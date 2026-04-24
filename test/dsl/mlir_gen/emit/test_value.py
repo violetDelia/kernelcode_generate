@@ -37,7 +37,7 @@ from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
 from kernel_gen.dsl.ast import ConstAST, VarAST
 from kernel_gen.dsl.mlir_gen.emit import EmitContext
 from kernel_gen.dsl.mlir_gen.emit.context import LoweringError
-from kernel_gen.dsl.mlir_gen.emit.value import emit_index_operand, emit_value
+from kernel_gen.dsl.mlir_gen.emit.value import emit_index_operand, emit_symbol_const, emit_value
 
 
 # EMIT-VALUE-001
@@ -107,3 +107,22 @@ def test_emit_index_operand_const() -> None:
         raise AssertionError("expected SymbolConstOp emitted")
     if not isinstance(result.type, SymbolValueType):
         raise AssertionError("expected symbol int type for index operand")
+
+
+def test_emit_value_and_symbol_const_private_edges() -> None:
+    block = Block()
+    ctx = EmitContext(builder=block, symbols={}, types={})
+
+    with pytest.raises(LoweringError, match="emit_value only supports"):
+        emit_value(object(), ctx)
+
+    const_from_ast = emit_symbol_const(ConstAST(3), ctx)
+    const_from_int = emit_symbol_const(4, ctx)
+
+    assert isinstance(const_from_ast.type, SymbolValueType)
+    assert isinstance(const_from_int.type, SymbolValueType)
+
+    with pytest.raises(LoweringError, match="symbol.const requires int literal"):
+        emit_symbol_const(ConstAST(1.5), ctx)
+    with pytest.raises(LoweringError, match="symbol.const requires int literal"):
+        emit_symbol_const("bad", ctx)  # type: ignore[arg-type]

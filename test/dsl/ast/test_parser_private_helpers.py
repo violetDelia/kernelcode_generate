@@ -22,6 +22,7 @@ import ast as py_ast
 import importlib
 import inspect
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -649,3 +650,1542 @@ def kernel(x: "Tensor[f32, 1]") -> "Tensor[f32, 1]":
             globals_table={"external_value": 7},
             config={"reject_external_values": True},
         )
+
+
+# AST-PARSER-HELPER-007
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 覆盖 formatted annotation 运算、DMA helper 扩展参数与 launch/barrier 的剩余边界。
+# 使用示例: pytest -q test/dsl/ast/test_parser_private_helpers.py -k test_parser_private_helpers_formatted_annotation_dma_and_launch_edge_contracts
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/ast/test_parser_private_helpers.py
+def test_parser_private_helpers_formatted_annotation_dma_and_launch_edge_contracts() -> None:
+    dma_module = importlib.import_module("kernel_gen.operation.dma")
+    nn_module = importlib.import_module("kernel_gen.operation.nn")
+    arch_module = importlib.import_module("kernel_gen.operation.arch")
+    runtime_table = {"N": SymbolDim("N"), "W": 8}
+
+    neg_symbol = parser_module._eval_formatted_annotation_expr(
+        py_ast.parse("-N", mode="eval").body,
+        {},
+        _BUILTINS_TABLE,
+        runtime_table,
+    )
+    assert isinstance(neg_symbol, SymbolDim)
+    assert str(neg_symbol) == "-N"
+    assert parser_module._eval_formatted_annotation_expr(
+        py_ast.parse("W + 2", mode="eval").body,
+        {},
+        _BUILTINS_TABLE,
+        runtime_table,
+    ) == 10
+    assert parser_module._eval_formatted_annotation_expr(
+        py_ast.parse("W - 2", mode="eval").body,
+        {},
+        _BUILTINS_TABLE,
+        runtime_table,
+    ) == 6
+    assert parser_module._eval_formatted_annotation_expr(
+        py_ast.parse("W * 2", mode="eval").body,
+        {},
+        _BUILTINS_TABLE,
+        runtime_table,
+    ) == 16
+    assert parser_module._eval_formatted_annotation_expr(
+        py_ast.parse("W / 2", mode="eval").body,
+        {},
+        _BUILTINS_TABLE,
+        runtime_table,
+    ) == 4
+    symbol_div = parser_module._eval_formatted_annotation_expr(
+        py_ast.parse("N / 2", mode="eval").body,
+        {},
+        _BUILTINS_TABLE,
+        runtime_table,
+    )
+    assert isinstance(symbol_div, SymbolDim)
+    formatted_value = parser_module._format_joinedstr_value(
+        py_ast.parse('f"{W // 2}"', mode="eval").body.values[0],
+        {},
+        _BUILTINS_TABLE,
+        runtime_table,
+    )
+    assert formatted_value == "4"
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported formatted annotation"):
+        parser_module._eval_formatted_annotation_expr(
+            py_ast.parse("W / 3", mode="eval").body,
+            {},
+            _BUILTINS_TABLE,
+            runtime_table,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported formatted annotation"):
+        parser_module._eval_formatted_annotation_expr(
+            py_ast.parse("W // 0", mode="eval").body,
+            {},
+            _BUILTINS_TABLE,
+            runtime_table,
+        )
+
+    globals_table = {
+        "NumericType": NumericType,
+        "MemorySpace": MemorySpace,
+        "BarrierVisibility": arch_module.BarrierVisibility,
+        "BarrierScope": arch_module.BarrierScope,
+        "alloc": dma_module.alloc,
+        "cast": dma_module.cast,
+        "broadcast_to": nn_module.broadcast_to,
+        "transpose": nn_module.transpose,
+        "barrier": arch_module.barrier,
+        "launch_kernel": arch_module.launch_kernel,
+    }
+    mem = Memory([SymbolDim("M"), SymbolDim("N")], NumericType.Float32)
+    tensor = TensorAST(name="tensor", memory=mem, location=None)
+    env = {
+        "tensor": tensor,
+        "n": SymbolDim("N"),
+        "bad_float": ScalarArgAST(name="bad_float", value_type=float, is_symbolic=False, location=None),
+        "callee": _parser_private_identity_callee,
+    }
+
+    alloc_ast = parser_module._parse_dma_call(
+        py_ast.parse(
+            "alloc([1, n], NumericType.Float32, space=MemorySpace.GM, stride=[n, 1])",
+            mode="eval",
+        ).body,
+        env,
+        globals_table,
+        _BUILTINS_TABLE,
+    )
+    assert type(alloc_ast).__name__ == "DmaAllocAST"
+    assert alloc_ast.space is MemorySpace.GM
+    assert alloc_ast.stride[0] == SymbolDim("N")
+    assert isinstance(alloc_ast.stride[1], ConstAST)
+    assert alloc_ast.stride[1].value == 1
+
+    cast_ast = parser_module._parse_dma_call(
+        py_ast.parse(
+            "cast(tensor, NumericType.Float32, memoryspace=MemorySpace.GM)",
+            mode="eval",
+        ).body,
+        env,
+        globals_table,
+        _BUILTINS_TABLE,
+    )
+    assert type(cast_ast).__name__ == "DmaCastAST"
+    assert cast_ast.memoryspace is MemorySpace.GM
+
+    broadcast_to_ast = parser_module._parse_dma_call(
+        py_ast.parse(
+            "broadcast_to(tensor, [1, n], space=MemorySpace.GM)",
+            mode="eval",
+        ).body,
+        env,
+        globals_table,
+        _BUILTINS_TABLE,
+    )
+    assert type(broadcast_to_ast).__name__ == "NnBroadcastToAST"
+    transpose_ast = parser_module._parse_dma_call(
+        py_ast.parse("transpose(tensor, perm=[1, 0])", mode="eval").body,
+        env,
+        globals_table,
+        _BUILTINS_TABLE,
+    )
+    assert type(transpose_ast).__name__ == "NnTransposeAST"
+
+    barrier_ast = parser_module._parse_dma_call(
+        py_ast.parse(
+            "barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.BLOCK)",
+            mode="eval",
+        ).body,
+        env,
+        globals_table,
+        _BUILTINS_TABLE,
+    )
+    assert type(barrier_ast).__name__ == "ArchBarrierAST"
+    assert [space.name for space in barrier_ast.visibility] == ["TSM", "TLM"]
+
+    launch_ast = parser_module._parse_dma_call(
+        py_ast.parse("launch_kernel(callee, n, 2, 1, 0, tensor)", mode="eval").body,
+        env,
+        globals_table,
+        _BUILTINS_TABLE,
+    )
+    assert isinstance(launch_ast, ArchLaunchKernelAST)
+    assert str(launch_ast.block) == "N"
+    assert isinstance(launch_ast.thread, ConstAST)
+    assert launch_ast.thread.value == 2
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported alloc arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse(
+                "alloc([1], NumericType.Float32, MemorySpace.GM, stride=[1], space=MemorySpace.GM)",
+                mode="eval",
+            ).body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="barrier visibility must be non-empty BarrierVisibility list"):
+        parser_module._parse_dma_call(
+            py_ast.parse(
+                "barrier(visibility=[], scope=BarrierScope.BLOCK)",
+                mode="eval",
+            ).body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="launch_kernel block must be int or SymbolDim"):
+        parser_module._parse_dma_call(
+            py_ast.parse("launch_kernel[bad_float, 2, 1, 0](callee, tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported launch_kernel arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("launch_kernel(callee, 1, 2, 1)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+
+# AST-PARSER-HELPER-008
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 覆盖 external value 约束、python callee 放行和 parse_function_impl 的剩余异常路径。
+# 使用示例: pytest -q test/dsl/ast/test_parser_private_helpers.py -k test_parser_private_helpers_external_value_and_parse_function_edge_contracts
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/ast/test_parser_private_helpers.py
+def test_parser_private_helpers_external_value_and_parse_function_edge_contracts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tensor = TensorAST(name="tensor", memory=Memory([SymbolDim("M")], NumericType.Float32), location=None)
+    globals_table = {"callee": _parser_private_identity_callee, "external_int": 7, "external_obj": object()}
+    reject_env = {parser_module._REJECT_EXTERNAL_VALUES_ENV_KEY: True, "tensor": tensor}
+    allow_const_env = dict(reject_env)
+    allow_const_env[parser_module._ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
+    allow_python_callee_env = dict(reject_env)
+    allow_python_callee_env[parser_module._ALLOW_PYTHON_CALLEE_CALL_ENV_KEY] = True
+
+    allowed_const = parser_module._parse_expr(
+        py_ast.parse("external_int", mode="eval").body,
+        allow_const_env,
+        globals_table,
+        _BUILTINS_TABLE,
+    )
+    assert isinstance(allowed_const, ConstAST)
+    assert allowed_const.value == 7
+
+    with pytest.raises(parser_module._ParseFailure, match="cannot use external value inside function body"):
+        parser_module._parse_expr(
+            py_ast.parse("external_obj", mode="eval").body,
+            reject_env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported call expression"):
+        parser_module._parse_expr(
+            py_ast.parse("callee(tensor)", mode="eval").body,
+            reject_env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    python_callee_expr = parser_module._parse_expr(
+        py_ast.parse("callee(tensor)", mode="eval").body,
+        allow_python_callee_env,
+        globals_table,
+        _BUILTINS_TABLE,
+    )
+    assert isinstance(python_callee_expr, PythonCalleeCallAST)
+
+    source_with_module_builtins = """\
+def kernel(x: "Tensor[f32, 1]") -> "Tensor[f32, 1]":
+    return x
+"""
+    parsed = _parse_function_from_source(
+        monkeypatch,
+        source_with_module_builtins,
+        use_impl=True,
+        globals_table={"__builtins__": sys.modules["builtins"]},
+    )
+    assert parsed is not None
+
+    unsupported_arg_source = """\
+def kernel(x: NumericType.Float32):
+    return x
+"""
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported annotation"):
+        _parse_function_from_source(
+            monkeypatch,
+            unsupported_arg_source,
+            use_impl=True,
+            globals_table={"NumericType": NumericType},
+        )
+
+
+# AST-PARSER-HELPER-009
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 覆盖 parser 私有 helper 的异常表达式、launch extent 与 stmt/for 剩余边界。
+# 使用示例: pytest -q test/dsl/ast/test_parser_private_helpers.py -k test_parser_private_helpers_expr_launch_stmt_edge_matrix
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/ast/test_parser_private_helpers.py
+def test_parser_private_helpers_expr_launch_stmt_edge_matrix() -> None:
+    def launch_callee(value: object) -> object:
+        return value
+
+    dummy_node = type("DummyNode", (), {"lineno": 3})()
+    assert parser_module._location_from_node(dummy_node) is None
+    assert parser_module._eval_symbolic_dim_node(py_ast.parse("-3", mode="eval").body, None) == -3
+    assert isinstance(parser_module._eval_symbolic_dim_node(py_ast.parse("2 / N", mode="eval").body, None), SymbolDim)
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported tensor dimension expression"):
+        parser_module._eval_symbolic_dim_node(py_ast.parse("8 / 0", mode="eval").body, None)
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported tensor dimension expression"):
+        parser_module._eval_symbolic_dim_expr("(", None)
+
+    runtime_table = {"W": 8, "S": SymbolDim("S")}
+    assert parser_module._eval_formatted_annotation_expr(
+        py_ast.parse("sym_expr", mode="eval").body,
+        {"sym_expr": parser_module.sp.Symbol("Q")},
+        _BUILTINS_TABLE,
+        runtime_table,
+    ) == SymbolDim(parser_module.sp.Symbol("Q"))
+    assert parser_module._eval_formatted_annotation_expr(
+        py_ast.parse("S / 2", mode="eval").body,
+        {},
+        _BUILTINS_TABLE,
+        runtime_table,
+    ) == SymbolDim("S") / 2
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported formatted annotation"):
+        parser_module._eval_formatted_annotation_expr(
+            py_ast.parse("bad", mode="eval").body,
+            {"bad": object()},
+            _BUILTINS_TABLE,
+            runtime_table,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported annotation"):
+        parser_module._normalize_annotation_text(py_ast.parse("1", mode="eval").body, {}, _BUILTINS_TABLE, runtime_table)
+
+    tensor = TensorAST(name="tensor", memory=Memory([SymbolDim("M")], NumericType.Float32), location=None)
+    env = {"tensor": tensor, "callee": launch_callee, "scale": 7, "sentinel": object()}
+    globals_table = {"callee": launch_callee}
+
+    launch_call = py_ast.parse("launch_kernel(callee, tensor)", mode="eval").body
+    with pytest.raises(parser_module._ParseFailure, match="launch_kernel thread must be > 0"):
+        parser_module._parse_launch_kernel_call(
+            launch_call,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+            launch_slice=py_ast.parse("(1, 0, 1, 0)", mode="eval").body,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="launch_kernel callee must be function symbol reference"):
+        parser_module._parse_launch_kernel_call(
+            py_ast.parse("tensor(tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+            launch_slice=py_ast.parse("(1, 1, 1, 0)", mode="eval").body,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported launch_kernel arity"):
+        parser_module._parse_launch_kernel_call(
+            py_ast.parse("launch_kernel(callee, tensor=1)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+            launch_slice=py_ast.parse("(1, 1, 1, 0)", mode="eval").body,
+        )
+
+    parsed_list = parser_module._parse_expr(py_ast.parse("[1, scale]", mode="eval").body, env, globals_table, _BUILTINS_TABLE)
+    parsed_tuple = parser_module._parse_expr(py_ast.parse("(1, scale)", mode="eval").body, env, globals_table, _BUILTINS_TABLE)
+    assert isinstance(parsed_list[0], ConstAST)
+    assert parsed_list[0].value == 1
+    assert parsed_list[1] == 7
+    assert isinstance(parsed_tuple[0], ConstAST)
+    assert parsed_tuple[0].value == 1
+    assert parsed_tuple[1] == 7
+    assert parser_module._parse_expr(py_ast.parse("sentinel", mode="eval").body, env, globals_table, _BUILTINS_TABLE) is env["sentinel"]
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported constant type"):
+        parser_module._parse_expr(py_ast.parse("b'x'", mode="eval").body, env, globals_table, _BUILTINS_TABLE)
+    with pytest.raises(parser_module._ParseFailure, match="get_shape source must be TensorAST"):
+        parser_module._parse_expr(py_ast.parse("scale.get_shape()[0]", mode="eval").body, env, globals_table, _BUILTINS_TABLE)
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported expression"):
+        parser_module._parse_expr(py_ast.parse("+1", mode="eval").body, env, globals_table, _BUILTINS_TABLE)
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported binary op"):
+        parser_module._parse_expr(py_ast.parse("1 @ 2", mode="eval").body, env, globals_table, _BUILTINS_TABLE)
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported compare expression"):
+        parser_module._parse_expr(py_ast.parse("1 < 2 < 3", mode="eval").body, env, globals_table, _BUILTINS_TABLE)
+
+    prior_loop_var = ConstAST(value=9, location=None)
+    loop_env = {"i": prior_loop_var}
+    parsed_for = parser_module._parse_for(
+        py_ast.parse("for i in range(1, 3):\n    i\n", mode="exec").body[0],
+        loop_env,
+        globals_table,
+        _BUILTINS_TABLE,
+    )
+    assert isinstance(parsed_for, ForAST)
+    assert loop_env["i"] is prior_loop_var
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported for target"):
+        parser_module._parse_for(
+            py_ast.parse("for i, j in range(2):\n    i\n", mode="exec").body[0],
+            {},
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported for iterator"):
+        parser_module._parse_for(
+            py_ast.parse("for i in items(2):\n    i\n", mode="exec").body[0],
+            {},
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported range arity"):
+        parser_module._parse_for(
+            py_ast.parse("for i in range(1, 2, 3, 4):\n    i\n", mode="exec").body[0],
+            {},
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="for range step must not be zero"):
+        parser_module._parse_for(
+            py_ast.parse("for i in range(0, 2, 0):\n    i\n", mode="exec").body[0],
+            {},
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Return inside for-loop is unsupported"):
+        parser_module._parse_for(
+            py_ast.parse("for i in range(2):\n    return i\n", mode="exec").body[0],
+            {},
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    with pytest.raises(parser_module._ParseFailure, match="Nested function definition is not supported"):
+        parser_module._parse_stmt(py_ast.parse("def inner():\n    pass\n", mode="exec").body[0], {}, globals_table, _BUILTINS_TABLE)
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported if bias is not None"):
+        parser_module._parse_stmt(
+            py_ast.parse("if bias is not None:\n    x\n", mode="exec").body[0],
+            {},
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported assignment target"):
+        parser_module._parse_stmt(py_ast.parse("x, y = 1, 2", mode="exec").body[0], {}, globals_table, _BUILTINS_TABLE)
+    with pytest.raises(parser_module._ParseFailure, match="Return value is required"):
+        parser_module._parse_stmt(py_ast.parse("return", mode="exec").body[0], {}, globals_table, _BUILTINS_TABLE)
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported syntax"):
+        parser_module._parse_stmt(py_ast.parse("while True:\n    break\n", mode="exec").body[0], {}, globals_table, _BUILTINS_TABLE)
+
+
+# AST-PARSER-HELPER-010
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 覆盖 parse_function_impl 的 source/builtins/return 相关异常矩阵。
+# 使用示例: pytest -q test/dsl/ast/test_parser_private_helpers.py -k test_parser_private_helpers_parse_function_impl_error_matrix
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/ast/test_parser_private_helpers.py
+def test_parser_private_helpers_parse_function_impl_error_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def kernel(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return None
+
+    monkeypatch.setattr(inspect, "getsource", lambda _obj: (_ for _ in ()).throw(OSError("missing source")))
+    with pytest.raises(parser_module.AstParseError, match="Unable to get source"):
+        parser_module._parse_function_impl(kernel)
+
+    with pytest.raises(parser_module._ParseFailure, match="Multiple top-level function definitions are not supported"):
+        _parse_function_from_source(
+            monkeypatch,
+            'def kernel(x: "Tensor[f32, 1]") -> "Tensor[f32, 1]":\n    return x\n\ndef other():\n    return None\n',
+            use_impl=True,
+        )
+
+    with pytest.raises(parser_module.AstParseError, match="Function definition not found"):
+        _parse_function_from_source(
+            monkeypatch,
+            'def other(x: "Tensor[f32, 1]") -> "Tensor[f32, 1]":\n    return x\n',
+            use_impl=True,
+        )
+
+    with pytest.raises(parser_module._ParseFailure, match="Missing annotation"):
+        _parse_function_from_source(monkeypatch, "def kernel(x):\n    return x\n", use_impl=True)
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported annotation"):
+        _parse_function_from_source(
+            monkeypatch,
+            'def kernel(x: "Tensor[f32, 1]") -> MemorySpace:\n    return x\n',
+            use_impl=True,
+            globals_table={"MemorySpace": MemorySpace},
+        )
+
+    with pytest.raises(parser_module.AstParseError, match="Missing return statement"):
+        _parse_function_from_source(
+            monkeypatch,
+            'def kernel(x: "Tensor[f32, 1]") -> "Tensor[f32, 1]":\n    x\n',
+            use_impl=True,
+        )
+
+    with pytest.raises(parser_module.AstParseError, match="Return statement must be last"):
+        _parse_function_from_source(
+            monkeypatch,
+            'def kernel(x: "Tensor[f32, 1]") -> "Tensor[f32, 1]":\n    return x\n    x\n',
+            use_impl=True,
+        )
+
+    with pytest.raises(parser_module.AstParseError, match="Return statement must be last"):
+        _parse_function_from_source(
+            monkeypatch,
+            'def kernel(x: "Tensor[f32, 1]") -> "Tensor[f32, 1]":\n    return x\n    import math\n',
+            use_impl=True,
+        )
+
+
+# AST-PARSER-HELPER-011
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 继续覆盖 parser 在 DMA/NN/arch helper 与表达式入口上的剩余错误矩阵。
+# 使用示例: pytest -q test/dsl/ast/test_parser_private_helpers.py -k test_parser_private_helpers_dma_arch_and_expr_error_matrix
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/ast/test_parser_private_helpers.py
+def test_parser_private_helpers_dma_arch_and_expr_error_matrix() -> None:
+    dma_module = importlib.import_module("kernel_gen.operation.dma")
+    nn_module = importlib.import_module("kernel_gen.operation.nn")
+    arch_module = importlib.import_module("kernel_gen.operation.arch")
+
+    globals_table = {
+        "MemorySpace": MemorySpace,
+        "NumericType": NumericType,
+        "BarrierVisibility": arch_module.BarrierVisibility,
+        "BarrierScope": arch_module.BarrierScope,
+        "load": dma_module.load,
+        "slice": dma_module.slice,
+        "store": dma_module.store,
+        "deslice": dma_module.deslice,
+        "alloc": dma_module.alloc,
+        "copy": dma_module.copy,
+        "cast": dma_module.cast,
+        "view": dma_module.view,
+        "reshape": dma_module.reshape,
+        "flatten": dma_module.flatten,
+        "free": dma_module.free,
+        "launch_kernel": arch_module.launch_kernel,
+        "barrier": arch_module.barrier,
+        "get_dynamic_memory": arch_module.get_dynamic_memory,
+        "get_thread_num": arch_module.get_thread_num,
+        "eq": nn_module.eq,
+        "reduce_sum": nn_module.reduce_sum,
+        "softmax": nn_module.softmax,
+        "broadcast": nn_module.broadcast,
+        "broadcast_to": nn_module.broadcast_to,
+        "transpose": nn_module.transpose,
+        "fc": nn_module.fc,
+        "matmul": nn_module.matmul,
+        "relu": nn_module.relu,
+    }
+
+    mem = Memory([SymbolDim("M"), SymbolDim("N")], NumericType.Float32)
+    tensor = TensorAST(name="tensor", memory=mem, location=None)
+    symbol_scalar = ScalarArgAST(name="sym", value_type=int, is_symbolic=True, location=None)
+    float_scalar = ScalarArgAST(name="float_arg", value_type=float, is_symbolic=False, location=None)
+    env = {
+        "tensor": tensor,
+        "sym": symbol_scalar,
+        "float_arg": float_scalar,
+        "callee": _parser_private_identity_callee,
+    }
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported nn compare arity"):
+        parser_module._parse_nn_compare_call(
+            py_ast.parse("eq(tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported relu arity"):
+        parser_module._parse_unary_helper_call(
+            "relu",
+            py_ast.parse("relu(tensor, tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported leaky_relu arity"):
+        parser_module._parse_unary_helper_call(
+            "leaky_relu",
+            py_ast.parse("leaky_relu(tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported hard_sigmoid arity"):
+        parser_module._parse_unary_helper_call(
+            "hard_sigmoid",
+            py_ast.parse("hard_sigmoid(tensor, 1, alpha=2)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported call expression"):
+        parser_module._parse_unary_helper_call(
+            "unknown",
+            py_ast.parse("unknown(tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported softmax arity"):
+        parser_module._parse_softmax_helper_call(
+            py_ast.parse("softmax(tensor, 1, axis=2)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported reduce_sum arity"):
+        parser_module._parse_reduce_helper_call(
+            "reduce_sum",
+            py_ast.parse("reduce_sum(tensor, 1, axis=2)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    with pytest.raises(parser_module._ParseFailure, match="load source must be TensorAST"):
+        parser_module._parse_dma_call(
+            py_ast.parse("load(sym, [0], [1])", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="slice space must be MemorySpace"):
+        parser_module._parse_dma_call(
+            py_ast.parse("slice(tensor, [0], [1], [1], 1)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="store target must be TensorAST"):
+        parser_module._parse_dma_call(
+            py_ast.parse("store(tensor, sym, [0], [1])", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="deslice space must be MemorySpace"):
+        parser_module._parse_dma_call(
+            py_ast.parse("deslice(tensor, tensor, [0], [1], [1], 1)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported alloc arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("alloc([1], NumericType.Float32, stride=[1], stride=[1])", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="alloc dtype must be NumericType"):
+        parser_module._parse_dma_call(
+            py_ast.parse("alloc([1], tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="alloc space must be MemorySpace"):
+        parser_module._parse_dma_call(
+            py_ast.parse("alloc([1], NumericType.Float32, 1)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="copy space must be MemorySpace"):
+        parser_module._parse_dma_call(
+            py_ast.parse("copy(tensor, 1)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported cast arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("cast(tensor, NumericType.Float32, space=MemorySpace.GM)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="cast memoryspace must be MemorySpace"):
+        parser_module._parse_dma_call(
+            py_ast.parse("cast(tensor, NumericType.Float32, memoryspace=1)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported view arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("view(tensor, [0], [1])", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported reshape arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("reshape(tensor, [1], [1])", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported flatten arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("flatten(tensor, 1)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported free arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("free()", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported img2col1d arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("img2col1d()", mode="eval").body,
+            env,
+            {"img2col1d": nn_module.img2col1d},
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported conv arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("conv(tensor, tensor, sh=1, sh=2)", mode="eval").body,
+            env,
+            {"conv": nn_module.conv},
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported broadcast arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("broadcast(tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported broadcast_to arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("broadcast_to(tensor, [1])", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported broadcast_to arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("broadcast_to(tensor, [1], MemorySpace.GM, target_shape=[1])", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="transpose perm is required"):
+        parser_module._parse_dma_call(
+            py_ast.parse("transpose(tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported transpose arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("transpose(tensor, [1, 0], perm=[1, 0])", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported fc arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("fc(tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported matmul arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("matmul(tensor, tensor, MemorySpace.GM, memoryspace=MemorySpace.GM)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="matmul memoryspace must be MemorySpace"):
+        parser_module._parse_dma_call(
+            py_ast.parse("matmul(tensor, tensor, memoryspace=1)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported get_thread_num arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("get_thread_num(1)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="get_dynamic_memory space must be MemorySpace"):
+        parser_module._parse_dma_call(
+            py_ast.parse("get_dynamic_memory(1)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="get_dynamic_memory space must be on-chip MemorySpace"):
+        parser_module._parse_dma_call(
+            py_ast.parse("get_dynamic_memory(MemorySpace.GM)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported barrier arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse(
+                "barrier(visibility=[BarrierVisibility.TSM], visibility=[BarrierVisibility.TLM])",
+                mode="eval",
+            ).body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="barrier scope must be BarrierScope"):
+        parser_module._parse_dma_call(
+            py_ast.parse(
+                "barrier(visibility=[BarrierVisibility.TSM], scope=1)",
+                mode="eval",
+            ).body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported launch_kernel arity"):
+        parser_module._parse_launch_kernel_call(
+            py_ast.parse("launch_kernel()", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="launch_kernel callee must be function symbol reference"):
+        parser_module._parse_launch_kernel_call(
+            py_ast.parse("launch_kernel(1, tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported launch_kernel arity"):
+        parser_module._parse_launch_kernel_call(
+            py_ast.parse("launch_kernel(callee, tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+            launch_slice=py_ast.parse("(1, 2, 3)", mode="eval").body,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="launch_kernel shared_memory_size must be >= 0"):
+        parser_module._parse_launch_kernel_call(
+            py_ast.parse("launch_kernel(callee, tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+            launch_slice=py_ast.parse("(1, 1, 1, -1)", mode="eval").body,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="launch_kernel block must be int or SymbolDim"):
+        parser_module._parse_launch_kernel_call(
+            py_ast.parse("launch_kernel(callee, float_arg, 1, 1, 0, tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    assert parser_module._parse_python_callee_call(
+        py_ast.parse("tensor.helper()", mode="eval").body,
+        env,
+        globals_table,
+        _BUILTINS_TABLE,
+    ) is None
+    assert parser_module._parse_python_callee_call(
+        py_ast.parse("callee(value=tensor)", mode="eval").body,
+        env,
+        globals_table,
+        _BUILTINS_TABLE,
+    ) is None
+    assert parser_module._parse_python_callee_call(
+        py_ast.parse("not_callable(tensor)", mode="eval").body,
+        env,
+        {"not_callable": object()},
+        _BUILTINS_TABLE,
+    ) is None
+
+    globals_expr_table = {
+        "mem_arg": Memory([2], NumericType.Float32),
+        "sym_arg": SymbolDim("K"),
+        "raw_obj": object(),
+    }
+    parsed_mem = parser_module._parse_expr(
+        py_ast.parse("mem_arg", mode="eval").body,
+        {},
+        globals_expr_table,
+        _BUILTINS_TABLE,
+    )
+    assert isinstance(parsed_mem, TensorAST)
+    parsed_sym = parser_module._parse_expr(
+        py_ast.parse("sym_arg", mode="eval").body,
+        {},
+        globals_expr_table,
+        _BUILTINS_TABLE,
+    )
+    assert isinstance(parsed_sym, ScalarArgAST)
+    assert parser_module._parse_expr(
+        py_ast.parse("raw_obj", mode="eval").body,
+        {},
+        globals_expr_table,
+        _BUILTINS_TABLE,
+    ) is globals_expr_table["raw_obj"]
+    parsed_stride = parser_module._parse_expr(
+        py_ast.parse("tensor.get_stride()[0]", mode="eval").body,
+        env,
+        globals_table,
+        _BUILTINS_TABLE,
+    )
+    assert isinstance(parsed_stride, TensorAxisAccessAST)
+    assert parsed_stride.kind == "stride"
+    with pytest.raises(parser_module._ParseFailure, match="Unknown name"):
+        parser_module._parse_expr(py_ast.parse("missing", mode="eval").body, {}, {}, _BUILTINS_TABLE)
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported get_shape arity"):
+        parser_module._parse_expr(
+            py_ast.parse("tensor.get_shape(1)[0]", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported compare op"):
+        parser_module._parse_expr(
+            py_ast.parse("1 in tensor", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+
+# AST-PARSER-HELPER-012
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 补齐 annotation/import/helper 解析上的剩余异常和回退分支。
+# 使用示例: pytest -q test/dsl/ast/test_parser_private_helpers.py -k test_parser_private_helpers_annotation_import_and_unary_remaining_edges
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/ast/test_parser_private_helpers.py
+def test_parser_private_helpers_annotation_import_and_unary_remaining_edges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_table = {"N": SymbolDim("N"), "M": SymbolDim("M"), "bad_text": "oops"}
+    builtins_with_mem = dict(_BUILTINS_TABLE)
+    builtins_with_mem["mem_builtin"] = Memory([4], NumericType.Float32)
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported tensor dimension expression"):
+        parser_module._eval_symbolic_dim_node(py_ast.parse('-"x"', mode="eval").body, None)
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported tensor dimension expression"):
+        parser_module._eval_symbolic_dim_node(py_ast.parse("helper(1)", mode="eval").body, None)
+
+    formatted_div_int_symbol = parser_module._eval_formatted_annotation_expr(
+        py_ast.parse("1 / N", mode="eval").body,
+        {},
+        _BUILTINS_TABLE,
+        runtime_table,
+    )
+    formatted_div_symbol_symbol = parser_module._eval_formatted_annotation_expr(
+        py_ast.parse("N / M", mode="eval").body,
+        {},
+        _BUILTINS_TABLE,
+        runtime_table,
+    )
+    assert isinstance(formatted_div_int_symbol, SymbolDim)
+    assert isinstance(formatted_div_symbol_symbol, SymbolDim)
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported formatted annotation"):
+        parser_module._eval_formatted_annotation_expr(
+            py_ast.parse("-bad_text", mode="eval").body,
+            {},
+            _BUILTINS_TABLE,
+            runtime_table,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported formatted annotation"):
+        parser_module._eval_formatted_annotation_expr(
+            py_ast.parse("N // 2", mode="eval").body,
+            {},
+            _BUILTINS_TABLE,
+            runtime_table,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported formatted annotation"):
+        parser_module._eval_formatted_annotation_expr(
+            py_ast.parse("unsupported()", mode="eval").body,
+            {},
+            _BUILTINS_TABLE,
+            runtime_table,
+        )
+
+    formatted_value = py_ast.FormattedValue(value=py_ast.Name(id="N", ctx=py_ast.Load()), conversion=-1, format_spec=None)
+    monkeypatch.setattr(parser_module, "_eval_formatted_annotation_expr", lambda *args, **kwargs: object())
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported formatted annotation"):
+        parser_module._format_joinedstr_value(formatted_value, {}, _BUILTINS_TABLE, runtime_table)
+
+    unsupported_joined = py_ast.JoinedStr(values=[py_ast.Name(id="bad", ctx=py_ast.Load())])
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported annotation"):
+        parser_module._normalize_annotation_text(unsupported_joined, {}, _BUILTINS_TABLE, runtime_table)
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported annotation"):
+        parser_module._normalize_annotation_text(py_ast.Name(id="bad", ctx=py_ast.Load()), {}, _BUILTINS_TABLE, runtime_table)
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported tensor annotation element"):
+        parser_module._tensor_annotation_text_from_subscript(py_ast.parse("Tensor[f32, N + 1]", mode="eval").body)
+
+    builtin_tensor = parser_module._parse_annotation_node(None, "mem_builtin", {}, builtins_with_mem)
+    assert isinstance(builtin_tensor, TensorAST)
+    assert builtin_tensor.name == "mem_builtin"
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported annotation"):
+        parser_module._parse_annotation_node(py_ast.parse("None", mode="eval").body, "x", {}, _BUILTINS_TABLE)
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported annotation"):
+        parser_module._parse_annotation_node(py_ast.parse("int | Tensor[f32, 1]", mode="eval").body, "x", {}, _BUILTINS_TABLE)
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported annotation"):
+        parser_module._parse_annotation_node(py_ast.parse("int | bool", mode="eval").body, "x", {}, _BUILTINS_TABLE)
+    parsed_bool = parser_module._parse_annotation_node(py_ast.parse("bool", mode="eval").body, "flag", {}, _BUILTINS_TABLE)
+    assert isinstance(parsed_bool, ScalarArgAST)
+    assert parsed_bool.value_type is bool
+    global_mem = Memory([2], NumericType.Float32)
+    parsed_global_mem = parser_module._parse_annotation_node(
+        py_ast.parse("global_mem", mode="eval").body,
+        "gm",
+        {"global_mem": global_mem},
+        _BUILTINS_TABLE,
+    )
+    assert isinstance(parsed_global_mem, TensorAST)
+    assert parsed_global_mem.memory == global_mem
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported annotation"):
+        parser_module._parse_annotation_node(py_ast.parse("List[int]", mode="eval").body, "x", {"List": list}, _BUILTINS_TABLE)
+
+    with pytest.raises(parser_module._ParseFailure, match="Unknown name"):
+        parser_module._parse_attribute_object(py_ast.parse("missing.attr", mode="eval").body, {}, _BUILTINS_TABLE)
+    with pytest.raises(parser_module._ParseFailure, match="Unknown attribute"):
+        parser_module._parse_attribute_object(
+            py_ast.parse("MemorySpace.LM.missing_attr", mode="eval").body,
+            {"MemorySpace": MemorySpace},
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported attribute expression"):
+        parser_module._parse_attribute_object(py_ast.parse("(1 + 2).real", mode="eval").body, {}, _BUILTINS_TABLE)
+
+    resolved_attr = parser_module._resolve_call_base_object(
+        py_ast.parse("MemorySpace.LM", mode="eval").body,
+        {"MemorySpace": MemorySpace},
+        _BUILTINS_TABLE,
+    )
+    assert resolved_attr is MemorySpace.LM
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported call expression"):
+        parser_module._resolve_call_base_object(py_ast.parse("1", mode="eval").body, {}, _BUILTINS_TABLE)
+
+    dma_module = importlib.import_module("kernel_gen.operation.dma")
+    fake_dma_alias = types.ModuleType("kernel_gen.operation.dma")
+    assert (
+        parser_module._resolve_import_bound_helper_call(
+            py_ast.parse("fake_dma.load", mode="eval").body,
+            {"fake_dma": fake_dma_alias},
+            _BUILTINS_TABLE,
+        )
+        is None
+    )
+    assert (
+        parser_module._resolve_import_bound_helper_call(
+            py_ast.parse("dma.unknown", mode="eval").body,
+            {"dma": dma_module},
+            _BUILTINS_TABLE,
+        )
+        is None
+    )
+    star_import_bindings: dict[str, object] = {}
+    parser_module._bind_safe_local_import(
+        py_ast.parse("from kernel_gen.operation.dma import *", mode="exec").body[0],
+        star_import_bindings,
+    )
+    assert star_import_bindings == {}
+
+    float_shadow = parser_module._parse_symbol_to_float_call(
+        py_ast.parse("float(n)", mode="eval").body,
+        {"n": SymbolDim("N")},
+        {"float": lambda value: value},
+        _BUILTINS_TABLE,
+    )
+    assert float_shadow is None
+
+    tensor = TensorAST(name="tensor", memory=Memory([2, 2], NumericType.Float32), location=None)
+    globals_table = {
+        "MemorySpace": MemorySpace,
+        "NumericType": NumericType,
+    }
+    env = {"tensor": tensor}
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported leaky_relu arity"):
+        parser_module._parse_unary_helper_call(
+            "leaky_relu",
+            py_ast.parse("leaky_relu(tensor, 1, 2)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported leaky_relu arity"):
+        parser_module._parse_unary_helper_call(
+            "leaky_relu",
+            py_ast.parse("leaky_relu(tensor, alpha=1, beta=2)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported leaky_relu arity"):
+        parser_module._parse_unary_helper_call(
+            "leaky_relu",
+            py_ast.parse("leaky_relu(tensor, 1, alpha=2)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported hard_sigmoid arity"):
+        parser_module._parse_unary_helper_call(
+            "hard_sigmoid",
+            py_ast.parse("hard_sigmoid(tensor, 1, 2, 3)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported hard_sigmoid arity"):
+        parser_module._parse_unary_helper_call(
+            "hard_sigmoid",
+            py_ast.parse("hard_sigmoid(tensor, alpha=1, beta=2, gamma=3)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported softmax arity"):
+        parser_module._parse_softmax_helper_call(
+            py_ast.parse("softmax()", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported softmax arity"):
+        parser_module._parse_softmax_helper_call(
+            py_ast.parse("softmax(tensor, axis=1, axis=2)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    parsed_reduce = parser_module._parse_reduce_helper_call(
+        "reduce_sum",
+        py_ast.parse("reduce_sum(tensor, 1, False)", mode="eval").body,
+        env,
+        globals_table,
+        _BUILTINS_TABLE,
+    )
+    assert isinstance(parsed_reduce, NnReduceAST)
+    assert parsed_reduce.keepdim is not None
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported reduce_sum arity"):
+        parser_module._parse_reduce_helper_call(
+            "reduce_sum",
+            py_ast.parse("reduce_sum()", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported reduce_sum arity"):
+        parser_module._parse_reduce_helper_call(
+            "reduce_sum",
+            py_ast.parse("reduce_sum(tensor, 1, False, keepdim=True)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported reduce_sum arity"):
+        parser_module._parse_reduce_helper_call(
+            "reduce_sum",
+            py_ast.parse("reduce_sum(tensor, other=1)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+
+# AST-PARSER-HELPER-013
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 补齐 DMA/launch/query/表达式入口的剩余正反向分支。
+# 使用示例: pytest -q test/dsl/ast/test_parser_private_helpers.py -k test_parser_private_helpers_dma_launch_query_remaining_edges
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/ast/test_parser_private_helpers.py
+def test_parser_private_helpers_dma_launch_query_remaining_edges() -> None:
+    dma_module = importlib.import_module("kernel_gen.operation.dma")
+    nn_module = importlib.import_module("kernel_gen.operation.nn")
+    arch_module = importlib.import_module("kernel_gen.operation.arch")
+    mem = Memory([2, 2], NumericType.Float32)
+    tensor = TensorAST(name="tensor", memory=mem, location=None)
+    callee = _parser_private_identity_callee
+
+    env = {"tensor": tensor, "callee": callee}
+    globals_table = {
+        "MemorySpace": MemorySpace,
+        "NumericType": NumericType,
+        "BarrierVisibility": arch_module.BarrierVisibility,
+        "BarrierScope": arch_module.BarrierScope,
+        "alloc": dma_module.alloc,
+        "broadcast": nn_module.broadcast,
+        "broadcast_to": nn_module.broadcast_to,
+        "transpose": nn_module.transpose,
+        "fc": nn_module.fc,
+        "get_block_num": arch_module.get_block_num,
+        "get_subthread_id": arch_module.get_subthread_id,
+        "get_subthread_num": arch_module.get_subthread_num,
+        "get_thread_id": arch_module.get_thread_id,
+        "get_dynamic_memory": arch_module.get_dynamic_memory,
+    }
+
+    none_keyword_alloc = py_ast.Call(
+        func=py_ast.Name(id="alloc", ctx=py_ast.Load()),
+        args=[
+            py_ast.List(elts=[py_ast.Constant(1)], ctx=py_ast.Load()),
+            py_ast.Attribute(value=py_ast.Name(id="NumericType", ctx=py_ast.Load()), attr="Float32", ctx=py_ast.Load()),
+        ],
+        keywords=[py_ast.keyword(arg=None, value=py_ast.Constant(1))],
+    )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported alloc arity"):
+        parser_module._parse_dma_call(none_keyword_alloc, env, globals_table, _BUILTINS_TABLE)
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported alloc arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse(
+                "alloc([1], NumericType.Float32, MemorySpace.GM, space=MemorySpace.GM)",
+                mode="eval",
+            ).body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported alloc arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse(
+                "alloc([1], NumericType.Float32, stride=[1], stride=[2])",
+                mode="eval",
+            ).body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported alloc arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("alloc([1], NumericType.Float32, other=1)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    parsed_broadcast = parser_module._parse_dma_call(
+        py_ast.parse("broadcast(tensor, [2, 2])", mode="eval").body,
+        env,
+        {**globals_table, "broadcast": nn_module.broadcast},
+        _BUILTINS_TABLE,
+    )
+    assert parsed_broadcast is not None
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported broadcast_to arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse(
+                "broadcast_to(tensor, target_shape=[2, 2], space=MemorySpace.GM, space=MemorySpace.GM)",
+                mode="eval",
+            ).body,
+            env,
+            {**globals_table, "broadcast_to": nn_module.broadcast_to},
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported broadcast_to arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("broadcast_to(tensor, target_shape=[2, 2], other=1)", mode="eval").body,
+            env,
+            {**globals_table, "broadcast_to": nn_module.broadcast_to},
+            _BUILTINS_TABLE,
+        )
+
+    none_keyword_transpose = py_ast.Call(
+        func=py_ast.Name(id="transpose", ctx=py_ast.Load()),
+        args=[py_ast.Name(id="tensor", ctx=py_ast.Load())],
+        keywords=[py_ast.keyword(arg=None, value=py_ast.List(elts=[py_ast.Constant(1), py_ast.Constant(0)], ctx=py_ast.Load()))],
+    )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported transpose arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("transpose()", mode="eval").body,
+            env,
+            {**globals_table, "transpose": nn_module.transpose},
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported transpose arity"):
+        parser_module._parse_dma_call(
+            none_keyword_transpose,
+            env,
+            {**globals_table, "transpose": nn_module.transpose},
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported transpose arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("transpose(tensor, other=1)", mode="eval").body,
+            env,
+            {**globals_table, "transpose": nn_module.transpose},
+            _BUILTINS_TABLE,
+        )
+
+    parsed_fc = parser_module._parse_dma_call(
+        py_ast.parse("fc(tensor, tensor)", mode="eval").body,
+        env,
+        {**globals_table, "fc": nn_module.fc},
+        _BUILTINS_TABLE,
+    )
+    assert parsed_fc is not None
+
+    for query_name in ("get_block_num", "get_subthread_id", "get_subthread_num", "get_thread_id"):
+        with pytest.raises(parser_module._ParseFailure, match=f"Unsupported {query_name} arity"):
+            parser_module._parse_dma_call(
+                py_ast.parse(f"{query_name}(1)", mode="eval").body,
+                env,
+                globals_table,
+                _BUILTINS_TABLE,
+            )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported get_dynamic_memory arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("get_dynamic_memory()", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    nameless_callee = _parser_private_identity_callee
+    original_name = nameless_callee.__name__
+    nameless_callee.__name__ = ""
+    try:
+        with pytest.raises(parser_module._ParseFailure, match="launch_kernel callee must be function symbol reference"):
+            parser_module._parse_launch_kernel_call(
+                py_ast.parse("launch_kernel(callee, tensor)", mode="eval").body,
+                {"callee": nameless_callee, "tensor": tensor},
+                {},
+                _BUILTINS_TABLE,
+            )
+    finally:
+        nameless_callee.__name__ = original_name
+
+    with pytest.raises(parser_module._ParseFailure, match="launch_kernel block must be int or SymbolDim"):
+        parser_module._parse_launch_kernel_call(
+            py_ast.parse("launch_kernel(callee, tensor)", mode="eval").body,
+            {"callee": callee, "tensor": tensor},
+            {},
+            _BUILTINS_TABLE,
+            launch_slice=py_ast.parse("(1.5, 1, 1, 0)", mode="eval").body,
+        )
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported for iterator"):
+        parser_module._parse_for(
+            py_ast.parse("for i in 4:\n    x = i", mode="exec").body[0],
+            {},
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+
+# AST-PARSER-HELPER-014
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 补齐 launch raw-int 校验与 DMA/NN helper 剩余 arity 回退分支。
+# 使用示例: pytest -q test/dsl/ast/test_parser_private_helpers.py -k test_parser_private_helpers_launch_and_helper_remaining_edges
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/ast/test_parser_private_helpers.py
+def test_parser_private_helpers_launch_and_helper_remaining_edges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dma_module = importlib.import_module("kernel_gen.operation.dma")
+    nn_module = importlib.import_module("kernel_gen.operation.nn")
+    arch_module = importlib.import_module("kernel_gen.operation.arch")
+
+    tensor = TensorAST(name="tensor", memory=Memory([2, 2], NumericType.Float32), location=None)
+    env = {
+        "tensor": tensor,
+        "callee": _parser_private_identity_callee,
+        "block_i": 2,
+        "thread_i": 3,
+        "sub_i": 1,
+        "shared_i": 0,
+        "zero_block": 0,
+        "neg_shared": -1,
+        "bad_extent": 1.5,
+    }
+    globals_table = {
+        "MemorySpace": MemorySpace,
+        "NumericType": NumericType,
+        "alloc": dma_module.alloc,
+        "copy": dma_module.copy,
+        "cast": dma_module.cast,
+        "launch_kernel": arch_module.launch_kernel,
+        "broadcast_to": nn_module.broadcast_to,
+        "img2col1d": nn_module.img2col1d,
+        "matmul": nn_module.matmul,
+    }
+
+    launch_call = py_ast.parse("launch_kernel(callee, tensor)", mode="eval").body
+    parsed_launch = parser_module._parse_launch_kernel_call(
+        launch_call,
+        env,
+        globals_table,
+        _BUILTINS_TABLE,
+        launch_slice=py_ast.parse("(block_i, thread_i, sub_i, shared_i)", mode="eval").body,
+    )
+    assert isinstance(parsed_launch, ArchLaunchKernelAST)
+
+    with pytest.raises(parser_module._ParseFailure, match="launch_kernel block must be > 0"):
+        parser_module._parse_launch_kernel_call(
+            launch_call,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+            launch_slice=py_ast.parse("(zero_block, thread_i, sub_i, shared_i)", mode="eval").body,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="launch_kernel shared_memory_size must be >= 0"):
+        parser_module._parse_launch_kernel_call(
+            launch_call,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+            launch_slice=py_ast.parse("(block_i, thread_i, sub_i, neg_shared)", mode="eval").body,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="launch_kernel block must be int or SymbolDim"):
+        parser_module._parse_launch_kernel_call(
+            launch_call,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+            launch_slice=py_ast.parse("(bad_extent, thread_i, sub_i, shared_i)", mode="eval").body,
+        )
+
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported alloc arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("alloc([1])", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported alloc arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse(
+                "alloc([1], NumericType.Float32, space=MemorySpace.GM, stride=[1], other=1)",
+                mode="eval",
+            ).body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported copy arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("copy(tensor, MemorySpace.GM, tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported cast arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("cast(tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported cast arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse(
+                "cast(tensor, NumericType.Float32, memoryspace=MemorySpace.GM, extra=MemorySpace.GM)",
+                mode="eval",
+            ).body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported matmul arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("matmul(tensor, tensor, memoryspace=MemorySpace.GM, other=1)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported broadcast_to arity"):
+        parser_module._parse_dma_call(
+            py_ast.parse("broadcast_to()", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    img2col_none_keyword = py_ast.Call(
+        func=py_ast.Name(id="img2col1d", ctx=py_ast.Load()),
+        args=[py_ast.Name(id="tensor", ctx=py_ast.Load())],
+        keywords=[py_ast.keyword(arg=None, value=py_ast.Constant(value=1))],
+    )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported img2col1d arity"):
+        parser_module._parse_dma_call(
+            img2col_none_keyword,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    broadcast_to_none_keyword = py_ast.Call(
+        func=py_ast.Name(id="broadcast_to", ctx=py_ast.Load()),
+        args=[py_ast.Name(id="tensor", ctx=py_ast.Load())],
+        keywords=[
+            py_ast.keyword(
+                arg=None,
+                value=py_ast.List(elts=[py_ast.Constant(value=2), py_ast.Constant(value=2)], ctx=py_ast.Load()),
+            )
+        ],
+    )
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported broadcast_to arity"):
+        parser_module._parse_dma_call(
+            broadcast_to_none_keyword,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    monkeypatch.setattr(parser_module, "_resolve_import_bound_helper_call", lambda *_args, **_kwargs: "img2col")
+    with pytest.raises(parser_module._ParseFailure, match="Unsupported img2col call"):
+        parser_module._parse_dma_call(
+            py_ast.parse("shim(tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+
+    monkeypatch.setattr(parser_module, "_resolve_import_bound_helper_call", lambda *_args, **_kwargs: "unknown_helper")
+    assert (
+        parser_module._parse_dma_call(
+            py_ast.parse("shim(tensor)", mode="eval").body,
+            env,
+            globals_table,
+            _BUILTINS_TABLE,
+        )
+        is None
+    )

@@ -38,6 +38,8 @@ from kernel_gen.dsl.mlir_gen.emit.shape_utils import (
     build_index_attrs,
     build_index_operands_exact,
     build_index_operands_from_layout,
+    build_stride_attrs,
+    resolve_index_expr,
 )
 
 
@@ -94,3 +96,12 @@ def test_build_index_operands_exact() -> None:
     result = build_index_operands_exact([ConstAST(1), ConstAST(2)], ctx)
     if len(result) != 2:
         raise AssertionError("expected two explicit operands")
+
+
+def test_shape_utils_private_helper_edges() -> None:
+    ctx = EmitContext(builder=Block(), symbols={}, types={})
+
+    assert resolve_index_expr(ConstAST(3), ctx) == 3
+
+    strides = build_stride_attrs(None, rank=2, ctx=ctx)
+    assert len(strides) == 2

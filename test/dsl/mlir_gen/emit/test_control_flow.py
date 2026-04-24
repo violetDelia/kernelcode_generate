@@ -85,3 +85,22 @@ def test_emit_control_flow_rejects_non_for() -> None:
 
     with pytest.raises(LoweringError, match="emit_control_flow only handles ForAST"):
         emit_control_flow(ConstAST(0), ctx)
+
+
+def test_emit_for_rejects_non_for_and_emit_control_flow_routes_for() -> None:
+    block = Block()
+    ctx = EmitContext(builder=block, symbols={}, types={})
+    loop = ForAST(
+        var=VarAST("i"),
+        start=ConstAST(0),
+        end=ConstAST(2),
+        step=ConstAST(1),
+        body=BlockAST(statements=[ConstAST(0)]),
+    )
+
+    with pytest.raises(LoweringError, match="emit_for expects ForAST"):
+        emit_for(ConstAST(0), ctx)  # type: ignore[arg-type]
+
+    emit_control_flow(loop, ctx)
+
+    assert any(isinstance(op, SymbolForOp) for op in block.ops)

@@ -39,7 +39,16 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaFreeOp, DmaLoadOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaTransposeOp, DmaViewOp
-from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
+from kernel_gen.dialect.kernel import (
+    KernelBinaryElewiseOp,
+    KernelExpOp,
+    KernelImg2col1dOp,
+    KernelImg2col2dOp,
+    KernelMatmulOp,
+    KernelReduceMinOp,
+    KernelReduceOp,
+    KernelSelectOp,
+)
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolToFloatOp, SymbolToIntOp, SymbolValueType
 from kernel_gen.dialect.tuner import TunerCostOp
@@ -56,6 +65,8 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 emit_c_package = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_c")
 emit_c_function = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_c.function")
 emit_c_register = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_c.register")
+emit_c_types = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_c.types")
+emit_c_module = importlib.import_module("kernel_gen.dsl.emit_c")
 
 
 @irdl_op_definition
@@ -128,6 +139,80 @@ def test_emit_c_package_registers_common_op_and_value_types() -> None:
     assert NnAddOp in op_types
     assert SymbolConstOp in value_types
     assert ArchGetThreadIdOp in value_types
+
+
+def test_emit_c_package_type_helpers_delegate_to_legacy_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, object]] = []
+
+    class _Legacy:
+        def _memory_space_to_c(self, value: object) -> str:
+            calls.append(("memory_space_to_c", value))
+            return "msc"
+
+        def _memory_space_to_c_for_target(self, value: object, target: str) -> str:
+            calls.append(("memory_space_to_c_for_target", (value, target)))
+            return "msct"
+
+        def _space_to_c(self, value: object, ctx: EmitCContext) -> str:
+            calls.append(("space_to_c", (value, ctx.target)))
+            return "stc"
+
+        def _space_name_to_c(self, value: str, ctx: EmitCContext) -> str:
+            calls.append(("space_name_to_c", (value, ctx.target)))
+            return "sntc"
+
+        def _type_to_c(self, value: object, ctx: EmitCContext) -> str:
+            calls.append(("type_to_c", (value, ctx.target)))
+            return "ttc"
+
+        def _type_to_c_for_target(self, value: object, target: str) -> str:
+            calls.append(("type_to_c_for_target", (value, target)))
+            return "ttft"
+
+    monkeypatch.setattr(emit_c_types, "_legacy_emit_c", _Legacy())
+
+    mem_type = _make_memory_type([2], [1])
+    space = NnMemorySpaceAttr.from_name("global")
+
+    assert emit_c_types.memory_space_to_c(space) == "msc"
+    assert emit_c_types.memory_space_to_c_for_target(space, "cpu") == "msct"
+    assert emit_c_types.space_to_c(mem_type, _ctx()) == "stc"
+    assert emit_c_types.space_name_to_c("global", _ctx()) == "sntc"
+    assert emit_c_types.type_to_c(mem_type, _ctx()) == "ttc"
+    assert emit_c_types.type_to_c_for_target(mem_type, "cpu") == "ttft"
+    assert [name for name, _ in calls] == [
+        "memory_space_to_c",
+        "memory_space_to_c_for_target",
+        "space_to_c",
+        "space_name_to_c",
+        "type_to_c",
+        "type_to_c_for_target",
+    ]
+
+
+def test_emit_c_package_legacy_kernel_add_and_value_fast_paths() -> None:
+    block = Block(arg_types=[i32, i32, i32])
+    ctx = _ctx()
+    for name, arg in zip(("lhs", "rhs", "out"), block.args, strict=True):
+        ctx.bind_name(arg, name)
+
+    legacy_add = UnsupportedOp.create(operands=[block.args[0], block.args[1], block.args[2]], result_types=[i32])
+    legacy_add.name = "builtin.unregistered"
+    legacy_add.attributes["op_name__"] = StringAttr("kernel.add")
+    assert emit_c_package.emit_c_op(legacy_add, ctx) == "cpu::add(lhs, rhs, out);"
+
+    bad_target_ctx = _npu_ctx()
+    for name, arg in zip(("lhs", "rhs", "out"), block.args, strict=True):
+        bad_target_ctx.bind_name(arg, name)
+    with pytest.raises(EmitCError, match="unsupported op"):
+        emit_c_package.emit_c_op(legacy_add, bad_target_ctx)
+
+    value_ctx = _ctx()
+    value_ctx.bind_name(block.args[0], "bound")
+    assert emit_c_package.emit_c_value(block.args[0], value_ctx) == "bound"
+    assert emit_c_package.emit_c(block.args[0], value_ctx) == "bound"
 
 
 def _make_memory_type(
@@ -848,6 +933,140 @@ def test_emit_c_memory_space_template_alloc() -> None:
     assert emit_c_op(add, ctx) == "cpu::add(lhs, rhs, v0);"
 
 
+# EC-S7-001
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证 kernel-family 节点在 emit_c 中会生成稳定 helper 文本，并对未实现的 reduce kind 显式失败。
+# 测试目的: 覆盖 exp/select/reduce/reduce_min/img2col1d/img2col2d 的节点级源码出口，避免这些路径在 coverage 里长期空白。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_lowers_kernel_family_and_rejects_unsupported_reduce_kind
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py, kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md, spec/dialect/kernel.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_op_lowers_kernel_family_and_rejects_unsupported_reduce_kind() -> None:
+    space = NnMemorySpaceAttr.from_name("global")
+    mem = _make_memory_type([2, 2], [2, 1], element_type=f32)
+    cond_mem = _make_memory_type([2, 2], [2, 1], element_type=i1)
+    reduce_out = _make_memory_type([2, 1], [1, 1], element_type=f32)
+    img2col1d_in = _make_memory_type([1, 3, 8], [24, 8, 1], element_type=f32)
+    img2col1d_out = _make_memory_type([1, 3, 3, 6], [54, 18, 6, 1], element_type=f32)
+    img2col2d_in = _make_memory_type([1, 3, 5, 5], [75, 25, 5, 1], element_type=f32)
+    img2col2d_out = _make_memory_type([1, 3, 3, 3, 3, 3], [243, 81, 27, 9, 3, 1], element_type=f32)
+
+    def _bind(*pairs: tuple[object, str]) -> EmitCContext:
+        ctx = _npu_ctx()
+        for value, name in pairs:
+            ctx.bind_name(value, name)
+        return ctx
+
+    exp_block = Block(arg_types=[mem, mem])
+    exp_op = KernelExpOp(exp_block.args[1], exp_block.args[0], space)
+    exp_op.verify()
+    exp_ctx = _bind((exp_block.args[0], "out"), (exp_block.args[1], "input"))
+    assert emit_c_op(exp_op, exp_ctx) == "exp<GM, float, float>(out /*out*/, input /*input*/);"
+
+    select_block = Block(arg_types=[mem, cond_mem, mem, mem])
+    select_op = KernelSelectOp(
+        select_block.args[0],
+        select_block.args[1],
+        select_block.args[2],
+        select_block.args[3],
+        space,
+    )
+    select_op.verify()
+    select_ctx = _bind(
+        (select_block.args[0], "out"),
+        (select_block.args[1], "cond"),
+        (select_block.args[2], "lhs"),
+        (select_block.args[3], "rhs"),
+    )
+    assert (
+        emit_c_op(select_op, select_ctx)
+        == "select<GM, float, float>(out /*out*/, cond /*cond*/, lhs /*lhs*/, rhs /*rhs*/);"
+    )
+
+    reduce_block = Block(arg_types=[reduce_out, mem])
+    reduce_sum_op = KernelReduceOp(
+        reduce_block.args[0],
+        reduce_block.args[1],
+        kind="sum",
+        axis=1,
+        keepdim=True,
+        space=space,
+    )
+    reduce_sum_op.verify()
+    reduce_ctx = _bind((reduce_block.args[0], "out"), (reduce_block.args[1], "input"))
+    assert (
+        emit_c_op(reduce_sum_op, reduce_ctx)
+        == "reduce_sum<GM, float, float>(out /*out*/, input /*input*/, 1 /*axis*/);"
+    )
+
+    reduce_min_op = KernelReduceMinOp(reduce_block.args[0], reduce_block.args[1], axis=1, keepdim=True, space=space)
+    reduce_min_op.verify()
+    assert (
+        emit_c_op(reduce_min_op, reduce_ctx)
+        == "reduce_min<GM, float, float>(out /*out*/, input /*input*/, 1 /*axis*/);"
+    )
+
+    unsupported_reduce_op = KernelReduceOp(
+        reduce_block.args[0],
+        reduce_block.args[1],
+        kind="max",
+        axis=1,
+        keepdim=True,
+        space=space,
+    )
+    unsupported_reduce_op.verify()
+    with pytest.raises(EmitCError, match="kernel.reduce: unsupported kind=max"):
+        emit_c_op(unsupported_reduce_op, reduce_ctx)
+
+    c0 = arith.ConstantOp(IntegerAttr(0, i32))
+    c1 = arith.ConstantOp(IntegerAttr(1, i32))
+    c3 = arith.ConstantOp(IntegerAttr(3, i32))
+
+    img2col1d_block = Block(arg_types=[img2col1d_out, img2col1d_in])
+    img2col1d_op = KernelImg2col1dOp(
+        img2col1d_block.args[0],
+        img2col1d_block.args[1],
+        c3.result,
+        c1.result,
+        c1.result,
+        c0.result,
+        c0.result,
+        space,
+    )
+    img2col1d_op.verify()
+    img2col1d_ctx = _bind((img2col1d_block.args[0], "out"), (img2col1d_block.args[1], "input"))
+    assert (
+        emit_c_op(img2col1d_op, img2col1d_ctx)
+        == "img2col1d<GM, GM, float, float>(out /*out*/, input /*input*/, 3 /*k*/, 1 /*s*/, 1 /*d*/, 0 /*p_left*/, 0 /*p_right*/);"
+    )
+
+    img2col2d_block = Block(arg_types=[img2col2d_out, img2col2d_in])
+    img2col2d_op = KernelImg2col2dOp(
+        img2col2d_block.args[0],
+        img2col2d_block.args[1],
+        c3.result,
+        c3.result,
+        c1.result,
+        c1.result,
+        c1.result,
+        c1.result,
+        c0.result,
+        c0.result,
+        c0.result,
+        c0.result,
+        space,
+    )
+    img2col2d_op.verify()
+    img2col2d_ctx = _bind((img2col2d_block.args[0], "out"), (img2col2d_block.args[1], "input"))
+    assert (
+        emit_c_op(img2col2d_op, img2col2d_ctx)
+        == "img2col2d<GM, GM, float, float>(out /*out*/, input /*input*/, 3 /*kh*/, 3 /*kw*/, 1 /*sh*/, 1 /*sw*/, 1 /*dh*/, 1 /*dw*/, 0 /*ph*/, 0 /*pw*/, 0 /*pl*/, 0 /*pr*/);"
+    )
+
+
 # EC-I3-001A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
@@ -954,6 +1173,461 @@ def test_emit_c_lowers_npu_demo_dma_misc_helper_contracts() -> None:
     assert free_stmt == "free<GM, float>(dst /*source*/);"
     assert transpose_stmt == "transpose<GM, GM, float, float>(dst /*dst*/, dst /*source*/, {1, 0} /*perm*/);"
     assert "Memory<GM, float> v0 = dst.reshape({3, 2} /*shape*/);" == reshape_stmt
+
+
+# EC-S7-001
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 覆盖 emit_c 上下文命名冲突、symbol.const 复用与 private helper 的异常边界。
+# 测试目的: 锁定 emit_c 的命名去重、mixed add、npu view/cast 这几条 helper 分支在边界场景下不回退。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_private_helper_and_context_edges
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_private_helper_and_context_edges(monkeypatch: pytest.MonkeyPatch) -> None:
+    naming_block = Block(arg_types=[i32, i32, i32])
+    naming_ctx = _ctx()
+    naming_ctx.bind_name(naming_block.args[0], "v0")
+    assert naming_ctx.allocate_name(naming_block.args[1]) == "v0_1"
+    assert naming_ctx.allocate_temp_name("dma") == "dma0"
+
+    preferred_ctx = _ctx()
+    assert emit_c_module._bind_preferred_name(preferred_ctx, naming_block.args[0], "lhs") == "lhs"
+    assert emit_c_module._bind_preferred_name(preferred_ctx, naming_block.args[0], "lhs") == "lhs"
+    assert emit_c_module._bind_preferred_name(preferred_ctx, naming_block.args[1], "lhs") == "lhs_1"
+
+    npu_ctx = _npu_ctx()
+    positive_const = SymbolConstOp(7)
+    duplicate_const = SymbolConstOp(7)
+    negative_const = SymbolConstOp(-3)
+    assert emit_c_module._emit_npu_symbol_const_stmt(positive_const, npu_ctx) == "S_INT c_7 = 7;"
+    assert emit_c_module._emit_npu_symbol_const_stmt(duplicate_const, npu_ctx) == ""
+    assert npu_ctx.lookup_name(duplicate_const.result) == "c_7"
+    assert emit_c_module._emit_npu_symbol_const_stmt(negative_const, npu_ctx) == "S_INT c_m3 = -3;"
+
+    with pytest.raises(EmitCError, match="symbol.const result must be !symbol.int"):
+        emit_c_module._emit_npu_symbol_const_stmt(UnsupportedOp(), _npu_ctx())
+
+    memory_type = _make_memory_type([2, 2], [2, 1], element_type=f32)
+    mixed_block = Block(arg_types=[memory_type, i32, i1])
+    mixed_ctx = _ctx()
+    mixed_ctx.bind_name(mixed_block.args[0], "lhs")
+    mixed_ctx.bind_name(mixed_block.args[1], "bias")
+    mixed_ctx.bind_name(mixed_block.args[2], "flag")
+    mixed_add = NnAddOp(mixed_block.args[0], mixed_block.args[1], memory_type, NnMemorySpaceAttr.from_name("global"))
+    mixed_ctx.bind_name(mixed_add.result, "out")
+    assert emit_c_module._emit_nn_add_stmt(mixed_add, mixed_ctx) == "cpu::add(lhs, bias, out);"
+
+    invalid_add = NnAddOp(mixed_block.args[0], mixed_block.args[2], memory_type, NnMemorySpaceAttr.from_name("global"))
+    mixed_ctx.bind_name(invalid_add.result, "bad_out")
+    with pytest.raises(EmitCError, match="unsupported op"):
+        emit_c_module._emit_nn_add_stmt(invalid_add, mixed_ctx)
+
+    view_ctx = _npu_ctx()
+    source_type = _make_memory_type([2, 2], [2, 1], element_type=f32)
+    view_block = Block(arg_types=[source_type])
+    view_ctx.bind_name(view_block.args[0], "src")
+    view_op = DmaViewOp(
+        view_block.args[0],
+        [arith.ConstantOp(IntegerAttr(0, i32)).result, arith.ConstantOp(IntegerAttr(0, i32)).result],
+        [arith.ConstantOp(IntegerAttr(2, i32)).result, arith.ConstantOp(IntegerAttr(2, i32)).result],
+        [arith.ConstantOp(IntegerAttr(2, i32)).result, arith.ConstantOp(IntegerAttr(1, i32)).result],
+        source_type,
+    )
+    monkeypatch.setattr(view_ctx, "allocate_name", lambda _value, prefix="v": "src")
+    stmt = emit_c_module._emit_npu_view_stmt(view_op, view_ctx)
+    assert "src_1" in stmt
+
+    with pytest.raises(EmitCError, match="unsupported op"):
+        emit_c_module._emit_npu_cast_stmt(
+            DmaCastOp.create(operands=[], result_types=[]),
+            _npu_ctx(),
+        )
+
+
+# EC-S7-002
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 覆盖 emit_c layout / operand normalization helper 的正反分支。
+# 测试目的: 锁定静态布局、npu alloc layout、memory decl、Vector 发射与旧 operand 顺序规整在 helper 层的公开收口。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_private_layout_and_operand_helpers
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_private_layout_and_operand_helpers() -> None:
+    cpu_ctx = _ctx()
+    npu_ctx = _npu_ctx()
+    mem_type = _make_memory_type([2, 3], [3, 1], element_type=f32)
+    dynamic_mem_type = NnMemoryType(
+        ArrayAttr([StringAttr("M"), StringAttr("N")]),
+        ArrayAttr([StringAttr("(M * N)"), IntAttr(1)]),
+        f32,
+        NnMemorySpaceAttr.from_name("tsm"),
+    )
+
+    assert emit_c_module._space_to_c(mem_type, cpu_ctx) == "GM"
+    assert emit_c_module._space_name_to_c("tlm2", npu_ctx) == "TLM2"
+    with pytest.raises(EmitCError, match="unsupported memory space"):
+        emit_c_module._space_name_to_c("weird", cpu_ctx)
+
+    assert emit_c_module._format_static_layout(mem_type.shape.data, cpu_ctx, "shape") == ["2", "3"]
+    with pytest.raises(EmitCError, match="only static memory layout is supported"):
+        emit_c_module._format_static_layout(dynamic_mem_type.shape.data, cpu_ctx, "shape")
+
+    assert emit_c_module._format_npu_alloc_layout(
+        dynamic_mem_type.stride.data,
+        npu_ctx,
+        "stride",
+        symbol_bindings={"M*N": "packed"},
+    ) == ["packed", "1"]
+    with pytest.raises(EmitCError, match="unsupported alloc layout value"):
+        emit_c_module._format_npu_alloc_layout([object()], npu_ctx, "shape")
+
+    assert emit_c_module._maybe_static_numel(mem_type.shape.data) == 6
+    assert emit_c_module._maybe_static_numel(dynamic_mem_type.shape.data) is None
+    assert emit_c_module._shape_product_expr(["M", "N"]) == "(M) * (N)"
+    assert emit_c_module._shape_product_expr([]) == "1"
+
+    storage_lines, buffer_name = emit_c_module._emit_backing_storage_decl(
+        "tile",
+        "float",
+        ["2", "3"],
+        mem_type,
+        cpu_ctx,
+    )
+    assert storage_lines == ["float tile_buffer[6] = {};"]
+    assert buffer_name == "tile_buffer"
+    with pytest.raises(EmitCError, match="dynamic shape backing is unsupported"):
+        emit_c_module._emit_backing_storage_decl(
+            "dyn",
+            "float",
+            ["M", "N"],
+            dynamic_mem_type,
+            npu_ctx,
+        )
+
+    cpu_decl = emit_c_module._emit_memory_decl("tile", mem_type, cpu_ctx, with_backing_storage=True)
+    assert "long long tile_shape[2] = {2, 3};" in cpu_decl
+    assert "float tile_buffer[6] = {};" in cpu_decl
+    assert "Memory<GM, float> tile(tile_buffer, 2, tile_shape, tile_stride, MemoryFormat::Norm);" in cpu_decl
+
+    npu_decl = emit_c_module._emit_memory_decl(
+        "tile",
+        mem_type,
+        npu_ctx,
+        shape_values=["m", "n"],
+        stride_values=["n", "1"],
+        data_expr="buf",
+        format_expr="fmt",
+        space_expr="TSM",
+    )
+    assert "long long tile_shape[2] = {m, n};" in npu_decl
+    assert "Memory<TSM, float> tile(buf, tile_shape, tile_stride, 2, fmt);" in npu_decl
+
+    vector_block = Block(
+        arg_types=[
+            SymbolValueType.from_expr("A"),
+            SymbolValueType.from_expr("B"),
+            SymbolValueType.from_expr("C"),
+            SymbolValueType.from_expr("D"),
+            SymbolValueType.from_expr("E"),
+        ]
+    )
+    for index, arg in enumerate(vector_block.args):
+        npu_ctx.bind_name(arg, f"s{index}")
+    assert emit_c_module._emit_npu_vector_expr(tuple(vector_block.args[:2]), npu_ctx, subject="offset") == "Vector{s0, s1}"
+    with pytest.raises(EmitCError, match="Vector supports 1..4 values"):
+        emit_c_module._emit_npu_vector_expr(tuple(vector_block.args), npu_ctx, subject="offset")
+
+    memory_block = Block(arg_types=[mem_type, mem_type, mem_type, mem_type])
+    assert emit_c_module._memory_base_name(memory_block.args[0], cpu_ctx) == "arg0"
+    cpu_ctx.bind_name(memory_block.args[1], "src")
+    assert emit_c_module._memory_base_name(memory_block.args[1], cpu_ctx) == "src"
+    alloc_op = DmaAllocOp([], mem_type)
+    assert emit_c_module._memory_base_name(alloc_op.result, cpu_ctx) == "v0"
+    with pytest.raises(EmitCError, match="invalid dependency"):
+        emit_c_module._memory_base_name(UnsupportedOp().result, cpu_ctx)
+
+    space = NnMemorySpaceAttr.from_name("global")
+    binary_old_order = KernelBinaryElewiseOp(
+        memory_block.args[1],
+        memory_block.args[2],
+        memory_block.args[0],
+        kind="add",
+        space=space,
+    )
+    assert emit_c_module._normalized_binary_elewise_operands(binary_old_order) == (
+        memory_block.args[0],
+        memory_block.args[1],
+        memory_block.args[2],
+    )
+    assert emit_c_module._normalized_out_input_operands(memory_block.args[2], memory_block.args[0]) == (
+        memory_block.args[0],
+        memory_block.args[2],
+    )
+
+    matmul_old_order = KernelMatmulOp(
+        memory_block.args[1],
+        memory_block.args[2],
+        memory_block.args[0],
+        space,
+    )
+    assert emit_c_module._normalized_matmul_operands(matmul_old_order) == (
+        memory_block.args[0],
+        memory_block.args[1],
+        memory_block.args[2],
+    )
+
+    select_old_order = KernelSelectOp(
+        memory_block.args[1],
+        memory_block.args[2],
+        memory_block.args[3],
+        memory_block.args[0],
+        space,
+    )
+    assert emit_c_module._normalized_select_operands(select_old_order) == (
+        memory_block.args[0],
+        memory_block.args[1],
+        memory_block.args[2],
+        memory_block.args[3],
+    )
+
+
+# EC-S7-003
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 补齐 emit_c helper 的命名冲突、dma/private helper 与 npu kernel 错误矩阵。
+# 测试目的: 锁定 wrapper/compat helper 在非法 target、非法 memory type 与重复命名场景下保持稳定报错。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_private_additional_error_matrix
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_private_additional_error_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mem_type = _make_memory_type([2, 2], [2, 1], element_type=f32)
+    cpu_ctx = _ctx()
+    npu_ctx = _npu_ctx()
+
+    naming_block = Block(arg_types=[i32, i32, i32])
+    naming_ctx = _ctx()
+    naming_ctx.bind_name(naming_block.args[0], "tmp")
+    naming_ctx.bind_name(naming_block.args[1], "tmp_1")
+    naming_ctx.naming = lambda _value: "tmp"
+    assert naming_ctx.allocate_name(naming_block.args[2]) == "tmp_2"
+
+    invalid_naming_ctx = EmitCContext(target="cpu", naming=object())
+    with pytest.raises(EmitCError, match="unsupported naming strategy"):
+        invalid_naming_ctx.allocate_name(naming_block.args[0])
+
+    class _Converter:
+        def convert(self, _attr: object) -> str:
+            return "converted"
+
+    assert emit_c_module._type_to_c(emit_c_module.Float16Type(), cpu_ctx) == "half"
+    assert emit_c_module._type_to_c(emit_c_module.BFloat16Type(), cpu_ctx) == "bfloat16_t"
+    assert emit_c_module._type_to_c(f32, EmitCContext(target="cpu", type_converter=_Converter())) == "converted"
+    with pytest.raises(EmitCError, match="unsupported type converter"):
+        emit_c_module._type_to_c(f32, EmitCContext(target="cpu", type_converter=object()))
+
+    fake_const = UnsupportedOp.create(result_types=[SymbolValueType.from_expr("K")])
+    fake_const.name = "builtin.unregistered"
+    fake_const.attributes["value"] = IntegerAttr(9, i32)
+    assert emit_c_module._emit_npu_symbol_const_stmt(fake_const, npu_ctx) == "S_INT c_9 = 9;"
+    fake_bad_const = UnsupportedOp.create(result_types=[SymbolValueType.from_expr("K")])
+    fake_bad_const.name = "builtin.unregistered"
+    fake_bad_const.attributes["value"] = StringAttr("bad")
+    with pytest.raises(EmitCError, match="symbol.const value must be integer attribute"):
+        emit_c_module._emit_npu_symbol_const_stmt(fake_bad_const, _npu_ctx())
+
+    no_backing_decl = emit_c_module._emit_memory_decl("out", mem_type, cpu_ctx, with_backing_storage=False)
+    assert "static_cast<float*>(nullptr)" in no_backing_decl
+
+    zero_rank_mem = NnMemoryType(ArrayAttr([]), ArrayAttr([]), f32, NnMemorySpaceAttr.from_name("global"))
+    assert emit_c_module._is_unit_tile(zero_rank_mem) is False
+
+    unit_tile_type = _make_memory_type([1], [1], element_type=f32)
+    load_block = Block(arg_types=[unit_tile_type, unit_tile_type])
+    load_op = DmaLoadOp(load_block.args[0], load_block.args[1], [], [], [])
+    view_op = DmaViewOp(load_block.args[0], [], [], [], unit_tile_type)
+    fill_value = arith.ConstantOp(FloatAttr(1.0, f32))
+    fill_op = DmaFillOp(load_block.args[0], fill_value.result)
+    for op in (load_op, view_op, fill_op):
+        with pytest.raises(EmitCError, match="cpu-only"):
+            emit_c_op(op, EmitCContext(target="gpu"))
+    store_block = Block(arg_types=[mem_type, mem_type])
+    with pytest.raises(EmitCError, match="only unit-tile dma.store source is supported"):
+        emit_c_op(DmaStoreOp(store_block.args[0], store_block.args[1], [], [], []), _ctx())
+
+    alloc_op = DmaAllocOp([], mem_type)
+    with pytest.raises(EmitCError, match="dma ops are cpu-only"):
+        emit_c_module._emit_dma_alloc_stmt(alloc_op, EmitCContext(target="gpu"))
+    bad_alloc = DmaAllocOp([], i32)
+    with pytest.raises(EmitCError, match="result must be nn.memory"):
+        emit_c_module._emit_dma_alloc_stmt(bad_alloc, _ctx())
+    with pytest.raises(EmitCError, match="dma.copy: dma ops are cpu-only"):
+        emit_c_module._emit_dma_copy_loop_nest(
+            source_expr="src",
+            target_expr="dst",
+            offsets=(),
+            sizes=(),
+            strides=(),
+            ctx=EmitCContext(target="gpu"),
+            target_has_offsets=False,
+        )
+    with pytest.raises(EmitCError, match="nn ops are cpu-only"):
+        emit_c_module._emit_img2col2d_stmt(
+            NnImg2col2dOp(
+                load_block.args[0],
+                mem_type,
+                arith.ConstantOp(IntegerAttr(1, i32)).result,
+                arith.ConstantOp(IntegerAttr(1, i32)).result,
+                arith.ConstantOp(IntegerAttr(1, i32)).result,
+                arith.ConstantOp(IntegerAttr(1, i32)).result,
+                arith.ConstantOp(IntegerAttr(1, i32)).result,
+                arith.ConstantOp(IntegerAttr(1, i32)).result,
+                arith.ConstantOp(IntegerAttr(0, i32)).result,
+                arith.ConstantOp(IntegerAttr(0, i32)).result,
+                arith.ConstantOp(IntegerAttr(0, i32)).result,
+                arith.ConstantOp(IntegerAttr(0, i32)).result,
+                NnMemorySpaceAttr.from_name("global"),
+            ),
+            EmitCContext(target="npu_demo"),
+        )
+
+    view_ctx = _npu_ctx()
+    view_block = Block(arg_types=[mem_type])
+    view_ctx.bind_name(view_block.args[0], "src")
+    view_ctx.bind_name(SymbolConstOp(0).result, "src_1")
+    colliding_view = DmaViewOp(
+        view_block.args[0],
+        [],
+        [arith.ConstantOp(IntegerAttr(2, i32)).result],
+        [arith.ConstantOp(IntegerAttr(1, i32)).result],
+        _make_memory_type([2], [1], element_type=f32),
+    )
+    monkeypatch.setattr(view_ctx, "allocate_name", lambda _value, prefix="v": "src")
+    assert "src_2" in emit_c_module._emit_npu_view_stmt(colliding_view, view_ctx)
+
+    with pytest.raises(EmitCError, match="unsupported dynamic memory space"):
+        emit_c_module._emit_npu_dynamic_memory_stmt(
+            ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("global"), mem_type),
+            _npu_ctx(),
+        )
+
+    rank3_type = _make_memory_type([2, 2, 2], [4, 2, 1], element_type=f32)
+    rank3_block = Block(arg_types=[rank3_type, rank3_type])
+    slice3 = DmaSliceOp(
+        rank3_block.args[0],
+        rank3_block.args[1],
+        [SymbolConstOp(0).result] * 3,
+        [SymbolConstOp(1).result] * 3,
+        [SymbolConstOp(1).result] * 3,
+    )
+    deslice3 = DmaDesliceOp(rank3_block.args[1], rank3_block.args[0], [SymbolConstOp(0).result] * 3, [SymbolConstOp(1).result] * 3, [SymbolConstOp(1).result] * 3, rank3_type)
+    rank3_ctx = _npu_ctx()
+    rank3_ctx.bind_name(rank3_block.args[0], "dst")
+    rank3_ctx.bind_name(rank3_block.args[1], "src")
+    assert "{0, 0, 0}" in emit_c_module._emit_npu_slice_stmt(slice3, rank3_ctx)
+    assert "{0, 0, 0}" in emit_c_module._emit_npu_deslice_stmt(deslice3, rank3_ctx)
+
+    kernel_block = Block(arg_types=[mem_type, mem_type, mem_type, i32])
+    kernel_ctx = _npu_ctx()
+    for index, arg in enumerate(kernel_block.args[:3]):
+        kernel_ctx.bind_name(arg, f"m{index}")
+
+    add_op = KernelBinaryElewiseOp(
+        kernel_block.args[0],
+        kernel_block.args[1],
+        kernel_block.args[2],
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("global"),
+    )
+    add_op.attributes["kind"] = StringAttr("pow")
+    with pytest.raises(EmitCError, match="unsupported kind=pow"):
+        emit_c_module._emit_kernel_binary_elewise_stmt(add_op, kernel_ctx)
+
+    bad_add = KernelBinaryElewiseOp(
+        kernel_block.args[0],
+        kernel_block.args[1],
+        kernel_block.args[3],
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("global"),
+    )
+    with pytest.raises(EmitCError, match="unsupported op"):
+        emit_c_module._emit_kernel_binary_elewise_stmt(bad_add, kernel_ctx)
+
+    exp_bad = KernelExpOp(kernel_block.args[3], kernel_block.args[0], NnMemorySpaceAttr.from_name("global"))
+    with pytest.raises(EmitCError, match="unsupported op"):
+        emit_c_module._emit_npu_kernel_exp_stmt(exp_bad, kernel_ctx)
+
+    select_bad = KernelSelectOp(kernel_block.args[0], kernel_block.args[3], kernel_block.args[1], kernel_block.args[2], NnMemorySpaceAttr.from_name("global"))
+    with pytest.raises(EmitCError, match="unsupported op"):
+        emit_c_module._emit_npu_kernel_select_stmt(select_bad, kernel_ctx)
+
+    reduce_bad = KernelReduceOp(
+        kernel_block.args[3],
+        kernel_block.args[0],
+        kind=StringAttr("sum"),
+        axis=IntegerAttr(0, i32),
+        keepdim=False,
+        space=NnMemorySpaceAttr.from_name("global"),
+    )
+    with pytest.raises(EmitCError, match="unsupported op"):
+        emit_c_module._emit_npu_kernel_reduce_stmt(reduce_bad, kernel_ctx)
+
+    reduce_min_bad = KernelReduceMinOp(
+        kernel_block.args[3],
+        kernel_block.args[0],
+        IntegerAttr(0, i32),
+        False,
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    with pytest.raises(EmitCError, match="unsupported op"):
+        emit_c_module._emit_npu_kernel_reduce_min_stmt(reduce_min_bad, kernel_ctx)
+
+    img2col1d_bad = KernelImg2col1dOp(
+        kernel_block.args[3],
+        kernel_block.args[0],
+        SymbolConstOp(1).result,
+        SymbolConstOp(1).result,
+        SymbolConstOp(1).result,
+        SymbolConstOp(0).result,
+        SymbolConstOp(0).result,
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    with pytest.raises(EmitCError, match="unsupported op"):
+        emit_c_module._emit_npu_kernel_img2col1d_stmt(img2col1d_bad, kernel_ctx)
+
+    img2col2d_bad = KernelImg2col2dOp(
+        kernel_block.args[3],
+        kernel_block.args[0],
+        SymbolConstOp(1).result,
+        SymbolConstOp(1).result,
+        SymbolConstOp(1).result,
+        SymbolConstOp(1).result,
+        SymbolConstOp(1).result,
+        SymbolConstOp(1).result,
+        SymbolConstOp(0).result,
+        SymbolConstOp(0).result,
+        SymbolConstOp(0).result,
+        SymbolConstOp(0).result,
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    with pytest.raises(EmitCError, match="unsupported op"):
+        emit_c_module._emit_npu_kernel_img2col2d_stmt(img2col2d_bad, kernel_ctx)
+
+    broadcast_bad = DmaBroadcastOp(kernel_block.args[3], kernel_block.args[0])
+    with pytest.raises(EmitCError, match="unsupported op"):
+        emit_c_module._emit_npu_broadcast_stmt(broadcast_bad, _ctx())
+    with pytest.raises(EmitCError, match="unsupported op"):
+        emit_c_module._emit_npu_broadcast_stmt(broadcast_bad, _npu_ctx())
+
+    one_operand_cast = DmaCastOp(kernel_block.args[0], kernel_block.args[1])
+    assert "cast<GM, float, float>" in emit_c_module._emit_npu_cast_stmt(one_operand_cast, kernel_ctx)
+    bad_cast = DmaCastOp(kernel_block.args[0], kernel_block.args[3])
+    with pytest.raises(EmitCError, match="unsupported op"):
+        emit_c_module._emit_npu_cast_stmt(bad_cast, kernel_ctx)
 
 
 def test_emit_c_lowers_npu_demo_dma_indexed_and_fill_helpers() -> None:

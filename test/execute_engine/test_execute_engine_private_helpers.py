@@ -1,7 +1,7 @@
 """execute_engine private helper coverage tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 execute_engine / entry_shim_builder / compiler 的私有 helper 边界与失败分支。
@@ -38,6 +38,8 @@ from kernel_gen.execute_engine import (
 )
 from kernel_gen.execute_engine.compiler import (
     CompileArtifacts,
+    _looks_like_internal_compiler_error,
+    _run_compiler_command,
     build_compile_command,
     build_compile_unit,
     compile_source,
@@ -590,13 +592,13 @@ def test_execute_engine_private_helpers_compile_source_and_command_paths(
             artifacts._cleanup()
 
     fake_result = SimpleNamespace(stdout="ok", stderr="", returncode=0)
-    run_calls: list[list[str]] = []
+    run_calls: list[tuple[str, ...]] = []
 
-    def _fake_run(cmd, capture_output, text, check):  # noqa: ANN001
-        run_calls.append(list(cmd))
+    def _fake_compile_run(cmd):  # noqa: ANN001
+        run_calls.append(tuple(cmd))
         return fake_result
 
-    monkeypatch.setattr(subprocess, "run", _fake_run)
+    monkeypatch.setattr("kernel_gen.execute_engine.compiler._run_compiler_command", _fake_compile_run)
     artifacts = compile_source(
         source="int main(){}",
         compiler="g++",
@@ -628,6 +630,61 @@ def test_execute_engine_private_helpers_compile_source_and_command_paths(
             dry_run=True,
         )
     assert not failing_dir.exists()
+
+
+def test_execute_engine_private_helpers_run_compiler_command_retries_only_for_internal_compiler_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """覆盖 `_run_compiler_command(...)` 的编译器异常重试分支。
+
+    创建者: 小李飞刀
+    最后更改: 小李飞刀
+
+    测试目的:
+    - 验证共享编译 helper 只会在 stderr 命中编译器内部异常特征时追加一次同命令重试。
+    - 保持普通编译失败仍按原始 return_code / stderr 直接返回，不吞掉真实错误。
+
+    对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
+    对应 spec 文件路径: spec/execute_engine/execute_engine_target.md
+    对应测试文件路径: test/execute_engine/test_execute_engine_private_helpers.py
+    """
+
+    internal_error = SimpleNamespace(
+        stdout="",
+        stderr="internal compiler error: Segmentation fault\nPlease submit a full bug report",
+        returncode=1,
+    )
+    compile_ok = SimpleNamespace(stdout="ok", stderr="", returncode=0)
+    run_calls: list[list[str]] = []
+    results = iter((internal_error, compile_ok))
+
+    def _fake_retry_run(cmd, capture_output, text, check):  # noqa: ANN001
+        run_calls.append(list(cmd))
+        return next(results)
+
+    monkeypatch.setattr(subprocess, "run", _fake_retry_run)
+    result = _run_compiler_command(["g++", "-std=c++17", "demo.cpp", "-o", "demo"])
+    assert _looks_like_internal_compiler_error(internal_error.stderr) is True
+    assert _looks_like_internal_compiler_error("fatal error: missing.h") is False
+    assert _looks_like_internal_compiler_error(None) is False
+    assert len(run_calls) == 2
+    assert run_calls[0] == run_calls[1]
+    assert result.stdout == "ok"
+    assert result.returncode == 0
+
+    normal_failure = SimpleNamespace(stdout="", stderr="fatal error: missing.h: No such file or directory", returncode=1)
+    single_call_count = 0
+
+    def _fake_fail_run(cmd, capture_output, text, check):  # noqa: ANN001
+        nonlocal single_call_count
+        single_call_count += 1
+        return normal_failure
+
+    monkeypatch.setattr(subprocess, "run", _fake_fail_run)
+    result = _run_compiler_command(["g++", "-std=c++17", "demo.cpp", "-o", "demo"])
+    assert single_call_count == 1
+    assert result.stderr == normal_failure.stderr
+    assert result.returncode == 1
 
 
 def test_execute_engine_private_helpers_load_entry_point_paths(tmp_path: Path) -> None:

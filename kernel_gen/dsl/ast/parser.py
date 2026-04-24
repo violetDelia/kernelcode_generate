@@ -314,7 +314,6 @@ def _eval_symbolic_dim_node(expr: py_ast.AST, node: object | None) -> int | Symb
             return lhs / rhs
         _raise_parse_error("Unsupported tensor dimension expression", node)
     _raise_parse_error("Unsupported tensor dimension expression", node)
-    return 0
 
 
 def _eval_symbolic_dim_expr(expr_text: str, node: object | None) -> int | SymbolDim:
@@ -469,7 +468,6 @@ def _eval_formatted_annotation_expr(
         _raise_parse_error("Unsupported formatted annotation", expr)
 
     _raise_parse_error("Unsupported formatted annotation", expr)
-    return 0
 
 
 def _format_joinedstr_value(
@@ -506,7 +504,6 @@ def _format_joinedstr_value(
     if isinstance(value, (int, str)):
         return str(value)
     _raise_parse_error("Unsupported formatted annotation", value_node)
-    return ""
 
 
 def _normalize_annotation_text(
@@ -546,7 +543,6 @@ def _normalize_annotation_text(
             _raise_parse_error("Unsupported annotation", value)
         return "".join(parts)
     _raise_parse_error("Unsupported annotation", node)
-    return ""
 
 
 def _annotation_from_runtime_value(arg_name: str, runtime_value: object) -> TensorAST | ScalarArgAST | None:
@@ -779,7 +775,6 @@ def _parse_annotation_node(
         return _annotation_from_text(_tensor_annotation_text_from_subscript(node), arg_name, node)
 
     _raise_parse_error("Unsupported annotation", node)
-    return None
 
 
 def _lookup_python_name(name: str, globals_table: dict[str, object], builtins_table: dict[str, object]) -> object | None:
@@ -939,7 +934,6 @@ def _resolve_call_base_object(
     if isinstance(expr, py_ast.Attribute):
         return _parse_attribute_object(expr, globals_table, builtins_table)
     _raise_parse_error("Unsupported call expression", expr)
-    return None
 
 
 def _resolve_import_bound_helper_call(
@@ -1259,7 +1253,6 @@ def _parse_unary_helper_call(
         return NnUnaryAST(kind=call_name, value=value, alpha=alpha, beta=beta, location=_location_from_node(expr))
 
     _raise_parse_error("Unsupported call expression", expr)
-    return None
 
 
 def _parse_softmax_helper_call(
@@ -2145,7 +2138,6 @@ def _parse_expr(
         return CompareExprAST(op=_CMP_OP_MAP[op_type], lhs=lhs, rhs=rhs, location=_location_from_node(expr))
 
     _raise_parse_error("Unsupported expression", expr)
-    return expr
 
 
 def _parse_for(
@@ -2269,7 +2261,6 @@ def _parse_stmt(
     if isinstance(stmt, py_ast.Expr):
         return _parse_expr(stmt.value, env, globals_table, builtins_table)
     _raise_parse_error("Unsupported syntax", stmt)
-    return stmt
 
 
 def _parse_function_impl(

@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -34,11 +35,13 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dsl.ast import ConstAST
+from kernel_gen.dsl.ast import ConstAST, PythonCalleeCallAST
 from kernel_gen.dsl.mlir_gen.emit import EmitContext, memory_type_from_memory
 from kernel_gen.dsl.mlir_gen.emit.context import LoweringError
 from kernel_gen.dsl.mlir_gen.emit.dispatch import call_dispatch, emit_mlir
 from kernel_gen.symbol_variable.memory import Memory, NumericType
+
+dispatch_module = importlib.import_module("kernel_gen.dsl.mlir_gen.emit.dispatch")
 
 
 # EMIT-DISP-001
@@ -126,3 +129,21 @@ def test_emit_package_root_exposes_memory_type_from_memory() -> None:
         raise AssertionError(f"unexpected shape from package root helper: {mem_type.shape.data}")
     if mem_type.element_type != f32:
         raise AssertionError(f"unexpected element type from package root helper: {mem_type.element_type}")
+
+
+def test_call_dispatch_routes_python_callee_through_private_emit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    block = Block(arg_types=[f32])
+    ctx = EmitContext(builder=block, symbols={}, types={})
+    call_expr = PythonCalleeCallAST(callee="callee", args=[ConstAST(1)], location=None)
+    seen: list[object] = []
+
+    def _fake_emit_mlir(node: object, passed_ctx: EmitContext) -> object:
+        seen.extend([node, passed_ctx])
+        return block.args[0]
+
+    monkeypatch.setattr(dispatch_module, "_emit_mlir", _fake_emit_mlir)
+
+    assert call_dispatch(call_expr, ctx) is block.args[0]
+    assert seen == [call_expr, ctx]

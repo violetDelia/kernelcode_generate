@@ -75,12 +75,19 @@ from kernel_gen.dialect.nn import (
     NnCastOp,
     NnDivOp,
     NnExpOp,
+    NnHardSigmoidOp,
+    NnLeakyReluOp,
+    NnReluOp,
+    NnSigmoidOp,
+    NnTanhOp,
     _normalize_axes_attr,
     _normalize_bool_attr,
     _promote_add_dtype,
     _resolve_add_dtype_key,
     _verify_activation_scalar_operand,
+    _verify_keepdim_attr,
     _verify_img2col_param_operands,
+    _verify_reduce_axes,
     _verify_unary_float_op,
     NnReduceMaxOp,
     NnReduceMinOp,
@@ -2311,3 +2318,112 @@ def test_nn_helper_contracts_and_validation_branches() -> None:
         _verify_unary_float_op(good_input, _make_simple_memory_type([IntAttr(2)], [IntAttr(2)], space="global"), _make_space("global"))
     with pytest.raises(VerifyException, match="alpha must be int or float scalar"):
         _verify_activation_scalar_operand(_TestOp(result_types=[_make_memory_type()]).results[0], "alpha")
+
+
+# NN-DIA-S7-001
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 覆盖 unary float family、activation scalar verifier 与 reduce helper 的剩余边界。
+# 测试目的: 锁定 relu/sigmoid/tanh/exp/leaky_relu/hard_sigmoid 的 verifier 主路径，以及 reduce axes / keepdim 的私有 helper 分支不回退。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_unary_float_family_and_reduce_helper_edges
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_unary_float_family_and_reduce_helper_edges() -> None:
+    input_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        element_type=Float32Type(),
+    )
+    result_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        element_type=Float32Type(),
+    )
+    inp = _TestOp(result_types=[input_type]).results[0]
+    alpha = arith.ConstantOp(IntegerAttr(1, i32)).result
+    beta = arith.ConstantOp(IntegerAttr(2, i32)).result
+
+    NnReluOp(inp, result_type, _make_space("global")).verify()
+    NnSigmoidOp(inp, result_type, _make_space("global")).verify()
+    NnTanhOp(inp, result_type, _make_space("global")).verify()
+    NnExpOp(inp, result_type, _make_space("global")).verify()
+    NnLeakyReluOp(inp, alpha, result_type, _make_space("global")).verify()
+    NnHardSigmoidOp(inp, alpha, beta, result_type, _make_space("global")).verify()
+
+    symbol_value = _TestOp(result_types=[SymbolValueType.from_expr("K")]).results[0]
+    with pytest.raises(VerifyException, match="alpha must be int or float scalar"):
+        NnLeakyReluOp(inp, symbol_value, result_type, _make_space("global")).verify()
+    with pytest.raises(VerifyException, match="beta must be int or float scalar"):
+        NnHardSigmoidOp(inp, alpha, symbol_value, result_type, _make_space("global")).verify()
+
+    assert _verify_reduce_axes(ArrayAttr([IntegerAttr(1, IntegerType(64))]), rank=3) == [1]
+    with pytest.raises(VerifyException, match="axes-must-be-non-empty-unique-and-in-range"):
+        _verify_reduce_axes(ArrayAttr([IntegerAttr(1, IntegerType(32))]), rank=3)
+    with pytest.raises(VerifyException, match="axes-must-be-non-empty-unique-and-in-range"):
+        _verify_reduce_axes(
+            ArrayAttr([IntegerAttr(1, IntegerType(64)), IntegerAttr(1, IntegerType(64))]),
+            rank=3,
+        )
+
+    assert _verify_keepdim_attr(IntegerAttr(-1, IntegerType(1))) is True
+    assert _verify_keepdim_attr(IntegerAttr(0, IntegerType(1))) is False
+    with pytest.raises(VerifyException, match="keepdim-must-be-i1-bool-attr"):
+        _verify_keepdim_attr(IntegerAttr(1, IntegerType(2)))
+    with pytest.raises(VerifyException, match="keepdim-must-be-i1-bool-attr"):
+        _verify_keepdim_attr(StringAttr("bad"))
+
+
+# NN-DIA-S7-002
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 覆盖 nn.memory 维度列表 parser 的复杂文本边界，以及 mixed scalar add verifier 的剩余错误路径。
+# 测试目的: 锁定 dim list 对 expression/identifier 回退的 parse 行为，并补齐 mixed add 在 space/stride/element_type 方向的异常短语。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_dim_parser_and_mixed_add_edge_contracts
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_memory_dim_parser_and_mixed_add_edge_contracts() -> None:
+    ctx = _build_context()
+    parsed = Parser(
+        ctx,
+        "!nn.memory<[M + 1, (K / 2), tail], [tail, 1, ?], i32, #nn.space<global>>",
+    ).parse_attribute()
+    assert isinstance(parsed, NnMemoryType)
+    assert _print_ir(parsed) == "!nn.memory<[M + 1, (K / 2), tail], [tail, 1, ?], i32, #nn.space<global>>"
+
+    memory_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        space="global",
+        element_type=Float32Type(),
+    )
+    lhs = _TestOp(result_types=[memory_type]).results[0]
+    scalar = _TestOp(result_types=[SymbolValueType.from_expr("N")]).results[0]
+
+    wrong_space_result = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        space="global",
+        element_type=Float32Type(),
+    )
+    with pytest.raises(VerifyException, match="attribute space must match memory operand space"):
+        NnAddOp(lhs, scalar, wrong_space_result, _make_space("shared")).verify()
+
+    wrong_stride = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(1), IntAttr(1)],
+        space="global",
+        element_type=Float32Type(),
+    )
+    with pytest.raises(VerifyException, match="result stride must match memory operand"):
+        NnAddOp(lhs, scalar, wrong_stride, _make_space("global")).verify()
+
+    wrong_dtype = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        space="global",
+        element_type=Float16Type(),
+    )
+    with pytest.raises(VerifyException, match="result element_type must match promoted element_type"):
+        NnAddOp(lhs, scalar, wrong_dtype, _make_space("global")).verify()

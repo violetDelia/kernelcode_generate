@@ -318,6 +318,110 @@ def test_index_symbol_materialization_and_resolution_helpers() -> None:
     assert emit_core._split_symbol_multiplication("M + N") is None
     assert emit_core._split_symbol_multiplication("") is None
 
+
+# CORE-S7-005
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 覆盖 core helper 的剩余死角与统一错误短语。
+# 测试目的: 锁定 dtype/type promotion、flatten/index helper、python callee registry 与 softmax/get_dynamic_memory 的边界不回退。
+# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_core.py -k test_emit_core_private_remaining_helper_edges
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/mlir_gen/emit/test_core.py
+def test_emit_core_private_remaining_helper_edges(monkeypatch: pytest.MonkeyPatch) -> None:
+    lhs_type = _memory_type([2], element_type=i32)
+    rhs_type = _memory_type([2], element_type=i32)
+
+    def _raise_type_error(_lhs: object, _rhs: object) -> object:
+        raise TypeError("boom")
+
+    monkeypatch.setattr(emit_core.Memory, "_promote_ranked_dtype", staticmethod(_raise_type_error))
+    with pytest.raises(emit_core._LoweringError, match="Binary op operands must have compatible element_type"):
+        emit_core._resolve_nn_arith_element_type(lhs_type, rhs_type, None)
+
+    assert emit_core._eval_symbolic_dim_node(py_ast.parse("-3", mode="eval").body, None) == -3
+    symbolic_div = emit_core._eval_symbolic_dim_node(py_ast.parse("N / M", mode="eval").body, None)
+    assert isinstance(symbolic_div, SymbolDim)
+    assert emit_core._eval_symbolic_dim_expr("1", None).get_value() == 1
+    with pytest.raises(emit_core._LoweringError, match="Unsupported symbolic dim expression"):
+        emit_core._eval_symbolic_dim_expr("(", None)
+
+    rank0_type = _memory_type([], stride=[])
+    _, rank0_ctx, rank0_value = _memory_ctx(rank0_type)
+    rank0_shape = emit_core._build_flatten_shape_operands(rank0_value, rank0_type, rank0_ctx, location=None)
+    assert len(rank0_shape) == 1
+    assert rank0_shape[0].owner.value.data == 1
+
+    with pytest.raises(emit_core._LoweringError, match="conv kw must be int or symbol"):
+        emit_core._resolve_helper_index_param_value("conv", "kw", object(), None)
+
+    helper_block = Block(arg_types=[i32, f32, IndexType()])
+    helper_ctx = EmitContext(
+        builder=helper_block,
+        symbols={"kw": helper_block.args[0], "bad_scalar": 7, "bad_var": 9, "flt": helper_block.args[1], "idx": helper_block.args[2]},
+        types={},
+    )
+    casted_symbol = emit_core._shape_attr_to_symbol_operand(StringAttr("kw"), helper_ctx, location=None)
+    assert type(casted_symbol.owner).__name__ == "UnrealizedConversionCastOp"
+    assert type(casted_symbol.owner.operands[0].owner).__name__ == "IndexCastOp"
+    assert isinstance(emit_core._lower_helper_index_operand(ConstAST("kw"), helper_ctx, location=None).type, IndexType)
+    assert emit_core._lower_helper_index_operand(3, helper_ctx, location=None).owner.value.value.data == 3
+    original_lookup_symbol = emit_core._lookup_symbol
+    monkeypatch.setattr(
+        emit_core,
+        "_lookup_symbol",
+        lambda node, ctx: 7 if getattr(node, "name", "") == "bad_scalar" else (9 if getattr(node, "name", "") == "bad_var" else original_lookup_symbol(node, ctx)),
+    )
+    with pytest.raises(emit_core._LoweringError, match="Index operand must be SSA value"):
+        emit_core._lower_helper_index_operand(ScalarArgAST("bad_scalar", int, location=None), helper_ctx, location=None)
+    with pytest.raises(emit_core._LoweringError, match="Index operand must be SSA value"):
+        emit_core._lower_helper_index_operand(VarAST("bad_var"), helper_ctx, location=None)
+    monkeypatch.setattr(emit_core, "_lookup_symbol", original_lookup_symbol)
+    with pytest.raises(emit_core._LoweringError, match="Index operand must be integer or symbol"):
+        emit_core._lower_helper_index_operand(ScalarArgAST("flt", float, location=None), helper_ctx, location=None)
+    assert emit_core._lower_helper_index_operand(VarAST("idx"), helper_ctx, location=None).type == IntegerType(32)
+    assert emit_core._resolve_index_expr(7, EmitContext(builder=Block(), symbols={}, types={})) == 7
+    with pytest.raises(emit_core._LoweringError, match="Unsupported index expression"):
+        emit_core._resolve_index_expr(object(), EmitContext(builder=Block(), symbols={}, types={}))
+
+    assert emit_core._infer_broadcast_shape(
+        [IntAttr(2)],
+        [IntAttr(3), IntAttr(2)],
+        None,
+    ) == [IntAttr(3), IntAttr(2)]
+    assert emit_core._infer_broadcast_shape(
+        [StringAttr("?"), IntAttr(2)],
+        [StringAttr("?"), IntAttr(2)],
+        None,
+    ) == [StringAttr("?"), IntAttr(2)]
+
+    unknown_tensor = TensorAST(name="missing", memory=Memory([2], NumericType.Float32), location=None)
+    with pytest.raises(emit_core._LoweringError, match="Unknown input reference"):
+        emit_core._infer_expr_type(unknown_tensor, {})
+
+    softmax_block = Block(arg_types=[i32])
+    softmax_ctx = EmitContext(builder=softmax_block, symbols={"x": softmax_block.args[0]}, types={})
+    softmax_expr = NnSoftmaxAST(value=ScalarArgAST("x", int, location=None), axis=0, location=None)
+    softmax_ctx._set_cache(emit_core._expr_key(softmax_expr.value), softmax_block.args[0])
+    softmax_ctx.types[emit_core._expr_key(softmax_expr)] = _memory_type([2], element_type=f32)
+    with pytest.raises(emit_core._LoweringError, match="softmax input must be nn.memory"):
+        emit_core._lower_expr(softmax_expr, softmax_ctx)
+
+    arch_ctx = EmitContext(builder=Block(), symbols={}, types={})
+    with pytest.raises(emit_core._LoweringError, match="get_dynamic_memory space must be on-chip MemorySpace"):
+        emit_core._lower_expr(ArchGetDynamicMemoryAST(space=MemorySpace.GM, location=None), arch_ctx)
+
+    py_ctx = EmitContext(builder=Block(), symbols={}, types={}, config={emit_core._MLIR_GEN_CALLEE_REGISTRY_CONFIG_KEY: []})
+    py_expr = PythonCalleeCallAST(callee="callee", args=[ConstAST(1)], location=None)
+    py_ctx.types[emit_core._expr_key(py_expr)] = i32
+    with pytest.raises(emit_core._LoweringError, match="Python callee registry must be dict"):
+        emit_core._lower_expr(py_expr, py_ctx)
+
+    missing_registry_ctx = EmitContext(builder=Block(), symbols={}, types={}, config={emit_core._MLIR_GEN_CALLEE_REGISTRY_CONFIG_KEY: {}})
+    missing_registry_ctx.types[emit_core._expr_key(py_expr)] = i32
+    with pytest.raises(emit_core._LoweringError, match="Python callee is missing from registry"):
+        emit_core._lower_expr(py_expr, missing_registry_ctx)
+
     product_block, product_ctx, _ = _symbol_ctx("M", "M")
     product_ctx.symbols["N"] = _symbol_ctx("N", "N")[2]
     product = emit_core._resolve_index_symbol_product("M*N", product_ctx, None)
@@ -689,7 +793,9 @@ def test_supported_statements_and_simple_helpers() -> None:
     with pytest.raises(emit_core._LoweringError, match="Operand must be nn.memory"):
         bad_block = Block(arg_types=[i32])
         emit_core._expect_memory_value(bad_block.args[0], None)
-    assert emit_core._expr_key(ConstAST(1)) != emit_core._expr_key(ConstAST(2))
+    first_const = ConstAST(1)
+    second_const = ConstAST(2)
+    assert emit_core._expr_key(first_const) != emit_core._expr_key(second_const)
 
 
 # CORE-010
@@ -792,6 +898,150 @@ def test_symbol_index_and_layout_helper_surfaces() -> None:
     assert all(isinstance(value.owner, emit_core.SymbolGetDimOp) for value in (batch_dim, out_h_dim, out_w_dim))
 
     assert emit_core._memory_space_from_ast(None, NnMemorySpaceAttr.from_name("global")) == NnMemorySpaceAttr.from_name("global")
+
+
+# CORE-S7-006
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 补齐 core helper 在符号表达式、barrier 和 stride 校验上的剩余边角。
+# 测试目的: 锁定 `_eval_symbolic_dim_node`、`_build_arch_barrier_visibility_attr`、`_build_stride_attrs` 和 `_conv_out_dim_value` 的少量漏测分支。
+# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_core.py -k test_emit_core_private_s7_helper_topoff_edges
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/mlir_gen/emit/test_core.py
+def test_emit_core_private_s7_helper_topoff_edges(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_eval_symbolic_dim_node = emit_core._eval_symbolic_dim_node
+
+    def _patched_eval_symbolic_dim_node(node: object, location: SourceLocation | None) -> object:
+        if isinstance(node, py_ast.Name) and node.id == "bad":
+            return object()
+        return original_eval_symbolic_dim_node(node, location)
+
+    monkeypatch.setattr(emit_core, "_eval_symbolic_dim_node", _patched_eval_symbolic_dim_node)
+    with pytest.raises(emit_core._LoweringError, match="Unsupported symbolic dim expression"):
+        original_eval_symbolic_dim_node(py_ast.parse("-bad", mode="eval").body, None)
+
+    with pytest.raises(emit_core._LoweringError, match="barrier visibility must be non-empty BarrierVisibility list"):
+        emit_core._build_arch_barrier_visibility_attr([object()], None)
+
+    two_constant = arith.ConstantOp.from_int_and_width(2, 32)
+    monkeypatch.setattr(emit_core, "_build_index_attrs", lambda *_args, **_kwargs: [two_constant.result])
+    with pytest.raises(emit_core._LoweringError, match="Only unit stride is supported"):
+        emit_core._build_stride_attrs([ConstAST(2)], 1, EmitContext(builder=Block(), symbols={}, types={}))
+
+    monkeypatch.setattr(emit_core.SymbolDim, "get_value", lambda self: 0)
+    with pytest.raises(VerifyException, match="output height must be positive"):
+        emit_core._conv_out_dim_value(
+            StringAttr("H"),
+            axis_name="height",
+            kernel=1,
+            stride=1,
+            dilation=1,
+            pad_before=0,
+            pad_after=0,
+            location=None,
+        )
+
+    loop_var = VarAST("loop")
+    assert emit_core._infer_expr_type(loop_var, {emit_core._expr_key(loop_var): i32}) == i32
+
+
+# CORE-S7-007
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 补齐 core lowering 在 mixed binary、conv、img2col、dynamic memory 与 store 上的剩余回退分支。
+# 测试目的: 锁定 emit 阶段少量只能通过 monkeypatch 进入的异常路径，确保诊断文案稳定。
+# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_core.py -k test_emit_core_private_s7_lowering_topoff_edges
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/mlir_gen/emit/test_core.py
+def test_emit_core_private_s7_lowering_topoff_edges(monkeypatch: pytest.MonkeyPatch) -> None:
+    tensor = TensorAST(name="x", memory=Memory([2], NumericType.Float32), location=None)
+    tensor_type = _memory_type([2], stride=[1], element_type=f32)
+    mixed_block = Block(arg_types=[tensor_type])
+    mixed_ctx = EmitContext(
+        builder=mixed_block,
+        symbols={"x": mixed_block.args[0]},
+        types={emit_core._expr_key(tensor): tensor_type},
+    )
+    mixed_ctx._set_cache(emit_core._expr_key(tensor), mixed_block.args[0])
+    mixed_expr = BinaryExprAST(op="pow", lhs=tensor, rhs=ConstAST(2), location=None)
+    mixed_ctx.types[emit_core._expr_key(mixed_expr)] = tensor_type
+    mixed_rhs = emit_core._lower_expr(ConstAST(2), mixed_ctx)
+    with pytest.raises(emit_core._LoweringError, match="Unsupported binary op: pow"):
+        emit_core._lower_mixed_binary_expr(mixed_expr, mixed_block.args[0], mixed_rhs, mixed_ctx)
+
+    value = TensorAST(name="value", memory=Memory([1, 1, 4, 4], NumericType.Float32), location=None)
+    weight = TensorAST(name="weight", memory=Memory([1, 1, 3, 3], NumericType.Float32), location=None)
+    value_type = _memory_type([1, 1, 4, 4], stride=[16, 16, 4, 1], element_type=f32)
+    weight_type = _memory_type([1, 1, 3, "KW"], stride=[3, 3, 1, 1], element_type=f32)
+    conv_expr = ConvAST(value=value, weight=weight, kwargs={}, location=None)
+    conv_result_type = _memory_type([1, 1, 2, 2], stride=[4, 4, 2, 1], element_type=f32)
+    conv_block = Block(arg_types=[value_type, weight_type])
+    conv_ctx = EmitContext(
+        builder=conv_block,
+        symbols={"value": conv_block.args[0], "weight": conv_block.args[1]},
+        types={
+            emit_core._expr_key(value): value_type,
+            emit_core._expr_key(weight): weight_type,
+            emit_core._expr_key(conv_expr): conv_result_type,
+        },
+    )
+    conv_ctx._set_cache(emit_core._expr_key(value), conv_block.args[0])
+    conv_ctx._set_cache(emit_core._expr_key(weight), conv_block.args[1])
+    kw_attr = weight_type.shape.data[3]
+    original_shape_attr_to_symbol_dim = emit_core._shape_attr_to_symbol_dim
+    monkeypatch.setattr(
+        emit_core,
+        "_shape_attr_to_symbol_dim",
+        lambda attr, location: None if attr == kw_attr else original_shape_attr_to_symbol_dim(attr, location),
+    )
+    with pytest.raises(emit_core._LoweringError, match="conv kh/kw must be int or symbol"):
+        emit_core._lower_expr(conv_expr, conv_ctx)
+
+    img2col_expr = Img2ColAST(kind="img2colX", args=[tensor], kwargs={}, location=None)
+    img2col_block = Block(arg_types=[tensor_type])
+    img2col_ctx = EmitContext(
+        builder=img2col_block,
+        symbols={"x": img2col_block.args[0]},
+        types={emit_core._expr_key(tensor): tensor_type, emit_core._expr_key(img2col_expr): tensor_type},
+    )
+    img2col_ctx._set_cache(emit_core._expr_key(tensor), img2col_block.args[0])
+    monkeypatch.setattr(emit_core, "_parse_img2col_helper", lambda _expr: (tensor, {}))
+    with pytest.raises(emit_core._LoweringError, match="Unsupported img2col helper"):
+        emit_core._lower_expr(img2col_expr, img2col_ctx)
+
+    monkeypatch.setattr(emit_core, "_build_dynamic_memory_type", lambda *_args, **_kwargs: tensor_type)
+    with pytest.raises(emit_core._LoweringError, match="get_dynamic_memory space must be on-chip MemorySpace"):
+        emit_core._lower_expr(
+            ArchGetDynamicMemoryAST(space=MemorySpace.GM, location=None),
+            EmitContext(builder=Block(), symbols={}, types={}),
+        )
+
+    source = TensorAST(name="source", memory=Memory([2], NumericType.Float32), location=None)
+    target = TensorAST(name="target", memory=Memory([2, 2], NumericType.Float32), location=None)
+    source_type = _memory_type([2], stride=[1], element_type=f32)
+    target_type = _memory_type([2, 2], stride=[2, 1], element_type=f32)
+    store_expr = StoreAST(
+        tensor=target,
+        value=source,
+        offset=[ConstAST(0), ConstAST(0)],
+        sizes=None,
+        stride=None,
+        kind="store",
+        location=None,
+    )
+    store_block = Block(arg_types=[target_type, source_type])
+    store_ctx = EmitContext(
+        builder=store_block,
+        symbols={"target": store_block.args[0], "source": store_block.args[1]},
+        types={emit_core._expr_key(target): target_type, emit_core._expr_key(source): source_type},
+    )
+    store_ctx._set_cache(emit_core._expr_key(target), store_block.args[0])
+    store_ctx._set_cache(emit_core._expr_key(source), store_block.args[1])
+    monkeypatch.setattr(emit_core._KG_OPERATION_DMA, "store", lambda *_args, **_kwargs: None)
+    with pytest.raises(emit_core._LoweringError, match="Store source rank mismatch"):
+        emit_core.emit_mlir(store_expr, store_ctx)
     assert emit_core._memory_space_from_ast(MemorySpace.SM, NnMemorySpaceAttr.from_name("global")) == NnMemorySpaceAttr.from_name("shared")
     assert emit_core._dims_equal(IntAttr(2), IntAttr(2))
     assert not emit_core._dims_equal(IntAttr(2), IntAttr(3))
@@ -2063,3 +2313,244 @@ def test_remaining_successful_emit_branches(monkeypatch: pytest.MonkeyPatch) -> 
         assert matmul_result is not None
         assert any(isinstance(op, emit_core.DmaCastOp) for op in matmul_ctx.builder.ops)
         assert any(isinstance(op, emit_core.NnMatmulOp) for op in matmul_ctx.builder.ops)
+
+
+# CORE-022
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 补齐 core helper 与表达式发射剩余边界。
+# 测试目的: 覆盖当前全量统计里仍缺失的符号维、helper 参数、conv/img2col/fc/store 诊断分支。
+# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_core.py -k test_emit_core_private_s7_remaining_branch_edges
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/mlir_gen/emit/test_core.py
+def test_emit_core_private_s7_remaining_branch_edges(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert isinstance(emit_core._eval_symbolic_dim_node(py_ast.parse("2 / N", mode="eval").body, None), SymbolDim)
+    with pytest.raises(emit_core._LoweringError, match="Unsupported symbolic dim expression"):
+        emit_core._eval_symbolic_dim_node(py_ast.parse("N % 2", mode="eval").body, None)
+    with pytest.raises(emit_core._LoweringError, match="Unsupported symbolic dim expression"):
+        emit_core._eval_symbolic_dim_node(py_ast.List(elts=[], ctx=py_ast.Load()), None)
+
+    original_eval_symbolic_dim_node = emit_core._eval_symbolic_dim_node
+    monkeypatch.setattr(emit_core, "_eval_symbolic_dim_node", lambda expr, location: object())
+    with pytest.raises(emit_core._LoweringError, match="Unsupported symbolic dim expression"):
+        emit_core._eval_symbolic_dim_expr("N", None)
+    monkeypatch.setattr(emit_core, "_eval_symbolic_dim_node", original_eval_symbolic_dim_node)
+
+    launch_tensor = TensorAST("mem", Memory([1], NumericType.Float32), location=None)
+    launch_tensor_type = _memory_type([1], element_type=f32)
+    launch_block = Block(
+        arg_types=[
+            emit_core.SymbolValueType.from_expr("-1"),
+            emit_core.SymbolValueType.from_expr("0"),
+            launch_tensor_type,
+        ]
+    )
+    launch_ctx = EmitContext(
+        builder=launch_block,
+        symbols={"neg": launch_block.args[0], "zero": launch_block.args[1], "mem": launch_block.args[2]},
+        types={},
+    )
+    negative_extent = ScalarArgAST("neg", int, is_symbolic=True, location=None)
+    zero_extent = ScalarArgAST("zero", int, is_symbolic=True, location=None)
+    launch_ctx._set_cache(emit_core._expr_key(negative_extent), launch_block.args[0])
+    launch_ctx._set_cache(emit_core._expr_key(zero_extent), launch_block.args[1])
+    launch_ctx._set_cache(emit_core._expr_key(launch_tensor), launch_block.args[2])
+    with pytest.raises(emit_core._LoweringError, match="launch_kernel block must be >= 0"):
+        emit_core._lower_launch_extent_symbol(negative_extent, "block", launch_ctx, None, allow_zero=True)
+    with pytest.raises(emit_core._LoweringError, match="launch_kernel block must be > 0"):
+        emit_core._lower_launch_extent_symbol(zero_extent, "block", launch_ctx, None)
+    with pytest.raises(emit_core._LoweringError, match="launch_kernel block must be !symbol.int"):
+        emit_core._lower_launch_extent_symbol(launch_tensor, "block", launch_ctx, None)
+
+    resolve_ctx = EmitContext(builder=Block(), symbols={}, types={})
+    assert emit_core._resolve_index_expr(
+        BinaryExprAST(op="mul", lhs=ConstAST("N"), rhs=ConstAST(2), location=None),
+        resolve_ctx,
+    ) == "2*N"
+
+    loop_bound = emit_core._lower_loop_bound(ConstAST(1.5), EmitContext(builder=Block(), symbols={}, types={}))
+    assert isinstance(loop_bound.owner, arith.ConstantOp)
+
+    helper_block = Block(arg_types=[i32, f32])
+    helper_ctx = EmitContext(builder=helper_block, symbols={"i": helper_block.args[0], "f": helper_block.args[1]}, types={})
+    assert emit_core._lower_helper_index_operand(VarAST("i"), helper_ctx, location=None) is helper_block.args[0]
+    with pytest.raises(emit_core._LoweringError, match="Index operand must be integer or index"):
+        emit_core._lower_helper_index_operand(VarAST("f"), helper_ctx, location=None)
+
+    assert emit_core._resolve_binary_element_type(i32, Float16Type(), None) == Float16Type()
+    with pytest.raises(emit_core._LoweringError, match="Binary op operands must have the same element_type"):
+        emit_core._resolve_binary_element_type(i32, IntAttr(1), None)
+
+    with pytest.raises(emit_core._LoweringError, match="matmul element_type must match"):
+        emit_core._infer_matmul_memory_type(
+            _memory_type([2, 3], element_type=i32, space=MemorySpace.GM),
+            _memory_type([3, 4], element_type=f32, space=MemorySpace.GM),
+            None,
+            None,
+        )
+
+    with pytest.raises(emit_core._LoweringError, match="nn.memory stride contains unknown dimension"):
+        emit_core._nn_memory_type_to_memory(_memory_type([2], stride=["?"], element_type=f32))
+    valid_memory_type = _memory_type([1], stride=[1], element_type=f32)
+
+    class _FakeUnsupportedSpace:
+        def __init__(self) -> None:
+            self.space = StringAttr("weird")
+
+    class _FakeUnsupportedMemoryType:
+        def __init__(self, base: NnMemoryType) -> None:
+            self.shape = base.shape
+            self.stride = base.stride
+            self.element_type = base.element_type
+            self.space = _FakeUnsupportedSpace()
+
+    unsupported_space_type = _FakeUnsupportedMemoryType(valid_memory_type)
+    with pytest.raises(emit_core._LoweringError, match="Unsupported nn.memory space"):
+        emit_core._nn_memory_type_to_memory(unsupported_space_type)
+
+    helper_value = TensorAST("value", Memory([4, 4], NumericType.Float32), location=None)
+    with pytest.raises(emit_core._LoweringError, match="Unsupported img2col helper"):
+        emit_core._parse_img2col_helper(Img2ColAST(kind="img2colX", args=[helper_value], kwargs={}, location=None))
+    with pytest.raises(emit_core._LoweringError, match="img2col1d arity mismatch"):
+        emit_core._parse_img2col_helper(
+            Img2ColAST(
+                kind="img2col1d",
+                args=[helper_value, ConstAST(3), ConstAST(1), ConstAST(1), ConstAST(0), ConstAST(0), ConstAST(9)],
+                kwargs={},
+                location=None,
+            )
+        )
+    with pytest.raises(emit_core._LoweringError, match="img2col1d got multiple values for argument 'kw'"):
+        emit_core._parse_img2col_helper(
+            Img2ColAST(kind="img2col1d", args=[helper_value, ConstAST(3)], kwargs={"kw": ConstAST(5)}, location=None)
+        )
+    with pytest.raises(emit_core._LoweringError, match="img2col1d missing required argument 'kw'"):
+        emit_core._parse_img2col_helper(
+            Img2ColAST(
+                kind="img2col1d",
+                args=[helper_value],
+                kwargs={"sw": ConstAST(1), "dw": ConstAST(1), "pl": ConstAST(0), "pr": ConstAST(0)},
+                location=None,
+            )
+        )
+
+    with pytest.raises(VerifyException, match="kw must be positive"):
+        emit_core._static_kernel_dim(StringAttr("-1"), "kw", None)
+    with pytest.raises(emit_core._LoweringError, match="conv dim must be int or symbol"):
+        emit_core._conv_out_dim_value(
+            FloatAttr(1.0, f32),
+            axis_name="height",
+            kernel=1,
+            stride=1,
+            dilation=1,
+            pad_before=0,
+            pad_after=0,
+            location=None,
+        )
+    with pytest.raises(VerifyException, match="output height must be positive"):
+        emit_core._conv_out_dim_value(
+            IntAttr(1),
+            axis_name="height",
+            kernel=3,
+            stride=1,
+            dilation=1,
+            pad_before=0,
+            pad_after=0,
+            location=None,
+        )
+    with pytest.raises(emit_core._LoweringError, match="img2col dim must be int or symbol"):
+        emit_core._img2col_out_dim_value(FloatAttr(1.0, f32), 3, 1, 1, 0, 0, None)
+    with pytest.raises(emit_core._LoweringError, match="Unsupported img2col helper"):
+        emit_core._infer_img2col_output_shape_attrs(
+            Img2ColAST(kind="img2colX", args=[helper_value], kwargs={}, location=None),
+            _memory_type([2, 3], element_type=f32),
+            {},
+        )
+
+    assert emit_core._parse_reduce_axis_expr(1, None) == [1]
+    with pytest.raises(emit_core._LoweringError, match="reduce axis must be int"):
+        emit_core._parse_reduce_axis_expr([ConstAST(1), "bad"], None)
+    with pytest.raises(emit_core._LoweringError, match="reduce axis must be int or list of int"):
+        emit_core._parse_reduce_axis_expr("bad", None)
+
+    with pytest.raises(emit_core._LoweringError, match="transpose perm entries must be int"):
+        emit_core._parse_transpose_perm_expr(ConstAST("bad"), None)
+    assert emit_core._parse_transpose_perm_expr(1, None) == [1]
+    with pytest.raises(emit_core._LoweringError, match="transpose perm entries must be int"):
+        emit_core._parse_transpose_perm_expr([ConstAST(1), "bad"], None)
+    with pytest.raises(emit_core._LoweringError, match="transpose perm must be list of int"):
+        emit_core._parse_transpose_perm_expr("bad", None)
+
+    fc_value = TensorAST("fc_value", Memory([2], NumericType.Float32), location=None)
+    fc_weight = TensorAST("fc_weight", Memory([2, 2], NumericType.Float32), location=None)
+    with pytest.raises(emit_core._LoweringError, match="fc operands must be rank-2 nn.memory"):
+        emit_core._infer_expr_type(
+            FCAST(value=fc_value, weight=fc_weight, location=None),
+            {
+                emit_core._expr_key(fc_value): _memory_type([2], element_type=f32),
+                emit_core._expr_key(fc_weight): _memory_type([2, 2], element_type=f32),
+            },
+        )
+
+    known_tensor = TensorAST("known", Memory([2], NumericType.Float32), location=None)
+    known_tensor_type = _memory_type([2], element_type=f32)
+    assert emit_core._infer_expr_type(known_tensor, {emit_core._expr_key(known_tensor): known_tensor_type}) == known_tensor_type
+
+    cast_block = Block(arg_types=[i32])
+    cast_ctx = EmitContext(builder=cast_block, symbols={"i": cast_block.args[0]}, types={})
+    with pytest.raises(emit_core._LoweringError, match="nn scalar element_type must be integer/float or symbol.int"):
+        emit_core._cast_nn_scalar_operand(cast_block.args[0], StringAttr("bad"), cast_ctx, None)
+
+    with pytest.raises(emit_core._LoweringError, match="Unknown input reference"):
+        emit_core._lower_expr(TensorAST("missing", Memory([1], NumericType.Float32), location=None), EmitContext(builder=Block(), symbols={}, types={}))
+
+    alloc_expr = DmaAllocAST(shape=2, dtype=NumericType.Float32, stride=None, location=None)
+    alloc_type = _memory_type([2], element_type=f32)
+    alloc_ctx = EmitContext(builder=Block(), symbols={}, types={emit_core._expr_key(alloc_expr): alloc_type})
+    alloc_result = emit_core._lower_expr(alloc_expr, alloc_ctx)
+    assert alloc_result.type == alloc_type
+
+    fc_lower_value = TensorAST("fc_lower_value", Memory([2], NumericType.Float32), location=None)
+    fc_lower_weight = TensorAST("fc_lower_weight", Memory([2, 2], NumericType.Float32), location=None)
+    fc_lower_block = Block(arg_types=[_memory_type([2], element_type=f32), _memory_type([2, 2], element_type=f32)])
+    fc_lower_ctx = EmitContext(
+        builder=fc_lower_block,
+        symbols={"fc_lower_value": fc_lower_block.args[0], "fc_lower_weight": fc_lower_block.args[1]},
+        types={
+            emit_core._expr_key(fc_lower_value): fc_lower_block.args[0].type,
+            emit_core._expr_key(fc_lower_weight): fc_lower_block.args[1].type,
+        },
+    )
+    fc_lower_ctx._set_cache(emit_core._expr_key(fc_lower_value), fc_lower_block.args[0])
+    fc_lower_ctx._set_cache(emit_core._expr_key(fc_lower_weight), fc_lower_block.args[1])
+    with pytest.raises(emit_core._LoweringError, match="fc operands must be rank-2 nn.memory"):
+        emit_core._lower_expr(FCAST(value=fc_lower_value, weight=fc_lower_weight, location=None), fc_lower_ctx)
+
+    with pytest.raises(emit_core._LoweringError, match="free does not produce a value"):
+        emit_core._lower_expr(DmaFreeAST(value=ConstAST(1), location=None), EmitContext(builder=Block(), symbols={}, types={}))
+
+    store_target = TensorAST("target", Memory([2, 2], NumericType.Float32), location=None)
+    store_value = TensorAST("value", Memory([2], NumericType.Float32), location=None)
+    store_block = Block(arg_types=[_memory_type([2, 2], element_type=f32), _memory_type([2], element_type=f32)])
+    store_ctx = EmitContext(
+        builder=store_block,
+        symbols={"target": store_block.args[0], "value": store_block.args[1]},
+        types={
+            emit_core._expr_key(store_target): store_block.args[0].type,
+            emit_core._expr_key(store_value): store_block.args[1].type,
+        },
+    )
+    store_ctx._set_cache(emit_core._expr_key(store_target), store_block.args[0])
+    store_ctx._set_cache(emit_core._expr_key(store_value), store_block.args[1])
+    with pytest.raises(ValueError, match="Index rank mismatch"):
+        emit_mlir(
+            StoreAST(
+                tensor=store_target,
+                offset=[ConstAST(0), ConstAST(0)],
+                stride=None,
+                value=store_value,
+                location=None,
+            ),
+            store_ctx,
+        )

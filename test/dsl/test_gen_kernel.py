@@ -1,7 +1,7 @@
 """gen_kernel tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 func.func 到目标函数源码的组装行为。
@@ -44,6 +44,7 @@ from xdsl.dialects.builtin import (
     ModuleOp,
     StringAttr,
     SymbolRefAttr,
+    UnrealizedConversionCastOp,
     f16,
     f32,
     f64,
@@ -68,11 +69,12 @@ from kernel_gen.dialect.arch import (
     ArchScopeAttr,
     ArchVisibilityAttr,
 )
-from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaSliceOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaSliceOp, DmaViewOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
+    SymbolConstOp,
     SymbolDimType,
     SymbolForOp,
     SymbolGetDimOp,
@@ -82,6 +84,7 @@ from kernel_gen.dialect.symbol import (
 from kernel_gen.dialect.tuner import TunerCostOp, TunerParamOp
 from kernel_gen.dsl.gen_kernel import EmitCContext, EmitCError, emit_c, emit_c_op, emit_c_value, GenKernelError, gen_kernel
 from kernel_gen.dsl.mlir_gen import build_func_op
+from kernel_gen.execute_engine import compiler as compiler_module
 from kernel_gen.operation.dma import alloc, deslice, slice
 from kernel_gen.operation.nn import matmul
 from kernel_gen.operation.scf import loop
@@ -102,6 +105,7 @@ gen_kernel_entry_module = importlib.util.module_from_spec(gen_kernel_entry_spec)
 sys.modules[gen_kernel_entry_spec.name] = gen_kernel_entry_module
 gen_kernel_entry_spec.loader.exec_module(gen_kernel_entry_module)
 gen_kernel_wrapper_module = importlib.import_module("kernel_gen.dsl.gen_kernel.gen_kernel")
+legacy_module = importlib.import_module("kernel_gen.dsl.gen_kernel._legacy")
 emit_context_module = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_context")
 tile_analysis_helpers = importlib.import_module("test.pass.test_lowering_tile_analysis")
 tile_analysis_module = importlib.import_module("kernel_gen.tile.analysis")
@@ -153,6 +157,43 @@ def _ctx() -> EmitCContext:
 
 def _npu_ctx() -> EmitCContext:
     return EmitCContext(target="npu_demo")
+
+
+def test_legacy_loader_reuses_existing_emit_c_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    legacy_module.load_legacy_emit_c_module.cache_clear()
+    sentinel = object()
+    monkeypatch.setitem(sys.modules, legacy_module._LEGACY_EMIT_C_MODULE_NAME, sentinel)
+    assert legacy_module.load_legacy_emit_c_module() is sentinel
+    legacy_module.load_legacy_emit_c_module.cache_clear()
+    sys.modules.pop(legacy_module._LEGACY_EMIT_C_MODULE_NAME, None)
+
+
+def test_legacy_loader_rejects_missing_specs(monkeypatch: pytest.MonkeyPatch) -> None:
+    legacy_module.load_legacy_emit_c_module.cache_clear()
+    legacy_module.load_legacy_gen_kernel_module.cache_clear()
+    sys.modules.pop(legacy_module._LEGACY_EMIT_C_MODULE_NAME, None)
+    sys.modules.pop(legacy_module._LEGACY_GEN_KERNEL_MODULE_NAME, None)
+    monkeypatch.setattr(legacy_module, "spec_from_file_location", lambda *args, **kwargs: None)
+
+    with pytest.raises(ImportError, match="cannot load legacy emit_c implementation"):
+        legacy_module.load_legacy_emit_c_module()
+
+    legacy_module.load_legacy_emit_c_module.cache_clear()
+    legacy_module.load_legacy_gen_kernel_module.cache_clear()
+    monkeypatch.setattr(legacy_module, "load_legacy_emit_c_module", lambda: object())
+    with pytest.raises(ImportError, match="cannot load legacy gen_kernel implementation"):
+        legacy_module.load_legacy_gen_kernel_module()
+
+
+def test_gen_kernel_wrapper_requires_emit_c_binding() -> None:
+    ctx = _ctx()
+    original_emit_c = gen_kernel_wrapper_module.emit_c
+    gen_kernel_wrapper_module.emit_c = None
+    try:
+        with pytest.raises(RuntimeError, match="gen_kernel wrapper emit_c binding is missing"):
+            gen_kernel_wrapper_module.gen_kernel(object(), ctx)
+    finally:
+        gen_kernel_wrapper_module.emit_c = original_emit_c
 
 
 def _parse_npu_demo_launch_module(text: str) -> ModuleOp:
@@ -605,6 +646,7 @@ def _compile_and_run(source: str) -> None:
 
     功能说明:
     - 使用 `g++ -std=c++17` 编译临时源码，并执行生成的可执行文件。
+    - 编译步骤复用 `kernel_gen.execute_engine.compiler._run_compiler_command(...)`，保持与执行引擎一致。
     - 用于锁定 `conv2d_img2col2d_tiled(...)` 的函数级骨架不仅存在，而且可编译运行。
 
     使用示例:
@@ -621,7 +663,7 @@ def _compile_and_run(source: str) -> None:
         binary_path = Path(tmpdir) / "gen_kernel_conv_test"
         source_path.write_text(source, encoding="utf-8")
 
-        compile_result = subprocess.run(
+        compile_result = compiler_module._run_compiler_command(
             [
                 "g++",
                 "-std=c++17",
@@ -630,10 +672,7 @@ def _compile_and_run(source: str) -> None:
                 str(source_path),
                 "-o",
                 str(binary_path),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
+            ]
         )
         if compile_result.returncode != 0:
             raise AssertionError(
@@ -660,11 +699,12 @@ def _compile_only(source: str) -> None:
     """仅编译 `gen_kernel` 生成的 C++ 片段。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 使用 `g++ -std=c++17 -c` 编译临时源码，验证目标 include/签名可通过编译。
-    - 用于 `target="npu_demo"` 的“只编译”门禁验证，不执行链接与运行。
+    - 编译步骤复用 `kernel_gen.execute_engine.compiler._run_compiler_command(...)`，保持与执行引擎一致。
+    - 用于 `target="npu_demo"` 的“只编译”验证，不执行链接与运行。
 
     使用示例:
     - _compile_only('#include "include/npu_demo/npu_demo.h"\\nvoid demo_kernel(...) {}')
@@ -680,28 +720,25 @@ def _compile_only(source: str) -> None:
         object_path = Path(tmpdir) / "gen_kernel_npu_demo_test.o"
         source_path.write_text(source, encoding="utf-8")
 
-        compile_result = subprocess.run(
-                [
-                    "g++",
-                    "-std=c++17",
-                    # GCC 13 在 npu_demo 的 DMA 模板上会在树优化/CFG cleanup 阶段触发 ICE；
-                    # 这里关闭几组相关优化，保留“可编译”门禁本身，不影响源码语义检查。
-                    "-fno-tree-ccp",
-                    "-fno-tree-dce",
-                    "-fno-tree-forwprop",
-                    "-fno-tree-scev-cprop",
-                    "-fno-tree-vrp",
-                    "-fno-tree-ter",
-                    "-I",
-                    str(REPO_ROOT),
+        compile_result = compiler_module._run_compiler_command(
+            [
+                "g++",
+                "-std=c++17",
+                # GCC 13 在 npu_demo 的 DMA 模板上会在树优化/CFG cleanup 阶段触发 ICE；
+                # 这里关闭几组相关优化，保留“可编译”校验本身，不影响源码语义检查。
+                "-fno-tree-ccp",
+                "-fno-tree-dce",
+                "-fno-tree-forwprop",
+                "-fno-tree-scev-cprop",
+                "-fno-tree-vrp",
+                "-fno-tree-ter",
+                "-I",
+                str(REPO_ROOT),
                 "-c",
                 str(source_path),
                 "-o",
                 str(object_path),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
+            ]
         )
         if compile_result.returncode != 0:
             raise AssertionError(
@@ -828,20 +865,10 @@ int main() {{
             str(binary_path),
         ]
 
-        compile_result = subprocess.run(
-            compile_cmd,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        compile_result = compiler_module._run_compiler_command(compile_cmd)
         if compile_result.returncode != 0:
             fallback_cmd = [*compile_cmd, "-latomic"]
-            fallback_result = subprocess.run(
-                fallback_cmd,
-                check=False,
-                capture_output=True,
-                text=True,
-            )
+            fallback_result = compiler_module._run_compiler_command(fallback_cmd)
             if fallback_result.returncode != 0:
                 raise AssertionError(
                     "g++ compile failed:\n"
@@ -868,6 +895,59 @@ int main() {{
                 f"stdout:\n{run_result.stdout}\n"
                 f"stderr:\n{run_result.stderr}"
             )
+
+
+# GK-S7-004
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 直接锁定 test_gen_kernel 本地编译 helper 继续委托 execute_engine 的共享编译入口。
+# 测试目的: 防止 `_compile_only` / `_compile_and_run` 回退到文件内自维护编译流程，只靠人工读代码发现分叉。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_local_compile_helpers_delegate_shared_compiler_runner
+# 对应功能实现文件路径: test/dsl/test_gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_local_compile_helpers_delegate_shared_compiler_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compile_calls: list[tuple[str, ...]] = []
+    runtime_calls: list[tuple[str, ...]] = []
+
+    def _fake_run_compiler_command(command: object) -> subprocess.CompletedProcess[str]:
+        assert isinstance(command, list)
+        compile_calls.append(tuple(str(part) for part in command))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    def _fake_run(command: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert isinstance(command, list)
+        runtime_calls.append(tuple(str(part) for part in command))
+        assert kwargs["check"] is False
+        assert kwargs["capture_output"] is True
+        assert kwargs["text"] is True
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(compiler_module, "_run_compiler_command", _fake_run_compiler_command)
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    _compile_only("int compiled_only() { return 0; }\n")
+    _compile_and_run("#include <cstdint>\nint main() { return 0; }\n")
+
+    assert len(compile_calls) == 2
+    compile_only_cmd, compile_and_run_cmd = compile_calls
+
+    assert compile_only_cmd[:2] == ("g++", "-std=c++17")
+    assert "-c" in compile_only_cmd
+    assert compile_only_cmd[compile_only_cmd.index("-I") + 1] == str(REPO_ROOT)
+    assert compile_only_cmd[compile_only_cmd.index("-c") + 1].endswith("gen_kernel_npu_demo_test.cpp")
+    assert compile_only_cmd[compile_only_cmd.index("-o") + 1].endswith("gen_kernel_npu_demo_test.o")
+
+    assert compile_and_run_cmd[:2] == ("g++", "-std=c++17")
+    assert "-c" not in compile_and_run_cmd
+    assert compile_and_run_cmd[compile_and_run_cmd.index("-I") + 1] == str(REPO_ROOT)
+    assert compile_and_run_cmd[compile_and_run_cmd.index("-I") + 2].endswith("gen_kernel_conv_test.cpp")
+    assert compile_and_run_cmd[compile_and_run_cmd.index("-o") + 1].endswith("gen_kernel_conv_test")
+
+    assert len(runtime_calls) == 1
+    assert runtime_calls[0][0].endswith("gen_kernel_conv_test")
 
 
 # GK-001
@@ -1732,6 +1812,77 @@ class Test_buffer_results_to_out_params_gen_kernel:
 
         with pytest.raises(GenKernelError, match="legacy memory return ABI is not supported"):
             gen_kernel(func_op, _ctx())
+
+
+# GK-S7-001
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 覆盖 direct-return add body 内部路径中的 transparent cast 与 rewritten out 绑定。
+# 测试目的: 锁定 `_emit_cpu_direct_return_nn_add_body(...)` 在保留 `view + unrealized_conversion_cast` 时仍会生成稳定源码片段，不把 cast 单独落成语句。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_private_direct_return_body_binds_view_and_transparent_cast
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_private_direct_return_body_binds_view_and_transparent_cast() -> None:
+    mem = _make_memory_type([2, 2], [2, 1])
+    block = Block(arg_types=[mem, mem, mem])
+    c0 = arith.ConstantOp(IntegerAttr(0, i32))
+    c1 = arith.ConstantOp(IntegerAttr(1, i32))
+    c2 = arith.ConstantOp(IntegerAttr(2, i32))
+    symbol_const = arith.ConstantOp(IntegerAttr(7, i32))
+    symbol_cast = UnrealizedConversionCastOp(
+        operands=[symbol_const.result],
+        result_types=[SymbolValueType.from_expr("7")],
+    )
+    view = DmaViewOp(
+        block.args[1],
+        [c0.result, c0.result],
+        [c2.result, c2.result],
+        [c1.result, c1.result],
+        mem,
+    )
+    add = NnAddOp(block.args[1], block.args[2], mem, NnMemorySpaceAttr.from_name("global"))
+    block.add_ops([c0, c1, c2, symbol_const, symbol_cast, view, add, func.ReturnOp()])
+    func_op = _func("direct_return_body", [mem, mem, mem], [], block, ("out", "lhs", "rhs"))
+
+    emitter = gen_kernel_entry_module._KernelEmitter(_ctx())
+    emitter.ctx.bind_name(func_op.args[0], "out")
+    emitter.ctx.bind_name(func_op.args[1], "lhs")
+    emitter.ctx.bind_name(func_op.args[2], "rhs")
+    emitter.ctx.bind_name(add.result, "out")
+
+    body = emitter._emit_cpu_direct_return_nn_add_body(func_op)
+
+    assert "builtin.unrealized_conversion_cast" not in body
+    assert "Memory<MemorySpace::GM, int32_t> out(" in body
+    assert "cpu::add(lhs, rhs, " in body
+
+
+# GK-S7-002
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 覆盖 direct-return add body 内部路径中的 returned alloc 绑定分支。
+# 测试目的: 锁定 `_is_returned_output_alloc(...)` 命中时会先把 alloc 结果绑定成 `out`，随后再由旧 memory return ABI 报错。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_private_direct_return_body_hits_returned_alloc_branch_before_legacy_return_error
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_private_direct_return_body_hits_returned_alloc_branch_before_legacy_return_error() -> None:
+    mem = _make_memory_type([2, 2], [2, 1])
+    block = Block(arg_types=[mem])
+    dim0 = SymbolGetDimOp(block.args[0], 0)
+    dim1 = SymbolGetDimOp(block.args[0], 1)
+    alloc = DmaAllocOp([dim0.result, dim1.result], mem)
+    block.add_ops([dim0, dim1, alloc, func.ReturnOp(alloc.result)])
+    func_op = _func("returned_alloc_body", [mem], [mem], block, ("lhs",))
+
+    emitter = gen_kernel_entry_module._KernelEmitter(_ctx())
+    emitter.ctx.bind_name(func_op.args[0], "lhs")
+
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="legacy memory return ABI is not supported"):
+        emitter._emit_cpu_direct_return_nn_add_body(func_op)
+
+    assert emitter.ctx.lookup_name(alloc.result) == "out"
 
 
 # GK-017
@@ -2810,3 +2961,447 @@ def test_gen_kernel_private_helpers_contracts() -> None:
     assert gen_kernel_entry_module._type_to_c_for_target(mem_type, "npu_demo") == "Memory<GM, int32_t>"
     assert gen_kernel_entry_module._type_to_c_for_target(SymbolValueType.from_expr("N"), "npu_demo") == "S_INT"
     assert gen_kernel_entry_module._memory_rank(mem_type) == 2
+
+
+# GK-S7-001
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 覆盖 gen_kernel private helper 的错误边界与 direct-return/tile helper 余下分支。
+# 测试目的: 锁定 wrapper/helper 在异常输入、ctx 切换和 legacy bridge 残留场景下保持 fail-fast。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_private_helper_error_edges
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_private_helper_error_edges() -> None:
+    mem_type = _make_memory_type([8, 4], [4, 1])
+    plain_func = func.FuncOp(
+        "plain_args",
+        FunctionType.from_lists([mem_type], []),
+        Region(Block(arg_types=[mem_type])),
+    )
+    assert gen_kernel_entry_module._leading_rewritten_out_param_count(plain_func) == 0
+
+    bad_attr_func = func.FuncOp(
+        "bad_attrs",
+        FunctionType.from_lists([mem_type], []),
+        Region(Block(arg_types=[mem_type])),
+        arg_attrs=ArrayAttr([StringAttr("bad")]),
+    )
+    assert gen_kernel_entry_module._leading_rewritten_out_param_count(bad_attr_func) == 0
+
+    assert gen_kernel_entry_module._kernel_out_operand(UnsupportedOp()) is None
+    mixed_block = Block(arg_types=[i32, mem_type])
+    non_kernel_op = NnAddOp(mixed_block.args[0], mixed_block.args[1], mem_type, NnMemorySpaceAttr.from_name("global"))
+    assert gen_kernel_entry_module._kernel_out_operand(non_kernel_op) is None
+
+    bad_cast_block = Block(arg_types=[i32])
+    bad_cast = UnrealizedConversionCastOp(operands=[[bad_cast_block.args[0]]], result_types=[[i32, i32]])
+    bad_cast_block.add_op(bad_cast)
+    emitter = gen_kernel_entry_module._KernelEmitter(_ctx())
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="must have exactly one operand and one result"):
+        emitter._bind_transparent_unrealized_conversion_cast(bad_cast)
+
+    add_block = Block(arg_types=[mem_type, mem_type])
+    add_op = NnAddOp(add_block.args[0], add_block.args[1], mem_type, NnMemorySpaceAttr.from_name("global"))
+    return_op = func.ReturnOp(add_op.result)
+    add_block.add_ops([add_op, return_op])
+    cpu_emitter = gen_kernel_entry_module._KernelEmitter(_ctx())
+    npu_emitter = gen_kernel_entry_module._KernelEmitter(_npu_ctx())
+    assert cpu_emitter._is_direct_return_nn_add(return_op) is True
+    assert cpu_emitter._has_cpu_direct_return_nn_add(
+        _func("direct_add", [mem_type, mem_type], [mem_type], add_block, ("arg0", "arg1"))
+    ) is True
+    assert npu_emitter._is_direct_return_nn_add(return_op) is False
+
+    bad_signature_block = Block(arg_types=[mem_type])
+    bad_signature_func = _func("bad_signature", [mem_type], [mem_type], bad_signature_block, ("arg0",))
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="unsupported npu_demo body-level kernel signature"):
+        npu_emitter._get_npu_demo_body_level_kernel_types(bad_signature_func)
+
+    bad_ctx_block = Block(arg_types=[mem_type, mem_type])
+    bad_ctx_func = _func("bad_ctx", [mem_type, mem_type], [mem_type], bad_ctx_block, ("arg0", "arg1"))
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="requires leading ctx argument"):
+        npu_emitter._get_npu_demo_body_level_kernel_types(bad_ctx_func)
+
+
+# GK-S7-002
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 覆盖 gen_kernel module/helper 识别、mutable operand 判定与 legacy public attr 边界。
+# 测试目的: 锁定 npu_demo 单函数 module 子集、rewrite 后 out 结果绑定以及旧公开名缺失语义不回退。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_private_module_and_helper_edges
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_private_module_and_helper_edges() -> None:
+    mem_type = _make_memory_type([2, 2], [2, 1])
+    cpu_emitter = gen_kernel_entry_module._KernelEmitter(_ctx())
+    npu_emitter = gen_kernel_entry_module._KernelEmitter(_npu_ctx())
+
+    non_func_module = ModuleOp([UnsupportedOp()])
+    assert npu_emitter._get_npu_demo_plain_func(non_func_module) is None
+
+    helper_only_block = Block(arg_types=[])
+    helper_only_block.add_ops([FakeSymbolValueOp("0"), func.ReturnOp()])
+    helper_only_func = func.FuncOp("helper_only", FunctionType.from_lists([], []), Region(helper_only_block))
+    assert npu_emitter._get_npu_demo_plain_func(ModuleOp([helper_only_func])) is None
+
+    plain_block = Block(arg_types=[])
+    plain_const = arith.ConstantOp(IntegerAttr(0, i32))
+    plain_block.add_ops([plain_const, func.ReturnOp()])
+    plain_func = func.FuncOp("plain", FunctionType.from_lists([], []), Region(plain_block))
+    assert npu_emitter._get_npu_demo_plain_func(ModuleOp([plain_func])) is plain_func
+
+    assert npu_emitter._get_npu_demo_plain_func(_make_npu_demo_add_barrier_module()) is None
+
+    operand_block = Block(arg_types=[mem_type, mem_type, mem_type, mem_type])
+    kernel_op = KernelBinaryElewiseOp(
+        operand_block.args[0],
+        operand_block.args[1],
+        operand_block.args[2],
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("global"),
+    )
+    assert cpu_emitter._mutable_memory_operands(kernel_op) == (operand_block.args[0],)
+    assert cpu_emitter._mutable_memory_operands(DmaCopyOp(operand_block.args[0], operand_block.args[1])) == (
+        operand_block.args[0],
+    )
+    assert cpu_emitter._mutable_memory_operands(
+        DmaDesliceOp(operand_block.args[1], operand_block.args[0], [], [], [], mem_type)
+    ) == (operand_block.args[0],)
+    assert cpu_emitter._mutable_memory_operands(UnsupportedOp()) == ()
+
+    bind_block = Block(arg_types=[mem_type])
+    c0 = arith.ConstantOp(IntegerAttr(0, i32))
+    c1 = arith.ConstantOp(IntegerAttr(1, i32))
+    c2 = arith.ConstantOp(IntegerAttr(2, i32))
+    view_op = DmaViewOp(
+        bind_block.args[0],
+        [c0.result, c0.result],
+        [c2.result, c2.result],
+        [c1.result, c1.result],
+        mem_type,
+    )
+    bind_block.add_ops([c0, c1, c2, view_op, func.ReturnOp()])
+    bind_func = _func("bind_view", [mem_type], [], bind_block, ("out",))
+
+    cpu_emitter.ctx.bind_name(bind_func.args[0], "out")
+    cpu_emitter._bind_rewritten_out_result(bind_func, view_op)
+    assert cpu_emitter.ctx.lookup_name(view_op.result) == "out"
+
+    fresh_emitter = gen_kernel_entry_module._KernelEmitter(_ctx())
+    fresh_emitter._bind_rewritten_out_result(bind_func, view_op)
+    assert fresh_emitter.ctx.lookup_name(view_op.result) is None
+
+    with pytest.raises(AttributeError, match="gen_signature is no longer a public entry"):
+        gen_kernel_entry_module.__getattr__("gen_signature")
+    with pytest.raises(AttributeError, match=r"has no attribute 'missing_attr'"):
+        gen_kernel_entry_module.__getattr__("missing_attr")
+
+    mismatched_func = _func(
+        "mismatch",
+        [mem_type, mem_type],
+        [_make_memory_type([8, 4], [4, 1], element_type=f16)],
+        Block(arg_types=[mem_type, mem_type]),
+        ("ctx", "arg1"),
+    )
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="requires matching element types"):
+        npu_emitter._get_npu_demo_body_level_kernel_types(mismatched_func)
+
+    tile_func = _tile_elewise_func(tile_analysis_helpers._build_module())
+    tile_emitter = gen_kernel_entry_module._KernelEmitter(_ctx())
+    tile_body = tile_emitter._emit_default_function_body(tile_func)
+    assert 'tuner_param("' in tile_body
+
+    legacy_tile_block = Block(arg_types=[mem_type])
+    legacy_tile_block.add_ops([FakeSymbolValueOp("1"), func.ReturnOp()])
+    legacy_tile_func = _func("legacy_tile", [mem_type], [], legacy_tile_block, ("arg0",))
+    legacy_tile_block.ops.first.name = "tile.symbol_literal"
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="legacy bridge ops are not allowed"):
+        tile_emitter._emit_default_function_body(legacy_tile_func)
+
+
+# GK-S7-003
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 补齐 gen_kernel helper 的 legacy bridge、npu wrapper、conv2d 特判和返回装配剩余边界。
+# 测试目的: 锁定当前兼容 helper 的 fail-fast 口径，不让 unreachable 风险路径在 coverage gate 中继续空置。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_private_additional_helper_matrix
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_private_additional_helper_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mem_type = _make_memory_type([8, 4], [4, 1])
+    cpu_emitter = gen_kernel_entry_module._KernelEmitter(_ctx())
+    npu_emitter = gen_kernel_entry_module._KernelEmitter(_npu_ctx())
+
+    tile_func = _tile_elewise_func(tile_analysis_helpers._build_module())
+    legacy_helper = next(iter(tile_func.body.block.ops))
+    legacy_helper.name = "tile.symbol_literal"
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="legacy bridge ops are not allowed"):
+        gen_kernel_entry_module._validate_tile_codegen_contract(tile_func, _ctx())
+
+    short_attr_func = func.FuncOp(
+        "short_attrs",
+        FunctionType.from_lists([mem_type, mem_type], []),
+        Region(Block(arg_types=[mem_type, mem_type])),
+        arg_attrs=ArrayAttr([DictionaryAttr({"name": StringAttr("arg0")})]),
+    )
+    assert gen_kernel_entry_module._leading_rewritten_out_param_count(short_attr_func) == 1
+    assert gen_kernel_entry_module._extract_arg_names(short_attr_func) == ["arg0"]
+
+    mixed_kernel_block = Block(arg_types=[mem_type, mem_type, i32])
+    mixed_kernel = KernelBinaryElewiseOp(
+        mixed_kernel_block.args[0],
+        mixed_kernel_block.args[1],
+        mixed_kernel_block.args[2],
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("global"),
+    )
+    assert gen_kernel_entry_module._kernel_out_operand(mixed_kernel) is None
+
+    deslice_block = Block(arg_types=[mem_type, i32, mem_type])
+    deslice_op = DmaDesliceOp(
+        deslice_block.args[2],
+        deslice_block.args[0],
+        [],
+        [],
+        [],
+        mem_type,
+    )
+    deslice_block.add_ops([deslice_op, func.ReturnOp()])
+    deslice_func = _func("deslice_out", [mem_type, i32, mem_type], [], deslice_block, ("arg0", "count", "src"))
+    assert gen_kernel_entry_module._leading_out_param_count_from_body(deslice_func) == 1
+
+    with pytest.raises(TypeError, match="unsupported nn memory space"):
+        gen_kernel_entry_module._memory_space_to_c(type("DummySpace", (), {"space": StringAttr("weird")})())
+
+    assert gen_kernel_entry_module._type_to_c(f16) == "half"
+    assert gen_kernel_entry_module._type_to_c(gen_kernel_entry_module.BFloat16Type()) == "bfloat16_t"
+    assert gen_kernel_entry_module._type_to_c(IndexType()) == "long long"
+    with pytest.raises(TypeError, match="unsupported type"):
+        gen_kernel_entry_module._type_to_c(StringAttr("bad"))
+    assert gen_kernel_entry_module._type_to_c_for_target(gen_kernel_entry_module.BFloat16Type(), "npu_demo") == "bfloat16_t"
+    with pytest.raises(TypeError, match="unsupported type"):
+        gen_kernel_entry_module._type_to_c_for_target(StringAttr("bad"), "npu_demo")
+
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="func.return/out binding must be emitted in function main flow"):
+        cpu_emitter.emit(func.ReturnOp())
+
+    non_func_module = _make_npu_demo_add_barrier_module(top_level_extra_ops=(UnsupportedOp(),))
+    body_func = next(op for op in non_func_module.ops if isinstance(op, func.FuncOp) and op.sym_name.data == "add_barrier_body")
+    wrapper_func = next(op for op in non_func_module.ops if isinstance(op, func.FuncOp) and op.sym_name.data == "add_barrier")
+    monkeypatch.setattr(npu_emitter, "_classify_npu_demo_launch_module", lambda _module: (body_func, wrapper_func))
+    monkeypatch.setattr(npu_emitter, "_emit_npu_demo_launch_body_declaration", lambda _func_op: "decl")
+    monkeypatch.setattr(npu_emitter, "_emit_npu_demo_launch_body_function", lambda _func_op: "body")
+    monkeypatch.setattr(npu_emitter, "_emit_npu_demo_launch_wrapper_function", lambda _wrapper, _body: "wrapper")
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="must contain only func.func"):
+        npu_emitter._emit_module(non_func_module)
+
+    empty_plain_func = func.FuncOp("empty_plain", FunctionType.from_lists([], []), Region(Block(arg_types=[])))
+    assert npu_emitter._get_npu_demo_plain_func(ModuleOp([empty_plain_func])) is None
+
+    only_return_block = Block(arg_types=[])
+    only_return_block.add_op(func.ReturnOp())
+    only_return_func = func.FuncOp("only_return", FunctionType.from_lists([], []), Region(only_return_block))
+    assert npu_emitter._get_npu_demo_plain_func(ModuleOp([only_return_func])) is None
+
+    launch_wrapper = _make_npu_demo_add_barrier_module(include_body=False)
+    assert npu_emitter._get_npu_demo_plain_func(launch_wrapper) is None
+
+    monkeypatch.setattr(cpu_emitter, "_function_strategies", lambda: ())
+    no_strategy_block = Block(arg_types=[])
+    no_strategy_block.add_op(func.ReturnOp())
+    no_strategy_func = func.FuncOp("no_strategy", FunctionType.from_lists([], []), Region(no_strategy_block))
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="no function emission strategy"):
+        cpu_emitter._select_func_strategy(no_strategy_func)
+
+    bad_conv_return_block = Block(arg_types=[])
+    bad_conv_return_block.add_op(func.ReturnOp())
+    bad_conv_return_func = func.FuncOp(
+        "conv2d_img2col2d_tiled",
+        FunctionType.from_lists([], []),
+        Region(bad_conv_return_block),
+    )
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="body must match frozen subset"):
+        cpu_emitter._validate_cpu_conv2d_img2col2d_tiled_body(bad_conv_return_func)
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="body must match frozen subset"):
+        cpu_emitter._emit_cpu_conv2d_img2col2d_tiled_body(bad_conv_return_func)
+
+    bad_conv_signature_func = func.FuncOp(
+        "conv2d_img2col2d_tiled",
+        FunctionType.from_lists([], []),
+        Region(Block(arg_types=[])),
+    )
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="unsupported conv2d_img2col2d_tiled signature"):
+        cpu_emitter._emit_cpu_conv2d_img2col2d_tiled_body(bad_conv_signature_func)
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="unsupported conv2d_img2col2d_tiled signature"):
+        cpu_emitter._emit_cpu_conv2d_img2col2d_tiled_signature(bad_conv_signature_func)
+
+    rank3_type = _make_memory_type([8, 4, 2], [8, 2, 1], element_type=f32)
+    conv_rank_block = Block(arg_types=[rank3_type, rank3_type])
+    conv_rank_func = _func(
+        "conv2d_img2col2d_tiled",
+        [rank3_type, rank3_type],
+        [rank3_type],
+        conv_rank_block,
+        ("input", "weight"),
+    )
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="requires rank-4 memory operands"):
+        cpu_emitter._emit_cpu_conv2d_img2col2d_tiled_body(conv_rank_func)
+
+    out_f16_type = _make_memory_type([1, 1, 1, 1], [1, 1, 1, 1], element_type=f16)
+    rank4_f32_type = _make_memory_type([1, 1, 1, 1], [1, 1, 1, 1], element_type=f32)
+    conv_dtype_block = Block(arg_types=[rank4_f32_type, rank4_f32_type])
+    conv_dtype_func = _func(
+        "conv2d_img2col2d_tiled",
+        [rank4_f32_type, rank4_f32_type],
+        [out_f16_type],
+        conv_dtype_block,
+        ("input", "weight"),
+    )
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="requires matching element types"):
+        cpu_emitter._emit_cpu_conv2d_img2col2d_tiled_body(conv_dtype_func)
+
+    body_level_no_ctx = _func(
+        "body_level_no_ctx",
+        [mem_type, mem_type],
+        [mem_type],
+        Block(arg_types=[mem_type, mem_type]),
+        ("lhs", "out"),
+    )
+    body_level_bad_input = _func(
+        "body_level_bad_input",
+        [mem_type, i32],
+        [mem_type],
+        Block(arg_types=[mem_type, i32]),
+        ("ctx", "src"),
+    )
+    body_level_bad_output = _func(
+        "body_level_bad_output",
+        [mem_type, mem_type],
+        [i32],
+        Block(arg_types=[mem_type, mem_type]),
+        ("ctx", "src"),
+    )
+    body_level_bad_dtype = _func(
+        "body_level_bad_dtype",
+        [mem_type, mem_type],
+        [_make_memory_type([8, 4], [4, 1], element_type=f16)],
+        Block(arg_types=[mem_type, mem_type]),
+        ("ctx", "src"),
+    )
+    assert npu_emitter._is_npu_demo_body_level_kernel(body_level_no_ctx) is False
+    assert npu_emitter._is_npu_demo_body_level_kernel(body_level_bad_input) is False
+    assert npu_emitter._is_npu_demo_body_level_kernel(body_level_bad_output) is False
+    assert npu_emitter._is_npu_demo_body_level_kernel(body_level_bad_dtype) is False
+
+    bad_launch_block = Block(arg_types=[mem_type, mem_type, mem_type])
+    bad_callee = ArchLaunchOp(
+        StringAttr("bad"),  # type: ignore[arg-type]
+        bad_launch_block.args[0],
+        bad_launch_block.args[1],
+        bad_launch_block.args[2],
+        SymbolConstOp(0).result,
+        (
+            SymbolConstOp(1).result,
+            SymbolConstOp(1).result,
+            SymbolConstOp(1).result,
+        ),
+    )
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="must use flat @callee"):
+        npu_emitter._launch_callee_name(bad_callee, "wrapper")
+
+    dynamic_launch = _make_npu_demo_add_barrier_module(block_extent_expr="M")
+    dynamic_wrapper = next(op for op in dynamic_launch.ops if isinstance(op, func.FuncOp) and op.sym_name.data == "add_barrier")
+    dynamic_launch_op = next(op for op in dynamic_wrapper.body.block.ops if isinstance(op, ArchLaunchOp))
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="block must be static integer"):
+        npu_emitter._static_launch_extent(dynamic_launch_op, "block", dynamic_wrapper.sym_name.data)
+
+    monkeypatch.setattr(
+        gen_kernel_entry_module.target_registry,
+        "get_target_hardware",
+        lambda target, key: None if key == "thread_num" else 1,
+    )
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="target missing thread_num"):
+        npu_emitter._expected_npu_demo_launch_extents()
+
+    bad_body_result = _func(
+        "bad_body_result",
+        [mem_type, mem_type, mem_type],
+        [mem_type],
+        Block(arg_types=[mem_type, mem_type, mem_type]),
+        ("lhs", "rhs", "out"),
+    )
+    bad_body_short = _func(
+        "bad_body_short",
+        [mem_type, mem_type],
+        [],
+        Block(arg_types=[mem_type, mem_type]),
+        ("lhs", "rhs"),
+    )
+    bad_body_ctx = _func(
+        "bad_body_ctx",
+        [mem_type, mem_type, mem_type, mem_type],
+        [],
+        Block(arg_types=[mem_type, mem_type, mem_type, mem_type]),
+        ("lhs", "rhs", "out", "tmp"),
+    )
+    bad_body_types = _func(
+        "bad_body_types",
+        [mem_type, i32, mem_type],
+        [],
+        Block(arg_types=[mem_type, i32, mem_type]),
+        ("lhs", "rhs", "out"),
+    )
+    bad_body_dtype = _func(
+        "bad_body_dtype",
+        [mem_type, mem_type, _make_memory_type([8, 4], [4, 1], element_type=f16)],
+        [],
+        Block(arg_types=[mem_type, mem_type, _make_memory_type([8, 4], [4, 1], element_type=f16)]),
+        ("lhs", "rhs", "out"),
+    )
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="unsupported npu_demo launch body signature"):
+        npu_emitter._validate_npu_demo_launch_body_signature(bad_body_result)
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="unsupported npu_demo launch body signature"):
+        npu_emitter._validate_npu_demo_launch_body_signature(bad_body_short)
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="requires leading ctx argument"):
+        npu_emitter._validate_npu_demo_launch_body_signature(bad_body_ctx)
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="unsupported npu_demo launch body signature"):
+        npu_emitter._validate_npu_demo_launch_body_signature(bad_body_types)
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="requires matching element types"):
+        npu_emitter._validate_npu_demo_launch_body_signature(bad_body_dtype)
+
+    wrong_result_module = _make_npu_demo_add_barrier_module()
+    wrong_result_body = next(
+        op for op in wrong_result_module.ops if isinstance(op, func.FuncOp) and op.sym_name.data == "add_barrier_body"
+    )
+    wrong_result_wrapper = next(
+        op for op in wrong_result_module.ops if isinstance(op, func.FuncOp) and op.sym_name.data == "add_barrier"
+    )
+    wrong_result_wrapper.properties["function_type"] = FunctionType.from_lists(
+        list(wrong_result_wrapper.function_type.inputs.data),
+        [mem_type],
+    )
+
+    wrong_input_module = _make_npu_demo_add_barrier_module()
+    wrong_input_body = next(
+        op for op in wrong_input_module.ops if isinstance(op, func.FuncOp) and op.sym_name.data == "add_barrier_body"
+    )
+    wrong_input_wrapper = next(
+        op for op in wrong_input_module.ops if isinstance(op, func.FuncOp) and op.sym_name.data == "add_barrier"
+    )
+    wrong_input_wrapper.properties["function_type"] = FunctionType.from_lists(
+        [
+            mem_type,
+            mem_type,
+            _make_memory_type([8, 4], [4, 1], element_type=f16),
+        ],
+        [],
+    )
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="unsupported npu_demo launch wrapper signature"):
+        npu_emitter._validate_npu_demo_launch_wrapper_signature(wrong_result_wrapper, wrong_result_body)
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="signature must match body inputs"):
+        npu_emitter._validate_npu_demo_launch_wrapper_signature(wrong_input_wrapper, wrong_input_body)

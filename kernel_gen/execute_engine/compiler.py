@@ -1,7 +1,7 @@
 """Compiler hook for ExecutionEngine (P0/S2).
 
 创建者: 朽木露琪亚
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供编译命令生成与编译单元拼接的最小实现，使 S2 阶段可稳定覆盖“编译路径”合同。
@@ -28,6 +28,73 @@ import tempfile
 from typing import Callable, Iterable
 
 from kernel_gen.common.text import join_text_sections
+
+_COMPILER_ICE_MARKERS = (
+    "internal compiler error",
+    "Please submit a full bug report",
+)
+
+
+def _looks_like_internal_compiler_error(stderr: str) -> bool:
+    """判断编译 stderr 是否命中编译器内部错误特征。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一识别 GCC/Clang 常见的 internal compiler error 文本。
+    - 供真实编译路径决定是否追加一次同命令重试，减少编译器偶发异常对回归结果的干扰。
+
+    使用示例:
+    - assert _looks_like_internal_compiler_error("internal compiler error: ...") is True
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_target.md
+    - test: test/execute_engine/test_execute_engine_private_helpers.py
+    - 功能实现: kernel_gen/execute_engine/compiler.py
+    """
+
+    if not isinstance(stderr, str):
+        return False
+    return any(marker in stderr for marker in _COMPILER_ICE_MARKERS)
+
+
+def _run_compiler_command(command: Iterable[str]) -> subprocess.CompletedProcess[str]:
+    """运行编译命令，并在编译器内部异常时追加一次重试。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一真实编译路径的命令执行与 stderr 判定逻辑。
+    - 当 stderr 命中编译器内部异常文本时，仅对同一命令追加一次重试。
+    - 让执行引擎与本地编译回归测试复用同一控制流，避免两处维护不同分支。
+
+    使用示例:
+    - result = _run_compiler_command(["g++", "-std=c++17", "demo.cpp", "-o", "demo"])
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_target.md
+    - test: test/execute_engine/test_execute_engine_private_helpers.py
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/execute_engine/compiler.py
+    """
+
+    argv = list(command)
+    result = subprocess.run(
+        argv,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 and _looks_like_internal_compiler_error(result.stderr):
+        result = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    return result
 
 
 def default_compiler() -> str:
@@ -187,7 +254,7 @@ def compile_source(
     """执行或模拟编译流程。
 
     创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 将编译单元写入工作目录，生成编译命令并执行或 dry-run。
@@ -240,12 +307,7 @@ def compile_source(
                 _cleanup=cleanup,
             )
 
-        result = subprocess.run(
-            list(command),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        result = _run_compiler_command(command)
         return CompileArtifacts(
             soname_path=str(soname_path),
             source_path=str(source_path),

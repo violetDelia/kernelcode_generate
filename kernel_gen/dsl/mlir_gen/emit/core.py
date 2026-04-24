@@ -364,8 +364,6 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -
         return i32
     if dtype is NumericType.Int64:
         return i64
-    if dtype is NumericType.Bool:
-        return i1
     raise _LoweringError(f"Unsupported dtype: {dtype}", location=location)
 
 
@@ -1493,8 +1491,6 @@ def _build_flatten_shape_operands(
         op = SymbolGetDimOp(source, IntAttr(axis))
         ctx.builder.add_op(op)
         dim_values.append(op.result)
-    if not dim_values:
-        raise _LoweringError("flatten source rank must be >= 1", location=location)
     total = dim_values[0]
     for value in dim_values[1:]:
         result_type = SymbolValueType.from_expr(
@@ -2003,8 +1999,6 @@ def _shape_numel_attr(shape: Sequence[Attribute]) -> Attribute:
             expr_parts.append(part)
             continue
         expr_parts.append(f"({part})")
-    if not expr_parts:
-        return IntAttr(1)
     if len(expr_parts) == 1:
         return StringAttr(expr_parts[0])
     return StringAttr("*".join(expr_parts))
@@ -3948,8 +3942,6 @@ def _cast_nn_scalar_operand(
         raise _LoweringError("nn scalar element_type must be integer/float or symbol.int", location=location)
     if isinstance(source_type, IntegerType):
         if isinstance(target_element_type, IntegerType):
-            if source_type == target_element_type:
-                return value
             raise _LoweringError("nn scalar integer width conversion is unsupported", location=location)
         if isinstance(target_element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
             cast_op = arith.SIToFPOp(value, target_element_type)
@@ -3960,8 +3952,6 @@ def _cast_nn_scalar_operand(
         target_element_type,
         (Float16Type, BFloat16Type, Float32Type, Float64Type),
     ):
-        if source_type == target_element_type:
-            return value
         source_width = 16 if isinstance(source_type, (Float16Type, BFloat16Type)) else (32 if isinstance(source_type, Float32Type) else 64)
         target_width = 16 if isinstance(target_element_type, (Float16Type, BFloat16Type)) else (32 if isinstance(target_element_type, Float32Type) else 64)
         if source_width < target_width:
@@ -4353,7 +4343,9 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         return op.result
     if isinstance(expr, NnSoftmaxAST):
         input_value = _lower_expr(expr.value, ctx)
-        input_type = _expect_memory_value(input_value, expr.location)
+        if not isinstance(input_value.type, NnMemoryType):
+            raise _LoweringError("softmax input must be nn.memory", location=expr.location)
+        input_type = input_value.type
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("softmax result must be nn.memory", location=expr.location)

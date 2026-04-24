@@ -85,8 +85,10 @@ from kernel_gen.dialect.nn import (
     NnCastOp,
     NnEqOp,
     NnExpOp,
+    NnHardSigmoidOp,
     NnImg2col1dOp,
     NnImg2col2dOp,
+    NnLeakyReluOp,
     NnReluOp,
     NnMatmulOp,
     NnMemorySpaceAttr,
@@ -97,6 +99,7 @@ from kernel_gen.dialect.nn import (
     NnReduceSumOp,
     NnSoftmaxOp,
     NnSubOp,
+    NnTransposeOp,
     NnTrueDivOp,
 )
 from kernel_gen.dialect.symbol import (
@@ -1668,6 +1671,92 @@ def test_build_func_op_supports_softmax_helper_call() -> None:
     assert softmax_ops[0].axis.value.data == 1
     assert list(func_op.function_type.outputs) == [softmax_ops[0].result.type]
     assert return_ops[0].arguments[0].type == softmax_ops[0].result.type
+
+
+# MGEN-036F
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 activation / broadcast_to / transpose helper 可通过高层 DSL 入口生成稳定 IR。
+# 测试目的: 同时覆盖 parser helper 解析、mlir_gen lowering 与 nn op 构造，避免这些 helper 只在私有分支里存在。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_activation_broadcast_to_and_transpose_helpers
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dialect/nn.md, spec/operation/nn.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_activation_broadcast_to_and_transpose_helpers() -> None:
+    from kernel_gen.operation.nn import broadcast_to, hard_sigmoid, leaky_relu, transpose
+
+    source = Memory([2, 3], NumericType.Float32, space=MemorySpace.GM)
+
+    def leaky_relu_kernel(src: "Tensor[f32, 2, 3]") -> "Tensor[f32, 2, 3]":
+        return leaky_relu(src, alpha=0.25)
+
+    def hard_sigmoid_kernel(src: "Tensor[f32, 2, 3]") -> "Tensor[f32, 2, 3]":
+        return hard_sigmoid(src, alpha=0.2, beta=0.5)
+
+    def broadcast_to_kernel(src: "Tensor[f32, 1, 3]") -> "Tensor[f32, 2, 3]":
+        return broadcast_to(src, target_shape=[2, 3], space=MemorySpace.GM)
+
+    def transpose_kernel(src: "Tensor[f32, 2, 3]") -> "Tensor[f32, 3, 2]":
+        return transpose(src, perm=[1, 0])
+
+    leaky_relu_func = build_func_op(leaky_relu_kernel, source)
+    leaky_relu_ops = [op for op in leaky_relu_func.body.block.ops if isinstance(op, NnLeakyReluOp)]
+    assert len(leaky_relu_ops) == 1
+    assert leaky_relu_ops[0].result.type == leaky_relu_func.function_type.outputs.data[0]
+
+    hard_sigmoid_func = build_func_op(hard_sigmoid_kernel, source)
+    hard_sigmoid_ops = [op for op in hard_sigmoid_func.body.block.ops if isinstance(op, NnHardSigmoidOp)]
+    assert len(hard_sigmoid_ops) == 1
+    assert hard_sigmoid_ops[0].result.type == hard_sigmoid_func.function_type.outputs.data[0]
+
+    broadcast_source = Memory([1, 3], NumericType.Float32, space=MemorySpace.GM)
+    broadcast_to_func = build_func_op(broadcast_to_kernel, broadcast_source)
+    broadcast_ops = [op for op in broadcast_to_func.body.block.ops if isinstance(op, NnBroadcastOp)]
+    assert len(broadcast_ops) == 1
+    assert [attr.data for attr in broadcast_ops[0].result.type.shape.data] == [2, 3]
+
+    transpose_func = build_func_op(transpose_kernel, source)
+    transpose_ops = [op for op in transpose_func.body.block.ops if isinstance(op, NnTransposeOp)]
+    assert len(transpose_ops) == 1
+    assert [attr.data for attr in transpose_ops[0].perm.data] == [1, 0]
+    assert [attr.data for attr in transpose_ops[0].result.type.shape.data] == [3, 2]
+
+
+# MGEN-036G
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 activation / broadcast_to / transpose helper 的 arity 缺口在解析阶段直接失败。
+# 测试目的: 锁定这些 helper 不接受缺失关键参数或重复参数，避免 parser 静默吞掉非法 DSL 调用。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_activation_broadcast_to_and_transpose_arity_gaps
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/operation/nn.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_rejects_activation_broadcast_to_and_transpose_arity_gaps() -> None:
+    from kernel_gen.operation.nn import broadcast_to, hard_sigmoid, leaky_relu, transpose
+
+    source = Memory([2, 3], NumericType.Float32, space=MemorySpace.GM)
+    broadcast_source = Memory([1, 3], NumericType.Float32, space=MemorySpace.GM)
+
+    def invalid_leaky_relu_kernel(src: "Tensor[f32, 2, 3]") -> "Tensor[f32, 2, 3]":
+        return leaky_relu(src)
+
+    def invalid_hard_sigmoid_kernel(src: "Tensor[f32, 2, 3]") -> "Tensor[f32, 2, 3]":
+        return hard_sigmoid(src, alpha=0.2)
+
+    def invalid_broadcast_to_kernel(src: "Tensor[f32, 1, 3]") -> "Tensor[f32, 2, 3]":
+        return broadcast_to(src, target_shape=[2, 3])
+
+    def invalid_transpose_kernel(src: "Tensor[f32, 2, 3]") -> "Tensor[f32, 3, 2]":
+        return transpose(src)
+
+    with pytest.raises(AstVisitorError, match="Unsupported leaky_relu arity"):
+        build_func_op(invalid_leaky_relu_kernel, source)
+    with pytest.raises(AstVisitorError, match="Unsupported hard_sigmoid arity"):
+        build_func_op(invalid_hard_sigmoid_kernel, source)
+    with pytest.raises(AstVisitorError, match="Unsupported broadcast_to arity"):
+        build_func_op(invalid_broadcast_to_kernel, broadcast_source)
+    with pytest.raises(AstVisitorError, match="transpose perm is required"):
+        build_func_op(invalid_transpose_kernel, source)
 
 
 # MGEN-036C
