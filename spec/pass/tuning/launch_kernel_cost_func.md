@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`jcc你莫辜负`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/pass/tuning/launch_kernel_cost_func.md`](../../../spec/pass/tuning/launch_kernel_cost_func.md)
 - `功能实现`：
   - [`kernel_gen/passes/tuning/launch_kernel_cost_func.py`](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
@@ -51,8 +51,8 @@
 - 原 host wrapper 与原 device func 必须保持不变；本 pass 只新增 sibling cost function。
 - 本 pass 不做 target runtime 求值、不查 cost table、不把 `tuner.cost` 折叠为常量。
 - 当前公开合同只接受 `compute|memory` 两 kind；`kind2`、`kind3`、`all` 或其他旧值都必须显式失败。
-- 旧目录 `expectation/pass/tuning/launch_kernel_cost_func/` 只作为历史证据保留；计划层仍把 `expectation/pass/tuning/launch_kernel_cost_func_compute_memory/` 记作后续两 kind 合同资产任务的路径占位，但在该目录真实入库前，当前 `T-20260423-e6493d39` 不以其为现场可核对源文件入口。
-- 若仓库后续仍需通过 `.gitignore` 放开该目录或新增该目录文件，必须拆到单独的合同资产处理；当前 `T-20260423-e6493d39` 的产品 diff 不混入 `.gitignore` 与 `expectation/**` 文件改动。
+- 当前仓库目录入口 `expectation/pass/tuning/launch_kernel_cost_func/` 只承接 `expectation/pass/tuning/launch_kernel_cost_func_compute_memory/` 的当前两 kind 合同资产。
+- 历史四 kind 子资产不属于当前公开入口；`multi_kind.py`、`shared_callee_once.py` 与缺失的 `invalid_kind.py` 不纳入该目录入口接线。
 - 若输入 module 已存在目标命名规则对应的 cost function，必须显式失败，不得覆盖或复用。
 
 ## 公开接口
@@ -227,9 +227,8 @@ kernel.add -> tuner.cost(op_name="kernel.add")
 - 执行命令：`pytest -q test/dialect/test_tuner_dialect.py -k "tuner_cost"`
 - 测试目标：锁定 `tuner.cost` 的 `compute/memory` verifier 边界与错误路径。
 
-- 合同验收资产：计划书层面仍保留 `expectation/pass/tuning/launch_kernel_cost_func_compute_memory/` 作为后续两 kind 合同资产任务的路径占位；在该目录真实入库前，当前 `T-20260423-e6493d39` build/review 不以其为现场 runner、diff 证明或说明入口。
-- 当前任务边界下，`basic_all.py` 与 `invalid_kind.py` 继续只读运行并单列记录，用于说明历史合同资产现状；它们不替代 diff 反推测试，也不代表 `launch_kernel_cost_func_compute_memory/` 源文件已在当前任务中入库。
-- 历史证据：[`expectation/pass/tuning/launch_kernel_cost_func`](../../../expectation/pass/tuning/launch_kernel_cost_func) 只保留旧四 kind 资产；其中 `basic_all.py` 与 `invalid_kind.py` 保持只读，不再作为本轮当前两 kind 目录入口。
+- 合同验收资产：[`expectation/pass/tuning/launch_kernel_cost_func`](../../../expectation/pass/tuning/launch_kernel_cost_func) 是仓库当前目录入口；它只串行承接 [`expectation/pass/tuning/launch_kernel_cost_func_compute_memory`](../../../expectation/pass/tuning/launch_kernel_cost_func_compute_memory) 的 `compute / memory` case，不替代 diff 反推测试。
+- 当前目录入口只运行 `compute / memory` 合同，不引回历史四 kind 子资产；`invalid_kind.py` 不属于该入口接线。
 
 ### 功能与用例清单
 

@@ -1,7 +1,7 @@
 """launch-kernel-cost-func compute/memory expectation。
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 使用 `ircheck` 锁定 `launch-kernel-cost-func` 在 `compute / memory` 两种公开 kind 下的最小合同。
@@ -21,21 +21,11 @@
 from __future__ import annotations
 
 from importlib import import_module
-from pathlib import Path
-import sys
 
-CURRENT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = Path(__file__).resolve().parents[4]
-if str(CURRENT_DIR) not in sys.path:
-    sys.path.insert(0, str(CURRENT_DIR))
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from expectation.utils.case_runner import raise_if_failures, run_case
-
-run_ircheck_success = import_module(
-    "expectation.pass.tuning.launch_kernel_cost_func._shared"
-).run_ircheck_success
+_shared = import_module("expectation.pass.tuning.launch_kernel_cost_func._shared")
+raise_if_failures = _shared.raise_if_failures
+run_case = _shared.run_case
+run_ircheck_success = _shared.run_ircheck_success
 
 MEM_TYPE = "!nn.memory<[4], [1], f32, #nn.space<global>>"
 INPUT_IR = f"""
