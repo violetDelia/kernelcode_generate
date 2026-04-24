@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/pass/tuning/launch_kernel_cost_func.md`](../../../spec/pass/tuning/launch_kernel_cost_func.md)
 - `功能实现`：
   - [`kernel_gen/passes/tuning/launch_kernel_cost_func.py`](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
@@ -51,8 +51,8 @@
 - 原 host wrapper 与原 device func 必须保持不变；本 pass 只新增 sibling cost function。
 - 本 pass 不做 target runtime 求值、不查 cost table、不把 `tuner.cost` 折叠为常量。
 - `cost_kind` 接受任意非空 kind 名；空串、全空白串、空段和重复段都必须显式失败。
-- 旧目录 `expectation/pass/tuning/launch_kernel_cost_func/` 只作为历史证据保留；计划层仍把 `expectation/pass/tuning/launch_kernel_cost_func_compute_memory/` 记作后续两 kind 合同资产任务的路径占位，但在该目录真实入库前，当前 `T-20260423-e6493d39` 不以其为现场可核对源文件入口。
-- 若仓库后续仍需通过 `.gitignore` 放开该目录或新增该目录文件，必须拆到单独的合同资产处理；当前 `T-20260423-e6493d39` 的产品 diff 不混入 `.gitignore` 与 `expectation/**` 文件改动。
+- 当前仓库已 tracked [`expectation/pass/tuning/launch_kernel_cost_func`](../../../expectation/pass/tuning/launch_kernel_cost_func) 与 [`expectation/pass/tuning/launch_kernel_cost_func_compute_memory`](../../../expectation/pass/tuning/launch_kernel_cost_func_compute_memory) 两个目录入口；前者只承接后者的 `compute / memory` runner，不引回历史 `multi_kind.py` / `invalid_kind.py` 子资产。
+- 若仓库后续需要重新引入历史四 kind companion 资产，或扩展当前目录入口覆盖范围，必须拆到单独的合同资产处理；当前公开合同仍以 open-kind 产品 spec/pytest/实现 与 tracked `compute / memory` expectation 入口分层定义。
 - 若输入 module 已存在目标命名规则对应的 cost function，必须显式失败，不得覆盖或复用。
 
 ## 公开接口
