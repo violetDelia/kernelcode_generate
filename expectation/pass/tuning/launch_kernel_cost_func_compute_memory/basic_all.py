@@ -1,7 +1,7 @@
 """launch-kernel-cost-func compute/memory expectation。
 
 创建者: 金铲铲大作战
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 使用 `ircheck` 锁定 `launch-kernel-cost-func` 在 `compute / memory` 两种公开 kind 下的最小合同。
@@ -22,7 +22,47 @@ from __future__ import annotations
 
 from importlib import import_module
 
-_shared = import_module("expectation.pass.tuning.launch_kernel_cost_func._shared")
+_CANONICAL_SHARED_MODULE = "expectation.pass.tuning.launch_kernel_cost_func._shared"
+
+
+def _load_runner_shared_module() -> object:
+    """加载 compute/memory expectation 依赖的 `_shared` 模块。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 包上下文存在时，优先通过相对导入加载 `..launch_kernel_cost_func._shared`。
+    - 只有当前模块没有包上下文，或目标 `_shared` 模块本身缺失时，才 fallback 到 canonical import。
+    - 不吞掉 `_shared.py` 内部真实依赖错误，避免把实现问题误判成 runner 边界问题。
+
+    使用示例:
+    - `shared_module = _load_runner_shared_module()`
+
+    关联文件:
+    - spec: [`spec/pass/tuning/launch_kernel_cost_func.md`](spec/pass/tuning/launch_kernel_cost_func.md)
+    - test: [`test/pass/test_launch_kernel_cost_func.py`](test/pass/test_launch_kernel_cost_func.py)
+    - 功能实现: [`expectation/pass/tuning/launch_kernel_cost_func_compute_memory/basic_all.py`](expectation/pass/tuning/launch_kernel_cost_func_compute_memory/basic_all.py)
+    - 功能实现: [`expectation/pass/tuning/launch_kernel_cost_func/_shared.py`](expectation/pass/tuning/launch_kernel_cost_func/_shared.py)
+    """
+
+    if not __package__:
+        return import_module(_CANONICAL_SHARED_MODULE)
+
+    try:
+        return import_module("..launch_kernel_cost_func._shared", __package__)
+    except ModuleNotFoundError as exc:
+        missing_module_names = {
+            "launch_kernel_cost_func",
+            "expectation.pass.tuning.launch_kernel_cost_func",
+            _CANONICAL_SHARED_MODULE,
+        }
+        if exc.name not in missing_module_names:
+            raise
+        return import_module(_CANONICAL_SHARED_MODULE)
+
+
+_shared = _load_runner_shared_module()
 raise_if_failures = _shared.raise_if_failures
 run_case = _shared.run_case
 run_ircheck_success = _shared.run_ircheck_success
