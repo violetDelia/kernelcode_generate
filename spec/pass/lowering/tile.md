@@ -3,17 +3,18 @@
 ## 功能简介
 
 - 本页定义 tile family 在 `S7` 后的总合同：对外 pass 入口只保留 `build_registered_pass("tile-analysis")`、`build_registered_pass("tile-elewise")`、`build_registered_pass("tile-reduce")`。
-- `kernel_gen.tile.common`、`kernel_gen.tile.analysis`、`kernel_gen.tile.elewise`、`kernel_gen.tile.reduce` 是 tile family 的唯一 logic/helper 落点；旧 `kernel_gen.passes.lowering.tile*` 只属于待清理消费者残留。
+- `kernel_gen.tile.common`、`kernel_gen.tile.analysis`、`kernel_gen.tile.elewise`、`kernel_gen.tile.reduce` 是 tile family 的唯一 logic/helper 落点；`kernel_gen.passes.lowering.tile` 只保留 compat helper re-export，`kernel_gen.passes.lowering.tile_analysis`、`kernel_gen.passes.lowering.tile_elewise`、`kernel_gen.passes.lowering.tile_reduce` 已退出消费者矩阵。
 - `tile-analysis` 只写 `tile.analysis + tile.tile_exprs`；`tile-elewise` 与 `tile-reduce` 在该输入上继续生成 split-after-IR 结构，供 `gen_kernel(...)` 消费。
 - 本页同时写清旧 module path、旧 importlib 字符串、旧 coverage include-module 的退场范围，供下游 `build/review` 直接按文档清理。
 
 ## 文档信息
 
 - 创建者：`小李飞刀`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/pass/lowering/tile.md`](../../../spec/pass/lowering/tile.md)
 - `功能实现`：
   - [`kernel_gen/passes/registry.py`](../../../kernel_gen/passes/registry.py)
+  - [`kernel_gen/passes/lowering/tile.py`](../../../kernel_gen/passes/lowering/tile.py)
   - [`kernel_gen/tile/common.py`](../../../kernel_gen/tile/common.py)
   - [`kernel_gen/tile/analysis.py`](../../../kernel_gen/tile/analysis.py)
   - [`kernel_gen/tile/elewise.py`](../../../kernel_gen/tile/elewise.py)
@@ -52,7 +53,7 @@
 - `tile-reduce` 负责 `kernel.matmul` 的 reduce 轴切分与累加结构。
 - tile family 的共享 helper 只保留在 `kernel_gen.tile.common`；analysis / elewise / reduce logic 分别落在 `kernel_gen.tile.analysis`、`kernel_gen.tile.elewise`、`kernel_gen.tile.reduce`。
 - `gen_kernel(...)` 只消费 tile family 产出的 split-after-IR 结果，不重新推导 tile family analysis。
-- `build/review` 需要同步清理旧 `kernel_gen.passes.lowering.tile*` 导入、旧字符串导入、旧 coverage include-module 口径。
+- `build/review` 需要同步清理旧 `kernel_gen.passes.lowering.tile_analysis`、`kernel_gen.passes.lowering.tile_elewise`、`kernel_gen.passes.lowering.tile_reduce` 导入、旧字符串导入、旧 coverage include-module 口径；`kernel_gen.passes.lowering.tile` 只允许作为 compat helper 导入。
 
 ## 限制与边界
 
@@ -60,8 +61,8 @@
 - tile family 不新增新 pass 名，不恢复旧 `TilePass / KernelSplitPass / tile.step_value / kernel_split.tile_value` 文本。
 - pass caller 的唯一公开入口是 registry 名称；`kernel_gen.tile.*` 只是 logic/helper 落点，不是新的 pass 名字。
 - helper / rewrite consumer 只能依赖 `kernel_gen.tile.common`、`kernel_gen.tile.analysis`、`kernel_gen.tile.elewise`、`kernel_gen.tile.reduce`。
+- `kernel_gen.passes.lowering.tile` 继续存在，但只允许作为 compat helper module 导出 `TilePassError` 与 `_raise_tile_error`；tile family 的 pass caller、logic helper 与 coverage 口径不得再依赖它。
 - 下列旧路径在 `S7 build` 完成后必须退出 tile family 的消费者矩阵：
-  - `kernel_gen.passes.lowering.tile`
   - `kernel_gen.passes.lowering.tile_analysis`
   - `kernel_gen.passes.lowering.tile_elewise`
   - `kernel_gen.passes.lowering.tile_reduce`
@@ -154,7 +155,8 @@ tile_reduce = build_registered_pass("tile-reduce")
 - 测试目标：
   - 验证三个公开 pass 名都能通过 registry 构造。
   - 验证 tile family 的 logic/helper 落点已经转到 `kernel_gen.tile.*`。
-  - 验证旧 `kernel_gen.passes.lowering.tile*` 不再出现在 tile family 的 helper 默认依赖、直接消费者导入或 coverage 过滤口径中。
+  - 验证 `kernel_gen.passes.lowering.tile` 仍可作为 compat helper 导入，但只保留 `TilePassError` 与 `_raise_tile_error`。
+  - 验证旧 `kernel_gen.passes.lowering.tile_analysis`、`kernel_gen.passes.lowering.tile_elewise`、`kernel_gen.passes.lowering.tile_reduce` 不再出现在 tile family 的 helper 默认依赖、直接消费者导入或 coverage 过滤口径中。
   - 验证 `gen_kernel(...)` 继续消费 `tile.analysis + tile.tile_exprs + tuner.param + symbol.for + dma.view` 组合。
 
 ## 额外补充
@@ -179,4 +181,5 @@ from kernel_gen.tile.reduce import apply_tile_reduce
 - `kernel_gen.tile.analysis` 负责 analysis-only 逻辑。
 - `kernel_gen.tile.elewise` 负责非 reduce 轴 rewrite。
 - `kernel_gen.tile.reduce` 负责 matmul reduce rewrite。
-- `kernel_gen.passes.lowering.tile*` 若在 `S7` 现场仍存在，只能视为待清理残留，不能继续被文档视为公开入口或 coverage 目标。
+- `kernel_gen.passes.lowering.tile` 若继续保留，只能视为 compat helper module，不能继续被文档视为 tile family 的公开 pass 入口、logic helper 入口或 coverage 目标。
+- `kernel_gen.passes.lowering.tile_analysis`、`kernel_gen.passes.lowering.tile_elewise`、`kernel_gen.passes.lowering.tile_reduce` 若仍被引用，只能视为待清理残留，不能继续被文档视为公开入口或 coverage 目标。
