@@ -1,7 +1,7 @@
 """buffer-results-to-out-params pass tests.
 
 创建者: 朽木露琪亚
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 buffer-results-to-out-params pass 的最小骨架行为与失败边界。
@@ -65,6 +65,50 @@ def test_public_import_path_uses_canonical_module_and_rejects_legacy_lowering_sh
 
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module("kernel_gen.passes.lowering.buffer_results_to_out_params")
+
+
+# BROTP-000
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-24 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-24 00:00:00 +0800
+# 功能说明: 验证目录级 expectation runner 在包上下文里优先使用相对导入，且不再写入当前目录到 `sys.path`。
+# 测试目的: 锁定 `expectation.pass.buffer_results_to_out_params.__main__` 的导入行为，避免回退到目录注入加裸模块导入。
+# 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_expectation_runner_prefers_relative_import_without_current_dir_sys_path
+# 对应功能实现文件路径: expectation/pass/buffer_results_to_out_params/__main__.py
+# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
+def test_expectation_runner_prefers_relative_import_without_current_dir_sys_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner_module = importlib.import_module("expectation.pass.buffer_results_to_out_params.__main__")
+    runner_dir = str(Path(runner_module.__file__).resolve().parent)
+    original_sys_path = sys.path[:]
+
+    for bare_module_name in ("single_output", "mixed_output", "multi_output", "reject_cases"):
+        sys.modules.pop(bare_module_name, None)
+
+    try:
+        sys.path[:] = [path for path in sys.path if path != runner_dir]
+        reloaded_runner_module = importlib.reload(runner_module)
+        assert runner_dir not in sys.path
+
+        import_calls: list[tuple[str, str | None]] = []
+        real_import_module = importlib.import_module
+
+        def _spy_import_module(name: str, package: str | None = None) -> object:
+            import_calls.append((name, package))
+            return real_import_module(name, package)
+
+        monkeypatch.setattr(reloaded_runner_module.importlib, "import_module", _spy_import_module)
+        single_output_main = reloaded_runner_module._load_case_main("single_output")
+
+        assert import_calls == [(".single_output", reloaded_runner_module.__package__)]
+        canonical_single_output = sys.modules["expectation.pass.buffer_results_to_out_params.single_output"]
+        assert single_output_main is canonical_single_output.main
+    finally:
+        sys.path[:] = original_sys_path
+        importlib.reload(runner_module)
 
 
 def _make_memory_type() -> NnMemoryType:

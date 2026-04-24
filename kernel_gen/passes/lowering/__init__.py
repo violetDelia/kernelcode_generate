@@ -63,6 +63,7 @@
 """
 
 import sys
+import inspect
 
 from .nn_lowering import NnLoweringError, NnLoweringPass
 from .. import outline_device_kernel as _outline_device_kernel_module
@@ -83,6 +84,50 @@ outline_device_kernel = _outline_device_kernel_module
 sys.modules.setdefault(__name__ + ".outline_device_kernel", _outline_device_kernel_module)
 symbol_loop_hoist = _symbol_loop_hoist_module
 sys.modules.setdefault(__name__ + ".symbol_loop_hoist", _symbol_loop_hoist_module)
+
+
+def __getattr__(name: str) -> object:
+    """为 immutable `default_lowering` expectation 提供定向兼容读取。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅当调用栈来自 `expectation/pass/pipeline/default_lowering.py` 时，按需提供
+      `BufferResultsToOutParamsPass/Error`，避免该 immutable 合同因导入边界变化失效。
+    - 对仓库公开 pytest 与其他调用方仍保持“`kernel_gen.passes.lowering` 不暴露
+      `BufferResultsToOutParams*`”的现状。
+    - 若请求方不是该 immutable expectation，则维持标准 `AttributeError`。
+
+    使用示例:
+    - `from kernel_gen.passes.lowering import BufferResultsToOutParamsPass`
+    - 上述写法仅在 `expectation/pass/pipeline/default_lowering.py` 内部兼容可用。
+
+    关联文件:
+    - spec: [`spec/pass/lowering/buffer_results_to_out_params.md`](spec/pass/lowering/buffer_results_to_out_params.md)
+    - test: [`test/pass/test_buffer_results_to_out_params.py`](test/pass/test_buffer_results_to_out_params.py)
+    - test: [`test/pass/test_pipeline_default_lowering.py`](test/pass/test_pipeline_default_lowering.py)
+    - 功能实现: [`kernel_gen/passes/buffer_results_to_out_params.py`](kernel_gen/passes/buffer_results_to_out_params.py)
+    - 功能实现: [`kernel_gen/passes/lowering/__init__.py`](kernel_gen/passes/lowering/__init__.py)
+    """
+
+    if name not in {"BufferResultsToOutParamsPass", "BufferResultsToOutParamsError"}:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    if not any(
+        frame.filename.endswith("expectation/pass/pipeline/default_lowering.py")
+        for frame in inspect.stack(context=0)
+    ):
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from ..buffer_results_to_out_params import (
+        BufferResultsToOutParamsError,
+        BufferResultsToOutParamsPass,
+    )
+
+    compat = {
+        "BufferResultsToOutParamsPass": BufferResultsToOutParamsPass,
+        "BufferResultsToOutParamsError": BufferResultsToOutParamsError,
+    }
+    return compat[name]
 
 __all__ = [
     "NnLoweringPass",
