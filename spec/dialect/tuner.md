@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`咯咯咯`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dialect/tuner.md`](../../spec/dialect/tuner.md)
 - `功能实现`：[`kernel_gen/dialect/tuner.py`](../../kernel_gen/dialect/tuner.py)
 - `test`：
@@ -27,7 +27,7 @@
 - 在 IR 中提供统一的超参数声明入口。
 - 在 IR 中提供统一的局部成本节点入口，使 pass 可把原 op 的 operands 与 attrs 映射为 `tuner.cost(...)->!symbol.int<"expr">`。
 - 保持 `parse/print` 与 verifier 约束清晰，保证超参数名可稳定打印与校验。
-- 当前 `tuner.cost.cost_kind` 的公开合法集合固定为 `compute` 与 `memory`。
+- 当前 `tuner.cost.cost_kind` 的公开方向为任意非空字符串 attr。
 
 ## 限制与边界
 
@@ -38,7 +38,7 @@
 - `tuner.param` 结果类型必须为 `!symbol.dim<"name">`；不得使用 `!symbol.int<"...">`、builtin `index`、普通整数或其他类型替代。
 - `name` 必须为非空标识符，且只能包含字母、数字与下划线，并以字母或下划线开头。
 - `tuner.cost` 无 region，operand 列表按原 op operands 原顺序透传，结果类型固定为 `!symbol.int<"expr">`。
-- `tuner.cost` 的 `cost_kind` 只接受 `compute` 或 `memory`，`op_name` 必须为非空字符串。
+- `tuner.cost` 的 `cost_kind` 必须为非空字符串 attr，`op_name` 必须为非空字符串。
 - `tuner.cost` 不再公开 `kind`、`device_func` 两个 attrs；若实现仍生成这两个字段，verifier 必须显式拒绝。
 - `tuner.cost` 不求值、不查表、不裁剪节点；“不同 `cost_kind` 下某类 op 是否为 0”属于后续 evaluator 语义。
 - 本方言不定义任何超参数值求解、范围约束、搜索策略、默认值逻辑或真实 cost evaluator。
@@ -82,14 +82,14 @@
 参数说明：
 
 - `operands(SSA value...)`：原 op operands，数量与顺序必须与原 op 一致；原 op 无 operands 时本列表为空。
-- `cost_kind(str attr)`：当前 cost function 的统计视角，只允许 `"compute"` 或 `"memory"`。
+- `cost_kind(str attr)`：当前 cost function 的统计视角；允许任意非空字符串。
 - `op_name(str attr)`：原 op 名称，例如 `"dma.copy"`、`"kernel.matmul"`、`"arch.barrier"`。
 
 使用示例：
 
 ```text
 %cost0 = tuner.cost(%tile_m, %k) {cost_kind = "memory", op_name = "dma.copy"} : (!symbol.int<"TILE_M">, !symbol.int<"K">) -> !symbol.int<"LOCAL">
-%cost1 = tuner.cost() {cost_kind = "compute", op_name = "arch.barrier", scope = #arch.scope<global>} : () -> !symbol.int<"BARRIER_COST">
+%cost1 = tuner.cost() {cost_kind = "latency", op_name = "arch.barrier", scope = #arch.scope<global>} : () -> !symbol.int<"BARRIER_COST">
 ```
 
 注意事项：
@@ -97,7 +97,7 @@
 - `tuner.cost` 只传原 op operands，不额外插入摘要 operand。
 - 原 op attributes 必须平铺保留；若原 op 已存在 `cost_kind / op_name` 任一同名 attr，生成方必须显式失败，不得覆盖或静默改名。
 - `cost_kind` 表示当前 cost function 的统计视角；是否保留节点、如何累计属于外层 pass 语义。
-- `kind2`、`kind3`、`all` 与其他旧值不再属于当前公开输入域。
+- 空串、全空白字符串不属于当前公开输入域。
 - 本 op 不负责把局部成本汇总成函数返回值；汇总由外层 cost function 通过 `symbol.add` 与 `symbol.for` carried `!symbol.int<"...">` 完成。
 
 返回与限制：
@@ -109,7 +109,7 @@
 
 - 测试文件：[`test/dialect/test_tuner_dialect.py`](../../test/dialect/test_tuner_dialect.py)
 - 执行命令：`pytest -q test/dialect/test_tuner_dialect.py -k "tuner_cost"`
-- 测试目标：验证 `tuner.cost` 的 parse/print、operand 透传、`!symbol.int<"...">` 结果类型、`compute/memory` verifier 与错误路径。
+- 测试目标：验证 `tuner.cost` 的 parse/print、operand 透传、`!symbol.int<"...">` 结果类型、open-kind verifier 与错误路径。
 
 - 测试文件：[`test/pass/test_launch_kernel_cost_func.py`](../../test/pass/test_launch_kernel_cost_func.py)
 - 执行命令：`pytest -q test/pass/test_launch_kernel_cost_func.py -k "launch_kernel_cost_func"`
@@ -123,5 +123,5 @@
 | TC-TUNER-002 | `tuner.param` 结果类型必须为 `!symbol.dim<"name">` | `test_tuner_param_rejects_invalid_result_type` |
 | TC-TUNER-003 | `tuner.param` 的 `name` 非法时报错 | `test_tuner_param_rejects_invalid_name` |
 | TC-TUNER-004 | `tuner.cost` parse/print 与 operand 透传稳定，结果类型固定为 `!symbol.int<"...">` | `test_tuner_cost_round_trip` |
-| TC-TUNER-005 | `tuner.cost.cost_kind` 仅允许 `compute / memory`，并拒绝旧 `kind / device_func` attrs | `test_tuner_cost_rejects_invalid_kind_attrs` |
+| TC-TUNER-005 | `tuner.cost.cost_kind` 必须是非空字符串，并拒绝旧 `kind / device_func` attrs | `test_tuner_cost_rejects_invalid_kind_attrs` |
 | TC-TUNER-006 | `tuner.cost` 必须包含 `cost_kind / op_name`，且结果类型必须为 `!symbol.int<"...">` | `test_tuner_cost_rejects_missing_attrs_or_invalid_result_type` |

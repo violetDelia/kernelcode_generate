@@ -369,7 +369,7 @@ def test_launch_kernel_cost_func_memory_keeps_compute_nodes() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-23 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-23 00:00:00 +0800
-# 功能说明: 验证 `cost_kind=compute|memory` 会按顺序新增 2 个 cost function。
+# 功能说明: 验证 open-kind 多值列表会按顺序新增对应数量的 cost function。
 # 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_builds_cost_functions_for_multi_kind_order
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
 # 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
@@ -377,7 +377,7 @@ def test_launch_kernel_cost_func_memory_keeps_compute_nodes() -> None:
 def test_launch_kernel_cost_func_builds_cost_functions_for_multi_kind_order() -> None:
     module = _build_launch_kernel_module()
 
-    LaunchKernelCostFuncPass(cost_kind="compute|memory").run(module)
+    LaunchKernelCostFuncPass(cost_kind="compute|memory|latency").run(module)
     module.verify()
 
     funcs = [op for op in module.ops if isinstance(op, func.FuncOp)]
@@ -386,13 +386,14 @@ def test_launch_kernel_cost_func_builds_cost_functions_for_multi_kind_order() ->
         "_device_kernel",
         "_cost_compute__device_kernel",
         "_cost_memory__device_kernel",
+        "_cost_latency__device_kernel",
     ]
 
     printed = _print_ir(module)
-    for kind in ("compute", "memory"):
+    for kind in ("compute", "memory", "latency"):
         assert printed.count(f'cost_kind = "{kind}"') == 2
         assert f'_cost_{kind}__device_kernel' in printed
-    assert printed.count("tuner.cost") == 4
+    assert printed.count("tuner.cost") == 6
     assert "{kind =" not in printed
 
 
@@ -428,17 +429,16 @@ def test_launch_kernel_cost_func_shared_callee_once() -> None:
 @pytest.mark.parametrize(
     "cost_kind",
     [
-        "invalid",
-        "compute|invalid",
+        "",
+        "   ",
         "compute||memory",
-        "compute|memory|compute",
-        "kind2",
+        "compute| latency |compute",
     ],
 )
 def test_launch_kernel_cost_func_rejects_invalid_cost_kind(cost_kind: str) -> None:
     with pytest.raises(
         LaunchKernelCostFuncError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be one of compute, memory$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
     ):
         LaunchKernelCostFuncPass(cost_kind=cost_kind)
 
@@ -458,9 +458,9 @@ def test_launch_kernel_cost_func_rejects_invalid_cost_kind_via_registry() -> Non
 
     with pytest.raises(
         LaunchKernelCostFuncError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be one of compute, memory$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
     ):
-        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "invalid"})
+        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "memory|latency|memory"})
 
 
 # TC-LKCF-006

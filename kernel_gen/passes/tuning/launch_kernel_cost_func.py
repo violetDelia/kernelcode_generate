@@ -7,10 +7,11 @@
 - 为 module 中被 `arch.launch` 引用的 device function 生成 sibling cost function。
 - 在 cost function 中保留 `symbol.for` 结构，复制必要的 helper op，并为 `dma/kernel/arch` op 生成 `tuner.cost` 与 `!symbol.int + symbol.add` 累计链。
 - 保持原 host wrapper 与原 device function 不变。
+- `cost_kind` 接受任意非空、`|` 分隔且去重后的 kind 名列表。
 
 使用示例:
 - from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
-    - module = LaunchKernelCostFuncPass(cost_kind="compute|memory").run(module)
+    - module = LaunchKernelCostFuncPass(cost_kind="compute|latency|bandwidth").run(module)
 
 关联文件:
 - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
@@ -31,10 +32,12 @@ from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolForOp, S
 from kernel_gen.dialect.tuner import TunerCostOp
 from kernel_gen.passes.pass_manager import Pass
 
-_VALID_COST_KINDS = ("compute", "memory")
 _RESERVED_METADATA_ATTRS = ("kind", "cost_kind", "op_name", "device_func")
 _SUPPORTED_COST_PREFIXES = ("dma.", "kernel.", "arch.")
 _HELPER_OP_NAMES = ("dma.view", "dma.reshape")
+_INVALID_COST_KIND_ERROR = (
+    "LaunchKernelCostFuncError: cost_kind must be a non-empty '|' separated list of unique kind names"
+)
 
 
 class LaunchKernelCostFuncError(ValueError):
@@ -48,7 +51,9 @@ class LaunchKernelCostFuncError(ValueError):
     - 为非法 `cost_kind`、callee 缺失、重名 cost function、metadata attr 冲突与非支持 op 等边界提供统一错误类型。
 
     使用示例:
-    - raise LaunchKernelCostFuncError("LaunchKernelCostFuncError: cost_kind must be one of compute, memory")
+    - raise LaunchKernelCostFuncError(
+    -     "LaunchKernelCostFuncError: cost_kind must be a non-empty '|' separated list of unique kind names"
+    - )
 
     关联文件:
     - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
@@ -64,12 +69,12 @@ def _normalize_cost_kinds(cost_kind: str) -> tuple[str, ...]:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 只接受 `compute`、`memory` 两种公开值。
-    - 多值时按 `|` 分隔并保持顺序；空段、重复段或未知段都显式失败。
+    - 接受任意非空 kind 名，多值时按 `|` 分隔并保持顺序。
+    - 会去掉每段首尾空白；空段、全空白段或重复段都显式失败。
     - 失败时抛出稳定错误短语，便于 registry 与 pytest 做机械匹配。
 
     使用示例:
-    - cost_kinds = _normalize_cost_kinds("compute|memory")
+    - cost_kinds = _normalize_cost_kinds("compute|latency|bandwidth")
 
     关联文件:
     - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
@@ -78,21 +83,15 @@ def _normalize_cost_kinds(cost_kind: str) -> tuple[str, ...]:
     """
 
     if not cost_kind:
-        raise LaunchKernelCostFuncError(
-            "LaunchKernelCostFuncError: cost_kind must be one of compute, memory"
-        )
-    kinds = cost_kind.split("|")
+        raise LaunchKernelCostFuncError(_INVALID_COST_KIND_ERROR)
+    kinds = [kind.strip() for kind in cost_kind.split("|")]
     if any(kind == "" for kind in kinds):
-        raise LaunchKernelCostFuncError(
-            "LaunchKernelCostFuncError: cost_kind must be one of compute, memory"
-        )
+        raise LaunchKernelCostFuncError(_INVALID_COST_KIND_ERROR)
     normalized: list[str] = []
     seen: set[str] = set()
     for kind in kinds:
-        if kind not in _VALID_COST_KINDS or kind in seen:
-            raise LaunchKernelCostFuncError(
-                "LaunchKernelCostFuncError: cost_kind must be one of compute, memory"
-            )
+        if kind in seen:
+            raise LaunchKernelCostFuncError(_INVALID_COST_KIND_ERROR)
         seen.add(kind)
         normalized.append(kind)
     return tuple(normalized)
@@ -109,7 +108,7 @@ def _normalize_cost_kind(cost_kind: str) -> str:
     - 单值返回原值，多值返回 `|` 拼接后的规范顺序。
 
     使用示例:
-    - cost_kind = _normalize_cost_kind("compute|memory")
+    - cost_kind = _normalize_cost_kind("compute|latency|bandwidth")
 
     关联文件:
     - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
@@ -490,7 +489,7 @@ class LaunchKernelCostFuncPass(Pass):
     - 不改写原 host wrapper 与原 device function。
 
     使用示例:
-    - module = LaunchKernelCostFuncPass(cost_kind="compute|memory").run(module)
+    - module = LaunchKernelCostFuncPass(cost_kind="compute|latency|bandwidth").run(module)
 
     关联文件:
     - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
@@ -531,11 +530,11 @@ class LaunchKernelCostFuncPass(Pass):
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 支持 `{"cost_kind": "compute|memory"}` 形式的 registry 入口。
+        - 支持 `{"cost_kind": "compute|latency|bandwidth"}` 形式的 registry 入口。
         - 拒绝未知选项，避免静默吞参。
 
         使用示例:
-        - pass_obj = LaunchKernelCostFuncPass.from_options({"cost_kind": "compute|memory"})
+        - pass_obj = LaunchKernelCostFuncPass.from_options({"cost_kind": "compute|latency|bandwidth"})
 
         关联文件:
         - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)

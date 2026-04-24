@@ -222,10 +222,10 @@ builtin.module {
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-23 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-23 00:00:00 +0800
-# 测试目的: 验证 tuner.cost 对 compute / memory 两个公开 cost_kind 均可 parse/print 与 verify。
+# 测试目的: 验证 tuner.cost 对任意非空 cost_kind 字符串都可 parse/print 与 verify。
 # 对应功能实现文件路径: kernel_gen/dialect/tuner.py
 # 对应 spec 文件路径: spec/dialect/tuner.md
-def test_tuner_cost_accepts_all_public_cost_kinds() -> None:
+def test_tuner_cost_accepts_arbitrary_non_empty_cost_kinds() -> None:
     ctx = _build_context()
     module = Parser(
         ctx,
@@ -234,15 +234,17 @@ builtin.module {
   %tile_m = "test.op"() : () -> !symbol.int<"TILE_M">
   %cost0 = tuner.cost(%tile_m) {cost_kind = "compute", op_name = "dma.copy"} : (!symbol.int<"TILE_M">) -> !symbol.int<"LOCAL">
   %cost1 = tuner.cost(%tile_m) {cost_kind = "memory", op_name = "dma.copy"} : (!symbol.int<"TILE_M">) -> !symbol.int<"LOCAL">
+  %cost2 = tuner.cost(%tile_m) {cost_kind = "latency", op_name = "dma.copy"} : (!symbol.int<"TILE_M">) -> !symbol.int<"LOCAL">
+  %cost3 = tuner.cost(%tile_m) {cost_kind = "memory_traffic", op_name = "dma.copy"} : (!symbol.int<"TILE_M">) -> !symbol.int<"LOCAL">
 }
 """,
     ).parse_module()
     module.verify()
 
     printed = _print_ir(module).rstrip()
-    for kind in ("compute", "memory"):
+    for kind in ("compute", "memory", "latency", "memory_traffic"):
         assert f'cost_kind = "{kind}"' in printed
-    assert printed.count("tuner.cost") == 2
+    assert printed.count("tuner.cost") == 4
 
 
 # TC-TUNER-005
@@ -250,7 +252,7 @@ builtin.module {
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-17 10:30:00 +0800
 # 最近一次运行成功时间: 2026-04-17 10:30:00 +0800
-# 测试目的: 验证 tuner.cost 仅接受公开合同允许的 cost_kind，并拒绝旧公开 attrs。
+# 测试目的: 验证 tuner.cost 拒绝空白 cost_kind，并继续拒绝旧公开 attrs。
 # 对应功能实现文件路径: kernel_gen/dialect/tuner.py
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_cost_rejects_invalid_kind_attrs() -> None:
@@ -258,11 +260,11 @@ def test_tuner_cost_rejects_invalid_kind_attrs() -> None:
 
     with pytest.raises(
         VerifyException,
-        match="tuner.cost cost_kind must be one of compute, memory",
+        match="tuner.cost cost_kind must be non-empty string attr",
     ):
         TunerCostOp(
             [value],
-            cost_kind=StringAttr("kind2"),
+            cost_kind=StringAttr("   "),
             op_name=StringAttr("dma.copy"),
         ).verify()
 

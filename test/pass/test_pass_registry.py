@@ -472,12 +472,12 @@ def test_build_registered_nn_lowering_pass_is_module_pass() -> None:
 def test_build_registered_launch_kernel_cost_func_pass() -> None:
     load_builtin_passes()
 
-    pass_obj = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "compute|memory"})
+    pass_obj = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "compute|memory|latency"})
 
     assert pass_obj.name == "launch-kernel-cost-func"
     assert type(pass_obj).__name__ == "LaunchKernelCostFuncPass"
-    assert getattr(pass_obj, "cost_kind") == "compute|memory"
-    assert getattr(pass_obj, "cost_kinds") == ("compute", "memory")
+    assert getattr(pass_obj, "cost_kind") == "compute|memory|latency"
+    assert getattr(pass_obj, "cost_kinds") == ("compute", "memory", "latency")
 
 
 # TC-REGISTRY-007C
@@ -495,9 +495,9 @@ def test_build_registered_launch_kernel_cost_func_rejects_invalid_kind() -> None
 
     with pytest.raises(
         LaunchKernelCostFuncError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be one of compute, memory$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
     ):
-        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "invalid"})
+        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "memory|latency|memory"})
 
 
 # TC-REGISTRY-007D
