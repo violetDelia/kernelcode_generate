@@ -53,7 +53,7 @@
 | `get_subthread_id()` | `arch.get_subthread_id` | subthread 索引查询。 |
 | `get_subthread_num()` | `arch.get_subthread_num` | subthread 数量查询。 |
 | `get_dynamic_memory(space)` | `arch.get_dynamic_memory` | 动态片上内存入口。 |
-| `launch_kernel(callee, block, thread, subthread, shared_memory_size)` | `arch.launch` | kernel 启动描述。 |
+| `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` | `arch.launch` | kernel 启动描述。 |
 
 ## 公开接口
 

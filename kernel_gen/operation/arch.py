@@ -260,7 +260,7 @@ def _resolve_launch_context_symbol(symbol_name: str) -> SymbolDim | None:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 在 `launch_kernel(...)` 临时上下文内，把 `block/thread/subthread` extent 暴露给数量类 helper。
+    - 在 `launch_kernel[...]` 启动请求执行期间，把 `block/thread/subthread` extent 暴露给数量类 helper。
     - 若当前不存在 launch 上下文，则返回 `None`。
 
     使用示例:
@@ -637,7 +637,7 @@ def _launch_context(block: LaunchExtent, thread: LaunchExtent, subthread: Launch
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 供 `launch_kernel(...)` 在调用 Python 函数对象时临时暴露 launch extent。
+    - 供 `launch_kernel[...]` 在调用 Python 函数对象时临时暴露 launch extent。
     - 离开上下文后恢复上一层 launch 语义，支持嵌套 launch。
 
     使用示例:
@@ -924,8 +924,8 @@ class _LaunchKernelBuilder:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 兼容直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)`。
-    - 支持新的 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 入口。
+    - 公开入口固定为 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`。
+    - 直调用 `launch_kernel(...)` 不再属于公开合同，必须在调用边界显式失败。
 
     使用示例:
     - launch_kernel[1, 4, 1, 0](kernel_body, lhs, rhs, out)
@@ -936,18 +936,14 @@ class _LaunchKernelBuilder:
     - 功能实现: kernel_gen/operation/arch.py
     """
 
-    def __call__(
-        self,
-        callee: object,
-        block: LaunchExtent,
-        thread: LaunchExtent,
-        subthread: LaunchExtent,
-        shared_memory_size: LaunchSharedMemorySize,
-        *args: object,
-    ) -> None:
-        """兼容直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)`。"""
+    def __call__(self, *args: object, **kwargs: object) -> None:
+        """拒绝旧直调用，要求使用下标式公开入口。"""
 
-        return _launch_kernel_impl(callee, block, thread, subthread, shared_memory_size, args)
+        del args, kwargs
+        raise TypeError(
+            "launch_kernel public API is "
+            "launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)"
+        )
 
     def __getitem__(self, extents: object) -> _LaunchKernelInvocation:
         """绑定 `launch_kernel[...]` 的四个 launch extent。"""

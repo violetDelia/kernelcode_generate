@@ -261,7 +261,7 @@ def test_barrier_rejects_invalid_arguments() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-06 03:47:21 +0800
 # 最近一次运行成功时间: 2026-04-06 03:47:21 +0800
-# 测试目的: 验证 launch_kernel 接受函数对象、合法 extent 与尾部 kernel args，且 launched body 查询返回本次 launch extent。
+# 测试目的: 验证 launch_kernel[...] 接受函数对象、合法 extent 与尾部 kernel args，且 launched body 查询返回本次 launch extent。
 # 使用示例: pytest -q test/operation/test_operation_arch.py -k test_launch_kernel_accepts_valid_extents_and_kernel_args
 # 对应功能实现文件路径: kernel_gen/operation/arch.py
 # 对应 spec 文件路径: spec/operation/arch.md
@@ -275,7 +275,7 @@ def test_launch_kernel_accepts_valid_extents_and_kernel_args() -> None:
         captured["thread"] = get_thread_num().get_value()
         captured["subthread"] = get_subthread_num().get_value()
 
-    result = launch_kernel(add_barrier_body, SymbolDim("GRID_X"), 128, 4, 0, "lhs", "rhs", "out")
+    result = launch_kernel[SymbolDim("GRID_X"), 128, 4, 0](add_barrier_body, "lhs", "rhs", "out")
 
     assert result is None
     assert captured["args"] == ("lhs", "rhs", "out")
@@ -289,7 +289,7 @@ def test_launch_kernel_accepts_valid_extents_and_kernel_args() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-06 03:47:21 +0800
 # 最近一次运行成功时间: 2026-04-06 03:47:21 +0800
-# 测试目的: 验证 launch_kernel 对字符串 callee、非法类型与静态非正规模报错。
+# 测试目的: 验证 launch_kernel[...] 对字符串 callee、非法类型与静态非正规模报错。
 # 使用示例: pytest -q test/operation/test_operation_arch.py -k test_launch_kernel_rejects_invalid_arguments
 # 对应功能实现文件路径: kernel_gen/operation/arch.py
 # 对应 spec 文件路径: spec/operation/arch.md
@@ -299,21 +299,23 @@ def test_launch_kernel_rejects_invalid_arguments() -> None:
         raise AssertionError("unsupported launch must fail before body execution")
 
     with pytest.raises(TypeError, match="callee must be function object"):
-        launch_kernel("my_kernel", 1, 1, 1, 0)
+        launch_kernel[1, 1, 1, 0]("my_kernel")
     with pytest.raises(TypeError, match="callee must be function object"):
-        launch_kernel(object(), 1, 1, 1, 0)
+        launch_kernel[1, 1, 1, 0](object())
     with pytest.raises(TypeError, match="block must be int or SymbolDim"):
-        launch_kernel(kernel_body, "1", 1, 1, 0)
+        launch_kernel["1", 1, 1, 0](kernel_body)
     with pytest.raises(TypeError, match="thread must be int or SymbolDim"):
-        launch_kernel(kernel_body, 1, object(), 1, 0)
+        launch_kernel[1, object(), 1, 0](kernel_body)
     with pytest.raises(TypeError, match="subthread must be int or SymbolDim"):
-        launch_kernel(kernel_body, 1, 1, [], 0)
+        launch_kernel[1, 1, [], 0](kernel_body)
     with pytest.raises(ValueError, match="block must be > 0"):
-        launch_kernel(kernel_body, 0, 1, 1, 0)
+        launch_kernel[0, 1, 1, 0](kernel_body)
     with pytest.raises(ValueError, match="thread must be > 0"):
-        launch_kernel(kernel_body, 1, -1, 1, 0)
+        launch_kernel[1, -1, 1, 0](kernel_body)
     with pytest.raises(ValueError, match="subthread must be > 0"):
-        launch_kernel(kernel_body, 1, 1, 0, 0)
+        launch_kernel[1, 1, 0, 0](kernel_body)
+    with pytest.raises(ValueError, match="shared_memory_size must be >= 0"):
+        launch_kernel[1, 1, 1, -1](kernel_body)
 
 
 # TC-OP-ARCH-013
@@ -321,7 +323,7 @@ def test_launch_kernel_rejects_invalid_arguments() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-06 03:47:21 +0800
 # 最近一次运行成功时间: 2026-04-06 03:47:21 +0800
-# 测试目的: 验证 launch_kernel 调用签名固定为 callee/block/thread/subthread + 尾部位置 args，且未知关键字/缺参报 TypeError。
+# 测试目的: 验证 launch_kernel 的公开入口固定为下标式，旧直调用与未知关键字都在调用边界报 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_arch.py -k test_launch_kernel_call_signature_errors
 # 对应功能实现文件路径: kernel_gen/operation/arch.py
 # 对应 spec 文件路径: spec/operation/arch.md
@@ -330,12 +332,21 @@ def test_launch_kernel_call_signature_errors() -> None:
     def kernel_body() -> None:
         return None
 
-    with pytest.raises(TypeError):
+    pattern = (
+        "launch_kernel public API is "
+        "launch_kernel\\[block, thread, subthread, shared_memory_size\\]\\(callee, \\*args\\)"
+    )
+
+    with pytest.raises(TypeError, match=pattern):
+        launch_kernel(kernel_body, 1, 1, 1, 0)
+    with pytest.raises(TypeError, match=pattern):
         launch_kernel(block=1, thread=1, subthread=1, callee=kernel_body)
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match=pattern):
         launch_kernel(block=1, thread=1, subthread=1, shared_memory_size=0)
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match=pattern):
         launch_kernel(callee=kernel_body, block=1, thread=1, subthread=1, shared_memory_size=0, grid=1)
+    with pytest.raises(TypeError, match="launch_kernel extents must contain block, thread, subthread, shared_memory_size"):
+        launch_kernel[1, 1, 1](kernel_body)
 
 
 # TC-OP-ARCH-014
@@ -343,18 +354,18 @@ def test_launch_kernel_call_signature_errors() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-06 03:47:21 +0800
 # 最近一次运行成功时间: 2026-04-06 03:47:21 +0800
-# 测试目的: 验证 launch_kernel 关键字调用仅允许 callee/block/thread/subthread 且语义一致。
-# 使用示例: pytest -q test/operation/test_operation_arch.py -k test_launch_kernel_keyword_call_success
+# 测试目的: 验证 launch_kernel[...] 是唯一公开调用形态，旧关键字直调用不再成功。
+# 使用示例: pytest -q test/operation/test_operation_arch.py -k test_launch_kernel_subscript_form_is_public_api
 # 对应功能实现文件路径: kernel_gen/operation/arch.py
 # 对应 spec 文件路径: spec/operation/arch.md
 # 对应测试文件路径: test/operation/test_operation_arch.py
-def test_launch_kernel_keyword_call_success() -> None:
+def test_launch_kernel_subscript_form_is_public_api() -> None:
     captured: list[str] = []
 
     def kernel_body() -> None:
         captured.append("called")
 
-    result = launch_kernel(thread=2, subthread=1, block=4, shared_memory_size=0, callee=kernel_body)
+    result = launch_kernel[4, 2, 1, 0](kernel_body)
 
     assert result is None
     assert captured == ["called"]
@@ -398,7 +409,7 @@ def test_launch_queries_and_memory_prefer_launch_or_hardware_context() -> None:
             captured["subthread"] = get_subthread_num().get_value()
             captured["smem_shape"] = get_dynamic_memory(MemorySpace.SM).get_shape()
 
-        launch_kernel(launched_body, SymbolDim("GRID_X"), 8, SymbolDim("SUBTHREAD_X"), 0)
+        launch_kernel[SymbolDim("GRID_X"), 8, SymbolDim("SUBTHREAD_X"), 0](launched_body)
 
         assert block_num.get_value() == 256
         assert thread_num.get_value() == 128
@@ -449,7 +460,7 @@ def test_barrier_and_launch_helpers_reject_unsupported_target_ops() -> None:
         with pytest.raises(ValueError, match="arch.barrier"):
             barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.BLOCK)
         with pytest.raises(ValueError, match="arch.launch"):
-            launch_kernel(lambda: None, 1, 1, 1, 0)
+            launch_kernel[1, 1, 1, 0](lambda: None)
     finally:
         target_registry._set_current_target(None)
 
