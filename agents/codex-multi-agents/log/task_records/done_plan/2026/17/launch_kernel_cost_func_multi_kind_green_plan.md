@@ -1,6 +1,6 @@
 # launch_kernel_cost_func_multi_kind_green_plan.md
 
-> 说明：该文件为 `launch_kernel_cost_func_multi_kind` 的归档承载快照。最新主线 `origin/main@791b9d0ed6a74276f2cf2e08fadd55156e874469` 已不再包含 `ARCHITECTURE/plan/launch_kernel_cost_func_multi_kind_green_plan.md` 与 `TODO.md`，因此后续计划状态、结论和续接依据统一收口到本归档文件与对应任务记录，不再回写缺失的计划正文或 `TODO.md`。
+> 说明：该文件为 `launch_kernel_cost_func_multi_kind` 的归档承载快照。当前 latest 远端基线 `origin/main@5d97a99588170fa33bc33b3c95807bd39492ffd6`，且自 `origin/main@791b9d0ed6a74276f2cf2e08fadd55156e874469` 起的后续主线现场，均不再包含 `ARCHITECTURE/plan/launch_kernel_cost_func_multi_kind_green_plan.md` 与 `TODO.md`；因此后续计划状态、结论和续接依据统一收口到本归档文件与对应任务记录，不再回写缺失的计划正文或 `TODO.md`。
 
 ## 文档信息
 
@@ -365,7 +365,7 @@ cost_kind = "latency"
 ## 任务创建记录
 
 - `S1=T-20260423-9c23217c，任务类型 spec，worktree=wt-20260422-launch-kernel-cost-multi-kind-s1，依赖 T-20260422-f94ed233`
-- `归档前最后一次共享计划快照状态：TODO.md 计划状态曾为 1/0/1 进行中；latest main@791b9d0 已无 TODO.md，后续状态以 done_plan 与任务记录为准`
+- `归档前最后一次共享计划快照状态：TODO.md 计划状态曾为 1/0/1 进行中；当前 latest 远端基线 origin/main@5d97a99588170fa33bc33b3c95807bd39492ffd6，且自 791b9d0 起的后续主线现场均已无 TODO.md，后续状态以 done_plan 与任务记录为准`
 
 ## 计划书自检
 
@@ -388,5 +388,5 @@ cost_kind = "latency"
 任务：T-20260425-393f25ad
 任务目标：把 `launch_kernel_cost_func_multi_kind` 的计划资产对齐到 latest main 仍存在的承载位置，仅处理计划文件、归档与记录资产。
 改动：将共享计划快照复制到 `agents/codex-multi-agents/log/task_records/done_plan/2026/17/launch_kernel_cost_func_multi_kind_green_plan.md`；新增 latest main 已无 `ARCHITECTURE/plan/launch_kernel_cost_func_multi_kind_green_plan.md` 与 `TODO.md` 的说明；将原 `TODO.md 计划状态` 改成归档前快照说明，避免继续引用最新主线中已不存在的状态文件。
-验证：`git -C /home/lfr/kernelcode_generate/wt-20260425-launch-kernel-cost-multi-kind-repair-s7 rev-parse HEAD` -> `791b9d0ed6a74276f2cf2e08fadd55156e874469`；`git -C /home/lfr/kernelcode_generate/wt-20260425-launch-kernel-cost-multi-kind-repair-s7 ls-tree --name-only HEAD` 与 `git -C ... ls-tree -r --name-only HEAD | rg 'launch_kernel_cost_func_multi_kind|TODO\\.md'` -> latest main 树中无该计划正文与 `TODO.md`；当前归档文件已创建为最新主线可承载位置。
+验证：`git -C /home/lfr/kernelcode_generate/wt-20260425-launch-kernel-cost-multi-kind-repair-s7 rev-parse HEAD` -> `791b9d0ed6a74276f2cf2e08fadd55156e874469`；`git -C /home/lfr/kernelcode_generate/wt-20260425-launch-kernel-cost-multi-kind-repair-s8 rev-parse origin/main` -> `5d97a99588170fa33bc33b3c95807bd39492ffd6`；对两处主线树分别执行 `ls-tree -r --name-only ... | rg '^ARCHITECTURE/plan/launch_kernel_cost_func_multi_kind_green_plan\\.md$|^TODO\\.md$|^agents/codex-multi-agents/log/task_records/done_plan/2026/17/launch_kernel_cost_func_multi_kind_green_plan\\.md$'`，结果表明：791b9d0 时主线尚无该计划正文、`TODO.md` 与 done_plan 承载文件；当前 latest 主线已由 done_plan 文件承接，但仍无 `ARCHITECTURE/plan/...` 与 `TODO.md`。`
 结论：该计划的后续承载点已改为 `done_plan` 归档文件；若后续还需引用计划正文，应以本文件与任务记录为准。
