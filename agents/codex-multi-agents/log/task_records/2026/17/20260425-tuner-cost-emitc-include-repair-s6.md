@@ -117,3 +117,29 @@ Diff 反推审查：
 - 已沿用前序 `build/review` 记录中的 latest-main 现场核对、链接校验、缺失路径核对和 `git diff --check` 结果。
 - merge 阶段不追加新的实现测试，只在提交前复核当前 diff 仍为上述两文件。
 结论：merge 工作日志已补齐，可以继续执行提交、推送、`-done` 与管理员回报。
+
+---
+时间：2026-04-25 22:19 +0800
+经办人：李白
+任务：T-20260425-5fd7d2a1
+任务目标：完成 merge 提交、推送、状态回写与管理员回报。
+改动：
+- 已在当前 worktree 提交计划资产 / 记录 residual diff，提交号为 `95d5b8c5`。
+- 已推送到 `origin/main`。
+- 主仓已执行 `fetch origin`，但 `ff-only` 到最新 `origin/main` 时被现有本地状态挡住；本轮未覆盖主仓现有改动。
+验证：
+- `git -C /home/lfr/kernelcode_generate/wt-20260425-tuner-cost-emitc-include-repair-s6 push -u origin wt-20260425-tuner-cost-emitc-include-repair-s6:main`
+  - 结果：`361405ec..95d5b8c5 -> main`
+- `git -C /home/lfr/kernelcode_generate merge --ff-only origin/main`
+  - 结果：失败；被以下本地状态挡住：
+    - `agents/codex-multi-agents/log/task_records/2026/17/20260425-launch-kernel-cost-multi-kind-repair-s10.md`
+    - `agents/codex-multi-agents/log/task_records/2026/17/20260425-launch-kernel-cost-multi-kind-repair-s5.md`
+    - `agents/codex-multi-agents/log/task_records/2026/17/20260425-launch-kernel-cost-multi-kind-repair-s6.md`
+    - `agents/codex-multi-agents/log/task_records/2026/17/20260425-launch-kernel-cost-multi-kind-repair-s7.md`
+    - `agents/codex-multi-agents/log/task_records/2026/17/20260425-launch-kernel-cost-multi-kind-repair-s8.md`
+    - `agents/codex-multi-agents/log/task_records/2026/17/20260425-launch-kernel-cost-multi-kind-repair-s9.md`
+    - `agents/codex-multi-agents/log/task_records/2026/17/20260425-pass-infra-repair-s11.md`
+    - `expectation/dsl/emit_c/npu_demo/__main__.py`
+    - `expectation/dsl/emit_c/npu_demo/cost/__main__.py`
+    - `expectation/pass/tuning/launch_kernel_cost_func_compute_memory/basic_all.py`
+结论：merge 已完成并推送；接下来执行 `-done`，并按当前主仓阻塞事实回报管理员。
