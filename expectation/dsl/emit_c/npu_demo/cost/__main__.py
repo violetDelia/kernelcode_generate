@@ -1,7 +1,7 @@
 """emit_c npu_demo cost expectation 目录入口。
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 运行 `expectation/dsl/emit_c/npu_demo/cost` 目录下的全部 expectation。
@@ -18,27 +18,45 @@
 - 功能实现: [`expectation/dsl/emit_c/npu_demo/cost/__main__.py`](expectation/dsl/emit_c/npu_demo/cost/__main__.py)
 """
 
+from importlib import import_module
 from pathlib import Path
-import sys
 
 CURRENT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "kernel_gen").exists())
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-if str(CURRENT_DIR) not in sys.path:
-    sys.path.insert(0, str(CURRENT_DIR))
 
-try:
-    from .._shared import discover_and_run_modules
-except ImportError:
-    from expectation.dsl.emit_c.npu_demo._shared import discover_and_run_modules
+
+def _load_shared_runner() -> object:
+    """加载 `cost` 目录入口依赖的共享 runner。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 包上下文可用时优先走 sibling package import。
+    - 包上下文缺失时退回绝对导入，避免依赖旧目录结构或临时 `sys.path` 注入。
+
+    使用示例:
+    - `discover_and_run_modules = _load_shared_runner()`
+
+    关联文件:
+    - spec: [`spec/dsl/emit_c.md`](spec/dsl/emit_c.md)
+    - test: [`test/tools/test_emitc_case_runner.py`](test/tools/test_emitc_case_runner.py)
+    - 功能实现: [`expectation/dsl/emit_c/npu_demo/cost/__main__.py`](expectation/dsl/emit_c/npu_demo/cost/__main__.py)
+    """
+
+    if __package__:
+        from .._shared import discover_and_run_modules as module_runner
+        return module_runner
+    return import_module("expectation.dsl.emit_c.npu_demo._shared").discover_and_run_modules
+
+
+discover_and_run_modules = _load_shared_runner()
 
 
 def main() -> None:
     """运行 `cost` 目录下自动发现到的全部 emit_c expectation。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 自动发现 `cost/` 目录下全部非 `_*.py` expectation 文件。

@@ -508,6 +508,7 @@ npu_demo::deslice(out_tile, out, m0, 16, 1);
 - 下游 `npu_demo` 专项验收至少应覆盖 `TSM/TLM1/TLM2/TLM3` dynamic memory 查询，建议测试名为 `test_emit_c_lowers_npu_demo_dynamic_memory_access`。
 - 下游 `npu_demo` 专项验收至少应覆盖 `alloc + source.view<T> + slice + add + deslice` 管线，建议测试名为 `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline`，且不得回退到 `npu_demo::view(`、`load<`、`store<`。
 - 下游 `npu_demo` 成本专项验收至少应覆盖 `kernel.add`、`kernel.matmul`、`dma.copy` 三个 `tuner.cost` 节点与对应失败路径。
+- 当前目录级合同入口 `python3 -m expectation.dsl.emit_c.npu_demo` 只聚合仓库当前真实存在的 tracked 子目录；在本轮现场中仅允许聚合 `cost/`，不得再硬依赖缺失的 `header/`、`kernel/`、`dma/` 或 `symbol/`。
 
 ### 功能与用例清单
 
