@@ -6,6 +6,20 @@
 - 该层面向 Python/DSL 调用侧，统一约束 `get_block_id/get_block_num/get_thread_id/get_thread_num/get_subthread_id/get_subthread_num/get_dynamic_memory/barrier/launch_kernel` 的入参与返回，不重复定义新的 dialect 语义。
 - operation 层只描述对外 helper 约定；底层 IR 形态、parse/print 与 verifier 约束统一复用 [`spec/dialect/arch.md`](../../spec/dialect/arch.md)。
 
+## API 列表
+
+- `get_block_id()`
+- `get_block_num()`
+- `get_thread_id()`
+- `get_thread_num()`
+- `get_subthread_id()`
+- `get_subthread_num()`
+- `get_dynamic_memory(space)`
+- `BarrierVisibility`
+- `BarrierScope`
+- `barrier(*, visibility, scope)`
+- `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`
+
 ## 文档信息
 
 - 创建者：`咯咯咯`

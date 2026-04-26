@@ -131,7 +131,7 @@ def test_check_python_coverage_supports_file_level_include_module_filter(tmp_pat
             "num_branches": 0,
         },
         "files": {
-            "kernel_gen/tile/common.py": {
+            "kernel_gen/passes/tile/analysis.py": {
                 "summary": {
                     "covered_lines": 5,
                     "num_statements": 5,
@@ -149,7 +149,7 @@ def test_check_python_coverage_supports_file_level_include_module_filter(tmp_pat
             "--coverage-json",
             str(report_path),
             "--include-module",
-            "kernel_gen.tile.common",
+            "kernel_gen.passes.tile.analysis",
             "--line-min",
             "95",
             "--branch-min",
@@ -157,7 +157,7 @@ def test_check_python_coverage_supports_file_level_include_module_filter(tmp_pat
         ]
     )
     assert code == 0
-    assert "scope=kernel_gen/tile/common (1 file(s))" in stdout
+    assert "scope=kernel_gen/passes/tile/analysis (1 file(s))" in stdout
     assert "line=100.00%" in stdout
     assert stderr == ""
 

@@ -2,57 +2,222 @@
 
 ## 功能简介
 
-用于描述静态或动态的形状信息，提供统一的形状输入归一化入口与列表式访问行为。
+用于定义 `SymbolShape` / `SymbolList` 的容器合同。本文只收三件事：输入如何规整为 `SymbolDim`，列表访问与赋值如何工作，公开序列化输出什么。
+
+## API 列表
+
+- `class SymbolList(shapes: Iterable[object])`
+  - `__repr__() -> str`
+  - `__len__() -> int`
+  - `__iter__() -> Iterator[SymbolDim]`
+  - `__reversed__() -> Iterator[SymbolDim]`
+  - `__getitem__(key: int | slice) -> SymbolDim | list[SymbolDim]`
+  - `__setitem__(key: int | slice, value: object) -> None`
+  - `get_shape() -> list[SymbolDim]`
+  - `get_values() -> list[int | str]`
+  - `to_symbols() -> list[int | str]`
+- `class SymbolShape(shapes: Iterable[object])`
+  - `__repr__() -> str`
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`大闸蟹`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/symbol_variable/symbol_shape.md`](../../spec/symbol_variable/symbol_shape.md)
 - `test`：[`test/symbol_variable/test_symbol_shape.py`](../../test/symbol_variable/test_symbol_shape.py)
 - `功能实现`：[`kernel_gen/symbol_variable/symbol_shape.py`](../../kernel_gen/symbol_variable/symbol_shape.py)
 
 ## 依赖
 
-- `kernel_gen/symbol_variable/symbol_dim.py`：[`SymbolDim`](../../kernel_gen/symbol_variable/symbol_dim.py) 的定义与校验规则来源。
-- `spec/symbol_variable/symbol_dim.md`：[`SymbolDim`](../../spec/symbol_variable/symbol_dim.md) 语义约束。
-- [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md)：包级导入/导出边界来源。
+- [`kernel_gen/symbol_variable/symbol_dim.py`](../../kernel_gen/symbol_variable/symbol_dim.py)：单个分量的构造与公开值规则。
+- [`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)：`SymbolDim` 语义来源。
+- [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：`shape/stride` 进入 `Memory` 后的消费规则。
 
 ## 限制与边界
 
-- 仅负责形状容器的保存、访问与序列化，不负责广播、约束求解或形状推导。
-- `SymbolShape(shapes)` 是对外唯一的形状输入归一化入口。
-- 容器不变量：内部存储的元素必须为 `SymbolDim`。
-- 输入元素通过 `SymbolDim(...)` 统一包装，支持 `SymbolDim`、`int` 及 `SymbolDim` 可接受的输入类型。
-- `__getitem__` 支持 `int` 与 `slice`；`__setitem__` 对 `slice` 赋值需逐项规范化。
-- `int` 索引越界统一抛 `IndexError("下标超出范围")`。
-- `int` 索引赋值越界统一抛 `IndexError("下标超出范围")`。
-- `slice` 赋值若传入不可迭代对象，抛 `TypeError`。
-- `slice` 赋值元素的异常边界复用 `SymbolDim(...)`：
-  - 不可转换对象收敛为 `TypeError("切片赋值元素无法转换为 SymbolDim")`。
-  - 浮点输入保持 `SymbolDim` 的 `NotImplementedError`，不在本层改写异常类型。
-- 若实现需要复用输入规整逻辑，应使用 `_normalize_*` 私有命名。
-
-### 相邻边界
-
-- `symbol_dim.md` 负责单个分量的构造与合法性；本文件只负责把这些分量组织成容器，并定义访问、赋值与序列化。
-- `memory.md` 负责 `shape/stride` 作为 `Memory` 元信息被消费时的额外约束；本文件不定义 `Memory` 构造或逐元素算术行为。
-- `package_api.md` 负责包级导入边界；本文件不重复定义 `kernel_gen.symbol_variable` 的导出集合。
+- 只负责容器化保存、访问、切片赋值和序列化，不负责广播、推导或约束求解。
+- 对外唯一的规整入口是 `SymbolShape(shapes)`。
+- 内部元素始终是 `SymbolDim`。
+- `__getitem__` 只支持 `int` / `slice`。
+- `__setitem__` 的 `slice` 赋值必须接收可迭代对象，并逐项规整为 `SymbolDim`。
+- 索引越界统一抛 `IndexError("下标超出范围")`。
+- `slice` 赋值异常边界复用 `SymbolDim(...)`：
+  - 不可转换对象收敛为 `TypeError("切片赋值元素无法转换为 SymbolDim")`
+  - 浮点输入保持 `NotImplementedError`
 
 ## 公开接口
 
-### SymbolShape
+### `class SymbolList(shapes: Iterable[object])`
 
-功能说明：
+功能：
 
-- 具体形状类型，继承 `SymbolList`，提供列表式访问与序列化能力。
-- 公开创建方式为 `SymbolShape(shapes)`。
+- 把可迭代输入规整为 `SymbolDim` 列表。
+- 对外提供列表访问、切片赋值与公开序列化能力。
 
-#### __init__(shapes)
+使用示例：
 
-参数说明：
+```python
+from kernel_gen.symbol_variable.symbol_shape import SymbolList
 
-- `shapes`：可迭代对象，元素为 `SymbolDim` 或可被 `SymbolDim(...)` 接收的值。
+symbol_list = SymbolList(["N", 32, "64"])
+```
+
+返回：
+
+- `SymbolList`
+
+#### `__repr__() -> str`
+
+功能：
+
+- 返回 `List(d0, d1, ...)` 形式的公开文本。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.symbol_shape import SymbolList
+
+assert repr(SymbolList([1, 2])) == "List(1, 2)"
+```
+
+#### `__len__() -> int`
+
+功能：
+
+- 提供标准列表长度能力。
+
+使用示例：
+
+```python
+symbol_list = SymbolList([1, 2, 3])
+assert len(symbol_list) == 3
+```
+
+#### `__iter__() -> Iterator[SymbolDim]`
+
+功能：
+
+- 提供正向迭代能力。
+
+使用示例：
+
+```python
+symbol_list = SymbolList([1, 2, 3])
+assert [dim.get_value() for dim in symbol_list] == [1, 2, 3]
+```
+
+#### `__reversed__() -> Iterator[SymbolDim]`
+
+功能：
+
+- 提供反向迭代能力。
+
+使用示例：
+
+```python
+symbol_list = SymbolList([1, 2, 3])
+assert [dim.get_value() for dim in reversed(symbol_list)] == [3, 2, 1]
+```
+
+#### `__getitem__(key: int | slice) -> SymbolDim | list[SymbolDim]`
+
+功能：
+
+- `int` 索引读取单个 `SymbolDim`
+- `slice` 读取返回 `list[SymbolDim]`
+
+使用示例：
+
+```python
+symbol_list = SymbolList([1, "N", 32])
+first = symbol_list[0]
+part = symbol_list[1:3]
+```
+
+约束：
+
+- `key` 非 `int` / `slice` 抛 `TypeError`
+
+#### `__setitem__(key: int | slice, value: object) -> None`
+
+功能：
+
+- `int` / `slice` 赋值都会先规整为 `SymbolDim`
+
+使用示例：
+
+```python
+symbol_list = SymbolList([1, "N", 32])
+symbol_list[0] = 64
+symbol_list[1:3] = ["M", 128]
+```
+
+约束：
+
+- `key` 非 `int` / `slice` 抛 `TypeError`
+- `slice` 赋值传入非可迭代对象抛 `TypeError`
+
+#### `get_shape() -> list[SymbolDim]`
+
+功能：
+
+- 返回内部 `SymbolDim` 列表的拷贝。
+
+使用示例：
+
+```python
+symbol_list = SymbolList([1, "N"])
+copied = symbol_list.get_shape()
+```
+
+约束：
+
+- 外部修改返回值不影响内部状态。
+
+#### `get_values() -> list[int | str]`
+
+功能：
+
+- 把内部维度序列化为 `list[int | str]`。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.symbol_shape import SymbolList
+
+assert SymbolList(["N", 32]).get_values() == ["N", 32]
+```
+
+约束：
+
+- 静态维度输出 `int`
+- 动态维度输出 `SymbolDim.get_value()` 对应的公开文本
+
+#### `to_symbols() -> list[int | str]`
+
+功能：
+
+- 复用 `get_values()` 的序列化规则。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.symbol_shape import SymbolList
+
+assert SymbolList(["N", "32"]).to_symbols() == ["N", 32]
+```
+
+约束：
+
+- 静态维度输出 `int`
+- 动态维度输出 `SymbolDim.get_value()` 对应的公开文本
+
+### `class SymbolShape(shapes: Iterable[object])`
+
+功能：
+
+- 作为具体 shape 容器对外使用。
+- 继承 `SymbolList` 的构造、索引、迭代和序列化能力。
 
 使用示例：
 
@@ -60,23 +225,18 @@
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 
 shape = SymbolShape(["N", 32, 64])
+cloned = SymbolShape(shape)
 ```
 
-注意事项：
+返回：
 
-- 传入元素会按 `SymbolDim(...)` 规则规范化并保存。
-- `SymbolShape(existing_shape)` 允许以已有 `SymbolShape` 构造等价新对象。
+- `SymbolShape`
 
-返回与限制：
+#### `__repr__() -> str`
 
-- 返回 `SymbolShape` 实例。
-- 规范化失败时向上抛出 `SymbolDim` 对应异常。
+功能：
 
-#### __repr__()
-
-参数说明：
-
-- 无参数。
+- 返回 `Shape(d0, d1, ...)` 形式的公开文本。
 
 使用示例：
 
@@ -86,274 +246,12 @@ from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 assert repr(SymbolShape([1, 2])) == "Shape(1, 2)"
 ```
 
-注意事项：
-
-- 返回值为稳定字符串格式 `Shape(d0, d1, ...)`。
-
-返回与限制：
-
-- 返回 `str`。
-
-#### get_shape()
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.symbol_shape import SymbolShape
-
-shape = SymbolShape([1, 2])
-copy_list = shape.get_shape()
-```
-
-注意事项：
-
-- 返回浅拷贝，外部修改不影响内部列表。
-
-返回与限制：
-
-- 返回 `List[SymbolDim]`。
-
-#### get_values()
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.symbol_shape import SymbolShape
-
-values = SymbolShape(["N", 32]).get_values()
-```
-
-注意事项：
-
-- 动态维度返回 `str(dim.get_symbol())`，静态维度返回 `int(dim.get_symbol())`。
-
-返回与限制：
-
-- 返回 `List[int | str]`。
-
-#### __len__()
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.symbol_shape import SymbolShape
-
-assert len(SymbolShape([1, 2, 3])) == 3
-```
-
-注意事项：
-
-- 以维度数量为长度。
-
-返回与限制：
-
-- 返回 `int`。
-
-#### __iter__()
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.symbol_shape import SymbolShape
-
-for dim in SymbolShape([1, 2]):
-    _ = dim
-```
-
-注意事项：
-
-- 迭代返回 `SymbolDim` 元素。
-
-返回与限制：
-
-- 返回迭代器。
-
-#### __reversed__()
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.symbol_shape import SymbolShape
-
-for dim in reversed(SymbolShape([1, 2])):
-    _ = dim
-```
-
-注意事项：
-
-- 反向迭代 `SymbolDim` 元素。
-
-返回与限制：
-
-- 返回迭代器。
-
-#### __getitem__(key)
-
-参数说明：
-
-- `key`：`int` 或 `slice`。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.symbol_shape import SymbolShape
-
-shape = SymbolShape([1, "N", 3])
-_ = shape[0]
-_ = shape[0:2]
-```
-
-注意事项：
-
-- `int` 索引越界抛 `IndexError("下标超出范围")`。
-- `slice` 返回 `List[SymbolDim]`。
-
-返回与限制：
-
-- `int` 索引返回 `SymbolDim`，`slice` 返回 `List[SymbolDim]`。
-- `key` 非 `int`/`slice` 抛 `TypeError`。
-
-#### __setitem__(key, value)
-
-参数说明：
-
-- `key`：`int` 或 `slice`。
-- `value`：`int`/`SymbolDim`/可迭代对象（当 `key` 为 `slice`）。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.symbol_shape import SymbolShape
-
-shape = SymbolShape([1, "N", 32])
-shape[0] = 64
-shape[1:3] = ["M", 128]
-```
-
-注意事项：
-
-- `int` 索引赋值通过 `SymbolDim(value)` 规范化。
-- `slice` 赋值要求可迭代并逐项规范化。
-
-返回与限制：
-
-- 无返回值。
-- `int` 索引越界抛 `IndexError("下标超出范围")`。
-- `slice` 赋值若传入不可迭代对象或存在非法元素，抛 `TypeError`。
-- `key` 非 `int`/`slice` 抛 `TypeError`。
-
-### SymbolList
-
-功能说明：
-
-- 对外公开的形状列表类型，作为基类提供列表行为与序列化能力。
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.symbol_shape import SymbolList
-
-symbols = SymbolList(["N", 32])
-```
-
-注意事项：
-
-- `SymbolList` 的序列化能力由 `to_symbols()` 提供。
-
-返回与限制：
-
-- 返回 `SymbolList` 实例。
-
-#### to_symbols()
-
-功能说明：
-
-- 将形状序列化为 `int`/`str` 列表。
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.symbol_shape import SymbolList
-
-symbols = SymbolList(["N", 32]).to_symbols()
-```
-
-注意事项：
-
-- 返回规则与 `get_values()` 一致。
-
-返回与限制：
-
-- 返回 `List[int | str]`。
-
-## 测试
-
-- 主测试文件：[`test/symbol_variable/test_symbol_shape.py`](../../test/symbol_variable/test_symbol_shape.py)
-- 交叉验证：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py) 负责验证 `Memory` 对 `SymbolShape` 的消费不回退。
-- 执行命令：`pytest -q test/symbol_variable/test_symbol_shape.py`
-
-### 测试目标
-
-- 构造：支持 `SymbolDim`、`int` 及 `SymbolDim` 可接受的输入。
-- 验证公开输入归一化入口为 `SymbolShape(shapes)`。
-- 列表行为：`len`、迭代、反向迭代、`repr`。
-- 索引访问：`int` 索引越界错误信息一致。
-- 赋值：`int` 索引赋值会转换为 `SymbolDim`，越界时错误信息一致；`slice` 赋值会逐项转换为 `SymbolDim`。
-- `slice` 赋值不可迭代对象触发 `TypeError`。
-- `slice` 赋值存在不可转换对象触发 `TypeError`。
-- `slice` 赋值出现浮点元素时，继续透传 `SymbolDim` 的 `NotImplementedError`。
-- `get_shape()` 返回拷贝，外部修改不影响内部。
-- 序列化：动态维度输出 `str`，静态维度输出 `int`。
-- `SymbolList.to_symbols()` 复用 `get_values()` 的序列化规则。
-- `SymbolShape(existing_shape)` 可构造等价的新形状对象。
-
-### 功能与用例清单
-
-| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 对应测试 |
-|---|---|---|---|---|---|---|
-| SS-001 | 构造 | SymbolDim/int | N/A | `SymbolShape([SymbolDim("N"), 32])` | 构造成功 | `test_init_accepts_symbol_dim_and_int` |
-| SS-002 | 序列化 | 动态/静态 | N/A | `get_values()` | 动态为 str，静态为 int | `test_get_values` |
-| SS-003 | 访问 | 越界 | N/A | `shape[99]` | 抛 `IndexError("下标超出范围")` | `test_getitem_out_of_range` |
-| SS-004 | 访问 | slice 索引 | N/A | `shape[0:1]` | 返回 `List[SymbolDim]` | `test_getitem_slice` |
-| SS-005 | 赋值 | slice 索引 | N/A | `shape[0:2] = [1, "N"]` | 逐项转为 `SymbolDim` | `test_setitem_slice_converts` |
-| SS-006 | 访问 | get_shape 拷贝 | N/A | `get_shape()` | 修改返回值不影响内部 | `test_get_shape_copy` |
-| SS-007 | 异常 | 非法索引类型 | N/A | `shape["x"]` | 抛 `TypeError` | `test_invalid_index_type` |
-| SS-008 | 异常 | slice 不可迭代 | N/A | `shape[0:1] = 1` | 抛 `TypeError`（不可迭代对象） | `test_slice_assign_non_iterable` |
-| SS-009 | 异常 | slice 元素非法对象 | N/A | `shape[0:1] = [object()]` | 抛 `TypeError`（元素类型不合法） | `test_slice_assign_invalid_item` |
-| SS-010 | 异常 | slice 元素为纯数字字符串 | N/A | `shape[0:1] = ["1"]` | 抛 `TypeError("切片赋值元素无法转换为 SymbolDim")` | `test_slice_assign_digit_string` |
-| SS-011 | 序列化 | SymbolList.to_symbols | N/A | `SymbolList(["N", 32]).to_symbols()` | 返回 `["N", 32]` | `test_to_symbols` |
-| SS-012 | 赋值 | int 索引 | N/A | `shape[0] = 64` | 转为 `SymbolDim` | `test_setitem_converts` |
-| SS-013 | 表现 | Shape repr | N/A | `repr(SymbolShape([1, 2]))` | 返回 `Shape(1, 2)` | `test_repr` |
-| SS-014 | 表现 | List repr | N/A | `repr(SymbolList([1, 2]))` | 返回 `List(1, 2)` | `test_list_repr` |
-| SS-015 | 构造 | 由已有 SymbolShape 创建 | N/A | `SymbolShape(SymbolShape([1, 2]))` | 构造等价的新对象 | `test_construct_from_existing_shape` |
-| SS-016 | 迭代 | for-in 迭代 | N/A | `for dim in shape:` | 可遍历 `SymbolDim` | `test_iteration` |
-| SS-017 | 异常 | int 索引赋值越界 | N/A | `shape[99] = 1` | 抛 `IndexError("下标超出范围")` | `test_setitem_out_of_range` |
-| SS-018 | 异常 | slice 元素为浮点 | N/A | `shape[0:1] = [1.0]` | 抛 `NotImplementedError`（沿用 `SymbolDim` 浮点输入边界） | `test_slice_assign_float_item_reuses_symbol_dim_error` |
+## 测试分层
+
+| 目标 | 用例 |
+|---|---|
+| 构造与规整 | [`test_init_accepts_symbol_dim_and_int`](../../test/symbol_variable/test_symbol_shape.py)、[`test_construct_from_existing_shape`](../../test/symbol_variable/test_symbol_shape.py) |
+| 公开序列化 | [`test_get_values`](../../test/symbol_variable/test_symbol_shape.py)、[`test_get_values_keeps_public_floordiv_text`](../../test/symbol_variable/test_symbol_shape.py)、[`test_to_symbols`](../../test/symbol_variable/test_symbol_shape.py) |
+| 访问与赋值 | [`test_getitem_slice`](../../test/symbol_variable/test_symbol_shape.py)、[`test_setitem_converts`](../../test/symbol_variable/test_symbol_shape.py)、[`test_setitem_slice_converts`](../../test/symbol_variable/test_symbol_shape.py) |
+| 异常边界 | [`test_getitem_out_of_range`](../../test/symbol_variable/test_symbol_shape.py)、[`test_invalid_index_type`](../../test/symbol_variable/test_symbol_shape.py)、[`test_slice_assign_non_iterable`](../../test/symbol_variable/test_symbol_shape.py)、[`test_slice_assign_invalid_item`](../../test/symbol_variable/test_symbol_shape.py)、[`test_slice_assign_float_item_reuses_symbol_dim_error`](../../test/symbol_variable/test_symbol_shape.py) |
+| 容器行为 | [`test_get_shape_copy`](../../test/symbol_variable/test_symbol_shape.py)、[`test_iteration`](../../test/symbol_variable/test_symbol_shape.py)、[`test_repr`](../../test/symbol_variable/test_symbol_shape.py)、[`test_list_repr`](../../test/symbol_variable/test_symbol_shape.py) |

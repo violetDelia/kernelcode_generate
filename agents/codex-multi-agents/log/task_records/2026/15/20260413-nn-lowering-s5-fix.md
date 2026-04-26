@@ -83,7 +83,7 @@
 经办人：提莫炖蘑菇
 任务：T-20260413-937e62f6
 任务目标：审查 S5 exp/softmax 实现与测试收口（动态 shape 与 axis 校验修复）及验证记录
-改动：未修改实现或测试；复核 spec/pass/lowering/nn_lowering.md 与 kernel_gen/passes/lowering/nn_lowering/nn_lowering.py、test/pass/nn_lowering/exp.py、test/pass/nn_lowering/softmax.py、test/pass/nn_lowering/test_lowering_nn_lowering.py（softmax axis）一致性，并核对记录中的验证结果
+改动：未修改实现或测试；复核 spec/pass/lowering/nn_lowering/spec.md 与 kernel_gen/passes/lowering/nn_lowering/nn_lowering.py、test/pass/nn_lowering/exp.py、test/pass/nn_lowering/softmax.py、test/pass/nn_lowering/test_lowering_nn_lowering.py（softmax axis）一致性，并核对记录中的验证结果
 验证：
 - cd /home/lfr/kernelcode_generate/wt-20260413-nn-lowering-s5-fix && pytest -q test/pass/nn_lowering/exp.py test/pass/nn_lowering/softmax.py -> 6 passed
 - cd /home/lfr/kernelcode_generate && PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-nn-lowering-s5-fix:. python expectation/pass/lowing/nn_lowering/exp.py -> exit 0

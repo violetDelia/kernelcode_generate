@@ -2,8 +2,8 @@
 经办人：睡觉小分队
 任务：T-20260411-6d9638f3
 任务目标：更新 S2 可改清单并统一 nn.div/nn.truediv 映射说明，明确 expectation 使用的 pass 与测试口径
-改动：更新 spec/pass/lowering/nn_lowering.md，补充 S2 可改清单与 expectation 口径说明；将 nn.div/nn.truediv 映射改为 kernel.binary_elewise(kind="div")；补充 S2 测试清单与用例映射。
-验证：文本核对（spec/pass/lowering/nn_lowering.md）。
+改动：更新 spec/pass/lowering/nn_lowering/spec.md，补充 S2 可改清单与 expectation 口径说明；将 nn.div/nn.truediv 映射改为 kernel.binary_elewise(kind="div")；补充 S2 测试清单与用例映射。
+验证：文本核对（spec/pass/lowering/nn_lowering/spec.md）。
 结论：当前阶段已完成，可进入 build。
 
 时间：2026-04-12 06:05
@@ -33,7 +33,7 @@
 结论：需修改；S2 口径与改动范围仍不一致。
 
 问题列表：
-- 文件/接口：spec/pass/lowering/nn_lowering.md 与 expectation/pass/lowing/nn_lowering/*.py；现象：spec 约定 expectation 使用 lower-nn，而脚本仍使用 lower-nn-to-kernel；风险：spec/expectation/测试口径不一致；建议：统一 expectation 入口并补充说明或同步脚本与 spec；优先级：P1
+- 文件/接口：spec/pass/lowering/nn_lowering/spec.md 与 expectation/pass/lowing/nn_lowering/*.py；现象：spec 约定 expectation 使用 lower-nn，而脚本仍使用 lower-nn-to-kernel；风险：spec/expectation/测试口径不一致；建议：统一 expectation 入口并补充说明或同步脚本与 spec；优先级：P1
 - 文件/接口：test/__init__.py、test/pass/__init__.py、test/pass/nn_lowering/__init__.py；现象：新增包入口文件不在 S2 可改清单；风险：范围不一致；建议：将包入口纳入 S2 可改清单或改用其他方式规避模块名冲突；优先级：P1
 
 漏洞排查结果：
@@ -51,8 +51,8 @@
 经办人：睡觉小分队
 任务：T-20260411-6d9638f3
 任务目标：调整 S2 可改清单并统一 expectation 入口与测试口径，明确 lower-nn 与 lower-nn-to-kernel 边界
-改动：更新 spec/pass/lowering/nn_lowering.md：补充 lower-nn 与 lower-nn-to-kernel 的入口边界说明；S2 可改清单新增 public_name 测试；统一 expectation 入口表述。
-验证：文本核对（spec/pass/lowering/nn_lowering.md）。
+改动：更新 spec/pass/lowering/nn_lowering/spec.md：补充 lower-nn 与 lower-nn-to-kernel 的入口边界说明；S2 可改清单新增 public_name 测试；统一 expectation 入口表述。
+验证：文本核对（spec/pass/lowering/nn_lowering/spec.md）。
 结论：spec 已更新，建议进入 build 或复审阶段。
 时间：2026-04-12 11:25
 经办人：金铲铲大作战

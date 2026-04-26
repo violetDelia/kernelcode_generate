@@ -2,7 +2,7 @@
 经办人：咯咯咯
 任务：T-20260411-b89bf74e
 任务目标：收口 broadcast / broadcast_to / transpose 的 dma lowering 合同
-改动：更新 `spec/pass/lowering/nn_lowering.md`，补齐 broadcast_to 支持、broadcast/transpose 的 dma 目标与动态维约束
+改动：更新 `spec/pass/lowering/nn_lowering/spec.md`，补齐 broadcast_to 支持、broadcast/transpose 的 dma 目标与动态维约束
 验证：未执行命令，原因：本任务仅 spec 文档调整
 结论：已完成当前 spec 修改；下一步交由 build 任务对齐实现与测试
 时间：2026-04-12 07:39
@@ -67,7 +67,7 @@
 任务：T-20260411-b89bf74e
 任务目标：审查 broadcast/broadcast_to/transpose lowering 实现与测试收口
 改动：
-- 复核文件：kernel_gen/passes/lowering/nn_to_kernel.py、test/pass/test_lowering_nn_to_kernel.py、spec/pass/lowering/nn_lowering.md。
+- 复核文件：kernel_gen/passes/lowering/nn_to_kernel.py、test/pass/test_lowering_nn_to_kernel.py、spec/pass/lowering/nn_lowering/spec.md。
 - 复核结果：broadcast/broadcast_to/transpose 的动态符号维约束与错误短语一致；transpose 动态维按 perm 使用 symbol.get_dim；新增/修改函数注释与示例齐全且与实现一致；测试头注释字段齐全。
 - 问题列表：未发现需修改项。
 - 漏洞排查结果：

@@ -17,7 +17,7 @@
 - 行为核对：GM->SM 使用 window offsets/sizes，SM->LM 与 LM->SM 使用 zero offsets + unit strides，SM->GM 写回使用 window offsets/sizes；与新增测试一致。
 结论：需修改。
 问题清单：
-- [P1] `spec/pass/lowering/dma_memory_hierarchy.md` 未新增 COV-DMH-008 用例映射，且未明确窗口链路的 offsets/sizes/strides 规则（GM->SM 保留 offsets/sizes、SM->LM/LM->SM zero offsets+unit strides、SM->GM 写回 offsets/sizes）；导致 spec/实现/测试不一致，存在合同缺口。
+- [P1] `spec/pass/lowering/dma_memory_hierarchy/spec.md` 未新增 COV-DMH-008 用例映射，且未明确窗口链路的 offsets/sizes/strides 规则（GM->SM 保留 offsets/sizes、SM->LM/LM->SM zero offsets+unit strides、SM->GM 写回 offsets/sizes）；导致 spec/实现/测试不一致，存在合同缺口。
 风险：
 - 规范缺口：窗口链路行为依赖实现与测试而非 spec 冻结，后续变更易漂移。
 验证命令：
@@ -29,9 +29,9 @@
 时间：2026-04-06 03:35:53 +0800
 经办人：咯咯咯
 任务：T-20260406-cf3468c3（dma_memory_hierarchy_lowering_green_plan-S2-spec）
-任务目标：在 `spec/pass/lowering/dma_memory_hierarchy.md` 补齐窗口链路口径：`GM -> SM` 保留原窗口 `offsets/sizes/strides`、`SM -> LM` 与 `LM -> SM` 使用 `zero offsets + unit strides`、`SM -> GM` 写回保留原窗口 `offsets/sizes/strides`；并新增 `COV-DMH-008` 覆盖映射。
+任务目标：在 `spec/pass/lowering/dma_memory_hierarchy/spec.md` 补齐窗口链路口径：`GM -> SM` 保留原窗口 `offsets/sizes/strides`、`SM -> LM` 与 `LM -> SM` 使用 `zero offsets + unit strides`、`SM -> GM` 写回保留原窗口 `offsets/sizes/strides`；并新增 `COV-DMH-008` 覆盖映射。
 改动：
-- 更新 `spec/pass/lowering/dma_memory_hierarchy.md` 的目标、限制与边界、`LowerDmaMemoryHierarchyPass.run(module)` 注意事项与测试目标，机械冻结窗口链路的四段参数口径。
+- 更新 `spec/pass/lowering/dma_memory_hierarchy/spec.md` 的目标、限制与边界、`LowerDmaMemoryHierarchyPass.run(module)` 注意事项与测试目标，机械冻结窗口链路的四段参数口径。
 - 新增 `COV-DMH-008`，映射到 `test_dma_memory_hierarchy_window_offsets_and_unit_strides`。
 - 验证：`PYTHONPATH=. pytest -q test/pass/test_dma_memory_hierarchy.py`（`5 passed in 0.35s`）。
 结论：S2 spec 补映射已收口；当前 spec、实现与测试在窗口链路参数规则上已对齐，`COV-DMH-008` 也已落到现有 gate 用例。
@@ -41,14 +41,14 @@
 - `SM -> GM` 写回必须保留输出窗口的原始 `offsets/sizes/strides`。
 - `COV-DMH-008` 作为窗口链路专用覆盖项，固定映射到 `test_dma_memory_hierarchy_window_offsets_and_unit_strides`。
 边界：
-- 仅修改 `spec/pass/lowering/dma_memory_hierarchy.md` 与本记录文件。
+- 仅修改 `spec/pass/lowering/dma_memory_hierarchy/spec.md` 与本记录文件。
 - 不改 `kernel_gen/passes/lowering/dma_memory_hierarchy.py` 与 `test/pass/test_dma_memory_hierarchy.py` 的实现内容。
 - 不扩展 `S2` 之外的 pass 顺序、目标策略或新层级语义。
 拒绝路径：
 - 输入残留 `nn.*` 时仍必须显式失败，见 `COV-DMH-007`。
 - 若 `SM -> LM` / `LM -> SM` 未正规化为 `zero offsets + unit strides`，或 `GM -> SM` / `SM -> GM` 丢失原窗口参数，则视为违反本 spec。
 引用文件：
-- `spec/pass/lowering/dma_memory_hierarchy.md`
+- `spec/pass/lowering/dma_memory_hierarchy/spec.md`
 - `ARCHITECTURE/plan/dma_memory_hierarchy_lowering_green_plan.md`
 - `test/pass/test_dma_memory_hierarchy.py`
 - `agents/codex-multi-agents/log/task_records/2026/14/20260405-dma-hierarchy-s2.md`
@@ -100,7 +100,7 @@
 任务：T-20260406-7fd13d77（dma_memory_hierarchy_lowering_green_plan-S2-合并收口）
 任务目标：合并 S2 审查通过变更（窗口链路合同 + COV-DMH-008 映射 + 对齐实现/补测），复跑 gate 并推送 main，清理 worktree/branch。
 改动：
-- 合入文件（业务）：`kernel_gen/passes/lowering/dma_memory_hierarchy.py`、`spec/pass/lowering/dma_memory_hierarchy.md`、`test/pass/test_dma_memory_hierarchy.py`。
+- 合入文件（业务）：`kernel_gen/passes/lowering/dma_memory_hierarchy.py`、`spec/pass/lowering/dma_memory_hierarchy/spec.md`、`test/pass/test_dma_memory_hierarchy.py`。
 - 合入文件（记录）：`agents/codex-multi-agents/log/task_records/2026/14/20260405-dma-hierarchy-s2.md`。
 - gate（复跑）：`PYTHONPATH=. pytest -q test/pass/test_dma_memory_hierarchy.py` -> `5 passed in 0.24s`（exit=0）。
 - merge_commit：`bfb208ce8be64c1b22ad66c5f84b3eca7601f2b3`。

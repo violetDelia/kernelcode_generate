@@ -3,8 +3,18 @@
 ## 功能简介
 
 - 定义 `decompass` pass 的公开合同。
-- `decompass` 在 `func.func` 内按注册规则分解 `nn.*` op。
+- `decompass` 在 `func.func` 内按固定 pattern 分解 `nn.softmax`。
 - 第一版内置 `nn.softmax` 分解链：`nn.reduce_max -> nn.broadcast -> nn.sub -> nn.exp -> nn.reduce_sum -> nn.broadcast -> nn.truediv`。
+
+## API 列表
+
+- `PassContractError(message: str)`
+- `DecompassPass`
+  - `—— apply(ctx: Context, module: ModuleOp)`
+  - `—— run(module: ModuleOp) -> ModuleOp`
+- `NnSoftmaxDecompPattern`
+  - `—— match_and_rewrite(op: NnSoftmaxOp, rewriter: PatternRewriter)`
+- `get_decompass_pass_patterns() -> list[RewritePattern]`
 
 ## 文档信息
 
@@ -23,8 +33,8 @@
 ## 目标
 
 - 新增 `DecompassPass`。
+- 提供 `get_decompass_pass_patterns()` 公开 pattern 组装入口。
 - 固定 pass 名字为 `decompass`。
-- 提供 `register_decompass_rewrite(op_name, rewrite)` 注册接口，用于扩展其它 `nn.*` 分解。
 - 固定内置 `nn.softmax` 分解链与顺序，不允许实现自由选择等价组合。
 - 固定 `axis` 只接受 `[0, rank)` 范围内的非负下标；负轴与越界轴都必须显式失败。
 - 固定 `nn.reduce_max` 与 `nn.reduce_sum` 使用 `keepdim=true`。
@@ -33,25 +43,27 @@
 ## 限制与边界
 
 - `decompass` 仅负责 `nn.* -> nn.*` 分解，不直接 lower 到 `kernel.*`。
-- 默认内置分解仅覆盖 `nn.softmax`。
-- 其它 op 的分解仅通过注册接口扩展。
+- 当前固定只覆盖 `nn.softmax`。
+- 不提供通用 decompass register；若后续支持其它 `nn.*` 分解，需继续按“一 op 一 pattern”扩展。
+- 公开错误类型统一使用 `kernel_gen.passes.PassContractError`。
+- 当前文件级公开 API 只包含 `DecompassPass`、`NnSoftmaxDecompPattern` 与 `get_decompass_pass_patterns()`；分解校验与结果类型构造逻辑不额外暴露文件级 helper，跨文件实现与测试不得直连内部步骤。
 - 不修改 `dsl/mlir_gen` 的 helper 入口形式。
 - 不扩后端 runtime、stream 或 target 相关能力。
 - 当前任务链的正式验收只依赖 `spec`、公开导入路径与 `pytest`；若现场额外具备架构侧 black-box runner，只作为补充对照，不要求当前任务携带本地测试副本。
 
 ## 公开接口
 
-### `class DecompassError(ValueError)`
+### `class PassContractError(ValueError)`
 
-- 功能说明：`decompass` 的显式错误类型。
+- 功能说明：`kernel_gen.passes` 共享的显式错误类型。
 - 参数说明：
   - `message: str`：错误文本。
-- 使用示例：`raise DecompassError("DecompassError: normalized axis out of range")`
+- 使用示例：`raise PassContractError("normalized axis out of range")`
 - 返回与限制：抛错即终止当前 pass。
 
 ### `class DecompassPass(Pass)`
 
-- 功能说明：对 `ModuleOp` 执行已注册分解规则。
+- 功能说明：对 `ModuleOp` 执行固定 `nn.softmax` 分解规则。
 - 参数说明：无。
 - 使用示例：
 
@@ -64,30 +76,40 @@ module = DecompassPass().run(module)
 - 注意事项：
   - 输入必须是 `builtin.module`。
   - 仅改写 `func.func` 的函数体。
-  - 命中的已注册 op 会被替换为其分解链。
+  - 命中的 `nn.softmax` 会被替换为其分解链。
 - 返回与限制：返回改写后的同一 `ModuleOp`。
 
-### `register_decompass_rewrite(op_name, rewrite)`
+### `class NnSoftmaxDecompPattern(RewritePattern)`
 
-- 功能说明：注册 decompass 的自定义分解规则。
-- 参数说明：
-  - `op_name: str`：待分解 op 名字（例如 `nn.exp`）。
-  - `rewrite: Callable[[Operation, Block], None]`：分解回调。
+- 功能说明：`decompass` 内部固定使用的 `nn.softmax` 单 op pattern。
+- 参数说明：无。
 - 使用示例：
 
 ```python
-from kernel_gen.passes.decompass import register_decompass_rewrite
+from kernel_gen.passes.decompass import NnSoftmaxDecompPattern
 
-def rewrite_exp(op, block):
-    op.result.replace_by(op.input)
-    block.erase_op(op)
-
-register_decompass_rewrite("nn.exp", rewrite_exp)
+pattern = NnSoftmaxDecompPattern()
 ```
 
 - 返回与限制：
-  - `op_name` 去空白后不能为空，否则抛 `DecompassError: op name must be non-empty`。
-  - 同名规则按最新注册覆盖。
+  - 仅匹配 `NnSoftmaxOp`。
+  - 不承担其它 `nn.*` 的通用注册或动态分发。
+
+### `get_decompass_pass_patterns()`
+
+- 功能说明：返回 `decompass` pass 当前使用的公开 pattern 列表。
+- 参数说明：无。
+- 使用示例：
+
+```python
+from kernel_gen.passes.decompass import get_decompass_pass_patterns
+
+patterns = get_decompass_pass_patterns()
+```
+
+- 返回与限制：
+  - 当前返回值固定为只含一个 `NnSoftmaxDecompPattern` 的列表。
+  - `DecompassPass.apply()` 必须通过该函数组装 pattern，不在 `apply()` 内手写重复列表。
 
 ## 最小改写合同
 
@@ -122,13 +144,13 @@ register_decompass_rewrite("nn.exp", rewrite_exp)
 - `axis` 为负数或越界时必须报错：
 
 ```text
-DecompassError: normalized axis out of range
+normalized axis out of range
 ```
 
 - `nn.softmax.result` 的 `shape/stride` 与输入不一致时必须报错：
 
 ```text
-DecompassError: result type must match input shape and stride
+result type must match input shape and stride
 ```
 
 ## 验证要求

@@ -10,8 +10,8 @@
 经办人：咯咯咯
 任务：T-20260413-a8b05b61
 任务目标：收口 element_binary add/sub 静态 ircheck expectation 的相邻行合同，并同步到 nn_lowering 相关 spec
-改动：更新 `spec/pass/lowering/nn_lowering.md` 与 `spec/pass/lowering/nn_lowering/element_binary_lowering.md`；明确静态 add/sub `memory + memory` case 的最小稳定输出为 `dma.alloc + kernel.binary_elewise + func.return`，不要求 `func.func` 后紧接 `symbol.get_dim`；明确结果 shape 含符号维度时，才要求按 rank 顺序生成 `symbol.get_dim` 后再执行 `dma.alloc`
-验证：文本核对 `spec/pass/lowering/nn_lowering.md`、`spec/pass/lowering/nn_lowering/element_binary_lowering.md` 与 `kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py`；执行 `PYTHONPATH=. python expectation/pass/lowing/nn_lowering/element_binary/add.py` -> failed，定位为 `static#1` 将 `symbol.get_dim` 锁为 `func.func` 后相邻行；执行 `PYTHONPATH=. python expectation/pass/lowing/nn_lowering/element_binary/sub.py` -> failed，现象一致；核对 `kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py` 中 `_build_alloc_dynamic_shape_from_source(...)`，确认静态 shape 返回空 dynamic shape，仅符号维度生成 `symbol.get_dim`
+改动：更新 `spec/pass/lowering/nn_lowering/spec.md` 与 `spec/pass/lowering/nn_lowering/element_binary_lowering.md`；明确静态 add/sub `memory + memory` case 的最小稳定输出为 `dma.alloc + kernel.binary_elewise + func.return`，不要求 `func.func` 后紧接 `symbol.get_dim`；明确结果 shape 含符号维度时，才要求按 rank 顺序生成 `symbol.get_dim` 后再执行 `dma.alloc`
+验证：文本核对 `spec/pass/lowering/nn_lowering/spec.md`、`spec/pass/lowering/nn_lowering/element_binary_lowering.md` 与 `kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py`；执行 `PYTHONPATH=. python expectation/pass/lowing/nn_lowering/element_binary/add.py` -> failed，定位为 `static#1` 将 `symbol.get_dim` 锁为 `func.func` 后相邻行；执行 `PYTHONPATH=. python expectation/pass/lowing/nn_lowering/element_binary/sub.py` -> failed，现象一致；核对 `kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py` 中 `_build_alloc_dynamic_shape_from_source(...)`，确认静态 shape 返回空 dynamic shape，仅符号维度生成 `symbol.get_dim`
 结论：当前 spec 已完成，可直接指导下游 build 修 add/sub 静态 ircheck 文案；下一步创建 build 任务并通知管理员推进
 
 时间：2026-04-13 22:37 +0800
@@ -122,7 +122,7 @@
 - `cd /home/lfr/kernelcode_generate/wt-20260413-nn-lowering-final-fix && PYTHONPATH=.tmp_expectation_verify:/home/lfr/kernelcode_generate python -m expectation.pass.lowing.nn_lowering > /tmp/t_20260413_a8b05b61_review.log 2>&1; tail -n 20 /tmp/t_20260413_a8b05b61_review.log` -> exit=0
 - 文本核对：`nl -ba /home/lfr/kernelcode_generate/expectation/pass/lowing/nn_lowering/element_binary/add.py | sed -n '26,137p'`
 - 文本核对：`nl -ba /home/lfr/kernelcode_generate/expectation/pass/lowing/nn_lowering/element_binary/sub.py | sed -n '26,137p'`
-- 文本核对：`nl -ba /home/lfr/kernelcode_generate/wt-20260413-nn-lowering-final-fix/spec/pass/lowering/nn_lowering.md | sed -n '43,45p;71,73p'`
+- 文本核对：`nl -ba /home/lfr/kernelcode_generate/wt-20260413-nn-lowering-final-fix/spec/pass/lowering/nn_lowering/spec.md | sed -n '43,45p;71,73p'`
 - 文本核对：`nl -ba /home/lfr/kernelcode_generate/wt-20260413-nn-lowering-final-fix/spec/pass/lowering/nn_lowering/element_binary_lowering.md | sed -n '46,47p;75,76p;111,113p'`
 结论：
 - 最终结论：`通过`
@@ -149,12 +149,12 @@
 任务目标：合并 `wt-20260413-nn-lowering-final-fix` 中已通过复核的 nn_lowering `spec` / 记录改动；不重复处理已由架构师直接修正的 tracked `expectation` 文件。
 改动：
 - 核对 `TODO.md`，确认当前任务已恢复为 `merge`、指派=`李白`、状态=`进行中`，允许继续推进。
-- 核对当前 `worktree` 差异，确认仅包含 `spec/pass/lowering/nn_lowering.md`、`spec/pass/lowering/nn_lowering/element_binary_lowering.md` 与当前记录文件；未混入 tracked `expectation` 变更。
+- 核对当前 `worktree` 差异，确认仅包含 `spec/pass/lowering/nn_lowering/spec.md`、`spec/pass/lowering/nn_lowering/element_binary_lowering.md` 与当前记录文件；未混入 tracked `expectation` 变更。
 - 核对主仓当前存在无关脏改动 `kernel_gen/dsl/emit_mlir.py`、`spec/dialect/symbol.md`、`spec/dsl/emit_mlir.md`、`test/dsl/test_ast_visitor.py`、`test/dsl/test_emit_mlir.py` 及若干无关记录文件；本轮不触碰、不混入这些差异。
 - 当前 `worktree` 为 detached HEAD（`35e3069`），本轮合并前需先以最小 `git` 命令补建临时绑定分支，便于提交并合并。
 验证：
 - `git -C /home/lfr/kernelcode_generate/wt-20260413-nn-lowering-final-fix status --short --branch` -> 仅见两份 `spec` 修改、当前记录文件未跟踪，以及临时目录 `.tmp_expectation_verify/`。
-- `git -C /home/lfr/kernelcode_generate/wt-20260413-nn-lowering-final-fix diff -- spec/pass/lowering/nn_lowering.md spec/pass/lowering/nn_lowering/element_binary_lowering.md` -> 差异与复核结论一致，均为 add/sub 静态/符号维顺序口径补充。
+- `git -C /home/lfr/kernelcode_generate/wt-20260413-nn-lowering-final-fix diff -- spec/pass/lowering/nn_lowering/spec.md spec/pass/lowering/nn_lowering/element_binary_lowering.md` -> 差异与复核结论一致，均为 add/sub 静态/符号维顺序口径补充。
 - `sed -n '1,260p' /home/lfr/kernelcode_generate/wt-20260413-nn-lowering-final-fix/agents/codex-multi-agents/log/task_records/2026/15/20260413-nn-lowering-final-fix.md` -> 已有 `review=通过` 结论，并明确“仅处理 worktree 内已通过复核的 spec / 记录改动，主仓 expectation 已由架构师直接修正，无需在 merge 阶段重复处理 tracked expectation 文件”。
 - 未执行测试命令，原因：本轮为已通过复核的 merge 任务，沿用记录文件中的复测结果。
 结论：已完成合并前自检；下一步仅提交并合并两份 `spec` 与当前记录文件，随后执行 `-done` 并清理该 `worktree`。

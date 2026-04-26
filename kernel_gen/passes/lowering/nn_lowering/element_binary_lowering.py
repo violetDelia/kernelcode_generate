@@ -16,7 +16,7 @@
 - patterns = element_binary_patterns()
 
 关联文件:
-- spec: spec/pass/lowering/nn_lowering.md
+- spec: spec/pass/lowering/nn_lowering/spec.md
 - test: test/pass/nn_lowering/element_binary_add.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
 """
@@ -86,7 +86,7 @@ def _select_memory_operand(op: Operation) -> SSAValue:
     - shape_source = _select_memory_operand(op)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_compare_eq.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -116,7 +116,7 @@ def _build_alloc_dynamic_shape_from_source(
     - ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(source, result_type)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_binary_add.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -168,7 +168,7 @@ def _materialize_element_binary_scalar_operand(
     - ops, value = _materialize_element_binary_scalar_operand(scalar, source_type, dynamic_shape)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_compare_eq.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -202,7 +202,7 @@ def _materialize_compare_scalar_operand(
     - ops, value = _materialize_compare_scalar_operand(scalar, source_type, dynamic_shape)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_compare_eq.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -232,7 +232,7 @@ def _normalize_symbol_ops(block: Block, anchor: Operation) -> None:
     - _normalize_symbol_ops(block, op)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_binary_add.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -299,7 +299,7 @@ def _lower_element_binary_op(
     - _lower_element_binary_op(op, block, kind="add", is_compare=False)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_binary_add.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -426,7 +426,7 @@ class _LowerNnAddPattern(RewritePattern):
     - pattern = _LowerNnAddPattern()
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_binary_add.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -452,7 +452,7 @@ class _LowerNnSubPattern(RewritePattern):
     - pattern = _LowerNnSubPattern()
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_binary_sub.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -478,7 +478,7 @@ class _LowerNnMulPattern(RewritePattern):
     - pattern = _LowerNnMulPattern()
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_binary_mul.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -504,7 +504,7 @@ class _LowerNnDivPattern(RewritePattern):
     - pattern = _LowerNnDivPattern()
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_binary_div.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -530,7 +530,7 @@ class _LowerNnTrueDivPattern(RewritePattern):
     - pattern = _LowerNnTrueDivPattern()
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_binary_truediv.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -556,7 +556,7 @@ class _LowerNnEqPattern(RewritePattern):
     - pattern = _LowerNnEqPattern()
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_compare_eq.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -582,7 +582,7 @@ class _LowerNnNePattern(RewritePattern):
     - pattern = _LowerNnNePattern()
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_compare_ne.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -608,7 +608,7 @@ class _LowerNnLtPattern(RewritePattern):
     - pattern = _LowerNnLtPattern()
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_compare_lt.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -634,7 +634,7 @@ class _LowerNnLePattern(RewritePattern):
     - pattern = _LowerNnLePattern()
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_compare_le.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -660,7 +660,7 @@ class _LowerNnGtPattern(RewritePattern):
     - pattern = _LowerNnGtPattern()
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_compare_gt.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -686,7 +686,7 @@ class _LowerNnGePattern(RewritePattern):
     - pattern = _LowerNnGePattern()
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_compare_ge.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """

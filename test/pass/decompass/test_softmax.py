@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -40,12 +41,31 @@ from kernel_gen.dialect.nn import (
     NnSubOp,
     NnTrueDivOp,
 )
-import kernel_gen.passes.decompass as decompass_impl
+from kernel_gen.passes import PassContractError
 from kernel_gen.passes.decompass import (
-    DecompassError,
     DecompassPass,
-    register_decompass_rewrite,
+    NnSoftmaxDecompPattern,
+    get_decompass_pass_patterns,
 )
+
+
+def test_public_import_path_exposes_decompass_pattern_api() -> None:
+    package_module = importlib.import_module("kernel_gen.passes")
+    decompass_module = importlib.import_module("kernel_gen.passes.decompass")
+
+    assert package_module.DecompassPass is DecompassPass
+    assert package_module.PassContractError is PassContractError
+    assert package_module.NnSoftmaxDecompPattern is NnSoftmaxDecompPattern
+    assert package_module.get_decompass_pass_patterns is get_decompass_pass_patterns
+    assert not hasattr(package_module, "DecompassError")
+    assert not hasattr(decompass_module, "DecompassError")
+
+
+def test_public_pattern_api_returns_single_softmax_pattern() -> None:
+    patterns = get_decompass_pass_patterns()
+
+    assert len(patterns) == 1
+    assert isinstance(patterns[0], NnSoftmaxDecompPattern)
 
 
 def _build_contiguous_stride(shape: tuple[int | str, ...]) -> ArrayAttr[Attribute]:
@@ -118,21 +138,6 @@ def _entry_ops(func_op: func.FuncOp) -> list[object]:
     return list(func_op.body.blocks.first.ops)
 
 
-def _make_exp_module(input_type: NnMemoryType) -> tuple[ModuleOp, func.FuncOp]:
-    """构造只包含一个 `nn.exp` 的测试 module。"""
-
-    block = Block(arg_types=[input_type])
-    exp_op = NnExpOp(block.args[0], input_type, input_type.space)
-    return_op = func.ReturnOp(exp_op.result)
-    block.add_ops([exp_op, return_op])
-    func_op = func.FuncOp(
-        "exp_kernel",
-        FunctionType.from_lists([input_type], [input_type]),
-        Region(block),
-    )
-    return ModuleOp([func_op]), func_op
-
-
 # DNS-001
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
@@ -200,8 +205,8 @@ def test_decompose_softmax_rejects_negative_axis() -> None:
     module, _func_op = _make_softmax_module(input_type=mem_type, axis=-1)
 
     with pytest.raises(
-        DecompassError,
-        match="DecompassError: normalized axis out of range",
+        PassContractError,
+        match="normalized axis out of range",
     ):
         DecompassPass().run(module)
 
@@ -222,8 +227,8 @@ def test_decompose_softmax_rejects_normalized_axis_out_of_range() -> None:
     module, _func_op = _make_softmax_module(input_type=mem_type, axis=3)
 
     with pytest.raises(
-        DecompassError,
-        match="DecompassError: normalized axis out of range",
+        PassContractError,
+        match="normalized axis out of range",
     ):
         DecompassPass().run(module)
 
@@ -254,34 +259,12 @@ def test_decompose_softmax_rejects_result_type_mismatch() -> None:
     )
 
     with pytest.raises(
-        DecompassError,
-        match="DecompassError: result type must match input shape and stride",
+        PassContractError,
+        match="result type must match input shape and stride",
     ):
         DecompassPass().run(module)
 
 
-def test_decompass_supports_registering_rewrite_for_other_nn_op() -> None:
-    mem_type = _make_memory_type((4,))
-    module, func_op = _make_exp_module(mem_type)
-
-    def _rewrite_exp_to_identity(op: object, block: Block) -> None:
-        if not isinstance(op, NnExpOp):
-            raise AssertionError("expected nn.exp op")
-        op.result.replace_by(op.input)
-        block.erase_op(op)
-
-    register_decompass_rewrite("nn.exp", _rewrite_exp_to_identity)
-    try:
-        DecompassPass().run(module)
-        module.verify()
-        body_ops = _entry_ops(func_op)
-        assert [op.name for op in body_ops] == ["func.return"]
-        return_op = next(op for op in body_ops if isinstance(op, func.ReturnOp))
-        assert return_op.arguments[0] == func_op.body.blocks.first.args[0]
-    finally:
-        decompass_impl._DECOMPASS_REWRITES.pop("nn.exp", None)
-
-
-def test_decompass_rejects_empty_registered_op_name() -> None:
-    with pytest.raises(DecompassError, match="DecompassError: op name must be non-empty"):
-        register_decompass_rewrite("   ", lambda op, block: None)
+def test_decompass_uses_single_softmax_pattern() -> None:
+    pattern = NnSoftmaxDecompPattern()
+    assert type(pattern).__name__ == "NnSoftmaxDecompPattern"

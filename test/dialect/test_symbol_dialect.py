@@ -850,7 +850,7 @@ def test_symbol_to_float_rejects_invalid_types() -> None:
 # 最后修改人: jcc你莫辜负
 # 测试目的: 验证 symbol.cast 支持整型结果并保持 parse/print 稳定。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
-# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应 spec 文件路径: spec/dsl/gen_kernel/emit.md
 def test_symbol_cast_round_trip() -> None:
     ctx = _build_context()
     module = Parser(
@@ -875,7 +875,7 @@ builtin.module {
 # 最后修改人: jcc你莫辜负
 # 测试目的: 验证 symbol.cast 会拒绝非 symbol.int 输入或非整型结果类型。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
-# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应 spec 文件路径: spec/dsl/gen_kernel/emit.md
 def test_symbol_cast_rejects_invalid_types() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     symbol_value = _make_symbol_value("N")

@@ -10,6 +10,28 @@
 - `get_shape(axis)` 与 `get_stride(axis)` 是 include/api 层统一公开的按轴查询接口。
 - `view` 与 `reshape` 在公共层固定为成员式：`source.view<T>(offset, size, stride)`、`source.reshape(shape)`。
 
+## API 列表
+
+- `enum class MemoryFormat { Norm, CLast }`
+- `enum class MemorySpace { GM, SM, LM, TSM, TLM1, TLM2, TLM3 }`
+- `void npu_demo::build_contiguous_stride(const long long* shape, unsigned long long rank, long long* out_stride)`
+- `template <MemorySpace Space, typename T> class Memory`
+- `Memory::Memory(T* data, const long long* shape, const long long* stride, unsigned long long rank, MemoryFormat format = MemoryFormat::Norm)`
+- `Memory::Memory(T* data, const long long* shape, unsigned long long rank, MemoryFormat format = MemoryFormat::Norm)`
+- `Memory::data() -> T*`
+- `Memory::data() const -> const T*`
+- `Memory::shape() const -> const long long*`
+- `Memory::stride() const -> const long long*`
+- `Memory::rank() const -> unsigned long long`
+- `Memory::format() const -> MemoryFormat`
+- `Memory::space() const -> MemorySpace`
+- `Memory::get_shape(unsigned long long axis) const -> long long`
+- `Memory::get_stride(unsigned long long axis) const -> long long`
+- `template <typename ViewT> Memory::view(const Vector& offset, const Vector& size, const Vector& stride) const -> Memory<Space, ViewT>`
+- `Memory::reshape(const Vector& shape) const -> Memory<Space, T>`
+- `Memory::element_count() const -> long long`
+- `Memory::is_contiguous() const -> bool`
+
 ## 文档信息
 
 - 创建者：`神秘人`

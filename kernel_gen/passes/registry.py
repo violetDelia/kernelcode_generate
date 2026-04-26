@@ -24,7 +24,7 @@ from collections.abc import Callable
 import inspect
 from typing import TypeVar
 
-from .pass_manager import Pass, PassManager, _build_pass_manager_from_passes
+from .pass_manager import Pass, PassManager
 from xdsl.passes import ModulePass as XdslModulePass
 
 PassType = TypeVar("PassType", bound=XdslModulePass)
@@ -315,9 +315,9 @@ def build_registered_pass(name: str, options: dict[str, str] | None = None) -> X
     normalized_options = _normalize_options(options)
     passthrough_errors: tuple[type[BaseException], ...] = ()
     if name == "launch-kernel-cost-func":
-        from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncError
+        from kernel_gen.passes.common import PassContractError
 
-        passthrough_errors = (LaunchKernelCostFuncError,)
+        passthrough_errors = (PassContractError,)
     return _build_registered_pass_instance(
         name,
         pass_cls,
@@ -389,7 +389,9 @@ def load_builtin_passes() -> None:
             return target
 
     def _build_no_op_pipeline() -> PassManager:
-        return _build_pass_manager_from_passes("no-op-pipeline", [NoOpPass()])
+        pm = PassManager(name="no-op-pipeline")
+        pm.add_pass(NoOpPass())
+        return pm
 
     if NoOpPass.name not in _PASS_REGISTRY:
         register_pass(NoOpPass)
@@ -405,9 +407,9 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
     from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
     from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
-    from kernel_gen.tile.analysis import TileAnalysisPass
-    from kernel_gen.tile.elewise import TileElewisePass
-    from kernel_gen.tile.reduce import TileReducePass
+    from kernel_gen.passes.tile.analysis import TileAnalysisPass
+    from kernel_gen.passes.tile.elewise import TileElewisePass
+    from kernel_gen.passes.tile.reduce import TileReducePass
     from kernel_gen.passes.tuning import LaunchKernelCostFuncPass
 
     for pass_cls in (

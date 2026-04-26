@@ -18,7 +18,7 @@
 - test: test/operation/test_operation_nn.py
 - test: test/operation/test_operation_dma.py
 - test: test/operation/test_operation_scf.py
-- 功能实现: kernel_gen/operation/nn.py
+- 功能实现: kernel_gen/operation/nn/__init__.py
 - 功能实现: kernel_gen/operation/dma.py
 - 功能实现: kernel_gen/operation/scf.py
 """

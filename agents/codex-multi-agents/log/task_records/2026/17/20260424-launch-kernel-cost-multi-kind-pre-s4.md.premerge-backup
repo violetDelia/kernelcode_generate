@@ -1,0 +1,32 @@
+# T-20260424-6195abc3
+
+时间：2026-04-24 22:56 +0800
+经办人：守护最好的爱莉希雅
+任务：T-20260424-6195abc3 / launch_kernel_cost_func_multi_kind 前置修复
+
+## 任务信息
+
+- 计划书：[`ARCHITECTURE/plan/launch_kernel_cost_func_multi_kind_green_plan.md`](../../../../../ARCHITECTURE/plan/launch_kernel_cost_func_multi_kind_green_plan.md)
+- worktree：`/home/lfr/kernelcode_generate/wt-20260424-launch-kernel-cost-multi-kind-pre-s4`
+- 任务类型：`build`
+- 当前基线：`origin/main@8e73d6af6fb6`
+
+## 最小目标
+
+- 在最新主线上把 `launch-kernel-cost-func` 的 7 个 `product/spec/pytest` 文件重新收回 `open-kind`：
+  - [`kernel_gen/passes/tuning/launch_kernel_cost_func.py`](../../../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
+  - [`kernel_gen/dialect/tuner.py`](../../../../../kernel_gen/dialect/tuner.py)
+  - [`spec/pass/tuning/launch_kernel_cost_func.md`](../../../../../spec/pass/tuning/launch_kernel_cost_func.md)
+  - [`spec/dialect/tuner.md`](../../../../../spec/dialect/tuner.md)
+  - [`test/pass/test_launch_kernel_cost_func.py`](../../../../../test/pass/test_launch_kernel_cost_func.py)
+  - [`test/pass/test_pass_registry.py`](../../../../../test/pass/test_pass_registry.py)
+  - [`test/dialect/test_tuner_dialect.py`](../../../../../test/dialect/test_tuner_dialect.py)
+- 只处理上述 7 个文件及其直接关联内容。
+- 收口完成后，再回到 `T-20260424-3b148a23` 继续 expectation-only 拆链。
+
+## 执行要求
+
+- 不得改动任何 `[immutable-file]`。
+- 执行记录必须写真实自检。
+- 执行记录必须写 `Diff 反推自测`。
+- `expectation` 只单列为合同验收资产，不替代对应测试。

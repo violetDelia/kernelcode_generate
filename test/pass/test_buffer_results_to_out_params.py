@@ -11,7 +11,7 @@
 
 关联文件:
 - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-- Spec 文档: spec/pass/lowering/buffer_results_to_out_params.md
+- Spec 文档: spec/pass/buffer_results_to_out_params.md
 - 测试文件: test/pass/test_buffer_results_to_out_params.py
 """
 
@@ -42,14 +42,19 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.passes import PassContractError
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.passes.pass_manager import PassManager
 
 pass_module = importlib.import_module(
     "kernel_gen.passes.buffer_results_to_out_params"
 )
-BufferResultsToOutParamsError = pass_module.BufferResultsToOutParamsError
 BufferResultsToOutParamsPass = pass_module.BufferResultsToOutParamsPass
+BufferResultsToOutParamsCallPattern = pass_module.BufferResultsToOutParamsCallPattern
+BufferResultsToOutParamsFuncPattern = pass_module.BufferResultsToOutParamsFuncPattern
+get_buffer_results_to_out_params_pass_patterns = (
+    pass_module.get_buffer_results_to_out_params_pass_patterns
+)
 
 
 def test_public_import_path_uses_canonical_module_and_rejects_legacy_lowering_shim() -> None:
@@ -59,7 +64,15 @@ def test_public_import_path_uses_canonical_module_and_rejects_legacy_lowering_sh
     lowering_package = importlib.import_module("kernel_gen.passes.lowering")
 
     assert package_module.BufferResultsToOutParamsPass is BufferResultsToOutParamsPass
-    assert package_module.BufferResultsToOutParamsError is BufferResultsToOutParamsError
+    assert package_module.PassContractError is PassContractError
+    assert package_module.BufferResultsToOutParamsCallPattern is BufferResultsToOutParamsCallPattern
+    assert package_module.BufferResultsToOutParamsFuncPattern is BufferResultsToOutParamsFuncPattern
+    assert (
+        package_module.get_buffer_results_to_out_params_pass_patterns
+        is get_buffer_results_to_out_params_pass_patterns
+    )
+    assert not hasattr(package_module, "BufferResultsToOutParamsError")
+    assert not hasattr(pass_module, "BufferResultsToOutParamsError")
     assert not hasattr(lowering_package, "BufferResultsToOutParamsPass")
     assert not hasattr(lowering_package, "BufferResultsToOutParamsError")
 
@@ -67,16 +80,28 @@ def test_public_import_path_uses_canonical_module_and_rejects_legacy_lowering_sh
         importlib.import_module("kernel_gen.passes.lowering.buffer_results_to_out_params")
 
 
+def test_public_pattern_api_returns_stable_pattern_list() -> None:
+    """验证公开 pattern API 会返回稳定顺序的 pattern 列表。"""
+
+    patterns = get_buffer_results_to_out_params_pass_patterns({})
+
+    assert len(patterns) == 2
+    assert isinstance(patterns[0], BufferResultsToOutParamsCallPattern)
+    assert isinstance(patterns[1], BufferResultsToOutParamsFuncPattern)
+    assert patterns[0].targets == {}
+    assert patterns[1].targets == {}
+
+
 # BROTP-000
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-24 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-24 00:00:00 +0800
-# 功能说明: 验证目录级 expectation runner 在包上下文里优先使用相对导入，且不再写入当前目录到 `sys.path`。
-# 测试目的: 锁定 `expectation.pass.buffer_results_to_out_params.__main__` 的导入行为，避免回退到目录注入加裸模块导入。
+# 功能说明: 验证目录级 expectation runner 的 `main()` 直接复用自动发现结果，不再保留兼容 alias 和二次导入逻辑。
+# 测试目的: 锁定 `expectation.pass.buffer_results_to_out_params.__main__` 的干净入口行为，避免回退到旧 lowering alias 或手工模块装配。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_expectation_runner_prefers_relative_import_without_current_dir_sys_path
 # 对应功能实现文件路径: expectation/pass/buffer_results_to_out_params/__main__.py
-# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应 spec 文件路径: spec/pass/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_expectation_runner_prefers_relative_import_without_current_dir_sys_path(
     monkeypatch: pytest.MonkeyPatch,
@@ -93,19 +118,27 @@ def test_expectation_runner_prefers_relative_import_without_current_dir_sys_path
         reloaded_runner_module = importlib.reload(runner_module)
         assert runner_dir not in sys.path
 
-        import_calls: list[tuple[str, str | None]] = []
-        real_import_module = importlib.import_module
+        sentinel_main = object()
+        monkeypatch.setattr(
+            reloaded_runner_module,
+            "discover_leaf_entry_modules",
+            lambda _entry_dir, _package_prefix: [
+                ("expectation.pass.buffer_results_to_out_params.single_output", sentinel_main)
+            ],
+        )
 
-        def _spy_import_module(name: str, package: str | None = None) -> object:
-            import_calls.append((name, package))
-            return real_import_module(name, package)
+        recorded_entries: list[tuple[str, object]] = []
 
-        monkeypatch.setattr(reloaded_runner_module.importlib, "import_module", _spy_import_module)
-        single_output_main = reloaded_runner_module._load_case_main("single_output")
+        def _record_run_entry(_failures, entry_name: str, entry_fn) -> None:
+            recorded_entries.append((entry_name, entry_fn))
 
-        assert import_calls == [(".single_output", reloaded_runner_module.__package__)]
-        canonical_single_output = sys.modules["expectation.pass.buffer_results_to_out_params.single_output"]
-        assert single_output_main is canonical_single_output.main
+        monkeypatch.setattr(reloaded_runner_module, "run_entry", _record_run_entry)
+        reloaded_runner_module.main()
+
+        assert len(recorded_entries) == 1
+        entry_name, entry_fn = recorded_entries[0]
+        assert entry_name == "pass-buffer_results_to_out_params-single_output"
+        assert entry_fn is sentinel_main
     finally:
         sys.path[:] = original_sys_path
         importlib.reload(runner_module)
@@ -124,7 +157,7 @@ def _make_memory_type() -> NnMemoryType:
     - mem_type = _make_memory_type()
 
     关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - spec: spec/pass/buffer_results_to_out_params.md
     - test: test/pass/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
@@ -151,7 +184,7 @@ def _make_memory_type_with_shape(shape: tuple[int, ...], *, space: str = "global
     - mem_type = _make_memory_type_with_shape((2, 4))
 
     关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - spec: spec/pass/buffer_results_to_out_params.md
     - test: test/pass/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
@@ -183,7 +216,7 @@ def _arg_attrs(*names: str) -> ArrayAttr[DictionaryAttr]:
     - attrs = _arg_attrs("src")
 
     关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - spec: spec/pass/buffer_results_to_out_params.md
     - test: test/pass/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
@@ -200,7 +233,7 @@ def _arg_attrs(*names: str) -> ArrayAttr[DictionaryAttr]:
 # 测试目的: 锁定 function_type.inputs 最前插入 arg0、outputs 清空、func.return 变为空 return，且函数体内对返回 buffer 的使用改写到 arg0。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_single_memory_result_to_front_out_param
 # 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
-# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应 spec 文件路径: spec/pass/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_single_memory_result_to_front_out_param() -> None:
     mem_type = _make_memory_type()
@@ -241,7 +274,7 @@ def test_rewrite_single_memory_result_to_front_out_param() -> None:
 # 测试目的: 锁定未定义函数体的 memory-return 函数不会被半改写。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_external_declaration
 # 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
-# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应 spec 文件路径: spec/pass/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_rejects_external_declaration() -> None:
     mem_type = _make_memory_type()
@@ -251,7 +284,7 @@ def test_rewrite_rejects_external_declaration() -> None:
     )
     module = ModuleOp([external_func])
 
-    with pytest.raises(BufferResultsToOutParamsError, match="external declaration"):
+    with pytest.raises(PassContractError, match="external declaration"):
         BufferResultsToOutParamsPass().run(module)
 
 
@@ -264,7 +297,7 @@ def test_rewrite_rejects_external_declaration() -> None:
 # 测试目的: 锁定 pass 不再保留旧 memory call result SSA，caller 侧必须先提供 out buffer。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_callsite_replaces_old_memory_result_ssa
 # 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
-# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应 spec 文件路径: spec/pass/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_callsite_replaces_old_memory_result_ssa() -> None:
     mem_type = _make_memory_type()
@@ -383,7 +416,7 @@ def test_pipeline_position_pass_manager_runs_lower_then_buffer_results_to_out_pa
 # 测试目的: 锁定多个 output 的前置顺序与 caller 显式 out 实参顺序，不允许交换或保留旧 memory call result SSA。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_multiple_memory_results_to_arg0_arg1
 # 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
-# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应 spec 文件路径: spec/pass/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_multiple_memory_results_to_arg0_arg1() -> None:
     mem_type_a = _make_memory_type_with_shape((2, 3))
@@ -451,7 +484,7 @@ def test_rewrite_multiple_memory_results_to_arg0_arg1() -> None:
 # 测试目的: 锁定 mixed returns 改写后 caller 侧 `func.call` 只保留 scalar result，旧 memory result SSA 不再存在。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_mixed_memory_and_scalar_results_preserves_scalar_return
 # 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
-# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应 spec 文件路径: spec/pass/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_mixed_memory_and_scalar_results_preserves_scalar_return() -> None:
     mem_type = _make_memory_type()
@@ -520,7 +553,7 @@ def test_rewrite_mixed_memory_and_scalar_results_preserves_scalar_return() -> No
 # 测试目的: 锁定 return SSA 被替换时，真实写回 operand 也必须切到 `arg0`，避免源码仍写旧 target 入参。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_deslice_result_retargets_writeback_to_front_out_param
 # 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
-# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应 spec 文件路径: spec/pass/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_deslice_result_retargets_writeback_to_front_out_param() -> None:
     source_type = _make_memory_type_with_shape((2, 2), space="local")
@@ -571,7 +604,7 @@ def test_rewrite_deslice_result_retargets_writeback_to_front_out_param() -> None
 # 测试目的: 锁定仅支持单 block 的边界，避免 CFG/分支场景被误改写。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_multi_block_function
 # 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
-# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应 spec 文件路径: spec/pass/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_rejects_multi_block_function() -> None:
     mem_type = _make_memory_type()
@@ -586,7 +619,7 @@ def test_rewrite_rejects_multi_block_function() -> None:
     )
     module = ModuleOp([func_op])
 
-    with pytest.raises(BufferResultsToOutParamsError, match="single-block"):
+    with pytest.raises(PassContractError, match="single-block"):
         BufferResultsToOutParamsPass().run(module)
 
 
@@ -599,7 +632,7 @@ def test_rewrite_rejects_multi_block_function() -> None:
 # 测试目的: 锁定 return/output arity mismatch 的边界诊断。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_return_arity_mismatch
 # 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
-# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应 spec 文件路径: spec/pass/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_rejects_return_arity_mismatch() -> None:
     mem_type = _make_memory_type()
@@ -613,7 +646,7 @@ def test_rewrite_rejects_return_arity_mismatch() -> None:
     )
     module = ModuleOp([func_op])
 
-    with pytest.raises(BufferResultsToOutParamsError, match="return operand count"):
+    with pytest.raises(PassContractError, match="return operand count"):
         BufferResultsToOutParamsPass().run(module)
 
 
@@ -626,7 +659,7 @@ def test_rewrite_rejects_return_arity_mismatch() -> None:
 # 测试目的: 锁定 callsite mismatch 不允许静默通过或部分改写。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_callsite_signature_mismatch
 # 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
-# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应 spec 文件路径: spec/pass/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_rejects_callsite_signature_mismatch() -> None:
     mem_type = _make_memory_type()
@@ -652,7 +685,7 @@ def test_rewrite_rejects_callsite_signature_mismatch() -> None:
 
     module = ModuleOp([callee, caller])
 
-    with pytest.raises(BufferResultsToOutParamsError, match="half-rewritten"):
+    with pytest.raises(PassContractError, match="half-rewritten"):
         BufferResultsToOutParamsPass().run(module)
 
 
@@ -665,7 +698,7 @@ def test_rewrite_rejects_callsite_signature_mismatch() -> None:
 # 测试目的: 锁定“callee 已是 out-param ABI，但 caller 仍消费旧 memory result”不会被静默放过。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_old_memory_callsite_against_rewritten_callee
 # 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
-# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应 spec 文件路径: spec/pass/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_rejects_old_memory_callsite_against_rewritten_callee() -> None:
     mem_type = _make_memory_type()
@@ -691,7 +724,7 @@ def test_rewrite_rejects_old_memory_callsite_against_rewritten_callee() -> None:
 
     module = ModuleOp([callee, caller])
 
-    with pytest.raises(BufferResultsToOutParamsError, match="half-rewritten"):
+    with pytest.raises(PassContractError, match="half-rewritten"):
         BufferResultsToOutParamsPass().run(module)
 
 
@@ -704,7 +737,7 @@ def test_rewrite_rejects_old_memory_callsite_against_rewritten_callee() -> None:
 # 测试目的: 锁定 ABI 校验不只比较参数/结果个数，还要比较 caller/callee 的结果类型。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_callsite_result_type_mismatch_with_same_arity
 # 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
-# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应 spec 文件路径: spec/pass/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_rejects_callsite_result_type_mismatch_with_same_arity() -> None:
     mem_type = _make_memory_type()
@@ -731,5 +764,5 @@ def test_rewrite_rejects_callsite_result_type_mismatch_with_same_arity() -> None
 
     module = ModuleOp([callee, caller])
 
-    with pytest.raises(BufferResultsToOutParamsError, match="half-rewritten"):
+    with pytest.raises(PassContractError, match="half-rewritten"):
         BufferResultsToOutParamsPass().run(module)

@@ -6,6 +6,11 @@
 - 本方言提供“声明超参数并生成符号标量”的 IR 表达，也提供 `tuner.cost` 作为 cost function 内的单 op 局部成本节点；不负责运行期求值、调度策略、搜索空间算法或真实 cost table。
 - 超参数标量统一返回 `!symbol.dim<"name">`，与 `SymbolDim` 的符号维度语义保持一致；`tuner.cost` 固定返回 `!symbol.int<"expr">`。
 
+## API 列表
+
+- `tuner.param`
+- `tuner.cost`
+
 ## 文档信息
 
 - 创建者：`咯咯咯`

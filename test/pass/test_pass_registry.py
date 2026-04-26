@@ -53,9 +53,7 @@ _reset_registry_for_test = registry_module._reset_registry_for_test
 pass_manager_module = importlib.import_module("kernel_gen.passes.pass_manager")
 Pass = pass_manager_module.Pass
 PassManager = pass_manager_module.PassManager
-LaunchKernelCostFuncError = importlib.import_module(
-    "kernel_gen.passes.tuning.launch_kernel_cost_func"
-).LaunchKernelCostFuncError
+PassContractError = importlib.import_module("kernel_gen.passes.common").PassContractError
 
 
 @pytest.fixture(autouse=True)
@@ -289,7 +287,7 @@ def test_build_registered_tile_analysis_pass() -> None:
     assert pass_obj.name == "tile-analysis"
     assert type(pass_obj).__name__ == "TileAnalysisPass"
     assert isinstance(pass_obj, ModulePass)
-    assert pass_obj.__class__.__module__ == "kernel_gen.tile.analysis"
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.tile.analysis"
 
 
 # TC-REGISTRY-007A-0B
@@ -308,7 +306,7 @@ def test_build_registered_tile_reduce_pass() -> None:
     assert pass_obj.name == "tile-reduce"
     assert type(pass_obj).__name__ == "TileReducePass"
     assert isinstance(pass_obj, ModulePass)
-    assert pass_obj.__class__.__module__ == "kernel_gen.tile.reduce"
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.tile.reduce"
 
 
 # TC-REGISTRY-007A-1
@@ -327,7 +325,7 @@ def test_build_registered_tile_elewise_pass() -> None:
     assert pass_obj.name == "tile-elewise"
     assert type(pass_obj).__name__ == "TileElewisePass"
     assert isinstance(pass_obj, ModulePass)
-    assert pass_obj.__class__.__module__ == "kernel_gen.tile.elewise"
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.tile.elewise"
 
 
 # TC-REGISTRY-007A-2
@@ -384,17 +382,17 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
         (
             "kernel_gen.passes.lowering",
             "TileAnalysisPass",
-            importlib.import_module("kernel_gen.tile.analysis").TileAnalysisPass,
+            importlib.import_module("kernel_gen.passes.tile.analysis").TileAnalysisPass,
         ),
         (
             "kernel_gen.passes.lowering",
             "TileElewisePass",
-            importlib.import_module("kernel_gen.tile.elewise").TileElewisePass,
+            importlib.import_module("kernel_gen.passes.tile.elewise").TileElewisePass,
         ),
         (
             "kernel_gen.passes.lowering",
             "TileReducePass",
-            importlib.import_module("kernel_gen.tile.reduce").TileReducePass,
+            importlib.import_module("kernel_gen.passes.tile.reduce").TileReducePass,
         ),
         (
             "kernel_gen.passes.dma_memory_hierarchy",
@@ -407,19 +405,19 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
             importlib.import_module("kernel_gen.passes.memory_pool").MemoryPoolPass,
         ),
         (
-            "kernel_gen.tile.analysis",
+            "kernel_gen.passes.tile.analysis",
             "TileAnalysisPass",
-            importlib.import_module("kernel_gen.tile.analysis").TileAnalysisPass,
+            importlib.import_module("kernel_gen.passes.tile.analysis").TileAnalysisPass,
         ),
         (
-            "kernel_gen.tile.elewise",
+            "kernel_gen.passes.tile.elewise",
             "TileElewisePass",
-            importlib.import_module("kernel_gen.tile.elewise").TileElewisePass,
+            importlib.import_module("kernel_gen.passes.tile.elewise").TileElewisePass,
         ),
         (
-            "kernel_gen.tile.reduce",
+            "kernel_gen.passes.tile.reduce",
             "TileReducePass",
-            importlib.import_module("kernel_gen.tile.reduce").TileReducePass,
+            importlib.import_module("kernel_gen.passes.tile.reduce").TileReducePass,
         ),
         (
             "kernel_gen.passes.lowering.outline_device_kernel",
@@ -477,7 +475,6 @@ def test_build_registered_launch_kernel_cost_func_pass() -> None:
     assert pass_obj.name == "launch-kernel-cost-func"
     assert type(pass_obj).__name__ == "LaunchKernelCostFuncPass"
     assert getattr(pass_obj, "cost_kind") == "compute|memory|latency"
-    assert getattr(pass_obj, "cost_kinds") == ("compute", "memory", "latency")
 
 
 # TC-REGISTRY-007C
@@ -494,7 +491,7 @@ def test_build_registered_launch_kernel_cost_func_rejects_invalid_kind() -> None
     load_builtin_passes()
 
     with pytest.raises(
-        LaunchKernelCostFuncError,
+        PassContractError,
         match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
     ):
         build_registered_pass("launch-kernel-cost-func", {"cost_kind": "memory|latency|memory"})

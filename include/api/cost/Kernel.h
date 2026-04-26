@@ -5,8 +5,8 @@
 
 使用示例:
 - #include "include/api/cost/Kernel.h"
-- S_INT add_cost = npu_demo::cost::add<GM, float, float, npu_demo::cost::CostKind::Compute>(out, lhs, rhs);
-- S_INT matmul_cost = npu_demo::cost::matmul<TSM, TSM, TLM1, float, float, float, npu_demo::cost::CostKind::Memory>(out, lhs, rhs);
+- S_INT add_cost = npu_demo::cost::add<GM, float, float, npu_demo::compute>(out, lhs, rhs);
+- S_INT matmul_cost = npu_demo::cost::matmul<TSM, TSM, TLM1, float, float, float, npu_demo::memory>(out, lhs, rhs);
 
 创建者: 金铲铲大作战
 最后修改人: 金铲铲大作战
@@ -31,8 +31,8 @@ namespace cost {
 - 声明逐元素二元算术成本 helper，参数顺序固定为 `out -> lhs -> rhs`。
 
 使用示例:
-- S_INT add_cost = npu_demo::cost::add<GM, float, float, npu_demo::cost::CostKind::Compute>(out, lhs, rhs);
-- S_INT div_cost = npu_demo::cost::truediv<TSM, float, float, npu_demo::cost::CostKind::Memory>(out, lhs, rhs);
+- S_INT add_cost = npu_demo::cost::add<GM, float, float, npu_demo::compute>(out, lhs, rhs);
+- S_INT div_cost = npu_demo::cost::truediv<TSM, float, float, npu_demo::memory>(out, lhs, rhs);
 
 创建者: 金铲铲大作战
 最后修改人: 金铲铲大作战
@@ -68,7 +68,7 @@ S_INT truediv(
 - 声明逐元素比较成本 helper，参数顺序固定为 `out -> lhs -> rhs`。
 
 使用示例:
-- S_INT eq_cost = npu_demo::cost::eq<GM, float, bool, npu_demo::cost::CostKind::Compute>(out, lhs, rhs);
+- S_INT eq_cost = npu_demo::cost::eq<GM, float, bool, npu_demo::compute>(out, lhs, rhs);
 
 创建者: 金铲铲大作战
 最后修改人: 金铲铲大作战
@@ -114,8 +114,8 @@ S_INT ge(
 - 声明一元、select 与 reduce 成本 helper，参数顺序与 include/api/Kernel.h 保持一致。
 
 使用示例:
-- S_INT exp_cost = npu_demo::cost::exp<GM, float, float, npu_demo::cost::CostKind::Compute>(out, input);
-- S_INT reduce_cost = npu_demo::cost::reduce_sum<GM, float, float, npu_demo::cost::CostKind::Memory>(out, input, 1);
+- S_INT exp_cost = npu_demo::cost::exp<GM, float, float, npu_demo::compute>(out, input);
+- S_INT reduce_cost = npu_demo::cost::reduce_sum<GM, float, float, npu_demo::memory>(out, input, 1);
 
 创建者: 金铲铲大作战
 最后修改人: 金铲铲大作战
@@ -143,7 +143,7 @@ S_INT reduce_min(const Memory<Space, OutType>& out, const Memory<Space, InType>&
 - 声明 matmul 与 img2col family 的成本 helper，模板顺序跟随原 Kernel helper，再在末尾追加 `Kind`。
 
 使用示例:
-- S_INT matmul_cost = npu_demo::cost::matmul<TSM, TSM, TLM1, float, float, float, npu_demo::cost::CostKind::Compute>(out, lhs, rhs);
+- S_INT matmul_cost = npu_demo::cost::matmul<TSM, TSM, TLM1, float, float, float, npu_demo::compute>(out, lhs, rhs);
 
 创建者: 金铲铲大作战
 最后修改人: 金铲铲大作战

@@ -8,9 +8,6 @@ xpu/
 temp
 .coverage
 coverage/
-!test/fixtures/
-!test/fixtures/coverage/
-!test/fixtures/coverage/*.json
 command.txt
 .vscode
 *.lock
@@ -19,17 +16,6 @@ DONE.md
 agents-lists.md
 **.log
 expectation
-!expectation/
-expectation/*
-!expectation/pass/
-expectation/pass/*
-!expectation/pass/tuning/
-expectation/pass/tuning/*
-!expectation/pass/tuning/launch_kernel_cost_func/
-expectation/pass/tuning/launch_kernel_cost_func/*
-!expectation/pass/tuning/launch_kernel_cost_func/__main__.py
-!expectation/pass/tuning/launch_kernel_cost_func/_shared.py
-经验.md
 main.py
 plan
 ARCHITECTURE/plan/

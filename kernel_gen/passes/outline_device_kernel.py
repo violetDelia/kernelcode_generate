@@ -1,7 +1,7 @@
 """outline-device-kernel pass.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: OpenAI Codex
 
 功能说明:
 - 作为 `ModulePass` 为带显式 launch 属性的 `func.func` 执行 host-launch outline。
@@ -24,33 +24,41 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import IntAttr, IntegerAttr, ModuleOp, StringAttr
-from xdsl.ir import Attribute, Block, Region
+from xdsl.ir import Block, Region
 from xdsl.passes import ModulePass
+from xdsl.pattern_rewriter import (
+    GreedyRewritePatternApplier,
+    PatternRewriter,
+    PatternRewriteWalker,
+    RewritePattern,
+    op_type_rewrite_pattern,
+)
+from xdsl.rewriter import InsertPoint
 
 from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dialect.symbol import SymbolConstOp
-from kernel_gen.passes.pass_manager import Pass
+from kernel_gen.passes.common import (
+    PassContractError,
+    ensure_builtin_module,
+    verify_generated_ops,
+)
 
-_LAUNCH_ATTRS = ("launch_block", "launch_thread", "launch_subthread")
 
+class OutlineDeviceKernelFuncPattern(RewritePattern):
+    """按单个 `func.func` 执行 outline-device-kernel 改写。
 
-class OutlineDeviceKernelError(ValueError):
-    """outline-device-kernel pass 的稳定错误类型。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    创建者: OpenAI Codex
+    最后一次更改: OpenAI Codex
 
     功能说明:
-    - 统一承载 outline 过程中的显式失败路径。
-    - 保持错误前缀稳定，便于测试与 expectation 做机械匹配。
+    - 一个 `func.func` 对应一个 pattern。
+    - 仅处理候选集合中带显式 launch attrs 的函数。
 
     使用示例:
-    - raise OutlineDeviceKernelError("OutlineDeviceKernelError: module must be builtin.module")
+    - pattern = OutlineDeviceKernelFuncPattern(candidates)
 
     关联文件:
     - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
@@ -58,202 +66,94 @@ class OutlineDeviceKernelError(ValueError):
     - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
+    LAUNCH_ATTRS = ("launch_block", "launch_thread", "launch_subthread")
 
-@dataclass(frozen=True)
-class _OutlineCandidate:
-    """记录待 outline 的函数与已规整的 launch extent。
+    def __init__(self, candidates: dict[str, tuple[int, int, int, int]]):
+        self._candidates = candidates
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: func.FuncOp, rewriter: PatternRewriter, /) -> None:
+        candidate = self._candidates.get(op.sym_name.data)
+        if candidate is None:
+            return
+        if not any(name in op.attributes for name in self.LAUNCH_ATTRS):
+            return
+        block, thread, subthread, shared_memory_size = candidate
+        input_types = list(op.function_type.inputs.data)
+        output_types = list(op.function_type.outputs.data)
+        original_attrs = dict(op.attributes)
+        device_name = f"{op.sym_name.data}_device"
+        device_region = Region()
+        op.body.move_blocks(device_region)
 
-    功能说明:
-    - 在正式改写前固定函数对象、device 名称与四段 launch extent。
-    - 让校验与改写分离，避免失败路径产生半改写状态。
-
-    使用示例:
-    - candidate = _OutlineCandidate(
-    -     func_op=func_op,
-    -     device_name="kernel_device",
-    -     block=1,
-    -     thread=4,
-    -     subthread=1,
-    -     shared_memory_size=0,
-    - )
-
-    关联文件:
-    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
-    """
-
-    func_op: func.FuncOp
-    device_name: str
-    block: int
-    thread: int
-    subthread: int
-    shared_memory_size: int
-
-
-def _extract_int_like_attr(attr_name: str, attr: Attribute, func_name: str) -> int:
-    """把函数属性提取为 Python 整数。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 支持 `IntAttr`、`IntegerAttr` 与可转整数的 `StringAttr`。
-    - 对非整数语义统一抛出稳定错误短语。
-
-    使用示例:
-    - value = _extract_int_like_attr("launch_thread", IntAttr(4), "kernel")
-
-    关联文件:
-    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
-    """
-
-    if isinstance(attr, IntAttr):
-        return attr.data
-    if isinstance(attr, IntegerAttr):
-        return attr.value.data
-    if isinstance(attr, StringAttr):
-        try:
-            return int(attr.data)
-        except ValueError as exc:
-            raise OutlineDeviceKernelError(
-                f"OutlineDeviceKernelError: function {func_name} {attr_name} must be int-like attribute"
-            ) from exc
-    raise OutlineDeviceKernelError(
-        f"OutlineDeviceKernelError: function {func_name} {attr_name} must be int-like attribute"
-    )
-
-
-def _normalize_positive_int_attr(attr_name: str, attr: Attribute, func_name: str) -> int:
-    """把函数属性规整为正整数 launch extent。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 复用 int-like 提取逻辑，校验 launch extent 必须大于 `0`。
-    - 对非整数或非正数语义抛出稳定错误短语。
-
-    使用示例:
-    - value = _normalize_positive_int_attr("launch_thread", IntAttr(4), "kernel")
-
-    关联文件:
-    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
-    """
-
-    value = _extract_int_like_attr(attr_name, attr, func_name)
-    if value <= 0:
-        raise OutlineDeviceKernelError(
-            f"OutlineDeviceKernelError: function {func_name} {attr_name} must be > 0"
+        device_func = func.FuncOp(
+            device_name,
+            (input_types, output_types),
+            device_region,
+            visibility=getattr(op, "sym_visibility", None),
+            arg_attrs=op.arg_attrs,
+            res_attrs=op.res_attrs,
         )
-    return value
-
-
-def _normalize_non_negative_int_attr(attr_name: str, attr: Attribute, func_name: str) -> int:
-    """把函数属性规整为非负整数 metadata。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 复用 int-like 提取逻辑，校验 metadata 必须大于等于 `0`。
-    - 供 `shared_memory_size` 这类可选 metadata 在候选收集阶段统一校验。
-
-    使用示例:
-    - value = _normalize_non_negative_int_attr("shared_memory_size", IntAttr(0), "kernel")
-
-    关联文件:
-    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
-    """
-
-    value = _extract_int_like_attr(attr_name, attr, func_name)
-    if value < 0:
-        raise OutlineDeviceKernelError(
-            f"OutlineDeviceKernelError: function {func_name} {attr_name} must be >= 0"
+        device_func.attributes.update(
+            {
+                name: attr
+                for name, attr in original_attrs.items()
+                if name not in self.LAUNCH_ATTRS
+            }
         )
-    return value
-
-
-def _collect_outline_candidate(
-    func_op: func.FuncOp,
-    existing_names: set[str],
-) -> _OutlineCandidate | None:
-    """收集单个 `func.func` 的 outline 候选信息。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 只对显式出现 launch 属性的函数做校验与候选收集。
-    - 锁定零返回、完整属性组、`shared_memory_size` 合法性与 `_device` 命名冲突等公开边界。
-
-    使用示例:
-    - candidate = _collect_outline_candidate(func_op, {"kernel", "helper"})
-
-    关联文件:
-    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
-    """
-
-    present_attrs = [name for name in _LAUNCH_ATTRS if name in func_op.attributes]
-    if not present_attrs:
-        return None
-    func_name = func_op.sym_name.data
-    if len(present_attrs) != len(_LAUNCH_ATTRS):
-        raise OutlineDeviceKernelError(
-            "OutlineDeviceKernelError: function "
-            f"{func_name} must define launch_block, launch_thread, and launch_subthread together"
+        op.attributes.clear()
+        op.attributes.update(
+            {
+                name: attr
+                for name, attr in original_attrs.items()
+                if name not in self.LAUNCH_ATTRS and name != "shared_memory_size"
+            }
         )
-    if len(func_op.function_type.outputs.data) != 0:
-        raise OutlineDeviceKernelError(f"OutlineDeviceKernelError: function {func_name} must have zero results")
-    if not any(True for _ in func_op.body.blocks):
-        raise OutlineDeviceKernelError(f"OutlineDeviceKernelError: function {func_name} must contain a body")
-    shared_memory_size = 0
-    if "shared_memory_size" in func_op.attributes:
-        shared_memory_size = _normalize_non_negative_int_attr(
-            "shared_memory_size",
-            func_op.attributes["shared_memory_size"],
-            func_name,
+        wrapper_block = Block(arg_types=input_types)
+        block_const = SymbolConstOp(block)
+        thread_const = SymbolConstOp(thread)
+        subthread_const = SymbolConstOp(subthread)
+        shared_memory_size_const = SymbolConstOp(shared_memory_size)
+        launch = ArchLaunchOp(
+            device_name,
+            block_const.result,
+            thread_const.result,
+            subthread_const.result,
+            shared_memory_size_const.result,
+            tuple(wrapper_block.args),
         )
-
-    device_name = f"{func_name}_device"
-    if device_name in existing_names:
-        raise OutlineDeviceKernelError(
-            f"OutlineDeviceKernelError: outlined device function '{device_name}' already exists"
+        wrapper_block.add_ops(
+            [
+                block_const,
+                thread_const,
+                subthread_const,
+                shared_memory_size_const,
+                launch,
+                func.ReturnOp(),
+            ]
         )
+        op.body.add_block(wrapper_block)
 
-    return _OutlineCandidate(
-        func_op=func_op,
-        device_name=device_name,
-        block=_normalize_positive_int_attr("launch_block", func_op.attributes["launch_block"], func_name),
-        thread=_normalize_positive_int_attr("launch_thread", func_op.attributes["launch_thread"], func_name),
-        subthread=_normalize_positive_int_attr("launch_subthread", func_op.attributes["launch_subthread"], func_name),
-        shared_memory_size=shared_memory_size,
-    )
+        rewriter.insert_op(device_func, InsertPoint.after(rewriter.current_operation))
+        verify_generated_ops([op, device_func])
+        rewriter.notify_op_modified(op)
 
 
-def _build_wrapper_attrs(attributes: dict[str, Attribute]) -> dict[str, Attribute]:
-    """生成 wrapper 保留的函数属性字典。
+def get_outline_device_kernel_pass_patterns(
+    candidates: dict[str, tuple[int, int, int, int]],
+) -> list[RewritePattern]:
+    """返回 `outline-device-kernel` pass 使用的公开 pattern 列表。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    创建者: OpenAI Codex
+    最后一次更改: OpenAI Codex
 
     功能说明:
-    - 移除三项 launch trigger attrs。
-    - 同时移除 `shared_memory_size`，把该 metadata 仅保留在 device function。
+    - 为外部测试、组合 pass 与公开 API 提供稳定的 pattern 构造入口。
+    - 当前固定只返回 `OutlineDeviceKernelFuncPattern`，顺序即为 pass 执行顺序。
 
     使用示例:
-    - wrapper_attrs = _build_wrapper_attrs(dict(func_op.attributes))
+    - patterns = get_outline_device_kernel_pass_patterns(candidates)
+    - walker = PatternRewriteWalker(GreedyRewritePatternApplier(patterns, ctx=ctx))
 
     关联文件:
     - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
@@ -261,121 +161,14 @@ def _build_wrapper_attrs(attributes: dict[str, Attribute]) -> dict[str, Attribut
     - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
-    return {
-        name: attr
-        for name, attr in attributes.items()
-        if name not in _LAUNCH_ATTRS and name != "shared_memory_size"
-    }
+    return [OutlineDeviceKernelFuncPattern(candidates)]
 
 
-def _build_device_attrs(attributes: dict[str, Attribute]) -> dict[str, Attribute]:
-    """生成 device function 保留的函数属性字典。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 只移除三项 launch trigger attrs。
-    - 保留 `shared_memory_size` 以及其他原函数元数据。
-
-    使用示例:
-    - device_attrs = _build_device_attrs(dict(func_op.attributes))
-
-    关联文件:
-    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
-    """
-
-    return {name: attr for name, attr in attributes.items() if name not in _LAUNCH_ATTRS}
-
-
-def _build_wrapper_block(candidate: _OutlineCandidate) -> Block:
-    """构造 host wrapper 的唯一 entry block。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 以原参数类型生成新 block 参数。
-    - 固定插入 `symbol.const` 四元组、单个 `arch.launch` 与空 `func.return`。
-
-    使用示例:
-    - block = _build_wrapper_block(candidate)
-
-    关联文件:
-    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
-    """
-
-    input_types = list(candidate.func_op.function_type.inputs.data)
-    wrapper_block = Block(arg_types=input_types)
-    block_const = SymbolConstOp(candidate.block)
-    thread_const = SymbolConstOp(candidate.thread)
-    subthread_const = SymbolConstOp(candidate.subthread)
-    shared_memory_size_const = SymbolConstOp(candidate.shared_memory_size)
-    launch = ArchLaunchOp(
-        candidate.device_name,
-        block_const.result,
-        thread_const.result,
-        subthread_const.result,
-        shared_memory_size_const.result,
-        tuple(wrapper_block.args),
-    )
-    wrapper_block.add_ops(
-        [block_const, thread_const, subthread_const, shared_memory_size_const, launch, func.ReturnOp()]
-    )
-    return wrapper_block
-
-
-def _outline_function(module: ModuleOp, candidate: _OutlineCandidate) -> None:
-    """把单个候选函数改写为 `wrapper + device body`。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 把原函数体 region 搬移到新的 `@<name>_device`。
-    - 原函数本身改写为 host wrapper，并在模块中紧随其后插入 device function。
-
-    使用示例:
-    - _outline_function(module, candidate)
-
-    关联文件:
-    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
-    """
-
-    func_op = candidate.func_op
-    input_types = list(func_op.function_type.inputs.data)
-    output_types = list(func_op.function_type.outputs.data)
-    original_attrs = dict(func_op.attributes)
-    device_region = Region()
-    func_op.body.move_blocks(device_region)
-
-    device_func = func.FuncOp(
-        candidate.device_name,
-        (input_types, output_types),
-        device_region,
-        visibility=getattr(func_op, "sym_visibility", None),
-        arg_attrs=func_op.arg_attrs,
-        res_attrs=func_op.res_attrs,
-    )
-    device_func.attributes.update(_build_device_attrs(original_attrs))
-
-    func_op.attributes.clear()
-    func_op.attributes.update(_build_wrapper_attrs(original_attrs))
-    func_op.body.add_block(_build_wrapper_block(candidate))
-    module.body.block.insert_op_after(device_func, func_op)
-
-
-class OutlineDeviceKernelPass(Pass, ModulePass):
+class OutlineDeviceKernelPass(ModulePass):
     """outline-device-kernel pass。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: OpenAI Codex
 
     功能说明:
     - 固定公开名称为 `outline-device-kernel`。
@@ -396,11 +189,11 @@ class OutlineDeviceKernelPass(Pass, ModulePass):
 
     name = "outline-device-kernel"
 
-    def apply(self: "OutlineDeviceKernelPass", ctx: Context, module: ModuleOp) -> None:
+    def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行 outline-device-kernel ModulePass。
 
         创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
+        最后一次更改: OpenAI Codex
 
         功能说明:
         - 仅接受 `builtin.module` 作为 ModulePass 输入。
@@ -418,27 +211,86 @@ class OutlineDeviceKernelPass(Pass, ModulePass):
         - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
         """
 
-        del ctx
-        if not isinstance(module, ModuleOp):
-            raise OutlineDeviceKernelError("OutlineDeviceKernelError: module must be builtin.module")
+        module = ensure_builtin_module(module)
         if not any(True for _ in module.ops):
             return
+        candidates: dict[str, tuple[int, int, int, int]] = {}
         existing_names = {op.sym_name.data for op in module.ops if isinstance(op, func.FuncOp)}
-        candidates: list[_OutlineCandidate] = []
         for op in module.ops:
             if not isinstance(op, func.FuncOp):
                 continue
-            candidate = _collect_outline_candidate(op, existing_names)
-            if candidate is not None:
-                candidates.append(candidate)
-        for candidate in candidates:
-            _outline_function(module, candidate)
+            present_attrs = [
+                name
+                for name in OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS
+                if name in op.attributes
+            ]
+            if not present_attrs:
+                continue
+            func_name = op.sym_name.data
+            if len(present_attrs) != len(OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS):
+                raise PassContractError(
+                    "function "
+                    f"{func_name} must define launch_block, launch_thread, and launch_subthread together"
+                )
+            if len(op.function_type.outputs.data) != 0:
+                raise PassContractError(f"function {func_name} must have zero results")
+            if not any(True for _ in op.body.blocks):
+                raise PassContractError(f"function {func_name} must contain a body")
 
-    def run(self: "OutlineDeviceKernelPass", module: object) -> ModuleOp:
+            values: list[int] = []
+            for attr_name in OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS + ("shared_memory_size",):
+                attr = op.attributes.get(attr_name)
+                if attr is None:
+                    if attr_name == "shared_memory_size":
+                        values.append(0)
+                        continue
+                    raise PassContractError(
+                        "function "
+                        f"{func_name} must define launch_block, launch_thread, and launch_subthread together"
+                    )
+                if isinstance(attr, IntAttr):
+                    value = attr.data
+                elif isinstance(attr, IntegerAttr):
+                    value = attr.value.data
+                elif isinstance(attr, StringAttr):
+                    try:
+                        value = int(attr.data)
+                    except ValueError as exc:
+                        raise PassContractError(
+                            f"function {func_name} {attr_name} must be int-like attribute"
+                        ) from exc
+                else:
+                    raise PassContractError(
+                        f"function {func_name} {attr_name} must be int-like attribute"
+                    )
+                if attr_name == "shared_memory_size":
+                    if value < 0:
+                        raise PassContractError(
+                            f"function {func_name} {attr_name} must be >= 0"
+                        )
+                elif value <= 0:
+                    raise PassContractError(f"function {func_name} {attr_name} must be > 0")
+                values.append(value)
+
+            device_name = f"{func_name}_device"
+            if device_name in existing_names:
+                raise PassContractError(f"outlined device function '{device_name}' already exists")
+            candidates[func_name] = (values[0], values[1], values[2], values[3])
+        if not candidates:
+            return
+        PatternRewriteWalker(
+            GreedyRewritePatternApplier(
+                [*get_outline_device_kernel_pass_patterns(candidates)],
+                ctx=ctx,
+                dce_enabled=False,
+            )
+        ).rewrite_module(module)
+
+    def run(self, module: object) -> ModuleOp:
         """兼容旧 Pass 接口的执行入口。
 
         创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
+        最后一次更改: OpenAI Codex
 
         功能说明:
         - 保持旧 `run(module)` 调用方可继续工作。
@@ -455,7 +307,11 @@ class OutlineDeviceKernelPass(Pass, ModulePass):
         """
 
         self.apply(Context(), module)  # type: ignore[arg-type]
-        return module
+        return module  # type: ignore[return-value]
 
 
-__all__ = ["OutlineDeviceKernelError", "OutlineDeviceKernelPass"]
+__all__ = [
+    "OutlineDeviceKernelFuncPattern",
+    "OutlineDeviceKernelPass",
+    "get_outline_device_kernel_pass_patterns",
+]

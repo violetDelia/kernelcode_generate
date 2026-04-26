@@ -69,7 +69,7 @@ using Status = StatusCode;
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/dsl/gen_kernel/test_gen_kernel.py
 - 功能实现: include/api/Core.h
 */
 using S_INT = long long;

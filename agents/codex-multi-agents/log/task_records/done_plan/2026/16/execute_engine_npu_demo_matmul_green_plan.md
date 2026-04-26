@@ -10,7 +10,7 @@
   - [`spec/execute_engine/execute_engine_target.md`](../../spec/execute_engine/execute_engine_target.md)
   - [`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
   - [`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
-  - [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)
+  - [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)
   - [`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md)
   - [`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md)
   - [`spec/include/api/Nn.md`](../../spec/include/api/Nn.md)
@@ -135,7 +135,7 @@
 
 - 当前 [`matmul.plan.md`](../../matmul.plan.md) 说明了 tiled matmul 的目标内核与 CPU 向缺口，但没有形成可直接推进的正式计划书，也没有位于 `expectation/execute_engine` 的验收资产。
 - 当前 [`expectation/execute_engine`](../../expectation/execute_engine) 只有 [`add.py`](../../expectation/execute_engine/add.py)；仓库里还没有 `npu_demo` matmul 的 compile + execute 合同。
-- 当前 [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md) 已要求“输出 module 不应再包含 `nn` op”，但现有 [`test/pass/nn_lowering/matmul.py`](../../test/pass/nn_lowering/matmul.py) 只覆盖平铺 `nn.matmul -> kernel.matmul`，没有覆盖 tiled loop region 中的 `nn.matmul`。
+- 当前 [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md) 已要求“输出 module 不应再包含 `nn` op”，但现有 [`test/pass/nn_lowering/matmul.py`](../../test/pass/nn_lowering/matmul.py) 只覆盖平铺 `nn.matmul -> kernel.matmul`，没有覆盖 tiled loop region 中的 `nn.matmul`。
 - 当前前端链对 [`expectation/execute_engine/npu_demo/matmul.py`](../../expectation/execute_engine/npu_demo/matmul.py) 的 raw IR 试跑结果显示：前端显式写成 `MemorySpace.TSM` 的 tile memory，进入 IR 后被物化成 `#nn.space<shared>`，没有保持成 `#nn.space<tsm>`；这与本轮用户口径不一致，必须单独收口。
 - 当前 [`kernel_gen/dsl/emit_c.py`](../../kernel_gen/dsl/emit_c.py) 在 `target=npu_demo` 下不只是缺 `kernel.matmul`；从当前 expectation 试跑看，实际先撞到的是 `symbol.const` 不支持，说明 tiled matmul 链真实命中的 `symbol.const / symbol.for / dma.alloc / dma.slice / dma.deslice / kernel.matmul` 等 op family 还没有完整打通。
 - 当前 [`kernel_gen/dsl/gen_kernel.py`](../../kernel_gen/dsl/gen_kernel.py) 的 `target=npu_demo` 子集仍集中在 add/memory-pipeline 与 launch-wrapper 受控形态，尚未覆盖 “tile loop + slice + matmul + deslice” 的 body。
@@ -335,7 +335,7 @@ npu_demo::matmul(lhs_tile, rhs_tile, partial);
 
 #### 目标 spec / API
 
-- `spec/pass/lowering/nn_lowering.md`
+- `spec/pass/lowering/nn_lowering/spec.md`
 - `公开 API：NnLoweringPass.run(module)`
 
 #### 可改文件
@@ -492,7 +492,7 @@ result == torch.matmul(lhs, rhs)
 
 #### 目标 spec / API
 
-- `spec/pass/lowering/nn_lowering.md`
+- `spec/pass/lowering/nn_lowering/spec.md`
 - `spec/dsl/emit_c.md`
 - `spec/dsl/gen_kernel.md`
 - `spec/execute_engine/execute_engine.md`

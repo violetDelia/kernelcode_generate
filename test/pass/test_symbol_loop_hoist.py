@@ -39,13 +39,37 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFreeOp, DmaSliceOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolGetDimOp, SymbolIterType, SymbolValueType
+from kernel_gen.dialect.symbol import (
+    SymbolAddOp,
+    SymbolConstOp,
+    SymbolDimType,
+    SymbolDivOp,
+    SymbolFloorDivOp,
+    SymbolForOp,
+    SymbolGetDimOp,
+    SymbolGetStrideOp,
+    SymbolIterType,
+    SymbolMulOp,
+    SymbolSubOp,
+    SymbolValueType,
+    SymbolYieldOp,
+)
+from kernel_gen.dialect.tuner import TunerParamOp
 
 pass_module = importlib.import_module("kernel_gen.passes.symbol_loop_hoist")
+SymbolAddHoistPattern = pass_module.SymbolAddHoistPattern
+SymbolConstHoistPattern = pass_module.SymbolConstHoistPattern
+SymbolDivHoistPattern = pass_module.SymbolDivHoistPattern
+SymbolFloorDivHoistPattern = pass_module.SymbolFloorDivHoistPattern
+SymbolGetDimHoistPattern = pass_module.SymbolGetDimHoistPattern
+SymbolGetStrideHoistPattern = pass_module.SymbolGetStrideHoistPattern
 SymbolLoopHoistError = pass_module.SymbolLoopHoistError
 SymbolLoopHoistPass = pass_module.SymbolLoopHoistPass
+SymbolMulHoistPattern = pass_module.SymbolMulHoistPattern
+SymbolSubHoistPattern = pass_module.SymbolSubHoistPattern
+TunerParamHoistPattern = pass_module.TunerParamHoistPattern
+get_symbol_loop_hoist_patterns = pass_module.get_symbol_loop_hoist_patterns
 lowering_pass_module = importlib.import_module("kernel_gen.passes.lowering")
 
 
@@ -96,32 +120,25 @@ def _memory_type(shape: tuple[object, ...]) -> NnMemoryType:
     )
 
 
-def _make_module_for_hoist_alloc() -> ModuleOp:
+def _make_module_for_symbol_dim_hoist() -> ModuleOp:
     mem_type = _memory_type(("M", 128))
-    block = Block(arg_types=[mem_type, mem_type, mem_type])
+    block = Block(arg_types=[mem_type])
     ops: list[object] = []
     c0, c0_cast, zero = _const_symbol_int(0)
     c1, c1_cast, one = _const_symbol_int(1)
-    c128, c128_cast, one_two_eight = _const_symbol_int(128)
-    ops.extend([c0, c0_cast, c1, c1_cast, c128, c128_cast])
+    ops.extend([c0, c0_cast, c1, c1_cast])
 
     loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
     get_dim = SymbolGetDimOp(block.args[0], IntAttr(0))
-    alloc_type = NnMemoryType(
-        mem_type.shape,
-        mem_type.stride,
-        mem_type.element_type,
-        NnMemorySpaceAttr.from_name("local"),
-    )
-    alloc = DmaAllocOp([get_dim.result, one_two_eight], alloc_type)
-    loop_block.add_ops([get_dim, alloc])
+    get_stride = SymbolGetStrideOp(block.args[0], IntAttr(1))
+    loop_block.add_ops([get_dim, get_stride])
     loop = SymbolForOp(zero, one, one, loop_block)
     ops.append(loop)
     ops.append(func.ReturnOp())
     block.add_ops(ops)
     func_op = func.FuncOp(
-        "hoist_alloc",
-        FunctionType.from_lists([mem_type, mem_type, mem_type], []),
+        "hoist_symbol_dim",
+        FunctionType.from_lists([mem_type], []),
         Region(block),
     )
     return ModuleOp([func_op])
@@ -150,6 +167,96 @@ def _make_module_for_const_hoist() -> ModuleOp:
     return ModuleOp([func_op])
 
 
+def _make_module_for_tuner_param_hoist() -> ModuleOp:
+    block = Block(arg_types=[])
+    ops: list[object] = []
+    c0 = SymbolConstOp(0)
+    c1 = SymbolConstOp(1)
+    c2 = SymbolConstOp(1)
+    ops.extend([c0, c1, c2])
+
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    loop_block.add_ops([TunerParamOp(SymbolDimType.from_name("TILE_D0"))])
+    loop = SymbolForOp(c0.result, c1.result, c2.result, loop_block)
+    ops.append(loop)
+    ops.append(func.ReturnOp())
+    block.add_ops(ops)
+    func_op = func.FuncOp(
+        "hoist_tuner_param",
+        FunctionType.from_lists([], []),
+        Region(block),
+    )
+    return ModuleOp([func_op])
+
+
+def _make_module_for_symbol_elewise_hoist() -> ModuleOp:
+    block = Block(arg_types=[])
+    ops: list[object] = []
+    c0 = SymbolConstOp(0)
+    c1 = SymbolConstOp(1)
+    c2 = SymbolConstOp(1)
+    c4 = SymbolConstOp(4)
+    c5 = SymbolConstOp(5)
+    c6 = SymbolConstOp(6)
+    c7 = SymbolConstOp(7)
+    c8 = SymbolConstOp(8)
+    ops.extend([c0, c1, c2, c4, c5, c6, c7, c8])
+
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    add = SymbolAddOp(c4.result, c5.result, SymbolValueType.from_expr("4 + 5"))
+    sub = SymbolSubOp(c6.result, c1.result, SymbolValueType.from_expr("6 - 1"))
+    mul = SymbolMulOp(c4.result, c2.result, SymbolValueType.from_expr("4 * 1"))
+    div = SymbolDivOp(c8.result, c2.result, SymbolValueType.from_expr("8 / 1"))
+    floordiv = SymbolFloorDivOp(c7.result, c2.result, SymbolValueType.from_expr("7 // 1"))
+    loop_block.add_ops([add, sub, mul, div, floordiv])
+    loop = SymbolForOp(c0.result, c1.result, c2.result, loop_block)
+    ops.append(loop)
+    ops.append(func.ReturnOp())
+    block.add_ops(ops)
+    func_op = func.FuncOp(
+        "hoist_symbol_elewise",
+        FunctionType.from_lists([], []),
+        Region(block),
+    )
+    return ModuleOp([func_op])
+
+
+def _make_module_for_loop_carried_symbol_add() -> ModuleOp:
+    block = Block(arg_types=[])
+    ops: list[object] = []
+    c0 = SymbolConstOp(0)
+    c1 = SymbolConstOp(1)
+    c2 = SymbolConstOp(1)
+    ops.extend([c0, c1, c2])
+
+    loop_block = Block(
+        arg_types=[
+            SymbolIterType.from_bounds("0", "1", "1"),
+            SymbolValueType.from_expr("TOTAL"),
+        ]
+    )
+    carried = loop_block.args[1]
+    carried_add = SymbolAddOp(carried, c1.result, SymbolValueType.from_expr("TOTAL + 1"))
+    loop_block.add_ops([carried_add, SymbolYieldOp(carried_add.result)])
+    loop = SymbolForOp(
+        c0.result,
+        c1.result,
+        c2.result,
+        loop_block,
+        init=c0.result,
+        result_type=SymbolValueType.from_expr("TOTAL"),
+    )
+    ops.append(loop)
+    ops.append(func.ReturnOp())
+    block.add_ops(ops)
+    func_op = func.FuncOp(
+        "keep_loop_carried_symbol_add",
+        FunctionType.from_lists([], []),
+        Region(block),
+    )
+    return ModuleOp([func_op])
+
+
 def _make_module_without_symbol_for() -> ModuleOp:
     block = Block(arg_types=[])
     only_const = SymbolConstOp(7)
@@ -157,81 +264,6 @@ def _make_module_without_symbol_for() -> ModuleOp:
     func_op = func.FuncOp(
         "no_symbol_for",
         FunctionType.from_lists([], []),
-        Region(block),
-    )
-    return ModuleOp([func_op])
-
-
-def _make_module_for_fixed_read_slice() -> ModuleOp:
-    mem_type = _memory_type((1, 128))
-    block = Block(arg_types=[mem_type, mem_type, mem_type])
-    ops: list[object] = []
-    c0, c0_cast, zero = _const_symbol_int(0)
-    c1, c1_cast, one = _const_symbol_int(1)
-    c128, c128_cast, one_two_eight = _const_symbol_int(128)
-    ops.extend([c0, c0_cast, c1, c1_cast, c128, c128_cast])
-
-    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
-    bias_type = NnMemoryType(
-        ArrayAttr([IntAttr(1), IntAttr(128)]),
-        ArrayAttr([IntAttr(128), IntAttr(1)]),
-        i32,
-        NnMemorySpaceAttr.from_name("local"),
-    )
-    bias_alloc = DmaAllocOp([one, one_two_eight], bias_type)
-    bias_slice = DmaSliceOp(
-        bias_alloc.result,
-        block.args[0],
-        offsets=[zero, zero],
-        sizes=[one, one_two_eight],
-        strides=[one, one],
-    )
-    loop_block.add_ops([bias_alloc, bias_slice])
-    loop = SymbolForOp(zero, one, one, loop_block)
-    ops.append(loop)
-    ops.append(func.ReturnOp())
-    block.add_ops(ops)
-    func_op = func.FuncOp(
-        "fixed_read_slice",
-        FunctionType.from_lists([mem_type, mem_type, mem_type], []),
-        Region(block),
-    )
-    return ModuleOp([func_op])
-
-
-def _make_module_with_forbidden_invariant_deslice() -> ModuleOp:
-    mem_type = _memory_type((1, 128))
-    block = Block(arg_types=[mem_type, mem_type, mem_type])
-    ops: list[object] = []
-    c0, c0_cast, zero = _const_symbol_int(0)
-    c1, c1_cast, one = _const_symbol_int(1)
-    c128, c128_cast, one_two_eight = _const_symbol_int(128)
-    ops.extend([c0, c0_cast, c1, c1_cast, c128, c128_cast])
-
-    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
-    lm_type = NnMemoryType(
-        ArrayAttr([IntAttr(1), IntAttr(128)]),
-        ArrayAttr([IntAttr(128), IntAttr(1)]),
-        i32,
-        NnMemorySpaceAttr.from_name("local"),
-    )
-    alloc = DmaAllocOp([one, one_two_eight], lm_type)
-    deslice = DmaDesliceOp(
-        alloc.result,
-        block.args[0],
-        offsets=[zero, zero],
-        sizes=[one, one_two_eight],
-        strides=[one, one],
-        result_type=mem_type,
-    )
-    loop_block.add_ops([alloc, deslice])
-    loop = SymbolForOp(zero, one, one, loop_block)
-    ops.append(loop)
-    ops.append(func.ReturnOp())
-    block.add_ops(ops)
-    func_op = func.FuncOp(
-        "forbidden_deslice",
-        FunctionType.from_lists([mem_type, mem_type, mem_type], []),
         Region(block),
     )
     return ModuleOp([func_op])
@@ -260,143 +292,15 @@ def _make_module_with_step_zero() -> ModuleOp:
     return ModuleOp([func_op])
 
 
-def _make_module_with_alloc_freed_in_loop() -> ModuleOp:
-    mem_type = _memory_type(("M", 128))
-    block = Block(arg_types=[mem_type, mem_type, mem_type])
-    ops: list[object] = []
-    c0, c0_cast, zero = _const_symbol_int(0)
-    c1, c1_cast, one = _const_symbol_int(1)
-    c128, c128_cast, one_two_eight = _const_symbol_int(128)
-    ops.extend([c0, c0_cast, c1, c1_cast, c128, c128_cast])
-
-    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
-    get_dim = SymbolGetDimOp(block.args[0], IntAttr(0))
-    alloc_type = NnMemoryType(
-        mem_type.shape,
-        mem_type.stride,
-        mem_type.element_type,
-        NnMemorySpaceAttr.from_name("local"),
-    )
-    alloc = DmaAllocOp([get_dim.result, one_two_eight], alloc_type)
-    free = DmaFreeOp(alloc.result)
-    loop_block.add_ops([get_dim, alloc, free])
-    loop = SymbolForOp(zero, one, one, loop_block)
-    ops.append(loop)
-    ops.append(func.ReturnOp())
-    block.add_ops(ops)
-    func_op = func.FuncOp(
-        "alloc_freed_in_loop",
-        FunctionType.from_lists([mem_type, mem_type, mem_type], []),
-        Region(block),
-    )
-    return ModuleOp([func_op])
-
-
-def _make_module_with_fixed_read_slice_target_rewritten() -> ModuleOp:
-    mem_type = _memory_type((1, 128))
-    block = Block(arg_types=[mem_type, mem_type, mem_type])
-    ops: list[object] = []
-    c0, c0_cast, zero = _const_symbol_int(0)
-    c1, c1_cast, one = _const_symbol_int(1)
-    c128, c128_cast, one_two_eight = _const_symbol_int(128)
-    ops.extend([c0, c0_cast, c1, c1_cast, c128, c128_cast])
-
-    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
-    iv = loop_block.args[0]
-    bias_type = NnMemoryType(
-        ArrayAttr([IntAttr(1), IntAttr(128)]),
-        ArrayAttr([IntAttr(128), IntAttr(1)]),
-        i32,
-        NnMemorySpaceAttr.from_name("local"),
-    )
-    bias_alloc = DmaAllocOp([one, one_two_eight], bias_type)
-    fixed_read = DmaSliceOp(
-        bias_alloc.result,
-        block.args[0],
-        offsets=[zero, zero],
-        sizes=[one, one_two_eight],
-        strides=[one, one],
-    )
-    loop_dependent_rewrite = DmaSliceOp(
-        bias_alloc.result,
-        block.args[0],
-        offsets=[iv, zero],
-        sizes=[one, one_two_eight],
-        strides=[one, one],
-    )
-    loop_block.add_ops([bias_alloc, fixed_read, loop_dependent_rewrite])
-    loop = SymbolForOp(zero, one, one, loop_block)
-    ops.append(loop)
-    ops.append(func.ReturnOp())
-    block.add_ops(ops)
-    func_op = func.FuncOp(
-        "fixed_read_source_mutated",
-        FunctionType.from_lists([mem_type, mem_type, mem_type], []),
-        Region(block),
-    )
-    return ModuleOp([func_op])
-
-
-def _make_module_with_fixed_read_slice_source_mutated() -> ModuleOp:
-    mem_type = _memory_type((1, 128))
-    block = Block(arg_types=[mem_type, mem_type, mem_type])
-    ops: list[object] = []
-    c0, c0_cast, zero = _const_symbol_int(0)
-    c1, c1_cast, one = _const_symbol_int(1)
-    c128, c128_cast, one_two_eight = _const_symbol_int(128)
-    ops.extend([c0, c0_cast, c1, c1_cast, c128, c128_cast])
-
-    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
-    iv = loop_block.args[0]
-    bias_type = NnMemoryType(
-        ArrayAttr([IntAttr(1), IntAttr(128)]),
-        ArrayAttr([IntAttr(128), IntAttr(1)]),
-        i32,
-        NnMemorySpaceAttr.from_name("local"),
-    )
-    bias_alloc = DmaAllocOp([one, one_two_eight], bias_type)
-    fixed_read = DmaSliceOp(
-        bias_alloc.result,
-        block.args[0],
-        offsets=[zero, zero],
-        sizes=[one, one_two_eight],
-        strides=[one, one],
-    )
-
-    # 让来源 buffer 在 loop 内被写入，但该写入依赖 loop iv，从而不会触发 invariant side-effect 的直接拒绝。
-    lm_only = DmaAllocOp([one, one_two_eight], bias_type)
-    writeback = DmaDesliceOp(
-        lm_only.result,
-        block.args[0],
-        offsets=[iv, zero],
-        sizes=[one, one_two_eight],
-        strides=[one, one],
-        result_type=mem_type,
-    )
-    loop_block.add_ops([bias_alloc, fixed_read, lm_only, writeback])
-    loop = SymbolForOp(zero, one, one, loop_block)
-    ops.append(loop)
-    ops.append(func.ReturnOp())
-    block.add_ops(ops)
-    func_op = func.FuncOp(
-        "fixed_read_result_rewritten",
-        FunctionType.from_lists([mem_type, mem_type, mem_type], []),
-        Region(block),
-    )
-    return ModuleOp([func_op])
-
-
 # TC-SLH-001
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-07 09:10:00 +0800
-# 最近一次运行成功时间: 2026-04-07 09:10:00 +0800
-# 测试目的: 验证 `symbol.get_dim + dma.alloc` 可从 `symbol.for` 内外提到循环外。
+# 最后一次更改: OpenAI Codex
+# 测试目的: 验证 loop 内 invariant `symbol.get_dim/get_stride` 会被向上提一层到 `symbol.for` 之前。
 # 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
-def test_symbol_loop_hoist_hoists_get_dim_and_alloc() -> None:
-    module = _make_module_for_hoist_alloc()
+def test_symbol_loop_hoist_hoists_symbol_dim_ops() -> None:
+    module = _make_module_for_symbol_dim_hoist()
     func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
     block = func_op.body.blocks.first
     loop = next(op for op in block.ops if isinstance(op, SymbolForOp))
@@ -405,16 +309,14 @@ def test_symbol_loop_hoist_hoists_get_dim_and_alloc() -> None:
 
     ops = list(block.ops)
     loop_index = ops.index(loop)
-    hoisted_ops = [op for op in ops[:loop_index] if isinstance(op, (SymbolGetDimOp, DmaAllocOp))]
-    assert [type(op) for op in hoisted_ops] == [SymbolGetDimOp, DmaAllocOp]
-    assert not any(isinstance(op, (SymbolGetDimOp, DmaAllocOp)) for op in loop.body.blocks.first.ops)
+    hoisted_ops = [op for op in ops[:loop_index] if isinstance(op, (SymbolGetDimOp, SymbolGetStrideOp))]
+    assert [type(op) for op in hoisted_ops] == [SymbolGetDimOp, SymbolGetStrideOp]
+    assert not any(isinstance(op, (SymbolGetDimOp, SymbolGetStrideOp)) for op in loop.body.blocks.first.ops)
 
 
 # TC-SLH-001A
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
-# 最近一次运行成功时间: N/A
 # 测试目的: 验证 loop 内的 invariant `symbol.const` 会被向上提一层到 `symbol.for` 之前。
 # 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
@@ -440,8 +342,84 @@ def test_symbol_loop_hoist_is_exported_from_lowering_package() -> None:
 
 
 # TC-SLH-001B
+# 创建者: OpenAI Codex
+# 最后一次更改: OpenAI Codex
+# 测试目的: 验证公开 pattern 与 getter 可导入，且 getter 顺序稳定。
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
+# 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
+def test_symbol_loop_hoist_patterns_are_public_and_stable() -> None:
+    patterns = get_symbol_loop_hoist_patterns()
+
+    assert [type(pattern) for pattern in patterns] == [
+        SymbolConstHoistPattern,
+        TunerParamHoistPattern,
+        SymbolGetDimHoistPattern,
+        SymbolGetStrideHoistPattern,
+        SymbolAddHoistPattern,
+        SymbolSubHoistPattern,
+        SymbolMulHoistPattern,
+        SymbolDivHoistPattern,
+        SymbolFloorDivHoistPattern,
+    ]
+
+
+# TC-SLH-001C
+# 创建者: OpenAI Codex
+# 最后一次更改: OpenAI Codex
+# 测试目的: 验证 loop 内 invariant `tuner.param` 会被向上提一层到 `symbol.for` 之前。
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
+# 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
+def test_symbol_loop_hoist_hoists_tuner_param() -> None:
+    module = _make_module_for_tuner_param_hoist()
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    block = func_op.body.blocks.first
+    loop = next(op for op in block.ops if isinstance(op, SymbolForOp))
+
+    SymbolLoopHoistPass().run(module)
+
+    ops = list(block.ops)
+    loop_index = ops.index(loop)
+    hoisted_ops = [op for op in ops[:loop_index] if isinstance(op, TunerParamOp)]
+    assert len(hoisted_ops) == 1
+    assert not any(isinstance(op, TunerParamOp) for op in loop.body.blocks.first.ops)
+
+
+# TC-SLH-001D
+# 创建者: OpenAI Codex
+# 最后一次更改: OpenAI Codex
+# 测试目的: 验证 loop 内 invariant `symbol.add/sub/mul/div/floordiv` 会被向上提一层到 `symbol.for` 之前。
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
+# 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
+def test_symbol_loop_hoist_hoists_symbol_elewise_ops() -> None:
+    module = _make_module_for_symbol_elewise_hoist()
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    block = func_op.body.blocks.first
+    loop = next(op for op in block.ops if isinstance(op, SymbolForOp))
+
+    SymbolLoopHoistPass().run(module)
+
+    ops = list(block.ops)
+    loop_index = ops.index(loop)
+    hoisted_ops = [
+        op
+        for op in ops[:loop_index]
+        if isinstance(op, (SymbolAddOp, SymbolSubOp, SymbolMulOp, SymbolDivOp, SymbolFloorDivOp))
+    ]
+    assert [type(op) for op in hoisted_ops] == [
+        SymbolAddOp,
+        SymbolSubOp,
+        SymbolMulOp,
+        SymbolDivOp,
+        SymbolFloorDivOp,
+    ]
+
+
+# TC-SLH-001E
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: OpenAI Codex
 # 测试目的: 验证 `SymbolLoopHoistPass` 作为 ModulePass 可直接通过 apply(ctx, module) 执行。
 # 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
@@ -459,7 +437,7 @@ def test_symbol_loop_hoist_apply_behaves_like_module_pass() -> None:
     module.verify()
 
 
-# TC-SLH-001C
+# TC-SLH-001F
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 测试目的: 验证 module 不含 `symbol.for` 时保持 no-op。
@@ -478,16 +456,14 @@ def test_symbol_loop_hoist_keeps_module_without_symbol_for_no_op() -> None:
 
 
 # TC-SLH-002
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-07 09:10:00 +0800
-# 最近一次运行成功时间: 2026-04-07 09:10:00 +0800
-# 测试目的: 验证固定窗口只读来源的 `dma.slice` 可外提，且外提后循环体内仍能使用准备好的 buffer。
+# 创建者: OpenAI Codex
+# 最后一次更改: OpenAI Codex
+# 测试目的: 验证依赖 loop iv 的 `symbol.add` 保持在 loop 内。
 # 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
-def test_symbol_loop_hoist_hoists_fixed_read_slice() -> None:
-    module = _make_module_for_fixed_read_slice()
+def test_symbol_loop_hoist_keeps_loop_carried_symbol_add_in_loop() -> None:
+    module = _make_module_for_loop_carried_symbol_add()
     func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
     block = func_op.body.blocks.first
     loop = next(op for op in block.ops if isinstance(op, SymbolForOp))
@@ -496,67 +472,8 @@ def test_symbol_loop_hoist_hoists_fixed_read_slice() -> None:
 
     ops = list(block.ops)
     loop_index = ops.index(loop)
-    assert any(isinstance(op, DmaAllocOp) for op in ops[:loop_index])
-    assert any(isinstance(op, DmaSliceOp) for op in ops[:loop_index])
-
-
-# TC-SLH-003
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-07 09:10:00 +0800
-# 最近一次运行成功时间: 2026-04-07 09:10:00 +0800
-# 测试目的: 验证禁止项（`dma.deslice`）在 loop invariant 形态下会触发显式失败短语。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
-# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
-# 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
-def test_symbol_loop_hoist_rejects_invariant_deslice() -> None:
-    module = _make_module_with_forbidden_invariant_deslice()
-    with pytest.raises(SymbolLoopHoistError, match="SymbolLoopHoistSideEffectOp"):
-        SymbolLoopHoistPass().run(module)
-
-# TC-SLH-004
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-07 09:40:00 +0800
-# 最近一次运行成功时间: 2026-04-07 09:40:00 +0800
-# 测试目的: 验证 `dma.alloc` 在 loop 内释放会触发固定失败短语 `SymbolLoopHoistAllocLifetimeUnsafe`。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
-# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
-# 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
-def test_symbol_loop_hoist_rejects_alloc_freed_in_loop() -> None:
-    module = _make_module_with_alloc_freed_in_loop()
-    with pytest.raises(SymbolLoopHoistError, match="SymbolLoopHoistAllocLifetimeUnsafe"):
-        SymbolLoopHoistPass().run(module)
-
-
-# TC-SLH-005
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-07 09:40:00 +0800
-# 最近一次运行成功时间: 2026-04-07 09:40:00 +0800
-# 测试目的: 验证固定窗口 `dma.slice` 的目标 buffer 在 loop 内仍被写会触发 `SymbolLoopHoistFixedReadResultRewritten`。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
-# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
-# 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
-def test_symbol_loop_hoist_rejects_fixed_read_slice_target_rewritten() -> None:
-    module = _make_module_with_fixed_read_slice_target_rewritten()
-    with pytest.raises(SymbolLoopHoistError, match="SymbolLoopHoistFixedReadResultRewritten"):
-        SymbolLoopHoistPass().run(module)
-
-
-# TC-SLH-006
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-07 09:40:00 +0800
-# 最近一次运行成功时间: 2026-04-07 09:40:00 +0800
-# 测试目的: 验证固定窗口 `dma.slice` 的来源在 loop 内被写会触发 `SymbolLoopHoistFixedReadSourceMutated`。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
-# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
-# 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
-def test_symbol_loop_hoist_rejects_fixed_read_slice_source_mutated() -> None:
-    module = _make_module_with_fixed_read_slice_source_mutated()
-    with pytest.raises(SymbolLoopHoistError, match="SymbolLoopHoistFixedReadSourceMutated"):
-        SymbolLoopHoistPass().run(module)
+    assert not any(isinstance(op, SymbolAddOp) for op in ops[:loop_index])
+    assert any(isinstance(op, SymbolAddOp) for op in loop.body.blocks.first.ops)
 
 
 # TC-SLH-007

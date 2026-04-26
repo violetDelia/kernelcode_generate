@@ -98,7 +98,7 @@ def test_nn_lowering_matmul_target() -> None:
 # 测试目的: 验证 symbol.for region 内的 nn.matmul 也会 lower 为 kernel.matmul。
 # 使用示例: pytest -q test/pass/nn_lowering/matmul.py -k test_nn_lowering_matmul_inside_symbol_for
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/matmul.py
 def test_nn_lowering_matmul_inside_symbol_for() -> None:
     def tiled_matmul(lhs: "Tensor[f32, 32, 16]", rhs: "Tensor[f32, 16, 32]") -> "Tensor[f32, 32, 32]":

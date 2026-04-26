@@ -192,3 +192,45 @@ Diff 反推审查：
     - `agents/codex-multi-agents/log/task_records/2026/17/20260425-launch-kernel-cost-multi-kind-repair-s10.md`
     - `agents/codex-multi-agents/log/task_records/2026/17/20260425-pass-infra-repair-s11.md`
 结论：merge 已完成并推送；接下来执行 `-done`，并按当前主仓阻塞事实回报管理员。
+
+---
+
+时间：2026-04-26 00:44 +0800
+经办人：提莫炖蘑菇
+任务：T-20260425-179e2ee1
+阶段：merge 后复审
+执行前阅读记录：
+- 已读根目录 [`AGENTS.md`](/home/lfr/kernelcode_generate/AGENTS.md)、[`agents/standard/审查规范.md`](/home/lfr/kernelcode_generate/agents/standard/审查规范.md)、[`agents/standard/spec文件规范.md`](/home/lfr/kernelcode_generate/agents/standard/spec文件规范.md)。
+- 已读本任务既有记录，确认原 worktree 已清理、`TODO.md` 中已无 `T-20260425-179e2ee1` 任务行，当前只能按主仓现场做 merge 后复审。
+- 已核对当前主仓相关文件：[`kernel_gen/tools/emitc_case_runner.py`](/home/lfr/kernelcode_generate/kernel_gen/tools/emitc_case_runner.py)、[`kernel_gen/tools/__init__.py`](/home/lfr/kernelcode_generate/kernel_gen/tools/__init__.py)、[`test/tools/test_emitc_case_runner.py`](/home/lfr/kernelcode_generate/test/tools/test_emitc_case_runner.py)、[`spec/dsl/gen_kernel/emit.md`](/home/lfr/kernelcode_generate/spec/dsl/gen_kernel/emit.md)。
+真实审查：
+- [`kernel_gen/tools/emitc_case_runner.py`](/home/lfr/kernelcode_generate/kernel_gen/tools/emitc_case_runner.py) 是本轮新增功能实现文件，且被 [`test/tools/test_emitc_case_runner.py`](/home/lfr/kernelcode_generate/test/tools/test_emitc_case_runner.py) 与多个 `expectation/dsl/emit_c/npu_demo/**` 目录下文件跨文件导入并调用。
+- 该文件的文件级说明包含 `功能说明 / 使用示例 / 关联文件`，但没有按当前规则提供“紧跟在功能说明后的文件级 API 列表”；这已经命中“build 改动功能实现文件必须同步维护文件级 API 列表”的硬规则。
+- 当前主仓内没有任何 `spec` 把 `run_emitc_case(case_text: str, *, source_path: str, op_name: str | None = None, expected_snippets: list[str], forbidden_snippets: list[str] | None = None) -> str` 明确定义为公开 API。当前最接近的 [`spec/dsl/gen_kernel/emit.md`](/home/lfr/kernelcode_generate/spec/dsl/gen_kernel/emit.md) 只列了 `emit_c / emit_c_op / emit_c_value`，并未承接该工具 helper。
+- 因此，[`test/tools/test_emitc_case_runner.py`](/home/lfr/kernelcode_generate/test/tools/test_emitc_case_runner.py) 当前是在直接测试未由 `spec` 定义的接口；同时 `expectation/dsl/emit_c/npu_demo/**` 大量跨文件导入 `run_emitc_case`，也属于当前文件之外的非公开 API 使用，不能以“只是 helper / 当前能跑”放行。
+Diff 反推审查：
+- 被审现场文件：
+  - [`kernel_gen/tools/emitc_case_runner.py`](/home/lfr/kernelcode_generate/kernel_gen/tools/emitc_case_runner.py)
+  - [`test/tools/test_emitc_case_runner.py`](/home/lfr/kernelcode_generate/test/tools/test_emitc_case_runner.py)
+  - [`spec/dsl/gen_kernel/emit.md`](/home/lfr/kernelcode_generate/spec/dsl/gen_kernel/emit.md)
+- 复测命令：
+  - `cd /home/lfr/kernelcode_generate && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/tools/test_emitc_case_runner.py -ra`
+    - 结果：`6 passed, 1 warning`
+  - `cd /home/lfr/kernelcode_generate && python3 -m py_compile kernel_gen/tools/emitc_case_runner.py test/tools/test_emitc_case_runner.py`
+    - 结果：通过
+  - `git -C /home/lfr/kernelcode_generate diff --check`
+    - 结果：通过
+- 合同验收单列：
+  - `cd /home/lfr/kernelcode_generate && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m expectation.dsl.emit_c.npu_demo`
+    - 结果：通过
+  - 上述 expectation 结果未计入 `Diff 反推审查`。
+自检：
+- 已额外检查“新增未在 spec 明确定义的公开接口 / 跨文件调用非公开 API / 测试直连非 API 接口”三项；当前命中全部 3 项。
+- 已确认问题不依赖已清理 worktree，而是存在于当前主仓现场。
+可改进点：
+- 不是普通“建议”，而是必须修复项：
+  1. 为 [`kernel_gen/tools/emitc_case_runner.py`](/home/lfr/kernelcode_generate/kernel_gen/tools/emitc_case_runner.py) 补齐文件级 `API 列表`，并按规则紧跟在功能说明后，明确 `run_emitc_case(...) -> str` 的完整签名。
+  2. 补一份直接承接该 helper 的 `spec`，或把它纳入现有正确模块的 `spec`，并在 `API 列表` 中显式定义签名；不能继续挂在只描述 `emit_c/emit_c_op/emit_c_value` 的 [`spec/dsl/gen_kernel/emit.md`](/home/lfr/kernelcode_generate/spec/dsl/gen_kernel/emit.md) 之外。
+  3. 在 `spec` 收口前，测试与跨文件调用不得继续把 `run_emitc_case` 当公开 API 使用。
+结论：`需修改`
+- 原因：当前 merge 后现场新增了未在 `spec` 明确定义的公开接口，存在跨文件使用非公开 API，且测试直连该未定义接口；同时功能实现文件缺失文件级 `API 列表`。按最新审查规则不得通过。

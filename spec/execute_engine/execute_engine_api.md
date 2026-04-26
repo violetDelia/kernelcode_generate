@@ -2,8 +2,18 @@
 
 ## 功能简介
 
-- 定义执行引擎 `P0` 的请求/结果/参数模型：`CompileRequest / ExecuteRequest / CompiledKernel / ExecuteResult / ArgSpec`。
+- 定义执行引擎 `P0` 的请求/结果/参数模型：`CompileRequest / ExecuteRequest / RuntimeArg / CompiledKernel / ExecuteResult`。
 - 冻结字段、默认值与失败短语触发条件，使调用方无需理解实现细节也能稳定调用与比对结果。
+
+## API 列表
+
+- `class CompileRequest(source: str, target: str, function: str, entry_point: str = "kg_execute_entry", compiler: str | None = None, compiler_flags: tuple[str, ...] = ("-std=c++17",), link_flags: tuple[str, ...] = ())`
+- `class ExecuteRequest(args: tuple[RuntimeArg, ...], entry_point: str | None = None, capture_function_output: bool = False, stream: object | None = None)`
+- `RuntimeArg = Any`
+- `class CompiledKernel(target: str, soname_path: str, function: str, entry_point: str, compile_stdout: str = "", compile_stderr: str = "")`
+- `CompiledKernel.close() -> None`
+- `CompiledKernel.execute(args: tuple[RuntimeArg, ...] | None = None, *, request: ExecuteRequest | None = None, entry_point: str | None = None, capture_function_output: bool = False, stream: object | None = None) -> ExecuteResult`
+- `class ExecuteResult(ok: bool, status_code: int, failure_phrase: str | None, compile_stdout: str = "", compile_stderr: str = "", run_stdout: str = "", run_stderr: str = "", elapsed_ms: float = 0.0)`
 
 ## 文档信息
 
@@ -16,16 +26,16 @@
 ## 依赖
 
 - 执行引擎总览合同：[`spec/execute_engine/execute_engine.md`](spec/execute_engine/execute_engine.md)
-- `emit_c` 输出语义：[`spec/dsl/emit_c.md`](spec/dsl/emit_c.md)
+- `emit_c` 输出语义：[`spec/dsl/gen_kernel/emit.md`](spec/dsl/gen_kernel/emit.md)
 
 ## 术语
 
-- `ArgSpec`：参数模型的统一抽象，取值为 `MemoryArg/IntArg/FloatArg` 之一。
+- `RuntimeArg`：执行引擎当前公开的运行时参数抽象，直接承载 memory / int / float 三类 Python 值。
 - `failure_phrase`：执行引擎对外固定失败短语集合。
 
 ## 目标
 
-- 统一 `CompileRequest/ExecuteRequest/ArgSpec/ExecuteResult` 字段与默认值。
+- 统一 `CompileRequest/ExecuteRequest/RuntimeArg/ExecuteResult` 字段与默认值。
 - 明确 `args` 与函数形参顺序的一一对应规则。
 - 锁定 7 个失败短语与触发条件。
 
@@ -34,12 +44,12 @@
 - `P0` 仅支持 `target in {"cpu","npu_demo"}`；其他 target 必须失败并返回 `target_header_mismatch`。
 - `P0` 不支持 `stream` 与输出回收；当 `ExecuteRequest.stream is not None` 或 `capture_function_output=True` 必须失败。
 - `args` 必须与 `function` 形参顺序严格一致；不做自动重排或参数推断。
-- `ArgSpec` 仅允许 `MemoryArg/IntArg/FloatArg` 三类；其他类型必须失败。
+- `RuntimeArg` 仅允许 memory / int / float 三类输入；其他类型必须失败。
 - 失败短语只允许取 7 个固定值（见 `ExecuteResult`）；禁止同义词扩散与 silent fallback。
 
 ## 公开接口
 
-### `CompileRequest`
+### `class CompileRequest(source: str, target: str, function: str, entry_point: str = "kg_execute_entry", compiler: str | None = None, compiler_flags: tuple[str, ...] = ("-std=c++17",), link_flags: tuple[str, ...] = ())`
 
 功能说明：
 
@@ -73,7 +83,7 @@ req = CompileRequest(
 
 - 编译失败必须返回 `compile_failed`。
 
-### `ExecuteRequest`
+### `class ExecuteRequest(args: tuple[RuntimeArg, ...], entry_point: str | None = None, capture_function_output: bool = False, stream: object | None = None)`
 
 功能说明：
 
@@ -81,7 +91,7 @@ req = CompileRequest(
 
 参数说明：
 
-- `args(tuple[ArgSpec, ...])`: 有序参数序列，必须与 `function` 形参顺序一致。
+- `args(tuple[RuntimeArg, ...])`: 有序参数序列，必须与 `function` 形参顺序一致。
 - `entry_point(str | None)`: 指定入口；默认 `None`（使用 `CompiledKernel.entry_point`）。
 - `capture_function_output(bool)`: 是否回收函数输出；默认 `False`（`P0` 必须失败）。
 - `stream(object | None)`: 运行 stream；默认 `None`（`P0` 必须失败）。
@@ -106,7 +116,7 @@ exec_req = ExecuteRequest(
 - `stream is not None` 时必须失败（`stream_not_supported`）。
 - `capture_function_output=True` 时必须失败（`function_output_capture_not_supported`）。
 
-### `CompiledKernel`
+### `class CompiledKernel(target: str, soname_path: str, function: str, entry_point: str, compile_stdout: str = "", compile_stderr: str = "")`
 
 功能说明：
 
@@ -139,7 +149,7 @@ kernel.close()
 
 - 仅承载编译结果，不负责执行。
 
-### `ExecuteResult`
+### `class ExecuteResult(ok: bool, status_code: int, failure_phrase: str | None, compile_stdout: str = "", compile_stderr: str = "", run_stdout: str = "", run_stderr: str = "", elapsed_ms: float = 0.0)`
 
 功能说明：
 
@@ -182,21 +192,24 @@ if not result.ok:
 
 - `ok=False` 时必须包含非空 `failure_phrase`，且属于固定集合。
 
-### `ArgSpec`
+### `RuntimeArg = Any`
 
 功能说明：
 
-- 统一参数模型的抽象类型。
+- 执行引擎当前对外暴露的运行时参数抽象别名。
+- `P0` 阶段以真实 Python 运行时值承载参数，不再额外公开 `MemoryArg / IntArg / FloatArg` 数据模型。
 
 参数说明：
 
-- `ArgSpec = MemoryArg | IntArg | FloatArg`。
+- `RuntimeArg` 在当前实现中允许三类输入：
+  - `torch.Tensor` / `numpy.ndarray`：按 memory 参数处理。
+  - `int`（排除 `bool`）：按整数标量处理。
+  - `float`（排除 `bool`）：按浮点标量处理。
 
 使用示例：
 
 ```python
-arg0: ArgSpec = MemoryArg(...)
-arg1: ArgSpec = IntArg(...)
+args: tuple[RuntimeArg, ...] = (lhs, rhs, out, 1, 1.0)
 ```
 
 注意事项：
@@ -207,105 +220,13 @@ arg1: ArgSpec = IntArg(...)
 
 - 仅用于参数描述，不承载执行结果。
 
-### `MemoryArg`
-
-功能说明：
-
-- 内存参数模型，用于传递张量/数组。
-
-参数说明：
-
-- `position(int)`: 形参序号（从 `0` 开始）。
-- `param_name(str | None)`: 可选；形参名称（未知时为 `None`）。
-- `space(str)`: 内存空间标识（例如 `"global"`/`"shared"`/`"local"`）。
-- `dtype(str)`: 数据类型字符串（必须与 `value` 一致）。
-- `shape(tuple[int, ...])`: 形状。
-- `stride(tuple[int, ...] | None)`: 可选 stride；`None` 表示紧致布局。
-- `value(object)`: `torch.Tensor` 或 `numpy.ndarray`。
-
-使用示例：
-
-```python
-memory_arg0 = MemoryArg(
-    position=0,
-    param_name="lhs",
-    space="global",
-    dtype="float32",
-    shape=(2, 3),
-    stride=(3, 1),
-    value=torch.zeros((2, 3)),
-)
-```
-
-注意事项：
-
-- `dtype/shape/stride` 必须与 `value` 一致；不一致时必须失败并返回 `runtime_throw_or_abort`。
-
-返回与限制：
-
-- 仅描述参数，不执行数据搬运或拷贝。
-
-### `IntArg`
-
-功能说明：
-
-- 整数参数模型。
-
-参数说明：
-
-- `position(int)`: 形参序号（从 `0` 开始）。
-- `param_name(str | None)`: 可选；形参名称（未知时为 `None`）。
-- `dtype(str)`: 整数类型字符串。
-- `value(int)`: 实际整数值。
-
-使用示例：
-
-```python
-int_arg1 = IntArg(position=1, param_name="rhs", dtype="int32", value=1)
-```
-
-注意事项：
-
-- `dtype` 必须与目标函数形参一致；不一致时必须失败并返回 `runtime_throw_or_abort`。
-
-返回与限制：
-
-- 仅描述参数，不包含执行结果。
-
-### `FloatArg`
-
-功能说明：
-
-- 浮点参数模型。
-
-参数说明：
-
-- `position(int)`: 形参序号（从 `0` 开始）。
-- `param_name(str | None)`: 可选；形参名称（未知时为 `None`）。
-- `dtype(str)`: 浮点类型字符串。
-- `value(float)`: 实际浮点值。
-
-使用示例：
-
-```python
-float_arg2 = FloatArg(position=2, param_name="alpha", dtype="float32", value=1.0)
-```
-
-注意事项：
-
-- `dtype` 必须与目标函数形参一致；不一致时必须失败并返回 `runtime_throw_or_abort`。
-
-返回与限制：
-
-- 仅描述参数，不包含执行结果。
-
 ## 测试
 
 - 测试文件：[`test/execute_engine/test_execute_engine_contract.py`](test/execute_engine/test_execute_engine_contract.py)
 - 执行命令：`pytest -q test/execute_engine/test_execute_engine_contract.py`
 - 测试目标：
-  - 覆盖 `CompileRequest/ExecuteRequest/ArgSpec/ExecuteResult` 的字段与默认值。
+  - 覆盖 `CompileRequest/ExecuteRequest/RuntimeArg/ExecuteResult` 的字段与默认值。
   - 覆盖 `args` 与函数形参顺序的一一对应规则。
   - 覆盖 7 个失败短语与触发条件的最小复现。
-- 覆盖 `MemoryArg.value` 支持 `torch.Tensor` / `numpy.ndarray`。
+- 覆盖 `RuntimeArg` 的 memory 路径支持 `torch.Tensor` / `numpy.ndarray`。
 - 覆盖 `stream` 与 `capture_function_output` 的 `P0` 禁用路径。

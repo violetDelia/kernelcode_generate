@@ -25,7 +25,7 @@ from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutPar
 from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
 from kernel_gen.passes.decompass import DecompassPass
 from kernel_gen.passes.lowering import NnLoweringPass
-from kernel_gen.passes.pass_manager import PassManager, _build_pass_manager_from_passes
+from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import register_pipeline
 
 
@@ -50,12 +50,13 @@ def build_default_lowering_pipeline() -> PassManager:
     - 功能实现: [kernel_gen/passes/pipeline/default_lowering.py](kernel_gen/passes/pipeline/default_lowering.py)
     """
 
-    return _build_pass_manager_from_passes(
-        "default-lowering",
+    pm = PassManager(name="default-lowering")
+    pm.extend(
         [
             DecompassPass(),
             NnLoweringPass(),
             BufferResultsToOutParamsPass(),
             LowerDmaMemoryHierarchyPass(),
-        ],
+        ]
     )
+    return pm

@@ -6,6 +6,16 @@
 - 支持 xdsl `ModulePass` 的注册与构造。
 - 该注册表服务于 CLI / pytest / 工具脚本的统一入口；同一名字在进程内必须唯一。
 
+## API 列表
+
+- `异常：`PassRegistryError`
+- `register_pass(pass_cls)`
+- `register_pipeline(name: str)`
+- `build_registered_pass(name: str, options: dict[str, str] | None = None) -> ModulePass`
+- `build_registered_pipeline(name: str, options: dict[str, str] | None = None) -> PassManager`
+- `load_builtin_passes() -> None`
+- `list_registered_passes() -> list[str]` / `list_registered_pipelines() -> list[str]`
+
 ## 文档信息
 
 - 创建者：`睡觉小分队`

@@ -12,7 +12,7 @@
 
 关联文件:
 - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
-- Spec 文档: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
+- Spec 文档: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
 - 测试文件: [test/pass/nn_lowering/test_reduce_lowering.py](test/pass/nn_lowering/test_reduce_lowering.py)
 """
 
@@ -71,7 +71,7 @@ def _make_ircheck_case_text(
     - text = _make_ircheck_case_text(case_desc="...", func_name="reduce_sum_kernel", ...)
 
     关联文件:
-    - spec: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
+    - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
     - test: [test/pass/nn_lowering/test_reduce_lowering.py](test/pass/nn_lowering/test_reduce_lowering.py)
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
@@ -236,7 +236,7 @@ def _assert_ircheck_ok(case_text: str, source_path: str, residual_op_name: str) 
     - _assert_ircheck_ok(CASE_TEXT_SUM_STATIC, "test/pass/nn_lowering/test_reduce_lowering.py:sum_static", "nn.reduce_sum")
 
     关联文件:
-    - spec: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
+    - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
     - test: [test/pass/nn_lowering/test_reduce_lowering.py](test/pass/nn_lowering/test_reduce_lowering.py)
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
@@ -269,7 +269,7 @@ def _make_memory_type(
     - mem_type = _make_memory_type([4, 8])
 
     关联文件:
-    - spec: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
+    - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
     - test: [test/pass/nn_lowering/test_reduce_lowering.py](test/pass/nn_lowering/test_reduce_lowering.py)
     - 功能实现: [kernel_gen/dialect/nn.py](kernel_gen/dialect/nn.py)
     """
@@ -304,7 +304,7 @@ def _build_reduce_module(
     - module = _build_reduce_module(NnReduceSumOp, "reduce_sum_bad_shape", input_type, result_type)
 
     关联文件:
-    - spec: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
+    - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
     - test: [test/pass/nn_lowering/test_reduce_lowering.py](test/pass/nn_lowering/test_reduce_lowering.py)
     - 功能实现: [kernel_gen/dialect/nn.py](kernel_gen/dialect/nn.py)
     """
@@ -373,7 +373,7 @@ REDUCE_CASES = [
 # 测试目的: 将 reduce_sum / reduce_min / reduce_max 的同构 case 收口为一个参数化 pytest。
 # 使用示例: pytest -q test/pass/nn_lowering/test_reduce_lowering.py -k test_nn_lowering_reduce_ircheck
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_reduce_lowering.py
 @pytest.mark.nn_lowering
 @pytest.mark.parametrize("case_text, source_path, residual_op_name", REDUCE_CASES)
@@ -391,7 +391,7 @@ def test_nn_lowering_reduce_ircheck(case_text: str, source_path: str, residual_o
     - pytest -q test/pass/nn_lowering/test_reduce_lowering.py -k test_nn_lowering_reduce_ircheck
 
     关联文件:
-    - spec: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
+    - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
     - test: [test/pass/nn_lowering/test_reduce_lowering.py](test/pass/nn_lowering/test_reduce_lowering.py)
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
@@ -415,7 +415,7 @@ REDUCE_MISMATCH_CASES = [
 # 测试目的: 统一覆盖 sum/min/max 的 shape mismatch 负例，避免三份重复测试文件。
 # 使用示例: pytest -q test/pass/nn_lowering/test_reduce_lowering.py -k test_nn_lowering_reduce_shape_mismatch
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_reduce_lowering.py
 @pytest.mark.nn_lowering
 @pytest.mark.parametrize("op_cls, kind", REDUCE_MISMATCH_CASES)
@@ -433,7 +433,7 @@ def test_nn_lowering_reduce_shape_mismatch(op_cls: type[object], kind: str) -> N
     - pytest -q test/pass/nn_lowering/test_reduce_lowering.py -k test_nn_lowering_reduce_shape_mismatch
 
     关联文件:
-    - spec: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
+    - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
     - test: [test/pass/nn_lowering/test_reduce_lowering.py](test/pass/nn_lowering/test_reduce_lowering.py)
     - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
     """

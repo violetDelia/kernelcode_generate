@@ -23,8 +23,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 
-from kernel_gen.common.contracts import _default_stride as _common_default_stride
-from kernel_gen.common.contracts import _public_dim_values as _common_public_dim_values
+import sympy as sp
+
+from kernel_gen.common.contracts import default_stride as _common_default_stride
+from kernel_gen.common.contracts import public_dim_values as _common_public_dim_values
 from kernel_gen.symbol_variable.dtype_constants import ARITHMETIC_DTYPE_RANK
 from .symbol_dim import SymbolDim
 from .symbol_shape import SymbolShape
@@ -225,27 +227,6 @@ class Memory:
         )
 
     @staticmethod
-    def _public_dim_values(shape: SymbolShape) -> list[int | str]:
-        """按 SymbolDim.get_value() 生成公开比较值序列。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 静态分量返回整数，动态分量返回 `SymbolDim.get_value()` 的稳定字符串。
-        - 用于 `Memory` 层的公开比较口径，不改变 `SymbolShape` 自身的序列化合同。
-
-        使用示例:
-        - Memory._public_dim_values(SymbolShape([SymbolDim("A") * SymbolDim("B") / SymbolDim("B")]))
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return _common_public_dim_values(shape)
-
-    @staticmethod
     def _default_stride(shape: SymbolShape) -> SymbolShape:
         """按连续行主序生成默认 stride。
 
@@ -284,7 +265,7 @@ class Memory:
         - test: test/symbol_variable/test_memory.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
-        return self._public_dim_values(self.shape)
+        return _common_public_dim_values(self.shape)
 
     def get_stride(self: "Memory") -> list[int | SymbolDim]:
         """返回 stride 列表，动态分量保留 SymbolDim。
@@ -304,10 +285,7 @@ class Memory:
         - test: test/symbol_variable/test_memory.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
-        values: list[int | SymbolDim] = []
-        for dim in self.stride.get_shape():
-            values.append(dim if dim.is_dynamic() else int(dim.get_symbol()))
-        return values
+        return [dim if dim.is_dynamic() else int(dim.get_symbol()) for dim in self.stride.get_shape()]
 
     def get_type(self: "Memory") -> NumericType:
         """返回 Memory 的 dtype。
@@ -404,6 +382,20 @@ class Memory:
         """
         return self.__repr__()
 
+    @staticmethod
+    def _same_public_dim(lhs: SymbolDim, rhs: SymbolDim) -> bool:
+        """判断两个维度是否语义等价。"""
+        if lhs.get_value() == rhs.get_value():
+            return True
+        return sp.simplify(lhs.get_symbol() - rhs.get_symbol()) == 0
+
+    @classmethod
+    def _same_public_shape(cls, lhs: SymbolShape, rhs: SymbolShape) -> bool:
+        """判断两个 shape 是否在公开语义上等价。"""
+        if len(lhs) != len(rhs):
+            return False
+        return all(cls._same_public_dim(lhs_dim, rhs_dim) for lhs_dim, rhs_dim in zip(lhs, rhs, strict=True))
+
     def _ensure_same_shape(self: "Memory", other: "Memory") -> None:
         """校验 Memory 形状一致。
 
@@ -411,7 +403,7 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 使用序列化结果判断形状是否完全一致，不支持广播。
+        - 按静态值或符号语义比较 shape，不支持广播。
 
         使用示例:
         - mem._ensure_same_shape(other)
@@ -421,7 +413,7 @@ class Memory:
         - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
-        if self.get_shape() != other.get_shape():
+        if not self._same_public_shape(self.shape, other.shape):
             raise ValueError("Memory shape mismatch")
 
     def _ensure_same_dtype(self: "Memory", other: "Memory") -> None:
@@ -461,22 +453,45 @@ class Memory:
         - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
-        if isinstance(value, bool):
-            value = int(value)
-        if not isinstance(value, int):
-            raise TypeError("Unsupported scalar type for Memory operation")
+        self._normalize_scalar(value)
         if self.dtype not in ARITHMETIC_DTYPE_RANK:
             raise TypeError("Scalar incompatible with Memory dtype")
+
+    @staticmethod
+    def _normalize_scalar(value: object) -> int:
+        """统一校验并规整标量输入。
+
+        创建者: 金铲铲大作战
+        最后一次更改: OpenAI Codex
+
+        功能说明:
+        - 接受 int/bool，bool 视作 int。
+        - 其他类型统一抛同一条 TypeError，避免多处重复定义标量边界。
+
+        使用示例:
+        - Memory._normalize_scalar(True)
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory_operation.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        raise TypeError("Unsupported scalar type for Memory operation")
 
     @staticmethod
     def _scalar_dtype(value: object) -> NumericType:
         """返回标量输入对应的 NumericType。
 
         创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
+        最后一次更改: OpenAI Codex
 
         功能说明:
-        - 将 int/bool 标量映射为 NumericType.Int32，bool 视作 int。
+        - 复用 `_normalize_scalar(...)` 的输入边界。
+        - 当前所有合法标量统一映射为 `NumericType.Int32`。
 
         使用示例:
         - Memory._scalar_dtype(1)
@@ -486,11 +501,8 @@ class Memory:
         - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
-        if isinstance(value, bool):
-            return NumericType.Int32
-        if isinstance(value, int):
-            return NumericType.Int32
-        raise TypeError("Unsupported scalar type for Memory operation")
+        Memory._normalize_scalar(value)
+        return NumericType.Int32
 
     def _clone_with_dtype(self: "Memory", dtype: NumericType) -> "Memory":
         """按指定 dtype 克隆 Memory。
@@ -563,306 +575,65 @@ class Memory:
         self._ensure_scalar_compatible(other)
         return self._clone_with_dtype(NumericType.Bool)
 
-    def __add__(self: "Memory", other: object) -> "Memory":
-        """逐元素加法。
+def _make_memory_binary_method(method_name: str, delegate_name: str, summary: str, example: str):
+    """生成委托到共享实现的 Memory 二元运算方法。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
+    创建者: OpenAI Codex
+    最后一次更改: OpenAI Codex
+
+    功能说明:
+    - 为多个同语义 dunder 统一生成方法体与文档。
+    - 保留每个公开运算入口的独立方法名，同时只维护一份委托实现。
+
+    使用示例:
+    - _make_memory_binary_method("__add__", "_binary_arithmetic", "逐元素加法", "mem + 1")
+
+    关联文件:
+    - spec: spec/symbol_variable/memory.md
+    - test: test/symbol_variable/test_memory_operation.py
+    - 功能实现: kernel_gen/symbol_variable/memory.py
+    """
+
+    def method(self: Memory, other: object) -> Memory:
+        return getattr(self, delegate_name)(other)
+
+    method.__name__ = method_name
+    method.__qualname__ = f"Memory.{method_name}"
+    method.__doc__ = f"""{summary}。
+
+        创建者: OpenAI Codex
+        最后一次更改: OpenAI Codex
 
         功能说明:
-        - 支持 Memory/Memory 与 Memory/int/bool，bool 视作 int。
+        - 复用 `{delegate_name}(...)` 的统一规则与错误边界。
 
         使用示例:
-        - mem + 1
+        - {example}
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
-        return self._binary_arithmetic(other)
-
-    def __radd__(self: "Memory", other: object) -> "Memory":
-        """逐元素反向加法。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 int/bool + Memory，bool 视作 int。
-
-        使用示例:
-        - 1 + mem
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_arithmetic(other)
-
-    def __sub__(self: "Memory", other: object) -> "Memory":
-        """逐元素减法。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 Memory/Memory 与 Memory/int/bool，bool 视作 int。
-
-        使用示例:
-        - mem - 1
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_arithmetic(other)
-
-    def __rsub__(self: "Memory", other: object) -> "Memory":
-        """逐元素反向减法。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 int/bool - Memory，bool 视作 int。
-
-        使用示例:
-        - 1 - mem
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_arithmetic(other)
-
-    def __mul__(self: "Memory", other: object) -> "Memory":
-        """逐元素乘法。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 Memory/Memory 与 Memory/int/bool，bool 视作 int。
-
-        使用示例:
-        - mem * 2
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_arithmetic(other)
-
-    def __rmul__(self: "Memory", other: object) -> "Memory":
-        """逐元素反向乘法。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 int/bool * Memory，bool 视作 int。
-
-        使用示例:
-        - 2 * mem
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_arithmetic(other)
-
-    def __truediv__(self: "Memory", other: object) -> "Memory":
-        """逐元素除法。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 Memory/Memory 与 Memory/int/bool，bool 视作 int。
-
-        使用示例:
-        - mem / 2
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_arithmetic(other)
-
-    def __rtruediv__(self: "Memory", other: object) -> "Memory":
-        """逐元素反向除法。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 int/bool / Memory，bool 视作 int。
-
-        使用示例:
-        - 2 / mem
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_arithmetic(other)
-
-    def __floordiv__(self: "Memory", other: object) -> "Memory":
-        """逐元素整除。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 Memory/Memory 与 Memory/int/bool，bool 视作 int。
-
-        使用示例:
-        - mem // 2
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_arithmetic(other)
-
-    def __rfloordiv__(self: "Memory", other: object) -> "Memory":
-        """逐元素反向整除。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 int/bool // Memory，bool 视作 int。
-
-        使用示例:
-        - 2 // mem
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_arithmetic(other)
-
-    def __eq__(self: "Memory", other: object) -> "Memory":
-        """逐元素相等比较。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
-
-        使用示例:
-        - mem == other
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_compare(other)
-
-    def __ne__(self: "Memory", other: object) -> "Memory":
-        """逐元素不等比较。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
-
-        使用示例:
-        - mem != other
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_compare(other)
-
-    def __lt__(self: "Memory", other: object) -> "Memory":
-        """逐元素小于比较。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
-
-        使用示例:
-        - mem < other
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_compare(other)
-
-    def __le__(self: "Memory", other: object) -> "Memory":
-        """逐元素小于等于比较。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
-
-        使用示例:
-        - mem <= other
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_compare(other)
-
-    def __gt__(self: "Memory", other: object) -> "Memory":
-        """逐元素大于比较。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
-
-        使用示例:
-        - mem > other
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_compare(other)
-
-    def __ge__(self: "Memory", other: object) -> "Memory":
-        """逐元素大于等于比较。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
-
-        使用示例:
-        - mem >= other
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_compare(other)
+    return method
+
+
+for _name, _delegate, _summary, _example in (
+    ("__add__", "_binary_arithmetic", "逐元素加法", "mem + 1"),
+    ("__radd__", "_binary_arithmetic", "逐元素反向加法", "1 + mem"),
+    ("__sub__", "_binary_arithmetic", "逐元素减法", "mem - 1"),
+    ("__rsub__", "_binary_arithmetic", "逐元素反向减法", "1 - mem"),
+    ("__mul__", "_binary_arithmetic", "逐元素乘法", "mem * 2"),
+    ("__rmul__", "_binary_arithmetic", "逐元素反向乘法", "2 * mem"),
+    ("__truediv__", "_binary_arithmetic", "逐元素除法", "mem / 2"),
+    ("__rtruediv__", "_binary_arithmetic", "逐元素反向除法", "2 / mem"),
+    ("__floordiv__", "_binary_arithmetic", "逐元素整除", "mem // 2"),
+    ("__rfloordiv__", "_binary_arithmetic", "逐元素反向整除", "2 // mem"),
+    ("__eq__", "_binary_compare", "逐元素相等比较", "mem == other"),
+    ("__ne__", "_binary_compare", "逐元素不等比较", "mem != other"),
+    ("__lt__", "_binary_compare", "逐元素小于比较", "mem < other"),
+    ("__le__", "_binary_compare", "逐元素小于等于比较", "mem <= other"),
+    ("__gt__", "_binary_compare", "逐元素大于比较", "mem > other"),
+    ("__ge__", "_binary_compare", "逐元素大于等于比较", "mem >= other"),
+):
+    setattr(Memory, _name, _make_memory_binary_method(_name, _delegate, _summary, _example))

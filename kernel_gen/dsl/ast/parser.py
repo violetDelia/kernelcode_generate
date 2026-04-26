@@ -12,7 +12,7 @@
 - func_ast = parse_function(kernel)
 
 关联文件:
-- spec: spec/dsl/ast.md
+- spec: spec/dsl/ast/__init__.md
 - test: test/dsl/ast/test_parser.py
 - 功能实现: kernel_gen/dsl/ast/parser.py
 """
@@ -180,8 +180,8 @@ class AstParseError(Exception):
     - raise AstParseError("Unsupported syntax", [Diagnostic("...", SourceLocation(1, 0))])
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -276,7 +276,7 @@ def _eval_symbolic_dim_node(expr: py_ast.AST, node: object | None) -> int | Symb
     - _eval_symbolic_dim_node(py_ast.parse("N + 1", mode="eval").body, None)
 
     关联文件:
-    - spec: spec/dsl/ast.md
+    - spec: spec/dsl/ast/__init__.md
     - test: test/dsl/test_mlir_gen.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
@@ -330,7 +330,7 @@ def _eval_symbolic_dim_expr(expr_text: str, node: object | None) -> int | Symbol
     - _eval_symbolic_dim_expr("(N + 1) / 2 + 1", None)
 
     关联文件:
-    - spec: spec/dsl/ast.md
+    - spec: spec/dsl/ast/__init__.md
     - test: test/dsl/test_mlir_gen.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
@@ -355,7 +355,7 @@ def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericTyp
     - _split_tensor_annotation("Tensor[f32, N, (W + 1) / 2 + 1]", None)
 
     关联文件:
-    - spec: spec/dsl/ast.md
+    - spec: spec/dsl/ast/__init__.md
     - test: test/dsl/test_mlir_gen.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
@@ -408,8 +408,8 @@ def _eval_formatted_annotation_expr(
     - _eval_formatted_annotation_expr(py_ast.parse("W + 1", mode="eval").body, globals(), __builtins__, {"W": 4})
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -489,8 +489,8 @@ def _format_joinedstr_value(
     - _format_joinedstr_value(node, globals(), __builtins__, {"N": 4})
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -524,8 +524,8 @@ def _normalize_annotation_text(
     - _normalize_annotation_text(node, globals(), __builtins__, runtime_table)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -558,8 +558,8 @@ def _annotation_from_runtime_value(arg_name: str, runtime_value: object) -> Tens
     - _annotation_from_runtime_value("n", 4)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -585,8 +585,8 @@ def _annotation_from_name_lookup(arg_name: str, namespace: dict[str, object]) ->
     - _annotation_from_name_lookup("A", {"A": Memory([4], NumericType.Float32)})
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -616,8 +616,8 @@ def _annotation_from_text(
     - _annotation_from_text("Tensor[f32, 4]", "A", node)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -646,8 +646,8 @@ def _tensor_annotation_text_from_subscript(node: py_ast.Subscript) -> str:
     - _tensor_annotation_text_from_subscript(py_ast.parse(\"Tensor[f32, M]\", mode=\"eval\").body)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -678,8 +678,8 @@ def _flatten_pep604_union_nodes(node: object) -> list[object]:
     - _flatten_pep604_union_nodes(py_ast.parse("int | SymbolDim", mode="eval").body)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -708,8 +708,8 @@ def _parse_annotation_node(
     - _parse_annotation_node(py_ast.parse("Ptr(f32)", mode="eval").body, "data", globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
     if node is None:
@@ -790,8 +790,8 @@ def _lookup_python_name(name: str, globals_table: dict[str, object], builtins_ta
     - _lookup_python_name("MemorySpace", globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -819,8 +819,8 @@ def _parse_attribute_object(
     - _parse_attribute_object(py_ast.parse("MemorySpace.LM").body[0].value, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -852,7 +852,7 @@ def _is_allowed_attribute_value(value: object) -> bool:
 
     关联文件:
     - spec: spec/dsl/mlir_gen.md
-    - test: test/dsl/test_ast_visitor.py
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -882,8 +882,8 @@ def _is_memory_target_ast(node: object) -> bool:
     - _is_memory_target_ast(TensorAST(name="out", memory=memory))
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -924,8 +924,8 @@ def _resolve_call_base_object(
     - _resolve_call_base_object(py_ast.parse(\"dma.load\", mode=\"eval\").body.value, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -957,8 +957,8 @@ def _resolve_import_bound_helper_call(
     - _resolve_import_bound_helper_call(py_ast.parse("cc.slice", mode="eval").body, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -1021,8 +1021,8 @@ def _bind_safe_local_import(stmt: py_ast.Import | py_ast.ImportFrom, globals_tab
     - _bind_safe_local_import(py_ast.parse("from kernel_gen.operation.dma import load").body[0], globals())
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -1066,8 +1066,8 @@ def _parse_symbol_to_float_call(
     - _parse_symbol_to_float_call(expr, env, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -1099,8 +1099,8 @@ def _parse_nn_arithmetic_call(
     - _parse_nn_arithmetic_call(expr, env, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -1145,7 +1145,7 @@ def _parse_nn_compare_call(
     - _parse_nn_compare_call(expr, env, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
+    - spec: spec/dsl/ast/__init__.md
     - test: test/dsl/ast/test_parser.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
@@ -1193,8 +1193,8 @@ def _parse_unary_helper_call(
     - _parse_unary_helper_call("relu", expr, env, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -1274,8 +1274,8 @@ def _parse_softmax_helper_call(
     - _parse_softmax_helper_call(expr, env, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -1317,8 +1317,8 @@ def _parse_reduce_helper_call(
     - _parse_reduce_helper_call("reduce_sum", expr, env, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -1385,8 +1385,8 @@ def _parse_load_like_call(
     - _parse_load_like_call(expr, \"load\", env, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -1435,8 +1435,8 @@ def _parse_store_like_call(
     - _parse_store_like_call(expr, \"store\", env, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -1490,8 +1490,8 @@ def _parse_launch_kernel_call(
     - _parse_launch_kernel_call(expr, env, globals(), __builtins__, launch_slice=expr.func.slice)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -1617,8 +1617,8 @@ def _parse_dma_call(
     - _parse_dma_call(py_ast.parse("slice(A, [i], [n])").body[0].value, env, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -2040,8 +2040,8 @@ def _parse_expr(
     - _parse_expr(py_ast.parse("value.get_shape()[0]").body[0].value, env, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -2159,8 +2159,8 @@ def _parse_for(
     - _parse_for(py_ast.parse("for i in range(4):\n    x = i").body[0], env, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -2225,8 +2225,8 @@ def _parse_stmt(
     - _parse_stmt(py_ast.parse("x = y").body[0], env, globals(), __builtins__)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -2285,8 +2285,8 @@ def _parse_function_impl(
     - func_ast = _parse_function_impl(my_kernel)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
@@ -2406,6 +2406,44 @@ def _parse_function_impl(
     )
 
 
+def parse_function_with_env(
+    fn: object,
+    globals_table: dict[str, object] | None = None,
+    builtins_table: dict[str, object] | None = None,
+    runtime_table: dict[str, object] | None = None,
+    config: dict[str, object] | None = None,
+) -> FunctionAST:
+    """解析 Python 函数并显式指定解析环境。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 解析函数源码，构建 `FunctionAST` 并允许调用方显式传入 `globals`/`builtins`/`runtime` 环境。
+    - 将内部 `_ParseFailure` 统一包装成 `AstParseError`，对外暴露稳定错误类型。
+
+    使用示例:
+    - func_ast = parse_function_with_env(fn, globals_table={}, builtins_table={}, runtime_table=None, config=None)
+
+    关联文件:
+    - spec: spec/dsl/ast/parser.md
+    - test: test/dsl/ast/test_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
+    """
+
+    try:
+        return _parse_function_impl(
+            fn,
+            globals_table=globals_table,
+            builtins_table=builtins_table,
+            runtime_table=runtime_table,
+            config=config,
+        )
+    except _ParseFailure as exc:
+        diagnostics = [Diagnostic(exc.message, location=exc.location)]
+        raise AstParseError(exc.message, diagnostics) from exc
+
+
 def parse_function(fn: object) -> FunctionAST:
     """解析 Python 函数为 DSL AST。
 
@@ -2419,13 +2457,9 @@ def parse_function(fn: object) -> FunctionAST:
     - func_ast = parse_function(add)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
-    try:
-        return _parse_function_impl(fn)
-    except _ParseFailure as exc:
-        diagnostics = [Diagnostic(exc.message, location=exc.location)]
-        raise AstParseError(exc.message, diagnostics) from exc
+    return parse_function_with_env(fn)

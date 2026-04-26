@@ -13,7 +13,7 @@
 
 关联文件:
 - spec: spec/dsl/emit_mlir.md
-- test: test/dsl/test_ast_visitor.py
+- test: test/dsl/ast/test_visitor_integration.py
 - 功能实现: kernel_gen/dsl/mlir_gen/emit/core.py
 """
 
@@ -35,6 +35,7 @@ from xdsl.dialects.builtin import (
     IntAttr,
     IntegerAttr,
     IntegerType,
+    Signedness,
     StringAttr,
     UnrealizedConversionCastOp,
     f32,
@@ -337,7 +338,7 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 将 DSL NumericType 转为 nn.memory 的 element_type，当前覆盖 Bool/Int8/Int32/Int64/BFloat16/Float16/Float32/Float64。
+    - 将 DSL NumericType 转为 nn.memory 的 element_type，当前覆盖 Bool/Int8/Int16/Int32/Int64/Uint8/Uint16/Uint32/Uint64/BFloat16/Float16/Float32/Float64。
     - 遇到不支持类型时抛出 LoweringError。
 
     使用示例:
@@ -345,7 +346,7 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
     if dtype is NumericType.Bool:
@@ -360,10 +361,20 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -
         return Float64Type()
     if dtype is NumericType.Int8:
         return i8
+    if dtype is NumericType.Int16:
+        return IntegerType(16)
     if dtype is NumericType.Int32:
         return i32
     if dtype is NumericType.Int64:
         return i64
+    if dtype is NumericType.Uint8:
+        return IntegerType(8, signedness=Signedness.UNSIGNED)
+    if dtype is NumericType.Uint16:
+        return IntegerType(16, signedness=Signedness.UNSIGNED)
+    if dtype is NumericType.Uint32:
+        return IntegerType(32, signedness=Signedness.UNSIGNED)
+    if dtype is NumericType.Uint64:
+        return IntegerType(64, signedness=Signedness.UNSIGNED)
     raise _LoweringError(f"Unsupported dtype: {dtype}", location=location)
 
 
@@ -374,7 +385,7 @@ def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = No
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 支持 Float16/BFloat16/Float32/Float64/Int32/Int64/Bool 解析为 NumericType。
+    - 支持 Float16/BFloat16/Float32/Float64/Int8/Int16/Int32/Int64/Uint8/Uint16/Uint32/Uint64/Bool 解析为 NumericType。
     - 不支持的 element_type 抛出 LoweringError。
 
     使用示例:
@@ -382,7 +393,7 @@ def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = No
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
     if isinstance(element_type, BFloat16Type):
@@ -393,14 +404,28 @@ def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = No
         return NumericType.Float32
     if isinstance(element_type, Float64Type):
         return NumericType.Float64
-    if element_type == i8:
-        return NumericType.Int8
-    if element_type == i32:
-        return NumericType.Int32
-    if element_type == i64:
-        return NumericType.Int64
     if element_type == i1:
         return NumericType.Bool
+    if isinstance(element_type, IntegerType):
+        width = element_type.width.data
+        signedness = element_type.signedness.data
+        if signedness == Signedness.UNSIGNED:
+            if width == 8:
+                return NumericType.Uint8
+            if width == 16:
+                return NumericType.Uint16
+            if width == 32:
+                return NumericType.Uint32
+            if width == 64:
+                return NumericType.Uint64
+        if width == 8:
+            return NumericType.Int8
+        if width == 16:
+            return NumericType.Int16
+        if width == 32:
+            return NumericType.Int32
+        if width == 64:
+            return NumericType.Int64
     raise _LoweringError("Unsupported element_type for nn arithmetic", location=location)
 
 
@@ -423,7 +448,7 @@ def _resolve_nn_arith_element_type(
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
     try:
@@ -571,6 +596,16 @@ def _eval_symbolic_dim_node(expr: py_ast.AST, location: SourceLocation | None) -
             if isinstance(rhs, int):
                 return lhs / rhs
             return lhs / rhs
+        if isinstance(expr.op, py_ast.FloorDiv):
+            if isinstance(lhs, int) and isinstance(rhs, int):
+                if rhs == 0:
+                    raise _LoweringError("Unsupported symbolic dim expression", location=location)
+                return lhs // rhs
+            if isinstance(lhs, int):
+                lhs = SymbolDim(lhs)
+            if isinstance(rhs, int):
+                return lhs // rhs
+            return lhs // rhs
         raise _LoweringError("Unsupported symbolic dim expression", location=location)
     raise _LoweringError("Unsupported symbolic dim expression", location=location)
 
@@ -735,7 +770,7 @@ def _cast_to_symbol_int(
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
@@ -763,7 +798,7 @@ def _const_symbol_int(value: int, ctx: EmitContext, location: SourceLocation | N
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
@@ -966,7 +1001,7 @@ def _materialize_index_symbol_from_memory(
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
@@ -1010,7 +1045,7 @@ def _materialize_index_symbol_from_symbol_alias(
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
@@ -1078,7 +1113,7 @@ def _split_symbol_multiplication(expr: str) -> list[str] | None:
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
     normalized = expr.strip()
@@ -1108,7 +1143,7 @@ def _resolve_index_symbol_product(expr: str, ctx: EmitContext, location: SourceL
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
     parts = _split_symbol_multiplication(expr)
@@ -1476,7 +1511,7 @@ def _build_flatten_shape_operands(
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
@@ -1687,7 +1722,7 @@ def _resolve_static_index_expr(
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
@@ -1835,7 +1870,7 @@ def _build_static_index_list(
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
@@ -1870,7 +1905,7 @@ def _build_static_index_attrs_exact(
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
@@ -1900,7 +1935,7 @@ def _build_index_operands_exact(
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
@@ -2211,7 +2246,7 @@ def _memory_space_from_ast(space: MemorySpace | None, fallback: NnMemorySpaceAtt
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
@@ -2343,7 +2378,7 @@ def _infer_broadcast_memory_type(
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
     if element_type is None and lhs_type.element_type != rhs_type.element_type:
@@ -2380,7 +2415,7 @@ def _resolve_binary_element_type(
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
     if lhs_type == rhs_type:
@@ -2489,7 +2524,7 @@ def _infer_binary_memory_type(
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
     if lhs_type.space != rhs_type.space:
@@ -2707,7 +2742,7 @@ def _infer_tensor_axis_access_type(
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
@@ -4712,7 +4747,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py), [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py), [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 

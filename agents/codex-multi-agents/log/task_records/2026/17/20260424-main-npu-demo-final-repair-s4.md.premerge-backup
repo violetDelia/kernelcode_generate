@@ -1,0 +1,24 @@
+# T-20260424-4781572d
+
+时间：2026-04-24 21:12 +0800
+经办人：守护最好的爱莉希雅
+任务：T-20260424-4781572d / main_npu_demo_pipeline_fold_cse 复验修复
+
+## 任务信息
+
+- 计划书：[`ARCHITECTURE/plan/main_npu_demo_pipeline_fold_cse_green_plan.md`](../../../../../ARCHITECTURE/plan/main_npu_demo_pipeline_fold_cse_green_plan.md)
+- worktree：`/home/lfr/kernelcode_generate/wt-20260424-main-npu-demo-final-repair-s4`
+- 任务类型：`build`
+- 当前基线：`main@7dc36033f4c877eb24450f3435e98e6c9a0f12d1`
+
+## 最小目标
+
+- 收口 [`expectation.pass.tuning.launch_kernel_cost_func`](../../../../../expectation/pass/tuning/launch_kernel_cost_func/__main__.py) 当前目录入口失败。
+- 复现点：`multi_kind.py` 仍报 `LaunchKernelCostFuncError: cost_kind must be one of compute, memory`。
+- 只处理这条相关 expectation 失败及其直接关联的实现 / spec / test，不扩到无关链路。
+
+## 执行要求
+
+- 执行记录必须写真实自检。
+- 执行记录必须写 `Diff 反推自测`。
+- `expectation` 只单列为合同验收资产，不替代对应测试。

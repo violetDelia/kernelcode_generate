@@ -6,6 +6,10 @@
 - 读取 `coverage.py` 生成的 JSON 报告，检查 Python 项目的 line / branch 覆盖率阈值。
 - 支持按 `kernel_gen` 模块前缀做阶段内 scoped 验收，不把合同验收资产、`test/`、`spec/` 计入本轮阈值。
 
+## API 列表
+
+- `script/check_python_coverage.py`
+
 ## 文档信息
 
 - 创建者：`金铲铲大作战`

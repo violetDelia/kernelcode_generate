@@ -4,6 +4,28 @@
 
 定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”以及“最小 pointer type 承载”。同时提供 `!symbol.iter<start = "...", end = "...", step = "...">` 用于表达循环迭代变量语义，与 `!symbol.int<"expr">` 同样承载整数值语义，但额外记录迭代边界。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘、除、整除以及比较计算，并提供 `symbol.to_int`（转为普通整型）与 `symbol.to_float`（转为 `f32`）两类显式类型转换 op；同时提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 在 IR 类型层的唯一最小载体。`symbol.for` 现支持旧的无 carried-value 形式，也支持单个 loop-carried `!symbol.int<"...">` 的 `iter_args(%acc = %init) ... -> !symbol.int<"...">` 公开语法，并通过 `symbol.yield` 终止循环体。该方言不负责张量、内存容器、通用控制流、pointer body op，或超出最小整数符号算术/比较范围的数值计算语义。
 
+## API 列表
+
+- `方言公开构件`
+- `SymbolExprAttr`
+- `SymbolValueType`
+- `SymbolIterType`
+- `SymbolIterAttr`
+- `SymbolYieldOp`
+- `SymbolPtrType`
+- `文本语法`
+- `类型校验规则`
+- `Memory 相关符号标量归属`
+- `symbol.const`
+- `symbol.add` / `symbol.sub` / `symbol.mul` / `symbol.div` / `symbol.floordiv`
+- `symbol.eq` / `symbol.ne` / `symbol.lt` / `symbol.le` / `symbol.gt` / `symbol.ge`
+- `symbol.to_int`
+- `symbol.to_float`
+- `symbol.get_dim`
+- `symbol.get_stride`
+- `symbol.for`
+- `symbol.yield`
+
 ## 文档信息
 
 - 创建者：`榕`

@@ -1,0 +1,25 @@
+# T-20260424-3c0b1a41
+
+时间：2026-04-24 22:22 +0800
+经办人：守护最好的爱莉希雅
+任务：T-20260424-3c0b1a41 / main_npu_demo_pipeline_fold_cse 复验修复
+
+## 任务信息
+
+- 计划书：[`ARCHITECTURE/plan/main_npu_demo_pipeline_fold_cse_green_plan.md`](../../../../../ARCHITECTURE/plan/main_npu_demo_pipeline_fold_cse_green_plan.md)
+- worktree：`/home/lfr/kernelcode_generate/wt-20260424-main-npu-demo-final-repair-s6`
+- 任务类型：`build`
+- 当前基线：`origin/main@7c63c3bc18b4d0d69dedc336e2cacdcfcb8bae99`
+
+## 最小目标
+
+- 收口 `spec/dialect/arch.md` 中剩余的旧直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size)` 公开口径。
+- 收口 `kernel_gen/operation/arch.py` 中仍保留并公开描述的直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 兼容入口与对应说明。
+- 只处理以上两处及其直接关联的实现 / spec / test。
+
+## 执行要求
+
+- 不得改动任何 `[immutable-file]`。
+- 执行记录必须写真实自检。
+- 执行记录必须写 `Diff 反推自测`。
+- `expectation` 只单列为合同验收资产，不替代对应测试。

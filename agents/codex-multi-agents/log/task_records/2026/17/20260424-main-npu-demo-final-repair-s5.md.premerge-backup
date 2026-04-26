@@ -1,0 +1,33 @@
+# T-20260424-33224722
+
+时间：2026-04-24 21:56 +0800
+经办人：守护最好的爱莉希雅
+任务：T-20260424-33224722 / main_npu_demo_pipeline_fold_cse 复验修复
+
+## 任务信息
+
+- 计划书：[`ARCHITECTURE/plan/main_npu_demo_pipeline_fold_cse_green_plan.md`](../../../../../ARCHITECTURE/plan/main_npu_demo_pipeline_fold_cse_green_plan.md)
+- worktree：`/home/lfr/kernelcode_generate/wt-20260424-main-npu-demo-final-repair-s5`
+- 任务类型：`build`
+- 当前基线：`origin/main@a45d798fa38e69f323f1f55ee4e994fa1f946bee`
+
+## 最小目标
+
+- 收口计划正文中“相关 expectation 资产清单”与当前真实保留合同集合不一致的问题。
+- 用户已明确确认以下 expectation 资产为主动删除，不再作为产品阻断：
+  - `expectation.operation.arch`
+  - `expectation.dsl.mlir_gen.dialect.arch`
+  - `expectation.pass.outline_device_kernel`
+  - `expectation.execute_engine.npu_demo.default`
+  - `expectation.tools.dsl_run`
+- 本任务只处理：
+  - 计划正文中的相关 expectation 清单
+  - 与这组清单直接关联的实现 / spec / test 说明收口
+- 不把用户主动删除的 expectation 继续当作产品失败。
+
+## 执行要求
+
+- 不得改动任何 `[immutable-file]`。
+- 执行记录必须写真实自检。
+- 执行记录必须写 `Diff 反推自测`。
+- `expectation` 只单列为合同验收资产，不替代对应测试。

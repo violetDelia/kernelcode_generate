@@ -11,8 +11,8 @@
 - pytest -q test/e2e/test_npu_demo_add_barrier.py
 
 关联文件:
-- 功能实现: kernel_gen/dsl/gen_kernel.py
-- Spec 文档: spec/dsl/gen_kernel.md
+- 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
+- Spec 文档: spec/dsl/gen_kernel/gen_kernel.md
 - 测试文件: test/e2e/test_npu_demo_add_barrier.py
 """
 
@@ -24,11 +24,11 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-GEN_KERNEL_TEST_PATH = REPO_ROOT / "test/dsl/test_gen_kernel.py"
+GEN_KERNEL_TEST_PATH = REPO_ROOT / "test/dsl/gen_kernel/test_gen_kernel.py"
 
 
 def _load_gen_kernel_test_module():
-    """加载 `test/dsl/test_gen_kernel.py` 中的 `npu_demo add+barrier` 测试辅助函数。
+    """加载 `test/dsl/gen_kernel/test_gen_kernel.py` 中的 `npu_demo add+barrier` 测试辅助函数。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
@@ -41,7 +41,7 @@ def _load_gen_kernel_test_module():
     - helpers = _load_gen_kernel_test_module()
 
     关联文件:
-    - spec: spec/dsl/gen_kernel.md
+    - spec: spec/dsl/gen_kernel/gen_kernel.md
     - test: test/e2e/test_npu_demo_add_barrier.py
     - 功能实现: test/e2e/test_npu_demo_add_barrier.py
     """
@@ -67,8 +67,8 @@ def _load_gen_kernel_test_module():
 # 功能说明: 验证 `npu_demo add+barrier` 双函数可从 DSL module 生成源码、编译为可执行程序，并在运行时证明共享 barrier 生效。
 # 测试目的: 锁定端到端链路不是“只生成源码”，且至少一个 case 构造“有人慢一步”时其他线程不会越过 barrier。
 # 使用示例: pytest -q test/e2e/test_npu_demo_add_barrier.py -k test_npu_demo_add_barrier_runs_end_to_end_with_real_barrier
-# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
-# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/e2e/test_npu_demo_add_barrier.py
 def test_npu_demo_add_barrier_runs_end_to_end_with_real_barrier() -> None:
     helpers = _load_gen_kernel_test_module()

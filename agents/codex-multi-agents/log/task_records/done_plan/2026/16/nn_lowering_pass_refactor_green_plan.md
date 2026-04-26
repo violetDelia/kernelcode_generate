@@ -5,7 +5,7 @@
 - 创建者：`大闸蟹`
 - 最后一次更改：`守护最好的爱莉希雅`
 - 目标 `spec`：
-  - [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)
+  - [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)
   - [`spec/pass/lowering/nn_lowering/nn_lowering_utility.md`](../../spec/pass/lowering/nn_lowering/nn_lowering_utility.md)
   - [`spec/pass/lowering/nn_lowering/element_binary_lowering.md`](../../spec/pass/lowering/nn_lowering/element_binary_lowering.md)
   - [`spec/pass/lowering/nn_lowering/select_cast_lowering.md`](../../spec/pass/lowering/nn_lowering/select_cast_lowering.md)
@@ -172,7 +172,7 @@
   - [`kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py`](../../kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py)
   - [`kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py`](../../kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py)
   - [`kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py`](../../kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py)
-- 当前还不存在对应 child spec；只有总 spec [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)。
+- 当前还不存在对应 child spec；只有总 spec [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)。
 - 当前实现结构与目标不一致：
   - [`element_binary_lowering.py`](../../kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py) 里仍有 `LowerNnElementBinaryPass`
   - [`select_cast_lowering.py`](../../kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py) 里仍有 `LowerNnSelectCastPass`
@@ -220,15 +220,15 @@ module = NnLoweringPass().run(module)
 
 | 文件 | 对应 spec | 是否公开 | 负责内容 | 必过验收资产 |
 | --- | --- | --- | --- | --- |
-| [`kernel_gen/passes/lowering/nn_lowering/__init__.py`](../../kernel_gen/passes/lowering/nn_lowering/__init__.py) | [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md) | `是` | 公开导出 `NnLoweringPass` / `NnLoweringError` | [`test/pass/nn_lowering/public_name.py`](../../test/pass/nn_lowering/public_name.py) |
-| [`kernel_gen/passes/lowering/nn_lowering/nn_lowering.py`](../../kernel_gen/passes/lowering/nn_lowering/nn_lowering.py) | [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md) | `是` | 唯一 pass、调度顺序、顶层遍历、错误汇总 | [`test/pass/test_pass_manager.py`](../../test/pass/test_pass_manager.py)、[`test/pass/test_pipeline_default_lowering.py`](../../test/pass/test_pipeline_default_lowering.py)、[`expectation/pass/lowing/nn_lowering`](../../expectation/pass/lowing/nn_lowering) |
+| [`kernel_gen/passes/lowering/nn_lowering/__init__.py`](../../kernel_gen/passes/lowering/nn_lowering/__init__.py) | [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md) | `是` | 公开导出 `NnLoweringPass` / `NnLoweringError` | [`test/pass/nn_lowering/public_name.py`](../../test/pass/nn_lowering/public_name.py) |
+| [`kernel_gen/passes/lowering/nn_lowering/nn_lowering.py`](../../kernel_gen/passes/lowering/nn_lowering/nn_lowering.py) | [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md) | `是` | 唯一 pass、调度顺序、顶层遍历、错误汇总 | [`test/pass/test_pass_manager.py`](../../test/pass/test_pass_manager.py)、[`test/pass/test_pipeline_default_lowering.py`](../../test/pass/test_pipeline_default_lowering.py)、[`expectation/pass/lowing/nn_lowering`](../../expectation/pass/lowing/nn_lowering) |
 | [`kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py`](../../kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py) | [`spec/pass/lowering/nn_lowering/nn_lowering_utility.md`](../../spec/pass/lowering/nn_lowering/nn_lowering_utility.md) | `否` | alloc / shape / symbol-int / broadcast bridge 等共享 helper | 被所有 family 测试与 expectation 间接覆盖 |
 | [`kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py`](../../kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py) | [`spec/pass/lowering/nn_lowering/element_binary_lowering.md`](../../spec/pass/lowering/nn_lowering/element_binary_lowering.md) | `否` | `nn.add/sub/mul/div/truediv/eq/ne/lt/le/gt/ge` | [`test/pass/nn_lowering/element_binary_add.py`](../../test/pass/nn_lowering/element_binary_add.py)、[`test/pass/nn_lowering/element_compare_eq.py`](../../test/pass/nn_lowering/element_compare_eq.py)、[`expectation/pass/lowing/nn_lowering/element_binary`](../../expectation/pass/lowing/nn_lowering/element_binary)、[`expectation/pass/lowing/nn_lowering/element_compare`](../../expectation/pass/lowing/nn_lowering/element_compare) |
 | [`kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py`](../../kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py) | [`spec/pass/lowering/nn_lowering/select_cast_lowering.md`](../../spec/pass/lowering/nn_lowering/select_cast_lowering.md) | `否` | `nn.select`、`nn.cast` | [`test/pass/nn_lowering/select.py`](../../test/pass/nn_lowering/select.py)、[`test/pass/nn_lowering/cast.py`](../../test/pass/nn_lowering/cast.py)、[`expectation/pass/lowing/nn_lowering/select.py`](../../expectation/pass/lowing/nn_lowering/select.py)、[`expectation/pass/lowing/nn_lowering/cast.py`](../../expectation/pass/lowing/nn_lowering/cast.py) |
 
 ### 三、每份 child spec 需要定义的重要 API
 
-- [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)
+- [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)
   - `class NnLoweringPass(Pass)`
   - `NnLoweringPass.run(module: ModuleOp) -> ModuleOp`
 - [`spec/pass/lowering/nn_lowering/nn_lowering_utility.md`](../../spec/pass/lowering/nn_lowering/nn_lowering_utility.md)
@@ -312,13 +312,13 @@ module = NnLoweringPass().run(module)
   - 为现有 `nn_lowering_utility.py`、`element_binary_lowering.py`、`select_cast_lowering.py` 建立对应 child spec。
   - 删除计划里与当前实现不对应的旧任务描述。
 - 目标 `spec / API`：
-  - [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)
+  - [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)
   - [`spec/pass/lowering/nn_lowering/nn_lowering_utility.md`](../../spec/pass/lowering/nn_lowering/nn_lowering_utility.md)
   - [`spec/pass/lowering/nn_lowering/element_binary_lowering.md`](../../spec/pass/lowering/nn_lowering/element_binary_lowering.md)
   - [`spec/pass/lowering/nn_lowering/select_cast_lowering.md`](../../spec/pass/lowering/nn_lowering/select_cast_lowering.md)
 - 可改文件：
   - `ARCHITECTURE/plan/nn_lowering_pass_refactor_green_plan.md`
-  - `spec/pass/lowering/nn_lowering.md`
+  - `spec/pass/lowering/nn_lowering/spec.md`
   - `spec/pass/lowering/nn_lowering/*.md`
 - 预期示例代码：
   ```python
@@ -513,7 +513,7 @@ module = NnLoweringPass().run(module)
   - 目录级 expectation 与 test 全绿
   - `pass_manager / pipeline / dsl / execute_engine` 中旧名引用清理完成
 - 目标 `spec / API`：
-  - [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)
+  - [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)
   - [`kernel_gen/passes/lowering/nn_lowering/__init__.py`](../../kernel_gen/passes/lowering/nn_lowering/__init__.py)
   - [`kernel_gen/passes/lowering/nn_lowering/nn_lowering.py`](../../kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
 - 可改文件：
@@ -551,7 +551,7 @@ module = NnLoweringPass().run(module)
 ## 参考资料
 
 - [`analysis .plan.md`](../../analysis%20.plan.md)
-- [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)
+- [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)
 - [`kernel_gen/passes/lowering/nn_lowering`](../../kernel_gen/passes/lowering/nn_lowering)
 - [`test/pass/nn_lowering`](../../test/pass/nn_lowering)
 - [`expectation/pass/lowing/nn_lowering`](../../expectation/pass/lowing/nn_lowering)

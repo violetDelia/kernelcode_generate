@@ -6,6 +6,17 @@
 - 该方言只覆盖 block/thread/subthread/shared_memory_size 四层执行索引、执行规模查询、动态内存入口与启动描述，不负责实际调度、同步、循环或 memory 读写语义。
 - 执行维度标量统一使用 `!symbol.int<"expr">` 表达，以便与现有 `symbol`、`dma`、`dsl` 链路保持一致。
 
+## API 列表
+
+- `arch.get_block_id`
+- `arch.get_block_num`
+- `arch.get_thread_id`
+- `arch.get_thread_num`
+- `arch.get_subthread_id`
+- `arch.get_subthread_num`
+- `arch.get_dynamic_memory(memory_space)`
+- `arch.launch<block, thread, subthread, shared_memory_size>(callee, args...)`
+
 ## 文档信息
 
 - 创建者：`摸鱼小分队`

@@ -12,7 +12,7 @@
 - space = ensure_space_attr(op)
 
 关联文件:
-- spec: spec/pass/lowering/nn_lowering.md
+- spec: spec/pass/lowering/nn_lowering/spec.md
 - test: test/pass/nn_lowering/public_name.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
 """
@@ -39,7 +39,7 @@ def ensure_module_op(module: Operation) -> ModuleOp:
     - module_op = ensure_module_op(module)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
     """
@@ -66,7 +66,7 @@ def ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
     - space = ensure_space_attr(op)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
     """
@@ -91,7 +91,7 @@ def ensure_single_result(op: Operation) -> NnMemoryType:
     - result_type = ensure_single_result(op)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
     """
@@ -117,7 +117,7 @@ def ensure_operand_count(op: Operation, expected: int) -> None:
     - ensure_operand_count(op, 2)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
     """
@@ -142,7 +142,7 @@ def ensure_expected_op_name(op: Operation, expected: str) -> None:
     - ensure_expected_op_name(op, "nn.add")
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
     """

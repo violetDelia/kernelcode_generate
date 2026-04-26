@@ -6,6 +6,10 @@
 - 负责 `nn.broadcast` / `nn.transpose` 的 lowering 语义。
 - 模块级公开入口只保留 `dma_structured_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
 
+## API 列表
+
+- `dma_structured_patterns() -> list[RewritePattern]`
+
 ## 文档信息
 
 - 创建者：`小李飞刀`
@@ -19,7 +23,7 @@
 
 ## 依赖
 
-- 总规范：[`spec/pass/lowering/nn_lowering.md`](../../../../spec/pass/lowering/nn_lowering.md)
+- 总规范：[`spec/pass/lowering/nn_lowering/spec.md`](../../../../spec/pass/lowering/nn_lowering/spec.md)
 - NN dialect：[`spec/dialect/nn.md`](../../../../spec/dialect/nn.md)
 - DMA dialect：[`spec/dialect/dma.md`](../../../../spec/dialect/dma.md)
 - Symbol dialect：[`spec/dialect/symbol.md`](../../../../spec/dialect/symbol.md)

@@ -4,6 +4,45 @@
 
 定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。当前基线要求 `cpu::Memory<Space, T>` 使用运行期 `rank`，并以 `MAX_DIM=8` 作为内部固定上限；逐元素/显式 broadcast、`add` 的 scalar overload（`Memory+scalar` / `scalar+Memory`，其中 `memory + const(i32)` 的目标源码保持 CPU 整数实参直传，`memory + symbol.int` 的 CPU 终点整数标量口径固定为 `long long`）、`exp`、`reduce_sum/reduce_min/reduce_max` 与 `img2col1d/img2col2d` CPU 叶子接口语义仍由 CPU include 层实现负责承接。
 
+## API 列表
+
+- `enum class cpu::MemoryFormat { Norm, CLast }`
+- `enum class cpu::MemorySpace { GM, SM, LM, TSM, TLM }`
+- `template <cpu::MemorySpace Space, typename T> class cpu::Memory`
+- `cpu::Memory::Memory(T* data, unsigned long long rank, const long long* shape, const long long* stride, cpu::MemoryFormat format = cpu::MemoryFormat::Norm)`
+- `cpu::Memory::Memory(T* data, unsigned long long rank, const long long* shape, cpu::MemoryFormat format = cpu::MemoryFormat::Norm)`
+- `cpu::Memory::data() -> T*`
+- `cpu::Memory::data() const -> const T*`
+- `cpu::Memory::shape() const -> const long long*`
+- `cpu::Memory::stride() const -> const long long*`
+- `cpu::Memory::rank() const -> unsigned long long`
+- `cpu::Memory::format() const -> cpu::MemoryFormat`
+- `cpu::Memory::space() const -> cpu::MemorySpace`
+- `cpu::Memory::element_count() const -> long long`
+- `cpu::Memory::is_contiguous() const -> bool`
+- `cpu::Memory::linear_offset(const long long* indices) const -> long long`
+- `cpu::Memory::at(const long long* indices) -> T&`
+- `cpu::Memory::at(const long long* indices) const -> const T&`
+- `template <cpu::MemorySpace Space, typename T> void cpu::add(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, T>& out)`
+- `template <cpu::MemorySpace Space, typename T, typename ScalarT> void cpu::add(const cpu::Memory<Space, T>& lhs, ScalarT rhs_scalar, cpu::Memory<Space, T>& out)`
+- `template <cpu::MemorySpace Space, typename T> void cpu::add(T lhs_scalar, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, T>& out)`
+- `template <cpu::MemorySpace Space, typename T> void cpu::sub(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, T>& out)`
+- `template <cpu::MemorySpace Space, typename T> void cpu::mul(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, T>& out)`
+- `template <cpu::MemorySpace Space, typename T> void cpu::truediv(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, T>& out)`
+- `template <cpu::MemorySpace Space> void cpu::exp(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out)`
+- `template <cpu::MemorySpace Space> void cpu::reduce_sum(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out, const long long* axes, unsigned long long axes_rank, bool keepdim)`
+- `template <cpu::MemorySpace Space> void cpu::reduce_min(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out, const long long* axes, unsigned long long axes_rank, bool keepdim)`
+- `template <cpu::MemorySpace Space> void cpu::reduce_max(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out, const long long* axes, unsigned long long axes_rank, bool keepdim)`
+- `template <cpu::MemorySpace Space, typename T, typename PredT> void cpu::eq(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, PredT>& out)`
+- `template <cpu::MemorySpace Space, typename T, typename PredT> void cpu::ne(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, PredT>& out)`
+- `template <cpu::MemorySpace Space, typename T, typename PredT> void cpu::lt(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, PredT>& out)`
+- `template <cpu::MemorySpace Space, typename T, typename PredT> void cpu::le(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, PredT>& out)`
+- `template <cpu::MemorySpace Space, typename T, typename PredT> void cpu::gt(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, PredT>& out)`
+- `template <cpu::MemorySpace Space, typename T, typename PredT> void cpu::ge(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, PredT>& out)`
+- `template <cpu::MemorySpace Space, typename T> void cpu::broadcast(const cpu::Memory<Space, T>& input, cpu::Memory<Space, T>& out)`
+- `template <cpu::MemorySpace Space> void cpu::img2col1d(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out, long long kw, long long sw, long long dw, long long pl, long long pr)`
+- `template <cpu::MemorySpace Space> void cpu::img2col2d(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`
+
 ## 文档信息
 
 - 创建者：`摸鱼小分队`

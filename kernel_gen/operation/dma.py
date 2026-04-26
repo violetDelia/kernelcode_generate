@@ -1,7 +1,7 @@
 """DMA operation API.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 Memory 的数据搬运、视图变换与显式转换 API，包括 alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast。
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from kernel_gen.common.contracts import _shape_numel as _common_shape_numel
+from kernel_gen.common.contracts import shape_numel as _common_shape_numel
 from kernel_gen.common.errors import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.dtype_constants import FLOAT_DTYPES, INT_DTYPES
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
@@ -31,6 +31,7 @@ from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_SCENE = "dma operation 参数校验"
+_REQUIRED_SPACE = object()
 
 
 def _ensure_memory(value: object, name: str) -> Memory:
@@ -209,6 +210,45 @@ def _normalize_index_list(value: object, name: str) -> SymbolShape:
     if isinstance(value, SymbolShape):
         return value
     return SymbolShape(value)
+
+
+def _resolve_memory_space(
+    space: object,
+    *,
+    scene: str,
+    default: MemorySpace | object = _REQUIRED_SPACE,
+) -> MemorySpace:
+    """统一解析 `MemorySpace` 参数。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 统一处理 `copy/load/slice` 的 `space` 参数校验。
+    - `default` 非哨兵时允许 `space=None` 回落到默认值。
+    - 非 `MemorySpace` 输入保持原有 `TypeError` 文案。
+
+    使用示例:
+    - _resolve_memory_space(MemorySpace.SM, scene="dma.copy 参数校验")
+    - _resolve_memory_space(None, scene="dma.load 参数校验", default=MemorySpace.GM)
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+    if space is None and default is not _REQUIRED_SPACE:
+        return default
+    if not isinstance(space, MemorySpace):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene=scene,
+                expected="space must be MemorySpace",
+                actual=type(space).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+    return space
 
 
 def _ensure_index_rank(memory: Memory, offsets: SymbolShape, sizes: SymbolShape, strides: SymbolShape | None) -> None:
@@ -621,19 +661,11 @@ def copy(source: object, space: object) -> Memory:
     - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
-    if not isinstance(space, MemorySpace):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
-                scene="dma.copy 参数校验",
-                expected="space must be MemorySpace",
-                actual=type(space).__name__,
-                action=_ERROR_ACTION,
-            )
-        )
+    target_space = _resolve_memory_space(space, scene="dma.copy 参数校验")
     return Memory(
         _clone_symbol_list(src.shape),
         src.dtype,
-        space=space,
+        space=target_space,
         stride=_clone_symbol_list(src.stride),
         format=src.format,
     )
@@ -663,22 +695,13 @@ def load(
     - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
-    if space is not None and not isinstance(space, MemorySpace):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
-                scene="dma.load 参数校验",
-                expected="space must be MemorySpace",
-                actual=type(space).__name__,
-                action=_ERROR_ACTION,
-            )
-        )
     offsets_shape, sizes_shape, strides_shape = _normalize_and_validate_access_region(
         src,
         offsets=offsets,
         sizes=sizes,
         strides=strides,
     )
-    target_space = src.space if space is None else space
+    target_space = _resolve_memory_space(space, scene="dma.load 参数校验", default=src.space)
     return Memory(
         _clone_symbol_list(sizes_shape),
         src.dtype,
@@ -765,22 +788,13 @@ def slice(
     - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
-    if space is not None and not isinstance(space, MemorySpace):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
-                scene="dma.slice 参数校验",
-                expected="space must be MemorySpace",
-                actual=type(space).__name__,
-                action=_ERROR_ACTION,
-            )
-        )
     offsets_shape, sizes_shape, strides_shape = _normalize_and_validate_access_region(
         src,
         offsets=offsets,
         sizes=sizes,
         strides=strides,
     )
-    target_space = src.space if space is None else space
+    target_space = _resolve_memory_space(space, scene="dma.slice 参数校验", default=src.space)
     return alloc(_clone_symbol_list(sizes_shape), src.dtype, space=target_space, format=src.format)
 
 

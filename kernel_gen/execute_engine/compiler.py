@@ -76,7 +76,7 @@ def _run_compiler_command(command: Iterable[str]) -> subprocess.CompletedProcess
     关联文件:
     - spec: spec/execute_engine/execute_engine_target.md
     - test: test/execute_engine/test_execute_engine_private_helpers.py
-    - test: test/dsl/test_gen_kernel.py
+    - test: test/dsl/gen_kernel/test_gen_kernel.py
     - 功能实现: kernel_gen/execute_engine/compiler.py
     """
 

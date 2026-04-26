@@ -200,9 +200,9 @@ static int fail(int code) { return code; }
 
 static void kernel_body(npu_demo::KernelContext& ctx, long long* seen_ids, long long* seen_thread_nums) {
     ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
-    const long long tid = ctx.thread_id();
+    const long long tid = thread_id();
     seen_ids[tid] = tid;
-    seen_thread_nums[tid] = ctx.thread_num();
+    seen_thread_nums[tid] = thread_num();
 }
 
 int main() {
@@ -282,9 +282,13 @@ def test_include_api_arch_keeps_backend_impl_out_of_api_header() -> None:
     assert "class KernelContext" in header
     assert "virtual long long thread_id() const = 0;" in header
     assert "virtual long long thread_num() const = 0;" in header
+    assert "S_INT thread_id();" in header
+    assert "S_INT thread_num();" in header
     assert "std::initializer_list<BarrierVisibility> visibility" in header
     assert "BarrierScope scope" in header
     assert "Memory<Space, T> get_dynamic_memory() const;" in header
+    assert "class DynamicMemoryRef" in header
+    assert "DynamicMemoryRef<Space> get_dynamic_memory();" in header
     assert "SUBTHREAD" in header
     assert "GLOBAL" in header
     assert "Status launch" in header
@@ -312,10 +316,9 @@ def test_include_api_arch_exposes_tlm123_dynamic_memory_contract() -> None:
 static int fail(int code) { return code; }
 
 int main() {
-    npu_demo::KernelContext ctx;
-    auto tlm1 = ctx.get_dynamic_memory<TLM1, float>();
-    auto tlm2 = ctx.get_dynamic_memory<TLM2, float>();
-    auto tlm3 = ctx.get_dynamic_memory<TLM3, float>();
+    Memory<TLM1, float> tlm1 = get_dynamic_memory<TLM1>();
+    Memory<TLM2, float> tlm2 = get_dynamic_memory<TLM2>();
+    Memory<TLM3, float> tlm3 = get_dynamic_memory<TLM3>();
 
     if (tlm1.rank() != 1 || tlm1.shape()[0] != 1024 || tlm1.stride()[0] != 1 || tlm1.space() != MemorySpace::TLM1) {
         return fail(1);
@@ -354,6 +357,9 @@ void inspect(KernelContext& ctx) {
     (void)ctx.thread_id();
     (void)ctx.thread_num();
     ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
+    (void)thread_id();
+    (void)thread_num();
+    (void)get_dynamic_memory<TSM>();
 }
 """
     _compile_only(source)

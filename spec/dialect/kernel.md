@@ -6,6 +6,22 @@
 - 所有结果通过显式 `outs(...)` 写回，不产生 SSA result。
 - 复用 `nn` dialect 的 memory type 与 space attribute，不新增独立 memory 类型体系。
 
+## API 列表
+
+- `NnMemorySpaceAttr`
+- `NnMemoryType`
+- `kernel.binary_elewise`
+- `已移除的旧公开名`
+- `kernel.select`
+- `kernel.exp`
+- `kernel.reduce_sum`
+- `kernel.reduce`
+- `kernel.reduce_min`
+- `kernel.reduce_max`
+- `kernel.matmul`
+- `kernel.img2col1d`
+- `kernel.img2col2d`
+
 ## 文档信息
 
 - 创建者：`榕`

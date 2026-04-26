@@ -31,6 +31,33 @@ from pathlib import Path
 import pytest
 
 
+LEGACY_MODULES = [
+    "symbol_variable",
+    "symbol_variable.symbol_dim",
+    "symbol_variable.symbol_shape",
+    "symbol_variable.memory",
+    "symbol_variable.type",
+]
+PUBLIC_EXPORTS = [
+    "Farmat",
+    "LocalSpaceMeta",
+    "Memory",
+    "MemorySpace",
+    "NumericType",
+    "SymbolDim",
+    "SymbolList",
+    "SymbolShape",
+]
+
+
+def _without_test_dir() -> None:
+    """移除测试目录并清理旧模块缓存。"""
+    test_dir = str(Path(__file__).resolve().parents[1])
+    sys.path[:] = [path for path in sys.path if path != test_dir]
+    for module_name in LEGACY_MODULES:
+        sys.modules.pop(module_name, None)
+
+
 # PM-001
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
@@ -63,21 +90,9 @@ def test_python_symbol_variable_imports() -> None:
 def test_legacy_import_disabled() -> None:
     import importlib
 
-    test_dir = str(Path(__file__).resolve().parents[1])
     original_sys_path = sys.path[:]
-    # 清理可能由其他测试遗留在 sys.modules 里的旧别名缓存，保证这里验证的是当前导入边界。
-    legacy_modules = [
-        "symbol_variable",
-        "symbol_variable.symbol_dim",
-        "symbol_variable.symbol_shape",
-        "symbol_variable.memory",
-        "symbol_variable.type",
-    ]
     try:
-        sys.path = [path for path in sys.path if path != test_dir]
-        for module_name in legacy_modules:
-            sys.modules.pop(module_name, None)
-
+        _without_test_dir()
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module("symbol_variable")
     finally:
@@ -97,22 +112,10 @@ def test_legacy_import_disabled() -> None:
 def test_legacy_submodule_import_disabled() -> None:
     import importlib
 
-    test_dir = str(Path(__file__).resolve().parents[1])
     original_sys_path = sys.path[:]
-    # 同步清理旧别名缓存，避免前序测试向 sys.modules 注入过 symbol_variable 顶层包。
-    legacy_modules = [
-        "symbol_variable",
-        "symbol_variable.symbol_dim",
-        "symbol_variable.symbol_shape",
-        "symbol_variable.memory",
-        "symbol_variable.type",
-    ]
     try:
-        sys.path = [path for path in sys.path if path != test_dir]
-        for module_name in legacy_modules:
-            sys.modules.pop(module_name, None)
-
-        for module_name in legacy_modules[1:]:
+        _without_test_dir()
+        for module_name in LEGACY_MODULES[1:]:
             with pytest.raises(ModuleNotFoundError):
                 importlib.import_module(module_name)
     finally:
@@ -188,16 +191,7 @@ def test_package_type_construct_memory() -> None:
 def test_python_package_all_boundary() -> None:
     import kernel_gen.symbol_variable as package_module
 
-    assert package_module.__all__ == [
-        "Farmat",
-        "LocalSpaceMeta",
-        "Memory",
-        "MemorySpace",
-        "NumericType",
-        "SymbolDim",
-        "SymbolList",
-        "SymbolShape",
-    ]
+    assert package_module.__all__ == PUBLIC_EXPORTS
 
 
 # PM-007
@@ -215,13 +209,4 @@ def test_python_package_import_star_exports_only_public_names() -> None:
 
     exec("from kernel_gen.symbol_variable import *", {}, namespace)
 
-    assert sorted(namespace) == [
-        "Farmat",
-        "LocalSpaceMeta",
-        "Memory",
-        "MemorySpace",
-        "NumericType",
-        "SymbolDim",
-        "SymbolList",
-        "SymbolShape",
-    ]
+    assert sorted(namespace) == PUBLIC_EXPORTS

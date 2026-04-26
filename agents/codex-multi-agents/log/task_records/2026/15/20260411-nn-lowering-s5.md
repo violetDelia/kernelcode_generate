@@ -11,7 +11,7 @@
 任务：T-20260411-40f2c480
 任务目标：复核 matmul/img2col lowering 与测试、expectation 证据
 改动：
-- 复核文件：kernel_gen/passes/lowering/nn_to_kernel.py、kernel_gen/dialect/nn.py、kernel_gen/tools/ircheck.py、test/pass/nn_lowering/matmul.py、test/pass/nn_lowering/img2col1d.py、test/pass/nn_lowering/img2col2d.py、spec/pass/lowering/nn_lowering.md、spec/dialect/nn.md、spec/operation/nn.md。
+- 复核文件：kernel_gen/passes/lowering/nn_to_kernel.py、kernel_gen/dialect/nn.py、kernel_gen/tools/ircheck.py、test/pass/nn_lowering/matmul.py、test/pass/nn_lowering/img2col1d.py、test/pass/nn_lowering/img2col2d.py、spec/pass/lowering/nn_lowering/spec.md、spec/dialect/nn.md、spec/operation/nn.md。
 - 复核结果：img2col 参数归一为 symbol.int 且 attr 由 symbol-int 派生；matmul/img2col 的 dynamic alloc 与输出形态与 spec/用例一致；新增测试文件头注释与示例齐全。
 - 问题列表：未发现需修改项。
 - 漏洞排查结果：

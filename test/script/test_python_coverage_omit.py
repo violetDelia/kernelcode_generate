@@ -68,5 +68,5 @@ def test_python_coverage_omit_manifest_excludes_logic_modules() -> None:
     assert "| `kernel_gen/__init__.py` |" not in text
     assert "| `kernel_gen/dialect/__init__.py` |" not in text
     assert "| `kernel_gen/dsl/gen_kernel/__init__.py` |" not in text
-    assert "| `kernel_gen/dsl/gen_kernel/emit_c/__init__.py` |" not in text
+    assert "| `kernel_gen/dsl/gen_kernel/emit/__init__.py` |" not in text
     assert "| `kernel_gen/passes/lowering/__init__.py` |" not in text

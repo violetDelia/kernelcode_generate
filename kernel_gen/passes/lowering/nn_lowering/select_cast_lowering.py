@@ -14,7 +14,7 @@
 - patterns = select_cast_patterns()
 
 关联文件:
-- spec: spec/pass/lowering/nn_lowering.md
+- spec: spec/pass/lowering/nn_lowering/spec.md
 - test: test/pass/nn_lowering/select.py
 - test: test/pass/nn_lowering/cast.py
 - test: test/pass/nn_lowering/exp.py
@@ -67,7 +67,7 @@ def _build_alloc_dynamic_shape_from_source(
     - ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(source, result_type)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/select.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
@@ -108,7 +108,7 @@ def _lower_select_op(op: Operation, block: Block) -> None:
     - _lower_select_op(op, block)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/select.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
@@ -156,7 +156,7 @@ def _lower_cast_op(op: Operation, block: Block) -> None:
     - _lower_cast_op(op, block)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/cast.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
@@ -207,7 +207,7 @@ def _lower_exp_op(op: Operation, block: Block) -> None:
     - _lower_exp_op(op, block)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/exp.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
@@ -248,7 +248,7 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
     - value = _ensure_symbol_or_int(op, operand)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/cast.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """

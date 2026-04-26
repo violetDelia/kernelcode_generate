@@ -45,26 +45,8 @@ from xdsl.ir import Attribute, Block, Operation, SSAValue
 from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaViewOp, _is_contiguous
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp, SymbolValueType
+from kernel_gen.passes.common import PassContractError, raise_pass_contract_error
 from kernel_gen.passes.pass_manager import Pass
-
-
-class MemoryPoolError(ValueError):
-    """memory-pool pass 的显式错误。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 统一收敛 memory-pool pass 的失败短语。
-
-    使用示例:
-    - raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free not found")
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
 
 
 @dataclass(frozen=True)
@@ -231,7 +213,7 @@ class MemoryPoolPass(Pass):
         """
 
         if func_name not in self._summaries:
-            raise MemoryPoolError(f"MemoryPoolSummaryNotFound: {func_name}")
+            raise_pass_contract_error("MemoryPoolSummaryNotFound", func_name)
         return self._summaries[func_name]
 
     def all_summaries(self) -> dict[str, MemoryPoolSummary]:
@@ -273,7 +255,7 @@ class MemoryPoolPass(Pass):
         """
 
         if not isinstance(module, ModuleOp):
-            raise MemoryPoolError("MemoryPoolInvalidModule: module must be builtin.module")
+            raise_pass_contract_error("MemoryPoolInvalidModule", "module must be builtin.module")
 
         self._summaries = {}
         for op in module.ops:
@@ -439,7 +421,7 @@ def _layout_family(mem_type: NnMemoryType) -> str:
     """
 
     if not _is_contiguous(mem_type):
-        raise MemoryPoolError(
+        raise PassContractError(
             "MemoryPoolUnsupportedNonLinearAlloc: custom stride is not supported in v1"
         )
     return "contiguous"
@@ -468,9 +450,9 @@ def _dim_expr(dim: Attribute) -> sp.Basic:
         return sp.Integer(dim.data)
     if isinstance(dim, StringAttr):
         if not dim.data or dim.data == "?":
-            raise MemoryPoolError("MemoryPoolUnsupportedShape: anonymous shape is not supported")
+            raise PassContractError("MemoryPoolUnsupportedShape: anonymous shape is not supported")
         return sp.Symbol(dim.data)
-    raise MemoryPoolError(f"MemoryPoolUnsupportedShape: {dim}")
+    raise PassContractError(f"MemoryPoolUnsupportedShape: {dim}")
 
 
 def _shape_product(mem_type: NnMemoryType) -> sp.Basic:
@@ -768,7 +750,7 @@ def _collect_ops_with_loops(
             if isinstance(op, SymbolForOp):
                 blocks = list(op.body.blocks)
                 if len(blocks) != 1:
-                    raise MemoryPoolError(
+                    raise PassContractError(
                         "MemoryPoolUnsupportedRegionEscape: symbol.for must have single block"
                     )
                 loop_start = index
@@ -777,7 +759,7 @@ def _collect_ops_with_loops(
                 loop_bounds[op] = (loop_start, loop_end)
                 continue
             if reject_other_regions:
-                raise MemoryPoolError(
+                raise PassContractError(
                     "MemoryPoolUnsupportedRegionEscape: nested regions are not supported"
                 )
             for region in op.regions:
@@ -813,7 +795,7 @@ def _collect_straight_line_ops(
     """
 
     if len(func_op.body.blocks) != 1:
-        raise MemoryPoolError("MemoryPoolRewriteUnsupported: function must have single block")
+        raise PassContractError("MemoryPoolRewriteUnsupported: function must have single block")
     block = func_op.body.blocks[0]
     ops, loop_bounds, op_loop = _collect_ops_with_loops(
         [block],
@@ -999,15 +981,15 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
         alloc_index += 1
         result_type = op.result.type
         if not isinstance(result_type, NnMemoryType):
-            raise MemoryPoolError("MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory")
+            raise PassContractError("MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory")
         if _has_escaping_use(op, op_loop):
-            raise MemoryPoolError("MemoryPoolEscapingAlloc: alloc escapes current region")
+            raise PassContractError("MemoryPoolEscapingAlloc: alloc escapes current region")
 
         bucket = _bucket_key(result_type)
         size_numel_expr = _shape_product(result_type)
         dtype_size = _element_size(result_type.element_type)
         if dtype_size is None:
-            raise MemoryPoolError(
+            raise PassContractError(
                 f"MemoryPoolUnsupportedDtype: {result_type.element_type} is not supported"
             )
         size_bytes_expr = size_numel_expr * sp.Integer(dtype_size)
@@ -1016,26 +998,26 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
         free_list = free_indices.get(op.result, [])
         free_after = [value for value in free_list if value >= alloc_idx]
         if not free_after:
-            raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
+            raise PassContractError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
         if len(free_after) > 1:
-            raise MemoryPoolError("MemoryPoolInvalidLifetime: multiple dma.free for alloc")
+            raise PassContractError("MemoryPoolInvalidLifetime: multiple dma.free for alloc")
         free_index = free_after[0]
         if free_index < alloc_idx:
-            raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free before alloc")
+            raise PassContractError("MemoryPoolInvalidLifetime: dma.free before alloc")
         free_op = ops[free_index]
         if not isinstance(free_op, DmaFreeOp):
-            raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free op mismatch")
+            raise PassContractError("MemoryPoolInvalidLifetime: dma.free op mismatch")
 
         alloc_loop = op_loop.get(op)
         free_loop = op_loop.get(free_op)
         if alloc_loop is None:
             if free_loop is not None:
-                raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free inside symbol.for")
+                raise PassContractError("MemoryPoolInvalidLifetime: dma.free inside symbol.for")
             begin_index = alloc_idx
             end_index = free_index
         else:
             if free_loop is not alloc_loop:
-                raise MemoryPoolError("MemoryPoolInvalidLifetime: loop alloc/free mismatch")
+                raise PassContractError("MemoryPoolInvalidLifetime: loop alloc/free mismatch")
             begin_index, end_index = loop_bounds[alloc_loop]
 
         intervals.append(
@@ -1124,39 +1106,39 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
             continue
         result_type = op.result.type
         if not isinstance(result_type, NnMemoryType):
-            raise MemoryPoolError("MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory")
+            raise PassContractError("MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory")
         if _has_escaping_use(op, op_loop):
-            raise MemoryPoolError("MemoryPoolEscapingAlloc: alloc escapes current region")
+            raise PassContractError("MemoryPoolEscapingAlloc: alloc escapes current region")
 
         alloc_idx = op_index[op]
         free_list = free_indices.get(op.result, [])
         free_after = [value for value in free_list if value >= alloc_idx]
         if not free_after:
-            raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
+            raise PassContractError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
         if len(free_after) > 1:
-            raise MemoryPoolError("MemoryPoolInvalidLifetime: multiple dma.free for alloc")
+            raise PassContractError("MemoryPoolInvalidLifetime: multiple dma.free for alloc")
         free_index = free_after[0]
         if free_index < alloc_idx:
-            raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free before alloc")
+            raise PassContractError("MemoryPoolInvalidLifetime: dma.free before alloc")
         free_op = ops[free_index]
         if not isinstance(free_op, DmaFreeOp):
-            raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free op mismatch")
+            raise PassContractError("MemoryPoolInvalidLifetime: dma.free op mismatch")
 
         alloc_loop = op_loop.get(op)
         free_loop = op_loop.get(free_op)
         if alloc_loop is None:
             if free_loop is not None:
-                raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free inside symbol.for")
+                raise PassContractError("MemoryPoolInvalidLifetime: dma.free inside symbol.for")
             begin_index = alloc_idx
             end_index = free_index
         else:
             if free_loop is not alloc_loop:
-                raise MemoryPoolError("MemoryPoolInvalidLifetime: loop alloc/free mismatch")
+                raise PassContractError("MemoryPoolInvalidLifetime: loop alloc/free mismatch")
             begin_index, end_index = loop_bounds[alloc_loop]
 
         dtype_size = _element_size(result_type.element_type)
         if dtype_size is None:
-            raise MemoryPoolError(
+            raise PassContractError(
                 f"MemoryPoolUnsupportedDtype: {result_type.element_type} is not supported"
             )
         size_bytes_expr = _shape_product(result_type) * sp.Integer(dtype_size)
@@ -1179,9 +1161,11 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
     ref_size = alloc_infos[0].size_bytes_expr
     for info in alloc_infos:
         if info.bucket_key != ref_bucket:
-            raise MemoryPoolError("MemoryPoolUnsupportedPoolBucket: mixed space is not supported")
+            raise PassContractError(
+                "MemoryPoolUnsupportedPoolBucket: mixed space is not supported"
+            )
         if info.size_bytes_expr != ref_size:
-            raise MemoryPoolError("MemoryPoolUnsupportedPoolBucket: size mismatch")
+            raise PassContractError("MemoryPoolUnsupportedPoolBucket: size mismatch")
 
     slot_map, max_slots = _assign_slots(
         [(info.begin_index, info.end_index, info) for info in alloc_infos]
@@ -1225,7 +1209,7 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
             offset_value = _maybe_int(info.size_bytes_expr * sp.Integer(slot))
             if size_value is not None and offset_value is not None:
                 if offset_value + size_value > pool_size_value:
-                    raise MemoryPoolError(
+                    raise PassContractError(
                         "MemoryPoolTypedViewOutOfBounds: typed view exceeds pool"
                     )
 
@@ -1239,14 +1223,14 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
 
         alloc_block = _parent_block(info.alloc_op)
         if alloc_block is None:
-            raise MemoryPoolError("MemoryPoolInvalidLifetime: alloc parent block not found")
+            raise PassContractError("MemoryPoolInvalidLifetime: alloc parent block not found")
         alloc_block.insert_ops_before([*offset_ops, *stride_ops, view_op], info.alloc_op)
         info.alloc_op.result.replace_by(view_op.result)
         alloc_block.erase_op(info.alloc_op)
 
         free_block = _parent_block(info.free_op)
         if free_block is None:
-            raise MemoryPoolError("MemoryPoolInvalidLifetime: free parent block not found")
+            raise PassContractError("MemoryPoolInvalidLifetime: free parent block not found")
         free_block.erase_op(info.free_op)
 
     pool_free = DmaFreeOp(pool_alloc.result)
@@ -1258,7 +1242,6 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
 
 
 __all__ = [
-    "MemoryPoolError",
     "MemoryPoolInterval",
     "MemoryPoolPass",
     "MemoryPoolSummary",

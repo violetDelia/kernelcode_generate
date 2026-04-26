@@ -4,6 +4,23 @@
 
 用于定义 `dma dialect` 的稳定方言语义，描述 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast` 以及作为 lowering 目标面的 `dma.broadcast`、`dma.transpose`，用于表示内存对象之间的数据搬运、标量物化与布局转换，包括整块搬运、切片读取、切片回写、跨空间迁移、标量写入临时 memory、显式广播物化、显式转置物化、视图变换与显式数据转换，并支持动态 shape 的表达。该方言不单独定义 memory type / memory space，而是统一复用 `nn dialect` 中的 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 
+## API 列表
+
+- `方言公开构件`
+- `dma.alloc`
+- `dma.fill`
+- `dma.free`
+- `dma.reshape`
+- `dma.view`
+- `dma.copy`
+- `dma.broadcast`
+- `dma.transpose`
+- `dma.load`
+- `dma.store`
+- `dma.slice`
+- `dma.deslice`
+- `dma.cast`
+
 ## 文档信息
 
 - 创建者：`榕`

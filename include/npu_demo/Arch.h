@@ -35,6 +35,8 @@
 
 namespace npu_demo {
 
+class KernelContext;
+
 namespace detail {
 
 static constexpr long long kBlockCapability = 1;
@@ -46,6 +48,86 @@ static constexpr long long kTsmMemorySize = 24576;
 static constexpr long long kTlm1MemorySize = 1024;
 static constexpr long long kTlm2MemorySize = 512;
 static constexpr long long kTlm3MemorySize = 512;
+
+/*
+功能说明:
+- 为当前线程绑定一次 launch 生命周期内可见的活动 KernelContext 指针。
+
+使用示例:
+- npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&ctx);
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/test_kernel_context.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+inline thread_local const KernelContext* active_kernel_context = nullptr;
+
+/*
+功能说明:
+- 在单次作用域内安装并恢复当前线程可见的活动 KernelContext。
+
+使用示例:
+- npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&ctx);
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/test_kernel_context.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+class ScopedActiveKernelContext {
+public:
+    /*
+    功能说明:
+    - 安装新的活动 KernelContext，并保存进入作用域前的旧指针。
+
+    使用示例:
+    - npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&ctx);
+
+    创建者: OpenAI Codex
+    最后修改人: OpenAI Codex
+
+    关联文件:
+    - spec: spec/include/npu_demo/npu_demo.md
+    - test: test/include/npu_demo/test_kernel_context.py
+    - 功能实现: include/npu_demo/Arch.h
+    */
+    explicit ScopedActiveKernelContext(const KernelContext* ctx)
+        : previous_(active_kernel_context) {
+        active_kernel_context = ctx;
+    }
+
+    /*
+    功能说明:
+    - 退出作用域时恢复进入前的活动 KernelContext。
+
+    使用示例:
+    - { npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&ctx); }
+
+    创建者: OpenAI Codex
+    最后修改人: OpenAI Codex
+
+    关联文件:
+    - spec: spec/include/npu_demo/npu_demo.md
+    - test: test/include/npu_demo/test_kernel_context.py
+    - 功能实现: include/npu_demo/Arch.h
+    */
+    ~ScopedActiveKernelContext() {
+        active_kernel_context = previous_;
+    }
+
+    ScopedActiveKernelContext(const ScopedActiveKernelContext&) = delete;
+    ScopedActiveKernelContext& operator=(const ScopedActiveKernelContext&) = delete;
+
+private:
+    const KernelContext* previous_;
+};
 
 /*
 功能说明:
@@ -463,7 +545,186 @@ private:
     std::shared_ptr<detail::LaunchBarrierState> barrier_state_;
 };
 
+/*
+功能说明:
+- 返回当前线程可见的活动 KernelContext；若当前不在 launch 内，则回退到默认上下文。
+
+使用示例:
+- const npu_demo::KernelContext& ctx = npu_demo::current_kernel_context();
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/test_kernel_context.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+inline const KernelContext& current_kernel_context() {
+    static const KernelContext default_ctx;
+    return detail::active_kernel_context != nullptr ? *detail::active_kernel_context : default_ctx;
+}
+
+/*
+功能说明:
+- 返回当前 launch 运行时视图中的线程索引，供生成代码以 free helper 形式直接调用。
+
+使用示例:
+- S_INT tid = npu_demo::thread_id();
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/test_kernel_context.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+inline S_INT thread_id() {
+    return static_cast<S_INT>(current_kernel_context().thread_id());
+}
+
+/*
+功能说明:
+- 返回当前 launch 运行时视图中的线程总数，供生成代码以 free helper 形式直接调用。
+
+使用示例:
+- S_INT tnum = npu_demo::thread_num();
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/test_kernel_context.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+inline S_INT thread_num() {
+    return static_cast<S_INT>(current_kernel_context().thread_num());
+}
+
+/*
+功能说明:
+- 返回指定片上空间的动态内存视图，供生成代码以 free helper 形式直接调用。
+- 返回值是可隐式转换到 `Memory<Space, T>` 的代理对象，元素类型由赋值目标决定。
+
+使用示例:
+- Memory<TSM, float> tsm = npu_demo::get_dynamic_memory<TSM>();
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/test_kernel_context.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+template <MemorySpace Space>
+inline ::DynamicMemoryRef<Space> get_dynamic_memory() {
+    return ::DynamicMemoryRef<Space>(&current_kernel_context());
+}
+
 }  // namespace npu_demo
+
+/*
+功能说明:
+- 使用后端活动上下文句柄构造 `get_dynamic_memory<Space>()` 返回的公开代理对象。
+
+使用示例:
+- Memory<TSM, float> tsm = get_dynamic_memory<TSM>();
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/api/Arch.md
+- test: test/include/api/test_arch.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+template <MemorySpace Space>
+inline DynamicMemoryRef<Space>::DynamicMemoryRef(const void* context)
+    : context_(context) {}
+
+/*
+功能说明:
+- 按赋值目标元素类型把动态内存代理转换成具体 `Memory<Space, T>` 视图。
+
+使用示例:
+- Memory<TSM, float> tsm = get_dynamic_memory<TSM>();
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/api/Arch.md
+- test: test/include/api/test_arch.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+template <MemorySpace Space>
+template <typename T>
+inline DynamicMemoryRef<Space>::operator Memory<Space, T>() const {
+    const auto* ctx = static_cast<const npu_demo::KernelContext*>(context_);
+    return ctx->template get_dynamic_memory<Space, T>();
+}
+
+/*
+功能说明:
+- 返回当前 launch 运行时视图中的线程索引，作为公开全局 free helper 供生成代码直接调用。
+
+使用示例:
+- S_INT tid = thread_id();
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/api/Arch.md
+- test: test/include/api/test_arch.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+inline S_INT thread_id() {
+    return npu_demo::thread_id();
+}
+
+/*
+功能说明:
+- 返回当前 launch 运行时视图中的线程总数，作为公开全局 free helper 供生成代码直接调用。
+
+使用示例:
+- S_INT tnum = thread_num();
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/api/Arch.md
+- test: test/include/api/test_arch.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+inline S_INT thread_num() {
+    return npu_demo::thread_num();
+}
+
+/*
+功能说明:
+- 返回指定片上空间的动态内存视图，作为公开全局 free helper 供生成代码直接调用。
+- 返回值是可隐式转换到 `Memory<Space, T>` 的代理对象，元素类型由赋值目标决定。
+
+使用示例:
+- Memory<TSM, float> tsm = get_dynamic_memory<TSM>();
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/api/Arch.md
+- test: test/include/api/test_arch.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+template <MemorySpace Space>
+inline DynamicMemoryRef<Space> get_dynamic_memory() {
+    return npu_demo::get_dynamic_memory<Space>();
+}
 
 /*
 功能说明:
@@ -516,6 +777,7 @@ inline Status launch(Callable&& callee, Args&&... args) {
                 0,
                 subthread,
                 barrier_state);
+            npu_demo::detail::ScopedActiveKernelContext scoped_active_ctx(&ctx);
             std::apply(
                 [&](auto&... unpacked_args) {
                     callable(ctx, unpacked_args...);

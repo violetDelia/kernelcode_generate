@@ -14,6 +14,15 @@
   - `stream` / 异步调度。
   - 函数输出回收（output capture），仅保留显式扩展位与失败短语。
 
+## API 列表
+
+- `class ExecutionEngine(target: str, compiler: str | None = None, compiler_flags: tuple[str, ...] = ("-std=c++17",), link_flags: tuple[str, ...] = ())`
+- `ExecutionEngine.compile(source: str | None = None, function: str | None = None, *, request: CompileRequest | None = None, entry_point: str = "kg_execute_entry") -> CompiledKernel`
+- `class CompiledKernel(target: str, soname_path: str, function: str, entry_point: str, compile_stdout: str = "", compile_stderr: str = "")`
+- `CompiledKernel.execute(args: tuple[RuntimeArg, ...] | None = None, *, request: ExecuteRequest | None = None, entry_point: str | None = None, capture_function_output: bool = False, stream: object | None = None) -> ExecuteResult`
+- `CompiledKernel.close() -> None`
+- `class ExecuteResult(ok: bool, status_code: int, failure_phrase: str | None, compile_stdout: str = "", compile_stderr: str = "", run_stdout: str = "", run_stderr: str = "", elapsed_ms: float = 0.0)`
+
 ## 文档信息
 
 - 创建者：睡觉小分队
@@ -25,7 +34,7 @@
 ## 依赖
 
 - `emit_c`：负责生成可编译的 C++ 源码片段（本执行引擎不改变 `emit_c` 语义）。
-  - 关联 spec：[`spec/dsl/emit_c.md`](spec/dsl/emit_c.md)
+  - 关联 spec：[`spec/dsl/gen_kernel/emit.md`](spec/dsl/gen_kernel/emit.md)
 - `target` 相关 include 目录（由 target 映射决定）：
   - `npu_demo`：`include/npu_demo/*`
   - `cpu`：`include/cpu/*`
@@ -54,7 +63,7 @@
 
 ## 公开接口
 
-### `ExecutionEngine`
+### `class ExecutionEngine(target: str, compiler: str | None = None, compiler_flags: tuple[str, ...] = ("-std=c++17",), link_flags: tuple[str, ...] = ())`
 
 - 功能说明：按 `compile -> execute` 生命周期编译并执行由 `emit_c` 生成的 C++ 源码。
 - 参数说明：
@@ -80,7 +89,7 @@ assert result.ok is True
 - 返回与限制：
   - `compile(...) -> CompiledKernel`；失败时必须返回 `ExecuteResult(ok=False, failure_phrase=...)` 或抛出等价的失败（具体承载形式见后续接口文档）。
 
-### `ExecutionEngine.compile(...)`
+### `ExecutionEngine.compile(source: str | None = None, function: str | None = None, *, request: CompileRequest | None = None, entry_point: str = "kg_execute_entry") -> CompiledKernel`
 
 - 功能说明：编译 `source`，并返回可执行的 `CompiledKernel`。
 - 参数说明（P0 总览级冻结）：
@@ -91,11 +100,11 @@ assert result.ok is True
   - 编译失败必须失败，`failure_phrase == "compile_failed"`。
   - 若编译过程使用了内部临时工作区，则在失败返回前必须先释放该工作区，避免临时文件残留。
 
-### `CompiledKernel.execute(...)`
+### `CompiledKernel.execute(args: tuple[RuntimeArg, ...] | None = None, *, request: ExecuteRequest | None = None, entry_point: str | None = None, capture_function_output: bool = False, stream: object | None = None) -> ExecuteResult`
 
 - 功能说明：以有序参数序列运行 `entry_point`，并返回 `ExecuteResult`。
 - 参数说明（P0 总览级冻结）：
-  - `args(tuple[ArgSpec, ...])`: 有序参数序列；必须与目标函数形参顺序一致。
+  - `args(tuple[RuntimeArg, ...])`: 有序参数序列；必须与目标函数形参顺序一致。
   - `entry_point(str | None)`: 可选；为 `None` 时使用 `CompiledKernel.entry_point`。
   - `stream(object | None)`: `P0` 不支持，非空必失败（`stream_not_supported`）。
   - `capture_function_output(bool)`: `P0` 不支持，为 `True` 必失败（`function_output_capture_not_supported`）。
@@ -103,7 +112,7 @@ assert result.ok is True
   - 运行时抛出/abort 必须失败，`failure_phrase == "runtime_throw_or_abort"`。
   - `entry_point` 无法解析时必须失败，`failure_phrase == "symbol_resolve_failed"`。
 
-### `CompiledKernel.close()`
+### `CompiledKernel.close() -> None`
 
 - 功能说明：显式释放编译阶段创建的内部临时工作区。
 - 使用示例：
@@ -121,7 +130,7 @@ finally:
   - `close()` 必须是幂等的，重复调用不得再释放同一临时工作区。
   - 若编译阶段未使用内部临时工作区，`close()` 必须保持空操作语义。
 
-### `ExecuteResult`
+### `class ExecuteResult(ok: bool, status_code: int, failure_phrase: str | None, compile_stdout: str = "", compile_stderr: str = "", run_stdout: str = "", run_stderr: str = "", elapsed_ms: float = 0.0)`
 
 - 功能说明：承载 `compile/execute` 的可机械比较结果。
 - 字段说明（P0 总览级冻结）：
@@ -166,7 +175,7 @@ assert result.ok and result.failure_phrase is None
 验收映射：
 
 - 合同资产：[`test/execute_engine/test_execute_engine_compile.py`](test/execute_engine/test_execute_engine_compile.py)、[`test/execute_engine/test_execute_engine_invoke.py`](test/execute_engine/test_execute_engine_invoke.py)
-- 关联 spec：[`spec/dsl/emit_c.md`](spec/dsl/emit_c.md)、[`spec/dsl/gen_kernel.md`](spec/dsl/gen_kernel.md)
+- 关联 spec：[`spec/dsl/gen_kernel/emit.md`](spec/dsl/gen_kernel/emit.md)、[`spec/dsl/gen_kernel/gen_kernel.md`](spec/dsl/gen_kernel/gen_kernel.md)
 - 关联测试：[`test/execute_engine/test_execute_engine_compile.py`](test/execute_engine/test_execute_engine_compile.py)、[`test/execute_engine/test_execute_engine_invoke.py`](test/execute_engine/test_execute_engine_invoke.py)
 
 ## 测试

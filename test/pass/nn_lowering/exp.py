@@ -10,7 +10,7 @@
 - pytest -q test/pass/nn_lowering/exp.py
 
 关联文件:
-- spec: spec/pass/lowering/nn_lowering.md
+- spec: spec/pass/lowering/nn_lowering/spec.md
 - test: test/pass/nn_lowering/exp.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 """
@@ -174,7 +174,7 @@ def _build_module(input_type: NnMemoryType, result_type: NnMemoryType) -> Module
 # 测试目的: 验证 nn.exp lowering 目标为 kernel.exp（静态形态）。
 # 使用示例: pytest -q test/pass/nn_lowering/exp.py -k test_nn_lowering_exp_static
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/exp.py
 def test_nn_lowering_exp_static() -> None:
     _assert_ircheck_ok(CASE_TEXT_STATIC, "test/pass/nn_lowering/exp.py:static")
@@ -188,7 +188,7 @@ def test_nn_lowering_exp_static() -> None:
 # 测试目的: 验证 nn.exp lowering 目标为 kernel.exp（符号维度）。
 # 使用示例: pytest -q test/pass/nn_lowering/exp.py -k test_nn_lowering_exp_dynamic
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/exp.py
 def test_nn_lowering_exp_dynamic() -> None:
     _assert_ircheck_ok(CASE_TEXT_DYNAMIC, "test/pass/nn_lowering/exp.py:dynamic")
@@ -202,7 +202,7 @@ def test_nn_lowering_exp_dynamic() -> None:
 # 测试目的: 验证 nn.exp 输出形态不一致时必须抛 NnLoweringError。
 # 使用示例: pytest -q test/pass/nn_lowering/exp.py -k test_nn_lowering_exp_shape_mismatch
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/exp.py
 def test_nn_lowering_exp_shape_mismatch() -> None:
     input_type = _make_memory_type([4, 8])

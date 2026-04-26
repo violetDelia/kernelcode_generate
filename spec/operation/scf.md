@@ -7,6 +7,10 @@
 - 允许 `SymbolDim` 参与范围描述，保持符号表达语义。
 - 当前只覆盖最小 loop helper；未来若要扩展 `if / while / yield / region builder`，必须另开计划，不在本文件顺手扩展。
 
+## API 列表
+
+- `loop(start, end, step, trip_count=1)`
+
 ## 文档信息
 
 - 创建者：`摸鱼小分队`

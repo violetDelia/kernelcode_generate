@@ -6,6 +6,16 @@
 - 该 pass 从已有 `arch.launch -> device func` 关系生成 sibling cost host function，用 `tuner.cost` 表示 device body 内受支持 op 的局部成本，并把全部局部 `!symbol.int` 成本通过 `symbol.add` 累计后返回单个 `!symbol.int` 总值。
 - 当前公开方向为 open-kind：`cost_kind` 接受任意非空 kind 名和任意数量；旧两值 / 四值示例只作为兼容样例保留，不再代表当前输入域上界。
 
+## API 列表
+
+- `class LaunchKernelCostFuncPass(cost_kind: str = "compute")`
+  - `name: str`
+  - `cost_kind: str`
+  - `__init__(cost_kind: str = "compute") -> None`
+  - `from_options(options: dict[str, str]) -> LaunchKernelCostFuncPass`
+  - `apply(ctx: Context, op: ModuleOp) -> None`
+  - `run(module: object) -> ModuleOp`
+
 ## 文档信息
 
 - 创建者：`睡觉小分队`
@@ -54,28 +64,11 @@
 - 当前仓库已 tracked [`expectation/pass/tuning/launch_kernel_cost_func`](../../../expectation/pass/tuning/launch_kernel_cost_func) 与 [`expectation/pass/tuning/launch_kernel_cost_func_compute_memory`](../../../expectation/pass/tuning/launch_kernel_cost_func_compute_memory) 两个目录入口；前者只承接后者的 `compute / memory` runner，不引回历史 `multi_kind.py` / `invalid_kind.py` 子资产。
 - 若仓库后续需要重新引入历史四 kind companion 资产，或扩展当前目录入口覆盖范围，必须拆到单独的合同资产处理；当前公开合同仍以 open-kind 产品 spec/pytest/实现 与 tracked `compute / memory` expectation 入口分层定义。
 - 若输入 module 已存在目标命名规则对应的 cost function，必须显式失败，不得覆盖或复用。
+- 当前文件不公开 helper 函数、helper 类或可跨文件复用的 rewrite 入口；device 收集、`symbol.for` 递归改写、`tuner.cost` 节点构造都只属于 `LaunchKernelCostFuncPass.run(...)` 的内部实现边界。
 
 ## 公开接口
 
-### `class LaunchKernelCostFuncError(ValueError)`
-
-功能说明：
-
-- 表示 `launch-kernel-cost-func` pass 的稳定错误类型。
-
-使用示例：
-
-```python
-raise LaunchKernelCostFuncError(
-    "LaunchKernelCostFuncError: cost_kind must be a non-empty '|' separated list of unique kind names"
-)
-```
-
-注意事项：
-
-- 非法 `cost_kind`、callee 缺失、预存重名 cost function、原 op metadata attr 冲突、非支持 op 等显式失败路径都应统一抛出该错误或 `ValueError` 子类，并保持错误消息可机械匹配。
-
-### `class LaunchKernelCostFuncPass(Pass)`
+### `class LaunchKernelCostFuncPass(cost_kind: str = "compute")`
 
 功能说明：
 
@@ -103,8 +96,18 @@ pass_obj = build_registered_pass(
 module = pass_obj.run(module)
 ```
 
+公开属性与方法：
+
+- `name: str`
+- `cost_kind: str`
+- `__init__(cost_kind: str = "compute") -> None`
+- `from_options(options: dict[str, str]) -> LaunchKernelCostFuncPass`
+- `apply(ctx: Context, op: ModuleOp) -> None`
+- `run(module: object) -> ModuleOp`
+
 注意事项：
 
+- 显式失败统一抛出 `PassContractError`，并保持稳定错误前缀 `LaunchKernelCostFuncError:`。
 - `cost_kind` 非法时必须显式失败，稳定错误短语为 `LaunchKernelCostFuncError: cost_kind must be a non-empty '|' separated list of unique kind names`。
 - `cost_kind` 的空段、全空白段或重复段必须显式失败。
 - 多个 wrapper 指向同一个 device callee 时，同一 `cost_kind` 下只能生成一份 cost function。

@@ -237,7 +237,7 @@ inline Status slice(
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/dsl/gen_kernel/test_gen_kernel.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
@@ -379,7 +379,7 @@ inline Status deslice(
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/dsl/gen_kernel/test_gen_kernel.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
@@ -411,7 +411,7 @@ inline Status deslice(
 最后修改人: Codex
 
 关联文件:
-- spec: spec/dsl/emit_c.md
+- spec: spec/dsl/gen_kernel/emit.md
 - test: expectation/dsl/emit_c/npu_demo/dma/store.py
 - 功能实现: include/npu_demo/Dma.h
 */

@@ -116,6 +116,8 @@ def test_include_api_cost_core_exports_compute_and_memory() -> None:
     assert "enum class CostKind" in public_header
     assert "Compute" in public_header
     assert "Memory" in public_header
+    assert "inline constexpr cost::CostKind compute" in public_header
+    assert "inline constexpr cost::CostKind memory" in public_header
     assert "Kind2" not in public_header
     assert "Kind3" not in public_header
 
@@ -124,10 +126,10 @@ def test_include_api_cost_core_exports_compute_and_memory() -> None:
 #include "include/npu_demo/cost/Core.h"
 
 int main() {
-    npu_demo::cost::CostKind compute_kind = npu_demo::cost::CostKind::Compute;
-    npu_demo::cost::CostKind memory_kind = npu_demo::cost::CostKind::Memory;
-    S_INT cost = compute_kind == npu_demo::cost::CostKind::Compute ? 0 : 1;
-    if (memory_kind != npu_demo::cost::CostKind::Memory) {
+    npu_demo::cost::CostKind compute_kind = npu_demo::compute;
+    npu_demo::cost::CostKind memory_kind = npu_demo::memory;
+    S_INT cost = compute_kind == npu_demo::compute ? 0 : 1;
+    if (memory_kind != npu_demo::memory) {
         return 1;
     }
     return static_cast<int>(cost);
@@ -168,7 +170,7 @@ int main() {
     Memory<TLM1, float> out_mat(out_data, mat_shape, mat_stride, 2, MemoryFormat::Norm);
 
     S_INT add_cost =
-        npu_demo::cost::add<GM, float, float, npu_demo::cost::CostKind::Compute>(out, lhs, rhs);
+        npu_demo::cost::add<GM, float, float, npu_demo::compute>(out, lhs, rhs);
     S_INT matmul_cost = npu_demo::cost::matmul<
         TSM,
         TSM,
@@ -176,7 +178,7 @@ int main() {
         float,
         float,
         float,
-        npu_demo::cost::CostKind::Memory>(out_mat, lhs_mat, rhs_mat);
+        npu_demo::memory>(out_mat, lhs_mat, rhs_mat);
     if (add_cost != 0 || matmul_cost != 0) {
         return fail(1);
     }
@@ -217,11 +219,11 @@ int main() {
     Memory<TSM, float> target(target_data, shape, stride, 1, MemoryFormat::Norm);
 
     S_INT copy_cost =
-        npu_demo::cost::copy<TSM, GM, float, npu_demo::cost::CostKind::Memory>(target, source);
+        npu_demo::cost::copy<TSM, GM, float, npu_demo::memory>(target, source);
     S_INT slice_cost =
-        npu_demo::cost::slice<TSM, GM, float, npu_demo::cost::CostKind::Memory>(target, source, offset, size, step);
+        npu_demo::cost::slice<TSM, GM, float, npu_demo::memory>(target, source, offset, size, step);
     S_INT deslice_cost =
-        npu_demo::cost::deslice<TSM, GM, float, npu_demo::cost::CostKind::Compute>(target, source, offset, size, step);
+        npu_demo::cost::deslice<TSM, GM, float, npu_demo::compute>(target, source, offset, size, step);
     if (copy_cost != 0 || slice_cost != 0 || deslice_cost != 0) {
         return fail(1);
     }

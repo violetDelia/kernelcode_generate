@@ -8,6 +8,26 @@
 - 全部 helper 固定返回 `S_INT`，参数顺序继续采用 `out-first`。
 - 当前公开源码口径统一为 `npu_demo::cost::<helper><...>(out, ...)`。
 
+## API 列表
+
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::add(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::sub(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::mul(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::truediv(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::eq(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::ne(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::lt(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::le(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::gt(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::ge(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::exp(const Memory<Space, OutType>& out, const Memory<Space, InType>& input)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::select(const Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::reduce_sum(const Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::reduce_min(const Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- `template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType, CostKind Kind> S_INT npu_demo::cost::matmul(const Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs)`
+- `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::img2col1d(const Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right)`
+- `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::img2col2d(const Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`
+
 ## 文档信息
 
 - 创建者：`睡觉小分队`
@@ -17,16 +37,16 @@
 - `功能实现`：[`include/npu_demo/cost/Kernel.h`](../../../../include/npu_demo/cost/Kernel.h)
 - `test`：
   - `test/include/api/test_cost.py`
-  - [`test/dsl/test_emit_c.py`](../../../../test/dsl/test_emit_c.py)
-  - [`test/dsl/test_gen_kernel.py`](../../../../test/dsl/test_gen_kernel.py)
+  - [`test/dsl/gen_kernel/emit/test_emit.py`](../../../../test/dsl/gen_kernel/emit/test_emit.py)
+  - [`test/dsl/gen_kernel/test_gen_kernel.py`](../../../../test/dsl/gen_kernel/test_gen_kernel.py)
 
 ## 依赖
 
 - [`spec/include/api/cost/Core.md`](./Core.md)：提供 `CostKind` 与 `S_INT` 基础合同。
 - [`spec/include/api/Kernel.md`](../../../../spec/include/api/Kernel.md)：提供对应计算 helper 的公开名字、模板顺序与参数顺序来源。
 - [`spec/include/api/Memory.md`](../../../../spec/include/api/Memory.md)：提供 `Memory<Space, T>` 与 `MemorySpace` 语义。
-- [`spec/dsl/emit_c.md`](../../../../spec/dsl/emit_c.md)：消费 `tuner.cost(op_name="kernel.*") -> npu_demo::cost::<helper>` 的节点级文本合同。
-- [`spec/dsl/gen_kernel.md`](../../../../spec/dsl/gen_kernel.md)：消费完整 cost function 的函数级源码合同。
+- [`spec/dsl/gen_kernel/emit.md`](../../../../spec/dsl/gen_kernel/emit.md)：消费 `tuner.cost(op_name="kernel.*") -> npu_demo::cost::<helper>` 的节点级文本合同。
+- [`spec/dsl/gen_kernel/gen_kernel.md`](../../../../spec/dsl/gen_kernel/gen_kernel.md)：消费完整 cost function 的函数级源码合同。
 
 ## 目标
 
@@ -67,8 +87,8 @@
 #include "include/npu_demo/npu_demo.h"
 
 using namespace npu_demo;
-S_INT cost0 = cost::add<GM, float, float, cost::CostKind::Compute>(out, lhs, rhs);
-S_INT cost1 = cost::truediv<TSM, float, float, cost::CostKind::Memory>(out, lhs, rhs);
+S_INT cost0 = cost::add<GM, float, float, compute>(out, lhs, rhs);
+S_INT cost1 = cost::truediv<TSM, float, float, memory>(out, lhs, rhs);
 ```
 
 注意事项：
@@ -102,7 +122,7 @@ S_INT cost1 = cost::truediv<TSM, float, float, cost::CostKind::Memory>(out, lhs,
 
 ```cpp
 using namespace npu_demo;
-S_INT cost0 = cost::eq<GM, float, bool, cost::CostKind::Compute>(out, lhs, rhs);
+S_INT cost0 = cost::eq<GM, float, bool, compute>(out, lhs, rhs);
 ```
 
 注意事项：
@@ -131,8 +151,8 @@ S_INT cost0 = cost::eq<GM, float, bool, cost::CostKind::Compute>(out, lhs, rhs);
 
 ```cpp
 using namespace npu_demo;
-S_INT exp_cost = cost::exp<TSM, float, float, cost::CostKind::Compute>(out, input);
-S_INT reduce_cost = cost::reduce_sum<GM, float, float, cost::CostKind::Memory>(out, input, 1);
+S_INT exp_cost = cost::exp<TSM, float, float, compute>(out, input);
+S_INT reduce_cost = cost::reduce_sum<GM, float, float, memory>(out, input, 1);
 ```
 
 注意事项：
@@ -160,7 +180,7 @@ S_INT reduce_cost = cost::reduce_sum<GM, float, float, cost::CostKind::Memory>(o
 
 ```cpp
 using namespace npu_demo;
-S_INT cost0 = cost::matmul<TSM, TSM, TLM1, float, float, float, cost::CostKind::Compute>(out, lhs, rhs);
+S_INT cost0 = cost::matmul<TSM, TSM, TLM1, float, float, float, compute>(out, lhs, rhs);
 ```
 
 注意事项：
@@ -179,12 +199,12 @@ S_INT cost0 = cost::matmul<TSM, TSM, TLM1, float, float, float, cost::CostKind::
 - 执行命令：`pytest -q test/include/api/test_cost.py`
 - 测试目标：通过当前聚合入口 `test_include_api_cost_kernel_signatures_compile` 一次性验证 `Kernel cost` helper 的声明、模板顺序与 `S_INT` 返回合同。
 
-- 测试文件：[`test/dsl/test_emit_c.py`](../../../../test/dsl/test_emit_c.py)
-- 执行命令：`pytest -q test/dsl/test_emit_c.py -k "tuner_cost or npu_demo"`
+- 测试文件：[`test/dsl/gen_kernel/emit/test_emit.py`](../../../../test/dsl/gen_kernel/emit/test_emit.py)
+- 执行命令：`pytest -q test/dsl/gen_kernel/emit/test_emit.py -k "tuner_cost or npu_demo"`
 - 测试目标：验证 `tuner.cost(op_name="kernel.add" | "kernel.matmul")` 的节点级文本发射。
 
-- 测试文件：[`test/dsl/test_gen_kernel.py`](../../../../test/dsl/test_gen_kernel.py)
-- 执行命令：`pytest -q test/dsl/test_gen_kernel.py -k "tuner_cost or cost_function or npu_demo"`
+- 测试文件：[`test/dsl/gen_kernel/test_gen_kernel.py`](../../../../test/dsl/gen_kernel/test_gen_kernel.py)
+- 执行命令：`pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k "tuner_cost or cost_function or npu_demo"`
 - 测试目标：验证完整 cost function 生成后可消费 `cost::add` 与 `cost::matmul`。
 
 - 合同验收资产：

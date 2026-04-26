@@ -1,0 +1,30 @@
+# T-20260424-3b36f2e2
+
+时间：2026-04-24 21:24 +0800
+经办人：守护最好的爱莉希雅
+任务：T-20260424-3b36f2e2 / pass_infrastructure_refactor 复验修复
+
+## 任务信息
+
+- 计划书：[`ARCHITECTURE/plan/pass_infrastructure_refactor_green_plan.md`](../../../../../ARCHITECTURE/plan/pass_infrastructure_refactor_green_plan.md)
+- worktree：`/home/lfr/kernelcode_generate/wt-20260424-pass-infra-final-repair-s9`
+- 任务类型：`build`
+- 当前基线：`origin/main@40bbd3a8dab5a147a040edc273676feda6bf6b86`
+
+## 最小目标
+
+- 收口计划正文点名的相关 expectation 资产缺失或不可执行问题。
+- 当前直接失败点包括：
+  - `expectation.pass.buffer_results_to_out_params`
+  - `expectation.pass.tile`
+  - `expectation.pass.symbol_loop_hoist`
+  - `expectation.pass.lowing.nn_lowering`
+  - `expectation/pass/pipeline/default_lowering.py`
+- 只处理这组 expectation 资产及其直接关联的实现 / spec / test。
+
+## 执行要求
+
+- 不得改动任何 `[immutable-file]`。
+- 执行记录必须写真实自检。
+- 执行记录必须写 `Diff 反推自测`。
+- `expectation` 只单列为合同验收资产，不替代对应测试。

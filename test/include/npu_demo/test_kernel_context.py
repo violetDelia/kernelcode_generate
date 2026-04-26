@@ -150,11 +150,11 @@ static void kernel_body(
     long long* thread_nums,
     long long* subthread_ids,
     long long* subthread_nums) {
-    const long long tid = ctx.thread_id();
+    const long long tid = thread_id();
     block_ids[tid] = ctx.block_id();
     block_nums[tid] = ctx.block_num();
-    thread_ids[tid] = ctx.thread_id();
-    thread_nums[tid] = ctx.thread_num();
+    thread_ids[tid] = thread_id();
+    thread_nums[tid] = thread_num();
     subthread_ids[tid] = ctx.subthread_id();
     subthread_nums[tid] = ctx.subthread_num();
 }
@@ -356,7 +356,7 @@ int main() {
 # 最后修改人: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-05 10:44:47 +0800
 # 最近一次运行成功时间: 2026-04-05 10:44:47 +0800
-# 测试目的: 验证 get_dynamic_memory<TSM, float>() 返回固定 shape/stride/space 的 Memory 视图。
+# 测试目的: 验证 get_dynamic_memory<TSM>() 返回固定 shape/stride/space 的 Memory 视图。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_returns_typed_tsm_memory
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -368,8 +368,7 @@ def test_npu_demo_kernel_context_returns_typed_tsm_memory() -> None:
 static int fail(int code) { return code; }
 
 int main() {
-    npu_demo::KernelContext ctx;
-    auto mem = ctx.get_dynamic_memory<TSM, float>();
+    Memory<TSM, float> mem = get_dynamic_memory<TSM>();
 
     if (mem.rank() != 1) {
         return fail(1);
@@ -395,7 +394,7 @@ int main() {
 # 最后修改人: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-05 10:44:47 +0800
 # 最近一次运行成功时间: 2026-04-05 10:44:47 +0800
-# 测试目的: 验证 get_dynamic_memory<TLM1/TLM2/TLM3, float>() 返回各自独立的 shape/stride/space Memory 视图。
+# 测试目的: 验证 get_dynamic_memory<TLM1/TLM2/TLM3>() 返回各自独立的 shape/stride/space Memory 视图。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_returns_typed_tlm123_memory
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -407,10 +406,9 @@ def test_npu_demo_kernel_context_returns_typed_tlm123_memory() -> None:
 static int fail(int code) { return code; }
 
 int main() {
-    npu_demo::KernelContext ctx;
-    auto tlm1 = ctx.get_dynamic_memory<TLM1, float>();
-    auto tlm2 = ctx.get_dynamic_memory<TLM2, float>();
-    auto tlm3 = ctx.get_dynamic_memory<TLM3, float>();
+    Memory<TLM1, float> tlm1 = get_dynamic_memory<TLM1>();
+    Memory<TLM2, float> tlm2 = get_dynamic_memory<TLM2>();
+    Memory<TLM3, float> tlm3 = get_dynamic_memory<TLM3>();
 
     if (tlm1.rank() != 1) {
         return fail(1);

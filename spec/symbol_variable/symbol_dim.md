@@ -4,6 +4,20 @@
 
 [immutable]用于定义 `SymbolDim` 的开发者设计规范。`SymbolDim` 是维度表达的统一入口，既支持静态整数维度，也支持基于符号的动态维度。
 
+## API 列表
+
+- `SymbolDim(value)`
+- `get_symbol()`
+- `get_value()`
+- `__repr__()`
+- `__add__() / __radd__()`
+- `__sub__() / __rsub__()`
+- `__mul__() / __rmul__()`
+- `__truediv__() / __rtruediv__()`
+- `__floordiv__() / __rfloordiv__()`
+- `__eq__(other)`
+- `is_dynamic()`
+
 ## 文档信息
 
 - 创建者：`摸鱼小分队`

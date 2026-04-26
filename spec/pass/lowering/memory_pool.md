@@ -6,6 +6,19 @@
 - 提供 `MemoryPoolSummary/MemoryPoolInterval` 稳定接口，用于后续统计与验证。
 - 支持直线路径的 pool 改写：将符合约束的 `dma.alloc/dma.free` 改写为 `i8` byte pool + `dma.view`。
 
+## API 列表
+
+- `class MemoryPoolPass(rewrite: bool = False)`
+  - `name: str`
+  - `__init__(rewrite: bool = False) -> None`
+  - `apply(ctx: Context, op: ModuleOp) -> None`
+  - `run(module: ModuleOp) -> ModuleOp`
+  - `get_summary(func_name: str) -> MemoryPoolSummary`
+  - `all_summaries() -> dict[str, MemoryPoolSummary]`
+- `class MemoryPoolSummary(func_name: str, intervals: tuple[MemoryPoolInterval, ...], peak_bytes_by_bucket: dict[tuple[str], sympy.Basic], pool_count: int)`
+  - `to_text() -> str`
+- `class MemoryPoolInterval(name: str, bucket_key: tuple[str], size_bytes_expr: sympy.Basic, begin_index: int, end_index: int, offset_bytes_expr: sympy.Basic)`
+
 ## 文档信息
 
 - 创建者：`金铲铲大作战`
@@ -34,6 +47,12 @@
 - 保持摘要输出稳定文本格式，便于直接比对。
 - 在直线路径内完成同 bucket、非重叠生命周期的 pool 改写。
 
+## Helper 边界
+
+- 公开 API 仅包含 `MemoryPoolPass`、`MemoryPoolSummary` 与 `MemoryPoolInterval`。
+- alloc/free 配对、shape/stride 转符号表达式、slot 分配、byte-pool 改写等逻辑都属于当前文件内部实现细节。
+- 其它实现文件与测试不得跨文件调用 `kernel_gen.passes.memory_pool` 中未列入 `API 列表` 的 helper。
+
 ## 限制与边界
 
 - 仅处理 `builtin.module` 内的 `func.func`。
@@ -51,7 +70,7 @@
 
 ## 公开接口
 
-### `class MemoryPoolPass(Pass)`
+### `class MemoryPoolPass(rewrite: bool = False)`
 
 功能说明：
 
@@ -82,7 +101,7 @@ summary = pass_obj.get_summary("main")
 - `run(module)` 返回输入 `module`。
 - 不满足公开合同的输入会报错，不会静默跳过。
 
-### `MemoryPoolPass.run(module)`
+### `MemoryPoolPass.run(module: ModuleOp)`
 
 功能说明：
 
@@ -108,7 +127,7 @@ module = pass_obj.run(module)
 
 - 返回 `module` 本体。
 
-### `MemoryPoolPass.get_summary(func_name)`
+### `MemoryPoolPass.get_summary(func_name: str)`
 
 功能说明：
 
@@ -126,13 +145,13 @@ summary = pass_obj.get_summary("main")
 
 注意事项：
 
-- 不存在时抛出 `MemoryPoolError`，错误短语必须为 `MemoryPoolSummaryNotFound`。
+- 不存在时抛出 `PassContractError`，错误前缀必须为 `MemoryPoolSummaryNotFound:`。
 
 返回与限制：
 
 - 返回 `MemoryPoolSummary`。
 
-### `MemoryPoolPass.all_summaries()`
+### `MemoryPoolPass.all_summaries() -> dict[str, MemoryPoolSummary]`
 
 功能说明：
 
@@ -156,7 +175,7 @@ summaries = pass_obj.all_summaries()
 
 - 返回 `dict[str, MemoryPoolSummary]`。
 
-### `class MemoryPoolSummary`
+### `class MemoryPoolSummary(func_name: str, intervals: tuple[MemoryPoolInterval, ...], peak_bytes_by_bucket: dict[tuple[str], sympy.Basic], pool_count: int)`
 
 功能说明：
 
@@ -184,7 +203,7 @@ text = summary.to_text()
 
 - `to_text()` 返回 `str`。
 
-### `class MemoryPoolInterval`
+### `class MemoryPoolInterval(name: str, bucket_key: tuple[str], size_bytes_expr: sympy.Basic, begin_index: int, end_index: int, offset_bytes_expr: sympy.Basic)`
 
 功能说明：
 
@@ -213,37 +232,13 @@ interval = summary.intervals[0]
 
 - 数据结构本身不执行验证。
 
-### `class MemoryPoolError(ValueError)`
-
-功能说明：
-
-- 统一摘要分析阶段的错误类型。
-
-参数说明：
-
-- `message (str)`：错误信息。
-
-使用示例：
-
-```python
-raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
-```
-
-注意事项：
-
-- 错误短语用于定位不满足公开合同的输入。
-
-返回与限制：
-
-- 继承 `ValueError`。
-
 ## 额外补充
 
 ### 失败短语
 
 范围说明：
 
-- 下列短语是 `MemoryPoolError(message)` 的公开前缀集合；实现必须保证错误信息以 `<短语>: ` 开头，其后可追加上下文细节。
+- 下列短语是 `PassContractError(message)` 的公开前缀集合；实现必须保证错误信息以 `<短语>: ` 开头，其后可追加上下文细节。
 - 本清单覆盖 `MemoryPoolPass.run(module)` 的摘要分析与（可选）IR 改写阶段，以及 `MemoryPoolPass.get_summary(func_name)` 的摘要查询阶段。
 - 本清单不覆盖 `dma/nn/symbol` dialect verifier 的报错文本，也不覆盖其它 pass 的错误短语。
 

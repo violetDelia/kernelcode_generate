@@ -11,7 +11,7 @@
 - pytest -q test/operation/test_operation_nn.py
 
 关联文件:
-- 功能实现: kernel_gen/operation/nn.py
+- 功能实现: kernel_gen/operation/nn/__init__.py
 - Spec 文档: spec/operation/nn.md
 - 测试文件: test/operation/test_operation_nn.py
 """
@@ -40,7 +40,7 @@ from kernel_gen.symbol_variable.type import NumericType
 # 最近一次运行成功时间: 2026-04-16 01:06:00 +0800
 # 测试目的: 验证 nn facade 继续暴露测试依赖的私有 helper。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_facade_reexports_private_helpers
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_facade_reexports_private_helpers() -> None:
@@ -58,7 +58,7 @@ def test_nn_facade_reexports_private_helpers() -> None:
 # 最近一次运行成功时间: 2026-04-16 01:06:00 +0800
 # 测试目的: 验证 nn facade 的公开 __all__ 集合在拆分后保持不变。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_facade_public_all_stable
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_facade_public_all_stable() -> None:
@@ -77,7 +77,7 @@ def test_nn_facade_public_all_stable() -> None:
 # 最近一次运行成功时间: 2026-04-16 01:06:00 +0800
 # 测试目的: 验证 nn facade 公开 helper 在拆分后仍可直接调用。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_facade_public_helpers_smoke
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_facade_public_helpers_smoke() -> None:
@@ -88,4 +88,3 @@ def test_nn_facade_public_helpers_smoke() -> None:
     assert matmul(Memory([2, 3], NumericType.Float32), Memory([3, 4], NumericType.Float32)).get_shape() == [2, 4]
     assert reduce_sum(lhs).get_shape() == [1]
     assert operation_api.add is add
-

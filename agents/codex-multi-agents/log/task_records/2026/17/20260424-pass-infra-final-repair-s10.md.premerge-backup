@@ -1,0 +1,38 @@
+# T-20260424-285240b8
+
+时间：2026-04-24 23:06 +0800
+经办人：守护最好的爱莉希雅
+任务：T-20260424-285240b8 / pass_infrastructure_refactor 第二位架构师复验修复
+
+## 任务信息
+
+- 计划书：[`ARCHITECTURE/plan/pass_infrastructure_refactor_green_plan.md`](../../../../../ARCHITECTURE/plan/pass_infrastructure_refactor_green_plan.md)
+- worktree：`/home/lfr/kernelcode_generate/wt-20260424-pass-infra-final-repair-s10`
+- 任务类型：`build`
+- 当前基线：`origin/main@7ac5513cec14ea146d48dbe9b21984c2ad1430e9`
+
+## 最小目标
+
+- 只处理 `kernel_gen.passes.lowering.tile` 在计划正文中的完成态描述与当前真实实现、spec、pytest 的对齐。
+- 当前直接阻断点是：
+  - 计划正文仍把 `kernel_gen.passes.lowering.tile` 写成必须失败或不再作为公开导入入口的旧路径。
+  - 最新主线实际保留 [`kernel_gen/passes/lowering/tile.py`](../../../../../kernel_gen/passes/lowering/tile.py) 作为 compat helper module。
+  - [`test/pass/test_lowering_tile.py`](../../../../../test/pass/test_lowering_tile.py) 已锁定该模块继续存在，但只保留 `TilePassError` 与 `_raise_tile_error`。
+- 只处理这条与其直接关联的实现 / spec / test 收口，不扩大到其他 pass family。
+
+## 执行要求
+
+- 不得改动任何 `[immutable-file]`。
+- 执行记录必须写真实自检。
+- 执行记录必须写 `Diff 反推自测`。
+- `expectation` 只单列为合同验收资产，不替代对应测试。
+
+## 架构口径
+
+- 这轮不是重开 `tile` 迁移，也不是继续推进“旧路径整体退场”。
+- 当前唯一任务是把计划正文、完成态描述、以及必要时与之直接冲突的实现 / spec / test 说明收回到真实主线口径。
+- 若最新主线已把 `kernel_gen.passes.lowering.tile` 固定为 compat helper module，则计划正文不得再把它写成“必须失败”。
+
+## 当前状态
+
+- 任务已创建，等待管理员继续分发。

@@ -4,6 +4,11 @@
 
 [immutable]用于定义基础数据类型枚举 `NumericType` 和张量布局格式枚举 `Farmat`。
 
+## API 列表
+
+- `NumericType`
+- `Farmat`
+
 ## [immutable]文档信息
 
 - 创建者：`摸鱼小分队`

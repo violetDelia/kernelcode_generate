@@ -2,15 +2,16 @@
 # codex-multi-agents-task.sh
 #
 # 创建者: 榕
-# 最后一次更改: 小李飞刀
+# 最后一次更改: Codex
 #
 # 功能:
 # - 管理 TODO.md 任务流转: 分发、完成、暂停、继续、改派、续接、新建、删除、计划归档。
 # - 支持 DONE.md 自动创建与完成记录追加。
-# - 在分发、完成、暂停、继续、改派、续接时同步更新 agents-lists.md 角色状态。
+# - 在分发、完成、暂停、继续、改派、续接时按 TODO 运行表全量重算 agents-lists.md 角色状态。
 # - 在 TODO.md 维护计划书进度表，支持 -status -plan-list 与 -done-plan 收口归档。
 # - 通过 task-core.py 处理表格读写、状态流转、权限与自动续接判定。
 # - 通过 task-notify.sh 处理 list -init、tmux -talk、任务消息、改派通知与管理员摘要。
+# - 对传入的 -agents-list 做 canonical AGENTS_FILE 校验，避免写入错误名单文件。
 # - 写操作统一使用 flock 文件锁。
 #
 # 对应文件:
@@ -584,6 +585,41 @@ resolve_default_agents_file() {
   printf ""
 }
 
+normalize_path_for_compare() {
+  local path="$1"
+  local base_dir="$2"
+
+  python3 - "$path" "$base_dir" <<'PY'
+import os
+import sys
+
+raw_path = sys.argv[1]
+base_dir = sys.argv[2]
+if not raw_path:
+    raise SystemExit(1)
+path = raw_path if os.path.isabs(raw_path) else os.path.join(base_dir, raw_path)
+print(os.path.realpath(path))
+PY
+}
+
+validate_agents_list_file() {
+  local path="$1"
+  [[ -e "$path" ]] || err "$RC_FILE" "file not found: $path"
+  [[ -f "$path" ]] || err "$RC_FILE" "not a regular file: $path"
+  [[ -r "$path" ]] || err "$RC_FILE" "file is not readable: $path"
+
+  local canonical=""
+  canonical="$(resolve_default_agents_file)"
+  [[ -n "$(trim "$canonical")" ]] || err "$RC_ARG" "cannot resolve canonical agents list; set CODEX_MULTI_AGENTS_AGENTS_FILE or AGENTS_FILE"
+
+  local normalized_input=""
+  local normalized_canonical=""
+  normalized_input="$(normalize_path_for_compare "$path" "$PWD")" || err "$RC_ARG" "cannot normalize -agents-list: $path"
+  normalized_canonical="$(normalize_path_for_compare "$canonical" "$REPO_ROOT")" || err "$RC_ARG" "cannot normalize configured AGENTS_FILE: $canonical"
+
+  [[ "$normalized_input" == "$normalized_canonical" ]] || err "$RC_ARG" "-agents-list must match configured AGENTS_FILE: $canonical"
+}
+
 resolve_permission_agents_file() {
   local from_env="${CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE-}"
   if [[ -n "$(trim "$from_env")" ]]; then
@@ -762,6 +798,9 @@ main() {
   parse_args "$@"
   validate_todo_file
   validate_parallel_limit
+  if [[ "$HAS_AGENTS_LIST" -eq 1 ]]; then
+    validate_agents_list_file "$AGENTS_LIST"
+  fi
 
   local op=""
   local done_file=""

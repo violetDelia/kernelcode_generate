@@ -83,9 +83,9 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         order.append("inline")
         return target
 
-    def _record_decompose(self: object, target: object) -> object:
+    def _record_decompose(self: object, ctx: object, target: object) -> None:
+        _ = ctx
         order.append("decompass")
-        return target
 
     def _record_lower(self: object, target: object) -> object:
         order.append("lower-nn")
@@ -99,16 +99,16 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         order.append("attach-arch-information")
         return target
 
-    def _record_outline(self: object, target: object) -> object:
+    def _record_outline(self: object, ctx: object, target: object) -> None:
+        _ = ctx
         order.append("outline-device-kernel")
-        return target
 
     monkeypatch.setattr(InlinePass, "run", _record_inline)
-    monkeypatch.setattr(DecompassPass, "run", _record_decompose)
+    monkeypatch.setattr(DecompassPass, "apply", _record_decompose)
     monkeypatch.setattr(NnLoweringPass, "run", _record_lower)
     monkeypatch.setattr(SymbolLoopHoistPass, "run", _record_hoist)
     monkeypatch.setattr(AttachArchInformationPass, "run", _record_attach)
-    monkeypatch.setattr(OutlineDeviceKernelPass, "run", _record_outline)
+    monkeypatch.setattr(OutlineDeviceKernelPass, "apply", _record_outline)
 
     pm = build_npu_demo_lowering_pipeline({"target": "npu_demo"})
     sentinel = object()

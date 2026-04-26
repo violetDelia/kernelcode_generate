@@ -12,7 +12,7 @@
 - func_ast = parse_function(kernel)
 
 关联文件:
-- spec: spec/dsl/ast.md
+- spec: spec/dsl/ast/__init__.md
 - test: test/dsl/ast/test_parser.py
 - 功能实现: kernel_gen/dsl/ast/__init__.py
 """
@@ -60,7 +60,7 @@ from .nodes import (
     TensorAxisAccessAST,
     VarAST,
 )
-from .parser import AstParseError, _ParseFailure, _parse_function_impl, parse_function
+from .parser import AstParseError, parse_function
 
 __all__ = [
     "ArchBarrierAST",
@@ -103,7 +103,5 @@ __all__ = [
     "TensorAST",
     "TensorAxisAccessAST",
     "VarAST",
-    "_ParseFailure",
-    "_parse_function_impl",
     "parse_function",
 ]

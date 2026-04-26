@@ -19,7 +19,7 @@
 
 关联文件:
 - 功能实现: kernel_gen/dsl/ast/visitor.py
-- Spec 文档: spec/dsl/ast_visitor.md
+- Spec 文档: spec/dsl/ast/visitor.md
 - 测试文件: test/dsl/ast/test_visitor.py
 """
 
@@ -46,7 +46,7 @@ from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
 # 功能说明: 空 BlockAST 可被访问器遍历，返回 None。
 # 使用示例: pytest -q test/dsl/ast/test_visitor.py -k test_ast_visitor_empty_block_returns_none
 # 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
-# 对应 spec 文件路径: spec/dsl/ast_visitor.md
+# 对应 spec 文件路径: spec/dsl/ast/visitor.md
 # 对应测试文件路径: test/dsl/ast/test_visitor.py
 def test_ast_visitor_empty_block_returns_none() -> None:
     visitor = AstVisitor()
@@ -62,7 +62,7 @@ def test_ast_visitor_empty_block_returns_none() -> None:
 # 功能说明: 不支持的 block 节点必须抛出 AstVisitorError。
 # 使用示例: pytest -q test/dsl/ast/test_visitor.py -k test_ast_visitor_rejects_unknown_block
 # 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
-# 对应 spec 文件路径: spec/dsl/ast_visitor.md
+# 对应 spec 文件路径: spec/dsl/ast/visitor.md
 # 对应测试文件路径: test/dsl/ast/test_visitor.py
 def test_ast_visitor_rejects_unknown_block() -> None:
     visitor = AstVisitor()
@@ -90,11 +90,30 @@ class _DummyVisitor(AstVisitor):
 # 功能说明: 已注册节点会被 visitor 正确分发。
 # 使用示例: pytest -q test/dsl/ast/test_visitor.py -k test_ast_visitor_dispatches_registered_node
 # 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
-# 对应 spec 文件路径: spec/dsl/ast_visitor.md
+# 对应 spec 文件路径: spec/dsl/ast/visitor.md
 # 对应测试文件路径: test/dsl/ast/test_visitor.py
 def test_ast_visitor_dispatches_registered_node() -> None:
     visitor = _DummyVisitor()
     assert visitor.visit(_DummyNode(), ctx="ctx") == "dummy:ctx"
+
+
+def test_ast_visitor_register_dispatches_custom_node() -> None:
+    """公共 register(...) API 可为自定义 visitor 注册节点分发。"""
+
+    class LocalNode:
+        def __init__(self) -> None:
+            self.location = SourceLocation(3, 2)
+
+    class LocalVisitor(AstVisitor):
+        _registry: dict[type, str] = {}
+
+        def visit_local(self, node: LocalNode, ctx: object) -> str:
+            del node
+            return f"local:{ctx}"
+
+    LocalVisitor.register(LocalNode, "visit_local")
+
+    assert LocalVisitor().visit(LocalNode(), ctx="ctx") == "local:ctx"
 
 
 # AST-S1-V-004
@@ -105,7 +124,7 @@ def test_ast_visitor_dispatches_registered_node() -> None:
 # 功能说明: 未注册节点必须抛出 AstVisitorError。
 # 使用示例: pytest -q test/dsl/ast/test_visitor.py -k test_ast_visitor_rejects_unregistered_node
 # 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
-# 对应 spec 文件路径: spec/dsl/ast_visitor.md
+# 对应 spec 文件路径: spec/dsl/ast/visitor.md
 # 对应测试文件路径: test/dsl/ast/test_visitor.py
 def test_ast_visitor_rejects_unregistered_node() -> None:
     visitor = AstVisitor()

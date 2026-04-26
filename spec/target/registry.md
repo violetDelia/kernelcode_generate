@@ -6,6 +6,16 @@
 - 支持 `json` 与 `txt` 两类来源；其中 `npu_demo` 的公开真源是 `kernel_gen/target/targets/npu_demo.txt`，不再以 Python 内置模板形式对外承诺。
 - target 信息用于驱动 `arch` 相关 operation/dialect/include-runtime 的“能力检查”和“硬件参数读取”，例如 `thread_num`、`sm_memory_size`、`arch.launch`、`arch.barrier`。
 
+## API 列表
+
+- `TargetSpec`
+- `load_targets(directory: Path) -> dict[str, TargetSpec]`
+- `register_target(spec: TargetSpec) -> None`
+- `is_arch_op_supported(target: str, op_name: str) -> bool`
+- `get_target_hardware(target: str, key: str) -> int | None`
+- `get_current_target_hardware(key: str) -> int | None`
+- `get_target_analysis_defaults(target: str) -> dict[str, dict[str, int]]`
+
 ## 文档信息
 
 - 创建者：`榕`

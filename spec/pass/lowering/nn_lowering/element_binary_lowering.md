@@ -6,6 +6,10 @@
 - 覆盖 `nn.add/sub/mul/div/truediv` 与 `nn.eq/ne/lt/le/gt/ge`，并输出 `kernel.binary_elewise`。
 - 模块级公开入口只保留 `element_binary_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
 
+## API 列表
+
+- `element_binary_patterns() -> list[RewritePattern]`
+
 ## 文档信息
 
 - 创建者：`睡觉小分队`
@@ -29,7 +33,7 @@
 
 ## 依赖
 
-- [`spec/pass/lowering/nn_lowering.md`](../../../../spec/pass/lowering/nn_lowering.md)
+- [`spec/pass/lowering/nn_lowering/spec.md`](../../../../spec/pass/lowering/nn_lowering/spec.md)
 - [`spec/pass/lowering/nn_lowering/nn_lowering_utility.md`](../../../../spec/pass/lowering/nn_lowering/nn_lowering_utility.md)
 - [`spec/dialect/nn.md`](../../../../spec/dialect/nn.md)
 - [`spec/dialect/kernel.md`](../../../../spec/dialect/kernel.md)

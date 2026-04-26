@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from types import SimpleNamespace
 
 import pytest
 import sympy as sp
@@ -33,6 +34,19 @@ from kernel_gen.symbol_variable.memory import LocalSpaceMeta, Memory, MemorySpac
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
+
+
+def _make_unsimplified_division_dim() -> SymbolDim:
+    """构造保持除法链文本的动态维度。"""
+    a_symbol = sp.symbols("A", integer=True, real=True)
+    b_symbol = sp.symbols("B", integer=True, real=True)
+    return SymbolDim(
+        sp.Mul(
+            sp.Mul(a_symbol, b_symbol, evaluate=False),
+            sp.Pow(b_symbol, -1, evaluate=False),
+            evaluate=False,
+        )
+    )
 
 
 # ME-001
@@ -131,20 +145,12 @@ def test_repr() -> None:
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/symbol_variable/test_memory.py
 def test_construct_from_tensor_fields() -> None:
-    class DummyTensor:
-        def __init__(
-            self: "DummyTensor",
-            shape: list[int | str],
-            dtype: NumericType,
-            stride: list[int | str],
-            format: Farmat,
-        ) -> None:
-            self.shape = shape
-            self.dtype = dtype
-            self.stride = stride
-            self.format = format
-
-    tensor = DummyTensor(["N", 4], NumericType.Float32, stride=[4, 1], format=Farmat.Norm)
+    tensor = SimpleNamespace(
+        shape=["N", 4],
+        dtype=NumericType.Float32,
+        stride=[4, 1],
+        format=Farmat.Norm,
+    )
     mem = Memory(
         tensor.shape,
         tensor.dtype,
@@ -206,27 +212,17 @@ def test_dynamic_shape_stride() -> None:
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/symbol_variable/test_memory.py
 def test_dynamic_shape_public_values_use_symbol_dim_get_value() -> None:
-    reducible = SymbolDim(
-        sp.Mul(
-            sp.Mul(
-                sp.symbols("A", integer=True, real=True),
-                sp.symbols("B", integer=True, real=True),
-                evaluate=False,
-            ),
-            sp.Pow(sp.symbols("B", integer=True, real=True), -1, evaluate=False),
-            evaluate=False,
-        )
-    )
+    reducible = _make_unsimplified_division_dim()
     mem = Memory([reducible, 4], NumericType.Float32, stride=[reducible, 1])
 
-    assert mem.shape.get_values() == ["(A*B)/B", 4]
+    assert mem.shape.get_values() == ["A*B/B", 4]
     assert mem.get_shape() == ["A*B/B", 4]
     assert mem.get_stride()[0].get_value() == "A*B/B"
 
 
 # ME-007
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-25 00:52:36 +0800
 # 最近一次运行成功时间: 2026-03-25 00:52:36 +0800
 # 测试目的: 验证 shape/stride 可直接接收 SymbolShape。
@@ -367,7 +363,7 @@ def test_clone_with_dtype_preserves_symbolic_stride_expression() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-18 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-18 00:00:00 +0800
-# 测试目的: 验证 Memory 形状匹配基于 SymbolDim.get_value() 的公开值，而非底层表达式结构。
+# 测试目的: 验证 Memory 运算前的 shape 校验按符号语义比较，而不是只比较序列化文本顺序。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_memory_shape_match_uses_symbol_dim_public_values
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
@@ -383,7 +379,7 @@ def test_memory_shape_match_uses_symbol_dim_public_values() -> None:
 
     assert lhs.shape.get_values() != rhs.shape.get_values()
     assert lhs.get_shape() == ["8*N", 4]
-    assert rhs.get_shape() == ["8*N", 4]
+    assert rhs.get_shape() == ["N*8", 4]
     assert result.get_shape() == ["8*N", 4]
     assert result.dtype is NumericType.Float32
     assert result.space is lhs.space

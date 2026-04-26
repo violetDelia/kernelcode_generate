@@ -9,7 +9,7 @@
 
 使用示例:
 - from kernel_gen.passes.tuning import LaunchKernelCostFuncPass
-- pass_obj = LaunchKernelCostFuncPass(kind="all")
+- pass_obj = LaunchKernelCostFuncPass(cost_kind="compute|memory")
 
 关联文件:
 - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
@@ -19,6 +19,6 @@
   - [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
 """
 
-from .launch_kernel_cost_func import LaunchKernelCostFuncError, LaunchKernelCostFuncPass
+from .launch_kernel_cost_func import LaunchKernelCostFuncPass
 
-__all__ = ["LaunchKernelCostFuncError", "LaunchKernelCostFuncPass"]
+__all__ = ["LaunchKernelCostFuncPass"]

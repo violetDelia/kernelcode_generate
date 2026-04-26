@@ -23,7 +23,7 @@
 - test: test/operation/test_operation_nn.py
 - test: test/dialect/test_nn_dialect.py
 - test: test/execute_engine/test_execute_engine_contract.py
-- 功能实现: kernel_gen/operation/nn.py
+- 功能实现: kernel_gen/operation/nn/__init__.py
 - 功能实现: kernel_gen/dialect/nn.py
 - 功能实现: kernel_gen/execute_engine/execution_engine.py
 """

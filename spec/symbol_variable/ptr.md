@@ -4,6 +4,13 @@
 
 用于冻结 Python 上层 `class Ptr` 的公开语义。`Ptr` 是一个仅承载 pointee dtype 的类型对象，面向 DSL 函数输入注解与 runtime args 传入场景。当前稳定入口是子模块 `kernel_gen.symbol_variable.ptr`，不由包入口 `kernel_gen.symbol_variable` 直接重导出。
 
+## API 列表
+
+- `class Ptr(*dtype: object)`
+  - `dtype: object`
+  - `__init__(*dtype: object) -> None`
+  - `__repr__() -> str`
+
 ## 文档信息
 
 - 创建者：`咯咯咯`
@@ -39,7 +46,7 @@
 
 ## 公开接口
 
-### `class Ptr`
+### `class Ptr(*dtype: object)`
 
 功能说明：
 
@@ -48,7 +55,7 @@
 
 参数说明：
 
-- `dtype`：pointee element dtype（如 `f32`）。
+- `*dtype: object`：仅允许传入 1 个 pointee element dtype（如 `f32`）。
 
 使用示例：
 
@@ -69,6 +76,83 @@ ptr = Ptr(f32)
 
 - 返回 `Ptr` 对象。
 - 仅允许 1 个 dtype 参数；参数数量非法时必须抛 `TypeError`，消息包含 `Ptr requires exactly one dtype`。
+
+#### `dtype: object`
+
+功能说明：
+
+- 暴露当前 `Ptr` 实例承载的 pointee dtype。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.ptr import Ptr
+from xdsl.dialects.builtin import f32
+
+ptr = Ptr(f32)
+assert ptr.dtype is f32
+```
+
+注意事项：
+
+- `dtype` 只表示 pointee element dtype。
+- 不承载名字、shape、stride 或地址值。
+
+返回与限制：
+
+- 返回构造时传入的唯一 dtype 对象。
+
+#### `__init__(*dtype: object) -> None`
+
+功能说明：
+
+- 初始化 `Ptr(dtype)`。
+- 校验参数数量必须恰好为 1。
+
+参数说明：
+
+- `*dtype: object`：仅允许传入 1 个 pointee element dtype。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.ptr import Ptr
+from xdsl.dialects.builtin import f32
+
+ptr = Ptr(f32)
+```
+
+注意事项：
+
+- `Ptr()` 必须抛 `TypeError`，消息包含 `Ptr requires exactly one dtype`。
+- `Ptr(f32, f32)` 必须抛 `TypeError`，消息包含 `Ptr requires exactly one dtype`。
+
+返回与限制：
+
+- 返回 `None`。
+
+#### `__repr__() -> str`
+
+功能说明：
+
+- 返回稳定公开文本 `Ptr(<dtype>)`。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.ptr import Ptr
+from xdsl.dialects.builtin import f32
+
+assert repr(Ptr(f32)) == "Ptr(f32)"
+```
+
+注意事项：
+
+- 使用 `str(dtype)` 保持 `f32` 等 xDSL 类型文本稳定。
+
+返回与限制：
+
+- 返回 `str`。
 
 ### 构造失败边界
 

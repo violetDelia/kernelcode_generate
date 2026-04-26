@@ -12,7 +12,7 @@
 
 关联文件:
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-- Spec 文档: spec/pass/lowering/nn_lowering.md
+- Spec 文档: spec/pass/lowering/nn_lowering/spec.md
 - 测试文件: test/pass/nn_lowering/public_name.py
 """
 
@@ -62,7 +62,7 @@ reduce_softmax_module = importlib.import_module(
 # 测试目的: 验证 NnLoweringPass 使用新的公开名字。
 # 使用示例: pytest -q test/pass/nn_lowering/public_name.py -k test_nn_lowering_pass_public_name
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/public_name.py
 def test_nn_lowering_pass_public_name() -> None:
     pass_obj = NnLoweringPass()
@@ -78,7 +78,7 @@ def test_nn_lowering_pass_public_name() -> None:
 # 测试目的: 验证 nn_lowering 以 canonical import 为主，旧 compat 模块失败且 compat 名称不再暴露。
 # 使用示例: pytest -q test/pass/nn_lowering/public_name.py -k test_nn_lowering_pass_public_exports
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/__init__.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/public_name.py
 def test_nn_lowering_pass_public_exports() -> None:
     assert lowering_pkg.NnLoweringPass is NnLoweringPass
@@ -98,7 +98,7 @@ def test_nn_lowering_pass_public_exports() -> None:
 # 测试目的: 验证 nn_lowering pattern driver 的注册顺序，elementwise/compare/select/cast/reduce/softmax 已按单 op pattern 注册，unsupported reject 保持最后。
 # 使用示例: pytest -q test/pass/nn_lowering/public_name.py -k test_nn_lowering_patterns_register_reject_last
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/public_name.py
 def test_nn_lowering_patterns_register_reject_last() -> None:
     names = [type(pattern).__name__ for pattern in nn_lowering_module.nn_lowering_patterns()]
@@ -143,7 +143,7 @@ def test_nn_lowering_patterns_register_reject_last() -> None:
 # 测试目的: 验证 nn_lowering child 模块只暴露 `*_patterns()`，不再保留 `lower_*_family` 兼容导出。
 # 使用示例: pytest -q test/pass/nn_lowering/public_name.py -k test_nn_lowering_child_pattern_exports
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/*.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/public_name.py
 def test_nn_lowering_child_pattern_exports() -> None:
     assert element_binary_module.__all__ == ["element_binary_patterns"]
@@ -159,7 +159,7 @@ def test_nn_lowering_child_pattern_exports() -> None:
 # 测试目的: 验证 NnLoweringPass.apply(...) 直接使用 nn_lowering_patterns() 驱动 PatternRewriteWalker。
 # 使用示例: pytest -q test/pass/nn_lowering/public_name.py -k test_nn_lowering_apply_uses_pattern_driver
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/public_name.py
 def test_nn_lowering_apply_uses_pattern_driver(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: dict[str, object] = {}

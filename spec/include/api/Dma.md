@@ -10,6 +10,12 @@
 - `view` 与 `reshape` 已移动到 `Memory` 的成员接口，不再保留以 `source` 为首参的公共层自由函数。
 - 本规范只冻结统一 API 名称、参数形态、输入约束与错误边界；不绑定任何具体后端实现。
 
+## API 列表
+
+- `template <MemorySpace Space, typename T> Memory<Space, T> npu_demo::alloc(std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::slice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::deslice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+
 ## 文档信息
 
 - 创建者：`大闸蟹`
@@ -35,7 +41,7 @@
 - 明确 DMA public function 的成功调用入口统一为 `npu_demo::alloc(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)`。
 - 明确 `slice/deslice` 的输入约束、返回语义与错误边界。
 - 明确删旧边界：`view` / `reshape` 不再属于 DMA 公共层；`source-first deslice`、`store` 等旧公开形态退出本轮稳定口径。
-- 为后续 `spec/operation/dma.md`、`spec/dialect/dma.md`、`spec/dsl/mlir_gen.md`、`spec/dsl/emit_c.md`、`spec/dsl/gen_kernel.md` 提供统一收敛目标。
+- 为后续 `spec/operation/dma.md`、`spec/dialect/dma.md`、`spec/dsl/mlir_gen.md`、`spec/dsl/gen_kernel/emit.md`、`spec/dsl/gen_kernel/gen_kernel.md` 提供统一收敛目标。
 
 ## 限制与边界
 

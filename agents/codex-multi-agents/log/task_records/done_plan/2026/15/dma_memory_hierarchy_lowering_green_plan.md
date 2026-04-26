@@ -29,7 +29,7 @@
 
 - `spec`
   - [`spec/pass/pass_manager.md`](/home/lfr/kernelcode_generate/spec/pass/pass_manager.md)
-  - 允许新增：[`spec/pass/lowering/dma_memory_hierarchy.md`](/home/lfr/kernelcode_generate/spec/pass/lowering/dma_memory_hierarchy.md)
+  - 允许新增：[`spec/pass/lowering/dma_memory_hierarchy/spec.md`](/home/lfr/kernelcode_generate/spec/pass/lowering/dma_memory_hierarchy/spec.md)
   - [`spec/pass/lowering/nn_to_kernel.md`](/home/lfr/kernelcode_generate/spec/pass/lowering/nn_to_kernel.md)
   - [`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/spec/pass/lowering/buffer_results_to_out_params.md)
   - [`spec/dialect/dma.md`](/home/lfr/kernelcode_generate/spec/dialect/dma.md)
@@ -232,7 +232,7 @@ dma.deslice(%out_sm, %out_gm, full_or_window_offsets, result_sizes, unit_strides
 
 ## 完成定义
 
-- 新增 [`spec/pass/lowering/dma_memory_hierarchy.md`](/home/lfr/kernelcode_generate/spec/pass/lowering/dma_memory_hierarchy.md)，并与 [`spec/pass/pass_manager.md`](/home/lfr/kernelcode_generate/spec/pass/pass_manager.md) 的顺序合同一致。
+- 新增 [`spec/pass/lowering/dma_memory_hierarchy/spec.md`](/home/lfr/kernelcode_generate/spec/pass/lowering/dma_memory_hierarchy/spec.md)，并与 [`spec/pass/pass_manager.md`](/home/lfr/kernelcode_generate/spec/pass/pass_manager.md) 的顺序合同一致。
 - 新增 [`kernel_gen/passes/lowering/dma_memory_hierarchy.py`](/home/lfr/kernelcode_generate/kernel_gen/passes/lowering/dma_memory_hierarchy.py)，并从 [`kernel_gen/passes/lowering/__init__.py`](/home/lfr/kernelcode_generate/kernel_gen/passes/lowering/__init__.py) 导出。
 - `test/pass/test_dma_memory_hierarchy.py` 至少覆盖：
   - 整块读路径 `GM -> SM -> LM`
@@ -260,7 +260,7 @@ pytest -q test/analysis/test_analysis.py -k 'dma_deslice or dma_memory_hierarchy
 
 - `任务类型`：`spec任务（允许联动 spec / 实现 / test）`
 - `阶段链路`：`spec -> 实现/重构 -> 审查（含复审） -> 合并`
-- `目标`：新增 [`spec/pass/lowering/dma_memory_hierarchy.md`](/home/lfr/kernelcode_generate/spec/pass/lowering/dma_memory_hierarchy.md)，冻结 pass 名字、执行顺序、输入/输出合同，以及“本 pass 新增搬运统一用 `slice/deslice` 表示”的主边界。
+- `目标`：新增 [`spec/pass/lowering/dma_memory_hierarchy/spec.md`](/home/lfr/kernelcode_generate/spec/pass/lowering/dma_memory_hierarchy/spec.md)，冻结 pass 名字、执行顺序、输入/输出合同，以及“本 pass 新增搬运统一用 `slice/deslice` 表示”的主边界。
 - `需要收口的合同`：
   - pass 名字固定为 `lower-dma-memory-hierarchy`
   - 顺序固定为 `LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`
@@ -282,7 +282,7 @@ dma.slice(%lm, %sm, %zero_offsets, sizes, %unit_strides)
 ```
 
 - `可改文件`：
-  - 允许新增：[`spec/pass/lowering/dma_memory_hierarchy.md`](/home/lfr/kernelcode_generate/spec/pass/lowering/dma_memory_hierarchy.md)
+  - 允许新增：[`spec/pass/lowering/dma_memory_hierarchy/spec.md`](/home/lfr/kernelcode_generate/spec/pass/lowering/dma_memory_hierarchy/spec.md)
   - [`spec/pass/pass_manager.md`](/home/lfr/kernelcode_generate/spec/pass/pass_manager.md)
 - `验收标准`：
   - spec 明确写清“新增 hierarchy 搬运”遵循 slice/deslice-only 合同
@@ -388,7 +388,7 @@ dma.deslice(%sm, %gm_out, orig_offsets, tile_sizes, unit_strides)
 
 - `可改文件`：
   - [`kernel_gen/passes/lowering/dma_memory_hierarchy.py`](/home/lfr/kernelcode_generate/kernel_gen/passes/lowering/dma_memory_hierarchy.py)
-  - [`spec/pass/lowering/dma_memory_hierarchy.md`](/home/lfr/kernelcode_generate/spec/pass/lowering/dma_memory_hierarchy.md)
+  - [`spec/pass/lowering/dma_memory_hierarchy/spec.md`](/home/lfr/kernelcode_generate/spec/pass/lowering/dma_memory_hierarchy/spec.md)
   - [`test/pass/test_dma_memory_hierarchy.py`](/home/lfr/kernelcode_generate/test/pass/test_dma_memory_hierarchy.py)
 - `验收标准`：
   - symbol shape 正例可通过

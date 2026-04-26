@@ -18,7 +18,7 @@
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
-- Spec 文档: spec/pass/lowering/nn_lowering.md
+- Spec 文档: spec/pass/lowering/nn_lowering/spec.md
 - 测试文件: test/pass/nn_lowering/test_lowering_nn_lowering.py
 - 测试文件: test/pass/nn_lowering/test_nn_lowering_private_helpers.py
 """
@@ -149,7 +149,7 @@ class UnsupportedNnOp(IRDLOperation):
 # 测试目的: 验证 nn_lowering_utility 的公开校验入口、错误模型与基础边界。
 # 使用示例: pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k test_nn_lowering_utility_helpers
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_nn_lowering_private_helpers.py
 def test_nn_lowering_utility_helpers() -> None:
     module = ModuleOp([])
@@ -186,7 +186,7 @@ def test_nn_lowering_utility_helpers() -> None:
 # 测试目的: 验证 core helper 的 shape / stride / symbol / reduce / matmul / materialize 合同。
 # 使用示例: pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k test_nn_lowering_core_helpers
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_nn_lowering_private_helpers.py
 def test_nn_lowering_core_helpers() -> None:
     core_module._ensure_space_attr(SimpleNamespace(attributes={"space": SPACE_GLOBAL}))
@@ -401,7 +401,7 @@ def test_nn_lowering_core_helpers() -> None:
 # 测试目的: 验证 dma_structured lowering helper、surviving pattern 导出和关键错误边界。
 # 使用示例: pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k test_dma_structured_lowering_helpers
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_nn_lowering_private_helpers.py
 def test_dma_structured_lowering_helpers() -> None:
     block = Block(arg_types=[SymbolValueType.from_expr("M")])
@@ -487,7 +487,7 @@ def test_dma_structured_lowering_helpers() -> None:
 # 测试目的: 验证 element binary lowering helper、mixed 物化路径与 surviving pattern 导出。
 # 使用示例: pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k test_element_binary_lowering_helpers
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_nn_lowering_private_helpers.py
 def test_element_binary_lowering_helpers() -> None:
     helper_block = Block(arg_types=[nn_memory_type((IntAttr(2), StringAttr("N")), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)])
@@ -602,7 +602,7 @@ def test_element_binary_lowering_helpers() -> None:
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_nn_lowering_private_helpers.py
 def test_reduce_select_cast_matmul_helpers() -> None:
     reduce_block = Block(arg_types=[nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)])
@@ -776,7 +776,7 @@ def test_reduce_select_cast_matmul_helpers() -> None:
 # 测试目的: 补齐 nn_lowering core helper 的 mixed/shape/error 分支与 reject pattern。
 # 使用示例: pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k core_additional
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_nn_lowering_private_helpers.py
 def test_nn_lowering_core_additional_branches() -> None:
     memory_type = nn_memory_type((IntAttr(2), IntAttr(3)), (IntAttr(3), IntAttr(1)), i32, SPACE_GLOBAL)
@@ -893,7 +893,7 @@ def test_nn_lowering_core_additional_branches() -> None:
 # 测试目的: 补齐 dma_structured lowering helper、broadcast/transpose 误差与 pattern 分支。
 # 使用示例: pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k dma_structured_additional
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_nn_lowering_private_helpers.py
 def test_dma_structured_lowering_additional_branches() -> None:
     operand_type = nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
@@ -935,7 +935,7 @@ def test_dma_structured_lowering_additional_branches() -> None:
 # 使用示例: pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k select_reduce_additional
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_nn_lowering_private_helpers.py
 def test_select_reduce_softmax_additional_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     source_type = nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), Float32Type(), SPACE_GLOBAL)

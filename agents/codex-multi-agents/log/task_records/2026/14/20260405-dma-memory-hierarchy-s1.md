@@ -2,14 +2,14 @@
 经办人：咯咯咯
 任务：T-20260405-e98c7369
 任务目标：冻结 dma memory hierarchy lowering pass 的公开名字、执行顺序与新增搬运边界，并在计划书中标注 S1 进行中。
-改动：新增 `spec/pass/lowering/dma_memory_hierarchy.md`，冻结 `lower-dma-memory-hierarchy` 的输入/输出合同、`LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass` 顺序边界，以及“本 pass 新增 hierarchy 搬运统一使用 dma.slice/dma.deslice、不要求改写输入里已有 dma.copy/load/store”的公开口径；同步更新 `spec/pass/pass_manager.md` 的 hierarchy pass 排序边界说明；由于该 worktree 缺失 `ARCHITECTURE/plan/dma_memory_hierarchy_lowering_green_plan.md`，从主仓当前计划书同步到 worktree 后将 `S1` 标注为 `进行中` 并对齐本任务 worktree/记录文件命名。
+改动：新增 `spec/pass/lowering/dma_memory_hierarchy/spec.md`，冻结 `lower-dma-memory-hierarchy` 的输入/输出合同、`LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass` 顺序边界，以及“本 pass 新增 hierarchy 搬运统一使用 dma.slice/dma.deslice、不要求改写输入里已有 dma.copy/load/store”的公开口径；同步更新 `spec/pass/pass_manager.md` 的 hierarchy pass 排序边界说明；由于该 worktree 缺失 `ARCHITECTURE/plan/dma_memory_hierarchy_lowering_green_plan.md`，从主仓当前计划书同步到 worktree 后将 `S1` 标注为 `进行中` 并对齐本任务 worktree/记录文件命名。
 结论：S1 spec 文档已冻结；本次仅修改 spec/计划/记录文件，未运行测试。
 
 时间：2026-04-05 13:45:17 +0800
 经办人：不要啊教练
 任务：T-20260405-7d4da585
 任务目标：复审 dma_memory_hierarchy S1（spec-only）：核对 diff 范围、pass 名称/顺序/边界，以及新增 `dma.slice/dma.deslice` 约束口径的一致性；不跑 pytest。
-改动：按两轮审查规范核对：1) `git diff --name-only` 范围仅包含 `spec/pass/lowering/dma_memory_hierarchy.md`、`spec/pass/pass_manager.md`、`ARCHITECTURE/plan/dma_memory_hierarchy_lowering_green_plan.md` 与本记录文件；2) 逐段核对 pass 名称 `lower-dma-memory-hierarchy`、顺序边界 `LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`、以及读写路径 `GM->SM->LM` / `LM->SM->GM` 均统一使用 `dma.slice/dma.deslice` 的公开合同，并核对“输入中既有 `dma.copy/load/store` 不要求重写，但本 pass 不得新增其作为 hierarchy 主语义”的边界表述。
+改动：按两轮审查规范核对：1) `git diff --name-only` 范围仅包含 `spec/pass/lowering/dma_memory_hierarchy/spec.md`、`spec/pass/pass_manager.md`、`ARCHITECTURE/plan/dma_memory_hierarchy_lowering_green_plan.md` 与本记录文件；2) 逐段核对 pass 名称 `lower-dma-memory-hierarchy`、顺序边界 `LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`、以及读写路径 `GM->SM->LM` / `LM->SM->GM` 均统一使用 `dma.slice/dma.deslice` 的公开合同，并核对“输入中既有 `dma.copy/load/store` 不要求重写，但本 pass 不得新增其作为 hierarchy 主语义”的边界表述。
 结论：需修改。
 
 问题列表：
@@ -40,11 +40,11 @@
 经办人：不要啊教练
 任务：T-20260405-58920fe4
 任务目标：复审 dma_memory_hierarchy S1 修复：核对 `spec/pass/pass_manager.md` 仅去重标题且语义未扩大；diff 仅 `pass_manager.md` + 记录；不跑 pytest。
-改动：按两轮审查规范核对：1) 范围核对：`git diff --name-only --cached` 仍包含 `ARCHITECTURE/plan/dma_memory_hierarchy_lowering_green_plan.md` 与 `spec/pass/lowering/dma_memory_hierarchy.md`，未收敛到“仅 `spec/pass/pass_manager.md` + 记录”；2) 语义核对：`spec/pass/pass_manager.md` 的未暂存修复仅删除一条重复标题，未发现新增语义、顺序边界或示例内容扩大。
+改动：按两轮审查规范核对：1) 范围核对：`git diff --name-only --cached` 仍包含 `ARCHITECTURE/plan/dma_memory_hierarchy_lowering_green_plan.md` 与 `spec/pass/lowering/dma_memory_hierarchy/spec.md`，未收敛到“仅 `spec/pass/pass_manager.md` + 记录”；2) 语义核对：`spec/pass/pass_manager.md` 的未暂存修复仅删除一条重复标题，未发现新增语义、顺序边界或示例内容扩大。
 结论：需修改。
 
 问题列表：
-- `wt-20260405-dma-memory-hierarchy-s1` diff 范围：当前 `git diff --name-only --cached` 仍超出本次修复授权范围，包含 `ARCHITECTURE/plan/dma_memory_hierarchy_lowering_green_plan.md` 与 `spec/pass/lowering/dma_memory_hierarchy.md`。（P1）
+- `wt-20260405-dma-memory-hierarchy-s1` diff 范围：当前 `git diff --name-only --cached` 仍超出本次修复授权范围，包含 `ARCHITECTURE/plan/dma_memory_hierarchy_lowering_green_plan.md` 与 `spec/pass/lowering/dma_memory_hierarchy/spec.md`。（P1）
 
 漏洞排查结果（spec/流程层面）：
 - 输入校验绕过：本次仅文档修复，无新增输入合同；未见新增绕过点。
@@ -64,7 +64,7 @@
 经办人：咯咯咯
 任务：T-20260405-ace5a859
 任务目标：清理 `wt-20260405-dma-memory-hierarchy-s1` 的 staged/working tree 残留，确保 `git diff --name-only` 与 `git diff --name-only --cached` 最终仅剩 `spec/pass/pass_manager.md` 与同链记录文件；不改语义，不跑 pytest。
-改动：将 `ARCHITECTURE/plan/dma_memory_hierarchy_lowering_green_plan.md` 与 `spec/pass/lowering/dma_memory_hierarchy.md` 从暂存区移除并删除其 worktree 残留文件；保留 `spec/pass/pass_manager.md` 的“仅去重重复标题”修复，并把清理结果追加到同链记录文件。
+改动：将 `ARCHITECTURE/plan/dma_memory_hierarchy_lowering_green_plan.md` 与 `spec/pass/lowering/dma_memory_hierarchy/spec.md` 从暂存区移除并删除其 worktree 残留文件；保留 `spec/pass/pass_manager.md` 的“仅去重重复标题”修复，并把清理结果追加到同链记录文件。
 结论：diff 范围已收敛到 `spec/pass/pass_manager.md` 与记录文件；未改 `pass_manager.md` 语义，未运行测试。
 
 时间：2026-04-05 14:01:39 +0800
@@ -95,7 +95,7 @@
 经办人：咯咯咯
 任务：T-20260405-8336ef1f
 任务目标：新增 dma_memory_hierarchy pass 的 spec，冻结 pass 名称/顺序/边界，并明确新增 hierarchy 搬运仅用 dma.slice/dma.deslice 的合同。
-改动：新增 `spec/pass/lowering/dma_memory_hierarchy.md`，补齐 `lower-dma-memory-hierarchy` 的公开接口、顺序边界与读写路径合同；明确整块搬运为 `slice/deslice` 全量窗口特例，强调新增 hierarchy 路径禁用 `dma.copy/load/store`；记录本次收口结论。
+改动：新增 `spec/pass/lowering/dma_memory_hierarchy/spec.md`，补齐 `lower-dma-memory-hierarchy` 的公开接口、顺序边界与读写路径合同；明确整块搬运为 `slice/deslice` 全量窗口特例，强调新增 hierarchy 路径禁用 `dma.copy/load/store`；记录本次收口结论。
 结论：S1 spec 已补齐；本次仅新增 spec 与记录文件，未修改实现/测试，未运行 pytest。
 收口的合同：
 - pass 名称固定为 `lower-dma-memory-hierarchy`。
@@ -109,7 +109,7 @@
 - 目标缺失 `SM/LM` 时必须显式失败，禁止静默降级。
 - 输入未完成 `nn_to_kernel` 或 out-param 收口时必须失败。
 引用文件：
-- `spec/pass/lowering/dma_memory_hierarchy.md`
+- `spec/pass/lowering/dma_memory_hierarchy/spec.md`
 - `spec/pass/pass_manager.md`
 - `spec/pass/lowering/nn_to_kernel.md`
 - `spec/pass/lowering/buffer_results_to_out_params.md`
@@ -136,14 +136,14 @@
   - 覆盖 GM->SM->LM + LM->SM->GM、LM-only no-op、SM/LM 缺失失败三类场景；
   - 通过注册一个 `sm_lm_demo` 测试 target（SM/LM memory size > 0）驱动成功路径；
   - 断言 pass 不引入 `dma.copy/load/store`。
-- 更新 spec 用例映射：`spec/pass/lowering/dma_memory_hierarchy.md`（补齐 `COV-DMH-006`，并把 `COV-DMH-001..004` 映射到可执行测试函数）。
+- 更新 spec 用例映射：`spec/pass/lowering/dma_memory_hierarchy/spec.md`（补齐 `COV-DMH-006`，并把 `COV-DMH-001..004` 映射到可执行测试函数）。
 
 证据：
 - `git diff --name-only`：
   - agents/codex-multi-agents/log/task_records/2026/14/20260405-dma-memory-hierarchy-s1.md
 - `git diff --name-only --cached`：
   - kernel_gen/passes/lowering/dma_memory_hierarchy.py
-  - spec/pass/lowering/dma_memory_hierarchy.md
+  - spec/pass/lowering/dma_memory_hierarchy/spec.md
   - test/pass/test_dma_memory_hierarchy.py
 - gate：
   - `PYTHONPATH=. pytest -q test/pass/test_dma_memory_hierarchy.py test/pass/test_pass_manager.py`
@@ -154,11 +154,11 @@
 经办人：提莫炖蘑菇
 任务：T-20260406-6341251f
 任务目标：从严复核 LowerDmaMemoryHierarchyPass 实现、spec 映射与新增测试一致性，并核对 gate 证据。
-改动：复核 kernel_gen/passes/lowering/dma_memory_hierarchy.py、spec/pass/lowering/dma_memory_hierarchy.md、test/pass/test_dma_memory_hierarchy.py 与记录文件；复跑 gate 并记录输出。
+改动：复核 kernel_gen/passes/lowering/dma_memory_hierarchy.py、spec/pass/lowering/dma_memory_hierarchy/spec.md、test/pass/test_dma_memory_hierarchy.py 与记录文件；复跑 gate 并记录输出。
 结论：需修改。
 
 问题列表：
-- P1｜kernel_gen/passes/lowering/dma_memory_hierarchy.py / spec/pass/lowering/dma_memory_hierarchy.md：spec 明确“输入不得包含 nn.*，不满足输入合同必须失败”，实现未检测 nn.* 或前置 pass 完成状态，仅遍历 kernel.* 并静默通过含 nn.* 的 module。风险：输入合同被绕过，可能在未完成 nn_to_kernel/out-param 收口时仍继续改写，造成语义偏差与后续 pass 隐性错误。建议：在 run() 增加 module 级前置校验（发现 nn.* 直接抛 LowerDmaMemoryHierarchyError，错误信息包含 nn.*/前置 pass 关键字），并补充对应失败用例。
+- P1｜kernel_gen/passes/lowering/dma_memory_hierarchy.py / spec/pass/lowering/dma_memory_hierarchy/spec.md：spec 明确“输入不得包含 nn.*，不满足输入合同必须失败”，实现未检测 nn.* 或前置 pass 完成状态，仅遍历 kernel.* 并静默通过含 nn.* 的 module。风险：输入合同被绕过，可能在未完成 nn_to_kernel/out-param 收口时仍继续改写，造成语义偏差与后续 pass 隐性错误。建议：在 run() 增加 module 级前置校验（发现 nn.* 直接抛 LowerDmaMemoryHierarchyError，错误信息包含 nn.*/前置 pass 关键字），并补充对应失败用例。
 
 漏洞排查结果：
 - 输入校验绕过：发现缺口（未拒绝 nn.* 输入）。
@@ -194,11 +194,11 @@
 经办人：提莫炖蘑菇
 任务：T-20260406-5c7f1b6c
 任务目标：从严复核 T-20260406-5ff59d15 修复（nn.* 输入显式失败校验 + 新增失败用例）与 spec 前置合同一致性，并核对 gate 证据。
-改动：复核 kernel_gen/passes/lowering/dma_memory_hierarchy.py、spec/pass/lowering/dma_memory_hierarchy.md、test/pass/test_dma_memory_hierarchy.py 与记录文件；复跑 gate 并记录输出。
+改动：复核 kernel_gen/passes/lowering/dma_memory_hierarchy.py、spec/pass/lowering/dma_memory_hierarchy/spec.md、test/pass/test_dma_memory_hierarchy.py 与记录文件；复跑 gate 并记录输出。
 结论：需修改。
 
 问题列表：
-- P2｜spec/pass/lowering/dma_memory_hierarchy.md：新增 nn.* 输入失败用例已落地到 test，但 spec “功能与用例清单”未补齐对应映射（COV-DMH-007），与“spec 映射与新增测试一致性”要求不一致。风险：测试/合同映射缺口导致审查链路误判覆盖。建议：补充 COV-DMH-007 约束点与测试函数映射。
+- P2｜spec/pass/lowering/dma_memory_hierarchy/spec.md：新增 nn.* 输入失败用例已落地到 test，但 spec “功能与用例清单”未补齐对应映射（COV-DMH-007），与“spec 映射与新增测试一致性”要求不一致。风险：测试/合同映射缺口导致审查链路误判覆盖。建议：补充 COV-DMH-007 约束点与测试函数映射。
 
 漏洞排查结果：
 - 输入校验绕过：已补齐 nn.* 前置校验，未见新增绕过；仍需 spec 映射同步。
@@ -223,9 +223,9 @@
 时间：2026-04-06 01:12:17 +0800
 经办人：咯咯咯
 任务：T-20260406-6ee9269c
-任务目标：补齐 `spec/pass/lowering/dma_memory_hierarchy.md` 的测试映射，新增 `COV-DMH-007`（`nn.*` 输入失败）并对齐已新增的失败用例。
+任务目标：补齐 `spec/pass/lowering/dma_memory_hierarchy/spec.md` 的测试映射，新增 `COV-DMH-007`（`nn.*` 输入失败）并对齐已新增的失败用例。
 改动：
-- 更新 `spec/pass/lowering/dma_memory_hierarchy.md` 的“测试目标”与“功能与用例清单”，新增 `COV-DMH-007`：输入残留 `nn.*` 必须显式失败。
+- 更新 `spec/pass/lowering/dma_memory_hierarchy/spec.md` 的“测试目标”与“功能与用例清单”，新增 `COV-DMH-007`：输入残留 `nn.*` 必须显式失败。
 - 将 `COV-DMH-007` 映射到失败用例 `test_dma_memory_hierarchy_rejects_nn_ops_in_input`。
 结论：spec 与同链实现/测试已重新对齐；本次仅修改 spec 与记录文件，未改实现、未改测试、未跑 pytest（spec-only）。
 收口的合同：
@@ -237,7 +237,7 @@
 拒绝路径：
 - 输入残留 `nn.*` 时，pass 必须显式失败，不得静默跳过或继续改写。
 引用文件：
-- `spec/pass/lowering/dma_memory_hierarchy.md`
+- `spec/pass/lowering/dma_memory_hierarchy/spec.md`
 - `test/pass/test_dma_memory_hierarchy.py`
 - `agents/codex-multi-agents/log/task_records/2026/14/20260405-dma-memory-hierarchy-s1.md`
 下游影响：
@@ -248,7 +248,7 @@
 经办人：提莫炖蘑菇
 任务：T-20260406-8fa06324
 任务目标：复核 COV-DMH-007 映射与 nn.* 输入 fail-fast 合同一致性，并核对同链记录与 gate 证据。
-改动：复核 spec/pass/lowering/dma_memory_hierarchy.md、kernel_gen/passes/lowering/dma_memory_hierarchy.py、test/pass/test_dma_memory_hierarchy.py 与同链记录；可选复跑 gate 并记录输出。
+改动：复核 spec/pass/lowering/dma_memory_hierarchy/spec.md、kernel_gen/passes/lowering/dma_memory_hierarchy.py、test/pass/test_dma_memory_hierarchy.py 与同链记录；可选复跑 gate 并记录输出。
 结论：通过。
 
 问题列表：
@@ -281,14 +281,14 @@
 改动：
 - 合并文件范围（仅以下文件）：
   - `kernel_gen/passes/lowering/dma_memory_hierarchy.py`
-  - `spec/pass/lowering/dma_memory_hierarchy.md`
+  - `spec/pass/lowering/dma_memory_hierarchy/spec.md`
   - `test/pass/test_dma_memory_hierarchy.py`
   - `agents/codex-multi-agents/log/task_records/2026/14/20260405-dma-memory-hierarchy-s1.md`
 证据：
 - `git diff --name-only`：
   - agents/codex-multi-agents/log/task_records/2026/14/20260405-dma-memory-hierarchy-s1.md
   - kernel_gen/passes/lowering/dma_memory_hierarchy.py
-  - spec/pass/lowering/dma_memory_hierarchy.md
+  - spec/pass/lowering/dma_memory_hierarchy/spec.md
   - test/pass/test_dma_memory_hierarchy.py
 - gate：
   - `PYTHONPATH=. pytest -q test/pass/test_dma_memory_hierarchy.py test/pass/test_pass_manager.py`

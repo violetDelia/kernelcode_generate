@@ -122,6 +122,13 @@
 - 修复任务创建人：`守护最好的爱莉希雅`
 - 修复任务信息：`已按当前阻点补建当前唯一修复任务 T-20260425-5fd7d2a1，worktree=/home/lfr/kernelcode_generate/wt-20260425-tuner-cost-emitc-include-repair-s6，记录文件=/home/lfr/kernelcode_generate/wt-20260425-tuner-cost-emitc-include-repair-s6/agents/codex-multi-agents/log/task_records/2026/17/20260425-tuner-cost-emitc-include-repair-s6.md。任务边界只收计划资产与最新主线现场的对齐，以及直接关联的归档或记录收口；不得改动任何 [immutable-file]；执行记录要求真实自检与 Diff 反推自测。`
 
+### 2026-04-26 守护最好的爱莉希雅 补建修复任务（emitc_case_runner API 复审阻断）
+
+- 背景：`merge 后复审命中新的硬阻断：kernel_gen/tools/emitc_case_runner.py 新增公开 helper run_emitc_case，但文件级 API 列表缺失；当前专题 spec 只定义 emit_c / emit_c_op / emit_c_value，没有承接 run_emitc_case；test/tools/test_emitc_case_runner.py 与 expectation/dsl/emit_c/npu_demo/** 正在跨文件直连该未定义接口。expectation 受仓库规则限制不可修改，因此修复链应优先收 spec 与文件级 API 列表，并明确测试/跨文件调用的公开接口合法性。`
+- 是否已创建修复任务：`是`
+- 修复任务创建人：`守护最好的爱莉希雅`
+- 修复任务信息：`已按当前阻断项补建当前唯一修复任务 T-20260426-4a6a5e31，worktree=/home/lfr/kernelcode_generate/wt-20260426-tuner-cost-emitc-include-repair-s7，记录文件=/home/lfr/kernelcode_generate/wt-20260426-tuner-cost-emitc-include-repair-s7/agents/codex-multi-agents/log/task_records/2026/17/20260426-tuner-cost-emitc-include-repair-s7.md。任务目标写成可直接执行的动作：为 kernel_gen/tools/emitc_case_runner.py 补齐文件级 API 列表与 run_emitc_case 公开合同；在 spec 承接该接口；确认 test/tools/test_emitc_case_runner.py 与 expectation/dsl/emit_c/npu_demo/** 的跨文件调用只使用已定义公开 API；不得修改 expectation 文件。`
+
 ## 任务创建记录
 
 - `S1=T-20260423-e6493d39，任务类型 spec，worktree=wt-20260423-tuner-cost-include-s1，记录文件=agents/codex-multi-agents/log/task_records/2026/17/20260423-tuner-cost-include-s1.md`

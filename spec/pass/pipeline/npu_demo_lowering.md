@@ -6,6 +6,10 @@
 - 公开 builder：`build_npu_demo_lowering_pipeline()`。
 - 该 pipeline 面向 `dsl_run` 的 `npu_demo` 正向链路，固定为最小可执行 lowering 组合，并在末尾输出可供 `gen_kernel(target="npu_demo")` 消费的 host wrapper + device body 双函数 IR。
 
+## API 列表
+
+- `build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> PassManager`
+
 ## 文档信息
 
 - 创建者：`朽木露琪亚`
@@ -20,7 +24,7 @@
 - 注册表：[`spec/pass/registry.md`](../../../spec/pass/registry.md)
 - `inline` 公开入口：[`spec/pass/inline.md`](../../../spec/pass/inline.md)
 - `decompass` 公开入口：[`spec/pass/decompass.md`](../../../spec/pass/decompass.md)
-- `nn` lowering：[`spec/pass/lowering/nn_lowering.md`](../../../spec/pass/lowering/nn_lowering.md)
+- `nn` lowering：[`spec/pass/lowering/nn_lowering/spec.md`](../../../spec/pass/lowering/nn_lowering/spec.md)
 - `symbol-loop-hoist`：[`spec/pass/symbol_loop_hoist.md`](../../../spec/pass/symbol_loop_hoist.md)
 - `attach-arch-information` 公开入口：[`spec/pass/attach_arch_information.md`](../../../spec/pass/attach_arch_information.md)
 - `outline-device-kernel` 公开入口：[`spec/pass/outline_device_kernel.md`](../../../spec/pass/outline_device_kernel.md)

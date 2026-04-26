@@ -17,7 +17,7 @@
 - 功能实现: [kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py](kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py)
 - 功能实现: [kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py](kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py)
 - 功能实现: [kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py](kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py)
-- Spec 文档: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
+- Spec 文档: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
 - 测试文件: [test/pass/nn_lowering/test_nn_lowering_asset_cases.py](test/pass/nn_lowering/test_nn_lowering_asset_cases.py)
 """
 
@@ -98,7 +98,7 @@ def test_nn_lowering_asset_case(case_name: str, case_fn: Callable[[], None]) -> 
     - pytest -q test/pass/nn_lowering/test_nn_lowering_asset_cases.py -k element_binary_add
 
     关联文件:
-    - spec: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
+    - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
     - test: [test/pass/nn_lowering/test_nn_lowering_asset_cases.py](test/pass/nn_lowering/test_nn_lowering_asset_cases.py)
     - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
     """
@@ -121,7 +121,7 @@ def test_nn_lowering_apply_uses_pattern_driver_asset(monkeypatch: pytest.MonkeyP
     - pytest -q test/pass/nn_lowering/test_nn_lowering_asset_cases.py -k pattern_driver
 
     关联文件:
-    - spec: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
+    - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
     - test: [test/pass/nn_lowering/public_name.py](test/pass/nn_lowering/public_name.py)
     - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
     """

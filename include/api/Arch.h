@@ -24,6 +24,9 @@
 #include "include/api/Core.h"
 #include "include/api/Memory.h"
 
+template <MemorySpace Space>
+class DynamicMemoryRef;
+
 /*
 功能说明:
 - 定义公开 barrier 可见域枚举，`TLM` 表示覆盖 `TLM1/TLM2/TLM3` 的聚合可见域。
@@ -195,6 +198,116 @@ protected:
     - 功能实现: include/npu_demo/Arch.h
     */
     ~KernelContext() = default;
+};
+
+/*
+功能说明:
+- 返回当前 launch 运行时视图中的线程索引，作为公开 free helper 供代码生成直接调用。
+
+使用示例:
+- S_INT tid = thread_id();
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/api/Arch.md
+- test: test/include/api/test_arch.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+S_INT thread_id();
+
+/*
+功能说明:
+- 返回当前 launch 运行时视图中的线程总数，作为公开 free helper 供代码生成直接调用。
+
+使用示例:
+- S_INT tnum = thread_num();
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/api/Arch.md
+- test: test/include/api/test_arch.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+S_INT thread_num();
+
+/*
+功能说明:
+- 返回指定片上空间的动态内存视图，作为公开 free helper 供代码生成直接调用。
+- 返回值是可隐式转换到 `Memory<Space, T>` 的代理对象，元素类型由赋值目标决定。
+
+使用示例:
+- Memory<TSM, float> tsm = get_dynamic_memory<TSM>();
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/api/Arch.md
+- test: test/include/api/test_arch.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+template <MemorySpace Space>
+DynamicMemoryRef<Space> get_dynamic_memory();
+
+/*
+功能说明:
+- 表示 `get_dynamic_memory<Space>()` 返回的公开转换代理；通常不直接使用该类型，而是赋值到 `Memory<Space, T>`。
+
+使用示例:
+- Memory<TSM, float> tsm = get_dynamic_memory<TSM>();
+
+创建者: OpenAI Codex
+最后修改人: OpenAI Codex
+
+关联文件:
+- spec: spec/include/api/Arch.md
+- test: test/include/api/test_arch.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+template <MemorySpace Space>
+class DynamicMemoryRef {
+public:
+    /*
+    功能说明:
+    - 使用后端上下文句柄构造动态内存转换代理；业务侧通常不直接调用。
+
+    使用示例:
+    - Memory<TSM, float> tsm = get_dynamic_memory<TSM>();
+
+    创建者: OpenAI Codex
+    最后修改人: OpenAI Codex
+
+    关联文件:
+    - spec: spec/include/api/Arch.md
+    - test: test/include/api/test_arch.py
+    - 功能实现: include/npu_demo/Arch.h
+    */
+    explicit DynamicMemoryRef(const void* context);
+
+    /*
+    功能说明:
+    - 按赋值目标元素类型将代理转换为具体 `Memory<Space, T>` 视图。
+
+    使用示例:
+    - Memory<TSM, float> tsm = get_dynamic_memory<TSM>();
+
+    创建者: OpenAI Codex
+    最后修改人: OpenAI Codex
+
+    关联文件:
+    - spec: spec/include/api/Arch.md
+    - test: test/include/api/test_arch.py
+    - 功能实现: include/npu_demo/Arch.h
+    */
+    template <typename T>
+    operator Memory<Space, T>() const;
+
+private:
+    const void* context_;
 };
 
 /*

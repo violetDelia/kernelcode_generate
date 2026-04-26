@@ -6,6 +6,10 @@
 - 对 direct `nn.softmax` 提供稳定拒绝路径，要求先由上游完成分解。
 - 模块级公开入口只保留 `reduce_softmax_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
 
+## API 列表
+
+- `reduce_softmax_patterns() -> list[RewritePattern]`
+
 ## 文档信息
 
 - 创建者：`小李飞刀`
@@ -20,7 +24,7 @@
 
 ## 依赖
 
-- [`spec/pass/lowering/nn_lowering.md`](../../../../spec/pass/lowering/nn_lowering.md)
+- [`spec/pass/lowering/nn_lowering/spec.md`](../../../../spec/pass/lowering/nn_lowering/spec.md)
 - [`spec/dialect/dma.md`](../../../../spec/dialect/dma.md)
 - [`spec/dialect/kernel.md`](../../../../spec/dialect/kernel.md)
 - [`spec/dialect/nn.md`](../../../../spec/dialect/nn.md)

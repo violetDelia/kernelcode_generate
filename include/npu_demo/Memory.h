@@ -416,7 +416,7 @@ inline Memory<Space, ViewT> Memory<Space, T>::view(
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/dsl/gen_kernel/test_gen_kernel.py
 - 功能实现: include/npu_demo/Memory.h
 */
 namespace npu_demo {

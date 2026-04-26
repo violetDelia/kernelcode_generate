@@ -20,10 +20,10 @@
 改动：
 - 审查结论：`需修改`
 - 问题列表：
-- `P1` 文件/接口：`spec/pass/lowering/nn_lowering.md:71-73`、`spec/pass/lowering/nn_lowering/element_binary_lowering.md:41-78`
+- `P1` 文件/接口：`spec/pass/lowering/nn_lowering/spec.md:71-73`、`spec/pass/lowering/nn_lowering/element_binary_lowering.md:41-78`
   现象：当前实现与测试已经把 element binary mixed scalar 固定为 `dma.alloc + dma.fill + kernel.binary_elewise`，并明确 mixed compare 继续走 `dma.broadcast`；但总 spec 仍写“`memory + symbol/const` 或结果含符号维度时…需要时额外生成 `dma.broadcast`”，child spec 也只约束了 mixed compare 的 `dma.broadcast`，没有把 element binary mixed scalar 的 `dma.fill` 合同收口进去。
   风险：公开合同与实现/测试/expectation/计划书不一致；后续执行人仍可能把 `dma.broadcast` 视为 element binary mixed scalar 的允许输出，导致同类回退再次通过文档审查。
-  建议：最小修改 `spec/pass/lowering/nn_lowering.md` 与 `spec/pass/lowering/nn_lowering/element_binary_lowering.md`，显式区分“element binary mixed scalar -> dma.fill”与“mixed compare -> dma.broadcast”，并补齐对应测试映射文字。
+  建议：最小修改 `spec/pass/lowering/nn_lowering/spec.md` 与 `spec/pass/lowering/nn_lowering/element_binary_lowering.md`，显式区分“element binary mixed scalar -> dma.fill”与“mixed compare -> dma.broadcast”，并补齐对应测试映射文字。
   优先级：P1
 - `P1` 文件/接口：`test/pass/nn_lowering/test_lowering_nn_lowering.py:1158-1199`
   现象：`test_lower_add_mixed_symbol_to_kernel()` 的断言已经锁定 `dma.fill` 且禁止 `dma.broadcast`，但测试头注释仍写“mixed symbol broadcast 的改写行为”。
@@ -50,26 +50,26 @@
 - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260414-nn-lowering-reopen-fix-r1:/home/lfr/kernelcode_generate python -m expectation.pass.lowing.nn_lowering`（cwd=`/home/lfr/kernelcode_generate/wt-20260414-nn-lowering-reopen-fix-r1`）-> exit=0；基于 worktree 代码 + 主仓 expectation 入口的目录级验收通过
 - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260414-nn-lowering-reopen-fix-r1:/home/lfr/kernelcode_generate python -m expectation.pass.lowing.nn_lowering.element_binary` -> exit=0
 - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260414-nn-lowering-reopen-fix-r1:/home/lfr/kernelcode_generate python -m expectation.pass.lowing.nn_lowering.element_compare` -> exit=0
-- 文本核对：`nl -ba spec/pass/lowering/nn_lowering.md | sed -n '64,76p'`
+- 文本核对：`nl -ba spec/pass/lowering/nn_lowering/spec.md | sed -n '64,76p'`
 - 文本核对：`nl -ba spec/pass/lowering/nn_lowering/element_binary_lowering.md | sed -n '40,84p'`
 - 文本核对：`nl -ba kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py | sed -n '140,210p'`
 - 文本核对：`nl -ba test/pass/nn_lowering/test_lowering_nn_lowering.py | sed -n '1156,1203p'`
 结论：
 - 最终结论：`需修改`
-- 下一步建议：转 `build`，最小补齐 `spec/pass/lowering/nn_lowering.md`、`spec/pass/lowering/nn_lowering/element_binary_lowering.md` 与 `test/pass/nn_lowering/test_lowering_nn_lowering.py` 的合同/注释收口，再回到 `review` 复核。
+- 下一步建议：转 `build`，最小补齐 `spec/pass/lowering/nn_lowering/spec.md`、`spec/pass/lowering/nn_lowering/element_binary_lowering.md` 与 `test/pass/nn_lowering/test_lowering_nn_lowering.py` 的合同/注释收口，再回到 `review` 复核。
 
 时间：2026-04-14 12:43 +0800
 经办人：小李飞刀
 任务：T-20260414-e056a6e4
 任务目标：同步 nn_lowering mixed scalar/mixed compare 的公开合同文案，并修正 pass 测试中文说明不再误写为 broadcast
 改动：
-- 更新 `spec/pass/lowering/nn_lowering.md`，明确 `element binary memory + symbol/const` 的 mixed scalar 路径固定为 `dma.alloc + dma.fill + kernel.binary_elewise`，`mixed compare` 继续固定为 `dma.alloc + dma.broadcast + kernel.binary_elewise`；补充动态符号维场景仅允许在 `dma.alloc` 前生成 `symbol.get_dim`，不改变 mixed scalar 的 `dma.fill` 物化路径。
+- 更新 `spec/pass/lowering/nn_lowering/spec.md`，明确 `element binary memory + symbol/const` 的 mixed scalar 路径固定为 `dma.alloc + dma.fill + kernel.binary_elewise`，`mixed compare` 继续固定为 `dma.alloc + dma.broadcast + kernel.binary_elewise`；补充动态符号维场景仅允许在 `dma.alloc` 前生成 `symbol.get_dim`，不改变 mixed scalar 的 `dma.fill` 物化路径。
 - 更新 `spec/pass/lowering/nn_lowering/element_binary_lowering.md`，把 family 级注意事项收口为“mixed scalar element binary -> dma.fill，mixed compare -> dma.broadcast”，避免再把 `dma.broadcast` 视作 mixed scalar binary 的允许输出。
 - 更新 `test/pass/nn_lowering/test_lowering_nn_lowering.py` 中 `test_lower_add_mixed_symbol_to_kernel` 的中文测试目的/元信息，明确该用例验证的是 mixed symbol scalar add 的 `dma.fill` 物化路径，而不是 broadcast。
 验证：
 - `PYTHONDONTWRITEBYTECODE=1 pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k 'test_lower_add_mixed_symbol_to_kernel or test_lower_broadcast_with_symbol_dim'` -> `2 passed, 38 deselected`
 - `PYTHONDONTWRITEBYTECODE=1 pytest -q test/pass/nn_lowering/element_binary_add.py test/pass/nn_lowering/element_compare_eq.py` -> `3 passed`
-- 文本核对 `spec/pass/lowering/nn_lowering.md:68-76` -> mixed scalar 已明确为 `dma.fill`，mixed compare 仍为 `dma.broadcast`
+- 文本核对 `spec/pass/lowering/nn_lowering/spec.md:68-76` -> mixed scalar 已明确为 `dma.fill`，mixed compare 仍为 `dma.broadcast`
 - 文本核对 `spec/pass/lowering/nn_lowering/element_binary_lowering.md:68-76` -> family 级注意事项已区分 `dma.fill` 与 `dma.broadcast`
 - 文本核对 `test/pass/nn_lowering/test_lowering_nn_lowering.py:1154-1161` -> 中文测试目的已改为 mixed symbol scalar add 的 `dma.fill` 路径
 结论：
@@ -85,14 +85,14 @@
 - 漏洞排查结果：
 - 输入校验绕过：总 spec、child spec 与实现中的 `_materialize_binary_scalar_operand()` / `_materialize_compare_scalar_operand()` 已统一为“mixed scalar binary -> dma.fill / mixed compare -> dma.broadcast”，未发现新放行路径。
 - 类型/形状绕过：复核 pass 级 mixed symbol add 用例与 compare 用例，`DmaFillOp` / `DmaBroadcastOp` 的断言与输出顺序均与当前 lowering 行为一致，未见 compare/binary 分支混淆。
-- 边界越界：本轮 build 仅补齐 `spec/pass/lowering/nn_lowering.md`、`spec/pass/lowering/nn_lowering/element_binary_lowering.md` 与 `test/pass/nn_lowering/test_lowering_nn_lowering.py` 的文案/注释；未混入实现逻辑扩散。
+- 边界越界：本轮 build 仅补齐 `spec/pass/lowering/nn_lowering/spec.md`、`spec/pass/lowering/nn_lowering/element_binary_lowering.md` 与 `test/pass/nn_lowering/test_lowering_nn_lowering.py` 的文案/注释；未混入实现逻辑扩散。
 - 错误处理缺失：本轮未修改异常路径；相关 pytest 与 expectation family 入口均未出现新的报错短语漂移。
-- 状态污染：`git diff -- spec/pass/lowering/nn_lowering.md spec/pass/lowering/nn_lowering/element_binary_lowering.md test/pass/nn_lowering/test_lowering_nn_lowering.py` 仅显示本轮目标文件收口。
+- 状态污染：`git diff -- spec/pass/lowering/nn_lowering/spec.md spec/pass/lowering/nn_lowering/element_binary_lowering.md test/pass/nn_lowering/test_lowering_nn_lowering.py` 仅显示本轮目标文件收口。
 - 资源释放问题：本轮未改动 alloc/fill/broadcast 执行链；复核中未见 temporary memory 使用关系回退。
 - 改进建议：
 - 未发现额外改进点。
 验证：
-- `nl -ba spec/pass/lowering/nn_lowering.md | sed -n '68,76p'` -> mixed compare 仍要求 `dma.broadcast`；element binary mixed scalar 已明确固定为 `dma.fill`
+- `nl -ba spec/pass/lowering/nn_lowering/spec.md | sed -n '68,76p'` -> mixed compare 仍要求 `dma.broadcast`；element binary mixed scalar 已明确固定为 `dma.fill`
 - `nl -ba spec/pass/lowering/nn_lowering/element_binary_lowering.md | sed -n '72,79p'` -> family 级注意事项已显式区分 mixed scalar 与 mixed compare
 - `nl -ba test/pass/nn_lowering/test_lowering_nn_lowering.py | sed -n '1152,1201p'` -> `test_lower_add_mixed_symbol_to_kernel` 中文测试目的已改为 `dma.fill` 路径，断言仍禁止 `dma.broadcast`
 - `nl -ba test/pass/nn_lowering/element_compare_eq.py | sed -n '180,206p'` -> mixed compare 用例仍断言 `DmaBroadcastOp` 存在且 `DmaFillOp` 不存在
@@ -126,7 +126,7 @@
 任务目标：在指定 `worktree` 内合并已通过复审的 nn_lowering mixed scalar 文案/测试注释收口改动，并按远端主分支口径完成提交与推送
 改动：
 - 复核 `TODO.md` 当前任务条目，确认 `T-20260414-e056a6e4` 已改派为 `李白`，任务类型为 `merge`、状态为 `进行中`，允许继续本轮合并。
-- 复核当前任务记录，确认最新 review 结论为 `通过`，本轮待合并范围收敛为 `kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py`、`spec/pass/lowering/nn_lowering.md`、`spec/pass/lowering/nn_lowering/element_binary_lowering.md`、`test/pass/nn_lowering/element_binary_add.py`、`test/pass/nn_lowering/element_compare_eq.py`、`test/pass/nn_lowering/test_lowering_nn_lowering.py` 与当前记录文件。
+- 复核当前任务记录，确认最新 review 结论为 `通过`，本轮待合并范围收敛为 `kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py`、`spec/pass/lowering/nn_lowering/spec.md`、`spec/pass/lowering/nn_lowering/element_binary_lowering.md`、`test/pass/nn_lowering/element_binary_add.py`、`test/pass/nn_lowering/element_compare_eq.py`、`test/pass/nn_lowering/test_lowering_nn_lowering.py` 与当前记录文件。
 - 记录当前基线状态：任务分支 `HEAD=0078801`，远端主分支 `origin/main=17ca684`，相对计数为 `9 0`，说明本任务分支落后最新远端主分支 9 个已推送提交；下一步先在当前 `worktree` 内追平远端主分支，再恢复任务改动并完成本轮 merge。
 验证：
 - `sed -n '1,220p' /home/lfr/kernelcode_generate/TODO.md`：确认当前任务条目显示 `merge`、指派 `李白`、状态 `进行中`。

@@ -5,7 +5,7 @@
 
 使用示例:
 - #include "include/api/cost/Dma.h"
-- S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::cost::CostKind::Memory>(target, source);
+- S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::memory>(target, source);
 
 创建者: 金铲铲大作战
 最后修改人: 金铲铲大作战
@@ -30,7 +30,7 @@ namespace cost {
 - 声明 `dma.copy` 对应的公共成本 helper。
 
 使用示例:
-- S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::cost::CostKind::Memory>(target, source);
+- S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::memory>(target, source);
 
 创建者: 金铲铲大作战
 最后修改人: 金铲铲大作战
@@ -48,8 +48,8 @@ S_INT copy(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& s
 - 声明 `slice/deslice` 成本 helper，参数顺序与 include/api/Dma.h 保持一致。
 
 使用示例:
-- S_INT slice_cost = npu_demo::cost::slice<TSM, GM, float, npu_demo::cost::CostKind::Memory>(target, source, offset, size, stride);
-- S_INT deslice_cost = npu_demo::cost::deslice<GM, TSM, float, npu_demo::cost::CostKind::Memory>(target, source, offset, size, stride);
+- S_INT slice_cost = npu_demo::cost::slice<TSM, GM, float, npu_demo::memory>(target, source, offset, size, stride);
+- S_INT deslice_cost = npu_demo::cost::deslice<GM, TSM, float, npu_demo::memory>(target, source, offset, size, stride);
 
 创建者: 金铲铲大作战
 最后修改人: 金铲铲大作战

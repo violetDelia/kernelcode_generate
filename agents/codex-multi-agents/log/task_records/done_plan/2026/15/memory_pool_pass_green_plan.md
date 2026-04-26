@@ -26,7 +26,7 @@
 - 当前公开 IR 已有：
   - [`spec/dialect/dma.md`](../../spec/dialect/dma.md) 中的 `dma.alloc / dma.free / dma.view / dma.reshape`
   - [`spec/pass/lowering/symbol_loop_hoist.md`](../../spec/pass/lowering/symbol_loop_hoist.md)
-  - [`spec/pass/lowering/dma_memory_hierarchy.md`](../../spec/pass/lowering/dma_memory_hierarchy.md)
+  - [`spec/pass/lowering/dma_memory_hierarchy/spec.md`](../../spec/pass/lowering/dma_memory_hierarchy/spec.md)
 - `analysis .plan.md` 里的 `alloc [2*A*B, i8] + with type` 思路保留为本计划第一版主路径。
 - 本计划不再把 `#layout.contiguous` 作为第一版公开合同前提，也不要求 pool bucket 绑定具体 layout 文本。
 - 第一版明确采用：
@@ -68,7 +68,7 @@
   - [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)
   - [`spec/pass/pass_manager.md`](../../spec/pass/pass_manager.md)
   - [`spec/pass/lowering/symbol_loop_hoist.md`](../../spec/pass/lowering/symbol_loop_hoist.md)
-  - [`spec/pass/lowering/dma_memory_hierarchy.md`](../../spec/pass/lowering/dma_memory_hierarchy.md)
+  - [`spec/pass/lowering/dma_memory_hierarchy/spec.md`](../../spec/pass/lowering/dma_memory_hierarchy/spec.md)
 - 推荐顺序：
   - `LowerNnToKernelPass -> BufferResultsToOutParamsPass -> TilePass -> SymbolLoopHoistPass -> MemoryPoolPass -> LowerDmaMemoryHierarchyPass`
 - 这样安排的原因：

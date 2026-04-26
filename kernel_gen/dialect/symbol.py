@@ -215,7 +215,7 @@ def _make_symbol_runtime_value(expr: str) -> int | "SymbolDim":
 
     关联文件:
     - spec: spec/dsl/mlir_gen.md
-    - test: test/dsl/test_ast_visitor.py
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -305,7 +305,7 @@ def _canonicalize_symbolic_expr(expr: str) -> str:
 
     关联文件:
     - spec: spec/dsl/mlir_gen.md
-    - test: test/dsl/test_ast_visitor.py
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -327,7 +327,7 @@ def build_public_symbol_expr(lhs_expr: str, rhs_expr: str, op_symbol: str) -> st
 
     关联文件:
     - spec: spec/dsl/mlir_gen.md
-    - test: test/dsl/test_ast_visitor.py
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -1863,7 +1863,7 @@ class SymbolCastOp(IRDLOperation):
         - SymbolCastOp(source, i32)
 
         关联文件:
-        - spec: spec/dsl/emit_c.md
+        - spec: spec/dsl/gen_kernel/emit.md
         - test: test/dialect/test_symbol_dialect.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
@@ -1884,7 +1884,7 @@ class SymbolCastOp(IRDLOperation):
         - SymbolCastOp(source, i32).verify_()
 
         关联文件:
-        - spec: spec/dsl/emit_c.md
+        - spec: spec/dsl/gen_kernel/emit.md
         - test: test/dialect/test_symbol_dialect.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """

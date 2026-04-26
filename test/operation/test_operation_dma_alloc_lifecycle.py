@@ -1,7 +1,7 @@
 """dma family tests.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 `kernel_gen.operation.dma` 的 family 级测试布局。
@@ -26,11 +26,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import kernel_gen.operation.dma as dma_api
-from kernel_gen.operation.dma import alloc, cast, copy, deslice, flatten, free, load, reshape, slice, store, view
+from kernel_gen.operation.dma import alloc, cast, copy, flatten, free, reshape
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
-from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 

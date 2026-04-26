@@ -11,7 +11,7 @@
 
 关联文件:
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
-- Spec 文档: spec/pass/lowering/nn_lowering.md
+- Spec 文档: spec/pass/lowering/nn_lowering/spec.md
 - 测试文件: test/pass/nn_lowering/element_compare_ge.py
 """
 
@@ -48,7 +48,7 @@ def _make_memory_type(element_type: Attribute = i32) -> NnMemoryType:
     - mem_type = _make_memory_type()
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_compare_ge.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -75,7 +75,7 @@ def _build_module(
     - module, block = _build_module([lhs, rhs], result_type, lambda block: [nn_op])
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/element_compare_ge.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
@@ -101,7 +101,7 @@ def _build_module(
 # 测试目的: 验证 nn.ge lower 为 kernel.binary_elewise(kind="ge")。
 # 使用示例: pytest -q test/pass/nn_lowering/element_compare_ge.py -k test_lower_ge_to_kernel_binary_elewise
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/element_compare_ge.py
 def test_lower_ge_to_kernel_binary_elewise() -> None:
     lhs_type = _make_memory_type()

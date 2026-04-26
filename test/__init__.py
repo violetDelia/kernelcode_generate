@@ -11,7 +11,7 @@
 - pytest -q test/pass/nn_lowering/select.py
 
 关联文件:
-- spec: spec/pass/lowering/nn_lowering.md
+- spec: spec/pass/lowering/nn_lowering/spec.md
 - test: test/pass/nn_lowering/select.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
 """

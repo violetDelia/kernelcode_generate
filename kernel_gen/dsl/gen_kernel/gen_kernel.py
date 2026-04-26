@@ -1,44 +1,64 @@
-"""Compatibility wrapper for package-level `gen_kernel`.
+"""`gen_kernel(...)` 公开模块入口。
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: OpenAI Codex
 
 功能说明:
-- 保留 `gen_kernel(obj, ctx)` 的公开兼容入口。
-- 统一委托给包内 `emit_c(obj, ctx)` 生成完整源码，再把 `EmitCError` 折回旧公开错误类型。
-- 让包根公开入口与旧模块级实现解耦，便于后续继续收口 `kernel_gen/dsl/gen_kernel.py` 的 legacy 逻辑。
+- 提供 `gen_kernel(obj, ctx)` 的稳定公开入口。
+- 单个非函数 op 继续直接委托给本模块绑定的 `emit_c_op(...)`。
+- 函数 / module 输入统一委托给内部 `KernelEmitter` 生成完整源码。
+- 内部函数级 kernel emitter 实现位于 `kernel_emitter.py`，本文件只承载公开 API。
 
 使用示例:
 - from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
 - source = gen_kernel(func_op, EmitCContext(target="cpu"))
 
 关联文件:
-- spec: [spec/dsl/gen_kernel.md](../../../../spec/dsl/gen_kernel.md)
-- spec: [spec/dsl/emit_c.md](../../../../spec/dsl/emit_c.md)
-- test: [test/dsl/test_gen_kernel.py](../../../../test/dsl/test_gen_kernel.py)
-- 功能实现: [kernel_gen/dsl/gen_kernel/](.)
+- spec: [spec/dsl/gen_kernel/gen_kernel.md](../../../../spec/dsl/gen_kernel/gen_kernel.md)
+- spec: [spec/dsl/gen_kernel/emit.md](../../../../spec/dsl/gen_kernel/emit.md)
+- test: [test/dsl/gen_kernel/test_gen_kernel.py](../../../../test/dsl/gen_kernel/test_gen_kernel.py)
+- 功能实现: [kernel_gen/dsl/gen_kernel/gen_kernel.py](.)
+- 功能实现: [kernel_gen/dsl/gen_kernel/kernel_emitter.py](kernel_emitter.py)
 """
 
 from __future__ import annotations
 
-from ._legacy import load_legacy_gen_kernel_module
-from .emit_c import EmitCContext, EmitCError
+from . import kernel_emitter as _kernel_emitter
+from .emit import emit_c_op
+from .emit_context import EmitCContext, EmitCError
 
-_legacy_gen_kernel = load_legacy_gen_kernel_module()
-
-GenKernelError = _legacy_gen_kernel.GenKernelError
-emit_c = None
+GenKernelError = _kernel_emitter.GenKernelError
+KernelEmitter = _kernel_emitter.KernelEmitter
 
 
 def gen_kernel(obj: object, ctx: EmitCContext) -> str:
-    """兼容保留旧函数名的源码发射入口。"""
+    """生成单个 op 或完整函数/module 的目标源码。"""
 
-    if emit_c is None:
-        raise RuntimeError("gen_kernel wrapper emit_c binding is missing")
+    emit_ctx = ctx
+    if ctx.target == "npu_demo":
+        emit_ctx = EmitCContext(
+            target=ctx.target,
+            indent="    ",
+            naming=ctx.naming,
+            type_converter=ctx.type_converter,
+            config=dict(ctx.config or {}),
+        )
+    emitter = KernelEmitter(emit_ctx, emit_op=emit_c_op)
     try:
-        return emit_c(obj, ctx)
+        source = emitter.emit(obj)
     except EmitCError as exc:
         raise GenKernelError(str(exc)) from exc
+    include = emitter.emit_include()
+    if include:
+        if source:
+            return include + source
+        return include.rstrip()
+    return source
 
 
-__all__ = ["GenKernelError", "gen_kernel"]
+def __getattr__(name: str) -> object:
+    if name in {"gen_signature", "gen_body"}:
+        raise AttributeError(f"{name} is no longer a public entry; use gen_kernel(...) instead")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+__all__ = ["GenKernelError", "KernelEmitter", "gen_kernel"]

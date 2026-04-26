@@ -58,9 +58,7 @@ class _SymbolList:
         - test: test/symbol_variable/test_symbol_shape.py
         - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
-        self.shape: List[SymbolDim] = []
-        for value in shapes:
-            self.shape.append(self._normalize_value(value))
+        self.shape = [self._normalize_value(value) for value in shapes]
 
     @staticmethod
     def _normalize_value(value: object) -> SymbolDim:
@@ -77,6 +75,12 @@ class _SymbolList:
     def _render_items(items: Iterable[SymbolDim]) -> str:
         """统一渲染 SymbolDim 序列。"""
         return ", ".join(str(item.get_symbol()) for item in items)
+
+    @staticmethod
+    def _serialize_dim(dim: SymbolDim) -> int | str:
+        """序列化单个维度为公开值。"""
+        public_value = dim.get_value()
+        return public_value if isinstance(public_value, int) else str(public_value)
 
     def _normalize_slice_values(self, value: object) -> List[SymbolDim]:
         """规范化切片赋值输入。
@@ -269,7 +273,8 @@ class _SymbolList:
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 动态维度输出字符串，静态维度输出整数。
+        - 动态维度复用 `SymbolDim.get_value()` 的公开文本口径。
+        - 静态维度输出整数。
 
         使用示例:
         - SymbolShape([\"N\", 32]).get_values()
@@ -279,13 +284,7 @@ class _SymbolList:
         - test: test/symbol_variable/test_symbol_shape.py
         - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
-        values: List[int | str] = []
-        for dim in self.shape:
-            if dim.is_dynamic():
-                values.append(str(dim.get_symbol()))
-            else:
-                values.append(int(dim.get_symbol()))
-        return values
+        return [self._serialize_dim(dim) for dim in self.shape]
 
 
 class SymbolList(_SymbolList):

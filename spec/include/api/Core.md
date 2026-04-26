@@ -9,6 +9,26 @@
 - `Vector` 不做动态分配，不依赖初始化列表或标准库容器。
 - `Core` 不定义 `view`、`reshape`、`slice`、`deslice` 等业务 helper。
 
+## API 列表
+
+- `enum StatusCode { kOk = 0, kError = 1 }`
+- `using Status = StatusCode`
+- `using S_INT = long long`
+- `class Vector`
+- `Vector::Vector(long long* data, unsigned long long size)`
+- `Vector::Vector(const long long* data, unsigned long long size)`
+- `Vector::Vector(long long value0)`
+- `Vector::Vector(long long value0, long long value1)`
+- `Vector::Vector(long long value0, long long value1, long long value2)`
+- `Vector::Vector(long long value0, long long value1, long long value2, long long value3)`
+- `Vector::Vector(const Vector& other)`
+- `Vector::operator=(const Vector& other) -> Vector&`
+- `Vector::size() const -> unsigned long long`
+- `Vector::data() -> long long*`
+- `Vector::data() const -> const long long*`
+- `Vector::operator[](unsigned long long index) -> long long&`
+- `Vector::operator[](unsigned long long index) const -> const long long&`
+
 ## 文档信息
 
 - 创建者：`摸鱼小分队`

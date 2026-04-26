@@ -44,7 +44,7 @@ def _find_block_symbol_dim(block: Block, dim: str) -> SSAValue | None:
     - symbol_value = _find_block_symbol_dim(block, "M")
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
     """

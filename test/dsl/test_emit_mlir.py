@@ -16,7 +16,7 @@
 
 关联文件:
 - 功能实现: kernel_gen/dsl/ast/visitor.py, kernel_gen/dsl/mlir_gen/emit/core.py
-- Spec 文档: spec/dsl/ast_visitor.md, spec/dsl/emit_mlir.md
+- Spec 文档: spec/dsl/ast/visitor.md, spec/dsl/emit_mlir.md
 - 测试文件: test/dsl/test_emit_mlir.py
 """
 
@@ -137,7 +137,6 @@ from kernel_gen.dsl.ast import (
     TensorAxisAccessAST,
     VarAST,
     ScalarArgAST,
-    _ParseFailure,
     parse_function,
 )
 from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
@@ -702,7 +701,7 @@ def test_emit_mlir_unsupported_node_reports_location() -> None:
 # 测试目的: 验证 AstVisitor 顺序访问 block 并生成多语句 SSA。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_ast_visitor_visit_block_preserves_order
 # 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
-# 对应 spec 文件路径: spec/dsl/ast_visitor.md
+# 对应 spec 文件路径: spec/dsl/ast/visitor.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_ast_visitor_visit_block_preserves_order() -> None:
     def add(
@@ -739,7 +738,7 @@ def test_ast_visitor_visit_block_preserves_order() -> None:
 # 测试目的: 验证同一表达式节点复用同一 value。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_ast_visitor_reuses_expression_value
 # 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
-# 对应 spec 文件路径: spec/dsl/ast_visitor.md
+# 对应 spec 文件路径: spec/dsl/ast/visitor.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_ast_visitor_reuses_expression_value() -> None:
     memory = Memory([2, 2], NumericType.Float32)
@@ -762,7 +761,7 @@ def test_ast_visitor_reuses_expression_value() -> None:
 # 测试目的: 验证不支持语句/表达式时抛 AstVisitorError 并携带位置信息。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_lowering_failure_reports_diagnostics
 # 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
-# 对应 spec 文件路径: spec/dsl/ast_visitor.md
+# 对应 spec 文件路径: spec/dsl/ast/visitor.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_lowering_failure_reports_diagnostics() -> None:
     def bad(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
@@ -1181,7 +1180,7 @@ def test_emit_mlir_dma_free_rejects_non_memory_operand() -> None:
 # 功能说明: 验证 nn.sub dtype promotion 会插入 dma.cast 并返回目标 dtype 的 nn.sub。
 # 测试目的: 锁定 build_func_op 对 nn.sub 混合 dtype 的 cast lowering 与返回类型。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/mlir_gen/emit/core.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py, kernel_gen/dsl/mlir_gen/emit/core.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
@@ -1216,7 +1215,7 @@ def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
 # 测试目的: 覆盖 AstVisitor.visit_function 的符号表命中与跳过分支。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_ast_visitor_visit_function_skips_unbound_input
 # 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
-# 对应 spec 文件路径: spec/dsl/ast_visitor.md
+# 对应 spec 文件路径: spec/dsl/ast/visitor.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_ast_visitor_visit_function_skips_unbound_input() -> None:
     memory = Memory([2, 2], NumericType.Float32)
@@ -1242,7 +1241,7 @@ def test_ast_visitor_visit_function_skips_unbound_input() -> None:
 # 测试目的: 验证 visit_block 遇到未知 block 节点会抛出 AstVisitorError。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_ast_visitor_rejects_block_without_statements
 # 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
-# 对应 spec 文件路径: spec/dsl/ast_visitor.md
+# 对应 spec 文件路径: spec/dsl/ast/visitor.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_ast_visitor_rejects_block_without_statements() -> None:
     class DummyBlock:
@@ -1266,7 +1265,7 @@ def test_ast_visitor_rejects_block_without_statements() -> None:
 # 测试目的: 验证 visit_stmt 捕获 _LoweringError 并转为 AstVisitorError。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_ast_visitor_visit_stmt_wraps_lowering_error
 # 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
-# 对应 spec 文件路径: spec/dsl/ast_visitor.md
+# 对应 spec 文件路径: spec/dsl/ast/visitor.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_ast_visitor_visit_stmt_wraps_lowering_error() -> None:
     visitor = AstVisitor()
@@ -2126,7 +2125,7 @@ def test_emit_mlir_for_loop_restores_loop_vars_and_errors() -> None:
 # 功能说明: 覆盖符号标量函数的输出判断。
 # 测试目的: 验证无输出时仍被视为符号标量函数。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_mlir_gen_symbol_scalar_function_no_outputs
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_mlir_gen_symbol_scalar_function_no_outputs() -> None:
@@ -2147,7 +2146,7 @@ def test_mlir_gen_symbol_scalar_function_no_outputs() -> None:
 # 功能说明: 覆盖返回类型校验的空输出与标量分支。
 # 测试目的: 验证无输出直接返回、标量返回的 i32 约束。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_mlir_gen_validate_return_type_variants
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_mlir_gen_validate_return_type_variants() -> None:
@@ -2386,7 +2385,7 @@ def test_emit_mlir_matmul_contracting_dim_mismatch_reports_location() -> None:
 # 功能说明: 覆盖 conv2d_img2col2d_tiled_npu_demo 的 emit 侧最小 raw IR 骨架。
 # 测试目的: 验证 alloc target deslice 与 img2col2d/reshape/matmul 可在同一 raw func.func 链路共存。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_supports_conv2d_img2col2d_tiled_npu_demo_chain
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_emit_mlir_supports_conv2d_img2col2d_tiled_npu_demo_chain() -> None:
@@ -2527,6 +2526,7 @@ def test_emit_mlir_private_helpers_symbolic_dim_stride_and_barrier_validation() 
     assert str(_eval_symbolic_dim_node(py_ast.parse("N - 2", mode="eval").body, None)) == "N - 2"
     assert str(_eval_symbolic_dim_node(py_ast.parse("N * 3", mode="eval").body, None)) == "3*N"
     assert _eval_symbolic_dim_node(py_ast.parse("4 / 2", mode="eval").body, None) == 2
+    assert str(_eval_symbolic_dim_node(py_ast.parse("N // 2", mode="eval").body, None)) == "N // 2"
 
     with pytest.raises(_LoweringError, match="Unsupported symbolic dim expression"):
         _eval_symbolic_dim_node(py_ast.parse("4 / 3", mode="eval").body, None)

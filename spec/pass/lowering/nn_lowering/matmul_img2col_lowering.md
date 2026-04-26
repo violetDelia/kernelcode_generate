@@ -6,6 +6,10 @@
 - 输出固定为 `kernel.matmul`、`kernel.img2col1d`、`kernel.img2col2d`，并通过 `dma.alloc` 创建结果 memory。
 - 模块级公开入口只保留 `matmul_img2col_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
 
+## API 列表
+
+- `matmul_img2col_patterns() -> list[RewritePattern]`
+
 ## 文档信息
 
 - 创建者：`小李飞刀`
@@ -21,7 +25,7 @@
 
 ## 依赖
 
-- 总规范：[`spec/pass/lowering/nn_lowering.md`](../../../../spec/pass/lowering/nn_lowering.md)
+- 总规范：[`spec/pass/lowering/nn_lowering/spec.md`](../../../../spec/pass/lowering/nn_lowering/spec.md)
 - 公共 helper：[`spec/pass/lowering/nn_lowering/nn_lowering_utility.md`](../../../../spec/pass/lowering/nn_lowering/nn_lowering_utility.md)
 - NN dialect：[`spec/dialect/nn.md`](../../../../spec/dialect/nn.md)
 - Kernel dialect：[`spec/dialect/kernel.md`](../../../../spec/dialect/kernel.md)

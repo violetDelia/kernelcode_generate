@@ -8,8 +8,8 @@
   - [`spec/pass/registry.md`](../../spec/pass/registry.md)
   - [`spec/pass/pass_manager.md`](../../spec/pass/pass_manager.md)
   - [`spec/pass/lowering/buffer_results_to_out_params.md`](../../spec/pass/lowering/buffer_results_to_out_params.md)
-  - [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)
-  - [`spec/pass/lowering/dma_memory_hierarchy.md`](../../spec/pass/lowering/dma_memory_hierarchy.md)
+  - [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)
+  - [`spec/pass/lowering/dma_memory_hierarchy/spec.md`](../../spec/pass/lowering/dma_memory_hierarchy/spec.md)
   - [`spec/pass/lowering/memory_pool.md`](../../spec/pass/lowering/memory_pool.md)
   - [`spec/pass/lowering/tile.md`](../../spec/pass/lowering/tile.md)
   - [`spec/pass/lowering/tile_analysis.md`](../../spec/pass/lowering/tile_analysis.md)
@@ -159,7 +159,7 @@
 ## 当前基线
 
 - 当前公开合同：
-  - [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md) 已写明 `lower-nn` 是唯一公开 pass 名，但 compat `nn_to_kernel` 入口仍存在。
+  - [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md) 已写明 `lower-nn` 是唯一公开 pass 名，但 compat `nn_to_kernel` 入口仍存在。
   - [`spec/pass/lowering/tile.md`](../../spec/pass/lowering/tile.md) 已把 `tile-analysis` / `tile-elewise` / `tile-reduce` 定义成对外合同，但真实逻辑仍依赖 [`kernel_gen/passes/lowering/tile.py`](../../kernel_gen/passes/lowering/tile.py)。
   - [`spec/pass/pass_manager.md`](../../spec/pass/pass_manager.md) 仍承载 tile family、dma hierarchy、symbol-loop-hoist 的顺序合同，并保留 `Pass.run -> apply` 兼容语义。
 - 当前公开 API：
@@ -398,13 +398,13 @@ consumer migration matrix fixed
 #### 目标 spec / API
 
 - [`spec/pass/lowering/buffer_results_to_out_params.md`](../../spec/pass/lowering/buffer_results_to_out_params.md)
-- [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)
+- [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)
 - `公开 API：kernel_gen.passes.buffer_results_to_out_params.BufferResultsToOutParamsPass`
 
 #### 禁止修改面 / 合同真源
 
 - `禁止修改面：expectation/pass/buffer_results_to_out_params/**`
-- `合同真源：spec/pass/lowering/buffer_results_to_out_params.md + spec/pass/lowering/nn_lowering.md > test/pass/test_buffer_results_to_out_params.py + test/pass/nn_lowering/public_name.py > 当前实现`
+- `合同真源：spec/pass/lowering/buffer_results_to_out_params.md + spec/pass/lowering/nn_lowering/spec.md > test/pass/test_buffer_results_to_out_params.py + test/pass/nn_lowering/public_name.py > 当前实现`
 
 #### 最小功能闭环
 
@@ -474,7 +474,7 @@ import kernel_gen.passes.lowering.nn_to_kernel -> ModuleNotFoundError
 
 #### 目标 spec / API
 
-- [`spec/pass/lowering/dma_memory_hierarchy.md`](../../spec/pass/lowering/dma_memory_hierarchy.md)
+- [`spec/pass/lowering/dma_memory_hierarchy/spec.md`](../../spec/pass/lowering/dma_memory_hierarchy/spec.md)
 - [`spec/pass/lowering/memory_pool.md`](../../spec/pass/lowering/memory_pool.md)
 - `公开 API：kernel_gen.passes.dma_memory_hierarchy.LowerDmaMemoryHierarchyPass`
 - `公开 API：kernel_gen.passes.memory_pool.MemoryPoolPass`
@@ -482,7 +482,7 @@ import kernel_gen.passes.lowering.nn_to_kernel -> ModuleNotFoundError
 #### 禁止修改面 / 合同真源
 
 - `禁止修改面：expectation/pass/pipeline/default_lowering.py`
-- `合同真源：spec/pass/lowering/dma_memory_hierarchy.md + spec/pass/lowering/memory_pool.md > test/pass/test_dma_memory_hierarchy.py + test/pass/test_memory_pool.py > 当前实现`
+- `合同真源：spec/pass/lowering/dma_memory_hierarchy/spec.md + spec/pass/lowering/memory_pool.md > test/pass/test_dma_memory_hierarchy.py + test/pass/test_memory_pool.py > 当前实现`
 
 #### 最小功能闭环
 
@@ -628,14 +628,14 @@ tile pass shell no longer depends on old mixed path layout
 
 #### 目标 spec / API
 
-- [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)
+- [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)
 - [`spec/pass/lowering/nn_lowering`](../../spec/pass/lowering/nn_lowering)
 - `公开 API：build_registered_pass("lower-nn")`
 
 #### 禁止修改面 / 合同真源
 
 - `禁止修改面：expectation/pass/lowing/nn_lowering/**`
-- `合同真源：expectation/pass/lowing/nn_lowering > spec/pass/lowering/nn_lowering.md > test/pass/nn_lowering/*.py > 当前实现`
+- `合同真源：expectation/pass/lowing/nn_lowering > spec/pass/lowering/nn_lowering/spec.md > test/pass/nn_lowering/*.py > 当前实现`
 
 #### 最小功能闭环
 

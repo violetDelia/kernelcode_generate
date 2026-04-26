@@ -4,6 +4,13 @@
 
 - 定义 `nn_lowering` 的公共校验与辅助入口，统一 module、space、result 与 operand 数量的检查逻辑。
 
+## API 列表
+
+- `ensure_module_op(module: Operation) -> ModuleOp`
+- `ensure_space_attr(op: Operation) -> NnMemorySpaceAttr`
+- `ensure_single_result(op: Operation) -> NnMemoryType`
+- `ensure_operand_count(op: Operation, expected: int) -> None`
+
 ## 文档信息
 
 - 创建者：`睡觉小分队`
@@ -15,7 +22,7 @@
 
 ## 依赖
 
-- [`spec/pass/lowering/nn_lowering.md`](../../../../spec/pass/lowering/nn_lowering.md)
+- [`spec/pass/lowering/nn_lowering/spec.md`](../../../../spec/pass/lowering/nn_lowering/spec.md)
 - [`spec/dialect/nn.md`](../../../../spec/dialect/nn.md)
 
 ## 目标

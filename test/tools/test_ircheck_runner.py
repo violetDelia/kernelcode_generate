@@ -1,17 +1,10 @@
 """ircheck runner tests.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 kernel_gen/tools/ircheck.py 的 run 行为：compile args 解析、pass/pipeline 执行、检查语义与退出码。
-
-当前覆盖率信息:
-- 当前覆盖率: 未统计（本任务验证未启用 coverage 统计）。
-- 达标判定: 待后续补充统计结果。
-
-覆盖率命令:
-- `pytest -q --cov=kernel_gen.tools.ircheck --cov-branch --cov-report=term-missing test/tools/test_ircheck_runner.py`
 
 使用示例:
 - pytest -q test/tools/test_ircheck_runner.py

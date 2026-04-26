@@ -14,7 +14,7 @@
 - NnLoweringPass().apply(Context(), module)
 
 关联文件:
-- spec: spec/pass/lowering/nn_lowering.md
+- spec: spec/pass/lowering/nn_lowering/spec.md
 - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 """
@@ -72,7 +72,7 @@ class NnLoweringError(ValueError):
     - raise NnLoweringError("Unsupported nn op")
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -105,7 +105,7 @@ def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
     - space = _ensure_space_attr(op)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -129,7 +129,7 @@ def _ensure_single_result(op: Operation) -> NnMemoryType:
     - result_type = _ensure_single_result(op)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -155,7 +155,7 @@ def _ensure_operand_count(op: Operation, count: int) -> None:
     - _ensure_operand_count(op, 2)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -178,7 +178,7 @@ def _ensure_int_attr(op: Operation, name: str) -> int:
     - axis = _ensure_int_attr(op, "axis")
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -206,7 +206,7 @@ def _ensure_unary_result_matches_operand(
     - shape = _ensure_unary_result_matches_operand(op, operand.type, result_type)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/exp.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -246,7 +246,7 @@ def _collect_unary_dynamic_shape(
     - params = _collect_unary_dynamic_shape(block, op, operand, operand_shape, result_shape)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/exp.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -280,7 +280,7 @@ def _ensure_symbol_int(op: Operation, operand: SSAValue | Operation) -> SSAValue
     - kw = _ensure_symbol_int(op, op.operands[1])
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -307,7 +307,7 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
     - value = _ensure_symbol_or_int(op, operand)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -334,7 +334,7 @@ def _ensure_reduce_axis(op_name: str, axes_attr: ArrayAttr) -> int:
     - axis = _ensure_reduce_axis("nn.reduce_min", axes_attr)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -366,7 +366,7 @@ def _ensure_reduce_keepdim(op_name: str, keepdim_attr: Attribute) -> bool:
     - keepdim = _ensure_reduce_keepdim("nn.reduce_min", keepdim_attr)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -397,7 +397,7 @@ def _normalize_shape_dims(shape: Iterable[Attribute]) -> list[int | str]:
     - dims = _normalize_shape_dims(mem_type.shape.data)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -439,7 +439,7 @@ def _collect_reduce_dynamic_shape(
     - params = _collect_reduce_dynamic_shape(block, op, operand, operand_shape, result_shape, axis, keepdim)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/reduce_min.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -480,7 +480,7 @@ def _ensure_matmul_shape(
     - _ensure_matmul_shape(lhs_type, rhs_type, out_type)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -509,7 +509,7 @@ def _ensure_matmul_stride(mem_type: NnMemoryType) -> None:
     - _ensure_matmul_stride(out_type)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -545,7 +545,7 @@ def _materialize_fill(
     - filled = _materialize_fill(block, scalar, result_type, space)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -576,7 +576,7 @@ def _materialize_fill_for_mixed(
     - lhs, rhs = _materialize_fill_for_mixed(block, op, lhs, rhs, result_type)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -603,7 +603,7 @@ def _lower_binary(block: Block, op: Operation) -> None:
     - _lower_binary(block, op)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -650,7 +650,7 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
     - _lower_reduce(block, op, kind="min")
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -712,7 +712,7 @@ def _lower_matmul(block: Block, op: Operation) -> None:
     - _lower_matmul(block, op)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -769,7 +769,7 @@ def _ensure_img2col_params(
     - operand, params = _ensure_img2col_params(op, 6, 5)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -794,7 +794,7 @@ def _lower_img2col1d(block: Block, op: Operation) -> None:
     - _lower_img2col1d(block, op)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -825,7 +825,7 @@ def _lower_img2col2d(block: Block, op: Operation) -> None:
     - _lower_img2col2d(block, op)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
@@ -856,7 +856,7 @@ def nn_lowering_patterns() -> list[RewritePattern]:
     - patterns = nn_lowering_patterns()
 
     关联文件:
-    - spec: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
+    - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
     - test: [test/pass/nn_lowering/public_name.py](test/pass/nn_lowering/public_name.py)
     - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
     """
@@ -891,7 +891,7 @@ class _RejectUnsupportedNnOpPattern(RewritePattern):
     - pattern = _RejectUnsupportedNnOpPattern()
 
     关联文件:
-    - spec: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
+    - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
     - test: [test/pass/nn_lowering/public_name.py](test/pass/nn_lowering/public_name.py)
     - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
     """
@@ -920,7 +920,7 @@ class NnLoweringPass(Pass):
     - NnLoweringPass().run(module)
 
     关联文件:
-    - spec: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
+    - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
     - test: [test/pass/nn_lowering/test_lowering_nn_lowering.py](test/pass/nn_lowering/test_lowering_nn_lowering.py)
     - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
     """

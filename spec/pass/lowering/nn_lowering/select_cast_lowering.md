@@ -6,6 +6,10 @@
 - 结果 memory 由 `dma.alloc` 创建，并写入 `kernel.select`、`dma.cast` 或 `kernel.exp`。
 - 模块级公开入口只保留 `select_cast_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
 
+## API 列表
+
+- `select_cast_patterns() -> list[RewritePattern]`
+
 ## 文档信息
 
 - 创建者：`咯咯咯`
@@ -21,7 +25,7 @@
 
 ## 依赖
 
-- 总规范：[`spec/pass/lowering/nn_lowering.md`](../../../spec/pass/lowering/nn_lowering.md)
+- 总规范：[`spec/pass/lowering/nn_lowering/spec.md`](../../../spec/pass/lowering/nn_lowering/spec.md)
 - 工具函数：[`spec/pass/lowering/nn_lowering/nn_lowering_utility.md`](../../../spec/pass/lowering/nn_lowering/nn_lowering_utility.md)
 - NN dialect：[`spec/dialect/nn.md`](../../../spec/dialect/nn.md)
 - Kernel dialect：[`spec/dialect/kernel.md`](../../../spec/dialect/kernel.md)

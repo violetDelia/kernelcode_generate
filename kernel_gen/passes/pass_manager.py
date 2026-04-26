@@ -5,7 +5,7 @@
 
 功能说明:
 - 定义 Pass 与 PassManager 的基础行为。
-- 提供 `build_default_lowering_pass_manager` 兼容入口，内部委派到 pipeline builder。
+- 固定 `kernel_gen.passes.pass_manager` 只承载 Pass 抽象与 PassManager，不再承载默认 pipeline builder。
 
 使用示例:
 - import importlib
@@ -14,7 +14,6 @@
 - pm = PassManager(name="opt")
 - pm.add_pass(MyPass())
 - result = pm.run(ir)
-- pm = build_default_lowering_pass_manager()
 
 关联文件:
 - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
@@ -74,15 +73,14 @@ class Pass(XdslModulePass):
         raise NotImplementedError("Pass.run must be implemented")
 
     def apply(self: "Pass", ctx: Context, op: ModuleOp) -> None:
-        """兼容 xdsl `ModulePass` 接口。
+        """满足 xdsl `ModulePass` 接口。
 
         创建者: 小李飞刀
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 默认将 `ModulePass.apply(...)` 适配到旧 `run(...)` 合同。
-        - 允许现有 pass 仍以 `run(...)` 作为主要实现入口，同时满足新的
-          `ModulePass` 公开合同。
+        - `Pass` 的公开主入口固定为 `run(target)`。
+        - `apply(ctx, module)` 只负责把 xdsl `ModulePass` 调用桥接到同一公开 `run(...)` 入口。
 
         使用示例:
         - pass_obj.apply(ctx, module)
@@ -95,153 +93,6 @@ class Pass(XdslModulePass):
 
         _ = ctx
         self.run(op)
-
-
-def _is_pass_like(obj: object) -> bool:
-    """判断对象是否满足 Pass 最小协议。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 必须包含 `run` 可调用属性。
-    - 必须包含字符串类型的 `name` 属性。
-
-    使用示例:
-    - if _is_pass_like(pass_obj): pm.add_pass(pass_obj)
-
-    关联文件:
-    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
-    - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
-    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
-    """
-
-    if not hasattr(obj, "name"):
-        return False
-    if not isinstance(getattr(obj, "name"), str):
-        return False
-    if hasattr(obj, "run") and callable(getattr(obj, "run")):
-        return True
-    if hasattr(obj, "apply") and callable(getattr(obj, "apply")):
-        return True
-    return False
-
-
-def _build_pass_manager_from_passes(
-    name: str | None, passes: Sequence[XdslModulePass]
-) -> "PassManager":
-    """按顺序构造 PassManager。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 通过共享 helper 统一 `PassManager` 的初始化与批量追加逻辑。
-    - 供 pipeline builder 与 registry 内部的 no-op pipeline 复用，避免重复写
-      `PassManager(...)` + `add_pass(...)` 的构造样板。
-
-    使用示例:
-    - pm = _build_pass_manager_from_passes("default-lowering", [DecompassPass(), NnLoweringPass()])
-
-    关联文件:
-    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
-    - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
-    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
-    """
-
-    pm = PassManager(name=name)
-    pm.extend(passes)
-    return pm
-
-
-def _build_pass_name_positions(pass_names: Sequence[str]) -> dict[str, int]:
-    """把 pass 名称列表规整为首个位置映射。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 统一 pass 顺序校验使用的索引查询，避免在同一组名称上重复遍历。
-    - 若出现重复名称，只保留首次出现的位置，保持与 `list.index(...)` 一致的语义。
-
-    使用示例:
-    - positions = _build_pass_name_positions(["decompass", "lower-nn", "lower-nn"])
-
-    关联文件:
-    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
-    - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
-    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
-    """
-
-    positions: dict[str, int] = {}
-    for index, name in enumerate(pass_names):
-        if name not in positions:
-            positions[name] = index
-    return positions
-
-
-def _validate_pass_order_constraints(pass_names: Sequence[str]) -> None:
-    """校验 PassManager 的公开顺序约束。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 将 `symbol-loop-hoist`、`lower-dma-memory-hierarchy` 与 tile family、buffer 之间的
-      顺序约束收口到单一 helper。
-    - 失败时保留原有稳定错误短语，供 `pytest` 与 expectation 机械匹配。
-
-    使用示例:
-    - _validate_pass_order_constraints(["decompass", "lower-nn", "buffer-results-to-out-params"])
-
-    关联文件:
-    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
-    - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
-    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
-    """
-
-    positions = _build_pass_name_positions(pass_names)
-    tile_family_names = {"tile-analysis", "tile-elewise", "tile-reduce"}
-    tile_family_indices = [index for index, name in enumerate(pass_names) if name in tile_family_names]
-    if "symbol-loop-hoist" in positions:
-        hoist_index = positions["symbol-loop-hoist"]
-        if tile_family_indices and hoist_index < max(tile_family_indices):
-            raise ValueError(
-                "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run after tile family"
-            )
-        if "lower-dma-memory-hierarchy" in positions:
-            dma_index = positions["lower-dma-memory-hierarchy"]
-            if hoist_index > dma_index:
-                raise ValueError(
-                    "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run before lower-dma-memory-hierarchy"
-                )
-    if "lower-dma-memory-hierarchy" in positions:
-        dma_index = positions["lower-dma-memory-hierarchy"]
-        if "buffer-results-to-out-params" not in positions:
-            raise ValueError(
-                "DmaMemoryHierarchyOrderError: lower-dma-memory-hierarchy requires buffer-results-to-out-params"
-            )
-        buffer_index = positions["buffer-results-to-out-params"]
-        if dma_index < buffer_index:
-            raise ValueError(
-                "DmaMemoryHierarchyOrderError: lower-dma-memory-hierarchy must run after buffer-results-to-out-params"
-            )
-    if tile_family_indices:
-        first_tile_index = min(tile_family_indices)
-        last_tile_index = max(tile_family_indices)
-        if "buffer-results-to-out-params" in positions:
-            buffer_index = positions["buffer-results-to-out-params"]
-            if first_tile_index < buffer_index:
-                raise ValueError(
-                    "TilePassOrderError: tile family must run after buffer-results-to-out-params"
-                )
-        if "lower-dma-memory-hierarchy" in positions:
-            dma_hierarchy_index = positions["lower-dma-memory-hierarchy"]
-            if last_tile_index > dma_hierarchy_index:
-                raise ValueError(
-                    "TilePassOrderError: tile family must run before lower-dma-memory-hierarchy"
-                )
-
 
 class PassManager:
     """Pass 管理器。
@@ -284,7 +135,7 @@ class PassManager:
         self.name = name
         self._passes: list[XdslModulePass] = []
 
-    def add_pass(self: "PassManager", pass_obj: Pass) -> None:
+    def add_pass(self: "PassManager", pass_obj: XdslModulePass) -> None:
         """注册单个 Pass。
 
         创建者: 李白
@@ -301,11 +152,11 @@ class PassManager:
         - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
         - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
         """
-        if not _is_pass_like(pass_obj):
-            raise TypeError("pass_obj must provide name(str) and run(target) or apply(ctx, module)")
+        if not isinstance(pass_obj, XdslModulePass) or not isinstance(getattr(pass_obj, "name", None), str):
+            raise TypeError("pass_obj must be ModulePass with stable name(str)")
         self._passes.append(pass_obj)
 
-    def extend(self: "PassManager", passes: Sequence[Pass]) -> None:
+    def extend(self: "PassManager", passes: Sequence[XdslModulePass]) -> None:
         """批量注册 Pass。
 
         创建者: 李白
@@ -323,49 +174,9 @@ class PassManager:
         - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
         """
         for item in passes:
-            if not _is_pass_like(item):
-                raise TypeError("passes must contain pass-like items")
+            if not isinstance(item, XdslModulePass) or not isinstance(getattr(item, "name", None), str):
+                raise TypeError("passes must contain ModulePass items with stable name(str)")
             self._passes.append(item)
-
-    def _execute_pass(
-        self: "PassManager", ctx: Context, pass_obj: XdslModulePass, target: object
-    ) -> object:
-        """执行单个 pass，兼容旧 `run` 与新 `apply` 合同。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - `Pass` 家族优先保留旧 `run(...)` 路径。
-        - 新 `ModulePass` 家族若提供 `run(...)` 兼容入口，则优先使用；否则回落到 `apply(...)`。
-
-        使用示例:
-        - result = self._execute_pass(pass_obj, target)
-
-        关联文件:
-        - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
-        - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
-        - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
-        """
-
-        run = getattr(pass_obj, "run", None)
-        if isinstance(pass_obj, Pass):
-            if callable(run) and type(pass_obj).run is not Pass.run:
-                return run(target)
-            apply = getattr(pass_obj, "apply", None)
-            if callable(apply):
-                apply(ctx, target)
-                return target
-            if callable(run):
-                return run(target)
-        else:
-            if callable(run):
-                return run(target)
-            apply = getattr(pass_obj, "apply", None)
-            if callable(apply):
-                apply(ctx, target)
-                return target
-        raise TypeError("pass_obj must provide run(target) or apply(ctx, module)")
 
     def run(self: "PassManager", target: object) -> object:
         """依序执行 Pass。
@@ -384,48 +195,13 @@ class PassManager:
         - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
         - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
         """
-        pass_names = [item.name for item in self._passes]
-        _validate_pass_order_constraints(pass_names)
-
         result = target
         ctx = Context()
-        seen_names: list[str] = []
-        seen_set: set[str] = set()
-        lowering_names = {"lower-nn", "lower-nn-to-kernel"}
         for item in self._passes:
-            if item.name == "buffer-results-to-out-params" and lowering_names.isdisjoint(seen_set):
-                raise ValueError(
-                    "buffer-results-to-out-params requires lowered IR after lower-nn or lower-nn-to-kernel"
-                )
-            result = self._execute_pass(ctx, item, result)
-            seen_names.append(item.name)
-            seen_set.add(item.name)
+            if isinstance(item, Pass):
+                result = item.run(result)
+            else:
+                item.apply(ctx, result)  # type: ignore[arg-type]
         return result
 
-
-def build_default_lowering_pass_manager() -> "PassManager":
-    """兼容入口：构造默认 lowering PassManager。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 兼容旧入口 `build_default_lowering_pass_manager()`。
-    - 实际委派给 `kernel_gen.passes.pipeline.build_default_lowering_pipeline()`。
-
-    使用示例:
-    - pm = build_default_lowering_pass_manager()
-    - lowered = pm.run(module)
-
-    关联文件:
-    - spec: [spec/pass/pipeline/default_lowering.md](spec/pass/pipeline/default_lowering.md)
-    - test: [test/pass/test_pipeline_default_lowering.py](test/pass/test_pipeline_default_lowering.py)
-    - 功能实现: [kernel_gen/passes/pipeline/default_lowering.py](kernel_gen/passes/pipeline/default_lowering.py)
-    """
-
-    from kernel_gen.passes.pipeline import build_default_lowering_pipeline
-
-    return build_default_lowering_pipeline()
-
-
-__all__ = ["Pass", "PassManager", "build_default_lowering_pass_manager"]
+__all__ = ["Pass", "PassManager"]

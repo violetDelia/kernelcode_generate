@@ -4,6 +4,34 @@
 
 `nn dialect` 定义方言层稳定接口，负责建模 memory space、memory type，以及逐元素算术、逐元素比较、逐元素 `exp`、按轴归约（`reduce_sum/reduce_min/reduce_max`）、显式 `broadcast`、`transpose`、`softmax`、`img2col1d/img2col2d` 和二维 `matmul` 的 IR 形态与 verifier 约束。本规范仅描述方言层字段、文本形式与校验语义，不包含上游高层 API 调度逻辑。
 
+## API 列表
+
+- `NnMemorySpaceAttr`
+- `NnMemoryType`
+- `nn.add`
+- `nn.sub`
+- `nn.mul`
+- `nn.div`
+- `nn.truediv`
+- `nn.eq`
+- `nn.ne`
+- `nn.lt`
+- `nn.le`
+- `nn.gt`
+- `nn.ge`
+- `nn.select`
+- `nn.cast`
+- `nn.exp`
+- `nn.reduce_sum`
+- `nn.reduce_min`
+- `nn.reduce_max`
+- `nn.broadcast`
+- `nn.transpose`
+- `nn.softmax`
+- `nn.matmul`
+- `nn.img2col1d`
+- `nn.img2col2d`
+
 ## 文档信息
 
 - 创建者：`规格小队`

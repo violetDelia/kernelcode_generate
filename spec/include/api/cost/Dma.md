@@ -8,6 +8,12 @@
 - 为保持目录结构与 `include/api/Dma.h` 一致，本文件也约束 `slice` / `deslice` 成本 helper 的模板顺序与参数顺序。
 - `alloc` 当前不属于成本 helper 输入域；`launch-kernel-cost-func` 现阶段不会为 `dma.alloc` 生成 `tuner.cost`。
 
+## API 列表
+
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::copy(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::slice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::deslice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+
 ## 文档信息
 
 - 创建者：`睡觉小分队`
@@ -17,15 +23,15 @@
 - `功能实现`：[`include/npu_demo/cost/Dma.h`](../../../../include/npu_demo/cost/Dma.h)
 - `test`：
   - `test/include/api/test_cost.py`
-  - [`test/dsl/test_emit_c.py`](../../../../test/dsl/test_emit_c.py)
-  - [`test/dsl/test_gen_kernel.py`](../../../../test/dsl/test_gen_kernel.py)
+  - [`test/dsl/gen_kernel/emit/test_emit.py`](../../../../test/dsl/gen_kernel/emit/test_emit.py)
+  - [`test/dsl/gen_kernel/test_gen_kernel.py`](../../../../test/dsl/gen_kernel/test_gen_kernel.py)
 
 ## 依赖
 
 - [`spec/include/api/cost/Core.md`](./Core.md)：提供 `CostKind` 与 `S_INT` 基础合同。
 - [`spec/include/api/Dma.md`](../../../../spec/include/api/Dma.md)：提供 `slice` / `deslice` 的参数顺序与类型来源。
 - [`spec/include/api/Memory.md`](../../../../spec/include/api/Memory.md)：提供 `Memory<Space, T>` 与 `MemorySpace` 语义。
-- [`spec/dsl/emit_c.md`](../../../../spec/dsl/emit_c.md)：消费 `tuner.cost(op_name="dma.copy")` 的节点级文本合同。
+- [`spec/dsl/gen_kernel/emit.md`](../../../../spec/dsl/gen_kernel/emit.md)：消费 `tuner.cost(op_name="dma.copy")` 的节点级文本合同。
 
 ## 目标
 
@@ -63,7 +69,7 @@
 #include "include/npu_demo/npu_demo.h"
 
 using namespace npu_demo;
-S_INT cost0 = cost::copy<TSM, GM, float, cost::CostKind::Memory>(target, source);
+S_INT cost0 = cost::copy<TSM, GM, float, memory>(target, source);
 ```
 
 注意事项：
@@ -99,8 +105,8 @@ S_INT cost0 = cost::copy<TSM, GM, float, cost::CostKind::Memory>(target, source)
 
 ```cpp
 using namespace npu_demo;
-S_INT slice_cost = cost::slice<TSM, GM, float, cost::CostKind::Memory>(target, source, offset, size, stride);
-S_INT deslice_cost = cost::deslice<GM, TSM, float, cost::CostKind::Memory>(target, source, offset, size, stride);
+S_INT slice_cost = cost::slice<TSM, GM, float, memory>(target, source, offset, size, stride);
+S_INT deslice_cost = cost::deslice<GM, TSM, float, memory>(target, source, offset, size, stride);
 ```
 
 注意事项：
@@ -120,12 +126,12 @@ S_INT deslice_cost = cost::deslice<GM, TSM, float, cost::CostKind::Memory>(targe
 - 执行命令：`pytest -q test/include/api/test_cost.py`
 - 测试目标：通过当前聚合入口 `test_include_api_cost_dma_signatures_compile` 一次性验证 `copy`、`slice`、`deslice` 的模板顺序、参数顺序与 `S_INT` 返回合同。
 
-- 测试文件：[`test/dsl/test_emit_c.py`](../../../../test/dsl/test_emit_c.py)
-- 执行命令：`pytest -q test/dsl/test_emit_c.py -k "tuner_cost or npu_demo"`
+- 测试文件：[`test/dsl/gen_kernel/emit/test_emit.py`](../../../../test/dsl/gen_kernel/emit/test_emit.py)
+- 执行命令：`pytest -q test/dsl/gen_kernel/emit/test_emit.py -k "tuner_cost or npu_demo"`
 - 测试目标：验证 `tuner.cost(op_name="dma.copy")` 的节点级文本发射。
 
-- 测试文件：[`test/dsl/test_gen_kernel.py`](../../../../test/dsl/test_gen_kernel.py)
-- 执行命令：`pytest -q test/dsl/test_gen_kernel.py -k "tuner_cost or cost_function or npu_demo"`
+- 测试文件：[`test/dsl/gen_kernel/test_gen_kernel.py`](../../../../test/dsl/gen_kernel/test_gen_kernel.py)
+- 执行命令：`pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k "tuner_cost or cost_function or npu_demo"`
 - 测试目标：验证完整 cost function 生成后可消费 `cost::copy`。
 
 - 合同验收资产：`expectation/dsl/emit_c/npu_demo/cost/dma_copy.py`

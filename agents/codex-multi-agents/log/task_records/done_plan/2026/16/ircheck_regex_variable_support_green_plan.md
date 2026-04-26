@@ -316,7 +316,7 @@ assert result.ok is True
 
 #### 目标 spec / API
 
-- `spec/pass/lowering/nn_lowering.md`
+- `spec/pass/lowering/nn_lowering/spec.md`
 - `公开 API：lower-nn`
 
 #### 可改文件

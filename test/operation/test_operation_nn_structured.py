@@ -1,7 +1,7 @@
 """nn structured family tests.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 `kernel_gen.operation.nn` 的 family 级测试布局。
@@ -10,7 +10,7 @@
 - pytest -q test/operation/test_operation_nn_structured.py
 
 关联文件:
-- 功能实现: kernel_gen/operation/nn.py
+- 功能实现: kernel_gen/operation/nn/__init__.py
 - Spec 文档: spec/operation/nn.md
 - 测试文件: test/operation/test_operation_nn_structured.py
 """
@@ -77,7 +77,7 @@ from kernel_gen.symbol_variable.type import Farmat, NumericType
 # 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
 # 测试目的: 验证 fc 在无 bias 场景下保留批维并输出默认布局。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_fc_without_bias
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_fc_without_bias() -> None:
@@ -98,7 +98,7 @@ def test_nn_fc_without_bias() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
 # 测试目的: 验证 fc 支持可选 bias 且与输出特征维对齐。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_fc_with_optional_bias
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_fc_with_optional_bias() -> None:
@@ -118,7 +118,7 @@ def test_nn_fc_with_optional_bias() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
 # 测试目的: 验证 fc 对非法类型输入报 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_fc_type_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_fc_type_error() -> None:
@@ -139,7 +139,7 @@ def test_nn_fc_type_error() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
 # 测试目的: 验证 fc 的 value/weight rank 约束报错。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_fc_rank_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_fc_rank_error() -> None:
@@ -160,7 +160,7 @@ def test_nn_fc_rank_error() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
 # 测试目的: 验证 fc 输入特征维不一致报错。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_fc_feature_mismatch
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_fc_feature_mismatch() -> None:
@@ -177,7 +177,7 @@ def test_nn_fc_feature_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
 # 测试目的: 验证 fc bias 维度不对齐报错。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_fc_bias_shape_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_fc_bias_shape_error() -> None:
@@ -198,7 +198,7 @@ def test_nn_fc_bias_shape_error() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
 # 测试目的: 验证 fc space 不一致报错。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_fc_space_mismatch
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_fc_space_mismatch() -> None:
@@ -212,14 +212,14 @@ def test_nn_fc_space_mismatch() -> None:
         _ = fc(value, weight_ok, bias=bias)
 
 
-# OP-FC-007
+# OP-FC-008
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-27 09:39:01 +0800
 # 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
 # 测试目的: 验证 fc 输出可继续参与 nn 算术链路。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_fc_chain_compatibility
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_fc_chain_compatibility() -> None:
@@ -238,7 +238,7 @@ def test_nn_fc_chain_compatibility() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证 matmul 基础二维矩阵乘输出 shape/dtype/space。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_matmul_success
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_matmul_success() -> None:
@@ -260,7 +260,7 @@ def test_nn_matmul_success() -> None:
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证 matmul 显式 memoryspace 仅覆盖结果 space。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_matmul_space_override
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_matmul_space_override() -> None:
@@ -280,7 +280,7 @@ def test_nn_matmul_space_override() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证 matmul contracting dim 不一致报错。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_matmul_contracting_dim_mismatch
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_matmul_contracting_dim_mismatch() -> None:
@@ -297,7 +297,7 @@ def test_nn_matmul_contracting_dim_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证 matmul 非二维输入报错。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_matmul_rank_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_matmul_rank_error() -> None:
@@ -314,7 +314,7 @@ def test_nn_matmul_rank_error() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证 matmul 标量输入非法。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_matmul_scalar_operand_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_matmul_scalar_operand_error() -> None:
@@ -330,7 +330,7 @@ def test_nn_matmul_scalar_operand_error() -> None:
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证 matmul dtype 按固定优先级决议。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_matmul_dtype_mismatch
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_matmul_dtype_mismatch() -> None:
@@ -348,7 +348,7 @@ def test_nn_matmul_dtype_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证 matmul space 不一致报错。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_matmul_space_mismatch
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_matmul_space_mismatch() -> None:
@@ -365,7 +365,7 @@ def test_nn_matmul_space_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-29 18:54:36 +0800
 # 测试目的: 验证 img2col1d 输出形状与参数校验规则。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_img2col1d_contract
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_img2col1d_contract() -> None:
@@ -416,7 +416,7 @@ def test_nn_img2col1d_contract() -> None:
 # 最近一次运行成功时间: 2026-03-29 18:54:36 +0800
 # 测试目的: 验证 img2col2d 输出形状与参数校验规则。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_img2col2d_contract
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_img2col2d_contract() -> None:
@@ -467,17 +467,7 @@ def test_nn_img2col2d_contract() -> None:
 # 功能说明: 验证 operation 层公开导出仅暴露 img2col1d/img2col2d，旧公开名 img2col 不再进入导出列表。
 # 测试目的: 锁定 kernel_gen.operation.nn.__all__ 与 kernel_gen.operation 包级公开列表不包含 img2col，避免旧 API 回流。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_img2col_public_exports
-# 对应功能实现文件路径: kernel_gen/operation/nn.py, kernel_gen/operation/__init__.py
-# 对应 spec 文件路径: spec/operation/nn.md
-
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-29 19:32:00 +0800
-# 最近一次运行成功时间: 2026-03-29 19:32:00 +0800
-# 功能说明: 验证 operation 层公开导出仅暴露 img2col1d/img2col2d，旧公开名 img2col 不再进入导出列表。
-# 测试目的: 锁定 kernel_gen.operation.nn.__all__ 与 kernel_gen.operation 包级公开列表不包含 img2col，避免旧 API 回流。
-# 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_img2col_public_exports
-# 对应功能实现文件路径: kernel_gen/operation/nn.py, kernel_gen/operation/__init__.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py, kernel_gen/operation/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_img2col_public_exports() -> None:
@@ -495,7 +485,7 @@ def test_nn_img2col_public_exports() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:34:06 +0800
 # 测试目的: 验证 softmax 默认 axis=-1 且结果保持输入元信息。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_softmax_default_axis
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_softmax_default_axis() -> None:
@@ -515,7 +505,7 @@ def test_nn_softmax_default_axis() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:34:06 +0800
 # 测试目的: 验证 softmax 负轴归一化路径。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_softmax_negative_axis
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_softmax_negative_axis() -> None:
@@ -532,7 +522,7 @@ def test_nn_softmax_negative_axis() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:34:06 +0800
 # 测试目的: 验证 softmax axis 非整数或为 bool 时抛 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_softmax_axis_type_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_softmax_axis_type_error() -> None:
@@ -550,7 +540,7 @@ def test_nn_softmax_axis_type_error() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:34:06 +0800
 # 测试目的: 验证 softmax axis 越界抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_softmax_axis_out_of_range
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_softmax_axis_out_of_range() -> None:
@@ -568,7 +558,7 @@ def test_nn_softmax_axis_out_of_range() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:34:06 +0800
 # 测试目的: 验证 softmax 非浮点 dtype 抛 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_softmax_dtype_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_softmax_dtype_error() -> None:
@@ -584,7 +574,7 @@ def test_nn_softmax_dtype_error() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:34:06 +0800
 # 测试目的: 验证 softmax 数值稳定性语义约束存在。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_softmax_numerical_stability_contract
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_softmax_numerical_stability_contract() -> None:
@@ -597,7 +587,7 @@ def test_nn_softmax_numerical_stability_contract() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:41:12 +0800
 # 测试目的: 验证 conv 基础路径、输出形状与参数校验规则（含 bias 对齐）。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_conv_basic
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_conv_basic() -> None:
@@ -667,7 +657,7 @@ def test_nn_conv_basic() -> None:
 # 最近一次运行成功时间: 2026-04-05 16:19:19 +0800
 # 测试目的: 验证 transpose 正例可按 perm 重排 shape/stride 并保留 dtype/space/format。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_transpose_success
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_transpose_success() -> None:
@@ -687,7 +677,7 @@ def test_nn_transpose_success() -> None:
 # 最近一次运行成功时间: 2026-04-05 16:19:19 +0800
 # 测试目的: 验证 transpose perm 长度不匹配或非排列时抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_transpose_invalid_perm_values
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_transpose_invalid_perm_values() -> None:
@@ -705,7 +695,7 @@ def test_nn_transpose_invalid_perm_values() -> None:
 # 最近一次运行成功时间: 2026-04-05 16:19:19 +0800
 # 测试目的: 验证 transpose perm 元素类型非法时抛 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_transpose_invalid_perm_type
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_transpose_invalid_perm_type() -> None:
@@ -723,7 +713,7 @@ def test_nn_transpose_invalid_perm_type() -> None:
 # 最近一次运行成功时间: 2026-04-05 16:19:19 +0800
 # 测试目的: 验证 transpose 通过 __all__ 导出。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_transpose_exported_in_all
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_transpose_exported_in_all() -> None:

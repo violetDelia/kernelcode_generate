@@ -17,7 +17,7 @@
 
 关联文件:
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-- Spec 文档: spec/pass/lowering/nn_lowering.md
+- Spec 文档: spec/pass/lowering/nn_lowering/spec.md
 - 测试文件: test/pass/nn_lowering/test_lowering_nn_lowering.py
 """
 
@@ -87,7 +87,6 @@ from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from kernel_gen.dsl.mlir_gen import build_func_op
 from kernel_gen.operation.nn import img2col1d, img2col2d, reduce_min
 from kernel_gen.passes.buffer_results_to_out_params import (
-    BufferResultsToOutParamsError,
     BufferResultsToOutParamsPass,
 )
 from kernel_gen.symbol_variable.memory import Memory
@@ -210,7 +209,7 @@ def _assert_single_dma_cast_after_first_alloc(block: Block) -> None:
     - _assert_single_dma_cast_after_first_alloc(block)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
@@ -267,7 +266,7 @@ def _build_module_from_op(op: Operation, input_types: list[NnMemoryType], output
 # 测试目的: 验证 Lowering 对 nn.add 的改写行为，生成 kernel.binary_elewise(kind="add")。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_add_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_add_to_kernel() -> None:
     block = Block()
@@ -297,7 +296,7 @@ def test_lower_add_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 nn.truediv 的改写行为，统一生成 kernel.binary_elewise(kind="div")。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_div_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_div_to_kernel() -> None:
     block = Block()
@@ -327,7 +326,7 @@ def test_lower_div_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 nn.eq 的改写行为，生成 kernel.binary_elewise(kind="eq")。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_eq_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_eq_to_kernel() -> None:
     block = Block()
@@ -357,7 +356,7 @@ def test_lower_eq_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 nn.ne 的改写行为，生成 kernel.binary_elewise(kind="ne")。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_ne_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_ne_to_kernel() -> None:
     block = Block()
@@ -387,7 +386,7 @@ def test_lower_ne_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 nn.le 的改写行为，生成 kernel.binary_elewise(kind="le")。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_le_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_le_to_kernel() -> None:
     block = Block()
@@ -417,7 +416,7 @@ def test_lower_le_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 nn.lt 的改写行为，生成 kernel.binary_elewise(kind="lt")。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_lt_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_lt_to_kernel() -> None:
     block = Block()
@@ -447,7 +446,7 @@ def test_lower_lt_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 nn.gt 的改写行为，生成 kernel.binary_elewise(kind="gt")。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_gt_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_gt_to_kernel() -> None:
     block = Block()
@@ -477,7 +476,7 @@ def test_lower_gt_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 nn.ge 的改写行为，生成 kernel.binary_elewise(kind="ge")。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_ge_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_ge_to_kernel() -> None:
     block = Block()
@@ -507,7 +506,7 @@ def test_lower_ge_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 nn.exp 的改写行为。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_exp_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_exp_to_kernel() -> None:
     block = Block()
@@ -535,7 +534,7 @@ def test_lower_exp_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 nn.reduce_min 的改写行为，生成 kernel.reduce(kind="min")。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_reduce_min_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_reduce_min_to_kernel() -> None:
     block = Block()
@@ -569,7 +568,7 @@ def test_lower_reduce_min_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 nn.reduce_sum 的改写行为，生成 kernel.reduce(kind="sum")。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_reduce_sum_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_reduce_sum_to_kernel() -> None:
     block = Block()
@@ -603,7 +602,7 @@ def test_lower_reduce_sum_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 nn.reduce_max 的改写行为，生成 kernel.reduce(kind="max")。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_reduce_max_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_reduce_max_to_kernel() -> None:
     block = Block()
@@ -637,7 +636,7 @@ def test_lower_reduce_max_to_kernel() -> None:
 # 测试目的: 验证 direct `nn.softmax` 会被拒绝，并提示需要先做分解。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_softmax_requires_decompass
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_softmax_requires_decompass() -> None:
     block = Block()
@@ -666,7 +665,7 @@ def test_lower_softmax_requires_decompass() -> None:
 # 测试目的: 验证 Lowering 对 nn.matmul 的改写行为。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_matmul_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_matmul_to_kernel() -> None:
     block = Block()
@@ -696,7 +695,7 @@ def test_lower_matmul_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 nn.img2col1d 的改写行为。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_img2col1d_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_img2col1d_to_kernel() -> None:
     block = Block()
@@ -757,7 +756,7 @@ def test_lower_img2col1d_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 nn.img2col2d 的改写行为。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_img2col2d_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_img2col2d_to_kernel() -> None:
     block = Block()
@@ -935,7 +934,7 @@ def test_lower_transpose_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 nn.cast 的改写行为。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_cast_to_dma_cast
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_cast_to_dma_cast() -> None:
     block = Block()
@@ -963,7 +962,7 @@ def test_lower_cast_to_dma_cast() -> None:
 # 测试目的: 验证 Lowering 对 nn.select 的改写行为。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_select_to_kernel_select
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_select_to_kernel_select() -> None:
     block = Block()
@@ -1041,7 +1040,7 @@ def test_lower_broadcast_with_symbol_dim() -> None:
 # 测试目的: 验证 Lowering 会把 mixed symbol scalar add 物化为 dma.fill 路径，并生成 kernel.binary_elewise(kind="add")。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_add_mixed_symbol_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_add_mixed_symbol_to_kernel() -> None:
     block = Block()
@@ -1083,7 +1082,7 @@ def test_lower_add_mixed_symbol_to_kernel() -> None:
 # 测试目的: 验证 Lowering 对 mixed symbol eq 的改写行为，生成 dma.alloc + dma.broadcast + kernel.binary_elewise(kind="eq")，且不混入 dma.fill。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_eq_mixed_symbol_uses_broadcast_only
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_eq_mixed_symbol_uses_broadcast_only() -> None:
     block = Block()
@@ -1125,7 +1124,7 @@ def test_lower_eq_mixed_symbol_uses_broadcast_only() -> None:
 # 测试目的: 验证 Lowering 对带符号维度的 cast 的改写行为。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_cast_preserves_symbol_dim
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_cast_preserves_symbol_dim() -> None:
     block = Block()
@@ -1163,7 +1162,7 @@ def test_lower_cast_preserves_symbol_dim() -> None:
 # 测试目的: 验证 Lowering 对 select 的符号维度保留行为。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_select_preserves_symbol_dim
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_select_preserves_symbol_dim() -> None:
     block = Block()
@@ -1240,7 +1239,7 @@ def _build_broadcast_exp_reduce_min_func() -> func.FuncOp:
     - func_op = _build_broadcast_exp_reduce_min_func()
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: test/pass/nn_lowering/test_lowering_nn_lowering.py
     """
@@ -1289,7 +1288,7 @@ def _assert_alloc_count(block: Block, expected: int) -> None:
     - _assert_alloc_count(block, 3)
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: test/pass/nn_lowering/test_lowering_nn_lowering.py
     """
@@ -1306,7 +1305,7 @@ def _assert_alloc_count(block: Block, expected: int) -> None:
 # 测试目的: 验证 Lowering 在组合场景下对 alloc 的处理。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_combined_ops_alloc
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_combined_ops_alloc() -> None:
     func_op = _build_broadcast_exp_reduce_min_func()
@@ -1327,7 +1326,7 @@ def test_lower_combined_ops_alloc() -> None:
 # 测试目的: 验证 Lowering 对非法 add 形状的拒绝。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_rejects_invalid_add_shape
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_rejects_invalid_add_shape() -> None:
     lhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
@@ -1385,7 +1384,7 @@ def test_lower_broadcast_rejects_unknown_dim() -> None:
 # 测试目的: 验证 Lowering 对 symbol dim cast 的行为。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_cast_symbol_dim_rejects_mismatch
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_cast_symbol_dim_rejects_mismatch() -> None:
     operand_type = nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
@@ -1411,7 +1410,7 @@ def test_lower_cast_symbol_dim_rejects_mismatch() -> None:
 # 测试目的: 验证 Lowering 对 select 的 symbol dim 保留。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_select_preserves_symbol_dim
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_select_preserves_symbol_dim() -> None:
     block = Block()
@@ -1482,7 +1481,7 @@ def test_lower_transpose_dynamic() -> None:
 # 测试目的: 验证 Lowering 对 bfloat16 cast 的行为。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_bfloat16_cast
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_bfloat16_cast() -> None:
     operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
@@ -1517,7 +1516,7 @@ def test_lower_bfloat16_cast() -> None:
 # 测试目的: 验证 Lowering 对未知 op 的拒绝。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_rejects_unknown_op
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_rejects_unknown_op() -> None:
     block = Block()
@@ -1542,7 +1541,7 @@ def test_lower_rejects_unknown_op() -> None:
 # 测试目的: 验证 Lowering 对 reduce_min 维度不一致的拒绝。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_reduce_min_rejects_invalid_rank
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_reduce_min_rejects_invalid_rank() -> None:
     operand_type = nn_memory_type(
@@ -1584,7 +1583,7 @@ def test_reduce_min_rejects_invalid_rank() -> None:
 # 测试目的: 验证 Lowering 对 reduce_min keepdim 类型的拒绝。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_reduce_min_rejects_bad_keepdim
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_reduce_min_rejects_bad_keepdim() -> None:
     block = Block()
@@ -1704,7 +1703,7 @@ def test_broadcast_rejects_invalid_scalar() -> None:
 # 测试目的: 验证 Lowering 对 matmul stride 的验证。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_matmul_requires_contiguous_stride
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_matmul_requires_contiguous_stride() -> None:
     block = Block()
@@ -1730,7 +1729,7 @@ def test_matmul_requires_contiguous_stride() -> None:
 # 测试目的: 验证 Lowering 对 reduce axes 校验。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_reduce_axes_validation
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_reduce_axes_validation() -> None:
     block = Block()
@@ -1760,7 +1759,7 @@ def test_reduce_axes_validation() -> None:
 # 测试目的: 验证 Lowering 对 reduce keepdim 校验。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_reduce_keepdim_validation
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_reduce_keepdim_validation() -> None:
     block = Block()
@@ -1790,7 +1789,7 @@ def test_reduce_keepdim_validation() -> None:
 # 测试目的: 验证 direct `nn.softmax` 即使 axis 非法，也会先按“需先分解”路径拒绝。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_softmax_requires_decompass_before_axis_validation
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_softmax_requires_decompass_before_axis_validation() -> None:
     block = Block()

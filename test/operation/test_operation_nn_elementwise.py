@@ -10,7 +10,7 @@
 - pytest -q test/operation/test_operation_nn_elementwise.py
 
 关联文件:
-- 功能实现: kernel_gen/operation/nn.py
+- 功能实现: kernel_gen/operation/nn/__init__.py
 - Spec 文档: spec/operation/nn.md
 - 测试文件: test/operation/test_operation_nn_elementwise.py
 """
@@ -64,7 +64,7 @@ from kernel_gen.operation.nn import (
     transpose,
     truediv,
 )
-from kernel_gen.operation._nn_common import _ensure_activation_scalar, _ensure_memory_operand
+from kernel_gen.operation.nn.common import _ensure_activation_scalar, _ensure_memory_operand
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolList, SymbolShape
@@ -78,7 +78,7 @@ from kernel_gen.symbol_variable.type import Farmat, NumericType
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证 add API 可独立调用并保持形状。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_add_memory
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_add_memory() -> None:
@@ -97,7 +97,7 @@ def test_nn_add_memory() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证 Memory 与标量加法支持左右两侧。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_add_scalar
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_add_scalar() -> None:
@@ -117,7 +117,7 @@ def test_nn_add_scalar() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证链式表达式逐步检查形状与类型。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_chain_expression
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_chain_expression() -> None:
@@ -135,7 +135,7 @@ def test_nn_chain_expression() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证 shape 不一致抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_shape_mismatch
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_shape_mismatch() -> None:
@@ -152,7 +152,7 @@ def test_nn_shape_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证 rank 不一致抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_rank_mismatch
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_rank_mismatch() -> None:
@@ -169,7 +169,7 @@ def test_nn_rank_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-24 01:43:10 +0800
 # 测试目的: 验证 nn.add 的 dtype 按固定优先级决议。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_dtype_mismatch
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 
@@ -190,7 +190,7 @@ def test_nn_dtype_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证不支持的 dtype 触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_dtype_invalid_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_dtype_invalid_error() -> None:
@@ -205,7 +205,7 @@ def test_nn_dtype_invalid_error() -> None:
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证 bool 标量可被接受。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_add_bool_scalar
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_add_bool_scalar() -> None:
@@ -222,7 +222,7 @@ def test_nn_add_bool_scalar() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证标量类型不合法抛 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_scalar_type_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_scalar_type_error() -> None:
@@ -238,7 +238,7 @@ def test_nn_scalar_type_error() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证比较 API 返回 predicate dtype。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_compare_predicate
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_compare_predicate() -> None:
@@ -262,7 +262,7 @@ def test_nn_compare_predicate() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证比较时 shape 顺序不同抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_compare_shape_order
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_compare_shape_order() -> None:
@@ -279,7 +279,7 @@ def test_nn_compare_shape_order() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证其他算术 API 保持形状。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_other_arithmetic
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_other_arithmetic() -> None:
@@ -297,7 +297,7 @@ def test_nn_other_arithmetic() -> None:
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证 sub 的 dtype 规则与标量反向调用。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_sub_reverse_and_dtype_mismatch
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_sub_reverse_and_dtype_mismatch() -> None:
@@ -317,7 +317,7 @@ def test_nn_sub_reverse_and_dtype_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证 sub 在 format/stride 不一致时回落默认布局。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_sub_format_fallback
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_sub_format_fallback() -> None:
@@ -335,7 +335,7 @@ def test_nn_sub_format_fallback() -> None:
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证 floordiv 复用算术规则、支持标量并覆盖错误路径。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_floordiv_rules
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_floordiv_rules() -> None:
@@ -363,7 +363,7 @@ def test_nn_floordiv_rules() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证逐元素算术包装在纯标量输入下复用 Python/SymbolDim 算术语义，并保持非法标量类型报错。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_scalar_only_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_scalar_only_error() -> None:
@@ -376,7 +376,7 @@ def test_nn_scalar_only_error() -> None:
     assert add(1, symbol).get_value() == "N + 1"
     assert sub(5, symbol).get_value() == "5 - N"
     assert mul(2, symbol).get_value() == "2*N"
-    assert floordiv(7, symbol).get_value() == "floor(7/N)"
+    assert floordiv(7, symbol).get_value() == "7 // N"
 
     with pytest.raises(TypeError):
         _ = add("lhs", "rhs")
@@ -389,7 +389,7 @@ def test_nn_scalar_only_error() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证比较操作对称 API 可用。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_compare_alias
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_compare_alias() -> None:
@@ -431,7 +431,7 @@ def test_nn_operation_does_not_require_convert_from_list() -> None:
 # 最近一次运行成功时间: 2026-03-24 01:43:10 +0800
 # 测试目的: 验证 format 不一致时回落默认布局。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_add_format_fallback
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 
@@ -450,7 +450,7 @@ def test_nn_add_format_fallback() -> None:
 # 最近一次运行成功时间: 2026-03-24 01:43:10 +0800
 # 测试目的: 验证 stride 不一致时回落默认布局。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_add_stride_fallback
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 
@@ -469,7 +469,7 @@ def test_nn_add_stride_fallback() -> None:
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证 stride 序列化维度的符号与常量路径。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_add_stride_dim_serialization
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_add_stride_dim_serialization() -> None:
@@ -486,7 +486,7 @@ def test_nn_add_stride_dim_serialization() -> None:
 # 最近一次运行成功时间: 未运行
 # 测试目的: 验证 nn_common helper 对非法 operand 与激活参数直接失败。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_helper_validation_branches
-# 对应功能实现文件路径: kernel_gen/operation/_nn_common.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/common.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_helper_validation_branches() -> None:
@@ -510,7 +510,7 @@ def test_nn_helper_validation_branches() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:44:59 +0800
 # 测试目的: 验证 relu/sigmoid/tanh/hard_sigmoid 输出继承输入描述。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_activation_basic
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_activation_basic() -> None:
@@ -538,7 +538,7 @@ def test_nn_activation_basic() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:44:59 +0800
 # 测试目的: 验证 leaky_relu alpha 参数接受有限数值并继承输入描述。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_activation_leaky_relu_alpha
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_activation_leaky_relu_alpha() -> None:
@@ -559,7 +559,7 @@ def test_nn_activation_leaky_relu_alpha() -> None:
 # 最近一次运行成功时间: 2026-03-27 09:44:59 +0800
 # 测试目的: 验证激活函数对非法输入、dtype 与参数报错。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_activation_invalid_input
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_activation_invalid_input() -> None:
@@ -603,7 +603,7 @@ def test_nn_activation_invalid_input() -> None:
 # 最近一次运行成功时间: 2026-03-30 02:24:00 +0800
 # 测试目的: 验证 exp 仅接受浮点 Memory 且输出继承输入元信息。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_exp_basic
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_exp_basic() -> None:
@@ -623,7 +623,7 @@ def test_nn_exp_basic() -> None:
 # 最近一次运行成功时间: 2026-03-30 02:24:00 +0800
 # 测试目的: 验证 exp 对非 Memory 或非浮点 dtype 输入报错。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_exp_invalid_input
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_exp_invalid_input() -> None:
@@ -640,5 +640,5 @@ def test_nn_exp_invalid_input() -> None:
 # 最近一次运行成功时间: 2026-03-30 02:24:00 +0800
 # 测试目的: 验证 reduce_sum 的 axis=None/int/Sequence[int] 路径与输出 shape 推导。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_reduce_sum_shape_contract
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md

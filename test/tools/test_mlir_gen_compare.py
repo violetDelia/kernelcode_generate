@@ -1,17 +1,10 @@
 """mlir_gen compare tests.
 
 创建者: 睡觉小分队
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 mlir_gen_compare(...) / mlir_gen_compare_text(...) / compare_mlir_file(...) 的 True/False 路径与非法文本返回 False 的行为。
-
-当前覆盖率信息:
-- 当前覆盖率: 未统计（本任务验证未启用 coverage 统计）。
-- 达标判定: 待后续补充统计结果。
-
-覆盖率命令:
-- pytest -q --cov=kernel_gen.tools.mlir_gen_compare --cov-branch --cov-report=term-missing test/tools/test_mlir_gen_compare.py
 
 使用示例:
 - pytest -q test/tools/test_mlir_gen_compare.py

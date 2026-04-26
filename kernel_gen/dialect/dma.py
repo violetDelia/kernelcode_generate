@@ -45,8 +45,8 @@ from xdsl.irdl import (
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.common.contracts import (
-    _dims_equal as _common_dims_equal,
-    _verify_memory_type as _common_verify_memory_type,
+    dims_equal as _common_dims_equal,
+    verify_memory_type as _common_verify_memory_type,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolIterType, SymbolValueType

@@ -2,8 +2,18 @@
 
 ## 功能简介
 
-- 定义 Pass 管理与调度的最小可用规范，描述 legacy `Pass` 与 xdsl `ModulePass` 的组织、排序与执行规则。
+- 定义 Pass 管理与调度的最小可用规范，描述 `Pass` 与 xdsl `ModulePass` 的组织、排序与执行规则。
 - 面向上层 IR/DSL 的通用优化/规范化流程，不绑定具体 IR 类型或后端。
+
+## API 列表
+
+- `Pass`
+  - `—— run(target: object) -> object`
+- `PassManager`
+  - `—— init(name: str | None = None)`
+  - `—— add_pass(pass_obj: Pass | ModulePass)`
+  - `—— extend(passes: Iterable[Pass | ModulePass])`
+  - `—— run(target: object) -> object`
 
 ## 文档信息
 
@@ -22,12 +32,8 @@
 - 提供可组合的 Pass 管理器，支持按顺序执行多个 Pass。
 - 统一 Pass 的注册、执行与错误传播规则，便于后续实现与测试闭环。
 - PassManager 只负责 Pass 编排与执行，不承载默认 pipeline builder；默认 builder 见 [`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)。
-- PassManager 在迁移期同时兼容 legacy `Pass.run(target)` 与 xdsl `ModulePass.apply(ctx, module)`；遇到 `ModulePass` 时内部创建并复用单个 `Context`。
-- 对 lowering 链固定公开一个可验证顺序示例：当模块内存在 `memory-return func.func + func.call` 链路时，`BufferResultsToOutParamsPass` 必须运行在 `NnLoweringPass` 之后，避免 caller/callee ABI 停留在双口径。
-- 对 nn 分解 lowering 链固定公开一个顺序边界：`DecompassPass` 必须运行在 `NnLoweringPass` 之前，确保默认 lowering 链路不让 residual `nn.*` 直接进入 `nn_lowering`。
-- 对下游 `gen_kernel` 合同固定明确：`gen_kernel` 仅接受已执行 `BufferResultsToOutParamsPass` 的 rewrite 后 ABI；若仍保留旧 `memory return` ABI，必须显式失败。
-- 对显式 memory hierarchy lowering 链固定公开一个扩展顺序边界：当调用方注册 `LowerDmaMemoryHierarchyPass` 时，其位置必须在 `NnLoweringPass` 与 `BufferResultsToOutParamsPass` 之后。
-- 对 tile family 固定公开一个顺序边界：`tile-analysis` / `tile-elewise` / `tile-reduce` 必须在 `BufferResultsToOutParamsPass` 之后、`LowerDmaMemoryHierarchyPass` 之前；若同时注册 `SymbolLoopHoistPass`，它必须位于 tile family 之后。
+- PassManager 固定支持两类公开对象：`Pass` 与 xdsl `ModulePass`；执行时内部创建并复用单个 `Context`。
+- 业务顺序约束不属于 PassManager 职责；具体 lowering / tuning / tile / backend pipeline 的顺序由对应 builder 与其 spec 固定。
 
 ## 限制与边界
 
@@ -36,18 +42,17 @@
 - 不要求 Pass 修改输入的方式（可返回新对象或就地修改），以 `run` 返回值为准。
 - 不要求 `ModulePass.apply` 返回值；`PassManager` 以 `apply(ctx, module)` 的副作用作为结果，继续返回原 `module` 对象。
 - 当管理器中无 Pass 时，执行结果必须等于输入（无副作用的空操作）。
-- 当 lowering 链包含 `LowerDmaMemoryHierarchyPass` 时，manager 只冻结其排序边界；是否注册该 pass 仍由调用方决定。
-- 当 lowering 链包含 tile family 时，manager 只固定 tile family 与 out-params / dma hierarchy / symbol-loop-hoist 的相对边界；是否注册具体 tile pass 仍由调用方决定。
+- PassManager 不解释 pass 名称语义，不根据 pass 名称施加排序或依赖约束。
 
 ## 当前调用边界
 
-- `PassManager` 与 legacy `Pass` 的 canonical public path 固定为 `kernel_gen.passes.pass_manager`。
+- `PassManager` 与 `Pass` 的 canonical public path 固定为 `kernel_gen.passes.pass_manager`。
 - default / npu-demo pipeline builder 的 canonical public path 固定为 `kernel_gen.passes.pipeline`。
 - `LowerDmaMemoryHierarchyPass` 与 `MemoryPoolPass` 的 canonical public path 固定为 `kernel_gen.passes.dma_memory_hierarchy` 与 `kernel_gen.passes.memory_pool`。
 - tile family 的 canonical public path 固定为：
-  - `kernel_gen.tile.analysis`
-  - `kernel_gen.tile.elewise`
-  - `kernel_gen.tile.reduce`
+  - `kernel_gen.passes.tile.analysis`
+  - `kernel_gen.passes.tile.elewise`
+  - `kernel_gen.passes.tile.reduce`
 - 当前仍允许 pass manager caller 通过下列活跃模块导入 lowering family：
   - `kernel_gen.passes.lowering`
 - 以下旧路径在当前基线中必须稳定失败：
@@ -65,6 +70,9 @@
   - `kernel_gen.passes.lowering.tile_elewise`
   - `kernel_gen.passes.lowering.tile_reduce`
 - `LowerDmaMemoryHierarchyPass` 与 `MemoryPoolPass` 的调用方不得再把 lowering compat 路径当作主入口；若需要添加这两个 pass，应从上级模块导入后再交给 `PassManager`。
+- 以下旧兼容入口在当前基线中必须稳定失败：
+  - `kernel_gen.passes.pass_manager.build_default_lowering_pass_manager`
+- 当前文件级公开 API 只包含 `Pass` 与 `PassManager`；pipeline / registry / test 不得跨文件调用额外 helper。
 
 ## 公开接口
 
@@ -141,27 +149,8 @@ result = pm.run(module)
 注意事项：
 
 - Pass 执行顺序与添加顺序一致。
-- `add_pass` 需要接受 legacy `Pass` 与 xdsl `ModulePass` 两类实例；`run` 执行时按实例类型分别调用 `run(target)` 或 `apply(ctx, module)`。
-- 对 `memory-return` lowering 链，当前固定示例顺序是：
-
-```python
-pm = PassManager(name="lowering")
-pm.add_pass(DecompassPass())
-pm.add_pass(NnLoweringPass())
-pm.add_pass(BufferResultsToOutParamsPass())
-module = pm.run(module)
-```
-
-- 当需要显式插入 DMA memory hierarchy lowering 时，顺序固定扩展为：
-
-```python
-pm = PassManager(name="lowering")
-pm.add_pass(DecompassPass())
-pm.add_pass(NnLoweringPass())
-pm.add_pass(BufferResultsToOutParamsPass())
-pm.add_pass(LowerDmaMemoryHierarchyPass())
-module = pm.run(module)
-```
+- `add_pass` 只接受 `Pass` 或 xdsl `ModulePass` 实例；不再接受仅靠 duck typing 暴露 `name/run/apply` 的 pass-like 对象。
+- 业务顺序由调用方决定；PassManager 只保证“按添加顺序执行”。
 
 前置条件：
 
@@ -194,8 +183,7 @@ pm.add_pass(MyPass())
 
 注意事项：
 
-- `pass_obj` 必须提供 `name` 属性与 `run(target)` 方法。
-- 迁移期也允许 `pass_obj` 是 xdsl `ModulePass` 实例，并通过 `apply(ctx, module)` 执行。
+- `pass_obj` 必须是 `Pass` 或 xdsl `ModulePass` 实例，且 `name` 必须是稳定字符串。
 
 返回与限制：
 
@@ -219,8 +207,7 @@ pm.extend([PassA(), PassB()])
 
 注意事项：
 
-- 任一元素不满足 `Pass` 约束时必须抛出 `TypeError`。
-- 迁移期也必须接受 xdsl `ModulePass` 实例。
+- 任一元素不是 `Pass` 或 xdsl `ModulePass`，或 `name` 不是字符串时必须抛出 `TypeError`。
 
 返回与限制：
 
@@ -246,7 +233,7 @@ result = pm.run(ir)
 
 - Pass 的输出必须作为下一个 Pass 的输入。
 - 任何 Pass 抛出的异常应原样传播。
-- 若调用方注册 `LowerDmaMemoryHierarchyPass`，不得把它前移到 `NnLoweringPass` 或 `BufferResultsToOutParamsPass` 之前。
+- `Pass` 固定走 `run(target)`；其它 xdsl `ModulePass` 固定走 `apply(ctx, target)`，不再按“是否额外提供 run/apply”做兼容优先级分支。
 
 前置条件：
 
@@ -271,9 +258,7 @@ result = pm.run(ir)
 - 验证空管理器执行返回原输入。
 - 验证显式注册非法 Pass 时触发 `TypeError`。
 - 验证 Pass 异常可向上抛出。
-- 验证 `NnLoweringPass -> BufferResultsToOutParamsPass` 的 lowering 顺序在 `memory-return` 链路上可被测试锁定。
-- 验证默认 lowering pipeline 的顺序为 `DecompassPass -> NnLoweringPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
-- 验证 `BufferResultsToOutParamsPass` 置于 `NnLoweringPass` 前会被显式拒绝。
+- 验证 PassManager 不承载旧默认 builder 兼容入口。
 
 ### 功能与用例清单
 
@@ -284,8 +269,7 @@ result = pm.run(ir)
 | TC-PASS-003 | 空管理器返回原输入 | `test_pass_manager_empty_returns_input` |
 | TC-PASS-004 | 非法 Pass 类型报错 | `test_pass_manager_invalid_pass_type` |
 | TC-PASS-005 | Pass 异常向上抛出 | `test_pass_manager_exception_propagation` |
-| TC-PASS-006 | 默认 lowering pipeline 固定顺序 | `test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out_params` |
-| TC-PASS-007 | 错误 lowering 顺序显式拒绝 | `test_pass_manager_rejects_buffer_results_to_out_params_before_lowering` |
+| TC-PASS-006 | 旧默认 builder 兼容入口已退场 | `test_pass_manager_has_no_legacy_default_lowering_builder` |
 
 ## 失败归因
 

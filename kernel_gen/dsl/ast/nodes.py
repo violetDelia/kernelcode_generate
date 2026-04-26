@@ -12,8 +12,8 @@
 - FunctionAST(name="kernel", inputs=[], outputs=[], body=BlockAST([]))
 
 关联文件:
-- spec: spec/dsl/ast_nodes.md
-- test: test/dsl/test_ast_nodes.py
+- spec: spec/dsl/ast/nodes.md
+- test: test/dsl/ast/test_nodes.py
 - 功能实现: kernel_gen/dsl/ast/nodes.py
 """
 
@@ -41,8 +41,8 @@ class SourceLocation:
     - SourceLocation(line=1, column=0)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -64,8 +64,8 @@ class Diagnostic:
     - Diagnostic(message="Unsupported syntax", location=SourceLocation(3, 4))
 
     关联文件:
-    - spec: spec/dsl/ast_visitor.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/visitor.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -87,8 +87,8 @@ class ModuleAST:
     - ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=BlockAST([]))])
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -109,8 +109,8 @@ class TensorAST:
     - TensorAST(name="A", memory=memory)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -133,8 +133,8 @@ class ScalarArgAST:
     - ScalarArgAST(name="n", value_type=int)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -159,8 +159,8 @@ class PtrArgAST:
     - PtrArgAST(name="data", dtype=f32)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -183,8 +183,8 @@ class VarAST:
     - VarAST(name="i")
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -206,8 +206,8 @@ class BlockAST:
     - BlockAST(statements=[])
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -229,8 +229,8 @@ class ForAST:
     - ForAST(var=VarAST("i"), start=ConstAST(0), end=ConstAST(10), body=BlockAST([]))
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -256,8 +256,8 @@ class StoreAST:
     - StoreAST(tensor=TensorAST("A", memory), offset=ConstAST(0), stride=None, value=ConstAST(1))
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -285,8 +285,8 @@ class LoadAST:
     - LoadAST(tensor=TensorAST("A", memory), offset=ConstAST(0), stride=None)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -313,8 +313,8 @@ class DmaAllocAST:
     - DmaAllocAST(shape=[ConstAST(4)], dtype=NumericType.Float32, space=MemorySpace.SM)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -339,8 +339,8 @@ class DmaCopyAST:
     - DmaCopyAST(source=TensorAST("src", memory), space=MemorySpace.SM)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -363,8 +363,8 @@ class DmaCastAST:
     - DmaCastAST(source=TensorAST("src", memory), dtype=NumericType.Float16)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -388,8 +388,8 @@ class DmaViewAST:
     - DmaViewAST(source=tensor, offset=[ConstAST(0)], size=[ConstAST(4)], stride=[ConstAST(1)])
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -414,8 +414,8 @@ class DmaReshapeAST:
     - DmaReshapeAST(source=tensor, shape=[ConstAST(8), ConstAST(8)])
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -438,8 +438,8 @@ class DmaFlattenAST:
     - DmaFlattenAST(source=tensor)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -461,8 +461,8 @@ class DmaFreeAST:
     - DmaFreeAST(value=tensor)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -485,8 +485,8 @@ class Img2ColAST:
     - Img2ColAST(kind="img2col2d", args=[tile], kwargs={"kh": ConstAST(3)})
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -511,8 +511,8 @@ class NnBroadcastAST:
     - NnBroadcastAST(value=VarAST("x"), target=VarAST("y"))
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -536,8 +536,8 @@ class NnBroadcastToAST:
     - NnBroadcastToAST(source=VarAST("x"), target_shape=[ConstAST(2)], space=MemorySpace.GM)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -562,8 +562,8 @@ class NnTransposeAST:
     - NnTransposeAST(value=VarAST("x"), perm=[ConstAST(1), ConstAST(0)])
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -588,8 +588,8 @@ class NnUnaryAST:
     - NnUnaryAST(kind="leaky_relu", value=VarAST("x"), alpha=ConstAST(0.1))
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -615,8 +615,8 @@ class NnReduceAST:
     - NnReduceAST(kind="reduce_sum", value=VarAST("x"), axis=ConstAST(1), keepdim=ConstAST(True))
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -642,8 +642,8 @@ class NnSoftmaxAST:
     - NnSoftmaxAST(value=VarAST("x"), axis=ConstAST(1))
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -667,8 +667,8 @@ class MatmulAST:
     - MatmulAST(lhs=VarAST("lhs"), rhs=VarAST("rhs"), memoryspace=MemorySpace.GM)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -693,7 +693,7 @@ class FCAST:
     - FCAST(value=VarAST("x"), weight=VarAST("w"))
 
     关联文件:
-    - spec: spec/dsl/ast.md
+    - spec: spec/dsl/ast/__init__.md
     - test: test/dsl/test_mlir_gen.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
@@ -743,8 +743,8 @@ class BinaryExprAST:
     - BinaryExprAST(op="add", lhs=VarAST("x"), rhs=VarAST("y"))
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -768,8 +768,8 @@ class CompareExprAST:
     - CompareExprAST(op="eq", lhs=VarAST("x"), rhs=VarAST("y"))
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -819,8 +819,8 @@ class SymbolToFloatAST:
     - SymbolToFloatAST(source=ScalarArgAST(name="n", value_type=int))
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -843,8 +843,8 @@ class TensorAxisAccessAST:
     - TensorAxisAccessAST(tensor=TensorAST("value", memory), kind="shape", axis=ConstAST(0))
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -874,8 +874,8 @@ class ArchQueryAST:
     - ArchQueryAST(query_name="get_thread_num")
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -898,8 +898,8 @@ class ArchGetDynamicMemoryAST:
     - ArchGetDynamicMemoryAST(space=MemorySpace.SM)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -925,8 +925,8 @@ class ArchBarrierAST:
     - )
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -957,8 +957,8 @@ class ArchLaunchKernelAST:
     - )
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_package.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -985,8 +985,8 @@ class ConstAST:
     - ConstAST(value=1)
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -1008,8 +1008,8 @@ class FunctionAST:
     - FunctionAST(name="kernel", inputs=[], outputs=[], body=BlockAST([]))
 
     关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/dsl/ast/__init__.md
+    - test: test/dsl/ast/test_visitor_integration.py
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
@@ -1038,8 +1038,8 @@ class FunctionAST:
         - list(func_ast.iter_inputs())
 
         关联文件:
-        - spec: spec/dsl/ast.md
-        - test: test/dsl/test_ast_visitor.py
+        - spec: spec/dsl/ast/__init__.md
+        - test: test/dsl/ast/test_visitor_integration.py
         - 功能实现: kernel_gen/dsl/ast/nodes.py
         """
 

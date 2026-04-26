@@ -5,7 +5,7 @@
 - 创建者：`大闸蟹`
 - 最后一次更改：`大闸蟹`
 - 目标 `spec`：
-  - [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)
+  - [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)
   - [`spec/pass/lowering/nn_lowering/element_binary_lowering.md`](../../spec/pass/lowering/nn_lowering/element_binary_lowering.md)
   - [`spec/pass/lowering/nn_lowering/select_cast_lowering.md`](../../spec/pass/lowering/nn_lowering/select_cast_lowering.md)
   - [`spec/pass/lowering/nn_lowering/dma_structured_lowering.md`](../../spec/pass/lowering/nn_lowering/dma_structured_lowering.md)
@@ -78,7 +78,7 @@
 ## 当前基线
 
 - 当前公开合同：
-  - [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md) 规定 `NnLoweringPass` 是唯一公开入口，`lower-nn` 只负责 `nn -> dma/kernel` 的 op rewrite。
+  - [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md) 规定 `NnLoweringPass` 是唯一公开入口，`lower-nn` 只负责 `nn -> dma/kernel` 的 op rewrite。
   - `nn.softmax` 仍要求先由上游分解；若直接进入本 pass，应抛出 `NnLoweringError`。
 - 当前公开 API：
   - [`kernel_gen/passes/lowering/nn_lowering/__init__.py`](../../kernel_gen/passes/lowering/nn_lowering/__init__.py) 导出 `NnLoweringError` 与 `NnLoweringPass`。
@@ -209,14 +209,14 @@ class LowerNnAddPattern(RewritePattern):
 
 #### 目标 spec / API
 
-- `spec/pass/lowering/nn_lowering.md`
+- `spec/pass/lowering/nn_lowering/spec.md`
 - `公开 API：NnLoweringPass / NnLoweringError / build_registered_pass("lower-nn")`
 - `内部 API：nn_lowering_patterns() -> list[RewritePattern]`
 
 #### 禁止修改面 / 合同真源
 
 - `禁止修改面：不改公开 pass 名，不改 expectation 输出语义，不新增公开 pipeline`
-- `合同真源：expectation/pass/lowing/nn_lowering > spec/pass/lowering/nn_lowering.md > test/pass/nn_lowering`
+- `合同真源：expectation/pass/lowing/nn_lowering > spec/pass/lowering/nn_lowering/spec.md > test/pass/nn_lowering`
 
 #### 预期示例代码
 

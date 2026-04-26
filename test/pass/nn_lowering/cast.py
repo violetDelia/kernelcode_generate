@@ -11,7 +11,7 @@
 
 关联文件:
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
-- Spec 文档: spec/pass/lowering/nn_lowering.md
+- Spec 文档: spec/pass/lowering/nn_lowering/spec.md
 - 测试文件: test/pass/nn_lowering/cast.py
 """
 
@@ -55,7 +55,7 @@ def _make_memory_type(element_type: Attribute = i32) -> NnMemoryType:
     - mem_type = _make_memory_type()
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/cast.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
@@ -82,7 +82,7 @@ def _build_module(
     - module, block = _build_module([input_type], result_type, lambda block: [nn_op])
 
     关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
+    - spec: spec/pass/lowering/nn_lowering/spec.md
     - test: test/pass/nn_lowering/cast.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
@@ -108,7 +108,7 @@ def _build_module(
 # 测试目的: 验证 nn.cast lower 为 dma.alloc + dma.cast。
 # 使用示例: pytest -q test/pass/nn_lowering/cast.py -k test_lower_cast_to_dma_cast
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/cast.py
 def test_lower_cast_to_dma_cast() -> None:
     input_type = _make_memory_type(element_type=i32)
@@ -134,7 +134,7 @@ def test_lower_cast_to_dma_cast() -> None:
 # 测试目的: 验证 nn.cast 支持 bfloat16 并 lower 为 dma.cast。
 # 使用示例: pytest -q test/pass/nn_lowering/cast.py -k test_lower_cast_bfloat16_to_dma_cast
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/pass/nn_lowering/cast.py
 def test_lower_cast_bfloat16_to_dma_cast() -> None:
     input_type = _make_memory_type(element_type=i32)

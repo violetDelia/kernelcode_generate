@@ -12,7 +12,7 @@
 - visitor = AstVisitor()
 
 关联文件:
-- spec: spec/dsl/ast_visitor.md
+- spec: spec/dsl/ast/visitor.md
 - test: test/dsl/ast/test_visitor.py
 - 功能实现: kernel_gen/dsl/ast/visitor.py
 """
@@ -42,7 +42,7 @@ class AstVisitorError(Exception):
     - raise AstVisitorError("Unsupported syntax", location)
 
     关联文件:
-    - spec: spec/dsl/ast_visitor.md
+    - spec: spec/dsl/ast/visitor.md
     - test: test/dsl/ast/test_visitor.py
     - 功能实现: kernel_gen/dsl/ast/visitor.py
     """
@@ -78,7 +78,7 @@ class AstVisitor:
     - visitor.visit_function(func_ast, ctx)
 
     关联文件:
-    - spec: spec/dsl/ast_visitor.md
+    - spec: spec/dsl/ast/visitor.md
     - test: test/dsl/ast/test_visitor.py
     - 功能实现: kernel_gen/dsl/ast/visitor.py
     """

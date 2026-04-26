@@ -8,7 +8,7 @@
 - 在计划书正文中追加“用户重开结论（2026-04-14 09:19）”与 `R1 -> R2 -> R3` 重开任务表，明确原“通过”结论失效，新的最小阻断项为 `实现 + 测试` 与 `expectation + spec` 的 split 状态。
 - 明确本轮取消兼容边界：element_binary mixed scalar 不再同时兼容 `dma.fill` 与 `dma.broadcast` 两套输出；`dma.broadcast` 仅保留给 mixed compare 与 memory-source 显式广播链路。
 验证：
-- 文本核对 `ARCHITECTURE/plan/nn_lowering_pass_refactor_green_plan.md`、`spec/pass/lowering/nn_lowering.md`、`spec/pass/lowering/nn_lowering/element_binary_lowering.md`。
+- 文本核对 `ARCHITECTURE/plan/nn_lowering_pass_refactor_green_plan.md`、`spec/pass/lowering/nn_lowering/spec.md`、`spec/pass/lowering/nn_lowering/element_binary_lowering.md`。
 - 文本核对 `expectation/pass/lowing/nn_lowering/element_binary/add.py`、`expectation/pass/lowing/nn_lowering/element_binary/sub.py`、`expectation/pass/lowing/nn_lowering/element_binary/mul.py`、`expectation/pass/lowing/nn_lowering/element_binary/div.py`、`expectation/pass/lowing/nn_lowering/element_binary/truediv.py`。
 - 文本核对 `kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py` 与 `test/pass/nn_lowering/test_lowering_nn_lowering.py`，确认旧 `dma.broadcast` 兼容仍在。
 结论：计划书已按最新用户合同重开；下一步创建 `R1 build` 任务，交由管理员推进执行链。

@@ -6,7 +6,7 @@
 - 最后一次更改：`睡觉小分队`
 - 目标 `spec`：
   [`spec/dialect/kernel.md`](../../spec/dialect/kernel.md)、
-  [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)、
+  [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)、
   [`spec/pass/lowering/nn_lowering/element_binary_lowering.md`](../../spec/pass/lowering/nn_lowering/element_binary_lowering.md)、
   [`spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md`](../../spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md)、
   [`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)、
@@ -311,7 +311,7 @@ kernel.softmax
 
 - [`agents/codex-multi-agents/log/talk.log`](../../agents/codex-multi-agents/log/talk.log)
 - [`spec/dialect/kernel.md`](../../spec/dialect/kernel.md)
-- [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)
+- [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)
 - [`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)
 - [`expectation/dsl/emit_c/npu_demo/kernel`](../../expectation/dsl/emit_c/npu_demo/kernel)
 - [`expectation/pass/pipeline/default_lowering.py`](../../expectation/pass/pipeline/default_lowering.py)
@@ -328,7 +328,7 @@ kernel.softmax
 #### 目标 spec / API
 
 - [`spec/dialect/kernel.md`](../../spec/dialect/kernel.md)
-- [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)
+- [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)
 - [`spec/pass/lowering/nn_lowering/element_binary_lowering.md`](../../spec/pass/lowering/nn_lowering/element_binary_lowering.md)
 - [`spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md`](../../spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md)
 - `kernel.binary_elewise(%out, %lhs, %rhs) {kind = "..."}`

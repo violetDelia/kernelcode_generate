@@ -4,13 +4,59 @@
 
 用于定义 `Memory` 高层运算规范，覆盖逐元素算术、比较、激活函数（含 `exp`）、归约（`reduce_sum` / `reduce_min` / `reduce_max`）、显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc`、二维 `matmul` 与二维 `conv`。本层只描述可调用语义、结果元信息约束与错误规则。
 
+## API 列表
+
+- `family 导航`
+- `add(lhs, rhs)`
+- `sub(lhs, rhs)`
+- `mul(lhs, rhs)`
+- `truediv(lhs, rhs)`
+- `floordiv(lhs, rhs)`
+- `eq(lhs, rhs)`
+- `ne(lhs, rhs)`
+- `lt(lhs, rhs)`
+- `le(lhs, rhs)`
+- `gt(lhs, rhs)`
+- `ge(lhs, rhs)`
+- `relu(value)`
+- `leaky_relu(value, alpha=0.01)`
+- `sigmoid(value)`
+- `tanh(value)`
+- `hard_sigmoid(value, alpha=0.2, beta=0.5)`
+- `exp(value)`
+- `reduce_sum(value, axis=None, keepdim=False)`
+- `reduce_min(value, axis=None, keepdim=False)`
+- `reduce_max(value, axis=None, keepdim=False)`
+- `broadcast(value, target)`
+- `broadcast_to(source, target_shape, space)`
+- `transpose(value, perm)`
+- `softmax(value, axis=-1)`
+- `fc(value, weight, bias=None)`
+- `matmul(lhs, rhs, memoryspace=None)`
+- `conv(value, weight, bias=None, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)`
+- `img2col1d(value, kw, sw=1, dw=1, pl=0, pr=0)`
+- `img2col2d(value, kh, kw, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)`
+
 ## 文档信息
 
 - 创建者：`榕`
 - 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/operation/nn.md`](../../spec/operation/nn.md)
 - `功能实现`：
-  - [`kernel_gen/operation/nn.py`](../../kernel_gen/operation/nn.py)
+  - [`kernel_gen/operation/nn/__init__.py`](../../kernel_gen/operation/nn/__init__.py)
+  - [`kernel_gen/operation/nn/common.py`](../../kernel_gen/operation/nn/common.py)
+  - [`kernel_gen/operation/nn/broadcast.py`](../../kernel_gen/operation/nn/broadcast.py)
+  - [`kernel_gen/operation/nn/elementwise_binary.py`](../../kernel_gen/operation/nn/elementwise_binary.py)
+  - [`kernel_gen/operation/nn/elementwise_compare.py`](../../kernel_gen/operation/nn/elementwise_compare.py)
+  - [`kernel_gen/operation/nn/activation.py`](../../kernel_gen/operation/nn/activation.py)
+  - [`kernel_gen/operation/nn/exp.py`](../../kernel_gen/operation/nn/exp.py)
+  - [`kernel_gen/operation/nn/reduction.py`](../../kernel_gen/operation/nn/reduction.py)
+  - [`kernel_gen/operation/nn/fc.py`](../../kernel_gen/operation/nn/fc.py)
+  - [`kernel_gen/operation/nn/matmul.py`](../../kernel_gen/operation/nn/matmul.py)
+  - [`kernel_gen/operation/nn/conv.py`](../../kernel_gen/operation/nn/conv.py)
+  - [`kernel_gen/operation/nn/img2col.py`](../../kernel_gen/operation/nn/img2col.py)
+  - [`kernel_gen/operation/nn/softmax.py`](../../kernel_gen/operation/nn/softmax.py)
+  - [`kernel_gen/operation/nn/transpose.py`](../../kernel_gen/operation/nn/transpose.py)
   - [`kernel_gen/operation/__init__.py`](../../kernel_gen/operation/__init__.py)
 - `test`：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
 
@@ -46,7 +92,7 @@
 - 不引入超出本文规则的复杂自动类型提升；`dtype` 兼容性需显式检查。
 - 不负责 AST/IR/lowering 设计。
 - 激活函数仅支持 `Memory` 输入；输出 `shape`/`dtype`/`space`/`format`/`stride` 继承输入，仅允许浮点 `dtype`（`Float16`/`BFloat16`/`Float32`/`Float64`）。
-- `kernel_gen.operation.nn` 是本组稳定模块入口；内部若后续拆出 `_nn_common / _nn_elementwise / _nn_broadcast / _nn_structured / _nn_reduction`，也只作为实现组织，不承诺为新的公开导入路径。
+- `kernel_gen.operation.nn` 是本组稳定包入口；当前实现已完整组织到 `common / broadcast / elementwise_binary / elementwise_compare / activation / exp / reduction / fc / matmul / conv / img2col / softmax / transpose` 子模块下。旧私有文件 `_nn_common / _nn_broadcast / _nn_elementwise / _nn_reduction / _nn_structured` 已删除，不再保留兼容导入路径。
 - `kernel_gen.operation` 顶层稳定导出只保留经过包级聚合的子集：`add / sub / mul / truediv / eq / ne / lt / le / gt / ge / matmul`；`floordiv`、激活、`broadcast`、`transpose`、`softmax`、`fc`、`conv`、`img2col1d`、`img2col2d` 与归约族均继续通过 `kernel_gen.operation.nn` 访问，不在本轮顺手上提到顶层。
 
 ## 术语

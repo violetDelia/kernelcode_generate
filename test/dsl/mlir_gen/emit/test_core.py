@@ -2326,6 +2326,7 @@ def test_remaining_successful_emit_branches(monkeypatch: pytest.MonkeyPatch) -> 
 # 对应测试文件路径: test/dsl/mlir_gen/emit/test_core.py
 def test_emit_core_private_s7_remaining_branch_edges(monkeypatch: pytest.MonkeyPatch) -> None:
     assert isinstance(emit_core._eval_symbolic_dim_node(py_ast.parse("2 / N", mode="eval").body, None), SymbolDim)
+    assert isinstance(emit_core._eval_symbolic_dim_node(py_ast.parse("N // 2", mode="eval").body, None), SymbolDim)
     with pytest.raises(emit_core._LoweringError, match="Unsupported symbolic dim expression"):
         emit_core._eval_symbolic_dim_node(py_ast.parse("N % 2", mode="eval").body, None)
     with pytest.raises(emit_core._LoweringError, match="Unsupported symbolic dim expression"):

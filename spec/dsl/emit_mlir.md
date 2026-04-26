@@ -6,6 +6,11 @@
 - 为 `ast_visitor` 提供可调用的节点发射接口。
 - 不负责 AST 解析与遍历，不负责 MLIR 文本输出。
 
+## API 列表
+
+- `EmitContext(builder, symbols, types, config=None)`
+- `emit_mlir(node, ctx)`
+
 ## 文档信息
 
 - 创建者：`规格小队`
@@ -36,8 +41,8 @@
 
 ## 依赖
 
-- AST 节点定义：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
-- AST 访问器：[`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md)
+- AST 节点定义：[`spec/dsl/ast/__init__.md`](../../spec/dsl/ast/__init__.md)
+- AST 访问器：[`spec/dsl/ast/visitor.md`](../../spec/dsl/ast/visitor.md)
 - Arch DSL helper 公开入口：[`spec/include/api/Arch.md`](../../spec/include/api/Arch.md)
 - arch 查询结果类型：[`spec/dialect/arch.md`](../../spec/dialect/arch.md)
 
@@ -297,12 +302,12 @@ value = emit_mlir(expr_ast, ctx)
   - [`test/dsl/mlir_gen/emit/test_type_utils.py`](../../test/dsl/mlir_gen/emit/test_type_utils.py)
   - [`test/dsl/mlir_gen/emit/test_shape_utils.py`](../../test/dsl/mlir_gen/emit/test_shape_utils.py)
 - 集成测试文件：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
-- 补充测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
+- 补充测试文件：[`test/dsl/ast/test_visitor_integration.py`](../../test/dsl/ast/test_visitor_integration.py)
 - 执行命令（emit 单测）：`pytest -q test/dsl/test_emit_mlir.py`
 - 执行命令（emit 拆分单测）：`pytest -q test/dsl/mlir_gen/emit`
 - 执行命令（emit 端到端回归）：`pytest -q test/dsl/test_mlir_gen.py`
-- 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/test_ast_visitor.py`
-- 拆分归属：EMIT-001~EMIT-028、EMIT-033~EMIT-035 默认归属 [`test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)；EMIT-029 默认归属 [`test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)；EMIT-031/031A/032 归属 [`test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)、[`test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py) 的联合回归。当前 `barrier/launch` 专项测试缺口在下游实现+补测阶段补齐。
+- 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/ast/test_visitor_integration.py`
+- 拆分归属：EMIT-001~EMIT-028、EMIT-033~EMIT-035 默认归属 [`test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)；EMIT-029 默认归属 [`test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)；EMIT-031/031A/032 归属 [`test_ast_visitor.py`](../../test/dsl/ast/test_visitor_integration.py)、[`test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py) 的联合回归。当前 `barrier/launch` 专项测试缺口在下游实现+补测阶段补齐。
 - 编号口径：EMIT-001A/EMIT-001B/EMIT-030/EMIT-030A 为有效拆分编号，纳入本清单映射；其中 EMIT-030 绑定 `get_thread_num` helper 参数约束用例，EMIT-030A 绑定 `arch.get_thread_num` 正向 lowering 用例。
 - 测试目标：
   - 覆盖常见表达式与语句节点的发射结果。
@@ -377,7 +382,7 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-028：`nn.sub` mixed dtype promotion 触发 `dma.cast` 并保持 `nn.sub` 与 `func.return` 的结果类型与 promotion 结果一致。（`test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast`）
   - EMIT-033：`nn.add` mixed memory+const/symbol lowering 需按 `i32 < f16 < f32` 执行 dtype promotion，`!symbol.int` 按 `i32` 参与决议；仅允许一侧为 memory 并按需插入 `dma.cast`，纯 scalar/symbol 双侧输入必须拒绝。（`test/dialect/test_nn_dialect.py::test_add_op_accepts_memory_const_rhs`、`test/dialect/test_nn_dialect.py::test_add_op_accepts_memory_symbol_rhs`、`test/dialect/test_nn_dialect.py::test_add_op_rejects_pure_scalar_operands`）
   - EMIT-034：`Img2ColAST(kind="img2col1d")` 必须 lowering 为 `nn.img2col1d`，并保持参数到属性/operand 的节点级一一映射；禁止引入 kernel dialect / `nn_lowering` / `cpu::img2col2d` 语义。（`test/dsl/test_emit_mlir.py::test_emit_mlir_img2col1d_lowering`）
-  - EMIT-035：`Img2ColAST(kind="img2col2d")` 必须 lowering 为 `nn.img2col2d`，并与 `ForAST + dma.slice/dma.deslice` 协同路径保持节点级映射一致，循环迭代与 DMA 标量 operand 继续保持 `!symbol.int` 语义。（`test/dsl/test_emit_mlir.py::test_emit_mlir_img2col2d_with_loop_slice_deslice_lowering`、`test/dsl/test_mlir_gen.py::test_build_func_op_supports_symbolic_for_loop_dma_without_return`、`test/dsl/test_ast_visitor.py::test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
+  - EMIT-035：`Img2ColAST(kind="img2col2d")` 必须 lowering 为 `nn.img2col2d`，并与 `ForAST + dma.slice/dma.deslice` 协同路径保持节点级映射一致，循环迭代与 DMA 标量 operand 继续保持 `!symbol.int` 语义。（`test/dsl/test_emit_mlir.py::test_emit_mlir_img2col2d_with_loop_slice_deslice_lowering`、`test/dsl/test_mlir_gen.py::test_build_func_op_supports_symbolic_for_loop_dma_without_return`、`test/dsl/ast/test_visitor_integration.py::test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
   - EMIT-036：`float(symbol.int)` 必须 lowering 为 `symbol.to_float`，结果类型固定为 `f32`；source 非 `!symbol.int<"...">` 时必须报具体类型错误。（下游待补测试映射：`test_emit_mlir_lowers_symbol_to_float`）
   - EMIT-C1A：`MatmulAST` 必须 lowering 为 `nn.matmul`，`element_type` 不一致必须报错 `matmul element_type must match`；不得回退为 `Unsupported call expression`。（`test_emit_mlir_matmul_lowering`、`test_build_func_op_supports_matmul_helper_call`）
   - EMIT-C1C：`ConvAST` 必须在 emit 层分解为 raw `nn.img2col2d + dma.reshape + nn.matmul + dma.reshape`，不得生成 `nn.conv`；符号输出维度与非法参数错误口径需保持稳定。（`test_build_func_op_supports_conv_helper_call`、`test_build_func_op_supports_symbolic_conv_helper_call`、`test_build_func_op_conv_helper_rejects_invalid_stride`、`test_build_func_op_conv_helper_rejects_invalid_arity`）

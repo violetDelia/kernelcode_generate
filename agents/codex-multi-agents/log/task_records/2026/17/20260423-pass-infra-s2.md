@@ -6,7 +6,7 @@
 - 已读 [`TODO.md`](/home/lfr/kernelcode_generate/TODO.md:5) 当前任务行，确认 `worktree`、计划书、记录文件与任务指派一致。
 - 已读 [`ARCHITECTURE/plan/pass_infrastructure_refactor_green_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/pass_infrastructure_refactor_green_plan.md:349) 的 `S2` 正文、全局完成态、合同真源顺序、消费者迁移矩阵与验收设计。
 - 已读前序记录 [`agents/codex-multi-agents/log/task_records/2026/17/20260423-pass-infra-s1.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/agents/codex-multi-agents/log/task_records/2026/17/20260423-pass-infra-s1.md)。
-- 已读当前 worktree 的 [`spec/pass/registry.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/registry.md)、[`spec/pass/pass_manager.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/pass_manager.md)、[`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/lowering/buffer_results_to_out_params.md)、[`spec/pass/lowering/nn_lowering.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/lowering/nn_lowering.md)。
+- 已读当前 worktree 的 [`spec/pass/registry.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/registry.md)、[`spec/pass/pass_manager.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/pass_manager.md)、[`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/lowering/buffer_results_to_out_params.md)、[`spec/pass/lowering/nn_lowering/spec.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/lowering/nn_lowering/spec.md)。
 - 已读相关 pytest 与实现入口：[`test/pass/test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/test/pass/test_buffer_results_to_out_params.py)、[`test/pass/nn_lowering/public_name.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/test/pass/nn_lowering/public_name.py)、[`kernel_gen/passes/__init__.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/kernel_gen/passes/__init__.py)、[`kernel_gen/passes/lowering/__init__.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/kernel_gen/passes/lowering/__init__.py)、[`kernel_gen/passes/lowering/buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/kernel_gen/passes/lowering/buffer_results_to_out_params.py)、[`kernel_gen/passes/lowering/nn_to_kernel.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/kernel_gen/passes/lowering/nn_to_kernel.py)。
 最小功能闭环：
 - 把 out-param / nn lowering caller 的 surviving public path 明确收口到 `kernel_gen.passes.buffer_results_to_out_params` 与 `kernel_gen.passes.lowering.nn_lowering`。
@@ -15,17 +15,17 @@
 改动：
 - 更新 [`spec/pass/registry.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/registry.md)，新增 `S2` 导入矩阵补充，写明 out-param / nn lowering caller 的 canonical path、两个 compat shim 的失败边界，以及 `pytest` 与 `expectation` 的分工。
 - 更新 [`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/lowering/buffer_results_to_out_params.md)，新增 `导入与兼容边界`，把 canonical import 固定为 `kernel_gen.passes.buffer_results_to_out_params`，并把 `kernel_gen.passes.lowering.buffer_results_to_out_params` 写成 `ModuleNotFoundError` 失败口径。
-- 更新 [`spec/pass/lowering/nn_lowering.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/lowering/nn_lowering.md)，把 canonical import 固定为 `kernel_gen.passes.lowering.nn_lowering`，并写明 `kernel_gen.passes.lowering.nn_to_kernel` 与 `LowerNnToKernelPass` 不再属于 surviving public contract。
+- 更新 [`spec/pass/lowering/nn_lowering/spec.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/lowering/nn_lowering/spec.md)，把 canonical import 固定为 `kernel_gen.passes.lowering.nn_lowering`，并写明 `kernel_gen.passes.lowering.nn_to_kernel` 与 `LowerNnToKernelPass` 不再属于 surviving public contract。
 - 当前 spec 同时要求下游 build 更新 [`test/pass/test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/test/pass/test_buffer_results_to_out_params.py) 与 [`test/pass/nn_lowering/public_name.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/test/pass/nn_lowering/public_name.py) 的导入证明，不再使用 package 级 re-export 作为通过证据。
 验证：
-- `rg -n "S2 导入矩阵补充|canonical import path|ModuleNotFoundError|nn_to_kernel|buffer_results_to_out_params" spec/pass/registry.md spec/pass/lowering/buffer_results_to_out_params.md spec/pass/lowering/nn_lowering.md`
+- `rg -n "S2 导入矩阵补充|canonical import path|ModuleNotFoundError|nn_to_kernel|buffer_results_to_out_params" spec/pass/registry.md spec/pass/lowering/buffer_results_to_out_params.md spec/pass/lowering/nn_lowering/spec.md`
   - 结果：命中新增导入边界、旧模块失败边界与 pytest/expectation 分工文案。
-- `rg -n "[[:blank:]]$" spec/pass/registry.md spec/pass/lowering/buffer_results_to_out_params.md spec/pass/lowering/nn_lowering.md agents/codex-multi-agents/log/task_records/2026/17/20260423-pass-infra-s2.md`
+- `rg -n "[[:blank:]]$" spec/pass/registry.md spec/pass/lowering/buffer_results_to_out_params.md spec/pass/lowering/nn_lowering/spec.md agents/codex-multi-agents/log/task_records/2026/17/20260423-pass-infra-s2.md`
   - 结果：无命中。
-- `git -C /home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2 diff --check -- spec/pass/registry.md spec/pass/lowering/buffer_results_to_out_params.md spec/pass/lowering/nn_lowering.md agents/codex-multi-agents/log/task_records/2026/17/20260423-pass-infra-s2.md`
+- `git -C /home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2 diff --check -- spec/pass/registry.md spec/pass/lowering/buffer_results_to_out_params.md spec/pass/lowering/nn_lowering/spec.md agents/codex-multi-agents/log/task_records/2026/17/20260423-pass-infra-s2.md`
   - 结果：通过。
 Diff 反推自测：
-- 本轮实际 diff 只落在 `spec/pass/registry.md`、`spec/pass/lowering/buffer_results_to_out_params.md`、`spec/pass/lowering/nn_lowering.md` 与当前任务记录，因此反推自测只做文本核对、空白检查与 `git diff --check`。
+- 本轮实际 diff 只落在 `spec/pass/registry.md`、`spec/pass/lowering/buffer_results_to_out_params.md`、`spec/pass/lowering/nn_lowering/spec.md` 与当前任务记录，因此反推自测只做文本核对、空白检查与 `git diff --check`。
 - 计划书要求的 `pytest -q test/pass/test_buffer_results_to_out_params.py test/pass/nn_lowering/public_name.py` 属于下游 build 需要兑现的 diff 反推测试；本轮未运行，因为当前角色只改 spec/记录、不改实现或 pytest。
 合同验收（如适用）：
 - `expectation/pass/buffer_results_to_out_params/**` 仍只作合同验收资产单列。
@@ -60,7 +60,7 @@ Diff 反推自测：
 - 更新 [`test/pass/nn_lowering/public_name.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/test/pass/nn_lowering/public_name.py)，改为直接从 canonical path `kernel_gen.passes.lowering.nn_lowering` 导入，并断言 `kernel_gen.passes.lowering.nn_to_kernel` 与 `LowerNnToKernel*` 不再暴露。
 - 更新 [`test/pass/nn_lowering/test_lowering_nn_lowering.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/test/pass/nn_lowering/test_lowering_nn_lowering.py)，删除对 `nn_to_kernel` compat shim 的顶层 import 与对应 compat 行为用例，避免 shim 退场后文件本身失效。
 - 更新 [`test/pass/test_pass_registry.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/test/pass/test_pass_registry.py)，把两个旧 shim 从 surviving import matrix 移出，并补进旧路径失败边界。
-- 当前 worktree 里 [`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/lowering/buffer_results_to_out_params.md)、[`spec/pass/lowering/nn_lowering.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/lowering/nn_lowering.md)、[`spec/pass/registry.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/registry.md) 是前序 `spec` 改动，本轮 `build` 未继续改写它们。
+- 当前 worktree 里 [`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/lowering/buffer_results_to_out_params.md)、[`spec/pass/lowering/nn_lowering/spec.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/lowering/nn_lowering/spec.md)、[`spec/pass/registry.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/registry.md) 是前序 `spec` 改动，本轮 `build` 未继续改写它们。
 验证：
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2:/home/lfr/kernelcode_generate pytest -q /home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/test/pass/test_buffer_results_to_out_params.py /home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/test/pass/nn_lowering/public_name.py /home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/test/pass/nn_lowering/test_lowering_nn_lowering.py /home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/test/pass/test_pass_registry.py`
   - 结果：`93 passed, 1 warning`
@@ -329,7 +329,7 @@ Diff 反推审查：
   - 删除 [`kernel_gen/passes/lowering/buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/kernel_gen/passes/lowering/buffer_results_to_out_params.py)
   - 删除 [`kernel_gen/passes/lowering/nn_to_kernel.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/kernel_gen/passes/lowering/nn_to_kernel.py)
   - [`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/lowering/buffer_results_to_out_params.md)
-  - [`spec/pass/lowering/nn_lowering.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/lowering/nn_lowering.md)
+  - [`spec/pass/lowering/nn_lowering/spec.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/lowering/nn_lowering/spec.md)
   - [`spec/pass/registry.md`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/spec/pass/registry.md)
   - [`test/pass/test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/test/pass/test_buffer_results_to_out_params.py)
   - [`test/pass/nn_lowering/public_name.py`](/home/lfr/kernelcode_generate/wt-20260423-pass-infra-s2/test/pass/nn_lowering/public_name.py)

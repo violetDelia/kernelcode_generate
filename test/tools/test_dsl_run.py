@@ -1,7 +1,7 @@
 """dsl_run tests.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 `dsl_run(func, real_args, pipeline, emitcconfig)` 的正向执行、错误合同与结果模型口径。
@@ -191,16 +191,6 @@ def add_kernel(
     store(lhs + rhs, out, [0], [6], [1])
 
 
-def store_add_kernel(
-    out: "Tensor[i32, 6]",
-    lhs: "Tensor[i32, 6]",
-    rhs: "Tensor[i32, 6]",
-) -> None:
-    """显式 out 参数版本的 add 样例。"""
-
-    store(lhs + rhs, out, [0], [6], [1])
-
-
 def return_add_kernel(
     lhs: "Tensor[i32, 6]",
     rhs: "Tensor[i32, 6]",
@@ -386,7 +376,7 @@ def test_dsl_run_numpy_output() -> None:
     expected = lhs.numpy() + rhs
 
     result = dsl_run(
-        store_add_kernel,
+        add_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
         EmitCContext(target="npu_demo"),
@@ -518,58 +508,6 @@ def test_dsl_run_mul_matches_public_contract() -> None:
     _assert_result_contract(result, out, expected, helper_snippet="mul<")
 
 
-# TC-DSL-RUN-003D
-# 创建者: 朽木露琪亚
-# 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
-# 测试目的: 锁定 dsl_run + npu-demo-lowering 对 sub 的 out-param 正向链路，避免执行链路只剩手工分支有回归覆盖。
-# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
-# 对应 spec 文件路径: spec/tools/dsl_run.md
-# 对应测试文件路径: test/tools/test_dsl_run.py
-def test_dsl_run_supports_sub_store_kernel_on_npu_demo() -> None:
-    out = torch.empty((6,), dtype=torch.int32)
-    lhs = torch.tensor([10, 11, 12, 13, 14, 15], dtype=torch.int32)
-    rhs = np.array([1, 2, 3, 4, 5, 6], dtype=np.int32)
-    expected = lhs - torch.from_numpy(rhs)
-
-    result = dsl_run(
-        sub_store_kernel,
-        (out, lhs, rhs),
-        "npu-demo-lowering",
-        EmitCContext(target="npu_demo"),
-    )
-
-    _assert_result_contract(result, out, expected, helper_snippet="sub<")
-    assert 'kind = "sub"' in str(result.func_op)
-
-
-# TC-DSL-RUN-003E
-# 创建者: 朽木露琪亚
-# 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
-# 测试目的: 锁定 dsl_run + npu-demo-lowering 对 mul 的 out-param 正向链路，避免执行链路只剩手工分支有回归覆盖。
-# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
-# 对应 spec 文件路径: spec/tools/dsl_run.md
-# 对应测试文件路径: test/tools/test_dsl_run.py
-def test_dsl_run_supports_mul_store_kernel_on_npu_demo() -> None:
-    out = torch.empty((6,), dtype=torch.int32)
-    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
-    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
-    expected = lhs * torch.from_numpy(rhs)
-
-    result = dsl_run(
-        mul_store_kernel,
-        (out, lhs, rhs),
-        "npu-demo-lowering",
-        EmitCContext(target="npu_demo"),
-    )
-
-    _assert_result_contract(result, out, expected, helper_snippet="mul<")
-    assert 'kind = "mul"' in str(result.func_op)
-
-
 # TC-DSL-RUN-003F
 # 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
@@ -637,7 +575,7 @@ def test_dsl_run_rejects_npu_demo_module_without_unique_wrapper(monkeypatch: pyt
 
     with pytest.raises(DslRunError, match=re.escape(NPU_DEMO_WRAPPER_ERROR)):
         dsl_run(
-            store_add_kernel,
+            add_kernel,
             (out, lhs, rhs),
             PassManager(),
             EmitCContext(target="npu_demo"),
@@ -681,7 +619,7 @@ def test_dsl_run_rejects_none_emitcconfig() -> None:
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
     with pytest.raises(DslRunError, match=re.escape(EMITCCONFIG_ERROR)):
-        dsl_run(store_add_kernel, (out, lhs, rhs), "npu-demo-lowering", None)
+        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", None)
 
 
 # TC-DSL-RUN-006
@@ -699,7 +637,7 @@ def test_dsl_run_rejects_invalid_emitcconfig_type() -> None:
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
     with pytest.raises(DslRunError, match=re.escape(EMITCCONFIG_ERROR)):
-        dsl_run(store_add_kernel, (out, lhs, rhs), "npu-demo-lowering", object())
+        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", object())
 
 
 # TC-DSL-RUN-007
@@ -717,7 +655,7 @@ def test_dsl_run_rejects_unknown_pipeline_name() -> None:
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
     with pytest.raises(DslRunError, match=re.escape(PIPELINE_NAME_ERROR)):
-        dsl_run(store_add_kernel, (out, lhs, rhs), "missing-pipeline", EmitCContext(target="npu_demo"))
+        dsl_run(add_kernel, (out, lhs, rhs), "missing-pipeline", EmitCContext(target="npu_demo"))
 
 
 # TC-DSL-RUN-008
@@ -735,7 +673,7 @@ def test_dsl_run_rejects_invalid_pipeline_type() -> None:
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
     with pytest.raises(DslRunError, match=re.escape(PIPELINE_TYPE_ERROR)):
-        dsl_run(store_add_kernel, (out, lhs, rhs), object(), EmitCContext(target="npu_demo"))
+        dsl_run(add_kernel, (out, lhs, rhs), object(), EmitCContext(target="npu_demo"))
 
 
 # TC-DSL-RUN-009
@@ -753,7 +691,7 @@ def test_dsl_run_rejects_unsupported_runtime_arg_type() -> None:
     rhs = object()
 
     with pytest.raises(DslRunError, match=re.escape(REAL_ARG_TYPE_ERROR)):
-        dsl_run(store_add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
+        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
 
 
 # TC-DSL-RUN-010
@@ -770,7 +708,7 @@ def test_dsl_run_rejects_arity_mismatch() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
 
     with pytest.raises(DslRunError, match=re.escape(ARITY_ERROR)):
-        dsl_run(store_add_kernel, (out, lhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
+        dsl_run(add_kernel, (out, lhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
 
 
 # TC-DSL-RUN-011

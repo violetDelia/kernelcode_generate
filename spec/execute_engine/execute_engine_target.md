@@ -6,6 +6,17 @@
 - 冻结 `entry_point` 命名、`ordered_args` 绑定顺序、编译器默认值与 flags 追加策略，使 `compile -> execute` 在不同 target 下保持机械一致。
 - 本文档覆盖 `target_registry / entry_shim_builder / compiler` 三类实现职责，因此属于一个接口 spec 对应多个实现文件的例外场景。
 
+## API 列表
+
+- `target_includes(target: str) -> tuple[str, ...]`
+- `default_compiler() -> str`
+- `class CompileArtifacts(soname_path: str, source_path: str, command: tuple[str, ...], stdout: str, stderr: str, return_code: int)`
+- `build_compile_unit(*, source: str, target_includes: tuple[str, ...], entry_shim_source: str) -> str`
+- `build_compile_command(*, compiler: str, source_path: str, output_path: str, compiler_flags: Iterable[str], link_flags: Iterable[str], include_dirs: Iterable[str]) -> tuple[str, ...]`
+- `compile_source(*, source: str, compiler: str, compiler_flags: tuple[str, ...], link_flags: tuple[str, ...], include_dirs: tuple[str, ...], work_dir: Path | None = None, dry_run: bool = True) -> CompileArtifacts`
+- `needs_entry_shim(source: str, entry_point: str) -> bool`
+- `build_entry_shim_source(*, function: str, entry_point: str, source: str | None = None) -> str`
+
 ## 文档信息
 
 - 创建者：咯咯咯
@@ -18,7 +29,7 @@
 
 - 执行引擎总览合同：[`spec/execute_engine/execute_engine.md`](spec/execute_engine/execute_engine.md)
 - 请求/结果/参数模型：[`spec/execute_engine/execute_engine_api.md`](spec/execute_engine/execute_engine_api.md)
-- `emit_c` 输出语义：[`spec/dsl/emit_c.md`](spec/dsl/emit_c.md)
+- `emit_c` 输出语义：[`spec/dsl/gen_kernel/emit.md`](spec/dsl/gen_kernel/emit.md)
 
 ## 术语
 
@@ -44,7 +55,7 @@
 
 ## 公开接口
 
-### `target` 选择与 include 注入
+### `target_includes(target: str) -> tuple[str, ...]`
 
 功能说明：
 
@@ -75,27 +86,219 @@ target=cpu      -> #include "include/cpu/Memory.h"
 - 不支持的 `target`，或最终编译单元依赖了与 `target` 不一致的 include family，必须失败并返回 `target_header_mismatch`。
 - 在正确 include 已注入的前提下仍然编译失败，必须返回 `compile_failed`。
 
-### `compiler` 默认值与 flags 追加
+### `default_compiler() -> str`
 
 功能说明：
 
-- 冻结编译器选择与 compile/link flags 的基线规则，保证不同调用路径下的编译命令可复现。
+- 返回执行引擎 `P0` 的默认编译器名。
 
 参数说明：
 
-- `compiler(str | None)`: 显式编译器；为 `None` 时默认使用 `g++`。
-- `compiler_flags(tuple[str, ...])`: 编译 flags；默认 `("-std=c++17",)`。
-- `link_flags(tuple[str, ...])`: 链接 flags；默认 `()`。
+- 无。
 
 使用示例：
 
 ```python
-CompileRequest(
-    target="cpu",
-    function="cpu::add",
-    compiler=None,
-    compiler_flags=("-std=c++17", "-O2"),
+compiler = default_compiler()
+assert compiler == "g++"
+```
+
+注意事项：
+
+- 仅在调用方未显式提供 `compiler` 时生效。
+
+返回与限制：
+
+- 当前固定返回 `"g++"`。
+
+### `class CompileArtifacts(soname_path: str, source_path: str, command: tuple[str, ...], stdout: str, stderr: str, return_code: int)`
+
+功能说明：
+
+- 承载编译阶段产物路径、命令与 stdout/stderr。
+
+参数说明：
+
+- `soname_path(str)`: 共享库产物路径。
+- `source_path(str)`: 编译单元源码路径。
+- `command(tuple[str, ...])`: 实际编译命令。
+- `stdout(str)`: 编译 stdout。
+- `stderr(str)`: 编译 stderr。
+- `return_code(int)`: 编译进程返回码。
+
+使用示例：
+
+```python
+artifacts = compile_source(
+    source="int main(){}",
+    compiler="g++",
+    compiler_flags=("-std=c++17",),
     link_flags=(),
+    include_dirs=(".",),
+)
+assert isinstance(artifacts.command, tuple)
+```
+
+注意事项：
+
+- 内部自动创建临时目录时，会附带私有清理句柄；该句柄不是公开 API。
+
+返回与限制：
+
+- 只承载编译结果描述，不负责执行。
+
+### `build_compile_unit(*, source: str, target_includes: tuple[str, ...], entry_shim_source: str) -> str`
+
+功能说明：
+
+- 拼接最终编译单元：`target includes + source + entry shim`。
+
+参数说明：
+
+- `source(str)`: 原始 C++ 源码。
+- `target_includes(tuple[str, ...])`: target 对应的 include 集合。
+- `entry_shim_source(str)`: entry shim 源码片段。
+
+使用示例：
+
+```python
+unit = build_compile_unit(
+    source="int main(){}",
+    target_includes=('#include "include/cpu/Memory.h"',),
+    entry_shim_source="",
+)
+```
+
+注意事项：
+
+- 仅补齐 `source` 中缺失的 target include，不重复注入已存在项。
+
+返回与限制：
+
+- 返回最终单个 translation unit 文本。
+
+### `build_compile_command(*, compiler: str, source_path: str, output_path: str, compiler_flags: Iterable[str], link_flags: Iterable[str], include_dirs: Iterable[str]) -> tuple[str, ...]`
+
+功能说明：
+
+- 生成稳定顺序的编译命令。
+
+参数说明：
+
+- `compiler(str)`: 编译器可执行名。
+- `source_path(str)`: 输入源码路径。
+- `output_path(str)`: 输出共享库路径。
+- `compiler_flags(Iterable[str])`: 编译 flags。
+- `link_flags(Iterable[str])`: 链接 flags。
+- `include_dirs(Iterable[str])`: `-I` 目录列表。
+
+使用示例：
+
+```python
+command = build_compile_command(
+    compiler="g++",
+    source_path="kernel.cpp",
+    output_path="libkernel.so",
+    compiler_flags=("-std=c++17",),
+    link_flags=(),
+    include_dirs=(".",),
+)
+```
+
+注意事项：
+
+- 输出固定为 `-shared -fPIC` 共享库命令形态。
+
+返回与限制：
+
+- 返回编译命令元组，不直接执行。
+
+### `compile_source(*, source: str, compiler: str, compiler_flags: tuple[str, ...], link_flags: tuple[str, ...], include_dirs: tuple[str, ...], work_dir: Path | None = None, dry_run: bool = True) -> CompileArtifacts`
+
+功能说明：
+
+- 写入编译单元并执行或模拟编译流程。
+
+参数说明：
+
+- `source(str)`: 最终编译单元源码。
+- `compiler(str)`: 编译器可执行名。
+- `compiler_flags(tuple[str, ...])`: 编译 flags。
+- `link_flags(tuple[str, ...])`: 链接 flags。
+- `include_dirs(tuple[str, ...])`: include 目录集合。
+- `work_dir(Path | None)`: 可选工作目录；为 `None` 时内部自动创建。
+- `dry_run(bool)`: 是否仅生成占位产物并跳过真实编译。
+
+使用示例：
+
+```python
+artifacts = compile_source(
+    source="int main(){}",
+    compiler="g++",
+    compiler_flags=("-std=c++17",),
+    link_flags=(),
+    include_dirs=(".",),
+    dry_run=True,
+)
+```
+
+注意事项：
+
+- `dry_run=True` 时会创建空 `.so` 占位文件。
+
+返回与限制：
+
+- 返回 `CompileArtifacts`。
+
+### `needs_entry_shim(source: str, entry_point: str) -> bool`
+
+功能说明：
+
+- 判断源码是否已经显式提供同名 `extern "C"` 入口。
+
+参数说明：
+
+- `source(str)`: 原始或拼接后的源码文本。
+- `entry_point(str)`: 预期导出的入口名。
+
+使用示例：
+
+```python
+needs = needs_entry_shim('extern "C" int kg_execute_entry(...) { return 0; }', "kg_execute_entry")
+assert needs is False
+```
+
+注意事项：
+
+- 无法识别时保守返回 `True`。
+
+返回与限制：
+
+- `True` 表示需要生成 shim，`False` 表示可直接复用现有入口。
+
+### `build_entry_shim_source(*, function: str, entry_point: str, source: str | None = None) -> str`
+
+功能说明：
+
+- 为目标函数生成稳定的 C ABI 入口源码。
+
+参数说明：
+
+- `function(str)`: 目标函数符号。
+- `entry_point(str)`: 导出入口名。
+- `source(str | None)`: 可选原始源码；用于解析真实形参并生成运行时 shim。
+
+功能说明：
+
+- 冻结编译器选择与 compile/link flags 的基线规则，并生成或省略 entry shim。
+
+使用示例：
+
+```python
+shim = build_entry_shim_source(
+    function="cpu::add",
+    entry_point="kg_execute_entry",
+    source="void add(){}",
 )
 ```
 
@@ -104,48 +307,18 @@ CompileRequest(
 - 当 `compiler is None` 时，引擎必须按 `g++` 生成编译命令。
 - 有效编译 flags 必须保留 `-std=c++17` 这一基线；调用方追加的 flags 按 `CompileRequest.compiler_flags` 给出的顺序保留。
 - `link_flags` 仅作为调用方追加项；默认空元组不产生额外链接参数。
-
-返回与限制：
-
-- 编译器启动失败、返回非零或编译命令无法生成可执行产物时，必须失败并返回 `compile_failed`。
-
-### `entry_point` 与 `entry shim`
-
-功能说明：
-
-- 为编译产物提供稳定的 `extern "C"` 入口，使运行阶段可以按统一符号名与统一参数槽位调用目标函数。
-
-参数说明：
-
-- `entry_point(str)`: 编译阶段公开导出的入口名；默认 `"kg_execute_entry"`。
-- `function(str)`: 目标函数符号；允许 `npu_demo::add`、`cpu::add` 等 C++ 名称。
-- `ordered_args(const KgArgSlot*)`: 按目标函数形参顺序排列的参数槽数组。
-- `arg_count(unsigned long long)`: `ordered_args` 的槽位数量。
-
-使用示例：
-
-```cpp
-extern "C" int kg_execute_entry(const KgArgSlot* ordered_args, unsigned long long arg_count);
-```
-
-```text
-ordered_args[0]=lhs, ordered_args[1]=rhs, ordered_args[2]=out
-ordered_args[0]=lhs, ordered_args[1]=bias, ordered_args[2]=out
-```
-
-注意事项：
-
 - `entry_point` 默认名为 `kg_execute_entry`；若 `CompileRequest.entry_point` 显式指定其他名称，导出符号名必须与该值一致。
 - 下游执行阶段若 `ExecuteRequest.entry_point is None`，则使用 `CompiledKernel.entry_point`；若显式指定非空值，则按该值解析导出符号。
 - `entry shim` 必须用于以下场景：目标函数是 C++ 符号、存在重载/模板实例，或需要把 Python 侧有序参数统一收口到单一 C ABI 入口。
 - `entry shim` 仅可在以下场景省略：源码已显式提供稳定 `extern "C"` 入口，且该入口名与 `CompileRequest.entry_point` 一致、签名为 `int <entry_point>(const KgArgSlot* ordered_args, unsigned long long arg_count)`，并且参数顺序可直接对应 `ordered_args`。
 - `ordered_args[i]` 必须绑定到目标函数第 `i` 个形参：
-  - `MemoryArg` -> `KgArgSlot.kind = KG_ARG_MEMORY`，并使用 `data/shape/stride/rank` 描述 memory view。
-  - `IntArg` -> `KgArgSlot.kind = KG_ARG_INT`，并写入 `int_value`。
-  - `FloatArg` -> `KgArgSlot.kind = KG_ARG_FLOAT`，并写入 `float_value`。
+  - memory `RuntimeArg` -> `KgArgSlot.kind = KG_ARG_MEMORY`，并使用 `data/shape/stride/rank` 描述 memory view。
+  - integer `RuntimeArg` -> `KgArgSlot.kind = KG_ARG_INT`，并写入 `int_value`。
+  - float `RuntimeArg` -> `KgArgSlot.kind = KG_ARG_FLOAT`，并写入 `float_value`。
 
 返回与限制：
 
+- 编译器启动失败、返回非零或编译命令无法生成可执行产物时，必须失败并返回 `compile_failed`。
 - `entry_point` 或导出符号无法解析时，必须失败并返回 `symbol_resolve_failed`。
 - `ordered_args` 数量或顺序与目标函数形参不一致导致执行失败时，必须返回 `runtime_throw_or_abort`。
 

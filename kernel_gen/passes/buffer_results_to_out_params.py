@@ -14,7 +14,7 @@
 - BufferResultsToOutParamsPass().apply(Context(), module)
 
 关联文件:
-- spec: spec/pass/lowering/buffer_results_to_out_params.md
+- spec: spec/pass/buffer_results_to_out_params.md
 - test: test/pass/test_buffer_results_to_out_params.py
 - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
 """
@@ -39,29 +39,11 @@ from xdsl.rewriter import InsertPoint
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp
 from kernel_gen.dialect.nn import NnMemoryType
-
-
-class BufferResultsToOutParamsError(ValueError):
-    """buffer-results-to-out-params pass 的显式错误。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 统一承载 external declaration、半改半留和当前骨架未覆盖场景的错误。
-
-    使用示例:
-    - raise BufferResultsToOutParamsError("external declaration is not supported")
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
+from kernel_gen.passes.common import PassContractError, ensure_builtin_module
 
 
 @dataclass(frozen=True)
-class _OutputSignature:
+class OutputSignature:
     """封装函数输出的 memory/scalar 结果分解信息。
 
     创建者: jcc你莫辜负
@@ -72,10 +54,10 @@ class _OutputSignature:
     - 便于在校验、callsite 改写与 callee 改写间共享同一拆分逻辑。
 
     使用示例:
-    - signature = _output_signature(func_op)
+    - signature = OutputSignature([memory_type], [0], [])
 
     关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - spec: spec/pass/buffer_results_to_out_params.md
     - test: test/pass/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
@@ -86,7 +68,7 @@ class _OutputSignature:
 
 
 @dataclass(frozen=True)
-class _RewriteTarget:
+class RewriteTarget:
     """记录待改写函数的输入/输出签名信息。
 
     创建者: jcc你莫辜负
@@ -97,496 +79,21 @@ class _RewriteTarget:
     - 保证 callsite 改写与 callee 改写基于同一套输出索引。
 
     使用示例:
-    - target = _build_rewrite_target(func_op)
+    - target = RewriteTarget(func_op, list(func_op.function_type.inputs.data), signature)
 
     关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - spec: spec/pass/buffer_results_to_out_params.md
     - test: test/pass/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
 
     func_op: func.FuncOp
     input_types: list[Attribute]
-    output_signature: _OutputSignature
-
-
-def _output_signature(func_op: func.FuncOp) -> _OutputSignature:
-    """拆分 `func.func` 的输出类型为 memory/scalar 索引列表。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 固化 `function_type.outputs` 的结构化拆分逻辑。
-    - 供校验、callsite 改写与 callee 改写复用。
-
-    使用示例:
-    - signature = _output_signature(func_op)
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    output_types = list(func_op.function_type.outputs.data)
-    memory_indices = [
-        index for index, output_type in enumerate(output_types) if isinstance(output_type, NnMemoryType)
-    ]
-    scalar_indices = [index for index in range(len(output_types)) if index not in memory_indices]
-    return _OutputSignature(output_types, memory_indices, scalar_indices)
-
-
-def _memory_output_indices(func_op: func.FuncOp) -> list[int]:
-    """收集函数输出中的 memory result 索引。
-
-    创建者: 朽木露琪亚
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 逐项检查 `function_type.outputs`。
-    - 返回其中 `NnMemoryType` 的位置索引。
-
-    使用示例:
-    - indices = _memory_output_indices(func_op)
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    return _output_signature(func_op).memory_indices
-
-
-def _has_leading_out_params(func_op: func.FuncOp, memory_count: int) -> bool:
-    """判断函数签名是否已出现 rewrite 后的前置 out 参数形态。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 仅当存在 `arg0/arg1/...` 命名的前置参数且类型为 `nn.memory` 时视作 out 参数。
-    - 用于识别“已插入 out 参数但仍保留 memory return”的半改写 ABI。
-
-    使用示例:
-    - if _has_leading_out_params(func_op, 1): ...
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    return memory_count > 0 and _leading_out_param_count(func_op) >= memory_count
-
-
-def _leading_out_param_count(func_op: func.FuncOp) -> int:
-    """统计函数签名前缀中连续的 out 参数个数。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 识别形如 `arg0/arg1/...` 的连续前置 `nn.memory` 参数前缀。
-    - 供半改写 ABI 检测与 callsite 校验共享，避免重复解析参数名规则。
-
-    使用示例:
-    - leading_count = _leading_out_param_count(func_op)
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    if func_op.arg_attrs is None:
-        return 0
-    input_types = list(func_op.function_type.inputs.data)
-    attrs = list(func_op.arg_attrs.data)
-    if len(attrs) < len(input_types):
-        return 0
-    leading_count = 0
-    for index, input_type in enumerate(input_types):
-        name_attr = attrs[index].data.get("name")
-        if not isinstance(input_type, NnMemoryType):
-            break
-        if not isinstance(name_attr, StringAttr) or name_attr.data != f"arg{index}":
-            break
-        leading_count += 1
-    return leading_count
-
-
-def _raise_half_rewritten(detail: str) -> None:
-    """抛出半改写 ABI 的统一错误。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 统一补齐包含 `half-rewritten` 关键字的错误信息。
-    - 避免不同分支在半改写场景下抛出不一致消息。
-
-    使用示例:
-    - _raise_half_rewritten("callsite does not match callee signature")
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    raise BufferResultsToOutParamsError(f"half-rewritten ABI is not supported: {detail}")
-
-
-def _rebuild_arg_attrs(func_op: func.FuncOp, prepended: int) -> ArrayAttr[DictionaryAttr]:
-    """为前置 out 参数重建 `arg_attrs`。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 新前置参数名固定为 `arg0`、`arg1`。
-    - 原有参数属性按顺序整体后移；缺失属性时补空字典。
-
-    使用示例:
-    - attrs = _rebuild_arg_attrs(func_op, 1)
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    existing = list(func_op.arg_attrs.data) if func_op.arg_attrs is not None else []
-    total_old_args = len(func_op.function_type.inputs.data)
-    while len(existing) < total_old_args:
-        existing.append(DictionaryAttr({}))
-    prepended_attrs = [
-        DictionaryAttr({"name": StringAttr(f"arg{index}")}) for index in range(prepended)
-    ]
-    return ArrayAttr([*prepended_attrs, *existing])
-
-
-def _validate_candidate(func_op: func.FuncOp, signature: _OutputSignature) -> None:
-    """校验当前最小骨架可安全改写的函数范围。
-
-    创建者: 朽木露琪亚
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - external declaration 直接失败。
-    - 本轮只接受单 block，且 `func.return` 参数个数必须与 `function_type.outputs` 一致。
-    - 多个 `memory` 返回与 `memory + scalar` 混合返回都在当前范围内。
-
-    使用示例:
-    - signature = _output_signature(func_op)
-    - _validate_candidate(func_op, signature)
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    memory_indices = signature.memory_indices
-    if not memory_indices:
-        return
-    if _has_leading_out_params(func_op, len(memory_indices)):
-        _raise_half_rewritten(
-            f"function {func_op.sym_name.data} already has leading out params but still returns memory"
-        )
-    first_block = func_op.body.blocks.first
-    is_external_like = func_op.is_declaration or (
-        first_block is not None and tuple(first_block.ops) == ()
-    )
-    if is_external_like:
-        raise BufferResultsToOutParamsError("external declaration is not supported")
-    if len(tuple(func_op.body.blocks)) != 1:
-        raise BufferResultsToOutParamsError("only single-block functions are supported")
-    return_op = func_op.get_return_op()
-    if return_op is None or len(return_op.arguments) != len(func_op.function_type.outputs.data):
-        raise BufferResultsToOutParamsError(
-            "return operand count must match function outputs for buffer-results-to-out-params"
-        )
-
-
-def _build_rewrite_target(func_op: func.FuncOp) -> _RewriteTarget | None:
-    """构建待改写函数的统一签名信息。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 在生成 target 前完成候选校验，保证后续改写逻辑前置失败。
-    - 仅当函数存在 memory 返回值时返回目标信息。
-
-    使用示例:
-    - target = _build_rewrite_target(func_op)
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    signature = _output_signature(func_op)
-    if not signature.memory_indices:
-        return None
-    _validate_candidate(func_op, signature)
-    return _RewriteTarget(func_op, list(func_op.function_type.inputs.data), signature)
-
-
-def _collect_rewrite_targets(module: ModuleOp) -> dict[str, _RewriteTarget]:
-    """收集需要改写的函数，并提前做边界校验。
-
-    创建者: 朽木露琪亚
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 只收集存在 `memory` 返回值的 `func.func`。
-    - 在真正改写前先执行候选校验，确保模块级原子失败。
-
-    使用示例:
-    - targets = _collect_rewrite_targets(module)
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    targets: dict[str, _RewriteTarget] = {}
-    for op in module.ops:
-        if not isinstance(op, func.FuncOp):
-            continue
-        target = _build_rewrite_target(op)
-        if target is None:
-            continue
-        targets[op.sym_name.data] = target
-    return targets
-
-
-def _validate_local_callsites(
-    module: ModuleOp,
-    targets: dict[str, _RewriteTarget],
-) -> None:
-    """在改写前校验模块内 local callsite 不存在半改写 ABI。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 对模块内可解析 `func.call` 统一校验 caller/callee 的参数个数与返回个数。
-    - 若 callsite 已落入本 pass 的 memory-return/out-param 责任范围，但 caller/callee 口径不一致，则显式抛出 `half-rewritten`。
-
-    使用示例:
-    - _validate_local_callsites(module, targets)
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    local_funcs = {
-        op.sym_name.data: op for op in module.ops if isinstance(op, func.FuncOp)
-    }
-    for op in module.walk():
-        if not isinstance(op, func.CallOp):
-            continue
-        callee_name = op.callee.root_reference.data
-        callee = local_funcs.get(callee_name)
-        if callee is None:
-            continue
-        target = targets.get(callee_name)
-        expected_inputs = (
-            target.input_types if target is not None else list(callee.function_type.inputs.data)
-        )
-        expected_outputs = (
-            target.output_signature.output_types
-            if target is not None
-            else list(callee.function_type.outputs.data)
-        )
-        actual_inputs = [argument.type for argument in op.arguments]
-        actual_outputs = [result.type for result in op.results]
-        if actual_inputs == expected_inputs and actual_outputs == expected_outputs:
-            continue
-        if target is not None or any(isinstance(result.type, NnMemoryType) for result in op.results):
-            _raise_half_rewritten(f"callsite for {callee_name} does not match callee signature")
-
-
-def _rewrite_callsite(
-    call_op: func.CallOp,
-    target: _RewriteTarget,
-    rewriter: PatternRewriter,
-) -> None:
-    """把调用待改写 callee 的 `func.call` 改成显式 out-arg 形式。
-
-    创建者: 朽木露琪亚
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 在旧 `func.call` 前为每个 `memory` result 插入 `dma.alloc`，caller 侧显式提供多个 out buffer。
-    - 新 `func.call` 的参数顺序固定为：所有 out 实参在前，原始输入参数整体后移。
-    - 旧 memory call result SSA 全量替换为 caller 侧显式 out buffer；非 memory result 继续作为新的 `func.call` 返回值保留。
-
-    使用示例:
-    - _rewrite_callsite(call_op, target, rewriter)
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    callee_name = call_op.callee.root_reference.data
-    memory_indices = target.output_signature.memory_indices
-    output_types = target.output_signature.output_types
-    if len(call_op.arguments) != len(target.input_types) or len(call_op.results) != len(output_types):
-        _raise_half_rewritten(f"callsite for {callee_name} does not match callee signature")
-    out_allocs: list[DmaAllocOp] = []
-    for result_index in memory_indices:
-        result_type = call_op.results[result_index].type
-        if not isinstance(result_type, NnMemoryType):
-            _raise_half_rewritten(
-                f"callsite for {callee_name} expects memory result at index {result_index}"
-            )
-        out_allocs.append(DmaAllocOp([], result_type))
-
-    scalar_indices = target.output_signature.scalar_indices
-    new_call = func.CallOp(
-        callee_name,
-        [*(alloc.result for alloc in out_allocs), *call_op.arguments],
-        [output_types[index] for index in scalar_indices],
-    )
-    memory_index_set = set(memory_indices)
-    scalar_results = iter(new_call.results)
-    new_results: list[SSAValue] = []
-    for result_index in range(len(output_types)):
-        if result_index in memory_index_set:
-            new_results.append(out_allocs[memory_indices.index(result_index)].result)
-        else:
-            new_results.append(next(scalar_results))
-
-    rewriter.replace_matched_op([*out_allocs, new_call], new_results)
-
-
-def _erase_dead_result_owner(value: SSAValue, rewriter: PatternRewriter) -> None:
-    """删除替换后已无用途的临时结果定义。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 当前仅删除已无用途的 `dma.alloc`。
-    - 避免保留仅为旧 return 服务的死临时 buffer。
-
-    使用示例:
-    - _erase_dead_result_owner(return_value, rewriter)
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    owner = getattr(value, "owner", None)
-    if not isinstance(owner, DmaAllocOp):
-        return
-    if all(result.first_use is None for result in owner.results):
-        rewriter.erase_op(owner)
-
-
-def _rewrite_side_effect_result_target(
-    return_value: SSAValue,
-    new_out_arg: BlockArgument,
-    rewriter: PatternRewriter,
-) -> None:
-    """同步改写依赖 target operand 的 memory-result 写回 op。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 处理 `dma.deslice` 这类“result 表示更新后 target，但真实写回落在 target operand”的 op。
-    - 当返回值被前置 out 参数接管时，同步把写回 target 改成新的 out 参数，避免实现仍写旧 buffer。
-
-    使用示例:
-    - _rewrite_side_effect_result_target(return_value, new_out_arg, rewriter)
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    owner = getattr(return_value, "owner", None)
-    if not isinstance(owner, DmaDesliceOp):
-        return
-    if owner.result != return_value:
-        return
-    owner.operands[1] = new_out_arg
-    rewriter.notify_op_modified(owner)
-
-
-def _rewrite_memory_results_to_out_params(target: _RewriteTarget, rewriter: PatternRewriter) -> None:
-    """将函数返回中的所有 `memory` 结果改写为最前置 out 参数。
-
-    创建者: 朽木露琪亚
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 在 block 最前按原 memory result 顺序插入 `arg0 / arg1 / ...`。
-    - 将原 memory 返回值在函数体内的使用替换为新 out 参数。
-    - `func.return` 仅保留非 memory 返回值；若无 scalar 返回则改为空 return。
-    - 刷新函数签名，使 `function_type.outputs` 只保留原 scalar 返回。
-
-    使用示例:
-    - _rewrite_memory_results_to_out_params(func_op, rewriter)
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    func_op = target.func_op
-    block = func_op.body.blocks.first
-    if block is None:
-        raise BufferResultsToOutParamsError("function body is empty")
-    output_types = target.output_signature.output_types
-    memory_indices = target.output_signature.memory_indices
-    return_op = func_op.get_return_op()
-    if return_op is None or len(return_op.arguments) != len(output_types):
-        raise BufferResultsToOutParamsError(
-            "return operand count must match function outputs for buffer-results-to-out-params"
-        )
-
-    new_out_args: list[BlockArgument] = []
-    for insert_index, memory_output_index in enumerate(memory_indices):
-        memory_type = output_types[memory_output_index]
-        if not isinstance(memory_type, NnMemoryType):
-            raise BufferResultsToOutParamsError("memory output index must point to nn.memory")
-        new_out_args.append(rewriter.insert_block_argument(block, insert_index, memory_type))
-
-    func_op.properties["arg_attrs"] = _rebuild_arg_attrs(func_op, len(new_out_args))
-
-    scalar_return_values = [return_op.arguments[index] for index in target.output_signature.scalar_indices]
-    memory_return_values = [return_op.arguments[index] for index in memory_indices]
-    for new_out_arg, return_value in zip(new_out_args, memory_return_values, strict=True):
-        _rewrite_side_effect_result_target(return_value, new_out_arg, rewriter)
-        rewriter.replace_all_uses_with(return_value, new_out_arg)
-    rewriter.erase_op(return_op)
-    rewriter.insert_op(func.ReturnOp(*scalar_return_values), InsertPoint.at_end(block))
-    for return_value in memory_return_values:
-        _erase_dead_result_owner(return_value, rewriter)
-    func_op.update_function_type()
-    rewriter.notify_op_modified(func_op)
+    output_signature: OutputSignature
 
 
 @dataclass(frozen=True)
-class _BufferResultsToOutParamsCallPattern(RewritePattern):
+class BufferResultsToOutParamsCallPattern(RewritePattern):
     """按 `func.call` 重写 buffer-results-to-out-params。
 
     创建者: 金铲铲大作战
@@ -597,15 +104,15 @@ class _BufferResultsToOutParamsCallPattern(RewritePattern):
     - 通过 pattern rewrite 将 caller 侧显式 out buffer 与新 `func.call` 一并插入。
 
     使用示例:
-    - pattern = _BufferResultsToOutParamsCallPattern(targets)
+    - pattern = BufferResultsToOutParamsCallPattern(targets)
 
     关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - spec: spec/pass/buffer_results_to_out_params.md
     - test: test/pass/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
 
-    targets: dict[str, _RewriteTarget]
+    targets: dict[str, RewriteTarget]
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: func.CallOp, rewriter: PatternRewriter, /) -> None:
@@ -615,11 +122,40 @@ class _BufferResultsToOutParamsCallPattern(RewritePattern):
             return
         if not any(isinstance(result.type, NnMemoryType) for result in op.results):
             return
-        _rewrite_callsite(op, target, rewriter)
+        memory_indices = target.output_signature.memory_indices
+        output_types = target.output_signature.output_types
+        if len(op.arguments) != len(target.input_types) or len(op.results) != len(output_types):
+            raise PassContractError(
+                f"half-rewritten ABI is not supported: callsite for {callee_name} does not match callee signature"
+            )
+        out_allocs: list[DmaAllocOp] = []
+        for result_index in memory_indices:
+            result_type = op.results[result_index].type
+            if not isinstance(result_type, NnMemoryType):
+                raise PassContractError(
+                    "half-rewritten ABI is not supported: "
+                    f"callsite for {callee_name} expects memory result at index {result_index}"
+                )
+            out_allocs.append(DmaAllocOp([], result_type))
+        scalar_indices = target.output_signature.scalar_indices
+        new_call = func.CallOp(
+            callee_name,
+            [*(alloc.result for alloc in out_allocs), *op.arguments],
+            [output_types[index] for index in scalar_indices],
+        )
+        memory_index_set = set(memory_indices)
+        scalar_results = iter(new_call.results)
+        new_results: list[SSAValue] = []
+        for result_index in range(len(output_types)):
+            if result_index in memory_index_set:
+                new_results.append(out_allocs[memory_indices.index(result_index)].result)
+            else:
+                new_results.append(next(scalar_results))
+        rewriter.replace_matched_op([*out_allocs, new_call], new_results)
 
 
 @dataclass(frozen=True)
-class _BufferResultsToOutParamsFuncPattern(RewritePattern):
+class BufferResultsToOutParamsFuncPattern(RewritePattern):
     """按 `func.func` 重写 buffer-results-to-out-params。
 
     创建者: 金铲铲大作战
@@ -630,15 +166,15 @@ class _BufferResultsToOutParamsFuncPattern(RewritePattern):
     - 只处理候选集合中仍保留 memory 输出的函数。
 
     使用示例:
-    - pattern = _BufferResultsToOutParamsFuncPattern(targets)
+    - pattern = BufferResultsToOutParamsFuncPattern(targets)
 
     关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - spec: spec/pass/buffer_results_to_out_params.md
     - test: test/pass/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
 
-    targets: dict[str, _RewriteTarget]
+    targets: dict[str, RewriteTarget]
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: func.FuncOp, rewriter: PatternRewriter, /) -> None:
@@ -649,7 +185,48 @@ class _BufferResultsToOutParamsFuncPattern(RewritePattern):
             return
         if list(op.function_type.outputs.data) != target.output_signature.output_types:
             return
-        _rewrite_memory_results_to_out_params(target, rewriter)
+        block = op.body.blocks.first
+        if block is None:
+            raise PassContractError("function body is empty")
+        output_types = target.output_signature.output_types
+        memory_indices = target.output_signature.memory_indices
+        return_op = op.get_return_op()
+        if return_op is None or len(return_op.arguments) != len(output_types):
+            raise PassContractError(
+                "return operand count must match function outputs for buffer-results-to-out-params"
+            )
+        new_out_args: list[BlockArgument] = []
+        for insert_index, memory_output_index in enumerate(memory_indices):
+            memory_type = output_types[memory_output_index]
+            if not isinstance(memory_type, NnMemoryType):
+                raise PassContractError("memory output index must point to nn.memory")
+            new_out_args.append(rewriter.insert_block_argument(block, insert_index, memory_type))
+        existing = list(op.arg_attrs.data) if op.arg_attrs is not None else []
+        total_old_args = len(op.function_type.inputs.data)
+        while len(existing) < total_old_args:
+            existing.append(DictionaryAttr({}))
+        prepended_attrs = [
+            DictionaryAttr({"name": StringAttr(f"arg{index}")}) for index in range(len(new_out_args))
+        ]
+        op.properties["arg_attrs"] = ArrayAttr([*prepended_attrs, *existing])
+        scalar_return_values = [
+            return_op.arguments[index] for index in target.output_signature.scalar_indices
+        ]
+        memory_return_values = [return_op.arguments[index] for index in memory_indices]
+        for new_out_arg, return_value in zip(new_out_args, memory_return_values, strict=True):
+            owner = getattr(return_value, "owner", None)
+            if isinstance(owner, DmaDesliceOp) and owner.result == return_value:
+                owner.operands[1] = new_out_arg
+                rewriter.notify_op_modified(owner)
+            rewriter.replace_all_uses_with(return_value, new_out_arg)
+        rewriter.erase_op(return_op)
+        rewriter.insert_op(func.ReturnOp(*scalar_return_values), InsertPoint.at_end(block))
+        for return_value in memory_return_values:
+            owner = getattr(return_value, "owner", None)
+            if isinstance(owner, DmaAllocOp) and all(result.first_use is None for result in owner.results):
+                rewriter.erase_op(owner)
+        op.update_function_type()
+        rewriter.notify_op_modified(op)
 
 
 class BufferResultsToOutParamsPass(ModulePass):
@@ -668,7 +245,7 @@ class BufferResultsToOutParamsPass(ModulePass):
     - BufferResultsToOutParamsPass().apply(Context(), module)
 
     关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - spec: spec/pass/buffer_results_to_out_params.md
     - test: test/pass/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
@@ -689,21 +266,90 @@ class BufferResultsToOutParamsPass(ModulePass):
         - BufferResultsToOutParamsPass().apply(Context(), module)
 
         关联文件:
-        - spec: spec/pass/lowering/buffer_results_to_out_params.md
+        - spec: spec/pass/buffer_results_to_out_params.md
         - test: test/pass/test_buffer_results_to_out_params.py
         - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
         """
 
-        if not isinstance(module, ModuleOp):
-            raise BufferResultsToOutParamsError("module must be builtin.module")
-        targets = _collect_rewrite_targets(module)
-        _validate_local_callsites(module, targets)
+        ensure_builtin_module(module)
+        targets: dict[str, RewriteTarget] = {}
+        local_funcs = {
+            op.sym_name.data: op for op in module.ops if isinstance(op, func.FuncOp)
+        }
+        for op in module.ops:
+            if not isinstance(op, func.FuncOp):
+                continue
+            output_types = list(op.function_type.outputs.data)
+            memory_indices = [
+                index
+                for index, output_type in enumerate(output_types)
+                if isinstance(output_type, NnMemoryType)
+            ]
+            if not memory_indices:
+                continue
+            scalar_indices = [
+                index for index in range(len(output_types)) if index not in memory_indices
+            ]
+            if op.arg_attrs is not None:
+                input_types = list(op.function_type.inputs.data)
+                attrs = list(op.arg_attrs.data)
+                if len(attrs) >= len(input_types):
+                    leading_out_count = 0
+                    for index, input_type in enumerate(input_types):
+                        name_attr = attrs[index].data.get("name")
+                        if not isinstance(input_type, NnMemoryType):
+                            break
+                        if not isinstance(name_attr, StringAttr) or name_attr.data != f"arg{index}":
+                            break
+                        leading_out_count += 1
+                    if leading_out_count >= len(memory_indices):
+                        raise PassContractError(
+                            "half-rewritten ABI is not supported: "
+                            f"function {op.sym_name.data} already has leading out params but still returns memory"
+                        )
+            first_block = op.body.blocks.first
+            is_external_like = op.is_declaration or (first_block is not None and tuple(first_block.ops) == ())
+            if is_external_like:
+                raise PassContractError("external declaration is not supported")
+            if len(tuple(op.body.blocks)) != 1:
+                raise PassContractError("only single-block functions are supported")
+            return_op = op.get_return_op()
+            if return_op is None or len(return_op.arguments) != len(output_types):
+                raise PassContractError(
+                    "return operand count must match function outputs for buffer-results-to-out-params"
+                )
+            targets[op.sym_name.data] = RewriteTarget(
+                op,
+                list(op.function_type.inputs.data),
+                OutputSignature(output_types, memory_indices, scalar_indices),
+            )
+        for op in module.walk():
+            if not isinstance(op, func.CallOp):
+                continue
+            callee_name = op.callee.root_reference.data
+            callee = local_funcs.get(callee_name)
+            if callee is None:
+                continue
+            target = targets.get(callee_name)
+            expected_inputs = (
+                target.input_types if target is not None else list(callee.function_type.inputs.data)
+            )
+            expected_outputs = (
+                target.output_signature.output_types
+                if target is not None
+                else list(callee.function_type.outputs.data)
+            )
+            actual_inputs = [argument.type for argument in op.arguments]
+            actual_outputs = [result.type for result in op.results]
+            if actual_inputs == expected_inputs and actual_outputs == expected_outputs:
+                continue
+            if target is not None or any(isinstance(result.type, NnMemoryType) for result in op.results):
+                raise PassContractError(
+                    f"half-rewritten ABI is not supported: callsite for {callee_name} does not match callee signature"
+                )
         PatternRewriteWalker(
             GreedyRewritePatternApplier(
-                [
-                    _BufferResultsToOutParamsCallPattern(targets),
-                    _BufferResultsToOutParamsFuncPattern(targets),
-                ],
+                get_buffer_results_to_out_params_pass_patterns(targets),
                 ctx=ctx,
                 dce_enabled=False,
             )
@@ -722,7 +368,7 @@ class BufferResultsToOutParamsPass(ModulePass):
         - module = BufferResultsToOutParamsPass().run(module)
 
         关联文件:
-        - spec: spec/pass/lowering/buffer_results_to_out_params.md
+        - spec: spec/pass/buffer_results_to_out_params.md
         - test: test/pass/test_buffer_results_to_out_params.py
         - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
         """
@@ -731,4 +377,37 @@ class BufferResultsToOutParamsPass(ModulePass):
         return module
 
 
-__all__ = ["BufferResultsToOutParamsError", "BufferResultsToOutParamsPass"]
+def get_buffer_results_to_out_params_pass_patterns(
+    targets: dict[str, RewriteTarget],
+) -> list[RewritePattern]:
+    """返回 `buffer-results-to-out-params` pass 使用的公开 pattern 列表。
+
+    创建者: OpenAI Codex
+    最后一次更改: OpenAI Codex
+
+    功能说明:
+    - 为外部测试、组合 pass 和公开 API 提供稳定的 pattern 构造入口。
+    - 保持 `func.call` 与 `func.func` 两段改写的 pattern 装配顺序稳定。
+
+    使用示例:
+    - patterns = get_buffer_results_to_out_params_pass_patterns(targets)
+    - walker = PatternRewriteWalker(GreedyRewritePatternApplier(patterns, ctx=ctx))
+
+    关联文件:
+    - spec: spec/pass/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
+    """
+
+    return [
+        BufferResultsToOutParamsCallPattern(targets),
+        BufferResultsToOutParamsFuncPattern(targets),
+    ]
+
+
+__all__ = [
+    "BufferResultsToOutParamsPass",
+    "BufferResultsToOutParamsCallPattern",
+    "BufferResultsToOutParamsFuncPattern",
+    "get_buffer_results_to_out_params_pass_patterns",
+]

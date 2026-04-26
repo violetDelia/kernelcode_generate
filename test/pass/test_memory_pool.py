@@ -43,7 +43,8 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp, SymbolIterType, SymbolValueType
-from kernel_gen.passes.memory_pool import MemoryPoolError, MemoryPoolPass
+from kernel_gen.passes import PassContractError
+from kernel_gen.passes.memory_pool import MemoryPoolPass
 
 
 def _make_space(space: str = "global") -> NnMemorySpaceAttr:
@@ -340,10 +341,10 @@ def test_memory_pool_rewrite_multiple_buckets() -> None:
     pass_obj = MemoryPoolPass(rewrite=True)
     try:
         pass_obj.run(module)
-    except MemoryPoolError as exc:
+    except PassContractError as exc:
         assert "MemoryPoolUnsupportedPoolBucket: mixed space is not supported" in str(exc)
     else:
-        raise AssertionError("expected MemoryPoolError for multiple buckets")
+        raise AssertionError("expected PassContractError for multiple buckets")
 
 
 # TC-MP-011
@@ -368,10 +369,10 @@ def test_memory_pool_rewrite_size_mismatch() -> None:
     pass_obj = MemoryPoolPass(rewrite=True)
     try:
         pass_obj.run(module)
-    except MemoryPoolError as exc:
+    except PassContractError as exc:
         assert "MemoryPoolUnsupportedPoolBucket: size mismatch" in str(exc)
     else:
-        raise AssertionError("expected MemoryPoolError for size mismatch")
+        raise AssertionError("expected PassContractError for size mismatch")
 
 
 # TC-MP-012
@@ -431,10 +432,10 @@ def test_memory_pool_rewrite_multiple_blocks() -> None:
     pass_obj = MemoryPoolPass(rewrite=True)
     try:
         pass_obj.run(module)
-    except MemoryPoolError as exc:
+    except PassContractError as exc:
         assert "MemoryPoolRewriteUnsupported: function must have single block" in str(exc)
     else:
-        raise AssertionError("expected MemoryPoolError for multiple blocks")
+        raise AssertionError("expected PassContractError for multiple blocks")
 
 
 # TC-MP-005
@@ -451,10 +452,10 @@ def test_memory_pool_invalid_module() -> None:
     pass_obj = MemoryPoolPass(rewrite=False)
     try:
         pass_obj.run(_TestOp())
-    except MemoryPoolError as exc:
+    except PassContractError as exc:
         assert "MemoryPoolInvalidModule" in str(exc)
     else:
-        raise AssertionError("expected MemoryPoolError for invalid module")
+        raise AssertionError("expected PassContractError for invalid module")
 
 
 # TC-MP-006
@@ -475,10 +476,10 @@ def test_memory_pool_non_contiguous_layout() -> None:
     pass_obj = MemoryPoolPass(rewrite=False)
     try:
         pass_obj.run(module)
-    except MemoryPoolError as exc:
+    except PassContractError as exc:
         assert "MemoryPoolUnsupportedNonLinearAlloc" in str(exc)
     else:
-        raise AssertionError("expected MemoryPoolError for non-contiguous layout")
+        raise AssertionError("expected PassContractError for non-contiguous layout")
 
 
 # TC-MP-007
@@ -498,10 +499,10 @@ def test_memory_pool_unpaired_alloc() -> None:
     pass_obj = MemoryPoolPass(rewrite=False)
     try:
         pass_obj.run(module)
-    except MemoryPoolError as exc:
+    except PassContractError as exc:
         assert "MemoryPoolInvalidLifetime" in str(exc)
     else:
-        raise AssertionError("expected MemoryPoolError for missing dma.free")
+        raise AssertionError("expected PassContractError for missing dma.free")
 
 
 # TC-MP-008
@@ -527,10 +528,10 @@ def test_memory_pool_anonymous_dim() -> None:
     pass_obj = MemoryPoolPass(rewrite=False)
     try:
         pass_obj.run(module)
-    except MemoryPoolError as exc:
+    except PassContractError as exc:
         assert "MemoryPoolUnsupportedShape" in str(exc)
     else:
-        raise AssertionError("expected MemoryPoolError for anonymous shape")
+        raise AssertionError("expected PassContractError for anonymous shape")
 
 
 # TC-MP-009
@@ -550,10 +551,10 @@ def test_memory_pool_alloc_non_memory() -> None:
     pass_obj = MemoryPoolPass(rewrite=False)
     try:
         pass_obj.run(module)
-    except MemoryPoolError as exc:
+    except PassContractError as exc:
         assert "MemoryPoolInvalidAlloc" in str(exc)
     else:
-        raise AssertionError("expected MemoryPoolError for alloc result type")
+        raise AssertionError("expected PassContractError for alloc result type")
 
 
 # TC-MP-014
@@ -626,10 +627,10 @@ def test_memory_pool_escape_return() -> None:
     pass_obj = MemoryPoolPass(rewrite=False)
     try:
         pass_obj.run(module)
-    except MemoryPoolError as exc:
+    except PassContractError as exc:
         assert "MemoryPoolEscapingAlloc" in str(exc)
     else:
-        raise AssertionError("expected MemoryPoolError for escaping alloc")
+        raise AssertionError("expected PassContractError for escaping alloc")
 
 
 # TC-MP-016
@@ -653,10 +654,10 @@ def test_memory_pool_invalid_lifetime_loop() -> None:
     pass_obj = MemoryPoolPass(rewrite=True)
     try:
         pass_obj.run(module)
-    except MemoryPoolError as exc:
+    except PassContractError as exc:
         assert "MemoryPoolInvalidLifetime: dma.free inside symbol.for" in str(exc)
     else:
-        raise AssertionError("expected MemoryPoolError for invalid loop lifetime")
+        raise AssertionError("expected PassContractError for invalid loop lifetime")
 
 
 # TC-MP-017
@@ -678,7 +679,7 @@ def test_memory_pool_unsupported_region_escape() -> None:
     pass_obj = MemoryPoolPass(rewrite=False)
     try:
         pass_obj.run(module)
-    except MemoryPoolError as exc:
+    except PassContractError as exc:
         assert "MemoryPoolUnsupportedRegionEscape" in str(exc)
     else:
-        raise AssertionError("expected MemoryPoolError for unsupported region")
+        raise AssertionError("expected PassContractError for unsupported region")

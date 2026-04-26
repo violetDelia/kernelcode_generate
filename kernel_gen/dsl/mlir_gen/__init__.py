@@ -18,9 +18,8 @@
 
 from __future__ import annotations
 
-from kernel_gen.dsl.ast import _parse_function_impl
-
 from .function_builder import build_func_op, build_func_op_from_ast
+from kernel_gen.dsl.gen_kernel import EmitCContext, EmitCError, GenKernelError, emit_c, emit_c_op, emit_c_value, gen_kernel
 from .module_builder import MlirGenModuleError, mlir_gen
 from .parse_env import _build_parse_environment, _build_runtime_table_for_signature, _parse_function_with_env
 from .signature import (
@@ -32,15 +31,21 @@ from .signature import (
 
 __all__ = [
     "MlirGenModuleError",
+    "EmitCContext",
+    "EmitCError",
+    "GenKernelError",
     "_build_parse_environment",
     "_build_runtime_table_for_signature",
     "_build_signature_types",
     "_is_symbol_scalar_function",
-    "_parse_function_impl",
     "_parse_function_with_env",
     "_symbol_expr_from_runtime_arg",
     "_validate_return_type",
     "build_func_op",
     "build_func_op_from_ast",
+    "emit_c",
+    "emit_c_op",
+    "emit_c_value",
+    "gen_kernel",
     "mlir_gen",
 ]

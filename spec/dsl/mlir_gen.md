@@ -6,6 +6,12 @@
 - 统一约束函数签名、参数与返回值的生成规则。
 - 提供函数级入口生成 `func.func`，并提供 module 级入口生成 `builtin.module`；不负责文本打印。
 
+## API 列表
+
+- `build_func_op(fn, *runtime_args, globals=None, builtins=None)`
+- `build_func_op_from_ast(func_ast, runtime_args=None, config=None)`
+- `mlir_gen(fn, *runtime_args, globals=None, builtins=None, config=None)`
+
 ## 文档信息
 
 - 创建者：`榕`
@@ -20,8 +26,8 @@
 
 ## 依赖
 
-- AST 节点与解析入口：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
-- AST 遍历访问器：[`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md)
+- AST 节点与解析入口：[`spec/dsl/ast/__init__.md`](../../spec/dsl/ast/__init__.md)
+- AST 遍历访问器：[`spec/dsl/ast/visitor.md`](../../spec/dsl/ast/visitor.md)
 - 节点发射规则：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - Arch DSL helper 公开入口：[`spec/include/api/Arch.md`](../../spec/include/api/Arch.md)
 - arch dialect 结果类型与查询 op：[`spec/dialect/arch.md`](../../spec/dialect/arch.md)
@@ -317,11 +323,11 @@ builtin.module {
   - [`test/dsl/mlir_gen/test_parse_env.py`](../../test/dsl/mlir_gen/test_parse_env.py)
   - [`test/dsl/mlir_gen/test_signature.py`](../../test/dsl/mlir_gen/test_signature.py)
   - [`test/dsl/mlir_gen/test_module_builder.py`](../../test/dsl/mlir_gen/test_module_builder.py)
-- 依赖测试文件：[`test/dsl/test_ast.py`](../../test/dsl/test_ast.py)、[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
-- 补充测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
+- 依赖测试文件：[`test/dsl/ast/test_package.py`](../../test/dsl/ast/test_package.py)、[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
+- 补充测试文件：[`test/dsl/ast/test_visitor_integration.py`](../../test/dsl/ast/test_visitor_integration.py)
 - 执行命令（mlir_gen 集成）：`pytest -q test/dsl/mlir_gen/test_function_builder.py test/dsl/mlir_gen/test_parse_env.py test/dsl/mlir_gen/test_signature.py test/dsl/mlir_gen/test_module_builder.py`
-- 执行命令（依赖子链路）：`pytest -q test/dsl/test_ast.py && pytest -q test/dsl/test_emit_mlir.py`
-- 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/test_ast_visitor.py`
+- 执行命令（依赖子链路）：`pytest -q test/dsl/ast/test_package.py && pytest -q test/dsl/test_emit_mlir.py`
+- 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/ast/test_visitor_integration.py`
 - 拆分归属：MGEN-001~MGEN-035 归属 `test/dsl/mlir_gen/test_function_builder.py`、`test/dsl/mlir_gen/test_parse_env.py`、`test/dsl/mlir_gen/test_signature.py`、`test/dsl/mlir_gen/test_module_builder.py`；其中 AST/emit 的前置语义分别由 `test_ast.py` 与 `test_emit_mlir.py` 单测保证；MGEN-036/037/037A 与 arch helper 正反路径由 `test_ast.py`、`test/dsl/mlir_gen/test_function_builder.py` 共同覆盖，当前缺口在下游实现/补测阶段补齐。
 - 测试目标：
   - 验证 `build_func_op(...)` 生成 `func.func`。

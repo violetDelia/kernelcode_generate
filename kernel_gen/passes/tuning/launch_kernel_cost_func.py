@@ -1,500 +1,60 @@
 """launch-kernel-cost-func tuning pass.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: OpenAI Codex
 
 功能说明:
 - 为 module 中被 `arch.launch` 引用的 device function 生成 sibling cost function。
-- 在 cost function 中保留 `symbol.for` 结构，复制必要的 helper op，并为 `dma/kernel/arch` op 生成 `tuner.cost` 与 `!symbol.int + symbol.add` 累计链。
-- 保持原 host wrapper 与原 device function 不变。
-- `cost_kind` 接受任意非空、`|` 分隔且去重后的 kind 名列表。
+- 在 cost function 中保留 `symbol.for` 结构，复制必要 helper op，并为 `dma/kernel/arch` op 生成 `tuner.cost` 与 `symbol.add` 累计链。
+- 保持原 host wrapper 与原 device function 不变；当前文件不公开 helper 函数或 helper 类，重写细节只属于 `LaunchKernelCostFuncPass.run(...)` 内部实现。
 
 使用示例:
 - from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
-    - module = LaunchKernelCostFuncPass(cost_kind="compute|latency|bandwidth").run(module)
+- module = LaunchKernelCostFuncPass(cost_kind="compute|latency|bandwidth").run(module)
 
 关联文件:
-- spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-- test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-- 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
+- spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
+- test: [test/pass/test_launch_kernel_cost_func.py](../../../test/pass/test_launch_kernel_cost_func.py)
+- 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp, StringAttr
-from xdsl.ir import Block, Operation, Region, SSAValue
+from xdsl.ir import Block, Region, SSAValue
 
 from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolForOp, SymbolYieldOp
 from kernel_gen.dialect.tuner import TunerCostOp
+from kernel_gen.passes.common import raise_pass_contract_error, verify_generated_ops
 from kernel_gen.passes.pass_manager import Pass
 
-_RESERVED_METADATA_ATTRS = ("kind", "cost_kind", "op_name", "device_func")
-_SUPPORTED_COST_PREFIXES = ("dma.", "kernel.", "arch.")
-_HELPER_OP_NAMES = ("dma.view", "dma.reshape")
-_INVALID_COST_KIND_ERROR = (
-    "LaunchKernelCostFuncError: cost_kind must be a non-empty '|' separated list of unique kind names"
-)
-
-
-class LaunchKernelCostFuncError(ValueError):
-    """launch-kernel-cost-func pass 的稳定错误类型。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 承载当前 pass 的稳定失败路径。
-    - 为非法 `cost_kind`、callee 缺失、重名 cost function、metadata attr 冲突与非支持 op 等边界提供统一错误类型。
-
-    使用示例:
-    - raise LaunchKernelCostFuncError(
-    -     "LaunchKernelCostFuncError: cost_kind must be a non-empty '|' separated list of unique kind names"
-    - )
-
-    关联文件:
-    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
-    """
-
-
-def _normalize_cost_kinds(cost_kind: str) -> tuple[str, ...]:
-    """规整并校验 pass `cost_kind` 参数。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 接受任意非空 kind 名，多值时按 `|` 分隔并保持顺序。
-    - 会去掉每段首尾空白；空段、全空白段或重复段都显式失败。
-    - 失败时抛出稳定错误短语，便于 registry 与 pytest 做机械匹配。
-
-    使用示例:
-    - cost_kinds = _normalize_cost_kinds("compute|latency|bandwidth")
-
-    关联文件:
-    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
-    """
-
-    if not cost_kind:
-        raise LaunchKernelCostFuncError(_INVALID_COST_KIND_ERROR)
-    kinds = [kind.strip() for kind in cost_kind.split("|")]
-    if any(kind == "" for kind in kinds):
-        raise LaunchKernelCostFuncError(_INVALID_COST_KIND_ERROR)
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for kind in kinds:
-        if kind in seen:
-            raise LaunchKernelCostFuncError(_INVALID_COST_KIND_ERROR)
-        seen.add(kind)
-        normalized.append(kind)
-    return tuple(normalized)
-
-
-def _normalize_cost_kind(cost_kind: str) -> str:
-    """兼容性包装：返回规整后的 `cost_kind` 字符串。
-
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 保持旧公开属性 `cost_kind` 仍是可打印的字符串。
-    - 单值返回原值，多值返回 `|` 拼接后的规范顺序。
-
-    使用示例:
-    - cost_kind = _normalize_cost_kind("compute|latency|bandwidth")
-
-    关联文件:
-    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
-    """
-
-    return "|".join(_normalize_cost_kinds(cost_kind))
-
-
-def _cost_function_name(cost_kind: str, device_func_name: str) -> str:
-    """返回公开 cost function 名称。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 固定命名规则为 `@_cost_<cost_kind>_<device_func_name>` 对应的 symbol 名。
-
-    使用示例:
-    - name = _cost_function_name("compute", "_device_kernel")
-
-    关联文件:
-    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
-    """
-
-    return f"_cost_{cost_kind}_{device_func_name}"
-
-
-def _clone_op_into_block(
-    op: Operation,
-    target_block: Block,
-    value_mapper: dict[SSAValue, SSAValue],
-) -> Operation:
-    """把源 op 克隆到目标 block，并同步 SSA 映射。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 复用 xdsl `Operation.clone(...)` 把 helper op 或带结果的受支持 op 复制到 cost function。
-    - 更新源结果到新结果的映射，供后续 operands 重写使用。
-
-    使用示例:
-    - cloned = _clone_op_into_block(op, block, value_mapper)
-
-    关联文件:
-    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
-    """
-
-    cloned = op.clone(value_mapper=value_mapper)
-    target_block.add_op(cloned)
-    for source_result, cloned_result in zip(op.results, cloned.results, strict=True):
-        value_mapper[source_result] = cloned_result
-    return cloned
-
-
-def _is_skip_op(op: Operation) -> bool:
-    """判断 op 是否属于“复制但不生成 tuner.cost”的 helper 集合。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - `arith.constant`、非循环结构的 `symbol.*` 与 `func.return` 仅作为 cost function 的辅助结构。
-    - `symbol.for` 单独走专门改写逻辑，不在这里处理。
-
-    使用示例:
-    - if _is_skip_op(op): ...
-
-    关联文件:
-    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
-    """
-
-    op_name = _effective_op_name(op)
-    if isinstance(op, func.ReturnOp):
-        return True
-    if op_name == "arith.constant":
-        return True
-    if op_name in _HELPER_OP_NAMES:
-        return True
-    if op_name.startswith("symbol.") and not isinstance(op, SymbolForOp):
-        return True
-    return False
-
-
-def _effective_op_name(op: Operation) -> str:
-    """返回 pass 语义层使用的 op 名称。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 对已注册 op，直接返回 `op.name`。
-    - 对 `builtin.unregistered`，回收其携带的 `op_name__`，确保 `"kernel.add"` 等文本合同可被识别。
-    """
-
-    if op.name != "builtin.unregistered":
-        return op.name
-    op_name_attr = op.attributes.get("op_name__")
-    if isinstance(op_name_attr, StringAttr):
-        return op_name_attr.data
-    return op.name
-
-
-def _is_supported_cost_op(op: Operation) -> bool:
-    """判断 op 是否属于受支持的成本节点集合。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 当前支持 `dma.*`、`kernel.*`、`arch.*` 前缀的 op 下沉为 `tuner.cost`。
-    - 其余 op 由调用方按 helper 或显式失败处理。
-
-    使用示例:
-    - is_supported = _is_supported_cost_op(op)
-
-    关联文件:
-    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
-    """
-
-    op_name = _effective_op_name(op)
-    return any(op_name.startswith(prefix) for prefix in _SUPPORTED_COST_PREFIXES)
-
-
-def _mapped_operands(
-    operands: Sequence[SSAValue],
-    value_mapper: dict[SSAValue, SSAValue],
-) -> list[SSAValue]:
-    """按当前 SSA 映射重写 op operands。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 把源 device function 中的 SSA 使用点映射到 cost function 内的新定义。
-
-    使用示例:
-    - operands = _mapped_operands(op.operands, value_mapper)
-
-    关联文件:
-    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
-    """
-
-    return [value_mapper.get(operand, operand) for operand in operands]
-
-
-def _build_cost_node(
-    op: Operation,
-    value_mapper: dict[SSAValue, SSAValue],
-    device_func_name: str,
-    cost_kind: str,
-) -> TunerCostOp:
-    """为单个源 op 构造 `tuner.cost(...)->!symbol.int`。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 透传原 op operands。
-    - 平铺保留原 op attrs，并补齐 `cost_kind/op_name` 两个公开 metadata。
-    - 在 metadata attr 冲突时显式失败。
-
-    使用示例:
-    - cost_op = _build_cost_node(op, value_mapper, "_device_kernel", "compute")
-
-    关联文件:
-    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
-    """
-
-    op_name = _effective_op_name(op)
-    extra_attrs = dict(op.attributes)
-    extra_attrs.pop("op_name__", None)
-    if op_name == "kernel.binary_elewise" and "kind" in extra_attrs:
-        extra_attrs["kernel_kind"] = extra_attrs.pop("kind")
-    for attr_name in _RESERVED_METADATA_ATTRS:
-        if attr_name in extra_attrs:
-            raise LaunchKernelCostFuncError(
-                "LaunchKernelCostFuncError: "
-                f"op '{op_name}' in device function '{device_func_name}' already defines reserved attr '{attr_name}'"
-            )
-    return TunerCostOp(
-        _mapped_operands(op.operands, value_mapper),
-        cost_kind=StringAttr(cost_kind),
-        op_name=StringAttr(op_name),
-        extra_attrs=extra_attrs,
-    )
-
-
-def _rewrite_block(
-    source_block: Block,
-    target_block: Block,
-    value_mapper: dict[SSAValue, SSAValue],
-    acc_value: SSAValue,
-    *,
-    device_func_name: str,
-    cost_kind: str,
-) -> SSAValue:
-    """把源 block 改写到 cost function block，并返回最新累计值。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 复制 helper op。
-    - 为受支持 op 生成 `tuner.cost + symbol.add`。
-    - 为 `symbol.for` 递归生成 carried `!symbol.int` 累计结构。
-
-    使用示例:
-    - acc = _rewrite_block(src_block, dst_block, value_mapper, zero.result, device_func_name="_device_kernel", cost_kind="compute")
-
-    关联文件:
-    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
-    """
-
-    for op in source_block.ops:
-        if isinstance(op, SymbolForOp):
-            if op.init is not None or op.result is not None:
-                raise LaunchKernelCostFuncError(
-                    "LaunchKernelCostFuncError: source symbol.for must not already carry loop-carried result"
-                )
-            inner_source_block = op.body.block
-            inner_block = Block(arg_types=[inner_source_block.args[0].type, acc_value.type])
-            inner_mapper = dict(value_mapper)
-            inner_mapper[inner_source_block.args[0]] = inner_block.args[0]
-            loop_op = SymbolForOp(
-                value_mapper.get(op.start, op.start),
-                value_mapper.get(op.end, op.end),
-                value_mapper.get(op.step, op.step),
-                Region(inner_block),
-                iter_attr=op.iter_attr,
-                init=acc_value,
-            )
-            target_block.add_op(loop_op)
-            loop_acc = _rewrite_block(
-                inner_source_block,
-                inner_block,
-                inner_mapper,
-                inner_block.args[1],
-                device_func_name=device_func_name,
-                cost_kind=cost_kind,
-            )
-            inner_block.add_op(SymbolYieldOp(loop_acc))
-            assert loop_op.result is not None
-            acc_value = loop_op.result
-            continue
-        if _is_skip_op(op):
-            if not isinstance(op, func.ReturnOp):
-                _clone_op_into_block(op, target_block, value_mapper)
-            continue
-        if not _is_supported_cost_op(op):
-            raise LaunchKernelCostFuncError(
-                f"LaunchKernelCostFuncError: unsupported op '{_effective_op_name(op)}' in device function '{device_func_name}'"
-            )
-        if len(op.results) != 0:
-            _clone_op_into_block(op, target_block, value_mapper)
-        cost_op = _build_cost_node(op, value_mapper, device_func_name, cost_kind)
-        target_block.add_op(cost_op)
-        add_op = SymbolAddOp(acc_value, cost_op.result, result_type=acc_value.type)
-        target_block.add_op(add_op)
-        acc_value = add_op.result
-    return acc_value
-
-
-def _build_cost_function(device_func: func.FuncOp, cost_kind: str) -> func.FuncOp:
-    """从单个 device function 生成 cost function。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 复制 device 参数列表。
-    - 以 `symbol.const 0 : !symbol.int<"0">` 作为累计初值。
-    - 调用 `_rewrite_block(...)` 重建 body，并以单个 `!symbol.int` 返回总成本。
-
-    使用示例:
-    - cost_func = _build_cost_function(device_func, "compute")
-
-    关联文件:
-    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
-    """
-
-    source_blocks = list(device_func.body.blocks)
-    if len(source_blocks) != 1:
-        raise LaunchKernelCostFuncError(
-            f"LaunchKernelCostFuncError: device function '{device_func.sym_name.data}' must contain single block"
-        )
-    input_types = list(device_func.function_type.inputs.data)
-    cost_block = Block(arg_types=input_types)
-    zero = SymbolConstOp(0)
-    cost_block.add_op(zero)
-    value_mapper = {
-        source_arg: cost_arg
-        for source_arg, cost_arg in zip(source_blocks[0].args, cost_block.args, strict=True)
-    }
-    acc_value = _rewrite_block(
-        source_blocks[0],
-        cost_block,
-        value_mapper,
-        zero.result,
-        device_func_name=device_func.sym_name.data,
-        cost_kind=cost_kind,
-    )
-    cost_block.add_op(func.ReturnOp(acc_value))
-    return func.FuncOp(
-        _cost_function_name(cost_kind, device_func.sym_name.data),
-        (input_types, [acc_value.type]),
-        Region(cost_block),
-        visibility=getattr(device_func, "sym_visibility", None),
-        arg_attrs=device_func.arg_attrs,
-    )
-
-
-def _collect_device_functions(module: ModuleOp) -> list[func.FuncOp]:
-    """按首次出现顺序收集被 `arch.launch` 调用的 device function。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 解析 `arch.launch` 的 callee symbol。
-    - 同一 device callee 只保留一份，满足共享 callee 去重合同。
-
-    使用示例:
-    - devices = _collect_device_functions(module)
-
-    关联文件:
-    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
-    """
-
-    func_by_name = {op.sym_name.data: op for op in module.ops if isinstance(op, func.FuncOp)}
-    ordered_devices: list[func.FuncOp] = []
-    seen: set[str] = set()
-    for op in module.walk():
-        if not isinstance(op, ArchLaunchOp):
-            continue
-        callee_name = op.callee.root_reference.data
-        device_func = func_by_name.get(callee_name)
-        if device_func is None:
-            raise LaunchKernelCostFuncError(
-                f"LaunchKernelCostFuncError: arch.launch callee '{callee_name}' not found"
-            )
-        if callee_name in seen:
-            continue
-        seen.add(callee_name)
-        ordered_devices.append(device_func)
-    return ordered_devices
+RESERVED_METADATA_ATTRS = ("kind", "cost_kind", "op_name", "device_func")
+SUPPORTED_COST_PREFIXES = ("dma.", "kernel.", "arch.")
+HELPER_OP_NAMES = ("dma.view", "dma.reshape")
+INVALID_COST_KIND_DETAIL = "cost_kind must be a non-empty '|' separated list of unique kind names"
 
 
 class LaunchKernelCostFuncPass(Pass):
     """launch-kernel-cost-func pass。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: OpenAI Codex
 
     功能说明:
     - 固定公开名称为 `launch-kernel-cost-func`。
     - 从 `arch.launch -> device func` 关系生成 sibling cost function。
-    - 不改写原 host wrapper 与原 device function。
+    - `cost_kind` 接受任意非空、`|` 分隔且去重后的 kind 名列表。
 
     使用示例:
-    - module = LaunchKernelCostFuncPass(cost_kind="compute|latency|bandwidth").run(module)
+    - from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
+    - module = LaunchKernelCostFuncPass(cost_kind="compute|memory|latency").run(module)
 
     关联文件:
-    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
+    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
+    - test: [test/pass/test_launch_kernel_cost_func.py](../../../test/pass/test_launch_kernel_cost_func.py)
+    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
     """
 
     name = "launch-kernel-cost-func"
@@ -503,22 +63,35 @@ class LaunchKernelCostFuncPass(Pass):
         """初始化 pass 选项。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: OpenAI Codex
 
         功能说明:
-        - 记录当前 cost function 的统计视角。
+        - 记录公开 `cost_kind` 字符串。
+        - 规整并缓存内部执行所需的 kind 列表顺序。
 
         使用示例:
-        - pass_obj = LaunchKernelCostFuncPass(cost_kind="memory")
+        - pass_obj = LaunchKernelCostFuncPass(cost_kind="compute|memory|latency")
 
         关联文件:
-        - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-        - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-        - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
+        - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
+        - test: [test/pass/test_launch_kernel_cost_func.py](../../../test/pass/test_launch_kernel_cost_func.py)
+        - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
         """
 
-        self.cost_kinds = _normalize_cost_kinds(cost_kind)
-        self.cost_kind = "|".join(self.cost_kinds)
+        if not cost_kind:
+            raise_pass_contract_error("LaunchKernelCostFuncError", INVALID_COST_KIND_DETAIL)
+        raw_kinds = [kind.strip() for kind in cost_kind.split("|")]
+        if any(kind == "" for kind in raw_kinds):
+            raise_pass_contract_error("LaunchKernelCostFuncError", INVALID_COST_KIND_DETAIL)
+        normalized_kinds: list[str] = []
+        seen_kinds: set[str] = set()
+        for kind in raw_kinds:
+            if kind in seen_kinds:
+                raise_pass_contract_error("LaunchKernelCostFuncError", INVALID_COST_KIND_DETAIL)
+            seen_kinds.add(kind)
+            normalized_kinds.append(kind)
+        self.cost_kind = "|".join(normalized_kinds)
+        self._cost_kinds = tuple(normalized_kinds)
 
     @classmethod
     def from_options(
@@ -527,25 +100,26 @@ class LaunchKernelCostFuncPass(Pass):
         """从 registry options 构造 pass。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: OpenAI Codex
 
         功能说明:
-        - 支持 `{"cost_kind": "compute|latency|bandwidth"}` 形式的 registry 入口。
+        - 支持 `{"cost_kind": "compute|memory|latency"}` 形式的 registry 入口。
         - 拒绝未知选项，避免静默吞参。
 
         使用示例:
-        - pass_obj = LaunchKernelCostFuncPass.from_options({"cost_kind": "compute|latency|bandwidth"})
+        - pass_obj = LaunchKernelCostFuncPass.from_options({"cost_kind": "compute|memory|latency"})
 
         关联文件:
-        - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-        - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-        - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
+        - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
+        - test: [test/pass/test_launch_kernel_cost_func.py](../../../test/pass/test_launch_kernel_cost_func.py)
+        - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
         """
 
         unknown = sorted(set(options) - {"cost_kind"})
         if unknown:
-            raise LaunchKernelCostFuncError(
-                f"LaunchKernelCostFuncError: unknown option(s): {', '.join(unknown)}"
+            raise_pass_contract_error(
+                "LaunchKernelCostFuncError",
+                f"unknown option(s): {', '.join(unknown)}",
             )
         return cls(cost_kind=options.get("cost_kind", "compute"))
 
@@ -553,43 +127,245 @@ class LaunchKernelCostFuncPass(Pass):
         """执行 launch-kernel-cost-func pass。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: OpenAI Codex
 
         功能说明:
-        - 校验 module 输入与 `cost_kind`。
-        - 收集 unique device callee 并插入对应 cost function。
-        - 若发现重名 cost function，显式失败并保持 module 原样。
+        - 校验 module 输入与 `arch.launch -> device func` 关系。
+        - 为每个 unique device callee 和每个请求的 `cost_kind` 生成 sibling cost function。
+        - 若发现非法 `cost_kind`、callee 缺失、metadata attr 冲突、非支持 op 或重名 cost function，显式失败。
 
         使用示例:
-        - module = LaunchKernelCostFuncPass(cost_kind="compute").run(module)
+        - module = LaunchKernelCostFuncPass(cost_kind="compute|memory").run(module)
 
         关联文件:
-        - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-        - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-        - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
+        - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
+        - test: [test/pass/test_launch_kernel_cost_func.py](../../../test/pass/test_launch_kernel_cost_func.py)
+        - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
         """
 
         if not isinstance(module, ModuleOp):
-            raise LaunchKernelCostFuncError("LaunchKernelCostFuncError: module must be builtin.module")
-        device_funcs = _collect_device_functions(module)
+            raise_pass_contract_error("LaunchKernelCostFuncError", "module must be builtin.module")
+
+        func_by_name = {
+            op.sym_name.data: op for op in module.ops if isinstance(op, func.FuncOp)
+        }
+        device_funcs: list[func.FuncOp] = []
+        seen_device_names: set[str] = set()
+        for op in module.walk():
+            if not isinstance(op, ArchLaunchOp):
+                continue
+            callee_name = op.callee.root_reference.data
+            device_func = func_by_name.get(callee_name)
+            if device_func is None:
+                raise_pass_contract_error(
+                    "LaunchKernelCostFuncError",
+                    f"arch.launch callee '{callee_name}' not found",
+                )
+            if callee_name in seen_device_names:
+                continue
+            seen_device_names.add(callee_name)
+            device_funcs.append(device_func)
         if not device_funcs:
             return module
-        existing_names = {op.sym_name.data for op in module.ops if isinstance(op, func.FuncOp)}
+
+        existing_names = {
+            op.sym_name.data for op in module.ops if isinstance(op, func.FuncOp)
+        }
         for device_func in device_funcs:
-            for cost_kind in self.cost_kinds:
-                cost_name = _cost_function_name(cost_kind, device_func.sym_name.data)
+            for cost_kind in self._cost_kinds:
+                cost_name = f"_cost_{cost_kind}_{device_func.sym_name.data}"
                 if cost_name in existing_names:
-                    raise LaunchKernelCostFuncError(
-                        f"LaunchKernelCostFuncError: cost function '{cost_name}' already exists"
+                    raise_pass_contract_error(
+                        "LaunchKernelCostFuncError",
+                        f"cost function '{cost_name}' already exists",
                     )
                 existing_names.add(cost_name)
+
         for device_func in device_funcs:
-            anchor: Operation = device_func
-            for cost_kind in self.cost_kinds:
-                cost_func = _build_cost_function(device_func, cost_kind)
+            source_blocks = list(device_func.body.blocks)
+            if len(source_blocks) != 1:
+                raise_pass_contract_error(
+                    "LaunchKernelCostFuncError",
+                    f"device function '{device_func.sym_name.data}' must contain single block",
+                )
+
+            anchor = device_func
+            input_types = list(device_func.function_type.inputs.data)
+            for cost_kind in self._cost_kinds:
+                cost_block = Block(arg_types=input_types)
+                zero = SymbolConstOp(0)
+                cost_block.add_op(zero)
+
+                frames: list[dict[str, object]] = [
+                    {
+                        "source_block": source_blocks[0],
+                        "target_block": cost_block,
+                        "ops": list(source_blocks[0].ops),
+                        "index": 0,
+                        "value_mapper": {
+                            source_arg: cost_arg
+                            for source_arg, cost_arg in zip(
+                                source_blocks[0].args,
+                                cost_block.args,
+                                strict=True,
+                            )
+                        },
+                        "acc_value": zero.result,
+                        "loop_op": None,
+                    }
+                ]
+                final_acc_value: SSAValue = zero.result
+
+                while frames:
+                    frame = frames[-1]
+                    ops = frame["ops"]
+                    index = frame["index"]
+                    assert isinstance(ops, list)
+                    assert isinstance(index, int)
+                    if index >= len(ops):
+                        finished = frames.pop()
+                        finished_target_block = finished["target_block"]
+                        finished_acc_value = finished["acc_value"]
+                        assert isinstance(finished_target_block, Block)
+                        assert isinstance(finished_acc_value, SSAValue)
+                        if not frames:
+                            final_acc_value = finished_acc_value
+                            break
+                        finished_target_block.add_op(SymbolYieldOp(finished_acc_value))
+                        parent = frames[-1]
+                        loop_op = finished["loop_op"]
+                        assert isinstance(loop_op, SymbolForOp)
+                        assert loop_op.result is not None
+                        parent["acc_value"] = loop_op.result
+                        continue
+
+                    op = ops[index]
+                    frame["index"] = index + 1
+                    target_block = frame["target_block"]
+                    value_mapper = frame["value_mapper"]
+                    acc_value = frame["acc_value"]
+                    assert isinstance(target_block, Block)
+                    assert isinstance(value_mapper, dict)
+                    assert isinstance(acc_value, SSAValue)
+
+                    if isinstance(op, SymbolForOp):
+                        if op.init is not None or op.result is not None:
+                            raise_pass_contract_error(
+                                "LaunchKernelCostFuncError",
+                                "source symbol.for must not already carry loop-carried result",
+                            )
+                        inner_source_block = op.body.block
+                        inner_block = Block(
+                            arg_types=[inner_source_block.args[0].type, acc_value.type]
+                        )
+                        inner_mapper = dict(value_mapper)
+                        inner_mapper[inner_source_block.args[0]] = inner_block.args[0]
+                        loop_op = SymbolForOp(
+                            value_mapper.get(op.start, op.start),
+                            value_mapper.get(op.end, op.end),
+                            value_mapper.get(op.step, op.step),
+                            Region(inner_block),
+                            iter_attr=op.iter_attr,
+                            init=acc_value,
+                        )
+                        target_block.add_op(loop_op)
+                        frames.append(
+                            {
+                                "source_block": inner_source_block,
+                                "target_block": inner_block,
+                                "ops": list(inner_source_block.ops),
+                                "index": 0,
+                                "value_mapper": inner_mapper,
+                                "acc_value": inner_block.args[1],
+                                "loop_op": loop_op,
+                            }
+                        )
+                        continue
+
+                    op_name = op.name
+                    if op_name == "builtin.unregistered":
+                        op_name_attr = op.attributes.get("op_name__")
+                        if isinstance(op_name_attr, StringAttr):
+                            op_name = op_name_attr.data
+
+                    is_skip_op = (
+                        isinstance(op, func.ReturnOp)
+                        or op_name == "arith.constant"
+                        or op_name in HELPER_OP_NAMES
+                        or (op_name.startswith("symbol.") and not isinstance(op, SymbolForOp))
+                    )
+                    if is_skip_op:
+                        if not isinstance(op, func.ReturnOp):
+                            cloned = op.clone(value_mapper=value_mapper)
+                            target_block.add_op(cloned)
+                            for source_result, cloned_result in zip(
+                                op.results,
+                                cloned.results,
+                                strict=True,
+                            ):
+                                value_mapper[source_result] = cloned_result
+                        continue
+
+                    if not any(
+                        op_name.startswith(prefix) for prefix in SUPPORTED_COST_PREFIXES
+                    ):
+                        raise_pass_contract_error(
+                            "LaunchKernelCostFuncError",
+                            f"unsupported op '{op_name}' in device function '{device_func.sym_name.data}'",
+                        )
+
+                    if len(op.results) != 0:
+                        cloned = op.clone(value_mapper=value_mapper)
+                        target_block.add_op(cloned)
+                        for source_result, cloned_result in zip(
+                            op.results,
+                            cloned.results,
+                            strict=True,
+                        ):
+                            value_mapper[source_result] = cloned_result
+
+                    extra_attrs = dict(op.attributes)
+                    extra_attrs.pop("op_name__", None)
+                    if op_name == "kernel.binary_elewise" and "kind" in extra_attrs:
+                        extra_attrs["kernel_kind"] = extra_attrs.pop("kind")
+                    for attr_name in RESERVED_METADATA_ATTRS:
+                        if attr_name in extra_attrs:
+                            raise_pass_contract_error(
+                                "LaunchKernelCostFuncError",
+                                (
+                                    f"op '{op_name}' in device function "
+                                    f"'{device_func.sym_name.data}' already defines reserved attr '{attr_name}'"
+                                ),
+                            )
+
+                    cost_op = TunerCostOp(
+                        [value_mapper.get(operand, operand) for operand in op.operands],
+                        cost_kind=StringAttr(cost_kind),
+                        op_name=StringAttr(op_name),
+                        extra_attrs=extra_attrs,
+                    )
+                    target_block.add_op(cost_op)
+                    add_op = SymbolAddOp(
+                        acc_value,
+                        cost_op.result,
+                        result_type=acc_value.type,
+                    )
+                    target_block.add_op(add_op)
+                    frame["acc_value"] = add_op.result
+
+                cost_block.add_op(func.ReturnOp(final_acc_value))
+                cost_func = func.FuncOp(
+                    f"_cost_{cost_kind}_{device_func.sym_name.data}",
+                    (input_types, [final_acc_value.type]),
+                    Region(cost_block),
+                    visibility=getattr(device_func, "sym_visibility", None),
+                    arg_attrs=device_func.arg_attrs,
+                )
+                verify_generated_ops([cost_func])
                 module.body.block.insert_op_after(cost_func, anchor)
                 anchor = cost_func
+
         return module
 
 
-__all__ = ["LaunchKernelCostFuncError", "LaunchKernelCostFuncPass"]
+__all__ = ["LaunchKernelCostFuncPass"]

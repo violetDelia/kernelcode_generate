@@ -450,7 +450,7 @@ def _infer_result_type_with_public_diagnostics(
 
     关联文件:
     - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - test: [test/dsl/ast/test_visitor_integration.py](test/dsl/ast/test_visitor_integration.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/function_builder.py](kernel_gen/dsl/mlir_gen/function_builder.py)
     """
 

@@ -38,7 +38,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.context import build_default_context
-from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelError, OutlineDeviceKernelPass
+from kernel_gen.passes import PassContractError
+from kernel_gen.passes.outline_device_kernel import (
+    OutlineDeviceKernelFuncPattern,
+    OutlineDeviceKernelPass,
+    get_outline_device_kernel_pass_patterns,
+)
 
 
 def _build_context() -> Context:
@@ -121,6 +126,21 @@ def test_outline_device_kernel_pass_registry_name() -> None:
     assert OutlineDeviceKernelPass.name == "outline-device-kernel"
 
 
+# TC-ODK-001A
+# 创建者: OpenAI Codex
+# 最后一次更改: OpenAI Codex
+# 功能说明: 锁定公开 pattern getter 只返回单个 func-level pattern。
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_pattern_getter_returns_single_func_pattern
+# 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
+# 对应 spec 文件路径: spec/pass/outline_device_kernel.md
+# 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
+def test_outline_device_kernel_pattern_getter_returns_single_func_pattern() -> None:
+    patterns = get_outline_device_kernel_pass_patterns({})
+
+    assert len(patterns) == 1
+    assert isinstance(patterns[0], OutlineDeviceKernelFuncPattern)
+
+
 # TC-ODK-002
 # 创建者: 朽木露琪亚
 # 最后一次更改: 金铲铲大作战
@@ -132,10 +152,14 @@ def test_outline_device_kernel_pass_registry_name() -> None:
 def test_outline_device_kernel_lowering_compat_import_matches_rehome_entry() -> None:
     compat_module = importlib.import_module("kernel_gen.passes.lowering.outline_device_kernel")
     direct_module = importlib.import_module("kernel_gen.passes.outline_device_kernel")
+    package_module = importlib.import_module("kernel_gen.passes")
 
     assert compat_module is direct_module
     assert compat_module.OutlineDeviceKernelPass is OutlineDeviceKernelPass
-    assert compat_module.OutlineDeviceKernelError is OutlineDeviceKernelError
+    assert compat_module.OutlineDeviceKernelFuncPattern is OutlineDeviceKernelFuncPattern
+    assert compat_module.get_outline_device_kernel_pass_patterns is get_outline_device_kernel_pass_patterns
+    assert direct_module.PassContractError is PassContractError
+    assert package_module.PassContractError is PassContractError
 
 
 # TC-ODK-003
@@ -148,8 +172,8 @@ def test_outline_device_kernel_lowering_compat_import_matches_rehome_entry() -> 
 # 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
 def test_outline_device_kernel_non_module_input_raises_stable_error() -> None:
     with pytest.raises(
-        OutlineDeviceKernelError,
-        match=r"^OutlineDeviceKernelError: module must be builtin\.module$",
+        PassContractError,
+        match=r"^module must be builtin\.module$",
     ):
         OutlineDeviceKernelPass().run(object())
 
@@ -317,9 +341,9 @@ builtin.module {
     )
 
     with pytest.raises(
-        OutlineDeviceKernelError,
+        PassContractError,
         match=(
-            r"^OutlineDeviceKernelError: function kernel must define "
+            r"^function kernel must define "
             r"launch_block, launch_thread, and launch_subthread together$"
         ),
     ):
@@ -351,8 +375,8 @@ builtin.module {
     )
 
     with pytest.raises(
-        OutlineDeviceKernelError,
-        match=r"^OutlineDeviceKernelError: function kernel launch_thread must be > 0$",
+        PassContractError,
+        match=r"^function kernel launch_thread must be > 0$",
     ):
         OutlineDeviceKernelPass().run(module)
 
@@ -382,8 +406,8 @@ builtin.module {
     )
 
     with pytest.raises(
-        OutlineDeviceKernelError,
-        match=r"^OutlineDeviceKernelError: function kernel shared_memory_size must be int-like attribute$",
+        PassContractError,
+        match=r"^function kernel shared_memory_size must be int-like attribute$",
     ):
         OutlineDeviceKernelPass().run(module)
 
@@ -413,8 +437,8 @@ builtin.module {
     )
 
     with pytest.raises(
-        OutlineDeviceKernelError,
-        match=r"^OutlineDeviceKernelError: function kernel shared_memory_size must be >= 0$",
+        PassContractError,
+        match=r"^function kernel shared_memory_size must be >= 0$",
     ):
         OutlineDeviceKernelPass().run(module)
 
@@ -445,8 +469,8 @@ builtin.module {
     )
 
     with pytest.raises(
-        OutlineDeviceKernelError,
-        match=r"^OutlineDeviceKernelError: function kernel must have zero results$",
+        PassContractError,
+        match=r"^function kernel must have zero results$",
     ):
         OutlineDeviceKernelPass().run(module)
 
@@ -479,7 +503,7 @@ builtin.module {
     )
 
     with pytest.raises(
-        OutlineDeviceKernelError,
-        match=r"^OutlineDeviceKernelError: outlined device function 'kernel_device' already exists$",
+        PassContractError,
+        match=r"^outlined device function 'kernel_device' already exists$",
     ):
         OutlineDeviceKernelPass().run(module)

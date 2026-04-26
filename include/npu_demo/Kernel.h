@@ -706,7 +706,7 @@ inline Status img2col2d(
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/dsl/gen_kernel/test_gen_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename T>

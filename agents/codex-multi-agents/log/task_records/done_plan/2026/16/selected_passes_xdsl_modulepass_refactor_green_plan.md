@@ -7,7 +7,7 @@
 - 目标 `spec`：
   - [`spec/pass/pass_manager.md`](../../spec/pass/pass_manager.md)
   - [`spec/pass/registry.md`](../../spec/pass/registry.md)
-  - [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)
+  - [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)
   - [`spec/pass/lowering/nn_lowering/element_binary_lowering.md`](../../spec/pass/lowering/nn_lowering/element_binary_lowering.md)
   - [`spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md`](../../spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md)
   - [`spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md`](../../spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md)
@@ -484,7 +484,7 @@ pm.run(module)
 
 #### 目标 spec / API
 
-- [`spec/pass/lowering/nn_lowering.md`](../../spec/pass/lowering/nn_lowering.md)
+- [`spec/pass/lowering/nn_lowering/spec.md`](../../spec/pass/lowering/nn_lowering/spec.md)
 - [`spec/pass/lowering/nn_lowering/element_binary_lowering.md`](../../spec/pass/lowering/nn_lowering/element_binary_lowering.md)
 - [`spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md`](../../spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md)
 - [`spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md`](../../spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md)

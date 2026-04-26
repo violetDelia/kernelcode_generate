@@ -11,11 +11,11 @@
 - from kernel_gen.dsl import parse_function, build_func_op
 
 关联文件:
-- spec: spec/dsl/ast.md
-- spec: spec/dsl/ast_visitor.md
+- spec: spec/dsl/ast/__init__.md
+- spec: spec/dsl/ast/visitor.md
 - spec: spec/dsl/emit_mlir.md
 - spec: spec/dsl/mlir_gen.md
-- test: test/dsl/test_ast_visitor.py
+- test: test/dsl/ast/test_visitor_integration.py
 - 功能实现: kernel_gen/dsl/__init__.py
 """
 

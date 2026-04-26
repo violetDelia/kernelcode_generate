@@ -79,25 +79,25 @@ def test_default_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) -
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
     order: list[str] = []
 
-    def _record_decompose(self: object, target: object) -> object:
+    def _record_decompose(self: object, ctx: object, target: object) -> None:
+        _ = ctx
         order.append("decompass")
-        return target
 
     def _record_lower(self: object, target: object) -> object:
         order.append("lower-nn")
         return target
 
-    def _record_buffer(self: object, target: object) -> object:
+    def _record_buffer(self: object, ctx: object, target: object) -> None:
+        _ = ctx
         order.append("buffer-results-to-out-params")
-        return target
 
     def _record_dma(self: object, target: object) -> object:
         order.append("lower-dma-memory-hierarchy")
         return target
 
-    monkeypatch.setattr(DecompassPass, "run", _record_decompose)
+    monkeypatch.setattr(DecompassPass, "apply", _record_decompose)
     monkeypatch.setattr(NnLoweringPass, "run", _record_lower)
-    monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _record_buffer)
+    monkeypatch.setattr(BufferResultsToOutParamsPass, "apply", _record_buffer)
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "run", _record_dma)
 
     pm = build_default_lowering_pipeline()

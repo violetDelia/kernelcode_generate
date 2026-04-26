@@ -4,6 +4,20 @@
 
 定义 `Memory` 的数据搬运、视图变换与生命周期操作规范，提供 `alloc/free/copy/cast/load/store/slice/deslice/view/reshape/flatten` 的输入约束、输出语义与错误边界。该层面对高层 API，负责描述搬运意图与视图范围；方言层语义由 [`spec/dialect/dma.md`](../../spec/dialect/dma.md) 定义。
 
+## API 列表
+
+- `alloc(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)`
+- `free(value)`
+- `copy(source, space)`
+- `cast(source, dtype, memoryspace=None)`
+- `load(source, offsets, sizes, strides=None, space=None)`
+- `slice(source, offsets, sizes, strides=None, space=None)`
+- `store(source, target, offsets, sizes, strides=None)`
+- `deslice(source, target, offsets, sizes, strides=None)`
+- `view(source, offset, size, stride)`
+- `reshape(source, shape)`
+- `flatten(source)`
+
 ## 文档信息
 
 - 创建者：`榕`

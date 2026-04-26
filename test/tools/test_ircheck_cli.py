@@ -1,20 +1,13 @@
 """ircheck CLI tests.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 `python -m kernel_gen.tools.ircheck <case-file>` 的最小 CLI 合同：
   - 成功时仅输出 `true`；
   - 失败时首行输出 `false`，并包含失败指令与规范化后的实际 IR（actual_ir）。
 - 覆盖 `-irdump` 目录生成与逐 step 文件命名约束。
-
-当前覆盖率信息:
-- 当前覆盖率: 未统计（本任务验证未启用 coverage 统计）。
-- 达标判定: 待后续补充统计结果。
-
-覆盖率命令:
-- `pytest -q --cov=kernel_gen.tools.ircheck --cov-branch --cov-report=term-missing test/tools/test_ircheck_cli.py`
 
 使用示例:
 - pytest -q test/tools/test_ircheck_cli.py

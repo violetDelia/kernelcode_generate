@@ -33,9 +33,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dsl import mlir_gen as mlir_gen_module
-from kernel_gen.dsl.ast import AstParseError, _ParseFailure
+from kernel_gen.dsl.ast import AstParseError, Diagnostic
 from kernel_gen.dsl.mlir_gen import _build_parse_environment, _build_runtime_table_for_signature, _parse_function_with_env
+from kernel_gen.dsl.mlir_gen import parse_env as parse_env_module
 
 
 # TC-MLIR-GEN-PARSE-001
@@ -79,7 +79,7 @@ def test_build_runtime_table_for_signature() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 测试目的: 验证 _ParseFailure 会转译为 AstParseError。
+# 测试目的: 验证 parser 公共错误会透传为 AstParseError。
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/parse_env.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 示例: pytest -q test/dsl/mlir_gen/test_parse_env.py -k test_parse_function_with_env_wraps_failure
@@ -88,9 +88,9 @@ def test_parse_function_with_env_wraps_failure(monkeypatch: pytest.MonkeyPatch) 
         return None
 
     def _broken_parse(*_args: object, **_kwargs: object) -> object:
-        raise _ParseFailure("boom", location=None)
+        raise AstParseError("boom", [Diagnostic("boom", location=None)])
 
-    monkeypatch.setattr(mlir_gen_module, "_parse_function_impl", _broken_parse)
+    monkeypatch.setattr(parse_env_module, "ast_parse_function_with_env", _broken_parse)
 
     with pytest.raises(AstParseError) as excinfo:
         _parse_function_with_env(kernel, globals_table={}, builtins_table={}, runtime_table={}, config=None)

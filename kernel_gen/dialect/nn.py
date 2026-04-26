@@ -22,13 +22,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from kernel_gen.common.contracts import (
-    _build_contiguous_stride as _common_build_contiguous_stride,
-    _collect_int_dims as _common_collect_int_dims,
-    _dims_equal as _common_dims_equal,
-    _verify_i64_attr as _common_verify_i64_attr,
-    _verify_i64_attr_group as _common_verify_i64_attr_group,
-    _verify_i64_attr_value as _common_verify_i64_attr_value,
-    _verify_memory_type as _common_verify_memory_type,
+    build_contiguous_stride as _common_build_contiguous_stride,
+    collect_int_dims as _common_collect_int_dims,
+    dims_equal as _common_dims_equal,
+    verify_i64_attr as _common_verify_i64_attr,
+    verify_i64_attr_group as _common_verify_i64_attr_group,
+    verify_i64_attr_value as _common_verify_i64_attr_value,
+    verify_memory_type as _common_verify_memory_type,
 )
 from kernel_gen.common.errors import _ERROR_TEMPLATE
 from xdsl.dialects.builtin import (

@@ -2,7 +2,7 @@
 经办人：睡觉小分队
 任务：T-20260411-cb4dfde3
 任务目标：收口 exp / reduce / softmax family 的 lowering 规范
-改动：更新 spec/pass/lowering/nn_lowering.md，补齐 nn.exp/nn.reduce_*/nn.softmax 的 lowering 目标、输出 memory 约束与测试清单
+改动：更新 spec/pass/lowering/nn_lowering/spec.md，补齐 nn.exp/nn.reduce_*/nn.softmax 的 lowering 目标、输出 memory 约束与测试清单
 验证：未执行命令，原因：spec 阶段仅更新文档
 结论：spec 已完成；后续 build 需按新增测试清单补齐实现与测试。
 
@@ -29,7 +29,7 @@
 任务：T-20260411-cb4dfde3
 任务目标：复核 lower-nn 注册、reduce keepdim 处理、exp/reduce/softmax ircheck 用例与 pytest 结果
 改动：
-- 复核文件：kernel_gen/passes/registry.py、kernel_gen/passes/lowering/nn_to_kernel.py、kernel_gen/passes/lowering/nn_lowering/nn_lowering.py、test/pass/nn_lowering/*.py、test/pass/test_lowering_nn_to_kernel.py、spec/pass/lowering/nn_lowering.md。
+- 复核文件：kernel_gen/passes/registry.py、kernel_gen/passes/lowering/nn_to_kernel.py、kernel_gen/passes/lowering/nn_lowering/nn_lowering.py、test/pass/nn_lowering/*.py、test/pass/test_lowering_nn_to_kernel.py、spec/pass/lowering/nn_lowering/spec.md。
 - 复核结果：lower-nn 已注册到 pass registry；reduce keepdim 解析规则与测试 keepdim=i1 一致；exp/reduce/softmax ircheck 用例与 spec 列表一致。
 - 问题列表：未发现需修改项。
 - 漏洞排查结果：

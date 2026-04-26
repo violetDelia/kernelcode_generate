@@ -51,8 +51,8 @@
   - [`test/dsl/test_ast_visitor.py`](../test/dsl/test_ast_visitor.py)
   - [`test/dsl/test_emit_mlir.py`](../test/dsl/test_emit_mlir.py)
   - [`test/dsl/test_mlir_gen.py`](../test/dsl/test_mlir_gen.py)
-  - [`test/dsl/test_emit_c.py`](../test/dsl/test_emit_c.py)
-  - [`test/dsl/test_gen_kernel.py`](../test/dsl/test_gen_kernel.py)
+  - [`test/dsl/gen_kernel/emit/test_emit.py`](../test/dsl/gen_kernel/emit/test_emit.py)
+  - [`test/dsl/gen_kernel/test_gen_kernel.py`](../test/dsl/gen_kernel/test_gen_kernel.py)
   - [`test/target/test_target_registry.py`](../test/target/test_target_registry.py)
   - [`test/include/cpu/test_memory.py`](../test/include/cpu/test_memory.py)
   - [`test/include/cpu/test_nn.py`](../test/include/cpu/test_nn.py)
@@ -70,8 +70,8 @@
 - [`spec/dsl/ast_visitor.md`](../spec/dsl/ast_visitor.md)：Python AST 到 DSL AST 的访问规则。
 - [`spec/dsl/emit_mlir.md`](../spec/dsl/emit_mlir.md)：DSL AST 到 MLIR 片段的发射规则。
 - [`spec/dsl/mlir_gen.md`](../spec/dsl/mlir_gen.md)：DSL 到 `func.func` 入口契约。
-- [`spec/dsl/emit_c.md`](../spec/dsl/emit_c.md)：节点级 C/C++ 片段生成边界。
-- [`spec/dsl/gen_kernel.md`](../spec/dsl/gen_kernel.md)：函数级源码生成边界。
+- [`spec/dsl/gen_kernel/emit.md`](../spec/dsl/gen_kernel/emit.md)：节点级 C/C++ 片段生成边界。
+- [`spec/dsl/gen_kernel/gen_kernel.md`](../spec/dsl/gen_kernel/gen_kernel.md)：函数级源码生成边界。
 - [`spec/target/registry.md`](../spec/target/registry.md)：target 能力与硬件参数注册中心。
 - [`spec/include/cpu/cpu.md`](../spec/include/cpu/cpu.md)：CPU 运行时头文件接口边界。
 
@@ -193,12 +193,12 @@ kernel_gen/target/targets/*.json|*.txt
 
 | 类别 | 当前最小支持范围 | 边界说明 |
 | --- | --- | --- |
-| 算术表达式 | `arith` 二元算术 | 以 [`spec/dsl/emit_c.md`](../spec/dsl/emit_c.md) 与 [`test/dsl/test_emit_c.py`](../test/dsl/test_emit_c.py) 为准 |
+| 算术表达式 | `arith` 二元算术 | 以 [`spec/dsl/gen_kernel/emit.md`](../spec/dsl/gen_kernel/emit.md) 与 [`test/dsl/gen_kernel/emit/test_emit.py`](../test/dsl/gen_kernel/emit/test_emit.py) 为准 |
 | 比较表达式 | `arith.cmpi` | 仅覆盖当前测试锁定的比较生成路径 |
 | 控制流 | `scf.for` | 生成完整循环语句块，不代表支持更广控制流 |
 | 访存 | unit-tile `dma.load` / `dma.store` | 仅覆盖 unit-tile 访存场景，不代表通用 DMA codegen |
 | 符号整数 | `symbol.add` | 仅 `target=cpu` 支持；非 CPU 必须报错 |
-| 函数级输出 | `func.func -> C/C++` | 由 [`spec/dsl/gen_kernel.md`](../spec/dsl/gen_kernel.md) 约束签名、返回和 `out` 参数风格 |
+| 函数级输出 | `func.func -> C/C++` | 由 [`spec/dsl/gen_kernel/gen_kernel.md`](../spec/dsl/gen_kernel/gen_kernel.md) 约束签名、返回和 `out` 参数风格 |
 
 - 这张表描述的是“当前最小可用 codegen 子集”，不是未来目标清单。
 - 未列入这张表的 op / dialect，默认不能推断为已具备 CPU codegen 支持。
@@ -207,7 +207,7 @@ kernel_gen/target/targets/*.json|*.txt
 
 | 路径 / 专题 | 起点 | 当前终点 | 当前状态 | 断点 / 备注 |
 | --- | --- | --- | --- | --- |
-| DSL 算术/比较/`scf.for`/unit-tile `dma.load/store`/`symbol.add(cpu)` | DSL/Python 函数 | CPU C/C++ 源码字符串 | 已有受控子集的代码生成链路 | 支持范围以 [`spec/dsl/emit_c.md`](../spec/dsl/emit_c.md) 与 [`spec/dsl/gen_kernel.md`](../spec/dsl/gen_kernel.md) 为准 |
+| DSL 算术/比较/`scf.for`/unit-tile `dma.load/store`/`symbol.add(cpu)` | DSL/Python 函数 | CPU C/C++ 源码字符串 | 已有受控子集的代码生成链路 | 支持范围以 [`spec/dsl/gen_kernel/emit.md`](../spec/dsl/gen_kernel/emit.md) 与 [`spec/dsl/gen_kernel/gen_kernel.md`](../spec/dsl/gen_kernel/gen_kernel.md) 为准 |
 | `nn` 逐元素算术/比较/`select`/`cast` lowering | `nn` dialect IR 或可构造的 `nn` op | `kernel/dma/func` IR | 已有 IR lowering | 由 [`kernel_gen/passes/lowering/nn_to_kernel.py`](../kernel_gen/passes/lowering/nn_to_kernel.py) 负责；不自动衔接源码生成 |
 | 高层 `operation` 的 `broadcast` / `softmax` / `fc` / `matmul` | `Memory` 语义调用 | 高层语义结果或局部 IR 设计入口 | 以语义层为主 | 是否进入 dialect/pass/codegen 需按专题单独推进 |
 | 高层 `operation` 的 `conv` / `img2col` | `Memory` 语义调用 | 高层语义结果 | 当前仅语义层收敛 | 尚无通用 lowering 或 `emit_c/gen_kernel` 直出代码路径 |

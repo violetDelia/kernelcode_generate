@@ -1,7 +1,7 @@
 """codex-multi-agents-task.sh tests.
 
 创建者: 榕
-最后一次更改: jcc你莫辜负
+最后一次更改: Codex
 
 功能说明:
 - 覆盖 task 脚本的任务分发、完成、暂停、继续、改派、新建、删除、状态查询与错误返回码路径。
@@ -9,7 +9,7 @@
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路的功能实现为 shell 脚本 `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh`，`pytest-cov` 无法直接采集脚本覆盖率，执行覆盖率命令会得到 `no-data-collected`。
 - 达标判定: shell 实现按规则豁免 `95%` 覆盖率达标线。
-- 当前以 `77` 条 pytest 用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、继续、改派、续接、新建、删除、状态查询、计划书进度、权限校验、并行上限、文件错误、结构错误、自动续接与角色职责约束路径。
+- 当前以 `89` 条 pytest 用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、继续、改派、续接、新建、删除、状态查询、计划书进度、权限校验、并行上限、文件错误、结构错误、自动续接与角色职责约束路径。
 
 覆盖率命令:
 - `pytest -q --cov=skills/codex-multi-agents/scripts/codex-multi-agents-task.sh --cov-branch --cov-report=term-missing test/codex-multi-agents/test_codex-multi-agents-task.py`
@@ -61,6 +61,22 @@ def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Comp
             merged_env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = agents_list_path
         else:
             merged_env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(
+                REPO_ROOT / "agents/codex-multi-agents/agents-lists.md"
+            )
+
+    if "CODEX_MULTI_AGENTS_AGENTS_FILE" not in merged_env:
+        agents_list_path = None
+        for i, arg in enumerate(args):
+            if arg == "-agents-list" and i + 1 < len(args):
+                agents_list_path = args[i + 1]
+                break
+            if arg.startswith("-agents-list="):
+                agents_list_path = arg.split("=", 1)[1]
+                break
+        if agents_list_path:
+            merged_env["CODEX_MULTI_AGENTS_AGENTS_FILE"] = agents_list_path
+        else:
+            merged_env["CODEX_MULTI_AGENTS_AGENTS_FILE"] = str(
                 REPO_ROOT / "agents/codex-multi-agents/agents-lists.md"
             )
 
@@ -398,7 +414,7 @@ def test_dispatch_task_success(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     agents = tmp_path / "agents-lists.md"
     write_todo_file_current(todo)
-    write_agents_file(agents)
+    write_agents_file(agents, [agent_row("worker-a", "busy"), agent_row("worker-b", "busy"), agent_row("worker-c", "free")])
 
     env = os.environ.copy()
     env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
@@ -410,7 +426,7 @@ def test_dispatch_task_success(tmp_path: Path) -> None:
         "-task_id",
         "EX-3",
         "-to",
-        "worker-a",
+        "worker-c",
         "-agents-list",
         str(agents),
         env=env,
@@ -420,12 +436,12 @@ def test_dispatch_task_success(tmp_path: Path) -> None:
     list_rows = parse_section_rows(content, "## 任务列表")
 
     assert result.returncode == 0
-    assert "OK: dispatch EX-3 -> worker-a" in result.stdout
-    assert "OK: replace worker-a 状态" in result.stdout
+    assert "OK: dispatch EX-3 -> worker-c" in result.stdout
+    assert "OK: replace worker-c 状态" in result.stdout
     assert any(
         r[0] == "EX-3"
         and r[1] == "苏轼"
-        and r[8] == "worker-a"
+        and r[8] == "worker-c"
         and r[9] == "进行中"
         and r[11] == "./log/ex3.md"
         and r[3] == ""
@@ -433,7 +449,7 @@ def test_dispatch_task_success(tmp_path: Path) -> None:
         for r in running_rows
     )
     assert not any(r[0] == "EX-3" for r in list_rows)
-    assert get_agent_status(agents, "worker-a") == "busy"
+    assert get_agent_status(agents, "worker-c") == "busy"
 
 
 # TC-001A
@@ -446,18 +462,18 @@ def test_dispatch_does_not_require_type(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     agents = tmp_path / "agents-lists.md"
     write_todo_file_with_task_type(todo)
-    write_agents_file(agents, [agent_row("神秘人", "free"), agent_row("worker-a", "free"), agent_row("worker-b", "free")])
+    write_agents_file(agents, [agent_row("神秘人", "free"), agent_row("worker-a", "busy"), agent_row("worker-b", "busy"), agent_row("worker-c", "free")])
 
     env = os.environ.copy()
     env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
     env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
-    result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-a", "-agents-list", str(agents), env=env)
+    result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-c", "-agents-list", str(agents), env=env)
 
     content = todo.read_text(encoding="utf-8")
     running_rows = parse_section_rows(content, "## 正在执行的任务")
 
     assert result.returncode == 0
-    assert any(r[0] == "EX-3" and r[5] == "build" and r[8] == "worker-a" and r[9] == "进行中" for r in running_rows)
+    assert any(r[0] == "EX-3" and r[5] == "build" and r[8] == "worker-c" and r[9] == "进行中" for r in running_rows)
 
 
 # TC-002
@@ -519,6 +535,161 @@ def test_dispatch_requires_agents_list(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "-dispatch requires -agents-list" in result.stderr
+
+
+# TC-002B
+# 创建者: Codex
+# 最后一次更改: Codex
+# 测试目的: 验证 -dispatch 传入的 -agents-list 必须与配置中的 canonical AGENTS_FILE 一致。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_rejects_non_canonical_agents_list(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    canonical_agents = tmp_path / "canonical-agents.md"
+    wrong_agents = tmp_path / "wrong-agents.md"
+    write_todo_file_current(todo)
+    write_agents_file(canonical_agents)
+    write_agents_file(wrong_agents)
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(canonical_agents)
+    env["CODEX_MULTI_AGENTS_AGENTS_FILE"] = str(canonical_agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-a",
+        "-agents-list",
+        str(wrong_agents),
+        env=env,
+    )
+
+    assert result.returncode == 1
+    assert "-agents-list must match configured AGENTS_FILE" in result.stderr
+
+
+# TC-002C
+# 创建者: Codex
+# 最后一次更改: Codex
+# 测试目的: 验证 -dispatch 只更新目标角色状态，不会重置未触及角色。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_updates_only_target_agent_status(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[],
+        list_rows=[
+            row_list_typed(
+                "EX-3",
+                "苏轼",
+                "2026-03-08 16:30:00 +0800",
+                "",
+                "新增任务",
+                "build",
+                "",
+                "",
+                "",
+                "./log/ex3.md",
+            )
+        ],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row("worker-a", "busy"),
+            agent_row("worker-c", "free"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-c",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    assert get_agent_status(agents, "worker-a") == "busy"
+    assert get_agent_status(agents, "worker-c") == "busy"
+
+
+# TC-002D
+# 创建者: Codex
+# 最后一次更改: Codex
+# 测试目的: 验证 -dispatch 会拒绝把任务继续分给已经拥有运行中任务的角色，即使名单状态是 stale free。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_rejects_assignee_with_existing_running_task_even_if_status_is_free(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-1",
+                "李白",
+                "2026-03-08 16:10:00 +0800",
+                ".",
+                "已有运行任务",
+                "build",
+                "",
+                "",
+                "worker-a",
+                "进行中",
+                "",
+                "./log/ex1.md",
+            )
+        ],
+        list_rows=[
+            row_list_typed(
+                "EX-3",
+                "苏轼",
+                "2026-03-08 16:30:00 +0800",
+                "",
+                "新增任务",
+                "build",
+                "",
+                "",
+                "",
+                "./log/ex3.md",
+            )
+        ],
+    )
+    write_agents_file(agents, rows=[agent_row("worker-a", "free"), agent_row("worker-b", "free")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-a",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 3
+    assert "assignee already has running task: worker-a" in result.stderr
 
 
 # TC-003
@@ -775,6 +946,123 @@ def test_done_requires_agents_list(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "-done requires -agents-list" in result.stderr
+
+
+# TC-004B
+# 创建者: Codex
+# 最后一次更改: Codex
+# 测试目的: 验证 -done 只更新完成任务对应角色状态，不会重置未触及角色。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_done_updates_only_completed_assignee_status(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-1",
+                "李白",
+                "2026-03-08 16:10:00 +0800",
+                ".",
+                "创建 src",
+                "build",
+                "",
+                "",
+                "worker-a",
+                "进行中",
+                "",
+                "./log/ex1.md",
+            ),
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                ".",
+                "创建 test",
+                "build",
+                "",
+                "",
+                "worker-b",
+                "进行中",
+                "",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row("worker-a", "busy"),
+            agent_row("worker-b", "busy"),
+            agent_row("worker-c", "busy"),
+        ],
+    )
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-done",
+        "-task_id",
+        "EX-1",
+        "-log",
+        "./agents/codex-multi-agents/log/task-EX-1.log",
+        "-agents-list",
+        str(agents),
+    )
+
+    assert result.returncode == 0
+    assert get_agent_status(agents, "worker-a") == "free"
+    assert get_agent_status(agents, "worker-b") == "busy"
+    assert get_agent_status(agents, "worker-c") == "busy"
+
+
+# TC-004C
+# 创建者: Codex
+# 最后一次更改: Codex
+# 测试目的: 验证 -done 遇到当前任务接手人状态与运行表不一致时直接失败，不会偷偷重置名单。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_done_rejects_current_assignee_status_mismatch(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-1",
+                "李白",
+                "2026-03-08 16:10:00 +0800",
+                ".",
+                "创建 src",
+                "build",
+                "",
+                "",
+                "worker-a",
+                "进行中",
+                "",
+                "./log/ex1.md",
+            )
+        ],
+        list_rows=[],
+    )
+    write_agents_file(agents, rows=[agent_row("worker-a", "free")])
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-done",
+        "-task_id",
+        "EX-1",
+        "-log",
+        "./agents/codex-multi-agents/log/task-EX-1.log",
+        "-agents-list",
+        str(agents),
+    )
+
+    assert result.returncode == 3
+    assert "agent status mismatch: worker-a expect busy but got free" in result.stderr
 
 
 # TC-005
@@ -1172,9 +1460,9 @@ def test_dispatch_with_message_sends_talk_success(tmp_path: Path) -> None:
     state_dir = tmp_path / "state"
     config = tmp_path / "config.txt"
     talk_log = tmp_path / "log" / "talk.log"
-    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["worker-a-session"])
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["worker-c-session"])
     write_todo_file_current(todo)
-    write_agents_file(agents)
+    write_agents_file(agents, [agent_row("worker-a", "busy"), agent_row("worker-b", "busy"), agent_row("worker-c", "free")])
     config.write_text(
         "\n".join(
             [
@@ -1197,7 +1485,7 @@ def test_dispatch_with_message_sends_talk_success(tmp_path: Path) -> None:
         "-task_id",
         "EX-3",
         "-to",
-        "worker-a",
+        "worker-c",
         "-agents-list",
         str(agents),
         "-message",
@@ -1206,13 +1494,13 @@ def test_dispatch_with_message_sends_talk_success(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
-    assert "OK: dispatch EX-3 -> worker-a" in result.stdout
-    assert "OK: talk 神秘人 -> worker-a (worker-a-session)" in result.stdout
+    assert "OK: dispatch EX-3 -> worker-c" in result.stdout
+    assert "OK: talk 神秘人 -> worker-c (worker-c-session)" in result.stdout
     calls_text = calls_file.read_text(encoding="utf-8")
-    assert "你的名字叫做worker-a" in calls_text
-    assert calls_text.index("你的名字叫做worker-a") < calls_text.index("@神秘人向@worker-a发起会话: 请处理任务 EX-3，完成后回报。")
-    assert "send:worker-a-session:@神秘人向@worker-a发起会话: 请处理任务 EX-3，完成后回报。:" in calls_text
-    assert "@神秘人向@worker-a发起会话: 请处理任务 EX-3，完成后回报。" in talk_log.read_text(encoding="utf-8")
+    assert "你的名字叫做worker-c" in calls_text
+    assert calls_text.index("你的名字叫做worker-c") < calls_text.index("@神秘人向@worker-c发起会话: 请处理任务 EX-3，完成后回报。")
+    assert "send:worker-c-session:@神秘人向@worker-c发起会话: 请处理任务 EX-3，完成后回报。:" in calls_text
+    assert "@神秘人向@worker-c发起会话: 请处理任务 EX-3，完成后回报。" in talk_log.read_text(encoding="utf-8")
 
 
 # TC-017
@@ -1231,7 +1519,7 @@ def test_dispatch_with_message_failure_keeps_dispatch_result(tmp_path: Path) -> 
     config = tmp_path / "config.txt"
     write_fake_tmux(bin_dir, state_dir, sessions=[])
     write_todo_file_current(todo)
-    write_agents_file(agents)
+    write_agents_file(agents, [agent_row("worker-a", "busy"), agent_row("worker-b", "busy"), agent_row("worker-c", "free")])
     config.write_text("ROOT_NAME=神秘人\n", encoding="utf-8")
 
     env = os.environ.copy()
@@ -1246,7 +1534,7 @@ def test_dispatch_with_message_failure_keeps_dispatch_result(tmp_path: Path) -> 
         "-task_id",
         "EX-3",
         "-to",
-        "worker-a",
+        "worker-c",
         "-agents-list",
         str(agents),
         "-message",
@@ -1258,12 +1546,12 @@ def test_dispatch_with_message_failure_keeps_dispatch_result(tmp_path: Path) -> 
     list_rows = parse_section_rows(content, "## 任务列表")
 
     assert result.returncode == 3
-    assert "WARN: dispatch init failed for worker-a:" in result.stderr
-    assert "target session not found: worker-a-session" in result.stderr
+    assert "WARN: dispatch init failed for worker-c:" in result.stderr
+    assert "target session not found: worker-c-session" in result.stderr
     assert "dispatch succeeded but message delivery failed for task EX-3" in result.stderr
-    assert any(r[0] == "EX-3" and r[8] == "worker-a" and r[9] == "进行中" for r in running_rows)
+    assert any(r[0] == "EX-3" and r[8] == "worker-c" and r[9] == "进行中" for r in running_rows)
     assert not any(r[0] == "EX-3" for r in list_rows)
-    assert get_agent_status(agents, "worker-a") == "busy"
+    assert get_agent_status(agents, "worker-c") == "busy"
 
 
 # TC-018
@@ -1279,9 +1567,9 @@ def test_dispatch_runs_init_before_dispatch(tmp_path: Path) -> None:
     agents = tmp_path / "agents-lists.md"
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
-    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["worker-a-session"])
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["worker-c-session"])
     write_todo_file_current(todo)
-    write_agents_file(agents)
+    write_agents_file(agents, [agent_row("worker-a", "busy"), agent_row("worker-b", "busy"), agent_row("worker-c", "free")])
 
     env = os.environ.copy()
     env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
@@ -1294,26 +1582,26 @@ def test_dispatch_runs_init_before_dispatch(tmp_path: Path) -> None:
         "-task_id",
         "EX-3",
         "-to",
-        "worker-a",
+        "worker-c",
         "-agents-list",
         str(agents),
         env=env,
     )
 
     assert result.returncode == 0
-    assert "OK: dispatch EX-3 -> worker-a" in result.stdout
-    assert "OK: talk 神秘人 -> worker-a (worker-a-session)" in result.stdout
+    assert "OK: dispatch EX-3 -> worker-c" in result.stdout
+    assert "OK: talk 神秘人 -> worker-c (worker-c-session)" in result.stdout
     calls_text = calls_file.read_text(encoding="utf-8")
-    assert "你的名字叫做worker-a" in calls_text
+    assert "你的名字叫做worker-c" in calls_text
     expected_message = (
-        "@神秘人向@worker-a发起会话: 请处理任务 EX-3（删除 tmp/demo.txt）。"
+        "@神秘人向@worker-c发起会话: 请处理任务 EX-3（删除 tmp/demo.txt）。"
         "记录文件=./log/ex3.md；"
         f"完成后按 {REPO_ROOT}/agents/standard/任务记录约定.md 记录并回报管理员；"
         "流程不清楚请询问管理员；实现/架构问题请询问架构师。"
     )
     assert expected_message in calls_text
-    assert calls_text.index("你的名字叫做worker-a") < calls_text.index(expected_message)
-    assert get_agent_status(agents, "worker-a") == "busy"
+    assert calls_text.index("你的名字叫做worker-c") < calls_text.index(expected_message)
+    assert get_agent_status(agents, "worker-c") == "busy"
 
 
 # TC-046
@@ -1331,7 +1619,7 @@ def test_dispatch_without_message_talk_failure_is_warning(tmp_path: Path) -> Non
     state_dir = tmp_path / "state"
     write_fake_tmux(bin_dir, state_dir, sessions=[])
     write_todo_file_current(todo)
-    write_agents_file(agents)
+    write_agents_file(agents, [agent_row("worker-a", "busy"), agent_row("worker-b", "busy"), agent_row("worker-c", "free")])
 
     env = os.environ.copy()
     env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
@@ -1344,7 +1632,7 @@ def test_dispatch_without_message_talk_failure_is_warning(tmp_path: Path) -> Non
         "-task_id",
         "EX-3",
         "-to",
-        "worker-a",
+        "worker-c",
         "-agents-list",
         str(agents),
         env=env,
@@ -1354,11 +1642,11 @@ def test_dispatch_without_message_talk_failure_is_warning(tmp_path: Path) -> Non
     running_rows = parse_section_rows(content, "## 正在执行的任务")
     list_rows = parse_section_rows(content, "## 任务列表")
     assert result.returncode == 0
-    assert "OK: dispatch EX-3 -> worker-a" in result.stdout
+    assert "OK: dispatch EX-3 -> worker-c" in result.stdout
     assert "WARN: auto dispatch talk failed for task EX-3:" in result.stderr
-    assert any(r[0] == "EX-3" and r[8] == "worker-a" and r[9] == "进行中" for r in running_rows)
+    assert any(r[0] == "EX-3" and r[8] == "worker-c" and r[9] == "进行中" for r in running_rows)
     assert not any(r[0] == "EX-3" for r in list_rows)
-    assert get_agent_status(agents, "worker-a") == "busy"
+    assert get_agent_status(agents, "worker-c") == "busy"
 
 
 # TC-047
@@ -1374,9 +1662,10 @@ def test_dispatch_without_message_template_includes_worktree_and_plan(tmp_path: 
     agents = tmp_path / "agents-lists.md"
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
-    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["worker-a-session"])
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["worker-c-session"])
     write_todo_file_current(
         todo,
+        running_rows=[],
         list_rows=[
             row_list_typed(
                 "EX-3",
@@ -1392,7 +1681,7 @@ def test_dispatch_without_message_template_includes_worktree_and_plan(tmp_path: 
             )
         ],
     )
-    write_agents_file(agents)
+    write_agents_file(agents, [agent_row("worker-c", "free")])
 
     env = os.environ.copy()
     env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
@@ -1405,17 +1694,17 @@ def test_dispatch_without_message_template_includes_worktree_and_plan(tmp_path: 
         "-task_id",
         "EX-3",
         "-to",
-        "worker-a",
+        "worker-c",
         "-agents-list",
         str(agents),
         env=env,
     )
 
     assert result.returncode == 0
-    assert "OK: dispatch EX-3 -> worker-a" in result.stdout
+    assert "OK: dispatch EX-3 -> worker-c" in result.stdout
     calls_text = calls_file.read_text(encoding="utf-8")
     expected_message = (
-        "@神秘人向@worker-a发起会话: 请处理任务 EX-3（删除 tmp/demo.txt）。"
+        "@神秘人向@worker-c发起会话: 请处理任务 EX-3（删除 tmp/demo.txt）。"
         "worktree=/tmp/wt-ex3；计划书=ARCHITECTURE/plan/demo.md；记录文件=./log/ex3.md；"
         f"完成后按 {REPO_ROOT}/agents/standard/任务记录约定.md 记录并回报管理员；"
         "流程不清楚请询问管理员；实现/架构问题请询问架构师。"
@@ -1649,7 +1938,7 @@ def test_reassign_requires_agents_list(tmp_path: Path) -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
-# 测试目的: 验证 -reassign 目标角色为 busy 时返回 RC=3。
+# 测试目的: 验证 -reassign 目标角色已有进行中任务时返回 RC=3。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_reassign_rejects_busy_agent(tmp_path: Path) -> None:
@@ -1660,17 +1949,42 @@ def test_reassign_rejects_busy_agent(tmp_path: Path) -> None:
         running_rows=[
             row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "", "", "worker-a", "进行中", "xxx", "./log/ex1.md"),
             row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "", "", "worker-b", "进行中", "xxx", "./log/ex2.md"),
+            row_running("EX-9", "王维", "2026-03-08 16:25:00 +0800", ".", "已有占用", "", "", "worker-c", "进行中", "xxx", "./log/ex9.md"),
         ],
     )
-    write_agents_file(agents, [agent_row("worker-a", "busy"), agent_row("worker-b", "busy")])
+    write_agents_file(agents, [agent_row("worker-a", "busy"), agent_row("worker-b", "busy"), agent_row("worker-c", "busy")])
 
-    result = run_script("-file", str(todo), "-reassign", "-task_id", "EX-1", "-to", "worker-b", "-agents-list", str(agents))
+    result = run_script("-file", str(todo), "-reassign", "-task_id", "EX-1", "-to", "worker-c", "-agents-list", str(agents))
     content = todo.read_text(encoding="utf-8")
     running_rows = parse_section_rows(content, "## 正在执行的任务")
 
     assert result.returncode == 3
-    assert "agent is busy, cannot reassign: worker-b" in result.stderr
+    assert "agent is busy, cannot reassign: worker-c" in result.stderr
     assert any(r[0] == "EX-1" and r[8] == "worker-a" for r in running_rows)
+
+
+# TC-028AA
+# 创建者: Codex
+# 最后一次更改: Codex
+# 测试目的: 验证 -reassign 会拒绝把任务改派给已经拥有运行中任务的角色，即使名单状态是 stale free。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_reassign_rejects_assignee_with_existing_running_task_even_if_status_is_free(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(
+        todo,
+        running_rows=[
+            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "", "", "worker-a", "进行中", "xxx", "./log/ex1.md"),
+            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "", "", "worker-b", "进行中", "xxx", "./log/ex2.md"),
+        ],
+    )
+    write_agents_file(agents, [agent_row("worker-a", "free"), agent_row("worker-b", "free")])
+
+    result = run_script("-file", str(todo), "-reassign", "-task_id", "EX-2", "-to", "worker-a", "-agents-list", str(agents))
+
+    assert result.returncode == 3
+    assert "assignee already has running task: worker-a" in result.stderr
 
 
 # TC-028B
@@ -2339,7 +2653,7 @@ def test_dispatch_blocked_by_unresolved_dependency(tmp_path: Path) -> None:
             row_list("EX-3", "苏轼", "2026-03-08 16:30:00 +0800", "", "删除 tmp/demo.txt", "EX-1", "ARCHITECTURE/plan/p.md", "", "./log/ex3.md"),
         ],
     )
-    write_agents_file(agents)
+    write_agents_file(agents, [agent_row("worker-a", "busy"), agent_row("worker-b", "busy"), agent_row("worker-c", "free")])
 
     env = os.environ.copy()
     env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
@@ -2351,7 +2665,7 @@ def test_dispatch_blocked_by_unresolved_dependency(tmp_path: Path) -> None:
         "-task_id",
         "EX-3",
         "-to",
-        "worker-a",
+        "worker-c",
         "-agents-list",
         str(agents),
         env=env,
@@ -2362,7 +2676,7 @@ def test_dispatch_blocked_by_unresolved_dependency(tmp_path: Path) -> None:
 
     assert result.returncode == 3
     assert "task has unresolved dependency: EX-1" in result.stderr
-    assert not any(r[0] == "EX-3" and r[8] == "worker-a" for r in running_rows)
+    assert not any(r[0] == "EX-3" and r[8] == "worker-c" for r in running_rows)
     assert any(r[0] == "EX-3" for r in list_rows)
 
     write_todo_file(
@@ -2382,7 +2696,7 @@ def test_dispatch_blocked_by_unresolved_dependency(tmp_path: Path) -> None:
         "-task_id",
         "EX-3",
         "-to",
-        "worker-a",
+        "worker-c",
         "-agents-list",
         str(agents),
         env=env,
@@ -2396,14 +2710,21 @@ def test_dispatch_blocked_by_unresolved_dependency(tmp_path: Path) -> None:
 # 最后一次更改: 守护最好的爱莉希雅
 # 最近一次运行测试时间: 2026-04-08 15:30:00 +0800
 # 最近一次运行成功时间: 2026-04-08 15:30:00 +0800
-# 测试目的: 验证 -dispatch 指派给 busy 角色时返回 RC=3。
+# 测试目的: 验证 -dispatch 指派给已有进行中任务的角色时返回 RC=3。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_dispatch_rejects_busy_agent(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     agents = tmp_path / "agents-lists.md"
-    write_todo_file(todo)
-    write_agents_file(agents, rows=[agent_row("worker-a", "free"), agent_row("worker-b", "busy")])
+    write_todo_file(
+        todo,
+        running_rows=[
+            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "", "", "worker-a", "进行中", "xxx", "./log/ex1.md"),
+            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "", "", "worker-b", "进行中", "xxx", "./log/ex2.md"),
+            row_running("EX-9", "王维", "2026-03-08 16:25:00 +0800", ".", "已有占用", "", "", "worker-c", "进行中", "xxx", "./log/ex9.md"),
+        ],
+    )
+    write_agents_file(agents, rows=[agent_row("worker-a", "busy"), agent_row("worker-b", "busy"), agent_row("worker-c", "busy")])
 
     env = os.environ.copy()
     env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
@@ -2415,7 +2736,7 @@ def test_dispatch_rejects_busy_agent(tmp_path: Path) -> None:
         "-task_id",
         "EX-3",
         "-to",
-        "worker-b",
+        "worker-c",
         "-agents-list",
         str(agents),
         env=env,
@@ -2425,8 +2746,8 @@ def test_dispatch_rejects_busy_agent(tmp_path: Path) -> None:
     list_rows = parse_section_rows(content, "## 任务列表")
 
     assert result.returncode == 3
-    assert "agent is busy, cannot dispatch: worker-b" in result.stderr
-    assert not any(r[0] == "EX-3" and r[8] == "worker-b" for r in running_rows)
+    assert "agent is busy, cannot dispatch: worker-c" in result.stderr
+    assert not any(r[0] == "EX-3" and r[8] == "worker-c" for r in running_rows)
     assert any(r[0] == "EX-3" for r in list_rows)
 
 
@@ -2441,6 +2762,7 @@ def test_dispatch_rejects_merge_task_for_substitute(tmp_path: Path) -> None:
     agents = tmp_path / "agents-lists.md"
     write_todo_file_current(
         todo,
+        running_rows=[],
         list_rows=[
             row_list_typed(
                 "EX-3",
@@ -2502,6 +2824,7 @@ def test_dispatch_rejects_merge_task_for_non_merge_specialist(tmp_path: Path) ->
     agents = tmp_path / "agents-lists.md"
     write_todo_file_current(
         todo,
+        running_rows=[],
         list_rows=[
             row_list_typed(
                 "EX-3",
@@ -2563,6 +2886,7 @@ def test_dispatch_rejects_build_task_for_review_specialist(tmp_path: Path) -> No
     agents = tmp_path / "agents-lists.md"
     write_todo_file_current(
         todo,
+        running_rows=[],
         list_rows=[
             row_list_typed(
                 "EX-3",
@@ -2958,6 +3282,114 @@ def test_next_auto_starts_first_ready_task_from_task_list(tmp_path: Path) -> Non
     ) in calls_text
 
 
+# TC-051AA
+# 创建者: Codex
+# 最后一次更改: Codex
+# 测试目的: 验证 -next -auto 只更新旧接手人与新接手人状态，不会重置未触及角色。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_auto_updates_only_involved_agent_statuses(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["神秘人-session", "worker-d-session"])
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-1",
+                "李白",
+                "2026-03-08 16:10:00 +0800",
+                "/tmp/wt-ex1",
+                "已有审查任务",
+                "review",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-c",
+                "进行中",
+                "",
+                "./log/ex1.md",
+            ),
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "创建 test",
+                "build",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[
+            row_list_typed(
+                "EX-3",
+                "苏轼",
+                "2026-03-08 16:30:00 +0800",
+                "/tmp/wt-ex3",
+                "补齐审查",
+                "review",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "",
+                "./log/ex3.md",
+            ),
+        ],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-b", "busy", "实现 测试"),
+            agent_row_with_role("worker-c", "busy", "审查"),
+            agent_row_with_role("worker-d", "free", "审查", "worker-d-session"),
+            agent_row_with_role("worker-x", "busy", "实现 测试"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-b"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-type",
+        "review",
+        "-message",
+        "下一阶段：补齐边界用例",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    assert any(r[0] == "EX-1" and r[8] == "worker-c" for r in running_rows)
+    assert any(r[0] == "EX-3" and r[8] == "worker-d" for r in running_rows)
+    assert get_agent_status(agents, "worker-b") == "free"
+    assert get_agent_status(agents, "worker-c") == "busy"
+    assert get_agent_status(agents, "worker-d") == "busy"
+    assert get_agent_status(agents, "worker-x") == "busy"
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert "向@worker-c发起会话" not in calls_text
+    assert "向@worker-d发起会话" in calls_text
+
+
 # TC-051B
 # 创建者: OpenAI
 # 最后一次更改: Codex
@@ -3257,6 +3689,20 @@ def test_next_auto_build_falls_back_to_substitute(tmp_path: Path) -> None:
     write_todo_file_current(
         todo,
         running_rows=[
+            row_running_typed(
+                "EX-1",
+                "李白",
+                "2026-03-08 16:10:00 +0800",
+                "/tmp/wt-ex1",
+                "已有 build 任务",
+                "build",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-c",
+                "进行中",
+                "",
+                "./log/ex1.md",
+            ),
             row_running_typed(
                 "EX-2",
                 "杜甫",

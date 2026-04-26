@@ -5,7 +5,7 @@
 
 使用示例:
 - #include "include/npu_demo/cost/Core.h"
-- npu_demo::cost::CostKind kind = npu_demo::cost::CostKind::Memory;
+- npu_demo::cost::CostKind kind = npu_demo::memory;
 
 创建者: 金铲铲大作战
 最后修改人: 金铲铲大作战

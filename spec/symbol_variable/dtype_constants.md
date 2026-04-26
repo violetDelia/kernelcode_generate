@@ -4,6 +4,14 @@
 
 定义 `NumericType` 的常用 dtype 集合常量与 arithmetic promotion 顺序常量，供 `operation` 与 `dialect` 模块共享使用，避免重复定义。
 
+## API 列表
+
+- `FLOAT_DTYPES`
+- `ARITHMETIC_DTYPE_ORDER`
+- `ARITHMETIC_DTYPE_RANK`
+- `INT_DTYPES`
+- `NN_FLOAT_DTYPES`
+
 ## 文档信息
 
 - 创建者：`睡觉小分队`

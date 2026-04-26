@@ -2,12 +2,13 @@
 """codex-multi-agents-task-core.py.
 
 创建者: OpenAI
-最后一次更改: 金铲铲大作战
+最后一次更改: Codex
 
 功能说明:
 - 处理 `codex-multi-agents-task.sh` 的核心数据逻辑。
 - 负责解析与写回 `TODO.md`、`DONE.md`、`agents-lists.md`。
 - 负责任务状态流转、计划书统计、角色权限与自动续接候选判定。
+- 仅按命令影响的角色增量维护 `busy/free`，并拒绝同一角色同时持有多条进行中任务。
 
 使用示例:
 - `python3 skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py status-plan-list ./TODO.md "" "" "" "" "" "" "" "" "" "" "" "" "" "" 8 0`
@@ -432,6 +433,142 @@ def count_doing_tasks(exec_rows: list[list[str]], assignee: str) -> int:
     return count
 
 
+def collect_doing_task_counts(exec_rows: list[list[str]]) -> dict[str, int]:
+    """汇总每个角色的进行中任务数量。
+
+    创建者: OpenAI
+    最后一次更改: Codex
+
+    功能说明:
+    - 只统计 `状态=进行中` 且 `指派` 非空的运行中任务。
+    - 供角色状态重算与“一人同一时刻仅一个任务”约束复用。
+
+    使用示例:
+    - counts = collect_doing_task_counts(exec_rows)
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+    counts: dict[str, int] = {}
+    for row in exec_rows:
+        assignee = row[8].strip()
+        status = row[9].strip()
+        if not assignee or status != "进行中":
+            continue
+        counts[assignee] = counts.get(assignee, 0) + 1
+    return counts
+
+
+def ensure_single_active_task_per_assignee(exec_rows: list[list[str]]) -> None:
+    """校验运行表中每个角色同一时刻至多一条进行中任务。
+
+    创建者: OpenAI
+    最后一次更改: Codex
+
+    功能说明:
+    - 若同一角色在运行表中出现多条 `状态=进行中` 任务，则直接报错。
+    - 避免脚本继续在脏状态基础上分发、改派或自动续接。
+
+    使用示例:
+    - ensure_single_active_task_per_assignee(exec_rows)
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+    duplicated = sorted((name for name, count in collect_doing_task_counts(exec_rows).items() if count > 1))
+    if duplicated:
+        fail(RC_DATA, f"assignee has multiple running tasks: {', '.join(duplicated)}")
+
+
+def expected_agent_status_from_exec_rows(exec_rows: list[list[str]], assignee: str) -> str:
+    """根据运行表计算单个角色应有的 busy/free 状态。
+
+    创建者: OpenAI
+    最后一次更改: Codex
+
+    功能说明:
+    - 只统计 `状态=进行中` 的任务。
+    - 返回单个角色在当前运行表下应呈现的 `busy/free`。
+
+    使用示例:
+    - status = expected_agent_status_from_exec_rows(exec_rows, "worker-a")
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+    return "busy" if count_doing_tasks(exec_rows, assignee) > 0 else "free"
+
+
+def ensure_agent_status_matches_exec_rows(
+    exec_rows: list[list[str]],
+    agents_rows: list[list[str]],
+    agents_table: dict,
+    assignee: str,
+) -> int:
+    """校验单个角色在 agents 表中的状态与运行表一致。
+
+    创建者: OpenAI
+    最后一次更改: Codex
+
+    功能说明:
+    - 只校验被当前命令直接读写的角色，不重算整张名单。
+    - 若名单状态与运行表中该角色的实际占用不一致，则直接报错。
+
+    使用示例:
+    - ensure_agent_status_matches_exec_rows(exec_rows, agents_rows, agents_table, "worker-a")
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+    ensure_single_active_task_per_assignee(exec_rows)
+    assignee_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
+    if assignee_idx < 0:
+        fail(RC_DATA, f"agent not found in agents list: {assignee}")
+    expected = expected_agent_status_from_exec_rows(exec_rows, assignee)
+    actual = agents_rows[assignee_idx][agents_table["status_idx"]].strip().lower()
+    if actual != expected:
+        fail(RC_DATA, f"agent status mismatch: {assignee} expect {expected} but got {actual or 'empty'}")
+    return assignee_idx
+
+
+def update_agent_status_from_exec_rows(
+    exec_rows: list[list[str]],
+    agents_rows: list[list[str]],
+    agents_table: dict,
+    assignee: str,
+) -> int:
+    """仅更新单个角色的名单状态，避免整表重算。
+
+    创建者: OpenAI
+    最后一次更改: Codex
+
+    功能说明:
+    - 只更新命令直接影响到的角色。
+    - `进行中` 任务存在时写为 `busy`，否则写为 `free`。
+
+    使用示例:
+    - update_agent_status_from_exec_rows(exec_rows, agents_rows, agents_table, "worker-a")
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+    assignee_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
+    if assignee_idx < 0:
+        fail(RC_DATA, f"agent not found in agents list: {assignee}")
+    agents_rows[assignee_idx][agents_table["status_idx"]] = expected_agent_status_from_exec_rows(exec_rows, assignee)
+    return assignee_idx
+
+
 def parse_dependencies(raw: str) -> list[str]:
     text = raw.strip()
     if not text or text.lower() == "none":
@@ -812,6 +949,7 @@ def build_auto_random() -> random.Random:
 
 def pick_next_auto_assignee(
     row: list[str],
+    exec_rows: list[list[str]],
     agents_rows: list[list[str]],
     agents_table: dict,
     operator_name: str,
@@ -828,7 +966,7 @@ def pick_next_auto_assignee(
     - 候选集合顺序由 agents-lists.md 决定。
 
     使用示例:
-    - assignee = pick_next_auto_assignee(row, agents_rows, agents_table, operator_name)
+    - assignee = pick_next_auto_assignee(row, exec_rows, agents_rows, agents_table, operator_name)
 
     关联文件:
     - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -845,6 +983,8 @@ def pick_next_auto_assignee(
     for candidate_row in agents_rows:
         name = candidate_row[agents_table["name_idx"]].strip()
         if not name:
+            continue
+        if count_doing_tasks(exec_rows, name) > 0:
             continue
         candidate_idx = is_agent_eligible_for_auto(name, agents_rows, agents_table)
         if candidate_idx < 0:
@@ -932,7 +1072,7 @@ def pick_ready_task_auto_dispatch(
             continue
         if not dependencies_resolved_for_row(row, exec_rows, list_rows):
             continue
-        picked = pick_next_auto_assignee(row, agents_rows, agents_table, operator_name, rng)
+        picked = pick_next_auto_assignee(row, exec_rows, agents_rows, agents_table, operator_name, rng)
         if picked is None:
             continue
         assignee, agent_idx = picked
@@ -1117,13 +1257,7 @@ def parse_max_parallel(raw: str) -> int:
 
 
 def count_active_assignees(exec_rows: list[list[str]]) -> int:
-    active: set[str] = set()
-    for row in exec_rows:
-        assignee = row[8].strip()
-        status = row[9].strip()
-        if assignee and status == "进行中":
-            active.add(assignee)
-    return len(active)
+    return len(collect_doing_task_counts(exec_rows))
 
 
 def generate_task_id(info: str, to: str, existing_ids: set[str]) -> str:
@@ -1168,6 +1302,7 @@ def main() -> int:
     list_rows = [r[:] for r in list_table["rows"]]
     plan_rows = [r[:] for r in plan_table["rows"]]
     validate_unique_task_ids(exec_rows, list_rows)
+    ensure_single_active_task_per_assignee(exec_rows)
     idx = 0
     while idx < len(plan_rows):
         before_len = len(plan_rows)
@@ -1181,6 +1316,7 @@ def main() -> int:
     agents_table = None
     agents_rows = None
     message_lines: list[str] = []
+    touched_agent_names: set[str] = set()
 
     if op in {"dispatch", "done", "pause", "continue", "reassign", "next"}:
         agents_lines, agents_table = parse_agents_table(agents_file)
@@ -1239,6 +1375,8 @@ def main() -> int:
         )
         if agents_rows[agent_idx][agents_table["status_idx"]].strip().lower() == "busy":
             fail(RC_DATA, f"agent is busy, cannot dispatch: {assignee}")
+        if count_doing_tasks(exec_rows, assignee) > 0:
+            fail(RC_DATA, f"assignee already has running task: {assignee}")
         active_assignees = count_active_assignees(exec_rows)
         if active_assignees >= max_parallel:
             fail(RC_DATA, f"parallel assignee limit reached: {active_assignees}/{max_parallel}")
@@ -1270,7 +1408,8 @@ def main() -> int:
                 record_file,
             ]
         )
-        agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
+        update_agent_status_from_exec_rows(exec_rows, agents_rows, agents_table, assignee)
+        touched_agent_names.add(assignee)
         message_lines.append(f"OK: dispatch {task_id} -> {assignee}")
         message_lines.append(f"OK: replace {assignee} 状态")
 
@@ -1327,21 +1466,18 @@ def main() -> int:
         if assignee:
             assert agents_table is not None
             assert agents_rows is not None
-            agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
-            if agent_idx < 0:
-                fail(RC_DATA, f"agent not found in agents list: {assignee}")
+            ensure_agent_status_matches_exec_rows(exec_rows + [row], agents_rows, agents_table, assignee)
         done_lines, done_table = parse_done_table(done_file)
         done_rows = [r[:] for r in done_table["rows"]]
         finished_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
         done_rows.append([row[0], row[4], assignee, "已完成", finished_at, log_file, ""])
         done_lines = replace_table(done_lines, done_table, done_rows, keep_original_head=False)
+        if assignee:
+            update_agent_status_from_exec_rows(exec_rows, agents_rows, agents_table, assignee)
+            touched_agent_names.add(assignee)
         message_lines.append(f"OK: done {task_id}")
         if assignee:
-            if count_doing_tasks(exec_rows, assignee) == 0:
-                agents_rows[agent_idx][agents_table["status_idx"]] = "free"
-                message_lines.append(f"OK: replace {assignee} 状态")
-            else:
-                agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
+            message_lines.append(f"OK: replace {assignee} 状态")
 
     elif op == "pause":
         idx = find_row_index(exec_rows, task_id)
@@ -1352,17 +1488,14 @@ def main() -> int:
         if assignee:
             assert agents_table is not None
             assert agents_rows is not None
-            agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
-            if agent_idx < 0:
-                fail(RC_DATA, f"agent not found in agents list: {assignee}")
+            ensure_agent_status_matches_exec_rows(exec_rows, agents_rows, agents_table, assignee)
         exec_rows[idx][9] = "暂停"
+        if assignee:
+            update_agent_status_from_exec_rows(exec_rows, agents_rows, agents_table, assignee)
+            touched_agent_names.add(assignee)
         message_lines.append(f"OK: pause {task_id}")
         if assignee:
-            if count_doing_tasks(exec_rows, assignee) == 0:
-                agents_rows[agent_idx][agents_table["status_idx"]] = "free"
-                message_lines.append(f"OK: replace {assignee} 状态")
-            else:
-                agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
+            message_lines.append(f"OK: replace {assignee} 状态")
 
     elif op == "continue":
         idx = find_row_index(exec_rows, task_id)
@@ -1376,14 +1509,16 @@ def main() -> int:
         if assignee:
             assert agents_table is not None
             assert agents_rows is not None
-            agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
-            if agent_idx < 0:
-                fail(RC_DATA, f"agent not found in agents list: {assignee}")
+            ensure_agent_status_matches_exec_rows(exec_rows, agents_rows, agents_table, assignee)
+            if count_doing_tasks(exec_rows, assignee) > 0:
+                fail(RC_DATA, f"assignee already has running task: {assignee}")
 
         exec_rows[idx][9] = "进行中"
+        if assignee:
+            update_agent_status_from_exec_rows(exec_rows, agents_rows, agents_table, assignee)
+            touched_agent_names.add(assignee)
         message_lines.append(f"OK: continue {task_id}")
         if assignee:
-            agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
             message_lines.append(f"OK: replace {assignee} 状态")
 
     elif op == "reassign":
@@ -1409,15 +1544,20 @@ def main() -> int:
         )
         if agents_rows[new_idx][agents_table["status_idx"]].strip().lower() == "busy":
             fail(RC_DATA, f"agent is busy, cannot reassign: {new_assignee}")
+        if count_doing_tasks(exec_rows, new_assignee) > 0:
+            fail(RC_DATA, f"assignee already has running task: {new_assignee}")
 
         old_assignee = exec_rows[idx][8].strip()
         old_idx = None
         if old_assignee:
-            old_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], old_assignee)
-            if old_idx < 0:
-                fail(RC_DATA, f"agent not found in agents list: {old_assignee}")
+            old_idx = ensure_agent_status_matches_exec_rows(exec_rows, agents_rows, agents_table, old_assignee)
 
         exec_rows[idx][8] = new_assignee
+        if old_assignee:
+            update_agent_status_from_exec_rows(exec_rows, agents_rows, agents_table, old_assignee)
+            touched_agent_names.add(old_assignee)
+        update_agent_status_from_exec_rows(exec_rows, agents_rows, agents_table, new_assignee)
+        touched_agent_names.add(new_assignee)
         message_lines.append(f"OK: reassign {task_id} -> {new_assignee}")
         message_lines.append(f"__REASSIGN__={old_assignee}|{new_assignee}")
 
@@ -1426,8 +1566,6 @@ def main() -> int:
         def update_agent(name: str, row_idx: int | None) -> None:
             if not name or row_idx is None or name in updated:
                 return
-            status = "busy" if count_doing_tasks(exec_rows, name) > 0 else "free"
-            agents_rows[row_idx][agents_table["status_idx"]] = status
             message_lines.append(f"OK: replace {name} 状态")
             updated.add(name)
 
@@ -1450,6 +1588,10 @@ def main() -> int:
 
         assert agents_table is not None
         assert agents_rows is not None
+        if assignee:
+            ensure_agent_status_matches_exec_rows(exec_rows + [row], agents_rows, agents_table, assignee)
+            update_agent_status_from_exec_rows(exec_rows, agents_rows, agents_table, assignee)
+            touched_agent_names.add(assignee)
 
         manual_assignee = to.strip()
         if manual_assignee:
@@ -1472,21 +1614,12 @@ def main() -> int:
                 agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
                 if agent_idx < 0:
                     fail(RC_DATA, f"agent not found in agents list: {assignee}")
-                if count_doing_tasks(exec_rows, assignee) == 0:
-                    agents_rows[agent_idx][agents_table["status_idx"]] = "free"
-                else:
-                    agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
                 message_lines.append(f"OK: replace {assignee} 状态")
 
-            candidate_is_current_without_other_task = (
-                manual_assignee == assignee
-                and count_doing_tasks(exec_rows, manual_assignee) == 0
-            )
-            if (
-                not candidate_is_current_without_other_task
-                and agents_rows[candidate_agent_idx][agents_table["status_idx"]].strip().lower() == "busy"
-            ):
+            if agents_rows[candidate_agent_idx][agents_table["status_idx"]].strip().lower() == "busy":
                 fail(RC_DATA, f"agent is busy, cannot next to: {manual_assignee}")
+            if count_doing_tasks(exec_rows, manual_assignee) > 0:
+                fail(RC_DATA, f"assignee already has running task: {manual_assignee}")
             if count_active_assignees(exec_rows) >= max_parallel:
                 fail(RC_DATA, f"parallel assignee limit reached: {count_active_assignees(exec_rows)}/{max_parallel}")
 
@@ -1506,7 +1639,8 @@ def main() -> int:
                     next_list_row[9],
                 ]
             )
-            agents_rows[candidate_agent_idx][agents_table["status_idx"]] = "busy"
+            update_agent_status_from_exec_rows(exec_rows, agents_rows, agents_table, manual_assignee)
+            touched_agent_names.add(manual_assignee)
             message_lines.append(f"OK: next-dispatch {task_id} -> {manual_assignee}")
             message_lines.append(f"OK: replace {manual_assignee} 状态")
             message_lines.append(f"__AUTO_NEXT__=dispatch|{task_id}|{manual_assignee}")
@@ -1515,13 +1649,6 @@ def main() -> int:
             list_rows.append(next_list_row)
 
             if assignee:
-                agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
-                if agent_idx < 0:
-                    fail(RC_DATA, f"agent not found in agents list: {assignee}")
-                if count_doing_tasks(exec_rows, assignee) == 0:
-                    agents_rows[agent_idx][agents_table["status_idx"]] = "free"
-                else:
-                    agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
                 message_lines.append(f"OK: replace {assignee} 状态")
 
         if not manual_assignee:
@@ -1538,6 +1665,7 @@ def main() -> int:
                 message_lines.append("__AUTO_NEXT__=none")
             else:
                 for started_task_id, started_assignee in started_tasks:
+                    touched_agent_names.add(started_assignee)
                     message_lines.append(f"OK: auto-dispatch {started_task_id} -> {started_assignee}")
                     message_lines.append(f"OK: replace {started_assignee} 状态")
                     message_lines.append(f"__AUTO_NEXT__=dispatch|{started_task_id}|{started_assignee}")
@@ -1608,6 +1736,8 @@ def main() -> int:
         write_atomic(done_file, done_lines)
 
     if agents_lines is not None and agents_table is not None and agents_rows is not None:
+        for name in sorted(touched_agent_names):
+            ensure_agent_status_matches_exec_rows(exec_rows, agents_rows, agents_table, name)
         agents_lines = replace_table(agents_lines, agents_table, agents_rows, keep_original_head=True)
         write_atomic(agents_file, agents_lines)
 

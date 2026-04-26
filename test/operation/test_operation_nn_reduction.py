@@ -1,7 +1,7 @@
 """nn reduction family tests.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 `kernel_gen.operation.nn` 的 family 级测试布局。
@@ -10,7 +10,7 @@
 - pytest -q test/operation/test_operation_nn_reduction.py
 
 关联文件:
-- 功能实现: kernel_gen/operation/nn.py
+- 功能实现: kernel_gen/operation/nn/__init__.py
 - Spec 文档: spec/operation/nn.md
 - 测试文件: test/operation/test_operation_nn_reduction.py
 """
@@ -21,52 +21,17 @@ import sys
 from pathlib import Path
 
 import pytest
-import kernel_gen.operation as operation_api
-import kernel_gen.operation.nn as operation_nn
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.operation.nn import (
-    _AddStrideDim,
-    _broadcast_memory_pair,
-    _infer_broadcast_shape,
-    _merge_broadcast_dim,
-    _resolve_add_dtype,
-    add,
-    broadcast,
-    broadcast_to,
-    conv,
-    eq,
-    exp,
-    fc,
-    floordiv,
-    ge,
-    gt,
-    hard_sigmoid,
-    img2col1d,
-    img2col2d,
-    leaky_relu,
-    le,
-    lt,
-    matmul,
-    mul,
-    ne,
-    relu,
     reduce_max,
     reduce_min,
     reduce_sum,
-    sigmoid,
-    softmax,
-    sub,
-    tanh,
-    transpose,
-    truediv,
 )
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
-from kernel_gen.symbol_variable.symbol_dim import SymbolDim
-from kernel_gen.symbol_variable.symbol_shape import SymbolList, SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 
@@ -77,7 +42,7 @@ from kernel_gen.symbol_variable.type import Farmat, NumericType
 # 最近一次运行成功时间: 2026-03-30 02:24:00 +0800
 # 测试目的: 验证 reduce_sum 的 axis=None/int/Sequence[int] 路径与输出 shape 推导。
 # 使用示例: pytest -q test/operation/test_operation_nn_reduction.py -k test_nn_reduce_sum_shape_contract
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_reduction.py
 def test_nn_reduce_sum_shape_contract() -> None:
@@ -112,7 +77,7 @@ def test_nn_reduce_sum_shape_contract() -> None:
 # 最近一次运行成功时间: 2026-03-30 02:24:00 +0800
 # 测试目的: 验证 reduce_sum 的 axis/keepdim 边界与异常路径。
 # 使用示例: pytest -q test/operation/test_operation_nn_reduction.py -k test_nn_reduce_sum_axis_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_reduction.py
 def test_nn_reduce_sum_axis_error() -> None:
@@ -141,7 +106,7 @@ def test_nn_reduce_sum_axis_error() -> None:
 # 最近一次运行成功时间: 2026-03-30 02:24:00 +0800
 # 测试目的: 验证 reduce_min/reduce_max 的 keepdim 规则与输出元信息口径。
 # 使用示例: pytest -q test/operation/test_operation_nn_reduction.py -k test_nn_reduce_min_max_keepdim_contract
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_reduction.py
 def test_nn_reduce_min_max_keepdim_contract() -> None:
@@ -169,7 +134,7 @@ def test_nn_reduce_min_max_keepdim_contract() -> None:
 # 最近一次运行成功时间: 2026-03-30 02:24:00 +0800
 # 测试目的: 验证 reduce_min/reduce_max 在静态空归约域时报错。
 # 使用示例: pytest -q test/operation/test_operation_nn_reduction.py -k test_nn_reduce_min_max_empty_extent_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_reduction.py
 def test_nn_reduce_min_max_empty_extent_error() -> None:
@@ -179,14 +144,3 @@ def test_nn_reduce_min_max_empty_extent_error() -> None:
         _ = reduce_min(empty_axis, axis=0)
     with pytest.raises(ValueError):
         _ = reduce_max(empty_axis, axis=None)
-
-
-# OP-TP-001
-# 创建者: jcc你莫辜负
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-05 16:19:19 +0800
-# 最近一次运行成功时间: 2026-04-05 16:19:19 +0800
-# 测试目的: 验证 transpose 正例可按 perm 重排 shape/stride 并保留 dtype/space/format。
-# 使用示例: pytest -q test/operation/test_operation_nn_reduction.py -k test_nn_transpose_success
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
-# 对应 spec 文件路径: spec/operation/nn.md

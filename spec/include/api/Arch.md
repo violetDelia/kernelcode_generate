@@ -2,12 +2,26 @@
 
 ## 功能简介
 
-定义 include/api 层统一对外的架构/运行时 API 头文件规范（`include/api/Arch.h`），收口 `launch<block, thread, subthread, shared_memory_size>(callee, args...)` 的公开源码形态、`BarrierVisibility`/`BarrierScope` 枚举，以及后端 `KernelContext::thread_id()`、`KernelContext::thread_num()`、`KernelContext::barrier(visibility, scope)`、`KernelContext::get_dynamic_memory<Space, T>()` 必须遵守的命名与参数合同。
+定义 include/api 层统一对外的架构/运行时 API 头文件规范（`include/api/Arch.h`），收口 `launch<block, thread, subthread, shared_memory_size>(callee, args...)` 的公开源码形态、`BarrierVisibility`/`BarrierScope` 枚举，以及后端 `KernelContext::thread_id()`、`KernelContext::thread_num()`、`KernelContext::barrier(visibility, scope)`、`KernelContext::get_dynamic_memory<Space, T>()` 与 free helper `thread_id()`、`thread_num()`、`get_dynamic_memory<Space>()` 必须遵守的命名与参数合同。
 
 - `launch<block, thread, subthread, shared_memory_size>(callee, args...)`：公开 launch 入口，`callee` 必须是函数对象，不能是字符串。
 - `BarrierVisibility`：公开可见域枚举，固定成员为 `TSM` 与 `TLM`；其中 `TLM` 表示聚合可见域，覆盖 `TLM1/TLM2/TLM3`。
 - `BarrierScope`：公开同步范围枚举，稳定成员为 `BLOCK`、`THREAD`、`SUBTHREAD`、`GLOBAL`。
 - `barrier(visibility, scope)`：公开同步接口名，`visibility` 与 `scope` 必填；不得退化为无参 barrier。
+
+## API 列表
+
+- `enum class BarrierVisibility { TSM, TLM }`
+- `enum class BarrierScope { BLOCK, THREAD, SUBTHREAD, GLOBAL }`
+- `template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args> Status launch(Callable&& callee, Args&&... args)`
+- `class KernelContext`
+- `KernelContext::thread_id() const -> long long`
+- `KernelContext::thread_num() const -> long long`
+- `KernelContext::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const -> void`
+- `template <MemorySpace Space, typename T> KernelContext::get_dynamic_memory() const -> Memory<Space, T>`
+- `thread_id() -> S_INT`
+- `thread_num() -> S_INT`
+- `template <MemorySpace Space> get_dynamic_memory() -> DynamicMemoryRef<Space>`
 
 ## 文档信息
 
@@ -43,7 +57,8 @@
 - `barrier(visibility, scope)` 的 `visibility` 元素类型必须是 `BarrierVisibility`；不得改成 `MemorySpace` 列表、字符串列表、自由文本或后端私有空间枚举。
 - `BarrierScope` 公开成员允许后端实现做能力裁剪；若某后端暂不支持某个 scope，必须显式失败，不得静默降级为其他 scope。
 - include/api 层不定义具体 `KernelContext` 的存储布局、生命周期、默认构造、线程绑定或注入方式；这些职责由后端私有 include 承接。
-- `KernelContext::thread_id()` / `KernelContext::thread_num()` / `KernelContext::barrier(...)` / `KernelContext::get_dynamic_memory<Space, T>()` 是 include/api 层公开承诺的最小接口面；后端可以补实现细节，但不得改名、改参数面或改成 target 私有别名。
+- `KernelContext::thread_id()` / `KernelContext::thread_num()` / `KernelContext::barrier(...)` / `KernelContext::get_dynamic_memory<Space, T>()` 是 include/api 层公开承诺的最小运行时接口面；后端可以补实现细节，但不得改名、改参数面或改成 target 私有别名。
+- `thread_id()` / `thread_num()` / `get_dynamic_memory<Space>()` 是公开代码生成口径；后端必须保证它们可在已绑定 launch 上下文时直接调用。
 
 ## 公开接口
 
@@ -149,7 +164,7 @@ Status status = launch<1, 4, 1, 0>(add_barrier_body, lhs, rhs, out);
 功能说明：
 
 - 定义后端 launched body 中可见的最小运行时上下文接口面。
-- include/api 层只冻结 `KernelContext::thread_id()`、`KernelContext::thread_num()`、`KernelContext::barrier(visibility, scope)`、`KernelContext::get_dynamic_memory<Space, T>()` 这些名称、参数面与最小返回语义。
+- include/api 层只冻结 `KernelContext::*` 运行时方法与 `thread_id()` / `thread_num()` / `get_dynamic_memory<Space>()` free helper 这些名称、参数面与最小返回语义。
 
 参数说明：
 
@@ -162,6 +177,9 @@ long long tid = ctx.thread_id();
 long long tnum = ctx.thread_num();
 ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
 auto tsm = ctx.get_dynamic_memory<TSM, float>();
+S_INT tid2 = thread_id();
+S_INT tnum2 = thread_num();
+Memory<TSM, float> tsm2 = get_dynamic_memory<TSM>();
 ```
 
 注意事项：
@@ -197,6 +215,34 @@ long long tnum = ctx.thread_num();
 
 - `KernelContext::thread_id()` 与 `KernelContext::thread_num()` 的公开语义是“当前 launch 的运行时值”，不是 target registry 常量，也不是编译期模板值的文本替身。
 - include/api 不规定具体整数实现类型，只要求源码层维持稳定方法名与返回整型语义。
+
+### `thread_id()` / `thread_num()`
+
+功能说明：
+
+- 返回当前 launch 运行时视图中的线程索引与线程总数，作为公开 free helper 供生成代码直接调用。
+
+参数说明：
+
+- 无参数。
+
+使用示例：
+
+```cpp
+S_INT tid = thread_id();
+S_INT tnum = thread_num();
+```
+
+注意事项：
+
+- `thread_id()` / `thread_num()` 的公开语义与 `KernelContext::thread_id()` / `KernelContext::thread_num()` 一致，都表示当前 launch 的运行时值。
+- 这组 free helper 的职责是隐藏活动上下文绑定细节；公开生成代码不得再硬编码 `ctx.` 前缀。
+
+返回与限制：
+
+- 返回类型：`S_INT`。
+- 返回语义：分别表示当前线程索引与当前 launch 的线程总数。
+- 限制条件：后端必须保证在已有活动 launch 上下文时可直接调用。
 
 返回与限制：
 
@@ -258,13 +304,35 @@ auto tsm = ctx.get_dynamic_memory<TSM, float>();
 
 - `get_dynamic_memory<Space, T>()` 是 `KernelContext` 的公开成员模板，不得回退为自由函数或把 `Space` 改成运行时位置参数。
 - include/api 只定义接口与最小语义；具体哪些 `Space` 合法、容量多少、失败条件如何表达，由 include/npu_demo 等后端私有层进一步收口。
-- 返回值必须保持 `Memory<Space, T>` 语义，不得改成裸指针或 target 私有 buffer 类型作为公开合同。
+
+### `get_dynamic_memory<Space>()`
+
+功能说明：
+
+- 返回指定片上空间的动态内存视图代理，作为公开 free helper 供生成代码直接调用。
+
+参数说明：
+
+- `Space`：目标片上空间模板参数。
+
+使用示例：
+
+```cpp
+Memory<TSM, float> tsm = get_dynamic_memory<TSM>();
+```
+
+注意事项：
+
+- 该 free helper 的公开语义与 `KernelContext::get_dynamic_memory<Space, T>()` 一致，但生成代码不再显式写 `ctx.`。
+- 元素类型不再作为 free helper 模板参数显式传入，而是由赋值目标的 `Memory<Space, T>` 类型在转换阶段确定。
+- 后端必须负责将 free helper 绑定到当前活动 launch 上下文。
 
 返回与限制：
 
-- 返回类型：`Memory<Space, T>`。
-- 返回语义：返回当前 launch 上下文可见的目标动态内存视图。
-- 限制条件：具体容量、布局和非法空间处理由后端私有 spec 收口，不在 include/api 层写死。
+- 返回类型：可转换为 `Memory<Space, T>` 的公开代理对象。
+- 返回语义：当前活动 launch 上下文中对应片上空间的动态内存视图。
+- 限制条件：具体哪些 `Space` 合法、容量多少、失败条件如何表达，仍由后端私有层进一步收口。
+- 返回值必须保持 `Memory<Space, T>` 语义，不得改成裸指针或 target 私有 buffer 类型作为公开合同。
 
 ## 测试
 

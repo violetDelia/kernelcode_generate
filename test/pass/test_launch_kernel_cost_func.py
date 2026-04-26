@@ -38,11 +38,9 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolIterType, SymbolValueType
+from kernel_gen.passes.common import PassContractError
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
-from kernel_gen.passes.tuning.launch_kernel_cost_func import (
-    LaunchKernelCostFuncError,
-    LaunchKernelCostFuncPass,
-)
+from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
 
 
 @irdl_op_definition
@@ -437,7 +435,7 @@ def test_launch_kernel_cost_func_shared_callee_once() -> None:
 )
 def test_launch_kernel_cost_func_rejects_invalid_cost_kind(cost_kind: str) -> None:
     with pytest.raises(
-        LaunchKernelCostFuncError,
+        PassContractError,
         match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
     ):
         LaunchKernelCostFuncPass(cost_kind=cost_kind)
@@ -457,7 +455,7 @@ def test_launch_kernel_cost_func_rejects_invalid_cost_kind_via_registry() -> Non
     load_builtin_passes()
 
     with pytest.raises(
-        LaunchKernelCostFuncError,
+        PassContractError,
         match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
     ):
         build_registered_pass("launch-kernel-cost-func", {"cost_kind": "memory|latency|memory"})
@@ -477,7 +475,7 @@ def test_launch_kernel_cost_func_rejects_metadata_attr_conflict() -> None:
     module = _build_launch_kernel_module(conflict_attr=True)
 
     with pytest.raises(
-        LaunchKernelCostFuncError,
+        PassContractError,
         match=r"reserved attr 'cost_kind'$",
     ):
         LaunchKernelCostFuncPass(cost_kind="compute").run(module)
@@ -497,7 +495,7 @@ def test_launch_kernel_cost_func_rejects_missing_callee() -> None:
     module = _build_launch_kernel_module(missing_callee=True)
 
     with pytest.raises(
-        LaunchKernelCostFuncError,
+        PassContractError,
         match=r"arch\.launch callee 'missing_kernel' not found",
     ):
         LaunchKernelCostFuncPass(cost_kind="compute").run(module)
@@ -517,7 +515,7 @@ def test_launch_kernel_cost_func_rejects_unsupported_op() -> None:
     module = _build_launch_kernel_module(unsupported_op=True)
 
     with pytest.raises(
-        LaunchKernelCostFuncError,
+        PassContractError,
         match=r"unsupported op 'test\.unsupported' in device function '_device_kernel'",
     ):
         LaunchKernelCostFuncPass(cost_kind="compute").run(module)
@@ -537,7 +535,7 @@ def test_launch_kernel_cost_func_rejects_existing_cost_func() -> None:
     module = _build_launch_kernel_module(preexisting_cost_func=True)
 
     with pytest.raises(
-        LaunchKernelCostFuncError,
+        PassContractError,
         match=r"cost function '_cost_compute__device_kernel' already exists",
     ):
         LaunchKernelCostFuncPass(cost_kind="compute").run(module)

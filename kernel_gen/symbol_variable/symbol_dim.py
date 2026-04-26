@@ -181,6 +181,92 @@ class _SymbolDim:
         return formatted
 
     @staticmethod
+    def _format_public_value_expr(expr: sp.Basic) -> str:
+        """格式化公开值表达式，优先保留 `/` 与 `//` 语义文本。
+
+        创建者: OpenAI Codex
+        最后一次更改: OpenAI Codex
+
+        功能说明:
+        - 对真除法链保留 `/` 文本与原始分母顺序。
+        - 对由 `sp.floor(...)` 表达的整除链统一格式化为 `//`。
+        - 其他表达式退回 `_format_public_expr(...)` 的最小必要括号规则。
+
+        使用示例:
+        - _SymbolDim._format_public_value_expr(sp.floor(sp.Symbol("N") / 2))
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        if expr.is_number:
+            return str(sp.simplify(expr))
+        if expr.is_Add:
+            terms = expr.as_ordered_terms()
+            formatted_terms: list[str] = []
+            for index, term in enumerate(terms):
+                if term.could_extract_minus_sign():
+                    text = _SymbolDim._format_public_value_expr(-term)
+                    formatted_terms.append(f"- {text}" if index > 0 else f"-{text}")
+                else:
+                    text = _SymbolDim._format_public_value_expr(term)
+                    formatted_terms.append(f"+ {text}" if index > 0 else text)
+            return " ".join(formatted_terms)
+        if expr.is_Mul and not _SymbolDim._is_truediv_expr(expr):
+            coeff, factors = expr.as_coeff_mul()
+            formatted_factors: list[str] = []
+            if coeff == -1:
+                prefix = "-"
+            elif coeff != 1:
+                prefix = f"{coeff}*"
+            else:
+                prefix = ""
+            for factor in factors:
+                factor_text = _SymbolDim._format_public_value_expr(factor)
+                if factor.is_Add:
+                    factor_text = f"({factor_text})"
+                formatted_factors.append(factor_text)
+            if not formatted_factors:
+                return str(coeff)
+            joined = "*".join(formatted_factors)
+            return f"{prefix}{joined}" if prefix else joined
+        if _SymbolDim._is_truediv_expr(expr):
+            split_expr = _SymbolDim._split_truediv_expr(expr)
+            if split_expr is not None:
+                numerator, denominator_factors = split_expr
+                numerator_text = _SymbolDim._format_public_value_expr(numerator)
+                denominator_parts = [
+                    _SymbolDim._format_public_value_expr(factor)
+                    for factor in denominator_factors
+                    if sp.simplify(factor) != 1
+                ]
+                if not denominator_parts:
+                    return numerator_text
+                if len(denominator_parts) == 1:
+                    return f"{numerator_text}/{denominator_parts[0]}"
+                return f"{numerator_text}/({'*'.join(denominator_parts)})"
+        if expr.func == sp.floor and len(expr.args) == 1:
+            floor_arg = expr.args[0]
+            split_expr = _SymbolDim._split_truediv_expr(floor_arg)
+            if split_expr is not None:
+                numerator, denominator_factors = split_expr
+                numerator_text = _SymbolDim._format_public_value_expr(numerator)
+                if any(token in numerator_text for token in (" // ", "/", " + ", " - ")):
+                    numerator_text = f"({numerator_text})"
+                denominator_parts = [
+                    _SymbolDim._format_public_value_expr(factor)
+                    for factor in denominator_factors
+                    if sp.simplify(factor) != 1
+                ]
+                if not denominator_parts:
+                    return numerator_text
+                if len(denominator_parts) == 1:
+                    return f"{numerator_text} // {denominator_parts[0]}"
+                return f"{numerator_text} // ({'*'.join(denominator_parts)})"
+        return _SymbolDim._format_public_expr(expr)
+
+    @staticmethod
     def _public_value(expr: sp.Basic) -> int | float | str | sp.Basic:
         """生成稳定的公开比较值。
 
@@ -206,24 +292,8 @@ class _SymbolDim:
                 return int(simplified)
             return float(simplified)
 
-        if expr.free_symbols and _SymbolDim._is_truediv_expr(expr):
-            split_expr = _SymbolDim._split_truediv_expr(expr)
-            if split_expr is not None:
-                numerator, denominator_factors = split_expr
-                numerator_text = _SymbolDim._format_public_expr(numerator)
-                denominator_parts = [
-                    _SymbolDim._format_public_expr(factor)
-                    for factor in denominator_factors
-                    if sp.simplify(factor) != 1
-                ]
-                if not denominator_parts:
-                    return numerator_text
-                if len(denominator_parts) == 1:
-                    return f"{numerator_text}/{denominator_parts[0]}"
-                return f"{numerator_text}/({'*'.join(denominator_parts)})"
-
         if expr.free_symbols:
-            return str(simplified)
+            return _SymbolDim._format_public_value_expr(expr)
         return simplified
 
     @staticmethod
@@ -395,6 +465,92 @@ class _SymbolDim:
             type_error_prefix="Unsupported operand type",
         )
 
+    @staticmethod
+    def _quotient_expr(numerator: sp.Basic, denominator: sp.Basic) -> sp.Basic:
+        """构造保留顺序的除法表达式。
+
+        创建者: OpenAI Codex
+        最后一次更改: OpenAI Codex
+
+        功能说明:
+        - 统一使用 `Mul(..., Pow(..., -1, evaluate=False))` 保存除法链顺序。
+        - 供真除法与整除共用，避免重复定义除法底层结构。
+
+        使用示例:
+        - _SymbolDim._quotient_expr(sp.Symbol("N"), sp.Integer(2))
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        return sp.Mul(numerator, sp.Pow(denominator, -1, evaluate=False), evaluate=False)
+
+    def _binary_symbol_op(
+        self,
+        other: int | str | sp.Basic | "_SymbolDim",
+        operator,
+        *,
+        reverse: bool = False,
+    ) -> "SymbolDim":
+        """统一执行二元符号算术。
+
+        创建者: OpenAI Codex
+        最后一次更改: OpenAI Codex
+
+        功能说明:
+        - 统一处理正向与反向的加减乘路径。
+        - 先规整操作数，再按传入 operator 组装最终 sympy 表达式。
+
+        使用示例:
+        - SymbolDim("N")._binary_symbol_op(2, lambda lhs, rhs: lhs + rhs)
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        lhs = self._normalize_operand(other) if reverse else self.get_symbol()
+        rhs = self.get_symbol() if reverse else self._normalize_operand(other)
+        return SymbolDim(operator(lhs, rhs))
+
+    def _quotient(
+        self,
+        other: int | str | sp.Basic | "_SymbolDim",
+        *,
+        reverse: bool = False,
+        floordiv: bool = False,
+    ) -> "SymbolDim":
+        """统一执行真除法与整除。
+
+        创建者: OpenAI Codex
+        最后一次更改: OpenAI Codex
+
+        功能说明:
+        - 共用同一套操作数规整、顺序保留与最小必要简化逻辑。
+        - 静态整除直接返回整数结果；动态整除继续保留 `floor(...)` 结构。
+
+        使用示例:
+        - SymbolDim("N")._quotient(2)
+        - SymbolDim("N")._quotient(2, floordiv=True)
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        lhs = self._normalize_operand(other) if reverse else self.get_symbol()
+        rhs = self.get_symbol() if reverse else self._normalize_operand(other)
+        if floordiv and not lhs.free_symbols and not rhs.free_symbols:
+            return SymbolDim(sp.Integer(int(sp.simplify(lhs)) // int(sp.simplify(rhs))))
+
+        expr = self._quotient_expr(lhs, rhs)
+        expr = sp.floor(expr) if floordiv else expr
+        simplified = sp.simplify(expr)
+        if self._should_use_simplified_quotient(expr, simplified):
+            return SymbolDim(simplified)
+        return SymbolDim(expr)
+
     def get_symbol(self) -> sp.Basic:
         """获取内部 sympy 表达式。
 
@@ -454,6 +610,26 @@ class _SymbolDim:
         """
         return str(self.get_symbol())
 
+    def __str__(self) -> str:
+        """返回符号维度的公开字符串表示。
+
+        创建者: OpenAI Codex
+        最后一次更改: OpenAI Codex
+
+        功能说明:
+        - 复用 `get_value()` 的公开口径输出字符串。
+        - 对外统一保留 `/` 与 `//` 文本，不暴露 `floor(...)` 形式。
+
+        使用示例:
+        - str(SymbolDim("N") // 2)
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        return str(self.get_value())
+
     def __add__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度加法。
 
@@ -471,7 +647,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        return SymbolDim(self.get_symbol() + self._normalize_operand(other))
+        return self._binary_symbol_op(other, lambda lhs, rhs: lhs + rhs)
 
     def __radd__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向加法。
@@ -490,7 +666,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        return SymbolDim(self._normalize_operand(other) + self.get_symbol())
+        return self._binary_symbol_op(other, lambda lhs, rhs: lhs + rhs, reverse=True)
 
     def __sub__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度减法。
@@ -509,7 +685,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        return SymbolDim(self.get_symbol() - self._normalize_operand(other))
+        return self._binary_symbol_op(other, lambda lhs, rhs: lhs - rhs)
 
     def __rsub__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向减法。
@@ -528,7 +704,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        return SymbolDim(self._normalize_operand(other) - self.get_symbol())
+        return self._binary_symbol_op(other, lambda lhs, rhs: lhs - rhs, reverse=True)
 
     def __mul__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度乘法。
@@ -547,7 +723,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        return SymbolDim(self.get_symbol() * self._normalize_operand(other))
+        return self._binary_symbol_op(other, lambda lhs, rhs: lhs * rhs)
 
     def __rmul__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向乘法。
@@ -566,7 +742,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        return SymbolDim(self._normalize_operand(other) * self.get_symbol())
+        return self._binary_symbol_op(other, lambda lhs, rhs: lhs * rhs, reverse=True)
 
     def __truediv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度除法。
@@ -585,12 +761,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        other_sym = self._normalize_operand(other)
-        expr = sp.Mul(self.get_symbol(), sp.Pow(other_sym, -1, evaluate=False), evaluate=False)
-        simplified = sp.simplify(expr)
-        if self._should_use_simplified_quotient(expr, simplified):
-            return SymbolDim(simplified)
-        return SymbolDim(expr)
+        return self._quotient(other)
 
     def __rtruediv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向除法。
@@ -609,12 +780,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        other_sym = self._normalize_operand(other)
-        expr = sp.Mul(other_sym, sp.Pow(self.get_symbol(), -1, evaluate=False), evaluate=False)
-        simplified = sp.simplify(expr)
-        if self._should_use_simplified_quotient(expr, simplified):
-            return SymbolDim(simplified)
-        return SymbolDim(expr)
+        return self._quotient(other, reverse=True)
 
     def __floordiv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度整除。
@@ -633,15 +799,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        other_sym = self._normalize_operand(other)
-        if not self.get_symbol().free_symbols and not other_sym.free_symbols:
-            return SymbolDim(sp.Integer(int(sp.simplify(self.get_symbol())) // int(sp.simplify(other_sym))))
-        expr = sp.Mul(self.get_symbol(), sp.Pow(other_sym, -1, evaluate=False), evaluate=False)
-        floored = sp.floor(expr)
-        simplified = sp.simplify(floored)
-        if self._should_use_simplified_quotient(floored, simplified):
-            return SymbolDim(simplified)
-        return SymbolDim(floored)
+        return self._quotient(other, floordiv=True)
 
     def __rfloordiv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向整除。
@@ -660,15 +818,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        other_sym = self._normalize_operand(other)
-        if not self.get_symbol().free_symbols and not other_sym.free_symbols:
-            return SymbolDim(sp.Integer(int(sp.simplify(other_sym)) // int(sp.simplify(self.get_symbol()))))
-        expr = sp.Mul(other_sym, sp.Pow(self.get_symbol(), -1, evaluate=False), evaluate=False)
-        floored = sp.floor(expr)
-        simplified = sp.simplify(floored)
-        if self._should_use_simplified_quotient(floored, simplified):
-            return SymbolDim(simplified)
-        return SymbolDim(floored)
+        return self._quotient(other, reverse=True, floordiv=True)
 
     def __eq__(self, other: object) -> bool:
         """比较符号维度表达式等价性。

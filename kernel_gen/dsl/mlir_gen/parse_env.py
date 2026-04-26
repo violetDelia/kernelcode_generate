@@ -4,8 +4,8 @@
 最后一次更改: 朽木露琪亚
 
 功能说明:
-- 负责 runtime_args、globals 与 builtins 的解析环境拼装。
-- 提供解析函数 AST 的统一入口与错误包装。
+    - 负责 runtime_args、globals 与 builtins 的解析环境拼装。
+    - 提供基于 AST parser 公共 API 的统一入口。
 
 使用示例:
 - globals_table, builtins_table = _build_parse_environment(fn, globals_table=None, builtins_table=None)
@@ -22,7 +22,8 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 
-from kernel_gen.dsl.ast import AstParseError, Diagnostic, FunctionAST, _ParseFailure
+from kernel_gen.dsl.ast import AstParseError, FunctionAST
+from kernel_gen.dsl.ast.parser import parse_function_with_env as ast_parse_function_with_env
 
 
 def _build_parse_environment(
@@ -111,8 +112,8 @@ def _parse_function_with_env(
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 包装 `_parse_function_impl`，将 `_ParseFailure` 统一转换为 `AstParseError`。
-    - 解析实现由 `kernel_gen.dsl.mlir_gen._parse_function_impl` 提供，便于测试覆写。
+    - 复用 `kernel_gen.dsl.ast.parser.parse_function_with_env(...)` 解析函数 AST。
+    - 保持 `mlir_gen` 侧环境拼装逻辑与 AST 解析逻辑分离。
 
     使用示例:
     - func_ast = _parse_function_with_env(fn, globals_table, builtins_table, runtime_table, config=None)
@@ -122,19 +123,10 @@ def _parse_function_with_env(
     - test: [test/dsl/mlir_gen/test_parse_env.py](test/dsl/mlir_gen/test_parse_env.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/parse_env.py](kernel_gen/dsl/mlir_gen/parse_env.py)
     """
-
-    from kernel_gen.dsl import mlir_gen as mlir_gen_module
-    from kernel_gen.dsl.ast import _parse_function_impl as fallback_parse
-
-    parse_impl = getattr(mlir_gen_module, "_parse_function_impl", fallback_parse)
-    try:
-        return parse_impl(
-            fn,
-            globals_table=globals_table,
-            builtins_table=builtins_table,
-            runtime_table=runtime_table,
-            config=config,
-        )
-    except _ParseFailure as exc:
-        diagnostics = [Diagnostic(exc.message, location=exc.location)]
-        raise AstParseError(exc.message, diagnostics) from exc
+    return ast_parse_function_with_env(
+        fn,
+        globals_table=globals_table,
+        builtins_table=builtins_table,
+        runtime_table=runtime_table,
+        config=config,
+    )

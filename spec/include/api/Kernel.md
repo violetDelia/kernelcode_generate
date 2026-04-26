@@ -8,6 +8,26 @@
 - 统一源码口径采用 `out-first`，并固定模板参数顺序为“先 space、后 type；多 space 时按 operand 顺序展开”。
 - 对 `target=npu_demo`，生成源码必须收口为 `npu_demo::<helper><...>(out, ...)` 的稳定调用形态。
 
+## API 列表
+
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::add(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::sub(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::le(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::gt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::exp(Memory<Space, OutType>& out, const Memory<Space, InType>& input)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::select(Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_sum(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- `template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType> Status npu_demo::matmul(Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs)`
+- `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col1d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right)`
+- `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col2d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`
+
 ## 文档信息
 
 - 创建者：`朽木露琪亚`
@@ -15,7 +35,7 @@
 - `spec`：[`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md)
 - `统一头文件`：[`include/api/Kernel.h`](../../../include/api/Kernel.h)
 - `功能实现`：[`include/api/Kernel.h`](../../../include/api/Kernel.h)、[`include/npu_demo/Kernel.h`](../../../include/npu_demo/Kernel.h)
-- `test`：[`test/include/api/test_kernel.py`](../../../test/include/api/test_kernel.py)、[`test/dsl/test_emit_c.py`](../../../test/dsl/test_emit_c.py)、[`test/dsl/test_gen_kernel.py`](../../../test/dsl/test_gen_kernel.py)
+- `test`：[`test/include/api/test_kernel.py`](../../../test/include/api/test_kernel.py)、[`test/dsl/gen_kernel/emit/test_emit.py`](../../../test/dsl/gen_kernel/emit/test_emit.py)、[`test/dsl/gen_kernel/test_gen_kernel.py`](../../../test/dsl/gen_kernel/test_gen_kernel.py)
 
 ## 依赖
 
@@ -23,8 +43,8 @@
 - [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：统一 `Memory<Space, T>` / `MemorySpace` / `MemoryFormat` 语义。
 - [`spec/include/api/cost/Kernel.md`](../../../spec/include/api/cost/Kernel.md)：定义与当前 Kernel helper 一一对应的成本 helper 合同。
 - [`spec/dialect/kernel.md`](../../../spec/dialect/kernel.md)：`kernel.*` IR 到公开 helper 名的职责映射来源。
-- [`spec/dsl/emit_c.md`](../../../spec/dsl/emit_c.md)：冻结 `target=npu_demo` 下 `kernel.* -> npu_demo::<helper>` 的节点级文本合同。
-- [`spec/dsl/gen_kernel.md`](../../../spec/dsl/gen_kernel.md)：冻结 `target=npu_demo` 下函数级源码只消费本文件定义的公共 helper。
+- [`spec/dsl/gen_kernel/emit.md`](../../../spec/dsl/gen_kernel/emit.md)：冻结 `target=npu_demo` 下 `kernel.* -> npu_demo::<helper>` 的节点级文本合同。
+- [`spec/dsl/gen_kernel/gen_kernel.md`](../../../spec/dsl/gen_kernel/gen_kernel.md)：冻结 `target=npu_demo` 下函数级源码只消费本文件定义的公共 helper。
 
 ## 目标
 
@@ -309,12 +329,12 @@ Status st2 = npu_demo::img2col2d<GM, TSM, float, float>(out, input, 3, 2, 1, 2, 
 - 执行命令：`pytest -q test/include/api/test_kernel.py`
 - 测试目标：锁定 `include/api/Kernel.h` 的 helper 集合、模板顺序、参数顺序与删除 `Nn` 公开层后的唯一入口语义。
 
-- 测试文件：[`test/dsl/test_emit_c.py`](../../../test/dsl/test_emit_c.py)
-- 执行命令：`pytest -q test/dsl/test_emit_c.py`
+- 测试文件：[`test/dsl/gen_kernel/emit/test_emit.py`](../../../test/dsl/gen_kernel/emit/test_emit.py)
+- 执行命令：`pytest -q test/dsl/gen_kernel/emit/test_emit.py`
 - 测试目标：锁定 `target=npu_demo` 时 `kernel.*` 节点发射到 `npu_demo::<helper><...>(out, ...)` 的文本合同。
 
-- 测试文件：[`test/dsl/test_gen_kernel.py`](../../../test/dsl/test_gen_kernel.py)
-- 执行命令：`pytest -q test/dsl/test_gen_kernel.py`
+- 测试文件：[`test/dsl/gen_kernel/test_gen_kernel.py`](../../../test/dsl/gen_kernel/test_gen_kernel.py)
+- 执行命令：`pytest -q test/dsl/gen_kernel/test_gen_kernel.py`
 - 测试目标：锁定 `gen_kernel(target=npu_demo)` 只消费 `Kernel` 公共接口，不再依赖公开 `Nn` 层。
 
 - 功能与用例清单：

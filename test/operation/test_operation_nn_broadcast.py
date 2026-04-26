@@ -1,7 +1,7 @@
 """nn broadcast family tests.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 `kernel_gen.operation.nn` 的 family 级测试布局。
@@ -10,7 +10,7 @@
 - pytest -q test/operation/test_operation_nn_broadcast.py
 
 关联文件:
-- 功能实现: kernel_gen/operation/nn.py
+- 功能实现: kernel_gen/operation/nn/__init__.py
 - Spec 文档: spec/operation/nn.md
 - 测试文件: test/operation/test_operation_nn_broadcast.py
 """
@@ -21,52 +21,22 @@ import sys
 from pathlib import Path
 
 import pytest
-import kernel_gen.operation as operation_api
-import kernel_gen.operation.nn as operation_nn
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.operation.nn import (
-    _AddStrideDim,
     _broadcast_memory_pair,
     _infer_broadcast_shape,
     _merge_broadcast_dim,
-    _resolve_add_dtype,
     add,
     broadcast,
     broadcast_to,
-    conv,
     eq,
-    exp,
-    fc,
-    floordiv,
-    ge,
-    gt,
-    hard_sigmoid,
-    img2col1d,
-    img2col2d,
-    leaky_relu,
-    le,
-    lt,
-    matmul,
-    mul,
-    ne,
-    relu,
-    reduce_max,
-    reduce_min,
-    reduce_sum,
-    sigmoid,
-    softmax,
-    sub,
-    tanh,
-    transpose,
-    truediv,
 )
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
-from kernel_gen.symbol_variable.symbol_dim import SymbolDim
-from kernel_gen.symbol_variable.symbol_shape import SymbolList, SymbolShape
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 
@@ -77,7 +47,7 @@ from kernel_gen.symbol_variable.type import Farmat, NumericType
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证 broadcast/broadcast_to 可扩张 singleton dim 且结果对齐 target。
 # 使用示例: pytest -q test/operation/test_operation_nn_broadcast.py -k test_nn_broadcast_success
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_broadcast.py
 def test_nn_broadcast_success() -> None:
@@ -105,7 +75,7 @@ def test_nn_broadcast_success() -> None:
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证 broadcast 可插入前置维并对齐 target 描述。
 # 使用示例: pytest -q test/operation/test_operation_nn_broadcast.py -k test_nn_broadcast_prepend_dimension
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_broadcast.py
 def test_nn_broadcast_prepend_dimension() -> None:
@@ -124,7 +94,7 @@ def test_nn_broadcast_prepend_dimension() -> None:
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证非 singleton 维度不兼容时报错。
 # 使用示例: pytest -q test/operation/test_operation_nn_broadcast.py -k test_nn_broadcast_dimension_mismatch
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_broadcast.py
 def test_nn_broadcast_dimension_mismatch() -> None:
@@ -140,7 +110,7 @@ def test_nn_broadcast_dimension_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证目标 rank 更小时报错。
 # 使用示例: pytest -q test/operation/test_operation_nn_broadcast.py -k test_nn_broadcast_rank_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_broadcast.py
 def test_nn_broadcast_rank_error() -> None:
@@ -156,7 +126,7 @@ def test_nn_broadcast_rank_error() -> None:
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证非 Memory 输入触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn_broadcast.py -k test_nn_broadcast_non_memory_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_broadcast.py
 def test_nn_broadcast_non_memory_error() -> None:
@@ -171,7 +141,7 @@ def test_nn_broadcast_non_memory_error() -> None:
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证非 Memory target 触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn_broadcast.py -k test_nn_broadcast_target_type_error
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_broadcast.py
 def test_nn_broadcast_target_type_error() -> None:
@@ -187,7 +157,7 @@ def test_nn_broadcast_target_type_error() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证逐元素算术支持 singleton dim 隐式 broadcast。
 # 使用示例: pytest -q test/operation/test_operation_nn_broadcast.py -k test_nn_add_implicit_broadcast_singleton
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_broadcast.py
 def test_nn_add_implicit_broadcast_singleton() -> None:
@@ -226,7 +196,7 @@ def test_nn_add_implicit_broadcast_singleton() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证逐元素算术支持前置维隐式 broadcast。
 # 使用示例: pytest -q test/operation/test_operation_nn_broadcast.py -k test_nn_add_implicit_broadcast_prepend_dimension
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_broadcast.py
 def test_nn_add_implicit_broadcast_prepend_dimension() -> None:
@@ -245,7 +215,7 @@ def test_nn_add_implicit_broadcast_prepend_dimension() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证比较运算复用隐式 broadcast 规则。
 # 使用示例: pytest -q test/operation/test_operation_nn_broadcast.py -k test_nn_compare_implicit_broadcast
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_broadcast.py
 def test_nn_compare_implicit_broadcast() -> None:
@@ -263,7 +233,7 @@ def test_nn_compare_implicit_broadcast() -> None:
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
 # 测试目的: 验证不兼容维度仍报错。
 # 使用示例: pytest -q test/operation/test_operation_nn_broadcast.py -k test_nn_add_implicit_broadcast_mismatch
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_broadcast.py
 def test_nn_add_implicit_broadcast_mismatch() -> None:
@@ -273,14 +243,3 @@ def test_nn_add_implicit_broadcast_mismatch() -> None:
         _ = add(lhs, rhs)
     with pytest.raises(ValueError):
         _infer_broadcast_shape(SymbolShape(["A", "B"]), SymbolShape(["A", "C"]))
-
-
-# OP-FC-001
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-27 09:39:01 +0800
-# 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
-# 测试目的: 验证 fc 在无 bias 场景下保留批维并输出默认布局。
-# 使用示例: pytest -q test/operation/test_operation_nn_broadcast.py -k test_nn_fc_without_bias
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
-# 对应 spec 文件路径: spec/operation/nn.md

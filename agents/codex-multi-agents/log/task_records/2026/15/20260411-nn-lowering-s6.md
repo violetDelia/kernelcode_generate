@@ -4,7 +4,7 @@
 任务目标：删除旧 nn_to_kernel 命名，并收口 nn_lowering 总回归规范
 改动：
 - 删除 spec/pass/lowering/nn_to_kernel.md
-- 更新 spec/pass/lowering/nn_lowering.md，补齐 exp/reduce/softmax/matmul/img2col lowering 规则与测试清单，替换旧名称与错误短语
+- 更新 spec/pass/lowering/nn_lowering/spec.md，补齐 exp/reduce/softmax/matmul/img2col lowering 规则与测试清单，替换旧名称与错误短语
 - 更新 pass/pipeline/pass_manager/dma_memory_hierarchy/tile/decompass/README 等 spec 引用为 nn_lowering 与 NnLoweringPass
 - 更新 spec/dialect/kernel.md、spec/dsl/gen_kernel.md、spec/dsl/emit_mlir.md、spec/dsl/emit_c.md、spec/tools/ircheck.md、spec/operation/nn.md 中的旧命名引用
 验证：未执行命令，原因：spec 阶段仅更新文档
@@ -35,9 +35,9 @@
 任务：T-20260411-bee543b6
 任务目标：审查 S6 旧命名清理与 nn_lowering 总回归收口
 改动：
-- 复核 spec/pass/lowering/nn_lowering.md、spec/dialect/kernel.md 与 nn_lowering 实现/测试一致性，检查旧命名清理状态与 expectation 目录清单。
+- 复核 spec/pass/lowering/nn_lowering/spec.md、spec/dialect/kernel.md 与 nn_lowering 实现/测试一致性，检查旧命名清理状态与 expectation 目录清单。
 - 复测 expectation 脚本时，触发 ModuleNotFoundError 与 PassRegistryError，定位到 pass registry 仍导入 nn_to_kernel 导致脚本失败。
-- 发现 spec/pass/lowering/nn_lowering.md 列出的 test/pass/nn_lowering/exp.py 等测试文件不存在，仅保留 public_name.py 与 test_lowering_nn_lowering.py，且测试侧未覆盖 kernel.binary_elewise / kernel.reduce 断言。
+- 发现 spec/pass/lowering/nn_lowering/spec.md 列出的 test/pass/nn_lowering/exp.py 等测试文件不存在，仅保留 public_name.py 与 test_lowering_nn_lowering.py，且测试侧未覆盖 kernel.binary_elewise / kernel.reduce 断言。
 验证：
 - SYMPY_GMPY=0 PYTHONPATH=. pytest -q test/pass/nn_lowering -> 38 passed
 - find expectation/pass/lowing/nn_lowering -name '*.py' | sort -> 已执行
@@ -49,7 +49,7 @@
 
 问题列表：
 1) 文件：kernel_gen/passes/registry.py；现象：load_builtin_passes 仍导入 nn_to_kernel，导致 expectation 脚本触发 ModuleNotFoundError 且后续 case 抛 PassRegistryError；风险：expectation 无法执行，回归链路中断；建议：改为导入 NnLoweringPass 并保证 load_builtin_passes 可重复调用；优先级：P1。
-2) 文件：spec/pass/lowering/nn_lowering.md 与 test/pass/nn_lowering/*；现象：spec 列出的 exp/reduce/softmax/matmul/img2col 测试文件在目录内不存在，测试侧无 kernel.binary_elewise / kernel.reduce 断言；风险：spec 与测试映射不一致，无法证明合同达成；建议：补齐对应测试文件或调整 spec/test 映射清单；优先级：P1。
+2) 文件：spec/pass/lowering/nn_lowering/spec.md 与 test/pass/nn_lowering/*；现象：spec 列出的 exp/reduce/softmax/matmul/img2col 测试文件在目录内不存在，测试侧无 kernel.binary_elewise / kernel.reduce 断言；风险：spec 与测试映射不一致，无法证明合同达成；建议：补齐对应测试文件或调整 spec/test 映射清单；优先级：P1。
 3) 文件：expectation/pass/lowing/nn_lowering/broadcast.py 等；现象：关联文件仍指向已删除的 test/pass/test_lowering_nn_to_kernel.py；风险：注释与实际不一致，接手成本上升；建议：更新关联文件链接；优先级：P2。
 
 漏洞排查结果：
@@ -84,17 +84,17 @@
 经办人：不要啊教练
 任务：T-20260411-bee543b6
 任务目标：复核 registry 切换到 NnLoweringPass 与 test/pass/nn_lowering 收口
-改动：核对 kernel_gen/passes/registry.py 已使用 NnLoweringPass 注册；核对 spec/pass/lowering/nn_lowering.md 与 test/pass/nn_lowering 目录一致性。
+改动：核对 kernel_gen/passes/registry.py 已使用 NnLoweringPass 注册；核对 spec/pass/lowering/nn_lowering/spec.md 与 test/pass/nn_lowering 目录一致性。
 验证：PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/pass/nn_lowering -> 38 passed
 结论：需修改；spec/test 映射与 lowering 口径仍不一致。
 
 问题列表：
-1) 文件/接口：spec/pass/lowering/nn_lowering.md vs test/pass/nn_lowering/*
+1) 文件/接口：spec/pass/lowering/nn_lowering/spec.md vs test/pass/nn_lowering/*
    现象：spec 列出 exp/reduce_sum/reduce_min/reduce_max/softmax/matmul/img2col1d/img2col2d 等测试文件，但目录仅有 public_name.py 与 test_lowering_nn_lowering.py。
    风险：spec 与测试映射断裂，无法证明列出的合同已被对应测试固定。
    建议：更新 spec 测试清单与执行命令，改为指向现有测试文件，或拆分测试文件与 spec 列表保持一致。
    优先级：P1
-2) 文件/接口：spec/pass/lowering/nn_lowering.md vs kernel_gen/passes/lowering/nn_lowering/nn_lowering.py / test/pass/nn_lowering/test_lowering_nn_lowering.py
+2) 文件/接口：spec/pass/lowering/nn_lowering/spec.md vs kernel_gen/passes/lowering/nn_lowering/nn_lowering.py / test/pass/nn_lowering/test_lowering_nn_lowering.py
    现象：spec 声明 `kernel.binary_elewise` 与 `kernel.reduce` 合同已就绪并应在测试中验证，但当前 lowering 与测试仍使用 KernelAddOp/KernelDivOp/KernelReduceMinOp 等具名 op，未见对 `kernel.binary_elewise` 与 `kernel.reduce` 的覆盖证据。
    风险：公开合同与实现/测试口径不一致，后续变更易引入行为偏差。
    建议：统一口径：要么改 spec 说明与测试目标为当前具名 op；要么补齐 `kernel.binary_elewise` / `kernel.reduce` 的实现与测试。
@@ -118,7 +118,7 @@
 改动：
 - kernel_gen/passes/lowering/nn_lowering/nn_lowering.py：binary lowering 改为 kernel.binary_elewise(kind=...)；reduce family 改为 kernel.reduce(kind=...) 并支持 nn.reduce_sum/min/max；更新相关说明与最后一次更改。
 - test/pass/nn_lowering/test_lowering_nn_lowering.py：binary/compare 断言改为 kernel.binary_elewise(kind=...)；新增 reduce_sum/reduce_max 用例并对齐 kernel.reduce(kind=...)；更新测试说明与最后一次更改。
-- spec/pass/lowering/nn_lowering.md：修正测试清单与执行命令，明确 kernel.binary_elewise/kernel.reduce 的 lowering 目标与测试映射。
+- spec/pass/lowering/nn_lowering/spec.md：修正测试清单与执行命令，明确 kernel.binary_elewise/kernel.reduce 的 lowering 目标与测试映射。
 验证：
 - pytest -q test/pass/nn_lowering -> 40 passed
 结论：build 已完成，建议进入 review。

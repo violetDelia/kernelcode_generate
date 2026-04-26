@@ -6,6 +6,12 @@
 - 只收录 `kernel_gen` 内纯转发 / 薄包装文件。
 - 该清单用于解释为什么某些文件不进入 line / branch 阈值统计。
 
+## API 列表
+
+- `coverage omit 清单`
+- `选择标准`
+- `排除边界`
+
 ## 文档信息
 
 - 创建者：`金铲铲大作战`
@@ -44,7 +50,7 @@
 - `kernel_gen/__init__.py` 不在 omit 清单内，因为它包含惰性导出分发逻辑。
 - `kernel_gen/dialect/__init__.py` 不在 omit 清单内，因为它包含惰性导入与缓存逻辑。
 - `kernel_gen/dsl/gen_kernel/__init__.py` 不在 omit 清单内，因为它包含兼容包装与发射分发逻辑。
-- `kernel_gen/dsl/gen_kernel/emit_c/__init__.py` 不在 omit 清单内，因为它包含注册、副作用与旧实现回退逻辑。
+- `kernel_gen/dsl/gen_kernel/emit/__init__.py` 不在 omit 清单内，因为它包含 target 分发、兼容路径与公开发射逻辑。
 - `kernel_gen/passes/lowering/__init__.py` 不在 omit 清单内，因为它包含兼容 alias 与 `sys.modules` 注册。
 - `kernel_gen/dsl/mlir_gen/emit/__init__.py` 不在 omit 清单内，因为它包含 `memory_type_from_memory` 的函数实现。
 
