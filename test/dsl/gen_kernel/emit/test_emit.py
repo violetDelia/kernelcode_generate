@@ -64,8 +64,6 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 emit_c_package = importlib.import_module("kernel_gen.dsl.gen_kernel.emit")
 emit_c_register = importlib.import_module("kernel_gen.dsl.gen_kernel.emit.register")
-kernel_emitter_module = importlib.import_module("kernel_gen.dsl.gen_kernel.kernel_emitter")
-emit_c_module = emit_c_package
 
 
 @irdl_op_definition
@@ -99,46 +97,25 @@ def test_emit_c_public_entry_matches_gen_kernel_for_empty_func() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-21 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-21 00:00:00 +0800
-# 功能说明: 验证 emit_c 的 func / module 入口直接复用 KernelEmitter，且不追加 include。
-# 测试目的: 锁定包根 `emit_c(...)` 不再依赖旧 bridge 文件，只返回源码本体。
-# 使用示例: pytest -q test/dsl/gen_kernel/emit/test_emit.py -k test_emit_c_routes_func_and_module_source_via_function_module
+# 功能说明: 验证 emit_c 的 func / module 入口保持当前公开黑盒合同。
+# 测试目的: 锁定 `emit_c(...)` 对单函数 `func.func` 与单函数 `builtin.module` 给出一致源码，不依赖内部 emitter helper。
+# 使用示例: pytest -q test/dsl/gen_kernel/emit/test_emit.py -k test_emit_c_public_entry_lowers_func_and_single_func_module_consistently
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/__init__.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/emit.md
 # 对应测试文件路径: test/dsl/gen_kernel/emit/test_emit.py
-def test_emit_c_routes_func_and_module_source_via_function_module(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[tuple[str, str, object]] = []
-
-    class _FakeEmitter:
-        def __init__(self, ctx: EmitCContext, *, emit_op: object) -> None:
-            self.ctx = ctx
-            self.emit_op = emit_op
-
-        def emit_func(self, obj: object) -> str:
-            seen.append((f"func:{type(obj).__name__}", self.ctx.target, self.emit_op))
-            return f"source:FuncOp:{self.ctx.target}"
-
-        def emit_module(self, obj: object) -> str:
-            seen.append((f"module:{type(obj).__name__}", self.ctx.target, self.emit_op))
-            return f"source:ModuleOp:{self.ctx.target}"
-
-        def emit(self, obj: object) -> str:
-            seen.append((f"generic:{type(obj).__name__}", self.ctx.target, self.emit_op))
-            return f"source:{type(obj).__name__}:{self.ctx.target}"
-
-        def emit_include(self) -> str:
-            return ""
-
-    monkeypatch.setattr(kernel_emitter_module, "KernelEmitter", _FakeEmitter)
-
+def test_emit_c_public_entry_lowers_func_and_single_func_module_consistently() -> None:
     block = Block(arg_types=[])
     block.add_op(func.ReturnOp())
     func_type = FunctionType.from_lists([], [])
     func_op = func.FuncOp("empty_kernel", func_type, Region(block))
-    module = ModuleOp([])
+    module = ModuleOp([func_op.clone()])
 
-    assert emit_c(func_op, _ctx()) == "source:FuncOp:cpu"
-    assert emit_c(module, _npu_ctx()) == "source:ModuleOp:npu_demo"
-    assert seen == [("func:FuncOp", "cpu", emit_c_op), ("generic:ModuleOp", "npu_demo", emit_c_op)]
+    func_source = emit_c(func_op, _ctx())
+    module_source = emit_c(module, _ctx())
+
+    assert func_source == gen_kernel(func_op, _ctx())
+    assert module_source == func_source
+    assert "void empty_kernel(" in func_source
 
 
 def test_emit_c_package_registers_common_op_and_value_types() -> None:

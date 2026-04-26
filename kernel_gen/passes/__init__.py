@@ -16,6 +16,41 @@
 - 暴露 `tile-elewise` 的公开入口与 pattern API。
 - 暴露 `tile-reduce` 的公开入口与 pattern API。
 
+API 列表:
+- `class Pass()`
+- `Pass.run(self: Pass, target: object) -> object`
+- `Pass.apply(self: Pass, ctx: Context, op: ModuleOp) -> None`
+- `class PassManager(name: str | None = None)`
+- `PassManager.add_pass(self: PassManager, pass_obj: XdslModulePass) -> None`
+- `PassManager.extend(self: PassManager, passes: Sequence[XdslModulePass]) -> None`
+- `PassManager.run(self: PassManager, target: object) -> object`
+- `class InlinePass()`
+- `class AttachArchInformationPass(target: str = "npu_demo")`
+- `class PassContractError(message: str)`
+- `class BufferResultsToOutParamsPass()`
+- `class BufferResultsToOutParamsCallPattern(targets: dict[str, RewriteTarget])`
+- `class BufferResultsToOutParamsFuncPattern(targets: dict[str, RewriteTarget])`
+- `get_buffer_results_to_out_params_pass_patterns(targets: dict[str, RewriteTarget]) -> list[RewritePattern]`
+- `class DecompassPass()`
+- `class NnSoftmaxDecompPattern()`
+- `get_decompass_pass_patterns() -> list[RewritePattern]`
+- `class OutlineDeviceKernelPass()`
+- `class TileAnalysisBinaryPattern()`
+- `class TileAnalysisBroadcastPattern()`
+- `class TileAnalysisMatmulPattern()`
+- `class TileAnalysisPass()`
+- `get_tile_analysis_pass_patterns() -> list[RewritePattern]`
+- `class TileElewiseBinaryPattern()`
+- `class TileElewiseBroadcastPattern()`
+- `class TileElewiseMatmulPattern()`
+- `class TileElewisePass()`
+- `get_tile_elewise_pass_patterns() -> list[RewritePattern]`
+- `class TileReduceMatmulPattern()`
+- `class TileReducePass()`
+- `get_tile_reduce_pass_patterns() -> list[RewritePattern]`
+- `class SymbolLoopHoistPass()`
+- `class SymbolLoopHoistError(message: str)`
+
 使用示例:
 - import importlib
 - pass_module = importlib.import_module("kernel_gen.passes.pass_manager")
@@ -85,11 +120,7 @@ from .decompass import (
     get_decompass_pass_patterns,
 )
 from .inline import InlinePass
-from .outline_device_kernel import (
-    OutlineDeviceKernelFuncPattern,
-    OutlineDeviceKernelPass,
-    get_outline_device_kernel_pass_patterns,
-)
+from .outline_device_kernel import OutlineDeviceKernelPass
 from .tile.analysis import (
     TileAnalysisBinaryPattern,
     TileAnalysisBroadcastPattern,
@@ -123,8 +154,6 @@ __all__ = [
     "NnSoftmaxDecompPattern",
     "get_decompass_pass_patterns",
     "OutlineDeviceKernelPass",
-    "OutlineDeviceKernelFuncPattern",
-    "get_outline_device_kernel_pass_patterns",
     "TileAnalysisBinaryPattern",
     "TileAnalysisBroadcastPattern",
     "TileAnalysisMatmulPattern",

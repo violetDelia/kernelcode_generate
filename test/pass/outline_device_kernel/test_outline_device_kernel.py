@@ -39,11 +39,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.context import build_default_context
 from kernel_gen.passes import PassContractError
-from kernel_gen.passes.outline_device_kernel import (
-    OutlineDeviceKernelFuncPattern,
-    OutlineDeviceKernelPass,
-    get_outline_device_kernel_pass_patterns,
-)
+from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
 
 
 def _build_context() -> Context:
@@ -128,22 +124,25 @@ def test_outline_device_kernel_pass_registry_name() -> None:
 
 # TC-ODK-001A
 # 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 功能说明: 锁定公开 pattern getter 只返回单个 func-level pattern。
-# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_pattern_getter_returns_single_func_pattern
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 锁定当前文件只公开 `OutlineDeviceKernelPass`，不再暴露内部 pattern helper。
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_public_entry_hides_internal_pattern_helpers
 # 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
 # 对应 spec 文件路径: spec/pass/outline_device_kernel.md
 # 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
-def test_outline_device_kernel_pattern_getter_returns_single_func_pattern() -> None:
-    patterns = get_outline_device_kernel_pass_patterns({})
+def test_outline_device_kernel_public_entry_hides_internal_pattern_helpers() -> None:
+    direct_module = importlib.import_module("kernel_gen.passes.outline_device_kernel")
 
-    assert len(patterns) == 1
-    assert isinstance(patterns[0], OutlineDeviceKernelFuncPattern)
+    assert direct_module.OutlineDeviceKernelPass is OutlineDeviceKernelPass
+    with pytest.raises(AttributeError):
+        getattr(direct_module, "OutlineDeviceKernelFuncPattern")
+    with pytest.raises(AttributeError):
+        getattr(direct_module, "get_outline_device_kernel_pass_patterns")
 
 
 # TC-ODK-002
 # 创建者: 朽木露琪亚
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 功能说明: 锁定 lowering 兼容导入仍映射到迁移后的唯一实现模块。
 # 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_lowering_compat_import_matches_rehome_entry
 # 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
@@ -156,10 +155,11 @@ def test_outline_device_kernel_lowering_compat_import_matches_rehome_entry() -> 
 
     assert compat_module is direct_module
     assert compat_module.OutlineDeviceKernelPass is OutlineDeviceKernelPass
-    assert compat_module.OutlineDeviceKernelFuncPattern is OutlineDeviceKernelFuncPattern
-    assert compat_module.get_outline_device_kernel_pass_patterns is get_outline_device_kernel_pass_patterns
-    assert direct_module.PassContractError is PassContractError
-    assert package_module.PassContractError is PassContractError
+    with pytest.raises(AttributeError):
+        getattr(compat_module, "OutlineDeviceKernelFuncPattern")
+    with pytest.raises(AttributeError):
+        getattr(compat_module, "get_outline_device_kernel_pass_patterns")
+    assert package_module.OutlineDeviceKernelPass is OutlineDeviceKernelPass
 
 
 # TC-ODK-003

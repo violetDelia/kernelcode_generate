@@ -8,6 +8,11 @@
 - 把原函数改写为只包含 `symbol.const + arch.launch + func.return` 的 host wrapper。
 - 把原函数体搬移到新的 `@<name>_device`，并只在 device 侧保留 `shared_memory_size`。
 
+API 列表:
+- `class OutlineDeviceKernelPass()`
+- `OutlineDeviceKernelPass.apply(ctx: Context, module: ModuleOp) -> None`
+- `OutlineDeviceKernelPass.run(module: object) -> ModuleOp`
+
 使用示例:
 - from xdsl.context import Context
 - from xdsl.dialects.builtin import ModuleOp
@@ -47,7 +52,7 @@ from kernel_gen.passes.common import (
 )
 
 
-class OutlineDeviceKernelFuncPattern(RewritePattern):
+class _OutlineDeviceKernelFuncPattern(RewritePattern):
     """按单个 `func.func` 执行 outline-device-kernel 改写。
 
     创建者: OpenAI Codex
@@ -58,7 +63,7 @@ class OutlineDeviceKernelFuncPattern(RewritePattern):
     - 仅处理候选集合中带显式 launch attrs 的函数。
 
     使用示例:
-    - pattern = OutlineDeviceKernelFuncPattern(candidates)
+    - pattern = _OutlineDeviceKernelFuncPattern(candidates)
 
     关联文件:
     - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
@@ -139,21 +144,20 @@ class OutlineDeviceKernelFuncPattern(RewritePattern):
         rewriter.notify_op_modified(op)
 
 
-def get_outline_device_kernel_pass_patterns(
+def _get_outline_device_kernel_pass_patterns(
     candidates: dict[str, tuple[int, int, int, int]],
 ) -> list[RewritePattern]:
-    """返回 `outline-device-kernel` pass 使用的公开 pattern 列表。
+    """返回 `outline-device-kernel` pass 的内部 pattern 列表。
 
     创建者: OpenAI Codex
     最后一次更改: OpenAI Codex
 
     功能说明:
-    - 为外部测试、组合 pass 与公开 API 提供稳定的 pattern 构造入口。
-    - 当前固定只返回 `OutlineDeviceKernelFuncPattern`，顺序即为 pass 执行顺序。
+    - 供当前文件内部构造 rewrite walker。
+    - 当前固定只返回 `_OutlineDeviceKernelFuncPattern`，顺序即为 pass 执行顺序。
 
     使用示例:
-    - patterns = get_outline_device_kernel_pass_patterns(candidates)
-    - walker = PatternRewriteWalker(GreedyRewritePatternApplier(patterns, ctx=ctx))
+    - patterns = _get_outline_device_kernel_pass_patterns(candidates)
 
     关联文件:
     - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
@@ -161,7 +165,7 @@ def get_outline_device_kernel_pass_patterns(
     - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
-    return [OutlineDeviceKernelFuncPattern(candidates)]
+    return [_OutlineDeviceKernelFuncPattern(candidates)]
 
 
 class OutlineDeviceKernelPass(ModulePass):
@@ -221,13 +225,13 @@ class OutlineDeviceKernelPass(ModulePass):
                 continue
             present_attrs = [
                 name
-                for name in OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS
+                for name in _OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS
                 if name in op.attributes
             ]
             if not present_attrs:
                 continue
             func_name = op.sym_name.data
-            if len(present_attrs) != len(OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS):
+            if len(present_attrs) != len(_OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS):
                 raise PassContractError(
                     "function "
                     f"{func_name} must define launch_block, launch_thread, and launch_subthread together"
@@ -238,7 +242,7 @@ class OutlineDeviceKernelPass(ModulePass):
                 raise PassContractError(f"function {func_name} must contain a body")
 
             values: list[int] = []
-            for attr_name in OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS + ("shared_memory_size",):
+            for attr_name in _OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS + ("shared_memory_size",):
                 attr = op.attributes.get(attr_name)
                 if attr is None:
                     if attr_name == "shared_memory_size":
@@ -280,7 +284,7 @@ class OutlineDeviceKernelPass(ModulePass):
             return
         PatternRewriteWalker(
             GreedyRewritePatternApplier(
-                [*get_outline_device_kernel_pass_patterns(candidates)],
+                [*_get_outline_device_kernel_pass_patterns(candidates)],
                 ctx=ctx,
                 dce_enabled=False,
             )
@@ -310,8 +314,4 @@ class OutlineDeviceKernelPass(ModulePass):
         return module  # type: ignore[return-value]
 
 
-__all__ = [
-    "OutlineDeviceKernelFuncPattern",
-    "OutlineDeviceKernelPass",
-    "get_outline_device_kernel_pass_patterns",
-]
+__all__ = ["OutlineDeviceKernelPass"]

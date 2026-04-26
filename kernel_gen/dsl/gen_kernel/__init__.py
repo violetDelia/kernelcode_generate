@@ -9,14 +9,13 @@
 - 包根仅承认 `gen_kernel(...)` / `emit_c(...)` / `emit_c_op(...)` / `emit_c_value(...)` 这组稳定公开入口。
 
 API 列表:
-- `GenKernelError(message: str)`
-- `KernelEmitter(ctx: EmitCContext, *, emit_op: Callable[[Operation, EmitCContext], str] = emit_c_op)`
-- `EmitCContext(target: str, indent: str = "    ", naming: Any | None = None, type_converter: Any | None = None, config: dict[str, Any] | None = None)`
-- `EmitCError(message: str)`
 - `gen_kernel(obj: object, ctx: EmitCContext) -> str`
 - `emit_c(obj: object, ctx: EmitCContext) -> str`
 - `emit_c_op(op: Operation, ctx: EmitCContext) -> str`
 - `emit_c_value(value: SSAValue, ctx: EmitCContext) -> str`
+- `EmitCContext(target: str, *, indent: str = "    ", naming: object | None = None, type_converter: object | None = None, config: dict[str, object] | None = None)`
+- `EmitCError(message: str)`
+- `GenKernelError(message: str)`
 
 helper 清单:
 - `__getattr__(name: str) -> object`
@@ -37,7 +36,7 @@ from __future__ import annotations
 
 from .emit import emit_c, emit_c_op, emit_c_value
 from .emit_context import EmitCContext, EmitCError
-from .gen_kernel import GenKernelError, KernelEmitter, gen_kernel
+from .gen_kernel import GenKernelError, gen_kernel
 
 
 def __getattr__(name: str) -> object:
@@ -68,7 +67,6 @@ def __getattr__(name: str) -> object:
 
 __all__ = [
     "GenKernelError",
-    "KernelEmitter",
     "gen_kernel",
     "EmitCContext",
     "EmitCError",

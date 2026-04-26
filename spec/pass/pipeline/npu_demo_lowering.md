@@ -3,8 +3,9 @@
 ## 功能简介
 
 - 定义 `npu-demo-lowering` pipeline 的公开合同与 pass 顺序。
-- 公开 builder：`build_npu_demo_lowering_pipeline()`。
-- 该 pipeline 面向 `dsl_run` 的 `npu_demo` 正向链路，固定为最小可执行 lowering 组合，并在末尾输出可供 `gen_kernel(target="npu_demo")` 消费的 host wrapper + device body 双函数 IR。
+- 当前文件只公开 pipeline builder：`build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> PassManager`。
+- 该 pipeline 面向 `npu_demo` 的 pass/pipeline 正向链路，固定为最小可执行 lowering 组合，并在末尾输出可供 `gen_kernel(...)` / `emit_c(...)` 消费的 host wrapper + device body 双函数 IR。
+- registry 名称 `npu-demo-lowering` 仍属于 [`spec/pass/registry.md`](../../../spec/pass/registry.md) 的公开入口；当前文件不额外公开 builder 之外的模块级 helper。
 
 ## API 列表
 
@@ -13,7 +14,7 @@
 ## 文档信息
 
 - 创建者：`朽木露琪亚`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/pipeline/npu_demo_lowering.md`](../../../spec/pass/pipeline/npu_demo_lowering.md)
 - `功能实现`：[`kernel_gen/passes/pipeline/npu_demo_lowering.py`](../../../kernel_gen/passes/pipeline/npu_demo_lowering.py)
 - `test`：[`test/pass/test_pipeline_npu_demo_lowering.py`](../../../test/pass/test_pipeline_npu_demo_lowering.py)
@@ -31,8 +32,8 @@
 
 ## 术语
 
-- `npu-demo-lowering`：`dsl_run` 的 npu_demo 正向 pipeline 名称。
-- `inline`：该 pipeline 的首个内联/展开阶段，作为 `dsl_run` 的前置规范化步骤。
+- `npu-demo-lowering`：`npu_demo` 目标的公开 pipeline 名称。
+- `inline`：该 pipeline 的首个内联/展开阶段。
 - `lower-nn`：`NnLoweringPass` 的公开 pass 名称。
 - `symbol-loop-hoist`：`SymbolLoopHoistPass` 的公开 pass 名称。
 - `attach-arch-information`：在 outline 前为目标函数附加 launch / shared memory 等 arch 元信息的阶段。
@@ -40,9 +41,9 @@
 
 ## 目标
 
-- 提供一条不依赖 `tile` 的最小公开 pipeline，供 `dsl_run` 正向合同与 pytest 直接复用。
+- 提供一条不依赖 `tile` 的最小公开 pipeline，供本轮 `pytest` 与 standalone 验收链直接复用。
 - 明确 `symbol-loop-hoist` 在无 `symbol.for` 时可以 no-op，因此可安全加入该最小 pipeline。
-- 明确该 pipeline 的最终输出为 host wrapper + device body 双函数 IR，供 `gen_kernel(target="npu_demo")` 直接消费。
+- 明确该 pipeline 的最终输出为 host wrapper + device body 双函数 IR，供 `gen_kernel(...)` 直接消费。
 - 保持 `default-lowering` 作为独立公开 builder，不与本 pipeline 混用。
 
 ## 限制与边界
@@ -50,6 +51,7 @@
 - builder 必须返回 `PassManager`。
 - builder 必须通过 `register_pipeline("npu-demo-lowering")` 注册。
 - builder 允许 `options={"target": "npu_demo"}`，空字典与 `None` 表示默认 target；`only-kernel`、`only_kernel` 或其他选项都必须显式失败。
+- 当前文件允许存在用于 pass 顺序、默认 target 或错误文本规整的当前文件内 helper，但这些 helper 不是公开 API；实现、其他模块与测试不得跨文件直连。
 - 公开顺序必须固定为：
   1. `InlinePass`
   2. `DecompassPass`
@@ -86,7 +88,7 @@ module = pm.run(module)
 
 - pipeline 名称必须固定为 `npu-demo-lowering`。
 - pass 顺序必须固定为 `inline -> decompass -> lower-nn -> symbol-loop-hoist -> attach-arch-information -> outline-device-kernel`。
-- 该 pipeline 是 `dsl_run` 的正向主合同，不要求 `tile` 先行。
+- 该 pipeline 是本轮 `pass/pipeline` 公开主合同，不要求 `tile` 先行。
 - 该 pipeline 不接受 `only-kernel` 选项；任何 options 输入都必须显式失败。
 
 返回与限制：
@@ -104,3 +106,4 @@ module = pm.run(module)
   - `symbol-loop-hoist` 在无 `symbol.for` 时可安全加入该 pipeline
   - pipeline 输出 host wrapper + device body 双函数 IR
   - `only-kernel` / `only_kernel` options 显式失败
+  - registry 透传 `npu-demo-lowering` 时只经由公开 builder，不依赖当前文件内非公开 helper
