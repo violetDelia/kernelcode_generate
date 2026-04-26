@@ -103,16 +103,8 @@ def _isolated_target_registry() -> None:
     - test: test/tools/test_dsl_run.py
     """
 
-    registry_snapshot = dict(target_registry._TARGET_REGISTRY)
-    current_target_snapshot = target_registry._CURRENT_TARGET
-    target_registry._TARGET_REGISTRY.clear()
     target_registry.load_targets(REPO_ROOT / "kernel_gen" / "target" / "targets")
-    try:
-        yield
-    finally:
-        target_registry._TARGET_REGISTRY.clear()
-        target_registry._TARGET_REGISTRY.update(registry_snapshot)
-        target_registry._CURRENT_TARGET = current_target_snapshot
+    yield
 
 
 def _build_npu_demo_lowering_pipeline() -> PassManager:

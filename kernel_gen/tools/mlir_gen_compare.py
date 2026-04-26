@@ -1,7 +1,7 @@
 """mlir_gen 产物比较工具。
 
 创建者: 睡觉小分队
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 mlir_gen_compare(...)：生成实际 builtin.module，读取预期 .mlir 文件，
@@ -9,6 +9,11 @@
 - 提供 mlir_gen_compare_text(...)：生成实际 builtin.module，接收预期完整 IR 文本，
   归一化比较并返回 bool。
 - 仅比较 mlir_gen 层的 module 文本，不运行 pass、不做 lowering。
+
+API 列表:
+- mlir_gen_compare(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, config: dict[str, object] | None, mlir_file: str) -> bool
+- mlir_gen_compare_text(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, config: dict[str, object] | None, mlir_text: str) -> bool
+- compare_mlir_file(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, config: dict[str, object] | None, mlir_file: str) -> bool
 
 使用示例:
 - from kernel_gen.tools.mlir_gen_compare import mlir_gen_compare
@@ -23,27 +28,38 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from io import StringIO
 from pathlib import Path
 
-from xdsl.dialects.builtin import ModuleOp
+from xdsl.context import Context
+from xdsl.dialects.arith import Arith
+from xdsl.dialects.builtin import Builtin, ModuleOp
+from xdsl.dialects.func import Func
+from xdsl.ir import Operation
 from xdsl.parser import Parser
+from xdsl.printer import Printer
 
-from kernel_gen.common.text import normalize_module_text as _normalize_module
-from kernel_gen.context import build_default_context as _build_default_context
+import kernel_gen.dsl.mlir_gen as mlir_gen_module
+from kernel_gen.dialect.arch import Arch
+from kernel_gen.dialect.dma import Dma
+from kernel_gen.dialect.kernel import Kernel
+from kernel_gen.dialect.nn import Nn
+from kernel_gen.dialect.symbol import Symbol
+from kernel_gen.dialect.tuner import Tuner
 
 
-def _load_mlir_gen() -> Callable[..., ModuleOp]:
-    """延迟加载 mlir_gen 入口。
+def _render_operation_text(value: Operation) -> str:
+    """把 operation 渲染为稳定文本。
 
-    创建者: 睡觉小分队
+    创建者: 金铲铲大作战
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 延迟导入 kernel_gen.dsl.mlir_gen.mlir_gen，避免模块导入阶段失败。
+    - 使用统一 printer 将 operation 打印为文本。
+    - 去掉尾部空白，便于在当前文件内做稳定字符串比较。
 
     使用示例:
-    - mlir_gen_fn = _load_mlir_gen()
-    - module = mlir_gen_fn(fn, *runtime_args, config=config)
+    - text = _render_operation_text(module)
 
     关联文件:
     - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
@@ -51,9 +67,91 @@ def _load_mlir_gen() -> Callable[..., ModuleOp]:
     - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
     """
 
-    from kernel_gen.dsl.mlir_gen import mlir_gen
+    stream = StringIO()
+    Printer(stream=stream).print_op(value)
+    return stream.getvalue().rstrip()
 
-    return mlir_gen
+
+def _build_compare_context() -> Context:
+    """构造当前文件内使用的最小比较 Context。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 在当前文件内加载比较路径需要的 builtin/func/arith 与仓库公开 dialect。
+    - 避免跨文件依赖未在本工具 spec 定义的 context helper。
+
+    使用示例:
+    - ctx = _build_compare_context()
+
+    关联文件:
+    - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
+    - test: [test/tools/test_mlir_gen_compare.py](test/tools/test_mlir_gen_compare.py)
+    - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
+    """
+
+    ctx = Context()
+    _load_compare_dialects(ctx)
+    return ctx
+
+
+def _load_compare_dialects(ctx: Context) -> None:
+    """向比较 Context 注册当前工具需要的 dialect。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 将比较路径会遇到的 builtin/func/arith 与仓库公开 dialect 逐个加载到 ctx。
+    - 拆出单独 helper 仅为保持 `_build_compare_context(...)` 可读，不对外公开。
+
+    使用示例:
+    - ctx = Context()
+    - _load_compare_dialects(ctx)
+
+    关联文件:
+    - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
+    - test: [test/tools/test_mlir_gen_compare.py](test/tools/test_mlir_gen_compare.py)
+    - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
+    """
+
+    ctx.load_dialect(Builtin)
+    ctx.load_dialect(Func)
+    ctx.load_dialect(Arith)
+    ctx.load_dialect(Nn)
+    ctx.load_dialect(Kernel)
+    ctx.load_dialect(Symbol)
+    ctx.load_dialect(Tuner)
+    ctx.load_dialect(Dma)
+    ctx.load_dialect(Arch)
+
+
+def _normalize_module_text(module: ModuleOp, ctx: Context) -> str:
+    """对 builtin.module 做当前文件内的解析后归一化。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 先把 module 打印成文本，再用当前文件内 Context 解析回 builtin.module。
+    - 重新打印解析结果，去除 printer 差异与尾部空白。
+    - 若解析结果不是 builtin.module，则抛出稳定 ValueError。
+
+    使用示例:
+    - text = _normalize_module_text(module, ctx)
+
+    关联文件:
+    - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
+    - test: [test/tools/test_mlir_gen_compare.py](test/tools/test_mlir_gen_compare.py)
+    - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
+    """
+
+    text = _render_operation_text(module)
+    parsed = Parser(ctx, text).parse_module()
+    if not isinstance(parsed, ModuleOp):
+        raise ValueError("mlir_gen_compare expects builtin.module")
+    return _render_operation_text(parsed)
 
 
 def _mlir_gen_compare_expected_text(
@@ -65,7 +163,7 @@ def _mlir_gen_compare_expected_text(
     """比较 mlir_gen(...) 结果与预期 module 文本。
 
     创建者: 守护最好的爱莉希雅
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 生成实际 builtin.module，并将 expected_text 解析为 builtin.module 后做归一化文本比较。
@@ -82,7 +180,6 @@ def _mlir_gen_compare_expected_text(
     - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
     """
 
-    mlir_gen_fn = _load_mlir_gen()
     if runtime_args is None:
         args = ()
     elif isinstance(runtime_args, (list, tuple)):
@@ -90,11 +187,11 @@ def _mlir_gen_compare_expected_text(
     else:
         raise TypeError("runtime_args must be list, tuple, or None")
 
-    actual_module = mlir_gen_fn(fn, *args, config=config)
+    actual_module = mlir_gen_module.mlir_gen(fn, *args, config=config)
     if not isinstance(actual_module, ModuleOp):
         return False
 
-    ctx = _build_default_context()
+    ctx = _build_compare_context()
     try:
         expected_module = Parser(ctx, expected_text).parse_module()
     except Exception:
@@ -103,8 +200,8 @@ def _mlir_gen_compare_expected_text(
         return False
 
     try:
-        actual_norm = _normalize_module(actual_module, ctx)
-        expected_norm = _normalize_module(expected_module, ctx)
+        actual_norm = _normalize_module_text(actual_module, ctx)
+        expected_norm = _normalize_module_text(expected_module, ctx)
     except Exception:
         return False
     return actual_norm == expected_norm

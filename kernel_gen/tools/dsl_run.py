@@ -8,6 +8,11 @@
 - 负责把 DSL 函数解析为 module，按指定 pipeline 做 lowering，再生成源码并交给执行引擎真实编译/执行。
 - 只承载公开合同，不把内部 parse / pass / emit / execute 细节暴露为外部依赖。
 
+API 列表:
+- DslRunError(message: str)
+- DslRunResult(func_op, module, source, compiled_kernel, execute_result, runtime_args)
+- dsl_run(func_obj, real_args, pipeline, emitcconfig)
+
 使用示例:
 - from kernel_gen.tools.dsl_run import dsl_run
 - result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
@@ -22,6 +27,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from contextlib import contextmanager
 from dataclasses import dataclass
 import inspect
 from typing import Any
@@ -228,6 +234,45 @@ def _build_dsl_globals_table(fn: Callable[..., object]) -> dict[str, object]:
     helper_globals.setdefault("loop", _operation_loop)
     helper_globals.setdefault("floordiv", _nn_floordiv)
     return helper_globals
+
+
+@contextmanager
+def _temporarily_inject_dsl_helpers(fn: Callable[..., object]) -> Iterable[None]:
+    """在 `mlir_gen(...)` 调用窗口内临时补齐 DSL helper globals。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 仅向 `fn.__globals__` 注入当前缺失的 helper 名称，避免覆盖调用方已有绑定。
+    - 调用完成后回收本次新增名称，让公开 `mlir_gen(...)` 继续保持删参后的纯 `runtime_args` 入口。
+
+    使用示例:
+    - with _temporarily_inject_dsl_helpers(func_obj):
+    -     module = mlir_gen(func_obj, *runtime_args, config=config)
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    fn_globals = getattr(fn, "__globals__", None)
+    if not isinstance(fn_globals, dict):
+        yield
+        return
+    helper_globals = _build_dsl_globals_table(fn)
+    inserted_names: list[str] = []
+    for name, value in helper_globals.items():
+        if name in fn_globals:
+            continue
+        fn_globals[name] = value
+        inserted_names.append(name)
+    try:
+        yield
+    finally:
+        for name in inserted_names:
+            fn_globals.pop(name, None)
 
 
 def _normalize_real_args(real_args: tuple[object, ...] | list[object]) -> tuple[object, ...]:
@@ -452,8 +497,12 @@ def dsl_run(
         if not (_is_torch_tensor(arg) or _is_numpy_array(arg)):
             raise DslRunError(REAL_ARG_TYPE_ERROR)
 
-    globals_table = _build_dsl_globals_table(func_obj)
-    module = mlir_gen(func_obj, *runtime_args, globals=globals_table, config={"reject_external_values": True, "allow_python_callee_calls": True})
+    with _temporarily_inject_dsl_helpers(func_obj):
+        module = mlir_gen(
+            func_obj,
+            *runtime_args,
+            config={"reject_external_values": True, "allow_python_callee_calls": True},
+        )
     if not isinstance(module, ModuleOp):
         raise DslRunError("DslRunInternalError: mlir_gen must return builtin.module")
 

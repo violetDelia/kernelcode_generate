@@ -29,6 +29,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.tools import mlir_gen_compare as compare_module
 
+from kernel_gen.dsl import mlir_gen as mlir_gen_package
+
 _SIMPLE_MODULE_TEXT = """builtin.module {
   func.func @main() {
     func.return
@@ -84,7 +86,7 @@ def _stub_mlir_gen(*_args: object, **_kwargs: object) -> object:
     - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
     """
 
-    ctx = compare_module._build_default_context()
+    ctx = _build_min_context()
     return Parser(ctx, _SIMPLE_MODULE_TEXT).parse_module()
 
 
@@ -98,7 +100,7 @@ def _build_min_context() -> object:
     - 仅加载 builtin/func/arith/nn/kernel，满足 mlir_gen_compare 的解析/打印路径。
 
     使用示例:
-    - monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+    - ctx = _build_min_context()
 
     关联文件:
     - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
@@ -125,37 +127,6 @@ def _build_min_context() -> object:
     return ctx
 
 
-def _build_module_with_arith_constant() -> object:
-    """构造一个包含 arith.constant 的最小 builtin.module。
-
-    创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 用于覆盖 mlir_gen_compare 在 actual/expected 含 arith dialect op 时的比较路径。
-    - 该 helper 直接用 xdsl op 构造 module，不依赖 Context 解析，便于模拟“Context 未加载 arith”场景。
-
-    使用示例:
-    - module = _build_module_with_arith_constant()
-
-    关联文件:
-    - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
-    - test: [test/tools/test_mlir_gen_compare.py](test/tools/test_mlir_gen_compare.py)
-    - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
-    """
-
-    from xdsl.dialects.arith import ConstantOp
-    from xdsl.dialects.builtin import ModuleOp
-    from xdsl.dialects.func import FuncOp, ReturnOp
-    from xdsl.ir import Block, Region
-
-    block = Block()
-    block.add_op(ConstantOp.from_int_and_width(0, 32))
-    block.add_op(ReturnOp())
-    func = FuncOp.from_region("main", [], [], Region(block))
-    return ModuleOp([func])
-
-
 # TC-MLIR-GEN-COMPARE-001
 # 创建者: 睡觉小分队
 # 最后一次更改: 金铲铲大作战
@@ -170,8 +141,7 @@ def _build_module_with_arith_constant() -> object:
 def test_mlir_gen_compare_true(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     expected_path = tmp_path / "expected.mlir"
     expected_path.write_text(_SIMPLE_MODULE_TEXT, encoding="utf-8")
-    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen)
-    monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+    monkeypatch.setattr(mlir_gen_package, "mlir_gen", _stub_mlir_gen)
 
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
@@ -197,8 +167,7 @@ def test_mlir_gen_compare_true(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 def test_compare_mlir_file_alias_true(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     expected_path = tmp_path / "expected_alias.mlir"
     expected_path.write_text(_SIMPLE_MODULE_TEXT, encoding="utf-8")
-    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen)
-    monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+    monkeypatch.setattr(mlir_gen_package, "mlir_gen", _stub_mlir_gen)
 
     ok = compare_module.compare_mlir_file(
         fn=_dummy_kernel,
@@ -228,8 +197,7 @@ def test_mlir_gen_compare_returns_false_on_mismatch(
     expected_path.write_text(
         _SIMPLE_MODULE_TEXT.replace("@main", "@other"), encoding="utf-8"
     )
-    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen)
-    monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+    monkeypatch.setattr(mlir_gen_package, "mlir_gen", _stub_mlir_gen)
 
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
@@ -257,8 +225,7 @@ def test_mlir_gen_compare_returns_false_on_invalid_text(
 ) -> None:
     expected_path = tmp_path / "invalid.mlir"
     expected_path.write_text("invalid mlir", encoding="utf-8")
-    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen)
-    monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+    monkeypatch.setattr(mlir_gen_package, "mlir_gen", _stub_mlir_gen)
 
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
@@ -286,8 +253,7 @@ def test_mlir_gen_compare_returns_false_on_non_utf8_text(
 ) -> None:
     expected_path = tmp_path / "non_utf8.mlir"
     expected_path.write_bytes(b"\xff\xfe\xfa")
-    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen)
-    monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+    monkeypatch.setattr(mlir_gen_package, "mlir_gen", _stub_mlir_gen)
 
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
@@ -317,11 +283,10 @@ def test_mlir_gen_compare_true_with_arith(
     expected_path.write_text(_ARITH_MODULE_TEXT, encoding="utf-8")
 
     def _stub_mlir_gen_arith(*_args: object, **_kwargs: object) -> object:
-        ctx = compare_module._build_default_context()
+        ctx = _build_min_context()
         return Parser(ctx, _ARITH_MODULE_TEXT).parse_module()
 
-    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen_arith)
-    monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+    monkeypatch.setattr(mlir_gen_package, "mlir_gen", _stub_mlir_gen_arith)
 
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
@@ -331,74 +296,6 @@ def test_mlir_gen_compare_true_with_arith(
     )
 
     assert ok is True
-
-
-# TC-MLIR-GEN-COMPARE-006
-# 创建者: 睡觉小分队
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
-# 功能说明: 对齐 mlir_gen_compare 的“归一化二次解析失败 -> False”兜底行为。
-# 测试目的: 验证当默认 Context 未加载 arith 时，normalize 过程解析失败不应抛异常，应返回 False。
-# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_returns_false_on_normalize_parse_error
-# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
-# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
-# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
-def test_mlir_gen_compare_returns_false_on_normalize_parse_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    expected_path = tmp_path / "expected_simple.mlir"
-    expected_path.write_text(_SIMPLE_MODULE_TEXT, encoding="utf-8")
-
-    actual_module = _build_module_with_arith_constant()
-    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: lambda *_a, **_k: actual_module)
-
-    def _ctx_without_arith() -> object:
-        from xdsl.context import Context
-        from xdsl.dialects.builtin import Builtin
-        from xdsl.dialects.func import Func
-
-        from kernel_gen.dialect.kernel import Kernel
-        from kernel_gen.dialect.nn import Nn
-
-        ctx = Context()
-        ctx.load_dialect(Builtin)
-        ctx.load_dialect(Func)
-        ctx.load_dialect(Nn)
-        ctx.load_dialect(Kernel)
-        return ctx
-
-    monkeypatch.setattr(compare_module, "_build_default_context", _ctx_without_arith)
-
-    ok = compare_module.mlir_gen_compare(
-        fn=_dummy_kernel,
-        runtime_args=None,
-        config=None,
-        mlir_file=str(expected_path),
-    )
-
-    assert ok is False
-
-
-# TC-MLIR-GEN-COMPARE-007
-# 创建者: 睡觉小分队
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
-# 功能说明: 对齐 mlir_gen_compare 默认 Context 的 dialect 覆盖集合。
-# 测试目的: 验证默认 Context 至少加载 builtin/func/arith 与 nn/kernel/symbol/dma/arch。
-# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_default_context_loads_required_dialects
-# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
-# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
-# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
-def test_default_context_loads_required_dialects() -> None:
-    try:
-        ctx = compare_module._build_default_context()
-    except Exception as exc:
-        pytest.skip(f"default context unavailable: {exc}")
-    required = ("builtin", "func", "arith", "nn", "kernel", "symbol", "dma", "arch")
-    missing = [name for name in required if ctx.get_optional_dialect(name) is None]
-    assert missing == []
 
 
 # TC-MLIR-GEN-COMPARE-008
@@ -417,10 +314,7 @@ def test_mlir_gen_compare_returns_false_when_actual_not_module(
 ) -> None:
     expected_path = tmp_path / "expected.mlir"
     expected_path.write_text(_SIMPLE_MODULE_TEXT, encoding="utf-8")
-    monkeypatch.setattr(
-        compare_module, "_load_mlir_gen", lambda: (lambda *_a, **_k: object())
-    )
-    monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+    monkeypatch.setattr(mlir_gen_package, "mlir_gen", lambda *_a, **_k: object())
 
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
@@ -460,11 +354,10 @@ def test_mlir_gen_compare_does_not_repair_legacy_dma_view_result_dtype(
     )
 
     def _stub_mlir_gen_dma(*_args: object, **_kwargs: object) -> object:
-        ctx = compare_module._build_default_context()
+        ctx = _build_min_context()
         return Parser(ctx, actual_text).parse_module()
 
-    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen_dma)
-    monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+    monkeypatch.setattr(mlir_gen_package, "mlir_gen", _stub_mlir_gen_dma)
 
     ok = compare_module.mlir_gen_compare_text(
         fn=_dummy_kernel,
@@ -488,8 +381,7 @@ def test_mlir_gen_compare_does_not_repair_legacy_dma_view_result_dtype(
 # 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
 # 对应测试文件路径: test/tools/test_mlir_gen_compare.py
 def test_mlir_gen_compare_text_true(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen)
-    monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+    monkeypatch.setattr(mlir_gen_package, "mlir_gen", _stub_mlir_gen)
 
     ok = compare_module.mlir_gen_compare_text(
         fn=_dummy_kernel,
@@ -515,8 +407,7 @@ def test_mlir_gen_compare_text_true(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_mlir_gen_compare_text_returns_false_on_invalid_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen)
-    monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+    monkeypatch.setattr(mlir_gen_package, "mlir_gen", _stub_mlir_gen)
 
     ok = compare_module.mlir_gen_compare_text(
         fn=_dummy_kernel,

@@ -44,6 +44,7 @@
 - 仅覆盖受限语法子集，不负责 MLIR 生成或后端行为。
 - 解析入口只做语法与基本形态校验；数值归一化与后续语义由下游处理。
 - 解析规则与诊断口径以 `spec/dsl/ast/__init__.md` 为准。
+- `parse_function_with_env(...)` 只属于 parser 模块级公开入口；`kernel_gen.dsl.ast` 包根 facade、`kernel_gen.dsl.mlir_gen` 包根 facade 与工具层公开入口都不得把它当作并列主入口重新导出。
 
 ## 公开接口
 
@@ -78,7 +79,7 @@ raise AstParseError("Missing annotation", [Diagnostic("Missing annotation", None
 功能说明：
 
 - 在显式 `globals` / `builtins` / `runtime` 环境下解析 Python 函数。
-- 为 `mlir_gen`、集成 builder 与需要注解推断的调用方提供稳定公共入口。
+- 为 parser 模块内需要显式环境控制的调用方提供稳定入口。
 
 参数说明：
 
@@ -104,6 +105,7 @@ func_ast = parse_function_with_env(
 
 - `runtime_table` 仅用于补充缺失注解推断与局部解析环境，不改变 AST 节点语义。
 - `config` 的公开键由实现与集成测试约束；当前已使用的键包括 `reject_external_values` 与 `allow_python_callee_calls`。
+- `build_func_op(...)` / `mlir_gen(...)` 的包根公开合同不再透出 `globals` / `builtins`；若上层实现仍需要显式环境控制，只能在 parser 或 mlir_gen 目录内消费本入口，不得把它转成新的工具层公开接口。
 - 文件内其他 `_...` helper 属于实现细节，不构成公开 API，也不得被跨文件实现或测试直连。
 
 返回与限制：
