@@ -8,12 +8,14 @@
 
 ## API 列表
 
-- `script/check_python_coverage.py`
+- `CoverageCheckError(message: str)`
+- `check_coverage(report_path: Path, line_min: float, branch_min: float, include_modules: list[str]) -> dict[str, Any]`
+- `main(argv: list[str] | None = None) -> int`
 
 ## 文档信息
 
 - 创建者：`金铲铲大作战`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/script/python_coverage_check.md`](../../spec/script/python_coverage_check.md)
 - `spec`：[`spec/script/python_coverage_omit.md`](../../spec/script/python_coverage_omit.md)
 - `功能实现`：[`script/check_python_coverage.py`](../../script/check_python_coverage.py)
@@ -58,22 +60,41 @@
 ```bash
 python3 script/check_python_coverage.py \
   --coverage-json coverage/S1/coverage.json \
-  --line-min 95 \
-  --branch-min 60
+  --line-min 98 \
+  --branch-min 70
 ```
 
 ```bash
 python3 script/check_python_coverage.py \
   --coverage-json coverage/S1/coverage.json \
   --include-module kernel_gen.passes \
-  --line-min 95 \
-  --branch-min 60
+  --line-min 98 \
+  --branch-min 70
 ```
 
 返回与限制：
 
 - 成功：退出码 `0`，输出一行覆盖率摘要。
 - 失败：退出码非 `0`，标准错误包含失败原因。
+
+## 公开 API 清单
+
+- `CoverageCheckError(message: str)`
+- `check_coverage(report_path: Path, line_min: float, branch_min: float, include_modules: list[str]) -> dict[str, Any]`
+- `main(argv: list[str] | None = None) -> int`
+
+## helper 清单
+
+- `_build_parser()`
+- `_load_report(path: Path)`
+- `_normalize_module_prefix(module: str)`
+- `_path_matches_module(path: str, module: str)`
+- `_require_int(value: Any, field: str, scope: str)`
+- `_summary_metrics(summary: Any, scope: str)`
+- `_select_scope(report: dict[str, Any], include_modules: list[str])`
+- `_percentage(covered: int, total: int)`
+- `_format_summary(scope: str, line_pct: float, branch_pct: float)`
+- `_validate_thresholds(line_pct: float, branch_pct: float, line_min: float, branch_min: float)`
 
 ## 测试
 

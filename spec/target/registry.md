@@ -8,9 +8,11 @@
 
 ## API 列表
 
-- `TargetSpec`
+- `TargetSpec(name: str, arch_supported_ops: set[str] | None, arch_unsupported_ops: set[str], hardware: dict[str, int])`
 - `load_targets(directory: Path) -> dict[str, TargetSpec]`
 - `register_target(spec: TargetSpec) -> None`
+- `set_current_target(target: str | None) -> None`
+- `get_current_target() -> str | None`
 - `is_arch_op_supported(target: str, op_name: str) -> bool`
 - `get_target_hardware(target: str, key: str) -> int | None`
 - `get_current_target_hardware(key: str) -> int | None`
@@ -19,7 +21,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/target/registry.md`](../../spec/target/registry.md)
 - `功能实现`：[`kernel_gen/target/registry.py`](../../kernel_gen/target/registry.py)
 - `test`：[`test/target/test_target_registry.py`](../../test/target/test_target_registry.py)
@@ -36,6 +38,7 @@
 - 保持配置文件可读、可扩展、可校验。
 - 为约定 target 冻结目录文件语义、launch 能力上限与能力矩阵，避免下游 codegen/runtime 再次推断硬件值或误放开未支持能力。
 - 为 `analysis` 主线提供正式 baseline 来源；当前需要由 registry 对 `npu_demo` 暴露 `path_bandwidth / path_latency_ns / theoretical_compute` 三类默认参数。
+- 为 `operation/arch.py` 与 `dialect/arch.py` 提供合法的 current target 查询与设置公开入口，避免继续跨文件访问私有 helper。
 
 ## 限制与边界
 
@@ -219,6 +222,21 @@ loaded = registry.load_targets(Path("kernel_gen/target/targets"))
 - 注册单个 target；用于测试或运行时增量注入。
 - 即使 `npu_demo` 以 `npu_demo.txt` 作为公开真源，测试仍可通过该接口做临时注入。
 
+### `set_current_target(target: str | None) -> None`
+
+功能说明：
+
+- 设置 current target 名称，供 operation / dialect / test 读取当前 target 上下文。
+- `None` 表示关闭 current target 校验。
+- 非 `None` 值必须已经完成注册。
+
+### `get_current_target() -> str | None`
+
+功能说明：
+
+- 读取 current target 名称。
+- 为 operation / dialect 的支持性校验提供公开查询入口，不再要求跨文件访问私有 helper。
+
 ### `is_arch_op_supported(target: str, op_name: str) -> bool`
 
 功能说明：
@@ -237,6 +255,42 @@ loaded = registry.load_targets(Path("kernel_gen/target/targets"))
 功能说明：
 
 - 按“当前 target”读取硬件参数；未设置当前 target 或字段缺失时返回 `None`。
+
+## 公开 API 清单
+
+- `TargetSpec`
+- `load_targets(directory: Path) -> dict[str, TargetSpec]`
+- `register_target(spec: TargetSpec) -> None`
+- `set_current_target(target: str | None) -> None`
+- `get_current_target() -> str | None`
+- `is_arch_op_supported(target: str, op_name: str) -> bool`
+- `get_target_hardware(target: str, key: str) -> int | None`
+- `get_current_target_hardware(key: str) -> int | None`
+- `get_target_analysis_defaults(target: str) -> dict[str, dict[str, int]]`
+
+## helper 清单
+
+- `_format_error(...)`
+- `_raise_value_error(...)`
+- `_raise_type_error(...)`
+- `_validate_target_name(...)`
+- `_validate_arch_ops(...)`
+- `_validate_op_set(...)`
+- `_validate_hardware_map(...)`
+- `_parse_ops_list(...)`
+- `_parse_arch_payload(...)`
+- `_parse_hardware_payload(...)`
+- `_parse_target_spec(...)`
+- `_read_target_json(...)`
+- `_parse_ops_text(...)`
+- `_parse_target_txt(...)`
+- `_ensure_cpu_target(...)`
+- `_ensure_npu_demo_target(...)`
+- `_is_default_cpu_spec(...)`
+- `_same_target_spec(...)`
+- `_register_loaded_target(...)`
+- `_set_current_target(...)`
+- `_get_current_target(...)`
 
 ### `get_target_analysis_defaults(target: str) -> dict[str, dict[str, int]]`
 

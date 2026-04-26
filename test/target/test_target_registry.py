@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import importlib
 import json
 import sys
 
@@ -313,6 +314,7 @@ def test_target_registry_rejects_txt_invalid_fields(
 # 对应功能实现文件路径: kernel_gen/target/registry.py
 # 对应 spec 文件路径: spec/target/registry.md
 def test_target_registry_current_target_hardware() -> None:
+    assert target_registry.get_current_target() is None
     assert target_registry.get_current_target_hardware("thread_num") is None
     spec = target_registry.TargetSpec(
         name="current_hw",
@@ -321,12 +323,44 @@ def test_target_registry_current_target_hardware() -> None:
         hardware={"thread_num": 4},
     )
     target_registry.register_target(spec)
-    target_registry._set_current_target("current_hw")
+    target_registry.set_current_target("current_hw")
     try:
+        assert target_registry.get_current_target() == "current_hw"
         assert target_registry.get_current_target_hardware("thread_num") == 4
         assert target_registry.get_current_target_hardware("sm_memory_size") is None
     finally:
-        target_registry._set_current_target(None)
+        target_registry.set_current_target(None)
+    assert target_registry.get_current_target() is None
+
+
+# TC-TGT-008A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-26 22:55:00 +0800
+# 最近一次运行成功时间: 2026-04-26 22:55:00 +0800
+# 测试目的: 验证 current target 公开 setter 对未注册 target 显式失败。
+# 对应功能实现文件路径: kernel_gen/target/registry.py
+# 对应 spec 文件路径: spec/target/registry.md
+def test_target_registry_set_current_target_rejects_unregistered_target() -> None:
+    with pytest.raises(ValueError):
+        target_registry.set_current_target("missing_current_target")
+
+
+def test_target_registry_public_exports_include_current_target_api() -> None:
+    """TC-TGT-014: public registry exports should expose current target accessors."""
+
+    registry_module = importlib.import_module("kernel_gen.target.registry")
+    namespace: dict[str, object] = {}
+    exec("from kernel_gen.target.registry import *", namespace)
+    public_names = {name for name in namespace if not name.startswith("__")}
+    assert "set_current_target" in public_names
+    assert "get_current_target" in public_names
+    assert "get_current_target_hardware" in public_names
+    assert namespace["set_current_target"] is registry_module.set_current_target
+    assert namespace["get_current_target"] is registry_module.get_current_target
+    assert namespace["get_current_target_hardware"] is registry_module.get_current_target_hardware
+    assert callable(namespace["set_current_target"])
+    assert callable(namespace["get_current_target"])
 
 
 # TC-TGT-011

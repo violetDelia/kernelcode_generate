@@ -1,21 +1,30 @@
 """tools package.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 - 暴露面向脚本与测试的轻量工具模块（例如 ircheck）。
-- 惰性暴露 `dsl_run` 的公开入口，供产品测试直接复用。
+- 包根惰性暴露 `DslRunError` / `DslRunResult` 两个公开类型，以及稳定的 `dsl_run(...)` 公开函数入口。
+
+API 列表:
+- `DslRunError(message: str)`
+- `DslRunResult(func_op: func.FuncOp, module: ModuleOp, source: str, compiled_kernel: CompiledKernel, execute_result: ExecuteResult, runtime_args: tuple[object, ...])`
+- `dsl_run(func_obj: object, real_args: tuple[object, ...] | list[object], pipeline: str | PassManager, emitcconfig: EmitCContext) -> DslRunResult`
+
+helper 清单:
+- `_load_dsl_run_exports() -> tuple[type[Exception], type[object], object]`
+- `__getattr__(name: str) -> object`
 
 使用示例:
 - from kernel_gen.tools.ircheck import run_ircheck_text
-- from kernel_gen.tools import dsl_run
+- import kernel_gen.tools as tools
 - result = run_ircheck_text(\"\"\"// COMPILE_ARGS: --pass no-op
 // CHECK: builtin.module
 
 builtin.module {}
 \"\"\")
 - assert result.ok is True
-- result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
+- result = tools.dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
 
 关联文件:
 - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
@@ -28,7 +37,74 @@ builtin.module {}
 
 from __future__ import annotations
 
-__all__ = ["DslRunError", "DslRunResult", "dsl_run"]
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kernel_gen.dsl.gen_kernel import EmitCContext
+    from kernel_gen.passes.pass_manager import PassManager
+    from .dsl_run import DslRunResult
+
+__all__ = ["DslRunError", "DslRunResult"]
+_PACKAGE_ROOT_DSL_RUN: object | None = None
+
+
+def _load_dsl_run_exports() -> tuple[type[Exception], type[object], object]:
+    """加载 `dsl_run` 公开导出对象。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 集中导入 `kernel_gen.tools.dsl_run` 模块中的稳定公开名。
+    - 供包根 `DslRunError` / `DslRunResult` 惰性导出与 `dsl_run(...)` 包装函数共用，避免重复写导入语句。
+    - 每次子模块导入后都会把包根 `dsl_run` 重新绑定回公开函数，消除同名子模块覆盖带来的导入顺序差异。
+
+    使用示例:
+    - dsl_run_error, dsl_run_result, dsl_run_func = _load_dsl_run_exports()
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_package_api.py](test_package_api.py)
+    - 功能实现: [kernel_gen/tools/__init__.py](.)
+    """
+
+    from .dsl_run import DslRunError, DslRunResult, dsl_run as dsl_run_func
+
+    if _PACKAGE_ROOT_DSL_RUN is not None:
+        globals()["dsl_run"] = _PACKAGE_ROOT_DSL_RUN
+    return DslRunError, DslRunResult, dsl_run_func
+
+
+def dsl_run(
+    func_obj: object,
+    real_args: tuple[object, ...] | list[object],
+    pipeline: str | "PassManager",
+    emitcconfig: "EmitCContext",
+) -> "DslRunResult":
+    """通过 `kernel_gen.tools` 包根转发 `dsl_run(...)` 公开入口。
+
+    创建者: OpenAI Codex
+    最后一次更改: OpenAI Codex
+
+    功能说明:
+    - 为 `kernel_gen.tools` 包根提供稳定的 `dsl_run(...)` 公开函数。
+    - 运行时按需加载 [`kernel_gen.tools.dsl_run`](dsl_run.py) 中的真实实现，避免包导入时直接拉起整条 lowering 链。
+
+    使用示例:
+    - import kernel_gen.tools as tools
+    - result = tools.dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", emitcconfig)
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_package_api.py](test_package_api.py)
+    - 功能实现: [kernel_gen/tools/__init__.py](.)
+    """
+
+    _, _, dsl_run_func = _load_dsl_run_exports()
+    return dsl_run_func(func_obj, real_args, pipeline, emitcconfig)
+
+
+_PACKAGE_ROOT_DSL_RUN = dsl_run
 
 
 def __getattr__(name: str) -> object:
@@ -38,12 +114,11 @@ def __getattr__(name: str) -> object:
     最后一次更改: OpenAI Codex
 
     功能说明:
-    - 仅在调用方真正访问 `dsl_run` 相关公开名时导入 [`kernel_gen.tools.dsl_run`](dsl_run.py)。
+    - 仅在调用方真正访问 `DslRunError` / `DslRunResult` 时导入 [`kernel_gen.tools.dsl_run`](dsl_run.py)。
     - 避免 `emitc_case_runner` 这类轻量 helper 在导入 `kernel_gen.tools.*` 时被 pass/pipeline 侧副作用拖起。
 
     使用示例:
-    - from kernel_gen.tools import dsl_run
-    - result = dsl_run(...)
+    - from kernel_gen.tools import DslRunError
 
     关联文件:
     - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
@@ -51,12 +126,10 @@ def __getattr__(name: str) -> object:
     - 功能实现: [kernel_gen/tools/__init__.py](.)
     """
 
-    if name in __all__:
-        from .dsl_run import DslRunError, DslRunResult, dsl_run
-
+    if name in {"DslRunError", "DslRunResult"}:
+        dsl_run_error, dsl_run_result, _ = _load_dsl_run_exports()
         return {
-            "DslRunError": DslRunError,
-            "DslRunResult": DslRunResult,
-            "dsl_run": dsl_run,
+            "DslRunError": dsl_run_error,
+            "DslRunResult": dsl_run_result,
         }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

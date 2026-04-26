@@ -7,6 +7,29 @@
 - 汇总 DSL AST、遍历与 MLIR 生成的公开入口。
 - 保持导出范围与 spec 定义一致。
 
+API 列表:
+- `BinaryExprAST(op: str, lhs: object, rhs: object, location: SourceLocation | None = None)`
+- `BlockAST(statements: list[object], location: SourceLocation | None = None)`
+- `CompareExprAST(op: str, lhs: object, rhs: object, location: SourceLocation | None = None)`
+- `ConstAST(value: object, location: SourceLocation | None = None)`
+- `Diagnostic(message: str, location: SourceLocation | None = None)`
+- `FunctionAST(name: str, inputs: list[TensorAST | ScalarArgAST | PtrArgAST], outputs: list[TensorAST | ScalarArgAST], body: BlockAST, location: SourceLocation | None = None, source: str | None = None, py_ast: object | None = None, diagnostics: list[Diagnostic] = ..., has_explicit_return: bool = False, has_return_annotation: bool = False, returns_none: bool = False)`
+- `ModuleAST(functions: list[FunctionAST])`
+- `ScalarArgAST(name: str, value_type: type, is_symbolic: bool = False, location: SourceLocation | None = None)`
+- `SourceLocation(line: int, column: int)`
+- `TensorAST(name: str, memory: object, location: SourceLocation | None = None)`
+- `VarAST(name: str, location: SourceLocation | None = None)`
+- `AstVisitor(config: dict[str, object] | None = None)`
+- `AstVisitorError(message: str, location: SourceLocation | None = None)`
+- `EmitContext(builder: Block, symbols: dict[str, object], types: dict[int, object], config: dict[str, object] | None = None)`
+- `parse_function(fn: object) -> FunctionAST`
+- `emit_mlir(node: object, ctx: EmitContext) -> object`
+- `build_func_op(fn: Callable[..., object], *runtime_args: object, globals: dict[str, object] | None = None, builtins: dict[str, object] | object | None = None) -> func.FuncOp`
+- `build_func_op_from_ast(func_ast: FunctionAST, runtime_args: tuple[object, ...] | list[object] | None = None, config: dict[str, object] | None = None) -> func.FuncOp`
+
+helper 清单:
+- 无
+
 使用示例:
 - from kernel_gen.dsl import parse_function, build_func_op
 

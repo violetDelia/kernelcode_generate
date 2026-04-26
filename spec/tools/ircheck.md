@@ -27,9 +27,57 @@
 ## API 列表
 
 - `CLI：`python -m kernel_gen.tools.ircheck [-irdump] [-emitc{target=<target>}] <case-file>`
+- `IrcheckParseError(message: str)`
+- `IrcheckCaseBlock(text: str, start_line: int)`
+- `CheckDirective(kind: CheckKind, text: str, line_no: int)`
+- `IrcheckCase(compile_args: str, checks: list[CheckDirective], input_ir: str, source_path: str | None = None)`
+- `IrcheckResult(ok: bool, exit_code: int, actual_ir: str, failed_check: CheckDirective | None = None, message: str | None = None)`
+- `IrcheckCompileStep(kind: Literal["pass", "pipeline"], name: str, options: dict[str, str])`
 - `parse_ircheck_file(path: str) -> IrcheckCase`
 - `run_ircheck_file(path: str, *, irdump: bool = False, emitc_target: str | None = None) -> IrcheckResult`
 - `run_ircheck_text(text: str, source_path: str | None = None, emitc_target: str | None = None) -> IrcheckResult`
+- `main(argv: Sequence[str] | None = None) -> int`
+
+## 公开 API 清单
+
+- `CLI：python -m kernel_gen.tools.ircheck [-irdump] [-emitc{target=<target>}] <case-file>`
+- `IrcheckParseError`
+- `IrcheckCaseBlock`
+- `CheckDirective`
+- `IrcheckCase`
+- `IrcheckResult`
+- `IrcheckCompileStep`
+- `parse_ircheck_file(path: str) -> IrcheckCase`
+- `run_ircheck_file(path: str, *, irdump: bool = False, emitc_target: str | None = None) -> IrcheckResult`
+- `run_ircheck_text(text: str, source_path: str | None = None, emitc_target: str | None = None) -> IrcheckResult`
+- `main(argv: Sequence[str] | None = None) -> int`
+
+## helper 清单
+
+- `_build_default_context() -> Context`
+- `_tokenize_check_pattern(text: str) -> list[tuple[str, str, str | None]]`
+- `_decode_literal_check_fragment(literal: str) -> str`
+- `_contains_invalid_regex_literal_fragment(literal: str) -> bool`
+- `_compile_literal_fragment(literal: str) -> str`
+- `_expand_regex_aliases(regex_text: str) -> str`
+- `_validate_pattern_directive(text: str, kind: CheckKind, declared_variables: set[str]) -> list[str]`
+- `_compile_pattern_directive(...)`
+- `_split_ircheck_text_into_case_blocks(text: str) -> list[IrcheckCaseBlock]`
+- `_parse_ircheck_cases(text: str, *, source_path: str | None) -> list[IrcheckCase]`
+- `_run_ircheck_cases(...)`
+- `_parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int = 0) -> IrcheckCase`
+- `_run_ircheck_case(...)`
+- `_render_emitc_text(operation: Operation, emitc_target: str) -> str`
+- `_is_empty_npu_demo_func(func_op: func.FuncOp) -> bool`
+- `_normalize_emitc_text(text: str, *, emitc_target: str, source_path: str | None) -> str`
+- `_parse_cli_args(args: Sequence[str]) -> tuple[str, bool, str | None] | None`
+- `_build_irdump_root(source_path: str | None, *, enabled: bool) -> Path | None`
+- `_write_irdump_file(path: Path, content: str) -> None`
+- `_parse_name_and_options(value: str) -> tuple[str, dict[str, str]] | None`
+- `_parse_compile_args(compile_args: str) -> list[IrcheckCompileStep] | None`
+- `_run_compile_step(ctx: Context, module: Operation, step: IrcheckCompileStep) -> Operation`
+- `_normalize_ir(value: Operation) -> str`
+- `_match_checks(...)`
 
 ## 核心语义
 

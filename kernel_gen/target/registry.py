@@ -7,6 +7,40 @@
 - 定义 target 注册与查询入口，用于管理 `arch` op 支持矩阵与硬件参数。
 - 支持从目录加载 JSON/TXT 形式的 target 规范，并提供支持性判定与硬件查询。
 
+API 列表:
+- `TargetSpec(name: str, arch_supported_ops: set[str] | None, arch_unsupported_ops: set[str], hardware: dict[str, int])`
+- `load_targets(directory: Path) -> dict[str, TargetSpec]`
+- `register_target(spec: TargetSpec) -> None`
+- `set_current_target(target: str | None) -> None`
+- `get_current_target() -> str | None`
+- `is_arch_op_supported(target: str, op_name: str) -> bool`
+- `get_target_hardware(target: str, key: str) -> int | None`
+- `get_current_target_hardware(key: str) -> int | None`
+- `get_target_analysis_defaults(target: str) -> dict[str, dict[str, int]]`
+
+helper 清单:
+- `_format_error(expected: str, actual: str = _ERROR_ACTUAL) -> str`
+- `_raise_value_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None`
+- `_raise_type_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None`
+- `_validate_target_name(name: str) -> None`
+- `_validate_arch_ops(spec: TargetSpec) -> None`
+- `_validate_op_set(op_set: set[str], field_name: str, target_name: str) -> None`
+- `_validate_hardware_map(hardware: dict[str, int], target_name: str) -> None`
+- `_parse_ops_list(raw_ops: object, field_name: str, target_name: str) -> set[str]`
+- `_parse_arch_payload(raw_arch: object, target_name: str) -> tuple[set[str] | None, set[str]]`
+- `_parse_hardware_payload(raw_hardware: object, target_name: str) -> dict[str, int]`
+- `_parse_target_spec(payload: dict[str, object], path: Path) -> TargetSpec`
+- `_read_target_json(path: Path) -> dict[str, object]`
+- `_parse_ops_text(text: str, field_name: str, target_name: str) -> set[str]`
+- `_parse_target_txt(path: Path) -> TargetSpec`
+- `_ensure_cpu_target() -> None`
+- `_ensure_npu_demo_target() -> None`
+- `_is_default_cpu_spec(spec: TargetSpec) -> bool`
+- `_same_target_spec(left: TargetSpec, right: TargetSpec) -> bool`
+- `_register_loaded_target(spec: TargetSpec) -> None`
+- `_set_current_target(target: str | None) -> None`
+- `_get_current_target() -> str | None`
+
 使用示例:
 - from pathlib import Path
 - from kernel_gen.target import registry
@@ -874,13 +908,7 @@ def _set_current_target(target: str | None) -> None:
     - 功能实现: kernel_gen/target/registry.py
     """
 
-    global _CURRENT_TARGET
-    if target is None:
-        _CURRENT_TARGET = None
-        return
-    if target not in _TARGET_REGISTRY:
-        _raise_value_error(f"target not registered: {target}")
-    _CURRENT_TARGET = target
+    set_current_target(target)
 
 
 def _get_current_target() -> str | None:
@@ -894,6 +922,57 @@ def _get_current_target() -> str | None:
 
     使用示例:
     - _get_current_target()
+
+    关联文件:
+    - spec: spec/target/registry.md
+    - test: test/target/test_target_registry.py
+    - 功能实现: kernel_gen/target/registry.py
+    """
+
+    return get_current_target()
+
+
+def set_current_target(target: str | None) -> None:
+    """设置当前启用的 target 名称。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 为 operation / dialect / test 提供稳定公开的 current target 设置入口。
+    - `target is None` 时关闭 current target 校验；否则要求 target 已完成注册。
+
+    使用示例:
+    - set_current_target("cpu")
+    - set_current_target(None)
+
+    关联文件:
+    - spec: spec/target/registry.md
+    - test: test/target/test_target_registry.py
+    - 功能实现: kernel_gen/target/registry.py
+    """
+
+    global _CURRENT_TARGET
+    if target is None:
+        _CURRENT_TARGET = None
+        return
+    if target not in _TARGET_REGISTRY:
+        _raise_value_error(f"target not registered: {target}")
+    _CURRENT_TARGET = target
+
+
+def get_current_target() -> str | None:
+    """获取当前启用的 target 名称。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 返回 current target registry 校验当前绑定的 target 名称。
+    - 为 operation / dialect 提供合法的公开查询接口，不再要求跨文件访问私有 helper。
+
+    使用示例:
+    - target_name = get_current_target()
 
     关联文件:
     - spec: spec/target/registry.md
@@ -932,10 +1011,12 @@ _ensure_npu_demo_target()
 
 __all__ = [
     "TargetSpec",
+    "get_current_target",
     "get_target_analysis_defaults",
     "get_current_target_hardware",
     "get_target_hardware",
     "is_arch_op_supported",
     "load_targets",
     "register_target",
+    "set_current_target",
 ]

@@ -88,14 +88,15 @@ def test_check_python_coverage_accepts_passing_report() -> None:
             "--coverage-json",
             str(_fixture("pass.json")),
             "--line-min",
-            "95",
+            "98",
             "--branch-min",
-            "60",
+            "70",
         ]
     )
     assert code == 0
     assert "coverage ok:" in stdout
-    assert "line=95.24%" in stdout
+    assert "line=98.00%" in stdout
+    assert "branch=70.00%" in stdout
     assert stderr == ""
 
 
@@ -109,9 +110,9 @@ def test_check_python_coverage_supports_include_module_filter() -> None:
             "--include-module",
             "kernel_gen.passes",
             "--line-min",
-            "95",
+            "98",
             "--branch-min",
-            "60",
+            "70",
         ]
     )
     assert code == 0
@@ -151,9 +152,9 @@ def test_check_python_coverage_supports_file_level_include_module_filter(tmp_pat
             "--include-module",
             "kernel_gen.passes.tile.analysis",
             "--line-min",
-            "95",
+            "98",
             "--branch-min",
-            "60",
+            "70",
         ]
     )
     assert code == 0
@@ -170,14 +171,14 @@ def test_check_python_coverage_rejects_line_threshold() -> None:
             "--coverage-json",
             str(_fixture("line_fail.json")),
             "--line-min",
-            "95",
+            "98",
             "--branch-min",
-            "60",
+            "70",
         ]
     )
     assert code == 1
     assert stdout == ""
-    assert "line coverage 90.00% < 95.00%" in stderr
+    assert "line coverage 90.00% < 98.00%" in stderr
 
 
 def test_check_python_coverage_rejects_branch_threshold() -> None:
@@ -188,14 +189,14 @@ def test_check_python_coverage_rejects_branch_threshold() -> None:
             "--coverage-json",
             str(_fixture("branch_fail.json")),
             "--line-min",
-            "95",
+            "98",
             "--branch-min",
-            "60",
+            "70",
         ]
     )
     assert code == 1
     assert stdout == ""
-    assert "branch coverage 55.00% < 60.00%" in stderr
+    assert "branch coverage 55.00% < 70.00%" in stderr
 
 
 def test_check_python_coverage_rejects_missing_fields() -> None:
@@ -206,9 +207,9 @@ def test_check_python_coverage_rejects_missing_fields() -> None:
             "--coverage-json",
             str(_fixture("missing_fields.json")),
             "--line-min",
-            "95",
+            "98",
             "--branch-min",
-            "60",
+            "70",
         ]
     )
     assert code == 1

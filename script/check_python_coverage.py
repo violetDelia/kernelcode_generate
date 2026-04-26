@@ -7,11 +7,28 @@
 功能说明:
 - 读取 `coverage.py` 生成的 JSON 报告。
 - 按全量 `kernel_gen` 或指定模块前缀检查 line / branch 覆盖率阈值。
-- 为 S1 / S7 提供可脚本化、可测试的覆盖率阈值检查入口。
+- 为 `repo_conformance_refactor` 主线提供可脚本化、可测试的覆盖率阈值检查入口。
+
+API 列表:
+- `CoverageCheckError(message: str)`
+- `check_coverage(report_path: Path, line_min: float, branch_min: float, include_modules: list[str]) -> dict[str, Any]`
+- `main(argv: list[str] | None = None) -> int`
+
+helper 清单:
+- `_build_parser() -> argparse.ArgumentParser`
+- `_load_report(path: Path) -> dict[str, Any]`
+- `_normalize_module_prefix(module: str) -> str`
+- `_path_matches_module(path: str, module: str) -> bool`
+- `_require_int(value: Any, field: str, scope: str) -> int`
+- `_summary_metrics(summary: Any, scope: str) -> dict[str, int]`
+- `_select_scope(report: dict[str, Any], include_modules: list[str]) -> tuple[str, dict[str, int]]`
+- `_percentage(covered: int, total: int) -> float`
+- `_format_summary(scope: str, line_pct: float, branch_pct: float) -> str`
+- `_validate_thresholds(line_pct: float, branch_pct: float, line_min: float, branch_min: float) -> None`
 
 使用示例:
-- python3 script/check_python_coverage.py --coverage-json coverage/S1/coverage.json --line-min 95 --branch-min 60
-- python3 script/check_python_coverage.py --coverage-json coverage/S1/coverage.json --include-module kernel_gen.passes --line-min 95 --branch-min 60
+- python3 script/check_python_coverage.py --coverage-json coverage/S2/coverage.json --line-min 98 --branch-min 70
+- python3 script/check_python_coverage.py --coverage-json coverage/S2/coverage.json --include-module kernel_gen.tools --line-min 98 --branch-min 70
 
 关联文件:
 - spec: [spec/script/python_coverage_check.md](../spec/script/python_coverage_check.md)
@@ -46,7 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     使用示例:
     - parser = _build_parser()
-    - args = parser.parse_args(["--coverage-json", "coverage.json", "--line-min", "95", "--branch-min", "60"])
+    - args = parser.parse_args(["--coverage-json", "coverage.json", "--line-min", "98", "--branch-min", "70"])
 
     关联文件:
     - spec: [spec/script/python_coverage_check.md](../spec/script/python_coverage_check.md)
