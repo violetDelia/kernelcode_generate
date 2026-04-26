@@ -48,7 +48,6 @@ build_registered_pipeline = registry_module.build_registered_pipeline
 load_builtin_passes = registry_module.load_builtin_passes
 list_registered_passes = registry_module.list_registered_passes
 list_registered_pipelines = registry_module.list_registered_pipelines
-_reset_registry_for_test = registry_module._reset_registry_for_test
 
 pass_manager_module = importlib.import_module("kernel_gen.passes.pass_manager")
 Pass = pass_manager_module.Pass
@@ -56,11 +55,41 @@ PassManager = pass_manager_module.PassManager
 PassContractError = importlib.import_module("kernel_gen.passes.common").PassContractError
 
 
+def _bind_registry_api(module: object) -> None:
+    """把 registry 模块的公开 API 重新绑定到当前测试文件。"""
+
+    global registry_module
+    global PassRegistryError
+    global register_pass
+    global register_pipeline
+    global build_registered_pass
+    global build_registered_pipeline
+    global load_builtin_passes
+    global list_registered_passes
+    global list_registered_pipelines
+
+    registry_module = module
+    PassRegistryError = module.PassRegistryError
+    register_pass = module.register_pass
+    register_pipeline = module.register_pipeline
+    build_registered_pass = module.build_registered_pass
+    build_registered_pipeline = module.build_registered_pipeline
+    load_builtin_passes = module.load_builtin_passes
+    list_registered_passes = module.list_registered_passes
+    list_registered_pipelines = module.list_registered_pipelines
+
+
+def _reload_registry_api() -> None:
+    """重新导入 registry 模块并恢复其公开入口状态。"""
+
+    _bind_registry_api(importlib.reload(importlib.import_module("kernel_gen.passes.registry")))
+
+
 @pytest.fixture(autouse=True)
 def _isolate_registry_state() -> None:
-    _reset_registry_for_test()
+    _reload_registry_api()
     yield
-    _reset_registry_for_test()
+    _reload_registry_api()
 
 
 @contextlib.contextmanager
@@ -733,14 +762,14 @@ def test_load_builtin_passes_is_idempotent() -> None:
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-13 11:38:00 +0800
 # 最近一次运行成功时间: 2026-04-13 11:38:00 +0800
-# 功能说明: 验证重置 registry 后再次 load_builtin_passes 仍能注册 default-lowering 与 npu-demo-lowering。
-# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_load_builtin_passes_after_reset_registers_default_lowering
+# 功能说明: 验证重新导入 registry 后再次 load_builtin_passes 仍能注册 default-lowering 与 npu-demo-lowering。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_load_builtin_passes_after_reload_registers_default_lowering
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
 # 对应测试文件路径: test/pass/test_pass_registry.py
-def test_load_builtin_passes_after_reset_registers_default_lowering() -> None:
+def test_load_builtin_passes_after_reload_registers_default_lowering() -> None:
     load_builtin_passes()
-    _reset_registry_for_test()
+    _reload_registry_api()
     load_builtin_passes()
     assert "default-lowering" in list_registered_pipelines()
     assert "npu-demo-lowering" in list_registered_pipelines()

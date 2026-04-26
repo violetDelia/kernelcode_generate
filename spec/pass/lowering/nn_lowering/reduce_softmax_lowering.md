@@ -13,14 +13,13 @@
 ## 文档信息
 
 - 创建者：`小李飞刀`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md`](../../../../spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py`](../../../../kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py)
 - `test`：
   - [`test/pass/nn_lowering/test_reduce_lowering.py`](../../../../test/pass/nn_lowering/test_reduce_lowering.py)
   - [`test/pass/nn_lowering/test_lowering_nn_lowering.py`](../../../../test/pass/nn_lowering/test_lowering_nn_lowering.py)
   - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
 
 ## 依赖
 
@@ -82,12 +81,10 @@ patterns = reduce_softmax_patterns()
   - [`test/pass/nn_lowering/test_reduce_lowering.py`](../../../../test/pass/nn_lowering/test_reduce_lowering.py)
   - [`test/pass/nn_lowering/test_lowering_nn_lowering.py`](../../../../test/pass/nn_lowering/test_lowering_nn_lowering.py)
   - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
 - 执行命令：
   - `pytest -q test/pass/nn_lowering/test_reduce_lowering.py`
-  - `pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k softmax`
+  - `pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k "reduce or softmax"`
   - `pytest -q test/pass/nn_lowering/public_name.py -k patterns`
-  - `pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k "reduce or softmax"`
 - 测试目标：
   - 确认 reduce family 的 lowering 结果与属性校验一致。
   - 确认 direct `nn.softmax` 稳定报错，提示必须先完成分解。
@@ -96,4 +93,6 @@ patterns = reduce_softmax_patterns()
   - `test_nn_lowering_reduce_ircheck`
   - `test_nn_lowering_reduce_shape_mismatch`
   - `test_lower_softmax_requires_decompass`
-  - `test_select_reduce_softmax_additional_branches`
+  - `test_reduce_axes_validation`
+  - `test_reduce_keepdim_validation`
+  - `test_softmax_requires_decompass_before_axis_validation`

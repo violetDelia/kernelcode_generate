@@ -7,6 +7,15 @@
 - 将 nn dialect op 通过 pattern collection lower 为 kernel dialect op。
 - 当结果无法复用已有输出时，为结果插入 dma.alloc。
 - `nn.softmax` 不在本 pass 直接 lower，需先由上游完成分解。
+- 文件内 helper 按 `_ensure_*`、`_normalize_*`、`_collect_*`、`_materialize_*`
+  与 `_lower_*` 前缀收口，并由 `_RejectUnsupportedNnOpPattern` 兜底拒绝未知 `nn.*`；
+  这些 helper 仅供当前文件内部复用。
+
+API 列表:
+- `class NnLoweringError()`
+- `nn_lowering_patterns() -> list[RewritePattern]`
+- `class NnLoweringPass()`
+- `NnLoweringPass.apply(self: NnLoweringPass, ctx: Context, op: ModuleOp) -> None`
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
@@ -928,11 +937,29 @@ class NnLoweringPass(Pass):
     name = "lower-nn"
 
     def apply(self, ctx: Context, op: ModuleOp) -> None:
-        """执行 nn lowering，并在 rewrite driver 内启用 folding。"""
+        """执行 nn lowering。
+
+        创建者: 金铲铲大作战
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 通过 canonical public path 取得 `nn_lowering_patterns()` 返回的 pattern driver。
+        - 使用 `PatternRewriteWalker + GreedyRewritePatternApplier` 对 module 原地改写。
+
+        使用示例:
+        - NnLoweringPass().apply(Context(), module)
+
+        关联文件:
+        - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
+        - test: [test/pass/nn_lowering/public_name.py](test/pass/nn_lowering/public_name.py)
+        - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
+        """
+
+        from kernel_gen.passes.lowering import nn_lowering as nn_lowering_pkg
 
         PatternRewriteWalker(
             GreedyRewritePatternApplier(
-                nn_lowering_patterns(),
+                nn_lowering_pkg.nn_lowering_patterns(),
                 ctx=ctx,
                 folding_enabled=True,
                 dce_enabled=False,

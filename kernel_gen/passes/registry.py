@@ -6,6 +6,19 @@
 功能说明:
 - 提供 pass / pipeline 的进程内注册表，统一“名字 -> 构造器”的解析入口。
 - 为工具层（如 ircheck）提供稳定名称解析能力，避免依赖具体 Python import path。
+- 文件内 helper 收口为 `_register_registry_entry`、`_build_registered_pass_instance`、
+  `_build_registered_pipeline_manager`、`_pipeline_accepts_options`、`_normalize_options`
+  与 `_reset_registry_for_test`；这些 helper 仅供本文件内部复用，不属于公开接口。
+
+API 列表:
+- `class PassRegistryError()`
+- `register_pass(pass_cls: type[PassType]) -> type[PassType]`
+- `register_pipeline(name: str) -> Callable[[Callable[..., PassManager]], Callable[..., PassManager]]`
+- `build_registered_pass(name: str, options: dict[str, str] | None = None) -> XdslModulePass`
+- `build_registered_pipeline(name: str, options: dict[str, str] | None = None) -> PassManager`
+- `load_builtin_passes() -> None`
+- `list_registered_passes() -> list[str]`
+- `list_registered_pipelines() -> list[str]`
 
 使用示例:
 - from kernel_gen.passes.registry import load_builtin_passes, build_registered_pass

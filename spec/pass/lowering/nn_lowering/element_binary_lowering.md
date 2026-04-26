@@ -13,7 +13,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/pass/lowering/nn_lowering/element_binary_lowering.md`](../../../../spec/pass/lowering/nn_lowering/element_binary_lowering.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py`](../../../../kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py)
 - `test`：
@@ -29,7 +29,7 @@
   - [`test/pass/nn_lowering/element_compare_gt.py`](../../../../test/pass/nn_lowering/element_compare_gt.py)
   - [`test/pass/nn_lowering/element_compare_ge.py`](../../../../test/pass/nn_lowering/element_compare_ge.py)
   - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
+  - [`test/pass/nn_lowering/test_nn_lowering_asset_cases.py`](../../../../test/pass/nn_lowering/test_nn_lowering_asset_cases.py)
 
 ## 依赖
 
@@ -106,7 +106,7 @@ patterns = element_binary_patterns()
   - [`test/pass/nn_lowering/element_compare_gt.py`](../../../../test/pass/nn_lowering/element_compare_gt.py)
   - [`test/pass/nn_lowering/element_compare_ge.py`](../../../../test/pass/nn_lowering/element_compare_ge.py)
   - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
+  - [`test/pass/nn_lowering/test_nn_lowering_asset_cases.py`](../../../../test/pass/nn_lowering/test_nn_lowering_asset_cases.py)
 - 执行命令：
   - `pytest -q test/pass/nn_lowering/element_binary_add.py`
   - `pytest -q test/pass/nn_lowering/element_binary_sub.py`
@@ -120,7 +120,7 @@ patterns = element_binary_patterns()
   - `pytest -q test/pass/nn_lowering/element_compare_gt.py`
   - `pytest -q test/pass/nn_lowering/element_compare_ge.py`
   - `pytest -q test/pass/nn_lowering/public_name.py -k patterns`
-  - `pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k element_binary`
+  - `pytest -q test/pass/nn_lowering/test_nn_lowering_asset_cases.py -k "element_binary or element_compare"`
 - 测试目标：
   - 验证每个 element binary / compare op 都由独立 pattern 处理，且 kind 映射一致。
   - 验证 add/sub 静态 `memory + memory` case 的最小稳定输出为 `dma.alloc + kernel.binary_elewise + func.return`。
@@ -139,4 +139,4 @@ patterns = element_binary_patterns()
   - `test_lower_le_to_kernel_binary_elewise`
   - `test_lower_gt_to_kernel_binary_elewise`
   - `test_lower_ge_to_kernel_binary_elewise`
-  - `test_element_binary_lowering_helpers`
+  - `test_nn_lowering_asset_case`

@@ -13,13 +13,12 @@
 ## 文档信息
 
 - 创建者：`小李飞刀`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/pass/lowering/nn_lowering/dma_structured_lowering.md`](../../../../spec/pass/lowering/nn_lowering/dma_structured_lowering.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py`](../../../../kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py)
 - `test`：
   - [`test/pass/nn_lowering/test_lowering_nn_lowering.py`](../../../../test/pass/nn_lowering/test_lowering_nn_lowering.py)
   - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
 
 ## 依赖
 
@@ -81,11 +80,9 @@ patterns = dma_structured_patterns()
 - 测试文件：
   - [`test/pass/nn_lowering/test_lowering_nn_lowering.py`](../../../../test/pass/nn_lowering/test_lowering_nn_lowering.py)
   - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
 - 执行命令：
   - `pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k "broadcast or transpose"`
   - `pytest -q test/pass/nn_lowering/public_name.py -k patterns`
-  - `pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k dma_structured`
 - 测试目标：
   - 验证 broadcast/transpose 的改写目标为 `dma.*`。
   - 验证 broadcast 的符号维与 shape 约束报错。
@@ -99,4 +96,3 @@ patterns = dma_structured_patterns()
   - `test_lower_transpose_dynamic`
   - `test_lower_broadcast_rejects_invalid_shape`
   - `test_broadcast_rejects_invalid_scalar`
-  - `test_dma_structured_lowering_helpers`

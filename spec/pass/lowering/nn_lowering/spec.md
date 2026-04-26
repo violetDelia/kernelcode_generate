@@ -8,23 +8,22 @@
 
 ## API 列表
 
-- `NnLoweringPass`
-  - `—— apply(ctx: Context, module: builtin.module) -> None`
-  - `—— run(module: builtin.module) -> builtin.module`
+- `class NnLoweringPass()`
+- `NnLoweringPass.apply(ctx: Context, module: builtin.module) -> None`
+- `NnLoweringPass.run(module: builtin.module) -> builtin.module`
+- `class NnLoweringError(message: str)`
 - `nn_lowering_patterns() -> list[RewritePattern]`
-- `NnLoweringError`
-- `ensure_module_op(module)`
 
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/pass/lowering/nn_lowering/spec.md`](../../../../spec/pass/lowering/nn_lowering/spec.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/nn_lowering.py`](../../../../kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
 - `test`：
   - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
   - [`test/pass/nn_lowering/test_lowering_nn_lowering.py`](../../../../test/pass/nn_lowering/test_lowering_nn_lowering.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
+  - [`test/pass/nn_lowering/test_nn_lowering_asset_cases.py`](../../../../test/pass/nn_lowering/test_nn_lowering_asset_cases.py)
 
 ## 依赖
 
@@ -292,11 +291,11 @@ module_op = ensure_module_op(module)
 - 测试文件：
   - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
   - [`test/pass/nn_lowering/test_lowering_nn_lowering.py`](../../../../test/pass/nn_lowering/test_lowering_nn_lowering.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
+  - [`test/pass/nn_lowering/test_nn_lowering_asset_cases.py`](../../../../test/pass/nn_lowering/test_nn_lowering_asset_cases.py)
 - 执行命令：
   - `pytest -q test/pass/nn_lowering/public_name.py`
   - `pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py`
-  - `pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py`
+  - `pytest -q test/pass/nn_lowering/test_nn_lowering_asset_cases.py`
   - `pytest -q test/pass/nn_lowering`
 - 测试目标：
   - 验证 `NnLoweringPass` 的公开名字与 canonical import path 稳定。
@@ -304,7 +303,7 @@ module_op = ensure_module_op(module)
   - 验证 `nn_lowering_patterns()` 的注册顺序稳定，且 family dispatcher 占位 pattern 已退场。
   - 验证 `NnLoweringPass.apply(...)` 直接使用 `PatternRewriteWalker + GreedyRewritePatternApplier + nn_lowering_patterns()` 驱动改写。
   - 验证 `NnLoweringError` 与 `NnLoweringPass` 的 canonical public import 可用。
-  - 验证 family shared helper 的错误模型、边界条件与 pattern 共享逻辑。
+  - 验证 collectable 公开资产入口当前桥接的非 `test_*.py` helper / boundary case 可直接执行。
   - 验证 `kernel.binary_elewise` 与 `kernel.reduce` 在 lowering 输出中可解析与可校验。
   - 验证 add/sub 的静态 `memory + memory` lowering 不把 `symbol.get_dim` 作为必现前置行。
   - 验证 add/sub 的符号维度 lowering 在 `dma.alloc` 前按维度生成 `symbol.get_dim`。
@@ -319,9 +318,12 @@ module_op = ensure_module_op(module)
 | --- | --- | --- |
 | TC-PASS-NNL-001 | `NnLoweringPass` 公开名称 | `test_nn_lowering_pass_public_name` |
 | TC-PASS-NNL-002 | canonical import 成功、旧 compat 模块失败 | `test_nn_lowering_pass_public_exports` |
-| TC-PASS-NNL-003 | `nn_lowering_patterns()` 的注册顺序与 reject-last 规则稳定 | `test_nn_lowering_patterns_register_reject_last` |
+| TC-PASS-NNL-003 | `nn_lowering_patterns()` 通过公开 `*_patterns()` 组合且 reject-last 规则稳定 | `test_nn_lowering_patterns_compose_public_family_exports` |
 | TC-PASS-NNL-004 | `NnLoweringPass.apply(...)` 直接使用 pattern driver | `test_nn_lowering_apply_uses_pattern_driver` |
-| TC-PASS-NNL-005 | shared helper 的基础错误模型与边界稳定 | `test_nn_lowering_utility_helpers`、`test_nn_lowering_core_helpers` |
+| TC-PASS-NNL-005 | collectable 公开资产入口可直接执行当前已纳入的非 `test_*.py` helper / boundary case | `test_nn_lowering_asset_case` |
+
+- collectable 资产入口当前只覆盖可直接通过的非 `test_*.py` 资产 case。
+- `img2col1d/2d` 的 `accepts_noncanonical_symbol_names` 仍由各自资产文件单独维护，不属于 `test_nn_lowering_asset_cases.py` 的当前公开入口范围。
 | TC-PASS-NNL-010 | `nn.add` lowering 为 `kernel.binary_elewise(kind="add")` | `test_lower_add_to_kernel` |
 | TC-PASS-NNL-011 | `nn.truediv` lowering 为 `kernel.binary_elewise(kind="div")` | `test_lower_div_to_kernel` |
 | TC-PASS-NNL-012 | `nn.reduce_min` lowering 为 `kernel.reduce(kind="min")` | `test_lower_reduce_min_to_kernel` |

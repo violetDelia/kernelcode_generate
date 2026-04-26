@@ -1,11 +1,13 @@
 """nn_lowering asset case collection tests.
 
 创建者: jcc你莫辜负
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 将 `test/pass/nn_lowering/` 下仍以资产形态存放的 nn_lowering case 收口为 collectable pytest。
 - 直接复用现有 case 函数，避免重复搬运断言，同时让 `pytest -q test/pass` 能实际执行这些回归。
+- 已经是 `test_*.py` 的 collectable 公开测试文件不再通过本文件跨文件复用测试函数。
+- collectable 公开入口当前只桥接可直接通过的非 `test_*.py` 资产 case；`img2col1d/2d accepts_noncanonical_symbol_names` 继续留在各自资产文件单独维护，不计入本入口。
 
 使用示例:
 - pytest -q test/pass/nn_lowering/test_nn_lowering_asset_cases.py
@@ -49,7 +51,6 @@ from . import exp as exp_cases
 from . import img2col1d as img2col1d_cases
 from . import img2col2d as img2col2d_cases
 from . import matmul as matmul_cases
-from . import public_name as public_name_cases
 from . import select as select_cases
 
 ASSET_CASES: list[tuple[str, Callable[[], None]]] = [
@@ -70,15 +71,10 @@ ASSET_CASES: list[tuple[str, Callable[[], None]]] = [
     ("exp::test_nn_lowering_exp_dynamic", exp_cases.test_nn_lowering_exp_dynamic),
     ("exp::test_nn_lowering_exp_shape_mismatch", exp_cases.test_nn_lowering_exp_shape_mismatch),
     ("exp::test_nn_lowering_exp_static", exp_cases.test_nn_lowering_exp_static),
-    ("img2col1d::test_nn_lowering_img2col1d_accepts_noncanonical_symbol_names", img2col1d_cases.test_nn_lowering_img2col1d_accepts_noncanonical_symbol_names),
     ("img2col1d::test_nn_lowering_img2col1d_target", img2col1d_cases.test_nn_lowering_img2col1d_target),
-    ("img2col2d::test_nn_lowering_img2col2d_accepts_noncanonical_symbol_names", img2col2d_cases.test_nn_lowering_img2col2d_accepts_noncanonical_symbol_names),
     ("img2col2d::test_nn_lowering_img2col2d_target", img2col2d_cases.test_nn_lowering_img2col2d_target),
     ("matmul::test_nn_lowering_matmul_inside_symbol_for", matmul_cases.test_nn_lowering_matmul_inside_symbol_for),
     ("matmul::test_nn_lowering_matmul_target", matmul_cases.test_nn_lowering_matmul_target),
-    ("public_name::test_nn_lowering_pass_public_exports", public_name_cases.test_nn_lowering_pass_public_exports),
-    ("public_name::test_nn_lowering_pass_public_name", public_name_cases.test_nn_lowering_pass_public_name),
-    ("public_name::test_nn_lowering_patterns_register_reject_last", public_name_cases.test_nn_lowering_patterns_register_reject_last),
     ("select::test_lower_select_to_kernel_select", select_cases.test_lower_select_to_kernel_select),
 ]
 
@@ -88,11 +84,12 @@ def test_nn_lowering_asset_case(case_name: str, case_fn: Callable[[], None]) -> 
     """执行 nn_lowering 资产 case。
 
     创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 让原本散落在非 `test_*.py` 文件中的 nn_lowering 回归变成真正可收集的 pytest。
+    - 让当前可直接通过的非 `test_*.py` nn_lowering 资产回归变成真正可收集的 pytest。
     - 每个 case 仍然保留独立断言，只是统一挂接到 collectable 入口。
+    - 已知仍需单独维护的 `img2col1d/2d accepts_noncanonical_symbol_names` 不纳入本入口。
 
     使用示例:
     - pytest -q test/pass/nn_lowering/test_nn_lowering_asset_cases.py -k element_binary_add
@@ -105,25 +102,3 @@ def test_nn_lowering_asset_case(case_name: str, case_fn: Callable[[], None]) -> 
 
     _ = case_name
     case_fn()
-
-
-def test_nn_lowering_apply_uses_pattern_driver_asset(monkeypatch: pytest.MonkeyPatch) -> None:
-    """执行 nn_lowering public_name 中需要 monkeypatch 的资产 case。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 直接把 fixture 依赖的 public_name case 接入 collectable pytest。
-    - 避免为单个 fixture case 引入额外的通用调用层。
-
-    使用示例:
-    - pytest -q test/pass/nn_lowering/test_nn_lowering_asset_cases.py -k pattern_driver
-
-    关联文件:
-    - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
-    - test: [test/pass/nn_lowering/public_name.py](test/pass/nn_lowering/public_name.py)
-    - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
-    """
-
-    public_name_cases.test_nn_lowering_apply_uses_pattern_driver(monkeypatch)

@@ -13,24 +13,24 @@
 ## 文档信息
 
 - 创建者：`咯咯咯`
-- 最后一次更改：`咯咯咯`
-- `spec`：[`spec/pass/lowering/nn_lowering/select_cast_lowering.md`](../../../spec/pass/lowering/nn_lowering/select_cast_lowering.md)
-- `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py`](../../../kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py)
+- 最后一次更改：`金铲铲大作战`
+- `spec`：[`spec/pass/lowering/nn_lowering/select_cast_lowering.md`](../../../../spec/pass/lowering/nn_lowering/select_cast_lowering.md)
+- `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py`](../../../../kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py)
 - `test`：
-  - [`test/pass/nn_lowering/select.py`](../../../test/pass/nn_lowering/select.py)
-  - [`test/pass/nn_lowering/cast.py`](../../../test/pass/nn_lowering/cast.py)
-  - [`test/pass/nn_lowering/exp.py`](../../../test/pass/nn_lowering/exp.py)
-  - [`test/pass/nn_lowering/public_name.py`](../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
+  - [`test/pass/nn_lowering/select.py`](../../../../test/pass/nn_lowering/select.py)
+  - [`test/pass/nn_lowering/cast.py`](../../../../test/pass/nn_lowering/cast.py)
+  - [`test/pass/nn_lowering/exp.py`](../../../../test/pass/nn_lowering/exp.py)
+  - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
+  - [`test/pass/nn_lowering/test_lowering_nn_lowering.py`](../../../../test/pass/nn_lowering/test_lowering_nn_lowering.py)
 
 ## 依赖
 
-- 总规范：[`spec/pass/lowering/nn_lowering/spec.md`](../../../spec/pass/lowering/nn_lowering/spec.md)
-- 工具函数：[`spec/pass/lowering/nn_lowering/nn_lowering_utility.md`](../../../spec/pass/lowering/nn_lowering/nn_lowering_utility.md)
-- NN dialect：[`spec/dialect/nn.md`](../../../spec/dialect/nn.md)
-- Kernel dialect：[`spec/dialect/kernel.md`](../../../spec/dialect/kernel.md)
-- DMA dialect：[`spec/dialect/dma.md`](../../../spec/dialect/dma.md)
-- Symbol dialect：[`spec/dialect/symbol.md`](../../../spec/dialect/symbol.md)
+- 总规范：[`spec/pass/lowering/nn_lowering/spec.md`](../../../../spec/pass/lowering/nn_lowering/spec.md)
+- 工具函数：[`spec/pass/lowering/nn_lowering/nn_lowering_utility.md`](../../../../spec/pass/lowering/nn_lowering/nn_lowering_utility.md)
+- NN dialect：[`spec/dialect/nn.md`](../../../../spec/dialect/nn.md)
+- Kernel dialect：[`spec/dialect/kernel.md`](../../../../spec/dialect/kernel.md)
+- DMA dialect：[`spec/dialect/dma.md`](../../../../spec/dialect/dma.md)
+- Symbol dialect：[`spec/dialect/symbol.md`](../../../../spec/dialect/symbol.md)
 
 ## 目标
 
@@ -102,17 +102,17 @@ patterns = select_cast_patterns()
 ## 测试
 
 - 测试文件：
-  - [`test/pass/nn_lowering/select.py`](../../../test/pass/nn_lowering/select.py)
-  - [`test/pass/nn_lowering/cast.py`](../../../test/pass/nn_lowering/cast.py)
-  - [`test/pass/nn_lowering/exp.py`](../../../test/pass/nn_lowering/exp.py)
-  - [`test/pass/nn_lowering/public_name.py`](../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
+  - [`test/pass/nn_lowering/select.py`](../../../../test/pass/nn_lowering/select.py)
+  - [`test/pass/nn_lowering/cast.py`](../../../../test/pass/nn_lowering/cast.py)
+  - [`test/pass/nn_lowering/exp.py`](../../../../test/pass/nn_lowering/exp.py)
+  - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
+  - [`test/pass/nn_lowering/test_lowering_nn_lowering.py`](../../../../test/pass/nn_lowering/test_lowering_nn_lowering.py)
 - 执行命令：
   - `pytest -q test/pass/nn_lowering/select.py`
   - `pytest -q test/pass/nn_lowering/cast.py`
   - `pytest -q test/pass/nn_lowering/exp.py`
   - `pytest -q test/pass/nn_lowering/public_name.py -k patterns`
-  - `pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k "select or reduce_softmax"`
+  - `pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k "select or cast or exp"`
 - 测试目标：
   - `nn.select` lower 为 `dma.alloc + kernel.select`。
   - `nn.cast` lower 为 `dma.alloc + dma.cast`。
@@ -126,4 +126,5 @@ patterns = select_cast_patterns()
   - `test_nn_lowering_exp_static`
   - `test_nn_lowering_exp_dynamic`
   - `test_nn_lowering_exp_shape_mismatch`
-  - `test_reduce_select_cast_matmul_helpers`
+  - `test_lower_cast_preserves_symbol_dim`
+  - `test_select_preserves_symbol_dim`

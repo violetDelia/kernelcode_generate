@@ -8,6 +8,9 @@
 - `nn.softmax` 不在本层直接 lowering，需先由上游完成分解。
 - surviving 模块级接口为 `reduce_softmax_patterns()`。
 
+API 列表:
+- `reduce_softmax_patterns() -> list[RewritePattern]`
+
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering.reduce_softmax_lowering import reduce_softmax_patterns
 - patterns = reduce_softmax_patterns()
@@ -21,56 +24,104 @@
 
 from __future__ import annotations
 
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, StringAttr
+from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, IntegerType, StringAttr
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewrite_pattern
 
 from kernel_gen.dialect.dma import DmaAllocOp
-from kernel_gen.dialect.kernel import KernelExpOp, KernelReduceOp
+from kernel_gen.dialect.kernel import KernelReduceOp
 from kernel_gen.dialect.nn import (
-    NnExpOp,
+    NnMemorySpaceAttr,
     NnMemoryType,
     NnReduceMaxOp,
     NnReduceMinOp,
     NnReduceSumOp,
     NnSoftmaxOp,
 )
-from kernel_gen.dialect.symbol import SymbolGetDimOp
-from .nn_lowering import (
-    NnLoweringError,
-    _ensure_operand_count,
-    _ensure_single_result,
-    _ensure_space_attr,
-    _ensure_symbol_or_int,
-)
+from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
+from .nn_lowering import NnLoweringError
 from .nn_lowering_utility import ensure_expected_op_name
 
 
-def _ensure_int_attr(op: Operation, name: str) -> int:
-    """获取并校验 op 的 int attribute。
+def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
+    """获取并校验 nn op 的 space attribute。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 从 op.attributes 获取指定 name。
-    - 校验为 IntegerAttr，并返回其值。
+    - 在当前文件内保持 reduce/softmax family 所需的 `space` 校验逻辑。
+    - 避免跨文件直连 `nn_lowering.py` 的下划线 helper。
 
     使用示例:
-    - axis = _ensure_int_attr(op, "axis")
+    - space = _ensure_space_attr(op)
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/test_nn_lowering_private_helpers.py
+    - test: test/pass/nn_lowering/test_reduce_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
-    attr = op.attributes.get(name)
-    if isinstance(attr, IntegerAttr):
-        return attr.value.data
-    if isinstance(attr, IntAttr):
-        return attr.data
-    raise NnLoweringError(f"{op.name} {name} must be integer")
+    space = op.attributes.get("space")
+    if not isinstance(space, NnMemorySpaceAttr):
+        raise NnLoweringError("nn op must define #nn.space attribute")
+    return space
+
+
+def _ensure_single_result(op: Operation) -> NnMemoryType:
+    """获取并校验 op 的唯一输出类型。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 在当前文件内保持 `nn.memory` 单结果校验逻辑。
+    - 避免跨文件直连 `nn_lowering.py` 的下划线 helper。
+
+    使用示例:
+    - result_type = _ensure_single_result(op)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+    - test: test/pass/nn_lowering/test_reduce_lowering.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
+    """
+
+    if len(op.results) != 1:
+        raise NnLoweringError("nn op must produce exactly one result")
+    result_type = op.results[0].type
+    if not isinstance(result_type, NnMemoryType):
+        raise NnLoweringError("nn op result must be nn.memory")
+    return result_type
+
+
+def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAValue:
+    """确保 operand 为 symbol.int 或整数 SSAValue。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 在当前文件内保持 reduce family 第二操作数的最小校验逻辑。
+    - 允许 `!symbol.int` 或整数 SSAValue。
+    - 避免跨文件直连 `nn_lowering.py` 的下划线 helper。
+
+    使用示例:
+    - _ensure_symbol_or_int(op, op.operands[1])
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
+    """
+
+    if isinstance(operand, Operation):
+        operand = operand.results[0]
+    if isinstance(operand.type, SymbolValueType):
+        return operand
+    if isinstance(operand.type, IntegerType):
+        return operand
+    raise NnLoweringError("broadcast scalar must be int or symbol")
 
 
 def _ensure_reduce_axis(op_name: str, axes_attr: ArrayAttr) -> int:
@@ -171,43 +222,6 @@ def _build_alloc_dynamic_shape_from_operand(
         block.insert_op_before(symbol_op, op)
         dynamic_shape.append(symbol_op.result)
     return dynamic_shape
-
-
-def _lower_exp(block: Block, op: Operation) -> None:
-    """lower nn.exp。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 先创建 dma.alloc，再调用 kernel.exp。
-
-    使用示例:
-    - _lower_exp(block, op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/exp.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
-    """
-
-    space = _ensure_space_attr(op)
-    result_type = _ensure_single_result(op)
-    _ensure_operand_count(op, 1)
-    operand = op.operands[0]
-    if not isinstance(operand.type, NnMemoryType):
-        raise NnLoweringError("nn.exp operand must be nn.memory")
-    if operand.type.shape != result_type.shape or operand.type.stride != result_type.stride:
-        raise NnLoweringError("nn.exp result shape must match operand")
-    axis_map = list(range(len(result_type.shape.data)))
-    dynamic_shape = _build_alloc_dynamic_shape_from_operand(block, op, operand, result_type, axis_map)
-    alloc = DmaAllocOp(dynamic_shape, result_type)
-    block.insert_op_before(alloc, op)
-    result = alloc.results[0]
-    lowered = KernelExpOp(result, operand, space)
-    block.insert_op_before(lowered, op)
-    op.results[0].replace_all_uses_with(result)
-    block.erase_op(op)
 
 
 def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:

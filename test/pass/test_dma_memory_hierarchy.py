@@ -307,19 +307,23 @@ def _symbol_int_values(values: list[SSAValue]) -> list[int | str]:
     return results
 
 
-def _ensure_sm_lm_target_registered() -> str:
-    """注册一个支持 SM/LM 的测试 target，并返回 target 名称。
+def _mock_current_target_hardware(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    sm_memory_size: int | None,
+    lm_memory_size: int | None,
+) -> None:
+    """通过公开查询入口模拟当前 target 的 SM/LM 容量。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 使用 `target_registry.register_target` 注册一个带 `sm_memory_size/lm_memory_size` 的 target。
-    - 若该 target 已存在则跳过注册（以避免同进程重复运行导致 ValueError）。
+    - 只 monkeypatch `target_registry.get_current_target_hardware` 这个公开查询 API。
+    - 让 pass 测试通过公开 target 查询行为验证 `SM/LM` 分支，不直连私有当前 target setter。
 
     使用示例:
-    - name = _ensure_sm_lm_target_registered()
-    - target_registry._set_current_target(name)
+    - _mock_current_target_hardware(monkeypatch, sm_memory_size=1024, lm_memory_size=1024)
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
@@ -327,29 +331,15 @@ def _ensure_sm_lm_target_registered() -> str:
     - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
-    name = "sm_lm_demo"
-    spec = target_registry.TargetSpec(
-        name=name,
-        arch_supported_ops=None,
-        arch_unsupported_ops=set(),
-        hardware={
-            "thread_num": 1,
-            "block_num": 1,
-            "subthread_num": 1,
-            "sm_memory_size": 1024,
-            "lm_memory_size": 1024,
-            "tsm_memory_size": 0,
-            "tlm1_memory_size": 0,
-            "tlm2_memory_size": 0,
-            "tlm3_memory_size": 0,
-        },
-    )
-    try:
-        target_registry.register_target(spec)
-    except ValueError as exc:
-        if "target already registered" not in str(exc):
-            raise
-    return name
+    hardware = {
+        "sm_memory_size": sm_memory_size,
+        "lm_memory_size": lm_memory_size,
+    }
+
+    def _lookup(key: str) -> int | None:
+        return hardware.get(key)
+
+    monkeypatch.setattr(target_registry, "get_current_target_hardware", _lookup)
 
 
 # COV-DMH-001 / COV-DMH-002 / COV-DMH-003 / COV-DMH-004
@@ -362,14 +352,10 @@ def _ensure_sm_lm_target_registered() -> str:
 # 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
-def test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback() -> None:
+def test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback(monkeypatch: pytest.MonkeyPatch) -> None:
     module, block, kernel_op = _build_kernel_binary_elewise_add_module("global")
-    target_name = _ensure_sm_lm_target_registered()
-    target_registry._set_current_target(target_name)
-    try:
-        LowerDmaMemoryHierarchyPass().run(module)
-    finally:
-        target_registry._set_current_target(None)
+    _mock_current_target_hardware(monkeypatch, sm_memory_size=1024, lm_memory_size=1024)
+    LowerDmaMemoryHierarchyPass().run(module)
 
     ops = _collect_ops(block)
     slices = [op for op in ops if isinstance(op, DmaSliceOp)]
@@ -428,14 +414,10 @@ def test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback() -> None:
 # 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
-def test_dma_memory_hierarchy_lm_only_is_noop() -> None:
+def test_dma_memory_hierarchy_lm_only_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
     module, block, kernel_op = _build_kernel_binary_elewise_add_module("local")
-    target_name = _ensure_sm_lm_target_registered()
-    target_registry._set_current_target(target_name)
-    try:
-        LowerDmaMemoryHierarchyPass().run(module)
-    finally:
-        target_registry._set_current_target(None)
+    _mock_current_target_hardware(monkeypatch, sm_memory_size=1024, lm_memory_size=1024)
+    LowerDmaMemoryHierarchyPass().run(module)
 
     ops = _collect_ops(block)
     assert not any(isinstance(op, (DmaSliceOp, DmaDesliceOp)) for op in ops)
@@ -452,14 +434,10 @@ def test_dma_memory_hierarchy_lm_only_is_noop() -> None:
 # 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
-def test_dma_memory_hierarchy_window_offsets_and_unit_strides() -> None:
+def test_dma_memory_hierarchy_window_offsets_and_unit_strides(monkeypatch: pytest.MonkeyPatch) -> None:
     module, block, kernel_op = _build_kernel_binary_elewise_add_module_with_window()
-    target_name = _ensure_sm_lm_target_registered()
-    target_registry._set_current_target(target_name)
-    try:
-        LowerDmaMemoryHierarchyPass().run(module)
-    finally:
-        target_registry._set_current_target(None)
+    _mock_current_target_hardware(monkeypatch, sm_memory_size=1024, lm_memory_size=1024)
+    LowerDmaMemoryHierarchyPass().run(module)
 
     ops = _collect_ops(block)
     slices = [op for op in ops if isinstance(op, DmaSliceOp)]
@@ -536,16 +514,12 @@ def test_dma_memory_hierarchy_window_offsets_and_unit_strides() -> None:
 # 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
-def test_dma_memory_hierarchy_symbol_shape_passthrough() -> None:
+def test_dma_memory_hierarchy_symbol_shape_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
     module, block, _ = _build_kernel_binary_elewise_add_module_with_type(
         _make_symbolic_memory_type("global")
     )
-    target_name = _ensure_sm_lm_target_registered()
-    target_registry._set_current_target(target_name)
-    try:
-        LowerDmaMemoryHierarchyPass().run(module)
-    finally:
-        target_registry._set_current_target(None)
+    _mock_current_target_hardware(monkeypatch, sm_memory_size=1024, lm_memory_size=1024)
+    LowerDmaMemoryHierarchyPass().run(module)
 
     allocs = [op for op in _collect_ops(block) if isinstance(op, DmaAllocOp)]
     assert len(allocs) == 6
@@ -563,14 +537,11 @@ def test_dma_memory_hierarchy_symbol_shape_passthrough() -> None:
 # 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
-def test_dma_memory_hierarchy_requires_sm_lm() -> None:
+def test_dma_memory_hierarchy_requires_sm_lm(monkeypatch: pytest.MonkeyPatch) -> None:
     module, _, _ = _build_kernel_binary_elewise_add_module("global")
-    target_registry._set_current_target("cpu")
-    try:
-        with pytest.raises(LowerDmaMemoryHierarchyError, match="SM/LM"):
-            LowerDmaMemoryHierarchyPass().run(module)
-    finally:
-        target_registry._set_current_target(None)
+    _mock_current_target_hardware(monkeypatch, sm_memory_size=0, lm_memory_size=0)
+    with pytest.raises(LowerDmaMemoryHierarchyError, match="SM/LM"):
+        LowerDmaMemoryHierarchyPass().run(module)
 
 
 # COV-DMH-010
@@ -583,17 +554,13 @@ def test_dma_memory_hierarchy_requires_sm_lm() -> None:
 # 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
-def test_dma_memory_hierarchy_rejects_anonymous_dynamic_shape() -> None:
+def test_dma_memory_hierarchy_rejects_anonymous_dynamic_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     module, _, _ = _build_kernel_binary_elewise_add_module_with_type(
         _make_anonymous_dynamic_memory_type("global")
     )
-    target_name = _ensure_sm_lm_target_registered()
-    target_registry._set_current_target(target_name)
-    try:
-        with pytest.raises(LowerDmaMemoryHierarchyError, match="dynamic_shape"):
-            LowerDmaMemoryHierarchyPass().run(module)
-    finally:
-        target_registry._set_current_target(None)
+    _mock_current_target_hardware(monkeypatch, sm_memory_size=1024, lm_memory_size=1024)
+    with pytest.raises(LowerDmaMemoryHierarchyError, match="dynamic_shape"):
+        LowerDmaMemoryHierarchyPass().run(module)
 
 
 # COV-DMH-007
@@ -606,7 +573,7 @@ def test_dma_memory_hierarchy_rejects_anonymous_dynamic_shape() -> None:
 # 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
-def test_dma_memory_hierarchy_rejects_nn_ops_in_input() -> None:
+def test_dma_memory_hierarchy_rejects_nn_ops_in_input(monkeypatch: pytest.MonkeyPatch) -> None:
     mem_type = _make_memory_type("global")
     func_type = FunctionType.from_lists([mem_type, mem_type], [])
     block = Block(arg_types=[mem_type, mem_type])
@@ -614,10 +581,6 @@ def test_dma_memory_hierarchy_rejects_nn_ops_in_input() -> None:
     block.add_ops([nn_add, func.ReturnOp()])
     func_op = func.FuncOp("main", func_type, Region(block))
     module = ModuleOp([func_op])
-    target_name = _ensure_sm_lm_target_registered()
-    target_registry._set_current_target(target_name)
-    try:
-        with pytest.raises(LowerDmaMemoryHierarchyError, match="nn"):
-            LowerDmaMemoryHierarchyPass().run(module)
-    finally:
-        target_registry._set_current_target(None)
+    _mock_current_target_hardware(monkeypatch, sm_memory_size=1024, lm_memory_size=1024)
+    with pytest.raises(LowerDmaMemoryHierarchyError, match="nn"):
+        LowerDmaMemoryHierarchyPass().run(module)

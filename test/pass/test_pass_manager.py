@@ -47,10 +47,12 @@ pipeline_module = importlib.import_module("kernel_gen.passes.pipeline")
 build_default_lowering_pipeline = pipeline_module.build_default_lowering_pipeline
 buffer_results_module = importlib.import_module("kernel_gen.passes.buffer_results_to_out_params")
 BufferResultsToOutParamsPass = buffer_results_module.BufferResultsToOutParamsPass
-registry_module = importlib.import_module("kernel_gen.passes.registry")
-build_registered_pass = registry_module.build_registered_pass
-load_builtin_passes = registry_module.load_builtin_passes
-_reset_registry_for_test = registry_module._reset_registry_for_test
+
+
+def _reload_registry_module():
+    """重新导入 registry 模块并恢复其公开状态。"""
+
+    return importlib.reload(importlib.import_module("kernel_gen.passes.registry"))
 
 
 @contextlib.contextmanager
@@ -239,10 +241,10 @@ def test_pass_manager_module_pass_apply_only() -> None:
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 def test_pass_manager_runs_registered_lower_nn(monkeypatch: pytest.MonkeyPatch) -> None:
-    _reset_registry_for_test()
+    registry_module = _reload_registry_module()
     try:
-        load_builtin_passes()
-        pass_obj = build_registered_pass("lower-nn")
+        registry_module.load_builtin_passes()
+        pass_obj = registry_module.build_registered_pass("lower-nn")
         order: list[str] = []
 
         def _record_run(self: object, target: ModuleOp) -> ModuleOp:
@@ -259,7 +261,7 @@ def test_pass_manager_runs_registered_lower_nn(monkeypatch: pytest.MonkeyPatch) 
         assert pm.run(module) is module
         assert order == ["lower-nn"]
     finally:
-        _reset_registry_for_test()
+        _reload_registry_module()
 
 
 # TC-PASS-005C

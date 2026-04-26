@@ -6,6 +6,16 @@
 功能说明:
 - 定义 Pass 与 PassManager 的基础行为。
 - 固定 `kernel_gen.passes.pass_manager` 只承载 Pass 抽象与 PassManager，不再承载默认 pipeline builder。
+- 当前文件不额外公开 helper；内部状态仅通过 `Pass` / `PassManager` 两个公开入口对外生效。
+
+API 列表:
+- `class Pass()`
+- `Pass.run(self: Pass, target: object) -> object`
+- `Pass.apply(self: Pass, ctx: Context, op: ModuleOp) -> None`
+- `class PassManager(name: str | None = None)`
+- `PassManager.add_pass(self: PassManager, pass_obj: XdslModulePass) -> None`
+- `PassManager.extend(self: PassManager, passes: Sequence[XdslModulePass]) -> None`
+- `PassManager.run(self: PassManager, target: object) -> object`
 
 使用示例:
 - import importlib
@@ -93,6 +103,7 @@ class Pass(XdslModulePass):
 
         _ = ctx
         self.run(op)
+
 
 class PassManager:
     """Pass 管理器。
@@ -203,5 +214,6 @@ class PassManager:
             else:
                 item.apply(ctx, result)  # type: ignore[arg-type]
         return result
+
 
 __all__ = ["Pass", "PassManager"]

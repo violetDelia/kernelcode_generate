@@ -10,6 +10,20 @@
 - 提供 outline-device-kernel 的 lowering 兼容入口。
 - 提供 tile-analysis / tile-elewise / tile-reduce ModulePass 入口。
 - 提供 symbol-loop-hoist 的兼容入口。
+- 当前文件只重导出 spec 已定义的公开 pass 类；不新增跨文件 private helper 入口。
+
+API 列表:
+- `class NnLoweringPass()`
+- `class NnLoweringError()`
+- `class LowerDmaMemoryHierarchyPass()`
+- `class LowerDmaMemoryHierarchyError()`
+- `class DecompassPass()`
+- `class OutlineDeviceKernelPass()`
+- `class TileAnalysisPass()`
+- `class TileElewisePass()`
+- `class TileReducePass()`
+- `class SymbolLoopHoistPass()`
+- `class SymbolLoopHoistError()`
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass

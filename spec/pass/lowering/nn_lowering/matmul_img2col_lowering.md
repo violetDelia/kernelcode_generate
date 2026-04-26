@@ -13,7 +13,7 @@
 ## 文档信息
 
 - 创建者：`小李飞刀`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md`](../../../../spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py`](../../../../kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py)
 - `test`：
@@ -21,7 +21,7 @@
   - [`test/pass/nn_lowering/img2col1d.py`](../../../../test/pass/nn_lowering/img2col1d.py)
   - [`test/pass/nn_lowering/img2col2d.py`](../../../../test/pass/nn_lowering/img2col2d.py)
   - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
+  - [`test/pass/nn_lowering/test_nn_lowering_asset_cases.py`](../../../../test/pass/nn_lowering/test_nn_lowering_asset_cases.py)
 
 ## 依赖
 
@@ -86,17 +86,15 @@ patterns = matmul_img2col_patterns()
   - [`test/pass/nn_lowering/img2col1d.py`](../../../../test/pass/nn_lowering/img2col1d.py)
   - [`test/pass/nn_lowering/img2col2d.py`](../../../../test/pass/nn_lowering/img2col2d.py)
   - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
+  - [`test/pass/nn_lowering/test_nn_lowering_asset_cases.py`](../../../../test/pass/nn_lowering/test_nn_lowering_asset_cases.py)
 - 执行命令：
-  - `pytest -q test/pass/nn_lowering/matmul.py`
-  - `pytest -q test/pass/nn_lowering/img2col1d.py`
-  - `pytest -q test/pass/nn_lowering/img2col2d.py`
+  - `pytest -q test/pass/nn_lowering/test_nn_lowering_asset_cases.py -k "matmul or img2col"`
   - `pytest -q test/pass/nn_lowering/public_name.py -k patterns`
-  - `pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k matmul`
 - 测试目标：
   - 验证 `nn.matmul` -> `kernel.matmul` 的 lowering 目标与输出 memory 约束。
   - 验证 `nn.img2col1d/nn.img2col2d` -> `kernel.img2col*` 的 lowering 目标与 `symbol.int` 参数约束。
   - 验证主 driver 的 pattern 顺序已不再包含 matmul/img2col family dispatcher。
+  - `img2col1d/2d accepts_noncanonical_symbol_names` 继续由各自资产文件单独维护，不纳入 collectable 公开入口。
 - 功能与用例清单：
   - `test_nn_lowering_matmul_target`
   - `test_nn_lowering_matmul_inside_symbol_for`
@@ -104,4 +102,4 @@ patterns = matmul_img2col_patterns()
   - `test_nn_lowering_img2col1d_accepts_noncanonical_symbol_names`
   - `test_nn_lowering_img2col2d_target`
   - `test_nn_lowering_img2col2d_accepts_noncanonical_symbol_names`
-  - `test_reduce_select_cast_matmul_helpers`
+  - `test_nn_lowering_asset_case`

@@ -9,6 +9,14 @@
 - 本 pass 新增的 hierarchy 搬运统一使用 `dma.slice / dma.deslice` 表达，不引入
   `dma.copy/load/store` 作为新增主语义。
 - 强制处理后的 `kernel.*` operand/out 仅使用 `LM` space，并同步刷新 op 的 `space` 属性为 `local`。
+- 文件内 helper 收口为 `_require_sm_lm_support`、`_memory_space`、`_with_space`、
+  `_const_symbol_int`、`_build_full_window_operands`、`_resolve_window_operands`
+  与 `_rewrite_kernel_binary_elewise_op`；这些 helper 仅供本文件内部复用。
+
+API 列表:
+- `class LowerDmaMemoryHierarchyError()`
+- `class LowerDmaMemoryHierarchyPass()`
+- `LowerDmaMemoryHierarchyPass.run(self: LowerDmaMemoryHierarchyPass, module: ModuleOp) -> ModuleOp`
 
 使用示例:
 - from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
