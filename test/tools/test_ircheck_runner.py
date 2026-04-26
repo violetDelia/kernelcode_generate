@@ -18,10 +18,8 @@
 from __future__ import annotations
 
 import sys
+from itertools import count
 from pathlib import Path
-
-import importlib
-import pytest
 
 from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
@@ -31,23 +29,33 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-registry_module = importlib.import_module("kernel_gen.passes.registry")
-_reset_registry_for_test = registry_module._reset_registry_for_test
-register_pass = registry_module.register_pass
-register_pipeline = registry_module.register_pipeline
-
+from kernel_gen.passes.pass_manager import Pass, PassManager
+from kernel_gen.passes.registry import register_pass, register_pipeline
 from kernel_gen.tools.ircheck import run_ircheck_text
 
-pass_manager_module = importlib.import_module("kernel_gen.passes.pass_manager")
-Pass = pass_manager_module.Pass
-PassManager = pass_manager_module.PassManager
+_PUBLIC_REGISTRY_NAME_COUNTER = count()
 
 
-@pytest.fixture(autouse=True)
-def _isolate_registry_state() -> None:
-    _reset_registry_for_test()
-    yield
-    _reset_registry_for_test()
+def _unique_public_name(prefix: str) -> str:
+    """生成当前测试进程内唯一的公开注册名。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 为本测试文件内临时注册的 pass / pipeline 生成唯一公开名称。
+    - 避免依赖跨文件非公开 registry reset，保持测试只走公开注册入口。
+
+    使用示例:
+    - pass_name = _unique_public_name("option-pass")
+
+    关联文件:
+    - 功能实现: kernel_gen/tools/ircheck.py
+    - Spec 文档: spec/tools/ircheck.md
+    - 测试文件: test/tools/test_ircheck_runner.py
+    """
+
+    return f"{prefix}-{next(_PUBLIC_REGISTRY_NAME_COUNTER)}"
 
 
 _SIMPLE_IR = """builtin.module {
@@ -84,7 +92,7 @@ def test_run_ircheck_text_pass_ok() -> None:
 
 # TC-IRCHECK-RUN-001B
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-20 23:57:30 +0800
 # 最近一次运行成功时间: 2026-04-20 23:57:30 +0800
 # 功能说明: 验证 ircheck 可直接执行 ModulePass 公开入口，不再受旧 Pass 类型门槛限制。
@@ -93,15 +101,17 @@ def test_run_ircheck_text_pass_ok() -> None:
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
 def test_run_ircheck_text_module_pass_ok() -> None:
+    pass_name = _unique_public_name("module-no-op")
+
     @register_pass
     class ModuleNoOpPass(ModulePass):
-        name = "module-no-op"
+        name = pass_name
 
         def apply(self: "ModuleNoOpPass", ctx: Context, op: ModuleOp) -> None:
             _ = ctx
             assert isinstance(op, ModuleOp)
 
-    text = f"""// COMPILE_ARGS: --pass module-no-op
+    text = f"""// COMPILE_ARGS: --pass {pass_name}
 // CHECK: builtin.module
 // CHECK: func.func @main
 // CHECK-NEXT: func.return
@@ -309,9 +319,11 @@ def test_run_ircheck_text_check_not_failure_between_positives() -> None:
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
 def test_run_ircheck_text_pass_with_options() -> None:
+    pass_name = _unique_public_name("option-pass")
+
     @register_pass
     class OptionPass(Pass):
-        name = "option-pass"
+        name = pass_name
         seen_options: dict[str, str] = {}
 
         @classmethod
@@ -322,7 +334,7 @@ def test_run_ircheck_text_pass_with_options() -> None:
         def run(self: "OptionPass", target: object) -> object:
             return target
 
-    text = f"""// COMPILE_ARGS: --pass "option-pass={{mode=fast}}"
+    text = f"""// COMPILE_ARGS: --pass "{pass_name}={{mode=fast}}"
 // CHECK: builtin.module
 
 {_SIMPLE_IR}"""
@@ -489,13 +501,14 @@ def test_run_ircheck_text_invalid_options_syntax() -> None:
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
 def test_run_ircheck_text_pipeline_with_options() -> None:
     options_seen: dict[str, str] = {}
+    pipeline_name = _unique_public_name("option-pipeline")
 
-    @register_pipeline("option-pipeline")
+    @register_pipeline(pipeline_name)
     def _build_option_pipeline(options: dict[str, str]) -> PassManager:
         options_seen.update(options)
-        return PassManager(name="option-pipeline")
+        return PassManager(name=pipeline_name)
 
-    text = f"""// COMPILE_ARGS: --pipeline "option-pipeline={{mode=fast}}"
+    text = f"""// COMPILE_ARGS: --pipeline "{pipeline_name}={{mode=fast}}"
 // CHECK: builtin.module
 
 {_SIMPLE_IR}"""
@@ -581,7 +594,7 @@ def test_run_ircheck_text_multi_case_failfast_marks_case_index() -> None:
 
 # TC-IRCHECK-RUN-010
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-12 10:20:00 +0800
 # 最近一次运行成功时间: 2026-04-12 10:20:00 +0800
 # 功能说明: 验证 --pass "name={k=v}" 能解析并走 from_options 构造路径。
@@ -590,9 +603,11 @@ def test_run_ircheck_text_multi_case_failfast_marks_case_index() -> None:
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
 def test_run_ircheck_text_pass_with_options_ok() -> None:
+    pass_name = _unique_public_name("opt-pass")
+
     @register_pass
     class OptionPass(Pass):
-        name = "opt-pass"
+        name = pass_name
 
         def __init__(self, mode: str) -> None:
             self.mode = mode
@@ -606,7 +621,7 @@ def test_run_ircheck_text_pass_with_options_ok() -> None:
         def run(self, target: object) -> object:
             return target
 
-    text = f"""// COMPILE_ARGS: --pass "opt-pass={{mode=fast}}"
+    text = f"""// COMPILE_ARGS: --pass "{pass_name}={{mode=fast}}"
 // CHECK: builtin.module
 
 {_SIMPLE_IR}"""
@@ -617,7 +632,7 @@ def test_run_ircheck_text_pass_with_options_ok() -> None:
 
 # TC-IRCHECK-RUN-011
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-12 10:20:00 +0800
 # 最近一次运行成功时间: 2026-04-12 10:20:00 +0800
 # 功能说明: 验证 --pipeline "name={k=v}" 能解析并调用带参 builder。
@@ -626,11 +641,13 @@ def test_run_ircheck_text_pass_with_options_ok() -> None:
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
 def test_run_ircheck_text_pipeline_with_options_ok() -> None:
-    @register_pipeline("opt-pipeline")
+    pipeline_name = _unique_public_name("opt-pipeline")
+
+    @register_pipeline(pipeline_name)
     def _build_pipeline(options: dict[str, str]) -> PassManager:
         return PassManager(name=f"opt-{options['mode']}")
 
-    text = f"""// COMPILE_ARGS: --pipeline "opt-pipeline={{mode=fast}}"
+    text = f"""// COMPILE_ARGS: --pipeline "{pipeline_name}={{mode=fast}}"
 // CHECK: builtin.module
 
 {_SIMPLE_IR}"""
@@ -717,50 +734,54 @@ def test_run_ircheck_text_rejects_unquoted_pipeline_options() -> None:
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
 def test_run_ircheck_text_multi_pass_sequence() -> None:
     executed: list[str] = []
+    pass_a_name = _unique_public_name("pass-a")
+    pass_b_name = _unique_public_name("pass-b")
+    pass_c_name = _unique_public_name("pass-c")
+    pipeline_name = _unique_public_name("pipe-b")
 
     @register_pass
     class PassA(Pass):
-        name = "pass-a"
+        name = pass_a_name
 
         def run(self, target: object) -> object:
-            executed.append("pass-a")
+            executed.append(pass_a_name)
             return target
 
     @register_pass
     class PassB(Pass):
-        name = "pass-b"
+        name = pass_b_name
 
         def run(self, target: object) -> object:
-            executed.append("pass-b")
+            executed.append(pass_b_name)
             return target
 
     @register_pass
     class PassC(Pass):
-        name = "pass-c"
+        name = pass_c_name
 
         def run(self, target: object) -> object:
-            executed.append("pass-c")
+            executed.append(pass_c_name)
             return target
 
-    @register_pipeline("pipe-b")
+    @register_pipeline(pipeline_name)
     def _build_pipe() -> PassManager:
-        pm = PassManager(name="pipe-b")
+        pm = PassManager(name=pipeline_name)
         pm.add_pass(PassB())
         return pm
 
-    text = f"""// COMPILE_ARGS: --pass pass-a --pipeline pipe-b --pass pass-c
+    text = f"""// COMPILE_ARGS: --pass {pass_a_name} --pipeline {pipeline_name} --pass {pass_c_name}
 // CHECK: builtin.module
 
 {_SIMPLE_IR}"""
     result = run_ircheck_text(text, source_path="inline.ircheck")
     assert result.ok is True
     assert result.exit_code == 0
-    assert executed == ["pass-a", "pass-b", "pass-c"]
+    assert executed == [pass_a_name, pass_b_name, pass_c_name]
 
 
 # TC-IRCHECK-RUN-025
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-13 06:30:00 +0800
 # 最近一次运行成功时间: 2026-04-13 06:30:00 +0800
 # 功能说明: 验证多 step 失败时 message 标明失败 step，actual_ir 返回失败前一刻 IR。
@@ -769,29 +790,31 @@ def test_run_ircheck_text_multi_pass_sequence() -> None:
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
 def test_run_ircheck_text_failing_step_reports_actual_ir() -> None:
+    pass_name = _unique_public_name("failing-pass")
+
     @register_pass
     class FailingPass(Pass):
-        name = "failing-pass"
+        name = pass_name
 
         def run(self, target: object) -> object:
-            raise RuntimeError("boom from failing-pass")
+            raise RuntimeError(f"boom from {pass_name}")
 
-    text = """// COMPILE_ARGS: --pass no-op --pass failing-pass --pass no-op
+    text = f"""// COMPILE_ARGS: --pass no-op --pass {pass_name} --pass no-op
 // CHECK: builtin.module
 
-builtin.module {
-  func.func @main() {
+builtin.module {{
+  func.func @main() {{
     %0 = arith.constant 1 : i32
     func.return
-  }
-}
+  }}
+}}
 """
     result = run_ircheck_text(text, source_path="inline.ircheck")
     assert result.ok is False
     assert result.exit_code == 2
     assert result.message is not None
     assert result.message.startswith(
-        "IrcheckRunError: pass execution failed at step 2 (pass failing-pass)"
+        f"IrcheckRunError: pass execution failed at step 2 (pass {pass_name})"
     )
     assert "builtin.module" in result.actual_ir
     assert "arith.constant 1 : i32" in result.actual_ir

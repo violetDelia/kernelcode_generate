@@ -3,7 +3,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/tools/ircheck.md`](../../spec/tools/ircheck.md)
 - `功能实现`：[`kernel_gen/tools/ircheck.py`](../../kernel_gen/tools/ircheck.py)
 - `test`：
@@ -19,6 +19,7 @@
   - 解析 `COMPILE_ARGS`
   - 顺序执行 pass / pipeline
   - 对规范化 IR 或 emitc 源码做 `CHECK*` 匹配
+- 当指定 `emitc_target` 时，工具继续把 compile 后的 op / `func.func` / `builtin.module` IR 交给公开 `gen_kernel(...)`；不接受 Python callable，也不改走 `dsl_gen_kernel(...)`。
 - 公开稳定入口只有：
   - `parse_ircheck_file`
   - `run_ircheck_file`
@@ -92,6 +93,7 @@
 - `CHECK-NOT:` 不能定义新变量，只能引用前面已绑定的变量。
 - 多 case 只支持 `// -----` 分隔，按顺序执行并在首个失败处停止。
 - 传入 `emitc_target` 时，匹配对象切换为生成的源码文本；不做 IR / 源码双路径混合匹配。
+- `emitc_target` 的源码生成阶段只承认公开 `gen_kernel(op|func|module, ctx)`；`dsl_gen_kernel(...)` 属于 DSL callable 前端入口，不是 `ircheck` 的输入或 fallback。
 
 ## 公开接口
 
@@ -166,3 +168,4 @@ builtin.module {
 - 执行流程：[`test/tools/test_ircheck_runner.py`](../../test/tools/test_ircheck_runner.py)
 - CLI：[`test/tools/test_ircheck_cli.py`](../../test/tools/test_ircheck_cli.py)
 - 执行命令：`pytest -q test/tools/test_ircheck_*.py`
+- 测试边界：只通过 `parse_ircheck_file(...)`、`run_ircheck_file(...)`、`run_ircheck_text(...)` 与 CLI 观察公开行为；不得把 `_render_emitc_text(...)`、`_run_compile_step(...)` 或 `dsl_gen_kernel(...)` 当成公开测试入口

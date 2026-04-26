@@ -3,7 +3,7 @@
 ## 文档信息
 
 - 创建者：`朽木露琪亚`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/tools/dsl_run.md`](../../spec/tools/dsl_run.md)
 - `功能实现`：[`kernel_gen/tools/dsl_run.py`](../../kernel_gen/tools/dsl_run.py)
 - `test`：[`test/tools/test_dsl_run.py`](../../test/tools/test_dsl_run.py)
@@ -15,6 +15,7 @@
 - 公开合同只覆盖这条一体化路径，不扩展到无关 pass、无关 dialect、无关工具。
 - `kernel_gen.tools` 包根稳定暴露 `DslRunError`、`DslRunResult` 与属性入口 `kernel_gen.tools.dsl_run(...)`，不把 `dsl_run` 子模块对象当作公开合同。
 - 前端只依赖公开 `mlir_gen(fn, *runtime_args, config=None)`；文件内 helper 若仍负责 DSL helper 注入或 pipeline 选择，只能视为本文件内部实现细节。
+- 即使 `kernel_gen.dsl.gen_kernel` 新增 `dsl_gen_kernel(...)` callable 入口，`dsl_run(...)` 也不得改走该 shortcut；它继续固定消费 pass/pipeline 后的 IR，并调用公开 `gen_kernel(module|func, ctx)`。
 
 ## API 列表
 
@@ -103,6 +104,7 @@ assert result.execute_result.ok is True
 - `pipeline` 仅接受 `str | PassManager`
 - `real_args` 仅接受 `tuple | list`，元素仅允许 `torch.Tensor` 或 `numpy.ndarray`
 - `dsl_run(...)` 只允许消费公开 `mlir_gen(...)`；`_build_dsl_globals_table(...)`、target registry 私有状态和 parser 环境 helper 若仍存在，都不构成 `dsl_run` 的公开 API，也不得被跨文件实现或测试直接调用
+- `dsl_run(...)` 的源码生成阶段只允许消费公开 `gen_kernel(...)`；`dsl_gen_kernel(...)` 属于 DSL callable 直出源码入口，不属于 `dsl_run(...)` 当前公开依赖，也不得被实现或测试拿来绕过 pipeline 后 IR 路径
 - DSL 函数只要存在值返回，就必须失败
 - `emitcconfig.target` 决定源码生成与执行目标，不做跨 target 自动猜测
 - `target == "npu_demo"` 时，lowered module 必须包含且仅包含一个带 `arch.launch` 的 wrapper func；否则必须显式失败
@@ -126,4 +128,4 @@ assert result.execute_result.ok is True
   - `torch` / `numpy` 参数归一化
   - `npu_demo` wrapper 唯一性失败边界
   - 固定错误短语
-  - 测试只通过 `dsl_run(...)` / `DslRunResult` 观察公开行为，不直连 `_build_dsl_globals_table(...)` 或其他跨文件非公开 API
+  - 测试只通过 `dsl_run(...)` / `DslRunResult` 观察公开行为，不直连 `_build_dsl_globals_table(...)`、`dsl_gen_kernel(...)` 或其他跨文件非公开 API

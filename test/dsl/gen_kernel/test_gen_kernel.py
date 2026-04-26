@@ -84,8 +84,8 @@ from kernel_gen.dialect.symbol import (
     SymbolValueType,
 )
 from kernel_gen.dialect.tuner import TunerCostOp, TunerParamOp
-from kernel_gen.dsl.gen_kernel import EmitCContext, EmitCError, emit_c, emit_c_op, emit_c_value, GenKernelError, gen_kernel
-from kernel_gen.dsl.mlir_gen import build_func_op
+from kernel_gen.dsl.gen_kernel import EmitCContext, EmitCError, KernelEmitter, dsl_gen_kernel, emit_c, emit_c_op, emit_c_value, GenKernelError, gen_kernel
+from kernel_gen.dsl.mlir_gen import build_func_op, mlir_gen
 from kernel_gen.operation.dma import alloc, deslice, slice
 from kernel_gen.operation.nn import matmul
 from kernel_gen.operation.scf import loop
@@ -1015,11 +1015,13 @@ def test_gen_kernel_converts_emit_c_error_to_gen_kernel_error(monkeypatch: pytes
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 def test_gen_kernel_entry_module_hides_internal_emitter_entry() -> None:
     namespace: dict[str, object] = {}
-    exec("from kernel_gen.dsl.gen_kernel.gen_kernel import GenKernelError, gen_kernel", namespace)
+    exec("from kernel_gen.dsl.gen_kernel.gen_kernel import GenKernelError, dsl_gen_kernel, gen_kernel", namespace)
 
     assert namespace["GenKernelError"] is GenKernelError
+    assert namespace["dsl_gen_kernel"] is dsl_gen_kernel
     assert namespace["gen_kernel"] is gen_kernel
     assert gen_kernel_entry_module.GenKernelError is GenKernelError
+    assert gen_kernel_entry_module.dsl_gen_kernel is dsl_gen_kernel
     assert gen_kernel_entry_module.gen_kernel is gen_kernel
     assert not hasattr(gen_kernel_entry_module, "KernelEmitter")
     with pytest.raises(ImportError):
@@ -1045,6 +1047,8 @@ def test_gen_kernel_is_the_package_public_entry() -> None:
 
     assert public_names == {
         "GenKernelError",
+        "KernelEmitter",
+        "dsl_gen_kernel",
         "gen_kernel",
         "EmitCContext",
         "EmitCError",
@@ -1053,6 +1057,8 @@ def test_gen_kernel_is_the_package_public_entry() -> None:
         "emit_c_value",
     }
     assert namespace["GenKernelError"] is GenKernelError
+    assert namespace["KernelEmitter"] is KernelEmitter
+    assert namespace["dsl_gen_kernel"] is dsl_gen_kernel
     assert namespace["gen_kernel"] is gen_kernel
     assert namespace["EmitCContext"] is EmitCContext
     assert namespace["EmitCError"] is EmitCError
@@ -1077,6 +1083,38 @@ def test_gen_kernel_is_the_package_public_entry() -> None:
     )
     assert emit_context_namespace["EmitCContext"] is EmitCContext
     assert emit_context_namespace["EmitCError"] is EmitCError
+
+
+# GK-014D
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证 `dsl_gen_kernel(...)` 复用公开 `mlir_gen(...) + gen_kernel(...)` 路径，不改变旧 IR 入口合同。
+# 测试目的: 锁定 callable 公开入口新增后，旧 `gen_kernel(module, ctx)` 链路仍是唯一源码生成后端。
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_dsl_gen_kernel_matches_public_mlir_gen_plus_gen_kernel_path
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
+# 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
+def test_dsl_gen_kernel_matches_public_mlir_gen_plus_gen_kernel_path() -> None:
+    def add_scalar(lhs: int, rhs: int) -> int:
+        return lhs + rhs
+
+    module = mlir_gen(add_scalar, 3, 4, config={"reject_external_values": True})
+    root_func = next(op for op in module.body.block.ops if isinstance(op, func.FuncOp))
+    ir_source = gen_kernel(root_func, _ctx())
+    callable_source = dsl_gen_kernel(
+        add_scalar,
+        3,
+        4,
+        ctx=_ctx(),
+        config={"reject_external_values": True},
+    )
+
+    assert callable_source == ir_source
+    assert callable_source.startswith("long long add_scalar(long long arg0, long long arg1)")
+    assert "long long v0 = (arg0 + arg1);" in callable_source
+    assert "return v0;" in callable_source
 
 
 # GK-014A

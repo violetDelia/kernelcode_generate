@@ -76,6 +76,7 @@ def test_gen_kernel_package_public_exports_and_legacy_rejection() -> None:
         "EmitCError",
         "GenKernelError",
         "KernelEmitter",
+        "dsl_gen_kernel",
         "emit_c",
         "emit_c_op",
         "emit_c_value",
@@ -85,6 +86,8 @@ def test_gen_kernel_package_public_exports_and_legacy_rejection() -> None:
     assert "gen_body" not in public_names
     assert namespace["GenKernelError"] is gen_kernel_package.GenKernelError
     assert namespace["EmitCContext"] is gen_kernel_package.EmitCContext
+    assert namespace["KernelEmitter"] is gen_kernel_package.KernelEmitter
+    assert callable(namespace["dsl_gen_kernel"])
     assert callable(namespace["gen_kernel"])
     assert callable(namespace["emit_c"])
     assert callable(namespace["emit_c_op"])
