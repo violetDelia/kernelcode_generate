@@ -1,12 +1,46 @@
 """NN dialect definitions.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 定义 nn dialect 的 memory type、space attribute 与逐元素/广播 op。
 - 约定 `nn.truediv` 为唯一公开除法 op，`nn.div` alias 已移除。
 - `nn.select` 不在 nn dialect 中提供，相关 lowering 由 pass 层按 op 名称处理。
+
+API 列表:
+- `class NnMemorySpaceAttr(space: StringAttr)`
+- `class NnMemoryType(shape: ArrayAttr[Attribute], stride: ArrayAttr[Attribute], element_type: Attribute, space: NnMemorySpaceAttr)`
+- `class NnAddOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnSubOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnMulOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnDivOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnTrueDivOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnFloorDivOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnEqOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnNeOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnLtOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnLeOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnGtOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnGeOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnSelectOp(pred: SSAValue, on_true: SSAValue, on_false: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnCastOp(input_value: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnBroadcastOp(input_value: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnTransposeOp(input_value: SSAValue, result_type: NnMemoryType, perm: Sequence[int] | ArrayAttr[IntegerAttr], space: NnMemorySpaceAttr)`
+- `class NnReluOp(input_value: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnSigmoidOp(input_value: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnTanhOp(input_value: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnLeakyReluOp(input_value: SSAValue, alpha: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnHardSigmoidOp(input_value: SSAValue, alpha: SSAValue, beta: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnSoftmaxOp(input_value: SSAValue, result_type: NnMemoryType, axis: int | IntegerAttr, space: NnMemorySpaceAttr)`
+- `class NnExpOp(input_value: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnReduceSumOp(input_value: SSAValue, result_type: NnMemoryType, axes: Sequence[int] | ArrayAttr[IntegerAttr], keepdim: bool | IntegerAttr, space: NnMemorySpaceAttr)`
+- `class NnReduceMinOp(input_value: SSAValue, result_type: NnMemoryType, axes: Sequence[int] | ArrayAttr[IntegerAttr], keepdim: bool | IntegerAttr, space: NnMemorySpaceAttr)`
+- `class NnReduceMaxOp(input_value: SSAValue, result_type: NnMemoryType, axes: Sequence[int] | ArrayAttr[IntegerAttr], keepdim: bool | IntegerAttr, space: NnMemorySpaceAttr)`
+- `class NnImg2col1dOp(input_value: SSAValue, result_type: NnMemoryType, kw: SSAValue, sw: SSAValue, dw: SSAValue, pl: SSAValue, pr: SSAValue, space: NnMemorySpaceAttr)`
+- `class NnImg2col2dOp(input_value: SSAValue, result_type: NnMemoryType, kh: SSAValue, kw: SSAValue, sh: SSAValue, sw: SSAValue, dh: SSAValue, dw: SSAValue, ph: SSAValue, pw: SSAValue, pl: SSAValue, pr: SSAValue, space: NnMemorySpaceAttr)`
+- `class NnMatmulOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `Nn`
 
 使用示例:
 - from kernel_gen.dialect.nn import Nn, NnAddOp, NnBroadcastOp, NnMemorySpaceAttr, NnMemoryType
@@ -19,6 +53,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from kernel_gen.common.contracts import (
@@ -62,6 +97,7 @@ _VALID_SPACES = {"global", "shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.nn verifier"
+_DIM_EXPR_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_$.]*|\d+|[()+*-]")
 
 
 def _raise_verify_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
@@ -81,11 +117,12 @@ def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
     """解析 shape 或 stride 维度列表。
 
     创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 支持非负整数、`?` 与符号标识符。
-    - 允许表达式维度（例如 `W + PL` / `(W + PL) // SW`），并按原文本保留。
+    - 允许 `+` / `-` / `*` / `()` 组成的维度表达式，并按原文本保留。
+    - 当前只承接 `xdsl` 公开 parser token 接口可稳定消费的文本范围，不承诺 `/`、`//` 原文 round-trip。
 
     使用示例:
     - _parse_dim_list(parser)
@@ -107,56 +144,75 @@ def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
         else:
             start_pos = parser.pos
             input_text = parser.lexer.input.content
-            integer = parser.parse_optional_integer(allow_boolean=False, allow_negative=False)
-            parsed_simple_integer = False
-            if integer is not None:
-                lookahead = parser.pos
-                while lookahead < len(input_text) and input_text[lookahead].isspace():
-                    lookahead += 1
-                if lookahead >= len(input_text) or input_text[lookahead] in {",", "]"}:
-                    dims.append(IntAttr(integer))
-                    parsed_simple_integer = True
-                else:
-                    parser._resume_from(start_pos)
-            if not parsed_simple_integer:
-                parsed_simple_ident = False
-                ident = parser.parse_optional_identifier()
-                if ident is not None:
-                    lookahead = parser.pos
-                    while lookahead < len(input_text) and input_text[lookahead].isspace():
-                        lookahead += 1
-                    if lookahead >= len(input_text) or input_text[lookahead] in {",", "]"}:
-                        dims.append(StringAttr(ident))
-                        parsed_simple_ident = True
-                    else:
-                        parser._resume_from(start_pos)
-                if not parsed_simple_ident:
-                    depth = 0
-                    end_pos = None
-                    pos = start_pos
-                    while pos < len(input_text):
-                        ch = input_text[pos]
-                        if ch == "(":
-                            depth += 1
-                        elif ch == ")" and depth > 0:
-                            depth -= 1
-                        elif depth == 0 and ch in {",", "]"}:
-                            end_pos = pos
-                            break
-                        pos += 1
-                    if end_pos is None:
-                        parser.raise_error("Expected dimension list terminator.")
-                    expr = input_text[start_pos:end_pos].strip()
-                    if not expr:
-                        parser.raise_error("Expected dimension symbol.")
-                    parser._resume_from(end_pos)
-                    dims.append(StringAttr(expr))
+            depth = 0
+            end_pos = None
+            pos = start_pos
+            while pos < len(input_text):
+                ch = input_text[pos]
+                if ch == "(":
+                    depth += 1
+                elif ch == ")" and depth > 0:
+                    depth -= 1
+                elif depth == 0 and ch in {",", "]"}:
+                    end_pos = pos
+                    break
+                pos += 1
+            if end_pos is None:
+                parser.raise_error("Expected dimension list terminator.")
+            raw_text = input_text[start_pos:end_pos]
+            expr = raw_text.strip()
+            if not expr:
+                parser.raise_error("Expected dimension symbol.")
+            _consume_dim_expr_tokens(parser, expr)
+            if expr.isdecimal():
+                dims.append(IntAttr(int(expr)))
+            else:
+                dims.append(StringAttr(expr))
 
         if parser.parse_optional_punctuation(",") is None:
             break
 
     parser.parse_punctuation("]", "Expected dimension list terminator.")
     return ArrayAttr(dims)
+
+
+def _consume_dim_expr_tokens(parser: AttrParser, expr: str) -> None:
+    """按公开 parser 接口消费维度表达式的 token 序列。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅使用公开 `AttrParser` token 接口消费 `identifier/integer/operator/paren`。
+    - 当前表达式 token 范围为 `+` / `-` / `*` / `()`；不消费 `/`、`//`。
+    - 避免依赖 `parser._resume_from(...)` 这类外部非公开能力。
+
+    使用示例:
+    - _consume_dim_expr_tokens(parser, "M + 1")
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    compact_expr = re.sub(r"\s+", "", expr)
+    tokens = _DIM_EXPR_TOKEN_RE.findall(compact_expr)
+    if not tokens or "".join(tokens) != compact_expr:
+        parser.raise_error("Expected dimension symbol.")
+
+    for token in tokens:
+        if token.isdecimal():
+            parsed = parser.parse_optional_integer(allow_boolean=False, allow_negative=False)
+            if parsed is None or str(parsed) != token:
+                parser.raise_error("Expected integer literal in dimension expression.")
+            continue
+        if token in {"(", ")", "+", "-", "*"}:
+            parser.parse_characters(token, "Expected dimension symbol.")
+            continue
+        parsed_identifier = parser.parse_optional_identifier()
+        if parsed_identifier != token:
+            parser.raise_error("Expected identifier in dimension expression.")
 
 
 def _print_dim_list(printer: Printer, dims: ArrayAttr[Attribute]) -> None:
@@ -550,7 +606,7 @@ def _resolve_add_dtype_key(attr: Attribute) -> str | None:
     """解析 nn.add 标量/element_type 的 promotion key。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 支持 i32/f16/f32 三种类型；
@@ -1049,6 +1105,15 @@ def _normalize_bool_attr(value: bool | int | IntegerAttr | IntAttr, field_name: 
         value = value.data
     if isinstance(value, bool):
         value = 1 if value else 0
+    if not isinstance(value, int):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="dialect.nn 参数校验",
+                expected=f"{field_name} must be bool/int or i1 attr",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     return IntegerAttr(int(value), IntegerType(1))
 
 

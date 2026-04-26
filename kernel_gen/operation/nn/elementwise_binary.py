@@ -6,6 +6,13 @@
 功能说明:
 - 提供逐元素算术 family 与共享隐式 broadcast helper。
 
+API 列表:
+- `add(lhs: object, rhs: object) -> ArithmeticResult`
+- `sub(lhs: object, rhs: object) -> ArithmeticResult`
+- `mul(lhs: object, rhs: object) -> ArithmeticResult`
+- `truediv(lhs: object, rhs: object) -> ArithmeticResult`
+- `floordiv(lhs: object, rhs: object) -> ArithmeticResult`
+
 使用示例:
 - from kernel_gen.operation.nn.elementwise_binary import add, sub, mul
 
@@ -17,23 +24,214 @@
 
 from __future__ import annotations
 
+from kernel_gen.common.contracts import default_stride
+from kernel_gen.common.errors import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat
-from .common import (
-    ArithmeticResult,
-    ScalarArithmeticValue,
-    _ERROR_ACTION,
-    _ERROR_SCENE,
-    _ERROR_TEMPLATE,
-    _build_add_stride,
-    _ensure_memory_operand,
-    _ensure_scalar_arithmetic_value,
-    _ensure_scalar_value,
-    _merge_broadcast_dim,
-    _resolve_add_dtype,
-    _resolve_scalar_dtype,
-)
+
+ScalarArithmeticValue = int | float | SymbolDim
+ArithmeticResult = Memory | ScalarArithmeticValue
+_ERROR_ACTION = "请按接口约束传参"
+_ERROR_SCENE = "nn operation 参数校验"
+
+
+def _clone_shape(shape: SymbolShape | None) -> SymbolShape | None:
+    """复制 `SymbolShape`，避免输出与输入共享符号实例。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 对 `Memory` 的 shape/stride 做逐维复制。
+    - 保持符号表达式结构不变，同时断开实例别名。
+
+    使用示例:
+    - _clone_shape(SymbolShape(["M", "N"]))
+    """
+
+    if shape is None:
+        return None
+    return SymbolShape([SymbolDim(dim.get_symbol()) for dim in shape.get_shape()])
+
+
+def _clone_memory_with_dtype(value: Memory, dtype: object) -> Memory:
+    """按指定 dtype 复制 `Memory` 的公开元信息。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅通过公开 shape/stride/space/format 元信息构造结果。
+    - 避免跨文件依赖 `Memory._clone_with_dtype(...)`。
+
+    使用示例:
+    - _clone_memory_with_dtype(Memory([1], NumericType.Float32), NumericType.Float32)
+    """
+
+    return Memory(
+        _clone_shape(value.shape),
+        dtype,
+        space=value.space,
+        stride=_clone_shape(value.stride),
+        format=value.format,
+    )
+
+
+def _resolve_add_dtype(lhs: object, rhs: object) -> object:
+    """按公开 `Memory` 算术语义推导 nn 算术结果 dtype。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 复用 `Memory` 的公开加法路径推导 dtype。
+    - 当 dtype 组合不受支持时，转为 `nn.add` 的稳定错误消息。
+
+    使用示例:
+    - _resolve_add_dtype(NumericType.Int32, NumericType.Float32)
+    """
+
+    try:
+        return (Memory([1], lhs) + Memory([1], rhs)).get_type()
+    except TypeError as exc:
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.add 参数校验",
+                expected="Unsupported dtype for nn.add",
+                actual=f"lhs={lhs} rhs={rhs}",
+                action=_ERROR_ACTION,
+            )
+        ) from exc
+
+
+def _resolve_scalar_dtype(memory_dtype: object) -> object:
+    """解析 `Memory/标量` 路径的 dtype 决议。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 标量按 `Int32` 参与公开算术类型提升规则。
+
+    使用示例:
+    - _resolve_scalar_dtype(NumericType.Int8)
+    """
+
+    from kernel_gen.symbol_variable.type import NumericType
+
+    return _resolve_add_dtype(memory_dtype, NumericType.Int32)
+
+
+def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
+    """合并两个维度为隐式 broadcast 目标维度。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 维度相等时返回该维度。
+    - 任一侧为静态 1 时返回另一侧。
+    - 其他情况视为不兼容。
+
+    使用示例:
+    - _merge_broadcast_dim(1, "N")
+    """
+
+    if lhs_dim == "?" or rhs_dim == "?":
+        if lhs_dim == rhs_dim:
+            return lhs_dim
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.add 参数校验",
+                expected="Implicit broadcast dimension mismatch",
+                actual=f"lhs={lhs_dim} rhs={rhs_dim}",
+                action=_ERROR_ACTION,
+            )
+        )
+    if lhs_dim == rhs_dim:
+        return lhs_dim
+    if lhs_dim == 1:
+        return rhs_dim
+    if rhs_dim == 1:
+        return lhs_dim
+    raise ValueError(
+        _ERROR_TEMPLATE.format(
+            scene="nn.add 参数校验",
+            expected="Implicit broadcast dimension mismatch",
+            actual=f"lhs={lhs_dim} rhs={rhs_dim}",
+            action=_ERROR_ACTION,
+        )
+    )
+
+
+def _ensure_memory_operand(lhs: object, rhs: object) -> None:
+    """校验至少一侧为 `Memory`。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅允许 `Memory` 或与 `Memory` 组合的二元运算。
+
+    使用示例:
+    - _ensure_memory_operand(Memory([1], NumericType.Float32), 1)
+    """
+
+    if not isinstance(lhs, Memory) and not isinstance(rhs, Memory):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="At least one operand must be Memory",
+                actual=f"lhs={type(lhs).__name__} rhs={type(rhs).__name__}",
+                action=_ERROR_ACTION,
+            )
+        )
+
+
+def _ensure_scalar_value(value: object) -> None:
+    """校验公开标量输入类型。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅允许 `int/float/bool` 作为与 `Memory` 组合的公开标量。
+
+    使用示例:
+    - _ensure_scalar_value(1)
+    """
+
+    if isinstance(value, bool):
+        return
+    if not isinstance(value, (int, float)):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="Unsupported scalar type for nn operation",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+
+
+def _ensure_scalar_arithmetic_value(value: object) -> None:
+    """校验纯标量算术输入类型。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 允许 `int/float/bool/SymbolDim` 参与纯标量算术。
+
+    使用示例:
+    - _ensure_scalar_arithmetic_value(SymbolDim("N"))
+    """
+
+    if isinstance(value, SymbolDim):
+        return
+    _ensure_scalar_value(value)
 
 def _infer_implicit_broadcast_shape(lhs: Memory, rhs: Memory) -> SymbolShape:
     """推导逐元素隐式 broadcast 的共同目标 shape。
@@ -93,12 +291,12 @@ def _binary_memory_result(lhs: Memory, rhs: Memory) -> Memory:
         if lhs.format is rhs.format and lhs.stride.get_values() == rhs.stride.get_values():
             if lhs.dtype is rhs.dtype:
                 return lhs + rhs
-            return lhs._clone_with_dtype(result_dtype)
+            return _clone_memory_with_dtype(lhs, result_dtype)
         return Memory(
             lhs.shape,
             result_dtype,
             space=lhs.space,
-            stride=_build_add_stride(lhs.shape),
+            stride=default_stride(lhs.shape),
             format=Farmat.Norm,
         )
     target_shape = _infer_implicit_broadcast_shape(lhs, rhs)
@@ -106,7 +304,7 @@ def _binary_memory_result(lhs: Memory, rhs: Memory) -> Memory:
         target_shape,
         result_dtype,
         space=lhs.space,
-        stride=_build_add_stride(target_shape),
+        stride=default_stride(target_shape),
         format=Farmat.Norm,
     )
 
@@ -136,12 +334,12 @@ def _binary_add_result(lhs: Memory, rhs: Memory) -> Memory:
         if lhs.format is rhs.format and lhs.stride.get_values() == rhs.stride.get_values():
             if lhs.dtype is rhs.dtype:
                 return lhs + rhs
-            return lhs._clone_with_dtype(result_dtype)
+            return _clone_memory_with_dtype(lhs, result_dtype)
         return Memory(
             lhs.shape,
             result_dtype,
             space=lhs.space,
-            stride=_build_add_stride(lhs.shape),
+            stride=default_stride(lhs.shape),
             format=Farmat.Norm,
         )
     target_shape = _infer_implicit_broadcast_shape(lhs, rhs)
@@ -149,7 +347,7 @@ def _binary_add_result(lhs: Memory, rhs: Memory) -> Memory:
         target_shape,
         result_dtype,
         space=lhs.space,
-        stride=_build_add_stride(target_shape),
+        stride=default_stride(target_shape),
         format=Farmat.Norm,
     )
 
@@ -246,9 +444,9 @@ def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> ArithmeticR
         return _binary_memory_result(lhs, rhs)
     if isinstance(lhs, Memory):
         _ensure_scalar_value(rhs)
-        return lhs._clone_with_dtype(_resolve_scalar_dtype(lhs.dtype))
+        return _clone_memory_with_dtype(lhs, _resolve_scalar_dtype(lhs.dtype))
     _ensure_scalar_value(lhs)
-    return rhs._clone_with_dtype(_resolve_scalar_dtype(rhs.dtype))
+    return _clone_memory_with_dtype(rhs, _resolve_scalar_dtype(rhs.dtype))
 
 def add(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素加法。
@@ -281,9 +479,9 @@ def add(lhs: object, rhs: object) -> ArithmeticResult:
         return _binary_add_result(lhs, rhs)
     if isinstance(lhs, Memory):
         _ensure_scalar_value(rhs)
-        return lhs._clone_with_dtype(_resolve_scalar_dtype(lhs.dtype))
+        return _clone_memory_with_dtype(lhs, _resolve_scalar_dtype(lhs.dtype))
     _ensure_scalar_value(lhs)
-    return rhs._clone_with_dtype(_resolve_scalar_dtype(rhs.dtype))
+    return _clone_memory_with_dtype(rhs, _resolve_scalar_dtype(rhs.dtype))
 
 def sub(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素减法。
@@ -391,17 +589,11 @@ def floordiv(lhs: object, rhs: object) -> ArithmeticResult:
         return _binary_memory_result(lhs, rhs)
     if isinstance(lhs, Memory):
         _ensure_scalar_value(rhs)
-        return lhs._clone_with_dtype(_resolve_scalar_dtype(lhs.dtype))
+        return _clone_memory_with_dtype(lhs, _resolve_scalar_dtype(lhs.dtype))
     _ensure_scalar_value(lhs)
-    return rhs._clone_with_dtype(_resolve_scalar_dtype(rhs.dtype))
+    return _clone_memory_with_dtype(rhs, _resolve_scalar_dtype(rhs.dtype))
 
 __all__ = [
-    "_infer_implicit_broadcast_shape",
-    "_binary_memory_result",
-    "_binary_add_result",
-    "_apply_scalar_operator",
-    "_dispatch_scalar_binary",
-    "_dispatch_binary",
     "add",
     "sub",
     "mul",

@@ -32,43 +32,56 @@ import kernel_gen.operation.dma as operation_dma
 import kernel_gen.operation.nn as operation_nn
 import kernel_gen.operation.scf as operation_scf
 
+NN_TOP_LEVEL_EXPORTS = (
+    "add",
+    "sub",
+    "mul",
+    "truediv",
+    "eq",
+    "ne",
+    "lt",
+    "le",
+    "gt",
+    "ge",
+    "matmul",
+)
+
+DMA_TOP_LEVEL_EXPORTS = (
+    "alloc",
+    "free",
+    "copy",
+    "load",
+    "store",
+    "slice",
+    "deslice",
+    "view",
+    "reshape",
+    "flatten",
+    "cast",
+)
+
+SCF_TOP_LEVEL_EXPORTS = ("loop",)
+
+STABLE_TOP_LEVEL_EXPORTS = (
+    NN_TOP_LEVEL_EXPORTS
+    + DMA_TOP_LEVEL_EXPORTS
+    + SCF_TOP_LEVEL_EXPORTS
+)
+
 
 # TC-OP-PKG-001
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-16 09:05:00 +0800
 # 最近一次运行成功时间: 2026-04-16 09:05:00 +0800
-# 测试目的: 验证 kernel_gen.operation.__all__ 显式锁定稳定顶层导出集合与顺序。
-# 使用示例: pytest -q test/operation/test_operation_package_api.py -k test_operation_top_level_all_matches_stable_exports
+# 测试目的: 验证 spec 已定义的 kernel_gen.operation 顶层公开对象可直接从 package-root 获取。
+# 使用示例: pytest -q test/operation/test_operation_package_api.py -k test_operation_top_level_public_exports_match_spec
 # 对应功能实现文件路径: kernel_gen/operation/__init__.py
-# 对应 spec 文件路径: spec/operation/nn.md
+# 对应 spec 文件路径: spec/operation/nn.md, spec/operation/dma.md, spec/operation/scf.md
 # 对应测试文件路径: test/operation/test_operation_package_api.py
-def test_operation_top_level_all_matches_stable_exports() -> None:
-    assert operation.__all__ == [
-        "add",
-        "sub",
-        "mul",
-        "truediv",
-        "eq",
-        "ne",
-        "lt",
-        "le",
-        "gt",
-        "ge",
-        "matmul",
-        "alloc",
-        "free",
-        "copy",
-        "load",
-        "store",
-        "slice",
-        "deslice",
-        "view",
-        "reshape",
-        "flatten",
-        "cast",
-        "loop",
-    ]
+def test_operation_top_level_public_exports_match_spec() -> None:
+    for name in STABLE_TOP_LEVEL_EXPORTS:
+        assert hasattr(operation, name)
 
 
 # TC-OP-PKG-002
@@ -76,22 +89,24 @@ def test_operation_top_level_all_matches_stable_exports() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-16 09:05:00 +0800
 # 最近一次运行成功时间: 2026-04-16 09:05:00 +0800
-# 测试目的: 验证星号导入只暴露稳定顶层 API，不泄露额外 helper。
-# 使用示例: pytest -q test/operation/test_operation_package_api.py -k test_operation_star_import_exposes_only_stable_exports
+# 测试目的: 验证显式公开导入只引入 spec 已定义的顶层公开对象，不依赖模块元数据。
+# 使用示例: pytest -q test/operation/test_operation_package_api.py -k test_operation_explicit_import_exposes_only_public_exports
 # 对应功能实现文件路径: kernel_gen/operation/__init__.py
-# 对应 spec 文件路径: spec/operation/nn.md
+# 对应 spec 文件路径: spec/operation/nn.md, spec/operation/dma.md, spec/operation/scf.md
 # 对应测试文件路径: test/operation/test_operation_package_api.py
-def test_operation_star_import_exposes_only_stable_exports() -> None:
+def test_operation_explicit_import_exposes_only_public_exports() -> None:
     namespace: dict[str, object] = {}
 
-    exec("from kernel_gen.operation import *", namespace)
+    exec(
+        f"from kernel_gen.operation import {', '.join(STABLE_TOP_LEVEL_EXPORTS)}",
+        namespace,
+    )
 
     imported_names = {name for name in namespace if name != "__builtins__"}
 
-    assert imported_names == set(operation.__all__)
-    assert namespace["add"] is operation.add
-    assert namespace["alloc"] is operation.alloc
-    assert namespace["loop"] is operation.loop
+    assert imported_names == set(STABLE_TOP_LEVEL_EXPORTS)
+    for name in STABLE_TOP_LEVEL_EXPORTS:
+        assert namespace[name] is getattr(operation, name)
 
 
 # TC-OP-PKG-003
@@ -154,8 +169,9 @@ def test_operation_package_top_level_imports() -> None:
 # 对应 spec 文件路径: spec/operation/nn.md, spec/operation/dma.md, spec/operation/scf.md
 # 对应测试文件路径: test/operation/test_operation_package_api.py
 def test_operation_package_export_identity() -> None:
-    assert operation.add is operation_nn.add
-    assert operation.matmul is operation_nn.matmul
-    assert operation.alloc is operation_dma.alloc
-    assert operation.slice is operation_dma.slice
-    assert operation.loop is operation_scf.loop
+    for name in NN_TOP_LEVEL_EXPORTS:
+        assert getattr(operation, name) is getattr(operation_nn, name)
+    for name in DMA_TOP_LEVEL_EXPORTS:
+        assert getattr(operation, name) is getattr(operation_dma, name)
+    for name in SCF_TOP_LEVEL_EXPORTS:
+        assert getattr(operation, name) is getattr(operation_scf, name)

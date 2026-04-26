@@ -46,9 +46,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.kernel import (
-    _verify_element_type_match,
-    _verify_memory_type,
-    _verify_same_layout,
     KernelBinaryElewiseOp,
     KernelExpOp,
     KernelImg2col1dOp,
@@ -294,8 +291,15 @@ def test_kernel_binary_elewise_add_layout_mismatch() -> None:
         op.verify()
 
     invalid_lhs = _TestOp(result_types=[i32]).results[0]
-    with pytest.raises(VerifyException, match="lhs must be nn.memory"):
-        _verify_memory_type(invalid_lhs.type, "lhs")
+    invalid_op = KernelBinaryElewiseOp(
+        _make_value(out_type),
+        invalid_lhs,
+        _make_value(rhs_type),
+        kind="add",
+        space=_make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="base attribute nn.memory"):
+        invalid_op.verify()
 
 
 # TC-KRN-006
@@ -510,9 +514,6 @@ def test_kernel_ops_no_result() -> None:
     ):
         op.verify()
         assert len(op.results) == 0
-
-    _verify_same_layout([], _make_space("global"))
-    _verify_element_type_match([], "unused")
 
 
 # TC-KRN-011

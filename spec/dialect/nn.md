@@ -6,36 +6,36 @@
 
 ## API 列表
 
-- `NnMemorySpaceAttr`
-- `NnMemoryType`
-- `nn.add`
-- `nn.sub`
-- `nn.mul`
-- `nn.div`
-- `nn.truediv`
-- `nn.eq`
-- `nn.ne`
-- `nn.lt`
-- `nn.le`
-- `nn.gt`
-- `nn.ge`
-- `nn.select`
-- `nn.cast`
-- `nn.exp`
-- `nn.reduce_sum`
-- `nn.reduce_min`
-- `nn.reduce_max`
-- `nn.broadcast`
-- `nn.transpose`
-- `nn.softmax`
-- `nn.matmul`
-- `nn.img2col1d`
-- `nn.img2col2d`
+- `NnMemorySpaceAttr(name: str)`
+- `NnMemoryType(shape: Sequence[Attribute], stride: Sequence[Attribute], element_type: Attribute, space: NnMemorySpaceAttr)`
+- `nn.add(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.sub(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.mul(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.div(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.truediv(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.eq(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.ne(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.lt(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.le(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.gt(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.ge(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.select(pred: SSAValue, on_true: SSAValue, on_false: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.cast(input_value: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.exp(input_value: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.reduce_sum(input_value: SSAValue, result_type: NnMemoryType, axes: Sequence[int] | ArrayAttr[IntegerAttr], keepdim: bool | IntegerAttr, space: NnMemorySpaceAttr)`
+- `nn.reduce_min(input_value: SSAValue, result_type: NnMemoryType, axes: Sequence[int] | ArrayAttr[IntegerAttr], keepdim: bool | IntegerAttr, space: NnMemorySpaceAttr)`
+- `nn.reduce_max(input_value: SSAValue, result_type: NnMemoryType, axes: Sequence[int] | ArrayAttr[IntegerAttr], keepdim: bool | IntegerAttr, space: NnMemorySpaceAttr)`
+- `nn.broadcast(input_value: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.transpose(input_value: SSAValue, result_type: NnMemoryType, perm: Sequence[int] | ArrayAttr[IntegerAttr], space: NnMemorySpaceAttr)`
+- `nn.softmax(input_value: SSAValue, result_type: NnMemoryType, axis: int | IntegerAttr, space: NnMemorySpaceAttr)`
+- `nn.matmul(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `nn.img2col1d(input_value: SSAValue, result_type: NnMemoryType, kw: SSAValue, sw: SSAValue, dw: SSAValue, pl: SSAValue, pr: SSAValue, space: NnMemorySpaceAttr)`
+- `nn.img2col2d(input_value: SSAValue, result_type: NnMemoryType, kh: SSAValue, kw: SSAValue, sh: SSAValue, sw: SSAValue, dh: SSAValue, dw: SSAValue, ph: SSAValue, pw: SSAValue, pl: SSAValue, pr: SSAValue, space: NnMemorySpaceAttr)`
 
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/dialect/nn.md`](../../spec/dialect/nn.md)
 - `功能实现`：[`kernel_gen/dialect/nn.py`](../../kernel_gen/dialect/nn.py)
 - `test`：[`test/dialect/test_nn_dialect.py`](../../test/dialect/test_nn_dialect.py)
@@ -55,6 +55,7 @@
 - 明确 `nn dialect` 不支持逐元素隐式 broadcast，所有广播必须显式使用 `nn.broadcast`。
 - 承接上游 `operation.broadcast_to(...)` 的 canonical lowering：进入方言时以 `nn.broadcast` 表达目标 shape（由结果类型承载），不在 `nn dialect` 额外新增 `nn.broadcast_to` 独立 op。
 - 保证合法文本 IR 可以 round-trip，非法输入在 parse 或 verifier 阶段被拒绝。
+- `!nn.memory<...>` 的 `shape/stride` 文本范围当前只承接 `xdsl` 公开 parser token 接口可稳定消费并保持 round-trip 的表达式子集；含 `/`、`//` 的原文维度表达式不属于 repo_conformance S1 当前轮次继续保留的公开合同。
 
 ## 限制与边界
 
@@ -79,7 +80,7 @@
 - `space` 指 `nn dialect` 中 memory 所在的物理或逻辑空间，由 `NnMemorySpaceAttr` 表示。
 - `memory type` 指 `NnMemoryType`，由 `shape/stride/element_type/space` 组成。
 - `round-trip` 指文本 IR 在 parse 后再 print，得到稳定且等价的文本表示。
-- 合法 `!nn.memory<...>`、`#nn.space<...>` 与包含公开 op 的模块文本必须支持 round-trip。
+- 合法 `!nn.memory<...>`、`#nn.space<...>` 与包含公开 op 的模块文本必须支持 round-trip；其中 `!nn.memory<...>` 的 `shape/stride` 维度文本范围仍以上述 `xdsl` 公开 token 接口可稳定消费的子集为准。
 
 ## 公开接口
 
@@ -130,6 +131,7 @@ mem_ty = NnMemoryType(shape, stride, element_type, space)
 
 - `shape` 与 `stride` 的 rank 必须一致。
 - `shape` 中的 `?` 可表示动态维度；`stride` 中的 `?` 受同位约束限制。
+- `shape/stride` 中的表达式文本当前仅承接 `xdsl` 公开 parser token 接口可稳定消费并保持 round-trip 的 `identifier/integer/?/+/-/*/()` 范围；含 `/`、`//` 的原文维度表达式不在本轮公开合同内。
 - 缺失字段的文本类型必须在 parse 阶段失败。
 
 返回与限制：

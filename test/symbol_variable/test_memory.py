@@ -349,13 +349,14 @@ def test_clone_with_dtype_preserves_symbolic_stride_expression() -> None:
     w = SymbolDim("W")
     stride_expr = h * 5
     mem = Memory([h, w], NumericType.Float32, stride=[stride_expr, 1])
-    cloned = mem._clone_with_dtype(NumericType.Int32)
-    assert cloned.stride is not None
+    rhs = Memory([h, w], NumericType.Int32, stride=[stride_expr, 1])
+    result = mem + rhs
+    assert result.stride is not None
     assert mem.stride is not None
     original_dim = mem.stride.get_shape()[0]
-    cloned_dim = cloned.stride.get_shape()[0]
-    assert cloned_dim is not original_dim
-    assert cloned_dim == original_dim
+    result_dim = result.stride.get_shape()[0]
+    assert result_dim is not original_dim
+    assert result_dim == original_dim
 
 
 # ME-021

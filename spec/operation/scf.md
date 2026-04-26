@@ -10,11 +10,12 @@
 ## API 列表
 
 - `loop(start, end, step, trip_count=1)`
+- `kernel_gen.operation.loop(start, end, step, trip_count=1)`
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/operation/scf.md`](../../spec/operation/scf.md)
 - `功能实现`：[`kernel_gen/operation/scf.py`](../../kernel_gen/operation/scf.py)
 - `test`：[`test/operation/test_operation_scf.py`](../../test/operation/test_operation_scf.py)
@@ -22,6 +23,7 @@
 ## 依赖
 
 - [`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)：`SymbolDim` 的符号维度语义。
+- [`kernel_gen/operation/__init__.py`](../../kernel_gen/operation/__init__.py)：定义 `kernel_gen.operation` 包级稳定导出集合，供本文件锁定顶层导出边界复用。
 
 ## 目标
 
@@ -44,6 +46,14 @@
 - `trip_count` 只接受 `int | SymbolDim | None`，并显式拒绝 `bool`；`None` 仅表示按默认值 `1` 归一化。
 - `trip_count <= 0` 必须抛出错误（建议 `ValueError`），不得 silent fallback 或默认当作 `1`。
 - `LoopRange(...)` 作为公开可直接构造入口，必须与 `loop(...)` 共用同一组输入校验与 `trip_count=None -> 1` 的归一化规则。
+- `kernel_gen.operation.scf` 是 scf family 的完整稳定入口；`kernel_gen.operation` 顶层只稳定重导出 `loop`，且对象身份必须与 `kernel_gen.operation.scf.loop` 一致。
+
+### package-root 导出边界
+
+| 入口 | 稳定公开 API | 说明 |
+| --- | --- | --- |
+| `kernel_gen.operation.scf` | `loop` | scf family 的完整稳定入口 |
+| `kernel_gen.operation` | `loop` | 包根稳定重导出同一 `loop` helper；对象身份与 `kernel_gen.operation.scf` 保持一致 |
 
 ## 公开接口
 
@@ -109,6 +119,7 @@ for t in loop(SymbolDim("S"), SymbolDim("S") + SymbolDim("K"), SymbolDim("K"), t
 ## 测试
 
 - 测试文件：[`test/operation/test_operation_scf.py`](../../test/operation/test_operation_scf.py)
+- 相关顶层导出测试：[`test/operation/test_operation_package_api.py`](../../test/operation/test_operation_package_api.py)
 - 执行命令：`pytest -q test/operation/test_operation_scf.py`
 - 测试目标：
   - 纯整数 `loop` 与 `range(start, end, step)` 的半开区间语义一致。
@@ -119,6 +130,7 @@ for t in loop(SymbolDim("S"), SymbolDim("S") + SymbolDim("K"), SymbolDim("K"), t
   - 当前只收口最小 loop helper，不扩到其他控制流构造。
   - 非法类型输入触发 `TypeError`。
   - 边界/半开区间语义与正负步长的停止条件一致。
+  - 验证 `kernel_gen.operation` 顶层继续稳定重导出 `loop`，且对象身份与 `kernel_gen.operation.scf.loop` 一致。
 - 功能与用例清单：
   - TC-OP-SCF-001：纯整数 `loop(0, 4, 1)` 产生 `[0, 1, 2, 3]`。
   - TC-OP-SCF-002：纯整数 `loop(4, 0, -1)` 产生 `[4, 3, 2, 1]`。

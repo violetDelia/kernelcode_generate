@@ -6,6 +6,11 @@
 功能说明:
 - 提供 reduce_sum/reduce_min/reduce_max family 实现
 
+API 列表:
+- `reduce_sum(value: object, axis: object = None, keepdim: bool = False) -> Memory`
+- `reduce_min(value: object, axis: object = None, keepdim: bool = False) -> Memory`
+- `reduce_max(value: object, axis: object = None, keepdim: bool = False) -> Memory`
+
 使用示例:
 - from kernel_gen.operation.nn import reduce_sum, reduce_min, reduce_max
 
@@ -19,11 +24,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from kernel_gen.common.contracts import default_stride as _common_default_stride
+from kernel_gen.common.errors import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
-from .common import _ERROR_ACTION, _ERROR_TEMPLATE, _build_add_stride
+
+_ERROR_ACTION = "请按接口约束传参"
 
 
 def _ensure_reduce_memory(value: object, op_name: str) -> Memory:
@@ -269,7 +277,7 @@ def _reduce_memory_result(
         result_shape,
         memory.dtype,
         space=memory.space,
-        stride=_build_add_stride(result_shape),
+        stride=_common_default_stride(result_shape),
         format=Farmat.Norm,
     )
 
@@ -356,12 +364,6 @@ def reduce_max(value: object, axis: object = None, keepdim: bool = False) -> Mem
     )
 
 __all__ = [
-    "_ensure_reduce_memory",
-    "_normalize_reduce_axes",
-    "_ensure_reduce_keepdim",
-    "_build_reduce_result_shape",
-    "_ensure_non_empty_reduction_extent",
-    "_reduce_memory_result",
     "reduce_sum",
     "reduce_min",
     "reduce_max",

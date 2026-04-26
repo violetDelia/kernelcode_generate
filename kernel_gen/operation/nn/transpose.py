@@ -6,6 +6,9 @@
 功能说明:
 - 提供 transpose 运算与 perm 规范化 helper。
 
+API 列表:
+- `transpose(value: object, perm: object) -> Memory`
+
 使用示例:
 - from kernel_gen.operation.nn.transpose import transpose
 
@@ -19,9 +22,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from kernel_gen.common.errors import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
-from .common import _ERROR_ACTION, _ERROR_TEMPLATE
+
+_ERROR_ACTION = "请按接口约束传参"
 
 def _normalize_transpose_perm(perm: object, rank: int) -> list[int]:
     """规范化 transpose 的 perm 参数。
@@ -127,7 +132,4 @@ def transpose(value: object, perm: object) -> Memory:
         format=value.format,
     )
 
-__all__ = [
-    "_normalize_transpose_perm",
-    "transpose",
-]
+__all__ = ["transpose"]

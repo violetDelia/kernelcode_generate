@@ -6,6 +6,16 @@
 功能说明:
 - 提供符号维度、形状、内存与类型枚举的统一导入入口。
 
+API 列表:
+- `SymbolDim(value: int | str | Expr | Symbol)`
+- `SymbolList(shapes: list[int | str | SymbolDim])`
+- `SymbolShape(shapes: list[int | str | SymbolDim])`
+- `LocalSpaceMeta(name: str, max_size: int | None, align: int)`
+- `Memory(shape: ShapeLike, dtype: NumericType | None = None, space: MemorySpace = MemorySpace.GM, stride: ShapeLike | None = None, format: Farmat = Farmat.Norm)`
+- `MemorySpace`
+- `NumericType`
+- `Farmat`
+
 使用示例:
 - from kernel_gen.symbol_variable import SymbolDim, SymbolShape, SymbolList, Memory, MemorySpace, NumericType, Farmat
 

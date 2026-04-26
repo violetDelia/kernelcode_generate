@@ -5,6 +5,17 @@
 
 功能说明:
 - 定义内存空间枚举与 Memory 对象，描述 shape/dtype/stride/format/space 元信息。
+- 当前文件私有 helper 仅服务 `Memory` 内部规整、复制和算术实现，不作为跨文件复用入口。
+
+API 列表:
+- `class LocalSpaceMeta(name: str, max_size: int | None, align: int)`
+- `class MemorySpace(Enum)`
+- `class Memory(shape: ShapeLike, dtype: NumericType | None = None, space: MemorySpace = MemorySpace.GM, stride: ShapeLike | None = None, format: Farmat = Farmat.Norm)`
+- `Memory.get_shape(self) -> list[int | str]`
+- `Memory.get_stride(self) -> list[int | SymbolDim] | None`
+- `Memory.get_type(self) -> NumericType`
+- `Memory.get_space(self) -> MemorySpace`
+- `Memory.get_format(self) -> Farmat`
 
 使用示例:
 - from kernel_gen.symbol_variable.memory import Memory, MemorySpace

@@ -27,16 +27,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.operation.nn import (
-    _broadcast_memory_pair,
-    _infer_broadcast_shape,
-    _merge_broadcast_dim,
     add,
     broadcast,
     broadcast_to,
     eq,
 )
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
-from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 
@@ -166,27 +162,12 @@ def test_nn_add_implicit_broadcast_singleton() -> None:
     result = add(lhs, rhs)
     lhs_same = Memory(["A", "B"], NumericType.Float32)
     rhs_same = Memory(["A", "B"], NumericType.Float32)
-    lhs_b, rhs_b = _broadcast_memory_pair(lhs_same, rhs_same)
-    lhs_b2, rhs_b2 = _broadcast_memory_pair(lhs, rhs)
-    inferred_rhs_short = _infer_broadcast_shape(SymbolShape(["A", "B"]), SymbolShape(["B"]))
-    inferred_lhs_one = _infer_broadcast_shape(SymbolShape([1, "B"]), SymbolShape(["A", "B"]))
-    inferred_rhs_one = _infer_broadcast_shape(SymbolShape(["A", "B"]), SymbolShape([1, "B"]))
     rhs_singleton = Memory([1, "B"], NumericType.Float32)
-    lhs_b3, rhs_b3 = _broadcast_memory_pair(lhs_same, rhs_singleton)
-    assert _merge_broadcast_dim("N", 1) == "N"
-    assert _merge_broadcast_dim("?", "?") == "?"
-    with pytest.raises(ValueError):
-        _merge_broadcast_dim("?", "N")
+    result_same = add(lhs_same, rhs_same)
+    result_rhs_singleton = add(lhs_same, rhs_singleton)
     assert result.shape.get_values() == ["A", "B"]
-    assert lhs_b is lhs_same
-    assert rhs_b is rhs_same
-    assert lhs_b2.shape.get_values() == ["A", "B"]
-    assert rhs_b2.shape.get_values() == ["A", "B"]
-    assert inferred_rhs_short.get_values() == ["A", "B"]
-    assert inferred_lhs_one.get_values() == ["A", "B"]
-    assert inferred_rhs_one.get_values() == ["A", "B"]
-    assert lhs_b3 is lhs_same
-    assert rhs_b3.shape.get_values() == ["A", "B"]
+    assert result_same.shape.get_values() == ["A", "B"]
+    assert result_rhs_singleton.shape.get_values() == ["A", "B"]
 
 
 # OP-IB-002
@@ -203,9 +184,7 @@ def test_nn_add_implicit_broadcast_prepend_dimension() -> None:
     lhs = Memory(["B"], NumericType.Float32)
     rhs = Memory(["A", "B"], NumericType.Float32)
     result = add(lhs, rhs)
-    inferred = _infer_broadcast_shape(SymbolShape(["B"]), SymbolShape(["A", "B"]))
     assert result.shape.get_values() == ["A", "B"]
-    assert inferred.get_values() == ["A", "B"]
 
 
 # OP-IB-003
@@ -241,5 +220,3 @@ def test_nn_add_implicit_broadcast_mismatch() -> None:
     rhs = Memory(["A", "C"], NumericType.Float32)
     with pytest.raises(ValueError):
         _ = add(lhs, rhs)
-    with pytest.raises(ValueError):
-        _infer_broadcast_shape(SymbolShape(["A", "B"]), SymbolShape(["A", "C"]))

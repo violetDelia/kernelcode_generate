@@ -6,6 +6,10 @@
 功能说明:
 - 提供 img2col1d / img2col2d 运算与共享 shape helper。
 
+API 列表:
+- `img2col1d(value: object, kw: int | SymbolDim, sw: int | SymbolDim = 1, dw: int | SymbolDim = 1, pl: int | SymbolDim = 0, pr: int | SymbolDim = 0) -> Memory`
+- `img2col2d(value: object, kh: int | SymbolDim, kw: int | SymbolDim, sh: int | SymbolDim = 1, sw: int | SymbolDim = 1, dh: int | SymbolDim = 1, dw: int | SymbolDim = 1, ph: int | SymbolDim = 0, pw: int | SymbolDim = 0, pl: int | SymbolDim = 0, pr: int | SymbolDim = 0) -> Memory`
+
 使用示例:
 - from kernel_gen.operation.nn.img2col import img2col1d, img2col2d
 
@@ -17,15 +21,106 @@
 
 from __future__ import annotations
 
-from .common import (
-    _ERROR_ACTION,
-    _ERROR_TEMPLATE,
-    _normalize_symbolic_int_param,
-)
+from kernel_gen.common.errors import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
+
+_ERROR_ACTION = "请按接口约束传参"
+
+
+def _normalize_symbolic_int_param(
+    scene: str,
+    owner: str,
+    name: str,
+    value: int | SymbolDim,
+    allow_zero: bool,
+) -> SymbolDim:
+    """规范化 img2col 内部整型/符号参数。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅接受 `int | SymbolDim`，拒绝 `bool` 和其他类型。
+    - 对静态可判定值执行 `> 0` 或 `>= 0` 约束。
+
+    使用示例:
+    - _normalize_symbolic_int_param("nn.img2col 参数校验", "img2col", "kw", 3, allow_zero=False)
+    """
+    expected_type = f"{owner} {name} must be int or SymbolDim"
+    expected_non_negative = f"{owner} {name} must be >= 0"
+    expected_positive = f"{owner} {name} must be > 0"
+    expected_integer = f"{owner} {name} must be integer"
+    if isinstance(value, bool):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene=scene,
+                expected=expected_type,
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+    if isinstance(value, int):
+        if allow_zero and value < 0:
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene=scene,
+                    expected=expected_non_negative,
+                    actual=str(value),
+                    action=_ERROR_ACTION,
+                )
+            )
+        if not allow_zero and value <= 0:
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene=scene,
+                    expected=expected_positive,
+                    actual=str(value),
+                    action=_ERROR_ACTION,
+                )
+            )
+        return SymbolDim(value)
+    if isinstance(value, SymbolDim):
+        if not value.is_dynamic():
+            resolved = value.get_value()
+            if not isinstance(resolved, int):
+                raise ValueError(
+                    _ERROR_TEMPLATE.format(
+                        scene=scene,
+                        expected=expected_integer,
+                        actual=str(resolved),
+                        action=_ERROR_ACTION,
+                    )
+                )
+            if allow_zero and resolved < 0:
+                raise ValueError(
+                    _ERROR_TEMPLATE.format(
+                        scene=scene,
+                        expected=expected_non_negative,
+                        actual=str(resolved),
+                        action=_ERROR_ACTION,
+                    )
+                )
+            if not allow_zero and resolved <= 0:
+                raise ValueError(
+                    _ERROR_TEMPLATE.format(
+                        scene=scene,
+                        expected=expected_positive,
+                        actual=str(resolved),
+                        action=_ERROR_ACTION,
+                    )
+                )
+        return value
+    raise TypeError(
+        _ERROR_TEMPLATE.format(
+            scene=scene,
+            expected=expected_type,
+            actual=type(value).__name__,
+            action=_ERROR_ACTION,
+        )
+    )
 
 def _normalize_img2col_param(name: str, value: int | SymbolDim, allow_zero: bool) -> SymbolDim:
     """规范化 img2col 参数为 SymbolDim。
@@ -310,9 +405,6 @@ def _img2col(
     )
 
 __all__ = [
-    "_normalize_img2col_param",
-    "_img2col_output_dim",
     "img2col1d",
     "img2col2d",
-    "_img2col",
 ]

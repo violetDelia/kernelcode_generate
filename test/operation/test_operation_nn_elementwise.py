@@ -29,11 +29,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.operation.nn import (
-    _AddStrideDim,
-    _broadcast_memory_pair,
-    _infer_broadcast_shape,
-    _merge_broadcast_dim,
-    _resolve_add_dtype,
     add,
     broadcast,
     broadcast_to,
@@ -64,7 +59,6 @@ from kernel_gen.operation.nn import (
     transpose,
     truediv,
 )
-from kernel_gen.operation.nn.common import _ensure_activation_scalar, _ensure_memory_operand
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolList, SymbolShape
@@ -194,8 +188,10 @@ def test_nn_dtype_mismatch() -> None:
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_dtype_invalid_error() -> None:
+    lhs = Memory(["A", "B"], NumericType.Bool)
+    rhs = Memory(["A", "B"], NumericType.Int32)
     with pytest.raises(TypeError):
-        _ = _resolve_add_dtype(NumericType.Bool, NumericType.Int32)
+        _ = add(lhs, rhs)
 
 
 # OP-005A
@@ -473,10 +469,10 @@ def test_nn_add_stride_fallback() -> None:
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_add_stride_dim_serialization() -> None:
-    symbolic = _AddStrideDim(SymbolDim("N").get_symbol())
-    constant = _AddStrideDim(SymbolDim(3).get_symbol())
-    assert symbolic.get_value() == "N"
-    assert constant.get_value() == 3
+    lhs = Memory(["M", "N"], NumericType.Int32, stride=["N", 1], format=Farmat.CLast)
+    rhs = Memory(["M", "N"], NumericType.Int32, stride=["N", 1], format=Farmat.CLast)
+    result = add(lhs, rhs)
+    assert result.get_stride() == ["N", 1]
 
 
 # OP-018
@@ -484,23 +480,23 @@ def test_nn_add_stride_dim_serialization() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 测试目的: 验证 nn_common helper 对非法 operand 与激活参数直接失败。
+# 测试目的: 验证公开 add / leaky_relu 对非法标量与激活参数直接失败。
 # 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_helper_validation_branches
 # 对应功能实现文件路径: kernel_gen/operation/nn/common.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
 def test_nn_helper_validation_branches() -> None:
-    with pytest.raises(TypeError, match="At least one operand must be Memory"):
-        _ensure_memory_operand(1, 2)
+    with pytest.raises(TypeError, match="Unsupported scalar type for nn operation"):
+        _ = add(Memory([2, 2], NumericType.Int32), object())
 
     with pytest.raises(TypeError, match="must be int or float"):
-        _ensure_activation_scalar("alpha", True)
+        _ = leaky_relu(Memory([2, 2], NumericType.Float32), alpha=True)
 
     with pytest.raises(TypeError, match="must be int or float"):
-        _ensure_activation_scalar("alpha", SymbolDim("N"))
+        _ = leaky_relu(Memory([2, 2], NumericType.Float32), alpha=SymbolDim("N"))
 
     with pytest.raises(ValueError, match="must be finite"):
-        _ensure_activation_scalar("alpha", float("inf"))
+        _ = leaky_relu(Memory([2, 2], NumericType.Float32), alpha=float("inf"))
 
 
 # OP-ACT-001

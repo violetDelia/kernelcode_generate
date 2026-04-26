@@ -9,19 +9,30 @@
 - `alloc(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)`
 - `free(value)`
 - `copy(source, space)`
-- `cast(source, dtype, memoryspace=None)`
 - `load(source, offsets, sizes, strides=None, space=None)`
-- `slice(source, offsets, sizes, strides=None, space=None)`
 - `store(source, target, offsets, sizes, strides=None)`
+- `slice(source, offsets, sizes, strides=None, space=None)`
 - `deslice(source, target, offsets, sizes, strides=None)`
 - `view(source, offset, size, stride)`
 - `reshape(source, shape)`
 - `flatten(source)`
+- `cast(source, dtype, memoryspace=None)`
+- `kernel_gen.operation.alloc(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)`
+- `kernel_gen.operation.free(value)`
+- `kernel_gen.operation.copy(source, space)`
+- `kernel_gen.operation.load(source, offsets, sizes, strides=None, space=None)`
+- `kernel_gen.operation.store(source, target, offsets, sizes, strides=None)`
+- `kernel_gen.operation.slice(source, offsets, sizes, strides=None, space=None)`
+- `kernel_gen.operation.deslice(source, target, offsets, sizes, strides=None)`
+- `kernel_gen.operation.view(source, offset, size, stride)`
+- `kernel_gen.operation.reshape(source, shape)`
+- `kernel_gen.operation.flatten(source)`
+- `kernel_gen.operation.cast(source, dtype, memoryspace=None)`
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`大闸蟹`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/operation/dma.md`](../../spec/operation/dma.md)
 - `功能实现`：[`kernel_gen/operation/dma.py`](../../kernel_gen/operation/dma.py)
 - `test`：[`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
@@ -33,6 +44,7 @@
 - [`spec/symbol_variable/symbol_shape.md`](../../spec/symbol_variable/symbol_shape.md)：`SymbolShape` 与索引列表规范。
 - [`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)：`NumericType` 定义。
 - [`kernel_gen/operation/dma.py`](../../kernel_gen/operation/dma.py)：高层 API 实现。
+- [`kernel_gen/operation/__init__.py`](../../kernel_gen/operation/__init__.py)：定义 `kernel_gen.operation` 包级稳定导出集合，供本文件锁定顶层导出边界复用。
 - [`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)：`Memory` 与 `MemorySpace` 实现。
 
 ## 目标
@@ -61,6 +73,14 @@
 - `view` 的 `stride` 参数只用于描述 subview 窗口步进与边界检查，不会直接替换返回值的 `Memory.stride`。
 - `view` 在 operation 层不要求 `source.shape` 与 `size` 的 `numel` 相等，只要求窗口边界合法。
 - operation 到 dialect 的映射边界：`view` 的 `offset/size/stride` 必须在调用点直接保留并传递给方言；仅依赖 `view` 返回的 `Memory` 无法恢复完整 subview 参数。
+- `kernel_gen.operation.dma` 是 dma family 的完整稳定入口；`kernel_gen.operation` 顶层同时稳定重导出 `alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast`，且这些对象在顶层与子模块中的身份必须一致。
+
+### package-root 导出边界
+
+| 入口 | 稳定公开 API | 说明 |
+| --- | --- | --- |
+| `kernel_gen.operation.dma` | `alloc / free / copy / cast / load / store / slice / deslice / view / reshape / flatten` | dma family 的完整稳定入口 |
+| `kernel_gen.operation` | `alloc / free / copy / cast / load / store / slice / deslice / view / reshape / flatten` | 包根重导出同一组 dma helper；对象身份与 `kernel_gen.operation.dma` 保持一致 |
 
 ## 额外补充
 
@@ -503,6 +523,7 @@ dst = flatten(src)
 ## 测试
 
 - 测试文件：[`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
+- 相关顶层导出测试：[`test/operation/test_operation_package_api.py`](../../test/operation/test_operation_package_api.py)
 - 执行命令：`pytest -q test/operation/test_operation_dma.py`
 
 ### 测试目标
@@ -513,6 +534,7 @@ dst = flatten(src)
 - 验证 `store/deslice` 的源块大小约束、dtype 校验与索引边界。
 - 验证 `view` 的 `offset/size/stride` 子视图语义与返回 `Memory` 规格继承规则。
 - 验证 `reshape/flatten` 的连续布局要求与结果形状规则。
+- 验证 `kernel_gen.operation` 顶层继续稳定重导出 `alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast`，且对象身份与 `kernel_gen.operation.dma` 一致。
 - 验证测试编号 `TC-OP-DMA-AF-001..007` 与 `TC-OP-DMA-001..028` 在文档和测试文件中一一对应。
 
 ### 功能与用例清单

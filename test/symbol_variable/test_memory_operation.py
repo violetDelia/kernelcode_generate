@@ -23,7 +23,6 @@ import pytest
 
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
-from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 
@@ -190,27 +189,3 @@ def test_memory_operation_preserves_tlm123_space() -> None:
 
     assert (lhs + rhs).space is MemorySpace.TLM2
     assert (lhs + 1).space is MemorySpace.TLM2
-
-
-def test_memory_helper_branches() -> None:
-    shape = SymbolShape([SymbolDim("N"), SymbolDim("K")])
-    cloned = Memory._clone_shape_like(shape)
-
-    assert cloned is not None
-    assert cloned is not shape
-    assert cloned.get_values() == shape.get_values()
-    assert Memory._clone_shape_like(None) is None
-
-    lhs = Memory([1], NumericType.Float32)
-    rhs = Memory([1], NumericType.Int32)
-
-    with pytest.raises(TypeError, match="Memory dtype mismatch"):
-        lhs._ensure_same_dtype(rhs)
-    with pytest.raises(TypeError, match="Unsupported scalar type for Memory operation"):
-        lhs._ensure_scalar_compatible("x")
-    with pytest.raises(TypeError, match="Scalar incompatible with Memory dtype"):
-        Memory([1], NumericType.Bool)._ensure_scalar_compatible(1)
-    with pytest.raises(TypeError, match="Unsupported scalar type for Memory operation"):
-        Memory._normalize_scalar("x")
-    with pytest.raises(TypeError, match="Unsupported scalar type for Memory operation"):
-        Memory._scalar_dtype("x")

@@ -9,6 +9,35 @@
 - `symbol.for` 同时兼容旧的无 carried-value 形式和新的 `iter_args(%acc = %zero) ... -> !symbol.int<"...">` 文本语法。
 - 在导入 sympy 前设置 `SYMPY_GMPY=0`，规避外部 gmpy 引发的 SystemError。
 
+API 列表:
+- `build_public_symbol_expr(lhs: object, rhs: object, op: str) -> str`
+- `class SymbolExprAttr(expr: StringAttr)`
+- `class SymbolDimType(expr: SymbolExprAttr)`
+- `class SymbolValueType(expr: SymbolExprAttr)`
+- `class SymbolIterAttr(start: StringAttr, end: StringAttr, step: StringAttr)`
+- `class SymbolIterType(iter_attr: SymbolIterAttr)`
+- `class SymbolPtrType(base_type: Attribute, shape: ArrayAttr[Attribute], stride: ArrayAttr[Attribute])`
+- `class SymbolConstOp(value: IntegerAttr | IntAttr | int)`
+- `class SymbolAddOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolSubOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolMulOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolDivOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolFloorDivOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolEqOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolNeOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolLtOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolLeOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolGtOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolGeOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolToFloatOp(value: SSAValue, result_type: Attribute)`
+- `class SymbolToIntOp(value: SSAValue, result_type: Attribute)`
+- `class SymbolCastOp(value: SSAValue, result_type: Attribute)`
+- `class SymbolGetDimOp(memory: SSAValue, index: int | IntAttr)`
+- `class SymbolGetStrideOp(memory: SSAValue, index: int | IntAttr)`
+- `class SymbolYieldOp(value: SSAValue | None = None)`
+- `class SymbolForOp(iter_attr: SymbolIterAttr, start: SSAValue, end: SSAValue, step: SSAValue, body: Region, init: SSAValue | None = None)`
+- `Symbol`
+
 使用示例:
 - from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolConstOp, SymbolDivOp, SymbolEqOp, SymbolFloorDivOp, SymbolForOp, SymbolYieldOp, SymbolSubOp, SymbolMulOp, SymbolToIntOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
 
@@ -2312,11 +2341,11 @@ class SymbolForOp(IRDLOperation):
         if block.ops:
             with printer.indented():
                 for op in block.ops:
-                    printer._print_new_line()
+                    printer.print_string("\n")
                     printer.print_op(op)
-            printer._print_new_line(indent=0)
+            printer.print_string("\n", indent=0)
         else:
-            printer._print_new_line(indent=0)
+            printer.print_string("\n", indent=0)
         printer.print_string("}")
 
     @classmethod

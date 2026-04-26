@@ -40,7 +40,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/operation/nn.md`](../../spec/operation/nn.md)
 - `功能实现`：
   - [`kernel_gen/operation/nn/__init__.py`](../../kernel_gen/operation/nn/__init__.py)
@@ -1169,8 +1169,8 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 | OP-TP-004 | OP-TP 规则仅适用于算术算子（`add/sub/mul/truediv/floordiv/matmul`） | `test_nn_other_arithmetic`, `test_nn_sub_reverse_and_dtype_mismatch`, `test_nn_floordiv_rules`, `test_nn_matmul_success` |
 | OP-TP-005 | 比较算子与显式广播路径不适用 OP-TP：比较结果固定 `Bool`，broadcast 结果对齐 target 描述 | `test_nn_compare_predicate`, `test_nn_compare_alias`, `test_nn_broadcast_success` |
 | OP-TP-006 | 不支持的 dtype 参与算术提升或非法标量输入必须抛错 | `test_nn_dtype_invalid_error`, `test_nn_scalar_type_error` |
-| OP-EXP-001 | `kernel_gen.operation.nn.__all__` 与包级公开列表不包含旧 `img2col`，避免旧 API 回流 | `test_nn_img2col_public_exports` |
-| OP-EXP-002 | `transpose` 继续通过 `kernel_gen.operation.nn.__all__` 导出 | `test_nn_transpose_exported_in_all` |
+| OP-EXP-001 | `img2col1d` / `img2col2d` 继续可从 `kernel_gen.operation.nn` package-root 直接获取，且 `kernel_gen.operation` 顶层不顺手暴露 `img2col1d` / `img2col2d` / 旧 `img2col` | `test_nn_img2col_public_exports` |
+| OP-EXP-002 | `transpose` 继续可从 `kernel_gen.operation.nn` package-root 直接获取，且 `kernel_gen.operation` 顶层不顺手暴露 `transpose` | `test_nn_transpose_exported_at_package_root` |
 | OP-ACT-001 | `relu`/`sigmoid`/`tanh`/`hard_sigmoid` 输出 `shape/dtype/space/stride/format` 继承输入 | `test_nn_activation_basic` |
 | OP-ACT-002 | `leaky_relu` 的 `alpha` 参数规则与边界行为 | `test_nn_activation_leaky_relu_alpha` |
 | OP-ACT-003 | 激活函数的非 `Memory` 输入、非浮点 `dtype` 与无效参数报错 | `test_nn_activation_invalid_input` |

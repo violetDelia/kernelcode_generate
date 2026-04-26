@@ -29,11 +29,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.operation.nn import (
-    _AddStrideDim,
-    _broadcast_memory_pair,
-    _infer_broadcast_shape,
-    _merge_broadcast_dim,
-    _resolve_add_dtype,
     add,
     broadcast,
     broadcast_to,
@@ -464,17 +459,17 @@ def test_nn_img2col2d_contract() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-29 19:32:00 +0800
 # 最近一次运行成功时间: 2026-03-29 19:32:00 +0800
-# 功能说明: 验证 operation 层公开导出仅暴露 img2col1d/img2col2d，旧公开名 img2col 不再进入导出列表。
-# 测试目的: 锁定 kernel_gen.operation.nn.__all__ 与 kernel_gen.operation 包级公开列表不包含 img2col，避免旧 API 回流。
+# 功能说明: 验证 operation 层公开导出仅要求 `img2col1d/img2col2d` 两个 family 入口可达，且 `kernel_gen.operation` 顶层不顺手暴露这些 structured helper。
+# 测试目的: 锁定 `spec/operation/nn.md` 已定义的 `img2col1d/img2col2d` package-root 入口与顶层不外泄边界，不把未定义的模块元数据或子模块属性当公开合同。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_img2col_public_exports
 # 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py, kernel_gen/operation/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
 def test_nn_img2col_public_exports() -> None:
-    assert "img2col1d" in operation_nn.__all__
-    assert "img2col2d" in operation_nn.__all__
-    assert "img2col" not in operation_nn.__all__
-    assert "img2col" not in operation_api.__all__
+    assert operation_nn.img2col1d is img2col1d
+    assert operation_nn.img2col2d is img2col2d
+    assert not hasattr(operation_api, "img2col1d")
+    assert not hasattr(operation_api, "img2col2d")
     assert not hasattr(operation_api, "img2col")
 
 
@@ -711,10 +706,11 @@ def test_nn_transpose_invalid_perm_type() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-05 16:19:19 +0800
 # 最近一次运行成功时间: 2026-04-05 16:19:19 +0800
-# 测试目的: 验证 transpose 通过 __all__ 导出。
-# 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_transpose_exported_in_all
+# 测试目的: 验证 transpose 仍可通过 `kernel_gen.operation.nn` package-root 公开获取，且不会顺手上提到 `kernel_gen.operation` 顶层。
+# 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_transpose_exported_at_package_root
 # 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn_structured.py
-def test_nn_transpose_exported_in_all() -> None:
-    assert "transpose" in operation_nn.__all__
+def test_nn_transpose_exported_at_package_root() -> None:
+    assert operation_nn.transpose is transpose
+    assert not hasattr(operation_api, "transpose")

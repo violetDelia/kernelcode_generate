@@ -6,6 +6,10 @@
 功能说明:
 - 提供显式 broadcast 与 broadcast_to family 实现
 
+API 列表:
+- `broadcast(value: object, target: object) -> Memory`
+- `broadcast_to(source: object, target_shape: object, space: object) -> Memory`
+
 使用示例:
 - from kernel_gen.operation.nn import add, broadcast, broadcast_to
 
@@ -19,10 +23,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from kernel_gen.common.errors import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat
-from .common import _ERROR_ACTION, _ERROR_TEMPLATE
+
+_ERROR_ACTION = "请按接口约束传参"
 
 
 def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
@@ -277,9 +283,4 @@ def broadcast_to(source: object, target_shape: object, space: object) -> Memory:
         format=Farmat.Norm,
     )
 
-__all__ = [
-    "_infer_broadcast_shape",
-    "_broadcast_memory_pair",
-    "broadcast",
-    "broadcast_to",
-]
+__all__ = ["broadcast", "broadcast_to"]

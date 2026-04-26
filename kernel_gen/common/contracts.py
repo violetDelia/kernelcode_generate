@@ -7,6 +7,20 @@
 - 提供 kernel_gen 内部可复用的类型、shape、dtype、错误与 verifier 辅助逻辑。
 - 该模块仅承载公共实现，不改变 dialect/operation/symbol_variable 的对外合同。
 
+API 列表:
+- `raise_verify_error(scene: str, expected: str, *, actual: str = _ERROR_ACTUAL, action: str = _ERROR_ACTION) -> None`
+- `verify_memory_type(value: Attribute, field_name: str, *, scene: str) -> NnMemoryType`
+- `verify_i64_attr(attr: IntegerAttr, field_name: str, *, scene: str) -> int`
+- `verify_i64_attr_range(attr: IntegerAttr, field_name: str, *, min_value: int, max_value: int, scene: str) -> int`
+- `verify_i64_attr_value(attr: IntegerAttr, field_name: str, *, allow_zero: bool, scene: str) -> int`
+- `verify_i64_attr_group(attrs: Sequence[IntegerAttr], *, allow_zero: bool, error_phrase: str, scene: str) -> list[int]`
+- `collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None`
+- `build_contiguous_stride(shape: Sequence[Attribute]) -> ArrayAttr[Attribute]`
+- `dims_equal(lhs: Sequence[Attribute], rhs: Sequence[Attribute]) -> bool`
+- `public_dim_values(dims: Sequence[Attribute]) -> list[int | str]`
+- `default_stride(shape: SymbolShape) -> SymbolShape`
+- `shape_numel(shape: SymbolShape) -> SymbolDim`
+
 使用示例:
 - from kernel_gen.common.contracts import verify_memory_type, default_stride
 - memory_type = verify_memory_type(value, "lhs", scene="dialect.kernel verifier")

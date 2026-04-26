@@ -1,12 +1,37 @@
 """Operation API 入口。
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
-- 暴露 nn 逐元素算术、比较与 matmul API。
-- 暴露 dma 搬运 API。
-- 暴露 scf loop 范围迭代 API。
+- 暴露 nn 顶层稳定子集：逐元素算术、比较与 `matmul`。
+- 暴露 dma family 的顶层稳定 helper：`alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast`。
+- 暴露 scf family 的顶层稳定 helper：`loop`。
+
+API 列表:
+- `add(lhs, rhs)`
+- `sub(lhs, rhs)`
+- `mul(lhs, rhs)`
+- `truediv(lhs, rhs)`
+- `eq(lhs, rhs)`
+- `ne(lhs, rhs)`
+- `lt(lhs, rhs)`
+- `le(lhs, rhs)`
+- `gt(lhs, rhs)`
+- `ge(lhs, rhs)`
+- `matmul(lhs, rhs, memoryspace=None)`
+- `alloc(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)`
+- `free(value)`
+- `copy(source, space)`
+- `load(source, offsets, sizes, strides=None, space=None)`
+- `store(source, target, offsets, sizes, strides=None)`
+- `slice(source, offsets, sizes, strides=None, space=None)`
+- `deslice(source, target, offsets, sizes, strides=None)`
+- `view(source, offset, size, stride)`
+- `reshape(source, shape)`
+- `flatten(source)`
+- `cast(source, dtype, memoryspace=None)`
+- `loop(start, end, step, trip_count=1)`
 
 使用示例:
 - from kernel_gen.operation import add, matmul, copy
@@ -18,6 +43,7 @@
 - test: test/operation/test_operation_nn.py
 - test: test/operation/test_operation_dma.py
 - test: test/operation/test_operation_scf.py
+- test: test/operation/test_operation_package_api.py
 - 功能实现: kernel_gen/operation/nn/__init__.py
 - 功能实现: kernel_gen/operation/dma.py
 - 功能实现: kernel_gen/operation/scf.py

@@ -6,6 +6,9 @@
 功能说明:
 - 提供统一的错误模板字符串，供 kernel_gen 各模块生成一致的参数校验与边界错误消息。
 
+API 列表:
+- `_ERROR_TEMPLATE: str`
+
 使用示例:
 - from kernel_gen.common.errors import _ERROR_TEMPLATE
 - message = _ERROR_TEMPLATE.format(

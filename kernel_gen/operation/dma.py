@@ -6,6 +6,19 @@
 功能说明:
 - 提供 Memory 的数据搬运、视图变换与显式转换 API，包括 alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast。
 
+API 列表:
+- `alloc(shape: Sequence[int | str] | SymbolShape, dtype: NumericType, space: MemorySpace = MemorySpace.GM, stride: Sequence[int | str] | SymbolShape | None = None, format: Farmat = Farmat.Norm) -> Memory`
+- `free(memory: object) -> None`
+- `copy(source: object, target: object) -> Memory`
+- `load(source: object, target: object) -> Memory`
+- `store(source: object, target: object) -> Memory`
+- `slice(memory: object, dim: Sequence[int | SymbolDim], offset: Sequence[int | SymbolDim], size: Sequence[int | SymbolDim], stride: Sequence[int | SymbolDim]) -> Memory`
+- `deslice(source: object, target: object, dim: Sequence[int | SymbolDim], offset: Sequence[int | SymbolDim], size: Sequence[int | SymbolDim], stride: Sequence[int | SymbolDim]) -> Memory`
+- `view(memory: object, shape: Sequence[int | str] | SymbolShape, stride: Sequence[int | str] | SymbolShape | None = None, format: Farmat | None = None) -> Memory`
+- `reshape(memory: object, shape: Sequence[int | str] | SymbolShape) -> Memory`
+- `flatten(memory: object) -> Memory`
+- `cast(memory: object, dtype: NumericType) -> Memory`
+
 使用示例:
 - from kernel_gen.operation.dma import copy, cast, view, flatten
 - copy(src, dst)
@@ -21,6 +34,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from kernel_gen.common.contracts import default_stride as _common_default_stride
 from kernel_gen.common.contracts import shape_numel as _common_shape_numel
 from kernel_gen.common.errors import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.dtype_constants import FLOAT_DTYPES, INT_DTYPES
@@ -532,7 +546,7 @@ def _is_contiguous(memory: Memory) -> bool:
     """
     if memory.stride is None:
         return False
-    default_stride = Memory._default_stride(memory.shape)
+    default_stride = _common_default_stride(memory.shape)
     current = memory.stride.get_shape()
     expected = default_stride.get_shape()
     return len(current) == len(expected) and all(lhs == rhs for lhs, rhs in zip(current, expected))

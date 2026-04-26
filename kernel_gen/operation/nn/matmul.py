@@ -6,6 +6,9 @@
 功能说明:
 - 提供二维矩阵乘运算。
 
+API 列表:
+- `matmul(lhs: object, rhs: object, memoryspace: MemorySpace | None = None) -> Memory`
+
 使用示例:
 - from kernel_gen.operation.nn.matmul import matmul
 
@@ -17,10 +20,40 @@
 
 from __future__ import annotations
 
+from kernel_gen.common.contracts import default_stride
+from kernel_gen.common.errors import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
-from .common import _ERROR_ACTION, _ERROR_TEMPLATE, _build_add_stride, _resolve_add_dtype
+
+_ERROR_ACTION = "请按接口约束传参"
+
+
+def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
+    """按公开 `Memory` 算术语义推导 nn 结构化算子的结果 dtype。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 复用 `Memory` 的公开加法路径推导 dtype。
+    - 当 dtype 组合不受支持时，转为 `nn.matmul` 的稳定错误消息。
+
+    使用示例:
+    - _resolve_add_dtype(NumericType.Int32, NumericType.Float32)
+    """
+
+    try:
+        return (Memory([1], lhs) + Memory([1], rhs)).get_type()
+    except TypeError as exc:
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.matmul 参数校验",
+                expected="Unsupported dtype for nn.matmul",
+                actual=f"lhs={lhs} rhs={rhs}",
+                action=_ERROR_ACTION,
+            )
+        ) from exc
 
 def matmul(lhs: object, rhs: object, memoryspace: MemorySpace | None = None) -> Memory:
     """二维矩阵乘。
@@ -85,7 +118,7 @@ def matmul(lhs: object, rhs: object, memoryspace: MemorySpace | None = None) -> 
         [lhs_values[0], rhs_values[1]],
         result_dtype,
         space=result_space,
-        stride=_build_add_stride(SymbolShape([lhs_values[0], rhs_values[1]])),
+        stride=default_stride(SymbolShape([lhs_values[0], rhs_values[1]])),
         format=Farmat.Norm,
     )
 

@@ -80,15 +80,6 @@ from kernel_gen.dialect.nn import (
     NnReluOp,
     NnSigmoidOp,
     NnTanhOp,
-    _normalize_axes_attr,
-    _normalize_bool_attr,
-    _promote_add_dtype,
-    _resolve_add_dtype_key,
-    _verify_activation_scalar_operand,
-    _verify_keepdim_attr,
-    _verify_img2col_param_operands,
-    _verify_reduce_axes,
-    _verify_unary_float_op,
     NnReduceMaxOp,
     NnReduceMinOp,
     NnReduceSumOp,
@@ -2263,68 +2254,74 @@ def test_reduce_ops_reject_non_contiguous_result_stride() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 测试目的: 验证 nn helper 的规范化、promotion 与激活/归约校验边界。
-# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_nn_helper_contracts_and_validation_branches
+# 测试目的: 验证公开 img2col / unary-float / activation verifier 边界。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_nn_public_validation_branches
 # 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
-def test_nn_helper_contracts_and_validation_branches() -> None:
-    axes_attr = _normalize_axes_attr([0, 2])
-    assert axes_attr == ArrayAttr([IntegerAttr(0, IntegerType(64)), IntegerAttr(2, IntegerType(64))])
-    assert _normalize_axes_attr(axes_attr) is axes_attr
-
-    keepdim_true = _normalize_bool_attr(True, "keepdim")
-    keepdim_zero = _normalize_bool_attr(IntAttr(0), "keepdim")
-    keepdim_attr = IntegerAttr(1, IntegerType(1))
-    assert keepdim_true == keepdim_attr
-    assert keepdim_zero == IntegerAttr(0, IntegerType(1))
-    assert _normalize_bool_attr(keepdim_attr, "keepdim") is keepdim_attr
-
-    assert _resolve_add_dtype_key(i32) == "i32"
-    assert _resolve_add_dtype_key(Float16Type()) == "f16"
-    assert _resolve_add_dtype_key(Float32Type()) == "f32"
-    assert _resolve_add_dtype_key(StringAttr("bad")) is None
-    assert isinstance(_promote_add_dtype(i32, Float16Type()), Float16Type)
-    assert _promote_add_dtype(StringAttr("bad"), Float16Type()) is None
-
-    valid_operand = arith.ConstantOp(IntegerAttr(1, i32)).result
-    assert _verify_img2col_param_operands(
-        [valid_operand],
-        allow_zero=False,
-        type_error_phrase="kw-sw-must-be-int-or-symbol",
-        value_error_phrase="kw-sw-must-be-positive",
-    ) == [1]
-    with pytest.raises(VerifyException, match="kw-sw-must-be-int-or-symbol"):
-        _verify_img2col_param_operands(
-            [_TestOp(result_types=[Float32Type()]).results[0]],
-            allow_zero=False,
-            type_error_phrase="kw-sw-must-be-int-or-symbol",
-            value_error_phrase="kw-sw-must-be-positive",
-        )
-    with pytest.raises(VerifyException, match="kw-sw-must-be-positive"):
-        _verify_img2col_param_operands(
-            [arith.ConstantOp(IntegerAttr(0, i32)).result],
-            allow_zero=False,
-            type_error_phrase="kw-sw-must-be-int-or-symbol",
-            value_error_phrase="kw-sw-must-be-positive",
-        )
-
+def test_nn_public_validation_branches() -> None:
     good_input = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="global", element_type=Float32Type())
     bad_input = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="global", element_type=i32)
     good_result = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="global", element_type=Float32Type())
+    good_input_value = _TestOp(result_types=[good_input]).results[0]
     with pytest.raises(VerifyException, match="operand-element-type-must-be-float"):
-        _verify_unary_float_op(bad_input, good_result, _make_space("global"))
+        NnExpOp(_TestOp(result_types=[bad_input]).results[0], good_result, _make_space("global")).verify()
     with pytest.raises(VerifyException, match="result-shape-stride-must-match-input"):
-        _verify_unary_float_op(good_input, _make_simple_memory_type([IntAttr(2)], [IntAttr(2)], space="global"), _make_space("global"))
+        NnExpOp(
+            good_input_value,
+            _make_simple_memory_type([IntAttr(2)], [IntAttr(2)], space="global"),
+            _make_space("global"),
+        ).verify()
     with pytest.raises(VerifyException, match="alpha must be int or float scalar"):
-        _verify_activation_scalar_operand(_TestOp(result_types=[_make_memory_type()]).results[0], "alpha")
+        NnLeakyReluOp(
+            good_input_value,
+            _TestOp(result_types=[_make_memory_type()]).results[0],
+            good_result,
+            _make_space("global"),
+        ).verify()
+
+    img2col_input = _make_simple_memory_type(
+        [IntAttr(1), IntAttr(2), IntAttr(8)],
+        [IntAttr(16), IntAttr(8), IntAttr(1)],
+        space="global",
+        element_type=Float32Type(),
+    )
+    img2col_result = _make_simple_memory_type(
+        [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)],
+        [IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(1)],
+        space="global",
+        element_type=Float32Type(),
+    )
+    img2col_input_value = _TestOp(result_types=[img2col_input]).results[0]
+    with pytest.raises(VerifyException, match="kw-sw-dw-must-be-int-or-symbol"):
+        NnImg2col1dOp(
+            img2col_input_value,
+            img2col_result,
+            kw=_TestOp(result_types=[Float32Type()]).results[0],
+            sw=arith.ConstantOp(IntegerAttr(1, i32)).result,
+            dw=arith.ConstantOp(IntegerAttr(1, i32)).result,
+            pl=arith.ConstantOp(IntegerAttr(0, i32)).result,
+            pr=arith.ConstantOp(IntegerAttr(0, i32)).result,
+            space=_make_space("global"),
+        ).verify()
+    with pytest.raises(VerifyException, match="kw-sw-dw-must-be-positive"):
+        NnImg2col1dOp(
+            img2col_input_value,
+            img2col_result,
+            kw=arith.ConstantOp(IntegerAttr(0, i32)).result,
+            sw=arith.ConstantOp(IntegerAttr(1, i32)).result,
+            dw=arith.ConstantOp(IntegerAttr(1, i32)).result,
+            pl=arith.ConstantOp(IntegerAttr(0, i32)).result,
+            pr=arith.ConstantOp(IntegerAttr(0, i32)).result,
+            space=_make_space("global"),
+        ).verify()
 
 
 # NN-DIA-S7-001
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 功能说明: 覆盖 unary float family、activation scalar verifier 与 reduce helper 的剩余边界。
-# 测试目的: 锁定 relu/sigmoid/tanh/exp/leaky_relu/hard_sigmoid 的 verifier 主路径，以及 reduce axes / keepdim 的私有 helper 分支不回退。
+# 测试目的: 锁定 relu/sigmoid/tanh/exp/leaky_relu/hard_sigmoid 的 verifier 主路径，以及 reduce 的公开异常边界不回退。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_unary_float_family_and_reduce_helper_edges
 # 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
@@ -2357,40 +2354,69 @@ def test_unary_float_family_and_reduce_helper_edges() -> None:
     with pytest.raises(VerifyException, match="beta must be int or float scalar"):
         NnHardSigmoidOp(inp, alpha, symbol_value, result_type, _make_space("global")).verify()
 
-    assert _verify_reduce_axes(ArrayAttr([IntegerAttr(1, IntegerType(64))]), rank=3) == [1]
+    reduce_input_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3), IntAttr(4)],
+        [IntAttr(12), IntAttr(4), IntAttr(1)],
+        element_type=Float32Type(),
+    )
+    reduce_input = _TestOp(result_types=[reduce_input_type]).results[0]
+    reduce_result = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(4)],
+        [IntAttr(4), IntAttr(1)],
+        element_type=Float32Type(),
+    )
+    NnReduceSumOp(reduce_input, reduce_result, axes=[1], keepdim=False, space=_make_space("global")).verify()
     with pytest.raises(VerifyException, match="axes-must-be-non-empty-unique-and-in-range"):
-        _verify_reduce_axes(ArrayAttr([IntegerAttr(1, IntegerType(32))]), rank=3)
+        NnReduceSumOp(
+            reduce_input,
+            reduce_result,
+            axes=ArrayAttr([IntegerAttr(1, IntegerType(32))]),
+            keepdim=False,
+            space=_make_space("global"),
+        ).verify()
     with pytest.raises(VerifyException, match="axes-must-be-non-empty-unique-and-in-range"):
-        _verify_reduce_axes(
-            ArrayAttr([IntegerAttr(1, IntegerType(64)), IntegerAttr(1, IntegerType(64))]),
-            rank=3,
+        NnReduceSumOp(
+            reduce_input,
+            reduce_result,
+            axes=[1, 1],
+            keepdim=False,
+            space=_make_space("global"),
+        ).verify()
+    with pytest.raises(VerifyException, match="keepdim-must-be-i1-bool-attr"):
+        NnReduceSumOp(
+            reduce_input,
+            reduce_result,
+            axes=[1],
+            keepdim=IntegerAttr(1, IntegerType(2)),
+            space=_make_space("global"),
+        ).verify()
+    with pytest.raises(TypeError, match="keepdim must be bool/int or i1 attr"):
+        NnReduceSumOp(
+            reduce_input,
+            reduce_result,
+            axes=[1],
+            keepdim=StringAttr("bad"),
+            space=_make_space("global"),
         )
-
-    assert _verify_keepdim_attr(IntegerAttr(-1, IntegerType(1))) is True
-    assert _verify_keepdim_attr(IntegerAttr(0, IntegerType(1))) is False
-    with pytest.raises(VerifyException, match="keepdim-must-be-i1-bool-attr"):
-        _verify_keepdim_attr(IntegerAttr(1, IntegerType(2)))
-    with pytest.raises(VerifyException, match="keepdim-must-be-i1-bool-attr"):
-        _verify_keepdim_attr(StringAttr("bad"))
 
 
 # NN-DIA-S7-002
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 功能说明: 覆盖 nn.memory 维度列表 parser 的复杂文本边界，以及 mixed scalar add verifier 的剩余错误路径。
-# 测试目的: 锁定 dim list 对 expression/identifier 回退的 parse 行为，并补齐 mixed add 在 space/stride/element_type 方向的异常短语。
-# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_dim_parser_and_mixed_add_edge_contracts
+# 功能说明: 覆盖 nn.memory 维度列表 parser 的当前公开文本范围，以及 mixed scalar add verifier 的剩余错误路径。
+# 测试目的: 锁定 dim list 在 `identifier/integer/?/+/-/*/()` 范围内的 parse/print 行为，并补齐 mixed add 在 space/stride/element_type 方向的异常短语。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_dim_parser_and_mixed_add_public_parser_contracts
 # 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
-def test_memory_dim_parser_and_mixed_add_edge_contracts() -> None:
+def test_memory_dim_parser_and_mixed_add_public_parser_contracts() -> None:
     ctx = _build_context()
     parsed = Parser(
         ctx,
-        "!nn.memory<[M + 1, (K / 2), tail], [tail, 1, ?], i32, #nn.space<global>>",
+        "!nn.memory<[M + 1, (K + 2), tail], [tail, 1, ?], i32, #nn.space<global>>",
     ).parse_attribute()
     assert isinstance(parsed, NnMemoryType)
-    assert _print_ir(parsed) == "!nn.memory<[M + 1, (K / 2), tail], [tail, 1, ?], i32, #nn.space<global>>"
+    assert _print_ir(parsed) == "!nn.memory<[M + 1, (K + 2), tail], [tail, 1, ?], i32, #nn.space<global>>"
 
     memory_type = _make_simple_memory_type(
         [IntAttr(2), IntAttr(3)],
