@@ -1,6 +1,6 @@
 # npu_demo_lowering_outline_device_kernel_green_plan.md
 
-> 说明：该文件为 `npu_pipeline_outline_device_kernel_contract` / `npu_demo_lowering_outline_device_kernel` 主题的归档承接快照。自 `origin/main@9a0a52a0730581787bcf4c767167253c4c5b936e` 起的后续主线现场，均不再包含 `ARCHITECTURE/plan/npu_pipeline_outline_device_kernel_contract_green_plan.md`、`TODO.md` 与 `expectation` 包；当前主题只由 `agents/codex-multi-agents/log/task_records/done_plan/2026/17/npu_demo_lowering_outline_device_kernel_green_plan.md` 承接。后续计划状态、结论和续接依据统一收口到本归档文件与对应任务记录；若需核对某一轮复验基线，以对应复验段和修复任务记录为准。
+> 说明：该文件为 `npu_pipeline_outline_device_kernel_contract` / `npu_demo_lowering_outline_device_kernel` 主题的归档承接快照。自 `origin/main@9a0a52a0730581787bcf4c767167253c4c5b936e` 起的后续主线现场，均不再包含 `ARCHITECTURE/plan/npu_pipeline_outline_device_kernel_contract_green_plan.md`、`TODO.md` 与 `expectation` 包；截至 `origin/main@04ad23dd3a697bbdd9215425635353897c5e348b`，当前主线仍保留的直接专题承接资产为本归档文件与 `agents/codex-multi-agents/log/task_records/2026/17/20260427-npu-pipeline-outline-plan-align-s2.md`。后续计划状态、结论和续接依据统一收口到本归档文件与对应任务记录；若需核对某一轮复验基线，以对应复验段和修复任务记录为准。
 
 ## 文档信息
 
@@ -47,12 +47,14 @@
 | --- | --- | --- | --- |
 | `S1：npu-demo-lowering / attach-arch-information / outline-device-kernel / gen_kernel-emit 合同分层收口` | 无 | `wt-20260426-npu-pipeline-outline-s1` | `agents/codex-multi-agents/log/task_records/2026/17/20260426-npu-pipeline-outline-s1.md` |
 | `R1：计划资产与 latest main 现场对齐 / 归档记录收口` | `T-20260426-dbabb1e3` | `wt-20260427-npu-pipeline-outline-plan-align-s2` | `agents/codex-multi-agents/log/task_records/2026/17/20260427-npu-pipeline-outline-plan-align-s2.md` |
+| `R2：继续对齐计划资产与 latest main 现场 / 承接位置再次收口` | `T-20260427-edf6681e` | `wt-20260427-npu-pipeline-outline-plan-align-s3` | `agents/codex-multi-agents/log/task_records/2026/17/20260427-npu-pipeline-outline-plan-align-s3.md` |
 
 ## 任务创建记录
 
 - `S1=T-20260426-dbabb1e3，任务类型 spec，worktree=wt-20260426-npu-pipeline-outline-s1，记录文件=agents/codex-multi-agents/log/task_records/2026/17/20260426-npu-pipeline-outline-s1.md`
 - `R1=T-20260427-edf6681e，任务类型 spec，依赖 T-20260426-dbabb1e3，worktree=wt-20260427-npu-pipeline-outline-plan-align-s2，记录文件=agents/codex-multi-agents/log/task_records/2026/17/20260427-npu-pipeline-outline-plan-align-s2.md`
-- `归档前最后一次共享计划快照状态：TODO.md 计划状态曾为 2/1/1 进行中；自 9a0a52a0730581787bcf4c767167253c4c5b936e 起的后续主线现场已无活动计划路径、TODO.md 与 expectation 包，后续状态以本归档文件与任务记录为准`
+- `R2=T-20260427-fd71d7df，任务类型 spec，依赖 T-20260427-edf6681e，worktree=wt-20260427-npu-pipeline-outline-plan-align-s3，记录文件=agents/codex-multi-agents/log/task_records/2026/17/20260427-npu-pipeline-outline-plan-align-s3.md`
+- `归档前最后一次共享计划快照状态：本地 TODO.md 计划状态当前为 3/2/1 进行中；自 9a0a52a0730581787bcf4c767167253c4c5b936e 起的后续主线现场已无活动计划路径、TODO.md 与 expectation 包；截至 04ad23dd3a697bbdd9215425635353897c5e348b，latest main 直接专题承接资产为本归档文件与 20260427-npu-pipeline-outline-plan-align-s2.md`
 
 ## 评审摘要
 
@@ -70,7 +72,7 @@
 - 最小阻断项或通过摘要：`最新同步现场本身未携带这份计划资产：origin/main@9a0a52a0730581787bcf4c767167253c4c5b936e 的干净 worktree 中没有 ARCHITECTURE/plan/npu_pipeline_outline_device_kernel_contract_green_plan.md，也不存在 expectation/pass/outline_device_kernel 或 expectation 包；当前只剩另一份 done_plan 归档名为 npu_demo_lowering_outline_device_kernel_green_plan.md。由于无法在最新主线现场对你指定计划执行正文保留的 expectation 合同验收，当前不能把这份计划当作已与最新主线对齐的有效归档对象。`
 - 是否已创建修复任务：`是；T-20260427-edf6681e`
 
-### 当前唯一修复任务（2026-04-27）
+### 修复任务（2026-04-27 第一轮）
 
 - 任务号：`T-20260427-edf6681e`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260427-npu-pipeline-outline-plan-align-s2`
@@ -79,6 +81,16 @@
 - 任务目标：`对齐计划资产与 latest main 现场，收口 done_plan / 任务记录承接位置，并让计划正文、TODO.md 与直接关联归档记录和最新主线一致；不得改动任何 expectation。`
 - 任务边界：`只处理计划资产与 latest main 现场的对齐，以及直接关联的归档 / 记录收口；不改动 expectation，不扩到实现、测试或其他专题资产。`
 - 记录要求：`执行记录必须包含真实自检与 Diff 反推自测；若最新主线现场仍缺失计划资产或归档承接位置不一致，必须如实记录，不得擅自补写未确认结论。`
+
+### 当前修复任务（2026-04-27 第二轮）
+
+- 任务号：`T-20260427-fd71d7df`
+- worktree：`/home/lfr/kernelcode_generate/wt-20260427-npu-pipeline-outline-plan-align-s3`
+- 记录文件：`/home/lfr/kernelcode_generate/wt-20260427-npu-pipeline-outline-plan-align-s3/agents/codex-multi-agents/log/task_records/2026/17/20260427-npu-pipeline-outline-plan-align-s3.md`
+- 任务类型：`spec`
+- 任务目标：`继续对齐计划资产与 latest main 现场，收口正文、TODO.md、done_plan 与直接关联任务记录的承接位置；不得改 expectation，不得伪造 latest main 中不存在的 expectation 包。`
+- 任务边界：`只处理计划资产与 latest main 现场的对齐，以及直接关联的归档 / 记录收口；不改动 expectation，不扩到实现、测试或其他专题资产。`
+- 记录要求：`执行记录必须包含真实自检与 Diff 反推自测；若 latest main 仍缺失该计划资产或 expectation 包，必须如实记录并保持文字与现场一致，不得擅自补造归档或伪造不存在的承接位置。`
 
 ## 归档对齐记录
 
@@ -89,6 +101,14 @@
 改动：在本归档文件顶部新增稳定承接说明；把 `最后一次更改` 收到本轮执行人；保留当前专题任务清单和 `2026-04-27` 复验 / 修复任务信息；将 `任务创建记录` 改成归档前快照语义；新增当前 `归档对齐记录`；并把原根目录层级的 Markdown 相对链接统一改到当前 done_plan 层级。
 验证：latest main 现场缺失检查、`ls-tree` 基线核对、Markdown 相对链接校验和当前任务记录引用，详见 [`20260427-npu-pipeline-outline-plan-align-s2.md`](../../../2026/17/20260427-npu-pipeline-outline-plan-align-s2.md)。
 结论：`npu_pipeline_outline_device_kernel_contract` 主题在 latest main 干净现场中不再通过活动计划路径、TODO.md 或 expectation 包承接，后续应以本归档文件和对应任务记录作为唯一续接依据；不需要在该现场重新补回活动计划路径、TODO.md 或 expectation 包。`
+
+时间：2026-04-27 00:38 +0800
+经办人：睡觉小分队
+任务：T-20260427-fd71d7df
+任务目标：继续把共享计划正文、本地 TODO 协调板、surviving done_plan 与直接关联任务记录的承接口径对齐到 `origin/main@04ad23dd3a697bbdd9215425635353897c5e348b` 的真实现场。
+改动：保留活动计划路径、TODO.md 与 expectation 包在 latest main 中缺失的事实；在本归档文件顶部说明里补入 `04ad23dd...` 基线下的直接专题承接资产；在任务清单与任务创建记录中追加 `R2`；新增当前修复任务（第二轮）条目，并把 latest main 直接承接资产明确收成“本归档文件 + 20260427-npu-pipeline-outline-plan-align-s2.md”。
+验证：`origin/main` 缺失检查、`ls-tree` 基线核对、当前任务记录引用与 Markdown 链接校验，详见 [`20260427-npu-pipeline-outline-plan-align-s3.md`](../../../2026/17/20260427-npu-pipeline-outline-plan-align-s3.md)。
+结论：`截至 04ad23dd3a697bbdd9215425635353897c5e348b，latest main 仍不包含活动计划路径、TODO.md 与 expectation 包；本归档文件和 20260427-npu-pipeline-outline-plan-align-s2.md 才是当前主线里的直接专题承接资产。`
 
 ## 输入摘要
 
