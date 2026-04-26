@@ -2,6 +2,26 @@
 功能说明:
 - 提供 npu_demo 后端的 launch / barrier 运行时实现与 KernelContext 运行时视图。
 
+API 列表:
+- `template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args> Status npu_demo::launch(Callable&& callee, Args&&... args)`
+- `class npu_demo::KernelContext`
+- `KernelContext::block_id() const -> long long`
+- `KernelContext::block_num() const -> long long`
+- `KernelContext::thread_id() const -> long long`
+- `KernelContext::thread_num() const -> long long`
+- `KernelContext::subthread_id() const -> long long`
+- `KernelContext::subthread_num() const -> long long`
+- `KernelContext::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const -> void`
+- `template <MemorySpace Space, typename T> KernelContext::get_dynamic_memory() const -> Memory<Space, T>`
+- `npu_demo::thread_id() -> S_INT`
+- `npu_demo::thread_num() -> S_INT`
+- `template <MemorySpace Space> npu_demo::get_dynamic_memory() -> DynamicMemoryRef<Space>`
+
+helper 清单:
+- `class ScopedActiveKernelContext`
+- `class LaunchBarrierState`
+- `npu_demo::detail::*`：launch 上下文绑定、barrier 状态与动态内存承接辅助逻辑。
+
 使用示例:
 - #include "include/npu_demo/Arch.h"
 - Status status = npu_demo::launch<1, 4, 1, 0>(kernel_body, output);

@@ -10,6 +10,49 @@
   - `stream` 与 `capture_function_output` 在 P0 的禁用行为；
   - 直接使用 RuntimeArg（torch/numpy/int/float）输入的调用路径。
 
+API 列表:
+- `FAILURE_TARGET_HEADER_MISMATCH: str`
+- `FAILURE_SOURCE_EMPTY_OR_INVALID: str`
+- `FAILURE_COMPILE_FAILED: str`
+- `FAILURE_SYMBOL_RESOLVE_FAILED: str`
+- `FAILURE_RUNTIME_THROW_OR_ABORT: str`
+- `FAILURE_STREAM_NOT_SUPPORTED: str`
+- `FAILURE_FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED: str`
+- `FAILURE_PHRASES: frozenset[str]`
+- `TargetName = Literal["cpu", "npu_demo"]`
+- `class ExecutionEngineError(failure_phrase: str, detail: str = "")`
+- `class CompileRequest(source: str, target: str, function: str, entry_point: str = "kg_execute_entry", compiler: str | None = None, compiler_flags: tuple[str, ...] = ("-std=c++17",), link_flags: tuple[str, ...] = ())`
+- `class ExecuteRequest(args: tuple[RuntimeArg, ...], entry_point: str | None = None, capture_function_output: bool = False, stream: object | None = None)`
+- `RuntimeArg = Any`
+- `class KgArgSlot(position: int, kind: Literal["memory", "int", "float"], dtype: str | None, shape: tuple[int, ...] | None, stride: tuple[int, ...] | None, value: object)`
+- `class ExecuteResult(ok: bool, status_code: int, failure_phrase: str | None, compile_stdout: str = "", compile_stderr: str = "", run_stdout: str = "", run_stderr: str = "", elapsed_ms: float = 0.0)`
+- `class CompiledKernel(target: str, soname_path: str, function: str, entry_point: str, compile_stdout: str = "", compile_stderr: str = "")`
+- `CompiledKernel.close() -> None`
+- `CompiledKernel.execute(args: tuple[RuntimeArg, ...] | None = None, *, request: ExecuteRequest | None = None, entry_point: str | None = None, capture_function_output: bool = False, stream: object | None = None) -> ExecuteResult`
+- `class ExecutionEngine(target: str, compiler: str | None = None, compiler_flags: tuple[str, ...] = ("-std=c++17",), link_flags: tuple[str, ...] = ())`
+- `ExecutionEngine.compile(source: str | None = None, function: str | None = None, *, request: CompileRequest | None = None, entry_point: str = "kg_execute_entry") -> CompiledKernel`
+
+helper 清单:
+- `_source_include_family(source: str) -> str | None`
+- `_inject_npu_demo_namespace_aliases(source: str) -> str`
+- `_ensure_compiler_flags(flags: tuple[str, ...]) -> tuple[str, ...]`
+- `_resolve_compiler_name(compiler: str | None) -> str`
+- `_normalize_dtype(value: object) -> str | None`
+- `_normalize_shape(value: object) -> tuple[int, ...] | None`
+- `_normalize_stride(value: object) -> tuple[int, ...] | None`
+- `_runtime_module_name(value: object) -> str`
+- `_is_torch_tensor(value: object) -> bool`
+- `_is_numpy_array(value: object) -> bool`
+- `_is_runtime_int(value: object) -> bool`
+- `_is_runtime_float(value: object) -> bool`
+- `_is_memory_runtime_arg(value: object) -> bool`
+- `_is_contiguous_memory(value: object) -> bool`
+- `_build_arg_slots(args: tuple[RuntimeArg, ...]) -> tuple[KgArgSlot, ...]`
+- `_contiguous_stride(shape: tuple[int, ...]) -> tuple[int, ...]`
+- `_runtime_data_pointer(value: object) -> int`
+- `_marshal_slots_for_abi(ordered_slots: tuple[KgArgSlot, ...]) -> tuple[object, ...]`
+- `_load_entry_point(soname_path: str, entry_point: str) -> Callable[[tuple[KgArgSlot, ...]], int]`
+
 使用示例:
 - from kernel_gen.execute_engine import ExecutionEngine, ExecuteRequest
 - engine = ExecutionEngine(target="cpu")

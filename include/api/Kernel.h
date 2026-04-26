@@ -3,6 +3,28 @@
 - 定义 include/api 层统一对外的 Kernel 计算 helper 声明。
 - 当前公开集合只覆盖已进入 `kernel dialect emit` 合同真源的 helper，并统一使用 `out-first` 参数顺序。
 
+API 列表:
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::add(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::sub(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::le(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::gt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::exp(Memory<Space, OutType>& out, const Memory<Space, InType>& input)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::select(Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_sum(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- `template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType> Status npu_demo::matmul(Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs)`
+- `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col1d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right)`
+- `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col2d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`
+
+helper 清单:
+- 无；当前文件只声明公开 Kernel helper。
+
 使用示例:
 - #include "include/api/Kernel.h"
 - Status status = npu_demo::add<GM, float, float>(out, lhs, rhs);

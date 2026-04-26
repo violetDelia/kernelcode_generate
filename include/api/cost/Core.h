@@ -4,6 +4,15 @@
 - 当前公开 `npu_demo::cost::CostKind::{Compute, Memory}`，并额外公开 `npu_demo::{compute, memory}` 作为模板实参别名。
 - 全部 cost helper 继续沿用 `S_INT` 作为返回类型来源。
 
+API 列表:
+- `namespace npu_demo::cost`
+- `enum class npu_demo::cost::CostKind { Compute, Memory }`
+- `inline constexpr npu_demo::cost::CostKind npu_demo::compute`
+- `inline constexpr npu_demo::cost::CostKind npu_demo::memory`
+
+helper 清单:
+- 无；当前文件只声明公开 cost 基础类型。
+
 使用示例:
 - #include "include/api/cost/Core.h"
 - npu_demo::cost::CostKind kind = npu_demo::compute;

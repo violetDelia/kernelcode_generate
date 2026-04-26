@@ -3,6 +3,28 @@
 - 提供 include/api/Core.h 的 npu_demo 实现，补全 Vector 方法定义。
 - 补齐 Vector 花括号构造的内联存储实现。
 
+API 列表:
+- `enum StatusCode { kOk = 0, kError = 1 }`
+- `using Status = StatusCode`
+- `using S_INT = long long`
+- `class Vector`
+- `Vector::Vector(long long* data, unsigned long long size)`
+- `Vector::Vector(const long long* data, unsigned long long size)`
+- `Vector::Vector(long long value0)`
+- `Vector::Vector(long long value0, long long value1)`
+- `Vector::Vector(long long value0, long long value1, long long value2)`
+- `Vector::Vector(long long value0, long long value1, long long value2, long long value3)`
+- `Vector::Vector(const Vector& other)`
+- `Vector::operator=(const Vector& other) -> Vector&`
+- `Vector::size() const -> unsigned long long`
+- `Vector::data() -> long long*`
+- `Vector::data() const -> const long long*`
+- `Vector::operator[](unsigned long long index) -> long long&`
+- `Vector::operator[](unsigned long long index) const -> const long long&`
+
+helper 清单:
+- 无；当前文件直接承接 `Vector` 公开方法实现，不额外暴露 helper。
+
 使用示例:
 - #include "include/npu_demo/Core.h"
 - long long coords_buf[3] = {5, 0, 7};

@@ -14,6 +14,13 @@
 
 - `enum class MemoryFormat { Norm, CLast }`
 - `enum class MemorySpace { GM, SM, LM, TSM, TLM1, TLM2, TLM3 }`
+- `inline constexpr MemorySpace GM = MemorySpace::GM`
+- `inline constexpr MemorySpace SM = MemorySpace::SM`
+- `inline constexpr MemorySpace LM = MemorySpace::LM`
+- `inline constexpr MemorySpace TSM = MemorySpace::TSM`
+- `inline constexpr MemorySpace TLM1 = MemorySpace::TLM1`
+- `inline constexpr MemorySpace TLM2 = MemorySpace::TLM2`
+- `inline constexpr MemorySpace TLM3 = MemorySpace::TLM3`
 - `void npu_demo::build_contiguous_stride(const long long* shape, unsigned long long rank, long long* out_stride)`
 - `template <MemorySpace Space, typename T> class Memory`
 - `Memory::Memory(T* data, const long long* shape, const long long* stride, unsigned long long rank, MemoryFormat format = MemoryFormat::Norm)`
@@ -31,11 +38,14 @@
 - `Memory::reshape(const Vector& shape) const -> Memory<Space, T>`
 - `Memory::element_count() const -> long long`
 - `Memory::is_contiguous() const -> bool`
+- `Memory::linear_offset(const long long* indices) const -> long long`
+- `Memory::at(const long long* indices) -> T&`
+- `Memory::at(const long long* indices) const -> const T&`
 
 ## 文档信息
 
 - 创建者：`神秘人`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)
 - `统一头文件`：[`include/api/Memory.h`](../../../include/api/Memory.h)
 - `功能实现`：[`include/npu_demo/Memory.h`](../../../include/npu_demo/Memory.h)
@@ -66,7 +76,7 @@
 - `MemoryFormat` 仅公开 `Norm` 与 `CLast`，不定义字符串别名或额外布局成员。
 - `MemorySpace` 仅公开 `GM`、`SM`、`LM`、`TSM`、`TLM1`、`TLM2`、`TLM3`，只表达空间分类，不表达容量、对齐或同步规则。
 - `MemorySpace::TLM` 不再作为公开输入；需要聚合语义时应使用 `BarrierVisibility::TLM`。
-- 本轮公共层只收口 `rank()`、`get_shape(axis)`、`get_stride(axis)`、`source.view<T>(...)`、`source.reshape(shape)` 与 `npu_demo::build_contiguous_stride(...)` 这组访问口径；若实现暂时保留 `shape()`、`stride()`、`element_count()`、`is_contiguous()`、`linear_offset()`、`at()` 等辅助接口，它们也不属于本轮稳定公开合同。
+- 本轮公共层稳定测试入口只收口 `rank()`、`get_shape(axis)`、`get_stride(axis)`、`element_count()`、`is_contiguous()`、`source.view<T>(...)`、`source.reshape(shape)` 与 `npu_demo::build_contiguous_stride(...)` 这组访问口径；若实现暂时保留 `shape()`、`stride()`、`linear_offset()`、`at()` 等辅助接口，它们也不属于本轮稳定公开合同。
 - `build_contiguous_stride` 不迁移 `Vector`、`Memory`、`MemorySpace` 等基础类型；这些类型继续来自 include/api 的当前公开位置。
 - `view` 不再作为 DMA 自由函数暴露在公共层；`dma.view` 的源码目标固定桥接到成员式 `source.view<T>(...)`。
 - `reshape(shape)` 只按当前公开子集收口为成员式接口，不在本轮扩展模板参数、隐式拷贝或空间改写语义。

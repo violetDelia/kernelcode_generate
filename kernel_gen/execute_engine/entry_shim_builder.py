@@ -8,6 +8,17 @@
 - 在可解析函数签名时，生成可运行的 `ordered_args -> function` 绑定代码；
   无法解析时退回占位 shim，保持历史兼容。
 
+API 列表:
+- `needs_entry_shim(source: str, entry_point: str) -> bool`
+- `build_entry_shim_source(*, function: str, entry_point: str, source: str | None = None) -> str`
+
+helper 清单:
+- `class _ParamSpec(kind: str, ctype: str, memory_space: str | None = None)`
+- `_split_params(params_text: str) -> tuple[str, ...]`
+- `_parse_param_spec(param_text: str) -> _ParamSpec | None`
+- `_extract_param_specs(source: str, function: str) -> tuple[_ParamSpec, ...] | None`
+- `_build_runtime_entry_shim_source(*, function: str, entry_point: str, params: tuple[_ParamSpec, ...]) -> str`
+
 使用示例:
 - from kernel_gen.execute_engine.entry_shim_builder import build_entry_shim_source, needs_entry_shim
 - src = build_entry_shim_source(function="cpu::add", entry_point="kg_execute_entry", source="void foo(){}")

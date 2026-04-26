@@ -2,6 +2,22 @@
 功能说明:
 - 定义 include/api 层统一对外的 launch / barrier 公开接口声明。
 
+API 列表:
+- `enum class BarrierVisibility { TSM, TLM }`
+- `enum class BarrierScope { BLOCK, THREAD, SUBTHREAD, GLOBAL }`
+- `template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args> Status launch(Callable&& callee, Args&&... args)`
+- `class KernelContext`
+- `KernelContext::thread_id() const -> long long`
+- `KernelContext::thread_num() const -> long long`
+- `KernelContext::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const -> void`
+- `template <MemorySpace Space, typename T> KernelContext::get_dynamic_memory() const -> Memory<Space, T>`
+- `thread_id() -> S_INT`
+- `thread_num() -> S_INT`
+- `template <MemorySpace Space> get_dynamic_memory() -> DynamicMemoryRef<Space>`
+
+helper 清单:
+- 无；当前文件只声明公开运行时接口，不承接后端 helper。
+
 使用示例:
 - #include "include/api/Arch.h"
 - BarrierVisibility vis = BarrierVisibility::TLM;

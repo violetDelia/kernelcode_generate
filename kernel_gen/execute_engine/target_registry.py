@@ -7,6 +7,12 @@
 - 本模块为后续阶段预留 target->include 映射的实现落点。
 - S1 阶段仅冻结 target 名称与 include family 的合同文本与测试入口。
 
+API 列表:
+- `target_includes(target: str) -> tuple[str, ...]`
+
+helper 清单:
+- 无；当前文件只承接公开 target include 映射。
+
 使用示例:
 - from kernel_gen.execute_engine.target_registry import target_includes
 - assert "include/npu_demo/npu_demo.h" in target_includes("npu_demo")[0]

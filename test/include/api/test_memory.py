@@ -173,14 +173,13 @@ int main() {
     if (mem.element_count() != 6) {
         return fail(5);
     }
-    long long index[2] = {1, 2};
-    if (mem.linear_offset(index) != 5) {
+    if (mem.data() != data) {
         return fail(6);
     }
-    if (mem.at(index) != 5) {
+    if (mem.data()[5] != 5) {
         return fail(7);
     }
-    mem.at(index) = 9;
+    mem.data()[5] = 9;
     if (data[5] != 9) {
         return fail(8);
     }

@@ -4,6 +4,14 @@
 - 公共层提供 `alloc / slice / deslice` 三类 DMA helper 声明；
   `view` / `reshape` 已移动到 `Memory` 的成员接口。
 
+API 列表:
+- `template <MemorySpace Space, typename T> Memory<Space, T> npu_demo::alloc(std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::slice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::deslice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+
+helper 清单:
+- 无；当前文件只声明公开 DMA helper。
+
 使用示例:
 - #include "include/api/Dma.h"
 - Vector offset(offset_buf, 1);

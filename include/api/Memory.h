@@ -3,6 +3,40 @@
 - 定义 include/api/Memory.h 的统一 `Memory<Space, T>` 视图类型与 `MemoryFormat/MemorySpace` 声明。
 - 固定公共层成员式 `view<T>(...)` / `reshape(shape)` 接口，以及 `get_shape(axis)` / `get_stride(axis)` 查询口径。
 
+API 列表:
+- `enum class MemoryFormat { Norm, CLast }`
+- `enum class MemorySpace { GM, SM, LM, TSM, TLM1, TLM2, TLM3 }`
+- `inline constexpr MemorySpace GM = MemorySpace::GM`
+- `inline constexpr MemorySpace SM = MemorySpace::SM`
+- `inline constexpr MemorySpace LM = MemorySpace::LM`
+- `inline constexpr MemorySpace TSM = MemorySpace::TSM`
+- `inline constexpr MemorySpace TLM1 = MemorySpace::TLM1`
+- `inline constexpr MemorySpace TLM2 = MemorySpace::TLM2`
+- `inline constexpr MemorySpace TLM3 = MemorySpace::TLM3`
+- `void npu_demo::build_contiguous_stride(const long long* shape, unsigned long long rank, long long* out_stride)`
+- `template <MemorySpace Space, typename T> class Memory`
+- `Memory::Memory(T* data, const long long* shape, const long long* stride, unsigned long long rank, MemoryFormat format = MemoryFormat::Norm)`
+- `Memory::Memory(T* data, const long long* shape, unsigned long long rank, MemoryFormat format = MemoryFormat::Norm)`
+- `Memory::data() -> T*`
+- `Memory::data() const -> const T*`
+- `Memory::shape() const -> const long long*`
+- `Memory::stride() const -> const long long*`
+- `Memory::rank() const -> unsigned long long`
+- `Memory::format() const -> MemoryFormat`
+- `Memory::space() const -> MemorySpace`
+- `Memory::get_shape(unsigned long long axis) const -> long long`
+- `Memory::get_stride(unsigned long long axis) const -> long long`
+- `template <typename ViewT> Memory::view(const Vector& offset, const Vector& size, const Vector& stride) const -> Memory<Space, ViewT>`
+- `Memory::reshape(const Vector& shape) const -> Memory<Space, T>`
+- `Memory::element_count() const -> long long`
+- `Memory::is_contiguous() const -> bool`
+- `Memory::linear_offset(const long long* indices) const -> long long`
+- `Memory::at(const long long* indices) -> T&`
+- `Memory::at(const long long* indices) const -> const T&`
+
+helper 清单:
+- 无；当前文件只声明公开 `Memory` 视图与基础枚举。
+
 使用示例:
 - #include "include/api/Memory.h"
 - int data[6] = {0, 1, 2, 3, 4, 5};
@@ -413,6 +447,7 @@ public:
     /*
     功能说明:
     - 根据运行期 rank 的多维索引计算线性偏移。
+    - 当前实现保留该索引辅助接口，供 include 层实现复用；它不属于本轮稳定公开测试入口。
 
     使用示例:
     - long long index[2] = {1, 2};
@@ -431,6 +466,7 @@ public:
     /*
     功能说明:
     - 返回索引位置的元素引用。
+    - 当前实现保留该索引辅助接口，供 include 层实现复用；它不属于本轮稳定公开测试入口。
 
     使用示例:
     - long long index[2] = {1, 2};
@@ -449,6 +485,7 @@ public:
     /*
     功能说明:
     - 返回只读索引位置元素引用。
+    - 当前实现保留该索引辅助接口，供 include 层实现复用；它不属于本轮稳定公开测试入口。
 
     使用示例:
     - long long index[2] = {1, 2};

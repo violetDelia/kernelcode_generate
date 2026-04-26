@@ -3,6 +3,14 @@
 - 定义 include/api/cost/Dma.h 的统一公共 DMA 成本 helper 声明。
 - 当前最小成功路径覆盖 `dma.copy -> npu_demo::cost::copy`，并同步冻结 `slice/deslice` 的模板与参数顺序。
 
+API 列表:
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::copy(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::slice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::deslice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+
+helper 清单:
+- 无；当前文件只声明公开 DMA 成本 helper。
+
 使用示例:
 - #include "include/api/cost/Dma.h"
 - S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::memory>(target, source);

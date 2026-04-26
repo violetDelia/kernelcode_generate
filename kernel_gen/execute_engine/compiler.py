@@ -7,6 +7,17 @@
 - 提供编译命令生成与编译单元拼接的最小实现，使 S2 阶段可稳定覆盖“编译路径”合同。
 - 默认以 dry-run 形式生成编译命令与产物占位文件，不强制依赖真实编译器环境。
 
+API 列表:
+- `default_compiler() -> str`
+- `class CompileArtifacts(soname_path: str, source_path: str, command: tuple[str, ...], stdout: str, stderr: str, return_code: int)`
+- `build_compile_unit(*, source: str, target_includes: tuple[str, ...], entry_shim_source: str) -> str`
+- `build_compile_command(*, compiler: str, source_path: str, output_path: str, compiler_flags: Iterable[str], link_flags: Iterable[str], include_dirs: Iterable[str]) -> tuple[str, ...]`
+- `compile_source(*, source: str, compiler: str, compiler_flags: tuple[str, ...], link_flags: tuple[str, ...], include_dirs: tuple[str, ...], work_dir: Path | None = None, dry_run: bool = True) -> CompileArtifacts`
+
+helper 清单:
+- `_looks_like_internal_compiler_error(stderr: str) -> bool`
+- `_run_compiler_command(command: Iterable[str]) -> subprocess.CompletedProcess[str]`
+
 使用示例:
 - from kernel_gen.execute_engine.compiler import default_compiler, build_compile_unit
 - assert default_compiler() == "g++"
