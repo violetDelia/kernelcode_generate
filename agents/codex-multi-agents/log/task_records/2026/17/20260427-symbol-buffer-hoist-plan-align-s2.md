@@ -180,3 +180,24 @@ Diff 反推自测：
 - 已确认主线最终只新增 surviving `done_plan` 与本轮对齐记录，和 review 通过口径一致。
 结论：
 - merge 收口完成，可提交 surviving 资产、`push origin/main` 并执行 `-done`。
+
+时间：2026-04-28 09:24
+经办人：睡觉小分队
+任务：T-20260428-71c1ecdf
+任务目标：修复 latest main 直接承接资产中的旧口径残留，仅收 surviving `done_plan/2026/17/symbol_buffer_hoist_green_plan.md` 与当前 `S2` 记录里的 `expectation` 活动验收 / 合同真源顺序，以及旧的 `not-through / plan-fix-s2` 表述
+执行前阅读记录：已读 [`TODO.md`](../../../../../../../TODO.md) 当前任务行、latest main tracked 资产 [`done_plan/2026/17/symbol_buffer_hoist_green_plan.md`](../../done_plan/2026/17/symbol_buffer_hoist_green_plan.md) 与当前记录的既有 `spec / review / merge` 条目、[`AGENTS.md`](../../../../../../../AGENTS.md)、[`agents/standard/任务记录约定.md`](../../../../../../../agents/standard/任务记录约定.md)，并核对 `origin/main@315bd81e7b660c809e82900ca94ca64bd38bc4e2` 的 `ls-tree` 现场
+最小功能闭环：只修 latest main 当前 tracked direct asset 的残留文字：surviving `done_plan` 去掉 `expectation` 的活动 `目标验收资产` / `合同真源顺序`，并把 `plan-fix-s2` 从“当前 direct asset”回收到历史第一轮修复记录；当前 `S2` 记录追加一条更正，说明这些旧口径已失效。未改 shared plan、实现、`pytest` 或 `expectation`
+改动：
+- 更新 surviving [`done_plan/2026/17/symbol_buffer_hoist_green_plan.md`](../../done_plan/2026/17/symbol_buffer_hoist_green_plan.md)：`目标验收资产` 现只保留公开 `pytest` 资产；`合同真源顺序` 现收口为 `spec > pytest > 当前记录 / 本归档 > 当前实现`；`当前主线 direct asset` 改为“本归档文件 + 当前 `S2` 记录”；`plan-fix-s2` 改写为第一轮修复记录；旧的 `不通过` 结论改写为“历史第一轮复验不通过（旧口径已由本任务继续修正）`
+- 当前 `S2` 记录追加本条更正说明，声明 latest main tracked direct asset 中关于 `expectation` 活动验收、`spec -> build -> test -> expectation`、以及“当前 direct asset 只有 `plan-fix-s2`”的旧说法已失效，后续以 updated surviving `done_plan` + 当前 `S2` 记录为准
+验证：
+- `git fetch origin main --quiet && git rev-parse origin/main`：latest main 基线为 `315bd81e7b660c809e82900ca94ca64bd38bc4e2`
+- `git ls-tree -r --name-only origin/main | rg '^agents/codex-multi-agents/log/task_records/done_plan/2026/17/symbol_buffer_hoist_green_plan\\.md$|^agents/codex-multi-agents/log/task_records/2026/17/20260427-symbol-buffer-hoist-plan-(fix|align)-s[0-9]+\\.md$|^expectation($|/)'`：命中当前 latest main tracked direct asset 为 `done_plan/2026/17/symbol_buffer_hoist_green_plan.md`、`20260427-symbol-buffer-hoist-plan-fix-s2.md`、`20260427-symbol-buffer-hoist-plan-align-s2.md`，且未命中 `expectation` 包
+- `python3` 文本断言脚本：通过；已确认 surviving `done_plan` 不再把 `expectation/pass/symbol_buffer_hoist/**` 与 `python3 -m expectation.pass.symbol_buffer_hoist` 写进 `目标验收资产` / `合同真源顺序`，并且已把 `current direct asset` 收口为 `done_plan + align-s2`，`plan-fix-s2` 仅保留为历史第一轮修复记录
+- `python3` Markdown 链接校验脚本：通过；surviving `done_plan`、当前 `S2` 记录与当前任务记录中的相对链接均可解析
+- `python3` 文件格式检查脚本：通过；surviving `done_plan`、当前 `S2` 记录与当前任务记录均无行尾空白，且末尾保留换行
+- `git -C /home/lfr/kernelcode_generate/wt-20260428-symbol-buffer-hoist-plan-align-s3 diff --check -- agents/codex-multi-agents/log/task_records/done_plan/2026/17/symbol_buffer_hoist_green_plan.md agents/codex-multi-agents/log/task_records/2026/17/20260427-symbol-buffer-hoist-plan-align-s2.md`：通过
+Diff 反推自测：本轮 diff 只涉及 surviving [`done_plan/2026/17/symbol_buffer_hoist_green_plan.md`](../../done_plan/2026/17/symbol_buffer_hoist_green_plan.md)、当前 `S2` 记录与当前任务记录；反推验证采用 `origin/main` 基线核对、`ls-tree` 命中检查、文本断言、Markdown 链接校验、文件格式检查，以及对当前 worktree 两个 tracked 文件执行 `git diff --check`。未跑 `pytest`，原因：本轮只修计划资产与记录文字，不改实现或测试文件
+合同验收（如适用）：未执行 `python3 -m expectation.pass.symbol_buffer_hoist`；原因：latest main `origin/main@315bd81e7b660c809e82900ca94ca64bd38bc4e2` 已无 `expectation` 包，本轮任务目标也是把相关内容回收到历史 / 本地归因说明，而不是恢复活动合同入口
+自检：已读当前任务行、latest main tracked direct asset、仓库规则与前序 `spec / review / merge` 记录；只改 surviving `done_plan`、当前 `S2` 记录与当前任务记录，没有越权改 shared plan、实现、测试或 `expectation`；已把 `expectation` 从活动验收资产和活动合同真源顺序中收回，把 `plan-fix-s2` 改成历史第一轮修复记录，并把“旧的不通过”限定为历史第一轮复验背景；本轮不涉及公开 `API`、跨文件非公开调用或测试直连非公开接口
+结论：当前 `spec` 已完成；latest main 当前 direct asset 上的旧 `expectation` 活动验收 / 合同真源顺序与 `plan-fix-s2` residual 口径已收口。下一步按 `TODO.md` 续到 `review`，复核 surviving `done_plan`、当前 `S2` 记录与本条更正是否一致
