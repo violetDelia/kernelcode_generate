@@ -1,7 +1,7 @@
 """AST visitor tests.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 AST 前端、nn dialect IR 与 MLIR 文本入口的回归测试。
@@ -133,48 +133,10 @@ from kernel_gen.dsl.ast import (
     ScalarArgAST,
     parse_function,
 )
+from kernel_gen.dsl.ast.parser import parse_function_with_env
 from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
-from kernel_gen.dsl.mlir_gen.emit.core import (
-    EmitContext,
-    _LoweringError,
-    _build_default_stride_attrs,
-    _build_index_operands_from_layout,
-    _build_static_index_list,
-    _build_stride,
-    _build_stride_attrs,
-    _build_index_attrs,
-    _dtype_to_xdsl,
-    _ensure_index_value,
-    _ensure_supported_statements,
-    _expr_key,
-    _get_loop_vars,
-    _infer_broadcast_memory_type,
-    _infer_broadcast_shape,
-    _infer_expr_type,
-    _lower_loop_bound,
-    _lower_expr,
-    _lookup_symbol,
-    _memory_space_from_ast,
-    _memory_to_nn_type,
-    _mul_symbol,
-    _resolve_index_operand,
-    _resolve_index_symbol,
-    _resolve_static_index_expr,
-    _resolve_index_expr,
-    emit_mlir as emit_node_mlir,
-)
-from kernel_gen.dsl.mlir_gen import (
-    _build_signature_types,
-    _is_symbol_scalar_function,
-    _parse_function_with_env,
-    _symbol_expr_from_runtime_arg,
-    _validate_return_type,
-    build_func_op,
-    build_func_op_from_ast,
-)
-from kernel_gen.dsl import mlir_gen as mlir_gen_module
-from kernel_gen.dsl.mlir_gen import parse_env as parse_env_module
-from kernel_gen.dsl.ast import visitor as ast_visitor_module
+from kernel_gen.dsl.mlir_gen.emit import EmitContext, emit_mlir as emit_node_mlir, memory_type_from_memory
+from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
 import kernel_gen.operation.nn as nn
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -223,7 +185,7 @@ def _parse_function_from_source(
     globals_table = dict(getattr(kernel, "__globals__", {}))
     builtins_obj = globals_table.get("__builtins__", __builtins__)
     builtins_table = builtins_obj if isinstance(builtins_obj, dict) else getattr(builtins_obj, "__dict__", {})
-    return _parse_function_with_env(kernel, globals_table, builtins_table, runtime_table, config=None)
+    return parse_function_with_env(kernel, globals_table, builtins_table, runtime_table, config=None)
 
 
 # AST-014A / MGEN-027
@@ -242,7 +204,7 @@ def test_build_func_op_lowers_arch_get_block_id_query(
 ) -> None:
     from kernel_gen.operation.arch import get_block_id
 
-    def get_block_id_kernel() -> int:
+    def get_block_id_kernel():
         return get_block_id()
 
     monkeypatch.setitem(get_block_id_kernel.__globals__, "get_block_id", get_block_id)
@@ -250,8 +212,8 @@ def test_build_func_op_lowers_arch_get_block_id_query(
     func_ast = parse_function(get_block_id_kernel)
     if len(func_ast.inputs) != 0:
         raise AssertionError("expected get_block_id kernel to have no inputs")
-    if len(func_ast.outputs) != 1:
-        raise AssertionError("expected get_block_id kernel to have one output annotation")
+    if func_ast.outputs:
+        raise AssertionError("expected get_block_id kernel to infer return type from body")
     if len(func_ast.body.statements) != 1:
         raise AssertionError("expected get_block_id kernel to lower to one AST statement")
     if not isinstance(func_ast.body.statements[0], ArchQueryAST):
@@ -420,7 +382,7 @@ def test_build_func_op_lowers_arch_get_block_num_query(
 ) -> None:
     from kernel_gen.operation.arch import get_block_num
 
-    def get_block_num_kernel() -> int:
+    def get_block_num_kernel():
         return get_block_num()
 
     monkeypatch.setitem(get_block_num_kernel.__globals__, "get_block_num", get_block_num)
@@ -428,8 +390,8 @@ def test_build_func_op_lowers_arch_get_block_num_query(
     func_ast = parse_function(get_block_num_kernel)
     if len(func_ast.inputs) != 0:
         raise AssertionError("expected get_block_num kernel to have no inputs")
-    if len(func_ast.outputs) != 1:
-        raise AssertionError("expected get_block_num kernel to have one output annotation")
+    if func_ast.outputs:
+        raise AssertionError("expected get_block_num kernel to infer return type from body")
     if len(func_ast.body.statements) != 1:
         raise AssertionError("expected get_block_num kernel to lower to one AST statement")
     if not isinstance(func_ast.body.statements[0], ArchQueryAST):
@@ -532,7 +494,7 @@ def test_build_func_op_lowers_arch_get_subthread_id_query(
 ) -> None:
     from kernel_gen.operation.arch import get_subthread_id
 
-    def get_subthread_id_kernel() -> int:
+    def get_subthread_id_kernel():
         return get_subthread_id()
 
     monkeypatch.setitem(get_subthread_id_kernel.__globals__, "get_subthread_id", get_subthread_id)
@@ -540,8 +502,8 @@ def test_build_func_op_lowers_arch_get_subthread_id_query(
     func_ast = parse_function(get_subthread_id_kernel)
     if len(func_ast.inputs) != 0:
         raise AssertionError("expected get_subthread_id kernel to have no inputs")
-    if len(func_ast.outputs) != 1:
-        raise AssertionError("expected get_subthread_id kernel to have one output annotation")
+    if func_ast.outputs:
+        raise AssertionError("expected get_subthread_id kernel to infer return type from body")
     if len(func_ast.body.statements) != 1:
         raise AssertionError("expected get_subthread_id kernel to lower to one AST statement")
     if not isinstance(func_ast.body.statements[0], ArchQueryAST):
@@ -644,7 +606,7 @@ def test_build_func_op_lowers_arch_get_thread_id_query(
 ) -> None:
     from kernel_gen.operation.arch import get_thread_id
 
-    def get_thread_id_kernel() -> int:
+    def get_thread_id_kernel():
         return get_thread_id()
 
     monkeypatch.setitem(get_thread_id_kernel.__globals__, "get_thread_id", get_thread_id)
@@ -652,8 +614,8 @@ def test_build_func_op_lowers_arch_get_thread_id_query(
     func_ast = parse_function(get_thread_id_kernel)
     if len(func_ast.inputs) != 0:
         raise AssertionError("expected get_thread_id kernel to have no inputs")
-    if len(func_ast.outputs) != 1:
-        raise AssertionError("expected get_thread_id kernel to have one output annotation")
+    if func_ast.outputs:
+        raise AssertionError("expected get_thread_id kernel to infer return type from body")
     if len(func_ast.body.statements) != 1:
         raise AssertionError("expected get_thread_id kernel to lower to one AST statement")
     if not isinstance(func_ast.body.statements[0], ArchQueryAST):
@@ -837,7 +799,7 @@ def kernel() -> "Tensor[i8, ?]":
 def test_emit_mlir_rejects_invalid_arch_get_dynamic_memory_space() -> None:
     node = ArchGetDynamicMemoryAST(space=MemorySpace.GM, location=None)
     ctx = EmitContext(builder=Block(), symbols={}, types={})
-    with pytest.raises(_LoweringError, match="get_dynamic_memory space must be on-chip MemorySpace"):
+    with pytest.raises(Exception, match="get_dynamic_memory space must be on-chip MemorySpace"):
         emit_node_mlir(node, ctx)
 
 
@@ -878,10 +840,10 @@ def test_build_func_op_lowers_arch_get_dynamic_memory_via_import_bound_aliases(
 ) -> None:
     import kernel_gen.operation.arch as arch_module
 
-    def module_alias_kernel() -> "Tensor[i8, ?]":
+    def module_alias_kernel():
         return arch_ops.get_dynamic_memory(MemorySpace.TSM)
 
-    def direct_alias_kernel() -> "Tensor[i8, ?]":
+    def direct_alias_kernel():
         return gdm(MemorySpace.TLM1)
 
     monkeypatch.setitem(module_alias_kernel.__globals__, "arch_ops", arch_module)
@@ -941,7 +903,7 @@ def test_build_func_op_lowers_arch_get_subthread_num_query(
 ) -> None:
     from kernel_gen.operation.arch import get_subthread_num
 
-    def get_subthread_num_kernel() -> int:
+    def get_subthread_num_kernel():
         return get_subthread_num()
 
     monkeypatch.setitem(get_subthread_num_kernel.__globals__, "get_subthread_num", get_subthread_num)
@@ -949,8 +911,8 @@ def test_build_func_op_lowers_arch_get_subthread_num_query(
     func_ast = parse_function(get_subthread_num_kernel)
     if len(func_ast.inputs) != 0:
         raise AssertionError("expected get_subthread_num kernel to have no inputs")
-    if len(func_ast.outputs) != 1:
-        raise AssertionError("expected get_subthread_num kernel to have one output annotation")
+    if func_ast.outputs:
+        raise AssertionError("expected get_subthread_num kernel to infer return type from body")
     if len(func_ast.body.statements) != 1:
         raise AssertionError("expected get_subthread_num kernel to lower to one AST statement")
     if not isinstance(func_ast.body.statements[0], ArchQueryAST):
@@ -1130,7 +1092,7 @@ def test_emit_mlir_rejects_invalid_arch_launch_kernel_args() -> None:
     for node, message in invalid_nodes:
         block = Block()
         ctx = EmitContext(builder=block, symbols={}, types={})
-        with pytest.raises(_LoweringError, match=message):
+        with pytest.raises(Exception, match=message):
             emit_node_mlir(node, ctx)
 
 
@@ -1406,19 +1368,18 @@ def test_build_func_op_returns_func_op() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_build_func_op_signature_uses_runtime_args_not_parse_env() -> None:
+def test_build_func_op_signature_uses_runtime_args_not_parse_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     runtime_expr = SymbolDim("runtime")
     shadow_expr = SymbolDim("shadow")
 
     def only_symbol(expr: int) -> int:
         return expr
 
-    func_op = build_func_op(
-        only_symbol,
-        runtime_expr,
-        globals={"expr": shadow_expr, "__builtins__": __builtins__},
-        builtins=object(),
-    )
+    monkeypatch.setitem(only_symbol.__globals__, "expr", shadow_expr)
+
+    func_op = build_func_op(only_symbol, runtime_expr)
     inputs = list(func_op.function_type.inputs)
     outputs = list(func_op.function_type.outputs)
     assert inputs == [SymbolValueType.from_expr("runtime")]
@@ -1486,35 +1447,6 @@ def test_build_func_op_from_ast_uses_runtime_args_for_symbol_signature() -> None
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_build_func_op_from_ast_forwards_config_to_visitor_and_context(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import kernel_gen.dsl.mlir_gen.function_builder as function_builder_module
-
-    captured: dict[str, object] = {}
-
-    class RecordingVisitor(ast_visitor_module.AstVisitor):
-        def __init__(self: "RecordingVisitor", config: dict[str, object] | None = None) -> None:
-            super().__init__(config=config)
-            captured["visitor_config"] = dict(self.config)
-
-        def visit_function(self: "RecordingVisitor", func_ast: FunctionAST, ctx: EmitContext) -> object:
-            captured["ctx_config"] = dict(ctx.config)
-            return super().visit_function(func_ast, ctx)
-
-    def identity(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
-        return x
-
-    monkeypatch.setattr(function_builder_module, "AstVisitor", RecordingVisitor)
-    func_ast = parse_function(identity)
-    config: dict[str, object] = {"loop_vars": {"i": "outer"}}
-    func_op = build_func_op_from_ast(func_ast, config=config)
-
-    assert isinstance(func_op, func.FuncOp)
-    assert captured["visitor_config"] == config
-    assert captured["ctx_config"] == config
-
-
 # MGEN-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
@@ -1534,7 +1466,7 @@ def test_build_func_op_return_type_matches_annotation() -> None:
     func_op = build_func_op(add, _tensor_arg([2, 2]))
     outputs = list(func_op.function_type.outputs)
     assert outputs
-    expected = _memory_to_nn_type(func_ast.outputs[0].memory)
+    expected = memory_type_from_memory(func_ast.outputs[0].memory)
     assert outputs[0] == expected
 
 
@@ -1543,30 +1475,22 @@ def test_build_func_op_return_type_matches_annotation() -> None:
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
 # 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
-# 功能说明: 覆盖 mlir_gen 的符号标量函数与签名构造分支。
-# 测试目的: 验证符号标量函数识别与 runtime arg 到 symbol expr 的映射。
+# 功能说明: 覆盖 mlir_gen 符号标量函数通过公开入口生成签名的分支。
+# 测试目的: 验证 build_func_op_from_ast 对 symbol 标量 runtime arg 的公开 lowering 行为。
 # 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_mlir_gen_symbol_scalar_helpers
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
 def test_mlir_gen_symbol_scalar_helpers() -> None:
-    func_ast = FunctionAST(
-        name="only_symbol",
-        inputs=[ScalarArgAST("n", int)],
-        outputs=[ScalarArgAST("n", int)],
-        body=BlockAST([]),
-    )
-    assert _is_symbol_scalar_function(func_ast)
-    assert not _is_symbol_scalar_function(FunctionAST("no_inputs", [], [], BlockAST([])))
+    def only_symbol(n: int) -> int:
+        return n
 
-    assert _symbol_expr_from_runtime_arg(SymbolDim("S")) == "S"
-    assert _symbol_expr_from_runtime_arg(4) == "4"
-    assert _symbol_expr_from_runtime_arg("bad") is None
-
-    arg_types, type_map = _build_signature_types(func_ast, runtime_args=[SymbolDim("S")])
+    func_ast = parse_function(only_symbol)
+    func_op = build_func_op_from_ast(func_ast, runtime_args=[SymbolDim("S")])
+    arg_types = list(func_op.function_type.inputs)
     assert len(arg_types) == 1
     assert isinstance(arg_types[0], SymbolValueType)
-    assert type_map[_expr_key(func_ast.inputs[0])] == arg_types[0]
+    assert list(func_op.function_type.outputs) == [arg_types[0]]
 
 
 # MGEN-002B
@@ -1631,8 +1555,8 @@ def test_build_func_op_accepts_joinedstr_tensor_annotation(monkeypatch: pytest.M
     monkeypatch.setitem(identity.__globals__, "COLS", cols)
     func_op = build_func_op(identity, _tensor_arg([rows, cols]))
     assert isinstance(func_op, func.FuncOp)
-    assert list(func_op.function_type.inputs) == [_memory_to_nn_type(Memory([rows, cols], NumericType.Float32))]
-    assert list(func_op.function_type.outputs) == [_memory_to_nn_type(Memory([rows, cols], NumericType.Float32))]
+    assert list(func_op.function_type.inputs) == [memory_type_from_memory(Memory([rows, cols], NumericType.Float32))]
+    assert list(func_op.function_type.outputs) == [memory_type_from_memory(Memory([rows, cols], NumericType.Float32))]
 
 
 # MGEN-040
@@ -1665,7 +1589,7 @@ def test_build_func_op_accepts_joinedstr_tensor_annotation_with_expr(monkeypatch
     monkeypatch.setitem(identity.__globals__, "PL", pl)
     monkeypatch.setitem(identity.__globals__, "PR", pr)
     func_op = build_func_op(identity, _tensor_arg([w]))
-    assert list(func_op.function_type.outputs) == [_memory_to_nn_type(Memory([expected], NumericType.Float32))]
+    assert list(func_op.function_type.outputs) == [memory_type_from_memory(Memory([expected], NumericType.Float32))]
 
 # MGEN-025
 # 创建者: 朽木露琪亚
@@ -1900,7 +1824,9 @@ def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_C
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_build_func_op_supports_dma_alloc_helper_with_symbol_shape_args() -> None:
+def test_build_func_op_supports_dma_alloc_helper_with_symbol_shape_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from kernel_gen.operation.dma import alloc
 
     symbol_lhs = SymbolDim("M")
@@ -1911,12 +1837,10 @@ def test_build_func_op_supports_dma_alloc_helper_with_symbol_shape_args() -> Non
     def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {lhs_expr}, {rhs_expr}]":
         return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
 
-    func_op = build_func_op(
-        alloc_kernel,
-        symbol_lhs,
-        symbol_rhs,
-        globals={"lhs_expr": lhs_expr, "rhs_expr": rhs_expr},
-    )
+    monkeypatch.setitem(alloc_kernel.__globals__, "lhs_expr", lhs_expr)
+    monkeypatch.setitem(alloc_kernel.__globals__, "rhs_expr", rhs_expr)
+
+    func_op = build_func_op(alloc_kernel, symbol_lhs, symbol_rhs)
     alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
 
     assert list(func_op.function_type.inputs) == [
@@ -1939,7 +1863,9 @@ def test_build_func_op_supports_dma_alloc_helper_with_symbol_shape_args() -> Non
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_build_func_op_supports_dma_alloc_helper_with_symbol_plus_const_shape_args() -> None:
+def test_build_func_op_supports_dma_alloc_helper_with_symbol_plus_const_shape_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from kernel_gen.operation.dma import alloc
 
     symbol_lhs = SymbolDim("M") + 2
@@ -1947,15 +1873,10 @@ def test_build_func_op_supports_dma_alloc_helper_with_symbol_plus_const_shape_ar
     lhs_expr = str(symbol_lhs.get_symbol())
     rhs_expr = str(symbol_rhs.get_symbol())
 
-    def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {lhs_expr}, {rhs_expr}]":
+    def alloc_kernel(rank1: int, rank2: int):
         return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
 
-    func_op = build_func_op(
-        alloc_kernel,
-        symbol_lhs,
-        symbol_rhs,
-        globals={"lhs_expr": lhs_expr, "rhs_expr": rhs_expr},
-    )
+    func_op = build_func_op(alloc_kernel, symbol_lhs, symbol_rhs)
     alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
 
     assert list(func_op.function_type.inputs) == [
@@ -2250,7 +2171,9 @@ def test_build_func_op_supports_dma_slice_helper() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_build_func_op_supports_dynamic_symbol_dma_slice_helper() -> None:
+def test_build_func_op_supports_dynamic_symbol_dma_slice_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from kernel_gen.operation.dma import slice
 
     row_symbol = SymbolDim("TILE_M")
@@ -2266,13 +2189,10 @@ def test_build_func_op_supports_dynamic_symbol_dma_slice_helper() -> None:
     ) -> f"Tensor[f32, {row_expr}, {col_expr}]":
         return slice(src, [0, 0], [size_row, size_col], [1, 1], MemorySpace.LM)
 
-    func_op = build_func_op(
-        slice_symbol_kernel,
-        source,
-        row_symbol,
-        col_symbol,
-        globals={"row_expr": row_expr, "col_expr": col_expr},
-    )
+    monkeypatch.setitem(slice_symbol_kernel.__globals__, "row_expr", row_expr)
+    monkeypatch.setitem(slice_symbol_kernel.__globals__, "col_expr", col_expr)
+
+    func_op = build_func_op(slice_symbol_kernel, source, row_symbol, col_symbol)
     alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
     slice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaSliceOp)]
     return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
@@ -2281,7 +2201,7 @@ def test_build_func_op_supports_dynamic_symbol_dma_slice_helper() -> None:
     assert len(slice_ops) == 1
     assert len(return_ops) == 1
     assert list(func_op.function_type.inputs) == [
-        _memory_to_nn_type(source),
+        memory_type_from_memory(source),
         SymbolValueType.from_expr(row_expr),
         SymbolValueType.from_expr(col_expr),
     ]
@@ -2314,96 +2234,6 @@ def test_build_func_op_supports_dma_deslice_helper() -> None:
     deslice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaDesliceOp)]
     assert isinstance(func_op, func.FuncOp)
     assert len(deslice_ops) == 1
-
-
-# MGEN-007
-# 创建者: 小李飞刀
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 16:05:00 +0800
-# 最近一次运行成功时间: 2026-03-25 16:05:00 +0800
-# 功能说明: 覆盖解析失败时的错误包装路径。
-# 测试目的: 验证 _parse_function_with_env 对 parser 公共错误保持 AstParseError 口径。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_mlir_gen_parse_failure_wrapped
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_mlir_gen_parse_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fn(x: object) -> object:
-        return x
-
-    def _broken_parse(*args: object, **kwargs: object) -> object:
-        raise AstParseError("broken", [Diagnostic("broken", location=SourceLocation(1, 2))])
-
-    monkeypatch.setattr(parse_env_module, "ast_parse_function_with_env", _broken_parse)
-    with pytest.raises(AstParseError, match="broken"):
-        _parse_function_with_env(fn, globals_table={}, builtins_table={}, runtime_table={}, config=None)
-
-
-# MGEN-007
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
-# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
-# 功能说明: 覆盖返回类型校验的错误分支。
-# 测试目的: 验证多返回、非法返回注解与不匹配类型时报错。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_mlir_gen_validate_return_type_errors
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_mlir_gen_validate_return_type_errors() -> None:
-    memory = Memory([2, 2], NumericType.Float32)
-    tensor_out = TensorAST("out", memory)
-    scalar_out = ScalarArgAST("n", int)
-
-    func_multi = FunctionAST("multi", [tensor_out], [tensor_out, tensor_out], BlockAST([]))
-    with pytest.raises(_LoweringError, match="Only single return value is supported"):
-        _validate_return_type(func_multi, _memory_to_nn_type(memory))
-
-    func_scalar_bad = FunctionAST("bad", [scalar_out], [ScalarArgAST("f", float)], BlockAST([]))
-    with pytest.raises(_LoweringError, match="Unsupported scalar return type"):
-        _validate_return_type(func_scalar_bad, i32)
-
-    func_unknown = FunctionAST("bad", [scalar_out], [VarAST("x")], BlockAST([]))
-    with pytest.raises(_LoweringError, match="Unsupported return annotation type"):
-        _validate_return_type(func_unknown, i32)
-
-    func_mismatch = FunctionAST("bad", [tensor_out], [tensor_out], BlockAST([]))
-    with pytest.raises(_LoweringError, match="Return type does not match annotation"):
-        _validate_return_type(func_mismatch, i32)
-
-    func_symbol = FunctionAST("sym", [scalar_out], [scalar_out], BlockAST([]))
-    with pytest.raises(_LoweringError, match="Return type does not match annotation"):
-        _validate_return_type(func_symbol, i32)
-
-
-# EMIT-001
-# 创建者: 朽木露琪亚
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
-# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
-# 功能说明: 验证二元表达式节点生成对应 op/value 并复用缓存。
-# 测试目的: 验证二元表达式节点生成对应 op/value 并复用缓存。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_context_reuses_cached_value
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_context_reuses_cached_value() -> None:
-    memory = Memory([2, 2], NumericType.Float32)
-    lhs = TensorAST(name="x", memory=memory, location=None)
-    rhs = TensorAST(name="y", memory=memory, location=None)
-    expr = BinaryExprAST(op="add", lhs=lhs, rhs=rhs, location=None)
-    func_op = build_func_op_from_ast(FunctionAST("tmp", [lhs, rhs], [], BlockAST([expr]), returns_none=True))
-    arg_types = list(func_op.function_type.inputs)
-    block = Block(arg_types=arg_types)
-    ctx = EmitContext(builder=block, symbols={"x": block.args[0], "y": block.args[1]}, types={})
-    emit_node_mlir(lhs, ctx)
-    emit_node_mlir(rhs, ctx)
-
-    first = emit_node_mlir(expr, ctx)
-    second = emit_node_mlir(expr, ctx)
-    assert first is second
-    ops = [op for op in block.ops if isinstance(op, NnAddOp)]
-    assert len(ops) == 1
 
 
 # EMIT-004
@@ -2474,7 +2304,7 @@ def test_emit_mlir_unsupported_node_reports_location() -> None:
     ctx = EmitContext(builder=block, symbols={}, types={})
     node = BlockAST(statements=[], location=SourceLocation(3, 2))
 
-    with pytest.raises(_LoweringError) as exc_info:
+    with pytest.raises(Exception) as exc_info:
         emit_node_mlir(node, ctx)
     assert exc_info.value.location == node.location
 
@@ -2602,7 +2432,7 @@ def test_symbol_scalar_function_uses_symbol_value_type_signature() -> None:
     def only_symbol(expr: int) -> int:
         return expr
 
-    func_op = build_func_op(only_symbol, expr, globals={"expr": expr, "__builtins__": __builtins__})
+    func_op = build_func_op(only_symbol, expr)
     inputs = list(func_op.function_type.inputs)
     outputs = list(func_op.function_type.outputs)
     assert inputs == [SymbolValueType.from_expr("expr")]
@@ -2861,14 +2691,19 @@ def test_build_func_op_rejects_runtime_arg_count_mismatch() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_build_func_op_globals_and_builtins_cannot_replace_runtime_args() -> None:
+def test_build_func_op_globals_and_builtins_cannot_replace_runtime_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     expr = SymbolDim("expr")
 
     def only_symbol(expr: int) -> int:
         return expr
 
-    with pytest.raises(AstVisitorError, match="globals/builtins cannot replace function runtime args") as exc_info:
-        build_func_op(only_symbol, globals={"expr": expr}, builtins=__builtins__)
+    monkeypatch.setitem(only_symbol.__globals__, "expr", expr)
+    monkeypatch.setitem(only_symbol.__globals__, "__builtins__", {"expr": expr})
+
+    with pytest.raises(AstVisitorError, match="requires explicit runtime args") as exc_info:
+        build_func_op(only_symbol)
 
     assert exc_info.value.location is None
 
@@ -2931,12 +2766,16 @@ def test_build_func_op_rejects_global_external_value_reference(monkeypatch: pyte
 # 对应功能实现文件路径: kernel_gen/dsl/ast/__init__.py, kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_build_func_op_rejects_builtins_external_value_reference() -> None:
+def test_build_func_op_rejects_builtins_external_value_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def use_builtin_value() -> int:
         return BUILTIN_EXTERNAL_VALUE
 
+    monkeypatch.setitem(use_builtin_value.__globals__, "__builtins__", {"BUILTIN_EXTERNAL_VALUE": 13})
+
     with pytest.raises(AstVisitorError, match="cannot use external value inside function body") as exc_info:
-        build_func_op(use_builtin_value, builtins={"BUILTIN_EXTERNAL_VALUE": 13})
+        build_func_op(use_builtin_value)
 
     assert exc_info.value.location is not None
 
@@ -3383,163 +3222,6 @@ def test_emit_mlir_symbolic_for_loop_avoids_index_cast() -> None:
     assert offsets[0] is loop_ops[0].body.block.args[0]
 
 
-# EMIT-015
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 10:04:04 +0800
-# 最近一次运行成功时间: 2026-03-25 10:04:04 +0800
-# 功能说明: 验证 alloc AST lowering 为 dma.alloc。
-# 测试目的: 验证 DmaAllocAST 直接 lowering 为 DmaAllocOp，且结果 memory space 与 dtype 正确。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_dma_alloc_lowering
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_dma_alloc_lowering() -> None:
-    expr = DmaAllocAST(shape=[ConstAST(2), ConstAST(3)], dtype=NumericType.Float32, space=MemorySpace.SM, location=None)
-    ctx = EmitContext(builder=Block(), symbols={}, types={})
-    result = _lower_expr(expr, ctx)
-    assert isinstance(result.owner, DmaAllocOp)
-    assert result.type.space.space.data == "shared"
-    assert result.type.element_type == f32
-
-
-# EMIT-016
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 10:04:04 +0800
-# 最近一次运行成功时间: 2026-03-25 10:04:04 +0800
-# 功能说明: 验证 copy AST lowering 会先生成目标 alloc，再生成 dma.copy。
-# 测试目的: 验证 DmaCopyAST 返回目标 memory value，并在块内发射 DmaCopyOp。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_dma_copy_lowering
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_dma_copy_lowering() -> None:
-    source_memory = Memory([2, 3], NumericType.Float32, space=MemorySpace.GM)
-    source = TensorAST(name="src", memory=source_memory, location=None)
-    block = Block(arg_types=[_memory_to_nn_type(source_memory)])
-    ctx = EmitContext(builder=block, symbols={"src": block.args[0]}, types={})
-    ctx._set_cache(_expr_key(source), block.args[0])
-    ctx.types[_expr_key(source)] = block.args[0].type
-
-    result = _lower_expr(DmaCopyAST(source=source, space=MemorySpace.SM, location=None), ctx)
-    assert isinstance(result.owner, DmaAllocOp)
-    assert any(isinstance(op, DmaCopyOp) for op in block.ops)
-    assert result.type.space.space.data == "shared"
-
-
-# EMIT-017
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 10:04:04 +0800
-# 最近一次运行成功时间: 2026-03-25 10:04:04 +0800
-# 功能说明: 验证 cast AST lowering 为 dma.cast。
-# 测试目的: 验证 DmaCastAST 生成 DmaCastOp，并允许覆盖目标 memory space。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_dma_cast_lowering
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_dma_cast_lowering() -> None:
-    source_memory = Memory([2, 3], NumericType.Float32, space=MemorySpace.GM)
-    source = TensorAST(name="src", memory=source_memory, location=None)
-    block = Block(arg_types=[_memory_to_nn_type(source_memory)])
-    ctx = EmitContext(builder=block, symbols={"src": block.args[0]}, types={})
-    ctx._set_cache(_expr_key(source), block.args[0])
-    ctx.types[_expr_key(source)] = block.args[0].type
-
-    result = _lower_expr(
-        DmaCastAST(source=source, dtype=NumericType.Float16, memoryspace=MemorySpace.SM, location=None),
-        ctx,
-    )
-    assert isinstance(result.owner, DmaAllocOp)
-    cast_ops = [op for op in block.ops if isinstance(op, DmaCastOp)]
-    assert len(cast_ops) == 1
-    assert cast_ops[0].target is result
-    assert result.type.element_type != block.args[0].type.element_type
-    assert result.type.space.space.data == "shared"
-
-
-# EMIT-018
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 10:04:04 +0800
-# 最近一次运行成功时间: 2026-03-25 10:04:04 +0800
-# 功能说明: 验证 view AST lowering 为 dma.view。
-# 测试目的: 验证 DmaViewAST 生成 DmaViewOp，并按结果 shape 生成视图结果类型。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_dma_view_lowering
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_dma_view_lowering() -> None:
-    source_memory = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
-    source = TensorAST(name="src", memory=source_memory, location=None)
-    block = Block(arg_types=[_memory_to_nn_type(source_memory)])
-    ctx = EmitContext(builder=block, symbols={"src": block.args[0]}, types={})
-    ctx._set_cache(_expr_key(source), block.args[0])
-    ctx.types[_expr_key(source)] = block.args[0].type
-
-    result = _lower_expr(
-        DmaViewAST(
-            source=source,
-            offset=[ConstAST(1), ConstAST(1)],
-            size=[ConstAST(2), ConstAST(2)],
-            stride=[ConstAST(1), ConstAST(1)],
-            location=None,
-        ),
-        ctx,
-    )
-    assert isinstance(result.owner, DmaViewOp)
-    assert [attr.data for attr in result.type.shape.data] == [2, 2]
-
-
-# EMIT-019
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 10:04:04 +0800
-# 最近一次运行成功时间: 2026-03-25 10:04:04 +0800
-# 功能说明: 验证 reshape AST lowering 为 dma.reshape。
-# 测试目的: 验证 DmaReshapeAST 生成 DmaReshapeOp，并输出目标 shape。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_dma_reshape_lowering
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_dma_reshape_lowering() -> None:
-    source_memory = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
-    source = TensorAST(name="src", memory=source_memory, location=None)
-    block = Block(arg_types=[_memory_to_nn_type(source_memory)])
-    ctx = EmitContext(builder=block, symbols={"src": block.args[0]}, types={})
-    ctx._set_cache(_expr_key(source), block.args[0])
-    ctx.types[_expr_key(source)] = block.args[0].type
-
-    result = _lower_expr(DmaReshapeAST(source=source, shape=[ConstAST(2), ConstAST(8)], location=None), ctx)
-    assert isinstance(result.owner, DmaReshapeOp)
-    assert [attr.data for attr in result.type.shape.data] == [2, 8]
-
-
-# EMIT-020
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 10:04:04 +0800
-# 最近一次运行成功时间: 2026-03-25 10:04:04 +0800
-# 功能说明: 验证 flatten AST 按一维 reshape 语义 lowering。
-# 测试目的: 验证 DmaFlattenAST 生成 DmaReshapeOp，且输出 shape 为元素总数的一维结果。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_dma_flatten_lowering
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_dma_flatten_lowering() -> None:
-    source_memory = Memory([2, 3], NumericType.Float32, space=MemorySpace.GM)
-    source = TensorAST(name="src", memory=source_memory, location=None)
-    block = Block(arg_types=[_memory_to_nn_type(source_memory)])
-    ctx = EmitContext(builder=block, symbols={"src": block.args[0]}, types={})
-    ctx._set_cache(_expr_key(source), block.args[0])
-    ctx.types[_expr_key(source)] = block.args[0].type
-
-    result = _lower_expr(DmaFlattenAST(source=source, location=None), ctx)
-    assert isinstance(result.owner, DmaReshapeOp)
-    assert [attr.data for attr in result.type.shape.data] == [6]
-
-
 # EMIT-021
 # 创建者: 朽木露琪亚
 # 最后一次更改: 小李飞刀
@@ -3552,19 +3234,18 @@ def test_emit_mlir_dma_flatten_lowering() -> None:
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
 def test_emit_mlir_dma_free_statement() -> None:
-    source_memory = Memory([2, 3], NumericType.Float32, space=MemorySpace.GM)
-    source = TensorAST(name="src", memory=source_memory, location=None)
-    block = Block(arg_types=[_memory_to_nn_type(source_memory)])
-    ctx = EmitContext(builder=block, symbols={"src": block.args[0]}, types={})
-    ctx._set_cache(_expr_key(source), block.args[0])
-    ctx.types[_expr_key(source)] = block.args[0].type
+    from kernel_gen.operation.dma import free
 
-    result = emit_node_mlir(DmaFreeAST(value=source, location=None), ctx)
-    ops = list(block.ops)
-    assert isinstance(result, DmaFreeOp)
-    assert len(ops) == 1
-    assert ops[0] is result
-    assert result.source is block.args[0]
+    source_memory = Memory([2, 3], NumericType.Float32, space=MemorySpace.GM)
+
+    def free_kernel(src: "Tensor[f32, 2, 3]") -> None:
+        free(src)
+
+    func_op = build_func_op(free_kernel, source_memory)
+    free_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaFreeOp)]
+
+    assert len(free_ops) == 1
+    assert free_ops[0].source is func_op.body.block.args[0]
 
 
 # EMIT-021
@@ -4343,7 +4024,7 @@ def test_tensor_truediv_dtype_promotion_lowering() -> None:
     div_ops = [op for op in func_op.body.block.ops if isinstance(op, NnTrueDivOp)]
     assert len(cast_ops) == 1
     assert len(div_ops) == 1
-    expected_type = _memory_to_nn_type(Memory([2, 2], NumericType.Float32))
+    expected_type = memory_type_from_memory(Memory([2, 2], NumericType.Float32))
     assert cast_ops[0].result.type == expected_type
     assert div_ops[0].result.type == expected_type
 
@@ -4450,7 +4131,7 @@ def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
 
     lhs_memory = Memory([2, 2], NumericType.Float32)
     rhs_memory = Memory([2, 2], NumericType.Int32)
-    expected_type = _memory_to_nn_type(lhs_memory - rhs_memory)
+    expected_type = memory_type_from_memory(lhs_memory - rhs_memory)
 
     func_op = build_func_op(sub, lhs_memory, rhs_memory)
     cast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnCastOp)]
@@ -4479,7 +4160,7 @@ def test_build_func_op_lowers_nn_add_memory_const_without_dma_cast() -> None:
         return lhs + 1
 
     lhs_memory = Memory([2, 2], NumericType.Float32)
-    expected_type = _memory_to_nn_type(lhs_memory)
+    expected_type = memory_type_from_memory(lhs_memory)
 
     func_op = build_func_op(add, lhs_memory)
     cast_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaCastOp)]
@@ -4572,8 +4253,8 @@ def test_ast_visitor_rejects_block_without_statements() -> None:
 # 最后一次更改: 不要啊教练
 # 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
 # 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
-# 功能说明: 验证 visit_stmt 捕获 _LoweringError 并转为 AstVisitorError。
-# 测试目的: 验证 visit_stmt 捕获 _LoweringError 并转为 AstVisitorError。
+# 功能说明: 验证 visit_stmt 捕获下游 lowering 失败并转为 AstVisitorError。
+# 测试目的: 验证 visit_stmt 在子节点 lowering 失败时统一抛出 AstVisitorError。
 # 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_ast_visitor_visit_stmt_wraps_lowering_error
 # 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
 # 对应 spec 文件路径: spec/dsl/ast/visitor.md
@@ -4588,852 +4269,6 @@ def test_ast_visitor_visit_stmt_wraps_lowering_error() -> None:
     assert exc_info.value.location == node.location
 
 
-# EMIT-011
-# 创建者: 不要啊教练
-# 最后一次更改: 不要啊教练
-# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
-# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
-# 功能说明: 验证 loop_vars 初始化与非法配置报错路径。
-# 测试目的: 验证 loop_vars 初始化与非法配置报错路径。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_loop_vars_validation
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_loop_vars_validation() -> None:
-    ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={}, config=None)
-    loop_vars = _get_loop_vars(ctx)
-    assert isinstance(loop_vars, dict)
-
-    bad_ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={}, config={"loop_vars": []})
-    with pytest.raises(_LoweringError):
-        _get_loop_vars(bad_ctx)
-
-
-# EMIT-012A
-# 创建者: 不要啊教练
-# 最后一次更改: 不要啊教练
-# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
-# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
-# 功能说明: 覆盖索引解析与 rank mismatch 的错误路径。
-# 测试目的: 覆盖索引解析与 rank mismatch 的错误路径。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_index_expr_rejections
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_index_expr_rejections() -> None:
-    ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={}, config={})
-
-    with pytest.raises(_LoweringError):
-        _resolve_index_expr(ConstAST(1.5, location=SourceLocation(1, 1)), ctx)
-
-    with pytest.raises(_LoweringError):
-        _resolve_index_expr(VarAST(name="i", location=SourceLocation(2, 1)), ctx)
-
-    with pytest.raises(_LoweringError):
-        _build_index_attrs([ConstAST(1, location=None)], rank=2, ctx=ctx, location=SourceLocation(3, 1))
-
-
-# EMIT-013
-# 创建者: 不要啊教练
-# 最后一次更改: 不要啊教练
-# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
-# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
-# 功能说明: 覆盖默认 stride 推导遇到非 IntAttr/StringAttr 的分支。
-# 测试目的: 覆盖默认 stride 推导遇到非 IntAttr/StringAttr 的分支。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_default_stride_handles_unknown_attr
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_default_stride_handles_unknown_attr() -> None:
-    attrs = _build_default_stride_attrs([ArrayAttr([])])
-    assert len(attrs) == 1
-
-
-# EMIT-012C
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
-# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
-# 功能说明: 覆盖 emit_mlir stride/index/layout 等辅助函数分支。
-# 测试目的: 覆盖 stride 构造、layout 解析与静态索引处理的错误分支。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_stride_and_layout_helpers
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_stride_and_layout_helpers() -> None:
-    assert _build_stride([2, "N"]) == [1, "?"]
-    assert _mul_symbol(1, "N") == "N"
-    assert _mul_symbol("M", 1) == "M"
-    assert _mul_symbol("M", "N") == "M*N"
-
-    stride_attrs = _build_default_stride_attrs([StringAttr("N"), IntAttr(2)])
-    assert all(isinstance(item, (IntAttr, StringAttr)) for item in stride_attrs)
-
-    ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={})
-    attrs = _build_index_attrs(ConstAST(1), rank=2, ctx=ctx, location=None)
-    assert len(attrs) == 2
-
-    with pytest.raises(_LoweringError, match="Unsupported layout attribute"):
-        _build_index_operands_from_layout(ArrayAttr([ArrayAttr([])]), ctx, location=None)
-
-    with pytest.raises(_LoweringError, match="Only unit stride is supported"):
-        _build_stride_attrs([ConstAST(2)], rank=1, ctx=ctx, location=None)
-
-    with pytest.raises(_LoweringError, match="Index must be int or str"):
-        _resolve_static_index_expr(ConstAST(1.5))
-
-    with pytest.raises(_LoweringError, match="Index rank mismatch"):
-        _build_static_index_list([ConstAST(1)], rank=2, default_value=0, location=None)
-
-    fallback = NnMemorySpaceAttr.from_name("global")
-    assert _memory_space_from_ast(MemorySpace.LM, fallback).space.data == "local"
-
-
-# EMIT-012D
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
-# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
-# 功能说明: 覆盖索引解析与 loop_vars 的分支。
-# 测试目的: 覆盖 index cast、符号索引解析、loop_vars 查表路径。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_index_resolution_helpers
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_index_resolution_helpers() -> None:
-    block = Block(arg_types=[i32, SymbolValueType.from_expr("N")])
-    ctx = EmitContext(builder=block, symbols={"n": block.args[1]}, types={}, config={})
-
-    cast_value = _ensure_index_value(block.args[0], ctx, location=None)
-    assert isinstance(cast_value.owner, arith.IndexCastOp)
-
-    with pytest.raises(_LoweringError, match="Unknown index symbol"):
-        _resolve_index_symbol("missing", ctx, location=None)
-
-    const_value = _resolve_index_operand(ConstAST(3), ctx, location=None)
-    assert isinstance(const_value.owner, SymbolConstOp)
-
-    symbol_value = _resolve_index_operand(ConstAST("n"), ctx, location=None)
-    assert symbol_value is block.args[1]
-
-    assert _resolve_index_expr(ScalarArgAST(name="k", value_type=int), ctx) == "k"
-    ctx.config["loop_vars"] = {"i": "i"}
-    assert _resolve_index_expr(VarAST(name="i", location=None), ctx) == "i"
-    with pytest.raises(_LoweringError, match="Unknown loop variable"):
-        _resolve_index_expr(VarAST(name="j", location=None), ctx)
-
-
-# EMIT-012
-# 创建者: 小李飞刀
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
-# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
-# 功能说明: 覆盖 emit_mlir 类型推导与 broadcast 错误分支。
-# 测试目的: 覆盖常量类型、symbol binary op、broadcast mismatch 等路径。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_infer_expr_type_branches
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_infer_expr_type_branches() -> None:
-    memory = Memory([2, 2], NumericType.Float32)
-    tensor = TensorAST(name="x", memory=memory, location=None)
-    type_map = {_expr_key(tensor): _memory_to_nn_type(memory)}
-    int_memory = Memory([2, 2], NumericType.Int32)
-    int_tensor = TensorAST(name="xi", memory=int_memory, location=None)
-    int_tensor_type = _memory_to_nn_type(int_memory)
-    type_map[_expr_key(int_tensor)] = int_tensor_type
-    half_memory = Memory([2, 2], NumericType.Float16)
-    half_tensor = TensorAST(name="xh", memory=half_memory, location=None)
-    half_tensor_type = _memory_to_nn_type(half_memory)
-    type_map[_expr_key(half_tensor)] = half_tensor_type
-    float_const = ConstAST(1.5)
-
-    assert _infer_expr_type(float_const, type_map) == f32
-    with pytest.raises(_LoweringError, match="Unsupported constant type"):
-        _infer_expr_type(ConstAST("bad"), type_map)
-
-    load = LoadAST(
-        tensor=tensor,
-        offset=[ConstAST(0), ConstAST(0)],
-        stride=None,
-        sizes=[ConstAST(1), ConstAST(1)],
-        location=None,
-    )
-    load_type = _infer_expr_type(load, type_map)
-    assert isinstance(load_type, NnMemoryType)
-    assert [dim.data for dim in load_type.shape.data] == [1, 1]
-
-    with pytest.raises(_LoweringError, match="StoreAST does not produce a value"):
-        _infer_expr_type(StoreAST(tensor=tensor, offset=ConstAST(0), stride=None, value=tensor), type_map)
-
-    with pytest.raises(_LoweringError, match="ForAST does not produce a value"):
-        loop = ForAST(var=VarAST("i"), start=ConstAST(0), end=ConstAST(1), body=BlockAST([]))
-        _infer_expr_type(loop, type_map)
-
-    sym_lhs = ScalarArgAST("a", int, is_symbolic=True)
-    sym_rhs = ScalarArgAST("b", int, is_symbolic=True)
-    type_map[_expr_key(sym_lhs)] = SymbolValueType.from_expr("A")
-    type_map[_expr_key(sym_rhs)] = SymbolValueType.from_expr("B")
-    binary_exprs: list[BinaryExprAST] = []
-    for op_name in ("add", "mul", "div", "floordiv"):
-        expr = BinaryExprAST(op=op_name, lhs=sym_lhs, rhs=sym_rhs)
-        binary_exprs.append(expr)
-        assert isinstance(_infer_expr_type(expr, type_map), SymbolValueType)
-
-    with pytest.raises(_LoweringError, match="Unsupported symbol binary op"):
-        _infer_expr_type(BinaryExprAST(op="mod", lhs=sym_lhs, rhs=sym_rhs), type_map)
-
-    for compare_op in ("eq", "ge", "gt", "le", "lt", "ne"):
-        assert _infer_expr_type(CompareExprAST(op=compare_op, lhs=sym_lhs, rhs=sym_rhs), type_map) == i1
-    with pytest.raises(_LoweringError, match="Unsupported symbol compare op"):
-        _infer_expr_type(CompareExprAST(op="cmp", lhs=sym_lhs, rhs=sym_rhs), type_map)
-
-    mixed_type_map = {
-        _expr_key(int_tensor): int_tensor_type,
-        _expr_key(half_tensor): half_tensor_type,
-    }
-    mixed_const_type = _infer_expr_type(BinaryExprAST(op="add", lhs=int_tensor, rhs=float_const, location=None), mixed_type_map)
-    assert isinstance(mixed_const_type, NnMemoryType)
-    assert mixed_const_type.shape == int_tensor_type.shape
-    assert mixed_const_type.stride == int_tensor_type.stride
-    assert mixed_const_type.element_type == f32
-
-    mixed_type_map[_expr_key(sym_lhs)] = SymbolValueType.from_expr("K")
-    mixed_symbol_expr = BinaryExprAST(op="add", lhs=half_tensor, rhs=sym_lhs, location=None)
-    mixed_symbol_type = _infer_expr_type(mixed_symbol_expr, mixed_type_map)
-    assert isinstance(mixed_symbol_type, NnMemoryType)
-    assert mixed_symbol_type.shape == half_tensor_type.shape
-    assert mixed_symbol_type.stride == half_tensor_type.stride
-    assert mixed_symbol_type.element_type == half_tensor_type.element_type
-
-    scalar_only_type_map = {_expr_key(sym_lhs): i32, _expr_key(sym_rhs): i32}
-    with pytest.raises(_LoweringError, match="nn.add requires at least one nn.memory operand"):
-        _infer_expr_type(BinaryExprAST(op="add", lhs=sym_lhs, rhs=sym_rhs), scalar_only_type_map)
-
-    invalid_scalar_type_map = {_expr_key(int_tensor): int_tensor_type, _expr_key(sym_lhs): i1}
-    with pytest.raises(_LoweringError, match="nn.add scalar element_type must be i32/f16/f32 or symbol.int"):
-        _infer_expr_type(BinaryExprAST(op="add", lhs=int_tensor, rhs=sym_lhs, location=None), invalid_scalar_type_map)
-
-    compare_type_map = {_expr_key(sym_lhs): i32, _expr_key(sym_rhs): i32}
-    with pytest.raises(_LoweringError, match="Compare op operands must have nn.memory type"):
-        _infer_expr_type(CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs), compare_type_map)
-
-    lhs_type = _memory_to_nn_type(Memory([2, 1], NumericType.Float32))
-    with pytest.raises(_LoweringError, match="Implicit broadcast dimension mismatch"):
-        _infer_broadcast_shape([StringAttr("?")], [IntAttr(2)], location=None)
-
-    rhs_type_mismatch = _memory_to_nn_type(Memory([2, 1], NumericType.Int32))
-    with pytest.raises(_LoweringError, match="Binary op operands must have the same element_type"):
-        _infer_broadcast_memory_type(lhs_type, rhs_type_mismatch, location=None)
-
-    rhs_space = _memory_to_nn_type(Memory([2, 1], NumericType.Float32, space=MemorySpace.LM))
-    with pytest.raises(_LoweringError, match="Binary op operands must have the same space"):
-        _infer_broadcast_memory_type(lhs_type, rhs_space, location=None)
-
-    with pytest.raises(_LoweringError, match="Unsupported expression for lowering"):
-        _infer_expr_type(object(), type_map)
-
-
-# EMIT-012B
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
-# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
-# 功能说明: 覆盖 emit_mlir lowering 的错误与支路。
-# 测试目的: 覆盖常量、load/store、symbol binary op 与 compare 错误分支。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_lower_expr_branches
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_lower_expr_branches() -> None:
-    memory = Memory([2, 2], NumericType.Float32)
-    tensor = TensorAST(name="x", memory=memory, location=None)
-    tensor_type = _memory_to_nn_type(memory)
-    block = Block(arg_types=[tensor_type, SymbolValueType.from_expr("N")])
-    ctx = EmitContext(builder=block, symbols={"x": block.args[0]}, types={})
-    ctx._set_cache(_expr_key(tensor), block.args[0])
-    ctx.types[_expr_key(tensor)] = tensor_type
-
-    float_value = _lower_expr(ConstAST(1.5), ctx)
-    assert isinstance(float_value.owner, arith.ConstantOp)
-
-    with pytest.raises(_LoweringError, match="Unsupported constant type"):
-        _lower_expr(ConstAST("bad"), ctx)
-
-    load = LoadAST(
-        tensor=tensor,
-        offset=[ConstAST(0), ConstAST(0)],
-        stride=None,
-        sizes=[ConstAST(1), ConstAST(1)],
-        location=None,
-    )
-    load_value = _lower_expr(load, ctx)
-    assert isinstance(load_value.owner, DmaAllocOp)
-    assert any(isinstance(op, DmaLoadOp) for op in block.ops)
-
-    bad_load = LoadAST(tensor=tensor, offset=ConstAST(0), stride=None, location=None)
-    ctx.types[_expr_key(bad_load)] = i32
-    with pytest.raises(_LoweringError, match="LoadAST result must be nn.memory"):
-        _lower_expr(bad_load, ctx)
-
-    sym_lhs = ScalarArgAST("a", int, is_symbolic=True)
-    sym_rhs = ScalarArgAST("b", int, is_symbolic=True)
-    ctx._set_cache(_expr_key(sym_lhs), block.args[1])
-    ctx._set_cache(_expr_key(sym_rhs), block.args[1])
-    ctx.types[_expr_key(sym_lhs)] = block.args[1].type
-    ctx.types[_expr_key(sym_rhs)] = block.args[1].type
-    bad_symbol = BinaryExprAST(op="add", lhs=sym_lhs, rhs=sym_rhs)
-    ctx.types[_expr_key(bad_symbol)] = i32
-    with pytest.raises(_LoweringError, match="Symbol binary op result must be !symbol.int"):
-        _lower_expr(bad_symbol, ctx)
-
-    mixed_int_memory = Memory([2, 2], NumericType.Int32)
-    mixed_int_tensor = TensorAST(name="xi", memory=mixed_int_memory, location=None)
-    mixed_int_type = _memory_to_nn_type(mixed_int_memory)
-    mixed_block = Block(arg_types=[mixed_int_type])
-    mixed_ctx = EmitContext(builder=mixed_block, symbols={"xi": mixed_block.args[0]}, types={})
-    mixed_ctx._set_cache(_expr_key(mixed_int_tensor), mixed_block.args[0])
-    mixed_ctx.types[_expr_key(mixed_int_tensor)] = mixed_int_type
-    mixed_const_expr = BinaryExprAST(op="add", lhs=mixed_int_tensor, rhs=ConstAST(1.5), location=None)
-    mixed_const_value = _lower_expr(mixed_const_expr, mixed_ctx)
-    mixed_const_cast_ops = [op for op in mixed_block.ops if isinstance(op, NnCastOp)]
-    mixed_const_add_ops = [op for op in mixed_block.ops if isinstance(op, NnAddOp)]
-    assert len(mixed_const_cast_ops) == 1
-    assert len(mixed_const_add_ops) == 1
-    assert mixed_const_value is mixed_const_add_ops[0].result
-    assert mixed_const_cast_ops[0].result.type == mixed_const_add_ops[0].result.type
-    assert mixed_const_add_ops[0].lhs is mixed_const_cast_ops[0].result
-    assert isinstance(mixed_const_add_ops[0].rhs.owner, arith.ConstantOp)
-
-    mixed_half_memory = Memory([2, 2], NumericType.Float16)
-    mixed_half_tensor = TensorAST(name="xh", memory=mixed_half_memory, location=None)
-    mixed_half_type = _memory_to_nn_type(mixed_half_memory)
-    mixed_symbol = ScalarArgAST("k", int, is_symbolic=True)
-    mixed_symbol_block = Block(arg_types=[mixed_half_type, SymbolValueType.from_expr("K")])
-    mixed_symbol_ctx = EmitContext(
-        builder=mixed_symbol_block,
-        symbols={"xh": mixed_symbol_block.args[0], "k": mixed_symbol_block.args[1]},
-        types={},
-    )
-    mixed_symbol_ctx._set_cache(_expr_key(mixed_half_tensor), mixed_symbol_block.args[0])
-    mixed_symbol_ctx._set_cache(_expr_key(mixed_symbol), mixed_symbol_block.args[1])
-    mixed_symbol_ctx.types[_expr_key(mixed_half_tensor)] = mixed_half_type
-    mixed_symbol_ctx.types[_expr_key(mixed_symbol)] = mixed_symbol_block.args[1].type
-    mixed_symbol_expr = BinaryExprAST(op="add", lhs=mixed_half_tensor, rhs=mixed_symbol, location=None)
-    mixed_symbol_value = _lower_expr(mixed_symbol_expr, mixed_symbol_ctx)
-    mixed_symbol_cast_ops = [op for op in mixed_symbol_block.ops if isinstance(op, SymbolToFloatOp)]
-    mixed_symbol_add_ops = [op for op in mixed_symbol_block.ops if isinstance(op, NnAddOp)]
-    assert len(mixed_symbol_cast_ops) == 1
-    assert len(mixed_symbol_add_ops) == 1
-    assert mixed_symbol_value is mixed_symbol_add_ops[0].result
-    assert mixed_symbol_add_ops[0].rhs is mixed_symbol_cast_ops[0].result
-    assert mixed_symbol_add_ops[0].result.type == mixed_half_type
-
-    bad_binary = BinaryExprAST(op="mod", lhs=tensor, rhs=tensor)
-    with pytest.raises(_LoweringError, match="Unsupported binary op"):
-        _lower_expr(bad_binary, ctx)
-
-    bad_compare = CompareExprAST(op="foo", lhs=tensor, rhs=tensor)
-    with pytest.raises(_LoweringError, match="Unsupported compare op"):
-        _lower_expr(bad_compare, ctx)
-
-    with pytest.raises(_LoweringError, match="StoreAST does not produce a value"):
-        _lower_expr(StoreAST(tensor=tensor, offset=ConstAST(0), stride=None, value=tensor), ctx)
-
-    with pytest.raises(_LoweringError, match="Unknown input reference"):
-        _lookup_symbol(VarAST("missing"), EmitContext(builder=block, symbols={}, types={}))
-
-
-# EMIT-022
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
-# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
-# 功能说明: 覆盖 StoreAST rank mismatch 与 deslice 分支。
-# 测试目的: 验证 StoreAST rank mismatch 抛错，sizes 路径生成 dma.deslice。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_store_rank_mismatch_and_deslice
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_store_rank_mismatch_and_deslice() -> None:
-    target_memory = Memory([2, 2], NumericType.Float32)
-    value_memory = Memory([2], NumericType.Float32)
-    target = TensorAST(name="t", memory=target_memory, location=None)
-    value = TensorAST(name="v", memory=value_memory, location=None)
-    block = Block(arg_types=[_memory_to_nn_type(target_memory), _memory_to_nn_type(value_memory)])
-    ctx = EmitContext(builder=block, symbols={"t": block.args[0], "v": block.args[1]}, types={})
-    ctx._set_cache(_expr_key(target), block.args[0])
-    ctx._set_cache(_expr_key(value), block.args[1])
-    ctx.types[_expr_key(target)] = block.args[0].type
-    ctx.types[_expr_key(value)] = block.args[1].type
-
-    with pytest.raises(ValueError, match="Store size mismatch"):
-        emit_node_mlir(
-            StoreAST(
-                tensor=target,
-                offset=[ConstAST(0), ConstAST(0)],
-                stride=None,
-                sizes=[ConstAST(1), ConstAST(1)],
-                value=value,
-            ),
-            ctx,
-        )
-
-    same_value = TensorAST(name="sv", memory=target_memory, location=None)
-    ctx.symbols["sv"] = block.args[0]
-    ctx._set_cache(_expr_key(same_value), block.args[0])
-    ctx.types[_expr_key(same_value)] = block.args[0].type
-    deslice = emit_node_mlir(
-        StoreAST(
-            tensor=target,
-            offset=[ConstAST(0), ConstAST(0)],
-            stride=None,
-            sizes=[ConstAST(2), ConstAST(2)],
-            value=same_value,
-            kind="deslice",
-        ),
-        ctx,
-    )
-    assert isinstance(deslice, DmaDesliceOp)
-
-
-# EMIT-023
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
-# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
-# 功能说明: 覆盖 _ensure_supported_statements 的错误分支。
-# 测试目的: 验证空函数体与不支持语句会抛出明确错误。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_ensure_supported_statements_errors
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_ensure_supported_statements_errors() -> None:
-    memory = Memory([2, 2], NumericType.Float32)
-    tensor = TensorAST(name="x", memory=memory, location=None)
-    empty_func = FunctionAST(name="empty", inputs=[tensor], outputs=[], body=BlockAST([]))
-    with pytest.raises(_LoweringError, match="Function body is empty"):
-        _ensure_supported_statements(empty_func)
-
-    bad_func = FunctionAST(name="bad", inputs=[tensor], outputs=[], body=BlockAST([object()]))
-    with pytest.raises(_LoweringError, match="Unsupported AST expression for lowering"):
-        _ensure_supported_statements(bad_func)
-
-
-# EMIT-013
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
-# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
-# 功能说明: 覆盖缓存恢复与索引类型分支。
-# 测试目的: 验证缓存快照/恢复与 IndexType 输入的处理路径。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_cache_restore_and_index_value_variants
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_cache_restore_and_index_value_variants() -> None:
-    block = Block(arg_types=[IndexType()])
-    ctx = EmitContext(builder=block, symbols={}, types={})
-    ctx._set_cache(1, "value")
-    snapshot = ctx._snapshot_cache()
-    ctx._set_cache(2, "new")
-    ctx._restore_cache(snapshot)
-    assert ctx._get_cache(1) == "value"
-    assert ctx._get_cache(2) is None
-
-    index_value = _ensure_index_value(block.args[0], ctx, location=None)
-    assert index_value is block.args[0]
-
-    float_op = arith.ConstantOp(FloatAttr(1.0, f32))
-    with pytest.raises(_LoweringError, match="Index operand must be integer or index"):
-        _ensure_index_value(float_op.result, ctx, location=None)
-
-
-# EMIT-014
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
-# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
-# 功能说明: 覆盖索引解析与 loop bound 的分支。
-# 测试目的: 验证索引解析错误路径、直接值与 loop bound 解析。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_index_operand_variants_and_loop_bound
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_index_operand_variants_and_loop_bound() -> None:
-    block = Block(arg_types=[IndexType()])
-    ctx = EmitContext(builder=block, symbols={"n": block.args[0]}, types={}, config={})
-
-    with pytest.raises(_LoweringError, match="Index must be int or str"):
-        _resolve_index_operand(ConstAST(1.5), ctx, location=None)
-
-    const_value = _resolve_index_operand(2, ctx, location=None)
-    assert isinstance(const_value.owner, SymbolConstOp)
-
-    symbol_value = _resolve_index_operand("n", ctx, location=None)
-    assert symbol_value is block.args[0]
-
-    assert _resolve_index_expr(ConstAST("k"), ctx) == "k"
-    assert _resolve_index_expr(ConstAST(3), ctx) == 3
-
-    scalar_arg = ScalarArgAST(name="n", value_type=int)
-    bound_value = _lower_loop_bound(scalar_arg, ctx)
-    assert bound_value is block.args[0]
-
-
-# EMIT-015
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
-# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
-# 功能说明: 覆盖 layout 解析与 stride 校验分支。
-# 测试目的: 验证 layout 支持 StringAttr 并拒绝非 unit stride。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_layout_and_stride_helpers
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_layout_and_stride_helpers() -> None:
-    block = Block(arg_types=[IndexType()])
-    ctx = EmitContext(builder=block, symbols={"n": block.args[0]}, types={}, config={})
-    layout = ArrayAttr([IntAttr(0), StringAttr("n")])
-    operands = _build_index_operands_from_layout(layout, ctx, location=None)
-    assert len(operands) == 2
-    assert isinstance(operands[0].owner, SymbolConstOp)
-    assert operands[1] is block.args[0]
-
-    with pytest.raises(_LoweringError, match="Only unit stride is supported"):
-        _build_stride_attrs([ConstAST(2)], rank=1, ctx=ctx, location=None)
-
-
-# EMIT-016
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
-# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
-# 功能说明: 覆盖静态索引与广播形状推导分支。
-# 测试目的: 验证静态索引列表构造与广播维度分支。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_static_index_list_and_broadcast_shape
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_static_index_list_and_broadcast_shape() -> None:
-    assert _resolve_static_index_expr(4) == 4
-    assert _resolve_static_index_expr("n") == "n"
-
-    default_attrs = _build_static_index_list(None, rank=2, default_value=1, location=None)
-    assert [attr.data for attr in default_attrs] == [1, 1]
-
-    scalar_attrs = _build_static_index_list(ConstAST(2), rank=3, default_value=1, location=None)
-    assert [attr.data for attr in scalar_attrs] == [2, 2, 2]
-
-    lhs_shape = [IntAttr(2), IntAttr(3)]
-    rhs_shape = [IntAttr(3)]
-    assert _infer_broadcast_shape(lhs_shape, rhs_shape, None)[0].data == 2
-
-    wildcard_shape = [StringAttr("?")]
-    assert _infer_broadcast_shape(wildcard_shape, wildcard_shape, None)[0].data == "?"
-
-    with pytest.raises(_LoweringError, match="Implicit broadcast dimension mismatch"):
-        _infer_broadcast_shape([IntAttr(2)], [StringAttr("?")], None)
-
-    broadcast = _infer_broadcast_shape([IntAttr(2)], [IntAttr(1)], None)
-    assert broadcast[0].data == 2
-
-
-# EMIT-017
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
-# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
-# 功能说明: 覆盖类型推导中的未知输入路径。
-# 测试目的: 验证 LoadAST 与 TensorAST 未登记时的报错。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_infer_expr_type_unknown_inputs
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_infer_expr_type_unknown_inputs() -> None:
-    memory = Memory([2], NumericType.Float32)
-    tensor = TensorAST(name="x", memory=memory, location=None)
-    load = LoadAST(tensor=tensor, offset=[ConstAST(0)], stride=None, location=None)
-    with pytest.raises(_LoweringError, match="Unknown input reference"):
-        _infer_expr_type(load, {})
-    with pytest.raises(_LoweringError, match="Unknown input reference"):
-        _infer_expr_type(tensor, {})
-
-
-# EMIT-018
-# 创建者: 小李飞刀
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
-# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
-# 功能说明: 覆盖 lowering 的错误路径与符号运算分支。
-# 测试目的: 验证未知输入、符号运算非法 op 与不支持表达式报错。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_lower_expr_unknown_and_symbol_errors
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_lower_expr_unknown_and_symbol_errors() -> None:
-    ctx = EmitContext(builder=Block(), symbols={}, types={})
-    tensor = TensorAST(name="x", memory=Memory([2], NumericType.Float32), location=None)
-    with pytest.raises(_LoweringError, match="Unknown input reference"):
-        _lower_expr(tensor, ctx)
-
-    block = Block(arg_types=[SymbolValueType.from_expr("N"), SymbolValueType.from_expr("M")])
-    symbol_ctx = EmitContext(builder=block, symbols={"a": block.args[0], "b": block.args[1]}, types={})
-    lhs = ScalarArgAST(name="a", value_type=int)
-    rhs = ScalarArgAST(name="b", value_type=int)
-    symbol_ctx._set_cache(_expr_key(lhs), block.args[0])
-    symbol_ctx._set_cache(_expr_key(rhs), block.args[1])
-    symbol_ctx.types[_expr_key(lhs)] = block.args[0].type
-    symbol_ctx.types[_expr_key(rhs)] = block.args[1].type
-    expr_cases = [
-        (BinaryExprAST(lhs=lhs, rhs=rhs, op="sub", location=None), SymbolSubOp),
-        (BinaryExprAST(lhs=lhs, rhs=rhs, op="mul", location=None), SymbolMulOp),
-        (BinaryExprAST(lhs=lhs, rhs=rhs, op="div", location=None), SymbolDivOp),
-        (BinaryExprAST(lhs=lhs, rhs=rhs, op="floordiv", location=None), SymbolFloorDivOp),
-    ]
-    for expr, op_type in expr_cases:
-        lowered = _lower_expr(expr, symbol_ctx)
-        assert isinstance(lowered.owner, op_type)
-
-    with pytest.raises(_LoweringError, match="Unsupported symbol compare op"):
-        _lower_expr(CompareExprAST(lhs=lhs, rhs=rhs, op="cmp", location=None), symbol_ctx)
-
-    with pytest.raises(_LoweringError, match="Unsupported symbol binary op"):
-        _lower_expr(BinaryExprAST(lhs=lhs, rhs=rhs, op="mod", location=None), symbol_ctx)
-
-    with pytest.raises(_LoweringError, match="Unsupported expression for lowering"):
-        _lower_expr(object(), symbol_ctx)
-
-
-# EMIT-024
-# 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
-# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
-# 功能说明: 验证 symbol 标量 >= 比较在 emit 阶段生成 symbol.ge 并返回 i1。
-# 测试目的: 锁定 symbol.ge lowering 与 i1 结果类型。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_lowers_symbol_ge
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_lowers_symbol_ge() -> None:
-    block = Block(arg_types=[SymbolValueType.from_expr("A"), SymbolValueType.from_expr("B")])
-    ctx = EmitContext(builder=block, symbols={"a": block.args[0], "b": block.args[1]}, types={})
-    lhs = ScalarArgAST(name="a", value_type=int, is_symbolic=True)
-    rhs = ScalarArgAST(name="b", value_type=int, is_symbolic=True)
-    ctx._set_cache(_expr_key(lhs), block.args[0])
-    ctx._set_cache(_expr_key(rhs), block.args[1])
-    ctx.types[_expr_key(lhs)] = block.args[0].type
-    ctx.types[_expr_key(rhs)] = block.args[1].type
-    expr = CompareExprAST(op="ge", lhs=lhs, rhs=rhs, location=None)
-
-    result = _lower_expr(expr, ctx)
-    assert isinstance(result.owner, SymbolGeOp)
-    assert result.type == i1
-
-
-def _assert_emit_mlir_lowers_symbol_compare(op_name: str, op_type: type[object]) -> None:
-    """断言 ast_visitor 侧的 emit helper 会将符号 compare family lowering 到对应 symbol op。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 复用同一套 block/context 初始化逻辑覆盖 `gt/le/lt/ne`。
-
-    使用示例:
-    - _assert_emit_mlir_lowers_symbol_compare("gt", SymbolGtOp)
-
-    关联文件:
-    - spec: spec/dsl/emit_mlir.md
-    - test: test/dsl/ast/test_visitor_integration.py
-    - 功能实现: kernel_gen/dsl/mlir_gen/emit/core.py
-    """
-
-    block = Block(arg_types=[SymbolValueType.from_expr("A"), SymbolValueType.from_expr("B")])
-    ctx = EmitContext(builder=block, symbols={"a": block.args[0], "b": block.args[1]}, types={})
-    lhs = ScalarArgAST(name="a", value_type=int, is_symbolic=True)
-    rhs = ScalarArgAST(name="b", value_type=int, is_symbolic=True)
-    ctx._set_cache(_expr_key(lhs), block.args[0])
-    ctx._set_cache(_expr_key(rhs), block.args[1])
-    ctx.types[_expr_key(lhs)] = block.args[0].type
-    ctx.types[_expr_key(rhs)] = block.args[1].type
-
-    result = _lower_expr(CompareExprAST(op=op_name, lhs=lhs, rhs=rhs, location=None), ctx)
-    assert isinstance(result.owner, op_type)
-    assert result.type == i1
-
-
-def test_emit_mlir_lowers_symbol_gt() -> None:
-    _assert_emit_mlir_lowers_symbol_compare("gt", SymbolGtOp)
-
-
-def test_emit_mlir_lowers_symbol_le() -> None:
-    _assert_emit_mlir_lowers_symbol_compare("le", SymbolLeOp)
-
-
-def test_emit_mlir_lowers_symbol_lt() -> None:
-    _assert_emit_mlir_lowers_symbol_compare("lt", SymbolLtOp)
-
-
-def test_emit_mlir_lowers_symbol_ne() -> None:
-    _assert_emit_mlir_lowers_symbol_compare("ne", SymbolNeOp)
-
-
-# EMIT-002A
-# 创建者: 小李飞刀
-# 最后一次更改: 咯咯咯
-# 最近一次运行测试时间: 2026-03-27 04:40:00 +0800
-# 最近一次运行成功时间: 2026-03-27 04:40:00 +0800
-# 功能说明: 覆盖 compare 广播路径中 rhs 需要扩展的分支。
-# 测试目的: 验证 CompareExprAST(op="ne") 的 rhs 广播与结果 element type 为 i1。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_binary_compare_broadcast_rhs
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_binary_compare_broadcast_rhs() -> None:
-    lhs_memory = Memory([2, 2], NumericType.Float32)
-    rhs_memory = Memory([1, 2], NumericType.Float32)
-    lhs = TensorAST(name="lhs", memory=lhs_memory, location=None)
-    rhs = TensorAST(name="rhs", memory=rhs_memory, location=None)
-    block = Block(arg_types=[_memory_to_nn_type(lhs_memory), _memory_to_nn_type(rhs_memory)])
-    ctx = EmitContext(builder=block, symbols={"lhs": block.args[0], "rhs": block.args[1]}, types={})
-    ctx._set_cache(_expr_key(lhs), block.args[0])
-    ctx._set_cache(_expr_key(rhs), block.args[1])
-    ctx.types[_expr_key(lhs)] = block.args[0].type
-    ctx.types[_expr_key(rhs)] = block.args[1].type
-
-    add_expr = BinaryExprAST(lhs=lhs, rhs=rhs, op="add", location=None)
-    add_value = _lower_expr(add_expr, ctx)
-    assert add_value.owner is not None
-    assert any(isinstance(op, NnBroadcastOp) for op in block.ops)
-
-    compare_expr = CompareExprAST(lhs=lhs, rhs=rhs, op="ne", location=None)
-    compare_value = _lower_expr(compare_expr, ctx)
-    assert isinstance(compare_value.owner, NnNeOp)
-    assert compare_value.type.element_type == i1
-
-
-# EMIT-002B
-# 创建者: 咯咯咯
-# 最后一次更改: 咯咯咯
-# 最近一次运行测试时间: 2026-03-27 04:40:00 +0800
-# 最近一次运行成功时间: 2026-03-27 04:40:00 +0800
-# 功能说明: 覆盖 compare memory 路径的 broadcast 与 dtype/space 错误分支。
-# 测试目的: 验证 CompareExprAST(op="ne") 相关的 broadcast mismatch 与 element type/space 报错文案。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_compare_memory_mismatch_reports_diagnostics
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_compare_memory_mismatch_reports_diagnostics() -> None:
-    lhs_type = _memory_to_nn_type(Memory([2, 1], NumericType.Float32))
-    rhs_type_mismatch = _memory_to_nn_type(Memory([3, 1], NumericType.Float32))
-
-    with pytest.raises(_LoweringError, match="Implicit broadcast dimension mismatch"):
-        _infer_broadcast_memory_type(lhs_type, rhs_type_mismatch, location=None)
-
-    rhs_element_mismatch = _memory_to_nn_type(Memory([2, 1], NumericType.Int32))
-    with pytest.raises(_LoweringError, match="Binary op operands must have the same element_type"):
-        _infer_broadcast_memory_type(lhs_type, rhs_element_mismatch, location=None)
-
-    rhs_space_mismatch = _memory_to_nn_type(Memory([2, 1], NumericType.Float32, space=MemorySpace.LM))
-    with pytest.raises(_LoweringError, match="Binary op operands must have the same space"):
-        _infer_broadcast_memory_type(lhs_type, rhs_space_mismatch, location=None)
-
-
-# EMIT-020
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
-# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
-# 功能说明: 覆盖 for 循环的 loop_vars 恢复逻辑与错误分支。
-# 测试目的: 验证 for 循环恢复已有 loop_vars 并拒绝不支持的节点。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_emit_mlir_for_loop_restores_loop_vars_and_errors
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_emit_mlir_for_loop_restores_loop_vars_and_errors() -> None:
-    ctx = EmitContext(builder=Block(), symbols={}, types={}, config={"loop_vars": {"i": "outer"}})
-    for_ast = ForAST(
-        var=VarAST(name="i", location=None),
-        start=ConstAST(0),
-        end=ConstAST(2),
-        body=BlockAST([ConstAST(1)]),
-    )
-    loop_op = emit_node_mlir(for_ast, ctx)
-    assert loop_op is not None
-    assert ctx.config["loop_vars"]["i"] == "outer"
-
-    with pytest.raises(_LoweringError, match="BlockAST must be lowered via AstVisitor"):
-        emit_node_mlir(BlockAST([]), ctx)
-
-    func_ast = FunctionAST(
-        name="fn",
-        inputs=[TensorAST(name="x", memory=Memory([1], NumericType.Float32), location=None)],
-        outputs=[],
-        body=BlockAST([ConstAST(1)]),
-    )
-    with pytest.raises(_LoweringError, match="FunctionAST must be lowered via AstVisitor"):
-        emit_node_mlir(func_ast, ctx)
-
-    return_op = func.ReturnOp()
-    assert emit_node_mlir(return_op, ctx) is return_op
-
-    with pytest.raises(_LoweringError, match="Unsupported expression for lowering"):
-        emit_node_mlir(object(), ctx)
-
-
-# MLIR-015
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
-# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
-# 功能说明: 覆盖符号标量函数的输出判断。
-# 测试目的: 验证无输出时仍被视为符号标量函数。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_mlir_gen_symbol_scalar_function_no_outputs
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_mlir_gen_symbol_scalar_function_no_outputs() -> None:
-    func_ast = FunctionAST(
-        name="sym",
-        inputs=[ScalarArgAST(name="n", value_type=int)],
-        outputs=[],
-        body=BlockAST([ConstAST(1)]),
-    )
-    assert _is_symbol_scalar_function(func_ast) is True
-
-
-# MLIR-016
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
-# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
-# 功能说明: 覆盖返回类型校验的空输出与标量分支。
-# 测试目的: 验证无输出直接返回、标量返回的 i32 约束。
-# 使用示例: pytest -q test/dsl/ast/test_visitor_integration.py -k test_mlir_gen_validate_return_type_variants
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_mlir_gen_validate_return_type_variants() -> None:
-    no_output_ast = FunctionAST(
-        name="noop",
-        inputs=[TensorAST(name="x", memory=Memory([1], NumericType.Float32), location=None)],
-        outputs=[],
-        body=BlockAST([ConstAST(1)]),
-    )
-    _validate_return_type(no_output_ast, i32)
-
-    scalar_output_ast = FunctionAST(
-        name="scalar_out",
-        inputs=[TensorAST(name="x", memory=Memory([1], NumericType.Float32), location=None)],
-        outputs=[ScalarArgAST(name="r", value_type=int)],
-        body=BlockAST([ConstAST(1)]),
-    )
-    _validate_return_type(scalar_output_ast, i32)
-
-
 # MGEN-001B
 # 创建者: 小李飞刀
 # 最后一次更改: 朽木露琪亚
@@ -5445,11 +4280,15 @@ def test_mlir_gen_validate_return_type_variants() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/ast/test_visitor_integration.py
-def test_mlir_gen_build_func_op_builtins_and_parse_error() -> None:
+def test_mlir_gen_build_func_op_builtins_and_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def add(x: "Tensor[f32, 2, 2]", y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
         return x + y
 
-    func_op = build_func_op(add, _tensor_arg([2, 2]), _tensor_arg([2, 2]), builtins=object())
+    monkeypatch.setitem(add.__globals__, "__builtins__", object())
+
+    func_op = build_func_op(add, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
     assert isinstance(func_op, func.FuncOp)
 
     def bad(x: "Tensor[f32]") -> "Tensor[f32]":

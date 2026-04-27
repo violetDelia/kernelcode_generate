@@ -1,7 +1,7 @@
 """AST parsing tests.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 AST 解析入口、注解解析与诊断负路径的回归测试。
@@ -107,46 +107,8 @@ from kernel_gen.dsl.ast import (
     parse_function,
 )
 from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
-from kernel_gen.dsl.mlir_gen.emit.core import (
-    EmitContext,
-    _LoweringError,
-    _build_default_stride_attrs,
-    _build_index_operands_from_layout,
-    _build_static_index_list,
-    _build_stride,
-    _build_stride_attrs,
-    _build_index_attrs,
-    _dtype_to_xdsl,
-    _ensure_index_value,
-    _ensure_supported_statements,
-    _expr_key,
-    _get_loop_vars,
-    _infer_broadcast_memory_type,
-    _infer_broadcast_shape,
-    _infer_expr_type,
-    _lower_loop_bound,
-    _lower_expr,
-    _lookup_symbol,
-    _memory_space_from_ast,
-    _memory_to_nn_type,
-    _mul_symbol,
-    _resolve_index_operand,
-    _resolve_index_symbol,
-    _resolve_static_index_expr,
-    _resolve_index_expr,
-    emit_mlir as emit_node_mlir,
-)
-from kernel_gen.dsl.mlir_gen import (
-    _build_signature_types,
-    _is_symbol_scalar_function,
-    _parse_function_with_env,
-    _symbol_expr_from_runtime_arg,
-    _validate_return_type,
-    build_func_op,
-    build_func_op_from_ast,
-)
-from kernel_gen.dsl import mlir_gen as mlir_gen_module
-from kernel_gen.dsl.ast import visitor as ast_visitor_module
+from kernel_gen.dsl.ast.parser import parse_function_with_env
+from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
 import kernel_gen.operation.nn as nn
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -194,7 +156,7 @@ def _parse_function_from_source(
     globals_table = dict(getattr(kernel, "__globals__", {}))
     builtins_obj = globals_table.get("__builtins__", __builtins__)
     builtins_table = builtins_obj if isinstance(builtins_obj, dict) else getattr(builtins_obj, "__dict__", {})
-    return _parse_function_with_env(kernel, globals_table, builtins_table, runtime_table, config=None)
+    return parse_function_with_env(kernel, globals_table, builtins_table, runtime_table, config=None)
 
 
 # AST-014B

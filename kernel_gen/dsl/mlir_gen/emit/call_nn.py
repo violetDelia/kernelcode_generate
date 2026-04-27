@@ -1,15 +1,18 @@
 """Emit nn elementwise family helper.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 收口 nn elementwise family 的类型推导与 lowering，覆盖 unary/binary/compare 三类 AST。
 - 统一承接 broadcast、dtype cast、`memory + const`、`memory + symbol` 的公共规则。
 
+API 列表:
+- 无（当前文件不单独承载公开 API；公开入口见 `emit_mlir(node, ctx)`）
+
 使用示例:
-- value = emit_nn_call(NnUnaryAST(kind="relu", value=tensor), ctx)
-- result_type = infer_nn_type(BinaryExprAST(op="add", lhs=lhs, rhs=rhs), type_map)
+- value = emit_mlir(NnUnaryAST(kind="relu", value=tensor), ctx)
+- value = emit_mlir(BinaryExprAST(op="add", lhs=lhs, rhs=rhs), ctx)
 
 关联文件:
 - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
@@ -19,14 +22,20 @@
 
 from __future__ import annotations
 
+import typing
+
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import (
+    ArrayAttr,
     Attribute,
+    IntAttr,
     BFloat16Type,
     Float16Type,
     Float32Type,
     Float64Type,
     IntegerType,
+    Signedness,
+    StringAttr,
     f32,
     i1,
     i32,
@@ -66,32 +75,327 @@ from kernel_gen.dialect.symbol import (
     SymbolLtOp,
     SymbolMulOp,
     SymbolNeOp,
+    SymbolConstOp,
     SymbolSubOp,
     SymbolToFloatOp,
     SymbolToIntOp,
     SymbolValueType,
     build_public_symbol_expr,
 )
-from kernel_gen.dsl.ast import BinaryExprAST, CompareExprAST, ConstAST, NnUnaryAST, ScalarArgAST, SourceLocation
-from .core import (
-    _LoweringError,
-    _const_symbol_int,
-    _expect_memory_value,
-    _expr_key,
-    _infer_broadcast_memory_type,
-    _infer_expr_type as _emit_infer_expr_type,
-    _lower_expr as _emit_lower_expr,
-    _memory_to_nn_type,
-    _memory_type_from_parts,
-    _nn_memory_type_to_memory,
-    _resolve_nn_arith_element_type,
-    _resolve_runtime_scalar_value,
-)
+from kernel_gen.dsl.ast import BinaryExprAST, CompareExprAST, ConstAST, NnUnaryAST, ScalarArgAST, SourceLocation, TensorAST, VarAST
 from kernel_gen.operation import nn as _KG_OPERATION_NN
-from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.type import NumericType
 
+from . import memory_type_from_memory
 from .context import EmitContext, LoweringError
+from .dispatch import emit_mlir
+
+
+_LoweringError = LoweringError
+
+
+def _expr_key(expr: object) -> int:
+    """生成当前文件内使用的 AST 缓存键。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 统一使用 `id(expr)` 作为 `ctx.cache` 与 `ctx.types` 的键。
+
+    使用示例:
+    - key = _expr_key(expr)
+    """
+
+    return id(expr)
+
+
+def _const_symbol_int(value: int, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
+    """构造 `!symbol.int` 常量值。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 在当前文件内直接生成 `symbol.const`，避免跨文件直连私有 helper。
+
+    使用示例:
+    - symbol_value = _const_symbol_int(4, ctx, location)
+    """
+
+    del location
+    op = SymbolConstOp(value)
+    ctx.builder.add_op(op)
+    return op.result
+
+
+def _expect_memory_value(value: object, location: SourceLocation | None) -> NnMemoryType:
+    """断言 SSA 值类型为 `nn.memory`。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅校验 `value.type` 是否为 `NnMemoryType`，成功时返回该类型。
+
+    使用示例:
+    - value_type = _expect_memory_value(value, location)
+    """
+
+    if not isinstance(getattr(value, "type", None), NnMemoryType):
+        raise _LoweringError("Operand must be nn.memory", location=location)
+    return typing.cast(NnMemoryType, value.type)
+
+
+def _resolve_runtime_scalar_value(
+    expr: object,
+    inferred_type: Attribute | None,
+    runtime_values: dict[str, object] | None = None,
+) -> object | None:
+    """解析类型推导阶段使用的公开标量值。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 支持 `ConstAST`、runtime `ScalarArgAST`、symbol 标量与 `VarAST`。
+    - 在只有目标类型时提供 `0 / 0.0` 默认值，维持原有推导行为。
+
+    使用示例:
+    - scalar = _resolve_runtime_scalar_value(ConstAST(1), i32)
+    """
+
+    if isinstance(expr, ConstAST) and isinstance(expr.value, (int, float, bool)):
+        return expr.value
+    if isinstance(expr, ScalarArgAST):
+        if runtime_values is not None and expr.name in runtime_values:
+            return runtime_values[expr.name]
+        if expr.is_symbolic:
+            return SymbolDim(expr.name)
+    if isinstance(expr, VarAST) and isinstance(inferred_type, SymbolValueType):
+        return SymbolDim(inferred_type.expr.expr.data)
+    if isinstance(inferred_type, SymbolValueType):
+        return SymbolDim(inferred_type.expr.expr.data)
+    if isinstance(inferred_type, IntegerType):
+        return 0
+    if isinstance(inferred_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
+        return 0.0
+    return None
+
+
+def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = None) -> NumericType:
+    """将 `xdsl` element type 还原为公开 `NumericType`。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅覆盖当前 `call_nn.py` 所需的公开数值类型映射。
+
+    使用示例:
+    - dtype = _xdsl_to_dtype(f32, location=None)
+    """
+
+    if isinstance(element_type, BFloat16Type):
+        return NumericType.BFloat16
+    if isinstance(element_type, Float16Type):
+        return NumericType.Float16
+    if element_type == f32:
+        return NumericType.Float32
+    if isinstance(element_type, Float64Type):
+        return NumericType.Float64
+    if element_type == i1:
+        return NumericType.Bool
+    if isinstance(element_type, IntegerType):
+        width = element_type.width.data
+        signedness = element_type.signedness.data
+        if signedness == Signedness.UNSIGNED:
+            if width == 8:
+                return NumericType.Uint8
+            if width == 16:
+                return NumericType.Uint16
+            if width == 32:
+                return NumericType.Uint32
+            if width == 64:
+                return NumericType.Uint64
+        if width == 8:
+            return NumericType.Int8
+        if width == 16:
+            return NumericType.Int16
+        if width == 32:
+            return NumericType.Int32
+        if width == 64:
+            return NumericType.Int64
+    raise _LoweringError("Unsupported element_type for nn arithmetic", location=location)
+
+
+def _shape_attr_to_symbol_dim(attr: Attribute, location: SourceLocation | None) -> SymbolDim | None:
+    """把 shape/stride 属性转换为 `SymbolDim`。"""
+
+    if isinstance(attr, IntAttr):
+        return SymbolDim(attr.data)
+    if isinstance(attr, StringAttr):
+        if attr.data == "?":
+            return None
+        return SymbolDim(attr.data)
+    raise _LoweringError("Unsupported shape attribute", location=location)
+
+
+def _memory_type_from_parts(
+    shape: typing.Sequence[Attribute],
+    stride: typing.Sequence[Attribute],
+    element_type: Attribute,
+    space: NnMemorySpaceAttr,
+) -> NnMemoryType:
+    """按既有 shape/stride/space 组装 `NnMemoryType`。"""
+
+    return NnMemoryType(ArrayAttr(list(shape)), ArrayAttr(list(stride)), element_type, space)
+
+
+def _memory_to_nn_type(memory: Memory, location: SourceLocation | None = None) -> NnMemoryType:
+    """通过公开 emit 包根入口转换 `Memory -> NnMemoryType`。"""
+
+    del location
+    return memory_type_from_memory(memory)
+
+
+def _nn_memory_type_to_memory(
+    memory_type: NnMemoryType,
+    location: SourceLocation | None = None,
+) -> Memory:
+    """将 `NnMemoryType` 还原为公开 `Memory` 描述。"""
+
+    shape: list[SymbolDim] = []
+    for dim_attr in memory_type.shape.data:
+        dim_symbol = _shape_attr_to_symbol_dim(dim_attr, location)
+        if dim_symbol is None:
+            raise _LoweringError("nn.memory shape contains unknown dimension", location=location)
+        shape.append(dim_symbol)
+    stride: list[SymbolDim] = []
+    for dim_attr in memory_type.stride.data:
+        dim_symbol = _shape_attr_to_symbol_dim(dim_attr, location)
+        if dim_symbol is None:
+            raise _LoweringError("nn.memory stride contains unknown dimension", location=location)
+        stride.append(dim_symbol)
+    dtype = _xdsl_to_dtype(memory_type.element_type, location)
+    space_name = memory_type.space.space.data
+    space_map = {
+        "global": MemorySpace.GM,
+        "shared": MemorySpace.SM,
+        "local": MemorySpace.LM,
+        "tsm": MemorySpace.TSM,
+        "tlm1": MemorySpace.TLM1,
+        "tlm2": MemorySpace.TLM2,
+        "tlm3": MemorySpace.TLM3,
+    }
+    space = space_map.get(space_name)
+    if space is None:
+        raise _LoweringError("Unsupported nn.memory space", location=location)
+    return Memory(shape, dtype, space=space, stride=stride)
+
+
+def _resolve_nn_arith_element_type(
+    lhs_type: NnMemoryType,
+    rhs_type: NnMemoryType,
+    location: SourceLocation | None,
+) -> Attribute:
+    """解析 nn 算术二元表达式的目标 element type。"""
+
+    try:
+        output_memory = _KG_OPERATION_NN.add(
+            _nn_memory_type_to_memory(lhs_type, location=location),
+            _nn_memory_type_to_memory(rhs_type, location=location),
+        )
+    except (TypeError, ValueError) as exc:
+        raise _LoweringError("Binary op operands must have compatible element_type", location=location) from exc
+    if not isinstance(output_memory, Memory):
+        raise _LoweringError("Binary op operands must have compatible element_type", location=location)
+    return _memory_to_nn_type(output_memory, location=location).element_type
+
+
+def _infer_broadcast_memory_type(
+    lhs_type: NnMemoryType,
+    rhs_type: NnMemoryType,
+    location: SourceLocation | None,
+    element_type: Attribute | None = None,
+) -> NnMemoryType:
+    """推导隐式 broadcast 后的目标 `nn.memory` 类型。"""
+
+    if element_type is None and lhs_type.element_type != rhs_type.element_type:
+        raise _LoweringError("Binary op operands must have the same element_type", location=location)
+    if lhs_type.space != rhs_type.space:
+        raise _LoweringError("Binary op operands must have the same space", location=location)
+    try:
+        output_memory = _KG_OPERATION_NN.add(
+            _nn_memory_type_to_memory(lhs_type, location=location),
+            _nn_memory_type_to_memory(rhs_type, location=location),
+        )
+    except ValueError as exc:
+        raise _LoweringError(str(exc), location=location) from exc
+    except TypeError as exc:
+        raise _LoweringError("Binary op operands must have the same element_type", location=location) from exc
+    if not isinstance(output_memory, Memory):
+        raise _LoweringError("Binary op operands must have the same element_type", location=location)
+    output_type = _memory_to_nn_type(output_memory, location=location)
+    if element_type is None:
+        return output_type
+    return _memory_type_from_parts(
+        output_type.shape.data,
+        output_type.stride.data,
+        element_type,
+        output_type.space,
+    )
+
+
+def _infer_expr_type(
+    expr: object,
+    type_map: dict[int, object],
+    runtime_values: dict[str, object] | None = None,
+    config: dict[str, object] | None = None,
+) -> object:
+    """推导 `call_nn` 公开路径需要的最小表达式类型集合。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 只覆盖 `call_nn.py` 自身会接触到的公开 AST：tensor/scalar/var/const 与 nn unary/binary/compare。
+    - 其他 AST 直接拒绝，避免继续跨文件直连 `.core` 私有推导 helper。
+
+    使用示例:
+    - result_type = _infer_expr_type(expr, type_map, runtime_values=runtime_values, config=config)
+    """
+
+    expr_key = _expr_key(expr)
+    if expr_key in type_map:
+        return type_map[expr_key]
+    if runtime_values is None and isinstance(config, dict):
+        candidate_runtime_values = config.get("__runtime_values__")
+        if isinstance(candidate_runtime_values, dict):
+            runtime_values = candidate_runtime_values
+    if isinstance(expr, ConstAST):
+        result_type: object
+        if isinstance(expr.value, int):
+            result_type = i32
+        elif isinstance(expr.value, float):
+            result_type = f32
+        else:
+            raise _LoweringError("Unsupported constant type", location=expr.location)
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, (TensorAST, ScalarArgAST, VarAST)):
+        if expr_key not in type_map:
+            raise _LoweringError("Unknown input reference", location=getattr(expr, "location", None))
+        return type_map[expr_key]
+    if isinstance(expr, (NnUnaryAST, BinaryExprAST, CompareExprAST)):
+        return infer_nn_type(expr, type_map, runtime_values=runtime_values, config=config)
+    raise _LoweringError("Unsupported AST expression for lowering", location=getattr(expr, "location", None))
+
+
+_emit_lower_expr = emit_mlir
+_emit_infer_expr_type = _infer_expr_type
 
 
 def infer_nn_type(
@@ -292,7 +596,10 @@ def _infer_binary_type(
         if expr.op == "add":
             raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
         raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
-    output_memory = binary_fn(lhs_value, rhs_value)
+    try:
+        output_memory = binary_fn(lhs_value, rhs_value)
+    except ValueError as exc:
+        raise _LoweringError(str(exc), location=expr.location) from exc
     if not isinstance(output_memory, Memory):
         raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
     result_type = _memory_to_nn_type(output_memory, location=expr.location)
