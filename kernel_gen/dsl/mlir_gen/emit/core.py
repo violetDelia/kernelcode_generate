@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
@@ -66,6 +66,7 @@ from kernel_gen.dialect.arch import (
 )
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
+    DmaBroadcastOp,
     DmaCastOp,
     DmaCopyOp,
     DmaDesliceOp,
@@ -1895,6 +1896,34 @@ def _resolve_runtime_scalar_value(
     if isinstance(inferred_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
         return 0.0
     return None
+
+
+def _resolve_fill_contract_value(
+    expr: object,
+    target_element_type: Attribute,
+    runtime_values: dict[str, object] | None,
+) -> object | None:
+    """解析 `dma.fill` 公开 helper 校验所需的标量值。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 保留 `ConstAST("inf"/"-inf")` 这类公开字符串字面量。
+    - 其他标量值复用运行时解析路径，供公开 `kernel_gen.operation.dma.fill(...)` 做合同校验。
+
+    使用示例:
+    - _resolve_fill_contract_value(ConstAST("-inf"), f32, runtime_values=None)
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/dsl/ast/test_visitor_integration.py
+    - 功能实现: kernel_gen/dsl/mlir_gen/emit/core.py
+    """
+
+    if isinstance(expr, ConstAST) and isinstance(expr.value, str):
+        return expr.value
+    return _resolve_runtime_scalar_value(expr, target_element_type, runtime_values=runtime_values)
 
 
 def _build_static_index_list(
@@ -4085,6 +4114,60 @@ def _materialize_mixed_binary_scalar_operand(
     return _cast_nn_scalar_operand(scalar_value, target_element_type, ctx, location)
 
 
+def _materialize_fill_scalar_operand(
+    value_expr: object,
+    target_element_type: Attribute,
+    ctx: EmitContext,
+    location: SourceLocation | None,
+) -> SSAValue:
+    """物化 `dma.fill` 所需的标量 operand。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 为 `int/float/"inf"/"-inf"` 常量直接生成与目标 element type 一致的 SSA value。
+    - 其他公开标量输入复用 `_lower_expr(...)` 与 `_cast_nn_scalar_operand(...)`。
+
+    使用示例:
+    - _materialize_fill_scalar_operand(ConstAST("-inf"), f32, ctx, location=None)
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/dsl/ast/test_visitor_integration.py
+    - 功能实现: kernel_gen/dsl/mlir_gen/emit/core.py
+    """
+
+    if isinstance(value_expr, ConstAST):
+        value = value_expr.value
+        if isinstance(value, str):
+            if not isinstance(target_element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
+                raise _LoweringError("fill string literal requires floating target", location=location)
+            literal = float("inf") if value == "inf" else float("-inf")
+            const_op = arith.ConstantOp(FloatAttr(literal, target_element_type))
+            ctx.builder.add_op(const_op)
+            return const_op.result
+        if isinstance(value, bool):
+            raise _LoweringError("fill value must be scalar or symbol.int", location=location)
+        if isinstance(value, int):
+            if isinstance(target_element_type, IntegerType):
+                const_op = arith.ConstantOp(IntegerAttr(int(value), target_element_type))
+                ctx.builder.add_op(const_op)
+                return const_op.result
+            if isinstance(target_element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
+                const_op = arith.ConstantOp(FloatAttr(float(value), target_element_type))
+                ctx.builder.add_op(const_op)
+                return const_op.result
+        if isinstance(value, float):
+            if not isinstance(target_element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
+                raise _LoweringError("fill float literal requires floating target", location=location)
+            const_op = arith.ConstantOp(FloatAttr(float(value), target_element_type))
+            ctx.builder.add_op(const_op)
+            return const_op.result
+    scalar_value = SSAValue.get(_lower_expr(value_expr, ctx))
+    return _cast_nn_scalar_operand(scalar_value, target_element_type, ctx, location)
+
+
 def _lower_mixed_binary_expr(
     expr: BinaryExprAST,
     lhs: SSAValue | None,
@@ -4841,6 +4924,18 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             _infer_expr_type(node, ctx.types, runtime_values=_ctx_runtime_values(ctx), config=ctx.config)
         return _lower_expr(node, ctx)
     if isinstance(node, StoreAST):
+        if node.kind == "fill":
+            runtime_values = _ctx_runtime_values(ctx)
+            target = _lower_expr(node.tensor, ctx)
+            target_type = _expect_memory_value(target, node.location)
+            target_memory = _nn_memory_type_to_memory(target_type, location=node.location)
+            contract_value = _resolve_fill_contract_value(node.value, target_type.element_type, runtime_values)
+            if contract_value is not None:
+                _KG_OPERATION_DMA.fill(target_memory, contract_value)
+            scalar_value = _materialize_fill_scalar_operand(node.value, target_type.element_type, ctx, node.location)
+            fill_op = DmaBroadcastOp(target, scalar_value)
+            ctx.builder.add_op(fill_op)
+            return fill_op
         runtime_values = _ctx_runtime_values(ctx)
         try:
             source_memory_type = _infer_expr_type(node.value, ctx.types, runtime_values=runtime_values, config=ctx.config)

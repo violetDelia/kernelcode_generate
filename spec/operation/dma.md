@@ -2,11 +2,12 @@
 
 ## 功能简介
 
-定义 `Memory` 的数据搬运、视图变换与生命周期操作规范，提供 `alloc/free/copy/cast/load/store/slice/deslice/view/reshape/flatten` 的输入约束、输出语义与错误边界。该层面对高层 API，负责描述搬运意图与视图范围；方言层语义由 [`spec/dialect/dma.md`](../../spec/dialect/dma.md) 定义。
+定义 `Memory` 的数据搬运、整块标量初始化、视图变换与生命周期操作规范，提供 `alloc/fill/free/copy/cast/load/store/slice/deslice/view/reshape/flatten` 的输入约束、输出语义与错误边界。该层面对高层 API，负责描述搬运意图、初始化意图与视图范围；方言层语义由 [`spec/dialect/dma.md`](../../spec/dialect/dma.md) 定义。
 
 ## API 列表
 
 - `alloc(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)`
+- `fill(target, value)`
 - `free(value)`
 - `copy(source, space)`
 - `load(source, offsets, sizes, strides=None, space=None)`
@@ -18,6 +19,7 @@
 - `flatten(source)`
 - `cast(source, dtype, memoryspace=None)`
 - `kernel_gen.operation.alloc(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)`
+- `kernel_gen.operation.dma.fill(target, value)`
 - `kernel_gen.operation.free(value)`
 - `kernel_gen.operation.copy(source, space)`
 - `kernel_gen.operation.load(source, offsets, sizes, strides=None, space=None)`
@@ -32,10 +34,13 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/operation/dma.md`](../../spec/operation/dma.md)
 - `功能实现`：[`kernel_gen/operation/dma.py`](../../kernel_gen/operation/dma.py)
-- `test`：[`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
+- `test`：
+  - [`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
+  - [`test/operation/test_operation_package_api.py`](../../test/operation/test_operation_package_api.py)
+  - [`test/dsl/ast/test_package.py`](../../test/dsl/ast/test_package.py)
 
 ## 依赖
 
@@ -50,7 +55,7 @@
 ## 目标
 
 - 为 `Memory` 提供统一、稳定的搬运与视图操作语义入口。
-- 明确 `alloc/free/copy/cast/load/store/slice/deslice/view/reshape/flatten` 的输入约束、输出语义与错误边界。
+- 明确 `alloc/fill/free/copy/cast/load/store/slice/deslice/view/reshape/flatten` 的输入约束、输出语义与错误边界。
 - 保留动态 `shape` 与 `offsets/sizes/strides` 的表达能力，支持后续 lowering 保留切片信息。
 
 ## 限制与边界
@@ -60,7 +65,9 @@
 - 不负责隐式元素类型转换；元素表示变化必须通过显式 `cast` 描述。
 - 不负责自动选择最优搬运空间、tile 大小或 stride。
 - `alloc/free` 仅定义高层生命周期语义，不承担搬运语义。
+- `fill` 只定义“把同一个标量值写入现有 `Memory` 每个逻辑元素”的高层初始化语义；它不分配新 `Memory`，也不返回新的 `Memory`。
 - 搬运操作不改变元素值语义，只改变数据的逻辑位置、覆盖范围或所在空间。
+- `fill` 的 `value` 允许 Python 数值标量、symbol 整型标量，以及字符串字面量形式的正/负无穷；字符串字面量的稳定拼写只允许 `"inf"` 与 `"-inf"`，不接受其他别名、大小写变体、前后空白或任意普通字符串。
 - `view/reshape/flatten` 不做数据搬运，仅调整张量视图的 `shape/stride` 描述。
 - `offsets/sizes/strides` 长度必须与相关 `Memory.rank` 一致；`sizes` 中静态维度必须为正。
 - `offsets` 中静态值必须为非负整数；`sizes/strides` 中静态值必须为正整数；动态值使用符号整型表达。
@@ -69,18 +76,20 @@
 - `load/slice/store/deslice` 允许非单位 `strides` 作为访问步进并执行边界校验；但当前 `dma dialect` 仅支持单位步长语义，进入方言层时任一维 `stride != 1` 必须显式报错，以避免生成无法验证的方言 op。
 - `store/deslice` 的 `sizes` 必须与 `source.shape` 一致。
 - `copy/cast` 仅改变 `Memory` 规格，不负责数据填充或变形。
+- `fill` 的高层 helper 合同不承诺固定 lower 为单个 `dma.fill`；若下游链路选择映射到 [`spec/dialect/dma.md`](../../spec/dialect/dma.md) 的 `dma.fill`，仍需满足该方言对 `i32` / `!symbol.int<"...">` 与 `i32 memory` 的更窄 verifier 约束。
 - `view` 不提供 `space` 或 `memoryspec` 参数；返回值总是继承 `source` 的 `dtype/space/format`，`stride` 由 source 物理 stride 与 view 逻辑 stride 逐维组合得到。
 - `view` 的 `stride` 参数只用于描述 subview 窗口步进与边界检查，不会直接替换返回值的 `Memory.stride`。
 - `view` 在 operation 层不要求 `source.shape` 与 `size` 的 `numel` 相等，只要求窗口边界合法。
 - operation 到 dialect 的映射边界：`view` 的 `offset/size/stride` 必须在调用点直接保留并传递给方言；仅依赖 `view` 返回的 `Memory` 无法恢复完整 subview 参数。
 - `kernel_gen.operation.dma` 是 dma family 的完整稳定入口；`kernel_gen.operation` 顶层同时稳定重导出 `alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast`，且这些对象在顶层与子模块中的身份必须一致。
+- `fill` 当前只属于 `kernel_gen.operation.dma` 子模块公开 API，不属于 `kernel_gen.operation` 顶层稳定导出集合；测试与消费者不得把 `kernel_gen.operation.fill` 当作兼容入口。
 
 ### package-root 导出边界
 
 | 入口 | 稳定公开 API | 说明 |
 | --- | --- | --- |
-| `kernel_gen.operation.dma` | `alloc / free / copy / cast / load / store / slice / deslice / view / reshape / flatten` | dma family 的完整稳定入口 |
-| `kernel_gen.operation` | `alloc / free / copy / cast / load / store / slice / deslice / view / reshape / flatten` | 包根重导出同一组 dma helper；对象身份与 `kernel_gen.operation.dma` 保持一致 |
+| `kernel_gen.operation.dma` | `alloc / fill / free / copy / cast / load / store / slice / deslice / view / reshape / flatten` | dma family 的完整稳定入口；`fill` 只在该子模块路径公开 |
+| `kernel_gen.operation` | `alloc / free / copy / cast / load / store / slice / deslice / view / reshape / flatten` | 包根重导出同一组 dma helper；不包含 `fill`，且对象身份与 `kernel_gen.operation.dma` 保持一致 |
 
 ## 额外补充
 
@@ -88,6 +97,7 @@
 
 ```text
 alloc -> 产出新的 Memory 规格
+fill -> 对现有 Memory 做整块标量初始化，不分配新 Memory
 copy -> 保留 shape/stride/format，仅切换目标 space
 load -> 从 source 读取窗口，直接返回结果块
 slice -> 用户侧返回值式 helper；lowering 时桥接为 alloc(target) + dma.slice(target, source, ...)
@@ -180,6 +190,46 @@ free(buf)
 返回与限制：
 
 - 返回 `None`，不产生新的 `Memory`。
+
+### fill(target, value)
+
+功能说明：
+
+- 将单个标量值写入 `target` 的每个逻辑元素，表达整块初始化意图。
+- `fill` 只作用于已有 `Memory`，不分配新 buffer，也不承诺固定 lower 为单个方言 op。
+
+参数说明：
+
+- `target: Memory`：待初始化的目标内存。
+- `value: int | float | SymbolDim | str`：写入标量；字符串字面量仅允许 `"inf"` 与 `"-inf"`。
+
+使用示例：
+
+```python
+from kernel_gen.operation.dma import alloc, fill
+
+buf = alloc([16, 16], NumericType.Float32, MemorySpace.TSM)
+fill(buf, 0)
+fill(buf, "-inf")
+```
+
+注意事项：
+
+- `target` 必须是 `Memory`。
+- `fill` 只承诺“同一个标量值写满整个 target”的 helper 语义；是否 lower 为 `dma.fill`、`arith.constant + dma.fill` 或其他合法化链路，取决于下游实现与目标 `dtype`。
+- 当 `value` 是字符串字面量时，当前稳定拼写只允许 `"inf"` 与 `"-inf"`；`"+inf"`、`"Infinity"`、`"nan"`、空字符串及其他普通字符串都不在公开合同内。
+- 本 helper 的公开导入路径是 `kernel_gen.operation.dma.fill`；`kernel_gen.operation` 顶层不导出 `fill`。
+
+非法输入：
+
+- `target` 不是 `Memory` 时必须抛出 `TypeError`。
+- `value` 是字符串但不是 `"inf"` 或 `"-inf"` 时必须抛出 `ValueError`。
+- `value` 不是数值标量、symbol 整型标量或上述两个字符串字面量时必须抛出 `TypeError`。
+
+返回与限制：
+
+- 返回 `None`。
+- 不返回新的 `Memory`，也不改变 `target.shape/stride/space/format`。
 
 ### copy(source, space)
 
@@ -524,18 +574,21 @@ dst = flatten(src)
 
 - 测试文件：[`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
 - 相关顶层导出测试：[`test/operation/test_operation_package_api.py`](../../test/operation/test_operation_package_api.py)
-- 执行命令：`pytest -q test/operation/test_operation_dma.py`
+- 相关 AST/helper 入口测试：[`test/dsl/ast/test_package.py`](../../test/dsl/ast/test_package.py)
+- 执行命令：`pytest -q test/operation/test_operation_dma.py test/operation/test_operation_package_api.py test/dsl/ast/test_package.py`
 
 ### 测试目标
 
 - 验证 `alloc/free` 的输入约束与返回口径。
+- 验证 `fill` 的公开 helper 入口、字符串字面量白名单与“不返回新 Memory”的语义。
 - 验证 `copy/cast` 的规格继承与目标空间/类型覆盖语义。
 - 验证 `load/slice` 的返回 `shape/dtype/space/format` 语义与索引校验。
 - 验证 `store/deslice` 的源块大小约束、dtype 校验与索引边界。
 - 验证 `view` 的 `offset/size/stride` 子视图语义与返回 `Memory` 规格继承规则。
 - 验证 `reshape/flatten` 的连续布局要求与结果形状规则。
 - 验证 `kernel_gen.operation` 顶层继续稳定重导出 `alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast`，且对象身份与 `kernel_gen.operation.dma` 一致。
-- 验证测试编号 `TC-OP-DMA-AF-001..007` 与 `TC-OP-DMA-001..028` 在文档和测试文件中一一对应。
+- 验证 `fill` 不会上提到 `kernel_gen.operation` 顶层，且 parser 只通过 `kernel_gen.operation.dma.fill` 的公开 helper 路径消费它。
+- 验证测试编号 `TC-OP-DMA-AF-001..007` 与 `TC-OP-DMA-001..033` 在文档和测试文件中一一对应。
 
 ### 功能与用例清单
 
@@ -576,3 +629,13 @@ dst = flatten(src)
 | TC-OP-DMA-026 | `store` 基础写回 | 合法写回返回 `None` | `test_store_success` | `test/operation/test_operation_dma.py` |
 | TC-OP-DMA-027 | `cast` 支持转换 | 支持同 dtype 或整数类型间转换 | `test_cast_supported_conversions` | `test/operation/test_operation_dma.py` |
 | TC-OP-DMA-028 | `view` 非法参数 | `offset/size/stride` rank 不一致、负 offset 或非正 stride 显式报错 | `test_view_invalid_offset_size_stride` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-029 | `fill` 基础初始化 | `fill(target, value)` 只写入现有 `target`，返回 `None` | `test_dma_facade_fill_returns_none` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-030 | `fill` 字符串字面量白名单 | 字符串输入仅允许 `"inf"` 与 `"-inf"` | `test_dma_facade_fill_rejects_invalid_string_literal` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-031 | `fill` 顶层导出边界 | `kernel_gen.operation` 顶层不导出 `fill`，子模块对象路径保持稳定 | `test_operation_dma_fill_is_public_only_in_dma_submodule` | `test/operation/test_operation_package_api.py` |
+| TC-OP-DMA-032 | `fill` AST 公开 helper 路径 | parser 只接受显式 import 绑定到 `kernel_gen.operation.dma.fill` 的 helper 调用，不依赖 helper Python 签名 | `test_parse_function_accepts_import_bound_fill_helper`、`test_parse_function_accepts_import_bound_fill_helper_without_signature_coupling` | `test/dsl/ast/test_package.py` |
+| TC-OP-DMA-033 | `fill` kernel 只读合同资产 | `expectation/kernel/flash_attention.py` 与 `expectation/kernel/matmul.py` 仅作为只读 kernel 合同资产，不计入本轮 diff 测试 | 只读核对，不新增写入 | `expectation/kernel/flash_attention.py`, `expectation/kernel/matmul.py` |
+
+### 只读合同验收资产
+
+- [expectation/kernel/flash_attention.py](/home/lfr/kernelcode_generate/expectation/kernel/flash_attention.py)：只读 kernel 合同资产。该文件当前通过 `fill(o_acc, 0)`、`fill(m_acc, "-inf")`、`fill(l_acc, 0)` 表达“整块初始化”意图，但它不是本轮 `spec` 的可写目标，也不计入 `Diff 反推自测`。本轮只要求公开 helper 合同与字符串字面量边界能解释这份只读资产的意图来源。
+- [expectation/kernel/matmul.py](/home/lfr/kernelcode_generate/expectation/kernel/matmul.py)：只读 sibling kernel 合同资产。该文件当前不依赖 `fill`，用于约束本轮范围不要顺手扩到无关 kernel helper 集合或改写其他 kernel 公开入口。

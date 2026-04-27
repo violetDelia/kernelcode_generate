@@ -1,7 +1,7 @@
 """AST parsing tests.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 AST 解析入口、注解解析与诊断负路径的回归测试。
@@ -105,6 +105,7 @@ from kernel_gen.dsl.ast import (
     VarAST,
     ScalarArgAST,
     parse_function,
+    StoreAST,
 )
 from kernel_gen.dsl.ast.parser import parse_function_with_env
 from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
@@ -424,6 +425,10 @@ def kernel(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]") -> None:
 def kernel(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]") -> None:
     deslice(tile, dst, [0, 0], [2, 2], [1, 1], MemorySpace.GM)
 """,
+        """\
+def kernel(dst: "Tensor[f32, 2, 2]") -> None:
+    fill(dst, 0)
+""",
     )
 
     for source in invalid_sources:
@@ -434,6 +439,93 @@ def kernel(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]") -> None:
             raise AssertionError("expected diagnostics for unimported dma helper")
         if diagnostics[0].message != "Unsupported call expression":
             raise AssertionError("expected Unsupported call expression diagnostic")
+
+
+# AST-014JAA
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 测试目的: 验证 import-bound `fill(...)` 可解析为公开 `StoreAST(kind=\"fill\")`，并保留 `\"-inf\"` 字面量。
+# 使用示例: pytest -q test/dsl/ast/test_package.py -k test_parse_function_accepts_import_bound_fill_helper
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast/parser.md
+# 对应测试文件路径: test/dsl/ast/test_package.py
+def test_parse_function_accepts_import_bound_fill_helper() -> None:
+    def kernel(dst: "Tensor[f32, 2, 2]") -> None:
+        from kernel_gen.operation.dma import fill
+
+        fill(dst, "-inf")
+
+    func_ast = parse_function(kernel)
+
+    fill_nodes = [node for node in func_ast.body.statements if isinstance(node, StoreAST) and node.kind == "fill"]
+    assert len(fill_nodes) == 1
+    assert isinstance(fill_nodes[0].value, ConstAST)
+    assert fill_nodes[0].value.value == "-inf"
+
+
+# AST-014JAAA
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 parser 识别 import-bound `fill(...)` 只依赖真实公开 helper 绑定，不依赖 helper 的 Python 签名。
+# 测试目的: 即使公开 `fill` 对象的 `__signature__` 被篡改成错误形态，`parse_function(...)` 仍应把该调用识别成 `StoreAST(kind="fill")`。
+# 使用示例: pytest -q test/dsl/ast/test_package.py -k test_parse_function_accepts_import_bound_fill_helper_without_signature_coupling
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast/parser.md
+# 对应测试文件路径: test/dsl/ast/test_package.py
+def test_parse_function_accepts_import_bound_fill_helper_without_signature_coupling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kernel_gen.operation.dma as dma
+
+    monkeypatch.setattr(
+        dma.fill,
+        "__signature__",
+        inspect.Signature(
+            parameters=[
+                inspect.Parameter(
+                    "bogus_only",
+                    inspect.Parameter.POSITIONAL_ONLY,
+                )
+            ]
+        ),
+        raising=False,
+    )
+
+    def kernel(dst: "Tensor[f32, 2, 2]") -> None:
+        from kernel_gen.operation.dma import fill
+
+        fill(dst, 0)
+
+    func_ast = parse_function(kernel)
+
+    fill_nodes = [node for node in func_ast.body.statements if isinstance(node, StoreAST) and node.kind == "fill"]
+    assert len(fill_nodes) == 1
+    assert isinstance(fill_nodes[0].value, ConstAST)
+    assert fill_nodes[0].value.value == 0
+
+
+# AST-014JAB
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 测试目的: 验证 `fill` 只允许 `\"inf\"` / `\"-inf\"` 字符串字面量，其他字符串在解析阶段直接拒绝。
+# 使用示例: pytest -q test/dsl/ast/test_package.py -k test_parse_function_rejects_invalid_fill_string_literal
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast/parser.md
+# 对应测试文件路径: test/dsl/ast/test_package.py
+def test_parse_function_rejects_invalid_fill_string_literal() -> None:
+    def kernel(dst: "Tensor[f32, 2, 2]") -> None:
+        from kernel_gen.operation.dma import fill
+
+        fill(dst, "nan")
+
+    with pytest.raises(AstParseError) as exc_info:
+        parse_function(kernel)
+
+    diagnostics = exc_info.value.diagnostics
+    if not diagnostics:
+        raise AssertionError("expected diagnostics for invalid fill string literal")
+    if diagnostics[0].message != 'fill string literal must be "inf" or "-inf"':
+        raise AssertionError("expected fill string literal diagnostic")
 
 
 # AST-014JB
@@ -452,6 +544,34 @@ def test_parse_function_rejects_dma_helper_call_via_attribute_chain(
 
     def kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
         return kernel_gen.operation.dma.slice(src, [0, 0], [2, 2], [1, 1], MemorySpace.LM)
+
+    monkeypatch.setitem(kernel.__globals__, "kernel_gen", kernel_gen_pkg)
+
+    with pytest.raises(AstParseError) as exc_info:
+        parse_function(kernel)
+
+    diagnostics = exc_info.value.diagnostics
+    if not diagnostics:
+        raise AssertionError("expected diagnostics for helper call via attribute chain")
+    if diagnostics[0].message != "Unsupported call expression":
+        raise AssertionError("expected Unsupported call expression diagnostic")
+
+
+# AST-014JAC
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 测试目的: 验证 `kernel_gen.operation.dma.fill(...)` 链式属性访问不会绕过 import-bound helper 边界。
+# 使用示例: pytest -q test/dsl/ast/test_package.py -k test_parse_function_rejects_fill_helper_call_via_attribute_chain
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast/parser.md
+# 对应测试文件路径: test/dsl/ast/test_package.py
+def test_parse_function_rejects_fill_helper_call_via_attribute_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kernel_gen as kernel_gen_pkg
+
+    def kernel(dst: "Tensor[f32, 2, 2]") -> None:
+        kernel_gen.operation.dma.fill(dst, 0)
 
     monkeypatch.setitem(kernel.__globals__, "kernel_gen", kernel_gen_pkg)
 

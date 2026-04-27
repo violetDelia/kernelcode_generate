@@ -1,11 +1,16 @@
 """DSL AST parser.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 `parse_function` 解析入口，将 Python 函数解析为 `FunctionAST`。
 - 生成 `Diagnostic` 以承载解析阶段的诊断信息。
+
+API 列表:
+- `AstParseError(message: str, diagnostics: list[Diagnostic])`
+- `parse_function_with_env(fn: object, globals_table: dict[str, object] | None = None, builtins_table: dict[str, object] | None = None, runtime_table: dict[str, object] | None = None, config: dict[str, object] | None = None) -> FunctionAST`
+- `parse_function(fn: object) -> FunctionAST`
 
 使用示例:
 - from kernel_gen.dsl.ast import parse_function
@@ -92,11 +97,13 @@ _REJECT_EXTERNAL_VALUES_ENV_KEY = "__dsl_reject_external_values__"
 _ALLOW_EXTERNAL_CONSTANTS_ENV_KEY = "__dsl_allow_external_constants__"
 _ALLOW_PYTHON_CALLEE_CALL_ENV_KEY = "__dsl_allow_python_callee_calls__"
 _LOCAL_IMPORT_SHADOW = object()
+_ALLOWED_FILL_STRING_LITERALS = frozenset({"inf", "-inf"})
 _ALLOWED_IMPORT_BOUND_HELPERS: dict[str, tuple[types.ModuleType, frozenset[str]]] = {
     "kernel_gen.operation.dma": (
         _KG_OPERATION_DMA,
         frozenset(
             {
+                "fill",
                 "load",
                 "slice",
                 "store",
@@ -907,6 +914,28 @@ def _is_memory_target_ast(node: object) -> bool:
     )
 
 
+def _is_fill_target_ast(node: object) -> bool:
+    """判断 `dma.fill` target 是否属于公开 memory 入口。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 允许直接 tensor 入参、会产生 memory 结果的 AST，以及绑定到这些结果的局部变量引用。
+    - 继续拒绝裸标量等非 memory target。
+
+    使用示例:
+    - _is_fill_target_ast(VarAST(name="buf"))
+
+    关联文件:
+    - spec: spec/dsl/ast/parser.md
+    - test: test/dsl/ast/test_package.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
+    """
+
+    return isinstance(node, VarAST) or _is_memory_target_ast(node)
+
+
 def _resolve_call_base_object(
     expr: py_ast.expr,
     globals_table: dict[str, object],
@@ -1585,6 +1614,49 @@ def _parse_launch_kernel_call(
     )
 
 
+def _parse_fill_call(
+    expr: py_ast.Call,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> StoreAST:
+    """解析 import-bound `kernel_gen.operation.dma.fill(...)`。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 只接受 `fill(target, value)` 两参公开入口。
+    - 对字符串字面量只允许 `"inf"` 与 `"-inf"`。
+
+    使用示例:
+    - _parse_fill_call(expr, env, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast/parser.md
+    - test: test/dsl/ast/test_package.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
+    """
+
+    if len(expr.args) != 2 or expr.keywords:
+        _raise_parse_error("Unsupported fill arity", expr)
+    target = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+    if not _is_fill_target_ast(target):
+        _raise_parse_error("fill target must be TensorAST", expr.args[0])
+    value = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+    if isinstance(value, ConstAST) and isinstance(value.value, str) and value.value not in _ALLOWED_FILL_STRING_LITERALS:
+        _raise_parse_error('fill string literal must be "inf" or "-inf"', expr.args[1])
+    return StoreAST(
+        tensor=target,
+        offset=None,
+        sizes=None,
+        stride=None,
+        value=value,
+        kind="fill",
+        location=_location_from_node(expr),
+    )
+
+
 def _parse_dma_call(
     expr: py_ast.Call,
     env: dict[str, object],
@@ -1598,7 +1670,7 @@ def _parse_dma_call(
 
     功能说明:
     - 仅接受当前函数显式导入绑定到 `kernel_gen.operation.dma/arch/nn` 的 helper 调用。
-    - 将 `load/slice/store/deslice/...` 解析为对应 AST 节点。
+    - 将 `load/slice/store/deslice/fill/...` 解析为对应 AST 节点。
     - 将 `conv(...)` 解析为 `ConvAST`，交由 lowering 阶段做前端分解。
     - 将 `nn.add/sub/mul/truediv/floordiv(...)` 解析为对应的 `BinaryExprAST`。
     - 将 `relu/sigmoid/tanh/leaky_relu/hard_sigmoid/exp(...)` 解析为 `NnUnaryAST`。
@@ -1653,6 +1725,9 @@ def _parse_dma_call(
 
     if call_name == "deslice":
         return _parse_store_like_call(expr, call_name, env, globals_table, builtins_table)
+
+    if call_name == "fill":
+        return _parse_fill_call(expr, env, globals_table, builtins_table)
 
     if call_name == "alloc":
         if len(expr.args) < 2 or len(expr.args) > 4:

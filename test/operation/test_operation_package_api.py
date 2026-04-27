@@ -1,7 +1,7 @@
 """operation package API tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 锁定 `kernel_gen.operation` 顶层稳定导出集合与非导出边界。
@@ -121,6 +121,7 @@ def test_operation_explicit_import_exposes_only_public_exports() -> None:
 # 对应测试文件路径: test/operation/test_operation_package_api.py
 def test_operation_top_level_namespace_does_not_export_arch_or_extended_nn_helpers() -> None:
     hidden_names = {
+        "fill",
         "barrier",
         "launch_kernel",
         "get_block_id",
@@ -137,6 +138,19 @@ def test_operation_top_level_namespace_does_not_export_arch_or_extended_nn_helpe
 
     for name in hidden_names:
         assert not hasattr(operation, name)
+
+
+# TC-OP-PKG-006
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 测试目的: 验证 `fill` 只在 `kernel_gen.operation.dma` 子模块公开，不上提到 package-root。
+# 使用示例: pytest -q test/operation/test_operation_package_api.py -k test_operation_dma_fill_is_public_only_in_dma_submodule
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_package_api.py
+def test_operation_dma_fill_is_public_only_in_dma_submodule() -> None:
+    assert hasattr(operation_dma, "fill")
+    assert not hasattr(operation, "fill")
 
 
 # TC-OP-PKG-004

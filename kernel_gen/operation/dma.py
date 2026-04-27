@@ -4,11 +4,12 @@
 最后一次更改: 金铲铲大作战
 
 功能说明:
-- 提供 Memory 的数据搬运、视图变换与显式转换 API，包括 alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast。
+- 提供 Memory 的数据搬运、视图变换、整块初始化与显式转换 API，包括 alloc/free/fill/copy/load/store/slice/deslice/view/reshape/flatten/cast。
 
 API 列表:
 - `alloc(shape: Sequence[int | str] | SymbolShape, dtype: NumericType, space: MemorySpace = MemorySpace.GM, stride: Sequence[int | str] | SymbolShape | None = None, format: Farmat = Farmat.Norm) -> Memory`
 - `free(memory: object) -> None`
+- `fill(target: object, value: object) -> None`
 - `copy(source: object, target: object) -> Memory`
 - `load(source: object, target: object) -> Memory`
 - `store(source: object, target: object) -> Memory`
@@ -20,8 +21,9 @@ API 列表:
 - `cast(memory: object, dtype: NumericType) -> Memory`
 
 使用示例:
-- from kernel_gen.operation.dma import copy, cast, view, flatten
+- from kernel_gen.operation.dma import copy, cast, fill, view, flatten
 - copy(src, dst)
+- fill(dst, 0)
 - cast(src, NumericType.Float16)
 
 关联文件:
@@ -46,6 +48,7 @@ from kernel_gen.symbol_variable.type import Farmat, NumericType
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_SCENE = "dma operation 参数校验"
 _REQUIRED_SPACE = object()
+_ALLOWED_FILL_STRING_LITERALS = frozenset({"inf", "-inf"})
 
 
 def _ensure_memory(value: object, name: str) -> Memory:
@@ -201,6 +204,81 @@ def free(value: object) -> None:
     - 功能实现: kernel_gen/operation/dma.py
     """
     _ensure_memory(value, "value")
+    return None
+
+
+def _validate_fill_value(value: object) -> object:
+    """校验 `dma.fill` 的公开 value 合同。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 接受 `int`、`float`、`SymbolDim` 与 `"inf"/"-inf"`。
+    - 其他字符串抛 `ValueError`，其他类型抛 `TypeError`。
+
+    使用示例:
+    - _validate_fill_value(0)
+    - _validate_fill_value("-inf")
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+    if isinstance(value, bool):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.fill 参数校验",
+                expected="fill value must be int/float/SymbolDim/'inf'/'-inf'",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+    if isinstance(value, str):
+        if value not in _ALLOWED_FILL_STRING_LITERALS:
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene="dma.fill 参数校验",
+                    expected='fill string literal must be "inf" or "-inf"',
+                    actual=value,
+                    action=_ERROR_ACTION,
+                )
+            )
+        return value
+    if isinstance(value, (int, float, SymbolDim)):
+        return value
+    raise TypeError(
+        _ERROR_TEMPLATE.format(
+            scene="dma.fill 参数校验",
+            expected="fill value must be int/float/SymbolDim/'inf'/'-inf'",
+            actual=type(value).__name__,
+            action=_ERROR_ACTION,
+        )
+    )
+
+
+def fill(target: object, value: object) -> None:
+    """表达对整块 memory 的公开填充语义。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 只校验公开 helper 合同，不分配新 buffer。
+    - 返回 `None`，保持 `target` 的 shape/stride/space/format 不变。
+
+    使用示例:
+    - fill(buf, 0)
+    - fill(buf, "-inf")
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+    _ensure_memory(target, "target")
+    _validate_fill_value(value)
     return None
 
 

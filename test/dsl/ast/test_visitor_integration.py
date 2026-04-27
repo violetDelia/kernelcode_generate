@@ -1,7 +1,7 @@
 """AST visitor public integration tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 只验证 `AstVisitor`、`EmitContext`、`emit_mlir`、`build_func_op`、`build_func_op_from_ast` 的公开集成行为。
@@ -33,7 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaCopyOp, DmaFreeOp
+from kernel_gen.dialect.dma import DmaBroadcastOp, DmaCopyOp, DmaFreeOp
 from kernel_gen.dialect.nn import NnAddOp
 from kernel_gen.dialect.symbol import SymbolGetDimOp
 from kernel_gen.dsl import (
@@ -134,6 +134,20 @@ def test_build_func_op_reports_public_broadcast_mismatch() -> None:
         build_func_op(add, _tensor_arg(["A", "B"]), _tensor_arg(["A", "C"]))
 
     assert exc_info.value.location is not None
+
+
+def test_build_func_op_lowers_public_dma_fill_helper() -> None:
+    def init_kernel() -> None:
+        from kernel_gen.operation.dma import alloc, fill
+
+        scratch = alloc([2, 2], NumericType.Float32)
+        fill(scratch, "-inf")
+
+    func_op = build_func_op(init_kernel)
+
+    body_ops = list(func_op.body.block.ops)
+    assert any(isinstance(op, DmaBroadcastOp) for op in body_ops)
+    assert isinstance(body_ops[-1], func.ReturnOp)
 
 
 def test_emit_mlir_rejects_block_ast_outside_public_visitor_path() -> None:
