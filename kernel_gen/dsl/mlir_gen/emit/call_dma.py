@@ -7,6 +7,9 @@
 - 收口 dma family 的 emit 入口，覆盖 alloc/copy/cast/view/reshape/flatten/free/read/write。
 - 仅负责 dma 相关 AST 的分发，不承载 arch/symbol/nn 逻辑。
 
+API 列表:
+- `emit_dma_call(node: object, ctx: EmitContext) -> object`
+
 使用示例:
 - value = emit_dma_call(DmaAllocAST(shape=[ConstAST(4)], dtype=NumericType.Float32), ctx)
 
@@ -29,9 +32,16 @@ from kernel_gen.dsl.ast import (
     LoadAST,
     StoreAST,
 )
-from .core import emit_mlir as _emit_mlir
 
-from .context import EmitContext, LoweringError
+from .context import EmitContext
+
+
+class LoweringError(ValueError):
+    """当前文件内使用的 dma emit 失败错误。"""
+
+    def __init__(self, message: str, location: object | None = None) -> None:
+        super().__init__(message)
+        self.location = location
 
 _DMA_AST_TYPES = (
     DmaAllocAST,
@@ -67,4 +77,6 @@ def emit_dma_call(node: object, ctx: EmitContext) -> object:
 
     if not isinstance(node, _DMA_AST_TYPES):
         raise LoweringError("emit_dma_call only handles dma family AST nodes", location=getattr(node, "location", None))
-    return _emit_mlir(node, ctx)
+    from . import emit_mlir as public_emit_mlir
+
+    return public_emit_mlir(node, ctx)

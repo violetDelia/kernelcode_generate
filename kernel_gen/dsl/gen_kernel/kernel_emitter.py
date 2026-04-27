@@ -9,7 +9,7 @@
 
 使用示例:
 - from kernel_gen.dsl.gen_kernel import gen_kernel
-- source = gen_kernel(func_op, EmitCContext(target="cpu"))
+- source = gen_kernel(func_op, EmitCContext(config={"target": "cpu"}))
 
 关联文件:
 - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -80,7 +80,7 @@ def _normalize_memory_stmt(stmt: str) -> str:
 
 
 def _build_error(ctx: EmitCContext, func_name: str, reason: str) -> GenKernelError:
-    return GenKernelError(f"target={ctx.target}: func {func_name}: {reason}")
+    return GenKernelError(f"target={ctx.config['target']}: func {func_name}: {reason}")
 
 
 def _walk_ops(op: Operation) -> list[Operation]:
@@ -137,7 +137,7 @@ def _validate_tile_codegen_contract(func_op: func.FuncOp, ctx: EmitCContext) -> 
     - 不允许回退到 `kernel_split.*` / `tile.step_value` / `tile.symbol_literal` 旧桥接口径。
 
     使用示例:
-    - _validate_tile_codegen_contract(func_op, EmitCContext(target="cpu"))
+    - _validate_tile_codegen_contract(func_op, EmitCContext(config={"target": "cpu"}))
 
     关联文件:
     - spec: [spec/dsl/gen_kernel/gen_kernel.md](spec/dsl/gen_kernel/gen_kernel.md)
@@ -146,7 +146,7 @@ def _validate_tile_codegen_contract(func_op: func.FuncOp, ctx: EmitCContext) -> 
     """
 
     func_name = func_op.sym_name.data
-    if ctx.target != "cpu":
+    if ctx.config["target"] != "cpu":
         raise _build_error(ctx, func_name, "TileCodegenMalformed: tile codegen is cpu-only")
 
     ops = list(func_op.body.block.ops)
@@ -371,7 +371,7 @@ class KernelEmitter:
       避免继续散落成平行 helper 入口。
 
     使用示例:
-    - source = KernelEmitter(EmitCContext(target="cpu")).emit(func_op)
+    - source = KernelEmitter(EmitCContext(config={"target": "cpu"})).emit(func_op)
 
     关联文件:
     - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -436,7 +436,7 @@ class KernelEmitter:
     def emit_attr(self, attr: Any) -> str:
         emitted = self.ctx.dispatch_attr(attr)
         if emitted is None:
-            raise EmitCError(f"target={self.ctx.target}: attr {attr}: unsupported attr")
+            raise EmitCError(f"target={self.ctx.config['target']}: attr {attr}: unsupported attr")
         return emitted
 
     def emit_value(self, value: SSAValue) -> str:
@@ -446,7 +446,7 @@ class KernelEmitter:
         return self._emit_op_impl(op, self.ctx)
 
     def _signature_type_to_c(self, attr: Any) -> str:
-        return self.ctx.clone_for_target("cpu").dispatch_type(attr)
+        return EmitCContext(config={**self.ctx.config, "target": "cpu"}).dispatch_type(attr)
 
     def _error(self, func_name: str, reason: str) -> GenKernelError:
         return _build_error(self.ctx, func_name, reason)
@@ -462,7 +462,7 @@ class KernelEmitter:
         if isinstance(op_or_func, SSAValue):
             return self.emit_value(op_or_func)
         if isinstance(op_or_func, func.ReturnOp):
-            raise GenKernelError(f"target={self.ctx.target}: func.return/out binding must be emitted in function main flow")
+            raise GenKernelError(f"target={self.ctx.config['target']}: func.return/out binding must be emitted in function main flow")
         if isinstance(op_or_func, Operation):
             return self.emit_op(op_or_func)
         return self.emit_attr(op_or_func)
@@ -479,7 +479,7 @@ class KernelEmitter:
         - wrapper 仍必须能被唯一 `arch.launch` 识别，body / wrapper 之外的 helper 继续走通用函数发射。
 
         使用示例:
-        - source = KernelEmitter(EmitCContext(target="npu_demo")).emit(module_op)
+        - source = KernelEmitter(EmitCContext(config={"target": "npu_demo"})).emit(module_op)
 
         关联文件:
         - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -487,7 +487,7 @@ class KernelEmitter:
         - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
         """
 
-        if self.ctx.target != "npu_demo":
+        if self.ctx.config["target"] != "npu_demo":
             raise self._error("<module>", "builtin.module is only supported for target=npu_demo")
 
         plain_func = self._get_npu_demo_plain_func(module_op)
@@ -604,7 +604,7 @@ class KernelEmitter:
         raise _build_error(self.ctx, func_op.sym_name.data, "no function emission strategy")
 
     def _is_npu_demo_body_level_kernel(self, func_op: func.FuncOp) -> bool:
-        if self.ctx.target != "npu_demo":
+        if self.ctx.config["target"] != "npu_demo":
             return False
         arg_names = self._arg_names(func_op)
         input_types = list(func_op.function_type.inputs.data)
@@ -670,7 +670,7 @@ class KernelEmitter:
     def _expected_npu_demo_launch_extents(self) -> tuple[int, int, int, int]:
         extents: list[int] = []
         for hw_key in ("block_num", "thread_num", "subthread_num", "sm_memory_size"):
-            value = target_registry.get_target_hardware(self.ctx.target, hw_key)
+            value = target_registry.get_target_hardware(self.ctx.config["target"], hw_key)
             if value is None:
                 raise self._error("<module>", f"npu_demo target missing {hw_key}")
             extents.append(value)
@@ -1118,7 +1118,7 @@ class KernelEmitter:
             )
         if result_types:
             result_type = result_types[0]
-            if isinstance(result_type, SymbolValueType) and self.ctx.target not in {"cpu", "npu_demo"}:
+            if isinstance(result_type, SymbolValueType) and self.ctx.config["target"] not in {"cpu", "npu_demo"}:
                 raise _build_error(self.ctx, func_name, "symbol scalar return is only supported on cpu and npu_demo")
             self._type_to_c(result_type)
 
@@ -1198,7 +1198,7 @@ class KernelEmitter:
         return tuple(mutable_args)
 
     def _is_returned_output_alloc(self, func_op: func.FuncOp, op: DmaAllocOp) -> bool:
-        if self.ctx.target != "cpu":
+        if self.ctx.config["target"] != "cpu":
             return False
         result_types = list(func_op.function_type.outputs.data)
         if len(result_types) != 1 or not isinstance(result_types[0], NnMemoryType):
@@ -1247,7 +1247,7 @@ class KernelEmitter:
         return True
 
     def _is_direct_return_nn_add(self, return_op: func.ReturnOp) -> bool:
-        if self.ctx.target != "cpu":
+        if self.ctx.config["target"] != "cpu":
             return False
         if len(return_op.arguments) != 1:
             return False
@@ -1260,7 +1260,7 @@ class KernelEmitter:
         return owner.result.get_user_of_unique_use() is return_op
 
     def _has_cpu_direct_return_nn_add(self, func_op: func.FuncOp) -> bool:
-        if self.ctx.target != "cpu":
+        if self.ctx.config["target"] != "cpu":
             return False
         return any(isinstance(op, func.ReturnOp) and self._is_direct_return_nn_add(op) for op in func_op.body.block.ops)
 
@@ -1286,7 +1286,7 @@ class KernelEmitter:
         - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
         """
 
-        if self.ctx.target != "npu_demo":
+        if self.ctx.config["target"] != "npu_demo":
             return None
         if not isinstance(op, SymbolAddOp) or len(op.results) != 1:
             return None
@@ -1345,7 +1345,7 @@ class KernelEmitter:
                 func_op.sym_name.data,
                 "legacy memory return ABI is not supported; run BufferResultsToOutParamsPass first",
             )
-        if isinstance(result_type, SymbolValueType) and self.ctx.target not in {"cpu", "npu_demo"}:
+        if isinstance(result_type, SymbolValueType) and self.ctx.config["target"] not in {"cpu", "npu_demo"}:
             raise _build_error(
                 self.ctx,
                 func_op.sym_name.data,
@@ -1422,7 +1422,7 @@ class KernelEmitter:
                 continue
             self._bind_rewritten_out_result(func_op, op)
             stmt = self.emit_op(op)
-            if stmt and self.ctx.target == "cpu":
+            if stmt and self.ctx.config["target"] == "cpu":
                 stmt = _normalize_memory_stmt(stmt)
             if stmt:
                 lines.append(stmt)
@@ -1447,7 +1447,7 @@ class KernelEmitter:
                     self.ctx.bind_name(op.result, "out")
             self._bind_rewritten_out_result(func_op, op)
             stmt = self.emit_op(op)
-            if stmt and self.ctx.target == "cpu":
+            if stmt and self.ctx.config["target"] == "cpu":
                 stmt = _normalize_memory_stmt(stmt)
             if stmt:
                 lines.append(stmt)

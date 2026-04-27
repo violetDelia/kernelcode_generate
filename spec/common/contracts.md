@@ -37,7 +37,7 @@
 ## Helper 边界
 
 - 公开 API 仅包含 `API 列表` 中列出的 12 个函数。
-- `_ERROR_TEMPLATE`、`_ERROR_ACTION`、`_ERROR_ACTUAL` 等模块常量属于当前文件内部实现细节，不属于跨文件公开接口。
+- [`kernel_gen.common.errors._ERROR_TEMPLATE`](../../kernel_gen/common/errors.py) 与 [`kernel_gen.common._ERROR_TEMPLATE`](../../kernel_gen/common/__init__.py) 的模板文本合同定义在 [`spec/common/errors.md`](../../spec/common/errors.md)；本文件不重复定义它们，也不把它们视为 `contracts.py` 的内部 helper。
 - 调用方只应通过 `raise_verify_error(...)`、`verify_*`、`collect_*`、`build_*`、`dims_equal(...)`、`public_dim_values(...)`、`default_stride(...)` 与 `shape_numel(...)` 访问本模块能力。
 
 ## 公开接口

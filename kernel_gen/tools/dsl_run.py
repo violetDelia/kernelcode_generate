@@ -9,13 +9,13 @@
 - 只承载公开合同，不把内部 parse / pass / emit / execute 细节暴露为外部依赖。
 
 API 列表:
-- DslRunError(message: str)
-- DslRunResult(func_op, module, source, compiled_kernel, execute_result, runtime_args)
-- dsl_run(func_obj, real_args, pipeline, emitcconfig)
+- `DslRunError(message: str)`
+- `DslRunResult(func_op: func.FuncOp, module: ModuleOp, source: str, compiled_kernel: CompiledKernel, execute_result: ExecuteResult, runtime_args: tuple[object, ...])`
+- `dsl_run(func_obj: Callable[..., object], real_args: tuple[object, ...] | list[object], pipeline: str | PassManager, emitcconfig: EmitCContext | object | None) -> DslRunResult`
 
 使用示例:
 - from kernel_gen.tools.dsl_run import dsl_run
-- result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
+- result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(config={"target": "npu_demo"}))
 - assert result.execute_result.ok is True
 
 关联文件:
@@ -27,7 +27,6 @@ API 列表:
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from contextlib import contextmanager
 from dataclasses import dataclass
 import inspect
 from typing import Any
@@ -236,45 +235,6 @@ def _build_dsl_globals_table(fn: Callable[..., object]) -> dict[str, object]:
     return helper_globals
 
 
-@contextmanager
-def _temporarily_inject_dsl_helpers(fn: Callable[..., object]) -> Iterable[None]:
-    """在 `mlir_gen(...)` 调用窗口内临时补齐 DSL helper globals。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 仅向 `fn.__globals__` 注入当前缺失的 helper 名称，避免覆盖调用方已有绑定。
-    - 调用完成后回收本次新增名称，让公开 `mlir_gen(...)` 继续保持删参后的纯 `runtime_args` 入口。
-
-    使用示例:
-    - with _temporarily_inject_dsl_helpers(func_obj):
-    -     module = mlir_gen(func_obj, *runtime_args, config=config)
-
-    关联文件:
-    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
-    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
-    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
-    """
-
-    fn_globals = getattr(fn, "__globals__", None)
-    if not isinstance(fn_globals, dict):
-        yield
-        return
-    helper_globals = _build_dsl_globals_table(fn)
-    inserted_names: list[str] = []
-    for name, value in helper_globals.items():
-        if name in fn_globals:
-            continue
-        fn_globals[name] = value
-        inserted_names.append(name)
-    try:
-        yield
-    finally:
-        for name in inserted_names:
-            fn_globals.pop(name, None)
-
-
 def _normalize_real_args(real_args: tuple[object, ...] | list[object]) -> tuple[object, ...]:
     """把 `real_args` 规整为 tuple，方便后续统一校验与执行。
 
@@ -330,6 +290,31 @@ def _resolve_pipeline(pipeline: str | PassManager) -> PassManager:
         return build_registered_pipeline(pipeline)
     except PassRegistryError as exc:
         raise DslRunError(f"DslRunUnknownPipeline: unknown pipeline '{pipeline}'") from exc
+
+
+def _emitc_target_name(emitcconfig: EmitCContext) -> str:
+    """读取 `EmitCContext` 当前公开合同下的 target 名称。
+
+    创建者: OpenAI Codex
+    最后一次更改: OpenAI Codex
+
+    功能说明:
+    - 统一从 `emitcconfig.config["target"]` 读取目标名。
+    - 若调用方在构造后篡改 `config`，这里仍按公开合同做一次最小校验并返回稳定错误短语。
+
+    使用示例:
+    - target = _emitc_target_name(EmitCContext(config={"target": "npu_demo"}))
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    target = emitcconfig.config.get("target")
+    if not isinstance(target, str) or not target:
+        raise DslRunError("DslRunInvalidEmitCContext: emitcconfig.config['target'] must be non-empty str")
+    return target
 
 
 def _find_first_func(module: ModuleOp) -> func.FuncOp:
@@ -396,7 +381,7 @@ def _select_source_and_entry(module: ModuleOp, emitcconfig: EmitCContext) -> tup
     - 其余 target 退回到首个 `func.func` 的源码生成入口，保证常见单函数和 expectation 场景稳定可执行。
 
     使用示例:
-    - source, entry_name, func_op = _select_source_and_entry(module, EmitCContext(target="npu_demo"))
+    - source, entry_name, func_op = _select_source_and_entry(module, EmitCContext(config={"target": "npu_demo"}))
 
     关联文件:
     - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
@@ -406,7 +391,7 @@ def _select_source_and_entry(module: ModuleOp, emitcconfig: EmitCContext) -> tup
 
     func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
     root_func = _find_first_func(module)
-    if emitcconfig.target == "npu_demo":
+    if _emitc_target_name(emitcconfig) == "npu_demo":
         wrapper_candidates = [
             func_op
             for func_op in func_ops
@@ -436,7 +421,7 @@ class DslRunResult:
     - `runtime_args` 保留为 tuple，便于下游机械比较和再次调用执行引擎。
 
     使用示例:
-    - result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
+    - result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(config={"target": "npu_demo"}))
     - assert result.execute_result.ok is True
 
     关联文件:
@@ -471,7 +456,7 @@ def dsl_run(
     - 结果以 `DslRunResult` 返回，外部可以继续读取 `func_op/module/source/compiled_kernel/execute_result/runtime_args`。
 
     使用示例:
-    - result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
+    - result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(config={"target": "npu_demo"}))
     - assert result.execute_result.ok is True
 
     关联文件:
@@ -497,12 +482,8 @@ def dsl_run(
         if not (_is_torch_tensor(arg) or _is_numpy_array(arg)):
             raise DslRunError(REAL_ARG_TYPE_ERROR)
 
-    with _temporarily_inject_dsl_helpers(func_obj):
-        module = mlir_gen(
-            func_obj,
-            *runtime_args,
-            config={"reject_external_values": True, "allow_python_callee_calls": True},
-        )
+    globals_table = _build_dsl_globals_table(func_obj)
+    module = mlir_gen(func_obj, *runtime_args, globals=globals_table, config={"reject_external_values": True, "allow_python_callee_calls": True})
     if not isinstance(module, ModuleOp):
         raise DslRunError("DslRunInternalError: mlir_gen must return builtin.module")
 
@@ -515,7 +496,7 @@ def dsl_run(
         raise DslRunError("DslRunInternalError: pipeline must return builtin.module")
 
     source, entry_name, func_op = _select_source_and_entry(lowered_module, emitcconfig)
-    engine = ExecutionEngine(target=emitcconfig.target)
+    engine = ExecutionEngine(target=_emitc_target_name(emitcconfig))
     compiled_kernel = engine.compile(source=source, function=entry_name)
     execute_result = compiled_kernel.execute(args=runtime_args)
     return DslRunResult(

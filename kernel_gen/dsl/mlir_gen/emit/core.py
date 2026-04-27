@@ -7,6 +7,10 @@
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
 - 维护节点发射所需的上下文、类型推导与显式错误。
 
+API 列表:
+- `EmitContext(builder: Block, symbols: dict[str, object], types: dict[int, object], config: dict[str, object] | None = None)`
+- `emit_mlir(node: object, ctx: EmitContext) -> object`
+
 使用示例:
 - from kernel_gen.dsl.mlir_gen.emit import EmitContext, emit_mlir
 - value = emit_mlir(expr_ast, ctx)
@@ -129,7 +133,6 @@ from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 from kernel_gen.operation import dma as _KG_OPERATION_DMA
-from kernel_gen.target import registry
 from kernel_gen.operation import arch as _KG_OPERATION_ARCH
 from kernel_gen.operation import nn as _KG_OPERATION_NN
 
@@ -194,6 +197,32 @@ _DYNAMIC_MEMORY_SPACE_MAP = {
 
 _MLIR_GEN_CALLEE_REGISTRY_CONFIG_KEY = "__mlir_gen_callee_registry__"
 _MLIR_GEN_CALLEE_COMPILER_CONFIG_KEY = "__mlir_gen_callee_compiler__"
+_TARGET_NAME_PATTERN = re.compile(r"^[a-z0-9_]+$")
+_ALLOWED_HARDWARE_FIELDS = {
+    "thread_num",
+    "block_num",
+    "subthread_num",
+    "sm_memory_size",
+    "lm_memory_size",
+    "tsm_memory_size",
+    "tlm1_memory_size",
+    "tlm2_memory_size",
+    "tlm3_memory_size",
+}
+_ARITHMETIC_DTYPE_RANK = {
+    NumericType.Int8: 0,
+    NumericType.Uint8: 1,
+    NumericType.Int16: 2,
+    NumericType.Uint16: 3,
+    NumericType.Int32: 4,
+    NumericType.Uint32: 5,
+    NumericType.Int64: 6,
+    NumericType.Uint64: 7,
+    NumericType.Float16: 8,
+    NumericType.BFloat16: 9,
+    NumericType.Float32: 10,
+    NumericType.Float64: 11,
+}
 
 _IMG2COL_PARAM_TABLE: dict[str, tuple[tuple[str, ...], dict[str, int]]] = {
     "img2col1d": (
@@ -226,6 +255,31 @@ class _LoweringError(ValueError):
         self.location = location
 
 
+def _validate_emit_context_target_name(name: str) -> None:
+    """校验 EmitContext target 名称满足当前公开命名规则。"""
+
+    if not name or not _TARGET_NAME_PATTERN.fullmatch(name):
+        raise _LoweringError(f"target name must match {_TARGET_NAME_PATTERN.pattern}")
+
+
+def _validate_emit_context_hardware_map(hardware: dict[str, int], target_name: str) -> None:
+    """校验 EmitContext hardware 字段的 key/value 合法性。"""
+
+    for key, value in hardware.items():
+        if key not in _ALLOWED_HARDWARE_FIELDS:
+            raise _LoweringError(f"{target_name} hardware has unknown key: {key}")
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise _LoweringError(f"{target_name} hardware.{key} must be int")
+
+
+def _promote_ranked_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
+    """按 emit 当前公开算术优先级选择更高 rank 的 dtype。"""
+
+    if lhs not in _ARITHMETIC_DTYPE_RANK or rhs not in _ARITHMETIC_DTYPE_RANK:
+        raise TypeError("Memory dtype mismatch")
+    return lhs if _ARITHMETIC_DTYPE_RANK[lhs] >= _ARITHMETIC_DTYPE_RANK[rhs] else rhs
+
+
 def _validate_emit_context_config(config: dict[str, object] | None) -> None:
     """校验 EmitContext.config 中的 target/hardware 字段。
 
@@ -252,20 +306,14 @@ def _validate_emit_context_config(config: dict[str, object] | None) -> None:
         target = config["target"]
         if not isinstance(target, str):
             raise _LoweringError("EmitContext target must be str")
-        try:
-            registry._validate_target_name(target)
-        except ValueError as exc:
-            raise _LoweringError(str(exc)) from exc
+        _validate_emit_context_target_name(target)
     if "hardware" in config:
         hardware = config["hardware"]
         if not isinstance(hardware, dict):
             raise _LoweringError("EmitContext hardware must be dict[str, int]")
         target_name = config.get("target")
         target_label = target_name if isinstance(target_name, str) else "emit_context"
-        try:
-            registry._validate_hardware_map(hardware, target_label)
-        except ValueError as exc:
-            raise _LoweringError(str(exc)) from exc
+        _validate_emit_context_hardware_map(hardware, target_label)
 
 
 class EmitContext:
@@ -454,7 +502,7 @@ def _resolve_nn_arith_element_type(
     try:
         lhs_dtype = _xdsl_to_dtype(lhs_type.element_type, location)
         rhs_dtype = _xdsl_to_dtype(rhs_type.element_type, location)
-        target_dtype = Memory._promote_ranked_dtype(lhs_dtype, rhs_dtype)
+        target_dtype = _promote_ranked_dtype(lhs_dtype, rhs_dtype)
     except TypeError as exc:
         raise _LoweringError("Binary op operands must have compatible element_type", location=location) from exc
     return _dtype_to_xdsl(target_dtype, location)
@@ -4314,7 +4362,9 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, NnUnaryAST):
         from kernel_gen.dsl.mlir_gen.emit.call_nn import emit_nn_call
 
-        return emit_nn_call(expr, ctx)
+        value = emit_nn_call(expr, ctx)
+        ctx._set_cache(expr_key, value)
+        return value
     if isinstance(expr, NnBroadcastAST):
         value = _lower_expr(expr.value, ctx)
         target = _lower_expr(expr.target, ctx)
@@ -4680,12 +4730,16 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, BinaryExprAST):
         from kernel_gen.dsl.mlir_gen.emit.call_nn import emit_nn_call
 
-        return emit_nn_call(expr, ctx)
+        value = emit_nn_call(expr, ctx)
+        ctx._set_cache(expr_key, value)
+        return value
 
     if isinstance(expr, CompareExprAST):
         from kernel_gen.dsl.mlir_gen.emit.call_nn import emit_nn_call
 
-        return emit_nn_call(expr, ctx)
+        value = emit_nn_call(expr, ctx)
+        ctx._set_cache(expr_key, value)
+        return value
 
     raise _LoweringError("Unsupported expression for lowering", location=getattr(expr, "location", None))
 

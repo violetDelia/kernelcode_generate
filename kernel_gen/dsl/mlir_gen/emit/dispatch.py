@@ -21,9 +21,16 @@ from __future__ import annotations
 from xdsl.ir import SSAValue
 
 from kernel_gen.dsl.ast import PythonCalleeCallAST
-from .core import emit_mlir as _emit_mlir
 
-from .context import EmitContext, LoweringError
+from .context import EmitContext
+
+
+class LoweringError(ValueError):
+    """当前文件内使用的 dispatch 失败错误。"""
+
+    def __init__(self, message: str, location: object | None = None) -> None:
+        super().__init__(message)
+        self.location = location
 
 
 def emit_mlir(node: object, ctx: EmitContext) -> object:
@@ -52,7 +59,9 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
     - test: [test/dsl/mlir_gen/emit/test_dispatch.py](test/dsl/mlir_gen/emit/test_dispatch.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/dispatch.py](kernel_gen/dsl/mlir_gen/emit/dispatch.py)
     """
-    return _emit_mlir(node, ctx)
+    from . import emit_mlir as public_emit_mlir
+
+    return public_emit_mlir(node, ctx)
 
 
 def call_dispatch(node: PythonCalleeCallAST, ctx: EmitContext) -> SSAValue:
@@ -82,4 +91,6 @@ def call_dispatch(node: PythonCalleeCallAST, ctx: EmitContext) -> SSAValue:
     """
     if not isinstance(node, PythonCalleeCallAST):
         raise LoweringError("call_dispatch expects PythonCalleeCallAST", location=getattr(node, "location", None))
-    return _emit_mlir(node, ctx)
+    from . import emit_mlir as public_emit_mlir
+
+    return public_emit_mlir(node, ctx)

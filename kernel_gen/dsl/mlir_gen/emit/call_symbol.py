@@ -7,6 +7,10 @@
 - 收口 symbol family 的 emit 入口，覆盖 symbol.to_float/get_dim/get_stride/symbol.for 相关 lowering。
 - 仅负责 symbol 相关 AST 的分发，不承载 arch/dma/nn 逻辑。
 
+API 列表:
+- `emit_symbol_call(node: object, ctx: EmitContext) -> object`
+- `emit_symbol_for(node: object, ctx: EmitContext) -> object`
+
 使用示例:
 - value = emit_symbol_call(SymbolToFloatAST(source=value), ctx)
 - loop = emit_symbol_for(for_ast, ctx)
@@ -20,9 +24,16 @@
 from __future__ import annotations
 
 from kernel_gen.dsl.ast import ForAST, SymbolToFloatAST, TensorAxisAccessAST
-from .core import emit_mlir as _emit_mlir
 
-from .context import EmitContext, LoweringError
+from .context import EmitContext
+
+
+class LoweringError(ValueError):
+    """当前文件内使用的 symbol emit 失败错误。"""
+
+    def __init__(self, message: str, location: object | None = None) -> None:
+        super().__init__(message)
+        self.location = location
 
 
 def emit_symbol_call(node: object, ctx: EmitContext) -> object:
@@ -46,7 +57,9 @@ def emit_symbol_call(node: object, ctx: EmitContext) -> object:
 
     if not isinstance(node, (SymbolToFloatAST, TensorAxisAccessAST)):
         raise LoweringError("emit_symbol_call only handles symbol family AST nodes", location=getattr(node, "location", None))
-    return _emit_mlir(node, ctx)
+    from . import emit_mlir as public_emit_mlir
+
+    return public_emit_mlir(node, ctx)
 
 
 def emit_symbol_for(node: object, ctx: EmitContext) -> object:
@@ -70,4 +83,6 @@ def emit_symbol_for(node: object, ctx: EmitContext) -> object:
 
     if not isinstance(node, ForAST):
         raise LoweringError("emit_symbol_for expects ForAST", location=getattr(node, "location", None))
-    return _emit_mlir(node, ctx)
+    from . import emit_mlir as public_emit_mlir
+
+    return public_emit_mlir(node, ctx)

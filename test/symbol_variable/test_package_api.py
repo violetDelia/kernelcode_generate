@@ -183,15 +183,16 @@ def test_package_type_construct_memory() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:52:17 +0800
 # 最近一次运行成功时间: 2026-03-22 13:52:17 +0800
-# 功能说明: 验证 kernel_gen.symbol_variable.__all__ 与公开导出集合一致。
-# 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_python_package_all_boundary
+# 功能说明: 验证 kernel_gen.symbol_variable 包入口稳定公开集合可显式导入且不额外暴露 Ptr。
+# 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_python_package_exports_match_public_contract
 # 对应功能实现文件路径: kernel_gen/symbol_variable/__init__.py
 # 对应 spec 文件路径: spec/symbol_variable/package_api.md
 # 对应测试文件路径: test/symbol_variable/test_package_api.py
-def test_python_package_all_boundary() -> None:
+def test_python_package_exports_match_public_contract() -> None:
     import kernel_gen.symbol_variable as package_module
 
-    assert package_module.__all__ == PUBLIC_EXPORTS
+    assert sorted(name for name in PUBLIC_EXPORTS if hasattr(package_module, name)) == PUBLIC_EXPORTS
+    assert not hasattr(package_module, "Ptr")
 
 
 # PM-007

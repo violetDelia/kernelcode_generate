@@ -1,10 +1,11 @@
-"""Emit control flow tests.
+"""Emit control-flow public integration tests.
 
 创建者: jcc你莫辜负
 最后一次更改: jcc你莫辜负
 
 功能说明:
-- 覆盖 emit control_flow 的最小行为与拒绝路径。
+- 只覆盖 `kernel_gen.dsl.mlir_gen.emit` 包根公开入口的控制流可观察行为。
+- 不再把 `control_flow.py` 子模块 helper 视为测试合同。
 
 使用示例:
 - pytest -q test/dsl/mlir_gen/emit/test_control_flow.py
@@ -15,7 +16,7 @@
 - 达标线: 90%
 
 关联文件:
-- 功能实现: kernel_gen/dsl/mlir_gen/emit/control_flow.py
+- 功能实现: kernel_gen/dsl/mlir_gen/emit/__init__.py
 - Spec 文档: spec/dsl/emit_mlir.md
 - 测试文件: test/dsl/mlir_gen/emit/test_control_flow.py
 """
@@ -34,9 +35,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.symbol import SymbolForOp
 from kernel_gen.dsl.ast import BlockAST, ConstAST, ForAST, VarAST
-from kernel_gen.dsl.mlir_gen.emit import EmitContext
-from kernel_gen.dsl.mlir_gen.emit.context import LoweringError
-from kernel_gen.dsl.mlir_gen.emit.control_flow import emit_control_flow, emit_for
+from kernel_gen.dsl.mlir_gen.emit import EmitContext, emit_mlir
 
 
 # EMIT-CF-001
@@ -44,13 +43,13 @@ from kernel_gen.dsl.mlir_gen.emit.control_flow import emit_control_flow, emit_fo
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
-# 功能说明: 验证 ForAST 的控制流入口能发射 symbol.for。
-# 测试目的: 锁定 emit_for 的最小循环发射语义。
-# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_control_flow.py -k test_emit_for_lowers_symbol_for
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/control_flow.py
+# 功能说明: 验证公开 `emit_mlir(...)` 可对 `ForAST` 发射 `symbol.for`。
+# 测试目的: 锁定公开循环发射语义。
+# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_control_flow.py -k test_emit_mlir_lowers_symbol_for
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/__init__.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/mlir_gen/emit/test_control_flow.py
-def test_emit_for_lowers_symbol_for() -> None:
+def test_emit_mlir_lowers_symbol_for() -> None:
     block = Block()
     ctx = EmitContext(builder=block, symbols={}, types={})
     loop = ForAST(
@@ -61,7 +60,7 @@ def test_emit_for_lowers_symbol_for() -> None:
         body=BlockAST(statements=[ConstAST(0)]),
     )
 
-    emit_for(loop, ctx)
+    emit_mlir(loop, ctx)
 
     body_ops = list(block.ops)
     if not any(isinstance(op, SymbolForOp) for op in body_ops):
@@ -73,34 +72,15 @@ def test_emit_for_lowers_symbol_for() -> None:
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
-# 功能说明: 验证 control_flow 入口拒绝非 ForAST 节点。
-# 测试目的: 锁定 emit_control_flow 的输入边界。
-# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_control_flow.py -k test_emit_control_flow_rejects_non_for
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/control_flow.py
+# 功能说明: 验证公开 `emit_mlir(...)` 继续拒绝直接 lowering `BlockAST`。
+# 测试目的: 锁定控制流结构仍需经 `AstVisitor` 组织 block。
+# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_control_flow.py -k test_emit_mlir_rejects_block_ast
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/__init__.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/mlir_gen/emit/test_control_flow.py
-def test_emit_control_flow_rejects_non_for() -> None:
+def test_emit_mlir_rejects_block_ast() -> None:
     block = Block()
     ctx = EmitContext(builder=block, symbols={}, types={})
 
-    with pytest.raises(LoweringError, match="emit_control_flow only handles ForAST"):
-        emit_control_flow(ConstAST(0), ctx)
-
-
-def test_emit_for_rejects_non_for_and_emit_control_flow_routes_for() -> None:
-    block = Block()
-    ctx = EmitContext(builder=block, symbols={}, types={})
-    loop = ForAST(
-        var=VarAST("i"),
-        start=ConstAST(0),
-        end=ConstAST(2),
-        step=ConstAST(1),
-        body=BlockAST(statements=[ConstAST(0)]),
-    )
-
-    with pytest.raises(LoweringError, match="emit_for expects ForAST"):
-        emit_for(ConstAST(0), ctx)  # type: ignore[arg-type]
-
-    emit_control_flow(loop, ctx)
-
-    assert any(isinstance(op, SymbolForOp) for op in block.ops)
+    with pytest.raises(ValueError, match="BlockAST must be lowered via AstVisitor"):
+        emit_mlir(BlockAST(statements=[ConstAST(0)]), ctx)

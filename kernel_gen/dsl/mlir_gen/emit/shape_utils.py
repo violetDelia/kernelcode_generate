@@ -7,6 +7,18 @@
 - 提供 shape/stride/index 的统一构造入口。
 - 聚合 emit 共享逻辑，避免在 family 逻辑中重复实现。
 
+API 列表:
+- `resolve_index_expr(expr: object, ctx: EmitContext) -> int | str`
+- `build_index_attrs(value: object | None, rank: int, ctx: EmitContext, default_value: int = 0, location: SourceLocation | None = None) -> list[SSAValue]`
+- `build_index_operands_from_layout(layout: ArrayAttr[Attribute], ctx: EmitContext, location: SourceLocation | None = None) -> list[SSAValue]`
+- `build_stride_attrs(value: object | None, rank: int, ctx: EmitContext, location: SourceLocation | None = None) -> list[SSAValue]`
+- `build_index_operands_exact(value: object, ctx: EmitContext, location: SourceLocation | None = None) -> list[SSAValue]`
+
+helper 清单:
+- `_loop_vars(ctx: EmitContext) -> dict[str, object]`
+- `_normalize_index_value(value: int | str | SymbolDim, location: SourceLocation | None) -> int | str`
+- `_apply_symbolic_index_binary_op(lhs_value: int | SymbolDim, rhs_value: int | SymbolDim, op: str, location: SourceLocation | None) -> int | SymbolDim`
+
 使用示例:
 - offsets = build_index_attrs(None, 2, ctx, default_value=0)
 
@@ -18,18 +30,78 @@
 
 from __future__ import annotations
 
+from xdsl.dialects import arith
+from xdsl.dialects.builtin import ArrayAttr, IntegerAttr, IntAttr, StringAttr
 from xdsl.ir import Attribute, SSAValue
 
-from kernel_gen.dsl.ast import SourceLocation
-from .core import (
-    _build_index_attrs,
-    _build_index_operands_exact,
-    _build_index_operands_from_layout,
-    _build_stride_attrs,
-    _resolve_index_expr,
-)
+from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dsl.ast import BinaryExprAST, ConstAST, ScalarArgAST, SourceLocation, VarAST
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 from .context import EmitContext
+from .value import emit_index_operand
+
+
+class LoweringError(ValueError):
+    """当前文件内使用的 shape/stride 失败错误。"""
+
+    def __init__(self, message: str, location: SourceLocation | None = None) -> None:
+        super().__init__(message)
+        self.location = location
+
+
+def _loop_vars(ctx: EmitContext) -> dict[str, object]:
+    """读取当前上下文里的 loop_vars。"""
+
+    if ctx.config is None:
+        ctx.config = {}
+    loop_vars = ctx.config.setdefault("loop_vars", {})
+    if not isinstance(loop_vars, dict):
+        raise LoweringError("loop_vars must be a dict", location=None)
+    return loop_vars
+
+
+def _normalize_index_value(value: int | str | SymbolDim, location: SourceLocation | None) -> int | str:
+    """将符号索引值收口成公开 `int | str`。"""
+
+    if isinstance(value, SymbolDim):
+        value = value.get_value()
+    if isinstance(value, (int, str)):
+        return value
+    raise LoweringError("Unsupported index expression", location=location)
+
+
+def _apply_symbolic_index_binary_op(
+    lhs_value: int | SymbolDim,
+    rhs_value: int | SymbolDim,
+    op: str,
+    location: SourceLocation | None,
+) -> int | SymbolDim:
+    """在当前文件内解析 shape/stride 公开索引的二元表达式。"""
+
+    if op == "add":
+        return lhs_value + rhs_value
+    if op == "sub":
+        return lhs_value - rhs_value
+    if op == "mul":
+        return lhs_value * rhs_value
+    if op == "div":
+        if isinstance(lhs_value, int) and isinstance(rhs_value, int):
+            if rhs_value == 0:
+                raise LoweringError("Unsupported index expression", location=location)
+            return lhs_value / rhs_value
+        if isinstance(lhs_value, int):
+            lhs_value = SymbolDim(lhs_value)
+        return lhs_value / rhs_value
+    if op == "floordiv":
+        if isinstance(lhs_value, int) and isinstance(rhs_value, int):
+            if rhs_value == 0:
+                raise LoweringError("Unsupported index expression", location=location)
+            return lhs_value // rhs_value
+        if isinstance(lhs_value, int):
+            lhs_value = SymbolDim(lhs_value)
+        return lhs_value // rhs_value
+    raise LoweringError("Unsupported index expression", location=location)
 
 
 def resolve_index_expr(expr: object, ctx: EmitContext) -> int | str:
@@ -57,7 +129,36 @@ def resolve_index_expr(expr: object, ctx: EmitContext) -> int | str:
     - test: [test/dsl/mlir_gen/emit/test_shape_utils.py](test/dsl/mlir_gen/emit/test_shape_utils.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/shape_utils.py](kernel_gen/dsl/mlir_gen/emit/shape_utils.py)
     """
-    return _resolve_index_expr(expr, ctx)
+    if isinstance(expr, ConstAST):
+        if isinstance(expr.value, (int, str)):
+            return _normalize_index_value(SymbolDim(expr.value) if isinstance(expr.value, str) else expr.value, expr.location)
+        raise LoweringError("Index must be int or str", location=expr.location)
+    if isinstance(expr, ScalarArgAST):
+        return expr.name
+    if isinstance(expr, VarAST):
+        loop_vars = _loop_vars(ctx)
+        if expr.name not in loop_vars:
+            raise LoweringError("Unknown loop variable", location=expr.location)
+        value = loop_vars[expr.name]
+        if isinstance(value, SymbolDim):
+            return _normalize_index_value(value, expr.location)
+        if isinstance(value, (int, str)):
+            return value
+        raise LoweringError("Unsupported index expression", location=expr.location)
+    if isinstance(expr, BinaryExprAST):
+        lhs = resolve_index_expr(expr.lhs, ctx)
+        rhs = resolve_index_expr(expr.rhs, ctx)
+        lhs_value = SymbolDim(lhs) if isinstance(lhs, str) else lhs
+        rhs_value = SymbolDim(rhs) if isinstance(rhs, str) else rhs
+        return _normalize_index_value(
+            _apply_symbolic_index_binary_op(lhs_value, rhs_value, expr.op, expr.location),
+            expr.location,
+        )
+    if isinstance(expr, int):
+        return expr
+    if isinstance(expr, str):
+        return _normalize_index_value(SymbolDim(expr), None)
+    raise LoweringError("Unsupported index expression", location=getattr(expr, "location", None))
 
 
 def build_index_attrs(
@@ -94,11 +195,19 @@ def build_index_attrs(
     - test: [test/dsl/mlir_gen/emit/test_shape_utils.py](test/dsl/mlir_gen/emit/test_shape_utils.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/shape_utils.py](kernel_gen/dsl/mlir_gen/emit/shape_utils.py)
     """
-    return _build_index_attrs(value, rank, ctx, default_value=default_value, location=location)
+    if value is None:
+        values = [default_value for _ in range(rank)]
+    elif isinstance(value, (list, tuple)):
+        if len(value) != rank:
+            raise LoweringError("Index rank mismatch", location=location or getattr(value, "location", None))
+        values = list(value)
+    else:
+        values = [value for _ in range(rank)]
+    return [emit_index_operand(item, ctx) for item in values]
 
 
 def build_index_operands_from_layout(
-    layout: Attribute,
+    layout: ArrayAttr[Attribute],
     ctx: EmitContext,
     *,
     location: SourceLocation | None = None,
@@ -127,7 +236,16 @@ def build_index_operands_from_layout(
     - test: [test/dsl/mlir_gen/emit/test_shape_utils.py](test/dsl/mlir_gen/emit/test_shape_utils.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/shape_utils.py](kernel_gen/dsl/mlir_gen/emit/shape_utils.py)
     """
-    return _build_index_operands_from_layout(layout, ctx, location=location)
+    values: list[object] = []
+    for dim in layout.data:
+        if isinstance(dim, IntAttr):
+            values.append(dim.data)
+            continue
+        if isinstance(dim, StringAttr):
+            values.append(dim.data)
+            continue
+        raise LoweringError("Unsupported layout attribute", location=location)
+    return [emit_index_operand(item, ctx) for item in values]
 
 
 def build_stride_attrs(
@@ -162,7 +280,18 @@ def build_stride_attrs(
     - test: [test/dsl/mlir_gen/emit/test_shape_utils.py](test/dsl/mlir_gen/emit/test_shape_utils.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/shape_utils.py](kernel_gen/dsl/mlir_gen/emit/shape_utils.py)
     """
-    return _build_stride_attrs(value, rank, ctx, location=location)
+    stride = build_index_attrs(value, rank, ctx, default_value=1, location=location)
+    for entry in stride:
+        if isinstance(entry.type, SymbolValueType):
+            if entry.type.get_value() != 1:
+                raise LoweringError("Only unit stride is supported", location=location)
+            continue
+        owner = entry.owner
+        if not isinstance(owner, arith.ConstantOp) or not isinstance(owner.value, IntegerAttr):
+            raise LoweringError("Only unit stride is supported", location=location)
+        if owner.value.value.data != 1:
+            raise LoweringError("Only unit stride is supported", location=location)
+    return stride
 
 
 def build_index_operands_exact(
@@ -195,4 +324,5 @@ def build_index_operands_exact(
     - test: [test/dsl/mlir_gen/emit/test_shape_utils.py](test/dsl/mlir_gen/emit/test_shape_utils.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/shape_utils.py](kernel_gen/dsl/mlir_gen/emit/shape_utils.py)
     """
-    return _build_index_operands_exact(value, ctx, location=location)
+    values = list(value) if isinstance(value, (list, tuple)) else [value]
+    return [emit_index_operand(item, ctx) for item in values]

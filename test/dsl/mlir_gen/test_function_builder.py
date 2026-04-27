@@ -23,23 +23,18 @@
 """
 
 from __future__ import annotations
-import sys
-from pathlib import Path
 
 import pytest
 from xdsl.dialects import func
-from xdsl.dialects.builtin import i32
+from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, i8
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
+from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dsl.ast import (
     BlockAST,
     ConstAST,
     FunctionAST,
-    NnReduceAST,
     ScalarArgAST,
+    TensorAST,
     parse_function,
 )
 from kernel_gen.dsl.ast.visitor import AstVisitorError
@@ -68,6 +63,27 @@ def _tensor_arg(shape: list[int]) -> Memory:
     """
 
     return Memory(shape, NumericType.Float32)
+
+
+def _memory_type(
+    shape: list[int | str],
+    stride: list[int | str],
+    *,
+    space: str = "global",
+) -> NnMemoryType:
+    def _attr(value: int | str) -> IntAttr | StringAttr:
+        if isinstance(value, int):
+            return IntAttr(value)
+        return StringAttr(value)
+
+    return NnMemoryType(
+        ArrayAttr([_attr(dim) for dim in shape]),
+        ArrayAttr([_attr(dim) for dim in stride]),
+        i8,
+        NnMemorySpaceAttr.from_name(space),
+    )
+
+
 # TC-MLIR-GEN-FUNC-001
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
@@ -82,8 +98,8 @@ def test_build_func_op_requires_runtime_args() -> None:
         return x
 
     with pytest.raises(AstVisitorError) as excinfo:
-        build_func_op(kernel)
-    assert "build_func_op requires explicit runtime args" in str(excinfo.value)
+        build_func_op(kernel, globals={"X": 1})
+    assert "globals/builtins cannot replace function runtime args" in str(excinfo.value)
 
 
 # TC-MLIR-GEN-FUNC-002
@@ -103,6 +119,8 @@ def test_build_func_op_from_ast_builds_func() -> None:
     func_op = build_func_op_from_ast(func_ast, runtime_args=[_tensor_arg([2, 2])])
     assert isinstance(func_op, func.FuncOp)
     assert func_op.sym_name.data == "identity"
+
+
 def test_build_func_op_from_ast_error_edges() -> None:
     with pytest.raises(AstVisitorError, match="Function return requires explicit return syntax or annotation"):
         build_func_op_from_ast(
@@ -114,6 +132,16 @@ def test_build_func_op_from_ast_error_edges() -> None:
                 returns_none=False,
             ),
         )
+
+    value_return_ast = FunctionAST(
+        name="empty_value_body",
+        inputs=[],
+        outputs=[ScalarArgAST("out", int)],
+        body=BlockAST([]),
+        returns_none=False,
+    )
+    with pytest.raises(AstVisitorError, match="Function body is empty"):
+        build_func_op_from_ast(value_return_ast)
 
 
 def test_build_func_op_from_ast_rejects_reduce_max_axis_out_of_range() -> None:

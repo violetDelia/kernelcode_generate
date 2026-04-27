@@ -1,4 +1,25 @@
-"""CPU target emitter entry."""
+"""CPU target emitter entry.
+
+创建者: OpenAI Codex
+最后一次更改: OpenAI Codex
+
+功能说明:
+- 注册 CPU target 的 emit op / value / attr / name handler。
+- 承载 CPU 侧片段源码生成与命名规则。
+
+API 列表:
+- 无（仅 target 私有注册实现）
+
+使用示例:
+- from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c_op
+- stmt = emit_c_op(op, EmitCContext(config={"target": "cpu"}))
+
+关联文件:
+- spec: [spec/dsl/gen_kernel/emit.md](../../../../../spec/dsl/gen_kernel/emit.md)
+- spec: [spec/dsl/gen_kernel/emit/register.md](../../../../../spec/dsl/gen_kernel/emit/register.md)
+- test: [test/dsl/gen_kernel/emit/test_emit.py](../../../../../test/dsl/gen_kernel/emit/test_emit.py)
+- 功能实现: [kernel_gen/dsl/gen_kernel/emit/cpu/__init__.py](.)
+"""
 
 from __future__ import annotations
 
@@ -116,19 +137,18 @@ def _emit_cpu_space(memory_type: NnMemoryType, _ctx) -> str:
 
 
 @emit_c_name_impl(BlockArgument, target="cpu")
-def _emit_cpu_block_arg_name(value: SSAValue, ctx, preferred: str | None, prefix: str) -> str:
-    if preferred is not None:
-        return preferred
-    if prefix != "v":
+def _emit_cpu_block_arg_name(value: SSAValue, ctx) -> str:
+    parent_op = value.owner.parent_op()
+    if value.index == 0 and isinstance(parent_op, (scf.ForOp, SymbolForOp)):
         counters = ctx.config.setdefault("name_counters", {})
-        current = int(counters.get(prefix, 0))
-        counters[prefix] = current + 1
-        return f"{prefix}{current}"
+        current = int(counters.get("i", 0))
+        counters["i"] = current + 1
+        return f"i{current}"
     return f"arg{value.index}"
 
 
 @emit_c_name_impl(SymbolConstOp, target="cpu")
-def _emit_cpu_symbol_const_name(value: SSAValue, _ctx, _preferred: str | None, _prefix: str) -> str:
+def _emit_cpu_symbol_const_name(value: SSAValue, _ctx) -> str:
     owner = value.owner
     if not isinstance(owner, SymbolConstOp):
         raise ValueError("symbol.const name handler only supports SymbolConstOp")
@@ -231,7 +251,7 @@ def _emit_memory_decl(
     space_expr: str | None = None,
     with_backing_storage: bool = False,
 ) -> str:
-    if ctx.target not in {"cpu", "npu_demo"}:
+    if ctx.config["target"] not in {"cpu", "npu_demo"}:
         raise emit_c_error(ctx, f"memory {name}", "unsupported target")
     element_type = ctx.dispatch_type(memory_type.element_type)
     if shape_values is None:
@@ -248,7 +268,7 @@ def _emit_memory_decl(
         format_expr = "MemoryFormat::Norm"
     if space_expr is None:
         space_expr = ctx.dispatch_attr(memory_type)
-    if ctx.target == "npu_demo":
+    if ctx.config["target"] == "npu_demo":
         ctor_args = f"{data_expr}, {name}_shape, {name}_stride, {len(shape_values)}, {format_expr}"
     else:
         ctor_args = f"{data_expr}, {len(shape_values)}, {name}_shape, {name}_stride, {format_expr}"
@@ -277,7 +297,7 @@ def _emit_dma_copy_loop_nest(
     ctx: EmitCContext,
     target_has_offsets: bool,
 ) -> str:
-    if ctx.target != "cpu":
+    if ctx.config["target"] != "cpu":
         raise emit_c_error(ctx, "dma.copy", "dma ops are cpu-only")
     base_name = _allocate_temp_name(ctx, "dma")
     source_indices_name = f"{base_name}_src_indices"
@@ -318,7 +338,7 @@ def _emit_dma_copy_loop_nest(
 
 
 def _emit_dma_load_stmt(op: DmaLoadOp, ctx: EmitCContext) -> str:
-    if ctx.target != "cpu":
+    if ctx.config["target"] != "cpu":
         raise emit_c_error(ctx, op.name, "dma ops are cpu-only")
     if not isinstance(op.source.type, NnMemoryType):
         raise emit_c_error(ctx, op.name, "source must be nn.memory")
@@ -336,7 +356,7 @@ def _emit_dma_load_stmt(op: DmaLoadOp, ctx: EmitCContext) -> str:
 
 
 def _emit_dma_store_stmt(op: DmaStoreOp, ctx: EmitCContext) -> str:
-    if ctx.target != "cpu":
+    if ctx.config["target"] != "cpu":
         raise emit_c_error(ctx, op.name, "dma ops are cpu-only")
     source_type = op.source.type
     if not isinstance(source_type, NnMemoryType) or not _is_unit_tile(source_type):
@@ -348,7 +368,7 @@ def _emit_dma_store_stmt(op: DmaStoreOp, ctx: EmitCContext) -> str:
 
 
 def _emit_dma_alloc_stmt(op: DmaAllocOp, ctx: EmitCContext) -> str:
-    if ctx.target != "cpu":
+    if ctx.config["target"] != "cpu":
         raise emit_c_error(ctx, op.name, "dma ops are cpu-only")
     result_name = ctx.create_or_get_name(op.result)
     result_type = op.result.type
@@ -369,7 +389,7 @@ def _emit_dma_alloc_stmt(op: DmaAllocOp, ctx: EmitCContext) -> str:
 
 
 def _emit_dma_fill_stmt(op: DmaFillOp, ctx: EmitCContext) -> str:
-    if ctx.target != "cpu":
+    if ctx.config["target"] != "cpu":
         raise emit_c_error(ctx, op.name, "dma ops are cpu-only")
     target_expr = _emit_c_value(op.target, ctx)
     value_expr = _emit_c_value(op.value, ctx)
@@ -383,7 +403,7 @@ def _emit_dma_fill_stmt(op: DmaFillOp, ctx: EmitCContext) -> str:
 
 
 def _emit_dma_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
-    if ctx.target != "cpu":
+    if ctx.config["target"] != "cpu":
         raise emit_c_error(ctx, op.name, "dma ops are cpu-only")
     source_expr = _emit_c_value(op.source, ctx)
     result_name = ctx.create_or_get_name(op.result)
@@ -408,7 +428,7 @@ def _emit_dma_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
 
 
 def _emit_dma_slice_stmt(op: DmaSliceOp, ctx: EmitCContext) -> str:
-    if ctx.target != "cpu":
+    if ctx.config["target"] != "cpu":
         raise emit_c_error(ctx, op.name, "dma ops are cpu-only")
     return _emit_dma_copy_loop_nest(
         source_expr=_emit_c_value(op.source, ctx),
@@ -422,7 +442,7 @@ def _emit_dma_slice_stmt(op: DmaSliceOp, ctx: EmitCContext) -> str:
 
 
 def _emit_dma_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
-    if ctx.target != "cpu":
+    if ctx.config["target"] != "cpu":
         raise emit_c_error(ctx, op.name, "dma ops are cpu-only")
     source_expr = _emit_c_value(op.source, ctx)
     target_expr = _emit_c_value(op.target, ctx)
@@ -439,7 +459,7 @@ def _emit_dma_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
 
 
 def _emit_img2col2d_stmt(op: NnImg2col2dOp, ctx: EmitCContext) -> str:
-    if ctx.target != "cpu":
+    if ctx.config["target"] != "cpu":
         raise emit_c_error(ctx, op.name, "nn ops are cpu-only")
     input_expr = _emit_c_value(op.input, ctx)
     result_expr = ctx.create_or_get_name(op.result)
@@ -463,7 +483,7 @@ def _emit_img2col2d_stmt(op: NnImg2col2dOp, ctx: EmitCContext) -> str:
 
 
 def _emit_nn_add_stmt(op: NnAddOp, ctx: EmitCContext) -> str:
-    if ctx.target != "cpu":
+    if ctx.config["target"] != "cpu":
         raise emit_c_error(ctx, op.name, "unsupported op")
     result_name = ctx.lookup_name(op.result)
     if result_name is None or not isinstance(op.result.type, NnMemoryType):
@@ -507,7 +527,7 @@ def _emit_kernel_binary_elewise_stmt(op: KernelBinaryElewiseOp, ctx: EmitCContex
 
 
 def _emit_dma_broadcast_stmt(op: DmaBroadcastOp, ctx: EmitCContext) -> str:
-    if ctx.target != "cpu":
+    if ctx.config["target"] != "cpu":
         raise emit_c_error(ctx, op.name, "unsupported op")
     if not isinstance(op.target.type, NnMemoryType) or not isinstance(op.source.type, NnMemoryType):
         raise emit_c_error(ctx, op.name, "unsupported op")
@@ -531,7 +551,7 @@ def _emit_loop_region(
     ctx: EmitCContext,
     iv_type: str = "long long",
 ) -> str:
-    iv_name = ctx.create_or_get_name(block.args[0], prefix="i")
+    iv_name = ctx.create_or_get_name(block.args[0])
     lines = [
         f"{ctx.current_indent}for ({iv_type} {iv_name} = {_emit_c_value(lower, ctx)}; {iv_name} < {_emit_c_value(upper, ctx)}; {iv_name} += {_emit_c_value(step, ctx)}) {{"
     ]

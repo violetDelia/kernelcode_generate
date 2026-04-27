@@ -22,7 +22,7 @@ from .emit_context import EmitCContext, EmitCError
 
 
 def emit_c_error(ctx: EmitCContext, subject: str, reason: str) -> EmitCError:
-    return EmitCError(f"target={ctx.target}: {subject}: {reason}")
+    return EmitCError(f"target={ctx.config['target']}: {subject}: {reason}")
 
 
 __all__ = ["emit_c_error"]

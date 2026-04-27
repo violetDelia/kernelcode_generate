@@ -10,7 +10,7 @@
 
 使用示例:
 - from kernel_gen.dsl.gen_kernel.emit import emit_c
-- source = emit_c(func_op, EmitCContext(target="cpu"))
+- source = emit_c(func_op, EmitCContext(config={"target": "cpu"}))
 
 关联文件:
 - spec: [spec/dsl/gen_kernel/emit.md](../../../../spec/dsl/gen_kernel/emit.md)
@@ -42,13 +42,13 @@ def _dispatch_target(target: str, *, for_value: bool = False):
 def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
     """把单个 op 发射为目标相关源码语句。"""
 
-    return _dispatch_target(ctx.target)._emit_c_op(op, ctx)
+    return _dispatch_target(ctx.config["target"])._emit_c_op(op, ctx)
 
 
 def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     """把 SSA value 发射为目标相关右值表达式。"""
 
-    return _dispatch_target(ctx.target, for_value=True)._emit_c_value(value, ctx)
+    return _dispatch_target(ctx.config["target"], for_value=True)._emit_c_value(value, ctx)
 
 
 def emit_c(obj: object, ctx: EmitCContext) -> str:
@@ -68,8 +68,8 @@ def emit_c(obj: object, ctx: EmitCContext) -> str:
         from kernel_gen.dialect.arch import ArchLaunchOp
 
         emit_ctx = ctx
-        if ctx.target == "npu_demo":
-            emit_ctx = ctx.clone_for_target(ctx.target)
+        if ctx.config["target"] == "npu_demo":
+            emit_ctx = EmitCContext(config=dict(ctx.config))
         emitter = KernelEmitter(emit_ctx, emit_op=emit_c_op)
         try:
             if isinstance(obj, func.FuncOp):
@@ -78,7 +78,7 @@ def emit_c(obj: object, ctx: EmitCContext) -> str:
                 top_ops = list(obj.ops)
                 if not top_ops or any(not isinstance(top_op, func.FuncOp) for top_op in top_ops):
                     source = emitter.emit(obj)
-                elif ctx.target == "npu_demo" and any(
+                elif ctx.config["target"] == "npu_demo" and any(
                     any(isinstance(inner, ArchLaunchOp) for inner in top_op.body.block.ops)
                     for top_op in top_ops
                 ):
@@ -92,8 +92,8 @@ def emit_c(obj: object, ctx: EmitCContext) -> str:
                 return include.rstrip()
             return source
         except EmitCError as exc:
-            raise GenKernelError(str(exc).replace(f"target={ctx.target}: ", "")) from exc
-    raise EmitCError(f"target={ctx.target}: unsupported emit_c object {type(obj).__name__}")
+            raise GenKernelError(str(exc).replace(f"target={ctx.config['target']}: ", "")) from exc
+    raise EmitCError(f"target={ctx.config['target']}: unsupported emit_c object {type(obj).__name__}")
 
 
 __all__ = ["emit_c", "emit_c_op", "emit_c_value"]

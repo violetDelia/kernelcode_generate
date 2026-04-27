@@ -76,11 +76,11 @@ class UnsupportedOp(IRDLOperation):
 
 
 def _ctx() -> EmitCContext:
-    return EmitCContext(target="cpu")
+    return EmitCContext(config={"target": "cpu"})
 
 
 def _npu_ctx() -> EmitCContext:
-    return EmitCContext(target="npu_demo")
+    return EmitCContext(config={"target": "npu_demo"})
 
 
 def test_emit_c_public_entry_matches_gen_kernel_for_empty_func() -> None:
@@ -149,7 +149,7 @@ def test_emit_c_context_type_helpers_delegate_to_context_converter() -> None:
         calls.append(value)
         return "ttc"
 
-    ctx = EmitCContext(target="cpu", type_converter=_converter)
+    ctx = EmitCContext(config={"target": "cpu", "type_converter": _converter})
 
     assert ctx.dispatch_attr(space) == "GM"
     assert ctx.dispatch_attr(mem_type) == "GM"
@@ -316,17 +316,17 @@ def test_emit_c_op_lowers_arith_add() -> None:
         def allocate(self: "_Allocator", _value: object) -> str:
             return "named"
 
-    ctx_named = EmitCContext(target="cpu", naming=_Allocator())
+    ctx_named = EmitCContext(config={"target": "cpu", "naming": _Allocator()})
     ctx_named.bind_name(block.args[0], "lhs")
     ctx_named.bind_name(block.args[1], "rhs")
     assert emit_c_op(op, ctx_named) == "int32_t named = (lhs + rhs);"
 
-    ctx_callable = EmitCContext(target="cpu", naming=lambda _value: "callable")
+    ctx_callable = EmitCContext(config={"target": "cpu", "naming": lambda _value: "callable"})
     ctx_callable.bind_name(block.args[0], "lhs")
     ctx_callable.bind_name(block.args[1], "rhs")
     assert emit_c_op(op, ctx_callable) == "int32_t callable = (lhs + rhs);"
 
-    ctx_converter = EmitCContext(target="cpu", type_converter=lambda _attr: "custom")
+    ctx_converter = EmitCContext(config={"target": "cpu", "type_converter": lambda _attr: "custom"})
     ctx_converter.bind_name(block.args[0], "lhs")
     ctx_converter.bind_name(block.args[1], "rhs")
     assert emit_c_op(op, ctx_converter) == "custom v0 = (lhs + rhs);"
@@ -335,19 +335,19 @@ def test_emit_c_op_lowers_arith_add() -> None:
         def convert(self: "_Converter", _attr: object) -> str:
             return "custom2"
 
-    ctx_convert = EmitCContext(target="cpu", type_converter=_Converter())
+    ctx_convert = EmitCContext(config={"target": "cpu", "type_converter": _Converter()})
     ctx_convert.bind_name(block.args[0], "lhs")
     ctx_convert.bind_name(block.args[1], "rhs")
     assert emit_c_op(op, ctx_convert) == "custom2 v0 = (lhs + rhs);"
 
-    ctx_bad_converter = EmitCContext(target="cpu", type_converter=object())
+    ctx_bad_converter = EmitCContext(config={"target": "cpu", "type_converter": object()})
     ctx_bad_converter.bind_name(block.args[0], "lhs")
     ctx_bad_converter.bind_name(block.args[1], "rhs")
     with pytest.raises(EmitCError) as exc_info:
         emit_c_op(op, ctx_bad_converter)
     assert "unsupported type converter" in str(exc_info.value)
 
-    ctx_bad_naming = EmitCContext(target="cpu", naming=object())
+    ctx_bad_naming = EmitCContext(config={"target": "cpu", "naming": object()})
     ctx_bad_naming.bind_name(block.args[0], "lhs")
     ctx_bad_naming.bind_name(block.args[1], "rhs")
     with pytest.raises(EmitCError) as exc_info:
@@ -654,7 +654,7 @@ def test_emit_c_op_rejects_symbol_add_on_non_cpu() -> None:
     rhs_type = SymbolValueType.from_expr("R")
     out_type = SymbolValueType.from_expr("L + R")
     block = Block(arg_types=[lhs_type, rhs_type])
-    ctx = EmitCContext(target="cuda")
+    ctx = EmitCContext(config={"target": "cuda"})
     ctx.bind_name(block.args[0], "lhs")
     ctx.bind_name(block.args[1], "rhs")
     op = SymbolAddOp(block.args[0], block.args[1], out_type)
@@ -880,7 +880,7 @@ def test_emit_c_op_keeps_nn_add_unsupported_without_prebound_result_or_on_non_cp
     with pytest.raises(EmitCError, match="nn.add: unsupported op"):
         emit_c_op(op, missing_result_ctx)
 
-    non_cpu_ctx = EmitCContext(target="cuda")
+    non_cpu_ctx = EmitCContext(config={"target": "cuda"})
     non_cpu_ctx.bind_name(block.args[0], "lhs")
     non_cpu_ctx.bind_name(block.args[1], "rhs")
     non_cpu_ctx.bind_name(op.result, "out")
@@ -1208,10 +1208,13 @@ def test_emit_c_private_helper_and_context_edges(monkeypatch: pytest.MonkeyPatch
     naming_ctx.bind_name(naming_block.args[0], "v0")
     assert naming_ctx.create_or_get_name(naming_block.args[1]) == "arg1"
 
-    preferred_ctx = _ctx()
-    assert preferred_ctx.create_or_get_name(naming_block.args[0], preferred="lhs") == "lhs"
-    assert preferred_ctx.create_or_get_name(naming_block.args[0], preferred="lhs") == "lhs"
-    assert preferred_ctx.create_or_get_name(naming_block.args[1], preferred="lhs") == "lhs_1"
+    dedupe_ctx = EmitCContext(config={"target": "cpu", "naming": lambda _value: "lhs"})
+    naming_mem = _make_memory_type([2], [1], element_type=f32)
+    first_alloc = DmaAllocOp([], naming_mem)
+    second_alloc = DmaAllocOp([], naming_mem)
+    assert dedupe_ctx.create_or_get_name(naming_block.args[0]) == "arg0"
+    assert dedupe_ctx.create_or_get_name(first_alloc.result) == "lhs"
+    assert dedupe_ctx.create_or_get_name(second_alloc.result) == "lhs_1"
 
     npu_ctx = _npu_ctx()
     positive_const = SymbolConstOp(7)
@@ -1248,7 +1251,7 @@ def test_emit_c_private_helper_and_context_edges(monkeypatch: pytest.MonkeyPatch
         [arith.ConstantOp(IntegerAttr(2, i32)).result, arith.ConstantOp(IntegerAttr(1, i32)).result],
         source_type,
     )
-    view_ctx.naming = lambda _value: "src"
+    view_ctx.config["naming"] = lambda _value: "src"
     stmt = emit_c_op(view_op, view_ctx)
     assert "src_1" in stmt
 
@@ -1320,11 +1323,11 @@ def test_emit_c_private_additional_error_matrix(
     naming_ctx = _ctx()
     naming_ctx.bind_name(naming_block.args[0], "tmp")
     naming_ctx.bind_name(naming_block.args[1], "tmp_1")
-    naming_ctx.naming = lambda _value: "tmp"
+    naming_ctx.config["naming"] = lambda _value: "tmp"
     naming_mem = _make_memory_type([2], [1], element_type=f32)
     assert naming_ctx.create_or_get_name(DmaAllocOp([], naming_mem).result) == "tmp_2"
 
-    invalid_naming_ctx = EmitCContext(target="cpu", naming=object())
+    invalid_naming_ctx = EmitCContext(config={"target": "cpu", "naming": object()})
     with pytest.raises(EmitCError, match="unsupported naming strategy"):
         invalid_naming_ctx.create_or_get_name(DmaAllocOp([], naming_mem).result)
 
@@ -1334,9 +1337,9 @@ def test_emit_c_private_additional_error_matrix(
 
     assert cpu_ctx.dispatch_type(Float16Type()) == "half"
     assert cpu_ctx.dispatch_type(BFloat16Type()) == "bfloat16_t"
-    assert EmitCContext(target="cpu", type_converter=_Converter()).dispatch_type(f32) == "converted"
+    assert EmitCContext(config={"target": "cpu", "type_converter": _Converter()}).dispatch_type(f32) == "converted"
     with pytest.raises(EmitCError, match="unsupported type converter"):
-        EmitCContext(target="cpu", type_converter=object()).dispatch_type(f32)
+        EmitCContext(config={"target": "cpu", "type_converter": object()}).dispatch_type(f32)
 
     unit_tile_type = _make_memory_type([1], [1], element_type=f32)
     load_block = Block(arg_types=[unit_tile_type, unit_tile_type])
@@ -1346,14 +1349,14 @@ def test_emit_c_private_additional_error_matrix(
     fill_op = DmaFillOp(load_block.args[0], fill_value.result)
     for op in (load_op, view_op, fill_op):
         with pytest.raises(EmitCError, match="cpu-only"):
-            emit_c_op(op, EmitCContext(target="gpu"))
+            emit_c_op(op, EmitCContext(config={"target": "gpu"}))
     store_block = Block(arg_types=[mem_type, mem_type])
     with pytest.raises(EmitCError, match="only unit-tile dma.store source is supported"):
         emit_c_op(DmaStoreOp(store_block.args[0], store_block.args[1], [], [], []), _ctx())
 
     alloc_op = DmaAllocOp([], mem_type)
     with pytest.raises(EmitCError, match="dma ops are cpu-only"):
-        emit_c_op(alloc_op, EmitCContext(target="gpu"))
+        emit_c_op(alloc_op, EmitCContext(config={"target": "gpu"}))
     bad_alloc = DmaAllocOp([], i32)
     with pytest.raises(EmitCError, match="result must be nn.memory"):
         emit_c_op(bad_alloc, _ctx())
@@ -1374,7 +1377,7 @@ def test_emit_c_private_additional_error_matrix(
                 arith.ConstantOp(IntegerAttr(0, i32)).result,
                 NnMemorySpaceAttr.from_name("global"),
             ),
-            EmitCContext(target="npu_demo"),
+            EmitCContext(config={"target": "npu_demo"}),
         )
 
     view_ctx = _npu_ctx()
@@ -1388,7 +1391,7 @@ def test_emit_c_private_additional_error_matrix(
         [arith.ConstantOp(IntegerAttr(1, i32)).result],
         _make_memory_type([2], [1], element_type=f32),
     )
-    view_ctx.naming = lambda _value: "src"
+    view_ctx.config["naming"] = lambda _value: "src"
     assert "src_2" in emit_c_op(colliding_view, view_ctx)
 
     with pytest.raises(EmitCError, match="unsupported dynamic memory space"):

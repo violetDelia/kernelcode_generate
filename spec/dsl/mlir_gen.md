@@ -8,15 +8,15 @@
 
 ## API 列表
 
-- `build_func_op(fn: Callable[..., object], *runtime_args: object) -> func.FuncOp`
-- `build_func_op_from_ast(func_ast: FunctionAST, runtime_args: tuple[object, ...] | list[object] | None = None, config: dict[str, object] | None = None) -> func.FuncOp`
-- `class MlirGenModuleError(reason: str)`
-- `mlir_gen(fn: Callable[..., object], *runtime_args: object, config: dict[str, object] | None = None) -> builtin.ModuleOp`
+- `MlirGenModuleError(message: str)`
+- `build_func_op(fn, *runtime_args, globals=None, builtins=None)`
+- `build_func_op_from_ast(func_ast, runtime_args=None, config=None)`
+- `mlir_gen(fn, *runtime_args, globals=None, builtins=None, config=None)`
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen/__init__.py`](../../kernel_gen/dsl/mlir_gen/__init__.py)
 - `test`：
@@ -44,6 +44,7 @@
 
 ## 限制与边界
 
+- `kernel_gen.dsl.mlir_gen` package-root 当前只公开 `MlirGenModuleError`、`build_func_op(...)`、`build_func_op_from_ast(...)`、`mlir_gen(...)`；不得把下划线 helper、`emit.core` 私有能力或 `kernel_gen.dsl.gen_kernel` 的 `EmitCContext/emit_c/gen_kernel` 系列重导出当成本模块公开合同。
 - `build_func_op(...)` / `build_func_op_from_ast(...)` 只生成 `func.func`，不负责组装 `builtin.module`；`mlir_gen(...)` 负责组装 `builtin.module`。
 - 不负责 MLIR 文本打印或后端代码生成。
 - `mlir_gen(...)` 只返回 in-memory `builtin.module`；与磁盘 `.mlir` 文件做归一化比较的规则由 [`spec/tools/mlir_gen_compare.md`](../../spec/tools/mlir_gen_compare.md) 定义，本模块不读取文件、不做文本比较。
@@ -52,12 +53,10 @@
 - `PtrArgAST` 虽属于 AST 层签名节点，但当前不在 builder / signature 支持面内；若流入 `build_func_op(...)` / `build_func_op_from_ast(...)`，必须按实现现状报 `Unsupported input type`，不得在 spec 中误写为已支持输入。
 - 当前 node-level lowering 子系统的唯一公开入口是 `kernel_gen.dsl.mlir_gen.emit`；`mlir_gen` 对外只承认这一套 emit 语义，不再保留旧 facade 的并列入口合同。
 - 不做优化或自动修复非法 IR。
-- `build_func_op(...)` 与 `mlir_gen(...)` 的公开入口只承认 `fn + runtime_args (+ config)`；若当前实现文件内仍保留 `globals` / `builtins` 兼容桥接，它们也只属于文件内 helper，不得进入包根公开 API。
+- `build_func_op` 的公开入口接收目标函数、运行时参数，以及仅用于补充源码解析环境的可选 `globals` / `builtins`；这些额外参数不得改变由 `runtime_args` 决定的函数输入签名，也不能代替必填的运行时参数。
 - `build_func_op` 的公开契约仅覆盖可位置绑定的形参；`runtime_args` 必须按这些形参的顺序传入。
 - 运行时参数必须按目标函数形参顺序传入；数量不一致、顺序不一致或类型无法映射时必须报错。
 - 运行时参数的类型 lowering 必须基于“实际传入的参数对象”决定，而不是基于额外配置推断。
-- `kernel_gen.dsl.mlir_gen.__all__` 的公开集合只允许包含 `MlirGenModuleError`、`build_func_op`、`build_func_op_from_ast`、`mlir_gen`；`_build_parse_environment`、`_build_runtime_table_for_signature`、`_build_signature_types`、`_is_symbol_scalar_function`、`_parse_function_with_env`、`_symbol_expr_from_runtime_arg`、`_validate_return_type`、`parse_env`、`emit_c`、`emit_c_op`、`emit_c_value`、`gen_kernel` 都不是本包根公开 API。
-- 当前文件内允许保留 parse-env、signature 与 module 组装 helper，但它们只允许在 `kernel_gen.dsl.mlir_gen` 目录内复用；目录外实现、工具和测试不得跨文件导入这些非公开 helper。
 - `build_func_op_from_ast` 允许 `func_ast.inputs` 为空；若提供 `runtime_args`，其长度必须与 `func_ast.inputs` 一致；若输入包含未支持的 AST 类型、未支持的标量类型，或带输入函数既不属于纯 symbol 标量函数又缺少 tensor 输入时，必须报错。
 - 当运行时参数为 `SymbolDim("s")` 这类 symbol 标量时，对应的 `func.func` 输入必须 lowering 为 `!symbol.int<"s">`；若为常量 symbol，例如 `SymbolDim(1)`，则必须 lowering 为 `!symbol.int<"1">`。
 - 当运行时参数是 Python `int` 且函数场景属于 symbol 整型标量运算时，对应的 `func.func` 输入必须 lowering 为携带具体整数值的 `SymbolValueType`，不得退回 `i32`、`index` 或其他 builtin 标量类型；若整数值为负数，对外字符串表示必须直接表现为十进制负数字面量，例如 `symbol.int<-7>`。
@@ -102,7 +101,7 @@
 
 ## 公开接口
 
-### `build_func_op(fn, *runtime_args)`
+### `build_func_op(fn, *runtime_args, globals=None, builtins=None)`
 
 功能说明：
 
@@ -114,6 +113,8 @@
 
 - `fn` (`callable`)：受限 Python 函数。
 - `runtime_args` (`tuple[object, ...]`)：目标函数实际传入的运行时参数，顺序必须与 `fn` 的形参顺序一致。
+- `globals` (`dict[str, object] | None`)：可选的解析环境补充表，仅用于补充 `parse_function(...)` 所需的全局名称解析。
+- `builtins` (`dict[str, object] | object | None`)：可选的内建名称补充表；若传入非 `dict` 对象，则按其 `__dict__` 参与解析环境构造。
 
 使用示例：
 
@@ -129,7 +130,7 @@ func_op = build_func_op(only_symbol, s)
 注意事项：
 
 - 解析失败或发射失败必须抛出可定位的错误。
-- 公开合同不提供 `globals` / `builtins` 参数；若当前实现文件内保留同名兼容桥接，它们也不得出现在包根 `__all__`、工具消费入口或跨文件测试调用中。
+- `globals` / `builtins` 只用于补充源码解析环境，不能改变函数签名推导行为，也不能替代 `runtime_args`。
 - `build_func_op` 不接收 `config`；如需 `config`，应改用 `build_func_op_from_ast(...)`。
 - `runtime_args` 的个数必须与函数形参数量一致。
 - `build_func_op` 仅保证可位置绑定形参按位置顺序接收 `runtime_args`。
@@ -220,7 +221,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 
 - 返回 `func.func` op。
 
-### `mlir_gen(fn, *runtime_args, config=None)`
+### `mlir_gen(fn, *runtime_args, globals=None, builtins=None, config=None)`
 
 功能说明：
 
@@ -233,6 +234,8 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 
 - `fn` (`callable`)：根函数。
 - `runtime_args` (`tuple[object, ...]`)：根函数的运行时参数，仅用于根函数签名推导。
+- `globals` (`dict[str, object] | None`)：解析环境补充表，语义与 `build_func_op(...)` 一致。
+- `builtins` (`dict[str, object] | object | None`)：内建名称补充表，语义与 `build_func_op(...)` 一致。
 - `config` (`dict[str, object] | None`)：可选配置；会透传给 visitor / lowering，但不得改变 module 组装顺序与 callee 收集边界。
 
 使用示例：
@@ -269,7 +272,6 @@ assert ok is True
 注意事项：
 
 - 根函数签名推导仅允许基于 `runtime_args + AST`；不得把 Python 函数签名、返回注解或参数注解当作另一套独立推导来源。
-- 公开合同不提供 `globals` / `builtins` 参数；若实现仍在文件内通过 parser 或 module helper 维护显式环境桥接，这些 helper 也只允许在 `kernel_gen.dsl.mlir_gen` 目录内使用。
 - callee 的 `func.func` 签名必须由其 call-site operand 类型推导；callee 不要求也不接受额外的 `runtime_args`。
 - 同一个 callee 若在多个 call-site 下推导出不一致签名，必须失败，错误消息包含 `MlirGenModuleError: inconsistent callee signature`。
 - 递归调用不支持，必须失败，错误消息包含 `MlirGenModuleError: recursive callee graph is not supported`。
@@ -323,24 +325,20 @@ builtin.module {
   - [`test/dsl/mlir_gen/test_parse_env.py`](../../test/dsl/mlir_gen/test_parse_env.py)
   - [`test/dsl/mlir_gen/test_signature.py`](../../test/dsl/mlir_gen/test_signature.py)
   - [`test/dsl/mlir_gen/test_module_builder.py`](../../test/dsl/mlir_gen/test_module_builder.py)
-- 公开消费者测试文件：
-  - [`test/dsl/ast/test_package.py`](../../test/dsl/ast/test_package.py)
-  - [`test/dsl/ast/test_visitor_integration.py`](../../test/dsl/ast/test_visitor_integration.py)
-  - [`test/tools/test_dsl_run.py`](../../test/tools/test_dsl_run.py)
-  - [`test/tools/test_mlir_gen_compare.py`](../../test/tools/test_mlir_gen_compare.py)
-- 依赖测试文件：[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
+- 依赖测试文件：[`test/dsl/ast/test_package.py`](../../test/dsl/ast/test_package.py)、[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
+- 补充测试文件：[`test/dsl/ast/test_visitor_integration.py`](../../test/dsl/ast/test_visitor_integration.py)
 - 执行命令（mlir_gen 集成）：`pytest -q test/dsl/mlir_gen/test_function_builder.py test/dsl/mlir_gen/test_parse_env.py test/dsl/mlir_gen/test_signature.py test/dsl/mlir_gen/test_module_builder.py`
-- 执行命令（公开消费者）：`pytest -q test/dsl/ast/test_package.py test/dsl/ast/test_visitor_integration.py test/tools/test_dsl_run.py test/tools/test_mlir_gen_compare.py`
-- 执行命令（依赖子链路）：`pytest -q test/dsl/test_emit_mlir.py`
+- 执行命令（依赖子链路）：`pytest -q test/dsl/ast/test_package.py && pytest -q test/dsl/test_emit_mlir.py`
+- 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/ast/test_visitor_integration.py`
 - 拆分归属：MGEN-001~MGEN-035 归属 `test/dsl/mlir_gen/test_function_builder.py`、`test/dsl/mlir_gen/test_parse_env.py`、`test/dsl/mlir_gen/test_signature.py`、`test/dsl/mlir_gen/test_module_builder.py`；其中 AST/emit 的前置语义分别由 `test_ast.py` 与 `test_emit_mlir.py` 单测保证；MGEN-036/037/037A 与 arch helper 正反路径由 `test_ast.py`、`test/dsl/mlir_gen/test_function_builder.py` 共同覆盖，当前缺口在下游实现/补测阶段补齐。
 - 测试目标：
   - 验证 `build_func_op(...)` 生成 `func.func`。
-  - 验证 `build_func_op(fn, *runtime_args)` 的输入签名仅由运行时参数决定。
-  - 验证 `build_func_op(...)` 仅支持按位置参数传入运行时参数；缺少运行时参数或数量不匹配时必须报错。
+  - 验证 `build_func_op(fn, *runtime_args, globals=None, builtins=None)` 的输入签名仅由运行时参数决定。
+  - 验证 `build_func_op(...)` 仅支持按位置参数传入运行时参数；缺少运行时参数、数量不匹配或试图以 `globals/builtins` 替代时必须报错。
   - 验证 `build_func_op_from_ast(func_ast, runtime_args=None, config=None)` 的公开接口与实现签名一致，且 `runtime_args` / `config` 成功路径可由测试直接观察。
   - 验证 `build_func_op_from_ast(...)` 的输入校验错误路径，包括空输入、`runtime_args` 长度不匹配、未支持的标量类型、未支持的输入节点类型，以及非纯 symbol 标量函数缺少 tensor 输入时报错。
-  - 验证 `kernel_gen.dsl.mlir_gen` 包根 `__all__` 只暴露公开 API，公开消费者测试不得从包根导入 `_build_parse_environment`、`_parse_function_with_env`、`_build_signature_types`、`parse_env` 或其他非公开 helper。
-  - 验证 `dsl_run(...)` 与 `mlir_gen_compare(...)` 只依赖公开 `mlir_gen(...)` 入口，不通过跨文件私有 helper 搭建环境或替换加载路径。
+  - 验证 `globals/builtins` 只补充解析环境，不替代运行时参数；缺少运行时参数、运行时实参数量不匹配或误用 `globals/builtins` 时必须报错。
+  - 验证非 `dict` 的 `builtins` 实参可作为解析环境输入成功构建 `func.func`。
   - 验证函数签名与返回值类型与 AST 一致。
   - 通过测试辅助封装验证 `func.func` 的结构输出（不改变本模块的边界）。
   - 覆盖无返回 `for` 循环与 `slice/deslice` 的生成能力，并要求 `LoopRange` lowering 为 `symbol.for`，且循环迭代变量 `it` 保持 `!symbol.int<"...">`。
@@ -378,7 +376,8 @@ builtin.module {
   - 验证 `conv2d_img2col2d_tiled_npu_demo(...)` 这类最小 conv2d 前端样例可直接生成 raw `func.func`，其中命中循环、`dma.alloc/slice/reshape/deslice`、`nn.img2col2d`、`nn.matmul` 与 `func.return`。
 - 功能与用例清单：
   - MGEN-001：`build_func_op(...)` 返回 `func.func`。（`test_build_func_op_returns_func_op`）
-  - MGEN-001A：`build_func_op(...)` 的输入签名只由 `runtime_args` 决定，公开消费者不得把解析环境注入当作包根合同。（`test_build_func_op_signature_uses_runtime_args_not_parse_env`）
+  - MGEN-001A：`build_func_op(...)` 的输入签名只由 `runtime_args` 决定；即使 `globals` 中存在同名对象且额外传入 `builtins`，成功路径的签名推导也不得被解析环境覆盖。（`test_build_func_op_signature_uses_runtime_args_not_parse_env`）
+  - MGEN-001B：非 `dict` 的 `builtins` 可作为解析环境补充输入，且解析失败必须收敛为 `AstVisitorError`。（`test_mlir_gen_build_func_op_builtins_and_parse_error`）
   - MGEN-002：`build_func_op_from_ast(...)` 保留 AST 参数顺序；当传入 `runtime_args` 时，输入签名仍由运行时参数语义驱动。（`test_build_func_op_from_ast_preserves_arg_order`、`test_build_func_op_from_ast_uses_runtime_args_for_symbol_signature`）
   - MGEN-002A：`build_func_op_from_ast(..., config=...)` 接收并透传 visitor / lowering 配置。（`test_build_func_op_from_ast_forwards_config_to_visitor_and_context`）
   - MGEN-002B：`build_func_op_from_ast(...)` 的公开入口必须覆盖空输入、`runtime_args` 长度不匹配、未支持的标量类型、未支持的输入节点类型，以及非纯 symbol 标量函数缺少 tensor 输入等错误路径。（`test_mlir_gen_signature_validation_errors`）
@@ -405,7 +404,7 @@ builtin.module {
   - MGEN-022C：返回注解放宽仅限二元算术 mixed dtype，且注解 `element_type` 必须是操作数 `element_type` 之一；不满足条件时必须报错 `Return type does not match annotation`。（`test_invalid_tensor_return_annotation_reports_diagnostics`）
   - MGEN-023：纯 symbol 标量除法 lowering 为 `symbol.div`；直接 Python `/` 与 `nn.truediv(...)` 包装在四类输入下必须保持一致；`const/const` 输入按静态整除结果收敛为常量整数；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
   - MGEN-024：纯 symbol 标量整除 lowering 为 `symbol.floordiv`；直接 Python `//` 与 `nn.floordiv(...)` 包装在四类输入下必须保持一致；`const/const` 输入按 Python `//` 语义收敛；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
-  - MGEN-019：`build_func_op` 的运行时参数为必填，且公开契约仅覆盖 `fn + runtime_args` 的可位置绑定形参；省略实参或实参数量不匹配时必须报错。（`test_build_func_op_requires_explicit_runtime_args`、`test_build_func_op_rejects_runtime_arg_count_mismatch`）
+  - MGEN-019：`build_func_op` 的运行时参数为必填，且公开契约仅覆盖 `fn + runtime_args` 的可位置绑定形参；省略实参、实参数量不匹配，或试图以 `globals/builtins` 替代时必须报错。（`test_build_func_op_requires_explicit_runtime_args`、`test_build_func_op_rejects_runtime_arg_count_mismatch`、`test_build_func_op_globals_and_builtins_cannot_replace_runtime_args`）
   - MGEN-020：`build_func_op(add, lhs, rhs)` 对普通 Python `int` runtime args 的 lowering 必须产出携带具体整数值的 `SymbolValueType` 输入；若实参包含负数，其对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，并在函数体内生成 `symbol.add` 结果。（`test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type`）
   - MGEN-025：Tensor 注解支持普通字符串字面量与可静态归一化的 `f"Tensor[...]"` 两种源码形式；若归一化结果不满足 Tensor 语法则必须报错。（`test_build_func_op_accepts_joinedstr_tensor_annotation`、`test_build_func_op_rejects_invalid_joinedstr_tensor_annotation`）
   - MGEN-026：DMA helper 调用在 `build_func_op(...)` 链路中按公开语义分流：`alloc/copy/cast/view/reshape/flatten` 生成对应 memory 结果，`free` 作为无返回值语句参与 lowering，`load/store/slice/deslice` 保持既有 memory 读写行为。（`test_build_func_op_supports_dma_helper_calls`、`test_build_func_op_supports_dma_free_statement`、`test_build_func_op_supports_dma_load_helper`、`test_build_func_op_supports_dma_store_helper`、`test_build_func_op_supports_dma_slice_helper`、`test_build_func_op_supports_dma_deslice_helper`）

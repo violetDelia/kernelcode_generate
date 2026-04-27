@@ -33,16 +33,15 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 registry_module = importlib.import_module("kernel_gen.passes.registry")
-_reset_registry_for_test = registry_module._reset_registry_for_test
 
 from kernel_gen.tools.ircheck import main
 
 
 @pytest.fixture(autouse=True)
 def _isolate_registry_state() -> None:
-    _reset_registry_for_test()
+    importlib.reload(registry_module)
     yield
-    _reset_registry_for_test()
+    importlib.reload(registry_module)
 
 
 _SIMPLE_IR = """builtin.module {

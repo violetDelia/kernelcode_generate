@@ -18,16 +18,12 @@
 
 from __future__ import annotations
 
-import re
 import importlib
 import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
-from xdsl.dialects import func
-from xdsl.dialects.builtin import FunctionType, ModuleOp
-from xdsl.ir import Block, Region
 
 
 def _find_repo_root(start: Path) -> Path:
@@ -64,11 +60,8 @@ from kernel_gen.operation import deslice, loop, matmul, slice, store
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import build_registered_pipeline, load_builtin_passes
 from kernel_gen.tools.dsl_run import DslRunError, dsl_run
-from kernel_gen.tools.dsl_run import NPU_DEMO_WRAPPER_ERROR
 from kernel_gen.target import registry as target_registry
 from kernel_gen.symbol_variable.memory import MemorySpace
-
-dsl_run_module = importlib.import_module("kernel_gen.tools.dsl_run")
 
 try:
     import torch
@@ -76,12 +69,15 @@ except ImportError as exc:  # pragma: no cover - tests require torch
     raise RuntimeError("test/tools/test_dsl_run.py requires torch") from exc
 
 
-RETURN_VALUE_ERROR = "DslRunReturnValueUnsupported: dsl_run only supports functions without DSL return values"
-EMITCCONFIG_ERROR = "DslRunInvalidEmitCContext: emitcconfig must be EmitCContext"
-PIPELINE_NAME_ERROR = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline'"
-PIPELINE_TYPE_ERROR = "DslRunInvalidPipeline: pipeline must be str or PassManager"
-REAL_ARG_TYPE_ERROR = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor and numpy.ndarray"
-ARITY_ERROR = "DslRunArityMismatch: real_args count does not match function signature"
+_EXPECTED_RETURN_VALUE_MESSAGE = "DslRunReturnValueUnsupported: dsl_run only supports functions without DSL return values"
+_EXPECTED_EMITCCONFIG_MESSAGE = "DslRunInvalidEmitCContext: emitcconfig must be EmitCContext"
+_EXPECTED_PIPELINE_NAME_MESSAGE = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline'"
+_EXPECTED_PIPELINE_TYPE_MESSAGE = "DslRunInvalidPipeline: pipeline must be str or PassManager"
+_EXPECTED_REAL_ARG_TYPE_MESSAGE = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor and numpy.ndarray"
+_EXPECTED_ARITY_MESSAGE = "DslRunArityMismatch: real_args count does not match function signature"
+_EXPECTED_NPU_DEMO_WRAPPER_MESSAGE = (
+    "DslRunInternalError: lowered npu_demo module must contain exactly one wrapper func with arch.launch"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -92,8 +88,8 @@ def _isolated_target_registry() -> None:
     最后更改: 金铲铲大作战
 
     功能说明:
-    - 先清空 registry，再重新加载当前仓库的默认 target 定义。
-    - 测试完成后恢复原始 registry / current target，避免与其他测试文件互相污染。
+    - 通过 `importlib.reload(...)` 重置 registry 模块状态，再重新加载当前仓库的默认 target 定义。
+    - 测试完成后再次 reload 并恢复默认目录加载，避免继续直连 registry 私有全局变量。
 
     使用示例:
     - 由 pytest 自动应用，无需手动调用。
@@ -103,8 +99,15 @@ def _isolated_target_registry() -> None:
     - test: test/tools/test_dsl_run.py
     """
 
+    importlib.reload(target_registry)
     target_registry.load_targets(REPO_ROOT / "kernel_gen" / "target" / "targets")
-    yield
+    target_registry.set_current_target(None)
+    try:
+        yield
+    finally:
+        importlib.reload(target_registry)
+        target_registry.load_targets(REPO_ROOT / "kernel_gen" / "target" / "targets")
+        target_registry.set_current_target(None)
 
 
 def _build_npu_demo_lowering_pipeline() -> PassManager:
@@ -132,18 +135,18 @@ def _build_npu_demo_lowering_pipeline() -> PassManager:
     return pipeline
 
 
-def _make_body_only_module() -> ModuleOp:
-    """构造一个只有普通 `func.func` 的 lowered module。
+def _npu_demo_emitc_context() -> EmitCContext:
+    """构造 `npu_demo` 目标的公开 `EmitCContext`。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    创建者: OpenAI Codex
+    最后一次更改: OpenAI Codex
 
     功能说明:
-    - 用于验证 `npu_demo` 在缺少唯一 `arch.launch` wrapper 时必须显式失败。
-    - 该 module 不含任何 wrapper 语义，便于锁定“不得回退到首个普通 func.func”的机械边界。
+    - 统一公开测试里 `EmitCContext(config={"target": "npu_demo"})` 的构造口径。
+    - 避免测试继续散落旧的 `target=` 关键字调用方式。
 
     使用示例:
-    - module = _make_body_only_module()
+    - ctx = _npu_demo_emitc_context()
 
     关联文件:
     - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
@@ -151,10 +154,7 @@ def _make_body_only_module() -> ModuleOp:
     - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
     """
 
-    block = Block()
-    block.add_op(func.ReturnOp())
-    func_op = func.FuncOp("body_kernel", FunctionType.from_lists([], []), Region(block))
-    return ModuleOp([func_op])
+    return EmitCContext(config={"target": "npu_demo"})
 
 
 def add_kernel(
@@ -172,7 +172,7 @@ def add_kernel(
     - 本函数不返回 DSL 值，只通过 `store(...)` 写入 `out`。
 
     使用示例:
-    - `dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))`
+    - `dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(config={"target": "npu_demo"}))`
 
     关联文件:
     - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
@@ -320,7 +320,7 @@ def test_dsl_run_string_pipeline_with_torch_numpy_mix() -> None:
         add_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
-        EmitCContext(target="npu_demo"),
+        _npu_demo_emitc_context(),
     )
 
     _assert_result_contract(result, out, expected)
@@ -346,7 +346,7 @@ def test_dsl_run_pass_manager_with_list_real_args() -> None:
         add_kernel,
         [out, lhs, rhs],
         pipeline,
-        EmitCContext(target="npu_demo"),
+        _npu_demo_emitc_context(),
     )
 
     _assert_result_contract(result, out, expected)
@@ -371,7 +371,7 @@ def test_dsl_run_numpy_output() -> None:
         add_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
-        EmitCContext(target="npu_demo"),
+        _npu_demo_emitc_context(),
     )
 
     _assert_result_contract(result, out, expected)
@@ -397,7 +397,7 @@ def test_dsl_run_add_slice_store_matches_public_contract() -> None:
         add_slice_store_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
-        EmitCContext(target="npu_demo"),
+        _npu_demo_emitc_context(),
     )
 
     lowered_text = str(result.func_op)
@@ -429,7 +429,7 @@ def test_dsl_run_add_for_loop_matches_public_contract() -> None:
         add_for_loop_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
-        EmitCContext(target="npu_demo"),
+        _npu_demo_emitc_context(),
     )
 
     lowered_text = str(result.func_op)
@@ -461,7 +461,7 @@ def test_dsl_run_sub_matches_public_contract() -> None:
         sub_store_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
-        EmitCContext(target="npu_demo"),
+        _npu_demo_emitc_context(),
     )
 
     lowered_text = str(result.func_op)
@@ -490,7 +490,7 @@ def test_dsl_run_mul_matches_public_contract() -> None:
         mul_store_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
-        EmitCContext(target="npu_demo"),
+        _npu_demo_emitc_context(),
     )
 
     lowered_text = str(result.func_op)
@@ -519,7 +519,7 @@ def test_dsl_run_supports_tiled_matmul_kernel_on_npu_demo() -> None:
         matmul_out_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
-        EmitCContext(target="npu_demo"),
+        _npu_demo_emitc_context(),
     )
 
     lowered_text = str(result.func_op)
@@ -551,26 +551,17 @@ def test_dsl_run_supports_tiled_matmul_kernel_on_npu_demo() -> None:
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
-def test_dsl_run_rejects_npu_demo_module_without_unique_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
-    lowered_module = _make_body_only_module()
-
-    def _unexpected_gen_kernel(*args: object, **kwargs: object) -> str:
-        pytest.fail("npu_demo lowered module should not fall back to the first normal func.func")
-
-    monkeypatch.setattr(dsl_run_module, "mlir_gen", lambda *args, **kwargs: lowered_module)
-    monkeypatch.setattr(dsl_run_module.PassManager, "run", lambda self, module: lowered_module)
-    monkeypatch.setattr(dsl_run_module, "gen_kernel", _unexpected_gen_kernel)
-
+def test_dsl_run_rejects_npu_demo_module_without_unique_wrapper() -> None:
     out = torch.empty((6,), dtype=torch.int32)
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
-    with pytest.raises(DslRunError, match=re.escape(NPU_DEMO_WRAPPER_ERROR)):
+    with pytest.raises(DslRunError, match=_EXPECTED_NPU_DEMO_WRAPPER_MESSAGE):
         dsl_run(
             add_kernel,
             (out, lhs, rhs),
             PassManager(),
-            EmitCContext(target="npu_demo"),
+            _npu_demo_emitc_context(),
         )
 
 
@@ -587,12 +578,12 @@ def test_dsl_run_rejects_value_return_kernel() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
-    with pytest.raises(DslRunError, match=re.escape(RETURN_VALUE_ERROR)):
+    with pytest.raises(DslRunError, match=_EXPECTED_RETURN_VALUE_MESSAGE):
         dsl_run(
             return_add_kernel,
             (lhs, rhs),
             "npu-demo-lowering",
-            EmitCContext(target="npu_demo"),
+            _npu_demo_emitc_context(),
         )
 
 
@@ -610,7 +601,7 @@ def test_dsl_run_rejects_none_emitcconfig() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
-    with pytest.raises(DslRunError, match=re.escape(EMITCCONFIG_ERROR)):
+    with pytest.raises(DslRunError, match=_EXPECTED_EMITCCONFIG_MESSAGE):
         dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", None)
 
 
@@ -628,7 +619,7 @@ def test_dsl_run_rejects_invalid_emitcconfig_type() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
-    with pytest.raises(DslRunError, match=re.escape(EMITCCONFIG_ERROR)):
+    with pytest.raises(DslRunError, match=_EXPECTED_EMITCCONFIG_MESSAGE):
         dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", object())
 
 
@@ -646,8 +637,8 @@ def test_dsl_run_rejects_unknown_pipeline_name() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
-    with pytest.raises(DslRunError, match=re.escape(PIPELINE_NAME_ERROR)):
-        dsl_run(add_kernel, (out, lhs, rhs), "missing-pipeline", EmitCContext(target="npu_demo"))
+    with pytest.raises(DslRunError, match=_EXPECTED_PIPELINE_NAME_MESSAGE):
+        dsl_run(add_kernel, (out, lhs, rhs), "missing-pipeline", _npu_demo_emitc_context())
 
 
 # TC-DSL-RUN-008
@@ -664,8 +655,8 @@ def test_dsl_run_rejects_invalid_pipeline_type() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
-    with pytest.raises(DslRunError, match=re.escape(PIPELINE_TYPE_ERROR)):
-        dsl_run(add_kernel, (out, lhs, rhs), object(), EmitCContext(target="npu_demo"))
+    with pytest.raises(DslRunError, match=_EXPECTED_PIPELINE_TYPE_MESSAGE):
+        dsl_run(add_kernel, (out, lhs, rhs), object(), _npu_demo_emitc_context())
 
 
 # TC-DSL-RUN-009
@@ -682,8 +673,8 @@ def test_dsl_run_rejects_unsupported_runtime_arg_type() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = object()
 
-    with pytest.raises(DslRunError, match=re.escape(REAL_ARG_TYPE_ERROR)):
-        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
+    with pytest.raises(DslRunError, match=_EXPECTED_REAL_ARG_TYPE_MESSAGE):
+        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", _npu_demo_emitc_context())
 
 
 # TC-DSL-RUN-010
@@ -699,8 +690,8 @@ def test_dsl_run_rejects_arity_mismatch() -> None:
     out = torch.empty((6,), dtype=torch.int32)
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
 
-    with pytest.raises(DslRunError, match=re.escape(ARITY_ERROR)):
-        dsl_run(add_kernel, (out, lhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
+    with pytest.raises(DslRunError, match=_EXPECTED_ARITY_MESSAGE):
+        dsl_run(add_kernel, (out, lhs), "npu-demo-lowering", _npu_demo_emitc_context())
 
 
 # TC-DSL-RUN-011

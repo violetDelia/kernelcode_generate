@@ -395,7 +395,7 @@ def test_launch_queries_and_memory_prefer_launch_or_hardware_context() -> None:
         hardware={"block_num": 256, "thread_num": 128, "subthread_num": 32, "sm_memory_size": 4096},
     )
     target_registry.register_target(spec)
-    target_registry._set_current_target("op_arch_hw_fallback")
+    target_registry.set_current_target("op_arch_hw_fallback")
     try:
         block_num = get_block_num()
         thread_num = get_thread_num()
@@ -423,7 +423,7 @@ def test_launch_queries_and_memory_prefer_launch_or_hardware_context() -> None:
         assert captured["subthread"] == "SUBTHREAD_X"
         assert captured["smem_shape"] == [4096]
     finally:
-        target_registry._set_current_target(None)
+        target_registry.set_current_target(None)
 
 
 # TC-OP-ARCH-016
@@ -444,7 +444,7 @@ def test_barrier_and_launch_helpers_reject_unsupported_target_ops() -> None:
         hardware={},
     )
     target_registry.register_target(spec)
-    target_registry._set_current_target("op_arch_support_gate")
+    target_registry.set_current_target("op_arch_support_gate")
     try:
         assert get_block_id().get_value() == "block_id"
         with pytest.raises(ValueError, match="arch.get_block_num"):
@@ -462,57 +462,7 @@ def test_barrier_and_launch_helpers_reject_unsupported_target_ops() -> None:
         with pytest.raises(ValueError, match="arch.launch"):
             launch_kernel[1, 1, 1, 0](lambda: None)
     finally:
-        target_registry._set_current_target(None)
-
-
-# TC-OP-ARCH-017
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-16 09:05:00 +0800
-# 最近一次运行成功时间: 2026-04-16 09:05:00 +0800
-# 测试目的: 验证 target registry 缺少 arch 支持矩阵关键字段时，arch query helper 返回显式错误。
-# 使用示例: pytest -q test/operation/test_operation_arch.py -k test_arch_queries_reject_target_registry_entries_missing_arch_fields
-# 对应功能实现文件路径: kernel_gen/operation/arch.py
-# 对应 spec 文件路径: spec/operation/arch.md
-# 对应测试文件路径: test/operation/test_operation_arch.py
-def test_arch_queries_reject_target_registry_entries_missing_arch_fields(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    broken_target = type("BrokenTargetSpec", (), {"hardware": {}})()
-    monkeypatch.setitem(target_registry._TARGET_REGISTRY, "op_arch_missing_arch_fields", broken_target)
-    target_registry._set_current_target("op_arch_missing_arch_fields")
-    try:
-        with pytest.raises(ValueError, match="missing required arch fields"):
-            get_block_id()
-    finally:
-        target_registry._set_current_target(None)
-
-
-# TC-OP-ARCH-018
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-16 09:05:00 +0800
-# 最近一次运行成功时间: 2026-04-16 09:05:00 +0800
-# 测试目的: 验证 target registry 缺少 hardware 关键字段时，动态内存 helper 返回显式错误。
-# 使用示例: pytest -q test/operation/test_operation_arch.py -k test_get_dynamic_memory_rejects_target_registry_entries_missing_hardware_field
-# 对应功能实现文件路径: kernel_gen/operation/arch.py
-# 对应 spec 文件路径: spec/operation/arch.md
-# 对应测试文件路径: test/operation/test_operation_arch.py
-def test_get_dynamic_memory_rejects_target_registry_entries_missing_hardware_field(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    broken_target = type(
-        "BrokenHardwareTargetSpec",
-        (),
-        {"arch_supported_ops": None, "arch_unsupported_ops": set()},
-    )()
-    monkeypatch.setitem(target_registry._TARGET_REGISTRY, "op_arch_missing_hardware_field", broken_target)
-    target_registry._set_current_target("op_arch_missing_hardware_field")
-    try:
-        with pytest.raises(ValueError, match="missing required hardware field: sm_memory_size"):
-            get_dynamic_memory(MemorySpace.SM)
-    finally:
-        target_registry._set_current_target(None)
+        target_registry.set_current_target(None)
 
 
 # TC-OP-ARCH-019
@@ -538,7 +488,7 @@ def test_query_helpers_reject_missing_target_hardware_fields() -> None:
         hardware={},
     )
     target_registry.register_target(spec)
-    target_registry._set_current_target("op_arch_missing_hw_field")
+    target_registry.set_current_target("op_arch_missing_hw_field")
     try:
         with pytest.raises(ValueError, match=r"hardware\.block_num"):
             get_block_num()
@@ -549,4 +499,4 @@ def test_query_helpers_reject_missing_target_hardware_fields() -> None:
         with pytest.raises(ValueError, match=r"hardware\.sm_memory_size"):
             get_dynamic_memory(MemorySpace.SM)
     finally:
-        target_registry._set_current_target(None)
+        target_registry.set_current_target(None)

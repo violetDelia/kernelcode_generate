@@ -44,7 +44,7 @@ def _format_literal(op: arith.ConstantOp, ctx: EmitCContext) -> str:
         return str(value.value.data)
     if hasattr(value, "data"):
         return str(value.data)
-    raise EmitCError(f"target={ctx.target}: {op.name}: unsupported constant literal")
+    raise EmitCError(f"target={ctx.config['target']}: {op.name}: unsupported constant literal")
 
 
 def _emit_c_op(op: Operation, ctx: EmitCContext) -> str:
@@ -53,7 +53,7 @@ def _emit_c_op(op: Operation, ctx: EmitCContext) -> str:
     dispatched = dispatch_op(op, ctx)
     if dispatched is not None:
         return dispatched
-    raise EmitCError(f"target={ctx.target}: {op.name}: unsupported op")
+    raise EmitCError(f"target={ctx.config['target']}: {op.name}: unsupported op")
 
 
 def _emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
@@ -70,7 +70,7 @@ def _emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     dispatched = dispatch_value(value, ctx)
     if dispatched is not None:
         return dispatched
-    raise EmitCError(f"target={ctx.target}: {owner.name}: invalid dependency for value {value}")
+    raise EmitCError(f"target={ctx.config['target']}: {owner.name}: invalid dependency for value {value}")
 
 
 __all__: list[str] = []

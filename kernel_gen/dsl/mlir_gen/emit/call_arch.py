@@ -7,6 +7,9 @@
 - 收口 arch family 的 emit 入口，覆盖 query/get_dynamic_memory/launch_kernel。
 - 仅负责 arch 相关 AST 的分发，不承载 symbol/dma/nn 逻辑。
 
+API 列表:
+- `emit_arch_call(node: object, ctx: EmitContext) -> object`
+
 使用示例:
 - value = emit_arch_call(ArchGetDynamicMemoryAST(space=MemorySpace.LM), ctx)
 
@@ -19,9 +22,16 @@
 from __future__ import annotations
 
 from kernel_gen.dsl.ast import ArchGetDynamicMemoryAST, ArchLaunchKernelAST, ArchQueryAST
-from .core import emit_mlir as _emit_mlir
 
-from .context import EmitContext, LoweringError
+from .context import EmitContext
+
+
+class LoweringError(ValueError):
+    """当前文件内使用的 arch emit 失败错误。"""
+
+    def __init__(self, message: str, location: object | None = None) -> None:
+        super().__init__(message)
+        self.location = location
 
 
 def emit_arch_call(node: object, ctx: EmitContext) -> object:
@@ -45,4 +55,6 @@ def emit_arch_call(node: object, ctx: EmitContext) -> object:
 
     if not isinstance(node, (ArchGetDynamicMemoryAST, ArchLaunchKernelAST, ArchQueryAST)):
         raise LoweringError("emit_arch_call only handles arch family AST nodes", location=getattr(node, "location", None))
-    return _emit_mlir(node, ctx)
+    from . import emit_mlir as public_emit_mlir
+
+    return public_emit_mlir(node, ctx)

@@ -152,47 +152,14 @@ from kernel_gen.dsl.ast import (
     ScalarArgAST,
     parse_function,
 )
+from kernel_gen.dsl.ast.parser import parse_function_with_env
 from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
-from kernel_gen.dsl.mlir_gen.emit.core import (
-    EmitContext,
-    _LoweringError,
-    _build_default_stride_attrs,
-    _build_index_operands_from_layout,
-    _build_static_index_list,
-    _build_stride,
-    _build_stride_attrs,
-    _build_index_attrs,
-    _dtype_to_xdsl,
-    _ensure_index_value,
-    _ensure_supported_statements,
-    _expr_key,
-    _get_loop_vars,
-    _infer_broadcast_memory_type,
-    _infer_broadcast_shape,
-    _infer_expr_type,
-    _lower_loop_bound,
-    _lower_expr,
-    _lookup_symbol,
-    _memory_space_from_ast,
-    _memory_to_nn_type,
-    _mul_symbol,
-    _resolve_index_operand,
-    _resolve_index_symbol,
-    _resolve_static_index_expr,
-    _resolve_index_expr,
-    emit_mlir as emit_node_mlir,
-)
+from kernel_gen.dsl.mlir_gen.emit import EmitContext, memory_type_from_memory as _memory_to_nn_type
 from kernel_gen.dsl.mlir_gen import (
-    _build_signature_types,
-    _is_symbol_scalar_function,
-    _parse_function_with_env,
-    _symbol_expr_from_runtime_arg,
-    _validate_return_type,
     build_func_op,
     build_func_op_from_ast,
 )
 from kernel_gen.dsl import mlir_gen as mlir_gen_module
-from kernel_gen.dsl.mlir_gen import parse_env as parse_env_module
 from kernel_gen.dsl.ast import visitor as ast_visitor_module
 import kernel_gen.operation.nn as nn
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
@@ -425,7 +392,7 @@ def _parse_function_from_source(
 
     功能说明:
     - 通过 monkeypatch 覆盖 `inspect.getsource(...)`，让测试可直接用字符串构造 DSL 函数源码。
-    - 将 `runtime_table` 一并传入 `_parse_function_with_env(...)`，覆盖 runtime 参数参与签名/符号解析的场景。
+    - 将 `runtime_table` 一并传入 `parse_function_with_env(...)`，覆盖 runtime 参数参与签名/符号解析的场景。
 
     使用示例:
     - func_ast = _parse_function_from_source(monkeypatch, \"def kernel(x):\\n    return x\\n\")
@@ -446,7 +413,7 @@ def _parse_function_from_source(
     globals_table = dict(getattr(kernel, "__globals__", {}))
     builtins_obj = globals_table.get("__builtins__", __builtins__)
     builtins_table = builtins_obj if isinstance(builtins_obj, dict) else getattr(builtins_obj, "__dict__", {})
-    return _parse_function_with_env(kernel, globals_table, builtins_table, runtime_table, config=None)
+    return parse_function_with_env(kernel, globals_table, builtins_table, runtime_table, config=None)
 
 
 # AST-014A / MGEN-027
@@ -948,7 +915,7 @@ def test_build_func_op_lowers_nn_helper_via_direct_alias(
 
     monkeypatch.setitem(relu_kernel.__globals__, "relu_alias", relu)
 
-    func_ast = _parse_function_with_env(
+    func_ast = parse_function_with_env(
         relu_kernel,
         globals_table=relu_kernel.__globals__,
         builtins_table=None,
@@ -1247,30 +1214,23 @@ def test_build_func_op_return_type_matches_annotation() -> None:
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
 # 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
-# 功能说明: 覆盖 mlir_gen 的符号标量函数与签名构造分支。
-# 测试目的: 验证符号标量函数识别与 runtime arg 到 symbol expr 的映射。
+# 功能说明: 覆盖 mlir_gen 的公开符号标量签名合同。
+# 测试目的: 验证 build_func_op/build_func_op_from_ast 在 SymbolDim runtime arg 下生成 symbol.int 签名。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_symbol_scalar_helpers
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_mlir_gen_symbol_scalar_helpers() -> None:
-    func_ast = FunctionAST(
-        name="only_symbol",
-        inputs=[ScalarArgAST("n", int)],
-        outputs=[ScalarArgAST("n", int)],
-        body=BlockAST([]),
-    )
-    assert _is_symbol_scalar_function(func_ast)
-    assert not _is_symbol_scalar_function(FunctionAST("no_inputs", [], [], BlockAST([])))
+    def only_symbol(n: int) -> int:
+        return n
 
-    assert _symbol_expr_from_runtime_arg(SymbolDim("S")) == "S"
-    assert _symbol_expr_from_runtime_arg(4) == "4"
-    assert _symbol_expr_from_runtime_arg("bad") is None
-
-    arg_types, type_map = _build_signature_types(func_ast, runtime_args=[SymbolDim("S")])
-    assert len(arg_types) == 1
-    assert isinstance(arg_types[0], SymbolValueType)
-    assert type_map[_expr_key(func_ast.inputs[0])] == arg_types[0]
+    func_ast = parse_function(only_symbol)
+    for func_op in (
+        build_func_op(only_symbol, SymbolDim("S")),
+        build_func_op_from_ast(func_ast, runtime_args=[SymbolDim("S")]),
+    ):
+        assert list(func_op.function_type.inputs) == [SymbolValueType.from_expr("S")]
+        assert list(func_op.function_type.outputs) == [SymbolValueType.from_expr("S")]
 
 
 # MGEN-002B
@@ -2928,22 +2888,22 @@ def test_build_func_op_supports_dma_deslice_helper() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-25 16:05:00 +0800
 # 最近一次运行成功时间: 2026-03-25 16:05:00 +0800
-# 功能说明: 覆盖解析失败时的错误包装路径。
-# 测试目的: 验证 _parse_function_with_env 对 parser 公共错误保持 AstParseError 口径。
+# 功能说明: 覆盖 parser 公开入口的解析失败路径。
+# 测试目的: 验证 parse_function_with_env(...) 对外保持 AstParseError 口径。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_parse_failure_wrapped
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast/parser.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_mlir_gen_parse_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
     def fn(x: object) -> object:
         return x
 
-    def _broken_parse(*args: object, **kwargs: object) -> object:
-        raise AstParseError("broken", [Diagnostic("broken", location=SourceLocation(1, 2))])
+    def _bad_getsource(_obj: object) -> str:
+        return 'def fn(x: "Tensor[bad, 4]"):\n    return x\n'
 
-    monkeypatch.setattr(parse_env_module, "ast_parse_function_with_env", _broken_parse)
-    with pytest.raises(AstParseError, match="broken"):
-        _parse_function_with_env(fn, globals_table={}, builtins_table={}, runtime_table={}, config=None)
+    monkeypatch.setattr(inspect, "getsource", _bad_getsource)
+    with pytest.raises(AstParseError, match="Unsupported tensor dtype"):
+        parse_function_with_env(fn, globals_table={}, builtins_table={}, runtime_table={}, config=None)
 
 
 # MGEN-009
@@ -2951,8 +2911,8 @@ def test_mlir_gen_parse_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
 # 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
-# 功能说明: 覆盖返回类型校验的错误分支。
-# 测试目的: 验证多返回、非法返回注解与不匹配类型时报错。
+# 功能说明: 覆盖返回类型校验错误在公开 facade 上的报错短语。
+# 测试目的: 验证 build_func_op_from_ast 对多返回、非法返回注解与不匹配类型继续报出稳定错误。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_validate_return_type_errors
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -2962,25 +2922,25 @@ def test_mlir_gen_validate_return_type_errors() -> None:
     tensor_out = TensorAST("out", memory)
     scalar_out = ScalarArgAST("n", int)
 
-    func_multi = FunctionAST("multi", [tensor_out], [tensor_out, tensor_out], BlockAST([]))
-    with pytest.raises(_LoweringError, match="Only single return value is supported"):
-        _validate_return_type(func_multi, _memory_to_nn_type(memory))
+    func_multi = FunctionAST("multi", [tensor_out], [tensor_out, tensor_out], BlockAST([tensor_out]))
+    with pytest.raises(AstVisitorError, match="Only single return value is supported"):
+        build_func_op_from_ast(func_multi, runtime_args=[memory])
 
-    func_scalar_bad = FunctionAST("bad", [scalar_out], [ScalarArgAST("f", float)], BlockAST([]))
-    with pytest.raises(_LoweringError, match="Unsupported scalar return type"):
-        _validate_return_type(func_scalar_bad, i32)
+    func_scalar_bad = FunctionAST("bad", [tensor_out], [ScalarArgAST("f", float)], BlockAST([ConstAST(1)]))
+    with pytest.raises(AstVisitorError, match="Unsupported scalar return type"):
+        build_func_op_from_ast(func_scalar_bad, runtime_args=[memory])
 
-    func_unknown = FunctionAST("bad", [scalar_out], [VarAST("x")], BlockAST([]))
-    with pytest.raises(_LoweringError, match="Unsupported return annotation type"):
-        _validate_return_type(func_unknown, i32)
+    func_unknown = FunctionAST("bad", [tensor_out], [VarAST("x")], BlockAST([ConstAST(1)]))
+    with pytest.raises(AstVisitorError, match="Unsupported return annotation type"):
+        build_func_op_from_ast(func_unknown, runtime_args=[memory])
 
-    func_mismatch = FunctionAST("bad", [tensor_out], [tensor_out], BlockAST([]))
-    with pytest.raises(_LoweringError, match="Return type does not match annotation"):
-        _validate_return_type(func_mismatch, i32)
+    func_mismatch = FunctionAST("bad", [tensor_out], [tensor_out], BlockAST([ConstAST(1)]))
+    with pytest.raises(AstVisitorError, match="Return type does not match annotation"):
+        build_func_op_from_ast(func_mismatch, runtime_args=[memory])
 
-    func_symbol = FunctionAST("sym", [scalar_out], [scalar_out], BlockAST([]))
-    with pytest.raises(_LoweringError, match="Return type does not match annotation"):
-        _validate_return_type(func_symbol, i32)
+    func_symbol = FunctionAST("sym", [scalar_out], [scalar_out], BlockAST([ConstAST(1)]))
+    with pytest.raises(AstVisitorError, match="Return type does not match annotation"):
+        build_func_op_from_ast(func_symbol, runtime_args=[SymbolDim("S")])
 
 
 # MGEN-040

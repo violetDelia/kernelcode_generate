@@ -18,7 +18,7 @@
 - `dispatch_type(attr, ctx: EmitCContext)`
 - `dispatch_attr(attr, ctx: EmitCContext)`
 - `dispatch_include(ctx: EmitCContext)`
-- `dispatch_name(value, ctx: EmitCContext, preferred: str | None = None, prefix: str = "v")`
+- `dispatch_name(value, ctx: EmitCContext)`
 
 ## 文档信息
 

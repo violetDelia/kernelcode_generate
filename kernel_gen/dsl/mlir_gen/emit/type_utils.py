@@ -7,6 +7,13 @@
 - 提供类型推导与 memory type 组装的共享工具。
 - 供 emit 共享层与测试用例复用。
 
+API 列表:
+- `infer_expr_type(expr: object, type_map: dict[int, object]) -> object`
+- `memory_type_from_parts(shape: Sequence[Attribute], stride: Sequence[Attribute], element_type: Attribute, space: NnMemorySpaceAttr) -> NnMemoryType`
+
+helper 清单:
+- `_expr_key(expr: object) -> int`
+
 使用示例:
 - result_type = infer_expr_type(expr, type_map)
 
@@ -20,10 +27,42 @@ from __future__ import annotations
 
 from typing import Sequence
 
+from xdsl.dialects.builtin import ArrayAttr, f32, i1, i32
 from xdsl.ir import Attribute
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from .core import _infer_expr_type, _memory_type_from_parts
+from kernel_gen.dsl.ast import ConstAST
+
+
+
+class LoweringError(ValueError):
+    """当前文件内使用的类型推导失败错误。"""
+
+    def __init__(self, message: str, location: object | None = None) -> None:
+        super().__init__(message)
+        self.location = location
+
+
+def _expr_key(expr: object) -> int:
+    """返回与 emit family 其余模块一致的表达式缓存 key。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 对公开 `type_utils` 保持与 emit family 其余缓存约定一致。
+    - 当前公开约定只依赖对象同一性，不额外暴露 `.core` 私有 helper。
+
+    使用示例:
+    - key = _expr_key(expr)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/mlir_gen/emit/test_type_utils.py](test/dsl/mlir_gen/emit/test_type_utils.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/type_utils.py](kernel_gen/dsl/mlir_gen/emit/type_utils.py)
+    """
+
+    return id(expr)
 
 
 def infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
@@ -51,7 +90,18 @@ def infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
     - test: [test/dsl/mlir_gen/emit/test_type_utils.py](test/dsl/mlir_gen/emit/test_type_utils.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/type_utils.py](kernel_gen/dsl/mlir_gen/emit/type_utils.py)
     """
-    return _infer_expr_type(expr, type_map)
+    expr_key = _expr_key(expr)
+    if expr_key in type_map:
+        return type_map[expr_key]
+    if isinstance(expr, ConstAST):
+        if isinstance(expr.value, bool):
+            return i1
+        if isinstance(expr.value, int):
+            return i32
+        if isinstance(expr.value, float):
+            return f32
+        raise LoweringError("Unsupported constant type", location=expr.location)
+    raise LoweringError("Unsupported expression for infer_expr_type helper")
 
 
 def memory_type_from_parts(
@@ -86,4 +136,4 @@ def memory_type_from_parts(
     - test: [test/dsl/mlir_gen/emit/test_type_utils.py](test/dsl/mlir_gen/emit/test_type_utils.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/type_utils.py](kernel_gen/dsl/mlir_gen/emit/type_utils.py)
     """
-    return _memory_type_from_parts(shape, stride, element_type, space)
+    return NnMemoryType(ArrayAttr(list(shape)), ArrayAttr(list(stride)), element_type, space)

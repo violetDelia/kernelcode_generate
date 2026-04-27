@@ -147,11 +147,11 @@ class FakeSymbolValueOp(IRDLOperation):
 
 
 def _ctx() -> EmitCContext:
-    return EmitCContext(target="cpu")
+    return EmitCContext(config={"target": "cpu"})
 
 
 def _npu_ctx() -> EmitCContext:
-    return EmitCContext(target="npu_demo")
+    return EmitCContext(config={"target": "npu_demo"})
 
 
 def test_gen_kernel_public_modules_exist_and_old_legacy_loader_path_is_gone() -> None:
@@ -1603,7 +1603,7 @@ def test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu() -> None:
     block.add_op(add)
     block.add_op(func.ReturnOp(add.result))
     func_op = _func("symbol_sum", [lhs_type, rhs_type], [out_type], block, ("lhs", "rhs"))
-    ctx = EmitCContext(target="gpu")
+    ctx = EmitCContext(config={"target": "gpu"})
 
     with pytest.raises(GenKernelError, match="symbol scalar return is only supported on cpu and npu_demo"):
         gen_kernel(func_op, ctx)

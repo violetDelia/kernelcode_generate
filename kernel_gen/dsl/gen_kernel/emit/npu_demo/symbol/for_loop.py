@@ -1,3 +1,25 @@
+"""npu_demo symbol.for emitter.
+
+创建者: OpenAI Codex
+最后一次更改: OpenAI Codex
+
+功能说明:
+- 生成 npu_demo target 下 `symbol.for` 的 for-loop 代码片段。
+- 迭代变量命名统一委托给 `EmitCContext.create_or_get_name(...)`。
+
+API 列表:
+- 无（仅 target 私有注册实现）
+
+使用示例:
+- from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c_op
+- stmt = emit_c_op(symbol_for_op, EmitCContext(config={"target": "npu_demo"}))
+
+关联文件:
+- spec: [spec/dsl/gen_kernel/emit.md](../../../../../../spec/dsl/gen_kernel/emit.md)
+- test: [test/dsl/gen_kernel/emit/test_emit.py](../../../../../../test/dsl/gen_kernel/emit/test_emit.py)
+- 功能实现: [kernel_gen/dsl/gen_kernel/emit/npu_demo/symbol/for_loop.py](.)
+"""
+
 from __future__ import annotations
 
 from kernel_gen.dialect.symbol import SymbolForOp
@@ -11,7 +33,7 @@ def _emit_npu_demo_symbol_for(op: SymbolForOp, ctx) -> str:
     from ... import emit_c_op, emit_c_value
 
     block = op.body.block
-    iv_name = ctx.create_or_get_name(block.args[0], prefix="i")
+    iv_name = ctx.create_or_get_name(block.args[0])
     lower_expr = emit_c_value(op.start, ctx)
     upper_expr = emit_c_value(op.end, ctx)
     step_expr = emit_c_value(op.step, ctx)

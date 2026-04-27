@@ -1,10 +1,10 @@
-"""Emit dispatch tests.
+"""Emit public dispatch tests.
 
 创建者: jcc你莫辜负
 最后一次更改: 小李飞刀
 
 功能说明:
-- 覆盖 emit dispatch/call_dispatch 的最小行为。
+- 覆盖 `kernel_gen.dsl.mlir_gen.emit` 包根公开入口的最小分发行为。
 
 使用示例:
 - pytest -q test/dsl/mlir_gen/emit/test_dispatch.py
@@ -15,6 +15,7 @@
 - 达标线: 90%
 
 关联文件:
+- 功能实现: kernel_gen/dsl/mlir_gen/emit/__init__.py
 - 功能实现: kernel_gen/dsl/mlir_gen/emit/dispatch.py
 - Spec 文档: spec/dsl/emit_mlir.md
 - 测试文件: test/dsl/mlir_gen/emit/test_dispatch.py
@@ -22,7 +23,6 @@
 
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -35,14 +35,10 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dsl.ast import ConstAST, PythonCalleeCallAST
-from kernel_gen.dsl.mlir_gen.emit import EmitContext, memory_type_from_memory
-from kernel_gen.dsl.mlir_gen.emit.context import LoweringError
-from kernel_gen.dsl.mlir_gen.emit.dispatch import call_dispatch, emit_mlir
-from kernel_gen.symbol_variable.memory import Memory, NumericType
-
-dispatch_module = importlib.import_module("kernel_gen.dsl.mlir_gen.emit.dispatch")
-
+from kernel_gen.dialect.nn import NnMemorySpaceAttr
+from kernel_gen.dsl.ast import ConstAST
+from kernel_gen.dsl.mlir_gen.emit import EmitContext, emit_mlir, memory_type_from_memory
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace, NumericType
 
 # EMIT-DISP-001
 # 创建者: jcc你莫辜负
@@ -70,25 +66,6 @@ def test_emit_mlir_dispatches_const() -> None:
         raise AssertionError("expected result to be constant op result")
 
 
-# EMIT-DISP-002
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
-# 功能说明: 验证 call_dispatch 对非 PythonCalleeCallAST 的拒绝路径。
-# 测试目的: 锁定 call_dispatch 的输入边界。
-# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_dispatch.py -k test_call_dispatch_rejects_non_callee
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/dispatch.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/mlir_gen/emit/test_dispatch.py
-def test_call_dispatch_rejects_non_callee() -> None:
-    block = Block()
-    ctx = EmitContext(builder=block, symbols={}, types={})
-
-    with pytest.raises(LoweringError, match="call_dispatch expects PythonCalleeCallAST"):
-        call_dispatch(ConstAST(1), ctx)  # type: ignore[arg-type]
-
-
 # EMIT-DISP-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
@@ -103,8 +80,12 @@ def test_call_dispatch_rejects_non_callee() -> None:
 def test_emit_package_root_exports_only_stable_api() -> None:
     import kernel_gen.dsl.mlir_gen.emit as emit_pkg
 
-    if emit_pkg.__all__ != ["EmitContext", "emit_mlir", "memory_type_from_memory"]:
-        raise AssertionError(f"unexpected package root exports: {emit_pkg.__all__}")
+    if emit_pkg.EmitContext is not EmitContext:
+        raise AssertionError("package root should expose EmitContext")
+    if emit_pkg.emit_mlir is not emit_mlir:
+        raise AssertionError("package root should expose emit_mlir")
+    if emit_pkg.memory_type_from_memory is not memory_type_from_memory:
+        raise AssertionError("package root should expose memory_type_from_memory")
     if hasattr(emit_pkg, "LoweringError"):
         raise AssertionError("package root should not expose LoweringError")
     if hasattr(emit_pkg, "call_dispatch"):
@@ -131,19 +112,21 @@ def test_emit_package_root_exposes_memory_type_from_memory() -> None:
         raise AssertionError(f"unexpected element type from package root helper: {mem_type.element_type}")
 
 
-def test_call_dispatch_routes_python_callee_through_private_emit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    block = Block(arg_types=[f32])
-    ctx = EmitContext(builder=block, symbols={}, types={})
-    call_expr = PythonCalleeCallAST(callee="callee", args=[ConstAST(1)], location=None)
-    seen: list[object] = []
+# EMIT-DISP-005
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证 emit 包根公开的 `memory_type_from_memory(...)` 对 on-chip 临时空间保持稳定映射。
+# 测试目的: 锁定 TSM/TLM* 这组公开 `MemorySpace` 不再依赖 `.core` 私有 helper 后仍映射到 dialect 接受的 space 名。
+# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_dispatch.py -k test_emit_package_root_memory_type_from_memory_keeps_tsm_space
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/__init__.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/mlir_gen/emit/test_dispatch.py
+def test_emit_package_root_memory_type_from_memory_keeps_tsm_space() -> None:
+    mem_type = memory_type_from_memory(Memory([2, "N"], NumericType.Float32, space=MemorySpace.TSM))
 
-    def _fake_emit_mlir(node: object, passed_ctx: EmitContext) -> object:
-        seen.extend([node, passed_ctx])
-        return block.args[0]
-
-    monkeypatch.setattr(dispatch_module, "_emit_mlir", _fake_emit_mlir)
-
-    assert call_dispatch(call_expr, ctx) is block.args[0]
-    assert seen == [call_expr, ctx]
+    if [dim.data for dim in mem_type.shape.data] != [2, "N"]:
+        raise AssertionError(f"unexpected shape from package root helper: {mem_type.shape.data}")
+    if mem_type.space != NnMemorySpaceAttr.from_name("tsm"):
+        raise AssertionError(f"unexpected space from package root helper: {mem_type.space}")

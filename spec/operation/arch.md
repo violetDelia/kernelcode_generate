@@ -444,5 +444,3 @@ launch_kernel[SymbolDim("GRID_X"), 128, 4, 0](my_kernel, "lhs", "rhs", "out")
   - `TC-OP-ARCH-014`：`launch_kernel[...]` 的公开语义、示例与错误路径不得回退为旧直调用写法。
   - `TC-OP-ARCH-015`：target registry 提供硬件值时，launch 外的 `get_block_num()` / `get_thread_num()` / `get_subthread_num()` / `get_dynamic_memory()` 必须优先使用硬件值；launched body 内则优先暴露本次 launch extent。
   - `TC-OP-ARCH-016`：当当前 target 不支持某个 `arch.*` op 时，对应 helper 的 target registry 支持性校验必须抛出 `ValueError` 并包含 op 名称；本条覆盖 `get_block_num()` / `get_thread_num()` / `get_subthread_num()` / `get_dynamic_memory()` / `barrier()` / `launch_kernel()` 的错误路径。
-  - `TC-OP-ARCH-017`：当当前 target registry 条目缺少 `arch_supported_ops/arch_unsupported_ops` 等必需字段时，arch query helper 必须返回显式 `missing required arch fields` 错误。
-  - `TC-OP-ARCH-018`：当当前 target registry 条目缺少 `hardware` 关键字段时，`get_dynamic_memory()` 必须返回显式 `missing required hardware field` 错误。

@@ -24,7 +24,7 @@ helper 清单:
 builtin.module {}
 \"\"\")
 - assert result.ok is True
-- result = tools.dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
+- result = tools.dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(config={"target": "npu_demo"}))
 
 关联文件:
 - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)

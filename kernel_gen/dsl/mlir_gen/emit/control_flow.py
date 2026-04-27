@@ -7,6 +7,10 @@
 - 处理控制流结构节点，当前聚焦 `ForAST`。
 - Assign/Return 在 AST 解析阶段已被折叠为表达式，不再作为独立节点进入 emit。
 
+API 列表:
+- `emit_for(node: ForAST, ctx: EmitContext) -> object`
+- `emit_control_flow(node: object, ctx: EmitContext) -> object`
+
 使用示例:
 - loop_op = emit_for(for_ast, ctx)
 
@@ -19,9 +23,16 @@
 from __future__ import annotations
 
 from kernel_gen.dsl.ast import ForAST
-from .core import emit_mlir as _emit_mlir
 
-from .context import EmitContext, LoweringError
+from .context import EmitContext
+
+
+class LoweringError(ValueError):
+    """当前文件内使用的控制流 emit 失败错误。"""
+
+    def __init__(self, message: str, location: object | None = None) -> None:
+        super().__init__(message)
+        self.location = location
 
 
 def emit_for(node: ForAST, ctx: EmitContext) -> object:
@@ -51,7 +62,9 @@ def emit_for(node: ForAST, ctx: EmitContext) -> object:
     """
     if not isinstance(node, ForAST):
         raise LoweringError("emit_for expects ForAST", location=getattr(node, "location", None))
-    return _emit_mlir(node, ctx)
+    from . import emit_mlir as public_emit_mlir
+
+    return public_emit_mlir(node, ctx)
 
 
 def emit_control_flow(node: object, ctx: EmitContext) -> object:

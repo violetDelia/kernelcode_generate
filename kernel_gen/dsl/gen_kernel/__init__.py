@@ -6,27 +6,23 @@
 功能说明:
 - 以包根形式汇总 `gen_kernel` 的公开入口、上下文对象与节点级片段发射接口。
 - 当前 `kernel_gen.dsl.gen_kernel` 就是 canonical 公开路径。
-- 包根承认 `gen_kernel(...)` / `dsl_gen_kernel(...)` / `emit_c(...)` / `emit_c_op(...)` / `emit_c_value(...)` 这组稳定公开入口。
-- sibling spec 已定义的 `KernelEmitter` 继续经由包根可达，避免回退既有公开导入路径。
+- 包根仅承认 `gen_kernel(...)` / `emit_c(...)` / `emit_c_op(...)` / `emit_c_value(...)` 这组稳定公开入口。
 
 API 列表:
 - `gen_kernel(obj: object, ctx: EmitCContext) -> str`
-- `dsl_gen_kernel(fn: Callable[..., object], *runtime_args: object, ctx: EmitCContext, config: dict[str, object] | None = None) -> str`
 - `emit_c(obj: object, ctx: EmitCContext) -> str`
 - `emit_c_op(op: Operation, ctx: EmitCContext) -> str`
 - `emit_c_value(value: SSAValue, ctx: EmitCContext) -> str`
-- `EmitCContext(target: str, *, indent: str = "    ", naming: object | None = None, type_converter: object | None = None, config: dict[str, object] | None = None)`
+- `EmitCContext(*, config: dict[str, object] | None = None)`
 - `EmitCError(message: str)`
 - `GenKernelError(message: str)`
-- `KernelEmitter(ctx: EmitCContext, emit_op=emit_c_op)`
 
 helper 清单:
 - `__getattr__(name: str) -> object`
 
 使用示例:
-- from kernel_gen.dsl.gen_kernel import EmitCContext, dsl_gen_kernel, emit_c, gen_kernel
-- source = emit_c(func_op, EmitCContext(target="cpu"))
-- text = dsl_gen_kernel(add_kernel, 3, 4, ctx=EmitCContext(target="cpu"))
+- from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c, gen_kernel
+- source = emit_c(func_op, EmitCContext(config={"target": "cpu"}))
 
 关联文件:
 - spec: [spec/dsl/gen_kernel/emit.md](../../../spec/dsl/gen_kernel/emit.md)
@@ -40,8 +36,7 @@ from __future__ import annotations
 
 from .emit import emit_c, emit_c_op, emit_c_value
 from .emit_context import EmitCContext, EmitCError
-from .gen_kernel import GenKernelError, dsl_gen_kernel, gen_kernel
-from .kernel_emitter import KernelEmitter
+from .gen_kernel import GenKernelError, gen_kernel
 
 
 def __getattr__(name: str) -> object:
@@ -73,10 +68,8 @@ def __getattr__(name: str) -> object:
 __all__ = [
     "GenKernelError",
     "gen_kernel",
-    "dsl_gen_kernel",
     "EmitCContext",
     "EmitCError",
-    "KernelEmitter",
     "emit_c",
     "emit_c_op",
     "emit_c_value",

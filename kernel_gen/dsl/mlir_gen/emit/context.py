@@ -4,7 +4,7 @@
 最后一次更改: jcc你莫辜负
 
 功能说明:
-- 统一 emit 共享层使用的上下文对象与错误类型。
+- 统一 emit 共享层使用的上下文对象。
 - 通过再导出减少上层对旧入口的直接依赖。
 
 使用示例:
@@ -19,6 +19,5 @@
 from __future__ import annotations
 
 from .core import EmitContext as EmitContext
-from .core import _LoweringError as LoweringError
 
-__all__ = ["EmitContext", "LoweringError"]
+__all__ = ["EmitContext"]

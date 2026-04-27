@@ -10,16 +10,15 @@
 
 ## API 列表
 
-- `EmitCError`
-- `EmitCContext`
-  - `—— init(target: str, indent: str = "    ", naming=None, type_converter=None, config=None)`
-  - `—— create_or_get_name(value, preferred: str | None = None, prefix: str = "v")`
-  - `—— dispatch(obj)`
-  - `—— dispatch_op(op)`
-  - `—— dispatch_value(value)`
-  - `—— dispatch_type(attr)`
-  - `—— dispatch_attr(attr)`
-  - `—— dispatch_include()`
+- `EmitCError(message: str)`
+- `EmitCContext(*, config: dict[str, Any] | None = None)`
+- `EmitCContext.create_or_get_name(value: SSAValue) -> str`
+- `EmitCContext.dispatch(obj: Any) -> str | None`
+- `EmitCContext.dispatch_op(op: Operation) -> str | None`
+- `EmitCContext.dispatch_value(value: SSAValue) -> str | None`
+- `EmitCContext.dispatch_type(attr: Any) -> str`
+- `EmitCContext.dispatch_attr(attr: Any) -> str | None`
+- `EmitCContext.dispatch_include() -> str`
 
 ## 文档信息
 
@@ -42,7 +41,8 @@
 ## 限制与边界
 
 - `EmitCContext` 只定义 emit 上下文，不承接函数级策略。
-- 命名、局部缓存和转换状态允许保存在 context 内；不得在 target 目录中维护第二套全局状态。
+- 除私有状态外，公开配置入口只保留 `config`；`target`、`indent`、`naming`、`type_converter` 不再各自暴露平行公开属性。
+- 命名、局部缓存和转换状态统一收口到 `config` 与 context 私有状态；不得在 target 目录中维护第二套全局状态。
 
 ## 测试
 

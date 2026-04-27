@@ -26,7 +26,35 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+
+def _find_repo_root(start: Path) -> Path:
+    """向上定位当前仓库根目录。
+
+    创建者: OpenAI Codex
+    最后一次更改: OpenAI Codex
+
+    功能说明:
+    - 兼容 worktree 与主仓两种执行环境，优先返回包含 `main.py` 与 `spec/tools/dsl_run.md` 的最近祖先目录。
+    - 让端到端测试始终指向当前现场真实可执行入口，而不是写死某一级父目录。
+
+    使用示例:
+    - repo_root = _find_repo_root(Path(__file__).resolve().parents[1])
+
+    关联文件:
+    - spec: [`spec/tools/dsl_run.md`](spec/tools/dsl_run.md)
+    - 功能实现: [`main.py`](main.py)
+    - test: [`test/test_main_npu_demo_pipeline.py`](test/test_main_npu_demo_pipeline.py)
+    """
+
+    for candidate in (start, *start.parents):
+        if (candidate / "main.py").is_file() and (candidate / "spec/tools/dsl_run.md").is_file():
+            return candidate
+    raise FileNotFoundError("cannot locate main.py and spec/tools/dsl_run.md")
+
+
+REPO_ROOT = _find_repo_root(Path(__file__).resolve().parents[1])
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 pytestmark = pytest.mark.npu_demo
 
@@ -130,7 +158,7 @@ def test_main_npu_demo_pipeline_helpers_split_wrapper_and_kernel_sources() -> No
             (__import__("numpy").arange(16 * 32, dtype=__import__("numpy").float32).reshape(16, 32) - 11.0) / 19.0,
         ),
         "npu-demo-lowering",
-        main_module.EmitCContext(target="npu_demo"),
+        main_module.EmitCContext(config={"target": "npu_demo"}),
     )
     wrapper_func, body_func = main_module._select_npu_demo_source_functions(result.module)
     host_source = main_module._extract_npu_demo_function_source(result.source, wrapper_func.sym_name.data)

@@ -29,7 +29,7 @@
   - 未声明 `COMPILE_ARGS`
   - `// COMPILE_ARGS: --pass no-op`
   - `// COMPILE_ARGS: --pass buffer-results-to-out-params`
-- 对输入 module 执行允许的最小预处理后，调用 `emit_c(module, EmitCContext(target="npu_demo"))`。
+- 对输入 module 执行允许的最小预处理后，调用 `emit_c(module, EmitCContext(config={"target": "npu_demo"}))`。
 - 依次校验 `expected_snippets` 必须存在、`forbidden_snippets` 必须不存在。
 - 返回最终生成的源码字符串，供 expectation 与 pytest 继续做补充断言。
 
@@ -49,7 +49,7 @@
 返回值：
 
 - `str`
-  - `emit_c(target="npu_demo")` 生成的完整源码文本。
+  - `emit_c(config={"target": "npu_demo"})` 生成的完整源码文本。
 
 使用示例：
 

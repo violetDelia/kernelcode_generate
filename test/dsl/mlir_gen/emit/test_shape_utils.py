@@ -1,21 +1,17 @@
-"""Emit shape utils tests.
+"""Emit shape public integration tests.
 
 创建者: jcc你莫辜负
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
-- 覆盖 index/shape/stride 构造工具的最小行为。
+- 只覆盖 `kernel_gen.dsl.mlir_gen.emit` 包根公开入口中的 shape/index 可观察行为。
+- 不再把 `shape_utils.py` 子模块 helper 视为测试合同。
 
 使用示例:
 - pytest -q test/dsl/mlir_gen/emit/test_shape_utils.py
 
-覆盖率信息:
-- 覆盖率命令: coverage run -m pytest -q test/dsl/mlir_gen/emit/test_shape_utils.py && coverage report --include=kernel_gen/dsl/mlir_gen/emit/shape_utils.py -m
-- 覆盖率结果: 未统计（待补充）
-- 达标线: 90%
-
 关联文件:
-- 功能实现: kernel_gen/dsl/mlir_gen/emit/shape_utils.py
+- 功能实现: kernel_gen/dsl/mlir_gen/emit/__init__.py
 - Spec 文档: spec/dsl/emit_mlir.md
 - 测试文件: test/dsl/mlir_gen/emit/test_shape_utils.py
 """
@@ -25,83 +21,111 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from xdsl.dialects.builtin import ArrayAttr, IntAttr
+import pytest
+from xdsl.dialects.builtin import ArrayAttr, IntAttr, f32
 from xdsl.ir import Block
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dsl.ast import ConstAST
-from kernel_gen.dsl.mlir_gen.emit import EmitContext
-from kernel_gen.dsl.mlir_gen.emit.shape_utils import (
-    build_index_attrs,
-    build_index_operands_exact,
-    build_index_operands_from_layout,
-    build_stride_attrs,
-    resolve_index_expr,
-)
+from kernel_gen.dialect.dma import DmaAllocOp, DmaLoadOp, DmaViewOp
+from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dsl.ast import ConstAST, DmaViewAST, LoadAST, TensorAST
+from kernel_gen.dsl.mlir_gen.emit import EmitContext, emit_mlir
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import NumericType
 
 
-# EMIT-SHAPE-001
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
-# 功能说明: 验证 build_index_attrs 的默认补值行为。
-# 测试目的: 锁定 rank=2 的索引 operand 生成数量。
-# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_shape_utils.py -k test_build_index_attrs_default
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/shape_utils.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/mlir_gen/emit/test_shape_utils.py
-def test_build_index_attrs_default() -> None:
-    ctx = EmitContext(builder=Block(), symbols={}, types={})
-    result = build_index_attrs(None, rank=2, ctx=ctx, default_value=0)
-    if len(result) != 2:
-        raise AssertionError("expected two index operands")
+def _expr_cache_key(expr: object) -> int:
+    return id(expr)
 
 
-# EMIT-SHAPE-002
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
-# 功能说明: 验证 build_index_operands_from_layout 的最小行为。
-# 测试目的: 锁定 layout -> operand 的列表长度。
-# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_shape_utils.py -k test_build_index_operands_from_layout
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/shape_utils.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/mlir_gen/emit/test_shape_utils.py
-def test_build_index_operands_from_layout() -> None:
-    ctx = EmitContext(builder=Block(), symbols={}, types={})
-    layout = ArrayAttr([IntAttr(2), IntAttr(3)])
-    result = build_index_operands_from_layout(layout, ctx)
-    if len(result) != 2:
-        raise AssertionError("expected two layout operands")
+def _tensor_type() -> NnMemoryType:
+    return NnMemoryType(
+        ArrayAttr([IntAttr(4), IntAttr(4)]),
+        ArrayAttr([IntAttr(4), IntAttr(1)]),
+        f32,
+        NnMemorySpaceAttr.from_name("global"),
+    )
 
 
-# EMIT-SHAPE-003
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
-# 功能说明: 验证 build_index_operands_exact 的最小行为。
-# 测试目的: 锁定显式索引列表的长度。
-# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_shape_utils.py -k test_build_index_operands_exact
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/shape_utils.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/mlir_gen/emit/test_shape_utils.py
-def test_build_index_operands_exact() -> None:
-    ctx = EmitContext(builder=Block(), symbols={}, types={})
-    result = build_index_operands_exact([ConstAST(1), ConstAST(2)], ctx)
-    if len(result) != 2:
-        raise AssertionError("expected two explicit operands")
+def _tensor_and_ctx() -> tuple[TensorAST, Block, EmitContext]:
+    tensor = TensorAST(name="x", memory=Memory([4, 4], NumericType.Float32), location=None)
+    tensor_type = _tensor_type()
+    block = Block(arg_types=[tensor_type])
+    ctx = EmitContext(builder=block, symbols={"x": block.args[0]}, types={_expr_cache_key(tensor): tensor_type})
+    emit_mlir(tensor, ctx)
+    return tensor, block, ctx
 
 
-def test_shape_utils_private_helper_edges() -> None:
-    ctx = EmitContext(builder=Block(), symbols={}, types={})
+def test_emit_mlir_lowers_dma_load_with_public_index_layout() -> None:
+    tensor, block, ctx = _tensor_and_ctx()
 
-    assert resolve_index_expr(ConstAST(3), ctx) == 3
+    result = emit_mlir(
+        LoadAST(
+            tensor=tensor,
+            offset=[ConstAST(0), ConstAST(0)],
+            stride=None,
+            sizes=[ConstAST(1), ConstAST(1)],
+            location=None,
+        ),
+        ctx,
+    )
 
-    strides = build_stride_attrs(None, rank=2, ctx=ctx)
-    assert len(strides) == 2
+    load_ops = [op for op in block.ops if isinstance(op, DmaLoadOp)]
+    assert isinstance(result.owner, DmaAllocOp)
+    assert len(load_ops) == 1
+    assert load_ops[0].target is result
+
+
+def test_emit_mlir_lowers_dma_view_with_public_shape_layout() -> None:
+    tensor, block, ctx = _tensor_and_ctx()
+
+    result = emit_mlir(
+        DmaViewAST(
+            source=tensor,
+            offset=[ConstAST(1), ConstAST(1)],
+            size=[ConstAST(2), ConstAST(2)],
+            stride=[ConstAST(1), ConstAST(1)],
+            location=None,
+        ),
+        ctx,
+    )
+
+    view_ops = [op for op in block.ops if isinstance(op, DmaViewOp)]
+    assert len(view_ops) == 1
+    assert result is view_ops[0].result
+    assert [attr.data for attr in result.type.shape.data] == [2, 2]
+
+
+def test_emit_mlir_rejects_view_index_rank_mismatch() -> None:
+    tensor, _block, ctx = _tensor_and_ctx()
+
+    with pytest.raises(ValueError, match="Index rank mismatch"):
+        emit_mlir(
+            DmaViewAST(
+                source=tensor,
+                offset=[ConstAST(1)],
+                size=[ConstAST(2), ConstAST(2)],
+                stride=[ConstAST(1), ConstAST(1)],
+                location=None,
+            ),
+            ctx,
+        )
+
+
+def test_emit_mlir_rejects_non_unit_stride_layout() -> None:
+    tensor, _block, ctx = _tensor_and_ctx()
+
+    with pytest.raises(ValueError, match="Only unit stride is supported"):
+        emit_mlir(
+            LoadAST(
+                tensor=tensor,
+                offset=[ConstAST(1), ConstAST(1)],
+                sizes=[ConstAST(1), ConstAST(1)],
+                stride=[ConstAST(2), ConstAST(1)],
+                location=None,
+            ),
+            ctx,
+        )

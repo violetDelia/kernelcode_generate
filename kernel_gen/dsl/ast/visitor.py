@@ -7,6 +7,16 @@
 - 提供 AST 访问器与访问器阶段错误类型。
 - 访问器负责遍历 AST，并将节点发射交由 `emit_mlir` 处理。
 
+API 列表:
+- `AstVisitorError(message: str, location: SourceLocation | None = None)`
+- `AstVisitor(config: dict[str, object] | None = None)`
+- `AstVisitor.register(node_type: type, method_name: str) -> None`
+- `AstVisitor.visit(node: object, ctx: EmitContext) -> object`
+- `AstVisitor.visit_function(func_ast: FunctionAST, ctx: EmitContext) -> object`
+- `AstVisitor.visit_block(block_ast: object, ctx: EmitContext) -> object`
+- `AstVisitor.visit_stmt(stmt: object, ctx: EmitContext) -> object`
+- `AstVisitor.visit_expr(expr: object, ctx: EmitContext) -> object`
+
 使用示例:
 - from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
 - visitor = AstVisitor()
@@ -111,19 +121,15 @@ class AstVisitor:
         return handler(node, ctx)
 
     def visit_function(self, func_ast: FunctionAST, ctx: EmitContext) -> object:
-        from kernel_gen.dsl.mlir_gen.emit.core import _expr_key
+        from kernel_gen.dsl.mlir_gen.emit import emit_mlir as emit_node_mlir
 
         block_args = getattr(ctx.builder, "args", ())
         for index, item in enumerate(func_ast.inputs):
-            if item.name in ctx.symbols:
-                value = ctx.symbols[item.name]
-            elif index < len(block_args):
-                value = block_args[index]
-                ctx.symbols[item.name] = value
-            else:
-                continue
-            ctx._setdefault_cache(_expr_key(item), value)
-            ctx.types.setdefault(_expr_key(item), value.type)
+            if item.name not in ctx.symbols:
+                if index >= len(block_args):
+                    continue
+                ctx.symbols[item.name] = block_args[index]
+            emit_node_mlir(item, ctx)
         return self.visit_block(func_ast.body, ctx)
 
     def visit_block(self, block_ast: object, ctx: EmitContext) -> object:
@@ -136,17 +142,15 @@ class AstVisitor:
         return last_value
 
     def visit_stmt(self, stmt: object, ctx: EmitContext) -> object:
-        from kernel_gen.dsl.mlir_gen.emit.core import _LoweringError
-
         try:
             return self.visit_expr(stmt, ctx)
-        except _LoweringError as exc:
-            raise AstVisitorError(str(exc), location=exc.location) from exc
+        except ValueError as exc:
+            raise AstVisitorError(str(exc), location=getattr(exc, "location", None)) from exc
 
     def visit_expr(self, expr: object, ctx: EmitContext) -> object:
-        from kernel_gen.dsl.mlir_gen.emit.core import _LoweringError, emit_mlir as emit_node_mlir
+        from kernel_gen.dsl.mlir_gen.emit import emit_mlir as emit_node_mlir
 
         try:
             return emit_node_mlir(expr, ctx)
-        except _LoweringError as exc:
-            raise AstVisitorError(str(exc), location=exc.location) from exc
+        except ValueError as exc:
+            raise AstVisitorError(str(exc), location=getattr(exc, "location", None)) from exc

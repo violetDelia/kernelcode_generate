@@ -13,6 +13,11 @@
 - 对外仅三条公开 API 作为稳定合同：`parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text`，
   便于 CLI / pytest / 脚本复用。
 
+API 列表:
+- `parse_ircheck_file(path: str) -> IrcheckCase`
+- `run_ircheck_file(path: str, *, irdump: bool = False, emitc_target: str | None = None) -> IrcheckResult`
+- `run_ircheck_text(text: str, *, source_path: str | None = None, irdump_dir: Path | None = None, emitc_target: str | None = None) -> IrcheckResult`
+
 使用示例:
 - PYTHONPATH=. python -m kernel_gen.tools.ircheck case.ircheck
 - from kernel_gen.tools.ircheck import run_ircheck_text
@@ -1105,7 +1110,7 @@ def _render_emitc_text(operation: Operation, emitc_target: str) -> str:
         raise ValueError("target=cpu requires func.func input")
 
     from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
-    return gen_kernel(emit_input, EmitCContext(target=emitc_target))
+    return gen_kernel(emit_input, EmitCContext(config={"target": emitc_target}))
 
 
 def _is_empty_npu_demo_func(func_op: func.FuncOp) -> bool:

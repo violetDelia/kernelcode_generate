@@ -1,10 +1,11 @@
-"""Emit value tests.
+"""Emit value public integration tests.
 
 创建者: jcc你莫辜负
 最后一次更改: jcc你莫辜负
 
 功能说明:
-- 覆盖 emit value/index 入口的最小行为与错误路径。
+- 只覆盖 `kernel_gen.dsl.mlir_gen.emit` 包根公开入口中与 value/index 相关的可观察行为。
+- 不再把 `value.py` 子模块 helper 视为测试合同。
 
 使用示例:
 - pytest -q test/dsl/mlir_gen/emit/test_value.py
@@ -15,7 +16,7 @@
 - 达标线: 90%
 
 关联文件:
-- 功能实现: kernel_gen/dsl/mlir_gen/emit/value.py
+- 功能实现: kernel_gen/dsl/mlir_gen/emit/__init__.py
 - Spec 文档: spec/dsl/emit_mlir.md
 - 测试文件: test/dsl/mlir_gen/emit/test_value.py
 """
@@ -27,17 +28,24 @@ from pathlib import Path
 
 import pytest
 from xdsl.dialects import arith
+from xdsl.dialects.builtin import ArrayAttr, IndexType, IntAttr, f32, i32
 from xdsl.ir import Block
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.dialect.dma import DmaAllocOp, DmaLoadOp
+from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
-from kernel_gen.dsl.ast import ConstAST, VarAST
-from kernel_gen.dsl.mlir_gen.emit import EmitContext
-from kernel_gen.dsl.mlir_gen.emit.context import LoweringError
-from kernel_gen.dsl.mlir_gen.emit.value import emit_index_operand, emit_symbol_const, emit_value
+from kernel_gen.dsl.ast import ConstAST, LoadAST, TensorAST, VarAST
+from kernel_gen.dsl.mlir_gen.emit import EmitContext, emit_mlir
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import NumericType
+
+
+def _expr_cache_key(expr: object) -> int:
+    return id(expr)
 
 
 # EMIT-VALUE-001
@@ -45,17 +53,17 @@ from kernel_gen.dsl.mlir_gen.emit.value import emit_index_operand, emit_symbol_c
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
-# 功能说明: 验证 emit_value 对 ConstAST 的最小下沉行为。
-# 测试目的: 确保 emit_value 返回常量 op 结果。
-# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_value.py -k test_emit_value_const
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/value.py
+# 功能说明: 验证公开 `emit_mlir(...)` 对 `ConstAST` 的最小下沉行为。
+# 测试目的: 确保公开入口返回常量 op 结果。
+# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_value.py -k test_emit_mlir_const
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/__init__.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/mlir_gen/emit/test_value.py
-def test_emit_value_const() -> None:
+def test_emit_mlir_const() -> None:
     block = Block()
     ctx = EmitContext(builder=block, symbols={}, types={})
 
-    result = emit_value(ConstAST(1), ctx)
+    result = emit_mlir(ConstAST(1), ctx)
 
     body_ops = list(block.ops)
     if len(body_ops) != 1:
@@ -71,18 +79,18 @@ def test_emit_value_const() -> None:
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
-# 功能说明: 验证 emit_value 对未知变量的错误路径。
-# 测试目的: 锁定 value 入口的缺失引用诊断。
-# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_value.py -k test_emit_value_unknown_var
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/value.py
+# 功能说明: 验证公开 `emit_mlir(...)` 对未知变量的错误路径。
+# 测试目的: 锁定公开 value 入口的缺失引用诊断。
+# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_value.py -k test_emit_mlir_unknown_var
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/__init__.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/mlir_gen/emit/test_value.py
-def test_emit_value_unknown_var() -> None:
+def test_emit_mlir_unknown_var() -> None:
     block = Block()
     ctx = EmitContext(builder=block, symbols={}, types={})
 
-    with pytest.raises(LoweringError, match="Unknown input reference"):
-        emit_value(VarAST("x"), ctx)
+    with pytest.raises(ValueError, match="Unknown input reference"):
+        emit_mlir(VarAST("x"), ctx)
 
 
 # EMIT-VALUE-003
@@ -90,39 +98,65 @@ def test_emit_value_unknown_var() -> None:
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
-# 功能说明: 验证 emit_index_operand 下沉 symbol.const。
-# 测试目的: 锁定索引 operand 的 symbol.const 结果类型。
-# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_value.py -k test_emit_index_operand_const
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/value.py
+# 功能说明: 验证公开 `emit_mlir(...)` 在 DMA offset 中下沉 `symbol.const`。
+# 测试目的: 锁定公开索引路径仍会生成 `symbol.const`。
+# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_value.py -k test_emit_mlir_lowers_symbol_const_in_dma_offset
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/__init__.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/mlir_gen/emit/test_value.py
-def test_emit_index_operand_const() -> None:
-    block = Block()
-    ctx = EmitContext(builder=block, symbols={}, types={})
+def test_emit_mlir_lowers_symbol_const_in_dma_offset() -> None:
+    tensor = TensorAST(name="x", memory=Memory([4, 4], NumericType.Float32), location=None)
+    tensor_type = NnMemoryType(
+        ArrayAttr([IntAttr(4), IntAttr(4)]),
+        ArrayAttr([IntAttr(4), IntAttr(1)]),
+        f32,
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    block = Block(arg_types=[tensor_type])
+    ctx = EmitContext(builder=block, symbols={"x": block.args[0]}, types={_expr_cache_key(tensor): tensor_type})
+    emit_mlir(tensor, ctx)
 
-    result = emit_index_operand(ConstAST(2), ctx)
+    result = emit_mlir(
+        LoadAST(tensor=tensor, offset=[ConstAST(2), ConstAST(0)], stride=None, sizes=[ConstAST(1), ConstAST(1)], location=None),
+        ctx,
+    )
 
-    body_ops = list(block.ops)
-    if not isinstance(body_ops[0], SymbolConstOp):
-        raise AssertionError("expected SymbolConstOp emitted")
-    if not isinstance(result.type, SymbolValueType):
-        raise AssertionError("expected symbol int type for index operand")
+    assert isinstance(result.owner, DmaAllocOp)
+    load_ops = [op for op in block.ops if isinstance(op, DmaLoadOp)]
+    assert len(load_ops) == 1
+    assert load_ops[0].target is result
+    assert any(isinstance(op, SymbolConstOp) for op in block.ops)
 
 
-def test_emit_value_and_symbol_const_private_edges() -> None:
-    block = Block()
-    ctx = EmitContext(builder=block, symbols={}, types={})
+def test_emit_mlir_lowers_index_cast_for_i32_dma_offset() -> None:
+    tensor = TensorAST(name="x", memory=Memory([4, 4], NumericType.Float32), location=None)
+    tensor_type = NnMemoryType(
+        ArrayAttr([IntAttr(4), IntAttr(4)]),
+        ArrayAttr([IntAttr(4), IntAttr(1)]),
+        f32,
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    block = Block(arg_types=[tensor_type, i32])
+    ctx = EmitContext(
+        builder=block,
+        symbols={"x": block.args[0], "i32_value": block.args[1]},
+        types={_expr_cache_key(tensor): tensor_type},
+    )
+    emit_mlir(tensor, ctx)
 
-    with pytest.raises(LoweringError, match="emit_value only supports"):
-        emit_value(object(), ctx)
+    result = emit_mlir(
+        LoadAST(
+            tensor=tensor,
+            offset=[VarAST("i32_value"), ConstAST(0)],
+            stride=None,
+            sizes=[ConstAST(1), ConstAST(1)],
+            location=None,
+        ),
+        ctx,
+    )
 
-    const_from_ast = emit_symbol_const(ConstAST(3), ctx)
-    const_from_int = emit_symbol_const(4, ctx)
-
-    assert isinstance(const_from_ast.type, SymbolValueType)
-    assert isinstance(const_from_int.type, SymbolValueType)
-
-    with pytest.raises(LoweringError, match="symbol.const requires int literal"):
-        emit_symbol_const(ConstAST(1.5), ctx)
-    with pytest.raises(LoweringError, match="symbol.const requires int literal"):
-        emit_symbol_const("bad", ctx)  # type: ignore[arg-type]
+    assert isinstance(result.owner, DmaAllocOp)
+    load_ops = [op for op in block.ops if isinstance(op, DmaLoadOp)]
+    assert len(load_ops) == 1
+    assert load_ops[0].target is result
+    assert any(isinstance(op, arith.IndexCastOp) for op in block.ops)

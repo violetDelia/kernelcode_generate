@@ -268,29 +268,11 @@ loaded = registry.load_targets(Path("kernel_gen/target/targets"))
 - `get_current_target_hardware(key: str) -> int | None`
 - `get_target_analysis_defaults(target: str) -> dict[str, dict[str, int]]`
 
-## helper 清单
+## helper 边界
 
-- `_format_error(...)`
-- `_raise_value_error(...)`
-- `_raise_type_error(...)`
-- `_validate_target_name(...)`
-- `_validate_arch_ops(...)`
-- `_validate_op_set(...)`
-- `_validate_hardware_map(...)`
-- `_parse_ops_list(...)`
-- `_parse_arch_payload(...)`
-- `_parse_hardware_payload(...)`
-- `_parse_target_spec(...)`
-- `_read_target_json(...)`
-- `_parse_ops_text(...)`
-- `_parse_target_txt(...)`
-- `_ensure_cpu_target(...)`
-- `_ensure_npu_demo_target(...)`
-- `_is_default_cpu_spec(...)`
-- `_same_target_spec(...)`
-- `_register_loaded_target(...)`
-- `_set_current_target(...)`
-- `_get_current_target(...)`
+- 当前文件内存在若干解析、校验与默认 target 组装 helper。
+- 这些 helper 仅用于 `registry.py` 内部复用，不属于公开合同。
+- 下游实现与测试只能通过 `TargetSpec`、`load_targets(...)`、`register_target(...)`、`set_current_target(...)`、`get_current_target(...)`、`is_arch_op_supported(...)`、`get_target_hardware(...)`、`get_current_target_hardware(...)` 与 `get_target_analysis_defaults(...)` 访问 target registry 能力。
 
 ### `get_target_analysis_defaults(target: str) -> dict[str, dict[str, int]]`
 

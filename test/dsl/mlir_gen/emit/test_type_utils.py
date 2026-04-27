@@ -1,21 +1,17 @@
-"""Emit type utils tests.
+"""Emit type public integration tests.
 
 创建者: jcc你莫辜负
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
-- 覆盖类型推导与 memory type 组装的最小行为。
+- 只覆盖 `kernel_gen.dsl.mlir_gen.emit` 包根公开入口中的类型相关可观察行为。
+- 不再把 `type_utils.py` 子模块 helper 视为测试合同。
 
 使用示例:
 - pytest -q test/dsl/mlir_gen/emit/test_type_utils.py
 
-覆盖率信息:
-- 覆盖率命令: coverage run -m pytest -q test/dsl/mlir_gen/emit/test_type_utils.py && coverage report --include=kernel_gen/dsl/mlir_gen/emit/type_utils.py -m
-- 覆盖率结果: 未统计（待补充）
-- 达标线: 90%
-
 关联文件:
-- 功能实现: kernel_gen/dsl/mlir_gen/emit/type_utils.py
+- 功能实现: kernel_gen/dsl/mlir_gen/emit/__init__.py
 - Spec 文档: spec/dsl/emit_mlir.md
 - 测试文件: test/dsl/mlir_gen/emit/test_type_utils.py
 """
@@ -25,57 +21,44 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, f32, i32
+from xdsl.dialects import arith
+from xdsl.dialects.builtin import f32, i32
+from xdsl.ir import Block
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.nn import NnMemorySpaceAttr
 from kernel_gen.dsl.ast import ConstAST
-from kernel_gen.dsl.mlir_gen.emit.type_utils import infer_expr_type, memory_type_from_parts
+from kernel_gen.dsl.mlir_gen.emit import EmitContext, emit_mlir, memory_type_from_memory
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.type import NumericType
 
 
-# EMIT-TYPE-001
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
-# 功能说明: 验证 memory_type_from_parts 的最小组装行为。
-# 测试目的: 锁定 NnMemoryType 的 shape/stride/element/space 组合结果。
-# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_type_utils.py -k test_memory_type_from_parts
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/type_utils.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/mlir_gen/emit/test_type_utils.py
-def test_memory_type_from_parts() -> None:
-    shape = [IntAttr(2), IntAttr(3)]
-    stride = [IntAttr(3), IntAttr(1)]
-    space = NnMemorySpaceAttr.from_name("global")
+def test_emit_package_root_memory_type_from_memory_builds_public_layout() -> None:
+    mem_type = memory_type_from_memory(Memory([2, "N"], NumericType.Float32, space=MemorySpace.TSM))
 
-    result = memory_type_from_parts(shape, stride, f32, space)
-
-    if not isinstance(result, NnMemoryType):
-        raise AssertionError("expected NnMemoryType result")
-    if list(result.shape.data) != shape:
-        raise AssertionError("shape mismatch")
-    if list(result.stride.data) != stride:
-        raise AssertionError("stride mismatch")
-    if result.element_type != f32:
-        raise AssertionError("element_type mismatch")
+    assert [dim.data for dim in mem_type.shape.data] == [2, "N"]
+    assert [dim.data for dim in mem_type.stride.data] == ["N", 1]
+    assert mem_type.element_type == f32
+    assert mem_type.space == NnMemorySpaceAttr.from_name("tsm")
 
 
-# EMIT-TYPE-002
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
-# 功能说明: 验证 infer_expr_type 对常量类型推导。
-# 测试目的: 锁定 int 常量推导为 i32。
-# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_type_utils.py -k test_infer_expr_type_const
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/type_utils.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/mlir_gen/emit/test_type_utils.py
-def test_infer_expr_type_const() -> None:
-    result = infer_expr_type(ConstAST(1), {})
-    if result != i32:
-        raise AssertionError("expected i32 for int constant")
+def test_emit_package_root_memory_type_from_memory_keeps_i32_element_type() -> None:
+    mem_type = memory_type_from_memory(Memory([4], NumericType.Int32, space=MemorySpace.GM))
+
+    assert [dim.data for dim in mem_type.shape.data] == [4]
+    assert [dim.data for dim in mem_type.stride.data] == [1]
+    assert mem_type.element_type == i32
+    assert mem_type.space == NnMemorySpaceAttr.from_name("global")
+
+
+def test_emit_mlir_const_keeps_public_i32_type() -> None:
+    block = Block()
+    ctx = EmitContext(builder=block, symbols={}, types={})
+
+    result = emit_mlir(ConstAST(1), ctx)
+
+    assert isinstance(result.owner, arith.ConstantOp)
+    assert result.type == i32

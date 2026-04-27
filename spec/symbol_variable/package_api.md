@@ -60,7 +60,7 @@ mem = Memory([SymbolDim("N"), 32], NumericType.Float32)
 
 约束：
 
-- `__all__` 必须严格等于上面的集合。
+- `from kernel_gen.symbol_variable import Name` 只承诺上面这组名称可稳定导入。
 - `from kernel_gen.symbol_variable import *` 只能暴露上面的集合。
 - 包入口不额外暴露 `Ptr`、实现细节或旧兼容名字。
 
@@ -117,4 +117,4 @@ importlib.import_module("kernel_gen.symbol_variable")
 | 包入口可导入 | [`test_python_symbol_variable_imports`](../../test/symbol_variable/test_package_api.py) |
 | 旧路径禁用 | [`test_legacy_import_disabled`](../../test/symbol_variable/test_package_api.py)、[`test_legacy_submodule_import_disabled`](../../test/symbol_variable/test_package_api.py) |
 | 对象同一性 | [`test_python_package_type_exports`](../../test/symbol_variable/test_package_api.py) |
-| `__all__` / `import *` | [`test_python_package_all_boundary`](../../test/symbol_variable/test_package_api.py)、[`test_python_package_import_star_exports_only_public_names`](../../test/symbol_variable/test_package_api.py) |
+| 包入口稳定导出 / `import *` | [`test_python_package_exports_match_public_contract`](../../test/symbol_variable/test_package_api.py)、[`test_python_package_import_star_exports_only_public_names`](../../test/symbol_variable/test_package_api.py) |

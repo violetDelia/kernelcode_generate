@@ -4,8 +4,17 @@
 最后一次更改: 朽木露琪亚
 
 功能说明:
-- 对外暴露 build_func_op/build_func_op_from_ast/mlir_gen 等公开入口。
-- 汇总解析环境、签名推导与 module 组装的兼容接口。
+- 对外暴露 `build_func_op`、`build_func_op_from_ast`、`mlir_gen` 与 `MlirGenModuleError` 公开入口。
+- 只承接 mlir_gen family 的稳定 package-root 导出，不顺手重导出下划线 helper 或 gen_kernel API。
+
+API 列表:
+- `MlirGenModuleError(message: str)`
+- `build_func_op(fn: Callable[..., object], *runtime_args: object, globals: dict[str, object] | None = None, builtins: dict[str, object] | object | None = None) -> func.FuncOp`
+- `build_func_op_from_ast(func_ast: FunctionAST, runtime_args: tuple[object, ...] | list[object] | None = None, config: dict[str, object] | None = None) -> func.FuncOp`
+- `mlir_gen(fn: Callable[..., object], *runtime_args: object, globals: dict[str, object] | None = None, builtins: dict[str, object] | object | None = None, config: dict[str, object] | None = None) -> ModuleOp`
+
+helper 清单:
+- 无
 
 API 列表:
 - MlirGenModuleError(reason: str)

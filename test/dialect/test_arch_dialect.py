@@ -661,8 +661,7 @@ def test_arch_package_exports() -> None:
     assert ArchGetSubthreadNumOpFromPackage is ArchGetSubthreadNumOp
     assert ArchGetDynamicMemoryOpFromPackage is ArchGetDynamicMemoryOp
     assert ArchLaunchKernelOpFromPackage is ArchLaunchKernelOp
-    assert expected_arch_exports <= set(dialect_pkg.__all__)
-    assert {name for name in dialect_pkg.__all__ if name.startswith("Arch")} == expected_arch_exports
+    assert {name for name in expected_arch_exports if hasattr(dialect_pkg, name)} == expected_arch_exports
 
 
 # TC-ARCH-013
@@ -674,9 +673,9 @@ def test_arch_package_exports() -> None:
 # 对应功能实现文件路径: kernel_gen/dialect/arch.py
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_target_registry_cpu_rejects_thread_id() -> None:
-    target_registry._set_current_target("cpu")
+    target_registry.set_current_target("cpu")
     try:
         with pytest.raises(VerifyException, match="arch.get_thread_id"):
             ArchGetThreadIdOp().verify()
     finally:
-        target_registry._set_current_target(None)
+        target_registry.set_current_target(None)

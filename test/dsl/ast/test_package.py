@@ -1,7 +1,7 @@
 """AST parsing tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 AST 解析入口、注解解析与诊断负路径的回归测试。
@@ -106,9 +106,14 @@ from kernel_gen.dsl.ast import (
     ScalarArgAST,
     parse_function,
 )
-from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
 from kernel_gen.dsl.ast.parser import parse_function_with_env
-from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
+from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
+from kernel_gen.dsl.mlir_gen import (
+    build_func_op,
+    build_func_op_from_ast,
+)
+from kernel_gen.dsl import mlir_gen as mlir_gen_module
+from kernel_gen.dsl.ast import visitor as ast_visitor_module
 import kernel_gen.operation.nn as nn
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim

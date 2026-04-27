@@ -1,43 +1,36 @@
+"""npu_demo symbol cast emitter.
+
+创建者: OpenAI Codex
+最后一次更改: OpenAI Codex
+
+功能说明:
+- 生成 npu_demo target 下 `symbol.cast` / `symbol.to_int` 的源码片段。
+- 结果命名统一委托给 `EmitCContext.create_or_get_name(...)` 与 target name handler。
+
+API 列表:
+- 无（仅 target 私有注册实现）
+
+使用示例:
+- from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c_op
+- stmt = emit_c_op(SymbolCastOp(src, i32), EmitCContext(config={"target": "npu_demo"}))
+
+关联文件:
+- spec: [spec/dsl/gen_kernel/emit.md](../../../../../../spec/dsl/gen_kernel/emit.md)
+- test: [test/dsl/gen_kernel/emit/test_emit.py](../../../../../../test/dsl/gen_kernel/emit/test_emit.py)
+- 功能实现: [kernel_gen/dsl/gen_kernel/emit/npu_demo/symbol/cast.py](.)
+"""
+
 from __future__ import annotations
 
-from xdsl.dialects.builtin import StringAttr
-from xdsl.ir import Operation
-
-from kernel_gen.dialect.symbol import SymbolConstOp
 from kernel_gen.dialect.symbol import SymbolCastOp, SymbolToIntOp
 
 from ...register import emit_c_impl, emit_c_value_impl
-
-
-def _is_symbol_const_like(op: object) -> bool:
-    if isinstance(op, SymbolConstOp):
-        return True
-    if not isinstance(op, Operation):
-        return False
-    op_name_attr = op.attributes.get("op_name__")
-    return (
-        op.name == "builtin.unregistered"
-        and isinstance(op_name_attr, StringAttr)
-        and op_name_attr.data == "symbol.const"
-    )
-
 
 @emit_c_impl(SymbolToIntOp, SymbolCastOp, target="npu_demo")
 def _emit_npu_demo_symbol_cast(op, ctx) -> str:
     result_name = ctx.lookup_name(op.result)
     if result_name is None:
-        source_owner = op.source.owner
-        if _is_symbol_const_like(source_owner):
-            source_name = _emit_npu_demo_symbol_cast_value(op.source, ctx)
-            result_name = ctx.create_or_get_name(
-                op.result,
-                preferred=f"{source_name}_cast_{ctx.dispatch_type(op.result.type)}",
-            )
-        else:
-            result_name = ctx.create_or_get_name(
-                op.result,
-                preferred=f"value_cast_{ctx.dispatch_type(op.result.type)}",
-            )
+        result_name = ctx.create_or_get_name(op.result)
     return f"{ctx.current_indent}{ctx.dispatch_type(op.result.type)} {result_name} = {_emit_npu_demo_symbol_cast_value(op.source, ctx)};"
 
 

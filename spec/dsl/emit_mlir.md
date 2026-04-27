@@ -11,6 +11,12 @@
 - `EmitContext(builder, symbols, types, config=None)`
 - `emit_mlir(node, ctx)`
 
+## 公开测试边界
+
+- `kernel_gen.dsl.mlir_gen.emit` 当前稳定公开入口只有 `EmitContext(...)` 与 `emit_mlir(...)`。
+- `call_arch.py`、`call_dma.py`、`call_nn.py`、`call_symbol.py`、`control_flow.py`、`value.py`、`type_utils.py`、`shape_utils.py` 都属于实现拆分文件，不单独构成公开 API。
+- 对这些实现拆分文件的回归，测试必须经由包根公开入口验证其可观察行为，不得直连子模块 helper。
+
 ## 文档信息
 
 - 创建者：`规格小队`

@@ -1,4 +1,35 @@
-"""Emit registry helpers for `gen_kernel.emit`."""
+"""Emit registry helpers for `gen_kernel.emit`.
+
+创建者: OpenAI Codex
+最后一次更改: OpenAI Codex
+
+功能说明:
+- 定义 `emit` 层公开注册器与 dispatch 合同。
+- 统一 target-specific op / value / type / attr / include / name 分发入口。
+
+API 列表:
+- `emit_c_impl(*types: type[Any], target: str | None = None) -> Callable[[OpHandler], OpHandler]`
+- `emit_c_value_impl(*types: type[Any], target: str | None = None) -> Callable[[ValueHandler], ValueHandler]`
+- `emit_c_type_impl(*types: type[Any], target: str) -> Callable[[TypeHandler], TypeHandler]`
+- `emit_c_attr_impl(*types: type[Any], target: str) -> Callable[[AttrHandler], AttrHandler]`
+- `emit_c_include_impl(target: str) -> Callable[[IncludeHandler], IncludeHandler]`
+- `emit_c_name_impl(*types: type[Any], target: str) -> Callable[[NameHandler], NameHandler]`
+- `dispatch_op(op: Operation, ctx: EmitCContext) -> str | None`
+- `dispatch_value(value: SSAValue, ctx: EmitCContext) -> str | None`
+- `dispatch_type(attr: Any, ctx: EmitCContext) -> str | None`
+- `dispatch_attr(attr: Any, ctx: EmitCContext) -> str | None`
+- `dispatch_include(ctx: EmitCContext) -> str`
+- `dispatch_name(value: SSAValue, ctx: EmitCContext) -> str | None`
+
+使用示例:
+- from kernel_gen.dsl.gen_kernel.emit.register import dispatch_op
+- stmt = dispatch_op(op, ctx)
+
+关联文件:
+- spec: [spec/dsl/gen_kernel/emit/register.md](../../../../spec/dsl/gen_kernel/emit/register.md)
+- test: [test/dsl/gen_kernel/emit/test_emit.py](../../../../test/dsl/gen_kernel/emit/test_emit.py)
+- 功能实现: [kernel_gen/dsl/gen_kernel/emit/register.py](.)
+"""
 
 from __future__ import annotations
 
@@ -15,7 +46,7 @@ ValueHandler = Callable[[SSAValue, EmitCContext], str]
 TypeHandler = Callable[[Any, EmitCContext], str]
 AttrHandler = Callable[[Any, EmitCContext], str]
 IncludeHandler = Callable[[EmitCContext], str]
-NameHandler = Callable[[SSAValue, EmitCContext, str | None, str], str | None]
+NameHandler = Callable[[SSAValue, EmitCContext], str | None]
 
 _OP_REGISTRY: dict[type[Any], OpHandler] = {}
 _VALUE_REGISTRY: dict[type[Any], ValueHandler] = {}
@@ -75,7 +106,7 @@ def emit_c_name_impl(*types: type[Any], target: str) -> Callable[[NameHandler], 
 
 
 def dispatch_op(op: Operation, ctx: EmitCContext) -> str | None:
-    target_registry = _TARGET_OP_REGISTRY.get(ctx.target, {})
+    target_registry = _TARGET_OP_REGISTRY.get(ctx.config["target"], {})
     for cls in type(op).__mro__:
         handler = target_registry.get(cls)
         if handler is not None:
@@ -88,7 +119,7 @@ def dispatch_op(op: Operation, ctx: EmitCContext) -> str | None:
 
 def dispatch_value(value: SSAValue, ctx: EmitCContext) -> str | None:
     owner = value.owner
-    target_registry = _TARGET_VALUE_REGISTRY.get(ctx.target, {})
+    target_registry = _TARGET_VALUE_REGISTRY.get(ctx.config["target"], {})
     for cls in type(owner).__mro__:
         handler = target_registry.get(cls)
         if handler is not None:
@@ -100,7 +131,7 @@ def dispatch_value(value: SSAValue, ctx: EmitCContext) -> str | None:
 
 
 def dispatch_type(attr: Any, ctx: EmitCContext) -> str | None:
-    target_registry = _TARGET_TYPE_REGISTRY.get(ctx.target, {})
+    target_registry = _TARGET_TYPE_REGISTRY.get(ctx.config["target"], {})
     for cls in type(attr).__mro__:
         handler = target_registry.get(cls)
         if handler is not None:
@@ -109,7 +140,7 @@ def dispatch_type(attr: Any, ctx: EmitCContext) -> str | None:
 
 
 def dispatch_attr(attr: Any, ctx: EmitCContext) -> str | None:
-    target_registry = _TARGET_ATTR_REGISTRY.get(ctx.target, {})
+    target_registry = _TARGET_ATTR_REGISTRY.get(ctx.config["target"], {})
     for cls in type(attr).__mro__:
         handler = target_registry.get(cls)
         if handler is not None:
@@ -118,31 +149,25 @@ def dispatch_attr(attr: Any, ctx: EmitCContext) -> str | None:
 
 
 def dispatch_include(ctx: EmitCContext) -> str:
-    handler = _TARGET_INCLUDE_REGISTRY.get(ctx.target)
+    handler = _TARGET_INCLUDE_REGISTRY.get(ctx.config["target"])
     if handler is None:
         return ""
     return handler(ctx)
 
 
-def dispatch_name(
-    value: SSAValue,
-    ctx: EmitCContext,
-    *,
-    preferred: str | None = None,
-    prefix: str = "v",
-) -> str | None:
-    target_registry = _TARGET_NAME_REGISTRY.get(ctx.target, {})
+def dispatch_name(value: SSAValue, ctx: EmitCContext) -> str | None:
+    target_registry = _TARGET_NAME_REGISTRY.get(ctx.config["target"], {})
     if isinstance(value, BlockArgument):
         for cls in type(value).__mro__:
             handler = target_registry.get(cls)
             if handler is not None:
-                return handler(value, ctx, preferred, prefix)
+                return handler(value, ctx)
         return None
     owner = value.owner
     for cls in type(owner).__mro__:
         handler = target_registry.get(cls)
         if handler is not None:
-            return handler(value, ctx, preferred, prefix)
+            return handler(value, ctx)
     return None
 
 __all__ = [

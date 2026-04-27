@@ -1,11 +1,14 @@
 """mlir_gen signature helpers.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 负责 func.func 签名与返回类型相关的类型推导与校验。
 - 提供 runtime_args、注解与 AST 之间的约束收敛入口。
+
+API 列表:
+- 无；当前文件仅提供 mlir_gen 内部 helper
 
 使用示例:
 - arg_types, type_map = _build_signature_types(func_ast, runtime_args=[...])
@@ -43,17 +46,26 @@ from kernel_gen.dsl.ast import (
     SymbolToFloatAST,
     TensorAST,
     TensorAxisAccessAST,
+    VarAST,
 )
-from kernel_gen.dsl.mlir_gen.emit.core import (
-    _LoweringError,
-    _expr_key,
-    _infer_binary_memory_type,
-    _infer_expr_type,
-    _memory_to_nn_type,
-    _resolve_symbolic_index_value,
-)
+from kernel_gen.dsl.mlir_gen.emit import memory_type_from_memory
+from kernel_gen.dsl.mlir_gen.emit.type_utils import infer_expr_type
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+
+
+class LoweringError(ValueError):
+    """当前文件内使用的 signature 失败错误。"""
+
+    def __init__(self, message: str, location: object | None = None) -> None:
+        super().__init__(message)
+        self.location = location
+
+
+def _expr_key(expr: object) -> int:
+    """为 AST 节点生成当前文件内使用的缓存键。"""
+
+    return id(expr)
 
 
 def _is_symbol_scalar_function(func_ast: FunctionAST) -> bool:
@@ -179,6 +191,76 @@ def _resolve_dma_alloc_shape_value(expr: object, runtime_values: dict[str, objec
     return _resolve_symbolic_index_value(expr, location=getattr(expr, "location", None), runtime_values=runtime_values)
 
 
+def _apply_symbolic_index_binary_op(
+    lhs_value: int | SymbolDim,
+    rhs_value: int | SymbolDim,
+    op: str,
+    location: object | None,
+) -> int | SymbolDim:
+    """在当前文件内解析 shape/stride 的符号索引二元运算。"""
+
+    if op == "add":
+        return lhs_value + rhs_value
+    if op == "sub":
+        return lhs_value - rhs_value
+    if op == "mul":
+        return lhs_value * rhs_value
+    if op == "div":
+        if isinstance(lhs_value, int) and isinstance(rhs_value, int):
+            if rhs_value == 0:
+                raise LoweringError("Unsupported index expression", location=location)
+            return lhs_value / rhs_value
+        if isinstance(lhs_value, int):
+            lhs_value = SymbolDim(lhs_value)
+        return lhs_value / rhs_value
+    if op == "floordiv":
+        if isinstance(lhs_value, int) and isinstance(rhs_value, int):
+            if rhs_value == 0:
+                raise LoweringError("Unsupported index expression", location=location)
+            return lhs_value // rhs_value
+        if isinstance(lhs_value, int):
+            lhs_value = SymbolDim(lhs_value)
+        return lhs_value // rhs_value
+    raise LoweringError("Unsupported index expression", location=location)
+
+
+def _resolve_symbolic_index_value(
+    expr: object,
+    *,
+    location: object | None = None,
+    runtime_values: dict[str, object] | None = None,
+) -> int | SymbolDim:
+    """在当前文件内解析 dma.alloc 需要的静态或符号索引值。"""
+
+    if isinstance(expr, ConstAST):
+        if isinstance(expr.value, int):
+            return expr.value
+        if isinstance(expr.value, str):
+            return SymbolDim(expr.value)
+        raise LoweringError("Index must be int or str", location=expr.location)
+    if isinstance(expr, ScalarArgAST):
+        if runtime_values is not None and expr.name in runtime_values:
+            runtime_value = runtime_values[expr.name]
+            if isinstance(runtime_value, (int, SymbolDim)):
+                return runtime_value
+        return SymbolDim(expr.name)
+    if isinstance(expr, VarAST):
+        if runtime_values is not None and expr.name in runtime_values:
+            runtime_value = runtime_values[expr.name]
+            if isinstance(runtime_value, (int, SymbolDim)):
+                return runtime_value
+        return SymbolDim(expr.name)
+    if isinstance(expr, BinaryExprAST):
+        lhs = _resolve_symbolic_index_value(expr.lhs, location=expr.location, runtime_values=runtime_values)
+        rhs = _resolve_symbolic_index_value(expr.rhs, location=expr.location, runtime_values=runtime_values)
+        return _apply_symbolic_index_binary_op(lhs, rhs, expr.op, expr.location)
+    if isinstance(expr, int):
+        return expr
+    if isinstance(expr, str):
+        return SymbolDim(expr)
+    raise LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+
+
 def _build_dma_alloc_only_result_type(
     func_ast: FunctionAST,
     alloc_expr: DmaAllocAST,
@@ -221,11 +303,12 @@ def _build_dma_alloc_only_result_type(
         else:
             stride_exprs = [alloc_expr.stride]
         stride = [_resolve_dma_alloc_shape_value(entry, runtime_values) for entry in stride_exprs]
-        default_stride = Memory._default_stride(Memory._normalize_shape(shape))
-        if Memory._normalize_shape(stride).get_values() != default_stride.get_values():
-            raise _LoweringError("dma.alloc only supports contiguous stride", location=alloc_expr.location)
+        normalized_stride = list(Memory(shape, alloc_expr.dtype, stride=stride).stride.get_values())
+        default_stride = list(Memory(shape, alloc_expr.dtype).stride.get_values())
+        if normalized_stride != default_stride:
+            raise LoweringError("dma.alloc only supports contiguous stride", location=alloc_expr.location)
     memory = Memory(shape, alloc_expr.dtype, space=alloc_expr.space, stride=stride)
-    return _memory_to_nn_type(memory, location=alloc_expr.location)
+    return memory_type_from_memory(memory)
 
 
 def _build_signature_types(
@@ -254,7 +337,7 @@ def _build_signature_types(
 
     is_symbol_scalar_function = _is_symbol_scalar_function(func_ast)
     if runtime_args is not None and len(runtime_args) != len(func_ast.inputs):
-        raise _LoweringError("runtime_args must align with func_ast inputs", location=func_ast.location)
+        raise LoweringError("runtime_args must align with func_ast inputs", location=func_ast.location)
 
     arg_types: list[object] = []
     type_map: dict[int, object] = {}
@@ -263,19 +346,19 @@ def _build_signature_types(
         runtime_arg = None if runtime_args is None else runtime_args[index]
         if isinstance(item, TensorAST):
             runtime_memory = runtime_arg if isinstance(runtime_arg, Memory) else None
-            arg_type = _memory_to_nn_type(runtime_memory or item.memory, location=item.location)
+            arg_type = memory_type_from_memory(runtime_memory or item.memory)
             tensor_input_count += 1
         elif isinstance(item, ScalarArgAST):
             if item.value_type is not int:
-                raise _LoweringError("Unsupported scalar argument type", location=item.location)
+                raise LoweringError("Unsupported scalar argument type", location=item.location)
             if runtime_args is not None:
                 if not isinstance(runtime_arg, (int, SymbolDim)):
-                    raise _LoweringError("Unsupported scalar argument type", location=item.location)
+                    raise LoweringError("Unsupported scalar argument type", location=item.location)
             runtime_expr = _symbol_expr_from_runtime_arg(runtime_arg)
             if allow_dma_alloc_only:
                 if runtime_args is not None:
                     if runtime_expr is None:
-                        raise _LoweringError("Unsupported scalar argument type", location=item.location)
+                        raise LoweringError("Unsupported scalar argument type", location=item.location)
                     arg_type = SymbolValueType.from_expr(runtime_expr)
                 else:
                     arg_type = SymbolValueType.from_expr(item.name)
@@ -286,14 +369,14 @@ def _build_signature_types(
             else:
                 arg_type = i32
         else:
-            raise _LoweringError("Unsupported input type", location=getattr(item, "location", None))
+            raise LoweringError("Unsupported input type", location=getattr(item, "location", None))
         arg_types.append(arg_type)
         type_map[_expr_key(item)] = arg_type
 
     if func_ast.inputs and tensor_input_count == 0 and not is_symbol_scalar_function and not allow_dma_alloc_only:
         statements = getattr(func_ast.body, "statements", None)
         if not statements:
-            raise _LoweringError("At least one tensor input is required", location=func_ast.location)
+            raise LoweringError("At least one tensor input is required", location=func_ast.location)
     return arg_types, type_map
 
 
@@ -325,8 +408,8 @@ def _allow_mixed_dtype_return(
         return False
     if return_expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
         return False
-    lhs_type = _infer_expr_type(return_expr.lhs, dict(type_map))
-    rhs_type = _infer_expr_type(return_expr.rhs, dict(type_map))
+    lhs_type = infer_expr_type(return_expr.lhs, dict(type_map))
+    rhs_type = infer_expr_type(return_expr.rhs, dict(type_map))
     if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
         return False
     if lhs_type.element_type == rhs_type.element_type:
@@ -334,10 +417,14 @@ def _allow_mixed_dtype_return(
     if expected_type.element_type not in {lhs_type.element_type, rhs_type.element_type}:
         return False
     try:
-        target_type = _infer_binary_memory_type(lhs_type, rhs_type, return_expr.location)
-    except _LoweringError:
+        target_type = infer_expr_type(return_expr, dict(type_map))
+    except LoweringError:
         return False
-    return result_type.shape == target_type.shape and result_type.element_type == target_type.element_type
+    return (
+        isinstance(target_type, NnMemoryType)
+        and result_type.shape == target_type.shape
+        and result_type.element_type == target_type.element_type
+    )
 
 
 def _parse_symbolic_dim_expr(expr: str) -> sp.Basic | None:
@@ -473,22 +560,22 @@ def _validate_return_type(
     if not func_ast.outputs:
         return
     if len(func_ast.outputs) != 1:
-        raise _LoweringError("Only single return value is supported", location=func_ast.location)
+        raise LoweringError("Only single return value is supported", location=func_ast.location)
     output = func_ast.outputs[0]
     if isinstance(output, TensorAST):
-        expected_type = _memory_to_nn_type(output.memory, location=output.location)
+        expected_type = memory_type_from_memory(output.memory)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("Return type does not match annotation", location=func_ast.location)
+            raise LoweringError("Return type does not match annotation", location=func_ast.location)
         shape_matches = _shape_annotation_matches(result_type, expected_type)
         if not shape_matches and isinstance(return_expr, DmaFlattenAST):
             shape_matches = _flatten_numel_annotation_matches(result_type, expected_type)
         if not shape_matches:
-            raise _LoweringError("Return type does not match annotation", location=func_ast.location)
+            raise LoweringError("Return type does not match annotation", location=func_ast.location)
         if result_type.element_type != expected_type.element_type:
             if return_expr is not None and type_map is not None:
                 if _allow_mixed_dtype_return(return_expr, type_map, result_type, expected_type):
                     return
-            raise _LoweringError("Return type does not match annotation", location=func_ast.location)
+            raise LoweringError("Return type does not match annotation", location=func_ast.location)
         return
     elif isinstance(output, ScalarArgAST):
         if output.value_type is bool:
@@ -510,13 +597,13 @@ def _validate_return_type(
             if isinstance(return_expr, SymbolToFloatAST):
                 expected_type = f32
             else:
-                raise _LoweringError("Unsupported scalar return type", location=output.location)
+                raise LoweringError("Unsupported scalar return type", location=output.location)
         else:
-            raise _LoweringError("Unsupported scalar return type", location=output.location)
+            raise LoweringError("Unsupported scalar return type", location=output.location)
     else:
-        raise _LoweringError("Unsupported return annotation type", location=getattr(output, "location", None))
+        raise LoweringError("Unsupported return annotation type", location=getattr(output, "location", None))
     if result_type != expected_type:
-        raise _LoweringError("Return type does not match annotation", location=func_ast.location)
+        raise LoweringError("Return type does not match annotation", location=func_ast.location)
 
 
 def _function_has_value_return(func_ast: FunctionAST) -> bool:
