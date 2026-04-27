@@ -1,17 +1,21 @@
 """attach-arch-information pass.
 
 创建者: 金铲铲大作战
-最后一次更改: OpenAI Codex
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 为 `builtin.module` 中的入口 `func.func` 补齐 `launch_block / launch_thread / launch_subthread / shared_memory_size`。
 - extent 统一从 target registry 读取，当前 `npu_demo` 口径为 `1/1/1/0`。
 - 不承担 outline 逻辑，仅负责把 IR 级 launch 信息补齐到后续 `outline-device-kernel` 可消费的状态。
 
+API 列表:
+- `class AttachArchInformationPass(target: str = "npu_demo")`
+- `AttachArchInformationPass.from_options(options: dict[str, str]) -> AttachArchInformationPass`
+- `AttachArchInformationPass.run(module: object) -> ModuleOp`
+
 使用示例:
 - from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
 - module = AttachArchInformationPass(target="npu_demo").run(module)
-- AttachArchInformationPass().apply(Context(), module)
 
 关联文件:
 - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
@@ -35,12 +39,12 @@ class AttachArchInformationPass(Pass, ModulePass):
     """attach-arch-information pass。
 
     创建者: 金铲铲大作战
-    最后一次更改: OpenAI Codex
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 固定公开名称为 `attach-arch-information`。
     - 为入口 `func.func` 从 target registry 补齐 launch extent 与 `shared_memory_size`。
-    - 兼容 `PassManager` 与 xdsl `ModulePass` 两套执行入口。
+    - 公开业务入口固定为 `run(module)`；`apply(ctx, module)` 仅保留给 xdsl `ModulePass` 协议。
 
     使用示例:
     - from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
@@ -109,19 +113,18 @@ class AttachArchInformationPass(Pass, ModulePass):
             raise PassContractError("AttachArchInformationError: target must be non-empty string")
         return cls(target=target)
 
-    def apply(self: "AttachArchInformationPass", ctx: Context, module: ModuleOp) -> None:
-        """执行 attach-arch-information pass。
+    def _apply_to_module(self: "AttachArchInformationPass", module: ModuleOp) -> None:
+        """执行当前文件内的 attach 主逻辑。
 
-        创建者: 金铲铲大作战
-        最后一次更改: OpenAI Codex
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
 
         功能说明:
-        - 只接受 `builtin.module` 输入。
-        - 只对模块入口 `func.func` 写回四段 launch extent。
-        - 若已有 launch 属性，则必须与 target registry 一致。
+        - 统一承载 `run(module)` 与 xdsl `apply(ctx, module)` 共享的业务步骤。
+        - 不把当前文件内的属性检查与写回流程暴露成跨文件调用入口。
 
         使用示例:
-        - AttachArchInformationPass(target="npu_demo").apply(Context(), module)
+        - pass_obj._apply_to_module(module)
 
         关联文件:
         - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
@@ -129,7 +132,6 @@ class AttachArchInformationPass(Pass, ModulePass):
         - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
         """
 
-        del ctx
         if not isinstance(module, ModuleOp):
             raise PassContractError("AttachArchInformationError: module must be builtin.module")
 
@@ -222,15 +224,37 @@ class AttachArchInformationPass(Pass, ModulePass):
         entry_func.attributes["launch_subthread"] = IntAttr(expected_values["launch_subthread"])
         entry_func.attributes["shared_memory_size"] = IntAttr(expected_values["shared_memory_size"])
 
+    def apply(self: "AttachArchInformationPass", ctx: Context, module: ModuleOp) -> None:
+        """满足 xdsl `ModulePass` 协议的 hook。
+
+        创建者: 金铲铲大作战
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 保留给 xdsl `ModulePass` 协议消费。
+        - 业务路径仍以 `run(module)` 为稳定入口。
+
+        使用示例:
+        - AttachArchInformationPass(target="npu_demo").apply(Context(), module)
+
+        关联文件:
+        - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
+        - test: [test/pass/test_attach_arch_information.py](../../test/pass/test_attach_arch_information.py)
+        - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
+        """
+
+        _ = ctx
+        self._apply_to_module(module)
+
     def run(self: "AttachArchInformationPass", module: object) -> ModuleOp:
         """兼容 `PassManager` 的 `run(module)` 执行入口。
 
         创建者: 金铲铲大作战
-        最后一次更改: OpenAI Codex
+        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 保持 `Pass` 风格调用方可继续工作。
-        - 内部直接复用 `apply()`，不额外暴露模块级 helper。
+        - 直接复用当前文件内 attach 主逻辑，不把 `apply(ctx, module)` 变成业务必经步骤。
 
         使用示例:
         - module = AttachArchInformationPass().run(module)
@@ -243,7 +267,7 @@ class AttachArchInformationPass(Pass, ModulePass):
 
         if not isinstance(module, ModuleOp):
             raise PassContractError("AttachArchInformationError: module must be builtin.module")
-        self.apply(Context(), module)
+        self._apply_to_module(module)
         return module
 
 

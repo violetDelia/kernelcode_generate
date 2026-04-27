@@ -6,13 +6,15 @@
 
 ## API 列表
 
-- `NumericType`
-- `Farmat`
+- `class NumericType(Enum)`
+- `class Farmat(Enum)`
+- `is_integer_dtype(dtype: NumericType) -> bool`
+- `is_float_dtype(dtype: NumericType) -> bool`
 
 ## [immutable]文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`大闸蟹`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)
 - `test`：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py)
 - `功能实现`：[`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py)
@@ -25,17 +27,21 @@
 ## 目标
 
 - 提供稳定、可枚举、可比较的数值类型与布局格式常量集合。
-- 明确模块级公开导出边界（`__all__` 与 `import *`）。
+- 明确模块级公开 API 可达性与 `import *` 导出边界。
 - 约束 `Farmat` 的公开成员与访问边界，仅允许 `Norm` 与 `CLast`。
 - 为上游比较类公开接口提供稳定的布尔 dtype 标识 `NumericType.Bool`。
+- 为 `Memory.clone(...)`、operation family 与 pass/DSL 公共入口提供最小 dtype family 查询能力。
 
 ## 限制与边界
 
 - [immutable]仅定义 `NumericType` 与 `Farmat` 两个枚举类型。
 - [immutable]不负责内存对象、张量对象或其他模块的运行时语义。
 - [immutable]不提供工厂函数、转换函数或其他辅助 API。
+- 上述旧口径在本轮继续保持“不提供工厂构造、转换、promotion、字符串解析或包根重导出 helper”的含义；当前新增公开范围仅限下文列出的两个 dtype family 查询 helper。
+- 当前唯一额外公开的模块级查询 helper 为 `is_integer_dtype(...)` 与 `is_float_dtype(...)`；它们只接受 `NumericType`，不承担工厂构造、字符串解析、自动转换或 promotion。
 - 不定义 dtype 推导、类型提升、布局转换或字符串解析逻辑。
 - 当前支持从 `kernel_gen.symbol_variable.type` 直接导入，也支持通过 `kernel_gen.symbol_variable` 包入口重导出导入；包级入口边界由 [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md) 负责。
+- `is_integer_dtype(...)` 与 `is_float_dtype(...)` 只在 `kernel_gen.symbol_variable.type` 子模块公开，不进入 `kernel_gen.symbol_variable` 包根稳定导出集合。
 - 不提供旧路径 `symbol_variable.type` 的兼容入口；该规则与包级 legacy 路径禁用保持一致。
 - 不扩展到量化类型、复数类型、稀疏布局或其他未公开的枚举成员。
 
@@ -45,9 +51,9 @@
 - `memory.md` 负责 `NumericType` / `Farmat` 在 `Memory` 中如何被消费，本文件不定义内存对象行为。
 - `operation/nn` 相关测试只把 `NumericType.Bool` 当作公开成员消费，不在本文件重复定义比较算子语义。
 
-## 公开接口
+## 公开语义说明
 
-### `NumericType`
+### `NumericType` 枚举成员与兼容边界
 
 功能说明：
 
@@ -95,7 +101,7 @@ assert NumericType.Int32 is not NumericType.Float32
 - 成员支持 `is` 与 `==` 比较，语义与标准 `Enum` 一致。
 - `.value` 属于公开接口，必须保持为当前 spec 列出的 dtype 字符串。
 
-### `Farmat`
+### `Farmat` 枚举成员与兼容边界
 
 功能说明：
 
@@ -128,6 +134,70 @@ assert Farmat.CLast.name == "CLast"
 - 返回的成员仅承诺 `Enum` 身份、可见性与 `.name` 稳定；不承诺 `.value` 可用于外部布局判等、字符串解析或别名兼容。
 - “常见布局别名”描述不构成新增导出成员、字符串匹配规则或与其他布局名的公开等价关系。
 
+### dtype family helper 语义
+
+#### `is_integer_dtype(dtype: NumericType) -> bool`
+
+功能说明：
+
+- 判断传入 `dtype` 是否属于当前公开整数 family。
+
+参数说明：
+
+- `dtype (NumericType)`：待判断的公开 dtype 枚举成员。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.type import NumericType, is_integer_dtype
+
+assert is_integer_dtype(NumericType.Int32) is True
+assert is_integer_dtype(NumericType.Uint64) is True
+assert is_integer_dtype(NumericType.Bool) is False
+```
+
+注意事项：
+
+- 当前整数 family 固定覆盖 `Int8/16/32/64` 与 `Uint8/16/32/64`。
+- `NumericType.Bool` 不属于整数 family。
+- helper 必须拒绝非 `NumericType` 输入，禁止把字符串、`.value`、其他枚举或任意对象当作可接受入口。
+
+返回与限制：
+
+- 返回 `bool`。
+- 非 `NumericType` 输入必须抛出 `TypeError`。
+
+#### `is_float_dtype(dtype: NumericType) -> bool`
+
+功能说明：
+
+- 判断传入 `dtype` 是否属于当前公开浮点 family。
+
+参数说明：
+
+- `dtype (NumericType)`：待判断的公开 dtype 枚举成员。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.type import NumericType, is_float_dtype
+
+assert is_float_dtype(NumericType.Float16) is True
+assert is_float_dtype(NumericType.BFloat16) is True
+assert is_float_dtype(NumericType.Int32) is False
+```
+
+注意事项：
+
+- 当前浮点 family 固定覆盖 `Float16`、`BFloat16`、`Float32`、`Float64`。
+- `Bool` 与所有整数成员都必须返回 `False`。
+- helper 只做 family 判断，不提供字符串字面量到 `NumericType` 的解析。
+
+返回与限制：
+
+- 返回 `bool`。
+- 非 `NumericType` 输入必须抛出 `TypeError`。
+
 ## 测试
 
 - 测试文件：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py)
@@ -135,7 +205,7 @@ assert Farmat.CLast.name == "CLast"
 
 ### 测试分层
 
-- 主测试：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py) 负责枚举成员、模块级 `__all__`、模块级 `import *` 与 legacy 子模块路径。
+- 主测试：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py) 负责枚举成员、`is_integer_dtype(...)` / `is_float_dtype(...)`、模块级公开 API 可达性、模块级 `import *` 与 legacy 子模块路径。
 - 交叉验证：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py) 只验证 `NumericType.Bool` 被上游比较接口稳定消费。
 
 ### 测试目标
@@ -143,7 +213,8 @@ assert Farmat.CLast.name == "CLast"
 - 验证 `NumericType` 既有公开成员、名称和值稳定；`Bool` 由交叉链路单独验证。
 - 验证 `NumericType.Bool` 作为公开枚举成员可用于比较类接口返回值。
 - 验证 `Farmat` 仅公开 `Norm` 与 `CLast`。
-- 验证 `__all__` 与 `import *` 的公开边界。
+- 验证 `is_integer_dtype(...)` 与 `is_float_dtype(...)` 的 family 结果、非法输入与子模块公开边界。
+- 验证模块级公开 API 可达性与 `import *` 的公开边界。
 - 验证旧路径 `symbol_variable.type` 不可导入。
 
 ### 功能与用例清单
@@ -152,8 +223,12 @@ assert Farmat.CLast.name == "CLast"
 |---|---|---|---|---|---|
 | TY-001 | 成员值 | `NumericType` 既有成员值稳定 | 已导入 `kernel_gen.symbol_variable.type` | 读取既有成员 `.value` | 与约定字符串一致 |
 | TY-002 | 成员边界 | `Farmat` 公开成员 | 已导入 `Farmat` | 仅可访问 `Norm`/`CLast` | 不存在额外布局名 |
-| TY-003 | 导出边界 | `__all__` 内容 | 已导入模块 | 读取 `__all__` | 严格等于 `["NumericType", "Farmat"]` |
-| TY-004 | 导出边界 | `import *` 暴露范围 | 已导入模块 | 执行 `from kernel_gen.symbol_variable.type import *` | 仅暴露 `Farmat`/`NumericType` |
+| TY-003 | 导出边界 | 模块公开 API 可达性 | 已导入模块 | 读取 `NumericType/Farmat/is_integer_dtype/is_float_dtype`，并确认无 `Memory/MemorySpace` 混入 | 仅已定义公开 API 可达，未定义名字不作为模块级公开接口出现 |
+| TY-004 | 导出边界 | `import *` 暴露范围 | 已导入模块 | 执行 `from kernel_gen.symbol_variable.type import *` | 仅暴露 `Farmat`/`NumericType`/`is_integer_dtype`/`is_float_dtype` |
 | TY-005 | 成员访问 | `NumericType` 既有成员访问 | 已导入 `NumericType` | 读取既有成员 `.name` | 与约定成员名一致 |
 | TY-006 | 导入边界 | 旧路径导入 | 已安装包 | `importlib.import_module("symbol_variable.type")` | 抛 `ModuleNotFoundError` |
 | TY-007 | 布尔类型 | `NumericType.Bool` 作为比较结果 dtype 的公开成员 | 已导入 `NumericType` 与 nn 比较接口 | 执行 `eq`/`ne`/`lt`/`le`/`gt`/`ge` 并读取结果 `dtype` | 返回值 `dtype` 为 `NumericType.Bool`，与公开成员语义一致 |
+| TY-008 | family helper | 整数 family 判断 | 已导入 `is_integer_dtype` | 分别传入 `Int32` / `Uint64` / `Bool` | 结果为 `True / True / False` |
+| TY-009 | family helper | 浮点 family 判断 | 已导入 `is_float_dtype` | 分别传入 `Float16` / `BFloat16` / `Int32` | 结果为 `True / True / False` |
+| TY-010 | family helper | 非法输入拒绝 | 已导入 helper | 传入字符串或其他非 `NumericType` 对象 | 抛 `TypeError` |
+| TY-011 | 包根边界 | helper 不进入包根 | 已导入 `kernel_gen.symbol_variable` | 读取 `is_integer_dtype` / `is_float_dtype` | 包根不存在这两个名称 |

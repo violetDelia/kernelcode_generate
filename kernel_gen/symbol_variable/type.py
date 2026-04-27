@@ -1,10 +1,16 @@
 """Type definitions for symbol variable.
 
 创建者: 小李飞刀
-最后一次更改: 榕
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供数值类型与格式枚举及其公开导出边界。
+
+API 列表:
+- `class NumericType(Enum)`
+- `class Farmat(Enum)`
+- `is_integer_dtype(dtype: NumericType) -> bool`
+- `is_float_dtype(dtype: NumericType) -> bool`
 
 使用示例:
 - from kernel_gen.symbol_variable.type import NumericType, Farmat
@@ -24,7 +30,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-__all__ = ["NumericType", "Farmat"]
+__all__ = ["NumericType", "Farmat", "is_integer_dtype", "is_float_dtype"]
 
 
 class NumericType(Enum):
@@ -82,3 +88,68 @@ class Farmat(Enum):
 
     Norm = "Norm"
     CLast = "CLast"
+
+
+_INTEGER_DTYPES = {
+    NumericType.Int8,
+    NumericType.Int16,
+    NumericType.Int32,
+    NumericType.Int64,
+    NumericType.Uint8,
+    NumericType.Uint16,
+    NumericType.Uint32,
+    NumericType.Uint64,
+}
+
+_FLOAT_DTYPES = {
+    NumericType.Float16,
+    NumericType.BFloat16,
+    NumericType.Float32,
+    NumericType.Float64,
+}
+
+
+def is_integer_dtype(dtype: NumericType) -> bool:
+    """判断 dtype 是否属于公开整数 family。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 只接受 `NumericType` 输入。
+    - 覆盖有符号与无符号整数成员。
+
+    使用示例:
+    - is_integer_dtype(NumericType.Int32)
+
+    关联文件:
+    - spec: spec/symbol_variable/type.md
+    - test: test/symbol_variable/test_type.py
+    - 功能实现: kernel_gen/symbol_variable/type.py
+    """
+    if not isinstance(dtype, NumericType):
+        raise TypeError("dtype must be NumericType")
+    return dtype in _INTEGER_DTYPES
+
+
+def is_float_dtype(dtype: NumericType) -> bool:
+    """判断 dtype 是否属于公开浮点 family。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 只接受 `NumericType` 输入。
+    - 覆盖 `Float16/BFloat16/Float32/Float64` 四个公开成员。
+
+    使用示例:
+    - is_float_dtype(NumericType.Float32)
+
+    关联文件:
+    - spec: spec/symbol_variable/type.md
+    - test: test/symbol_variable/test_type.py
+    - 功能实现: kernel_gen/symbol_variable/type.py
+    """
+    if not isinstance(dtype, NumericType):
+        raise TypeError("dtype must be NumericType")
+    return dtype in _FLOAT_DTYPES

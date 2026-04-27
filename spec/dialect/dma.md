@@ -24,7 +24,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/dialect/dma.md`](../../spec/dialect/dma.md)
 - `test`：[`test/dialect/test_dma_dialect.py`](../../test/dialect/test_dma_dialect.py)
 - `功能实现`：[`kernel_gen/dialect/dma.py`](../../kernel_gen/dialect/dma.py)
@@ -51,7 +51,7 @@
 ## 限制与边界
 
 - `dma dialect` 不单独维护 memory type / memory space，所有相关 operand / result 类型统一复用 `NnMemoryType` 与 `NnMemorySpaceAttr`。
-- 本文件只定义方言层的数据搬运、布局转换与显式数据转换语义，不负责真实 DMA 硬件调度、流水线编排、带宽建模、同步原语、事件、barrier 或 async token 设计。
+- 本文件只定义方言层的数据搬运、布局转换与显式数据转换语义，不负责真实 DMA 设备调度、流水线编排、带宽建模、同步原语、事件、barrier 或 async token 设计。
 - 本文件不负责逐元素算术、比较、归约、matmul 等张量计算语义，也不负责自动求解 `offsets/sizes/strides` 或自动推导最优搬运策略；但它提供与“数据物化/布局变换”一致的两类稳定原语：
   - `dma.broadcast`：把 scalar 或较低 rank memory 按广播规则物化写入目标 memory（用于显式广播与 mixed compare 桥接）
   - `dma.transpose`：把 source 按 perm 置换物化写入目标 memory（作为 `nn.transpose` 的 lowering 目标）
@@ -249,6 +249,7 @@ op = DmaFillOp(target, value)
 
 - `target.element_type` 当前固定为 `i32`；更宽整数、`f16`、`f32` 等其他 scalar family 不在本轮公开范围内。
 - 当 `value` 为 builtin `i32` 时，对应 `const(i32)` 物化路径；当 `value` 为 `!symbol.int<"expr">` 时，对应 `symbol.int` 物化路径；两者都必须以真实 SSA operand 进入 `dma.fill`，不得退化为 attribute 占位。
+- 若上层 DSL `fill(...)` helper 接受字符串字面量并继续 lower 到当前链路，公开字符串只允许表示正无穷 / 负无穷的两种规范语义；当前文面固定为 `"inf"` 与 `"-inf"`，不得放宽到其他大小写、别名或任意字符串。该规则属于更高层 helper 边界，不能扩展 `dma.fill.value` 在本层仍只接受 builtin `i32` / `!symbol.int<"expr">` 的事实。
 - `dma.fill` 必须把同一个标量值写入 `target` 的每个逻辑元素；它不是 `dma.alloc` 的语法糖，也不等价于“只创建 memory 但不写值”。
 - `dma.fill` 只负责标量写入，不承担 memory-memory 广播、逐元素算术或 dtype promotion。
 - verifier 只检查 `dma.fill` 的局部类型与接口合法性；“该 `target` 是否在下游 IR 中被实际消费”属于链路级验收边界。对 mixed add 当前最低通过口径，必须出现 `dma.alloc + dma.fill + downstream use(target)` 的完整片段，`users=[]` 的 dead temporary memory 不能计为通过。
@@ -256,7 +257,7 @@ op = DmaFillOp(target, value)
 返回与限制：
 
 - 返回类型为无返回值；当前 op result 数量固定为 `0`。
-- 当前只冻结 `i32 | !symbol.int<"expr"> -> !nn.memory<..., i32, ...>` 的最小公开子集；若后续需要浮点或更宽整数 materialize，必须新增独立 spec 收口。
+- 当前只收为 `i32 | !symbol.int<"expr"> -> !nn.memory<..., i32, ...>` 的最小公开子集；若后续需要浮点或更宽整数 materialize，必须新增独立 spec 收口。
 
 ### `dma.free`
 

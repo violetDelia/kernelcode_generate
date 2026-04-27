@@ -193,6 +193,8 @@ def test_python_package_exports_match_public_contract() -> None:
 
     assert sorted(name for name in PUBLIC_EXPORTS if hasattr(package_module, name)) == PUBLIC_EXPORTS
     assert not hasattr(package_module, "Ptr")
+    assert not hasattr(package_module, "is_integer_dtype")
+    assert not hasattr(package_module, "is_float_dtype")
 
 
 # PM-007

@@ -1,7 +1,7 @@
 """type module tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 kernel_gen.symbol_variable.type 的枚举语义、导出边界与旧路径禁用约束。
@@ -106,18 +106,23 @@ def test_farmat_public_members() -> None:
 
 # TY-003
 # 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 14:28:43 +0800
 # 最近一次运行成功时间: 2026-03-22 14:28:43 +0800
-# 测试目的: 验证 kernel_gen.symbol_variable.type 仅公开 NumericType 与 Farmat。
-# 使用示例: pytest -q test/symbol_variable/test_type.py -k test_python_type_module_all_boundary
+# 测试目的: 验证 `kernel_gen.symbol_variable.type` 模块的公开 API 可达，且测试边界不依赖 `__all__` 元数据。
+# 使用示例: pytest -q test/symbol_variable/test_type.py -k test_python_type_module_public_api_boundary
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
 # 对应 spec 文件路径: spec/symbol_variable/type.md
 # 对应测试文件路径: test/symbol_variable/test_type.py
-def test_python_type_module_all_boundary() -> None:
+def test_python_type_module_public_api_boundary() -> None:
     import kernel_gen.symbol_variable.type as type_module
 
-    assert type_module.__all__ == ["NumericType", "Farmat"]
+    assert hasattr(type_module, "NumericType")
+    assert hasattr(type_module, "Farmat")
+    assert hasattr(type_module, "is_integer_dtype")
+    assert hasattr(type_module, "is_float_dtype")
+    assert not hasattr(type_module, "Memory")
+    assert not hasattr(type_module, "MemorySpace")
 
 
 # TY-004
@@ -135,7 +140,7 @@ def test_python_type_import_star_exports_only_public_names() -> None:
 
     exec("from kernel_gen.symbol_variable.type import *", {}, namespace)
 
-    assert sorted(namespace) == ["Farmat", "NumericType"]
+    assert sorted(namespace) == ["Farmat", "NumericType", "is_float_dtype", "is_integer_dtype"]
 
 
 # TY-006
@@ -167,3 +172,60 @@ def test_legacy_type_import_disabled() -> None:
             importlib.import_module("symbol_variable.type")
     finally:
         sys.path[:] = original_sys_path
+
+
+# TY-008
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 验证 `is_integer_dtype(...)` 仅把公开整数成员判为 True。
+# 使用示例: pytest -q test/symbol_variable/test_type.py -k test_is_integer_dtype_public_family
+# 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
+# 对应 spec 文件路径: spec/symbol_variable/type.md
+# 对应测试文件路径: test/symbol_variable/test_type.py
+def test_is_integer_dtype_public_family() -> None:
+    from kernel_gen.symbol_variable.type import NumericType, is_integer_dtype
+
+    assert is_integer_dtype(NumericType.Int32) is True
+    assert is_integer_dtype(NumericType.Uint64) is True
+    assert is_integer_dtype(NumericType.Bool) is False
+    assert is_integer_dtype(NumericType.Float32) is False
+
+
+# TY-009
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 验证 `is_float_dtype(...)` 仅把公开浮点成员判为 True。
+# 使用示例: pytest -q test/symbol_variable/test_type.py -k test_is_float_dtype_public_family
+# 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
+# 对应 spec 文件路径: spec/symbol_variable/type.md
+# 对应测试文件路径: test/symbol_variable/test_type.py
+def test_is_float_dtype_public_family() -> None:
+    from kernel_gen.symbol_variable.type import NumericType, is_float_dtype
+
+    assert is_float_dtype(NumericType.Float16) is True
+    assert is_float_dtype(NumericType.BFloat16) is True
+    assert is_float_dtype(NumericType.Int32) is False
+    assert is_float_dtype(NumericType.Bool) is False
+
+
+# TY-010
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 验证 dtype family helper 拒绝非 `NumericType` 输入。
+# 使用示例: pytest -q test/symbol_variable/test_type.py -k test_dtype_family_helpers_reject_non_numeric_type
+# 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
+# 对应 spec 文件路径: spec/symbol_variable/type.md
+# 对应测试文件路径: test/symbol_variable/test_type.py
+def test_dtype_family_helpers_reject_non_numeric_type() -> None:
+    from kernel_gen.symbol_variable.type import is_float_dtype, is_integer_dtype
+
+    with pytest.raises(TypeError, match=r"^dtype must be NumericType$"):
+        is_integer_dtype("int32")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match=r"^dtype must be NumericType$"):
+        is_float_dtype(object())  # type: ignore[arg-type]

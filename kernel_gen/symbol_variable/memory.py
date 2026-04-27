@@ -1,7 +1,7 @@
 """Memory implementation.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 定义内存空间枚举与 Memory 对象，描述 shape/dtype/stride/format/space 元信息。
@@ -16,6 +16,7 @@ API 列表:
 - `Memory.get_type(self) -> NumericType`
 - `Memory.get_space(self) -> MemorySpace`
 - `Memory.get_format(self) -> Farmat`
+- `Memory.clone(self, dtype: NumericType | None = None, space: MemorySpace | None = None) -> Memory`
 
 使用示例:
 - from kernel_gen.symbol_variable.memory import Memory, MemorySpace
@@ -177,7 +178,7 @@ class Memory:
         """规范化 stride 并校验 rank 一致性。
 
         创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
+        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 将 stride 规整为 SymbolShape。
@@ -354,6 +355,41 @@ class Memory:
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self.format
+
+    def clone(
+        self: "Memory",
+        dtype: NumericType | None = None,
+        space: MemorySpace | None = None,
+    ) -> "Memory":
+        """按公开元信息克隆 `Memory`。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 默认继承当前对象的 `shape/stride/dtype/space/format`。
+        - `dtype` 或 `space` 显式传入时，只覆写对应公开元信息。
+        - 返回新的 `Memory`，避免与原对象共享 `shape/stride` 容器。
+
+        使用示例:
+        - Memory(["M", "N"], NumericType.Float32).clone(dtype=NumericType.Int32)
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        resolved_dtype = self.dtype if dtype is None else dtype
+        if not isinstance(resolved_dtype, NumericType):
+            raise TypeError("Memory.clone dtype must be NumericType or None")
+
+        resolved_space = self.space if space is None else space
+        if not isinstance(resolved_space, MemorySpace):
+            raise TypeError("Memory.clone space must be MemorySpace or None")
+
+        shape = self._clone_shape_like(self.shape)
+        stride = self._clone_shape_like(self.stride)
+        return Memory(shape, resolved_dtype, space=resolved_space, stride=stride, format=self.format)
 
     def __repr__(self: "Memory") -> str:
         """返回 Memory 的字符串表示。
@@ -532,9 +568,7 @@ class Memory:
         - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
-        shape = self._clone_shape_like(self.shape)
-        stride = self._clone_shape_like(self.stride)
-        return Memory(shape, dtype, space=self.space, stride=stride, format=self.format)
+        return self.clone(dtype=dtype)
 
     def _binary_arithmetic(self: "Memory", other: object) -> "Memory":
         """逐元素算术运算入口。

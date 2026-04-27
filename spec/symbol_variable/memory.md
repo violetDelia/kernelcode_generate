@@ -6,34 +6,35 @@
 
 ## API 列表
 
-- `LocalSpaceMeta`
-- `MemorySpace`
-- `Memory(shape, dtype=NumericType.Float32, space=MemorySpace.GM, stride=None, format=Farmat.Norm)`
-  - `—— get_shape()`
-  - `—— get_stride()`
-  - `—— get_type()`
-  - `—— get_space()`
-  - `—— get_format()`
-  - `—— __repr__()`
-  - `—— __str__()`
-  - `—— __add__(other)`
-  - `—— __radd__(other)`
-  - `—— __sub__(other)`
-  - `—— __rsub__(other)`
-  - `—— __mul__(other)`
-  - `—— __rmul__(other)`
-  - `—— __truediv__(other)`
-  - `—— __rtruediv__(other)`
-  - `—— __floordiv__(other)`
-  - `—— __rfloordiv__(other)`
-  - `—— __eq__(other)`
-  - `—— __lt__(other)`
-  - `—— __gt__(other)`
+- `class LocalSpaceMeta(name: str, max_size: int | None, align: int)`
+- `class MemorySpace(Enum)`
+- `class Memory(shape: ShapeLike, dtype: NumericType | None = None, space: MemorySpace = MemorySpace.GM, stride: ShapeLike | None = None, format: Farmat = Farmat.Norm)`
+- `Memory.get_shape(self) -> list[int | str]`
+- `Memory.get_stride(self) -> list[int | SymbolDim]`
+- `Memory.get_type(self) -> NumericType`
+- `Memory.get_space(self) -> MemorySpace`
+- `Memory.get_format(self) -> Farmat`
+- `Memory.clone(self, dtype: NumericType | None = None, space: MemorySpace | None = None) -> Memory`
+- `Memory.__repr__(self) -> str`
+- `Memory.__str__(self) -> str`
+- `Memory.__add__(self, other: object) -> Memory`
+- `Memory.__radd__(self, other: object) -> Memory`
+- `Memory.__sub__(self, other: object) -> Memory`
+- `Memory.__rsub__(self, other: object) -> Memory`
+- `Memory.__mul__(self, other: object) -> Memory`
+- `Memory.__rmul__(self, other: object) -> Memory`
+- `Memory.__truediv__(self, other: object) -> Memory`
+- `Memory.__rtruediv__(self, other: object) -> Memory`
+- `Memory.__floordiv__(self, other: object) -> Memory`
+- `Memory.__rfloordiv__(self, other: object) -> Memory`
+- `Memory.__eq__(self, other: object) -> Memory`
+- `Memory.__lt__(self, other: object) -> Memory`
+- `Memory.__gt__(self, other: object) -> Memory`
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`OpenAI Codex`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
 - `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)、[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
 - `功能实现`：[`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)
@@ -52,12 +53,13 @@
 - 不负责广播、约束求解、真实地址偏移推导、空间可用性判断和生命周期管理。
 - `shape`、`stride` 的单个分量若进入 IR，统一复用 [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)。
 - 本文件不重复定义 `SymbolDim` 算术规则，也不重复定义 `SymbolShape` 容器接口。
+- 当前文件内允许存在 `_clone_with_dtype`、`_clone_shape_like` 等辅助函数，但它们只服务 `Memory.clone(...)` 与运算实现，不属于公开 API；其他模块与测试不得跨文件直连。
 
 ## 公开合同
 
 ### `LocalSpaceMeta`
 
-- 冻结数据类，字段为 `name`、`max_size`、`align`。
+- 不可变数据类，字段为 `name`、`max_size`、`align`。
 - 只表示空间静态元信息；`max_size=None` 表示未指定。
 
 示例：
@@ -96,6 +98,31 @@ from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
 mem = Memory(["B", 128], NumericType.Float32, space=MemorySpace.SM)
+```
+
+### `Memory.clone(dtype=None, space=None)`
+
+- 返回一个新的 `Memory`，默认继承原对象的 `shape`、`stride`、`dtype`、`space` 与 `format`。
+- `dtype is None` 时沿用原 `dtype`；传入 `NumericType` 时只覆盖结果 `dtype`。
+- `space is None` 时沿用原 `space`；传入 `MemorySpace` 时只覆盖结果 `space`。
+- 返回值必须复制 `shape/stride` 的公开元信息，避免与原对象共享同一 `SymbolShape` / `SymbolDim` 实例。
+- `format` 固定继承原对象；`clone(...)` 不提供 `format` 或 `stride` 的公开覆写入口。
+- `dtype` 非 `NumericType|None` 或 `space` 非 `MemorySpace|None` 时必须抛出 `TypeError`。
+- `_clone_with_dtype(...)` 与 `_clone_shape_like(...)` 只允许作为当前文件内实现步骤存在，不得被其他模块或测试当作稳定入口调用。
+
+示例：
+
+```python
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.type import NumericType
+
+mem = Memory(["M", "N"], NumericType.Float32, space=MemorySpace.GM, stride=["N", 1])
+cloned = mem.clone(dtype=NumericType.Int32, space=MemorySpace.SM)
+
+assert cloned.get_shape() == ["M", "N"]
+assert cloned.get_type() is NumericType.Int32
+assert cloned.get_space() is MemorySpace.SM
+assert cloned.get_format() is mem.get_format()
 ```
 
 ### 默认 `stride`
@@ -166,6 +193,6 @@ mem = Memory(["B", 128], NumericType.Float32, space=MemorySpace.SM)
 
 ## 测试分层
 
-- [`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)：构造、元信息读取、默认步幅、文本表示。
-- [`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)：逐元素算术、比较、异常路径。
+- [`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)：构造、元信息读取、默认步幅、文本表示、`Memory.clone(...)` 的 dtype/space 覆写与元数据独立性。
+- [`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)：逐元素算术、比较、异常路径，以及经公开路径触发的 clone 保真行为。
 - [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)：与 symbol dialect 的相邻边界。

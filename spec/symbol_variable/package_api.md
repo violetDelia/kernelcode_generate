@@ -7,20 +7,28 @@
 ## API 列表
 
 - `kernel_gen.symbol_variable`
-- `Farmat`
-- `LocalSpaceMeta`
-- `Memory`
-- `MemorySpace`
-- `NumericType`
-- `SymbolDim`
-- `SymbolList`
-- `SymbolShape`
-- `kernel_gen.symbol_variable.ptr.Ptr`
+- `SymbolDim(value: int | str | Expr | Symbol)`
+- `SymbolList(shapes: list[int | str | SymbolDim])`
+- `SymbolShape(shapes: list[int | str | SymbolDim])`
+- `class LocalSpaceMeta(name: str, max_size: int | None, align: int)`
+- `class Memory(shape: ShapeLike, dtype: NumericType | None = None, space: MemorySpace = MemorySpace.GM, stride: ShapeLike | None = None, format: Farmat = Farmat.Norm)`
+- `Memory.get_shape(self) -> list[int | str]`
+- `Memory.get_stride(self) -> list[int | SymbolDim] | None`
+- `Memory.get_type(self) -> NumericType`
+- `Memory.get_space(self) -> MemorySpace`
+- `Memory.get_format(self) -> Farmat`
+- `Memory.clone(self, dtype: NumericType | None = None, space: MemorySpace | None = None) -> Memory`
+- `class MemorySpace(Enum)`
+- `class NumericType(Enum)`
+- `class Farmat(Enum)`
+- `kernel_gen.symbol_variable.type.is_integer_dtype(dtype: NumericType) -> bool`
+- `kernel_gen.symbol_variable.type.is_float_dtype(dtype: NumericType) -> bool`
+- `kernel_gen.symbol_variable.ptr.Ptr(*dtype: object)`
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md)
 - `test`：[`test/symbol_variable/test_package_api.py`](../../test/symbol_variable/test_package_api.py)
 - `功能实现`：[`kernel_gen/symbol_variable/__init__.py`](../../kernel_gen/symbol_variable/__init__.py)
@@ -32,7 +40,7 @@
 | [`kernel_gen/symbol_variable/symbol_dim.py`](../../kernel_gen/symbol_variable/symbol_dim.py) | `SymbolDim` |
 | [`kernel_gen/symbol_variable/symbol_shape.py`](../../kernel_gen/symbol_variable/symbol_shape.py) | `SymbolList`、`SymbolShape` |
 | [`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py) | `LocalSpaceMeta`、`Memory`、`MemorySpace` |
-| [`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py) | `NumericType`、`Farmat` |
+| [`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py) | `NumericType`、`Farmat`；`is_integer_dtype`、`is_float_dtype` 仅子模块入口 |
 | [`kernel_gen/symbol_variable/ptr.py`](../../kernel_gen/symbol_variable/ptr.py) | `Ptr`，只保留子模块入口 |
 
 ## 包入口合同
@@ -63,6 +71,7 @@ mem = Memory([SymbolDim("N"), 32], NumericType.Float32)
 - `from kernel_gen.symbol_variable import Name` 只承诺上面这组名称可稳定导入。
 - `from kernel_gen.symbol_variable import *` 只能暴露上面的集合。
 - 包入口不额外暴露 `Ptr`、实现细节或旧兼容名字。
+- `kernel_gen.symbol_variable.type.is_integer_dtype` 与 `kernel_gen.symbol_variable.type.is_float_dtype` 若存在，也只允许通过子模块入口导入；包入口不重导出这两个 helper。
 
 ### 对象同一性
 
@@ -79,12 +88,13 @@ assert PackageMemory is ModuleMemory
 
 ### 仅子模块入口
 
-`Ptr` 继续作为子模块 API 存在，但不进入包入口导出集合。
+`Ptr` 继续作为子模块 API 存在，但不进入包入口导出集合。`is_integer_dtype` 与 `is_float_dtype` 也属于同类“仅子模块入口”的公开接口。
 
 使用示例：
 
 ```python
 from kernel_gen.symbol_variable.ptr import Ptr
+from kernel_gen.symbol_variable.type import is_float_dtype, is_integer_dtype
 ```
 
 ### 旧路径禁用

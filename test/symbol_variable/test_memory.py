@@ -359,6 +359,76 @@ def test_clone_with_dtype_preserves_symbolic_stride_expression() -> None:
     assert result_dim == original_dim
 
 
+# ME-020A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 验证 `Memory.clone(...)` 可按公开参数覆写 dtype/space，并保留其余公开元信息。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_memory_clone_overrides_dtype_and_space
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_memory_clone_overrides_dtype_and_space() -> None:
+    mem = Memory(["M", 8], NumericType.Float32, space=MemorySpace.GM, stride=["S", 1], format=Farmat.CLast)
+
+    cloned = mem.clone(dtype=NumericType.Int32, space=MemorySpace.SM)
+
+    assert cloned is not mem
+    assert cloned.get_shape() == ["M", 8]
+    assert cloned.get_type() is NumericType.Int32
+    assert cloned.get_space() is MemorySpace.SM
+    assert cloned.get_format() is Farmat.CLast
+    cloned_stride = cloned.get_stride()
+    assert isinstance(cloned_stride[0], SymbolDim)
+    assert cloned_stride[0].get_value() == "S"
+    assert cloned_stride[1] == 1
+
+
+# ME-020B
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 验证 `Memory.clone(...)` 默认继承 dtype/space/format 与公开 shape/stride。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_memory_clone_defaults_preserve_public_metadata
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_memory_clone_defaults_preserve_public_metadata() -> None:
+    mem = Memory([2, "N"], NumericType.Float16, space=MemorySpace.LM, stride=["N", 1], format=Farmat.Norm)
+
+    cloned = mem.clone()
+
+    assert cloned.get_shape() == [2, "N"]
+    assert cloned.get_type() is NumericType.Float16
+    assert cloned.get_space() is MemorySpace.LM
+    assert cloned.get_format() is Farmat.Norm
+    cloned_stride = cloned.get_stride()
+    assert isinstance(cloned_stride[0], SymbolDim)
+    assert cloned_stride[0].get_value() == "N"
+    assert cloned_stride[1] == 1
+
+
+# ME-020C
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 验证 `Memory.clone(...)` 拒绝非法 dtype/space 输入。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_memory_clone_rejects_invalid_public_overrides
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_memory_clone_rejects_invalid_public_overrides() -> None:
+    mem = Memory([1, 2], NumericType.Float32)
+
+    with pytest.raises(TypeError, match=r"^Memory\.clone dtype must be NumericType or None$"):
+        mem.clone(dtype="int32")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match=r"^Memory\.clone space must be MemorySpace or None$"):
+        mem.clone(space="GM")  # type: ignore[arg-type]
+
+
 # ME-021
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战

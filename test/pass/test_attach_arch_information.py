@@ -106,8 +106,9 @@ def test_attach_arch_information_writes_registry_launch_extents() -> None:
     module = _make_empty_func_module()
     func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
 
-    AttachArchInformationPass.from_options({"target": "npu_demo"}).run(module)
+    result = AttachArchInformationPass.from_options({"target": "npu_demo"}).run(module)
 
+    assert result is module
     assert func_op.attributes["launch_block"] == IntAttr(1)
     assert func_op.attributes["launch_thread"] == IntAttr(1)
     assert func_op.attributes["launch_subthread"] == IntAttr(1)
