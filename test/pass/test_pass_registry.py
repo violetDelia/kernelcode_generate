@@ -399,6 +399,16 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
             importlib.import_module("kernel_gen.passes.symbol_loop_hoist").SymbolLoopHoistPass,
         ),
         (
+            "kernel_gen.passes.symbol_buffer_hoist",
+            "SymbolBufferHoistPass",
+            importlib.import_module("kernel_gen.passes.symbol_buffer_hoist").SymbolBufferHoistPass,
+        ),
+        (
+            "kernel_gen.passes",
+            "SymbolBufferHoistPass",
+            importlib.import_module("kernel_gen.passes.symbol_buffer_hoist").SymbolBufferHoistPass,
+        ),
+        (
             "kernel_gen.passes.lowering",
             "NnLoweringPass",
             importlib.import_module("kernel_gen.passes.lowering.nn_lowering").NnLoweringPass,
@@ -687,6 +697,7 @@ def test_registry_old_lowering_paths_fail_fast() -> None:
         "kernel_gen.passes.lowering.decompass",
         "kernel_gen.passes.lowering.buffer_results_to_out_params",
         "kernel_gen.passes.lowering.nn_to_kernel",
+        "kernel_gen.passes.lowering.symbol_buffer_hoist",
         "kernel_gen.passes.lowering.tile_analysis",
         "kernel_gen.passes.lowering.tile_elewise",
         "kernel_gen.passes.lowering.tile_reduce",
@@ -711,6 +722,25 @@ def test_registry_retired_analysis_pass_name_fails_fast() -> None:
 
     with pytest.raises(PassRegistryError, match=r"^PassRegistryError: unknown pass 'analyze-func-cost'$"):
         build_registered_pass("analyze-func-cost")
+
+
+# TC-REGISTRY-007J-2
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证内置加载后 symbol-buffer-hoist 可通过稳定名称构造，并固定 canonical module path。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_symbol_buffer_hoist_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_symbol_buffer_hoist_pass() -> None:
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass("symbol-buffer-hoist")
+
+    assert isinstance(pass_obj, ModulePass)
+    assert pass_obj.name == "symbol-buffer-hoist"
+    assert type(pass_obj).__name__ == "SymbolBufferHoistPass"
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.symbol_buffer_hoist"
 
 
 # TC-REGISTRY-007K

@@ -1,7 +1,7 @@
 """pass package.
 
 创建者: 李白
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 暴露 Pass 管理相关实现。
@@ -11,6 +11,7 @@
 - 暴露 `buffer-results-to-out-params` 的公开入口。
 - 暴露 `decompass` 专题 pass 的根路径入口。
 - 暴露 `outline-device-kernel` 的公开入口。
+- 暴露 `symbol-buffer-hoist` 的公开入口与 pattern API。
 - 暴露 `symbol-loop-hoist` 专题 pass 的根路径入口。
 - 暴露 `tile-analysis` 的公开入口与 pattern API。
 - 暴露 `tile-elewise` 的公开入口与 pattern API。
@@ -35,6 +36,9 @@ API 列表:
 - `class NnSoftmaxDecompPattern()`
 - `get_decompass_pass_patterns() -> list[RewritePattern]`
 - `class OutlineDeviceKernelPass()`
+- `class DmaAllocInSymbolForHoistPattern()`
+- `get_symbol_buffer_hoist_patterns() -> list[RewritePattern]`
+- `class SymbolBufferHoistPass()`
 - `class TileAnalysisBinaryPattern()`
 - `class TileAnalysisBroadcastPattern()`
 - `class TileAnalysisMatmulPattern()`
@@ -64,6 +68,9 @@ API 列表:
 - attach_pass = AttachArchInformationPass(target="npu_demo")
 - from kernel_gen.passes import OutlineDeviceKernelPass
 - outline_pass = OutlineDeviceKernelPass()
+- from kernel_gen.passes import DmaAllocInSymbolForHoistPattern, SymbolBufferHoistPass
+- symbol_buffer_patterns = get_symbol_buffer_hoist_patterns()
+- symbol_buffer_pass = SymbolBufferHoistPass()
 - from kernel_gen.passes import TileAnalysisPass, TileAnalysisBinaryPattern
 - tile_analysis_pass = TileAnalysisPass()
 - from kernel_gen.passes import TileElewisePass, TileReducePass
@@ -99,7 +106,8 @@ API 列表:
   - kernel_gen/passes/attach_arch_information.py
   - kernel_gen/passes/buffer_results_to_out_params.py
   - kernel_gen/passes/decompass.py
-  - kernel_gen/passes/outline_device_kernel.py
+- kernel_gen/passes/outline_device_kernel.py
+- kernel_gen/passes/symbol_buffer_hoist.py
   - kernel_gen/passes/tile/analysis.py
   - kernel_gen/passes/tile/elewise.py
   - kernel_gen/passes/tile/reduce.py
@@ -121,6 +129,11 @@ from .decompass import (
 )
 from .inline import InlinePass
 from .outline_device_kernel import OutlineDeviceKernelPass
+from .symbol_buffer_hoist import (
+    DmaAllocInSymbolForHoistPattern,
+    SymbolBufferHoistPass,
+    get_symbol_buffer_hoist_patterns,
+)
 from .tile.analysis import (
     TileAnalysisBinaryPattern,
     TileAnalysisBroadcastPattern,
@@ -154,6 +167,9 @@ __all__ = [
     "NnSoftmaxDecompPattern",
     "get_decompass_pass_patterns",
     "OutlineDeviceKernelPass",
+    "DmaAllocInSymbolForHoistPattern",
+    "get_symbol_buffer_hoist_patterns",
+    "SymbolBufferHoistPass",
     "TileAnalysisBinaryPattern",
     "TileAnalysisBroadcastPattern",
     "TileAnalysisMatmulPattern",

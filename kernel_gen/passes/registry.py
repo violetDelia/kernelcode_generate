@@ -419,6 +419,7 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.memory_pool import MemoryPoolPass
     from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
     from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
+    from kernel_gen.passes.symbol_buffer_hoist import SymbolBufferHoistPass
     from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
     from kernel_gen.passes.tile.analysis import TileAnalysisPass
     from kernel_gen.passes.tile.elewise import TileElewisePass
@@ -432,6 +433,7 @@ def load_builtin_passes() -> None:
         BufferResultsToOutParamsPass,
         LowerDmaMemoryHierarchyPass,
         OutlineDeviceKernelPass,
+        SymbolBufferHoistPass,
         AttachArchInformationPass,
         TileAnalysisPass,
         TileElewisePass,

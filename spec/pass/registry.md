@@ -19,7 +19,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/registry.md`](../../spec/pass/registry.md)
 - `功能实现`：[`kernel_gen/passes/registry.py`](../../kernel_gen/passes/registry.py)
 - `test`：[`test/pass/test_pass_registry.py`](../../test/pass/test_pass_registry.py)
@@ -64,6 +64,7 @@
   - `no-op`：恒等 pass（对输入 module 不做任何改写），且必须满足“可构造”要求（`pass_cls()` 可成功执行）。
   - `inline`：module 内 helper 展平 pass，供 `npu-demo-lowering` 前置收口。
   - `attach-arch-information`：把 target registry 的 launch extent 写回入口 `func.func`。
+  - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前。
   - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 pytest 与工具层统一解析。
 - tuning pass `launch-kernel-cost-func` 属于 standalone pass，必须通过 pass registry 显式启用；不得自动进入任何默认 pipeline。
 - `launch-kernel-cost-func` 接受 `options={"cost_kind": "compute|memory"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
@@ -83,6 +84,7 @@
   - `kernel_gen.passes.dma_memory_hierarchy`
   - `kernel_gen.passes.memory_pool`
   - `kernel_gen.passes.outline_device_kernel`
+  - `kernel_gen.passes.symbol_buffer_hoist`
   - `kernel_gen.passes.symbol_loop_hoist`
 - 对当前仍存活的 compat / family caller，当前基线仍允许继续导入，但不承诺永久保留：
   - `kernel_gen.passes.lowering`
@@ -109,7 +111,7 @@
   - `kernel_gen.passes.lowering.tile_reduce`
 - 已退场的 analysis family 不再提供公开 pass 名或 registry 构造入口；`build_registered_pass("analyze-func-cost")` 必须显式失败。
 - 机械验收口径：
-  - `test/pass/test_pass_registry.py` 负责锁定 canonical public path、旧路径失败边界、`analyze-func-cost` 构造失败与 registry caller 的 `importlib` 消费者矩阵。
+  - `test/pass/test_pass_registry.py` 负责锁定 canonical public path、`symbol-buffer-hoist` 的稳定注册名与包根 re-export、旧路径失败边界、`analyze-func-cost` 构造失败与 registry caller 的 `importlib` 消费者矩阵。
   - `test/pass/test_pass_manager.py` 负责锁定 pass manager / pipeline caller 的 `importlib` 消费者矩阵。
 
 ## S2 导入矩阵补充
@@ -232,6 +234,7 @@ pass_obj = build_registered_pass("tile-analysis")
 pass_obj = build_registered_pass("tile-reduce")
 inline_pass = build_registered_pass("inline")
 attach_pass = build_registered_pass("attach-arch-information")
+hoist_pass = build_registered_pass("symbol-buffer-hoist")
 cost_pass = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "compute|memory"})
 ```
 
