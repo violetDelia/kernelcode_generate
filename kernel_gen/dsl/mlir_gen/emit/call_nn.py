@@ -20,6 +20,9 @@ API 列表:
 """
 
 from __future__ import annotations
+from typing import TYPE_CHECKING
+
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import (
@@ -105,17 +108,8 @@ from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
-from .context import EmitContext
-
-
-class LoweringError(ValueError):
-    """当前文件内使用的 nn emit 失败错误。"""
-
-    def __init__(self, message: str, location: SourceLocation | None = None) -> None:
-        super().__init__(message)
-        self.location = location
-
-_LoweringError = LoweringError
+if TYPE_CHECKING:
+    from . import EmitContext
 _ARITHMETIC_DTYPE_RANK = {
     NumericType.Int8: 0,
     NumericType.Uint8: 1,
@@ -169,16 +163,16 @@ def _infer_expr_type(
         elif isinstance(expr.value, float):
             result_type = f32
         else:
-            raise _LoweringError("Unsupported constant type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported constant type", location=expr.location)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, (TensorAST, ScalarArgAST, VarAST)):
         if expr_key not in type_map:
-            raise _LoweringError("Unknown input reference", location=getattr(expr, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unknown input reference", location=getattr(expr, "location", None))
         return type_map[expr_key]
     if isinstance(expr, TensorAxisAccessAST):
         if not isinstance(expr.axis, ConstAST) or not isinstance(expr.axis.value, int):
-            raise _LoweringError("Unsupported AST expression for lowering", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported AST expression for lowering", location=expr.location)
         dims = expr.tensor.memory.shape if expr.kind == "shape" else expr.tensor.memory.stride
         dim_value = dims[expr.axis.value].get_value()
         result_type = SymbolValueType.from_expr(dim_value if isinstance(dim_value, str) else str(dim_value))
@@ -187,7 +181,7 @@ def _infer_expr_type(
     if isinstance(expr, DmaReshapeAST):
         source_type = _emit_infer_expr_type(expr.source, type_map, runtime_values=runtime_values, config=config)
         if not isinstance(source_type, NnMemoryType):
-            raise _LoweringError("reshape source must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reshape source must have nn.memory type", location=expr.location)
         source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
         result_memory = _KG_OPERATION_DMA.reshape(
             source_memory,
@@ -199,7 +193,7 @@ def _infer_expr_type(
     if isinstance(expr, NnTransposeAST):
         value_type = _emit_infer_expr_type(expr.value, type_map, runtime_values=runtime_values, config=config)
         if not isinstance(value_type, NnMemoryType):
-            raise _LoweringError("transpose source must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "transpose source must have nn.memory type", location=expr.location)
         result_memory = _KG_OPERATION_NN.transpose(
             _nn_memory_type_to_memory(value_type, location=expr.location),
             _resolve_static_int_list(expr.perm, expr.location),
@@ -211,7 +205,7 @@ def _infer_expr_type(
         lhs_type = _emit_infer_expr_type(expr.lhs, type_map, runtime_values=runtime_values, config=config)
         rhs_type = _emit_infer_expr_type(expr.rhs, type_map, runtime_values=runtime_values, config=config)
         if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
-            raise _LoweringError("matmul operands must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "matmul operands must have nn.memory type", location=expr.location)
         result_memory = _KG_OPERATION_NN.matmul(
             _nn_memory_type_to_memory(lhs_type, location=expr.location),
             _nn_memory_type_to_memory(rhs_type, location=expr.location),
@@ -223,7 +217,7 @@ def _infer_expr_type(
     if isinstance(expr, NnReduceAST):
         value_type = _emit_infer_expr_type(expr.value, type_map, runtime_values=runtime_values, config=config)
         if not isinstance(value_type, NnMemoryType):
-            raise _LoweringError("reduce source must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reduce source must have nn.memory type", location=expr.location)
         reduce_fn_map = {
             "reduce_sum": _KG_OPERATION_NN.reduce_sum,
             "reduce_min": _KG_OPERATION_NN.reduce_min,
@@ -231,7 +225,7 @@ def _infer_expr_type(
         }
         reduce_fn = reduce_fn_map.get(expr.kind)
         if reduce_fn is None:
-            raise _LoweringError("Unsupported AST expression for lowering", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported AST expression for lowering", location=expr.location)
         axis = None if expr.axis is None else _resolve_static_int(expr.axis, expr.location)
         keepdim = False if expr.keepdim is None else _resolve_static_bool(expr.keepdim, expr.location)
         result_memory = reduce_fn(
@@ -245,7 +239,7 @@ def _infer_expr_type(
     if isinstance(expr, NnBroadcastToAST):
         source_type = _emit_infer_expr_type(expr.source, type_map, runtime_values=runtime_values, config=config)
         if not isinstance(source_type, NnMemoryType):
-            raise _LoweringError("broadcast_to source must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "broadcast_to source must have nn.memory type", location=expr.location)
         result_memory = _KG_OPERATION_NN.broadcast_to(
             _nn_memory_type_to_memory(source_type, location=expr.location),
             _resolve_public_shape_values(expr.target_shape, type_map, runtime_values, config, expr.location),
@@ -256,7 +250,7 @@ def _infer_expr_type(
         return result_type
     if isinstance(expr, (NnUnaryAST, BinaryExprAST, CompareExprAST)):
         return infer_nn_type(expr, type_map, runtime_values=runtime_values, config=config)
-    raise _LoweringError("Unsupported AST expression for lowering", location=getattr(expr, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported AST expression for lowering", location=getattr(expr, "location", None))
 
 
 _emit_infer_expr_type = _infer_expr_type
@@ -267,7 +261,7 @@ def _emit_lower_expr(expr: object, ctx: EmitContext) -> SSAValue:
 
     value = emit_mlir(expr, ctx)
     if not isinstance(value, SSAValue):
-        raise LoweringError("Unsupported expression for lowering", location=getattr(expr, "location", None))
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported expression for lowering", location=getattr(expr, "location", None))
     return value
 
 
@@ -280,19 +274,42 @@ def _const_symbol_int(value: int, ctx: EmitContext, location: SourceLocation | N
 
 def _expect_memory_value(value: object, location: SourceLocation | None) -> NnMemoryType:
     if not isinstance(getattr(value, "type", None), NnMemoryType):
-        raise LoweringError("Operand must be nn.memory", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Operand must be nn.memory", location=location)
     return value.type
 
 
 def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None) -> Attribute:
+    """将 NN emit 推导出的 `NumericType` 转为 xdsl element type。
+
+    创建者: OpenAI
+    最后一次更改: 榕
+
+    功能说明:
+    - 覆盖 `NumericType` 当前公开的 bool、signed/unsigned integer 与 floating dtype。
+    - unsigned integer 必须保留 unsigned signedness，供后续 `dma.cast` / `nn` op 保持稳定文本。
+
+    使用示例:
+    - `_dtype_to_xdsl(NumericType.Uint32, location=None)`
+    """
+
     if dtype is NumericType.Bool:
         return i1
     if dtype is NumericType.Int8:
         return i8
+    if dtype is NumericType.Int16:
+        return IntegerType(16)
     if dtype is NumericType.Int32:
         return i32
     if dtype is NumericType.Int64:
         return i64
+    if dtype is NumericType.Uint8:
+        return IntegerType(8, signedness=Signedness.UNSIGNED)
+    if dtype is NumericType.Uint16:
+        return IntegerType(16, signedness=Signedness.UNSIGNED)
+    if dtype is NumericType.Uint32:
+        return IntegerType(32, signedness=Signedness.UNSIGNED)
+    if dtype is NumericType.Uint64:
+        return IntegerType(64, signedness=Signedness.UNSIGNED)
     if dtype is NumericType.BFloat16:
         return BFloat16Type()
     if dtype is NumericType.Float16:
@@ -301,7 +318,7 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None) -> Attri
         return f32
     if dtype is NumericType.Float64:
         return Float64Type()
-    raise LoweringError("Unsupported element_type for nn arithmetic", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported element_type for nn arithmetic", location=location)
 
 
 def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None) -> NumericType:
@@ -335,7 +352,7 @@ def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None) -> 
             return NumericType.Int32
         if width == 64:
             return NumericType.Int64
-    raise LoweringError("Unsupported element_type for nn arithmetic", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported element_type for nn arithmetic", location=location)
 
 
 def _promote_ranked_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
@@ -356,7 +373,7 @@ def _resolve_nn_arith_element_type(
         rhs_dtype = _xdsl_to_dtype(rhs_type.element_type, location)
         target_dtype = _promote_ranked_dtype(lhs_dtype, rhs_dtype)
     except TypeError as exc:
-        raise LoweringError("Binary op operands must have compatible element_type", location=location) from exc
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have compatible element_type", location=location) from exc
     return _dtype_to_xdsl(target_dtype, location)
 
 
@@ -388,7 +405,7 @@ def _shape_attr_to_symbol_dim(attr: Attribute, location: SourceLocation | None) 
         if attr.data == "?":
             return None
         return SymbolDim(attr.data)
-    raise LoweringError("Unsupported shape attribute", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported shape attribute", location=location)
 
 
 def _resolve_static_int(expr: object, location: SourceLocation | None) -> int:
@@ -407,7 +424,7 @@ def _resolve_static_int(expr: object, location: SourceLocation | None) -> int:
 
     if isinstance(expr, ConstAST) and isinstance(expr.value, int) and not isinstance(expr.value, bool):
         return expr.value
-    raise LoweringError("Unsupported AST expression for lowering", location=location or getattr(expr, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported AST expression for lowering", location=location or getattr(expr, "location", None))
 
 
 def _resolve_static_bool(expr: object, location: SourceLocation | None) -> bool:
@@ -426,7 +443,7 @@ def _resolve_static_bool(expr: object, location: SourceLocation | None) -> bool:
 
     if isinstance(expr, ConstAST) and isinstance(expr.value, bool):
         return expr.value
-    raise LoweringError("Unsupported AST expression for lowering", location=location or getattr(expr, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported AST expression for lowering", location=location or getattr(expr, "location", None))
 
 
 def _resolve_static_int_list(values: list[object], location: SourceLocation | None) -> list[int]:
@@ -476,7 +493,7 @@ def _resolve_public_shape_values(
         if isinstance(inferred_type, SymbolValueType):
             resolved.append(SymbolDim(inferred_type.expr.expr.data))
             continue
-        raise LoweringError("Unsupported AST expression for lowering", location=location or getattr(value, "location", None))
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported AST expression for lowering", location=location or getattr(value, "location", None))
     return resolved
 
 
@@ -520,13 +537,13 @@ def _nn_memory_type_to_memory(memory_type: NnMemoryType, location: SourceLocatio
     for dim_attr in memory_type.shape.data:
         dim_symbol = _shape_attr_to_symbol_dim(dim_attr, location)
         if dim_symbol is None:
-            raise LoweringError("nn.memory shape contains unknown dimension", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.memory shape contains unknown dimension", location=location)
         shape.append(dim_symbol)
     stride: list[SymbolDim] = []
     for dim_attr in memory_type.stride.data:
         dim_symbol = _shape_attr_to_symbol_dim(dim_attr, location)
         if dim_symbol is None:
-            raise LoweringError("nn.memory stride contains unknown dimension", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.memory stride contains unknown dimension", location=location)
         stride.append(dim_symbol)
     dtype = _xdsl_to_dtype(memory_type.element_type, location)
     space_map = {
@@ -540,7 +557,7 @@ def _nn_memory_type_to_memory(memory_type: NnMemoryType, location: SourceLocatio
     }
     space = space_map.get(memory_type.space.space.data)
     if space is None:
-        raise LoweringError("Unsupported nn.memory space", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported nn.memory space", location=location)
     return Memory(shape, dtype, space=space, stride=stride)
 
 
@@ -597,12 +614,12 @@ def _infer_broadcast_shape(
             if _dims_equal(lhs_dim, rhs_dim):
                 result.insert(0, lhs_dim)
                 continue
-            raise LoweringError("Implicit broadcast dimension mismatch", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch", location=location)
         if isinstance(rhs_dim, StringAttr) and rhs_dim.data == "?":
             if _dims_equal(lhs_dim, rhs_dim):
                 result.insert(0, rhs_dim)
                 continue
-            raise LoweringError("Implicit broadcast dimension mismatch", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch", location=location)
         if _dims_equal(lhs_dim, rhs_dim):
             result.insert(0, lhs_dim)
             continue
@@ -612,7 +629,7 @@ def _infer_broadcast_shape(
         if isinstance(rhs_dim, IntAttr) and rhs_dim.data == 1:
             result.insert(0, lhs_dim)
             continue
-        raise LoweringError("Implicit broadcast dimension mismatch", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch", location=location)
     return result
 
 
@@ -623,9 +640,9 @@ def _infer_broadcast_memory_type(
     element_type: Attribute | None = None,
 ) -> NnMemoryType:
     if element_type is None and lhs_type.element_type != rhs_type.element_type:
-        raise LoweringError("Binary op operands must have the same element_type", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have the same element_type", location=location)
     if lhs_type.space != rhs_type.space:
-        raise LoweringError("Binary op operands must have the same space", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have the same space", location=location)
     target_shape = _infer_broadcast_shape(list(lhs_type.shape.data), list(rhs_type.shape.data), location)
     target_stride = _build_default_stride_attrs(target_shape)
     return _memory_type_from_parts(target_shape, target_stride, element_type or lhs_type.element_type, lhs_type.space)
@@ -661,7 +678,7 @@ def infer_nn_type(
         return _infer_binary_type(node, type_map, runtime_values=runtime_values, config=config)
     if isinstance(node, CompareExprAST):
         return _infer_compare_type(node, type_map, runtime_values=runtime_values, config=config)
-    raise LoweringError("infer_nn_type only handles nn elementwise AST nodes", location=getattr(node, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "infer_nn_type only handles nn elementwise AST nodes", location=getattr(node, "location", None))
 
 
 def emit_nn_call(node: object, ctx: EmitContext) -> object:
@@ -689,7 +706,7 @@ def emit_nn_call(node: object, ctx: EmitContext) -> object:
         return _emit_binary(node, ctx)
     if isinstance(node, CompareExprAST):
         return _emit_compare(node, ctx)
-    raise LoweringError("emit_nn_call only handles nn elementwise AST nodes", location=getattr(node, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "emit_nn_call only handles nn elementwise AST nodes", location=getattr(node, "location", None))
 
 
 def _infer_unary_type(
@@ -700,7 +717,7 @@ def _infer_unary_type(
 ) -> NnMemoryType:
     value_type = _emit_infer_expr_type(expr.value, type_map, runtime_values=runtime_values, config=config)
     if not isinstance(value_type, NnMemoryType):
-        raise _LoweringError("Unary op operand must be nn.memory", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unary op operand must be nn.memory", location=expr.location)
     input_memory = _nn_memory_type_to_memory(value_type, location=expr.location)
     if expr.kind == "leaky_relu":
         alpha_type = (
@@ -743,7 +760,7 @@ def _infer_unary_type(
         }
         unary_fn = unary_map.get(expr.kind)
         if unary_fn is None:
-            raise _LoweringError("Unsupported unary helper", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported unary helper", location=expr.location)
         output_memory = unary_fn(input_memory)
     return _memory_to_nn_type(output_memory, location=expr.location)
 
@@ -780,7 +797,7 @@ def _infer_binary_type(
     rhs_symbol_expr = _symbol_scalar_expr_text(expr.rhs, rhs_type, runtime_values)
     if lhs_symbol_expr is not None and rhs_symbol_expr is not None:
         if expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
-            raise _LoweringError("Unsupported symbol binary op", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbol binary op", location=expr.location)
         op_symbol = {"add": "+", "sub": "-", "mul": "*", "div": "/", "floordiv": "//"}[expr.op]
         result_type = SymbolValueType.from_expr(build_public_symbol_expr(lhs_symbol_expr, rhs_symbol_expr, op_symbol))
         type_map[expr_key] = result_type
@@ -794,24 +811,24 @@ def _infer_binary_type(
     }
     binary_fn = nn_binary_map.get(expr.op)
     if binary_fn is None:
-        raise _LoweringError(f"Unsupported binary op: {expr.op}", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"Unsupported binary op: {expr.op}", location=expr.location)
     lhs_is_memory = isinstance(lhs_type, NnMemoryType)
     rhs_is_memory = isinstance(rhs_type, NnMemoryType)
     if not lhs_is_memory and not rhs_is_memory:
         if expr.op == "add":
-            raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
-        raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.add requires at least one nn.memory operand", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have nn.memory type", location=expr.location)
     if lhs_is_memory != rhs_is_memory and (isinstance(lhs_type, SymbolValueType) or isinstance(rhs_type, SymbolValueType)):
         memory_type = lhs_type if lhs_is_memory else rhs_type
         if not isinstance(memory_type, NnMemoryType):
-            raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have nn.memory type", location=expr.location)
         type_map[expr_key] = memory_type
         return memory_type
     if lhs_is_memory != rhs_is_memory:
         memory_type = lhs_type if lhs_is_memory else rhs_type
         scalar_type = rhs_type if lhs_is_memory else lhs_type
         if not isinstance(memory_type, NnMemoryType) or not isinstance(scalar_type, Attribute):
-            raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have nn.memory type", location=expr.location)
         result_type = _infer_mixed_binary_type(memory_type, scalar_type, expr.location, op_name=expr.op)
         type_map[expr_key] = result_type
         return result_type
@@ -827,11 +844,11 @@ def _infer_binary_type(
     )
     if lhs_value is None or rhs_value is None:
         if expr.op == "add":
-            raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
-        raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.add requires at least one nn.memory operand", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have nn.memory type", location=expr.location)
     output_memory = binary_fn(lhs_value, rhs_value)
     if not isinstance(output_memory, Memory):
-        raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.add requires at least one nn.memory operand", location=expr.location)
     result_type = _memory_to_nn_type(output_memory, location=expr.location)
     type_map[expr_key] = result_type
     return result_type
@@ -862,7 +879,7 @@ def _normalize_mixed_scalar_element_type(scalar_type: Attribute, location: Sourc
         return scalar_type
     if isinstance(scalar_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
         return scalar_type
-    raise _LoweringError("nn.add scalar element_type must be i32/f16/f32 or symbol.int", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.add scalar element_type must be i32/f16/f32 or symbol.int", location=location)
 
 
 def _symbol_scalar_expr_text(
@@ -968,7 +985,7 @@ def _materialize_symbol_binary_operand(
             return value
     if isinstance(runtime_value, int) and not isinstance(runtime_value, bool):
         return _const_symbol_int(int(runtime_value), ctx, location)
-    raise _LoweringError("Binary op operands must have nn.memory type", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have nn.memory type", location=location)
 
 
 def _infer_mixed_binary_type(
@@ -1000,7 +1017,7 @@ def _infer_mixed_binary_type(
     if op_name == "floordiv":
         output_memory = _KG_OPERATION_NN.floordiv(_nn_memory_type_to_memory(memory_type, location=location), 1)
         if not isinstance(output_memory, Memory):
-            raise _LoweringError("Binary op result must be nn.memory", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op result must be nn.memory", location=location)
         return _memory_to_nn_type(output_memory, location=location)
 
     scalar_type = _normalize_mixed_scalar_element_type(scalar_type, location)
@@ -1028,11 +1045,11 @@ def _infer_compare_type(
     expr_key = _expr_key(expr)
     if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
         if expr.op not in {"eq", "ge", "gt", "le", "lt", "ne"}:
-            raise _LoweringError("Unsupported symbol compare op", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbol compare op", location=expr.location)
         type_map[expr_key] = i1
         return i1
     if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
-        raise _LoweringError("Compare op operands must have nn.memory type", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Compare op operands must have nn.memory type", location=expr.location)
     if lhs_type == rhs_type:
         result_type = NnMemoryType(lhs_type.shape, lhs_type.stride, i1, lhs_type.space)
         type_map[expr_key] = result_type
@@ -1088,15 +1105,15 @@ def _cast_nn_scalar_operand(
             cast_op = SymbolToFloatOp(value, target_element_type)
             ctx.builder.add_op(cast_op)
             return cast_op.result
-        raise _LoweringError("nn scalar element_type must be integer/float or symbol.int", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn scalar element_type must be integer/float or symbol.int", location=location)
     if isinstance(source_type, IntegerType):
         if isinstance(target_element_type, IntegerType):
-            raise _LoweringError("nn scalar integer width conversion is unsupported", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn scalar integer width conversion is unsupported", location=location)
         if isinstance(target_element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
             cast_op = arith.SIToFPOp(value, target_element_type)
             ctx.builder.add_op(cast_op)
             return cast_op.result
-        raise _LoweringError("nn scalar element_type must be integer/float or symbol.int", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn scalar element_type must be integer/float or symbol.int", location=location)
     if isinstance(source_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)) and isinstance(
         target_element_type,
         (Float16Type, BFloat16Type, Float32Type, Float64Type),
@@ -1110,7 +1127,7 @@ def _cast_nn_scalar_operand(
         cast_op = arith.TruncFOp(value, target_element_type)
         ctx.builder.add_op(cast_op)
         return cast_op.result
-    raise _LoweringError("nn scalar element_type must be integer/float or symbol.int", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn scalar element_type must be integer/float or symbol.int", location=location)
 
 
 def _materialize_mixed_binary_scalar_operand(
@@ -1144,7 +1161,7 @@ def _materialize_mixed_binary_scalar_operand(
     if isinstance(scalar_expr, ConstAST) and isinstance(scalar_expr.value, int):
         scalar_value = _const_symbol_int(int(scalar_expr.value), ctx, location)
     if scalar_value is None:
-        raise _LoweringError("Binary op scalar operand could not be materialized", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op scalar operand could not be materialized", location=location)
     if not cast_to_element_type:
         return scalar_value
     return _cast_nn_scalar_operand(scalar_value, target_element_type, ctx, location)
@@ -1182,19 +1199,19 @@ def _lower_mixed_binary_expr(
         return None
     if not lhs_is_memory and not rhs_is_memory:
         if expr.op == "add":
-            raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
-        raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.add requires at least one nn.memory operand", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have nn.memory type", location=expr.location)
 
     result_type = _emit_infer_expr_type(expr, ctx.types, config=ctx.config)
     if not isinstance(result_type, NnMemoryType):
-        raise _LoweringError("Binary op result must be nn.memory", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op result must be nn.memory", location=expr.location)
 
     memory_value = lhs if lhs_is_memory else rhs
     memory_type = lhs_type if lhs_is_memory else rhs_type
     scalar_value = rhs if lhs_is_memory else lhs
     scalar_expr = expr.rhs if lhs_is_memory else expr.lhs
     if not isinstance(memory_type, NnMemoryType):
-        raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have nn.memory type", location=expr.location)
 
     if expr.op != "floordiv" and memory_type.element_type != result_type.element_type:
         cast_type = _memory_type_from_parts(
@@ -1225,7 +1242,7 @@ def _lower_mixed_binary_expr(
     }
     op_cls = op_map.get(expr.op)
     if op_cls is None:
-        raise _LoweringError(f"Unsupported binary op: {expr.op}", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"Unsupported binary op: {expr.op}", location=expr.location)
     op = op_cls(
         memory_value if lhs_is_memory else scalar_value,
         scalar_value if lhs_is_memory else memory_value,
@@ -1260,7 +1277,7 @@ def _emit_unary(expr: NnUnaryAST, ctx: EmitContext) -> SSAValue:
     input_type = _expect_memory_value(input_value, expr.location)
     result_type = _emit_infer_expr_type(expr, ctx.types, config=ctx.config)
     if not isinstance(result_type, NnMemoryType):
-        raise _LoweringError("Unary op result must be nn.memory", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unary op result must be nn.memory", location=expr.location)
     if expr.kind in {"relu", "sigmoid", "tanh", "exp"}:
         op_map = {
             "relu": NnReluOp,
@@ -1277,7 +1294,7 @@ def _emit_unary(expr: NnUnaryAST, ctx: EmitContext) -> SSAValue:
         beta = _emit_lower_expr(expr.beta, ctx) if expr.beta is not None else _emit_lower_expr(ConstAST(0.5), ctx)
         op = NnHardSigmoidOp(input_value, alpha, beta, result_type, input_type.space)
     else:
-        raise _LoweringError("Unsupported unary helper", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported unary helper", location=expr.location)
     ctx.builder.add_op(op)
     return op.result
 
@@ -1309,12 +1326,12 @@ def _emit_binary(expr: BinaryExprAST, ctx: EmitContext) -> SSAValue:
     rhs_symbol_expr = _symbol_scalar_expr_text(expr.rhs, rhs_hint, runtime_values)
     if lhs_symbol_expr is not None and rhs_symbol_expr is not None:
         if expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
-            raise _LoweringError("Unsupported symbol binary op", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbol binary op", location=expr.location)
         lhs = _materialize_symbol_binary_operand(expr.lhs, lhs_hint, ctx, expr.location)
         rhs = _materialize_symbol_binary_operand(expr.rhs, rhs_hint, ctx, expr.location)
         result_type = _emit_infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, SymbolValueType):
-            raise _LoweringError("Symbol binary op result must be !symbol.int", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Symbol binary op result must be !symbol.int", location=expr.location)
         op_map = {
             "add": SymbolAddOp,
             "sub": SymbolSubOp,
@@ -1335,10 +1352,10 @@ def _emit_binary(expr: BinaryExprAST, ctx: EmitContext) -> SSAValue:
     rhs_attr = getattr(rhs, "type", None)
     if isinstance(lhs_attr, SymbolValueType) and isinstance(rhs_attr, SymbolValueType):
         if expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
-            raise _LoweringError("Unsupported symbol binary op", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbol binary op", location=expr.location)
         result_type = _emit_infer_expr_type(expr, ctx.types, config=ctx.config)
         if not isinstance(result_type, SymbolValueType):
-            raise _LoweringError("Symbol binary op result must be !symbol.int", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Symbol binary op result must be !symbol.int", location=expr.location)
         op_map = {
             "add": SymbolAddOp,
             "sub": SymbolSubOp,
@@ -1353,12 +1370,12 @@ def _emit_binary(expr: BinaryExprAST, ctx: EmitContext) -> SSAValue:
     if mixed_binary_result is not None:
         return mixed_binary_result
     if lhs is None or rhs is None:
-        raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have nn.memory type", location=expr.location)
     lhs_type = _expect_memory_value(lhs, expr.location)
     rhs_type = _expect_memory_value(rhs, expr.location)
     result_type = _emit_infer_expr_type(expr, ctx.types, config=ctx.config)
     if not isinstance(result_type, NnMemoryType):
-        raise _LoweringError("Binary op result must be nn.memory", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op result must be nn.memory", location=expr.location)
     target_type = result_type
     if lhs_type.element_type != target_type.element_type:
         cast_type = _memory_type_from_parts(
@@ -1399,7 +1416,7 @@ def _emit_binary(expr: BinaryExprAST, ctx: EmitContext) -> SSAValue:
     }
     op_cls = op_map.get(expr.op)
     if op_cls is None:
-        raise _LoweringError(f"Unsupported binary op: {expr.op}", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"Unsupported binary op: {expr.op}", location=expr.location)
     op = op_cls(lhs, rhs, target_type, target_type.space)
     ctx.builder.add_op(op)
     return op.result
@@ -1431,7 +1448,7 @@ def _emit_compare(expr: CompareExprAST, ctx: EmitContext) -> SSAValue:
     rhs_attr = getattr(rhs, "type", None)
     if isinstance(lhs_attr, SymbolValueType) and isinstance(rhs_attr, SymbolValueType):
         if expr.op not in {"eq", "ge", "gt", "le", "lt", "ne"}:
-            raise _LoweringError("Unsupported symbol compare op", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbol compare op", location=expr.location)
         op_map = {
             "eq": SymbolEqOp,
             "ge": SymbolGeOp,
@@ -1490,7 +1507,7 @@ def _emit_compare(expr: CompareExprAST, ctx: EmitContext) -> SSAValue:
     op_map = {"eq": NnEqOp, "ne": NnNeOp, "lt": NnLtOp, "le": NnLeOp, "gt": NnGtOp, "ge": NnGeOp}
     op_cls = op_map.get(expr.op)
     if op_cls is None:
-        raise _LoweringError(f"Unsupported compare op: {expr.op}", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"Unsupported compare op: {expr.op}", location=expr.location)
     op = op_cls(lhs, rhs, result_type, lhs_type.space)
     ctx.builder.add_op(op)
     return op.result

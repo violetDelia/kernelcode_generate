@@ -124,14 +124,17 @@ int main() {
     Memory<TSM, float> tile(out_data, shape, stride, 1, MemoryFormat::Norm);
 
     S_INT add_cost =
-        npu_demo::cost::add<GM, float, float, npu_demo::compute>(out, source, source);
+        npu_demo::cost::add<GM, float, float, npu_demo::MAC>(out, source, source);
     S_INT copy_cost =
-        npu_demo::cost::copy<TSM, GM, float, npu_demo::memory>(tile, source);
+        npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA>(tile, source);
     if (add_cost != 0 || copy_cost != 0) {
         return fail(1);
     }
     if (npu_demo::compute == npu_demo::memory) {
         return fail(2);
+    }
+    if (npu_demo::DMA == npu_demo::MAC) {
+        return fail(3);
     }
     return 0;
 }

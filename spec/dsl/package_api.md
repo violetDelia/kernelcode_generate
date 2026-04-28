@@ -9,7 +9,7 @@
 ## API 列表
 
 - `AstVisitor(config: dict[str, object] | None = None)`
-- `AstVisitorError(message: str, location: SourceLocation | None = None)`
+- `KernelCodeError(kind, module, message, **metadata)`
 - `BinaryExprAST(op: str, lhs: object, rhs: object, location: SourceLocation | None = None)`
 - `BlockAST(statements: list[object], location: SourceLocation | None = None)`
 - `CompareExprAST(op: str, lhs: object, rhs: object, location: SourceLocation | None = None)`
@@ -25,7 +25,7 @@
 - `parse_function(fn: Callable[..., object]) -> FunctionAST`
 - `emit_mlir(node: object, ctx: EmitContext) -> object`
 - `build_func_op(fn: Callable[..., object], *runtime_args: object, globals: dict[str, object] | None = None, builtins: dict[str, object] | object | None = None) -> func.FuncOp`
-- `build_func_op_from_ast(func_ast: FunctionAST, runtime_args: tuple[object, ...] | list[object] | None = None, config: dict[str, object] | None = None) -> func.FuncOp`
+- `build_func_op_from_ast(func_ast: FunctionAST, runtime_args: tuple[object, ...] | list[object] | None = None) -> func.FuncOp`
 
 ## 文档信息
 
@@ -40,7 +40,7 @@
 ## 依赖
 
 - [`spec/dsl/ast/__init__.md`](../../spec/dsl/ast/__init__.md)：AST facade 的公开入口与导出边界。
-- [`spec/dsl/ast/visitor.md`](../../spec/dsl/ast/visitor.md)：`AstVisitor` / `AstVisitorError` 合同。
+- [`spec/dsl/ast/visitor.md`](../../spec/dsl/ast/visitor.md)：`AstVisitor` / `KernelCodeError` 合同。
 - [`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)：`EmitContext` / `emit_mlir(...)` 合同。
 - [`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)：`build_func_op(...)` / `build_func_op_from_ast(...)` 合同。
 
@@ -55,7 +55,7 @@
 - `kernel_gen.dsl` 包根只承认本文件 `API 列表` 中列出的公开名字；未列出的类、函数、模块别名、helper、环境控制入口和 sibling package 能力都不是包根公开 API。
 - `kernel_gen.dsl` 包根不公开：
   - `mlir_gen(...)`
-  - `EmitCContext` / `EmitCError`
+  - `EmitCContext`
   - `emit_c(...)` / `emit_c_op(...)` / `emit_c_value(...)`
   - `gen_kernel(...)`
   - `parse_function_with_env(...)`
@@ -68,7 +68,7 @@
 
 | 包根名字 | 真源 spec | 说明 |
 | --- | --- | --- |
-| `AstVisitor` / `AstVisitorError` | [`spec/dsl/ast/visitor.md`](../../spec/dsl/ast/visitor.md) | visitor facade |
+| `AstVisitor` / `KernelCodeError` | [`spec/dsl/ast/visitor.md`](../../spec/dsl/ast/visitor.md) | visitor facade |
 | `BinaryExprAST` / `BlockAST` / `CompareExprAST` / `ConstAST` / `Diagnostic` / `FunctionAST` / `ModuleAST` / `ScalarArgAST` / `SourceLocation` / `TensorAST` / `VarAST` / `parse_function(...)` | [`spec/dsl/ast/__init__.md`](../../spec/dsl/ast/__init__.md) | AST facade |
 | `EmitContext` / `emit_mlir(...)` | [`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md) | emit facade |
 | `build_func_op(...)` / `build_func_op_from_ast(...)` | [`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md) | `func.func` builder facade |

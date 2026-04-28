@@ -1,17 +1,18 @@
 """dtype_constants tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 榕
 
 功能说明:
-- 覆盖 dtype 常量集合内容与一致性约束。
+- 覆盖 dtype 常量兼容导出内容与 `type.py` 真源一致性约束。
 
 使用示例:
 - pytest -q test/symbol_variable/test_dtype_constants.py
 
 关联文件:
-- 功能实现: kernel_gen/symbol_variable/dtype_constants.py
-- Spec 文档: spec/symbol_variable/dtype_constants.md
+- 功能实现: kernel_gen/symbol_variable/type.py
+- 兼容实现: kernel_gen/symbol_variable/dtype_constants.py
+- Spec 文档: spec/symbol_variable/type.md
 - 测试文件: test/symbol_variable/test_dtype_constants.py
 """
 
@@ -82,6 +83,27 @@ def test_nn_float_matches_float() -> None:
     from kernel_gen.symbol_variable.dtype_constants import FLOAT_DTYPES, NN_FLOAT_DTYPES
 
     assert NN_FLOAT_DTYPES == FLOAT_DTYPES
+
+
+# DC-003A
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 验证 dtype_constants 复用 type.py 的公开 dtype family 真源，不再自维护重复集合。
+# 使用示例: pytest -q test/symbol_variable/test_dtype_constants.py -k test_dtype_constants_alias_type_public_families
+# 对应功能实现文件路径: kernel_gen/symbol_variable/dtype_constants.py
+# 对应 spec 文件路径: spec/symbol_variable/dtype_constants.md
+# 对应测试文件路径: test/symbol_variable/test_dtype_constants.py
+def test_dtype_constants_alias_type_public_families() -> None:
+    from kernel_gen.symbol_variable import dtype_constants
+    from kernel_gen.symbol_variable import type as type_module
+
+    assert dtype_constants.FLOAT_DTYPES is type_module.FLOAT_DTYPES
+    assert dtype_constants.INT_DTYPES is type_module.INT_DTYPES
+    assert dtype_constants.NN_FLOAT_DTYPES is type_module.FLOAT_DTYPES
+    assert dtype_constants.ARITHMETIC_DTYPE_ORDER is type_module.ARITHMETIC_DTYPE_ORDER
+    assert dtype_constants.ARITHMETIC_DTYPE_RANK is type_module.ARITHMETIC_DTYPE_RANK
 
 
 # DC-004

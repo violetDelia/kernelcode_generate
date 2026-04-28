@@ -14,7 +14,6 @@
   与 `_rewrite_kernel_binary_elewise_op`；这些 helper 仅供本文件内部复用。
 
 API 列表:
-- `class LowerDmaMemoryHierarchyError()`
 - `class LowerDmaMemoryHierarchyPass()`
 - `LowerDmaMemoryHierarchyPass.run(self: LowerDmaMemoryHierarchyPass, module: ModuleOp) -> ModuleOp`
 
@@ -29,6 +28,7 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import (
@@ -48,23 +48,6 @@ from kernel_gen.passes.pass_manager import Pass
 from kernel_gen.target import registry as target_registry
 
 
-class LowerDmaMemoryHierarchyError(ValueError):
-    """dma-memory-hierarchy lowering 过程的显式错误。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 用于在 pass 执行过程中中断并返回明确错误信息。
-
-    使用示例:
-    - raise LowerDmaMemoryHierarchyError("target does not support SM/LM")
-
-    关联文件:
-    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
-    """
 
 
 def _require_sm_lm_support() -> None:
@@ -89,11 +72,11 @@ def _require_sm_lm_support() -> None:
     sm_size = target_registry.get_current_target_hardware("sm_memory_size")
     lm_size = target_registry.get_current_target_hardware("lm_memory_size")
     if sm_size is None or lm_size is None:
-        raise LowerDmaMemoryHierarchyError(
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
             "target must be selected and provide SM/LM hardware size for lower-dma-memory-hierarchy"
         )
     if sm_size <= 0 or lm_size <= 0:
-        raise LowerDmaMemoryHierarchyError(
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
             "target does not support SM/LM for lower-dma-memory-hierarchy"
         )
 
@@ -201,14 +184,14 @@ def _build_full_window_operands(
 
     source_type = source.type
     if not isinstance(source_type, NnMemoryType):
-        raise LowerDmaMemoryHierarchyError("dynamic_shape source must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "dynamic_shape source must be nn.memory")
 
     ops: list[Operation] = []
     sizes: list[SSAValue] = []
     for axis in range(rank):
         shape_dim = source_type.shape.data[axis]
         if isinstance(shape_dim, StringAttr) and shape_dim.data == "?":
-            raise LowerDmaMemoryHierarchyError(
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                 "dynamic_shape must come from explicit symbol source; anonymous '?' dimension is unsupported in lower-dma-memory-hierarchy"
             )
         get_dim = SymbolGetDimOp(source, IntAttr(axis))
@@ -250,7 +233,7 @@ def _resolve_window_operands(
         offsets = list(owner.offsets)
         sizes = list(owner.shape)
         if len(offsets) != rank or len(sizes) != rank:
-            raise LowerDmaMemoryHierarchyError("dma.view window rank mismatch for lower-dma-memory-hierarchy")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "dma.view window rank mismatch for lower-dma-memory-hierarchy")
         return [], SSAValue.get(owner.source), offsets, sizes, [one] * rank
     ops, offsets, sizes, strides = _build_full_window_operands(
         value, rank=rank, zero=zero, one=one
@@ -279,7 +262,7 @@ def _ensure_static_rank(memory_type: NnMemoryType, context: str) -> int:
     memory_type.verify()
     rank = len(memory_type.shape.data)
     if rank <= 0:
-        raise LowerDmaMemoryHierarchyError(f"{context} rank must be >= 1")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"{context} rank must be >= 1")
     return rank
 
 
@@ -392,7 +375,7 @@ def _lower_gm_out_to_lm_with_writeback(
         out, rank=rank, zero=zero, one=one
     )
     if not isinstance(window_target.type, NnMemoryType):
-        raise LowerDmaMemoryHierarchyError("window target must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "window target must be nn.memory")
     alloc_sm = DmaAllocOp(window_sizes, sm_type)
     alloc_lm = DmaAllocOp(window_sizes, lm_type)
     pre_ops: list[Operation] = [*window_ops, alloc_sm, alloc_lm]
@@ -400,16 +383,16 @@ def _lower_gm_out_to_lm_with_writeback(
     zero_offsets = [zero] * rank
     unit_strides = [one] * rank
     deslice_lm_to_sm = DmaDesliceOp(
-        alloc_lm.result,
         alloc_sm.result,
+        alloc_lm.result,
         zero_offsets,
         window_sizes,
         unit_strides,
         sm_type,
     )
     deslice_sm_to_gm = DmaDesliceOp(
-        deslice_lm_to_sm.result,
         window_target,
+        deslice_lm_to_sm.result,
         window_offsets,
         window_sizes,
         window_strides,
@@ -462,10 +445,10 @@ class LowerDmaMemoryHierarchyPass(Pass):
         """
 
         if not isinstance(module, ModuleOp):
-            raise LowerDmaMemoryHierarchyError("module must be builtin.module")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "module must be builtin.module")
         _require_sm_lm_support()
         if any(op.name.startswith("nn.") for op in module.walk()):
-            raise LowerDmaMemoryHierarchyError(
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                 "lower-dma-memory-hierarchy input must not contain nn.* ops"
             )
 
@@ -473,7 +456,7 @@ class LowerDmaMemoryHierarchyPass(Pass):
         for op in kernel_ops:
             block = op.parent
             if not isinstance(block, Block):
-                raise LowerDmaMemoryHierarchyError("kernel op must live in a block")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "kernel op must live in a block")
             if not op.operands:
                 continue
 
@@ -482,7 +465,7 @@ class LowerDmaMemoryHierarchyPass(Pass):
             out_value = SSAValue.get(op.operands[out_index])
             out_type = out_value.type
             if not isinstance(out_type, NnMemoryType):
-                raise LowerDmaMemoryHierarchyError("kernel out operand must be nn.memory")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "kernel out operand must be nn.memory")
 
             # 预检：只允许 GM/LM space，且仅当存在 GM 时才插入 staging op。
             gm_input_indices: list[int] = []
@@ -499,13 +482,13 @@ class LowerDmaMemoryHierarchyPass(Pass):
                 elif space == "local":
                     continue
                 else:
-                    raise LowerDmaMemoryHierarchyError(
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                         f"kernel operand space must be GM or LM, got {space}"
                     )
 
             out_space = _memory_space(out_type)
             if out_space not in {"global", "local"}:
-                raise LowerDmaMemoryHierarchyError(
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                     f"kernel out space must be GM or LM, got {out_space}"
                 )
 
@@ -552,7 +535,7 @@ class LowerDmaMemoryHierarchyPass(Pass):
                 op.operands[out_index] = lowered_out
                 block.insert_ops_after(post_ops, op)
             else:
-                raise LowerDmaMemoryHierarchyError(
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                     f"kernel out space must be GM or LM, got {out_space}"
                 )
 
@@ -561,4 +544,4 @@ class LowerDmaMemoryHierarchyPass(Pass):
         return module
 
 
-__all__ = ["LowerDmaMemoryHierarchyError", "LowerDmaMemoryHierarchyPass"]
+__all__ = ["LowerDmaMemoryHierarchyPass"]

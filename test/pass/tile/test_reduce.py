@@ -47,10 +47,10 @@ TileAnalysisPass = tile_analysis_module.TileAnalysisPass
 TileReduceMatmulPattern = tile_reduce_module.TileReduceMatmulPattern
 TileReducePass = tile_reduce_module.TileReducePass
 get_tile_reduce_pass_patterns = tile_reduce_module.get_tile_reduce_pass_patterns
-PassContractError = passes_common_module.PassContractError
 build_registered_pass = registry_module.build_registered_pass
 load_builtin_passes = registry_module.load_builtin_passes
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.kernel import KernelMatmulOp
 
 
@@ -118,7 +118,7 @@ def test_tile_reduce_pass_requires_precomputed_analysis_attrs() -> None:
     """锁定 TileReducePass 对缺少 analysis attrs 的 matmul fail-fast。"""
 
     module = build_matmul_module()
-    with pytest.raises(PassContractError, match="requires tile.analysis and tile.tile_exprs before tile-reduce"):
+    with pytest.raises(KernelCodeError, match="requires tile.analysis and tile.tile_exprs before tile-reduce"):
         TileReducePass().apply(Context(), module)
 
 

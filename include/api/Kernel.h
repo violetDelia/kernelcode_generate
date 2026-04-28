@@ -18,6 +18,7 @@ API 列表:
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::select(Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_sum(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
 - `template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType> Status npu_demo::matmul(Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs)`
 - `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col1d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right)`
 - `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col2d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`
@@ -31,7 +32,7 @@ helper 清单:
 - Status status2 = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 守护最好的爱莉希雅
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -133,9 +134,10 @@ Status select(
 使用示例:
 - Status st = npu_demo::reduce_sum<GM, float, float>(out, input, 1);
 - Status st2 = npu_demo::reduce_min<TSM, int32_t, int32_t>(out, input, 0);
+- Status st3 = npu_demo::reduce_max<TSM, float, float>(out, input, 1);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 守护最好的爱莉希雅
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -146,6 +148,8 @@ template <MemorySpace Space, typename InType, typename OutType>
 Status reduce_sum(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis);
 template <MemorySpace Space, typename InType, typename OutType>
 Status reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis);
+template <MemorySpace Space, typename InType, typename OutType>
+Status reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis);
 
 /*
 功能说明:

@@ -134,9 +134,9 @@
 | `copy(source, space)` | `dma.copy` | 跨空间搬运。 |
 | `cast(source, dtype, memoryspace=None)` | `dma.cast` | 显式元素类型转换。 |
 | `load(source, offsets, sizes, strides=None, space=None)` | `dma.load` | 切片读取。 |
-| `store(source, target, offsets, sizes, strides=None)` | `dma.store` | 切片写回。 |
+| `store(target, source, offsets, sizes, strides=None)` | `dma.store` | 切片写回。 |
 | `slice(source, offsets, sizes, strides=None, space=None)` | `dma.alloc + dma.slice(target, source, offsets, sizes, strides)` | 先分配 `target`，再执行目标式切片写入；表达式值绑定到 `dma.alloc` 的结果。 |
-| `deslice(source, target, offsets, sizes, strides=None)` | `dma.deslice` | 切片写回（语义等价于 `store`）。 |
+| `deslice(target, source, offsets, sizes, strides=None)` | `dma.deslice` | 切片写回（语义等价于 `store`）。 |
 | `view(source, offset, size, stride)` | `dma.view` | 视图重解释，`offset/size/stride` 分别映射为 `dma.view` 的 `offsets/shape/stride` operand；`result_type.shape == size`、`result_type.stride == stride`，静态可判定时要求 `source/result` `numel` 一致；若该结果直接返回，则 `func.return` 类型必须与同一 `result_type` 一致。 |
 | `reshape(source, shape)` | `dma.reshape` | 连续布局 reshape。 |
 | `flatten(source)` | `dma.reshape` | 视为 `reshape` 到一维形状。 |
@@ -453,6 +453,7 @@ dma.transpose(%src, %out) {perm = [1, 0]} : (!nn.memory<[M, N], f16, #nn.space<L
 - `source/target` 必须为 `!nn.memory<...>`，且 `element_type/space` 必须一致。
 - `perm` 必须为合法排列且长度等于 `source.rank`；存在重复索引或越界时 verifier 必须失败。
 - `target.shape` 必须与按 `perm` 重排的 `source.shape` 机械一致；当相关维度为静态整数或可直接比较的符号时必须执行一致性校验，不做数值求解。
+- `target.stride` 必须是 `target.shape` 的默认连续 stride；`dma.transpose` 是物化搬运，不表达非连续视图。
 - 禁止 silent fallback：perm 非排列、rank 不一致、shape 不一致时不得退化为 “copy/view”，必须显式失败。
 
 返回与限制：
@@ -510,8 +511,8 @@ op = DmaLoadOp(
 
 参数说明：
 
-- `source`：待写回的源块，类型为 `!nn.memory<...>`。
 - `target`：被更新的目标内存，类型为 `!nn.memory<...>`。
+- `source`：待写回的源块，类型为 `!nn.memory<...>`。
 - `offsets`：variadic `!symbol.int<"expr">` 或 `!symbol.iter<"expr">` operand；每一维表示 `target` 对应维度的写回起始索引，长度必须与 `target.rank` 一致。
 - `sizes`：variadic `!symbol.int<"expr">` operand；每一维表示写回区域在 `target` 对应维度的大小，长度必须与 `target.rank` 一致。
 - `strides`：variadic `!symbol.int<"expr">` operand；每一维表示 `target` 对应维度的写回步长，长度必须与 `target.rank` 一致，当前每一维必须具有单位步长语义。
@@ -519,7 +520,7 @@ op = DmaLoadOp(
 使用示例：
 
 ```python
-op = DmaStoreOp(source, target, offsets, sizes, strides)
+op = DmaStoreOp(target, source, offsets, sizes, strides)
 ```
 
 注意事项：
@@ -589,7 +590,7 @@ op = DmaSliceOp(target, source, offsets, sizes, strides)
 使用示例：
 
 ```python
-op = DmaDesliceOp(source, target, offsets, sizes, strides, result_type)
+op = DmaDesliceOp(target, source, offsets, sizes, strides, result_type)
 ```
 
 注意事项：

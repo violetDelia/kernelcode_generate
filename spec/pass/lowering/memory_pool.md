@@ -145,7 +145,7 @@ summary = pass_obj.get_summary("main")
 
 注意事项：
 
-- 不存在时抛出 `PassContractError`，错误前缀必须为 `MemoryPoolSummaryNotFound:`。
+- 不存在时抛出 `KernelCodeError`，错误前缀必须为 `MemoryPoolSummaryNotFound:`。
 
 返回与限制：
 
@@ -238,7 +238,7 @@ interval = summary.intervals[0]
 
 范围说明：
 
-- 下列短语是 `PassContractError(message)` 的公开前缀集合；实现必须保证错误信息以 `<短语>: ` 开头，其后可追加上下文细节。
+- 下列短语是 `KernelCodeError(message)` 的公开前缀集合；实现必须保证错误信息以 `<短语>: ` 开头，其后可追加上下文细节。
 - 本清单覆盖 `MemoryPoolPass.run(module)` 的摘要分析与（可选）IR 改写阶段，以及 `MemoryPoolPass.get_summary(func_name)` 的摘要查询阶段。
 - 本清单不覆盖 `dma/nn/symbol` dialect verifier 的报错文本，也不覆盖其它 pass 的错误短语。
 

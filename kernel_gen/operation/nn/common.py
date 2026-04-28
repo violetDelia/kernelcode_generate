@@ -1,7 +1,7 @@
 """NN operation common helpers.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 榕
 
 功能说明:
 - 提供 `kernel_gen.operation.nn` 各公开 helper 共享的类型、常量与参数校验内部逻辑。
@@ -27,13 +27,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 import math
 
-from kernel_gen.common.errors import _ERROR_TEMPLATE
-from kernel_gen.symbol_variable.dtype_constants import ARITHMETIC_DTYPE_RANK
-from kernel_gen.symbol_variable.dtype_constants import NN_FLOAT_DTYPES
+from kernel_gen.core.contracts import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
-from kernel_gen.symbol_variable.type import Farmat, NumericType
+from kernel_gen.symbol_variable.type import ARITHMETIC_DTYPE_RANK, NN_FLOAT_DTYPES, Farmat, NumericType
 
 ScalarArithmeticValue = int | float | SymbolDim
 ArithmeticResult = Memory | ScalarArithmeticValue

@@ -11,9 +11,9 @@
 - `free(value)`
 - `copy(source, space)`
 - `load(source, offsets, sizes, strides=None, space=None)`
-- `store(source, target, offsets, sizes, strides=None)`
+- `store(target, source, offsets, sizes, strides=None)`
 - `slice(source, offsets, sizes, strides=None, space=None)`
-- `deslice(source, target, offsets, sizes, strides=None)`
+- `deslice(target, source, offsets, sizes, strides=None)`
 - `view(source, offset, size, stride)`
 - `reshape(source, shape)`
 - `flatten(source)`
@@ -23,9 +23,9 @@
 - `kernel_gen.operation.free(value)`
 - `kernel_gen.operation.copy(source, space)`
 - `kernel_gen.operation.load(source, offsets, sizes, strides=None, space=None)`
-- `kernel_gen.operation.store(source, target, offsets, sizes, strides=None)`
+- `kernel_gen.operation.store(target, source, offsets, sizes, strides=None)`
 - `kernel_gen.operation.slice(source, offsets, sizes, strides=None, space=None)`
-- `kernel_gen.operation.deslice(source, target, offsets, sizes, strides=None)`
+- `kernel_gen.operation.deslice(target, source, offsets, sizes, strides=None)`
 - `kernel_gen.operation.view(source, offset, size, stride)`
 - `kernel_gen.operation.reshape(source, shape)`
 - `kernel_gen.operation.flatten(source)`
@@ -387,7 +387,7 @@ sub = slice(src, offsets=[32], sizes=[16], strides=[1], space=MemorySpace.TSM)
 - 返回新的 `Memory`；其 `shape == sizes`，`space` 由 `space` 参数决定（`None` 时沿用 `source.space`），`dtype/format` 继承 `source`。
 - 返回值对应 lowering 自动分配的 `target`，而不是 `dma.slice` 的直接返回结果。
 
-### store(source, target, offsets, sizes, strides=None)
+### store(target, source, offsets, sizes, strides=None)
 
 功能说明：
 
@@ -395,8 +395,8 @@ sub = slice(src, offsets=[32], sizes=[16], strides=[1], space=MemorySpace.TSM)
 
 参数说明：
 
-- `source: Memory`：源块。
 - `target: Memory`：目标内存。
+- `source: Memory`：源块。
 - `offsets: Sequence | SymbolShape`：索引列表或 `SymbolShape`。
 - `sizes: Sequence | SymbolShape`：索引列表或 `SymbolShape`，必须与 `source.shape` 一致。
 - `strides: Sequence | SymbolShape | None`：可选步进序列；`None` 表示单位步进。
@@ -404,7 +404,7 @@ sub = slice(src, offsets=[32], sizes=[16], strides=[1], space=MemorySpace.TSM)
 使用示例：
 
 ```python
-store(tile, dst, offsets=[0, 0], sizes=[32, 32], strides=[1, 1])
+store(dst, tile, offsets=[0, 0], sizes=[32, 32], strides=[1, 1])
 ```
 
 注意事项：
@@ -424,7 +424,7 @@ store(tile, dst, offsets=[0, 0], sizes=[32, 32], strides=[1, 1])
 
 - 返回 `None`。
 
-### deslice(source, target, offsets, sizes, strides=None)
+### deslice(target, source, offsets, sizes, strides=None)
 
 功能说明：
 
@@ -441,7 +441,7 @@ store(tile, dst, offsets=[0, 0], sizes=[32, 32], strides=[1, 1])
 使用示例：
 
 ```python
-deslice(sub, dst, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
+deslice(dst, sub, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
 ```
 
 注意事项：

@@ -15,6 +15,7 @@ API 列表:
 - `compile_source(*, source: str, compiler: str, compiler_flags: tuple[str, ...], link_flags: tuple[str, ...], include_dirs: tuple[str, ...], work_dir: Path | None = None, dry_run: bool = True) -> CompileArtifacts`
 
 helper 清单:
+- `_join_text_sections(*sections: str) -> str`
 - `_looks_like_internal_compiler_error(stderr: str) -> bool`
 - `_run_compiler_command(command: Iterable[str]) -> subprocess.CompletedProcess[str]`
 
@@ -38,12 +39,36 @@ import subprocess
 import tempfile
 from typing import Callable, Iterable
 
-from kernel_gen.common.text import join_text_sections
-
 _COMPILER_ICE_MARKERS = (
     "internal compiler error",
     "Please submit a full bug report",
 )
+
+
+def _join_text_sections(*sections: str) -> str:
+    """把多段源码文本按空行拼接。
+
+    创建者: 榕
+    最后一次更改: 榕
+
+    功能说明:
+    - 过滤空字符串段，并统一去掉每段尾部空白。
+    - 以空行分隔段落，保持编译单元源码的稳定换行口径。
+    - 结果始终以单个换行结束。
+
+    使用示例:
+    - source = _join_text_sections("#include <a>", "int main() {}")
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_target.md
+    - test: test/execute_engine/test_execute_engine_compile.py
+    - 功能实现: kernel_gen/execute_engine/compiler.py
+    """
+
+    normalized_sections = tuple(section.rstrip() for section in sections if section)
+    if not normalized_sections:
+        return "\n"
+    return "\n\n".join(normalized_sections).rstrip() + "\n"
 
 
 def _looks_like_internal_compiler_error(stderr: str) -> bool:
@@ -200,7 +225,7 @@ def build_compile_unit(
     sections.append(source.rstrip())
     if entry_shim_source:
         sections.append(entry_shim_source.rstrip())
-    return join_text_sections(*sections)
+    return _join_text_sections(*sections)
 
 
 def build_compile_command(

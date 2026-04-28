@@ -11,7 +11,6 @@
 - `class NnLoweringPass()`
 - `NnLoweringPass.apply(ctx: Context, module: builtin.module) -> None`
 - `NnLoweringPass.run(module: builtin.module) -> builtin.module`
-- `class NnLoweringError(message: str)`
 - `nn_lowering_patterns() -> list[RewritePattern]`
 
 ## 文档信息
@@ -63,7 +62,8 @@
 - caller 的 canonical public path 固定为：
 
 ```python
-from kernel_gen.passes.lowering.nn_lowering import NnLoweringError, NnLoweringPass
+from kernel_gen.core.error import KernelCodeError
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 ```
 
 - `kernel_gen.passes.lowering.nn_to_kernel` 属于旧 compat 模块；导入必须以 `ModuleNotFoundError` 失败。
@@ -81,18 +81,18 @@ from kernel_gen.passes.lowering.nn_lowering import NnLoweringError, NnLoweringPa
   - 当结果 `shape` 含符号维度时，必须按结果 rank 逐维生成 `symbol.get_dim`，并在 `dma.alloc` 之前按顺序传入这些符号值。
 - `nn.exp` lowering 规则：
   - 目标 op 固定为 `kernel.exp`，并把结果写入 `out` operand。
-  - `out` 必须由 `dma.alloc` 创建；输入与输出的 `shape/stride/element_type/space` 必须一致，否则抛出 `NnLoweringError`。
+  - `out` 必须由 `dma.alloc` 创建；输入与输出的 `shape/stride/element_type/space` 必须一致，否则抛出 `KernelCodeError`。
 - `nn.reduce_sum/min/max` lowering 规则：
   - 目标 op 固定为 `kernel.reduce`，`kind` 取值分别为 `"sum" / "min" / "max"`。
   - `axis/keepdim` 直接继承 `nn.reduce_*` 的语义；`out` 仅消费已有结果 memory，不得改写为 `kernel.reduce_sum/min/max`。
-  - `out` 的 `shape/stride/element_type/space` 必须满足 reduce 合同，否则抛出 `NnLoweringError`。
+  - `out` 的 `shape/stride/element_type/space` 必须满足 reduce 合同，否则抛出 `KernelCodeError`。
 - `nn.softmax` 不在 `lower-nn` 内直接 lowering：
   - 进入本 pass 前必须先由上游 helper/分解 pass 展开为公开稳定链路。
-  - 若仍直接命中 `nn.softmax`，必须抛出 `NnLoweringError`，错误信息需明确要求“先分解再进入 lower-nn”。
+  - 若仍直接命中 `nn.softmax`，必须抛出 `KernelCodeError`，错误信息需明确要求“先分解再进入 lower-nn”。
 - `nn.matmul` lowering 规则：
   - 目标 op 固定为 `kernel.matmul`，并把结果写入 `out` operand。
   - 动态维度只能来源于 `symbol.get_dim` 或显式 `!symbol.int<"...">`；不允许把 `i32/index` 直接作为动态维度来源。
-  - `out` 的 `shape/stride/element_type/space` 必须与 matmul 合同一致，否则抛出 `NnLoweringError`。
+  - `out` 的 `shape/stride/element_type/space` 必须与 matmul 合同一致，否则抛出 `KernelCodeError`。
 - `nn.img2col1d/nn.img2col2d` lowering 规则：
   - 目标 op 固定为 `kernel.img2col1d` / `kernel.img2col2d`。
   - `kw/kh/sw/sh/dw/dh/pl/pr/ph/pw` 在进入 lowering 时必须是 `!symbol.int<"...">` 值；不接受 `i32/index` 或整数 attribute 直接作为 operand。
@@ -108,7 +108,7 @@ from kernel_gen.passes.lowering.nn_lowering import NnLoweringError, NnLoweringPa
   - `memory + memory` 的静态 add/sub case，应以 `dma.alloc + kernel.binary_elewise + func.return` 作为最小稳定输出序列。
   - `memory + symbol/const` 的 element binary（如 add/sub/mul/div/truediv）必须先物化 `dma.alloc + dma.fill` temporary memory，再执行 `kernel.binary_elewise`；不允许回退为 `dma.broadcast`。
   - 结果含符号维度时，允许在 `dma.alloc` 前按 rank 顺序生成 `symbol.get_dim` 以构造 dynamic shape operand，但 mixed scalar binary 的物化路径仍固定为 `dma.fill`。
-- 遇到不支持的 op、结果类型非法、缺失 `nn.space`、operand 数量不匹配或 kernel 校验失败时，必须抛出 `NnLoweringError` 并终止。
+- 遇到不支持的 op、结果类型非法、缺失 `nn.space`、operand 数量不匹配或 kernel 校验失败时，必须抛出 `KernelCodeError` 并终止。
 
 ## 公开接口
 
@@ -141,7 +141,7 @@ pass_obj.apply(Context(), module)
 返回与限制：
 
 - 不直接返回值；通过实例方法 `apply(...)` / `run(...)` 使用。
-- 若出现不支持的 op 或校验失败，必须抛出 `NnLoweringError`。
+- 若出现不支持的 op 或校验失败，必须抛出 `KernelCodeError`。
 
 ### `NnLoweringPass.apply(ctx: Context, module: builtin.module) -> None`
 
@@ -164,7 +164,7 @@ NnLoweringPass().apply(Context(), module)
 
 注意事项：
 
-- `module` 不是 `builtin.module` 时必须抛出 `NnLoweringError`。
+- `module` 不是 `builtin.module` 时必须抛出 `KernelCodeError`。
 - `apply(...)` 必须直接消费 `nn_lowering_patterns()` 返回的顺序化 pattern 列表。
 
 返回与限制：
@@ -221,7 +221,7 @@ patterns = nn_lowering_patterns()
 
 - 返回可直接传入 `GreedyRewritePatternApplier` 的 `RewritePattern` 列表。
 
-### `class NnLoweringError(ValueError)`
+### 失败类型
 
 功能说明：
 
@@ -234,7 +234,7 @@ patterns = nn_lowering_patterns()
 使用示例：
 
 ```python
-raise NnLoweringError("module must be builtin.module")
+raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "module must be builtin.module")
 ```
 
 注意事项：
@@ -263,7 +263,7 @@ module_op = ensure_module_op(module)
 
 注意事项：
 
-- `module` 不是 `builtin.module` 或 `module.ops` 不可遍历时必须抛出 `NnLoweringError`。
+- `module` 不是 `builtin.module` 或 `module.ops` 不可遍历时必须抛出 `KernelCodeError`。
 
 返回与限制：
 
@@ -281,7 +281,7 @@ module_op = ensure_module_op(module)
   - `reduce_softmax_lowering.py`：`reduce_softmax_patterns()`，覆盖 `nn.reduce_*` 与 direct `nn.softmax` 拒绝。
 - `nn_lowering` family 的 surviving 模块级接口只包括：
   - `NnLoweringPass`
-  - `NnLoweringError`
+  - `KernelCodeError`
   - `nn_lowering_patterns()`
   - 各 child 模块的 `*_patterns()`
 - `lower_*_family` 只属于待清理的旧 helper 名称，不能作为 build/review 的通过证据。
@@ -302,7 +302,7 @@ module_op = ensure_module_op(module)
   - 验证 `kernel_gen.passes.lowering.nn_to_kernel` 旧模块导入失败，且 `LowerNnToKernelPass` 不再作为 surviving public contract。
   - 验证 `nn_lowering_patterns()` 的注册顺序稳定，且 family dispatcher 占位 pattern 已退场。
   - 验证 `NnLoweringPass.apply(...)` 直接使用 `PatternRewriteWalker + GreedyRewritePatternApplier + nn_lowering_patterns()` 驱动改写。
-  - 验证 `NnLoweringError` 与 `NnLoweringPass` 的 canonical public import 可用。
+  - 验证 `KernelCodeError` 与 `NnLoweringPass` 的 canonical public import 可用。
   - 验证 collectable 公开资产入口当前桥接的非 `test_*.py` helper / boundary case 可直接执行。
   - 验证 `kernel.binary_elewise` 与 `kernel.reduce` 在 lowering 输出中可解析与可校验。
   - 验证 add/sub 的静态 `memory + memory` lowering 不把 `symbol.get_dim` 作为必现前置行。

@@ -28,6 +28,7 @@ import pytest
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, i8
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from kernel_gen.dsl.ast import (
@@ -38,7 +39,6 @@ from kernel_gen.dsl.ast import (
     TensorAST,
     parse_function,
 )
-from kernel_gen.dsl.ast.visitor import AstVisitorError
 from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
 from kernel_gen.operation.dma import alloc, deslice, fill, reshape, slice
 from kernel_gen.operation.nn import add, reduce_max
@@ -102,7 +102,7 @@ def test_build_func_op_requires_runtime_args() -> None:
     def kernel(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
         return x
 
-    with pytest.raises(AstVisitorError) as excinfo:
+    with pytest.raises(KernelCodeError) as excinfo:
         build_func_op(kernel, globals={"X": 1})
     assert "globals/builtins cannot replace function runtime args" in str(excinfo.value)
 
@@ -127,7 +127,7 @@ def test_build_func_op_from_ast_builds_func() -> None:
 
 
 def test_build_func_op_from_ast_error_edges() -> None:
-    with pytest.raises(AstVisitorError, match="Function return requires explicit return syntax or annotation"):
+    with pytest.raises(KernelCodeError, match="Function return requires explicit return syntax or annotation"):
         build_func_op_from_ast(
             FunctionAST(
                 name="missing_return_contract",
@@ -145,7 +145,7 @@ def test_build_func_op_from_ast_error_edges() -> None:
         body=BlockAST([]),
         returns_none=False,
     )
-    with pytest.raises(AstVisitorError, match="Function body is empty"):
+    with pytest.raises(KernelCodeError, match="Function body is empty"):
         build_func_op_from_ast(value_return_ast)
 
 
@@ -155,7 +155,7 @@ def test_build_func_op_from_ast_rejects_reduce_max_axis_out_of_range() -> None:
 
     func_ast = parse_function(kernel)
 
-    with pytest.raises(AstVisitorError, match=r"reduce_max axis must be within \[-2, 1\]"):
+    with pytest.raises(KernelCodeError, match=r"reduce_max axis must be within \[-2, 1\]"):
         build_func_op_from_ast(func_ast, runtime_args=[_tensor_arg([2, 2])])
 
 
@@ -221,7 +221,7 @@ def test_build_func_op_supports_kernel_contract_loop_local_rebinding() -> None:
             tile_buf = slice(x, [m0, 0], [step, N], [1, 1], MemorySpace.TSM)
             acc = add(acc, tile_buf)
         out_tile = reshape(acc, [step, N])
-        deslice(out_tile, y, [0, 0], [step, N], [1, 1])
+        deslice(y, out_tile, [0, 0], [step, N], [1, 1])
 
     func_op = build_func_op(kernel, q, out, tile)
     func_text = str(func_op)

@@ -66,6 +66,7 @@ from kernel_gen.dialect.symbol import (
     SymbolToFloatOp,
     SymbolPtrType,
     SymbolValueType,
+    build_public_symbol_expr,
 )
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.type import NumericType
@@ -480,6 +481,20 @@ def test_symbol_arith_ops_verify_success() -> None:
     assert _print_attr(mul_op.result.type) == '!symbol.int<"M*N">'
     assert _print_attr(div_op.result.type) == '!symbol.int<"M / N">'
     assert _print_attr(floordiv_op.result.type) == '!symbol.int<"M // N">'
+
+
+# TC-SYM-015B
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 验证公开 symbol 表达构造在乘法操作数含加减表达式时保留操作数边界。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_build_public_symbol_expr_preserves_operand_precedence() -> None:
+    assert build_public_symbol_expr("THO - 1", "SH", "*") == "SH*(THO - 1)"
+    assert build_public_symbol_expr("KH - 1", "DH", "*") == "DH*(KH - 1)"
+    assert build_public_symbol_expr("N + 1", "T", "//") == "(N + 1) // T"
 
 
 # TC-SYM-016

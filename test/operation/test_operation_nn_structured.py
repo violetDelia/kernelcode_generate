@@ -650,7 +650,7 @@ def test_nn_conv_basic() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-05 16:19:19 +0800
 # 最近一次运行成功时间: 2026-04-05 16:19:19 +0800
-# 测试目的: 验证 transpose 正例可按 perm 重排 shape/stride 并保留 dtype/space/format。
+# 测试目的: 验证 transpose 正例可按 perm 重排 shape，并生成连续 stride。
 # 使用示例: pytest -q test/operation/test_operation_nn_structured.py -k test_nn_transpose_success
 # 对应功能实现文件路径: kernel_gen/operation/nn/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
@@ -659,7 +659,7 @@ def test_nn_transpose_success() -> None:
     value = Memory([2, 3, 4], NumericType.Float16, space=MemorySpace.LM, stride=[12, 4, 1], format=Farmat.CLast)
     result = transpose(value, perm=[2, 0, 1])
     assert result.shape.get_values() == [4, 2, 3]
-    assert result.get_stride() == [1, 12, 4]
+    assert result.get_stride() == [6, 3, 1]
     assert result.dtype is NumericType.Float16
     assert result.space is MemorySpace.LM
     assert result.format is Farmat.CLast

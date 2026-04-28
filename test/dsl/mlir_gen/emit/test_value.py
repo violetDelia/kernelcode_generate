@@ -35,6 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaLoadOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
@@ -89,7 +90,7 @@ def test_emit_mlir_unknown_var() -> None:
     block = Block()
     ctx = EmitContext(builder=block, symbols={}, types={})
 
-    with pytest.raises(ValueError, match="Unknown input reference"):
+    with pytest.raises(KernelCodeError, match="Unknown input reference"):
         emit_mlir(VarAST("x"), ctx)
 
 

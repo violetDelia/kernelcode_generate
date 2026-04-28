@@ -24,6 +24,7 @@
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::select(const Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::reduce_sum(const Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::reduce_min(const Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::reduce_max(const Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
 - `template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType, CostKind Kind> S_INT npu_demo::cost::matmul(const Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs)`
 - `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::img2col1d(const Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right)`
 - `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::img2col2d(const Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`
@@ -31,7 +32,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`守护最好的爱莉希雅`
 - `spec`：[`spec/include/api/cost/Kernel.md`](../../../../spec/include/api/cost/Kernel.md)
 - `统一头文件`：[`include/api/cost/Kernel.h`](../../../../include/api/cost/Kernel.h)
 - `功能实现`：[`include/npu_demo/cost/Kernel.h`](../../../../include/npu_demo/cost/Kernel.h)
@@ -57,8 +58,8 @@
 
 ## 限制与边界
 
-- 当前公开 helper 集合与 [`spec/include/api/Kernel.md`](../../../../spec/include/api/Kernel.md) 保持一致：`add`、`sub`、`mul`、`truediv`、`eq`、`ne`、`lt`、`le`、`gt`、`ge`、`exp`、`select`、`reduce_sum`、`reduce_min`、`matmul`、`img2col1d`、`img2col2d`。
-- 当前不公开 `broadcast`、`softmax`、`cast`、`reduce_max` 或旧 `Nn` helper 的成本接口。
+- 当前公开 helper 集合与 [`spec/include/api/Kernel.md`](../../../../spec/include/api/Kernel.md) 保持一致：`add`、`sub`、`mul`、`truediv`、`eq`、`ne`、`lt`、`le`、`gt`、`ge`、`exp`、`select`、`reduce_sum`、`reduce_min`、`reduce_max`、`matmul`、`img2col1d`、`img2col2d`。
+- 当前不公开 `broadcast`、`softmax`、`cast` 或旧 `Nn` helper 的成本接口。
 - cost helper 只表达当前 op 的局部成本承接，不负责累计、调度或运行时执行。
 - `kind2`、`kind3` 与其他旧 kind 不再属于当前 helper 输入域。
 
@@ -69,7 +70,7 @@
 功能说明：
 
 - 定义逐元素二元算术的成本 helper。
-- 对应 `tuner.cost(op_name="kernel.add" | "kernel.sub" | "kernel.mul" | "kernel.truediv")` 的稳定落点。
+- 对应 `tuner.cost(op_name="kernel.add")` 与 `tuner.cost(op_name="kernel.binary_elewise", kernel_kind="add|sub|mul|div|truediv")` 的稳定落点。
 
 参数说明：
 
@@ -135,7 +136,7 @@ S_INT cost0 = cost::eq<GM, float, bool, compute>(out, lhs, rhs);
 - 返回类型：`S_INT`。
 - 限制条件：本轮不开放额外 predicate 容器类型。
 
-### `exp` / `select` / `reduce_sum` / `reduce_min`
+### `exp` / `select` / `reduce_sum` / `reduce_min` / `reduce_max`
 
 功能说明：
 
@@ -145,7 +146,7 @@ S_INT cost0 = cost::eq<GM, float, bool, compute>(out, lhs, rhs);
 
 - `exp`：模板顺序为 `Space -> InType -> OutType -> Kind`，参数顺序为 `out -> input`。
 - `select`：模板顺序为 `Space -> InType -> OutType -> Kind`，参数顺序为 `out -> cond -> lhs -> rhs`。
-- `reduce_sum` / `reduce_min`：模板顺序为 `Space -> InType -> OutType -> Kind`，参数顺序为 `out -> input -> axis`。
+- `reduce_sum` / `reduce_min` / `reduce_max`：模板顺序为 `Space -> InType -> OutType -> Kind`，参数顺序为 `out -> input -> axis`。
 
 使用示例：
 
@@ -153,12 +154,12 @@ S_INT cost0 = cost::eq<GM, float, bool, compute>(out, lhs, rhs);
 using namespace npu_demo;
 S_INT exp_cost = cost::exp<TSM, float, float, compute>(out, input);
 S_INT reduce_cost = cost::reduce_sum<GM, float, float, memory>(out, input, 1);
+S_INT max_cost = cost::reduce_max<GM, float, float, memory>(out, input, 1);
 ```
 
 注意事项：
 
 - 参数与模板顺序不得脱离对应 `Kernel` helper。
-- `reduce_max` 不在当前公开成本接口集合内。
 
 返回与限制：
 
@@ -186,7 +187,7 @@ S_INT cost0 = cost::matmul<TSM, TSM, TLM1, float, float, float, compute>(out, lh
 注意事项：
 
 - 多空间 helper 的模板参数顺序不得为了成本接口单独重排。
-- `emit_c` 生成源码时，`tuner.cost(op_name="kernel.matmul")` 必须直接落到 `cost::matmul`。
+- `emit_c` 生成源码时，`tuner.cost(op_name="kernel.exp" | "kernel.select" | "kernel.reduce" | "kernel.reduce_min" | "kernel.matmul" | "kernel.img2col1d" | "kernel.img2col2d")` 必须直接落到对应 `cost::*` helper。
 
 返回与限制：
 
@@ -201,7 +202,7 @@ S_INT cost0 = cost::matmul<TSM, TSM, TLM1, float, float, float, compute>(out, lh
 
 - 测试文件：[`test/dsl/gen_kernel/emit/test_emit.py`](../../../../test/dsl/gen_kernel/emit/test_emit.py)
 - 执行命令：`pytest -q test/dsl/gen_kernel/emit/test_emit.py -k "tuner_cost or npu_demo"`
-- 测试目标：验证 `tuner.cost(op_name="kernel.add" | "kernel.matmul")` 的节点级文本发射。
+- 测试目标：验证 `tuner.cost(op_name="kernel.add" | "kernel.binary_elewise" | "kernel.exp" | "kernel.select" | "kernel.reduce" | "kernel.matmul" | "kernel.img2col2d")` 的节点级文本发射。
 
 - 测试文件：[`test/dsl/gen_kernel/test_gen_kernel.py`](../../../../test/dsl/gen_kernel/test_gen_kernel.py)
 - 执行命令：`pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k "tuner_cost or cost_function or npu_demo"`
@@ -218,4 +219,7 @@ S_INT cost0 = cost::matmul<TSM, TSM, TLM1, float, float, float, compute>(out, lh
 | COST-KERNEL-001 | `cost::add` 独立实例化 | 模板顺序为 `Space -> InType -> OutType -> Kind`，返回 `S_INT` | `test_include_api_cost_kernel_signatures_compile` |
 | COST-KERNEL-002 | `cost::matmul` 独立实例化 | 模板顺序与 `Kernel.matmul` 一致并在末尾追加 `Kind`，且同一编译入口验证返回 `S_INT` | `test_include_api_cost_kernel_signatures_compile` |
 | COST-KERNEL-003 | `emit_c` 节点级发射 `kernel.add` 成本调用 | 生成 `cost::add<...>(out, lhs, rhs)` | `test_emit_c_lowers_npu_demo_tuner_cost_kernel_add` |
+| COST-KERNEL-003A | `emit_c` 节点级发射 `kernel.binary_elewise` 成本调用 | 按 `kernel_kind` 生成 `cost::add/sub/mul/truediv/eq/ne/lt/le/gt/ge<...>(out, lhs, rhs)` | `test_emit_c_lowers_npu_demo_tuner_cost_kernel_binary_elewise` |
+| COST-KERNEL-003B | `emit_c` 节点级发射 `kernel.exp/select/reduce` 成本调用 | 生成 `cost::exp/select/reduce_*<...>` | `test_emit_c_lowers_npu_demo_tuner_cost_kernel_exp_select_reduce` |
 | COST-KERNEL-004 | `gen_kernel` 函数级发射 `kernel.matmul` 成本函数 | 生成 `cost::matmul<...>(out, lhs, rhs)` | `test_gen_kernel_emits_npu_demo_cost_matmul_function` |
+| COST-KERNEL-005 | `emit_c` 节点级发射 `kernel.img2col2d` 成本调用 | 生成 `cost::img2col2d<...>(out, input, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr)` | `test_emit_c_lowers_npu_demo_tuner_cost_kernel_img2col2d` |

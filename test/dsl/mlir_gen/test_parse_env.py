@@ -34,8 +34,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.symbol import SymbolValueType
-from kernel_gen.dsl.ast.visitor import AstVisitorError
 from kernel_gen.dsl.mlir_gen import build_func_op
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
@@ -81,7 +81,7 @@ def test_build_func_op_globals_and_builtins_cannot_replace_runtime_args() -> Non
     def only_symbol(expr: int) -> int:
         return expr
 
-    with pytest.raises(AstVisitorError, match="globals/builtins cannot replace function runtime args"):
+    with pytest.raises(KernelCodeError, match="globals/builtins cannot replace function runtime args"):
         build_func_op(only_symbol, globals={"expr": expr}, builtins=__builtins__)
 
 
@@ -98,5 +98,5 @@ def test_build_func_op_rejects_builtins_external_value_reference() -> None:
     def use_builtin_value() -> int:
         return BUILTIN_EXTERNAL_VALUE
 
-    with pytest.raises(AstVisitorError, match="cannot use external value inside function body"):
+    with pytest.raises(KernelCodeError, match="cannot use external value inside function body"):
         build_func_op(use_builtin_value, builtins={"BUILTIN_EXTERNAL_VALUE": 13})

@@ -1,7 +1,7 @@
 """Memory implementation.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 榕
 
 功能说明:
 - 定义内存空间枚举与 Memory 对象，描述 shape/dtype/stride/format/space 元信息。
@@ -37,12 +37,11 @@ from enum import Enum
 
 import sympy as sp
 
-from kernel_gen.common.contracts import default_stride as _common_default_stride
-from kernel_gen.common.contracts import public_dim_values as _common_public_dim_values
-from kernel_gen.symbol_variable.dtype_constants import ARITHMETIC_DTYPE_RANK
+from kernel_gen.core.contracts import default_stride as _common_default_stride
+from kernel_gen.core.contracts import public_dim_values as _common_public_dim_values
 from .symbol_dim import SymbolDim
 from .symbol_shape import SymbolShape
-from .type import Farmat, NumericType
+from .type import ARITHMETIC_DTYPE_RANK, Farmat, NumericType
 
 ShapeLike = SymbolShape | Sequence[SymbolDim | int | str]
 

@@ -33,6 +33,7 @@ import pytest
 
 from xdsl.context import Context
 from xdsl.passes import ModulePass
+from kernel_gen.core.error import KernelCodeError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -40,7 +41,6 @@ if str(REPO_ROOT) not in sys.path:
 WORKTREE_FALLBACK_REPO = REPO_ROOT.parent if REPO_ROOT.name.startswith("wt-") else None
 
 registry_module = importlib.import_module("kernel_gen.passes.registry")
-PassRegistryError = registry_module.PassRegistryError
 register_pass = registry_module.register_pass
 register_pipeline = registry_module.register_pipeline
 build_registered_pass = registry_module.build_registered_pass
@@ -52,14 +52,12 @@ list_registered_pipelines = registry_module.list_registered_pipelines
 pass_manager_module = importlib.import_module("kernel_gen.passes.pass_manager")
 Pass = pass_manager_module.Pass
 PassManager = pass_manager_module.PassManager
-PassContractError = importlib.import_module("kernel_gen.passes.common").PassContractError
 
 
 def _bind_registry_api(module: object) -> None:
     """把 registry 模块的公开 API 重新绑定到当前测试文件。"""
 
     global registry_module
-    global PassRegistryError
     global register_pass
     global register_pipeline
     global build_registered_pass
@@ -69,7 +67,6 @@ def _bind_registry_api(module: object) -> None:
     global list_registered_pipelines
 
     registry_module = module
-    PassRegistryError = module.PassRegistryError
     register_pass = module.register_pass
     register_pipeline = module.register_pipeline
     build_registered_pass = module.build_registered_pass
@@ -143,7 +140,7 @@ def test_register_pass_duplicate_fails() -> None:
         def run(self: "SecondPass", target: object) -> object:
             return target
 
-    with pytest.raises(PassRegistryError, match=r"^PassRegistryError: pass 'dup-pass' is already registered$"):
+    with pytest.raises(KernelCodeError, match=r"^PassRegistryError: pass 'dup-pass' is already registered$"):
         register_pass(SecondPass)
 
 
@@ -162,7 +159,7 @@ def test_register_pipeline_duplicate_fails() -> None:
     def build_first() -> PassManager:
         return PassManager(name="first")
 
-    with pytest.raises(PassRegistryError, match=r"^PassRegistryError: pipeline 'dup-pipeline' is already registered$"):
+    with pytest.raises(KernelCodeError, match=r"^PassRegistryError: pipeline 'dup-pipeline' is already registered$"):
 
         @register_pipeline("dup-pipeline")
         def build_second() -> PassManager:  # pragma: no cover - should not be reached
@@ -180,7 +177,7 @@ def test_register_pipeline_duplicate_fails() -> None:
 # 对应 spec 文件路径: spec/pass/registry.md
 # 对应测试文件路径: test/pass/test_pass_registry.py
 def test_build_registered_pass_unknown() -> None:
-    with pytest.raises(PassRegistryError, match=r"^PassRegistryError: unknown pass 'missing-pass'$"):
+    with pytest.raises(KernelCodeError, match=r"^PassRegistryError: unknown pass 'missing-pass'$"):
         _ = build_registered_pass("missing-pass")
 
 
@@ -205,7 +202,7 @@ def test_build_registered_pass_not_constructible() -> None:
         def run(self: "NeedsArgPass", target: object) -> object:
             return target
 
-    with pytest.raises(PassRegistryError, match=r"^PassRegistryError: pass 'needs-arg' is not constructible$"):
+    with pytest.raises(KernelCodeError, match=r"^PassRegistryError: pass 'needs-arg' is not constructible$"):
         _ = build_registered_pass("needs-arg")
 
 
@@ -220,7 +217,7 @@ def test_build_registered_pass_not_constructible() -> None:
 # 对应 spec 文件路径: spec/pass/registry.md
 # 对应测试文件路径: test/pass/test_pass_registry.py
 def test_build_registered_pipeline_unknown() -> None:
-    with pytest.raises(PassRegistryError, match=r"^PassRegistryError: unknown pipeline 'missing-pipeline'$"):
+    with pytest.raises(KernelCodeError, match=r"^PassRegistryError: unknown pipeline 'missing-pipeline'$"):
         _ = build_registered_pipeline("missing-pipeline")
 
 
@@ -240,7 +237,7 @@ def test_build_registered_pipeline_must_return_pass_manager() -> None:
         return object()
 
     with pytest.raises(
-        PassRegistryError, match=r"^PassRegistryError: pipeline 'bad-pipeline' did not return PassManager$"
+        KernelCodeError, match=r"^PassRegistryError: pipeline 'bad-pipeline' did not return PassManager$"
     ):
         _ = build_registered_pipeline("bad-pipeline")
 
@@ -516,6 +513,26 @@ def test_build_registered_launch_kernel_cost_func_pass() -> None:
     assert getattr(pass_obj, "cost_kind") == "compute|memory|latency"
 
 
+# TC-REGISTRY-007BA
+# 创建者: OpenAI Codex
+# 最后一次更改: OpenAI Codex
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证 registry 无参构造 launch-kernel-cost-func 时使用公开默认 `DMA|MAC`。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_launch_kernel_cost_func_default_kind
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_launch_kernel_cost_func_default_kind() -> None:
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass("launch-kernel-cost-func")
+
+    assert pass_obj.name == "launch-kernel-cost-func"
+    assert type(pass_obj).__name__ == "LaunchKernelCostFuncPass"
+    assert getattr(pass_obj, "cost_kind") == "DMA|MAC"
+
+
 # TC-REGISTRY-007C
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
@@ -530,7 +547,7 @@ def test_build_registered_launch_kernel_cost_func_rejects_invalid_kind() -> None
     load_builtin_passes()
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
     ):
         build_registered_pass("launch-kernel-cost-func", {"cost_kind": "memory|latency|memory"})
@@ -656,6 +673,43 @@ def test_build_registered_inline_pass() -> None:
     assert type(pass_obj).__name__ == "InlinePass"
 
 
+# TC-REGISTRY-007H1
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 功能说明: 验证 registry 的通用 `fold` 选项可作用于所有内置 pass。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_pass_accepts_universal_fold_option
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_pass_accepts_universal_fold_option() -> None:
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass("inline", {"fold": "false"})
+    module_pass_obj = build_registered_pass("decompass", {"fold": "false"})
+
+    assert isinstance(pass_obj, ModulePass)
+    assert pass_obj.name == "inline"
+    assert pass_obj.fold is False
+    assert isinstance(module_pass_obj, ModulePass)
+    assert module_pass_obj.name == "decompass"
+    assert module_pass_obj.fold is False
+
+
+# TC-REGISTRY-007H2
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 功能说明: 验证 registry 对非法 `fold` bool 文本稳定失败。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_pass_rejects_invalid_fold_option
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_pass_rejects_invalid_fold_option() -> None:
+    load_builtin_passes()
+
+    with pytest.raises(KernelCodeError, match=r"^PassRegistryError: option 'fold' expects bool$"):
+        build_registered_pass("inline", {"fold": "maybe"})
+
+
 # TC-REGISTRY-007I
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
@@ -720,7 +774,7 @@ def test_registry_old_lowering_paths_fail_fast() -> None:
 def test_registry_retired_analysis_pass_name_fails_fast() -> None:
     load_builtin_passes()
 
-    with pytest.raises(PassRegistryError, match=r"^PassRegistryError: unknown pass 'analyze-func-cost'$"):
+    with pytest.raises(KernelCodeError, match=r"^PassRegistryError: unknown pass 'analyze-func-cost'$"):
         build_registered_pass("analyze-func-cost")
 
 
@@ -839,7 +893,7 @@ def test_build_registered_npu_demo_lowering_pipeline_rejects_unknown_option() ->
     load_builtin_passes()
 
     with pytest.raises(
-        PassRegistryError, match=r"^PassRegistryError: pipeline 'npu-demo-lowering' option error$"
+        KernelCodeError, match=r"^PassRegistryError: pipeline 'npu-demo-lowering' option error$"
     ):
         build_registered_pipeline("npu-demo-lowering", {"only-kernel": "true"})
 
@@ -893,7 +947,7 @@ def test_build_registered_pass_options_not_supported() -> None:
             return target
 
     with pytest.raises(
-        PassRegistryError, match=r"^PassRegistryError: pass 'plain-pass' does not accept options$"
+        KernelCodeError, match=r"^PassRegistryError: pass 'plain-pass' does not accept options$"
     ):
         _ = build_registered_pass("plain-pass", {"mode": "fast"})
 
@@ -920,7 +974,7 @@ def test_build_registered_pass_option_error() -> None:
         def run(self: "ErrorPass", target: object) -> object:
             return target
 
-    with pytest.raises(PassRegistryError, match=r"^PassRegistryError: pass 'error-pass' option error$"):
+    with pytest.raises(KernelCodeError, match=r"^PassRegistryError: pass 'error-pass' option error$"):
         _ = build_registered_pass("error-pass", {"mode": "fast"})
 
 
@@ -960,7 +1014,7 @@ def test_build_registered_pipeline_options_not_supported() -> None:
         return PassManager(name="plain")
 
     with pytest.raises(
-        PassRegistryError, match=r"^PassRegistryError: pipeline 'plain-pipeline' does not accept options$"
+        KernelCodeError, match=r"^PassRegistryError: pipeline 'plain-pipeline' does not accept options$"
     ):
         _ = build_registered_pipeline("plain-pipeline", {"mode": "fast"})
 
@@ -981,6 +1035,6 @@ def test_build_registered_pipeline_option_error() -> None:
         raise ValueError("invalid options")
 
     with pytest.raises(
-        PassRegistryError, match=r"^PassRegistryError: pipeline 'error-pipeline' option error$"
+        KernelCodeError, match=r"^PassRegistryError: pipeline 'error-pipeline' option error$"
     ):
         _ = build_registered_pipeline("error-pipeline", {"mode": "fast"})

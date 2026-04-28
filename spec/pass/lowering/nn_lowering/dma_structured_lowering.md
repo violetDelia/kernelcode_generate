@@ -37,7 +37,7 @@
 
 - 仅覆盖 `nn.broadcast`、`nn.transpose`。
 - `nn.broadcast` 必须 lower 为 `dma.alloc + dma.broadcast`。
-- `nn.transpose` 必须 lower 为 `dma.alloc + dma.transpose`，并校验 `perm`。
+- `nn.transpose` 必须 lower 为 `dma.alloc + dma.transpose`，并校验 `perm`；输出 memory stride 必须保持物化后的默认连续布局。
 - 广播若引入新的符号维度，必须报错且错误信息包含 `NnLoweringBroadcastSymbolDimNotFromSource`。
 - 模块级 surviving 接口只允许 `dma_structured_patterns()`；`lower_dma_structured_family` 不属于公开入口。
 - 每个 op 都必须由独立的 `@op_type_rewrite_pattern` 处理，不再通过 `block/op -> bool` family 分发。

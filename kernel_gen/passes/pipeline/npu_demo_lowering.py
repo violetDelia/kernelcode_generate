@@ -6,8 +6,11 @@
 功能说明:
 - 提供 `npu-demo-lowering` pipeline 的 builder。
 - 固定 `dsl_run` 的 npu_demo 正向链路为
-  `InlinePass -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> AttachArchInformationPass -> OutlineDeviceKernelPass`。
+  `InlinePass -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> SymbolBufferHoistPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> LaunchKernelCostFuncPass`。
 - 通过 registry 装饰器完成 pipeline 注册。
+
+API 列表:
+- `build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> PassManager`
 
 使用示例:
 - from kernel_gen.passes.pipeline import build_npu_demo_lowering_pipeline
@@ -29,7 +32,9 @@ from kernel_gen.passes.lowering import NnLoweringPass
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import register_pipeline
 from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
+from kernel_gen.passes.symbol_buffer_hoist import SymbolBufferHoistPass
 from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
+from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
 
 
 @register_pipeline("npu-demo-lowering")
@@ -42,9 +47,13 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     功能说明:
     - 返回 `PassManager(name="npu-demo-lowering")`。
     - 固定 pass 顺序为
-      `InlinePass -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> AttachArchInformationPass -> OutlineDeviceKernelPass`。
+      `InlinePass -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> SymbolBufferHoistPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> LaunchKernelCostFuncPass`。
     - `SymbolLoopHoistPass` 在没有 `symbol.for` 的模块上应保持 no-op，因此可直接用于
       dsl_run 的最小 npu_demo 正向合同。
+    - `SymbolBufferHoistPass` 位于 `SymbolLoopHoistPass` 之后，用于把 loop 内安全 `dma.alloc`
+      外提到 loop 之前。
+    - `LaunchKernelCostFuncPass` 位于 pipeline 最后，使用默认 `cost_kind="DMA|MAC"` 生成 sibling
+      cost function。
     - 仅允许 `target` 选项；当前默认 target 为 `npu_demo`，`only-kernel` 等历史选项必须显式失败。
 
     使用示例:
@@ -71,6 +80,8 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     pm.add_pass(DecompassPass())
     pm.add_pass(NnLoweringPass())
     pm.add_pass(SymbolLoopHoistPass())
+    pm.add_pass(SymbolBufferHoistPass())
     pm.add_pass(AttachArchInformationPass(target=target))
     pm.add_pass(OutlineDeviceKernelPass())
+    pm.add_pass(LaunchKernelCostFuncPass())
     return pm

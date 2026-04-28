@@ -1,11 +1,24 @@
 """DSL AST node definitions.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 榕
 
 功能说明:
 - 定义 DSL AST 节点与公共数据结构。
 - 仅包含节点数据结构，不包含解析实现。
+
+API 列表:
+- `SourceLocation(line: int, column: int)`
+- `Diagnostic(message: str, location: SourceLocation | None = None)`
+- `ModuleAST(functions: list[FunctionAST])`
+- `TensorAST(name: str, memory: object, location: SourceLocation | None = None)`
+- `ScalarArgAST(name: str, value_type: type, is_symbolic: bool = False, location: SourceLocation | None = None)`
+- `PtrArgAST(name: str, dtype: object, location: SourceLocation | None = None)`
+- `VarAST(name: str, location: SourceLocation | None = None)`
+- `BlockAST(statements: list[object], location: SourceLocation | None = None)`
+- `ForAST(var: VarAST, start: object, end: object, body: BlockAST, step: object | None = None, location: SourceLocation | None = None)`
+- `IfAST(condition: object, true_body: BlockAST, false_body: BlockAST | None = None, location: SourceLocation | None = None)`
+- 其余 DMA / NN / arch / symbol 节点类见本文件公开 dataclass 定义。
 
 使用示例:
 - from kernel_gen.dsl.ast import FunctionAST, BlockAST
@@ -239,6 +252,31 @@ class ForAST:
     end: object
     body: BlockAST
     step: object | None = None
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class IfAST:
+    """条件分支节点。
+
+    创建者: 榕
+    最后一次更改: 榕
+
+    功能说明:
+    - 表示 DSL 中的语句级 `if` / `if else` 控制流结构。
+
+    使用示例:
+    - IfAST(condition=VarAST("flag"), true_body=BlockAST([]), false_body=None)
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes.md
+    - test: test/dsl/ast/test_parser.py
+    - 功能实现: kernel_gen/dsl/ast/nodes.py
+    """
+
+    condition: object
+    true_body: BlockAST
+    false_body: BlockAST | None = None
     location: SourceLocation | None = None
 
 

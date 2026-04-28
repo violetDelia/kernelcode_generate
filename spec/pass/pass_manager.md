@@ -4,11 +4,13 @@
 
 - 定义 Pass 管理与调度的最小可用规范，描述 `Pass` 与 xdsl `ModulePass` 的组织、排序与执行规则。
 - 面向上层 IR/DSL 的通用优化/规范化流程，不绑定具体 IR 类型或后端。
+- `Pass` 默认启用 `fold=True`，`PassManager` 在每个 pass 后对 `ModuleOp` 做一次仅 folding、不做 DCE 的 fold sweep。
 
 ## API 列表
 
-- `Pass`
+- `Pass(fold: bool = True)`
   - `—— run(target: object) -> object`
+  - `—— apply(ctx: Context, op: ModuleOp) -> None`
 - `PassManager`
   - `—— init(name: str | None = None)`
   - `—— add_pass(pass_obj: Pass | ModulePass)`
@@ -33,14 +35,18 @@
 - 统一 Pass 的注册、执行与错误传播规则，便于后续实现与测试闭环。
 - PassManager 只负责 Pass 编排与执行，不承载默认 pipeline builder；默认 builder 见 [`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)。
 - PassManager 固定支持两类公开对象：`Pass` 与 xdsl `ModulePass`；执行时内部创建并复用单个 `Context`。
+- `dump_dir` 是来自 `kernel_gen.core.config` 的诊断开关；非空时写入初始 IR 与逐 pass 后 IR，不改变 pass 执行结果。
+- fold 是 pass 级通用开关；未声明 `fold` 的第三方 `ModulePass` 按 `fold=True` 处理，只有显式 `fold=False` 才关闭 pass 后 fold sweep。
+- 通用 fold sweep 只启用 folding，不启用 dead-code-elimination，不承担 pass 业务重写或 canonicalization pattern。
 - 业务顺序约束不属于 PassManager 职责；具体 lowering / tuning / tile / backend pipeline 的顺序由对应 builder 与其 spec 固定。
 
 ## 限制与边界
 
-- 不定义任何具体 Pass 的业务逻辑，仅规范 Pass 组织与执行流程。
+- 不定义任何具体 Pass 的业务逻辑，仅规范 Pass 组织、执行流程与通用 fold 调度。
 - 不引入跨模块依赖或后端 lowering 规则。
 - 不要求 Pass 修改输入的方式（可返回新对象或就地修改），以 `run` 返回值为准。
 - 不要求 `ModulePass.apply` 返回值；`PassManager` 以 `apply(ctx, module)` 的副作用作为结果，继续返回原 `module` 对象。
+- 通用 fold sweep 当前只承诺对实现 folder 的 symbol 算术等 foldable op 生效；不会把 DCE、CSE 或具体 lowering pattern 混入 PassManager。
 - 当管理器中无 Pass 时，执行结果必须等于输入（无副作用的空操作）。
 - PassManager 不解释 pass 名称语义，不根据 pass 名称施加排序或依赖约束。
 
@@ -76,7 +82,7 @@
 
 ## 公开接口
 
-### `class Pass`
+### `class Pass(fold: bool = True)`
 
 功能说明：
 
@@ -85,6 +91,7 @@
 参数说明：
 
 - `name (str)`：Pass 标识名称，用于诊断与测试断言。
+- `fold (bool)`：是否允许该 pass 后执行通用 fold sweep，默认 `True`。
 
 使用示例：
 
@@ -93,12 +100,15 @@ class MyPass(Pass):
     name = "my-pass"
     def run(self, target):
         return target
+
+pass_obj = MyPass(fold=False)
 ```
 
 注意事项：
 
 - `run` 必须接收一个输入并返回一个输出对象。
 - `name` 需可读且稳定，便于测试匹配。
+- `fold=False` 只关闭通用 folding，不允许 pass 因此跳过自身必须执行的业务校验。
 
 前置条件：
 
@@ -107,6 +117,7 @@ class MyPass(Pass):
 后置条件：
 
 - `run` 返回值必须可作为下游 Pass 的输入；若无法继续传递必须显式抛错。
+- 当输入 / 输出是 `ModuleOp` 且 `fold=True` 时，PassManager 会在该 pass 后执行一次 fold sweep。
 
 返回与限制：
 
@@ -222,10 +233,13 @@ pm.extend([PassA(), PassB()])
 参数说明：
 
 - `target (object)`：待处理对象（IR/AST 等）。
+- 诊断目录通过 `kernel_gen.core.config.set_dump_dir(...)` 设置；非空时写入 pass IR 产物。
 
 使用示例：
 
 ```python
+result = pm.run(ir)
+set_dump_dir("dump/kernel")
 result = pm.run(ir)
 ```
 
@@ -234,6 +248,8 @@ result = pm.run(ir)
 - Pass 的输出必须作为下一个 Pass 的输入。
 - 任何 Pass 抛出的异常应原样传播。
 - `Pass` 固定走 `run(target)`；其它 xdsl `ModulePass` 固定走 `apply(ctx, target)`，不再按“是否额外提供 run/apply”做兼容优先级分支。
+- `kernel_gen.core.config.dump_dir` 非空时，目录内必须包含 `01-first-ir.mlir`；每个 pass 完成后写入 `NN-<pass-name>.mlir`。
+- 每个 pass 后 dump 文件第一行必须是当前 pass 的可解析名称文本，后续内容为该 pass 后的 IR 文本。
 
 前置条件：
 
@@ -246,6 +262,7 @@ result = pm.run(ir)
 返回与限制：
 
 - 返回最终 Pass 的输出；无 Pass 时返回输入本身。
+- `dump_dir` 不参与返回值，不允许改变 pass 业务结果。
 
 ## 测试
 
@@ -256,6 +273,7 @@ result = pm.run(ir)
 
 - 验证 Pass 注册与执行顺序一致。
 - 验证空管理器执行返回原输入。
+- 验证 `dump_dir` 写入初始 IR 与逐 pass 后 IR。
 - 验证显式注册非法 Pass 时触发 `TypeError`。
 - 验证 Pass 异常可向上抛出。
 - 验证 PassManager 不承载旧默认 builder 兼容入口。

@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from enum import Enum
 import inspect
 
-from kernel_gen.common.errors import _ERROR_TEMPLATE
+from kernel_gen.core.contracts import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType

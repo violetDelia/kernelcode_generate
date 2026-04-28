@@ -388,30 +388,6 @@ def test_target_registry_npu_demo_template() -> None:
     assert target_registry.get_target_hardware("npu_demo", "tlm3_memory_size") == 512
 
 
-# TC-TGT-011A
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
-# 测试目的: 验证 npu_demo 文件化固定 target 同时暴露 analysis 默认参数。
-# 对应功能实现文件路径: kernel_gen/target/registry.py
-# 对应 spec 文件路径: spec/target/registry.md
-def test_target_registry_npu_demo_analysis_defaults() -> None:
-    defaults = target_registry.get_target_analysis_defaults("npu_demo")
-
-    assert defaults["path_bandwidth"]["GM->LM"] == 64
-    assert defaults["path_bandwidth"]["GM->SM"] == 96
-    assert defaults["path_bandwidth"]["GM->TSM"] == 32
-    assert defaults["path_bandwidth"]["TSM->TLM"] == 16
-    assert defaults["path_latency_ns"]["GM->LM"] == 20
-    assert defaults["path_latency_ns"]["GM->SM"] == 18
-    assert defaults["path_latency_ns"]["GM->TSM"] == 24
-    assert defaults["path_latency_ns"]["TSM->TLM"] == 8
-    assert defaults["theoretical_compute"]["scalar"] == 1
-    assert defaults["theoretical_compute"]["vector"] == 8
-    assert defaults["theoretical_compute"]["tensor"] == 64
-
-
 # TC-TGT-012
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚

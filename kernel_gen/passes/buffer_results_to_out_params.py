@@ -20,6 +20,7 @@
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from dataclasses import dataclass
 
@@ -39,7 +40,8 @@ from xdsl.rewriter import InsertPoint
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp
 from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.passes.common import PassContractError, ensure_builtin_module
+from kernel_gen.dialect.symbol import Symbol
+from kernel_gen.passes.common import ensure_builtin_module
 
 
 @dataclass(frozen=True)
@@ -125,14 +127,14 @@ class BufferResultsToOutParamsCallPattern(RewritePattern):
         memory_indices = target.output_signature.memory_indices
         output_types = target.output_signature.output_types
         if len(op.arguments) != len(target.input_types) or len(op.results) != len(output_types):
-            raise PassContractError(
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                 f"half-rewritten ABI is not supported: callsite for {callee_name} does not match callee signature"
             )
         out_allocs: list[DmaAllocOp] = []
         for result_index in memory_indices:
             result_type = op.results[result_index].type
             if not isinstance(result_type, NnMemoryType):
-                raise PassContractError(
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                     "half-rewritten ABI is not supported: "
                     f"callsite for {callee_name} expects memory result at index {result_index}"
                 )
@@ -187,19 +189,19 @@ class BufferResultsToOutParamsFuncPattern(RewritePattern):
             return
         block = op.body.blocks.first
         if block is None:
-            raise PassContractError("function body is empty")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "function body is empty")
         output_types = target.output_signature.output_types
         memory_indices = target.output_signature.memory_indices
         return_op = op.get_return_op()
         if return_op is None or len(return_op.arguments) != len(output_types):
-            raise PassContractError(
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                 "return operand count must match function outputs for buffer-results-to-out-params"
             )
         new_out_args: list[BlockArgument] = []
         for insert_index, memory_output_index in enumerate(memory_indices):
             memory_type = output_types[memory_output_index]
             if not isinstance(memory_type, NnMemoryType):
-                raise PassContractError("memory output index must point to nn.memory")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "memory output index must point to nn.memory")
             new_out_args.append(rewriter.insert_block_argument(block, insert_index, memory_type))
         existing = list(op.arg_attrs.data) if op.arg_attrs is not None else []
         total_old_args = len(op.function_type.inputs.data)
@@ -216,7 +218,7 @@ class BufferResultsToOutParamsFuncPattern(RewritePattern):
         for new_out_arg, return_value in zip(new_out_args, memory_return_values, strict=True):
             owner = getattr(return_value, "owner", None)
             if isinstance(owner, DmaDesliceOp) and owner.result == return_value:
-                owner.operands[1] = new_out_arg
+                owner.operands[0] = new_out_arg
                 rewriter.notify_op_modified(owner)
             rewriter.replace_all_uses_with(return_value, new_out_arg)
         rewriter.erase_op(return_op)
@@ -251,6 +253,27 @@ class BufferResultsToOutParamsPass(ModulePass):
     """
 
     name = "buffer-results-to-out-params"
+
+    def __init__(self: "BufferResultsToOutParamsPass", fold: bool = True) -> None:
+        """初始化 buffer-results-to-out-params pass 公共选项。
+
+        创建者: 大闸蟹
+        最后一次更改: 大闸蟹
+
+        功能说明:
+        - 记录 `fold` 开关，默认允许 pass 内 pattern walker 执行 folding。
+
+        使用示例:
+        - pass_obj = BufferResultsToOutParamsPass()
+        - pass_obj = BufferResultsToOutParamsPass(fold=False)
+
+        关联文件:
+        - spec: spec/pass/buffer_results_to_out_params.md
+        - test: test/pass/test_buffer_results_to_out_params.py
+        - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
+        """
+
+        object.__setattr__(self, "fold", bool(fold))
 
     def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行最小骨架改写。
@@ -303,19 +326,19 @@ class BufferResultsToOutParamsPass(ModulePass):
                             break
                         leading_out_count += 1
                     if leading_out_count >= len(memory_indices):
-                        raise PassContractError(
+                        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                             "half-rewritten ABI is not supported: "
                             f"function {op.sym_name.data} already has leading out params but still returns memory"
                         )
             first_block = op.body.blocks.first
             is_external_like = op.is_declaration or (first_block is not None and tuple(first_block.ops) == ())
             if is_external_like:
-                raise PassContractError("external declaration is not supported")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "external declaration is not supported")
             if len(tuple(op.body.blocks)) != 1:
-                raise PassContractError("only single-block functions are supported")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "only single-block functions are supported")
             return_op = op.get_return_op()
             if return_op is None or len(return_op.arguments) != len(output_types):
-                raise PassContractError(
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                     "return operand count must match function outputs for buffer-results-to-out-params"
                 )
             targets[op.sym_name.data] = RewriteTarget(
@@ -344,13 +367,16 @@ class BufferResultsToOutParamsPass(ModulePass):
             if actual_inputs == expected_inputs and actual_outputs == expected_outputs:
                 continue
             if target is not None or any(isinstance(result.type, NnMemoryType) for result in op.results):
-                raise PassContractError(
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                     f"half-rewritten ABI is not supported: callsite for {callee_name} does not match callee signature"
                 )
+        if ctx.get_optional_dialect(Symbol.name) is None:
+            ctx.load_dialect(Symbol)
         PatternRewriteWalker(
             GreedyRewritePatternApplier(
                 get_buffer_results_to_out_params_pass_patterns(targets),
                 ctx=ctx,
+                folding_enabled=self.fold,
                 dce_enabled=False,
             )
         ).rewrite_module(module)

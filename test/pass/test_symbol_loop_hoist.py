@@ -39,6 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
@@ -64,7 +65,6 @@ SymbolDivHoistPattern = pass_module.SymbolDivHoistPattern
 SymbolFloorDivHoistPattern = pass_module.SymbolFloorDivHoistPattern
 SymbolGetDimHoistPattern = pass_module.SymbolGetDimHoistPattern
 SymbolGetStrideHoistPattern = pass_module.SymbolGetStrideHoistPattern
-SymbolLoopHoistError = pass_module.SymbolLoopHoistError
 SymbolLoopHoistPass = pass_module.SymbolLoopHoistPass
 SymbolMulHoistPattern = pass_module.SymbolMulHoistPattern
 SymbolSubHoistPattern = pass_module.SymbolSubHoistPattern
@@ -305,7 +305,7 @@ def test_symbol_loop_hoist_hoists_symbol_dim_ops() -> None:
     block = func_op.body.blocks.first
     loop = next(op for op in block.ops if isinstance(op, SymbolForOp))
 
-    SymbolLoopHoistPass().run(module)
+    SymbolLoopHoistPass(fold=False).run(module)
 
     ops = list(block.ops)
     loop_index = ops.index(loop)
@@ -327,7 +327,7 @@ def test_symbol_loop_hoist_hoists_symbol_const() -> None:
     block = func_op.body.blocks.first
     loop = next(op for op in block.ops if isinstance(op, SymbolForOp))
 
-    SymbolLoopHoistPass().run(module)
+    SymbolLoopHoistPass(fold=False).run(module)
 
     ops = list(block.ops)
     loop_index = ops.index(loop)
@@ -338,7 +338,6 @@ def test_symbol_loop_hoist_hoists_symbol_const() -> None:
 
 def test_symbol_loop_hoist_is_exported_from_lowering_package() -> None:
     assert lowering_pass_module.SymbolLoopHoistPass is SymbolLoopHoistPass
-    assert lowering_pass_module.SymbolLoopHoistError is SymbolLoopHoistError
 
 
 # TC-SLH-001B
@@ -399,7 +398,7 @@ def test_symbol_loop_hoist_hoists_symbol_elewise_ops() -> None:
     block = func_op.body.blocks.first
     loop = next(op for op in block.ops if isinstance(op, SymbolForOp))
 
-    SymbolLoopHoistPass().run(module)
+    SymbolLoopHoistPass(fold=False).run(module)
 
     ops = list(block.ops)
     loop_index = ops.index(loop)
@@ -487,5 +486,5 @@ def test_symbol_loop_hoist_keeps_loop_carried_symbol_add_in_loop() -> None:
 # 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_verifier_errors_are_wrapped() -> None:
     module = _make_module_with_step_zero()
-    with pytest.raises(SymbolLoopHoistError, match="SymbolLoopHoistVerifierError"):
+    with pytest.raises(KernelCodeError, match="SymbolLoopHoistVerifierError"):
         SymbolLoopHoistPass().run(module)

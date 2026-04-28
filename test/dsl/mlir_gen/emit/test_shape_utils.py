@@ -29,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaLoadOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dsl.ast import ConstAST, DmaViewAST, LoadAST, TensorAST
@@ -102,7 +103,7 @@ def test_emit_mlir_lowers_dma_view_with_public_shape_layout() -> None:
 def test_emit_mlir_rejects_view_index_rank_mismatch() -> None:
     tensor, _block, ctx = _tensor_and_ctx()
 
-    with pytest.raises(ValueError, match="Index rank mismatch"):
+    with pytest.raises(KernelCodeError, match="Index rank mismatch"):
         emit_mlir(
             DmaViewAST(
                 source=tensor,
@@ -118,7 +119,7 @@ def test_emit_mlir_rejects_view_index_rank_mismatch() -> None:
 def test_emit_mlir_rejects_non_unit_stride_layout() -> None:
     tensor, _block, ctx = _tensor_and_ctx()
 
-    with pytest.raises(ValueError, match="Only unit stride is supported"):
+    with pytest.raises(KernelCodeError, match="Only unit stride is supported"):
         emit_mlir(
             LoadAST(
                 tensor=tensor,

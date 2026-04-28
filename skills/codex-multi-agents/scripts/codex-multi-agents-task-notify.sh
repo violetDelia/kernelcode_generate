@@ -4,9 +4,15 @@
 # 创建者: OpenAI
 # 最后一次更改: 小李飞刀
 #
-# 功能:
+# 功能说明:
 # - 执行 task 脚本的通知副作用：list -init、tmux -talk、任务消息拼装、管理员摘要发送。
 # - 供 codex-multi-agents-task.sh 在 -dispatch、-reassign 与 -next 成功后调用。
+#
+# API 列表:
+# - codex-multi-agents-task-notify.sh -dispatch-init -agents-list <agents-lists.md> -to <worker>
+# - codex-multi-agents-task-notify.sh -dispatch-message -file <TODO.md> -task_id <id> -to <worker> -from <sender> -agents-list <agents-lists.md> [-message <text>]
+# - codex-multi-agents-task-notify.sh -reassign -file <TODO.md> -task_id <id> -to <worker> -old-assignee <worker> -from <sender> -agents-list <agents-lists.md>
+# - codex-multi-agents-task-notify.sh -next -file <TODO.md> -task_id <id> -type <execute|spec|build|review|merge|other|refactor> -agents-list <agents-lists.md> -from <sender> -admin <admin> [-auto-dispatch <task_id|assignee>]...
 #
 # 对应文件:
 # - spec: /home/lfr/kernelcode_generate/spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -65,7 +71,7 @@ Usage:
   codex-multi-agents-task-notify.sh -dispatch-init -agents-list <agents-lists.md> -to <worker>
   codex-multi-agents-task-notify.sh -dispatch-message -file <TODO.md> -task_id <id> -to <worker> -from <sender> -agents-list <agents-lists.md> [-message <text>]
   codex-multi-agents-task-notify.sh -reassign -file <TODO.md> -task_id <id> -to <worker> -old-assignee <worker> -from <sender> -agents-list <agents-lists.md>
-  codex-multi-agents-task-notify.sh -next -file <TODO.md> -task_id <id> -type <spec|build|review|merge|other|refactor> -agents-list <agents-lists.md> -from <sender> -admin <admin> [-auto-dispatch <task_id|assignee>]...
+  codex-multi-agents-task-notify.sh -next -file <TODO.md> -task_id <id> -type <execute|spec|build|review|merge|other|refactor> -agents-list <agents-lists.md> -from <sender> -admin <admin> [-auto-dispatch <task_id|assignee>]...
 USAGE
 }
 

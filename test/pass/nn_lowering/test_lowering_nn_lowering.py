@@ -49,6 +49,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaFillOp, DmaTransposeOp
 from kernel_gen.dialect.kernel import (
     KernelBinaryElewiseOp,
@@ -93,7 +94,6 @@ from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 pass_module = importlib.import_module("kernel_gen.passes.lowering.nn_lowering")
-NnLoweringError = pass_module.NnLoweringError
 NnLoweringPass = pass_module.NnLoweringPass
 
 SPACE_GLOBAL = NnMemorySpaceAttr(StringAttr("global"))
@@ -653,7 +653,7 @@ def test_lower_softmax_requires_decompass() -> None:
     block.add_op(func.ReturnOp(softmax_op.results[0]))
     module = ModuleOp([func.FuncOp("softmax", FunctionType.from_lists([operand_type], [res_type]), Region(block))])
 
-    with pytest.raises(NnLoweringError, match="nn.softmax must be decomposed before lower-nn"):
+    with pytest.raises(KernelCodeError, match="nn.softmax must be decomposed before lower-nn"):
         NnLoweringPass().run(module)
 
 
@@ -1342,7 +1342,7 @@ def test_lower_rejects_invalid_add_shape() -> None:
     func_op = func.FuncOp("bad_add", FunctionType.from_lists([lhs_type, rhs_type], [res_type]), region)
     module = ModuleOp([func_op])
 
-    with pytest.raises(NnLoweringError, match="nn op operands must have the same shape"):
+    with pytest.raises(KernelCodeError, match="nn op operands must have the same shape"):
         NnLoweringPass().run(module)
 
 
@@ -1372,7 +1372,7 @@ def test_lower_broadcast_rejects_unknown_dim() -> None:
     func_op = func.FuncOp("unknown_dim", FunctionType.from_lists([operand_type], [operand_type]), region)
     module = ModuleOp([func_op])
 
-    with pytest.raises(NnLoweringError, match="nn.broadcast operand shape must not contain '\\?'"):
+    with pytest.raises(KernelCodeError, match="nn.broadcast operand shape must not contain '\\?'"):
         NnLoweringPass().run(module)
 
 
@@ -1398,7 +1398,7 @@ def test_lower_cast_symbol_dim_rejects_mismatch() -> None:
     func_op = func.FuncOp("cast_mismatch", FunctionType.from_lists([operand_type], [result_type]), region)
     module = ModuleOp([func_op])
 
-    with pytest.raises(NnLoweringError, match="dma.cast shape mismatch"):
+    with pytest.raises(KernelCodeError, match="dma.cast shape mismatch"):
         NnLoweringPass().run(module)
 
 
@@ -1452,7 +1452,7 @@ def test_lower_transpose_dynamic() -> None:
     )
     result_type = nn_memory_type(
         (StringAttr("N"), StringAttr("M")),
-        (IntAttr(2), IntAttr(1)),
+        (StringAttr("M"), IntAttr(1)),
         f32,
         SPACE_GLOBAL,
     )
@@ -1529,7 +1529,7 @@ def test_lower_rejects_unknown_op() -> None:
     block.add_op(func.ReturnOp(unknown_op.results[0]))
     module = ModuleOp([func.FuncOp("unknown", FunctionType.from_lists([operand_type], [res_type]), Region(block))])
 
-    with pytest.raises(NnLoweringError, match="unknown op"):
+    with pytest.raises(KernelCodeError, match="unknown op"):
         NnLoweringPass().run(module)
 
 
@@ -1571,7 +1571,7 @@ def test_reduce_min_rejects_invalid_rank() -> None:
     func_op = func.FuncOp("reduce_min_bad_rank", FunctionType.from_lists([operand_type], [res_type]), region)
     module = ModuleOp([func_op])
 
-    with pytest.raises(NnLoweringError, match="reduce shape rank must match"):
+    with pytest.raises(KernelCodeError, match="reduce shape rank must match"):
         NnLoweringPass().run(module)
 
 
@@ -1602,7 +1602,7 @@ def test_reduce_min_rejects_bad_keepdim() -> None:
     block.add_op(func.ReturnOp(reduce_op.results[0]))
     module = ModuleOp([func.FuncOp("reduce_min", FunctionType.from_lists([operand_type], [res_type]), Region(block))])
 
-    with pytest.raises(NnLoweringError, match="keepdim must be integer"):
+    with pytest.raises(KernelCodeError, match="keepdim must be integer"):
         NnLoweringPass().run(module)
 
 
@@ -1632,7 +1632,7 @@ def test_reduce_min_rejects_keepdim_negative_one() -> None:
     block.add_op(func.ReturnOp(reduce_op.results[0]))
     module = ModuleOp([func.FuncOp("reduce_min", FunctionType.from_lists([operand_type], [res_type]), Region(block))])
 
-    with pytest.raises(NnLoweringError, match="keepdim must be 0 or 1"):
+    with pytest.raises(KernelCodeError, match="keepdim must be 0 or 1"):
         NnLoweringPass().run(module)
 
 
@@ -1665,7 +1665,7 @@ def test_lower_broadcast_rejects_invalid_shape() -> None:
     )
     module = ModuleOp([func_op])
 
-    with pytest.raises(NnLoweringError, match="invalid broadcast target shape"):
+    with pytest.raises(KernelCodeError, match="invalid broadcast target shape"):
         NnLoweringPass().run(module)
 
 
@@ -1691,7 +1691,7 @@ def test_broadcast_rejects_invalid_scalar() -> None:
     block.add_op(func.ReturnOp(broadcast_op.results[0]))
     module = ModuleOp([func.FuncOp("broadcast_scalar", FunctionType.from_lists([operand_type, StringAttr], [result_type]), Region(block))])
 
-    with pytest.raises(NnLoweringError, match="broadcast scalar must be int or symbol"):
+    with pytest.raises(KernelCodeError, match="broadcast scalar must be int or symbol"):
         NnLoweringPass().run(module)
 
 
@@ -1717,7 +1717,7 @@ def test_matmul_requires_contiguous_stride() -> None:
     block.add_op(func.ReturnOp(matmul_op.results[0]))
     module = ModuleOp([func.FuncOp("matmul", FunctionType.from_lists([lhs_type, rhs_type], [res_type]), Region(block))])
 
-    with pytest.raises(NnLoweringError, match="matmul stride must be contiguous"):
+    with pytest.raises(KernelCodeError, match="matmul stride must be contiguous"):
         NnLoweringPass().run(module)
 
 
@@ -1747,7 +1747,7 @@ def test_reduce_axes_validation() -> None:
     block.add_op(func.ReturnOp(reduce_op.results[0]))
     module = ModuleOp([func.FuncOp("reduce_min", FunctionType.from_lists([operand_type], [res_type]), Region(block))])
 
-    with pytest.raises(NnLoweringError, match="reduce axes must be non-empty"):
+    with pytest.raises(KernelCodeError, match="reduce axes must be non-empty"):
         NnLoweringPass().run(module)
 
 
@@ -1777,7 +1777,7 @@ def test_reduce_keepdim_validation() -> None:
     block.add_op(func.ReturnOp(reduce_op.results[0]))
     module = ModuleOp([func.FuncOp("reduce_min", FunctionType.from_lists([operand_type], [res_type]), Region(block))])
 
-    with pytest.raises(NnLoweringError, match="keepdim must be 0 or 1"):
+    with pytest.raises(KernelCodeError, match="keepdim must be 0 or 1"):
         NnLoweringPass().run(module)
 
 
@@ -1806,5 +1806,5 @@ def test_softmax_requires_decompass_before_axis_validation() -> None:
     block.add_op(func.ReturnOp(softmax_op.results[0]))
     module = ModuleOp([func.FuncOp("softmax", FunctionType.from_lists([operand_type], [res_type]), Region(block))])
 
-    with pytest.raises(NnLoweringError, match="nn.softmax must be decomposed before lower-nn"):
+    with pytest.raises(KernelCodeError, match="nn.softmax must be decomposed before lower-nn"):
         NnLoweringPass().run(module)

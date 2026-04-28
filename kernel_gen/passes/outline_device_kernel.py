@@ -28,6 +28,7 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.context import Context
 from xdsl.dialects import func
@@ -44,9 +45,8 @@ from xdsl.pattern_rewriter import (
 from xdsl.rewriter import InsertPoint
 
 from kernel_gen.dialect.arch import ArchLaunchOp
-from kernel_gen.dialect.symbol import SymbolConstOp
+from kernel_gen.dialect.symbol import Symbol, SymbolConstOp
 from kernel_gen.passes.common import (
-    PassContractError,
     ensure_builtin_module,
     verify_generated_ops,
 )
@@ -193,6 +193,27 @@ class OutlineDeviceKernelPass(ModulePass):
 
     name = "outline-device-kernel"
 
+    def __init__(self: "OutlineDeviceKernelPass", fold: bool = True) -> None:
+        """初始化 outline-device-kernel pass 公共选项。
+
+        创建者: 大闸蟹
+        最后一次更改: 大闸蟹
+
+        功能说明:
+        - 记录 `fold` 开关，默认允许 pass 内 pattern walker 执行 folding。
+
+        使用示例:
+        - pass_obj = OutlineDeviceKernelPass()
+        - pass_obj = OutlineDeviceKernelPass(fold=False)
+
+        关联文件:
+        - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+        - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+        - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
+        """
+
+        object.__setattr__(self, "fold", bool(fold))
+
     def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行 outline-device-kernel ModulePass。
 
@@ -232,14 +253,14 @@ class OutlineDeviceKernelPass(ModulePass):
                 continue
             func_name = op.sym_name.data
             if len(present_attrs) != len(_OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS):
-                raise PassContractError(
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                     "function "
                     f"{func_name} must define launch_block, launch_thread, and launch_subthread together"
                 )
             if len(op.function_type.outputs.data) != 0:
-                raise PassContractError(f"function {func_name} must have zero results")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"function {func_name} must have zero results")
             if not any(True for _ in op.body.blocks):
-                raise PassContractError(f"function {func_name} must contain a body")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"function {func_name} must contain a body")
 
             values: list[int] = []
             for attr_name in _OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS + ("shared_memory_size",):
@@ -248,7 +269,7 @@ class OutlineDeviceKernelPass(ModulePass):
                     if attr_name == "shared_memory_size":
                         values.append(0)
                         continue
-                    raise PassContractError(
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                         "function "
                         f"{func_name} must define launch_block, launch_thread, and launch_subthread together"
                     )
@@ -260,32 +281,35 @@ class OutlineDeviceKernelPass(ModulePass):
                     try:
                         value = int(attr.data)
                     except ValueError as exc:
-                        raise PassContractError(
+                        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                             f"function {func_name} {attr_name} must be int-like attribute"
                         ) from exc
                 else:
-                    raise PassContractError(
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                         f"function {func_name} {attr_name} must be int-like attribute"
                     )
                 if attr_name == "shared_memory_size":
                     if value < 0:
-                        raise PassContractError(
+                        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                             f"function {func_name} {attr_name} must be >= 0"
                         )
                 elif value <= 0:
-                    raise PassContractError(f"function {func_name} {attr_name} must be > 0")
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"function {func_name} {attr_name} must be > 0")
                 values.append(value)
 
             device_name = f"{func_name}_device"
             if device_name in existing_names:
-                raise PassContractError(f"outlined device function '{device_name}' already exists")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"outlined device function '{device_name}' already exists")
             candidates[func_name] = (values[0], values[1], values[2], values[3])
         if not candidates:
             return
+        if ctx.get_optional_dialect(Symbol.name) is None:
+            ctx.load_dialect(Symbol)
         PatternRewriteWalker(
             GreedyRewritePatternApplier(
                 [*_get_outline_device_kernel_pass_patterns(candidates)],
                 ctx=ctx,
+                folding_enabled=self.fold,
                 dce_enabled=False,
             )
         ).rewrite_module(module)

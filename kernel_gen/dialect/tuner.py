@@ -19,7 +19,7 @@
 
 from __future__ import annotations
 
-from kernel_gen.common.errors import _ERROR_TEMPLATE
+from kernel_gen.core.contracts import _ERROR_TEMPLATE
 from xdsl.dialects.builtin import StringAttr
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, result_def, var_operand_def

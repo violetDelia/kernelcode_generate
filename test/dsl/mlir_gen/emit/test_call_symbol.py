@@ -1,7 +1,7 @@
 """Emit symbol public integration tests.
 
 创建者: jcc你莫辜负
-最后一次更改: jcc你莫辜负
+最后一次更改: 榕
 
 功能说明:
 - 只覆盖 `kernel_gen.dsl.mlir_gen.emit` 包根公开入口的 symbol family 可观察行为。
@@ -30,9 +30,19 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolForOp, SymbolGetDimOp, SymbolIterType, SymbolToFloatOp, SymbolValueType
+from kernel_gen.dialect.symbol import (
+    SymbolAddOp,
+    SymbolFloorDivOp,
+    SymbolForOp,
+    SymbolGetDimOp,
+    SymbolIterType,
+    SymbolToFloatOp,
+    SymbolValueType,
+)
 from kernel_gen.dsl.ast import (
+    BinaryExprAST,
     BlockAST,
     ConstAST,
     ForAST,
@@ -176,7 +186,76 @@ def test_emit_mlir_lowers_symbolic_loop() -> None:
     assert not any(isinstance(op, arith.IndexCastOp) for op in loop_ops[0].body.block.ops)
 
 
-# EMIT-CALL-SYMBOL-004
+# EMIT-CALL-SYMBOL-005
+# 创建者: 榕
+# 最后一次更改: 榕
+# 最近一次运行测试时间: 2026-04-29 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-29 00:00:00 +0800
+# 功能说明: 验证公开 `emit_mlir(...)` 支持符号算术表达式作为 `symbol.for` 上界。
+# 测试目的: 锁定卷积输出维度这类 `((H + pad) // stride) + 1` loop bound 可生成 symbol 算术链。
+# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_call_symbol.py -k test_emit_mlir_lowers_symbolic_loop_bound_expression
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/__init__.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/mlir_gen/emit/test_call_symbol.py
+def test_emit_mlir_lowers_symbolic_loop_bound_expression() -> None:
+    start = ScalarArgAST(name="start", value_type=int, is_symbolic=True, location=None)
+    size = ScalarArgAST(name="size", value_type=int, is_symbolic=True, location=None)
+    pad = ScalarArgAST(name="pad", value_type=int, is_symbolic=True, location=None)
+    stride = ScalarArgAST(name="stride", value_type=int, is_symbolic=True, location=None)
+    loop_var = VarAST(name="i", location=None)
+    end_expr = BinaryExprAST(
+        lhs=BinaryExprAST(
+            lhs=BinaryExprAST(lhs=size, op="add", rhs=pad, location=None),
+            op="floordiv",
+            rhs=stride,
+            location=None,
+        ),
+        op="add",
+        rhs=ConstAST(1),
+        location=None,
+    )
+    loop = ForAST(
+        var=loop_var,
+        start=start,
+        end=end_expr,
+        step=stride,
+        body=BlockAST([]),
+        location=None,
+    )
+    start_type = SymbolValueType.from_expr("START")
+    size_type = SymbolValueType.from_expr("H")
+    pad_type = SymbolValueType.from_expr("PAD")
+    stride_type = SymbolValueType.from_expr("STRIDE")
+    block = Block(arg_types=[start_type, size_type, pad_type, stride_type])
+    ctx = EmitContext(
+        builder=block,
+        symbols={
+            "start": block.args[0],
+            "size": block.args[1],
+            "pad": block.args[2],
+            "stride": block.args[3],
+        },
+        types={
+            _expr_cache_key(start): start_type,
+            _expr_cache_key(size): size_type,
+            _expr_cache_key(pad): pad_type,
+            _expr_cache_key(stride): stride_type,
+        },
+    )
+    emit_mlir(start, ctx)
+    emit_mlir(size, ctx)
+    emit_mlir(pad, ctx)
+    emit_mlir(stride, ctx)
+
+    emit_mlir(loop, ctx)
+    body_ops = list(block.ops)
+
+    assert any(isinstance(op, SymbolAddOp) for op in body_ops)
+    assert any(isinstance(op, SymbolFloorDivOp) for op in body_ops)
+    assert any(isinstance(op, SymbolForOp) for op in body_ops)
+
+
+# EMIT-CALL-SYMBOL-006
 # 创建者: jcc你莫辜负
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
@@ -200,5 +279,5 @@ def test_emit_mlir_rejects_invalid_tensor_axis_kind() -> None:
     ctx = EmitContext(builder=block, symbols={"x": block.args[0]}, types={_expr_cache_key(tensor): tensor_type})
     emit_mlir(tensor, ctx)
 
-    with pytest.raises(ValueError, match="Unsupported tensor axis access kind"):
+    with pytest.raises(KernelCodeError, match="Unsupported tensor axis access kind"):
         emit_mlir(TensorAxisAccessAST(tensor=tensor, kind="bad", axis=ConstAST(0), location=None), ctx)

@@ -31,6 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.nn import (
     NnMemorySpaceAttr,
     NnMemoryType,
@@ -38,7 +39,7 @@ from kernel_gen.dialect.nn import (
     NnReduceMinOp,
     NnReduceSumOp,
 )
-from kernel_gen.passes.lowering.nn_lowering import NnLoweringError, NnLoweringPass
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.tools.ircheck import run_ircheck_text
 
 GLOBAL_SPACE = "#nn.space<global>"
@@ -411,7 +412,7 @@ REDUCE_MISMATCH_CASES = [
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 功能说明: 验证 reduce family 输出形态不一致时必须抛 NnLoweringError。
+# 功能说明: 验证 reduce family 输出形态不一致时必须抛 KernelCodeError。
 # 测试目的: 统一覆盖 sum/min/max 的 shape mismatch 负例，避免三份重复测试文件。
 # 使用示例: pytest -q test/pass/nn_lowering/test_reduce_lowering.py -k test_nn_lowering_reduce_shape_mismatch
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
@@ -426,7 +427,7 @@ def test_nn_lowering_reduce_shape_mismatch(op_cls: type[object], kind: str) -> N
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 构造输入输出形状不一致的 reduce module，并断言 `NnLoweringError` 直接抛出。
+    - 构造输入输出形状不一致的 reduce module，并断言 `KernelCodeError` 直接抛出。
     - 将 sum/min/max 的同类负例收拢到一个参数化测试中，避免重复维护三份几乎一样的用例。
 
     使用示例:
@@ -441,5 +442,5 @@ def test_nn_lowering_reduce_shape_mismatch(op_cls: type[object], kind: str) -> N
     input_type = _make_memory_type([4, 8])
     result_type = _make_memory_type([4, 2])
     module = _build_reduce_module(op_cls, f"reduce_{kind}_bad_shape", input_type, result_type)
-    with pytest.raises(NnLoweringError):
+    with pytest.raises(KernelCodeError):
         NnLoweringPass().run(module)

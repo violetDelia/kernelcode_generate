@@ -20,18 +20,16 @@ API 列表:
 """
 
 from __future__ import annotations
+from typing import TYPE_CHECKING
+
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from kernel_gen.dsl.ast import ForAST
 
-from .context import EmitContext
+if TYPE_CHECKING:
+    from . import EmitContext
 
 
-class LoweringError(ValueError):
-    """当前文件内使用的控制流 emit 失败错误。"""
-
-    def __init__(self, message: str, location: object | None = None) -> None:
-        super().__init__(message)
-        self.location = location
 
 
 def emit_for(node: ForAST, ctx: EmitContext) -> object:
@@ -60,7 +58,7 @@ def emit_for(node: ForAST, ctx: EmitContext) -> object:
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/control_flow.py](kernel_gen/dsl/mlir_gen/emit/control_flow.py)
     """
     if not isinstance(node, ForAST):
-        raise LoweringError("emit_for expects ForAST", location=getattr(node, "location", None))
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "emit_for expects ForAST", location=getattr(node, "location", None))
     from . import emit_mlir as public_emit_mlir
 
     return public_emit_mlir(node, ctx)
@@ -93,4 +91,4 @@ def emit_control_flow(node: object, ctx: EmitContext) -> object:
     """
     if isinstance(node, ForAST):
         return emit_for(node, ctx)
-    raise LoweringError("emit_control_flow only handles ForAST", location=getattr(node, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "emit_control_flow only handles ForAST", location=getattr(node, "location", None))

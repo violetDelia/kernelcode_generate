@@ -1,11 +1,10 @@
 """pass package.
 
 创建者: 李白
-最后一次更改: 金铲铲大作战
+最后一次更改: 大闸蟹
 
 功能说明:
 - 暴露 Pass 管理相关实现。
-- 暴露 passes 共享显式错误 `PassContractError`。
 - 暴露 `inline` 的公开入口。
 - 暴露 `attach-arch-information` 的公开入口。
 - 暴露 `buffer-results-to-out-params` 的公开入口。
@@ -27,7 +26,6 @@ API 列表:
 - `PassManager.run(self: PassManager, target: object) -> object`
 - `class InlinePass()`
 - `class AttachArchInformationPass(target: str = "npu_demo")`
-- `class PassContractError(message: str)`
 - `class BufferResultsToOutParamsPass()`
 - `class BufferResultsToOutParamsCallPattern(targets: dict[str, RewriteTarget])`
 - `class BufferResultsToOutParamsFuncPattern(targets: dict[str, RewriteTarget])`
@@ -53,13 +51,12 @@ API 列表:
 - `class TileReducePass()`
 - `get_tile_reduce_pass_patterns() -> list[RewritePattern]`
 - `class SymbolLoopHoistPass()`
-- `class SymbolLoopHoistError(message: str)`
 
 使用示例:
 - import importlib
 - pass_module = importlib.import_module("kernel_gen.passes.pass_manager")
 - Pass, PassManager = pass_module.Pass, pass_module.PassManager
-- from kernel_gen.passes import BufferResultsToOutParamsPass, DecompassPass, PassContractError
+- from kernel_gen.passes import BufferResultsToOutParamsPass, DecompassPass
 - buffer_pass = BufferResultsToOutParamsPass()
 - decompass_pass = DecompassPass()
 - from kernel_gen.passes import InlinePass
@@ -121,7 +118,6 @@ from .buffer_results_to_out_params import (
     get_buffer_results_to_out_params_pass_patterns,
 )
 from .attach_arch_information import AttachArchInformationPass
-from .common import PassContractError
 from .decompass import (
     DecompassPass,
     NnSoftmaxDecompPattern,
@@ -151,14 +147,13 @@ from .tile.elewise import (
 from .tile.reduce import TileReducePass
 from .tile.reduce import TileReduceMatmulPattern, get_tile_reduce_pass_patterns
 from .pass_manager import Pass, PassManager
-from .symbol_loop_hoist import SymbolLoopHoistError, SymbolLoopHoistPass
+from .symbol_loop_hoist import SymbolLoopHoistPass
 
 __all__ = [
     "Pass",
     "PassManager",
     "InlinePass",
     "AttachArchInformationPass",
-    "PassContractError",
     "BufferResultsToOutParamsPass",
     "BufferResultsToOutParamsCallPattern",
     "BufferResultsToOutParamsFuncPattern",
@@ -184,5 +179,4 @@ __all__ = [
     "TileReducePass",
     "get_tile_reduce_pass_patterns",
     "SymbolLoopHoistPass",
-    "SymbolLoopHoistError",
 ]

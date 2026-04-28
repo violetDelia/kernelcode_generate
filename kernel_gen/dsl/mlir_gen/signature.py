@@ -21,6 +21,7 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 import re
 
@@ -54,12 +55,6 @@ from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 
-class LoweringError(ValueError):
-    """当前文件内使用的 signature 失败错误。"""
-
-    def __init__(self, message: str, location: object | None = None) -> None:
-        super().__init__(message)
-        self.location = location
 
 
 def _expr_key(expr: object) -> int:
@@ -208,7 +203,7 @@ def _apply_symbolic_index_binary_op(
     if op == "div":
         if isinstance(lhs_value, int) and isinstance(rhs_value, int):
             if rhs_value == 0:
-                raise LoweringError("Unsupported index expression", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
             return lhs_value / rhs_value
         if isinstance(lhs_value, int):
             lhs_value = SymbolDim(lhs_value)
@@ -216,12 +211,12 @@ def _apply_symbolic_index_binary_op(
     if op == "floordiv":
         if isinstance(lhs_value, int) and isinstance(rhs_value, int):
             if rhs_value == 0:
-                raise LoweringError("Unsupported index expression", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
             return lhs_value // rhs_value
         if isinstance(lhs_value, int):
             lhs_value = SymbolDim(lhs_value)
         return lhs_value // rhs_value
-    raise LoweringError("Unsupported index expression", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
 
 
 def _resolve_symbolic_index_value(
@@ -237,7 +232,7 @@ def _resolve_symbolic_index_value(
             return expr.value
         if isinstance(expr.value, str):
             return SymbolDim(expr.value)
-        raise LoweringError("Index must be int or str", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index must be int or str", location=expr.location)
     if isinstance(expr, ScalarArgAST):
         if runtime_values is not None and expr.name in runtime_values:
             runtime_value = runtime_values[expr.name]
@@ -258,7 +253,7 @@ def _resolve_symbolic_index_value(
         return expr
     if isinstance(expr, str):
         return SymbolDim(expr)
-    raise LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location or getattr(expr, "location", None))
 
 
 def _build_dma_alloc_only_result_type(
@@ -306,7 +301,7 @@ def _build_dma_alloc_only_result_type(
         normalized_stride = list(Memory(shape, alloc_expr.dtype, stride=stride).stride.get_values())
         default_stride = list(Memory(shape, alloc_expr.dtype).stride.get_values())
         if normalized_stride != default_stride:
-            raise LoweringError("dma.alloc only supports contiguous stride", location=alloc_expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "dma.alloc only supports contiguous stride", location=alloc_expr.location)
     memory = Memory(shape, alloc_expr.dtype, space=alloc_expr.space, stride=stride)
     return memory_type_from_memory(memory)
 
@@ -337,7 +332,7 @@ def _build_signature_types(
 
     is_symbol_scalar_function = _is_symbol_scalar_function(func_ast)
     if runtime_args is not None and len(runtime_args) != len(func_ast.inputs):
-        raise LoweringError("runtime_args must align with func_ast inputs", location=func_ast.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "runtime_args must align with func_ast inputs", location=func_ast.location)
 
     arg_types: list[object] = []
     type_map: dict[int, object] = {}
@@ -350,15 +345,15 @@ def _build_signature_types(
             tensor_input_count += 1
         elif isinstance(item, ScalarArgAST):
             if item.value_type is not int:
-                raise LoweringError("Unsupported scalar argument type", location=item.location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported scalar argument type", location=item.location)
             if runtime_args is not None:
                 if not isinstance(runtime_arg, (int, SymbolDim)):
-                    raise LoweringError("Unsupported scalar argument type", location=item.location)
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported scalar argument type", location=item.location)
             runtime_expr = _symbol_expr_from_runtime_arg(runtime_arg)
             if allow_dma_alloc_only:
                 if runtime_args is not None:
                     if runtime_expr is None:
-                        raise LoweringError("Unsupported scalar argument type", location=item.location)
+                        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported scalar argument type", location=item.location)
                     arg_type = SymbolValueType.from_expr(runtime_expr)
                 else:
                     arg_type = SymbolValueType.from_expr(item.name)
@@ -369,14 +364,14 @@ def _build_signature_types(
             else:
                 arg_type = i32
         else:
-            raise LoweringError("Unsupported input type", location=getattr(item, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported input type", location=getattr(item, "location", None))
         arg_types.append(arg_type)
         type_map[_expr_key(item)] = arg_type
 
     if func_ast.inputs and tensor_input_count == 0 and not is_symbol_scalar_function and not allow_dma_alloc_only:
         statements = getattr(func_ast.body, "statements", None)
         if not statements:
-            raise LoweringError("At least one tensor input is required", location=func_ast.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "At least one tensor input is required", location=func_ast.location)
     return arg_types, type_map
 
 
@@ -418,7 +413,7 @@ def _allow_mixed_dtype_return(
         return False
     try:
         target_type = infer_expr_type(return_expr, dict(type_map))
-    except LoweringError:
+    except KernelCodeError:
         return False
     return (
         isinstance(target_type, NnMemoryType)
@@ -560,22 +555,22 @@ def _validate_return_type(
     if not func_ast.outputs:
         return
     if len(func_ast.outputs) != 1:
-        raise LoweringError("Only single return value is supported", location=func_ast.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Only single return value is supported", location=func_ast.location)
     output = func_ast.outputs[0]
     if isinstance(output, TensorAST):
         expected_type = memory_type_from_memory(output.memory)
         if not isinstance(result_type, NnMemoryType):
-            raise LoweringError("Return type does not match annotation", location=func_ast.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Return type does not match annotation", location=func_ast.location)
         shape_matches = _shape_annotation_matches(result_type, expected_type)
         if not shape_matches and isinstance(return_expr, DmaFlattenAST):
             shape_matches = _flatten_numel_annotation_matches(result_type, expected_type)
         if not shape_matches:
-            raise LoweringError("Return type does not match annotation", location=func_ast.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Return type does not match annotation", location=func_ast.location)
         if result_type.element_type != expected_type.element_type:
             if return_expr is not None and type_map is not None:
                 if _allow_mixed_dtype_return(return_expr, type_map, result_type, expected_type):
                     return
-            raise LoweringError("Return type does not match annotation", location=func_ast.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Return type does not match annotation", location=func_ast.location)
         return
     elif isinstance(output, ScalarArgAST):
         if output.value_type is bool:
@@ -597,13 +592,13 @@ def _validate_return_type(
             if isinstance(return_expr, SymbolToFloatAST):
                 expected_type = f32
             else:
-                raise LoweringError("Unsupported scalar return type", location=output.location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported scalar return type", location=output.location)
         else:
-            raise LoweringError("Unsupported scalar return type", location=output.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported scalar return type", location=output.location)
     else:
-        raise LoweringError("Unsupported return annotation type", location=getattr(output, "location", None))
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported return annotation type", location=getattr(output, "location", None))
     if result_type != expected_type:
-        raise LoweringError("Return type does not match annotation", location=func_ast.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Return type does not match annotation", location=func_ast.location)
 
 
 def _function_has_value_return(func_ast: FunctionAST) -> bool:

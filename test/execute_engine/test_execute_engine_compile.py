@@ -34,6 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.execute_engine import (
     FAILURE_COMPILE_FAILED,
     FAILURE_RUNTIME_THROW_OR_ABORT,
@@ -42,7 +43,6 @@ from kernel_gen.execute_engine import (
     FAILURE_TARGET_HEADER_MISMATCH,
     CompileRequest,
     ExecutionEngine,
-    ExecutionEngineError,
 )
 from kernel_gen.execute_engine.compiler import build_compile_unit
 from kernel_gen.execute_engine.entry_shim_builder import (
@@ -63,7 +63,7 @@ from kernel_gen.execute_engine.target_registry import target_includes
 # 对应测试文件路径: test/execute_engine/test_execute_engine_compile.py
 def test_execute_engine_compile_source_empty_or_invalid() -> None:
     engine = ExecutionEngine(target="cpu")
-    with pytest.raises(ExecutionEngineError) as exc:
+    with pytest.raises(KernelCodeError) as exc:
         engine.compile(source="  ", function="cpu::add")
     assert exc.value.failure_phrase == FAILURE_SOURCE_EMPTY_OR_INVALID
 
@@ -79,7 +79,7 @@ def test_execute_engine_compile_source_empty_or_invalid() -> None:
 # 对应测试文件路径: test/execute_engine/test_execute_engine_compile.py
 def test_execute_engine_compile_function_empty_symbol_resolve_failed() -> None:
     engine = ExecutionEngine(target="cpu")
-    with pytest.raises(ExecutionEngineError) as exc:
+    with pytest.raises(KernelCodeError) as exc:
         engine.compile(source="int main(){}", function=" ")
     assert exc.value.failure_phrase == FAILURE_SYMBOL_RESOLVE_FAILED
 
@@ -95,7 +95,7 @@ def test_execute_engine_compile_function_empty_symbol_resolve_failed() -> None:
 # 对应测试文件路径: test/execute_engine/test_execute_engine_compile.py
 def test_execute_engine_compile_entry_point_empty_symbol_resolve_failed() -> None:
     engine = ExecutionEngine(target="cpu")
-    with pytest.raises(ExecutionEngineError) as exc:
+    with pytest.raises(KernelCodeError) as exc:
         engine.compile(source="int main(){}", function="cpu::add", entry_point=" ")
     assert exc.value.failure_phrase == FAILURE_SYMBOL_RESOLVE_FAILED
 
@@ -112,7 +112,7 @@ def test_execute_engine_compile_entry_point_empty_symbol_resolve_failed() -> Non
 def test_execute_engine_compile_target_header_mismatch_on_source_include_family() -> None:
     engine = ExecutionEngine(target="npu_demo")
     cpu_source = '#include "include/cpu/Memory.h"\nint main(){}'
-    with pytest.raises(ExecutionEngineError) as exc:
+    with pytest.raises(KernelCodeError) as exc:
         engine.compile(source=cpu_source, function="npu_demo::add")
     assert exc.value.failure_phrase == FAILURE_TARGET_HEADER_MISMATCH
 
@@ -129,7 +129,7 @@ def test_execute_engine_compile_target_header_mismatch_on_source_include_family(
 def test_execute_engine_compile_failed_on_error_directive() -> None:
     engine = ExecutionEngine(target="cpu")
     source = "#error force compile failed\nint main(){}"
-    with pytest.raises(ExecutionEngineError) as exc:
+    with pytest.raises(KernelCodeError) as exc:
         engine.compile(source=source, function="cpu::add")
     assert exc.value.failure_phrase == FAILURE_COMPILE_FAILED
 
@@ -213,7 +213,7 @@ def test_execute_engine_compile_close_releases_temp_workdir_and_is_idempotent() 
         kernel.close()
 
         assert not workdir.exists()
-        with pytest.raises(ExecutionEngineError) as exc:
+        with pytest.raises(KernelCodeError) as exc:
             kernel.execute(args=())
         assert exc.value.failure_phrase == FAILURE_RUNTIME_THROW_OR_ABORT
     finally:

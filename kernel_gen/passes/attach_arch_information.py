@@ -24,13 +24,13 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import IntAttr, IntegerAttr, ModuleOp, StringAttr
 from xdsl.passes import ModulePass
 
-from kernel_gen.passes.common import PassContractError
 from kernel_gen.passes.pass_manager import Pass
 from kernel_gen.target import registry as target_registry
 
@@ -59,7 +59,7 @@ class AttachArchInformationPass(Pass, ModulePass):
 
     name = "attach-arch-information"
 
-    def __init__(self: "AttachArchInformationPass", target: str = "npu_demo") -> None:
+    def __init__(self: "AttachArchInformationPass", target: str = "npu_demo", fold: bool = True) -> None:
         """初始化 attach-arch-information pass。
 
         创建者: 金铲铲大作战
@@ -68,10 +68,12 @@ class AttachArchInformationPass(Pass, ModulePass):
         功能说明:
         - 记录当前 attach 的 target 名称。
         - 默认 target 为 `npu_demo`，与当前主线 pytest / pipeline 口径对齐。
+        - `fold` 默认开启，由 PassManager 在 pass 后执行通用 folding sweep。
 
         使用示例:
         - pass_obj = AttachArchInformationPass()
         - pass_obj = AttachArchInformationPass(target="npu_demo")
+        - pass_obj = AttachArchInformationPass(fold=False)
 
         关联文件:
         - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
@@ -79,6 +81,7 @@ class AttachArchInformationPass(Pass, ModulePass):
         - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
         """
 
+        super().__init__(fold=fold)
         self.target = target
 
     @classmethod
@@ -105,12 +108,12 @@ class AttachArchInformationPass(Pass, ModulePass):
 
         unknown = sorted(set(options) - {"target"})
         if unknown:
-            raise PassContractError(
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                 f"AttachArchInformationError: unknown option(s): {', '.join(unknown)}"
             )
         target = options.get("target", "npu_demo")
         if not isinstance(target, str) or not target.strip():
-            raise PassContractError("AttachArchInformationError: target must be non-empty string")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "AttachArchInformationError: target must be non-empty string")
         return cls(target=target)
 
     def _apply_to_module(self: "AttachArchInformationPass", module: ModuleOp) -> None:
@@ -133,7 +136,7 @@ class AttachArchInformationPass(Pass, ModulePass):
         """
 
         if not isinstance(module, ModuleOp):
-            raise PassContractError("AttachArchInformationError: module must be builtin.module")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "AttachArchInformationError: module must be builtin.module")
 
         entry_funcs = [
             op
@@ -141,7 +144,7 @@ class AttachArchInformationPass(Pass, ModulePass):
             if isinstance(op, func.FuncOp) and not getattr(op, "is_declaration", False)
         ]
         if len(entry_funcs) != 1:
-            raise PassContractError(
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                 "AttachArchInformationError: module must contain exactly one non-declaration func.func"
             )
         entry_func = entry_funcs[0]
@@ -149,7 +152,7 @@ class AttachArchInformationPass(Pass, ModulePass):
         all_launch_attr_names = launch_attr_names + ("shared_memory_size",)
 
         if not target_registry.is_arch_op_supported(self.target, "arch.launch"):
-            raise PassContractError(
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                 f"AttachArchInformationError: target {self.target} does not support arch.launch"
             )
 
@@ -159,22 +162,22 @@ class AttachArchInformationPass(Pass, ModulePass):
         ):
             extent = target_registry.get_target_hardware(self.target, hw_key)
             if extent is None:
-                raise PassContractError(
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                     f"AttachArchInformationError: target {self.target} is missing launch extent"
                 )
             if extent <= 0:
-                raise PassContractError(
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                     f"AttachArchInformationError: function {self.target} {attr_name} must be > 0"
                 )
             expected_values[attr_name] = extent
 
         shared_memory_size = target_registry.get_target_hardware(self.target, "sm_memory_size")
         if shared_memory_size is None:
-            raise PassContractError(
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                 f"AttachArchInformationError: target {self.target} is missing launch extent"
             )
         if shared_memory_size < 0:
-            raise PassContractError(
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                 "AttachArchInformationError: function "
                 f"{self.target} shared_memory_size must be >= 0"
             )
@@ -183,7 +186,7 @@ class AttachArchInformationPass(Pass, ModulePass):
         present = [name for name in all_launch_attr_names if name in entry_func.attributes]
         if present:
             if len(present) != len(all_launch_attr_names):
-                raise PassContractError(
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                     "AttachArchInformationError: function "
                     f"{entry_func.sym_name.data} must define launch_block, launch_thread, "
                     "launch_subthread, and shared_memory_size together"
@@ -201,19 +204,19 @@ class AttachArchInformationPass(Pass, ModulePass):
                     try:
                         current_values[attr_name] = int(attr.data)
                     except ValueError as exc:  # pragma: no cover - defensive branch
-                        raise PassContractError(
+                        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                             "AttachArchInformationError: function "
                             f"{entry_func.sym_name.data} {attr_name} must be int-like attribute"
                         ) from exc
                     continue
-                raise PassContractError(
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                     "AttachArchInformationError: function "
                     f"{entry_func.sym_name.data} {attr_name} must be int-like attribute"
                 )
             if tuple(current_values[name] for name in all_launch_attr_names) != tuple(
                 expected_values[name] for name in all_launch_attr_names
             ):
-                raise PassContractError(
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                     "AttachArchInformationError: function "
                     f"{entry_func.sym_name.data} launch extents must match target {self.target}"
                 )
@@ -266,7 +269,7 @@ class AttachArchInformationPass(Pass, ModulePass):
         """
 
         if not isinstance(module, ModuleOp):
-            raise PassContractError("AttachArchInformationError: module must be builtin.module")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "AttachArchInformationError: module must be builtin.module")
         self._apply_to_module(module)
         return module
 

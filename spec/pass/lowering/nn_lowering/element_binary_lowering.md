@@ -56,7 +56,7 @@
 - `memory + memory` 的静态 add/sub 输出只要求收口到 `dma.alloc + kernel.binary_elewise + func.return`；不把 `symbol.get_dim` 视为必现前置行。
 - 结果 shape 含符号维度时，才要求在 `dma.alloc` 前按 rank 顺序生成 `symbol.get_dim`。
 - mixed scalar element binary 需要先物化 `dma.alloc + dma.fill`，再写入 `kernel.binary_elewise`；该路径禁止回退为 `dma.broadcast`。
-- 任何空间、结果类型或 operand 校验失败必须抛出 `NnLoweringError`。
+- 任何空间、结果类型或 operand 校验失败必须抛出 `KernelCodeError`。
 
 ## 公开接口
 

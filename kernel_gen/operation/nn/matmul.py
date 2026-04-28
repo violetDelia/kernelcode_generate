@@ -20,8 +20,8 @@ API 列表:
 
 from __future__ import annotations
 
-from kernel_gen.common.contracts import default_stride
-from kernel_gen.common.errors import _ERROR_TEMPLATE
+from kernel_gen.core.contracts import default_stride
+from kernel_gen.core.contracts import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType

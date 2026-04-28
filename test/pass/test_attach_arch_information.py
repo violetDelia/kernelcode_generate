@@ -37,7 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.passes import PassContractError
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
 
 
@@ -97,7 +97,6 @@ def test_public_import_path_exposes_attach_arch_information_pass_only() -> None:
     attach_module = importlib.import_module("kernel_gen.passes.attach_arch_information")
 
     assert package_module.AttachArchInformationPass is AttachArchInformationPass
-    assert package_module.PassContractError is PassContractError
     assert not hasattr(package_module, "AttachArchInformationError")
     assert not hasattr(attach_module, "AttachArchInformationError")
 
@@ -121,7 +120,7 @@ def test_attach_arch_information_rejects_partial_launch_attrs() -> None:
     func_op.attributes["launch_block"] = IntAttr(1)
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"^AttachArchInformationError: function launch_kernel must define launch_block, launch_thread, launch_subthread, and shared_memory_size together$",
     ):
         AttachArchInformationPass(target="npu_demo").run(module)
@@ -131,7 +130,7 @@ def test_attach_arch_information_rejects_multiple_entry_funcs() -> None:
     module = _make_multi_func_module()
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"^AttachArchInformationError: module must contain exactly one non-declaration func\.func$",
     ):
         AttachArchInformationPass(target="npu_demo").run(module)

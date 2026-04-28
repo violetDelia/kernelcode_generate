@@ -3,7 +3,6 @@ from __future__ import annotations
 from kernel_gen.dialect.kernel import KernelImg2col1dOp
 from kernel_gen.dialect.nn import NnMemoryType
 
-from ....errors import emit_c_error
 from ...register import emit_c_impl
 
 
@@ -23,7 +22,7 @@ def _normalize_out_input_operands(out_value, input_value):
 def _emit_npu_demo_kernel_img2col1d(op: KernelImg2col1dOp, ctx) -> str:
     out_value, input_value = _normalize_out_input_operands(op.out, op.input)
     if not isinstance(input_value.type, NnMemoryType) or not isinstance(out_value.type, NnMemoryType):
-        raise emit_c_error(ctx, op.name, "unsupported op")
+        raise ctx.emit_error(op.name, "unsupported op")
     from ... import emit_c_value
 
     params = [emit_c_value(value, ctx) for value in (op.k, op.s, op.d, op.p_left, op.p_right)]

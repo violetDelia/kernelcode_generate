@@ -25,6 +25,7 @@
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
@@ -41,6 +42,7 @@ from xdsl.rewriter import InsertPoint
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.symbol import (
+    Symbol,
     SymbolAddOp,
     SymbolConstOp,
     SymbolFloorDivOp,
@@ -55,23 +57,6 @@ from kernel_gen.dialect.tuner import TunerParamOp
 from kernel_gen.passes.pass_manager import Pass
 
 
-class SymbolLoopHoistError(ValueError):
-    """symbol-loop-hoist pass 的显式错误。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 统一承载 `SymbolLoopHoist*` 关键短语错误，便于测试稳定匹配。
-
-    使用示例:
-    - raise SymbolLoopHoistError("SymbolLoopHoistVerifierError: ...")
-
-    关联文件:
-    - spec: spec/pass/symbol_loop_hoist.md
-    - test: test/pass/test_symbol_loop_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
-    """
 
 class SymbolConstHoistPattern(RewritePattern):
     """`symbol.const` 外提 pattern。"""
@@ -396,17 +381,20 @@ class SymbolLoopHoistPass(Pass, ModulePass):
         - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
         """
 
+        if ctx.get_optional_dialect(Symbol.name) is None:
+            ctx.load_dialect(Symbol)
         PatternRewriteWalker(
             GreedyRewritePatternApplier(
                 get_symbol_loop_hoist_patterns(),
                 ctx=ctx,
+                folding_enabled=self.fold,
                 dce_enabled=False,
             )
         ).rewrite_module(module)
         try:
             module.verify()
         except VerifyException as exc:
-            raise SymbolLoopHoistError(f"SymbolLoopHoistVerifierError: {exc}") from exc
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"SymbolLoopHoistVerifierError: {exc}") from exc
 
     def run(self: "SymbolLoopHoistPass", module: ModuleOp) -> ModuleOp:
         """兼容旧 Pass 接口的执行入口。
@@ -433,7 +421,6 @@ class SymbolLoopHoistPass(Pass, ModulePass):
         return module
 
 __all__ = [
-    "SymbolLoopHoistError",
     "SymbolLoopHoistPass",
     "SymbolConstHoistPattern",
     "TunerParamHoistPattern",

@@ -15,6 +15,7 @@ API 列表:
 - `template <MemorySpace Space, typename T> KernelContext::get_dynamic_memory() const -> Memory<Space, T>`
 - `npu_demo::thread_id() -> S_INT`
 - `npu_demo::thread_num() -> S_INT`
+- `npu_demo::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) -> void`
 - `template <MemorySpace Space> npu_demo::get_dynamic_memory() -> DynamicMemoryRef<Space>`
 
 helper 清单:
@@ -27,7 +28,7 @@ helper 清单:
 - Status status = npu_demo::launch<1, 4, 1, 0>(kernel_body, output);
 
 创建者: 小李飞刀
-最后修改人: 金铲铲大作战
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
@@ -644,6 +645,25 @@ inline ::DynamicMemoryRef<Space> get_dynamic_memory() {
     return ::DynamicMemoryRef<Space>(&current_kernel_context());
 }
 
+/*
+功能说明:
+- 通过当前 launch 活动上下文执行 barrier，供生成代码以 free helper 形式直接调用。
+
+使用示例:
+- npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
+
+创建者: 大闸蟹
+最后修改人: 大闸蟹
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/test_kernel_context.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+inline void barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) {
+    current_kernel_context().barrier(visibility, scope);
+}
+
 }  // namespace npu_demo
 
 /*
@@ -748,13 +768,14 @@ inline DynamicMemoryRef<Space> get_dynamic_memory() {
 
 /*
 功能说明:
-- 启动一次 npu_demo P0 kernel 执行，并向 callee 注入运行时 KernelContext。
+- 启动一次 npu_demo P0 kernel 执行，并绑定当前线程可见的运行时 KernelContext。
+- callee 可显式接收 `npu_demo::KernelContext&` 首参，也可只接收业务参数并通过 free helper 读取活动上下文。
 
 使用示例:
 - Status status = launch<1, 4, 1, 0>(kernel_body, output);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Arch.md
@@ -767,8 +788,9 @@ inline Status launch(Callable&& callee, Args&&... args) {
         !std::is_convertible<typename std::decay<Callable>::type, const char*>::value,
         "launch callee must be function object, not string");
     static_assert(
-        std::is_invocable<typename std::decay<Callable>::type, npu_demo::KernelContext&, Args...>::value,
-        "launch callee must accept npu_demo::KernelContext& as first argument");
+        std::is_invocable<typename std::decay<Callable>::type, npu_demo::KernelContext&, Args...>::value
+            || std::is_invocable<typename std::decay<Callable>::type, Args...>::value,
+        "launch callee must accept args or npu_demo::KernelContext& plus args");
 
     if constexpr (block <= 0 || thread <= 0 || subthread <= 0 || shared_memory_size < 0) {
         return StatusCode::kError;
@@ -800,7 +822,11 @@ inline Status launch(Callable&& callee, Args&&... args) {
             npu_demo::detail::ScopedActiveKernelContext scoped_active_ctx(&ctx);
             std::apply(
                 [&](auto&... unpacked_args) {
-                    callable(ctx, unpacked_args...);
+                    if constexpr (std::is_invocable<decltype(callable)&, npu_demo::KernelContext&, decltype(unpacked_args)...>::value) {
+                        callable(ctx, unpacked_args...);
+                    } else {
+                        callable(unpacked_args...);
+                    }
                 },
                 forwarded_args);
         });

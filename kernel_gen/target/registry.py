@@ -1,7 +1,7 @@
 """Target registry definitions.
 
 创建者: 我不是牛马
-最后一次更改: 金铲铲大作战
+最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 定义 target 注册与查询入口，用于管理 `arch` op 支持矩阵与硬件参数。
@@ -16,7 +16,6 @@ API 列表:
 - `is_arch_op_supported(target: str, op_name: str) -> bool`
 - `get_target_hardware(target: str, key: str) -> int | None`
 - `get_current_target_hardware(key: str) -> int | None`
-- `get_target_analysis_defaults(target: str) -> dict[str, dict[str, int]]`
 
 helper 清单:
 - `_format_error(expected: str, actual: str = _ERROR_ACTUAL) -> str`
@@ -59,7 +58,7 @@ from pathlib import Path
 import json
 import re
 
-from kernel_gen.common.errors import _ERROR_TEMPLATE
+from kernel_gen.core.contracts import _ERROR_TEMPLATE
 
 _ALLOWED_ROOT_FIELDS = {"name", "arch", "hardware"}
 _ALLOWED_ARCH_FIELDS = {"supported_ops", "unsupported_ops"}
@@ -88,42 +87,6 @@ _DEFAULT_CPU_HARDWARE = {
     "tlm1_memory_size": 0,
     "tlm2_memory_size": 0,
     "tlm3_memory_size": 0,
-}
-_DEFAULT_NPU_DEMO_ANALYSIS_DEFAULTS = {
-    "path_bandwidth": {
-        "GM->GM": 64,
-        "GM->LM": 64,
-        "LM->GM": 64,
-        "GM->SM": 96,
-        "SM->LM": 48,
-        "GM->TSM": 32,
-        "TSM->TLM": 16,
-        "FM->TSM": 32,
-        "GM->compute": 64,
-        "compute->GM": 64,
-        "LM->compute": 48,
-        "compute->LM": 48,
-    },
-    "path_latency_ns": {
-        "GM->GM": 20,
-        "GM->LM": 20,
-        "LM->GM": 20,
-        "GM->SM": 18,
-        "SM->LM": 12,
-        "GM->TSM": 24,
-        "TSM->TLM": 8,
-        "FM->TSM": 16,
-        "GM->compute": 20,
-        "compute->GM": 20,
-        "LM->compute": 12,
-        "compute->LM": 12,
-    },
-    "theoretical_compute": {
-        "scalar": 1,
-        "vector": 8,
-        "tensor": 64,
-        "math": 1,
-    },
 }
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
@@ -202,13 +165,6 @@ class TargetSpec:
 
 _TARGET_REGISTRY: dict[str, TargetSpec] = {}
 _CURRENT_TARGET: str | None = None
-_TARGET_ANALYSIS_DEFAULTS: dict[str, dict[str, dict[str, int]]] = {
-    "npu_demo": {
-        "path_bandwidth": dict(_DEFAULT_NPU_DEMO_ANALYSIS_DEFAULTS["path_bandwidth"]),
-        "path_latency_ns": dict(_DEFAULT_NPU_DEMO_ANALYSIS_DEFAULTS["path_latency_ns"]),
-        "theoretical_compute": dict(_DEFAULT_NPU_DEMO_ANALYSIS_DEFAULTS["theoretical_compute"]),
-    }
-}
 
 
 def _validate_target_name(name: str) -> None:
@@ -863,33 +819,6 @@ def get_target_hardware(target: str, key: str) -> int | None:
     return _TARGET_REGISTRY[target].hardware.get(key)
 
 
-def get_target_analysis_defaults(target: str) -> dict[str, dict[str, int]]:
-    """读取指定 target 的 analysis 默认参数。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 返回 `path_bandwidth/path_latency_ns/theoretical_compute` 三类 analysis 默认参数。
-    - 当前正式收口到 `npu_demo`，其它 target 若无定义则返回空字典。
-
-    使用示例:
-    - defaults = get_target_analysis_defaults("npu_demo")
-
-    关联文件:
-    - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
-    - 功能实现: kernel_gen/target/registry.py
-    """
-
-    if target not in _TARGET_REGISTRY:
-        _raise_value_error(f"target not registered: {target}")
-    defaults = _TARGET_ANALYSIS_DEFAULTS.get(target)
-    if defaults is None:
-        return {}
-    return {key: dict(value) for key, value in defaults.items()}
-
-
 def _set_current_target(target: str | None) -> None:
     """设置当前启用的 target 名称。
 
@@ -1012,7 +941,6 @@ _ensure_npu_demo_target()
 __all__ = [
     "TargetSpec",
     "get_current_target",
-    "get_target_analysis_defaults",
     "get_current_target_hardware",
     "get_target_hardware",
     "is_arch_op_supported",

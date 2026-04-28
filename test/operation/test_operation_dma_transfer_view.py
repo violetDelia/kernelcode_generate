@@ -104,7 +104,7 @@ def test_store_size_mismatch() -> None:
     src = Memory([16, 16], NumericType.Float32)
     dst = Memory(["M", "N"], NumericType.Float32)
     with pytest.raises(ValueError):
-        store(src, dst, offsets=[0, 0], sizes=[32, 32], strides=[1, 1])
+        store(dst, src, offsets=[0, 0], sizes=[32, 32], strides=[1, 1])
 
 
 # TC-OP-DMA-025
@@ -121,9 +121,9 @@ def test_store_dtype_mismatch() -> None:
     src = Memory([16, 16], NumericType.Float32)
     dst = Memory(["M", "N"], NumericType.Float16)
     with pytest.raises(TypeError):
-        store(src, dst, offsets=[0, 0], sizes=[16, 16], strides=[1, 1])
+        store(dst, src, offsets=[0, 0], sizes=[16, 16], strides=[1, 1])
     with pytest.raises(TypeError):
-        deslice(src, dst, offsets=[0, 0], sizes=[16, 16], strides=[1, 1])
+        deslice(dst, src, offsets=[0, 0], sizes=[16, 16], strides=[1, 1])
 
 
 # TC-OP-DMA-026
@@ -139,7 +139,7 @@ def test_store_dtype_mismatch() -> None:
 def test_store_success() -> None:
     src = Memory([16, 16], NumericType.Float32)
     dst = Memory([32, 32], NumericType.Float32)
-    result = store(src, dst, offsets=[0, 0], sizes=[16, 16], strides=[1, 1])
+    result = store(dst, src, offsets=[0, 0], sizes=[16, 16], strides=[1, 1])
     assert result is None
 
 
@@ -157,7 +157,7 @@ def test_deslice_size_mismatch() -> None:
     src = Memory([16, 16], NumericType.Float32)
     dst = Memory(["M", "N"], NumericType.Float32)
     with pytest.raises(ValueError):
-        deslice(src, dst, offsets=[0, 0], sizes=[32, 32], strides=[1, 1])
+        deslice(dst, src, offsets=[0, 0], sizes=[32, 32], strides=[1, 1])
 
 
 # TC-OP-DMA-007
@@ -227,7 +227,7 @@ def test_dma_type_error() -> None:
     with pytest.raises(TypeError, match="Memory"):
         load("source", offsets=[0, 0], sizes=[1, 1], strides=[1, 1])
     with pytest.raises(TypeError, match="Memory"):
-        store(dst, "target", offsets=[0, 0], sizes=[1, 1], strides=[1, 1])
+        store("target", dst, offsets=[0, 0], sizes=[1, 1], strides=[1, 1])
 
 
 # TC-OP-DMA-014
@@ -354,7 +354,7 @@ def test_dma_access_region_helpers_share_unified_validation_entry(monkeypatch: p
     monkeypatch.setattr(dma_api, "_normalize_and_validate_access_region", fake_normalize_and_validate_access_region)
 
     load(source, offsets=[0, 0], sizes=[2, 2], strides=[1, 1], space=MemorySpace.SM)
-    store(tile, target, offsets=[0, 0], sizes=[2, 2], strides=[1, 1])
+    store(target, tile, offsets=[0, 0], sizes=[2, 2], strides=[1, 1])
     slice(source, offsets=[0, 0], sizes=[2, 2], strides=[1, 1], space=MemorySpace.LM)
     view(source, offset=[0, 0], size=[2, 2], stride=[1, 1])
 

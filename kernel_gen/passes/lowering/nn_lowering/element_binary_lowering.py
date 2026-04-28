@@ -22,6 +22,7 @@
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.dialects.builtin import IntAttr, StringAttr
 from xdsl.ir import Block, Operation, SSAValue
@@ -55,7 +56,6 @@ from kernel_gen.dialect.symbol import (
     SymbolValueType,
 )
 from .nn_lowering_utility import (
-    NnLoweringError,
     ensure_expected_op_name,
     ensure_operand_count,
     ensure_single_result,
@@ -80,7 +80,7 @@ def _select_memory_operand(op: Operation) -> SSAValue:
 
     功能说明:
     - 从 operands 中选择第一个 nn.memory 作为 shape 来源。
-    - 若不存在 nn.memory 则抛出 NnLoweringError。
+    - 若不存在 nn.memory 则抛出 KernelCodeError。
 
     使用示例:
     - shape_source = _select_memory_operand(op)
@@ -95,7 +95,7 @@ def _select_memory_operand(op: Operation) -> SSAValue:
         value = SSAValue.get(operand)
         if isinstance(value.type, NnMemoryType):
             return value
-    raise NnLoweringError("nn element binary requires at least one nn.memory operand")
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary requires at least one nn.memory operand")
 
 
 def _build_alloc_dynamic_shape_from_source(
@@ -110,7 +110,7 @@ def _build_alloc_dynamic_shape_from_source(
     功能说明:
     - 逐维使用 symbol.get_dim 读取 shape 对应维度。
     - 禁止结果 shape 包含匿名维度 '?'。
-    - source 与 result rank 不一致时抛出 NnLoweringError。
+    - source 与 result rank 不一致时抛出 KernelCodeError。
 
     使用示例:
     - ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(source, result_type)
@@ -123,9 +123,9 @@ def _build_alloc_dynamic_shape_from_source(
 
     source_type = source.type
     if not isinstance(source_type, NnMemoryType):
-        raise NnLoweringError("dynamic_shape source must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "dynamic_shape source must be nn.memory")
     if len(source_type.shape.data) != len(result_type.shape.data):
-        raise NnLoweringError("nn element binary operand/result rank mismatch")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary operand/result rank mismatch")
 
     ops: list[Operation] = []
     operands: list[SSAValue] = []
@@ -133,12 +133,12 @@ def _build_alloc_dynamic_shape_from_source(
     for dim in result_type.shape.data:
         if isinstance(dim, StringAttr):
             if dim.data == "?":
-                raise NnLoweringError("nn element binary result shape must not contain '?'")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary result shape must not contain '?'")
             has_dynamic = True
             continue
         if isinstance(dim, IntAttr):
             continue
-        raise NnLoweringError("nn element binary result shape must be int or symbol")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary result shape must be int or symbol")
 
     if not has_dynamic:
         return ops, operands
@@ -174,11 +174,11 @@ def _materialize_element_binary_scalar_operand(
     """
 
     if not isinstance(source_type, NnMemoryType):
-        raise NnLoweringError("compare materialize source must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "compare materialize source must be nn.memory")
     if isinstance(scalar.type, SymbolValueType):
         pass
     elif source_type.element_type != scalar.type:
-        raise NnLoweringError("nn element binary scalar type mismatch")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary scalar type mismatch")
     alloc = DmaAllocOp(dynamic_shape, source_type)
     fill = DmaFillOp(alloc.result, scalar)
     return [alloc, fill], alloc.result
@@ -208,11 +208,11 @@ def _materialize_compare_scalar_operand(
     """
 
     if not isinstance(source_type, NnMemoryType):
-        raise NnLoweringError("compare materialize source must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "compare materialize source must be nn.memory")
     if isinstance(scalar.type, SymbolValueType):
         pass
     elif source_type.element_type != scalar.type:
-        raise NnLoweringError("nn compare scalar type mismatch")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn compare scalar type mismatch")
     alloc = DmaAllocOp(dynamic_shape, source_type)
     broadcast = DmaBroadcastOp(alloc.result, scalar)
     return [alloc, broadcast], alloc.result
@@ -319,23 +319,23 @@ def _lower_element_binary_op(
     if is_compare:
         if lhs_is_memory and rhs_is_memory:
             if lhs_value.type.shape != rhs_value.type.shape:
-                raise NnLoweringError("nn op operands must have the same shape")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op operands must have the same shape")
         elif lhs_is_memory and not rhs_is_memory:
             pass
         elif rhs_is_memory and not lhs_is_memory:
             pass
         else:
-            raise NnLoweringError("nn compare must provide at least one nn.memory operand")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn compare must provide at least one nn.memory operand")
     else:
         if lhs_is_memory and rhs_is_memory:
             if lhs_value.type.shape != rhs_value.type.shape:
-                raise NnLoweringError("nn op operands must have the same shape")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op operands must have the same shape")
         elif lhs_is_memory and not rhs_is_memory:
             pass
         elif rhs_is_memory and not lhs_is_memory:
             pass
         else:
-            raise NnLoweringError("nn element binary must provide at least one nn.memory operand")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary must provide at least one nn.memory operand")
 
     shape_source = _select_memory_operand(op)
     shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(shape_source, result_type)
@@ -372,7 +372,7 @@ def _lower_element_binary_op(
         alloc.verify()
         kernel_op.verify()
     except VerifyException as exc:
-        raise NnLoweringError(str(exc)) from exc
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, str(exc)) from exc
 
     block.insert_ops_before([*shape_ops, alloc, *extra_ops, kernel_op], op)
     op.results[0].replace_all_uses_with(alloc.result)
@@ -406,7 +406,7 @@ def _lower_typed_element_binary_pattern(
 
     block = op.parent_block()
     if block is None:
-        raise NnLoweringError("nn op must be inside a block")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op must be inside a block")
     ensure_expected_op_name(op, expected_name)
     _lower_element_binary_op(op, block, kind=kind, is_compare=is_compare)
     rewriter.has_done_action = True

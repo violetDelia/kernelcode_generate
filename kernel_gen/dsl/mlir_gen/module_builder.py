@@ -10,7 +10,7 @@
 
 API 列表:
 - 无；当前文件仅提供 `kernel_gen.dsl.mlir_gen` 包根公开
-  `MlirGenModuleError(...)` / `mlir_gen(...)` 的内部实现拆分。
+  `mlir_gen(...)` 的内部实现拆分。
 
 使用示例:
 - from kernel_gen.dsl.mlir_gen import mlir_gen
@@ -23,6 +23,7 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 import inspect
 import re
@@ -47,10 +48,8 @@ from xdsl.dialects.builtin import (
 
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
-from kernel_gen.dsl.ast import AstParseError
-from kernel_gen.dsl.ast.visitor import AstVisitorError
 from kernel_gen.dsl.ast.parser import parse_function_with_env
-from kernel_gen.dsl.mlir_gen.function_builder import build_func_op_from_ast
+from kernel_gen.dsl.mlir_gen.function_builder import _build_func_op_from_ast_impl
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
@@ -60,18 +59,20 @@ _CALLEE_COMPILER_CONFIG_KEY = "__mlir_gen_callee_compiler__"
 
 
 def _raise_visitor_error_from_parse_error(
-    exc: AstParseError,
+    exc: KernelCodeError,
     *,
     value_messages: tuple[str, ...] = (),
 ) -> None:
-    """把 AstParseError 翻译为当前文件沿用的公开错误合同。"""
+    """把 AST 解析错误翻译为当前文件沿用的公开错误合同。"""
 
-    location = exc.diagnostics[0].location if exc.diagnostics else None
-    if exc.message in value_messages:
-        raise ValueError(exc.message) from exc
-    if exc.message.endswith("space must be MemorySpace") or exc.message == "cast dtype must be NumericType":
-        raise TypeError(exc.message) from exc
-    raise AstVisitorError(exc.message, location=location) from exc
+    diagnostics = getattr(exc, "diagnostics", ())
+    location = diagnostics[0].location if diagnostics else getattr(exc, "location", None)
+    message = exc.message()
+    if message in value_messages:
+        raise ValueError(message) from exc
+    if message.endswith("space must be MemorySpace") or message == "cast dtype must be NumericType":
+        raise TypeError(message) from exc
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, message, location=location) from exc
 
 
 def _build_parse_environment(
@@ -198,7 +199,7 @@ def _shape_attr_to_symbol_dim(entry: IntAttr | StringAttr, location: object | No
         return SymbolDim(entry.data)
     if isinstance(entry, StringAttr) and entry.data != "?":
         return SymbolDim(entry.data)
-    raise MlirGenModuleError("unsupported callee function")
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "unsupported callee function")
 
 
 def _xdsl_element_type_to_numeric_type(element_type: object) -> NumericType:
@@ -250,7 +251,7 @@ def _xdsl_element_type_to_numeric_type(element_type: object) -> NumericType:
             return NumericType.Int32
         if width == 64:
             return NumericType.Int64
-    raise MlirGenModuleError("unsupported callee function")
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "unsupported callee function")
 
 
 def _nn_memory_type_to_runtime_memory(memory_type: NnMemoryType, location: object | None) -> Memory:
@@ -287,52 +288,28 @@ def _nn_memory_type_to_runtime_memory(memory_type: NnMemoryType, location: objec
     }
     space = space_map.get(space_name)
     if space is None:
-        raise MlirGenModuleError("unsupported callee function")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "unsupported callee function")
     return Memory(shape, dtype, space=space, stride=stride)
 
 
-class MlirGenModuleError(ValueError):
-    """`mlir_gen(...)` module 组装阶段错误。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 统一承载 `mlir_gen(...)` 公开合同中的失败短语。
-    - 当前固定短语为：
-      - `MlirGenModuleError: unsupported callee function`
-      - `MlirGenModuleError: recursive callee graph is not supported`
-      - `MlirGenModuleError: inconsistent callee signature`
-
-    使用示例:
-    - raise MlirGenModuleError("unsupported callee function")
-
-    关联文件:
-    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
-    - test: [test/dsl/mlir_gen/test_module_builder.py](test/dsl/mlir_gen/test_module_builder.py)
-    - 功能实现: [kernel_gen/dsl/mlir_gen/module_builder.py](kernel_gen/dsl/mlir_gen/module_builder.py)
-    """
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(f"MlirGenModuleError: {reason}")
 
 
-def _reraise_module_error_from_ast_visitor_error(exc: AstVisitorError) -> None:
+def _reraise_module_error_from_ast_error(exc: KernelCodeError) -> None:
     """把 `build_func_op_from_ast(...)` 折返出的模块错误恢复为公开模块错误。
 
     创建者: 金铲铲大作战
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - `AstVisitor` 会把任意 `ValueError` 折返成 `AstVisitorError`。
-    - 当 message 已经是 `MlirGenModuleError: ...` 时，这里恢复成公开 `MlirGenModuleError`，
+    - `AstVisitor` 会把任意 `ValueError` 折返成 `KernelCodeError`。
+    - 当 message 已经是 `MlirGenModuleError: ...` 时，这里恢复成 `mlir_gen` 模块错误，
       以保持 `mlir_gen(...)` 对外的稳定错误合同。
 
     使用示例:
     - try:
     -     build_func_op_from_ast(func_ast)
-    - except AstVisitorError as exc:
-    -     _reraise_module_error_from_ast_visitor_error(exc)
+    - except KernelCodeError as exc:
+    -     _reraise_module_error_from_ast_error(exc)
 
     关联文件:
     - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
@@ -341,9 +318,10 @@ def _reraise_module_error_from_ast_visitor_error(exc: AstVisitorError) -> None:
     """
 
     prefix = "MlirGenModuleError: "
-    if not exc.message.startswith(prefix):
+    message = exc.message()
+    if not message.startswith(prefix):
         raise exc
-    raise MlirGenModuleError(exc.message.removeprefix(prefix)) from exc
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, message.removeprefix(prefix)) from exc
 
 
 def _is_supported_python_callee(fn: object) -> bool:
@@ -415,7 +393,7 @@ def _runtime_args_from_callee_signature(
         if arg_type == i32:
             runtime_args.append(0)
             continue
-        raise MlirGenModuleError("unsupported callee function")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "unsupported callee function")
     return runtime_args
 
 
@@ -424,7 +402,6 @@ def mlir_gen(
     *runtime_args: object,
     globals: dict[str, object] | None = None,
     builtins: dict[str, object] | object | None = None,
-    config: dict[str, object] | None = None,
 ) -> ModuleOp:
     """从 Python 根函数生成 `builtin.module`。
 
@@ -432,7 +409,8 @@ def mlir_gen(
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 基于 `build_func_op_from_ast(...)` 生成根函数的 `func.func`，并包装为 `builtin.module`。
+    - 基于内部函数构建流程生成根函数的 `func.func`，并包装为 `builtin.module`。
+    - 不接收公开 `config` 字典；仅保留 callee 收集所需的私有构建状态。
     - 当函数体出现“应当表达为 `func.call` 的 Python callee 调用”时，自动补齐 callee 的 `func.func`。
     - callee 收集范围为从根函数出发的传递闭包，module 内函数顺序为 root + DFS。
     - 递归调用、不一致签名与不支持 callee 形式必须失败并返回固定短语。
@@ -451,7 +429,7 @@ def mlir_gen(
     callee_signatures: dict[object, tuple[object, ...]] = {}
     compiling: set[object] = set()
 
-    lowering_config: dict[str, object] = dict(config or {})
+    lowering_config: dict[str, object] = {}
     lowering_config[_CALLEE_REGISTRY_CONFIG_KEY] = callee_registry
 
     def _ensure_callee_compiled(callee: object, arg_types: list[object], location: object | None) -> None:
@@ -477,15 +455,15 @@ def mlir_gen(
         """
 
         if not _is_supported_python_callee(callee):
-            raise MlirGenModuleError("unsupported callee function")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "unsupported callee function")
 
         signature = tuple(arg_types)
         existing_signature = callee_signatures.get(callee)
         if existing_signature is not None and existing_signature != signature:
-            raise MlirGenModuleError("inconsistent callee signature")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "inconsistent callee signature")
 
         if callee in compiling:
-            raise MlirGenModuleError("recursive callee graph is not supported")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "recursive callee graph is not supported")
         if callee in callee_registry:
             return
 
@@ -496,30 +474,26 @@ def mlir_gen(
             callee_runtime_args = _runtime_args_from_callee_signature(list(signature), location)
             callee_globals, callee_builtins = _build_parse_environment(callee, globals, builtins)
             callee_runtime_table = _build_runtime_table(callee, callee_runtime_args)
-            parse_config: dict[str, object] = dict(config or {})
-            parse_config["reject_external_values"] = True
-            parse_config["allow_python_callee_calls"] = True
             try:
                 callee_ast = parse_function_with_env(
                     callee,
                     globals_table=callee_globals,
                     builtins_table=callee_builtins,
                     runtime_table=callee_runtime_table,
-                    config=parse_config,
                 )
-            except AstParseError as exc:
+            except KernelCodeError as exc:
                 _raise_visitor_error_from_parse_error(
                     exc,
                     value_messages=("get_dynamic_memory space must be on-chip MemorySpace",),
                 )
             try:
-                callee_registry[callee] = build_func_op_from_ast(
+                callee_registry[callee] = _build_func_op_from_ast_impl(
                     callee_ast,
                     runtime_args=callee_runtime_args,
                     config=lowering_config,
                 )
-            except AstVisitorError as exc:
-                _reraise_module_error_from_ast_visitor_error(exc)
+            except KernelCodeError as exc:
+                _reraise_module_error_from_ast_error(exc)
         finally:
             compiling.remove(callee)
 
@@ -527,18 +501,14 @@ def mlir_gen(
 
     root_globals, root_builtins = _build_parse_environment(fn, globals, builtins)
     root_runtime_table = _build_runtime_table(fn, runtime_args)
-    parse_config = dict(config or {})
-    parse_config["reject_external_values"] = True
-    parse_config["allow_python_callee_calls"] = True
     try:
         func_ast = parse_function_with_env(
             fn,
             globals_table=root_globals,
             builtins_table=root_builtins,
             runtime_table=root_runtime_table,
-            config=parse_config,
         )
-    except AstParseError as exc:
+    except KernelCodeError as exc:
         _raise_visitor_error_from_parse_error(
             exc,
             value_messages=("get_dynamic_memory space must be on-chip MemorySpace",),
@@ -547,9 +517,9 @@ def mlir_gen(
     compiling.add(fn)
     try:
         try:
-            root_func_op = build_func_op_from_ast(func_ast, runtime_args=runtime_args, config=lowering_config)
-        except AstVisitorError as exc:
-            _reraise_module_error_from_ast_visitor_error(exc)
+            root_func_op = _build_func_op_from_ast_impl(func_ast, runtime_args=runtime_args, config=lowering_config)
+        except KernelCodeError as exc:
+            _reraise_module_error_from_ast_error(exc)
     finally:
         compiling.remove(fn)
 

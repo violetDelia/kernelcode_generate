@@ -49,7 +49,7 @@
 - 当前文件的公开 API 只有 `AttachArchInformationPass`；不得跨文件调用当前文件模块级 helper、常量或错误文本规整步骤。
 - `AttachArchInformationPass.run(module)` 是面向业务调用方与 pytest 的稳定执行入口；`apply(ctx, module)` 只允许由 `PassManager` / xdsl `ModulePass` 协议消费，不再承诺 `AttachArchInformationPass().apply(Context(), module)` 这条旧兼容用法。
 - `apply(ctx, module)` 即使暂时不消费 `ctx` 里的业务信息，也不得通过 `del ctx` 或其他显式丢弃语句把该协议形参写成“已废弃入口”。
-- 所有预期失败统一抛出 [`PassContractError`](../../../kernel_gen/passes/common.py)，错误消息仍以 `AttachArchInformationError:` 前缀开头，供测试做稳定匹配。
+- 所有预期失败统一抛出 [`KernelCodeError`](../../../kernel_gen/passes/common.py)，错误消息仍以 `AttachArchInformationError:` 前缀开头，供测试做稳定匹配。
 
 ## 公开行为说明
 

@@ -14,16 +14,13 @@
 
 API 列表:
 - `class NnLoweringPass()`
-- `class NnLoweringError()`
 - `class LowerDmaMemoryHierarchyPass()`
-- `class LowerDmaMemoryHierarchyError()`
 - `class DecompassPass()`
 - `class OutlineDeviceKernelPass()`
 - `class TileAnalysisPass()`
 - `class TileElewisePass()`
 - `class TileReducePass()`
 - `class SymbolLoopHoistPass()`
-- `class SymbolLoopHoistError()`
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
@@ -79,16 +76,15 @@ API 列表:
 
 import sys
 
-from .nn_lowering import NnLoweringError, NnLoweringPass
+from .nn_lowering import NnLoweringPass
 from .. import outline_device_kernel as _outline_device_kernel_module
 from .. import symbol_loop_hoist as _symbol_loop_hoist_module
 from ..dma_memory_hierarchy import (
-    LowerDmaMemoryHierarchyError,
     LowerDmaMemoryHierarchyPass,
 )
 from ..decompass import DecompassPass
 from ..outline_device_kernel import OutlineDeviceKernelPass
-from ..symbol_loop_hoist import SymbolLoopHoistError, SymbolLoopHoistPass
+from ..symbol_loop_hoist import SymbolLoopHoistPass
 from ..tile.analysis import TileAnalysisPass
 from ..tile.elewise import TileElewisePass
 from ..tile.reduce import TileReducePass
@@ -100,14 +96,11 @@ sys.modules.setdefault(__name__ + ".symbol_loop_hoist", _symbol_loop_hoist_modul
 
 __all__ = [
     "NnLoweringPass",
-    "NnLoweringError",
     "LowerDmaMemoryHierarchyPass",
-    "LowerDmaMemoryHierarchyError",
     "DecompassPass",
     "OutlineDeviceKernelPass",
     "TileAnalysisPass",
     "TileElewisePass",
     "TileReducePass",
     "SymbolLoopHoistPass",
-    "SymbolLoopHoistError",
 ]

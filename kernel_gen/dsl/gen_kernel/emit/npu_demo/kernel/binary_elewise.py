@@ -3,7 +3,6 @@ from __future__ import annotations
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnMemoryType
 
-from ....errors import emit_c_error
 from ...register import emit_c_impl
 
 
@@ -35,7 +34,7 @@ def _emit_npu_demo_kernel_binary_elewise(op: KernelBinaryElewiseOp, ctx) -> str:
 
     out_value, lhs_value, rhs_value = _normalize_binary_elewise_operands(op)
     if not all(isinstance(value.type, NnMemoryType) for value in (out_value, lhs_value, rhs_value)):
-        raise emit_c_error(ctx, op.name, "unsupported op")
+        raise ctx.emit_error(op.name, "unsupported op")
     helper_map = {
         "add": "add",
         "sub": "sub",
@@ -50,7 +49,7 @@ def _emit_npu_demo_kernel_binary_elewise(op: KernelBinaryElewiseOp, ctx) -> str:
     }
     helper_name = helper_map.get(op.kind.data)
     if helper_name is None:
-        raise emit_c_error(ctx, op.name, f"unsupported kind={op.kind.data}")
+        raise ctx.emit_error(op.name, f"unsupported kind={op.kind.data}")
     out_expr = emit_c_value(out_value, ctx)
     lhs_expr = emit_c_value(lhs_value, ctx)
     rhs_expr = emit_c_value(rhs_value, ctx)

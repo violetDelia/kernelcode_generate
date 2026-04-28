@@ -14,7 +14,6 @@ from kernel_gen.dialect.symbol import (
     SymbolSubOp,
 )
 
-from ....errors import emit_c_error
 from ...register import emit_c_impl, emit_c_value_impl
 
 _BINARY_SIGILS = {
@@ -81,5 +80,5 @@ def _emit_npu_demo_symbol_binary_or_compare_value(value, ctx) -> str:
     rhs = emit_c_value(owner.operands[1], ctx)
     sigil = _BINARY_SIGILS.get(type(owner)) or _COMPARE_SIGILS.get(type(owner))
     if sigil is None:
-        raise emit_c_error(ctx, owner.name, "unsupported target")
+        raise ctx.emit_error(owner.name, "unsupported target")
     return f"({lhs} {sigil} {rhs})"

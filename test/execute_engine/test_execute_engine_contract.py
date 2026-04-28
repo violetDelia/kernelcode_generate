@@ -35,6 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.execute_engine import (
     FAILURE_FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED,
     FAILURE_SOURCE_EMPTY_OR_INVALID,
@@ -43,7 +44,6 @@ from kernel_gen.execute_engine import (
     FAILURE_PHRASES,
     ExecuteRequest,
     ExecutionEngine,
-    ExecutionEngineError,
 )
 
 
@@ -97,7 +97,7 @@ def test_execute_engine_stream_not_supported() -> None:
     engine = ExecutionEngine(target="cpu")
     kernel = engine.compile(source="int main(){}", function="cpu::add")
     try:
-        with pytest.raises(ExecutionEngineError) as exc:
+        with pytest.raises(KernelCodeError) as exc:
             kernel.execute(request=ExecuteRequest(args=(), stream=object()))
         assert exc.value.failure_phrase == FAILURE_STREAM_NOT_SUPPORTED
     finally:
@@ -117,7 +117,7 @@ def test_execute_engine_function_output_capture_not_supported() -> None:
     engine = ExecutionEngine(target="cpu")
     kernel = engine.compile(source="int main(){}", function="cpu::add")
     try:
-        with pytest.raises(ExecutionEngineError) as exc:
+        with pytest.raises(KernelCodeError) as exc:
             kernel.execute(request=ExecuteRequest(args=(), capture_function_output=True))
         assert exc.value.failure_phrase == FAILURE_FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED
     finally:
@@ -135,7 +135,7 @@ def test_execute_engine_function_output_capture_not_supported() -> None:
 # 对应测试文件路径: test/execute_engine/test_execute_engine_contract.py
 def test_execute_engine_source_empty_or_invalid() -> None:
     engine = ExecutionEngine(target="cpu")
-    with pytest.raises(ExecutionEngineError) as exc:
+    with pytest.raises(KernelCodeError) as exc:
         engine.compile(source="  ", function="cpu::add")
     assert exc.value.failure_phrase == FAILURE_SOURCE_EMPTY_OR_INVALID
 
@@ -151,7 +151,7 @@ def test_execute_engine_source_empty_or_invalid() -> None:
 # 对应测试文件路径: test/execute_engine/test_execute_engine_contract.py
 def test_execute_engine_target_header_mismatch() -> None:
     engine = ExecutionEngine(target="unknown-target")
-    with pytest.raises(ExecutionEngineError) as exc:
+    with pytest.raises(KernelCodeError) as exc:
         engine.compile(source="int main(){}", function="cpu::add")
     assert exc.value.failure_phrase == FAILURE_TARGET_HEADER_MISMATCH
 

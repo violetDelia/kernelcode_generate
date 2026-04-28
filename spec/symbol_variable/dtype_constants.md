@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 `NumericType` 的常用 dtype 集合常量与 arithmetic promotion 顺序常量，供 `operation` 与 `dialect` 模块共享使用，避免重复定义。
+兼容导出 `kernel_gen.symbol_variable.type` 中的 dtype family 与 arithmetic promotion 常量。新代码应直接从 `kernel_gen.symbol_variable.type` 导入；本文件不再自维护 dtype 常量。
 
 ## API 列表
 
@@ -15,14 +15,15 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`榕`
 - `spec`：[`spec/symbol_variable/dtype_constants.md`](../../spec/symbol_variable/dtype_constants.md)
 - `test`：[`test/symbol_variable/test_dtype_constants.py`](../../test/symbol_variable/test_dtype_constants.py)
-- `功能实现`：[`kernel_gen/symbol_variable/dtype_constants.py`](../../kernel_gen/symbol_variable/dtype_constants.py)
+- `功能实现`：[`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py)
+- `兼容实现`：[`kernel_gen/symbol_variable/dtype_constants.py`](../../kernel_gen/symbol_variable/dtype_constants.py)
 
 ## 依赖
 
-- [`kernel_gen.symbol_variable.type.NumericType`](../../kernel_gen/symbol_variable/type.py)
+- [`kernel_gen.symbol_variable.type`](../../kernel_gen/symbol_variable/type.py)：提供 `NumericType`、`FLOAT_DTYPES`、`INT_DTYPES`、`ARITHMETIC_DTYPE_ORDER`、`ARITHMETIC_DTYPE_RANK`、`NN_FLOAT_DTYPES` 真源。
 
 ## 公开接口
 
@@ -52,6 +53,7 @@ assert NumericType.Float16 in FLOAT_DTYPES
 注意事项：
 
 - 仅包含浮点 dtype；不包含 `NumericType.Bool`。
+- 该对象必须与 `kernel_gen.symbol_variable.type.FLOAT_DTYPES` 保持同一对象身份；本文件仅做兼容 re-export。
 
 返回与限制：
 
@@ -154,6 +156,7 @@ assert NumericType.Uint32 in INT_DTYPES
 注意事项：
 
 - 不包含浮点 dtype；不包含 `NumericType.Bool`。
+- 该对象必须与 `kernel_gen.symbol_variable.type.INT_DTYPES` 保持同一对象身份。
 
 返回与限制：
 
@@ -181,6 +184,7 @@ assert NumericType.BFloat16 in NN_FLOAT_DTYPES
 注意事项：
 
 - `NN_FLOAT_DTYPES` 与 `FLOAT_DTYPES` 需保持一致，避免出现双重来源。
+- 该对象必须复用 `kernel_gen.symbol_variable.type.FLOAT_DTYPES`；本文件仅做兼容 re-export。
 
 返回与限制：
 
@@ -193,9 +197,11 @@ assert NumericType.BFloat16 in NN_FLOAT_DTYPES
 - 测试目标：
   - 验证 `FLOAT_DTYPES` 与 `INT_DTYPES` 集合内容。
   - 验证 `NN_FLOAT_DTYPES` 与 `FLOAT_DTYPES` 一致。
+  - 验证 `dtype_constants` 中的 dtype family 与 promotion 常量复用 `type.py` 的公开真源。
   - 验证 `ARITHMETIC_DTYPE_ORDER` / `ARITHMETIC_DTYPE_RANK` 的排序与映射关系。
 - 功能与用例清单：
   - `DC-001`：浮点 dtype 集合正确。
   - `DC-002`：整数 dtype 集合正确。
   - `DC-003`：`NN_FLOAT_DTYPES` 与 `FLOAT_DTYPES` 一致。
+  - `DC-003A`：`dtype_constants` 复用 `type.py` 的 dtype family 真源。
   - `DC-004`：arithmetic dtype 顺序与 rank 映射正确。

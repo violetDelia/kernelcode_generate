@@ -73,9 +73,9 @@ EXPECTATION_REPO_ROOT = _expectation_repo_root()
 if str(EXPECTATION_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(EXPECTATION_REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.passes import PassContractError
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.passes.pass_manager import PassManager
 
@@ -97,7 +97,6 @@ def test_public_import_path_uses_canonical_module_and_rejects_legacy_lowering_sh
     lowering_package = importlib.import_module("kernel_gen.passes.lowering")
 
     assert package_module.BufferResultsToOutParamsPass is BufferResultsToOutParamsPass
-    assert package_module.PassContractError is PassContractError
     assert package_module.BufferResultsToOutParamsCallPattern is BufferResultsToOutParamsCallPattern
     assert package_module.BufferResultsToOutParamsFuncPattern is BufferResultsToOutParamsFuncPattern
     assert (
@@ -139,7 +138,12 @@ def test_public_pattern_api_returns_stable_pattern_list() -> None:
 def test_expectation_runner_prefers_relative_import_without_current_dir_sys_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    runner_module = importlib.import_module("expectation.pass.buffer_results_to_out_params.__main__")
+    try:
+        runner_module = importlib.import_module("expectation.pass.buffer_results_to_out_params.__main__")
+    except ModuleNotFoundError as exc:
+        if exc.name == "expectation":
+            pytest.skip("expectation package is not available in this checkout")
+        raise
     runner_dir = str(Path(runner_module.__file__).resolve().parent)
     original_sys_path = sys.path[:]
 
@@ -317,7 +321,7 @@ def test_rewrite_rejects_external_declaration() -> None:
     )
     module = ModuleOp([external_func])
 
-    with pytest.raises(PassContractError, match="external declaration"):
+    with pytest.raises(KernelCodeError, match="external declaration"):
         BufferResultsToOutParamsPass().run(module)
 
 
@@ -596,8 +600,8 @@ def test_rewrite_deslice_result_retargets_writeback_to_front_out_param() -> None
     c1 = arith.ConstantOp(IntegerAttr(1, i32))
     c2 = arith.ConstantOp(IntegerAttr(2, i32))
     deslice_op = DmaDesliceOp(
-        block.args[0],
         block.args[1],
+        block.args[0],
         [c0.result, c0.result],
         [c2.result, c2.result],
         [c1.result, c1.result],
@@ -652,7 +656,7 @@ def test_rewrite_rejects_multi_block_function() -> None:
     )
     module = ModuleOp([func_op])
 
-    with pytest.raises(PassContractError, match="single-block"):
+    with pytest.raises(KernelCodeError, match="single-block"):
         BufferResultsToOutParamsPass().run(module)
 
 
@@ -679,7 +683,7 @@ def test_rewrite_rejects_return_arity_mismatch() -> None:
     )
     module = ModuleOp([func_op])
 
-    with pytest.raises(PassContractError, match="return operand count"):
+    with pytest.raises(KernelCodeError, match="return operand count"):
         BufferResultsToOutParamsPass().run(module)
 
 
@@ -718,7 +722,7 @@ def test_rewrite_rejects_callsite_signature_mismatch() -> None:
 
     module = ModuleOp([callee, caller])
 
-    with pytest.raises(PassContractError, match="half-rewritten"):
+    with pytest.raises(KernelCodeError, match="half-rewritten"):
         BufferResultsToOutParamsPass().run(module)
 
 
@@ -757,7 +761,7 @@ def test_rewrite_rejects_old_memory_callsite_against_rewritten_callee() -> None:
 
     module = ModuleOp([callee, caller])
 
-    with pytest.raises(PassContractError, match="half-rewritten"):
+    with pytest.raises(KernelCodeError, match="half-rewritten"):
         BufferResultsToOutParamsPass().run(module)
 
 
@@ -797,5 +801,5 @@ def test_rewrite_rejects_callsite_result_type_mismatch_with_same_arity() -> None
 
     module = ModuleOp([callee, caller])
 
-    with pytest.raises(PassContractError, match="half-rewritten"):
+    with pytest.raises(KernelCodeError, match="half-rewritten"):
         BufferResultsToOutParamsPass().run(module)

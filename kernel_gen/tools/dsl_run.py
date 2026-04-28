@@ -1,21 +1,21 @@
 """dsl_run tool entry.
 
 创建者: 朽木露琪亚
-最后一次更改: 金铲铲大作战
+最后一次更改: 大闸蟹
 
 功能说明:
-- 提供 `dsl_run(func, real_args, pipeline, emitcconfig)` 的一体化入口。
+- 提供 `dsl_run(func, real_args, pipeline)` 的一体化入口。
 - 负责把 DSL 函数解析为 module，按指定 pipeline 做 lowering，再生成源码并交给执行引擎真实编译/执行。
 - 只承载公开合同，不把内部 parse / pass / emit / execute 细节暴露为外部依赖。
+- `dump_dir` 诊断开关统一从 `kernel_gen.core.config` 读取，不作为 `dsl_run(...)` 入参。
 
 API 列表:
-- `DslRunError(message: str)`
 - `DslRunResult(func_op: func.FuncOp, module: ModuleOp, source: str, compiled_kernel: CompiledKernel, execute_result: ExecuteResult, runtime_args: tuple[object, ...])`
-- `dsl_run(func_obj: Callable[..., object], real_args: tuple[object, ...] | list[object], pipeline: str | PassManager, emitcconfig: EmitCContext | object | None) -> DslRunResult`
+- `dsl_run(func_obj: Callable[..., object], real_args: tuple[object, ...] | list[object], pipeline: str | PassManager) -> DslRunResult`
 
 使用示例:
 - from kernel_gen.tools.dsl_run import dsl_run
-- result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(config={"target": "npu_demo"}))
+- result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
 - assert result.execute_result.ok is True
 
 关联文件:
@@ -25,15 +25,19 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 import inspect
+from pathlib import Path
+import re
 from typing import Any
 
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp
 
+from kernel_gen.core.config import get_dump_dir, get_target, restore_config, set_dump_dir, snapshot_config
 from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
 from kernel_gen.dsl.mlir_gen import mlir_gen
 from kernel_gen.execute_engine import CompiledKernel, ExecuteResult, ExecutionEngine
@@ -109,15 +113,85 @@ from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
-DslRunError = ValueError
-
 RETURN_VALUE_ERROR = "DslRunReturnValueUnsupported: dsl_run only supports functions without DSL return values"
-EMITCCONFIG_ERROR = "DslRunInvalidEmitCContext: emitcconfig must be EmitCContext"
 PIPELINE_NAME_ERROR = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline'"
 PIPELINE_TYPE_ERROR = "DslRunInvalidPipeline: pipeline must be str or PassManager"
 REAL_ARG_TYPE_ERROR = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor and numpy.ndarray"
 ARITY_ERROR = "DslRunArityMismatch: real_args count does not match function signature"
 NPU_DEMO_WRAPPER_ERROR = "DslRunInternalError: lowered npu_demo module must contain exactly one wrapper func with arch.launch"
+
+def _sanitize_dump_component(value: str) -> str:
+    """把 dump 路径片段规整为安全文件名。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 保留常见可读字符，其他字符替换为 `_`。
+    - 用于 kernel 子目录名，避免函数名中的特殊字符影响落盘。
+
+    使用示例:
+    - _sanitize_dump_component("add_kernel")
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
+    return safe_name or "kernel"
+
+
+def _resolve_dump_kernel_dir(
+    func_obj: Callable[..., object],
+) -> Path | None:
+    """从公开 config 解析 `dsl_run(...)` 的 kernel 级 dump 目录。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - `kernel_gen.core.config.get_dump_dir() is None` 时禁用落盘。
+    - 非空时在根目录下按 DSL 函数名创建子目录，匹配 `dir/kernelname/...` 结构。
+
+    使用示例:
+    - dump_path = _resolve_dump_kernel_dir(add_kernel)
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+    dump_dir = get_dump_dir()
+    if dump_dir is None:
+        return None
+    kernel_name = getattr(func_obj, "__name__", "kernel")
+    if not isinstance(kernel_name, str) or not kernel_name:
+        kernel_name = "kernel"
+    return dump_dir / _sanitize_dump_component(kernel_name)
+
+
+def _write_dump_file(path: Path, content: str) -> None:
+    """写入 `dsl_run(...)` 的 dump 文件。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 自动创建父目录。
+    - 保证文本以换行结尾。
+
+    使用示例:
+    - _write_dump_file(Path("dump/kernel/01-first-ir.mlir"), ir_text)
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = content if content.endswith("\n") else f"{content}\n"
+    path.write_text(text, encoding="utf-8")
 
 
 def _runtime_module_name(value: object) -> str:
@@ -258,7 +332,7 @@ def _normalize_real_args(real_args: tuple[object, ...] | list[object]) -> tuple[
         return real_args
     if isinstance(real_args, list):
         return tuple(real_args)
-    raise DslRunError("DslRunInvalidRealArgs: real_args must be tuple or list")
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInvalidRealArgs: real_args must be tuple or list")
 
 
 def _resolve_pipeline(pipeline: str | PassManager) -> PassManager:
@@ -284,26 +358,87 @@ def _resolve_pipeline(pipeline: str | PassManager) -> PassManager:
     if isinstance(pipeline, PassManager):
         return pipeline
     if not isinstance(pipeline, str):
-        raise DslRunError(PIPELINE_TYPE_ERROR)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, PIPELINE_TYPE_ERROR)
     load_builtin_passes()
     try:
         return build_registered_pipeline(pipeline)
-    except RuntimeError as exc:
-        raise DslRunError(f"DslRunUnknownPipeline: unknown pipeline '{pipeline}'") from exc
+    except KernelCodeError as exc:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, f"DslRunUnknownPipeline: unknown pipeline '{pipeline}'") from exc
 
 
-def _emitc_target_name(emitcconfig: EmitCContext) -> str:
-    """读取 `EmitCContext` 当前公开合同下的 target 名称。
+def _pipeline_uses_config_dump(pipeline: PassManager) -> bool:
+    """判断 pipeline 是否使用标准 `PassManager.run(...)` 的 config dump。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
 
     功能说明:
-    - 统一从 `emitcconfig.config["target"]` 读取目标名。
-    - 若调用方在构造后篡改 `config`，这里仍按公开合同做一次最小校验并返回稳定错误短语。
+    - 标准 `PassManager.run(...)` 从 `kernel_gen.core.config.get_dump_dir()` 读取 dump 目录。
+    - 测试或外部自定义 `PassManager` 子类可能覆盖 `run(module)`，此时回退为工具层粗粒度 dump。
 
     使用示例:
-    - target = _emitc_target_name(EmitCContext(config={"target": "npu_demo"}))
+    - _pipeline_uses_config_dump(pm)
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+    return type(pipeline).run is PassManager.run
+
+
+def _run_pipeline_with_optional_dump(
+    pipeline: PassManager,
+    module: ModuleOp,
+    dump_dir: Path | None,
+) -> object:
+    """执行 pipeline，并在可用时写入 pass IR dump。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 标准 `PassManager` 由自身写入 `01-first-ir.mlir` 和逐 pass IR。
+    - 覆盖 `run(module)` 的自定义 pipeline 不强制改签名，只写入初始 IR 与 pipeline 后 IR。
+
+    使用示例:
+    - lowered = _run_pipeline_with_optional_dump(pm, module, Path("dump/kernel"))
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+    if dump_dir is None:
+        return pipeline.run(module)
+    if _pipeline_uses_config_dump(pipeline):
+        snapshot = snapshot_config()
+        try:
+            set_dump_dir(dump_dir)
+            return pipeline.run(module)
+        finally:
+            restore_config(snapshot)
+    _write_dump_file(dump_dir / "01-first-ir.mlir", str(module))
+    output = pipeline.run(module)
+    pipeline_name = getattr(pipeline, "name", "pipeline")
+    if not isinstance(pipeline_name, str) or not pipeline_name:
+        pipeline_name = "pipeline"
+    _write_dump_file(dump_dir / "02-pipeline.mlir", f"{pipeline_name}\n{output}")
+    return output
+
+
+def _emitc_target_name(emit_context: EmitCContext) -> str:
+    """读取当前公开 target 名称。
+
+    创建者: OpenAI Codex
+    最后一次更改: 守护最好的爱莉希雅
+
+    功能说明:
+    - 统一从 `kernel_gen.core.config.get_target()` 读取目标名。
+    - `emit_context` 参数保留为调用链上下文标记，不访问其内部 target 状态。
+
+    使用示例:
+    - target = _emitc_target_name(EmitCContext())
 
     关联文件:
     - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
@@ -311,9 +446,16 @@ def _emitc_target_name(emitcconfig: EmitCContext) -> str:
     - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
     """
 
-    target = emitcconfig.config.get("target")
+    try:
+        target = get_target()
+    except KernelCodeError as exc:
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.TOOLS,
+            "DslRunInvalidTarget: core config target must be non-empty str",
+        ) from exc
     if not isinstance(target, str) or not target:
-        raise DslRunError("DslRunInvalidEmitCContext: emitcconfig.config['target'] must be non-empty str")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInvalidTarget: core config target must be non-empty str")
     return target
 
 
@@ -339,7 +481,7 @@ def _find_first_func(module: ModuleOp) -> func.FuncOp:
     for op in module.ops:
         if isinstance(op, func.FuncOp):
             return op
-    raise DslRunError("DslRunInternalError: lowered module does not contain func.func")
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInternalError: lowered module does not contain func.func")
 
 
 def _find_func_by_sym_name(module: ModuleOp, sym_name: str) -> func.FuncOp:
@@ -364,10 +506,10 @@ def _find_func_by_sym_name(module: ModuleOp, sym_name: str) -> func.FuncOp:
     for op in module.ops:
         if isinstance(op, func.FuncOp) and op.sym_name.data == sym_name:
             return op
-    raise DslRunError(f"DslRunInternalError: lowered module does not contain func.func @{sym_name}")
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, f"DslRunInternalError: lowered module does not contain func.func @{sym_name}")
 
 
-def _select_source_and_entry(module: ModuleOp, emitcconfig: EmitCContext) -> tuple[str, str, func.FuncOp]:
+def _select_source_and_entry(module: ModuleOp, emit_context: EmitCContext) -> tuple[str, str, func.FuncOp]:
     """根据 lowered module 选择源码生成入口与执行入口名。
 
     创建者: 朽木露琪亚
@@ -381,7 +523,7 @@ def _select_source_and_entry(module: ModuleOp, emitcconfig: EmitCContext) -> tup
     - 其余 target 退回到首个 `func.func` 的源码生成入口，保证常见单函数和 expectation 场景稳定可执行。
 
     使用示例:
-    - source, entry_name, func_op = _select_source_and_entry(module, EmitCContext(config={"target": "npu_demo"}))
+    - source, entry_name, func_op = _select_source_and_entry(module, EmitCContext())
 
     关联文件:
     - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
@@ -391,20 +533,20 @@ def _select_source_and_entry(module: ModuleOp, emitcconfig: EmitCContext) -> tup
 
     func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
     root_func = _find_first_func(module)
-    if _emitc_target_name(emitcconfig) == "npu_demo":
+    if _emitc_target_name(emit_context) == "npu_demo":
         wrapper_candidates = [
             func_op
             for func_op in func_ops
             if any(item.name == "arch.launch" for item in func_op.body.block.ops)
         ]
         if len(wrapper_candidates) != 1:
-            raise DslRunError(NPU_DEMO_WRAPPER_ERROR)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, NPU_DEMO_WRAPPER_ERROR)
         wrapper_func = wrapper_candidates[0]
         wrapper_launch = next(item for item in wrapper_func.body.block.ops if item.name == "arch.launch")
         body_func = _find_func_by_sym_name(module, wrapper_launch.callee.root_reference.data)
-        return gen_kernel(module, emitcconfig), body_func.sym_name.data, body_func
+        return gen_kernel(module, emit_context), body_func.sym_name.data, body_func
     try:
-        return gen_kernel(root_func, emitcconfig), root_func.sym_name.data, root_func
+        return gen_kernel(root_func, emit_context), root_func.sym_name.data, root_func
     except Exception:
         raise
 
@@ -421,7 +563,7 @@ class DslRunResult:
     - `runtime_args` 保留为 tuple，便于下游机械比较和再次调用执行引擎。
 
     使用示例:
-    - result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(config={"target": "npu_demo"}))
+    - result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
     - assert result.execute_result.ok is True
 
     关联文件:
@@ -442,21 +584,22 @@ def dsl_run(
     func_obj: Callable[..., object],
     real_args: tuple[object, ...] | list[object],
     pipeline: str | PassManager,
-    emitcconfig: EmitCContext | object | None,
 ) -> DslRunResult:
     """把 DSL 函数按指定 pipeline 真实 lowering 并执行。
 
     创建者: 朽木露琪亚
-    最后更改: 朽木露琪亚
+        最后更改: 大闸蟹
 
     功能说明:
-    - 先校验 `emitcconfig`，再解析 pipeline 与 `real_args`。
+    - 先解析全局公开 target 配置、pipeline 与 `real_args`。
     - 通过 `mlir_gen(...)` 生成 `builtin.module`，拒绝带 DSL 返回值的函数。
     - 按 pipeline 对 module 做 lowering，使用 `gen_kernel(...)` 生成目标源码，再交给 `ExecutionEngine` 真实编译与执行。
+    - `kernel_gen.core.config.dump_dir` 非空时按 `dump_dir/<kernel name>/` 写入初始 IR、每个 pass 后 IR 与最终源码。
     - 结果以 `DslRunResult` 返回，外部可以继续读取 `func_op/module/source/compiled_kernel/execute_result/runtime_args`。
 
     使用示例:
-    - result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(config={"target": "npu_demo"}))
+    - result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
+    - set_dump_dir("dump"); result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
     - assert result.execute_result.ok is True
 
     关联文件:
@@ -465,11 +608,12 @@ def dsl_run(
     - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
     """
 
-    if not isinstance(emitcconfig, EmitCContext):
-        raise DslRunError(EMITCCONFIG_ERROR)
-
+    if not isinstance(get_target(), str) or not get_target():
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInvalidTarget: core config target must be non-empty str")
+    emit_context = EmitCContext()
     resolved_pipeline = _resolve_pipeline(pipeline)
     runtime_args = _normalize_real_args(real_args)
+    dump_kernel_dir = _resolve_dump_kernel_dir(func_obj)
 
     positional_params = [
         param
@@ -477,26 +621,32 @@ def dsl_run(
         if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     ]
     if len(runtime_args) != len(positional_params):
-        raise DslRunError(ARITY_ERROR)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, ARITY_ERROR)
     for arg in runtime_args:
         if not (_is_torch_tensor(arg) or _is_numpy_array(arg)):
-            raise DslRunError(REAL_ARG_TYPE_ERROR)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, REAL_ARG_TYPE_ERROR)
 
     globals_table = _build_dsl_globals_table(func_obj)
-    module = mlir_gen(func_obj, *runtime_args, globals=globals_table, config={"reject_external_values": True, "allow_python_callee_calls": True})
+    module = mlir_gen(func_obj, *runtime_args, globals=globals_table)
     if not isinstance(module, ModuleOp):
-        raise DslRunError("DslRunInternalError: mlir_gen must return builtin.module")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInternalError: mlir_gen must return builtin.module")
 
     root_func = _find_first_func(module)
     if root_func.function_type.outputs.data:
-        raise DslRunError(RETURN_VALUE_ERROR)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, RETURN_VALUE_ERROR)
 
-    lowered_module = resolved_pipeline.run(module)
+    lowered_module = _run_pipeline_with_optional_dump(resolved_pipeline, module, dump_kernel_dir)
     if not isinstance(lowered_module, ModuleOp):
-        raise DslRunError("DslRunInternalError: pipeline must return builtin.module")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInternalError: pipeline must return builtin.module")
 
-    source, entry_name, func_op = _select_source_and_entry(lowered_module, emitcconfig)
-    engine = ExecutionEngine(target=_emitc_target_name(emitcconfig))
+    source_snapshot = snapshot_config()
+    try:
+        if dump_kernel_dir is not None:
+            set_dump_dir(dump_kernel_dir)
+        source, entry_name, func_op = _select_source_and_entry(lowered_module, emit_context)
+    finally:
+        restore_config(source_snapshot)
+    engine = ExecutionEngine(target=_emitc_target_name(emit_context))
     compiled_kernel = engine.compile(source=source, function=entry_name)
     execute_result = compiled_kernel.execute(args=runtime_args)
     return DslRunResult(
@@ -510,7 +660,6 @@ def dsl_run(
 
 
 __all__ = [
-    "DslRunError",
     "DslRunResult",
     "dsl_run",
 ]

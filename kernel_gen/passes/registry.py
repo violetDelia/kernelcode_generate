@@ -7,11 +7,10 @@
 - 提供 pass / pipeline 的进程内注册表，统一“名字 -> 构造器”的解析入口。
 - 为工具层（如 ircheck）提供稳定名称解析能力，避免依赖具体 Python import path。
 - 文件内 helper 收口为 `_register_registry_entry`、`_build_registered_pass_instance`、
-  `_build_registered_pipeline_manager`、`_pipeline_accepts_options`、`_normalize_options`
-  与 `_reset_registry_for_test`；这些 helper 仅供本文件内部复用，不属于公开接口。
+  `_build_registered_pipeline_manager`、`_pipeline_accepts_options`、`_normalize_options`、
+  `_split_fold_option` 与 `_reset_registry_for_test`；这些 helper 仅供本文件内部复用，不属于公开接口。
 
 API 列表:
-- `class PassRegistryError()`
 - `register_pass(pass_cls: type[PassType]) -> type[PassType]`
 - `register_pipeline(name: str) -> Callable[[Callable[..., PassManager]], Callable[..., PassManager]]`
 - `build_registered_pass(name: str, options: dict[str, str] | None = None) -> XdslModulePass`
@@ -32,6 +31,7 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from collections.abc import Callable
 import inspect
@@ -48,24 +48,80 @@ _PIPELINE_REGISTRY: dict[str, Callable[..., PassManager]] = {}
 _BUILTINS_LOADED = False
 
 
-class PassRegistryError(RuntimeError):
-    """Pass registry 预期失败异常。
+def _set_pass_fold_option(pass_obj: XdslModulePass, fold: bool) -> None:
+    """设置 pass 实例的通用 fold 开关。
 
-    创建者: 睡觉小分队
-    最后一次更改: 金铲铲大作战
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
 
     功能说明:
-    - 表示 pass / pipeline 注册与查询阶段的可预期失败。
-    - `str(e)` 必须以 `spec/pass/registry.md` 列出的错误短语之一开头，便于测试做机械匹配。
+    - 统一处理 `ModulePass` / frozen dataclass pass 的属性写入。
+    - 仅供 registry 在解析通用 `fold` 选项后设置实例状态。
 
     使用示例:
-    - raise PassRegistryError("PassRegistryError: unknown pass 'tile'")
+    - _set_pass_fold_option(pass_obj, False)
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
     - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
+
+    object.__setattr__(pass_obj, "fold", bool(fold))
+
+
+def _parse_bool_option(name: str, value: str) -> bool:
+    """解析 registry bool 选项。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 接受常见 true/false 文本。
+    - 非法文本按 pass option error 处理，保持 registry 错误归属稳定。
+
+    使用示例:
+    - enabled = _parse_bool_option("fold", "false")
+
+    关联文件:
+    - spec: [spec/pass/registry.md](spec/pass/registry.md)
+    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
+    """
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: option '{name}' expects bool")
+
+
+def _split_fold_option(options: dict[str, str]) -> tuple[dict[str, str], bool | None]:
+    """从 pass options 中拆出通用 `fold` 选项。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - `fold` 是所有 pass 的通用 registry 选项，默认由 pass 构造器自身决定。
+    - 剩余 options 继续交给 pass 自有 `from_options` 处理。
+
+    使用示例:
+    - pass_options, fold = _split_fold_option({"fold": "false"})
+
+    关联文件:
+    - spec: [spec/pass/registry.md](spec/pass/registry.md)
+    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
+    """
+
+    pass_options = dict(options)
+    if "fold" not in pass_options:
+        return pass_options, None
+    return pass_options, _parse_bool_option("fold", pass_options.pop("fold"))
+
+
 
 
 def _register_registry_entry(
@@ -90,7 +146,7 @@ def _register_registry_entry(
     """
 
     if name in registry:
-        raise PassRegistryError(f"PassRegistryError: {kind} '{name}' is already registered")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: {kind} '{name}' is already registered")
     registry[name] = value
 
 
@@ -118,25 +174,35 @@ def _build_registered_pass_instance(
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
-    if options:
+    pass_options, fold = _split_fold_option(options)
+    if pass_options:
         from_options = getattr(pass_cls, "from_options", None)
         if not callable(from_options):
-            raise PassRegistryError(f"PassRegistryError: pass '{name}' does not accept options")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: pass '{name}' does not accept options")
         try:
-            pass_obj = from_options(options)
+            pass_obj = from_options(pass_options)
         except Exception as exc:  # pragma: no cover - exception detail not stable
             if passthrough_errors and isinstance(exc, passthrough_errors):
                 raise
-            raise PassRegistryError(f"PassRegistryError: pass '{name}' option error") from exc
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: pass '{name}' option error") from exc
         if not isinstance(pass_obj, XdslModulePass):
-            raise PassRegistryError(f"PassRegistryError: pass '{name}' option error")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: pass '{name}' option error")
+        if fold is not None:
+            _set_pass_fold_option(pass_obj, fold)
         return pass_obj
     try:
-        return pass_cls()
+        if fold is None:
+            return pass_cls()
+        try:
+            pass_obj = pass_cls(fold=fold)  # type: ignore[call-arg]
+        except TypeError:
+            pass_obj = pass_cls()
+            _set_pass_fold_option(pass_obj, fold)
+        return pass_obj
     except Exception as exc:  # pragma: no cover - exception detail not stable
         if passthrough_errors and isinstance(exc, passthrough_errors):
             raise
-        raise PassRegistryError(f"PassRegistryError: pass '{name}' is not constructible") from exc
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: pass '{name}' is not constructible") from exc
 
 
 def _build_registered_pipeline_manager(
@@ -162,20 +228,20 @@ def _build_registered_pipeline_manager(
 
     if options:
         if not _pipeline_accepts_options(builder):
-            raise PassRegistryError(f"PassRegistryError: pipeline '{name}' does not accept options")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: pipeline '{name}' does not accept options")
         try:
             pm = builder(options)
         except Exception as exc:  # pragma: no cover - builder error path not deterministic
-            raise PassRegistryError(f"PassRegistryError: pipeline '{name}' option error") from exc
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: pipeline '{name}' option error") from exc
     else:
         try:
             pm = builder()
         except Exception as exc:  # pragma: no cover - builder error path not deterministic
-            raise PassRegistryError(
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                 f"PassRegistryError: pipeline '{name}' did not return PassManager"
             ) from exc
     if not isinstance(pm, PassManager):
-        raise PassRegistryError(f"PassRegistryError: pipeline '{name}' did not return PassManager")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: pipeline '{name}' did not return PassManager")
     return pm
 
 
@@ -202,10 +268,10 @@ def register_pass(pass_cls: type[PassType]) -> type[PassType]:
     """
 
     if not isinstance(pass_cls, type) or not issubclass(pass_cls, XdslModulePass):
-        raise PassRegistryError("PassRegistryError: register_pass expects ModulePass subclass")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "PassRegistryError: register_pass expects ModulePass subclass")
     pass_name = getattr(pass_cls, "name", None)
     if not isinstance(pass_name, str) or not pass_name.strip():
-        raise PassRegistryError("PassRegistryError: pass name must be non-empty string")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "PassRegistryError: pass name must be non-empty string")
     _register_registry_entry(_PASS_REGISTRY, pass_name, pass_cls, "pass")
     return pass_cls
 
@@ -233,13 +299,13 @@ def register_pipeline(name: str) -> Callable[[Callable[..., PassManager]], Calla
     """
 
     if not isinstance(name, str) or not name.strip():
-        raise PassRegistryError("PassRegistryError: pipeline name must be non-empty string")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "PassRegistryError: pipeline name must be non-empty string")
     if name in _PIPELINE_REGISTRY:
-        raise PassRegistryError(f"PassRegistryError: pipeline '{name}' is already registered")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: pipeline '{name}' is already registered")
 
     def _decorator(builder: Callable[..., PassManager]) -> Callable[..., PassManager]:
         if not callable(builder):
-            raise PassRegistryError("PassRegistryError: register_pipeline expects callable builder")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "PassRegistryError: register_pipeline expects callable builder")
         _register_registry_entry(_PIPELINE_REGISTRY, name, builder, "pipeline")
         return builder
 
@@ -323,14 +389,12 @@ def build_registered_pass(name: str, options: dict[str, str] | None = None) -> X
     """
 
     if name not in _PASS_REGISTRY:
-        raise PassRegistryError(f"PassRegistryError: unknown pass '{name}'")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: unknown pass '{name}'")
     pass_cls = _PASS_REGISTRY[name]
     normalized_options = _normalize_options(options)
     passthrough_errors: tuple[type[BaseException], ...] = ()
     if name == "launch-kernel-cost-func":
-        from kernel_gen.passes.common import PassContractError
-
-        passthrough_errors = (PassContractError,)
+        passthrough_errors = (KernelCodeError,)
     return _build_registered_pass_instance(
         name,
         pass_cls,
@@ -364,7 +428,7 @@ def build_registered_pipeline(name: str, options: dict[str, str] | None = None) 
     """
 
     if name not in _PIPELINE_REGISTRY:
-        raise PassRegistryError(f"PassRegistryError: unknown pipeline '{name}'")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: unknown pipeline '{name}'")
     builder = _PIPELINE_REGISTRY[name]
     normalized_options = _normalize_options(options)
     return _build_registered_pipeline_manager(name, builder, normalized_options)
@@ -533,7 +597,6 @@ def _reset_registry_for_test() -> None:
 
 
 __all__ = [
-    "PassRegistryError",
     "register_pass",
     "register_pipeline",
     "build_registered_pass",

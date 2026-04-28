@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from kernel_gen.dialect.dma import DmaSliceOp
 
-from ....errors import emit_c_error
 from ...register import emit_c_impl
 
 
@@ -12,7 +11,7 @@ def _emit_brace_list(values, ctx, emit_value) -> str:
 
 def _emit_vector_expr(values, ctx, emit_value) -> str:
     if not 1 <= len(values) <= 4:
-        raise emit_c_error(ctx, "dma.slice", "npu_demo Vector supports 1..4 values")
+        raise ctx.emit_error("dma.slice", "npu_demo Vector supports 1..4 values")
     return "Vector{" + ", ".join(emit_value(value, ctx) for value in values) + "}"
 
 

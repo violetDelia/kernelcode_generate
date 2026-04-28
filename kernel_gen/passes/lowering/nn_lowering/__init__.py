@@ -4,11 +4,10 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 对外暴露 `NnLoweringPass`、相关错误类型与公开 pattern 集合入口。
+- 对外暴露 `NnLoweringPass` 与公开 pattern 集合入口。
 
 API 列表:
 - `class NnLoweringPass()`
-- `class NnLoweringError()`
 - `nn_lowering_patterns() -> list[RewritePattern]`
 
 使用示例:
@@ -24,6 +23,6 @@ API 列表:
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/__init__.py
 """
 
-from .nn_lowering import NnLoweringError, NnLoweringPass, nn_lowering_patterns
+from .nn_lowering import NnLoweringPass, nn_lowering_patterns
 
-__all__ = ["NnLoweringPass", "NnLoweringError", "nn_lowering_patterns"]
+__all__ = ["NnLoweringPass", "nn_lowering_patterns"]

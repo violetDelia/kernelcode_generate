@@ -45,7 +45,7 @@
 - helper 必须是单 block 且 block 末尾为 `func.return`。
 - 若 inline 之后仍残留可内联 local call，必须显式失败。
 - 当前文件的公开 API 仅限 `InlinePass`；helper 展平、候选收集、private helper 清理都属于 `InlinePass` 的内部实现细节，不对外公开，也不得被跨文件实现或测试直连。
-- 显式失败统一抛 `PassContractError`，并保持以下稳定错误前缀：
+- 显式失败统一抛 `KernelCodeError`，并保持以下稳定错误前缀：
   - `InlineError: module must be builtin.module`
   - `InlineError: callee '<name>' must be a single-block func.func`
   - `InlineError: func.call arity mismatch for '<name>'`
@@ -134,12 +134,12 @@ InlinePass().apply(Context(), module)
 
 - `ctx` 仅作为 `ModulePass` 标准签名的一部分；该 pass 不额外定义 context 侧状态协议。
 - 当 module 内没有 `func.func` 或没有可内联的本地 `func.call` 时，必须表现为 no-op。
-- 若 helper 不满足单 block / `func.return` 结尾 / 参数结果 arity 一致等条件，必须以 `PassContractError` 报出 `InlineError:` 前缀错误。
+- 若 helper 不满足单 block / `func.return` 结尾 / 参数结果 arity 一致等条件，必须以 `KernelCodeError` 报出 `InlineError:` 前缀错误。
 
 返回与限制：
 
 - 返回 `None`。
-- 显式失败统一抛 `PassContractError`。
+- 显式失败统一抛 `KernelCodeError`。
 
 #### `run(module: ModuleOp) -> ModuleOp`
 
@@ -167,7 +167,7 @@ module = InlinePass().run(module)
 返回与限制：
 
 - 返回被原地改写后的同一 `ModuleOp`。
-- 显式失败统一抛 `PassContractError`。
+- 显式失败统一抛 `KernelCodeError`。
 
 ## 测试
 
@@ -176,5 +176,5 @@ module = InlinePass().run(module)
 - 测试目标：
   - `InlinePass` 可展开本地 helper
   - inline 后 private helper 会被清理
-  - 非 module 输入显式失败并走 `PassContractError`
+  - 非 module 输入显式失败并走 `KernelCodeError`
   - registry 仍能通过 `build_registered_pass("inline")` 构造 `InlinePass`

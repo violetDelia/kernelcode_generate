@@ -33,6 +33,7 @@ if str(REPO_ROOT) not in sys.path:
 
 registry_module = importlib.import_module("kernel_gen.passes.registry")
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.tools.ircheck import run_ircheck_text
 
 pass_manager_module = importlib.import_module("kernel_gen.passes.pass_manager")

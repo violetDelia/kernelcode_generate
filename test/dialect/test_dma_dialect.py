@@ -390,7 +390,7 @@ def test_dma_store_size_mismatch() -> None:
     offsets = _make_symbol_operands([0, 0])
     sizes = _make_symbol_operands([2, 2])
     strides = _make_symbol_operands([1, 1])
-    op = DmaStoreOp(source, target, offsets, sizes, strides)
+    op = DmaStoreOp(target, source, offsets, sizes, strides)
     with pytest.raises(VerifyException, match="source shape must match sizes"):
         op.verify()
 
@@ -413,7 +413,7 @@ def test_dma_deslice_verify_success() -> None:
     offsets = _make_symbol_operands([0, 0])
     sizes = _make_symbol_operands([2, 4])
     strides = _make_symbol_operands([1, 1])
-    op = DmaDesliceOp(source, target, offsets, sizes, strides, target_type)
+    op = DmaDesliceOp(target, source, offsets, sizes, strides, target_type)
     op.verify()
 
 
@@ -470,8 +470,8 @@ def test_dma_dynamic_symbol_int_operands_valid() -> None:
 
     DmaLoadOp(tile, source, offsets, sizes, strides).verify()
     DmaSliceOp(tile, source, offsets, sizes, strides).verify()
-    DmaStoreOp(tile, target, offsets, sizes, strides).verify()
-    DmaDesliceOp(tile, target, offsets, sizes, strides, source_type).verify()
+    DmaStoreOp(target, tile, offsets, sizes, strides).verify()
+    DmaDesliceOp(target, tile, offsets, sizes, strides, source_type).verify()
 
 
 # TC-DMA-011
@@ -672,6 +672,49 @@ def test_dma_reshape_allows_dynamic_symbol_int_shape_operands() -> None:
     op = DmaReshapeOp(source, _make_symbol_operands(["M", "N"]), bad_result_type)
     with pytest.raises(VerifyException, match="dma.reshape requires contiguous result stride"):
         op.verify()
+
+
+# TC-DMA-017B
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证 dma.reshape 接受符号乘法因子顺序不同但等价的连续 source stride。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_reshape_accepts_equivalent_symbolic_contiguous_source_stride
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_reshape_accepts_equivalent_symbolic_contiguous_source_stride() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr(
+            [
+                StringAttr("TN"),
+                StringAttr("TC"),
+                StringAttr("KH"),
+                StringAttr("KW"),
+                StringAttr("THO"),
+                StringAttr("TWO"),
+            ]
+        ),
+        stride=ArrayAttr(
+            [
+                StringAttr("KH*KW*TC*THO*TWO"),
+                StringAttr("KH*KW*THO*TWO"),
+                StringAttr("KW*THO*TWO"),
+                StringAttr("THO*TWO"),
+                StringAttr("TWO"),
+                IntAttr(1),
+            ]
+        ),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("KH*KW*TC"), StringAttr("THO*TN*TWO")]),
+        stride=ArrayAttr([StringAttr("THO*TN*TWO"), IntAttr(1)]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    op = DmaReshapeOp(source, _make_symbol_operands(["KH*KW*TC", "THO*TN*TWO"]), result_type)
+
+    op.verify()
 
 
 # TC-DMA-018
@@ -959,8 +1002,8 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
         [c3.results[0], c3.results[0]],
     )
     store = DmaStoreOp(
-        load_target,
         alloc.result,
+        load_target,
         [c2.results[0], c2.results[0]],
         [c0.results[0], c1.results[0]],
         [c3.results[0], c3.results[0]],
@@ -973,8 +1016,8 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
         [c3.results[0], c3.results[0]],
     )
     deslice = DmaDesliceOp(
-        load_target,
         alloc.result,
+        load_target,
         [c2.results[0], c2.results[0]],
         [c0.results[0], c1.results[0]],
         [c3.results[0], c3.results[0]],
@@ -1152,7 +1195,7 @@ def test_dma_transfer_ops_reject_element_space_or_result_mismatch() -> None:
 
     store_source_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
     store_source = _TestOp(result_types=[store_source_type]).results[0]
-    op = DmaStoreOp(store_source, target, offsets, sizes, strides)
+    op = DmaStoreOp(target, store_source, offsets, sizes, strides)
     with pytest.raises(VerifyException, match="dma.store element_type mismatch"):
         op.verify()
 
@@ -1168,8 +1211,8 @@ def test_dma_transfer_ops_reject_element_space_or_result_mismatch() -> None:
     bad_deslice_source_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
     bad_deslice_source = _TestOp(result_types=[bad_deslice_source_type]).results[0]
     op = DmaDesliceOp(
-        bad_deslice_source,
         deslice_target,
+        bad_deslice_source,
         offsets,
         sizes,
         strides,
@@ -1179,7 +1222,7 @@ def test_dma_transfer_ops_reject_element_space_or_result_mismatch() -> None:
         op.verify()
 
     bad_result_type = _make_memory_type(shape=ArrayAttr([IntAttr(8), IntAttr(4)]), space="shared")
-    op = DmaDesliceOp(deslice_source, deslice_target, offsets, sizes, strides, bad_result_type)
+    op = DmaDesliceOp(deslice_target, deslice_source, offsets, sizes, strides, bad_result_type)
     with pytest.raises(VerifyException, match="dma.deslice result must match target type"):
         op.verify()
 
@@ -1320,7 +1363,7 @@ def test_dma_transpose_accepts_valid_perm() -> None:
     )
     target_type = _make_memory_type(
         shape=ArrayAttr([IntAttr(3), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(1), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     target = _TestOp(result_types=[target_type]).results[0]
@@ -1345,7 +1388,7 @@ def test_dma_transpose_rejects_invalid_perm() -> None:
     )
     target_type = _make_memory_type(
         shape=ArrayAttr([IntAttr(3), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(1), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     target = _TestOp(result_types=[target_type]).results[0]

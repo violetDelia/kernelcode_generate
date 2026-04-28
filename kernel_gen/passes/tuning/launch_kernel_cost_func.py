@@ -5,11 +5,17 @@
 
 功能说明:
 - 为 module 中被 `arch.launch` 引用的 device function 生成 sibling cost function。
-- 在 cost function 中保留 `symbol.for` 结构，复制必要 helper op，并为 `dma/kernel/arch` op 生成 `tuner.cost` 与 `symbol.add` 累计链。
+- 在 cost function 中保留 `symbol.for` 结构，复制必要 helper op，并为受支持的 `dma/kernel/arch` op 生成 `tuner.cost` 与 `symbol.add` 累计链。
 - 保持原 host wrapper 与原 device function 不变；当前文件不公开 helper 函数或 helper 类，重写细节只属于 `LaunchKernelCostFuncPass.run(...)` 内部实现。
+
+API 列表:
+- `class LaunchKernelCostFuncPass(cost_kind: str = "DMA|MAC", fold: bool = True)`
+- `LaunchKernelCostFuncPass.from_options(options: dict[str, str]) -> LaunchKernelCostFuncPass`
+- `LaunchKernelCostFuncPass.run(module: object) -> ModuleOp`
 
 使用示例:
 - from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
+- module = LaunchKernelCostFuncPass().run(module)
 - module = LaunchKernelCostFuncPass(cost_kind="compute|latency|bandwidth").run(module)
 
 关联文件:
@@ -32,7 +38,22 @@ from kernel_gen.passes.pass_manager import Pass
 
 RESERVED_METADATA_ATTRS = ("kind", "cost_kind", "op_name", "device_func")
 SUPPORTED_COST_PREFIXES = ("dma.", "kernel.", "arch.")
-HELPER_OP_NAMES = ("dma.view", "dma.reshape")
+HELPER_OP_NAMES = (
+    "builtin.unrealized_conversion_cast",
+    "dma.view",
+    "dma.reshape",
+    "dma.alloc",
+)
+DROPPED_HELPER_OP_NAMES = (
+    "dma.load",
+    "dma.store",
+    "dma.free",
+    "dma.broadcast",
+    "dma.fill",
+    "dma.cast",
+    "dma.transpose",
+)
+DEFAULT_COST_KIND = "DMA|MAC"
 INVALID_COST_KIND_DETAIL = "cost_kind must be a non-empty '|' separated list of unique kind names"
 
 
@@ -59,7 +80,11 @@ class LaunchKernelCostFuncPass(Pass):
 
     name = "launch-kernel-cost-func"
 
-    def __init__(self: "LaunchKernelCostFuncPass", cost_kind: str = "compute") -> None:
+    def __init__(
+        self: "LaunchKernelCostFuncPass",
+        cost_kind: str = DEFAULT_COST_KIND,
+        fold: bool = True,
+    ) -> None:
         """初始化 pass 选项。
 
         创建者: 小李飞刀
@@ -68,9 +93,12 @@ class LaunchKernelCostFuncPass(Pass):
         功能说明:
         - 记录公开 `cost_kind` 字符串。
         - 规整并缓存内部执行所需的 kind 列表顺序。
+        - `fold` 默认开启，由 PassManager 在 pass 后执行通用 folding sweep。
 
         使用示例:
+        - pass_obj = LaunchKernelCostFuncPass()
         - pass_obj = LaunchKernelCostFuncPass(cost_kind="compute|memory|latency")
+        - pass_obj = LaunchKernelCostFuncPass(fold=False)
 
         关联文件:
         - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
@@ -78,6 +106,7 @@ class LaunchKernelCostFuncPass(Pass):
         - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
         """
 
+        super().__init__(fold=fold)
         if not cost_kind:
             raise_pass_contract_error("LaunchKernelCostFuncError", INVALID_COST_KIND_DETAIL)
         raw_kinds = [kind.strip() for kind in cost_kind.split("|")]
@@ -104,9 +133,11 @@ class LaunchKernelCostFuncPass(Pass):
 
         功能说明:
         - 支持 `{"cost_kind": "compute|memory|latency"}` 形式的 registry 入口。
+        - 未提供 `cost_kind` 时使用默认 `DMA|MAC`。
         - 拒绝未知选项，避免静默吞参。
 
         使用示例:
+        - pass_obj = LaunchKernelCostFuncPass.from_options({})
         - pass_obj = LaunchKernelCostFuncPass.from_options({"cost_kind": "compute|memory|latency"})
 
         关联文件:
@@ -121,7 +152,7 @@ class LaunchKernelCostFuncPass(Pass):
                 "LaunchKernelCostFuncError",
                 f"unknown option(s): {', '.join(unknown)}",
             )
-        return cls(cost_kind=options.get("cost_kind", "compute"))
+        return cls(cost_kind=options.get("cost_kind", DEFAULT_COST_KIND))
 
     def run(self: "LaunchKernelCostFuncPass", module: object) -> ModuleOp:
         """执行 launch-kernel-cost-func pass。
@@ -292,10 +323,11 @@ class LaunchKernelCostFuncPass(Pass):
                         isinstance(op, func.ReturnOp)
                         or op_name == "arith.constant"
                         or op_name in HELPER_OP_NAMES
+                        or op_name in DROPPED_HELPER_OP_NAMES
                         or (op_name.startswith("symbol.") and not isinstance(op, SymbolForOp))
                     )
                     if is_skip_op:
-                        if not isinstance(op, func.ReturnOp):
+                        if not isinstance(op, func.ReturnOp) and op_name not in DROPPED_HELPER_OP_NAMES:
                             cloned = op.clone(value_mapper=value_mapper)
                             target_block.add_op(cloned)
                             for source_result, cloned_result in zip(
@@ -314,7 +346,11 @@ class LaunchKernelCostFuncPass(Pass):
                             f"unsupported op '{op_name}' in device function '{device_func.sym_name.data}'",
                         )
 
-                    if len(op.results) != 0:
+                    if op_name == "dma.deslice" and op.results and op.operands:
+                        mapped_target = value_mapper.get(op.operands[0], op.operands[0])
+                        for source_result in op.results:
+                            value_mapper[source_result] = mapped_target
+                    elif len(op.results) != 0:
                         cloned = op.clone(value_mapper=value_mapper)
                         target_block.add_op(cloned)
                         for source_result, cloned_result in zip(
@@ -326,7 +362,7 @@ class LaunchKernelCostFuncPass(Pass):
 
                     extra_attrs = dict(op.attributes)
                     extra_attrs.pop("op_name__", None)
-                    if op_name == "kernel.binary_elewise" and "kind" in extra_attrs:
+                    if op_name in ("kernel.binary_elewise", "kernel.reduce") and "kind" in extra_attrs:
                         extra_attrs["kernel_kind"] = extra_attrs.pop("kind")
                     for attr_name in RESERVED_METADATA_ATTRS:
                         if attr_name in extra_attrs:

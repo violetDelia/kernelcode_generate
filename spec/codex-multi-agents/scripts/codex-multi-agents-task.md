@@ -43,7 +43,7 @@
 
 ## 术语
 
-- `任务类型`：任务阶段标签，只接受 `spec/build/review/merge/other/refactor`。
+- `任务类型`：任务阶段标签，只接受 `execute/spec/build/review/merge/other/refactor`；新建计划书任务默认使用 `execute`。
 - `正在执行的任务`：已被指派、当前仍在推进的任务。
 - `任务列表`：尚未分发，或已经通过 `-next` 退回等待下一阶段处理的任务。
 - `计划书`：用于聚合任务数量与完成状态的文档路径。
@@ -147,8 +147,9 @@ codex-multi-agents-task.sh \
 - `任务 ID` 在 `正在执行的任务` 与 `任务列表` 中必须全局唯一；若运行表已存在同一角色多条 `状态=进行中` 的脏数据，`-dispatch` 必须直接失败。
 - 目标角色除名单状态为 `free` 外，还必须在运行表中没有其他 `状态=进行中` 的任务；即使名单里是 stale `free`，也必须拒绝重复占用。
 - `-dispatch` 仅在目标角色存在、当前空闲且总并发人数未超过 `CODEX_MULTI_AGENTS_MAX_PARALLEL` 时才允许继续。
-- `-dispatch` 的目标角色必须满足对应任务类型职责约束；`build` 不能分发给 `审查/复审` 专职，`merge` 不能分发给候补或非合并专职。
+- `-dispatch` 的目标角色必须满足对应任务类型职责约束；`execute` 不能分发给纯审查专职，`merge` 不能分发给候补或非合并专职。
 - 角色职责约束固定为：
+  - `execute`：只允许计划级 `execute` 专职、`实现/测试/spec` 专职或 `全能替补`。
   - `spec`：只允许 `spec` 专职或 `全能替补`。
   - `build`：只允许 `实现/测试` 专职或 `全能替补`。
   - `review`：只允许 `审查/复审` 专职或 `全能替补`。
@@ -390,7 +391,7 @@ codex-multi-agents-task.sh \
 - `agents-lists.md` 不是可被 `TODO.md` 全量回算覆盖的派生文件；`-next` 不得整表重置 `busy/free`。
 - 若当前命令直接读写的角色在 `agents-lists.md` 中的状态与运行表不一致，`-next` 必须直接失败，不能静默修正。
 - `-next` 无论是否带 `-auto`，都会向管理员发送一条摘要消息。
-- 自动续接只会尝试启动 `spec/build/review/merge/refactor` 五类 ready 任务；`other` 不参与自动续接。
+- 自动续接只会尝试启动 `execute/spec/build/review/merge/refactor` 六类 ready 任务；`other` 不参与自动续接。
 - 自动续接会扫描整个 `任务列表`，只考虑“依赖任务已经从 `正在执行的任务` 与 `任务列表` 中消失”的 ready 任务；按当前列表顺序选择，不会跳过前面的可启动任务去启动后面的任务。
 - 自动续接成功时，会把被选中的 ready 任务移回 `正在执行的任务`，并把接手角色状态改为 `busy`。
 - 若被自动续接的是当前这条刚退回 `任务列表` 的同一任务，则沿用当前任务原 `任务 ID`。
@@ -399,6 +400,7 @@ codex-multi-agents-task.sh \
 - 自动续接无论是否成功，都会向管理员发送一条摘要消息。
 - 自动续接候选规则固定为：
   - 先按任务类型筛出专职池，再按需要启用候补池。
+  - `execute` 专职：职责包含 `计划级 execute`、`execute`、`实现`、`测试` 或 `spec`，且职责不包含 `全能替补`。
   - `spec` 专职：职责包含 `spec` 或 `spec 文档编写`，且职责不包含 `全能替补`。
   - `build` 专职：职责包含 `实现` 或 `测试`，且职责不包含 `全能替补`。
   - `review` 专职：职责包含 `审查` 或 `复审`，且职责不包含 `全能替补`。
@@ -408,7 +410,7 @@ codex-multi-agents-task.sh \
   - 仅保留 `agents-lists.md` 中状态为 `free` 且职责匹配的角色；职责包含 `不承担管理员分发的任务` 的角色不计入候选。
   - 若当前执行者满足上述条件，则作为候选之一参与选择。
 - 自动续接选择规则固定为：
-  - `spec/build/review/refactor`：若存在可用专职，只在专职池内随机；专职池为空时才允许候补池参与随机。
+  - `execute/spec/build/review/refactor`：若存在可用专职，只在专职池内随机；专职池为空时才允许候补池参与随机。
   - `merge`：只在专职池内随机；若无可用专职则自动续接失败，任务保留在 `任务列表` 并通知管理员。
   - 随机范围仅限当前启用的候选池，不跨层级混合随机。
 - 若设置 `CODEX_MULTI_AGENTS_AUTO_RANDOM_SEED`，自动续接使用该值的 `sha256` 结果作为随机种子；在候选集合与 `agents-lists.md` 顺序不变时可复现选择结果。
@@ -493,7 +495,7 @@ codex-multi-agents-task.sh \
   -file "./skills/codex-multi-agents/examples/TODO.md" \
   -new \
   -info "补充单元测试" \
-  -type "build" \
+  -type "execute" \
   -worktree "repo-x" \
   -depends "EX-2 EX-3" \
   -plan "ARCHITECTURE/plan/x.md" \
@@ -563,6 +565,7 @@ codex-multi-agents-task.sh \
   - 验证权限规则：管理员专属操作、管理员/架构师专属操作，以及合并角色执行 `-done` 的范围。
 - 功能与用例清单：
   - `TC-001` `test_dispatch_task_success`：分发成功，任务移入运行表，角色变为 `busy`
+  - `TC-001B` `test_dispatch_accepts_execute_task_type`：分发计划级 `execute` 任务给 `execute` 专职角色
   - `TC-002` `test_dispatch_missing_task_returns_rc3`：分发不存在任务，返回 `3`
   - `TC-003` `test_done_task_moves_to_done_file_success`：完成成功，任务移出 TODO，追加到 DONE
   - `TC-004` `test_done_missing_task_returns_rc3`：完成不存在任务，返回 `3`
@@ -570,6 +573,7 @@ codex-multi-agents-task.sh \
   - `TC-006` `test_pause_missing_task_returns_rc3`：暂停不存在任务，返回 `3`
   - `TC-007` `test_new_task_with_assignee_success`：新建任务并带默认指派，任务列表新增一行
   - `TC-008` `test_new_task_without_assignee_success`：新建任务且不带默认指派，指派为空
+  - `TC-008A` `test_new_accepts_execute_task_type`：新建计划级 `execute` 任务
   - `TC-009` `test_argument_error_returns_rc1`：缺少必填参数，返回 `1`
   - `TC-010` `test_file_not_found_returns_rc2`：`TODO.md` 不存在，返回 `2`
   - `TC-011` `test_invalid_todo_structure_returns_rc2`：表结构非法，返回 `2`
@@ -632,6 +636,7 @@ codex-multi-agents-task.sh \
   - `TC-057` `test_next_auto_random_assignment_seed_changes`：不同随机种子会触发不同接手人
   - `TC-057A` `test_next_auto_starts_first_ready_task_from_task_list`：普通 `-next` 会自动启动任务列表中首个 ready 任务
   - `TC-058` `test_next_auto_spec_dedicated_first`：`spec` 专职可用时仅从专职池选择
+  - `TC-058A` `test_next_auto_execute_dedicated_first`：`execute` 专职可用时仅从专职池选择
   - `TC-059` `test_next_auto_build_dedicated_first`：`build` 专职可用时仅从专职池选择
   - `TC-060` `test_next_auto_build_falls_back_to_substitute`：`build` 专职不可用时回退到候补池
   - `TC-061` `test_next_auto_review_dedicated_first`：`review` 专职可用时仅从专职池选择

@@ -21,14 +21,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from kernel_gen.common.contracts import (
+from kernel_gen.core.contracts import (
     build_contiguous_stride as _common_build_contiguous_stride,
     collect_int_dims as _common_collect_int_dims,
     dims_equal as _common_dims_equal,
     verify_i64_attr_range as _common_verify_i64_attr_range,
     verify_memory_type as _common_verify_memory_type,
 )
-from kernel_gen.common.errors import _ERROR_TEMPLATE
+from kernel_gen.core.contracts import _ERROR_TEMPLATE
 from xdsl.dialects.builtin import (
     BFloat16Type,
     Float16Type,

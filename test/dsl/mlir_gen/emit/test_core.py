@@ -30,6 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.arch import ArchGetThreadNumOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolToFloatOp, SymbolValueType
@@ -44,11 +45,11 @@ def _expr_cache_key(expr: object) -> int:
 
 
 def test_emit_context_validates_public_config() -> None:
-    with pytest.raises(ValueError, match="EmitContext config must be dict or None"):
+    with pytest.raises(KernelCodeError, match="EmitContext config must be dict or None"):
         EmitContext(builder=Block(), symbols={}, types={}, config=[])  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="EmitContext target must be str"):
+    with pytest.raises(KernelCodeError, match="EmitContext target must be str"):
         EmitContext(builder=Block(), symbols={}, types={}, config={"target": 1})
-    with pytest.raises(ValueError, match="EmitContext hardware must be dict\\[str, int\\]"):
+    with pytest.raises(KernelCodeError, match="EmitContext hardware must be dict\\[str, int\\]"):
         EmitContext(builder=Block(), symbols={}, types={}, config={"hardware": []})
 
 
@@ -113,7 +114,7 @@ def test_emit_mlir_rejects_non_symbol_to_float_source() -> None:
     )
     emit_mlir(source, ctx)
 
-    with pytest.raises(ValueError, match='symbol.to_float source must have type !symbol.int<"expr">'):
+    with pytest.raises(KernelCodeError, match='symbol.to_float source must have type !symbol.int<"expr">'):
         emit_mlir(SymbolToFloatAST(source=source, location=None), ctx)
 
 

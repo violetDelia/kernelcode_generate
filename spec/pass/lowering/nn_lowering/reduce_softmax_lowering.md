@@ -67,7 +67,7 @@ patterns = reduce_softmax_patterns()
 
 注意事项：
 
-- `nn.softmax` pattern 只负责抛出 `NnLoweringError("nn.softmax must be decomposed before lower-nn")`。
+- `nn.softmax` pattern 只负责抛出 `KernelCodeError("nn.softmax must be decomposed before lower-nn")`。
 - 返回列表中不得保留 `lower_reduce_softmax_family` 兼容入口。
 - `nn.exp` 不属于本模块的 pattern 列表。
 

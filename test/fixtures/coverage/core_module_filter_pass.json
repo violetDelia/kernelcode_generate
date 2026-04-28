@@ -1,0 +1,18 @@
+{
+  "totals": {
+    "covered_lines": 0,
+    "num_statements": 0,
+    "covered_branches": 0,
+    "num_branches": 0
+  },
+  "files": {
+    "kernel_gen/dsl/mlir_gen/emit/core.py": {
+      "summary": {
+        "covered_lines": 5,
+        "num_statements": 5,
+        "covered_branches": 2,
+        "num_branches": 2
+      }
+    }
+  }
+}

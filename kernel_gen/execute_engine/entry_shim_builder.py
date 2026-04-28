@@ -14,6 +14,7 @@ API 列表:
 
 helper 清单:
 - `class _ParamSpec(kind: str, ctype: str, memory_space: str | None = None)`
+- `_join_text_sections(*sections: str) -> str`
 - `_split_params(params_text: str) -> tuple[str, ...]`
 - `_parse_param_spec(param_text: str) -> _ParamSpec | None`
 - `_extract_param_specs(source: str, function: str) -> tuple[_ParamSpec, ...] | None`
@@ -34,8 +35,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-
-from kernel_gen.common.text import join_text_sections
 
 
 @dataclass(frozen=True)
@@ -61,6 +60,32 @@ class _ParamSpec:
     kind: str
     ctype: str
     memory_space: str | None = None
+
+
+def _join_text_sections(*sections: str) -> str:
+    """把多段源码文本按空行拼接。
+
+    创建者: 榕
+    最后一次更改: 榕
+
+    功能说明:
+    - 过滤空字符串段，并统一去掉每段尾部空白。
+    - 以空行分隔段落，保持 entry shim 源码的稳定换行口径。
+    - 结果始终以单个换行结束。
+
+    使用示例:
+    - source = _join_text_sections("extern \"C\" int entry() {", "}")
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_target.md
+    - test: test/execute_engine/test_execute_engine_compile.py
+    - 功能实现: kernel_gen/execute_engine/entry_shim_builder.py
+    """
+
+    normalized_sections = tuple(section.rstrip() for section in sections if section)
+    if not normalized_sections:
+        return "\n"
+    return "\n\n".join(normalized_sections).rstrip() + "\n"
 
 
 _INT_TYPE_PATTERN = re.compile(
@@ -318,7 +343,7 @@ def _build_runtime_entry_shim_source(
             "",
         ]
     )
-    return join_text_sections("\n".join(lines))
+    return _join_text_sections("\n".join(lines))
 
 
 def needs_entry_shim(source: str, entry_point: str) -> bool:

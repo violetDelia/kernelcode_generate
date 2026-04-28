@@ -1,7 +1,7 @@
 """python_coverage_omit.md tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 榕
 
 功能说明:
 - 校验 coverage omit 清单只收录纯转发 / 薄包装模块，并排除带有实际逻辑的入口。
@@ -53,7 +53,6 @@ def test_python_coverage_omit_manifest_exists_and_lists_forwarding_modules() -> 
     """TC-COM-001: omit 清单必须存在并列出纯转发模块。"""
 
     text = _manifest_text()
-    assert "kernel_gen/common/__init__.py" in text
     assert "kernel_gen/dsl/__init__.py" in text
     assert "kernel_gen/dsl/mlir_gen/parse_env.py" in text
     assert "kernel_gen/dsl/mlir_gen/signature.py" in text
@@ -78,6 +77,7 @@ def test_python_coverage_omit_manifest_excludes_logic_modules() -> None:
     """TC-COM-002: 含有逻辑或兼容副作用的入口不得加入 omit 清单。"""
 
     text = _manifest_text()
+    assert "| `kernel_gen/core/contracts.py` |" not in text
     assert "| `kernel_gen/__init__.py` |" not in text
     assert "| `kernel_gen/dialect/__init__.py` |" not in text
     assert "| `kernel_gen/dsl/gen_kernel/__init__.py` |" not in text

@@ -1,7 +1,7 @@
 """reduce/softmax boundary lowering 实现。
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 提供 nn.reduce_* 的单 op pattern lowering 入口。
@@ -23,6 +23,7 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, IntegerType, StringAttr
 from xdsl.ir import Attribute, Block, Operation, SSAValue
@@ -39,7 +40,6 @@ from kernel_gen.dialect.nn import (
     NnSoftmaxOp,
 )
 from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
-from .nn_lowering import NnLoweringError
 from .nn_lowering_utility import ensure_expected_op_name
 
 
@@ -64,7 +64,7 @@ def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
 
     space = op.attributes.get("space")
     if not isinstance(space, NnMemorySpaceAttr):
-        raise NnLoweringError("nn op must define #nn.space attribute")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op must define #nn.space attribute")
     return space
 
 
@@ -88,10 +88,10 @@ def _ensure_single_result(op: Operation) -> NnMemoryType:
     """
 
     if len(op.results) != 1:
-        raise NnLoweringError("nn op must produce exactly one result")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op must produce exactly one result")
     result_type = op.results[0].type
     if not isinstance(result_type, NnMemoryType):
-        raise NnLoweringError("nn op result must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op result must be nn.memory")
     return result_type
 
 
@@ -121,7 +121,7 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
         return operand
     if isinstance(operand.type, IntegerType):
         return operand
-    raise NnLoweringError("broadcast scalar must be int or symbol")
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "broadcast scalar must be int or symbol")
 
 
 def _ensure_reduce_axis(op_name: str, axes_attr: ArrayAttr) -> int:
@@ -143,27 +143,28 @@ def _ensure_reduce_axis(op_name: str, axes_attr: ArrayAttr) -> int:
     """
 
     if not isinstance(axes_attr, ArrayAttr):
-        raise NnLoweringError(f"{op_name} axes must be ArrayAttr")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"{op_name} axes must be ArrayAttr")
     if len(axes_attr.data) == 0:
-        raise NnLoweringError("reduce axes must be non-empty")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce axes must be non-empty")
     if len(axes_attr.data) != 1:
-        raise NnLoweringError("reduce axes must contain exactly one element")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce axes must contain exactly one element")
     axis_attr = axes_attr.data[0]
     if isinstance(axis_attr, IntegerAttr):
         return axis_attr.value.data
     if isinstance(axis_attr, IntAttr):
         return axis_attr.data
-    raise NnLoweringError("reduce axis must be integer")
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce axis must be integer")
 
 
 def _ensure_reduce_keepdim(op_name: str, keepdim_attr: Attribute) -> bool:
     """校验 reduce keepdim 参数。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
-    - keepdim 必须是 IntegerAttr 0 或 1。
+    - keepdim 支持 IntegerAttr/IntAttr 的 0 或 1。
+    - DSL 生成的布尔属性会打印为 true/false，底层为 i1 IntegerAttr，也按布尔值处理。
 
     使用示例:
     - keepdim = _ensure_reduce_keepdim("nn.reduce_min", keepdim_attr)
@@ -176,13 +177,20 @@ def _ensure_reduce_keepdim(op_name: str, keepdim_attr: Attribute) -> bool:
 
     if isinstance(keepdim_attr, IntegerAttr):
         keepdim = keepdim_attr.value.data
+        width = getattr(keepdim_attr.type, "width", None)
+        if getattr(width, "data", None) == 1:
+            if keepdim == 0 or keepdim is False:
+                return False
+            if keepdim == 1 or keepdim == -1 or keepdim is True:
+                return True
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "keepdim must be 0 or 1")
     elif isinstance(keepdim_attr, IntAttr):
         keepdim = keepdim_attr.data
     else:
-        raise NnLoweringError("keepdim must be integer")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "keepdim must be integer")
     if keepdim in (0, 1):
         return bool(keepdim)
-    raise NnLoweringError("keepdim must be 0 or 1")
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "keepdim must be 0 or 1")
 
 
 def _build_alloc_dynamic_shape_from_operand(
@@ -211,7 +219,7 @@ def _build_alloc_dynamic_shape_from_operand(
     """
 
     if not isinstance(operand.type, NnMemoryType):
-        raise NnLoweringError(f"{op.name} operand must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"{op.name} operand must be nn.memory")
 
     dynamic_shape: list[SSAValue] = []
     for result_axis, dim in enumerate(result_type.shape.data):
@@ -248,23 +256,23 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
     if len(op.operands) == 2:
         _ensure_symbol_or_int(op, op.operands[1])
     elif len(op.operands) != 1:
-        raise NnLoweringError(f"{op.name} must have 1 operands")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"{op.name} must have 1 operands")
     operand = op.operands[0]
     if not isinstance(operand.type, NnMemoryType):
-        raise NnLoweringError("nn.reduce operand must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.reduce operand must be nn.memory")
     axes_attr = op.attributes.get("axes")
     if axes_attr is None:
-        raise NnLoweringError(f"{op.name} axes must be ArrayAttr")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"{op.name} axes must be ArrayAttr")
     axis = _ensure_reduce_axis(op.name, axes_attr)
     keepdim_attr = op.attributes.get("keepdim")
     if keepdim_attr is None:
-        raise NnLoweringError(f"{op.name} keepdim must be bool")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"{op.name} keepdim must be bool")
     keepdim = _ensure_reduce_keepdim(op.name, keepdim_attr)
     operand_rank = len(operand.type.shape.data)
     result_rank = len(result_type.shape.data)
     expected_rank = operand_rank if keepdim else operand_rank - 1
     if result_rank != expected_rank:
-        raise NnLoweringError("reduce shape rank must match")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce shape rank must match")
     operand_shape = operand.type.shape.data
     result_shape = result_type.shape.data
     if keepdim:
@@ -272,19 +280,19 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
             result_dim = result_shape[idx]
             if idx == axis:
                 if isinstance(result_dim, StringAttr):
-                    raise NnLoweringError("reduce keepdim dimension must be 1")
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce keepdim dimension must be 1")
                 if isinstance(result_dim, IntegerAttr):
                     dim_value = result_dim.value.data
                 elif isinstance(result_dim, IntAttr):
                     dim_value = result_dim.data
                 else:
-                    raise NnLoweringError("reduce keepdim dimension must be 1")
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce keepdim dimension must be 1")
                 if dim_value != 1:
-                    raise NnLoweringError("reduce keepdim dimension must be 1")
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce keepdim dimension must be 1")
             else:
                 if isinstance(result_dim, StringAttr) and isinstance(operand_dim, StringAttr):
                     if result_dim.data != operand_dim.data:
-                        raise NnLoweringError("reduce shape mismatch")
+                        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce shape mismatch")
                 elif isinstance(result_dim, (IntegerAttr, IntAttr)) and isinstance(
                     operand_dim, (IntegerAttr, IntAttr)
                 ):
@@ -293,9 +301,9 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
                         operand_dim.value.data if isinstance(operand_dim, IntegerAttr) else operand_dim.data
                     )
                     if result_value != operand_value:
-                        raise NnLoweringError("reduce shape mismatch")
+                        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce shape mismatch")
                 else:
-                    raise NnLoweringError("reduce shape mismatch")
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce shape mismatch")
     if keepdim:
         axis_map = list(range(operand_rank))
     else:
@@ -308,16 +316,16 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
             operand_dim = operand_shape[operand_axis]
             if isinstance(result_dim, StringAttr) and isinstance(operand_dim, StringAttr):
                 if result_dim.data != operand_dim.data:
-                    raise NnLoweringError("reduce shape mismatch")
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce shape mismatch")
             elif isinstance(result_dim, (IntegerAttr, IntAttr)) and isinstance(
                 operand_dim, (IntegerAttr, IntAttr)
             ):
                 result_value = result_dim.value.data if isinstance(result_dim, IntegerAttr) else result_dim.data
                 operand_value = operand_dim.value.data if isinstance(operand_dim, IntegerAttr) else operand_dim.data
                 if result_value != operand_value:
-                    raise NnLoweringError("reduce shape mismatch")
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce shape mismatch")
             else:
-                raise NnLoweringError("reduce shape mismatch")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce shape mismatch")
     dynamic_shape = _build_alloc_dynamic_shape_from_operand(block, op, operand, result_type, axis_map)
     alloc = DmaAllocOp(dynamic_shape, result_type)
     block.insert_op_before(alloc, op)
@@ -355,7 +363,7 @@ class _LowerNnReduceSumPattern(RewritePattern):
     def match_and_rewrite(self, op: NnReduceSumOp, rewriter: PatternRewriter, /) -> None:
         block = op.parent_block()
         if block is None:
-            raise NnLoweringError("nn op must be inside a block")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op must be inside a block")
         ensure_expected_op_name(op, "nn.reduce_sum")
         _lower_reduce(block, op, kind="sum")
         rewriter.has_done_action = True
@@ -384,7 +392,7 @@ class _LowerNnReduceMinPattern(RewritePattern):
     def match_and_rewrite(self, op: NnReduceMinOp, rewriter: PatternRewriter, /) -> None:
         block = op.parent_block()
         if block is None:
-            raise NnLoweringError("nn op must be inside a block")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op must be inside a block")
         ensure_expected_op_name(op, "nn.reduce_min")
         _lower_reduce(block, op, kind="min")
         rewriter.has_done_action = True
@@ -413,7 +421,7 @@ class _LowerNnReduceMaxPattern(RewritePattern):
     def match_and_rewrite(self, op: NnReduceMaxOp, rewriter: PatternRewriter, /) -> None:
         block = op.parent_block()
         if block is None:
-            raise NnLoweringError("nn op must be inside a block")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op must be inside a block")
         ensure_expected_op_name(op, "nn.reduce_max")
         _lower_reduce(block, op, kind="max")
         rewriter.has_done_action = True
@@ -442,7 +450,7 @@ class _RejectNnSoftmaxPattern(RewritePattern):
     def match_and_rewrite(self, op: NnSoftmaxOp, rewriter: PatternRewriter, /) -> None:
         _ = rewriter
         ensure_expected_op_name(op, "nn.softmax")
-        raise NnLoweringError("nn.softmax must be decomposed before lower-nn")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.softmax must be decomposed before lower-nn")
 
 
 def reduce_softmax_patterns() -> list[RewritePattern]:

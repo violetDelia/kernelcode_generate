@@ -988,7 +988,7 @@ def test_transpose_op_verify_success() -> None:
     )
     result_type = _make_simple_memory_type(
         [StringAttr("N"), StringAttr("M"), IntAttr(4)],
-        [IntAttr(4), IntAttr(8), IntAttr(1)],
+        [StringAttr("M*4"), IntAttr(4), IntAttr(1)],
         space="global",
     )
     inp = _TestOp(result_types=[input_type]).results[0]
@@ -1096,7 +1096,7 @@ def test_transpose_module_round_trip() -> None:
     ctx = _build_context()
     text = """builtin.module {
   %0 = "test.op"() : () -> !nn.memory<[M, N, 4], [8, 4, 1], i32, #nn.space<global>>
-  %1 = "nn.transpose"(%0) {perm = [1 : i64, 0 : i64, 2 : i64], space = #nn.space<global>} : (!nn.memory<[M, N, 4], [8, 4, 1], i32, #nn.space<global>>) -> !nn.memory<[N, M, 4], [4, 8, 1], i32, #nn.space<global>>
+  %1 = "nn.transpose"(%0) {perm = [1 : i64, 0 : i64, 2 : i64], space = #nn.space<global>} : (!nn.memory<[M, N, 4], [8, 4, 1], i32, #nn.space<global>>) -> !nn.memory<[N, M, 4], [M*4, 4, 1], i32, #nn.space<global>>
 }
 """
     module = Parser(ctx, text).parse_module()
@@ -2404,7 +2404,7 @@ def test_unary_float_family_and_reduce_helper_edges() -> None:
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 功能说明: 覆盖 nn.memory 维度列表 parser 的当前公开文本范围，以及 mixed scalar add verifier 的剩余错误路径。
-# 测试目的: 锁定 dim list 在 `identifier/integer/?/+/-/*/()` 范围内的 parse/print 行为，并补齐 mixed add 在 space/stride/element_type 方向的异常短语。
+# 测试目的: 锁定 dim list 在标识符、整数、`?`、`+`、`-`、`*`、`//` 与括号范围内的 parse/print 行为，并补齐 mixed add 在 space/stride/element_type 方向的异常短语。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_dim_parser_and_mixed_add_public_parser_contracts
 # 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
@@ -2417,6 +2417,16 @@ def test_memory_dim_parser_and_mixed_add_public_parser_contracts() -> None:
     ).parse_attribute()
     assert isinstance(parsed, NnMemoryType)
     assert _print_ir(parsed) == "!nn.memory<[M + 1, (K + 2), tail], [tail, 1, ?], i32, #nn.space<global>>"
+
+    floordiv_expr = "(-DW*(KW - 1) + PL + PR + W - 1) // SW + 1"
+    parsed_floordiv = Parser(
+        ctx,
+        f"!nn.memory<[B, C, {floordiv_expr}], [C*{floordiv_expr}, {floordiv_expr}, 1], i32, #nn.space<global>>",
+    ).parse_attribute()
+    assert isinstance(parsed_floordiv, NnMemoryType)
+    assert _print_ir(parsed_floordiv) == (
+        f"!nn.memory<[B, C, {floordiv_expr}], [C*{floordiv_expr}, {floordiv_expr}, 1], i32, #nn.space<global>>"
+    )
 
     memory_type = _make_simple_memory_type(
         [IntAttr(2), IntAttr(3)],

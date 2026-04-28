@@ -1,7 +1,7 @@
 /*
 功能说明:
 - 提供 include/api/cost/Core.h 的 npu_demo 默认承接层。
-- 当前只复用公共 `CostKind` 与 `S_INT`，不额外引入 target 私有 kind。
+- 当前只复用公共 `CostKind` 与 `S_INT`，并承接 `compute/memory/DMA/MAC` 四个公开 kind 别名。
 
 使用示例:
 - #include "include/npu_demo/cost/Core.h"

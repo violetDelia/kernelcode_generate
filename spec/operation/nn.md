@@ -832,7 +832,7 @@ out = transpose(value, perm=[1, 0, 2])
 
 - 返回 `Memory` 语义结果。
 - `out.shape` 按 `perm` 重排。
-- 若 `value.stride` 存在，`out.stride` 按相同 `perm` 重排。
+- `out.stride` 按 `out.shape` 生成默认连续 stride；`transpose` 表示物化搬运，不返回 source 的非连续视图。
 - `out.dtype` 与 `out.space` 继承自 `value`。
 
 ### `softmax(value, axis=-1)`

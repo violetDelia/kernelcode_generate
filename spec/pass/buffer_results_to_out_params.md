@@ -8,7 +8,6 @@
 
 ## API 列表
 
-- `PassContractError(message: str)`
 - `BufferResultsToOutParamsPass`
   - `—— apply(ctx: Context, module: ModuleOp)`
   - `—— run(module: object) -> ModuleOp`
@@ -62,7 +61,7 @@
   - 返回值个数与函数签名不一致
 - 对于当前未覆盖而又无法安全同步改写的场景，必须显式报错，不允许静默保留双口径。
 - 公开 `Pass` 名保持 `BufferResultsToOutParams*` 前缀。
-- 公开错误类型统一使用 `kernel_gen.passes.PassContractError`。
+- 显式失败统一使用 `kernel_gen.core.error.KernelCodeError(ErrorModule.PASS, message)`。
 - `BufferResultsToOutParamsCallPattern`、`BufferResultsToOutParamsFuncPattern` 与 `get_buffer_results_to_out_params_pass_patterns(...)` 也属于当前公开接口。
 - `OutputSignature`、`RewriteTarget` 只作为文件内实现细节存在，不属于公开 API；实现与测试都不得跨文件直接依赖这些 helper 类名。
 
@@ -77,12 +76,12 @@
 
 ## 公开接口
 
-### `class PassContractError(ValueError)`
+### 失败类型
 
-- 功能说明：`kernel_gen.passes` 共享的显式错误类型。
+- 功能说明：使用 `kernel_gen.core.error.KernelCodeError` 表示显式失败。
 - 参数说明：
   - `message: str`：错误文本。
-- 使用示例：`raise PassContractError("external declaration is not supported")`
+- 使用示例：`raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "external declaration is not supported")`
 - 注意事项：所有“半改半留必须失败”的场景都应统一抛出该错误。
 - 返回与限制：抛错即终止当前 pass。
 
@@ -171,7 +170,7 @@ patterns = get_buffer_results_to_out_params_pass_patterns(targets)
 - caller 的 canonical public path 固定为：
 
 ```python
-from kernel_gen.passes import PassContractError
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.passes.buffer_results_to_out_params import (
     BufferResultsToOutParamsPass,
     BufferResultsToOutParamsCallPattern,

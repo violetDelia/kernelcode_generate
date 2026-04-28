@@ -24,7 +24,8 @@ from __future__ import annotations
 
 from xdsl.parser import Parser
 
-from kernel_gen.context import build_default_context
+from kernel_gen.core.context import build_default_context
+from kernel_gen.core.config import restore_config, set_target, snapshot_config
 from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c
 from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
 
@@ -133,7 +134,7 @@ def run_emitc_case(
     - 解析带注释头的 expectation case 文本。
     - 当前接受未声明 `COMPILE_ARGS`、`// COMPILE_ARGS: --pass no-op` 与
       `// COMPILE_ARGS: --pass buffer-results-to-out-params`。
-    - 对解析得到的 `builtin.module` 执行 `emit_c(config={\"target\": \"npu_demo\"})`，再按给定片段做包含/排除断言。
+    - 对解析得到的 `builtin.module` 设置 `target="npu_demo"` 后执行 `emit_c(module, EmitCContext())`，再按给定片段做包含/排除断言。
 
     使用示例:
     - `run_emitc_case(case_text, source_path="inline", op_name="tuner.cost.kernel.add", expected_snippets=["cost::add"], forbidden_snippets=["tuner.cost("])`
@@ -156,7 +157,12 @@ def run_emitc_case(
     ctx = build_default_context()
     module = Parser(ctx, input_ir).parse_module()
     _apply_compile_args(module, compile_args=compile_args, ctx=ctx)
-    source = emit_c(module, EmitCContext(config={"target": "npu_demo"}))
+    snapshot = snapshot_config()
+    try:
+        set_target("npu_demo")
+        source = emit_c(module, EmitCContext())
+    finally:
+        restore_config(snapshot)
 
     for snippet in expected_snippets:
         assert snippet in source, (

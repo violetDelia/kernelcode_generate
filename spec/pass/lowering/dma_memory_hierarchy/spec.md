@@ -138,8 +138,8 @@ dma.slice(%lm, %sm, zero_offsets, full_sizes, unit_strides)
 
 ```text
 %sm = dma.alloc ... space=SM
-dma.deslice(%lm, %sm, zero_offsets, full_sizes, unit_strides)
-dma.deslice(%sm, %gm, zero_offsets, full_sizes, unit_strides)
+dma.deslice(%sm, %lm, zero_offsets, full_sizes, unit_strides)
+dma.deslice(%gm, %sm, zero_offsets, full_sizes, unit_strides)
 ```
 
 - 窗口读路径中，`GM -> SM` 的 `dma.slice` 必须保留输入窗口的原始 `offsets/sizes` 并使用 unit stride；后续 `SM -> LM` 的 `dma.slice` 必须使用 `zero_offsets + window_sizes + unit_strides`。

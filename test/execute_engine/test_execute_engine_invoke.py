@@ -37,13 +37,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.execute_engine import (
     FAILURE_RUNTIME_THROW_OR_ABORT,
     FAILURE_SYMBOL_RESOLVE_FAILED,
     CompiledKernel,
     ExecuteRequest,
     ExecutionEngine,
-    ExecutionEngineError,
 )
 
 
@@ -210,7 +210,7 @@ def test_execute_engine_invoke_ok_via_request_args() -> None:
 # 对应测试文件路径: test/execute_engine/test_execute_engine_invoke.py
 def test_execute_engine_invoke_runtime_throw_or_abort_on_args_none() -> None:
     kernel = _compile_minimal_kernel()
-    with pytest.raises(ExecutionEngineError) as exc:
+    with pytest.raises(KernelCodeError) as exc:
         kernel.execute()
     assert exc.value.failure_phrase == FAILURE_RUNTIME_THROW_OR_ABORT
 
@@ -226,7 +226,7 @@ def test_execute_engine_invoke_runtime_throw_or_abort_on_args_none() -> None:
 # 对应测试文件路径: test/execute_engine/test_execute_engine_invoke.py
 def test_execute_engine_invoke_runtime_throw_or_abort_on_args_not_tuple() -> None:
     kernel = _compile_minimal_kernel()
-    with pytest.raises(ExecutionEngineError) as exc:
+    with pytest.raises(KernelCodeError) as exc:
         kernel.execute(args=[])  # type: ignore[arg-type]
     assert exc.value.failure_phrase == FAILURE_RUNTIME_THROW_OR_ABORT
 
@@ -242,7 +242,7 @@ def test_execute_engine_invoke_runtime_throw_or_abort_on_args_not_tuple() -> Non
 # 对应测试文件路径: test/execute_engine/test_execute_engine_invoke.py
 def test_execute_engine_invoke_runtime_throw_or_abort_on_unsupported_runtime_arg() -> None:
     kernel = _compile_minimal_kernel()
-    with pytest.raises(ExecutionEngineError) as exc:
+    with pytest.raises(KernelCodeError) as exc:
         kernel.execute(args=(True,))  # type: ignore[arg-type]
     assert exc.value.failure_phrase == FAILURE_RUNTIME_THROW_OR_ABORT
 
@@ -258,7 +258,7 @@ def test_execute_engine_invoke_runtime_throw_or_abort_on_unsupported_runtime_arg
 # 对应测试文件路径: test/execute_engine/test_execute_engine_invoke.py
 def test_execute_engine_invoke_symbol_resolve_failed_on_empty_entry_point() -> None:
     kernel = _compile_minimal_kernel()
-    with pytest.raises(ExecutionEngineError) as exc:
+    with pytest.raises(KernelCodeError) as exc:
         kernel.execute(request=ExecuteRequest(args=(), entry_point=" "))
     assert exc.value.failure_phrase == FAILURE_SYMBOL_RESOLVE_FAILED
 
@@ -299,7 +299,7 @@ def test_execute_engine_invoke_ok_with_memory_int_float_args() -> None:
 # 对应测试文件路径: test/execute_engine/test_execute_engine_invoke.py
 def test_execute_engine_invoke_symbol_resolve_failed_on_entry_point_mismatch() -> None:
     kernel = _compile_minimal_kernel()
-    with pytest.raises(ExecutionEngineError) as exc:
+    with pytest.raises(KernelCodeError) as exc:
         kernel.execute(args=(), entry_point="kg_execute_entry_v2")
     assert exc.value.failure_phrase == FAILURE_SYMBOL_RESOLVE_FAILED
 
@@ -318,7 +318,7 @@ def test_execute_engine_invoke_symbol_resolve_failed_on_entry_point_mismatch() -
 def test_execute_engine_invoke_runtime_throw_or_abort_on_memory_not_contiguous() -> None:
     kernel = _compile_minimal_kernel()
     value = _FakeTorchTensor(shape=(2, 2), dtype="float32", contiguous=False)
-    with pytest.raises(ExecutionEngineError) as exc:
+    with pytest.raises(KernelCodeError) as exc:
         kernel.execute(args=(value,))
     assert exc.value.failure_phrase == FAILURE_RUNTIME_THROW_OR_ABORT
 
@@ -337,6 +337,6 @@ def test_execute_engine_invoke_runtime_throw_or_abort_on_memory_not_contiguous()
 def test_execute_engine_invoke_runtime_throw_or_abort_on_memory_dtype_missing() -> None:
     kernel = _compile_minimal_kernel()
     value = _FakeTorchTensor(shape=(2, 2), dtype="")
-    with pytest.raises(ExecutionEngineError) as exc:
+    with pytest.raises(KernelCodeError) as exc:
         kernel.execute(args=(value,))
     assert exc.value.failure_phrase == FAILURE_RUNTIME_THROW_OR_ABORT

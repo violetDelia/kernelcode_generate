@@ -1,7 +1,7 @@
 """Emit registry helpers for `gen_kernel.emit`.
 
 创建者: OpenAI Codex
-最后一次更改: OpenAI Codex
+最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 定义 `emit` 层公开注册器与 dispatch 合同。
@@ -106,7 +106,7 @@ def emit_c_name_impl(*types: type[Any], target: str) -> Callable[[NameHandler], 
 
 
 def dispatch_op(op: Operation, ctx: EmitCContext) -> str | None:
-    target_registry = _TARGET_OP_REGISTRY.get(ctx.config["target"], {})
+    target_registry = ctx.target_entry(_TARGET_OP_REGISTRY, {})
     for cls in type(op).__mro__:
         handler = target_registry.get(cls)
         if handler is not None:
@@ -119,7 +119,7 @@ def dispatch_op(op: Operation, ctx: EmitCContext) -> str | None:
 
 def dispatch_value(value: SSAValue, ctx: EmitCContext) -> str | None:
     owner = value.owner
-    target_registry = _TARGET_VALUE_REGISTRY.get(ctx.config["target"], {})
+    target_registry = ctx.target_entry(_TARGET_VALUE_REGISTRY, {})
     for cls in type(owner).__mro__:
         handler = target_registry.get(cls)
         if handler is not None:
@@ -131,7 +131,7 @@ def dispatch_value(value: SSAValue, ctx: EmitCContext) -> str | None:
 
 
 def dispatch_type(attr: Any, ctx: EmitCContext) -> str | None:
-    target_registry = _TARGET_TYPE_REGISTRY.get(ctx.config["target"], {})
+    target_registry = ctx.target_entry(_TARGET_TYPE_REGISTRY, {})
     for cls in type(attr).__mro__:
         handler = target_registry.get(cls)
         if handler is not None:
@@ -140,7 +140,7 @@ def dispatch_type(attr: Any, ctx: EmitCContext) -> str | None:
 
 
 def dispatch_attr(attr: Any, ctx: EmitCContext) -> str | None:
-    target_registry = _TARGET_ATTR_REGISTRY.get(ctx.config["target"], {})
+    target_registry = ctx.target_entry(_TARGET_ATTR_REGISTRY, {})
     for cls in type(attr).__mro__:
         handler = target_registry.get(cls)
         if handler is not None:
@@ -149,14 +149,14 @@ def dispatch_attr(attr: Any, ctx: EmitCContext) -> str | None:
 
 
 def dispatch_include(ctx: EmitCContext) -> str:
-    handler = _TARGET_INCLUDE_REGISTRY.get(ctx.config["target"])
+    handler = ctx.target_entry(_TARGET_INCLUDE_REGISTRY)
     if handler is None:
         return ""
     return handler(ctx)
 
 
 def dispatch_name(value: SSAValue, ctx: EmitCContext) -> str | None:
-    target_registry = _TARGET_NAME_REGISTRY.get(ctx.config["target"], {})
+    target_registry = ctx.target_entry(_TARGET_NAME_REGISTRY, {})
     if isinstance(value, BlockArgument):
         for cls in type(value).__mro__:
             handler = target_registry.get(cls)

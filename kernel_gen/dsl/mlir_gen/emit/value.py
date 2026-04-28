@@ -20,6 +20,9 @@ API 列表:
 """
 
 from __future__ import annotations
+from typing import TYPE_CHECKING
+
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import IndexType, IntegerType
@@ -28,15 +31,10 @@ from xdsl.ir import SSAValue
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolIterType, SymbolValueType
 from kernel_gen.dsl.ast import ConstAST, ScalarArgAST, TensorAST, VarAST
 
-from .context import EmitContext
+if TYPE_CHECKING:
+    from . import EmitContext
 
 
-class LoweringError(ValueError):
-    """当前文件内使用的基础 value emit 失败错误。"""
-
-    def __init__(self, message: str, location: object | None = None) -> None:
-        super().__init__(message)
-        self.location = location
 
 
 def _lookup_public_symbol(name: str, ctx: EmitContext, location: object | None) -> SSAValue:
@@ -44,7 +42,7 @@ def _lookup_public_symbol(name: str, ctx: EmitContext, location: object | None) 
 
     value = ctx.symbols.get(name)
     if not isinstance(value, SSAValue):
-        raise LoweringError("Unknown input reference", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unknown input reference", location=location)
     return value
 
 
@@ -57,7 +55,7 @@ def _coerce_index_operand(value: SSAValue, ctx: EmitContext, location: object | 
         op = arith.IndexCastOp(value, IndexType())
         ctx.builder.add_op(op)
         return op.result
-    raise LoweringError("Index operand must be integer or index", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index operand must be integer or index", location=location)
 
 
 def emit_value(expr: object, ctx: EmitContext) -> object:
@@ -86,7 +84,7 @@ def emit_value(expr: object, ctx: EmitContext) -> object:
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/value.py](kernel_gen/dsl/mlir_gen/emit/value.py)
     """
     if not isinstance(expr, (ConstAST, ScalarArgAST, TensorAST, VarAST)):
-        raise LoweringError("emit_value only supports ConstAST/ScalarArgAST/TensorAST/VarAST", location=getattr(expr, "location", None))
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "emit_value only supports ConstAST/ScalarArgAST/TensorAST/VarAST", location=getattr(expr, "location", None))
     from . import emit_mlir as public_emit_mlir
 
     return public_emit_mlir(expr, ctx)
@@ -119,12 +117,12 @@ def emit_symbol_const(value: int | ConstAST, ctx: EmitContext) -> SSAValue:
     """
     if isinstance(value, ConstAST):
         if not isinstance(value.value, int):
-            raise LoweringError("symbol.const requires int literal", location=value.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "symbol.const requires int literal", location=value.location)
         op = SymbolConstOp(value.value)
         ctx.builder.add_op(op)
         return op.result
     if not isinstance(value, int):
-        raise LoweringError("symbol.const requires int literal", location=None)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "symbol.const requires int literal", location=None)
     op = SymbolConstOp(value)
     ctx.builder.add_op(op)
     return op.result
@@ -161,7 +159,7 @@ def emit_index_operand(expr: object, ctx: EmitContext) -> SSAValue:
             return emit_symbol_const(expr, ctx)
         if isinstance(expr.value, str):
             return _coerce_index_operand(_lookup_public_symbol(expr.value, ctx, expr.location), ctx, expr.location)
-        raise LoweringError("Index must be int or str", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index must be int or str", location=expr.location)
     if isinstance(expr, int):
         return emit_symbol_const(expr, ctx)
     if isinstance(expr, str):
@@ -170,4 +168,4 @@ def emit_index_operand(expr: object, ctx: EmitContext) -> SSAValue:
         return _coerce_index_operand(_lookup_public_symbol(expr, ctx, location), ctx, location)
     if isinstance(expr, (ScalarArgAST, VarAST)):
         return _coerce_index_operand(_lookup_public_symbol(expr.name, ctx, location), ctx, location)
-    raise LoweringError("Unsupported index expression", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)

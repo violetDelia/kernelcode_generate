@@ -24,6 +24,7 @@
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::select(Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_sum(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
 - `template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType> Status npu_demo::matmul(Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs)`
 - `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col1d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right)`
 - `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col2d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`
@@ -31,7 +32,7 @@
 ## 文档信息
 
 - 创建者：`朽木露琪亚`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`守护最好的爱莉希雅`
 - `spec`：[`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md)
 - `统一头文件`：[`include/api/Kernel.h`](../../../include/api/Kernel.h)
 - `功能实现`：[`include/api/Kernel.h`](../../../include/api/Kernel.h)、[`include/npu_demo/Kernel.h`](../../../include/npu_demo/Kernel.h)
@@ -55,8 +56,8 @@
 
 ## 限制与边界
 
-- 本规范只覆盖当前已进入合同真源的 helper：`add`、`sub`、`mul`、`truediv`、`eq`、`ne`、`lt`、`le`、`gt`、`ge`、`exp`、`select`、`reduce_sum`、`reduce_min`、`matmul`、`img2col1d`、`img2col2d`。
-- `broadcast`、`broadcast_to`、`softmax`、`cast`、`reduce_max` 与其他旧 `Nn` 公开名，不属于本轮 `Kernel` 公共接口。
+- 本规范只覆盖当前已进入合同真源的 helper：`add`、`sub`、`mul`、`truediv`、`eq`、`ne`、`lt`、`le`、`gt`、`ge`、`exp`、`select`、`reduce_sum`、`reduce_min`、`reduce_max`、`matmul`、`img2col1d`、`img2col2d`。
+- `broadcast`、`broadcast_to`、`softmax`、`cast` 与其他旧 `Nn` 公开名，不属于本轮 `Kernel` 公共接口。
 - 除 `matmul`、`img2col1d`、`img2col2d` 外，当前公开 helper 默认要求输入与输出使用同一 `MemorySpace`；若后端实现不支持某个合法组合，必须显式失败，不能静默回退。
 - 所有 helper 都要求调用方显式提供输出 `Memory`，统一返回 `Status`；不得通过函数返回值承接输出 memory。
 - `include/api/Kernel.h` 只冻结公共 helper 名、模板顺序、参数顺序与最小类型边界，不承接后端私有实现细节。
@@ -209,12 +210,12 @@ Status st = npu_demo::select<GM, float, float>(out, cond, lhs, rhs);
 - 返回语义：返回 `select` helper 的承接状态。
 - 限制条件：本轮不开放标量条件、标量输入或跨空间选择。
 
-### `reduce_sum` / `reduce_min`
+### `reduce_sum` / `reduce_min` / `reduce_max`
 
 功能说明：
 
 - 定义当前已进入合同真源的 reduce helper 公共接口。
-- 适用于 `kernel.reduce(kind="sum")` 与 `kernel.reduce_min` 的稳定公开落点。
+- 适用于 `kernel.reduce(kind="sum" | "min" | "max")` 与 `kernel.reduce_min` 的稳定公开落点。
 
 参数说明：
 
@@ -232,19 +233,19 @@ Status st = npu_demo::select<GM, float, float>(out, cond, lhs, rhs);
 
 Status st = npu_demo::reduce_sum<GM, float, float>(out, input, 1);
 Status st2 = npu_demo::reduce_min<TSM, int32_t, int32_t>(out, input, 0);
+Status st3 = npu_demo::reduce_max<TSM, float, float>(out, input, 1);
 ```
 
 注意事项：
 
 - 参数顺序固定为 `out -> input -> axis`。
 - 模板顺序固定为 `Space -> InType -> OutType`。
-- `reduce_max` 尚未进入本轮公共 `Kernel` 接口。
 
 返回与限制：
 
 - 返回类型：`Status`。
 - 返回语义：返回规约 helper 的承接状态。
-- 限制条件：本轮只冻结 `reduce_sum` 与 `reduce_min`，不定义额外 keepdim/axis 容器变体。
+- 限制条件：本轮只冻结 `reduce_sum`、`reduce_min` 与 `reduce_max`，不定义额外 keepdim/axis 容器变体。
 
 ### `matmul`
 

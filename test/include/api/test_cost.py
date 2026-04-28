@@ -1,11 +1,11 @@
 """API cost compile tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `include/api/cost/*.h` 的公开成本 helper 声明。
-- 结合 `include/npu_demo/cost/*.h` 提供的默认实现，锁定 compute / memory 两 kind 与 `S_INT` 返回合同。
+- 结合 `include/npu_demo/cost/*.h` 提供的默认实现，锁定 compute / memory / DMA / MAC 四种 kind 与 `S_INT` 返回合同。
 
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路为 C++ 头文件，按规则豁免 `pytest-cov` 覆盖率统计。
@@ -105,7 +105,7 @@ def _compile_and_run(source: str) -> None:
 # COST-API-001
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 测试目的: 验证 `include/api/cost/Core.h` 只公开 compute / memory 两种 kind，且不再残留 kind2 / kind3。
+# 测试目的: 验证 `include/api/cost/Core.h` 公开 compute / memory / DMA / MAC 四种 kind，且不再残留 kind2 / kind3。
 # 使用示例: `pytest -q test/include/api/test_cost.py -k test_include_api_cost_core_exports_compute_and_memory`
 # 对应功能实现文件路径: `include/api/cost/Core.h`
 # 对应 spec 文件路径: `spec/include/api/cost/Core.md`
@@ -116,8 +116,12 @@ def test_include_api_cost_core_exports_compute_and_memory() -> None:
     assert "enum class CostKind" in public_header
     assert "Compute" in public_header
     assert "Memory" in public_header
+    assert "DMA" in public_header
+    assert "MAC" in public_header
     assert "inline constexpr cost::CostKind compute" in public_header
     assert "inline constexpr cost::CostKind memory" in public_header
+    assert "inline constexpr cost::CostKind DMA" in public_header
+    assert "inline constexpr cost::CostKind MAC" in public_header
     assert "Kind2" not in public_header
     assert "Kind3" not in public_header
 
@@ -128,9 +132,14 @@ def test_include_api_cost_core_exports_compute_and_memory() -> None:
 int main() {
     npu_demo::cost::CostKind compute_kind = npu_demo::compute;
     npu_demo::cost::CostKind memory_kind = npu_demo::memory;
+    npu_demo::cost::CostKind dma_kind = npu_demo::DMA;
+    npu_demo::cost::CostKind mac_kind = npu_demo::MAC;
     S_INT cost = compute_kind == npu_demo::compute ? 0 : 1;
     if (memory_kind != npu_demo::memory) {
         return 1;
+    }
+    if (dma_kind != npu_demo::DMA || mac_kind != npu_demo::MAC) {
+        return 2;
     }
     return static_cast<int>(cost);
 }
@@ -140,8 +149,8 @@ int main() {
 
 # COST-API-002
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 测试目的: 验证 `include/api/cost/Kernel.h` 的 add / matmul 成本接口可独立实例化并返回 `S_INT`。
+# 最后一次更改: 守护最好的爱莉希雅
+# 测试目的: 验证 `include/api/cost/Kernel.h` 的 add / reduce_max / matmul 成本接口可独立实例化并返回 `S_INT`。
 # 使用示例: `pytest -q test/include/api/test_cost.py -k test_include_api_cost_kernel_signatures_compile`
 # 对应功能实现文件路径: `include/api/cost/Kernel.h`
 # 对应 spec 文件路径: `spec/include/api/cost/Kernel.md`
@@ -170,7 +179,9 @@ int main() {
     Memory<TLM1, float> out_mat(out_data, mat_shape, mat_stride, 2, MemoryFormat::Norm);
 
     S_INT add_cost =
-        npu_demo::cost::add<GM, float, float, npu_demo::compute>(out, lhs, rhs);
+        npu_demo::cost::add<GM, float, float, npu_demo::MAC>(out, lhs, rhs);
+    S_INT reduce_max_cost =
+        npu_demo::cost::reduce_max<TSM, float, float, npu_demo::compute>(lhs_mat, rhs_mat, 1);
     S_INT matmul_cost = npu_demo::cost::matmul<
         TSM,
         TSM,
@@ -178,8 +189,8 @@ int main() {
         float,
         float,
         float,
-        npu_demo::memory>(out_mat, lhs_mat, rhs_mat);
-    if (add_cost != 0 || matmul_cost != 0) {
+        npu_demo::MAC>(out_mat, lhs_mat, rhs_mat);
+    if (add_cost != 0 || reduce_max_cost != 0 || matmul_cost != 0) {
         return fail(1);
     }
     return 0;
@@ -219,7 +230,7 @@ int main() {
     Memory<TSM, float> target(target_data, shape, stride, 1, MemoryFormat::Norm);
 
     S_INT copy_cost =
-        npu_demo::cost::copy<TSM, GM, float, npu_demo::memory>(target, source);
+        npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA>(target, source);
     S_INT slice_cost =
         npu_demo::cost::slice<TSM, GM, float, npu_demo::memory>(target, source, offset, size, step);
     S_INT deslice_cost =

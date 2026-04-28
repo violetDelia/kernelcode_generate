@@ -36,7 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.passes.common import PassContractError
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.passes.inline import InlinePass
 
 
@@ -99,5 +99,5 @@ def test_inline_expands_private_helper_and_cleans_dead_helper() -> None:
 
 
 def test_inline_rejects_non_module() -> None:
-    with pytest.raises(PassContractError, match=r"^InlineError: module must be builtin.module$"):
+    with pytest.raises(KernelCodeError, match=r"^InlineError: module must be builtin.module$"):
         InlinePass().run(object())

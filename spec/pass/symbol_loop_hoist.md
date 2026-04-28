@@ -8,7 +8,6 @@
 
 ## API 列表
 
-- `class SymbolLoopHoistError(message: str)`
 - `class SymbolLoopHoistPass()`
   - `name: str`
   - `apply(ctx: Context, module: ModuleOp) -> None`
@@ -43,7 +42,7 @@
 
 ## 目标
 
-- 保持公开 pass 名称 `symbol-loop-hoist` 与根路径导入 `kernel_gen.passes.symbol_loop_hoist.SymbolLoopHoistPass` / `SymbolLoopHoistError` 稳定。
+- 保持公开 pass 名称 `symbol-loop-hoist` 与根路径导入 `kernel_gen.passes.symbol_loop_hoist.SymbolLoopHoistPass` 稳定；失败类型统一使用 `kernel_gen.core.error.KernelCodeError`。
 - 保持 `kernel_gen.passes.lowering` 与 `kernel_gen.passes.lowering.symbol_loop_hoist` 当前对同名对象的 re-export 继续可用，不在本阶段移除。
 - 保持 `build_registered_pass("symbol-loop-hoist")` 可构造出该 pass，并返回可直接执行的 xDSL `ModulePass` 实例。
 - 将公开语义收口为“每种受支持 op 一个公开 RewritePattern + 反复驱动直到当前 `symbol.for` 达到稳定态”，而不是把外提行为描述为不透明的手写循环。
@@ -83,7 +82,7 @@
 
 ## 公开接口
 
-### `class SymbolLoopHoistError(message: str)`
+### 失败类型
 
 功能说明：
 
@@ -97,9 +96,9 @@
 使用示例：
 
 ```python
-from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistError
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
-raise SymbolLoopHoistError("SymbolLoopHoistVerifierError: ...")
+raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "SymbolLoopHoistVerifierError: ...")
 ```
 
 注意事项：
@@ -204,7 +203,7 @@ SymbolLoopHoistPass().apply(Context(), module)
 返回与限制：
 
 - 返回 `None`。
-- 显式失败只能抛出 `SymbolLoopHoistError`。
+- 显式失败只能抛出 `KernelCodeError`。
 
 #### `run(module: ModuleOp) -> ModuleOp`
 
@@ -323,7 +322,7 @@ assert isinstance(patterns[0], SymbolConstHoistPattern)
 - 测试文件：[`test/pass/test_symbol_loop_hoist.py`](../../test/pass/test_symbol_loop_hoist.py)
 - 执行命令：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/pass/test_symbol_loop_hoist.py`
 - 测试目标：
-  - 验证 `SymbolLoopHoistPass` / `SymbolLoopHoistError` / 公开 pattern / getter 的根路径导入与 `kernel_gen.passes.lowering` re-export 可用。
+  - 验证 `SymbolLoopHoistPass` / `KernelCodeError` / 公开 pattern / getter 的根路径导入与 `kernel_gen.passes.lowering` re-export 可用。
   - 验证 `apply(ctx, module)` 与 `run(module)` 共用同一公开语义。
   - 验证 `symbol.const`、`tuner.param`、`symbol.get_dim/get_stride`、`symbol.add/sub/mul/div/floordiv` 的外提主路径。
   - 验证 loop iv / loop-carried 依赖时保持原位不动。

@@ -31,13 +31,11 @@ def test_tools_package_public_exports() -> None:
     exec("from kernel_gen.tools import *", namespace)
     public_names = sorted(name for name in namespace if not name.startswith("__"))
 
-    assert public_names == ["DslRunError", "DslRunResult"]
-    assert namespace["DslRunError"] is tools_package.DslRunError
+    assert public_names == ["DslRunResult"]
     assert namespace["DslRunResult"] is tools_package.DslRunResult
     assert callable(tools_package.dsl_run)
     assert tools_package.dsl_run.__name__ == "dsl_run"
     assert tools_package.dsl_run.__module__ == "kernel_gen.tools"
-    assert issubclass(tools_package.DslRunError, ValueError)
     assert tools_package.DslRunResult.__name__ == "DslRunResult"
 
 

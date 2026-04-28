@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, Float32Type, IntAttr, ModuleOp, StringAttr, i32
+from xdsl.dialects.builtin import ArrayAttr, Float32Type, IntAttr, IntegerAttr, ModuleOp, StringAttr, i32
 from xdsl.ir import Attribute, Region
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, result_def
 from xdsl.dialects.builtin import SymbolRefAttr
@@ -35,10 +35,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolIterType, SymbolValueType
-from kernel_gen.passes.common import PassContractError
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
 from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
 
@@ -111,6 +111,32 @@ class KernelAddOp(IRDLOperation):
         super().__init__(operands=[out, lhs, rhs], attributes={"space": space})
 
 
+@irdl_op_definition
+class KernelReduceOp(IRDLOperation):
+    """测试专用的 `kernel.reduce`。"""
+
+    name = "kernel.reduce"
+    out = operand_def(Attribute)
+    input = operand_def(Attribute)
+    kind = attr_def(Attribute)
+    axis = attr_def(Attribute)
+    space = attr_def(Attribute)
+
+    def __init__(
+        self: "KernelReduceOp",
+        out: object,
+        input: object,
+        *,
+        kind: Attribute,
+        axis: Attribute,
+        space: Attribute,
+    ) -> None:
+        super().__init__(
+            operands=[out, input],
+            attributes={"kind": kind, "axis": axis, "space": space},
+        )
+
+
 def _print_ir(module: ModuleOp) -> str:
     """打印 module 为稳定文本。
 
@@ -164,6 +190,7 @@ def _build_launch_kernel_module(
     *,
     duplicate_launch: bool = False,
     conflict_attr: bool = False,
+    reduce_kind_op: bool = False,
     unsupported_op: bool = False,
     missing_callee: bool = False,
     preexisting_cost_func: bool = False,
@@ -255,6 +282,13 @@ def _build_launch_kernel_module(
         device_block.args[1],
         space=NnMemorySpaceAttr(StringAttr("global")),
     )
+    kernel_reduce = KernelReduceOp(
+        device_block.args[2],
+        device_block.args[0],
+        kind=StringAttr("max"),
+        axis=IntegerAttr(1, i32),
+        space=NnMemorySpaceAttr(StringAttr("global")),
+    )
     if conflict_attr:
         kernel_add.attributes["cost_kind"] = StringAttr("memory")
     loop_block.add_op(view)
@@ -263,6 +297,8 @@ def _build_launch_kernel_module(
     if unsupported_op:
         loop_block.add_op(UnsupportedOp())
     loop_block.add_op(kernel_add)
+    if reduce_kind_op:
+        loop_block.add_op(kernel_reduce)
     loop = SymbolForOp(
         start.result,
         device_block.args[3],
@@ -303,6 +339,31 @@ def test_launch_kernel_cost_func_pass_registry_name() -> None:
     assert LaunchKernelCostFuncPass.name == "launch-kernel-cost-func"
 
 
+# TC-LKCF-001A
+# 创建者: OpenAI Codex
+# 最后一次更改: OpenAI Codex
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证默认 `cost_kind` 固定为 `DMA|MAC`。
+# 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_default_kind_is_dma_mac
+# 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
+# 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
+# 对应测试文件路径: test/pass/test_launch_kernel_cost_func.py
+def test_launch_kernel_cost_func_default_kind_is_dma_mac() -> None:
+    module = _build_launch_kernel_module()
+
+    pass_obj = LaunchKernelCostFuncPass()
+    pass_obj.run(module)
+    module.verify()
+
+    assert pass_obj.cost_kind == "DMA|MAC"
+    funcs = [op.sym_name.data for op in module.ops if isinstance(op, func.FuncOp)]
+    assert funcs == ["wrapper", "_device_kernel", "_cost_DMA__device_kernel", "_cost_MAC__device_kernel"]
+    printed = _print_ir(module)
+    assert printed.count('cost_kind = "DMA"') == 2
+    assert printed.count('cost_kind = "MAC"') == 2
+
+
 # TC-LKCF-002
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
@@ -338,6 +399,28 @@ def test_launch_kernel_cost_func_builds_cost_function_for_compute_kind() -> None
     assert ' kind = "compute"' not in printed
     assert ' kind = "memory"' not in printed
     assert printed.count("tuner.cost") == 2
+
+
+# TC-LKCF-002A
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证 `kernel.reduce.kind` 作为业务属性会被转成 `kernel_kind`，不与 cost metadata 冲突。
+# 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_preserves_kernel_reduce_kind_as_kernel_kind
+# 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
+# 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
+# 对应测试文件路径: test/pass/test_launch_kernel_cost_func.py
+def test_launch_kernel_cost_func_preserves_kernel_reduce_kind_as_kernel_kind() -> None:
+    module = _build_launch_kernel_module(reduce_kind_op=True)
+
+    LaunchKernelCostFuncPass(cost_kind="MAC").run(module)
+    module.verify()
+
+    printed = _print_ir(module)
+    assert 'op_name = "kernel.reduce"' in printed
+    assert 'kernel_kind = "max"' in printed
+    assert "reserved attr" not in printed
 
 
 # TC-LKCF-003
@@ -435,7 +518,7 @@ def test_launch_kernel_cost_func_shared_callee_once() -> None:
 )
 def test_launch_kernel_cost_func_rejects_invalid_cost_kind(cost_kind: str) -> None:
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
     ):
         LaunchKernelCostFuncPass(cost_kind=cost_kind)
@@ -455,7 +538,7 @@ def test_launch_kernel_cost_func_rejects_invalid_cost_kind_via_registry() -> Non
     load_builtin_passes()
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
     ):
         build_registered_pass("launch-kernel-cost-func", {"cost_kind": "memory|latency|memory"})
@@ -475,7 +558,7 @@ def test_launch_kernel_cost_func_rejects_metadata_attr_conflict() -> None:
     module = _build_launch_kernel_module(conflict_attr=True)
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"reserved attr 'cost_kind'$",
     ):
         LaunchKernelCostFuncPass(cost_kind="compute").run(module)
@@ -495,7 +578,7 @@ def test_launch_kernel_cost_func_rejects_missing_callee() -> None:
     module = _build_launch_kernel_module(missing_callee=True)
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"arch\.launch callee 'missing_kernel' not found",
     ):
         LaunchKernelCostFuncPass(cost_kind="compute").run(module)
@@ -515,7 +598,7 @@ def test_launch_kernel_cost_func_rejects_unsupported_op() -> None:
     module = _build_launch_kernel_module(unsupported_op=True)
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"unsupported op 'test\.unsupported' in device function '_device_kernel'",
     ):
         LaunchKernelCostFuncPass(cost_kind="compute").run(module)
@@ -535,7 +618,7 @@ def test_launch_kernel_cost_func_rejects_existing_cost_func() -> None:
     module = _build_launch_kernel_module(preexisting_cost_func=True)
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"cost function '_cost_compute__device_kernel' already exists",
     ):
         LaunchKernelCostFuncPass(cost_kind="compute").run(module)

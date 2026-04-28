@@ -38,6 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaSliceOp, DmaViewOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
@@ -45,7 +46,6 @@ from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.target import registry as target_registry
 
 pass_module = importlib.import_module("kernel_gen.passes.dma_memory_hierarchy")
-LowerDmaMemoryHierarchyError = pass_module.LowerDmaMemoryHierarchyError
 LowerDmaMemoryHierarchyPass = pass_module.LowerDmaMemoryHierarchyPass
 
 
@@ -540,7 +540,7 @@ def test_dma_memory_hierarchy_symbol_shape_passthrough(monkeypatch: pytest.Monke
 def test_dma_memory_hierarchy_requires_sm_lm(monkeypatch: pytest.MonkeyPatch) -> None:
     module, _, _ = _build_kernel_binary_elewise_add_module("global")
     _mock_current_target_hardware(monkeypatch, sm_memory_size=0, lm_memory_size=0)
-    with pytest.raises(LowerDmaMemoryHierarchyError, match="SM/LM"):
+    with pytest.raises(KernelCodeError, match="SM/LM"):
         LowerDmaMemoryHierarchyPass().run(module)
 
 
@@ -559,7 +559,7 @@ def test_dma_memory_hierarchy_rejects_anonymous_dynamic_shape(monkeypatch: pytes
         _make_anonymous_dynamic_memory_type("global")
     )
     _mock_current_target_hardware(monkeypatch, sm_memory_size=1024, lm_memory_size=1024)
-    with pytest.raises(LowerDmaMemoryHierarchyError, match="dynamic_shape"):
+    with pytest.raises(KernelCodeError, match="dynamic_shape"):
         LowerDmaMemoryHierarchyPass().run(module)
 
 
@@ -582,5 +582,5 @@ def test_dma_memory_hierarchy_rejects_nn_ops_in_input(monkeypatch: pytest.Monkey
     func_op = func.FuncOp("main", func_type, Region(block))
     module = ModuleOp([func_op])
     _mock_current_target_hardware(monkeypatch, sm_memory_size=1024, lm_memory_size=1024)
-    with pytest.raises(LowerDmaMemoryHierarchyError, match="nn"):
+    with pytest.raises(KernelCodeError, match="nn"):
         LowerDmaMemoryHierarchyPass().run(module)

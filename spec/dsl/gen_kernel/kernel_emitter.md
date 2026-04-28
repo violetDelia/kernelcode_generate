@@ -10,7 +10,7 @@
 
 ## API 列表
 
-- `GenKernelError`
+- `KernelCodeError`
 - `KernelEmitter`
   - `—— init(ctx: EmitCContext, emit_op=emit_c_op)`
   - `—— emit(obj: object)`

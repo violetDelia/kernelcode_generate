@@ -18,6 +18,7 @@
 - `class VarAST(name: str, location: SourceLocation | None = None)`
 - `class ConstAST(value: object, location: SourceLocation | None = None)`
 - `class ForAST(var: VarAST, start: object, end: object, body: BlockAST, step: object | None = None, location: SourceLocation | None = None)`
+- `class IfAST(condition: object, true_body: BlockAST, false_body: BlockAST | None = None, location: SourceLocation | None = None)`
 - `class StoreAST(tensor: TensorAST, offset: object, stride: object | None, value: object, sizes: object | None = None, space: MemorySpace | None = None, kind: str = "store", location: SourceLocation | None = None)`
 - `class LoadAST(tensor: TensorAST, offset: object, stride: object | None, sizes: object | None = None, space: MemorySpace | None = None, kind: str = "load", location: SourceLocation | None = None)`
 - `class DmaAllocAST(shape: object, dtype: NumericType, space: MemorySpace = MemorySpace.GM, stride: object | None = None, location: SourceLocation | None = None)`
@@ -50,7 +51,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`榕`
 - `spec`：[`spec/dsl/ast/nodes.md`](../../../spec/dsl/ast/nodes.md)
 - `功能实现`：[`kernel_gen/dsl/ast/nodes.py`](../../../kernel_gen/dsl/ast/nodes.py)
 - `test`：[`test/dsl/ast/test_nodes.py`](../../../test/dsl/ast/test_nodes.py)
@@ -148,7 +149,7 @@ func = FunctionAST(name="add", inputs=[], outputs=[], body=block, location=loc)
 
 - 公开节点类型清单如下（按用途分组）：
   - 基础与容器：`ModuleAST`、`FunctionAST`、`BlockAST`、`TensorAST`、`ScalarArgAST`、`PtrArgAST`、`VarAST`、`ConstAST`。
-  - 控制与存取：`ForAST`、`StoreAST`、`LoadAST`。
+  - 控制与存取：`ForAST`、`IfAST`、`StoreAST`、`LoadAST`。
   - DMA 入口：`DmaAllocAST`、`DmaCopyAST`、`DmaCastAST`、`DmaViewAST`、`DmaReshapeAST`、`DmaFlattenAST`、`DmaFreeAST`。
   - NN 入口：`Img2ColAST`、`NnBroadcastAST`、`NnBroadcastToAST`、`NnTransposeAST`、`NnUnaryAST`、`NnReduceAST`、`NnSoftmaxAST`、`MatmulAST`、`FCAST`、`ConvAST`。
   - 表达式与调用：`BinaryExprAST`、`CompareExprAST`、`PythonCalleeCallAST`、`SymbolToFloatAST`、`TensorAxisAccessAST`。

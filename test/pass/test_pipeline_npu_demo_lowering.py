@@ -34,6 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.config import reset_config, set_target
 from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
 from kernel_gen.dsl.mlir_gen import mlir_gen
 from kernel_gen.operation.dma import deslice, slice
@@ -53,7 +54,11 @@ AttachArchInformationPass = importlib.import_module("kernel_gen.passes.attach_ar
 DecompassPass = importlib.import_module("kernel_gen.passes.decompass").DecompassPass
 NnLoweringPass = importlib.import_module("kernel_gen.passes.lowering").NnLoweringPass
 OutlineDeviceKernelPass = importlib.import_module("kernel_gen.passes.outline_device_kernel").OutlineDeviceKernelPass
+SymbolBufferHoistPass = importlib.import_module("kernel_gen.passes.symbol_buffer_hoist").SymbolBufferHoistPass
 SymbolLoopHoistPass = importlib.import_module("kernel_gen.passes.symbol_loop_hoist").SymbolLoopHoistPass
+LaunchKernelCostFuncPass = importlib.import_module(
+    "kernel_gen.passes.tuning.launch_kernel_cost_func"
+).LaunchKernelCostFuncPass
 
 
 # TC-PIPELINE-100
@@ -78,7 +83,7 @@ def test_npu_demo_lowering_pipeline_builds_pass_manager() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 功能说明: 验证 npu-demo-lowering 的固定顺序为 inline -> decompass -> lower-nn -> symbol-loop-hoist -> attach-arch-information -> outline-device-kernel。
+# 功能说明: 验证 npu-demo-lowering 的固定顺序为 inline -> decompass -> lower-nn -> symbol-loop-hoist -> symbol-buffer-hoist -> attach-arch-information -> outline-device-kernel -> launch-kernel-cost-func。
 # 测试目的: 锁定 dsl_run 新正向管线的最小公开顺序。
 # 使用示例: pytest -q test/pass/test_pipeline_npu_demo_lowering.py -k test_npu_demo_lowering_pipeline_pass_order
 # 对应功能实现文件路径: kernel_gen/passes/pipeline/npu_demo_lowering.py
@@ -104,6 +109,10 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         order.append("symbol-loop-hoist")
         return target
 
+    def _record_buffer_hoist(self: object, target: object) -> object:
+        order.append("symbol-buffer-hoist")
+        return target
+
     def _record_attach(self: object, target: object) -> object:
         order.append("attach-arch-information")
         return target
@@ -112,12 +121,18 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         _ = ctx
         order.append("outline-device-kernel")
 
+    def _record_cost(self: object, target: object) -> object:
+        order.append("launch-kernel-cost-func")
+        return target
+
     monkeypatch.setattr(InlinePass, "run", _record_inline)
     monkeypatch.setattr(DecompassPass, "apply", _record_decompose)
     monkeypatch.setattr(NnLoweringPass, "run", _record_lower)
     monkeypatch.setattr(SymbolLoopHoistPass, "run", _record_hoist)
+    monkeypatch.setattr(SymbolBufferHoistPass, "run", _record_buffer_hoist)
     monkeypatch.setattr(AttachArchInformationPass, "run", _record_attach)
     monkeypatch.setattr(OutlineDeviceKernelPass, "apply", _record_outline)
+    monkeypatch.setattr(LaunchKernelCostFuncPass, "run", _record_cost)
 
     pm = build_npu_demo_lowering_pipeline({"target": "npu_demo"})
     sentinel = object()
@@ -127,8 +142,10 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "decompass",
         "lower-nn",
         "symbol-loop-hoist",
+        "symbol-buffer-hoist",
         "attach-arch-information",
         "outline-device-kernel",
+        "launch-kernel-cost-func",
     ]
 
 
@@ -155,16 +172,23 @@ def test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain(
                 lhs_tile = slice(lhs, [m0, 0], [TILE_M, K], [1, 1], MemorySpace.TSM)
                 rhs_tile = slice(rhs, [0, n0], [K, TILE_N], [1, 1], MemorySpace.TSM)
                 partial = matmul(lhs_tile, rhs_tile)
-                deslice(partial, out, [m0, n0], [TILE_M, TILE_N], [1, 1])
+                deslice(out, partial, [m0, n0], [TILE_M, TILE_N], [1, 1])
 
     module = mlir_gen(matmul_kernel, lhs, rhs, out, tile_m, tile_n)
     pipeline = build_npu_demo_lowering_pipeline()
     pipeline.run(module)
-    source = gen_kernel(module, EmitCContext(target="npu_demo"))
+    set_target("npu_demo")
+    try:
+        source = gen_kernel(module, EmitCContext())
+    finally:
+        reset_config()
 
     assert "void matmul_kernel(" in source
+    assert "S_INT _cost_DMA_matmul_kernel_device(" in source
+    assert "S_INT _cost_MAC_matmul_kernel_device(" in source
     assert ", long long arg3, long long arg4" in source
-    assert "static void matmul_kernel_device(npu_demo::KernelContext& ctx" in source
+    assert "static void matmul_kernel_device(" in source
+    assert "npu_demo::KernelContext& ctx" not in source
     assert ", S_INT arg3, S_INT arg4" in source
     assert "npu_demo::launch<1, 1, 1, 0>(matmul_kernel_device, arg0, arg1, arg2, arg3, arg4);" in source
     assert "Memory<TSM, float>" in source

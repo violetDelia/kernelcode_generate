@@ -4,11 +4,10 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 提供 AST 访问器与访问器阶段错误类型。
+- 提供 AST 访问器，访问阶段失败统一抛出 `KernelCodeError(module="ast")`。
 - 访问器负责遍历 AST，并将节点发射交由 `emit_mlir` 处理。
 
 API 列表:
-- `AstVisitorError(message: str, location: SourceLocation | None = None)`
 - `AstVisitor(config: dict[str, object] | None = None)`
 - `AstVisitor.register(node_type: type, method_name: str) -> None`
 - `AstVisitor.visit(node: object, ctx: EmitContext) -> object`
@@ -18,7 +17,7 @@ API 列表:
 - `AstVisitor.visit_expr(expr: object, ctx: EmitContext) -> object`
 
 使用示例:
-- from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
+- from kernel_gen.dsl.ast.visitor import AstVisitor
 - visitor = AstVisitor()
 
 关联文件:
@@ -28,77 +27,14 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from kernel_gen.dsl.ast import BlockAST, FunctionAST, SourceLocation
+from kernel_gen.dsl.ast import BlockAST, FunctionAST
 
 if TYPE_CHECKING:
     from kernel_gen.dsl.mlir_gen.emit import EmitContext
-
-
-@dataclass(frozen=True)
-class AstVisitorError(Exception):
-    """AST 访问阶段错误，携带可定位信息。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 统一包装解析、遍历与节点发射阶段的错误。
-
-    使用示例:
-    - raise AstVisitorError("Unsupported syntax", location)
-
-    关联文件:
-    - spec: spec/dsl/ast/visitor.md
-    - test: test/dsl/ast/test_visitor.py
-    - 功能实现: kernel_gen/dsl/ast/visitor.py
-    """
-
-    message: str
-    location: SourceLocation | None = None
-
-    def __init__(
-        self,
-        message: str,
-        location: SourceLocation | None = None,
-    ) -> None:
-        Exception.__init__(self, message)
-        object.__setattr__(self, "message", message)
-        object.__setattr__(self, "location", location)
-
-    def __str__(self) -> str:
-        return self.message
-
-
-def _is_public_mlir_gen_error(exc: ValueError) -> bool:
-    """判断异常是否属于应当原样透传的 mlir_gen 公开错误。
-
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
-
-    功能说明:
-    - 当前只识别 `kernel_gen.dsl.mlir_gen` package-root 公开的 `MlirGenModuleError`。
-    - 避免 visitor 把 module-builder 已定义的公开失败再包成 `AstVisitorError`。
-
-    使用示例:
-    - if _is_public_mlir_gen_error(exc):
-    -     raise exc
-
-    关联文件:
-    - spec: spec/dsl/mlir_gen.md
-    - test: test/dsl/mlir_gen/test_module_builder.py
-    - 功能实现: kernel_gen/dsl/ast/visitor.py
-    """
-
-    try:
-        from kernel_gen.dsl.mlir_gen import MlirGenModuleError
-    except Exception:
-        return False
-    return isinstance(exc, MlirGenModuleError)
-
 
 class AstVisitor:
     """DSL AST 遍历访问器。
@@ -135,13 +71,13 @@ class AstVisitor:
     def visit(self, node: object, ctx: EmitContext) -> object:
         handler_name = self._registry.get(type(node))
         if not handler_name:
-            raise AstVisitorError(
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, 
                 "Unsupported AST node",
                 location=getattr(node, "location", None),
             )
         handler = getattr(self, handler_name, None)
         if handler is None:
-            raise AstVisitorError(
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, 
                 "Unsupported AST node",
                 location=getattr(node, "location", None),
             )
@@ -162,7 +98,7 @@ class AstVisitor:
     def visit_block(self, block_ast: object, ctx: EmitContext) -> object:
         statements = getattr(block_ast, "statements", None)
         if statements is None:
-            raise AstVisitorError("Unsupported block node", location=getattr(block_ast, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, "Unsupported block node", location=getattr(block_ast, "location", None))
         last_value = None
         for stmt in statements:
             last_value = self.visit_stmt(stmt, ctx)
@@ -171,17 +107,17 @@ class AstVisitor:
     def visit_stmt(self, stmt: object, ctx: EmitContext) -> object:
         try:
             return self.visit_expr(stmt, ctx)
+        except KernelCodeError:
+            raise
         except ValueError as exc:
-            if _is_public_mlir_gen_error(exc):
-                raise
-            raise AstVisitorError(str(exc), location=getattr(exc, "location", None)) from exc
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, str(exc), location=getattr(exc, "location", None)) from exc
 
     def visit_expr(self, expr: object, ctx: EmitContext) -> object:
         from kernel_gen.dsl.mlir_gen.emit import emit_mlir as emit_node_mlir
 
         try:
             return emit_node_mlir(expr, ctx)
+        except KernelCodeError:
+            raise
         except ValueError as exc:
-            if _is_public_mlir_gen_error(exc):
-                raise
-            raise AstVisitorError(str(exc), location=getattr(exc, "location", None)) from exc
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, str(exc), location=getattr(exc, "location", None)) from exc

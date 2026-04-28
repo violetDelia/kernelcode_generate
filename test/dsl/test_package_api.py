@@ -24,6 +24,7 @@ from __future__ import annotations
 import importlib
 
 import pytest
+from kernel_gen.core.error import KernelCodeError
 
 
 def test_dsl_package_public_exports() -> None:
@@ -37,7 +38,6 @@ def test_dsl_package_public_exports() -> None:
     assert public_names == sorted(
         [
             "AstVisitor",
-            "AstVisitorError",
             "BinaryExprAST",
             "BlockAST",
             "CompareExprAST",
@@ -74,8 +74,6 @@ def test_gen_kernel_package_public_exports_and_legacy_rejection() -> None:
 
     assert public_names == [
         "EmitCContext",
-        "EmitCError",
-        "GenKernelError",
         "KernelEmitter",
         "dsl_gen_kernel",
         "emit_c",
@@ -85,7 +83,6 @@ def test_gen_kernel_package_public_exports_and_legacy_rejection() -> None:
     ]
     assert "gen_signature" not in public_names
     assert "gen_body" not in public_names
-    assert namespace["GenKernelError"] is gen_kernel_package.GenKernelError
     assert namespace["EmitCContext"] is gen_kernel_package.EmitCContext
     assert namespace["KernelEmitter"] is gen_kernel_package.KernelEmitter
     assert callable(namespace["gen_kernel"])
@@ -109,12 +106,10 @@ def test_mlir_gen_package_public_exports() -> None:
     public_names = sorted(name for name in namespace if not name.startswith("__"))
 
     assert public_names == [
-        "MlirGenModuleError",
         "build_func_op",
         "build_func_op_from_ast",
         "mlir_gen",
     ]
-    assert namespace["MlirGenModuleError"] is mlir_gen_package.MlirGenModuleError
     assert callable(namespace["build_func_op"])
     assert callable(namespace["build_func_op_from_ast"])
     assert callable(namespace["mlir_gen"])
@@ -128,8 +123,6 @@ def test_mlir_gen_package_public_exports() -> None:
         "_symbol_expr_from_runtime_arg",
         "_validate_return_type",
         "EmitCContext",
-        "EmitCError",
-        "GenKernelError",
         "emit_c",
         "emit_c_op",
         "emit_c_value",

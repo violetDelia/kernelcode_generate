@@ -21,6 +21,7 @@
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.context import Context
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, ModuleOp, StringAttr
@@ -44,8 +45,8 @@ from kernel_gen.dialect.nn import (
     NnSubOp,
     NnTrueDivOp,
 )
+from kernel_gen.dialect.symbol import Symbol
 from kernel_gen.passes.common import (
-    PassContractError,
     ensure_builtin_module,
     verify_generated_ops,
 )
@@ -77,13 +78,13 @@ class NnSoftmaxDecompPattern(RewritePattern):
         input_type = op.input.type
         result_type = op.result.type
         if not isinstance(input_type, NnMemoryType) or not isinstance(result_type, NnMemoryType):
-            raise PassContractError("operand and result must be nn.memory")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "operand and result must be nn.memory")
         if input_type.shape != result_type.shape or input_type.stride != result_type.stride:
-            raise PassContractError("result type must match input shape and stride")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "result type must match input shape and stride")
         rank = len(input_type.shape.data)
         axis = op.axis.value.data
         if axis < 0 or axis >= rank:
-            raise PassContractError("normalized axis out of range")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "normalized axis out of range")
 
         reduce_shape = list(input_type.shape.data)
         reduce_shape[axis] = IntAttr(1)
@@ -99,7 +100,7 @@ class NnSoftmaxDecompPattern(RewritePattern):
                 if isinstance(factor, StringAttr):
                     expr_parts.append(factor.data)
                     continue
-                raise PassContractError("shape entries must be IntAttr or StringAttr")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "shape entries must be IntAttr or StringAttr")
             if not expr_parts:
                 reduce_strides.append(IntAttr(int_product))
             else:
@@ -183,6 +184,27 @@ class DecompassPass(ModulePass):
 
     name = "decompass"
 
+    def __init__(self: "DecompassPass", fold: bool = True) -> None:
+        """初始化 decompass pass 公共选项。
+
+        创建者: 大闸蟹
+        最后一次更改: 大闸蟹
+
+        功能说明:
+        - 记录 `fold` 开关，默认允许 pass 内 pattern walker 执行 folding。
+
+        使用示例:
+        - pass_obj = DecompassPass()
+        - pass_obj = DecompassPass(fold=False)
+
+        关联文件:
+        - spec: spec/pass/decompass.md
+        - test: test/pass/decompass/test_softmax.py
+        - 功能实现: kernel_gen/passes/decompass.py
+        """
+
+        object.__setattr__(self, "fold", bool(fold))
+
     def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行 `decompass` pass。
 
@@ -202,10 +224,12 @@ class DecompassPass(ModulePass):
         """
 
         ensure_builtin_module(module)
+        if ctx.get_optional_dialect(Symbol.name) is None:
+            ctx.load_dialect(Symbol)
         PatternRewriteWalker(
             GreedyRewritePatternApplier([
                 *get_decompass_pass_patterns(),
-            ], ctx=ctx, dce_enabled=False)
+            ], ctx=ctx, folding_enabled=self.fold, dce_enabled=False)
         ).rewrite_module(module)
 
     def run(self, module: ModuleOp) -> ModuleOp:

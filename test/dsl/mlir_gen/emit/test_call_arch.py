@@ -28,6 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadNumOp
 from kernel_gen.dsl.ast import ArchGetDynamicMemoryAST, ArchQueryAST, ConstAST
 from kernel_gen.dsl.mlir_gen.emit import EmitContext, emit_mlir
@@ -96,5 +97,5 @@ def test_emit_mlir_rejects_invalid_dynamic_memory_space() -> None:
     block = Block()
     ctx = EmitContext(builder=block, symbols={}, types={})
 
-    with pytest.raises(ValueError, match="get_dynamic_memory space must be on-chip MemorySpace"):
+    with pytest.raises(KernelCodeError, match="get_dynamic_memory space must be on-chip MemorySpace"):
         emit_mlir(ArchGetDynamicMemoryAST(space=MemorySpace.GM, location=ConstAST(1).location), ctx)

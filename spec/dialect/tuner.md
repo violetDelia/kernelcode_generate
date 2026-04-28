@@ -101,6 +101,7 @@
 
 - `tuner.cost` 只传原 op operands，不额外插入摘要 operand。
 - 原 op attributes 必须平铺保留；若原 op 已存在 `cost_kind / op_name` 任一同名 attr，生成方必须显式失败，不得覆盖或静默改名。
+- 原 op 若存在业务字段 `kind`，生成方必须先改名为领域字段，例如 `kernel_kind`；`tuner.cost` 自身仍不公开旧 metadata attr `kind`。
 - `cost_kind` 表示当前 cost function 的统计视角；是否保留节点、如何累计属于外层 pass 语义。
 - 空串、全空白字符串不属于当前公开输入域。
 - 本 op 不负责把局部成本汇总成函数返回值；汇总由外层 cost function 通过 `symbol.add` 与 `symbol.for` carried `!symbol.int<"...">` 完成。

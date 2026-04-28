@@ -18,13 +18,12 @@
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.ir import Operation
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from .nn_lowering import NnLoweringError
-
 
 def ensure_module_op(module: Operation) -> ModuleOp:
     """校验 module 是否为 builtin.module 并确保 ops 可遍历。
@@ -45,11 +44,11 @@ def ensure_module_op(module: Operation) -> ModuleOp:
     """
 
     if not isinstance(module, ModuleOp):
-        raise NnLoweringError("module must be builtin.module")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "module must be builtin.module")
     try:
         iter(module.ops)
     except TypeError as exc:
-        raise NnLoweringError("module ops must be iterable") from exc
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "module ops must be iterable") from exc
     return module
 
 
@@ -73,7 +72,7 @@ def ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
 
     space = op.attributes.get("space")
     if not isinstance(space, NnMemorySpaceAttr):
-        raise NnLoweringError("nn op must provide nn.space attribute")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op must provide nn.space attribute")
     return space
 
 
@@ -97,10 +96,10 @@ def ensure_single_result(op: Operation) -> NnMemoryType:
     """
 
     if len(op.results) != 1:
-        raise NnLoweringError("nn op must have exactly one result")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op must have exactly one result")
     result_type = op.results[0].type
     if not isinstance(result_type, NnMemoryType):
-        raise NnLoweringError("nn op result must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op result must be nn.memory")
     return result_type
 
 
@@ -123,7 +122,7 @@ def ensure_operand_count(op: Operation, expected: int) -> None:
     """
 
     if len(op.operands) != expected:
-        raise NnLoweringError(
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
             f"nn op {op.name} expects {expected} operands, got {len(op.operands)}"
         )
 
@@ -148,11 +147,10 @@ def ensure_expected_op_name(op: Operation, expected: str) -> None:
     """
 
     if op.name != expected:
-        raise NnLoweringError(f"unknown op: {op.name}")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"unknown op: {op.name}")
 
 
 __all__ = [
-    "NnLoweringError",
     "ensure_expected_op_name",
     "ensure_module_op",
     "ensure_space_attr",

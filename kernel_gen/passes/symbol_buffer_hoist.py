@@ -8,7 +8,7 @@
 - 只在 `symbol.for` 单 block 循环体内识别 `dma.alloc`，并在 shape 明确不依赖 loop 内 SSA、
   且直接 use 仅属于输入 staging / output scratch 两类安全形态时，将其外提到所属
   `symbol.for` 之前。
-- 失败边界统一复用 `PassContractError`；不新增专题专属错误类型，也不承诺额外 compat path。
+- 失败边界统一复用 `KernelCodeError(module="pass")`；不新增专题专属错误类型，也不承诺额外 compat path。
 
 API 列表:
 - `class DmaAllocInSymbolForHoistPattern()`
@@ -33,6 +33,7 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from collections.abc import Iterable
 
@@ -50,8 +51,8 @@ from xdsl.rewriter import InsertPoint
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaSliceOp
-from kernel_gen.dialect.symbol import SymbolForOp
-from kernel_gen.passes.common import PassContractError, ensure_builtin_module
+from kernel_gen.dialect.symbol import Symbol, SymbolForOp
+from kernel_gen.passes.common import ensure_builtin_module
 from kernel_gen.passes.pass_manager import Pass
 
 
@@ -126,7 +127,7 @@ def _is_supported_direct_use(use: Use) -> bool:
 
     user = use.operation
     return (isinstance(user, DmaSliceOp) and use.index == 0) or (
-        isinstance(user, DmaDesliceOp) and use.index == 0
+        isinstance(user, DmaDesliceOp) and use.index == 1
     )
 
 
@@ -259,8 +260,8 @@ class SymbolBufferHoistPass(Pass):
 
     功能说明:
     - 通过 pattern walker 处理 module 中满足公开条件的 `dma.alloc` 外提。
-    - 非 `builtin.module` 输入直接复用共享 `PassContractError("module must be builtin.module")`。
-    - 最终 verifier 失败统一转成 `PassContractError("SymbolBufferHoistVerifierError: ...")`。
+    - 非 `builtin.module` 输入直接复用共享 `KernelCodeError("module must be builtin.module")`。
+    - 最终 verifier 失败统一转成 `KernelCodeError("SymbolBufferHoistVerifierError: ...")`。
 
     使用示例:
     - from xdsl.context import Context
@@ -299,17 +300,20 @@ class SymbolBufferHoistPass(Pass):
         """
 
         module = ensure_builtin_module(module)
+        if ctx.get_optional_dialect(Symbol.name) is None:
+            ctx.load_dialect(Symbol)
         PatternRewriteWalker(
             GreedyRewritePatternApplier(
                 get_symbol_buffer_hoist_patterns(),
                 ctx=ctx,
+                folding_enabled=self.fold,
                 dce_enabled=False,
             )
         ).rewrite_module(module)
         try:
             module.verify()
         except VerifyException as exc:
-            raise PassContractError(f"SymbolBufferHoistVerifierError: {exc}") from exc
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"SymbolBufferHoistVerifierError: {exc}") from exc
 
     def run(self, module: ModuleOp) -> ModuleOp:
         """兼容旧 `Pass.run(module)` 入口。

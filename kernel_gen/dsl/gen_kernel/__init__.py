@@ -11,21 +11,19 @@
 
 API 列表:
 - `gen_kernel(obj: object, ctx: EmitCContext) -> str`
-- `dsl_gen_kernel(fn: Callable[..., object], *runtime_args: object, ctx: EmitCContext, config: dict[str, object] | None = None) -> str`
+- `dsl_gen_kernel(fn: Callable[..., object], *runtime_args: object, ctx: EmitCContext) -> str`
 - `emit_c(obj: object, ctx: EmitCContext) -> str`
 - `emit_c_op(op: Operation, ctx: EmitCContext) -> str`
 - `emit_c_value(value: SSAValue, ctx: EmitCContext) -> str`
 - `KernelEmitter(ctx: EmitCContext, emit_op: Callable[[Operation, EmitCContext], str | None] | None = None, emit_value: Callable[[SSAValue, EmitCContext], str | None] | None = None)`
-- `EmitCContext(*, config: dict[str, object] | None = None)`
-- `EmitCError(message: str)`
-- `GenKernelError(message: str)`
+- `EmitCContext()`
 
 helper 清单:
 - `__getattr__(name: str) -> object`
 
 使用示例:
 - from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c, gen_kernel
-- source = emit_c(func_op, EmitCContext(config={"target": "cpu"}))
+- source = emit_c(func_op, EmitCContext())
 
 关联文件:
 - spec: [spec/dsl/gen_kernel/emit.md](../../../spec/dsl/gen_kernel/emit.md)
@@ -38,8 +36,8 @@ helper 清单:
 from __future__ import annotations
 
 from .emit import emit_c, emit_c_op, emit_c_value
-from .emit_context import EmitCContext, EmitCError
-from .gen_kernel import GenKernelError, dsl_gen_kernel, gen_kernel
+from .emit_context import EmitCContext
+from .gen_kernel import dsl_gen_kernel, gen_kernel
 from .kernel_emitter import KernelEmitter
 
 
@@ -70,12 +68,10 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
-    "GenKernelError",
     "KernelEmitter",
     "dsl_gen_kernel",
     "gen_kernel",
     "EmitCContext",
-    "EmitCError",
     "emit_c",
     "emit_c_op",
     "emit_c_value",

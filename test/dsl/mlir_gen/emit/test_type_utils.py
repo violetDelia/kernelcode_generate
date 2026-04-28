@@ -21,8 +21,20 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
 from xdsl.dialects import arith
-from xdsl.dialects.builtin import f32, i32
+from xdsl.dialects.builtin import (
+    BFloat16Type,
+    Float16Type,
+    Float64Type,
+    IntegerType,
+    Signedness,
+    f32,
+    i1,
+    i8,
+    i32,
+    i64,
+)
 from xdsl.ir import Block
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -52,6 +64,33 @@ def test_emit_package_root_memory_type_from_memory_keeps_i32_element_type() -> N
     assert [dim.data for dim in mem_type.stride.data] == [1]
     assert mem_type.element_type == i32
     assert mem_type.space == NnMemorySpaceAttr.from_name("global")
+
+
+@pytest.mark.parametrize(
+    ("dtype", "expected_element_type"),
+    [
+        (NumericType.Bool, i1),
+        (NumericType.Int8, i8),
+        (NumericType.Int16, IntegerType(16)),
+        (NumericType.Int32, i32),
+        (NumericType.Int64, i64),
+        (NumericType.Uint8, IntegerType(8, signedness=Signedness.UNSIGNED)),
+        (NumericType.Uint16, IntegerType(16, signedness=Signedness.UNSIGNED)),
+        (NumericType.Uint32, IntegerType(32, signedness=Signedness.UNSIGNED)),
+        (NumericType.Uint64, IntegerType(64, signedness=Signedness.UNSIGNED)),
+        (NumericType.BFloat16, BFloat16Type()),
+        (NumericType.Float16, Float16Type()),
+        (NumericType.Float32, f32),
+        (NumericType.Float64, Float64Type()),
+    ],
+)
+def test_emit_package_root_memory_type_from_memory_covers_public_numeric_types(
+    dtype: NumericType,
+    expected_element_type: object,
+) -> None:
+    mem_type = memory_type_from_memory(Memory([4], dtype, space=MemorySpace.GM))
+
+    assert mem_type.element_type == expected_element_type
 
 
 def test_emit_mlir_const_keeps_public_i32_type() -> None:

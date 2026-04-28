@@ -30,6 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.nn import (
     NnBroadcastOp,
     NnExpOp,
@@ -41,7 +42,6 @@ from kernel_gen.dialect.nn import (
     NnSubOp,
     NnTrueDivOp,
 )
-from kernel_gen.passes import PassContractError
 from kernel_gen.passes.decompass import (
     DecompassPass,
     NnSoftmaxDecompPattern,
@@ -54,7 +54,6 @@ def test_public_import_path_exposes_decompass_pattern_api() -> None:
     decompass_module = importlib.import_module("kernel_gen.passes.decompass")
 
     assert package_module.DecompassPass is DecompassPass
-    assert package_module.PassContractError is PassContractError
     assert package_module.NnSoftmaxDecompPattern is NnSoftmaxDecompPattern
     assert package_module.get_decompass_pass_patterns is get_decompass_pass_patterns
     assert not hasattr(package_module, "DecompassError")
@@ -205,7 +204,7 @@ def test_decompose_softmax_rejects_negative_axis() -> None:
     module, _func_op = _make_softmax_module(input_type=mem_type, axis=-1)
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match="normalized axis out of range",
     ):
         DecompassPass().run(module)
@@ -227,7 +226,7 @@ def test_decompose_softmax_rejects_normalized_axis_out_of_range() -> None:
     module, _func_op = _make_softmax_module(input_type=mem_type, axis=3)
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match="normalized axis out of range",
     ):
         DecompassPass().run(module)
@@ -259,7 +258,7 @@ def test_decompose_softmax_rejects_result_type_mismatch() -> None:
     )
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match="result type must match input shape and stride",
     ):
         DecompassPass().run(module)

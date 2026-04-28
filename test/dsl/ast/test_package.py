@@ -48,6 +48,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
     DmaCastOp,
@@ -89,7 +90,6 @@ from kernel_gen.dialect.symbol import (
     SymbolValueType,
 )
 from kernel_gen.dsl.ast import (
-    AstParseError,
     ArchBarrierAST,
     ArchGetDynamicMemoryAST,
     ArchLaunchKernelAST,
@@ -112,7 +112,7 @@ from kernel_gen.dsl.ast import (
     StoreAST,
 )
 from kernel_gen.dsl.ast.parser import parse_function_with_env
-from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
+from kernel_gen.dsl.ast.visitor import AstVisitor
 from kernel_gen.dsl.mlir_gen import (
     build_func_op,
     build_func_op_from_ast,
@@ -195,7 +195,7 @@ def kernel() -> int:
     )
 
     for source in invalid_sources:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             _parse_function_from_source(monkeypatch, source)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -230,7 +230,7 @@ def kernel() -> int:
     )
 
     for source in invalid_sources:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             _parse_function_from_source(monkeypatch, source)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -265,7 +265,7 @@ def kernel() -> int:
     )
 
     for source in invalid_sources:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             _parse_function_from_source(monkeypatch, source)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -300,7 +300,7 @@ def kernel() -> int:
     )
 
     for source in invalid_sources:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             _parse_function_from_source(monkeypatch, source)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -391,7 +391,7 @@ def kernel() -> int:
     )
 
     for source in invalid_sources:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             _parse_function_from_source(monkeypatch, source)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -423,11 +423,11 @@ def kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
 """,
         """\
 def kernel(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]") -> None:
-    store(tile, dst, [0, 0], [2, 2])
+    store(dst, tile, [0, 0], [2, 2])
 """,
         """\
 def kernel(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]") -> None:
-    deslice(tile, dst, [0, 0], [2, 2], [1, 1], MemorySpace.GM)
+    deslice(dst, tile, [0, 0], [2, 2], [1, 1], MemorySpace.GM)
 """,
         """\
 def kernel(dst: "Tensor[f32, 2, 2]") -> None:
@@ -436,7 +436,7 @@ def kernel(dst: "Tensor[f32, 2, 2]") -> None:
     )
 
     for source in invalid_sources:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             _parse_function_from_source(monkeypatch, source)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -522,7 +522,7 @@ def test_parse_function_rejects_invalid_fill_string_literal() -> None:
 
         fill(dst, "nan")
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(kernel)
 
     diagnostics = exc_info.value.diagnostics
@@ -551,7 +551,7 @@ def test_parse_function_rejects_dma_helper_call_via_attribute_chain(
 
     monkeypatch.setitem(kernel.__globals__, "kernel_gen", kernel_gen_pkg)
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(kernel)
 
     diagnostics = exc_info.value.diagnostics
@@ -579,7 +579,7 @@ def test_parse_function_rejects_fill_helper_call_via_attribute_chain(
 
     monkeypatch.setitem(kernel.__globals__, "kernel_gen", kernel_gen_pkg)
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(kernel)
 
     diagnostics = exc_info.value.diagnostics
@@ -614,7 +614,7 @@ def kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
     return slice(src, [0, 0], [2, 2], [1, 1], MemorySpace.LM)
 """
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         _parse_function_from_source(monkeypatch, source)
     diagnostics = exc_info.value.diagnostics
     if not diagnostics:
@@ -641,7 +641,7 @@ def kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
     return load(src, [0, 0], [2, 2], [1, 1], MemorySpace.LM)
 """
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         _parse_function_from_source(monkeypatch, source)
     diagnostics = exc_info.value.diagnostics
     if not diagnostics:
@@ -676,7 +676,7 @@ def kernel(src: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
     )
 
     for source in sources:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             _parse_function_from_source(monkeypatch, source)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -790,7 +790,7 @@ def bad(x, y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
 """,
     )
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(bad)
     diagnostics = exc_info.value.diagnostics
     assert diagnostics
@@ -965,7 +965,7 @@ def test_unknown_name_reports_diagnostics() -> None:
     def bad(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
         return y
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(bad)
     diagnostics = exc_info.value.diagnostics
     assert diagnostics
@@ -987,7 +987,7 @@ def test_invalid_return_annotation_reports_diagnostics() -> None:
     def bad_return(x: "Tensor[f32, 2, 2]") -> "NotSupported":
         return x
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(bad_return)
     diagnostics = exc_info.value.diagnostics
     assert diagnostics
@@ -1009,7 +1009,7 @@ def test_missing_return_reports_diagnostics() -> None:
     def bad(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
         y = x
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(bad)
     diagnostics = exc_info.value.diagnostics
     assert diagnostics
@@ -1030,7 +1030,7 @@ def test_missing_return_reports_diagnostics() -> None:
 def test_missing_tensor_dimensions_reports_diagnostics() -> None:
     def bad_string(x: "Tensor[f32]") -> "Tensor[f32, 2, 2]":
         return x
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(bad_string)
     diagnostics = exc_info.value.diagnostics
     assert diagnostics
@@ -1116,7 +1116,7 @@ def kernel(flag, x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
 # 对应 spec 文件路径: spec/dsl/ast/__init__.md
 # 对应测试文件路径: test/dsl/ast/test_package.py
 def test_parse_function_rejects_float_runtime_arguments_without_annotations(monkeypatch: pytest.MonkeyPatch) -> None:
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         _parse_function_from_source(
             monkeypatch,
             """
@@ -1186,7 +1186,7 @@ def test_parse_function_rejects_unsupported_nn_arithmetic_arity_variants() -> No
         return nn.add(x, y, z)
 
     for fn in (too_few, too_many):
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             parse_function(fn)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -1274,7 +1274,7 @@ def test_ast_rejects_non_float_annotation_for_symbol_to_float() -> None:
     def cast_dim(n: int) -> float:
         return n
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(cast_dim)
     diagnostics = exc_info.value.diagnostics
     if not diagnostics:
@@ -1317,7 +1317,7 @@ def test_parse_function_rejects_invalid_load_helper_variants(
         ("load space must be MemorySpace", bad_space),
     )
     for expected_message, fn in expected_messages:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             parse_function(fn)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -1360,7 +1360,7 @@ def test_parse_function_rejects_invalid_slice_helper_variants(
         ("slice space must be MemorySpace", bad_space),
     )
     for expected_message, fn in expected_messages:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             parse_function(fn)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -1388,7 +1388,7 @@ def test_parse_function_rejects_invalid_copy_helper_space(
 
     monkeypatch.setitem(bad_space.__globals__, "copy", copy)
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(bad_space)
     diagnostics = exc_info.value.diagnostics
     if not diagnostics:
@@ -1425,7 +1425,7 @@ def test_parse_function_rejects_invalid_cast_helper_parameters(
         ("cast memoryspace must be MemorySpace", bad_memoryspace),
     )
     for expected_message, fn in expected_messages:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             parse_function(fn)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -1451,10 +1451,10 @@ def test_parse_function_rejects_invalid_store_helper_variants(
     from kernel_gen.operation.dma import store
 
     def bad_arity(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
-        store(tile, dst, [0, 0])
+        store(dst, tile, [0, 0])
 
     def bad_target(tile: "Tensor[f32, 2, 2]", dst: int):
-        store(tile, dst, [0, 0], [2, 2])
+        store(dst, tile, [0, 0], [2, 2])
 
     for fn in (bad_arity, bad_target):
         monkeypatch.setitem(fn.__globals__, "store", store)
@@ -1464,7 +1464,7 @@ def test_parse_function_rejects_invalid_store_helper_variants(
         ("store target must be TensorAST", bad_target),
     )
     for expected_message, fn in expected_messages:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             parse_function(fn)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -1490,13 +1490,13 @@ def test_parse_function_rejects_invalid_deslice_helper_variants(
     from kernel_gen.operation.dma import deslice
 
     def bad_arity(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
-        deslice(tile, dst, [0, 0])
+        deslice(dst, tile, [0, 0])
 
     def bad_target(tile: "Tensor[f32, 2, 2]", dst: int):
-        deslice(tile, dst, [0, 0], [2, 2])
+        deslice(dst, tile, [0, 0], [2, 2])
 
     def bad_space(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
-        deslice(tile, dst, [0, 0], [2, 2], [1, 1], 1)
+        deslice(dst, tile, [0, 0], [2, 2], [1, 1], 1)
 
     for fn in (bad_arity, bad_target, bad_space):
         monkeypatch.setitem(fn.__globals__, "deslice", deslice)
@@ -1507,7 +1507,7 @@ def test_parse_function_rejects_invalid_deslice_helper_variants(
         ("deslice space must be MemorySpace", bad_space),
     )
     for expected_message, fn in expected_messages:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             parse_function(fn)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -1533,7 +1533,7 @@ def test_unsupported_syntax_reports_diagnostics() -> None:
             return x
         return x
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(bad)
     diagnostics = exc_info.value.diagnostics
     assert diagnostics
@@ -1611,7 +1611,7 @@ def test_parse_function_rejects_invalid_arch_barrier_variants(monkeypatch: pytes
         ("barrier scope must be BarrierScope", bad_scope_type),
     )
     for expected_message, fn in expected_messages:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             parse_function(fn)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -1716,7 +1716,7 @@ def test_parse_function_rejects_invalid_arch_launch_kernel_variants(monkeypatch:
         ("launch_kernel block must be > 0", bad_zero_extent),
     )
     for expected_message, fn in expected_messages:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             parse_function(fn)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -1892,7 +1892,7 @@ def test_parse_function_rejects_invalid_keyword_helper_variants(monkeypatch: pyt
         ("launch_kernel shared_memory_size must be >= 0", bad_legacy_launch_shared_memory),
     )
     for expected_message, fn in expected_messages:
-        with pytest.raises(AstParseError) as exc_info:
+        with pytest.raises(KernelCodeError) as exc_info:
             parse_function(fn)
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
@@ -2061,7 +2061,7 @@ def test_parse_function_rejects_invalid_nn_helper_arity_variants(
     for name, value in helper_values.items():
         monkeypatch.setitem(helper_kernel.__globals__, name, value)
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(helper_kernel)
 
     diagnostics = exc_info.value.diagnostics
@@ -2114,7 +2114,7 @@ def test_parse_function_rejects_invalid_structured_nn_helper_variants(
     }.items():
         monkeypatch.setitem(helper_kernel.__globals__, name, value)
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(helper_kernel)
 
     diagnostics = exc_info.value.diagnostics

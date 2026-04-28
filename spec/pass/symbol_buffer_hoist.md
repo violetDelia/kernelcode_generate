@@ -75,9 +75,9 @@
   - 推断未写入本文件的副作用规则。
   - 改写 `func.func` 签名、生成 helper function 或新增 control-flow 结构。
   - 为 `kernel_gen.passes.lowering.symbol_buffer_hoist` 之类额外 compat path 提供公开承诺。
-- 显式失败统一复用 [`PassContractError`](../../kernel_gen/passes/common.py)；当前专题不新增 `SymbolBufferHoistError` 之类独立错误类。
+- 显式失败统一复用 [`KernelCodeError`](../../kernel_gen/passes/common.py)；当前专题不新增 `SymbolBufferHoistError` 之类独立错误类。
 - 稳定失败边界固定为：
-  - 非 `builtin.module` 输入：`PassContractError("module must be builtin.module")`
+  - 非 `builtin.module` 输入：`KernelCodeError("module must be builtin.module")`
   - pass 执行后 verifier 失败或生成非法 IR：错误消息前缀固定为 `SymbolBufferHoistVerifierError:`
 - 文件内若存在 shape 判定、escape 判定、插入点选择、walker 组装、verifier 包装等 helper，它们都不是公开 API；实现与测试都不得跨文件直接导入这些 helper。
 
@@ -164,7 +164,7 @@ symbol.for ... {
   - 输入 staging buffer 外提正例
   - output scratch 外提正例
   - shape 依赖 loop-carried 反例
-  - `PassContractError("module must be builtin.module")`
+  - `KernelCodeError("module must be builtin.module")`
   - `SymbolBufferHoistVerifierError:` 失败前缀
 
 - 测试文件：[`test/pass/test_pass_registry.py`](../../test/pass/test_pass_registry.py)

@@ -1,14 +1,13 @@
 """Function-level C-like kernel generation helpers.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 按 `emit_c` 的节点级规则，组装 `func.func` 的完整函数源码。
 - 负责函数签名、参数顺序、输出参数与函数体遍历。
 
 API 列表:
-- `GenKernelError(message: str)`
 - `class KernelEmitter(ctx: EmitCContext, emit_op: Callable[[Operation, EmitCContext], str] = emit_c_op)`
 - `KernelEmitter.emit_include(self) -> str`
 - `KernelEmitter.emit_type(self, attr: Any) -> str`
@@ -21,7 +20,7 @@ API 列表:
 
 使用示例:
 - from kernel_gen.dsl.gen_kernel import gen_kernel
-- source = gen_kernel(func_op, EmitCContext(config={"target": "cpu"}))
+- source = gen_kernel(func_op, EmitCContext())
 
 关联文件:
 - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -30,6 +29,7 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import KernelCodeError
 
 from dataclasses import dataclass
 from typing import Any
@@ -57,14 +57,13 @@ from kernel_gen.dialect.arch import ArchBarrierOp, ArchGetDynamicMemoryOp, ArchG
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaTransposeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolValueType
+from kernel_gen.core.config import restore_config, set_target, snapshot_config
 from kernel_gen.target import registry as target_registry
 
 from .emit import emit_c_op, emit_c_value
-from .emit_context import EmitCContext, EmitCError
+from .emit_context import EmitCContext
 
 
-class GenKernelError(ValueError):
-    """Raised when `gen_kernel` cannot emit a valid target function."""
 
 
 def _normalize_memory_stmt(stmt: str) -> str:
@@ -91,8 +90,8 @@ def _normalize_memory_stmt(stmt: str) -> str:
     return normalized
 
 
-def _build_error(ctx: EmitCContext, func_name: str, reason: str) -> GenKernelError:
-    return GenKernelError(f"target={ctx.config['target']}: func {func_name}: {reason}")
+def _build_error(ctx: EmitCContext, func_name: str, reason: str) -> KernelCodeError:
+    return ctx.emit_error(f"func {func_name}", reason)
 
 
 def _walk_ops(op: Operation) -> list[Operation]:
@@ -149,7 +148,7 @@ def _validate_tile_codegen_contract(func_op: func.FuncOp, ctx: EmitCContext) -> 
     - 不允许回退到 `kernel_split.*` / `tile.step_value` / `tile.symbol_literal` 旧桥接口径。
 
     使用示例:
-    - _validate_tile_codegen_contract(func_op, EmitCContext(config={"target": "cpu"}))
+    - _validate_tile_codegen_contract(func_op, EmitCContext())
 
     关联文件:
     - spec: [spec/dsl/gen_kernel/gen_kernel.md](spec/dsl/gen_kernel/gen_kernel.md)
@@ -158,7 +157,7 @@ def _validate_tile_codegen_contract(func_op: func.FuncOp, ctx: EmitCContext) -> 
     """
 
     func_name = func_op.sym_name.data
-    if ctx.config["target"] != "cpu":
+    if not ctx.is_target("cpu"):
         raise _build_error(ctx, func_name, "TileCodegenMalformed: tile codegen is cpu-only")
 
     ops = list(func_op.body.block.ops)
@@ -383,7 +382,7 @@ class KernelEmitter:
       避免继续散落成平行 helper 入口。
 
     使用示例:
-    - source = KernelEmitter(EmitCContext(config={"target": "cpu"})).emit(func_op)
+        - source = KernelEmitter(EmitCContext()).emit(func_op)
 
     关联文件:
     - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -448,7 +447,7 @@ class KernelEmitter:
     def emit_attr(self, attr: Any) -> str:
         emitted = self.ctx.dispatch_attr(attr)
         if emitted is None:
-            raise EmitCError(f"target={self.ctx.config['target']}: attr {attr}: unsupported attr")
+            raise self.ctx.emit_error(f"attr {attr}", "unsupported attr")
         return emitted
 
     def emit_value(self, value: SSAValue) -> str:
@@ -458,9 +457,14 @@ class KernelEmitter:
         return self._emit_op_impl(op, self.ctx)
 
     def _signature_type_to_c(self, attr: Any) -> str:
-        return EmitCContext(config={**self.ctx.config, "target": "cpu"}).dispatch_type(attr)
+        snapshot = snapshot_config()
+        try:
+            set_target("cpu")
+            return EmitCContext().dispatch_type(attr)
+        finally:
+            restore_config(snapshot)
 
-    def _error(self, func_name: str, reason: str) -> GenKernelError:
+    def _error(self, func_name: str, reason: str) -> KernelCodeError:
         return _build_error(self.ctx, func_name, reason)
 
     def _arg_names(self, func_op: func.FuncOp) -> list[str]:
@@ -474,7 +478,7 @@ class KernelEmitter:
         if isinstance(op_or_func, SSAValue):
             return self.emit_value(op_or_func)
         if isinstance(op_or_func, func.ReturnOp):
-            raise GenKernelError(f"target={self.ctx.config['target']}: func.return/out binding must be emitted in function main flow")
+            raise self.ctx.emit_error("func.return/out binding must be emitted in function main flow", "")
         if isinstance(op_or_func, Operation):
             return self.emit_op(op_or_func)
         return self.emit_attr(op_or_func)
@@ -491,7 +495,7 @@ class KernelEmitter:
         - wrapper 仍必须能被唯一 `arch.launch` 识别，body / wrapper 之外的 helper 继续走通用函数发射。
 
         使用示例:
-        - source = KernelEmitter(EmitCContext(config={"target": "npu_demo"})).emit(module_op)
+        - source = KernelEmitter(EmitCContext()).emit(module_op)
 
         关联文件:
         - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -499,7 +503,7 @@ class KernelEmitter:
         - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
         """
 
-        if self.ctx.config["target"] != "npu_demo":
+        if not self.ctx.is_target("npu_demo"):
             raise self._error("<module>", "builtin.module is only supported for target=npu_demo")
 
         plain_func = self._get_npu_demo_plain_func(module_op)
@@ -616,7 +620,7 @@ class KernelEmitter:
         raise _build_error(self.ctx, func_op.sym_name.data, "no function emission strategy")
 
     def _is_npu_demo_body_level_kernel(self, func_op: func.FuncOp) -> bool:
-        if self.ctx.config["target"] != "npu_demo":
+        if not self.ctx.is_target("npu_demo"):
             return False
         arg_names = self._arg_names(func_op)
         input_types = list(func_op.function_type.inputs.data)
@@ -682,7 +686,7 @@ class KernelEmitter:
     def _expected_npu_demo_launch_extents(self) -> tuple[int, int, int, int]:
         extents: list[int] = []
         for hw_key in ("block_num", "thread_num", "subthread_num", "sm_memory_size"):
-            value = target_registry.get_target_hardware(self.ctx.config["target"], hw_key)
+            value = target_registry.get_target_hardware("npu_demo", hw_key)
             if value is None:
                 raise self._error("<module>", f"npu_demo target missing {hw_key}")
             extents.append(value)
@@ -702,13 +706,12 @@ class KernelEmitter:
         """校验 body 函数签名。
 
         创建者: 小李飞刀
-        最后一次更改: 朽木露琪亚
+        最后一次更改: 守护最好的爱莉希雅
 
         功能说明:
-        - body 既兼容 `ctx + lhs + rhs + out` 的四参数、零返回形式，也兼容 outline 后的
-          `lhs + rhs + out` 三参数、零返回形式。
-        - 三个 memory 参数后允许继续携带零个或多个 `!symbol.int` tile / shape 参数。
-        - 三个 memory 参数必须 element type 一致，尾部公开标量参数必须保持 `SymbolValueType`。
+        - body 兼容可选 `ctx` 参数、至少三个连续 memory 参数、零返回形式。
+        - memory 参数后允许继续携带零个或多个 `!symbol.int` tile / shape 参数。
+        - memory 参数必须 element type 一致，尾部公开标量参数必须保持 `SymbolValueType`。
 
         使用示例:
         - body_input_types, arg_offset = self._validate_npu_demo_launch_body_signature(body_func)
@@ -737,14 +740,22 @@ class KernelEmitter:
         body_input_types = input_types[body_arg_offset:]
         if len(body_input_types) < 3:
             raise self._error(func_name, "unsupported npu_demo launch body signature")
-        memory_input_types = body_input_types[:3]
-        symbol_input_types = body_input_types[3:]
-        if any(not isinstance(arg_type, NnMemoryType) for arg_type in memory_input_types):
+
+        memory_input_types: list[NnMemoryType] = []
+        symbol_start = len(body_input_types)
+        for index, arg_type in enumerate(body_input_types):
+            if isinstance(arg_type, NnMemoryType):
+                memory_input_types.append(arg_type)
+                continue
+            symbol_start = index
+            break
+        symbol_input_types = body_input_types[symbol_start:]
+        if len(memory_input_types) < 3:
             raise self._error(func_name, "unsupported npu_demo launch body signature")
         if any(not isinstance(arg_type, SymbolValueType) for arg_type in symbol_input_types):
             raise self._error(func_name, "unsupported npu_demo launch body signature")
-        lhs_type, rhs_type, out_type = memory_input_types
-        if lhs_type.element_type != rhs_type.element_type or lhs_type.element_type != out_type.element_type:
+        first_memory_type = memory_input_types[0]
+        if any(arg_type.element_type != first_memory_type.element_type for arg_type in memory_input_types[1:]):
             raise self._error(func_name, "npu_demo launch body requires matching element types")
         return list(body_input_types), body_arg_offset
 
@@ -756,10 +767,10 @@ class KernelEmitter:
         """校验 wrapper 函数签名与 launch 参数透传关系。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 守护最好的爱莉希雅
 
         功能说明:
-        - wrapper 必须是 `lhs + rhs + out` 的三参数、零返回形式。
+        - wrapper 必须与 body 的非 ctx 参数完全一致，并保持零返回形式。
         - `arch.launch` 的 args 必须按原顺序透传 wrapper 参数，extent 由静态 launch 值与 target registry 一致性共同约束。
 
         使用示例:
@@ -919,10 +930,10 @@ class KernelEmitter:
         """生成 npu_demo launch body 的函数签名。
 
         创建者: jcc你莫辜负
-        最后一次更改: 朽木露琪亚
+        最后一次更改: 大闸蟹
 
         功能说明:
-        - 统一构造 `static void <body>(npu_demo::KernelContext& ctx, ...)` 的签名。
+        - 统一构造不显式暴露 `KernelContext` 的 `static void <body>(...)` 签名。
         - 供 body 定义与前置声明共享，避免两处拼接逻辑不一致。
         - 三个 memory 参数后允许继续透传 `SymbolValueType` 参数，保持 tile / shape 公开链路。
 
@@ -939,7 +950,7 @@ class KernelEmitter:
         arg_names = self._arg_names(func_op)
         body_arg_names = arg_names[body_arg_offset:]
         mutable_memory_args = self._mutable_memory_arg_indices(func_op)
-        params: list[str] = ["npu_demo::KernelContext& ctx"]
+        params: list[str] = []
         for arg_index, (arg_name, arg_type) in enumerate(
             zip(body_arg_names, body_input_types, strict=True),
             start=body_arg_offset,
@@ -1040,8 +1051,7 @@ class KernelEmitter:
             self.ctx.bind_name(arg_value, arg_name)
         source_name = self.ctx.lookup_name(func_op.args[1]) or arg_names[1]
         return (
-            f"void {func_op.sym_name.data}(npu_demo::KernelContext& ctx, "
-            f"const {self._signature_type_to_c(source_type)}& {source_name}, "
+            f"void {func_op.sym_name.data}(const {self._signature_type_to_c(source_type)}& {source_name}, "
             f"{self._signature_type_to_c(out_type)}& out)"
         )
 
@@ -1109,7 +1119,7 @@ class KernelEmitter:
         if spaces != ["tsm", "tlm"]:
             raise self._error(func_name, "npu_demo barrier visibility must be [tsm, tlm]")
         return (
-            f"{self.ctx.current_indent}ctx.barrier("
+            f"{self.ctx.current_indent}npu_demo::barrier("
             "{BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);"
         )
 
@@ -1145,7 +1155,7 @@ class KernelEmitter:
             )
         if result_types:
             result_type = result_types[0]
-            if isinstance(result_type, SymbolValueType) and self.ctx.config["target"] not in {"cpu", "npu_demo"}:
+            if isinstance(result_type, SymbolValueType) and not (self.ctx.is_target("cpu") or self.ctx.is_target("npu_demo")):
                 raise _build_error(self.ctx, func_name, "symbol scalar return is only supported on cpu and npu_demo")
             self._type_to_c(result_type)
 
@@ -1225,7 +1235,7 @@ class KernelEmitter:
         return tuple(mutable_args)
 
     def _is_returned_output_alloc(self, func_op: func.FuncOp, op: DmaAllocOp) -> bool:
-        if self.ctx.config["target"] != "cpu":
+        if not self.ctx.is_target("cpu"):
             return False
         result_types = list(func_op.function_type.outputs.data)
         if len(result_types) != 1 or not isinstance(result_types[0], NnMemoryType):
@@ -1295,7 +1305,7 @@ class KernelEmitter:
         - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
         """
 
-        if self.ctx.config["target"] != "npu_demo":
+        if not self.ctx.is_target("npu_demo"):
             return None
         if not isinstance(op, SymbolAddOp) or len(op.results) != 1:
             return None
@@ -1354,7 +1364,7 @@ class KernelEmitter:
                 func_op.sym_name.data,
                 "legacy memory return ABI is not supported; run BufferResultsToOutParamsPass first",
             )
-        if isinstance(result_type, SymbolValueType) and self.ctx.config["target"] not in {"cpu", "npu_demo"}:
+        if isinstance(result_type, SymbolValueType) and not (self.ctx.is_target("cpu") or self.ctx.is_target("npu_demo")):
             raise _build_error(
                 self.ctx,
                 func_op.sym_name.data,
@@ -1431,7 +1441,7 @@ class KernelEmitter:
                 continue
             self._bind_rewritten_out_result(func_op, op)
             stmt = self.emit_op(op)
-            if stmt and self.ctx.config["target"] == "cpu":
+            if stmt and self.ctx.is_target("cpu"):
                 stmt = _normalize_memory_stmt(stmt)
             if stmt:
                 lines.append(stmt)
@@ -1461,4 +1471,4 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["GenKernelError", "KernelEmitter"]
+__all__ = ["KernelEmitter"]

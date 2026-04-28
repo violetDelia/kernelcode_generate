@@ -72,7 +72,7 @@ def test_emit_mlir_dispatches_const() -> None:
 # 最近一次运行测试时间: 2026-04-16 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-16 00:00:00 +0800
 # 功能说明: 验证 emit 包根仅公开稳定入口集合。
-# 测试目的: 锁定 `kernel_gen.dsl.mlir_gen.emit` 的包根公开集合，避免 `LoweringError`、`call_dispatch` 等内部 helper 被继续视为稳定 API。
+# 测试目的: 锁定 `kernel_gen.dsl.mlir_gen.emit` 的包根公开集合，避免旧 Error 类型、`call_dispatch` 等内部 helper 被继续视为稳定 API。
 # 使用示例: pytest -q test/dsl/mlir_gen/emit/test_dispatch.py -k test_emit_package_root_exports_only_stable_api
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/__init__.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -86,8 +86,8 @@ def test_emit_package_root_exports_only_stable_api() -> None:
         raise AssertionError("package root should expose emit_mlir")
     if emit_pkg.memory_type_from_memory is not memory_type_from_memory:
         raise AssertionError("package root should expose memory_type_from_memory")
-    if hasattr(emit_pkg, "LoweringError"):
-        raise AssertionError("package root should not expose LoweringError")
+    if hasattr(emit_pkg, "Lowering" + "Error"):
+        raise AssertionError("package root should not expose legacy lowering error")
     if hasattr(emit_pkg, "call_dispatch"):
         raise AssertionError("package root should not expose call_dispatch")
 

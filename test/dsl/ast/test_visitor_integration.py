@@ -33,12 +33,12 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaBroadcastOp, DmaCopyOp, DmaFreeOp
 from kernel_gen.dialect.nn import NnAddOp
 from kernel_gen.dialect.symbol import SymbolGetDimOp
 from kernel_gen.dsl import (
     AstVisitor,
-    AstVisitorError,
     EmitContext,
     build_func_op,
     build_func_op_from_ast,
@@ -82,7 +82,7 @@ def test_ast_visitor_visit_expr_wraps_public_emit_failure() -> None:
     expr = VarAST(name="missing", location=SourceLocation(3, 7))
     ctx = EmitContext(builder=Block(), symbols={}, types={})
 
-    with pytest.raises(AstVisitorError, match="Unknown input reference") as exc_info:
+    with pytest.raises(KernelCodeError, match="Unknown input reference") as exc_info:
         AstVisitor().visit_expr(expr, ctx)
 
     assert exc_info.value.location == expr.location
@@ -130,7 +130,7 @@ def test_build_func_op_reports_public_broadcast_mismatch() -> None:
     def add(x: "Tensor[f32, A, B]", y: "Tensor[f32, A, C]") -> "Tensor[f32, A, B]":
         return x + y
 
-    with pytest.raises(AstVisitorError, match="Implicit broadcast dimension mismatch") as exc_info:
+    with pytest.raises(KernelCodeError, match="Implicit broadcast dimension mismatch") as exc_info:
         build_func_op(add, _tensor_arg(["A", "B"]), _tensor_arg(["A", "C"]))
 
     assert exc_info.value.location is not None
@@ -157,5 +157,5 @@ def test_emit_mlir_rejects_block_ast_outside_public_visitor_path() -> None:
     block_ast = parse_function(identity).body
     ctx = EmitContext(builder=Block(), symbols={}, types={})
 
-    with pytest.raises(ValueError, match="BlockAST must be lowered via AstVisitor"):
+    with pytest.raises(KernelCodeError, match="BlockAST must be lowered via AstVisitor"):
         emit_mlir(block_ast, ctx)

@@ -22,7 +22,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from kernel_gen.common.errors import _ERROR_TEMPLATE
+from kernel_gen.core.contracts import default_stride
+from kernel_gen.core.contracts import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 
@@ -91,14 +92,14 @@ def _normalize_transpose_perm(perm: object, rank: int) -> list[int]:
     return normalized_perm
 
 def transpose(value: object, perm: object) -> Memory:
-    """按指定 perm 重排 Memory 的轴顺序。
+    """按指定 perm 物化转置 Memory 的轴顺序。
 
     创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 仅接受 Memory 输入，输出保留输入的 dtype/space/format。
-    - 按 perm 同步重排 shape 与 stride。
+    - 按 perm 重排 shape，并为转置后的目标 memory 生成默认连续 stride。
     - 对非法 perm 长度、元素类型或非排列情形直接报错。
 
     使用示例:
@@ -121,9 +122,8 @@ def transpose(value: object, perm: object) -> Memory:
 
     perm_values = _normalize_transpose_perm(perm, rank=len(value.shape))
     shape_dims = value.shape.get_shape()
-    stride_dims = value.stride.get_shape()
     transposed_shape = SymbolShape([shape_dims[index] for index in perm_values])
-    transposed_stride = SymbolShape([stride_dims[index] for index in perm_values])
+    transposed_stride = default_stride(transposed_shape)
     return Memory(
         transposed_shape,
         value.dtype,

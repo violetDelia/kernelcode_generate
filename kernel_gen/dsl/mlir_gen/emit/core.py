@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: 榕
 
 功能说明:
 - 负责 `kernel_gen.dsl.mlir_gen.emit` 包根公开 `EmitContext(...)` /
@@ -24,6 +24,7 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 import ast as py_ast
 import re
@@ -159,6 +160,7 @@ from kernel_gen.dsl.ast import (
     FCAST,
     ForAST,
     FunctionAST,
+    IfAST,
     Img2ColAST,
     LoadAST,
     MatmulAST,
@@ -250,19 +252,13 @@ _CONV_PARAM_DEFAULTS: dict[str, int] = {
 }
 
 
-class _LoweringError(ValueError):
-    """lowering/emit 阶段错误。"""
-
-    def __init__(self: "_LoweringError", message: str, location: SourceLocation | None = None) -> None:
-        super().__init__(message)
-        self.location = location
 
 
 def _validate_emit_context_target_name(name: str) -> None:
     """校验 EmitContext target 名称满足当前公开命名规则。"""
 
     if not name or not _TARGET_NAME_PATTERN.fullmatch(name):
-        raise _LoweringError(f"target name must match {_TARGET_NAME_PATTERN.pattern}")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"target name must match {_TARGET_NAME_PATTERN.pattern}")
 
 
 def _validate_emit_context_hardware_map(hardware: dict[str, int], target_name: str) -> None:
@@ -270,9 +266,9 @@ def _validate_emit_context_hardware_map(hardware: dict[str, int], target_name: s
 
     for key, value in hardware.items():
         if key not in _ALLOWED_HARDWARE_FIELDS:
-            raise _LoweringError(f"{target_name} hardware has unknown key: {key}")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{target_name} hardware has unknown key: {key}")
         if not isinstance(value, int) or isinstance(value, bool):
-            raise _LoweringError(f"{target_name} hardware.{key} must be int")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{target_name} hardware.{key} must be int")
 
 
 def _promote_ranked_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
@@ -304,16 +300,16 @@ def _validate_emit_context_config(config: dict[str, object] | None) -> None:
     if config is None:
         return
     if not isinstance(config, dict):
-        raise _LoweringError("EmitContext config must be dict or None")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "EmitContext config must be dict or None")
     if "target" in config:
         target = config["target"]
         if not isinstance(target, str):
-            raise _LoweringError("EmitContext target must be str")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "EmitContext target must be str")
         _validate_emit_context_target_name(target)
     if "hardware" in config:
         hardware = config["hardware"]
         if not isinstance(hardware, dict):
-            raise _LoweringError("EmitContext hardware must be dict[str, int]")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "EmitContext hardware must be dict[str, int]")
         target_name = config.get("target")
         target_label = target_name if isinstance(target_name, str) else "emit_context"
         _validate_emit_context_hardware_map(hardware, target_label)
@@ -390,7 +386,7 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -
 
     功能说明:
     - 将 DSL NumericType 转为 nn.memory 的 element_type，当前覆盖 Bool/Int8/Int16/Int32/Int64/Uint8/Uint16/Uint32/Uint64/BFloat16/Float16/Float32/Float64。
-    - 遇到不支持类型时抛出 LoweringError。
+    - 遇到不支持类型时抛出 KernelCodeError。
 
     使用示例:
     - _dtype_to_xdsl(NumericType.Float32)
@@ -426,7 +422,7 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -
         return IntegerType(32, signedness=Signedness.UNSIGNED)
     if dtype is NumericType.Uint64:
         return IntegerType(64, signedness=Signedness.UNSIGNED)
-    raise _LoweringError(f"Unsupported dtype: {dtype}", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"Unsupported dtype: {dtype}", location=location)
 
 
 def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = None) -> NumericType:
@@ -437,7 +433,7 @@ def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = No
 
     功能说明:
     - 支持 Float16/BFloat16/Float32/Float64/Int8/Int16/Int32/Int64/Uint8/Uint16/Uint32/Uint64/Bool 解析为 NumericType。
-    - 不支持的 element_type 抛出 LoweringError。
+    - 不支持的 element_type 抛出 KernelCodeError。
 
     使用示例:
     - _xdsl_to_dtype(f32)
@@ -477,7 +473,7 @@ def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = No
             return NumericType.Int32
         if width == 64:
             return NumericType.Int64
-    raise _LoweringError("Unsupported element_type for nn arithmetic", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported element_type for nn arithmetic", location=location)
 
 
 def _resolve_nn_arith_element_type(
@@ -492,7 +488,7 @@ def _resolve_nn_arith_element_type(
 
     功能说明:
     - 按 Memory 算术 dtype 决议规则选择目标 element_type。
-    - 无法解析时抛出 LoweringError。
+    - 无法解析时抛出 KernelCodeError。
 
     使用示例:
     - _resolve_nn_arith_element_type(lhs_type, rhs_type, location)
@@ -507,7 +503,7 @@ def _resolve_nn_arith_element_type(
         rhs_dtype = _xdsl_to_dtype(rhs_type.element_type, location)
         target_dtype = _promote_ranked_dtype(lhs_dtype, rhs_dtype)
     except TypeError as exc:
-        raise _LoweringError("Binary op operands must have compatible element_type", location=location) from exc
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have compatible element_type", location=location) from exc
     return _dtype_to_xdsl(target_dtype, location)
 
 
@@ -627,7 +623,7 @@ def _eval_symbolic_dim_node(expr: py_ast.AST, location: SourceLocation | None) -
             return SymbolDim(0) - value
         if isinstance(value, int):
             return -value
-        raise _LoweringError("Unsupported symbolic dim expression", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbolic dim expression", location=location)
     if isinstance(expr, py_ast.BinOp):
         lhs = _eval_symbolic_dim_node(expr.left, location)
         rhs = _eval_symbolic_dim_node(expr.right, location)
@@ -640,7 +636,7 @@ def _eval_symbolic_dim_node(expr: py_ast.AST, location: SourceLocation | None) -
         if isinstance(expr.op, py_ast.Div):
             if isinstance(lhs, int) and isinstance(rhs, int):
                 if rhs == 0 or lhs % rhs != 0:
-                    raise _LoweringError("Unsupported symbolic dim expression", location=location)
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbolic dim expression", location=location)
                 return lhs // rhs
             if isinstance(lhs, int):
                 lhs = SymbolDim(lhs)
@@ -650,15 +646,15 @@ def _eval_symbolic_dim_node(expr: py_ast.AST, location: SourceLocation | None) -
         if isinstance(expr.op, py_ast.FloorDiv):
             if isinstance(lhs, int) and isinstance(rhs, int):
                 if rhs == 0:
-                    raise _LoweringError("Unsupported symbolic dim expression", location=location)
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbolic dim expression", location=location)
                 return lhs // rhs
             if isinstance(lhs, int):
                 lhs = SymbolDim(lhs)
             if isinstance(rhs, int):
                 return lhs // rhs
             return lhs // rhs
-        raise _LoweringError("Unsupported symbolic dim expression", location=location)
-    raise _LoweringError("Unsupported symbolic dim expression", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbolic dim expression", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbolic dim expression", location=location)
 
 
 def _eval_symbolic_dim_expr(expr_text: str, location: SourceLocation | None) -> SymbolDim:
@@ -682,13 +678,13 @@ def _eval_symbolic_dim_expr(expr_text: str, location: SourceLocation | None) -> 
     try:
         parsed = py_ast.parse(expr_text, mode="eval").body
     except SyntaxError as exc:
-        raise _LoweringError("Unsupported symbolic dim expression", location=location) from exc
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbolic dim expression", location=location) from exc
     value = _eval_symbolic_dim_node(parsed, location)
     if isinstance(value, int):
         return SymbolDim(value)
     if isinstance(value, SymbolDim):
         return value
-    raise _LoweringError("Unsupported symbolic dim expression", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbolic dim expression", location=location)
 
 
 def _shape_attr_to_symbol_dim(attr: Attribute, location: SourceLocation | None) -> SymbolDim | None:
@@ -715,7 +711,7 @@ def _shape_attr_to_symbol_dim(attr: Attribute, location: SourceLocation | None) 
         if attr.data == "?":
             return None
         return _eval_symbolic_dim_expr(attr.data, location)
-    raise _LoweringError("Unsupported shape attribute", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported shape attribute", location=location)
 
 
 def _build_symbolic_stride_attrs(shape: Sequence[Attribute], location: SourceLocation | None) -> list[Attribute]:
@@ -810,10 +806,11 @@ def _cast_to_symbol_int(
     """将 SSAValue 转换为指定表达式的 !symbol.int<"expr">。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 若已是 SymbolValueType，则直接返回。
+    - `symbol.iter` 循环变量按调用方传入的表达式名称转换成 `!symbol.int<"...">`。
     - 否则通过 UnrealizedConversionCastOp 生成 !symbol.int<"expr">。
 
     使用示例:
@@ -827,8 +824,8 @@ def _cast_to_symbol_int(
 
     if isinstance(value.type, SymbolValueType):
         return value
-    if not isinstance(value.type, (IndexType, IntegerType)):
-        raise _LoweringError("Index operand must be integer or index", location=location)
+    if not isinstance(value.type, (SymbolIterType, IndexType, IntegerType)):
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index operand must be integer or index", location=location)
     result_type = SymbolValueType.from_expr(expr)
     op = UnrealizedConversionCastOp(operands=[value], result_types=[result_type])
     ctx.builder.add_op(op)
@@ -910,7 +907,7 @@ def _build_arch_barrier_visibility_attr(
     if not isinstance(visibility, list) or not visibility or not all(
         isinstance(space, _KG_OPERATION_ARCH.BarrierVisibility) for space in visibility
     ):
-        raise _LoweringError("barrier visibility must be non-empty BarrierVisibility list", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "barrier visibility must be non-empty BarrierVisibility list", location=location)
     space_map = {
         _KG_OPERATION_ARCH.BarrierVisibility.TSM: "tsm",
         _KG_OPERATION_ARCH.BarrierVisibility.TLM: "tlm",
@@ -919,7 +916,7 @@ def _build_arch_barrier_visibility_attr(
     for space in visibility:
         space_name = space_map.get(space)
         if space_name is None:
-            raise _LoweringError("barrier visibility must be non-empty BarrierVisibility list", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "barrier visibility must be non-empty BarrierVisibility list", location=location)
         attrs.append(ArchVisibilityAttr.from_name(space_name))
     return ArrayAttr(attrs)
 
@@ -947,7 +944,7 @@ def _build_arch_barrier_scope_attr(
     """
 
     if not isinstance(scope, _KG_OPERATION_ARCH.BarrierScope):
-        raise _LoweringError("barrier scope must be BarrierScope", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "barrier scope must be BarrierScope", location=location)
     return ArchScopeAttr.from_name(scope.value)
 
 
@@ -979,12 +976,12 @@ def _lower_launch_extent_symbol(
 
     if isinstance(extent, ConstAST):
         if not isinstance(extent.value, int):
-            raise _LoweringError(f"launch_kernel {dim_name} must be !symbol.int", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"launch_kernel {dim_name} must be !symbol.int", location=location)
         if allow_zero:
             if extent.value < 0:
-                raise _LoweringError(f"launch_kernel {dim_name} must be >= 0", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"launch_kernel {dim_name} must be >= 0", location=location)
         elif extent.value <= 0:
-            raise _LoweringError(f"launch_kernel {dim_name} must be > 0", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"launch_kernel {dim_name} must be > 0", location=location)
         return _const_symbol_int(extent.value, ctx, location)
 
     value = _lower_expr(extent, ctx)
@@ -994,14 +991,14 @@ def _lower_launch_extent_symbol(
             int_value = int(expr_text)
             if allow_zero:
                 if int_value < 0:
-                    raise _LoweringError(f"launch_kernel {dim_name} must be >= 0", location=location)
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"launch_kernel {dim_name} must be >= 0", location=location)
             elif int_value <= 0:
-                raise _LoweringError(f"launch_kernel {dim_name} must be > 0", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"launch_kernel {dim_name} must be > 0", location=location)
         return value
 
     if isinstance(extent, ScalarArgAST):
         return _cast_to_symbol_int(value, ctx, extent.name, location)
-    raise _LoweringError(f"launch_kernel {dim_name} must be !symbol.int", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"launch_kernel {dim_name} must be !symbol.int", location=location)
 
 
 def _ensure_index_value(value: SSAValue, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
@@ -1030,7 +1027,7 @@ def _ensure_index_value(value: SSAValue, ctx: EmitContext, location: SourceLocat
         op = arith.IndexCastOp(value, IndexType())
         ctx.builder.add_op(op)
         return op.result
-    raise _LoweringError("Index operand must be integer or index", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index operand must be integer or index", location=location)
 
 
 def _materialize_index_symbol_from_memory(
@@ -1138,10 +1135,10 @@ def _resolve_index_symbol(name: str, ctx: EmitContext, location: SourceLocation 
             return aliased
         materialized = _materialize_index_symbol_from_memory(name, ctx, location)
         if materialized is None:
-            raise _LoweringError("Unknown index symbol", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unknown index symbol", location=location)
     value = ctx.symbols[name]
     if not isinstance(value, SSAValue):
-        raise _LoweringError("Index symbol must be SSA value", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index symbol must be SSA value", location=location)
     if isinstance(value.type, SymbolValueType):
         return value
     if isinstance(value.type, (IndexType, IntegerType)):
@@ -1199,7 +1196,7 @@ def _resolve_index_symbol_product(expr: str, ctx: EmitContext, location: SourceL
     """
     parts = _split_symbol_multiplication(expr)
     if parts is None:
-        raise _LoweringError("Unsupported index expression", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
     if len(parts) == 1:
         return _resolve_index_symbol(parts[0], ctx, location)
     current = _cast_to_symbol_int(_resolve_index_symbol(parts[0], ctx, location), ctx, parts[0], location)
@@ -1225,7 +1222,7 @@ def _build_symbol_index_result(
     lhs_expr = lhs.type.expr.expr.data if isinstance(lhs.type, SymbolValueType) else None
     rhs_expr = rhs.type.expr.expr.data if isinstance(rhs.type, SymbolValueType) else None
     if lhs_expr is None or rhs_expr is None:
-        raise _LoweringError("Unsupported index expression", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
     lhs_value = _cast_to_symbol_int(lhs, ctx, lhs_expr, location)
     rhs_value = _cast_to_symbol_int(rhs, ctx, rhs_expr, location)
     result_type = SymbolValueType.from_expr(build_public_symbol_expr(lhs_value.type.expr.expr.data, rhs_value.type.expr.expr.data, op_symbol))
@@ -1240,7 +1237,7 @@ def _build_symbol_index_result(
     elif op_symbol == "//":
         op = SymbolFloorDivOp(lhs_value, rhs_value, result_type)
     else:
-        raise _LoweringError("Unsupported index expression", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
     ctx.builder.add_op(op)
     return op.result
 
@@ -1328,7 +1325,7 @@ def _lower_symbolic_index_node(
             return _build_symbol_index_result(lhs, rhs, "/", ctx, location)
         if isinstance(expr.op, py_ast.FloorDiv):
             return _build_symbol_index_result(lhs, rhs, "//", ctx, location)
-    raise _LoweringError("Unsupported index expression", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
 
 
 def _lower_symbolic_index_text(
@@ -1342,7 +1339,7 @@ def _lower_symbolic_index_text(
     try:
         parsed = py_ast.parse(expr_text, mode="eval").body
     except SyntaxError as exc:
-        raise _LoweringError("Unsupported index expression", location=location) from exc
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location) from exc
     return _lower_symbolic_index_node(parsed, ctx, location, const_cache)
 
 
@@ -1355,10 +1352,11 @@ def _resolve_index_operand(
     """将索引表达式 lowering 为 SSA operand。
 
     创建者: OpenAI
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 支持常量、symbol 名称、循环变量、张量 shape/stride 维度访问和显式字符串乘法表达式。
+    - 循环变量参与二元表达式时会先转换成同名 `symbol.int`，供 `symbol.mul/add/...` 消费。
     - 对非法输入保持统一的 index 诊断文案。
     - 常量会直接生成 `symbol.const`，保持 symbol.int 路径一致。
 
@@ -1375,15 +1373,19 @@ def _resolve_index_operand(
             return _get_symbol_index_constant(expr.value, ctx, expr.location, const_cache)
         if isinstance(expr.value, str):
             return _lower_symbolic_index_text(expr.value, ctx, expr.location, const_cache)
-        raise _LoweringError("Index must be int or str", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index must be int or str", location=expr.location)
     if isinstance(expr, (ScalarArgAST, VarAST)):
         value = _lookup_symbol(expr, ctx)
         if not isinstance(value, SSAValue):
-            raise _LoweringError("Index operand must be SSA value", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index operand must be SSA value", location=expr.location)
         return _ensure_index_value(value, ctx, expr.location)
     if isinstance(expr, BinaryExprAST):
         lhs = _resolve_index_operand(expr.lhs, ctx, getattr(expr.lhs, "location", None) or location, const_cache)
         rhs = _resolve_index_operand(expr.rhs, ctx, getattr(expr.rhs, "location", None) or location, const_cache)
+        if isinstance(lhs.type, SymbolIterType) and isinstance(expr.lhs, VarAST):
+            lhs = _cast_to_symbol_int(lhs, ctx, expr.lhs.name, getattr(expr.lhs, "location", None) or location)
+        if isinstance(rhs.type, SymbolIterType) and isinstance(expr.rhs, VarAST):
+            rhs = _cast_to_symbol_int(rhs, ctx, expr.rhs.name, getattr(expr.rhs, "location", None) or location)
         op_symbol = {
             "add": "+",
             "sub": "-",
@@ -1392,18 +1394,18 @@ def _resolve_index_operand(
             "floordiv": "//",
         }.get(expr.op)
         if op_symbol is None:
-            raise _LoweringError("Unsupported index expression", location=location or expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location or expr.location)
         return _build_symbol_index_result(lhs, rhs, op_symbol, ctx, location or expr.location)
     if isinstance(expr, TensorAxisAccessAST):
         value = _lower_expr(expr, ctx)
         if not isinstance(value, SSAValue):
-            raise _LoweringError("Index operand must be SSA value", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index operand must be SSA value", location=expr.location)
         return _ensure_index_value(value, ctx, expr.location)
     if isinstance(expr, int):
         return _get_symbol_index_constant(expr, ctx, location, const_cache)
     if isinstance(expr, str):
         return _lower_symbolic_index_text(expr, ctx, location, const_cache)
-    raise _LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location or getattr(expr, "location", None))
 
 
 def _get_loop_vars(ctx: EmitContext) -> dict[str, int]:
@@ -1428,7 +1430,7 @@ def _get_loop_vars(ctx: EmitContext) -> dict[str, int]:
         ctx.config = {}
     loop_vars = ctx.config.setdefault("loop_vars", {})
     if not isinstance(loop_vars, dict):
-        raise _LoweringError("loop_vars must be a dict", location=None)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "loop_vars must be a dict", location=None)
     return loop_vars
 
 
@@ -1453,14 +1455,14 @@ def _resolve_index_expr(expr: object, ctx: EmitContext) -> int | str:
     if isinstance(expr, ConstAST):
         if isinstance(expr.value, (int, str)):
             return _resolve_static_index_expr(expr, location=expr.location)
-        raise _LoweringError("Index must be int or str", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index must be int or str", location=expr.location)
     if isinstance(expr, ScalarArgAST):
         return expr.name
     if isinstance(expr, VarAST):
         loop_vars = _get_loop_vars(ctx)
         if expr.name in loop_vars:
             return loop_vars[expr.name]
-        raise _LoweringError("Unknown loop variable", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unknown loop variable", location=expr.location)
     if isinstance(expr, BinaryExprAST):
         lhs = _resolve_index_expr(expr.lhs, ctx)
         rhs = _resolve_index_expr(expr.rhs, ctx)
@@ -1468,12 +1470,12 @@ def _resolve_index_expr(expr: object, ctx: EmitContext) -> int | str:
         if isinstance(value, SymbolDim):
             normalized = value.get_value()
             if not isinstance(normalized, (int, str)):
-                raise _LoweringError("Unsupported index expression", location=expr.location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=expr.location)
             return normalized
         return value
     if isinstance(expr, (int, str)):
         return _resolve_static_index_expr(expr, location=getattr(expr, "location", None))
-    raise _LoweringError("Unsupported index expression", location=getattr(expr, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=getattr(expr, "location", None))
 
 
 def _build_index_attrs(
@@ -1505,7 +1507,7 @@ def _build_index_attrs(
         values = [default_value for _ in range(rank)]
     elif isinstance(value, (list, tuple)):
         if len(value) != rank:
-            raise _LoweringError("Index rank mismatch", location=location or getattr(value, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index rank mismatch", location=location or getattr(value, "location", None))
         values = list(value)
     else:
         values = [value for _ in range(rank)]
@@ -1542,7 +1544,7 @@ def _build_index_operands_from_layout(
         elif isinstance(dim, StringAttr):
             values.append(dim.data)
         else:
-            raise _LoweringError("Unsupported layout attribute", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported layout attribute", location=location)
     return [_resolve_index_operand(item, ctx, location) for item in values]
 
 
@@ -1597,10 +1599,10 @@ def _lower_loop_bound(expr: object, ctx: EmitContext) -> object:
     """将 `for` 上下界表达式 lowering 为 SSA 值。
 
     创建者: OpenAI
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 榕
 
     功能说明:
-    - 支持常量、标量参数、循环变量引用以及 `TensorAxisAccessAST` 产生的 `!symbol.int` 边界。
+    - 支持常量、标量参数、循环变量引用、`TensorAxisAccessAST` 和符号算术表达式产生的 `!symbol.int` 边界。
     - 不支持的表达式维持统一的 loop bound 诊断。
 
     使用示例:
@@ -1611,15 +1613,9 @@ def _lower_loop_bound(expr: object, ctx: EmitContext) -> object:
     - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
-    if isinstance(expr, ConstAST):
-        if isinstance(expr.value, int):
-            return _const_symbol_int(expr.value, ctx, expr.location)
-        return _lower_expr(expr, ctx)
-    if isinstance(expr, (ScalarArgAST, VarAST)):
-        return _lookup_symbol(expr, ctx)
-    if isinstance(expr, TensorAxisAccessAST):
-        return _lower_expr(expr, ctx)
-    raise _LoweringError("Unsupported loop bound expression", location=getattr(expr, "location", None))
+    if isinstance(expr, (ConstAST, ScalarArgAST, VarAST, BinaryExprAST, TensorAxisAccessAST, int, str)):
+        return _resolve_index_operand(expr, ctx, getattr(expr, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported loop bound expression", location=getattr(expr, "location", None))
 
 
 def _build_stride_attrs(
@@ -1650,13 +1646,13 @@ def _build_stride_attrs(
     for entry in stride:
         if isinstance(entry.type, SymbolValueType):
             if entry.type.get_value() != 1:
-                raise _LoweringError("Only unit stride is supported", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Only unit stride is supported", location=location)
             continue
         owner = entry.owner
         if not isinstance(owner, arith.ConstantOp) or not isinstance(owner.value, IntegerAttr):
-            raise _LoweringError("Only unit stride is supported", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Only unit stride is supported", location=location)
         if owner.value.value.data != 1:
-            raise _LoweringError("Only unit stride is supported", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Only unit stride is supported", location=location)
     return stride
 
 
@@ -1692,7 +1688,7 @@ def _apply_symbolic_index_binary_op(
     if op == "div":
         if isinstance(lhs_value, int) and isinstance(rhs_value, int):
             if rhs_value == 0 or lhs_value % rhs_value != 0:
-                raise _LoweringError("Unsupported index expression", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
             return lhs_value // rhs_value
         if isinstance(lhs_value, int):
             lhs_value = SymbolDim(lhs_value)
@@ -1700,12 +1696,12 @@ def _apply_symbolic_index_binary_op(
     if op == "floordiv":
         if isinstance(lhs_value, int) and isinstance(rhs_value, int):
             if rhs_value == 0:
-                raise _LoweringError("Unsupported index expression", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
             return lhs_value // rhs_value
         if isinstance(lhs_value, int):
             lhs_value = SymbolDim(lhs_value)
         return lhs_value // rhs_value
-    raise _LoweringError("Unsupported index expression", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
 
 
 def _resolve_symbolic_index_value(
@@ -1738,7 +1734,7 @@ def _resolve_symbolic_index_value(
             return expr.value
         if isinstance(expr.value, str):
             return _eval_symbolic_dim_expr(expr.value, expr.location)
-        raise _LoweringError("Index must be int or str", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index must be int or str", location=expr.location)
     if isinstance(expr, ScalarArgAST):
         if runtime_values is not None and expr.name in runtime_values:
             runtime_value = runtime_values[expr.name]
@@ -1757,7 +1753,7 @@ def _resolve_symbolic_index_value(
         return _apply_symbolic_index_binary_op(lhs, rhs, expr.op, expr.location)
     if isinstance(expr, TensorAxisAccessAST):
         if not isinstance(expr.axis, ConstAST) or not isinstance(expr.axis.value, int):
-            raise _LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location or getattr(expr, "location", None))
         dims = expr.tensor.memory.shape if expr.kind == "shape" else expr.tensor.memory.stride
         dim = dims[expr.axis.value]
         public_value = dim.get_value()
@@ -1766,7 +1762,7 @@ def _resolve_symbolic_index_value(
         return expr
     if isinstance(expr, str):
         return _eval_symbolic_dim_expr(expr, location)
-    raise _LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location or getattr(expr, "location", None))
 
 
 def _resolve_static_index_expr(
@@ -1795,7 +1791,7 @@ def _resolve_static_index_expr(
     if isinstance(value, SymbolDim):
         normalized = value.get_value()
         if not isinstance(normalized, (int, str)):
-            raise _LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location or getattr(expr, "location", None))
         return normalized
     return value
 
@@ -1831,8 +1827,8 @@ def _resolve_helper_index_param_value(
             location=getattr(value, "location", None) or location,
             runtime_values=runtime_values,
         )
-    except _LoweringError as exc:
-        raise _LoweringError(
+    except KernelCodeError as exc:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN,
             f"{helper_name} {param_name} must be int or symbol",
             location=getattr(value, "location", None) or location,
         ) from exc
@@ -1868,7 +1864,7 @@ def _helper_index_value_to_symbolic(
         return value
     if isinstance(value, str):
         return _eval_symbolic_dim_expr(value, location)
-    raise _LoweringError(f"{helper_name} {param_name} must be int or symbol", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{helper_name} {param_name} must be int or symbol", location=location)
 
 
 def _resolve_runtime_scalar_value(
@@ -1971,7 +1967,7 @@ def _build_static_index_list(
         values = [default_value for _ in range(rank)]
     elif isinstance(value, (list, tuple)):
         if len(value) != rank:
-            raise _LoweringError("Index rank mismatch", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index rank mismatch", location=location)
         values = [_resolve_static_index_expr(entry, location, runtime_values) for entry in value]
     else:
         scalar = _resolve_static_index_expr(value, location, runtime_values)
@@ -2161,12 +2157,12 @@ def _shape_attr_to_symbol_operand(
         return _const_symbol_int(attr.data, ctx, location)
     if isinstance(attr, StringAttr):
         if attr.data == "?":
-            raise _LoweringError("Unsupported layout attribute", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported layout attribute", location=location)
         value = _resolve_index_operand(attr.data, ctx, location)
         if isinstance(value.type, SymbolValueType):
             return value
         return _cast_to_symbol_int(value, ctx, attr.data, location)
-    raise _LoweringError("Unsupported layout attribute", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported layout attribute", location=location)
 
 
 def _shape_attr_to_helper_index_operand(
@@ -2197,7 +2193,7 @@ def _shape_attr_to_helper_index_operand(
         return _const_i32(attr.data, ctx, location)
     if isinstance(attr, StringAttr):
         return _shape_attr_to_symbol_operand(attr, ctx, location=location)
-    raise _LoweringError("Unsupported layout attribute", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported layout attribute", location=location)
 
 
 def _lower_helper_index_operand(
@@ -2234,18 +2230,18 @@ def _lower_helper_index_operand(
     if isinstance(expr, ScalarArgAST):
         value = _lookup_symbol(expr, ctx)
         if not isinstance(value, SSAValue):
-            raise _LoweringError("Index operand must be SSA value", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index operand must be SSA value", location=expr.location)
         if isinstance(value.type, (IntegerType, SymbolValueType)):
             return value
         if isinstance(value.type, IndexType):
             cast = arith.IndexCastOp(value, IntegerType(32))
             ctx.builder.add_op(cast)
             return cast.result
-        raise _LoweringError("Index operand must be integer or symbol", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index operand must be integer or symbol", location=expr.location)
     if isinstance(expr, VarAST):
         value = _lookup_symbol(expr, ctx)
         if not isinstance(value, SSAValue):
-            raise _LoweringError("Index operand must be SSA value", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index operand must be SSA value", location=expr.location)
         if isinstance(value.type, (IntegerType, SymbolValueType)):
             return value
         if isinstance(value.type, IndexType):
@@ -2281,7 +2277,7 @@ def _build_symbol_product_operand(
     """
 
     if not values:
-        raise _LoweringError("Symbol product requires at least one operand", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Symbol product requires at least one operand", location=location)
     current = values[0]
     for value in values[1:]:
         result_type = SymbolValueType.from_expr(
@@ -2411,12 +2407,12 @@ def _infer_broadcast_shape(
             if _dims_equal(lhs_dim, rhs_dim):
                 result.insert(0, lhs_dim)
                 continue
-            raise _LoweringError("Implicit broadcast dimension mismatch", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch", location=location)
         if isinstance(rhs_dim, StringAttr) and rhs_dim.data == "?":
             if _dims_equal(lhs_dim, rhs_dim):
                 result.insert(0, rhs_dim)
                 continue
-            raise _LoweringError("Implicit broadcast dimension mismatch", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch", location=location)
         if _dims_equal(lhs_dim, rhs_dim):
             result.insert(0, lhs_dim)
             continue
@@ -2426,7 +2422,7 @@ def _infer_broadcast_shape(
         if isinstance(rhs_dim, IntAttr) and rhs_dim.data == 1:
             result.insert(0, lhs_dim)
             continue
-        raise _LoweringError("Implicit broadcast dimension mismatch", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch", location=location)
     return result
 
 
@@ -2475,9 +2471,9 @@ def _infer_broadcast_memory_type(
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
     if element_type is None and lhs_type.element_type != rhs_type.element_type:
-        raise _LoweringError("Binary op operands must have the same element_type", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have the same element_type", location=location)
     if lhs_type.space != rhs_type.space:
-        raise _LoweringError("Binary op operands must have the same space", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have the same space", location=location)
     target_element_type = element_type or lhs_type.element_type
     target_shape = _infer_broadcast_shape(lhs_type.shape.data, rhs_type.shape.data, location)
     target_stride = _build_broadcast_stride(target_shape)
@@ -2520,7 +2516,7 @@ def _resolve_binary_element_type(
     elif lhs_type == f32:
         lhs_rank = 10
     else:
-        raise _LoweringError("Binary op operands must have the same element_type", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have the same element_type", location=location)
 
     if rhs_type == i32:
         rhs_rank = 4
@@ -2529,7 +2525,7 @@ def _resolve_binary_element_type(
     elif rhs_type == f32:
         rhs_rank = 10
     else:
-        raise _LoweringError("Binary op operands must have the same element_type", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have the same element_type", location=location)
     return lhs_type if lhs_rank >= rhs_rank else rhs_type
 
 
@@ -2559,7 +2555,7 @@ def _normalize_add_scalar_element_type(
         return i32
     if scalar_type == i32 or isinstance(scalar_type, Float16Type) or scalar_type == f32:
         return scalar_type
-    raise _LoweringError("nn.add scalar element_type must be i32/f16/f32 or symbol.int", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.add scalar element_type must be i32/f16/f32 or symbol.int", location=location)
 
 
 def _infer_add_mixed_memory_type(
@@ -2621,7 +2617,7 @@ def _infer_binary_memory_type(
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
     if lhs_type.space != rhs_type.space:
-        raise _LoweringError("Binary op operands must have the same space", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have the same space", location=location)
     target_shape = _infer_broadcast_shape(lhs_type.shape.data, rhs_type.shape.data, location)
     target_stride = _build_broadcast_stride(target_shape)
     target_element_type = _resolve_binary_element_type(lhs_type.element_type, rhs_type.element_type, location)
@@ -2659,15 +2655,15 @@ def _infer_matmul_memory_type(
     """
 
     if lhs_type.space != rhs_type.space:
-        raise _LoweringError("nn.matmul operands must use the same space", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.matmul operands must use the same space", location=location)
     lhs_shape = list(lhs_type.shape.data)
     rhs_shape = list(rhs_type.shape.data)
     if len(lhs_shape) != 2 or len(rhs_shape) != 2:
-        raise _LoweringError("matmul operands must be rank-2 nn.memory", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "matmul operands must be rank-2 nn.memory", location=location)
     if not _dims_equal(lhs_shape[1], rhs_shape[0]):
-        raise _LoweringError("matmul contracting dimension mismatch", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "matmul contracting dimension mismatch", location=location)
     if lhs_type.element_type != rhs_type.element_type:
-        raise _LoweringError("matmul element_type must match", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "matmul element_type must match", location=location)
     target_space = _memory_space_from_ast(memoryspace, lhs_type.space)
     target_element_type = lhs_type.element_type
     out_shape = [lhs_shape[0], rhs_shape[1]]
@@ -2703,6 +2699,28 @@ def _memory_to_nn_type(memory: Memory, location: SourceLocation | None = None) -
     return NnMemoryType(shape_attr, stride_attr, element_type, space)
 
 
+def _operation_value_error(exc: ValueError, location: SourceLocation | None = None) -> KernelCodeError:
+    """将 operation 层参数校验失败折成 DSL 公开错误。
+
+    创建者: OpenAI Codex
+    最后一次更改: OpenAI Codex
+
+    功能说明:
+    - `mlir_gen.emit` 是 DSL lowering 的公开错误边界，不能向外透出 operation 层 `ValueError`。
+    - 保留原始消息文本，统一设置为 `KernelCodeError(module="mlir_gen")`。
+
+    使用示例:
+    - raise _operation_value_error(exc, location=expr.location)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/mlir_gen/emit/test_shape_utils.py](test/dsl/mlir_gen/emit/test_shape_utils.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
+    """
+
+    return KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, str(exc), location=location)
+
+
 def _nn_memory_type_to_memory(
     memory_type: NnMemoryType,
     location: SourceLocation | None = None,
@@ -2728,13 +2746,13 @@ def _nn_memory_type_to_memory(
     for dim_attr in memory_type.shape.data:
         dim_symbol = _shape_attr_to_symbol_dim(dim_attr, location)
         if dim_symbol is None:
-            raise _LoweringError("nn.memory shape contains unknown dimension", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.memory shape contains unknown dimension", location=location)
         shape.append(dim_symbol)
     stride: list[SymbolDim] = []
     for dim_attr in memory_type.stride.data:
         dim_symbol = _shape_attr_to_symbol_dim(dim_attr, location)
         if dim_symbol is None:
-            raise _LoweringError("nn.memory stride contains unknown dimension", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.memory stride contains unknown dimension", location=location)
         stride.append(dim_symbol)
     dtype = _xdsl_to_dtype(memory_type.element_type, location)
     space_name = memory_type.space.space.data
@@ -2749,7 +2767,7 @@ def _nn_memory_type_to_memory(
     }
     space = space_map.get(space_name)
     if space is None:
-        raise _LoweringError("Unsupported nn.memory space", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported nn.memory space", location=location)
     return Memory(shape, dtype, space=space, stride=stride)
 
 
@@ -2776,7 +2794,7 @@ def _build_dynamic_memory_type(
     """
     space_name = _DYNAMIC_MEMORY_SPACE_MAP.get(space)
     if space_name is None:
-        raise _LoweringError("get_dynamic_memory space must be on-chip MemorySpace", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "get_dynamic_memory space must be on-chip MemorySpace", location=location)
     return NnMemoryType(
         ArrayAttr([StringAttr("?")]),
         ArrayAttr([IntAttr(1)]),
@@ -2810,9 +2828,9 @@ def _resolve_tensor_axis_index(
 
     axis = _resolve_static_index_expr(axis_expr, location, runtime_values)
     if not isinstance(axis, int):
-        raise _LoweringError("Tensor axis must be static int", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Tensor axis must be static int", location=location)
     if axis < 0:
-        raise _LoweringError("Tensor axis must be non-negative", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Tensor axis must be non-negative", location=location)
     return axis
 
 
@@ -2841,17 +2859,17 @@ def _infer_tensor_axis_access_type(
 
     tensor_type = type_map.get(_expr_key(expr.tensor))
     if not isinstance(tensor_type, NnMemoryType):
-        raise _LoweringError("Tensor axis access source must be nn.memory", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Tensor axis access source must be nn.memory", location=expr.location)
     axis = _resolve_tensor_axis_index(expr.axis, expr.location, runtime_values)
     entries = tensor_type.shape.data if expr.kind == "shape" else tensor_type.stride.data
     if axis >= len(entries):
-        raise _LoweringError("Tensor axis out of range", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Tensor axis out of range", location=expr.location)
     entry = entries[axis]
     if isinstance(entry, IntAttr):
         return SymbolValueType.from_expr(str(entry.data))
     if isinstance(entry, StringAttr) and entry.data != "?":
         return SymbolValueType.from_expr(entry.data)
-    raise _LoweringError("Tensor axis access does not support unknown entry '?'", location=expr.location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Tensor axis access does not support unknown entry '?'", location=expr.location)
 
 
 def _infer_img2col_input_format(input_type: NnMemoryType) -> Farmat:
@@ -2947,9 +2965,9 @@ def _resolve_helper_index_param(
     if isinstance(resolved, int):
         if allow_zero:
             if resolved < 0:
-                raise _LoweringError(f"{op_name} {param_name} must be non-negative", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{op_name} {param_name} must be non-negative", location=location)
         elif resolved <= 0:
-            raise _LoweringError(f"{op_name} {param_name} must be positive", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{op_name} {param_name} must be positive", location=location)
     return resolved
 
 
@@ -3045,11 +3063,11 @@ def _parse_img2col_helper(expr: Img2ColAST) -> tuple[object, dict[str, object]]:
     """
     spec = _IMG2COL_PARAM_TABLE.get(expr.kind)
     if spec is None:
-        raise _LoweringError("Unsupported img2col helper", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported img2col helper", location=expr.location)
     param_names, defaults = spec
 
     if len(expr.args) > len(param_names):
-        raise _LoweringError(f"{expr.kind} arity mismatch", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{expr.kind} arity mismatch", location=expr.location)
 
     params: dict[str, object] = {}
     for index, arg in enumerate(expr.args):
@@ -3057,9 +3075,9 @@ def _parse_img2col_helper(expr: Img2ColAST) -> tuple[object, dict[str, object]]:
 
     for key, value in expr.kwargs.items():
         if key not in param_names:
-            raise _LoweringError(f"{expr.kind} got unexpected keyword '{key}'", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{expr.kind} got unexpected keyword '{key}'", location=expr.location)
         if key in params:
-            raise _LoweringError(f"{expr.kind} got multiple values for argument '{key}'", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{expr.kind} got multiple values for argument '{key}'", location=expr.location)
         params[key] = value
 
     for name in param_names:
@@ -3068,7 +3086,7 @@ def _parse_img2col_helper(expr: Img2ColAST) -> tuple[object, dict[str, object]]:
         if name in defaults:
             params[name] = defaults[name]
             continue
-        raise _LoweringError(f"{expr.kind} missing required argument '{name}'", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{expr.kind} missing required argument '{name}'", location=expr.location)
 
     input_expr = params.pop("value")
     return input_expr, params
@@ -3098,7 +3116,7 @@ def _parse_conv_helper(expr: ConvAST) -> tuple[object, object, dict[str, object]
         resolved[name] = params.pop(name, default_value)
     if params:
         unexpected = next(iter(params))
-        raise _LoweringError(f"conv got unexpected keyword '{unexpected}'", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"conv got unexpected keyword '{unexpected}'", location=expr.location)
     return expr.value, expr.weight, resolved
 
 
@@ -3163,7 +3181,7 @@ def _static_kernel_dim(attr: Attribute, name: str, location: SourceLocation | No
         if isinstance(normalized, int) and normalized <= 0:
             raise VerifyException(f"{name} must be positive")
         return symbolic
-    raise _LoweringError(f"conv {name} must be int or symbol", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"conv {name} must be int or symbol", location=location)
 
 
 def _conv_out_dim_value(
@@ -3205,7 +3223,7 @@ def _conv_out_dim_value(
     elif isinstance(dim, StringAttr):
         dim_value = SymbolDim(dim.data)
     else:
-        raise _LoweringError("conv dim must be int or symbol", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "conv dim must be int or symbol", location=location)
     if all(
         isinstance(value, int)
         for value in (dim_value, kernel_value, stride_value, dilation_value, pad_before_value, pad_after_value)
@@ -3302,7 +3320,7 @@ def _img2col_out_dim_value(
     elif isinstance(dim, StringAttr):
         dim_value = SymbolDim(dim.data)
     else:
-        raise _LoweringError("img2col dim must be int or symbol", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "img2col dim must be int or symbol", location=location)
     if all(
         isinstance(value, int)
         for value in (dim_value, kernel_value, stride_value, dilation_value, pad_left_value, pad_right_value)
@@ -3363,7 +3381,7 @@ def _infer_img2col_output_shape_attrs(
             pr=params["pr"],
         )
     else:
-        raise _LoweringError("Unsupported img2col helper", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported img2col helper", location=expr.location)
     result_type = _memory_to_nn_type(result_memory, location=expr.location)
     return list(result_type.shape.data)
 
@@ -3391,7 +3409,7 @@ def _parse_reduce_axis_expr(axis_expr: object | None, location: SourceLocation |
     if isinstance(axis_expr, ConstAST):
         if isinstance(axis_expr.value, int):
             return [axis_expr.value]
-        raise _LoweringError("reduce axis must be int", location=axis_expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reduce axis must be int", location=axis_expr.location)
     if isinstance(axis_expr, int):
         return [axis_expr]
     if isinstance(axis_expr, (list, tuple)):
@@ -3403,9 +3421,9 @@ def _parse_reduce_axis_expr(axis_expr: object | None, location: SourceLocation |
             if isinstance(entry, int):
                 axes.append(entry)
                 continue
-            raise _LoweringError("reduce axis must be int", location=getattr(entry, "location", None) or location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reduce axis must be int", location=getattr(entry, "location", None) or location)
         return axes
-    raise _LoweringError("reduce axis must be int or list of int", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reduce axis must be int or list of int", location=location)
 
 
 def _parse_softmax_axis_expr(axis_expr: object | None, rank: int, location: SourceLocation | None) -> int:
@@ -3435,7 +3453,7 @@ def _parse_softmax_axis_expr(axis_expr: object | None, rank: int, location: Sour
             value = axis_expr.value
             location = axis_expr.location or location
     if isinstance(value, bool) or not isinstance(value, int):
-        raise _LoweringError("softmax axis must be int", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "softmax axis must be int", location=location)
     normalized = value + rank if value < 0 else value
     return normalized if normalized >= 0 else value
 
@@ -3460,11 +3478,11 @@ def _parse_transpose_perm_expr(perm_expr: object | None, location: SourceLocatio
     """
 
     if perm_expr is None:
-        raise _LoweringError("transpose perm must be list of int", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "transpose perm must be list of int", location=location)
     if isinstance(perm_expr, ConstAST):
         if isinstance(perm_expr.value, int):
             return [perm_expr.value]
-        raise _LoweringError("transpose perm entries must be int", location=perm_expr.location or location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "transpose perm entries must be int", location=perm_expr.location or location)
     if isinstance(perm_expr, int):
         return [perm_expr]
     if isinstance(perm_expr, (list, tuple)):
@@ -3476,12 +3494,12 @@ def _parse_transpose_perm_expr(perm_expr: object | None, location: SourceLocatio
             if isinstance(entry, int):
                 perm_values.append(entry)
                 continue
-            raise _LoweringError(
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN,
                 "transpose perm entries must be int",
                 location=getattr(entry, "location", None) or location,
             )
         return perm_values
-    raise _LoweringError("transpose perm must be list of int", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "transpose perm must be list of int", location=location)
 
 
 def _parse_reduce_keepdim_expr(
@@ -3516,7 +3534,7 @@ def _parse_reduce_keepdim_expr(
         return value, True
     if isinstance(value, int):
         return value, value in (0, 1)
-    raise _LoweringError("reduce keepdim must be bool or int", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reduce keepdim must be bool or int", location=location)
 
 
 def _build_reduce_result_shape_attrs(
@@ -3607,7 +3625,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
     """
     statements = function_ast.body.statements
     if not statements:
-        raise _LoweringError("Function body is empty", location=function_ast.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Function body is empty", location=function_ast.location)
     for expr in statements:
         if not isinstance(
             expr,
@@ -3647,7 +3665,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 TensorAxisAccessAST,
             ),
         ):
-            raise _LoweringError("Unsupported AST expression for lowering", location=getattr(expr, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported AST expression for lowering", location=getattr(expr, "location", None))
     return statements
 
 
@@ -3670,7 +3688,7 @@ def _expect_memory_value(value: object, location: SourceLocation | None) -> NnMe
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
     if not isinstance(value.type, NnMemoryType):
-        raise _LoweringError("Operand must be nn.memory", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Operand must be nn.memory", location=location)
     return value.type
 
 
@@ -3734,22 +3752,22 @@ def _infer_expr_type(
             registry_value = config.get(_MLIR_GEN_CALLEE_REGISTRY_CONFIG_KEY, {})
             compiler_value = config.get(_MLIR_GEN_CALLEE_COMPILER_CONFIG_KEY)
         if not isinstance(registry_value, dict):
-            raise _LoweringError("Python callee registry must be dict", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Python callee registry must be dict", location=expr.location)
 
         arg_types = [
             _infer_expr_type(arg, type_map, runtime_values=runtime_values, config=config) for arg in expr.args
         ]
         if compiler_value is not None:
             if not callable(compiler_value):
-                raise _LoweringError("Python callee compiler must be callable", location=expr.location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Python callee compiler must be callable", location=expr.location)
             compiler_value(expr.callee, arg_types, expr.location)
 
         callee_op = registry_value.get(expr.callee)
         if not isinstance(callee_op, func.FuncOp):
-            raise _LoweringError("Python callee is missing from registry", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Python callee is missing from registry", location=expr.location)
         output_types = list(callee_op.function_type.outputs.data)
         if len(output_types) != 1:
-            raise _LoweringError("Python callee must return exactly one value", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Python callee must return exactly one value", location=expr.location)
         type_map[expr_key] = output_types[0]
         return output_types[0]
 
@@ -3760,11 +3778,11 @@ def _infer_expr_type(
         if isinstance(expr.value, float):
             type_map[expr_key] = f32
             return f32
-        raise _LoweringError("Unsupported constant type", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported constant type", location=expr.location)
     if isinstance(expr, LoadAST):
         tensor_key = _expr_key(expr.tensor)
         if tensor_key not in type_map or not isinstance(type_map[tensor_key], NnMemoryType):
-            raise _LoweringError("Unknown input reference", location=getattr(expr.tensor, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unknown input reference", location=getattr(expr.tensor, "location", None))
         source_type = type_map[tensor_key]
         source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
         offsets_value = _symbolic_index_sequence(expr.offset, location=expr.location, runtime_values=runtime_values)
@@ -3803,14 +3821,14 @@ def _infer_expr_type(
         )
         default_stride = _build_default_stride_attrs(shape_attr)
         if stride_attr != default_stride:
-            raise _LoweringError("dma.alloc only supports contiguous stride", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "dma.alloc only supports contiguous stride", location=expr.location)
         result_type = _memory_to_nn_type(result_memory, location=expr.location)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaCopyAST):
         source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
         if not isinstance(source_type, NnMemoryType):
-            raise _LoweringError("copy source must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "copy source must have nn.memory type", location=expr.location)
         source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
         result_type = _memory_to_nn_type(_KG_OPERATION_DMA.copy(source_memory, expr.space), location=expr.location)
         type_map[expr_key] = result_type
@@ -3818,7 +3836,7 @@ def _infer_expr_type(
     if isinstance(expr, DmaCastAST):
         source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
         if not isinstance(source_type, NnMemoryType):
-            raise _LoweringError("cast source must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "cast source must have nn.memory type", location=expr.location)
         source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
         result_type = _memory_to_nn_type(
             _KG_OPERATION_DMA.cast(source_memory, expr.dtype, memoryspace=expr.memoryspace),
@@ -3829,21 +3847,22 @@ def _infer_expr_type(
     if isinstance(expr, DmaViewAST):
         source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
         if not isinstance(source_type, NnMemoryType):
-            raise _LoweringError("view source must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "view source must have nn.memory type", location=expr.location)
         source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
         offset_value = _symbolic_index_sequence(expr.offset, location=expr.location, runtime_values=runtime_values)
         size_value = _symbolic_index_sequence(expr.size, location=expr.location, runtime_values=runtime_values)
         stride_value = _symbolic_index_sequence(expr.stride, location=expr.location, runtime_values=runtime_values)
-        result_type = _memory_to_nn_type(
-            _KG_OPERATION_DMA.view(source_memory, offset_value, size_value, stride_value),
-            location=expr.location,
-        )
+        try:
+            view_memory = _KG_OPERATION_DMA.view(source_memory, offset_value, size_value, stride_value)
+        except ValueError as exc:
+            raise _operation_value_error(exc, location=expr.location) from exc
+        result_type = _memory_to_nn_type(view_memory, location=expr.location)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaReshapeAST):
         source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
         if not isinstance(source_type, NnMemoryType):
-            raise _LoweringError("reshape source must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reshape source must have nn.memory type", location=expr.location)
         source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
         shape_value = _symbolic_index_sequence(expr.shape, location=expr.location, runtime_values=runtime_values)
         result_type = _memory_to_nn_type(_KG_OPERATION_DMA.reshape(source_memory, shape_value), location=expr.location)
@@ -3852,7 +3871,7 @@ def _infer_expr_type(
     if isinstance(expr, DmaFlattenAST):
         source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
         if not isinstance(source_type, NnMemoryType):
-            raise _LoweringError("flatten source must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "flatten source must have nn.memory type", location=expr.location)
         source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
         result_type = _memory_to_nn_type(_KG_OPERATION_DMA.flatten(source_memory), location=expr.location)
         type_map[expr_key] = result_type
@@ -3861,7 +3880,7 @@ def _infer_expr_type(
         value_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
         target_type = _infer_expr_type(expr.target, type_map, runtime_values=runtime_values)
         if not isinstance(value_type, NnMemoryType) or not isinstance(target_type, NnMemoryType):
-            raise _LoweringError("broadcast operands must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "broadcast operands must be nn.memory", location=expr.location)
         source_memory = _nn_memory_type_to_memory(value_type, location=expr.location)
         target_memory = _nn_memory_type_to_memory(target_type, location=expr.location)
         output_memory = _KG_OPERATION_NN.broadcast(source_memory, target_memory)
@@ -3871,7 +3890,7 @@ def _infer_expr_type(
     if isinstance(expr, NnBroadcastToAST):
         source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
         if not isinstance(source_type, NnMemoryType):
-            raise _LoweringError("broadcast_to source must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "broadcast_to source must be nn.memory", location=expr.location)
         source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
         target_attrs = _build_static_index_attrs_exact(
             expr.target_shape,
@@ -3882,10 +3901,10 @@ def _infer_expr_type(
         for attr in target_attrs:
             dim_symbol = _shape_attr_to_symbol_dim(attr, expr.location)
             if dim_symbol is None:
-                raise _LoweringError("broadcast_to target_shape contains unknown dimension", location=expr.location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "broadcast_to target_shape contains unknown dimension", location=expr.location)
             target_dims.append(dim_symbol)
         if not isinstance(expr.space, MemorySpace):
-            raise _LoweringError("broadcast_to space must be MemorySpace", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "broadcast_to space must be MemorySpace", location=expr.location)
         output_memory = _KG_OPERATION_NN.broadcast_to(source_memory, target_dims, expr.space)
         result_type = _memory_to_nn_type(output_memory, location=expr.location)
         type_map[expr_key] = result_type
@@ -3893,7 +3912,7 @@ def _infer_expr_type(
     if isinstance(expr, NnTransposeAST):
         value_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
         if not isinstance(value_type, NnMemoryType):
-            raise _LoweringError("transpose input must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "transpose input must be nn.memory", location=expr.location)
         perm_values = _parse_transpose_perm_expr(expr.perm, expr.location)
         input_memory = _nn_memory_type_to_memory(value_type, location=expr.location)
         output_memory = _KG_OPERATION_NN.transpose(input_memory, perm_values)
@@ -3909,7 +3928,7 @@ def _infer_expr_type(
     if isinstance(expr, NnReduceAST):
         input_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
         if not isinstance(input_type, NnMemoryType):
-            raise _LoweringError("reduce input must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reduce input must be nn.memory", location=expr.location)
         output_shape = _infer_reduce_output_shape_attrs(expr, input_type)
         stride_attr = _build_symbolic_stride_attrs(output_shape, expr.location)
         result_type = _memory_type_from_parts(
@@ -3923,7 +3942,7 @@ def _infer_expr_type(
     if isinstance(expr, NnSoftmaxAST):
         input_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
         if not isinstance(input_type, NnMemoryType):
-            raise _LoweringError("softmax input must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "softmax input must be nn.memory", location=expr.location)
         result_type = input_type
         type_map[expr_key] = result_type
         return result_type
@@ -3931,7 +3950,7 @@ def _infer_expr_type(
         value_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
         weight_type = _infer_expr_type(expr.weight, type_map, runtime_values=runtime_values)
         if not isinstance(value_type, NnMemoryType) or not isinstance(weight_type, NnMemoryType):
-            raise _LoweringError("conv operands must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "conv operands must be nn.memory", location=expr.location)
         result_type = _infer_conv_memory_type(expr, value_type, weight_type, runtime_values=runtime_values)
         type_map[expr_key] = result_type
         return result_type
@@ -3939,7 +3958,7 @@ def _infer_expr_type(
         input_expr, raw_params = _parse_img2col_helper(expr)
         input_type = _infer_expr_type(input_expr, type_map, runtime_values=runtime_values)
         if not isinstance(input_type, NnMemoryType):
-            raise _LoweringError(f"{expr.kind} input must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{expr.kind} input must be nn.memory", location=expr.location)
         params = _resolve_img2col_param_values(expr, raw_params, runtime_values)
         out_shape = _infer_img2col_output_shape_attrs(expr, input_type, params)
         stride_attr = _build_symbolic_stride_attrs(out_shape, expr.location)
@@ -3950,11 +3969,11 @@ def _infer_expr_type(
         value_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
         weight_type = _infer_expr_type(expr.weight, type_map, runtime_values=runtime_values)
         if not isinstance(value_type, NnMemoryType) or not isinstance(weight_type, NnMemoryType):
-            raise _LoweringError("fc operands must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fc operands must be nn.memory", location=expr.location)
         value_shape = list(value_type.shape.data)
         weight_shape = list(weight_type.shape.data)
         if len(value_shape) != 2 or len(weight_shape) != 2:
-            raise _LoweringError("fc operands must be rank-2 nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fc operands must be rank-2 nn.memory", location=expr.location)
         out_shape = [value_shape[0], weight_shape[0]]
         out_stride = _build_default_stride_attrs(out_shape)
         result_type = _memory_type_from_parts(out_shape, out_stride, value_type.element_type, value_type.space)
@@ -3964,20 +3983,20 @@ def _infer_expr_type(
         lhs_type = _infer_expr_type(expr.lhs, type_map, runtime_values=runtime_values)
         rhs_type = _infer_expr_type(expr.rhs, type_map, runtime_values=runtime_values)
         if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
-            raise _LoweringError("matmul operands must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "matmul operands must be nn.memory", location=expr.location)
         result_type = _infer_matmul_memory_type(lhs_type, rhs_type, expr.memoryspace, expr.location)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, StoreAST):
-        raise _LoweringError("StoreAST does not produce a value", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "StoreAST does not produce a value", location=expr.location)
     if isinstance(expr, DmaFreeAST):
-        raise _LoweringError("free does not produce a value", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "free does not produce a value", location=expr.location)
     if isinstance(expr, ForAST):
-        raise _LoweringError("ForAST does not produce a value", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "ForAST does not produce a value", location=expr.location)
     if isinstance(expr, ArchBarrierAST):
-        raise _LoweringError("barrier does not produce a value", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "barrier does not produce a value", location=expr.location)
     if isinstance(expr, ArchLaunchKernelAST):
-        raise _LoweringError("launch_kernel does not produce a value", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "launch_kernel does not produce a value", location=expr.location)
     if isinstance(expr, ArchGetDynamicMemoryAST):
         result_type = _build_dynamic_memory_type(expr.space, location=expr.location)
         type_map[expr_key] = result_type
@@ -3993,7 +4012,7 @@ def _infer_expr_type(
         }
         symbol_name = query_map.get(expr.query_name)
         if symbol_name is None:
-            raise _LoweringError("Unsupported arch query", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported arch query", location=expr.location)
         result_type = SymbolValueType.from_expr(symbol_name)
         type_map[expr_key] = result_type
         return result_type
@@ -4004,7 +4023,7 @@ def _infer_expr_type(
     if isinstance(expr, SymbolToFloatAST):
         source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
         if not isinstance(source_type, SymbolValueType):
-            raise _LoweringError('symbol.to_float source must have type !symbol.int<"expr">', location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, 'symbol.to_float source must have type !symbol.int<"expr">', location=expr.location)
         type_map[expr_key] = f32
         return f32
 
@@ -4024,10 +4043,10 @@ def _infer_expr_type(
 
     if isinstance(expr, (TensorAST, ScalarArgAST, VarAST)):
         if expr_key not in type_map:
-            raise _LoweringError("Unknown input reference", location=getattr(expr, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unknown input reference", location=getattr(expr, "location", None))
         return type_map[expr_key]
 
-    raise _LoweringError("Unsupported expression for lowering", location=getattr(expr, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported expression for lowering", location=getattr(expr, "location", None))
 
 
 def _cast_nn_scalar_operand(
@@ -4067,15 +4086,15 @@ def _cast_nn_scalar_operand(
             cast_op = SymbolToFloatOp(value, target_element_type)
             ctx.builder.add_op(cast_op)
             return cast_op.result
-        raise _LoweringError("nn scalar element_type must be integer/float or symbol.int", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn scalar element_type must be integer/float or symbol.int", location=location)
     if isinstance(source_type, IntegerType):
         if isinstance(target_element_type, IntegerType):
-            raise _LoweringError("nn scalar integer width conversion is unsupported", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn scalar integer width conversion is unsupported", location=location)
         if isinstance(target_element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
             cast_op = arith.SIToFPOp(value, target_element_type)
             ctx.builder.add_op(cast_op)
             return cast_op.result
-        raise _LoweringError("nn scalar element_type must be integer/float or symbol.int", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn scalar element_type must be integer/float or symbol.int", location=location)
     if isinstance(source_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)) and isinstance(
         target_element_type,
         (Float16Type, BFloat16Type, Float32Type, Float64Type),
@@ -4089,7 +4108,7 @@ def _cast_nn_scalar_operand(
         cast_op = arith.TruncFOp(value, target_element_type)
         ctx.builder.add_op(cast_op)
         return cast_op.result
-    raise _LoweringError("nn scalar element_type must be integer/float or symbol.int", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn scalar element_type must be integer/float or symbol.int", location=location)
 
 
 def _materialize_mixed_binary_scalar_operand(
@@ -4124,7 +4143,7 @@ def _materialize_mixed_binary_scalar_operand(
     if isinstance(scalar_expr, ConstAST) and isinstance(scalar_expr.value, int):
         scalar_value = _const_symbol_int(int(scalar_expr.value), ctx, location)
     if scalar_value is None:
-        raise _LoweringError("Binary op scalar operand could not be materialized", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op scalar operand could not be materialized", location=location)
     if not cast_to_element_type:
         return scalar_value
     return _cast_nn_scalar_operand(scalar_value, target_element_type, ctx, location)
@@ -4158,13 +4177,13 @@ def _materialize_fill_scalar_operand(
         value = value_expr.value
         if isinstance(value, str):
             if not isinstance(target_element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
-                raise _LoweringError("fill string literal requires floating target", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fill string literal requires floating target", location=location)
             literal = float("inf") if value == "inf" else float("-inf")
             const_op = arith.ConstantOp(FloatAttr(literal, target_element_type))
             ctx.builder.add_op(const_op)
             return const_op.result
         if isinstance(value, bool):
-            raise _LoweringError("fill value must be scalar or symbol.int", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fill value must be scalar or symbol.int", location=location)
         if isinstance(value, int):
             if isinstance(target_element_type, IntegerType):
                 const_op = arith.ConstantOp(IntegerAttr(int(value), target_element_type))
@@ -4176,7 +4195,7 @@ def _materialize_fill_scalar_operand(
                 return const_op.result
         if isinstance(value, float):
             if not isinstance(target_element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
-                raise _LoweringError("fill float literal requires floating target", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fill float literal requires floating target", location=location)
             const_op = arith.ConstantOp(FloatAttr(float(value), target_element_type))
             ctx.builder.add_op(const_op)
             return const_op.result
@@ -4216,8 +4235,8 @@ def _lower_mixed_binary_expr(
         return None
     if not lhs_is_memory and not rhs_is_memory:
         if expr.op == "add":
-            raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
-        raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.add requires at least one nn.memory operand", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have nn.memory type", location=expr.location)
 
     result_type = _infer_expr_type(
         expr,
@@ -4226,14 +4245,14 @@ def _lower_mixed_binary_expr(
         config=ctx.config,
     )
     if not isinstance(result_type, NnMemoryType):
-        raise _LoweringError("Binary op result must be nn.memory", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op result must be nn.memory", location=expr.location)
 
     memory_value = lhs if lhs_is_memory else rhs
     memory_type = lhs_type if lhs_is_memory else rhs_type
     scalar_value = rhs if lhs_is_memory else lhs
     scalar_expr = expr.rhs if lhs_is_memory else expr.lhs
     if not isinstance(memory_type, NnMemoryType):
-        raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Binary op operands must have nn.memory type", location=expr.location)
 
     if memory_type.element_type != result_type.element_type:
         cast_type = _memory_type_from_parts(
@@ -4264,7 +4283,7 @@ def _lower_mixed_binary_expr(
     }
     op_cls = op_map.get(expr.op)
     if op_cls is None:
-        raise _LoweringError(f"Unsupported binary op: {expr.op}", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"Unsupported binary op: {expr.op}", location=expr.location)
     op = op_cls(
         memory_value if lhs_is_memory else scalar_value,
         scalar_value if lhs_is_memory else memory_value,
@@ -4294,9 +4313,9 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     - 返回对应的 SSAValue（通常为 op.result），供后续表达式使用。
 
     限制与异常:
-    - 不支持的 AST 节点会抛出 `_LoweringError`。
-    - `StoreAST` 与 `DmaFreeAST` 不产生值，会抛出 `_LoweringError`。
-    - 未知输入引用会抛出 `_LoweringError`。
+    - 不支持的 AST 节点会抛出 `KernelCodeError`。
+    - `StoreAST` 与 `DmaFreeAST` 不产生值，会抛出 `KernelCodeError`。
+    - 未知输入引用会抛出 `KernelCodeError`。
 
     使用示例:
     - value = _lower_expr(expr, ctx)
@@ -4313,7 +4332,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
 
     if isinstance(expr, (TensorAST, ScalarArgAST, VarAST)):
         if not ctx._has_cache(expr_key):
-            raise _LoweringError("Unknown input reference", location=getattr(expr, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unknown input reference", location=getattr(expr, "location", None))
         return ctx._get_cache(expr_key)
     if isinstance(expr, ConstAST):
         if isinstance(expr.value, int):
@@ -4323,7 +4342,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             attr = FloatAttr(expr.value, f32)
             op = arith.ConstantOp(attr)
         else:
-            raise _LoweringError("Unsupported constant type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported constant type", location=expr.location)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         return op.result
@@ -4340,7 +4359,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         strides = _build_stride_attrs(expr.stride, rank, ctx, location=expr.location)
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("LoadAST result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "LoadAST result must be nn.memory", location=expr.location)
         if expr.kind == "slice":
             if any(isinstance(dim, StringAttr) for dim in result_type.shape.data):
                 alloc_shape = _build_index_operands_from_layout(result_type.shape, ctx, location=expr.location)
@@ -4371,7 +4390,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, DmaAllocAST):
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("alloc result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "alloc result must be nn.memory", location=expr.location)
         if isinstance(expr.shape, (list, tuple)):
             shape_entries = list(expr.shape)
         else:
@@ -4394,7 +4413,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         source_type = _expect_memory_value(source, expr.location)
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("copy result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "copy result must be nn.memory", location=expr.location)
         if all(isinstance(dim, IntAttr) for dim in result_type.shape.data):
             alloc_shape: list[SSAValue] = []
         else:
@@ -4411,7 +4430,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         _expect_memory_value(source, expr.location)
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("cast result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "cast result must be nn.memory", location=expr.location)
         if all(isinstance(dim, IntAttr) for dim in result_type.shape.data):
             alloc_shape = []
         else:
@@ -4427,7 +4446,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         _expect_memory_value(source, expr.location)
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("view result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "view result must be nn.memory", location=expr.location)
         rank = len(result_type.shape.data)
         offsets = _build_index_attrs(expr.offset, rank, ctx, location=expr.location)
         shape = _build_index_operands_exact(expr.size, ctx, location=expr.location)
@@ -4441,7 +4460,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         _expect_memory_value(source, expr.location)
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("reshape result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reshape result must be nn.memory", location=expr.location)
         shape = _build_index_operands_exact(expr.shape, ctx, location=expr.location)
         op = DmaReshapeOp(source, shape, result_type)
         ctx.builder.add_op(op)
@@ -4452,7 +4471,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         source_type = _expect_memory_value(source, expr.location)
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("flatten result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "flatten result must be nn.memory", location=expr.location)
         shape_operand = _build_flatten_shape_operands(source, source_type, ctx, location=expr.location)
         op = DmaReshapeOp(source, shape_operand, result_type)
         ctx.builder.add_op(op)
@@ -4471,9 +4490,9 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         target_type = _expect_memory_value(target, expr.location)
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("broadcast result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "broadcast result must be nn.memory", location=expr.location)
         if result_type != target_type:
-            raise _LoweringError("broadcast result must match target type", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "broadcast result must match target type", location=expr.location)
         op = NnBroadcastOp(value, result_type, result_type.space)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
@@ -4483,7 +4502,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         _expect_memory_value(source, expr.location)
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("broadcast_to result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "broadcast_to result must be nn.memory", location=expr.location)
         op = NnBroadcastOp(source, result_type, result_type.space)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
@@ -4493,7 +4512,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         input_type = _expect_memory_value(value, expr.location)
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("transpose result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "transpose result must be nn.memory", location=expr.location)
         perm_values = _parse_transpose_perm_expr(expr.perm, expr.location)
         op = NnTransposeOp(value, result_type, perm=perm_values, space=input_type.space)
         op.verify()
@@ -4505,7 +4524,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         input_type = _expect_memory_value(input_value, expr.location)
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("reduce result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reduce result must be nn.memory", location=expr.location)
         axes = _parse_reduce_axis_expr(expr.axis, expr.location)
         if axes is None:
             axes = list(range(len(input_type.shape.data)))
@@ -4519,7 +4538,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             "reduce_max": NnReduceMaxOp,
         }
         if expr.kind not in op_map:
-            raise _LoweringError("Unsupported reduce helper", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported reduce helper", location=expr.location)
         op = op_map[expr.kind](input_value, result_type, axes=axes, keepdim=keepdim_arg, space=input_type.space)
         op.verify()
         ctx.builder.add_op(op)
@@ -4528,11 +4547,11 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, NnSoftmaxAST):
         input_value = _lower_expr(expr.value, ctx)
         if not isinstance(input_value.type, NnMemoryType):
-            raise _LoweringError("softmax input must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "softmax input must be nn.memory", location=expr.location)
         input_type = input_value.type
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("softmax result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "softmax result must be nn.memory", location=expr.location)
         axis_value = _parse_softmax_axis_expr(expr.axis, len(input_type.shape.data), expr.location)
         op = NnSoftmaxOp(input_value, result_type, axis=axis_value, space=input_type.space)
         op.verify()
@@ -4546,7 +4565,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         weight_type = _expect_memory_value(weight, expr.location)
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("conv result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "conv result must be nn.memory", location=expr.location)
 
         _, _, raw_params = _parse_conv_helper(expr)
         params = _resolve_conv_param_values(expr, raw_params, runtime_values)
@@ -4555,7 +4574,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         kh_dim = _shape_attr_to_symbol_dim(kh_attr, expr.location)
         kw_dim = _shape_attr_to_symbol_dim(kw_attr, expr.location)
         if kh_dim is None or kw_dim is None:
-            raise _LoweringError("conv kh/kw must be int or symbol", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "conv kh/kw must be int or symbol", location=expr.location)
         img2col_memory = _KG_OPERATION_NN.img2col2d(
             value_memory,
             kh=kh_dim,
@@ -4650,7 +4669,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         input_type = _expect_memory_value(input_value, expr.location)
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError(f"{expr.kind} result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{expr.kind} result must be nn.memory", location=expr.location)
         if expr.kind == "img2col1d":
             op = NnImg2col1dOp(
                 input_value,
@@ -4679,7 +4698,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
                 space=input_type.space,
             )
         else:
-            raise _LoweringError("Unsupported img2col helper", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported img2col helper", location=expr.location)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         return op.result
@@ -4689,7 +4708,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         value_type = _expect_memory_value(value, expr.location)
         weight_type = _expect_memory_value(weight, expr.location)
         if len(value_type.shape.data) != 2 or len(weight_type.shape.data) != 2:
-            raise _LoweringError("fc operands must be rank-2 nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fc operands must be rank-2 nn.memory", location=expr.location)
         transposed_shape = [weight_type.shape.data[1], weight_type.shape.data[0]]
         transposed_stride = [weight_type.stride.data[1], weight_type.stride.data[0]]
         transpose_type = NnMemoryType(
@@ -4703,7 +4722,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx.builder.add_op(transpose_op)
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("fc result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fc result must be nn.memory", location=expr.location)
         matmul_op = NnMatmulOp(value, transpose_op.result, result_type, result_type.space)
         matmul_op.verify()
         ctx.builder.add_op(matmul_op)
@@ -4716,7 +4735,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         rhs_type = _expect_memory_value(rhs, expr.location)
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("matmul result must be nn.memory", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "matmul result must be nn.memory", location=expr.location)
         if lhs_type.element_type != result_type.element_type:
             cast_type = _memory_type_from_parts(
                 lhs_type.shape.data,
@@ -4746,14 +4765,14 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx._set_cache(expr_key, op.result)
         return op.result
     if isinstance(expr, StoreAST):
-        raise _LoweringError("StoreAST does not produce a value", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "StoreAST does not produce a value", location=expr.location)
     if isinstance(expr, DmaFreeAST):
-        raise _LoweringError("free does not produce a value", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "free does not produce a value", location=expr.location)
     if isinstance(expr, ArchGetDynamicMemoryAST):
         result_type = _build_dynamic_memory_type(expr.space, location=expr.location)
         space_name = _DYNAMIC_MEMORY_SPACE_MAP.get(expr.space)
         if space_name is None:
-            raise _LoweringError("get_dynamic_memory space must be on-chip MemorySpace", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "get_dynamic_memory space must be on-chip MemorySpace", location=expr.location)
         op = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name(space_name), result_type)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
@@ -4773,7 +4792,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         elif expr.query_name == "get_thread_num":
             op = ArchGetThreadNumOp()
         else:
-            raise _LoweringError("Unsupported arch query", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported arch query", location=expr.location)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         ctx.types[expr_key] = op.result.type
@@ -4787,11 +4806,11 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         elif expr.kind == "stride":
             op = SymbolGetStrideOp(source, IntAttr(axis))
         else:
-            raise _LoweringError("Unsupported tensor axis access kind", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported tensor axis access kind", location=expr.location)
         try:
             op.verify()
         except VerifyException as exc:
-            raise _LoweringError(str(exc), location=expr.location) from exc
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, str(exc), location=expr.location) from exc
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         ctx.types[expr_key] = op.result.type
@@ -4799,7 +4818,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, SymbolToFloatAST):
         source = _lower_expr(expr.source, ctx)
         if not isinstance(getattr(source, "type", None), SymbolValueType):
-            raise _LoweringError('symbol.to_float source must have type !symbol.int<"expr">', location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, 'symbol.to_float source must have type !symbol.int<"expr">', location=expr.location)
         op = SymbolToFloatOp(source, f32)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
@@ -4812,16 +4831,16 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         if isinstance(ctx.config, dict):
             registry_value = ctx.config.get(_MLIR_GEN_CALLEE_REGISTRY_CONFIG_KEY, {})
         if not isinstance(registry_value, dict):
-            raise _LoweringError("Python callee registry must be dict", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Python callee registry must be dict", location=expr.location)
         callee_op = registry_value.get(expr.callee)
         if not isinstance(callee_op, func.FuncOp):
-            raise _LoweringError("Python callee is missing from registry", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Python callee is missing from registry", location=expr.location)
         callee_name = callee_op.sym_name.data
         args = [SSAValue.get(_lower_expr(arg, ctx)) for arg in expr.args]
         call_op = func.CallOp(callee_name, args, [result_type])
         ctx.builder.add_op(call_op)
         if len(call_op.results) != 1:
-            raise _LoweringError("Python callee must return exactly one value", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Python callee must return exactly one value", location=expr.location)
         ctx._set_cache(expr_key, call_op.results[0])
         ctx.types[expr_key] = call_op.results[0].type
         return call_op.results[0]
@@ -4840,7 +4859,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx._set_cache(expr_key, value)
         return value
 
-    raise _LoweringError("Unsupported expression for lowering", location=getattr(expr, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported expression for lowering", location=getattr(expr, "location", None))
 
 
 def _lookup_symbol(node: TensorAST | ScalarArgAST | VarAST, ctx: EmitContext) -> object:
@@ -4861,7 +4880,7 @@ def _lookup_symbol(node: TensorAST | ScalarArgAST | VarAST, ctx: EmitContext) ->
     - 返回已缓存的 SSAValue。
 
     限制与异常:
-    - 符号不存在时抛出 `_LoweringError`。
+    - 符号不存在时抛出 `KernelCodeError`。
 
     使用示例:
     - value = _lookup_symbol(node, ctx)
@@ -4875,24 +4894,53 @@ def _lookup_symbol(node: TensorAST | ScalarArgAST | VarAST, ctx: EmitContext) ->
     if ctx._has_cache(expr_key):
         return ctx._get_cache(expr_key)
     if node.name not in ctx.symbols:
-        raise _LoweringError("Unknown input reference", location=getattr(node, "location", None))
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unknown input reference", location=getattr(node, "location", None))
     value = ctx.symbols[node.name]
     ctx._set_cache(expr_key, value)
     ctx.types.setdefault(expr_key, value.type)
     return value
 
 
+def _lower_if_body(body: BlockAST, body_block: Block, ctx: EmitContext) -> object | None:
+    """将 `IfAST` 的单个分支 lowering 到目标 region block。
+
+    创建者: 榕
+    最后一次更改: 榕
+
+    功能说明:
+    - 复用父上下文已有 SSA/cache 快照作为分支输入。
+    - 分支内新增临时值不回写父上下文，避免分支局部状态泄漏到 `scf.if` 外部。
+
+    使用示例:
+    - _lower_if_body(if_ast.true_body, true_block, ctx)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/mlir_gen/emit/test_control_flow.py](test/dsl/mlir_gen/emit/test_control_flow.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
+    """
+
+    nested_ctx = EmitContext(builder=body_block, symbols=dict(ctx.symbols), types=dict(ctx.types), config=ctx.config)
+    nested_ctx._cache = ctx._snapshot_cache()
+    last_value = None
+    for stmt in body.statements:
+        last_value = emit_mlir(stmt, nested_ctx)
+    body_block.add_op(scf.YieldOp())
+    return last_value
+
+
 def emit_mlir(node: object, ctx: EmitContext) -> object:
     """将单个 AST 节点发射为 MLIR value 或 op。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: 榕
 
     功能说明:
     - 统一处理 expression 与 statement 节点的 lowering 入口。
-    - 按节点类型分派到符号查找、表达式 lowering 或 store 发射路径。
+    - 按节点类型分派到符号查找、表达式 lowering、store 发射或控制流发射路径。
     - 对需要类型信息的表达式先补做 `_infer_expr_type`，再进入 `_lower_expr`。
     - `free(...)` 作为语句 helper 时会发射单个 `dma.free`，但不会产生新的 SSA 结果。
+    - `IfAST` 作为语句级控制流 lowering 为无结果 `scf.if`。
 
     使用示例:
     - value = emit_mlir(BinaryExprAST(op="add", lhs=lhs, rhs=rhs), ctx)
@@ -4955,7 +5003,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         runtime_values = _ctx_runtime_values(ctx)
         try:
             source_memory_type = _infer_expr_type(node.value, ctx.types, runtime_values=runtime_values, config=ctx.config)
-        except _LoweringError:
+        except KernelCodeError:
             source_memory_type = None
         try:
             target_memory_type = _infer_expr_type(
@@ -4964,7 +5012,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
                 runtime_values=runtime_values,
                 config=ctx.config,
             )
-        except _LoweringError:
+        except KernelCodeError:
             target_memory_type = None
         if isinstance(source_memory_type, NnMemoryType) and isinstance(target_memory_type, NnMemoryType):
             source_memory = _nn_memory_type_to_memory(source_memory_type, location=node.location)
@@ -4981,16 +5029,16 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
                 else _symbolic_index_sequence(node.stride, location=node.location, runtime_values=runtime_values)
             )
             if node.kind == "deslice":
-                _KG_OPERATION_DMA.deslice(source_memory, target_memory, offsets_value, sizes_value, strides_value)
+                _KG_OPERATION_DMA.deslice(target_memory, source_memory, offsets_value, sizes_value, strides_value)
             else:
-                _KG_OPERATION_DMA.store(source_memory, target_memory, offsets_value, sizes_value, strides_value)
+                _KG_OPERATION_DMA.store(target_memory, source_memory, offsets_value, sizes_value, strides_value)
         target = _lower_expr(node.tensor, ctx)
         target_type = _expect_memory_value(target, node.location)
         value = _lower_expr(node.value, ctx)
         value_type = _expect_memory_value(value, node.location)
         rank = len(target_type.shape.data)
         if len(value_type.shape.data) != rank:
-            raise _LoweringError("Store source rank mismatch", location=node.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Store source rank mismatch", location=node.location)
         offsets = _build_index_attrs(node.offset, rank, ctx, location=node.location)
         sizes = (
             _build_index_attrs(node.sizes, rank, ctx, default_value=1, location=node.location)
@@ -4999,9 +5047,9 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         )
         strides = _build_stride_attrs(node.stride, rank, ctx, location=node.location)
         if node.kind == "deslice":
-            store_op = DmaDesliceOp(value, target, offsets, sizes, strides, target_type)
+            store_op = DmaDesliceOp(target, value, offsets, sizes, strides, target_type)
         else:
-            store_op = DmaStoreOp(value, target, offsets, sizes, strides)
+            store_op = DmaStoreOp(target, value, offsets, sizes, strides)
         ctx.builder.add_op(store_op)
         return store_op
     if isinstance(node, DmaFreeAST):
@@ -5012,7 +5060,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
                 runtime_values=_ctx_runtime_values(ctx),
                 config=ctx.config,
             )
-        except _LoweringError:
+        except KernelCodeError:
             value_type = None
         if not isinstance(value_type, NnMemoryType):
             raw_value = node.value.value if isinstance(node.value, ConstAST) else node.value
@@ -5030,12 +5078,12 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         try:
             barrier_op.verify()
         except VerifyException as exc:
-            raise _LoweringError(str(exc), location=node.location) from exc
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, str(exc), location=node.location) from exc
         ctx.builder.add_op(barrier_op)
         return barrier_op
     if isinstance(node, ArchLaunchKernelAST):
         if not isinstance(node.callee, str) or node.callee == "":
-            raise _LoweringError("launch_kernel callee must be function symbol reference", location=node.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "launch_kernel callee must be function symbol reference", location=node.location)
         block = _lower_launch_extent_symbol(node.block, "block", ctx, node.location)
         thread = _lower_launch_extent_symbol(node.thread, "thread", ctx, node.location)
         subthread = _lower_launch_extent_symbol(node.subthread, "subthread", ctx, node.location)
@@ -5051,9 +5099,25 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         try:
             op.verify()
         except VerifyException as exc:
-            raise _LoweringError(str(exc), location=node.location) from exc
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, str(exc), location=node.location) from exc
         ctx.builder.add_op(op)
         return op
+    if isinstance(node, IfAST):
+        condition = SSAValue.get(_lower_expr(node.condition, ctx))
+        if condition.type != i1:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "if condition must lower to i1", location=node.location)
+        true_block = Block()
+        if node.false_body is None:
+            false_block = None
+            if_op = scf.IfOp(condition, [], [true_block])
+        else:
+            false_block = Block()
+            if_op = scf.IfOp(condition, [], [true_block], [false_block])
+        ctx.builder.add_op(if_op)
+        _lower_if_body(node.true_body, true_block, ctx)
+        if false_block is not None and node.false_body is not None:
+            _lower_if_body(node.false_body, false_block, ctx)
+        return if_op
     if isinstance(node, ForAST):
         start_value = _lower_loop_bound(node.start, ctx)
         end_value = _lower_loop_bound(node.end, ctx)
@@ -5096,9 +5160,9 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             loop_vars[node.var.name] = previous
         return loop_op if last_value is None else last_value
     if isinstance(node, BlockAST):
-        raise _LoweringError("BlockAST must be lowered via AstVisitor", location=node.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "BlockAST must be lowered via AstVisitor", location=node.location)
     if isinstance(node, FunctionAST):
-        raise _LoweringError("FunctionAST must be lowered via AstVisitor", location=node.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "FunctionAST must be lowered via AstVisitor", location=node.location)
     if isinstance(node, func.ReturnOp):
         return node
-    raise _LoweringError("Unsupported expression for lowering", location=getattr(node, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported expression for lowering", location=getattr(node, "location", None))

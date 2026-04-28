@@ -21,6 +21,11 @@
 - `class MemorySpace(Enum)`
 - `class NumericType(Enum)`
 - `class Farmat(Enum)`
+- `kernel_gen.symbol_variable.type.FLOAT_DTYPES`
+- `kernel_gen.symbol_variable.type.INT_DTYPES`
+- `kernel_gen.symbol_variable.type.ARITHMETIC_DTYPE_ORDER`
+- `kernel_gen.symbol_variable.type.ARITHMETIC_DTYPE_RANK`
+- `kernel_gen.symbol_variable.type.NN_FLOAT_DTYPES`
 - `kernel_gen.symbol_variable.type.is_integer_dtype(dtype: NumericType) -> bool`
 - `kernel_gen.symbol_variable.type.is_float_dtype(dtype: NumericType) -> bool`
 - `kernel_gen.symbol_variable.ptr.Ptr(*dtype: object)`
@@ -40,7 +45,7 @@
 | [`kernel_gen/symbol_variable/symbol_dim.py`](../../kernel_gen/symbol_variable/symbol_dim.py) | `SymbolDim` |
 | [`kernel_gen/symbol_variable/symbol_shape.py`](../../kernel_gen/symbol_variable/symbol_shape.py) | `SymbolList`、`SymbolShape` |
 | [`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py) | `LocalSpaceMeta`、`Memory`、`MemorySpace` |
-| [`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py) | `NumericType`、`Farmat`；`is_integer_dtype`、`is_float_dtype` 仅子模块入口 |
+| [`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py) | `NumericType`、`Farmat`；`FLOAT_DTYPES`、`INT_DTYPES`、`ARITHMETIC_DTYPE_ORDER`、`ARITHMETIC_DTYPE_RANK`、`NN_FLOAT_DTYPES`、`is_integer_dtype`、`is_float_dtype` 仅子模块入口 |
 | [`kernel_gen/symbol_variable/ptr.py`](../../kernel_gen/symbol_variable/ptr.py) | `Ptr`，只保留子模块入口 |
 
 ## 包入口合同
@@ -71,7 +76,7 @@ mem = Memory([SymbolDim("N"), 32], NumericType.Float32)
 - `from kernel_gen.symbol_variable import Name` 只承诺上面这组名称可稳定导入。
 - `from kernel_gen.symbol_variable import *` 只能暴露上面的集合。
 - 包入口不额外暴露 `Ptr`、实现细节或旧兼容名字。
-- `kernel_gen.symbol_variable.type.is_integer_dtype` 与 `kernel_gen.symbol_variable.type.is_float_dtype` 若存在，也只允许通过子模块入口导入；包入口不重导出这两个 helper。
+- `kernel_gen.symbol_variable.type.FLOAT_DTYPES`、`kernel_gen.symbol_variable.type.INT_DTYPES`、`kernel_gen.symbol_variable.type.ARITHMETIC_DTYPE_ORDER`、`kernel_gen.symbol_variable.type.ARITHMETIC_DTYPE_RANK`、`kernel_gen.symbol_variable.type.NN_FLOAT_DTYPES`、`kernel_gen.symbol_variable.type.is_integer_dtype` 与 `kernel_gen.symbol_variable.type.is_float_dtype` 若存在，也只允许通过子模块入口导入；包入口不重导出这些 dtype family / promotion 入口。
 
 ### 对象同一性
 
@@ -88,13 +93,13 @@ assert PackageMemory is ModuleMemory
 
 ### 仅子模块入口
 
-`Ptr` 继续作为子模块 API 存在，但不进入包入口导出集合。`is_integer_dtype` 与 `is_float_dtype` 也属于同类“仅子模块入口”的公开接口。
+`Ptr` 继续作为子模块 API 存在，但不进入包入口导出集合。`FLOAT_DTYPES`、`INT_DTYPES`、`ARITHMETIC_DTYPE_ORDER`、`ARITHMETIC_DTYPE_RANK`、`NN_FLOAT_DTYPES`、`is_integer_dtype` 与 `is_float_dtype` 也属于同类“仅子模块入口”的公开接口。
 
 使用示例：
 
 ```python
 from kernel_gen.symbol_variable.ptr import Ptr
-from kernel_gen.symbol_variable.type import is_float_dtype, is_integer_dtype
+from kernel_gen.symbol_variable.type import ARITHMETIC_DTYPE_ORDER, FLOAT_DTYPES, INT_DTYPES, is_float_dtype, is_integer_dtype
 ```
 
 ### 旧路径禁用

@@ -24,9 +24,9 @@ API 列表:
 - `free(value)`
 - `copy(source, space)`
 - `load(source, offsets, sizes, strides=None, space=None)`
-- `store(source, target, offsets, sizes, strides=None)`
+- `store(target, source, offsets, sizes, strides=None)`
 - `slice(source, offsets, sizes, strides=None, space=None)`
-- `deslice(source, target, offsets, sizes, strides=None)`
+- `deslice(target, source, offsets, sizes, strides=None)`
 - `view(source, offset, size, stride)`
 - `reshape(source, shape)`
 - `flatten(source)`

@@ -4,11 +4,11 @@
 最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
-- 提供 `kernel_gen.passes` 共享的显式错误类型。
+- 提供 `kernel_gen.passes` 共享的 pass 合同校验 helper。
 - 提供 pass 级公共校验 helper，避免在多个 pass 中重复定义模块类型校验、统一报错入口和新生成 op verifier 包装逻辑。
 
 使用示例:
-- from kernel_gen.passes.common import PassContractError, ensure_builtin_module, raise_pass_contract_error, verify_generated_ops
+- from kernel_gen.passes.common import ensure_builtin_module, raise_pass_contract_error, verify_generated_ops
 - module = ensure_builtin_module(module)
 - raise_pass_contract_error("UnsupportedOp", "unsupported op custom.foo")
 - verify_generated_ops([new_op])
@@ -22,6 +22,7 @@
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from collections.abc import Sequence
 
@@ -30,26 +31,6 @@ from xdsl.ir import Operation
 from xdsl.utils.exceptions import VerifyException
 
 
-class PassContractError(ValueError):
-    """`kernel_gen.passes` 共享的显式错误。
-
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
-
-    功能说明:
-    - 统一承载 pass 公开失败边界，避免每个 pass 再定义独立错误类。
-    - 保持错误类型稳定，便于测试、spec 与只读 expectation 通过兼容别名继续引用。
-
-    使用示例:
-    - raise PassContractError("module must be builtin.module")
-
-    关联文件:
-    - spec: spec/pass/decompass.md
-    - spec: spec/pass/buffer_results_to_out_params.md
-    - test: test/pass/decompass/test_softmax.py
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/common.py
-    """
 
 
 def ensure_builtin_module(module: object) -> ModuleOp:
@@ -60,7 +41,7 @@ def ensure_builtin_module(module: object) -> ModuleOp:
 
     功能说明:
     - 为 pass 入口提供统一的 `ModuleOp` 类型校验。
-    - 失败时抛出 `PassContractError("module must be builtin.module")`。
+    - 失败时抛出 `KernelCodeError(module="pass", message="module must be builtin.module")`。
 
     使用示例:
     - module = ensure_builtin_module(module)
@@ -74,7 +55,7 @@ def ensure_builtin_module(module: object) -> ModuleOp:
     """
 
     if not isinstance(module, ModuleOp):
-        raise PassContractError("module must be builtin.module")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "module must be builtin.module")
     return module
 
 
@@ -97,7 +78,7 @@ def raise_pass_contract_error(keyword: str, detail: str) -> None:
     - 功能实现: kernel_gen/passes/common.py
     """
 
-    raise PassContractError(f"{keyword}: {detail}")
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"{keyword}: {detail}")
 
 
 def verify_generated_ops(ops: Sequence[Operation]) -> None:
@@ -107,7 +88,7 @@ def verify_generated_ops(ops: Sequence[Operation]) -> None:
     最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
-    - 把方言 verifier 抛出的 `VerifyException` 统一包装成 `PassContractError`。
+    - 把方言 verifier 抛出的 `VerifyException` 统一包装成 `KernelCodeError`。
     - 适合在 pass pattern 中对新生成 op 做局部合同校验。
 
     使用示例:
@@ -125,11 +106,10 @@ def verify_generated_ops(ops: Sequence[Operation]) -> None:
         try:
             op.verify()
         except VerifyException as exc:
-            raise PassContractError(str(exc)) from exc
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, str(exc)) from exc
 
 
 __all__ = [
-    "PassContractError",
     "ensure_builtin_module",
     "raise_pass_contract_error",
     "verify_generated_ops",

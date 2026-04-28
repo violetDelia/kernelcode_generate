@@ -1,7 +1,7 @@
 """NN operation elementwise compare family.
 
 创建者: 守护最好的爱莉希雅
-最后一次更改: 金铲铲大作战
+最后一次更改: 大闸蟹
 
 功能说明:
 - 提供逐元素比较 family。
@@ -25,53 +25,12 @@ API 列表:
 
 from __future__ import annotations
 
-from kernel_gen.common.errors import _ERROR_TEMPLATE
+from kernel_gen.core.contracts import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory
-from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import NumericType
 
 _ERROR_ACTION = "请按接口约束传参"
-
-
-def _clone_shape(shape: SymbolShape | None) -> SymbolShape | None:
-    """复制 `SymbolShape`，避免输出与输入共享符号实例。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 对 `Memory` 的 shape/stride 做逐维复制。
-
-    使用示例:
-    - _clone_shape(SymbolShape(["M", "N"]))
-    """
-
-    if shape is None:
-        return None
-    return SymbolShape([SymbolDim(dim.get_symbol()) for dim in shape.get_shape()])
-
-
-def _clone_memory_with_dtype(value: Memory, dtype: NumericType) -> Memory:
-    """按指定 dtype 复制 `Memory` 的公开元信息。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 仅通过公开元信息构造结果，避免跨文件依赖私有 helper。
-
-    使用示例:
-    - _clone_memory_with_dtype(Memory([1], NumericType.Float32), NumericType.Bool)
-    """
-
-    return Memory(
-        _clone_shape(value.shape),
-        dtype,
-        space=value.space,
-        stride=_clone_shape(value.stride),
-        format=value.format,
-    )
 
 
 def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
@@ -186,7 +145,7 @@ def _compare_memory_result(lhs: Memory, rhs: Memory) -> Memory:
     """逐元素比较 Memory/Memory 结果推导。
 
     创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 支持隐式 broadcast 推导目标 shape。
@@ -212,7 +171,7 @@ def _compare_memory_result(lhs: Memory, rhs: Memory) -> Memory:
     lhs_values = lhs.shape.get_values()
     rhs_values = rhs.shape.get_values()
     if lhs_values == rhs_values:
-        return _clone_memory_with_dtype(lhs, NumericType.Bool)
+        return lhs.clone(dtype=NumericType.Bool)
     target_shape = _infer_implicit_broadcast_shape(lhs, rhs)
     return Memory(target_shape, NumericType.Bool, space=lhs.space, stride=None, format=lhs.format)
 
@@ -220,7 +179,7 @@ def _dispatch_compare(lhs: object, rhs: object, op: str, rop: str) -> Memory:
     """二元比较调度。
 
     创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 保持比较方向的调度规则。
@@ -238,9 +197,9 @@ def _dispatch_compare(lhs: object, rhs: object, op: str, rop: str) -> Memory:
         return _compare_memory_result(lhs, rhs)
     if isinstance(lhs, Memory):
         _ensure_scalar_value(rhs)
-        return _clone_memory_with_dtype(lhs, NumericType.Bool)
+        return lhs.clone(dtype=NumericType.Bool)
     _ensure_scalar_value(lhs)
-    return _clone_memory_with_dtype(rhs, NumericType.Bool)
+    return rhs.clone(dtype=NumericType.Bool)
 
 def eq(lhs: object, rhs: object) -> Memory:
     """逐元素相等比较。

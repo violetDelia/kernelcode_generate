@@ -1,7 +1,7 @@
 """`target=npu_demo` 的按 dialect 注册 emitter 入口。
 
 创建者: OpenAI Codex
-最后一次更改: OpenAI Codex
+最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 聚合 `arch/dma/kernel/nn/symbol/tuner/type` 各子目录注册的 emitter。
@@ -18,14 +18,13 @@
 """
 
 from __future__ import annotations
-
 from xdsl.dialects import arith
 from xdsl.ir import BlockArgument
 from xdsl.ir import Operation, SSAValue
 
 from kernel_gen.dialect.nn import NnMemoryType
 
-from ...emit_context import EmitCContext, EmitCError
+from ...emit_context import EmitCContext
 from ..register import dispatch_op, dispatch_value
 from . import arch as _arch  # noqa: F401
 from . import dma as _dma  # noqa: F401
@@ -44,7 +43,7 @@ def _format_literal(op: arith.ConstantOp, ctx: EmitCContext) -> str:
         return str(value.value.data)
     if hasattr(value, "data"):
         return str(value.data)
-    raise EmitCError(f"target={ctx.config['target']}: {op.name}: unsupported constant literal")
+    raise ctx.emit_error(op.name, "unsupported constant literal")
 
 
 def _emit_c_op(op: Operation, ctx: EmitCContext) -> str:
@@ -53,7 +52,7 @@ def _emit_c_op(op: Operation, ctx: EmitCContext) -> str:
     dispatched = dispatch_op(op, ctx)
     if dispatched is not None:
         return dispatched
-    raise EmitCError(f"target={ctx.config['target']}: {op.name}: unsupported op")
+    raise ctx.emit_error(op.name, "unsupported op")
 
 
 def _emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
@@ -70,7 +69,7 @@ def _emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     dispatched = dispatch_value(value, ctx)
     if dispatched is not None:
         return dispatched
-    raise EmitCError(f"target={ctx.config['target']}: {owner.name}: invalid dependency for value {value}")
+    raise ctx.emit_error(owner.name, f"invalid dependency for value {value}")
 
 
 __all__: list[str] = []

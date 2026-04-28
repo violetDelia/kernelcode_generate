@@ -34,13 +34,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.arch import ArchGetThreadNumOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaFreeOp
 from kernel_gen.dialect.nn import NnMatmulOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolToFloatOp, SymbolValueType
 from kernel_gen.dsl import build_func_op, build_func_op_from_ast, parse_function
-from kernel_gen.dsl.ast import ArchQueryAST, AstParseError, ConstAST, ScalarArgAST, SymbolToFloatAST, TensorAST
-from kernel_gen.dsl.ast.visitor import AstVisitorError
+from kernel_gen.dsl.ast import ArchQueryAST, ConstAST, ScalarArgAST, SymbolToFloatAST, TensorAST
 from kernel_gen.dsl.mlir_gen.emit import EmitContext, emit_mlir, memory_type_from_memory
 from kernel_gen.operation import copy as dma_copy
 from kernel_gen.operation import free as dma_free
@@ -106,7 +106,7 @@ def test_emit_mlir_rejects_non_symbol_source_for_symbol_to_float() -> None:
     ctx = EmitContext(builder=block, symbols={"x": block.args[0]}, types={_expr_cache_key(source): block.args[0].type})
     emit_mlir(source, ctx)
 
-    with pytest.raises(ValueError, match='symbol.to_float source must have type !symbol.int<"expr">'):
+    with pytest.raises(KernelCodeError, match='symbol.to_float source must have type !symbol.int<"expr">'):
         emit_mlir(SymbolToFloatAST(source=source, location=None), ctx)
 
 
@@ -143,7 +143,7 @@ def test_build_func_op_reports_broadcast_mismatch_via_public_error() -> None:
     def add(x: "Tensor[f32, A, B]", y: "Tensor[f32, A, C]") -> "Tensor[f32, A, B]":
         return x + y
 
-    with pytest.raises(AstVisitorError, match="Implicit broadcast dimension mismatch") as exc_info:
+    with pytest.raises(KernelCodeError, match="Implicit broadcast dimension mismatch") as exc_info:
         build_func_op(add, _tensor_arg(["A", "B"]), _tensor_arg(["A", "C"]))
     assert exc_info.value.location is not None
 
@@ -178,7 +178,7 @@ def test_parse_function_public_error_path_stays_ast_parse_error() -> None:
     def bad(x):
         return x
 
-    with pytest.raises(AstParseError):
+    with pytest.raises(KernelCodeError):
         parse_function(bad)
 
 

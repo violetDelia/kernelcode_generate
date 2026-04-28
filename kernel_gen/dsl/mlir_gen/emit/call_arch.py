@@ -20,18 +20,16 @@ API 列表:
 """
 
 from __future__ import annotations
+from typing import TYPE_CHECKING
+
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from kernel_gen.dsl.ast import ArchGetDynamicMemoryAST, ArchLaunchKernelAST, ArchQueryAST
 
-from .context import EmitContext
+if TYPE_CHECKING:
+    from . import EmitContext
 
 
-class LoweringError(ValueError):
-    """当前文件内使用的 arch emit 失败错误。"""
-
-    def __init__(self, message: str, location: object | None = None) -> None:
-        super().__init__(message)
-        self.location = location
 
 
 def emit_arch_call(node: object, ctx: EmitContext) -> object:
@@ -54,7 +52,7 @@ def emit_arch_call(node: object, ctx: EmitContext) -> object:
     """
 
     if not isinstance(node, (ArchGetDynamicMemoryAST, ArchLaunchKernelAST, ArchQueryAST)):
-        raise LoweringError("emit_arch_call only handles arch family AST nodes", location=getattr(node, "location", None))
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "emit_arch_call only handles arch family AST nodes", location=getattr(node, "location", None))
     from . import emit_mlir as public_emit_mlir
 
     return public_emit_mlir(node, ctx)

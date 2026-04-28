@@ -8,9 +8,7 @@
 
 ## API 列表
 
-- `class AstVisitorError(message: str, location: SourceLocation | None = None)`
-- `AstVisitorError.__init__(message: str, location: SourceLocation | None = None) -> None`
-- `AstVisitorError.__str__() -> str`
+- `KernelCodeError(kind, ErrorModule.AST, message, location: SourceLocation | None = None)`
 - `class AstVisitor(config: dict[str, object] | None = None)`
 - `AstVisitor.__init__(config: dict[str, object] | None = None) -> None`
 - `AstVisitor.register(node_type: type, method_name: str) -> None`
@@ -37,7 +35,7 @@
 
 - `AstVisitor`：AST 遍历器，负责节点分发与顺序控制。
 - `EmitContext`：发射上下文结构。
-- `AstVisitorError`：访问器阶段错误类型。
+- `KernelCodeError`：访问器阶段错误类型，`module()` 固定为 `ast`。
 
 ## 目标
 
@@ -188,7 +186,7 @@ visitor.visit_stmt(stmt_ast, ctx)
 
 注意事项：
 
-- 不支持的语句必须抛出 `AstVisitorError`。
+- 不支持的语句必须抛出 `KernelCodeError`。
 
 返回与限制：
 
@@ -214,7 +212,7 @@ result = visitor.visit(func_ast.body, ctx)
 
 注意事项：
 
-- 未注册节点必须抛出 `AstVisitorError`。
+- 未注册节点必须抛出 `KernelCodeError`。
 
 返回与限制：
 
@@ -245,7 +243,7 @@ value = visitor.visit_expr(expr_ast, ctx)
 
 - 返回 MLIR value 对象。
 
-### `AstVisitorError`
+### `KernelCodeError`
 
 功能说明：访问器阶段的统一错误类型。
 
@@ -257,7 +255,7 @@ value = visitor.visit_expr(expr_ast, ctx)
 使用示例：
 
 ```python
-raise AstVisitorError("Unsupported node", location)
+raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, "Unsupported node", location=location)
 ```
 
 注意事项：
@@ -278,7 +276,7 @@ raise AstVisitorError("Unsupported node", location)
   - 覆盖已注册节点分发与未注册节点报错。
 - 功能与用例清单：
   - AV-001：空 BlockAST 遍历返回 None。（`test_ast_visitor_empty_block_returns_none`）
-  - AV-002：未知 BlockAST 抛 `AstVisitorError`。（`test_ast_visitor_rejects_unknown_block`）
+  - AV-002：未知 BlockAST 抛 `KernelCodeError`。（`test_ast_visitor_rejects_unknown_block`）
   - AV-003：已注册节点正确分发。（`test_ast_visitor_dispatches_registered_node`）
   - AV-004：`register(...)` 可为自定义 visitor 注册节点分发。（`test_ast_visitor_register_dispatches_custom_node`）
-  - AV-005：未注册节点抛 `AstVisitorError`。（`test_ast_visitor_rejects_unregistered_node`）
+  - AV-005：未注册节点抛 `KernelCodeError`。（`test_ast_visitor_rejects_unregistered_node`）

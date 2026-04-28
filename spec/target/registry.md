@@ -16,7 +16,6 @@
 - `is_arch_op_supported(target: str, op_name: str) -> bool`
 - `get_target_hardware(target: str, key: str) -> int | None`
 - `get_current_target_hardware(key: str) -> int | None`
-- `get_target_analysis_defaults(target: str) -> dict[str, dict[str, int]]`
 
 ## 文档信息
 
@@ -37,7 +36,6 @@
 - 让 operation/dialect 在不绑定具体后端实现的前提下，读取标准硬件参数。
 - 保持配置文件可读、可扩展、可校验。
 - 为约定 target 冻结目录文件语义、launch 能力上限与能力矩阵，避免下游 codegen/runtime 再次推断硬件值或误放开未支持能力。
-- 为 `analysis` 主线提供正式 baseline 来源；当前需要由 registry 对 `npu_demo` 暴露 `path_bandwidth / path_latency_ns / theoretical_compute` 三类默认参数。
 - 为 `operation/arch.py` 与 `dialect/arch.py` 提供合法的 current target 查询与设置公开入口，避免继续跨文件访问私有 helper。
 
 ## 限制与边界
@@ -47,8 +45,6 @@
 - `arch.supported_ops` 与 `arch.unsupported_ops` 不能有交集。
 - registry 只负责“配置解析与查询”；不负责具体后端驱动初始化、设备探测或运行时调度。
 - 当硬件字段缺失时，调用方必须使用自身回退逻辑（例如返回符号值或动态 shape），registry 不自动补默认业务值。
-- `analysis` 默认参数与硬件参数不同：当前只对 `npu_demo` 暴露正式 analysis baseline；若 `analysis` 侧读取时缺字段，必须显式失败，不允许静默回退到调用点手写常量。
-- `path_bandwidth` 与 `path_latency_ns` 的 key 空间必须与 analysis 主线的正式 `MemoryPath` 文本值一致；不得继续引入自由字符串 path。
 - 对显式白名单 target，白名单外能力查询必须固定判定为未启用；不得把未列入白名单的 `arch.*` 能力视为默认可用。
 - `is_arch_op_supported(...)` 的稳定输入域是 `arch.*` 能力键；`launch`、`barrier` 这类未带 `arch.` 前缀的字符串不属于 registry 公共查询接口的稳定输入。
 
@@ -158,19 +154,6 @@ hw.tlm3_memory_size=512
 - `block_num=1`、`thread_num=1`、`subthread_num=1` 表示 `npu_demo` P0 launch 能力上限：`block` 固定为 `1`、`subthread` 固定为 `1`、`thread` 固定为 `1`；这些字段不再直接表示 launched body 中当前可见的运行时 extent。
 - `sm_memory_size=0` 与 `lm_memory_size=0` 表示 `npu_demo` 不提供 `SM/LM` 动态内存容量；`tsm_memory_size=24576`、`tlm1_memory_size=1024`、`tlm2_memory_size=512`、`tlm3_memory_size=512` 为固定片上容量。
 - `npu_demo` 的标准注册入口是 `kernel_gen/target/targets/npu_demo.txt`；标准查询入口是 `is_arch_op_supported(...)`、`get_target_hardware(...)` 与 `get_current_target_hardware(...)`。
-- `npu_demo` 的 analysis 默认参数仍由 registry 固定提供，当前至少包含：
-  - `path_bandwidth["GM->LM"] = 64`
-  - `path_bandwidth["GM->SM"] = 96`
-  - `path_bandwidth["GM->TSM"] = 32`
-  - `path_bandwidth["TSM->TLM"] = 16`
-  - `path_latency_ns["GM->LM"] = 20`
-  - `path_latency_ns["GM->SM"] = 18`
-  - `path_latency_ns["GM->TSM"] = 24`
-  - `path_latency_ns["TSM->TLM"] = 8`
-  - `theoretical_compute["scalar"] = 1`
-  - `theoretical_compute["vector"] = 8`
-  - `theoretical_compute["tensor"] = 64`
-- `analysis` 侧读取这些值时，不能再在 `AnalysisConfig(...)` 调用点重复手写同样常量。
 
 ## 公开接口
 
@@ -266,23 +249,12 @@ loaded = registry.load_targets(Path("kernel_gen/target/targets"))
 - `is_arch_op_supported(target: str, op_name: str) -> bool`
 - `get_target_hardware(target: str, key: str) -> int | None`
 - `get_current_target_hardware(key: str) -> int | None`
-- `get_target_analysis_defaults(target: str) -> dict[str, dict[str, int]]`
 
 ## helper 边界
 
 - 当前文件内存在若干解析、校验与默认 target 组装 helper。
 - 这些 helper 仅用于 `registry.py` 内部复用，不属于公开合同。
-- 下游实现与测试只能通过 `TargetSpec`、`load_targets(...)`、`register_target(...)`、`set_current_target(...)`、`get_current_target(...)`、`is_arch_op_supported(...)`、`get_target_hardware(...)`、`get_current_target_hardware(...)` 与 `get_target_analysis_defaults(...)` 访问 target registry 能力。
-
-### `get_target_analysis_defaults(target: str) -> dict[str, dict[str, int]]`
-
-功能说明：
-
-- 按 target 名称读取 analysis 默认参数。
-- 当前正式收口到 `npu_demo`；返回至少包含：
-  - `path_bandwidth`
-  - `path_latency_ns`
-  - `theoretical_compute`
+- 下游实现与测试只能通过 `TargetSpec`、`load_targets(...)`、`register_target(...)`、`set_current_target(...)`、`get_current_target(...)`、`is_arch_op_supported(...)`、`get_target_hardware(...)` 与 `get_current_target_hardware(...)` 访问 target registry 能力。
 
 ## 与 arch 层的联动约束
 
@@ -291,7 +263,6 @@ loaded = registry.load_targets(Path("kernel_gen/target/targets"))
 - `operation/arch.get_dynamic_memory(space)` 可读取 `*_memory_size` 作为静态 shape；无值时回退动态 shape。
 - `dialect/arch` 在 verifier 阶段可根据“当前 target”校验 op 支持性。
 - 当 `target="npu_demo"` 时，`block_num=1`、`thread_num=1`、`subthread_num=1` 必须作为 P0 能力上限读取；`SM/LM` 动态内存容量固定为 `0`，`TSM/TLM1/TLM2/TLM3` 动态内存容量固定为 `24576/1024/512/512`。
-- 当 `target="npu_demo"` 时，`analysis` 侧的 `path_bandwidth / path_latency_ns / theoretical_compute` 默认参数也必须由 registry 提供；当前不允许 `analysis` 在调用点长期手写这些常量。
 - 当 `target="npu_demo"` 时，`arch.launch` 与 `arch.barrier` 通过 `is_arch_op_supported(...)` 查询必须返回已启用；旧名 `arch.launch_kernel` 必须保持未启用。
 
 ## CPU TXT 示例
@@ -331,7 +302,6 @@ hw.tlm3_memory_size=0
 - 默认目录重复加载应保持幂等，不得因内置 `cpu` 与 `cpu.txt` 冲突而失败。
 - `npu_demo.txt` 应通过标准查询入口满足以下能力/容量值：`block_num=1`、`thread_num=1`、`subthread_num=1`、`sm_memory_size=0`、`lm_memory_size=0`、`tsm_memory_size=24576`、`tlm1_memory_size=1024`、`tlm2_memory_size=512`、`tlm3_memory_size=512`。
 - `npu_demo.txt` 作为唯一标准 target 数据源，必须能被 `load_targets(Path("kernel_gen/target/targets"))` 一并加载；默认目录重复加载应保持幂等，不得因 `npu_demo` 与内置注册冲突而失败。
-- `npu_demo.txt` 应通过 `get_target_analysis_defaults("npu_demo")` 暴露 analysis 默认参数；至少覆盖 `path_bandwidth["GM->LM"]`、`path_latency_ns["GM->LM"]` 与 `theoretical_compute["scalar"/"tensor"]`。
 - `npu_demo` 的 `arch.launch` / `arch.barrier` 查询必须固定判定为已启用；旧名 `arch.launch_kernel` 与未带 `arch.` 前缀的 `launch` / `barrier` 不属于已启用能力。
 - `name` 缺失、格式非法、与文件名不一致时报错。
 - `arch.supported_ops` 与 `arch.unsupported_ops` 冲突时报错。

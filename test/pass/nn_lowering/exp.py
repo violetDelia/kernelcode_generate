@@ -25,8 +25,9 @@ from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, f32
 from xdsl.ir import Block, Region
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.nn import NnExpOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.passes.lowering.nn_lowering import NnLoweringError, NnLoweringPass
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.tools.ircheck import run_ircheck_text
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -199,7 +200,7 @@ def test_nn_lowering_exp_dynamic() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-12 09:10:00 +0800
 # 最近一次运行成功时间: 2026-04-12 09:10:00 +0800
-# 测试目的: 验证 nn.exp 输出形态不一致时必须抛 NnLoweringError。
+# 测试目的: 验证 nn.exp 输出形态不一致时必须抛 KernelCodeError。
 # 使用示例: pytest -q test/pass/nn_lowering/exp.py -k test_nn_lowering_exp_shape_mismatch
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
@@ -208,5 +209,5 @@ def test_nn_lowering_exp_shape_mismatch() -> None:
     input_type = _make_memory_type([4, 8])
     result_type = _make_memory_type([4, 7])
     module = _build_module(input_type, result_type)
-    with pytest.raises(NnLoweringError):
+    with pytest.raises(KernelCodeError):
         NnLoweringPass().run(module)

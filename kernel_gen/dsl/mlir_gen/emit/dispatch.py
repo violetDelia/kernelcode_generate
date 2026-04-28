@@ -17,20 +17,18 @@
 """
 
 from __future__ import annotations
+from typing import TYPE_CHECKING
+
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.ir import SSAValue
 
 from kernel_gen.dsl.ast import PythonCalleeCallAST
 
-from .context import EmitContext
+if TYPE_CHECKING:
+    from . import EmitContext
 
 
-class LoweringError(ValueError):
-    """当前文件内使用的 dispatch 失败错误。"""
-
-    def __init__(self, message: str, location: object | None = None) -> None:
-        super().__init__(message)
-        self.location = location
 
 
 def emit_mlir(node: object, ctx: EmitContext) -> object:
@@ -90,7 +88,7 @@ def call_dispatch(node: PythonCalleeCallAST, ctx: EmitContext) -> SSAValue:
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/dispatch.py](kernel_gen/dsl/mlir_gen/emit/dispatch.py)
     """
     if not isinstance(node, PythonCalleeCallAST):
-        raise LoweringError("call_dispatch expects PythonCalleeCallAST", location=getattr(node, "location", None))
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "call_dispatch expects PythonCalleeCallAST", location=getattr(node, "location", None))
     from . import emit_mlir as public_emit_mlir
 
     return public_emit_mlir(node, ctx)

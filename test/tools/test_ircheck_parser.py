@@ -33,8 +33,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.tools.ircheck import (
-    IrcheckParseError,
     parse_ircheck_file,
     run_ircheck_file,
     run_ircheck_text,
@@ -92,7 +92,7 @@ builtin.module {}
 """
     path = tmp_path / "missing_compile_args.ircheck"
     path.write_text(content, encoding="utf-8")
-    with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid ircheck header$"):
+    with pytest.raises(KernelCodeError, match=r"^IrcheckParseError: invalid ircheck header$"):
         _ = parse_ircheck_file(str(path))
 
 
@@ -114,7 +114,7 @@ builtin.module {}
 """
     path = tmp_path / "duplicate_compile_args.ircheck"
     path.write_text(content, encoding="utf-8")
-    with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid ircheck header$"):
+    with pytest.raises(KernelCodeError, match=r"^IrcheckParseError: invalid ircheck header$"):
         _ = parse_ircheck_file(str(path))
 
 
@@ -134,7 +134,7 @@ def test_parse_ircheck_file_missing_input_ir_fails(tmp_path: Path) -> None:
 """
     path = tmp_path / "missing_input_ir.ircheck"
     path.write_text(content, encoding="utf-8")
-    with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: missing input ir$"):
+    with pytest.raises(KernelCodeError, match=r"^IrcheckParseError: missing input ir$"):
         _ = parse_ircheck_file(str(path))
 
 
@@ -156,7 +156,7 @@ builtin.module {}
 """
     path = tmp_path / "empty_compile_args.ircheck"
     path.write_text(content, encoding="utf-8")
-    with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid ircheck header$"):
+    with pytest.raises(KernelCodeError, match=r"^IrcheckParseError: invalid ircheck header$"):
         _ = parse_ircheck_file(str(path))
 
 
@@ -190,7 +190,7 @@ builtin.module {{
 """
     path = tmp_path / "empty_check_text.ircheck"
     path.write_text(content, encoding="utf-8")
-    with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid ircheck header$"):
+    with pytest.raises(KernelCodeError, match=r"^IrcheckParseError: invalid ircheck header$"):
         _ = parse_ircheck_file(str(path))
 
 
@@ -217,7 +217,7 @@ builtin.module {
 """
     path = tmp_path / "check_next_first_positive.ircheck"
     path.write_text(content, encoding="utf-8")
-    with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid ircheck header$"):
+    with pytest.raises(KernelCodeError, match=r"^IrcheckParseError: invalid ircheck header$"):
         _ = parse_ircheck_file(str(path))
 
 
@@ -251,7 +251,7 @@ builtin.module {{
 """
     path = tmp_path / "legacy_regex_directives.ircheck"
     path.write_text(content, encoding="utf-8")
-    with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid ircheck header$"):
+    with pytest.raises(KernelCodeError, match=r"^IrcheckParseError: invalid ircheck header$"):
         _ = parse_ircheck_file(str(path))
 
 
@@ -278,7 +278,7 @@ builtin.module {}
 """
     path = tmp_path / "multi_case.ircheck"
     path.write_text(content, encoding="utf-8")
-    with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid ircheck header$"):
+    with pytest.raises(KernelCodeError, match=r"^IrcheckParseError: invalid ircheck header$"):
         _ = parse_ircheck_file(str(path))
 
 
@@ -341,7 +341,7 @@ builtin.module {
 """
     path = tmp_path / "invalid_regex.ircheck"
     path.write_text(content, encoding="utf-8")
-    with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid regex check$"):
+    with pytest.raises(KernelCodeError, match=r"^IrcheckParseError: invalid regex check$"):
         _ = parse_ircheck_file(str(path))
 
 
@@ -367,7 +367,7 @@ builtin.module {
 """
     path = tmp_path / "invalid_escaped_regex.ircheck"
     path.write_text(content, encoding="utf-8")
-    with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid regex check$"):
+    with pytest.raises(KernelCodeError, match=r"^IrcheckParseError: invalid regex check$"):
         _ = parse_ircheck_file(str(path))
 
 
@@ -447,7 +447,7 @@ builtin.module {
 """
     path = tmp_path / "undefined_regex_variable.ircheck"
     path.write_text(content, encoding="utf-8")
-    with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: undefined regex variable$"):
+    with pytest.raises(KernelCodeError, match=r"^IrcheckParseError: undefined regex variable$"):
         _ = parse_ircheck_file(str(path))
 
 
@@ -488,7 +488,7 @@ builtin.module {{
 """
     path = tmp_path / "duplicate_or_not_regex.ircheck"
     path.write_text(content, encoding="utf-8")
-    with pytest.raises(IrcheckParseError, match=message):
+    with pytest.raises(KernelCodeError, match=message):
         _ = parse_ircheck_file(str(path))
 
 

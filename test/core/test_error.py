@@ -17,7 +17,8 @@
 
 from __future__ import annotations
 
-from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError, kernel_code_error
+from kernel_gen.core.error import KernelCodeError
+from kernel_gen.core.error import ErrorKind, ErrorModule, kernel_code_error
 
 
 # CE-001
@@ -31,6 +32,7 @@ from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError, kerne
 # 对应 spec 文件路径: spec/core/error.md
 # 对应测试文件路径: test/core/test_error.py
 def test_error_module_values() -> None:
+    assert ErrorModule.AST == "ast"
     assert ErrorModule.MLIR_GEN == "mlir_gen"
     assert ErrorModule.DIALECT == "dialect"
     assert ErrorModule.GEN_KERNEL == "gen_kernel"
@@ -38,6 +40,7 @@ def test_error_module_values() -> None:
     assert ErrorModule.PASS == "pass"
     assert ErrorModule.PIPELINE == "pipeline"
     assert ErrorModule.TARGET == "target"
+    assert ErrorModule.TOOLS == "tools"
     assert ErrorModule.EXECUTE_ENGINE == "execute_engine"
 
 
@@ -72,11 +75,13 @@ def test_error_kind_values() -> None:
 # 对应 spec 文件路径: spec/core/error.md
 # 对应测试文件路径: test/core/test_error.py
 def test_kernel_code_error_methods_and_str() -> None:
-    err = KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "invalid pass input")
+    err = KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "invalid pass input", location="line 1")
 
     assert err.kind() == "contract"
     assert err.module() == "pass"
     assert err.message() == "invalid pass input"
+    assert err.message_text == "invalid pass input"
+    assert err.location == "line 1"
     assert str(err) == "invalid pass input"
 
 

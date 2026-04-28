@@ -174,7 +174,7 @@ assert cloned.get_format() is mem.get_format()
 - `bool` 按 `int` 处理。
 - `Memory op Memory` 要求 `shape` 语义等价。
 - 结果继承 `shape`、`stride`、`space`、`format`。
-- 结果 `dtype` 按 [`kernel_gen/symbol_variable/dtype_constants.py`](../../kernel_gen/symbol_variable/dtype_constants.py) 的顺序提升。
+- 结果 `dtype` 按 [`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py) 中 `ARITHMETIC_DTYPE_RANK` 的顺序提升。
 - 不支持的标量类型抛 `TypeError("Unsupported scalar type for Memory operation")`。
 
 ### 逐元素比较

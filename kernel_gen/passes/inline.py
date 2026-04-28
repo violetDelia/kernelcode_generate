@@ -1,7 +1,7 @@
 """inline pass.
 
 创建者: 金铲铲大作战
-最后一次更改: OpenAI Codex
+最后一次更改: 大闸蟹
 
 功能说明:
 - 在 `builtin.module` 内把可内联的本地 `func.call` 展平到调用点。
@@ -12,7 +12,6 @@
 - from xdsl.context import Context
 - from kernel_gen.passes.inline import InlinePass
 - module = InlinePass().run(module)
-- InlinePass().apply(Context(), module)
 
 关联文件:
 - spec: [spec/pass/inline.md](../../spec/pass/inline.md)
@@ -36,17 +35,17 @@ class InlinePass(Pass, ModulePass):
     """inline pass。
 
     创建者: 金铲铲大作战
-    最后一次更改: OpenAI Codex
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 固定公开名称为 `inline`。
     - 对本地可内联 helper 执行模块内展平，并清理失效的 private helper。
-    - 兼容 `PassManager` 与 xdsl `ModulePass` 两套执行入口。
+    - 兼容 `PassManager` 与 xdsl `ModulePass` 协议执行入口。
 
     使用示例:
     - from kernel_gen.passes.inline import InlinePass
     - module = InlinePass().run(module)
-    - InlinePass().apply(Context(), module)
+    - module = InlinePass().run(module)
 
     关联文件:
     - spec: [spec/pass/inline.md](../../spec/pass/inline.md)
@@ -60,7 +59,7 @@ class InlinePass(Pass, ModulePass):
         """执行 inline pass。
 
         创建者: 金铲铲大作战
-        最后一次更改: OpenAI Codex
+        最后一次更改: 大闸蟹
 
         功能说明:
         - 只接受 `builtin.module` 输入。
@@ -76,7 +75,7 @@ class InlinePass(Pass, ModulePass):
         - 功能实现: [kernel_gen/passes/inline.py](../../kernel_gen/passes/inline.py)
         """
 
-        del ctx
+        _ = ctx
         if not isinstance(module, ModuleOp):
             raise_pass_contract_error("InlineError", "module must be builtin.module")
 
@@ -210,7 +209,7 @@ class InlinePass(Pass, ModulePass):
         """兼容旧 Pass 接口的执行入口。
 
         创建者: 金铲铲大作战
-        最后一次更改: OpenAI Codex
+        最后一次更改: 大闸蟹
 
         功能说明:
         - 保持旧 `run(module)` 调用方可继续工作。

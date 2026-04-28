@@ -34,10 +34,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.passes import lowering as lowering_pkg
 from kernel_gen.passes.lowering.nn_lowering import (
-    NnLoweringError,
     NnLoweringPass,
     nn_lowering_patterns,
 )
@@ -113,9 +113,7 @@ def test_nn_lowering_pass_public_name() -> None:
 # 对应测试文件路径: test/pass/nn_lowering/public_name.py
 def test_nn_lowering_pass_public_exports() -> None:
     assert lowering_pkg.NnLoweringPass is NnLoweringPass
-    assert lowering_pkg.NnLoweringError is NnLoweringError
     assert nn_lowering_pkg.NnLoweringPass is NnLoweringPass
-    assert nn_lowering_pkg.NnLoweringError is NnLoweringError
     assert getattr(nn_lowering_pkg, "nn_lowering_patterns", None) is nn_lowering_patterns
     assert not hasattr(lowering_pkg, "LowerNnToKernelPass")
     assert not hasattr(lowering_pkg, "LowerNnToKernelError")

@@ -56,15 +56,15 @@
   - 结果 `shape` 不允许包含 `?`。
   - `dma.alloc` 的 `dynamic_shape` 必须逐维由 `symbol.get_dim` 从 `input` 读取。
   - lower 结果必须包含 `dma.cast(out, input)` 形态的 op（out + source，无返回值），且 `out` 为 `dma.alloc` 结果。
-  - 若触发以下条件必须抛出 `NnLoweringError`：
+  - 若触发以下条件必须抛出 `KernelCodeError`：
     - `input` 不是 `nn.memory`：`nn.cast input must be nn.memory`
     - `input` 与结果 rank 不一致：`nn select/cast operand/result rank mismatch`
     - 结果 `shape` 含 `?`：`nn select/cast result shape must not contain '?'`
     - `dma.cast` 校验失败：`dma.cast shape mismatch` / `dma.cast stride mismatch` / `dma.cast space mismatch`
 - `nn.exp`：
   - 必须 lower 为 `dma.alloc + kernel.exp`。
-  - 输入与输出的 `shape/stride/element_type/space` 必须一致，否则抛出 `NnLoweringError`。
-- 若 `dma.alloc`、`kernel.select`、`dma.cast` 或 `kernel.exp` 校验失败，必须抛出 `NnLoweringError` 并中止当前 op 的处理。
+  - 输入与输出的 `shape/stride/element_type/space` 必须一致，否则抛出 `KernelCodeError`。
+- 若 `dma.alloc`、`kernel.select`、`dma.cast` 或 `kernel.exp` 校验失败，必须抛出 `KernelCodeError` 并中止当前 op 的处理。
 
 ## 公开接口
 

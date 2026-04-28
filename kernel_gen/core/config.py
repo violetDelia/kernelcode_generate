@@ -1,15 +1,14 @@
 """Project-wide common config definitions.
 
 创建者: OpenAI Codex
-最后一次更改: OpenAI Codex
+最后一次更改: 大闸蟹
 
 功能说明:
-- 定义项目级公共配置底座，统一承载显式公开的配置项与稳定读写接口。
-- 当前阶段只新增公共配置文件，不替换现有模块里分散的 `config` 传递与读取逻辑。
+- 定义项目级公共行为配置底座，统一承载显式公开的 target、dump_dir 配置与稳定读写接口。
 - 当前公开配置项及其设置语义如下：
   - `target`：设置当前调用链预期使用的目标名称，例如 `cpu`、`npu_demo`；传 `None` 表示清空显式目标，让后续调用方自行决定默认目标。
-  - `reject_external_values`：设置是否拒绝外部值注入；为 `True` 时，后续接入此配置的调用方应对未显式声明来源的外部值走严格拒绝逻辑。
-  - `allow_python_callee_calls`：设置是否允许 Python callee 调用；为 `True` 时，后续接入此配置的调用方可放开 Python 函数调用路径。
+  - `dump_dir`：设置 DSL/Pass 诊断产物根目录；传 `None` 表示关闭诊断落盘。
+- 外部值拒绝与 Python callee 调用均为固定默认行为，不再作为公开配置项。
 
 配置项说明:
 - `target`
@@ -19,34 +18,30 @@
   - 示例：
     - `set_target("cpu")`
     - `set_target("npu_demo")`
-- `reject_external_values`
-  - 设置说明：用于显式声明后续调用链是否要走“严格拒绝外部值”模式。
-  - 典型值：`True`、`False`。
+- `dump_dir`
+  - 设置说明：用于启用 DSL/Pass 诊断产物落盘。
+  - 典型值：`"dump"`、`Path("dump")`。
+  - 清空方式：`set_dump_dir(None)` 或 `set_dump_dir("")`。
   - 示例：
-    - `set_reject_external_values(True)`
-    - `set_reject_external_values(False)`
-- `allow_python_callee_calls`
-  - 设置说明：用于显式声明后续调用链是否允许 Python callee 调用路径。
-  - 典型值：`True`、`False`。
-  - 示例：
-    - `set_allow_python_callee_calls(True)`
-    - `set_allow_python_callee_calls(False)`
+    - `set_dump_dir("dump")`
+    - `set_dump_dir(Path("dump"))`
 
 API 列表:
 - `set_target(value: str | None) -> None`
 - `get_target() -> str | None`
-- `set_reject_external_values(value: bool) -> None`
-- `get_reject_external_values() -> bool`
-- `set_allow_python_callee_calls(value: bool) -> None`
-- `get_allow_python_callee_calls() -> bool`
+- `set_dump_dir(value: str | Path | None) -> None`
+- `get_dump_dir() -> Path | None`
+- `reset_config() -> None`
+- `CoreConfigSnapshot(target: str | None, dump_dir: Path | None)`
+- `snapshot_config() -> CoreConfigSnapshot`
+- `restore_config(snapshot: CoreConfigSnapshot) -> None`
 
 使用示例:
-- from kernel_gen.core.config import get_target, set_target
+- from kernel_gen.core.config import get_dump_dir, get_target, set_dump_dir, set_target
 - set_target("npu_demo")
 - assert get_target() == "npu_demo"
-- from kernel_gen.core.config import get_reject_external_values, set_reject_external_values
-- set_reject_external_values(True)
-- assert get_reject_external_values() is True
+- set_dump_dir("dump")
+- assert get_dump_dir() == Path("dump")
 
 关联文件:
 - spec: [spec/core/config.md](../../spec/core/config.md)
@@ -56,18 +51,42 @@ API 列表:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
+
 __all__ = [
+    "CoreConfigSnapshot",
     "set_target",
     "get_target",
-    "set_reject_external_values",
-    "get_reject_external_values",
-    "set_allow_python_callee_calls",
-    "get_allow_python_callee_calls",
+    "set_dump_dir",
+    "get_dump_dir",
+    "reset_config",
+    "snapshot_config",
+    "restore_config",
 ]
 
 _target: str | None = None
-_reject_external_values: bool = False
-_allow_python_callee_calls: bool = False
+_dump_dir: Path | None = None
+
+
+@dataclass(frozen=True)
+class CoreConfigSnapshot:
+    """公开配置快照。
+
+    创建者: OpenAI Codex
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 保存 `kernel_gen.core.config` 中的公开 target 与 dump_dir 配置。
+    - 不承载运行时临时状态、解析环境、EmitC 名字表或任意扩展 key。
+
+    使用示例:
+    - snapshot = snapshot_config()
+    - restore_config(snapshot)
+    """
+
+    target: str | None
+    dump_dir: Path | None
 
 
 def set_target(value: str | None) -> None:
@@ -115,89 +134,112 @@ def get_target() -> str | None:
     return _target
 
 
-def set_reject_external_values(value: bool) -> None:
-    """设置公开 reject_external_values 配置。
+def set_dump_dir(value: str | Path | None) -> None:
+    """设置公开 dump_dir 配置。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
-
-    功能说明:
-    - 更新项目公共配置中的 `reject_external_values`。
-    - 仅接受 `bool`。
-    - 适合在需要严格限制外部值渗入时开启；后续接入此配置的调用方应把 `True` 视作严格模式。
-
-    使用示例:
-    - set_reject_external_values(True)
-    - assert get_reject_external_values() is True
-    - set_reject_external_values(False)
-    - assert get_reject_external_values() is False
-    """
-
-    global _reject_external_values
-    if not isinstance(value, bool):
-        raise TypeError("reject_external_values must be bool")
-    _reject_external_values = value
-
-
-def get_reject_external_values() -> bool:
-    """读取公开 reject_external_values 配置。
-
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
 
     功能说明:
-    - 返回当前公共配置中的 `reject_external_values` 值。
-    - `True` 表示当前选择了严格拒绝外部值的模式，`False` 表示未开启该限制。
+    - 更新项目公共配置中的 `dump_dir`。
+    - 仅接受 `str`、`Path` 或 `None`。
+    - 非空时启用 DSL/Pass 诊断产物落盘，具体子目录结构由调用工具定义。
+    - 传 `None` 或空字符串表示关闭诊断落盘。
 
     使用示例:
-    - set_reject_external_values(True)
-    - assert get_reject_external_values() is True
-    - set_reject_external_values(False)
-    - assert get_reject_external_values() is False
+    - set_dump_dir("dump")
+    - assert get_dump_dir() == Path("dump")
+    - set_dump_dir(None)
+    - assert get_dump_dir() is None
     """
 
-    return _reject_external_values
+    global _dump_dir
+    if value is not None and not isinstance(value, (str, Path)):
+        raise TypeError("dump_dir must be str, Path or None")
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        _dump_dir = None
+        return
+    _dump_dir = Path(value)
 
 
-def set_allow_python_callee_calls(value: bool) -> None:
-    """设置公开 allow_python_callee_calls 配置。
+def get_dump_dir() -> Path | None:
+    """读取公开 dump_dir 配置。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
 
     功能说明:
-    - 更新项目公共配置中的 `allow_python_callee_calls`。
-    - 仅接受 `bool`。
-    - 适合在 DSL 到 IR 的前端调用链中显式控制是否允许 Python callee 调用路径。
+    - 返回当前公共配置中的 `dump_dir` 值。
+    - 返回 `None` 表示当前未启用诊断产物落盘。
 
     使用示例:
-    - set_allow_python_callee_calls(True)
-    - assert get_allow_python_callee_calls() is True
-    - set_allow_python_callee_calls(False)
-    - assert get_allow_python_callee_calls() is False
+    - set_dump_dir("dump")
+    - assert get_dump_dir() == Path("dump")
     """
 
-    global _allow_python_callee_calls
-    if not isinstance(value, bool):
-        raise TypeError("allow_python_callee_calls must be bool")
-    _allow_python_callee_calls = value
+    return _dump_dir
 
 
-def get_allow_python_callee_calls() -> bool:
-    """读取公开 allow_python_callee_calls 配置。
+def reset_config() -> None:
+    """恢复公开配置默认值。
 
     创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
+    最后一次更改: 大闸蟹
 
     功能说明:
-    - 返回当前公共配置中的 `allow_python_callee_calls` 值。
-    - `True` 表示允许 Python callee 调用，`False` 表示当前未放开该路径。
+    - 将 `target` 与 `dump_dir` 恢复为 `None`。
+    - 只影响公开行为配置，不处理任何单次生成状态。
 
     使用示例:
-    - set_allow_python_callee_calls(True)
-    - assert get_allow_python_callee_calls() is True
-    - set_allow_python_callee_calls(False)
-    - assert get_allow_python_callee_calls() is False
+    - set_target("npu_demo")
+    - set_dump_dir("dump")
+    - reset_config()
+    - assert get_target() is None
+    - assert get_dump_dir() is None
     """
 
-    return _allow_python_callee_calls
+    global _target, _dump_dir
+    _target = None
+    _dump_dir = None
+
+
+def snapshot_config() -> CoreConfigSnapshot:
+    """保存当前公开配置。
+
+    创建者: OpenAI Codex
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 返回不可变 `CoreConfigSnapshot`。
+    - 用于工具入口临时设置 target 后恢复调用前配置。
+
+    使用示例:
+    - snapshot = snapshot_config()
+    - set_target("cpu")
+    - restore_config(snapshot)
+    """
+
+    return CoreConfigSnapshot(target=_target, dump_dir=_dump_dir)
+
+
+def restore_config(snapshot: CoreConfigSnapshot) -> None:
+    """恢复公开配置快照。
+
+    创建者: OpenAI Codex
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 将 `snapshot_config()` 返回的快照恢复为当前公开配置。
+    - 拒绝非 `CoreConfigSnapshot` 入参，避免任意 dict 重新成为公开配置入口。
+
+    使用示例:
+    - snapshot = snapshot_config()
+    - set_target("npu_demo")
+    - restore_config(snapshot)
+    """
+
+    if not isinstance(snapshot, CoreConfigSnapshot):
+        raise TypeError("snapshot must be CoreConfigSnapshot")
+    global _target, _dump_dir
+    _target = snapshot.target
+    _dump_dir = snapshot.dump_dir

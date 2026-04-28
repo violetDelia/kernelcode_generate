@@ -5,16 +5,16 @@
 
 功能说明:
 - 定义项目级公共错误底座，统一承载错误模块、错误类别和稳定消息文本。
-- 当前阶段只新增公共错误文件，不替换现有模块各自的错误类型与抛错逻辑。
+- 仓库内公开失败统一使用 `KernelCodeError`；不再新增模块级错误类。
 
 API 列表:
 - `class ErrorModule()`
 - `class ErrorKind()`
-- `class KernelCodeError(kind: ErrorKind | str, module: ErrorModule | str, message: str)`
+- `class KernelCodeError(kind: ErrorKind | str, module: ErrorModule | str, message: str, **metadata: object)`
 - `KernelCodeError.message() -> str`
 - `KernelCodeError.kind() -> str`
 - `KernelCodeError.module() -> str`
-- `kernel_code_error(kind: ErrorKind | str, module: ErrorModule | str, message: str) -> KernelCodeError`
+- `kernel_code_error(kind: ErrorKind | str, module: ErrorModule | str, message: str, **metadata: object) -> KernelCodeError`
 
 使用示例:
 - from kernel_gen.core.error import ErrorKind, ErrorModule, kernel_code_error
@@ -55,6 +55,7 @@ class ErrorModule(StrEnum):
     - assert ErrorModule.PASS == "pass"
     """
 
+    AST = "ast"
     MLIR_GEN = "mlir_gen"
     DIALECT = "dialect"
     GEN_KERNEL = "gen_kernel"
@@ -62,6 +63,7 @@ class ErrorModule(StrEnum):
     PASS = "pass"
     PIPELINE = "pipeline"
     TARGET = "target"
+    TOOLS = "tools"
     EXECUTE_ENGINE = "execute_engine"
 
 
@@ -144,7 +146,7 @@ class KernelCodeError(Exception):
 
     功能说明:
     - 统一承载项目公共错误的模块、类别和稳定消息文本。
-    - 当前阶段只新增公共底座，不强制替换现有模块已存在的错误类型。
+    - 仓库内公开失败必须直接抛出本类型，不再定义模块级错误子类。
 
     使用示例:
     - err = KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "invalid pass input")
@@ -156,6 +158,7 @@ class KernelCodeError(Exception):
         kind: ErrorKind | str,
         module: ErrorModule | str,
         message: str,
+        **metadata: object,
     ) -> None:
         """构造项目公共错误实例。
 
@@ -165,6 +168,7 @@ class KernelCodeError(Exception):
         功能说明:
         - 规范化模块和类别字段。
         - 把稳定 `message` 注册为异常主文本，保证 `str(err)` 可直接用于公开错误消息。
+        - 允许旧调用链在迁移期挂载 `location`、`diagnostics` 等上下文字段，但错误类型保持唯一。
 
         使用示例:
         - err = KernelCodeError("contract", "pass", "invalid pass input")
@@ -174,6 +178,9 @@ class KernelCodeError(Exception):
         self._kind = _normalize_error_kind(kind)
         self._module = _normalize_error_module(module)
         self._message = message
+        self.message_text = message
+        for name, value in metadata.items():
+            setattr(self, name, value)
         super().__init__(message)
 
     def message(self) -> str:
@@ -229,6 +236,7 @@ def kernel_code_error(
     kind: ErrorKind | str,
     module: ErrorModule | str,
     message: str,
+    **metadata: object,
 ) -> KernelCodeError:
     """构造项目通用错误对象。
 
@@ -244,4 +252,4 @@ def kernel_code_error(
     - assert isinstance(err, KernelCodeError)
     """
 
-    return KernelCodeError(kind=kind, module=module, message=message)
+    return KernelCodeError(kind=kind, module=module, message=message, **metadata)

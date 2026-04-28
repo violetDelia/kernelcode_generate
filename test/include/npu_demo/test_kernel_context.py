@@ -205,6 +205,53 @@ int main() {
     _compile_and_run(source)
 
 
+# NPU-DEMO-KC-001B
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 验证 npu_demo::launch 支持无显式 KernelContext 参数的 callee，并通过 free helper 读取活动上下文。
+# 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_launch_accepts_context_free_callee_with_free_helpers
+# 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
+# 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+# 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+def test_npu_demo_launch_accepts_context_free_callee_with_free_helpers() -> None:
+    source = r"""
+#include "include/npu_demo/npu_demo.h"
+
+static int fail(int code) { return code; }
+
+static void kernel_body(long long* thread_ids, long long* thread_nums, long long* after_barrier) {
+    const long long tid = npu_demo::thread_id();
+    thread_ids[tid] = tid;
+    thread_nums[tid] = npu_demo::thread_num();
+    npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
+    after_barrier[tid] = npu_demo::thread_num();
+}
+
+int main() {
+    long long thread_ids[4] = {-1, -1, -1, -1};
+    long long thread_nums[4] = {0, 0, 0, 0};
+    long long after_barrier[4] = {0, 0, 0, 0};
+
+    if (npu_demo::launch<1, 4, 1, 0>(kernel_body, thread_ids, thread_nums, after_barrier) != StatusCode::kOk) {
+        return fail(1);
+    }
+
+    for (long long i = 0; i < 4; ++i) {
+        if (thread_ids[i] != i) {
+            return fail(10 + static_cast<int>(i));
+        }
+        if (thread_nums[i] != 4 || after_barrier[i] != 4) {
+            return fail(20 + static_cast<int>(i));
+        }
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
 # NPU-DEMO-KC-001A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀

@@ -48,7 +48,7 @@
 - 固定触发合同：只对带 `launch_block / launch_thread / launch_subthread` 三项属性的 `func.func` 生效。
 - 固定输出 IR 形状：原函数名保留为 host wrapper，新函数名固定追加 `_device`。
 - 固定首轮 ABI 边界：只接受零返回 / 已完成 out-param ABI 的输入。
-- 固定 pipeline 分层：`outline-device-kernel` 既可 standalone 运行，也可作为 `npu-demo-lowering` 的末尾 pass；当前文件不扩展到 `default-lowering`。
+- 固定 pipeline 分层：`outline-device-kernel` 既可 standalone 运行，也可作为 `npu-demo-lowering` 中 cost function 生成前的 outline 阶段；当前文件不扩展到 `default-lowering`。
 
 ## 限制与边界
 
@@ -60,7 +60,7 @@
 - wrapper 上不得保留 `launch_block / launch_thread / launch_subthread`；`shared_memory_size` 若存在，只保留在 device function attributes 上，并由 wrapper 的 `arch.launch` 透传为第 4 个 extent operand。
 - `shared_memory_size` 仅做 metadata 合法性校验：需要是 int-like attr，且值必须大于等于 `0`；本轮扩展 `arch.launch` op 的第 4 个 extent operand，但不改写其它 op 属性形状。
 - 旧路径 `kernel_gen.passes.lowering.outline_device_kernel` 只保留兼容导入，不再承载独立实现文件。
-- 公开错误类型统一使用 `kernel_gen.passes.PassContractError`。
+- 公开错误类型统一使用 `kernel_gen.core.error.KernelCodeError`。
 - 当前文件级公开 API 只包含 `OutlineDeviceKernelPass`；pattern、候选收集、属性规整与 wrapper/device 改写步骤不额外暴露文件级 helper，跨文件实现与测试不得直连这些内部步骤。
 - 本轮范围排除 `gen_kernel(target="npu_demo")` / `ctx` 专用适配，也不把 `buffer-results-to-out-params` 并入本 pass 职责面。
 
@@ -88,8 +88,8 @@ module = OutlineDeviceKernelPass().run(module)
 
 - 公开 pass 名称固定为 `outline-device-kernel`。
 - 只接受零返回 / 已完成 out-param ABI 的输入函数。
-- 可 standalone 运行，也可作为 `npu-demo-lowering` 的末尾 pass 运行。
-- `PassContractError` 仍是稳定错误类型，但它属于 `kernel_gen.passes` 共享公开 API，不新增为当前文件的独立公开入口。
+- 可 standalone 运行，也可作为 `npu-demo-lowering` 中 `launch-kernel-cost-func` 前的 outline 阶段运行。
+- `KernelCodeError` 仍是稳定错误类型，但它属于 `kernel_gen.passes` 共享公开 API，不新增为当前文件的独立公开入口。
 
 返回与限制：
 

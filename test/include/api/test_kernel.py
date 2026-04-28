@@ -1,7 +1,7 @@
 """API Kernel compile tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `include/api/Kernel.h` 的公开 helper 声明，
@@ -153,6 +153,7 @@ def test_include_api_kernel_exports_only_public_kernel_helpers() -> None:
     assert "Status add(" in public_header
     assert "Status matmul(" in public_header
     assert "Status img2col2d(" in public_header
+    assert "Status reduce_max(" in public_header
     assert "Status broadcast(" not in public_header
     assert "Status softmax(" not in public_header
     assert not (REPO_ROOT / "include" / "api" / "Nn.h").exists()
@@ -162,7 +163,7 @@ def test_include_api_kernel_exports_only_public_kernel_helpers() -> None:
 
 # API-KERNEL-002
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 守护最好的爱莉希雅
 # 最近一次运行测试时间: N/A
 # 最近一次运行成功时间: N/A
 # 测试目的: 验证 `Kernel` 公共层可按 `out-first` 口径编译并运行 add/matmul 基础路径。
@@ -209,6 +210,21 @@ int main() {
     if (out_matmul_data[0] != 19.0f || out_matmul_data[1] != 22.0f ||
         out_matmul_data[2] != 43.0f || out_matmul_data[3] != 50.0f) {
         return fail(4);
+    }
+
+    float reduce_data[6] = {1.0f, 9.0f, 3.0f, 7.0f, 2.0f, 5.0f};
+    float reduce_out_data[2] = {0.0f, 0.0f};
+    long long reduce_shape[2] = {2, 3};
+    long long reduce_stride[2] = {3, 1};
+    long long reduce_out_shape[2] = {2, 1};
+    long long reduce_out_stride[2] = {1, 1};
+    Memory<TSM, float> reduce_input(reduce_data, reduce_shape, reduce_stride, 2, MemoryFormat::Norm);
+    Memory<TSM, float> reduce_out(reduce_out_data, reduce_out_shape, reduce_out_stride, 2, MemoryFormat::Norm);
+    if (npu_demo::reduce_max<TSM, float, float>(reduce_out, reduce_input, 1) != StatusCode::kOk) {
+        return fail(5);
+    }
+    if (reduce_out_data[0] != 9.0f || reduce_out_data[1] != 7.0f) {
+        return fail(6);
     }
     return 0;
 }

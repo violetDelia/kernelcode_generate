@@ -1,7 +1,7 @@
 """mlir_gen 产物比较工具。
 
 创建者: 睡觉小分队
-最后一次更改: 金铲铲大作战
+最后一次更改: 榕
 
 功能说明:
 - 提供 mlir_gen_compare(...)：生成实际 builtin.module，读取预期 .mlir 文件，
@@ -11,13 +11,13 @@
 - 仅比较 mlir_gen 层的 module 文本，不运行 pass、不做 lowering。
 
 API 列表:
-- mlir_gen_compare(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, config: dict[str, object] | None, mlir_file: str) -> bool
-- mlir_gen_compare_text(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, config: dict[str, object] | None, mlir_text: str) -> bool
-- compare_mlir_file(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, config: dict[str, object] | None, mlir_file: str) -> bool
+- mlir_gen_compare(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, mlir_file: str) -> bool
+- mlir_gen_compare_text(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, mlir_text: str) -> bool
+- compare_mlir_file(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, mlir_file: str) -> bool
 
 使用示例:
 - from kernel_gen.tools.mlir_gen_compare import mlir_gen_compare
-- ok = mlir_gen_compare(fn=add, runtime_args=[lhs, rhs], config=None, mlir_file="expected.mlir")
+- ok = mlir_gen_compare(fn=add, runtime_args=[lhs, rhs], mlir_file="expected.mlir")
 
 关联文件:
 - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
@@ -32,20 +32,13 @@ from io import StringIO
 from pathlib import Path
 
 from xdsl.context import Context
-from xdsl.dialects.arith import Arith
-from xdsl.dialects.builtin import Builtin, ModuleOp
-from xdsl.dialects.func import Func
+from xdsl.dialects.builtin import ModuleOp
 from xdsl.ir import Operation
 from xdsl.parser import Parser
 from xdsl.printer import Printer
 
 import kernel_gen.dsl.mlir_gen as mlir_gen_module
-from kernel_gen.dialect.arch import Arch
-from kernel_gen.dialect.dma import Dma
-from kernel_gen.dialect.kernel import Kernel
-from kernel_gen.dialect.nn import Nn
-from kernel_gen.dialect.symbol import Symbol
-from kernel_gen.dialect.tuner import Tuner
+from kernel_gen.core.context import build_default_context
 
 
 def _render_operation_text(value: Operation) -> str:
@@ -76,11 +69,11 @@ def _build_compare_context() -> Context:
     """构造当前文件内使用的最小比较 Context。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 榕
 
     功能说明:
-    - 在当前文件内加载比较路径需要的 builtin/func/arith 与仓库公开 dialect。
-    - 避免跨文件依赖未在本工具 spec 定义的 context helper。
+    - 复用 `kernel_gen.core.context.build_default_context()` 的默认 dialect 集合。
+    - 避免本工具维护第二套 dialect 注册列表。
 
     使用示例:
     - ctx = _build_compare_context()
@@ -91,41 +84,7 @@ def _build_compare_context() -> Context:
     - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
     """
 
-    ctx = Context()
-    _load_compare_dialects(ctx)
-    return ctx
-
-
-def _load_compare_dialects(ctx: Context) -> None:
-    """向比较 Context 注册当前工具需要的 dialect。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 将比较路径会遇到的 builtin/func/arith 与仓库公开 dialect 逐个加载到 ctx。
-    - 拆出单独 helper 仅为保持 `_build_compare_context(...)` 可读，不对外公开。
-
-    使用示例:
-    - ctx = Context()
-    - _load_compare_dialects(ctx)
-
-    关联文件:
-    - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
-    - test: [test/tools/test_mlir_gen_compare.py](test/tools/test_mlir_gen_compare.py)
-    - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
-    """
-
-    ctx.load_dialect(Builtin)
-    ctx.load_dialect(Func)
-    ctx.load_dialect(Arith)
-    ctx.load_dialect(Nn)
-    ctx.load_dialect(Kernel)
-    ctx.load_dialect(Symbol)
-    ctx.load_dialect(Tuner)
-    ctx.load_dialect(Dma)
-    ctx.load_dialect(Arch)
-
+    return build_default_context()
 
 def _normalize_module_text(module: ModuleOp, ctx: Context) -> str:
     """对 builtin.module 做当前文件内的解析后归一化。
@@ -157,7 +116,6 @@ def _normalize_module_text(module: ModuleOp, ctx: Context) -> str:
 def _mlir_gen_compare_expected_text(
     fn: Callable[..., object],
     runtime_args: tuple[object, ...] | list[object] | None,
-    config: dict[str, object] | None,
     expected_text: str,
 ) -> bool:
     """比较 mlir_gen(...) 结果与预期 module 文本。
@@ -172,7 +130,7 @@ def _mlir_gen_compare_expected_text(
     - mlir_gen(...) 抛错时不改变其失败语义，直接向上传播。
 
     使用示例:
-    - ok = _mlir_gen_compare_expected_text(fn=add, runtime_args=[lhs, rhs], config=None, expected_text=text)
+    - ok = _mlir_gen_compare_expected_text(fn=add, runtime_args=[lhs, rhs], expected_text=text)
 
     关联文件:
     - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
@@ -187,7 +145,7 @@ def _mlir_gen_compare_expected_text(
     else:
         raise TypeError("runtime_args must be list, tuple, or None")
 
-    actual_module = mlir_gen_module.mlir_gen(fn, *args, config=config)
+    actual_module = mlir_gen_module.mlir_gen(fn, *args)
     if not isinstance(actual_module, ModuleOp):
         return False
 
@@ -210,7 +168,6 @@ def _mlir_gen_compare_expected_text(
 def mlir_gen_compare(
     fn: Callable[..., object],
     runtime_args: tuple[object, ...] | list[object] | None,
-    config: dict[str, object] | None,
     mlir_file: str,
 ) -> bool:
     """比较 mlir_gen 结果与预期 mlir 文件。
@@ -224,7 +181,7 @@ def mlir_gen_compare(
     - 预期文件读取失败、解析失败、归一化失败，或归一化文本不一致时返回 False。
 
     使用示例:
-    - ok = mlir_gen_compare(fn=add, runtime_args=[lhs, rhs], config=None, mlir_file="expected.mlir")
+    - ok = mlir_gen_compare(fn=add, runtime_args=[lhs, rhs], mlir_file="expected.mlir")
 
     关联文件:
     - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
@@ -240,7 +197,6 @@ def mlir_gen_compare(
     return _mlir_gen_compare_expected_text(
         fn=fn,
         runtime_args=runtime_args,
-        config=config,
         expected_text=expected_text,
     )
 
@@ -248,7 +204,6 @@ def mlir_gen_compare(
 def mlir_gen_compare_text(
     fn: Callable[..., object],
     runtime_args: tuple[object, ...] | list[object] | None,
-    config: dict[str, object] | None,
     mlir_text: str,
 ) -> bool:
     """比较 mlir_gen 结果与预期 module 文本。
@@ -264,7 +219,7 @@ def mlir_gen_compare_text(
     - mlir_gen(...) 抛错时不改变其失败语义，直接向上传播。
 
     使用示例:
-    - ok = mlir_gen_compare_text(fn=add, runtime_args=[lhs, rhs], config=None, mlir_text=text)
+    - ok = mlir_gen_compare_text(fn=add, runtime_args=[lhs, rhs], mlir_text=text)
 
     关联文件:
     - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
@@ -275,7 +230,6 @@ def mlir_gen_compare_text(
     return _mlir_gen_compare_expected_text(
         fn=fn,
         runtime_args=runtime_args,
-        config=config,
         expected_text=mlir_text,
     )
 
@@ -283,7 +237,6 @@ def mlir_gen_compare_text(
 def compare_mlir_file(
     fn: Callable[..., object],
     runtime_args: tuple[object, ...] | list[object] | None,
-    config: dict[str, object] | None,
     mlir_file: str,
 ) -> bool:
     """兼容旧接口 compare_mlir_file(...)，等价于 mlir_gen_compare(...)。
@@ -295,7 +248,7 @@ def compare_mlir_file(
     - 保持旧接口可用，便于下游脚本与测试渐进迁移到 mlir_gen_compare(...)。
 
     使用示例:
-    - ok = compare_mlir_file(fn=add, runtime_args=[lhs, rhs], config=None, mlir_file="expected.mlir")
+    - ok = compare_mlir_file(fn=add, runtime_args=[lhs, rhs], mlir_file="expected.mlir")
 
     关联文件:
     - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
@@ -306,6 +259,5 @@ def compare_mlir_file(
     return mlir_gen_compare(
         fn=fn,
         runtime_args=runtime_args,
-        config=config,
         mlir_file=mlir_file,
     )

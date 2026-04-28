@@ -55,7 +55,7 @@
 - 明确 `nn dialect` 不支持逐元素隐式 broadcast，所有广播必须显式使用 `nn.broadcast`。
 - 承接上游 `operation.broadcast_to(...)` 的 canonical lowering：进入方言时以 `nn.broadcast` 表达目标 shape（由结果类型承载），不在 `nn dialect` 额外新增 `nn.broadcast_to` 独立 op。
 - 保证合法文本 IR 可以 round-trip，非法输入在 parse 或 verifier 阶段被拒绝。
-- `!nn.memory<...>` 的 `shape/stride` 文本范围当前只承接 `xdsl` 公开 parser token 接口可稳定消费并保持 round-trip 的表达式子集；含 `/`、`//` 的原文维度表达式不属于 repo_conformance S1 当前轮次继续保留的公开合同。
+- `!nn.memory<...>` 的 `shape/stride` 文本范围当前只承接 `xdsl` 公开 parser token 接口可稳定消费并保持 round-trip 的表达式子集；支持整数、标识符、`?`、`+`、`-`、`*`、`//` 与括号，单斜杠 `/` 原文维度表达式不属于当前公开合同。
 
 ## 限制与边界
 
@@ -131,7 +131,7 @@ mem_ty = NnMemoryType(shape, stride, element_type, space)
 
 - `shape` 与 `stride` 的 rank 必须一致。
 - `shape` 中的 `?` 可表示动态维度；`stride` 中的 `?` 受同位约束限制。
-- `shape/stride` 中的表达式文本当前仅承接 `xdsl` 公开 parser token 接口可稳定消费并保持 round-trip 的 `identifier/integer/?/+/-/*/()` 范围；含 `/`、`//` 的原文维度表达式不在本轮公开合同内。
+- `shape/stride` 中的表达式文本当前仅承接 `xdsl` 公开 parser token 接口可稳定消费并保持 round-trip 的整数、标识符、`?`、`+`、`-`、`*`、`//` 与括号范围；单斜杠 `/` 原文维度表达式不在当前公开合同内。
 - 缺失字段的文本类型必须在 parse 阶段失败。
 
 返回与限制：
@@ -705,7 +705,7 @@ op = NnTransposeOp(inp, result_type, perm=[1, 0, 2], space=NnMemorySpaceAttr.fro
 - `input/result` 必须为 `NnMemoryType`。
 - `perm` 长度必须与 `input.rank` 一致，且必须是 `0..rank-1` 的排列。
 - `result.shape` 必须按 `perm` 重排 `input.shape`。
-- `result.stride` 必须按 `perm` 重排 `input.stride`。
+- `result.stride` 必须是 `result.shape` 的默认连续 stride；`nn.transpose` 表示物化转置，不表达非连续视图。
 - `input.element_type == result.element_type`。
 - `input.space == result.space == op.space`。
 

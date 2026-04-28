@@ -1,7 +1,7 @@
 """MLIR gen integration tests.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 榕
 
 功能说明:
 - 覆盖 build_func_op/build_func_op_from_ast 及相关 lowering 集成回归。
@@ -54,6 +54,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.config import reset_config
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
     DmaCastOp,
@@ -122,7 +124,6 @@ from kernel_gen.dialect.symbol import (
     SymbolValueType,
 )
 from kernel_gen.dsl.ast import (
-    AstParseError,
     Diagnostic,
     ArchBarrierAST,
     ArchGetDynamicMemoryAST,
@@ -153,7 +154,7 @@ from kernel_gen.dsl.ast import (
     parse_function,
 )
 from kernel_gen.dsl.ast.parser import parse_function_with_env
-from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
+from kernel_gen.dsl.ast.visitor import AstVisitor
 from kernel_gen.dsl.mlir_gen.emit import EmitContext, memory_type_from_memory as _memory_to_nn_type
 from kernel_gen.dsl.mlir_gen import (
     build_func_op,
@@ -165,6 +166,25 @@ import kernel_gen.operation.nn as nn
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import Farmat, NumericType
+
+
+@pytest.fixture(autouse=True)
+def _reset_core_config() -> None:
+    """重置公共配置测试现场。
+
+    创建者: OpenAI Codex
+    最后一次更改: OpenAI Codex
+
+    功能说明:
+    - 保证本文件测试不会被 `kernel_gen.core.config` 的进程级配置串扰。
+
+    使用示例:
+    - pytest -q test/dsl/test_mlir_gen.py
+    """
+
+    reset_config()
+    yield
+    reset_config()
 
 
 def _tensor_arg(shape: list[object]) -> Memory:
@@ -920,7 +940,6 @@ def test_build_func_op_lowers_nn_helper_via_direct_alias(
         globals_table=relu_kernel.__globals__,
         builtins_table=None,
         runtime_table={"x": _tensor_arg([4])},
-        config={"reject_external_values": True},
     )
     if len(func_ast.body.statements) != 1:
         raise AssertionError("expected relu alias kernel to lower to one AST statement")
@@ -964,6 +983,33 @@ def test_visit_to_nn_ir_builds_module() -> None:
     assert isinstance(module, ModuleOp)
     assert any(isinstance(op, func.FuncOp) for op in module.ops)
     assert any(isinstance(op, NnAddOp) for op in module.walk())
+
+
+def test_build_func_op_lowers_if_else_to_scf_if() -> None:
+    """验证 Python DSL if/else 会 lowering 为 scf.if。"""
+
+    from kernel_gen.operation.dma import store
+
+    target = Memory([4], NumericType.Float32)
+    source = Memory([2], NumericType.Float32)
+
+    def if_kernel(target, source, lhs, rhs):
+        if lhs < rhs:
+            store(target, source, [0], [2], [1])
+        else:
+            store(target, source, [1], [2], [1])
+
+    module = _module_from_func(
+        if_kernel,
+        target,
+        source,
+        SymbolDim("LHS"),
+        SymbolDim("RHS"),
+    )
+    walked_ops = list(module.walk())
+
+    assert any(isinstance(op, scf.IfOp) for op in walked_ops)
+    assert sum(1 for op in walked_ops if isinstance(op, DmaStoreOp)) == 2
 
 
 # MGEN-005
@@ -1142,7 +1188,7 @@ def test_build_func_op_from_ast_rejects_symbol_scalar_missing_runtime_args() -> 
     outputs = list(func_op.function_type.outputs)
     assert inputs == [SymbolValueType.from_expr("expr")]
     assert outputs == [SymbolValueType.from_expr("expr")]
-    with pytest.raises(AstVisitorError, match="runtime_args must align"):
+    with pytest.raises(KernelCodeError, match="runtime_args must align"):
         build_func_op_from_ast(func_ast, runtime_args=[SymbolDim("expr"), SymbolDim("extra")])
 
 
@@ -1151,39 +1197,19 @@ def test_build_func_op_from_ast_rejects_symbol_scalar_missing_runtime_args() -> 
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-25 16:45:00 +0800
 # 最近一次运行成功时间: 2026-03-25 16:45:00 +0800
-# 功能说明: 验证 build_func_op_from_ast 会把 config 透传给 visitor 与 lowering context。
-# 测试目的: 证明 build_func_op_from_ast(..., config=...) 的公开成功路径不是空签名兼容，而是可观察地把配置传入 visitor/context。
-# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_from_ast_forwards_config_to_visitor_and_context
+# 功能说明: 验证 build_func_op_from_ast 不再接受公开 config 参数。
+# 测试目的: 锁定构建配置只能来自公开 core config 或内部调用态，不能继续通过旧关键字注入。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_from_ast_rejects_public_config_argument
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
-def test_build_func_op_from_ast_forwards_config_to_visitor_and_context(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import kernel_gen.dsl.mlir_gen.function_builder as function_builder_module
-
-    captured: dict[str, object] = {}
-
-    class RecordingVisitor(ast_visitor_module.AstVisitor):
-        def __init__(self: "RecordingVisitor", config: dict[str, object] | None = None) -> None:
-            super().__init__(config=config)
-            captured["visitor_config"] = dict(self.config)
-
-        def visit_function(self: "RecordingVisitor", func_ast: FunctionAST, ctx: EmitContext) -> object:
-            captured["ctx_config"] = dict(ctx.config)
-            return super().visit_function(func_ast, ctx)
-
+def test_build_func_op_from_ast_rejects_public_config_argument() -> None:
     def identity(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
         return x
 
-    monkeypatch.setattr(function_builder_module, "AstVisitor", RecordingVisitor)
     func_ast = parse_function(identity)
-    config: dict[str, object] = {"loop_vars": {"i": "outer"}}
-    func_op = build_func_op_from_ast(func_ast, config=config)
-
-    assert isinstance(func_op, func.FuncOp)
-    assert captured["visitor_config"] == config
-    assert captured["ctx_config"] == config
+    with pytest.raises(TypeError, match="unexpected keyword argument 'config'"):
+        build_func_op_from_ast(func_ast, **{"config": {"loop_vars": {"i": "outer"}}})  # type: ignore[call-arg]
 
 
 # MGEN-016
@@ -1245,7 +1271,7 @@ def test_mlir_gen_symbol_scalar_helpers() -> None:
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_mlir_gen_signature_validation_errors() -> None:
-    with pytest.raises(AstVisitorError, match="Function body is empty"):
+    with pytest.raises(KernelCodeError, match="Function body is empty"):
         build_func_op_from_ast(FunctionAST("empty", [], [], BlockAST([])))
 
     single_tensor = FunctionAST(
@@ -1254,13 +1280,13 @@ def test_mlir_gen_signature_validation_errors() -> None:
         [],
         BlockAST([]),
     )
-    with pytest.raises(AstVisitorError, match="runtime_args must align"):
+    with pytest.raises(KernelCodeError, match="runtime_args must align"):
         build_func_op_from_ast(single_tensor, runtime_args=[_tensor_arg([2, 2]), _tensor_arg([2, 2])])
 
-    with pytest.raises(AstVisitorError, match="Unsupported scalar argument type"):
+    with pytest.raises(KernelCodeError, match="Unsupported scalar argument type"):
         build_func_op_from_ast(FunctionAST("bad", [ScalarArgAST("n", float)], [], BlockAST([])))
 
-    with pytest.raises(AstVisitorError, match="Unsupported input type"):
+    with pytest.raises(KernelCodeError, match="Unsupported input type"):
         build_func_op_from_ast(FunctionAST("bad", [VarAST("x")], [], BlockAST([])))
 
     outputs_tensor = FunctionAST(
@@ -1269,7 +1295,7 @@ def test_mlir_gen_signature_validation_errors() -> None:
         [TensorAST("out", Memory([2], NumericType.Float32))],
         BlockAST([]),
     )
-    with pytest.raises(AstVisitorError, match="At least one tensor input is required"):
+    with pytest.raises(KernelCodeError, match="At least one tensor input is required"):
         build_func_op_from_ast(outputs_tensor)
 
 
@@ -1317,7 +1343,7 @@ def test_build_func_op_rejects_invalid_joinedstr_tensor_annotation(monkeypatch: 
         return src
 
     monkeypatch.setitem(invalid.__globals__, "BAD_SPEC", bad_spec)
-    with pytest.raises(AstVisitorError, match="Tensor annotation missing dimensions"):
+    with pytest.raises(KernelCodeError, match="Tensor annotation missing dimensions"):
         build_func_op(invalid, _tensor_arg([2]))
 
 
@@ -1399,7 +1425,7 @@ def test_build_func_op_rejects_unimported_dma_view_and_slice_helpers() -> None:
         return slice(src, [1, 1], [2, 2], [1, 1], MemorySpace.LM)
 
     for fn in (view_kernel, slice_kernel):
-        with pytest.raises(AstVisitorError, match="Unsupported call expression"):
+        with pytest.raises(KernelCodeError, match="Unsupported call expression"):
             build_func_op(fn, source)
 
 
@@ -1431,7 +1457,7 @@ def test_mlir_gen_rejects_dma_slice_invalid_space_type(monkeypatch: pytest.Monke
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 功能说明: 验证 mlir_gen 对 cast helper 的非法 dtype 参数继续按 TypeError 对外暴露。
-# 测试目的: 锁定 parser 恢复 cast dtype AST 校验后，module_builder 不再把该错误回包为 AstVisitorError。
+# 测试目的: 锁定 parser 恢复 cast dtype AST 校验后，module_builder 不再把该错误回包为 KernelCodeError。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_rejects_dma_cast_invalid_dtype
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/module_builder.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -1710,13 +1736,13 @@ def test_build_func_op_rejects_activation_broadcast_to_and_transpose_arity_gaps(
     def invalid_transpose_kernel(src: "Tensor[f32, 2, 3]") -> "Tensor[f32, 3, 2]":
         return transpose(src)
 
-    with pytest.raises(AstVisitorError, match="Unsupported leaky_relu arity"):
+    with pytest.raises(KernelCodeError, match="Unsupported leaky_relu arity"):
         build_func_op(invalid_leaky_relu_kernel, source)
-    with pytest.raises(AstVisitorError, match="Unsupported hard_sigmoid arity"):
+    with pytest.raises(KernelCodeError, match="Unsupported hard_sigmoid arity"):
         build_func_op(invalid_hard_sigmoid_kernel, source)
-    with pytest.raises(AstVisitorError, match="Unsupported broadcast_to arity"):
+    with pytest.raises(KernelCodeError, match="Unsupported broadcast_to arity"):
         build_func_op(invalid_broadcast_to_kernel, broadcast_source)
-    with pytest.raises(AstVisitorError, match="transpose perm is required"):
+    with pytest.raises(KernelCodeError, match="transpose perm is required"):
         build_func_op(invalid_transpose_kernel, source)
 
 
@@ -1871,7 +1897,7 @@ def test_build_func_op_matmul_tsm_tile_memory_keeps_tsm_in_raw_ir(
                 lhs_tile = slice(lhs, [m0, 0], [16, 16], [1, 1], MemorySpace.TSM)
                 rhs_tile = slice(rhs, [0, n0], [16, 16], [1, 1], MemorySpace.TSM)
                 partial = matmul(lhs_tile, rhs_tile)
-                deslice(partial, out, [m0, n0], [16, 16], [1, 1])
+                deslice(out, partial, [m0, n0], [16, 16], [1, 1])
         return out
 
     for name, value in (
@@ -2019,7 +2045,7 @@ def test_build_func_op_conv_helper_rejects_invalid_stride() -> None:
     ) -> "Tensor[f32, 1, 8, 5, 5]":
         return conv(value, weight, sh=0, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
 
-    with pytest.raises(AstVisitorError, match="conv sh must be positive|output height must be positive"):
+    with pytest.raises(KernelCodeError, match="conv sh must be positive|output height must be positive"):
         build_func_op(conv_kernel, value, weight)
 
 
@@ -2065,7 +2091,7 @@ def test_build_func_op_conv_helper_rejects_invalid_arity() -> None:
     def conv_kernel(value: "Tensor[f32, 1, 3, 5, 5]") -> "Tensor[f32, 1, 8, 5, 5]":
         return conv(value)
 
-    with pytest.raises(AstVisitorError, match="Unsupported conv arity"):
+    with pytest.raises(KernelCodeError, match="Unsupported conv arity"):
         build_func_op(conv_kernel, value)
 
 
@@ -2105,7 +2131,7 @@ def test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo(
                             weight2 = reshape(weight_tile, [16, 144])
                             out2 = matmul(weight2, col2)
                             out_tile = reshape(out2, [1, 16, 16, 16])
-                            deslice(out_tile, out, [n0, f0, ho0, wo0], [1, 16, 16, 16], [1, 1, 1, 1])
+                            deslice(out, out_tile, [n0, f0, ho0, wo0], [1, 16, 16, 16], [1, 1, 1, 1])
         return out
 
     for name, value in (
@@ -2172,7 +2198,7 @@ def test_build_func_op_conv2d_npu_demo_blackbox_raw_ir(
             weight2 = reshape(weight_tile, [16, 144])
             out2 = matmul(weight2, col2)
             out_tile = reshape(out2, [1, 16, 16, 16])
-            deslice(out_tile, out, [n0, 0, 0, 0], [1, 16, 16, 16], [1, 1, 1, 1])
+            deslice(out, out_tile, [n0, 0, 0, 0], [1, 16, 16, 16], [1, 1, 1, 1])
         return out
 
     for name, value in (
@@ -2269,7 +2295,7 @@ def test_build_func_op_conv2d_npu_demo_missing_helper_reports_unsupported(
         weight2 = reshape(weight_tile, [16, 144])
         out2 = matmul(weight2, col2)
         out_tile = reshape(out2, [1, 16, 16, 16])
-        deslice(out_tile, out, [0, 0, 0, 0], [1, 16, 16, 16], [1, 1, 1, 1])
+        deslice(out, out_tile, [0, 0, 0, 0], [1, 16, 16, 16], [1, 1, 1, 1])
         return out
 
     for name, value in (
@@ -2282,7 +2308,7 @@ def test_build_func_op_conv2d_npu_demo_missing_helper_reports_unsupported(
     ):
         monkeypatch.setitem(conv2d_img2col2d_tiled_npu_demo.__globals__, name, value)
 
-    with pytest.raises(AstVisitorError, match="Unsupported call expression"):
+    with pytest.raises(KernelCodeError, match="Unsupported call expression"):
         build_func_op(conv2d_img2col2d_tiled_npu_demo, input_memory, weight_memory)
 
 
@@ -2323,7 +2349,7 @@ def test_build_func_op_conv2d_npu_demo_unplanned_op_reports_unsupported(
         weight2 = reshape(weight_tile, [16, 144])
         out2 = matmul(weight2, col2)
         out_tile = reshape(out2, [1, 16, 16, 16])
-        deslice(out_tile, out, [0, 0, 0, 0], [1, 16, 16, 16], [1, 1, 1, 1])
+        deslice(out, out_tile, [0, 0, 0, 0], [1, 16, 16, 16], [1, 1, 1, 1])
         return out
 
     for name, value in (
@@ -2338,7 +2364,7 @@ def test_build_func_op_conv2d_npu_demo_unplanned_op_reports_unsupported(
     ):
         monkeypatch.setitem(conv2d_img2col2d_tiled_npu_demo.__globals__, name, value)
 
-    with pytest.raises(AstVisitorError, match="Unsupported call expression"):
+    with pytest.raises(KernelCodeError, match="Unsupported call expression"):
         build_func_op(conv2d_img2col2d_tiled_npu_demo, input_memory, weight_memory)
 
 
@@ -2428,7 +2454,7 @@ def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_C
 
     monkeypatch.setattr(inspect, "getsource", fake_getsource)
 
-    with pytest.raises(AstVisitorError, match="Unsupported scalar argument type"):
+    with pytest.raises(KernelCodeError, match="Unsupported scalar argument type"):
         build_func_op(alloc_kernel, 1.5, cols)
 
 
@@ -2595,7 +2621,7 @@ def test_build_func_op_rejects_dma_alloc_helper_with_invalid_dtype() -> None:
     def alloc_kernel(rank1: int, rank2: int) -> "Tensor[f32, 2, 3]":
         return alloc([rank1, rank2], "f32", MemorySpace.SM)
 
-    with pytest.raises(AstVisitorError, match="alloc dtype must be NumericType"):
+    with pytest.raises(KernelCodeError, match="alloc dtype must be NumericType"):
         build_func_op(alloc_kernel, 2, 3)
 
 
@@ -2642,7 +2668,7 @@ def test_build_func_op_rejects_dma_alloc_helper_with_non_contiguous_stride() -> 
             stride=[stride1, stride2],
         )
 
-    with pytest.raises(AstVisitorError, match="dma.alloc only supports contiguous stride"):
+    with pytest.raises(KernelCodeError, match="dma.alloc only supports contiguous stride"):
         build_func_op(alloc_kernel, 2, 3, 3, 2)
 
 
@@ -2713,7 +2739,7 @@ def test_build_func_op_rejects_invalid_free_arity() -> None:
     def free_kernel(src: "Tensor[f32, 4, 4]"):
         free()
 
-    with pytest.raises(AstVisitorError, match="Unsupported free arity"):
+    with pytest.raises(KernelCodeError, match="Unsupported free arity"):
         build_func_op(free_kernel, source)
 
 
@@ -2766,7 +2792,7 @@ def test_build_func_op_supports_dma_store_helper() -> None:
     target = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
 
     def store_kernel(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
-        store(tile, dst, [1, 1], [2, 2], [1, 1])
+        store(dst, tile, [1, 1], [2, 2], [1, 1])
 
     func_op = build_func_op(store_kernel, source, target)
     store_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaStoreOp)]
@@ -2875,7 +2901,7 @@ def test_build_func_op_supports_dma_deslice_helper() -> None:
     target = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
 
     def deslice_kernel(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
-        deslice(tile, dst, [1, 1], [2, 2], [1, 1])
+        deslice(dst, tile, [1, 1], [2, 2], [1, 1])
 
     func_op = build_func_op(deslice_kernel, source, target)
     deslice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaDesliceOp)]
@@ -2889,7 +2915,7 @@ def test_build_func_op_supports_dma_deslice_helper() -> None:
 # 最近一次运行测试时间: 2026-03-25 16:05:00 +0800
 # 最近一次运行成功时间: 2026-03-25 16:05:00 +0800
 # 功能说明: 覆盖 parser 公开入口的解析失败路径。
-# 测试目的: 验证 parse_function_with_env(...) 对外保持 AstParseError 口径。
+# 测试目的: 验证 parse_function_with_env(...) 对外保持 KernelCodeError 口径。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_parse_failure_wrapped
 # 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
 # 对应 spec 文件路径: spec/dsl/ast/parser.md
@@ -2902,7 +2928,7 @@ def test_mlir_gen_parse_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None
         return 'def fn(x: "Tensor[bad, 4]"):\n    return x\n'
 
     monkeypatch.setattr(inspect, "getsource", _bad_getsource)
-    with pytest.raises(AstParseError, match="Unsupported tensor dtype"):
+    with pytest.raises(KernelCodeError, match="Unsupported tensor dtype"):
         parse_function_with_env(fn, globals_table={}, builtins_table={}, runtime_table={}, config=None)
 
 
@@ -2923,23 +2949,23 @@ def test_mlir_gen_validate_return_type_errors() -> None:
     scalar_out = ScalarArgAST("n", int)
 
     func_multi = FunctionAST("multi", [tensor_out], [tensor_out, tensor_out], BlockAST([tensor_out]))
-    with pytest.raises(AstVisitorError, match="Only single return value is supported"):
+    with pytest.raises(KernelCodeError, match="Only single return value is supported"):
         build_func_op_from_ast(func_multi, runtime_args=[memory])
 
     func_scalar_bad = FunctionAST("bad", [tensor_out], [ScalarArgAST("f", float)], BlockAST([ConstAST(1)]))
-    with pytest.raises(AstVisitorError, match="Unsupported scalar return type"):
+    with pytest.raises(KernelCodeError, match="Unsupported scalar return type"):
         build_func_op_from_ast(func_scalar_bad, runtime_args=[memory])
 
     func_unknown = FunctionAST("bad", [tensor_out], [VarAST("x")], BlockAST([ConstAST(1)]))
-    with pytest.raises(AstVisitorError, match="Unsupported return annotation type"):
+    with pytest.raises(KernelCodeError, match="Unsupported return annotation type"):
         build_func_op_from_ast(func_unknown, runtime_args=[memory])
 
     func_mismatch = FunctionAST("bad", [tensor_out], [tensor_out], BlockAST([ConstAST(1)]))
-    with pytest.raises(AstVisitorError, match="Return type does not match annotation"):
+    with pytest.raises(KernelCodeError, match="Return type does not match annotation"):
         build_func_op_from_ast(func_mismatch, runtime_args=[memory])
 
     func_symbol = FunctionAST("sym", [scalar_out], [scalar_out], BlockAST([ConstAST(1)]))
-    with pytest.raises(AstVisitorError, match="Return type does not match annotation"):
+    with pytest.raises(KernelCodeError, match="Return type does not match annotation"):
         build_func_op_from_ast(func_symbol, runtime_args=[SymbolDim("S")])
 
 
@@ -3236,7 +3262,7 @@ def test_build_func_op_rejects_symbol_scalar_float_runtime_args() -> None:
     def only_symbol(expr: int) -> int:
         return expr
 
-    with pytest.raises(AstVisitorError, match="Unsupported scalar argument type"):
+    with pytest.raises(KernelCodeError, match="Unsupported scalar argument type"):
         build_func_op(only_symbol, 1.5)
 
 
@@ -3615,7 +3641,7 @@ def test_build_func_op_requires_explicit_runtime_args() -> None:
     def add(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
         return x
 
-    with pytest.raises(AstVisitorError, match="requires explicit runtime args") as exc_info:
+    with pytest.raises(KernelCodeError, match="requires explicit runtime args") as exc_info:
         build_func_op(add)
 
     assert exc_info.value.location is None
@@ -3637,7 +3663,7 @@ def test_build_func_op_rejects_runtime_arg_count_mismatch() -> None:
     def add(x: "Tensor[f32, 2, 2]", y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
         return x + y
 
-    with pytest.raises(AstVisitorError, match="expected 2, got 1"):
+    with pytest.raises(KernelCodeError, match="expected 2, got 1"):
         build_func_op(add, _tensor_arg([2, 2]))
 
 
@@ -3658,7 +3684,7 @@ def test_build_func_op_globals_and_builtins_cannot_replace_runtime_args() -> Non
     def only_symbol(expr: int) -> int:
         return expr
 
-    with pytest.raises(AstVisitorError, match="globals/builtins cannot replace function runtime args") as exc_info:
+    with pytest.raises(KernelCodeError, match="globals/builtins cannot replace function runtime args") as exc_info:
         build_func_op(only_symbol, globals={"expr": expr}, builtins=__builtins__)
 
     assert exc_info.value.location is None
@@ -3681,7 +3707,7 @@ def test_build_func_op_rejects_external_value_reference_inside_function_body() -
     def use_outer_value() -> int:
         return outer_value
 
-    with pytest.raises(AstVisitorError, match="cannot use external value inside function body") as exc_info:
+    with pytest.raises(KernelCodeError, match="cannot use external value inside function body") as exc_info:
         build_func_op(use_outer_value)
 
     assert exc_info.value.location is not None
@@ -3705,7 +3731,7 @@ def test_build_func_op_rejects_global_external_value_reference(monkeypatch: pyte
 
     monkeypatch.setitem(use_global_value.__globals__, "GLOBAL_EXTERNAL_VALUE", 11)
 
-    with pytest.raises(AstVisitorError, match="cannot use external value inside function body") as exc_info:
+    with pytest.raises(KernelCodeError, match="cannot use external value inside function body") as exc_info:
         build_func_op(use_global_value)
 
     assert exc_info.value.location is not None
@@ -3726,7 +3752,7 @@ def test_build_func_op_rejects_builtins_external_value_reference() -> None:
     def use_builtin_value() -> int:
         return BUILTIN_EXTERNAL_VALUE
 
-    with pytest.raises(AstVisitorError, match="cannot use external value inside function body") as exc_info:
+    with pytest.raises(KernelCodeError, match="cannot use external value inside function body") as exc_info:
         build_func_op(use_builtin_value, builtins={"BUILTIN_EXTERNAL_VALUE": 13})
 
     assert exc_info.value.location is not None
@@ -3750,7 +3776,7 @@ def test_build_func_op_rejects_attribute_external_value_reference() -> None:
     def use_attribute_value() -> int:
         return ExternalModule.CONST
 
-    with pytest.raises(AstVisitorError, match="cannot use external value inside function body") as exc_info:
+    with pytest.raises(KernelCodeError, match="cannot use external value inside function body") as exc_info:
         build_func_op(use_attribute_value)
 
     assert exc_info.value.location is not None
@@ -3771,7 +3797,7 @@ def test_invalid_tensor_return_annotation_reports_diagnostics() -> None:
     def bad_return(x: "Tensor[f32, 2, 2]") -> "Tensor[f16, 2, 2]":
         return x
 
-    with pytest.raises(AstVisitorError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         build_func_op(bad_return, _tensor_arg([2, 2]))
     assert exc_info.value.location is not None
 
@@ -3794,7 +3820,7 @@ def test_mixed_dtype_return_annotation_requires_operand_element_type() -> None:
     ) -> "Tensor[f16, 2, 2]":
         return lhs * rhs
 
-    with pytest.raises(AstVisitorError, match="Return type does not match annotation"):
+    with pytest.raises(KernelCodeError, match="Return type does not match annotation"):
         build_func_op(
             mul_mixed_invalid,
             Memory([2, 2], NumericType.Float32),
@@ -3817,7 +3843,7 @@ def test_constant_lowering_reports_diagnostics() -> None:
     def bad(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
         return 1
 
-    with pytest.raises(AstVisitorError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         build_func_op(bad, _tensor_arg([2, 2]))
     assert exc_info.value.location is not None
 
@@ -3837,7 +3863,7 @@ def test_return_type_mismatch_reports_diagnostics() -> None:
     def bad(x: "Tensor[f32, 2, 2]", y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
         return x == y
 
-    with pytest.raises(AstVisitorError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         build_func_op(bad, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
     assert exc_info.value.location is not None
 
@@ -3904,7 +3930,7 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
             SA = slice(A, [index], [step], [1], MemorySpace.LM)
             SB = slice(B, [index], [step], [1], MemorySpace.LM)
             SC = SA + SB
-            deslice(SC, C, [index], [step], [1], MemorySpace.LM)
+            deslice(C, SC, [index], [step], [1], MemorySpace.LM)
 
     monkeypatch.setitem(add.__globals__, "A", A)
     monkeypatch.setitem(add.__globals__, "B", B)
@@ -4092,8 +4118,8 @@ def test_build_func_op_lowers_nn_ne_with_tensor_i1_return_annotation() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
 # 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
-# 功能说明: 验证不可广播的逐元素表达式抛 LoweringError 且保留位置。
-# 测试目的: 验证不可广播的逐元素表达式抛 LoweringError 且保留位置。
+# 功能说明: 验证不可广播的逐元素表达式抛 KernelCodeError 且保留位置。
+# 测试目的: 验证不可广播的逐元素表达式抛 KernelCodeError 且保留位置。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -4105,7 +4131,7 @@ def test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics() -> None
     ) -> "Tensor[f32, A, B]":
         return x + y
 
-    with pytest.raises(AstVisitorError, match="Implicit broadcast dimension mismatch") as exc_info:
+    with pytest.raises(KernelCodeError, match="Implicit broadcast dimension mismatch") as exc_info:
         build_func_op(add, _tensor_arg(["A", "B"]), _tensor_arg(["A", "C"]))
     assert exc_info.value.location is not None
 
@@ -4182,7 +4208,7 @@ def test_build_func_op_lowers_nn_add_memory_symbol_with_scalar_promotion() -> No
 # 最近一次运行测试时间: 2026-03-25 17:10:00 +0800
 # 最近一次运行成功时间: 2026-03-25 17:10:00 +0800
 # 功能说明: 覆盖 build_func_op 对 builtins 与解析失败的处理。
-# 测试目的: 验证非 dict builtins 作为解析环境补充可成功运行，且解析失败会收敛为 AstVisitorError。
+# 测试目的: 验证非 dict builtins 作为解析环境补充可成功运行，且解析失败会收敛为 KernelCodeError。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_build_func_op_builtins_and_parse_error
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -4197,7 +4223,7 @@ def test_mlir_gen_build_func_op_builtins_and_parse_error() -> None:
     def bad(x: "Tensor[f32]") -> "Tensor[f32]":
         return x
 
-    with pytest.raises(AstVisitorError, match="Tensor annotation missing dimensions"):
+    with pytest.raises(KernelCodeError, match="Tensor annotation missing dimensions"):
         build_func_op(bad, _tensor_arg([2]))
 
 
@@ -4428,9 +4454,9 @@ def test_mlir_gen_rejects_unsupported_callee() -> None:
     def main(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
         return helper(x)
 
-    with pytest.raises(mlir_gen_module.MlirGenModuleError) as excinfo:
+    with pytest.raises(KernelCodeError) as excinfo:
         mlir_gen_module.mlir_gen(main, _tensor_arg([4]))
-    assert "MlirGenModuleError: unsupported callee function" in str(excinfo.value)
+    assert "unsupported callee function" in str(excinfo.value)
 
 
 # MGEN-046
@@ -4446,9 +4472,9 @@ def test_mlir_gen_rejects_recursive_callee_graph() -> None:
     def main(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
         return _mlir_gen_recursive_a(x)
 
-    with pytest.raises(mlir_gen_module.MlirGenModuleError) as excinfo:
+    with pytest.raises(KernelCodeError) as excinfo:
         mlir_gen_module.mlir_gen(main, _tensor_arg([4]))
-    assert "MlirGenModuleError: recursive callee graph is not supported" in str(excinfo.value)
+    assert "recursive callee graph is not supported" in str(excinfo.value)
 
 
 # MGEN-047
@@ -4466,6 +4492,6 @@ def test_mlir_gen_rejects_inconsistent_callee_signature() -> None:
         _ = _mlir_gen_inconsistent_signature_helper(y)
         return x
 
-    with pytest.raises(mlir_gen_module.MlirGenModuleError) as excinfo:
+    with pytest.raises(KernelCodeError) as excinfo:
         mlir_gen_module.mlir_gen(main, _tensor_arg([2, 2]), _tensor_arg([4]))
-    assert "MlirGenModuleError: inconsistent callee signature" in str(excinfo.value)
+    assert "inconsistent callee signature" in str(excinfo.value)

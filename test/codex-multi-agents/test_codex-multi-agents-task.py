@@ -9,7 +9,7 @@
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路的功能实现为 shell 脚本 `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh`，`pytest-cov` 无法直接采集脚本覆盖率，执行覆盖率命令会得到 `no-data-collected`。
 - 达标判定: shell 实现按规则豁免 `95%` 覆盖率达标线。
-- 当前以 `89` 条 pytest 用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、继续、改派、续接、新建、删除、状态查询、计划书进度、权限校验、并行上限、文件错误、结构错误、自动续接与角色职责约束路径。
+- 当前以 `93` 条 pytest 用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、继续、改派、续接、新建、删除、状态查询、计划书进度、权限校验、并行上限、文件错误、结构错误、自动续接与角色职责约束路径。
 
 覆盖率命令:
 - `pytest -q --cov=skills/codex-multi-agents/scripts/codex-multi-agents-task.sh --cov-branch --cov-report=term-missing test/codex-multi-agents/test_codex-multi-agents-task.py`
@@ -60,6 +60,9 @@ def _default_agents_list_path() -> Path:
     - 测试文件: test/codex-multi-agents/test_codex-multi-agents-task.py
     """
 
+    fixture_candidate = REPO_ROOT / "test/fixtures/agents_table.md"
+    if fixture_candidate.is_file():
+        return fixture_candidate
     repo_candidate = REPO_ROOT / "agents/codex-multi-agents/agents-lists.md"
     if repo_candidate.is_file():
         return repo_candidate
@@ -499,6 +502,64 @@ def test_dispatch_does_not_require_type(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert any(r[0] == "EX-3" and r[5] == "build" and r[8] == "worker-c" and r[9] == "进行中" for r in running_rows)
+
+
+# TC-001B
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 测试目的: 验证 -dispatch 可以分发计划级 execute 任务给 execute 专职角色。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_accepts_execute_task_type(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[],
+        list_rows=[
+            row_list_typed(
+                "EX-3",
+                "苏轼",
+                "2026-03-08 16:30:00 +0800",
+                "wt-plan",
+                "补齐计划书全部小任务卡",
+                "execute",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "",
+                "./log/ex3.md",
+            )
+        ],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员"),
+            agent_row_with_role("worker-c", "free", "负责计划级 execute"),
+            agent_row_with_role("worker-r", "free", "审查"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-c",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    running_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 正在执行的任务")
+    assert result.returncode == 0
+    assert any(r[0] == "EX-3" and r[5] == "execute" and r[8] == "worker-c" and r[9] == "进行中" for r in running_rows)
+    assert get_agent_status(agents, "worker-c") == "busy"
 
 
 # TC-002
@@ -1243,6 +1304,38 @@ def test_new_task_without_assignee_success(tmp_path: Path) -> None:
         and re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4}", r[2] or "")
         for r in list_rows
     )
+
+
+# TC-008A
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 测试目的: 验证 -new 接受计划级 execute 任务类型并写入任务列表。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_new_accepts_execute_task_type(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-new",
+        "-info",
+        "补齐计划书全部小任务卡",
+        "-type",
+        "execute",
+        "-worktree",
+        "repo-plan",
+        "-depends",
+        "None",
+        "-plan",
+        "ARCHITECTURE/plan/demo.md",
+    )
+    list_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 任务列表")
+
+    assert result.returncode == 0
+    assert re.search(r"OK: new T-\d{8}-[0-9a-f]{8}", result.stdout)
+    assert any(r[4] == "补齐计划书全部小任务卡" and r[5] == "execute" and r[3] == "repo-plan" for r in list_rows)
 
 
 # TC-009
@@ -3615,6 +3708,82 @@ def test_next_auto_spec_dedicated_first(tmp_path: Path) -> None:
     content = todo.read_text(encoding="utf-8")
     running_rows = parse_section_rows(content, "## 正在执行的任务")
     assert any(r[0] == "EX-2" and r[5] == "spec" and r[8] == "worker-c" for r in running_rows)
+    assert get_agent_status(agents, "worker-c") == "busy"
+    assert get_agent_status(agents, "worker-s") == "free"
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert "你的名字叫做worker-c" in calls_text
+
+
+# TC-058A
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 测试目的: 验证 execute 自动续接优先分配给计划级 execute 专职角色。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_execute_dedicated_first
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_auto_execute_dedicated_first(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["神秘人-session", "worker-c-session"])
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "补齐计划书全部小任务卡",
+                "execute",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-b", "busy", "审查"),
+            agent_row_with_role("worker-c", "free", "负责计划级 execute"),
+            agent_row_with_role("worker-s", "free", "全能替补"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-b"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-type",
+        "execute",
+        "-message",
+        "下一阶段：补齐计划书全部小任务卡",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    running_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 正在执行的任务")
+    assert any(r[0] == "EX-2" and r[5] == "execute" and r[8] == "worker-c" for r in running_rows)
     assert get_agent_status(agents, "worker-c") == "busy"
     assert get_agent_status(agents, "worker-s") == "free"
     calls_text = calls_file.read_text(encoding="utf-8")

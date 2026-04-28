@@ -55,7 +55,7 @@ import re
 from collections.abc import Sequence
 from typing import ClassVar, TYPE_CHECKING
 
-from kernel_gen.common.errors import _ERROR_TEMPLATE
+from kernel_gen.core.contracts import _ERROR_TEMPLATE
 os.environ.setdefault("SYMPY_GMPY", "0")
 from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerType, StringAttr, f32, f64, i1, i32
 from xdsl.dialect_interfaces.constant_materialization import ConstantMaterializationInterface
@@ -350,6 +350,7 @@ def build_public_symbol_expr(lhs_expr: str, rhs_expr: str, op_symbol: str) -> st
 
     功能说明:
     - 统一收敛 lowering 结果类型上的公开 `symbol.int<expr>` 文本。
+    - 构造表达式时保留操作数边界，避免 `A - 1` 与 `* B` 拼接后被解析成 `A - 1 * B`。
 
     使用示例:
     - build_public_symbol_expr("N", "4", "*")
@@ -360,7 +361,7 @@ def build_public_symbol_expr(lhs_expr: str, rhs_expr: str, op_symbol: str) -> st
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
-    value = _make_symbol_runtime_value(f"{lhs_expr} {op_symbol} {rhs_expr}")
+    value = _make_symbol_runtime_value(f"({lhs_expr}) {op_symbol} ({rhs_expr})")
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     if isinstance(value, int):

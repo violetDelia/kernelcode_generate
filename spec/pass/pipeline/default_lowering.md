@@ -104,7 +104,7 @@ module = pm.run(module)
   - 结果 IR 中应存在与 local memory hierarchy 对应的 `dma.slice` / `dma.deslice`。
 - 失败边界的公开验收点：
   - 若把 `BufferResultsToOutParamsPass` 排在 `NnLoweringPass` 之前，必须显式失败。
-  - 若输入包含当前不支持的 `nn` op，必须继续抛出 `NnLoweringError`，不得静默产出不合法 IR。
+  - 若输入包含当前不支持的 `nn` op，必须继续抛出 `KernelCodeError`，不得静默产出不合法 IR。
   - 若调用方需要 `outline-device-kernel`，必须在默认 pipeline 之外显式追加；当前任务链的正式验收只依赖 `pytest` 与顺序口径检查，架构侧 black-box runner 仅作补充对照。
 
 ## 测试

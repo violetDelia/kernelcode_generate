@@ -10,6 +10,7 @@ API 列表:
 - `class npu_demo::KernelContext`
 - `npu_demo::thread_id() -> S_INT`
 - `npu_demo::thread_num() -> S_INT`
+- `npu_demo::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) -> void`
 - `template <MemorySpace Space> npu_demo::get_dynamic_memory() -> DynamicMemoryRef<Space>`
 - `void npu_demo::build_contiguous_stride(const long long* shape, unsigned long long rank, long long* out_stride)`
 - `template <MemorySpace Space, typename T> Memory<Space, T> npu_demo::alloc(std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
@@ -25,7 +26,7 @@ helper 清单:
 - Status status = npu_demo::launch<1, 4, 1, 0>(kernel_body, output);
 
 创建者: 朽木露琪亚
-最后修改人: jcc你莫辜负
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)

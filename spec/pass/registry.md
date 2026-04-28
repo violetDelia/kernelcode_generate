@@ -5,10 +5,11 @@
 - 定义 pass / pipeline 的公开注册与查询接口：把“名字”与“构造器”解耦，使工具层（如 `ircheck`）只依赖稳定名称而不依赖具体 Python 模块路径。
 - 支持 xdsl `ModulePass` 的注册与构造。
 - 该注册表服务于 CLI / pytest / 工具脚本的统一入口；同一名字在进程内必须唯一。
+- `build_registered_pass(...)` 支持所有 pass 通用 `options={"fold": "true|false"}`，默认仍为 pass 自身的 `fold=True`。
 
 ## API 列表
 
-- `异常：`PassRegistryError`
+- `异常：`KernelCodeError`
 - `register_pass(pass_cls)`
 - `register_pipeline(name: str)`
 - `build_registered_pass(name: str, options: dict[str, str] | None = None) -> ModulePass`
@@ -42,6 +43,7 @@
 - `pipeline name`：对外公开的 pipeline 标识字符串。
 - `constructible`：对 `build_registered_pass(name)` 来说，表示该 pass 可用无参方式构造为实例；若构造失败则视为不可构造。
 - `options`：构造 pass / pipeline 时的键值字典（`dict[str, str]`）；空字典与 `None` 表示不提供选项。
+- `fold`：所有 pass 的通用 options key；合法值为 `true/false/1/0/yes/no/on/off`，控制 pass 后通用 folding sweep。
 
 ## 目标
 
@@ -54,7 +56,7 @@
 - 注册表不接收用户输入的任意 import path；也不负责扫描文件系统自动发现。
 - 注册发生在 Python import 时；因此对“内置 pass/pipeline”必须提供一个显式加载入口（见 `load_builtin_passes`）。
 - `build_registered_pass/build_registered_pipeline` 不得隐式调用 `load_builtin_passes()`；加载时机由调用方控制，以保持工具入口行为可预测。
-- 注册表不解析 `options` 语义；仅负责把 `options` 传给 pass / pipeline 构造入口。
+- 除 pass 通用 `fold` 选项外，注册表不解析其它 `options` 语义；其它 pass options 继续交给 pass / pipeline 构造入口。
 - 内置 pipeline 模块放在 `kernel_gen/passes/pipeline`；`load_builtin_passes()` 负责导入这些模块以触发注册。
 - 当前内置 pipeline 至少包含 `default-lowering` 与 `npu-demo-lowering` 两个公开 builder。
 - `npu-demo-lowering` 公开 builder 支持 `options={"target": "npu_demo"}`；`only-kernel` / `only_kernel` 之类选项必须显式失败，不能把 host wrapper 与 device body 的 outline 流程裁成仅 kernel 形态。
@@ -66,9 +68,9 @@
   - `attach-arch-information`：把 target registry 的 launch extent 写回入口 `func.func`。
   - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前。
   - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 pytest 与工具层统一解析。
-- tuning pass `launch-kernel-cost-func` 属于 standalone pass，必须通过 pass registry 显式启用；不得自动进入任何默认 pipeline。
-- `launch-kernel-cost-func` 接受 `options={"cost_kind": "compute|memory"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
-- registry 不解析 `options` 的语义；`options` 仅按字典透传给 pass 或 pipeline 构造入口。
+- tuning pass `launch-kernel-cost-func` 既可通过 pass registry 显式启用，也作为 `npu-demo-lowering` 的末尾 pass 运行；不自动进入 `default-lowering`。
+- `launch-kernel-cost-func` 默认 `cost_kind="DMA|MAC"`，并接受 `options={"cost_kind": "compute|memory"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
+- registry 只解析 pass 通用 `fold` 选项；剩余 `options` 仅按字典透传给 pass 或 pipeline 构造入口。
 
 ## 当前公开路径与迁移矩阵
 
@@ -130,7 +132,7 @@
 
 ## 公开接口
 
-### 异常：`PassRegistryError`
+### 异常：`KernelCodeError`
 
 功能说明：
 
@@ -138,10 +140,11 @@
 
 注意事项：
 
-- `PassRegistryError` 的 `str(e)` 必须以本文件列出的错误短语之一开头，便于测试做机械匹配。
+- `KernelCodeError` 的 `str(e)` 必须以本文件列出的错误短语之一开头，便于测试做机械匹配。
 - 与 `options` 相关的错误短语：
   - `PassRegistryError: pass '<name>' does not accept options`
   - `PassRegistryError: pass '<name>' option error`
+  - `PassRegistryError: option 'fold' expects bool`
   - `PassRegistryError: pipeline '<name>' does not accept options`
   - `PassRegistryError: pipeline '<name>' option error`
 
@@ -173,7 +176,7 @@ class TileAnalysisPass(ModulePass):
 
 - `pass_cls` 必须是 `ModulePass` 子类。
 - `pass_cls.name` 必须是非空字符串。
-- 若同名 pass 已存在，必须抛出 `PassRegistryError`。
+- 若同名 pass 已存在，必须抛出 `KernelCodeError`。
 
 返回与限制：
 
@@ -206,7 +209,7 @@ def build_default_lowering_pipeline() -> PassManager:
 
 - 被装饰函数必须返回 `PassManager`。
 - 若 pipeline 需要接收选项，builder 应提供 `builder(options: dict[str, str]) -> PassManager` 形态。
-- 若同名 pipeline 已存在，必须抛出 `PassRegistryError`。
+- 若同名 pipeline 已存在，必须抛出 `KernelCodeError`。
 
 返回与限制：
 
@@ -218,6 +221,20 @@ def build_default_lowering_pipeline() -> PassManager:
 
 - 根据 pass 名称构造并返回 pass 实例。
 - 返回值必须是 xdsl `ModulePass` 实例。
+- 若 `options` 中包含 `fold`，registry 先解析并设置到返回 pass 实例；剩余 options 再按原规则交给 pass 自身构造入口。
+
+参数说明：
+
+- `name (str)`：已注册的 pass 名称。
+- `options (dict[str, str] | None)`：构造选项；`fold` 为所有 pass 通用选项，其它选项由具体 pass 定义。
+
+使用示例：
+
+```python
+load_builtin_passes()
+pass_obj = build_registered_pass("inline", {"fold": "false"})
+assert pass_obj.fold is False
+```
 
 参数说明：
 
@@ -236,6 +253,7 @@ inline_pass = build_registered_pass("inline")
 attach_pass = build_registered_pass("attach-arch-information")
 hoist_pass = build_registered_pass("symbol-buffer-hoist")
 cost_pass = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "compute|memory"})
+default_cost_pass = build_registered_pass("launch-kernel-cost-func")
 ```
 
 注意事项：
@@ -249,7 +267,7 @@ cost_pass = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "comp
 
 返回与限制：
 
-- 失败时必须抛出 `PassRegistryError`，且错误短语前缀为：
+- 失败时必须抛出 `KernelCodeError`，且错误短语前缀为：
   - `PassRegistryError: unknown pass '<name>'`
   - `PassRegistryError: pass '<name>' is not constructible`
   - `PassRegistryError: pass '<name>' does not accept options`
@@ -289,7 +307,7 @@ pm = build_registered_pipeline("default-lowering", {"bufferize": "true"})
 
 返回与限制：
 
-- 失败时必须抛出 `PassRegistryError`，且错误短语前缀为：
+- 失败时必须抛出 `KernelCodeError`，且错误短语前缀为：
   - `PassRegistryError: unknown pipeline '<name>'`
   - `PassRegistryError: pipeline '<name>' did not return PassManager`
   - `PassRegistryError: pipeline '<name>' does not accept options`
@@ -350,6 +368,6 @@ names = list_registered_passes()
 - 测试目标：
   - `register_pass/register_pipeline`：重复注册立即失败，错误短语可机械匹配。
   - `build_registered_pass/build_registered_pipeline`：未知名称、不可构造、选项不被接受、返回值非法路径报告稳定错误短语。
-- `launch-kernel-cost-func`：通过 `load_builtin_passes()` 后可查询；`cost_kind=compute|memory` 选项可透传构造；非法 `cost_kind` 不被 registry 层吞掉。
+- `launch-kernel-cost-func`：通过 `load_builtin_passes()` 后可查询；无参构造默认 `DMA|MAC`；`cost_kind=compute|memory` 选项可透传构造；非法 `cost_kind` 不被 registry 层吞掉。
 - `tile-analysis` / `tile-elewise` / `tile-reduce`：通过 `load_builtin_passes()` 后可查询；三者均以 `ModulePass` 形式公开给 registry / pipeline / pytest 入口。
 - `list_registered_*`：返回值顺序确定且不含重复项。

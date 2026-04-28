@@ -22,6 +22,7 @@
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.dialects.builtin import IntAttr, StringAttr
 from xdsl.dialects.builtin import IntegerType
@@ -40,7 +41,6 @@ from kernel_gen.dialect.kernel import KernelExpOp, KernelSelectOp
 from kernel_gen.dialect.nn import NnCastOp, NnExpOp, NnMemoryType, NnSelectOp
 from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from .nn_lowering_utility import (
-    NnLoweringError,
     ensure_expected_op_name,
     ensure_operand_count,
     ensure_single_result,
@@ -61,7 +61,7 @@ def _build_alloc_dynamic_shape_from_source(
     - 仅对符号维度使用 symbol.get_dim 读取 shape 对应维度。
     - 全静态 shape 时返回空的 dynamic_shape。
     - 禁止结果 shape 包含匿名维度 '?'。
-    - source 与 result rank 不一致时抛出 NnLoweringError。
+    - source 与 result rank 不一致时抛出 KernelCodeError。
 
     使用示例:
     - ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(source, result_type)
@@ -74,9 +74,9 @@ def _build_alloc_dynamic_shape_from_source(
 
     source_type = source.type
     if not isinstance(source_type, NnMemoryType):
-        raise NnLoweringError("dynamic_shape source must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "dynamic_shape source must be nn.memory")
     if len(source_type.shape.data) != len(result_type.shape.data):
-        raise NnLoweringError("nn select/cast operand/result rank mismatch")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn select/cast operand/result rank mismatch")
 
     ops: list[Operation] = []
     operands: list[SSAValue] = []
@@ -85,12 +85,12 @@ def _build_alloc_dynamic_shape_from_source(
             continue
         if isinstance(dim, StringAttr):
             if dim.data == "?":
-                raise NnLoweringError("nn select/cast result shape must not contain '?'")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn select/cast result shape must not contain '?'")
             get_dim = SymbolGetDimOp(source, IntAttr(axis))
             ops.append(get_dim)
             operands.append(get_dim.result)
             continue
-        raise NnLoweringError("nn select/cast result shape must be int or symbol")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn select/cast result shape must be int or symbol")
     return ops, operands
 
 
@@ -121,11 +121,11 @@ def _lower_select_op(op: Operation, block: Block) -> None:
     lhs_value = SSAValue.get(op.operands[1])
     rhs_value = SSAValue.get(op.operands[2])
     if not isinstance(cond_value.type, NnMemoryType):
-        raise NnLoweringError("nn.select cond must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.select cond must be nn.memory")
     if not isinstance(lhs_value.type, NnMemoryType):
-        raise NnLoweringError("nn.select lhs must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.select lhs must be nn.memory")
     if not isinstance(rhs_value.type, NnMemoryType):
-        raise NnLoweringError("nn.select rhs must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.select rhs must be nn.memory")
 
     shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(lhs_value, result_type)
     alloc = DmaAllocOp(dynamic_shape, result_type)
@@ -135,7 +135,7 @@ def _lower_select_op(op: Operation, block: Block) -> None:
         alloc.verify()
         kernel_op.verify()
     except VerifyException as exc:
-        raise NnLoweringError(str(exc)) from exc
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, str(exc)) from exc
 
     block.insert_ops_before([*shape_ops, alloc, kernel_op], op)
     op.results[0].replace_all_uses_with(alloc.result)
@@ -169,14 +169,14 @@ def _lower_cast_op(op: Operation, block: Block) -> None:
 
     input_value = SSAValue.get(op.operands[0])
     if not isinstance(input_value.type, NnMemoryType):
-        raise NnLoweringError("nn.cast input must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.cast input must be nn.memory")
     for elem_type in (input_value.type.element_type, result_type.element_type):
         if isinstance(elem_type, IntegerType):
             if elem_type.width.data == 1:
-                raise NnLoweringError("nn.cast element_type must be integer or float and not i1")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.cast element_type must be integer or float and not i1")
             continue
         if not isinstance(elem_type, (Float16Type, Float32Type, Float64Type, BFloat16Type)):
-            raise NnLoweringError("nn.cast element_type must be integer or float and not i1")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.cast element_type must be integer or float and not i1")
 
     shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(input_value, result_type)
     alloc = DmaAllocOp(dynamic_shape, result_type)
@@ -186,7 +186,7 @@ def _lower_cast_op(op: Operation, block: Block) -> None:
         dma_cast_op.verify_()
         alloc.verify()
     except VerifyException as exc:
-        raise NnLoweringError(str(exc)) from exc
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, str(exc)) from exc
 
     block.insert_ops_before([*shape_ops, alloc, dma_cast_op], op)
     op.results[0].replace_all_uses_with(alloc.result)
@@ -217,9 +217,9 @@ def _lower_exp_op(op: Operation, block: Block) -> None:
 
     operand = SSAValue.get(op.operands[0])
     if not isinstance(operand.type, NnMemoryType):
-        raise NnLoweringError("nn.exp operand must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.exp operand must be nn.memory")
     if operand.type.shape != result_type.shape or operand.type.stride != result_type.stride:
-        raise NnLoweringError("nn.exp result shape must match operand")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.exp result shape must match operand")
 
     shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(operand, result_type)
     alloc = DmaAllocOp(dynamic_shape, result_type)
@@ -228,7 +228,7 @@ def _lower_exp_op(op: Operation, block: Block) -> None:
     try:
         alloc.verify()
     except VerifyException as exc:
-        raise NnLoweringError(str(exc)) from exc
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, str(exc)) from exc
 
     block.insert_ops_before([*shape_ops, alloc, lowered], op)
     op.results[0].replace_all_uses_with(alloc.result)
@@ -259,7 +259,7 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
         return operand
     if isinstance(operand.type, IntegerType):
         return operand
-    raise NnLoweringError("nn.cast optional operand must be int or symbol")
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.cast optional operand must be int or symbol")
 
 
 class _LowerSelectPattern(RewritePattern):
@@ -285,7 +285,7 @@ class _LowerSelectPattern(RewritePattern):
     def match_and_rewrite(self, op: NnSelectOp, rewriter: PatternRewriter, /) -> None:
         block = op.parent_block()
         if block is None:
-            raise NnLoweringError("nn op must be inside a block")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op must be inside a block")
         ensure_expected_op_name(op, "nn.select")
         _lower_select_op(op, block)
         rewriter.has_done_action = True
@@ -314,7 +314,7 @@ class _LowerCastPattern(RewritePattern):
     def match_and_rewrite(self, op: NnCastOp, rewriter: PatternRewriter, /) -> None:
         block = op.parent_block()
         if block is None:
-            raise NnLoweringError("nn op must be inside a block")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op must be inside a block")
         ensure_expected_op_name(op, "nn.cast")
         _lower_cast_op(op, block)
         rewriter.has_done_action = True
@@ -343,7 +343,7 @@ class _LowerExpPattern(RewritePattern):
     def match_and_rewrite(self, op: NnExpOp, rewriter: PatternRewriter, /) -> None:
         block = op.parent_block()
         if block is None:
-            raise NnLoweringError("nn op must be inside a block")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op must be inside a block")
         ensure_expected_op_name(op, "nn.exp")
         _lower_exp_op(op, block)
         rewriter.has_done_action = True

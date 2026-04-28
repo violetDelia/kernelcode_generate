@@ -1,7 +1,7 @@
 """pass_manager tests.
 
 创建者: 李白
-最后一次更改: 金铲铲大作战
+最后一次更改: 大闸蟹
 
 功能说明:
 - 覆盖 kernel_gen/passes/pass_manager.py 的 Pass 管理行为。
@@ -34,6 +34,8 @@ import pytest
 
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.passes import ModulePass
+
+from kernel_gen.core.config import reset_config, set_dump_dir
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -146,6 +148,105 @@ def test_pass_manager_empty_returns_input() -> None:
     pm = PassManager()
     data = {"key": "value"}
     assert pm.run(data) is data
+
+
+# TC-PASS-003A
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证 PassManager dump_dir 会写入初始 IR 与逐 pass 后 IR。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_dump_dir_writes_pass_ir
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_pass_manager_dump_dir_writes_pass_ir(tmp_path: Path) -> None:
+    class NoOpPass(Pass):
+        name = "no-op"
+
+        def run(self: "NoOpPass", target: ModuleOp) -> ModuleOp:
+            return target
+
+    pm = PassManager(name="dump-pipeline")
+    pm.add_pass(NoOpPass())
+    module = ModuleOp([])
+
+    try:
+        set_dump_dir(tmp_path)
+        assert pm.run(module) is module
+    finally:
+        reset_config()
+
+    first_ir = (tmp_path / "01-first-ir.mlir").read_text(encoding="utf-8")
+    pass_ir = (tmp_path / "02-no-op.mlir").read_text(encoding="utf-8")
+    assert "builtin.module" in first_ir
+    assert pass_ir.splitlines()[0] == "no-op"
+    assert "builtin.module" in pass_ir
+
+
+# TC-PASS-003B
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证 pass 默认开启 fold，PassManager 在 pass 后折叠 symbol 算术。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_folds_symbol_ops_by_default
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_pass_manager_folds_symbol_ops_by_default() -> None:
+    from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolValueType
+
+    class NoOpPass(Pass):
+        name = "no-op"
+
+        def run(self: "NoOpPass", target: ModuleOp) -> ModuleOp:
+            return target
+
+    lhs = SymbolConstOp(2)
+    rhs = SymbolConstOp(3)
+    add = SymbolAddOp(lhs.result, rhs.result, SymbolValueType.from_expr("5"))
+    module = ModuleOp([lhs, rhs, add])
+
+    pm = PassManager(name="fold-pipeline")
+    pm.add_pass(NoOpPass())
+    result = pm.run(module)
+
+    assert result is module
+    assert "symbol.add" not in str(module)
+    assert 'symbol.const 5 : !symbol.int<"5">' in str(module)
+
+
+# TC-PASS-003C
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证 pass 可通过 `fold=False` 关闭默认 fold。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_fold_can_be_disabled_per_pass
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_pass_manager_fold_can_be_disabled_per_pass() -> None:
+    from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolValueType
+
+    class NoOpPass(Pass):
+        name = "no-op"
+
+        def run(self: "NoOpPass", target: ModuleOp) -> ModuleOp:
+            return target
+
+    lhs = SymbolConstOp(2)
+    rhs = SymbolConstOp(3)
+    add = SymbolAddOp(lhs.result, rhs.result, SymbolValueType.from_expr("5"))
+    module = ModuleOp([lhs, rhs, add])
+
+    pm = PassManager(name="fold-disabled-pipeline")
+    pm.add_pass(NoOpPass(fold=False))
+    result = pm.run(module)
+
+    assert result is module
+    assert "symbol.add" in str(module)
 
 
 # TC-PASS-004

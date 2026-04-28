@@ -1,7 +1,7 @@
 """mlir_gen function builder.
 
 创建者: 朽木露琪亚
-最后一次更改: 金铲铲大作战
+最后一次更改: 榕
 
 功能说明:
 - 负责 `kernel_gen.dsl.mlir_gen` 包根公开 `build_func_op(...)` /
@@ -24,6 +24,7 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 import inspect
 import re
@@ -42,7 +43,6 @@ from kernel_gen.dsl.ast import (
     ArchGetDynamicMemoryAST,
     ArchLaunchKernelAST,
     ArchQueryAST,
-    AstParseError,
     BinaryExprAST,
     CompareExprAST,
     ConstAST,
@@ -57,6 +57,7 @@ from kernel_gen.dsl.ast import (
     FCAST,
     ForAST,
     FunctionAST,
+    IfAST,
     Img2ColAST,
     LoadAST,
     MatmulAST,
@@ -75,7 +76,7 @@ from kernel_gen.dsl.ast import (
     VarAST,
 )
 from kernel_gen.dsl.ast.parser import parse_function_with_env
-from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
+from kernel_gen.dsl.ast.visitor import AstVisitor
 from kernel_gen.dsl.mlir_gen.emit import EmitContext, emit_mlir, memory_type_from_memory
 from kernel_gen.dsl.mlir_gen.emit.type_utils import infer_expr_type
 from kernel_gen.symbol_variable.memory import Memory
@@ -91,27 +92,23 @@ _DYNAMIC_MEMORY_SYMBOL_NAMES = {
 }
 
 
-class LoweringError(ValueError):
-    """当前文件内使用的 function_builder 失败错误。"""
-
-    def __init__(self, message: str, location: object | None = None) -> None:
-        super().__init__(message)
-        self.location = location
 
 
 def _raise_visitor_error_from_parse_error(
-    exc: AstParseError,
+    exc: KernelCodeError,
     *,
     value_messages: tuple[str, ...] = (),
 ) -> None:
-    """把 AstParseError 翻译为当前文件沿用的公开错误合同。"""
+    """把 AST 解析错误翻译为当前文件沿用的公开错误合同。"""
 
-    location = exc.diagnostics[0].location if exc.diagnostics else None
-    if exc.message in value_messages:
-        raise ValueError(exc.message) from exc
-    if exc.message.endswith("space must be MemorySpace") or exc.message == "cast dtype must be NumericType":
-        raise TypeError(exc.message) from exc
-    raise AstVisitorError(exc.message, location=location) from exc
+    diagnostics = getattr(exc, "diagnostics", ())
+    location = diagnostics[0].location if diagnostics else getattr(exc, "location", None)
+    message = exc.message()
+    if message in value_messages:
+        raise ValueError(message) from exc
+    if message.endswith("space must be MemorySpace") or message == "cast dtype must be NumericType":
+        raise TypeError(message) from exc
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, message, location=location) from exc
 
 
 def _expr_key(expr: object) -> int:
@@ -139,7 +136,7 @@ def _is_symbol_scalar_function(func_ast: FunctionAST) -> bool:
     """判断是否为纯 symbol 标量函数。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 榕
 
     功能说明:
     - 识别仅包含 symbol 标量输入/输出的函数。
@@ -269,7 +266,7 @@ def _apply_symbolic_index_binary_op(
     if op == "div":
         if isinstance(lhs_value, int) and isinstance(rhs_value, int):
             if rhs_value == 0 or lhs_value % rhs_value != 0:
-                raise LoweringError("Unsupported index expression", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
             return lhs_value // rhs_value
         if isinstance(lhs_value, int):
             lhs_value = SymbolDim(lhs_value)
@@ -277,12 +274,12 @@ def _apply_symbolic_index_binary_op(
     if op == "floordiv":
         if isinstance(lhs_value, int) and isinstance(rhs_value, int):
             if rhs_value == 0:
-                raise LoweringError("Unsupported index expression", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
             return lhs_value // rhs_value
         if isinstance(lhs_value, int):
             lhs_value = SymbolDim(lhs_value)
         return lhs_value // rhs_value
-    raise LoweringError("Unsupported index expression", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
 
 
 def _resolve_symbolic_index_value(
@@ -314,7 +311,7 @@ def _resolve_symbolic_index_value(
             return expr.value
         if isinstance(expr.value, str):
             return SymbolDim(expr.value)
-        raise LoweringError("Index must be int or str", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index must be int or str", location=expr.location)
     if isinstance(expr, ScalarArgAST):
         if runtime_values is not None and expr.name in runtime_values:
             runtime_value = runtime_values[expr.name]
@@ -333,7 +330,7 @@ def _resolve_symbolic_index_value(
         return _apply_symbolic_index_binary_op(lhs, rhs, expr.op, expr.location)
     if isinstance(expr, TensorAxisAccessAST):
         if not isinstance(expr.axis, ConstAST) or not isinstance(expr.axis.value, int):
-            raise LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location or getattr(expr, "location", None))
         dims = expr.tensor.memory.shape if expr.kind == "shape" else expr.tensor.memory.stride
         dim = dims[expr.axis.value]
         public_value = dim.get_value()
@@ -342,7 +339,7 @@ def _resolve_symbolic_index_value(
         return expr
     if isinstance(expr, str):
         return SymbolDim(expr)
-    raise LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location or getattr(expr, "location", None))
 
 
 def _resolve_static_index_expr(
@@ -372,7 +369,7 @@ def _resolve_static_index_expr(
     if isinstance(value, SymbolDim):
         normalized = value.get_value()
         if not isinstance(normalized, (int, str)):
-            raise LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location or getattr(expr, "location", None))
         return normalized
     return value
 
@@ -440,7 +437,7 @@ def _build_dma_alloc_only_result_type(
         normalized_stride = list(Memory(shape, alloc_expr.dtype, stride=stride).stride.get_values())
         default_stride = list(Memory(shape, alloc_expr.dtype).stride.get_values())
         if normalized_stride != default_stride:
-            raise LoweringError("dma.alloc only supports contiguous stride", location=alloc_expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "dma.alloc only supports contiguous stride", location=alloc_expr.location)
     memory = Memory(shape, alloc_expr.dtype, space=alloc_expr.space, stride=stride)
     return memory_type_from_memory(memory)
 
@@ -471,7 +468,7 @@ def _build_signature_types(
 
     is_symbol_scalar_function = _is_symbol_scalar_function(func_ast)
     if runtime_args is not None and len(runtime_args) != len(func_ast.inputs):
-        raise LoweringError("runtime_args must align with func_ast inputs", location=func_ast.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "runtime_args must align with func_ast inputs", location=func_ast.location)
 
     arg_types: list[object] = []
     type_map: dict[int, object] = {}
@@ -484,14 +481,14 @@ def _build_signature_types(
             tensor_input_count += 1
         elif isinstance(item, ScalarArgAST):
             if item.value_type is not int:
-                raise LoweringError("Unsupported scalar argument type", location=item.location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported scalar argument type", location=item.location)
             if runtime_args is not None and not isinstance(runtime_arg, (int, SymbolDim)):
-                raise LoweringError("Unsupported scalar argument type", location=item.location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported scalar argument type", location=item.location)
             runtime_expr = _symbol_expr_from_runtime_arg(runtime_arg)
             if allow_dma_alloc_only:
                 if runtime_args is not None:
                     if runtime_expr is None:
-                        raise LoweringError("Unsupported scalar argument type", location=item.location)
+                        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported scalar argument type", location=item.location)
                     arg_type = SymbolValueType.from_expr(runtime_expr)
                 else:
                     arg_type = SymbolValueType.from_expr(item.name)
@@ -502,13 +499,13 @@ def _build_signature_types(
             else:
                 arg_type = i32
         else:
-            raise LoweringError("Unsupported input type", location=getattr(item, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported input type", location=getattr(item, "location", None))
         arg_types.append(arg_type)
         type_map[_expr_key(item)] = arg_type
 
     if func_ast.inputs and tensor_input_count == 0 and not is_symbol_scalar_function and not allow_dma_alloc_only:
         if not getattr(func_ast.body, "statements", None):
-            raise LoweringError("At least one tensor input is required", location=func_ast.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "At least one tensor input is required", location=func_ast.location)
     return arg_types, type_map
 
 
@@ -551,7 +548,7 @@ def _allow_mixed_dtype_return(
         return False
     try:
         target_type = infer_expr_type(return_expr, dict(type_map))
-    except LoweringError:
+    except KernelCodeError:
         return False
     return (
         isinstance(target_type, NnMemoryType)
@@ -695,22 +692,22 @@ def _validate_return_type(
     if not func_ast.outputs:
         return
     if len(func_ast.outputs) != 1:
-        raise LoweringError("Only single return value is supported", location=func_ast.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Only single return value is supported", location=func_ast.location)
     output = func_ast.outputs[0]
     if isinstance(output, TensorAST):
         expected_type = memory_type_from_memory(output.memory)
         if not isinstance(result_type, NnMemoryType):
-            raise LoweringError("Return type does not match annotation", location=func_ast.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Return type does not match annotation", location=func_ast.location)
         shape_matches = _shape_annotation_matches(result_type, expected_type)
         if not shape_matches and isinstance(return_expr, DmaFlattenAST):
             shape_matches = _flatten_numel_annotation_matches(result_type, expected_type)
         if not shape_matches:
-            raise LoweringError("Return type does not match annotation", location=func_ast.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Return type does not match annotation", location=func_ast.location)
         if result_type.element_type != expected_type.element_type:
             if return_expr is not None and type_map is not None:
                 if _allow_mixed_dtype_return(return_expr, type_map, result_type, expected_type):
                     return
-            raise LoweringError("Return type does not match annotation", location=func_ast.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Return type does not match annotation", location=func_ast.location)
         return
     if isinstance(output, ScalarArgAST):
         if output.value_type is bool:
@@ -732,13 +729,13 @@ def _validate_return_type(
             if isinstance(return_expr, SymbolToFloatAST):
                 expected_type = f32
             else:
-                raise LoweringError("Unsupported scalar return type", location=output.location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported scalar return type", location=output.location)
         else:
-            raise LoweringError("Unsupported scalar return type", location=output.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported scalar return type", location=output.location)
     else:
-        raise LoweringError("Unsupported return annotation type", location=getattr(output, "location", None))
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported return annotation type", location=getattr(output, "location", None))
     if result_type != expected_type:
-        raise LoweringError("Return type does not match annotation", location=func_ast.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Return type does not match annotation", location=func_ast.location)
 
 
 def _function_has_value_return(func_ast: FunctionAST) -> bool:
@@ -772,10 +769,10 @@ def _is_zero_return_statement_expr(expr: object) -> bool:
     """判断表达式是否属于语句型零返回函数体。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 榕
 
     功能说明:
-    - 仅允许 `free/store/deslice/for/launch_kernel` 这类本来就不产生函数返回值的语句函数保持零结果。
+    - 仅允许 `free/store/deslice/if/for/launch_kernel` 这类本来就不产生函数返回值的语句函数保持零结果。
 
     使用示例:
     - if _is_zero_return_statement_expr(last_stmt): ...
@@ -786,7 +783,7 @@ def _is_zero_return_statement_expr(expr: object) -> bool:
     - 功能实现: [kernel_gen/dsl/mlir_gen/function_builder.py](kernel_gen/dsl/mlir_gen/function_builder.py)
     """
 
-    return isinstance(expr, (DmaFreeAST, StoreAST, ForAST, ArchBarrierAST, ArchLaunchKernelAST))
+    return isinstance(expr, (DmaFreeAST, StoreAST, IfAST, ForAST, ArchBarrierAST, ArchLaunchKernelAST))
 
 
 def _parse_reduce_axis_expr(axis_expr: object | None, location: object | None) -> list[int] | None:
@@ -813,7 +810,7 @@ def _parse_reduce_axis_expr(axis_expr: object | None, location: object | None) -
     if isinstance(axis_expr, ConstAST):
         if isinstance(axis_expr.value, int):
             return [axis_expr.value]
-        raise LoweringError("reduce axis must be int", location=axis_expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reduce axis must be int", location=axis_expr.location)
     if isinstance(axis_expr, int):
         return [axis_expr]
     if isinstance(axis_expr, (list, tuple)):
@@ -825,20 +822,21 @@ def _parse_reduce_axis_expr(axis_expr: object | None, location: object | None) -
             if isinstance(entry, int):
                 axes.append(entry)
                 continue
-            raise LoweringError("reduce axis must be int", location=getattr(entry, "location", None) or location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reduce axis must be int", location=getattr(entry, "location", None) or location)
         return axes
-    raise LoweringError("reduce axis must be int or list of int", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reduce axis must be int or list of int", location=location)
 
 
 def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
     """校验函数体中的 AST 语句是否属于当前 lowering 支持范围。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 榕
 
     功能说明:
     - 拒绝空函数体。
     - 遍历并检查每条语句的 AST 类型，提前在发射前给出统一诊断。
+    - 语句级 `IfAST` 允许进入后续 `emit_mlir(...)` 控制流 lowering。
 
     使用示例:
     - statements = _ensure_supported_statements(function_ast)
@@ -851,7 +849,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
 
     statements = function_ast.body.statements
     if not statements:
-        raise LoweringError("Function body is empty", location=function_ast.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Function body is empty", location=function_ast.location)
     for expr in statements:
         if not isinstance(
             expr,
@@ -882,6 +880,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 NnUnaryAST,
                 DmaFreeAST,
                 ForAST,
+                IfAST,
                 ArchBarrierAST,
                 ArchGetDynamicMemoryAST,
                 ArchLaunchKernelAST,
@@ -891,7 +890,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 TensorAxisAccessAST,
             ),
         ):
-            raise LoweringError("Unsupported AST expression for lowering", location=getattr(expr, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported AST expression for lowering", location=getattr(expr, "location", None))
     return statements
 
 
@@ -1120,9 +1119,9 @@ def build_func_op(
     - 返回构建完成的 `func.FuncOp`。
 
     限制与异常:
-    - 运行时参数数量不匹配会抛出 `AstVisitorError`。
+    - 运行时参数数量不匹配会抛出 `KernelCodeError`。
     - `slice/cast/alloc` 等前端参数类型错误会按公开合同抛出 `TypeError`。
-    - 其余解析或下沉失败会抛出 `AstVisitorError`。
+    - 其余解析或下沉失败会抛出 `KernelCodeError`。
 
     使用示例:
     - func_op = build_func_op(fn, *runtime_args)
@@ -1145,12 +1144,12 @@ def build_func_op(
                 "globals/builtins cannot replace function runtime args: "
                 f"expected {len(positional_params)}, got 0"
             )
-            raise AstVisitorError(reason, location=None)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, reason, location=None)
         reason = (
             f"build_func_op requires explicit runtime args for {fn.__name__}: "
             f"expected {len(positional_params)}, got {len(runtime_args)}"
         )
-        raise AstVisitorError(reason, location=None)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, reason, location=None)
 
     runtime_table = {param.name: runtime_args[index] for index, param in enumerate(positional_params)}
     globals_table = dict(getattr(fn, "__globals__", {}) or {})
@@ -1170,9 +1169,8 @@ def build_func_op(
             globals_table,
             builtins_table,
             runtime_table,
-            config={"reject_external_values": True},
         )
-    except AstParseError as exc:
+    except KernelCodeError as exc:
         _raise_visitor_error_from_parse_error(
             exc,
             value_messages=(),
@@ -1231,7 +1229,7 @@ def _build_func_op_from_ast_impl(
         return_expr = last_stmt
         if is_dma_alloc_only:
             if not isinstance(return_expr, DmaAllocAST):
-                raise LoweringError("Return type does not match annotation", location=func_ast.location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Return type does not match annotation", location=func_ast.location)
             result_type = _build_dma_alloc_only_result_type(func_ast, return_expr, runtime_args)
         else:
             if isinstance(return_expr, NnReduceAST) and return_expr.kind == "reduce_max":
@@ -1246,7 +1244,7 @@ def _build_func_op_from_ast_impl(
                         rank = len(input_type.shape.data)
                         for axis_value in axes:
                             if axis_value < -rank or axis_value >= rank:
-                                raise LoweringError(
+                                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, 
                                     f"{return_expr.kind} axis must be within [-{rank}, {rank - 1}]",
                                     location=return_expr.location,
                                 )
@@ -1260,7 +1258,7 @@ def _build_func_op_from_ast_impl(
         type_map[_expr_key(return_expr)] = result_type
         result_types = [result_type]
     elif not func_ast.returns_none and not _is_zero_return_statement_expr(last_stmt):
-        raise LoweringError(
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, 
             "Function return requires explicit return syntax or annotation",
             location=getattr(last_stmt, "location", None) or func_ast.location,
         )
@@ -1275,7 +1273,7 @@ def _build_func_op_from_ast_impl(
     return_value = visitor.visit_function(func_ast, ctx)
     if has_value_return:
         if return_value is None:
-            raise LoweringError("Function body is empty", location=func_ast.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Function body is empty", location=func_ast.location)
         block.add_op(func.ReturnOp(return_value))
     else:
         block.add_op(func.ReturnOp())
@@ -1295,9 +1293,9 @@ def _emit_result_type_with_public_diagnostics(
 
     功能说明:
     - 调用公开 `emit_mlir(...)` 预发射返回表达式并读取结果类型。
-    - 仅将 `emit_mlir(...)` 抛出的带 lowering 语义的 `ValueError` 重新包装为带位置信息的 `LoweringError`，
-      以保持 `build_func_op(...) -> AstVisitorError` 的既有公开合同。
-    - `MlirGenModuleError` 这类 module-builder 公开的非 lowering 失败继续原样透传，不在这里被误改写。
+    - 仅将 `emit_mlir(...)` 抛出的带 lowering 语义的 `ValueError` 重新包装为带位置信息的 `KernelCodeError`，
+      以保持 `build_func_op(...) -> KernelCodeError` 的既有公开合同。
+    - 已带 `MlirGenModuleError: ...` 前缀的 module-builder 公开失败消息继续原样透传，不在这里被误改写。
 
     使用示例:
     - result_type = _emit_result_type_with_public_diagnostics(expr, preview_ctx, func_ast.location)
@@ -1316,7 +1314,7 @@ def _emit_result_type_with_public_diagnostics(
             and "Implicit broadcast dimension mismatch" not in str(exc)
         ):
             raise
-        raise LoweringError(
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, 
             str(exc),
             location=getattr(exc, "location", None)
             or getattr(expr, "location", None)
@@ -1327,7 +1325,6 @@ def _emit_result_type_with_public_diagnostics(
 def build_func_op_from_ast(
     func_ast: FunctionAST,
     runtime_args: tuple[object, ...] | list[object] | None = None,
-    config: dict[str, object] | None = None,
 ) -> func.FuncOp:
     """从 `FunctionAST` 生成 MLIR `func.func`。
 
@@ -1336,18 +1333,16 @@ def build_func_op_from_ast(
 
     功能说明:
     - 调用内部构建流程生成 `func.FuncOp`。
-    - 将 `LoweringError` 统一转换为 `AstVisitorError`。
+    - 将 `KernelCodeError` 统一转换为 `KernelCodeError`。
 
     参数说明:
     - func_ast: 已解析的函数 AST。
     - runtime_args: 运行时参数，用于推导标量类型/符号表达式。
-    - config: 构建配置（例如外部值拒绝策略）。
-
     返回说明:
     - 返回构建完成的 `func.FuncOp`。
 
     限制与异常:
-    - 语义检查或下沉失败会抛出 `AstVisitorError`。
+    - 语义检查或下沉失败会抛出 `KernelCodeError`。
 
     使用示例:
     - func_op = build_func_op_from_ast(func_ast, runtime_args=runtime_args)
@@ -1359,6 +1354,11 @@ def build_func_op_from_ast(
     """
 
     try:
-        return _build_func_op_from_ast_impl(func_ast, runtime_args=runtime_args, config=config)
-    except LoweringError as exc:
-        raise AstVisitorError(str(exc), location=exc.location) from exc
+        return _build_func_op_from_ast_impl(func_ast, runtime_args=runtime_args)
+    except KernelCodeError as exc:
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.AST,
+            exc.message(),
+            location=getattr(exc, "location", None),
+        ) from exc

@@ -1,13 +1,14 @@
-"""Common reusable contracts.
+"""Core reusable contracts.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 榕
 
 功能说明:
 - 提供 kernel_gen 内部可复用的类型、shape、dtype、错误与 verifier 辅助逻辑。
 - 该模块仅承载公共实现，不改变 dialect/operation/symbol_variable 的对外合同。
 
 API 列表:
+- `_ERROR_TEMPLATE: str`
 - `raise_verify_error(scene: str, expected: str, *, actual: str = _ERROR_ACTUAL, action: str = _ERROR_ACTION) -> None`
 - `verify_memory_type(value: Attribute, field_name: str, *, scene: str) -> NnMemoryType`
 - `verify_i64_attr(attr: IntegerAttr, field_name: str, *, scene: str) -> int`
@@ -22,14 +23,14 @@ API 列表:
 - `shape_numel(shape: SymbolShape) -> SymbolDim`
 
 使用示例:
-- from kernel_gen.common.contracts import verify_memory_type, default_stride
+- from kernel_gen.core.contracts import verify_memory_type, default_stride
 - memory_type = verify_memory_type(value, "lhs", scene="dialect.kernel verifier")
 - stride = default_stride(SymbolShape(["M", "K", "N"]))
 
 关联文件:
-- spec: spec/common/contracts.md
+- spec: spec/core/contracts.md
 - test: test/common/test_contracts.py
-- 功能实现: kernel_gen/common/contracts.py
+- 功能实现: kernel_gen/core/contracts.py
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ from xdsl.dialects.builtin import IntAttr, IntegerAttr, IntegerType, StringAttr
 from xdsl.ir import Attribute
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.common.errors import _ERROR_TEMPLATE
+_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
 
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
@@ -58,6 +59,7 @@ __all__ = [
     "verify_i64_attr_range",
     "verify_i64_attr_value",
     "verify_memory_type",
+    "_ERROR_TEMPLATE",
 ]
 
 
@@ -81,9 +83,9 @@ def raise_verify_error(
     - raise_verify_error("dialect.kernel verifier", "lhs must be nn.memory")
 
     关联文件:
-    - spec: spec/common/contracts.md
+    - spec: spec/core/contracts.md
     - test: test/common/test_contracts.py
-    - 功能实现: kernel_gen/common/contracts.py
+    - 功能实现: kernel_gen/core/contracts.py
     """
 
     raise VerifyException(
@@ -110,9 +112,9 @@ def verify_memory_type(value: Attribute, field_name: str, *, scene: str) -> "NnM
     - verify_memory_type(op.lhs.type, "lhs", scene="dialect.kernel verifier")
 
     关联文件:
-    - spec: spec/common/contracts.md
+    - spec: spec/core/contracts.md
     - test: test/common/test_contracts.py
-    - 功能实现: kernel_gen/common/contracts.py
+    - 功能实现: kernel_gen/core/contracts.py
     """
 
     from kernel_gen.dialect.nn import NnMemoryType
@@ -137,9 +139,9 @@ def verify_i64_attr(attr: IntegerAttr, field_name: str, *, scene: str) -> int:
     - axis = verify_i64_attr(axis_attr, "axis", scene="dialect.nn verifier")
 
     关联文件:
-    - spec: spec/common/contracts.md
+    - spec: spec/core/contracts.md
     - test: test/common/test_contracts.py
-    - 功能实现: kernel_gen/common/contracts.py
+    - 功能实现: kernel_gen/core/contracts.py
     """
 
     if not isinstance(attr.type, IntegerType):
@@ -172,9 +174,9 @@ def verify_i64_attr_range(
     - verify_i64_attr_range(attr, "axis", min_value=-2, max_value=1, scene="dialect.kernel verifier")
 
     关联文件:
-    - spec: spec/common/contracts.md
+    - spec: spec/core/contracts.md
     - test: test/common/test_contracts.py
-    - 功能实现: kernel_gen/common/contracts.py
+    - 功能实现: kernel_gen/core/contracts.py
     """
 
     value = verify_i64_attr(attr, field_name, scene=scene)
@@ -200,9 +202,9 @@ def verify_i64_attr_value(attr: IntegerAttr, field_name: str, *, allow_zero: boo
     - verify_i64_attr_value(attr, "kw", allow_zero=False, scene="dialect.nn verifier")
 
     关联文件:
-    - spec: spec/common/contracts.md
+    - spec: spec/core/contracts.md
     - test: test/common/test_contracts.py
-    - 功能实现: kernel_gen/common/contracts.py
+    - 功能实现: kernel_gen/core/contracts.py
     """
 
     value = verify_i64_attr(attr, field_name, scene=scene)
@@ -235,9 +237,9 @@ def verify_i64_attr_group(
     - verify_i64_attr_group([kw, sw, dw], allow_zero=False, error_phrase="kw-sw-dw must be positive", scene="dialect.nn verifier")
 
     关联文件:
-    - spec: spec/common/contracts.md
+    - spec: spec/core/contracts.md
     - test: test/common/test_contracts.py
-    - 功能实现: kernel_gen/common/contracts.py
+    - 功能实现: kernel_gen/core/contracts.py
     """
 
     values: list[int] = []
@@ -272,9 +274,9 @@ def collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
     - collect_int_dims([IntAttr(1), IntAttr(2)])
 
     关联文件:
-    - spec: spec/common/contracts.md
+    - spec: spec/core/contracts.md
     - test: test/common/test_contracts.py
-    - 功能实现: kernel_gen/common/contracts.py
+    - 功能实现: kernel_gen/core/contracts.py
     """
 
     values: list[int] = []
@@ -298,9 +300,9 @@ def build_contiguous_stride(shape: Sequence[int]) -> list[int]:
     - build_contiguous_stride([1, 3, 3, 3])
 
     关联文件:
-    - spec: spec/common/contracts.md
+    - spec: spec/core/contracts.md
     - test: test/common/test_contracts.py
-    - 功能实现: kernel_gen/common/contracts.py
+    - 功能实现: kernel_gen/core/contracts.py
     """
 
     running = 1
@@ -326,9 +328,9 @@ def dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     - dims_equal(IntAttr(2), IntAttr(2))
 
     关联文件:
-    - spec: spec/common/contracts.md
+    - spec: spec/core/contracts.md
     - test: test/common/test_contracts.py
-    - 功能实现: kernel_gen/common/contracts.py
+    - 功能实现: kernel_gen/core/contracts.py
     """
 
     if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
@@ -352,9 +354,9 @@ def public_dim_values(shape: SymbolShape) -> list[int | str]:
     - public_dim_values(SymbolShape([SymbolDim("M"), SymbolDim("K")]))
 
     关联文件:
-    - spec: spec/common/contracts.md
+    - spec: spec/core/contracts.md
     - test: test/common/test_contracts.py
-    - 功能实现: kernel_gen/common/contracts.py
+    - 功能实现: kernel_gen/core/contracts.py
     """
 
     values: list[int | str] = []
@@ -382,9 +384,9 @@ def default_stride(shape: SymbolShape) -> SymbolShape:
     - default_stride(SymbolShape(["M", "K", "N"]))
 
     关联文件:
-    - spec: spec/common/contracts.md
+    - spec: spec/core/contracts.md
     - test: test/common/test_contracts.py
-    - 功能实现: kernel_gen/common/contracts.py
+    - 功能实现: kernel_gen/core/contracts.py
     """
 
     from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -413,9 +415,9 @@ def shape_numel(shape: SymbolShape) -> SymbolDim:
     - shape_numel(SymbolShape([2, 3, 4]))
 
     关联文件:
-    - spec: spec/common/contracts.md
+    - spec: spec/core/contracts.md
     - test: test/common/test_contracts.py
-    - 功能实现: kernel_gen/common/contracts.py
+    - 功能实现: kernel_gen/core/contracts.py
     """
 
     from kernel_gen.symbol_variable.symbol_dim import SymbolDim

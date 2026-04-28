@@ -34,10 +34,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.dsl.ast import parse_function
-from kernel_gen.dsl.ast.visitor import AstVisitorError
 from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -141,7 +141,7 @@ def test_build_func_op_rejects_dma_alloc_helper_with_non_contiguous_stride() -> 
             stride=[stride1, stride2],
         )
 
-    with pytest.raises(AstVisitorError, match="dma.alloc only supports contiguous stride"):
+    with pytest.raises(KernelCodeError, match="dma.alloc only supports contiguous stride"):
         build_func_op(alloc_kernel, 2, 3, 3, 2)
 
 
@@ -161,7 +161,7 @@ def test_mixed_dtype_return_annotation_requires_operand_element_type() -> None:
     ) -> "Tensor[f16, 2, 2]":
         return lhs * rhs
 
-    with pytest.raises(AstVisitorError, match="Return type does not match annotation"):
+    with pytest.raises(KernelCodeError, match="Return type does not match annotation"):
         build_func_op(
             mul_mixed_invalid,
             _tensor_arg([2, 2], NumericType.Float32),

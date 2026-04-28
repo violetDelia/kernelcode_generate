@@ -46,7 +46,7 @@ from xdsl.pattern_rewriter import (
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaViewOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolForOp, SymbolGetDimOp, SymbolIterType, SymbolValueType
+from kernel_gen.dialect.symbol import Symbol, SymbolForOp, SymbolGetDimOp, SymbolIterType, SymbolValueType
 from kernel_gen.dialect.tuner import TunerParamOp
 from kernel_gen.passes.common import ensure_builtin_module, raise_pass_contract_error
 
@@ -699,12 +699,36 @@ class TileElewisePass(ModulePass):
 
     name = "tile-elewise"
 
+    def __init__(self: "TileElewisePass", fold: bool = True) -> None:
+        """初始化 tile-elewise pass 公共选项。
+
+        创建者: 大闸蟹
+        最后一次更改: 大闸蟹
+
+        功能说明:
+        - 记录 `fold` 开关，默认允许 pass 内 pattern walker 执行 folding。
+
+        使用示例:
+        - pass_obj = TileElewisePass()
+        - pass_obj = TileElewisePass(fold=False)
+
+        关联文件:
+        - spec: [spec/pass/tile/elewise.md](spec/pass/tile/elewise.md)
+        - test: [test/pass/tile/test_elewise.py](test/pass/tile/test_elewise.py)
+        - 功能实现: [kernel_gen/passes/tile/elewise.py](kernel_gen/passes/tile/elewise.py)
+        """
+
+        object.__setattr__(self, "fold", bool(fold))
+
     def apply(self: "TileElewisePass", ctx: Context, module: ModuleOp) -> None:
         ensure_builtin_module(module)
+        if ctx.get_optional_dialect(Symbol.name) is None:
+            ctx.load_dialect(Symbol)
         PatternRewriteWalker(
             GreedyRewritePatternApplier(
                 get_tile_elewise_pass_patterns(),
                 ctx=ctx,
+                folding_enabled=self.fold,
                 dce_enabled=False,
             ),
             walk_regions_first=True,

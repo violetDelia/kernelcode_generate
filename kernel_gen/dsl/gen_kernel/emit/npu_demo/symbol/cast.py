@@ -12,7 +12,7 @@ API 列表:
 
 使用示例:
 - from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c_op
-- stmt = emit_c_op(SymbolCastOp(src, i32), EmitCContext(config={"target": "npu_demo"}))
+- stmt = emit_c_op(SymbolCastOp(src, i32), EmitCContext())
 
 关联文件:
 - spec: [spec/dsl/gen_kernel/emit.md](../../../../../../spec/dsl/gen_kernel/emit.md)

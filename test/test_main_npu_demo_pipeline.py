@@ -56,6 +56,8 @@ REPO_ROOT = _find_repo_root(Path(__file__).resolve().parents[1])
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.config import reset_config, set_target
+
 pytestmark = pytest.mark.npu_demo
 
 
@@ -122,7 +124,10 @@ def test_main_npu_demo_pipeline_prints_host_kernel_source_sections() -> None:
     assert "[EXECUTE]" in stdout
     assert "[CHECK]" in stdout
     assert "npu_demo::launch<1, 1, 1, 0>(matmul_kernel_device" in stdout
-    assert "static void matmul_kernel_device(npu_demo::KernelContext& ctx" in stdout
+    assert "static void matmul_kernel_device(npu_demo::KernelContext& ctx" not in stdout
+    assert "static void matmul_kernel_device(" in stdout
+    assert "_cost_DMA_matmul_kernel_device" in stdout
+    assert "_cost_MAC_matmul_kernel_device" in stdout
     assert "output matches torch.matmul" in stdout
     assert "npu_demo::launch<1, 1, 1>(" not in stdout
 
@@ -150,23 +155,28 @@ def test_main_npu_demo_pipeline_helpers_split_wrapper_and_kernel_sources() -> No
     import importlib
 
     main_module = importlib.import_module("main")
-    result = main_module.dsl_run(
-        main_module.matmul_kernel,
-        (
-            __import__("torch").empty((32, 32), dtype=__import__("torch").float32),
-            __import__("torch").arange(32 * 16, dtype=__import__("torch").float32).reshape(32, 16) / 17.0,
-            (__import__("numpy").arange(16 * 32, dtype=__import__("numpy").float32).reshape(16, 32) - 11.0) / 19.0,
-        ),
-        "npu-demo-lowering",
-        main_module.EmitCContext(config={"target": "npu_demo"}),
-    )
+    set_target("npu_demo")
+    try:
+        result = main_module.dsl_run(
+            main_module.matmul_kernel,
+            (
+                __import__("torch").empty((32, 32), dtype=__import__("torch").float32),
+                __import__("torch").arange(32 * 16, dtype=__import__("torch").float32).reshape(32, 16) / 17.0,
+                (__import__("numpy").arange(16 * 32, dtype=__import__("numpy").float32).reshape(16, 32) - 11.0) / 19.0,
+            ),
+            "npu-demo-lowering",
+        )
+    finally:
+        reset_config()
     wrapper_func, body_func = main_module._select_npu_demo_source_functions(result.module)
     host_source = main_module._extract_npu_demo_function_source(result.source, wrapper_func.sym_name.data)
     kernel_source = main_module._extract_npu_demo_function_source(result.source, body_func.sym_name.data)
 
     assert wrapper_func.sym_name.data == "matmul_kernel"
     assert body_func.sym_name.data == "matmul_kernel_device"
+    assert "_cost_DMA_matmul_kernel_device" in result.source
+    assert "_cost_MAC_matmul_kernel_device" in result.source
     assert host_source.startswith("void matmul_kernel(")
     assert "npu_demo::launch<1, 1, 1, 0>(matmul_kernel_device" in host_source
     assert kernel_source.startswith("static void matmul_kernel_device(")
-    assert "static void matmul_kernel_device(npu_demo::KernelContext& ctx" in kernel_source
+    assert "npu_demo::KernelContext& ctx" not in kernel_source

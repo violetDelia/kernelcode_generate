@@ -108,7 +108,7 @@ def test_nn_lowering_matmul_inside_symbol_for() -> None:
                 lhs_tile = slice(lhs, [m0, 0], [16, 16], [1, 1], MemorySpace.TSM)
                 rhs_tile = slice(rhs, [0, n0], [16, 16], [1, 1], MemorySpace.TSM)
                 partial = matmul(lhs_tile, rhs_tile)
-                deslice(partial, out, [m0, n0], [16, 16], [1, 1])
+                deslice(out, partial, [m0, n0], [16, 16], [1, 1])
         return out
 
     func_op = build_func_op(

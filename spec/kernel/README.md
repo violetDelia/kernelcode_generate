@@ -11,8 +11,8 @@
 ## API 列表
 
 - `kernel_gen.dsl.build_func_op(fn: Callable[..., object], *runtime_args: object, globals: dict[str, object] | None = None, builtins: dict[str, object] | object | None = None) -> func.FuncOp`
-- `kernel_gen.dsl.mlir_gen.mlir_gen(fn: callable, *runtime_args, globals: dict[str, object] | None = None, builtins: dict[str, object] | object | None = None, config: dict[str, object] | None = None) -> builtin.ModuleOp`
-- `kernel_gen.dsl.gen_kernel.EmitCContext(*, target: str | None = None, config: dict[str, Any] | None = None)`
+- `kernel_gen.dsl.mlir_gen.mlir_gen(fn: callable, *runtime_args, globals: dict[str, object] | None = None, builtins: dict[str, object] | object | None = None) -> builtin.ModuleOp`
+- `kernel_gen.dsl.gen_kernel.EmitCContext()`
 - `kernel_gen.dsl.gen_kernel.gen_kernel(obj: object, ctx: EmitCContext) -> str`
 - `kernel_gen.passes.pipeline.build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> PassManager`
 - `kernel_gen.passes.SymbolLoopHoistPass()`
@@ -24,7 +24,7 @@
 - `kernel_gen.operation.dma.alloc(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)`
 - `kernel_gen.operation.dma.fill(target, value)`
 - `kernel_gen.operation.dma.slice(source, offsets, sizes, strides=None, space=None)`
-- `kernel_gen.operation.dma.deslice(source, target, offsets, sizes, strides=None)`
+- `kernel_gen.operation.dma.deslice(target, source, offsets, sizes, strides=None)`
 - `kernel_gen.operation.dma.reshape(source, shape)`
 - `kernel_gen.operation.nn.add(lhs, rhs)`
 - `kernel_gen.operation.nn.broadcast_to(source, target_shape, space)`
@@ -98,15 +98,15 @@
 - 该资产要求三段公开链路在同一现场可连续执行：
   1. `mlir_gen(matmul_kernel, ...)`
   2. `build_npu_demo_lowering_pipeline().run(module)`
-  3. `gen_kernel(module, EmitCContext(...))`
+  3. `set_target("npu_demo")` 后 `gen_kernel(module, EmitCContext())`
 - `matmul.py` 当前还显式导入：
   - `EmitCContext`
   - `SymbolLoopHoistPass`
   - `NnLoweringPass`
 - 这意味着后续实现既要保证 module 路径可运行，也要保证这些导入路径本身继续有效。
-- 当 `matmul_kernel(...)` 带 `SymbolDim` tile / shape 参数时，公开链 `mlir_gen(...) -> build_npu_demo_lowering_pipeline().run(module) -> gen_kernel(module, EmitCContext(target="npu_demo"))` 还必须保留这些 trailing symbol scalar：
+- 当 `matmul_kernel(...)` 带 `SymbolDim` tile / shape 参数时，公开链 `set_target("npu_demo") -> mlir_gen(...) -> build_npu_demo_lowering_pipeline().run(module) -> gen_kernel(module, EmitCContext())` 还必须保留这些 trailing symbol scalar：
   - wrapper 对外继续暴露 `lhs/rhs/out + trailing symbol scalar` 公开签名；
-  - device body 继续暴露 `KernelContext + lhs/rhs/out + trailing symbol scalar` 公开签名；
+  - device body 不再暴露 `KernelContext` 参数，只保留 `lhs/rhs/out + trailing symbol scalar` 公开签名；
   - `npu_demo::launch<...>(body, ...)` 必须把 trailing symbol scalar 与 memory 参数一起原样透传。
 
 ## 公开导入与非公开边界
@@ -136,10 +136,8 @@
 - helper 识别继续以 [`spec/dsl/ast/parser.md`](../dsl/ast/parser.md) 的“显式 import 绑定到真实公开 helper 对象 + 调用形态”作为真源，不允许依赖 helper Python 签名做解析分支。
 - `fill(...)` 的字符串字面量继续只允许 `"inf"` 与 `"-inf"`；`flash_attention.py` 中的 `fill(m_acc, "-inf")` 直接由这条公开口径解释，不允许后续实现改成别的字符串别名再要求资产跟着变。
 - `build_npu_demo_lowering_pipeline(...)` 继续只接受 `target=npu_demo` 这条公开 builder 路径，不扩大到 `dsl_run` 或 `execute_engine` 相关工具入口。
-- `EmitCContext` 在本专题内必须同时接受两种公开构造形态：
-  - `EmitCContext(config={"target": "npu_demo"})`
-  - `EmitCContext(target="npu_demo")`
-- 上述两种形态的公开语义必须一致；实现可以在当前文件内部把 `target=` 归一到 `config["target"]`，但不得要求改写 [`expectation/kernel/matmul.py`](/home/lfr/kernelcode_generate/expectation/kernel/matmul.py) 这份只读资产。
+- `EmitCContext` 在本专题内只接受无参构造；target 必须先通过 `kernel_gen.core.config.set_target("npu_demo")` 设置。
+- `expectation/kernel/matmul.py` 若参与本轮合同验收，应同步到 `set_target("npu_demo") + EmitCContext()` 公开链路。
 - `kernel_gen.passes.lowering.NnLoweringPass` 与 `kernel_gen.passes.SymbolLoopHoistPass` 继续作为当前专题只读资产可导入路径承接；后续若要下收或移位，必须先给这两份资产准备新的公开承接路径，再另开任务处理。
 
 ## 测试矩阵

@@ -19,7 +19,7 @@
 
 from __future__ import annotations
 
-from kernel_gen.common.errors import _ERROR_TEMPLATE
+from kernel_gen.core.contracts import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 _ERROR_ACTION = "请按接口约束传参"

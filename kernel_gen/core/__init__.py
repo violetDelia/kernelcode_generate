@@ -1,7 +1,7 @@
 """core package.
 
 创建者: OpenAI Codex
-最后一次更改: OpenAI Codex
+最后一次更改: 榕
 
 功能说明:
 - 承载 `kernel_gen` 级别的核心公共设施子模块。
@@ -15,9 +15,14 @@ API 列表:
 
 关联文件:
 - spec: [spec/core/error.md](../../spec/core/error.md)
+- spec: [spec/core/context.md](../../spec/core/context.md)
+- spec: [spec/core/contracts.md](../../spec/core/contracts.md)
 - test: [test/core/test_error.py](../../test/core/test_error.py)
+- test: [test/common/test_contracts.py](../../test/common/test_contracts.py)
 - 功能实现: [kernel_gen/core/__init__.py](../../kernel_gen/core/__init__.py)
 - 功能实现: [kernel_gen/core/error.py](../../kernel_gen/core/error.py)
+- 功能实现: [kernel_gen/core/context.py](../../kernel_gen/core/context.py)
+- 功能实现: [kernel_gen/core/contracts.py](../../kernel_gen/core/contracts.py)
 """
 
 from __future__ import annotations

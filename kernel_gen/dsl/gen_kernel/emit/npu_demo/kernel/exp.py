@@ -3,7 +3,6 @@ from __future__ import annotations
 from kernel_gen.dialect.kernel import KernelExpOp
 from kernel_gen.dialect.nn import NnMemoryType
 
-from ....errors import emit_c_error
 from ...register import emit_c_impl
 
 
@@ -25,7 +24,7 @@ def _emit_npu_demo_kernel_exp(op: KernelExpOp, ctx) -> str:
 
     out_value, input_value = _normalize_out_input_operands(op.out, op.input)
     if not isinstance(input_value.type, NnMemoryType) or not isinstance(out_value.type, NnMemoryType):
-        raise emit_c_error(ctx, op.name, "unsupported op")
+        raise ctx.emit_error(op.name, "unsupported op")
     return (
         f"{ctx.current_indent}exp<{ctx.dispatch_attr(out_value.type)}, {ctx.dispatch_type(input_value.type.element_type)}, "
         f"{ctx.dispatch_type(out_value.type.element_type)}>"

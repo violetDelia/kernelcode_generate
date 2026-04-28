@@ -35,6 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaSliceOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolIterType, SymbolValueType, SymbolYieldOp
@@ -46,7 +47,6 @@ registry_module = importlib.import_module("kernel_gen.passes.registry")
 DmaAllocInSymbolForHoistPattern = pass_module.DmaAllocInSymbolForHoistPattern
 SymbolBufferHoistPass = pass_module.SymbolBufferHoistPass
 get_symbol_buffer_hoist_patterns = pass_module.get_symbol_buffer_hoist_patterns
-PassContractError = package_module.PassContractError
 build_registered_pass = registry_module.build_registered_pass
 load_builtin_passes = registry_module.load_builtin_passes
 
@@ -181,8 +181,8 @@ def _build_deslice_module() -> ModuleOp:
     loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
     alloc = DmaAllocOp([tm.result, tn.result], scratch_type)
     deslice = DmaDesliceOp(
-        alloc.result,
         top_block.args[0],
+        alloc.result,
         [zero.result, zero.result],
         [tm.result, tn.result],
         [one.result, one.result],
@@ -428,13 +428,13 @@ def test_symbol_buffer_hoist_keeps_loop_carried_shape_inside_loop() -> None:
 # TC-SYMBOL-BUFFER-HOIST-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 功能说明: 验证非 builtin.module 输入复用共享 PassContractError 边界。
+# 功能说明: 验证非 builtin.module 输入复用共享 KernelCodeError 边界。
 # 使用示例: pytest -q test/pass/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_rejects_non_module_input
 # 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/pass/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_rejects_non_module_input() -> None:
-    with pytest.raises(PassContractError, match=r"^module must be builtin.module$"):
+    with pytest.raises(KernelCodeError, match=r"^module must be builtin.module$"):
         SymbolBufferHoistPass().run(object())
 
 
@@ -449,7 +449,7 @@ def test_symbol_buffer_hoist_rejects_non_module_input() -> None:
 def test_symbol_buffer_hoist_wraps_verify_failure_prefix() -> None:
     module = _build_invalid_verify_module()
 
-    with pytest.raises(PassContractError, match=r"^SymbolBufferHoistVerifierError:"):
+    with pytest.raises(KernelCodeError, match=r"^SymbolBufferHoistVerifierError:"):
         SymbolBufferHoistPass().run(module)
 
 

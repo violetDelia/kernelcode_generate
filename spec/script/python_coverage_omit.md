@@ -31,7 +31,6 @@
 
 | 路径 | 排除理由 | 覆盖率影响 |
 | --- | --- | --- |
-| `kernel_gen/common/__init__.py` | 仅导出 `_ERROR_TEMPLATE`，无独立公开逻辑 | 不计入 line / branch 阈值 |
 | `kernel_gen/dsl/__init__.py` | 仅汇总 DSL 公开入口 | 不计入 line / branch 阈值 |
 | `kernel_gen/dsl/ast/__init__.py` | 仅转发 AST 公开接口 | 不计入 line / branch 阈值 |
 | `kernel_gen/dsl/mlir_gen/__init__.py` | 仅汇总 mlir_gen 公开入口 | 不计入 line / branch 阈值 |
@@ -47,7 +46,7 @@
 | `kernel_gen/dsl/mlir_gen/emit/type_utils.py` | `emit_mlir(...)` 共享的类型推导内部辅助逻辑 | 不计入 line / branch 阈值 |
 | `kernel_gen/dsl/mlir_gen/emit/value.py` | `emit_mlir(...)` 共享的 value 内部辅助逻辑 | 不计入 line / branch 阈值 |
 | `kernel_gen/dsl/mlir_gen/function_builder.py` | `kernel_gen.dsl.mlir_gen` 包根公开 `build_func_op(...)` / `build_func_op_from_ast(...)` 的内部实现拆分 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/module_builder.py` | `kernel_gen.dsl.mlir_gen` 包根公开 `MlirGenModuleError(...)` / `mlir_gen(...)` 的内部实现拆分 | 不计入 line / branch 阈值 |
+| `kernel_gen/dsl/mlir_gen/module_builder.py` | `kernel_gen.dsl.mlir_gen` 包根公开 `KernelCodeError(...)` / `mlir_gen(...)` 的内部实现拆分 | 不计入 line / branch 阈值 |
 | `kernel_gen/execute_engine/__init__.py` | 仅转发执行引擎公开入口 | 不计入 line / branch 阈值 |
 | `kernel_gen/operation/__init__.py` | 仅汇总 operation 公开入口 | 不计入 line / branch 阈值 |
 | `kernel_gen/operation/nn/common.py` | `kernel_gen.operation.nn` 各公开 helper 共享的内部校验与类型辅助逻辑 | 不计入 line / branch 阈值 |

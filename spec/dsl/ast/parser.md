@@ -7,16 +7,14 @@
 
 ## API 列表
 
-- `class AstParseError(message: str, diagnostics: list[Diagnostic])`
-- `AstParseError.__init__(message: str, diagnostics: list[Diagnostic]) -> None`
-- `AstParseError.__str__() -> str`
+- `KernelCodeError(kind, ErrorModule.AST, message, diagnostics=list[Diagnostic])`
 - `parse_function_with_env(fn: object, globals_table: dict[str, object] | None = None, builtins_table: dict[str, object] | None = None, runtime_table: dict[str, object] | None = None, config: dict[str, object] | None = None) -> FunctionAST`
 - `parse_function(fn: object) -> FunctionAST`
 
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`榕`
 - `spec`：[`spec/dsl/ast/parser.md`](../../../spec/dsl/ast/parser.md)
 - `功能实现`：[`kernel_gen/dsl/ast/parser.py`](../../../kernel_gen/dsl/ast/parser.py)
 - `test`：
@@ -52,14 +50,16 @@
 - 对 `kernel_gen.operation.dma.fill`，当前公开解析入口只接受显式 import 绑定得到的 helper 调用；未导入的裸 `fill(...)` 与 `kernel_gen.operation.dma.fill(...)` 这类链式属性访问都不属于当前 AST 公开入口。
 - 当 helper 为 `fill(...)` 时，parser 对字符串字面量只接受 `"inf"` 与 `"-inf"`；其他字符串必须在解析阶段直接拒绝，不下沉到后续 lowering 再猜测含义。
 - 当 `build_func_op(...)` / `mlir_gen(...)` 提供 `runtime_args` 时，参数注解中的裸 `Memory` 与裸 `SymbolDim` 允许作为占位注解被 parser 接受；parser 不得把这两类注解直接收敛为 `Unsupported annotation`。实际 `func.func` 输入签名仍由下游 builder 基于 `runtime_args` 决定，而不是由这类占位注解直接决定。
+- Python DSL 语句级 `if` / `if else` 必须解析为 `IfAST`；条件由 `_parse_expr` 解析，then/else 分支分别解析为 `BlockAST`。分支内临时赋值只在本分支内可见，不得泄漏到 `if` 外部；分支内 `return` 当前必须报错 `Return inside if is unsupported`。
+- `if bias is not None` 这类 Python 对象存在性判断仍不属于当前 DSL if 合同，必须保持 `Unsupported if bias is not None` 失败边界。
 
 ## 公开接口
 
-### `AstParseError(message: str, diagnostics: list[Diagnostic])`
+### `KernelCodeError(kind, ErrorModule.AST, message, diagnostics=list[Diagnostic])`
 
 功能说明：
 
-- AST 解析阶段统一错误类型。
+- AST 解析阶段统一错误类型使用 `KernelCodeError`。
 - 通过 `diagnostics` 暴露稳定诊断集合。
 
 参数说明：
@@ -70,12 +70,12 @@
 使用示例：
 
 ```python
-raise AstParseError("Missing annotation", [Diagnostic("Missing annotation", None)])
+raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, "Missing annotation", diagnostics=[Diagnostic("Missing annotation", None)])
 ```
 
 注意事项：
 
-- 对外错误类型固定为 `AstParseError`；调用方不应依赖 parser 文件内私有异常。
+- 对外错误类型固定为 `KernelCodeError`；调用方不应依赖 parser 文件内私有异常。
 
 返回与限制：
 
@@ -111,7 +111,7 @@ func_ast = parse_function_with_env(
 注意事项：
 
 - `runtime_table` 仅用于补充缺失注解推断与局部解析环境，不改变 AST 节点语义。
-- `config` 的公开键由实现与集成测试约束；当前已使用的键包括 `reject_external_values` 与 `allow_python_callee_calls`。
+- `config` 不再承载公开行为键；外部值拒绝与 Python callee 调用默认开启，不再提供公开开关。
 - `build_func_op(...)` / `mlir_gen(...)` 的包根公开合同不再透出 `globals` / `builtins`；若上层实现仍需要显式环境控制，只能在 parser 或 mlir_gen 目录内消费本入口，不得把它转成新的工具层公开接口。
 - 文件内其他 `_...` helper 属于实现细节，不构成公开 API，也不得被跨文件实现或测试直连。
 - dma/nn/arch helper 的识别规则以 import 绑定关系与 parser 自身白名单为准；不得通过改 helper 函数签名、额外包装 callable 或伪造同名对象来影响解析结果。
@@ -119,7 +119,7 @@ func_ast = parse_function_with_env(
 返回与限制：
 
 - 返回 `FunctionAST`。
-- 失败时抛 `AstParseError`。
+- 失败时抛 `KernelCodeError`。
 
 ### `parse_function(fn: object)`
 
@@ -169,7 +169,7 @@ func_ast = parse_function(add)
   - AST-P-002：解析 `for range(...)` 语法并生成 `ForAST`。（`test_parse_function_for_loop`）
   - AST-P-003：解析 helper 调用入口并生成相应 AST。（`test_parse_function_helper_call`）
   - AST-P-004：显式环境入口允许通过 `runtime_table` 推断缺失注解。（`test_parse_function_with_env_infers_runtime_annotation`）
-  - AST-P-005：缺失注解时返回带位置信息的 `AstParseError`。（`test_parse_function_reports_diagnostics`）
+  - AST-P-005：缺失注解时返回带位置信息的 `KernelCodeError`。（`test_parse_function_reports_diagnostics`）
   - AST-P-006：解析 helper 非法参数形态并报稳定错误。（`test_parse_function_rejects_invalid_helper_arity`）
   - AST-P-007：`for range(..., step=0)` 在解析阶段直接报错。（`test_parse_function_step_zero_rejected`）
   - AST-P-008：facade 不导出 parser 私有 helper。（`test_ast_facade_does_not_export_parser_private_helpers`）
@@ -177,3 +177,4 @@ func_ast = parse_function(add)
   - AST-P-010：`fill` 的字符串字面量只允许 `"inf"` 与 `"-inf"`，其他字符串在解析阶段直接拒绝。（`test_parse_function_rejects_invalid_fill_string_literal`）
   - AST-P-011：未导入的裸 `fill(...)` 与 `kernel_gen.operation.dma.fill(...)` 链式属性访问不属于当前 AST 公开入口。（`test_parse_function_rejects_unimported_dma_helpers`、`test_parse_function_rejects_fill_helper_call_via_attribute_chain`）
   - AST-P-012：当 `build_func_op(...)` / `mlir_gen(...)` 传入 `runtime_args` 时，裸 `Memory` / `SymbolDim` 参数注解必须作为占位注解被 parser 接受，不得报 `Unsupported annotation`。（下游待补测试映射：`test_parse_function_accepts_runtime_driven_memory_placeholder_annotation`、`test_parse_function_accepts_runtime_driven_symbol_placeholder_annotation`）
+  - AST-P-013：解析语句级 `if/else` 并生成 `IfAST`，保留比较条件与两个分支语句块。（`test_parse_function_if_else`）

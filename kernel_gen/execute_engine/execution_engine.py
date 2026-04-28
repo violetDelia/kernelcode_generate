@@ -20,7 +20,6 @@ API 列表:
 - `FAILURE_FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED: str`
 - `FAILURE_PHRASES: frozenset[str]`
 - `TargetName = Literal["cpu", "npu_demo"]`
-- `class ExecutionEngineError(failure_phrase: str, detail: str = "")`
 - `class CompileRequest(source: str, target: str, function: str, entry_point: str = "kg_execute_entry", compiler: str | None = None, compiler_flags: tuple[str, ...] = ("-std=c++17",), link_flags: tuple[str, ...] = ())`
 - `class ExecuteRequest(args: tuple[RuntimeArg, ...], entry_point: str | None = None, capture_function_output: bool = False, stream: object | None = None)`
 - `RuntimeArg = Any`
@@ -85,6 +84,7 @@ from kernel_gen.execute_engine.entry_shim_builder import (
     needs_entry_shim,
 )
 from kernel_gen.execute_engine.target_registry import target_includes
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 FAILURE_TARGET_HEADER_MISMATCH = "target_header_mismatch"
 FAILURE_SOURCE_EMPTY_OR_INVALID = "source_empty_or_invalid"
@@ -107,6 +107,42 @@ FAILURE_PHRASES: frozenset[str] = frozenset(
 )
 
 TargetName: TypeAlias = Literal["cpu", "npu_demo"]
+
+
+def _execution_engine_error(failure_phrase: str, detail: str = "") -> KernelCodeError:
+    """构造执行引擎统一错误对象。
+
+    创建者: OpenAI Codex
+    最后一次更改: OpenAI Codex
+
+    功能说明:
+    - 用 `KernelCodeError` 承载 execute_engine 的固定 `failure_phrase`。
+    - 保留 `failure_phrase` metadata，兼容现有调用方按短语分类处理失败。
+
+    使用示例:
+    - err = _execution_engine_error(FAILURE_COMPILE_FAILED, "compiler is empty")
+    - assert err.module() == "execute_engine"
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_contract.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    if failure_phrase not in FAILURE_PHRASES:
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.EXECUTE_ENGINE,
+            f"unknown failure phrase: {failure_phrase}",
+        )
+    message = failure_phrase if not detail else f"{failure_phrase}: {detail}"
+    return KernelCodeError(
+        ErrorKind.CONTRACT,
+        ErrorModule.EXECUTE_ENGINE,
+        message,
+        failure_phrase=failure_phrase,
+        detail=detail,
+    )
 
 
 def _source_include_family(source: str) -> str | None:
@@ -220,36 +256,13 @@ def _resolve_compiler_name(compiler: str | None) -> str:
     if compiler is None:
         return default_compiler()
     if not isinstance(compiler, str) or not compiler.strip():
-        raise ExecutionEngineError(
+        raise _execution_engine_error(
             FAILURE_COMPILE_FAILED,
             "compiler is empty",
         )
     return compiler
 
 
-class ExecutionEngineError(RuntimeError):
-    """对外可机械匹配的执行引擎错误。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 用固定 `failure_phrase` 承载失败原因，确保测试稳定匹配。
-
-    使用示例:
-    - raise ExecutionEngineError(FAILURE_SOURCE_EMPTY_OR_INVALID, "source is empty")
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine.md
-    - test: test/execute_engine/test_execute_engine_contract.py
-    - 功能实现: kernel_gen/execute_engine/execution_engine.py
-    """
-
-    def __init__(self, failure_phrase: str, detail: str = "") -> None:
-        if failure_phrase not in FAILURE_PHRASES:
-            raise ValueError(f"unknown failure_phrase: {failure_phrase}")
-        super().__init__(f"{failure_phrase}: {detail}" if detail else failure_phrase)
-        self.failure_phrase = failure_phrase
 
 
 @dataclass(frozen=True)
@@ -631,14 +644,14 @@ def _build_arg_slots(args: tuple[RuntimeArg, ...]) -> tuple[KgArgSlot, ...]:
             continue
         if _is_memory_runtime_arg(arg):
             if not _is_contiguous_memory(arg):
-                raise ExecutionEngineError(
+                raise _execution_engine_error(
                     FAILURE_RUNTIME_THROW_OR_ABORT,
                     f"memory arg is not contiguous at position {idx}",
                 )
             dtype = _normalize_dtype(getattr(arg, "dtype", None))
             shape = _normalize_shape(arg)
             if dtype is None or shape is None:
-                raise ExecutionEngineError(
+                raise _execution_engine_error(
                     FAILURE_RUNTIME_THROW_OR_ABORT,
                     f"memory arg missing dtype/shape at position {idx}",
                 )
@@ -653,7 +666,7 @@ def _build_arg_slots(args: tuple[RuntimeArg, ...]) -> tuple[KgArgSlot, ...]:
                 )
             )
             continue
-        raise ExecutionEngineError(
+        raise _execution_engine_error(
             FAILURE_RUNTIME_THROW_OR_ABORT,
             f"unsupported RuntimeArg at position {idx}",
         )
@@ -711,7 +724,7 @@ def _runtime_data_pointer(value: object) -> int:
         return int(data_ptr)
     if _is_numpy_array(value) and hasattr(value, "ctypes"):
         return int(value.ctypes.data)
-    raise ExecutionEngineError(
+    raise _execution_engine_error(
         FAILURE_RUNTIME_THROW_OR_ABORT,
         "memory arg data pointer is unavailable",
     )
@@ -756,13 +769,13 @@ def _marshal_slots_for_abi(
     for slot in ordered_slots:
         if slot.kind == "memory":
             if slot.shape is None:
-                raise ExecutionEngineError(
+                raise _execution_engine_error(
                     FAILURE_RUNTIME_THROW_OR_ABORT,
                     f"memory shape missing at position {slot.position}",
                 )
             stride = slot.stride if slot.stride is not None else _contiguous_stride(slot.shape)
             if len(stride) != len(slot.shape):
-                raise ExecutionEngineError(
+                raise _execution_engine_error(
                     FAILURE_RUNTIME_THROW_OR_ABORT,
                     f"memory stride rank mismatch at position {slot.position}",
                 )
@@ -809,7 +822,7 @@ def _marshal_slots_for_abi(
                 )
             )
             continue
-        raise ExecutionEngineError(
+        raise _execution_engine_error(
             FAILURE_RUNTIME_THROW_OR_ABORT,
             f"unsupported slot kind at position {slot.position}",
         )
@@ -840,13 +853,13 @@ def _load_entry_point(soname_path: str, entry_point: str) -> Callable[[tuple[KgA
     """
 
     if not isinstance(soname_path, str) or not soname_path:
-        raise ExecutionEngineError(
+        raise _execution_engine_error(
             FAILURE_RUNTIME_THROW_OR_ABORT,
             "soname_path is empty",
         )
     soname = Path(soname_path)
     if not soname.is_file():
-        raise ExecutionEngineError(
+        raise _execution_engine_error(
             FAILURE_RUNTIME_THROW_OR_ABORT,
             "soname_path is missing",
         )
@@ -860,14 +873,14 @@ def _load_entry_point(soname_path: str, entry_point: str) -> Callable[[tuple[KgA
     try:
         library = ctypes.CDLL(str(soname))
     except OSError as exc:
-        raise ExecutionEngineError(
+        raise _execution_engine_error(
             FAILURE_SYMBOL_RESOLVE_FAILED,
             f"unable to load shared object: {exc}",
         ) from exc
     try:
         symbol = getattr(library, entry_point)
     except AttributeError as exc:
-        raise ExecutionEngineError(
+        raise _execution_engine_error(
             FAILURE_SYMBOL_RESOLVE_FAILED,
             f"entry_point '{entry_point}' is missing",
         ) from exc
@@ -995,23 +1008,23 @@ class CompiledKernel:
             stream = request.stream
 
         if stream is not None:
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_STREAM_NOT_SUPPORTED,
                 "ExecuteRequest.stream is not supported in P0",
             )
         if capture_function_output:
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED,
                 "ExecuteRequest.capture_function_output is not supported in P0",
             )
 
         if args is None:
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_RUNTIME_THROW_OR_ABORT,
                 "args must be provided",
             )
         if not isinstance(args, tuple):
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_RUNTIME_THROW_OR_ABORT,
                 "args must be a tuple",
             )
@@ -1019,12 +1032,12 @@ class CompiledKernel:
 
         resolved_entry = self.entry_point if entry_point is None else entry_point
         if not isinstance(resolved_entry, str) or not resolved_entry.strip():
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_SYMBOL_RESOLVE_FAILED,
                 "entry_point is empty",
             )
         if resolved_entry != self.entry_point:
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_SYMBOL_RESOLVE_FAILED,
                 "entry_point mismatch",
             )
@@ -1032,7 +1045,7 @@ class CompiledKernel:
         invoke_entry = _load_entry_point(self.soname_path, resolved_entry)
         status_code = invoke_entry(ordered_slots)
         if status_code != 0:
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_RUNTIME_THROW_OR_ABORT,
                 f"entry_point returned non-zero ({status_code})",
             )
@@ -1103,45 +1116,45 @@ class ExecutionEngine:
             link_flags = self.link_flags
 
         if target not in ("cpu", "npu_demo"):
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_TARGET_HEADER_MISMATCH,
                 f"unsupported target: {target}",
             )
         if source is None or not isinstance(source, str) or not source.strip():
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_SOURCE_EMPTY_OR_INVALID,
                 "source is empty",
             )
         include_family = _source_include_family(source)
         if include_family == "mixed":
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_TARGET_HEADER_MISMATCH,
                 "source includes mixed target include families",
             )
         if include_family is not None and include_family != target:
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_TARGET_HEADER_MISMATCH,
                 f"source include family mismatch: source={include_family}, target={target}",
             )
         if "#error" in source:
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_COMPILE_FAILED,
                 "source contains #error directive",
             )
         if function is None or not isinstance(function, str) or not function.strip():
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_SYMBOL_RESOLVE_FAILED,
                 "function is empty",
             )
         if not isinstance(entry_point, str) or not entry_point.strip():
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_SYMBOL_RESOLVE_FAILED,
                 "entry_point is empty",
             )
 
         target_headers = target_includes(target)
         if not target_headers:
-            raise ExecutionEngineError(
+            raise _execution_engine_error(
                 FAILURE_TARGET_HEADER_MISMATCH,
                 f"unsupported target: {target}",
             )
@@ -1167,12 +1180,12 @@ class ExecutionEngine:
         )
         try:
             if artifacts.return_code != 0:
-                raise ExecutionEngineError(
+                raise _execution_engine_error(
                     FAILURE_COMPILE_FAILED,
                     f"compiler returned non-zero ({artifacts.return_code})",
                 )
             if not Path(artifacts.soname_path).exists():
-                raise ExecutionEngineError(
+                raise _execution_engine_error(
                     FAILURE_COMPILE_FAILED,
                     "compile output is missing",
                 )
@@ -1210,5 +1223,4 @@ __all__ = [
     "ExecuteRequest",
     "ExecuteResult",
     "ExecutionEngine",
-    "ExecutionEngineError",
 ]

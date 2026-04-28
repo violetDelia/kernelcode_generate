@@ -5,7 +5,6 @@ from xdsl.dialects.builtin import IntAttr, StringAttr
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.symbol import SymbolValueType
 
-from ....errors import emit_c_error
 from ...register import emit_c_impl
 
 
@@ -27,7 +26,7 @@ def _format_alloc_layout(ctx, values, subject: str, *, symbol_bindings: dict[str
                     mapped = symbol_bindings.get(unwrapped_expr) or symbol_bindings.get(unwrapped_expr.replace(" ", ""))
             formatted.append(mapped or layout_expr)
             continue
-        raise emit_c_error(ctx, subject, "unsupported alloc layout value")
+        raise ctx.emit_error(subject, "unsupported alloc layout value")
     return formatted
 
 
@@ -54,7 +53,7 @@ def _emit_npu_demo_dma_alloc(op: DmaAllocOp, ctx) -> str:
                     symbol_bindings[expr_key] = value_name
     stride_values = _format_alloc_layout(ctx, result_type.stride.data, f"{op.name} stride", symbol_bindings=symbol_bindings)
     if not hasattr(result_type, "element_type"):
-        raise emit_c_error(ctx, op.name, "result must be nn.memory")
+        raise ctx.emit_error(op.name, "result must be nn.memory")
     space_expr = ctx.dispatch_attr(result_type)
     element_type = ctx.dispatch_type(result_type.element_type)
     shape_text = ", ".join(shape_values)

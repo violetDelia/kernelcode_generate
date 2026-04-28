@@ -30,7 +30,21 @@ helper 清单:
 
 from __future__ import annotations
 
-from xdsl.dialects.builtin import ArrayAttr, BFloat16Type, Float16Type, Float64Type, IntAttr, StringAttr, f32, i1, i8, i32, i64
+from xdsl.dialects.builtin import (
+    ArrayAttr,
+    BFloat16Type,
+    Float16Type,
+    Float64Type,
+    IntAttr,
+    IntegerType,
+    Signedness,
+    StringAttr,
+    f32,
+    i1,
+    i8,
+    i32,
+    i64,
+)
 from xdsl.ir import Attribute
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
@@ -39,8 +53,7 @@ from kernel_gen.symbol_variable.memory import MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
-from .context import EmitContext
-from .core import emit_mlir
+from .core import EmitContext, emit_mlir
 
 
 def _dim_to_attr(value: int | str | object) -> IntAttr | StringAttr:
@@ -54,13 +67,29 @@ def _dim_to_attr(value: int | str | object) -> IntAttr | StringAttr:
 
 
 def _dtype_to_xdsl(dtype: NumericType) -> Attribute:
-    """将公开 `NumericType` 映射到稳定 xDSL element_type。"""
+    """将公开 `NumericType` 映射到稳定 xDSL element_type。
+
+    创建者: jcc你莫辜负
+    最后一次更改: 榕
+
+    功能说明:
+    - 覆盖 `NumericType` 当前公开的 bool、signed/unsigned integer 与 floating dtype。
+    - unsigned integer 必须保留 unsigned signedness，不能静默退化为 signless integer。
+
+    使用示例:
+    - `_dtype_to_xdsl(NumericType.Uint16)`
+    """
 
     mapping = {
         NumericType.Bool: i1,
         NumericType.Int8: i8,
+        NumericType.Int16: IntegerType(16),
         NumericType.Int32: i32,
         NumericType.Int64: i64,
+        NumericType.Uint8: IntegerType(8, signedness=Signedness.UNSIGNED),
+        NumericType.Uint16: IntegerType(16, signedness=Signedness.UNSIGNED),
+        NumericType.Uint32: IntegerType(32, signedness=Signedness.UNSIGNED),
+        NumericType.Uint64: IntegerType(64, signedness=Signedness.UNSIGNED),
         NumericType.BFloat16: BFloat16Type(),
         NumericType.Float16: Float16Type(),
         NumericType.Float32: f32,

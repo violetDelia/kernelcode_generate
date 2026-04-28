@@ -1,7 +1,7 @@
 """Type definitions for symbol variable.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 榕
 
 功能说明:
 - 提供数值类型与格式枚举及其公开导出边界。
@@ -9,6 +9,11 @@
 API 列表:
 - `class NumericType(Enum)`
 - `class Farmat(Enum)`
+- `FLOAT_DTYPES`
+- `INT_DTYPES`
+- `ARITHMETIC_DTYPE_ORDER`
+- `ARITHMETIC_DTYPE_RANK`
+- `NN_FLOAT_DTYPES`
 - `is_integer_dtype(dtype: NumericType) -> bool`
 - `is_float_dtype(dtype: NumericType) -> bool`
 
@@ -29,8 +34,19 @@ API 列表:
 from __future__ import annotations
 
 from enum import Enum
+from typing import Final
 
-__all__ = ["NumericType", "Farmat", "is_integer_dtype", "is_float_dtype"]
+__all__ = [
+    "NumericType",
+    "Farmat",
+    "FLOAT_DTYPES",
+    "INT_DTYPES",
+    "ARITHMETIC_DTYPE_ORDER",
+    "ARITHMETIC_DTYPE_RANK",
+    "NN_FLOAT_DTYPES",
+    "is_integer_dtype",
+    "is_float_dtype",
+]
 
 
 class NumericType(Enum):
@@ -90,7 +106,7 @@ class Farmat(Enum):
     CLast = "CLast"
 
 
-_INTEGER_DTYPES = {
+INT_DTYPES: Final[set[NumericType]] = {
     NumericType.Int8,
     NumericType.Int16,
     NumericType.Int32,
@@ -101,7 +117,7 @@ _INTEGER_DTYPES = {
     NumericType.Uint64,
 }
 
-_FLOAT_DTYPES = {
+FLOAT_DTYPES: Final[set[NumericType]] = {
     NumericType.Float16,
     NumericType.BFloat16,
     NumericType.Float32,
@@ -109,11 +125,33 @@ _FLOAT_DTYPES = {
 }
 
 
+ARITHMETIC_DTYPE_ORDER: Final[tuple[NumericType, ...]] = (
+    NumericType.Int8,
+    NumericType.Uint8,
+    NumericType.Int16,
+    NumericType.Uint16,
+    NumericType.Int32,
+    NumericType.Uint32,
+    NumericType.Int64,
+    NumericType.Uint64,
+    NumericType.Float16,
+    NumericType.BFloat16,
+    NumericType.Float32,
+    NumericType.Float64,
+)
+
+ARITHMETIC_DTYPE_RANK: Final[dict[NumericType, int]] = {
+    dtype: index for index, dtype in enumerate(ARITHMETIC_DTYPE_ORDER)
+}
+
+NN_FLOAT_DTYPES: Final[set[NumericType]] = FLOAT_DTYPES
+
+
 def is_integer_dtype(dtype: NumericType) -> bool:
     """判断 dtype 是否属于公开整数 family。
 
     创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 只接受 `NumericType` 输入。
@@ -129,14 +167,14 @@ def is_integer_dtype(dtype: NumericType) -> bool:
     """
     if not isinstance(dtype, NumericType):
         raise TypeError("dtype must be NumericType")
-    return dtype in _INTEGER_DTYPES
+    return dtype in INT_DTYPES
 
 
 def is_float_dtype(dtype: NumericType) -> bool:
     """判断 dtype 是否属于公开浮点 family。
 
     创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 只接受 `NumericType` 输入。
@@ -152,4 +190,4 @@ def is_float_dtype(dtype: NumericType) -> bool:
     """
     if not isinstance(dtype, NumericType):
         raise TypeError("dtype must be NumericType")
-    return dtype in _FLOAT_DTYPES
+    return dtype in FLOAT_DTYPES

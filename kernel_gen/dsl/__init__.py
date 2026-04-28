@@ -20,12 +20,11 @@ API 列表:
 - `TensorAST(name: str, memory: object, location: SourceLocation | None = None)`
 - `VarAST(name: str, location: SourceLocation | None = None)`
 - `AstVisitor(config: dict[str, object] | None = None)`
-- `AstVisitorError(message: str, location: SourceLocation | None = None)`
 - `EmitContext(builder: Block, symbols: dict[str, object], types: dict[int, object], config: dict[str, object] | None = None)`
 - `parse_function(fn: object) -> FunctionAST`
 - `emit_mlir(node: object, ctx: EmitContext) -> object`
 - `build_func_op(fn: Callable[..., object], *runtime_args: object, globals: dict[str, object] | None = None, builtins: dict[str, object] | object | None = None) -> func.FuncOp`
-- `build_func_op_from_ast(func_ast: FunctionAST, runtime_args: tuple[object, ...] | list[object] | None = None, config: dict[str, object] | None = None) -> func.FuncOp`
+- `build_func_op_from_ast(func_ast: FunctionAST, runtime_args: tuple[object, ...] | list[object] | None = None) -> func.FuncOp`
 
 helper 清单:
 - 无
@@ -56,13 +55,12 @@ from .ast import (
     VarAST,
     parse_function,
 )
-from .ast.visitor import AstVisitor, AstVisitorError
+from .ast.visitor import AstVisitor
 from .mlir_gen.emit import EmitContext, emit_mlir
 from .mlir_gen import build_func_op, build_func_op_from_ast
 
 __all__ = [
     "AstVisitor",
-    "AstVisitorError",
     "BinaryExprAST",
     "BlockAST",
     "CompareExprAST",

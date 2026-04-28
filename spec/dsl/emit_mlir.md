@@ -20,7 +20,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`大闸蟹`
+- 最后一次更改：`榕`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - `功能实现`：
   - [`kernel_gen/dsl/mlir_gen/emit/core.py`](../../kernel_gen/dsl/mlir_gen/emit/core.py)
@@ -28,7 +28,6 @@
   - [`kernel_gen/dsl/mlir_gen/emit/call_arch.py`](../../kernel_gen/dsl/mlir_gen/emit/call_arch.py)
   - [`kernel_gen/dsl/mlir_gen/emit/call_dma.py`](../../kernel_gen/dsl/mlir_gen/emit/call_dma.py)
   - [`kernel_gen/dsl/mlir_gen/emit/call_symbol.py`](../../kernel_gen/dsl/mlir_gen/emit/call_symbol.py)
-  - [`kernel_gen/dsl/mlir_gen/emit/context.py`](../../kernel_gen/dsl/mlir_gen/emit/context.py)
   - [`kernel_gen/dsl/mlir_gen/emit/dispatch.py`](../../kernel_gen/dsl/mlir_gen/emit/dispatch.py)
   - [`kernel_gen/dsl/mlir_gen/emit/control_flow.py`](../../kernel_gen/dsl/mlir_gen/emit/control_flow.py)
   - [`kernel_gen/dsl/mlir_gen/emit/value.py`](../../kernel_gen/dsl/mlir_gen/emit/value.py)
@@ -100,7 +99,9 @@
 - 不生成 MLIR 文本；文本输出由上游调用方负责。
 - 发射阶段仅消费 AST 与上下文，不向 AST 注入 `target`/`hardware` 字段；相关信息只能通过 `EmitContext` 或外部上下文传入。
 - 当 `ForAST` 来自 `LoopRange(start, end, step)` 且边界与循环变量保持 symbol 整数语义时，必须 lowering 为 `symbol.for`，不得回退为 `scf.for`；其循环块参数 `it` 必须为 `!symbol.iter<...>`。
+- `ForAST` 的 `start/end/step` 允许使用 `ConstAST`、标量参数、循环变量引用、`TensorAxisAccessAST` 以及由 `+/-/*///` 组成的符号算术表达式；符号算术必须 lowering 为对应 `symbol.add/sub/mul/div/floordiv` 链，并继续作为 `symbol.for` 边界。
 - 在上述 `LoopRange` 场景中，循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand 必须直接复用 symbol 语义 value，不得插入 `arith.index_cast`；其中 `start/end/step` 保持 `!symbol.int<"expr">`，循环变量 `it` 可直接以 `!symbol.iter<...>` 参与 DMA operand；若 `it` 退化为 `index`、普通整数、浮点类型或其他非 symbol 迭代类型，应视为 lowering 违规。
+- 当 `IfAST` 来自 Python DSL 语句级 `if` / `if else` 时，必须 lowering 为无结果 `scf.if`；条件必须 lowering 为标量 `i1`，then/else 分支分别 lowering 到对应 region。无 `else` 时不得制造伪 else region；有 `else` 时必须保留 `else` region。当前不支持 `scf.if` 返回值语义，分支内赋值不得向 `if` 外泄漏。
 - 当 DSL AST 表达 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用时，`emit_mlir` 必须按对应 memory 语义 lowering；其中 `flatten` 公开上视为一维 `reshape` 语义，不要求生成独立 dialect op。
 - 当 DSL AST 表达 `img2col1d(...)` 或 `img2col2d(...)` helper 调用时，`emit_mlir` 必须直接 lowering 为 `nn.img2col1d` 或 `nn.img2col2d`；不得在 emit 层引入 `kernel_dialect`、`nn_lowering` 或 `cpu::img2col2d` 相关语义。
 - 当 DSL AST 表达 `matmul(lhs, rhs, memoryspace=...)` helper 调用时，`emit_mlir` 必须直接 lowering 为 `nn.matmul`；若左右操作数 `element_type` 不一致必须报错 `matmul element_type must match`，不得插入 `dma.cast`。
@@ -110,7 +111,7 @@
 - 当 `CompareExprAST(op="ne")` 来自 `lhs != rhs` 入口且两侧为 `nn.memory` 时，必须 lowering 为 `nn.ne`；允许按隐式 broadcast 规则插入 `nn.broadcast`，若无法广播必须报错 `Implicit broadcast dimension mismatch`，若 element type 不一致必须报错 `Binary op operands must have the same element_type`。
 - 当 `BinaryExprAST(op="mul")` 来自 `lhs * rhs` 或 `nn.mul(lhs, rhs)` 入口且两侧为 `nn.memory` 时，必须 lowering 为 `nn.mul`；若 shape 不一致但可 broadcast，允许按需插入 `nn.broadcast`，若不可 broadcast 必须报错 `Implicit broadcast dimension mismatch`。当两侧 `element_type` 不一致但 `space` 一致时，必须按二元算术 dtype promotion（`i32 < f16 < f32`）决议目标 element_type，并仅对非目标侧插入 `dma.cast` 再发射 `nn.mul`；若 `space` 不一致必须报错 `Binary op operands must have the same space`。
 - `free` 必须作为语句型 helper 处理，不产生新的 SSA 结果，并在 emit 阶段生成单个 `dma.free`。
-- `_memory_to_nn_type(...)` / `_nn_memory_type_to_memory(...)` 的 dtype 映射必须覆盖 `NumericType.Int64 <-> i64`，避免 tensor memory 在 `i64` 场景下断链。
+- `_memory_to_nn_type(...)` / `_nn_memory_type_to_memory(...)` 的 dtype 映射必须覆盖 `Bool <-> i1`、`Int8/Int16/Int32/Int64 <-> i8/i16/i32/i64`、`Uint8/Uint16/Uint32/Uint64 <-> ui8/ui16/ui32/ui64`、`BFloat16/Float16/Float32/Float64 <-> bf16/f16/f32/f64`，避免 tensor memory 在 signedness 或宽度不同的场景下断链。
 - `ArchQueryAST(query_name="get_block_id")` 必须 lowering 为单个 `arch.get_block_id`，并保持结果类型为 `!symbol.int<"block_id">`。
 - `ArchQueryAST(query_name="get_block_num")` 必须 lowering 为单个 `arch.get_block_num`，并保持结果类型为 `!symbol.int<"block_num">`。
 - `ArchQueryAST(query_name="get_subthread_id")` 必须 lowering 为单个 `arch.get_subthread_id`，并保持结果类型为 `!symbol.int<"subthread_id">`。
@@ -197,7 +198,7 @@ value = emit_mlir(expr_ast, ctx)
   | 签名输入 | `TensorAST` / `ScalarArgAST` | `signature.py` / `function_builder.py` | 决定当前已支持的 `func.func` 输入签名与 block args；emit 只读取既有 SSA 绑定。 |
   | AST-only 签名节点 | `PtrArgAST` | AST / parser | 当前不进入 builder/signature 支持面；若流入 `mlir_gen`，必须按实现现状报 `Unsupported input type`。 |
   | 值与索引 | `ConstAST` / `VarAST` | `value.py` + core emit | 生成 builtin literal / `symbol.const`，或从 cache / `ctx.symbols` 复用已有 SSA value。 |
-  | symbol family | `ForAST` / `TensorAxisAccessAST` / `SymbolToFloatAST` | `control_flow.py` / `call_symbol.py` + core emit | 生成 `symbol.for`、`symbol.get_dim`、`symbol.get_stride`、`symbol.to_float`。 |
+  | symbol/control family | `ForAST` / `IfAST` / `TensorAxisAccessAST` / `SymbolToFloatAST` | `control_flow.py` / `call_symbol.py` + core emit | 生成 `symbol.for`、`scf.if`、`symbol.get_dim`、`symbol.get_stride`、`symbol.to_float`。 |
   | DMA family | `LoadAST` / `StoreAST` / `DmaAllocAST` / `DmaCopyAST` / `DmaCastAST` / `DmaViewAST` / `DmaReshapeAST` / `DmaFlattenAST` / `DmaFreeAST` | `call_dma.py` + core emit | 生成 `dma.load/store/slice/deslice/alloc/copy/cast/view/reshape/free`。 |
   | NN family | `BinaryExprAST` / `CompareExprAST` / `NnBroadcastAST` / `NnBroadcastToAST` / `NnTransposeAST` / `NnUnaryAST` / `NnReduceAST` / `NnSoftmaxAST` / `Img2ColAST` / `MatmulAST` / `FCAST` / `ConvAST` | core emit + `type_utils.py` / `shape_utils.py` | 生成 `nn.*` 或 raw `nn + dma` 组合；具体 helper 不再使用旧 `CallAST(...)` 口径。 |
   | arch family | `ArchQueryAST` / `ArchGetDynamicMemoryAST` / `ArchLaunchKernelAST` | `call_arch.py` + core emit | 生成 `arch.get_*` / `arch.get_dynamic_memory` / `arch.launch`。 |
@@ -233,7 +234,7 @@ value = emit_mlir(expr_ast, ctx)
   | `flatten(...)` | `dma.reshape`（一维） | memory value | `source` 非 `nn.memory` 或非连续布局时必须报错。 |
   | `load(...)` | `dma.load` | memory value | `source` 非 `nn.memory` 或索引/space 参数非法时必须报错。 |
   | `slice(...)` | `dma.alloc + dma.slice` | memory value（返回 alloc 结果） | `source` 非 `nn.memory` 或索引/space 参数非法时必须报错。 |
-  | `store(...)` | `dma.store` | 语句 | `source/target` 非 `nn.memory` 或索引参数非法时必须报错。 |
+  | `store(...)` | `dma.store` | 语句 | `target/source` 非 `nn.memory` 或索引参数非法时必须报错。 |
   | `deslice(...)` | `dma.deslice` | 语句 | 与 `store(...)` 相同。 |
   | `free(...)` | `dma.free` | 语句 | 见下方固定诊断约定。 |
 
@@ -351,7 +352,7 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-007：非 unit stride 抛出可定位错误。（`test_load_ast_lowering_raises_lowering_error`）
   - EMIT-008：索引 rank mismatch 抛出可定位错误。（`test_load_ast_index_rank_mismatch_reports_location`）
   - EMIT-009：`StoreAST` 输入非 memory 抛出错误。（`test_store_ast_lowering_raises_lowering_error`）
-  - EMIT-010：`ForAST` 在 `LoopRange` 场景下 lowering 为 `symbol.for`，其中 `start/end/step` 保持 `!symbol.int<"...">`、循环块参数 `it` 保持 `!symbol.iter<...>`，循环体内相关 DMA operand 直接复用这些 symbol value，不生成 `arith.index_cast`。（`test_emit_mlir_symbolic_for_loop_avoids_index_cast`）
+  - EMIT-010：`ForAST` 在 `LoopRange` 场景下 lowering 为 `symbol.for`，其中 `start/end/step` 保持 `!symbol.int<"...">`、循环块参数 `it` 保持 `!symbol.iter<...>`，循环体内相关 DMA operand 直接复用这些 symbol value，不生成 `arith.index_cast`；`end` 等边界为 `((H + pad) // stride) + 1` 这类符号算术表达式时必须生成 `symbol.add/sub/mul/div/floordiv` 链。（`test_emit_mlir_symbolic_for_loop_avoids_index_cast`、`test_emit_mlir_lowers_symbolic_loop_bound_expression`）
   - EMIT-011：循环变量表初始化与非法配置报错路径。（`test_emit_mlir_loop_vars_validation`）
   - EMIT-011B：`EmitContext` 校验 `config.target` 命名约束的错误路径。（`test_emit_context_rejects_invalid_target_name`）
   - EMIT-011C：`EmitContext` 校验 `config.hardware` 字段约束的错误路径。（`test_emit_context_rejects_invalid_hardware_field`）

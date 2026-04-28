@@ -1,7 +1,7 @@
 """DSL AST parser tests.
 
 创建者: OpenAI
-最后一次更改: 金铲铲大作战
+最后一次更改: 榕
 
 功能说明:
 - 覆盖 `parse_function(...)` 的基础解析与诊断路径。
@@ -35,8 +35,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dsl.ast import ConstAST, ForAST, FunctionAST, NnUnaryAST, ScalarArgAST, TensorAST, parse_function
-from kernel_gen.dsl.ast.parser import AstParseError, parse_function_with_env
+from kernel_gen.core.error import KernelCodeError
+from kernel_gen.dsl.ast import CompareExprAST, ConstAST, ForAST, FunctionAST, IfAST, NnUnaryAST, ScalarArgAST, TensorAST, parse_function
+from kernel_gen.dsl.ast.parser import parse_function_with_env
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
@@ -80,6 +81,28 @@ def test_parse_function_for_loop() -> None:
     assert step_node.value == 1
 
 
+def test_parse_function_if_else() -> None:
+    """解析 if/else 语法并生成 IfAST。"""
+
+    def if_kernel(target: "Tensor[f32, 4]", source: "Tensor[f32, 2]", lhs: int, rhs: int):
+        from kernel_gen.operation.dma import store
+
+        if lhs < rhs:
+            store(target, source, [0], [2], [1])
+        else:
+            store(target, source, [1], [2], [1])
+
+    func_ast = parse_function(if_kernel)
+    if_nodes = [node for node in func_ast.body.statements if isinstance(node, IfAST)]
+
+    assert if_nodes, "expected IfAST in function body"
+    assert isinstance(if_nodes[0].condition, CompareExprAST)
+    assert if_nodes[0].condition.op == "lt"
+    assert len(if_nodes[0].true_body.statements) == 1
+    assert if_nodes[0].false_body is not None
+    assert len(if_nodes[0].false_body.statements) == 1
+
+
 def test_parse_function_helper_call() -> None:
     """解析 helper 调用入口并生成相应 AST。"""
 
@@ -114,12 +137,12 @@ def test_parse_function_with_env_infers_runtime_annotation() -> None:
 
 
 def test_parse_function_reports_diagnostics() -> None:
-    """缺失注解时返回带位置信息的 AstParseError。"""
+    """缺失注解时返回带位置信息的 KernelCodeError。"""
 
     def kernel(x):
         return x
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(kernel)
 
     assert exc_info.value.diagnostics
@@ -134,7 +157,7 @@ def test_parse_function_rejects_invalid_helper_arity() -> None:
 
         return get_block_id(1)
 
-    with pytest.raises(AstParseError, match="Unsupported get_block_id arity"):
+    with pytest.raises(KernelCodeError, match="Unsupported get_block_id arity"):
         parse_function(kernel)
 
 
@@ -146,7 +169,7 @@ def test_parse_function_step_zero_rejected() -> None:
             x = x
         return x
 
-    with pytest.raises(AstParseError, match="for range step must not be zero"):
+    with pytest.raises(KernelCodeError, match="for range step must not be zero"):
         parse_function(invalid_step_kernel)
 
 
@@ -212,7 +235,7 @@ def test_parse_function_rejects_unsupported_formatted_tensor_annotations(
     def kernel(x: annotation):
         return x
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(kernel)
 
     assert exc_info.value.diagnostics
@@ -225,7 +248,7 @@ def test_parse_function_rejects_direct_tensor_annotation_expression_element() ->
     def kernel(x: Tensor[f32, ROWS + 1]):
         return x
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(kernel)
 
     assert exc_info.value.diagnostics
@@ -254,7 +277,7 @@ def test_parse_function_rejects_unsupported_union_annotation() -> None:
     def kernel(x: int | float):
         return x
 
-    with pytest.raises(AstParseError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         parse_function(kernel)
 
     assert exc_info.value.diagnostics

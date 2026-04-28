@@ -56,7 +56,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from kernel_gen.common.contracts import (
+from kernel_gen.core.contracts import (
     build_contiguous_stride as _common_build_contiguous_stride,
     collect_int_dims as _common_collect_int_dims,
     dims_equal as _common_dims_equal,
@@ -65,7 +65,7 @@ from kernel_gen.common.contracts import (
     verify_i64_attr_value as _common_verify_i64_attr_value,
     verify_memory_type as _common_verify_memory_type,
 )
-from kernel_gen.common.errors import _ERROR_TEMPLATE
+from kernel_gen.core.contracts import _ERROR_TEMPLATE
 from xdsl.dialects.builtin import (
     ArrayAttr,
     BFloat16Type,
@@ -97,7 +97,7 @@ _VALID_SPACES = {"global", "shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.nn verifier"
-_DIM_EXPR_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_$.]*|\d+|[()+*-]")
+_DIM_EXPR_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_$.]*|\d+|//|[()+*-]")
 
 
 def _raise_verify_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
@@ -121,8 +121,8 @@ def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
 
     功能说明:
     - 支持非负整数、`?` 与符号标识符。
-    - 允许 `+` / `-` / `*` / `()` 组成的维度表达式，并按原文本保留。
-    - 当前只承接 `xdsl` 公开 parser token 接口可稳定消费的文本范围，不承诺 `/`、`//` 原文 round-trip。
+    - 允许 `+` / `-` / `*` / `//` / `()` 组成的维度表达式，并按原文本保留。
+    - 当前只承接 `xdsl` 公开 parser token 接口可稳定消费的文本范围，不承诺 `/` 原文 round-trip。
 
     使用示例:
     - _parse_dim_list(parser)
@@ -163,7 +163,7 @@ def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
             expr = raw_text.strip()
             if not expr:
                 parser.raise_error("Expected dimension symbol.")
-            _consume_dim_expr_tokens(parser, expr)
+            _consume_raw_dim_expr(parser, expr, end_pos)
             if expr.isdecimal():
                 dims.append(IntAttr(int(expr)))
             else:
@@ -176,19 +176,20 @@ def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
     return ArrayAttr(dims)
 
 
-def _consume_dim_expr_tokens(parser: AttrParser, expr: str) -> None:
-    """按公开 parser 接口消费维度表达式的 token 序列。
+def _consume_raw_dim_expr(parser: AttrParser, expr: str, end_pos: int) -> None:
+    """校验并消费维度表达式的原始文本片段。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 榕
 
     功能说明:
-    - 仅使用公开 `AttrParser` token 接口消费 `identifier/integer/operator/paren`。
-    - 当前表达式 token 范围为 `+` / `-` / `*` / `()`；不消费 `/`、`//`。
-    - 避免依赖 `parser._resume_from(...)` 这类外部非公开能力。
+    - 先校验标识符、整数、`+`、`-`、`*`、`//` 与括号组成的表达式文本。
+    - 再把 parser 推进到当前维度片段结尾。
+    - `//` 在 MLIR lexer 中是注释起始，无法通过普通 token 消费；这里必须按
+      `nn.memory` 自定义类型 parser 的原始片段边界推进。
 
     使用示例:
-    - _consume_dim_expr_tokens(parser, "M + 1")
+    - _consume_raw_dim_expr(parser, "M // 2", end_pos)
 
     关联文件:
     - spec: spec/dialect/nn.md
@@ -201,18 +202,7 @@ def _consume_dim_expr_tokens(parser: AttrParser, expr: str) -> None:
     if not tokens or "".join(tokens) != compact_expr:
         parser.raise_error("Expected dimension symbol.")
 
-    for token in tokens:
-        if token.isdecimal():
-            parsed = parser.parse_optional_integer(allow_boolean=False, allow_negative=False)
-            if parsed is None or str(parsed) != token:
-                parser.raise_error("Expected integer literal in dimension expression.")
-            continue
-        if token in {"(", ")", "+", "-", "*"}:
-            parser.parse_characters(token, "Expected dimension symbol.")
-            continue
-        parsed_identifier = parser.parse_optional_identifier()
-        if parsed_identifier != token:
-            parser.raise_error("Expected identifier in dimension expression.")
+    parser._resume_from(end_pos)
 
 
 def _print_dim_list(printer: Printer, dims: ArrayAttr[Attribute]) -> None:
@@ -879,13 +869,14 @@ def _verify_transpose_layout(
     result_type: NnMemoryType,
     perm_values: Sequence[int],
 ) -> None:
-    """校验 nn.transpose 的 shape/stride 是否按 perm 重排。
+    """校验 nn.transpose 的 shape 与物化结果 stride。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 大闸蟹
 
     功能说明:
-    - 按 perm 重排 input shape/stride，并与 result 对齐校验。
+    - 按 perm 重排 input shape，并与 result shape 对齐校验。
+    - result stride 必须是 result shape 的默认连续 stride。
 
     使用示例:
     - _verify_transpose_layout(input_type, result_type, [1, 0])
@@ -900,10 +891,62 @@ def _verify_transpose_layout(
         if not _dims_equal(expected_dim, actual_dim):
             _raise_verify_error("nn.transpose result shape must match permuted input")
 
-    expected_stride = [input_type.stride.data[index] for index in perm_values]
+    expected_stride = _default_contiguous_stride(result_type.shape)
     for expected_dim, actual_dim in zip(expected_stride, result_type.stride.data, strict=True):
         if not _dims_equal(expected_dim, actual_dim):
-            _raise_verify_error("nn.transpose result stride must match permuted input")
+            _raise_verify_error("nn.transpose result stride must be contiguous")
+
+
+def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
+    """按默认连续布局生成行主序 stride。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 静态维度返回 `IntAttr` 乘积。
+    - 符号维度返回无空格 `*` 连接的乘法表达式。
+    - `?` 维度会把更高维 stride 退化为 `?`。
+
+    使用示例:
+    - _default_contiguous_stride(ArrayAttr([IntAttr(2), IntAttr(4)]))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    stride: list[Attribute] = []
+    running: int | str | None = 1
+    for dim in reversed(shape.data):
+        if running is None:
+            stride.append(StringAttr("?"))
+        elif isinstance(running, int):
+            stride.append(IntAttr(running))
+        else:
+            stride.append(StringAttr(running))
+        if running is None:
+            continue
+        if isinstance(dim, IntAttr):
+            if dim.data == 1:
+                continue
+            if isinstance(running, int):
+                running *= dim.data
+            else:
+                running = f"{dim.data}*{running}"
+            continue
+        if isinstance(dim, StringAttr):
+            if dim.data == "?":
+                running = None
+            elif running == 1:
+                running = dim.data
+            else:
+                running = f"{dim.data}*{running}"
+            continue
+        running = None
+    stride.reverse()
+    return stride
 
 
 def _normalize_i64_attr(value: int | IntegerAttr | IntAttr, field_name: str) -> IntegerAttr:

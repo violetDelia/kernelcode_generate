@@ -20,6 +20,9 @@ API 列表:
 """
 
 from __future__ import annotations
+from typing import TYPE_CHECKING
+
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import ArrayAttr, IntegerAttr, IntAttr, StringAttr
@@ -29,16 +32,11 @@ from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.dsl.ast import BinaryExprAST, ConstAST, ScalarArgAST, SourceLocation, VarAST
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-from .context import EmitContext
 from .value import emit_index_operand
 
+if TYPE_CHECKING:
+    from . import EmitContext
 
-class LoweringError(ValueError):
-    """当前文件内使用的 shape/stride 失败错误。"""
-
-    def __init__(self, message: str, location: SourceLocation | None = None) -> None:
-        super().__init__(message)
-        self.location = location
 
 
 def _loop_vars(ctx: EmitContext) -> dict[str, object]:
@@ -48,7 +46,7 @@ def _loop_vars(ctx: EmitContext) -> dict[str, object]:
         ctx.config = {}
     loop_vars = ctx.config.setdefault("loop_vars", {})
     if not isinstance(loop_vars, dict):
-        raise LoweringError("loop_vars must be a dict", location=None)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "loop_vars must be a dict", location=None)
     return loop_vars
 
 
@@ -59,7 +57,7 @@ def _normalize_index_value(value: int | str | SymbolDim, location: SourceLocatio
         value = value.get_value()
     if isinstance(value, (int, str)):
         return value
-    raise LoweringError("Unsupported index expression", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
 
 
 def _apply_symbolic_index_binary_op(
@@ -79,7 +77,7 @@ def _apply_symbolic_index_binary_op(
     if op == "div":
         if isinstance(lhs_value, int) and isinstance(rhs_value, int):
             if rhs_value == 0:
-                raise LoweringError("Unsupported index expression", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
             return lhs_value / rhs_value
         if isinstance(lhs_value, int):
             lhs_value = SymbolDim(lhs_value)
@@ -87,12 +85,12 @@ def _apply_symbolic_index_binary_op(
     if op == "floordiv":
         if isinstance(lhs_value, int) and isinstance(rhs_value, int):
             if rhs_value == 0:
-                raise LoweringError("Unsupported index expression", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
             return lhs_value // rhs_value
         if isinstance(lhs_value, int):
             lhs_value = SymbolDim(lhs_value)
         return lhs_value // rhs_value
-    raise LoweringError("Unsupported index expression", location=location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=location)
 
 
 def resolve_index_expr(expr: object, ctx: EmitContext) -> int | str:
@@ -123,19 +121,19 @@ def resolve_index_expr(expr: object, ctx: EmitContext) -> int | str:
     if isinstance(expr, ConstAST):
         if isinstance(expr.value, (int, str)):
             return _normalize_index_value(SymbolDim(expr.value) if isinstance(expr.value, str) else expr.value, expr.location)
-        raise LoweringError("Index must be int or str", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index must be int or str", location=expr.location)
     if isinstance(expr, ScalarArgAST):
         return expr.name
     if isinstance(expr, VarAST):
         loop_vars = _loop_vars(ctx)
         if expr.name not in loop_vars:
-            raise LoweringError("Unknown loop variable", location=expr.location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unknown loop variable", location=expr.location)
         value = loop_vars[expr.name]
         if isinstance(value, SymbolDim):
             return _normalize_index_value(value, expr.location)
         if isinstance(value, (int, str)):
             return value
-        raise LoweringError("Unsupported index expression", location=expr.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=expr.location)
     if isinstance(expr, BinaryExprAST):
         lhs = resolve_index_expr(expr.lhs, ctx)
         rhs = resolve_index_expr(expr.rhs, ctx)
@@ -149,7 +147,7 @@ def resolve_index_expr(expr: object, ctx: EmitContext) -> int | str:
         return expr
     if isinstance(expr, str):
         return _normalize_index_value(SymbolDim(expr), None)
-    raise LoweringError("Unsupported index expression", location=getattr(expr, "location", None))
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported index expression", location=getattr(expr, "location", None))
 
 
 def build_index_attrs(
@@ -190,7 +188,7 @@ def build_index_attrs(
         values = [default_value for _ in range(rank)]
     elif isinstance(value, (list, tuple)):
         if len(value) != rank:
-            raise LoweringError("Index rank mismatch", location=location or getattr(value, "location", None))
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index rank mismatch", location=location or getattr(value, "location", None))
         values = list(value)
     else:
         values = [value for _ in range(rank)]
@@ -235,7 +233,7 @@ def build_index_operands_from_layout(
         if isinstance(dim, StringAttr):
             values.append(dim.data)
             continue
-        raise LoweringError("Unsupported layout attribute", location=location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported layout attribute", location=location)
     return [emit_index_operand(item, ctx) for item in values]
 
 
@@ -275,13 +273,13 @@ def build_stride_attrs(
     for entry in stride:
         if isinstance(entry.type, SymbolValueType):
             if entry.type.get_value() != 1:
-                raise LoweringError("Only unit stride is supported", location=location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Only unit stride is supported", location=location)
             continue
         owner = entry.owner
         if not isinstance(owner, arith.ConstantOp) or not isinstance(owner.value, IntegerAttr):
-            raise LoweringError("Only unit stride is supported", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Only unit stride is supported", location=location)
         if owner.value.value.data != 1:
-            raise LoweringError("Only unit stride is supported", location=location)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Only unit stride is supported", location=location)
     return stride
 
 

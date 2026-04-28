@@ -37,8 +37,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.context import build_default_context
-from kernel_gen.passes import PassContractError
+from kernel_gen.core.error import KernelCodeError
+from kernel_gen.core.context import build_default_context
 from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
 
 
@@ -172,7 +172,7 @@ def test_outline_device_kernel_lowering_compat_import_matches_rehome_entry() -> 
 # 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
 def test_outline_device_kernel_non_module_input_raises_stable_error() -> None:
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"^module must be builtin\.module$",
     ):
         OutlineDeviceKernelPass().run(object())
@@ -341,7 +341,7 @@ builtin.module {
     )
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=(
             r"^function kernel must define "
             r"launch_block, launch_thread, and launch_subthread together$"
@@ -375,7 +375,7 @@ builtin.module {
     )
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"^function kernel launch_thread must be > 0$",
     ):
         OutlineDeviceKernelPass().run(module)
@@ -406,7 +406,7 @@ builtin.module {
     )
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"^function kernel shared_memory_size must be int-like attribute$",
     ):
         OutlineDeviceKernelPass().run(module)
@@ -437,7 +437,7 @@ builtin.module {
     )
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"^function kernel shared_memory_size must be >= 0$",
     ):
         OutlineDeviceKernelPass().run(module)
@@ -469,7 +469,7 @@ builtin.module {
     )
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"^function kernel must have zero results$",
     ):
         OutlineDeviceKernelPass().run(module)
@@ -503,7 +503,7 @@ builtin.module {
     )
 
     with pytest.raises(
-        PassContractError,
+        KernelCodeError,
         match=r"^outlined device function 'kernel_device' already exists$",
     ):
         OutlineDeviceKernelPass().run(module)

@@ -8,15 +8,15 @@
 
 ## API 列表
 
-- `MlirGenModuleError(reason: str)`
+- `KernelCodeError(kind, ErrorModule.MLIR_GEN, message, **metadata)`
 - `build_func_op(fn: Callable[..., object], *runtime_args: object, globals: dict[str, object] | None = None, builtins: dict[str, object] | object | None = None) -> func.FuncOp`
-- `build_func_op_from_ast(func_ast: FunctionAST, runtime_args: tuple[object, ...] | list[object] | None = None, config: dict[str, object] | None = None) -> func.FuncOp`
-- `mlir_gen(fn: Callable[..., object], *runtime_args: object, globals: dict[str, object] | None = None, builtins: dict[str, object] | object | None = None, config: dict[str, object] | None = None) -> ModuleOp`
+- `build_func_op_from_ast(func_ast: FunctionAST, runtime_args: tuple[object, ...] | list[object] | None = None) -> func.FuncOp`
+- `mlir_gen(fn: Callable[..., object], *runtime_args: object, globals: dict[str, object] | None = None, builtins: dict[str, object] | object | None = None) -> ModuleOp`
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`榕`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen/__init__.py`](../../kernel_gen/dsl/mlir_gen/__init__.py)
 - `test`：
@@ -44,7 +44,7 @@
 
 ## 限制与边界
 
-- `kernel_gen.dsl.mlir_gen` package-root 当前只公开 `MlirGenModuleError`、`build_func_op(...)`、`build_func_op_from_ast(...)`、`mlir_gen(...)`；不得把下划线 helper、`emit.core` 私有能力或 `kernel_gen.dsl.gen_kernel` 的 `EmitCContext/emit_c/gen_kernel` 系列重导出当成本模块公开合同。
+- `kernel_gen.dsl.mlir_gen` package-root 当前只公开 `build_func_op(...)`、`build_func_op_from_ast(...)`、`mlir_gen(...)`；失败统一使用 `KernelCodeError(ErrorModule.MLIR_GEN, ...)`。不得把下划线 helper、`emit.core` 私有能力或 `kernel_gen.dsl.gen_kernel` 的 `EmitCContext/emit_c/gen_kernel` 系列重导出当成本模块公开合同。
 - `build_func_op(...)` / `build_func_op_from_ast(...)` 只生成 `func.func`，不负责组装 `builtin.module`；`mlir_gen(...)` 负责组装 `builtin.module`。
 - 不负责 MLIR 文本打印或后端代码生成。
 - `mlir_gen(...)` 只返回 in-memory `builtin.module`；与磁盘 `.mlir` 文件做归一化比较的规则由 [`spec/tools/mlir_gen_compare.md`](../../spec/tools/mlir_gen_compare.md) 定义，本模块不读取文件、不做文本比较。
@@ -61,15 +61,18 @@
 - 当运行时参数为 `SymbolDim("s")` 这类 symbol 标量时，对应的 `func.func` 输入必须 lowering 为 `!symbol.int<"s">`；若为常量 symbol，例如 `SymbolDim(1)`，则必须 lowering 为 `!symbol.int<"1">`。
 - 当运行时参数是 Python `int` 且函数场景属于 symbol 整型标量运算时，对应的 `func.func` 输入必须 lowering 为携带具体整数值的 `SymbolValueType`，不得退回 `i32`、`index` 或其他 builtin 标量类型；若整数值为负数，对外字符串表示必须直接表现为十进制负数字面量，例如 `symbol.int<-7>`。
 - 只要 `FunctionAST.has_explicit_return == True`，即使没有返回注解且 `FunctionAST.outputs == []`，`build_func_op(...)` / `build_func_op_from_ast(...)` 也必须根据最后一条显式 `return expr` 的 lowering 结果生成单结果 `func.func` 与 `func.return`；不得退回零结果。
-- 当 `FunctionAST.has_explicit_return == False` 且 `FunctionAST.outputs == []` 时，若函数体最后停在值表达式上、必须依赖“最后一个值”才能猜出函数输出，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须抛出 `AstVisitorError`，错误消息包含 `Function return requires explicit return syntax or annotation`；不得靠最后一个值表达式猜函数输出，也不得静默生成零结果 `func.func`。
+- 当 `FunctionAST.has_explicit_return == False` 且 `FunctionAST.outputs == []` 时，若函数体最后停在值表达式上、必须依赖“最后一个值”才能猜出函数输出，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须抛出 `KernelCodeError`，错误消息包含 `Function return requires explicit return syntax or annotation`；不得靠最后一个值表达式猜函数输出，也不得静默生成零结果 `func.func`。
 - 参数注解只允许作为解析/局部校验信息；当 `runtime_args` 表示的实际输入类型与参数注解不一致时，`func.func inputs`、函数体内由输入推导出的结果类型，以及 `func.func outputs` 都必须跟随 `runtime_args`，不得跟随参数注解变化。
 - 当 `build_func_op(...)` / `mlir_gen(...)` 提供 `runtime_args` 时，参数注解中的裸 `Memory` 与裸 `SymbolDim` 允许作为占位注解存在；只要 `runtime_args` 的数量与位置绑定形参一致，builder 必须接受这类占位注解并继续基于 `runtime_args` 推导 `func.func` 输入签名，不得在解析阶段回退为 `Unsupported annotation`。
 - 当函数体仅包含 `for` 循环且没有 `return` 时，输出 `func.func` 允许零返回值。
+- 当函数体仅包含 `if` / `if else` 分支且没有 `return` 时，输出 `func.func` 允许零返回值；分支 lowering 必须生成语句级无结果 `scf.if`，不得引入 `scf.if` 结果。
+- `if` 条件表达式 lowering 后必须是 `i1`；纯 symbol compare 条件必须通过 `symbol.eq/ne/lt/le/gt/ge` 生成 `i1`，不得把 symbol 整数本身当作条件。
+- `if` 无 `else` 时必须生成无 else region 的 `scf.if`；有 `else` 时必须保留 else region。分支内允许使用父作用域 value，分支内新赋值不得泄漏到 `if` 之后。
 - 当 `ForAST` 来源于 `LoopRange(start, end, step)` 且循环边界保持 symbol 整数语义时，lowering 后必须生成 `symbol.for`，不得退回 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - `LoopRange` 场景中的循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand，必须直接保持 `!symbol.int<"expr">` 语义传递，不得额外生成 `arith.index_cast`。
 - 对于纯 symbol 标量算术函数（仅符号标量入参/返回且返回为整型标量），函数签名中的输入与输出必须统一使用 `!symbol.int<"expr">`，不得降级为 `i32`、`index` 或其他 builtin 标量类型。
 - 对于纯 symbol 标量 compare family（`==` / `!=` / `<` / `<=` / `>` / `>=`）函数，函数签名中的输入必须保持 `!symbol.int<"expr">`，返回类型必须统一为 `i1`，不得退回 `!symbol.int<"expr">` 或其他 builtin 标量类型。
-- memory 路径的比较表达式（`eq/ne/lt/le/gt/ge`）必须复用逐元素隐式 broadcast 规则，且 `lhs/rhs` 的 `element_type`/`space` 必须一致；当隐式 broadcast 失败或类型不一致时，`build_func_op(...)` 必须抛出 `AstVisitorError` 并保留位置（例如 `Implicit broadcast dimension mismatch`、`Binary op operands must have the same element_type`、`Binary op operands must have the same space`）。当函数体以 `return lhs != rhs` 承载 tensor 比较语义时，必须复用 `CompareExprAST(op=\"ne\")` lowering 链路生成 `nn.ne`，且结果 element type 为 `i1`。
+- memory 路径的比较表达式（`eq/ne/lt/le/gt/ge`）必须复用逐元素隐式 broadcast 规则，且 `lhs/rhs` 的 `element_type`/`space` 必须一致；当隐式 broadcast 失败或类型不一致时，`build_func_op(...)` 必须抛出 `KernelCodeError` 并保留位置（例如 `Implicit broadcast dimension mismatch`、`Binary op operands must have the same element_type`、`Binary op operands must have the same space`）。当函数体以 `return lhs != rhs` 承载 tensor 比较语义时，必须复用 `CompareExprAST(op=\"ne\")` lowering 链路生成 `nn.ne`，且结果 element type 为 `i1`。
 - `build_func_op(...)` / `build_func_op_from_ast(...)` 经过的 unary/binary/compare 三条 `nn` elementwise 路径，长期规则归属必须统一落在 [`kernel_gen/dsl/mlir_gen/emit/call_nn.py`](../../kernel_gen/dsl/mlir_gen/emit/call_nn.py) 及其所属 `kernel_gen.dsl.mlir_gen.emit` 子系统，不得再维护第二份 elementwise 专用规则。
 - 当函数体以 `return lhs * rhs` 或 `return nn.mul(lhs, rhs)` 承载 tensor 乘法语义时，必须复用 `BinaryExprAST(op="mul")` lowering 链路生成 `nn.mul`；该链路允许 implicit broadcast，若 shape 不可 broadcast 必须报错 `Implicit broadcast dimension mismatch`。当两侧 `element_type` 不一致但 `space` 一致时，必须按二元算术 dtype promotion（`i32 < f16 < f32`）选择目标 element_type，并通过 `dma.cast` 将非目标侧对齐后再执行 `nn.mul`；若 `space` 不一致必须报错 `Binary op operands must have the same space`。
 - Tensor 返回注解放宽仅适用于“二元算术 mixed dtype”场景：仅当 `return` 表达式是 tensor 二元算术且两操作数 `element_type` 不一致时，允许返回注解与最终 lowering 结果在 `element_type` 上暂不一致；且注解 `element_type` 必须是左右操作数 `element_type` 之一，否则必须报错 `Return type does not match annotation`。
@@ -132,13 +135,13 @@ func_op = build_func_op(only_symbol, s)
 
 - 解析失败或发射失败必须抛出可定位的错误。
 - `globals` / `builtins` 只用于补充源码解析环境，不能改变函数签名推导行为，也不能替代 `runtime_args`。
-- `build_func_op` 不接收 `config`；如需 `config`，应改用 `build_func_op_from_ast(...)`。
+- `build_func_op` 不接收公开 `config`；公开行为开关统一通过 `kernel_gen.core.config` 设置。
 - `runtime_args` 的个数必须与函数形参数量一致。
 - `build_func_op` 仅保证可位置绑定形参按位置顺序接收 `runtime_args`。
 - 若 `fn` 没有可位置绑定形参，则允许以零个 `runtime_args` 调用；函数结果类型仍必须遵守本文件的统一返回装配规则，即由显式 `return` lowering 结果决定，或在显式 `-> None` / 语句型零返回函数场景下保持零结果，不能靠最后一个值表达式猜输出。
 - 若函数没有返回注解但存在显式 `return expr`，则 `func.func outputs` 与 `func.return` operand 类型必须跟随该 `return expr` 的 lowering 结果，不得因为 `FunctionAST.outputs == []` 而退回零结果。
-- 若函数没有返回注解、也没有显式 `return`，但函数体最后停在值表达式上，则必须抛出 `AstVisitorError`，错误消息包含 `Function return requires explicit return syntax or annotation`；不得靠最后一个值表达式猜函数输出。
-- 张量类运行时参数应按其对应 spec lowering 为项目内的 memory type；当前 tensor dtype lowering 必须覆盖 `NumericType.Int64 -> i64`，不得在 `i64` 场景下静默退回其他 builtin 整型。
+- 若函数没有返回注解、也没有显式 `return`，但函数体最后停在值表达式上，则必须抛出 `KernelCodeError`，错误消息包含 `Function return requires explicit return syntax or annotation`；不得靠最后一个值表达式猜函数输出。
+- 张量类运行时参数应按其对应 spec lowering 为项目内的 memory type；当前 tensor dtype lowering 必须覆盖 `NumericType.Bool -> i1`、`Int8/Int16/Int32/Int64 -> i8/i16/i32/i64`、`Uint8/Uint16/Uint32/Uint64 -> ui8/ui16/ui32/ui64`、`BFloat16/Float16/Float32/Float64 -> bf16/f16/f32/f64`，不得在 signed/unsigned 或宽度不同的场景下静默退回其他 builtin 类型。
 - `SymbolDim("s")` 这类运行时参数必须 lowering 为 `!symbol.int<"s">`；`SymbolDim(1)` 这类常量 symbol 必须 lowering 为 `!symbol.int<"1">`。
 - 当 `runtime_args` 为普通 Python `int` 且函数场景属于整型标量运算时，输入参数必须 lowering 为携带该整数值的 `SymbolValueType`，而不是 builtin 整数类型；负数实参的对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量形式。
 - 允许 `for` 循环内包含 `dma.slice`/`dma.deslice` 相关语义；当循环来自 `LoopRange` 且边界为 symbol 整数时，必须保留 `symbol.for` 结构，且迭代变量 `it` 不能退化为 `index`、`i32`、浮点或其他非 `SymbolValueType`。
@@ -174,7 +177,7 @@ func_op = build_func_op(only_symbol, s)
 - 返回 `func.func` op。
 - 不返回 module。
 
-### `build_func_op_from_ast(func_ast, runtime_args=None, config=None)`
+### `build_func_op_from_ast(func_ast, runtime_args=None)`
 
 功能说明：
 
@@ -186,8 +189,6 @@ func_op = build_func_op(only_symbol, s)
 
 - `func_ast` (`FunctionAST`)：函数 AST。
 - `runtime_args` (`tuple[object, ...] | list[object] | None`)：目标函数实际传入的运行时参数；若提供，则顺序必须与 `func_ast.inputs` 一致，并用于驱动 `func.func` 输入签名的 lowering。
-- `config` (`dict[str, object] | None`)：可选的 visitor / lowering 配置，会透传给 `AstVisitor(config=...)` 与 `EmitContext(..., config=...)`，但不得改变 `runtime_args` 驱动签名的公开契约。
-
 使用示例：
 
 ```python
@@ -195,19 +196,14 @@ func_ast = parse_function(add)
 func_op = build_func_op_from_ast(func_ast, [A, B])
 ```
 
-```python
-func_ast = parse_function(loop_body)
-func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars": {"i": "outer"}})
-```
-
 注意事项：
 
 - 输入 AST 必须满足 `ast.md` 的结构约束。
 - `runtime_args` 省略时，输入签名按 AST 注解 lowering；提供时，必须与 `func_ast.inputs` 一一对应，并以实际运行时参数语义驱动签名 lowering。
-- `config` 只用于 visitor / lowering 配置透传，不得替代 `runtime_args`，也不得改变由 `runtime_args` 决定的输入签名。
+- `build_func_op_from_ast(...)` 不接受公开 `config` 参数；构建行为开关只能来自 `kernel_gen.core.config`，单次内部状态只能由实现内部维护。
 - `func_ast.inputs` 可以为空；若提供 `runtime_args`，长度必须与 `func_ast.inputs` 一致。
 - 当 `func_ast.has_explicit_return == True` 且 `func_ast.outputs == []` 时，`build_func_op_from_ast(...)` 仍必须生成单结果 `func.func`；结果类型与 `func.return` operand 类型都必须由最后一条显式 `return expr` 的 lowering 结果决定。
-- 当 `func_ast.has_explicit_return == False` 且 `func_ast.outputs == []` 时，若函数体最后停在值表达式上、必须依赖末尾值表达式才能推断输出，`build_func_op_from_ast(...)` 必须抛出 `AstVisitorError`，错误消息包含 `Function return requires explicit return syntax or annotation`；不得猜测函数输出类型。
+- 当 `func_ast.has_explicit_return == False` 且 `func_ast.outputs == []` 时，若函数体最后停在值表达式上、必须依赖末尾值表达式才能推断输出，`build_func_op_from_ast(...)` 必须抛出 `KernelCodeError`，错误消息包含 `Function return requires explicit return syntax or annotation`；不得猜测函数输出类型。
 - 若 AST 输入包含未支持的节点类型、未支持的标量类型，或函数既不属于纯 symbol 标量函数又缺少 tensor 输入，必须报错。
 - 若 `runtime_args` 中存在 `SymbolDim("s")` 这类 symbol 标量，对应输入必须 lowering 为 `!symbol.int<"s">`。
 - 若 AST 仅包含符号标量输入/输出，则生成的 `func.func` 签名必须保持 `!symbol.int<"expr">` 输入与返回，不得改写为 builtin 标量类型。
@@ -222,7 +218,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 
 - 返回 `func.func` op。
 
-### `mlir_gen(fn, *runtime_args, globals=None, builtins=None, config=None)`
+### `mlir_gen(fn, *runtime_args, globals=None, builtins=None)`
 
 功能说明：
 
@@ -237,7 +233,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 - `runtime_args` (`tuple[object, ...]`)：根函数的运行时参数，仅用于根函数签名推导。
 - `globals` (`dict[str, object] | None`)：解析环境补充表，语义与 `build_func_op(...)` 一致。
 - `builtins` (`dict[str, object] | object | None`)：内建名称补充表，语义与 `build_func_op(...)` 一致。
-- `config` (`dict[str, object] | None`)：可选配置；会透传给 visitor / lowering，但不得改变 module 组装顺序与 callee 收集边界。
+- 外部值拒绝与 Python callee 调用默认开启，不再提供公开开关；`mlir_gen(...)` 不接受公开 `config` 字典。
 
 使用示例：
 
@@ -264,7 +260,6 @@ from kernel_gen.tools.mlir_gen_compare import mlir_gen_compare
 ok = mlir_gen_compare(
     fn=main,
     runtime_args=[Memory([4], NumericType.Int32)],
-    config=None,
     mlir_file="main_expected.mlir",
 )
 assert ok is True
@@ -276,9 +271,9 @@ assert ok is True
 - 对以 [expectation/kernel/flash_attention.py](/home/lfr/kernelcode_generate/expectation/kernel/flash_attention.py) 与 [expectation/kernel/matmul.py](/home/lfr/kernelcode_generate/expectation/kernel/matmul.py) 为代表的只读 kernel 合同资产，根函数参数允许写成裸 `Memory` / 裸 `SymbolDim` 占位注解；module 级签名推导仍只允许基于 `runtime_args + AST`，不得要求这些资产补成完整 Tensor 注解文本后才能通过前端入口。
 - 当 DSL 函数体在 `for` 循环内重绑定 lowerable memory/helper 表达式时，这些绑定只在当前循环解析作用域内生效；循环外后续语句不得再通过宏展开捕获已退场的内层 induction 变量。
 - callee 的 `func.func` 签名必须由其 call-site operand 类型推导；callee 不要求也不接受额外的 `runtime_args`。
-- 同一个 callee 若在多个 call-site 下推导出不一致签名，必须失败，错误消息包含 `MlirGenModuleError: inconsistent callee signature`。
-- 递归调用不支持，必须失败，错误消息包含 `MlirGenModuleError: recursive callee graph is not supported`。
-- 遇到不支持的 callee 形式（例如匿名函数、lambda、捕获外部变量的本地闭包函数等），必须失败，错误消息包含 `MlirGenModuleError: unsupported callee function`。
+- 同一个 callee 若在多个 call-site 下推导出不一致签名，必须抛出 `KernelCodeError`，错误消息包含 `MlirGenModuleError: inconsistent callee signature`。
+- 递归调用不支持，必须抛出 `KernelCodeError`，错误消息包含 `MlirGenModuleError: recursive callee graph is not supported`。
+- 遇到不支持的 callee 形式（例如匿名函数、lambda、捕获外部变量的本地闭包函数等），必须抛出 `KernelCodeError`，错误消息包含 `MlirGenModuleError: unsupported callee function`。
 - DSL helper 调用（例如 `softmax(...)`、`broadcast_to(...)`、`matmul(...)`）不属于“应当表达为 `func.call` 的 Python callee”，不得因此向 module 额外增加新的 `func.func`。
 
 module 内函数顺序：
@@ -338,7 +333,7 @@ builtin.module {
   - 验证 `build_func_op(...)` 生成 `func.func`。
   - 验证 `build_func_op(fn, *runtime_args, globals=None, builtins=None)` 的输入签名仅由运行时参数决定。
   - 验证 `build_func_op(...)` 仅支持按位置参数传入运行时参数；缺少运行时参数、数量不匹配或试图以 `globals/builtins` 替代时必须报错。
-  - 验证 `build_func_op_from_ast(func_ast, runtime_args=None, config=None)` 的公开接口与实现签名一致，且 `runtime_args` / `config` 成功路径可由测试直接观察。
+  - 验证 `build_func_op_from_ast(func_ast, runtime_args=None)` 的公开接口与实现签名一致，且旧 `config` 关键字不再作为公开入口接受。
   - 验证 `build_func_op_from_ast(...)` 的输入校验错误路径，包括空输入、`runtime_args` 长度不匹配、未支持的标量类型、未支持的输入节点类型，以及非纯 symbol 标量函数缺少 tensor 输入时报错。
   - 验证 `globals/builtins` 只补充解析环境，不替代运行时参数；缺少运行时参数、运行时实参数量不匹配或误用 `globals/builtins` 时必须报错。
   - 验证非 `dict` 的 `builtins` 实参可作为解析环境输入成功构建 `func.func`。
@@ -380,11 +375,11 @@ builtin.module {
 - 功能与用例清单：
   - MGEN-001：`build_func_op(...)` 返回 `func.func`。（`test_build_func_op_returns_func_op`）
   - MGEN-001A：`build_func_op(...)` 的输入签名只由 `runtime_args` 决定；即使 `globals` 中存在同名对象且额外传入 `builtins`，成功路径的签名推导也不得被解析环境覆盖。（`test_build_func_op_signature_uses_runtime_args_not_parse_env`）
-  - MGEN-001B：非 `dict` 的 `builtins` 可作为解析环境补充输入，且解析失败必须收敛为 `AstVisitorError`。（`test_mlir_gen_build_func_op_builtins_and_parse_error`）
+  - MGEN-001B：非 `dict` 的 `builtins` 可作为解析环境补充输入，且解析失败必须收敛为 `KernelCodeError`。（`test_mlir_gen_build_func_op_builtins_and_parse_error`）
   - MGEN-001C：当 `runtime_args` 已提供时，裸 `Memory` / 裸 `SymbolDim` 参数注解必须被当作占位注解接受，并继续由 `runtime_args` 驱动输入签名；不得报 `Unsupported annotation`。（下游待补测试映射：`test_build_func_op_accepts_runtime_driven_memory_placeholder_annotation`、`test_mlir_gen_accepts_runtime_driven_symbol_placeholder_annotation`）
   - MGEN-001D：kernel 合同样例中，`for` 循环体内的 lowerable memory/helper 重绑定必须保持循环内可用，且循环外后续语句不得再捕获内层 induction 变量；`build_func_op(...)` 需能继续生成 raw `func.func`。（`test_build_func_op_supports_kernel_contract_loop_local_rebinding`）
   - MGEN-002：`build_func_op_from_ast(...)` 保留 AST 参数顺序；当传入 `runtime_args` 时，输入签名仍由运行时参数语义驱动。（`test_build_func_op_from_ast_preserves_arg_order`、`test_build_func_op_from_ast_uses_runtime_args_for_symbol_signature`）
-  - MGEN-002A：`build_func_op_from_ast(..., config=...)` 接收并透传 visitor / lowering 配置。（`test_build_func_op_from_ast_forwards_config_to_visitor_and_context`）
+  - MGEN-002A：`build_func_op_from_ast(...)` 不再接收公开 `config` 关键字，构建配置只能来自 `kernel_gen.core.config` 或内部调用态。（`test_build_func_op_from_ast_rejects_public_config_argument`）
   - MGEN-002B：`build_func_op_from_ast(...)` 的公开入口必须覆盖空输入、`runtime_args` 长度不匹配、未支持的标量类型、未支持的输入节点类型，以及非纯 symbol 标量函数缺少 tensor 输入等错误路径。（`test_mlir_gen_signature_validation_errors`）
   - MGEN-003：返回值类型与 AST 对齐。（`test_build_func_op_return_type_matches_annotation`）
   - MGEN-004：经测试辅助封装后 module 含 `func.func`/`nn` op。（`test_visit_to_nn_ir_builds_module`）

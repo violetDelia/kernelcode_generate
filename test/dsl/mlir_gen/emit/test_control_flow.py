@@ -33,6 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.symbol import SymbolForOp
 from kernel_gen.dsl.ast import BlockAST, ConstAST, ForAST, VarAST
 from kernel_gen.dsl.mlir_gen.emit import EmitContext, emit_mlir
@@ -82,5 +83,5 @@ def test_emit_mlir_rejects_block_ast() -> None:
     block = Block()
     ctx = EmitContext(builder=block, symbols={}, types={})
 
-    with pytest.raises(ValueError, match="BlockAST must be lowered via AstVisitor"):
+    with pytest.raises(KernelCodeError, match="BlockAST must be lowered via AstVisitor"):
         emit_mlir(BlockAST(statements=[ConstAST(0)]), ctx)

@@ -1,11 +1,18 @@
 """DSL AST package facade.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 榕
 
 功能说明:
 - 聚合 AST 节点与解析入口，提供稳定的 `kernel_gen.dsl.ast` 导入路径。
 - 只做导出，不在本文件内实现节点定义或解析逻辑。
+
+API 列表:
+- `parse_function(fn: object) -> FunctionAST`
+- `FunctionAST` / `BlockAST` / `ForAST` / `IfAST`
+- `TensorAST` / `ScalarArgAST` / `PtrArgAST` / `VarAST` / `ConstAST`
+- `Diagnostic` / `SourceLocation`
+- 其余公开 AST 节点类由 `kernel_gen.dsl.ast.nodes` 定义并经本包根导出。
 
 使用示例:
 - from kernel_gen.dsl.ast import FunctionAST, parse_function
@@ -40,6 +47,7 @@ from .nodes import (
     FCAST,
     ForAST,
     FunctionAST,
+    IfAST,
     Img2ColAST,
     LoadAST,
     MatmulAST,
@@ -60,14 +68,13 @@ from .nodes import (
     TensorAxisAccessAST,
     VarAST,
 )
-from .parser import AstParseError, parse_function
+from .parser import parse_function
 
 __all__ = [
     "ArchBarrierAST",
     "ArchGetDynamicMemoryAST",
     "ArchLaunchKernelAST",
     "ArchQueryAST",
-    "AstParseError",
     "BinaryExprAST",
     "BlockAST",
     "CompareExprAST",
@@ -84,6 +91,7 @@ __all__ = [
     "FCAST",
     "ForAST",
     "FunctionAST",
+    "IfAST",
     "Img2ColAST",
     "LoadAST",
     "MatmulAST",

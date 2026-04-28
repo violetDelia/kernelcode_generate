@@ -8,15 +8,15 @@
 
 ## API 列表
 
-- `class AstParseError(message: str, diagnostics: list[Diagnostic])`
+- `KernelCodeError(kind, ErrorModule.AST, message, diagnostics=list[Diagnostic])`
 - `parse_function(fn: Callable[..., object]) -> FunctionAST`
-- `AST 节点公开类：见 spec/dsl/ast/nodes.md`
+- `AST 节点公开类：见 spec/dsl/ast/nodes.md`；控制流节点包含 `ForAST` 与 `IfAST`
 - `诊断与位置信息类型：Diagnostic, SourceLocation`
 
 ## 文档信息
 
 - 创建者：`OpenAI Codex`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`榕`
 - `spec`：[`spec/dsl/ast/__init__.md`](../../../spec/dsl/ast/__init__.md)
 - `功能实现`：[`kernel_gen/dsl/ast/__init__.py`](../../../kernel_gen/dsl/ast/__init__.py)
 - `test`：
@@ -38,7 +38,7 @@
 
 - 本文件只定义包级 facade 合同，不重复列出每个节点字段细节。
 - 节点字段与 visitor 细节不得在本文件维护第二份副本。
-- `kernel_gen.dsl.ast` 包根只承认 `AstParseError`、`parse_function(...)`、AST 节点公开类与诊断类型；`parse_function_with_env(...)`、parser 文件内 helper 与任何 `mlir_gen` helper 都不是包根公开 API。
+- `kernel_gen.dsl.ast` 包根只承认 `parse_function(...)`、AST 节点公开类与诊断类型；失败统一使用 `KernelCodeError(ErrorModule.AST, ...)`，不再导出解析专属错误类。`parse_function_with_env(...)`、parser 文件内 helper 与任何 `mlir_gen` helper 都不是包根公开 API。
 - 跨文件实现与测试只允许通过本节 `API 列表` 中的包根入口消费 `kernel_gen.dsl.ast`；不得从包根假定存在 parser 环境控制或其他未列出的兼容导出。
 
 ## 测试

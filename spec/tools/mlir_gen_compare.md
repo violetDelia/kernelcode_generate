@@ -3,7 +3,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`榕`
 - `spec`：[`spec/tools/mlir_gen_compare.md`](../../spec/tools/mlir_gen_compare.md)
 - `功能实现`：[`kernel_gen/tools/mlir_gen_compare.py`](../../kernel_gen/tools/mlir_gen_compare.py)
 - `test`：[`test/tools/test_mlir_gen_compare.py`](../../test/tools/test_mlir_gen_compare.py)
@@ -13,17 +13,18 @@
 - `mlir_gen_compare` 用来比较 `mlir_gen(...)` 产出的 `builtin.module` 与预期 `.mlir` 文件是否一致。
 - 比较口径固定为“两边都先解析，再统一打印后比较字符串”。
 - 只返回 `bool`；不执行 pass、不做 lowering、不输出 diff。
-- 工具层只依赖公开 `mlir_gen(fn, *runtime_args, config=None)`；若当前文件保留延迟加载或文本归一化 helper，它们都不是公开 API。
+- 工具层只依赖公开 `mlir_gen(fn, *runtime_args)`；若当前文件保留延迟加载或文本归一化 helper，它们都不是公开 API。
+- expected 文本与实际 module 的解析 Context 必须复用 `kernel_gen.core.context.build_default_context()`；不得在本工具内维护第二套 dialect 注册列表。默认 Context 必须覆盖 `scf.if` 这类 mlir_gen 公开可能产出的控制流 op。
 
 ## API 列表
 
-- `mlir_gen_compare(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, config: dict[str, object] | None, mlir_file: str) -> bool`
-- `mlir_gen_compare_text(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, config: dict[str, object] | None, mlir_text: str) -> bool`
-- `compare_mlir_file(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, config: dict[str, object] | None, mlir_file: str) -> bool`
+- `mlir_gen_compare(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, mlir_file: str) -> bool`
+- `mlir_gen_compare_text(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, mlir_text: str) -> bool`
+- `compare_mlir_file(fn: Callable[..., object], runtime_args: tuple[object, ...] | list[object] | None, mlir_file: str) -> bool`
 
 ## 公开接口
 
-### `mlir_gen_compare(fn, runtime_args, config, mlir_file) -> bool`
+### `mlir_gen_compare(fn, runtime_args, mlir_file) -> bool`
 
 功能说明：
 
@@ -39,18 +40,17 @@ from kernel_gen.tools.mlir_gen_compare import mlir_gen_compare
 ok = mlir_gen_compare(
     fn=add,
     runtime_args=[lhs, rhs],
-    config=None,
     mlir_file="expected/add.mlir",
 )
 assert ok is True
 ```
 
-### `mlir_gen_compare_text(fn, runtime_args, config, mlir_text) -> bool`
+### `mlir_gen_compare_text(fn, runtime_args, mlir_text) -> bool`
 
 - 语义与 `mlir_gen_compare(...)` 一致
 - 区别只在 expected 来源是内存字符串，不是磁盘文件
 
-### `compare_mlir_file(fn, runtime_args, config, mlir_file) -> bool`
+### `compare_mlir_file(fn, runtime_args, mlir_file) -> bool`
 
 - 旧兼容入口
 - 行为等价于 `mlir_gen_compare(...)`

@@ -39,8 +39,10 @@ builtin.module {}
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 import os
 import re
@@ -55,11 +57,10 @@ from xdsl.dialects.builtin import ModuleOp
 from xdsl.ir import Operation
 from xdsl.parser import Parser
 from xdsl.passes import ModulePass
+from xdsl.printer import Printer
 
-from kernel_gen.common.text import render_operation_text
-from kernel_gen.context import build_default_context as _build_default_context_base
+from kernel_gen.core.context import build_default_context as _build_default_context_base
 from kernel_gen.passes.registry import (
-    PassRegistryError,
     build_registered_pass,
     build_registered_pipeline,
     load_builtin_passes,
@@ -90,7 +91,7 @@ def _build_default_context() -> Context:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 复用 `kernel_gen.context.build_default_context()` 的基础 dialect 组合。
+    - 复用 `kernel_gen.core.context.build_default_context()` 的基础 dialect 组合。
     - 额外开启 `allow_unregistered`，保持 ircheck 对 expectation 文本的宽松解析口径。
 
     使用示例:
@@ -109,24 +110,30 @@ def _build_default_context() -> Context:
     return ctx
 
 
-class IrcheckParseError(ValueError):
-    """ircheck case 文件解析错误。
+def _render_operation_text(value: Operation) -> str:
+    """把 xDSL operation 渲染为当前工具使用的稳定文本。
 
-    创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
+    创建者: 榕
+    最后一次更改: 榕
 
     功能说明:
-    - 表示 case 文件头部指令区与输入 IR 正文的结构性错误。
-    - `str(e)` 必须以 `spec/tools/ircheck.md` 列出的错误短语之一开头。
+    - 使用 xDSL `Printer` 将 operation 打印为字符串。
+    - 去掉尾部空白，供 `_normalize_ir(...)` 继续做 ircheck 专属格式归一。
 
     使用示例:
-    - raise IrcheckParseError("IrcheckParseError: missing input ir")
+    - text = _render_operation_text(module)
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
-    - test: [test/tools/test_ircheck_parser.py](test/tools/test_ircheck_parser.py)
+    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
+
+    stream = StringIO()
+    Printer(stream=stream).print_op(value)
+    return stream.getvalue().rstrip()
+
+
 
 
 @dataclass(frozen=True)
@@ -282,7 +289,7 @@ def _tokenize_check_pattern(text: str) -> list[tuple[str, str, str | None]]:
     for match in _CHECK_TOKEN_PATTERN.finditer(text):
         literal = text[cursor : match.start()]
         if _contains_invalid_regex_literal_fragment(literal):
-            raise IrcheckParseError("IrcheckParseError: invalid regex check")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid regex check")
         if literal:
             tokens.append(("literal", literal, None))
         name = match.group(1)
@@ -291,13 +298,13 @@ def _tokenize_check_pattern(text: str) -> list[tuple[str, str, str | None]]:
             tokens.append(("ref", name, None))
         else:
             if not regex_text:
-                raise IrcheckParseError("IrcheckParseError: invalid regex check")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid regex check")
             tokens.append(("define", name, regex_text))
         cursor = match.end()
 
     tail = text[cursor:]
     if _contains_invalid_regex_literal_fragment(tail):
-        raise IrcheckParseError("IrcheckParseError: invalid regex check")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid regex check")
     if tail:
         tokens.append(("literal", tail, None))
     return tokens
@@ -416,10 +423,10 @@ def _compile_literal_fragment(literal: str) -> str:
         if open_idx == open_double_idx:
             close_idx = decoded.find("}}", open_idx + 2)
             if close_idx == -1:
-                raise IrcheckParseError("IrcheckParseError: invalid regex check")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid regex check")
             regex_text = decoded[open_idx + 2 : close_idx]
             if not regex_text:
-                raise IrcheckParseError("IrcheckParseError: invalid regex check")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid regex check")
             pattern_parts.append(_expand_regex_aliases(regex_text))
             cursor = close_idx + 2
             continue
@@ -481,7 +488,7 @@ def _validate_pattern_directive(text: str, kind: CheckKind, declared_variables: 
             continue
         if token_kind == "ref":
             if name not in visible_variables:
-                raise IrcheckParseError("IrcheckParseError: undefined regex variable")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: undefined regex variable")
             if name in new_definitions:
                 pattern_parts.append(f"(?P={name})")
             else:
@@ -490,9 +497,9 @@ def _validate_pattern_directive(text: str, kind: CheckKind, declared_variables: 
 
         assert payload is not None
         if kind == "CHECK-NOT":
-            raise IrcheckParseError("IrcheckParseError: CHECK-NOT cannot define variables")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: CHECK-NOT cannot define variables")
         if name in visible_variables:
-            raise IrcheckParseError("IrcheckParseError: duplicate regex variable")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: duplicate regex variable")
         visible_variables.add(name)
         new_definitions.append(name)
         pattern_parts.append(f"(?P<{name}>{_expand_regex_aliases(payload)})")
@@ -500,7 +507,7 @@ def _validate_pattern_directive(text: str, kind: CheckKind, declared_variables: 
     try:
         re.compile("".join(pattern_parts))
     except re.error as exc:
-        raise IrcheckParseError("IrcheckParseError: invalid regex check") from exc
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid regex check") from exc
     return new_definitions
 
 
@@ -570,7 +577,7 @@ def parse_ircheck_file(path: str) -> IrcheckCase:
     text = Path(path).read_text(encoding="utf-8")
     blocks = _split_ircheck_text_into_case_blocks(text)
     if len(blocks) != 1:
-        raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid ircheck header")
     return _parse_ircheck_text(text, source_path=path)
 
 
@@ -693,7 +700,7 @@ def _split_ircheck_text_into_case_blocks(text: str) -> list[IrcheckCaseBlock]:
             saw_separator = True
             block_text = "\n".join(current_lines).strip("\n")
             if not block_text.strip():
-                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid ircheck header")
             blocks.append(IrcheckCaseBlock(text=block_text, start_line=current_start_line))
             current_lines = []
             current_start_line = line_no + 1
@@ -702,7 +709,7 @@ def _split_ircheck_text_into_case_blocks(text: str) -> list[IrcheckCaseBlock]:
 
     tail_text = "\n".join(current_lines).strip("\n")
     if saw_separator and not tail_text.strip():
-        raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid ircheck header")
     if tail_text.strip():
         blocks.append(IrcheckCaseBlock(text=tail_text, start_line=current_start_line))
 
@@ -836,7 +843,7 @@ def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int 
 
     input_ir = "\n".join(lines[body_start:])
     if not input_ir.strip():
-        raise IrcheckParseError("IrcheckParseError: missing input ir")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: missing input ir")
 
     compile_args: str | None = None
     checks: list[CheckDirective] = []
@@ -846,18 +853,18 @@ def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int 
         content = raw[2:].lstrip()
         if content.startswith("COMPILE_ARGS:"):
             if compile_args is not None:
-                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid ircheck header")
             compile_args = content[len("COMPILE_ARGS:") :].strip()
             if not compile_args:
-                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid ircheck header")
             continue
         if content.startswith("CHECK-NEXT:"):
             check_text = content[len("CHECK-NEXT:") :].strip()
             if not check_text:
-                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid ircheck header")
             _ = _validate_pattern_directive(check_text, "CHECK-NEXT", declared_pattern_variables)
             if not saw_positive_check:
-                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid ircheck header")
             checks.append(
                 CheckDirective(
                     kind="CHECK-NEXT",
@@ -873,7 +880,7 @@ def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int 
         if content.startswith("CHECK-NOT:"):
             check_text = content[len("CHECK-NOT:") :].strip()
             if not check_text:
-                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid ircheck header")
             _ = _validate_pattern_directive(check_text, "CHECK-NOT", declared_pattern_variables)
             checks.append(
                 CheckDirective(
@@ -886,7 +893,7 @@ def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int 
         if content.startswith("CHECK:"):
             check_text = content[len("CHECK:") :].strip()
             if not check_text:
-                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid ircheck header")
             _ = _validate_pattern_directive(check_text, "CHECK", declared_pattern_variables)
             checks.append(
                 CheckDirective(
@@ -905,10 +912,10 @@ def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int 
             or content.startswith("CHECK-NEXT-REGEX:")
             or content.startswith("CHECK-NOT-REGEX:")
         ):
-            raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid ircheck header")
 
     if compile_args is None:
-        raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid ircheck header")
 
     return IrcheckCase(
         compile_args=compile_args,
@@ -1109,8 +1116,15 @@ def _render_emitc_text(operation: Operation, emitc_target: str) -> str:
     if emitc_target == "cpu" and not isinstance(emit_input, func.FuncOp):
         raise ValueError("target=cpu requires func.func input")
 
+    from kernel_gen.core.config import restore_config, set_target, snapshot_config
     from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
-    return gen_kernel(emit_input, EmitCContext(config={"target": emitc_target}))
+
+    snapshot = snapshot_config()
+    try:
+        set_target(emitc_target)
+        return gen_kernel(emit_input, EmitCContext())
+    finally:
+        restore_config(snapshot)
 
 
 def _is_empty_npu_demo_func(func_op: func.FuncOp) -> bool:
@@ -1443,7 +1457,7 @@ def _normalize_ir(value: Operation) -> str:
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
-    text = render_operation_text(value)
+    text = _render_operation_text(value)
     # 归一化 func.func 签名里命名 SSA `name:` 的空格口径，让期望文本可按旧合同继续匹配。
     text = re.sub(r"(%[A-Za-z_][A-Za-z0-9_]*):(?=\s)", r"\1 :", text)
     if "kernel.img2col1d" in text:
@@ -1650,7 +1664,6 @@ if __name__ == "__main__":  # pragma: no cover
 __all__ = [
     "CheckDirective",
     "IrcheckCase",
-    "IrcheckParseError",
     "IrcheckResult",
     "parse_ircheck_file",
     "run_ircheck_file",

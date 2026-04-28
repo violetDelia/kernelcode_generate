@@ -33,7 +33,7 @@
 ## 限制与边界
 
 - 仅用于 `nn_lowering` 目录内的 lowering 逻辑，不作为公开 pass 或独立命令入口。
-- 失败时必须抛出 `NnLoweringError`，并保持错误短语与本文件一致。
+- 失败时必须抛出 `KernelCodeError`，并保持错误短语与本文件一致。
 
 ## 公开接口
 
@@ -55,8 +55,8 @@ module_op = ensure_module_op(module)
 
 注意事项：
 
-- 非 `builtin.module` 必须抛出 `NnLoweringError("module must be builtin.module")`。
-- `module.ops` 不可遍历时必须抛出 `NnLoweringError("module ops must be iterable")`。
+- 非 `builtin.module` 必须抛出 `KernelCodeError("module must be builtin.module")`。
+- `module.ops` 不可遍历时必须抛出 `KernelCodeError("module ops must be iterable")`。
 
 返回与限制：
 
@@ -80,7 +80,7 @@ space = ensure_space_attr(op)
 
 注意事项：
 
-- 非 `NnMemorySpaceAttr` 时必须抛出 `NnLoweringError("nn op must provide nn.space attribute")`。
+- 非 `NnMemorySpaceAttr` 时必须抛出 `KernelCodeError("nn op must provide nn.space attribute")`。
 
 返回与限制：
 
@@ -104,8 +104,8 @@ result_type = ensure_single_result(op)
 
 注意事项：
 
-- 结果数量不为 1 时必须抛出 `NnLoweringError("nn op must have exactly one result")`。
-- 结果类型非 `NnMemoryType` 时必须抛出 `NnLoweringError("nn op result must be nn.memory")`。
+- 结果数量不为 1 时必须抛出 `KernelCodeError("nn op must have exactly one result")`。
+- 结果类型非 `NnMemoryType` 时必须抛出 `KernelCodeError("nn op result must be nn.memory")`。
 
 返回与限制：
 
@@ -130,7 +130,7 @@ ensure_operand_count(op, 2)
 
 注意事项：
 
-- 数量不匹配时必须抛出 `NnLoweringError("nn op {op.name} expects {expected} operands, got {actual}")`。
+- 数量不匹配时必须抛出 `KernelCodeError("nn op {op.name} expects {expected} operands, got {actual}")`。
 
 返回与限制：
 
@@ -143,7 +143,7 @@ ensure_operand_count(op, 2)
 - 执行命令：
   - `pytest -q test/pass/nn_lowering/public_name.py`
 - 测试目标：
-  - 验证 `NnLoweringPass` / `NnLoweringError` 的公开入口可被稳定导出。
+  - 验证 `NnLoweringPass` / `KernelCodeError` 的公开入口可被稳定导出。
 - 功能与用例清单：
   - `test_nn_lowering_pass_public_name`
   - `test_nn_lowering_pass_public_exports`

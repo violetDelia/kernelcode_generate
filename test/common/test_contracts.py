@@ -1,17 +1,17 @@
-"""common contracts tests.
+"""core contracts tests.
 
 创建者: 金铲铲大作战
 最后一次更改: 金铲铲大作战
 
 功能说明:
-- 覆盖 kernel_gen.common.contracts 中的公共 verifier、shape 与 dtype 辅助逻辑。
+- 覆盖 kernel_gen.core.contracts 中的公共 verifier、shape 与 dtype 辅助逻辑。
 
 使用示例:
 - pytest -q test/common/test_contracts.py
 
 关联文件:
-- 功能实现: kernel_gen/common/contracts.py
-- Spec 文档: spec/common/contracts.md
+- 功能实现: kernel_gen/core/contracts.py
+- Spec 文档: spec/core/contracts.md
 - 测试文件: test/common/test_contracts.py
 """
 
@@ -31,7 +31,7 @@ from xdsl.dialects.builtin import (
 )
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.common.contracts import (
+from kernel_gen.core.contracts import (
     build_contiguous_stride,
     collect_int_dims,
     default_stride,

@@ -25,7 +25,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 
-from kernel_gen.dsl.ast import AstParseError, FunctionAST
+from kernel_gen.dsl.ast import FunctionAST
 from kernel_gen.dsl.ast.parser import parse_function_with_env as ast_parse_function_with_env
 
 

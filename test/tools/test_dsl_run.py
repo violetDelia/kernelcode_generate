@@ -1,10 +1,10 @@
 """dsl_run tests.
 
 创建者: 朽木露琪亚
-最后一次更改: 金铲铲大作战
+最后一次更改: 大闸蟹
 
 功能说明:
-- 覆盖 `dsl_run(func, real_args, pipeline, emitcconfig)` 的正向执行、错误合同与结果模型口径。
+- 覆盖 `dsl_run(func, real_args, pipeline)` 的正向执行、错误合同与结果模型口径。
 - 同时锁定 `dsl_run` 对正向、反向与 tiled matmul 样例的行为。
 
 使用示例:
@@ -58,13 +58,14 @@ REPO_ROOT = _find_repo_root(Path(__file__).resolve().parents[2])
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dsl.gen_kernel import EmitCContext
+from kernel_gen.core.config import reset_config, set_dump_dir, set_target
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dialect.symbol import SymbolConstOp
 from kernel_gen.operation import deslice, loop, matmul, slice, store
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import build_registered_pipeline, load_builtin_passes
-from kernel_gen.tools.dsl_run import DslRunError, dsl_run
+from kernel_gen.tools.dsl_run import dsl_run
 from kernel_gen.target import registry as target_registry
 from kernel_gen.symbol_variable.memory import MemorySpace
 
@@ -75,7 +76,7 @@ except ImportError as exc:  # pragma: no cover - tests require torch
 
 
 _EXPECTED_RETURN_VALUE_MESSAGE = "DslRunReturnValueUnsupported: dsl_run only supports functions without DSL return values"
-_EXPECTED_EMITCCONFIG_MESSAGE = "DslRunInvalidEmitCContext: emitcconfig must be EmitCContext"
+_EXPECTED_TARGET_MESSAGE = "DslRunInvalidTarget: core config target must be non-empty str"
 _EXPECTED_PIPELINE_NAME_MESSAGE = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline'"
 _EXPECTED_PIPELINE_TYPE_MESSAGE = "DslRunInvalidPipeline: pipeline must be str or PassManager"
 _EXPECTED_REAL_ARG_TYPE_MESSAGE = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor and numpy.ndarray"
@@ -107,9 +108,12 @@ def _isolated_target_registry() -> None:
     importlib.reload(target_registry)
     target_registry.load_targets(REPO_ROOT / "kernel_gen" / "target" / "targets")
     target_registry.set_current_target(None)
+    reset_config()
+    set_target("npu_demo")
     try:
         yield
     finally:
+        reset_config()
         importlib.reload(target_registry)
         target_registry.load_targets(REPO_ROOT / "kernel_gen" / "target" / "targets")
         target_registry.set_current_target(None)
@@ -138,34 +142,6 @@ def _build_npu_demo_lowering_pipeline() -> PassManager:
     pipeline = build_registered_pipeline("npu-demo-lowering")
     assert isinstance(pipeline, PassManager)
     return pipeline
-
-
-def _npu_demo_emitc_context() -> EmitCContext:
-    """构造 `npu_demo` 目标的公开 `EmitCContext`。
-
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
-
-    功能说明:
-    - 统一公开测试里 `EmitCContext(config={"target": "npu_demo"})` 的构造口径。
-    - 避免测试继续散落旧的 `target=` 关键字调用方式。
-
-    使用示例:
-    - ctx = _npu_demo_emitc_context()
-
-    关联文件:
-    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
-    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
-    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
-    """
-
-    return EmitCContext(config={"target": "npu_demo"})
-
-
-def _cpu_emitc_context() -> EmitCContext:
-    """构造 `cpu` 目标的公开 `EmitCContext`。"""
-
-    return EmitCContext(config={"target": "cpu"})
 
 
 def _make_launch_only_module(*, callee: str) -> ModuleOp:
@@ -205,7 +181,7 @@ def add_kernel(
     - 本函数不返回 DSL 值，只通过 `store(...)` 写入 `out`。
 
     使用示例:
-    - `dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(config={"target": "npu_demo"}))`
+    - `dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")`
 
     关联文件:
     - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
@@ -213,7 +189,7 @@ def add_kernel(
     - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
     """
 
-    store(lhs + rhs, out, [0], [6], [1])
+    store(out, lhs + rhs, [0], [6], [1])
 
 
 def return_add_kernel(
@@ -234,7 +210,7 @@ def add_slice_store_kernel(
 
     lhs_tile = slice(lhs, [1], [4], [1], MemorySpace.TSM)
     rhs_tile = slice(rhs, [1], [4], [1], MemorySpace.TSM)
-    store(lhs_tile + rhs_tile, out, [1], [4], [1])
+    store(out, lhs_tile + rhs_tile, [1], [4], [1])
 
 
 def add_for_loop_kernel(
@@ -247,7 +223,7 @@ def add_for_loop_kernel(
     for index in loop(0, 6, 3):
         lhs_tile = slice(lhs, [index], [3], [1], MemorySpace.TSM)
         rhs_tile = slice(rhs, [index], [3], [1], MemorySpace.TSM)
-        store(lhs_tile + rhs_tile, out, [index], [3], [1])
+        store(out, lhs_tile + rhs_tile, [index], [3], [1])
 
 
 def sub_store_kernel(
@@ -257,7 +233,7 @@ def sub_store_kernel(
 ) -> None:
     """显式 out 参数版本的 sub 样例。"""
 
-    store(lhs - rhs, out, [0], [6], [1])
+    store(out, lhs - rhs, [0], [6], [1])
 
 
 def mul_store_kernel(
@@ -267,7 +243,7 @@ def mul_store_kernel(
 ) -> None:
     """显式 out 参数版本的 mul 样例。"""
 
-    store(lhs * rhs, out, [0], [6], [1])
+    store(out, lhs * rhs, [0], [6], [1])
 
 
 def matmul_out_kernel(
@@ -282,7 +258,7 @@ def matmul_out_kernel(
             lhs_tile = slice(lhs, [m0, 0], [16, 16], [1, 1], MemorySpace.TSM)
             rhs_tile = slice(rhs, [0, n0], [16, 16], [1, 1], MemorySpace.TSM)
             partial = matmul(lhs_tile, rhs_tile)
-            deslice(partial, out, [m0, n0], [16, 16], [1, 1])
+            deslice(out, partial, [m0, n0], [16, 16], [1, 1])
 
 
 def _assert_result_contract(
@@ -353,10 +329,67 @@ def test_dsl_run_string_pipeline_with_torch_numpy_mix() -> None:
         add_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
-        _npu_demo_emitc_context(),
     )
 
     _assert_result_contract(result, out, expected)
+
+
+# TC-DSL-RUN-001A
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 锁定 dump_dir 会按 kernel 名写入初始 IR、逐 pass IR 与最终源码。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_dump_dir_writes_pass_ir_and_source(tmp_path: Path) -> None:
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+
+    set_dump_dir(tmp_path)
+    result = dsl_run(
+        add_kernel,
+        (out, lhs, rhs),
+        "npu-demo-lowering",
+    )
+
+    kernel_dump_dir = tmp_path / "add_kernel"
+    assert result.execute_result.ok is True
+    assert (kernel_dump_dir / "01-first-ir.mlir").is_file()
+    pass_dumps = sorted(path for path in kernel_dump_dir.glob("*.mlir") if path.name != "01-first-ir.mlir")
+    assert pass_dumps
+    assert pass_dumps[0].read_text(encoding="utf-8").splitlines()[0]
+    source_text = (kernel_dump_dir / "source.cpp").read_text(encoding="utf-8")
+    assert source_text == result.source + ("\n" if not result.source.endswith("\n") else "")
+    assert '#include "include/npu_demo/npu_demo.h"' in source_text
+
+
+# TC-DSL-RUN-001B
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 锁定 dump_dir 为空字符串时不会写出诊断产物。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_empty_dump_dir_disables_dump(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+
+    monkeypatch.chdir(tmp_path)
+    set_dump_dir("")
+    result = dsl_run(
+        add_kernel,
+        (out, lhs, rhs),
+        "npu-demo-lowering",
+    )
+
+    assert result.execute_result.ok is True
+    assert not (tmp_path / "add_kernel").exists()
 
 
 # TC-DSL-RUN-002
@@ -379,7 +412,6 @@ def test_dsl_run_pass_manager_with_list_real_args() -> None:
         add_kernel,
         [out, lhs, rhs],
         pipeline,
-        _npu_demo_emitc_context(),
     )
 
     _assert_result_contract(result, out, expected)
@@ -404,7 +436,6 @@ def test_dsl_run_numpy_output() -> None:
         add_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
-        _npu_demo_emitc_context(),
     )
 
     _assert_result_contract(result, out, expected)
@@ -430,7 +461,6 @@ def test_dsl_run_add_slice_store_matches_public_contract() -> None:
         add_slice_store_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
-        _npu_demo_emitc_context(),
     )
 
     lowered_text = str(result.func_op)
@@ -462,7 +492,6 @@ def test_dsl_run_add_for_loop_matches_public_contract() -> None:
         add_for_loop_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
-        _npu_demo_emitc_context(),
     )
 
     lowered_text = str(result.func_op)
@@ -494,7 +523,6 @@ def test_dsl_run_sub_matches_public_contract() -> None:
         sub_store_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
-        _npu_demo_emitc_context(),
     )
 
     lowered_text = str(result.func_op)
@@ -523,7 +551,6 @@ def test_dsl_run_mul_matches_public_contract() -> None:
         mul_store_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
-        _npu_demo_emitc_context(),
     )
 
     lowered_text = str(result.func_op)
@@ -552,7 +579,6 @@ def test_dsl_run_supports_tiled_matmul_kernel_on_npu_demo() -> None:
         matmul_out_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
-        _npu_demo_emitc_context(),
     )
 
     lowered_text = str(result.func_op)
@@ -589,12 +615,11 @@ def test_dsl_run_rejects_npu_demo_module_without_unique_wrapper() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
-    with pytest.raises(DslRunError, match=_EXPECTED_NPU_DEMO_WRAPPER_MESSAGE):
+    with pytest.raises(KernelCodeError, match=_EXPECTED_NPU_DEMO_WRAPPER_MESSAGE):
         dsl_run(
             add_kernel,
             (out, lhs, rhs),
             PassManager(),
-            _npu_demo_emitc_context(),
         )
 
 
@@ -611,12 +636,11 @@ def test_dsl_run_rejects_value_return_kernel() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
-    with pytest.raises(DslRunError, match=_EXPECTED_RETURN_VALUE_MESSAGE):
+    with pytest.raises(KernelCodeError, match=_EXPECTED_RETURN_VALUE_MESSAGE):
         dsl_run(
             return_add_kernel,
             (lhs, rhs),
             "npu-demo-lowering",
-            _npu_demo_emitc_context(),
         )
 
 
@@ -625,17 +649,18 @@ def test_dsl_run_rejects_value_return_kernel() -> None:
 # 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 测试目的: 锁定 emitcconfig=None 的固定失败短语。
+# 测试目的: 锁定未设置 core config target 的固定失败短语。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
-def test_dsl_run_rejects_none_emitcconfig() -> None:
+def test_dsl_run_rejects_missing_core_target() -> None:
     out = torch.empty((6,), dtype=torch.int32)
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
-    with pytest.raises(DslRunError, match=_EXPECTED_EMITCCONFIG_MESSAGE):
-        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", None)
+    reset_config()
+    with pytest.raises(KernelCodeError, match=_EXPECTED_TARGET_MESSAGE):
+        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
 
 
 # TC-DSL-RUN-006
@@ -643,17 +668,18 @@ def test_dsl_run_rejects_none_emitcconfig() -> None:
 # 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 测试目的: 锁定 emitcconfig 不是 EmitCContext 的固定失败短语。
+# 测试目的: 锁定 target 配置类型错误时仍会在公开入口显式失败。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
-def test_dsl_run_rejects_invalid_emitcconfig_type() -> None:
+def test_dsl_run_rejects_invalid_core_target_type() -> None:
     out = torch.empty((6,), dtype=torch.int32)
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
-    with pytest.raises(DslRunError, match=_EXPECTED_EMITCCONFIG_MESSAGE):
-        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", object())
+    set_target(None)
+    with pytest.raises(KernelCodeError, match=_EXPECTED_TARGET_MESSAGE):
+        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
 
 
 # TC-DSL-RUN-007
@@ -670,8 +696,8 @@ def test_dsl_run_rejects_unknown_pipeline_name() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
-    with pytest.raises(DslRunError, match=_EXPECTED_PIPELINE_NAME_MESSAGE):
-        dsl_run(add_kernel, (out, lhs, rhs), "missing-pipeline", _npu_demo_emitc_context())
+    with pytest.raises(KernelCodeError, match=_EXPECTED_PIPELINE_NAME_MESSAGE):
+        dsl_run(add_kernel, (out, lhs, rhs), "missing-pipeline")
 
 
 # TC-DSL-RUN-008
@@ -688,8 +714,8 @@ def test_dsl_run_rejects_invalid_pipeline_type() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
-    with pytest.raises(DslRunError, match=_EXPECTED_PIPELINE_TYPE_MESSAGE):
-        dsl_run(add_kernel, (out, lhs, rhs), object(), _npu_demo_emitc_context())
+    with pytest.raises(KernelCodeError, match=_EXPECTED_PIPELINE_TYPE_MESSAGE):
+        dsl_run(add_kernel, (out, lhs, rhs), object())
 
 
 # TC-DSL-RUN-008A
@@ -706,12 +732,11 @@ def test_dsl_run_rejects_invalid_real_args_container() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
-    with pytest.raises(DslRunError, match=r"^DslRunInvalidRealArgs: real_args must be tuple or list$"):
+    with pytest.raises(KernelCodeError, match=r"^DslRunInvalidRealArgs: real_args must be tuple or list$"):
         dsl_run(
             add_kernel,
             {"out": out, "lhs": lhs, "rhs": rhs},
             "npu-demo-lowering",
-            _npu_demo_emitc_context(),
         )
 
 
@@ -720,22 +745,21 @@ def test_dsl_run_rejects_invalid_real_args_container() -> None:
 # 最后一次更改: OpenAI Codex
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 测试目的: 锁定调用方后续篡改 `EmitCContext.config["target"]` 为空字符串时仍会在公开入口显式失败。
+# 测试目的: 锁定 core config target 为空字符串时仍会在公开入口显式失败。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
-def test_dsl_run_rejects_emitccontext_with_empty_target_name() -> None:
+def test_dsl_run_rejects_empty_core_target_name() -> None:
     out = torch.empty((6,), dtype=torch.int32)
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
-    ctx = _npu_demo_emitc_context()
-    ctx.config["target"] = ""
+    set_target("")
 
     with pytest.raises(
-        DslRunError,
-        match=r"^DslRunInvalidEmitCContext: emitcconfig\.config\['target'\] must be non-empty str$",
+        KernelCodeError,
+        match=r"^DslRunInvalidTarget: core config target must be non-empty str$",
     ):
-        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", ctx)
+        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
 
 
 # TC-DSL-RUN-009
@@ -752,8 +776,8 @@ def test_dsl_run_rejects_unsupported_runtime_arg_type() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = object()
 
-    with pytest.raises(DslRunError, match=_EXPECTED_REAL_ARG_TYPE_MESSAGE):
-        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", _npu_demo_emitc_context())
+    with pytest.raises(KernelCodeError, match=_EXPECTED_REAL_ARG_TYPE_MESSAGE):
+        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
 
 
 # TC-DSL-RUN-010
@@ -769,8 +793,8 @@ def test_dsl_run_rejects_arity_mismatch() -> None:
     out = torch.empty((6,), dtype=torch.int32)
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
 
-    with pytest.raises(DslRunError, match=_EXPECTED_ARITY_MESSAGE):
-        dsl_run(add_kernel, (out, lhs), "npu-demo-lowering", _npu_demo_emitc_context())
+    with pytest.raises(KernelCodeError, match=_EXPECTED_ARITY_MESSAGE):
+        dsl_run(add_kernel, (out, lhs), "npu-demo-lowering")
 
 
 # TC-DSL-RUN-010A
@@ -790,9 +814,10 @@ def test_dsl_run_rejects_pipeline_returning_empty_module() -> None:
     out = torch.empty((6,), dtype=torch.int32)
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+    set_target("cpu")
 
-    with pytest.raises(DslRunError, match=r"^DslRunInternalError: lowered module does not contain func\.func$"):
-        dsl_run(add_kernel, (out, lhs, rhs), EmptyModulePipeline(), _cpu_emitc_context())
+    with pytest.raises(KernelCodeError, match=r"^DslRunInternalError: lowered module does not contain func\.func$"):
+        dsl_run(add_kernel, (out, lhs, rhs), EmptyModulePipeline())
 
 
 # TC-DSL-RUN-010B
@@ -814,10 +839,10 @@ def test_dsl_run_rejects_npu_demo_wrapper_without_body_func() -> None:
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
     with pytest.raises(
-        DslRunError,
+        KernelCodeError,
         match=r"^DslRunInternalError: lowered module does not contain func\.func @missing_kernel$",
     ):
-        dsl_run(add_kernel, (out, lhs, rhs), MissingBodyPipeline(), _npu_demo_emitc_context())
+        dsl_run(add_kernel, (out, lhs, rhs), MissingBodyPipeline())
 
 
 # TC-DSL-RUN-010C
@@ -837,9 +862,10 @@ def test_dsl_run_re_raises_codegen_failure_for_cpu_launch_wrapper() -> None:
     out = torch.empty((6,), dtype=torch.int32)
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+    set_target("cpu")
 
-    with pytest.raises(ValueError, match=r"^target=cpu: arch\.launch: unsupported op$"):
-        dsl_run(add_kernel, (out, lhs, rhs), CpuLaunchWrapperPipeline(), _cpu_emitc_context())
+    with pytest.raises(KernelCodeError, match=r"^target=cpu: arch\.launch: unsupported op$"):
+        dsl_run(add_kernel, (out, lhs, rhs), CpuLaunchWrapperPipeline())
 
 
 # TC-DSL-RUN-010D
@@ -859,9 +885,10 @@ def test_dsl_run_rejects_pipeline_returning_non_module() -> None:
     out = torch.empty((6,), dtype=torch.int32)
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+    set_target("cpu")
 
-    with pytest.raises(DslRunError, match=r"^DslRunInternalError: pipeline must return builtin\.module$"):
-        dsl_run(add_kernel, (out, lhs, rhs), NonModulePipeline(), _cpu_emitc_context())
+    with pytest.raises(KernelCodeError, match=r"^DslRunInternalError: pipeline must return builtin\.module$"):
+        dsl_run(add_kernel, (out, lhs, rhs), NonModulePipeline())
 
 
 # TC-DSL-RUN-011

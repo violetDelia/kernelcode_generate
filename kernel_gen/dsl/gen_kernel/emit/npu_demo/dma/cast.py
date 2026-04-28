@@ -3,7 +3,6 @@ from __future__ import annotations
 from kernel_gen.dialect.dma import DmaCastOp
 from kernel_gen.dialect.nn import NnMemoryType
 
-from ....errors import emit_c_error
 from ...register import emit_c_impl
 
 
@@ -20,9 +19,9 @@ def _emit_npu_demo_dma_cast(op: DmaCastOp, ctx) -> str:
         source_value = op.operands[0]
         target_type_attr = op.results[0].type
     else:
-        raise emit_c_error(ctx, op.name, "unsupported op")
+        raise ctx.emit_error(op.name, "unsupported op")
     if not isinstance(target_type_attr, NnMemoryType) or not isinstance(source_value.type, NnMemoryType):
-        raise emit_c_error(ctx, op.name, "unsupported op")
+        raise ctx.emit_error(op.name, "unsupported op")
     target_expr = emit_c_value(target_value, ctx)
     source_expr = emit_c_value(source_value, ctx)
     return (

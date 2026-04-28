@@ -19,6 +19,7 @@
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from collections.abc import Iterable
 
@@ -40,7 +41,6 @@ from kernel_gen.dialect.symbol import (
     build_public_symbol_expr,
 )
 from .nn_lowering_utility import (
-    NnLoweringError,
     ensure_operand_count,
     ensure_single_result,
     ensure_space_attr,
@@ -56,7 +56,7 @@ def _normalize_shape_dims(shape: Iterable[Attribute]) -> list[int | str]:
     功能说明:
     - IntAttr/IntegerAttr 转换为 int。
     - StringAttr 转换为 str。
-    - 其它类型抛出 NnLoweringError。
+    - 其它类型抛出 KernelCodeError。
 
     使用示例:
     - dims = _normalize_shape_dims(mem_type.shape.data)
@@ -78,7 +78,7 @@ def _normalize_shape_dims(shape: Iterable[Attribute]) -> list[int | str]:
         if isinstance(dim, StringAttr):
             dims.append(dim.data)
             continue
-        raise NnLoweringError("matmul shape must be IntAttr or StringAttr")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "matmul shape must be IntAttr or StringAttr")
     return dims
 
 
@@ -109,11 +109,11 @@ def _ensure_matmul_shape(
     rhs_shape = _normalize_shape_dims(rhs_type.shape.data)
     out_shape = _normalize_shape_dims(out_type.shape.data)
     if len(lhs_shape) != 2 or len(rhs_shape) != 2 or len(out_shape) != 2:
-        raise NnLoweringError("matmul requires rank-2 memory types")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "matmul requires rank-2 memory types")
     if lhs_shape[1] != rhs_shape[0]:
-        raise NnLoweringError("matmul contracting dimensions must match")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "matmul contracting dimensions must match")
     if out_shape[0] != lhs_shape[0] or out_shape[1] != rhs_shape[1]:
-        raise NnLoweringError("matmul output shape must match operands")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "matmul output shape must match operands")
 
 
 def _ensure_matmul_stride(mem_type: NnMemoryType) -> None:
@@ -137,7 +137,7 @@ def _ensure_matmul_stride(mem_type: NnMemoryType) -> None:
     shape = mem_type.shape.data
     stride = mem_type.stride.data
     if len(shape) != 2 or len(stride) != 2:
-        raise NnLoweringError("matmul stride must be contiguous")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "matmul stride must be contiguous")
     if not all(isinstance(dim, IntAttr) for dim in shape):
         return
     if not all(isinstance(dim, IntAttr) for dim in stride):
@@ -145,7 +145,7 @@ def _ensure_matmul_stride(mem_type: NnMemoryType) -> None:
     expected_stride0 = shape[1].data
     expected_stride1 = 1
     if stride[0].data != expected_stride0 or stride[1].data != expected_stride1:
-        raise NnLoweringError("matmul stride must be contiguous")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "matmul stride must be contiguous")
 
 
 def _ensure_symbol_int(
@@ -161,7 +161,7 @@ def _ensure_symbol_int(
     功能说明:
     - 若 operand 为 symbol.const，则克隆为新的 symbol.const 并返回。
     - 若 operand 为 symbol.int（非 symbol.const）直接返回。
-    - 其余类型统一抛出 NnLoweringError。
+    - 其余类型统一抛出 KernelCodeError。
 
     使用示例:
     - kw, _ = _ensure_symbol_int(block, op, op.operands[1])
@@ -182,8 +182,8 @@ def _ensure_symbol_int(
             return cloned.result, owner
         return operand, None
     if isinstance(operand, SSAValue):
-        raise NnLoweringError("nn img2col parameters must be symbol.int")
-    raise NnLoweringError("nn img2col parameters must be symbol.int")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn img2col parameters must be symbol.int")
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn img2col parameters must be symbol.int")
 
 
 def _ensure_img2col_params(
@@ -229,7 +229,7 @@ def _symbol_expr(value: SSAValue) -> str:
 
     功能说明:
     - 将 `!symbol.int<"...">` 的表达式文本提取为字符串。
-    - 非 `symbol.int` 时抛出 `NnLoweringError`。
+    - 非 `symbol.int` 时抛出 `KernelCodeError`。
 
     使用示例:
     - expr = _symbol_expr(symbol_value)
@@ -241,7 +241,7 @@ def _symbol_expr(value: SSAValue) -> str:
     """
 
     if not isinstance(value.type, SymbolValueType):
-        raise NnLoweringError("symbol expression must be symbol.int")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "symbol expression must be symbol.int")
     return value.type.expr.expr.data
 
 
@@ -299,16 +299,16 @@ def _get_symbol_dim_by_axis(
     """
 
     if not isinstance(operand.type, NnMemoryType):
-        raise NnLoweringError("nn img2col operand must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn img2col operand must be nn.memory")
     cached = cache.get(axis)
     if cached is not None:
         return cached
     dims = list(operand.type.shape.data)
     if axis < 0 or axis >= len(dims):
-        raise NnLoweringError("nn img2col operand axis out of range")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn img2col operand axis out of range")
     dim = dims[axis]
     if not isinstance(dim, StringAttr):
-        raise NnLoweringError("nn img2col symbolic dim must come from symbolic source axis")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn img2col symbolic dim must come from symbolic source axis")
     symbol_op = SymbolGetDimOp(operand, axis)
     block.insert_op_before(symbol_op, op)
     cache[axis] = symbol_op.result
@@ -402,7 +402,7 @@ def _build_img2col1d_dynamic_dims(
             elif axis == 3:
                 dynamic_dims.append(w_out.result)
             else:
-                raise NnLoweringError("nn img2col1d result rank must be 4")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn img2col1d result rank must be 4")
     return dynamic_dims
 
 
@@ -524,7 +524,7 @@ def _build_img2col2d_dynamic_dims(
             elif axis == 5:
                 dynamic_dims.append(w_out.result)
             else:
-                raise NnLoweringError("nn img2col2d result rank must be 6")
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn img2col2d result rank must be 6")
     return dynamic_dims
 
 
@@ -553,7 +553,7 @@ def _lower_matmul(block: Block, op: Operation) -> None:
     ensure_operand_count(op, 2)
     lhs, rhs = op.operands
     if not isinstance(lhs.type, NnMemoryType) or not isinstance(rhs.type, NnMemoryType):
-        raise NnLoweringError("nn.matmul operands must be nn.memory")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.matmul operands must be nn.memory")
     _ensure_matmul_shape(lhs.type, rhs.type, result_type)
     _ensure_matmul_stride(lhs.type)
     _ensure_matmul_stride(rhs.type)
@@ -696,7 +696,7 @@ class _LowerNnMatmulPattern(RewritePattern):
     def match_and_rewrite(self, op: NnMatmulOp, rewriter: PatternRewriter) -> None:
         block = op.parent_block()
         if block is None:
-            raise NnLoweringError("nn op must be inside a block")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op must be inside a block")
         _lower_matmul(block, op)
         rewriter.has_done_action = True
 
@@ -724,7 +724,7 @@ class _LowerNnImg2col1dPattern(RewritePattern):
     def match_and_rewrite(self, op: NnImg2col1dOp, rewriter: PatternRewriter) -> None:
         block = op.parent_block()
         if block is None:
-            raise NnLoweringError("nn op must be inside a block")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op must be inside a block")
         _lower_img2col1d(block, op)
         rewriter.has_done_action = True
 
@@ -752,7 +752,7 @@ class _LowerNnImg2col2dPattern(RewritePattern):
     def match_and_rewrite(self, op: NnImg2col2dOp, rewriter: PatternRewriter) -> None:
         block = op.parent_block()
         if block is None:
-            raise NnLoweringError("nn op must be inside a block")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn op must be inside a block")
         _lower_img2col2d(block, op)
         rewriter.has_done_action = True
 

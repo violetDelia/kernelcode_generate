@@ -3,13 +3,28 @@
 - 提供 npu_demo 后端的 Kernel helper 轻量实现，匹配 `include/api/Kernel.h` 的公开声明。
 - 当前实现优先覆盖 add / matmul 的真实运行路径，并为其余已公开 helper 提供最小可编译承接。
 
+API 列表:
+- `npu_demo::add<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::sub<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::mul<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::truediv<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::eq/ne/lt/le/gt/ge<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::exp<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& input) -> Status`
+- `npu_demo::select<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::reduce_sum<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) -> Status`
+- `npu_demo::reduce_min<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) -> Status`
+- `npu_demo::reduce_max<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) -> Status`
+- `npu_demo::matmul<LhsSpace, RhsSpace, OutSpace, LhsType, RhsType, OutType>(Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs) -> Status`
+- `npu_demo::img2col1d<InputSpace, OutputSpace, InType, OutType>(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right) -> Status`
+- `npu_demo::img2col2d<InputSpace, OutputSpace, InType, OutType>(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr) -> Status`
+
 使用示例:
 - #include "include/npu_demo/Kernel.h"
 - Status st = npu_demo::add<GM, float, float>(out, lhs, rhs);
 - Status st2 = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs);
 
 创建者: 小李飞刀
-最后修改人: jcc你莫辜负
+最后修改人: 守护最好的爱莉希雅
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -546,6 +561,66 @@ inline Status reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType
                 long long index[2] = {i, j};
                 const OutType value = static_cast<OutType>(input.at(index));
                 current = value < current ? value : current;
+            }
+            long long out_index[2] = {0, j};
+            out.at(out_index) = current;
+        }
+        return StatusCode::kOk;
+    }
+    return StatusCode::kError;
+}
+
+/*
+功能说明:
+- 对二维输入在指定 `axis` 上执行 `reduce_max`，并把结果写入 `out`。
+
+使用示例:
+- Status st = npu_demo::reduce_max<GM, float, float>(out, input, 1);
+
+创建者: 守护最好的爱莉希雅
+最后修改人: 守护最好的爱莉希雅
+
+关联文件:
+- spec: spec/include/api/Kernel.md
+- test: test/include/api/test_kernel.py
+- 功能实现: include/npu_demo/Kernel.h
+*/
+template <MemorySpace Space, typename InType, typename OutType>
+inline Status reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) {
+    if (input.rank() != 2 || out.rank() != 2) {
+        return StatusCode::kError;
+    }
+    if (!detail::is_non_null(input.data()) || !detail::is_non_null(out.data())) {
+        return StatusCode::kError;
+    }
+    if (axis == 1) {
+        if (out.get_shape(0) != input.get_shape(0) || out.get_shape(1) != 1) {
+            return StatusCode::kError;
+        }
+        for (long long i = 0; i < input.get_shape(0); ++i) {
+            long long start_index[2] = {i, 0};
+            OutType current = static_cast<OutType>(input.at(start_index));
+            for (long long j = 1; j < input.get_shape(1); ++j) {
+                long long index[2] = {i, j};
+                const OutType value = static_cast<OutType>(input.at(index));
+                current = value > current ? value : current;
+            }
+            long long out_index[2] = {i, 0};
+            out.at(out_index) = current;
+        }
+        return StatusCode::kOk;
+    }
+    if (axis == 0) {
+        if (out.get_shape(0) != 1 || out.get_shape(1) != input.get_shape(1)) {
+            return StatusCode::kError;
+        }
+        for (long long j = 0; j < input.get_shape(1); ++j) {
+            long long start_index[2] = {0, j};
+            OutType current = static_cast<OutType>(input.at(start_index));
+            for (long long i = 1; i < input.get_shape(0); ++i) {
+                long long index[2] = {i, j};
+                const OutType value = static_cast<OutType>(input.at(index));
+                current = value > current ? value : current;
             }
             long long out_index[2] = {0, j};
             out.at(out_index) = current;

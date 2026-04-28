@@ -57,7 +57,7 @@ load_builtin_passes = registry_module.load_builtin_passes
 
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.context import build_default_context
+from kernel_gen.core.context import build_default_context
 
 
 def test_tile_elewise_public_api_surface_is_stable() -> None:

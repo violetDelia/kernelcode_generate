@@ -7,6 +7,22 @@
 - 定义 dma dialect 的 alloc/fill/copy/load/store/slice/deslice/view/reshape/cast/broadcast op 与 verifier 规则。
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
 
+API 列表:
+- `Dma`
+- `DmaAllocOp`
+- `DmaFillOp`
+- `DmaFreeOp`
+- `DmaCopyOp`
+- `DmaBroadcastOp`
+- `DmaTransposeOp`
+- `DmaLoadOp`
+- `DmaStoreOp`
+- `DmaSliceOp`
+- `DmaDesliceOp`
+- `DmaViewOp`
+- `DmaReshapeOp`
+- `DmaCastOp`
+
 使用示例:
 - from kernel_gen.dialect.dma import Dma, DmaCopyOp
 
@@ -18,8 +34,10 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
+import sympy as sp
 from xdsl.dialects.builtin import (
     ArrayAttr,
     BFloat16Type,
@@ -44,7 +62,7 @@ from xdsl.irdl import (
 )
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.common.contracts import (
+from kernel_gen.core.contracts import (
     dims_equal as _common_dims_equal,
     verify_memory_type as _common_verify_memory_type,
 )
@@ -418,13 +436,14 @@ def _verify_transpose_layout(
     target_type: NnMemoryType,
     perm_values: Sequence[int],
 ) -> None:
-    """校验 dma.transpose 的 shape/stride 是否按 perm 重排。
+    """校验 dma.transpose 的目标 shape 与连续 stride。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 大闸蟹
 
     功能说明:
-    - 按 perm 重排 source shape/stride，并与 target 对齐校验。
+    - 按 perm 重排 source shape，并与 target shape 对齐校验。
+    - target stride 必须是 target shape 的默认连续 stride。
 
     使用示例:
     - _verify_transpose_layout(source_type, target_type, [1, 0])
@@ -442,9 +461,9 @@ def _verify_transpose_layout(
         if not _dims_equal(expected_dim, actual_dim):
             raise VerifyException("dma.transpose target shape mismatch")
 
-    expected_stride = [source_type.stride.data[index] for index in perm_values]
+    expected_stride = _default_contiguous_stride(target_type.shape)
     for expected_dim, actual_dim in zip(expected_stride, target_type.stride.data, strict=True):
-        if not _dims_equal(expected_dim, actual_dim):
+        if not _stride_attrs_equal(expected_dim, actual_dim):
             raise VerifyException("dma.transpose target stride mismatch")
 
 
@@ -692,6 +711,69 @@ def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
     return stride
 
 
+def _parse_symbolic_dim_attr(value: Attribute) -> sp.Basic | None:
+    """解析 stride 维度 attribute 为 sympy 表达式。
+
+    创建者: 守护最好的爱莉希雅
+    最后一次更改: 守护最好的爱莉希雅
+
+    功能说明:
+    - `IntAttr` 解析为整数表达式。
+    - `StringAttr` 解析为符号表达式，并为所有标识符创建同名整数符号。
+    - 无法解析或未知动态维度时返回 `None`。
+
+    使用示例:
+    - _parse_symbolic_dim_attr(StringAttr("KH*KW*TC"))
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if isinstance(value, IntAttr):
+        return sp.Integer(value.data)
+    if not isinstance(value, StringAttr):
+        return None
+    text = value.data.strip()
+    if text == "?":
+        return None
+    names = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text))
+    local_dict = {name: sp.Symbol(name, integer=True, real=True) for name in names}
+    try:
+        return sp.sympify(text, locals=local_dict)
+    except (TypeError, ValueError, SyntaxError, sp.SympifyError):
+        return None
+
+
+def _stride_attrs_equal(lhs: Attribute, rhs: Attribute) -> bool:
+    """判断两个 stride 维度是否等价。
+
+    创建者: 守护最好的爱莉希雅
+    最后一次更改: 守护最好的爱莉希雅
+
+    功能说明:
+    - 优先复用公共维度比较。
+    - 当文本不同但表达式等价时，使用 sympy 简化差值判断。
+
+    使用示例:
+    - _stride_attrs_equal(StringAttr("TC*KH*KW"), StringAttr("KH*KW*TC"))
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if _common_dims_equal(lhs, rhs):
+        return True
+    lhs_expr = _parse_symbolic_dim_attr(lhs)
+    rhs_expr = _parse_symbolic_dim_attr(rhs)
+    if lhs_expr is None or rhs_expr is None:
+        return False
+    return sp.simplify(lhs_expr - rhs_expr) == 0
+
+
 def _is_contiguous(memory_type: NnMemoryType) -> bool:
     """检查 memory type 是否连续行主序。
 
@@ -699,7 +781,8 @@ def _is_contiguous(memory_type: NnMemoryType) -> bool:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 仅在 stride 为 IntAttr 且匹配连续行主序时返回 True。
+    - 静态 stride 直接比较整数。
+    - 符号 stride 使用表达式等价判断，允许乘法因子顺序不同。
 
     使用示例:
     - _is_contiguous(memory_type)
@@ -714,15 +797,8 @@ def _is_contiguous(memory_type: NnMemoryType) -> bool:
     if len(expected) != len(memory_type.stride.data):
         return False
     for expected_dim, stride_dim in zip(expected, memory_type.stride.data, strict=True):
-        if isinstance(expected_dim, IntAttr):
-            if not isinstance(stride_dim, IntAttr) or stride_dim.data != expected_dim.data:
-                return False
-            continue
-        if isinstance(expected_dim, StringAttr):
-            if not isinstance(stride_dim, StringAttr) or stride_dim.data != expected_dim.data:
-                return False
-            continue
-        return False
+        if not _stride_attrs_equal(expected_dim, stride_dim):
+            return False
     return True
 
 
@@ -1085,7 +1161,8 @@ class DmaTransposeOp(IRDLOperation):
         功能说明:
         - target/source 必须为 nn.memory。
         - element_type 与 space 必须一致。
-        - perm 必须是 0..rank-1 的排列，且 target shape/stride 为 source 的重排。
+        - perm 必须是 0..rank-1 的排列，target shape 为 source 的重排。
+        - target stride 必须是 target shape 的默认连续 stride。
 
         使用示例:
         - DmaTransposeOp(...).verify_()
@@ -1193,8 +1270,8 @@ class DmaStoreOp(IRDLOperation):
 
     name = "dma.store"
 
-    source = operand_def(NnMemoryType)
     target = operand_def(NnMemoryType)
+    source = operand_def(NnMemoryType)
     offsets = var_operand_def(Attribute)
     sizes = var_operand_def(SymbolValueType)
     strides = var_operand_def(SymbolValueType)
@@ -1203,8 +1280,8 @@ class DmaStoreOp(IRDLOperation):
 
     def __init__(
         self,
-        source: SSAValue | Operation,
         target: SSAValue | Operation,
+        source: SSAValue | Operation,
         offsets: Sequence[SSAValue],
         sizes: Sequence[SSAValue],
         strides: Sequence[SSAValue],
@@ -1215,11 +1292,11 @@ class DmaStoreOp(IRDLOperation):
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 设置 source/target 与 offsets/sizes/strides。
+        - 设置 target/source 与 offsets/sizes/strides。
         - offsets 允许 `!symbol.int` 与 `!symbol.iter`。
 
         使用示例:
-        - DmaStoreOp(source, target, offsets, sizes, strides)
+        - DmaStoreOp(target, source, offsets, sizes, strides)
 
         关联文件:
         - spec: spec/dialect/dma.md
@@ -1227,7 +1304,7 @@ class DmaStoreOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
-        super().__init__(operands=[source, target, offsets, sizes, strides])
+        super().__init__(operands=[target, source, offsets, sizes, strides])
 
     def verify_(self) -> None:
         """校验 dma.store。
@@ -1350,8 +1427,8 @@ class DmaDesliceOp(IRDLOperation):
 
     name = "dma.deslice"
 
-    source = operand_def(NnMemoryType)
     target = operand_def(NnMemoryType)
+    source = operand_def(NnMemoryType)
     offsets = var_operand_def(Attribute)
     sizes = var_operand_def(SymbolValueType)
     strides = var_operand_def(SymbolValueType)
@@ -1361,8 +1438,8 @@ class DmaDesliceOp(IRDLOperation):
 
     def __init__(
         self,
-        source: SSAValue | Operation,
         target: SSAValue | Operation,
+        source: SSAValue | Operation,
         offsets: Sequence[SSAValue],
         sizes: Sequence[SSAValue],
         strides: Sequence[SSAValue],
@@ -1374,11 +1451,11 @@ class DmaDesliceOp(IRDLOperation):
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 设置 source/target、offsets/sizes/strides 与结果类型。
+        - 设置 target/source、offsets/sizes/strides 与结果类型。
         - offsets 允许 `!symbol.int` 与 `!symbol.iter`。
 
         使用示例:
-        - DmaDesliceOp(source, target, offsets, sizes, strides, result_type)
+        - DmaDesliceOp(target, source, offsets, sizes, strides, result_type)
 
         关联文件:
         - spec: spec/dialect/dma.md
@@ -1387,7 +1464,7 @@ class DmaDesliceOp(IRDLOperation):
         """
 
         super().__init__(
-            operands=[source, target, offsets, sizes, strides],
+            operands=[target, source, offsets, sizes, strides],
             result_types=[result_type],
         )
 

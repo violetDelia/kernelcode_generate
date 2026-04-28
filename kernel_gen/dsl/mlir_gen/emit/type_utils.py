@@ -20,6 +20,7 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from typing import Sequence
 
@@ -31,12 +32,6 @@ from kernel_gen.dsl.ast import ConstAST
 
 
 
-class LoweringError(ValueError):
-    """当前文件内使用的类型推导失败错误。"""
-
-    def __init__(self, message: str, location: object | None = None) -> None:
-        super().__init__(message)
-        self.location = location
 
 
 def _expr_key(expr: object) -> int:
@@ -96,8 +91,8 @@ def infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
             return i32
         if isinstance(expr.value, float):
             return f32
-        raise LoweringError("Unsupported constant type", location=expr.location)
-    raise LoweringError("Unsupported expression for infer_expr_type helper")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported constant type", location=expr.location)
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported expression for infer_expr_type helper")
 
 
 def memory_type_from_parts(

@@ -4,7 +4,7 @@
 # 创建者: 榕
 # 最后一次更改: Codex
 #
-# 功能:
+# 功能说明:
 # - 管理 TODO.md 任务流转: 分发、完成、暂停、继续、改派、续接、新建、删除、计划归档。
 # - 支持 DONE.md 自动创建与完成记录追加。
 # - 在分发、完成、暂停、继续、改派、续接时按 TODO 运行表全量重算 agents-lists.md 角色状态。
@@ -13,6 +13,18 @@
 # - 通过 task-notify.sh 处理 list -init、tmux -talk、任务消息、改派通知与管理员摘要。
 # - 对传入的 -agents-list 做 canonical AGENTS_FILE 校验，避免写入错误名单文件。
 # - 写操作统一使用 flock 文件锁。
+#
+# API 列表:
+# - codex-multi-agents-task.sh -file <TODO.md> -dispatch -task_id <id> [-to <worker>] -agents-list <agents-lists.md> [-message <text>] [-type <execute|spec|build|review|merge|other|refactor>]
+# - codex-multi-agents-task.sh -file <TODO.md> -done -task_id <id> -log <log_path> -agents-list <agents-lists.md>
+# - codex-multi-agents-task.sh -file <TODO.md> -pause -task_id <id> -agents-list <agents-lists.md>
+# - codex-multi-agents-task.sh -file <TODO.md> -continue -task_id <id> -agents-list <agents-lists.md>
+# - codex-multi-agents-task.sh -file <TODO.md> -reassign -task_id <id> -to <worker> -agents-list <agents-lists.md>
+# - codex-multi-agents-task.sh -file <TODO.md> -next [-to <worker>|-auto] -task_id <id> -from <sender> -type <execute|spec|build|review|merge|other|refactor> -message <text> -agents-list <agents-lists.md>
+# - codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> -type <execute|spec|build|review|merge|other|refactor> -worktree <path> -depends <task_ids|None> -plan <plan_doc|None> [-to <worker>] [-from <owner>] [-log <record_path>]
+# - codex-multi-agents-task.sh -file <TODO.md> -status <-doing|-task-list|-plan-list>
+# - codex-multi-agents-task.sh -file <TODO.md> -delete -task_id <id>
+# - codex-multi-agents-task.sh -file <TODO.md> -done-plan -plan <plan_doc>
 #
 # 对应文件:
 # - spec: /home/lfr/kernelcode_generate/spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -103,7 +115,7 @@ validate_type_kind() {
   local text
   text="$(trim "$raw" | tr '[:upper:]' '[:lower:]')"
   case "$text" in
-    spec|build|review|merge|other|refactor)
+    execute|spec|build|review|merge|other|refactor)
       printf "%s" "$text"
       return 0
       ;;
@@ -123,13 +135,13 @@ err() {
 usage() {
   cat <<'USAGE'
 Usage:
-  codex-multi-agents-task.sh -file <TODO.md> -dispatch -task_id <id> [-to <worker>] -agents-list <agents-lists.md> [-message <text>] [-type <spec|build|review|merge|other|refactor>]
+  codex-multi-agents-task.sh -file <TODO.md> -dispatch -task_id <id> [-to <worker>] -agents-list <agents-lists.md> [-message <text>] [-type <execute|spec|build|review|merge|other|refactor>]
   codex-multi-agents-task.sh -file <TODO.md> -done -task_id <id> -log <log_path> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -pause -task_id <id> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -continue -task_id <id> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -reassign -task_id <id> -to <worker> -agents-list <agents-lists.md>
-  codex-multi-agents-task.sh -file <TODO.md> -next [-to <worker>|-auto] -task_id <id> -from <sender> -type <spec|build|review|merge|other|refactor> -message <text> -agents-list <agents-lists.md>
-  codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> -type <spec|build|review|merge|other|refactor> -worktree <path> -depends <task_ids|None> -plan <plan_doc|None> [-to <worker>] [-from <owner>] [-log <record_path>]
+  codex-multi-agents-task.sh -file <TODO.md> -next [-to <worker>|-auto] -task_id <id> -from <sender> -type <execute|spec|build|review|merge|other|refactor> -message <text> -agents-list <agents-lists.md>
+  codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> -type <execute|spec|build|review|merge|other|refactor> -worktree <path> -depends <task_ids|None> -plan <plan_doc|None> [-to <worker>] [-from <owner>] [-log <record_path>]
   codex-multi-agents-task.sh -file <TODO.md> -status -doing
   codex-multi-agents-task.sh -file <TODO.md> -status -task-list
   codex-multi-agents-task.sh -file <TODO.md> -status -plan-list
@@ -150,7 +162,7 @@ Examples:
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -next -task_id EX-2 -from worker-b -type review -message "下一阶段：补齐边界测试" -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -next -task_id EX-2 -from worker-b -to worker-c -type review -message "下一阶段：补齐边界测试" -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -next -auto -task_id EX-2 -from worker-b -type review -message "下一阶段：补齐边界测试" -agents-list ./agents/codex-multi-agents/agents-lists.md
-  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -new -info "补充单元测试" -type build -worktree repo-x -depends "EX-2,EX-5" -plan "ARCHITECTURE/plan/x.md" -to worker-b -from 李白 -log ./log/record.md
+  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -new -info "补齐计划书全部小任务卡" -type execute -worktree repo-x -depends "EX-2,EX-5" -plan "ARCHITECTURE/plan/x.md" -to worker-b -from 李白 -log ./log/record.md
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -doing
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -task-list
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -plan-list

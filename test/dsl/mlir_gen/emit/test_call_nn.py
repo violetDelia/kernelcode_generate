@@ -29,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
@@ -144,5 +145,5 @@ def test_emit_mlir_rejects_unsupported_symbol_binary_op() -> None:
     emit_mlir(lhs, ctx)
     emit_mlir(rhs, ctx)
 
-    with pytest.raises(ValueError, match="Unsupported symbol binary op"):
+    with pytest.raises(KernelCodeError, match="Unsupported symbol binary op"):
         emit_mlir(BinaryExprAST(op="pow", lhs=lhs, rhs=rhs, location=None), ctx)

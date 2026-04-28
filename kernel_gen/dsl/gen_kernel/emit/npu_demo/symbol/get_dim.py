@@ -4,7 +4,6 @@ from xdsl.dialects.builtin import IntAttr
 
 from kernel_gen.dialect.symbol import SymbolGetDimOp
 
-from ....errors import emit_c_error
 from ...register import emit_c_impl, emit_c_value_impl
 
 
@@ -25,6 +24,6 @@ def _emit_npu_demo_symbol_get_dim_value(value, ctx) -> str:
 
     owner = value.owner
     if not isinstance(owner.axis, IntAttr):
-        raise emit_c_error(ctx, owner.name, "axis must be IntAttr")
+        raise ctx.emit_error(owner.name, "axis must be IntAttr")
     source_expr = emit_c_value(owner.source, ctx)
     return f"{source_expr}.get_shape({owner.axis.data})"

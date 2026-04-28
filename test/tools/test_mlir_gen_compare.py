@@ -1,7 +1,7 @@
 """mlir_gen compare tests.
 
 创建者: 睡觉小分队
-最后一次更改: 金铲铲大作战
+最后一次更改: 榕
 
 功能说明:
 - 覆盖 mlir_gen_compare(...) / mlir_gen_compare_text(...) / compare_mlir_file(...) 的 True/False 路径与非法文本返回 False 的行为。
@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.context import build_default_context
+from kernel_gen.core.context import build_default_context
 import kernel_gen.dsl.mlir_gen as public_mlir_gen
 from kernel_gen.tools import mlir_gen_compare as compare_module
 
@@ -46,6 +46,15 @@ _ARITH_MODULE_TEXT = """builtin.module {
 }
 """
 
+_SCF_MODULE_TEXT = """builtin.module {
+  func.func @main(%0 : i1) {
+    scf.if %0 {
+    }
+    func.return
+  }
+}
+"""
+
 
 def _dummy_kernel() -> None:
     """占位 kernel，用于 mlir_gen_compare 测试。
@@ -57,7 +66,7 @@ def _dummy_kernel() -> None:
     - 作为 mlir_gen_compare 的入参占位，便于测试走通比较逻辑。
 
     使用示例:
-    - mlir_gen_compare(_dummy_kernel, None, None, path)
+    - mlir_gen_compare(_dummy_kernel, None, path)
 
     关联文件:
     - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
@@ -88,6 +97,14 @@ def _stub_mlir_gen(*_args: object, **_kwargs: object) -> object:
 
     ctx = build_default_context()
     return Parser(ctx, _SIMPLE_MODULE_TEXT).parse_module()
+
+
+def test_build_default_context_parses_scf_if() -> None:
+    """默认解析 Context 必须覆盖 mlir_gen_compare 需要的 scf.if。"""
+
+    module = Parser(build_default_context(), _SCF_MODULE_TEXT).parse_module()
+
+    assert module is not None
 
 
 def _install_public_mlir_gen_stub(
@@ -165,7 +182,6 @@ def test_mlir_gen_compare_true(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
         runtime_args=None,
-        config=None,
         mlir_file=str(expected_path),
     )
 
@@ -191,7 +207,6 @@ def test_compare_mlir_file_alias_true(tmp_path: Path, monkeypatch: pytest.Monkey
     ok = compare_module.compare_mlir_file(
         fn=_dummy_kernel,
         runtime_args=None,
-        config=None,
         mlir_file=str(expected_path),
     )
 
@@ -221,7 +236,6 @@ def test_mlir_gen_compare_returns_false_on_mismatch(
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
         runtime_args=(),
-        config=None,
         mlir_file=str(expected_path),
     )
 
@@ -249,7 +263,6 @@ def test_mlir_gen_compare_returns_false_on_invalid_text(
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
         runtime_args=None,
-        config=None,
         mlir_file=str(expected_path),
     )
 
@@ -277,7 +290,6 @@ def test_mlir_gen_compare_returns_false_on_non_utf8_text(
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
         runtime_args=None,
-        config=None,
         mlir_file=str(expected_path),
     )
 
@@ -310,7 +322,6 @@ def test_mlir_gen_compare_true_with_arith(
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
         runtime_args=None,
-        config=None,
         mlir_file=str(expected_path),
     )
 
@@ -340,7 +351,6 @@ def test_mlir_gen_compare_returns_false_on_normalize_parse_error(
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
         runtime_args=None,
-        config=None,
         mlir_file=str(expected_path),
     )
 
@@ -389,7 +399,6 @@ def test_mlir_gen_compare_returns_false_when_actual_not_module(
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
         runtime_args=None,
-        config=None,
         mlir_file=str(expected_path),
     )
 
@@ -432,7 +441,6 @@ def test_mlir_gen_compare_does_not_repair_legacy_dma_view_result_dtype(
     ok = compare_module.mlir_gen_compare_text(
         fn=_dummy_kernel,
         runtime_args=None,
-        config=None,
         mlir_text=expected_text,
     )
 
@@ -456,7 +464,6 @@ def test_mlir_gen_compare_text_true(monkeypatch: pytest.MonkeyPatch) -> None:
     ok = compare_module.mlir_gen_compare_text(
         fn=_dummy_kernel,
         runtime_args=None,
-        config=None,
         mlir_text=_SIMPLE_MODULE_TEXT,
     )
 
@@ -482,7 +489,6 @@ def test_mlir_gen_compare_text_returns_false_on_invalid_text(
     ok = compare_module.mlir_gen_compare_text(
         fn=_dummy_kernel,
         runtime_args=None,
-        config=None,
         mlir_text="invalid mlir",
     )
 

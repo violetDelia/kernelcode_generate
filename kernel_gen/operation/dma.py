@@ -1,7 +1,7 @@
 """DMA operation API.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 大闸蟹
 
 功能说明:
 - 提供 Memory 的数据搬运、视图变换、整块初始化与显式转换 API，包括 alloc/free/fill/copy/load/store/slice/deslice/view/reshape/flatten/cast。
@@ -11,10 +11,10 @@ API 列表:
 - `free(memory: object) -> None`
 - `fill(target: object, value: object) -> None`
 - `copy(source: object, target: object) -> Memory`
-- `load(source: object, target: object) -> Memory`
-- `store(source: object, target: object) -> Memory`
+- `load(source: object, offsets: Sequence[int | str] | SymbolShape, sizes: Sequence[int | str] | SymbolShape, strides: Sequence[int | str] | SymbolShape | None = None, space: MemorySpace | None = None) -> Memory`
+- `store(target: object, source: object, offsets: Sequence[int | str] | SymbolShape, sizes: Sequence[int | str] | SymbolShape, strides: Sequence[int | str] | SymbolShape | None = None) -> None`
 - `slice(memory: object, dim: Sequence[int | SymbolDim], offset: Sequence[int | SymbolDim], size: Sequence[int | SymbolDim], stride: Sequence[int | SymbolDim]) -> Memory`
-- `deslice(source: object, target: object, dim: Sequence[int | SymbolDim], offset: Sequence[int | SymbolDim], size: Sequence[int | SymbolDim], stride: Sequence[int | SymbolDim]) -> Memory`
+- `deslice(target: object, source: object, dim: Sequence[int | SymbolDim], offset: Sequence[int | SymbolDim], size: Sequence[int | SymbolDim], stride: Sequence[int | SymbolDim]) -> Memory`
 - `view(memory: object, shape: Sequence[int | str] | SymbolShape, stride: Sequence[int | str] | SymbolShape | None = None, format: Farmat | None = None) -> Memory`
 - `reshape(memory: object, shape: Sequence[int | str] | SymbolShape) -> Memory`
 - `flatten(memory: object) -> Memory`
@@ -36,14 +36,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from kernel_gen.common.contracts import default_stride as _common_default_stride
-from kernel_gen.common.contracts import shape_numel as _common_shape_numel
-from kernel_gen.common.errors import _ERROR_TEMPLATE
-from kernel_gen.symbol_variable.dtype_constants import FLOAT_DTYPES, INT_DTYPES
+from kernel_gen.core.contracts import default_stride as _common_default_stride
+from kernel_gen.core.contracts import shape_numel as _common_shape_numel
+from kernel_gen.core.contracts import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
-from kernel_gen.symbol_variable.type import Farmat, NumericType
+from kernel_gen.symbol_variable.type import FLOAT_DTYPES, INT_DTYPES, Farmat, NumericType
 
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_SCENE = "dma operation 参数校验"
@@ -739,7 +738,7 @@ def copy(source: object, space: object) -> Memory:
     """整块拷贝。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 返回新的 Memory 描述，仅覆盖目标 space。
@@ -754,13 +753,7 @@ def copy(source: object, space: object) -> Memory:
     """
     src = _ensure_memory(source, "source")
     target_space = _resolve_memory_space(space, scene="dma.copy 参数校验")
-    return Memory(
-        _clone_symbol_list(src.shape),
-        src.dtype,
-        space=target_space,
-        stride=_clone_symbol_list(src.stride),
-        format=src.format,
-    )
+    return src.clone(space=target_space)
 
 
 def load(
@@ -804,8 +797,8 @@ def load(
 
 
 def store(
-    source: object,
     target: object,
+    source: object,
     offsets: Sequence[int | str] | SymbolShape,
     sizes: Sequence[int | str] | SymbolShape,
     strides: Sequence[int | str] | SymbolShape | None = None,
@@ -816,18 +809,19 @@ def store(
     最后一次更改: 小李飞刀
 
     功能说明:
+    - target-first：第一个参数固定为写回目标。
     - source.shape 必须与 sizes 一致。
 
     使用示例:
-    - store(tile, dst, offsets=[0, 0], sizes=[32, 32])
+    - store(dst, tile, offsets=[0, 0], sizes=[32, 32])
 
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
-    src = _ensure_memory(source, "source")
     dst = _ensure_memory(target, "target")
+    src = _ensure_memory(source, "source")
     if src.dtype is not dst.dtype:
         raise TypeError(
             _ERROR_TEMPLATE.format(
@@ -891,8 +885,8 @@ def slice(
 
 
 def deslice(
-    source: object,
     target: object,
+    source: object,
     offsets: Sequence[int | str] | SymbolShape,
     sizes: Sequence[int | str] | SymbolShape,
     strides: Sequence[int | str] | SymbolShape | None = None,
@@ -903,17 +897,17 @@ def deslice(
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - source.shape 必须与 sizes 一致。
+    - target 为写回目标，source.shape 必须与 sizes 一致。
 
     使用示例:
-    - deslice(sub, dst, offsets=[0, 0], sizes=[8, 8])
+    - deslice(dst, sub, offsets=[0, 0], sizes=[8, 8])
 
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
-    return store(source, target, offsets, sizes, strides=strides)
+    return store(target, source, offsets, sizes, strides=strides)
 
 
 def view(
@@ -1043,7 +1037,7 @@ def cast(source: object, dtype: NumericType, memoryspace: MemorySpace | None = N
     """显式转换 Memory dtype。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 返回 shape/stride/format 保持一致的新 Memory，space 可选覆盖。
@@ -1085,10 +1079,4 @@ def cast(source: object, dtype: NumericType, memoryspace: MemorySpace | None = N
             )
         )
     target_space = src.space if memoryspace is None else memoryspace
-    return Memory(
-        _clone_symbol_list(src.shape),
-        dtype,
-        space=target_space,
-        stride=_clone_symbol_list(src.stride),
-        format=src.format,
-    )
+    return src.clone(dtype=dtype, space=target_space)

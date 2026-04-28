@@ -27,7 +27,7 @@
 ## API 列表
 
 - `CLI：`python -m kernel_gen.tools.ircheck [-irdump] [-emitc{target=<target>}] <case-file>`
-- `IrcheckParseError(message: str)`
+- 解析失败统一抛出 `KernelCodeError(module=tools, message="IrcheckParseError: ...")`
 - `IrcheckCaseBlock(text: str, start_line: int)`
 - `CheckDirective(kind: CheckKind, text: str, line_no: int)`
 - `IrcheckCase(compile_args: str, checks: list[CheckDirective], input_ir: str, source_path: str | None = None)`

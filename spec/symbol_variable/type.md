@@ -8,6 +8,11 @@
 
 - `class NumericType(Enum)`
 - `class Farmat(Enum)`
+- `FLOAT_DTYPES`
+- `INT_DTYPES`
+- `ARITHMETIC_DTYPE_ORDER`
+- `ARITHMETIC_DTYPE_RANK`
+- `NN_FLOAT_DTYPES`
 - `is_integer_dtype(dtype: NumericType) -> bool`
 - `is_float_dtype(dtype: NumericType) -> bool`
 
@@ -37,11 +42,11 @@
 - [immutable]仅定义 `NumericType` 与 `Farmat` 两个枚举类型。
 - [immutable]不负责内存对象、张量对象或其他模块的运行时语义。
 - [immutable]不提供工厂函数、转换函数或其他辅助 API。
-- 上述旧口径在本轮继续保持“不提供工厂构造、转换、promotion、字符串解析或包根重导出 helper”的含义；当前新增公开范围仅限下文列出的两个 dtype family 查询 helper。
-- 当前唯一额外公开的模块级查询 helper 为 `is_integer_dtype(...)` 与 `is_float_dtype(...)`；它们只接受 `NumericType`，不承担工厂构造、字符串解析、自动转换或 promotion。
-- 不定义 dtype 推导、类型提升、布局转换或字符串解析逻辑。
+- 上述旧口径在本轮继续保持“不提供工厂构造、转换、promotion、字符串解析或包根重导出 helper”的含义；当前新增公开范围仅限下文列出的 dtype family 常量与两个 dtype family 查询 helper。
+- 当前额外公开的模块级 dtype family 真源为 `FLOAT_DTYPES` / `INT_DTYPES` / `NN_FLOAT_DTYPES`，dtype promotion 常量真源为 `ARITHMETIC_DTYPE_ORDER` / `ARITHMETIC_DTYPE_RANK`，查询 helper 为 `is_integer_dtype(...)` 与 `is_float_dtype(...)`；helper 只接受 `NumericType`，不承担工厂构造、字符串解析或自动转换。
+- 仅定义 arithmetic promotion 的稳定顺序与 rank 常量，不定义完整 dtype 推导、布局转换或字符串解析逻辑。
 - 当前支持从 `kernel_gen.symbol_variable.type` 直接导入，也支持通过 `kernel_gen.symbol_variable` 包入口重导出导入；包级入口边界由 [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md) 负责。
-- `is_integer_dtype(...)` 与 `is_float_dtype(...)` 只在 `kernel_gen.symbol_variable.type` 子模块公开，不进入 `kernel_gen.symbol_variable` 包根稳定导出集合。
+- `FLOAT_DTYPES`、`INT_DTYPES`、`NN_FLOAT_DTYPES`、`ARITHMETIC_DTYPE_ORDER`、`ARITHMETIC_DTYPE_RANK`、`is_integer_dtype(...)` 与 `is_float_dtype(...)` 只在 `kernel_gen.symbol_variable.type` 子模块公开，不进入 `kernel_gen.symbol_variable` 包根稳定导出集合。
 - 不提供旧路径 `symbol_variable.type` 的兼容入口；该规则与包级 legacy 路径禁用保持一致。
 - 不扩展到量化类型、复数类型、稀疏布局或其他未公开的枚举成员。
 
@@ -134,7 +139,125 @@ assert Farmat.CLast.name == "CLast"
 - 返回的成员仅承诺 `Enum` 身份、可见性与 `.name` 稳定；不承诺 `.value` 可用于外部布局判等、字符串解析或别名兼容。
 - “常见布局别名”描述不构成新增导出成员、字符串匹配规则或与其他布局名的公开等价关系。
 
-### dtype family helper 语义
+### dtype family 常量与 helper 语义
+
+#### `FLOAT_DTYPES`
+
+功能说明：
+
+- 当前公开浮点 dtype family 真源。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.type import FLOAT_DTYPES, NumericType
+
+assert NumericType.Float32 in FLOAT_DTYPES
+assert NumericType.Bool not in FLOAT_DTYPES
+```
+
+注意事项：
+
+- 固定覆盖 `Float16`、`BFloat16`、`Float32`、`Float64`。
+- 不包含整数成员与 `Bool`。
+- `dtype_constants.FLOAT_DTYPES` 必须复用该对象，不再自维护重复集合。
+
+返回与限制：
+
+- 返回 `set[NumericType]`。
+
+#### `INT_DTYPES`
+
+功能说明：
+
+- 当前公开整数 dtype family 真源。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.type import INT_DTYPES, NumericType
+
+assert NumericType.Int32 in INT_DTYPES
+assert NumericType.Bool not in INT_DTYPES
+```
+
+注意事项：
+
+- 固定覆盖 `Int8/16/32/64` 与 `Uint8/16/32/64`。
+- 不包含浮点成员与 `Bool`。
+- `dtype_constants.INT_DTYPES` 必须复用该对象，不再自维护重复集合。
+
+返回与限制：
+
+- 返回 `set[NumericType]`。
+
+#### `ARITHMETIC_DTYPE_ORDER`
+
+功能说明：
+
+- 当前公开 arithmetic promotion 顺序真源。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.type import ARITHMETIC_DTYPE_ORDER, NumericType
+
+assert ARITHMETIC_DTYPE_ORDER[0] is NumericType.Int8
+assert ARITHMETIC_DTYPE_ORDER[-1] is NumericType.Float64
+```
+
+注意事项：
+
+- 固定顺序为 `Int8`、`Uint8`、`Int16`、`Uint16`、`Int32`、`Uint32`、`Int64`、`Uint64`、`Float16`、`BFloat16`、`Float32`、`Float64`。
+- `NumericType.Bool` 不参与 arithmetic promotion 顺序。
+
+返回与限制：
+
+- 返回 `tuple[NumericType, ...]`。
+
+#### `ARITHMETIC_DTYPE_RANK`
+
+功能说明：
+
+- 当前公开 arithmetic promotion rank 真源。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.type import ARITHMETIC_DTYPE_RANK, NumericType
+
+assert ARITHMETIC_DTYPE_RANK[NumericType.Float32] > ARITHMETIC_DTYPE_RANK[NumericType.Int32]
+```
+
+注意事项：
+
+- 必须由 `ARITHMETIC_DTYPE_ORDER` 派生，键集合与 `ARITHMETIC_DTYPE_ORDER` 保持一致。
+
+返回与限制：
+
+- 返回 `dict[NumericType, int]`。
+
+#### `NN_FLOAT_DTYPES`
+
+功能说明：
+
+- 当前公开 nn family 浮点 dtype 集合真源。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.type import FLOAT_DTYPES, NN_FLOAT_DTYPES
+
+assert NN_FLOAT_DTYPES is FLOAT_DTYPES
+```
+
+注意事项：
+
+- 当前必须与 `FLOAT_DTYPES` 保持同一对象身份，避免 nn family 维护第二套浮点集合。
+
+返回与限制：
+
+- 返回 `set[NumericType]`。
 
 #### `is_integer_dtype(dtype: NumericType) -> bool`
 
@@ -205,7 +328,7 @@ assert is_float_dtype(NumericType.Int32) is False
 
 ### 测试分层
 
-- 主测试：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py) 负责枚举成员、`is_integer_dtype(...)` / `is_float_dtype(...)`、模块级公开 API 可达性、模块级 `import *` 与 legacy 子模块路径。
+- 主测试：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py) 负责枚举成员、`FLOAT_DTYPES` / `INT_DTYPES`、`is_integer_dtype(...)` / `is_float_dtype(...)`、模块级公开 API 可达性、模块级 `import *` 与 legacy 子模块路径。
 - 交叉验证：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py) 只验证 `NumericType.Bool` 被上游比较接口稳定消费。
 
 ### 测试目标
@@ -213,7 +336,7 @@ assert is_float_dtype(NumericType.Int32) is False
 - 验证 `NumericType` 既有公开成员、名称和值稳定；`Bool` 由交叉链路单独验证。
 - 验证 `NumericType.Bool` 作为公开枚举成员可用于比较类接口返回值。
 - 验证 `Farmat` 仅公开 `Norm` 与 `CLast`。
-- 验证 `is_integer_dtype(...)` 与 `is_float_dtype(...)` 的 family 结果、非法输入与子模块公开边界。
+- 验证 `FLOAT_DTYPES` / `INT_DTYPES` 内容与 `is_integer_dtype(...)` / `is_float_dtype(...)` 的 family 结果、非法输入与子模块公开边界。
 - 验证模块级公开 API 可达性与 `import *` 的公开边界。
 - 验证旧路径 `symbol_variable.type` 不可导入。
 
@@ -224,7 +347,8 @@ assert is_float_dtype(NumericType.Int32) is False
 | TY-001 | 成员值 | `NumericType` 既有成员值稳定 | 已导入 `kernel_gen.symbol_variable.type` | 读取既有成员 `.value` | 与约定字符串一致 |
 | TY-002 | 成员边界 | `Farmat` 公开成员 | 已导入 `Farmat` | 仅可访问 `Norm`/`CLast` | 不存在额外布局名 |
 | TY-003 | 导出边界 | 模块公开 API 可达性 | 已导入模块 | 读取 `NumericType/Farmat/is_integer_dtype/is_float_dtype`，并确认无 `Memory/MemorySpace` 混入 | 仅已定义公开 API 可达，未定义名字不作为模块级公开接口出现 |
-| TY-004 | 导出边界 | `import *` 暴露范围 | 已导入模块 | 执行 `from kernel_gen.symbol_variable.type import *` | 仅暴露 `Farmat`/`NumericType`/`is_integer_dtype`/`is_float_dtype` |
+| TY-004 | 导出边界 | `import *` 暴露范围 | 已导入模块 | 执行 `from kernel_gen.symbol_variable.type import *` | 仅暴露 `Farmat`/`NumericType`/`FLOAT_DTYPES`/`INT_DTYPES`/`is_integer_dtype`/`is_float_dtype` |
+| TY-004A | dtype family 常量 | 模块级 dtype family 真源 | 已导入 `FLOAT_DTYPES` / `INT_DTYPES` | 读取集合内容并检查 `Bool` 不属于任一集合 | 内容与公开 dtype family 一致 |
 | TY-005 | 成员访问 | `NumericType` 既有成员访问 | 已导入 `NumericType` | 读取既有成员 `.name` | 与约定成员名一致 |
 | TY-006 | 导入边界 | 旧路径导入 | 已安装包 | `importlib.import_module("symbol_variable.type")` | 抛 `ModuleNotFoundError` |
 | TY-007 | 布尔类型 | `NumericType.Bool` 作为比较结果 dtype 的公开成员 | 已导入 `NumericType` 与 nn 比较接口 | 执行 `eq`/`ne`/`lt`/`le`/`gt`/`ge` 并读取结果 `dtype` | 返回值 `dtype` 为 `NumericType.Bool`，与公开成员语义一致 |

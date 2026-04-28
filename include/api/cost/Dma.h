@@ -1,7 +1,8 @@
 /*
 功能说明:
 - 定义 include/api/cost/Dma.h 的统一公共 DMA 成本 helper 声明。
-- 当前最小成功路径覆盖 `dma.copy -> npu_demo::cost::copy`，并同步冻结 `slice/deslice` 的模板与参数顺序。
+- 当前成功路径覆盖 `dma.copy -> npu_demo::cost::copy` 与
+  `dma.slice/dma.deslice -> npu_demo::cost::slice/deslice`。
 
 API 列表:
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::copy(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source)`
@@ -13,7 +14,7 @@ helper 清单:
 
 使用示例:
 - #include "include/api/cost/Dma.h"
-- S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::memory>(target, source);
+- S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA>(target, source);
 
 创建者: 金铲铲大作战
 最后修改人: 金铲铲大作战
@@ -38,7 +39,7 @@ namespace cost {
 - 声明 `dma.copy` 对应的公共成本 helper。
 
 使用示例:
-- S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::memory>(target, source);
+- S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA>(target, source);
 
 创建者: 金铲铲大作战
 最后修改人: 金铲铲大作战
@@ -56,8 +57,8 @@ S_INT copy(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& s
 - 声明 `slice/deslice` 成本 helper，参数顺序与 include/api/Dma.h 保持一致。
 
 使用示例:
-- S_INT slice_cost = npu_demo::cost::slice<TSM, GM, float, npu_demo::memory>(target, source, offset, size, stride);
-- S_INT deslice_cost = npu_demo::cost::deslice<GM, TSM, float, npu_demo::memory>(target, source, offset, size, stride);
+- S_INT slice_cost = npu_demo::cost::slice<TSM, GM, float, npu_demo::DMA>(target, source, offset, size, stride);
+- S_INT deslice_cost = npu_demo::cost::deslice<GM, TSM, float, npu_demo::DMA>(target, source, offset, size, stride);
 
 创建者: 金铲铲大作战
 最后修改人: 金铲铲大作战

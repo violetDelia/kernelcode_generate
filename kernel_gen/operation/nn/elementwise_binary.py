@@ -1,7 +1,7 @@
 """NN operation elementwise binary family.
 
 创建者: 守护最好的爱莉希雅
-最后一次更改: 金铲铲大作战
+最后一次更改: 大闸蟹
 
 功能说明:
 - 提供逐元素算术 family 与共享隐式 broadcast helper。
@@ -24,8 +24,8 @@ API 列表:
 
 from __future__ import annotations
 
-from kernel_gen.common.contracts import default_stride
-from kernel_gen.common.errors import _ERROR_TEMPLATE
+from kernel_gen.core.contracts import default_stride
+from kernel_gen.core.contracts import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
@@ -35,48 +35,6 @@ ScalarArithmeticValue = int | float | SymbolDim
 ArithmeticResult = Memory | ScalarArithmeticValue
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_SCENE = "nn operation 参数校验"
-
-
-def _clone_shape(shape: SymbolShape | None) -> SymbolShape | None:
-    """复制 `SymbolShape`，避免输出与输入共享符号实例。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 对 `Memory` 的 shape/stride 做逐维复制。
-    - 保持符号表达式结构不变，同时断开实例别名。
-
-    使用示例:
-    - _clone_shape(SymbolShape(["M", "N"]))
-    """
-
-    if shape is None:
-        return None
-    return SymbolShape([SymbolDim(dim.get_symbol()) for dim in shape.get_shape()])
-
-
-def _clone_memory_with_dtype(value: Memory, dtype: object) -> Memory:
-    """按指定 dtype 复制 `Memory` 的公开元信息。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 仅通过公开 shape/stride/space/format 元信息构造结果。
-    - 避免跨文件依赖 `Memory._clone_with_dtype(...)`。
-
-    使用示例:
-    - _clone_memory_with_dtype(Memory([1], NumericType.Float32), NumericType.Float32)
-    """
-
-    return Memory(
-        _clone_shape(value.shape),
-        dtype,
-        space=value.space,
-        stride=_clone_shape(value.stride),
-        format=value.format,
-    )
 
 
 def _resolve_add_dtype(lhs: object, rhs: object) -> object:
@@ -269,7 +227,7 @@ def _binary_memory_result(lhs: Memory, rhs: Memory) -> Memory:
     """逐元素算术 Memory/Memory 结果推导。
 
     创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 支持隐式 broadcast 推导目标 shape。
@@ -291,7 +249,7 @@ def _binary_memory_result(lhs: Memory, rhs: Memory) -> Memory:
         if lhs.format is rhs.format and lhs.stride.get_values() == rhs.stride.get_values():
             if lhs.dtype is rhs.dtype:
                 return lhs + rhs
-            return _clone_memory_with_dtype(lhs, result_dtype)
+            return lhs.clone(dtype=result_dtype)
         return Memory(
             lhs.shape,
             result_dtype,
@@ -312,7 +270,7 @@ def _binary_add_result(lhs: Memory, rhs: Memory) -> Memory:
     """逐元素加法 Memory/Memory 结果推导。
 
     创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 支持隐式 broadcast 推导目标 shape。
@@ -334,7 +292,7 @@ def _binary_add_result(lhs: Memory, rhs: Memory) -> Memory:
         if lhs.format is rhs.format and lhs.stride.get_values() == rhs.stride.get_values():
             if lhs.dtype is rhs.dtype:
                 return lhs + rhs
-            return _clone_memory_with_dtype(lhs, result_dtype)
+            return lhs.clone(dtype=result_dtype)
         return Memory(
             lhs.shape,
             result_dtype,
@@ -423,7 +381,7 @@ def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> ArithmeticR
     """二元算术调度。
 
     创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 根据 Memory 所在侧选择正向或反向运算。
@@ -444,15 +402,15 @@ def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> ArithmeticR
         return _binary_memory_result(lhs, rhs)
     if isinstance(lhs, Memory):
         _ensure_scalar_value(rhs)
-        return _clone_memory_with_dtype(lhs, _resolve_scalar_dtype(lhs.dtype))
+        return lhs.clone(dtype=_resolve_scalar_dtype(lhs.dtype))
     _ensure_scalar_value(lhs)
-    return _clone_memory_with_dtype(rhs, _resolve_scalar_dtype(rhs.dtype))
+    return rhs.clone(dtype=_resolve_scalar_dtype(rhs.dtype))
 
 def add(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素加法。
 
     创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 支持 Memory 与 Memory/标量的加法。
@@ -479,9 +437,9 @@ def add(lhs: object, rhs: object) -> ArithmeticResult:
         return _binary_add_result(lhs, rhs)
     if isinstance(lhs, Memory):
         _ensure_scalar_value(rhs)
-        return _clone_memory_with_dtype(lhs, _resolve_scalar_dtype(lhs.dtype))
+        return lhs.clone(dtype=_resolve_scalar_dtype(lhs.dtype))
     _ensure_scalar_value(lhs)
-    return _clone_memory_with_dtype(rhs, _resolve_scalar_dtype(rhs.dtype))
+    return rhs.clone(dtype=_resolve_scalar_dtype(rhs.dtype))
 
 def sub(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素减法。
@@ -562,7 +520,7 @@ def floordiv(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素整除。
 
     创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 支持 Memory 与 Memory/标量的整除。
@@ -589,9 +547,9 @@ def floordiv(lhs: object, rhs: object) -> ArithmeticResult:
         return _binary_memory_result(lhs, rhs)
     if isinstance(lhs, Memory):
         _ensure_scalar_value(rhs)
-        return _clone_memory_with_dtype(lhs, _resolve_scalar_dtype(lhs.dtype))
+        return lhs.clone(dtype=_resolve_scalar_dtype(lhs.dtype))
     _ensure_scalar_value(lhs)
-    return _clone_memory_with_dtype(rhs, _resolve_scalar_dtype(rhs.dtype))
+    return rhs.clone(dtype=_resolve_scalar_dtype(rhs.dtype))
 
 __all__ = [
     "add",

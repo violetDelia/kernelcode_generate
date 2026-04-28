@@ -35,15 +35,23 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
+from kernel_gen.core.config import reset_config
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
-from kernel_gen.dsl.ast.visitor import AstVisitorError
-from kernel_gen.dsl.mlir_gen import MlirGenModuleError, mlir_gen
+from kernel_gen.dsl.mlir_gen import mlir_gen
 from kernel_gen.operation.arch import get_dynamic_memory
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.memory import MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
+
+
+@pytest.fixture(autouse=True)
+def _reset_core_config() -> None:
+    reset_config()
+    yield
+    reset_config()
 
 
 def _memory_type(
@@ -119,7 +127,7 @@ def test_mlir_gen_rejects_unsupported_closure_callee() -> None:
     def main(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
         return closure(x)
 
-    with pytest.raises(MlirGenModuleError, match="unsupported callee function"):
+    with pytest.raises(KernelCodeError, match="unsupported callee function"):
         mlir_gen(main, Memory([4], NumericType.Float32))
 
 

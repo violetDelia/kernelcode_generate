@@ -8,10 +8,10 @@
 
 ## API 列表
 
-- `class LaunchKernelCostFuncPass(cost_kind: str = "compute")`
+- `class LaunchKernelCostFuncPass(cost_kind: str = "DMA|MAC", fold: bool = True)`
   - `name: str`
   - `cost_kind: str`
-  - `__init__(cost_kind: str = "compute") -> None`
+  - `__init__(cost_kind: str = "DMA|MAC", fold: bool = True) -> None`
   - `from_options(options: dict[str, str]) -> LaunchKernelCostFuncPass`
   - `apply(ctx: Context, op: ModuleOp) -> None`
   - `run(module: object) -> ModuleOp`
@@ -49,14 +49,17 @@
 ## 目标
 
 - 固定 pass 名称：`launch-kernel-cost-func`。
-- 固定公开入口：`LaunchKernelCostFuncPass(cost_kind="compute|memory|latency")` 与 `build_registered_pass("launch-kernel-cost-func", {"cost_kind": ...})`。
+- 固定公开入口：`LaunchKernelCostFuncPass(cost_kind="DMA|MAC")`、`LaunchKernelCostFuncPass(cost_kind="compute|memory|latency")` 与 `build_registered_pass("launch-kernel-cost-func", {"cost_kind": ...})`。
+- 固定默认 kind：未显式传入 `cost_kind` 时使用 `DMA|MAC`。
 - 固定输出：每个 unique device callee 对请求列表中的每个 `cost_kind` 生成一份 cost function。
 - 固定 cost function 返回语义：全部 `tuner.cost(...)->!symbol.int` 必须进入 `symbol.add` 累计链，最终 `func.return` 返回单个总值。
-- 保持 helper 保留规则：`dma.view` / `dma.reshape` 必须保留到 cost function，但不下沉 `tuner.cost`。
+- 保持 helper 保留规则：`builtin.unrealized_conversion_cast`、`dma.view`、`dma.reshape` 与 `dma.alloc` 必须保留到 cost function，但不下沉 `tuner.cost`。
+- `dma.load` / `dma.store` / `dma.free` / `dma.broadcast` / `dma.fill` / `dma.cast` / `dma.transpose` 暂无公开 cost helper，本 pass 在 cost function 中直接跳过，不生成 `tuner.cost` 或运行时 side effect。
+- `kernel.binary_elewise.kind` 与 `kernel.reduce.kind` 是原业务 op 的算法类别，不是 cost metadata；生成 `tuner.cost` 时必须改名为 `kernel_kind` 保留，避免重新引入旧公开 attr `kind`。
 
 ## 限制与边界
 
-- 本 pass 是 standalone tuning pass，不自动进入 `default-lowering` 或其他默认 pipeline。
+- 本 pass 是 standalone tuning pass，同时作为 `npu-demo-lowering` 的末尾 pass 运行；不自动进入 `default-lowering`。
 - 输入必须已经存在 `arch.launch`，且 callee symbol 可解析到 module 内的 device `func.func`。
 - 原 host wrapper 与原 device func 必须保持不变；本 pass 只新增 sibling cost function。
 - 本 pass 不做 target runtime 求值、不查 cost table、不把 `tuner.cost` 折叠为常量。
@@ -68,7 +71,7 @@
 
 ## 公开接口
 
-### `class LaunchKernelCostFuncPass(cost_kind: str = "compute")`
+### `class LaunchKernelCostFuncPass(cost_kind: str = "DMA|MAC", fold: bool = True)`
 
 功能说明：
 
@@ -76,13 +79,15 @@
 
 参数说明：
 
-- `cost_kind(str = "compute")`：当前 cost function 的统计视角，使用 `|` 分隔的有序列表字符串；每个片段必须是非空 kind 名，允许任意文本。
+- `cost_kind(str = "DMA|MAC")`：当前 cost function 的统计视角，使用 `|` 分隔的有序列表字符串；每个片段必须是非空 kind 名，允许任意文本。
+- `fold(bool = True)`：控制 pass 后通用 folding sweep；该通用选项由 [`spec/pass/pass_manager.md`](../pass_manager.md) 承接。
 
 使用示例：
 
 ```python
 from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
 
+module = LaunchKernelCostFuncPass().run(module)
 module = LaunchKernelCostFuncPass(cost_kind="compute|memory|latency").run(module)
 ```
 
@@ -100,14 +105,14 @@ module = pass_obj.run(module)
 
 - `name: str`
 - `cost_kind: str`
-- `__init__(cost_kind: str = "compute") -> None`
+- `__init__(cost_kind: str = "DMA|MAC", fold: bool = True) -> None`
 - `from_options(options: dict[str, str]) -> LaunchKernelCostFuncPass`
 - `apply(ctx: Context, op: ModuleOp) -> None`
 - `run(module: object) -> ModuleOp`
 
 注意事项：
 
-- 显式失败统一抛出 `PassContractError`，并保持稳定错误前缀 `LaunchKernelCostFuncError:`。
+- 显式失败统一抛出 `KernelCodeError`，并保持稳定错误前缀 `LaunchKernelCostFuncError:`。
 - `cost_kind` 非法时必须显式失败，稳定错误短语为 `LaunchKernelCostFuncError: cost_kind must be a non-empty '|' separated list of unique kind names`。
 - `cost_kind` 的空段、全空白段或重复段必须显式失败。
 - 多个 wrapper 指向同一个 device callee 时，同一 `cost_kind` 下只能生成一份 cost function。
@@ -129,6 +134,8 @@ module = pass_obj.run(module)
 ```text
 func.func @_cost_compute__device_matmul_kernel_(%lhs, %rhs, %out, %m, %k, %n) -> !symbol.int<"0">
 func.func @_cost_memory__device_matmul_kernel_(%lhs, %rhs, %out, %m, %k, %n) -> !symbol.int<"0">
+func.func @_cost_DMA__device_matmul_kernel_(%lhs, %rhs, %out, %m, %k, %n) -> !symbol.int<"0">
+func.func @_cost_MAC__device_matmul_kernel_(%lhs, %rhs, %out, %m, %k, %n) -> !symbol.int<"0">
 ```
 
 注意事项：
@@ -159,9 +166,11 @@ func.func @_cost_memory__device_matmul_kernel_(%lhs, %rhs, %out, %m, %k, %n) -> 
 注意事项：
 
 - 下沉成本节点的 op 家族：`dma.*`、`kernel.*`、`arch.*`。
-- helper op `dma.view`、`dma.reshape` 需要克隆保留，但不生成 `tuner.cost`。
+- helper op `builtin.unrealized_conversion_cast`、`dma.view`、`dma.reshape`、`dma.alloc` 需要克隆保留，但不生成 `tuner.cost`。
+- side-effect DMA op `dma.load`、`dma.store`、`dma.free`、`dma.transpose` 在 cost function 中跳过，不克隆且不生成 `tuner.cost`。
 - `cost_kind` 始终等于 pass 参数展开后的单个 kind；允许任意非空字符串。
 - 不因任一合法 `cost_kind` 取值裁剪 `dma.*` / `kernel.*` / `arch.*` 成本节点。
+- `dma.deslice` 只生成 `tuner.cost(op_name="dma.deslice")`，不得在 cost function 中执行真实写回；若原 op result 被后续消费，result 映射为原 target memory。
 - 原 op 已存在 `kind`、`cost_kind`、`op_name`、`device_func` 任一同名 attr 时必须显式失败。
 - `tuner.cost` 不公开 `kind`、`device_func` 两个 attrs。
 
@@ -178,6 +187,11 @@ arith.constant -> skip
 symbol.const -> skip
 dma.view -> clone helper only
 dma.reshape -> clone helper only
+dma.alloc -> clone helper only
+dma.load -> skip
+dma.store -> skip
+dma.free -> skip
+dma.transpose -> skip
 dma.copy -> tuner.cost(op_name="dma.copy")
 kernel.add -> tuner.cost(op_name="kernel.add")
 ```
@@ -191,6 +205,11 @@ kernel.add -> tuner.cost(op_name="kernel.add")
   - `symbol.for` 自身（循环体递归处理）
   - `dma.view`
   - `dma.reshape`
+  - `dma.alloc`
+  - `dma.load`
+  - `dma.store`
+  - `dma.free`
+  - `dma.transpose`
 - 其他非支持 op 必须显式失败，不做 silent skip。
 
 ### `symbol.for` 累计规则
@@ -237,6 +256,7 @@ kernel.add -> tuner.cost(op_name="kernel.add")
 
 | 用例 ID | 场景 | 前置条件 | 操作 | 预期结果 | 对应测试 |
 | --- | --- | --- | --- | --- | --- |
+| LKCF-001A | 默认 `DMA|MAC` 成功路径 | 单 wrapper 指向单 device callee，device body 含 `dma.view/dma.reshape/dma.copy/kernel.add` | 执行 `LaunchKernelCostFuncPass()` | 新增 `_cost_DMA_<device>` 与 `_cost_MAC_<device>`，helper 保留、成本节点不裁剪，函数返回 `!symbol.int` | `test_launch_kernel_cost_func_default_kind_is_dma_mac` |
 | LKCF-001 | `cost_kind=compute` 基础成功路径 | 单 wrapper 指向单 device callee，device body 含 `dma.view/dma.reshape/dma.copy/kernel.add` | 执行 `LaunchKernelCostFuncPass(cost_kind="compute")` | 新增 `_cost_compute_<device>`，helper 保留、成本节点不裁剪，函数返回 `!symbol.int` | `test_launch_kernel_cost_func_builds_cost_function_for_compute_kind` |
 | LKCF-002 | `cost_kind=memory` 基础成功路径 | 同 LKCF-001 | 执行 `cost_kind="memory"` | 新增 `_cost_memory_<device>`，`tuner.cost.cost_kind` 全为 `"memory"`，节点不裁剪 | `test_launch_kernel_cost_func_memory_keeps_compute_nodes` |
 | LKCF-003 | open-kind 列表成功路径 | 同 LKCF-001 | 执行 `cost_kind="compute|memory|latency"` | 新增 3 个 sibling cost function，顺序与列表一致，`tuner.cost.cost_kind` 分别等于对应 kind | `test_launch_kernel_cost_func_builds_cost_functions_for_multi_kind_order` |

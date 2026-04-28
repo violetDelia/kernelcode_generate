@@ -1,7 +1,7 @@
 """type module tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 榕
 
 功能说明:
 - 覆盖 kernel_gen.symbol_variable.type 的枚举语义、导出边界与旧路径禁用约束。
@@ -119,6 +119,11 @@ def test_python_type_module_public_api_boundary() -> None:
 
     assert hasattr(type_module, "NumericType")
     assert hasattr(type_module, "Farmat")
+    assert hasattr(type_module, "FLOAT_DTYPES")
+    assert hasattr(type_module, "INT_DTYPES")
+    assert hasattr(type_module, "ARITHMETIC_DTYPE_ORDER")
+    assert hasattr(type_module, "ARITHMETIC_DTYPE_RANK")
+    assert hasattr(type_module, "NN_FLOAT_DTYPES")
     assert hasattr(type_module, "is_integer_dtype")
     assert hasattr(type_module, "is_float_dtype")
     assert not hasattr(type_module, "Memory")
@@ -140,7 +145,82 @@ def test_python_type_import_star_exports_only_public_names() -> None:
 
     exec("from kernel_gen.symbol_variable.type import *", {}, namespace)
 
-    assert sorted(namespace) == ["Farmat", "NumericType", "is_float_dtype", "is_integer_dtype"]
+    assert sorted(namespace) == [
+        "ARITHMETIC_DTYPE_ORDER",
+        "ARITHMETIC_DTYPE_RANK",
+        "FLOAT_DTYPES",
+        "Farmat",
+        "INT_DTYPES",
+        "NN_FLOAT_DTYPES",
+        "NumericType",
+        "is_float_dtype",
+        "is_integer_dtype",
+    ]
+
+
+# TY-004A
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 验证 `FLOAT_DTYPES` / `INT_DTYPES` 成为 type.py 的公开 dtype family 真源。
+# 使用示例: pytest -q test/symbol_variable/test_type.py -k test_python_type_public_dtype_family_constants
+# 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
+# 对应 spec 文件路径: spec/symbol_variable/type.md
+# 对应测试文件路径: test/symbol_variable/test_type.py
+def test_python_type_public_dtype_family_constants() -> None:
+    from kernel_gen.symbol_variable.type import FLOAT_DTYPES, INT_DTYPES, NN_FLOAT_DTYPES, NumericType
+
+    assert FLOAT_DTYPES == {
+        NumericType.Float16,
+        NumericType.BFloat16,
+        NumericType.Float32,
+        NumericType.Float64,
+    }
+    assert INT_DTYPES == {
+        NumericType.Int8,
+        NumericType.Int16,
+        NumericType.Int32,
+        NumericType.Int64,
+        NumericType.Uint8,
+        NumericType.Uint16,
+        NumericType.Uint32,
+        NumericType.Uint64,
+    }
+    assert NumericType.Bool not in FLOAT_DTYPES
+    assert NumericType.Bool not in INT_DTYPES
+    assert NN_FLOAT_DTYPES is FLOAT_DTYPES
+
+
+# TY-004B
+# 创建者: 榕
+# 最后一次更改: 榕
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 验证 arithmetic dtype promotion 常量已整合到 type.py 真源。
+# 使用示例: pytest -q test/symbol_variable/test_type.py -k test_python_type_public_arithmetic_dtype_order_and_rank
+# 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
+# 对应 spec 文件路径: spec/symbol_variable/type.md
+# 对应测试文件路径: test/symbol_variable/test_type.py
+def test_python_type_public_arithmetic_dtype_order_and_rank() -> None:
+    from kernel_gen.symbol_variable.type import ARITHMETIC_DTYPE_ORDER, ARITHMETIC_DTYPE_RANK, NumericType
+
+    expected_order = (
+        NumericType.Int8,
+        NumericType.Uint8,
+        NumericType.Int16,
+        NumericType.Uint16,
+        NumericType.Int32,
+        NumericType.Uint32,
+        NumericType.Int64,
+        NumericType.Uint64,
+        NumericType.Float16,
+        NumericType.BFloat16,
+        NumericType.Float32,
+        NumericType.Float64,
+    )
+    assert ARITHMETIC_DTYPE_ORDER == expected_order
+    assert ARITHMETIC_DTYPE_RANK == {dtype: index for index, dtype in enumerate(expected_order)}
 
 
 # TY-006

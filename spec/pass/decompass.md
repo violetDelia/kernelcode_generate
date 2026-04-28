@@ -8,7 +8,6 @@
 
 ## API 列表
 
-- `PassContractError(message: str)`
 - `DecompassPass`
   - `—— apply(ctx: Context, module: ModuleOp)`
   - `—— run(module: ModuleOp) -> ModuleOp`
@@ -45,7 +44,7 @@
 - `decompass` 仅负责 `nn.* -> nn.*` 分解，不直接 lower 到 `kernel.*`。
 - 当前固定只覆盖 `nn.softmax`。
 - 不提供通用 decompass register；若后续支持其它 `nn.*` 分解，需继续按“一 op 一 pattern”扩展。
-- 公开错误类型统一使用 `kernel_gen.passes.PassContractError`。
+- 显式失败统一使用 `kernel_gen.core.error.KernelCodeError(ErrorModule.PASS, message)`。
 - 当前文件级公开 API 只包含 `DecompassPass`、`NnSoftmaxDecompPattern` 与 `get_decompass_pass_patterns()`；分解校验与结果类型构造逻辑不额外暴露文件级 helper，跨文件实现与测试不得直连内部步骤。
 - 不修改 `dsl/mlir_gen` 的 helper 入口形式。
 - 不扩后端 runtime、stream 或 target 相关能力。
@@ -53,12 +52,12 @@
 
 ## 公开接口
 
-### `class PassContractError(ValueError)`
+### 失败类型
 
-- 功能说明：`kernel_gen.passes` 共享的显式错误类型。
+- 功能说明：使用 `kernel_gen.core.error.KernelCodeError` 表示显式失败。
 - 参数说明：
   - `message: str`：错误文本。
-- 使用示例：`raise PassContractError("normalized axis out of range")`
+- 使用示例：`raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "normalized axis out of range")`
 - 返回与限制：抛错即终止当前 pass。
 
 ### `class DecompassPass(Pass)`

@@ -19,7 +19,6 @@ API 列表:
 - `class CompileRequest(source: str, target: str, function: str, entry_point: str = "kg_execute_entry", compiler: str | None = None, compiler_flags: tuple[str, ...] = ("-std=c++17",), link_flags: tuple[str, ...] = ())`
 - `class ExecuteRequest(args: tuple[RuntimeArg, ...], entry_point: str | None = None, capture_function_output: bool = False, stream: object | None = None)`
 - `class ExecuteResult(ok: bool, status_code: int, failure_phrase: str | None, compile_stdout: str = "", compile_stderr: str = "", run_stdout: str = "", run_stderr: str = "", elapsed_ms: float = 0.0)`
-- `class ExecutionEngineError(failure_phrase: str, detail: str = "")`
 - `class CompiledKernel(target: str, soname_path: str, function: str, entry_point: str, compile_stdout: str = "", compile_stderr: str = "")`
 - `CompiledKernel.close() -> None`
 - `CompiledKernel.execute(args: tuple[RuntimeArg, ...] | None = None, *, request: ExecuteRequest | None = None, entry_point: str | None = None, capture_function_output: bool = False, stream: object | None = None) -> ExecuteResult`
@@ -57,7 +56,6 @@ from .execution_engine import (
     ExecuteRequest,
     ExecuteResult,
     ExecutionEngine,
-    ExecutionEngineError,
     RuntimeArg,
 )
 
@@ -75,6 +73,5 @@ __all__ = [
     "ExecuteRequest",
     "ExecuteResult",
     "ExecutionEngine",
-    "ExecutionEngineError",
     "RuntimeArg",
 ]

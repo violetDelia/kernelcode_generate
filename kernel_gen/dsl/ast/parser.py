@@ -1,14 +1,13 @@
 """DSL AST parser.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: 榕
 
 功能说明:
 - 提供 `parse_function` 解析入口，将 Python 函数解析为 `FunctionAST`。
 - 生成 `Diagnostic` 以承载解析阶段的诊断信息。
 
 API 列表:
-- `AstParseError(message: str, diagnostics: list[Diagnostic])`
 - `parse_function_with_env(fn: object, globals_table: dict[str, object] | None = None, builtins_table: dict[str, object] | None = None, runtime_table: dict[str, object] | None = None, config: dict[str, object] | None = None) -> FunctionAST`
 - `parse_function(fn: object) -> FunctionAST`
 
@@ -23,6 +22,7 @@ API 列表:
 """
 
 from __future__ import annotations
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 import gc as _gc
 
@@ -72,6 +72,7 @@ from kernel_gen.dsl.ast.nodes import (
     FCAST,
     ForAST,
     FunctionAST,
+    IfAST,
     Img2ColAST,
     LoadAST,
     MatmulAST,
@@ -93,9 +94,9 @@ from kernel_gen.dsl.ast.nodes import (
     VarAST,
 )
 
-_REJECT_EXTERNAL_VALUES_ENV_KEY = "__dsl_reject_external_values__"
+_EXTERNAL_VALUES_REJECTED_ENV_KEY = "__dsl_external_values_rejected__"
 _ALLOW_EXTERNAL_CONSTANTS_ENV_KEY = "__dsl_allow_external_constants__"
-_ALLOW_PYTHON_CALLEE_CALL_ENV_KEY = "__dsl_allow_python_callee_calls__"
+_PYTHON_CALLEE_CALLS_ENABLED_ENV_KEY = "__dsl_python_callee_calls_enabled__"
 _LOCAL_IMPORT_SHADOW = object()
 _ALLOWED_FILL_STRING_LITERALS = frozenset({"inf", "-inf"})
 _ALLOWED_IMPORT_BOUND_HELPERS: dict[str, tuple[types.ModuleType, frozenset[str]]] = {
@@ -172,42 +173,6 @@ _ALLOWED_IMPORT_BOUND_HELPERS: dict[str, tuple[types.ModuleType, frozenset[str]]
     ),
 }
 
-
-
-class AstParseError(Exception):
-    """DSL AST 解析错误。
-
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 统一解析阶段错误类型，并携带诊断信息列表。
-
-    使用示例:
-    - raise AstParseError("Unsupported syntax", [Diagnostic("...", SourceLocation(1, 0))])
-
-    关联文件:
-    - spec: spec/dsl/ast/__init__.md
-    - test: test/dsl/ast/test_visitor_integration.py
-    - 功能实现: kernel_gen/dsl/ast/parser.py
-    """
-
-    def __init__(self: AstParseError, message: str, diagnostics: list[Diagnostic]) -> None:
-        super().__init__(message)
-        self.message = message
-        self.diagnostics = diagnostics
-
-    def __str__(self: AstParseError) -> str:
-        return self.message
-
-
-class _ParseFailure(Exception):
-    def __init__(self: _ParseFailure, message: str, location: SourceLocation | None) -> None:
-        super().__init__(message)
-        self.message = message
-        self.location = location
-
-
 _DTYPE_MAP: dict[str, NumericType] = {
     "f16": NumericType.Float16,
     "float16": NumericType.Float16,
@@ -266,7 +231,14 @@ def _location_from_node(node: object | None) -> SourceLocation | None:
 
 
 def _raise_parse_error(message: str, node: object | None) -> None:
-    raise _ParseFailure(message, _location_from_node(node))
+    location = _location_from_node(node)
+    raise KernelCodeError(
+        ErrorKind.CONTRACT,
+        ErrorModule.AST,
+        message,
+        location=location,
+        diagnostics=[Diagnostic(message, location=location)],
+    )
 
 
 def _eval_symbolic_dim_node(expr: py_ast.AST, node: object | None) -> int | SymbolDim:
@@ -1666,7 +1638,7 @@ def _parse_load_like_call(
     if not isinstance(tensor, TensorAST):
         _raise_parse_error(f"{call_name} source must be TensorAST", expr.args[0])
     index_env = dict(env)
-    if bool(index_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+    if bool(index_env.get(_EXTERNAL_VALUES_REJECTED_ENV_KEY, False)):
         index_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
     offsets = _parse_expr(expr.args[1], index_env, globals_table, builtins_table)
     sizes = _parse_expr(expr.args[2], index_env, globals_table, builtins_table)
@@ -1714,12 +1686,13 @@ def _parse_store_like_call(
     max_arity = 5 if call_name == "store" else 6
     if len(expr.args) < min_arity or len(expr.args) > max_arity:
         _raise_parse_error(f"Unsupported {call_name} arity", expr)
-    value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-    tensor = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+    tensor = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+    value = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+    target_expr = expr.args[0]
     if not _is_memory_target_ast(tensor):
-        _raise_parse_error(f"{call_name} target must be TensorAST", expr.args[1])
+        _raise_parse_error(f"{call_name} target must be TensorAST", target_expr)
     index_env = dict(env)
-    if bool(index_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+    if bool(index_env.get(_EXTERNAL_VALUES_REJECTED_ENV_KEY, False)):
         index_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
     offsets = _parse_expr(expr.args[2], index_env, globals_table, builtins_table)
     sizes = _parse_expr(expr.args[3], index_env, globals_table, builtins_table)
@@ -2037,7 +2010,7 @@ def _parse_dma_call(
             _raise_parse_error("Unsupported view arity", expr)
         source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
         index_env = dict(env)
-        if bool(index_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+        if bool(index_env.get(_EXTERNAL_VALUES_REJECTED_ENV_KEY, False)):
             index_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
         offset = _parse_expr(expr.args[1], index_env, globals_table, builtins_table)
         size = _parse_expr(expr.args[2], index_env, globals_table, builtins_table)
@@ -2055,7 +2028,7 @@ def _parse_dma_call(
             _raise_parse_error("Unsupported reshape arity", expr)
         source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
         index_env = dict(env)
-        if bool(index_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+        if bool(index_env.get(_EXTERNAL_VALUES_REJECTED_ENV_KEY, False)):
             index_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
         shape = _parse_expr(expr.args[1], index_env, globals_table, builtins_table)
         return DmaReshapeAST(source=source, shape=shape, location=_location_from_node(expr))
@@ -2088,7 +2061,7 @@ def _parse_dma_call(
         if not expr.args:
             _raise_parse_error(f"Unsupported {call_name} arity", expr)
         call_env = dict(env)
-        if bool(call_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+        if bool(call_env.get(_EXTERNAL_VALUES_REJECTED_ENV_KEY, False)):
             call_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
         args = [_parse_expr(arg, call_env, globals_table, builtins_table) for arg in expr.args]
         kwargs: dict[str, object] = {}
@@ -2133,7 +2106,7 @@ def _parse_dma_call(
             _raise_parse_error("Unsupported broadcast_to arity", expr)
         source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
         shape_env = dict(env)
-        if bool(shape_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+        if bool(shape_env.get(_EXTERNAL_VALUES_REJECTED_ENV_KEY, False)):
             shape_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
         target_shape = (
             _parse_expr(expr.args[1], shape_env, globals_table, builtins_table) if len(expr.args) >= 2 else None
@@ -2167,7 +2140,7 @@ def _parse_dma_call(
             _raise_parse_error("Unsupported transpose arity", expr)
         value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
         perm_env = dict(env)
-        if bool(perm_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+        if bool(perm_env.get(_EXTERNAL_VALUES_REJECTED_ENV_KEY, False)):
             perm_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
         perm = _parse_expr(expr.args[1], perm_env, globals_table, builtins_table) if len(expr.args) >= 2 else None
         for keyword in expr.keywords:
@@ -2331,6 +2304,8 @@ def _parse_python_callee_call(
         callee_value = _lookup_python_name(expr.func.id, globals_table, builtins_table)
     if not inspect.isfunction(callee_value):
         return None
+    if str(getattr(callee_value, "__module__", "")).startswith("kernel_gen.operation"):
+        return None
     args = [_parse_expr(arg, env, globals_table, builtins_table) for arg in expr.args]
     return PythonCalleeCallAST(callee=callee_value, args=args, location=_location_from_node(expr))
 
@@ -2365,7 +2340,7 @@ def _parse_expr(
         if expr.id in env:
             return env[expr.id]
         value = _lookup_python_name(expr.id, globals_table, builtins_table)
-        if value is not None and bool(env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+        if value is not None and bool(env.get(_EXTERNAL_VALUES_REJECTED_ENV_KEY, False)):
             allow_constants = bool(env.get(_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY, False))
             if not (allow_constants and isinstance(value, (int, float, str))):
                 _raise_parse_error("cannot use external value inside function body", expr)
@@ -2395,7 +2370,7 @@ def _parse_expr(
         if metadata_value is not None:
             return metadata_value
         value = _parse_attribute_object(expr, globals_table, builtins_table)
-        if bool(env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)) and not _is_allowed_attribute_value(value):
+        if bool(env.get(_EXTERNAL_VALUES_REJECTED_ENV_KEY, False)) and not _is_allowed_attribute_value(value):
             _raise_parse_error("cannot use external value inside function body", expr)
         return value
 
@@ -2415,7 +2390,7 @@ def _parse_expr(
         dma_expr = _parse_dma_call(expr, env, globals_table, builtins_table)
         if dma_expr is not None:
             return dma_expr
-        if bool(env.get(_ALLOW_PYTHON_CALLEE_CALL_ENV_KEY, False)):
+        if bool(env.get(_PYTHON_CALLEE_CALLS_ENABLED_ENV_KEY, False)):
             callee_expr = _parse_python_callee_call(expr, env, globals_table, builtins_table)
             if callee_expr is not None:
                 return callee_expr
@@ -2438,7 +2413,7 @@ def _parse_expr(
                 if not isinstance(tensor_expr, TensorAST):
                     _raise_parse_error(f"{accessor.attr} source must be TensorAST", accessor.value)
                 axis_env = dict(env)
-                if bool(axis_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+                if bool(axis_env.get(_EXTERNAL_VALUES_REJECTED_ENV_KEY, False)):
                     axis_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
                 axis_expr = _parse_expr(expr.slice, axis_env, globals_table, builtins_table)
                 return TensorAxisAccessAST(
@@ -2541,6 +2516,98 @@ def _parse_for(
     return ForAST(var=var, start=start_expr, end=end_expr, step=step_expr, body=body, location=_location_from_node(stmt))
 
 
+def _parse_if_block(
+    body_stmts: list[py_ast.stmt],
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+    location_node: py_ast.AST,
+) -> BlockAST:
+    """解析 `if` 分支内的语句块。
+
+    创建者: 榕
+    最后一次更改: 榕
+
+    功能说明:
+    - 在父作用域快照上解析单个分支，允许分支内部临时变量被同一分支后续语句使用。
+    - 分支解析结束后恢复父作用域，避免分支内赋值泄漏到 `if` 外部。
+
+    使用示例:
+    - body = _parse_if_block(stmt.body, env, globals_table, builtins_table, stmt)
+
+    关联文件:
+    - spec: spec/dsl/ast/parser.md
+    - test: test/dsl/ast/test_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
+    """
+
+    env_snapshot = dict(env)
+    parsed_statements: list[object] = []
+    try:
+        for body_stmt in body_stmts:
+            if isinstance(body_stmt, py_ast.Return):
+                _raise_parse_error("Return inside if is unsupported", body_stmt)
+            parsed_stmt = _parse_stmt(body_stmt, env, globals_table, builtins_table)
+            if parsed_stmt is not None:
+                parsed_statements.append(parsed_stmt)
+    finally:
+        env.clear()
+        env.update(env_snapshot)
+    body_location = _location_from_node(body_stmts[0]) if body_stmts else _location_from_node(location_node)
+    return BlockAST(statements=parsed_statements, location=body_location)
+
+
+def _parse_if(
+    stmt: py_ast.If,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> IfAST:
+    """解析语句级 `if` / `if else`。
+
+    创建者: 榕
+    最后一次更改: 榕
+
+    功能说明:
+    - 将 Python `if` 条件解析为表达式 AST，将 then/else 分支解析为 `BlockAST`。
+    - 当前只支持语句型分支；分支内 `return` 不进入 `scf.if` 结果语义。
+
+    使用示例:
+    - if_ast = _parse_if(stmt, env, globals_table, builtins_table)
+
+    关联文件:
+    - spec: spec/dsl/ast/parser.md
+    - test: test/dsl/ast/test_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
+    """
+
+    test = stmt.test
+    if (
+        isinstance(test, py_ast.Compare)
+        and len(test.ops) == 1
+        and isinstance(test.ops[0], py_ast.IsNot)
+        and len(test.comparators) == 1
+        and isinstance(test.left, py_ast.Name)
+        and test.left.id == "bias"
+        and isinstance(test.comparators[0], py_ast.Constant)
+        and test.comparators[0].value is None
+    ):
+        _raise_parse_error("Unsupported if bias is not None", stmt)
+    condition = _parse_expr(test, env, globals_table, builtins_table)
+    true_body = _parse_if_block(stmt.body, env, globals_table, builtins_table, stmt)
+    false_body = (
+        _parse_if_block(stmt.orelse, env, globals_table, builtins_table, stmt)
+        if stmt.orelse
+        else None
+    )
+    return IfAST(
+        condition=condition,
+        true_body=true_body,
+        false_body=false_body,
+        location=_location_from_node(stmt),
+    )
+
+
 def _parse_stmt(
     stmt: py_ast.stmt,
     env: dict[str, object],
@@ -2550,11 +2617,11 @@ def _parse_stmt(
     """解析 DSL 语句节点为 AST 语句。
 
     创建者: 金铲铲大作战
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 榕
 
     功能说明:
-    - 解析 Assign/Assert/Return/For/Expr 语句，并委托 `_parse_expr/_parse_for` 处理子节点。
-    - 禁止嵌套 FunctionDef、通用 if 语句、`if bias is not None` 分支。
+    - 解析 Assign/Assert/Return/For/If/Expr 语句，并委托 `_parse_expr/_parse_for/_parse_if` 处理子节点。
+    - 禁止嵌套 FunctionDef、`if bias is not None` 分支，以及 if 分支内 return。
 
     使用示例:
     - _parse_stmt(py_ast.parse("x = y").body[0], env, globals(), __builtins__)
@@ -2577,19 +2644,7 @@ def _parse_stmt(
             _raise_parse_error("Assert failed", stmt.test)
         return None
     if isinstance(stmt, py_ast.If):
-        test = stmt.test
-        if (
-            isinstance(test, py_ast.Compare)
-            and len(test.ops) == 1
-            and isinstance(test.ops[0], py_ast.IsNot)
-            and len(test.comparators) == 1
-            and isinstance(test.left, py_ast.Name)
-            and test.left.id == "bias"
-            and isinstance(test.comparators[0], py_ast.Constant)
-            and test.comparators[0].value is None
-        ):
-            _raise_parse_error("Unsupported if bias is not None", stmt)
-        _raise_parse_error("Unsupported if statement", stmt)
+        return _parse_if(stmt, env, globals_table, builtins_table)
     if isinstance(stmt, py_ast.Assign):
         if len(stmt.targets) != 1:
             _raise_parse_error("Unsupported assignment target", stmt)
@@ -2638,7 +2693,7 @@ def _parse_function_impl(
     - 从源码中定位唯一顶层 FunctionDef，并解析参数/返回注解为 TensorAST/ScalarArgAST。
     - 解析函数体语句，收集诊断并执行返回语句位置与缺失校验。
     - 忽略函数体首个 docstring 语句，保留函数说明文本而不把它当成 DSL 常量参与 lowering。
-    - 可按配置拒绝外部值，确保 AST 合同与禁用项诊断一致。
+    - 默认拒绝函数体外部值注入，确保 AST 合同与禁用项诊断一致。
 
     使用示例:
     - func_ast = _parse_function_impl(my_kernel)
@@ -2649,9 +2704,6 @@ def _parse_function_impl(
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
-    config = config or {}
-    reject_external_values = bool(config.get("reject_external_values", False))
-    allow_python_callee_calls = bool(config.get("allow_python_callee_calls", False))
     if globals_table is None:
         globals_table = getattr(fn, "__globals__", {}) or {}
     globals_table = dict(globals_table)
@@ -2665,7 +2717,13 @@ def _parse_function_impl(
     try:
         source = inspect.getsource(fn)
     except OSError as exc:
-        raise AstParseError("Unable to get source", [Diagnostic(str(exc), location=None)]) from exc
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.AST,
+            "Unable to get source",
+            location=None,
+            diagnostics=[Diagnostic(str(exc), location=None)],
+        ) from exc
 
     source = textwrap.dedent(source)
     module = py_ast.parse(source)
@@ -2679,13 +2737,18 @@ def _parse_function_impl(
             func_def = node
             break
     if func_def is None:
-        raise AstParseError("Function definition not found", [Diagnostic("Function definition not found", None)])
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.AST,
+            "Function definition not found",
+            location=None,
+            diagnostics=[Diagnostic("Function definition not found", None)],
+        )
 
-    env: dict[str, object] = {}
-    if reject_external_values:
-        env[_REJECT_EXTERNAL_VALUES_ENV_KEY] = True
-    if allow_python_callee_calls:
-        env[_ALLOW_PYTHON_CALLEE_CALL_ENV_KEY] = True
+    env: dict[str, object] = {
+        _EXTERNAL_VALUES_REJECTED_ENV_KEY: True,
+    }
+    env[_PYTHON_CALLEE_CALLS_ENABLED_ENV_KEY] = True
     inputs: list[TensorAST | ScalarArgAST] = []
     for arg in func_def.args.args:
         parsed = _parse_annotation_node(arg.annotation, arg.arg, globals_table, builtins_table, runtime_table)
@@ -2721,9 +2784,13 @@ def _parse_function_impl(
     for stmt in body:
         if isinstance(stmt, (py_ast.Import, py_ast.ImportFrom)):
             if has_explicit_return:
-                raise AstParseError(
+                location = _location_from_node(stmt)
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.AST,
                     "Return statement must be last",
-                    [Diagnostic("Return statement must be last", _location_from_node(stmt))],
+                    location=location,
+                    diagnostics=[Diagnostic("Return statement must be last", location)],
                 )
             _bind_safe_local_import(stmt, globals_table)
             continue
@@ -2735,17 +2802,32 @@ def _parse_function_impl(
             has_explicit_return = True
 
     if has_return_annotation and not has_explicit_return and not returns_none:
-        raise AstParseError("Missing return statement", [Diagnostic("Missing return statement", _location_from_node(func_def))])
+        location = _location_from_node(func_def)
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.AST,
+            "Missing return statement",
+            location=location,
+            diagnostics=[Diagnostic("Missing return statement", location)],
+        )
     if has_explicit_return and body and not isinstance(body[-1], py_ast.Return):
-        raise AstParseError(
+        location = _location_from_node(body[-1])
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.AST,
             "Return statement must be last",
-            [Diagnostic("Return statement must be last", _location_from_node(body[-1]))],
+            location=location,
+            diagnostics=[Diagnostic("Return statement must be last", location)],
         )
     if outputs and isinstance(outputs[0], ScalarArgAST) and outputs[0].value_type is float:
         if not statements or not isinstance(statements[-1], SymbolToFloatAST):
-            raise AstParseError(
+            location = _location_from_node(func_def.returns)
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.AST,
                 "Unsupported return annotation",
-                [Diagnostic("Unsupported return annotation", _location_from_node(func_def.returns))],
+                location=location,
+                diagnostics=[Diagnostic("Unsupported return annotation", location)],
             )
 
     body_location = (
@@ -2780,7 +2862,7 @@ def parse_function_with_env(
 
     功能说明:
     - 解析函数源码，构建 `FunctionAST` 并允许调用方显式传入 `globals`/`builtins`/`runtime` 环境。
-    - 将内部 `_ParseFailure` 统一包装成 `AstParseError`，对外暴露稳定错误类型。
+    - 解析失败统一抛出 `KernelCodeError(module="ast")`，并在可定位错误上挂载 `location` / `diagnostics`。
 
     使用示例:
     - func_ast = parse_function_with_env(fn, globals_table={}, builtins_table={}, runtime_table=None, config=None)
@@ -2791,17 +2873,13 @@ def parse_function_with_env(
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
-    try:
-        return _parse_function_impl(
-            fn,
-            globals_table=globals_table,
-            builtins_table=builtins_table,
-            runtime_table=runtime_table,
-            config=config,
-        )
-    except _ParseFailure as exc:
-        diagnostics = [Diagnostic(exc.message, location=exc.location)]
-        raise AstParseError(exc.message, diagnostics) from exc
+    return _parse_function_impl(
+        fn,
+        globals_table=globals_table,
+        builtins_table=builtins_table,
+        runtime_table=runtime_table,
+        config=config,
+    )
 
 
 def parse_function(fn: object) -> FunctionAST:

@@ -149,7 +149,7 @@ Status status = launch<1, 4, 1, 0>(add_barrier_body, lhs, rhs, out);
 注意事项：
 
 - 公开调用形态固定为 `launch<block, thread, subthread, shared_memory_size>(callee, args...)`；不得改成 `launch(callee, block, thread, subthread, shared_memory_size, ...)`，也不得退回字符串 callee。
-- `callee` 的公开合同是函数对象；后端实现可在调用时额外注入 `KernelContext&` 等运行时上下文，但调用方不显式传入该上下文参数。
+- `callee` 的公开合同是函数对象；后端实现必须绑定活动运行时上下文，生成源码不显式传入 `KernelContext&` 参数，手写 callee 可由后端兼容显式接收该上下文参数。
 - include/api 层只定义“存在这样一个 launch 入口”；具体线程模型、运行方式、barrier 共享对象与失败诊断由后端实现承担。
 - 不支持 silent fallback：不合法或不受支持的 launch extent / callee 形态必须显式失败。
 

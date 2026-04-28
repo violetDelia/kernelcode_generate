@@ -1,11 +1,11 @@
 """测试包入口。
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 榕
 
 功能说明:
 - 为测试用例补齐包路径，避免标准库同名模块导致导入混淆。
-- 在 worktree 中运行测试时补齐 `kernel_gen.common` 的模块搜索路径。
+- 在 worktree 中运行测试时补齐主仓 `kernel_gen` 的模块搜索路径。
 
 使用示例:
 - pytest -q test/pass/nn_lowering/select.py
@@ -27,7 +27,7 @@ MAIN_ROOT = REPO_ROOT.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-if (MAIN_ROOT / "kernel_gen" / "common").exists():
+if (MAIN_ROOT / "kernel_gen" / "core").exists():
     import kernel_gen
 
     main_kernel_gen = str(MAIN_ROOT / "kernel_gen")

@@ -3,12 +3,22 @@
 - 提供 include/api/cost/Kernel.h 的 npu_demo 默认实现。
 - 当前所有 Kernel cost helper 统一返回 `0`，只承接可编译、可实例化的成本接口合同。
 
+API 列表:
+- `npu_demo::cost::add/sub/mul/truediv<Space, InType, OutType, Kind>(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> S_INT`
+- `npu_demo::cost::eq/ne/lt/le/gt/ge<Space, InType, OutType, Kind>(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> S_INT`
+- `npu_demo::cost::exp<Space, InType, OutType, Kind>(const Memory<Space, OutType>& out, const Memory<Space, InType>& input) -> S_INT`
+- `npu_demo::cost::select<Space, InType, OutType, Kind>(const Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> S_INT`
+- `npu_demo::cost::reduce_sum/reduce_min/reduce_max<Space, InType, OutType, Kind>(const Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) -> S_INT`
+- `npu_demo::cost::matmul<LhsSpace, RhsSpace, OutSpace, LhsType, RhsType, OutType, Kind>(const Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs) -> S_INT`
+- `npu_demo::cost::img2col1d<InputSpace, OutputSpace, InType, OutType, Kind>(const Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right) -> S_INT`
+- `npu_demo::cost::img2col2d<InputSpace, OutputSpace, InType, OutType, Kind>(const Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr) -> S_INT`
+
 使用示例:
 - #include "include/npu_demo/cost/Kernel.h"
 - S_INT add_cost = npu_demo::cost::add<GM, float, float, npu_demo::compute>(out, lhs, rhs);
 
 创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
+最后修改人: 守护最好的爱莉希雅
 
 关联文件:
 - spec: spec/include/api/cost/Kernel.md
@@ -143,9 +153,10 @@ inline S_INT ge(
 
 使用示例:
 - S_INT exp_cost = npu_demo::cost::exp<GM, float, float, npu_demo::compute>(out, input);
+- S_INT max_cost = npu_demo::cost::reduce_max<GM, float, float, npu_demo::memory>(out, input, 1);
 
 创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
+最后修改人: 守护最好的爱莉希雅
 
 关联文件:
 - spec: spec/include/api/cost/Kernel.md
@@ -170,6 +181,10 @@ inline S_INT reduce_sum(const Memory<Space, OutType>& out, const Memory<Space, I
 }
 template <MemorySpace Space, typename InType, typename OutType, CostKind Kind>
 inline S_INT reduce_min(const Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) {
+    return detail::zero_cost(out, input, axis, Kind);
+}
+template <MemorySpace Space, typename InType, typename OutType, CostKind Kind>
+inline S_INT reduce_max(const Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) {
     return detail::zero_cost(out, input, axis, Kind);
 }
 

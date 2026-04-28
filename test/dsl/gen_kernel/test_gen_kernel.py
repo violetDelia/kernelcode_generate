@@ -60,7 +60,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.context import build_default_context
+from kernel_gen.core.config import reset_config, set_dump_dir, set_target
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
+from kernel_gen.core.context import build_default_context
 from kernel_gen.dialect.arch import (
     ArchBarrierOp,
     ArchGetDynamicMemoryOp,
@@ -84,7 +86,7 @@ from kernel_gen.dialect.symbol import (
     SymbolValueType,
 )
 from kernel_gen.dialect.tuner import TunerCostOp, TunerParamOp
-from kernel_gen.dsl.gen_kernel import EmitCContext, EmitCError, KernelEmitter, dsl_gen_kernel, emit_c, emit_c_op, emit_c_value, GenKernelError, gen_kernel
+from kernel_gen.dsl.gen_kernel import EmitCContext, KernelEmitter, dsl_gen_kernel, emit_c, emit_c_op, emit_c_value, gen_kernel
 from kernel_gen.dsl.mlir_gen import build_func_op, mlir_gen
 from kernel_gen.operation.dma import alloc, deslice, slice
 from kernel_gen.operation.nn import matmul
@@ -95,6 +97,13 @@ from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
+
+
+@pytest.fixture(autouse=True)
+def _reset_core_config() -> None:
+    reset_config()
+    yield
+    reset_config()
 
 gen_kernel_module = importlib.import_module("kernel_gen.dsl.gen_kernel")
 gen_kernel_entry_module = importlib.import_module("kernel_gen.dsl.gen_kernel.gen_kernel")
@@ -147,11 +156,38 @@ class FakeSymbolValueOp(IRDLOperation):
 
 
 def _ctx() -> EmitCContext:
-    return EmitCContext(config={"target": "cpu"})
+    set_target("cpu")
+    return EmitCContext()
 
 
 def _npu_ctx() -> EmitCContext:
-    return EmitCContext(config={"target": "npu_demo"})
+    set_target("npu_demo")
+    return EmitCContext()
+
+
+# TC-GK-000A
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证 `gen_kernel(...)` 根据公开 `dump_dir` 配置写出最终源码。
+# 测试目的: 锁定源码 dump 属于 gen_kernel 公共链路，不需要 runner 或 dsl_run 额外手写 source.cpp。
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_dump_dir_writes_source
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
+# 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
+def test_gen_kernel_dump_dir_writes_source(tmp_path: Path) -> None:
+    block = Block(arg_types=[])
+    block.add_op(func.ReturnOp())
+    func_op = func.FuncOp("dump_kernel", ([], []), Region(block))
+    set_dump_dir(tmp_path)
+
+    source = gen_kernel(func_op, _ctx())
+
+    source_path = tmp_path / "source.cpp"
+    assert source_path.is_file()
+    assert source_path.read_text(encoding="utf-8") == source + ("\n" if not source.endswith("\n") else "")
+    assert "dump_kernel" in source
 
 
 def test_gen_kernel_public_modules_exist_and_old_legacy_loader_path_is_gone() -> None:
@@ -282,7 +318,7 @@ def _make_npu_demo_add_barrier_module(
         space=NnMemorySpaceAttr.from_name("tsm"),
     )
     barrier1 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
-    deslice = DmaDesliceOp(out_tsm.result, body_block.args[3], [thread_offset.result], [size.result], [stride.result], gm_type)
+    deslice = DmaDesliceOp(body_block.args[3], out_tsm.result, [thread_offset.result], [size.result], [stride.result], gm_type)
     body_block.add_ops(
         [
             thread_offset,
@@ -996,19 +1032,19 @@ def test_gen_kernel_returns_target_source() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-22 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-22 00:00:00 +0800
-# 功能说明: 验证 `gen_kernel(...)` 直接使用模块本地 `emit_c_op` 时，仍会把 `EmitCError` 折回公开错误类型。
+# 功能说明: 验证 `gen_kernel(...)` 直接使用模块本地 `emit_c_op` 时，仍会把 `KernelCodeError` 折回公开错误类型。
 # 测试目的: 锁定 canonical `gen_kernel.py` 的直接 emit 绑定语义，避免错误类型泄漏。
-# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_converts_emit_c_error_to_gen_kernel_error
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_converts_emit_error_to_gen_kernel_error
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/__init__.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
-def test_gen_kernel_converts_emit_c_error_to_gen_kernel_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gen_kernel_converts_emit_error_to_gen_kernel_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(_op: object, _ctx: EmitCContext) -> str:
-        raise EmitCError("boom")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.GEN_KERNEL, "boom")
 
     monkeypatch.setattr(gen_kernel_entry_module, "emit_c_op", _boom)
 
-    with pytest.raises(GenKernelError, match="boom"):
+    with pytest.raises(KernelCodeError, match="boom"):
         gen_kernel(UnsupportedOp(), _ctx())
 
 
@@ -1018,19 +1054,17 @@ def test_gen_kernel_converts_emit_c_error_to_gen_kernel_error(monkeypatch: pytes
 # 最近一次运行测试时间: 2026-04-22 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-22 00:00:00 +0800
 # 功能说明: 验证 `gen_kernel.py` 模块本身只保留 `spec` 已定义的公开对象可达性。
-# 测试目的: 锁定 `kernel_gen.dsl.gen_kernel.gen_kernel` 的公开面只保留 `gen_kernel(...)` 与 `GenKernelError`，避免内部 helper 或未入 `spec` 的模块元数据被当成跨文件入口。
+# 测试目的: 锁定 `kernel_gen.dsl.gen_kernel.gen_kernel` 的公开面只保留 `gen_kernel(...)` / `dsl_gen_kernel(...)`，避免内部 helper 或未入 `spec` 的模块元数据被当成跨文件入口。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_entry_module_hides_internal_emitter_entry
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 def test_gen_kernel_entry_module_hides_internal_emitter_entry() -> None:
     namespace: dict[str, object] = {}
-    exec("from kernel_gen.dsl.gen_kernel.gen_kernel import GenKernelError, dsl_gen_kernel, gen_kernel", namespace)
+    exec("from kernel_gen.dsl.gen_kernel.gen_kernel import dsl_gen_kernel, gen_kernel", namespace)
 
-    assert namespace["GenKernelError"] is GenKernelError
     assert namespace["dsl_gen_kernel"] is dsl_gen_kernel
     assert namespace["gen_kernel"] is gen_kernel
-    assert gen_kernel_entry_module.GenKernelError is GenKernelError
     assert gen_kernel_entry_module.dsl_gen_kernel is dsl_gen_kernel
     assert gen_kernel_entry_module.gen_kernel is gen_kernel
     assert not hasattr(gen_kernel_entry_module, "KernelEmitter")
@@ -1056,43 +1090,35 @@ def test_gen_kernel_is_the_package_public_entry() -> None:
     public_names = {name for name in namespace if name != "__builtins__"}
 
     assert public_names == {
-        "GenKernelError",
         "KernelEmitter",
         "dsl_gen_kernel",
         "gen_kernel",
         "EmitCContext",
-        "EmitCError",
         "emit_c",
         "emit_c_op",
         "emit_c_value",
     }
-    assert namespace["GenKernelError"] is GenKernelError
     assert namespace["KernelEmitter"] is KernelEmitter
     assert namespace["dsl_gen_kernel"] is dsl_gen_kernel
     assert namespace["gen_kernel"] is gen_kernel
     assert namespace["EmitCContext"] is EmitCContext
-    assert namespace["EmitCError"] is EmitCError
     assert namespace["emit_c"] is emit_c
     assert namespace["emit_c_op"] is emit_c_op
     assert namespace["emit_c_value"] is emit_c_value
-    assert gen_kernel_module.GenKernelError is GenKernelError
     assert gen_kernel_module.gen_kernel is gen_kernel_entry_module.gen_kernel
     assert gen_kernel_module.EmitCContext is EmitCContext
-    assert gen_kernel_module.EmitCError is EmitCError
     assert gen_kernel_module.emit_c is emit_c
     assert gen_kernel_module.emit_c_op is emit_c_op
     assert gen_kernel_module.emit_c_value is emit_c_value
     assert "gen_signature" not in public_names
     assert "gen_body" not in public_names
     assert emit_context_module.EmitCContext is EmitCContext
-    assert emit_context_module.EmitCError is EmitCError
     emit_context_namespace: dict[str, object] = {}
     exec(
-        "from kernel_gen.dsl.gen_kernel.emit_context import EmitCContext, EmitCError",
+        "from kernel_gen.dsl.gen_kernel.emit_context import EmitCContext",
         emit_context_namespace,
     )
     assert emit_context_namespace["EmitCContext"] is EmitCContext
-    assert emit_context_namespace["EmitCError"] is EmitCError
 
 
 # GK-014D
@@ -1110,7 +1136,7 @@ def test_dsl_gen_kernel_matches_public_mlir_gen_plus_gen_kernel_path() -> None:
     def add_scalar(lhs: int, rhs: int) -> int:
         return lhs + rhs
 
-    module = mlir_gen(add_scalar, 3, 4, config={"reject_external_values": True})
+    module = mlir_gen(add_scalar, 3, 4)
     root_func = next(op for op in module.body.block.ops if isinstance(op, func.FuncOp))
     ir_source = gen_kernel(root_func, _ctx())
     callable_source = dsl_gen_kernel(
@@ -1118,7 +1144,6 @@ def test_dsl_gen_kernel_matches_public_mlir_gen_plus_gen_kernel_path() -> None:
         3,
         4,
         ctx=_ctx(),
-        config={"reject_external_values": True},
     )
 
     assert callable_source == ir_source
@@ -1241,8 +1266,8 @@ def test_gen_kernel_rewritten_deslice_memory_result_uses_front_out_param() -> No
     c1 = arith.ConstantOp(IntegerAttr(1, i32))
     c2 = arith.ConstantOp(IntegerAttr(2, i32))
     deslice_op = DmaDesliceOp(
-        block.args[0],
         block.args[1],
+        block.args[0],
         [c0.result, c0.result],
         [c2.result, c2.result],
         [c1.result, c1.result],
@@ -1411,13 +1436,13 @@ def test_gen_kernel_handles_func_return_and_out_binding_in_main_flow(monkeypatch
 def test_kernel_emitter_public_dispatch_error_boundaries() -> None:
     emitter = KernelEmitter(_ctx())
 
-    with pytest.raises(EmitCError, match=r"unsupported attr"):
+    with pytest.raises(KernelCodeError, match=r"unsupported attr"):
         emitter.emit_attr(object())
 
-    with pytest.raises(GenKernelError, match=r"func\.return/out binding must be emitted in function main flow"):
+    with pytest.raises(KernelCodeError, match=r"func\.return/out binding must be emitted in function main flow"):
         emitter.emit(func.ReturnOp())
 
-    with pytest.raises(GenKernelError, match=r"builtin\.module is only supported for target=npu_demo"):
+    with pytest.raises(KernelCodeError, match=r"builtin\.module is only supported for target=npu_demo"):
         emitter.emit(ModuleOp([]))
 
 
@@ -1481,18 +1506,18 @@ def test_gen_kernel_assembles_loop_body() -> None:
 # 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证 emit_c 错误可向上抛出。
 # 测试目的: 验证 gen_kernel 不吞掉 emit_c 失败原因。
-# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_propagates_emit_c_error
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_propagates_emit_error
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 
-def test_gen_kernel_propagates_emit_c_error() -> None:
+def test_gen_kernel_propagates_emit_error() -> None:
     block = Block(arg_types=[])
     block.add_op(UnsupportedOp())
     block.add_op(func.ReturnOp())
     func_op = _func("bad_kernel", [], [], block, ())
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         gen_kernel(func_op, _ctx())
 
     assert "test.unsupported" in str(exc_info.value)
@@ -1523,7 +1548,7 @@ def test_gen_kernel_rejects_unsupported_return_form() -> None:
     tuple_block.add_op(func.ReturnOp())
     tuple_type = FunctionType.from_lists([], [i32, i32])
     tuple_func = func.FuncOp("tuple_return", tuple_type, Region(tuple_block), arg_attrs=ArrayAttr([]))
-    with pytest.raises(GenKernelError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         gen_kernel(tuple_func, _ctx())
     assert "unsupported return form" in str(exc_info.value)
 
@@ -1658,9 +1683,10 @@ def test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu() -> None:
     block.add_op(add)
     block.add_op(func.ReturnOp(add.result))
     func_op = _func("symbol_sum", [lhs_type, rhs_type], [out_type], block, ("lhs", "rhs"))
-    ctx = EmitCContext(config={"target": "gpu"})
+    set_target("gpu")
+    ctx = EmitCContext()
 
-    with pytest.raises(GenKernelError, match="symbol scalar return is only supported on cpu and npu_demo"):
+    with pytest.raises(KernelCodeError, match="symbol scalar return is only supported on cpu and npu_demo"):
         gen_kernel(func_op, ctx)
 
 
@@ -1819,7 +1845,7 @@ class Test_buffer_results_to_out_params_gen_kernel:
             return lhs + rhs
 
         func_op = _lower_func(build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2])))
-        with pytest.raises(GenKernelError, match="legacy memory return ABI is not supported"):
+        with pytest.raises(KernelCodeError, match="legacy memory return ABI is not supported"):
             gen_kernel(func_op, _ctx())
 
     # GK-O5-004
@@ -1842,7 +1868,7 @@ class Test_buffer_results_to_out_params_gen_kernel:
         block.add_op(func.ReturnOp(block.args[0]))
         func_op = _func("half_rewritten", [mem, mem, mem], [mem], block, ("arg0", "lhs", "rhs"))
 
-        with pytest.raises(GenKernelError, match="legacy memory return ABI is not supported"):
+        with pytest.raises(KernelCodeError, match="legacy memory return ABI is not supported"):
             gen_kernel(func_op, _ctx())
 
 
@@ -1851,8 +1877,8 @@ class Test_buffer_results_to_out_params_gen_kernel:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 21:00:00 +0800
 # 最近一次运行成功时间: 2026-04-02 21:00:00 +0800
-# 功能说明: 验证 npu_demo target 可生成包含 KernelContext 与 free helper 查询的 body-level kernel 骨架。
-# 测试目的: 锁定签名首参仍为 `npu_demo::KernelContext& ctx`，并且查询文本显式限定为 `npu_demo::thread_id()` / `npu_demo::thread_num()`。
+# 功能说明: 验证 npu_demo target 可生成无显式 KernelContext 参数的 body-level kernel 骨架。
+# 测试目的: 锁定生成源码不再暴露 `npu_demo::KernelContext& ctx`，并且查询文本显式限定为 `npu_demo::thread_id()` / `npu_demo::thread_num()`。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_body_level_kernel
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
@@ -1866,12 +1892,12 @@ def test_gen_kernel_emits_npu_demo_body_level_kernel() -> None:
 
     assert source.startswith('#include "include/npu_demo/npu_demo.h"\nusing namespace npu_demo;\n\n')
     assert (
-        "void demo_kernel(npu_demo::KernelContext& ctx, const Memory<MemorySpace::GM, float>& source, Memory<MemorySpace::GM, float>& out)"
+        "void demo_kernel(const Memory<MemorySpace::GM, float>& source, Memory<MemorySpace::GM, float>& out)"
         in source
     )
     assert "S_INT tid = npu_demo::thread_id();" in source
     assert "S_INT tnum = npu_demo::thread_num();" in source
-    assert "npu_demo::KernelContext& ctx" in source
+    assert "npu_demo::KernelContext& ctx" not in source
     assert "launch" not in source
     assert "barrier" not in source
     assert "arch.launch_kernel" not in source
@@ -2016,7 +2042,7 @@ def test_gen_kernel_compiles_npu_demo_tiled_matmul_source() -> None:
                 lhs_tile = slice(lhs, [m0, 0], [16, 16], [1, 1], MemorySpace.TSM)
                 rhs_tile = slice(rhs, [0, n0], [16, 16], [1, 1], MemorySpace.TSM)
                 partial = matmul(lhs_tile, rhs_tile)
-                deslice(partial, out, [m0, n0], [16, 16], [1, 1])
+                deslice(out, partial, [m0, n0], [16, 16], [1, 1])
         return out
 
     func_op = build_func_op(
@@ -2097,7 +2123,7 @@ def test_gen_kernel_rejects_npu_demo_body_level_kernel_with_unknown_body_op() ->
     block.add_op(UnsupportedOp())
     func_op = _func("demo_kernel", [IndexType(), mem], [mem], block, ("ctx", "source"))
 
-    with pytest.raises(GenKernelError) as exc_info:
+    with pytest.raises(KernelCodeError) as exc_info:
         gen_kernel(func_op, _npu_ctx())
 
     assert "test.unsupported" in str(exc_info.value)
@@ -2120,7 +2146,7 @@ def test_gen_kernel_rejects_npu_demo_body_level_kernel_with_nonempty_body() -> N
     block.add_op(func.ReturnOp())
     func_op = _func("demo_kernel", [IndexType(), mem], [mem], block, ("ctx", "source"))
 
-    with pytest.raises(GenKernelError, match="body must match frozen subset"):
+    with pytest.raises(KernelCodeError, match="body must match frozen subset"):
         gen_kernel(func_op, _npu_ctx())
 
 
@@ -2311,7 +2337,7 @@ def test_gen_kernel_rejects_tile_codegen_missing_tuner_param() -> None:
     loop = SymbolForOp(start.result, end.result, step.result, Region(loop_body))
     block.insert_ops_before([start, end, step, loop], block.last_op)
 
-    with pytest.raises(GenKernelError, match="missing tuner.param"):
+    with pytest.raises(KernelCodeError, match="missing tuner.param"):
         gen_kernel(func_op, _ctx())
 
 
@@ -2329,7 +2355,7 @@ def test_gen_kernel_rejects_tile_codegen_missing_tuner_param() -> None:
 def test_gen_kernel_rejects_tile_codegen_missing_loop() -> None:
     func_op = _tile_analysis_func(tile_analysis_helpers._build_module())
 
-    with pytest.raises(GenKernelError, match="missing explicit tile loop"):
+    with pytest.raises(KernelCodeError, match="missing explicit tile loop"):
         gen_kernel(func_op, _ctx())
 
 
@@ -2352,7 +2378,7 @@ def test_gen_kernel_rejects_tile_codegen_with_helper_call() -> None:
     first_op = next(iter(loop_block.ops))
     loop_block.insert_op_before(func.CallOp("helper", [], []), first_op)
 
-    with pytest.raises(GenKernelError, match="TileCodegenUnexpectedHelperFunction"):
+    with pytest.raises(KernelCodeError, match="TileCodegenUnexpectedHelperFunction"):
         gen_kernel(func_op, _ctx())
 
 
@@ -2374,7 +2400,7 @@ def test_gen_kernel_rejects_legacy_split_tuner_param_contract() -> None:
     block.add_ops([tuner, func.ReturnOp()])
     func_op = func.FuncOp("legacy_split_contract", FunctionType.from_lists([mem_type], []), Region(block))
 
-    with pytest.raises(GenKernelError, match="TileCodegenMalformed"):
+    with pytest.raises(KernelCodeError, match="TileCodegenMalformed"):
         gen_kernel(func_op, _ctx())
 
 
@@ -2448,7 +2474,7 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
     assert source.startswith('#include "include/npu_demo/npu_demo.h"\nusing namespace npu_demo;\n\n')
     assert source.index("static void add_barrier_body(") < source.index("void add_barrier(") < source.index("void npu_demo_helper()")
     assert (
-        "static void add_barrier_body(npu_demo::KernelContext& ctx, const Memory<GM, float>& lhs, "
+        "static void add_barrier_body(const Memory<GM, float>& lhs, "
         "const Memory<GM, float>& rhs, Memory<GM, float>& out)"
         in source
     )
@@ -2458,16 +2484,17 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
         in source
     )
     assert "npu_demo::launch<1, 1, 1, 0>(add_barrier_body, lhs, rhs, out);" in source
-    assert source.count("ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);") == 2
+    assert source.count("npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);") == 2
+    assert "npu_demo::KernelContext& ctx" not in source
     assert source.index("S_INT v0 = npu_demo::thread_id();") < source.index(
         "Memory<TSM, float> v2 = npu_demo::get_dynamic_memory<TSM>();"
     )
     assert f"Memory<{space_enum}, float> v3 = npu_demo::get_dynamic_memory<{space_enum}>();" in source
     assert "npu_demo::thread_id() * 16" in source
-    assert source.index("slice(v6 /*dst*/, v4 /*source*/, 0 /*offset*/, 16 /*size*/, 1 /*stride*/);") < source.index(
-        "add<TSM, float, float>(v8 /*out*/, v6 /*lhs*/, v7 /*rhs*/);"
+    assert source.index("slice(v2_1 /*dst*/, lhs_1 /*source*/, 0 /*offset*/, 16 /*size*/, 1 /*stride*/);") < source.index(
+        "add<TSM, float, float>(v2_3 /*out*/, v2_1 /*lhs*/, v2_2 /*rhs*/);"
     ) < source.index(
-        "deslice(out /*target*/, v8 /*source*/, npu_demo::thread_id() * 16 /*offset*/, 16 /*size*/, 1 /*stride*/);"
+        "deslice(out /*target*/, v2_3 /*source*/, npu_demo::thread_id() * 16 /*offset*/, 16 /*size*/, 1 /*stride*/);"
     )
     assert "arch.launch_kernel" not in source
     assert "ctx.sync_threads" not in source
@@ -2605,7 +2632,7 @@ def test_gen_kernel_npu_demo_add_barrier_runtime_smoke() -> None:
     source = gen_kernel(module, _npu_ctx())
 
     assert "static void add_barrier_body" in source
-    assert "ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);" in source
+    assert "npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);" in source
     _compile_and_run_npu_demo_add_barrier_source(source, prove_barrier_runtime=False)
 
 
@@ -2623,7 +2650,7 @@ def test_gen_kernel_npu_demo_add_barrier_runtime_smoke() -> None:
 def test_gen_kernel_rejects_npu_demo_barrier_wrapper_missing_body_symbol() -> None:
     module = _make_npu_demo_add_barrier_module(callee_name="missing_body")
 
-    with pytest.raises(GenKernelError, match="missing body missing_body"):
+    with pytest.raises(KernelCodeError, match="missing body missing_body"):
         gen_kernel(module, _npu_ctx())
 
 
@@ -2702,5 +2729,5 @@ def test_gen_kernel_rejects_npu_demo_barrier_fail_fast_boundaries(
     ctx: EmitCContext,
     pattern: str,
 ) -> None:
-    with pytest.raises(GenKernelError, match=pattern):
+    with pytest.raises(KernelCodeError, match=pattern):
         gen_kernel(module, ctx)
