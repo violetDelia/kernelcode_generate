@@ -1,23 +1,17 @@
 """Emit value 共享逻辑。
 
 创建者: jcc你莫辜负
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 处理变量取值、字面量与 symbol.const/index operand 等基础 value 逻辑。
-- 避免在此层直接构造 nn/dma family op。
+- 处理 `emit_mlir(...)` 共享的变量取值、字面量与 symbol.const/index operand 内部逻辑。
+- 当前文件不单独承载公开 API，对外公开入口仍是 `EmitContext(...)` / `emit_mlir(node, ctx)`。
 
 API 列表:
-- `emit_value(expr: object, ctx: EmitContext) -> object`
-- `emit_symbol_const(value: int | ConstAST, ctx: EmitContext) -> SSAValue`
-- `emit_index_operand(expr: object, ctx: EmitContext) -> SSAValue`
-
-helper 清单:
-- `_lookup_public_symbol(name: str, ctx: EmitContext, location: object | None) -> SSAValue`
-- `_coerce_index_operand(value: SSAValue, ctx: EmitContext, location: object | None) -> SSAValue`
+- 无；当前文件仅提供 `emit_mlir(node, ctx)` 共享的内部 value helper。
 
 使用示例:
-- value = emit_value(ConstAST(1), ctx)
+- value = emit_mlir(node, ctx)
 
 关联文件:
 - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)

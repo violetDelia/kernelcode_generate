@@ -1,21 +1,17 @@
 """Emit 类型工具。
 
 创建者: jcc你莫辜负
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 提供类型推导与 memory type 组装的共享工具。
-- 供 emit 共享层与测试用例复用。
+- 提供 `emit_mlir(...)` 共享的类型推导内部辅助逻辑。
+- 当前文件不单独承载公开 API，对外公开入口仍是 `EmitContext(...)` / `emit_mlir(node, ctx)`。
 
 API 列表:
-- `infer_expr_type(expr: object, type_map: dict[int, object]) -> object`
-- `memory_type_from_parts(shape: Sequence[Attribute], stride: Sequence[Attribute], element_type: Attribute, space: NnMemorySpaceAttr) -> NnMemoryType`
-
-helper 清单:
-- `_expr_key(expr: object) -> int`
+- 无；当前文件仅提供 `emit_mlir(node, ctx)` 共享的内部类型 helper。
 
 使用示例:
-- result_type = infer_expr_type(expr, type_map)
+- result = emit_mlir(node, ctx)
 
 关联文件:
 - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)

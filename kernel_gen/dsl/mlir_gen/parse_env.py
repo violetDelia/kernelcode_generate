@@ -1,15 +1,18 @@
 """mlir_gen parse environment helpers.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
-    - 负责 runtime_args、globals 与 builtins 的解析环境拼装。
-    - 提供基于 AST parser 公共 API 的统一入口。
+- 负责 `build_func_op(...)` / `mlir_gen(...)` 共享的 runtime_args、globals 与 builtins 解析环境拼装。
+- 当前文件只承载内部解析环境辅助逻辑，不单独构成公开 API。
+
+API 列表:
+- 无；当前文件仅提供 `build_func_op(...)` / `mlir_gen(...)` 共享的内部解析环境 helper。
 
 使用示例:
-- globals_table, builtins_table = _build_parse_environment(fn, globals_table=None, builtins_table=None)
-- func_ast = _parse_function_with_env(fn, globals_table, builtins_table, runtime_table, config=None)
+- func_op = build_func_op(fn, *runtime_args)
+- module_op = mlir_gen(fn, *runtime_args)
 
 关联文件:
 - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)

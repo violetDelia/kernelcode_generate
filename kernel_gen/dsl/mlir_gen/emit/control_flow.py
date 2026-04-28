@@ -1,18 +1,17 @@
 """Emit 结构节点处理。
 
 创建者: jcc你莫辜负
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 处理控制流结构节点，当前聚焦 `ForAST`。
-- Assign/Return 在 AST 解析阶段已被折叠为表达式，不再作为独立节点进入 emit。
+- 处理 `emit_mlir(...)` 的控制流内部拆分逻辑，当前聚焦 `ForAST`。
+- 当前文件不单独承载公开 API，对外公开入口仍是 `EmitContext(...)` / `emit_mlir(node, ctx)`。
 
 API 列表:
-- `emit_for(node: ForAST, ctx: EmitContext) -> object`
-- `emit_control_flow(node: object, ctx: EmitContext) -> object`
+- 无；当前文件仅提供 `emit_mlir(node, ctx)` 的控制流内部拆分实现。
 
 使用示例:
-- loop_op = emit_for(for_ast, ctx)
+- loop_op = emit_mlir(for_ast, ctx)
 
 关联文件:
 - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)

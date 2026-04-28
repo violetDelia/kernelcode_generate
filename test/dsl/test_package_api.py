@@ -1,7 +1,7 @@
 """dsl package public api tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 只通过公开包入口验证 `kernel_gen.dsl`、`kernel_gen.dsl.mlir_gen` 与 `kernel_gen.dsl.gen_kernel` 的导出边界。

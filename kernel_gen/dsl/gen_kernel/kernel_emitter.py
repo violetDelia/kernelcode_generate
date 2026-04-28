@@ -9,9 +9,15 @@
 
 API 列表:
 - `GenKernelError(message: str)`
-
-helper 清单:
-- `KernelEmitter(ctx: EmitCContext, emit_op: Callable[[Operation, EmitCContext], str] = emit_c_op)`
+- `class KernelEmitter(ctx: EmitCContext, emit_op: Callable[[Operation, EmitCContext], str] = emit_c_op)`
+- `KernelEmitter.emit_include(self) -> str`
+- `KernelEmitter.emit_type(self, attr: Any) -> str`
+- `KernelEmitter.emit_attr(self, attr: Any) -> str`
+- `KernelEmitter.emit_value(self, value: SSAValue) -> str`
+- `KernelEmitter.emit_op(self, op: Operation) -> str`
+- `KernelEmitter.emit(self, op_or_func: Any) -> str`
+- `KernelEmitter.emit_module(self, module_op: ModuleOp) -> str`
+- `KernelEmitter.emit_func(self, func_op: func.FuncOp) -> str`
 
 使用示例:
 - from kernel_gen.dsl.gen_kernel import gen_kernel
@@ -1267,24 +1273,6 @@ class KernelEmitter:
         self.ctx.bind_name(op.results[0], emit_c_value(op.operands[0], self.ctx))
         return True
 
-    def _is_direct_return_nn_add(self, return_op: func.ReturnOp) -> bool:
-        if self.ctx.config["target"] != "cpu":
-            return False
-        if len(return_op.arguments) != 1:
-            return False
-        returned = return_op.arguments[0]
-        owner = getattr(returned, "owner", None)
-        if not isinstance(owner, NnAddOp):
-            return False
-        if not owner.result.has_one_use():
-            return False
-        return owner.result.get_user_of_unique_use() is return_op
-
-    def _has_cpu_direct_return_nn_add(self, func_op: func.FuncOp) -> bool:
-        if self.ctx.config["target"] != "cpu":
-            return False
-        return any(isinstance(op, func.ReturnOp) and self._is_direct_return_nn_add(op) for op in func_op.body.block.ops)
-
     def _emit_npu_demo_return_symbol_assignment(self, op: Operation) -> str | None:
         """为 `npu_demo` 的 `%total` 累计值生成稳定赋值语句。
 
@@ -1448,32 +1436,6 @@ class KernelEmitter:
             if stmt:
                 lines.append(stmt)
         return "\n".join(lines)
-
-    def _emit_cpu_direct_return_nn_add_body(self, func_op: func.FuncOp) -> str:
-        lines: list[str] = []
-        for op in func_op.body.block.ops:
-            if isinstance(op, func.ReturnOp):
-                stmt = self._emit_return_statement(func_op, op, allow_direct_return_nn_add=True)
-                if stmt:
-                    lines.append(stmt)
-                continue
-            if isinstance(op, DmaAllocOp) and self._is_returned_output_alloc(func_op, op):
-                self.ctx.bind_name(op.result, "out")
-                continue
-            if self._bind_transparent_unrealized_conversion_cast(op):
-                continue
-            if isinstance(op, NnAddOp) and op.result.has_one_use():
-                unique_user = op.result.get_user_of_unique_use()
-                if isinstance(unique_user, func.ReturnOp) and self._is_direct_return_nn_add(unique_user):
-                    self.ctx.bind_name(op.result, "out")
-            self._bind_rewritten_out_result(func_op, op)
-            stmt = self.emit_op(op)
-            if stmt and self.ctx.config["target"] == "cpu":
-                stmt = _normalize_memory_stmt(stmt)
-            if stmt:
-                lines.append(stmt)
-        return "\n".join(lines)
-
 
 def __getattr__(name: str) -> Any:
     """拒绝回流的 legacy 双接口公开访问。

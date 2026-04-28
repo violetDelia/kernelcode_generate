@@ -55,8 +55,21 @@ def test_python_coverage_omit_manifest_exists_and_lists_forwarding_modules() -> 
     text = _manifest_text()
     assert "kernel_gen/common/__init__.py" in text
     assert "kernel_gen/dsl/__init__.py" in text
+    assert "kernel_gen/dsl/mlir_gen/parse_env.py" in text
+    assert "kernel_gen/dsl/mlir_gen/signature.py" in text
+    assert "kernel_gen/dsl/mlir_gen/function_builder.py" in text
+    assert "kernel_gen/dsl/mlir_gen/module_builder.py" in text
+    assert "kernel_gen/dsl/mlir_gen/emit/call_nn.py" in text
+    assert "kernel_gen/dsl/mlir_gen/emit/core.py" in text
+    assert "kernel_gen/dsl/mlir_gen/emit/value.py" in text
+    assert "kernel_gen/dsl/gen_kernel/emit/cpu/__init__.py" in text
+    assert "kernel_gen/dsl/gen_kernel/emit/npu_demo/name.py" in text
+    assert "kernel_gen/dsl/gen_kernel/emit/npu_demo/symbol/cast.py" in text
+    assert "kernel_gen/dsl/gen_kernel/emit/npu_demo/symbol/const.py" in text
+    assert "kernel_gen/dsl/gen_kernel/emit/npu_demo/symbol/for_loop.py" in text
     assert "kernel_gen/execute_engine/__init__.py" in text
     assert "kernel_gen/operation/__init__.py" in text
+    assert "kernel_gen/operation/nn/common.py" in text
     assert "kernel_gen/passes/pipeline/__init__.py" in text
     assert "kernel_gen/symbol_variable/__init__.py" in text
 

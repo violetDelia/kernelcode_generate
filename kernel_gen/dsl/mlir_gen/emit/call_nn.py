@@ -1,32 +1,17 @@
 """Emit nn elementwise family helper.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 收口 nn elementwise family 的类型推导与 lowering，覆盖 unary/binary/compare 三类 AST。
-- 统一承接 broadcast、dtype cast、`memory + const`、`memory + symbol` 的公共规则。
+- 收口 `emit_mlir(...)` 的 nn family 内部拆分实现，覆盖 unary/binary/compare 三类 AST。
+- 当前文件只承载 emit 内部拆分逻辑，对外公开入口仍是 `EmitContext(...)` / `emit_mlir(node, ctx)`。
 
 API 列表:
-- `infer_nn_type(node: object, type_map: dict[str, object], runtime_values: dict[str, object] | None = None, config: dict[str, object] | None = None) -> object`
-- `emit_nn_call(node: object, ctx: EmitContext) -> object`
-
-helper 清单:
-- `_expr_key(expr: object) -> int`
-- `_emit_infer_expr_type(expr: object, type_map: dict[int, object], runtime_values: dict[str, object] | None = None, config: dict[str, object] | None = None) -> object`
-- `_emit_lower_expr(expr: object, ctx: EmitContext) -> SSAValue`
-- `_promote_ranked_dtype(lhs: NumericType, rhs: NumericType) -> NumericType`
-- `_resolve_runtime_scalar_value(expr: object, inferred_type: Attribute | None, runtime_values: dict[str, object] | None = None) -> object | None`
-- `_resolve_static_int(expr: object, location: SourceLocation | None) -> int`
-- `_resolve_static_bool(expr: object, location: SourceLocation | None) -> bool`
-- `_resolve_static_int_list(values: list[object], location: SourceLocation | None) -> list[int]`
-- `_resolve_public_shape_values(values: list[object], type_map: dict[int, object], runtime_values: dict[str, object] | None, config: dict[str, object] | None, location: SourceLocation | None) -> list[int | SymbolDim]`
-- `_nn_memory_type_to_memory(memory_type: NnMemoryType, location: SourceLocation | None = None) -> Memory`
-- `_infer_broadcast_memory_type(lhs_type: NnMemoryType, rhs_type: NnMemoryType, location: SourceLocation | None, element_type: Attribute | None = None) -> NnMemoryType`
+- 无；当前文件仅提供 `emit_mlir(node, ctx)` 的 nn family 内部拆分实现。
 
 使用示例:
-- value = emit_nn_call(NnUnaryAST(kind="relu", value=tensor), ctx)
-- result_type = infer_nn_type(BinaryExprAST(op="add", lhs=lhs, rhs=rhs), type_map)
+- value = emit_mlir(NnUnaryAST(kind="relu", value=tensor), ctx)
 
 关联文件:
 - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)

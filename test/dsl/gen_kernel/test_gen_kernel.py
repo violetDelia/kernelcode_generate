@@ -1397,6 +1397,51 @@ def test_gen_kernel_handles_func_return_and_out_binding_in_main_flow(monkeypatch
     assert "out = rhs;" not in source
 
 
+# GK-005C
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证 `KernelEmitter.emit(...)` 的公开 dispatch 错误边界。
+# 测试目的: 锁定 unsupported attr、裸 `func.return` 与非 `npu_demo` `builtin.module` 都通过公开 `KernelEmitter` 暴露稳定错误。
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_kernel_emitter_public_dispatch_error_boundaries
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/kernel_emitter.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
+# 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
+def test_kernel_emitter_public_dispatch_error_boundaries() -> None:
+    emitter = KernelEmitter(_ctx())
+
+    with pytest.raises(EmitCError, match=r"unsupported attr"):
+        emitter.emit_attr(object())
+
+    with pytest.raises(GenKernelError, match=r"func\.return/out binding must be emitted in function main flow"):
+        emitter.emit(func.ReturnOp())
+
+    with pytest.raises(GenKernelError, match=r"builtin\.module is only supported for target=npu_demo"):
+        emitter.emit(ModuleOp([]))
+
+
+# GK-005D
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证 `KernelEmitter` 的公开前导与类型分发入口。
+# 测试目的: 锁定 `emit_include()` / `emit_type()` 继续只通过 `EmitCContext` target 分发工作，不回退为私有入口。
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_kernel_emitter_public_include_and_type_dispatch
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/kernel_emitter.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
+# 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
+def test_kernel_emitter_public_include_and_type_dispatch() -> None:
+    cpu_emitter = KernelEmitter(_ctx())
+    npu_emitter = KernelEmitter(_npu_ctx())
+
+    assert cpu_emitter.emit_include() == ""
+    assert "using namespace npu_demo;" in npu_emitter.emit_include()
+    assert cpu_emitter.emit_type(i32) == "int32_t"
+    assert npu_emitter.emit_type(i32) == "int32_t"
+
+
 # GK-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战

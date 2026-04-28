@@ -1,17 +1,19 @@
 """mlir_gen function builder.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 提供 build_func_op/build_func_op_from_ast 的公开入口。
-- 负责函数签名、返回类型与函数体装配，不处理 module 组装。
+- 负责 `kernel_gen.dsl.mlir_gen` 包根公开 `build_func_op(...)` /
+  `build_func_op_from_ast(...)` 背后的函数级 IR 装配逻辑。
+- 当前文件只承载 package-root facade 背后的内部实现拆分，不单独扩展新的公开入口。
 
 API 列表:
-- build_func_op(fn, *runtime_args, globals=None, builtins=None)
-- build_func_op_from_ast(func_ast, runtime_args=None, config=None)
+- 无；当前文件仅提供 `kernel_gen.dsl.mlir_gen` 包根公开
+  `build_func_op(...)` / `build_func_op_from_ast(...)` 的内部实现拆分。
 
 使用示例:
+- from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
 - func_op = build_func_op(fn, *runtime_args)
 - func_op = build_func_op_from_ast(func_ast, runtime_args=[...])
 
@@ -1293,9 +1295,9 @@ def _emit_result_type_with_public_diagnostics(
 
     功能说明:
     - 调用公开 `emit_mlir(...)` 预发射返回表达式并读取结果类型。
-    - 仅将 `emit_mlir(...)` 抛出的 lowering 诊断重新包装为带位置信息的 `LoweringError`，
+    - 仅将 `emit_mlir(...)` 抛出的带 lowering 语义的 `ValueError` 重新包装为带位置信息的 `LoweringError`，
       以保持 `build_func_op(...) -> AstVisitorError` 的既有公开合同。
-    - module-builder 公开 `MlirGenModuleError` 这类非 lowering 失败继续原样透传，不在这里改写。
+    - `MlirGenModuleError` 这类 module-builder 公开的非 lowering 失败继续原样透传，不在这里被误改写。
 
     使用示例:
     - result_type = _emit_result_type_with_public_diagnostics(expr, preview_ctx, func_ast.location)

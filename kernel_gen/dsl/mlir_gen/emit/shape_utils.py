@@ -1,26 +1,17 @@
 """Emit shape/stride 工具。
 
 创建者: jcc你莫辜负
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 提供 shape/stride/index 的统一构造入口。
-- 聚合 emit 共享逻辑，避免在 family 逻辑中重复实现。
+- 提供 `emit_mlir(...)` 共享的 shape/stride/index 内部辅助逻辑。
+- 当前文件不单独承载公开 API，对外公开入口仍是 `EmitContext(...)` / `emit_mlir(node, ctx)`。
 
 API 列表:
-- `resolve_index_expr(expr: object, ctx: EmitContext) -> int | str`
-- `build_index_attrs(value: object | None, rank: int, ctx: EmitContext, default_value: int = 0, location: SourceLocation | None = None) -> list[SSAValue]`
-- `build_index_operands_from_layout(layout: ArrayAttr[Attribute], ctx: EmitContext, location: SourceLocation | None = None) -> list[SSAValue]`
-- `build_stride_attrs(value: object | None, rank: int, ctx: EmitContext, location: SourceLocation | None = None) -> list[SSAValue]`
-- `build_index_operands_exact(value: object, ctx: EmitContext, location: SourceLocation | None = None) -> list[SSAValue]`
-
-helper 清单:
-- `_loop_vars(ctx: EmitContext) -> dict[str, object]`
-- `_normalize_index_value(value: int | str | SymbolDim, location: SourceLocation | None) -> int | str`
-- `_apply_symbolic_index_binary_op(lhs_value: int | SymbolDim, rhs_value: int | SymbolDim, op: str, location: SourceLocation | None) -> int | SymbolDim`
+- 无；当前文件仅提供 `emit_mlir(node, ctx)` 共享的内部 shape/index helper。
 
 使用示例:
-- offsets = build_index_attrs(None, 2, ctx, default_value=0)
+- offsets = emit_mlir(node, ctx)
 
 关联文件:
 - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)

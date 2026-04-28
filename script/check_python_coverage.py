@@ -18,13 +18,16 @@ helper 清单:
 - `_build_parser() -> argparse.ArgumentParser`
 - `_load_report(path: Path) -> dict[str, Any]`
 - `_normalize_module_prefix(module: str) -> str`
+- `_normalize_repo_path(path: str) -> str`
+- `_omit_manifest_path() -> Path`
+- `_load_omit_paths(path: Path) -> set[str]`
 - `_path_matches_module(path: str, module: str) -> bool`
 - `_require_int(value: Any, field: str, scope: str) -> int`
 - `_summary_metrics(summary: Any, scope: str) -> dict[str, int]`
-- `_select_scope(report: dict[str, Any], include_modules: list[str]) -> tuple[str, dict[str, int]]`
-- `_percentage(covered: int, total: int) -> float`
-- `_format_summary(scope: str, line_pct: float, branch_pct: float) -> str`
-- `_validate_thresholds(line_pct: float, branch_pct: float, line_min: float, branch_min: float) -> None`
+- `_aggregate_metrics(items: list[dict[str, int]]) -> dict[str, int]`
+- `_collect_file_metrics(files: dict[str, Any], include_modules: list[str], omit_paths: set[str]) -> tuple[list[dict[str, int]], list[str]]`
+- `_select_metrics(report: dict[str, Any], include_modules: list[str]) -> tuple[dict[str, int], str]`
+- `_coverage_percent(covered: int, total: int) -> float`
 
 使用示例:
 - python3 script/check_python_coverage.py --coverage-json coverage/S2/coverage.json --line-min 98 --branch-min 70
@@ -42,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -142,6 +146,85 @@ def _normalize_module_prefix(module: str) -> str:
     return normalized.strip("/")
 
 
+def _normalize_repo_path(path: str) -> str:
+    """把 coverage JSON 路径归一化为仓内 `kernel_gen/...` 相对路径。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 统一处理 coverage JSON 中的绝对路径、相对路径与 Windows 风格路径。
+    - 若路径中包含 `kernel_gen/` 段，则截取该段开始的仓内相对路径。
+
+    使用示例:
+    - _normalize_repo_path("/tmp/wt/kernel_gen/tools/dsl_run.py") == "kernel_gen/tools/dsl_run.py"
+
+    关联文件:
+    - spec: [spec/script/python_coverage_check.md](../spec/script/python_coverage_check.md)
+    - test: [test/script/test_python_coverage_check.py](../test/script/test_python_coverage_check.py)
+    - 功能实现: [script/check_python_coverage.py](check_python_coverage.py)
+    """
+
+    normalized = path.replace("\\", "/").strip()
+    match = re.search(r"(^|/)(kernel_gen/.+)$", normalized)
+    if match is not None:
+        return match.group(2)
+    return normalized.lstrip("./")
+
+
+def _omit_manifest_path() -> Path:
+    """返回 coverage omit 清单路径。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 固定定位当前仓库的 `spec/script/python_coverage_omit.md`。
+    - 供覆盖率阈值检查与测试共享同一份 omit 合同真源。
+
+    使用示例:
+    - path = _omit_manifest_path()
+
+    关联文件:
+    - spec: [spec/script/python_coverage_omit.md](../spec/script/python_coverage_omit.md)
+    - test: [test/script/test_python_coverage_omit.py](../test/script/test_python_coverage_omit.py)
+    - 功能实现: [script/check_python_coverage.py](check_python_coverage.py)
+    """
+
+    return Path(__file__).resolve().parents[1] / "spec/script/python_coverage_omit.md"
+
+
+def _load_omit_paths(path: Path) -> set[str]:
+    """从 omit 清单解析需要排除的仓内文件路径。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 只解析 markdown 表格中的 ``kernel_gen/...`` 路径。
+    - 当 omit 清单缺失或为空时返回空集合，保持 CLI 可独立运行。
+
+    使用示例:
+    - omit_paths = _load_omit_paths(_omit_manifest_path())
+
+    关联文件:
+    - spec: [spec/script/python_coverage_omit.md](../spec/script/python_coverage_omit.md)
+    - test: [test/script/test_python_coverage_omit.py](../test/script/test_python_coverage_omit.py)
+    - 功能实现: [script/check_python_coverage.py](check_python_coverage.py)
+    """
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    omit_paths: set[str] = set()
+    for match in re.finditer(r"\|\s*`([^`]+)`\s*\|", text):
+        candidate = _normalize_repo_path(match.group(1))
+        if candidate.startswith("kernel_gen/"):
+            omit_paths.add(candidate)
+    return omit_paths
+
+
 def _path_matches_module(path: str, module: str) -> bool:
     """判断 coverage 文件路径是否属于指定模块前缀。
 
@@ -164,7 +247,8 @@ def _path_matches_module(path: str, module: str) -> bool:
     prefix = _normalize_module_prefix(module)
     if not prefix:
         return False
-    normalized_parts = [part for part in PurePosixPath(path.replace("\\", "/")).parts if part not in {"", "/"}]
+    normalized_path = _normalize_repo_path(path)
+    normalized_parts = [part for part in PurePosixPath(normalized_path).parts if part not in {"", "/"}]
     prefix_parts = prefix.split("/")
     if len(normalized_parts) < len(prefix_parts):
         return False
@@ -269,6 +353,46 @@ def _aggregate_metrics(items: list[dict[str, int]]) -> dict[str, int]:
     }
 
 
+def _collect_file_metrics(
+    files: dict[str, Any],
+    include_modules: list[str],
+    omit_paths: set[str],
+) -> tuple[list[dict[str, int]], list[str]]:
+    """收集未命中 omit 的文件 summary，并按模块前缀过滤。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 先按 omit 清单排除内部拆分或薄包装文件。
+    - 再按 `--include-module` 过滤剩余 coverage 文件。
+
+    使用示例:
+    - metrics, matched_files = _collect_file_metrics(files, ["kernel_gen.tools"], omit_paths)
+
+    关联文件:
+    - spec: [spec/script/python_coverage_check.md](../spec/script/python_coverage_check.md)
+    - spec: [spec/script/python_coverage_omit.md](../spec/script/python_coverage_omit.md)
+    - test: [test/script/test_python_coverage_check.py](../test/script/test_python_coverage_check.py)
+    - 功能实现: [script/check_python_coverage.py](check_python_coverage.py)
+    """
+
+    normalized_modules = [_normalize_module_prefix(module) for module in include_modules]
+    metrics: list[dict[str, int]] = []
+    matched_files: list[str] = []
+    for path, data in files.items():
+        normalized_path = _normalize_repo_path(path)
+        if not normalized_path.startswith("kernel_gen/"):
+            continue
+        if normalized_path in omit_paths:
+            continue
+        if normalized_modules and not any(_path_matches_module(normalized_path, module) for module in normalized_modules):
+            continue
+        metrics.append(_summary_metrics((data or {}).get("summary"), normalized_path))
+        matched_files.append(normalized_path)
+    return metrics, matched_files
+
+
 def _select_metrics(report: dict[str, Any], include_modules: list[str]) -> tuple[dict[str, int], str]:
     """从 coverage 报告中选择需要检查的 metrics。
 
@@ -276,8 +400,8 @@ def _select_metrics(report: dict[str, Any], include_modules: list[str]) -> tuple
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 不传 `--include-module` 时直接读取 `totals`。
-    - 传入模块列表时，仅汇总匹配这些模块前缀的文件 summary。
+    - 优先按 `files` 聚合覆盖率，并先应用 omit 清单再做模块过滤。
+    - 仅当报告缺少 `files` 且未请求 `--include-module` 时，才回退读取 `totals`。
 
     使用示例:
     - metrics, scope = _select_metrics(report, ["kernel_gen.passes"])
@@ -288,28 +412,26 @@ def _select_metrics(report: dict[str, Any], include_modules: list[str]) -> tuple
     - 功能实现: [script/check_python_coverage.py](check_python_coverage.py)
     """
 
-    if not include_modules:
-        totals = report.get("totals")
-        return _summary_metrics(totals, "totals"), "totals"
-
     files = report.get("files")
-    if not isinstance(files, dict):
+    omit_paths = _load_omit_paths(_omit_manifest_path())
+    if isinstance(files, dict):
+        metrics, matched_files = _collect_file_metrics(files, include_modules, omit_paths)
+        if not metrics:
+            if include_modules:
+                raise CoverageCheckError(
+                    "coverage JSON does not contain non-omitted files for include-module scope: "
+                    + ", ".join(sorted(set(include_modules)))
+                )
+            raise CoverageCheckError("coverage JSON does not contain non-omitted kernel_gen files")
+        if not include_modules:
+            return _aggregate_metrics(metrics), "totals"
+        normalized_modules = sorted(set(_normalize_module_prefix(module) for module in include_modules))
+        scope = ", ".join(normalized_modules)
+        return _aggregate_metrics(metrics), f"{scope} ({len(matched_files)} file(s))"
+    if include_modules:
         raise CoverageCheckError("coverage JSON missing files for --include-module filtering")
-
-    metrics: list[dict[str, int]] = []
-    matched_files: list[str] = []
-    normalized_modules = [_normalize_module_prefix(module) for module in include_modules]
-    for path, data in files.items():
-        if any(_path_matches_module(path, module) for module in normalized_modules):
-            metrics.append(_summary_metrics((data or {}).get("summary"), path))
-            matched_files.append(path)
-    if not metrics:
-        raise CoverageCheckError(
-            "coverage JSON does not contain files for include-module scope: "
-            + ", ".join(sorted(set(include_modules)))
-        )
-    scope = ", ".join(sorted(set(normalized_modules)))
-    return _aggregate_metrics(metrics), f"{scope} ({len(matched_files)} file(s))"
+    totals = report.get("totals")
+    return _summary_metrics(totals, "totals"), "totals"
 
 
 def _coverage_percent(covered: int, total: int) -> float:

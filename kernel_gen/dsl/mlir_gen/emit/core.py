@@ -4,12 +4,14 @@
 最后一次更改: 朽木露琪亚
 
 功能说明:
-- 提供 AST 节点到 MLIR SSA value/op 的发射入口。
-- 维护节点发射所需的上下文、类型推导与显式错误。
+- 负责 `kernel_gen.dsl.mlir_gen.emit` 包根公开 `EmitContext(...)` /
+  `emit_mlir(...)` / `memory_type_from_memory(...)` 背后的内部 lowering 逻辑。
+- 当前文件只承载 package-root facade 背后的实现拆分，不单独扩展新的公开入口。
 
 API 列表:
-- `EmitContext(builder: Block, symbols: dict[str, object], types: dict[int, object], config: dict[str, object] | None = None)`
-- `emit_mlir(node: object, ctx: EmitContext) -> object`
+- 无；当前文件仅提供 `kernel_gen.dsl.mlir_gen.emit` 包根公开
+  `EmitContext(...)` / `emit_mlir(...)` / `memory_type_from_memory(...)`
+  的内部实现拆分。
 
 使用示例:
 - from kernel_gen.dsl.mlir_gen.emit import EmitContext, emit_mlir

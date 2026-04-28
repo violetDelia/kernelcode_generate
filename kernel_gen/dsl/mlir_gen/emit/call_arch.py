@@ -1,17 +1,17 @@
 """Emit arch family helper.
 
 创建者: jcc你莫辜负
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 收口 arch family 的 emit 入口，覆盖 query/get_dynamic_memory/launch_kernel。
-- 仅负责 arch 相关 AST 的分发，不承载 symbol/dma/nn 逻辑。
+- 收口 `emit_mlir(...)` 的 arch family 内部拆分实现，覆盖 query/get_dynamic_memory/launch_kernel。
+- 当前文件不单独承载公开 API，对外公开入口仍是 `EmitContext(...)` / `emit_mlir(node, ctx)`。
 
 API 列表:
-- `emit_arch_call(node: object, ctx: EmitContext) -> object`
+- 无；当前文件仅提供 `emit_mlir(node, ctx)` 的 arch family 内部拆分实现。
 
 使用示例:
-- value = emit_arch_call(ArchGetDynamicMemoryAST(space=MemorySpace.LM), ctx)
+- value = emit_mlir(ArchGetDynamicMemoryAST(space=MemorySpace.LM), ctx)
 
 关联文件:
 - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)

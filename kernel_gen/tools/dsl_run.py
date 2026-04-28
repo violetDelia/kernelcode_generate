@@ -1,7 +1,7 @@
 """dsl_run tool entry.
 
 创建者: 朽木露琪亚
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 `dsl_run(func, real_args, pipeline, emitcconfig)` 的一体化入口。

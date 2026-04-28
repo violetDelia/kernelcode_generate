@@ -1,17 +1,19 @@
 """mlir_gen module builder.
 
 创建者: 朽木露琪亚
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 负责从根函数生成 builtin.module，并收集 callee func.func。
-- 管理 callee 的签名一致性、递归检测与排序规则。
+- 负责 `kernel_gen.dsl.mlir_gen` 包根公开 `mlir_gen(...)` 背后的
+  module 组装、callee 收集与排序逻辑。
+- 当前文件只承载 package-root facade 背后的内部实现拆分，不单独扩展新的公开入口。
 
 API 列表:
-- MlirGenModuleError(reason)
-- mlir_gen(fn, *runtime_args, globals=None, builtins=None, config=None)
+- 无；当前文件仅提供 `kernel_gen.dsl.mlir_gen` 包根公开
+  `MlirGenModuleError(...)` / `mlir_gen(...)` 的内部实现拆分。
 
 使用示例:
+- from kernel_gen.dsl.mlir_gen import mlir_gen
 - module = mlir_gen(main, Memory([4], NumericType.Float32))
 
 关联文件:
@@ -315,6 +317,35 @@ class MlirGenModuleError(ValueError):
         super().__init__(f"MlirGenModuleError: {reason}")
 
 
+def _reraise_module_error_from_ast_visitor_error(exc: AstVisitorError) -> None:
+    """把 `build_func_op_from_ast(...)` 折返出的模块错误恢复为公开模块错误。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - `AstVisitor` 会把任意 `ValueError` 折返成 `AstVisitorError`。
+    - 当 message 已经是 `MlirGenModuleError: ...` 时，这里恢复成公开 `MlirGenModuleError`，
+      以保持 `mlir_gen(...)` 对外的稳定错误合同。
+
+    使用示例:
+    - try:
+    -     build_func_op_from_ast(func_ast)
+    - except AstVisitorError as exc:
+    -     _reraise_module_error_from_ast_visitor_error(exc)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/mlir_gen/test_module_builder.py](test/dsl/mlir_gen/test_module_builder.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/module_builder.py](kernel_gen/dsl/mlir_gen/module_builder.py)
+    """
+
+    prefix = "MlirGenModuleError: "
+    if not exc.message.startswith(prefix):
+        raise exc
+    raise MlirGenModuleError(exc.message.removeprefix(prefix)) from exc
+
+
 def _is_supported_python_callee(fn: object) -> bool:
     """判断是否属于 `mlir_gen(...)` 支持的 Python callee。
 
@@ -481,11 +512,14 @@ def mlir_gen(
                     exc,
                     value_messages=("get_dynamic_memory space must be on-chip MemorySpace",),
                 )
-            callee_registry[callee] = build_func_op_from_ast(
-                callee_ast,
-                runtime_args=callee_runtime_args,
-                config=lowering_config,
-            )
+            try:
+                callee_registry[callee] = build_func_op_from_ast(
+                    callee_ast,
+                    runtime_args=callee_runtime_args,
+                    config=lowering_config,
+                )
+            except AstVisitorError as exc:
+                _reraise_module_error_from_ast_visitor_error(exc)
         finally:
             compiling.remove(callee)
 
@@ -512,7 +546,10 @@ def mlir_gen(
 
     compiling.add(fn)
     try:
-        root_func_op = build_func_op_from_ast(func_ast, runtime_args=runtime_args, config=lowering_config)
+        try:
+            root_func_op = build_func_op_from_ast(func_ast, runtime_args=runtime_args, config=lowering_config)
+        except AstVisitorError as exc:
+            _reraise_module_error_from_ast_visitor_error(exc)
     finally:
         compiling.remove(fn)
 

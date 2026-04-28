@@ -1,7 +1,7 @@
 """`gen_kernel(...)` 公开模块入口。
 
 创建者: 小李飞刀
-最后一次更改: OpenAI Codex
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 `gen_kernel(obj, ctx)` 的稳定公开入口。
@@ -66,9 +66,8 @@ def gen_kernel(obj: object, ctx: EmitCContext) -> str:
 
 def _resolve_root_func(module: ModuleOp, fn_name: str) -> func.FuncOp:
     """从 `mlir_gen(...)` 结果里定位 callable 对应的根函数。
-
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 优先按 callable 的 `__name__` 精确匹配 `func.func`。
@@ -101,9 +100,8 @@ def dsl_gen_kernel(
     config: dict[str, object] | None = None,
 ) -> str:
     """通过公开 `mlir_gen(...) + gen_kernel(...)` 链路生成 callable 源码。
-
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 只接受 Python DSL callable 及其运行时参数。

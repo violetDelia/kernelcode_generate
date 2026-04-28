@@ -4,7 +4,11 @@
 最后一次更改: 金铲铲大作战
 
 功能说明:
-- 提供 nn family 共享类型、常量与参数校验 helper
+- 提供 `kernel_gen.operation.nn` 各公开 helper 共享的类型、常量与参数校验内部逻辑。
+- 当前文件不单独承载公开 API，对外公开入口仍是 `kernel_gen.operation.nn` 包根 helper。
+
+API 列表:
+- 无；当前文件仅提供 `kernel_gen.operation.nn` 公开 helper 共享的内部校验与类型辅助逻辑。
 
 使用示例:
 - from kernel_gen.operation.nn import add, broadcast, matmul, reduce_sum

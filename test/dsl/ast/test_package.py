@@ -91,13 +91,17 @@ from kernel_gen.dialect.symbol import (
 from kernel_gen.dsl.ast import (
     AstParseError,
     ArchBarrierAST,
+    ArchGetDynamicMemoryAST,
     ArchLaunchKernelAST,
     BlockAST,
     BinaryExprAST,
     CompareExprAST,
     ConstAST,
+    DmaAllocAST,
     FunctionAST,
     ForAST,
+    NnBroadcastToAST,
+    NnTransposeAST,
     SourceLocation,
     SymbolToFloatAST,
     TensorAST,
@@ -1721,3 +1725,400 @@ def test_parse_function_rejects_invalid_arch_launch_kernel_variants(monkeypatch:
             raise AssertionError(
                 f"expected launch_kernel diagnostic {expected_message!r}, got {diagnostics[0].message!r}"
             )
+
+
+# AST-014M
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 legacy `launch_kernel(callee, block, thread, subthread, shared, *args)` 仍走公开解析链路。
+# 测试目的: 覆盖 parser 的 legacy launch_kernel 正路径，不依赖任何私有 helper。
+# 使用示例: pytest -q test/dsl/ast/test_package.py -k test_parse_function_parses_legacy_arch_launch_kernel_call
+# 对应功能实现文件路径: kernel_gen/dsl/ast/__init__.py
+# 对应 spec 文件路径: spec/dsl/ast/__init__.md
+# 对应测试文件路径: test/dsl/ast/test_package.py
+def test_parse_function_parses_legacy_arch_launch_kernel_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.operation.arch import launch_kernel
+
+    def launched_body(
+        lhs: "Tensor[f32, M, N]",
+        rhs: "Tensor[f32, M, N]",
+        out: "Tensor[f32, M, N]",
+    ) -> None:
+        return None
+
+    def launch_entry(
+        lhs: "Tensor[f32, M, N]",
+        rhs: "Tensor[f32, M, N]",
+        out: "Tensor[f32, M, N]",
+    ) -> None:
+        launch_kernel(launched_body, 1, 2, 3, 0, lhs, rhs, out)
+
+    monkeypatch.setitem(launch_entry.__globals__, "launch_kernel", launch_kernel)
+    monkeypatch.setitem(launch_entry.__globals__, "launched_body", launched_body)
+
+    func_ast = parse_function(launch_entry)
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected legacy launch entry to lower to one AST statement")
+    stmt = func_ast.body.statements[0]
+    if not isinstance(stmt, ArchLaunchKernelAST):
+        raise AssertionError("expected legacy launch entry to parse into ArchLaunchKernelAST")
+    if stmt.callee != "launched_body":
+        raise AssertionError("expected legacy launch callee to normalize to function symbol name")
+    if not isinstance(stmt.block, ConstAST) or stmt.block.value != 1:
+        raise AssertionError("expected legacy block extent to stay constant 1")
+    if not isinstance(stmt.thread, ConstAST) or stmt.thread.value != 2:
+        raise AssertionError("expected legacy thread extent to stay constant 2")
+    if not isinstance(stmt.subthread, ConstAST) or stmt.subthread.value != 3:
+        raise AssertionError("expected legacy subthread extent to stay constant 3")
+    if [getattr(arg, "name", None) for arg in stmt.args] != ["lhs", "rhs", "out"]:
+        raise AssertionError("expected legacy launch args to preserve positional order")
+
+
+# AST-014N
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 alloc/broadcast_to/transpose/get_dynamic_memory 的公开关键字路径可正常解析。
+# 测试目的: 覆盖 parser 对 DMA/NN/ARCH helper 关键字正路径的公开合同，不通过私有 helper 断言。
+# 使用示例: pytest -q test/dsl/ast/test_package.py -k test_parse_function_parses_keyword_helper_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast/__init__.py
+# 对应 spec 文件路径: spec/dsl/ast/__init__.md
+# 对应测试文件路径: test/dsl/ast/test_package.py
+def test_parse_function_parses_keyword_helper_variants(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.operation.arch import get_dynamic_memory
+    from kernel_gen.operation.dma import alloc
+    from kernel_gen.operation.nn import broadcast_to, transpose
+
+    def helper_kernel(src: "Tensor[f32, 2, 3]") -> "Tensor[f32, 3, 2]":
+        tmp = alloc([2, 3], NumericType.Float32, space=MemorySpace.SM, stride=[3, 1])
+        shaped = broadcast_to(src, target_shape=[2, 3], space=MemorySpace.SM)
+        scratch = get_dynamic_memory(MemorySpace.SM)
+        _ = tmp
+        _ = scratch
+        return transpose(shaped, perm=[1, 0])
+
+    monkeypatch.setitem(helper_kernel.__globals__, "alloc", alloc)
+    monkeypatch.setitem(helper_kernel.__globals__, "broadcast_to", broadcast_to)
+    monkeypatch.setitem(helper_kernel.__globals__, "transpose", transpose)
+    monkeypatch.setitem(helper_kernel.__globals__, "get_dynamic_memory", get_dynamic_memory)
+
+    func_ast = parse_function(helper_kernel)
+    statements = func_ast.body.statements
+    if not isinstance(statements[0], DmaAllocAST):
+        raise AssertionError("expected alloc helper to parse into DmaAllocAST")
+    if not isinstance(statements[1], NnBroadcastToAST):
+        raise AssertionError("expected broadcast_to helper to parse into NnBroadcastToAST")
+    if not isinstance(statements[2], ArchGetDynamicMemoryAST):
+        raise AssertionError("expected get_dynamic_memory helper to parse into ArchGetDynamicMemoryAST")
+    if not isinstance(statements[-1], NnTransposeAST):
+        raise AssertionError("expected transpose helper to parse into NnTransposeAST")
+
+
+# AST-014O
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 alloc/broadcast_to/transpose/get_dynamic_memory/launch_kernel 的公开负路径诊断不回退。
+# 测试目的: 覆盖 parser 对 helper 关键字冲突、缺失参数、非法 space 与 legacy launch extent 的错误分支。
+# 使用示例: pytest -q test/dsl/ast/test_package.py -k test_parse_function_rejects_invalid_keyword_helper_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast/__init__.py
+# 对应 spec 文件路径: spec/dsl/ast/__init__.md
+# 对应测试文件路径: test/dsl/ast/test_package.py
+def test_parse_function_rejects_invalid_keyword_helper_variants(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.operation.arch import get_dynamic_memory, launch_kernel
+    from kernel_gen.operation.dma import alloc
+    from kernel_gen.operation.nn import broadcast_to, transpose
+
+    def launched_body() -> None:
+        return None
+
+    def bad_alloc_duplicate_space() -> None:
+        alloc([2, 2], NumericType.Float32, MemorySpace.SM, space=MemorySpace.GM)
+
+    def bad_alloc_dtype() -> None:
+        alloc([2, 2], "f32")
+
+    def bad_alloc_space() -> None:
+        alloc([2, 2], NumericType.Float32, "SM")
+
+    def bad_broadcast_to_missing_space(src: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return broadcast_to(src, target_shape=[2, 2])
+
+    def bad_broadcast_to_duplicate_target_shape(src: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return broadcast_to(src, [2, 2], MemorySpace.SM, target_shape=[2, 2])
+
+    def bad_transpose_missing_perm(src: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return transpose(src)
+
+    def bad_transpose_duplicate_perm(src: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return transpose(src, [1, 0], perm=[1, 0])
+
+    def bad_dynamic_memory_space_type() -> None:
+        get_dynamic_memory("SM")
+
+    def bad_dynamic_memory_space_kind() -> None:
+        get_dynamic_memory(MemorySpace.GM)
+
+    def bad_legacy_launch_shared_memory() -> None:
+        launch_kernel(launched_body, 1, 2, 3, -1)
+
+    for fn in (
+        bad_alloc_duplicate_space,
+        bad_alloc_dtype,
+        bad_alloc_space,
+        bad_broadcast_to_missing_space,
+        bad_broadcast_to_duplicate_target_shape,
+        bad_transpose_missing_perm,
+        bad_transpose_duplicate_perm,
+        bad_dynamic_memory_space_type,
+        bad_dynamic_memory_space_kind,
+        bad_legacy_launch_shared_memory,
+    ):
+        monkeypatch.setitem(fn.__globals__, "alloc", alloc)
+        monkeypatch.setitem(fn.__globals__, "broadcast_to", broadcast_to)
+        monkeypatch.setitem(fn.__globals__, "transpose", transpose)
+        monkeypatch.setitem(fn.__globals__, "get_dynamic_memory", get_dynamic_memory)
+        monkeypatch.setitem(fn.__globals__, "launch_kernel", launch_kernel)
+        monkeypatch.setitem(fn.__globals__, "launched_body", launched_body)
+
+    expected_messages = (
+        ("Unsupported alloc arity", bad_alloc_duplicate_space),
+        ("alloc dtype must be NumericType", bad_alloc_dtype),
+        ("alloc space must be MemorySpace", bad_alloc_space),
+        ("Unsupported broadcast_to arity", bad_broadcast_to_missing_space),
+        ("Unsupported broadcast_to arity", bad_broadcast_to_duplicate_target_shape),
+        ("transpose perm is required", bad_transpose_missing_perm),
+        ("Unsupported transpose arity", bad_transpose_duplicate_perm),
+        ("get_dynamic_memory space must be MemorySpace", bad_dynamic_memory_space_type),
+        ("get_dynamic_memory space must be on-chip MemorySpace", bad_dynamic_memory_space_kind),
+        ("launch_kernel shared_memory_size must be >= 0", bad_legacy_launch_shared_memory),
+    )
+    for expected_message, fn in expected_messages:
+        with pytest.raises(AstParseError) as exc_info:
+            parse_function(fn)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError(f"expected diagnostics for helper variant: {expected_message}")
+        if diagnostics[0].message != expected_message:
+            raise AssertionError(
+                f"expected helper diagnostic {expected_message!r}, got {diagnostics[0].message!r}"
+            )
+
+
+def _build_bad_relu_kernel(relu: object) -> object:
+    def bad_relu(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return relu(x, x)
+
+    return bad_relu
+
+
+def _build_bad_leaky_relu_missing_alpha_kernel(leaky_relu: object) -> object:
+    def bad_leaky_relu_missing_alpha(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return leaky_relu(x)
+
+    return bad_leaky_relu_missing_alpha
+
+
+def _build_bad_leaky_relu_duplicate_alpha_kernel(leaky_relu: object) -> object:
+    def bad_leaky_relu_duplicate_alpha(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return leaky_relu(x, 0.25, alpha=0.5)
+
+    return bad_leaky_relu_duplicate_alpha
+
+
+def _build_bad_hard_sigmoid_missing_beta_kernel(hard_sigmoid: object) -> object:
+    def bad_hard_sigmoid_missing_beta(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return hard_sigmoid(x, alpha=0.2)
+
+    return bad_hard_sigmoid_missing_beta
+
+
+def _build_bad_hard_sigmoid_duplicate_beta_kernel(hard_sigmoid: object) -> object:
+    def bad_hard_sigmoid_duplicate_beta(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return hard_sigmoid(x, 0.2, 0.3, beta=0.4)
+
+    return bad_hard_sigmoid_duplicate_beta
+
+
+def _build_bad_softmax_duplicate_axis_kernel(softmax: object) -> object:
+    def bad_softmax_duplicate_axis(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return softmax(x, 1, axis=1)
+
+    return bad_softmax_duplicate_axis
+
+
+def _build_bad_reduce_sum_duplicate_keepdim_kernel(reduce_sum: object) -> object:
+    def bad_reduce_sum_duplicate_keepdim(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return reduce_sum(x, 1, True, keepdim=False)
+
+    return bad_reduce_sum_duplicate_keepdim
+
+
+def _build_bad_reduce_max_duplicate_axis_kernel(reduce_max: object) -> object:
+    def bad_reduce_max_duplicate_axis(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return reduce_max(x, 1, keepdim=True, axis=1)
+
+    return bad_reduce_max_duplicate_axis
+
+
+def _build_bad_matmul_duplicate_memoryspace_kernel(
+    matmul: object,
+    **_: object,
+) -> object:
+    def bad_matmul_duplicate_memoryspace(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[f32, 2, 2]",
+    ) -> "Tensor[f32, 2, 2]":
+        return matmul(lhs, rhs, MemorySpace.GM, memoryspace=MemorySpace.GM)
+
+    return bad_matmul_duplicate_memoryspace
+
+
+def _build_bad_matmul_invalid_memoryspace_type_kernel(
+    matmul: object,
+    **_: object,
+) -> object:
+    def bad_matmul_invalid_memoryspace_type(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[f32, 2, 2]",
+    ) -> "Tensor[f32, 2, 2]":
+        return matmul(lhs, rhs, "GM")
+
+    return bad_matmul_invalid_memoryspace_type
+
+
+def _build_bad_conv_unsupported_keyword_kernel(
+    conv: object,
+    **_: object,
+) -> object:
+    def bad_conv_unsupported_keyword(
+        value: "Tensor[f32, 2, 2]",
+        weight: "Tensor[f32, 2, 2]",
+    ) -> "Tensor[f32, 2, 2]":
+        return conv(value, weight, padding=1)
+
+    return bad_conv_unsupported_keyword
+
+
+def _build_bad_img2col1d_missing_args_kernel(
+    img2col1d: object,
+    **_: object,
+) -> object:
+    def bad_img2col1d_missing_args(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return img2col1d()
+
+    return bad_img2col1d_missing_args
+
+
+def _build_bad_img2col2d_missing_args_kernel(
+    img2col2d: object,
+    **_: object,
+) -> object:
+    def bad_img2col2d_missing_args(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return img2col2d()
+
+    return bad_img2col2d_missing_args
+
+
+# AST-021H
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 import-bound nn unary/reduce/softmax helper 的公开错误口径不回退。
+# 测试目的: 覆盖 parser 在重复关键字、缺参和缺失必填参数上的公开诊断分支，不依赖 Python 签名或私有 helper。
+# 使用示例: pytest -q test/dsl/ast/test_package.py -k test_parse_function_rejects_invalid_nn_helper_arity_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast/__init__.md
+# 对应测试文件路径: test/dsl/ast/test_package.py
+@pytest.mark.parametrize(
+    ("expected_message", "builder_name"),
+    [
+        pytest.param("Unsupported relu arity", "_build_bad_relu_kernel", id="relu-too-many-positional"),
+        pytest.param("Unsupported leaky_relu arity", "_build_bad_leaky_relu_missing_alpha_kernel", id="leaky-relu-missing-alpha"),
+        pytest.param("Unsupported leaky_relu arity", "_build_bad_leaky_relu_duplicate_alpha_kernel", id="leaky-relu-duplicate-alpha"),
+        pytest.param("Unsupported hard_sigmoid arity", "_build_bad_hard_sigmoid_missing_beta_kernel", id="hard-sigmoid-missing-beta"),
+        pytest.param("Unsupported hard_sigmoid arity", "_build_bad_hard_sigmoid_duplicate_beta_kernel", id="hard-sigmoid-duplicate-beta"),
+        pytest.param("Unsupported softmax arity", "_build_bad_softmax_duplicate_axis_kernel", id="softmax-duplicate-axis"),
+        pytest.param("Unsupported reduce_sum arity", "_build_bad_reduce_sum_duplicate_keepdim_kernel", id="reduce-sum-duplicate-keepdim"),
+        pytest.param("Unsupported reduce_max arity", "_build_bad_reduce_max_duplicate_axis_kernel", id="reduce-max-duplicate-axis"),
+    ],
+)
+def test_parse_function_rejects_invalid_nn_helper_arity_variants(
+    monkeypatch: pytest.MonkeyPatch,
+    expected_message: str,
+    builder_name: str,
+) -> None:
+    from kernel_gen.operation.nn import hard_sigmoid, leaky_relu, reduce_max, reduce_sum, relu, softmax
+
+    helper_values = {
+        "relu": relu,
+        "leaky_relu": leaky_relu,
+        "hard_sigmoid": hard_sigmoid,
+        "softmax": softmax,
+        "reduce_sum": reduce_sum,
+        "reduce_max": reduce_max,
+    }
+    builder = globals()[builder_name]
+    helper_kernel = builder(**{name: value for name, value in helper_values.items() if name in builder.__code__.co_varnames})
+
+    for name, value in helper_values.items():
+        monkeypatch.setitem(helper_kernel.__globals__, name, value)
+
+    with pytest.raises(AstParseError) as exc_info:
+        parse_function(helper_kernel)
+
+    diagnostics = exc_info.value.diagnostics
+    if not diagnostics:
+        raise AssertionError(f"expected diagnostics for helper variant: {expected_message}")
+    if diagnostics[0].message != expected_message:
+        raise AssertionError(f"expected helper diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
+
+
+# AST-021I
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 import-bound structured nn helper 的 arity 与参数类型错误继续只通过公开 parse_function(...) 暴露。
+# 测试目的: 覆盖 matmul/conv/img2col family 的公开负路径，不回退为私有 lowering 或签名层校验。
+# 使用示例: pytest -q test/dsl/ast/test_package.py -k test_parse_function_rejects_invalid_structured_nn_helper_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast/__init__.md
+# 对应测试文件路径: test/dsl/ast/test_package.py
+@pytest.mark.parametrize(
+    ("expected_message", "builder_name"),
+    [
+        pytest.param("Unsupported matmul arity", "_build_bad_matmul_duplicate_memoryspace_kernel", id="matmul-duplicate-memoryspace"),
+        pytest.param("matmul memoryspace must be MemorySpace", "_build_bad_matmul_invalid_memoryspace_type_kernel", id="matmul-invalid-memoryspace-type"),
+        pytest.param("Unsupported conv arity", "_build_bad_conv_unsupported_keyword_kernel", id="conv-unsupported-keyword"),
+        pytest.param("Unsupported img2col1d arity", "_build_bad_img2col1d_missing_args_kernel", id="img2col1d-missing-args"),
+        pytest.param("Unsupported img2col2d arity", "_build_bad_img2col2d_missing_args_kernel", id="img2col2d-missing-args"),
+    ],
+)
+def test_parse_function_rejects_invalid_structured_nn_helper_variants(
+    monkeypatch: pytest.MonkeyPatch,
+    expected_message: str,
+    builder_name: str,
+) -> None:
+    from kernel_gen.operation.nn import conv, img2col1d, img2col2d, matmul
+
+    builder = globals()[builder_name]
+    helper_kernel = builder(
+        matmul=matmul,
+        conv=conv,
+        img2col1d=img2col1d,
+        img2col2d=img2col2d,
+        memoryspace=MemorySpace.GM,
+    )
+    for name, value in {
+        "matmul": matmul,
+        "conv": conv,
+        "img2col1d": img2col1d,
+        "img2col2d": img2col2d,
+        "MemorySpace": MemorySpace,
+    }.items():
+        monkeypatch.setitem(helper_kernel.__globals__, name, value)
+
+    with pytest.raises(AstParseError) as exc_info:
+        parse_function(helper_kernel)
+
+    diagnostics = exc_info.value.diagnostics
+    if not diagnostics:
+        raise AssertionError(f"expected diagnostics for helper variant: {expected_message}")
+    if diagnostics[0].message != expected_message:
+        raise AssertionError(f"expected helper diagnostic {expected_message!r}, got {diagnostics[0].message!r}")

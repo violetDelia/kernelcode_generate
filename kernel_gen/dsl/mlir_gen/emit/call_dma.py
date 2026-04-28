@@ -1,17 +1,17 @@
 """Emit dma family helper.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 收口 dma family 的 emit 入口，覆盖 alloc/copy/cast/view/reshape/flatten/free/read/write。
-- 仅负责 dma 相关 AST 的分发，不承载 arch/symbol/nn 逻辑。
+- 收口 `emit_mlir(...)` 的 dma family 内部拆分实现，覆盖 alloc/copy/cast/view/reshape/flatten/free/read/write。
+- 当前文件不单独承载公开 API，对外公开入口仍是 `EmitContext(...)` / `emit_mlir(node, ctx)`。
 
 API 列表:
-- `emit_dma_call(node: object, ctx: EmitContext) -> object`
+- 无；当前文件仅提供 `emit_mlir(node, ctx)` 的 dma family 内部拆分实现。
 
 使用示例:
-- value = emit_dma_call(DmaAllocAST(shape=[ConstAST(4)], dtype=NumericType.Float32), ctx)
+- value = emit_mlir(DmaAllocAST(shape=[ConstAST(4)], dtype=NumericType.Float32), ctx)
 
 关联文件:
 - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)

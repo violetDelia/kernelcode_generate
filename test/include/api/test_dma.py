@@ -43,6 +43,8 @@ def _compile_and_run(source: str) -> None:
 
     功能说明:
     - 使用 `g++` 编译临时源码并执行生成的程序。
+    - 对 GCC 13 在 `include/npu_demo/Dma.h` 上偶发的 internal compiler error 做有限重试，
+      保持测试关注点仍是公开头文件合同而不是编译器偶发现象。
 
     使用示例:
     - `_compile_and_run("int main() { return 0; }")`
@@ -57,28 +59,36 @@ def _compile_and_run(source: str) -> None:
         binary_path = Path(tmpdir) / "dma_test"
         source_path.write_text(source, encoding="utf-8")
 
-        compile_result = subprocess.run(
-            [
-                "g++",
-                "-std=c++17",
-                # GCC 13 会在 include/npu_demo/Dma.h 的某些模板组合上触发 ICE，
-                # 这里用较保守的优化开关保持“可编译”门槛可测，不改变语义。
-                "-fno-tree-ccp",
-                "-fno-tree-dce",
-                "-fno-tree-forwprop",
-                "-fno-tree-scev-cprop",
-                "-fno-tree-vrp",
-                "-fno-tree-ter",
-                "-I",
-                str(REPO_ROOT),
-                str(source_path),
-                "-o",
-                str(binary_path),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        compile_result = None
+        max_attempts = 3
+        for _attempt in range(max_attempts):
+            compile_result = subprocess.run(
+                [
+                    "g++",
+                    "-std=c++17",
+                    # GCC 13 会在 include/npu_demo/Dma.h 的某些模板组合上触发 ICE，
+                    # 这里用较保守的优化开关保持“可编译”门槛可测，不改变语义。
+                    "-fno-tree-ccp",
+                    "-fno-tree-dce",
+                    "-fno-tree-forwprop",
+                    "-fno-tree-scev-cprop",
+                    "-fno-tree-vrp",
+                    "-fno-tree-ter",
+                    "-I",
+                    str(REPO_ROOT),
+                    str(source_path),
+                    "-o",
+                    str(binary_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if compile_result.returncode == 0:
+                break
+            stderr = compile_result.stderr
+            if "internal compiler error" not in stderr and "ld terminated with signal" not in stderr:
+                break
         if compile_result.returncode != 0:
             raise AssertionError(
                 "g++ compile failed:\n"

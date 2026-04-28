@@ -31,13 +31,12 @@ pytestmark = pytest.mark.infra
 
 def _fixture_root() -> Path:
     """返回当前测试现场可读的 coverage fixture 根目录。
-
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 优先使用当前 `REPO_ROOT/test/fixtures/coverage`。
-    - 当测试运行在独立 worktree 且 fixture 只存在于主仓时，回退到父目录同名路径。
+    - 优先使用当前 worktree 下的 `test/fixtures/coverage`。
+    - 当 fixture 只存在于主仓时，回退到父目录同名路径。
     - 避免 coverage CLI 测试依赖“每个 worktree 都复制一份 fixture JSON”。
 
     使用示例:
@@ -46,7 +45,7 @@ def _fixture_root() -> Path:
     关联文件:
     - 功能实现: [script/check_python_coverage.py](../../script/check_python_coverage.py)
     - Spec 文档: [spec/script/python_coverage_check.md](../../spec/script/python_coverage_check.md)
-    - 测试文件: [test/script/test_python_coverage_check.py](test_python_coverage_check.py)
+    - 测试文件: [test/script/test_python_coverage_check.py](test/script/test_python_coverage_check.py)
     """
 
     repo_candidate = REPO_ROOT / "test/fixtures/coverage"
@@ -198,6 +197,27 @@ def test_check_python_coverage_supports_exact_repo_file_module_fixture() -> None
     code, stdout, stderr = _run_check(
         [
             "--coverage-json",
+            str(_fixture("module_filter_pass.json")),
+            "--include-module",
+            "kernel_gen.passes.example",
+            "--line-min",
+            "98",
+            "--branch-min",
+            "70",
+        ]
+    )
+    assert code == 0
+    assert "scope=kernel_gen/passes/example (1 file(s))" in stdout
+    assert "line=100.00%" in stdout
+    assert stderr == ""
+
+
+def test_check_python_coverage_rejects_exact_repo_file_module_when_file_is_omitted() -> None:
+    """TC-CPY-002C1: exact repo file module path should fail when the file is omit-listed."""
+
+    code, stdout, stderr = _run_check(
+        [
+            "--coverage-json",
             str(_fixture("core_module_filter_pass.json")),
             "--include-module",
             "kernel_gen.dsl.mlir_gen.emit.core",
@@ -207,9 +227,111 @@ def test_check_python_coverage_supports_exact_repo_file_module_fixture() -> None
             "70",
         ]
     )
+    assert code == 1
+    assert stdout == ""
+    assert (
+        "coverage JSON does not contain non-omitted files for include-module scope: "
+        "kernel_gen.dsl.mlir_gen.emit.core"
+    ) in stderr
+
+
+def test_check_python_coverage_omits_internal_split_files_from_global_gate(tmp_path: Path) -> None:
+    """TC-CPY-002D: global gate should exclude omit-listed internal split files before aggregation."""
+
+    report = {
+        "totals": {
+            "covered_lines": 100,
+            "num_statements": 200,
+            "covered_branches": 70,
+            "num_branches": 120,
+        },
+        "files": {
+            "kernel_gen/dsl/mlir_gen/emit/value.py": {
+                "summary": {
+                    "covered_lines": 0,
+                    "num_statements": 100,
+                    "covered_branches": 0,
+                    "num_branches": 20,
+                }
+            },
+            "kernel_gen/tools/dsl_run.py": {
+                "summary": {
+                    "covered_lines": 100,
+                    "num_statements": 100,
+                    "covered_branches": 70,
+                    "num_branches": 100,
+                }
+            },
+        },
+    }
+    report_path = tmp_path / "omit-global.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    code, stdout, stderr = _run_check(
+        [
+            "--coverage-json",
+            str(report_path),
+            "--line-min",
+            "98",
+            "--branch-min",
+            "70",
+        ]
+    )
     assert code == 0
-    assert "scope=kernel_gen/dsl/mlir_gen/emit/core (1 file(s))" in stdout
+    assert "scope=totals" in stdout
     assert "line=100.00%" in stdout
+    assert "branch=70.00%" in stdout
+    assert stderr == ""
+
+
+def test_check_python_coverage_applies_omit_before_include_module_filter(tmp_path: Path) -> None:
+    """TC-CPY-002E: scoped gate should exclude omit-listed files before module filtering."""
+
+    report = {
+        "totals": {
+            "covered_lines": 100,
+            "num_statements": 200,
+            "covered_branches": 70,
+            "num_branches": 120,
+        },
+        "files": {
+            "kernel_gen/dsl/mlir_gen/emit/call_nn.py": {
+                "summary": {
+                    "covered_lines": 0,
+                    "num_statements": 100,
+                    "covered_branches": 0,
+                    "num_branches": 20,
+                }
+            },
+            "kernel_gen/dsl/mlir_gen/emit/__init__.py": {
+                "summary": {
+                    "covered_lines": 100,
+                    "num_statements": 100,
+                    "covered_branches": 70,
+                    "num_branches": 100,
+                }
+            },
+        },
+    }
+    report_path = tmp_path / "omit-scoped.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    code, stdout, stderr = _run_check(
+        [
+            "--coverage-json",
+            str(report_path),
+            "--include-module",
+            "kernel_gen.dsl.mlir_gen.emit",
+            "--line-min",
+            "98",
+            "--branch-min",
+            "70",
+        ]
+    )
+    assert code == 0
+    assert "scope=kernel_gen/dsl/mlir_gen/emit (1 file(s))" in stdout
+    assert "line=100.00%" in stdout
+    assert "branch=70.00%" in stdout
     assert stderr == ""
 
 
