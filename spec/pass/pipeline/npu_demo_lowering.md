@@ -44,6 +44,7 @@
 - 提供一条不依赖 `tile` 的最小公开 pipeline，供本轮 `pytest` 与 standalone 验收链直接复用。
 - 明确 `symbol-loop-hoist` 在无 `symbol.for` 时可以 no-op，因此可安全加入该最小 pipeline。
 - 明确该 pipeline 的最终输出为 host wrapper + device body 双函数 IR，供 `gen_kernel(...)` 直接消费。
+- 当输入 DSL callable 除 `lhs/rhs/out` 外还包含公开 `SymbolDim` tile / shape 参数时，pipeline 输出的 host wrapper + device body 双函数 IR 必须继续保留这些 trailing `!symbol.int` 参数，供 `gen_kernel(...)` 直接消费。
 - 保持 `default-lowering` 作为独立公开 builder，不与本 pipeline 混用。
 
 ## 限制与边界
@@ -105,5 +106,6 @@ module = pm.run(module)
   - pass 顺序固定为 `inline -> decompass -> lower-nn -> symbol-loop-hoist -> attach-arch-information -> outline-device-kernel`
   - `symbol-loop-hoist` 在无 `symbol.for` 时可安全加入该 pipeline
   - pipeline 输出 host wrapper + device body 双函数 IR
+  - pipeline 输出的 wrapper/body 会保留 trailing `!symbol.int` tile / shape 参数，供 `gen_kernel(...)` 直接发射
   - `only-kernel` / `only_kernel` options 显式失败
   - registry 透传 `npu-demo-lowering` 时只经由公开 builder，不依赖当前文件内非公开 helper

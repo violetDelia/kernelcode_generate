@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
@@ -285,7 +285,7 @@ def _validate_emit_context_config(config: dict[str, object] | None) -> None:
     """校验 EmitContext.config 中的 target/hardware 字段。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 当 config 中包含 target/hardware 时，校验其类型与字段约束。
@@ -837,7 +837,7 @@ def _const_symbol_int(value: int, ctx: EmitContext, location: SourceLocation | N
     """构造 !symbol.int<"expr"> 常量 SSA value。
 
     创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 直接生成 `symbol.const`，保持 !symbol.int<"expr"> 常量形态一致。
@@ -1353,10 +1353,10 @@ def _resolve_index_operand(
     """将索引表达式 lowering 为 SSA operand。
 
     创建者: OpenAI
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 支持常量、symbol 名称、循环变量和显式字符串乘法表达式。
+    - 支持常量、symbol 名称、循环变量、张量 shape/stride 维度访问和显式字符串乘法表达式。
     - 对非法输入保持统一的 index 诊断文案。
     - 常量会直接生成 `symbol.const`，保持 symbol.int 路径一致。
 
@@ -1392,6 +1392,11 @@ def _resolve_index_operand(
         if op_symbol is None:
             raise _LoweringError("Unsupported index expression", location=location or expr.location)
         return _build_symbol_index_result(lhs, rhs, op_symbol, ctx, location or expr.location)
+    if isinstance(expr, TensorAxisAccessAST):
+        value = _lower_expr(expr, ctx)
+        if not isinstance(value, SSAValue):
+            raise _LoweringError("Index operand must be SSA value", location=expr.location)
+        return _ensure_index_value(value, ctx, expr.location)
     if isinstance(expr, int):
         return _get_symbol_index_constant(expr, ctx, location, const_cache)
     if isinstance(expr, str):
@@ -1593,7 +1598,7 @@ def _lower_loop_bound(expr: object, ctx: EmitContext) -> object:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 支持常量、标量参数与循环变量引用。
+    - 支持常量、标量参数、循环变量引用以及 `TensorAxisAccessAST` 产生的 `!symbol.int` 边界。
     - 不支持的表达式维持统一的 loop bound 诊断。
 
     使用示例:
@@ -1610,6 +1615,8 @@ def _lower_loop_bound(expr: object, ctx: EmitContext) -> object:
         return _lower_expr(expr, ctx)
     if isinstance(expr, (ScalarArgAST, VarAST)):
         return _lookup_symbol(expr, ctx)
+    if isinstance(expr, TensorAxisAccessAST):
+        return _lower_expr(expr, ctx)
     raise _LoweringError("Unsupported loop bound expression", location=getattr(expr, "location", None))
 
 
@@ -1711,7 +1718,7 @@ def _resolve_symbolic_index_value(
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 支持 `ConstAST`、`ScalarArgAST`、`VarAST`、`BinaryExprAST` 以及直接的 `int|str`。
+    - 支持 `ConstAST`、`ScalarArgAST`、`VarAST`、`BinaryExprAST`、`TensorAxisAccessAST` 以及直接的 `int|str`。
     - 当 `runtime_values` 提供 `int|SymbolDim` 时，优先使用运行时标量值参与 helper 参数与 symbol shape 计算。
     - 对纯符号表达式返回 `SymbolDim`，供 facade、helper 参数校验与类型推导统一复用。
 
@@ -1746,6 +1753,13 @@ def _resolve_symbolic_index_value(
         lhs = _resolve_symbolic_index_value(expr.lhs, location=expr.location, runtime_values=runtime_values)
         rhs = _resolve_symbolic_index_value(expr.rhs, location=expr.location, runtime_values=runtime_values)
         return _apply_symbolic_index_binary_op(lhs, rhs, expr.op, expr.location)
+    if isinstance(expr, TensorAxisAccessAST):
+        if not isinstance(expr.axis, ConstAST) or not isinstance(expr.axis.value, int):
+            raise _LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+        dims = expr.tensor.memory.shape if expr.kind == "shape" else expr.tensor.memory.stride
+        dim = dims[expr.axis.value]
+        public_value = dim.get_value()
+        return public_value if isinstance(public_value, int) else dim
     if isinstance(expr, int):
         return expr
     if isinstance(expr, str):

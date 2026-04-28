@@ -1,7 +1,7 @@
 """Emit nn elementwise family helper.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 收口 nn elementwise family 的类型推导与 lowering，覆盖 unary/binary/compare 三类 AST。
@@ -17,6 +17,10 @@ helper 清单:
 - `_emit_lower_expr(expr: object, ctx: EmitContext) -> SSAValue`
 - `_promote_ranked_dtype(lhs: NumericType, rhs: NumericType) -> NumericType`
 - `_resolve_runtime_scalar_value(expr: object, inferred_type: Attribute | None, runtime_values: dict[str, object] | None = None) -> object | None`
+- `_resolve_static_int(expr: object, location: SourceLocation | None) -> int`
+- `_resolve_static_bool(expr: object, location: SourceLocation | None) -> bool`
+- `_resolve_static_int_list(values: list[object], location: SourceLocation | None) -> list[int]`
+- `_resolve_public_shape_values(values: list[object], type_map: dict[int, object], runtime_values: dict[str, object] | None, config: dict[str, object] | None, location: SourceLocation | None) -> list[int | SymbolDim]`
 - `_nn_memory_type_to_memory(memory_type: NnMemoryType, location: SourceLocation | None = None) -> Memory`
 - `_infer_broadcast_memory_type(lhs_type: NnMemoryType, rhs_type: NnMemoryType, location: SourceLocation | None, element_type: Attribute | None = None) -> NnMemoryType`
 
@@ -98,12 +102,19 @@ from kernel_gen.dsl.ast import (
     BinaryExprAST,
     CompareExprAST,
     ConstAST,
+    DmaReshapeAST,
+    MatmulAST,
+    NnBroadcastToAST,
+    NnReduceAST,
+    NnTransposeAST,
     NnUnaryAST,
     ScalarArgAST,
     SourceLocation,
     TensorAST,
+    TensorAxisAccessAST,
     VarAST,
 )
+from kernel_gen.operation import dma as _KG_OPERATION_DMA
 from kernel_gen.operation import nn as _KG_OPERATION_NN
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -146,6 +157,19 @@ def _infer_expr_type(
     runtime_values: dict[str, object] | None = None,
     config: dict[str, object] | None = None,
 ) -> object:
+    """推导公开 nn/dma 复合表达式的结果类型。
+
+    创建者: 小李飞刀
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 为 `infer_nn_type(...)` 内部递归提供统一类型入口，覆盖常量、symbol 标量、memory 轴访问与当前公开 helper 复合 AST。
+    - 对 `reshape/transpose/matmul/reduce/broadcast_to` 这类公开 helper，复用公开 operation API 做结果类型推导。
+
+    使用示例:
+    - result_type = _infer_expr_type(expr, type_map, runtime_values=runtime_values, config=config)
+    """
+
     expr_key = _expr_key(expr)
     if expr_key in type_map:
         return type_map[expr_key]
@@ -167,6 +191,84 @@ def _infer_expr_type(
         if expr_key not in type_map:
             raise _LoweringError("Unknown input reference", location=getattr(expr, "location", None))
         return type_map[expr_key]
+    if isinstance(expr, TensorAxisAccessAST):
+        if not isinstance(expr.axis, ConstAST) or not isinstance(expr.axis.value, int):
+            raise _LoweringError("Unsupported AST expression for lowering", location=expr.location)
+        dims = expr.tensor.memory.shape if expr.kind == "shape" else expr.tensor.memory.stride
+        dim_value = dims[expr.axis.value].get_value()
+        result_type = SymbolValueType.from_expr(dim_value if isinstance(dim_value, str) else str(dim_value))
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, DmaReshapeAST):
+        source_type = _emit_infer_expr_type(expr.source, type_map, runtime_values=runtime_values, config=config)
+        if not isinstance(source_type, NnMemoryType):
+            raise _LoweringError("reshape source must have nn.memory type", location=expr.location)
+        source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
+        result_memory = _KG_OPERATION_DMA.reshape(
+            source_memory,
+            _resolve_public_shape_values(expr.shape, type_map, runtime_values, config, expr.location),
+        )
+        result_type = _memory_to_nn_type(result_memory, location=expr.location)
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, NnTransposeAST):
+        value_type = _emit_infer_expr_type(expr.value, type_map, runtime_values=runtime_values, config=config)
+        if not isinstance(value_type, NnMemoryType):
+            raise _LoweringError("transpose source must have nn.memory type", location=expr.location)
+        result_memory = _KG_OPERATION_NN.transpose(
+            _nn_memory_type_to_memory(value_type, location=expr.location),
+            _resolve_static_int_list(expr.perm, expr.location),
+        )
+        result_type = _memory_to_nn_type(result_memory, location=expr.location)
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, MatmulAST):
+        lhs_type = _emit_infer_expr_type(expr.lhs, type_map, runtime_values=runtime_values, config=config)
+        rhs_type = _emit_infer_expr_type(expr.rhs, type_map, runtime_values=runtime_values, config=config)
+        if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
+            raise _LoweringError("matmul operands must have nn.memory type", location=expr.location)
+        result_memory = _KG_OPERATION_NN.matmul(
+            _nn_memory_type_to_memory(lhs_type, location=expr.location),
+            _nn_memory_type_to_memory(rhs_type, location=expr.location),
+            expr.memoryspace,
+        )
+        result_type = _memory_to_nn_type(result_memory, location=expr.location)
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, NnReduceAST):
+        value_type = _emit_infer_expr_type(expr.value, type_map, runtime_values=runtime_values, config=config)
+        if not isinstance(value_type, NnMemoryType):
+            raise _LoweringError("reduce source must have nn.memory type", location=expr.location)
+        reduce_fn_map = {
+            "reduce_sum": _KG_OPERATION_NN.reduce_sum,
+            "reduce_min": _KG_OPERATION_NN.reduce_min,
+            "reduce_max": _KG_OPERATION_NN.reduce_max,
+        }
+        reduce_fn = reduce_fn_map.get(expr.kind)
+        if reduce_fn is None:
+            raise _LoweringError("Unsupported AST expression for lowering", location=expr.location)
+        axis = None if expr.axis is None else _resolve_static_int(expr.axis, expr.location)
+        keepdim = False if expr.keepdim is None else _resolve_static_bool(expr.keepdim, expr.location)
+        result_memory = reduce_fn(
+            _nn_memory_type_to_memory(value_type, location=expr.location),
+            axis=axis,
+            keepdim=keepdim,
+        )
+        result_type = _memory_to_nn_type(result_memory, location=expr.location)
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, NnBroadcastToAST):
+        source_type = _emit_infer_expr_type(expr.source, type_map, runtime_values=runtime_values, config=config)
+        if not isinstance(source_type, NnMemoryType):
+            raise _LoweringError("broadcast_to source must have nn.memory type", location=expr.location)
+        result_memory = _KG_OPERATION_NN.broadcast_to(
+            _nn_memory_type_to_memory(source_type, location=expr.location),
+            _resolve_public_shape_values(expr.target_shape, type_map, runtime_values, config, expr.location),
+            expr.space,
+        )
+        result_type = _memory_to_nn_type(result_memory, location=expr.location)
+        type_map[expr_key] = result_type
+        return result_type
     if isinstance(expr, (NnUnaryAST, BinaryExprAST, CompareExprAST)):
         return infer_nn_type(expr, type_map, runtime_values=runtime_values, config=config)
     raise _LoweringError("Unsupported AST expression for lowering", location=getattr(expr, "location", None))
@@ -302,6 +404,95 @@ def _shape_attr_to_symbol_dim(attr: Attribute, location: SourceLocation | None) 
             return None
         return SymbolDim(attr.data)
     raise LoweringError("Unsupported shape attribute", location=location)
+
+
+def _resolve_static_int(expr: object, location: SourceLocation | None) -> int:
+    """解析公开 AST 整数字面量。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 只接受 `ConstAST(int)` 且显式排除 `bool`。
+    - 为 `reduce axis`、`transpose perm` 等需要静态整数的公开 helper 提供统一校验。
+
+    使用示例:
+    - axis = _resolve_static_int(ConstAST(1, location=None), location=None)
+    """
+
+    if isinstance(expr, ConstAST) and isinstance(expr.value, int) and not isinstance(expr.value, bool):
+        return expr.value
+    raise LoweringError("Unsupported AST expression for lowering", location=location or getattr(expr, "location", None))
+
+
+def _resolve_static_bool(expr: object, location: SourceLocation | None) -> bool:
+    """解析公开 AST 布尔字面量。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 只接受 `ConstAST(bool)`。
+    - 为 `keepdim` 这类公开 keyword 参数提供统一校验。
+
+    使用示例:
+    - keepdim = _resolve_static_bool(ConstAST(True, location=None), location=None)
+    """
+
+    if isinstance(expr, ConstAST) and isinstance(expr.value, bool):
+        return expr.value
+    raise LoweringError("Unsupported AST expression for lowering", location=location or getattr(expr, "location", None))
+
+
+def _resolve_static_int_list(values: list[object], location: SourceLocation | None) -> list[int]:
+    """解析静态整数列表。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 逐项复用 `_resolve_static_int(...)`。
+    - 供 `transpose perm` 这类公开整型列表参数复用。
+
+    使用示例:
+    - perm = _resolve_static_int_list([ConstAST(1, None), ConstAST(0, None)], location=None)
+    """
+
+    return [_resolve_static_int(value, location) for value in values]
+
+
+def _resolve_public_shape_values(
+    values: list[object],
+    type_map: dict[int, object],
+    runtime_values: dict[str, object] | None,
+    config: dict[str, object] | None,
+    location: SourceLocation | None,
+) -> list[int | SymbolDim]:
+    """解析公开 shape 列表为 `int | SymbolDim`。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 支持 `ConstAST(int)`、公开 `SymbolValueType`、runtime `SymbolDim/int` 与 tensor 轴访问。
+    - 为 `reshape` / `broadcast_to` 这类公开 helper 统一提供 shape 参数归一。
+
+    使用示例:
+    - shape = _resolve_public_shape_values(expr.shape, type_map, runtime_values, config, expr.location)
+    """
+
+    resolved: list[int | SymbolDim] = []
+    for value in values:
+        inferred_type = _emit_infer_expr_type(value, type_map, runtime_values=runtime_values, config=config)
+        runtime_value = _resolve_runtime_scalar_value(value, inferred_type, runtime_values)
+        if isinstance(runtime_value, (int, SymbolDim)) and not isinstance(runtime_value, bool):
+            resolved.append(runtime_value)
+            continue
+        if isinstance(inferred_type, SymbolValueType):
+            resolved.append(SymbolDim(inferred_type.expr.expr.data))
+            continue
+        raise LoweringError("Unsupported AST expression for lowering", location=location or getattr(value, "location", None))
+    return resolved
 
 
 def _space_attr_from_memory_space(space: MemorySpace) -> NnMemorySpaceAttr:

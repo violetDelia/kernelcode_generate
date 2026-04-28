@@ -1,7 +1,7 @@
 """`gen_kernel.emit` 公开上下文定义。
 
 创建者: 小李飞刀
-最后一次更改: OpenAI Codex
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 定义 `EmitCContext` / `EmitCError` 的稳定公开入口。
@@ -10,7 +10,7 @@
 
 API 列表:
 - `EmitCError(message: str)`
-- `EmitCContext(*, config: dict[str, Any] | None = None)`
+- `EmitCContext(*, target: str | None = None, config: dict[str, Any] | None = None)`
 - `EmitCContext.create_or_get_name(value: SSAValue) -> str`
 - `EmitCContext.dispatch(obj: Any) -> str | None`
 - `EmitCContext.dispatch_op(op: Operation) -> str | None`
@@ -28,6 +28,7 @@ helper 清单:
 
 使用示例:
 - from kernel_gen.dsl.gen_kernel.emit_context import EmitCContext
+- ctx = EmitCContext(target="npu_demo")
 - ctx = EmitCContext(config={"target": "cpu", "indent": "  "})
 
 关联文件:
@@ -61,8 +62,34 @@ class EmitCContext:
     _next_id: int
     _indent_level: int
 
-    def __init__(self, *, config: dict[str, Any] | None = None) -> None:
+    def __init__(self, *, target: str | None = None, config: dict[str, Any] | None = None) -> None:
+        """初始化公开 `EmitCContext`。
+
+        创建者: 朽木露琪亚
+        最后一次更改: 朽木露琪亚
+
+        功能说明:
+        - 接受 `target=` 或 `config["target"]` 两种公开构造形态。
+        - 当两者同时出现时要求语义一致，并统一归一到 `config["target"]`。
+
+        使用示例:
+        - EmitCContext(target="npu_demo")
+        - EmitCContext(config={"target": "cpu"})
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel/emit_context.md
+        - test: test/dsl/gen_kernel/emit/test_emit.py
+        - 功能实现: kernel_gen/dsl/gen_kernel/emit_context.py
+        """
+
         self.config = dict(config or {})
+        config_target = self.config.get("target")
+        if target is not None:
+            if not isinstance(target, str) or not target:
+                raise EmitCError("EmitCContext: target must be non-empty str")
+            if config_target is not None and config_target != target:
+                raise EmitCError("EmitCContext: target conflicts with config['target']")
+            self.config["target"] = target
         target = self.config.get("target")
         if not isinstance(target, str) or not target:
             raise EmitCError("EmitCContext: config['target'] must be non-empty str")

@@ -16,7 +16,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/dsl/ast/parser.md`](../../../spec/dsl/ast/parser.md)
 - `功能实现`：[`kernel_gen/dsl/ast/parser.py`](../../../kernel_gen/dsl/ast/parser.py)
 - `test`：
@@ -51,6 +51,7 @@
 - DSL helper 识别规则以“显式 import 绑定到真实公开 helper 对象 + 调用形态”作为真源；不得依赖 helper 的 Python `inspect.signature`、参数注解、默认值或文件内私有包装函数来决定是否把某个调用当作 DSL helper。
 - 对 `kernel_gen.operation.dma.fill`，当前公开解析入口只接受显式 import 绑定得到的 helper 调用；未导入的裸 `fill(...)` 与 `kernel_gen.operation.dma.fill(...)` 这类链式属性访问都不属于当前 AST 公开入口。
 - 当 helper 为 `fill(...)` 时，parser 对字符串字面量只接受 `"inf"` 与 `"-inf"`；其他字符串必须在解析阶段直接拒绝，不下沉到后续 lowering 再猜测含义。
+- 当 `build_func_op(...)` / `mlir_gen(...)` 提供 `runtime_args` 时，参数注解中的裸 `Memory` 与裸 `SymbolDim` 允许作为占位注解被 parser 接受；parser 不得把这两类注解直接收敛为 `Unsupported annotation`。实际 `func.func` 输入签名仍由下游 builder 基于 `runtime_args` 决定，而不是由这类占位注解直接决定。
 
 ## 公开接口
 
@@ -175,3 +176,4 @@ func_ast = parse_function(add)
   - AST-P-009：显式 import 绑定到 `kernel_gen.operation.dma.fill` 的 helper 调用可被识别，且识别不依赖 helper Python 签名。（`test_parse_function_accepts_import_bound_fill_helper`、`test_parse_function_accepts_import_bound_fill_helper_without_signature_coupling`）
   - AST-P-010：`fill` 的字符串字面量只允许 `"inf"` 与 `"-inf"`，其他字符串在解析阶段直接拒绝。（`test_parse_function_rejects_invalid_fill_string_literal`）
   - AST-P-011：未导入的裸 `fill(...)` 与 `kernel_gen.operation.dma.fill(...)` 链式属性访问不属于当前 AST 公开入口。（`test_parse_function_rejects_unimported_dma_helpers`、`test_parse_function_rejects_fill_helper_call_via_attribute_chain`）
+  - AST-P-012：当 `build_func_op(...)` / `mlir_gen(...)` 传入 `runtime_args` 时，裸 `Memory` / `SymbolDim` 参数注解必须作为占位注解被 parser 接受，不得报 `Unsupported annotation`。（下游待补测试映射：`test_parse_function_accepts_runtime_driven_memory_placeholder_annotation`、`test_parse_function_accepts_runtime_driven_symbol_placeholder_annotation`）

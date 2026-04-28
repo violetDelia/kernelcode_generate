@@ -1,11 +1,17 @@
 """Function-level C-like kernel generation helpers.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 按 `emit_c` 的节点级规则，组装 `func.func` 的完整函数源码。
 - 负责函数签名、参数顺序、输出参数与函数体遍历。
+
+API 列表:
+- `GenKernelError(message: str)`
+
+helper 清单:
+- `KernelEmitter(ctx: EmitCContext, emit_op: Callable[[Operation, EmitCContext], str] = emit_c_op)`
 
 使用示例:
 - from kernel_gen.dsl.gen_kernel import gen_kernel
@@ -686,16 +692,17 @@ class KernelEmitter:
 
     def _validate_npu_demo_launch_body_signature(
         self, func_op: func.FuncOp
-    ) -> tuple[list[NnMemoryType], int]:
+    ) -> tuple[list[Any], int]:
         """校验 body 函数签名。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 朽木露琪亚
 
         功能说明:
         - body 既兼容 `ctx + lhs + rhs + out` 的四参数、零返回形式，也兼容 outline 后的
           `lhs + rhs + out` 三参数、零返回形式。
-        - 三个 memory 参数必须 element type 一致。
+        - 三个 memory 参数后允许继续携带零个或多个 `!symbol.int` tile / shape 参数。
+        - 三个 memory 参数必须 element type 一致，尾部公开标量参数必须保持 `SymbolValueType`。
 
         使用示例:
         - body_input_types, arg_offset = self._validate_npu_demo_launch_body_signature(body_func)
@@ -712,21 +719,25 @@ class KernelEmitter:
         arg_names = self._arg_names(func_op)
         if result_types:
             raise self._error(func_name, "unsupported npu_demo launch body signature")
-        if len(input_types) not in {3, 4}:
+        if len(input_types) < 3:
             raise self._error(func_name, "unsupported npu_demo launch body signature")
 
         body_arg_offset = 0
-        if len(input_types) == 4:
+        if len(input_types) >= 4 and arg_names and arg_names[0] == "ctx":
             if not arg_names or arg_names[0] != "ctx":
                 raise self._error(func_name, "npu_demo launch body requires leading ctx argument")
             body_arg_offset = 1
 
         body_input_types = input_types[body_arg_offset:]
-        if len(body_input_types) != 3:
+        if len(body_input_types) < 3:
             raise self._error(func_name, "unsupported npu_demo launch body signature")
-        if any(not isinstance(arg_type, NnMemoryType) for arg_type in body_input_types):
+        memory_input_types = body_input_types[:3]
+        symbol_input_types = body_input_types[3:]
+        if any(not isinstance(arg_type, NnMemoryType) for arg_type in memory_input_types):
             raise self._error(func_name, "unsupported npu_demo launch body signature")
-        lhs_type, rhs_type, out_type = body_input_types
+        if any(not isinstance(arg_type, SymbolValueType) for arg_type in symbol_input_types):
+            raise self._error(func_name, "unsupported npu_demo launch body signature")
+        lhs_type, rhs_type, out_type = memory_input_types
         if lhs_type.element_type != rhs_type.element_type or lhs_type.element_type != out_type.element_type:
             raise self._error(func_name, "npu_demo launch body requires matching element types")
         return list(body_input_types), body_arg_offset
@@ -760,7 +771,7 @@ class KernelEmitter:
         result_types = list(wrapper_func.function_type.outputs.data)
         wrapper_ops = self._filtered_launch_ops(wrapper_func)
         launch_op = wrapper_ops[0]
-        if len(input_types) != 3 or result_types:
+        if len(input_types) != len(body_input_types) or result_types:
             raise self._error(func_name, "unsupported npu_demo launch wrapper signature")
         if input_types != body_input_types:
             raise self._error(func_name, "npu_demo launch wrapper signature must match body inputs")
@@ -902,11 +913,12 @@ class KernelEmitter:
         """生成 npu_demo launch body 的函数签名。
 
         创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
+        最后一次更改: 朽木露琪亚
 
         功能说明:
         - 统一构造 `static void <body>(npu_demo::KernelContext& ctx, ...)` 的签名。
         - 供 body 定义与前置声明共享，避免两处拼接逻辑不一致。
+        - 三个 memory 参数后允许继续透传 `SymbolValueType` 参数，保持 tile / shape 公开链路。
 
         使用示例:
         - signature = self._emit_npu_demo_launch_body_signature(func_op, body_input_types, body_arg_offset)
@@ -926,20 +938,25 @@ class KernelEmitter:
             zip(body_arg_names, body_input_types, strict=True),
             start=body_arg_offset,
         ):
-            if not isinstance(arg_type, NnMemoryType):
-                raise self._error(func_name, "unsupported npu_demo launch body signature")
-            qualifier = "" if arg_index in mutable_memory_args else "const "
-            params.append(f"{qualifier}{self._type_to_c(arg_type)}& {arg_name}")
+            if isinstance(arg_type, NnMemoryType):
+                qualifier = "" if arg_index in mutable_memory_args else "const "
+                params.append(f"{qualifier}{self._type_to_c(arg_type)}& {arg_name}")
+                continue
+            if isinstance(arg_type, SymbolValueType):
+                params.append(f"{self._type_to_c(arg_type)} {arg_name}")
+                continue
+            raise self._error(func_name, "unsupported npu_demo launch body signature")
         return f"static void {func_name}({', '.join(params)})"
 
     def _emit_npu_demo_launch_wrapper_function(self, wrapper_func: func.FuncOp, body_func: func.FuncOp) -> str:
         """生成 npu_demo wrapper 函数源码。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 朽木露琪亚
 
         功能说明:
-        - wrapper 负责把 `lhs/rhs/out` 原样透传给 `npu_demo::launch<block, thread, subthread, shared_memory_size>(body, ...)`。
+        - wrapper 负责把 `lhs/rhs/out` 与 trailing `!symbol.int` 参数原样透传给
+          `npu_demo::launch<block, thread, subthread, shared_memory_size>(body, ...)`。
         - 不生成 `KernelContext` 参数，也不引入旧同步接口。
 
         使用示例:
@@ -961,11 +978,15 @@ class KernelEmitter:
         mutable_memory_args = self._mutable_memory_arg_indices(body_func)
         params: list[str] = []
         for index, (arg_name, arg_type) in enumerate(zip(arg_names, wrapper_func.function_type.inputs.data, strict=True)):
-            if not isinstance(arg_type, NnMemoryType):
-                raise self._error(wrapper_func.sym_name.data, "unsupported npu_demo launch wrapper signature")
             body_arg_index = body_arg_offset + index
-            qualifier = "" if body_arg_index in mutable_memory_args else "const "
-            params.append(f"{qualifier}{self._signature_type_to_c(arg_type)}& {arg_name}")
+            if isinstance(arg_type, NnMemoryType):
+                qualifier = "" if body_arg_index in mutable_memory_args else "const "
+                params.append(f"{qualifier}{self._signature_type_to_c(arg_type)}& {arg_name}")
+                continue
+            if isinstance(arg_type, SymbolValueType):
+                params.append(f"{self._signature_type_to_c(arg_type)} {arg_name}")
+                continue
+            raise self._error(wrapper_func.sym_name.data, "unsupported npu_demo launch wrapper signature")
         signature = f"void {wrapper_func.sym_name.data}({', '.join(params)})"
         self.ctx.push_indent()
         call_args = ", ".join(arg_names)

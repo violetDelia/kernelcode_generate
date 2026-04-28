@@ -1,7 +1,7 @@
 """mlir_gen function builder.
 
 创建者: 朽木露琪亚
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 提供 build_func_op/build_func_op_from_ast 的公开入口。
@@ -116,7 +116,7 @@ def _expr_key(expr: object) -> int:
     """为 AST 节点生成当前文件内使用的缓存键。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 当前直接使用 `id(expr)` 作为当前文件内的类型/值缓存键。
@@ -295,7 +295,7 @@ def _resolve_symbolic_index_value(
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 支持 `ConstAST`、`ScalarArgAST`、`VarAST`、`BinaryExprAST` 以及直接的 `int|str`。
+    - 支持 `ConstAST`、`ScalarArgAST`、`VarAST`、`BinaryExprAST`、`TensorAxisAccessAST` 以及直接的 `int|str`。
     - 当 `runtime_values` 提供 `int|SymbolDim` 时，优先使用运行时标量值。
 
     使用示例:
@@ -329,6 +329,13 @@ def _resolve_symbolic_index_value(
         lhs = _resolve_symbolic_index_value(expr.lhs, location=expr.location, runtime_values=runtime_values)
         rhs = _resolve_symbolic_index_value(expr.rhs, location=expr.location, runtime_values=runtime_values)
         return _apply_symbolic_index_binary_op(lhs, rhs, expr.op, expr.location)
+    if isinstance(expr, TensorAxisAccessAST):
+        if not isinstance(expr.axis, ConstAST) or not isinstance(expr.axis.value, int):
+            raise LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+        dims = expr.tensor.memory.shape if expr.kind == "shape" else expr.tensor.memory.stride
+        dim = dims[expr.axis.value]
+        public_value = dim.get_value()
+        return public_value if isinstance(public_value, int) else dim
     if isinstance(expr, int):
         return expr
     if isinstance(expr, str):

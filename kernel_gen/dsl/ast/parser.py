@@ -1,7 +1,7 @@
 """DSL AST parser.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 提供 `parse_function` 解析入口，将 Python 函数解析为 `FunctionAST`。
@@ -760,6 +760,10 @@ def _parse_annotation_node(
         _raise_parse_error("Unsupported annotation", node)
 
     if isinstance(node, py_ast.Name):
+        if runtime_table is not None and arg_name is not None and arg_name in runtime_table and node.id in {"Memory", "SymbolDim"}:
+            inferred = _annotation_from_runtime_value(arg_name, runtime_table[arg_name])
+            if inferred is not None:
+                return inferred
         if node.id == "int":
             return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=_location_from_node(node))
         if node.id == "bool":
@@ -870,6 +874,243 @@ def _is_allowed_attribute_value(value: object) -> bool:
             NumericType,
             _KG_OPERATION_ARCH.BarrierVisibility,
             _KG_OPERATION_ARCH.BarrierScope,
+        ),
+    )
+
+
+def _resolve_tensor_metadata_value(expr: py_ast.Attribute, env: dict[str, object]) -> object | None:
+    """解析函数体内 tensor 元信息属性访问。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 仅接受函数入参 `TensorAST` 的公开 metadata 属性访问。
+    - 当前支持 `shape/stride/dtype/space/format`，用于只读 kernel 合同中的 metadata 前端入口。
+
+    使用示例:
+    - _resolve_tensor_metadata_value(py_ast.parse("x.dtype").body[0].value, {"x": tensor_ast})
+
+    关联文件:
+    - spec: spec/kernel/README.md
+    - test: test/dsl/mlir_gen/test_function_builder.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
+    """
+
+    if not isinstance(expr.value, py_ast.Name):
+        return None
+    bound_value = env.get(expr.value.id)
+    if not isinstance(bound_value, TensorAST):
+        return None
+    metadata_map = {
+        "shape": bound_value.memory.shape,
+        "stride": bound_value.memory.stride,
+        "dtype": bound_value.memory.dtype,
+        "space": bound_value.memory.space,
+        "format": bound_value.memory.format,
+    }
+    return metadata_map.get(expr.attr)
+
+
+def _resolve_tensor_axis_source(
+    accessor: py_ast.Attribute,
+    env: dict[str, object],
+) -> tuple[TensorAST, str] | None:
+    """解析 `get_shape/get_stride` 访问对应的 tensor 源与语义种类。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 支持 `tensor.get_shape()/tensor.get_stride()` 这类直接入口。
+    - 兼容 `tensor.shape.get_shape()` / `tensor.stride.get_shape()` 这类 metadata 链式入口。
+
+    使用示例:
+    - _resolve_tensor_axis_source(py_ast.parse("x.shape.get_shape").body[0].value, {"x": tensor_ast})
+
+    关联文件:
+    - spec: spec/kernel/README.md
+    - test: test/dsl/mlir_gen/test_function_builder.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
+    """
+
+    if isinstance(accessor.value, py_ast.Name):
+        bound_value = env.get(accessor.value.id)
+        if isinstance(bound_value, TensorAST):
+            if accessor.attr == "get_shape":
+                return bound_value, "shape"
+            if accessor.attr == "get_stride":
+                return bound_value, "stride"
+        return None
+
+    if (
+        accessor.attr == "get_shape"
+        and isinstance(accessor.value, py_ast.Attribute)
+        and accessor.value.attr in {"shape", "stride"}
+        and isinstance(accessor.value.value, py_ast.Name)
+    ):
+        bound_value = env.get(accessor.value.value.id)
+        if isinstance(bound_value, TensorAST):
+            return bound_value, "shape" if accessor.value.attr == "shape" else "stride"
+    return None
+
+
+def _build_tensor_axis_access_list(
+    tensor: TensorAST,
+    *,
+    kind: str,
+    location: SourceLocation | None,
+) -> list[TensorAxisAccessAST]:
+    """把整段 shape/stride metadata 调用展开为逐轴访问 AST 列表。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 仅服务 tuple unpack 这类前端 metadata 读取场景。
+    - 每个维度都保持 `TensorAxisAccessAST` 语义，避免退回为裸 Python 外部值。
+
+    使用示例:
+    - _build_tensor_axis_access_list(tensor_ast, kind="shape", location=None)
+
+    关联文件:
+    - spec: spec/kernel/README.md
+    - test: test/dsl/mlir_gen/test_function_builder.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
+    """
+
+    source_dims = tensor.memory.shape if kind == "shape" else tensor.memory.stride
+    rank = len(source_dims)
+    return [
+        TensorAxisAccessAST(
+            tensor=tensor,
+            kind=kind,
+            axis=ConstAST(value=axis, location=location),
+            location=location,
+        )
+        for axis in range(rank)
+    ]
+
+
+def _evaluate_assert_expr(
+    expr: py_ast.AST,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> object:
+    """在解析阶段求值只读 kernel 前置条件断言。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 仅支持当前 kernel 合同需要的 metadata/常量比较。
+    - 断言只用于前端前置条件校验，不进入 AST lowering 结果。
+
+    使用示例:
+    - _evaluate_assert_expr(py_ast.parse("x.dtype == y.dtype", mode="eval").body, env, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/kernel/README.md
+    - test: test/dsl/mlir_gen/test_function_builder.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
+    """
+
+    if isinstance(expr, py_ast.Constant):
+        return expr.value
+    if isinstance(expr, py_ast.Name):
+        if expr.id in env:
+            return env[expr.id]
+        value = _lookup_python_name(expr.id, globals_table, builtins_table)
+        if value is not None:
+            return value
+        _raise_parse_error("Unknown name", expr)
+    if isinstance(expr, py_ast.Attribute):
+        metadata_value = _resolve_tensor_metadata_value(expr, env)
+        if metadata_value is not None:
+            return metadata_value
+        return _parse_attribute_object(expr, globals_table, builtins_table)
+    if isinstance(expr, py_ast.Compare):
+        if len(expr.ops) != 1 or len(expr.comparators) != 1:
+            _raise_parse_error("Unsupported assert statement", expr)
+        lhs = _evaluate_assert_expr(expr.left, env, globals_table, builtins_table)
+        rhs = _evaluate_assert_expr(expr.comparators[0], env, globals_table, builtins_table)
+        op = expr.ops[0]
+        if isinstance(op, py_ast.Eq):
+            return lhs == rhs
+        if isinstance(op, py_ast.NotEq):
+            return lhs != rhs
+        if isinstance(op, py_ast.Is):
+            return lhs is rhs
+        if isinstance(op, py_ast.IsNot):
+            return lhs is not rhs
+        if isinstance(op, py_ast.Lt):
+            return lhs < rhs
+        if isinstance(op, py_ast.LtE):
+            return lhs <= rhs
+        if isinstance(op, py_ast.Gt):
+            return lhs > rhs
+        if isinstance(op, py_ast.GtE):
+            return lhs >= rhs
+        _raise_parse_error("Unsupported assert statement", expr)
+    _raise_parse_error("Unsupported assert statement", expr)
+
+
+def _is_lowerable_statement_value(value: object) -> bool:
+    """判断赋值右值是否需要作为 AST 语句保留。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 仅保留当前 lowering 支持的 AST 语句值。
+    - 对纯 metadata / Python 常量绑定返回 False，使其仅进入局部环境不进入函数体语句列表。
+
+    使用示例:
+    - _is_lowerable_statement_value(ConstAST(1))
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/mlir_gen/test_function_builder.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
+    """
+
+    return isinstance(
+        value,
+        (
+            BinaryExprAST,
+            CompareExprAST,
+            ConstAST,
+            TensorAST,
+            ScalarArgAST,
+            VarAST,
+            LoadAST,
+            StoreAST,
+            DmaAllocAST,
+            DmaCopyAST,
+            DmaCastAST,
+            DmaViewAST,
+            DmaReshapeAST,
+            DmaFlattenAST,
+            ConvAST,
+            Img2ColAST,
+            FCAST,
+            MatmulAST,
+            NnBroadcastAST,
+            NnBroadcastToAST,
+            NnReduceAST,
+            NnSoftmaxAST,
+            NnTransposeAST,
+            NnUnaryAST,
+            DmaFreeAST,
+            ForAST,
+            ArchBarrierAST,
+            ArchGetDynamicMemoryAST,
+            ArchLaunchKernelAST,
+            ArchQueryAST,
+            PythonCalleeCallAST,
+            SymbolToFloatAST,
+            TensorAxisAccessAST,
         ),
     )
 
@@ -2103,7 +2344,7 @@ def _parse_expr(
     """解析 DSL 表达式节点为 AST。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 解析 Name/Constant/List/Tuple/Attribute/Call/Subscript/UnaryOp/BinOp/Compare 等表达式节点。
@@ -2150,12 +2391,24 @@ def _parse_expr(
         return tuple(_parse_expr(item, env, globals_table, builtins_table) for item in expr.elts)
 
     if isinstance(expr, py_ast.Attribute):
+        metadata_value = _resolve_tensor_metadata_value(expr, env)
+        if metadata_value is not None:
+            return metadata_value
         value = _parse_attribute_object(expr, globals_table, builtins_table)
         if bool(env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)) and not _is_allowed_attribute_value(value):
             _raise_parse_error("cannot use external value inside function body", expr)
         return value
 
     if isinstance(expr, py_ast.Call):
+        if isinstance(expr.func, py_ast.Attribute) and not expr.args and not expr.keywords:
+            tensor_axis_source = _resolve_tensor_axis_source(expr.func, env)
+            if tensor_axis_source is not None:
+                tensor_expr, kind = tensor_axis_source
+                return _build_tensor_axis_access_list(
+                    tensor_expr,
+                    kind=kind,
+                    location=_location_from_node(expr),
+                )
         symbol_to_float_expr = _parse_symbol_to_float_call(expr, env, globals_table, builtins_table)
         if symbol_to_float_expr is not None:
             return symbol_to_float_expr
@@ -2174,7 +2427,14 @@ def _parse_expr(
             if accessor.attr in {"get_shape", "get_stride"}:
                 if expr.value.args or expr.value.keywords:
                     _raise_parse_error(f"Unsupported {accessor.attr} arity", expr.value)
-                tensor_expr = _parse_expr(accessor.value, env, globals_table, builtins_table)
+                tensor_axis_source = _resolve_tensor_axis_source(accessor, env)
+                if tensor_axis_source is None:
+                    tensor_expr = _parse_expr(accessor.value, env, globals_table, builtins_table)
+                    if not isinstance(tensor_expr, TensorAST):
+                        _raise_parse_error(f"{accessor.attr} source must be TensorAST", accessor.value)
+                    axis_kind = "shape" if accessor.attr == "get_shape" else "stride"
+                else:
+                    tensor_expr, axis_kind = tensor_axis_source
                 if not isinstance(tensor_expr, TensorAST):
                     _raise_parse_error(f"{accessor.attr} source must be TensorAST", accessor.value)
                 axis_env = dict(env)
@@ -2183,7 +2443,7 @@ def _parse_expr(
                 axis_expr = _parse_expr(expr.slice, axis_env, globals_table, builtins_table)
                 return TensorAxisAccessAST(
                     tensor=tensor_expr,
-                    kind="shape" if accessor.attr == "get_shape" else "stride",
+                    kind=axis_kind,
                     axis=axis_expr,
                     location=_location_from_node(expr),
                 )
@@ -2224,7 +2484,7 @@ def _parse_for(
     """解析 for 语句为 ForAST。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 解析 `for i in range/LoopRange/loop(...)` 语句，生成循环变量与起止步长。
@@ -2264,18 +2524,18 @@ def _parse_for(
     if isinstance(step_expr, ConstAST) and step_expr.value == 0:
         _raise_parse_error("for range step must not be zero", stmt.iter)
 
+    env_snapshot = dict(env)
     var = VarAST(name=stmt.target.id, location=_location_from_node(stmt.target))
-    previous = env.get(var.name)
     env[var.name] = var
     body_statements: list[object] = []
     for body_stmt in stmt.body:
         if isinstance(body_stmt, py_ast.Return):
             _raise_parse_error("Return inside for-loop is unsupported", body_stmt)
-        body_statements.append(_parse_stmt(body_stmt, env, globals_table, builtins_table))
-    if previous is None:
-        env.pop(var.name, None)
-    else:
-        env[var.name] = previous
+        parsed_body_stmt = _parse_stmt(body_stmt, env, globals_table, builtins_table)
+        if parsed_body_stmt is not None:
+            body_statements.append(parsed_body_stmt)
+    env.clear()
+    env.update(env_snapshot)
     body_location = _location_from_node(stmt.body[0]) if stmt.body else _location_from_node(stmt)
     body = BlockAST(statements=body_statements, location=body_location)
     return ForAST(var=var, start=start_expr, end=end_expr, step=step_expr, body=body, location=_location_from_node(stmt))
@@ -2286,14 +2546,14 @@ def _parse_stmt(
     env: dict[str, object],
     globals_table: dict[str, object],
     builtins_table: dict[str, object],
-) -> object:
+) -> object | None:
     """解析 DSL 语句节点为 AST 语句。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 解析 Assign/Return/For/Expr 语句，并委托 `_parse_expr/_parse_for` 处理子节点。
+    - 解析 Assign/Assert/Return/For/Expr 语句，并委托 `_parse_expr/_parse_for` 处理子节点。
     - 禁止嵌套 FunctionDef、通用 if 语句、`if bias is not None` 分支。
 
     使用示例:
@@ -2307,6 +2567,15 @@ def _parse_stmt(
 
     if isinstance(stmt, py_ast.FunctionDef):
         _raise_parse_error("Nested function definition is not supported", stmt)
+    if isinstance(stmt, py_ast.Assert):
+        if stmt.msg is not None:
+            _raise_parse_error("Unsupported assert statement", stmt)
+        assert_result = _evaluate_assert_expr(stmt.test, env, globals_table, builtins_table)
+        if not isinstance(assert_result, bool):
+            _raise_parse_error("Unsupported assert statement", stmt.test)
+        if not assert_result:
+            _raise_parse_error("Assert failed", stmt.test)
+        return None
     if isinstance(stmt, py_ast.If):
         test = stmt.test
         if (
@@ -2322,11 +2591,26 @@ def _parse_stmt(
             _raise_parse_error("Unsupported if bias is not None", stmt)
         _raise_parse_error("Unsupported if statement", stmt)
     if isinstance(stmt, py_ast.Assign):
-        if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], py_ast.Name):
+        if len(stmt.targets) != 1:
             _raise_parse_error("Unsupported assignment target", stmt)
+        target = stmt.targets[0]
         value = _parse_expr(stmt.value, env, globals_table, builtins_table)
-        env[stmt.targets[0].id] = value
-        return value
+        if isinstance(target, py_ast.Name):
+            env[target.id] = value
+            if not _is_lowerable_statement_value(value):
+                return None
+            return value
+        if isinstance(target, (py_ast.Tuple, py_ast.List)):
+            if not isinstance(value, (list, tuple)):
+                _raise_parse_error("Unsupported assignment target", stmt)
+            if len(target.elts) != len(value):
+                _raise_parse_error("Tuple assignment arity mismatch", stmt)
+            for target_item, assigned_value in zip(target.elts, value, strict=True):
+                if not isinstance(target_item, py_ast.Name):
+                    _raise_parse_error("Unsupported assignment target", target_item)
+                env[target_item.id] = assigned_value
+            return None
+        _raise_parse_error("Unsupported assignment target", stmt)
     if isinstance(stmt, py_ast.Return):
         if stmt.value is None:
             _raise_parse_error("Return value is required", stmt)
@@ -2444,7 +2728,8 @@ def _parse_function_impl(
             _bind_safe_local_import(stmt, globals_table)
             continue
         parsed_stmt = _parse_stmt(stmt, env, globals_table, builtins_table)
-        statements.append(parsed_stmt)
+        if parsed_stmt is not None:
+            statements.append(parsed_stmt)
         parsed_body_statements.append(stmt)
         if isinstance(stmt, py_ast.Return):
             has_explicit_return = True

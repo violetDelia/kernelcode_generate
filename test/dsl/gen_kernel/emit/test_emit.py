@@ -169,6 +169,17 @@ def test_emit_c_context_type_helpers_dispatch_npu_demo_type_and_space_registry()
     assert ctx.dispatch_type(mem_type) == "Memory<TSM, int32_t>"
 
 
+def test_emit_c_context_accepts_target_keyword_and_rejects_conflicts() -> None:
+    target_ctx = EmitCContext(target="npu_demo")
+    same_target_ctx = EmitCContext(target="cpu", config={"target": "cpu"})
+
+    assert target_ctx.config["target"] == "npu_demo"
+    assert same_target_ctx.config["target"] == "cpu"
+
+    with pytest.raises(EmitCError, match=r"target conflicts with config\['target'\]"):
+        EmitCContext(target="cpu", config={"target": "npu_demo"})
+
+
 def test_emit_c_package_value_fast_paths_and_legacy_kernel_add_rejects() -> None:
     block = Block(arg_types=[i32, i32, i32])
     ctx = _ctx()

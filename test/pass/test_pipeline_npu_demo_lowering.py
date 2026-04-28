@@ -34,6 +34,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
+from kernel_gen.dsl.mlir_gen import mlir_gen
+from kernel_gen.operation.dma import deslice, slice
+from kernel_gen.operation.nn import matmul
+from kernel_gen.operation.scf import loop
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.type import NumericType
+
 pipeline_module = importlib.import_module("kernel_gen.passes.pipeline")
 build_npu_demo_lowering_pipeline = pipeline_module.build_npu_demo_lowering_pipeline
 
@@ -126,3 +135,36 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
 def test_npu_demo_lowering_pipeline_rejects_unknown_option() -> None:
     with pytest.raises(ValueError, match=r"^npu-demo-lowering only accepts target option; got only-kernel$"):
         build_npu_demo_lowering_pipeline({"only-kernel": "true"})
+
+
+def test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain() -> None:
+    """验证公开 npu_demo lowering -> gen_kernel 链路保留 tile 符号参数。"""
+    lhs = Memory(["M", "K"], NumericType.Float32)
+    rhs = Memory(["K", "N"], NumericType.Float32)
+    out = Memory(["M", "N"], NumericType.Float32)
+    tile_m = SymbolDim("TILE_M")
+    tile_n = SymbolDim("TILE_N")
+
+    def matmul_kernel(lhs: Memory, rhs: Memory, out: Memory, TILE_M: SymbolDim, TILE_N: SymbolDim):
+        M = lhs.shape.get_shape()[0]
+        K = lhs.shape.get_shape()[1]
+        N = rhs.shape.get_shape()[1]
+
+        for m0 in loop(0, M, TILE_M):
+            for n0 in loop(0, N, TILE_N):
+                lhs_tile = slice(lhs, [m0, 0], [TILE_M, K], [1, 1], MemorySpace.TSM)
+                rhs_tile = slice(rhs, [0, n0], [K, TILE_N], [1, 1], MemorySpace.TSM)
+                partial = matmul(lhs_tile, rhs_tile)
+                deslice(partial, out, [m0, n0], [TILE_M, TILE_N], [1, 1])
+
+    module = mlir_gen(matmul_kernel, lhs, rhs, out, tile_m, tile_n)
+    pipeline = build_npu_demo_lowering_pipeline()
+    pipeline.run(module)
+    source = gen_kernel(module, EmitCContext(target="npu_demo"))
+
+    assert "void matmul_kernel(" in source
+    assert ", long long arg3, long long arg4" in source
+    assert "static void matmul_kernel_device(npu_demo::KernelContext& ctx" in source
+    assert ", S_INT arg3, S_INT arg4" in source
+    assert "npu_demo::launch<1, 1, 1, 0>(matmul_kernel_device, arg0, arg1, arg2, arg3, arg4);" in source
+    assert "Memory<TSM, float>" in source

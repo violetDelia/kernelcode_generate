@@ -8,15 +8,15 @@
 
 ## API 列表
 
-- `MlirGenModuleError(message: str)`
-- `build_func_op(fn, *runtime_args, globals=None, builtins=None)`
-- `build_func_op_from_ast(func_ast, runtime_args=None, config=None)`
-- `mlir_gen(fn, *runtime_args, globals=None, builtins=None, config=None)`
+- `MlirGenModuleError(reason: str)`
+- `build_func_op(fn: Callable[..., object], *runtime_args: object, globals: dict[str, object] | None = None, builtins: dict[str, object] | object | None = None) -> func.FuncOp`
+- `build_func_op_from_ast(func_ast: FunctionAST, runtime_args: tuple[object, ...] | list[object] | None = None, config: dict[str, object] | None = None) -> func.FuncOp`
+- `mlir_gen(fn: Callable[..., object], *runtime_args: object, globals: dict[str, object] | None = None, builtins: dict[str, object] | object | None = None, config: dict[str, object] | None = None) -> ModuleOp`
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`jcc你莫辜负`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen/__init__.py`](../../kernel_gen/dsl/mlir_gen/__init__.py)
 - `test`：
@@ -63,6 +63,7 @@
 - 只要 `FunctionAST.has_explicit_return == True`，即使没有返回注解且 `FunctionAST.outputs == []`，`build_func_op(...)` / `build_func_op_from_ast(...)` 也必须根据最后一条显式 `return expr` 的 lowering 结果生成单结果 `func.func` 与 `func.return`；不得退回零结果。
 - 当 `FunctionAST.has_explicit_return == False` 且 `FunctionAST.outputs == []` 时，若函数体最后停在值表达式上、必须依赖“最后一个值”才能猜出函数输出，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须抛出 `AstVisitorError`，错误消息包含 `Function return requires explicit return syntax or annotation`；不得靠最后一个值表达式猜函数输出，也不得静默生成零结果 `func.func`。
 - 参数注解只允许作为解析/局部校验信息；当 `runtime_args` 表示的实际输入类型与参数注解不一致时，`func.func inputs`、函数体内由输入推导出的结果类型，以及 `func.func outputs` 都必须跟随 `runtime_args`，不得跟随参数注解变化。
+- 当 `build_func_op(...)` / `mlir_gen(...)` 提供 `runtime_args` 时，参数注解中的裸 `Memory` 与裸 `SymbolDim` 允许作为占位注解存在；只要 `runtime_args` 的数量与位置绑定形参一致，builder 必须接受这类占位注解并继续基于 `runtime_args` 推导 `func.func` 输入签名，不得在解析阶段回退为 `Unsupported annotation`。
 - 当函数体仅包含 `for` 循环且没有 `return` 时，输出 `func.func` 允许零返回值。
 - 当 `ForAST` 来源于 `LoopRange(start, end, step)` 且循环边界保持 symbol 整数语义时，lowering 后必须生成 `symbol.for`，不得退回 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - `LoopRange` 场景中的循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand，必须直接保持 `!symbol.int<"expr">` 语义传递，不得额外生成 `arith.index_cast`。
@@ -272,6 +273,8 @@ assert ok is True
 注意事项：
 
 - 根函数签名推导仅允许基于 `runtime_args + AST`；不得把 Python 函数签名、返回注解或参数注解当作另一套独立推导来源。
+- 对以 [expectation/kernel/flash_attention.py](/home/lfr/kernelcode_generate/expectation/kernel/flash_attention.py) 与 [expectation/kernel/matmul.py](/home/lfr/kernelcode_generate/expectation/kernel/matmul.py) 为代表的只读 kernel 合同资产，根函数参数允许写成裸 `Memory` / 裸 `SymbolDim` 占位注解；module 级签名推导仍只允许基于 `runtime_args + AST`，不得要求这些资产补成完整 Tensor 注解文本后才能通过前端入口。
+- 当 DSL 函数体在 `for` 循环内重绑定 lowerable memory/helper 表达式时，这些绑定只在当前循环解析作用域内生效；循环外后续语句不得再通过宏展开捕获已退场的内层 induction 变量。
 - callee 的 `func.func` 签名必须由其 call-site operand 类型推导；callee 不要求也不接受额外的 `runtime_args`。
 - 同一个 callee 若在多个 call-site 下推导出不一致签名，必须失败，错误消息包含 `MlirGenModuleError: inconsistent callee signature`。
 - 递归调用不支持，必须失败，错误消息包含 `MlirGenModuleError: recursive callee graph is not supported`。
@@ -378,6 +381,8 @@ builtin.module {
   - MGEN-001：`build_func_op(...)` 返回 `func.func`。（`test_build_func_op_returns_func_op`）
   - MGEN-001A：`build_func_op(...)` 的输入签名只由 `runtime_args` 决定；即使 `globals` 中存在同名对象且额外传入 `builtins`，成功路径的签名推导也不得被解析环境覆盖。（`test_build_func_op_signature_uses_runtime_args_not_parse_env`）
   - MGEN-001B：非 `dict` 的 `builtins` 可作为解析环境补充输入，且解析失败必须收敛为 `AstVisitorError`。（`test_mlir_gen_build_func_op_builtins_and_parse_error`）
+  - MGEN-001C：当 `runtime_args` 已提供时，裸 `Memory` / 裸 `SymbolDim` 参数注解必须被当作占位注解接受，并继续由 `runtime_args` 驱动输入签名；不得报 `Unsupported annotation`。（下游待补测试映射：`test_build_func_op_accepts_runtime_driven_memory_placeholder_annotation`、`test_mlir_gen_accepts_runtime_driven_symbol_placeholder_annotation`）
+  - MGEN-001D：kernel 合同样例中，`for` 循环体内的 lowerable memory/helper 重绑定必须保持循环内可用，且循环外后续语句不得再捕获内层 induction 变量；`build_func_op(...)` 需能继续生成 raw `func.func`。（`test_build_func_op_supports_kernel_contract_loop_local_rebinding`）
   - MGEN-002：`build_func_op_from_ast(...)` 保留 AST 参数顺序；当传入 `runtime_args` 时，输入签名仍由运行时参数语义驱动。（`test_build_func_op_from_ast_preserves_arg_order`、`test_build_func_op_from_ast_uses_runtime_args_for_symbol_signature`）
   - MGEN-002A：`build_func_op_from_ast(..., config=...)` 接收并透传 visitor / lowering 配置。（`test_build_func_op_from_ast_forwards_config_to_visitor_and_context`）
   - MGEN-002B：`build_func_op_from_ast(...)` 的公开入口必须覆盖空输入、`runtime_args` 长度不匹配、未支持的标量类型、未支持的输入节点类型，以及非纯 symbol 标量函数缺少 tensor 输入等错误路径。（`test_mlir_gen_signature_validation_errors`）
