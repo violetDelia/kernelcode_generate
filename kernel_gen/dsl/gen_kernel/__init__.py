@@ -6,13 +6,16 @@
 功能说明:
 - 以包根形式汇总 `gen_kernel` 的公开入口、上下文对象与节点级片段发射接口。
 - 当前 `kernel_gen.dsl.gen_kernel` 就是 canonical 公开路径。
-- 包根仅承认 `gen_kernel(...)` / `emit_c(...)` / `emit_c_op(...)` / `emit_c_value(...)` 这组稳定公开入口。
+- 包根承认 `gen_kernel(...)` / `dsl_gen_kernel(...)` / `emit_c(...)` / `emit_c_op(...)` / `emit_c_value(...)` 这组稳定公开入口。
+- `KernelEmitter` 继续作为 package-root 可达的公开类型导出保留，但函数源码生成仍统一经 `gen_kernel(...)` / `dsl_gen_kernel(...)` 收口。
 
 API 列表:
 - `gen_kernel(obj: object, ctx: EmitCContext) -> str`
+- `dsl_gen_kernel(fn: Callable[..., object], *runtime_args: object, ctx: EmitCContext, config: dict[str, object] | None = None) -> str`
 - `emit_c(obj: object, ctx: EmitCContext) -> str`
 - `emit_c_op(op: Operation, ctx: EmitCContext) -> str`
 - `emit_c_value(value: SSAValue, ctx: EmitCContext) -> str`
+- `KernelEmitter(ctx: EmitCContext, emit_op: Callable[[Operation, EmitCContext], str | None] | None = None, emit_value: Callable[[SSAValue, EmitCContext], str | None] | None = None)`
 - `EmitCContext(*, config: dict[str, object] | None = None)`
 - `EmitCError(message: str)`
 - `GenKernelError(message: str)`
@@ -36,7 +39,8 @@ from __future__ import annotations
 
 from .emit import emit_c, emit_c_op, emit_c_value
 from .emit_context import EmitCContext, EmitCError
-from .gen_kernel import GenKernelError, gen_kernel
+from .gen_kernel import GenKernelError, dsl_gen_kernel, gen_kernel
+from .kernel_emitter import KernelEmitter
 
 
 def __getattr__(name: str) -> object:
@@ -67,6 +71,8 @@ def __getattr__(name: str) -> object:
 
 __all__ = [
     "GenKernelError",
+    "KernelEmitter",
+    "dsl_gen_kernel",
     "gen_kernel",
     "EmitCContext",
     "EmitCError",

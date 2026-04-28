@@ -18,7 +18,7 @@
 ## 文档信息
 
 - 创建者：咯咯咯
-- 最后一次更改：咯咯咯
+- 最后一次更改：小李飞刀
 - spec：[`spec/execute_engine/execute_engine_api.md`](spec/execute_engine/execute_engine_api.md)
 - 功能实现：[`kernel_gen/execute_engine/execution_engine.py`](kernel_gen/execute_engine/execution_engine.py)
 - test：[`test/execute_engine/test_execute_engine_contract.py`](test/execute_engine/test_execute_engine_contract.py)
@@ -210,6 +210,15 @@ if not result.ok:
 
 ```python
 args: tuple[RuntimeArg, ...] = (lhs, rhs, out, 1, 1.0)
+```
+
+```python
+args: tuple[RuntimeArg, ...] = (
+    torch.zeros((2, 3)),
+    numpy.zeros((2, 3), dtype=numpy.float32),
+    1,
+    1.0,
+)
 ```
 
 注意事项：

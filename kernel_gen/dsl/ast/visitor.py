@@ -73,6 +73,33 @@ class AstVisitorError(Exception):
         return self.message
 
 
+def _is_public_mlir_gen_error(exc: ValueError) -> bool:
+    """判断异常是否属于应当原样透传的 mlir_gen 公开错误。
+
+    创建者: OpenAI Codex
+    最后一次更改: OpenAI Codex
+
+    功能说明:
+    - 当前只识别 `kernel_gen.dsl.mlir_gen` package-root 公开的 `MlirGenModuleError`。
+    - 避免 visitor 把 module-builder 已定义的公开失败再包成 `AstVisitorError`。
+
+    使用示例:
+    - if _is_public_mlir_gen_error(exc):
+    -     raise exc
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/mlir_gen/test_module_builder.py
+    - 功能实现: kernel_gen/dsl/ast/visitor.py
+    """
+
+    try:
+        from kernel_gen.dsl.mlir_gen import MlirGenModuleError
+    except Exception:
+        return False
+    return isinstance(exc, MlirGenModuleError)
+
+
 class AstVisitor:
     """DSL AST 遍历访问器。
 
@@ -145,6 +172,8 @@ class AstVisitor:
         try:
             return self.visit_expr(stmt, ctx)
         except ValueError as exc:
+            if _is_public_mlir_gen_error(exc):
+                raise
             raise AstVisitorError(str(exc), location=getattr(exc, "location", None)) from exc
 
     def visit_expr(self, expr: object, ctx: EmitContext) -> object:
@@ -153,4 +182,6 @@ class AstVisitor:
         try:
             return emit_node_mlir(expr, ctx)
         except ValueError as exc:
+            if _is_public_mlir_gen_error(exc):
+                raise
             raise AstVisitorError(str(exc), location=getattr(exc, "location", None)) from exc

@@ -1286,8 +1286,9 @@ def _emit_result_type_with_public_diagnostics(
 
     功能说明:
     - 调用公开 `emit_mlir(...)` 预发射返回表达式并读取结果类型。
-    - 将隐式 broadcast 维度不匹配重新包装为带位置信息的 `LoweringError`，
+    - 仅将 `emit_mlir(...)` 抛出的 lowering 诊断重新包装为带位置信息的 `LoweringError`，
       以保持 `build_func_op(...) -> AstVisitorError` 的既有公开合同。
+    - module-builder 公开 `MlirGenModuleError` 这类非 lowering 失败继续原样透传，不在这里改写。
 
     使用示例:
     - result_type = _emit_result_type_with_public_diagnostics(expr, preview_ctx, func_ast.location)
@@ -1301,11 +1302,16 @@ def _emit_result_type_with_public_diagnostics(
     try:
         return emit_mlir(expr, ctx).type
     except ValueError as exc:
-        if "Implicit broadcast dimension mismatch" not in str(exc):
+        if (
+            not hasattr(exc, "location")
+            and "Implicit broadcast dimension mismatch" not in str(exc)
+        ):
             raise
         raise LoweringError(
             str(exc),
-            location=getattr(expr, "location", None) or fallback_location,
+            location=getattr(exc, "location", None)
+            or getattr(expr, "location", None)
+            or fallback_location,
         ) from exc
 
 

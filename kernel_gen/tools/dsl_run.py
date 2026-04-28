@@ -1,7 +1,7 @@
 """dsl_run tool entry.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供 `dsl_run(func, real_args, pipeline, emitcconfig)` 的一体化入口。
@@ -104,7 +104,7 @@ from kernel_gen.operation.nn import (
     img2col2d as _nn_img2col2d,
 )
 from kernel_gen.passes.pass_manager import PassManager
-from kernel_gen.passes.registry import PassRegistryError, build_registered_pipeline, load_builtin_passes
+from kernel_gen.passes.registry import build_registered_pipeline, load_builtin_passes
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import Farmat, NumericType
@@ -288,7 +288,7 @@ def _resolve_pipeline(pipeline: str | PassManager) -> PassManager:
     load_builtin_passes()
     try:
         return build_registered_pipeline(pipeline)
-    except PassRegistryError as exc:
+    except RuntimeError as exc:
         raise DslRunError(f"DslRunUnknownPipeline: unknown pipeline '{pipeline}'") from exc
 
 

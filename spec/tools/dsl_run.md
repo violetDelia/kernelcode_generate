@@ -62,11 +62,15 @@ assert result.execute_result.ok is True
 ## 输入与失败边界
 
 - `emitcconfig` 仅接受 `EmitCContext`
+- `emitcconfig.config["target"]` 必须是非空 `str`；若调用方在构造后篡改该字段，`dsl_run(...)` 仍必须在公开入口显式失败
 - `pipeline` 仅接受 `str | PassManager`
-- `real_args` 仅接受 `tuple | list`，元素仅允许 `torch.Tensor` 或 `numpy.ndarray`
+- `real_args` 容器仅接受 `tuple | list`，元素仅允许 `torch.Tensor` 或 `numpy.ndarray`
 - DSL 函数只要存在值返回，就必须失败
 - `emitcconfig.config["target"]` 决定源码生成与执行目标，不做跨 target 自动猜测
 - `target == "npu_demo"` 时，lowered module 必须包含且仅包含一个带 `arch.launch` 的 wrapper func；否则必须显式失败
+- `target == "npu_demo"` 且存在唯一 wrapper 时，该 wrapper 指向的 body func 必须在 lowered module 内可达；缺失时必须显式失败
+- pipeline lowering 的返回值必须是 `builtin.module`
+- lowering 后若入口函数不满足当前 target 的公开 `gen_kernel(...)` 合同，`dsl_run(...)` 直接透传对应公开错误，不额外包装
 - lowering 后残留的透明 `builtin.unrealized_conversion_cast` 允许由工具层源码生成自动吞掉
 
 ## 依赖
@@ -85,5 +89,7 @@ assert result.execute_result.ok is True
   - 正向执行与结果模型
   - `str` / `PassManager` 两类 pipeline 入口
   - `torch` / `numpy` 参数归一化
+  - `real_args` 非 `tuple/list` 与空 `target` 边界
   - `npu_demo` wrapper 唯一性失败边界
+  - pipeline 返回空 / 非 `builtin.module`、wrapper 缺 body func 与公开 codegen 失败透传
   - 固定错误短语

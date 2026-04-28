@@ -40,6 +40,35 @@ SCRIPT_PATH = REPO_ROOT / "skills/codex-multi-agents/scripts/codex-multi-agents-
 pytestmark = pytest.mark.infra
 
 
+def _default_agents_list_path() -> Path:
+    """返回当前测试现场可读的 canonical `agents-lists.md` 路径。
+
+    创建者: OpenAI Codex
+    最后一次更改: OpenAI Codex
+
+    功能说明:
+    - 优先使用当前 `REPO_ROOT` 下的 `agents/codex-multi-agents/agents-lists.md`。
+    - 当测试运行在独立 worktree 且该名单文件只存在于主仓时，回退到父目录同名路径。
+    - 让 `run_script(...)` 的默认环境配置不依赖“每个 worktree 都复制一份 agents-lists.md”。
+
+    使用示例:
+    - path = _default_agents_list_path()
+
+    关联文件:
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+    - Spec 文档: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - 测试文件: test/codex-multi-agents/test_codex-multi-agents-task.py
+    """
+
+    repo_candidate = REPO_ROOT / "agents/codex-multi-agents/agents-lists.md"
+    if repo_candidate.is_file():
+        return repo_candidate
+    parent_candidate = REPO_ROOT.parent / "agents/codex-multi-agents/agents-lists.md"
+    if parent_candidate.is_file():
+        return parent_candidate
+    return repo_candidate
+
+
 def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     """调用待测 shell 脚本并返回执行结果。"""
     merged_env = os.environ.copy()
@@ -60,9 +89,7 @@ def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Comp
         if agents_list_path:
             merged_env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = agents_list_path
         else:
-            merged_env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(
-                REPO_ROOT / "agents/codex-multi-agents/agents-lists.md"
-            )
+            merged_env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(_default_agents_list_path())
 
     if "CODEX_MULTI_AGENTS_AGENTS_FILE" not in merged_env:
         agents_list_path = None
@@ -76,9 +103,7 @@ def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Comp
         if agents_list_path:
             merged_env["CODEX_MULTI_AGENTS_AGENTS_FILE"] = agents_list_path
         else:
-            merged_env["CODEX_MULTI_AGENTS_AGENTS_FILE"] = str(
-                REPO_ROOT / "agents/codex-multi-agents/agents-lists.md"
-            )
+            merged_env["CODEX_MULTI_AGENTS_AGENTS_FILE"] = str(_default_agents_list_path())
 
     return subprocess.run(
         ["bash", str(SCRIPT_PATH), *args],

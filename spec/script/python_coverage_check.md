@@ -29,7 +29,7 @@
 ## 目标
 
 - 为 S1 / S7 提供稳定的覆盖率阈值检查入口。
-- 允许阶段内按 `--include-module` 只检查指定 `kernel_gen` 模块前缀。
+- 允许阶段内按 `--include-module` 只检查指定 `kernel_gen` 模块前缀或单文件模块路径。
 - 对缺失或损坏的 coverage JSON 明确失败，不把不完整报告误判为通过。
 
 ## 限制与边界
@@ -37,51 +37,6 @@
 - 仅处理 `coverage.py` JSON 报告，不负责生成覆盖率数据。
 - 不读取合同验收资产目录，也不把合同验收资产纳入覆盖率目标。
 - 不替代 `pytest`，只负责 coverage 阈值校验。
-
-## 公开接口
-
-### `script/check_python_coverage.py`
-
-功能说明：
-
-- 读取 coverage JSON。
-- 计算 line / branch 覆盖率百分比。
-- 失败时返回非零退出码并打印原因。
-
-参数说明：
-
-- `--coverage-json(Path)`：coverage JSON 路径。
-- `--line-min(float)`：最小 line coverage 百分比。
-- `--branch-min(float)`：最小 branch coverage 百分比。
-- `--include-module(list[str])`：可重复指定的模块前缀，未指定时检查报告总计。
-
-使用示例：
-
-```bash
-python3 script/check_python_coverage.py \
-  --coverage-json coverage/S1/coverage.json \
-  --line-min 98 \
-  --branch-min 70
-```
-
-```bash
-python3 script/check_python_coverage.py \
-  --coverage-json coverage/S1/coverage.json \
-  --include-module kernel_gen.passes \
-  --line-min 98 \
-  --branch-min 70
-```
-
-返回与限制：
-
-- 成功：退出码 `0`，输出一行覆盖率摘要。
-- 失败：退出码非 `0`，标准错误包含失败原因。
-
-## 公开 API 清单
-
-- `CoverageCheckError(message: str)`
-- `check_coverage(report_path: Path, line_min: float, branch_min: float, include_modules: list[str]) -> dict[str, Any]`
-- `main(argv: list[str] | None = None) -> int`
 
 ## helper 清单
 
@@ -111,3 +66,4 @@ pytest -q test/script/test_python_coverage_check.py
   - branch 不足。
   - JSON 缺字段。
   - `--include-module` 只检查指定模块前缀。
+  - `--include-module` 支持单文件模块路径，例如 `kernel_gen.tools.dsl_run`。

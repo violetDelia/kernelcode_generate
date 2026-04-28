@@ -40,6 +40,39 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+
+def _expectation_repo_root() -> Path:
+    """返回当前测试现场可读的 expectation 根目录。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 优先使用当前 worktree 的 `expectation/`。
+    - 当独立 worktree 未复制 `expectation/` 时，回退到父级现场的只读合同资产目录。
+    - 只解决测试导入入口定位，不改变 expectation 本身。
+
+    使用示例:
+    - repo_root = _expectation_repo_root()
+
+    关联文件:
+    - spec: spec/pass/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: expectation/pass/buffer_results_to_out_params/__main__.py
+    """
+
+    if (REPO_ROOT / "expectation").is_dir():
+        return REPO_ROOT
+    parent_root = REPO_ROOT.parent
+    if (parent_root / "expectation").is_dir():
+        return parent_root
+    return REPO_ROOT
+
+
+EXPECTATION_REPO_ROOT = _expectation_repo_root()
+if str(EXPECTATION_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(EXPECTATION_REPO_ROOT))
+
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.passes import PassContractError

@@ -620,6 +620,16 @@ def _run_local_compile_command(command: list[str]) -> subprocess.CompletedProces
     - 功能实现: test/dsl/gen_kernel/test_gen_kernel.py
     """
 
+    compile_result = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if compile_result.returncode == 0:
+        return compile_result
+    if "internal compiler error:" not in compile_result.stderr:
+        return compile_result
     return subprocess.run(
         command,
         check=False,

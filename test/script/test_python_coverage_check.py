@@ -17,16 +17,45 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
 
 import pytest
 
 from script.check_python_coverage import main
 
-FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "coverage"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 pytestmark = pytest.mark.infra
+
+
+def _fixture_root() -> Path:
+    """返回当前测试现场可读的 coverage fixture 根目录。
+
+    创建者: OpenAI Codex
+    最后一次更改: OpenAI Codex
+
+    功能说明:
+    - 优先使用当前 `REPO_ROOT/test/fixtures/coverage`。
+    - 当测试运行在独立 worktree 且 fixture 只存在于主仓时，回退到父目录同名路径。
+    - 避免 coverage CLI 测试依赖“每个 worktree 都复制一份 fixture JSON”。
+
+    使用示例:
+    - root = _fixture_root()
+
+    关联文件:
+    - 功能实现: [script/check_python_coverage.py](../../script/check_python_coverage.py)
+    - Spec 文档: [spec/script/python_coverage_check.md](../../spec/script/python_coverage_check.md)
+    - 测试文件: [test/script/test_python_coverage_check.py](test_python_coverage_check.py)
+    """
+
+    repo_candidate = REPO_ROOT / "test/fixtures/coverage"
+    if repo_candidate.is_dir():
+        return repo_candidate
+    parent_candidate = REPO_ROOT.parent / "test/fixtures/coverage"
+    if parent_candidate.is_dir():
+        return parent_candidate
+    return repo_candidate
 
 
 def _fixture(name: str) -> Path:
@@ -48,7 +77,7 @@ def _fixture(name: str) -> Path:
     - 测试文件: [test/script/test_python_coverage_check.py](test/script/test_python_coverage_check.py)
     """
 
-    return FIXTURE_ROOT / name
+    return _fixture_root() / name
 
 
 def _run_check(argv: list[str]) -> tuple[int, str, str]:
@@ -159,6 +188,27 @@ def test_check_python_coverage_supports_file_level_include_module_filter(tmp_pat
     )
     assert code == 0
     assert "scope=kernel_gen/passes/tile/analysis (1 file(s))" in stdout
+    assert "line=100.00%" in stdout
+    assert stderr == ""
+
+
+def test_check_python_coverage_supports_exact_repo_file_module_fixture() -> None:
+    """TC-CPY-002C: include-module should accept an exact repo file module path."""
+
+    code, stdout, stderr = _run_check(
+        [
+            "--coverage-json",
+            str(_fixture("core_module_filter_pass.json")),
+            "--include-module",
+            "kernel_gen.dsl.mlir_gen.emit.core",
+            "--line-min",
+            "98",
+            "--branch-min",
+            "70",
+        ]
+    )
+    assert code == 0
+    assert "scope=kernel_gen/dsl/mlir_gen/emit/core (1 file(s))" in stdout
     assert "line=100.00%" in stdout
     assert stderr == ""
 

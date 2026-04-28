@@ -24,6 +24,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from xdsl.dialects import func
+from xdsl.dialects.builtin import FunctionType, ModuleOp
+from xdsl.ir import Block, Region
 
 
 def _find_repo_root(start: Path) -> Path:
@@ -56,6 +59,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dsl.gen_kernel import EmitCContext
+from kernel_gen.dialect.arch import ArchLaunchOp
+from kernel_gen.dialect.symbol import SymbolConstOp
 from kernel_gen.operation import deslice, loop, matmul, slice, store
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import build_registered_pipeline, load_builtin_passes
@@ -155,6 +160,34 @@ def _npu_demo_emitc_context() -> EmitCContext:
     """
 
     return EmitCContext(config={"target": "npu_demo"})
+
+
+def _cpu_emitc_context() -> EmitCContext:
+    """构造 `cpu` 目标的公开 `EmitCContext`。"""
+
+    return EmitCContext(config={"target": "cpu"})
+
+
+def _make_launch_only_module(*, callee: str) -> ModuleOp:
+    """构造只含单个 launch wrapper 的最小 lowered module。"""
+
+    launch_block = func.Block(arg_types=[]) if hasattr(func, "Block") else Block(arg_types=[])
+    launch_grid = SymbolConstOp(1)
+    launch_thread = SymbolConstOp(1)
+    launch_subthread = SymbolConstOp(1)
+    launch_shared_memory = SymbolConstOp(0)
+    launch_op = ArchLaunchOp(
+        callee,
+        launch_grid.result,
+        launch_thread.result,
+        launch_subthread.result,
+        launch_shared_memory.result,
+        (),
+    )
+    launch_block.add_ops([launch_grid, launch_thread, launch_subthread, launch_shared_memory, launch_op, func.ReturnOp()])
+    launch_region = func.Region(launch_block) if hasattr(func, "Region") else Region(launch_block)
+    wrapper = func.FuncOp("wrapper", FunctionType.from_lists([], []), launch_region)
+    return ModuleOp([wrapper])
 
 
 def add_kernel(
@@ -659,6 +692,52 @@ def test_dsl_run_rejects_invalid_pipeline_type() -> None:
         dsl_run(add_kernel, (out, lhs, rhs), object(), _npu_demo_emitc_context())
 
 
+# TC-DSL-RUN-008A
+# 创建者: OpenAI Codex
+# 最后一次更改: OpenAI Codex
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 锁定 real_args 容器本身必须是 tuple/list，避免把 dict 或其他对象静默当成参数序列。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_rejects_invalid_real_args_container() -> None:
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+
+    with pytest.raises(DslRunError, match=r"^DslRunInvalidRealArgs: real_args must be tuple or list$"):
+        dsl_run(
+            add_kernel,
+            {"out": out, "lhs": lhs, "rhs": rhs},
+            "npu-demo-lowering",
+            _npu_demo_emitc_context(),
+        )
+
+
+# TC-DSL-RUN-008B
+# 创建者: OpenAI Codex
+# 最后一次更改: OpenAI Codex
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 锁定调用方后续篡改 `EmitCContext.config["target"]` 为空字符串时仍会在公开入口显式失败。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_rejects_emitccontext_with_empty_target_name() -> None:
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+    ctx = _npu_demo_emitc_context()
+    ctx.config["target"] = ""
+
+    with pytest.raises(
+        DslRunError,
+        match=r"^DslRunInvalidEmitCContext: emitcconfig\.config\['target'\] must be non-empty str$",
+    ):
+        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", ctx)
+
+
 # TC-DSL-RUN-009
 # 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
@@ -692,6 +771,97 @@ def test_dsl_run_rejects_arity_mismatch() -> None:
 
     with pytest.raises(DslRunError, match=_EXPECTED_ARITY_MESSAGE):
         dsl_run(add_kernel, (out, lhs), "npu-demo-lowering", _npu_demo_emitc_context())
+
+
+# TC-DSL-RUN-010A
+# 创建者: OpenAI Codex
+# 最后一次更改: OpenAI Codex
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 锁定 pipeline 若返回空 builtin.module，dsl_run 会在公开入口显式拒绝。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_rejects_pipeline_returning_empty_module() -> None:
+    class EmptyModulePipeline(PassManager):
+        def run(self, module: ModuleOp) -> ModuleOp:
+            return ModuleOp([])
+
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+
+    with pytest.raises(DslRunError, match=r"^DslRunInternalError: lowered module does not contain func\.func$"):
+        dsl_run(add_kernel, (out, lhs, rhs), EmptyModulePipeline(), _cpu_emitc_context())
+
+
+# TC-DSL-RUN-010B
+# 创建者: OpenAI Codex
+# 最后一次更改: OpenAI Codex
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 锁定 npu_demo 唯一 wrapper 若指向缺失 body func，dsl_run 会在公开入口显式失败。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_rejects_npu_demo_wrapper_without_body_func() -> None:
+    class MissingBodyPipeline(PassManager):
+        def run(self, module: ModuleOp) -> ModuleOp:
+            return _make_launch_only_module(callee="missing_kernel")
+
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+
+    with pytest.raises(
+        DslRunError,
+        match=r"^DslRunInternalError: lowered module does not contain func\.func @missing_kernel$",
+    ):
+        dsl_run(add_kernel, (out, lhs, rhs), MissingBodyPipeline(), _npu_demo_emitc_context())
+
+
+# TC-DSL-RUN-010C
+# 创建者: OpenAI Codex
+# 最后一次更改: OpenAI Codex
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 锁定非 npu_demo target 若收到仅含 launch wrapper 的 module，会继续透传公开 gen_kernel 失败而不是静默吞掉。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_re_raises_codegen_failure_for_cpu_launch_wrapper() -> None:
+    class CpuLaunchWrapperPipeline(PassManager):
+        def run(self, module: ModuleOp) -> ModuleOp:
+            return _make_launch_only_module(callee="_device_kernel")
+
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+
+    with pytest.raises(ValueError, match=r"^target=cpu: arch\.launch: unsupported op$"):
+        dsl_run(add_kernel, (out, lhs, rhs), CpuLaunchWrapperPipeline(), _cpu_emitc_context())
+
+
+# TC-DSL-RUN-010D
+# 创建者: OpenAI Codex
+# 最后一次更改: OpenAI Codex
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 锁定 pipeline 若返回非 builtin.module，dsl_run 会在公开入口显式拒绝。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_rejects_pipeline_returning_non_module() -> None:
+    class NonModulePipeline(PassManager):
+        def run(self, module: ModuleOp) -> object:
+            return object()
+
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+
+    with pytest.raises(DslRunError, match=r"^DslRunInternalError: pipeline must return builtin\.module$"):
+        dsl_run(add_kernel, (out, lhs, rhs), NonModulePipeline(), _cpu_emitc_context())
 
 
 # TC-DSL-RUN-011
