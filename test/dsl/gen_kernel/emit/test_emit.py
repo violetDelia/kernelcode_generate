@@ -1544,6 +1544,32 @@ def test_emit_c_lowers_npu_demo_dma_indexed_and_fill_helpers() -> None:
     assert "fill<GM, int32_t>(dst /*dst*/, c_7_cast_int32_t /*value*/);" in joined
 
 
+# EC-NPU-DMA-FILL-INF-001
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证 npu_demo `dma.fill` 对无穷字面量发射可编译 C++ 表达式。
+# 测试目的: 避免生成 `-inf` 这类未定义 C++ 标识符，锁定 `std::numeric_limits<T>::infinity()` 口径。
+# 使用示例: pytest -q test/dsl/gen_kernel/emit/test_emit.py -k test_emit_c_lowers_npu_demo_dma_fill_infinity_literal
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/npu_demo/dma/fill.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/emit.md
+# 对应测试文件路径: test/dsl/gen_kernel/emit/test_emit.py
+def test_emit_c_lowers_npu_demo_dma_fill_infinity_literal() -> None:
+    dst_type = _make_memory_type([2, 3], [3, 1], space="global", element_type=f32)
+    block = Block(arg_types=[dst_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "dst")
+    fill_value = arith.ConstantOp(FloatAttr(float("-inf"), f32))
+
+    stmt = emit_c_op(DmaFillOp(block.args[0], fill_value.result), ctx)
+
+    assert stmt == (
+        "fill<GM, float>(dst /*dst*/, "
+        "-std::numeric_limits<float>::infinity() /*value*/);"
+    )
+
+
 # EC-I3-002
 # 创建者: 小李飞刀
 # 最后一次更改: 朽木露琪亚

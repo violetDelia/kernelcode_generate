@@ -8,7 +8,7 @@
 - `KernelContext` 是由 `launch` 创建并绑定到当前线程的运行时上下文视图，不再是生成源码 body 签名中的显式参数。
 - `thread_num()` / `block_num()` / `subthread_num()` 返回本次 launch 的 extent，而不是 target registry 的固定模板值；`shared_memory_size` 作为 launch metadata 以编译期模板参数承接。
 - `include/npu_demo/npu_demo.h` 作为单入口头文件，需透传 `include/api/Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `cost/*.h` 的统一声明，并汇聚 `include/npu_demo/Core.h` / `Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `cost/*.h` 的后端实现。
-- `npu_demo::add/sub/mul/...`、`npu_demo::launch(...)`、`npu_demo::build_contiguous_stride(...)`、`npu_demo::view(...)`、`npu_demo::alloc(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)` 以及 `npu_demo::cost::add/copy/...` 是 public function 的唯一成功消费方向；`detail` 只服务实现内部。
+- `npu_demo::add/sub/mul/...`、`npu_demo::launch(...)`、`npu_demo::build_contiguous_stride(...)`、`npu_demo::view(...)`、`npu_demo::alloc(...)`、`npu_demo::fill(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)`、`npu_demo::transpose(...)`、`npu_demo::broadcast(...)` 以及 `npu_demo::cost::add/copy/...` 是 public function 的唯一成功消费方向；`detail` 只服务实现内部。
 
 ## API 列表
 
@@ -27,6 +27,9 @@
 - `npu_demo::thread_num() -> S_INT`
 - `npu_demo::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) -> void`
 - `template <MemorySpace Space> npu_demo::get_dynamic_memory() -> DynamicMemoryRef<Space>`
+- `template <MemorySpace Space, typename T> Status npu_demo::fill(Memory<Space, T>& target, const T& value)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::transpose(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& perm)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::broadcast(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source)`
 
 ## 文档信息
 
@@ -41,7 +44,7 @@
 - [`spec/include/api/Arch.md`](../../../spec/include/api/Arch.md)：统一 `launch` / `BarrierScope` / `barrier(visibility, scope)` 公开合同。
 - [`spec/include/api/Core.md`](../../../spec/include/api/Core.md)：统一 `Status` / `StatusCode` 语义。
 - [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：统一 `Memory<Space, T>`、`MemorySpace`、`MemoryFormat`、`npu_demo::build_contiguous_stride(...)` 与成员式 `view<T>` / `reshape` 语义。
-- [`spec/include/api/Dma.md`](../../../spec/include/api/Dma.md)：统一 `npu_demo::alloc/slice/deslice` 对 `Memory<Space, T>` 的公开职责。
+- [`spec/include/api/Dma.md`](../../../spec/include/api/Dma.md)：统一 `npu_demo::alloc/slice/deslice/transpose` 对 `Memory<Space, T>` 的公开职责。
 - [`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md)：统一 `Kernel` helper 公共接口职责。
 - [`spec/include/api/cost/Core.md`](../../../spec/include/api/cost/Core.md)：统一 `npu_demo::cost::CostKind` 与 `S_INT` 成本返回语义。
 - [`spec/include/api/cost/Dma.md`](../../../spec/include/api/cost/Dma.md)：统一 `npu_demo::cost::copy/slice/deslice` 的公共合同。
@@ -104,11 +107,17 @@ npu_demo::build_contiguous_stride(shape_buf, 2, stride_buf);
 
 float source_data[6] = {0, 1, 2, 3, 4, 5};
 float out_data[6] = {0, 0, 0, 0, 0, 0};
+long long transposed_shape[2] = {3, 2};
+long long transposed_stride[2] = {2, 1};
 Memory<GM, float> source(source_data, shape_buf, stride_buf, 2, MemoryFormat::Norm);
 Memory<GM, float> out(out_data, shape_buf, stride_buf, 2, MemoryFormat::Norm);
+Memory<GM, float> transposed(out_data, transposed_shape, transposed_stride, 2, MemoryFormat::Norm);
 auto tile = npu_demo::alloc<TSM, float>({2, 3}, {3, 1}, MemoryFormat::Norm);
 Status slice_status = npu_demo::slice(tile, source, Vector{0, 0}, Vector{2, 3}, Vector{1, 1});
 Status deslice_status = npu_demo::deslice(out, tile, Vector{0, 0}, Vector{2, 3}, Vector{1, 1});
+Status fill_status = npu_demo::fill(tile, 0.0f);
+Status transpose_status = npu_demo::transpose(transposed, tile, Vector{1, 0});
+Status broadcast_status = npu_demo::broadcast(tile, tile);
 S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::memory>(tile, source);
 ```
 
@@ -116,7 +125,7 @@ S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::memory>(tile, s
 
 - 正向调用示例不得直接使用 `npu_demo::detail` 或 `*_detail` 名称。
 - `Vector shape{2, 3}`、`Memory<GM, float>`、`StatusCode::kOk` 等基础类型仍保持当前公开位置。
-- `npu_demo::alloc/slice/deslice/view/build_contiguous_stride` 与 `npu_demo::cost::*` 已属于当前 public function 合同；未限定的全局 `alloc/slice/deslice/view/build_contiguous_stride` 或全局 `cost::*` 不作为成功调用方向。
+- `npu_demo::alloc/fill/slice/deslice/transpose/broadcast/view/build_contiguous_stride` 与 `npu_demo::cost::*` 已属于当前 public function 合同；未限定的全局 `alloc/fill/slice/deslice/transpose/broadcast/view/build_contiguous_stride` 或全局 `cost::*` 不作为成功调用方向。
 
 返回与限制：
 

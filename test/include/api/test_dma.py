@@ -373,6 +373,124 @@ int main() {
     _compile_and_run(source)
 
 
+# API-DMA-003T
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 功能说明: 验证 target-first `transpose` 在跨空间与跨元素类型模板参数下可编译并返回成功。
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 测试目的: 验证 `transpose` 接口按 `perm[target_axis] = source_axis` 物化转置。
+# 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_transpose_materializes_permuted_layout`
+# 对应功能实现文件路径: `include/npu_demo/Dma.h`
+# 对应 spec 文件路径: `spec/include/api/Dma.md`
+# 对应测试文件路径: `test/include/api/test_dma.py`
+def test_dma_transpose_materializes_permuted_layout() -> None:
+    source = r"""
+#include "include/api/Dma.h"
+#include "include/npu_demo/Dma.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    float source_data[6] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+    long long source_shape[2] = {2, 3};
+    long long source_stride[2] = {3, 1};
+    Memory<TSM, float> source(source_data, source_shape, source_stride, 2, MemoryFormat::Norm);
+
+    int target_data[6] = {0, 0, 0, 0, 0, 0};
+    long long target_shape[2] = {3, 2};
+    long long target_stride[2] = {2, 1};
+    Memory<GM, int> target(target_data, target_shape, target_stride, 2, MemoryFormat::Norm);
+
+    if (npu_demo::transpose(target, source, Vector{1, 0}) != StatusCode::kOk) {
+        return fail(1);
+    }
+    if (target_data[0] != 1 || target_data[1] != 4 ||
+        target_data[2] != 2 || target_data[3] != 5 ||
+        target_data[4] != 3 || target_data[5] != 6) {
+        return fail(2);
+    }
+
+    long long bad_shape[2] = {2, 3};
+    long long bad_stride[2] = {3, 1};
+    Memory<GM, int> bad_target(target_data, bad_shape, bad_stride, 2, MemoryFormat::Norm);
+    if (npu_demo::transpose(bad_target, source, Vector{1, 0}) != StatusCode::kError) {
+        return fail(3);
+    }
+    long long duplicate_perm_buf[2] = {0, 0};
+    Vector duplicate_perm(duplicate_perm_buf, 2);
+    if (npu_demo::transpose(target, source, duplicate_perm) != StatusCode::kError) {
+        return fail(4);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# API-DMA-003B
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 功能说明: 验证 `fill/broadcast` 在 npu_demo 后端可编译并物化目标块。
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 测试目的: 锁定 `fill` 与 trailing-dimension `broadcast` 的公共 DMA helper 语义。
+# 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_fill_and_broadcast_materialize_target`
+# 对应功能实现文件路径: `include/npu_demo/Dma.h`
+# 对应 spec 文件路径: `spec/include/api/Dma.md`
+# 对应测试文件路径: `test/include/api/test_dma.py`
+def test_dma_fill_and_broadcast_materialize_target() -> None:
+    source = r"""
+#include "include/api/Dma.h"
+#include "include/npu_demo/Dma.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    float fill_data[6] = {0.0f};
+    long long fill_shape[2] = {2, 3};
+    long long fill_stride[2] = {3, 1};
+    Memory<TSM, float> fill_target(fill_data, fill_shape, fill_stride, 2, MemoryFormat::Norm);
+    if (npu_demo::fill<TSM, float>(fill_target, 2.5f) != StatusCode::kOk) {
+        return fail(1);
+    }
+    for (int i = 0; i < 6; ++i) {
+        if (fill_data[i] != 2.5f) {
+            return fail(2);
+        }
+    }
+
+    float source_data[2] = {10.0f, 20.0f};
+    long long source_shape[2] = {2, 1};
+    long long source_stride[2] = {1, 1};
+    Memory<TSM, float> source(source_data, source_shape, source_stride, 2, MemoryFormat::Norm);
+
+    int target_data[6] = {0, 0, 0, 0, 0, 0};
+    long long target_shape[2] = {2, 3};
+    long long target_stride[2] = {3, 1};
+    Memory<TSM, int> target(target_data, target_shape, target_stride, 2, MemoryFormat::Norm);
+    if (npu_demo::broadcast<TSM, TSM, int, float>(target, source) != StatusCode::kOk) {
+        return fail(3);
+    }
+    int expected[6] = {10, 10, 10, 20, 20, 20};
+    for (int i = 0; i < 6; ++i) {
+        if (target_data[i] != expected[i]) {
+            return fail(4);
+        }
+    }
+
+    long long bad_shape[2] = {3, 3};
+    long long bad_stride[2] = {3, 1};
+    Memory<TSM, int> bad_target(target_data, bad_shape, bad_stride, 2, MemoryFormat::Norm);
+    if (npu_demo::broadcast<TSM, TSM, int, float>(bad_target, source) != StatusCode::kError) {
+        return fail(5);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
 # API-DMA-003A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀

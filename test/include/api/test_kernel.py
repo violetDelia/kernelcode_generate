@@ -232,6 +232,136 @@ int main() {
     _compile_and_run(source)
 
 
+# API-KERNEL-002B
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 测试目的: 验证 `Kernel` same-shape 逐元素 helper 支持二维中间张量。
+# 使用示例: `pytest -q test/include/api/test_kernel.py -k test_include_api_kernel_elementwise_supports_same_shape_2d`
+# 对应功能实现文件路径: `include/npu_demo/Kernel.h`
+# 对应 spec 文件路径: `spec/include/api/Kernel.md`
+# 对应测试文件路径: `test/include/api/test_kernel.py`
+def test_include_api_kernel_elementwise_supports_same_shape_2d() -> None:
+    source = r"""
+#include <cmath>
+
+#include "include/api/Kernel.h"
+#include "include/npu_demo/Kernel.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    float lhs_data[6] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+    float rhs_data[6] = {6.0f, 5.0f, 4.0f, 3.0f, 2.0f, 1.0f};
+    float out_data[6] = {0.0f};
+    long long shape[2] = {2, 3};
+    long long stride[2] = {3, 1};
+    Memory<TSM, float> lhs(lhs_data, shape, stride, 2, MemoryFormat::Norm);
+    Memory<TSM, float> rhs(rhs_data, shape, stride, 2, MemoryFormat::Norm);
+    Memory<TSM, float> out(out_data, shape, stride, 2, MemoryFormat::Norm);
+
+    if (npu_demo::add<TSM, float, float>(out, lhs, rhs) != StatusCode::kOk) {
+        return fail(1);
+    }
+    for (int i = 0; i < 6; ++i) {
+        if (out_data[i] != 7.0f) {
+            return fail(2);
+        }
+    }
+    if (npu_demo::sub<TSM, float, float>(out, lhs, rhs) != StatusCode::kOk) {
+        return fail(3);
+    }
+    if (out_data[0] != -5.0f || out_data[5] != 5.0f) {
+        return fail(4);
+    }
+    if (npu_demo::exp<TSM, float, float>(out, lhs) != StatusCode::kOk) {
+        return fail(5);
+    }
+    if (std::fabs(out_data[0] - std::exp(1.0f)) > 0.0001f ||
+        std::fabs(out_data[5] - std::exp(6.0f)) > 0.01f) {
+        return fail(6);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# API-KERNEL-002A
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 测试目的: 验证 `img2col1d/img2col2d` 公开 helper 按结构化布局真实物化窗口。
+# 使用示例: `pytest -q test/include/api/test_kernel.py -k test_include_api_kernel_img2col_helpers_materialize_windows`
+# 对应功能实现文件路径: `include/npu_demo/Kernel.h`
+# 对应 spec 文件路径: `spec/include/api/Kernel.md`
+# 对应测试文件路径: `test/include/api/test_kernel.py`
+def test_include_api_kernel_img2col_helpers_materialize_windows() -> None:
+    source = r"""
+#include "include/api/Kernel.h"
+#include "include/npu_demo/Kernel.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    float input1d_data[5] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
+    long long input1d_shape[3] = {1, 1, 5};
+    long long input1d_stride[3] = {5, 5, 1};
+    Memory<GM, float> input1d(input1d_data, input1d_shape, input1d_stride, 3, MemoryFormat::Norm);
+
+    float out1d_data[9] = {0.0f};
+    long long out1d_shape[4] = {1, 1, 3, 3};
+    long long out1d_stride[4] = {9, 9, 3, 1};
+    Memory<TSM, float> out1d(out1d_data, out1d_shape, out1d_stride, 4, MemoryFormat::Norm);
+    if (npu_demo::img2col1d<GM, TSM, float, float>(out1d, input1d, 3, 2, 1, 1, 1) != StatusCode::kOk) {
+        return fail(1);
+    }
+    float expected1d[9] = {
+        0.0f, 2.0f, 4.0f,
+        1.0f, 3.0f, 5.0f,
+        2.0f, 4.0f, 0.0f,
+    };
+    for (int i = 0; i < 9; ++i) {
+        if (out1d_data[i] != expected1d[i]) {
+            return fail(2);
+        }
+    }
+
+    float input2d_data[9] = {
+        1.0f, 2.0f, 3.0f,
+        4.0f, 5.0f, 6.0f,
+        7.0f, 8.0f, 9.0f,
+    };
+    long long input2d_shape[4] = {1, 1, 3, 3};
+    long long input2d_stride[4] = {9, 9, 3, 1};
+    Memory<GM, float> input2d(input2d_data, input2d_shape, input2d_stride, 4, MemoryFormat::Norm);
+
+    float out2d_data[16] = {0.0f};
+    long long out2d_shape[6] = {1, 1, 2, 2, 2, 2};
+    long long out2d_stride[6] = {16, 16, 8, 4, 2, 1};
+    Memory<TSM, float> out2d(out2d_data, out2d_shape, out2d_stride, 6, MemoryFormat::Norm);
+    if (npu_demo::img2col2d<GM, TSM, float, float>(out2d, input2d, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0) != StatusCode::kOk) {
+        return fail(3);
+    }
+    float expected2d[16] = {
+        1.0f, 2.0f, 4.0f, 5.0f,
+        2.0f, 3.0f, 5.0f, 6.0f,
+        4.0f, 5.0f, 7.0f, 8.0f,
+        5.0f, 6.0f, 8.0f, 9.0f,
+    };
+    for (int i = 0; i < 16; ++i) {
+        if (out2d_data[i] != expected2d[i]) {
+            return fail(4);
+        }
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
 # API-KERNEL-003
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀

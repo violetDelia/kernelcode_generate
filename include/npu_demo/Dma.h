@@ -1,13 +1,21 @@
 /*
 功能说明:
-- 提供 npu_demo 后端的 `alloc/slice/deslice` 轻量实现，并复用 `Memory` 的成员式 `view/reshape` 接口。
+- 提供 npu_demo 后端的 `alloc/fill/slice/deslice/transpose/broadcast` 轻量实现，并复用 `Memory` 的成员式 `view/reshape` 接口。
+
+API 列表:
+- `npu_demo::alloc<Space, T>(std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm) -> Memory<Space, T>`
+- `npu_demo::fill<Space, T>(Memory<Space, T>& target, const T& value) -> Status`
+- `npu_demo::slice<TargetSpace, SourceSpace, T>(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride) -> Status`
+- `npu_demo::deslice<TargetSpace, SourceSpace, T>(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride) -> Status`
+- `npu_demo::transpose<TargetSpace, SourceSpace, TargetType, SourceType>(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& perm) -> Status`
+- `npu_demo::broadcast<TargetSpace, SourceSpace, TargetType, SourceType>(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source) -> Status`
 
 使用示例:
 - #include "include/npu_demo/Dma.h"
 - Status status = npu_demo::slice(tile, source, offset, size, stride);
 
 创建者: 大闸蟹
-最后修改人: 金铲铲大作战
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Dma.md
@@ -112,6 +120,54 @@ inline Memory<Space, T> alloc(
     }
     T* data = new T[static_cast<unsigned long long>(storage_size)]();
     return Memory<Space, T>(data, shape_buf, stride_buf, rank, format);
+}
+
+/*
+功能说明:
+- 使用标量值填充 `target` 的全部逻辑元素。
+- 支持非连续 stride；填充范围按 shape 逻辑坐标遍历。
+
+使用示例:
+- Status status = npu_demo::fill<TSM, float>(target, 0.0f);
+
+创建者: 大闸蟹
+最后修改人: 大闸蟹
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace Space, typename T>
+inline Status fill(Memory<Space, T>& target, const T& value) {
+    const unsigned long long rank = target.rank();
+    if (rank == 0 || rank > npu_demo::detail::kMaxDmaRank || target.data() == nullptr) {
+        return StatusCode::kError;
+    }
+    long long element_count = 1;
+    for (unsigned long long axis = 0; axis < rank; ++axis) {
+        if (target.get_shape(axis) <= 0 || target.get_stride(axis) <= 0) {
+            return StatusCode::kError;
+        }
+        long long next_element_count = 0;
+        if (!npu_demo::detail::dma_checked_mul_non_negative(
+                element_count, target.get_shape(axis), &next_element_count)) {
+            return StatusCode::kError;
+        }
+        element_count = next_element_count;
+    }
+
+    long long target_indices[npu_demo::detail::kMaxDmaRank] = {0};
+    for (long long linear = 0; linear < element_count; ++linear) {
+        long long remainder = linear;
+        for (unsigned long long reverse_index = 0; reverse_index < rank; ++reverse_index) {
+            const unsigned long long axis = rank - 1 - reverse_index;
+            target_indices[axis] = remainder % target.get_shape(axis);
+            remainder /= target.get_shape(axis);
+        }
+        target.at(target_indices) = value;
+    }
+    return StatusCode::kOk;
 }
 
 /*
@@ -485,6 +541,159 @@ inline Status store(
             if (!npu_demo::detail::dma_checked_add_non_negative(offset[dim], target_delta, &target_indices[dim])) {
                 return StatusCode::kError;
             }
+        }
+        target.at(target_indices) = static_cast<TargetType>(source.at(source_indices));
+    }
+    return StatusCode::kOk;
+}
+
+/*
+功能说明:
+- 按 `perm` 将 source 物化转置到预分配 target。
+- `perm[target_axis]` 表示 target 轴从 source 的哪一轴读取。
+- 允许 source/target 元素类型不同，写入时按 target 类型显式转换。
+
+使用示例:
+- Status status = transpose<TSM, TSM, float, float>(target, source, Vector{1, 0});
+
+创建者: 大闸蟹
+最后修改人: 大闸蟹
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>
+inline Status transpose(
+    Memory<TargetSpace, TargetType>& target,
+    const Memory<SourceSpace, SourceType>& source,
+    const Vector& perm) {
+    const unsigned long long rank = source.rank();
+    if (rank == 0 || rank > npu_demo::detail::kMaxDmaRank) {
+        return StatusCode::kError;
+    }
+    if (target.rank() != rank || perm.size() != rank) {
+        return StatusCode::kError;
+    }
+    if (source.data() == nullptr || target.data() == nullptr) {
+        return StatusCode::kError;
+    }
+
+    bool seen[npu_demo::detail::kMaxDmaRank] = {false};
+    long long element_count = 1;
+    for (unsigned long long axis = 0; axis < rank; ++axis) {
+        const long long source_axis_value = perm[axis];
+        if (source_axis_value < 0 || source_axis_value >= static_cast<long long>(rank)) {
+            return StatusCode::kError;
+        }
+        const unsigned long long source_axis = static_cast<unsigned long long>(source_axis_value);
+        if (seen[source_axis]) {
+            return StatusCode::kError;
+        }
+        seen[source_axis] = true;
+        if (target.get_shape(axis) != source.get_shape(source_axis)) {
+            return StatusCode::kError;
+        }
+        if (target.get_shape(axis) <= 0 || source.get_shape(source_axis) <= 0) {
+            return StatusCode::kError;
+        }
+        if (target.get_stride(axis) <= 0 || source.get_stride(source_axis) <= 0) {
+            return StatusCode::kError;
+        }
+        long long next_element_count = 0;
+        if (!npu_demo::detail::dma_checked_mul_non_negative(
+                element_count, target.get_shape(axis), &next_element_count)) {
+            return StatusCode::kError;
+        }
+        element_count = next_element_count;
+    }
+
+    long long target_indices[npu_demo::detail::kMaxDmaRank] = {0};
+    long long source_indices[npu_demo::detail::kMaxDmaRank] = {0};
+    for (long long linear = 0; linear < element_count; ++linear) {
+        long long remainder = linear;
+        for (unsigned long long reverse_index = 0; reverse_index < rank; ++reverse_index) {
+            const unsigned long long dim = rank - 1 - reverse_index;
+            target_indices[dim] = remainder % target.get_shape(dim);
+            remainder /= target.get_shape(dim);
+        }
+        for (unsigned long long target_axis = 0; target_axis < rank; ++target_axis) {
+            const unsigned long long source_axis = static_cast<unsigned long long>(perm[target_axis]);
+            source_indices[source_axis] = target_indices[target_axis];
+        }
+        target.at(target_indices) = static_cast<TargetType>(source.at(source_indices));
+    }
+    return StatusCode::kOk;
+}
+
+/*
+功能说明:
+- 将 `source` 按 trailing-dimension broadcast 规则物化到预分配 `target`。
+- 允许 source rank 小于 target rank；缺失的前置维按 singleton 处理。
+
+使用示例:
+- Status status = npu_demo::broadcast<TSM, TSM, float, float>(target, source);
+
+创建者: 大闸蟹
+最后修改人: 大闸蟹
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>
+inline Status broadcast(
+    Memory<TargetSpace, TargetType>& target,
+    const Memory<SourceSpace, SourceType>& source) {
+    const unsigned long long target_rank = target.rank();
+    const unsigned long long source_rank = source.rank();
+    if (target_rank == 0 || source_rank == 0 || target_rank > npu_demo::detail::kMaxDmaRank ||
+        source_rank > npu_demo::detail::kMaxDmaRank || source_rank > target_rank) {
+        return StatusCode::kError;
+    }
+    if (target.data() == nullptr || source.data() == nullptr) {
+        return StatusCode::kError;
+    }
+
+    const unsigned long long rank_offset = target_rank - source_rank;
+    long long element_count = 1;
+    for (unsigned long long axis = 0; axis < target_rank; ++axis) {
+        if (target.get_shape(axis) <= 0 || target.get_stride(axis) <= 0) {
+            return StatusCode::kError;
+        }
+        if (axis >= rank_offset) {
+            const unsigned long long source_axis = axis - rank_offset;
+            const long long source_shape = source.get_shape(source_axis);
+            if (source_shape <= 0 || source.get_stride(source_axis) <= 0) {
+                return StatusCode::kError;
+            }
+            if (source_shape != 1 && source_shape != target.get_shape(axis)) {
+                return StatusCode::kError;
+            }
+        }
+        long long next_element_count = 0;
+        if (!npu_demo::detail::dma_checked_mul_non_negative(
+                element_count, target.get_shape(axis), &next_element_count)) {
+            return StatusCode::kError;
+        }
+        element_count = next_element_count;
+    }
+
+    long long target_indices[npu_demo::detail::kMaxDmaRank] = {0};
+    long long source_indices[npu_demo::detail::kMaxDmaRank] = {0};
+    for (long long linear = 0; linear < element_count; ++linear) {
+        long long remainder = linear;
+        for (unsigned long long reverse_index = 0; reverse_index < target_rank; ++reverse_index) {
+            const unsigned long long axis = target_rank - 1 - reverse_index;
+            target_indices[axis] = remainder % target.get_shape(axis);
+            remainder /= target.get_shape(axis);
+        }
+        for (unsigned long long source_axis = 0; source_axis < source_rank; ++source_axis) {
+            const unsigned long long target_axis = source_axis + rank_offset;
+            source_indices[source_axis] =
+                source.get_shape(source_axis) == 1 ? 0 : target_indices[target_axis];
         }
         target.at(target_indices) = static_cast<TargetType>(source.at(source_indices));
     }

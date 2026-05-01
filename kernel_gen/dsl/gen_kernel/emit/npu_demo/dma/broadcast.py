@@ -28,6 +28,27 @@ from kernel_gen.dialect.nn import NnMemoryType
 from ...register import emit_c_impl
 
 
+def _format_fill_value_expr(value_expr: str, target_type: str) -> str:
+    """格式化 npu_demo 标量 broadcast 降级为 `fill` 时的 C++ 实参。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 保留普通 C++ 表达式原文。
+    - 把 `inf` / `-inf` 转成目标元素类型的标准库 infinity 表达式。
+
+    使用示例:
+    - expr = _format_fill_value_expr("inf", "float")
+    """
+
+    if value_expr == "inf":
+        return f"std::numeric_limits<{target_type}>::infinity()"
+    if value_expr == "-inf":
+        return f"-std::numeric_limits<{target_type}>::infinity()"
+    return value_expr
+
+
 @emit_c_impl(DmaBroadcastOp, target="npu_demo")
 def _emit_npu_demo_dma_broadcast(op: DmaBroadcastOp, ctx) -> str:
     """发射 npu_demo `dma.broadcast`。
@@ -53,16 +74,17 @@ def _emit_npu_demo_dma_broadcast(op: DmaBroadcastOp, ctx) -> str:
     if not isinstance(op.target.type, NnMemoryType):
         raise ctx.emit_error(op.name, "unsupported op")
     dst_expr = emit_c_value(op.target, ctx)
+    target_type = ctx.dispatch_type(op.target.type.element_type)
     if not isinstance(op.source.type, NnMemoryType):
-        value_expr = emit_c_value(op.source, ctx)
+        value_expr = _format_fill_value_expr(emit_c_value(op.source, ctx), target_type)
         return (
             f"{ctx.current_indent}fill<{ctx.dispatch_attr(op.target.type)}, "
-            f"{ctx.dispatch_type(op.target.type.element_type)}>"
+            f"{target_type}>"
             f"({dst_expr} /*dst*/, {value_expr} /*value*/);"
         )
     src_expr = emit_c_value(op.source, ctx)
     return (
         f"{ctx.current_indent}broadcast<{ctx.dispatch_attr(op.target.type)}, {ctx.dispatch_attr(op.source.type)}, "
-        f"{ctx.dispatch_type(op.target.type.element_type)}, {ctx.dispatch_type(op.source.type.element_type)}>"
+        f"{target_type}, {ctx.dispatch_type(op.source.type.element_type)}>"
         f"({dst_expr} /*dst*/, {src_expr} /*source*/);"
     )

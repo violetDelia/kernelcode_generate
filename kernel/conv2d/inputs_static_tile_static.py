@@ -7,9 +7,10 @@
 - 实现 `inputs 静 + tile 静` 的 NCHW conv2d kernel demo。
 - 使用 `img2col2d + matmul` 实现卷积。
 - 输入固定为 `input[1, 3, 8, 8]`、`weight[4, 3, 3, 3]`、`out[1, 4, 6, 6]`。
+- 通过 `dsl_run` 真实执行，并和 `torch.nn.functional.conv2d` 参考结果对齐。
 
 API 列表:
-- `conv2d_inputs_static_tile_static_kernel(input: Memory, weight: Memory, out: Memory) -> None`
+- `conv2d_inputs_static_tile_static_kernel(out: Tensor[f32, 1, 4, 6, 6], input_tensor: Tensor[f32, 1, 3, 8, 8], weight: Tensor[f32, 4, 3, 3, 3]) -> None`
 - `main() -> None`
 
 使用示例:
@@ -25,19 +26,25 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import torch
+import torch.nn.functional as F
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from kernel.runner import run_lowering_demo
+from kernel.runner import run_torch_demo
 from kernel_gen.operation.dma import deslice, reshape, slice
 from kernel_gen.operation.nn import img2col2d, matmul, transpose
 from kernel_gen.operation.scf import loop
-from kernel_gen.symbol_variable.memory import Memory, MemorySpace
-from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.memory import MemorySpace
 
 
-def conv2d_inputs_static_tile_static_kernel(input: Memory, weight: Memory, out: Memory) -> None:
+def conv2d_inputs_static_tile_static_kernel(
+    out: "Tensor[f32, 1, 4, 6, 6]",
+    input_tensor: "Tensor[f32, 1, 3, 8, 8]",
+    weight: "Tensor[f32, 4, 3, 3, 3]",
+) -> None:
     """执行静态输入、静态 tile 的 conv2d。
 
     创建者: 大闸蟹
@@ -49,10 +56,10 @@ def conv2d_inputs_static_tile_static_kernel(input: Memory, weight: Memory, out: 
     - 固定 tile 为 `TF=2, TC=3, TN=1, THO=3, TWO=3`。
 
     使用示例:
-    - `conv2d_inputs_static_tile_static_kernel(input, weight, out)`
+    - `conv2d_inputs_static_tile_static_kernel(out, input_tensor, weight)`
     """
 
-    n_size, c_size, h_size, w_size = input.shape.get_shape()
+    n_size, c_size, h_size, w_size = input_tensor.shape.get_shape()
     f_size = weight.shape.get_shape()[0]
     kh_size = weight.shape.get_shape()[2]
     kw_size = weight.shape.get_shape()[3]
@@ -82,7 +89,7 @@ def conv2d_inputs_static_tile_static_kernel(input: Memory, weight: Memory, out: 
                 for ho0 in loop(0, ho_size, tile_ho):
                     for wo0 in loop(0, wo_size, tile_wo):
                         input_tile = slice(
-                            input,
+                            input_tensor,
                             [n0, c0, ho0 * stride_h, wo0 * stride_w],
                             [tile_n, tile_c, input_h_tile, input_w_tile],
                             [1, 1, 1, 1],
@@ -105,25 +112,28 @@ def main() -> None:
     最后一次更改: 大闸蟹
 
     功能说明:
-    - 构造静态卷积输入。
+    - 构造真实 torch tensor 输入。
     - 写入 `kernel/dump/conv2d/inputs_static_tile_static/`。
+    - 用 `torch.nn.functional.conv2d` 校验输出。
 
     使用示例:
     - `python3 kernel/conv2d/inputs_static_tile_static.py`
     """
 
-    input_mem = Memory([1, 3, 8, 8], NumericType.Float32, space=MemorySpace.GM)
-    weight = Memory([4, 3, 3, 3], NumericType.Float32, space=MemorySpace.GM)
-    out = Memory([1, 4, 6, 6], NumericType.Float32, space=MemorySpace.GM)
-    module, source = run_lowering_demo(
+    input_tensor = torch.arange(1 * 3 * 8 * 8, dtype=torch.float32).reshape(1, 3, 8, 8) / 101.0
+    weight = torch.arange(4 * 3 * 3 * 3, dtype=torch.float32).reshape(4, 3, 3, 3) / 113.0
+    out = torch.empty((1, 4, 6, 6), dtype=torch.float32)
+    expected = F.conv2d(input_tensor, weight)
+    result = run_torch_demo(
         "conv2d/inputs_static_tile_static",
         conv2d_inputs_static_tile_static_kernel,
-        input_mem,
-        weight,
+        (out, input_tensor, weight),
         out,
+        expected,
     )
-    print(module)
-    print(source)
+    print(result.dsl_result.module)
+    print(result.dsl_result.source)
+    print(f"[CHECK] {result.case_name} max_abs_diff={result.max_abs_diff}")
 
 
 if __name__ == "__main__":

@@ -247,6 +247,12 @@ int main() {
     if (tile.rank() != 1 || tile.get_shape(0) != 2 || tile.get_stride(0) != 1) {
         return fail(3);
     }
+    if (npu_demo::fill<TSM, float>(tile, 0.0f) != StatusCode::kOk) {
+        return fail(30);
+    }
+    if (tile.data()[0] != 0.0f || tile.data()[1] != 0.0f) {
+        return fail(31);
+    }
 
     if (npu_demo::slice(tile, line, Vector{1}, Vector{2}, Vector{1}) != StatusCode::kOk) {
         return fail(4);
@@ -263,14 +269,52 @@ int main() {
     if (target_data[1] != 2.0f || target_data[2] != 3.0f) {
         return fail(7);
     }
+
+    float matrix_data[6] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+    Memory<TSM, float> matrix(matrix_data, Vector{2, 3}.data(), Vector{3, 1}.data(), 2, MemoryFormat::Norm);
+    float transposed_data[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    Memory<GM, float> transposed(transposed_data, Vector{3, 2}.data(), Vector{2, 1}.data(), 2, MemoryFormat::Norm);
+    if (npu_demo::transpose(transposed, matrix, Vector{1, 0}) != StatusCode::kOk) {
+        return fail(8);
+    }
+    if (transposed_data[0] != 1.0f || transposed_data[1] != 4.0f ||
+        transposed_data[2] != 2.0f || transposed_data[3] != 5.0f ||
+        transposed_data[4] != 3.0f || transposed_data[5] != 6.0f) {
+        return fail(9);
+    }
+    float broadcast_source_data[2] = {5.0f, 7.0f};
+    Memory<TSM, float> broadcast_source(
+        broadcast_source_data,
+        Vector{2, 1}.data(),
+        Vector{1, 1}.data(),
+        2,
+        MemoryFormat::Norm);
+    float broadcast_target_data[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    Memory<TSM, float> broadcast_target(
+        broadcast_target_data,
+        Vector{2, 3}.data(),
+        Vector{3, 1}.data(),
+        2,
+        MemoryFormat::Norm);
+    if (npu_demo::broadcast<TSM, TSM, float, float>(broadcast_target, broadcast_source) != StatusCode::kOk) {
+        return fail(10);
+    }
+    if (broadcast_target_data[0] != 5.0f || broadcast_target_data[1] != 5.0f ||
+        broadcast_target_data[2] != 5.0f || broadcast_target_data[3] != 7.0f ||
+        broadcast_target_data[4] != 7.0f || broadcast_target_data[5] != 7.0f) {
+        return fail(11);
+    }
     return 0;
 }
 """
     assert "npu_demo::build_contiguous_stride" in source
     assert "npu_demo::view" in source
     assert "npu_demo::alloc" in source
+    assert "npu_demo::fill" in source
     assert "npu_demo::slice" in source
     assert "npu_demo::deslice" in source
+    assert "npu_demo::transpose" in source
+    assert "npu_demo::broadcast" in source
     assert "npu_demo::detail" not in source
     assert "npu_demo_dma_detail" not in source
     assert "npu_demo_memory_detail" not in source

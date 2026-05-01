@@ -7,6 +7,7 @@
 - `Kernel` 只冻结当前 `emit_c/gen_kernel(target=npu_demo)` 已进入合同真源的 helper 集合。
 - 统一源码口径采用 `out-first`，并固定模板参数顺序为“先 space、后 type；多 space 时按 operand 顺序展开”。
 - 对 `target=npu_demo`，生成源码必须收口为 `npu_demo::<helper><...>(out, ...)` 的稳定调用形态。
+- 逐元素 helper 按 same-shape 多维张量语义执行；不在本层隐式 broadcast。
 
 ## API 列表
 
@@ -32,7 +33,7 @@
 ## 文档信息
 
 - 创建者：`朽木露琪亚`
-- 最后一次更改：`守护最好的爱莉希雅`
+- 最后一次更改：`大闸蟹`
 - `spec`：[`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md)
 - `统一头文件`：[`include/api/Kernel.h`](../../../include/api/Kernel.h)
 - `功能实现`：[`include/api/Kernel.h`](../../../include/api/Kernel.h)、[`include/npu_demo/Kernel.h`](../../../include/npu_demo/Kernel.h)
@@ -102,6 +103,7 @@ Status st2 = npu_demo::truediv<TSM, int32_t, float>(out, lhs, rhs);
 - 返回类型：`Status`。
 - 返回语义：`StatusCode::kOk` 表示 helper 请求被成功承接；非 `kOk` 表示失败。
 - 限制条件：本轮不定义隐式广播、标量 overload 或跨空间输入/输出混用。
+- 维度语义：输入与输出 rank/shape 必须完全一致，可为一维或多维。
 
 ### `eq` / `ne` / `lt` / `le` / `gt` / `ge`
 
@@ -139,6 +141,7 @@ Status st2 = npu_demo::gt<TLM1, int32_t, bool>(out, lhs, rhs);
 - 返回类型：`Status`。
 - 返回语义：返回比较 helper 的承接状态。
 - 限制条件：本轮不开放隐式类型提升、跨空间比较或额外 predicate 容器类型。
+- 维度语义：输入与输出 rank/shape 必须完全一致，可为一维或多维。
 
 ### `exp`
 
@@ -173,6 +176,7 @@ Status st = npu_demo::exp<TSM, float, float>(out, input);
 - 返回类型：`Status`。
 - 返回语义：返回一元 helper 的承接状态。
 - 限制条件：本轮不定义额外 unary helper 或 inplace 特判。
+- 维度语义：输入与输出 rank/shape 必须完全一致，可为一维或多维。
 
 ### `select`
 

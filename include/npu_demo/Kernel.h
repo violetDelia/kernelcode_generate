@@ -1,7 +1,7 @@
 /*
 功能说明:
 - 提供 npu_demo 后端的 Kernel helper 轻量实现，匹配 `include/api/Kernel.h` 的公开声明。
-- 当前实现优先覆盖 add / matmul 的真实运行路径，并为其余已公开 helper 提供最小可编译承接。
+- 当前实现覆盖 same-shape 逐元素、reduce、matmul 与 img2col 的真实运行路径。
 
 API 列表:
 - `npu_demo::add<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
@@ -24,7 +24,7 @@ API 列表:
 - Status st2 = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs);
 
 创建者: 小李飞刀
-最后修改人: 守护最好的爱莉希雅
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -36,6 +36,7 @@ API 列表:
 #define KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_KERNEL_H_
 
 #include <cmath>
+#include <limits>
 
 #include "include/api/Kernel.h"
 #include "include/npu_demo/Core.h"
@@ -52,7 +53,7 @@ namespace detail {
 - bool ok = npu_demo::detail::is_non_null(mem.data());
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -66,14 +67,14 @@ inline bool is_non_null(const T* ptr) {
 
 /*
 功能说明:
-- 复用一维逐元素二元计算的公共前置检查与遍历逻辑。
+- 复用 same-shape 多维逐元素二元计算的公共前置检查与遍历逻辑。
 - 由 `add/sub/mul/truediv` 和 compare family 共享。
 
 使用示例:
-- Status st = npu_demo::detail::unary_or_binary_1d_binary(out, lhs, rhs, [](auto a, auto b) { return a + b; });
+- Status st = npu_demo::detail::elementwise_binary_same_shape(out, lhs, rhs, [](auto a, auto b) { return a + b; });
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -81,49 +82,55 @@ inline bool is_non_null(const T* ptr) {
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, typename BinaryFn>
-inline Status unary_or_binary_1d_binary(
+inline Status elementwise_binary_same_shape(
     Memory<Space, OutType>& out,
     const Memory<Space, InType>& lhs,
     const Memory<Space, InType>& rhs,
     BinaryFn fn) {
-    if (lhs.rank() != 1 || rhs.rank() != 1 || out.rank() != 1) {
+    const unsigned long long rank = out.rank();
+    if (rank == 0 || rank > 8 || lhs.rank() != rank || rhs.rank() != rank) {
         return StatusCode::kError;
     }
     if (!is_non_null(lhs.data()) || !is_non_null(rhs.data()) || !is_non_null(out.data())) {
         return StatusCode::kError;
     }
-    const long long lhs_size = lhs.get_shape(0);
-    const long long rhs_size = rhs.get_shape(0);
-    const long long out_size = out.get_shape(0);
-    if (lhs_size <= 0 || rhs_size <= 0 || out_size <= 0) {
-        return StatusCode::kError;
+    long long element_count = 1;
+    for (unsigned long long axis = 0; axis < rank; ++axis) {
+        const long long extent = out.get_shape(axis);
+        if (extent <= 0 || lhs.get_shape(axis) != extent || rhs.get_shape(axis) != extent) {
+            return StatusCode::kError;
+        }
+        if (out.get_stride(axis) <= 0 || lhs.get_stride(axis) <= 0 || rhs.get_stride(axis) <= 0) {
+            return StatusCode::kError;
+        }
+        if (element_count > std::numeric_limits<long long>::max() / extent) {
+            return StatusCode::kError;
+        }
+        element_count *= extent;
     }
-    if (lhs_size != rhs_size || lhs_size != out_size) {
-        return StatusCode::kError;
-    }
-    const long long lhs_stride = lhs.get_stride(0);
-    const long long rhs_stride = rhs.get_stride(0);
-    const long long out_stride = out.get_stride(0);
-    if (lhs_stride <= 0 || rhs_stride <= 0 || out_stride <= 0) {
-        return StatusCode::kError;
-    }
-    for (long long i = 0; i < lhs_size; ++i) {
-        out.data()[i * out_stride] = static_cast<OutType>(
-            fn(lhs.data()[i * lhs_stride], rhs.data()[i * rhs_stride]));
+    long long indices[8] = {0};
+    for (long long linear = 0; linear < element_count; ++linear) {
+        long long remainder = linear;
+        for (unsigned long long reverse_index = 0; reverse_index < rank; ++reverse_index) {
+            const unsigned long long axis = rank - 1 - reverse_index;
+            indices[axis] = remainder % out.get_shape(axis);
+            remainder /= out.get_shape(axis);
+        }
+        out.at(indices) = static_cast<OutType>(fn(lhs.at(indices), rhs.at(indices)));
     }
     return StatusCode::kOk;
 }
 
 /*
 功能说明:
-- 复用一维逐元素一元计算的公共前置检查与遍历逻辑。
+- 复用 same-shape 多维逐元素一元计算的公共前置检查与遍历逻辑。
 - 由 `exp` 等一元 helper 共享。
 
 使用示例:
-- Status st = npu_demo::detail::unary_1d(out, input, [](auto value) { return value; });
+- Status st = npu_demo::detail::elementwise_unary_same_shape(out, input, [](auto value) { return value; });
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -131,42 +138,54 @@ inline Status unary_or_binary_1d_binary(
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, typename UnaryFn>
-inline Status unary_1d(
+inline Status elementwise_unary_same_shape(
     Memory<Space, OutType>& out,
     const Memory<Space, InType>& input,
     UnaryFn fn) {
-    if (input.rank() != 1 || out.rank() != 1) {
+    const unsigned long long rank = out.rank();
+    if (rank == 0 || rank > 8 || input.rank() != rank) {
         return StatusCode::kError;
     }
     if (!is_non_null(input.data()) || !is_non_null(out.data())) {
         return StatusCode::kError;
     }
-    const long long input_size = input.get_shape(0);
-    const long long out_size = out.get_shape(0);
-    if (input_size <= 0 || out_size <= 0 || input_size != out_size) {
-        return StatusCode::kError;
+    long long element_count = 1;
+    for (unsigned long long axis = 0; axis < rank; ++axis) {
+        const long long extent = out.get_shape(axis);
+        if (extent <= 0 || input.get_shape(axis) != extent) {
+            return StatusCode::kError;
+        }
+        if (out.get_stride(axis) <= 0 || input.get_stride(axis) <= 0) {
+            return StatusCode::kError;
+        }
+        if (element_count > std::numeric_limits<long long>::max() / extent) {
+            return StatusCode::kError;
+        }
+        element_count *= extent;
     }
-    const long long input_stride = input.get_stride(0);
-    const long long out_stride = out.get_stride(0);
-    if (input_stride <= 0 || out_stride <= 0) {
-        return StatusCode::kError;
-    }
-    for (long long i = 0; i < input_size; ++i) {
-        out.data()[i * out_stride] = static_cast<OutType>(fn(input.data()[i * input_stride]));
+    long long indices[8] = {0};
+    for (long long linear = 0; linear < element_count; ++linear) {
+        long long remainder = linear;
+        for (unsigned long long reverse_index = 0; reverse_index < rank; ++reverse_index) {
+            const unsigned long long axis = rank - 1 - reverse_index;
+            indices[axis] = remainder % out.get_shape(axis);
+            remainder /= out.get_shape(axis);
+        }
+        out.at(indices) = static_cast<OutType>(fn(input.at(indices)));
     }
     return StatusCode::kOk;
 }
 
 /*
 功能说明:
-- 复用一维逐元素比较 helper 的公共遍历逻辑。
+- 复用 same-shape 多维逐元素比较 helper 的公共遍历逻辑。
 - 由 `eq/ne/lt/le/gt/ge` 共享。
 
 使用示例:
-- Status st = npu_demo::detail::compare_1d(out, lhs, rhs, [](auto a, auto b) { return a == b; });
+- Status st = npu_demo::detail::compare_same_shape(out, lhs, rhs, [](auto a, auto b) { return a == b; });
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -174,25 +193,25 @@ inline Status unary_1d(
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, typename CompareFn>
-inline Status compare_1d(
+inline Status compare_same_shape(
     Memory<Space, OutType>& out,
     const Memory<Space, InType>& lhs,
     const Memory<Space, InType>& rhs,
     CompareFn fn) {
-    return unary_or_binary_1d_binary(out, lhs, rhs, fn);
+    return elementwise_binary_same_shape(out, lhs, rhs, fn);
 }
 
 }  // namespace detail
 
 /*
 功能说明:
-- 执行一维逐元素加法并把结果写入 `out`。
+- 执行 same-shape 多维逐元素加法并把结果写入 `out`。
 
 使用示例:
 - Status st = npu_demo::add<GM, float, float>(out, lhs, rhs);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -201,18 +220,18 @@ inline Status compare_1d(
 */
 template <MemorySpace Space, typename InType, typename OutType>
 inline Status add(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
-    return detail::unary_or_binary_1d_binary(out, lhs, rhs, [](const InType& a, const InType& b) { return a + b; });
+    return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a + b; });
 }
 
 /*
 功能说明:
-- 执行一维逐元素减法并把结果写入 `out`。
+- 执行 same-shape 多维逐元素减法并把结果写入 `out`。
 
 使用示例:
 - Status st = npu_demo::sub<GM, float, float>(out, lhs, rhs);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -221,18 +240,18 @@ inline Status add(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 */
 template <MemorySpace Space, typename InType, typename OutType>
 inline Status sub(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
-    return detail::unary_or_binary_1d_binary(out, lhs, rhs, [](const InType& a, const InType& b) { return a - b; });
+    return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a - b; });
 }
 
 /*
 功能说明:
-- 执行一维逐元素乘法并把结果写入 `out`。
+- 执行 same-shape 多维逐元素乘法并把结果写入 `out`。
 
 使用示例:
 - Status st = npu_demo::mul<GM, float, float>(out, lhs, rhs);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -241,18 +260,18 @@ inline Status sub(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 */
 template <MemorySpace Space, typename InType, typename OutType>
 inline Status mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
-    return detail::unary_or_binary_1d_binary(out, lhs, rhs, [](const InType& a, const InType& b) { return a * b; });
+    return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a * b; });
 }
 
 /*
 功能说明:
-- 执行一维逐元素真除法并把结果写入 `out`。
+- 执行 same-shape 多维逐元素真除法并把结果写入 `out`。
 
 使用示例:
 - Status st = npu_demo::truediv<GM, float, float>(out, lhs, rhs);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -261,7 +280,7 @@ inline Status mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 */
 template <MemorySpace Space, typename InType, typename OutType>
 inline Status truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
-    return detail::unary_or_binary_1d_binary(
+    return detail::elementwise_binary_same_shape(
         out,
         lhs,
         rhs,
@@ -272,13 +291,13 @@ inline Status truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& 
 
 /*
 功能说明:
-- 执行一维逐元素相等比较并把结果写入 `out`。
+- 执行 same-shape 多维逐元素相等比较并把结果写入 `out`。
 
 使用示例:
 - Status st = npu_demo::eq<GM, float, bool>(out, lhs, rhs);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -287,18 +306,18 @@ inline Status truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& 
 */
 template <MemorySpace Space, typename InType, typename OutType>
 inline Status eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
-    return detail::compare_1d(out, lhs, rhs, [](const InType& a, const InType& b) { return a == b; });
+    return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a == b; });
 }
 
 /*
 功能说明:
-- 执行一维逐元素不等比较并把结果写入 `out`。
+- 执行 same-shape 多维逐元素不等比较并把结果写入 `out`。
 
 使用示例:
 - Status st = npu_demo::ne<GM, float, bool>(out, lhs, rhs);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -307,18 +326,18 @@ inline Status eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 */
 template <MemorySpace Space, typename InType, typename OutType>
 inline Status ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
-    return detail::compare_1d(out, lhs, rhs, [](const InType& a, const InType& b) { return a != b; });
+    return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a != b; });
 }
 
 /*
 功能说明:
-- 执行一维逐元素小于比较并把结果写入 `out`。
+- 执行 same-shape 多维逐元素小于比较并把结果写入 `out`。
 
 使用示例:
 - Status st = npu_demo::lt<GM, float, bool>(out, lhs, rhs);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -327,18 +346,18 @@ inline Status ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 */
 template <MemorySpace Space, typename InType, typename OutType>
 inline Status lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
-    return detail::compare_1d(out, lhs, rhs, [](const InType& a, const InType& b) { return a < b; });
+    return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a < b; });
 }
 
 /*
 功能说明:
-- 执行一维逐元素小于等于比较并把结果写入 `out`。
+- 执行 same-shape 多维逐元素小于等于比较并把结果写入 `out`。
 
 使用示例:
 - Status st = npu_demo::le<GM, float, bool>(out, lhs, rhs);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -347,18 +366,18 @@ inline Status lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 */
 template <MemorySpace Space, typename InType, typename OutType>
 inline Status le(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
-    return detail::compare_1d(out, lhs, rhs, [](const InType& a, const InType& b) { return a <= b; });
+    return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a <= b; });
 }
 
 /*
 功能说明:
-- 执行一维逐元素大于比较并把结果写入 `out`。
+- 执行 same-shape 多维逐元素大于比较并把结果写入 `out`。
 
 使用示例:
 - Status st = npu_demo::gt<GM, float, bool>(out, lhs, rhs);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -367,18 +386,18 @@ inline Status le(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 */
 template <MemorySpace Space, typename InType, typename OutType>
 inline Status gt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
-    return detail::compare_1d(out, lhs, rhs, [](const InType& a, const InType& b) { return a > b; });
+    return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a > b; });
 }
 
 /*
 功能说明:
-- 执行一维逐元素大于等于比较并把结果写入 `out`。
+- 执行 same-shape 多维逐元素大于等于比较并把结果写入 `out`。
 
 使用示例:
 - Status st = npu_demo::ge<GM, float, bool>(out, lhs, rhs);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -387,18 +406,18 @@ inline Status gt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 */
 template <MemorySpace Space, typename InType, typename OutType>
 inline Status ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
-    return detail::compare_1d(out, lhs, rhs, [](const InType& a, const InType& b) { return a >= b; });
+    return detail::compare_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) { return a >= b; });
 }
 
 /*
 功能说明:
-- 执行一维逐元素指数计算并把结果写入 `out`。
+- 执行 same-shape 多维逐元素指数计算并把结果写入 `out`。
 
 使用示例:
 - Status st = npu_demo::exp<GM, float, float>(out, input);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -407,7 +426,7 @@ inline Status ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 */
 template <MemorySpace Space, typename InType, typename OutType>
 inline Status exp(Memory<Space, OutType>& out, const Memory<Space, InType>& input) {
-    return detail::unary_1d(out, input, [](const InType& value) {
+    return detail::elementwise_unary_same_shape(out, input, [](const InType& value) {
         return static_cast<OutType>(std::exp(static_cast<double>(value)));
     });
 }
@@ -690,7 +709,7 @@ inline Status matmul(
 
 /*
 功能说明:
-- 提供 `img2col1d` 的最小公开承接实现，当前用于保持 public Kernel helper 编译链路可用。
+- 提供 `img2col1d` 的公开承接实现，按 `[N, C, W] -> [N, C, K, Wo]` 物化展开窗口。
 
 使用示例:
 - Status st = npu_demo::img2col1d<GM, TSM, float, float>(out, input, 3, 2, 1, 1, 1);
@@ -712,19 +731,59 @@ inline Status img2col1d(
     long long d,
     long long p_left,
     long long p_right) {
-    (void)out;
-    (void)input;
-    (void)k;
-    (void)s;
-    (void)d;
-    (void)p_left;
-    (void)p_right;
+    if (input.rank() != 3 || out.rank() != 4) {
+        return StatusCode::kError;
+    }
+    if (!detail::is_non_null(input.data()) || !detail::is_non_null(out.data())) {
+        return StatusCode::kError;
+    }
+    if (input.format() != MemoryFormat::Norm || out.format() != MemoryFormat::Norm) {
+        return StatusCode::kError;
+    }
+    if (k <= 0 || s <= 0 || d <= 0 || p_left < 0 || p_right < 0) {
+        return StatusCode::kError;
+    }
+
+    const long long n = input.get_shape(0);
+    const long long c = input.get_shape(1);
+    const long long w = input.get_shape(2);
+    const long long w_out = ((w + p_left + p_right - d * (k - 1) - 1) / s) + 1;
+    if (n <= 0 || c <= 0 || w <= 0 || w_out <= 0) {
+        return StatusCode::kError;
+    }
+    if (out.get_shape(0) != n || out.get_shape(1) != c || out.get_shape(2) != k || out.get_shape(3) != w_out) {
+        return StatusCode::kError;
+    }
+
+    long long input_index[3] = {0, 0, 0};
+    long long out_index[4] = {0, 0, 0, 0};
+    for (long long ni = 0; ni < n; ++ni) {
+        input_index[0] = ni;
+        out_index[0] = ni;
+        for (long long ci = 0; ci < c; ++ci) {
+            input_index[1] = ci;
+            out_index[1] = ci;
+            for (long long ki = 0; ki < k; ++ki) {
+                out_index[2] = ki;
+                for (long long wo = 0; wo < w_out; ++wo) {
+                    out_index[3] = wo;
+                    const long long source_w = wo * s + ki * d - p_left;
+                    if (source_w < 0 || source_w >= w) {
+                        out.at(out_index) = static_cast<OutType>(0);
+                        continue;
+                    }
+                    input_index[2] = source_w;
+                    out.at(out_index) = static_cast<OutType>(input.at(input_index));
+                }
+            }
+        }
+    }
     return StatusCode::kOk;
 }
 
 /*
 功能说明:
-- 提供 `img2col2d` 的最小公开承接实现，当前用于保持 public Kernel helper 编译链路可用。
+- 提供 `img2col2d` 的公开承接实现，按 `[N, C, H, W] -> [N, C, KH, KW, Ho, Wo]` 物化展开窗口。
 
 使用示例:
 - Status st = npu_demo::img2col2d<GM, TSM, float, float>(out, input, 3, 2, 1, 2, 1, 1, 1, 0, 0, 1);
@@ -751,18 +810,67 @@ inline Status img2col2d(
     long long pw,
     long long pl,
     long long pr) {
-    (void)out;
-    (void)input;
-    (void)kh;
-    (void)kw;
-    (void)sh;
-    (void)sw;
-    (void)dh;
-    (void)dw;
-    (void)ph;
-    (void)pw;
-    (void)pl;
-    (void)pr;
+    if (input.rank() != 4 || out.rank() != 6) {
+        return StatusCode::kError;
+    }
+    if (!detail::is_non_null(input.data()) || !detail::is_non_null(out.data())) {
+        return StatusCode::kError;
+    }
+    if (input.format() != MemoryFormat::Norm || out.format() != MemoryFormat::Norm) {
+        return StatusCode::kError;
+    }
+    if (kh <= 0 || kw <= 0 || sh <= 0 || sw <= 0 || dh <= 0 || dw <= 0) {
+        return StatusCode::kError;
+    }
+    if (ph < 0 || pw < 0 || pl < 0 || pr < 0) {
+        return StatusCode::kError;
+    }
+
+    const long long n = input.get_shape(0);
+    const long long c = input.get_shape(1);
+    const long long h = input.get_shape(2);
+    const long long w = input.get_shape(3);
+    const long long h_out = ((h + ph + pw - dh * (kh - 1) - 1) / sh) + 1;
+    const long long w_out = ((w + pl + pr - dw * (kw - 1) - 1) / sw) + 1;
+    if (n <= 0 || c <= 0 || h <= 0 || w <= 0 || h_out <= 0 || w_out <= 0) {
+        return StatusCode::kError;
+    }
+    if (out.get_shape(0) != n || out.get_shape(1) != c || out.get_shape(2) != kh || out.get_shape(3) != kw ||
+        out.get_shape(4) != h_out || out.get_shape(5) != w_out) {
+        return StatusCode::kError;
+    }
+
+    long long input_index[4] = {0, 0, 0, 0};
+    long long out_index[6] = {0, 0, 0, 0, 0, 0};
+    for (long long ni = 0; ni < n; ++ni) {
+        input_index[0] = ni;
+        out_index[0] = ni;
+        for (long long ci = 0; ci < c; ++ci) {
+            input_index[1] = ci;
+            out_index[1] = ci;
+            for (long long khi = 0; khi < kh; ++khi) {
+                out_index[2] = khi;
+                for (long long kwi = 0; kwi < kw; ++kwi) {
+                    out_index[3] = kwi;
+                    for (long long ho = 0; ho < h_out; ++ho) {
+                        out_index[4] = ho;
+                        const long long source_h = ho * sh + khi * dh - ph;
+                        for (long long wo = 0; wo < w_out; ++wo) {
+                            out_index[5] = wo;
+                            const long long source_w = wo * sw + kwi * dw - pl;
+                            if (source_h < 0 || source_h >= h || source_w < 0 || source_w >= w) {
+                                out.at(out_index) = static_cast<OutType>(0);
+                                continue;
+                            }
+                            input_index[2] = source_h;
+                            input_index[3] = source_w;
+                            out.at(out_index) = static_cast<OutType>(input.at(input_index));
+                        }
+                    }
+                }
+            }
+        }
+    }
     return StatusCode::kOk;
 }
 

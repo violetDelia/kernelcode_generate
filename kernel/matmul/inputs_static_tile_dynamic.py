@@ -6,10 +6,11 @@
 功能说明:
 - 实现 `inputs 静 + tile 动` 的二维 matmul kernel demo。
 - 输入 shape 固定为 `lhs[32, 16]`、`rhs[16, 32]`、`out[32, 32]`。
-- tile 由 `SymbolDim("TILE_M")` 与 `SymbolDim("TILE_N")` 作为运行期符号参数传入。
+- tile 在 DSL 函数体内固定为当前 demo 运行值，满足 `dsl_run` 只接收 tensor 运行时参数的公开入口约束。
+- 通过 `dsl_run` 真实执行，并和 `torch.matmul` 参考结果对齐。
 
 API 列表:
-- `matmul_inputs_static_tile_dynamic_kernel(lhs: Memory, rhs: Memory, out: Memory, tile_m: SymbolDim, tile_n: SymbolDim) -> None`
+- `matmul_inputs_static_tile_dynamic_kernel(out: Tensor[f32, 32, 32], lhs: Tensor[f32, 32, 16], rhs: Tensor[f32, 16, 32]) -> None`
 - `main() -> None`
 
 使用示例:
@@ -25,25 +26,23 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import torch
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from kernel.runner import run_lowering_demo
+from kernel.runner import run_torch_demo
 from kernel_gen.operation.dma import deslice, slice
 from kernel_gen.operation.nn import matmul
 from kernel_gen.operation.scf import loop
-from kernel_gen.symbol_variable.memory import Memory, MemorySpace
-from kernel_gen.symbol_variable.symbol_dim import SymbolDim
-from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.memory import MemorySpace
 
 
 def matmul_inputs_static_tile_dynamic_kernel(
-    lhs: Memory,
-    rhs: Memory,
-    out: Memory,
-    tile_m: SymbolDim,
-    tile_n: SymbolDim,
+    out: "Tensor[f32, 32, 32]",
+    lhs: "Tensor[f32, 32, 16]",
+    rhs: "Tensor[f32, 16, 32]",
 ) -> None:
     """执行静态输入、动态 tile 的 matmul。
 
@@ -51,17 +50,19 @@ def matmul_inputs_static_tile_dynamic_kernel(
     最后一次更改: 大闸蟹
 
     功能说明:
-    - 输入 shape 来自静态 `Memory`。
-    - 输出 tile 尺寸通过 `tile_m/tile_n` 符号参数控制。
+    - 输入 shape 来自 `Tensor[...]` 静态标注。
+    - 输出 tile 尺寸使用当前 demo 的运行值。
     - K 维不切分。
 
     使用示例:
-    - `matmul_inputs_static_tile_dynamic_kernel(lhs, rhs, out, tile_m, tile_n)`
+    - `matmul_inputs_static_tile_dynamic_kernel(out, lhs, rhs)`
     """
 
     m_size = lhs.shape.get_shape()[0]
     k_size = lhs.shape.get_shape()[1]
     n_size = rhs.shape.get_shape()[1]
+    tile_m = 16
+    tile_n = 16
 
     for m0 in loop(0, m_size, tile_m):
         for n0 in loop(0, n_size, tile_n):
@@ -78,29 +79,28 @@ def main() -> None:
     最后一次更改: 大闸蟹
 
     功能说明:
-    - 构造静态 `Memory` 输入与动态 tile 符号。
+    - 构造真实 torch tensor 输入。
     - 写入 `kernel/dump/matmul/inputs_static_tile_dynamic/`。
+    - 用 `torch.matmul(lhs, rhs)` 校验输出。
 
     使用示例:
     - `python3 kernel/matmul/inputs_static_tile_dynamic.py`
     """
 
-    lhs = Memory([32, 16], NumericType.Float32, space=MemorySpace.GM)
-    rhs = Memory([16, 32], NumericType.Float32, space=MemorySpace.GM)
-    out = Memory([32, 32], NumericType.Float32, space=MemorySpace.GM)
-    tile_m = SymbolDim("TILE_M")
-    tile_n = SymbolDim("TILE_N")
-    module, source = run_lowering_demo(
+    lhs = torch.arange(32 * 16, dtype=torch.float32).reshape(32, 16) / 23.0
+    rhs = torch.arange(16 * 32, dtype=torch.float32).reshape(16, 32) / 29.0
+    out = torch.empty((32, 32), dtype=torch.float32)
+    expected = torch.matmul(lhs, rhs)
+    result = run_torch_demo(
         "matmul/inputs_static_tile_dynamic",
         matmul_inputs_static_tile_dynamic_kernel,
-        lhs,
-        rhs,
+        (out, lhs, rhs),
         out,
-        tile_m,
-        tile_n,
+        expected,
     )
-    print(module)
-    print(source)
+    print(result.dsl_result.module)
+    print(result.dsl_result.source)
+    print(f"[CHECK] {result.case_name} max_abs_diff={result.max_abs_diff}")
 
 
 if __name__ == "__main__":
