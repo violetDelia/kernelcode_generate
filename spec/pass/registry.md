@@ -74,6 +74,7 @@
 - tuning pass `launch-kernel-cost-func` 既可通过 pass registry 显式启用，也作为 `npu-demo-lowering` 的末尾 pass 运行；不自动进入 `default-lowering`。
 - `launch-kernel-cost-func` 默认 `cost_kind="DMA|MAC"`，并接受 `options={"cost_kind": "compute|memory"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
 - `lower-dma-memory-hierarchy` 接受 pass 专属 `options={"apply_op": "matmul{[\\"\\", \\"tlm1\\", \\"tlm2\\"]}"}`；registry 只负责透传该 option，规则语法与错误语义由 `LowerDmaMemoryHierarchyPass.from_options(...)` 承载。
+- `memory-pool` 接受 pass 专属 `options={"rewrite": "true|false", "alignment": "<non-negative-int>"}`；`fold` 仍由 registry 通用 option 处理。`rewrite` 非 bool、`alignment` 负数或非整数、未知 option 必须由 `MemoryPoolPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'memory-pool' option error: <原因>`。
 - registry 只解析 pass 通用 `fold` 选项；剩余 `options` 仅按字典透传给 pass 或 pipeline 构造入口。
 
 ### 当前公开路径与迁移矩阵
@@ -257,6 +258,7 @@ inline_pass = build_registered_pass("inline")
 attach_pass = build_registered_pass("attach-arch-information")
 hoist_pass = build_registered_pass("symbol-buffer-hoist")
 cost_pass = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "compute|memory"})
+memory_pool_pass = build_registered_pass("memory-pool", {"rewrite": "true", "fold": "false", "alignment": "0"})
 default_cost_pass = build_registered_pass("launch-kernel-cost-func")
 ```
 
@@ -526,6 +528,8 @@ names = list_registered_passes()
 | TC-PASS-REGISTRY-021 | 公开入口 | build registered inline pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_inline_pass`。 | 公开入口在“build registered inline pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_inline_pass` |
 | TC-PASS-REGISTRY-022 | 公开入口 | build registered pass accepts universal fold option | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_pass_accepts_universal_fold_option`。 | 公开入口在“build registered pass accepts universal fold option”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_pass_accepts_universal_fold_option` |
 | TC-PASS-REGISTRY-023 | 边界/异常 | build registered pass rejects invalid fold option | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_build_registered_pass_rejects_invalid_fold_option`。 | “build registered pass rejects invalid fold option”场景按公开错误语义失败或被拒绝。 | `test_build_registered_pass_rejects_invalid_fold_option` |
+| TC-PASS-REGISTRY-023A | 公开入口 | memory-pool rewrite/alignment options | 加载内置 pass 并提供 `rewrite/fold/alignment` option。 | 运行 `test_build_registered_memory_pool_alignment_options`。 | registry 构造 `MemoryPoolPass`，`rewrite=True`、`fold=False`、`alignment=0`。 | `test_build_registered_memory_pool_alignment_options` |
+| TC-PASS-REGISTRY-023B | 边界/异常 | memory-pool alignment/options 非法值 | 准备非法 `rewrite`、非法 `alignment` 或未知 option。 | 运行 `test_build_registered_memory_pool_alignment_rejects_invalid_options`。 | registry 报 `PassRegistryError: pass 'memory-pool' option error: <原因>`。 | `test_build_registered_memory_pool_alignment_rejects_invalid_options` |
 | TC-PASS-REGISTRY-024 | 公开入口 | build registered attach arch information pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_attach_arch_information_pass`。 | 公开入口在“build registered attach arch information pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_attach_arch_information_pass` |
 | TC-PASS-REGISTRY-025 | 边界/异常 | registry old lowering paths fail fast | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_registry_old_lowering_paths_fail_fast`。 | “registry old lowering paths fail fast”场景按公开错误语义失败或被拒绝。 | `test_registry_old_lowering_paths_fail_fast` |
 | TC-PASS-REGISTRY-026 | 边界/异常 | registry retired analysis pass name fails fast | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_registry_retired_analysis_pass_name_fails_fast`。 | “registry retired analysis pass name fails fast”场景按公开错误语义失败或被拒绝。 | `test_registry_retired_analysis_pass_name_fails_fast` |

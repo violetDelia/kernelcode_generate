@@ -7,14 +7,20 @@
   - `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 按“普通文本字面量 + `[[NAME:REGEX]]` / `[[NAME]]` 变量”匹配；
   - 不再支持 `CHECK-REGEX*` 变体，整行 regex 需求统一收口到 `[[NAME:REGEX]]` 的局部片段内。
   最终输出 `true/false`。
-- CLI 支持 `-irdump`：自动写入每个 case 的输入与逐 step IR。
-- 对外仅三条公开 API 作为稳定合同：`parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text`，
-  便于 CLI / pytest / 脚本复用。
+- CLI 支持 `--help` / `-h`、`-irdump` 与 `-emitc{target=...}`。
+- 对外公开 API 包括 CLI `main(...)`、公开数据模型与三条函数入口：
+  `parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text`，便于 CLI / pytest / 脚本复用。
 
 API 列表:
+- `class IrcheckCaseBlock(text: str, start_line: int)`
+- `class CheckDirective(kind: CheckKind, text: str, line_no: int)`
+- `class IrcheckCase(compile_args: str, checks: list[CheckDirective], input_ir: str, source_path: str | None = None)`
+- `class IrcheckResult(ok: bool, exit_code: int, actual_ir: str, failed_check: CheckDirective | None = None, message: str | None = None)`
+- `class IrcheckCompileStep(kind: Literal["pass", "pipeline"], name: str, options: dict[str, str])`
 - `parse_ircheck_file(path: str) -> IrcheckCase`
 - `run_ircheck_file(path: str, *, irdump: bool = False, emitc_target: str | None = None) -> IrcheckResult`
-- `run_ircheck_text(text: str, *, source_path: str | None = None, irdump_dir: Path | None = None, emitc_target: str | None = None) -> IrcheckResult`
+- `run_ircheck_text(text: str, source_path: str | None = None, emitc_target: str | None = None) -> IrcheckResult`
+- `main(argv: Sequence[str] | None = None) -> int`
 
 使用示例:
 - PYTHONPATH=. python -m kernel_gen.tools.ircheck case.ircheck
@@ -80,6 +86,15 @@ _REGEX_ALIASES = {
     "dim": r"[1-9][0-9]*",
     "int": r"-?[0-9]+",
 }
+_CLI_HELP_TEXT = """usage: python -m kernel_gen.tools.ircheck [-h|--help] [-irdump] [-emitc{target=cpu|npu_demo}] <case-file>
+
+Run one ircheck case file and print true or false.
+
+options:
+  -h, --help                         show this help message and exit
+  -irdump                            write .irdump/<stem>/case_XX diagnostic IR files
+  -emitc{target=cpu|npu_demo}        match generated source text for the selected target
+"""
 
 
 def _build_default_context() -> Context:
@@ -1612,12 +1627,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     功能说明:
     - 运行单个 case 文件并在标准输出打印 `true/false`。
+    - `--help` 或 `-h` 单独出现时输出帮助文本并返回 `0`。
     - 若文件中包含 `// -----` 分隔符，会按顺序执行多个 case（fail-fast）。
     - 支持 `-irdump <case-file>`，用于写入 `.irdump/<stem>/case_<index>/`。
     - 支持 `-emitc{target=<target>}`，在 compile steps 完成后切换为源码匹配。
     - 退出码约束见 `spec/tools/ircheck.md`。
 
     使用示例:
+    - PYTHONPATH=. python -m kernel_gen.tools.ircheck --help
     - PYTHONPATH=. python -m kernel_gen.tools.ircheck case.ircheck
     - PYTHONPATH=. python -m kernel_gen.tools.ircheck -emitc{target=cpu} case.ircheck
 
@@ -1630,6 +1647,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
 
     args = list(sys.argv[1:] if argv is None else argv)
+    if args in (["--help"], ["-h"]):
+        print(_CLI_HELP_TEXT, end="")
+        return 0
+
     parsed = _parse_cli_args(args)
     if parsed is None:
         print("false")
@@ -1660,8 +1681,11 @@ if __name__ == "__main__":  # pragma: no cover
 __all__ = [
     "CheckDirective",
     "IrcheckCase",
+    "IrcheckCaseBlock",
+    "IrcheckCompileStep",
     "IrcheckResult",
     "parse_ircheck_file",
     "run_ircheck_file",
     "run_ircheck_text",
+    "main",
 ]

@@ -7,10 +7,10 @@
   - 解析 `COMPILE_ARGS`
   - 顺序执行 pass / pipeline
   - 对规范化 IR 或 emitc 源码做 `CHECK*` 匹配
-- 公开稳定入口只有：
-  - `parse_ircheck_file`
-  - `run_ircheck_file`
-  - `run_ircheck_text`
+- 公开稳定入口以 `API 列表` 为准，分为三类：
+  - CLI 入口：`python -m kernel_gen.tools.ircheck(...)` 与 `main(...)`
+  - 数据模型：`IrcheckCaseBlock`、`CheckDirective`、`IrcheckCase`、`IrcheckResult`、`IrcheckCompileStep`
+  - 函数入口：`parse_ircheck_file(...)`、`run_ircheck_file(...)`、`run_ircheck_text(...)`
 
 ## API 列表
 
@@ -70,6 +70,7 @@
   ```
 - 功能说明：执行 `ircheck` CLI，对 case 文件运行 pass/pipeline 并检查规范化 IR 或 emitc 源码。
 - 注意事项：
+  - `--help` 或 `-h` 单独出现时必须输出帮助文本并返回 `0`；帮助输出不得以 `true` / `false` 开头。
   - 只支持 `CHECK:`、`CHECK-NEXT:`、`CHECK-NOT:` 三条检查指令。
   - 普通文本按字面量匹配；regex 能力只允许出现在局部变量片段 `[[NAME:REGEX]]` 和引用片段 `[[NAME]]`。
   - `CHECK-NEXT:` 不能作为第一条正向检查。
@@ -237,6 +238,7 @@
 - 功能说明：执行 `main`。
 - 注意事项：
   - `argv=None` 表示读取进程命令行参数。
+  - `argv=["--help"]` 与 `argv=["-h"]` 表示帮助入口，必须输出 usage 帮助文本并返回 `0`。
   - 返回码必须与 CLI API 一致：成功 `0`，匹配失败 `1`，解析、compile args、pass/pipeline 或 emitc 生成失败 `2`。
   - 非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
 

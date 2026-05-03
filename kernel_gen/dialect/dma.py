@@ -2,7 +2,7 @@
 
 
 功能说明:
-- 定义 dma dialect 的 alloc/fill/copy/load/store/slice/deslice/view/reshape/cast/broadcast op 与 verifier 规则。
+- 定义 dma dialect 的 alloc/fill/copy/load/store/slice/deslice/subview/view/reshape/cast/broadcast op 与 verifier 规则。
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
 
 API 列表:
@@ -16,6 +16,7 @@ API 列表:
 - `class DmaStoreOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
 - `class DmaSliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
 - `class DmaDesliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue], result_type: NnMemoryType)`
+- `class DmaSubviewOp(source: SSAValue | Operation, offset: SSAValue | Operation, size: SSAValue | Operation, stride: SSAValue | Operation, result_type: NnMemoryType)`
 - `class DmaViewOp(source: SSAValue | Operation, offsets: Sequence[SSAValue], shape: Sequence[SSAValue], stride: Sequence[SSAValue], result_type: NnMemoryType)`
 - `class DmaReshapeOp(source: SSAValue | Operation, shape: Sequence[SSAValue], result_type: NnMemoryType)`
 - `class DmaCastOp(target: SSAValue | Operation, source: SSAValue | Operation)`
@@ -1523,6 +1524,111 @@ class DmaViewOp(IRDLOperation):
 
 
 @irdl_op_definition
+class DmaSubviewOp(IRDLOperation):
+    """dma.subview。"""
+
+    name = "dma.subview"
+
+    source = var_operand_def(NnMemoryType)
+    offset = var_operand_def(SymbolValueType)
+    size = var_operand_def(SymbolValueType)
+    stride = var_operand_def(SymbolValueType)
+    result = result_def(NnMemoryType)
+
+    irdl_options = (AttrSizedOperandSegments(as_property=True),)
+
+    def __init__(
+        self,
+        source: SSAValue | Operation,
+        offset: SSAValue | Operation,
+        size: SSAValue | Operation,
+        stride: SSAValue | Operation,
+        result_type: NnMemoryType,
+    ) -> None:
+        """初始化 dma.subview。
+
+
+        功能说明:
+        - 设置一维 i8 backing memory、元素单位 offset/size/stride 与一维 typed result。
+        - `offset/size/stride` 均为单个 `!symbol.int<"expr">` operand。
+
+        使用示例:
+        - DmaSubviewOp(pool, offset, size, stride, flat_result_type)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        if not isinstance(result_type, NnMemoryType):
+            raise TypeError("result_type must be nn.memory")
+
+        super().__init__(
+            operands=[[source], [offset], [size], [stride]],
+            result_types=[result_type],
+        )
+
+    def verify_(self) -> None:
+        """校验 dma.subview。
+
+
+        功能说明:
+        - source 必须是一维 i8 backing memory。
+        - result 必须是一维 contiguous typed memory，且 space 与 source 一致。
+        - offset/size/stride 都必须是单个 `!symbol.int<"expr">`；size 必须匹配 result flat shape。
+
+        使用示例:
+        - DmaSubviewOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        if len(self.source) != 1 or len(self.offset) != 1 or len(self.size) != 1 or len(self.stride) != 1:
+            raise VerifyException("dma.subview requires one source, offset, size and stride")
+
+        source_type = _verify_memory_type(self.source[0].type, "source")
+        result_type = _verify_memory_type(self.result.type, "result")
+        offset = _verify_symbol_int_operands(self.offset, "offset", min_value=0)[0]
+        size = _verify_symbol_int_operands(self.size, "size", min_value=1)[0]
+        stride = _verify_symbol_int_operands(self.stride, "stride", min_value=1)[0]
+
+        if not _is_i8_byte_pool(source_type):
+            raise VerifyException("dma.subview source must be one-dimensional i8 memory")
+        if len(result_type.shape.data) != 1:
+            raise VerifyException("dma.subview result must be one-dimensional")
+        if len(result_type.stride.data) != 1:
+            raise VerifyException("dma.subview result stride rank must be one")
+        if source_type.space.space.data != result_type.space.space.data:
+            raise VerifyException("dma.subview space mismatch")
+
+        _verify_default_contiguous_stride(result_type, "dma.subview result must be contiguous")
+        _verify_operands_match_layout([size], result_type.shape, "dma.subview size must match result shape")
+
+        source_numel = _maybe_numel(source_type.shape)
+        result_numel = _maybe_numel(result_type.shape)
+        result_elem_size = _element_byte_size(result_type.element_type)
+        if result_elem_size is None:
+            raise VerifyException("dma.subview result element_type unsupported")
+        offset_int = _operand_int_value(offset)
+        size_int = _operand_int_value(size)
+        stride_int = _operand_int_value(stride)
+        if (
+            source_numel is not None
+            and result_numel is not None
+            and offset_int is not None
+            and size_int is not None
+            and stride_int is not None
+        ):
+            byte_end = (offset_int + (size_int - 1) * stride_int + 1) * result_elem_size
+            if byte_end > source_numel:
+                raise VerifyException("dma.subview byte bounds mismatch")
+
+
+@irdl_op_definition
 class DmaReshapeOp(IRDLOperation):
     """dma.reshape。"""
 
@@ -1677,6 +1783,7 @@ class Dma(Dialect):
         DmaStoreOp,
         DmaSliceOp,
         DmaDesliceOp,
+        DmaSubviewOp,
         DmaViewOp,
         DmaReshapeOp,
         DmaCastOp,
@@ -1696,6 +1803,7 @@ __all__ = [
     "DmaStoreOp",
     "DmaSliceOp",
     "DmaDesliceOp",
+    "DmaSubviewOp",
     "DmaViewOp",
     "DmaReshapeOp",
     "DmaCastOp",

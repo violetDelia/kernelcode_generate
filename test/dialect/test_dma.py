@@ -70,6 +70,7 @@ from kernel_gen.dialect.dma import (
     DmaReshapeOp,
     DmaSliceOp,
     DmaStoreOp,
+    DmaSubviewOp,
     DmaViewOp,
 )
 from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
@@ -813,6 +814,127 @@ def test_dma_view_byte_pool_typed_view() -> None:
     )
     with pytest.raises(VerifyException, match="byte bounds mismatch"):
         op.verify()
+
+
+# TC-DMA-019E
+# 功能说明: 验证 dma.subview 接受一维 i8 backing memory、元素单位 offset/size/stride 与一维 typed result。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_subview_byte_pool_typed_result_valid
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_subview_byte_pool_typed_result_valid() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(64)]),
+        stride=ArrayAttr([IntAttr(1)]),
+        element_type=i8,
+        space="shared",
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(8)]),
+        stride=ArrayAttr([IntAttr(1)]),
+        element_type=i32,
+        space="shared",
+    )
+
+    op = DmaSubviewOp(
+        source,
+        _make_symbol_operands([8])[0],
+        _make_symbol_operands([8])[0],
+        _make_symbol_operands([1])[0],
+        result_type,
+    )
+
+    op.verify()
+    assert op.result.type == result_type
+
+
+# TC-DMA-019F
+# 功能说明: 验证 dma.subview 对 source/result/size/space/bounds 的公开 verifier 边界。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_subview_rejects_invalid_contract_edges
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_subview_rejects_invalid_contract_edges() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(16)]),
+        stride=ArrayAttr([IntAttr(1)]),
+        element_type=i8,
+        space="shared",
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(1)]),
+        element_type=i32,
+        space="shared",
+    )
+
+    non_i8_source = _TestOp(
+        result_types=[
+            _make_memory_type(
+                shape=ArrayAttr([IntAttr(16)]),
+                stride=ArrayAttr([IntAttr(1)]),
+                element_type=i32,
+                space="shared",
+            )
+        ]
+    ).results[0]
+    with pytest.raises(VerifyException, match="source must be one-dimensional i8 memory"):
+        DmaSubviewOp(
+            non_i8_source,
+            _make_symbol_operands([0])[0],
+            _make_symbol_operands([4])[0],
+            _make_symbol_operands([1])[0],
+            result_type,
+        ).verify()
+
+    two_dim_result = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        element_type=i32,
+        space="shared",
+    )
+    with pytest.raises(VerifyException, match="result must be one-dimensional"):
+        DmaSubviewOp(
+            source,
+            _make_symbol_operands([0])[0],
+            _make_symbol_operands([4])[0],
+            _make_symbol_operands([1])[0],
+            two_dim_result,
+        ).verify()
+
+    with pytest.raises(VerifyException, match="space mismatch"):
+        DmaSubviewOp(
+            source,
+            _make_symbol_operands([0])[0],
+            _make_symbol_operands([4])[0],
+            _make_symbol_operands([1])[0],
+            _make_memory_type(
+                shape=ArrayAttr([IntAttr(4)]),
+                stride=ArrayAttr([IntAttr(1)]),
+                element_type=i32,
+                space="local",
+            ),
+        ).verify()
+
+    with pytest.raises(VerifyException, match="size must match result shape"):
+        DmaSubviewOp(
+            source,
+            _make_symbol_operands([0])[0],
+            _make_symbol_operands([3])[0],
+            _make_symbol_operands([1])[0],
+            result_type,
+        ).verify()
+
+    with pytest.raises(VerifyException, match="byte bounds mismatch"):
+        DmaSubviewOp(
+            source,
+            _make_symbol_operands([1])[0],
+            _make_symbol_operands([4])[0],
+            _make_symbol_operands([1])[0],
+            result_type,
+        ).verify()
 
 
 # 功能说明: 验证 dma.view 的 offsets 需要与 rank 一致且静态场景下会执行边界检查。

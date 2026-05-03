@@ -201,8 +201,16 @@ def _make_dynamic_memory_type(
     - 功能实现: kernel_gen/dialect/arch.py
     """
 
+    capacity_by_space = {
+        "shared": "SM_SIZE",
+        "local": "LM_SIZE",
+        "tsm": "TSM_SIZE",
+        "tlm1": "TLM1_SIZE",
+        "tlm2": "TLM2_SIZE",
+        "tlm3": "TLM3_SIZE",
+    }
     return NnMemoryType(
-        shape or ArrayAttr([StringAttr("?")]),
+        shape or ArrayAttr([StringAttr(capacity_by_space[space])]),
         stride or ArrayAttr([IntAttr(1)]),
         element_type,
         _make_space(space),
@@ -325,7 +333,7 @@ def test_arch_get_dynamic_memory_success() -> None:
     op = ArchGetDynamicMemoryOp(_make_space("shared"))
     op.verify()
     assert op.result.type == _make_dynamic_memory_type()
-    assert _print_ir(op) == "%0 = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[?], [1], i8, #nn.space<shared>>"
+    assert _print_ir(op) == "%0 = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[SM_SIZE], [1], i8, #nn.space<shared>>"
 
 
 # TC-ARCH-007A
@@ -338,7 +346,7 @@ def test_arch_get_dynamic_memory_supports_tlm123() -> None:
         op.verify()
         assert op.result.type == _make_dynamic_memory_type(space=space)
         assert _print_ir(op) == (
-            f"%0 = arch.get_dynamic_memory #nn.space<{space}> : !nn.memory<[?], [1], i8, #nn.space<{space}>>"
+            f"%0 = arch.get_dynamic_memory #nn.space<{space}> : !nn.memory<[{space.upper()}_SIZE], [1], i8, #nn.space<{space}>>"
         )
 
 
@@ -350,7 +358,7 @@ def test_arch_get_dynamic_memory_verify_errors() -> None:
     with pytest.raises(VerifyException, match="shared/local/tsm/tlm1/tlm2/tlm3"):
         ArchGetDynamicMemoryOp(_make_space("global")).verify()
 
-    with pytest.raises(VerifyException, match="global/shared/local/tsm/tlm1/tlm2/tlm3"):
+    with pytest.raises(VerifyException, match="shared/local/tsm/tlm1/tlm2/tlm3"):
         ArchGetDynamicMemoryOp(_make_space("tlm")).verify()
 
     with pytest.raises(VerifyException, match="result must be 1-D"):
@@ -377,7 +385,7 @@ def test_arch_get_dynamic_memory_verify_errors() -> None:
     with pytest.raises(VerifyException, match="result space must match memory_space"):
         ArchGetDynamicMemoryOp(
             _make_space("shared"),
-            _make_dynamic_memory_type(space="local"),
+            _make_dynamic_memory_type(space="local", shape=ArrayAttr([StringAttr("SM_SIZE")])),
         ).verify()
 
 
@@ -522,8 +530,8 @@ builtin.module {
   %tnum = arch.get_thread_num : !symbol.int<"thread_num">
   %stid = arch.get_subthread_id : !symbol.int<"subthread_id">
   %stnum = arch.get_subthread_num : !symbol.int<"subthread_num">
-  %smem_size = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[?], [1], i8, #nn.space<shared>>
-  %tlm1 = arch.get_dynamic_memory #nn.space<tlm1> : !nn.memory<[?], [1], i8, #nn.space<tlm1>>
+  %smem_size = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[SM_SIZE], [1], i8, #nn.space<shared>>
+  %tlm1 = arch.get_dynamic_memory #nn.space<tlm1> : !nn.memory<[TLM1_SIZE], [1], i8, #nn.space<tlm1>>
   arch.barrier {scope = #arch.scope<global>, visibility = [#arch.visibility<tsm>, #arch.visibility<tlm>]}
   %smem = "test.op"() : () -> !symbol.int<"smem_n">
   arch.launch<%block, %thread, %subthread, %smem>(@my_kernel, %arg) : (!symbol.int<"arg_n">) -> ()

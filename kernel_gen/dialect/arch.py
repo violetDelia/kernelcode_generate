@@ -59,6 +59,14 @@ from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.target import registry as target_registry
 
 _DYNAMIC_MEMORY_SPACES = {"shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
+_DYNAMIC_MEMORY_CAPACITY_SYMBOLS = {
+    "shared": "SM_SIZE",
+    "local": "LM_SIZE",
+    "tsm": "TSM_SIZE",
+    "tlm1": "TLM1_SIZE",
+    "tlm2": "TLM2_SIZE",
+    "tlm3": "TLM3_SIZE",
+}
 _ERROR_SCENE = "dialect.arch verifier"
 _BARRIER_SCOPE_VALUES = {"block", "thread", "subthread", "global"}
 _BARRIER_VISIBLE_SPACES = {"tsm", "tlm"}
@@ -369,7 +377,7 @@ def _dynamic_memory_result_type(space: NnMemorySpaceAttr) -> NnMemoryType:
 
 
     功能说明:
-    - 返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`。
+    - 返回 `!nn.memory<[<SPACE>_SIZE], [1], i8, #nn.space<space>>`。
 
     使用示例:
     - _dynamic_memory_result_type(NnMemorySpaceAttr.from_name("shared"))
@@ -381,7 +389,7 @@ def _dynamic_memory_result_type(space: NnMemorySpaceAttr) -> NnMemoryType:
     """
 
     return NnMemoryType(
-        ArrayAttr([StringAttr("?")]),
+        ArrayAttr([StringAttr(_DYNAMIC_MEMORY_CAPACITY_SYMBOLS.get(space.space.data, "?"))]),
         ArrayAttr([IntAttr(1)]),
         i8,
         space,
@@ -640,11 +648,15 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
                     action=ERROR_ACTION,
                 )
             )
-        if result_type.shape.data[0] != StringAttr("?"):
+        expected_capacity = _DYNAMIC_MEMORY_CAPACITY_SYMBOLS[space_name]
+        if result_type.shape.data[0] != StringAttr(expected_capacity):
             raise VerifyException(
                 ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
-                    expected="arch.get_dynamic_memory result shape must be [?]",
+                    expected=(
+                        "arch.get_dynamic_memory result shape must be "
+                        f"[{expected_capacity}]"
+                    ),
                     actual=ERROR_ACTUAL,
                     action=ERROR_ACTION,
                 )

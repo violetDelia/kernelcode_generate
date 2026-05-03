@@ -2,464 +2,209 @@
 
 ## 功能简介
 
-- 定义 `MemoryPoolPass` 的公开合同：基于 `dma.alloc/dma.free` 生成内存生命周期摘要结构。
-- 提供 `MemoryPoolSummary/MemoryPoolInterval` 稳定接口，用于后续统计与验证。
-- 支持直线路径的 pool 改写：将符合约束的 `dma.alloc/dma.free` 改写为 `i8` byte pool + `dma.view`。
+- `MemoryPoolPass` 提供 `dma.alloc/dma.free` 生命周期摘要分析，并在显式 `rewrite=True` 时把片上 `dma.alloc` 改写为 `arch.get_dynamic_memory + dma.subview + dma.reshape`。
+- 默认 `MemoryPoolPass()` 是 analysis-only，不修改 IR；rewrite 只能通过公开构造参数或 registry/ircheck option 显式启用。
+- 本 pass 不做内存复用；同一 `func + memory space` 内的 alloc 按词法出现顺序线性切分 backing memory。
 
 ## API 列表
 
-- `class MemoryPoolPass(rewrite: bool = False)`
-  - `name: str`
-  - `__init__(rewrite: bool = False) -> None`
-  - `apply(ctx: Context, op: ModuleOp) -> None`
-  - `apply(ctx: Context, module: ModuleOp) -> None`
-  - `get_summary(func_name: str) -> MemoryPoolSummary`
-  - `all_summaries() -> dict[str, MemoryPoolSummary]`
+- `class MemoryPoolPass(rewrite: bool = False, fold: bool = True, alignment: int = 1024)`
+- `MemoryPoolPass.from_options(options: dict[str, str]) -> MemoryPoolPass`
+- `MemoryPoolPass.apply(ctx: Context, module: ModuleOp) -> None`
+- `MemoryPoolPass.get_summary(func_name: str) -> MemoryPoolSummary`
+- `MemoryPoolPass.all_summaries() -> dict[str, MemoryPoolSummary]`
 - `class MemoryPoolSummary(func_name: str, intervals: tuple[MemoryPoolInterval, ...], peak_bytes_by_bucket: dict[tuple[str], sympy.Basic], pool_count: int)`
-  - `to_text() -> str`
+- `MemoryPoolSummary.to_text() -> str`
 - `class MemoryPoolInterval(name: str, bucket_key: tuple[str], size_bytes_expr: sympy.Basic, begin_index: int, end_index: int, offset_bytes_expr: sympy.Basic)`
 
 ## 文档信息
 
-- 创建者：`未记录`
-- 最后一次更改：`小李飞刀`
-- `spec`：[`spec/pass/lowering/memory_pool.md`](../../../spec/pass/lowering/memory_pool.md)
-- `功能实现`：[`kernel_gen/passes/memory_pool.py`](../../../kernel_gen/passes/memory_pool.py)
-- `test`：[`test/passes/test_memory_pool.py`](../../../test/passes/test_memory_pool.py)
+- `spec`：`spec/pass/lowering/memory_pool.md`
+- `功能实现`：`kernel_gen/passes/memory_pool.py`
+- `test`：`test/passes/test_memory_pool.py`、`test/passes/test_registry.py`、`test/passes/test_pass_manager.py`
+- `合同验收资产`：`expectation/pass/memory_pool`
 
 ## 依赖
 
-- `dma` dialect：[`kernel_gen/dialect/dma.py`](../../../kernel_gen/dialect/dma.py)
-- `nn` memory type：[`kernel_gen/dialect/nn.py`](../../../kernel_gen/dialect/nn.py)
-- pass registry：[`spec/pass/registry.md`](../../../spec/pass/registry.md)
-- `func.func`：`xdsl.dialects.func`
-- `sympy` 表达式库
+- `kernel_gen/dialect/arch.py`：提供公开 `ArchGetDynamicMemoryOp`。
+- `kernel_gen/dialect/dma.py`：提供公开 `DmaAllocOp`、`DmaFreeOp`、`DmaSubviewOp`、`DmaReshapeOp`。
+- `kernel_gen/dialect/nn.py`：提供 `NnMemoryType` 与 `NnMemorySpaceAttr`。
+- `kernel_gen/dialect/symbol.py`：提供 `!symbol.int<"expr">` 物化 op 与类型。
+- `kernel_gen/passes/registry.py`：通过 `memory-pool={rewrite=...,fold=...,alignment=...}` 公开 option 构造本 pass。
 
 ## 术语
 
-- `interval`：单个 `dma.alloc` 对应的生命周期区间。
-- `bucket`：按 `(space)` 聚合的分桶键。
-- `peak`：同一 bucket 在词法序列上的最大并发字节数量。
+- `interval`：单个 `dma.alloc` 的生命周期摘要，包含 byte size、词法起止索引和线性 byte offset。
+- `bucket`：按 memory space 聚合的分桶键；rewrite 时每个 bucket 对应一份 `arch.get_dynamic_memory`。
+- `alignment`：byte 对齐值；默认 `1024`，`0` 表示关闭对齐。
 
 ## 目标
 
-- 提供稳定的摘要结构用于统计与验证。
-- 保持摘要输出稳定文本格式，便于直接比对。
-- 在直线路径内完成同 bucket、非重叠生命周期的 pool 改写。
-
-## 额外补充
-
-### Helper 说明
-
-- 公开 API 仅包含 `MemoryPoolPass`、`MemoryPoolSummary` 与 `MemoryPoolInterval`。
-- alloc/free 配对、shape/stride 转符号表达式、slot 分配、byte-pool 改写等逻辑都属于当前文件内部实现细节。
-- 其它实现文件与测试不得跨文件调用 `kernel_gen.passes.memory_pool` 中未列入 `API 列表` 的 helper。
-
-
-### 失败短语
-
-范围说明：
-
-- 下列短语是 `KernelCodeError(message)` 的公开前缀集合；实现必须保证错误信息以 `<短语>: ` 开头，其后可追加上下文细节。
-- 本清单覆盖 `MemoryPoolPass.apply(Context(), module)` 的摘要分析与（可选）IR 改写阶段，以及 `MemoryPoolPass.get_summary(func_name)` 的摘要查询阶段。
-- 本清单不覆盖 `dma/nn/symbol` dialect verifier 的报错文本，也不覆盖其它 pass 的错误短语。
-
-短语清单：
-
-- `MemoryPoolInvalidModule`
-  - 输入不是 `builtin.module`，或 module 结构无法被本 pass 处理（例如缺少可枚举的 `func.func`）。
-- `MemoryPoolInvalidAlloc`
-  - `dma.alloc` 本体或其结果类型不满足本 pass 的输入域约束（例如 alloc 结果不是 `nn.memory`），导致无法进入后续的生命周期分析与改写。
-- `MemoryPoolEscapingAlloc`
-  - alloc 结果逃逸出本 pass 可分析范围，例如被 return、被写入容器后跨出所在 `symbol.for` 的词法范围。
-- `MemoryPoolInvalidLifetime`
-  - `dma.alloc/dma.free` 的配对关系或词法生命周期不合法（例如找不到 free、重复 free、free 出现在 alloc 之前、或 loop 内不成对），导致无法构建稳定 interval。
-- `MemoryPoolUnsupportedShape`
-  - `nn.memory` 的 `shape/stride` 含本 pass 不支持的维度表示（例如匿名动态维 `?`，或动态维分量不属于约定的 `IntAttr` / 具名 `StringAttr`），导致无法形成稳定的字节数量表达式。
-- `MemoryPoolUnsupportedDtype`
-  - `nn.memory` 的 `dtype` 无法映射到稳定的字节宽度（例如缺少 element byte size 的定义），导致无法形成 `size_bytes_expr`。
-- `MemoryPoolUnsupportedNonLinearAlloc`
-  - alloc 对应的 memory 不是 contiguous 布局，或需要 custom stride 解释，导致无法按本 pass 的字节池模型计算 size/offset。
-- `MemoryPoolRewriteUnsupported`
-  - `rewrite=True` 时输入 IR 不满足改写前提（例如非单 block、出现除 `symbol.for` 以外的 region/control-flow 结构、同 bucket 区间无法证明不重叠、或字节 size 表达式不一致），因此只能拒绝改写而不是静默跳过。
-- `MemoryPoolUnsupportedRegionEscape`
-  - 出现非 `symbol.for` 的 region/control-flow 结构，或出现会导致 interval 归属与索引模型失效的 region 逃逸场景。
-- `MemoryPoolUnsupportedPoolBucket`
-  - alloc 无法归入当前按 bucket（例如按 `space`）聚合的 byte pool，例如 space 不受支持或 bucket key 无法稳定构造。
-- `MemoryPoolTypedViewOutOfBounds`
-  - typed `dma.view` 的字节区间越界，或与 dtype 字节宽度不匹配。
-- `MemoryPoolSummaryNotFound`
-  - `get_summary(func_name)` 查询不到对应的摘要。
-
-### 模块级补充
-
-- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
-- 仅处理 `builtin.module` 内的 `func.func`。
-- 仅支持 `dma.alloc` 结果为 `nn.memory` 且布局为 contiguous。
-- `dma.alloc` 必须存在且仅存在一个对应的 `dma.free`，且顺序合法。
-- 动态维度仅允许 `IntAttr` 或具名 `StringAttr`，不接受匿名 `?`。
-- `rewrite=True` 仅支持单 block，允许 `symbol.for`，其余 region 直接拒绝。
-- `symbol.for` 内 alloc 的生命周期按 region 进入/退出索引统计；分析不按迭代次数展开为多份 interval。
-- 当 interval 在上述索引模型中可证明不重叠时，允许它们共享同一个 `offset_bytes_expr`（体现 byte pool 的复用）。
-- 参与改写的 alloc 必须同 bucket、相同字节 size 表达式；生命周期重叠会分配不同 offset。
-- pool 采用 1-D `i8` byte pool，并通过 `dma.view` 恢复原始类型。
-- 公开导入入口固定为 `kernel_gen.passes.memory_pool`；`kernel_gen.passes.lowering.memory_pool` 不再属于公开合同，必须以 `ModuleNotFoundError` 失败。
-- 当 lowering pipeline 同时包含 tile family、`SymbolLoopHoistPass`、`LowerDmaMemoryHierarchyPass` 时，`MemoryPoolPass` 的相对顺序要求为：
-  - `tile family -> SymbolLoopHoistPass -> MemoryPoolPass -> LowerDmaMemoryHierarchyPass`
-
-
-### `class MemoryPoolPass(rewrite: bool = False)`
-
-- 功能说明：
-
-- 生成每个 `func.func` 的 `MemoryPoolSummary`。
-- 缓存摘要以供查询。
-
-- 参数：
-
-- `rewrite (bool)`：是否执行 IR 改写；`True` 仅在直线路径与同 bucket 条件满足时生效。
-
-- 使用示例：
-
-```python
-from kernel_gen.passes.memory_pool import MemoryPoolPass
-
-pass_obj = MemoryPoolPass(rewrite=False)
-pass_obj.apply(Context(), module)
-summary = pass_obj.get_summary("main")
-```
-
-- 注意事项：
-
-- `rewrite=True` 会对符合条件的 alloc/free 进行 pool 改写。
-- 仅对 `func.func` 统计，其余 op 会被跳过。
-
-- 返回值：
-
-- `apply(ctx, module)` 原地更新摘要与可选 IR 改写，返回 `None`。
-- 不满足公开合同的输入会报错，不会静默跳过。
-
-### `MemoryPoolPass.apply(ctx: Context, module: ModuleOp) -> None`
-
-- 功能说明：
-
-- 对 `module` 中每个 `func.func` 生成摘要。
-
-- 参数：
-
-- `module (builtin.module)`：待处理的 module。
-
-- 使用示例：
-
-```python
-pass_obj = MemoryPoolPass(rewrite=False)
-pass_obj.apply(Context(), module)
-```
-
-- 注意事项：
-
-- 输入必须是 `builtin.module`，否则报错。
-- `rewrite=True` 时 summary 先于 IR 改写生成。
-
-- 返回值：
-
-- 返回 `module` 本体。
-
-### `MemoryPoolPass.get_summary(func_name: str)`
-
-- 功能说明：
-
-- 根据函数名返回对应摘要。
-
-- 参数：
-
-- `func_name (str)`：函数名。
-
-- 使用示例：
-
-```python
-summary = pass_obj.get_summary("main")
-```
-
-- 注意事项：
-
-- 不存在时抛出 `KernelCodeError`，错误前缀必须为 `MemoryPoolSummaryNotFound:`。
-
-- 返回值：
-
-- 返回 `MemoryPoolSummary`。
-
-### `MemoryPoolPass.all_summaries() -> dict[str, MemoryPoolSummary]`
-
-- 功能说明：
-
-- 返回全部摘要的拷贝。
-
-- 参数：
-
-- 无。
-
-- 使用示例：
-
-```python
-summaries = pass_obj.all_summaries()
-```
-
-- 注意事项：
-
-- 返回值为浅拷贝，避免外部直接修改内部缓存。
-
-- 返回值：
-
-- 返回 `dict[str, MemoryPoolSummary]`。
-
-### `class MemoryPoolSummary(func_name: str, intervals: tuple[MemoryPoolInterval, ...], peak_bytes_by_bucket: dict[tuple[str], sympy.Basic], pool_count: int)`
-
-- 功能说明：
-
-- 描述单个 `func.func` 的生命周期摘要。
-
-- 参数：
-
-- `func_name (str)`：函数名。
-- `intervals (tuple[MemoryPoolInterval, ...])`：生命周期区间列表。
-- `peak_bytes_by_bucket (dict[tuple[str], sympy.Basic])`：按 bucket 汇总的 peak 字节数。
-- `pool_count (int)`：bucket 数量。
-
-- 使用示例：
-
-```python
-summary = pass_obj.get_summary("main")
-text = summary.to_text()
-```
-
-- 注意事项：
-
-- `to_text()` 输出稳定文本格式，便于对比。
-
-- 返回值：
-
-- `to_text()` 返回 `str`。
-
-### `class MemoryPoolInterval(name: str, bucket_key: tuple[str], size_bytes_expr: sympy.Basic, begin_index: int, end_index: int, offset_bytes_expr: sympy.Basic)`
-
-- 功能说明：
-
-- 描述单个 alloc 的生命周期区间与偏移信息。
-
-- 参数：
-
-- `name (str)`：alloc 名称。
-- `bucket_key (tuple[str])`：分桶键。
-- `size_bytes_expr (sympy.Basic)`：字节数量表达式。
-- `begin_index (int)`：开始索引。
-- `end_index (int)`：结束索引。
-- `offset_bytes_expr (sympy.Basic)`：字节偏移表达式。
-
-- 使用示例：
-
-```python
-interval = summary.intervals[0]
-```
-
-- 注意事项：
-
-- `offset_bytes_expr` 由 slot 分配，等于 `size_bytes_expr * slot_index`。
-
-- 返回值：
-
-- 数据结构本身不执行验证。
+- summary 路径必须覆盖静态 shape、具名动态 shape、`symbol.for` / `scf.for` 中的 loop-invariant alloc，以及缺少 `dma.free` 的 alloc。
+- rewrite 路径只改写 `shared/local/tsm/tlm1/tlm2/tlm3` 片上 memory space；`global` 不属于 `arch.get_dynamic_memory` 支持范围。
+- rewrite 结果必须使用 `arch.get_dynamic_memory + dma.subview + dma.reshape`，不得生成旧 view/getmemory 路径或 byte-pool `dma.alloc/dma.free` 作为本 pass 的 rewrite 结果。
+- `offset` 按目标 dtype 的元素单位表达；若 `aligned_offset_bytes / sizeof(target_dtype)` 不能证明整除，必须以 `KernelCodeError(ErrorKind.UNIMPLEMENTED, ErrorModule.PASS, ...)` 失败。
 
 ## API详细说明
 
-### `class MemoryPoolPass(rewrite: bool = False)`
+### `class MemoryPoolPass(rewrite: bool = False, fold: bool = True, alignment: int = 1024)`
 
-- api：`class MemoryPoolPass(rewrite: bool = False)`
+- api：`class MemoryPoolPass(rewrite: bool = False, fold: bool = True, alignment: int = 1024)`
 - 参数：
-  - `rewrite`：`rewrite` 输入值，参与 `MemoryPoolPass` 的公开处理流程；类型 `bool`；默认值 `False`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `rewrite`：是否执行 IR rewrite；类型 `bool`；默认 `False`；非法类型报 `MemoryPoolOptionError: rewrite must be bool`。
+  - `fold`：是否启用 pass manager 通用 fold；类型 `bool`；默认 `True`；非法类型报 `MemoryPoolOptionError: fold must be bool`。
+  - `alignment`：byte 对齐值；类型 `int`；默认 `1024`；`0` 关闭对齐；负数、`bool` 或非整数报 `MemoryPoolOptionError: alignment must be non-negative integer`。
 - 返回值：`MemoryPoolPass` 实例。
-- 使用示例：
-
-  ```python
-  memory_pool_pass = MemoryPoolPass(rewrite=False)
-  ```
-- 功能说明：定义 `MemoryPoolPass` pass 对象。
-- 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
-
-### `name: str`
-
-- api：`name: str`
-- 参数：无。
-- 返回值：`str` 的返回值；返回类型以 API 签名为准。
 - 使用示例：
 
   ```python
   from kernel_gen.passes.memory_pool import MemoryPoolPass
 
-  assert MemoryPoolPass.name == "memory-pool"
+  pass_obj = MemoryPoolPass(rewrite=True, fold=False, alignment=0)
   ```
-- 功能说明：执行 `str`。
-- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
+- 功能说明：创建 memory-pool pass，并配置是否 rewrite、是否 fold 和 byte 对齐策略。
+- 注意事项：构造器只公开 `rewrite/fold/alignment` 三个参数；本文件内 helper 不是公开 API，外部实现和测试不得跨文件调用。
 
-### `__init__(rewrite: bool = False) -> None`
+### `MemoryPoolPass.from_options(options: dict[str, str]) -> MemoryPoolPass`
 
-- api：`__init__(rewrite: bool = False) -> None`
+- api：`MemoryPoolPass.from_options(options: dict[str, str]) -> MemoryPoolPass`
 - 参数：
-  - `rewrite`：`rewrite` 输入值，参与 `__init__` 的公开处理流程；类型 `bool`；默认值 `False`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-- 返回值：无返回值；调用成功表示操作完成。
+  - `options`：registry/ircheck 传入的字符串键值；类型 `dict[str, str]`；允许键仅为 `rewrite`、`fold`、`alignment`；未知键报 `MemoryPoolOptionError: unknown option: <name>`。
+- 返回值：`MemoryPoolPass` 实例。
 - 使用示例：
 
   ```python
-  __init__(rewrite=False)
+  pass_obj = MemoryPoolPass.from_options({"rewrite": "true", "alignment": "0"})
   ```
-- 功能说明：执行 `__init__`。
-- 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
+- 功能说明：把公开 CLI/registry option 转为 `MemoryPoolPass` 构造参数。
+- 注意事项：`rewrite/fold` 接受 `true/false/1/0/yes/no/on/off`；`alignment` 必须是非负整数字符串；registry 可先处理通用 `fold` option 后再透传剩余 option。
 
-### `apply(ctx: Context, op: ModuleOp) -> None`
+### `MemoryPoolPass.apply(ctx: Context, module: ModuleOp) -> None`
 
-- api：`apply(ctx: Context, op: ModuleOp) -> None`
+- api：`MemoryPoolPass.apply(ctx: Context, module: ModuleOp) -> None`
 - 参数：
-  - `ctx`：公开上下文对象，提供代码生成、emit、pass 或工具执行所需的配置与状态；类型 `Context`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `op`：IR operation，作为 emit、rewrite、lowering 或校验的当前处理对象；类型 `ModuleOp`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-- 返回值：无返回值；调用成功表示操作完成。
+  - `ctx`：xdsl `Context`；本 pass 不从 `ctx` 探测运行期能力。
+  - `module`：待处理 `builtin.module`；类型 `ModuleOp`；非 module 报 `MemoryPoolInvalidModule: module must be builtin.module`。
+- 返回值：`None`；原地更新 summary，并在 `rewrite=True` 时原地改写 IR。
 - 使用示例：
 
   ```python
-  apply(ctx=ctx, op=op)
+  pass_obj = MemoryPoolPass(rewrite=False)
+  pass_obj.apply(ctx, module)
+  summary = pass_obj.get_summary("main")
   ```
-- 功能说明：执行 `apply`。
-- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
+- 功能说明：遍历 module 内 `func.func`，生成 `MemoryPoolSummary`；显式 rewrite 时重写符合输入域的 `dma.alloc/dma.free`。
+- 注意事项：
+  - analysis-only 路径不修改 IR。
+  - 缺少 `dma.free` 的 alloc 生命周期按所在 block/region 结束记录。
+  - `rewrite=True` 时每个 `func + memory space` 在函数入口生成一份 `arch.get_dynamic_memory`。
+  - 多 alloc 线性切分，不因生命周期不重叠而复用 offset。
+  - `symbol.for` 内 alloc 的 `dma.subview + dma.reshape` 留在 loop body；`scf.for` 内 loop-invariant alloc 的 backing memory 仍在函数入口。
+  - 非 contiguous/custom stride 报 `MemoryPoolUnsupportedLayout: non-contiguous/custom stride is not supported`，错误类型为 `UNIMPLEMENTED`。
+  - 多 block 或无法归属的 control-flow 报 `MemoryPoolUnsupportedControlFlow` 或 `MemoryPoolUnsupportedRegionEscape`，不得静默跳过非法 alloc。
 
-### `apply(ctx: Context, module: ModuleOp) -> None`
+### `MemoryPoolPass.get_summary(func_name: str) -> MemoryPoolSummary`
 
-- api：`apply(ctx: Context, module: ModuleOp) -> None`
+- api：`MemoryPoolPass.get_summary(func_name: str) -> MemoryPoolSummary`
 - 参数：
-  - `ctx`：公开上下文对象，提供代码生成、emit、pass 或工具执行所需的配置与状态；类型 `Context`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `module`：模块级 IR 对象，作为 pass、校验或代码生成的处理主体；类型 `ModuleOp`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-- 返回值：无返回值；调用成功表示操作完成。
-- 使用示例：
-
-  ```python
-  apply(ctx=ctx, module=module)
-  ```
-- 功能说明：执行 `apply`。
-- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
-
-### `get_summary(func_name: str) -> MemoryPoolSummary`
-
-- api：`get_summary(func_name: str) -> MemoryPoolSummary`
-- 参数：
-  - `func_name`：公开名称或符号名；类型 `str`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `func_name`：函数名；类型 `str`；必须对应最近一次 `apply(...)` 已分析的 `func.func`。
 - 返回值：`MemoryPoolSummary`。
 - 使用示例：
 
   ```python
-  result = get_summary(func_name=func_name)
+  summary = pass_obj.get_summary("main")
   ```
-- 功能说明：读取 `summary`。
-- 注意事项：该接口只读取公开状态；返回对象的内部可变结构不作为额外公开合同。
+- 功能说明：返回指定函数的 summary。
+- 注意事项：函数名不存在时报 `MemoryPoolSummaryNotFound: <func_name>`。
 
-### `all_summaries() -> dict[str, MemoryPoolSummary]`
+### `MemoryPoolPass.all_summaries() -> dict[str, MemoryPoolSummary]`
 
-- api：`all_summaries() -> dict[str, MemoryPoolSummary]`
+- api：`MemoryPoolPass.all_summaries() -> dict[str, MemoryPoolSummary]`
 - 参数：无。
-- 返回值：`dict[str, MemoryPoolSummary]`。
+- 返回值：`dict[str, MemoryPoolSummary]`；返回浅拷贝。
 - 使用示例：
 
   ```python
-  result = all_summaries()
+  summaries = pass_obj.all_summaries()
   ```
-- 功能说明：执行 `all_summaries`。
-- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
+- 功能说明：返回最近一次 `apply(...)` 产生的全部函数摘要。
+- 注意事项：调用方修改返回字典不得影响 pass 内部缓存。
 
 ### `class MemoryPoolSummary(func_name: str, intervals: tuple[MemoryPoolInterval, ...], peak_bytes_by_bucket: dict[tuple[str], sympy.Basic], pool_count: int)`
 
 - api：`class MemoryPoolSummary(func_name: str, intervals: tuple[MemoryPoolInterval, ...], peak_bytes_by_bucket: dict[tuple[str], sympy.Basic], pool_count: int)`
 - 参数：
-  - `func_name`：公开名称或符号名；类型 `str`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `intervals`：区间集合，定义 tiling、调度或符号范围的分段信息；类型 `tuple[MemoryPoolInterval, ...]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `peak_bytes_by_bucket`：`peak_bytes_by_bucket` 输入值，参与 `MemoryPoolSummary` 的公开处理流程；类型 `dict[tuple[str], sympy.Basic]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按可变容器传入时，是否修改输入必须以本接口功能说明和注意事项为准；非法值按该 API 的公开错误语义处理。
-  - `pool_count`：`pool_count` 输入值，参与 `MemoryPoolSummary` 的公开处理流程；类型 `int`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `func_name`：summary 对应函数名。
+  - `intervals`：按分析顺序排列的 allocation 生命周期。
+  - `peak_bytes_by_bucket`：每个 bucket 的 peak byte 表达式。
+  - `pool_count`：bucket 数量。
 - 返回值：`MemoryPoolSummary` 实例。
 - 使用示例：
 
   ```python
-  memory_pool_summary = MemoryPoolSummary(func_name=func_name, intervals=intervals, peak_bytes_by_bucket=peak_bytes_by_bucket, pool_count=pool_count)
+  summary = MemoryPoolSummary("main", intervals, peak_bytes_by_bucket, pool_count=1)
   ```
-- 功能说明：定义 `MemoryPoolSummary` 公开类型。
-- 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
+- 功能说明：表示单个函数的 memory-pool 摘要。
+- 注意事项：summary 是只读数据结构；rewrite 是否启用不改变 `MemoryPoolSummary` 的字段含义。
 
-### `to_text() -> str`
+### `MemoryPoolSummary.to_text() -> str`
 
-- api：`to_text() -> str`
+- api：`MemoryPoolSummary.to_text() -> str`
 - 参数：无。
-- 返回值：`str`，表示生成或格式化后的文本。
+- 返回值：稳定文本摘要。
 - 使用示例：
 
   ```python
-  result = to_text()
+  text = summary.to_text()
   ```
-- 功能说明：执行 `to_text`。
-- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
+- 功能说明：输出可供 pytest 和调试比对的 summary 文本。
+- 注意事项：文本必须包含 `func_name`、`intervals`、`peak_bytes_by_bucket` 和 `pool_count`。
 
 ### `class MemoryPoolInterval(name: str, bucket_key: tuple[str], size_bytes_expr: sympy.Basic, begin_index: int, end_index: int, offset_bytes_expr: sympy.Basic)`
 
 - api：`class MemoryPoolInterval(name: str, bucket_key: tuple[str], size_bytes_expr: sympy.Basic, begin_index: int, end_index: int, offset_bytes_expr: sympy.Basic)`
 - 参数：
-  - `name`：公开名称、符号名或注册名，用于查找、打印、注册或生成稳定标识；类型 `str`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `bucket_key`：`bucket_key` 输入值，参与 `MemoryPoolInterval` 的公开处理流程；类型 `tuple[str]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `size_bytes_expr`：大小或容量值；类型 `sympy.Basic`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `begin_index`：`begin_index` 输入值，参与 `MemoryPoolInterval` 的公开处理流程；类型 `int`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `end_index`：`end_index` 输入值，参与 `MemoryPoolInterval` 的公开处理流程；类型 `int`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `offset_bytes_expr`：偏移量；类型 `sympy.Basic`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `name`：allocation 名称；无显式 name hint 时使用稳定 `alloc<n>`。
+  - `bucket_key`：memory bucket；当前至少包含 memory space 文本。
+  - `size_bytes_expr`：allocation byte size 的 `sympy.Basic` 表达式。
+  - `begin_index`：词法生命周期起点。
+  - `end_index`：词法生命周期终点；缺 free 时为所在 block/region 结束。
+  - `offset_bytes_expr`：summary 中按线性切分得到的 byte offset 表达式。
 - 返回值：`MemoryPoolInterval` 实例。
 - 使用示例：
 
   ```python
-  memory_pool_interval = MemoryPoolInterval(name=name, bucket_key=bucket_key, size_bytes_expr=size_bytes_expr, begin_index=begin_index, end_index=end_index, offset_bytes_expr=offset_bytes_expr)
+  interval = MemoryPoolInterval("alloc1", ("#SM",), sympy.Integer(32), 0, 1, sympy.Integer(0))
   ```
-- 功能说明：定义 `MemoryPoolInterval` 公开类型。
-- 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
+- 功能说明：记录单个 allocation 的 summary 区间。
+- 注意事项：`offset_bytes_expr` 是 byte 单位；rewrite 中的 `dma.subview.offset` 会再转换为目标 dtype 的元素单位。
 
 ## 测试
 
-- 测试文件：
-  - `test/passes/test_memory_pool.py`
-  - `test/passes/test_registry.py`
-- 执行命令：
-  - `pytest -q test/passes/test_memory_pool.py`
-  - `pytest -q test/passes/test_memory_pool.py -k "symbol_for or escape or layout or invalid_lifetime"`
+- 测试文件：`test/passes/test_memory_pool.py`、`test/passes/test_registry.py`、`test/passes/test_pass_manager.py`
+- 执行命令：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/passes/test_memory_pool.py test/passes/test_registry.py test/passes/test_pass_manager.py`
+- 合同验收：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m expectation.pass.memory_pool`
 
 ### 测试目标
 
-- 验证 `spec/pass/lowering/memory_pool.md` 对应公开 API 的正常路径、边界条件与错误语义。
-- 验证 Memory/DMA 参数、布局、搬运或 verifier 行为。
-- 验证 pass 或 pipeline 对目标 IR 的改写、no-op 与顺序约束。
-- 验证非法输入、边界条件和错误语义按公开合同失败。
-
+- 验证 summary API、文本输出、缺 free 生命周期、dtype/shape/stride 错误、loop 生命周期错误。
+- 验证 `rewrite=True` 生成 `arch.get_dynamic_memory + dma.subview + dma.reshape`，且不生成旧 view rewrite。
+- 验证 `alignment=0`、默认 alignment、正 alignment、非法 alignment 和 registry/ircheck option 路径。
+- 验证测试只通过公开 `MemoryPoolPass`、registry、PassManager 与公开 dialect op 入口运行，不调用 `memory_pool.py` 内部 helper。
 
 ### 功能与用例清单
 
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
-| TC-PASS-LOWERING-MEMORY-POOL-001 | 内存/DMA | `test_memory_pool_summary_basic` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_memory_pool_summary_basic`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`test_memory_pool_summary_basic`”场景。 | `test_memory_pool_summary_basic` |
-| TC-PASS-LOWERING-MEMORY-POOL-002 | 内存/DMA | `test_memory_pool_interval_indices` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_memory_pool_interval_indices`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`test_memory_pool_interval_indices`”场景。 | `test_memory_pool_interval_indices` |
-| TC-PASS-LOWERING-MEMORY-POOL-003 | 内存/DMA | `test_memory_pool_peak_overlap` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_memory_pool_peak_overlap`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`test_memory_pool_peak_overlap`”场景。 | `test_memory_pool_peak_overlap` |
-| TC-PASS-LOWERING-MEMORY-POOL-004 | pass 改写 | `test_memory_pool_rewrite_straight_line_pool_reuse` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_memory_pool_rewrite_straight_line_pool_reuse`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_memory_pool_rewrite_straight_line_pool_reuse`”场景。 | `test_memory_pool_rewrite_straight_line_pool_reuse` |
-| TC-PASS-LOWERING-MEMORY-POOL-005 | pass 改写 | `test_memory_pool_rewrite_multiple_buckets` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_memory_pool_rewrite_multiple_buckets`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_memory_pool_rewrite_multiple_buckets`”场景。 | `test_memory_pool_rewrite_multiple_buckets` |
-| TC-PASS-LOWERING-MEMORY-POOL-006 | 边界/异常 | `test_memory_pool_rewrite_size_mismatch` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_memory_pool_rewrite_size_mismatch`。 | “`test_memory_pool_rewrite_size_mismatch`”场景按公开错误语义失败或被拒绝。 | `test_memory_pool_rewrite_size_mismatch` |
-| TC-PASS-LOWERING-MEMORY-POOL-007 | pass 改写 | `test_memory_pool_rewrite_overlap` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_memory_pool_rewrite_overlap`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_memory_pool_rewrite_overlap`”场景。 | `test_memory_pool_rewrite_overlap` |
-| TC-PASS-LOWERING-MEMORY-POOL-008 | pass 改写 | `test_memory_pool_rewrite_multiple_blocks` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_memory_pool_rewrite_multiple_blocks`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_memory_pool_rewrite_multiple_blocks`”场景。 | `test_memory_pool_rewrite_multiple_blocks` |
-| TC-PASS-LOWERING-MEMORY-POOL-009 | 边界/异常 | `test_memory_pool_invalid_module` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_memory_pool_invalid_module`。 | “`test_memory_pool_invalid_module`”场景按公开错误语义失败或被拒绝。 | `test_memory_pool_invalid_module` |
-| TC-PASS-LOWERING-MEMORY-POOL-010 | 内存/DMA | `test_memory_pool_non_contiguous_layout` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_memory_pool_non_contiguous_layout`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`test_memory_pool_non_contiguous_layout`”场景。 | `test_memory_pool_non_contiguous_layout` |
-| TC-PASS-LOWERING-MEMORY-POOL-011 | 内存/DMA | `test_memory_pool_unpaired_alloc` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_memory_pool_unpaired_alloc`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`test_memory_pool_unpaired_alloc`”场景。 | `test_memory_pool_unpaired_alloc` |
-| TC-PASS-LOWERING-MEMORY-POOL-012 | 内存/DMA | `test_memory_pool_anonymous_dim` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_memory_pool_anonymous_dim`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`test_memory_pool_anonymous_dim`”场景。 | `test_memory_pool_anonymous_dim` |
-| TC-PASS-LOWERING-MEMORY-POOL-013 | 内存/DMA | `test_memory_pool_alloc_non_memory` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_memory_pool_alloc_non_memory`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`test_memory_pool_alloc_non_memory`”场景。 | `test_memory_pool_alloc_non_memory` |
-| TC-PASS-LOWERING-MEMORY-POOL-014 | 内存/DMA | `test_memory_pool_symbol_for_reuse` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_memory_pool_symbol_for_reuse`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`test_memory_pool_symbol_for_reuse`”场景。 | `test_memory_pool_symbol_for_reuse` |
-| TC-PASS-LOWERING-MEMORY-POOL-015 | 内存/DMA | `test_memory_pool_escape_return` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_memory_pool_escape_return`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`test_memory_pool_escape_return`”场景。 | `test_memory_pool_escape_return` |
-| TC-PASS-LOWERING-MEMORY-POOL-016 | 边界/异常 | `test_memory_pool_invalid_lifetime_loop` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_memory_pool_invalid_lifetime_loop`。 | “`test_memory_pool_invalid_lifetime_loop`”场景按公开错误语义失败或被拒绝。 | `test_memory_pool_invalid_lifetime_loop` |
-| TC-PASS-LOWERING-MEMORY-POOL-017 | 内存/DMA | `test_memory_pool_unsupported_region_escape` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_memory_pool_unsupported_region_escape`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`test_memory_pool_unsupported_region_escape`”场景。 | `test_memory_pool_unsupported_region_escape` |
-| TC-PASS-LOWERING-MEMORY-POOL-018 | 边界/异常 | `test_memory_pool_public_summary_access_edges` | 准备空函数 module、多 key bucket summary 与缺失函数名查询。 | 运行 `test_memory_pool_public_summary_access_edges`。 | `MemoryPoolPass` 跳过非函数 op、空函数摘要稳定输出、`all_summaries()` 返回拷贝、缺失 summary 按 `MemoryPoolSummaryNotFound` 公开错误失败。 | `test_memory_pool_public_summary_access_edges` |
-| TC-PASS-LOWERING-MEMORY-POOL-019 | 内存/DMA | `test_memory_pool_dtype_and_symbolic_shape_matrix` | 准备公开 dtype 矩阵、非法 dtype 与具名符号 shape 的 contiguous memory。 | 运行 `test_memory_pool_dtype_and_symbolic_shape_matrix`。 | dtype 字节数、非法 dtype 错误、符号 size 表达式与 `rewrite=True` 生成的 `dma.view` 类型均按公开合同稳定。 | `test_memory_pool_dtype_and_symbolic_shape_matrix` |
-| TC-PASS-LOWERING-MEMORY-POOL-020 | 边界/异常 | `test_memory_pool_public_invalid_shape_stride_and_free_edges` | 准备匿名 stride 与重复 dma.free 的公开 IR 输入。 | 运行 `test_memory_pool_public_invalid_shape_stride_and_free_edges`。 | `MemoryPoolPass.apply(...)` 按 `MemoryPoolUnsupportedNonLinearAlloc` 或 `MemoryPoolInvalidLifetime` 公开错误语义失败。 | `test_memory_pool_public_invalid_shape_stride_and_free_edges` |
-| TC-PASS-LOWERING-MEMORY-POOL-021 | pass 改写 | `test_memory_pool_rewrite_non_alloc_noop` | 准备不含 `dma.alloc/dma.free` 的单 block 函数，并启用 `rewrite=True`。 | 运行 `test_memory_pool_rewrite_non_alloc_noop`。 | summary 为空且 IR 不新增 pool/view/free，保持公开 no-op 行为。 | `test_memory_pool_rewrite_non_alloc_noop` |
+| TC-MP-001 | summary | 单 alloc/free | 构造 `dma.alloc + dma.free` | 运行 `MemoryPoolPass(rewrite=False).apply(...)` | 生成一个 interval 与 bucket peak | `test_memory_pool_summary_basic` |
+| TC-MP-002 | summary API | 空函数、缺失查询、拷贝语义 | 构造空函数 module | 查询 `get_summary/all_summaries` | 空 summary 稳定，缺失函数报 `MemoryPoolSummaryNotFound` | `test_memory_pool_public_summary_access_edges` |
+| TC-MP-003 | rewrite | 单 space 多 alloc | `shared` alloc/free，`alignment=0` | 运行 `MemoryPoolPass(rewrite=True, alignment=0)` | 一个 dynamic memory、多个 subview/reshape、无 alloc/free 残留 | `test_memory_pool_rewrite_straight_line_pool_reuse` |
+| TC-MP-004 | rewrite | 多 memory space | `shared` 与 `tlm1` alloc | 运行 rewrite | 每个 space 一份 dynamic memory | `test_memory_pool_rewrite_multiple_buckets` |
+| TC-MP-005 | rewrite | 不同 size 线性切分 | 同 space 不同 shape | 运行 rewrite | subview offset/size 按出现顺序相邻 | `test_memory_pool_rewrite_size_mismatch` |
+| TC-MP-006 | rewrite | 生命周期重叠 | 同 space alloc 重叠 | 运行 rewrite | 不复用 offset，线性切分 | `test_memory_pool_rewrite_overlap` |
+| TC-MP-007 | dtype/shape | dtype 矩阵与符号 shape | 内置 dtype、非法 dtype、动态 shape | 运行 summary/rewrite | byte size 与符号表达稳定，非法 dtype 失败 | `test_memory_pool_dtype_and_symbolic_shape_matrix` |
+| TC-MP-008 | 边界 | 非 contiguous/custom stride | 非连续 stride memory | 运行 `apply(...)` | `UNIMPLEMENTED` + `MemoryPoolUnsupportedLayout` | `test_memory_pool_public_invalid_shape_stride_and_free_edges` |
+| TC-MP-009 | 边界 | 缺 free | 单 alloc 无 free | 运行 analysis-only | interval end 为 block/region 结束 | `test_memory_pool_unpaired_alloc` |
+| TC-MP-010 | loop | `symbol.for` alloc | loop 内 alloc/free | 运行 rewrite | backing 在函数入口，subview/reshape 留在 loop body | `test_memory_pool_symbol_for_reuse` |
+| TC-MP-011 | registry | memory-pool options | `rewrite/fold/alignment` option | 运行 `build_registered_pass(...)` | 构造 `MemoryPoolPass`，非法 option 稳定失败 | `test_build_registered_memory_pool_alignment_options` |
+| TC-MP-012 | 合同验收 | expectation memory_pool | 只读 `expectation/pass/memory_pool` | 运行 `python3 -m expectation.pass.memory_pool` | 全部合同通过且不修改 expectation | `expectation.pass.memory_pool` |

@@ -753,6 +753,47 @@ def test_build_registered_pass_rejects_invalid_fold_option() -> None:
         build_registered_pass("inline", {"fold": "maybe"})
 
 
+# TC-REGISTRY-007H3
+# 功能说明: 验证 memory-pool 公开 options 可经 registry 构造并保留 alignment 边界。
+# 使用示例: pytest -q test/passes/test_registry.py -k "memory_pool and alignment"
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_memory_pool_alignment_options() -> None:
+    load_builtin_passes()
+    memory_pool_module = importlib.import_module("kernel_gen.passes.memory_pool")
+
+    pass_obj = build_registered_pass(
+        "memory-pool",
+        {"rewrite": "true", "fold": "false", "alignment": "0"},
+    )
+
+    assert isinstance(pass_obj, memory_pool_module.MemoryPoolPass)
+    assert pass_obj.rewrite is True
+    assert pass_obj.fold is False
+    assert pass_obj.alignment == 0
+
+
+# TC-REGISTRY-007H4
+# 功能说明: 验证 memory-pool alignment 与 option 文本非法时经 registry 稳定失败。
+# 使用示例: pytest -q test/passes/test_registry.py -k "memory_pool and alignment"
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_memory_pool_alignment_rejects_invalid_options() -> None:
+    load_builtin_passes()
+
+    invalid_cases = [
+        ({"rewrite": "true", "alignment": "-1"}, "alignment must be non-negative integer"),
+        ({"rewrite": "true", "alignment": "x"}, "alignment must be non-negative integer"),
+        ({"rewrite": "maybe", "alignment": "0"}, "rewrite must be bool"),
+        ({"rewrite": "true", "alignment": "0", "unknown": "1"}, "unknown option: unknown"),
+    ]
+    for options, expected in invalid_cases:
+        with pytest.raises(KernelCodeError, match=expected):
+            build_registered_pass("memory-pool", options)
+
+
 # TC-REGISTRY-007I
 # 功能说明: 验证内置加载后 attach-arch-information 通过 registry 返回 ModulePass。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_attach_arch_information_pass

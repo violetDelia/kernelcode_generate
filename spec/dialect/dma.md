@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-用于定义 `dma dialect` 的稳定方言语义，描述 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast` 以及作为 lowering 目标面的 `dma.broadcast`、`dma.transpose`，用于表示内存对象之间的数据搬运、标量物化与布局转换，包括整块搬运、切片读取、切片回写、跨空间迁移、标量写入临时 memory、显式广播物化、显式转置物化、视图变换与显式数据转换，并支持动态 shape 的表达。该方言不单独定义 memory type / memory space，而是统一复用 `nn dialect` 中的 `NnMemoryType` 与 `NnMemorySpaceAttr`。
+用于定义 `dma dialect` 的稳定方言语义，描述 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.subview`、`dma.view`、`dma.reshape`、`dma.cast` 以及作为 lowering 目标面的 `dma.broadcast`、`dma.transpose`，用于表示内存对象之间的数据搬运、标量物化与布局转换，包括整块搬运、切片读取、切片回写、跨空间迁移、标量写入临时 memory、显式广播物化、显式转置物化、一维 byte backing 切分、视图变换与显式数据转换，并支持动态 shape 的表达。该方言不单独定义 memory type / memory space，而是统一复用 `nn dialect` 中的 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 
 ## API 列表
 
@@ -17,6 +17,7 @@
 - `class DmaStoreOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
 - `class DmaSliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
 - `class DmaDesliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue], result_type: NnMemoryType)`
+- `class DmaSubviewOp(source: SSAValue | Operation, offset: SSAValue | Operation, size: SSAValue | Operation, stride: SSAValue | Operation, result_type: NnMemoryType)`
 - `class DmaViewOp(source: SSAValue | Operation, offsets: Sequence[SSAValue], shape: Sequence[SSAValue], stride: Sequence[SSAValue], result_type: NnMemoryType)`
 - `class DmaReshapeOp(source: SSAValue | Operation, shape: Sequence[SSAValue], result_type: NnMemoryType)`
 - `class DmaCastOp(target: SSAValue | Operation, source: SSAValue | Operation)`
@@ -58,7 +59,7 @@
 - 本文件不负责逐元素算术、比较、归约、matmul 等张量计算语义，也不负责自动求解 `offsets/sizes/strides` 或自动推导最优搬运策略；但它提供与“数据物化/布局变换”一致的两类稳定原语：
   - `dma.broadcast`：把 scalar 或较低 rank memory 按广播规则物化写入目标 memory（用于显式广播与 mixed compare 桥接）
   - `dma.transpose`：把 source 按 perm 置换物化写入目标 memory（作为 `nn.transpose` 的 lowering 目标）
-- 当前方言范围包含 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.broadcast`、`dma.transpose`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast`。
+- 当前方言范围包含 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.broadcast`、`dma.transpose`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.subview`、`dma.view`、`dma.reshape`、`dma.cast`。
 - 除 `dma.cast` 与 `dma.fill` 外，其他搬运 op 不改变元素值语义，只改变数据所在的逻辑位置、切片范围、布局表达或空间；同一个 op 不应同时承担计算和搬运语义。
 - 本文件中的“转换”包含三类：布局、切片视图或空间层面的转换，通过 `dma.cast` 表达的显式元素类型转换，以及通过 `dma.fill` 表达的标量到 memory 物化；不包括 memory-memory 广播、归约或通用数值计算。
 
@@ -87,6 +88,8 @@
 - `dma.slice` 必须采用目标式 `dma.slice(target, source, offsets, sizes, strides)`：由 `target` 承载切片结果，op 本身不产生 result。
 - `dma.slice` 的稳定搬运路径语义固定为 `source.space -> target.space`；逻辑字节数按 `sizes` 对应的元素数乘以 `element_type` 字节大小计算。
 - `dma.view` 中与动态布局相关的 `offsets` 允许 `!symbol.int<"expr">` 或 `!symbol.iter<"expr">`，`shape/stride` 仍需 `!symbol.int<"expr">` operand 显式传入；不得仅依赖结果类型里的符号维度推断。
+- `dma.subview` 只表达一维 `i8` backing memory 到一维 typed memory 的连续切分；`offset/size/stride` 必须各由一个 `!symbol.int<"expr">` SSA operand 提供，且 `offset >= 0`、`size >= 1`、`stride >= 1`。
+- `dma.subview` 的 `source` 必须是一维 `i8` memory，`result` 必须是一维 contiguous memory，`source.space == result.space`，`size` 必须与 `result_type.shape` 完全一致。
 - `dma.view` 的 `result_type.shape` 必须由 `shape` operand（DSL `view(..., size, ...)`）确定，`result_type.stride` 必须由 `stride` operand（DSL `view(..., stride)`）确定；二者都必须与对应 operand 一一对齐，不得只因“生成了 `dma.view` op”就视为合同对齐成功。
 - 当 `dma.view` 结果直接参与 `func.return` 时，返回的 `!nn.memory<...>` 类型必须与同一份 `result_type` 完全一致；`test/dsl/ast/test_mlir_gen.py` 中的 `EXPECTED_MEMORY` 比对依赖这一边界。
 - 静态可判定时 `dma.view` 的 `source/result` `numel` 必须一致；若 `source` 为一维 `i8` byte pool，则要求字节数一致且静态边界不越界。
@@ -121,6 +124,7 @@
 | `store(target, source, offsets, sizes, strides=None)` | `dma.store` | 切片写回。 |
 | `slice(source, offsets, sizes, strides=None, space=None)` | `dma.alloc + dma.slice(target, source, offsets, sizes, strides)` | 先分配 `target`，再执行目标式切片写入；表达式值绑定到 `dma.alloc` 的结果。 |
 | `deslice(target, source, offsets, sizes, strides=None)` | `dma.deslice` | 切片写回（语义等价于 `store`）。 |
+| `（无直接 DSL helper；pass 侧合法化原语）` | `dma.subview` | 从一维 `i8` backing memory 按目标 dtype 元素单位切出一维 contiguous typed memory，当前用于 `memory-pool` rewrite。 |
 | `view(source, offset, size, stride)` | `dma.view` | 视图重解释，`offset/size/stride` 分别映射为 `dma.view` 的 `offsets/shape/stride` operand；`result_type.shape == size`、`result_type.stride == stride`，静态可判定时要求 `source/result` `numel` 一致；若该结果直接返回，则 `func.return` 类型必须与同一 `result_type` 一致。 |
 | `reshape(source, shape)` | `dma.reshape` | 连续布局 reshape。 |
 | `flatten(source)` | `dma.reshape` | 视为 `reshape` 到一维形状。 |
@@ -150,6 +154,7 @@
 - `dma.view` 的动态 `offsets/shape/stride` operand 数量与 rank 不一致必须报错；`shape/stride` 不是 `!symbol.int<"expr">` 时必须报错；`offsets` 仅允许 `!symbol.int<"expr">` 或 `!symbol.iter<"expr">`；`dma.reshape` 的动态 `shape` operand 数量与 rank 不一致必须报错，且其 operand 必须为 `!symbol.int<"expr">`。
 - `dma.view` 的 `offsets` 必须为非负整数；当 `source.shape/offsets/shape/stride` 可静态判定时，必须进行边界校验并在越界时报错。
 - `dma.view` 的 `result.stride` rank 与 `result.shape` 不一致必须报错；`dma.reshape` 的 `result.stride` 非连续行主序必须报错。
+- `dma.subview` 的 `source` 非一维 `i8` memory、`result` 非一维 contiguous memory、`source/result` space 不一致、`offset/size/stride` 非单个 `!symbol.int<"expr">`、`size` 与结果 shape 不一致，或静态可判定 byte 边界越界时必须报错。
 - `dma.reshape` 的连续行主序校验必须接受含 `min(lhs, rhs)` 的等价符号 stride 表达式；例如动态尾块 shape 中出现 `min(tile, extent - iter)` 时，不得仅因乘法因子打印顺序或 `min` 文本形式不同而拒绝。
 - `dma.cast` 中 `source/result` 的 `shape/stride/space` 不一致必须报错。
 - `strides` 当前仅允许单位步长语义；若当前实现限制 stride 为 1，则 `stride != 1` 的切片搬运必须显式报错，不得 silently 接受。
@@ -531,6 +536,41 @@ op = DmaDesliceOp(target, source, offsets, sizes, strides, result_type)
 - 返回值语义为“回写完成后的目标内存”，其类型必须与 `target` 完全一致。
 - 可 lowering 到 `tensor.insert_slice`、`memref.copy` 或等价目标。
 
+### `class DmaSubviewOp(source: SSAValue | Operation, offset: SSAValue | Operation, size: SSAValue | Operation, stride: SSAValue | Operation, result_type: NnMemoryType)`
+
+- api：`class DmaSubviewOp(source: SSAValue | Operation, offset: SSAValue | Operation, size: SSAValue | Operation, stride: SSAValue | Operation, result_type: NnMemoryType)`
+
+- 功能说明：
+
+- 从一维 `i8` backing memory 中按目标 dtype 元素单位切出一维 typed memory。
+- 当前公开用途是 `memory-pool` pass 的 rewrite 目标面，配合 `dma.reshape` 恢复原 alloc type。
+
+- 参数：
+
+- `source`：源 backing memory；类型必须为一维 `!nn.memory<[N], [1], i8, #nn.space<...>>`。
+- `offset`：单个 `!symbol.int<"expr">` operand；按 `result_type.element_type` 的元素单位表达；必须非负。
+- `size`：单个 `!symbol.int<"expr">` operand；按 `result_type.element_type` 的元素数量表达；必须与 `result_type.shape` 一致。
+- `stride`：单个 `!symbol.int<"expr">` operand；按 `result_type.element_type` 的元素单位表达；当前合法路径使用 `1`，静态负值或 0 必须被拒绝。
+- `result_type`：一维 contiguous typed memory；类型必须为 `NnMemoryType`。
+
+- 使用示例：
+
+```python
+op = DmaSubviewOp(source, offset, size, stride, result_type)
+```
+
+- 注意事项：
+
+- `source.space` 必须与 `result_type.space` 一致。
+- `source.element_type` 必须是 `i8`；`result_type.element_type` 可以是公开支持的 typed memory dtype。
+- `result_type.shape` 必须是一维；`result_type.stride` 必须是一维连续 `[1]`。
+- 静态可判定时，`(offset + (size - 1) * stride + 1) * sizeof(result_dtype)` 不得超过 source byte length。
+- `dma.subview` 不替代通用多维 `dma.view`；它只表达 byte backing memory 的一维 typed 切分。
+
+- 返回值：
+
+- 返回一维 typed `!nn.memory<...>`；当前 op result 数量固定为 `1`。
+
 ### `class DmaViewOp(source: SSAValue | Operation, offsets: Sequence[SSAValue], shape: Sequence[SSAValue], stride: Sequence[SSAValue], result_type: NnMemoryType)`
 
 - api：`class DmaViewOp(source: SSAValue | Operation, offsets: Sequence[SSAValue], shape: Sequence[SSAValue], stride: Sequence[SSAValue], result_type: NnMemoryType)`
@@ -657,6 +697,7 @@ op = DmaCastOp(source, result_type)
 - 验证 `dma.fill` 能将 `const(i32)` / `!symbol.int<"expr">` 真实写入 `i32 memory`，并锁定它不是“空 `dma.alloc` 占位”的替代说法。
 - 验证 `dma.free` 的内存类型约束与无返回值语义。
 - 验证 `dma.view/reshape` 的元素类型/空间一致性与形状约束，其中 `dma.view` 覆盖动态 `offsets`（允许 `!symbol.iter<"expr">`）、`shape/stride`（`!symbol.int<"expr">`）operand 与边界校验，`dma.reshape` 覆盖动态 `shape` 的 `!symbol.int<"expr">` operand。
+- 验证 `dma.subview` 的一维 `i8` backing memory、一维 typed result、元素单位 `offset/size/stride`、space 一致性、size 对齐与静态 byte bounds 边界。
 - 验证 `dma.view` 在 DSL helper / 合同链路中不仅要生成 op，还要求返回 `Memory` 类型与 `dma.view.result_type` 一致；当直接 `func.return` 时，`EXPECTED_MEMORY` 比对必须成功。
 - 验证默认连续 stride 在符号维度（如 `N` / `M*N` / `min(tile, extent - iter)` / `?`）下的推导、等价判断与退化规则已覆盖。
 - 验证 `dma.cast` 只允许改变元素类型，且保持 `shape/stride/space` 不变。
@@ -692,6 +733,8 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-019A | 边界/异常 | `dma.view` offsets 边界 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_view_rejects_invalid_offsets_or_bounds`。 | “`dma.view` offsets 边界”场景按公开错误语义失败或被拒绝。 | `test_dma_view_rejects_invalid_offsets_or_bounds` |
 | TC-DMA-019B | 内存/DMA | `dma.view` 显式 stride 布局 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_view_accepts_matching_numel_subset_with_explicit_stride`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.view` 显式 stride 布局”场景。 | `test_dma_view_accepts_matching_numel_subset_with_explicit_stride` |
 | TC-DMA-019D | 内存/DMA | `dma.view` byte pool typed view | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_view_byte_pool_typed_view`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.view` byte pool typed view”场景。 | `test_dma_view_byte_pool_typed_view` |
+| TC-DMA-019E | 内存/DMA | `dma.subview` byte backing typed result | 准备一维 `i8` backing memory、`!symbol.int` offset/size/stride 与一维 typed result。 | 运行 `test_dma_subview_byte_pool_typed_result_valid`。 | `dma.subview` verifier 接受合法 typed subview。 | `test_dma_subview_byte_pool_typed_result_valid` |
+| TC-DMA-019F | 边界/异常 | `dma.subview` 公开 verifier 边界 | 准备非 i8 source、二维 result、space mismatch、size mismatch 与 byte bounds 越界输入。 | 运行 `test_dma_subview_rejects_invalid_contract_edges`。 | `dma.subview` 按公开错误语义拒绝非法输入。 | `test_dma_subview_rejects_invalid_contract_edges` |
 | TC-DMA-019C | 执行结果 | `dma.view` 合同返回类型对齐 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 [`test/dsl/ast/test_mlir_gen.py`](../../test/dsl/ast/test_mlir_gen.py)。 | 命令返回码、输出、执行结果或状态变更体现“`dma.view` 合同返回类型对齐”场景。 | [`test/dsl/ast/test_mlir_gen.py`](../../test/dsl/ast/test_mlir_gen.py) |
 | TC-DMA-020 | 内存/DMA | `dma.alloc` 动态形状输入 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_alloc_dynamic_symbol_int_shape_operands_valid`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.alloc` 动态形状输入”场景。 | `test_dma_alloc_dynamic_symbol_int_shape_operands_valid` |
 | TC-DMA-021 | 解析/打印 | 动态 shape round-trip | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_dma_dynamic_symbol_int_parse_print_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_dma_dynamic_symbol_int_parse_print_round_trip` |

@@ -4,17 +4,22 @@
 功能说明:
 - 提供 `memory-pool` pass 的生命周期摘要分析接口。
 - 汇总 `dma.alloc/dma.free` 的生命周期区间与 peak 统计。
-- 支持直线路径的 pool 改写：`dma.alloc -> i8 byte pool + dma.view`。
+- 显式 `rewrite=True` 时，将片上 `dma.alloc` 改写为 `arch.get_dynamic_memory + dma.subview + dma.reshape`。
 
 API 列表:
-- `class MemoryPoolPass(rewrite: bool = False, fold: bool = True)`
+- `class MemoryPoolPass(rewrite: bool = False, fold: bool = True, alignment: int = 1024)`
+- `MemoryPoolPass.from_options(options: dict[str, str]) -> MemoryPoolPass`
+- `MemoryPoolPass.apply(ctx: Context, module: ModuleOp) -> None`
 - `MemoryPoolPass.get_summary(func_name: str) -> MemoryPoolSummary`
 - `MemoryPoolPass.all_summaries() -> dict[str, MemoryPoolSummary]`
+- `class MemoryPoolSummary(func_name: str, intervals: tuple[MemoryPoolInterval, ...], peak_bytes_by_bucket: dict[tuple[str], sympy.Basic], pool_count: int)`
+- `MemoryPoolSummary.to_text() -> str`
+- `class MemoryPoolInterval(name: str, bucket_key: tuple[str], size_bytes_expr: sympy.Basic, begin_index: int, end_index: int, offset_bytes_expr: sympy.Basic)`
 
 使用示例:
 - from kernel_gen.passes.memory_pool import MemoryPoolPass
 - MemoryPoolPass(rewrite=False).apply(Context(), module)
-- summary = MemoryPoolPass(rewrite=False).get_summary("main")
+- MemoryPoolPass(rewrite=True, fold=False, alignment=0).apply(Context(), module)
 
 关联文件:
 - spec: spec/pass/lowering/memory_pool.md
@@ -23,13 +28,14 @@ API 列表:
 """
 
 from __future__ import annotations
-from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from dataclasses import dataclass
+from typing import TypeAlias
 
+import re
 import sympy as sp
 from xdsl.context import Context
-from xdsl.dialects import arith, func
+from xdsl.dialects import func, scf
 from xdsl.dialects.builtin import (
     ArrayAttr,
     BFloat16Type,
@@ -37,21 +43,30 @@ from xdsl.dialects.builtin import (
     Float32Type,
     Float64Type,
     IntAttr,
-    IntegerAttr,
     IntegerType,
     ModuleOp,
     StringAttr,
-    UnrealizedConversionCastOp,
     i8,
-    i32,
 )
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaViewOp
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
+from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaReshapeOp, DmaSubviewOp
 from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.dialect.symbol import SymbolForOp, SymbolValueType
+from kernel_gen.dialect.symbol import (
+    SymbolAddOp,
+    SymbolConstOp,
+    SymbolFloorDivOp,
+    SymbolForOp,
+    SymbolMulOp,
+    SymbolValueType,
+)
 from kernel_gen.passes.common import raise_pass_contract_error
 from kernel_gen.passes.pass_manager import Pass
+
+
+LoopOp: TypeAlias = SymbolForOp | scf.ForOp
 
 
 @dataclass(frozen=True)
@@ -60,10 +75,10 @@ class MemoryPoolInterval:
 
 
     功能说明:
-    - 记录 alloc 的 bucket、字节大小表达式、词法起止索引与复用 offset。
+    - 记录 alloc 的 bucket、字节大小表达式、词法起止索引与线性 byte offset。
 
     使用示例:
-    - interval = MemoryPoolInterval("alloc1", ("#GM",), sp.Symbol("A"), 0, 2, sp.Integer(0))
+    - interval = MemoryPoolInterval("alloc1", ("#TSM",), sp.Integer(16), 0, 2, sp.Integer(0))
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -80,34 +95,6 @@ class MemoryPoolInterval:
 
 
 @dataclass(frozen=True)
-class _AllocInfo:
-    """改写阶段使用的 alloc 生命周期信息。
-
-
-    功能说明:
-    - 记录 alloc/free 对、bucket、字节大小表达式与词法区间，供直线路径改写使用。
-
-    使用示例:
-    - info = _AllocInfo(alloc_op, free_op, sp.Integer(8), ("#GM",), 0, 1)
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    alloc_op: DmaAllocOp
-    free_op: DmaFreeOp
-    size_bytes_expr: sp.Basic
-    bucket_key: tuple[str]
-    begin_index: int
-    end_index: int
-
-
-SlotKey = MemoryPoolInterval | _AllocInfo
-
-
-@dataclass(frozen=True)
 class MemoryPoolSummary:
     """memory-pool summary 结构体。
 
@@ -117,7 +104,7 @@ class MemoryPoolSummary:
 
     使用示例:
     - summary = MemoryPoolSummary("main", intervals, peak_bytes_by_bucket, pool_count=1)
-    - print(summary.to_text())
+    - text = summary.to_text()
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -169,16 +156,91 @@ class MemoryPoolSummary:
         return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class _AllocInfo:
+    """改写阶段使用的 alloc 生命周期信息。
+
+
+    功能说明:
+    - 记录 alloc/free、dtype、bucket、字节大小表达式与词法区间，供 summary 与 rewrite 共用。
+
+    使用示例:
+    - info = _AllocInfo(alloc_op, free_op, sp.Integer(8), 4, ("#TSM",), 0, 1)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    alloc_op: DmaAllocOp
+    free_op: DmaFreeOp | None
+    size_bytes_expr: sp.Basic
+    dtype_size: int
+    bucket_key: tuple[str]
+    begin_index: int
+    end_index: int
+
+
+@dataclass(frozen=True)
+class _SymbolMaterial:
+    """rewrite 内部 symbol SSA 值。
+
+
+    功能说明:
+    - 绑定 `!symbol.int<"expr">` SSA 值、稳定表达文本与 sympy 表达式。
+
+    使用示例:
+    - material = _SymbolMaterial(op.result, "N", sp.Symbol("N"))
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    value: SSAValue
+    expr_text: str
+    expr: sp.Basic
+
+
+@dataclass(frozen=True)
+class _RewriteInfo:
+    """单个 alloc 的 rewrite 物化信息。
+
+
+    功能说明:
+    - 保存 shape/numel/offset symbol 值与待插入 metadata op。
+
+    使用示例:
+    - rewrite_info = _RewriteInfo(info, shape_values, numel, offset, metadata_ops)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    info: _AllocInfo
+    shape_values: tuple[_SymbolMaterial, ...]
+    numel: _SymbolMaterial
+    offset: _SymbolMaterial
+    one: _SymbolMaterial
+    metadata_ops: tuple[Operation, ...]
+
+
 class MemoryPoolPass(Pass):
     """memory-pool pass。
 
 
     功能说明:
     - 统计 `dma.alloc/dma.free` 生命周期并生成 summary。
-    - `rewrite=True` 时对直线路径执行 pool 改写。
+    - `rewrite=True` 时执行 dynamic memory rewrite。
+    - `alignment` 以 byte 为单位控制线性切分偏移；`0` 表示关闭对齐。
 
     使用示例:
     - MemoryPoolPass(rewrite=False).apply(Context(), module)
+    - MemoryPoolPass.from_options({"rewrite": "true", "alignment": "0"})
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -188,17 +250,17 @@ class MemoryPoolPass(Pass):
 
     name = "memory-pool"
 
-    def __init__(self, rewrite: bool = False, fold: bool = True) -> None:
+    def __init__(self, rewrite: bool = False, fold: bool = True, alignment: int = 1024) -> None:
         """初始化 memory-pool pass。
 
 
         功能说明:
-        - 记录是否执行 pool 改写。
-        - `fold` 默认开启，由 PassManager 在 pass 后执行通用 folding sweep。
+        - 记录是否执行 pool 改写、通用 fold 开关与 byte alignment。
+        - `alignment=0` 关闭对齐；负数或非整数直接报公开合同错误。
 
         使用示例:
         - pass_obj = MemoryPoolPass()
-        - pass_obj = MemoryPoolPass(rewrite=True, fold=False)
+        - pass_obj = MemoryPoolPass(rewrite=True, fold=False, alignment=0)
 
         关联文件:
         - spec: spec/pass/lowering/memory_pool.md
@@ -206,9 +268,47 @@ class MemoryPoolPass(Pass):
         - 功能实现: kernel_gen/passes/memory_pool.py
         """
 
+        if not isinstance(rewrite, bool):
+            raise_pass_contract_error("MemoryPoolOptionError", "rewrite must be bool")
+        if not isinstance(fold, bool):
+            raise_pass_contract_error("MemoryPoolOptionError", "fold must be bool")
+        if isinstance(alignment, bool) or not isinstance(alignment, int):
+            raise_pass_contract_error("MemoryPoolOptionError", "alignment must be non-negative integer")
+        if alignment < 0:
+            raise_pass_contract_error("MemoryPoolOptionError", "alignment must be non-negative integer")
+
         super().__init__(fold=fold)
         self.rewrite = rewrite
+        self.alignment = alignment
         self._summaries: dict[str, MemoryPoolSummary] = {}
+
+    @classmethod
+    def from_options(cls, options: dict[str, str]) -> "MemoryPoolPass":
+        """从 registry/ircheck options 构造 MemoryPoolPass。
+
+
+        功能说明:
+        - 支持 `rewrite`、`fold` 与 `alignment` 三个公开 option。
+        - 未知 option、非法 bool、负数或非整数 alignment 稳定失败。
+
+        使用示例:
+        - pass_obj = MemoryPoolPass.from_options({"rewrite": "true", "alignment": "1024"})
+
+        关联文件:
+        - spec: spec/pass/lowering/memory_pool.md
+        - test: test/passes/test_memory_pool.py
+        - 功能实现: kernel_gen/passes/memory_pool.py
+        """
+
+        allowed = {"rewrite", "fold", "alignment"}
+        unknown = sorted(set(options) - allowed)
+        if unknown:
+            raise_pass_contract_error("MemoryPoolOptionError", f"unknown option: {unknown[0]}")
+
+        rewrite = _parse_bool_option(options.get("rewrite", "false"), "rewrite")
+        fold = _parse_bool_option(options.get("fold", "true"), "fold")
+        alignment = _parse_alignment_option(options.get("alignment", "1024"))
+        return cls(rewrite=rewrite, fold=fold, alignment=alignment)
 
     def get_summary(self, func_name: str) -> MemoryPoolSummary:
         """查询单个 func 的 summary。
@@ -249,15 +349,15 @@ class MemoryPoolPass(Pass):
         return dict(self._summaries)
 
     def apply(self, ctx: Context, module: ModuleOp) -> None:
-        """执行 memory-pool 分析。
+        """执行 memory-pool 分析与可选改写。
 
 
         功能说明:
         - 遍历 module 内每个 `func.func` 并生成 summary。
-        - 公开执行入口固定为 xdsl `ModulePass.apply(ctx, module)`，不再提供单 pass `run(...)` 兼容入口。
+        - `rewrite=True` 时将片上 alloc 改写为 dynamic memory subview + reshape。
 
         使用示例:
-        - MemoryPoolPass(rewrite=False).apply(Context(), module)
+        - MemoryPoolPass(rewrite=True, fold=False, alignment=0).apply(Context(), module)
 
         关联文件:
         - spec: spec/pass/lowering/memory_pool.md
@@ -273,10 +373,12 @@ class MemoryPoolPass(Pass):
         for op in module.ops:
             if not isinstance(op, func.FuncOp):
                 continue
-            summary = _summarize_func(op)
+            block, ops, op_index, loop_bounds, op_loop = _collect_straight_line_ops(op)
+            alloc_infos = _alloc_infos_from_ops(ops, op_index, loop_bounds, op_loop)
+            summary = _summarize_func(op, alloc_infos, self.alignment)
             self._summaries[summary.func_name] = summary
             if self.rewrite:
-                _rewrite_func(op)
+                _rewrite_func(block, alloc_infos, op_loop, self.alignment)
 
 
 _SPACE_TOKENS = {
@@ -285,7 +387,61 @@ _SPACE_TOKENS = {
     "local": "#LM",
     "tsm": "#TSM",
     "tlm": "#TLM",
+    "tlm1": "#TLM1",
+    "tlm2": "#TLM2",
+    "tlm3": "#TLM3",
 }
+_DYNAMIC_MEMORY_SPACES = {"shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
+_SYMBOL_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _parse_bool_option(value: str, name: str) -> bool:
+    """解析 bool option。
+
+
+    功能说明:
+    - 接受常见 true/false 文本并保持非法输入稳定失败。
+
+    使用示例:
+    - enabled = _parse_bool_option("true", "rewrite")
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise_pass_contract_error("MemoryPoolOptionError", f"{name} must be bool")
+
+
+def _parse_alignment_option(value: str) -> int:
+    """解析 alignment option。
+
+
+    功能说明:
+    - 将公开字符串 option 转成非负整数。
+
+    使用示例:
+    - alignment = _parse_alignment_option("1024")
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    try:
+        alignment = int(value.strip())
+    except ValueError:
+        raise_pass_contract_error("MemoryPoolOptionError", "alignment must be non-negative integer")
+    if alignment < 0:
+        raise_pass_contract_error("MemoryPoolOptionError", "alignment must be non-negative integer")
+    return alignment
 
 
 def _expr_text(expr: sp.Basic) -> str:
@@ -315,7 +471,7 @@ def _bucket_text(bucket: tuple[str]) -> str:
     - 用于 summary 文本输出。
 
     使用示例:
-    - text = _bucket_text(("#GM",))
+    - text = _bucket_text(("#TSM",))
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -333,7 +489,7 @@ def _space_token(mem_type: NnMemoryType) -> str:
 
 
     功能说明:
-    - 将 `global/shared/local/tsm/tlm` 统一映射到 `#GM/#SM/#LM/#TSM/#TLM`。
+    - 将 `global/shared/local/tsm/tlm1/tlm2/tlm3` 统一映射到稳定文本 token。
 
     使用示例:
     - token = _space_token(mem_type)
@@ -384,36 +540,13 @@ def _element_size(element_type: Attribute) -> int | None:
     return None
 
 
-def _layout_family(mem_type: NnMemoryType) -> str:
-    """解析 memory type 的 layout 族。
-
-
-    功能说明:
-    - 第一版仅支持 contiguous layout。
-
-    使用示例:
-    - family = _layout_family(mem_type)
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    if not _is_contiguous_memory_type(mem_type):
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
-            "MemoryPoolUnsupportedNonLinearAlloc: custom stride is not supported in v1"
-        )
-    return "contiguous"
-
-
 def _dim_expr(dim: Attribute) -> sp.Basic:
-    """将 shape 维度属性转换为 sympy 表达式。
+    """将 shape/stride 维度属性转换为 sympy 表达式。
 
 
     功能说明:
     - IntAttr 转为 Integer。
-    - StringAttr 转为 Symbol；若为 "?" 则显式失败。
+    - StringAttr 转为整数符号；匿名 `?` 直接失败。
 
     使用示例:
     - expr = _dim_expr(StringAttr("M"))
@@ -428,9 +561,39 @@ def _dim_expr(dim: Attribute) -> sp.Basic:
         return sp.Integer(dim.data)
     if isinstance(dim, StringAttr):
         if not dim.data or dim.data == "?":
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolUnsupportedShape: anonymous shape is not supported")
-        return sp.Symbol(dim.data)
-    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"MemoryPoolUnsupportedShape: {dim}")
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "MemoryPoolUnsupportedShape: anonymous shape is not supported",
+            )
+        return sp.Symbol(dim.data, integer=True, positive=True)
+    raise KernelCodeError(
+        ErrorKind.CONTRACT,
+        ErrorModule.PASS,
+        f"MemoryPoolUnsupportedShape: {dim}",
+    )
+
+
+def _shape_product(mem_type: NnMemoryType) -> sp.Basic:
+    """将 memory shape 转为乘积表达式。
+
+
+    功能说明:
+    - 逐维累乘生成元素数量表达式。
+
+    使用示例:
+    - size_expr = _shape_product(mem_type)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    result: sp.Basic = sp.Integer(1)
+    for dim in mem_type.shape.data:
+        result = sp.simplify(result * _dim_expr(dim))
+    return result
 
 
 def _is_contiguous_memory_type(mem_type: NnMemoryType) -> bool:
@@ -439,7 +602,6 @@ def _is_contiguous_memory_type(mem_type: NnMemoryType) -> bool:
 
     功能说明:
     - 在本文件内按 `shape` 推导默认 row-major stride，避免跨文件调用 dma 私有 helper。
-    - 使用 `sympy` 比较等价表达式，允许符号乘法因子顺序不同。
 
     使用示例:
     - _is_contiguous_memory_type(result_type)
@@ -467,184 +629,12 @@ def _is_contiguous_memory_type(mem_type: NnMemoryType) -> bool:
     return True
 
 
-def _shape_product(mem_type: NnMemoryType) -> sp.Basic:
-    """将 memory shape 转为乘积表达式。
-
-
-    功能说明:
-    - 逐维累乘生成 size 表达式。
-
-    使用示例:
-    - size_expr = _shape_product(mem_type)
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    result: sp.Basic = sp.Integer(1)
-    for dim in mem_type.shape.data:
-        result *= _dim_expr(dim)
-    return result
-
-
-def _maybe_int(expr: sp.Basic) -> int | None:
-    """尝试将 sympy 表达式转换为整数。
-
-
-    功能说明:
-    - 当表达式为可解析的整数时返回 int，否则返回 None。
-
-    使用示例:
-    - value = _maybe_int(sp.Integer(4))
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    if isinstance(expr, sp.Integer):
-        return int(expr)
-    if expr.is_number and expr.is_integer:
-        try:
-            return int(expr)
-        except (TypeError, ValueError):
-            return None
-    return None
-
-
-def _const_symbol_int(value: int) -> tuple[arith.ConstantOp, UnrealizedConversionCastOp]:
-    """构造 `!symbol.int<"value">` 常量的 IR op 对。
-
-
-    功能说明:
-    - 先创建 i32 常量，再用 `builtin.unrealized_conversion_cast` 转成 `!symbol.int<"expr">`。
-    - 返回两条 op，调用者决定插入到 block 中的位置。
-
-    使用示例:
-    - const_i32, cast = _const_symbol_int(1)
-    - block.insert_ops_before([const_i32, cast], anchor_op)
-    - one = cast.results[0]
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    const = arith.ConstantOp(IntegerAttr(value, i32))
-    result_type = SymbolValueType.from_expr(str(value))
-    cast = UnrealizedConversionCastOp(operands=[const.result], result_types=[result_type])
-    return const, cast
-
-
-def _symbol_value_expr(expr: str) -> tuple[list[Operation], SSAValue]:
-    """构造 `!symbol.int<"expr">` 的 SSA value。
-
-
-    功能说明:
-    - 当 expr 可解析为整数时，使用 `_const_symbol_int` 生成常量。
-    - 否则使用 `builtin.unrealized_conversion_cast` 生成指定 expr 的 symbol 值。
-
-    使用示例:
-    - ops, value = _symbol_value_expr("M*N")
-    - block.insert_ops_before(ops, anchor_op)
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    try:
-        int_value = int(expr)
-    except ValueError:
-        int_value = None
-    if int_value is not None:
-        const, cast = _const_symbol_int(int_value)
-        return [const, cast], cast.results[0]
-
-    const = arith.ConstantOp(IntegerAttr(0, i32))
-    result_type = SymbolValueType.from_expr(expr)
-    cast = UnrealizedConversionCastOp(operands=[const.result], result_types=[result_type])
-    return [const, cast], cast.results[0]
-
-
-def _symbol_expr(expr: sp.Basic) -> tuple[list[Operation], SSAValue]:
-    """将 sympy 表达式转换为 `!symbol.int<"expr">` SSA value。
-
-
-    功能说明:
-    - 统一通过 `_symbol_value_expr` 生成可插入的 IR op 列表。
-
-    使用示例:
-    - ops, value = _symbol_expr(sp.Symbol("M") * sp.Integer(2))
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    return _symbol_value_expr(_expr_text(expr))
-
-
-def _shape_dim_attr(expr: sp.Basic) -> Attribute:
-    """将 size 表达式转换为 shape 维度 attribute。
-
-
-    功能说明:
-    - 整数表达式转为 `IntAttr`。
-    - 其他表达式转为 `StringAttr`。
-
-    使用示例:
-    - dim_attr = _shape_dim_attr(sp.Symbol("M"))
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    if isinstance(expr, sp.Integer):
-        return IntAttr(int(expr))
-    return StringAttr(_expr_text(expr))
-
-
-def _layout_operands(layout: ArrayAttr[Attribute]) -> tuple[list[Operation], list[SSAValue]]:
-    """将 layout 属性转换为 `!symbol.int<"expr">` operand 列表。
-
-
-    功能说明:
-    - IntAttr 转为常量 `!symbol.int<"n">`。
-    - StringAttr 转为符号 `!symbol.int<"expr">`。
-
-    使用示例:
-    - ops, values = _layout_operands(result_type.stride)
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    ops: list[Operation] = []
-    values: list[SSAValue] = []
-    for attr in layout.data:
-        expr_ops, expr_value = _symbol_expr(_dim_expr(attr))
-        ops.extend(expr_ops)
-        values.append(expr_value)
-    return ops, values
-
-
 def _bucket_key(mem_type: NnMemoryType) -> tuple[str]:
     """生成 bucket key。
 
 
     功能说明:
-    - 规则: (space,)；layout 仅用于校验。
+    - 规则固定为 `(space,)`；layout 仅用于校验。
 
     使用示例:
     - key = _bucket_key(mem_type)
@@ -655,7 +645,12 @@ def _bucket_key(mem_type: NnMemoryType) -> tuple[str]:
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    _layout_family(mem_type)
+    if not _is_contiguous_memory_type(mem_type):
+        raise KernelCodeError(
+            ErrorKind.UNIMPLEMENTED,
+            ErrorModule.PASS,
+            "MemoryPoolUnsupportedLayout: non-contiguous/custom stride is not supported",
+        )
     return (_space_token(mem_type),)
 
 
@@ -675,16 +670,16 @@ def _parent_block(op: Operation) -> Block | None:
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    return getattr(op, "parent_block", lambda: None)()
+    return op.parent_block()
 
 
 def _visit_ops_with_loops(
     ops_list: list[Operation],
-    current_loop: SymbolForOp | None,
+    current_loop: LoopOp | None,
     reject_other_regions: bool,
     ops: list[Operation],
-    loop_bounds: dict[SymbolForOp, tuple[int, int]],
-    op_loop: dict[Operation, SymbolForOp | None],
+    loop_bounds: dict[LoopOp, tuple[int, int]],
+    op_loop: dict[Operation, LoopOp | None],
     index: int,
 ) -> int:
     """递归收集 op 并返回最新词法索引。
@@ -692,7 +687,7 @@ def _visit_ops_with_loops(
 
     功能说明:
     - 作为 `_collect_ops_with_loops(...)` 的当前文件私有递归 helper。
-    - 避免在函数体内定义嵌套 visitor。
+    - 接受 `symbol.for` 与 `scf.for`，其余 region 在 rewrite 路径拒绝。
 
     使用示例:
     - index = _visit_ops_with_loops(list(block.ops), None, True, ops, loop_bounds, op_loop, 0)
@@ -709,11 +704,13 @@ def _visit_ops_with_loops(
         index += 1
         if not op.regions:
             continue
-        if isinstance(op, SymbolForOp):
+        if isinstance(op, (SymbolForOp, scf.ForOp)):
             blocks = list(op.body.blocks)
             if len(blocks) != 1:
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS,
-                    "MemoryPoolUnsupportedRegionEscape: symbol.for must have single block"
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.PASS,
+                    "MemoryPoolUnsupportedRegionEscape: loop must have single block",
                 )
             loop_start = index
             index = _visit_ops_with_loops(
@@ -729,8 +726,10 @@ def _visit_ops_with_loops(
             loop_bounds[op] = (loop_start, loop_end)
             continue
         if reject_other_regions:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS,
-                "MemoryPoolUnsupportedRegionEscape: nested regions are not supported"
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "MemoryPoolUnsupportedRegionEscape: nested regions are not supported",
             )
         for region in op.regions:
             for block in region.blocks:
@@ -750,13 +749,12 @@ def _collect_ops_with_loops(
     blocks: list[Block],
     *,
     reject_other_regions: bool,
-) -> tuple[list[Operation], dict[SymbolForOp, tuple[int, int]], dict[Operation, SymbolForOp | None]]:
-    """收集 op 列表并记录 symbol.for 的词法范围。
+) -> tuple[list[Operation], dict[LoopOp, tuple[int, int]], dict[Operation, LoopOp | None]]:
+    """收集 op 列表并记录 loop 的词法范围。
 
 
     功能说明:
-    - 按词法顺序收集 op，并为每个 op 记录所在的最内层 symbol.for。
-    - 当 `reject_other_regions=True` 时，遇到非 symbol.for 的 region 会直接报错。
+    - 按词法顺序收集 op，并为每个 op 记录所在的最内层 loop。
 
     使用示例:
     - ops, loop_bounds, op_loop = _collect_ops_with_loops(blocks, reject_other_regions=True)
@@ -768,10 +766,9 @@ def _collect_ops_with_loops(
     """
 
     ops: list[Operation] = []
-    loop_bounds: dict[SymbolForOp, tuple[int, int]] = {}
-    op_loop: dict[Operation, SymbolForOp | None] = {}
+    loop_bounds: dict[LoopOp, tuple[int, int]] = {}
+    op_loop: dict[Operation, LoopOp | None] = {}
     index = 0
-
     for block in blocks:
         index = _visit_ops_with_loops(
             list(block.ops),
@@ -782,20 +779,18 @@ def _collect_ops_with_loops(
             op_loop,
             index,
         )
-
     return ops, loop_bounds, op_loop
 
 
 def _collect_straight_line_ops(
     func_op: func.FuncOp,
-) -> tuple[Block, list[Operation], dict[Operation, int], dict[SymbolForOp, tuple[int, int]], dict[Operation, SymbolForOp | None]]:
-    """收集可改写路径的 op 列表。
+) -> tuple[Block, list[Operation], dict[Operation, int], dict[LoopOp, tuple[int, int]], dict[Operation, LoopOp | None]]:
+    """收集可分析/改写路径的 op 列表。
 
 
     功能说明:
-    - 仅允许单 block。
-    - 允许 symbol.for，其余 region 直接报错。
-    - 返回 op 索引与 loop 词法范围，供生命周期分析使用。
+    - 仅允许单 block 函数体。
+    - 允许 `symbol.for` 与 `scf.for`，其余 region 直接报错。
 
     使用示例:
     - block, ops, op_index, loop_bounds, op_loop = _collect_straight_line_ops(func_op)
@@ -807,19 +802,20 @@ def _collect_straight_line_ops(
     """
 
     if len(func_op.body.blocks) != 1:
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolRewriteUnsupported: function must have single block")
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "MemoryPoolUnsupportedControlFlow: function must have single block",
+        )
     block = func_op.body.blocks[0]
-    ops, loop_bounds, op_loop = _collect_ops_with_loops(
-        [block],
-        reject_other_regions=True,
-    )
+    ops, loop_bounds, op_loop = _collect_ops_with_loops([block], reject_other_regions=True)
     op_index = {op: idx for idx, op in enumerate(ops)}
     return block, ops, op_index, loop_bounds, op_loop
 
 
 def _has_escaping_use(
     alloc_op: DmaAllocOp,
-    op_loop: dict[Operation, SymbolForOp | None],
+    op_loop: dict[Operation, LoopOp | None],
 ) -> bool:
     """判断 alloc 是否存在 escaping use。
 
@@ -854,7 +850,7 @@ def _free_indices_for_ops(
 
 
     功能说明:
-    - 为 summary 与 rewrite 共用 alloc/free 配对输入，避免两处维护重复扫描逻辑。
+    - 为 summary 与 rewrite 共用 alloc/free 配对输入，避免两处重复扫描。
 
     使用示例:
     - free_indices = _free_indices_for_ops(ops, op_index)
@@ -875,15 +871,15 @@ def _free_indices_for_ops(
 def _alloc_infos_from_ops(
     ops: list[Operation],
     op_index: dict[Operation, int],
-    loop_bounds: dict[SymbolForOp, tuple[int, int]],
-    op_loop: dict[Operation, SymbolForOp | None],
+    loop_bounds: dict[LoopOp, tuple[int, int]],
+    op_loop: dict[Operation, LoopOp | None],
 ) -> list[_AllocInfo]:
     """从词法 op 列表构造 alloc 生命周期信息。
 
 
     功能说明:
     - 统一 summary 与 rewrite 的 alloc/free 配对、dtype、shape 与 loop 生命周期校验。
-    - 只返回当前文件内部 `_AllocInfo`，不新增公开 API。
+    - 无 free alloc 的生命周期按所在 region 结束处理。
 
     使用示例:
     - alloc_infos = _alloc_infos_from_ops(ops, op_index, loop_bounds, op_loop)
@@ -896,50 +892,88 @@ def _alloc_infos_from_ops(
 
     free_indices = _free_indices_for_ops(ops, op_index)
     alloc_infos: list[_AllocInfo] = []
+    last_index = len(ops) - 1
     for op in ops:
         if not isinstance(op, DmaAllocOp):
             continue
         result_type = op.result.type
         if not isinstance(result_type, NnMemoryType):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory")
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
+            )
         if _has_escaping_use(op, op_loop):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolEscapingAlloc: alloc escapes current region")
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "MemoryPoolEscapingAlloc: alloc escapes current region",
+            )
 
         alloc_idx = op_index[op]
         free_list = free_indices.get(op.result, [])
         free_after = [value for value in free_list if value >= alloc_idx]
-        if not free_after:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: dma.free not found for alloc")
+        free_before = [value for value in free_list if value < alloc_idx]
         if len(free_after) > 1:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: multiple dma.free for alloc")
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "MemoryPoolLifetimeError: multiple dma.free for alloc",
+            )
+        if free_before and not free_after:
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "MemoryPoolLifetimeError: dma.free before alloc",
+            )
 
-        free_index = free_after[0]
-        free_op = ops[free_index]
-        assert isinstance(free_op, DmaFreeOp)
+        free_op: DmaFreeOp | None = None
+        free_index: int | None = None
+        if free_after:
+            free_index = free_after[0]
+            candidate = ops[free_index]
+            if not isinstance(candidate, DmaFreeOp):
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.PASS,
+                    "MemoryPoolLifetimeError: free index does not point to dma.free",
+                )
+            free_op = candidate
 
         alloc_loop = op_loop.get(op)
-        free_loop = op_loop.get(free_op)
         if alloc_loop is None:
-            if free_loop is not None:
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: dma.free inside symbol.for")
+            if free_op is not None and op_loop.get(free_op) is not None:
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.PASS,
+                    "MemoryPoolLifetimeError: dma.free inside loop",
+                )
             begin_index = alloc_idx
-            end_index = free_index
+            end_index = free_index if free_index is not None else last_index
         else:
-            if free_loop is not alloc_loop:
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: loop alloc/free mismatch")
-            begin_index, end_index = loop_bounds[alloc_loop]
+            if free_op is not None and op_loop.get(free_op) is not alloc_loop:
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.PASS,
+                    "MemoryPoolLifetimeError: loop alloc/free mismatch",
+                )
+            begin_index, loop_end = loop_bounds[alloc_loop]
+            end_index = loop_end
 
         dtype_size = _element_size(result_type.element_type)
         if dtype_size is None:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS,
-                f"MemoryPoolUnsupportedDtype: {result_type.element_type} is not supported"
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                f"MemoryPoolUnsupportedDtype: {result_type.element_type} is not supported",
             )
 
         alloc_infos.append(
             _AllocInfo(
                 op,
                 free_op,
-                _shape_product(result_type) * sp.Integer(dtype_size),
+                sp.simplify(_shape_product(result_type) * sp.Integer(dtype_size)),
+                dtype_size,
                 _bucket_key(result_type),
                 begin_index,
                 end_index,
@@ -948,18 +982,17 @@ def _alloc_infos_from_ops(
     return alloc_infos
 
 
-def _assign_slots(
-    items: list[tuple[int, int, SlotKey]],
-) -> tuple[dict[SlotKey, int], int]:
-    """基于词法区间为条目分配 slot。
+def _align_expr(expr: sp.Basic, alignment: int) -> sp.Basic:
+    """对 byte offset 表达式执行公开 alignment 规则。
 
 
     功能说明:
-    - 输入 (begin, end, key) 列表，输出每个 key 的 slot 以及最大 slot 数。
-    - 仅当区间不重叠时才会复用已有 slot。
+    - `alignment=0` 直接返回原表达式。
+    - 静态整数表达式使用 `align_up`。
+    - 动态表达式无法机械物化时按 unimplemented 失败。
 
     使用示例:
-    - slots, max_slots = _assign_slots([(0, 2, alloc_a), (3, 5, alloc_b)])
+    - offset = _align_expr(sp.Integer(514), 1024)
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -967,30 +1000,51 @@ def _assign_slots(
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    ordered = sorted(items, key=lambda item: (item[0], item[1]))
-    active: list[tuple[int, int]] = []
-    free_slots: list[int] = []
-    slot_map: dict[SlotKey, int] = {}
-    next_slot = 0
+    if alignment == 0:
+        return sp.simplify(expr)
+    if expr == 0:
+        return sp.Integer(0)
+    if isinstance(expr, sp.Integer) or (expr.is_number and expr.is_integer):
+        value = int(expr)
+        return sp.Integer(((value + alignment - 1) // alignment) * alignment)
+    raise KernelCodeError(
+        ErrorKind.UNIMPLEMENTED,
+        ErrorModule.PASS,
+        "MemoryPoolUnsupportedAlignment: dynamic aligned offset is not supported",
+    )
 
-    for begin, end, key in ordered:
-        still_active: list[tuple[int, int]] = []
-        for active_end, slot in active:
-            if active_end < begin:
-                free_slots.append(slot)
-            else:
-                still_active.append((active_end, slot))
-        active = still_active
-        if free_slots:
-            free_slots.sort()
-            slot = free_slots.pop(0)
-        else:
-            slot = next_slot
-            next_slot += 1
-        slot_map[key] = slot
-        active.append((end, slot))
 
-    return slot_map, next_slot
+def _peak_bytes(intervals: list[MemoryPoolInterval]) -> sp.Basic:
+    """计算 bucket 内的 peak 字节数量。
+
+
+    功能说明:
+    - 按 begin/end 索引构造事件流，取最大并发表达式。
+
+    使用示例:
+    - peak = _peak_bytes(intervals)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    if not intervals:
+        return sp.Integer(0)
+    events: dict[int, list[sp.Basic]] = {}
+    for interval in intervals:
+        events.setdefault(interval.begin_index, []).append(interval.size_bytes_expr)
+        events.setdefault(interval.end_index + 1, []).append(-interval.size_bytes_expr)
+
+    current = sp.Integer(0)
+    candidates: list[sp.Basic] = []
+    for index in sorted(events):
+        for delta in events[index]:
+            current = sp.simplify(current + delta)
+        candidates.append(current)
+
+    return sp.Max(*candidates)
 
 
 def _alloc_name(value: SSAValue, index: int) -> str:
@@ -1015,46 +1069,19 @@ def _alloc_name(value: SSAValue, index: int) -> str:
     return f"alloc{index}"
 
 
-def _peak_bytes(intervals: list[MemoryPoolInterval]) -> sp.Basic:
-    """计算 bucket 内的 peak 字节数量。
-
-
-    功能说明:
-    - 按 begin/end 索引构造事件流，取最大并发表达式。
-
-    使用示例:
-    - peak = _peak_bytes(intervals)
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    events: dict[int, list[sp.Basic]] = {}
-    for interval in intervals:
-        events.setdefault(interval.begin_index, []).append(interval.size_bytes_expr)
-        events.setdefault(interval.end_index + 1, []).append(-interval.size_bytes_expr)
-
-    current = sp.Integer(0)
-    candidates: list[sp.Basic] = []
-    for index in sorted(events):
-        for delta in events[index]:
-            current += delta
-        candidates.append(current)
-
-    return sp.Max(*candidates)
-
-
-def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
+def _summarize_func(
+    func_op: func.FuncOp,
+    alloc_infos: list[_AllocInfo],
+    alignment: int,
+) -> MemoryPoolSummary:
     """生成单个 func 的 summary。
 
 
     功能说明:
-    - 解析 alloc/free 区间并计算 peak 统计。
+    - 解析 alloc/free 区间并计算线性 offset 与 peak 统计。
 
     使用示例:
-    - summary = _summarize_func(func_op)
+    - summary = _summarize_func(func_op, alloc_infos, 1024)
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -1062,17 +1089,11 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    ops, loop_bounds, op_loop = _collect_ops_with_loops(
-        list(func_op.body.blocks),
-        reject_other_regions=True,
-    )
-    op_index = {op: idx for idx, op in enumerate(ops)}
-
+    current_by_bucket: dict[tuple[str], sp.Basic] = {}
     intervals: list[MemoryPoolInterval] = []
-    for alloc_index, info in enumerate(
-        _alloc_infos_from_ops(ops, op_index, loop_bounds, op_loop),
-        start=1,
-    ):
+    for alloc_index, info in enumerate(alloc_infos, start=1):
+        current = current_by_bucket.get(info.bucket_key, sp.Integer(0))
+        offset = _align_expr(current, alignment)
         intervals.append(
             MemoryPoolInterval(
                 _alloc_name(info.alloc_op.result, alloc_index),
@@ -1080,42 +1101,17 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
                 info.size_bytes_expr,
                 info.begin_index,
                 info.end_index,
-                sp.Integer(0),
+                offset,
             )
         )
+        current_by_bucket[info.bucket_key] = sp.simplify(offset + info.size_bytes_expr)
 
-    slot_map: dict[MemoryPoolInterval, int] = {}
-    groups: dict[tuple[tuple[str], sp.Basic], list[MemoryPoolInterval]] = {}
-    for interval in intervals:
-        group_key = (interval.bucket_key, interval.size_bytes_expr)
-        groups.setdefault(group_key, []).append(interval)
-    for group in groups.values():
-        group_items = [(item.begin_index, item.end_index, item) for item in group]
-        group_slots, _ = _assign_slots(group_items)
-        slot_map.update(group_slots)
-
-    intervals_with_offset: list[MemoryPoolInterval] = []
-    for interval in intervals:
-        slot = slot_map.get(interval, 0)
-        offset_expr = interval.size_bytes_expr * sp.Integer(slot)
-        intervals_with_offset.append(
-            MemoryPoolInterval(
-                interval.name,
-                interval.bucket_key,
-                interval.size_bytes_expr,
-                interval.begin_index,
-                interval.end_index,
-                offset_expr,
-            )
-        )
-
-    intervals_tuple = tuple(intervals_with_offset)
+    intervals_tuple = tuple(intervals)
     peak_bytes_by_bucket: dict[tuple[str], sp.Basic] = {}
-    for bucket in {interval.bucket_key for interval in intervals_with_offset}:
-        bucket_intervals = [
-            interval for interval in intervals_with_offset if interval.bucket_key == bucket
-        ]
-        peak_bytes_by_bucket[bucket] = _peak_bytes(bucket_intervals)
+    for bucket in {interval.bucket_key for interval in intervals_tuple}:
+        peak_bytes_by_bucket[bucket] = _peak_bytes(
+            [interval for interval in intervals_tuple if interval.bucket_key == bucket]
+        )
 
     return MemoryPoolSummary(
         func_op.sym_name.data,
@@ -1125,16 +1121,15 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
     )
 
 
-def _rewrite_func(func_op: func.FuncOp) -> None:
-    """对直线路径执行 pool 改写。
+def _symbol_expr_from_type(value: SSAValue) -> str:
+    """从 `!symbol.int<"expr">` SSA type 读取表达文本。
 
 
     功能说明:
-    - 仅支持单 block，允许 `symbol.for`，其余 region 直接报错。
-    - 仅改写同 bucket、相同 size 表达式的 alloc/free，并按 slot 分配 offset。
+    - 用于复用函数参数或已有 symbol SSA 值。
 
     使用示例:
-    - _rewrite_func(func_op)
+    - expr = _symbol_expr_from_type(block.args[0])
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -1142,94 +1137,1079 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    block, ops, op_index, loop_bounds, op_loop = _collect_straight_line_ops(func_op)
-    if not ops:
-        return
+    if not isinstance(value.type, SymbolValueType):
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "MemoryPoolUnsupportedShape: dynamic shape must be !symbol.int",
+        )
+    return value.type.expr.expr.data
 
-    alloc_infos = _alloc_infos_from_ops(ops, op_index, loop_bounds, op_loop)
+
+def _material_from_existing(value: SSAValue) -> _SymbolMaterial:
+    """把已有 symbol SSA 包装为 `_SymbolMaterial`。
+
+
+    功能说明:
+    - 不新增 IR op，仅记录表达文本与 sympy 表达式。
+
+    使用示例:
+    - material = _material_from_existing(arg)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    expr_text = _symbol_expr_from_type(value)
+    return _SymbolMaterial(value, expr_text, _sympy_expr_from_text(expr_text))
+
+
+def _sympy_expr_from_text(expr_text: str) -> sp.Basic:
+    """将公开 symbol 表达文本转成 sympy 表达式。
+
+
+    功能说明:
+    - 显式把标识符绑定为整数符号，避免 `N` 被 sympy 解析为内置函数。
+
+    使用示例:
+    - expr = _sympy_expr_from_text("M*N")
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    names = set(_SYMBOL_NAME_PATTERN.findall(expr_text))
+    local_symbols = {
+        name: sp.Symbol(name, integer=True, positive=True)
+        for name in names
+        if name != "min"
+    }
+    return sp.sympify(expr_text, locals=local_symbols)
+
+
+def _const_material(value: int) -> tuple[SymbolConstOp, _SymbolMaterial]:
+    """构造 symbol.const material。
+
+
+    功能说明:
+    - 创建一个 `symbol.const` op 和对应 `_SymbolMaterial`。
+
+    使用示例:
+    - op, material = _const_material(1)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    op = SymbolConstOp(value)
+    return op, _SymbolMaterial(op.result, str(value), sp.Integer(value))
+
+
+def _add_material(lhs: _SymbolMaterial, rhs: _SymbolMaterial) -> tuple[SymbolAddOp, _SymbolMaterial]:
+    """构造 symbol.add material。
+
+
+    功能说明:
+    - 按公开 `SymbolAddOp` 物化两个 symbol 值相加。
+
+    使用示例:
+    - op, material = _add_material(lhs, rhs)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    expr = sp.simplify(lhs.expr + rhs.expr)
+    if expr == lhs.expr:
+        expr_text = lhs.expr_text
+    elif expr == rhs.expr:
+        expr_text = rhs.expr_text
+    elif isinstance(expr, sp.Integer) or (expr.is_number and expr.is_integer):
+        expr_text = str(int(expr))
+    else:
+        expr_text = f"{lhs.expr_text}+{rhs.expr_text}"
+    op = SymbolAddOp(lhs.value, rhs.value, SymbolValueType.from_expr(expr_text))
+    return op, _SymbolMaterial(op.result, expr_text, expr)
+
+
+def _mul_expr_text(lhs: _SymbolMaterial, rhs: _SymbolMaterial, expr: sp.Basic) -> str:
+    """生成乘法结果类型表达文本。
+
+
+    功能说明:
+    - 静态值输出整数；动态加法子表达式加括号，保持 memory_pool expectation 的稳定文本。
+
+    使用示例:
+    - text = _mul_expr_text(lhs, rhs, lhs.expr * rhs.expr)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    if isinstance(expr, sp.Integer) or (expr.is_number and expr.is_integer):
+        return str(int(expr))
+    lhs_text = f"({lhs.expr_text})" if "+" in lhs.expr_text or "-" in lhs.expr_text[1:] else lhs.expr_text
+    rhs_text = f"({rhs.expr_text})" if "+" in rhs.expr_text or "-" in rhs.expr_text[1:] else rhs.expr_text
+    return f"{lhs_text}*{rhs_text}"
+
+
+def _mul_material(lhs: _SymbolMaterial, rhs: _SymbolMaterial) -> tuple[SymbolMulOp, _SymbolMaterial]:
+    """构造 symbol.mul material。
+
+
+    功能说明:
+    - 按公开 `SymbolMulOp` 物化两个 symbol 值相乘。
+
+    使用示例:
+    - op, material = _mul_material(lhs, rhs)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    expr = sp.simplify(lhs.expr * rhs.expr)
+    expr_text = _mul_expr_text(lhs, rhs, expr)
+    op = SymbolMulOp(lhs.value, rhs.value, SymbolValueType.from_expr(expr_text))
+    return op, _SymbolMaterial(op.result, expr_text, expr)
+
+
+def _floordiv_material(
+    lhs: _SymbolMaterial,
+    rhs: _SymbolMaterial,
+) -> tuple[SymbolFloorDivOp, _SymbolMaterial]:
+    """构造 symbol.floordiv material。
+
+
+    功能说明:
+    - 仅在调用方已证明 byte offset 可被 dtype size 整除后使用。
+
+    使用示例:
+    - op, material = _floordiv_material(offset_bytes, dtype_size)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    if rhs.expr == 0 or sp.simplify(lhs.expr % rhs.expr) != 0:
+        raise KernelCodeError(
+            ErrorKind.UNIMPLEMENTED,
+            ErrorModule.PASS,
+            "MemoryPoolTypedViewOutOfBounds: byte offset is not divisible by dtype size",
+        )
+    expr = sp.simplify(lhs.expr / rhs.expr)
+    expr_text = _expr_text(expr)
+    op = SymbolFloorDivOp(lhs.value, rhs.value, SymbolValueType.from_expr(expr_text))
+    return op, _SymbolMaterial(op.result, expr_text, expr)
+
+
+def _find_dynamic_shape_value(info: _AllocInfo, dim: StringAttr, index: int) -> SSAValue:
+    """从 dma.alloc dynamic_shape 中查找指定维度的 symbol SSA。
+
+
+    功能说明:
+    - 支持 full-rank dynamic_shape 与仅符号维 dynamic_shape 两种公开输入形态。
+
+    使用示例:
+    - value = _find_dynamic_shape_value(info, StringAttr("M"), 0)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    dynamic_values = list(info.alloc_op.dynamic_shape)
+    if len(dynamic_values) == len(info.alloc_op.result.type.shape.data):
+        return dynamic_values[index]
+    for value in dynamic_values:
+        if _symbol_expr_from_type(value) == dim.data:
+            return value
+    raise KernelCodeError(
+        ErrorKind.CONTRACT,
+        ErrorModule.PASS,
+        f"MemoryPoolUnsupportedShape: dynamic shape operand not found for {dim.data}",
+    )
+
+
+def _shape_materials(info: _AllocInfo) -> tuple[list[Operation], tuple[_SymbolMaterial, ...]]:
+    """为 alloc result shape 生成 reshape 所需 symbol 值。
+
+
+    功能说明:
+    - 静态维生成 `symbol.const`；动态维复用 `dma.alloc` 的公开 dynamic_shape operand。
+
+    使用示例:
+    - ops, dims = _shape_materials(info)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    result_type = info.alloc_op.result.type
+    if not isinstance(result_type, NnMemoryType):
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
+        )
+    ops: list[Operation] = []
+    values: list[_SymbolMaterial] = []
+    for index, dim in enumerate(result_type.shape.data):
+        if isinstance(dim, IntAttr):
+            op, material = _const_material(dim.data)
+            ops.append(op)
+            values.append(material)
+            continue
+        if isinstance(dim, StringAttr):
+            if dim.data == "?":
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.PASS,
+                    "MemoryPoolUnsupportedShape: anonymous shape is not supported",
+                )
+            values.append(_material_from_existing(_find_dynamic_shape_value(info, dim, index)))
+            continue
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            f"MemoryPoolUnsupportedShape: {dim}",
+        )
+    return ops, tuple(values)
+
+
+def _symbol_value_visible_from_block(value: SSAValue, target_block: Block, func_block: Block) -> bool:
+    """判断已有 symbol SSA 是否可在目标 block 中安全使用。
+
+
+    功能说明:
+    - 函数体内定义的 symbol 值可以被函数体后续 op 与嵌套 loop body 使用。
+    - loop body 内定义的 symbol 值只允许在同一 loop body 内使用，不能泄漏到函数体后续 offset。
+
+    使用示例:
+    - if not _symbol_value_visible_from_block(dim.value, block, func_block): ...
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    owner = value.owner
+    if isinstance(owner, Operation):
+        owner_block = _parent_block(owner)
+        return owner_block is target_block or owner_block is func_block
+    if isinstance(owner, Block):
+        return owner is target_block
+    return False
+
+
+def _shape_materials_for_block(
+    info: _AllocInfo,
+    target_block: Block,
+    func_block: Block,
+) -> tuple[list[Operation], tuple[_SymbolMaterial, ...]]:
+    """为指定 block 生成 shape material 并校验动态维支配关系。
+
+
+    功能说明:
+    - 静态维会在目标 block 内重新生成 const。
+    - 动态维只能复用对目标 block 可见的已有 `!symbol.int` SSA；不可见时公开拒绝 rewrite。
+
+    使用示例:
+    - ops, dims = _shape_materials_for_block(info, func_block, func_block)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    shape_ops, shape_values = _shape_materials(info)
+    generated_ops = set(shape_ops)
+    for material in shape_values:
+        owner = material.value.owner
+        if isinstance(owner, Operation) and owner in generated_ops:
+            continue
+        if _symbol_value_visible_from_block(material.value, target_block, func_block):
+            continue
+        raise KernelCodeError(
+            ErrorKind.UNIMPLEMENTED,
+            ErrorModule.PASS,
+            "MemoryPoolUnsupportedControlFlow: dynamic loop alloc size does not dominate later offset",
+        )
+    return shape_ops, shape_values
+
+
+def _numel_material(
+    dims: tuple[_SymbolMaterial, ...],
+    *,
+    prefer_mul: bool,
+) -> tuple[list[Operation], _SymbolMaterial]:
+    """生成 flat result 的元素数量 symbol 值。
+
+
+    功能说明:
+    - rank-1 直接复用该维度。
+    - 动态维或 `prefer_mul=True` 时使用 `symbol.mul` 链。
+    - 纯静态多 alloc 场景可直接生成 `symbol.const <numel>`。
+
+    使用示例:
+    - ops, numel = _numel_material(dims, prefer_mul=True)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    if not dims:
+        op, material = _const_material(1)
+        return [op], material
+    if len(dims) == 1:
+        return [], dims[0]
+
+    has_dynamic = any(not isinstance(dim.expr, sp.Integer) for dim in dims)
+    if has_dynamic or prefer_mul:
+        ops: list[Operation] = []
+        current = dims[0]
+        for dim in dims[1:]:
+            op, current = _mul_material(current, dim)
+            ops.append(op)
+        return ops, current
+
+    numel = sp.Integer(1)
+    for dim in dims:
+        numel *= dim.expr
+    op, material = _const_material(int(numel))
+    return [op], material
+
+
+def _is_static_dims(dims: tuple[_SymbolMaterial, ...]) -> bool:
+    """判断 shape 维度是否全为静态整数。
+
+
+    功能说明:
+    - 为 rewrite 的稳定 IR 物化策略提供分支依据。
+
+    使用示例:
+    - if _is_static_dims(dims): ...
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    return all(isinstance(dim.expr, sp.Integer) for dim in dims)
+
+
+def _offset_material(
+    current_bytes: sp.Basic,
+    dtype_size: int,
+    alignment: int,
+    *,
+    zero: _SymbolMaterial,
+    prior_numels_same_dtype: list[_SymbolMaterial],
+    prior_numels: list[tuple[_SymbolMaterial, int]],
+    force_floordiv: bool,
+    ratio_materials: dict[int, _SymbolMaterial] | None = None,
+) -> tuple[list[Operation], _SymbolMaterial]:
+    """生成当前 alloc 的 subview offset。
+
+
+    功能说明:
+    - offset 以当前 target dtype 的元素为单位。
+    - 只有已证明整除时才物化 `symbol.floordiv`。
+
+    使用示例:
+    - ops, offset = _offset_material(current_bytes, 4, 0, zero=zero, prior_numels_same_dtype=[a], prior_numels=[(a, 4)], force_floordiv=False)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    aligned_bytes = _align_expr(current_bytes, alignment)
+    if aligned_bytes == 0:
+        return [], zero
+
+    if alignment == 0 and prior_numels_same_dtype and not force_floordiv:
+        ops: list[Operation] = []
+        current = zero
+        for prior in prior_numels_same_dtype:
+            op, current = _add_material(current, prior)
+            ops.append(op)
+        return ops, current
+
+    if alignment == 0 and prior_numels and not force_floordiv:
+        if any(not isinstance(numel.expr, sp.Integer) for numel, _ in prior_numels):
+            return _dynamic_offset_from_prior_numels(prior_numels, dtype_size, zero, ratio_materials)
+
+    if sp.simplify(aligned_bytes % dtype_size) != 0:
+        raise KernelCodeError(
+            ErrorKind.UNIMPLEMENTED,
+            ErrorModule.PASS,
+            "MemoryPoolTypedViewOutOfBounds: byte offset is not divisible by dtype size",
+        )
+
+    byte_op, byte_material = _const_material(int(aligned_bytes))
+    dtype_op, dtype_material = _const_material(dtype_size)
+    div_op, offset = _floordiv_material(byte_material, dtype_material)
+    return [byte_op, dtype_op, div_op], offset
+
+
+def _dynamic_offset_from_prior_numels(
+    prior_numels: list[tuple[_SymbolMaterial, int]],
+    dtype_size: int,
+    zero: _SymbolMaterial,
+    ratio_materials: dict[int, _SymbolMaterial] | None = None,
+) -> tuple[list[Operation], _SymbolMaterial]:
+    """按 prior numel 与 dtype byte ratio 生成动态 offset。
+
+
+    功能说明:
+    - 仅处理可证明整除的整数 ratio。
+    - 多个同 ratio 动态项先求和再乘 ratio，保持 IR 可读且避免 floor 截断。
+
+    使用示例:
+    - ops, offset = _dynamic_offset_from_prior_numels([(m, 4), (k, 4)], 2, zero)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    ratio_groups: dict[int, list[_SymbolMaterial]] = {}
+    for numel, prior_dtype_size in prior_numels:
+        if prior_dtype_size % dtype_size != 0:
+            raise KernelCodeError(
+                ErrorKind.UNIMPLEMENTED,
+                ErrorModule.PASS,
+                "MemoryPoolTypedViewOutOfBounds: byte offset is not divisible by dtype size",
+            )
+        ratio_groups.setdefault(prior_dtype_size // dtype_size, []).append(numel)
+
+    ops: list[Operation] = []
+    current: _SymbolMaterial | None = None
+    for ratio in sorted(ratio_groups):
+        group_values = ratio_groups[ratio]
+        group_current = group_values[0]
+        for value in group_values[1:]:
+            op, group_current = _add_material(group_current, value)
+            ops.append(op)
+        if ratio != 1:
+            if ratio_materials is not None and ratio in ratio_materials:
+                ratio_material = ratio_materials[ratio]
+                ratio_op = None
+            else:
+                ratio_op, ratio_material = _const_material(ratio)
+            mul_op, group_current = _mul_material(group_current, ratio_material)
+            if ratio_op is not None:
+                ops.append(ratio_op)
+            ops.append(mul_op)
+        if current is None:
+            if ratio == 1:
+                op, current = _add_material(zero, group_current)
+                ops.append(op)
+            else:
+                current = group_current
+            continue
+        op, current = _add_material(current, group_current)
+        ops.append(op)
+    if current is None:
+        return [], zero
+    return ops, current
+
+
+def _element_key(info: _AllocInfo) -> str:
+    """返回 alloc element type 的稳定内部 key。
+
+
+    功能说明:
+    - 区分 `f32` 与 `i32` 这类 byte size 相同但公开 dtype 不同的 alloc。
+
+    使用示例:
+    - key = _element_key(info)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    result_type = info.alloc_op.result.type
+    if not isinstance(result_type, NnMemoryType):
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
+        )
+    return repr(result_type.element_type)
+
+
+def _all_numels_static(values: dict[_AllocInfo, _SymbolMaterial]) -> bool:
+    """判断一组 numel material 是否均为静态整数。
+
+
+    功能说明:
+    - 为静态 mixed dtype offset 选择 byte const + floordiv 物化路径。
+
+    使用示例:
+    - if _all_numels_static(numel_by_info): ...
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    return all(isinstance(material.expr, sp.Integer) for material in values.values())
+
+
+def _bucket_has_mixed_element(
+    group_infos: list[_AllocInfo],
+    bucket: tuple[str],
+) -> bool:
+    """判断同一 bucket 内是否存在多个公开 dtype。
+
+
+    功能说明:
+    - mixed dtype 需要按 byte offset 证明可整除，不能复用同 dtype 元素累计路径。
+
+    使用示例:
+    - mixed = _bucket_has_mixed_element(group_infos, ("#TSM",))
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    return len({_element_key(info) for info in group_infos if info.bucket_key == bucket}) > 1
+
+
+def _flat_result_type(info: _AllocInfo, numel: _SymbolMaterial) -> NnMemoryType:
+    """生成 dma.subview 的一维 typed result type。
+
+
+    功能说明:
+    - 保留原 dtype/space，将 shape 收敛为 `[numel]`、stride 固定 `[1]`。
+
+    使用示例:
+    - flat_type = _flat_result_type(info, numel)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    result_type = info.alloc_op.result.type
+    if not isinstance(result_type, NnMemoryType):
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
+        )
+    shape_attr: Attribute
+    if isinstance(numel.expr, sp.Integer):
+        shape_attr = IntAttr(int(numel.expr))
+    else:
+        shape_attr = StringAttr(numel.expr_text)
+    return NnMemoryType(
+        ArrayAttr([shape_attr]),
+        ArrayAttr([IntAttr(1)]),
+        result_type.element_type,
+        result_type.space,
+    )
+
+
+def _metadata_group_block(info: _AllocInfo, op_loop: dict[Operation, LoopOp | None], func_block: Block) -> Block:
+    """选择 metadata op 插入所在 block。
+
+
+    功能说明:
+    - `symbol.for` 内 alloc 的 shape/offset metadata 留在 loop 内。
+    - `scf.for` 内 alloc 的 loop-invariant metadata 留在函数入口 block。
+
+    使用示例:
+    - block = _metadata_group_block(info, op_loop, func_block)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    loop = op_loop.get(info.alloc_op)
+    if isinstance(loop, SymbolForOp):
+        block = _parent_block(info.alloc_op)
+        if block is None:
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "MemoryPoolLifetimeError: alloc parent block not found",
+            )
+        return block
+    return func_block
+
+
+def _materialize_prior_numel_for_block(
+    info: _AllocInfo,
+    target_block: Block,
+    func_block: Block,
+    cache: dict[_AllocInfo, _SymbolMaterial],
+    metadata_ops: list[Operation],
+) -> _SymbolMaterial:
+    """在目标 block 内重新物化 prior alloc 的 numel。
+
+
+    功能说明:
+    - 用于后续函数体 alloc 的 offset 依赖前面 loop 内动态 alloc 大小的场景。
+    - 重新物化可避免函数体 `dma.subview.offset` 引用 loop body 内 SSA。
+
+    使用示例:
+    - material = _materialize_prior_numel_for_block(info, func_block, func_block, cache, ops)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    if info in cache:
+        return cache[info]
+    shape_ops, dims = _shape_materials_for_block(info, target_block, func_block)
+    metadata_ops.extend(shape_ops)
+    numel_ops, numel = _numel_material(dims, prefer_mul=not _is_static_dims(dims))
+    metadata_ops.extend(numel_ops)
+    cache[info] = numel
+    return numel
+
+
+def _prior_numels_for_block(
+    prior_entries: list[tuple[_AllocInfo, _SymbolMaterial, int]],
+    target_block: Block,
+    func_block: Block,
+    cache: dict[_AllocInfo, _SymbolMaterial],
+    metadata_ops: list[Operation],
+) -> list[tuple[_SymbolMaterial, int]]:
+    """返回可在目标 block 使用的 prior numel 列表。
+
+
+    功能说明:
+    - 已支配目标 block 的 material 直接复用。
+    - 不支配目标 block 的 material 按 prior alloc 重新在目标 block 物化。
+
+    使用示例:
+    - prior_numels = _prior_numels_for_block(processed, block, func_block, cache, metadata_ops)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    result: list[tuple[_SymbolMaterial, int]] = []
+    for info, material, dtype_size in prior_entries:
+        owner = material.value.owner
+        if isinstance(owner, Operation) and owner in metadata_ops:
+            result.append((material, dtype_size))
+            continue
+        if _symbol_value_visible_from_block(material.value, target_block, func_block):
+            result.append((material, dtype_size))
+            continue
+        local_material = _materialize_prior_numel_for_block(
+            info,
+            target_block,
+            func_block,
+            cache,
+            metadata_ops,
+        )
+        result.append((local_material, dtype_size))
+    return result
+
+
+def _prepare_rewrite_infos(
+    alloc_infos: list[_AllocInfo],
+    op_loop: dict[Operation, LoopOp | None],
+    func_block: Block,
+    alignment: int,
+) -> dict[_AllocInfo, _RewriteInfo]:
+    """准备所有 alloc 的 rewrite metadata。
+
+
+    功能说明:
+    - 按 `func + space` 线性切分，不做生命周期复用。
+    - 生成 metadata 时只使用公开 symbol dialect op。
+
+    使用示例:
+    - rewrite_infos = _prepare_rewrite_infos(alloc_infos, op_loop, block, 0)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    grouped: list[tuple[Block, list[_AllocInfo]]] = []
+    for info in alloc_infos:
+        group_block = _metadata_group_block(info, op_loop, func_block)
+        if grouped and grouped[-1][0] is group_block:
+            grouped[-1][1].append(info)
+        else:
+            grouped.append((group_block, [info]))
+
+    result: dict[_AllocInfo, _RewriteInfo] = {}
+    current_by_bucket: dict[tuple[str], sp.Basic] = {}
+    processed_numels_by_bucket: dict[tuple[str], list[tuple[_AllocInfo, _SymbolMaterial, int]]] = {}
+    for group_block, group_infos in grouped:
+        zero_op, zero = _const_material(0)
+        one_op, one = _const_material(1)
+        metadata_ops: list[Operation] = [zero_op]
+        if len(group_infos) > 1:
+            metadata_ops.append(one_op)
+
+        shape_by_info: dict[_AllocInfo, tuple[_SymbolMaterial, ...]] = {}
+        numel_ops_by_info: dict[_AllocInfo, list[Operation]] = {}
+        numel_by_info: dict[_AllocInfo, _SymbolMaterial] = {}
+        ratio_materials: dict[int, _SymbolMaterial] = {}
+        rematerialized_prior_numel_by_info: dict[_AllocInfo, _SymbolMaterial] = {}
+
+        for index, info in enumerate(group_infos):
+            if all(isinstance(candidate.size_bytes_expr, sp.Integer) for candidate in group_infos):
+                continue
+            prior_infos = [
+                prior
+                for prior in group_infos[:index]
+                if prior.bucket_key == info.bucket_key
+            ]
+            if not prior_infos:
+                continue
+            if alignment != 0:
+                continue
+            if not _bucket_has_mixed_element(group_infos, info.bucket_key):
+                continue
+            for prior in prior_infos:
+                if prior.dtype_size % info.dtype_size != 0:
+                    continue
+                ratio = prior.dtype_size // info.dtype_size
+                if ratio > 1 and ratio not in ratio_materials:
+                    ratio_op, ratio_material = _const_material(ratio)
+                    metadata_ops.append(ratio_op)
+                    ratio_materials[ratio] = ratio_material
+
+        for info in group_infos:
+            shape_ops, shape_values = _shape_materials(info)
+            metadata_ops.extend(shape_ops)
+            shape_by_info[info] = shape_values
+
+        for info in group_infos:
+            dims = shape_by_info[info]
+            has_multiple_buckets = len({candidate.bucket_key for candidate in group_infos}) > 1
+            prefer_mul = (
+                len(group_infos) == 1
+                or has_multiple_buckets
+                or not _is_static_dims(dims)
+                or alignment != 0
+                or isinstance(op_loop.get(info.alloc_op), SymbolForOp)
+            )
+            numel_ops, numel = _numel_material(dims, prefer_mul=prefer_mul)
+            numel_ops_by_info[info] = numel_ops
+            numel_by_info[info] = numel
+
+        if len(group_infos) == 1:
+            metadata_ops.extend(numel_ops_by_info[group_infos[0]])
+            metadata_ops.append(one_op)
+        emit_numels_before_offsets = (
+            len(group_infos) > 1
+            and (
+                alignment != 0
+                or _all_numels_static(numel_by_info)
+                or not any(
+                    _bucket_has_mixed_element(group_infos, info.bucket_key)
+                    and not isinstance(numel_by_info[info].expr, sp.Integer)
+                    for info in group_infos
+                )
+            )
+        )
+        if emit_numels_before_offsets:
+            for info in group_infos:
+                metadata_ops.extend(numel_ops_by_info[info])
+
+        static_mixed_byte_by_info: dict[_AllocInfo, _SymbolMaterial] = {}
+        static_mixed_dtype_by_info: dict[_AllocInfo, _SymbolMaterial] = {}
+        if alignment == 0 and _all_numels_static(numel_by_info):
+            for bucket in {info.bucket_key for info in group_infos}:
+                bucket_infos = [info for info in group_infos if info.bucket_key == bucket]
+                if len(bucket_infos) < 2 or not _bucket_has_mixed_element(group_infos, bucket):
+                    continue
+                for info in bucket_infos[:-1]:
+                    byte_count = int(numel_by_info[info].expr) * info.dtype_size
+                    byte_op, byte_material = _const_material(byte_count)
+                    metadata_ops.append(byte_op)
+                    static_mixed_byte_by_info[info] = byte_material
+                for info in bucket_infos[1:]:
+                    dtype_op, dtype_material = _const_material(info.dtype_size)
+                    metadata_ops.append(dtype_op)
+                    static_mixed_dtype_by_info[info] = dtype_material
+
+        group_rewrites: dict[_AllocInfo, tuple[list[Operation], _SymbolMaterial]] = {}
+        prior_infos_by_bucket: dict[tuple[str], list[_AllocInfo]] = {}
+        same_element_next_offset: dict[tuple[tuple[str], str], _SymbolMaterial] = {}
+        emitted_numel_infos: set[_AllocInfo] = set(
+            group_infos if emit_numels_before_offsets or len(group_infos) == 1 else ()
+        )
+        for index, info in enumerate(group_infos):
+            if (
+                not emit_numels_before_offsets
+                and info not in emitted_numel_infos
+                and not prior_infos_by_bucket.get(info.bucket_key)
+            ):
+                metadata_ops.extend(numel_ops_by_info[info])
+                emitted_numel_infos.add(info)
+
+            current = current_by_bucket.get(info.bucket_key, sp.Integer(0))
+            prior_infos = prior_infos_by_bucket.get(info.bucket_key, [])
+            element_key = (info.bucket_key, _element_key(info))
+            all_prior_same_element = bool(prior_infos) and all(
+                _element_key(prior) == _element_key(info) for prior in prior_infos
+            )
+            if current == 0:
+                offset_ops, offset = [], zero
+            elif (
+                alignment == 0
+                and all_prior_same_element
+                and element_key in same_element_next_offset
+            ):
+                offset_ops, offset = [], same_element_next_offset[element_key]
+            elif (
+                alignment == 0
+                and _all_numels_static(numel_by_info)
+                and info in static_mixed_dtype_by_info
+            ):
+                offset_ops = []
+                prior_byte_values = [
+                    static_mixed_byte_by_info[prior]
+                    for prior in prior_infos
+                    if prior in static_mixed_byte_by_info
+                ]
+                byte_offset = prior_byte_values[0]
+                for prior_byte in prior_byte_values[1:]:
+                    add_op, byte_offset = _add_material(byte_offset, prior_byte)
+                    offset_ops.append(add_op)
+                div_op, offset = _floordiv_material(
+                    byte_offset,
+                    static_mixed_dtype_by_info[info],
+                )
+                offset_ops.append(div_op)
+            else:
+                prior_numels: list[tuple[_SymbolMaterial, int]] = []
+                if alignment == 0 and not isinstance(current, sp.Integer):
+                    prior_numels = _prior_numels_for_block(
+                        processed_numels_by_bucket.get(info.bucket_key, []),
+                        group_block,
+                        func_block,
+                        rematerialized_prior_numel_by_info,
+                        metadata_ops,
+                    )
+                offset_ops, offset = _offset_material(
+                    current,
+                    info.dtype_size,
+                    alignment,
+                    zero=zero,
+                    prior_numels_same_dtype=[],
+                    prior_numels=prior_numels,
+                    force_floordiv=alignment != 0,
+                    ratio_materials=ratio_materials,
+                )
+            group_rewrites[info] = (offset_ops, offset)
+            metadata_ops.extend(offset_ops)
+            if info not in emitted_numel_infos:
+                metadata_ops.extend(numel_ops_by_info[info])
+                emitted_numel_infos.add(info)
+
+            next_info = group_infos[index + 1] if index + 1 < len(group_infos) else None
+            if (
+                next_info is not None
+                and next_info.bucket_key == info.bucket_key
+                and _element_key(next_info) == _element_key(info)
+                and alignment == 0
+            ):
+                next_op, next_offset = _add_material(offset, numel_by_info[info])
+                metadata_ops.append(next_op)
+                same_element_next_offset[element_key] = next_offset
+
+            current_by_bucket[info.bucket_key] = sp.simplify(_align_expr(current, alignment) + info.size_bytes_expr)
+            processed_numels_by_bucket.setdefault(info.bucket_key, []).append(
+                (info, numel_by_info[info], info.dtype_size)
+            )
+            prior_infos_by_bucket.setdefault(info.bucket_key, []).append(info)
+
+        anchor = group_infos[0].alloc_op
+        if group_block is func_block:
+            candidate_indices = [
+                list(func_block.ops).index(info.alloc_op)
+                for info in group_infos
+                if _parent_block(info.alloc_op) is func_block
+            ]
+            if candidate_indices:
+                anchor = list(func_block.ops)[min(candidate_indices)]
+            else:
+                loop_ops = [op_loop[info.alloc_op] for info in group_infos if op_loop.get(info.alloc_op) is not None]
+                if loop_ops:
+                    anchor = loop_ops[0]
+        group_block.insert_ops_before(metadata_ops, anchor)
+
+        for info in group_infos:
+            offset_ops, offset = group_rewrites[info]
+            result[info] = _RewriteInfo(
+                info,
+                shape_by_info[info],
+                numel_by_info[info],
+                offset,
+                one,
+                tuple(metadata_ops),
+            )
+
+    return result
+
+
+def _dynamic_memory_backing_ops(
+    alloc_infos: list[_AllocInfo],
+) -> dict[tuple[str], ArchGetDynamicMemoryOp]:
+    """为每个 space 构造唯一 arch.get_dynamic_memory op。
+
+
+    功能说明:
+    - 按 `func + memory space` 粒度创建 dynamic memory backing op。
+
+    使用示例:
+    - backings = _dynamic_memory_backing_ops(alloc_infos)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    backings: dict[tuple[str], ArchGetDynamicMemoryOp] = {}
+    for info in alloc_infos:
+        result_type = info.alloc_op.result.type
+        if not isinstance(result_type, NnMemoryType):
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
+            )
+        space_name = result_type.space.space.data
+        if space_name not in _DYNAMIC_MEMORY_SPACES:
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                f"MemoryPoolUnsupportedPoolBucket: dynamic memory space is not supported: {space_name}",
+            )
+        key = (space_name,)
+        if key not in backings:
+            backings[key] = ArchGetDynamicMemoryOp(result_type.space)
+    return backings
+
+
+def _rewrite_func(
+    block: Block,
+    alloc_infos: list[_AllocInfo],
+    op_loop: dict[Operation, LoopOp | None],
+    alignment: int,
+) -> None:
+    """对直线路径执行 dynamic memory rewrite。
+
+
+    功能说明:
+    - 每个 `func + memory space` 在入口生成唯一 `arch.get_dynamic_memory`。
+    - 原 alloc 就地替换为 `dma.subview + dma.reshape`；旧 free 被删除。
+
+    使用示例:
+    - _rewrite_func(block, alloc_infos, op_loop, alignment=0)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
 
     if not alloc_infos:
         return
 
-    ref_bucket = alloc_infos[0].bucket_key
-    ref_size = alloc_infos[0].size_bytes_expr
+    backings = _dynamic_memory_backing_ops(alloc_infos)
+    first_op = list(block.ops)[0] if list(block.ops) else None
+    backing_ops = list(backings.values())
+    if first_op is None:
+        block.add_ops(backing_ops)
+    else:
+        block.insert_ops_before(backing_ops, first_op)
+
+    rewrite_infos = _prepare_rewrite_infos(alloc_infos, op_loop, block, alignment)
     for info in alloc_infos:
-        if info.bucket_key != ref_bucket:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
-                "MemoryPoolUnsupportedPoolBucket: mixed space is not supported"
-            )
-        if info.size_bytes_expr != ref_size:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolUnsupportedPoolBucket: size mismatch")
-
-    slot_map, max_slots = _assign_slots(
-        [(info.begin_index, info.end_index, info) for info in alloc_infos]
-    )
-    first_type = alloc_infos[0].alloc_op.result.type
-    assert isinstance(first_type, NnMemoryType)
-    pool_size_expr = ref_size * sp.Integer(max_slots)
-    pool_shape_attr = _shape_dim_attr(pool_size_expr)
-    pool_type = NnMemoryType(
-        ArrayAttr([pool_shape_attr]),
-        ArrayAttr([IntAttr(1)]),
-        i8,
-        first_type.space,
-    )
-
-    pool_shape_ops, pool_shape_value = _symbol_expr(pool_size_expr)
-    zero_ops, zero_value = _symbol_value_expr("0")
-    pool_alloc = DmaAllocOp([pool_shape_value], pool_type)
-
-    anchor_op = ops[0]
-    block.insert_ops_before([*pool_shape_ops, *zero_ops, pool_alloc], anchor_op)
-
-    pool_size_value = _maybe_int(pool_size_expr)
-    for info in alloc_infos:
-        slot = slot_map.get(info, 0)
+        rewrite_info = rewrite_infos[info]
         result_type = info.alloc_op.result.type
-        assert isinstance(result_type, NnMemoryType)
-        stride_ops, stride_values = _layout_operands(result_type.stride)
-        rank = len(result_type.shape.data)
-
-        shape0_expr = _dim_expr(result_type.shape.data[0])
-        offset0_expr = sp.Integer(slot) * shape0_expr
-        offset_ops, offset0_value = _symbol_expr(offset0_expr)
-        offset_values = [offset0_value] + [zero_value] * (rank - 1)
-
-        if pool_size_value is not None:
-            size_value = _maybe_int(info.size_bytes_expr)
-            offset_value = _maybe_int(info.size_bytes_expr * sp.Integer(slot))
-            if size_value is not None and offset_value is not None:
-                if offset_value + size_value > pool_size_value:
-                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
-                        "MemoryPoolTypedViewOutOfBounds: typed view exceeds pool"
-                    )
-
-        view_op = DmaViewOp(
-            pool_alloc.result,
-            offset_values,
-            list(info.alloc_op.dynamic_shape),
-            stride_values,
+        if not isinstance(result_type, NnMemoryType):
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
+            )
+        backing = backings[(result_type.space.space.data,)]
+        subview = DmaSubviewOp(
+            backing.result,
+            rewrite_info.offset.value,
+            rewrite_info.numel.value,
+            rewrite_info.one.value,
+            _flat_result_type(info, rewrite_info.numel),
+        )
+        reshape = DmaReshapeOp(
+            subview.result,
+            [shape.value for shape in rewrite_info.shape_values],
             result_type,
         )
 
         alloc_block = _parent_block(info.alloc_op)
         if alloc_block is None:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: alloc parent block not found")
-        alloc_block.insert_ops_before([*offset_ops, *stride_ops, view_op], info.alloc_op)
-        info.alloc_op.result.replace_all_uses_with(view_op.result)
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "MemoryPoolLifetimeError: alloc parent block not found",
+            )
+        alloc_block.insert_ops_before([subview, reshape], info.alloc_op)
+        info.alloc_op.result.replace_all_uses_with(reshape.result)
         alloc_block.erase_op(info.alloc_op)
 
-        free_block = _parent_block(info.free_op)
-        if free_block is None:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: free parent block not found")
-        free_block.erase_op(info.free_op)
-
-    pool_free = DmaFreeOp(pool_alloc.result)
-    terminator = list(block.ops)[-1]
-    if isinstance(terminator, func.ReturnOp):
-        block.insert_ops_before([pool_free], terminator)
-    else:
-        block.add_ops([pool_free])
+        if info.free_op is not None:
+            free_block = _parent_block(info.free_op)
+            if free_block is None:
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.PASS,
+                    "MemoryPoolLifetimeError: free parent block not found",
+                )
+            free_block.erase_op(info.free_op)
 
 
 __all__ = [

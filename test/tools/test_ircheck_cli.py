@@ -50,6 +50,27 @@ _SIMPLE_IR = """builtin.module {
 """
 
 
+# TC-IRCHECK-CLI-000
+# 功能说明: 验证 CLI `--help` 与 `-h` 是公开成功入口，不走 false/error 输出。
+# 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_help_outputs_usage
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_cli.py
+def test_ircheck_cli_help_outputs_usage(capsys: pytest.CaptureFixture[str]) -> None:
+    for flag in ("--help", "-h"):
+        exit_code = main([flag])
+        captured = capsys.readouterr()
+
+        assert exit_code == 0
+        assert captured.err == ""
+        stdout_lines = captured.out.splitlines()
+        assert stdout_lines
+        assert stdout_lines[0].startswith("usage: python -m kernel_gen.tools.ircheck")
+        assert "-irdump" in captured.out
+        assert "-emitc{target=cpu|npu_demo}" in captured.out
+        assert stdout_lines[0] != "false"
+
+
 # TC-IRCHECK-CLI-001
 # 功能说明: 验证 CLI 匹配失败时 stdout 包含 failed_check 与 actual_ir，且退出码为 1。
 # 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_match_failure_outputs_actual_ir

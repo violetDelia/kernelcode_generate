@@ -55,8 +55,8 @@
 - `arch.get_block_id`、`arch.get_block_num`、`arch.get_thread_id`、`arch.get_thread_num`、`arch.get_subthread_id`、`arch.get_subthread_num` 都是无 operand、单结果 op。
 - 上述查询 op 的结果类型必须分别固定为 `!symbol.int<"block_id">`、`!symbol.int<"block_num">`、`!symbol.int<"thread_id">`、`!symbol.int<"thread_num">`、`!symbol.int<"subthread_id">`、`!symbol.int<"subthread_num">`，不得改写为 builtin `index`、普通整数或其他符号表达。
 - `arch.get_dynamic_memory` 只描述“获取某个 memory space 对应的动态 memory 入口”；不负责容量求值、分配策略或布局推导。
-- `arch.get_dynamic_memory` 的结果类型当前统一为一维动态字节缓冲：`!nn.memory<[?], [1], i8, #nn.space<space>>`。
-- `arch.get_dynamic_memory` 的 `memory_space` 只允许 `shared`、`local`、`tsm`、`tlm`；`global` 不属于动态片上内存入口范围，必须报错。
+- `arch.get_dynamic_memory` 的结果类型当前统一为一维 named-capacity 字节缓冲：`!nn.memory<[SM_SIZE], [1], i8, #nn.space<shared>>`、`!nn.memory<[LM_SIZE], [1], i8, #nn.space<local>>`、`!nn.memory<[TSM_SIZE], [1], i8, #nn.space<tsm>>`、`!nn.memory<[TLM1_SIZE], [1], i8, #nn.space<tlm1>>`、`!nn.memory<[TLM2_SIZE], [1], i8, #nn.space<tlm2>>`、`!nn.memory<[TLM3_SIZE], [1], i8, #nn.space<tlm3>>`。
+- `arch.get_dynamic_memory` 的 `memory_space` 只允许 `shared`、`local`、`tsm`、`tlm1`、`tlm2`、`tlm3`；`global` 与旧 `tlm` 不属于动态片上内存入口范围，必须报错。
 - `arch.barrier` 只描述同步请求；不负责数据搬运、事件管理或 target 私有副作用。
 - `arch.barrier` 的 `scope` 只允许 `block/thread/subthread/global`，`visibility` 必须且只能包含 `#arch.visibility<tsm>` 与 `#arch.visibility<tlm>` 各一次。
 - `arch.launch` 只描述一次 kernel 启动请求，不定义返回值、region、异步句柄或启动完成语义。
@@ -234,10 +234,16 @@
 - 使用示例：
 
   ```python
-  arch_get_dynamic_memory_op = ArchGetDynamicMemoryOp(memory_space=memory_space, result_type=None)
+  from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp
+  from kernel_gen.dialect.nn import NnMemorySpaceAttr
+
+  arch_get_dynamic_memory_op = ArchGetDynamicMemoryOp(
+      memory_space=NnMemorySpaceAttr.from_name("shared"),
+      result_type=None,
+  )
   ```
-- 功能说明：定义 `ArchGetDynamicMemoryOp` 公开类型。
-- 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
+- 功能说明：获取指定片上 memory space 的动态 backing memory 入口。
+- 注意事项：`memory_space` 只允许 `shared/local/tsm/tlm1/tlm2/tlm3`；默认 `result_type=None` 时按 space 生成 named-capacity 一维 `i8` memory；显式 `result_type` 必须匹配同一 space、`[<CAPACITY>]` shape、`[1]` stride 与 `i8` element type。
 
 ### `class ArchBarrierOp(scope: ArchScopeAttr, visibility: ArrayAttr[Attribute])`
 
@@ -309,7 +315,7 @@
 ### 测试目标
 
 - 验证六个执行维度查询 op 的固定结果类型与无 operand 文本形式。
-- 验证 `arch.get_dynamic_memory` 的 `space`、结果类型、parse/print 与 verifier 边界。
+- 验证 `arch.get_dynamic_memory` 的 `space`、named-capacity 结果类型、parse/print 与 verifier 边界。
 - 验证 `arch.launch` 的名称、operand 类型、静态非法规模与无结果约束。
 - 验证 `arch` dialect 文本能够完成 parse/print round-trip。
 - 验证 `kernel_gen.dialect` 包级入口已导出 `arch` 公共符号。
@@ -324,7 +330,7 @@
 | TC-ARCH-004 | 执行结果 | `arch.get_thread_num` 固定返回 `!symbol.int<"thread_num">` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_thread_num_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_thread_num` 固定返回 `!symbol.int<"thread_num">`”场景。 | `test_arch_get_thread_num_result_type` |
 | TC-ARCH-005 | 执行结果 | `arch.get_subthread_id` 固定返回 `!symbol.int<"subthread_id">` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_subthread_id_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_subthread_id` 固定返回 `!symbol.int<"subthread_id">`”场景。 | `test_arch_get_subthread_id_result_type` |
 | TC-ARCH-006 | 执行结果 | `arch.get_subthread_num` 固定返回 `!symbol.int<"subthread_num">` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_subthread_num_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_subthread_num` 固定返回 `!symbol.int<"subthread_num">`”场景。 | `test_arch_get_subthread_num_result_type` |
-| TC-ARCH-007 | 内存/DMA | `arch.get_dynamic_memory` 合法路径 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_arch_get_dynamic_memory_success`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`arch.get_dynamic_memory` 合法路径”场景。 | `test_arch_get_dynamic_memory_success` |
+| TC-ARCH-007 | 内存/DMA | `arch.get_dynamic_memory` 合法路径 | 准备 `shared/tlm1/tlm2/tlm3` 等公开 memory space。 | 运行 `test_arch_get_dynamic_memory_success` 与 `test_arch_get_dynamic_memory_supports_tlm123`。 | verifier 接受合法 space，并打印对应 `SM_SIZE/TLM1_SIZE/TLM2_SIZE/TLM3_SIZE` named capacity。 | `test_arch_get_dynamic_memory_success` / `test_arch_get_dynamic_memory_supports_tlm123` |
 | TC-ARCH-008 | 边界/异常 | `arch.get_dynamic_memory` 非法 `memory_space`/结果类型被拒绝 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_arch_get_dynamic_memory_verify_errors`。 | “`arch.get_dynamic_memory` 非法 `memory_space`/结果类型被拒绝”场景按公开错误语义失败或被拒绝。 | `test_arch_get_dynamic_memory_verify_errors` |
 | TC-ARCH-009 | 公开入口 | `arch.launch` 合法路径 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_arch_launch_kernel_success`。 | 公开入口在“`arch.launch` 合法路径”场景下可导入、构造、注册或按名称发现。 | `test_arch_launch_kernel_success` |
 | TC-ARCH-010 | 边界/异常 | `arch.launch` 拒绝空名称、非 `symbol.int` operand 与静态非法规模 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_arch_launch_kernel_verify_errors`。 | “`arch.launch` 拒绝空名称、非 `symbol.int` operand 与静态非法规模”场景按公开错误语义失败或被拒绝。 | `test_arch_launch_kernel_verify_errors` |

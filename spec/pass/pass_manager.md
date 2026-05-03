@@ -78,6 +78,7 @@
   - `kernel_gen.passes.lowering.tile_elewise`
   - `kernel_gen.passes.lowering.tile_reduce`
 - `LowerDmaMemoryHierarchyPass` 与 `MemoryPoolPass` 的调用方不得再把 lowering compat 路径当作主入口；若需要添加这两个 pass，应从上级模块导入后再交给 `PassManager`。
+- `MemoryPoolPass` 的 `rewrite` 与 `alignment` 由 `MemoryPoolPass(...)` 或 registry/ircheck 构造入口决定；`PassManager` 只负责按 pass 对象现有配置执行和处理通用 `fold` sweep，不解析 `memory-pool` 专属 option。
 - 以下旧兼容入口在当前基线中必须稳定失败：
   - `kernel_gen.passes.pass_manager.build_default_lowering_pass_manager`
 - 当前文件级公开 API 只包含 `Pass` 与 `PassManager`；pipeline / registry / test 不得跨文件调用额外 helper。
