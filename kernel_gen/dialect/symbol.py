@@ -9,24 +9,28 @@
 
 API 列表:
 - `class SymbolExprAttr(expr: StringAttr)`
+- `SymbolExprAttr.from_expr(expr: str) -> SymbolExprAttr`
 - `class SymbolDimType(expr: SymbolExprAttr)`
 - `class SymbolValueType(expr: SymbolExprAttr)`
+- `SymbolValueType.from_expr(expr: str) -> SymbolValueType`
+- `SymbolValueType.get_value() -> int | str`
+- `SymbolValueType.is_symbol() -> bool`
 - `class SymbolIterAttr(start: StringAttr, end: StringAttr, step: StringAttr)`
 - `class SymbolIterType(iter_attr: SymbolIterAttr)`
 - `class SymbolPtrType(base_type: Attribute, shape: ArrayAttr[Attribute], stride: ArrayAttr[Attribute])`
-- `class SymbolConstOp(value: IntegerAttr | IntAttr | int)`
-- `class SymbolAddOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolSubOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolMulOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolDivOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolFloorDivOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolMinOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolEqOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolNeOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolLtOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolLeOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolGtOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolGeOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolConstOp(value: int | IntAttr, result_type: SymbolValueType | None = None)`
+- `class SymbolAddOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- `class SymbolSubOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- `class SymbolMulOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- `class SymbolDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- `class SymbolFloorDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- `class SymbolMinOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- `class SymbolEqOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- `class SymbolNeOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- `class SymbolLtOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- `class SymbolLeOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- `class SymbolGtOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- `class SymbolGeOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 - `class SymbolToFloatOp(value: SSAValue, result_type: Attribute)`
 - `class SymbolToIntOp(value: SSAValue, result_type: Attribute)`
 - `class SymbolCastOp(value: SSAValue, result_type: Attribute)`
@@ -55,7 +59,8 @@ from typing import ClassVar, TYPE_CHECKING
 
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
 os.environ.setdefault("SYMPY_GMPY", "0")
-from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerType, StringAttr, f32, f64, i1, i32
+from xdsl.dialects import arith
+from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerAttr, IntegerType, StringAttr, f32, f64, i1, i32
 from xdsl.dialect_interfaces.constant_materialization import ConstantMaterializationInterface
 from xdsl.ir import Attribute, Block, Dialect, Operation, ParametrizedAttribute, Region, SSAValue, TypeAttribute
 from xdsl.irdl import (
@@ -89,6 +94,7 @@ _SYMBOL_EXPR_PATTERN = re.compile(
 )
 _SYMBOL_DIM_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ERROR_SCENE = "dialect.symbol"
+_UNKNOWN_SYMBOL_EXPR = "?"
 
 
 def _format_error(expected: str, actual: str = ERROR_ACTUAL) -> str:
@@ -160,6 +166,8 @@ def _normalize_expr(expr: str) -> str:
     """
 
     normalized = expr.strip()
+    if normalized == _UNKNOWN_SYMBOL_EXPR:
+        return _UNKNOWN_SYMBOL_EXPR
     concrete_value = _evaluate_concrete_expr(normalized)
     return str(concrete_value) if concrete_value is not None else normalized
 
@@ -384,6 +392,8 @@ def _canonicalize_symbolic_expr(expr: str) -> str:
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
+    if expr == _UNKNOWN_SYMBOL_EXPR:
+        return _UNKNOWN_SYMBOL_EXPR
     if _has_symbol_min_call(expr):
         return _normalize_symbol_min_expr(expr)
     value = _make_symbol_runtime_value(expr)
@@ -446,6 +456,8 @@ def _is_supported_symbol_expr(expr: str) -> bool:
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
+    if expr == _UNKNOWN_SYMBOL_EXPR:
+        return True
     try:
         parsed = py_ast.parse(expr, mode="eval")
     except SyntaxError:
@@ -608,6 +620,38 @@ def _is_symbol_arith_operand_type(attr: Attribute) -> bool:
     return isinstance(attr, (SymbolValueType, SymbolIterType))
 
 
+def _is_unknown_symbol_int_type(attr: Attribute) -> bool:
+    """判断 `!symbol.int<"?">` unknown 类型。
+
+    功能说明:
+    - 只在 symbol dialect 当前文件内服务 verifier 与 fold 边界。
+    - unknown 是保守值语义，不等同具名符号表达。
+
+    使用示例:
+    - _is_unknown_symbol_int_type(SymbolValueType.from_expr("?"))
+    """
+
+    return isinstance(attr, SymbolValueType) and attr.get_value() == _UNKNOWN_SYMBOL_EXPR
+
+
+def _requires_unknown_arith_result(lhs_type: Attribute, rhs_type: Attribute) -> bool:
+    """判断 symbol 算术结果是否必须为 unknown。
+
+    功能说明:
+    - 任一 operand 为 `!symbol.iter<...>` 或 `!symbol.int<"?">` 时，算术结果必须保守为 `!symbol.int<"?">`。
+
+    使用示例:
+    - needs_unknown = _requires_unknown_arith_result(lhs.type, rhs.type)
+    """
+
+    return (
+        isinstance(lhs_type, SymbolIterType)
+        or isinstance(rhs_type, SymbolIterType)
+        or _is_unknown_symbol_int_type(lhs_type)
+        or _is_unknown_symbol_int_type(rhs_type)
+    )
+
+
 def _get_concrete_symbol_int_value(attr: Attribute) -> int | None:
     """提取静态可求值的 `!symbol.int` 整数值。
 
@@ -662,7 +706,7 @@ class SymbolExprAttr(ParametrizedAttribute):
         if not expr:
             _raise_verify_error("symbol expr must not be empty")
         if not _is_supported_symbol_expr(expr):
-            _raise_verify_error("symbol expr must contain identifiers, integers, +, -, *, /, //, floor(...) or min(lhs, rhs)")
+            _raise_verify_error("symbol expr must contain identifiers, ?, integers, +, -, *, /, //, floor(...) or min(lhs, rhs)")
 
     @classmethod
     def from_expr(cls: type["SymbolExprAttr"], expr: str) -> "SymbolExprAttr":
@@ -862,6 +906,8 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         """
 
         expr = _normalize_expr(self.expr.expr.data)
+        if expr == _UNKNOWN_SYMBOL_EXPR:
+            return _UNKNOWN_SYMBOL_EXPR
         concrete_value = _evaluate_concrete_expr(expr)
         return concrete_value if concrete_value is not None else _canonicalize_symbolic_expr(expr)
 
@@ -882,7 +928,8 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
-        return _evaluate_concrete_expr(self.expr.expr.data) is None
+        expr = _normalize_expr(self.expr.expr.data)
+        return expr != _UNKNOWN_SYMBOL_EXPR and _evaluate_concrete_expr(expr) is None
 
     @classmethod
     def from_expr(cls: type["SymbolValueType"], expr: str) -> "SymbolValueType":
@@ -1342,14 +1389,20 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
                 _raise_verify_error(f"{self.name} {field_name} must have type !symbol.int<\"expr\"> or !symbol.iter<...>")
         if not _is_symbol_int_type(self.result.type):
             _raise_verify_error(f"{self.name} result type must be !symbol.int<\"expr\">")
+        lhs_type = SSAValue.get(self.lhs).type
+        rhs_type = SSAValue.get(self.rhs).type
+        result_type = SSAValue.get(self.result).type
+        if _requires_unknown_arith_result(lhs_type, rhs_type) and not _is_unknown_symbol_int_type(result_type):
+            _raise_verify_error(f"{self.name} result type must be !symbol.int<\"?\"> when operand is !symbol.iter<...> or !symbol.int<\"?\">")
 
     def fold(self: "_BaseSymbolBinaryArithOp") -> Sequence[SSAValue | Attribute] | None:
         """折叠静态整数 symbol 二元算术 op。
 
 
         功能说明:
-        - 仅当 lhs/rhs/result 都是静态整数 `!symbol.int` 时折叠。
-        - 动态 symbol 表达一律保守返回 `None`，避免误折叠。
+        - 仅当 lhs/rhs 都是静态整数 `!symbol.int` 时折叠。
+        - result 为 `!symbol.int<"?">` 时仍可物化确定 `symbol.const`。
+        - 动态 symbol、`?` 与 iter 表达一律保守返回 `None`，避免误折叠。
 
         使用示例:
         - SymbolAddOp(SymbolConstOp(1).result, SymbolConstOp(2).result, SymbolValueType.from_expr("3")).fold()
@@ -1385,7 +1438,8 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
         else:
             return None
 
-        if result_type.get_value() != result_value:
+        result_expr = result_type.get_value()
+        if result_expr != _UNKNOWN_SYMBOL_EXPR and result_expr != result_value:
             return None
         return (IntAttr(result_value),)
 
@@ -1422,7 +1476,7 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
         return cls(lhs, rhs, result_type)
 
 
-class _BaseSymbolCompareOp(IRDLOperation):
+class _BaseSymbolCompareOp(IRDLOperation, HasFolderInterface):
     """symbol 二元整数比较 op 基类。"""
 
     traits = traits_def(Pure())
@@ -1477,6 +1531,43 @@ class _BaseSymbolCompareOp(IRDLOperation):
         if self.result.type != i1:
             _raise_verify_error(f"{self.name} result type must be i1")
 
+    def fold(self: "_BaseSymbolCompareOp") -> Sequence[SSAValue | Attribute] | None:
+        """折叠静态整数 symbol 比较 op。
+
+        功能说明:
+        - 仅当 lhs/rhs 均为静态整数 `!symbol.int` 时折叠。
+        - 结果固定物化为 `i1` bool 常量。
+        - 动态 symbol、`?` 与 iter operand 不折叠。
+
+        使用示例:
+        - SymbolEqOp(SymbolConstOp(1).result, SymbolConstOp(1).result).fold()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        lhs_value = _get_concrete_symbol_int_value(SSAValue.get(self.lhs).type)
+        rhs_value = _get_concrete_symbol_int_value(SSAValue.get(self.rhs).type)
+        if lhs_value is None or rhs_value is None or self.result.type != i1:
+            return None
+        if self.name == "symbol.eq":
+            result_value = lhs_value == rhs_value
+        elif self.name == "symbol.ne":
+            result_value = lhs_value != rhs_value
+        elif self.name == "symbol.lt":
+            result_value = lhs_value < rhs_value
+        elif self.name == "symbol.le":
+            result_value = lhs_value <= rhs_value
+        elif self.name == "symbol.gt":
+            result_value = lhs_value > rhs_value
+        elif self.name == "symbol.ge":
+            result_value = lhs_value >= rhs_value
+        else:
+            return None
+        return (IntegerAttr.from_bool(result_value),)
+
     def print(self: "_BaseSymbolCompareOp", printer: Printer) -> None:
         """打印 symbol 二元整数比较 op 自定义文本语法。"""
 
@@ -1530,6 +1621,8 @@ class SymbolConstOp(IRDLOperation):
 
         功能说明:
         - 记录整数常量 attribute，并生成对应的 `!symbol.int<"...">` 结果类型。
+        - 公开构造只接受 Python `int` 或 `IntAttr`；`IntegerAttr` 属于 arith/builtin 常量属性，不作为 `symbol.const` 输入。
+        - `bool` 与 `IntAttr(data=True/False)` 不是 symbol 整数常量输入；布尔比较 fold 由 `arith.constant i1` 承接。
 
         使用示例:
         - SymbolConstOp(3)
@@ -1540,7 +1633,16 @@ class SymbolConstOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
-        value_attr = value if isinstance(value, IntAttr) else IntAttr(value)
+        if isinstance(value, IntAttr):
+            if isinstance(value.data, bool):
+                raise TypeError("SymbolConstOp value must be non-bool int or IntAttr with non-bool data")
+            value_attr = value
+        elif isinstance(value, int):
+            if isinstance(value, bool):
+                raise TypeError("SymbolConstOp value must be non-bool int or IntAttr with non-bool data")
+            value_attr = IntAttr(value)
+        else:
+            raise TypeError("SymbolConstOp value must be non-bool int or IntAttr with non-bool data")
         inferred_type = result_type or SymbolValueType.from_expr(str(value_attr.data))
         super().__init__(result_types=[inferred_type], attributes={"value": value_attr})
 
@@ -1614,15 +1716,20 @@ class SymbolConstOp(IRDLOperation):
 
 
 class SymbolConstantMaterializationInterface(ConstantMaterializationInterface):
-    """将 folded 整数属性 materialize 回 symbol.const。
+    """将 folded 常量 materialize 为对应公开 IR operation。
 
 
     功能说明:
-    - 仅接受与 `SymbolValueType` 一致的静态整数常量。
-    - 为 xdsl folding 提供 `symbol.const` 物化入口，不新增独立 cleanup pass。
+    - 为 xdsl folding 提供 symbol dialect 常量物化入口，不新增独立 cleanup pass。
+    - `IntegerAttr + i1` 对应 symbol compare fold，物化为 `arith.constant`。
+    - `IntAttr + SymbolValueType` 对应 symbol arithmetic fold，物化为 `symbol.const`。
+    - `!symbol.int<"?">` result 接收确定 `IntAttr` 并物化为确定 `SymbolConstOp`。
+    - 其它 value/type 组合返回 `None`，由 folding 框架保守保留原 op。
 
     使用示例:
     - SymbolConstantMaterializationInterface().materialize_constant(IntAttr(3), SymbolValueType.from_expr("3"))
+    - SymbolConstantMaterializationInterface().materialize_constant(IntAttr(3), SymbolValueType.from_expr("?"))
+    - SymbolConstantMaterializationInterface().materialize_constant(IntegerAttr.from_bool(True), i1)
 
     关联文件:
     - spec: spec/dialect/symbol.md
@@ -1631,13 +1738,29 @@ class SymbolConstantMaterializationInterface(ConstantMaterializationInterface):
     """
 
     def materialize_constant(self, value: Attribute, type: Attribute) -> Operation | None:
-        """把整数常量 materialize 为 `symbol.const`。"""
+        """把 folded 常量 materialize 为公开 IR operation。
 
+        功能说明:
+        - `IntegerAttr + i1` 对应 symbol compare fold，物化为 `arith.constant`。
+        - `IntAttr + SymbolValueType` 对应 symbol arithmetic fold，物化为 `symbol.const`。
+        - `!symbol.int<"?">` 结果类型接收确定 `IntAttr` 并返回确定 `SymbolConstOp`。
+        - 其它 value/type 组合返回 `None`，交由 folding 框架保守保留原 op。
+
+        使用示例:
+        - SymbolConstantMaterializationInterface().materialize_constant(IntAttr(3), SymbolValueType.from_expr("?"))
+        - SymbolConstantMaterializationInterface().materialize_constant(IntegerAttr.from_bool(True), i1)
+        """
+
+        if isinstance(value, IntegerAttr) and type == i1:
+            return arith.ConstantOp(value)
         if not isinstance(value, IntAttr):
             return None
         if not isinstance(type, SymbolValueType):
             return None
-        if type.get_value() != value.data:
+        type_value = type.get_value()
+        if type_value == _UNKNOWN_SYMBOL_EXPR:
+            return SymbolConstOp(value)
+        if type_value != value.data:
             return None
         return SymbolConstOp(value, type)
 

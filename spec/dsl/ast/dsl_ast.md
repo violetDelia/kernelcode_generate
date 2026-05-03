@@ -254,7 +254,7 @@
     result = visitor.visit_For(node=node)
     ```
 - 功能说明：访问标准库 `For` AST 节点并返回对应 DSL AST 公开节点。
-- 注意事项：输入必须来自标准库 `ast` 与公开 DSL runtime 类型；不支持的语法必须通过公开 `KernelCodeError` 失败，不得静默生成内部占位节点。
+- 注意事项：输入必须来自标准库 `ast` 与公开 DSL runtime 类型；循环变量的解析期 symbol 语义为 `?`，不得从 SSA 名称或 block argument 名称拼出 shape/size 表达；不支持的语法必须通过公开 `KernelCodeError` 失败，不得静默生成内部占位节点。
 
 ### `DslAstVisitor.visit_If(node: ast.If) -> IfAST`
 

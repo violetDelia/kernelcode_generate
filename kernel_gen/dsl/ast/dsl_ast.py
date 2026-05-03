@@ -5,6 +5,7 @@
 - 定义 `DslAstVisitor`，把 Python `ast` 树转换为项目 DSL AST。
 - helper call 先解析到实际 operation 对象，再通过 `kernel_gen.dsl.ast.plugin.lookup_builtin(...)` 注册表识别。
 - 赋值名称绑定只消费右侧 `ValueAST.binding_value()` / `bind_target(...)`，不在 visitor 中维护节点级结果推导。
+- `for` 循环变量的解析期 symbol 语义标记为 `?`，避免后续 shape/size 推导把迭代 SSA 名称拼入公开表达。
 
 API 列表:
 - `DslAstVisitor(fn: DslCallable, runtime_args: tuple[DslRuntimeArg, ...] = ())`
@@ -754,6 +755,7 @@ class DslAstVisitor(py_ast.NodeVisitor):
 
         功能说明:
         - 支持 `range(...)` 与 DSL `loop(...)`，生成 `ForAST`。
+        - 循环变量的解析期 symbol 语义标记为 `?`，避免后续 shape/size 推导把迭代 SSA 名称拼入公开表达。
 
         使用示例:
         - for_ast = visitor.visit_For(for_node)
@@ -783,7 +785,11 @@ class DslAstVisitor(py_ast.NodeVisitor):
         if isinstance(step, ConstValueAST) and step.raw_value == 0:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, "for range step must not be zero")
         previous_scope = dict(self.scope)
-        loop_var = SymbolDimAST(node.target.id, location=SourceLocation.from_py_ast(node.target))
+        loop_var = SymbolDimAST(
+            node.target.id,
+            location=SourceLocation.from_py_ast(node.target),
+            runtime_symbol=SymbolDim("?"),
+        )
         self.scope[node.target.id] = loop_var
         statements: list[DSLNode] = []
         for stmt in node.body:

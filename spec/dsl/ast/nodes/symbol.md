@@ -56,6 +56,8 @@
 - `symbol.py` 不定义 `ForAST`；循环边界和 step 的 `!symbol.int` 合同由 `control_flow.py` 的 `ForAST` 承载。
 - `TensorAxisAccessAST` 只负责 memory shape/stride 到 `symbol.get_dim` / `symbol.get_stride` 的查询。
 - symbol 二元运算节点必须通过 `result_symbol()` 暴露解析期结果，并通过 `emit_mlir(...)` 生成对应 `symbol.add/sub/mul/div/floordiv/min`。
+- `emit_mlir(...)` 组合 result type 时，只允许从 `!symbol.int` 类型的公开表达读取值语义；`!symbol.iter<...>` operand 不得通过 SSA 名称、block argument 名称或 `name_hint` 拼出表达式，必须传播为 `!symbol.int<"?">`。
+- 任一二元 operand 的 MLIR 类型为 `!symbol.int<"?">` 时，发射结果类型必须继续为 `!symbol.int<"?">`。
 - `SymbolMinAST` 仅承接 DSL `min(lhs, rhs)` 的二元符号最小值；不支持多参数、关键字参数、张量级最小值或运行期 Python `min` 直接求值。
 - `SymbolMinAST` 处理复合 operand 时必须先物化两侧直接整数常量，再发射左右 operand 算术与最终 `symbol.min`，用于稳定 `min(lhs + 1, rhs - 2)` 这类合同文本的 SSA 顺序。
 - `SymbolBinaryAST` 与 `SymbolCompareAST` 的左右操作数可为任意能发射 `!symbol.int<"...">` 或 `!symbol.iter<...>` 的 `ValueAST`；用于支持 `symbol.for` 迭代变量参与尾块表达式。
@@ -92,7 +94,7 @@
 - 参数：无。
 - 返回值：`int | SymbolDim | None`。
 - 功能说明：对左右 symbol 语义做对应二元组合，供 shape/stride 与赋值绑定复用。
-- 注意事项：只覆盖当前节点表达式，不做全局符号化简；`SymbolMinAST` 对静态整数返回 Python `min` 结果，对动态符号返回 `SymbolDim(min(lhs, rhs))` 语义。
+- 注意事项：只覆盖解析期 `result_symbol()` 表达式，不做全局符号化简；MLIR 发射阶段遇到 `!symbol.iter<...>` 或 `!symbol.int<"?">` operand 时必须生成 `!symbol.int<"?">`，不得从 SSA 名称或 `name_hint` 反推出表达式。
 
 ## 测试
 
@@ -119,4 +121,6 @@
 | TC-DSL-AST-NODES-SYMBOL-010 | 解析/打印 | symbol list public emit mlir and normalization edges | 通过公开 `ListAST`、`TupleAST`、`ValueAST.emit_mlir` 合同构造 symbol 列表。 | 运行 `test_symbol_list_public_emit_mlir_and_normalization_edges`。 | `SymbolListAST` 发射同序 symbol SSA 列表，非 symbol 结果按公开错误失败。 | `test_symbol_list_public_emit_mlir_and_normalization_edges` |
 | TC-DSL-AST-NODES-SYMBOL-011 | 解析/打印 | tensor axis emit public shape stride and errors | 准备带 `nn.memory` 类型的命名 block 参数及非法 axis/kind/type 输入。 | 运行 `test_symbol_tensor_axis_emit_public_shape_stride_and_errors`。 | shape/stride 生成 `symbol.get_dim/get_stride`，非法公开边界按稳定错误失败。 | `test_symbol_tensor_axis_emit_public_shape_stride_and_errors` |
 | TC-DSL-AST-NODES-SYMBOL-012 | 解析/打印 | symbol binary public emit mlir matrix and errors | 参数化覆盖 add/sub/mul/div/floordiv 发射及非 `!symbol.int` 操作数。 | 运行 `test_symbol_binary_public_emit_mlir_matrix_and_errors`。 | 各二元节点生成对应 `symbol.*` op，非法操作数按公开错误失败。 | `test_symbol_binary_public_emit_mlir_matrix_and_errors` |
+| TC-DSL-AST-NODES-SYMBOL-012A | 符号语义 | unknown 与 iter operand 传播为 unknown result | 准备公开 `ValueAST.emit_mlir` 合同返回 `!symbol.int<"?">` 或 `!symbol.iter<...>` 的节点。 | 运行 `test_symbol_binary_public_emit_mlir_propagates_unknown_for_unknown_and_iter_operands`。 | 二元算术结果类型均为 `!symbol.int<"?">`，不会出现由 SSA 名称拼出的 `2 - f0`。 | `test_symbol_binary_public_emit_mlir_propagates_unknown_for_unknown_and_iter_operands` |
+| TC-DSL-AST-NODES-SYMBOL-012B | 符号语义 | compare iter operand 仍返回 i1 | 准备公开 `ValueAST.emit_mlir` 合同返回 `!symbol.iter<...>` 的节点。 | 运行 `test_symbol_compare_public_emit_mlir_keeps_i1_for_iter_operand`。 | compare 节点结果类型固定为 `i1`。 | `test_symbol_compare_public_emit_mlir_keeps_i1_for_iter_operand` |
 | TC-DSL-AST-NODES-SYMBOL-013 | 边界/异常 | symbol to float and compare public emit error edges | 通过公开 `ValueAST.emit_mlir` 合同构造 detached op 与非法原始结果。 | 运行 `test_symbol_to_float_and_compare_public_emit_error_edges`。 | `symbol.to_float`/比较节点接受 SSA 结果，非法 emit 结果按公开错误失败。 | `test_symbol_to_float_and_compare_public_emit_error_edges` |

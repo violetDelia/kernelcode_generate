@@ -26,8 +26,8 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.arith import Arith
-from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, IntegerType, StringAttr, bf16, f16, f32, f64, i1, i8, i16, i32, i64
+from xdsl.dialects.arith import Arith, ConstantOp
+from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, IntegerAttr, IntegerType, StringAttr, bf16, f16, f32, f64, i1, i8, i16, i32, i64
 from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Block, Operation, Region
 from xdsl.folder import Folder
@@ -199,7 +199,7 @@ def _make_symbol_value(expr: str):
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_expr_attr_round_trip() -> None:
     ctx = _build_context()
-    for text in ['#symbol.expr<"N">', '#symbol.expr<"M + 1">', '#symbol.expr<"B*K">', '#symbol.expr<"min(T, N - i)">']:
+    for text in ['#symbol.expr<"N">', '#symbol.expr<"M + 1">', '#symbol.expr<"B*K">', '#symbol.expr<"min(T, N - i)">', '#symbol.expr<"?">']:
         expr = Parser(ctx, text).parse_attribute()
         assert isinstance(expr, SymbolExprAttr)
         expr.verify()
@@ -232,11 +232,28 @@ def test_symbol_expr_attr_rejects_empty_expr() -> None:
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_value_type_round_trip_for_integer_only_semantics() -> None:
     ctx = _build_context()
-    for text in ['!symbol.int<"N">', '!symbol.int<"M + 1">', '!symbol.int<"3">', '!symbol.int<"min(T, N - i)">']:
+    for text in ['!symbol.int<"N">', '!symbol.int<"M + 1">', '!symbol.int<"3">', '!symbol.int<"min(T, N - i)">', '!symbol.int<"?">']:
         ty = Parser(ctx, text).parse_attribute()
         assert isinstance(ty, SymbolValueType)
         ty.verify()
         assert _print_attr(ty) == text
+
+
+# TC-SYM-006A
+# 测试目的: 验证 `!symbol.int<"?">` 的公开 unknown 语义与旧 iter<...> 表达文本拒绝路径。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_value_type_unknown_public_semantics() -> None:
+    unknown_type = SymbolValueType.from_expr("?")
+    unknown_type.verify()
+
+    assert unknown_type.get_value() == "?"
+    assert unknown_type.is_symbol() is False
+
+    with pytest.raises(VerifyException, match=r"symbol expr must contain identifiers, \?"):
+        SymbolExprAttr.from_expr("iter<0, 8, 1>").verify()
+    with pytest.raises(VerifyException, match=r"symbol expr must contain identifiers, \?"):
+        SymbolValueType.from_expr("2 - iter<0, 8, 1>").verify()
 
 
 # TC-SYM-052
@@ -325,6 +342,51 @@ def test_symbol_binary_arith_fold_constant_operands(
     assert new_op.result.type == SymbolValueType.from_expr(str(expected))
 
 
+# TC-SYM-056A
+# 测试目的: 验证静态整数 operand 即使 result 为 `?` 仍可 fold 为确定 symbol.const。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_binary_arith_fold_constant_operands_with_unknown_result() -> None:
+    ctx = _build_context()
+    folder = Folder(ctx)
+    lhs_op = SymbolConstOp(1)
+    rhs_op = SymbolConstOp(1)
+    add_op = SymbolAddOp(lhs_op.result, rhs_op.result, SymbolValueType.from_expr("?"))
+
+    folded = folder.try_fold(add_op)
+
+    assert folded is not None
+    values, new_ops = folded
+    assert len(values) == 1
+    assert len(new_ops) == 1
+    assert isinstance(new_op := new_ops[0], SymbolConstOp)
+    assert new_op.value.data == 2
+    assert new_op.result.type == SymbolValueType.from_expr("2")
+
+
+# TC-SYM-056B
+# 测试目的: 验证前序 fold 产出的 symbol.const 可作为后续 operand 继续 fold。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_binary_arith_folded_const_can_feed_later_fold() -> None:
+    ctx = _build_context()
+    folder = Folder(ctx)
+    add_op = SymbolAddOp(SymbolConstOp(2).result, SymbolConstOp(3).result, SymbolValueType.from_expr("?"))
+    folded = folder.try_fold(add_op)
+    assert folded is not None
+    _values, new_ops = folded
+    assert isinstance(add_const := new_ops[0], SymbolConstOp)
+
+    mul_op = SymbolMulOp(add_const.result, SymbolConstOp(4).result, SymbolValueType.from_expr("?"))
+    mul_folded = folder.try_fold(mul_op)
+
+    assert mul_folded is not None
+    _mul_values, mul_new_ops = mul_folded
+    assert isinstance(mul_const := mul_new_ops[0], SymbolConstOp)
+    assert mul_const.value.data == 20
+    assert mul_const.result.type == SymbolValueType.from_expr("20")
+
+
 # TC-SYM-057
 # 测试目的: 验证静态 folding 不会误折叠含动态 symbol 的二元算术表达式。
 # 使用示例: pytest -q test/dialect/test_symbol.py -k test_symbol_binary_arith_fold_rejects_dynamic_operands
@@ -340,6 +402,21 @@ def test_symbol_binary_arith_fold_rejects_dynamic_operands() -> None:
     assert folder.try_fold(op) is None
 
 
+# TC-SYM-057A
+# 测试目的: 验证 `?` 与 `symbol.iter` operand 均不会被误折叠。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_binary_arith_fold_rejects_unknown_and_iter_operands() -> None:
+    ctx = _build_context()
+    folder = Folder(ctx)
+    unknown_op = SymbolAddOp(_make_symbol_value("?"), SymbolConstOp(2).result, SymbolValueType.from_expr("?"))
+    iter_value = _TestOp(result_types=[SymbolIterType.from_bounds("0", "N", "1")]).results[0]
+    iter_op = SymbolSubOp(SymbolConstOp(2).result, iter_value, SymbolValueType.from_expr("?"))
+
+    assert folder.try_fold(unknown_op) is None
+    assert folder.try_fold(iter_op) is None
+
+
 # TC-SYM-051
 # 测试目的: 验证 symbol.const 会拒绝不匹配的结果类型。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
@@ -349,6 +426,27 @@ def test_symbol_const_op_rejects_mismatched_type() -> None:
         SymbolConstOp(3, SymbolValueType.from_expr("4")).verify()
     with pytest.raises(VerifyException, match="base attribute symbol.int"):
         SymbolConstOp(3, i32).verify()
+
+
+# TC-SYM-051A
+# 功能说明: 验证 `SymbolConstOp(...)` 公开构造拒绝 `IntegerAttr` 输入，避免与 compare `i1` fold 的 arith 常量边界混淆。
+# 使用示例: pytest -q test/dialect/test_symbol.py -k test_symbol_const_op_rejects_integer_attr_input
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_const_op_rejects_integer_attr_input() -> None:
+    with pytest.raises(TypeError, match="SymbolConstOp value must be non-bool int or IntAttr with non-bool data"):
+        SymbolConstOp(IntegerAttr(3, i32))
+
+
+# TC-SYM-051B
+# 功能说明: 验证 `SymbolConstOp(...)` 公开构造拒绝 bool 与 bool-backed IntAttr，保持 symbol.const 的整数-only 边界。
+# 使用示例: pytest -q test/dialect/test_symbol.py -k test_symbol_const_op_rejects_boolean_inputs
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+@pytest.mark.parametrize("value", [True, False, IntAttr(data=True), IntAttr(data=False)])
+def test_symbol_const_op_rejects_boolean_inputs(value: bool | IntAttr) -> None:
+    with pytest.raises(TypeError, match="SymbolConstOp value must be non-bool int or IntAttr with non-bool data"):
+        SymbolConstOp(value)
 
 
 # TC-SYM-013 / TC-SYM-014
@@ -541,6 +639,25 @@ def test_symbol_arith_ops_verify_success() -> None:
     assert _print_attr(min_op.result.type) == '!symbol.int<"min(T, N - i)">'
 
 
+# TC-SYM-015A
+# 测试目的: 验证 `?` 与 `symbol.iter` 参与 symbol 算术时 result 必须保守为 `!symbol.int<"?">`。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_arith_ops_require_unknown_result_for_unknown_or_iter_operands() -> None:
+    unknown_value = _make_symbol_value("?")
+    concrete_value = SymbolConstOp(1).result
+    iter_value = _TestOp(result_types=[SymbolIterType.from_bounds("0", "N", "1")]).results[0]
+
+    SymbolAddOp(unknown_value, concrete_value, SymbolValueType.from_expr("?")).verify()
+    SymbolSubOp(concrete_value, iter_value, SymbolValueType.from_expr("?")).verify()
+    SymbolMulOp(concrete_value, concrete_value, SymbolValueType.from_expr("?")).verify()
+
+    with pytest.raises(VerifyException, match=r'result type must be !symbol\.int<"\?">'):
+        SymbolAddOp(unknown_value, concrete_value, SymbolValueType.from_expr("N + 1")).verify()
+    with pytest.raises(VerifyException, match=r'result type must be !symbol\.int<"\?">'):
+        SymbolSubOp(concrete_value, iter_value, SymbolValueType.from_expr("2 - f0")).verify()
+
+
 # TC-SYM-015B
 # 测试目的: 验证公开 SymbolDim 运算在乘法操作数含加减表达式时保留操作数边界。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
@@ -701,6 +818,67 @@ def test_symbol_compare_ops_verify_success() -> None:
     for op in ops:
         op.verify()
         assert op.result.type == i1
+
+
+# TC-SYM-020A
+# 测试目的: 验证 symbol compare 对静态整数 operand fold 为 `i1` 常量。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+@pytest.mark.parametrize(
+    ("op_factory", "lhs", "rhs", "expected"),
+    [
+        (SymbolEqOp, 3, 3, True),
+        (SymbolNeOp, 3, 4, True),
+        (SymbolLtOp, 3, 4, True),
+        (SymbolLeOp, 3, 3, True),
+        (SymbolGtOp, 4, 3, True),
+        (SymbolGeOp, 4, 4, True),
+        (SymbolEqOp, 3, 4, False),
+        (SymbolNeOp, 3, 3, False),
+        (SymbolLtOp, 4, 3, False),
+        (SymbolLeOp, 4, 3, False),
+        (SymbolGtOp, 3, 4, False),
+        (SymbolGeOp, 3, 4, False),
+    ],
+)
+def test_symbol_compare_ops_fold_static_operands_to_i1_bool(
+    op_factory: type[SymbolEqOp],
+    lhs: int,
+    rhs: int,
+    expected: bool,
+) -> None:
+    ctx = _build_context()
+    folder = Folder(ctx)
+    op = op_factory(SymbolConstOp(lhs).result, SymbolConstOp(rhs).result, i1)
+
+    folded = folder.try_fold(op)
+
+    assert folded is not None
+    values, new_ops = folded
+    assert len(values) == 1
+    assert len(new_ops) == 1
+    assert isinstance(new_op := new_ops[0], ConstantOp)
+    assert new_op.result.type == i1
+    assert bool(new_op.value.value.data) is expected
+
+
+# TC-SYM-020B
+# 测试目的: 验证 symbol compare 对动态、`?` 与 `symbol.iter` operand 保守不 fold。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_compare_ops_reject_dynamic_unknown_and_iter_fold() -> None:
+    ctx = _build_context()
+    folder = Folder(ctx)
+    iter_value = _TestOp(result_types=[SymbolIterType.from_bounds("0", "N", "1")]).results[0]
+    cases = [
+        SymbolEqOp(_make_symbol_value("N"), SymbolConstOp(1).result, i1),
+        SymbolLtOp(_make_symbol_value("?"), SymbolConstOp(1).result, i1),
+        SymbolGeOp(iter_value, SymbolConstOp(1).result, i1),
+    ]
+
+    for op in cases:
+        assert op.result.type == i1
+        assert folder.try_fold(op) is None
 
 
 # TC-SYM-021

@@ -385,6 +385,9 @@ def test_mlir_gen_lowers_symbol_min_and_iter_arithmetic() -> None:
 
     assert "symbol.min" in module_text
     assert "symbol.mul" in module_text
+    assert '!symbol.int<"?">' in module_text
+    assert "N - f0" not in module_text
+    assert "2 - f0" not in module_text
     root_op = list(module.body.block.ops)[0]
     assert isinstance(root_op, func.FuncOp)
     assert any(isinstance(op, SymbolForOp) for op in root_op.body.block.ops)

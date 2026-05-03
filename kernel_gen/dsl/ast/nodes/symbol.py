@@ -4,6 +4,7 @@
 功能说明:
 - 定义 `symbol` dialect 相关 DSL AST 节点。
 - 节点只保存 DSL 语义数据，`emit_mlir(ctx, block)` 递归发射对应 `symbol.*` op。
+- `!symbol.iter<...>` 或 `!symbol.int<"?">` 参与 symbol 二元算术时结果传播为 `!symbol.int<"?">`。
 - `basic.py` 不再承载 symbol dialect 节点实现，避免基础节点文件同时维护 symbol op 发射逻辑。
 
 API 列表:
@@ -457,7 +458,7 @@ def _symbol_expr_from_ssa(value: SSAValue) -> int | str:
 
     功能说明:
     - 从 `!symbol.int` 类型读取已记录的表达文本。
-    - 对 `!symbol.iter` 使用稳定 `name_hint` 承接循环迭代变量表达。
+    - 对 `!symbol.iter` 返回 unknown `?`，避免从 SSA 名称或 `name_hint` 反推表达。
     - 非 symbol SSA value 按公开 MLIR 生成合同报错。
 
     使用示例:
@@ -466,8 +467,8 @@ def _symbol_expr_from_ssa(value: SSAValue) -> int | str:
 
     if isinstance(value.type, SymbolValueType):
         return value.type.get_value()
-    if isinstance(value.type, SymbolIterType) and isinstance(value.name_hint, str) and value.name_hint:
-        return value.name_hint
+    if isinstance(value.type, SymbolIterType):
+        return "?"
     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "symbol operands must have !symbol.int or !symbol.iter type")
 
 
@@ -475,8 +476,8 @@ def _compose_symbol_binary_expr(op_name: str, lhs: int | str, rhs: int | str) ->
     """按公开 symbol 算术语义生成结果类型表达。
 
     功能说明:
+    - 任一 operand 表达为 `?` 时，结果直接传播为 `?`。
     - 对可由 `SymbolDim` 解析的表达复用解析期算术语义。
-    - 对含 `symbol.iter` 等运行期文本的表达保留可读 infix 文本。
     - `min` 在双整数输入时直接折叠，否则生成 `min(lhs, rhs)` 文本。
 
     使用示例:
@@ -484,6 +485,8 @@ def _compose_symbol_binary_expr(op_name: str, lhs: int | str, rhs: int | str) ->
     - min_expr = _compose_symbol_binary_expr("min", "tile", "N - i")
     """
 
+    if lhs == "?" or rhs == "?":
+        return "?"
     lhs_operand = _normalize_symbol_operand_expr(lhs)
     rhs_operand = _normalize_symbol_operand_expr(rhs)
     if op_name == "min":
@@ -540,6 +543,20 @@ def _symbol_min_runtime_value(lhs: int | SymbolDim, rhs: int | SymbolDim) -> int
     return SymbolDim(sp.Min(lhs_symbol, rhs_symbol))
 
 
+def _is_unknown_runtime_symbol(value: int | SymbolDim) -> bool:
+    """判断解析期 symbol 值是否为 unknown。
+
+    功能说明:
+    - 仅在当前文件内服务 `SymbolBinaryAST.result_symbol()`。
+    - 将来自 loop iterator 的 unknown runtime symbol 继续传播为 `SymbolDim("?")`。
+
+    使用示例:
+    - is_unknown = _is_unknown_runtime_symbol(SymbolDim("?"))
+    """
+
+    return isinstance(value, SymbolDim) and str(value.get_value()) == "?"
+
+
 @dataclass
 class SymbolBinaryAST(ValueAST):
     """符号二元计算抽象节点。"""
@@ -557,6 +574,7 @@ class SymbolBinaryAST(ValueAST):
         功能说明:
         - 递归读取左右节点的 `result_symbol()`。
         - 结果保持 `int | SymbolDim`，供 shape/stride 与赋值绑定使用。
+        - 任一 operand 解析期语义为 `?` 时，结果继续传播为 `SymbolDim("?")`。
 
         使用示例:
         - symbol = SymbolAddAST(SymbolDimAST("M"), ConstValueAST(1)).result_symbol()
@@ -566,6 +584,8 @@ class SymbolBinaryAST(ValueAST):
         rhs = self.rhs.result_symbol()
         if lhs is None or rhs is None:
             return None
+        if _is_unknown_runtime_symbol(lhs) or _is_unknown_runtime_symbol(rhs):
+            return SymbolDim("?")
         lhs_symbol = lhs if isinstance(lhs, SymbolDim) else SymbolDim(lhs)
         rhs_symbol = rhs if isinstance(rhs, SymbolDim) else SymbolDim(rhs)
         try:
@@ -580,7 +600,8 @@ class SymbolBinaryAST(ValueAST):
             elif isinstance(self, SymbolFloorDivAST):
                 result = lhs_symbol // rhs_symbol
             elif isinstance(self, SymbolMinAST):
-                return _symbol_min_runtime_value(lhs, rhs)
+                min_value = _symbol_min_runtime_value(lhs, rhs)
+                return SymbolDim("?") if _is_unknown_runtime_symbol(min_value) else min_value
             else:
                 return None
         except (TypeError, ValueError):

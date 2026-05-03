@@ -2,29 +2,33 @@
 
 ## 功能简介
 
-定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”以及“最小 pointer type 承载”。同时提供 `!symbol.iter<start = "...", end = "...", step = "...">` 用于表达循环迭代变量语义，与 `!symbol.int<"expr">` 同样承载整数值语义，但额外记录迭代边界。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘、除、整除、最小值以及比较计算，并提供 `symbol.to_int`（转为普通整型）与 `symbol.to_float`（转为 `f32`）两类显式类型转换 op；同时提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 在 IR 类型层的唯一最小载体。`symbol.for` 现支持旧的无 carried-value 形式，也支持单个 loop-carried `!symbol.int<"...">` 的 `iter_args(%acc = %init) ... -> !symbol.int<"...">` 公开语法，并通过 `symbol.yield` 终止循环体。该方言不负责张量、内存容器、通用控制流、pointer body op，或超出最小整数符号算术/比较范围的数值计算语义。
+定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”以及“最小 pointer type 承载”。同时提供 `!symbol.iter<start = "...", end = "...", step = "...">` 用于表达循环迭代变量语义，与 `!symbol.int<"expr">` 同样承载整数值语义，但额外记录迭代边界。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”，`!symbol.int<"?">` 表示“该整数值当前无法由稳定符号名或常量表达确定”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘、除、整除、最小值以及比较计算，并提供 `symbol.to_int`（转为普通整型）与 `symbol.to_float`（转为 `f32`）两类显式类型转换 op；同时提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 在 IR 类型层的唯一最小载体。`symbol.for` 现支持旧的无 carried-value 形式，也支持单个 loop-carried `!symbol.int<"...">` 的 `iter_args(%acc = %init) ... -> !symbol.int<"...">` 公开语法，并通过 `symbol.yield` 终止循环体。该方言不负责张量、内存容器、通用控制流、pointer body op，或超出最小整数符号算术/比较范围的数值计算语义。
 
 ## API 列表
 
 - `class SymbolExprAttr(expr: StringAttr)`
+- `SymbolExprAttr.from_expr(expr: str) -> SymbolExprAttr`
 - `class SymbolDimType(expr: SymbolExprAttr)`
 - `class SymbolValueType(expr: SymbolExprAttr)`
+- `SymbolValueType.from_expr(expr: str) -> SymbolValueType`
+- `SymbolValueType.get_value() -> int | str`
+- `SymbolValueType.is_symbol() -> bool`
 - `class SymbolIterAttr(start: StringAttr, end: StringAttr, step: StringAttr)`
 - `class SymbolIterType(iter_attr: SymbolIterAttr)`
 - `class SymbolPtrType(base_type: Attribute, shape: ArrayAttr[Attribute], stride: ArrayAttr[Attribute])`
-- `class SymbolConstOp(value: IntegerAttr | IntAttr | int)`
-- `class SymbolAddOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolSubOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolMulOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolDivOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolFloorDivOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolMinOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolEqOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolNeOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolLtOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolLeOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolGtOp(lhs: SSAValue, rhs: SSAValue)`
-- `class SymbolGeOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolConstOp(value: int | IntAttr, result_type: SymbolValueType | None = None)`
+- `class SymbolAddOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- `class SymbolSubOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- `class SymbolMulOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- `class SymbolDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- `class SymbolFloorDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- `class SymbolMinOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- `class SymbolEqOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- `class SymbolNeOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- `class SymbolLtOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- `class SymbolLeOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- `class SymbolGtOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- `class SymbolGeOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 - `class SymbolToFloatOp(value: SSAValue, result_type: Attribute)`
 - `class SymbolToIntOp(value: SSAValue, result_type: Attribute)`
 - `class SymbolCastOp(value: SSAValue, result_type: Attribute)`
@@ -84,7 +88,7 @@
 - `symbol.get_dim` / `symbol.get_stride` 查询到静态整数 shape/stride 条目时支持常量折叠，可在通用 folding 中物化为 `symbol.const`；符号表达与匿名动态值不得被折叠成常量。
 - 若目标维度或步幅条目为匿名动态值 `?`，由于无法稳定映射为 `!symbol.int<"...">`，必须报错；本接口只接受可表示为整数常量或符号表达的条目。
 - `symbol.get_dim` / `symbol.get_stride` 的轴号当前必须是静态整数索引；越界、负数或非整数轴号必须报错。
-- 本方言暂不定义“未知但无名字”的匿名符号值；若需要动态未知值，应优先使用具名符号或由其他方言以 SSA value 传递。
+- 本方言定义 `?` 作为 unknown symbol value，仅表示当前 `!symbol.int` 的值语义无法稳定命名或静态确定；`?` 不是具名符号，不参与符号化简，也不得扩展为 memory shape/stride 的匿名动态条目。
 - 当前只定义整数语义，不区分 `int/int8/int16/int32/int64` 等具体整型宽度，也不定义 `index`、浮点或其他非整型 symbol 类型。
 - `SymbolIterType` 只用于表达循环迭代变量语义；`symbol.for` 的 `start/end/step` 仍要求 `!symbol.int<"expr">`，`it` 则要求 `!symbol.iter<...>`。
 - `symbol.for` 支持的循环承载值仅限一个 `!symbol.int<"...">` 累计值；该能力服务于成本函数一类“循环内累计、循环外返回”的 IR 表达，不扩展为通用多值控制流。
@@ -112,8 +116,10 @@
 
 ```text
 #symbol.expr<"N">
+#symbol.expr<"?">
 #symbol.expr<"M + 1">
 !symbol.int<"N">
+!symbol.int<"?">
 !symbol.int<"3">
 !symbol.iter<start = "0", end = "index", step = "1">
 !symbol.ptr<f32>
@@ -157,6 +163,8 @@ SymbolPtrType(f32)
 - `expr` 不能为空。
 - `expr` 中若出现非法字符、空白后为空、或不可解析的表达式，必须报错；公开表达式仅允许 `min(lhs, rhs)` 形式表示整数符号最小值。
 - `expr` 允许纯整数字面量，`!symbol.int<"1">`、`!symbol.int<"2">`、`!symbol.int<"3">` 都必须视为合法类型表达。
+- `expr` 允许单独的 `?`，`SymbolValueType.from_expr("?").get_value()` 必须返回 `"?"`，`SymbolValueType.from_expr("?").is_symbol()` 必须返回 `False`。
+- `iter<begin,end,step>` 文本不是 `SymbolValueType` 或 `SymbolExprAttr` 的合法表达片段；`2 - iter<0, 8, 1>`、`2 - f0` 这类由 SSA 名称或迭代变量文本拼出的 result 表达不得作为迭代变量算术结果。
 - `SymbolIterType` 的表达式规则与 `SymbolValueType` 一致，打印后再解析必须得到等价类型对象。
 - 兼容解析旧文本 `!symbol.iter<"expr">`，解析后应等价于 `!symbol.iter<start = "0", end = "expr", step = "1">`。
 - 同一个 `SymbolValueType` 的相等性比较只比较整数语义下的 `expr`。
@@ -170,6 +178,43 @@ SymbolPtrType(f32)
 
 - 返回类型：校验规则定义。
 - 限制：仅校验整数符号类型表达与 pointer carrier 的合法性，不负责判断两个不同表达式是否数学等价，也不定义 pointer body 语义。
+
+### Unknown、算术 verifier 与 fold 规则
+
+- 功能说明：
+
+- 规定 `?`、`symbol.iter`、binary arithmetic 与 compare fold 的公开语义。
+
+- 参数：
+
+- `lhs`：二元 op 左操作数，类型必须是 `!symbol.int<"...">` 或 `!symbol.iter<...>`。
+- `rhs`：二元 op 右操作数，类型必须是 `!symbol.int<"...">` 或 `!symbol.iter<...>`。
+- `result_type`：二元算术 op 的结果类型，必须是 `!symbol.int<"...">`；compare op 的结果类型固定为 `i1`。
+
+- 使用示例：
+
+```python
+from xdsl.dialects.builtin import i1
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolEqOp, SymbolValueType
+
+unknown_type = SymbolValueType.from_expr("?")
+sum_op = SymbolAddOp(lhs, rhs, unknown_type)
+eq_op = SymbolEqOp(lhs, rhs, i1)
+```
+
+- 注意事项：
+
+- `symbol.add/sub/mul/div/floordiv/min` 任一 operand 为 `!symbol.iter<...>` 时，result type 必须为 `!symbol.int<"?">`。
+- `symbol.add/sub/mul/div/floordiv/min` 任一 operand 为 `!symbol.int<"?">` 时，result type 必须为 `!symbol.int<"?">`。
+- 两个 operand 均为确定 `!symbol.int` 时，result type 可以是确定表达，也可以保守写成 `!symbol.int<"?">`。
+- fold 只在当前 operand 均为静态整数时发生；result type 为 `!symbol.int<"?">` 时仍应物化为确定 `symbol.const`。
+- 当前 operand 为 `!symbol.int<"?">`、动态符号表达或 `!symbol.iter<...>` 时不得 fold 为常量。
+- `symbol.eq/ne/lt/le/gt/ge` 结果固定为 `i1`；静态整数 operand 可 fold 为 `arith.constant` 的 `i1` bool，动态符号、`?` 或 `symbol.iter` operand 不 fold。
+
+- 返回值：
+
+- 返回类型：arith op 返回 `SymbolAddOp` / `SymbolSubOp` / `SymbolMulOp` / `SymbolDivOp` / `SymbolFloorDivOp` / `SymbolMinOp` 实例；compare op 返回 `SymbolEqOp` / `SymbolNeOp` / `SymbolLtOp` / `SymbolLeOp` / `SymbolGtOp` / `SymbolGeOp` 实例。
+- 限制：`?` 仅表示 unknown scalar symbol value，不定义 `!symbol.bool<?>`，不允许 compare 返回 `!symbol.int<"...">`。
 
 ### Memory 相关符号标量归属
 
@@ -333,225 +378,210 @@ SymbolPtrType(f32)
 - 功能说明：构造或表示 `SymbolPtrType` 对应的 symbol dialect type。
 - 注意事项：`base_type` 必须是合法 xDSL type attribute；不得把 `!symbol.int` 用作 pointer pointee。
 
-### `class SymbolConstOp(value: IntegerAttr | IntAttr | int)`
+### `class SymbolConstOp(value: int | IntAttr, result_type: SymbolValueType | None = None)`
 
-- api：`class SymbolConstOp(value: IntegerAttr | IntAttr | int)`
+- api：`class SymbolConstOp(value: int | IntAttr, result_type: SymbolValueType | None = None)`
 - 参数：
-  - `value`：输入值；类型 `IntegerAttr | IntAttr | int`；无默认值；不允许 None，除非签名显式允许；用于当前节点、op 或转换的主输入。
+  - `value`：输入值；类型 `int | IntAttr`；无默认值；不允许 None；用于构造 `symbol.const` 的整数常量。
+  - `result_type`：结果类型；类型 `SymbolValueType | None`；默认值 `None`；为 `None` 时按 `value` 推导 `!symbol.int<"...">`。
 - 返回值：`SymbolConstOp` 实例。
 - 使用示例：
 
   ```python
-    from kernel_gen.dialect.symbol import SymbolConstOp
+    from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
 
-    value = SymbolConstOp(value=value)
+    value = SymbolConstOp(3)
+    typed = SymbolConstOp(3, SymbolValueType.from_expr("3"))
     ```
 - 功能说明：构造或表示 `SymbolConstOp` 对应的 symbol dialect operation。
-- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。`bool`、`IntAttr(data=True/False)` 与 `IntegerAttr` 不是 `SymbolConstOp(...)` 的公开输入；需要 `i1` compare fold 时由 `SymbolConstantMaterializationInterface` 物化为 `arith.constant`，不经由 `symbol.const`。调用者不得把 `SymbolValueType.from_expr("?")` 作为 `symbol.const` 的直接结果类型；当 arithmetic fold 的目标 result type 是 `!symbol.int<"?">` 时，`materialize_constant(IntAttr(3), SymbolValueType.from_expr("?"))` 必须物化为确定的 `SymbolConstOp(3)` / `!symbol.int<"3">`。
 
-### `class SymbolAddOp(lhs: SSAValue, rhs: SSAValue)`
+### `class SymbolAddOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 
-- api：`class SymbolAddOp(lhs: SSAValue, rhs: SSAValue)`
+- api：`class SymbolAddOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 - 参数：
-  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
-  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+  - `lhs`：左操作数；类型 `SSAValue | Operation`；无默认值；必须为 `!symbol.int<"...">` 或 `!symbol.iter<...>`。
+  - `rhs`：右操作数；类型 `SSAValue | Operation`；无默认值；必须为 `!symbol.int<"...">` 或 `!symbol.iter<...>`。
+  - `result_type`：结果类型；类型 `Attribute`；无默认值；必须为 `SymbolValueType`；若任一 operand 为 `!symbol.iter<...>` 或 `!symbol.int<"?">`，必须为 `SymbolValueType.from_expr("?")`。
 - 返回值：`SymbolAddOp` 实例。
 - 使用示例：
 
   ```python
-    from kernel_gen.dialect.symbol import SymbolAddOp
+  from kernel_gen.dialect.symbol import SymbolAddOp, SymbolValueType
 
-    value = SymbolAddOp(lhs=lhs, rhs=rhs)
-    ```
-- 功能说明：构造或表示 `SymbolAddOp` 对应的 symbol dialect operation。
-- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+  value = SymbolAddOp(lhs, rhs, SymbolValueType.from_expr("N + 1"))
+  ```
+- 功能说明：构造或表示 `symbol.add`。
+- 注意事项：静态整数 operand 可 fold；动态、`?` 或 iter operand 不 fold，且 `?` / iter operand 的结果必须保守为 `!symbol.int<"?">`。
 
-### `class SymbolSubOp(lhs: SSAValue, rhs: SSAValue)`
+### `class SymbolSubOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 
-- api：`class SymbolSubOp(lhs: SSAValue, rhs: SSAValue)`
-- 参数：
-  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
-  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- api：`class SymbolSubOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- 参数：同 `SymbolAddOp`。
 - 返回值：`SymbolSubOp` 实例。
 - 使用示例：
 
   ```python
-    from kernel_gen.dialect.symbol import SymbolSubOp
+  from kernel_gen.dialect.symbol import SymbolSubOp, SymbolValueType
 
-    value = SymbolSubOp(lhs=lhs, rhs=rhs)
-    ```
-- 功能说明：构造或表示 `SymbolSubOp` 对应的 symbol dialect operation。
-- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+  value = SymbolSubOp(lhs, rhs, SymbolValueType.from_expr("N - 1"))
+  ```
+- 功能说明：构造或表示 `symbol.sub`。
+- 注意事项：不得用 SSA 名称或 `name_hint` 拼出 `2 - f0` 这类 result type；涉及 `symbol.iter` 时必须使用 `!symbol.int<"?">`。
 
-### `class SymbolMulOp(lhs: SSAValue, rhs: SSAValue)`
+### `class SymbolMulOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 
-- api：`class SymbolMulOp(lhs: SSAValue, rhs: SSAValue)`
-- 参数：
-  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
-  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- api：`class SymbolMulOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- 参数：同 `SymbolAddOp`。
 - 返回值：`SymbolMulOp` 实例。
 - 使用示例：
 
   ```python
-    from kernel_gen.dialect.symbol import SymbolMulOp
+  from kernel_gen.dialect.symbol import SymbolMulOp, SymbolValueType
 
-    value = SymbolMulOp(lhs=lhs, rhs=rhs)
-    ```
-- 功能说明：构造或表示 `SymbolMulOp` 对应的 symbol dialect operation。
-- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+  value = SymbolMulOp(lhs, rhs, SymbolValueType.from_expr("M*N"))
+  ```
+- 功能说明：构造或表示 `symbol.mul`。
+- 注意事项：`?` 与 `symbol.iter` 传播规则同 `SymbolAddOp`。
 
-### `class SymbolDivOp(lhs: SSAValue, rhs: SSAValue)`
+### `class SymbolDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 
-- api：`class SymbolDivOp(lhs: SSAValue, rhs: SSAValue)`
-- 参数：
-  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
-  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- api：`class SymbolDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- 参数：同 `SymbolAddOp`。
 - 返回值：`SymbolDivOp` 实例。
 - 使用示例：
 
   ```python
-    from kernel_gen.dialect.symbol import SymbolDivOp
+  from kernel_gen.dialect.symbol import SymbolDivOp, SymbolValueType
 
-    value = SymbolDivOp(lhs=lhs, rhs=rhs)
-    ```
-- 功能说明：构造或表示 `SymbolDivOp` 对应的 symbol dialect operation。
-- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+  value = SymbolDivOp(lhs, rhs, SymbolValueType.from_expr("M / N"))
+  ```
+- 功能说明：构造或表示 `symbol.div`。
+- 注意事项：静态 fold 仅在整除且除数非零时发生；`?` 与 `symbol.iter` 传播规则同 `SymbolAddOp`。
 
-### `class SymbolFloorDivOp(lhs: SSAValue, rhs: SSAValue)`
+### `class SymbolFloorDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 
-- api：`class SymbolFloorDivOp(lhs: SSAValue, rhs: SSAValue)`
-- 参数：
-  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
-  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- api：`class SymbolFloorDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- 参数：同 `SymbolAddOp`。
 - 返回值：`SymbolFloorDivOp` 实例。
 - 使用示例：
 
   ```python
-    from kernel_gen.dialect.symbol import SymbolFloorDivOp
+  from kernel_gen.dialect.symbol import SymbolFloorDivOp, SymbolValueType
 
-    value = SymbolFloorDivOp(lhs=lhs, rhs=rhs)
-    ```
-- 功能说明：构造或表示 `SymbolFloorDivOp` 对应的 symbol dialect operation。
-- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+  value = SymbolFloorDivOp(lhs, rhs, SymbolValueType.from_expr("M // N"))
+  ```
+- 功能说明：构造或表示 `symbol.floordiv`。
+- 注意事项：静态 fold 仅在除数非零时发生；`?` 与 `symbol.iter` 传播规则同 `SymbolAddOp`。
 
-### `class SymbolMinOp(lhs: SSAValue, rhs: SSAValue)`
+### `class SymbolMinOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 
-- api：`class SymbolMinOp(lhs: SSAValue, rhs: SSAValue)`
-- 参数：
-  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须为 `!symbol.int<"...">` 或 `!symbol.iter<...>` 整数符号值。
-  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须为 `!symbol.int<"...">` 或 `!symbol.iter<...>` 整数符号值。
+- api：`class SymbolMinOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- 参数：同 `SymbolAddOp`。
 - 返回值：`SymbolMinOp` 实例。
 - 使用示例：
 
   ```python
-    from kernel_gen.dialect.symbol import SymbolMinOp
+  from kernel_gen.dialect.symbol import SymbolMinOp, SymbolValueType
 
-    value = SymbolMinOp(lhs=lhs, rhs=rhs)
-    ```
-- 功能说明：构造或表示 `SymbolMinOp` 对应的 symbol dialect operation，结果为左右整数符号值的最小值。
-- 注意事项：只允许二元 `min`；不得扩展为多参数、张量级或浮点最小值；测试不得直连当前文件之外的非公开 helper。
+  value = SymbolMinOp(lhs, rhs, SymbolValueType.from_expr("min(T, N)"))
+  ```
+- 功能说明：构造或表示 `symbol.min`，结果为左右整数符号值的最小值。
+- 注意事项：只允许二元 `min`；不得扩展为多参数、张量级或浮点最小值；涉及 `symbol.iter` 或 `?` 时结果必须保守为 `!symbol.int<"?">`。
 
-### `class SymbolEqOp(lhs: SSAValue, rhs: SSAValue)`
+### `class SymbolEqOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 
-- api：`class SymbolEqOp(lhs: SSAValue, rhs: SSAValue)`
+- api：`class SymbolEqOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 - 参数：
-  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
-  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+  - `lhs`：左操作数；类型 `SSAValue | Operation`；无默认值；必须为 `!symbol.int<"...">` 或 `!symbol.iter<...>`。
+  - `rhs`：右操作数；类型 `SSAValue | Operation`；无默认值；必须为 `!symbol.int<"...">` 或 `!symbol.iter<...>`。
+  - `result_type`：结果类型；类型 `Attribute`；默认值 `i1`；必须固定为 `i1`。
 - 返回值：`SymbolEqOp` 实例。
 - 使用示例：
 
   ```python
-    from kernel_gen.dialect.symbol import SymbolEqOp
+  from xdsl.dialects.builtin import i1
+  from kernel_gen.dialect.symbol import SymbolEqOp
 
-    value = SymbolEqOp(lhs=lhs, rhs=rhs)
-    ```
-- 功能说明：构造或表示 `SymbolEqOp` 对应的 symbol dialect operation。
-- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+  value = SymbolEqOp(lhs, rhs, i1)
+  ```
+- 功能说明：构造或表示 `symbol.eq`。
+- 注意事项：静态整数 operand 可 fold 为 `i1` bool 常量；动态、`?` 或 iter operand 不 fold。
 
-### `class SymbolNeOp(lhs: SSAValue, rhs: SSAValue)`
+### `class SymbolNeOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 
-- api：`class SymbolNeOp(lhs: SSAValue, rhs: SSAValue)`
-- 参数：
-  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
-  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- api：`class SymbolNeOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- 参数：同 `SymbolEqOp`。
 - 返回值：`SymbolNeOp` 实例。
 - 使用示例：
 
   ```python
-    from kernel_gen.dialect.symbol import SymbolNeOp
+  from kernel_gen.dialect.symbol import SymbolNeOp
 
-    value = SymbolNeOp(lhs=lhs, rhs=rhs)
-    ```
-- 功能说明：构造或表示 `SymbolNeOp` 对应的 symbol dialect operation。
-- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+  value = SymbolNeOp(lhs, rhs)
+  ```
+- 功能说明：构造或表示 `symbol.ne`。
+- 注意事项：compare family 结果固定为 `i1`，不定义 `!symbol.bool<?>`。
 
-### `class SymbolLtOp(lhs: SSAValue, rhs: SSAValue)`
+### `class SymbolLtOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 
-- api：`class SymbolLtOp(lhs: SSAValue, rhs: SSAValue)`
-- 参数：
-  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
-  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- api：`class SymbolLtOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- 参数：同 `SymbolEqOp`。
 - 返回值：`SymbolLtOp` 实例。
 - 使用示例：
 
   ```python
-    from kernel_gen.dialect.symbol import SymbolLtOp
+  from kernel_gen.dialect.symbol import SymbolLtOp
 
-    value = SymbolLtOp(lhs=lhs, rhs=rhs)
-    ```
-- 功能说明：构造或表示 `SymbolLtOp` 对应的 symbol dialect operation。
-- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+  value = SymbolLtOp(lhs, rhs)
+  ```
+- 功能说明：构造或表示 `symbol.lt`。
+- 注意事项：compare family 结果固定为 `i1`，不定义 compare result `symbol.int`。
 
-### `class SymbolLeOp(lhs: SSAValue, rhs: SSAValue)`
+### `class SymbolLeOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 
-- api：`class SymbolLeOp(lhs: SSAValue, rhs: SSAValue)`
-- 参数：
-  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
-  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- api：`class SymbolLeOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- 参数：同 `SymbolEqOp`。
 - 返回值：`SymbolLeOp` 实例。
 - 使用示例：
 
   ```python
-    from kernel_gen.dialect.symbol import SymbolLeOp
+  from kernel_gen.dialect.symbol import SymbolLeOp
 
-    value = SymbolLeOp(lhs=lhs, rhs=rhs)
-    ```
-- 功能说明：构造或表示 `SymbolLeOp` 对应的 symbol dialect operation。
-- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+  value = SymbolLeOp(lhs, rhs)
+  ```
+- 功能说明：构造或表示 `symbol.le`。
+- 注意事项：compare family 结果固定为 `i1`。
 
-### `class SymbolGtOp(lhs: SSAValue, rhs: SSAValue)`
+### `class SymbolGtOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 
-- api：`class SymbolGtOp(lhs: SSAValue, rhs: SSAValue)`
-- 参数：
-  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
-  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- api：`class SymbolGtOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- 参数：同 `SymbolEqOp`。
 - 返回值：`SymbolGtOp` 实例。
 - 使用示例：
 
   ```python
-    from kernel_gen.dialect.symbol import SymbolGtOp
+  from kernel_gen.dialect.symbol import SymbolGtOp
 
-    value = SymbolGtOp(lhs=lhs, rhs=rhs)
-    ```
-- 功能说明：构造或表示 `SymbolGtOp` 对应的 symbol dialect operation。
-- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+  value = SymbolGtOp(lhs, rhs)
+  ```
+- 功能说明：构造或表示 `symbol.gt`。
+- 注意事项：compare family 结果固定为 `i1`。
 
-### `class SymbolGeOp(lhs: SSAValue, rhs: SSAValue)`
+### `class SymbolGeOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 
-- api：`class SymbolGeOp(lhs: SSAValue, rhs: SSAValue)`
-- 参数：
-  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
-  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- api：`class SymbolGeOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
+- 参数：同 `SymbolEqOp`。
 - 返回值：`SymbolGeOp` 实例。
 - 使用示例：
 
   ```python
-    from kernel_gen.dialect.symbol import SymbolGeOp
+  from kernel_gen.dialect.symbol import SymbolGeOp
 
-    value = SymbolGeOp(lhs=lhs, rhs=rhs)
-    ```
-- 功能说明：构造或表示 `SymbolGeOp` 对应的 symbol dialect operation。
-- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+  value = SymbolGeOp(lhs, rhs)
+  ```
+- 功能说明：构造或表示 `symbol.ge`。
+- 注意事项：compare family 结果固定为 `i1`。
 
 ### `class SymbolToFloatOp(value: SSAValue, result_type: Attribute)`
 
@@ -728,6 +758,7 @@ SymbolPtrType(f32)
 | TC-SYM-004 | 解析/打印 | `SymbolValueType` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_value_type_round_trip_for_integer_only_semantics`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_value_type_round_trip_for_integer_only_semantics` |
 | TC-SYM-005 | 解析/打印 | `SymbolValueType` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_value_type_round_trip_for_integer_only_semantics`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_value_type_round_trip_for_integer_only_semantics` |
 | TC-SYM-006 | 解析/打印 | `SymbolValueType` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_value_type_round_trip_for_integer_only_semantics`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_value_type_round_trip_for_integer_only_semantics` |
+| TC-SYM-006A | 符号语义 | `!symbol.int<"?">` unknown 公开语义 | 准备 `SymbolValueType.from_expr("?")` 与旧 `iter<...>` 文本。 | 运行 `test_symbol_value_type_unknown_public_semantics`。 | `get_value()` 返回 `"?"`，`is_symbol()` 返回 `False`，旧 `iter<...>` 表达片段被拒绝。 | `test_symbol_value_type_unknown_public_semantics` |
 | TC-SYM-007 | 边界/异常 | `SymbolValueType` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_value_type_rejects_unsupported_legacy_text_forms`、`test_symbol_verifier_rejects_illegal_expression_characters`。 | “`SymbolValueType`”场景按公开错误语义失败或被拒绝。 | `test_symbol_value_type_rejects_unsupported_legacy_text_forms`、`test_symbol_verifier_rejects_illegal_expression_characters` |
 | TC-SYM-008 | 边界/异常 | `SymbolValueType` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_value_type_rejects_unsupported_legacy_text_forms`。 | “`SymbolValueType`”场景按公开错误语义失败或被拒绝。 | `test_symbol_value_type_rejects_unsupported_legacy_text_forms` |
 | TC-SYM-052 | 解析/打印 | `SymbolIterType` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_iter_type_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_iter_type_round_trip` |
@@ -738,12 +769,15 @@ SymbolPtrType(f32)
 | TC-SYM-013 | 解析/打印 | memory 元信息标量 | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
 | TC-SYM-014 | 解析/打印 | memory 元信息标量 | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
 | TC-SYM-015 | 符号语义 | `symbol.add/sub/mul/div/floordiv/min` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_arith_ops_verify_success`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.add/sub/mul/div/floordiv/min`”场景。 | `test_symbol_arith_ops_verify_success` |
+| TC-SYM-015A | 边界/异常 | `?` 与 `symbol.iter` 算术结果必须为 unknown | 准备 `!symbol.int<"?">` 与 `!symbol.iter<...>` operand。 | 运行 `test_symbol_arith_ops_require_unknown_result_for_unknown_or_iter_operands`。 | 合法 unknown result 通过 verifier，`N + 1`、`2 - f0` 这类 result type 被拒绝。 | `test_symbol_arith_ops_require_unknown_result_for_unknown_or_iter_operands` |
 | TC-SYM-016 | 解析/打印 | `symbol.add/sub/mul/div/floordiv/min` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_arith_ops_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_arith_ops_round_trip` |
 | TC-SYM-017 | 边界/异常 | `symbol.add/sub/mul/div/floordiv/min` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_arith_ops_reject_non_symbol_int_types`。 | “`symbol.add/sub/mul/div/floordiv/min`”场景按公开错误语义失败或被拒绝。 | `test_symbol_arith_ops_reject_non_symbol_int_types` |
 | TC-SYM-018 | 边界/异常 | `symbol.add/sub/mul/div/floordiv/min` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_arith_ops_reject_malformed_signatures`。 | “`symbol.add/sub/mul/div/floordiv/min`”场景按公开错误语义失败或被拒绝。 | `test_symbol_arith_ops_reject_malformed_signatures` |
 | TC-SYM-019 | 边界/异常 | `symbol.add/sub/mul/div/floordiv/min` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_arith_ops_error_messages_include_context`。 | “`symbol.add/sub/mul/div/floordiv/min`”场景按公开错误语义失败或被拒绝。 | `test_symbol_arith_ops_error_messages_include_context` |
 | TC-SYM-019A | 解析/打印 | `symbol.min` 类型和值语义 | 准备 `!symbol.int` 或 `!symbol.iter` 操作数。 | 运行 `test_symbol_arith_ops_verify_success` 与 `test_symbol_arith_ops_round_trip`。 | `symbol.min` 可打印解析，结果类型保留 `min(lhs, rhs)` 或等价常量语义。 | `test_symbol_arith_ops_verify_success`、`test_symbol_arith_ops_round_trip` |
 | TC-SYM-020 | 符号语义 | `symbol.eq/ne/lt/le/gt/ge` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_compare_ops_verify_success`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.eq/ne/lt/le/gt/ge`”场景。 | `test_symbol_compare_ops_verify_success` |
+| TC-SYM-020A | 符号语义 | compare 静态整数 fold 为 `i1` | 准备静态整数 `symbol.const` operand。 | 运行 `test_symbol_compare_ops_fold_static_operands_to_i1_bool`。 | eq/ne/lt/le/gt/ge 均可在静态整数输入下 fold 为 `arith.constant` i1。 | `test_symbol_compare_ops_fold_static_operands_to_i1_bool` |
+| TC-SYM-020B | 边界/异常 | compare 动态、`?` 与 `symbol.iter` 不 fold | 准备动态 symbol、unknown 与 iter operand。 | 运行 `test_symbol_compare_ops_reject_dynamic_unknown_and_iter_fold`。 | compare result 仍为 `i1`，但不发生常量 fold。 | `test_symbol_compare_ops_reject_dynamic_unknown_and_iter_fold` |
 | TC-SYM-021 | 解析/打印 | `symbol.eq/ne/lt/le/gt/ge` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_compare_ops_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_compare_ops_round_trip` |
 | TC-SYM-022 | 边界/异常 | `symbol.eq/ne/lt/le/gt/ge` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_compare_ops_reject_non_symbol_int_operands`。 | “`symbol.eq/ne/lt/le/gt/ge`”场景按公开错误语义失败或被拒绝。 | `test_symbol_compare_ops_reject_non_symbol_int_operands` |
 | TC-SYM-023 | 边界/异常 | `symbol.eq/ne/lt/le/gt/ge` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_compare_ops_reject_non_i1_result`。 | “`symbol.eq/ne/lt/le/gt/ge`”场景按公开错误语义失败或被拒绝。 | `test_symbol_compare_ops_reject_non_i1_result` |
@@ -779,6 +813,8 @@ SymbolPtrType(f32)
 | TC-SYM-049 | 符号语义 | `symbol.const` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_const_op_verify_success`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.const`”场景。 | `test_symbol_const_op_verify_success` |
 | TC-SYM-050 | 解析/打印 | `symbol.const` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_const_op_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_const_op_round_trip` |
 | TC-SYM-051 | 边界/异常 | `symbol.const` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_const_op_rejects_mismatched_type`。 | “`symbol.const`”场景按公开错误语义失败或被拒绝。 | `test_symbol_const_op_rejects_mismatched_type` |
+| TC-SYM-051A | 边界/异常 | `SymbolConstOp` 拒绝 `IntegerAttr` 输入 | 准备 `IntegerAttr(3, i32)`。 | 运行 `test_symbol_const_op_rejects_integer_attr_input`。 | `SymbolConstOp(...)` 公开构造只接受 `int | IntAttr`，`IntegerAttr` 被稳定拒绝。 | `test_symbol_const_op_rejects_integer_attr_input` |
+| TC-SYM-051B | 边界/异常 | `SymbolConstOp` 拒绝 bool 输入 | 准备 `True`、`False`、`IntAttr(data=True)` 与 `IntAttr(data=False)`。 | 运行 `test_symbol_const_op_rejects_boolean_inputs`。 | `SymbolConstOp(...)` 公开构造拒绝 bool 与 bool-backed `IntAttr`，不把布尔值误当作 `symbol.int<"1">` 或 `symbol.int<"0">`。 | `test_symbol_const_op_rejects_boolean_inputs` |
 | TC-SYM-058 | 符号语义 | `SymbolValueType.get_value()/is_symbol()` 对常量、负数、除法、整除与 `floor(...)` 的公开值语义 | 准备公开 `!symbol.int<"...">` 文本与构造入口。 | 运行 `test_symbol_value_type_public_expression_matrix`。 | 常量表达归一为整数，符号表达返回 canonical 文本，`is_symbol()` 与公开值语义一致。 | `test_symbol_value_type_public_expression_matrix` |
 | TC-SYM-059 | 解析/打印 | `SymbolDimType` 与 `SymbolIterType` 公开构造、字符串化和 legacy iter parser | 准备公开 symbol dim 名称、iter bounds 与 legacy iter 文本。 | 运行 `test_symbol_dim_and_iter_public_constructor_matrix`。 | 合法名称与 iter 文本稳定，空名称、非法名称和 malformed iter 文本按公开错误语义失败。 | `test_symbol_dim_and_iter_public_constructor_matrix` |
 | TC-SYM-060 | 边界/异常 | `symbol.add/div/floordiv` 公开 folding 拒绝除零、非整除与 result type 不匹配 | 准备公开 `Folder.try_fold(...)` 入口和 `symbol.const` 操作数。 | 运行 `test_symbol_binary_arith_fold_public_rejection_matrix`。 | 除零、非整除和 result type 不匹配均不发生错误折叠。 | `test_symbol_binary_arith_fold_public_rejection_matrix` |

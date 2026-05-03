@@ -21,10 +21,13 @@ import random
 
 import pytest
 from xdsl.context import Context
+from xdsl.dialects.builtin import i1
+from xdsl.dialects.test import TestOp as _TestOp
+from xdsl.ir import Attribute
 from xdsl.ir import Block, Operation, SSAValue
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dialect.symbol import SymbolIterType, SymbolValueType
 from kernel_gen.dsl.ast.nodes.attr import FloatTypeAttrAST, IntTypeAttrAST, ListAST, PythonObjectAttrAST, TupleAST
 from kernel_gen.dsl.ast.nodes.basic import MemoryAST, ValueAST
 from kernel_gen.dsl.ast.nodes.symbol import (
@@ -65,6 +68,19 @@ class DetachedSymbolValueAST(ValueAST):
         emitted = ConstValueAST(self.value).emit_mlir(ctx, None)
         assert isinstance(emitted, Operation)
         return emitted
+
+
+class DetachedSymbolTypedValueAST(ValueAST):
+    """测试公开 ValueAST 合同时返回指定 symbol 类型 SSA 的节点。"""
+
+    def __init__(self, result_type: Attribute) -> None:
+        self.result_type = result_type
+
+    def emit_mlir(self, ctx: Context, block: Block | None = None) -> Operation:
+        """返回指定 result type 的 xDSL 测试 op。"""
+
+        _ = (ctx, block)
+        return _TestOp(result_types=[self.result_type])
 
 
 class RawEmitAST(ValueAST):
@@ -293,6 +309,43 @@ def test_symbol_binary_public_emit_mlir_matrix_and_errors(node_type: type, expec
 
     with pytest.raises(KernelCodeError, match=r"symbol operands must have !symbol\.int or !symbol\.iter type"):
         node_type(ConstValueAST(True), ConstValueAST(2)).emit_mlir(ctx, Block())
+
+
+def test_symbol_binary_public_emit_mlir_propagates_unknown_for_unknown_and_iter_operands() -> None:
+    """symbol 二元 AST 对 `?` 和 `symbol.iter` operand 发射 unknown result。"""
+
+    ctx = Context()
+    block = Block()
+
+    unknown_result = SymbolAddAST(
+        DetachedSymbolTypedValueAST(SymbolValueType.from_expr("?")),
+        ConstValueAST(2),
+    ).emit_mlir(ctx, block)
+    iter_result = SymbolSubAST(
+        ConstValueAST(2),
+        DetachedSymbolTypedValueAST(SymbolIterType.from_bounds("0", "N", "1")),
+    ).emit_mlir(ctx, block)
+
+    assert isinstance(unknown_result, SSAValue)
+    assert isinstance(iter_result, SSAValue)
+    assert unknown_result.type == SymbolValueType.from_expr("?")
+    assert iter_result.type == SymbolValueType.from_expr("?")
+    assert "2 - " not in str(iter_result.type)
+
+
+def test_symbol_compare_public_emit_mlir_keeps_i1_for_iter_operand() -> None:
+    """symbol compare AST 对 `symbol.iter` operand 仍发射 `i1` 结果。"""
+
+    ctx = Context()
+    block = Block()
+
+    result = SymbolLtAST(
+        DetachedSymbolTypedValueAST(SymbolIterType.from_bounds("0", "N", "1")),
+        ConstValueAST(2),
+    ).emit_mlir(ctx, block)
+
+    assert isinstance(result, SSAValue)
+    assert result.type == i1
 
 
 def test_symbol_to_float_and_compare_public_emit_error_edges() -> None:
