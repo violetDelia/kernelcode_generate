@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import random
 import sys
 from pathlib import Path
 
@@ -32,6 +33,8 @@ from kernel_gen.operation.nn import (
     eq,
 )
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 
@@ -179,3 +182,54 @@ def test_nn_add_implicit_broadcast_mismatch() -> None:
     rhs = Memory(["A", "C"], NumericType.Float32)
     with pytest.raises(KernelCodeError):
         _ = add(lhs, rhs)
+
+
+# OP-BC-007
+# 测试目的: 以确定性随机矩阵验证显式/隐式 broadcast 的 rank、singleton、SymbolShape 与错误语义。
+# 使用示例: pytest -q test/operation/nn/test_broadcast.py -k test_nn_broadcast_parameterized_public_shape_matrix
+# 对应功能实现文件路径: kernel_gen/operation/nn/broadcast.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/nn/test_broadcast.py
+def test_nn_broadcast_parameterized_public_shape_matrix() -> None:
+    rng = random.Random(20260505)
+    batch = SymbolDim("B")
+    cols = rng.choice([4, "N", SymbolDim("N")])
+    cases = [
+        (Memory([1, cols], NumericType.Float32), Memory([batch, cols], NumericType.Float32)),
+        (Memory([batch, 1], NumericType.Float32), Memory([batch, cols], NumericType.Float32)),
+        (Memory([cols], NumericType.Float32), Memory([batch, cols], NumericType.Float32)),
+        (Memory([batch, cols], NumericType.Float32), Memory([batch, cols], NumericType.Float32)),
+    ]
+
+    for source, target in rng.sample(cases, k=len(cases)):
+        result = broadcast(source, target)
+        assert result.shape.get_values() == target.shape.get_values()
+        assert result.dtype is target.dtype
+        assert result.space is target.space
+
+    shape_result = broadcast_to(
+        Memory([1, "N"], NumericType.Int32),
+        SymbolShape([SymbolDim("M"), "N"]),
+        MemorySpace.SM,
+    )
+    assert shape_result.shape.get_values() == [SymbolDim("M"), "N"]
+    assert shape_result.dtype is NumericType.Int32
+    assert shape_result.space is MemorySpace.SM
+
+    lhs = Memory([1, "N"], NumericType.Int32)
+    rhs = Memory(["M", "N"], NumericType.Int32)
+    assert add(lhs, rhs).shape.get_values() == ["M", "N"]
+    assert eq(rhs, lhs).shape.get_values() == ["M", "N"]
+
+    with pytest.raises(KernelCodeError, match="broadcast dtype must match target dtype"):
+        broadcast(Memory([1], NumericType.Float32), Memory([2], NumericType.Int32))
+    with pytest.raises(KernelCodeError, match="broadcast_to source must be Memory"):
+        broadcast_to(1, [1], MemorySpace.GM)
+    with pytest.raises(KernelCodeError, match="broadcast_to space must be MemorySpace"):
+        broadcast_to(Memory([1], NumericType.Float32), [2], "global")
+    with pytest.raises(KernelCodeError, match="broadcast_to target_shape must be iterable shape"):
+        broadcast_to(Memory([1], NumericType.Float32), 2, MemorySpace.GM)
+    with pytest.raises(KernelCodeError, match="broadcast_to target rank must be >= input rank"):
+        broadcast_to(Memory([2, 3], NumericType.Float32), [3], MemorySpace.GM)
+    with pytest.raises(KernelCodeError, match="broadcast_to dimension mismatch"):
+        broadcast_to(Memory([2, 3], NumericType.Float32), [2, 4], MemorySpace.GM)

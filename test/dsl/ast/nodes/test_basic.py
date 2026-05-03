@@ -20,24 +20,56 @@ import importlib
 
 import pytest
 from xdsl.context import Context
+from xdsl.ir import Block, Operation, SSAValue
 
 from kernel_gen.core.error import KernelCodeError
+from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.dsl.ast.nodes.attr import SourceLocation
+from kernel_gen.dsl.ast.nodes.attr import BoolTypeAttrAST, FloatTypeAttrAST, IntTypeAttrAST, MemorySpaceAttrAST, PythonObjectAttrAST, SourceLocation
 from kernel_gen.dsl.ast.nodes.basic import (
     BlockAST,
     BoolValueAST,
     BoundExprAST,
     CallAST,
+    DSLNode,
     FunctionAST,
     MemoryAST,
+    ModuleAST,
     ReturnAST,
+    ValueAST,
 )
 from kernel_gen.dsl.ast.nodes.symbol import ConstValueAST, SymbolAddAST, SymbolDimAST, SymbolListAST
-from kernel_gen.dsl.ast.nodes.attr import FloatTypeAttrAST, MemorySpaceAttrAST
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
-from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.type import Farmat, NumericType
+
+
+class DetachedConstValueAST(ValueAST):
+    """测试公开 ValueAST 发射合同时返回未挂接常量 op 的节点。"""
+
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+    def emit_mlir(self, ctx: Context, block: Block | None = None) -> Operation:
+        """返回未挂接常量 op，验证容器节点按公开合同接入。"""
+
+        _ = block
+        emitted = ConstValueAST(self.value).emit_mlir(ctx, None)
+        assert isinstance(emitted, Operation)
+        return emitted
+
+
+class RawEmitValueAST(ValueAST):
+    """测试公开 ValueAST 发射合同时返回非法结果的节点。"""
+
+    def __init__(self, value: int | str | None) -> None:
+        self.value = value
+
+    def emit_mlir(self, ctx: Context, block: Block | None = None) -> int | str | None:
+        """返回原始值，用于验证公开 emit 错误边界。"""
+
+        _ = (ctx, block)
+        return self.value
 
 
 def test_basic_nodes_construct_expr_block() -> None:
@@ -149,6 +181,24 @@ def test_value_result_semantics_are_owned_by_nodes() -> None:
     assert isinstance(BoolValueAST(True).bind_target("flag", SourceLocation(line=10, column=2)), BoolValueAST)
 
 
+def test_value_defaults_and_bind_target_public_edges() -> None:
+    """ValueAST 默认结果语义与 bind_target 边界保持公开稳定。"""
+
+    value = ValueAST()
+    loc = SourceLocation(line=12, column=4)
+
+    assert value.result_memory() is None
+    assert value.result_symbol() is None
+    assert value.result_scalar() is None
+    assert value.binding_value() is None
+    assert value.bind_target("same", loc) is value
+    assert isinstance(ConstValueAST(3).bind_target("tile", loc), SymbolDimAST)
+    assert isinstance(ConstValueAST(1.5).bind_target("scale", loc), ConstValueAST)
+
+    with pytest.raises(NotImplementedError, match="DSLNode.emit_mlir not implemented"):
+        DSLNode().emit_mlir(Context(), None)
+
+
 def test_memory_ast_builds_mlir_type_from_runtime_memory() -> None:
     """MemoryAST.type_from_memory() 是 Memory -> NnMemoryType 的统一入口。"""
 
@@ -163,6 +213,148 @@ def test_memory_ast_builds_mlir_type_from_runtime_memory() -> None:
 
     assert isinstance(memory_type, NnMemoryType)
     assert str(memory_type) == "!nn.memory<[2, 4], [4, 1], f32, #nn.space<tsm>>"
+
+
+def test_memory_ast_public_dtype_space_and_binding_edges() -> None:
+    """MemoryAST 公开 dtype/space 映射、字段归一和 SSA 绑定查找保持稳定。"""
+
+    ctx = Context()
+    dtype_cases = [
+        (NumericType.Bool, BoolTypeAttrAST),
+        (NumericType.Int8, IntTypeAttrAST),
+        (NumericType.Int16, IntTypeAttrAST),
+        (NumericType.Int32, IntTypeAttrAST),
+        (NumericType.Int64, IntTypeAttrAST),
+        (NumericType.Uint8, IntTypeAttrAST),
+        (NumericType.Uint16, IntTypeAttrAST),
+        (NumericType.Uint32, IntTypeAttrAST),
+        (NumericType.Uint64, IntTypeAttrAST),
+        (NumericType.Float16, FloatTypeAttrAST),
+        (NumericType.BFloat16, FloatTypeAttrAST),
+        (NumericType.Float32, FloatTypeAttrAST),
+        (NumericType.Float64, FloatTypeAttrAST),
+    ]
+
+    for dtype, attr_type in dtype_cases:
+        dtype_attr = MemoryAST.dtype_attr_from_numeric_type(dtype)
+
+        assert isinstance(dtype_attr, attr_type)
+        assert MemoryAST.numeric_type_from_dtype_attr(dtype_attr) is dtype
+
+    normalized = MemoryAST(
+        "x",
+        [SymbolAddAST(ConstValueAST(1), ConstValueAST(1)), SymbolDim("N")],
+        [SymbolAddAST(ConstValueAST(2), ConstValueAST(2)), 1],
+        FloatTypeAttrAST(NumericType.Float32),
+        MemorySpace.GM,
+        format="not-a-format",
+    )
+    memory_value = normalized.memory
+
+    assert isinstance(normalized.shape, SymbolListAST)
+    assert isinstance(normalized.stride, SymbolListAST)
+    assert isinstance(normalized.space, MemorySpaceAttrAST)
+    assert isinstance(normalized.format, PythonObjectAttrAST)
+    assert memory_value.format is Farmat.Norm
+
+    block = Block(arg_types=[normalized.to_mlir_type(ctx)])
+    block.args[0].name_hint = "x"
+    assert normalized.emit_mlir(ctx, block) is block.args[0]
+
+    result_type = normalized.to_mlir_type(ctx)
+    alloc = DmaAllocOp([], result_type)
+    block.add_op(alloc)
+    alloc.results[0].name_hint = "tmp"
+    assert MemoryAST.from_memory("tmp", normalized.memory).emit_mlir(ctx, block) is alloc.results[0]
+
+    with pytest.raises(KernelCodeError, match="Unsupported memory dtype"):
+        MemoryAST.dtype_attr_from_numeric_type("bad")
+    with pytest.raises(KernelCodeError, match="Unsupported memory dtype"):
+        MemoryAST.numeric_type_from_dtype_attr(IntTypeAttrAST(7))
+    with pytest.raises(KernelCodeError, match="Unbound memory value"):
+        MemoryAST.from_memory("missing", normalized.memory).emit_mlir(ctx, Block())
+
+
+def test_basic_emit_mlir_public_block_bound_return_and_bool_edges() -> None:
+    """BlockAST/BoundExprAST/ReturnAST/BoolValueAST 通过公开 emit_mlir 协作。"""
+
+    ctx = Context()
+    block = Block()
+
+    assert isinstance(BoolValueAST(False).emit_mlir(ctx, None), Operation)
+    assert isinstance(BoolValueAST(True).emit_mlir(ctx, block), SSAValue)
+
+    detached_bound = BoundExprAST("detached", SymbolDimAST("detached"), DetachedConstValueAST(4))
+    detached_op = detached_bound.emit_mlir(ctx, block)
+    assert isinstance(detached_op, Operation)
+    assert detached_op.results[0].name_hint == "detached"
+
+    ssa_bound = BoundExprAST("ssa", SymbolDimAST("ssa"), SymbolDimAST(5))
+    ssa_value = ssa_bound.emit_mlir(ctx, block)
+    assert isinstance(ssa_value, SSAValue)
+    assert ssa_value.name_hint == "ssa"
+
+    returned = ReturnAST([DetachedConstValueAST(1), SymbolDimAST(6)]).emit_mlir(ctx, block)
+    assert isinstance(returned, tuple)
+    assert len(returned) == 2
+
+    last_value = BlockAST([DetachedConstValueAST(7), SymbolDimAST(8)]).emit_mlir(ctx, Block())
+    assert isinstance(last_value, SSAValue)
+
+    with pytest.raises(KernelCodeError, match="return values must be ValueAST"):
+        ReturnAST([BlockAST([])])
+    with pytest.raises(KernelCodeError, match="return value must lower to SSA value"):
+        ReturnAST(RawEmitValueAST("bad")).emit_mlir(ctx, Block())
+
+
+def test_function_and_module_emit_public_input_and_return_edges() -> None:
+    """FunctionAST/ModuleAST 发射公开函数输入、返回和模块包装。"""
+
+    ctx = Context()
+    memory = MemoryAST.from_memory("x", Memory([2], NumericType.Float32, space=MemorySpace.GM))
+    typed_inputs = [
+        memory,
+        SymbolDimAST("tile", runtime_symbol=4),
+        BoolValueAST(True),
+        ConstValueAST(1.25),
+    ]
+    typed_function = FunctionAST(
+        "typed_kernel",
+        typed_inputs,
+        [],
+        BlockAST([]),
+        source="def typed_kernel(): ...",
+        py_ast="py-ast",
+        diagnostics=("diag",),
+        has_explicit_return=False,
+        returns_none=True,
+        runtime_args=(1, "arg"),
+    )
+    typed_op = typed_function.emit_mlir(ctx, None)
+
+    assert typed_op.name == "func.func"
+    assert all(isinstance(arg, PythonObjectAttrAST) for arg in typed_function.runtime_args)
+
+    return_function = FunctionAST(
+        "return_symbol",
+        [SymbolDimAST("n", runtime_symbol=SymbolDim("N"))],
+        [],
+        BlockAST([ReturnAST(SymbolDimAST("n"))]),
+        has_explicit_return=True,
+        returns_none=False,
+    )
+    return_op = return_function.emit_mlir(ctx, None)
+    module_op = ModuleAST([return_function], runtime_args=(SymbolDim("N"),), source_fn="return_symbol").emit_mlir(ctx, None)
+
+    assert return_op.name == "func.func"
+    assert module_op.name == "builtin.module"
+
+    with pytest.raises(KernelCodeError, match="NnMemoryType runtime argument is unsupported"):
+        FunctionAST.input_from_runtime_arg("x", memory.to_mlir_type(ctx))
+    with pytest.raises(KernelCodeError, match="Missing runtime argument"):
+        FunctionAST.input_from_runtime_arg("x", object())
+    with pytest.raises(KernelCodeError, match="Unsupported Python callee argument"):
+        FunctionAST.input_from_bound_value("tmp", DetachedConstValueAST(1))
 
 
 def test_call_ast_constructs_from_parsed_callee() -> None:
@@ -199,6 +391,27 @@ def test_call_ast_rejects_callee_return_value() -> None:
 
     with pytest.raises(KernelCodeError, match="Python callee return value is unsupported"):
         CallAST(callee, [scalar])
+
+
+def test_call_ast_emit_public_argument_and_error_edges() -> None:
+    """CallAST 通过公开 ValueAST 参数发射 func.call 并校验错误边界。"""
+
+    ctx = Context()
+    block = Block()
+    scalar = SymbolDimAST("n")
+    callee = FunctionAST("helper", [scalar], [], BlockAST([]), returns_none=True)
+    call = CallAST(callee, [DetachedConstValueAST(3)])
+
+    assert call.emit_mlir(ctx, block) is None
+    assert block.last_op is not None
+    assert block.last_op.name == "func.call"
+
+    with pytest.raises(KernelCodeError, match="CallAST callee must be FunctionAST"):
+        CallAST("helper", [])
+    with pytest.raises(KernelCodeError, match="Python callee arity mismatch"):
+        CallAST(callee, [])
+    with pytest.raises(KernelCodeError, match="Python callee arguments must lower to SSA values"):
+        CallAST(callee, [RawEmitValueAST(None)]).emit_mlir(ctx, Block())
 
 
 def test_return_ast_accepts_multiple_values() -> None:

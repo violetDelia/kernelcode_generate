@@ -1,0 +1,6 @@
+agents/codex-multi-agents/log/task_records/2026/18/20260503-repo-spec-test-conformance.md
+agents/codex-multi-agents/log/task_records/2026/18/sync_protection_T-20260503-9d27254c_20260503_2005/baseline_status.txt
+agents/codex-multi-agents/log/task_records/2026/18/sync_protection_T-20260503-9d27254c_20260503_2005/dirty_diff.patch
+agents/codex-multi-agents/log/task_records/2026/18/sync_protection_T-20260503-9d27254c_20260503_2005/dirty_diff_stat.txt
+agents/codex-multi-agents/log/task_records/2026/18/sync_protection_T-20260503-9d27254c_20260503_2005/staged_diff.patch
+agents/codex-multi-agents/log/task_records/2026/18/sync_protection_T-20260503-9d27254c_20260503_2005/untracked_files.txt

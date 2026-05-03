@@ -32,6 +32,7 @@ from xdsl.dialects.builtin import (
     IntegerAttr,
     IntegerType,
     StringAttr,
+    UnrealizedConversionCastOp,
     i1,
     i32,
 )
@@ -49,10 +50,12 @@ from kernel_gen.dialect.kernel import (
     KernelImg2col1dOp,
     KernelImg2col2dOp,
     KernelMatmulOp,
+    KernelReduceOp,
     KernelReduceMinOp,
     KernelSelectOp,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
 
 
 def _make_space(name: str) -> NnMemorySpaceAttr:
@@ -138,6 +141,48 @@ def _const_i32(value: int) -> SSAValue:
     """
 
     return arith.ConstantOp(IntegerAttr(value, i32)).result
+
+
+def _symbol_const_i32(value: int) -> SSAValue:
+    """构造 symbol.const 常量 SSA value。
+
+
+    功能说明:
+    - 生成 `symbol.const` 结果，供 kernel img2col 参数 operand 校验使用。
+
+    使用示例:
+    - k = _symbol_const_i32(3)
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    return SymbolConstOp(value).result
+
+
+def _cast_i32_to_symbol(value: int) -> SSAValue:
+    """构造公开 unrealized cast 后的 symbol.int SSA value。
+
+
+    功能说明:
+    - 通过 xDSL 公开 `builtin.unrealized_conversion_cast` 模拟 parser / lowering 常见的整数到 symbol.int 桥接。
+
+    使用示例:
+    - k = _cast_i32_to_symbol(3)
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    cast = UnrealizedConversionCastOp.get(
+        [_const_i32(value)],
+        [SymbolValueType.from_expr(str(value))],
+    )
+    return cast.results[0]
 
 
 # TC-KRN-001
@@ -348,6 +393,46 @@ def test_kernel_binary_elewise_compare_output_type_error() -> None:
             _make_value(_make_memory_type()),
             _make_value(_make_memory_type()),
             kind="pow",
+            space=_make_space("global"),
+        )
+
+
+# TC-KRN-024
+# 功能说明: 验证 kernel.binary_elewise 公开 kind 输入矩阵与非字符串拒绝边界。
+# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_binary_elewise_public_kind_matrix
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel.py
+def test_kernel_binary_elewise_public_kind_matrix() -> None:
+    memory_type = _make_memory_type()
+    bool_memory_type = _make_memory_type(element_type=i1)
+    lhs = _make_value(memory_type)
+    rhs = _make_value(memory_type)
+
+    for kind in ("sub", "mul", "div", "truediv"):
+        KernelBinaryElewiseOp(
+            _make_value(memory_type),
+            lhs,
+            rhs,
+            kind=StringAttr(kind),
+            space=_make_space("global"),
+        ).verify()
+
+    for kind in ("ne", "le", "ge"):
+        KernelBinaryElewiseOp(
+            _make_value(bool_memory_type),
+            lhs,
+            rhs,
+            kind=kind,
+            space=_make_space("global"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match="kernel.binary_elewise kind must be string"):
+        KernelBinaryElewiseOp(
+            _make_value(memory_type),
+            lhs,
+            rhs,
+            kind=IntAttr(1),
             space=_make_space("global"),
         )
 
@@ -601,6 +686,74 @@ def test_kernel_matmul_rank_shape_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.matmul contracting dimensions"):
         op.verify()
+
+    out_shape_mismatch_type = _make_memory_type(shape=ArrayAttr([IntAttr(3), IntAttr(4)]))
+    op = KernelMatmulOp(
+        _make_value(out_shape_mismatch_type),
+        _make_value(lhs_type),
+        _make_value(_make_memory_type(shape=ArrayAttr([IntAttr(3), IntAttr(4)]))),
+        _make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="kernel.matmul result shape"):
+        op.verify()
+
+
+# TC-KRN-025
+# 功能说明: 验证 kernel.matmul mixed-space 公开矩阵与非法 space 拒绝边界。
+# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_matmul_space_contract_matrix
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel.py
+def test_kernel_matmul_space_contract_matrix() -> None:
+    for out_space, lhs_space, rhs_space, attr_space in [
+        ("global", "global", "local", "global"),
+        ("local", "global", "global", "shared"),
+        ("tsm", "tlm1", "tlm2", "global"),
+    ]:
+        lhs_type = _make_memory_type(
+            shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
+            element_type=Float32Type(),
+            space=lhs_space,
+        )
+        rhs_type = _make_memory_type(
+            shape=ArrayAttr([IntAttr(3), IntAttr(4)]),
+            element_type=Float32Type(),
+            space=rhs_space,
+        )
+        out_type = _make_memory_type(
+            shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+            element_type=Float32Type(),
+            space=out_space,
+        )
+        KernelMatmulOp(
+            _make_value(out_type),
+            _make_value(lhs_type),
+            _make_value(rhs_type),
+            _make_space(attr_space),
+        ).verify()
+
+    lhs_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
+        element_type=Float32Type(),
+        space="global",
+    )
+    rhs_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(3), IntAttr(4)]),
+        element_type=Float32Type(),
+        space="global",
+    )
+    out_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        element_type=Float32Type(),
+        space="global",
+    )
+    with pytest.raises(VerifyException, match="nn space must be one of"):
+        KernelMatmulOp(
+            _make_value(out_type),
+            _make_value(lhs_type),
+            _make_value(rhs_type),
+            _make_space("invalid"),
+        ).verify()
 
 
 # TC-KRN-017
@@ -987,6 +1140,257 @@ def test_kernel_img2col_output_extent_contract() -> None:
         ).verify()
 
 
+# TC-KRN-026
+# 功能说明: 验证 kernel.img2col1d 参数 operand 的公开 symbol/cast/动态与非法值矩阵。
+# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_img2col1d_public_param_operand_matrix
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel.py
+def test_kernel_img2col1d_public_param_operand_matrix() -> None:
+    input_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5)]),
+        stride=ArrayAttr([IntAttr(15), IntAttr(5), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    output_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+
+    KernelImg2col1dOp(
+        _make_value(output_type),
+        _make_value(input_type),
+        k=_symbol_const_i32(3),
+        s=_symbol_const_i32(1),
+        d=_symbol_const_i32(1),
+        p_left=_symbol_const_i32(0),
+        p_right=_symbol_const_i32(0),
+        space=_make_space("global"),
+    ).verify()
+    KernelImg2col1dOp(
+        _make_value(output_type),
+        _make_value(input_type),
+        k=_cast_i32_to_symbol(3),
+        s=_cast_i32_to_symbol(1),
+        d=_cast_i32_to_symbol(1),
+        p_left=_cast_i32_to_symbol(0),
+        p_right=_cast_i32_to_symbol(0),
+        space=_make_space("global"),
+    ).verify()
+
+    dynamic_param = _TestOp(result_types=[SymbolValueType.from_expr("K")]).results[0]
+    KernelImg2col1dOp(
+        _make_value(output_type),
+        _make_value(input_type),
+        k=dynamic_param,
+        s=_const_i32(1),
+        d=_const_i32(1),
+        p_left=_const_i32(0),
+        p_right=_const_i32(0),
+        space=_make_space("global"),
+    ).verify()
+
+    dynamic_input_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), StringAttr("W")]),
+        stride=ArrayAttr([StringAttr("3 * W"), StringAttr("W"), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    KernelImg2col1dOp(
+        _make_value(output_type),
+        _make_value(dynamic_input_type),
+        k=_const_i32(3),
+        s=_const_i32(1),
+        d=_const_i32(1),
+        p_left=_const_i32(0),
+        p_right=_const_i32(0),
+        space=_make_space("global"),
+    ).verify()
+
+    bad_param = _TestOp(result_types=[Float32Type()]).results[0]
+    with pytest.raises(VerifyException, match="kernel.img2col1d k/s/d must be integer or symbol"):
+        KernelImg2col1dOp(
+            _make_value(output_type),
+            _make_value(input_type),
+            k=bad_param,
+            s=_const_i32(1),
+            d=_const_i32(1),
+            p_left=_const_i32(0),
+            p_right=_const_i32(0),
+            space=_make_space("global"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match="kernel.img2col1d k/s/d must be positive"):
+        KernelImg2col1dOp(
+            _make_value(output_type),
+            _make_value(input_type),
+            k=_const_i32(0),
+            s=_const_i32(1),
+            d=_const_i32(1),
+            p_left=_const_i32(0),
+            p_right=_const_i32(0),
+            space=_make_space("global"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match="kernel.img2col1d p_left/p_right must be non-negative"):
+        KernelImg2col1dOp(
+            _make_value(output_type),
+            _make_value(input_type),
+            k=_const_i32(3),
+            s=_const_i32(1),
+            d=_const_i32(1),
+            p_left=_const_i32(-1),
+            p_right=_const_i32(0),
+            space=_make_space("global"),
+        ).verify()
+
+
+# TC-KRN-027
+# 功能说明: 验证 kernel.img2col2d 的 space/dtype、动态参数和窗口轴公开矩阵。
+# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_img2col2d_public_contract_matrix
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel.py
+def test_kernel_img2col2d_public_contract_matrix() -> None:
+    input_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
+        stride=ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
+        element_type=Float32Type(),
+        space="global",
+    )
+    output_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(243), IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        element_type=Float32Type(),
+        space="global",
+    )
+
+    with pytest.raises(VerifyException, match="kernel.img2col2d attribute space must match input space"):
+        KernelImg2col2dOp(
+            _make_value(output_type),
+            _make_value(_make_memory_type(
+                shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
+                stride=ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
+                element_type=Float32Type(),
+                space="local",
+            )),
+            kh=_const_i32(3),
+            kw=_const_i32(3),
+            sh=_const_i32(1),
+            sw=_const_i32(1),
+            dh=_const_i32(1),
+            dw=_const_i32(1),
+            ph=_const_i32(0),
+            pw=_const_i32(0),
+            pl=_const_i32(0),
+            pr=_const_i32(0),
+            space=_make_space("global"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match="kernel.img2col2d attribute space must match result space"):
+        KernelImg2col2dOp(
+            _make_value(_make_memory_type(
+                shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
+                stride=ArrayAttr([IntAttr(243), IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+                element_type=Float32Type(),
+                space="local",
+            )),
+            _make_value(input_type),
+            kh=_const_i32(3),
+            kw=_const_i32(3),
+            sh=_const_i32(1),
+            sw=_const_i32(1),
+            dh=_const_i32(1),
+            dw=_const_i32(1),
+            ph=_const_i32(0),
+            pw=_const_i32(0),
+            pl=_const_i32(0),
+            pr=_const_i32(0),
+            space=_make_space("global"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match="kernel.img2col2d result element_type must match input"):
+        KernelImg2col2dOp(
+            _make_value(_make_memory_type(
+                shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
+                stride=ArrayAttr([IntAttr(243), IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+                element_type=Float16Type(),
+            )),
+            _make_value(input_type),
+            kh=_const_i32(3),
+            kw=_const_i32(3),
+            sh=_const_i32(1),
+            sw=_const_i32(1),
+            dh=_const_i32(1),
+            dw=_const_i32(1),
+            ph=_const_i32(0),
+            pw=_const_i32(0),
+            pl=_const_i32(0),
+            pr=_const_i32(0),
+            space=_make_space("global"),
+        ).verify()
+
+    bad_kw_output_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(2), IntAttr(3), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(162), IntAttr(54), IntAttr(18), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
+        KernelImg2col2dOp(
+            _make_value(bad_kw_output_type),
+            _make_value(input_type),
+            kh=_const_i32(3),
+            kw=_const_i32(3),
+            sh=_const_i32(1),
+            sw=_const_i32(1),
+            dh=_const_i32(1),
+            dw=_const_i32(1),
+            ph=_const_i32(0),
+            pw=_const_i32(0),
+            pl=_const_i32(0),
+            pr=_const_i32(0),
+            space=_make_space("global"),
+        ).verify()
+
+    dynamic_param = _TestOp(result_types=[SymbolValueType.from_expr("KH")]).results[0]
+    KernelImg2col2dOp(
+        _make_value(output_type),
+        _make_value(input_type),
+        kh=dynamic_param,
+        kw=_const_i32(3),
+        sh=_const_i32(1),
+        sw=_const_i32(1),
+        dh=_const_i32(1),
+        dw=_const_i32(1),
+        ph=_const_i32(0),
+        pw=_const_i32(0),
+        pl=_const_i32(0),
+        pr=_const_i32(0),
+        space=_make_space("global"),
+    ).verify()
+
+    dynamic_input_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), StringAttr("H"), StringAttr("W")]),
+        stride=ArrayAttr([StringAttr("3 * H * W"), StringAttr("H * W"), StringAttr("W"), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    KernelImg2col2dOp(
+        _make_value(output_type),
+        _make_value(dynamic_input_type),
+        kh=_const_i32(3),
+        kw=_const_i32(3),
+        sh=_const_i32(1),
+        sw=_const_i32(1),
+        dh=_const_i32(1),
+        dw=_const_i32(1),
+        ph=_const_i32(0),
+        pw=_const_i32(0),
+        pl=_const_i32(0),
+        pr=_const_i32(0),
+        space=_make_space("global"),
+    ).verify()
+
+
 # TC-KRN-023
 # 功能说明: 验证 kernel.reduce_min 正常路径可通过。
 # 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_reduce_min_success
@@ -1080,3 +1484,177 @@ def test_kernel_reduce_min_keepdim_error() -> None:
     )
     with pytest.raises(VerifyException, match="keepdim must be i1"):
         op.verify()
+
+
+# TC-KRN-028
+# 功能说明: 验证 kernel.reduce 通用公开入口的 kind/axis/keepdim 与 shape 矩阵。
+# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_reduce_public_kind_axis_keepdim_matrix
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel.py
+def test_kernel_reduce_public_kind_axis_keepdim_matrix() -> None:
+    input_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(3), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    keepdim_out_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    squeeze_out_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+
+    KernelReduceOp(
+        _make_value(keepdim_out_type),
+        _make_value(input_type),
+        kind=StringAttr("sum"),
+        axis=IntegerAttr(1, IntegerType(64)),
+        keepdim=IntAttr(1),
+        space=_make_space("global"),
+    ).verify()
+    KernelReduceOp(
+        _make_value(squeeze_out_type),
+        _make_value(input_type),
+        kind="max",
+        axis=IntAttr(1),
+        keepdim=0,
+        space=_make_space("global"),
+    ).verify()
+
+    rank1_input_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    scalar_out_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1)]),
+        stride=ArrayAttr([IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    KernelReduceOp(
+        _make_value(scalar_out_type),
+        _make_value(rank1_input_type),
+        kind="min",
+        axis=0,
+        keepdim=False,
+        space=_make_space("global"),
+    ).verify()
+
+    with pytest.raises(VerifyException, match="kernel.reduce kind must be one of"):
+        KernelReduceOp(
+            _make_value(keepdim_out_type),
+            _make_value(input_type),
+            kind="prod",
+            axis=1,
+            keepdim=True,
+            space=_make_space("global"),
+        )
+
+    with pytest.raises(VerifyException, match="kernel.reduce element_type must match"):
+        KernelReduceOp(
+            _make_value(_make_memory_type(
+                shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
+                stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+                element_type=Float16Type(),
+            )),
+            _make_value(input_type),
+            kind="sum",
+            axis=1,
+            keepdim=True,
+            space=_make_space("global"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match="kernel.reduce out space must match input"):
+        KernelReduceOp(
+            _make_value(_make_memory_type(
+                shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
+                stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+                element_type=Float32Type(),
+                space="local",
+            )),
+            _make_value(input_type),
+            kind="sum",
+            axis=1,
+            keepdim=True,
+            space=_make_space("global"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match="kernel.reduce attribute space must match input"):
+        KernelReduceOp(
+            _make_value(keepdim_out_type),
+            _make_value(input_type),
+            kind="sum",
+            axis=1,
+            keepdim=True,
+            space=_make_space("local"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match="kernel.reduce out shape must match reduce contract"):
+        KernelReduceOp(
+            _make_value(_make_memory_type(
+                shape=ArrayAttr([IntAttr(3)]),
+                stride=ArrayAttr([IntAttr(1)]),
+                element_type=Float32Type(),
+            )),
+            _make_value(input_type),
+            kind="sum",
+            axis=1,
+            keepdim=False,
+            space=_make_space("global"),
+        ).verify()
+
+
+# TC-KRN-029
+# 功能说明: 验证 kernel.reduce_min 的 dtype 和 space 公开拒绝矩阵。
+# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_reduce_min_dtype_space_matrix
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel.py
+def test_kernel_reduce_min_dtype_space_matrix() -> None:
+    input_type = _make_memory_type(element_type=Float32Type())
+    keepdim_out_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+
+    with pytest.raises(VerifyException, match="kernel.reduce_min element_type must match"):
+        KernelReduceMinOp(
+            _make_value(_make_memory_type(
+                shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
+                stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+                element_type=Float16Type(),
+            )),
+            _make_value(input_type),
+            axis=1,
+            keepdim=True,
+            space=_make_space("global"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match="kernel.reduce_min out space must match input"):
+        KernelReduceMinOp(
+            _make_value(_make_memory_type(
+                shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
+                stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+                element_type=Float32Type(),
+                space="local",
+            )),
+            _make_value(input_type),
+            axis=1,
+            keepdim=True,
+            space=_make_space("global"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match="kernel.reduce_min attribute space must match input"):
+        KernelReduceMinOp(
+            _make_value(keepdim_out_type),
+            _make_value(input_type),
+            axis=1,
+            keepdim=True,
+            space=_make_space("local"),
+        ).verify()

@@ -640,12 +640,12 @@ auto status = cpu::img2col2d(out, input, 3, 3, 1, 1, 1, 1, 0, 0, 0, 0);
 
 边界：
 
-- 本文只定义 CPU include 层的公开接口；不定义 DSL lowering、`nn dialect` 结构、`build_func_op(...)` 结构、pass 名称或完整 conv 模板。
+- 本文只定义 CPU include 层的公开接口；不定义 DSL lowering、`nn dialect` 结构、`mlir_gen(...)` 生成结构、pass 名称或完整 conv 模板。
 - 本文只修改 `spec/include/cpu/cpu.md` 所覆盖的公开契约，不反向规定上游 AST/IR 该如何组织。
 
 - 注意事项：
 
-- CPU runtime 只依赖 `cpu::Memory<Space, T>`、普通标量参数和本层运行时契约，不依赖 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
+- CPU runtime 只依赖 `cpu::Memory<Space, T>`、普通标量参数和本层运行时契约，不依赖 AST 节点类型、`nn dialect` 运行时类型、`mlir_gen(...)` 生成结构或 pass 名称。
 - `cpu::img2col1d(...)` 与 `cpu::img2col2d(...)` 是稳定公开名；不得继续新增 `cpu::img2col(...)` 笼统接口。
 - 下文中的 `describe_cpu_api_contract(...)` 仅是验收辅助伪名，不是产品接口，不能在 `include/cpu` 中实现为公开 API。
 
@@ -712,7 +712,7 @@ def test_cpu_img2col_api_contract_v1():
         "forbidden_dependencies": [
             "ast-node-types",
             "nn-dialect-runtime-types",
-            "build_func_op-structure",
+            "mlir-gen-structure",
             "pass-names",
         ],
         "forbidden_public_names": ["cpu::img2col"],
@@ -725,8 +725,8 @@ def test_cpu_img2col_api_contract_v1():
 - `cpu::Memory<Space, T>` 以运行期 `rank` 描述维度，并在内部以 `MAX_DIM=8` 保存 `shape/stride`；调用方必须满足前置条件 `0 < rank <= 8`，实现不得对 `rank > 8` 做静默截断。
 - 公开接口均为纯头文件模板与内联实现，不提供动态分配、异常或运行时边界检查。
 - 逐元素与比较算子要求输入与输出形状一致，广播仅支持显式 `broadcast`，不提供隐式广播；仅 `cpu::add` 允许 `Memory+scalar` / `scalar+Memory` 两个公开 overload。
-- `img2col1d/img2col2d` 只定义 CPU include 层叶子接口，不反向规定 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
-- `exp/reduce_*` 只定义 CPU include 层叶子接口，不反向规定 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
+- `img2col1d/img2col2d` 只定义 CPU include 层叶子接口，不反向规定 AST 节点类型、`nn dialect` 运行时类型、`mlir_gen(...)` 生成结构或 pass 名称。
+- `exp/reduce_*` 只定义 CPU include 层叶子接口，不反向规定 AST 节点类型、`nn dialect` 运行时类型、`mlir_gen(...)` 生成结构或 pass 名称。
 - `exp/reduce_*` 当前公开口径固定为 `float` 入参与出参，不在 include 层提供自动类型提升或隐式 cast。
 - `cpu::add` 的整数标量终点只冻结 `memory + const(i32)` 与 `memory + !symbol.int<"...">` 的 CPU 公开调用口径：前者保持整数实参直传，后者固定为 `long long`；本轮不定义 `f16/f32` mixed scalar 等其他混合标量提升规则，也不扩展到左标量整数形态。
 - `reduce_*` 的 `axes` 由调用方提供规范化后的非空轴列表（去重、非负、升序）；`axis=None` 语义由上游在进入 include 层前显式展开。

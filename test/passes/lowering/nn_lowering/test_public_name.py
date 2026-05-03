@@ -21,10 +21,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from xdsl.dialects import func
+from xdsl.dialects import arith, func
 from xdsl.context import Context
 from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, Region, StringAttr, i32
-from xdsl.ir import Attribute, Block
+from xdsl.ir import Attribute, Block, Operation
 from xdsl.passes import ModulePass
 from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewrite_pattern
 
@@ -38,6 +38,12 @@ from kernel_gen.passes import lowering as lowering_pkg
 from kernel_gen.passes.lowering.nn_lowering import (
     NnLoweringPass,
     nn_lowering_patterns,
+)
+from kernel_gen.passes.lowering.nn_lowering.nn_lowering_utility import (
+    ensure_module_op,
+    ensure_operand_count,
+    ensure_single_result,
+    ensure_space_attr,
 )
 
 nn_lowering_pkg = importlib.import_module("kernel_gen.passes.lowering.nn_lowering")
@@ -81,6 +87,13 @@ def _build_add_module() -> ModuleOp:
         Region(block),
     )
     return ModuleOp([func_op])
+
+
+def _first_op(module: ModuleOp, op_type: type[Operation]) -> Operation:
+    for op in module.walk():
+        if isinstance(op, op_type):
+            return op
+    raise AssertionError(f"{op_type.__name__} not found")
 
 
 # TC-PASS-NNL-001
@@ -192,3 +205,36 @@ def test_nn_lowering_apply_uses_pattern_driver(
     module = _build_add_module()
     with pytest.raises(_PatternDriverSentinel, match="public nn_lowering_patterns driver reached apply"):
         NnLoweringPass().apply(Context(), module)
+
+
+def test_nn_lowering_utility_validates_public_module_space_result_and_operands() -> None:
+    module = _build_add_module()
+    add_op = _first_op(module, NnAddOp)
+
+    assert ensure_module_op(module) is module
+    assert ensure_space_attr(add_op) == SPACE_GLOBAL
+    assert ensure_single_result(add_op) == add_op.results[0].type
+    assert ensure_operand_count(add_op, 2) is None
+
+
+def test_nn_lowering_utility_rejects_public_invalid_inputs() -> None:
+    module = _build_add_module()
+    add_op = _first_op(module, NnAddOp)
+
+    with pytest.raises(KernelCodeError, match="module must be builtin\\.module"):
+        ensure_module_op(add_op)
+
+    add_op.attributes.pop("space")
+    with pytest.raises(KernelCodeError, match="nn op must provide nn\\.space attribute"):
+        ensure_space_attr(add_op)
+
+    with pytest.raises(KernelCodeError, match="nn op nn\\.add expects 3 operands, got 2"):
+        ensure_operand_count(add_op, 3)
+
+    return_op = _first_op(module, func.ReturnOp)
+    with pytest.raises(KernelCodeError, match="nn op must have exactly one result"):
+        ensure_single_result(return_op)
+
+    scalar_op = arith.ConstantOp.from_int_and_width(1, i32)
+    with pytest.raises(KernelCodeError, match="nn op result must be nn\\.memory"):
+        ensure_single_result(scalar_op)

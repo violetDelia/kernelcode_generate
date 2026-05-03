@@ -163,7 +163,7 @@ class TileElewiseBinaryPattern(RewritePattern):
                 properties={
                     "value": IntAttr(0)
                     if use_legacy_int_attrs
-                    else IntegerAttr.from_int_and_width(0, 64)
+                    else IntegerAttr(0, 64)
                 },
             )
             end = SymbolGetDimOp(reference, axis)
@@ -209,16 +209,12 @@ class TileElewiseBinaryPattern(RewritePattern):
             properties={
                 "value": IntAttr(1)
                 if use_legacy_int_attrs
-                else IntegerAttr.from_int_and_width(1, 64)
+                else IntegerAttr(1, 64)
             },
         )
         current_block.add_op(const_one)
 
-        ordered_memory_values = (
-            [memory_values[-1], memory_values[0], memory_values[1]]
-            if is_compare_kind and len(memory_values) >= 3
-            else memory_values
-        )
+        ordered_memory_values = memory_values
         views: list[DmaViewOp] = []
         use_unit_stride_operands = use_legacy_int_attrs
         for value in ordered_memory_values:
@@ -256,16 +252,11 @@ class TileElewiseBinaryPattern(RewritePattern):
         anchor = op
         block.insert_ops_before(pre_ops + [outer_loop], anchor)
         op.detach()
-        if is_compare_kind and len(views) >= 3:
-            op.operands[0] = views[0].result
-            op.operands[1] = views[1].result
-            op.operands[2] = views[2].result
-        else:
-            memory_index = 0
-            for index, operand in enumerate(old_operands):
-                if isinstance(SSAValue.get(operand).type, NnMemoryType):
-                    op.operands[index] = views[memory_index].result
-                    memory_index += 1
+        memory_index = 0
+        for index, operand in enumerate(old_operands):
+            if isinstance(SSAValue.get(operand).type, NnMemoryType):
+                op.operands[index] = views[memory_index].result
+                memory_index += 1
         current_block.add_op(op)
         rewriter.notify_op_modified(parent_op)
 
@@ -340,7 +331,7 @@ class TileElewiseBroadcastPattern(RewritePattern):
                 properties={
                     "value": IntAttr(0)
                     if use_legacy_int_attrs
-                    else IntegerAttr.from_int_and_width(0, 64)
+                    else IntegerAttr(0, 64)
                 },
             )
             end = SymbolGetDimOp(target, axis)
@@ -389,7 +380,7 @@ class TileElewiseBroadcastPattern(RewritePattern):
             properties={
                 "value": IntAttr(1)
                 if use_legacy_int_attrs
-                else IntegerAttr.from_int_and_width(1, 64)
+                else IntegerAttr(1, 64)
             },
         )
         current_block.add_op(const_one)
@@ -582,7 +573,7 @@ class TileElewiseMatmulPattern(RewritePattern):
             properties={
                 "value": IntAttr(0)
                 if use_legacy_int_attrs
-                else IntegerAttr.from_int_and_width(0, 64)
+                else IntegerAttr(0, 64)
             },
         )
         dim_m = SymbolGetDimOp(out, 0)
@@ -593,7 +584,7 @@ class TileElewiseMatmulPattern(RewritePattern):
             properties={
                 "value": IntAttr(0)
                 if use_legacy_int_attrs
-                else IntegerAttr.from_int_and_width(0, 64)
+                else IntegerAttr(0, 64)
             },
         )
         dim_n = SymbolGetDimOp(out, 1)
@@ -627,7 +618,7 @@ class TileElewiseMatmulPattern(RewritePattern):
             properties={
                 "value": IntAttr(1)
                 if use_legacy_int_attrs
-                else IntegerAttr.from_int_and_width(1, 64)
+                else IntegerAttr(1, 64)
             },
         )
         inner_block.add_op(const_one)

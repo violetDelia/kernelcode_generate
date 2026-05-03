@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import random
 import sys
 from pathlib import Path
 
@@ -36,6 +37,116 @@ from kernel_gen.core.error import KernelCodeError
 from kernel_gen.execute_engine import (
     CompileRequest,
     ExecutionEngine,
+)
+
+
+_COMPILE_TARGET_SOURCE_CASES = tuple(
+    random.Random(20260505).sample(
+        [
+            (
+                "cpu-adds-missing-includes-and-runtime-shim",
+                "cpu",
+                "int add(int lhs, int rhs) { return lhs + rhs; }",
+                "add",
+                True,
+                ('#include "include/cpu/Memory.h"', '#include "include/cpu/Nn.h"'),
+                (),
+            ),
+            (
+                "cpu-preserves-existing-extern-entry",
+                "cpu",
+                'extern "C" int kg_execute_entry(const void*, unsigned long long) { return 0; }\nint add(){ return 0; }',
+                "add",
+                False,
+                ('#include "include/cpu/Memory.h"', '#include "include/cpu/Nn.h"'),
+                (),
+            ),
+            (
+                "cpu-only-injects-missing-include",
+                "cpu",
+                '#include "include/cpu/Memory.h"\nint add(){ return 0; }',
+                "add",
+                True,
+                ('#include "include/cpu/Memory.h"', '#include "include/cpu/Nn.h"'),
+                ('#include "include/npu_demo/npu_demo.h"',),
+            ),
+            (
+                "npu-adds-npu-include-and-runtime-shim",
+                "npu_demo",
+                "int add(int lhs, int rhs) { return lhs + rhs; }",
+                "add",
+                True,
+                ('#include "include/npu_demo/npu_demo.h"',),
+                ('#include "include/cpu/Memory.h"', '#include "include/cpu/Nn.h"'),
+            ),
+            (
+                "npu-preserves-existing-extern-entry",
+                "npu_demo",
+                'extern "C" int kg_execute_entry(const void*, unsigned long long) { return 0; }\nint add(){ return 0; }',
+                "add",
+                False,
+                ('#include "include/npu_demo/npu_demo.h"',),
+                ('#include "include/cpu/Memory.h"', '#include "include/cpu/Nn.h"'),
+            ),
+        ],
+        5,
+    )
+)
+
+_COMPILE_FAILURE_CASES = tuple(
+    random.Random(20260505).sample(
+        [
+            (
+                "mixed-include-family",
+                ExecutionEngine(target="cpu"),
+                '#include "include/cpu/Memory.h"\n#include "include/npu_demo/npu_demo.h"\nint add(){ return 0; }',
+                "add",
+                "kg_execute_entry",
+                "target_header_mismatch",
+            ),
+            (
+                "npu-source-with-cpu-include",
+                ExecutionEngine(target="npu_demo"),
+                '#include "include/cpu/Memory.h"\nint add(){ return 0; }',
+                "add",
+                "kg_execute_entry",
+                "target_header_mismatch",
+            ),
+            (
+                "cpu-source-with-npu-include",
+                ExecutionEngine(target="cpu"),
+                '#include "include/npu_demo/npu_demo.h"\nint add(){ return 0; }',
+                "add",
+                "kg_execute_entry",
+                "target_header_mismatch",
+            ),
+            (
+                "empty-compiler",
+                ExecutionEngine(target="cpu", compiler=" "),
+                "int add(){ return 0; }",
+                "add",
+                "kg_execute_entry",
+                "compile_failed",
+            ),
+            (
+                "compile-request-empty-entry",
+                ExecutionEngine(target="cpu"),
+                "int add(){ return 0; }",
+                "add",
+                " ",
+                "symbol_resolve_failed",
+            ),
+            (
+                "npu-namespaced-function-without-namespace-definition",
+                ExecutionEngine(target="npu_demo"),
+                "int add(){ return 0; }",
+                "npu_demo::add",
+                "kg_execute_entry",
+                "compile_failed",
+            ),
+        ],
+        6,
+    )
 )
 
 
@@ -218,5 +329,116 @@ def test_execute_engine_compile_request_compiler_flags_order() -> None:
         assert "-O2" in command
         assert command.index("-std=c++17") < command.index("-O2")
         assert "-lm" in command
+    finally:
+        kernel.close()
+
+
+# EE-TGT-001/002/004/005
+# 功能说明: 覆盖 target include、entry shim 注入/省略与 CPU/npu target 矩阵。
+# 使用示例: pytest -q test/execute_engine/test_compile.py -k "target_include_and_entry_shim_matrix"
+# 测试目的: 验证公开 ExecutionEngine.compile 入口对 target/header/shim 合同的组合行为。
+# 对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
+# 对应 spec 文件路径: spec/execute_engine/execute_engine_target.md
+# 对应测试文件路径: test/execute_engine/test_compile.py
+@pytest.mark.parametrize(
+    ("case_id", "target", "source", "function", "expects_shim", "required_lines", "forbidden_lines"),
+    _COMPILE_TARGET_SOURCE_CASES,
+)
+def test_execute_engine_compile_target_include_and_entry_shim_matrix(
+    case_id: str,
+    target: str,
+    source: str,
+    function: str,
+    expects_shim: bool,
+    required_lines: tuple[str, ...],
+    forbidden_lines: tuple[str, ...],
+) -> None:
+    engine = ExecutionEngine(target=target)
+    kernel = engine.compile(source=source, function=function)
+    try:
+        unit = (Path(kernel.soname_path).parent / "kernel.cpp").read_text(encoding="utf-8")
+        assert kernel.target == target
+        assert case_id
+        for line in required_lines:
+            assert line in unit
+        for line in forbidden_lines:
+            assert line not in unit
+        assert ("runtime entry shim for" in unit) is expects_shim
+        assert unit.count('#include "include/cpu/Memory.h"') <= 1
+        assert unit.count('#include "include/cpu/Nn.h"') <= 1
+        assert unit.count('#include "include/npu_demo/npu_demo.h"') <= 1
+    finally:
+        kernel.close()
+
+
+# EE-TGT-006/007
+# 功能说明: 覆盖 compile 公开失败短语矩阵。
+# 使用示例: pytest -q test/execute_engine/test_compile.py -k "failure_phrase_matrix"
+# 测试目的: 验证 include family、compiler、entry_point 与真实 npu 编译失败均通过公开错误语义暴露。
+# 对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
+# 对应 spec 文件路径: spec/execute_engine/execute_engine_target.md
+# 对应测试文件路径: test/execute_engine/test_compile.py
+@pytest.mark.parametrize(
+    ("case_id", "engine", "source", "function", "entry_point", "failure_phrase"),
+    _COMPILE_FAILURE_CASES,
+)
+def test_execute_engine_compile_failure_phrase_matrix(
+    case_id: str,
+    engine: ExecutionEngine,
+    source: str,
+    function: str,
+    entry_point: str,
+    failure_phrase: str,
+) -> None:
+    with pytest.raises(KernelCodeError) as exc:
+        engine.compile(source=source, function=function, entry_point=entry_point)
+
+    assert case_id
+    assert exc.value.failure_phrase == failure_phrase
+
+
+# EE-TGT-008
+# 功能说明: 覆盖 entry shim 对 memory/int/float/KernelContext 形参的公开源码拼装。
+# 使用示例: pytest -q test/execute_engine/test_compile.py -k "entry_shim_public_param_matrix"
+# 测试目的: 验证公开 compile 入口按目标函数形参顺序生成 runtime entry shim。
+# 对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
+# 对应 spec 文件路径: spec/execute_engine/execute_engine_target.md
+# 对应测试文件路径: test/execute_engine/test_compile.py
+def test_execute_engine_compile_entry_shim_public_param_matrix() -> None:
+    source = (
+        "void add(npu_demo::KernelContext& ctx, Memory<GM, float>& out, "
+        "const Memory<GM, int32_t>& lhs, long count, double alpha) {}\n"
+    )
+    kernel = ExecutionEngine(target="cpu").compile(source=source, function="add")
+    try:
+        unit = (Path(kernel.soname_path).parent / "kernel.cpp").read_text(encoding="utf-8")
+
+        assert "npu_demo::KernelContext ctx;" in unit
+        assert "if (arg_count != 4ULL)" in unit
+        assert "Memory<GM, float> arg0(" in unit
+        assert "Memory<GM, int32_t> arg1(" in unit
+        assert "long arg2 = static_cast<long>(ordered_args[2].int_value);" in unit
+        assert "double arg3 = static_cast<double>(ordered_args[3].float_value);" in unit
+        assert "add(ctx, arg0, arg1, arg2, arg3);" in unit
+    finally:
+        kernel.close()
+
+
+# EE-TGT-009
+# 功能说明: 覆盖不能解析的目标形参回退到占位 entry shim 的公开行为。
+# 使用示例: pytest -q test/execute_engine/test_compile.py -k "entry_shim_placeholder"
+# 测试目的: 验证公开 compile 入口遇到未支持形参时仍生成稳定 C ABI 占位入口。
+# 对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
+# 对应 spec 文件路径: spec/execute_engine/execute_engine_target.md
+# 对应测试文件路径: test/execute_engine/test_compile.py
+def test_execute_engine_compile_entry_shim_placeholder_for_unsupported_params() -> None:
+    kernel = ExecutionEngine(target="cpu").compile(source="void add(Custom value) {}\n", function="add")
+    try:
+        unit = (Path(kernel.soname_path).parent / "kernel.cpp").read_text(encoding="utf-8")
+
+        assert "// entry shim placeholder for add as kg_execute_entry" in unit
+        assert "struct _ArgSlot;" in unit
+        assert "(void)arg_count;" in unit
+        assert "return 0;" in unit
     finally:
         kernel.close()

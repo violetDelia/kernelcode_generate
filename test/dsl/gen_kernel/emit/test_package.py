@@ -23,6 +23,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 import importlib
+import random
 import re
 import sys
 
@@ -163,6 +164,11 @@ def test_emit_c_context_type_helpers_use_target_registry() -> None:
     assert ctx.dispatch_attr(mem_type) == "GM"
     assert ctx.dispatch_attr("global") == "GM"
     assert ctx.dispatch_type(mem_type) == "Memory<MemorySpace::GM, int32_t>"
+    assert ctx.dispatch_type(f64) == "double"
+    assert ctx.dispatch_type(IndexType()) == "long long"
+    assert ctx.dispatch_type(SymbolValueType.from_expr("N")) == "long long"
+    with pytest.raises(ValueError, match="unsupported memory space"):
+        ctx.dispatch_attr("bad_space")
 
 
 def test_emit_c_context_type_helpers_dispatch_npu_demo_type_and_space_registry() -> None:
@@ -174,6 +180,61 @@ def test_emit_c_context_type_helpers_dispatch_npu_demo_type_and_space_registry()
     assert ctx.dispatch_attr(mem_type) == "TSM"
     assert ctx.dispatch_type(SymbolValueType.from_expr("N")) == "S_INT"
     assert ctx.dispatch_type(mem_type) == "Memory<TSM, int32_t>"
+
+
+def test_emit_c_context_public_state_and_dispatch_edges() -> None:
+    """EmitCContext 公开状态 API 与统一 dispatch 入口保持一致。"""
+
+    ctx = _ctx()
+    cache_key = ("shape", 0, None)
+    assert ctx.allocate_name("tmp") == "tmp0"
+    assert ctx.allocate_name("tmp") == "tmp1"
+    assert ctx.lookup_cached_name("layout", cache_key) is None
+    assert ctx.bind_cached_name("layout", cache_key, "layout0") == "layout0"
+    assert ctx.lookup_cached_name("layout", cache_key) == "layout0"
+    with pytest.raises(KernelCodeError, match="cached name must be non-empty str"):
+        ctx.bind_cached_name("layout", "empty", "")
+
+    assert ctx.current_indent == ""
+    ctx.push_indent()
+    assert ctx.current_indent == "    "
+    ctx.pop_indent()
+    ctx.pop_indent()
+    assert ctx.current_indent == ""
+
+    assert ctx.is_target("cpu")
+    assert not ctx.is_target("npu_demo")
+    assert ctx.target_entry({"cpu": "selected"}, "fallback") == "selected"
+    assert ctx.target_entry({"npu_demo": "selected"}, "fallback") == "fallback"
+    assert "target=cpu: emit_c" in str(ctx.emit_error("emit_c", ""))
+
+    mem_type = _make_memory_type([2], [1], element_type=i32)
+    block = Block(arg_types=[mem_type])
+    assert ctx.dispatch(block.args[0]) == "arg0"
+    assert ctx.dispatch("global") == "GM"
+    assert ctx.dispatch_attr("global") == "GM"
+    assert ctx.dispatch_type(i32) == "int32_t"
+    alloc_stmt = ctx.dispatch(DmaAllocOp([], mem_type))
+    assert alloc_stmt is not None
+    assert "Memory<GM, int32_t> v0" in alloc_stmt
+
+    view_ctx = _npu_ctx()
+    view_mem_type = _make_memory_type([2], [1], space="tsm", element_type=i32)
+    view_block = Block(arg_types=[view_mem_type, view_mem_type, view_mem_type])
+    view_ctx.bind_name(view_block.args[0], "0bad")
+    view_ctx.bind_name(view_block.args[1], "view")
+    fallback_view = DmaViewOp(view_block.args[0], [], [], [], view_mem_type)
+    assert view_ctx.create_or_get_name(fallback_view.result) == "view_1"
+
+    suffix_ctx = _npu_ctx()
+    suffix_ctx.bind_name(view_block.args[0], "src")
+    suffix_ctx.bind_name(view_block.args[1], "src_1")
+    suffix_ctx.bind_name(view_block.args[2], "src_2")
+    suffix_view = DmaViewOp(view_block.args[0], [], [], [], view_mem_type)
+    assert suffix_ctx.create_or_get_name(suffix_view.result) == "src_3"
+
+    with pytest.raises(KernelCodeError, match="unsupported type"):
+        ctx.dispatch_type(ArrayAttr([IntAttr(1)]))
 
 
 def test_emit_c_context_reads_core_config_target() -> None:
@@ -263,11 +324,11 @@ def _lower_single_op_func(
 
 
 def _lower_built_func(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> Block:
-    """对 `build_func_op(...)` 生成的 `func.func` 执行 pass 并返回 entry block。
+    """对 `mlir_gen(...)` 生成的 `func.func` 执行 pass 并返回 entry block。
 
 
     功能说明:
-    - 用于 I4 的公开链路 smoke：`build_func_op -> NnLoweringPass -> emit_c`。
+    - 用于 I4 的公开链路 smoke：`mlir_gen -> NnLoweringPass -> emit_c`。
     - 返回被 pass 改写后的 entry block，便于继续按 lowered op 发射节点级代码。
 
     使用示例:
@@ -621,6 +682,34 @@ def test_emit_c_op_lowers_npu_demo_symbol_const_cast_and_to_float() -> None:
     assert emit_c_op(to_float, ctx) == "float v0 = c_0;"
 
 
+# EC-008A-CONST-EDGES
+# 功能说明: 验证 npu_demo 下 `symbol.const` 的公开 value 复用与 dma.load 内联消费边界。
+# 测试目的: 锁定 `emit_c_value(...)` 已绑定名称优先，以及只被 `dma.load` 消费的 const 不额外生成 `S_INT` 声明。
+# 使用示例: pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_symbol_const_value_and_dma_load_edges
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/npu_demo/symbol/const.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/emit/npu_demo/symbol/__init__.md
+# 对应测试文件路径: test/dsl/gen_kernel/emit/test_package.py
+def test_emit_c_lowers_npu_demo_symbol_const_value_and_dma_load_edges() -> None:
+    ctx = _npu_ctx()
+    value_const = SymbolConstOp(13)
+    assert emit_c_value(value_const.result, ctx) == "13"
+    ctx.bind_name(value_const.result, "bound_symbol")
+    assert emit_c_value(value_const.result, ctx) == "bound_symbol"
+
+    source_type = _make_memory_type([4], [1], space="global")
+    tile_type = _make_memory_type([1], [1], space="tsm")
+    block = Block(arg_types=[tile_type, source_type])
+    offset = SymbolConstOp(0)
+    size = SymbolConstOp(1)
+    stride = SymbolConstOp(1)
+    load = DmaLoadOp(block.args[0], block.args[1], [offset.result], [size.result], [stride.result])
+
+    assert load.name == "dma.load"
+    assert emit_c_op(offset, ctx) == ""
+    assert emit_c_op(size, ctx) == ""
+    assert emit_c_op(stride, ctx) == ""
+
+
 # EC-008A-MODULE
 # 测试目的: 验证 target=npu_demo 下单函数 plain module 的 symbol.const/cast 不需要 `arch.launch` wrapper 也能直接 emit。
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
@@ -734,13 +823,13 @@ def test_emit_c_op_lowers_npu_demo_symbol_for() -> None:
 
 
 # EC-008E
-# 功能说明: 验证 `build_func_op -> pass -> emit_c` 的 add 三条 CPU 路径可生成 lowered IR 节点片段。
+# 功能说明: 验证 `mlir_gen -> pass -> emit_c` 的 add 三条 CPU 路径可生成 lowered IR 节点片段。
 # 测试目的: 清理 raw `NnAddOp` 节点级直出源码的旧成功口径，锁定公开成功链路来自 pass 后 `kernel.binary_elewise` / `dma.fill`。
-# 使用示例: pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_op_lowers_build_func_op_nn_add_variants_after_pass
+# 使用示例: pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_op_lowers_mlir_gen_nn_add_variants_after_pass
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/__init__.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/emit.md
 # 对应测试文件路径: test/dsl/gen_kernel/emit/test_package.py
-def test_emit_c_op_lowers_build_func_op_nn_add_variants_after_pass() -> None:
+def test_emit_c_op_lowers_mlir_gen_nn_add_variants_after_pass() -> None:
     def add_direct(lhs: "Tensor[i32, 2, 3]", rhs: "Tensor[i32, 2, 3]") -> "Tensor[i32, 2, 3]":
         return lhs + rhs
 
@@ -1302,6 +1391,29 @@ def test_emit_c_private_additional_error_matrix(
     for op in (load_op, view_op, fill_op):
         with pytest.raises(KernelCodeError, match="cpu-only"):
             emit_c_op(op, _target_ctx("gpu"))
+    slice_op = DmaSliceOp(load_block.args[0], load_block.args[1], [], [], [])
+    deslice_op = DmaDesliceOp(load_block.args[0], load_block.args[1], [], [], [], unit_tile_type)
+    img2col_op = NnImg2col2dOp(
+        load_block.args[0],
+        unit_tile_type,
+        arith.ConstantOp(IntegerAttr(1, i32)).result,
+        arith.ConstantOp(IntegerAttr(1, i32)).result,
+        arith.ConstantOp(IntegerAttr(1, i32)).result,
+        arith.ConstantOp(IntegerAttr(1, i32)).result,
+        arith.ConstantOp(IntegerAttr(1, i32)).result,
+        arith.ConstantOp(IntegerAttr(1, i32)).result,
+        arith.ConstantOp(IntegerAttr(0, i32)).result,
+        arith.ConstantOp(IntegerAttr(0, i32)).result,
+        arith.ConstantOp(IntegerAttr(0, i32)).result,
+        arith.ConstantOp(IntegerAttr(0, i32)).result,
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    broadcast_op = DmaBroadcastOp(load_block.args[0], load_block.args[1])
+    for op in (slice_op, deslice_op, img2col_op):
+        with pytest.raises(KernelCodeError, match="cpu-only"):
+            emit_c_op(op, _target_ctx("gpu"))
+    with pytest.raises(KernelCodeError, match="unsupported op"):
+        emit_c_op(broadcast_op, _target_ctx("gpu"))
     store_block = Block(arg_types=[mem_type, mem_type])
     with pytest.raises(KernelCodeError, match="only unit-tile dma.store source is supported"):
         emit_c_op(DmaStoreOp(store_block.args[0], store_block.args[1], [], [], []), _ctx())
@@ -1309,6 +1421,19 @@ def test_emit_c_private_additional_error_matrix(
     alloc_op = DmaAllocOp([], mem_type)
     with pytest.raises(KernelCodeError, match="dma ops are cpu-only"):
         emit_c_op(alloc_op, _target_ctx("gpu"))
+    dynamic_alloc_ctx = _ctx()
+    dynamic_dim = SymbolConstOp(4)
+    emit_c_op(dynamic_dim, dynamic_alloc_ctx)
+    dynamic_alloc = DmaAllocOp([dynamic_dim.result], _make_memory_type([4], [1], element_type=f32))
+    assert "v0_shape[1] = {4};" in emit_c_op(dynamic_alloc, dynamic_alloc_ctx)
+    dynamic_shape_type = NnMemoryType(
+        ArrayAttr([StringAttr("N")]),
+        ArrayAttr([IntAttr(1)]),
+        f32,
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    with pytest.raises(KernelCodeError, match="only static memory layout is supported"):
+        emit_c_op(DmaAllocOp([], dynamic_shape_type), _ctx())
     bad_alloc = DmaAllocOp([], i32)
     with pytest.raises(KernelCodeError, match="result must be nn.memory"):
         emit_c_op(bad_alloc, _ctx())
@@ -1390,6 +1515,54 @@ def test_emit_c_private_additional_error_matrix(
         kind="add",
         space=NnMemorySpaceAttr.from_name("global"),
     )
+    cpu_kernel_ctx = _ctx()
+    for index, arg in enumerate(kernel_block.args[:3]):
+        cpu_kernel_ctx.bind_name(arg, f"cpu_m{index}")
+    for kind, helper in (
+        ("add", "add"),
+        ("sub", "sub"),
+        ("mul", "mul"),
+        ("div", "div"),
+        ("eq", "eq"),
+        ("ne", "ne"),
+        ("lt", "lt"),
+        ("le", "le"),
+        ("gt", "gt"),
+        ("ge", "ge"),
+    ):
+        stmt = emit_c_op(
+            KernelBinaryElewiseOp(
+                kernel_block.args[0],
+                kernel_block.args[1],
+                kernel_block.args[2],
+                kind=kind,
+                space=NnMemorySpaceAttr.from_name("global"),
+            ),
+            cpu_kernel_ctx,
+        )
+        assert stmt == f"cpu::{helper}(cpu_m1, cpu_m2, cpu_m0);"
+    cpu_bad_kind = KernelBinaryElewiseOp(
+        kernel_block.args[0],
+        kernel_block.args[1],
+        kernel_block.args[2],
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("global"),
+    )
+    cpu_bad_kind.attributes["kind"] = StringAttr("pow")
+    with pytest.raises(KernelCodeError, match="unsupported kind=pow"):
+        emit_c_op(cpu_bad_kind, cpu_kernel_ctx)
+    cpu_add_ctx = _ctx()
+    cpu_add_block = Block(arg_types=[mem_type, mem_type])
+    cpu_add_ctx.bind_name(cpu_add_block.args[0], "lhs")
+    cpu_add_ctx.bind_name(cpu_add_block.args[1], "rhs")
+    cpu_add_op = NnAddOp(
+        cpu_add_block.args[0],
+        cpu_add_block.args[1],
+        mem_type,
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    cpu_add_ctx.bind_name(cpu_add_op.result, "out")
+    assert emit_c_op(cpu_add_op, cpu_add_ctx) == "cpu::add(lhs, rhs, out);"
     with pytest.raises(KernelCodeError, match="unsupported op"):
         emit_c_op(bad_add, kernel_ctx)
 
@@ -1830,23 +2003,40 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_add() -> None:
 def test_emit_c_lowers_npu_demo_tuner_cost_kernel_binary_elewise() -> None:
     memory_type = _make_memory_type([4, 4], [4, 1], space="global", element_type=f32)
     block = Block(arg_types=[memory_type, memory_type, memory_type])
-    ctx = _npu_ctx()
-    ctx.bind_name(block.args[0], "out")
-    ctx.bind_name(block.args[1], "lhs")
-    ctx.bind_name(block.args[2], "rhs")
-    op = _make_tuner_cost_op(
-        "kernel.binary_elewise",
-        "MAC",
-        [block.args[0], block.args[1], block.args[2]],
-        extra_attrs={"kernel_kind": StringAttr("add")},
-    )
+    rng = random.Random(20260505)
+    cases = [
+        ("add", "add"),
+        ("sub", "sub"),
+        ("mul", "mul"),
+        ("div", "truediv"),
+        ("truediv", "truediv"),
+        ("eq", "eq"),
+        ("ne", "ne"),
+        ("lt", "lt"),
+        ("le", "le"),
+        ("gt", "gt"),
+        ("ge", "ge"),
+    ]
+    rng.shuffle(cases)
 
-    stmt = emit_c_op(op, ctx)
+    for index, (kernel_kind, helper) in enumerate(cases):
+        ctx = _npu_ctx()
+        ctx.bind_name(block.args[0], "out")
+        ctx.bind_name(block.args[1], "lhs")
+        ctx.bind_name(block.args[2], "rhs")
+        op = _make_tuner_cost_op(
+            "kernel.binary_elewise",
+            f"KIND{index}",
+            [block.args[0], block.args[1], block.args[2]],
+            extra_attrs={"kernel_kind": StringAttr(kernel_kind)},
+        )
 
-    assert stmt == (
-        "S_INT cost0 = cost::add<GM, float, float, MAC>"
-        "(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);"
-    )
+        stmt = emit_c_op(op, ctx)
+
+        assert stmt == (
+            f"S_INT cost0 = cost::{helper}<GM, float, float, KIND{index}>"
+            "(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);"
+        )
 
 
 # EC-018B
@@ -1873,11 +2063,23 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_exp_select_reduce() -> None:
         "DMA",
         [block.args[0], block.args[2], block.args[1], block.args[1]],
     )
-    reduce_op = _make_tuner_cost_op(
+    reduce_max_op = _make_tuner_cost_op(
         "kernel.reduce",
         "MAC",
         [block.args[3], block.args[1]],
         extra_attrs={"kernel_kind": StringAttr("max"), "axis": IntegerAttr(1, i32)},
+    )
+    reduce_sum_op = _make_tuner_cost_op(
+        "kernel.reduce",
+        "MEMORY",
+        [block.args[3], block.args[1]],
+        extra_attrs={"kernel_kind": StringAttr("sum"), "axis": IntegerAttr(0, i32)},
+    )
+    reduce_min_op = _make_tuner_cost_op(
+        "kernel.reduce_min",
+        "DMA",
+        [block.args[3], block.args[1]],
+        extra_attrs={"axis": IntegerAttr(1, i32)},
     )
 
     assert emit_c_op(exp_op, ctx) == (
@@ -1888,8 +2090,16 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_exp_select_reduce() -> None:
         "S_INT cost1 = cost::select<TSM, float, float, DMA>"
         "(out /*out*/, cond /*cond*/, input /*lhs*/, input /*rhs*/);"
     )
-    assert emit_c_op(reduce_op, ctx) == (
+    assert emit_c_op(reduce_max_op, ctx) == (
         "S_INT cost2 = cost::reduce_max<TSM, float, float, MAC>"
+        "(reduce_out /*out*/, input /*input*/, 1 /*axis*/);"
+    )
+    assert emit_c_op(reduce_sum_op, ctx) == (
+        "S_INT cost3 = cost::reduce_sum<TSM, float, float, MEMORY>"
+        "(reduce_out /*out*/, input /*input*/, 0 /*axis*/);"
+    )
+    assert emit_c_op(reduce_min_op, ctx) == (
+        "S_INT cost4 = cost::reduce_min<TSM, float, float, DMA>"
         "(reduce_out /*out*/, input /*input*/, 1 /*axis*/);"
     )
 
@@ -1963,6 +2173,37 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_img2col2d() -> None:
         "S_INT cost0 = cost::img2col2d<TSM, TSM, float, float, DMA>"
         "(out /*out*/, input /*input*/, 3 /*kh*/, 3 /*kw*/, 1 /*sh*/, 1 /*sw*/, "
         "1 /*dh*/, 1 /*dw*/, 0 /*ph*/, 0 /*pw*/, 0 /*pl*/, 0 /*pr*/);"
+    )
+
+
+# EC-019B
+# 功能说明: 验证 npu_demo 下 `tuner.cost(op_name="kernel.img2col1d")` 发射为 `cost::img2col1d`。
+# 测试目的: 锁定一维 im2col cost helper 的公开参数顺序与 cost kind 原样透传。
+# 使用示例: pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_tuner_cost_kernel_img2col1d
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/npu_demo/tuner/cost.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/emit.md
+# 对应测试文件路径: test/dsl/gen_kernel/emit/test_package.py
+def test_emit_c_lowers_npu_demo_tuner_cost_kernel_img2col1d() -> None:
+    out_type = _make_memory_type([1, 3, 3, 6], [54, 18, 6, 1], space="tsm", element_type=f32)
+    input_type = _make_memory_type([1, 3, 8], [24, 8, 1], space="tsm", element_type=f32)
+    block = Block(arg_types=[out_type, input_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "out")
+    ctx.bind_name(block.args[1], "input")
+    c0 = SymbolConstOp(0)
+    c1 = SymbolConstOp(1)
+    c3 = SymbolConstOp(3)
+    op = _make_tuner_cost_op(
+        "kernel.img2col1d",
+        "LOAD_STORE",
+        [block.args[0], block.args[1], c3.result, c1.result, c1.result, c0.result, c0.result],
+    )
+
+    stmt = emit_c_op(op, ctx)
+
+    assert stmt == (
+        "S_INT cost0 = cost::img2col1d<TSM, TSM, float, float, LOAD_STORE>"
+        "(out /*out*/, input /*input*/, 3 /*k*/, 1 /*s*/, 1 /*d*/, 0 /*p_left*/, 0 /*p_right*/);"
     )
 
 
@@ -2100,6 +2341,353 @@ def test_emit_c_preserves_raw_npu_demo_tuner_cost_kind_and_rejects_invalid_memor
         emit_c_op(invalid_type, ctx)
 
 
+# EC-023A
+# 功能说明: 验证 npu_demo 下 `tuner.cost` 公开错误语义覆盖 metadata、operand、kind、axis 与空间/类型不匹配矩阵。
+# 测试目的: 锁定 cost emitter 对公开 `tuner.cost` metadata 与 operands 的拒绝边界，不依赖内部注册 helper。
+# 使用示例: pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/npu_demo/tuner/cost.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/emit.md
+# 对应测试文件路径: test/dsl/gen_kernel/emit/test_package.py
+def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
+    memory_type = _make_memory_type([4, 4], [4, 1], space="global", element_type=f32)
+    tsm_type = _make_memory_type([4, 4], [4, 1], space="tsm", element_type=f32)
+    int_type = _make_memory_type([4, 4], [4, 1], space="global", element_type=i32)
+    bool_type = _make_memory_type([4, 4], [4, 1], space="global", element_type=i1)
+    reduce_out_type = _make_memory_type([4, 1], [1, 1], space="global", element_type=f32)
+    big_type = _make_memory_type([2, 2, 2, 2, 2], [16, 8, 4, 2, 1], space="global", element_type=f32)
+    block = Block(arg_types=[memory_type, memory_type, tsm_type, int_type, bool_type, reduce_out_type, big_type])
+    scalar_block = Block(arg_types=[i32, i32])
+    c0 = SymbolConstOp(0)
+    c1 = SymbolConstOp(1)
+    ctx = _npu_ctx()
+    cases = [
+        (
+            TunerCostOp([block.args[0]], cost_kind=IntegerAttr(1, i32), op_name=StringAttr("kernel.add")),
+            r"tuner\.cost: cost_kind must be string attr",
+        ),
+        (
+            TunerCostOp([block.args[0]], cost_kind=StringAttr("compute"), op_name=IntegerAttr(1, i32)),
+            r"tuner\.cost: op_name must be string attr",
+        ),
+        (
+            _make_tuner_cost_op("kernel.add", "compute", [block.args[0], block.args[1]]),
+            r"tuner\.cost: op_name=kernel\.add requires out, lhs, rhs",
+        ),
+        (
+            _make_tuner_cost_op("kernel.add", "compute", [scalar_block.args[0], block.args[1], block.args[1]]),
+            r"tuner\.cost: out must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op("kernel.add", "compute", [block.args[0], scalar_block.args[0], block.args[1]]),
+            r"tuner\.cost: lhs must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op("kernel.add", "compute", [block.args[0], block.args[1], scalar_block.args[0]]),
+            r"tuner\.cost: rhs must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op("kernel.add", "compute", [block.args[0], block.args[1], block.args[2]]),
+            r"tuner\.cost: kernel\.add operands must share memory space",
+        ),
+        (
+            _make_tuner_cost_op("kernel.add", "compute", [block.args[0], block.args[1], block.args[3]]),
+            r"tuner\.cost: kernel\.add lhs/rhs element type must match",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.binary_elewise",
+                "compute",
+                [block.args[0], block.args[1], block.args[1]],
+            ),
+            r"tuner\.cost: kernel\.binary_elewise requires kernel_kind string attr",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.binary_elewise",
+                "compute",
+                [block.args[0], block.args[1]],
+                extra_attrs={"kernel_kind": StringAttr("add")},
+            ),
+            r"tuner\.cost: op_name=kernel\.binary_elewise requires out, lhs, rhs",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.binary_elewise",
+                "compute",
+                [block.args[0], block.args[1], block.args[1]],
+                extra_attrs={"kernel_kind": StringAttr("pow")},
+            ),
+            r"tuner\.cost: kernel\.binary_elewise unsupported kind=pow",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.binary_elewise",
+                "compute",
+                [scalar_block.args[0], block.args[1], block.args[1]],
+                extra_attrs={"kernel_kind": StringAttr("add")},
+            ),
+            r"tuner\.cost: out must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.binary_elewise",
+                "compute",
+                [block.args[0], scalar_block.args[0], block.args[1]],
+                extra_attrs={"kernel_kind": StringAttr("add")},
+            ),
+            r"tuner\.cost: lhs must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.binary_elewise",
+                "compute",
+                [block.args[0], block.args[1], scalar_block.args[0]],
+                extra_attrs={"kernel_kind": StringAttr("add")},
+            ),
+            r"tuner\.cost: rhs must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.binary_elewise",
+                "compute",
+                [block.args[0], block.args[1], block.args[2]],
+                extra_attrs={"kernel_kind": StringAttr("add")},
+            ),
+            r"tuner\.cost: kernel\.binary_elewise operands must share memory space",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.binary_elewise",
+                "compute",
+                [block.args[0], block.args[1], block.args[3]],
+                extra_attrs={"kernel_kind": StringAttr("add")},
+            ),
+            r"tuner\.cost: kernel\.binary_elewise lhs/rhs element type must match",
+        ),
+        (
+            _make_tuner_cost_op("kernel.exp", "compute", [block.args[0]]),
+            r"tuner\.cost: op_name=kernel\.exp requires out, input",
+        ),
+        (
+            _make_tuner_cost_op("kernel.exp", "compute", [scalar_block.args[0], block.args[1]]),
+            r"tuner\.cost: out must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op("kernel.exp", "compute", [block.args[0], scalar_block.args[0]]),
+            r"tuner\.cost: input must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op("kernel.exp", "compute", [block.args[0], block.args[2]]),
+            r"tuner\.cost: kernel\.exp operands must share memory space",
+        ),
+        (
+            _make_tuner_cost_op("kernel.select", "compute", [block.args[0], block.args[4], block.args[1]]),
+            r"tuner\.cost: op_name=kernel\.select requires out, cond, lhs, rhs",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.select",
+                "compute",
+                [scalar_block.args[0], block.args[4], block.args[1], block.args[1]],
+            ),
+            r"tuner\.cost: out must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.select",
+                "compute",
+                [block.args[0], scalar_block.args[0], block.args[1], block.args[1]],
+            ),
+            r"tuner\.cost: cond must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.select",
+                "compute",
+                [block.args[0], block.args[4], scalar_block.args[0], block.args[1]],
+            ),
+            r"tuner\.cost: lhs must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.select",
+                "compute",
+                [block.args[0], block.args[4], block.args[1], scalar_block.args[0]],
+            ),
+            r"tuner\.cost: rhs must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.select",
+                "compute",
+                [block.args[0], block.args[4], block.args[1], block.args[2]],
+            ),
+            r"tuner\.cost: kernel\.select operands must share memory space",
+        ),
+        (
+            _make_tuner_cost_op("kernel.select", "compute", [block.args[0], block.args[1], block.args[1], block.args[1]]),
+            r"tuner\.cost: kernel\.select cond element type must be bool",
+        ),
+        (
+            _make_tuner_cost_op("kernel.select", "compute", [block.args[0], block.args[4], block.args[1], block.args[3]]),
+            r"tuner\.cost: kernel\.select lhs/rhs element type must match",
+        ),
+        (
+            _make_tuner_cost_op("kernel.reduce", "compute", [block.args[5], block.args[1]]),
+            r"tuner\.cost: kernel\.reduce requires kernel_kind string attr",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.reduce",
+                "compute",
+                [block.args[5]],
+                extra_attrs={"kernel_kind": StringAttr("sum"), "axis": IntegerAttr(0, i32)},
+            ),
+            r"tuner\.cost: op_name=kernel\.reduce requires out, input",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.reduce",
+                "compute",
+                [block.args[5], block.args[1]],
+                extra_attrs={"kernel_kind": StringAttr("prod"), "axis": IntegerAttr(0, i32)},
+            ),
+            r"tuner\.cost: kernel\.reduce unsupported kind=prod",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.reduce",
+                "compute",
+                [scalar_block.args[0], block.args[1]],
+                extra_attrs={"kernel_kind": StringAttr("sum"), "axis": IntegerAttr(0, i32)},
+            ),
+            r"tuner\.cost: out must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.reduce",
+                "compute",
+                [block.args[5], scalar_block.args[0]],
+                extra_attrs={"kernel_kind": StringAttr("sum"), "axis": IntegerAttr(0, i32)},
+            ),
+            r"tuner\.cost: input must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.reduce",
+                "compute",
+                [block.args[5], block.args[2]],
+                extra_attrs={"kernel_kind": StringAttr("sum"), "axis": IntegerAttr(0, i32)},
+            ),
+            r"tuner\.cost: kernel\.reduce operands must share memory space",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.reduce_min",
+                "compute",
+                [block.args[5], block.args[1]],
+            ),
+            r"tuner\.cost: kernel\.reduce_min requires integer axis attr",
+        ),
+        (
+            _make_tuner_cost_op("dma.copy", "memory", [block.args[0]]),
+            r"tuner\.cost: op_name=dma\.copy requires target, source",
+        ),
+        (
+            _make_tuner_cost_op("dma.copy", "memory", [block.args[0], scalar_block.args[0]]),
+            r"tuner\.cost: source must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op("dma.copy", "memory", [block.args[0], block.args[3]]),
+            r"tuner\.cost: dma\.copy source/target element type must match",
+        ),
+        (
+            _make_tuner_cost_op("dma.slice", "memory", [block.args[0]]),
+            r"tuner\.cost: op_name=dma\.slice requires target, source, offsets, sizes, strides",
+        ),
+        (
+            _make_tuner_cost_op("dma.slice", "memory", [scalar_block.args[0], block.args[0]]),
+            r"tuner\.cost: target must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op("dma.slice", "memory", [block.args[0], scalar_block.args[0]]),
+            r"tuner\.cost: source must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op("dma.slice", "memory", [block.args[0], block.args[0], c0.result]),
+            r"tuner\.cost: op_name=dma\.slice requires target, source, offsets, sizes, strides",
+        ),
+        (
+            _make_tuner_cost_op(
+                "dma.slice",
+                "memory",
+                [block.args[3], block.args[0], c0.result, c0.result, c1.result, c1.result, c1.result, c1.result],
+            ),
+            r"tuner\.cost: dma\.slice source/target element type must match",
+        ),
+        (
+            _make_tuner_cost_op(
+                "dma.slice",
+                "memory",
+                [block.args[6], block.args[6], c0.result, c0.result, c0.result, c0.result, c0.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result],
+            ),
+            r"tuner\.cost: op_name=dma\.slice npu_demo Vector supports 1\.\.4 values",
+        ),
+        (
+            _make_tuner_cost_op("kernel.matmul", "compute", [block.args[0], block.args[1]]),
+            r"tuner\.cost: op_name=kernel\.matmul requires out, lhs, rhs",
+        ),
+        (
+            _make_tuner_cost_op("kernel.matmul", "compute", [scalar_block.args[0], block.args[1], block.args[1]]),
+            r"tuner\.cost: out must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op("kernel.matmul", "compute", [block.args[0], scalar_block.args[0], block.args[1]]),
+            r"tuner\.cost: lhs must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op("kernel.matmul", "compute", [block.args[0], block.args[1], scalar_block.args[0]]),
+            r"tuner\.cost: rhs must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op("kernel.img2col1d", "compute", [block.args[0], block.args[1]]),
+            r"tuner\.cost: op_name=kernel\.img2col1d requires out, input, k, s, d, p_left, p_right",
+        ),
+        (
+            _make_tuner_cost_op("kernel.img2col1d", "compute", [scalar_block.args[0], block.args[1], c0.result, c1.result, c1.result, c0.result, c0.result]),
+            r"tuner\.cost: out must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op("kernel.img2col1d", "compute", [block.args[0], scalar_block.args[0], c0.result, c1.result, c1.result, c0.result, c0.result]),
+            r"tuner\.cost: input must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op("kernel.img2col2d", "compute", [block.args[0], block.args[1]]),
+            r"tuner\.cost: op_name=kernel\.img2col2d requires out, input, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.img2col2d",
+                "compute",
+                [scalar_block.args[0], block.args[1], c0.result, c0.result, c1.result, c1.result, c1.result, c1.result, c0.result, c0.result, c0.result, c0.result],
+            ),
+            r"tuner\.cost: out must be nn\.memory",
+        ),
+        (
+            _make_tuner_cost_op(
+                "kernel.img2col2d",
+                "compute",
+                [block.args[0], scalar_block.args[1], c0.result, c0.result, c1.result, c1.result, c1.result, c1.result, c0.result, c0.result, c0.result, c0.result],
+            ),
+            r"tuner\.cost: input must be nn\.memory",
+        ),
+    ]
+
+    for op, message in cases:
+        with pytest.raises(KernelCodeError, match=message):
+            emit_c_op(op, ctx)
+
+
 # EC-024
 # 功能说明: 验证 npu_demo 下 thread 查询节点发射为 free helper `thread_id/thread_num`。
 # 测试目的: 锁定 target=npu_demo 的查询文本不再带 `ctx.`，避免回退到成员调用或 launch 语义。
@@ -2108,6 +2696,16 @@ def test_emit_c_preserves_raw_npu_demo_tuner_cost_kind_and_rejects_invalid_memor
 # 对应 spec 文件路径: spec/dsl/gen_kernel/emit.md
 # 对应测试文件路径: test/dsl/gen_kernel/emit/test_package.py
 def test_emit_c_lowers_npu_demo_kernel_context_queries() -> None:
+    value_ctx = _npu_ctx()
+    tid_value = ArchGetThreadIdOp()
+    tnum_value = ArchGetThreadNumOp()
+    assert emit_c_value(tid_value.result, value_ctx) == "npu_demo::thread_id()"
+    assert emit_c_value(tnum_value.result, value_ctx) == "npu_demo::thread_num()"
+    value_ctx.bind_name(tid_value.result, "tid_expr")
+    value_ctx.bind_name(tnum_value.result, "tnum_expr")
+    assert emit_c_value(tid_value.result, value_ctx) == "tid_expr"
+    assert emit_c_value(tnum_value.result, value_ctx) == "tnum_expr"
+
     ctx = _npu_ctx()
     tid = ArchGetThreadIdOp()
     tnum = ArchGetThreadNumOp()
@@ -2134,6 +2732,7 @@ def test_emit_c_maps_nn_space_to_template_param() -> None:
     ctx = _npu_ctx()
     tsm_type = _make_memory_type([16], [1], space="tsm", element_type=f32)
     tlm_type = _make_memory_type([16], [1], space="tlm1", element_type=f32)
+    gm_type = _make_memory_type([16], [1], space="global", element_type=f32)
     tsm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tsm"), tsm_type)
     tlm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tlm1"), tlm_type)
     ctx.bind_name(tsm.result, "tsm")
@@ -2144,8 +2743,16 @@ def test_emit_c_maps_nn_space_to_template_param() -> None:
 
     assert tsm_stmt == "Memory<TSM, float> tsm = npu_demo::get_dynamic_memory<TSM>();"
     assert tlm_stmt == "Memory<TLM1, float> tlm = npu_demo::get_dynamic_memory<TLM1>();"
+    value_tsm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tsm"), tsm_type)
+    assert emit_c_value(value_tsm.result, _npu_ctx()) == "npu_demo::get_dynamic_memory<TSM>()"
     assert "load<" not in tsm_stmt
     assert "store<" not in tlm_stmt
+
+    gm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("global"), gm_type)
+    with pytest.raises(KernelCodeError, match="unsupported dynamic memory space"):
+        emit_c_op(gm, _npu_ctx())
+    with pytest.raises(KernelCodeError, match="unsupported dynamic memory space"):
+        emit_c_value(gm.result, _npu_ctx())
 
 
 # EC-026

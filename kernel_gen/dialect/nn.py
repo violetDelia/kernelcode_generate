@@ -58,8 +58,6 @@ from kernel_gen.core.contracts import (
     collect_int_dims as _common_collect_int_dims,
     dims_equal as _common_dims_equal,
     verify_i64_attr as _common_verify_i64_attr,
-    verify_i64_attr_group as _common_verify_i64_attr_group,
-    verify_i64_attr_value as _common_verify_i64_attr_value,
     verify_memory_type as _common_verify_memory_type,
 )
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
@@ -967,61 +965,6 @@ def _normalize_i64_attr(value: int | IntegerAttr | IntAttr, field_name: str) -> 
     if isinstance(value, IntAttr):
         value = value.data
     return IntegerAttr(value, IntegerType(64))
-
-
-def _verify_i64_attr_value(attr: IntegerAttr, field_name: str, *, allow_zero: bool) -> int:
-    """校验 i64 属性值并返回整数。
-
-
-    功能说明:
-    - 校验属性类型为 i64。
-    - 校验正数/非负数约束并返回值。
-
-    使用示例:
-    - _verify_i64_attr_value(attr, "kw", allow_zero=False)
-
-    关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn.py
-    - 功能实现: kernel_gen/dialect/nn.py
-    """
-
-    return _common_verify_i64_attr_value(
-        attr,
-        field_name,
-        allow_zero=allow_zero,
-        scene=_ERROR_SCENE,
-    )
-
-
-def _verify_i64_attr_group(
-    attrs: Sequence[IntegerAttr],
-    *,
-    allow_zero: bool,
-    error_phrase: str,
-) -> list[int]:
-    """校验一组 i64 属性值并返回整数列表。
-
-
-    功能说明:
-    - 校验属性类型为 i64，且满足正数/非负数约束。
-    - 任一属性不满足约束时，统一抛出 error_phrase。
-
-    使用示例:
-    - _verify_i64_attr_group([kw, sw, dw], allow_zero=False, error_phrase="kw-sw-dw-must-be-positive")
-
-    关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn.py
-    - 功能实现: kernel_gen/dialect/nn.py
-    """
-
-    return _common_verify_i64_attr_group(
-        attrs,
-        allow_zero=allow_zero,
-        error_phrase=error_phrase,
-        scene=_ERROR_SCENE,
-    )
 
 
 def _verify_i64_attr(attr: IntegerAttr, field_name: str) -> int:

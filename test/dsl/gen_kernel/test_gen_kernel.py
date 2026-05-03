@@ -156,6 +156,36 @@ class FakeSymbolValueOp(IRDLOperation):
         super().__init__(result_types=[SymbolValueType.from_expr(expr)])
 
 
+@irdl_op_definition
+class NoResultFakeSymbolValueOp(IRDLOperation):
+    """测试用的 malformed `test.fake_symbol_value` 输入 op。"""
+
+    name = "test.fake_symbol_value"
+
+    def __init__(self: "NoResultFakeSymbolValueOp") -> None:
+        super().__init__()
+
+
+@irdl_op_definition
+class NoResultTunerParamOp(IRDLOperation):
+    """测试用的 malformed `tuner.param` 输入 op。"""
+
+    name = "tuner.param"
+
+    def __init__(self: "NoResultTunerParamOp") -> None:
+        super().__init__()
+
+
+@irdl_op_definition
+class LegacyTileStepValueOp(IRDLOperation):
+    """测试用的 legacy tile bridge 输入 op。"""
+
+    name = "tile.step_value"
+
+    def __init__(self: "LegacyTileStepValueOp") -> None:
+        super().__init__()
+
+
 def _ctx() -> EmitCContext:
     set_target("cpu")
     return EmitCContext()
@@ -453,6 +483,73 @@ def _make_npu_demo_cost_function_module() -> ModuleOp:
     )
 
 
+def _make_npu_demo_launch_signature_module(
+    *,
+    body_input_types: tuple[Attribute, ...],
+    body_arg_names: tuple[str, ...],
+    wrapper_input_types: tuple[Attribute, ...] | None = None,
+    wrapper_arg_names: tuple[str, ...] | None = None,
+    body_result_types: tuple[Attribute, ...] = (),
+    wrapper_result_types: tuple[Attribute, ...] = (),
+    launch_arg_indices: tuple[int, ...] | None = None,
+    body_extra_ops: tuple[Operation, ...] = (),
+    thread_extent_from_wrapper_arg_index: int | None = None,
+) -> ModuleOp:
+    """构造只验证 launch 签名合同的 `npu_demo` module。
+
+
+    功能说明:
+    - 生成最小 body + wrapper 双函数 module，专门覆盖 `gen_kernel(target="npu_demo")`
+      的公开签名校验与 launch 参数透传错误语义。
+    - body 不依赖具体 kernel op，避免把测试绑定到节点级 emit 细节。
+    - 可选注入 malformed body op 或非法 launch extent，用于公开 fail-fast 矩阵。
+
+    使用示例:
+    - module = _make_npu_demo_launch_signature_module(body_input_types=(mem, mem, mem), body_arg_names=("lhs", "rhs", "out"))
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel/kernel_emitter.md
+    - test: test/dsl/gen_kernel/test_gen_kernel.py
+    - 功能实现: test/dsl/gen_kernel/test_gen_kernel.py
+    """
+
+    wrapper_input_types = body_input_types if wrapper_input_types is None else wrapper_input_types
+    wrapper_arg_names = body_arg_names if wrapper_arg_names is None else wrapper_arg_names
+
+    body_block = Block(arg_types=list(body_input_types))
+    body_block.add_ops([*body_extra_ops, func.ReturnOp()])
+    body_func = _func("sig_body", list(body_input_types), list(body_result_types), body_block, body_arg_names)
+
+    wrapper_block = Block(arg_types=list(wrapper_input_types))
+    block_extent = FakeSymbolValueOp("1")
+    thread_extent = FakeSymbolValueOp("1")
+    subthread_extent = FakeSymbolValueOp("1")
+    shared_memory_size = FakeSymbolValueOp("0")
+    if launch_arg_indices is None:
+        launch_args = tuple(wrapper_block.args)
+    else:
+        launch_args = tuple(wrapper_block.args[index] for index in launch_arg_indices)
+    launch = ArchLaunchOp(
+        "sig_body",
+        block_extent.result,
+        wrapper_block.args[thread_extent_from_wrapper_arg_index]
+        if thread_extent_from_wrapper_arg_index is not None
+        else thread_extent.result,
+        subthread_extent.result,
+        shared_memory_size.result,
+        launch_args,
+    )
+    wrapper_block.add_ops([block_extent, thread_extent, subthread_extent, shared_memory_size, launch, func.ReturnOp()])
+    wrapper_func = _func(
+        "sig_wrapper",
+        list(wrapper_input_types),
+        list(wrapper_result_types),
+        wrapper_block,
+        wrapper_arg_names,
+    )
+    return ModuleOp([body_func, wrapper_func])
+
+
 def _lower_func(func_op: func.FuncOp) -> func.FuncOp:
     """对单个 `func.func` 执行 `NnLoweringPass` 并返回改写后的函数。
 
@@ -503,7 +600,7 @@ def _lower_and_rewrite_func(func_op: func.FuncOp) -> func.FuncOp:
 
     功能说明:
     - 固定公开成功链路为 `NnLoweringPass -> BufferResultsToOutParamsPass`。
-    - 用于 O5 的 `build_func_op -> pass -> gen_kernel` 黑盒闭环测试。
+    - 用于 O5 的 `mlir_gen -> pass -> gen_kernel` 黑盒闭环测试。
 
     使用示例:
     - lowered = _lower_and_rewrite_func(func_op)
@@ -586,6 +683,59 @@ def _tile_reduce_func(module: ModuleOp) -> func.FuncOp:
     TileAnalysisPass().apply(ctx, module)
     TileReducePass().apply(ctx, module)
     return next(op for op in module.ops if isinstance(op, func.FuncOp))
+
+
+def _make_tile_codegen_contract_func(extra_ops: tuple[Operation, ...] = ()) -> func.FuncOp:
+    """构造最小 tile codegen 合同测试函数。
+
+
+    功能说明:
+    - 通过公开 `gen_kernel(...)` 输入构造 `tuner.param : !symbol.int` 与 `symbol.for`，
+      让函数级发射器进入 tile codegen 合同校验路径。
+    - 调用方可追加 malformed op，验证 fail-fast 错误语义。
+
+    使用示例:
+    - func_op = _make_tile_codegen_contract_func((LegacyTileStepValueOp(),))
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel/kernel_emitter.md
+    - test: test/dsl/gen_kernel/test_gen_kernel.py
+    - 功能实现: test/dsl/gen_kernel/test_gen_kernel.py
+    """
+
+    mem_type = _make_memory_type([8], [1])
+    block = Block(arg_types=[mem_type])
+    tuner = TunerParamOp(SymbolValueType.from_expr("TILE_D0"))
+    start = FakeSymbolValueOp("0")
+    end = FakeSymbolValueOp("8")
+    step = FakeSymbolValueOp("1")
+    loop_body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "TILE_D0")])
+    loop = SymbolForOp(start.result, end.result, step.result, Region(loop_body))
+    block.add_ops([tuner, start, end, step, loop, *extra_ops, func.ReturnOp()])
+    return _func("tile_contract", [mem_type], [], block, ("input",))
+
+
+def _make_legacy_bridge_default_func() -> func.FuncOp:
+    """构造不满足 tile codegen 合同但包含 legacy bridge op 的函数。
+
+
+    功能说明:
+    - 验证 legacy bridge op 即使未进入 tile codegen 合同，也必须通过公开
+      `gen_kernel(...)` fail-fast。
+    - 避免实现只在 tile 合同校验层拒绝旧 bridge，而在默认函数体遍历中静默放行。
+
+    使用示例:
+    - func_op = _make_legacy_bridge_default_func()
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel/kernel_emitter.md
+    - test: test/dsl/gen_kernel/test_gen_kernel.py
+    - 功能实现: test/dsl/gen_kernel/test_gen_kernel.py
+    """
+
+    block = Block()
+    block.add_ops([LegacyTileStepValueOp(), func.ReturnOp()])
+    return _func("legacy_bridge_default", [], [], block, ())
 
 
 def test_tile_gen_kernel_paths_use_kernel_gen_tile_modules() -> None:
@@ -1344,6 +1494,12 @@ def test_gen_kernel_handles_func_return_and_out_binding_in_main_flow(monkeypatch
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 def test_kernel_emitter_public_dispatch_error_boundaries() -> None:
     emitter = KernelEmitter(_ctx())
+    block = Block(arg_types=[i32])
+
+    assert emitter.emit(block.args[0]) == "arg0"
+    assert emitter.emit_value(block.args[0]) == "arg0"
+    assert emitter.emit("global") == "GM"
+    assert emitter.emit_attr("global") == "GM"
 
     with pytest.raises(KernelCodeError, match=r"unsupported attr"):
         emitter.emit_attr(object())
@@ -1353,6 +1509,9 @@ def test_kernel_emitter_public_dispatch_error_boundaries() -> None:
 
     with pytest.raises(KernelCodeError, match=r"builtin\.module is only supported for target=npu_demo"):
         emitter.emit(ModuleOp([]))
+
+    with pytest.raises(KernelCodeError, match=r"test\.unsupported"):
+        emitter.emit(UnsupportedOp())
 
 
 # GK-005D
@@ -1436,6 +1595,39 @@ def test_gen_kernel_rejects_unsupported_return_form() -> None:
     source = gen_kernel(func_op, _ctx())
     assert source.startswith("int32_t scalar_return(int32_t value)")
     assert "return value;" in source
+
+    no_result_block = Block(arg_types=[i32])
+    no_result_block.add_op(func.ReturnOp(no_result_block.args[0]))
+    no_result_func = _func("no_result_return_arg", [i32], [], no_result_block, ("value",))
+    with pytest.raises(KernelCodeError) as exc_info:
+        gen_kernel(no_result_func, _ctx())
+    assert "unsupported return form" in str(exc_info.value)
+
+    missing_return_value_block = Block(arg_types=[i32])
+    missing_return_value_block.add_op(func.ReturnOp())
+    missing_return_value_func = _func(
+        "missing_return_value",
+        [i32],
+        [i32],
+        missing_return_value_block,
+        ("value",),
+    )
+    with pytest.raises(KernelCodeError) as exc_info:
+        gen_kernel(missing_return_value_func, _ctx())
+    assert "unsupported return form" in str(exc_info.value)
+
+    mismatched_return_type_block = Block(arg_types=[f32])
+    mismatched_return_type_block.add_op(func.ReturnOp(mismatched_return_type_block.args[0]))
+    mismatched_return_type_func = _func(
+        "mismatched_return_type",
+        [f32],
+        [i32],
+        mismatched_return_type_block,
+        ("value",),
+    )
+    with pytest.raises(KernelCodeError) as exc_info:
+        gen_kernel(mismatched_return_type_func, _ctx())
+    assert "unsupported return form" in str(exc_info.value)
 
     tuple_block = Block(arg_types=[])
     tuple_block.add_op(func.ReturnOp())
@@ -1533,8 +1725,10 @@ def test_gen_kernel_supports_symbol_scalar_return() -> None:
     out_type = SymbolValueType.from_expr("7")
     block = Block(arg_types=[lhs_type, rhs_type])
     add = SymbolAddOp(block.args[0], block.args[1], out_type)
+    cast = UnrealizedConversionCastOp.get([add.result], [out_type])
     block.add_op(add)
-    block.add_op(func.ReturnOp(add.result))
+    block.add_op(cast)
+    block.add_op(func.ReturnOp(cast.results[0]))
     func_op = _func("symbol_sum", [lhs_type, rhs_type], [out_type], block, ("lhs", "rhs"))
 
     source = gen_kernel(func_op, _ctx())
@@ -1568,7 +1762,7 @@ def test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu() -> None:
 
 
 # GK-013
-# 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的 memory+memory add 在 cpu target 下可生成源码。
+# 功能说明: 验证 `mlir_gen -> pass -> gen_kernel` 的 memory+memory add 在 cpu target 下可生成源码。
 # 测试目的: 清理 raw `nn.add` 直出源码的旧成功口径，锁定 pass 后逐元素加法已被消费为 `cpu::add(lhs, rhs, out)`。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
@@ -1591,7 +1785,7 @@ def test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu() -> None:
 
 
 # GK-014
-# 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的 memory+const(i32) add 会先经 `dma.fill` 再生成源码。
+# 功能说明: 验证 `mlir_gen -> pass -> gen_kernel` 的 memory+const(i32) add 会先经 `dma.fill` 再生成源码。
 # 测试目的: 清理 raw mixed `nn.add` 直接出源码的旧成功口径，锁定 pass 后 `dma.fill + cpu::add(lhs, v0, out)` 文本。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
@@ -1616,7 +1810,7 @@ def test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu() -> None:
 
 
 # GK-015
-# 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的 memory+symbol.int add 会先经 `dma.fill` 再生成源码。
+# 功能说明: 验证 `mlir_gen -> pass -> gen_kernel` 的 memory+symbol.int add 会先经 `dma.fill` 再生成源码。
 # 测试目的: 清理 raw `nn.add(memory, symbol.int)` 直接出源码的旧成功口径，锁定 pass 后 `dma.fill + cpu::add(lhs, v0, out)` 文本与 long long bias 签名。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_supports_lowered_nn_add_memory_symbol_on_cpu
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
@@ -1748,6 +1942,53 @@ def test_gen_kernel_emits_npu_demo_body_level_kernel() -> None:
     assert "arch.launch_kernel" not in source
 
 
+# GK-017B
+# 功能说明: 验证 `target="npu_demo"` body-level kernel 只接受 spec 定义的 `ctx + Memory -> Memory` 签名。
+# 测试目的: 锁定非 ctx 首参、非 Memory 源参数与 element type 不匹配都会回落到公开 memory-return 拒绝语义。
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_npu_demo_body_level_signature_boundaries
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/kernel_emitter.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/kernel_emitter.md
+# 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
+@pytest.mark.parametrize(
+    "func_op",
+    [
+        pytest.param(
+            _func(
+                "body_without_ctx_name",
+                [IndexType(), _make_memory_type([64], [1], element_type=f32)],
+                [_make_memory_type([64], [1], element_type=f32)],
+                Block(arg_types=[IndexType(), _make_memory_type([64], [1], element_type=f32)]),
+                ("context", "source"),
+            ),
+            id="leading-name-not-ctx",
+        ),
+        pytest.param(
+            _func(
+                "body_without_memory_source",
+                [IndexType(), i32],
+                [_make_memory_type([64], [1], element_type=f32)],
+                Block(arg_types=[IndexType(), i32]),
+                ("ctx", "source"),
+            ),
+            id="source-not-memory",
+        ),
+        pytest.param(
+            _func(
+                "body_element_mismatch",
+                [IndexType(), _make_memory_type([64], [1], element_type=i32)],
+                [_make_memory_type([64], [1], element_type=f32)],
+                Block(arg_types=[IndexType(), _make_memory_type([64], [1], element_type=i32)]),
+                ("ctx", "source"),
+            ),
+            id="element-type-mismatch",
+        ),
+    ],
+)
+def test_gen_kernel_rejects_npu_demo_body_level_signature_boundaries(func_op: func.FuncOp) -> None:
+    with pytest.raises(KernelCodeError, match="legacy memory return ABI is not supported"):
+        gen_kernel(func_op, _npu_ctx())
+
+
 # GK-S12-001
 # 功能说明: 验证 npu_demo 单函数 kernel family 会把最前置 out 参数生成为可写引用，并通过 Kernel helper 发射。
 # 测试目的: 锁定 `kernel.binary_elewise(kind="add")` 在 `target=npu_demo` 下的函数签名与 helper 调用都遵循 `out-first` 口径，防止把 out 误生成为 `const Memory&`。
@@ -1835,6 +2076,54 @@ def test_gen_kernel_emits_npu_demo_dma_alloc_module() -> None:
     assert "void dma_alloc_dynamic_case(S_INT arg0, S_INT arg1)" in dynamic_source
     assert "Memory<TSM, float> v0 = alloc<TSM, float>({arg0, arg1} /*shape*/, {arg1, 1} /*stride*/);" in dynamic_source
     _compile_only(dynamic_source)
+
+
+# GK-017A1
+# 功能说明: 验证 `target="npu_demo"` 单函数 module 的 plain/helper/launch 边界。
+# 测试目的: 锁定单函数 module 只能在可公开发射的普通函数形态下成功，helper-only、缺 return 与缺 body launch 都必须 fail-fast。
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_handles_npu_demo_plain_module_public_boundaries
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/kernel_emitter.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/kernel_emitter.md
+# 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
+def test_gen_kernel_handles_npu_demo_plain_module_public_boundaries() -> None:
+    plain_return_source = gen_kernel(ModuleOp([_make_npu_demo_helper_func("plain_return")]), _npu_ctx())
+    assert "void plain_return()" in plain_return_source
+
+    helper_only_block = Block()
+    helper_only_block.add_op(FakeSymbolValueOp("1"))
+    helper_only_module = ModuleOp([_func("helper_only", [], [], helper_only_block, ())])
+    with pytest.raises(KernelCodeError, match=r"must contain exactly one wrapper func with arch\.launch"):
+        gen_kernel(helper_only_module, _npu_ctx())
+
+    missing_return_block = Block()
+    missing_return_block.add_op(UnsupportedOp())
+    missing_return_module = ModuleOp([_func("missing_return", [], [], missing_return_block, ())])
+    with pytest.raises(KernelCodeError, match=r"must contain exactly one wrapper func with arch\.launch"):
+        gen_kernel(missing_return_module, _npu_ctx())
+
+    launch_block = Block()
+    block_extent = FakeSymbolValueOp("1")
+    thread_extent = FakeSymbolValueOp("1")
+    subthread_extent = FakeSymbolValueOp("1")
+    shared_memory_size = FakeSymbolValueOp("0")
+    launch = ArchLaunchOp(
+        "missing_body",
+        block_extent.result,
+        thread_extent.result,
+        subthread_extent.result,
+        shared_memory_size.result,
+        (),
+    )
+    launch_block.add_ops([block_extent, thread_extent, subthread_extent, shared_memory_size, launch, func.ReturnOp()])
+    launch_module = ModuleOp([_func("single_launch_wrapper", [], [], launch_block, ())])
+    with pytest.raises(KernelCodeError, match="references missing body missing_body"):
+        gen_kernel(launch_module, _npu_ctx())
+
+    helper_return_block = Block()
+    helper_return_block.add_ops([FakeSymbolValueOp("1"), func.ReturnOp()])
+    helper_return_module = ModuleOp([_func("helper_return", [], [], helper_return_block, ())])
+    with pytest.raises(KernelCodeError, match=r"must contain exactly one wrapper func with arch\.launch"):
+        gen_kernel(helper_return_module, _npu_ctx())
 
 
 # GK-017A
@@ -1995,8 +2284,8 @@ def test_gen_kernel_black_box_lowered_add_and_npu_demo_contracts() -> None:
 
 
 # GK-I2-001
-# 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的三条 nn.add CPU 路径可生成源码并完成编译执行。
-# 测试目的: 作为 I4 的统一 smoke，确认公开成功链路来自 `build_func_op -> NnLoweringPass -> gen_kernel`，而不是 raw `nn.add` direct-return 特化。
+# 功能说明: 验证 `mlir_gen -> pass -> gen_kernel` 的三条 nn.add CPU 路径可生成源码并完成编译执行。
+# 测试目的: 作为 I4 的统一 smoke，确认公开成功链路来自 `mlir_gen -> NnLoweringPass -> gen_kernel`，而不是 raw `nn.add` direct-return 特化。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_compiles_and_runs_lowered_nn_add_variants_on_cpu
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
@@ -2195,6 +2484,59 @@ def test_gen_kernel_rejects_legacy_split_tuner_param_contract() -> None:
         gen_kernel(func_op, _ctx())
 
 
+# GK-S3-006
+# 功能说明: 验证 tile codegen malformed 输入继续只通过公开 `gen_kernel(...)` fail-fast。
+# 测试目的: 锁定非 CPU target、无结果 tuner.param 与 legacy bridge op 均不会被静默发射。
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_tile_codegen_public_malformed_matrix
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/kernel_emitter.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/kernel_emitter.md
+# 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
+@pytest.mark.parametrize(
+    ("func_op", "ctx", "pattern"),
+    [
+        pytest.param(
+            _make_tile_codegen_contract_func(),
+            _npu_ctx(),
+            "tile codegen is cpu-only",
+            id="tile-codegen-non-cpu",
+        ),
+        pytest.param(
+            _func(
+                "tuner_without_result",
+                [],
+                [],
+                Block(),
+                (),
+            ),
+            _ctx(),
+            "tuner.param must have a result",
+            id="tuner-param-without-result",
+        ),
+        pytest.param(
+            _make_tile_codegen_contract_func((LegacyTileStepValueOp(),)),
+            _ctx(),
+            "legacy bridge ops are not allowed",
+            id="legacy-bridge-op",
+        ),
+        pytest.param(
+            _make_legacy_bridge_default_func(),
+            _ctx(),
+            "legacy bridge ops are not allowed",
+            id="legacy-bridge-op-without-tile-contract",
+        ),
+    ],
+)
+def test_gen_kernel_rejects_tile_codegen_public_malformed_matrix(
+    func_op: func.FuncOp,
+    ctx: EmitCContext,
+    pattern: str,
+) -> None:
+    if func_op.sym_name.data == "tuner_without_result":
+        func_op.body.block.add_ops([NoResultTunerParamOp(), func.ReturnOp()])
+    with pytest.raises(KernelCodeError, match=pattern):
+        gen_kernel(func_op, ctx)
+
+
 # GK-S5-001
 # 功能说明: 验证 tile-elewise after-IR 的 elementwise/broadcast 可生成稳定的 CPU 源码绑定。
 # 测试目的: 锁定 `tuner_param("TILE_D0")` 与 `cpu::add` / `cpu::broadcast` 的公开收口口径。
@@ -2285,6 +2627,28 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
     )
     assert "arch.launch_kernel" not in source
     assert "ctx.sync_threads" not in source
+
+
+# GK-S4-001A
+# 功能说明: 验证 `target="npu_demo"` launch module 支持 trailing `!symbol.int` 参数透传。
+# 测试目的: 锁定 body 使用 `S_INT`、wrapper 使用公开签名类型并把符号参数继续转发给 `npu_demo::launch`。
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_launch_wrapper_with_symbol_args
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/kernel_emitter.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/kernel_emitter.md
+# 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
+def test_gen_kernel_emits_npu_demo_launch_wrapper_with_symbol_args() -> None:
+    mem = _make_memory_type([64], [1], element_type=f32)
+    tile = SymbolValueType.from_expr("TILE")
+    module = _make_npu_demo_launch_signature_module(
+        body_input_types=(mem, mem, mem, tile),
+        body_arg_names=("lhs", "rhs", "out", "tile"),
+    )
+
+    source = gen_kernel(module, _npu_ctx())
+
+    assert "static void sig_body(Memory<GM, float>& lhs, Memory<GM, float>& rhs, Memory<GM, float>& out, S_INT tile);" in source
+    assert "void sig_wrapper(Memory<MemorySpace::GM, float>& lhs, Memory<MemorySpace::GM, float>& rhs, Memory<MemorySpace::GM, float>& out, long long tile)" in source
+    assert "npu_demo::launch<c_0, c_1, c_2, c_3>(sig_body, lhs, rhs, out, tile);" in source
 
 
 # GK-S4-002
@@ -2480,6 +2844,161 @@ def test_gen_kernel_rejects_npu_demo_barrier_wrapper_missing_body_symbol() -> No
             _ctx(),
             r"builtin\.module is only supported for target=npu_demo",
             id="module-input-rejected-on-cpu",
+        ),
+        pytest.param(
+            _make_npu_demo_launch_signature_module(
+                body_input_types=(
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                ),
+                body_arg_names=("lhs", "rhs", "out"),
+                body_result_types=(i32,),
+            ),
+            _npu_ctx(),
+            r"unsupported npu_demo launch body signature",
+            id="body-has-result",
+        ),
+        pytest.param(
+            _make_npu_demo_launch_signature_module(
+                body_input_types=(
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                ),
+                body_arg_names=("lhs", "rhs"),
+            ),
+            _npu_ctx(),
+            r"unsupported npu_demo launch body signature",
+            id="body-too-few-inputs",
+        ),
+        pytest.param(
+            _make_npu_demo_launch_signature_module(
+                body_input_types=(
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                    SymbolValueType.from_expr("TILE"),
+                ),
+                body_arg_names=("lhs", "rhs", "tile"),
+            ),
+            _npu_ctx(),
+            r"unsupported npu_demo launch body signature",
+            id="body-too-few-memory-inputs",
+        ),
+        pytest.param(
+            _make_npu_demo_launch_signature_module(
+                body_input_types=(
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                    i32,
+                ),
+                body_arg_names=("lhs", "rhs", "out", "bad"),
+            ),
+            _npu_ctx(),
+            r"unsupported npu_demo launch body signature",
+            id="body-trailing-non-symbol",
+        ),
+        pytest.param(
+            _make_npu_demo_launch_signature_module(
+                body_input_types=(
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=i32),
+                    _make_memory_type([64], [1], element_type=f32),
+                ),
+                body_arg_names=("lhs", "rhs", "out"),
+            ),
+            _npu_ctx(),
+            r"body requires matching element types",
+            id="body-memory-element-mismatch",
+        ),
+        pytest.param(
+            _make_npu_demo_launch_signature_module(
+                body_input_types=(
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                ),
+                body_arg_names=("lhs", "rhs", "out"),
+                body_extra_ops=(NoResultFakeSymbolValueOp(),),
+            ),
+            _npu_ctx(),
+            r"unsupported npu_demo launch body helper op",
+            id="body-helper-without-result",
+        ),
+        pytest.param(
+            _make_npu_demo_launch_signature_module(
+                body_input_types=(
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                ),
+                body_arg_names=("lhs", "rhs", "out"),
+                wrapper_result_types=(i32,),
+            ),
+            _npu_ctx(),
+            r"unsupported npu_demo launch wrapper signature",
+            id="wrapper-has-result",
+        ),
+        pytest.param(
+            _make_npu_demo_launch_signature_module(
+                body_input_types=(
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                ),
+                body_arg_names=("lhs", "rhs", "out"),
+                wrapper_input_types=(
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=i32),
+                ),
+                wrapper_arg_names=("lhs", "rhs", "out"),
+            ),
+            _npu_ctx(),
+            r"wrapper signature must match body inputs",
+            id="wrapper-input-mismatch",
+        ),
+        pytest.param(
+            _make_npu_demo_launch_signature_module(
+                body_input_types=(
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                ),
+                body_arg_names=("lhs", "rhs", "out"),
+                launch_arg_indices=(0, 1),
+            ),
+            _npu_ctx(),
+            r"wrapper args must forward wrapper signature",
+            id="wrapper-arg-count-mismatch",
+        ),
+        pytest.param(
+            _make_npu_demo_launch_signature_module(
+                body_input_types=(
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                ),
+                body_arg_names=("lhs", "rhs", "out"),
+                launch_arg_indices=(1, 0, 2),
+            ),
+            _npu_ctx(),
+            r"wrapper args must forward wrapper signature",
+            id="wrapper-arg-order-mismatch",
+        ),
+        pytest.param(
+            _make_npu_demo_launch_signature_module(
+                body_input_types=(
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                ),
+                body_arg_names=("lhs", "rhs", "out"),
+                thread_extent_from_wrapper_arg_index=0,
+            ),
+            _npu_ctx(),
+            r"thread must be !symbol\.int",
+            id="extent-not-symbol",
         ),
     ],
 )

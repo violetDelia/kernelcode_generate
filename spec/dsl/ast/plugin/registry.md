@@ -97,7 +97,7 @@
   result = dsl_builtin(op=op, ast_node=ast_node)
   ```
 - 功能说明：执行 `dsl_builtin`。
-- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
+- 注意事项：`name=None` 时 `func` 必须提供非空字符串 `__name__`；缺失时按 `KernelCodeError(ErrorModule.AST, ...)` 失败。非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
 
 ### `external_builtin(func: BuiltinOperation, name: str | None = None) -> Callable[[BuiltinBuilder], BuiltinBuilder]`
 
@@ -159,3 +159,6 @@
 | TC-DSL-AST-PLUGIN-REGISTRY-003 | 公开入口 | DSL builtin ast node cannot bind multiple operations | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_dsl_builtin_ast_node_cannot_bind_multiple_operations`。 | 公开入口在“DSL builtin ast node cannot bind multiple operations”场景下可导入、构造、注册或按名称发现。 | `test_dsl_builtin_ast_node_cannot_bind_multiple_operations` |
 | TC-DSL-AST-PLUGIN-REGISTRY-004 | 公开入口 | DSL builtin builder must return declared ast node | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_dsl_builtin_builder_must_return_declared_ast_node`。 | 公开入口在“DSL builtin builder must return declared ast node”场景下可导入、构造、注册或按名称发现。 | `test_dsl_builtin_builder_must_return_declared_ast_node` |
 | TC-DSL-AST-PLUGIN-REGISTRY-005 | 边界/异常 | DSL builtin builder rejects declared ast subclass | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dsl_builtin_builder_rejects_declared_ast_subclass`。 | “DSL builtin builder rejects declared ast subclass”场景按公开错误语义失败或被拒绝。 | `test_dsl_builtin_builder_rejects_declared_ast_subclass` |
+| TC-DSL-AST-PLUGIN-REGISTRY-006 | 公开入口 | DSL builtin public callable object and successful builder edges | 准备无 `__name__` 的公开 callable object、AST 类型与 builder。 | 运行 `test_dsl_builtin_public_callable_object_and_successful_builder_edges`。 | callable object 可推断稳定显示名；成功 builder 返回声明 AST 精确类型；重复同 op/AST 装饰保持幂等。 | `test_dsl_builtin_public_callable_object_and_successful_builder_edges` |
+| TC-DSL-AST-PLUGIN-REGISTRY-007 | 边界/异常 | DSL builtin reports previous callable object name for ast collision | 准备 callable object 已绑定的 AST 类型与第二个 operation。 | 运行 `test_dsl_builtin_reports_previous_callable_object_name_for_ast_collision`。 | AST 复用错误中包含 callable object 的稳定 previous 名称。 | `test_dsl_builtin_reports_previous_callable_object_name_for_ast_collision` |
+| TC-DSL-AST-PLUGIN-REGISTRY-008 | 边界/异常 | external builtin public registration edges | 准备外部 callable、重复 builder、不同 builder、无 `__name__` callable 与未注册 callable。 | 运行 `test_external_builtin_public_registration_edges`。 | `external_builtin` 按 callable identity 注册；重复相同 builder 幂等；不同 builder 或缺失 name 按公开错误语义失败；未注册 lookup 返回 None。 | `test_external_builtin_public_registration_edges` |

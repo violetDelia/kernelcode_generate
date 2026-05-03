@@ -35,6 +35,8 @@ API 列表:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
+from typing import ClassVar, TypeAlias
 
 from xdsl.context import Context
 from xdsl.dialects import arith
@@ -84,6 +86,10 @@ from .attr import BoolTypeAttrAST, EmitMlirResult, FloatTypeAttrAST, IntTypeAttr
 from .basic import BoolValueAST, MemoryAST, ValueAST
 from .symbol import ConstValueAST, SymbolListAST
 
+ReduceAxisElement: TypeAlias = "int | float | bool | str | SymbolDim | ValueAST"
+ReduceAxisValue: TypeAlias = "ReduceAxisElement | list[ReduceAxisElement] | tuple[ReduceAxisElement, ...] | None"
+ReduceKeepdimValue: TypeAlias = "bool | ValueAST | None"
+
 
 def _is_singleton_dim(dim: Attribute) -> bool:
     """判断 shape attr 是否为静态 singleton 维度。
@@ -115,7 +121,7 @@ def _contiguous_stride_attrs(shape_attrs: list[Attribute]) -> ArrayAttr[Attribut
     """
 
     stride_attrs: list[Attribute] = []
-    running: object = 1
+    running: int | str = 1
     for dim in reversed(shape_attrs):
         stride_attrs.insert(0, IntAttr(running) if isinstance(running, int) else StringAttr(str(running)))
         dim_value = dim.data if isinstance(dim, (IntAttr, StringAttr)) else str(dim)
@@ -309,7 +315,7 @@ class Img2ColAST(ValueAST):
             param_nodes = [self.kh, self.kw, self.sh, self.sw, self.dh, self.dw, self.ph, self.pw, self.pl, self.pr]
         else:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported img2col AST")
-        params: list[object] = []
+        params: list[int | SymbolDim] = []
         param_operands: list[SSAValue] = []
         for item in param_nodes:
             emitted = item.emit_mlir(ctx, block)
@@ -459,7 +465,7 @@ class NnBroadcastToAST(ValueAST):
         if not isinstance(self.source, MemoryAST):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "broadcast_to source must be tensor argument")
         shape_items = list(self.target_shape.items)
-        target_shape_values: list[object] = []
+        target_shape_values: list[int | float | str | bool | SymbolDim] = []
         for item in shape_items:
             if isinstance(item, ConstValueAST):
                 target_shape_values.append(item.raw_value)
@@ -750,7 +756,7 @@ class NnReduceAST(ValueAST):
 
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reduce_name must be implemented by concrete reduce AST")
 
-    def axis_value(self) -> object:
+    def axis_value(self) -> ReduceAxisValue:
         """返回 reduce axis 的公开语义值。
 
         创建者: 榕
@@ -765,7 +771,7 @@ class NnReduceAST(ValueAST):
 
         return self.axis.raw_value if isinstance(self.axis, ConstValueAST) else self.axis
 
-    def keepdim_value(self) -> object:
+    def keepdim_value(self) -> ReduceKeepdimValue:
         """返回 reduce keepdim 的公开语义值。
 
         创建者: 榕
@@ -802,7 +808,7 @@ class NnReduceAST(ValueAST):
         except ValueError as exc:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, str(exc)) from exc
 
-    def reduce_memory(self, value: Memory, axis: object, keepdim: object) -> Memory:
+    def reduce_memory(self, value: Memory, axis: ReduceAxisValue, keepdim: ReduceKeepdimValue) -> Memory:
         """执行具体 reduce operation 的 memory 语义。
 
         创建者: 榕
@@ -817,7 +823,7 @@ class NnReduceAST(ValueAST):
 
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reduce_memory must be implemented by concrete reduce AST")
 
-    def emit_reduce_op(self, value: SSAValue, result_type: NnMemoryType, axes: list[object], keepdim: object) -> Operation:
+    def emit_reduce_op(self, value: SSAValue, result_type: NnMemoryType, axes: list[ReduceAxisElement], keepdim: ReduceKeepdimValue) -> Operation:
         """发射具体 reduce dialect op。
 
         创建者: 榕
@@ -862,13 +868,27 @@ class NnReduceSumAST(NnReduceAST):
 
         return "reduce_sum"
 
-    def reduce_memory(self, value: Memory, axis: object, keepdim: object) -> Memory:
-        """执行 reduce_sum 的 memory 语义。"""
+    def reduce_memory(self, value: Memory, axis: ReduceAxisValue, keepdim: ReduceKeepdimValue) -> Memory:
+        """执行 reduce_sum 的 memory 语义。
+
+        功能说明:
+        - 调用公开 `kernel_gen.operation.nn.reduce_sum(...)`，按 axis / keepdim 推导输出 memory。
+
+        使用示例:
+        - memory = reduce_ast.reduce_memory(value, axis, keepdim)
+        """
 
         return nn_ops.reduce_sum(value, axis=axis, keepdim=keepdim)
 
-    def emit_reduce_op(self, value: SSAValue, result_type: NnMemoryType, axes: list[object], keepdim: object) -> Operation:
-        """发射 `nn.reduce_sum`。"""
+    def emit_reduce_op(self, value: SSAValue, result_type: NnMemoryType, axes: list[ReduceAxisElement], keepdim: ReduceKeepdimValue) -> Operation:
+        """发射 `nn.reduce_sum`。
+
+        功能说明:
+        - 构造 `nn.reduce_sum` dialect op，使用已推导的 result_type、axes 与 keepdim。
+
+        使用示例:
+        - op = reduce_ast.emit_reduce_op(value, result_type, axes, keepdim)
+        """
 
         return NnReduceSumOp(value, result_type, axes, keepdim, value.type.space)
 
@@ -882,13 +902,27 @@ class NnReduceMinAST(NnReduceAST):
 
         return "reduce_min"
 
-    def reduce_memory(self, value: Memory, axis: object, keepdim: object) -> Memory:
-        """执行 reduce_min 的 memory 语义。"""
+    def reduce_memory(self, value: Memory, axis: ReduceAxisValue, keepdim: ReduceKeepdimValue) -> Memory:
+        """执行 reduce_min 的 memory 语义。
+
+        功能说明:
+        - 调用公开 `kernel_gen.operation.nn.reduce_min(...)`，按 axis / keepdim 推导输出 memory。
+
+        使用示例:
+        - memory = reduce_ast.reduce_memory(value, axis, keepdim)
+        """
 
         return nn_ops.reduce_min(value, axis=axis, keepdim=keepdim)
 
-    def emit_reduce_op(self, value: SSAValue, result_type: NnMemoryType, axes: list[object], keepdim: object) -> Operation:
-        """发射 `nn.reduce_min`。"""
+    def emit_reduce_op(self, value: SSAValue, result_type: NnMemoryType, axes: list[ReduceAxisElement], keepdim: ReduceKeepdimValue) -> Operation:
+        """发射 `nn.reduce_min`。
+
+        功能说明:
+        - 构造 `nn.reduce_min` dialect op，使用已推导的 result_type、axes 与 keepdim。
+
+        使用示例:
+        - op = reduce_ast.emit_reduce_op(value, result_type, axes, keepdim)
+        """
 
         return NnReduceMinOp(value, result_type, axes, keepdim, value.type.space)
 
@@ -902,13 +936,27 @@ class NnReduceMaxAST(NnReduceAST):
 
         return "reduce_max"
 
-    def reduce_memory(self, value: Memory, axis: object, keepdim: object) -> Memory:
-        """执行 reduce_max 的 memory 语义。"""
+    def reduce_memory(self, value: Memory, axis: ReduceAxisValue, keepdim: ReduceKeepdimValue) -> Memory:
+        """执行 reduce_max 的 memory 语义。
+
+        功能说明:
+        - 调用公开 `kernel_gen.operation.nn.reduce_max(...)`，按 axis / keepdim 推导输出 memory。
+
+        使用示例:
+        - memory = reduce_ast.reduce_memory(value, axis, keepdim)
+        """
 
         return nn_ops.reduce_max(value, axis=axis, keepdim=keepdim)
 
-    def emit_reduce_op(self, value: SSAValue, result_type: NnMemoryType, axes: list[object], keepdim: object) -> Operation:
-        """发射 `nn.reduce_max`。"""
+    def emit_reduce_op(self, value: SSAValue, result_type: NnMemoryType, axes: list[ReduceAxisElement], keepdim: ReduceKeepdimValue) -> Operation:
+        """发射 `nn.reduce_max`。
+
+        功能说明:
+        - 构造 `nn.reduce_max` dialect op，使用已推导的 result_type、axes 与 keepdim。
+
+        使用示例:
+        - op = reduce_ast.emit_reduce_op(value, result_type, axes, keepdim)
+        """
 
         return NnReduceMaxOp(value, result_type, axes, keepdim, value.type.space)
 
@@ -1276,7 +1324,7 @@ class ConvAST(ValueAST):
 
         c_in_dim = weight_dims[1]
         kernel_factor_values: list[int | SymbolDim] = [
-            c_in_dim if isinstance(c_in_dim, int) else SymbolDim(c_in_dim.get_value()),
+            c_in_dim if isinstance(c_in_dim, int) else SymbolDim(c_in_dim.get_value() if isinstance(c_in_dim, SymbolDim) else c_in_dim),
             param_values["kh"],
             param_values["kw"],
         ]
@@ -1446,328 +1494,227 @@ class NnImg2Col2dAST(Img2ColAST):
 
 
 @dataclass
-class NnAddAST(ValueAST):
+class _BinaryNnAST(ValueAST):
+    """element binary AST 的当前文件内共享实现。"""
+
+    lhs: ValueAST
+    rhs: ValueAST
+    location: SourceLocation | None = None
+
+    _op_name: ClassVar[str]
+    _semantic_op: ClassVar[Callable[..., Memory]]
+    _dialect_op: ClassVar[Callable[..., Operation]]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.lhs, ValueAST):
+            self.lhs = ConstValueAST(self.lhs, location=self.location)
+        if not isinstance(self.rhs, ValueAST):
+            self.rhs = ConstValueAST(self.rhs, location=self.location)
+
+    def result_memory(self) -> Memory | None:
+        """返回 element binary 节点的解析期 memory 结果。
+
+        功能说明:
+        - 通过当前公开 operation 语义计算 memory 结果。
+        - memory 与符号标量混合时保持现有结果 memory 形状。
+
+        使用示例:
+        - memory = binary_ast.result_memory()
+        """
+
+        lhs = self.lhs.result_memory() or self.lhs.result_symbol()
+        rhs = self.rhs.result_memory() or self.rhs.result_symbol()
+        if lhs is None or rhs is None:
+            return None
+        try:
+            return type(self)._semantic_op(lhs, rhs)
+        except KernelCodeError:
+            if isinstance(lhs, Memory) and isinstance(rhs, SymbolDim):
+                return lhs.clone()
+            if isinstance(rhs, Memory) and isinstance(lhs, SymbolDim):
+                return rhs.clone()
+            raise
+
+    def _cast_symbol_for_memory(self, symbol: SSAValue, memory_type: NnMemoryType, block: Block) -> SSAValue:
+        """按 memory element type 将 symbol 标量转为可参与 NN binary 的值。
+
+        功能说明:
+        - 浮点 memory 使用 `symbol.to_float`。
+        - 整数/布尔 memory 使用 `symbol.to_int`。
+
+        使用示例:
+        - scalar = self._cast_symbol_for_memory(symbol_value, memory_type, block)
+        """
+
+        if isinstance(memory_type.element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
+            scalar_cast = SymbolToFloatOp(symbol, memory_type.element_type)
+        else:
+            scalar_cast = SymbolToIntOp(symbol, memory_type.element_type)
+        block.add_op(scalar_cast)
+        return scalar_cast.results[0]
+
+    def _emit_memory_symbol(self, ctx: Context, block: Block, memory: SSAValue, symbol: SSAValue) -> Operation:
+        """发射 `memory op symbol` 形态的 element binary。
+
+        功能说明:
+        - 默认使用当前 memory 类型作为结果类型。
+        - 特殊 op 可在子类覆盖该当前文件内 helper。
+
+        使用示例:
+        - op = self._emit_memory_symbol(ctx, block, lhs, rhs)
+        """
+
+        _ = ctx
+        if not isinstance(memory.type, NnMemoryType):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"Unsupported {self._op_name} operands")
+        scalar = self._cast_symbol_for_memory(symbol, memory.type, block)
+        return type(self)._dialect_op(memory, scalar, memory.type, memory.type.space)
+
+    def _emit_symbol_memory(self, ctx: Context, block: Block, symbol: SSAValue, memory: SSAValue) -> Operation:
+        """发射 `symbol op memory` 形态的 element binary。
+
+        功能说明:
+        - 默认使用当前 memory 类型作为结果类型。
+        - 特殊 op 可在子类覆盖该当前文件内 helper。
+
+        使用示例:
+        - op = self._emit_symbol_memory(ctx, block, lhs, rhs)
+        """
+
+        _ = ctx
+        if not isinstance(memory.type, NnMemoryType):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"Unsupported {self._op_name} operands")
+        scalar = self._cast_symbol_for_memory(symbol, memory.type, block)
+        return type(self)._dialect_op(scalar, memory, memory.type, memory.type.space)
+
+    def _emit_memory_memory(self, lhs: SSAValue, rhs: SSAValue) -> Operation:
+        """发射 `memory op memory` 形态的 element binary。
+
+        功能说明:
+        - rank 与 shape 必须一致，否则按公开隐式 broadcast 错误失败。
+
+        使用示例:
+        - op = self._emit_memory_memory(lhs, rhs)
+        """
+
+        if not isinstance(lhs.type, NnMemoryType) or not isinstance(rhs.type, NnMemoryType):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"Unsupported {self._op_name} operands")
+        if len(lhs.type.shape.data) != len(rhs.type.shape.data):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch")
+        for lhs_dim, rhs_dim in zip(lhs.type.shape.data, rhs.type.shape.data, strict=True):
+            if lhs_dim != rhs_dim:
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch")
+        return type(self)._dialect_op(lhs, rhs, lhs.type, lhs.type.space)
+
+    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
+        """发射 element binary NN op。
+
+        功能说明:
+        - 只接受 memory/memory、memory/symbol、symbol/memory 三类公开 DSL 结果。
+        - 其它输入按公开错误语义失败。
+
+        使用示例:
+        - op = binary_ast.emit_mlir(ctx, block)
+        """
+
+        assert isinstance(ctx, Context)
+        assert isinstance(block, Block)
+        lhs = self.lhs.emit_mlir(ctx, block)
+        if isinstance(lhs, Operation):
+            block.add_op(lhs)
+            lhs = lhs.results[0]
+        rhs = self.rhs.emit_mlir(ctx, block)
+        if isinstance(rhs, Operation):
+            block.add_op(rhs)
+            rhs = rhs.results[0]
+        if not isinstance(lhs, SSAValue) or not isinstance(rhs, SSAValue):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{self._op_name} operands must lower to SSA values")
+        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, SymbolValueType):
+            return self._emit_memory_symbol(ctx, block, lhs, rhs)
+        if isinstance(rhs.type, NnMemoryType) and isinstance(lhs.type, SymbolValueType):
+            return self._emit_symbol_memory(ctx, block, lhs, rhs)
+        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, NnMemoryType):
+            return self._emit_memory_memory(lhs, rhs)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"Unsupported {self._op_name} operands")
+
+
+@dataclass
+class NnAddAST(_BinaryNnAST):
     """nn.add helper 专用注册节点。"""
 
-    lhs: ValueAST
-    rhs: ValueAST
-    location: SourceLocation | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.lhs, ValueAST):
-            self.lhs = ConstValueAST(self.lhs, location=self.location)
-        if not isinstance(self.rhs, ValueAST):
-            self.rhs = ConstValueAST(self.rhs, location=self.location)
-
-    def result_memory(self) -> Memory | None:
-        """返回 `nn.add` 的解析期 memory 结果。
-
-        创建者: 榕
-        最后一次更改: 2026-05-03
-
-        功能说明:
-        - add 节点自身读取 lhs/rhs 的 memory 或 symbol 语义。
-
-        使用示例:
-        - memory = add_ast.result_memory()
-        """
-
-        lhs = self.lhs.result_memory() or self.lhs.result_symbol()
-        rhs = self.rhs.result_memory() or self.rhs.result_symbol()
-        if lhs is None or rhs is None:
-            return None
-        try:
-            return nn_ops.add(lhs, rhs)
-        except KernelCodeError:
-            if isinstance(lhs, Memory) and isinstance(rhs, SymbolDim):
-                return lhs.clone()
-            if isinstance(rhs, Memory) and isinstance(lhs, SymbolDim):
-                return rhs.clone()
-            raise
-
-    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """发射 `nn.add`。"""
-
-        assert isinstance(ctx, Context)
-        assert isinstance(block, Block)
-        lhs = self.lhs.emit_mlir(ctx, block)
-        if isinstance(lhs, Operation):
-            block.add_op(lhs)
-            lhs = lhs.results[0]
-        rhs = self.rhs.emit_mlir(ctx, block)
-        if isinstance(rhs, Operation):
-            block.add_op(rhs)
-            rhs = rhs.results[0]
-        if not isinstance(lhs, SSAValue) or not isinstance(rhs, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.add operands must lower to SSA values")
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, SymbolValueType):
-            if isinstance(lhs.type.element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
-                scalar_cast = SymbolToFloatOp(rhs, lhs.type.element_type)
-            else:
-                scalar_cast = SymbolToIntOp(rhs, lhs.type.element_type)
-            block.add_op(scalar_cast)
-            return NnAddOp(lhs, scalar_cast.results[0], lhs.type, lhs.type.space)
-        if isinstance(rhs.type, NnMemoryType) and isinstance(lhs.type, SymbolValueType):
-            if isinstance(rhs.type.element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
-                scalar_cast = SymbolToFloatOp(lhs, rhs.type.element_type)
-            else:
-                scalar_cast = SymbolToIntOp(lhs, rhs.type.element_type)
-            block.add_op(scalar_cast)
-            return NnAddOp(scalar_cast.results[0], rhs, rhs.type, rhs.type.space)
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, NnMemoryType):
-            if len(lhs.type.shape.data) != len(rhs.type.shape.data):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch")
-            for lhs_dim, rhs_dim in zip(lhs.type.shape.data, rhs.type.shape.data, strict=True):
-                if lhs_dim != rhs_dim:
-                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch")
-            return NnAddOp(lhs, rhs, lhs.type, lhs.type.space)
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported nn.add operands")
+    _op_name: ClassVar[str] = "nn.add"
+    _semantic_op: ClassVar[Callable[..., Memory]] = nn_ops.add
+    _dialect_op: ClassVar[Callable[..., Operation]] = NnAddOp
 
 
 @dataclass
-class NnSubAST(ValueAST):
+class NnSubAST(_BinaryNnAST):
     """nn.sub helper 专用注册节点。"""
 
-    lhs: ValueAST
-    rhs: ValueAST
-    location: SourceLocation | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.lhs, ValueAST):
-            self.lhs = ConstValueAST(self.lhs, location=self.location)
-        if not isinstance(self.rhs, ValueAST):
-            self.rhs = ConstValueAST(self.rhs, location=self.location)
-
-    def result_memory(self) -> Memory | None:
-        """返回 `nn.sub` 的解析期 memory 结果。
-
-        创建者: 榕
-        最后一次更改: 2026-05-03
-
-        功能说明:
-        - sub 节点自身读取 lhs/rhs 的 memory 或 symbol 语义。
-
-        使用示例:
-        - memory = sub_ast.result_memory()
-        """
-
-        lhs = self.lhs.result_memory() or self.lhs.result_symbol()
-        rhs = self.rhs.result_memory() or self.rhs.result_symbol()
-        if lhs is None or rhs is None:
-            return None
-        try:
-            return nn_ops.sub(lhs, rhs)
-        except KernelCodeError:
-            if isinstance(lhs, Memory) and isinstance(rhs, SymbolDim):
-                return lhs.clone()
-            if isinstance(rhs, Memory) and isinstance(lhs, SymbolDim):
-                return rhs.clone()
-            raise
-
-    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """发射 `nn.sub`。"""
-
-        assert isinstance(ctx, Context)
-        assert isinstance(block, Block)
-        lhs = self.lhs.emit_mlir(ctx, block)
-        if isinstance(lhs, Operation):
-            block.add_op(lhs)
-            lhs = lhs.results[0]
-        rhs = self.rhs.emit_mlir(ctx, block)
-        if isinstance(rhs, Operation):
-            block.add_op(rhs)
-            rhs = rhs.results[0]
-        if not isinstance(lhs, SSAValue) or not isinstance(rhs, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.sub operands must lower to SSA values")
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, SymbolValueType):
-            if isinstance(lhs.type.element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
-                scalar_cast = SymbolToFloatOp(rhs, lhs.type.element_type)
-            else:
-                scalar_cast = SymbolToIntOp(rhs, lhs.type.element_type)
-            block.add_op(scalar_cast)
-            return NnSubOp(lhs, scalar_cast.results[0], lhs.type, lhs.type.space)
-        if isinstance(rhs.type, NnMemoryType) and isinstance(lhs.type, SymbolValueType):
-            if isinstance(rhs.type.element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
-                scalar_cast = SymbolToFloatOp(lhs, rhs.type.element_type)
-            else:
-                scalar_cast = SymbolToIntOp(lhs, rhs.type.element_type)
-            block.add_op(scalar_cast)
-            return NnSubOp(scalar_cast.results[0], rhs, rhs.type, rhs.type.space)
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, NnMemoryType):
-            if len(lhs.type.shape.data) != len(rhs.type.shape.data):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch")
-            for lhs_dim, rhs_dim in zip(lhs.type.shape.data, rhs.type.shape.data, strict=True):
-                if lhs_dim != rhs_dim:
-                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch")
-            return NnSubOp(lhs, rhs, lhs.type, lhs.type.space)
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported nn.sub operands")
+    _op_name: ClassVar[str] = "nn.sub"
+    _semantic_op: ClassVar[Callable[..., Memory]] = nn_ops.sub
+    _dialect_op: ClassVar[Callable[..., Operation]] = NnSubOp
 
 
 @dataclass
-class NnMulAST(ValueAST):
+class NnMulAST(_BinaryNnAST):
     """nn.mul helper 专用注册节点。"""
 
-    lhs: ValueAST
-    rhs: ValueAST
-    location: SourceLocation | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.lhs, ValueAST):
-            self.lhs = ConstValueAST(self.lhs, location=self.location)
-        if not isinstance(self.rhs, ValueAST):
-            self.rhs = ConstValueAST(self.rhs, location=self.location)
-
-    def result_memory(self) -> Memory | None:
-        """返回 `nn.mul` 的解析期 memory 结果。
-
-        创建者: 榕
-        最后一次更改: 2026-05-03
-
-        功能说明:
-        - mul 节点自身读取 lhs/rhs 的 memory 或 symbol 语义。
-
-        使用示例:
-        - memory = mul_ast.result_memory()
-        """
-
-        lhs = self.lhs.result_memory() or self.lhs.result_symbol()
-        rhs = self.rhs.result_memory() or self.rhs.result_symbol()
-        if lhs is None or rhs is None:
-            return None
-        try:
-            return nn_ops.mul(lhs, rhs)
-        except KernelCodeError:
-            if isinstance(lhs, Memory) and isinstance(rhs, SymbolDim):
-                return lhs.clone()
-            if isinstance(rhs, Memory) and isinstance(lhs, SymbolDim):
-                return rhs.clone()
-            raise
-
-    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """发射 `nn.mul`。"""
-
-        assert isinstance(ctx, Context)
-        assert isinstance(block, Block)
-        lhs = self.lhs.emit_mlir(ctx, block)
-        if isinstance(lhs, Operation):
-            block.add_op(lhs)
-            lhs = lhs.results[0]
-        rhs = self.rhs.emit_mlir(ctx, block)
-        if isinstance(rhs, Operation):
-            block.add_op(rhs)
-            rhs = rhs.results[0]
-        if not isinstance(lhs, SSAValue) or not isinstance(rhs, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.mul operands must lower to SSA values")
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, SymbolValueType):
-            if isinstance(lhs.type.element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
-                scalar_cast = SymbolToFloatOp(rhs, lhs.type.element_type)
-            else:
-                scalar_cast = SymbolToIntOp(rhs, lhs.type.element_type)
-            block.add_op(scalar_cast)
-            return NnMulOp(lhs, scalar_cast.results[0], lhs.type, lhs.type.space)
-        if isinstance(rhs.type, NnMemoryType) and isinstance(lhs.type, SymbolValueType):
-            if isinstance(rhs.type.element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
-                scalar_cast = SymbolToFloatOp(lhs, rhs.type.element_type)
-            else:
-                scalar_cast = SymbolToIntOp(lhs, rhs.type.element_type)
-            block.add_op(scalar_cast)
-            return NnMulOp(scalar_cast.results[0], rhs, rhs.type, rhs.type.space)
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, NnMemoryType):
-            if len(lhs.type.shape.data) != len(rhs.type.shape.data):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch")
-            for lhs_dim, rhs_dim in zip(lhs.type.shape.data, rhs.type.shape.data, strict=True):
-                if lhs_dim != rhs_dim:
-                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch")
-            return NnMulOp(lhs, rhs, lhs.type, lhs.type.space)
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported nn.mul operands")
+    _op_name: ClassVar[str] = "nn.mul"
+    _semantic_op: ClassVar[Callable[..., Memory]] = nn_ops.mul
+    _dialect_op: ClassVar[Callable[..., Operation]] = NnMulOp
 
 
 @dataclass
-class NnTrueDivAST(ValueAST):
+class NnTrueDivAST(_BinaryNnAST):
     """nn.truediv helper 专用注册节点。"""
 
-    lhs: ValueAST
-    rhs: ValueAST
-    location: SourceLocation | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.lhs, ValueAST):
-            self.lhs = ConstValueAST(self.lhs, location=self.location)
-        if not isinstance(self.rhs, ValueAST):
-            self.rhs = ConstValueAST(self.rhs, location=self.location)
-
-    def result_memory(self) -> Memory | None:
-        """返回 `nn.truediv` 的解析期 memory 结果。
-
-        创建者: 榕
-        最后一次更改: 2026-05-03
-
-        功能说明:
-        - truediv 节点自身读取 lhs/rhs 的 memory 或 symbol 语义。
-
-        使用示例:
-        - memory = truediv_ast.result_memory()
-        """
-
-        lhs = self.lhs.result_memory() or self.lhs.result_symbol()
-        rhs = self.rhs.result_memory() or self.rhs.result_symbol()
-        if lhs is None or rhs is None:
-            return None
-        try:
-            return nn_ops.truediv(lhs, rhs)
-        except KernelCodeError:
-            if isinstance(lhs, Memory) and isinstance(rhs, SymbolDim):
-                return lhs.clone()
-            if isinstance(rhs, Memory) and isinstance(lhs, SymbolDim):
-                return rhs.clone()
-            raise
-
-    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """发射 `nn.truediv`。"""
-
-        assert isinstance(ctx, Context)
-        assert isinstance(block, Block)
-        lhs = self.lhs.emit_mlir(ctx, block)
-        if isinstance(lhs, Operation):
-            block.add_op(lhs)
-            lhs = lhs.results[0]
-        rhs = self.rhs.emit_mlir(ctx, block)
-        if isinstance(rhs, Operation):
-            block.add_op(rhs)
-            rhs = rhs.results[0]
-        if not isinstance(lhs, SSAValue) or not isinstance(rhs, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.truediv operands must lower to SSA values")
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, SymbolValueType):
-            if isinstance(lhs.type.element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
-                scalar_cast = SymbolToFloatOp(rhs, lhs.type.element_type)
-            else:
-                scalar_cast = SymbolToIntOp(rhs, lhs.type.element_type)
-            block.add_op(scalar_cast)
-            return NnTrueDivOp(lhs, scalar_cast.results[0], lhs.type, lhs.type.space)
-        if isinstance(rhs.type, NnMemoryType) and isinstance(lhs.type, SymbolValueType):
-            if isinstance(rhs.type.element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
-                scalar_cast = SymbolToFloatOp(lhs, rhs.type.element_type)
-            else:
-                scalar_cast = SymbolToIntOp(lhs, rhs.type.element_type)
-            block.add_op(scalar_cast)
-            return NnTrueDivOp(scalar_cast.results[0], rhs, rhs.type, rhs.type.space)
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, NnMemoryType):
-            if len(lhs.type.shape.data) != len(rhs.type.shape.data):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch")
-            for lhs_dim, rhs_dim in zip(lhs.type.shape.data, rhs.type.shape.data, strict=True):
-                if lhs_dim != rhs_dim:
-                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch")
-            return NnTrueDivOp(lhs, rhs, lhs.type, lhs.type.space)
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported nn.truediv operands")
+    _op_name: ClassVar[str] = "nn.truediv"
+    _semantic_op: ClassVar[Callable[..., Memory]] = nn_ops.truediv
+    _dialect_op: ClassVar[Callable[..., Operation]] = NnTrueDivOp
 
 
 @dataclass
-class NnFloorDivAST(ValueAST):
+class NnFloorDivAST(_BinaryNnAST):
     """nn.floordiv helper 专用注册节点。"""
 
+    _op_name: ClassVar[str] = "nn.floordiv"
+    _semantic_op: ClassVar[Callable[..., Memory]] = nn_ops.floordiv
+    _dialect_op: ClassVar[Callable[..., Operation]] = NnFloorDivOp
+
+    def _emit_memory_symbol(self, ctx: Context, block: Block, memory: SSAValue, symbol: SSAValue) -> Operation:
+        """发射 `memory // symbol`，保留常量整除的公开 dtype 推导。
+
+        功能说明:
+        - `memory // const` 使用公开 operation 结果 dtype 构造结果类型。
+        - 其它 `memory // symbol` 走共享 scalar cast 路径。
+
+        使用示例:
+        - op = self._emit_memory_symbol(ctx, block, lhs, rhs)
+        """
+
+        if not isinstance(memory.type, NnMemoryType):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported nn.floordiv operands")
+        if isinstance(self.lhs, MemoryAST) and isinstance(self.rhs, ConstValueAST):
+            result_memory = nn_ops.floordiv(self.lhs.memory, self.rhs.raw_value)
+            result_type = MemoryAST.type_from_memory(ctx, result_memory, self.location)
+            element_type = result_type.element_type
+            floordiv_type = NnMemoryType(memory.type.shape, memory.type.stride, element_type, memory.type.space)
+            return NnFloorDivOp(memory, symbol, floordiv_type, memory.type.space)
+        return super()._emit_memory_symbol(ctx, block, memory, symbol)
+
+
+@dataclass
+class _CompareNnAST(ValueAST):
+    """compare AST 的当前文件内共享实现。"""
+
     lhs: ValueAST
     rhs: ValueAST
     location: SourceLocation | None = None
+
+    _op_name: ClassVar[str]
+    _semantic_op: ClassVar[Callable[..., Memory]]
+    _dialect_op: ClassVar[type[NnEqOp] | type[NnNeOp] | type[NnLtOp] | type[NnLeOp] | type[NnGtOp] | type[NnGeOp]]
 
     def __post_init__(self) -> None:
         if not isinstance(self.lhs, ValueAST):
@@ -1776,16 +1723,14 @@ class NnFloorDivAST(ValueAST):
             self.rhs = ConstValueAST(self.rhs, location=self.location)
 
     def result_memory(self) -> Memory | None:
-        """返回 `nn.floordiv` 的解析期 memory 结果。
-
-        创建者: 榕
-        最后一次更改: 2026-05-03
+        """返回 compare 节点的解析期 bool memory 结果。
 
         功能说明:
-        - floordiv 节点自身读取 lhs/rhs 的 memory 或 symbol 语义。
+        - 优先使用公开 compare operation 语义。
+        - mixed/broadcast 失败时按现有 AST 合同退化为 bool memory 形状推导。
 
         使用示例:
-        - memory = floordiv_ast.result_memory()
+        - memory = compare_ast.result_memory()
         """
 
         lhs = self.lhs.result_memory() or self.lhs.result_symbol()
@@ -1793,16 +1738,31 @@ class NnFloorDivAST(ValueAST):
         if lhs is None or rhs is None:
             return None
         try:
-            return nn_ops.floordiv(lhs, rhs)
+            return type(self)._semantic_op(lhs, rhs)
         except KernelCodeError:
-            if isinstance(lhs, Memory) and isinstance(rhs, SymbolDim):
-                return lhs.clone()
-            if isinstance(rhs, Memory) and isinstance(lhs, SymbolDim):
-                return rhs.clone()
+            if isinstance(lhs, Memory) and isinstance(rhs, Memory):
+                try:
+                    arithmetic_result = nn_ops.add(lhs, rhs)
+                    if isinstance(arithmetic_result, Memory):
+                        return arithmetic_result.clone(dtype=NumericType.Bool)
+                except KernelCodeError:
+                    return lhs.clone(dtype=NumericType.Bool)
+            if isinstance(lhs, Memory):
+                return lhs.clone(dtype=NumericType.Bool)
+            if isinstance(rhs, Memory):
+                return rhs.clone(dtype=NumericType.Bool)
             raise
 
     def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """发射 `nn.floordiv`。"""
+        """发射 compare NN op。
+
+        功能说明:
+        - memory/memory 通过当前文件内 compare broadcast/cast helper 发射。
+        - 非 memory/memory 输入按公开错误语义失败。
+
+        使用示例:
+        - op = compare_ast.emit_mlir(ctx, block)
+        """
 
         assert isinstance(ctx, Context)
         assert isinstance(block, Block)
@@ -1815,433 +1775,61 @@ class NnFloorDivAST(ValueAST):
             block.add_op(rhs)
             rhs = rhs.results[0]
         if not isinstance(lhs, SSAValue) or not isinstance(rhs, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.floordiv operands must lower to SSA values")
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, SymbolValueType):
-            if isinstance(self.lhs, MemoryAST) and isinstance(self.rhs, ConstValueAST):
-                result_memory = nn_ops.floordiv(self.lhs.memory, self.rhs.raw_value)
-                result_type = MemoryAST.type_from_memory(ctx, result_memory, self.location)
-                element_type = result_type.element_type
-                return NnFloorDivOp(lhs, rhs, NnMemoryType(lhs.type.shape, lhs.type.stride, element_type, lhs.type.space), lhs.type.space)
-            if isinstance(lhs.type.element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
-                scalar_cast = SymbolToFloatOp(rhs, lhs.type.element_type)
-            else:
-                scalar_cast = SymbolToIntOp(rhs, lhs.type.element_type)
-            block.add_op(scalar_cast)
-            return NnFloorDivOp(lhs, scalar_cast.results[0], lhs.type, lhs.type.space)
-        if isinstance(rhs.type, NnMemoryType) and isinstance(lhs.type, SymbolValueType):
-            if isinstance(rhs.type.element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
-                scalar_cast = SymbolToFloatOp(lhs, rhs.type.element_type)
-            else:
-                scalar_cast = SymbolToIntOp(lhs, rhs.type.element_type)
-            block.add_op(scalar_cast)
-            return NnFloorDivOp(scalar_cast.results[0], rhs, rhs.type, rhs.type.space)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{self._op_name} operands must lower to SSA values")
         if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, NnMemoryType):
-            if len(lhs.type.shape.data) != len(rhs.type.shape.data):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch")
-            for lhs_dim, rhs_dim in zip(lhs.type.shape.data, rhs.type.shape.data, strict=True):
-                if lhs_dim != rhs_dim:
-                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Implicit broadcast dimension mismatch")
-            return NnFloorDivOp(lhs, rhs, lhs.type, lhs.type.space)
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported nn.floordiv operands")
+            return _emit_compare_with_broadcast_and_cast(self._op_name, type(self)._dialect_op, lhs, rhs, block)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"Unsupported {self._op_name} operands")
 
 
 @dataclass
-class NnEqAST(ValueAST):
+class NnEqAST(_CompareNnAST):
     """nn.eq helper 专用注册节点。"""
 
-    lhs: ValueAST
-    rhs: ValueAST
-    location: SourceLocation | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.lhs, ValueAST):
-            self.lhs = ConstValueAST(self.lhs, location=self.location)
-        if not isinstance(self.rhs, ValueAST):
-            self.rhs = ConstValueAST(self.rhs, location=self.location)
-
-    def result_memory(self) -> Memory | None:
-        """返回 `nn.eq` 的解析期 bool memory 结果。
-
-        创建者: 榕
-        最后一次更改: 2026-05-03
-
-        功能说明:
-        - compare 节点自身读取 lhs/rhs 的 memory 或 symbol 语义。
-
-        使用示例:
-        - memory = eq_ast.result_memory()
-        """
-
-        lhs = self.lhs.result_memory() or self.lhs.result_symbol()
-        rhs = self.rhs.result_memory() or self.rhs.result_symbol()
-        if lhs is None or rhs is None:
-            return None
-        try:
-            return nn_ops.eq(lhs, rhs)
-        except KernelCodeError:
-            if isinstance(lhs, Memory) and isinstance(rhs, Memory):
-                try:
-                    arithmetic_result = nn_ops.add(lhs, rhs)
-                    if isinstance(arithmetic_result, Memory):
-                        return arithmetic_result.clone(dtype=NumericType.Bool)
-                except KernelCodeError:
-                    return lhs.clone(dtype=NumericType.Bool)
-            if isinstance(lhs, Memory):
-                return lhs.clone(dtype=NumericType.Bool)
-            if isinstance(rhs, Memory):
-                return rhs.clone(dtype=NumericType.Bool)
-            raise
-
-    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """发射 `nn.eq`。"""
-
-        assert isinstance(ctx, Context)
-        assert isinstance(block, Block)
-        lhs = self.lhs.emit_mlir(ctx, block)
-        if isinstance(lhs, Operation):
-            block.add_op(lhs)
-            lhs = lhs.results[0]
-        rhs = self.rhs.emit_mlir(ctx, block)
-        if isinstance(rhs, Operation):
-            block.add_op(rhs)
-            rhs = rhs.results[0]
-        if not isinstance(lhs, SSAValue) or not isinstance(rhs, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.eq operands must lower to SSA values")
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, NnMemoryType):
-            return _emit_compare_with_broadcast_and_cast("nn.eq", NnEqOp, lhs, rhs, block)
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported nn.eq operands")
+    _op_name: ClassVar[str] = "nn.eq"
+    _semantic_op: ClassVar[Callable[..., Memory]] = nn_ops.eq
+    _dialect_op: ClassVar[type[NnEqOp]] = NnEqOp
 
 
 @dataclass
-class NnNeAST(ValueAST):
+class NnNeAST(_CompareNnAST):
     """nn.ne helper 专用注册节点。"""
 
-    lhs: ValueAST
-    rhs: ValueAST
-    location: SourceLocation | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.lhs, ValueAST):
-            self.lhs = ConstValueAST(self.lhs, location=self.location)
-        if not isinstance(self.rhs, ValueAST):
-            self.rhs = ConstValueAST(self.rhs, location=self.location)
-
-    def result_memory(self) -> Memory | None:
-        """返回 `nn.ne` 的解析期 bool memory 结果。
-
-        创建者: 榕
-        最后一次更改: 2026-05-03
-
-        功能说明:
-        - compare 节点自身读取 lhs/rhs 的 memory 或 symbol 语义。
-
-        使用示例:
-        - memory = ne_ast.result_memory()
-        """
-
-        lhs = self.lhs.result_memory() or self.lhs.result_symbol()
-        rhs = self.rhs.result_memory() or self.rhs.result_symbol()
-        if lhs is None or rhs is None:
-            return None
-        try:
-            return nn_ops.ne(lhs, rhs)
-        except KernelCodeError:
-            if isinstance(lhs, Memory) and isinstance(rhs, Memory):
-                try:
-                    arithmetic_result = nn_ops.add(lhs, rhs)
-                    if isinstance(arithmetic_result, Memory):
-                        return arithmetic_result.clone(dtype=NumericType.Bool)
-                except KernelCodeError:
-                    return lhs.clone(dtype=NumericType.Bool)
-            if isinstance(lhs, Memory):
-                return lhs.clone(dtype=NumericType.Bool)
-            if isinstance(rhs, Memory):
-                return rhs.clone(dtype=NumericType.Bool)
-            raise
-
-    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """发射 `nn.ne`。"""
-
-        assert isinstance(ctx, Context)
-        assert isinstance(block, Block)
-        lhs = self.lhs.emit_mlir(ctx, block)
-        if isinstance(lhs, Operation):
-            block.add_op(lhs)
-            lhs = lhs.results[0]
-        rhs = self.rhs.emit_mlir(ctx, block)
-        if isinstance(rhs, Operation):
-            block.add_op(rhs)
-            rhs = rhs.results[0]
-        if not isinstance(lhs, SSAValue) or not isinstance(rhs, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.ne operands must lower to SSA values")
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, NnMemoryType):
-            return _emit_compare_with_broadcast_and_cast("nn.ne", NnNeOp, lhs, rhs, block)
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported nn.ne operands")
+    _op_name: ClassVar[str] = "nn.ne"
+    _semantic_op: ClassVar[Callable[..., Memory]] = nn_ops.ne
+    _dialect_op: ClassVar[type[NnNeOp]] = NnNeOp
 
 
 @dataclass
-class NnLtAST(ValueAST):
+class NnLtAST(_CompareNnAST):
     """nn.lt helper 专用注册节点。"""
 
-    lhs: ValueAST
-    rhs: ValueAST
-    location: SourceLocation | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.lhs, ValueAST):
-            self.lhs = ConstValueAST(self.lhs, location=self.location)
-        if not isinstance(self.rhs, ValueAST):
-            self.rhs = ConstValueAST(self.rhs, location=self.location)
-
-    def result_memory(self) -> Memory | None:
-        """返回 `nn.lt` 的解析期 bool memory 结果。
-
-        创建者: 榕
-        最后一次更改: 2026-05-03
-
-        功能说明:
-        - compare 节点自身读取 lhs/rhs 的 memory 或 symbol 语义。
-
-        使用示例:
-        - memory = lt_ast.result_memory()
-        """
-
-        lhs = self.lhs.result_memory() or self.lhs.result_symbol()
-        rhs = self.rhs.result_memory() or self.rhs.result_symbol()
-        if lhs is None or rhs is None:
-            return None
-        try:
-            return nn_ops.lt(lhs, rhs)
-        except KernelCodeError:
-            if isinstance(lhs, Memory) and isinstance(rhs, Memory):
-                try:
-                    arithmetic_result = nn_ops.add(lhs, rhs)
-                    if isinstance(arithmetic_result, Memory):
-                        return arithmetic_result.clone(dtype=NumericType.Bool)
-                except KernelCodeError:
-                    return lhs.clone(dtype=NumericType.Bool)
-            if isinstance(lhs, Memory):
-                return lhs.clone(dtype=NumericType.Bool)
-            if isinstance(rhs, Memory):
-                return rhs.clone(dtype=NumericType.Bool)
-            raise
-
-    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """发射 `nn.lt`。"""
-
-        assert isinstance(ctx, Context)
-        assert isinstance(block, Block)
-        lhs = self.lhs.emit_mlir(ctx, block)
-        if isinstance(lhs, Operation):
-            block.add_op(lhs)
-            lhs = lhs.results[0]
-        rhs = self.rhs.emit_mlir(ctx, block)
-        if isinstance(rhs, Operation):
-            block.add_op(rhs)
-            rhs = rhs.results[0]
-        if not isinstance(lhs, SSAValue) or not isinstance(rhs, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.lt operands must lower to SSA values")
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, NnMemoryType):
-            return _emit_compare_with_broadcast_and_cast("nn.lt", NnLtOp, lhs, rhs, block)
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported nn.lt operands")
+    _op_name: ClassVar[str] = "nn.lt"
+    _semantic_op: ClassVar[Callable[..., Memory]] = nn_ops.lt
+    _dialect_op: ClassVar[type[NnLtOp]] = NnLtOp
 
 
 @dataclass
-class NnLeAST(ValueAST):
+class NnLeAST(_CompareNnAST):
     """nn.le helper 专用注册节点。"""
 
-    lhs: ValueAST
-    rhs: ValueAST
-    location: SourceLocation | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.lhs, ValueAST):
-            self.lhs = ConstValueAST(self.lhs, location=self.location)
-        if not isinstance(self.rhs, ValueAST):
-            self.rhs = ConstValueAST(self.rhs, location=self.location)
-
-    def result_memory(self) -> Memory | None:
-        """返回 `nn.le` 的解析期 bool memory 结果。
-
-        创建者: 榕
-        最后一次更改: 2026-05-03
-
-        功能说明:
-        - compare 节点自身读取 lhs/rhs 的 memory 或 symbol 语义。
-
-        使用示例:
-        - memory = le_ast.result_memory()
-        """
-
-        lhs = self.lhs.result_memory() or self.lhs.result_symbol()
-        rhs = self.rhs.result_memory() or self.rhs.result_symbol()
-        if lhs is None or rhs is None:
-            return None
-        try:
-            return nn_ops.le(lhs, rhs)
-        except KernelCodeError:
-            if isinstance(lhs, Memory) and isinstance(rhs, Memory):
-                try:
-                    arithmetic_result = nn_ops.add(lhs, rhs)
-                    if isinstance(arithmetic_result, Memory):
-                        return arithmetic_result.clone(dtype=NumericType.Bool)
-                except KernelCodeError:
-                    return lhs.clone(dtype=NumericType.Bool)
-            if isinstance(lhs, Memory):
-                return lhs.clone(dtype=NumericType.Bool)
-            if isinstance(rhs, Memory):
-                return rhs.clone(dtype=NumericType.Bool)
-            raise
-
-    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """发射 `nn.le`。"""
-
-        assert isinstance(ctx, Context)
-        assert isinstance(block, Block)
-        lhs = self.lhs.emit_mlir(ctx, block)
-        if isinstance(lhs, Operation):
-            block.add_op(lhs)
-            lhs = lhs.results[0]
-        rhs = self.rhs.emit_mlir(ctx, block)
-        if isinstance(rhs, Operation):
-            block.add_op(rhs)
-            rhs = rhs.results[0]
-        if not isinstance(lhs, SSAValue) or not isinstance(rhs, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.le operands must lower to SSA values")
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, NnMemoryType):
-            return _emit_compare_with_broadcast_and_cast("nn.le", NnLeOp, lhs, rhs, block)
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported nn.le operands")
+    _op_name: ClassVar[str] = "nn.le"
+    _semantic_op: ClassVar[Callable[..., Memory]] = nn_ops.le
+    _dialect_op: ClassVar[type[NnLeOp]] = NnLeOp
 
 
 @dataclass
-class NnGtAST(ValueAST):
+class NnGtAST(_CompareNnAST):
     """nn.gt helper 专用注册节点。"""
 
-    lhs: ValueAST
-    rhs: ValueAST
-    location: SourceLocation | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.lhs, ValueAST):
-            self.lhs = ConstValueAST(self.lhs, location=self.location)
-        if not isinstance(self.rhs, ValueAST):
-            self.rhs = ConstValueAST(self.rhs, location=self.location)
-
-    def result_memory(self) -> Memory | None:
-        """返回 `nn.gt` 的解析期 bool memory 结果。
-
-        创建者: 榕
-        最后一次更改: 2026-05-03
-
-        功能说明:
-        - compare 节点自身读取 lhs/rhs 的 memory 或 symbol 语义。
-
-        使用示例:
-        - memory = gt_ast.result_memory()
-        """
-
-        lhs = self.lhs.result_memory() or self.lhs.result_symbol()
-        rhs = self.rhs.result_memory() or self.rhs.result_symbol()
-        if lhs is None or rhs is None:
-            return None
-        try:
-            return nn_ops.gt(lhs, rhs)
-        except KernelCodeError:
-            if isinstance(lhs, Memory) and isinstance(rhs, Memory):
-                try:
-                    arithmetic_result = nn_ops.add(lhs, rhs)
-                    if isinstance(arithmetic_result, Memory):
-                        return arithmetic_result.clone(dtype=NumericType.Bool)
-                except KernelCodeError:
-                    return lhs.clone(dtype=NumericType.Bool)
-            if isinstance(lhs, Memory):
-                return lhs.clone(dtype=NumericType.Bool)
-            if isinstance(rhs, Memory):
-                return rhs.clone(dtype=NumericType.Bool)
-            raise
-
-    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """发射 `nn.gt`。"""
-
-        assert isinstance(ctx, Context)
-        assert isinstance(block, Block)
-        lhs = self.lhs.emit_mlir(ctx, block)
-        if isinstance(lhs, Operation):
-            block.add_op(lhs)
-            lhs = lhs.results[0]
-        rhs = self.rhs.emit_mlir(ctx, block)
-        if isinstance(rhs, Operation):
-            block.add_op(rhs)
-            rhs = rhs.results[0]
-        if not isinstance(lhs, SSAValue) or not isinstance(rhs, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.gt operands must lower to SSA values")
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, NnMemoryType):
-            return _emit_compare_with_broadcast_and_cast("nn.gt", NnGtOp, lhs, rhs, block)
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported nn.gt operands")
+    _op_name: ClassVar[str] = "nn.gt"
+    _semantic_op: ClassVar[Callable[..., Memory]] = nn_ops.gt
+    _dialect_op: ClassVar[type[NnGtOp]] = NnGtOp
 
 
 @dataclass
-class NnGeAST(ValueAST):
+class NnGeAST(_CompareNnAST):
     """nn.ge helper 专用注册节点。"""
 
-    lhs: ValueAST
-    rhs: ValueAST
-    location: SourceLocation | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.lhs, ValueAST):
-            self.lhs = ConstValueAST(self.lhs, location=self.location)
-        if not isinstance(self.rhs, ValueAST):
-            self.rhs = ConstValueAST(self.rhs, location=self.location)
-
-    def result_memory(self) -> Memory | None:
-        """返回 `nn.ge` 的解析期 bool memory 结果。
-
-        创建者: 榕
-        最后一次更改: 2026-05-03
-
-        功能说明:
-        - compare 节点自身读取 lhs/rhs 的 memory 或 symbol 语义。
-
-        使用示例:
-        - memory = ge_ast.result_memory()
-        """
-
-        lhs = self.lhs.result_memory() or self.lhs.result_symbol()
-        rhs = self.rhs.result_memory() or self.rhs.result_symbol()
-        if lhs is None or rhs is None:
-            return None
-        try:
-            return nn_ops.ge(lhs, rhs)
-        except KernelCodeError:
-            if isinstance(lhs, Memory) and isinstance(rhs, Memory):
-                try:
-                    arithmetic_result = nn_ops.add(lhs, rhs)
-                    if isinstance(arithmetic_result, Memory):
-                        return arithmetic_result.clone(dtype=NumericType.Bool)
-                except KernelCodeError:
-                    return lhs.clone(dtype=NumericType.Bool)
-            if isinstance(lhs, Memory):
-                return lhs.clone(dtype=NumericType.Bool)
-            if isinstance(rhs, Memory):
-                return rhs.clone(dtype=NumericType.Bool)
-            raise
-
-    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """发射 `nn.ge`。"""
-
-        assert isinstance(ctx, Context)
-        assert isinstance(block, Block)
-        lhs = self.lhs.emit_mlir(ctx, block)
-        if isinstance(lhs, Operation):
-            block.add_op(lhs)
-            lhs = lhs.results[0]
-        rhs = self.rhs.emit_mlir(ctx, block)
-        if isinstance(rhs, Operation):
-            block.add_op(rhs)
-            rhs = rhs.results[0]
-        if not isinstance(lhs, SSAValue) or not isinstance(rhs, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "nn.ge operands must lower to SSA values")
-        if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, NnMemoryType):
-            return _emit_compare_with_broadcast_and_cast("nn.ge", NnGeOp, lhs, rhs, block)
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported nn.ge operands")
+    _op_name: ClassVar[str] = "nn.ge"
+    _semantic_op: ClassVar[Callable[..., Memory]] = nn_ops.ge
+    _dialect_op: ClassVar[type[NnGeOp]] = NnGeOp

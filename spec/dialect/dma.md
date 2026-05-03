@@ -129,7 +129,7 @@
 
 - `view` 的 `offset/size/stride` 在方言层分别对应 `dma.view` 的 `offsets/shape/stride` operand；`shape/stride` operand 与 `result_type.shape/stride` 必须一致。
 - 对当前验收子集，`dma.view` 的 `result_type.shape` 必须来自 DSL `size`，`result_type.stride` 必须来自 DSL `stride`；不得只复用上层 `Memory` 既有元信息或仅以“成功生成 `dma.view` op”为通过条件。
-- 若 `build_func_op(...)` / `emit_mlir` 让 `dma.view` 结果直接流向 `func.return`，则 `func.return` 携带的 `!nn.memory<...>` 类型必须与 `dma.view.result_type` 完全一致；`EXPECTED_MEMORY` 比对即基于这份返回类型。
+- 若 `mlir_gen(...)` / `emit_mlir` 让 `dma.view` 结果直接流向 `func.return`，则 `func.return` 携带的 `!nn.memory<...>` 类型必须与 `dma.view.result_type` 完全一致；`EXPECTED_MEMORY` 比对即基于这份返回类型。
 - `dma.fill` 当前没有直接 DSL helper；它是 dialect / pass 层公开原语。对 `nn.add(memory, const(i32) / symbol.int)` 这类 mixed add 路径，当前最小合法 lower 片段必须显式包含 `dma.alloc + dma.fill`，且被填充的 temporary memory 必须在后续 IR 中被实际消费。
 - operation 层允许“静态可判定的缩小 subview”（`size` 的 `numel` 小于 `source.shape`），但当前 `dma.view` 在静态可判定时要求 `source/result` `numel` 一致；该场景不属于当前 `dma.view` 的可验证映射子集。
 - `operation.slice(...)-> dma.alloc + dma.slice(target, source, offsets, sizes, strides)`：`dma.slice` 只负责把切片内容写入 `target`，不返回新的 memory result；operation 表达式返回值来自前置 `dma.alloc` 的 result。
@@ -701,3 +701,4 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-025 | 内存/DMA | `dma.fill` 物化 `symbol.int` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 构造并校验 `dma.fill` | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.fill` 物化 `symbol.int`”场景。 | test/dialect/test_dma.py::test_dma_fill_accepts_symbol_int_scalar_operand |
 | TC-DMA-026 | 内存/DMA | `dma.fill` 类型边界 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 构造并校验 `dma.fill` | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.fill` 类型边界”场景。 | test/dialect/test_dma.py::test_dma_fill_rejects_non_i32_target_or_unsupported_scalar |
 | TC-DMA-027 | 内存/DMA | mixed add 临时 memory 真实消费 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 检查 lower 后 IR | 内存类型、布局、搬运结果或 verifier 行为体现“mixed add 临时 memory 真实消费”场景。 | test/passes/lowering/nn_lowering/test_element_binary_add.py::test_lower_add_mixed_scalar_uses_dma_fill |
+| TC-DMA-059 | 边界/异常 | `dma.alloc/broadcast/transpose/view` 公开 verifier 边界矩阵 | 准备公开 op 构造入口、动态 shape、broadcast 源/目标类型、transpose perm/target 与 byte-pool view 类型组合。 | 运行 `test_dma_public_verifier_boundary_matrix`。 | 动态 shape、broadcast rank/type/space、transpose perm/layout/type/space、transfer rank、byte-pool view element size 与动态边界按公开错误语义通过或稳定拒绝。 | `test_dma_public_verifier_boundary_matrix` |

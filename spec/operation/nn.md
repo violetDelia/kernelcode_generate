@@ -43,7 +43,6 @@
 - `spec`：[`spec/operation/nn.md`](../../spec/operation/nn.md)
 - `功能实现`：
   - [`kernel_gen/operation/nn/__init__.py`](../../kernel_gen/operation/nn/__init__.py)
-  - [`kernel_gen/operation/nn/common.py`](../../kernel_gen/operation/nn/common.py)
   - [`kernel_gen/operation/nn/broadcast.py`](../../kernel_gen/operation/nn/broadcast.py)
   - [`kernel_gen/operation/nn/elementwise_binary.py`](../../kernel_gen/operation/nn/elementwise_binary.py)
   - [`kernel_gen/operation/nn/elementwise_compare.py`](../../kernel_gen/operation/nn/elementwise_compare.py)
@@ -1152,7 +1151,7 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 - 不引入超出本文规则的复杂自动类型提升；`dtype` 兼容性需显式检查。
 - 不负责 AST/IR/lowering 设计。
 - 激活函数仅支持 `Memory` 输入；输出 `shape`/`dtype`/`space`/`format`/`stride` 继承输入，仅允许浮点 `dtype`（`Float16`/`BFloat16`/`Float32`/`Float64`）。
-- `kernel_gen.operation.nn` 是本组稳定包入口；当前实现已完整组织到 `common / broadcast / elementwise_binary / elementwise_compare / activation / exp / reduction / fc / matmul / conv / img2col / softmax / transpose` 子模块下。旧私有文件 `_nn_common / _nn_broadcast / _nn_elementwise / _nn_reduction / _nn_structured` 已删除，不再保留兼容导入路径。
+- `kernel_gen.operation.nn` 是本组稳定包入口；当前实现已完整组织到 `broadcast / elementwise_binary / elementwise_compare / activation / exp / reduction / fc / matmul / conv / img2col / softmax / transpose` 子模块下。旧私有文件 `_nn_common / _nn_broadcast / _nn_elementwise / _nn_reduction / _nn_structured` 已删除，不再保留兼容导入路径。
 - `kernel_gen.operation` 顶层稳定导出只保留经过包级聚合的子集：`add / sub / mul / truediv / eq / ne / lt / le / gt / ge / matmul`；`floordiv`、激活、`broadcast`、`transpose`、`softmax`、`fc`、`conv`、`img2col1d`、`img2col2d` 与归约族均继续通过 `kernel_gen.operation.nn` 访问，不在本轮顺手上提到顶层。
 
 ## 测试
@@ -1231,8 +1230,9 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 | TC-OP-BC-002 | 符号语义 | `broadcast` / `broadcast_to` 支持前置维扩张并保持 `target` 描述 | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_nn_broadcast_prepend_dimension`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`broadcast` / `broadcast_to` 支持前置维扩张并保持 `target` 描述”场景。 | `test_nn_broadcast_prepend_dimension` |
 | TC-OP-BC-003 | 边界/异常 | `broadcast` / `broadcast_to` 维度不兼容报错 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_nn_broadcast_dimension_mismatch`。 | “`broadcast` / `broadcast_to` 维度不兼容报错”场景按公开错误语义失败或被拒绝。 | `test_nn_broadcast_dimension_mismatch` |
 | TC-OP-BC-004 | 边界/异常 | `broadcast` / `broadcast_to` 目标 rank 更小时报错 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_nn_broadcast_rank_error`。 | “`broadcast` / `broadcast_to` 目标 rank 更小时报错”场景按公开错误语义失败或被拒绝。 | `test_nn_broadcast_rank_error` |
-| TC-OP-BC-005 | 边界/异常 | `broadcast` / `broadcast_to` 非 `Memory` 输入报错 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_nn_broadcast_non_memory_error`。 | “`broadcast` / `broadcast_to` 非 `Memory` 输入报错”场景按公开错误语义失败或被拒绝。 | `test_nn_broadcast_non_memory_error` |
+| TC-OP-BC-005 | 边界/异常 | `broadcast` / `broadcast_to` 非 `Memory` 输入报错 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_nn_broadcast_non_memory_error`, `test_nn_broadcast_parameterized_public_shape_matrix`。 | “`broadcast` / `broadcast_to` 非 `Memory` 输入报错”场景按公开错误语义失败或被拒绝。 | `test_nn_broadcast_non_memory_error`, `test_nn_broadcast_parameterized_public_shape_matrix` |
 | TC-OP-BC-006 | 边界/异常 | `broadcast` 非 `Memory` target 报错 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_nn_broadcast_target_type_error`。 | “`broadcast` 非 `Memory` target 报错”场景按公开错误语义失败或被拒绝。 | `test_nn_broadcast_target_type_error` |
+| TC-OP-BC-007 | 符号语义 | `broadcast` / `broadcast_to` 以确定性参数矩阵覆盖 singleton、前置维、`SymbolShape` 与公开错误语义 | 准备公开 `Memory`、`SymbolDim`、`SymbolShape` 与非法参数组合。 | 运行 `test_nn_broadcast_parameterized_public_shape_matrix`。 | 广播结果 shape、dtype、space 与目标描述一致，非法 dtype、space、rank、shape 输入按公开 `KernelCodeError` 失败。 | `test_nn_broadcast_parameterized_public_shape_matrix` |
 | TC-OP-IB-001 | 符号语义 | 算术支持 singleton dim 隐式 broadcast | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_nn_add_implicit_broadcast_singleton`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“算术支持 singleton dim 隐式 broadcast”场景。 | `test_nn_add_implicit_broadcast_singleton` |
 | TC-OP-IB-002 | 符号语义 | 算术支持前置维隐式 broadcast | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_nn_add_implicit_broadcast_prepend_dimension`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“算术支持前置维隐式 broadcast”场景。 | `test_nn_add_implicit_broadcast_prepend_dimension` |
 | TC-OP-IB-003 | 公开入口 | 比较运算复用隐式 broadcast | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_nn_compare_implicit_broadcast`。 | 公开入口在“比较运算复用隐式 broadcast”场景下可导入、构造、注册或按名称发现。 | `test_nn_compare_implicit_broadcast` |
@@ -1253,7 +1253,7 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 | TC-OP-MM-003 | 边界/异常 | `matmul` contracting dim 不一致报错 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_nn_matmul_contracting_dim_mismatch`。 | “`matmul` contracting dim 不一致报错”场景按公开错误语义失败或被拒绝。 | `test_nn_matmul_contracting_dim_mismatch` |
 | TC-OP-MM-004 | 边界/异常 | `matmul` 非二维输入报错 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_nn_matmul_rank_error`。 | “`matmul` 非二维输入报错”场景按公开错误语义失败或被拒绝。 | `test_nn_matmul_rank_error` |
 | TC-OP-MM-005 | 边界/异常 | `matmul` 标量输入非法 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_nn_matmul_scalar_operand_error`。 | “`matmul` 标量输入非法”场景按公开错误语义失败或被拒绝。 | `test_nn_matmul_scalar_operand_error` |
-| TC-OP-MM-006 | 边界/异常 | `matmul` 的 `dtype` 按固定优先级决议并选择顺序更靠后类型 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_nn_matmul_dtype_mismatch`。 | “`matmul` 的 `dtype` 按固定优先级决议并选择顺序更靠后类型”场景按公开错误语义失败或被拒绝。 | `test_nn_matmul_dtype_mismatch` |
+| TC-OP-MM-006 | 边界/异常 | `matmul` 的 `dtype` 按固定优先级决议并拒绝不支持的 dtype | 准备 mixed int/float 与 bool dtype 的公开 `Memory` 输入。 | 运行 `test_nn_matmul_dtype_mismatch`, `test_nn_matmul_rejects_unsupported_bool_dtype`。 | mixed int/float 结果选择顺序更靠后类型；bool dtype 按 `Unsupported dtype for nn.matmul` 失败。 | `test_nn_matmul_dtype_mismatch`, `test_nn_matmul_rejects_unsupported_bool_dtype` |
 | TC-OP-MM-007 | 边界/异常 | `matmul` 输入 `space` 不一致报错 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_nn_matmul_space_mismatch`。 | “`matmul` 输入 `space` 不一致报错”场景按公开错误语义失败或被拒绝。 | `test_nn_matmul_space_mismatch` |
 | TC-OP-SM-001 | 内存/DMA | `softmax` 默认 `axis=-1`，结果保持输入 `shape/dtype/space/format/stride` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_nn_softmax_default_axis`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`softmax` 默认 `axis=-1`，结果保持输入 `shape/dtype/space/format/stride`”场景。 | `test_nn_softmax_default_axis` |
 | TC-OP-SM-002 | 符号语义 | `softmax` 支持负轴并归一化到合法维度 | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_nn_softmax_negative_axis`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`softmax` 支持负轴并归一化到合法维度”场景。 | `test_nn_softmax_negative_axis` |

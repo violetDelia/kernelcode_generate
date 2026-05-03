@@ -50,7 +50,6 @@ API 列表:
 - test: test/operation/nn/test_structured.py
 - test: test/operation/nn/test_reduction.py
 - 功能实现: kernel_gen/operation/nn/__init__.py
-- 功能实现: kernel_gen/operation/nn/common.py
 - 功能实现: kernel_gen/operation/nn/broadcast.py
 - 功能实现: kernel_gen/operation/nn/elementwise_binary.py
 - 功能实现: kernel_gen/operation/nn/elementwise_compare.py

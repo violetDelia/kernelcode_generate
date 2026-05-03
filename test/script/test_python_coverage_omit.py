@@ -57,7 +57,6 @@ def test_python_coverage_omit_manifest_exists_and_lists_forwarding_modules() -> 
     assert "kernel_gen/dsl/gen_kernel/emit/npu_demo/symbol/for_loop.py" in text
     assert "kernel_gen/execute_engine/__init__.py" in text
     assert "kernel_gen/operation/__init__.py" in text
-    assert "kernel_gen/operation/nn/common.py" in text
     assert "kernel_gen/passes/pipeline/__init__.py" in text
     assert "kernel_gen/symbol_variable/__init__.py" in text
 

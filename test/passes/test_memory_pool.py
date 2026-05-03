@@ -31,7 +31,7 @@ os.environ.setdefault("SYMPY_GMPY", "0")
 import sympy as sp
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, i8, i32
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, IntegerType, ModuleOp, StringAttr, bf16, f16, f32, f64, i1, i8, i16, i32, i64
 from xdsl.dialects.test import TestOp as _TestOp
 from xdsl.ir import Block, Operation, Region, SSAValue
 
@@ -43,7 +43,7 @@ from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp, SymbolIterType, SymbolValueType
-from kernel_gen.passes.memory_pool import MemoryPoolPass
+from kernel_gen.passes.memory_pool import MemoryPoolInterval, MemoryPoolPass, MemoryPoolSummary
 
 
 def _make_space(space: str = "global") -> NnMemorySpaceAttr:
@@ -211,6 +211,55 @@ def test_memory_pool_summary_basic() -> None:
     assert "pool_count = 1" in text
 
 
+# TC-MP-018
+# 功能说明: 验证 MemoryPoolPass 的公开 summary 查询、空函数摘要、多 key bucket 文本与 all_summaries 拷贝语义。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_public_summary_access_edges
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_public_summary_access_edges() -> None:
+    module = ModuleOp([
+        _TestOp(),
+        func.FuncOp("empty", FunctionType.from_lists([], []), Region(Block())),
+    ])
+    pass_obj = MemoryPoolPass(rewrite=True)
+
+    pass_obj.apply(Context(), module)
+    summary = pass_obj.get_summary("empty")
+    summary_text = summary.to_text()
+
+    assert summary.func_name == "empty"
+    assert "  - <empty>" in summary_text
+    assert "pool_count = 0" in summary_text
+
+    returned = pass_obj.all_summaries()
+    returned["manual"] = MemoryPoolSummary("manual", (), {}, 0)
+    assert "manual" not in pass_obj.all_summaries()
+    try:
+        pass_obj.get_summary("manual")
+    except KernelCodeError as exc:
+        assert "MemoryPoolSummaryNotFound" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for missing summary")
+
+    manual = MemoryPoolSummary(
+        "manual",
+        (
+            MemoryPoolInterval(
+                "allocx",
+                ("#GM", "#SM"),
+                sp.Integer(8),
+                0,
+                0,
+                sp.Integer(0),
+            ),
+        ),
+        {("#GM", "#SM"): sp.Integer(8)},
+        1,
+    )
+    assert "(#GM, #SM) -> 8" in manual.to_text()
+
+
 # TC-MP-002
 # 功能说明: 验证 interval 的 begin/end 索引随词法顺序变化。
 # 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_interval_indices
@@ -365,6 +414,149 @@ def test_memory_pool_rewrite_overlap() -> None:
         assert isinstance(offset_type, SymbolValueType)
         offsets.append(offset_type.get_value())
     assert set(offsets) == {0, 2}
+
+
+# TC-MP-019
+# 功能说明: 验证 MemoryPoolPass 的公开 dtype 矩阵、非内置 dtype 拒绝与符号 shape rewrite 行为。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_dtype_and_symbolic_shape_matrix
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_dtype_and_symbolic_shape_matrix() -> None:
+    dtype_cases = [
+        (i1, "2"),
+        (i8, "2"),
+        (i16, "4"),
+        (i32, "8"),
+        (i64, "16"),
+        (f16, "4"),
+        (bf16, "4"),
+        (f32, "8"),
+        (f64, "16"),
+    ]
+
+    for element_type, expected_size in dtype_cases:
+        mem_type = _make_memory_type(shape=(2,), stride=(1,), element_type=element_type)
+        alloc = DmaAllocOp(_make_symbol_operands([2]), mem_type)
+        free = DmaFreeOp(alloc.result)
+        module = _build_module("main", [alloc, free])
+        pass_obj = MemoryPoolPass(rewrite=False)
+
+        pass_obj.apply(Context(), module)
+
+        interval = pass_obj.get_summary("main").intervals[0]
+        assert str(interval.size_bytes_expr) == expected_size
+
+    unsupported_type = _make_memory_type(shape=(2,), stride=(1,), element_type=StringAttr("bad"))
+    unsupported_alloc = DmaAllocOp(_make_symbol_operands([2]), unsupported_type)
+    unsupported_free = DmaFreeOp(unsupported_alloc.result)
+    unsupported_module = _build_module("bad_dtype", [unsupported_alloc, unsupported_free])
+    try:
+        MemoryPoolPass(rewrite=False).apply(Context(), unsupported_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolUnsupportedDtype" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for unsupported dtype")
+
+    unsupported_width = _make_memory_type(shape=(2,), stride=(1,), element_type=IntegerType(7))
+    unsupported_width_alloc = DmaAllocOp(_make_symbol_operands([2]), unsupported_width)
+    unsupported_width_free = DmaFreeOp(unsupported_width_alloc.result)
+    unsupported_width_module = _build_module(
+        "bad_integer_width",
+        [unsupported_width_alloc, unsupported_width_free],
+    )
+    try:
+        MemoryPoolPass(rewrite=False).apply(Context(), unsupported_width_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolUnsupportedDtype" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for unsupported integer width")
+
+    symbolic_type = NnMemoryType(
+        ArrayAttr([StringAttr("N"), IntAttr(4)]),
+        ArrayAttr([IntAttr(4), IntAttr(1)]),
+        i32,
+        _make_space("shared"),
+    )
+    symbolic_alloc = DmaAllocOp(_make_symbol_operands(["N", 4]), symbolic_type)
+    symbolic_free = DmaFreeOp(symbolic_alloc.result)
+    symbolic_module = _build_module("symbolic", [symbolic_alloc, symbolic_free])
+    symbolic_pass = MemoryPoolPass(rewrite=True)
+
+    symbolic_pass.apply(Context(), symbolic_module)
+    symbolic_summary = symbolic_pass.get_summary("symbolic")
+    view_ops = [
+        op
+        for op in _collect_ops_recursive(symbolic_module.body.block)
+        if isinstance(op, DmaViewOp)
+    ]
+
+    assert "size_bytes=16*N" in symbolic_summary.to_text()
+    assert "(#SM) -> Max(0, 16*N)" in symbolic_summary.to_text()
+    assert len(view_ops) == 1
+    assert view_ops[0].result.type == symbolic_type
+
+
+# TC-MP-020
+# 功能说明: 验证公开 pass 对匿名 stride 与重复 free 的错误边界。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_public_invalid_shape_stride_and_free_edges
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_public_invalid_shape_stride_and_free_edges() -> None:
+    anonymous_stride = NnMemoryType(
+        ArrayAttr([IntAttr(2)]),
+        ArrayAttr([StringAttr("?")]),
+        i32,
+        _make_space("global"),
+    )
+    anonymous_stride_alloc = DmaAllocOp(_make_symbol_operands([2]), anonymous_stride)
+    anonymous_stride_free = DmaFreeOp(anonymous_stride_alloc.result)
+    anonymous_stride_module = _build_module(
+        "anonymous_stride",
+        [anonymous_stride_alloc, anonymous_stride_free],
+    )
+    try:
+        MemoryPoolPass(rewrite=False).apply(Context(), anonymous_stride_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolUnsupportedNonLinearAlloc" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for anonymous stride")
+
+    mem_type = _make_memory_type()
+    duplicate_alloc = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    duplicate_free_a = DmaFreeOp(duplicate_alloc.result)
+    duplicate_free_b = DmaFreeOp(duplicate_alloc.result)
+    duplicate_module = _build_module(
+        "duplicate_free",
+        [duplicate_alloc, duplicate_free_a, duplicate_free_b],
+    )
+    try:
+        MemoryPoolPass(rewrite=False).apply(Context(), duplicate_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolInvalidLifetime: multiple dma.free for alloc" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for duplicate dma.free")
+
+
+# TC-MP-021
+# 功能说明: 验证 rewrite=True 遇到非 alloc 函数时保持公开 no-op 行为。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_rewrite_non_alloc_noop
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_rewrite_non_alloc_noop() -> None:
+    module = _build_module("no_alloc", [_TestOp()])
+    pass_obj = MemoryPoolPass(rewrite=True)
+
+    pass_obj.apply(Context(), module)
+
+    summary = pass_obj.get_summary("no_alloc")
+    func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
+    block_ops = list(func_ops[0].body.blocks[0].ops)
+    assert summary.pool_count == 0
+    assert summary.intervals == ()
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp, DmaViewOp)) for op in block_ops)
 
 
 # TC-MP-013

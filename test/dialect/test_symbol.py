@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 from io import StringIO
+import random
 import sys
 from pathlib import Path
 
@@ -45,6 +46,7 @@ from kernel_gen.dialect.symbol import (
     SymbolCastOp,
     SymbolConstOp,
     SymbolDivOp,
+    SymbolDimType,
     SymbolEqOp,
     SymbolExprAttr,
     SymbolFloorDivOp,
@@ -53,6 +55,7 @@ from kernel_gen.dialect.symbol import (
     SymbolGetStrideOp,
     SymbolForOp,
     SymbolGtOp,
+    SymbolIterAttr,
     SymbolLeOp,
     SymbolLtOp,
     SymbolMulOp,
@@ -395,6 +398,103 @@ def test_symbol_value_type_equality_depends_on_expr_only() -> None:
     assert _print_attr(lhs) == '!symbol.int<"N">'
 
 
+# TC-SYM-058
+# 测试目的: 以确定性随机表达式矩阵验证公开 symbol.int 值语义、常量归一化与符号表达 canonical 文本。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_value_type_public_expression_matrix() -> None:
+    ctx = _build_context()
+    rng = random.Random(20260505)
+    cases = [
+        ("+4", 4, False, '!symbol.int<"4">'),
+        ("-4", -4, False, '!symbol.int<"-4">'),
+        ("7 - 4", 3, False, '!symbol.int<"3">'),
+        ("2 + 3 * 4", 14, False, '!symbol.int<"14">'),
+        ("8 / 2", 4, False, '!symbol.int<"4">'),
+        ("7 // 3", 2, False, '!symbol.int<"2">'),
+        ("+N", "N", True, '!symbol.int<"+N">'),
+        ("N + 1", "N + 1", True, '!symbol.int<"N + 1">'),
+        ("N - T", "N - T", True, '!symbol.int<"N - T">'),
+        ("N * T", "N*T", True, '!symbol.int<"N * T">'),
+        ("-N + M", "M - N", True, '!symbol.int<"-N + M">'),
+        ("floor(7)", "7", True, '!symbol.int<"floor(7)">'),
+        ("floor(7/N)", "7 // N", True, '!symbol.int<"floor(7/N)">'),
+        ("floor((N + 1) / T)", "(N + 1) // T", True, '!symbol.int<"floor((N + 1) / T)">'),
+        ("N // 2", "N // 2", True, '!symbol.int<"N // 2">'),
+    ]
+
+    for expr, expected_value, expected_symbol, expected_text in rng.sample(cases, k=len(cases)):
+        parsed = Parser(ctx, f'!symbol.int<"{expr}">').parse_attribute()
+        assert isinstance(parsed, SymbolValueType)
+        parsed.verify()
+        assert parsed.get_value() == expected_value
+        assert parsed.is_symbol() is expected_symbol
+        assert _print_attr(parsed) == expected_text
+
+
+# TC-SYM-061
+# 测试目的: 验证公开 symbol.int 对除零和非整除表达式保持非静态符号语义，不误归一为整数常量。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_value_type_public_non_concrete_division_edges() -> None:
+    ctx = _build_context()
+    cases = ["7 / 0", "7 / 2"]
+
+    for expr in cases:
+        parsed = Parser(ctx, f'!symbol.int<"{expr}">').parse_attribute()
+        assert isinstance(parsed, SymbolValueType)
+        parsed.verify()
+        assert parsed.is_symbol()
+        assert _print_attr(parsed) == f'!symbol.int<"{expr}">'
+
+
+# TC-SYM-059
+# 测试目的: 验证 symbol.dim 与 symbol.iter 公开构造、字符串化和 parser 兼容边界。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_dim_and_iter_public_constructor_matrix() -> None:
+    ctx = _build_context()
+    rng = random.Random(20260505)
+    for name in rng.sample(["BLOCK_M", "tile_n", "_inner0"], k=3):
+        dim_type = SymbolDimType.from_name(name)
+        dim_type.verify()
+        assert str(dim_type) == f"symbol.dim<{name}>"
+
+    for name, message in [(" ", "must not be empty"), ("1bad", "must match")]:
+        with pytest.raises(VerifyException, match=message):
+            SymbolDimType.from_name(name)
+
+    iter_attr = SymbolIterAttr.from_bounds("0", "N", "TILE_N")
+    iter_type = SymbolIterType.from_attr(iter_attr)
+    assert str(iter_type) == "symbol.iter<start=0, end=N, step=TILE_N>"
+
+    legacy = Parser(ctx, '!symbol.iter<"index">').parse_attribute()
+    assert isinstance(legacy, SymbolIterType)
+    assert _print_attr(legacy) == '!symbol.iter<start = "0", end = "index", step = "1">'
+
+    with pytest.raises(ParseError, match="Expected quoted symbol expression"):
+        Parser(ctx, "!symbol.iter<start = 0, end = \"N\", step = \"1\">").parse_attribute()
+
+
+# TC-SYM-060
+# 测试目的: 验证公开 Folder 折叠入口对除零、非整除和结果类型不匹配的稳定拒绝。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_binary_arith_fold_public_rejection_matrix() -> None:
+    ctx = _build_context()
+    folder = Folder(ctx)
+    cases = [
+        SymbolDivOp(SymbolConstOp(7).result, SymbolConstOp(0).result, SymbolValueType.from_expr("0")),
+        SymbolDivOp(SymbolConstOp(7).result, SymbolConstOp(2).result, SymbolValueType.from_expr("3")),
+        SymbolFloorDivOp(SymbolConstOp(7).result, SymbolConstOp(0).result, SymbolValueType.from_expr("0")),
+        SymbolAddOp(SymbolConstOp(1).result, SymbolConstOp(2).result, SymbolValueType.from_expr("4")),
+        SymbolAddOp(_TestOp(result_types=[i32]).results[0], SymbolConstOp(1).result, SymbolValueType.from_expr("1")),
+    ]
+
+    for op in cases:
+        assert folder.try_fold(op) is None
+
+
 # TC-SYM-003 / TC-SYM-007
 # 测试目的: 验证非法字符表达式在 attr/type 两条路径都会报 verifier 错误。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
@@ -404,6 +504,10 @@ def test_symbol_verifier_rejects_illegal_expression_characters() -> None:
         SymbolExprAttr.from_expr("N@2").verify()
     with pytest.raises(VerifyException, match="must contain identifiers"):
         SymbolValueType.from_expr("N@1").verify()
+    with pytest.raises(VerifyException, match="must contain identifiers"):
+        SymbolExprAttr.from_expr("N +").verify()
+    with pytest.raises(VerifyException, match="must contain identifiers"):
+        SymbolExprAttr.from_expr("[]").verify()
 
 
 # TC-SYM-015
@@ -978,6 +1082,29 @@ def test_symbol_get_stride_folds_static_stride_to_const_attr() -> None:
     assert dynamic_op.fold() is None
 
 
+# TC-SYM-062
+# 测试目的: 验证 symbol.get_dim/get_stride 的公开 fold 入口会稳定拒绝非 memory、非静态轴号、越界轴号与匿名动态条目。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_memory_query_fold_public_rejection_matrix() -> None:
+    non_memory_source = _TestOp(result_types=[i32]).results[0]
+    static_source = _make_memory_value(
+        _make_memory_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)])
+    )
+    unknown_dim_source = _make_memory_value(
+        _make_memory_type([StringAttr("?"), IntAttr(8)], [IntAttr(8), IntAttr(1)])
+    )
+    unknown_stride_source = _make_memory_value(
+        _make_memory_type([IntAttr(4), IntAttr(8)], [StringAttr("?"), IntAttr(1)])
+    )
+
+    assert SymbolGetDimOp(non_memory_source, 0).fold() is None
+    assert SymbolGetDimOp(static_source, StringAttr("axis")).fold() is None
+    assert SymbolGetStrideOp(static_source, 2).fold() is None
+    assert SymbolGetDimOp(unknown_dim_source, 0).fold() is None
+    assert SymbolGetStrideOp(unknown_stride_source, 0).fold() is None
+
+
 # TC-SYM-029
 # 测试目的: 验证 symbol.get_stride 可从 nn.memory 读取符号步幅并返回对应 symbol value type。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
@@ -1182,6 +1309,46 @@ builtin.module {
 }
 """,
         ).parse_module()
+    with pytest.raises(VerifyException, match="iter attribute must be"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %start = "test.op"() : () -> !symbol.int<"0">
+  %end = "test.op"() : () -> !symbol.int<"N">
+  %step = "test.op"() : () -> !symbol.int<"1">
+  symbol.for %i = %start to %end step %step {iter = #symbol.expr<"N">} {
+  }
+}
+""",
+        ).parse_module()
+    with pytest.raises(VerifyException, match="result type requires loop-carried"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %start = "test.op"() : () -> !symbol.int<"0">
+  %end = "test.op"() : () -> !symbol.int<"N">
+  %step = "test.op"() : () -> !symbol.int<"1">
+  symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = "0", end = "N", step = "1">} -> !symbol.int<"N"> {
+  }
+}
+""",
+        ).parse_module()
+    with pytest.raises(VerifyException, match="loop-carried result must be"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %start = "test.op"() : () -> !symbol.int<"0">
+  %end = "test.op"() : () -> !symbol.int<"N">
+  %step = "test.op"() : () -> !symbol.int<"1">
+  %zero = symbol.const 0 : !symbol.int<"0">
+  symbol.for %i = %start to %end step %step iter_args(%acc = %zero) {iter = #symbol.iter<start = "0", end = "N", step = "1">} -> f32 {
+  }
+}
+""",
+        ).parse_module()
     with pytest.raises(ParseError, match="symbol.for"):
         Parser(
             ctx,
@@ -1223,6 +1390,104 @@ builtin.module {
 }
 """,
         ).parse_module()
+
+
+# TC-SYM-063
+# 测试目的: 验证 symbol.yield 公开 verifier 对父 op 与 carried value 约束保持稳定错误语义。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_yield_public_parent_and_carried_edges() -> None:
+    start = _make_symbol_value("0")
+    end = _make_symbol_value("N")
+    step = _make_symbol_value("1")
+
+    with pytest.raises(VerifyException, match="symbol.yield must appear inside symbol.for"):
+        SymbolYieldOp(SymbolConstOp(1).result).verify()
+
+    block = Block(arg_types=[SymbolIterType.from_bounds("0", "N", "1")])
+    yield_op = SymbolYieldOp(SymbolConstOp(1).result)
+    block.add_op(yield_op)
+    SymbolForOp(start, end, step, block)
+    with pytest.raises(VerifyException, match="symbol.yield requires symbol.for loop-carried"):
+        yield_op.verify()
+
+
+# TC-SYM-064
+# 测试目的: 验证 symbol.for 公开 verifier 对 iter attribute 与 block argument 的一致性矩阵。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_for_rejects_iter_attr_mismatch_matrix() -> None:
+    start = _make_symbol_value("0")
+    end = _make_symbol_value("N")
+    step = _make_symbol_value("1")
+
+    cases = [
+        (
+            SymbolForOp(
+                start,
+                end,
+                step,
+                Block(arg_types=[SymbolIterType.from_bounds("1", "N", "1")]),
+                iter_attr=SymbolIterAttr.from_bounds("1", "N", "1"),
+            ),
+            "iter.start must match start operand",
+        ),
+        (
+            SymbolForOp(
+                start,
+                end,
+                step,
+                Block(arg_types=[SymbolIterType.from_bounds("0", "M", "1")]),
+                iter_attr=SymbolIterAttr.from_bounds("0", "M", "1"),
+            ),
+            "iter.end must match end operand",
+        ),
+        (
+            SymbolForOp(
+                start,
+                end,
+                step,
+                Block(arg_types=[SymbolIterType.from_bounds("0", "N", "2")]),
+                iter_attr=SymbolIterAttr.from_bounds("0", "N", "2"),
+            ),
+            "iter.step must match step operand",
+        ),
+        (
+            SymbolForOp(
+                start,
+                end,
+                step,
+                Block(arg_types=[SymbolIterType.from_bounds("0", "N", "2")]),
+                iter_attr=SymbolIterAttr.from_bounds("0", "N", "1"),
+            ),
+            "it must have type symbol.iter",
+        ),
+        (
+            SymbolForOp(
+                start,
+                end,
+                step,
+                Block(arg_types=[SymbolIterType.from_bounds("0", "N", "1")]),
+                init=SymbolConstOp(0).result,
+                result_type=SymbolValueType.from_expr("TOTAL"),
+            ),
+            "requires exactly two block arguments",
+        ),
+    ]
+
+    for op, message in cases:
+        with pytest.raises(VerifyException, match=message):
+            op.verify()
+
+
+# TC-SYM-065
+# 测试目的: 验证 symbol.for 打印公开路径会对结构不完整的循环回退到稳定 default format。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_for_prints_default_format_for_invalid_body_shape() -> None:
+    op = SymbolForOp(_make_symbol_value("0"), _make_symbol_value("N"), _make_symbol_value("1"), Block())
+
+    assert _print_op(op).startswith("symbol.for(")
 
 
 # TC-SYM-038A

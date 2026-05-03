@@ -51,7 +51,7 @@ from xdsl.dialects.builtin import (
 from xdsl.ir import Operation, SSAValue
 
 from kernel_gen.dialect.arch import ArchBarrierOp, ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp, ArchLaunchOp
-from kernel_gen.dialect.dma import DmaAllocOp, DmaCastOp, DmaReshapeOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaCastOp, DmaReshapeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolValueType
 from kernel_gen.core.config import restore_config, set_target, snapshot_config
@@ -154,26 +154,6 @@ class KernelEmitter:
             raise self._error(func_name, "TileCodegenMalformed: legacy bridge ops are not allowed")
         if any(item.name == "func.call" for item in self._walk_ops(func_op)):
             raise self._error(func_name, "TileCodegenUnexpectedHelperFunction: func.call is not allowed in tile codegen")
-
-    def _leading_rewritten_out_param_count(self, func_op: func.FuncOp) -> int:
-        input_types = list(func_op.function_type.inputs.data)
-        attrs = func_op.arg_attrs
-        count = 0
-        for index, arg_type in enumerate(input_types):
-            if not isinstance(arg_type, NnMemoryType):
-                break
-            if not isinstance(attrs, ArrayAttr):
-                break
-            if index >= len(attrs.data):
-                break
-            attr = attrs.data[index]
-            if not isinstance(attr, DictionaryAttr):
-                break
-            name_attr = attr.data.get("name")
-            if not isinstance(name_attr, StringAttr) or name_attr.data != f"arg{index}":
-                break
-            count += 1
-        return count
 
     def emit_include(self) -> str:
         """返回当前 target 需要的源码前导。
@@ -294,8 +274,6 @@ class KernelEmitter:
         body_func, wrapper_func = self._classify_npu_demo_launch_module(module_op)
         emitted: list[str] = [self._emit_npu_demo_launch_body_declaration(body_func)]
         for top_op in module_op.ops:
-            if not isinstance(top_op, func.FuncOp):
-                raise self._error("<module>", "npu_demo launch module must contain only func.func")
             if top_op is body_func:
                 emitted.append(self._emit_npu_demo_launch_body_function(body_func))
                 continue
@@ -367,8 +345,6 @@ class KernelEmitter:
             if any(self._is_launch_helper_op(op) for op in raw_ops):
                 return None
             return func_op
-        if all(self._is_launch_helper_op(op) or isinstance(op, func.ReturnOp) for op in filtered_ops):
-            return None
         return func_op
 
     def emit_func(self, func_op: func.FuncOp) -> str:
@@ -498,14 +474,9 @@ class KernelEmitter:
 
         body_arg_offset = 0
         if len(input_types) >= 4 and arg_names and arg_names[0] == "ctx":
-            if not arg_names or arg_names[0] != "ctx":
-                raise self._error(func_name, "npu_demo launch body requires leading ctx argument")
             body_arg_offset = 1
 
         body_input_types = input_types[body_arg_offset:]
-        if len(body_input_types) < 3:
-            raise self._error(func_name, "unsupported npu_demo launch body signature")
-
         memory_input_types: list[NnMemoryType] = []
         symbol_start = len(body_input_types)
         for index, arg_type in enumerate(body_input_types):
@@ -622,9 +593,7 @@ class KernelEmitter:
                 self.ctx.bind_name(op.results[0], expr)
                 continue
             if isinstance(op, func.ReturnOp):
-                stmt = self._emit_return_statement(func_op, op)
-                if stmt:
-                    lines.append(stmt)
+                self._emit_return_statement(func_op, op)
                 continue
             if isinstance(op, ArchBarrierOp):
                 lines.append(self._format_npu_demo_barrier_stmt(op, func_name))
@@ -714,6 +683,7 @@ class KernelEmitter:
             if isinstance(arg_type, SymbolValueType):
                 params.append(f"{self._type_to_c(arg_type)} {arg_name}")
                 continue
+        if len(params) != len(body_input_types):
             raise self._error(func_name, "unsupported npu_demo launch body signature")
         return f"static void {func_name}({', '.join(params)})"
 
@@ -752,6 +722,7 @@ class KernelEmitter:
             if isinstance(arg_type, SymbolValueType):
                 params.append(f"{self._signature_type_to_c(arg_type)} {arg_name}")
                 continue
+        if len(params) != len(wrapper_func.function_type.inputs.data):
             raise self._error(wrapper_func.sym_name.data, "unsupported npu_demo launch wrapper signature")
         signature = f"void {wrapper_func.sym_name.data}({', '.join(params)})"
         self.ctx.push_indent()
@@ -829,7 +800,6 @@ class KernelEmitter:
         - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
         """
 
-        self._get_npu_demo_body_level_kernel_types(func_op)
         self._validate_npu_demo_body_level_kernel_body(func_op)
         _, out_type = self._get_npu_demo_body_level_kernel_types(func_op)
         arg_names = self._arg_names(func_op)
@@ -925,14 +895,6 @@ class KernelEmitter:
             return_type = self._type_to_c(result_types[0])
 
         return f"{return_type} {func_name}({', '.join(params)})"
-
-    def _is_returned_output_alloc(self, func_op: func.FuncOp, op: DmaAllocOp) -> bool:
-        if not self.ctx.is_target("cpu"):
-            return False
-        result_types = list(func_op.function_type.outputs.data)
-        if len(result_types) != 1 or not isinstance(result_types[0], NnMemoryType):
-            return False
-        return any(isinstance(use.operation, func.ReturnOp) for use in op.result.uses)
 
     def _bind_rewritten_out_result(self, func_op: func.FuncOp, op: Operation) -> None:
         """把 rewrite 后仍保留 memory result 的 DMA op 绑定到首个 out 参数。"""
@@ -1037,23 +999,11 @@ class KernelEmitter:
             if return_op.arguments:
                 raise self._error(func_op.sym_name.data, "unsupported return form")
             return None
-        if len(result_types) != 1:
-            raise self._error(func_op.sym_name.data, "unsupported return form")
         result_type = result_types[0]
         if len(return_op.arguments) != 1:
             raise self._error(func_op.sym_name.data, "unsupported return form")
         if return_op.arguments[0].type != result_type:
             raise self._error(func_op.sym_name.data, "unsupported return form")
-        if isinstance(result_type, NnMemoryType):
-            raise self._error(
-                func_op.sym_name.data,
-                "legacy memory return ABI is not supported; run BufferResultsToOutParamsPass first",
-            )
-        if isinstance(result_type, SymbolValueType) and not (self.ctx.is_target("cpu") or self.ctx.is_target("npu_demo")):
-            raise self._error(
-                func_op.sym_name.data,
-                "symbol scalar return is only supported on cpu and npu_demo",
-            )
         value_expr = emit_c_value(return_op.arguments[0], self.ctx)
         return f"{self.ctx.current_indent}return {value_expr};"
 
@@ -1109,9 +1059,6 @@ class KernelEmitter:
                     lines.append(stmt)
                 continue
             if self._bind_transparent_unrealized_conversion_cast(op):
-                continue
-            if isinstance(op, DmaAllocOp) and self._is_returned_output_alloc(func_op, op):
-                self.ctx.bind_name(op.result, "out")
                 continue
             total_stmt = self._emit_npu_demo_return_symbol_assignment(op)
             if total_stmt is not None:

@@ -50,3 +50,5 @@
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-DSL-AST-PLUGIN-NN-001 | 公开入口 | NN helper call uses registered specific ast node | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_nn_helper_call_uses_registered_specific_ast_node`。 | 公开入口在“NN helper call uses registered specific ast node”场景下可导入、构造、注册或按名称发现。 | `test_nn_helper_call_uses_registered_specific_ast_node` |
+| TC-DSL-AST-PLUGIN-NN-002 | 公开入口 | NN public helpers parse parameterized return nodes | 通过固定 seed 的参数化顺序覆盖 elementwise、activation、reduce、broadcast、structured、transpose 与 softmax helper。 | 运行 `test_nn_public_helpers_parse_parameterized_return_nodes`。 | NN 公开 helper 均经 parser/registry 解析为对应 AST 节点。 | `test_nn_public_helpers_parse_parameterized_return_nodes` |
+| TC-DSL-AST-PLUGIN-NN-003 | 边界/异常 | NN public helpers reject invalid contracts | 准备固定 seed 的 elementwise/compare/unary/reduce/softmax/broadcast/transpose/matmul/conv/img2col 非法 arity、keyword 与类型矩阵。 | 运行 `test_nn_public_helpers_reject_invalid_contracts`。 | 参数错误按公开 KernelCodeError 文案被拒绝，且每类 helper 的错误文本保持稳定。 | `test_nn_public_helpers_reject_invalid_contracts` |

@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import FunctionType, IntAttr, ModuleOp
+from xdsl.dialects.builtin import FunctionType, IntAttr, ModuleOp, StringAttr
 from xdsl.ir import Block, Region
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -38,6 +38,20 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
+from kernel_gen.target.registry import TargetSpec, register_target
+
+
+def _register_attach_target(name: str, hardware: dict[str, int], supports_launch: bool = True) -> None:
+    """注册 attach pass 边界测试使用的公开 target。"""
+
+    register_target(
+        TargetSpec(
+            name=name,
+            arch_supported_ops={"arch.launch"} if supports_launch else set(),
+            arch_unsupported_ops=set(),
+            hardware=hardware,
+        )
+    )
 
 
 def _make_empty_func_module() -> ModuleOp:
@@ -129,4 +143,88 @@ def test_attach_arch_information_rejects_multiple_entry_funcs() -> None:
         KernelCodeError,
         match=r"^AttachArchInformationError: module must contain exactly one non-declaration func\.func$",
     ):
+        AttachArchInformationPass(target="npu_demo").apply(Context(), module)
+
+
+def test_attach_arch_information_rejects_invalid_public_options() -> None:
+    with pytest.raises(KernelCodeError, match=r"^AttachArchInformationError: unknown option\(s\): extra$"):
+        AttachArchInformationPass.from_options({"target": "npu_demo", "extra": "1"})
+
+    with pytest.raises(KernelCodeError, match=r"^AttachArchInformationError: target must be non-empty string$"):
+        AttachArchInformationPass.from_options({"target": ""})
+
+
+def test_attach_arch_information_rejects_non_module_input() -> None:
+    block = Block()
+    block.add_op(func.ReturnOp())
+    func_op = func.FuncOp("launch_kernel", FunctionType.from_lists([], []), Region(block))
+
+    with pytest.raises(KernelCodeError, match=r"^AttachArchInformationError: module must be builtin\.module$"):
+        AttachArchInformationPass(target="npu_demo").apply(Context(), func_op)
+
+
+def test_attach_arch_information_rejects_target_registry_boundaries() -> None:
+    module = _make_empty_func_module()
+    _register_attach_target(
+        "attach_no_launch",
+        {"block_num": 1, "thread_num": 1, "subthread_num": 1, "sm_memory_size": 0},
+        supports_launch=False,
+    )
+    with pytest.raises(KernelCodeError, match=r"^AttachArchInformationError: target attach_no_launch does not support arch\.launch$"):
+        AttachArchInformationPass(target="attach_no_launch").apply(Context(), module)
+
+    _register_attach_target(
+        "attach_missing_thread",
+        {"block_num": 1, "subthread_num": 1, "sm_memory_size": 0},
+    )
+    with pytest.raises(KernelCodeError, match=r"^AttachArchInformationError: target attach_missing_thread is missing launch extent$"):
+        AttachArchInformationPass(target="attach_missing_thread").apply(Context(), _make_empty_func_module())
+
+    _register_attach_target(
+        "attach_zero_block",
+        {"block_num": 0, "thread_num": 1, "subthread_num": 1, "sm_memory_size": 0},
+    )
+    with pytest.raises(KernelCodeError, match=r"^AttachArchInformationError: function attach_zero_block launch_block must be > 0$"):
+        AttachArchInformationPass(target="attach_zero_block").apply(Context(), _make_empty_func_module())
+
+    _register_attach_target(
+        "attach_missing_sm",
+        {"block_num": 1, "thread_num": 1, "subthread_num": 1},
+    )
+    with pytest.raises(KernelCodeError, match=r"^AttachArchInformationError: target attach_missing_sm is missing launch extent$"):
+        AttachArchInformationPass(target="attach_missing_sm").apply(Context(), _make_empty_func_module())
+
+    _register_attach_target(
+        "attach_negative_sm",
+        {"block_num": 1, "thread_num": 1, "subthread_num": 1, "sm_memory_size": -1},
+    )
+    with pytest.raises(KernelCodeError, match=r"^AttachArchInformationError: function attach_negative_sm shared_memory_size must be >= 0$"):
+        AttachArchInformationPass(target="attach_negative_sm").apply(Context(), _make_empty_func_module())
+
+
+def test_attach_arch_information_accepts_existing_int_like_attrs() -> None:
+    module = _make_empty_func_module()
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    func_op.attributes["launch_block"] = StringAttr("1")
+    func_op.attributes["launch_thread"] = StringAttr("1")
+    func_op.attributes["launch_subthread"] = StringAttr("1")
+    func_op.attributes["shared_memory_size"] = StringAttr("0")
+
+    AttachArchInformationPass(target="npu_demo").apply(Context(), module)
+
+    assert func_op.attributes["launch_block"] == StringAttr("1")
+    assert func_op.attributes["launch_thread"] == StringAttr("1")
+    assert func_op.attributes["launch_subthread"] == StringAttr("1")
+    assert func_op.attributes["shared_memory_size"] == StringAttr("0")
+
+
+def test_attach_arch_information_rejects_existing_attr_mismatch() -> None:
+    module = _make_empty_func_module()
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    func_op.attributes["launch_block"] = IntAttr(1)
+    func_op.attributes["launch_thread"] = IntAttr(2)
+    func_op.attributes["launch_subthread"] = IntAttr(1)
+    func_op.attributes["shared_memory_size"] = IntAttr(0)
+
+    with pytest.raises(KernelCodeError, match=r"^AttachArchInformationError: function launch_kernel launch extents must match target npu_demo$"):
         AttachArchInformationPass(target="npu_demo").apply(Context(), module)

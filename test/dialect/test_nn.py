@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from io import StringIO
+import random
 import sys
 from pathlib import Path
 
@@ -73,6 +74,7 @@ from kernel_gen.dialect.nn import (
     NnCastOp,
     NnDivOp,
     NnExpOp,
+    NnFloorDivOp,
     NnHardSigmoidOp,
     NnLeakyReluOp,
     NnReluOp,
@@ -85,7 +87,8 @@ from kernel_gen.dialect.nn import (
     NnSoftmaxOp,
     NnTransposeOp,
 )
-from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
+from kernel_gen.dialect.symbol import Symbol
 
 
 def _build_context() -> Context:
@@ -108,6 +111,7 @@ def _build_context() -> Context:
     ctx.load_dialect(Builtin)
     ctx.load_dialect(Test)
     ctx.load_dialect(Nn)
+    ctx.load_dialect(Symbol)
     return ctx
 
 
@@ -2169,6 +2173,32 @@ def test_unary_float_family_and_reduce_helper_edges() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_memory_dim_parser_and_mixed_add_public_parser_contracts() -> None:
     ctx = _build_context()
+    rng = random.Random(20260505)
+    round_trip_types = [
+        '!nn.memory<[M], [1], "elem, type", #nn.space<global>>',
+        "!nn.memory<[N + 1], [1], tensor<2xf32>, #nn.space<global>>",
+        "!nn.memory<[M // 2, N], [N, 1], i32, #nn.space<global>>",
+    ]
+    for text in rng.sample(round_trip_types, k=len(round_trip_types)):
+        parsed_type = Parser(ctx, text).parse_attribute()
+        assert isinstance(parsed_type, NnMemoryType)
+        parsed_type.verify()
+        assert _print_ir(parsed_type) == text
+
+    for malformed_text, message in [
+        ("!nn.memory", "Expected '<'"),
+        ("!nn.memory<[M], [1], i32, #nn.space<global>", "Expected '>'"),
+        ("!nn.memory<M, [1], i32, #nn.space<global>>", "Expected dimension list"),
+        ("!nn.memory<[M), [1], i32, #nn.space<global>>", "Malformed nn memory type parameters"),
+        ("!nn.memory<[M], [1], i32, #nn.space<global>, >", "requires shape"),
+        ("!nn.memory<[M +], [1], i32, #nn.space<global>>", "valid SymbolDim string"),
+    ]:
+        with pytest.raises(ParseError, match=message):
+            Parser(ctx, malformed_text).parse_attribute()
+
+    with pytest.raises(VerifyException, match="shape dimensions must be IntAttr or StringAttr"):
+        _print_ir(NnMemoryType(ArrayAttr([Float32Type()]), ArrayAttr([IntAttr(1)]), i32, _make_space("global")))
+
     parsed = Parser(
         ctx,
         "!nn.memory<[M + 1, (K + 2), tail], [tail, 1, ?], i32, #nn.space<global>>",
@@ -2229,3 +2259,381 @@ def test_memory_dim_parser_and_mixed_add_public_parser_contracts() -> None:
     )
     with pytest.raises(VerifyException, match="result element_type must match promoted element_type"):
         NnAddOp(lhs, scalar, wrong_dtype, _make_space("global")).verify()
+
+
+# NN-DIA-S7-003
+# 功能说明: 以公开 op 构造入口验证 mixed scalar 二元 family 的参数化 verifier 合同。
+# 测试目的: 锁定 sub/mul/truediv/floordiv 的 memory+scalar、scalar+memory、space、shape、stride 与 dtype 边界。
+# 使用示例: pytest -q test/dialect/test_nn.py -k test_mixed_scalar_binary_family_public_contracts
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn.py
+def test_mixed_scalar_binary_family_public_contracts() -> None:
+    rng = random.Random(20260505)
+    op_classes = rng.sample([NnSubOp, NnMulOp, NnTrueDivOp, NnFloorDivOp], k=4)
+    memory_i32 = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        space="global",
+        element_type=i32,
+    )
+    result_f16 = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        space="global",
+        element_type=Float16Type(),
+    )
+    memory_value = _TestOp(result_types=[memory_i32]).results[0]
+    scalar_f16 = _TestOp(result_types=[Float16Type()]).results[0]
+
+    for op_cls in op_classes:
+        op_cls(memory_value, scalar_f16, result_f16, _make_space("global")).verify()
+        op_cls(scalar_f16, memory_value, result_f16, _make_space("global")).verify()
+
+        with pytest.raises(VerifyException, match="requires at least one nn.memory operand"):
+            op_cls(
+                _TestOp(result_types=[i32]).results[0],
+                _TestOp(result_types=[Float32Type()]).results[0],
+                result_f16,
+                _make_space("global"),
+            ).verify()
+
+        with pytest.raises(VerifyException, match="attribute space must match memory operand space"):
+            op_cls(memory_value, scalar_f16, result_f16, _make_space("shared")).verify()
+
+        wrong_space_result = _make_simple_memory_type(
+            [IntAttr(2), IntAttr(3)],
+            [IntAttr(3), IntAttr(1)],
+            space="shared",
+            element_type=Float16Type(),
+        )
+        with pytest.raises(VerifyException, match="result space must match memory operand"):
+            op_cls(memory_value, scalar_f16, wrong_space_result, _make_space("global")).verify()
+
+        wrong_shape = _make_simple_memory_type(
+            [IntAttr(2), IntAttr(4)],
+            [IntAttr(4), IntAttr(1)],
+            space="global",
+            element_type=Float16Type(),
+        )
+        with pytest.raises(VerifyException, match="result shape must match memory operand"):
+            op_cls(memory_value, scalar_f16, wrong_shape, _make_space("global")).verify()
+
+        wrong_stride = _make_simple_memory_type(
+            [IntAttr(2), IntAttr(3)],
+            [IntAttr(1), IntAttr(1)],
+            space="global",
+            element_type=Float16Type(),
+        )
+        with pytest.raises(VerifyException, match="result stride must match memory operand"):
+            op_cls(memory_value, scalar_f16, wrong_stride, _make_space("global")).verify()
+
+        with pytest.raises(VerifyException, match="scalar element_type must be i32/f16/f32 or symbol.int"):
+            op_cls(
+                memory_value,
+                _TestOp(result_types=[IntegerType(16)]).results[0],
+                result_f16,
+                _make_space("global"),
+            ).verify()
+
+        wrong_dtype = _make_simple_memory_type(
+            [IntAttr(2), IntAttr(3)],
+            [IntAttr(3), IntAttr(1)],
+            space="global",
+            element_type=i32,
+        )
+        with pytest.raises(VerifyException, match="result element_type must match promoted element_type"):
+            op_cls(memory_value, scalar_f16, wrong_dtype, _make_space("global")).verify()
+
+
+# NN-DIA-S7-004
+# 功能说明: 验证 transpose 在动态维度公开合同下使用连续 stride 规则。
+# 测试目的: 锁定 result 低维为动态 `?` 时高维 stride 为 `?`、低维 stride 为 1 的合法布局。
+# 使用示例: pytest -q test/dialect/test_nn.py -k test_transpose_dynamic_stride_public_contract
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn.py
+def test_transpose_dynamic_stride_public_contract() -> None:
+    input_type = _make_simple_memory_type(
+        [StringAttr("?"), IntAttr(2)],
+        [IntAttr(2), IntAttr(1)],
+        space="global",
+    )
+    result_type = _make_simple_memory_type(
+        [IntAttr(2), StringAttr("?")],
+        [StringAttr("?"), IntAttr(1)],
+        space="global",
+    )
+    inp = _TestOp(result_types=[input_type]).results[0]
+    NnTransposeOp(inp, result_type, perm=[1, 0], space=_make_space("global")).verify()
+
+
+# NN-DIA-S7-005
+# 功能说明: 验证 select/cast/activation 的公开 verifier 错误矩阵。
+# 测试目的: 锁定公开 op 构造入口对 space、shape、stride、dtype 和标量参数边界的错误语义。
+# 使用示例: pytest -q test/dialect/test_nn.py -k test_select_cast_activation_public_error_matrix
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn.py
+def test_select_cast_activation_public_error_matrix() -> None:
+    cond = _TestOp(
+        result_types=[_make_simple_memory_type([IntAttr(2)], [IntAttr(1)], element_type=i1)]
+    ).results[0]
+    data_type = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], element_type=Float32Type())
+    data = _TestOp(result_types=[data_type]).results[0]
+
+    select_cases = [
+        (
+            data,
+            _TestOp(
+                result_types=[
+                    _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="shared", element_type=Float32Type())
+                ]
+            ).results[0],
+            data_type,
+            "global",
+            "nn.select operands must use the same space",
+        ),
+        (
+            data,
+            data,
+            data_type,
+            "shared",
+            "nn.select attribute space must match operand space",
+        ),
+        (
+            data,
+            data,
+            _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="shared", element_type=Float32Type()),
+            "global",
+            "nn.select attribute space must match result space",
+        ),
+        (
+            data,
+            _TestOp(
+                result_types=[_make_simple_memory_type([IntAttr(3)], [IntAttr(1)], element_type=Float32Type())]
+            ).results[0],
+            data_type,
+            "global",
+            "nn.select shape must match across operands and result",
+        ),
+        (
+            data,
+            _TestOp(
+                result_types=[_make_simple_memory_type([IntAttr(2)], [IntAttr(2)], element_type=Float32Type())]
+            ).results[0],
+            data_type,
+            "global",
+            "nn.select stride must match across operands and result",
+        ),
+        (
+            data,
+            _TestOp(result_types=[_make_simple_memory_type([IntAttr(2)], [IntAttr(1)], element_type=i32)]).results[0],
+            data_type,
+            "global",
+            "nn.select operand element_type must match",
+        ),
+        (
+            data,
+            data,
+            _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], element_type=i32),
+            "global",
+            "nn.select result element_type must match operand element_type",
+        ),
+    ]
+    for lhs, rhs, result_type, space, message in select_cases:
+        with pytest.raises(VerifyException, match=message):
+            NnSelectOp(cond, lhs, rhs, result_type, _make_space(space)).verify()
+
+    with pytest.raises(VerifyException, match="nn.cast attribute space must match operand space"):
+        NnCastOp(data, data_type, _make_space("shared")).verify()
+    with pytest.raises(VerifyException, match="nn.cast attribute space must match result space"):
+        NnCastOp(
+            data,
+            _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="shared", element_type=Float16Type()),
+            _make_space("global"),
+        ).verify()
+    with pytest.raises(VerifyException, match="nn.cast stride must match input"):
+        NnCastOp(
+            data,
+            _make_simple_memory_type([IntAttr(2)], [IntAttr(2)], element_type=Float16Type()),
+            _make_space("global"),
+        ).verify()
+
+    wrong_shape = _make_simple_memory_type([IntAttr(3)], [IntAttr(1)], element_type=Float32Type())
+    with pytest.raises(VerifyException, match="result-shape-stride-must-match-input"):
+        NnReluOp(data, wrong_shape, _make_space("global")).verify()
+    wrong_dtype = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], element_type=Float16Type())
+    with pytest.raises(VerifyException, match="result-element-type-must-match-input"):
+        NnSigmoidOp(data, wrong_dtype, _make_space("global")).verify()
+    wrong_space = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="shared", element_type=Float32Type())
+    with pytest.raises(VerifyException, match="result-space-must-match-input-and-attr"):
+        NnTanhOp(data, wrong_space, _make_space("global")).verify()
+    with pytest.raises(VerifyException, match="result-space-must-match-input-and-attr"):
+        NnReluOp(data, data_type, _make_space("shared")).verify()
+    with pytest.raises(VerifyException, match="alpha must be int or float scalar"):
+        NnLeakyReluOp(data, _TestOp(result_types=[StringAttr("bad")]).results[0], data_type, _make_space("global")).verify()
+
+
+# NN-DIA-S7-006
+# 功能说明: 验证 img2col 的公开 symbol/dynamic 参数与错误矩阵。
+# 测试目的: 锁定 symbol.const、动态 shape、symbol 参数、非负 padding 和 result stride 边界。
+# 使用示例: pytest -q test/dialect/test_nn.py -k test_img2col_public_symbol_dynamic_error_matrix
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn.py
+def test_img2col_public_symbol_dynamic_error_matrix() -> None:
+    input_1d = _make_simple_memory_type(
+        [IntAttr(1), IntAttr(2), IntAttr(8)],
+        [IntAttr(16), IntAttr(8), IntAttr(1)],
+        element_type=Float32Type(),
+    )
+    result_1d = _make_simple_memory_type(
+        [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)],
+        [IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(1)],
+        element_type=Float32Type(),
+    )
+    input_1d_value = _TestOp(result_types=[input_1d]).results[0]
+    three = SymbolConstOp(3).result
+    one = SymbolConstOp(1).result
+    zero = SymbolConstOp(0).result
+    NnImg2col1dOp(input_1d_value, result_1d, three, one, one, one, one, _make_space("global")).verify()
+    with pytest.raises(VerifyException, match="kw-sw-dw-must-be-positive"):
+        NnImg2col1dOp(input_1d_value, result_1d, zero, one, one, one, one, _make_space("global")).verify()
+    with pytest.raises(VerifyException, match="pl-pr-must-be-non-negative"):
+        NnImg2col1dOp(
+            input_1d_value,
+            result_1d,
+            three,
+            one,
+            one,
+            arith.ConstantOp(IntegerAttr(-1, i32)).result,
+            one,
+            _make_space("global"),
+        ).verify()
+
+    dynamic_input_1d = _make_simple_memory_type(
+        [IntAttr(1), IntAttr(2), StringAttr("W")],
+        [StringAttr("2*W"), StringAttr("W"), IntAttr(1)],
+        element_type=Float32Type(),
+    )
+    NnImg2col1dOp(
+        _TestOp(result_types=[dynamic_input_1d]).results[0],
+        result_1d,
+        three,
+        one,
+        one,
+        one,
+        one,
+        _make_space("global"),
+    ).verify()
+    symbol_param = _TestOp(result_types=[SymbolValueType.from_expr("KW")]).results[0]
+    NnImg2col1dOp(
+        input_1d_value,
+        result_1d,
+        symbol_param,
+        one,
+        one,
+        one,
+        one,
+        _make_space("global"),
+    ).verify()
+    with pytest.raises(VerifyException, match="result-shape-stride-must-match-img2col1d-contract"):
+        NnImg2col1dOp(
+            input_1d_value,
+            _make_simple_memory_type(
+                [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)],
+                [StringAttr("S"), IntAttr(24), IntAttr(8), IntAttr(1)],
+                element_type=Float32Type(),
+            ),
+            three,
+            one,
+            one,
+            one,
+            one,
+            _make_space("global"),
+        ).verify()
+
+    input_2d = _make_simple_memory_type(
+        [IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)],
+        [IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)],
+        element_type=Float32Type(),
+    )
+    result_2d = _make_simple_memory_type(
+        [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(5)],
+        [IntAttr(675), IntAttr(225), IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)],
+        element_type=Float32Type(),
+    )
+    input_2d_value = _TestOp(result_types=[input_2d]).results[0]
+    NnImg2col2dOp(input_2d_value, result_2d, three, three, one, one, one, one, one, one, one, one, _make_space("global")).verify()
+    dynamic_input_2d = _make_simple_memory_type(
+        [IntAttr(1), IntAttr(3), StringAttr("H"), IntAttr(5)],
+        [StringAttr("15*H"), StringAttr("5*H"), IntAttr(5), IntAttr(1)],
+        element_type=Float32Type(),
+    )
+    NnImg2col2dOp(
+        _TestOp(result_types=[dynamic_input_2d]).results[0],
+        result_2d,
+        three,
+        three,
+        one,
+        one,
+        one,
+        one,
+        one,
+        one,
+        one,
+        one,
+        _make_space("global"),
+    ).verify()
+    NnImg2col2dOp(
+        input_2d_value,
+        result_2d,
+        symbol_param,
+        three,
+        one,
+        one,
+        one,
+        one,
+        one,
+        one,
+        one,
+        one,
+        _make_space("global"),
+    ).verify()
+    with pytest.raises(VerifyException, match="ph-pw-pl-pr-must-be-non-negative"):
+        NnImg2col2dOp(
+            input_2d_value,
+            result_2d,
+            three,
+            three,
+            one,
+            one,
+            one,
+            one,
+            arith.ConstantOp(IntegerAttr(-1, i32)).result,
+            one,
+            one,
+            one,
+            _make_space("global"),
+        ).verify()
+    with pytest.raises(VerifyException, match="result-shape-stride-must-match-img2col2d-contract"):
+        NnImg2col2dOp(
+            input_2d_value,
+            _make_simple_memory_type(
+                [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(5)],
+                [StringAttr("S"), IntAttr(225), IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)],
+                element_type=Float32Type(),
+            ),
+            three,
+            three,
+            one,
+            one,
+            one,
+            one,
+            one,
+            one,
+            one,
+            one,
+            _make_space("global"),
+        ).verify()

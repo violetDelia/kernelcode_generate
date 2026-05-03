@@ -115,6 +115,12 @@ def test_target_registry_loads_json_specs(tmp_path: Path) -> None:
         ("unknown_field", {"name": "unknown_field", "extra": 1}),
         ("invalid_name", {"name": "BadName"}),
         ("invalid_arch", {"name": "invalid_arch", "arch": "bad"}),
+        ("invalid_arch_field", {"name": "invalid_arch_field", "arch": {"extra": []}}),
+        ("invalid_supported_ops_type", {"name": "invalid_supported_ops_type", "arch": {"supported_ops": "arch.launch"}}),
+        ("invalid_supported_ops_item", {"name": "invalid_supported_ops_item", "arch": {"supported_ops": [1]}}),
+        ("invalid_hardware", {"name": "invalid_hardware", "hardware": "bad"}),
+        ("invalid_hardware_field", {"name": "invalid_hardware_field", "hardware": {"unknown": 1}}),
+        ("invalid_hardware_value", {"name": "invalid_hardware_value", "hardware": {"thread_num": True}}),
     ],
 )
 def test_target_registry_rejects_invalid_specs(
@@ -123,6 +129,27 @@ def test_target_registry_rejects_invalid_specs(
     payload: TargetJsonPayload,
 ) -> None:
     _write_target_json(tmp_path, file_name, payload)
+    with pytest.raises(ValueError):
+        target_registry.load_targets(tmp_path)
+
+
+# TC-TGT-002A
+# 测试目的: 验证 JSON 读取入口拒绝非法 JSON 与非 object 根节点。
+# 对应功能实现文件路径: kernel_gen/target/registry.py
+# 对应 spec 文件路径: spec/target/registry.md
+@pytest.mark.parametrize(
+    ("file_name", "content"),
+    [
+        ("broken_json", "{"),
+        ("list_json", "[]"),
+    ],
+)
+def test_target_registry_rejects_invalid_json_files(
+    tmp_path: Path,
+    file_name: str,
+    content: str,
+) -> None:
+    (tmp_path / f"{file_name}.json").write_text(content, encoding="utf-8")
     with pytest.raises(ValueError):
         target_registry.load_targets(tmp_path)
 
@@ -255,6 +282,15 @@ def test_target_registry_default_directory_idempotent_load() -> None:
     [
         ("bad_key", ["name=bad_key", "arch.supported_ops=", "unknown.key=1"]),
         ("bad_hw", ["name=bad_hw", "arch.supported_ops=", "hw.thread_num=1.5"]),
+        ("bad_line", ["name=bad_line", "arch.supported_ops"]),
+        ("bad_empty_key", ["=bad_empty_key", "name=bad_empty_key"]),
+        ("bad_duplicate_key", ["name=bad_duplicate_key", "name=bad_duplicate_key"]),
+        ("bad_empty_name", ["name="]),
+        ("bad_hw_key", ["name=bad_hw_key", "hw.unknown=1"]),
+        ("bad_hw_empty", ["name=bad_hw_empty", "hw.thread_num="]),
+        ("bad_missing_name", ["arch.supported_ops="]),
+        ("bad_name_mismatch", ["name=other_name"]),
+        ("bad_empty_op", ["name=bad_empty_op", "arch.supported_ops=arch.launch,"]),
     ],
 )
 def test_target_registry_rejects_txt_invalid_fields(
@@ -298,6 +334,51 @@ def test_target_registry_current_target_hardware() -> None:
 def test_target_registry_set_current_target_rejects_unregistered_target() -> None:
     with pytest.raises(ValueError):
         target_registry.set_current_target("missing_current_target")
+
+
+# TC-TGT-008B
+# 测试目的: 通过公开 API 验证 register/query 对非法 TargetSpec 和未注册 target 的错误语义。
+# 对应功能实现文件路径: kernel_gen/target/registry.py
+# 对应 spec 文件路径: spec/target/registry.md
+def test_target_registry_public_api_error_matrix() -> None:
+    bad_supported = target_registry.TargetSpec("bad_supported_matrix", ["arch.launch"], set(), {})
+    bad_unsupported = target_registry.TargetSpec("bad_unsupported_matrix", None, ["arch.launch"], {})
+    bad_supported_item = target_registry.TargetSpec("bad_supported_item_matrix", {1}, set(), {})
+    bad_hardware_key = target_registry.TargetSpec("bad_hardware_key_matrix", None, set(), {"unknown": 1})
+    bad_hardware_value = target_registry.TargetSpec("bad_hardware_value_matrix", None, set(), {"thread_num": True})
+
+    for spec in (
+        bad_supported,
+        bad_unsupported,
+        bad_supported_item,
+        bad_hardware_key,
+        bad_hardware_value,
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            target_registry.register_target(spec)
+
+    duplicate = target_registry.TargetSpec("duplicate_matrix", None, set(), {"thread_num": 1})
+    target_registry.register_target(duplicate)
+    with pytest.raises(ValueError, match="target already registered"):
+        target_registry.register_target(duplicate)
+    with pytest.raises(ValueError, match="target not registered"):
+        target_registry.is_arch_op_supported("missing_query_matrix", "arch.launch")
+    with pytest.raises(ValueError, match="target not registered"):
+        target_registry.get_target_hardware("missing_query_matrix", "thread_num")
+
+
+# TC-TGT-008C
+# 测试目的: 验证 load_targets 公开入口拒绝缺失路径和非目录路径。
+# 对应功能实现文件路径: kernel_gen/target/registry.py
+# 对应 spec 文件路径: spec/target/registry.md
+def test_target_registry_load_targets_rejects_invalid_directory(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="target directory does not exist"):
+        target_registry.load_targets(tmp_path / "missing_targets")
+
+    not_directory = tmp_path / "target.txt"
+    not_directory.write_text("name=target", encoding="utf-8")
+    with pytest.raises(ValueError, match="target directory is not a directory"):
+        target_registry.load_targets(not_directory)
 
 
 def test_target_registry_public_exports_include_current_target_api() -> None:

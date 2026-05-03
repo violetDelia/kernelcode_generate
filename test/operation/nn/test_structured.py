@@ -279,6 +279,13 @@ def test_nn_matmul_dtype_mismatch() -> None:
     assert result.dtype is NumericType.Float32
 
 
+def test_nn_matmul_rejects_unsupported_bool_dtype() -> None:
+    lhs = Memory(["M", "K"], NumericType.Bool)
+    rhs = Memory(["K", "N"], NumericType.Float32)
+    with pytest.raises(KernelCodeError, match="Unsupported dtype for nn.matmul"):
+        _ = matmul(lhs, rhs)
+
+
 # OP-MM-007
 # 测试目的: 验证 matmul space 不一致报错。
 # 使用示例: pytest -q test/operation/nn/test_structured.py -k test_nn_matmul_space_mismatch

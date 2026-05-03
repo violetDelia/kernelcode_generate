@@ -78,6 +78,9 @@
   - `test/passes/lowering/nn_lowering/test_public_name.py`
 - 执行命令：
   - `pytest -q test/passes/lowering/nn_lowering/test_asset_cases.py -k "matmul or img2col"`
+  - `pytest -q test/passes/lowering/nn_lowering/test_matmul.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_img2col1d.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_img2col2d.py`
   - `pytest -q test/passes/lowering/nn_lowering/test_public_name.py -k patterns`
 
 ### 测试目标
@@ -97,3 +100,7 @@
 | TC-PASS-LOWERING-NN-LOWERING-MATMUL-IMG2COL-LOWERING-005 | pass 改写 | `test_nn_lowering_img2col2d_target` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_nn_lowering_img2col2d_target`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_nn_lowering_img2col2d_target`”场景。 | `test_nn_lowering_img2col2d_target` |
 | TC-PASS-LOWERING-NN-LOWERING-MATMUL-IMG2COL-LOWERING-006 | pass 改写 | `test_nn_lowering_img2col2d_accepts_noncanonical_symbol_names` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_nn_lowering_img2col2d_accepts_noncanonical_symbol_names`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_nn_lowering_img2col2d_accepts_noncanonical_symbol_names`”场景。 | `test_nn_lowering_img2col2d_accepts_noncanonical_symbol_names` |
 | TC-PASS-LOWERING-NN-LOWERING-MATMUL-IMG2COL-LOWERING-007 | pass 改写 | `test_nn_lowering_asset_case` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_nn_lowering_asset_case`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_nn_lowering_asset_case`”场景。 | `test_nn_lowering_asset_case` |
+| TC-PASS-LOWERING-NN-LOWERING-MATMUL-IMG2COL-LOWERING-008 | pass 改写 | `test_nn_lowering_matmul_dynamic_output_dims` | 通过公开 `NnMatmulOp` 与 `NnLoweringPass` 构造动态输出维度和符号 stride 的 matmul 输入。 | 运行 `test_nn_lowering_matmul_dynamic_output_dims`。 | 动态输出维度通过 `symbol.get_dim` 接入 `dma.alloc`，并输出 `kernel.matmul`；符号 stride 在非全静态 stride 场景下不触发静态连续性拒绝。 | `test_nn_lowering_matmul_dynamic_output_dims` |
+| TC-PASS-LOWERING-NN-LOWERING-MATMUL-IMG2COL-LOWERING-009 | 边界/异常 | `test_nn_lowering_matmul_public_error_matrix` | 通过公开 `NnMatmulOp` 与 `NnLoweringPass` 构造非 memory operand、rank、contracting dim、输出 shape 与 stride 错误。 | 运行 `test_nn_lowering_matmul_public_error_matrix`。 | 非法 matmul 输入按公开 `KernelCodeError` 语义失败。 | `test_nn_lowering_matmul_public_error_matrix` |
+| TC-PASS-LOWERING-NN-LOWERING-MATMUL-IMG2COL-LOWERING-010 | 边界/异常 | `test_nn_lowering_img2col1d_public_error_matrix` | 通过公开 `NnImg2col1dOp` 与 `NnLoweringPass` 构造非法参数类型、静态源轴动态输出和非法结果 rank。 | 运行 `test_nn_lowering_img2col1d_public_error_matrix`。 | 非法 img2col1d 输入按公开 `KernelCodeError` 语义失败。 | `test_nn_lowering_img2col1d_public_error_matrix` |
+| TC-PASS-LOWERING-NN-LOWERING-MATMUL-IMG2COL-LOWERING-011 | 边界/异常 | `test_nn_lowering_img2col2d_public_error_matrix` | 通过公开 `NnImg2col2dOp` 与 `NnLoweringPass` 构造非法参数类型、静态源轴动态输出和非法结果 rank。 | 运行 `test_nn_lowering_img2col2d_public_error_matrix`。 | 非法 img2col2d 输入按公开 `KernelCodeError` 语义失败。 | `test_nn_lowering_img2col2d_public_error_matrix` |

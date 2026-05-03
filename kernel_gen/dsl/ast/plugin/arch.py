@@ -37,6 +37,7 @@ from kernel_gen.dsl.ast.nodes import (
     Diagnostic,
     ListAST,
     PythonObjectAttrAST,
+    TupleAST,
 )
 from kernel_gen.dsl.ast.plugin.registry import BuiltinCall, dsl_builtin
 from kernel_gen.operation import arch
@@ -87,7 +88,7 @@ def _build_barrier(node: BuiltinCall) -> ArchBarrierAST:
         scope = scope_arg.attr
     else:
         scope = scope_arg
-    if isinstance(visibility, ListAST):
+    if isinstance(visibility, (ListAST, TupleAST)):
         visibility_items = []
         for item in visibility.items:
             if isinstance(item, ConstValueAST):
@@ -105,6 +106,12 @@ def _build_barrier(node: BuiltinCall) -> ArchBarrierAST:
             visibility_items = visibility
     if not isinstance(visibility_items, list) or not visibility_items or not all(isinstance(item, BarrierVisibility) for item in visibility_items):
         diagnostic = Diagnostic("barrier visibility must be non-empty BarrierVisibility list", location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
+    if len(set(visibility_items)) != len(visibility_items):
+        diagnostic = Diagnostic("barrier visibility must not contain duplicates", location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
+    if set(visibility_items) != {BarrierVisibility.TSM, BarrierVisibility.TLM}:
+        diagnostic = Diagnostic("barrier visibility must contain TSM and TLM exactly once", location)
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
     if not isinstance(scope, BarrierScope):
         diagnostic = Diagnostic("barrier scope must be BarrierScope", location)

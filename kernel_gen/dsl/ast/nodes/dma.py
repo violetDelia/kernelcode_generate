@@ -30,7 +30,9 @@ API 列表:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import ClassVar, TypeAlias
 
 from xdsl.context import Context
 from xdsl.dialects import arith
@@ -69,6 +71,8 @@ from .symbol import (
     SymbolSubAST,
     SymbolTrueDivAST,
 )
+
+SymbolRuntimeValue: TypeAlias = "int | float | str | bool | SymbolDim"
 
 
 @dataclass
@@ -137,7 +141,7 @@ class DmaAllocAST(ValueAST):
         shape = self.shape.result_symbols()
         if shape is None:
             return None
-        stride: list[object] | None = None
+        stride: list[SymbolRuntimeValue] | None = None
         if self.stride is not None:
             stride = self.stride.result_symbols()
             if stride is None:
@@ -169,8 +173,8 @@ class DmaAllocAST(ValueAST):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "alloc dtype must be a public dtype attr")
         space_value = self.space.space
         shape_items = list(self.shape.items)
-        shape_values: list[object] = []
-        shape_attr_values: list[object] = []
+        shape_values: list[SymbolRuntimeValue] = []
+        shape_attr_values: list[SymbolRuntimeValue] = []
         dynamic_shape: list[SSAValue] = []
         pre_emitted_shape_values: dict[int, SSAValue] = {}
         if any(isinstance(item, SymbolBinaryAST) for item in shape_items):
@@ -247,7 +251,7 @@ class DmaAllocAST(ValueAST):
                 shape_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
                 shape_attr_values.append(value)
                 dynamic_shape.append(emitted_value)
-        stride_values: list[object] | None = None
+        stride_values: list[SymbolRuntimeValue] | None = None
         if self.stride is not None:
             stride_values = []
             stride_items = list(self.stride.items)
@@ -507,7 +511,7 @@ class DmaViewAST(ValueAST):
         if not isinstance(source, SSAValue):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "view source must lower to SSA value")
         offsets: list[SSAValue] = []
-        offset_values: list[object] = []
+        offset_values: list[SymbolRuntimeValue] = []
         offset_items = list(self.offset.items)
         for item in offset_items:
             emitted = item.emit_mlir(ctx, block)
@@ -520,7 +524,7 @@ class DmaViewAST(ValueAST):
             offsets.append(emitted)
             offset_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
         sizes: list[SSAValue] = []
-        size_values: list[object] = []
+        size_values: list[SymbolRuntimeValue] = []
         static_size_cache: dict[int, SSAValue] = {}
         size_items = list(self.size.items)
         for item in size_items:
@@ -540,7 +544,7 @@ class DmaViewAST(ValueAST):
             sizes.append(emitted)
             size_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
         strides: list[SSAValue] = []
-        stride_values: list[object] = []
+        stride_values: list[SymbolRuntimeValue] = []
         stride_items = list(self.stride.items)
         for item in stride_items:
             emitted = item.emit_mlir(ctx, block)
@@ -618,7 +622,7 @@ class DmaReshapeAST(ValueAST):
         if not isinstance(source, SSAValue):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reshape source must lower to SSA value")
         shape_items = list(self.shape.items)
-        shape_values: list[object] = []
+        shape_values: list[SymbolRuntimeValue] = []
         shape_operands: list[SSAValue] = []
         for item in shape_items:
             emitted = item.emit_mlir(ctx, block)
@@ -859,22 +863,8 @@ class DmaFillAST(StatementAST):
 
 
 @dataclass
-class DmaLoadAST(ValueAST):
-    """load helper 专用注册节点。
-
-
-    功能说明:
-    - 表示 `dma.load(source, offset, size, stride=None, space=None)` 调用。
-    - lowering 生成内部 target alloc 后发射 target-first `dma.slice`。
-
-    使用示例:
-    - DmaLoadAST(source, [0], [4], [1]).emit_mlir(ctx, block)
-
-    关联文件:
-    - spec: spec/dsl/ast/nodes/dma.md
-    - test: test/dsl/ast/nodes/test_dma.py
-    - 功能实现: kernel_gen/dsl/ast/nodes/dma.py
-    """
+class _ReadSliceDmaAST(ValueAST):
+    """load/slice 读取类 DMA AST 的当前文件内共享实现。"""
 
     source: ValueAST
     offset: SymbolListAST
@@ -882,6 +872,9 @@ class DmaLoadAST(ValueAST):
     stride: SymbolListAST | None = None
     space: MemorySpaceAttrAST | None = None
     location: SourceLocation | None = None
+
+    _op_name: ClassVar[str]
+    _semantic_op: ClassVar[Callable[..., Memory]]
 
     def __post_init__(self) -> None:
         if not isinstance(self.source, ValueAST):
@@ -896,16 +889,14 @@ class DmaLoadAST(ValueAST):
             self.space = MemorySpaceAttrAST(self.space, self.location)
 
     def result_memory(self) -> Memory | None:
-        """返回 `dma.load` 的解析期 memory 结果。
-
-        创建者: 榕
-        最后一次更改: 2026-05-03
+        """返回读取类 DMA 节点的解析期 memory 结果。
 
         功能说明:
-        - load 结果由 source、offset、size、stride 与目标 space 决定。
+        - 通过公开 `dma.load` / `dma.slice` operation 语义推导结果。
+        - stride 缺省时沿用公开 operation 默认行为。
 
         使用示例:
-        - memory = load_ast.result_memory()
+        - memory = read_dma_ast.result_memory()
         """
 
         source = self.source.result_memory()
@@ -916,133 +907,71 @@ class DmaLoadAST(ValueAST):
             return None
         if self.stride is not None and strides is None:
             return None
-        return dma.load(source, offsets, sizes, strides, self.space.space if self.space is not None else None)
+        return type(self)._semantic_op(source, offsets, sizes, strides, self.space.space if self.space is not None else None)
 
-    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """将 DMA load 节点发射为 `dma.alloc + dma.slice`。"""
-
-        assert isinstance(ctx, Context)
-        assert isinstance(block, Block)
-        source = self.source.emit_mlir(ctx, block)
-        if isinstance(source, Operation):
-            block.add_op(source)
-            source = source.results[0]
-        if not isinstance(source, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "load source must lower to SSA value")
-        offset_items = list(self.offset.items)
-        size_items = list(self.size.items)
-        stride_items = list(self.stride.items) if self.stride is not None else [ConstValueAST(1, location=self.location) for _ in size_items]
-        offsets: list[SSAValue] = []
-        for item in offset_items:
-            emitted = item.emit_mlir(ctx, block)
-            if isinstance(emitted, Operation):
-                block.add_op(emitted)
-                emitted_value = emitted.results[0]
-            else:
-                emitted_value = emitted
-            if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, (SymbolValueType, SymbolIterType)):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "load offset must lower to symbol.int")
-            offsets.append(emitted_value)
-        sizes: list[SSAValue] = []
-        dynamic_shape: list[SSAValue] = []
-        for item in size_items:
-            emitted = item.emit_mlir(ctx, block)
-            if isinstance(emitted, Operation):
-                block.add_op(emitted)
-                emitted_value = emitted.results[0]
-            else:
-                emitted_value = emitted
-            if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, SymbolValueType):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "load size must lower to symbol.int")
-            value = emitted_value.type.get_value()
-            sizes.append(emitted_value)
-            if not isinstance(value, int):
-                dynamic_shape.append(emitted_value)
-        strides: list[SSAValue] = []
-        for item in stride_items:
-            emitted = item.emit_mlir(ctx, block)
-            if isinstance(emitted, Operation):
-                block.add_op(emitted)
-                emitted_value = emitted.results[0]
-            else:
-                emitted_value = emitted
-            if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, SymbolValueType):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "load stride must lower to symbol.int")
-            strides.append(emitted_value)
-        if not isinstance(source.type, NnMemoryType):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "load source must lower to nn.memory")
-        result_memory = self.result_memory()
-        if not isinstance(result_memory, Memory):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "load result memory must be known from AST")
-        result_type = MemoryAST.type_from_memory(ctx, result_memory, self.location)
-        alloc_op = DmaAllocOp(dynamic_shape, result_type)
-        block.add_op(alloc_op)
-        block.add_op(DmaSliceOp(alloc_op.results[0], source, offsets, sizes, strides))
-        return alloc_op.results[0]
-
-
-@dataclass
-class DmaSliceAST(ValueAST):
-    """slice helper 专用注册节点。
-
-
-    功能说明:
-    - 表示 `dma.slice(source, offset, size, stride=None, space=None)` 调用。
-    - lowering 生成内部 target alloc 后发射 target-first `dma.slice`。
-
-    使用示例:
-    - DmaSliceAST(source, [0], [4], [1]).emit_mlir(ctx, block)
-
-    关联文件:
-    - spec: spec/dsl/ast/nodes/dma.md
-    - test: test/dsl/ast/nodes/test_dma.py
-    - 功能实现: kernel_gen/dsl/ast/nodes/dma.py
-    """
-
-    source: ValueAST
-    offset: SymbolListAST
-    size: SymbolListAST
-    stride: SymbolListAST | None = None
-    space: MemorySpaceAttrAST | None = None
-    location: SourceLocation | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.source, ValueAST):
-            self.source = ConstValueAST(self.source, location=self.location)
-        if not isinstance(self.offset, SymbolListAST):
-            self.offset = SymbolListAST(self.offset, self.location)
-        if not isinstance(self.size, SymbolListAST):
-            self.size = SymbolListAST(self.size, self.location)
-        if self.stride is not None and not isinstance(self.stride, SymbolListAST):
-            self.stride = SymbolListAST(self.stride, self.location)
-        if self.space is not None and not isinstance(self.space, MemorySpaceAttrAST):
-            self.space = MemorySpaceAttrAST(self.space, self.location)
-
-    def result_memory(self) -> Memory | None:
-        """返回 `dma.slice` 的解析期 memory 结果。
-
-        创建者: 榕
-        最后一次更改: 2026-05-03
+    def _stride_items(self) -> list[ValueAST]:
+        """返回显式或默认 stride AST 项。
 
         功能说明:
-        - slice 结果由 source、offset、size、stride 与目标 space 决定。
+        - 未传 stride 时按 size rank 生成公开常量 1。
 
         使用示例:
-        - memory = slice_ast.result_memory()
+        - items = self._stride_items()
         """
 
-        source = self.source.result_memory()
-        offsets = self.offset.result_symbols()
-        sizes = self.size.result_symbols()
-        strides = self.stride.result_symbols() if self.stride is not None else None
-        if not isinstance(source, Memory) or offsets is None or sizes is None:
-            return None
-        if self.stride is not None and strides is None:
-            return None
-        return dma.slice(source, offsets, sizes, strides, self.space.space if self.space is not None else None)
+        if self.stride is not None:
+            return list(self.stride.items)
+        return [ConstValueAST(1, location=self.location) for _ in self.size.items]
+
+    def _emit_symbol_operands(
+        self,
+        ctx: Context,
+        block: Block,
+        items: list[ValueAST],
+        message: str,
+        *,
+        allow_iter: bool = False,
+        collect_dynamic: bool = False,
+    ) -> tuple[list[SSAValue], list[SSAValue]]:
+        """发射 symbol operand 列表。
+
+        功能说明:
+        - offset 可选择接受 loop iterator。
+        - size 可按非静态维度收集 dynamic shape。
+
+        使用示例:
+        - operands, dynamic_shape = self._emit_symbol_operands(ctx, block, items, message)
+        """
+
+        operands: list[SSAValue] = []
+        dynamic_shape: list[SSAValue] = []
+        valid_types = (SymbolValueType, SymbolIterType) if allow_iter else (SymbolValueType,)
+        for item in items:
+            emitted = item.emit_mlir(ctx, block)
+            if isinstance(emitted, Operation):
+                block.add_op(emitted)
+                emitted_value = emitted.results[0]
+            else:
+                emitted_value = emitted
+            if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, valid_types):
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, message)
+            operands.append(emitted_value)
+            if collect_dynamic:
+                value = emitted_value.type.get_value()
+                if not isinstance(value, int):
+                    dynamic_shape.append(emitted_value)
+        return operands, dynamic_shape
 
     def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """将 DMA slice 节点发射为 `dma.alloc + dma.slice`。"""
+        """将读取类 DMA 节点发射为 `dma.alloc + dma.slice`。
+
+        功能说明:
+        - `load` 与 `slice` 共享同一 IR 形态。
+        - 结果类型必须来自当前 AST 的 `result_memory()`。
+
+        使用示例:
+        - value = read_dma_ast.emit_mlir(ctx, block)
+        """
 
         assert isinstance(ctx, Context)
         assert isinstance(block, Block)
@@ -1051,52 +980,32 @@ class DmaSliceAST(ValueAST):
             block.add_op(source)
             source = source.results[0]
         if not isinstance(source, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "slice source must lower to SSA value")
-        offset_items = list(self.offset.items)
-        size_items = list(self.size.items)
-        stride_items = list(self.stride.items) if self.stride is not None else [ConstValueAST(1, location=self.location) for _ in size_items]
-        offsets: list[SSAValue] = []
-        for item in offset_items:
-            emitted = item.emit_mlir(ctx, block)
-            if isinstance(emitted, Operation):
-                block.add_op(emitted)
-                emitted_value = emitted.results[0]
-            else:
-                emitted_value = emitted
-            if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, (SymbolValueType, SymbolIterType)):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "slice offset must lower to symbol.int")
-            offsets.append(emitted_value)
-        sizes: list[SSAValue] = []
-        dynamic_shape: list[SSAValue] = []
-        for item in size_items:
-            emitted = item.emit_mlir(ctx, block)
-            if isinstance(emitted, Operation):
-                block.add_op(emitted)
-                emitted_value = emitted.results[0]
-            else:
-                emitted_value = emitted
-            if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, SymbolValueType):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "slice size must lower to symbol.int")
-            value = emitted_value.type.get_value()
-            sizes.append(emitted_value)
-            if not isinstance(value, int):
-                dynamic_shape.append(emitted_value)
-        strides: list[SSAValue] = []
-        for item in stride_items:
-            emitted = item.emit_mlir(ctx, block)
-            if isinstance(emitted, Operation):
-                block.add_op(emitted)
-                emitted_value = emitted.results[0]
-            else:
-                emitted_value = emitted
-            if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, SymbolValueType):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "slice stride must lower to symbol.int")
-            strides.append(emitted_value)
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{self._op_name} source must lower to SSA value")
+        offsets, _ = self._emit_symbol_operands(
+            ctx,
+            block,
+            list(self.offset.items),
+            f"{self._op_name} offset must lower to symbol.int",
+            allow_iter=True,
+        )
+        sizes, dynamic_shape = self._emit_symbol_operands(
+            ctx,
+            block,
+            list(self.size.items),
+            f"{self._op_name} size must lower to symbol.int",
+            collect_dynamic=True,
+        )
+        strides, _ = self._emit_symbol_operands(
+            ctx,
+            block,
+            self._stride_items(),
+            f"{self._op_name} stride must lower to symbol.int",
+        )
         if not isinstance(source.type, NnMemoryType):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "slice source must lower to nn.memory")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{self._op_name} source must lower to nn.memory")
         result_memory = self.result_memory()
         if not isinstance(result_memory, Memory):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "slice result memory must be known from AST")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{self._op_name} result memory must be known from AST")
         result_type = MemoryAST.type_from_memory(ctx, result_memory, self.location)
         alloc_op = DmaAllocOp(dynamic_shape, result_type)
         block.add_op(alloc_op)
@@ -1105,22 +1014,24 @@ class DmaSliceAST(ValueAST):
 
 
 @dataclass
-class DmaStoreAST(StatementAST):
-    """store helper 专用注册节点。
+class DmaLoadAST(_ReadSliceDmaAST):
+    """load helper 专用注册节点。"""
+
+    _op_name: ClassVar[str] = "load"
+    _semantic_op: ClassVar[Callable[..., Memory]] = dma.load
 
 
-    功能说明:
-    - 表示 target-first `dma.store(target, source, offset, size, stride=None)` 调用。
-    - 节点自身直接 emit，不再通过 `StoreAST(kind="store")` 二次分派。
+@dataclass
+class DmaSliceAST(_ReadSliceDmaAST):
+    """slice helper 专用注册节点。"""
 
-    使用示例:
-    - DmaStoreAST(target, source, [0], [4], [1]).emit_mlir(ctx, block)
+    _op_name: ClassVar[str] = "slice"
+    _semantic_op: ClassVar[Callable[..., Memory]] = dma.slice
 
-    关联文件:
-    - spec: spec/dsl/ast/nodes/dma.md
-    - test: test/dsl/ast/nodes/test_dma.py
-    - 功能实现: kernel_gen/dsl/ast/nodes/dma.py
-    """
+
+@dataclass
+class _WriteSliceDmaAST(StatementAST):
+    """store/deslice 写回类 DMA AST 的当前文件内共享实现。"""
 
     target: ValueAST
     source: ValueAST
@@ -1129,6 +1040,8 @@ class DmaStoreAST(StatementAST):
     stride: SymbolListAST | None = None
     space: MemorySpaceAttrAST | None = None
     location: SourceLocation | None = None
+
+    _op_name: ClassVar[str]
 
     def __post_init__(self) -> None:
         if not isinstance(self.target, ValueAST):
@@ -1144,8 +1057,100 @@ class DmaStoreAST(StatementAST):
         if self.space is not None and not isinstance(self.space, MemorySpaceAttrAST):
             self.space = MemorySpaceAttrAST(self.space, self.location)
 
+    def _stride_items(self) -> list[ValueAST]:
+        """返回显式或默认 stride AST 项。
+
+        功能说明:
+        - 未传 stride 时按 size rank 生成公开常量 1。
+
+        使用示例:
+        - items = self._stride_items()
+        """
+
+        if self.stride is not None:
+            return list(self.stride.items)
+        return [ConstValueAST(1, location=self.location) for _ in self.size.items]
+
+    def _emit_symbol_operands(
+        self,
+        ctx: Context,
+        block: Block,
+        items: list[ValueAST],
+        message: str,
+        *,
+        allow_iter: bool = False,
+    ) -> tuple[list[SSAValue], list[int | str | SymbolDim]]:
+        """发射 symbol operand 与公开语义值列表。
+
+        功能说明:
+        - 写回类 op 需要同时构造 dialect operand 和公开 operation 校验值。
+
+        使用示例:
+        - operands, values = self._emit_symbol_operands(ctx, block, items, message)
+        """
+
+        operands: list[SSAValue] = []
+        values: list[int | str | SymbolDim] = []
+        valid_types = (SymbolValueType, SymbolIterType) if allow_iter else (SymbolValueType,)
+        for item in items:
+            emitted = item.emit_mlir(ctx, block)
+            if isinstance(emitted, Operation):
+                block.add_op(emitted)
+                emitted_value = emitted.results[0]
+            else:
+                emitted_value = emitted
+            if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, valid_types):
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, message)
+            if isinstance(emitted_value.type, SymbolIterType):
+                value = SymbolDim(emitted_value.name_hint or "it")
+            else:
+                raw_value = emitted_value.type.get_value()
+                value = raw_value if isinstance(raw_value, int) else SymbolDim(raw_value.replace(" ", "") if isinstance(raw_value, str) else raw_value)
+            operands.append(emitted_value)
+            values.append(value)
+        return operands, values
+
+    def _validate_public_semantics(
+        self,
+        target: SSAValue,
+        source: SSAValue,
+        offsets: list[int | str | SymbolDim],
+        sizes: list[int | str | SymbolDim],
+        strides: list[int | str | SymbolDim],
+    ) -> None:
+        """校验写回类 op 的公开 operation 语义。
+
+        功能说明:
+        - 子类按自身公开 operation 选择校验规则。
+
+        使用示例:
+        - self._validate_public_semantics(target, source, offsets, sizes, strides)
+        """
+
+        _ = (target, source, offsets, sizes, strides)
+
+    def _build_dma_op(self, target: SSAValue, source: SSAValue, offsets: list[SSAValue], sizes: list[SSAValue], strides: list[SSAValue]) -> Operation:
+        """构造具体 DMA dialect op。
+
+        功能说明:
+        - 子类返回 `DmaStoreOp` 或 `DmaDesliceOp`。
+
+        使用示例:
+        - op = self._build_dma_op(target, source, offsets, sizes, strides)
+        """
+
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"Unsupported {self._op_name} op")
+
     def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """将 DMA store 节点发射为 `dma.store`。"""
+        """将写回类 DMA 节点发射为对应 DMA op。
+
+        功能说明:
+        - `store` 与 `deslice` 共享 target/source 与 offset/size/stride 发射流程。
+        - 子类保留各自公开语义校验和 dialect op 构造。
+
+        使用示例:
+        - op = write_dma_ast.emit_mlir(ctx, block)
+        """
 
         assert isinstance(ctx, Context)
         assert isinstance(block, Block)
@@ -1158,170 +1163,110 @@ class DmaStoreAST(StatementAST):
             block.add_op(source)
             source = source.results[0]
         if not isinstance(target, SSAValue) or not isinstance(source, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "store operands must lower to SSA values")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{self._op_name} operands must lower to SSA values")
+        offsets, offset_values = self._emit_symbol_operands(
+            ctx,
+            block,
+            list(self.offset.items),
+            f"{self._op_name} offset must lower to symbol.int",
+            allow_iter=True,
+        )
+        sizes, size_values = self._emit_symbol_operands(ctx, block, list(self.size.items), f"{self._op_name} size must lower to symbol.int")
+        strides, stride_values = self._emit_symbol_operands(ctx, block, self._stride_items(), f"{self._op_name} stride must lower to symbol.int")
+        self._validate_public_semantics(target, source, offset_values, size_values, stride_values)
+        return self._build_dma_op(target, source, offsets, sizes, strides)
+
+
+@dataclass
+class DmaStoreAST(_WriteSliceDmaAST):
+    """store helper 专用注册节点。"""
+
+    _op_name: ClassVar[str] = "store"
+
+    def _validate_public_semantics(
+        self,
+        target: SSAValue,
+        source: SSAValue,
+        offsets: list[int | str | SymbolDim],
+        sizes: list[int | str | SymbolDim],
+        strides: list[int | str | SymbolDim],
+    ) -> None:
+        """校验 `dma.store` 的公开 memory 语义。
+
+        功能说明:
+        - source 必须为 memory SSA。
+        - target 不是 `MemoryAST` 时保持既有公开错误。
+
+        使用示例:
+        - self._validate_public_semantics(target, source, offsets, sizes, strides)
+        """
+
+        _ = target
         if not isinstance(source.type, NnMemoryType):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "store source must lower to nn.memory")
-        offset_items = list(self.offset.items)
-        size_items = list(self.size.items)
-        stride_items = list(self.stride.items) if self.stride is not None else [ConstValueAST(1, location=self.location) for _ in size_items]
-        offsets: list[SSAValue] = []
-        offset_values: list[object] = []
-        for item in offset_items:
-            emitted = item.emit_mlir(ctx, block)
-            if isinstance(emitted, Operation):
-                block.add_op(emitted)
-                emitted_value = emitted.results[0]
-            else:
-                emitted_value = emitted
-            if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, (SymbolValueType, SymbolIterType)):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "store offset must lower to symbol.int")
-            value = SymbolDim(emitted_value.name_hint or "it") if isinstance(emitted_value.type, SymbolIterType) else emitted_value.type.get_value()
-            offsets.append(emitted_value)
-            offset_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
-        sizes: list[SSAValue] = []
-        size_values: list[object] = []
-        for item in size_items:
-            emitted = item.emit_mlir(ctx, block)
-            if isinstance(emitted, Operation):
-                block.add_op(emitted)
-                emitted_value = emitted.results[0]
-            else:
-                emitted_value = emitted
-            if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, SymbolValueType):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "store size must lower to symbol.int")
-            value = emitted_value.type.get_value()
-            sizes.append(emitted_value)
-            size_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
-        strides: list[SSAValue] = []
-        stride_values: list[object] = []
-        for item in stride_items:
-            emitted = item.emit_mlir(ctx, block)
-            if isinstance(emitted, Operation):
-                block.add_op(emitted)
-                emitted_value = emitted.results[0]
-            else:
-                emitted_value = emitted
-            if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, SymbolValueType):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "store stride must lower to symbol.int")
-            value = emitted_value.type.get_value()
-            strides.append(emitted_value)
-            stride_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
         try:
             if not isinstance(self.target, MemoryAST):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "store target must be MemoryAST")
             if isinstance(self.source, MemoryAST):
-                dma.store(self.target.memory, self.source.memory, offset_values, size_values, stride_values)
+                dma.store(self.target.memory, self.source.memory, offsets, sizes, strides)
         except ValueError as exc:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, str(exc)) from exc
+
+    def _build_dma_op(self, target: SSAValue, source: SSAValue, offsets: list[SSAValue], sizes: list[SSAValue], strides: list[SSAValue]) -> Operation:
+        """构造 `DmaStoreOp`。
+
+        功能说明:
+        - 使用 target-first operand 顺序。
+
+        使用示例:
+        - op = self._build_dma_op(target, source, offsets, sizes, strides)
+        """
+
         return DmaStoreOp(target, source, offsets, sizes, strides)
 
 
 @dataclass
-class DmaDesliceAST(StatementAST):
-    """deslice helper 专用注册节点。
+class DmaDesliceAST(_WriteSliceDmaAST):
+    """deslice helper 专用注册节点。"""
 
+    _op_name: ClassVar[str] = "deslice"
 
-    功能说明:
-    - 表示 target-first `dma.deslice(target, source, offset, size, stride=None)` 调用。
-    - 节点自身直接 emit，不再通过 `StoreAST(kind="deslice")` 二次分派。
+    def _validate_public_semantics(
+        self,
+        target: SSAValue,
+        source: SSAValue,
+        offsets: list[int | str | SymbolDim],
+        sizes: list[int | str | SymbolDim],
+        strides: list[int | str | SymbolDim],
+    ) -> None:
+        """校验 `dma.deslice` 的公开 memory 语义。
 
-    使用示例:
-    - DmaDesliceAST(target, source, [0], [4], [1]).emit_mlir(ctx, block)
+        功能说明:
+        - target 必须为 memory SSA。
+        - 当 target/source 均为 MemoryAST 时执行公开 operation 校验。
 
-    关联文件:
-    - spec: spec/dsl/ast/nodes/dma.md
-    - test: test/dsl/ast/nodes/test_dma.py
-    - 功能实现: kernel_gen/dsl/ast/nodes/dma.py
-    """
+        使用示例:
+        - self._validate_public_semantics(target, source, offsets, sizes, strides)
+        """
 
-    target: ValueAST
-    source: ValueAST
-    offset: SymbolListAST
-    size: SymbolListAST
-    stride: SymbolListAST | None = None
-    space: MemorySpaceAttrAST | None = None
-    location: SourceLocation | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.target, ValueAST):
-            self.target = ConstValueAST(self.target, location=self.location)
-        if not isinstance(self.source, ValueAST):
-            self.source = ConstValueAST(self.source, location=self.location)
-        if not isinstance(self.offset, SymbolListAST):
-            self.offset = SymbolListAST(self.offset, self.location)
-        if not isinstance(self.size, SymbolListAST):
-            self.size = SymbolListAST(self.size, self.location)
-        if self.stride is not None and not isinstance(self.stride, SymbolListAST):
-            self.stride = SymbolListAST(self.stride, self.location)
-        if self.space is not None and not isinstance(self.space, MemorySpaceAttrAST):
-            self.space = MemorySpaceAttrAST(self.space, self.location)
-
-    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """将 DMA deslice 节点发射为 `dma.deslice`。"""
-
-        assert isinstance(ctx, Context)
-        assert isinstance(block, Block)
-        target = self.target.emit_mlir(ctx, block)
-        if isinstance(target, Operation):
-            block.add_op(target)
-            target = target.results[0]
-        source = self.source.emit_mlir(ctx, block)
-        if isinstance(source, Operation):
-            block.add_op(source)
-            source = source.results[0]
-        if not isinstance(target, SSAValue) or not isinstance(source, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "deslice operands must lower to SSA values")
-        offset_items = list(self.offset.items)
-        size_items = list(self.size.items)
-        stride_items = list(self.stride.items) if self.stride is not None else [ConstValueAST(1, location=self.location) for _ in size_items]
-        offsets: list[SSAValue] = []
-        offset_values: list[object] = []
-        for item in offset_items:
-            emitted = item.emit_mlir(ctx, block)
-            if isinstance(emitted, Operation):
-                block.add_op(emitted)
-                emitted_value = emitted.results[0]
-            else:
-                emitted_value = emitted
-            if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, (SymbolValueType, SymbolIterType)):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "deslice offset must lower to symbol.int")
-            value = SymbolDim(emitted_value.name_hint or "it") if isinstance(emitted_value.type, SymbolIterType) else emitted_value.type.get_value()
-            offsets.append(emitted_value)
-            offset_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
-        sizes: list[SSAValue] = []
-        size_values: list[object] = []
-        for item in size_items:
-            emitted = item.emit_mlir(ctx, block)
-            if isinstance(emitted, Operation):
-                block.add_op(emitted)
-                emitted_value = emitted.results[0]
-            else:
-                emitted_value = emitted
-            if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, SymbolValueType):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "deslice size must lower to symbol.int")
-            value = emitted_value.type.get_value()
-            sizes.append(emitted_value)
-            size_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
-        strides: list[SSAValue] = []
-        stride_values: list[object] = []
-        for item in stride_items:
-            emitted = item.emit_mlir(ctx, block)
-            if isinstance(emitted, Operation):
-                block.add_op(emitted)
-                emitted_value = emitted.results[0]
-            else:
-                emitted_value = emitted
-            if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, SymbolValueType):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "deslice stride must lower to symbol.int")
-            value = emitted_value.type.get_value()
-            strides.append(emitted_value)
-            stride_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
         if isinstance(self.source, MemoryAST) and isinstance(self.target, MemoryAST):
             try:
-                dma.deslice(self.target.memory, self.source.memory, offset_values, size_values, stride_values)
+                dma.deslice(self.target.memory, self.source.memory, offsets, sizes, strides)
             except ValueError as exc:
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, str(exc)) from exc
-        result_type = target.type
-        if not isinstance(result_type, NnMemoryType):
+        if not isinstance(target.type, NnMemoryType):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "deslice target must be nn.memory")
-        return DmaDesliceOp(target, source, offsets, sizes, strides, result_type)
+        _ = source
+
+    def _build_dma_op(self, target: SSAValue, source: SSAValue, offsets: list[SSAValue], sizes: list[SSAValue], strides: list[SSAValue]) -> Operation:
+        """构造 `DmaDesliceOp`。
+
+        功能说明:
+        - deslice 保留 target type 作为 out-param result type。
+
+        使用示例:
+        - op = self._build_dma_op(target, source, offsets, sizes, strides)
+        """
+
+        assert isinstance(target.type, NnMemoryType)
+        return DmaDesliceOp(target, source, offsets, sizes, strides, target.type)

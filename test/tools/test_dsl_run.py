@@ -90,6 +90,33 @@ class _NonModulePipelineResult:
     """Sentinel result used to exercise public pipeline return validation."""
 
 
+class _FallbackNamedCpuLaunchPipeline(PassManager):
+    """自定义 pipeline：覆盖 `run(...)` 并返回最小 launch wrapper。"""
+
+    name = ""
+
+    def run(self, module: ModuleOp) -> ModuleOp:
+        _ = module
+        return _make_launch_only_module(callee="_device_kernel")
+
+
+class _ClearingTargetPipeline(PassManager):
+    """自定义 pipeline：模拟公开 pipeline 执行后 target 配置失效。"""
+
+    def run(self, module: ModuleOp) -> ModuleOp:
+        _ = module
+        set_target("")
+        return _make_launch_only_module(callee="_device_kernel")
+
+
+class _NonModuleResultPipeline(PassManager):
+    """自定义 pipeline：返回非 `ModuleOp` 以触发公开 pipeline 结果校验。"""
+
+    def run(self, module: ModuleOp) -> _NonModulePipelineResult:
+        _ = module
+        return _NonModulePipelineResult()
+
+
 @pytest.fixture(autouse=True)
 def _isolated_target_registry() -> None:
     """隔离 `dsl_run` 测试期间的 target registry 全局状态。
@@ -393,6 +420,44 @@ def test_dsl_run_empty_dump_dir_disables_dump(tmp_path: Path, monkeypatch: pytes
 
     assert result.execute_result.ok is True
     assert not (tmp_path / "add_kernel").exists()
+
+
+# TC-DSL-RUN-001C
+# 测试目的: 锁定 dump_dir 非空且函数名为空时使用 `kernel` 作为诊断子目录名，不影响后续公开 arity 校验。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_empty_function_name_uses_kernel_dump_fallback(tmp_path: Path) -> None:
+    original_name = add_kernel.__name__
+    set_dump_dir(tmp_path)
+    add_kernel.__name__ = ""
+    try:
+        with pytest.raises(KernelCodeError, match=_EXPECTED_ARITY_MESSAGE):
+            dsl_run(add_kernel, (), "npu-demo-lowering")
+    finally:
+        add_kernel.__name__ = original_name
+
+
+# TC-DSL-RUN-001D
+# 测试目的: 锁定覆盖 `run(...)` 的自定义 PassManager 仍写入初始 IR 与粗粒度 pipeline dump。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_custom_pipeline_dump_uses_public_fallback_name(tmp_path: Path) -> None:
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+
+    set_target("cpu")
+    set_dump_dir(tmp_path)
+    with pytest.raises(KernelCodeError, match=r"^target=cpu: arch\.launch: unsupported op$"):
+        dsl_run(add_kernel, (out, lhs, rhs), _FallbackNamedCpuLaunchPipeline())
+
+    dump_dir = tmp_path / "add_kernel"
+    assert (dump_dir / "01-first-ir.mlir").is_file()
+    pipeline_dump = dump_dir / "02-pipeline.mlir"
+    assert pipeline_dump.is_file()
+    assert pipeline_dump.read_text(encoding="utf-8").splitlines()[0] == "pipeline"
 
 
 # TC-DSL-RUN-002
@@ -779,6 +844,20 @@ def test_dsl_run_rejects_empty_core_target_name() -> None:
         dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
 
 
+# TC-DSL-RUN-008C
+# 测试目的: 锁定 pipeline 执行后若 core target 失效，源码生成入口仍按公开 target 错误失败。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_rejects_target_cleared_after_pipeline() -> None:
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+
+    with pytest.raises(KernelCodeError, match=_EXPECTED_TARGET_MESSAGE):
+        dsl_run(add_kernel, (out, lhs, rhs), _ClearingTargetPipeline())
+
+
 # TC-DSL-RUN-009
 # 最后更改: 朽木露琪亚
 # 测试目的: 锁定非法 runtime 参数类型的固定失败短语。
@@ -806,6 +885,35 @@ def test_dsl_run_rejects_non_positive_tile_runtime_scalar() -> None:
 
     with pytest.raises(KernelCodeError, match=_EXPECTED_TILE_VALUE_MESSAGE):
         dsl_run(add_dynamic_tile_kernel, (out, lhs, rhs, 0), "npu-demo-lowering")
+
+
+# TC-DSL-RUN-009B
+# 测试目的: 锁定不受支持的 numpy dtype 会在公开 real_args 转换阶段失败。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_rejects_unsupported_numpy_dtype() -> None:
+    out = np.empty((6,), dtype=np.complex64)
+    lhs = np.ones((6,), dtype=np.complex64)
+    rhs = np.ones((6,), dtype=np.complex64)
+
+    with pytest.raises(KernelCodeError, match=_EXPECTED_REAL_ARG_TYPE_MESSAGE):
+        dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
+
+
+# TC-DSL-RUN-009C
+# 测试目的: 锁定 torch.bfloat16 运行时 dtype 映射到 DSL dtype 后再进入公开 pipeline 结果校验。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_maps_bfloat16_runtime_dtype_before_pipeline_validation() -> None:
+    out = torch.empty((6,), dtype=torch.bfloat16)
+    lhs = torch.ones((6,), dtype=torch.bfloat16)
+    rhs = torch.ones((6,), dtype=torch.bfloat16)
+    set_target("cpu")
+
+    with pytest.raises(KernelCodeError, match=r"^DslRunInternalError: pipeline must return builtin\.module$"):
+        dsl_run(add_kernel, (out, lhs, rhs), _NonModuleResultPipeline())
 
 
 # TC-DSL-RUN-010

@@ -348,25 +348,6 @@ def _space_token(mem_type: NnMemoryType) -> str:
     return _SPACE_TOKENS.get(raw, f"#{raw.upper()}")
 
 
-def _dtype_string(element_type: Attribute) -> str:
-    """生成稳定 dtype 字符串。
-
-
-    功能说明:
-    - 当前直接复用 str(element_type)。
-
-    使用示例:
-    - text = _dtype_string(Float32Type())
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    return str(element_type)
-
-
 def _element_size(element_type: Attribute) -> int | None:
     """解析 element_type 的字节大小。
 
@@ -678,31 +659,6 @@ def _bucket_key(mem_type: NnMemoryType) -> tuple[str]:
     return (_space_token(mem_type),)
 
 
-def _collect_ops(block: Block) -> list[Operation]:
-    """按词法顺序收集 block 及子 region 内 op。
-
-
-    功能说明:
-    - 先收集当前 block op，再递归收集其子 region 的 op。
-
-    使用示例:
-    - ops = _collect_ops(func_op.body.blocks[0])
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    ops: list[Operation] = []
-    for op in block.ops:
-        ops.append(op)
-        for region in op.regions:
-            for child in region.blocks:
-                ops.extend(_collect_ops(child))
-    return ops
-
-
 def _parent_block(op: Operation) -> Block | None:
     """安全获取 op 的 parent block。
 
@@ -890,6 +846,108 @@ def _has_escaping_use(
     return False
 
 
+def _free_indices_for_ops(
+    ops: list[Operation],
+    op_index: dict[Operation, int],
+) -> dict[SSAValue, list[int]]:
+    """收集每个 SSA value 对应的 dma.free 索引。
+
+
+    功能说明:
+    - 为 summary 与 rewrite 共用 alloc/free 配对输入，避免两处维护重复扫描逻辑。
+
+    使用示例:
+    - free_indices = _free_indices_for_ops(ops, op_index)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    free_indices: dict[SSAValue, list[int]] = {}
+    for op in ops:
+        if isinstance(op, DmaFreeOp):
+            free_indices.setdefault(op.source, []).append(op_index[op])
+    return free_indices
+
+
+def _alloc_infos_from_ops(
+    ops: list[Operation],
+    op_index: dict[Operation, int],
+    loop_bounds: dict[SymbolForOp, tuple[int, int]],
+    op_loop: dict[Operation, SymbolForOp | None],
+) -> list[_AllocInfo]:
+    """从词法 op 列表构造 alloc 生命周期信息。
+
+
+    功能说明:
+    - 统一 summary 与 rewrite 的 alloc/free 配对、dtype、shape 与 loop 生命周期校验。
+    - 只返回当前文件内部 `_AllocInfo`，不新增公开 API。
+
+    使用示例:
+    - alloc_infos = _alloc_infos_from_ops(ops, op_index, loop_bounds, op_loop)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    free_indices = _free_indices_for_ops(ops, op_index)
+    alloc_infos: list[_AllocInfo] = []
+    for op in ops:
+        if not isinstance(op, DmaAllocOp):
+            continue
+        result_type = op.result.type
+        if not isinstance(result_type, NnMemoryType):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory")
+        if _has_escaping_use(op, op_loop):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolEscapingAlloc: alloc escapes current region")
+
+        alloc_idx = op_index[op]
+        free_list = free_indices.get(op.result, [])
+        free_after = [value for value in free_list if value >= alloc_idx]
+        if not free_after:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: dma.free not found for alloc")
+        if len(free_after) > 1:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: multiple dma.free for alloc")
+
+        free_index = free_after[0]
+        free_op = ops[free_index]
+        assert isinstance(free_op, DmaFreeOp)
+
+        alloc_loop = op_loop.get(op)
+        free_loop = op_loop.get(free_op)
+        if alloc_loop is None:
+            if free_loop is not None:
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: dma.free inside symbol.for")
+            begin_index = alloc_idx
+            end_index = free_index
+        else:
+            if free_loop is not alloc_loop:
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: loop alloc/free mismatch")
+            begin_index, end_index = loop_bounds[alloc_loop]
+
+        dtype_size = _element_size(result_type.element_type)
+        if dtype_size is None:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS,
+                f"MemoryPoolUnsupportedDtype: {result_type.element_type} is not supported"
+            )
+
+        alloc_infos.append(
+            _AllocInfo(
+                op,
+                free_op,
+                _shape_product(result_type) * sp.Integer(dtype_size),
+                _bucket_key(result_type),
+                begin_index,
+                end_index,
+            )
+        )
+    return alloc_infos
+
+
 def _assign_slots(
     items: list[tuple[int, int, SlotKey]],
 ) -> tuple[dict[SlotKey, int], int]:
@@ -973,8 +1031,6 @@ def _peak_bytes(intervals: list[MemoryPoolInterval]) -> sp.Basic:
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    if not intervals:
-        return sp.Integer(0)
     events: dict[int, list[sp.Basic]] = {}
     for interval in intervals:
         events.setdefault(interval.begin_index, []).append(interval.size_bytes_expr)
@@ -987,8 +1043,6 @@ def _peak_bytes(intervals: list[MemoryPoolInterval]) -> sp.Basic:
             current += delta
         candidates.append(current)
 
-    if len(candidates) == 1:
-        return candidates[0]
     return sp.Max(*candidates)
 
 
@@ -1014,65 +1068,18 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
     )
     op_index = {op: idx for idx, op in enumerate(ops)}
 
-    free_indices: dict[SSAValue, list[int]] = {}
-    for op in ops:
-        if isinstance(op, DmaFreeOp):
-            free_indices.setdefault(op.source, []).append(op_index[op])
-
     intervals: list[MemoryPoolInterval] = []
-    alloc_index = 0
-    for op in ops:
-        if not isinstance(op, DmaAllocOp):
-            continue
-        alloc_index += 1
-        result_type = op.result.type
-        if not isinstance(result_type, NnMemoryType):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory")
-        if _has_escaping_use(op, op_loop):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolEscapingAlloc: alloc escapes current region")
-
-        bucket = _bucket_key(result_type)
-        size_numel_expr = _shape_product(result_type)
-        dtype_size = _element_size(result_type.element_type)
-        if dtype_size is None:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
-                f"MemoryPoolUnsupportedDtype: {result_type.element_type} is not supported"
-            )
-        size_bytes_expr = size_numel_expr * sp.Integer(dtype_size)
-
-        alloc_idx = op_index[op]
-        free_list = free_indices.get(op.result, [])
-        free_after = [value for value in free_list if value >= alloc_idx]
-        if not free_after:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: dma.free not found for alloc")
-        if len(free_after) > 1:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: multiple dma.free for alloc")
-        free_index = free_after[0]
-        if free_index < alloc_idx:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: dma.free before alloc")
-        free_op = ops[free_index]
-        if not isinstance(free_op, DmaFreeOp):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: dma.free op mismatch")
-
-        alloc_loop = op_loop.get(op)
-        free_loop = op_loop.get(free_op)
-        if alloc_loop is None:
-            if free_loop is not None:
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: dma.free inside symbol.for")
-            begin_index = alloc_idx
-            end_index = free_index
-        else:
-            if free_loop is not alloc_loop:
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: loop alloc/free mismatch")
-            begin_index, end_index = loop_bounds[alloc_loop]
-
+    for alloc_index, info in enumerate(
+        _alloc_infos_from_ops(ops, op_index, loop_bounds, op_loop),
+        start=1,
+    ):
         intervals.append(
             MemoryPoolInterval(
-                _alloc_name(op.result, alloc_index),
-                bucket,
-                size_bytes_expr,
-                begin_index,
-                end_index,
+                _alloc_name(info.alloc_op.result, alloc_index),
+                info.bucket_key,
+                info.size_bytes_expr,
+                info.begin_index,
+                info.end_index,
                 sp.Integer(0),
             )
         )
@@ -1139,64 +1146,7 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
     if not ops:
         return
 
-    free_indices: dict[SSAValue, list[int]] = {}
-    for op in ops:
-        if isinstance(op, DmaFreeOp):
-            free_indices.setdefault(op.source, []).append(op_index[op])
-
-    alloc_infos: list[_AllocInfo] = []
-    for op in ops:
-        if not isinstance(op, DmaAllocOp):
-            continue
-        result_type = op.result.type
-        if not isinstance(result_type, NnMemoryType):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory")
-        if _has_escaping_use(op, op_loop):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolEscapingAlloc: alloc escapes current region")
-
-        alloc_idx = op_index[op]
-        free_list = free_indices.get(op.result, [])
-        free_after = [value for value in free_list if value >= alloc_idx]
-        if not free_after:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: dma.free not found for alloc")
-        if len(free_after) > 1:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: multiple dma.free for alloc")
-        free_index = free_after[0]
-        if free_index < alloc_idx:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: dma.free before alloc")
-        free_op = ops[free_index]
-        if not isinstance(free_op, DmaFreeOp):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: dma.free op mismatch")
-
-        alloc_loop = op_loop.get(op)
-        free_loop = op_loop.get(free_op)
-        if alloc_loop is None:
-            if free_loop is not None:
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: dma.free inside symbol.for")
-            begin_index = alloc_idx
-            end_index = free_index
-        else:
-            if free_loop is not alloc_loop:
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: loop alloc/free mismatch")
-            begin_index, end_index = loop_bounds[alloc_loop]
-
-        dtype_size = _element_size(result_type.element_type)
-        if dtype_size is None:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
-                f"MemoryPoolUnsupportedDtype: {result_type.element_type} is not supported"
-            )
-        size_bytes_expr = _shape_product(result_type) * sp.Integer(dtype_size)
-
-        alloc_infos.append(
-            _AllocInfo(
-                op,
-                free_op,
-                size_bytes_expr,
-                _bucket_key(result_type),
-                begin_index,
-                end_index,
-            )
-        )
+    alloc_infos = _alloc_infos_from_ops(ops, op_index, loop_bounds, op_loop)
 
     if not alloc_infos:
         return
@@ -1214,9 +1164,6 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
     slot_map, max_slots = _assign_slots(
         [(info.begin_index, info.end_index, info) for info in alloc_infos]
     )
-    if max_slots <= 0:
-        return
-
     first_type = alloc_infos[0].alloc_op.result.type
     assert isinstance(first_type, NnMemoryType)
     pool_size_expr = ref_size * sp.Integer(max_slots)
@@ -1269,7 +1216,7 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
         if alloc_block is None:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "MemoryPoolInvalidLifetime: alloc parent block not found")
         alloc_block.insert_ops_before([*offset_ops, *stride_ops, view_op], info.alloc_op)
-        info.alloc_op.result.replace_by(view_op.result)
+        info.alloc_op.result.replace_all_uses_with(view_op.result)
         alloc_block.erase_op(info.alloc_op)
 
         free_block = _parent_block(info.free_op)

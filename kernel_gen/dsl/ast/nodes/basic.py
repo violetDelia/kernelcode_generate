@@ -473,26 +473,26 @@ class MemoryAST(ValueAST):
 
     @property
     def memory(self) -> Memory:
-        """根据 AST 字段构造 runtime `Memory`。"""
+        """根据 AST 字段构造 runtime `Memory`。
 
-        from .symbol import ConstValueAST, SymbolDimAST
+        功能说明:
+        - 逐项通过公开 `result_symbol()` / `result_scalar()` 读取 shape 与 stride 语义。
+        - 支持 `SymbolDimAST`、`ConstValueAST` 与公开 symbol 表达式节点，不把 AST repr 当作符号文本。
+
+        使用示例:
+        - memory = memory_ast.memory
+        """
 
         shape: list[int | float | bool | str | SymbolDim] = []
         for item in self.shape.values:
-            if isinstance(item, ConstValueAST):
-                shape.append(item.raw_value)
-            elif isinstance(item, SymbolDimAST):
-                shape.append(item.symbol)
-            else:
-                shape.append(str(item))
+            symbol_value = item.result_symbol()
+            scalar_value = item.result_scalar()
+            shape.append(symbol_value if symbol_value is not None else scalar_value if scalar_value is not None else str(item))
         stride: list[int | float | bool | str | SymbolDim] = []
         for item in self.stride.values:
-            if isinstance(item, ConstValueAST):
-                stride.append(item.raw_value)
-            elif isinstance(item, SymbolDimAST):
-                stride.append(item.symbol)
-            else:
-                stride.append(str(item))
+            symbol_value = item.result_symbol()
+            scalar_value = item.result_scalar()
+            stride.append(symbol_value if symbol_value is not None else scalar_value if scalar_value is not None else str(item))
         dtype = self.numeric_type_from_dtype_attr(self.type)
         memory_format = self.format.attr
         if not isinstance(memory_format, Farmat):

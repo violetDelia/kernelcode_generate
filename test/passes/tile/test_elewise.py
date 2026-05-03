@@ -20,9 +20,10 @@ import importlib
 import sys
 from pathlib import Path
 
+import pytest
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, i1, i32
 from xdsl.ir import Block, Region
 from xdsl.parser import Parser
 from xdsl.passes import ModulePass
@@ -53,7 +54,8 @@ get_tile_elewise_pass_patterns = tile_elewise_module.get_tile_elewise_pass_patte
 build_registered_pass = registry_module.build_registered_pass
 load_builtin_passes = registry_module.load_builtin_passes
 
-from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
+from kernel_gen.dialect.dma import DmaBroadcastOp
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.core.context import build_default_context
 
@@ -96,6 +98,168 @@ def test_tile_elewise_binary_pattern_rewrites_single_add_op() -> None:
     )
 
 
+def test_tile_elewise_binary_pattern_public_compare_and_boundary_matrix() -> None:
+    """锁定 binary pattern 的 compare rewrite、no-op 与公开错误边界。"""
+
+    mem_type = make_memory_type(["M", "N"])
+    bool_mem_type = NnMemoryType(mem_type.shape, mem_type.stride, i1, NnMemorySpaceAttr.from_name("global"))
+    block = Block(arg_types=[mem_type, mem_type, bool_mem_type])
+    space = NnMemorySpaceAttr.from_name("global")
+    compare_op = KernelBinaryElewiseOp(block.args[2], block.args[0], block.args[1], kind="eq", space=space)
+    compare_op.attributes["tile.analysis"] = ArrayAttr(
+        [
+            ArrayAttr([StringAttr("elewise"), StringAttr("elewise")]),
+            ArrayAttr([StringAttr("elewise"), StringAttr("elewise")]),
+            ArrayAttr([StringAttr("elewise"), StringAttr("elewise")]),
+        ]
+    )
+    block.add_ops([compare_op, func.ReturnOp()])
+    module = ModuleOp(
+        [
+            func.FuncOp(
+                "tile_compare",
+                FunctionType.from_lists([mem_type, mem_type, bool_mem_type], []),
+                Region(block),
+            )
+        ]
+    )
+
+    TileElewiseBinaryPattern().match_and_rewrite(compare_op, PatternRewriter(compare_op))
+
+    rewritten = next(op for op in collect_ops(module) if op.name == "kernel.binary_elewise")
+    assert len([op for op in collect_ops(module) if op.name == "dma.view"]) == 3
+    assert [operand.type.element_type for operand in rewritten.operands] == [i1, i32, i32]
+
+    rank1_mem_type = make_memory_type(["M"])
+    rank1_block = Block(arg_types=[rank1_mem_type, rank1_mem_type, rank1_mem_type])
+    rank1_op = KernelBinaryElewiseOp(rank1_block.args[2], rank1_block.args[0], rank1_block.args[1], kind="add", space=space)
+    rank1_op.attributes["tile.analysis"] = ArrayAttr(
+        [ArrayAttr([StringAttr("elewise")]), ArrayAttr([StringAttr("elewise")]), ArrayAttr([StringAttr("elewise")])]
+    )
+    rank1_block.add_ops([rank1_op, func.ReturnOp()])
+    rank1_module = ModuleOp(
+        [
+            func.FuncOp(
+                "tile_rank1_binary",
+                FunctionType.from_lists([rank1_mem_type, rank1_mem_type, rank1_mem_type], []),
+                Region(rank1_block),
+            )
+        ]
+    )
+    TileElewiseBinaryPattern().match_and_rewrite(rank1_op, PatternRewriter(rank1_op))
+    assert [op.name for op in collect_ops(rank1_module)].count("symbol.for") == 1
+    assert [op.name for op in collect_ops(rank1_module)].count("dma.view") == 3
+
+    rank3_mem_type = make_memory_type(["B", "M", "N"])
+    rank3_block = Block(arg_types=[rank3_mem_type, rank3_mem_type, rank3_mem_type])
+    rank3_op = KernelBinaryElewiseOp(rank3_block.args[2], rank3_block.args[0], rank3_block.args[1], kind="mul", space=space)
+    rank3_op.attributes["tile.analysis"] = ArrayAttr(
+        [
+            ArrayAttr([StringAttr("elewise"), StringAttr("elewise"), StringAttr("elewise")]),
+            ArrayAttr([StringAttr("elewise"), StringAttr("elewise"), StringAttr("elewise")]),
+            ArrayAttr([StringAttr("elewise"), StringAttr("elewise"), StringAttr("elewise")]),
+        ]
+    )
+    rank3_block.add_ops([rank3_op, func.ReturnOp()])
+    rank3_module = ModuleOp(
+        [
+            func.FuncOp(
+                "tile_rank3_binary",
+                FunctionType.from_lists([rank3_mem_type, rank3_mem_type, rank3_mem_type], []),
+                Region(rank3_block),
+            )
+        ]
+    )
+    TileElewiseBinaryPattern().match_and_rewrite(rank3_op, PatternRewriter(rank3_op))
+    rank3_views = [op for op in collect_ops(rank3_module) if op.name == "dma.view"]
+    assert [op.name for op in collect_ops(rank3_module)].count("symbol.for") == 3
+    assert all(view.result.type.shape.data == ArrayAttr(
+        [StringAttr("TILE_D0"), StringAttr("TILE_D1"), StringAttr("TILE_D2")]
+    ).data for view in rank3_views)
+
+    no_analysis_module = build_elementwise_module()
+    no_analysis_op = next(op for op in collect_ops(no_analysis_module) if op.name == "kernel.binary_elewise")
+    TileElewiseBinaryPattern().match_and_rewrite(no_analysis_op, PatternRewriter(no_analysis_op))
+    assert [op.name for op in collect_ops(no_analysis_module)].count("symbol.for") == 0
+
+    scalar_mem_type = NnMemoryType(ArrayAttr([]), ArrayAttr([]), i32, space)
+    scalar_block = Block(arg_types=[scalar_mem_type, scalar_mem_type, scalar_mem_type])
+    scalar_op = KernelBinaryElewiseOp(scalar_block.args[2], scalar_block.args[0], scalar_block.args[1], kind="add", space=space)
+    scalar_op.attributes["tile.analysis"] = ArrayAttr([ArrayAttr([]), ArrayAttr([]), ArrayAttr([])])
+    scalar_block.add_ops([scalar_op, func.ReturnOp()])
+    scalar_module = ModuleOp(
+        [
+            func.FuncOp(
+                "tile_scalar_noop",
+                FunctionType.from_lists([scalar_mem_type, scalar_mem_type, scalar_mem_type], []),
+                Region(scalar_block),
+            )
+        ]
+    )
+    TileElewiseBinaryPattern().match_and_rewrite(scalar_op, PatternRewriter(scalar_op))
+    assert [op.name for op in collect_ops(scalar_module)].count("symbol.for") == 0
+
+    bad_attr_block = Block(arg_types=[mem_type, mem_type, mem_type])
+    bad_attr_op = KernelBinaryElewiseOp(bad_attr_block.args[2], bad_attr_block.args[0], bad_attr_block.args[1], kind="add", space=space)
+    bad_attr_op.attributes["tile.analysis"] = StringAttr("bad")
+    bad_attr_block.add_ops([bad_attr_op, func.ReturnOp()])
+    ModuleOp(
+        [
+            func.FuncOp(
+                "tile_bad_analysis_attr",
+                FunctionType.from_lists([mem_type, mem_type, mem_type], []),
+                Region(bad_attr_block),
+            )
+        ]
+    )
+    with pytest.raises(Exception, match="TilePassUnsupportedOp"):
+        TileElewiseBinaryPattern().match_and_rewrite(bad_attr_op, PatternRewriter(bad_attr_op))
+
+    bad_row_block = Block(arg_types=[mem_type, mem_type, mem_type])
+    bad_row_op = KernelBinaryElewiseOp(bad_row_block.args[2], bad_row_block.args[0], bad_row_block.args[1], kind="add", space=space)
+    bad_row_op.attributes["tile.analysis"] = ArrayAttr([StringAttr("bad")])
+    bad_row_block.add_ops([bad_row_op, func.ReturnOp()])
+    ModuleOp(
+        [
+            func.FuncOp(
+                "tile_bad_analysis_row",
+                FunctionType.from_lists([mem_type, mem_type, mem_type], []),
+                Region(bad_row_block),
+            )
+        ]
+    )
+    with pytest.raises(Exception, match="TilePassUnsupportedOp"):
+        TileElewiseBinaryPattern().match_and_rewrite(bad_row_op, PatternRewriter(bad_row_op))
+
+    mismatch_block = Block(arg_types=[mem_type, rank1_mem_type, mem_type])
+    mismatch_op = KernelBinaryElewiseOp(
+        mismatch_block.args[2],
+        mismatch_block.args[0],
+        mismatch_block.args[1],
+        kind="add",
+        space=space,
+    )
+    mismatch_op.attributes["tile.analysis"] = ArrayAttr(
+        [
+            ArrayAttr([StringAttr("elewise"), StringAttr("elewise")]),
+            ArrayAttr([StringAttr("elewise")]),
+            ArrayAttr([StringAttr("elewise"), StringAttr("elewise")]),
+        ]
+    )
+    mismatch_block.add_ops([mismatch_op, func.ReturnOp()])
+    ModuleOp(
+        [
+            func.FuncOp(
+                "tile_rank_mismatch",
+                FunctionType.from_lists([mem_type, rank1_mem_type, mem_type], []),
+                Region(mismatch_block),
+            )
+        ]
+    )
+    with pytest.raises(Exception, match="TilePassRankMismatch"):
+        TileElewiseBinaryPattern().match_and_rewrite(mismatch_op, PatternRewriter(mismatch_op))
+
+
 def test_tile_elewise_broadcast_pattern_rewrites_single_broadcast_op() -> None:
     """锁定 BroadcastPattern 会为 broadcast 写出 loop/view 结构。"""
 
@@ -117,6 +281,142 @@ def test_tile_elewise_broadcast_pattern_rewrites_single_broadcast_op() -> None:
             ArrayAttr([StringAttr(""), StringAttr("TILE_D0")]),
         ]
     )
+
+
+def test_tile_elewise_broadcast_pattern_public_boundary_matrix() -> None:
+    """锁定 broadcast pattern 的 no-op、expand 与公开 analysis 错误边界。"""
+
+    no_analysis_module = build_broadcast_module()
+    no_analysis_op = next(op for op in collect_ops(no_analysis_module) if op.name == "dma.broadcast")
+    TileElewiseBroadcastPattern().match_and_rewrite(no_analysis_op, PatternRewriter(no_analysis_op))
+    assert [op.name for op in collect_ops(no_analysis_module)].count("symbol.for") == 0
+
+    space = NnMemorySpaceAttr.from_name("global")
+    scalar_mem_type = NnMemoryType(ArrayAttr([]), ArrayAttr([]), i32, space)
+    scalar_block = Block(arg_types=[scalar_mem_type, scalar_mem_type])
+    scalar_op = DmaBroadcastOp(scalar_block.args[0], scalar_block.args[1])
+    scalar_op.attributes["tile.analysis"] = ArrayAttr([ArrayAttr([]), ArrayAttr([])])
+    scalar_block.add_ops([scalar_op, func.ReturnOp()])
+    scalar_module = ModuleOp(
+        [
+            func.FuncOp(
+                "tile_scalar_broadcast_noop",
+                FunctionType.from_lists([scalar_mem_type, scalar_mem_type], []),
+                Region(scalar_block),
+            )
+        ]
+    )
+    TileElewiseBroadcastPattern().match_and_rewrite(scalar_op, PatternRewriter(scalar_op))
+    assert [op.name for op in collect_ops(scalar_module)].count("symbol.for") == 0
+
+    all_expand_mem_type = make_memory_type(["M"])
+    all_expand_block = Block(arg_types=[all_expand_mem_type, all_expand_mem_type])
+    all_expand_op = DmaBroadcastOp(all_expand_block.args[0], all_expand_block.args[1])
+    all_expand_op.attributes["tile.analysis"] = ArrayAttr(
+        [ArrayAttr([StringAttr("expand")]), ArrayAttr([StringAttr("expand")])]
+    )
+    all_expand_block.add_ops([all_expand_op, func.ReturnOp()])
+    all_expand_module = ModuleOp(
+        [
+            func.FuncOp(
+                "tile_all_expand_broadcast",
+                FunctionType.from_lists([all_expand_mem_type, all_expand_mem_type], []),
+                Region(all_expand_block),
+            )
+        ]
+    )
+    TileElewiseBroadcastPattern().match_and_rewrite(all_expand_op, PatternRewriter(all_expand_op))
+    assert [op.name for op in collect_ops(all_expand_module)].count("symbol.for") == 0
+    assert all_expand_op.attributes["tile.tile_exprs"] == ArrayAttr(
+        [ArrayAttr([StringAttr("")]), ArrayAttr([StringAttr("")])]
+    )
+
+    target_type = make_memory_type(["B", "M", "N"])
+    source_type = make_memory_type(["M", "N"])
+    expand_block = Block(arg_types=[target_type, source_type])
+    expand_op = DmaBroadcastOp(expand_block.args[0], expand_block.args[1])
+    expand_op.attributes["tile.analysis"] = ArrayAttr(
+        [
+            ArrayAttr([StringAttr("expand"), StringAttr("elewise"), StringAttr("elewise")]),
+            ArrayAttr([StringAttr("expand"), StringAttr("elewise"), StringAttr("elewise")]),
+        ]
+    )
+    expand_block.add_ops([expand_op, func.ReturnOp()])
+    expand_module = ModuleOp(
+        [
+            func.FuncOp(
+                "tile_expand_broadcast",
+                FunctionType.from_lists([target_type, source_type], []),
+                Region(expand_block),
+            )
+        ]
+    )
+    TileElewiseBroadcastPattern().match_and_rewrite(expand_op, PatternRewriter(expand_op))
+    views = [op for op in collect_ops(expand_module) if op.name == "dma.view"]
+    assert len([op for op in collect_ops(expand_module) if op.name == "symbol.for"]) == 2
+    assert len(views) == 2
+    assert views[0].result.type.shape.data == ArrayAttr(
+        [IntAttr(1), StringAttr("TILE_D0"), StringAttr("TILE_D1")]
+    ).data
+    assert views[1].result.type.shape.data == ArrayAttr([StringAttr("TILE_D0"), StringAttr("TILE_D1")]).data
+
+    partial_target_type = make_memory_type(["M", "N"])
+    partial_source_type = make_memory_type(["M", "N"])
+    partial_block = Block(arg_types=[partial_target_type, partial_source_type])
+    partial_op = DmaBroadcastOp(partial_block.args[0], partial_block.args[1])
+    partial_op.attributes["tile.analysis"] = ArrayAttr(
+        [
+            ArrayAttr([StringAttr("expand"), StringAttr("elewise")]),
+            ArrayAttr([StringAttr("elewise"), StringAttr("elewise")]),
+        ]
+    )
+    partial_block.add_ops([partial_op, func.ReturnOp()])
+    partial_module = ModuleOp(
+        [
+            func.FuncOp(
+                "tile_partial_expand_broadcast",
+                FunctionType.from_lists([partial_target_type, partial_source_type], []),
+                Region(partial_block),
+            )
+        ]
+    )
+    TileElewiseBroadcastPattern().match_and_rewrite(partial_op, PatternRewriter(partial_op))
+    partial_views = [op for op in collect_ops(partial_module) if op.name == "dma.view"]
+    assert len([op for op in collect_ops(partial_module) if op.name == "symbol.for"]) == 1
+    assert partial_views[0].result.type.shape.data == ArrayAttr([IntAttr(1), StringAttr("TILE_D0")]).data
+    assert partial_views[1].result.type.shape.data == ArrayAttr([StringAttr("M"), StringAttr("TILE_D0")]).data
+
+    bad_len_block = Block(arg_types=[target_type, source_type])
+    bad_len_op = DmaBroadcastOp(bad_len_block.args[0], bad_len_block.args[1])
+    bad_len_op.attributes["tile.analysis"] = ArrayAttr([ArrayAttr([StringAttr("elewise")])])
+    bad_len_block.add_ops([bad_len_op, func.ReturnOp()])
+    ModuleOp(
+        [
+            func.FuncOp(
+                "tile_broadcast_bad_len",
+                FunctionType.from_lists([target_type, source_type], []),
+                Region(bad_len_block),
+            )
+        ]
+    )
+    with pytest.raises(Exception, match="TilePassUnsupportedOp"):
+        TileElewiseBroadcastPattern().match_and_rewrite(bad_len_op, PatternRewriter(bad_len_op))
+
+    bad_row_block = Block(arg_types=[target_type, source_type])
+    bad_row_op = DmaBroadcastOp(bad_row_block.args[0], bad_row_block.args[1])
+    bad_row_op.attributes["tile.analysis"] = ArrayAttr([StringAttr("bad"), StringAttr("bad")])
+    bad_row_block.add_ops([bad_row_op, func.ReturnOp()])
+    ModuleOp(
+        [
+            func.FuncOp(
+                "tile_broadcast_bad_row",
+                FunctionType.from_lists([target_type, source_type], []),
+                Region(bad_row_block),
+            )
+        ]
+    )
+    with pytest.raises(Exception, match="TilePassUnsupportedOp"):
+        TileElewiseBroadcastPattern().match_and_rewrite(bad_row_op, PatternRewriter(bad_row_op))
 
 
 def test_tile_elewise_matmul_pattern_rewrites_single_matmul_op() -> None:
@@ -242,3 +542,61 @@ builtin.module {
     assert lhs_type.shape.data == ArrayAttr([StringAttr("TILE_D0"), IntAttr(8)]).data
     assert rhs_type.shape.data == ArrayAttr([IntAttr(8), StringAttr("TILE_D1")]).data
     assert out_type.shape.data == ArrayAttr([StringAttr("TILE_D0"), StringAttr("TILE_D1")]).data
+
+
+def test_tile_elewise_matmul_pattern_public_noop_shape_boundaries() -> None:
+    """锁定 matmul pattern 对缺失 analysis 与不匹配 shape 的公开 no-op 边界。"""
+
+    no_analysis_module = build_matmul_module()
+    no_analysis_op = next(op for op in collect_ops(no_analysis_module) if op.name == "kernel.matmul")
+    TileElewiseMatmulPattern().match_and_rewrite(no_analysis_op, PatternRewriter(no_analysis_op))
+    assert [op.name for op in collect_ops(no_analysis_module)].count("symbol.for") == 0
+
+    space = NnMemorySpaceAttr.from_name("global")
+    out_type = make_memory_type(["M", "N"])
+    lhs_type = make_memory_type(["X", "K"])
+    rhs_type = make_memory_type(["K", "Y"])
+    mismatch_block = Block(arg_types=[out_type, lhs_type, rhs_type])
+    mismatch_op = KernelMatmulOp(mismatch_block.args[0], mismatch_block.args[1], mismatch_block.args[2], space)
+    mismatch_op.attributes["tile.analysis"] = ArrayAttr(
+        [
+            ArrayAttr([StringAttr("elewise"), StringAttr("elewise")]),
+            ArrayAttr([StringAttr("elewise"), StringAttr("reduce")]),
+            ArrayAttr([StringAttr("reduce"), StringAttr("elewise")]),
+        ]
+    )
+    mismatch_block.add_ops([mismatch_op, func.ReturnOp()])
+    mismatch_module = ModuleOp(
+        [
+            func.FuncOp(
+                "tile_matmul_shape_mismatch",
+                FunctionType.from_lists([out_type, lhs_type, rhs_type], []),
+                Region(mismatch_block),
+            )
+        ]
+    )
+    TileElewiseMatmulPattern().match_and_rewrite(mismatch_op, PatternRewriter(mismatch_op))
+    assert [op.name for op in collect_ops(mismatch_module)].count("symbol.for") == 0
+
+    rank1_type = make_memory_type(["M"])
+    rank1_block = Block(arg_types=[rank1_type, rank1_type, rank1_type])
+    rank1_op = KernelMatmulOp(rank1_block.args[0], rank1_block.args[1], rank1_block.args[2], space)
+    rank1_op.attributes["tile.analysis"] = ArrayAttr(
+        [
+            ArrayAttr([StringAttr("elewise")]),
+            ArrayAttr([StringAttr("elewise")]),
+            ArrayAttr([StringAttr("elewise")]),
+        ]
+    )
+    rank1_block.add_ops([rank1_op, func.ReturnOp()])
+    rank1_module = ModuleOp(
+        [
+            func.FuncOp(
+                "tile_matmul_rank_mismatch",
+                FunctionType.from_lists([rank1_type, rank1_type, rank1_type], []),
+                Region(rank1_block),
+            )
+        ]
+    )
+    TileElewiseMatmulPattern().match_and_rewrite(rank1_op, PatternRewriter(rank1_op))
+    assert [op.name for op in collect_ops(rank1_module)].count("symbol.for") == 0

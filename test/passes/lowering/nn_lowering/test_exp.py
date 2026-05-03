@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, f32
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, f32, i32
 from xdsl.ir import Attribute, Block, Region
 
 from kernel_gen.core.error import KernelCodeError
@@ -191,4 +191,30 @@ def test_nn_lowering_exp_shape_mismatch() -> None:
     result_type = _make_memory_type([4, 7])
     module = _build_module(input_type, result_type)
     with pytest.raises(KernelCodeError):
+        NnLoweringPass().apply(Context(), module)
+
+
+# TC-PASS-NNL-014
+# 测试目的: 验证 nn.exp 输入不是 nn.memory 时必须抛 KernelCodeError。
+# 使用示例: pytest -q test/passes/lowering/nn_lowering/test_exp.py -k test_nn_lowering_exp_rejects_non_memory_input
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/select_cast_lowering.md
+# 对应测试文件路径: test/passes/lowering/nn_lowering/test_exp.py
+def test_nn_lowering_exp_rejects_non_memory_input() -> None:
+    result_type = _make_memory_type([4, 8])
+    block = Block(arg_types=[i32])
+    exp_op = NnExpOp(block.args[0], result_type, NnMemorySpaceAttr.from_name("global"))
+    block.add_op(exp_op)
+    block.add_op(func.ReturnOp(exp_op.result))
+    module = ModuleOp(
+        [
+            func.FuncOp(
+                "exp_non_memory_input",
+                FunctionType.from_lists([i32], [result_type]),
+                Region(block),
+            )
+        ]
+    )
+
+    with pytest.raises(KernelCodeError, match="nn.exp operand must be nn.memory"):
         NnLoweringPass().apply(Context(), module)

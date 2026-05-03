@@ -22,7 +22,79 @@ import pytest
 
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dsl.ast import SourceLocation
-from kernel_gen.dsl.ast.plugin import BuiltinCall, dsl_builtin, lookup_builtin
+from kernel_gen.dsl.ast.plugin import BuiltinCall, all_builtin_names, dsl_builtin, external_builtin, lookup_builtin
+
+
+class _RegistryBuilder:
+    def __call__(self) -> None:
+        return None
+
+
+class _PreviousBuilder:
+    def __call__(self) -> None:
+        return None
+
+
+class _NamelessCallable:
+    def __call__(self) -> None:
+        return None
+
+
+class _RegistryExpectedAST:
+    pass
+
+
+class _RegistrySharedAST:
+    pass
+
+
+def _registry_expected_builder(node: BuiltinCall) -> _RegistryExpectedAST:
+    del node
+    return _RegistryExpectedAST()
+
+
+def _registry_alternate_expected_builder(node: BuiltinCall) -> _RegistryExpectedAST:
+    del node
+    return _RegistryExpectedAST()
+
+
+def _registry_shared_builder(node: BuiltinCall) -> _RegistrySharedAST:
+    del node
+    return _RegistrySharedAST()
+
+
+def _registry_second_shared_op() -> None:
+    return None
+
+
+def _registry_external_func() -> None:
+    return None
+
+
+def _registry_unregistered_func() -> None:
+    return None
+
+
+def _registry_external_builder(node: BuiltinCall) -> str:
+    return node.dsl_name
+
+
+def _registry_external_other_builder(node: BuiltinCall) -> str:
+    del node
+    return "other"
+
+
+def _make_builtin_call(dsl_name: str, ast_node: type | None = None) -> BuiltinCall:
+    call = py_ast.parse(f"{dsl_name}()").body[0].value
+    assert isinstance(call, py_ast.Call)
+    return BuiltinCall(
+        source=call,
+        dsl_name=dsl_name,
+        ast_node=ast_node,
+        args=[],
+        kwargs={},
+        location=SourceLocation(1, 0),
+    )
 
 
 def test_dsl_builtin_operation_binds_to_one_ast_node() -> None:
@@ -154,3 +226,49 @@ def test_dsl_builtin_builder_rejects_declared_ast_subclass() -> None:
 
     with pytest.raises(KernelCodeError, match="builder returned SubExpectedAST, expected ExpectedAST"):
         entry.builder(builtin_call)
+
+
+def test_dsl_builtin_public_callable_object_and_successful_builder_edges() -> None:
+    """dsl_builtin 支持无 __name__ callable 的公开显示名推断与成功 builder。"""
+
+    op = _RegistryBuilder()
+    decorated = dsl_builtin(op, _RegistryExpectedAST)(_registry_expected_builder)
+
+    assert decorated is _registry_expected_builder
+    entry = lookup_builtin(op)
+    assert entry is not None
+    assert entry.dsl_name == "registry"
+    assert entry.builder(_make_builtin_call("registry", _RegistryExpectedAST)).__class__ is _RegistryExpectedAST
+    assert "registry" in all_builtin_names()
+    assert dsl_builtin(op, _RegistryExpectedAST)(_registry_alternate_expected_builder) is _registry_alternate_expected_builder
+
+
+def test_dsl_builtin_reports_previous_callable_object_name_for_ast_collision() -> None:
+    """AST 复用错误中 callable object 也给出稳定 previous 名称。"""
+
+    previous = _PreviousBuilder()
+    dsl_builtin(previous, _RegistrySharedAST)(_registry_shared_builder)
+
+    with pytest.raises(KernelCodeError, match="_PreviousBuilder"):
+        dsl_builtin(_registry_second_shared_op, _RegistrySharedAST)(_registry_shared_builder)
+
+
+def test_external_builtin_public_registration_edges() -> None:
+    """external_builtin 只按 callable identity 注册并维护公开错误语义。"""
+
+    assert lookup_builtin(_registry_unregistered_func) is None
+    assert external_builtin(_registry_external_func)(_registry_external_builder) is _registry_external_builder
+
+    entry = lookup_builtin(_registry_external_func)
+    assert entry is not None
+    assert entry.dsl_name == "_registry_external_func"
+    assert entry.ast_node is None
+    assert entry.builder(_make_builtin_call("_registry_external_func")) == "_registry_external_func"
+    assert "_registry_external_func" in all_builtin_names()
+    assert external_builtin(_registry_external_func)(_registry_external_builder) is _registry_external_builder
+
+    with pytest.raises(KernelCodeError, match="already registered"):
+        external_builtin(_registry_external_func, name="renamed")(_registry_external_other_builder)
+
+    with pytest.raises(KernelCodeError, match="must provide name or __name__"):
+        external_builtin(_NamelessCallable())(_registry_external_builder)

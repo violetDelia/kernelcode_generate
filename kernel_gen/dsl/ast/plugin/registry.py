@@ -206,7 +206,7 @@ def external_builtin(
     def decorator(builder: BuiltinBuilder) -> BuiltinBuilder:
         dsl_name = name
         if dsl_name is None:
-            inferred_name = func.__name__
+            inferred_name = getattr(func, "__name__", None)
             if not isinstance(inferred_name, str) or not inferred_name:
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, "builtin registry value must provide name or __name__")
             dsl_name = inferred_name

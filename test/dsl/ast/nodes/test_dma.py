@@ -16,28 +16,34 @@
 
 from __future__ import annotations
 
+import random
+
 import pytest
 from xdsl.context import Context
-from xdsl.ir import Block
+from xdsl.ir import Block, Operation, SSAValue
 
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp
-from kernel_gen.dsl.ast.nodes.attr import FloatTypeAttrAST, MemorySpaceAttrAST
+from kernel_gen.dsl.ast.nodes.attr import BoolTypeAttrAST, FloatTypeAttrAST, IntTypeAttrAST, MemorySpaceAttrAST
 from kernel_gen.dsl.ast.nodes.basic import MemoryAST, ValueAST
 from kernel_gen.dsl.ast.nodes.symbol import ConstValueAST, SymbolListAST
+from kernel_gen.dsl.ast.nodes.symbol import SymbolAddAST, SymbolDimAST, SymbolFloorDivAST, SymbolMulAST, SymbolSubAST, SymbolTrueDivAST, TensorAxisAccessAST
 from kernel_gen.dsl.ast.nodes.dma import (
     DmaAllocAST,
     DmaCastAST,
     DmaCopyAST,
     DmaDesliceAST,
+    DmaFillAST,
     DmaFlattenAST,
+    DmaFreeAST,
     DmaLoadAST,
     DmaReshapeAST,
     DmaSliceAST,
     DmaStoreAST,
     DmaViewAST,
 )
-from kernel_gen.symbol_variable.memory import MemorySpace
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 
@@ -56,6 +62,16 @@ def _memory(name: str, shape: list[int]) -> MemoryAST:
         FloatTypeAttrAST(NumericType.Float32),
         MemorySpaceAttrAST(MemorySpace.GM),
     )
+
+
+def _block_for_memories(*nodes: MemoryAST) -> tuple[Context, Block]:
+    """为公开 MemoryAST 输入构造 Context 与带命名参数的 Block。"""
+
+    ctx = Context()
+    block = Block(arg_types=[node.to_mlir_type(ctx) for node in nodes])
+    for arg, node in zip(block.args, nodes, strict=True):
+        arg.name_hint = node.name
+    return ctx, block
 
 
 def test_dma_alloc_normalizes_shape_dtype_space_and_stride_nodes() -> None:
@@ -115,7 +131,7 @@ def test_dma_write_nodes_keep_target_first_contract() -> None:
 class SsaOnlyMemoryAST(ValueAST):
     """只发射 SSA memory，但不提供解析期 result_memory。"""
 
-    def emit_mlir(self, ctx: Context, block: Block | None = None) -> object:
+    def emit_mlir(self, ctx: Context, block: Block | None = None) -> SSAValue:
         """发射一个测试用 memory SSA。"""
 
         assert isinstance(block, Block)
@@ -123,6 +139,19 @@ class SsaOnlyMemoryAST(ValueAST):
         alloc = DmaAllocOp([], source_type)
         block.add_op(alloc)
         return alloc.results[0]
+
+
+class RawEmitAST(ValueAST):
+    """按测试输入原样返回非法 emit 结果。"""
+
+    def __init__(self, value: int | str | None) -> None:
+        self.value = value
+
+    def emit_mlir(self, ctx: Context, block: Block | None = None) -> int | str | None:
+        """返回原始值，用于验证公开 AST 对非法 emit 结果的错误语义。"""
+
+        _ = (ctx, block)
+        return self.value
 
 
 def test_dma_result_nodes_require_ast_result_memory_for_result_type() -> None:
@@ -150,3 +179,239 @@ def test_dma_result_nodes_require_ast_result_memory_for_result_type() -> None:
 
     with pytest.raises(KernelCodeError, match="flatten result memory must be known from AST"):
         DmaFlattenAST(source).emit_mlir(Context(), Block())
+
+
+def test_dma_result_memory_handles_parameterized_public_shapes() -> None:
+    """DMA result 节点按公开 Memory 语义推导 shape、dtype 与 space。"""
+
+    rng = random.Random(20260503)
+
+    for index in range(8):
+        rows = rng.randint(2, 8)
+        cols = rng.randint(2, 8)
+        source = MemoryAST.from_memory(f"src_{index}", Memory([rows, cols], NumericType.Float32))
+
+        assert DmaAllocAST([SymbolDim("N"), cols], NumericType.Float32, MemorySpace.SM).result_memory().space is MemorySpace.SM
+        assert DmaCopyAST(source, MemorySpace.SM).result_memory().shape.get_values() == [rows, cols]
+        assert DmaCopyAST(source, MemorySpace.SM).result_memory().space is MemorySpace.SM
+        assert DmaCastAST(source, NumericType.Float16, MemorySpace.LM).result_memory().dtype is NumericType.Float16
+        assert DmaViewAST(source, [0, 0], [rows - 1, cols], [1, 1]).result_memory().shape.get_values() == [rows - 1, cols]
+        assert DmaReshapeAST(source, [rows * cols]).result_memory().shape.get_values() == [rows * cols]
+        assert DmaFlattenAST(source).result_memory().shape.get_values() == [rows * cols]
+        assert DmaLoadAST(source, [0, 0], [rows - 1, cols], [1, 1], MemorySpace.SM).result_memory().space is MemorySpace.SM
+        assert DmaSliceAST(source, [0, 0], [rows - 1, cols], [1, 1], MemorySpace.SM).result_memory().space is MemorySpace.SM
+
+    assert DmaCopyAST(1, MemorySpace.SM).result_memory() is None
+    assert DmaAllocAST([_memory("shape_unknown", [2])], NumericType.Float32).result_memory() is None
+    assert DmaAllocAST([2], NumericType.Float32, stride=[_memory("stride_unknown", [2])]).result_memory() is None
+    assert DmaLoadAST(_memory("stride_source", [4]), [0], [1], [_memory("stride_bad", [2])]).result_memory() is None
+
+
+def test_dma_emit_mlir_accepts_public_nodes_and_reports_public_errors() -> None:
+    """DMA AST 节点通过公开 emit_mlir 发射，非法公开输入按稳定错误失败。"""
+
+    x = MemoryAST.from_memory("x", Memory([8, 4], NumericType.Float32))
+    y = MemoryAST.from_memory("y", Memory([8, 4], NumericType.Float32))
+    tile = MemoryAST.from_memory("tile", Memory([4, 4], NumericType.Float32))
+    ctx = Context()
+    block = Block(arg_types=[x.to_mlir_type(ctx), y.to_mlir_type(ctx), tile.to_mlir_type(ctx)])
+    for arg, node in zip(block.args, (x, y, tile), strict=True):
+        arg.name_hint = node.name
+
+    success_nodes = (
+        DmaAllocAST([8, 4], NumericType.Float32, MemorySpace.SM),
+        DmaAllocAST([SymbolDimAST(4)], NumericType.Float32, MemorySpace.SM, stride=[SymbolDimAST(1)]),
+        DmaCopyAST(DmaAllocAST([8, 4], NumericType.Float32, MemorySpace.GM), MemorySpace.SM),
+        DmaCopyAST(x, MemorySpace.SM),
+        DmaCastAST(DmaAllocAST([8, 4], NumericType.Float32, MemorySpace.GM), NumericType.Float16, MemorySpace.SM),
+        DmaCastAST(x, NumericType.Float16, MemorySpace.SM),
+        DmaViewAST(DmaAllocAST([8, 4], NumericType.Float32, MemorySpace.GM), [0, 0], [4, 4], [1, 1]),
+        DmaViewAST(x, [0, 0], [4, 4], [1, 1]),
+        DmaReshapeAST(DmaAllocAST([2, 4], NumericType.Float32, MemorySpace.GM), [8]),
+        DmaReshapeAST(x, [32]),
+        DmaFlattenAST(DmaAllocAST([2, 4], NumericType.Float32, MemorySpace.GM)),
+        DmaFlattenAST(x),
+        DmaFillAST(DmaAllocAST([2], NumericType.Float32, MemorySpace.GM), 0),
+        DmaFillAST(x, "inf"),
+        DmaLoadAST(DmaAllocAST([8, 4], NumericType.Float32, MemorySpace.GM), [0, 0], [4, 4], [1, 1], MemorySpace.SM),
+        DmaLoadAST(x, [0, 0], [4, 4], [1, 1], MemorySpace.SM),
+        DmaSliceAST(x, [0, 0], [4, 4], [1, 1], MemorySpace.SM),
+        DmaStoreAST(y, DmaAllocAST([4, 4], NumericType.Float32, MemorySpace.GM), [0, 0], [4, 4], [1, 1]),
+        DmaStoreAST(y, tile, [0, 0], [4, 4], [1, 1]),
+        DmaDesliceAST(y, tile, [0, 0], [4, 4], [1, 1]),
+    )
+    for node in success_nodes:
+        emitted = node.emit_mlir(ctx, block)
+        assert isinstance(emitted, (Operation, type(None))) or hasattr(emitted, "type")
+
+    DmaFreeAST(x).emit_mlir(ctx, block)
+    DmaFreeAST(DmaAllocAST([2], NumericType.Float32, MemorySpace.GM)).emit_mlir(ctx, block)
+    with pytest.raises(KernelCodeError, match="copy source must lower to nn.memory"):
+        DmaCopyAST(1, MemorySpace.SM).emit_mlir(ctx, block)
+    with pytest.raises(KernelCodeError, match="fill string literal"):
+        DmaFillAST(x, "nan").emit_mlir(ctx, block)
+    with pytest.raises(KernelCodeError, match="load offset must lower to symbol.int"):
+        DmaLoadAST(x, [x], [4], [1]).emit_mlir(ctx, block)
+
+
+def test_dma_alloc_emit_mlir_handles_parameterized_public_shape_expressions() -> None:
+    """dma.alloc 公开 AST 覆盖动态 shape 表达式、dtype 分支与 stride 合同。"""
+
+    rng = random.Random(20260504)
+    shape_exprs = [
+        SymbolAddAST(ConstValueAST(rng.randint(2, 4)), ConstValueAST(3)),
+        SymbolSubAST(ConstValueAST(9), ConstValueAST(rng.randint(1, 3))),
+        SymbolMulAST(ConstValueAST(2), ConstValueAST(rng.randint(3, 5))),
+        SymbolTrueDivAST(ConstValueAST(8), ConstValueAST(2)),
+        SymbolFloorDivAST(ConstValueAST(9), ConstValueAST(2)),
+    ]
+    ctx = Context()
+    block = Block()
+    emitted = DmaAllocAST(shape_exprs, NumericType.Int32, MemorySpace.SM).emit_mlir(ctx, block)
+    assert isinstance(emitted, DmaAllocOp)
+    assert len(emitted.dynamic_shape) == len(shape_exprs)
+
+    bool_alloc = DmaAllocAST([2], NumericType.Bool, MemorySpace.LM).emit_mlir(Context(), Block())
+    int_alloc = DmaAllocAST([2], NumericType.Uint16, MemorySpace.LM).emit_mlir(Context(), Block())
+    signed_alloc = DmaAllocAST([2], IntTypeAttrAST(64, True), MemorySpace.LM).emit_mlir(Context(), Block())
+    unsigned_alloc = DmaAllocAST([2], IntTypeAttrAST(32, False), MemorySpace.LM).emit_mlir(Context(), Block())
+    strided = DmaAllocAST([2, 3], NumericType.Float32, MemorySpace.SM, stride=[3, 1])
+    assert isinstance(bool_alloc, DmaAllocOp)
+    assert isinstance(int_alloc, DmaAllocOp)
+    assert isinstance(signed_alloc, DmaAllocOp)
+    assert isinstance(unsigned_alloc, DmaAllocOp)
+    assert strided.result_memory().stride.get_values() == [3, 1]
+
+    with pytest.raises(KernelCodeError, match="alloc dtype must be a public dtype attr"):
+        DmaAllocAST([2], "bad-dtype", MemorySpace.SM)
+    shape_mem = _memory("shape_mem", [2])
+    shape_ctx, shape_block = _block_for_memories(shape_mem)
+    with pytest.raises(KernelCodeError, match="alloc shape must lower to symbol.int"):
+        DmaAllocAST([shape_mem], NumericType.Float32, MemorySpace.SM).emit_mlir(shape_ctx, shape_block)
+    stride_mem = _memory("stride_mem", [2])
+    stride_ctx, stride_block = _block_for_memories(stride_mem)
+    with pytest.raises(KernelCodeError, match="alloc stride must lower to symbol.int"):
+        DmaAllocAST([2], NumericType.Float32, MemorySpace.SM, stride=[stride_mem]).emit_mlir(stride_ctx, stride_block)
+    with pytest.raises(KernelCodeError, match="alloc shape expression must lower to SSA values"):
+        DmaAllocAST([SymbolAddAST(RawEmitAST(1), ConstValueAST(3))], NumericType.Float32, MemorySpace.SM).emit_mlir(Context(), Block())
+    with pytest.raises(KernelCodeError, match="dma.alloc only supports contiguous stride"):
+        DmaAllocAST([2, 3], NumericType.Float32, MemorySpace.SM, stride=[1, 1]).emit_mlir(Context(), Block())
+
+
+def test_dma_emit_mlir_handles_dynamic_public_memory_paths() -> None:
+    """DMA copy/cast/view/reshape/flatten/load/slice 覆盖符号 shape 与默认 stride 公开路径。"""
+
+    source = MemoryAST.from_memory("source", Memory([SymbolDim("N"), 4], NumericType.Float32))
+    target = MemoryAST.from_memory("target", Memory([SymbolDim("N"), 4], NumericType.Float32))
+    tile = MemoryAST.from_memory("tile", Memory([2, 4], NumericType.Float32, space=MemorySpace.SM))
+    ctx, block = _block_for_memories(source, target, tile)
+
+    for node in (
+        DmaCopyAST(source, MemorySpace.SM),
+        DmaCastAST(source, NumericType.Float16, MemorySpace.SM),
+        DmaViewAST(source, [0, 0], [2, 4], [1, 1]),
+        DmaReshapeAST(source, [2, 4]),
+        DmaFlattenAST(source),
+        DmaLoadAST(source, [0, 0], [2, 4], None, MemorySpace.SM),
+        DmaSliceAST(source, [0, 0], [2, 4], None, MemorySpace.SM),
+    ):
+        emitted = node.emit_mlir(ctx, block)
+        assert isinstance(emitted, (Operation, SSAValue))
+
+    assert isinstance(DmaStoreAST(target, tile, [0, 0], [2, 4], None).emit_mlir(ctx, block), Operation)
+    assert isinstance(DmaDesliceAST(target, tile, [0, 0], [2, 4], None).emit_mlir(ctx, block), Operation)
+    dynamic_size = [TensorAxisAccessAST(source, "shape", 0), 4]
+    assert isinstance(DmaLoadAST(source, [0, 0], dynamic_size, None, MemorySpace.SM).emit_mlir(ctx, block), SSAValue)
+    assert isinstance(DmaSliceAST(source, [0, 0], dynamic_size, None, MemorySpace.SM).emit_mlir(ctx, block), SSAValue)
+
+
+def test_dma_fill_emit_mlir_handles_public_value_and_dtype_matrix() -> None:
+    """dma.fill 覆盖 bool/int/float/symbol/string 公开值矩阵与稳定错误语义。"""
+
+    bool_mem = MemoryAST.from_memory("bool_mem", Memory([2], NumericType.Bool))
+    int_mem = MemoryAST.from_memory("int_mem", Memory([2], NumericType.Int32))
+    float_mem = MemoryAST.from_memory("float_mem", Memory([2], NumericType.Float32))
+    ctx, block = _block_for_memories(bool_mem, int_mem, float_mem)
+
+    for node in (
+        DmaFillAST(bool_mem, True),
+        DmaFillAST(int_mem, 7),
+        DmaFillAST(float_mem, 3),
+        DmaFillAST(float_mem, 1.5),
+        DmaFillAST(float_mem, "-inf"),
+        DmaFillAST(float_mem, SymbolDimAST(5)),
+        DmaFillAST(bool_mem, False),
+        DmaFillAST(bool_mem, 1),
+    ):
+        assert isinstance(node.emit_mlir(ctx, block), Operation)
+
+    with pytest.raises(KernelCodeError, match="fill string literal requires float memory"):
+        DmaFillAST(int_mem, "inf").emit_mlir(ctx, block)
+    with pytest.raises(KernelCodeError, match="fill float value requires float memory"):
+        DmaFillAST(int_mem, 1.5).emit_mlir(ctx, block)
+    with pytest.raises(KernelCodeError, match="Unsupported fill value"):
+        DmaFillAST(float_mem, None).emit_mlir(ctx, block)
+
+
+def test_dma_emit_mlir_reports_public_error_matrix() -> None:
+    """DMA 公开 AST 覆盖非法 emit 结果、非 memory 输入与写回语义错误矩阵。"""
+
+    target = MemoryAST.from_memory("target", Memory([4, 4], NumericType.Float32))
+    tile = MemoryAST.from_memory("tile", Memory([2, 4], NumericType.Float32))
+    ctx, block = _block_for_memories(target, tile)
+
+    error_cases = (
+        (DmaFreeAST(ConstValueAST(1)), "value must be Memory"),
+        (DmaFillAST(ConstValueAST(1), 0), "fill target must lower to nn.memory"),
+        (DmaViewAST(RawEmitAST(1), [0, 0], [2, 2], [1, 1]), "view source must lower to SSA value"),
+        (DmaViewAST(1, [0], [1], [1]), "view source must lower to nn.memory"),
+        (DmaViewAST(target, [target], [1], [1]), "view offset must lower to symbol.int"),
+        (DmaViewAST(target, [0], [target], [1]), "view size must lower to symbol.int"),
+        (DmaViewAST(target, [0], [1], [target]), "view stride must lower to symbol.int"),
+        (DmaReshapeAST(RawEmitAST(1), [4]), "reshape source must lower to SSA value"),
+        (DmaReshapeAST(1, [4]), "reshape source must be nn.memory"),
+        (DmaReshapeAST(target, [target]), "reshape shape must lower to symbol.int"),
+        (DmaFlattenAST(RawEmitAST(1)), "flatten source must lower to SSA value"),
+        (DmaFlattenAST(1), "flatten source must be nn.memory"),
+        (DmaLoadAST(RawEmitAST(1), [0], [1], [1]), "load source must lower to SSA value"),
+        (DmaLoadAST(1, [0], [1], [1]), "load source must lower to nn.memory"),
+        (DmaSliceAST(RawEmitAST(1), [0], [1], [1]), "slice source must lower to SSA value"),
+        (DmaAllocAST([DmaAllocAST([2], NumericType.Float32, MemorySpace.GM)], NumericType.Float32, MemorySpace.SM), "alloc shape must lower to symbol.int"),
+        (DmaCopyAST(RawEmitAST(1), MemorySpace.SM), "copy source must lower to SSA value"),
+        (DmaCastAST(RawEmitAST(1), NumericType.Float16), "cast source must lower to SSA value"),
+        (DmaCastAST(1, NumericType.Float16), "cast source must lower to nn.memory"),
+        (DmaLoadAST(target, [target], [1], [1]), "load offset must lower to symbol.int"),
+        (DmaSliceAST(target, [0], [target], [1]), "slice size must lower to symbol.int"),
+        (DmaSliceAST(target, [0], [1], [target]), "slice stride must lower to symbol.int"),
+        (DmaStoreAST(target, ConstValueAST(1), [0, 0], [2, 4], [1, 1]), "store source must lower to nn.memory"),
+        (DmaStoreAST(DmaAllocAST([4, 4], NumericType.Float32, MemorySpace.GM), tile, [0, 0], [2, 4], [1, 1]), "store target must be MemoryAST"),
+        (DmaStoreAST(target, tile, [target], [2, 4], [1, 1]), "store offset must lower to symbol.int"),
+        (DmaStoreAST(target, tile, [0, 0], [target], [1, 1]), "store size must lower to symbol.int"),
+        (DmaStoreAST(target, tile, [0, 0], [2, 4], [target]), "store stride must lower to symbol.int"),
+        (DmaDesliceAST(ConstValueAST(1), tile, [0, 0], [2, 4], [1, 1]), "deslice target must be nn.memory"),
+        (DmaDesliceAST(target, tile, [target], [2, 4], [1, 1]), "deslice offset must lower to symbol.int"),
+        (DmaDesliceAST(target, tile, [0, 0], [target], [1, 1]), "deslice size must lower to symbol.int"),
+        (DmaDesliceAST(target, tile, [0, 0], [2, 4], [target]), "deslice stride must lower to symbol.int"),
+        (DmaStoreAST(RawEmitAST(1), tile, [0], [1], [1]), "store operands must lower to SSA values"),
+    )
+    for node, message in error_cases:
+        with pytest.raises(KernelCodeError, match=message):
+            node.emit_mlir(ctx, block)
+
+    with pytest.raises(KernelCodeError):
+        DmaStoreAST(target, tile, [0, 0], [8, 4], [1, 1]).emit_mlir(ctx, block)
+    with pytest.raises(KernelCodeError):
+        DmaDesliceAST(target, tile, [0, 0], [8, 4], [1, 1]).emit_mlir(ctx, block)
+    with pytest.raises(KernelCodeError, match="cast dtype must be a public dtype attr"):
+        DmaCastAST(target, "bad-dtype")
+
+
+def test_dma_flatten_public_dynamic_and_scalar_shape_matrix() -> None:
+    """dma.flatten 公开 AST 覆盖多维符号 shape 与 rank-0 输入边界。"""
+
+    dynamic = MemoryAST.from_memory("dynamic", Memory([SymbolDim("N"), SymbolDim("M"), 4], NumericType.Float32))
+    scalar = MemoryAST.from_memory("scalar", Memory([], NumericType.Float32))
+    ctx, block = _block_for_memories(dynamic, scalar)
+
+    assert isinstance(DmaFlattenAST(dynamic).emit_mlir(ctx, block), Operation)
+    assert isinstance(DmaFlattenAST(scalar).emit_mlir(ctx, block), Operation)

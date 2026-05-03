@@ -183,6 +183,24 @@ def test_decompose_softmax_into_fixed_nn_chain() -> None:
     assert list(reduce_max.result.type.stride.data) == [IntAttr(1), IntAttr(1)]
 
 
+def test_decompose_softmax_preserves_symbolic_reduce_stride_contract() -> None:
+    mem_type = _make_memory_type((2, "N", 4))
+    module, func_op = _make_softmax_module(input_type=mem_type, axis=0)
+
+    DecompassPass().apply(Context(), module)
+    module.verify()
+
+    body_ops = _entry_ops(func_op)
+    reduce_max = next(op for op in body_ops if isinstance(op, NnReduceMaxOp))
+    reduce_sum = next(op for op in body_ops if isinstance(op, NnReduceSumOp))
+    broadcasts = [op for op in body_ops if isinstance(op, NnBroadcastOp)]
+
+    assert list(reduce_max.result.type.shape.data) == [IntAttr(1), StringAttr("N"), IntAttr(4)]
+    assert list(reduce_max.result.type.stride.data) == [StringAttr("4*N"), IntAttr(4), IntAttr(1)]
+    assert reduce_sum.result.type == reduce_max.result.type
+    assert all(broadcast.result.type == mem_type for broadcast in broadcasts)
+
+
 # DNS-002
 # 功能说明: 验证负轴属于非法输入并返回固定短语。
 # 测试目的: 锁定 axis=-1 不再被 pass 改写成正轴继续分解。

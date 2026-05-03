@@ -38,6 +38,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.core.error import KernelCodeError
+from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
@@ -255,6 +256,93 @@ def _make_module_for_loop_carried_symbol_add() -> ModuleOp:
     return ModuleOp([func_op])
 
 
+def _make_module_for_loop_local_symbol_inputs() -> ModuleOp:
+    mem_type = _memory_type((4,))
+    block = Block(arg_types=[])
+    ops: list[object] = []
+    c0 = SymbolConstOp(0)
+    c1 = SymbolConstOp(1)
+    c2 = SymbolConstOp(1)
+    ops.extend([c0, c1, c2])
+
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    local_const = arith.ConstantOp(IntegerAttr(3, i32))
+    local_symbol = UnrealizedConversionCastOp(
+        operands=[local_const.result],
+        result_types=[SymbolValueType.from_expr("3")],
+    )
+    local_alloc = DmaAllocOp([], mem_type)
+    get_dim = SymbolGetDimOp(local_alloc.result, IntAttr(0))
+    get_stride = SymbolGetStrideOp(local_alloc.result, IntAttr(0))
+    add = SymbolAddOp(local_symbol.results[0], c1.result, SymbolValueType.from_expr("3 + 1"))
+    sub = SymbolSubOp(local_symbol.results[0], c1.result, SymbolValueType.from_expr("3 - 1"))
+    mul = SymbolMulOp(local_symbol.results[0], c1.result, SymbolValueType.from_expr("3 * 1"))
+    div = SymbolDivOp(local_symbol.results[0], c1.result, SymbolValueType.from_expr("3 / 1"))
+    floordiv = SymbolFloorDivOp(local_symbol.results[0], c1.result, SymbolValueType.from_expr("3 // 1"))
+    loop_block.add_ops([
+        local_const,
+        local_symbol,
+        local_alloc,
+        get_dim,
+        get_stride,
+        add,
+        sub,
+        mul,
+        div,
+        floordiv,
+    ])
+    loop = SymbolForOp(c0.result, c1.result, c2.result, loop_block)
+    ops.append(loop)
+    ops.append(func.ReturnOp())
+    block.add_ops(ops)
+    func_op = func.FuncOp(
+        "keep_loop_local_symbol_inputs",
+        FunctionType.from_lists([], []),
+        Region(block),
+    )
+    return ModuleOp([func_op])
+
+
+def _make_module_for_loop_carried_symbol_elewise() -> ModuleOp:
+    block = Block(arg_types=[])
+    ops: list[object] = []
+    c0 = SymbolConstOp(0)
+    c1 = SymbolConstOp(1)
+    c2 = SymbolConstOp(1)
+    ops.extend([c0, c1, c2])
+
+    loop_block = Block(
+        arg_types=[
+            SymbolIterType.from_bounds("0", "1", "1"),
+            SymbolValueType.from_expr("TOTAL"),
+        ]
+    )
+    carried = loop_block.args[1]
+    add = SymbolAddOp(carried, c1.result, SymbolValueType.from_expr("TOTAL + 1"))
+    sub = SymbolSubOp(carried, c1.result, SymbolValueType.from_expr("TOTAL - 1"))
+    mul = SymbolMulOp(carried, c1.result, SymbolValueType.from_expr("TOTAL * 1"))
+    div = SymbolDivOp(carried, c1.result, SymbolValueType.from_expr("TOTAL / 1"))
+    floordiv = SymbolFloorDivOp(carried, c1.result, SymbolValueType.from_expr("TOTAL // 1"))
+    loop_block.add_ops([add, sub, mul, div, floordiv, SymbolYieldOp(add.result)])
+    loop = SymbolForOp(
+        c0.result,
+        c1.result,
+        c2.result,
+        loop_block,
+        init=c0.result,
+        result_type=SymbolValueType.from_expr("TOTAL"),
+    )
+    ops.append(loop)
+    ops.append(func.ReturnOp())
+    block.add_ops(ops)
+    func_op = func.FuncOp(
+        "keep_loop_carried_symbol_elewise",
+        FunctionType.from_lists([], []),
+        Region(block),
+    )
+    return ModuleOp([func_op])
+
+
 def _make_module_without_symbol_for() -> ModuleOp:
     block = Block(arg_types=[])
     only_const = SymbolConstOp(7)
@@ -455,6 +543,70 @@ def test_symbol_loop_hoist_keeps_loop_carried_symbol_add_in_loop() -> None:
     loop_index = ops.index(loop)
     assert not any(isinstance(op, SymbolAddOp) for op in ops[:loop_index])
     assert any(isinstance(op, SymbolAddOp) for op in loop.body.blocks.first.ops)
+
+
+# TC-SLH-002A
+# 测试目的: 验证依赖 loop-local 生产者的 get_dim/get_stride 与 symbol 算术保持在 loop 内。
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
+def test_symbol_loop_hoist_keeps_loop_local_symbol_inputs_in_loop() -> None:
+    module = _make_module_for_loop_local_symbol_inputs()
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    block = func_op.body.blocks.first
+    loop = next(op for op in block.ops if isinstance(op, SymbolForOp))
+
+    SymbolLoopHoistPass(fold=False).apply(Context(), module)
+
+    ops = list(block.ops)
+    loop_index = ops.index(loop)
+    hoist_candidates = (
+        SymbolGetDimOp,
+        SymbolGetStrideOp,
+        SymbolAddOp,
+        SymbolSubOp,
+        SymbolMulOp,
+        SymbolDivOp,
+        SymbolFloorDivOp,
+    )
+    assert not any(isinstance(op, hoist_candidates) for op in ops[:loop_index])
+    loop_ops = list(loop.body.blocks.first.ops)
+    assert [type(op) for op in loop_ops[-7:]] == [
+        SymbolGetDimOp,
+        SymbolGetStrideOp,
+        SymbolAddOp,
+        SymbolSubOp,
+        SymbolMulOp,
+        SymbolDivOp,
+        SymbolFloorDivOp,
+    ]
+
+
+# TC-SLH-002B
+# 测试目的: 验证依赖 loop-carried 值的 symbol 算术白名单全部保持在 loop 内。
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
+def test_symbol_loop_hoist_keeps_loop_carried_symbol_elewise_in_loop() -> None:
+    module = _make_module_for_loop_carried_symbol_elewise()
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    block = func_op.body.blocks.first
+    loop = next(op for op in block.ops if isinstance(op, SymbolForOp))
+
+    SymbolLoopHoistPass(fold=False).apply(Context(), module)
+
+    ops = list(block.ops)
+    loop_index = ops.index(loop)
+    symbol_ops = (SymbolAddOp, SymbolSubOp, SymbolMulOp, SymbolDivOp, SymbolFloorDivOp)
+    assert not any(isinstance(op, symbol_ops) for op in ops[:loop_index])
+    loop_ops = list(loop.body.blocks.first.ops)
+    assert [type(op) for op in loop_ops[:5]] == [
+        SymbolAddOp,
+        SymbolSubOp,
+        SymbolMulOp,
+        SymbolDivOp,
+        SymbolFloorDivOp,
+    ]
 
 
 # TC-SLH-007

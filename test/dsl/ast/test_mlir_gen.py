@@ -39,9 +39,48 @@ from kernel_gen.dsl.ast import parse
 from kernel_gen.dsl.ast.mlir_gen import mlir_gen
 from kernel_gen.operation import copy as dma_copy
 from kernel_gen.operation import free as dma_free
-from kernel_gen.operation.arch import get_dynamic_memory
-from kernel_gen.operation.dma import alloc, deslice, fill, reshape, slice
-from kernel_gen.operation.nn import add, img2col2d, matmul, reduce_max, softmax
+from kernel_gen.operation.arch import (
+    get_block_id,
+    get_block_num,
+    get_dynamic_memory,
+    get_subthread_id,
+    get_subthread_num,
+    get_thread_id,
+    get_thread_num,
+    launch_kernel,
+)
+from kernel_gen.operation.dma import alloc, cast as dma_cast, deslice, fill, flatten, load, reshape, slice, store, view
+from kernel_gen.operation.nn import (
+    add,
+    broadcast,
+    broadcast_to,
+    conv,
+    eq,
+    exp,
+    fc,
+    floordiv,
+    ge,
+    gt,
+    hard_sigmoid,
+    img2col1d,
+    img2col2d,
+    le,
+    leaky_relu,
+    lt,
+    matmul,
+    mul,
+    ne,
+    reduce_max,
+    reduce_min,
+    reduce_sum,
+    relu,
+    sigmoid,
+    softmax,
+    sub,
+    tanh,
+    transpose,
+    truediv,
+)
 from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -113,7 +152,6 @@ def _memory_type(
         NnMemorySpaceAttr.from_name(space),
     )
 
-
 def _symbol_min_iter_kernel(out: Memory, src: Memory, tile_n: SymbolDim) -> None:
     """提供模块级 DSL kernel，避免测试函数内定义非装饰器嵌套函数。"""
 
@@ -129,6 +167,87 @@ def _symbol_min_dynamic_expr_kernel(lhs: SymbolDim, rhs: SymbolDim) -> int:
     """提供动态 symbol.min 复合 operand DSL kernel。"""
 
     return min(lhs + 1, rhs - 2)
+
+
+def public_nn_activation_reduce_kernel(x: Memory) -> None:
+    relu(x)
+    sigmoid(x)
+    tanh(x)
+    exp(x)
+    leaky_relu(x, alpha=0.25)
+    hard_sigmoid(x, alpha=0.2, beta=0.5)
+    reduce_sum(x, axis=1, keepdim=True)
+    reduce_min(x, axis=0, keepdim=False)
+    reduce_max(x)
+    softmax(x, axis=-1)
+
+
+def public_nn_arithmetic_compare_kernel(lhs: Memory, rhs: Memory, scalar: int) -> None:
+    add(lhs, rhs)
+    sub(lhs, scalar)
+    mul(scalar, lhs)
+    truediv(lhs, rhs)
+    floordiv(lhs, 2)
+    eq(lhs, rhs)
+    ne(lhs, rhs)
+    lt(lhs, rhs)
+    le(lhs, rhs)
+    gt(lhs, rhs)
+    ge(lhs, rhs)
+
+
+def public_nn_broadcast_kernel(src: Memory, target: Memory, shape_dim: int) -> None:
+    broadcast(src, target)
+    broadcast_to(src, [shape_dim, 3], MemorySpace.GM)
+    transpose(target, [1, 0])
+
+
+def public_nn_structured_kernel(
+    mat_lhs: Memory,
+    mat_rhs: Memory,
+    fc_weight: Memory,
+    img1d: Memory,
+    img2d: Memory,
+    conv_input: Memory,
+    conv_weight: Memory,
+) -> None:
+    matmul(mat_lhs, mat_rhs)
+    fc(mat_lhs, fc_weight)
+    img2col1d(img1d, kw=3, sw=1, dw=1, pl=1, pr=1)
+    img2col2d(img2d, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
+    conv(conv_input, conv_weight, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
+
+
+def public_dma_helper_chain_kernel(x: Memory, y: Memory, n: int) -> None:
+    local = alloc([n, 4], NumericType.Float32, MemorySpace.SM)
+    fill(local, "inf")
+    copied = dma_copy(x, MemorySpace.SM)
+    loaded = load(x, [0, 0], [n, 4], [1, 1], MemorySpace.SM)
+    slice(x, [0, 0], [n, 4], [1, 1], MemorySpace.SM)
+    view(x, [0, 0], [n, 4], [1, 1])
+    reshape(loaded, [n * 4])
+    flatten(x)
+    dma_cast(copied, NumericType.Float16, MemorySpace.SM)
+    store(y, local, [0, 0], [n, 4], [1, 1])
+    deslice(y, local, [0, 0], [n, 4], [1, 1])
+
+
+def public_arch_launched_body(x: Memory) -> None:
+    get_block_num()
+    get_thread_num()
+    get_subthread_num()
+
+
+def public_arch_helper_kernel(x: Memory) -> None:
+    get_block_id()
+    get_block_num()
+    get_thread_id()
+    get_thread_num()
+    get_subthread_id()
+    get_subthread_num()
+    get_dynamic_memory(MemorySpace.SM)
+    get_dynamic_memory(MemorySpace.LM)
+    launch_kernel[1, 2, 3, 0](public_arch_launched_body, x)
 
 
 def test_mlir_gen_requires_runtime_args() -> None:
@@ -698,7 +817,7 @@ def test_mlir_gen_globals_cannot_replace_runtime_args() -> None:
         return expr
 
     with pytest.raises(TypeError, match="unexpected keyword argument 'globals'"):
-        mlir_gen(only_symbol, globals={"expr": expr})
+        mlir_gen(only_symbol, **{"globals": {"expr": expr}})
 
 
 def test_mlir_gen_rejects_builtins_external_value_reference() -> None:
@@ -708,7 +827,7 @@ def test_mlir_gen_rejects_builtins_external_value_reference() -> None:
         return BUILTIN_EXTERNAL_VALUE
 
     with pytest.raises(TypeError, match="unexpected keyword argument 'builtins'"):
-        mlir_gen(use_builtin_value, builtins={"BUILTIN_EXTERNAL_VALUE": 13})
+        mlir_gen(use_builtin_value, **{"builtins": {"BUILTIN_EXTERNAL_VALUE": 13}})
 
 
 def test_module_ast_emit_mlir_requires_context() -> None:
@@ -750,6 +869,117 @@ def test_mlir_gen_lowers_nn_matmul_public_helper() -> None:
     assert len(matmul_ops) == 1
     assert matmul_ops[0].result.type.shape.data[0].data == 2
     assert matmul_ops[0].result.type.shape.data[1].data == 4
+
+
+def test_mlir_gen_lowers_nn_activation_reduce_public_helpers() -> None:
+    """TC-MLIR-GEN-AST-008: activation / reduce helper 通过公开入口生成 NN op。"""
+
+    module = mlir_gen(public_nn_activation_reduce_kernel, Memory([2, 3], NumericType.Float32))
+    module_text = str(module)
+
+    for op_name in (
+        "nn.relu",
+        "nn.sigmoid",
+        "nn.tanh",
+        "nn.exp",
+        "nn.leaky_relu",
+        "nn.hard_sigmoid",
+        "nn.reduce_sum",
+        "nn.reduce_min",
+        "nn.reduce_max",
+        "nn.softmax",
+    ):
+        assert op_name in module_text
+
+
+def test_mlir_gen_lowers_nn_arithmetic_compare_public_helpers() -> None:
+    """TC-MLIR-GEN-AST-009: arithmetic / compare helper 通过公开入口生成 NN op。"""
+
+    module = mlir_gen(
+        public_nn_arithmetic_compare_kernel,
+        Memory([2, 3], NumericType.Float32),
+        Memory([2, 3], NumericType.Float32),
+        SymbolDim("SCALAR"),
+    )
+    module_text = str(module)
+
+    for op_name in (
+        "nn.add",
+        "nn.sub",
+        "nn.mul",
+        "nn.truediv",
+        "nn.floordiv",
+        "nn.eq",
+        "nn.ne",
+        "nn.lt",
+        "nn.le",
+        "nn.gt",
+        "nn.ge",
+    ):
+        assert op_name in module_text
+
+
+def test_mlir_gen_lowers_nn_broadcast_and_structured_public_helpers() -> None:
+    """TC-MLIR-GEN-AST-010: broadcast 与 structured helper 通过公开入口生成稳定 op 链。"""
+
+    broadcast_module = mlir_gen(
+        public_nn_broadcast_kernel,
+        Memory([1, 3], NumericType.Float32),
+        Memory([2, 3], NumericType.Float32),
+        SymbolDim("M"),
+    )
+    structured_module = mlir_gen(
+        public_nn_structured_kernel,
+        Memory([2, 3], NumericType.Float32),
+        Memory([3, 4], NumericType.Float32),
+        Memory([5, 3], NumericType.Float32),
+        Memory([1, 3, 8], NumericType.Float32),
+        Memory([1, 3, 8, 8], NumericType.Float32),
+        Memory([1, 3, 8, 8], NumericType.Float32),
+        Memory([4, 3, 3, 3], NumericType.Float32),
+    )
+    module_text = f"{broadcast_module}\n{structured_module}"
+
+    assert module_text.count("nn.broadcast") >= 2
+    assert "nn.transpose" in module_text
+    assert module_text.count("nn.matmul") >= 3
+    assert "nn.img2col1d" in module_text
+    assert "nn.img2col2d" in module_text
+    assert module_text.count("dma.reshape") >= 3
+
+
+def test_mlir_gen_lowers_dma_and_arch_public_helper_chains() -> None:
+    """TC-MLIR-GEN-AST-011: DMA 与 arch helper 链通过公开入口生成对应 dialect op。"""
+
+    dma_module = mlir_gen(
+        public_dma_helper_chain_kernel,
+        Memory([8, 4], NumericType.Float32),
+        Memory([8, 4], NumericType.Float32),
+        SymbolDim("N"),
+    )
+    arch_module = mlir_gen(public_arch_helper_kernel, Memory([4], NumericType.Float32))
+    module_text = f"{dma_module}\n{arch_module}"
+
+    for op_name in (
+        "dma.alloc",
+        "dma.broadcast",
+        "dma.copy",
+        "dma.slice",
+        "dma.view",
+        "dma.reshape",
+        "dma.cast",
+        "dma.store",
+        "dma.deslice",
+        "arch.get_block_id",
+        "arch.get_block_num",
+        "arch.get_thread_id",
+        "arch.get_thread_num",
+        "arch.get_subthread_id",
+        "arch.get_subthread_num",
+        "arch.get_dynamic_memory",
+        "arch.launch",
+    ):
+        assert op_name in module_text
 
 
 def test_mlir_gen_reuses_bound_memory_expr_with_symbol_axis_arithmetic() -> None:

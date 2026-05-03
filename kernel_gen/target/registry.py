@@ -15,29 +15,6 @@ API 列表:
 - `get_target_hardware(target: str, key: str) -> int | None`
 - `get_current_target_hardware(key: str) -> int | None`
 
-helper 清单:
-- `_format_error(expected: str, actual: str = ERROR_ACTUAL) -> str`
-- `_raise_value_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None`
-- `_raise_type_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None`
-- `_validate_target_name(name: str) -> None`
-- `_validate_arch_ops(spec: TargetSpec) -> None`
-- `_validate_op_set(op_set: set[str], field_name: str, target_name: str) -> None`
-- `_validate_hardware_map(hardware: dict[str, int], target_name: str) -> None`
-- `_parse_ops_list(raw_ops: list[str], field_name: str, target_name: str) -> set[str]`
-- `_parse_arch_payload(raw_arch: TargetJsonPayload, target_name: str) -> tuple[set[str] | None, set[str]]`
-- `_parse_hardware_payload(raw_hardware: TargetJsonPayload, target_name: str) -> dict[str, int]`
-- `_parse_target_spec(payload: TargetJsonPayload, path: Path) -> TargetSpec`
-- `_read_target_json(path: Path) -> TargetJsonPayload`
-- `_parse_ops_text(text: str, field_name: str, target_name: str) -> set[str]`
-- `_parse_target_txt(path: Path) -> TargetSpec`
-- `_ensure_cpu_target() -> None`
-- `_ensure_npu_demo_target() -> None`
-- `_is_default_cpu_spec(spec: TargetSpec) -> bool`
-- `_same_target_spec(left: TargetSpec, right: TargetSpec) -> bool`
-- `_register_loaded_target(spec: TargetSpec) -> None`
-- `_set_current_target(target: str | None) -> None`
-- `_get_current_target() -> str | None`
-
 使用示例:
 - from pathlib import Path
 - from kernel_gen.target import registry
@@ -505,8 +482,6 @@ def _parse_target_txt(path: Path) -> TargetSpec:
                 hw_value = int(value)
             except ValueError as exc:
                 raise ValueError(_format_error(f"{path.stem} hardware.{hw_key} must be int")) from exc
-            if isinstance(hw_value, bool):
-                _raise_value_error(f"{path.stem} hardware.{hw_key} must be int")
             hardware[hw_key] = hw_value
             continue
         _raise_value_error(f"{path.name} has unknown key: {key}")
@@ -771,44 +746,6 @@ def get_target_hardware(target: str, key: str) -> int | None:
     if target not in _TARGET_REGISTRY:
         _raise_value_error(f"target not registered: {target}")
     return _TARGET_REGISTRY[target].hardware.get(key)
-
-
-def _set_current_target(target: str | None) -> None:
-    """设置当前启用的 target 名称。
-
-
-    功能说明:
-    - 供 arch verifier 与测试启用/关闭 target registry 校验。
-
-    使用示例:
-    - _set_current_target("cpu")
-
-    关联文件:
-    - spec: spec/target/registry.md
-    - test: test/target/test_registry.py
-    - 功能实现: kernel_gen/target/registry.py
-    """
-
-    set_current_target(target)
-
-
-def _get_current_target() -> str | None:
-    """获取当前启用的 target 名称。
-
-
-    功能说明:
-    - 返回当前 target registry 校验使用的 target 名称。
-
-    使用示例:
-    - _get_current_target()
-
-    关联文件:
-    - spec: spec/target/registry.md
-    - test: test/target/test_registry.py
-    - 功能实现: kernel_gen/target/registry.py
-    """
-
-    return get_current_target()
 
 
 def set_current_target(target: str | None) -> None:

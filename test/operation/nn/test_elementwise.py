@@ -393,7 +393,7 @@ def test_nn_add_stride_dim_serialization() -> None:
 # OP-018
 # 测试目的: 验证公开 add / leaky_relu 对非法标量与激活参数直接失败。
 # 使用示例: pytest -q test/operation/nn/test_elementwise.py -k test_nn_helper_validation_branches
-# 对应功能实现文件路径: kernel_gen/operation/nn/common.py
+# 对应功能实现文件路径: kernel_gen/operation/nn/elementwise_binary.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/nn/test_elementwise.py
 def test_nn_helper_validation_branches() -> None:

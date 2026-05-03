@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import random
 import sys
 from pathlib import Path
 
@@ -1000,3 +1001,155 @@ builtin.module {
     assert result.failed_check is None
     assert result.message is not None
     assert result.message.startswith("IrcheckEmitCError: emit_c generation failed")
+
+
+# TC-IRCHECK-RUN-034
+# 功能说明: 验证 `run_ircheck_text` 支持 inline regex literal、无 CHECK 成功路径与确定性解析错误矩阵。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_literal_regex_and_parse_error_matrix
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_literal_regex_and_parse_error_matrix() -> None:
+    success_text = f"""// COMPILE_ARGS: --pass no-op
+// CHECK: func.func @{{{{ma.*}}}}
+// CHECK-NEXT: func.return
+
+{_SIMPLE_IR}"""
+    success = run_ircheck_text(success_text, source_path="inline_regex.ircheck")
+    assert success.ok is True
+    assert success.exit_code == 0
+
+    no_check_text = f"""// COMPILE_ARGS: --pass no-op
+
+{_SIMPLE_IR}"""
+    no_check = run_ircheck_text(no_check_text, source_path="inline_no_checks.ircheck")
+    assert no_check.ok is True
+    assert no_check.exit_code == 0
+    assert "func.func @main" in no_check.actual_ir
+
+    rng = random.Random(20260505)
+    invalid_texts = [
+        (
+            """// COMPILE_ARGS: --pass no-op
+// CHECK: func.func @{{}}
+
+builtin.module {}
+""",
+            "IrcheckParseError: invalid regex check",
+        ),
+        (
+            """// COMPILE_ARGS: --pass no-op
+// CHECK: func.func @{{main
+
+builtin.module {}
+""",
+            "IrcheckParseError: invalid regex check",
+        ),
+        (
+            """// COMPILE_ARGS: --pass no-op
+// CHECK: func.func @[[FN:]]
+
+builtin.module {}
+""",
+            "IrcheckParseError: invalid regex check",
+        ),
+        (
+            """// COMPILE_ARGS: --pass no-op
+// CHECK: func.func [[UNPARSED]]
+
+builtin.module {}
+""",
+            "IrcheckParseError: undefined regex variable",
+        ),
+        (
+            """// COMPILE_ARGS: --pass no-op
+// CHECK: func.func @main\\(\\[\\[BROKEN:{reg}\\]
+
+builtin.module {}
+""",
+            "IrcheckParseError: invalid regex check",
+        ),
+    ]
+    rng.shuffle(invalid_texts)
+    for text, prefix in invalid_texts:
+        result = run_ircheck_text(text, source_path="inline_invalid_regex.ircheck")
+        assert result.ok is False
+        assert result.exit_code == 2
+        assert result.message is not None
+        assert result.message.startswith(prefix)
+
+
+# TC-IRCHECK-RUN-035
+# 功能说明: 验证 `run_ircheck_text` 的公开失败边界覆盖空输入、尾部分隔符、解析失败、CHECK-NEXT 越界与 CPU emitc 输入形态。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_public_failure_boundary_matrix
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_public_failure_boundary_matrix() -> None:
+    empty = run_ircheck_text("", source_path="empty.ircheck")
+    assert empty.ok is False
+    assert empty.exit_code == 2
+    assert empty.message is not None
+    assert empty.message.startswith("IrcheckParseError: missing input ir")
+
+    trailing_separator = run_ircheck_text(
+        f"""// COMPILE_ARGS: --pass no-op
+// CHECK: builtin.module
+
+{_SIMPLE_IR}
+// -----
+""",
+        source_path="trailing_separator.ircheck",
+    )
+    assert trailing_separator.ok is False
+    assert trailing_separator.exit_code == 2
+    assert trailing_separator.message is not None
+    assert trailing_separator.message.startswith("IrcheckParseError: invalid ircheck header")
+
+    malformed_ir = run_ircheck_text(
+        """// COMPILE_ARGS: --pass no-op
+// CHECK: builtin.module
+
+builtin.module {
+""",
+        source_path="malformed.ircheck",
+    )
+    assert malformed_ir.ok is False
+    assert malformed_ir.exit_code == 2
+    assert malformed_ir.message is not None
+    assert malformed_ir.message.startswith("IrcheckRunError: pass execution failed: failed to parse input ir")
+
+    next_after_end = run_ircheck_text(
+        """// COMPILE_ARGS: --pass no-op
+// CHECK: builtin.module
+// CHECK-NEXT: func.return
+
+builtin.module {}
+""",
+        source_path="next_after_end.ircheck",
+    )
+    assert next_after_end.ok is False
+    assert next_after_end.exit_code == 1
+    assert next_after_end.message is not None
+    assert next_after_end.message.startswith("IrcheckMatchError: CHECK-NEXT not found on next line")
+
+    cpu_multi_func = run_ircheck_text(
+        """// COMPILE_ARGS: --pass no-op
+// CHECK: unused
+
+builtin.module {
+  func.func @main() {
+    func.return
+  }
+  func.func @helper() {
+    func.return
+  }
+}
+""",
+        source_path="cpu_multi_func_emitc.ircheck",
+        emitc_target="cpu",
+    )
+    assert cpu_multi_func.ok is False
+    assert cpu_multi_func.exit_code == 2
+    assert cpu_multi_func.message is not None
+    assert "target=cpu requires a module with exactly one top-level func.func" in cpu_multi_func.message

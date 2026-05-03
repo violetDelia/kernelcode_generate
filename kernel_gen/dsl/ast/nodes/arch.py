@@ -308,21 +308,9 @@ class ArchLaunchKernelAST(StatementAST):
         assert isinstance(ctx, Context)
         assert isinstance(block, Block)
         block_extent = self.block.emit_mlir(ctx, block)
-        if isinstance(block_extent, Operation):
-            block.add_op(block_extent)
-            block_extent = block_extent.results[0]
         thread_extent = self.thread.emit_mlir(ctx, block)
-        if isinstance(thread_extent, Operation):
-            block.add_op(thread_extent)
-            thread_extent = thread_extent.results[0]
         subthread_extent = self.subthread.emit_mlir(ctx, block)
-        if isinstance(subthread_extent, Operation):
-            block.add_op(subthread_extent)
-            subthread_extent = subthread_extent.results[0]
         shared_memory_size = self.shared_memory_size.emit_mlir(ctx, block)
-        if isinstance(shared_memory_size, Operation):
-            block.add_op(shared_memory_size)
-            shared_memory_size = shared_memory_size.results[0]
         launch_args: list[SSAValue] = []
         for arg in self.args:
             emitted_arg = arg.emit_mlir(ctx, block)
@@ -336,14 +324,6 @@ class ArchLaunchKernelAST(StatementAST):
                     "launch_kernel arg must lower to SSA value",
                 )
             launch_args.append(emitted_arg)
-        if not isinstance(block_extent, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "launch_kernel block must lower to SSA value")
-        if not isinstance(thread_extent, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "launch_kernel thread must lower to SSA value")
-        if not isinstance(subthread_extent, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "launch_kernel subthread must lower to SSA value")
-        if not isinstance(shared_memory_size, SSAValue):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "launch_kernel shared_memory_size must lower to SSA value")
         return ArchLaunchKernelOp(
             str(self.callee.attr),
             block_extent,

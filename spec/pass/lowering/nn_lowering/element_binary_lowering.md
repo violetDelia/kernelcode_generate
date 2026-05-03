@@ -94,6 +94,7 @@
   - `test/passes/lowering/nn_lowering/test_element_compare_le.py`
   - `test/passes/lowering/nn_lowering/test_element_compare_lt.py`
   - `test/passes/lowering/nn_lowering/test_element_compare_ne.py`
+  - `test/passes/lowering/nn_lowering/test_nn_lowering.py`
   - `test/passes/lowering/nn_lowering/test_public_name.py`
 - 执行命令：
   - `pytest -q test/passes/lowering/nn_lowering/test_element_binary_add.py`
@@ -107,6 +108,7 @@
   - `pytest -q test/passes/lowering/nn_lowering/test_element_compare_le.py`
   - `pytest -q test/passes/lowering/nn_lowering/test_element_compare_gt.py`
   - `pytest -q test/passes/lowering/nn_lowering/test_element_compare_ge.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_nn_lowering.py -k "element_binary_public or compare_public"`
   - `pytest -q test/passes/lowering/nn_lowering/test_public_name.py -k patterns`
   - `pytest -q test/passes/lowering/nn_lowering/test_asset_cases.py -k "element_binary or element_compare"`
 
@@ -132,3 +134,6 @@
 | TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-010 | pass 改写 | `test_lower_gt_to_kernel_binary_elewise` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_gt_to_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_lower_gt_to_kernel_binary_elewise`”场景。 | `test_lower_gt_to_kernel_binary_elewise` |
 | TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-011 | pass 改写 | `test_lower_ge_to_kernel_binary_elewise` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_ge_to_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_lower_ge_to_kernel_binary_elewise`”场景。 | `test_lower_ge_to_kernel_binary_elewise` |
 | TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-012 | pass 改写 | `test_nn_lowering_asset_case` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_nn_lowering_asset_case`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_nn_lowering_asset_case`”场景。 | `test_nn_lowering_asset_case` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-013 | pass 改写 | `test_lower_element_binary_public_dynamic_scalar_and_symbol_matrix` | 准备动态 shape、左侧 scalar、symbol.const/symbol.add 前置链等公开 IR 输入。 | 通过公开 `NnLoweringPass.apply(...)` 运行 lowering。 | 动态 shape 生成 `symbol.get_dim`，mixed scalar 走 `dma.fill`，symbol 前置链规范化后不残留 `nn.*`。 | `test_lower_element_binary_public_dynamic_scalar_and_symbol_matrix` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-014 | pass 改写 | `test_lower_compare_public_left_scalar_matrix` | 准备左侧 scalar、右侧 memory 的公开 compare IR 输入。 | 通过公开 `NnLoweringPass.apply(...)` 运行 lowering。 | mixed compare scalar 走 `dma.broadcast`，不混入 `dma.fill`。 | `test_lower_compare_public_left_scalar_matrix` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-015 | 边界/异常 | `test_lower_element_binary_public_error_matrix` | 准备无 memory、rank 不匹配、`?` result shape、scalar 类型不匹配与 compare 输出类型非法输入。 | 通过公开 `NnLoweringPass.apply(...)` 运行 lowering。 | 按稳定 `KernelCodeError` 文本拒绝非法 element binary / compare 输入。 | `test_lower_element_binary_public_error_matrix` |

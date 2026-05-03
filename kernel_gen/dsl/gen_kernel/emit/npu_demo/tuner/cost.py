@@ -313,8 +313,6 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
         input_type = input_value.type
         out_expr = emit_c_value(out_value, ctx)
         input_expr = emit_c_value(input_value, ctx)
-        if not symbol_values:
-            raise ctx.emit_error("tuner.cost", f"op_name={helper_name} requires symbol operands")
         k_expr, s_expr, d_expr, p_left_expr, p_right_expr = tuple(emit_c_value(value, ctx) for value in symbol_values)
         return (
             f"{ctx.current_indent}S_INT {result_name} = "
@@ -338,8 +336,6 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
         input_type = input_value.type
         out_expr = emit_c_value(out_value, ctx)
         input_expr = emit_c_value(input_value, ctx)
-        if not symbol_values:
-            raise ctx.emit_error("tuner.cost", f"op_name={helper_name} requires symbol operands")
         (
             kh_expr,
             kw_expr,

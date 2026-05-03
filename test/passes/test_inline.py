@@ -98,3 +98,96 @@ def test_inline_expands_private_helper_and_cleans_dead_helper() -> None:
 def test_inline_rejects_non_module() -> None:
     with pytest.raises(KernelCodeError, match=r"^InlineError: module must be builtin.module$"):
         InlinePass().apply(Context(), object())  # type: ignore[arg-type]
+
+
+def test_inline_noops_for_empty_module_and_external_declaration() -> None:
+    empty_module = ModuleOp([])
+    InlinePass().apply(Context(), empty_module)
+    assert list(empty_module.ops) == []
+
+    declaration = func.FuncOp.external("declared", [i32], [i32])
+    entry_block = Block()
+    entry_block.add_op(func.ReturnOp())
+    entry = func.FuncOp("entry", FunctionType.from_lists([], []), Region(entry_block))
+    module = ModuleOp([declaration, entry])
+
+    InlinePass().apply(Context(), module)
+
+    assert [op.sym_name.data for op in module.ops if isinstance(op, func.FuncOp)] == ["entry"]
+
+
+def test_inline_keeps_public_helpers_and_referenced_private_non_inlineable() -> None:
+    public_helper_block = Block()
+    public_helper_block.add_op(func.ReturnOp())
+    public_helper = func.FuncOp("public_helper", FunctionType.from_lists([], []), Region(public_helper_block))
+
+    private_block = Block()
+    private_block.add_ops([func.ReturnOp(), arith.ConstantOp(IntegerAttr(0, i32))])
+    private_helper = func.FuncOp(
+        "private_helper",
+        FunctionType.from_lists([], []),
+        Region(private_block),
+        visibility="private",
+    )
+
+    entry_block = Block()
+    entry_block.add_ops([func.CallOp("private_helper", [], []), func.ReturnOp()])
+    entry = func.FuncOp("entry", FunctionType.from_lists([], []), Region(entry_block))
+    module = ModuleOp([entry, public_helper, private_helper])
+
+    InlinePass().apply(Context(), module)
+
+    assert [op.sym_name.data for op in module.ops if isinstance(op, func.FuncOp)] == [
+        "entry",
+        "public_helper",
+        "private_helper",
+    ]
+
+
+def test_inline_rejects_self_recursive_inlineable_call() -> None:
+    block = Block(arg_types=[i32])
+    call_op = func.CallOp("recursive", [block.args[0]], [i32])
+    block.add_ops([call_op, func.ReturnOp(call_op.results[0])])
+    recursive = func.FuncOp("recursive", FunctionType.from_lists([i32], [i32]), Region(block))
+    module = ModuleOp([recursive])
+
+    with pytest.raises(KernelCodeError, match=r"^InlineError: unresolved func\.call remains after inline$"):
+        InlinePass().apply(Context(), module)
+
+
+def test_inline_rejects_call_argument_arity_mismatch() -> None:
+    helper_block = Block(arg_types=[i32])
+    helper_block.add_op(func.ReturnOp(helper_block.args[0]))
+    helper = func.FuncOp(
+        "helper",
+        FunctionType.from_lists([i32], [i32]),
+        Region(helper_block),
+        visibility="private",
+    )
+    caller_block = Block()
+    call_op = func.CallOp("helper", [], [i32])
+    caller_block.add_ops([call_op, func.ReturnOp(call_op.results[0])])
+    caller = func.FuncOp("caller", FunctionType.from_lists([], [i32]), Region(caller_block))
+    module = ModuleOp([helper, caller])
+
+    with pytest.raises(KernelCodeError, match=r"^InlineError: func\.call arity mismatch for 'helper'$"):
+        InlinePass().apply(Context(), module)
+
+
+def test_inline_rejects_call_result_arity_mismatch() -> None:
+    helper_block = Block()
+    const_value = arith.ConstantOp(IntegerAttr(1, i32))
+    helper_block.add_ops([const_value, func.ReturnOp(const_value.result)])
+    helper = func.FuncOp(
+        "helper",
+        FunctionType.from_lists([], [i32]),
+        Region(helper_block),
+        visibility="private",
+    )
+    caller_block = Block()
+    caller_block.add_ops([func.CallOp("helper", [], []), func.ReturnOp()])
+    caller = func.FuncOp("caller", FunctionType.from_lists([], []), Region(caller_block))
+    module = ModuleOp([helper, caller])
+
+    with pytest.raises(KernelCodeError, match=r"^InlineError: func\.call result arity mismatch for 'helper'$"):
+        InlinePass().apply(Context(), module)
