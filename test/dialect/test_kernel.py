@@ -511,6 +511,37 @@ def test_kernel_exp_requires_float() -> None:
 
 
 # TC-KRN-014
+# 功能说明: 验证 kernel.matmul 允许 out/lhs/rhs 使用不同合法 memory space。
+# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_matmul_allows_mixed_spaces
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel.py
+def test_kernel_matmul_allows_mixed_spaces() -> None:
+    lhs_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(3), IntAttr(1)]),
+        space="tlm1",
+    )
+    rhs_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(3), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        space="tlm2",
+    )
+    out_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        space="tsm",
+    )
+    op = KernelMatmulOp(
+        _make_value(out_type),
+        _make_value(lhs_type),
+        _make_value(rhs_type),
+        _make_space("global"),
+    )
+    op.verify()
+
+
+# TC-KRN-014
 # 功能说明: 验证 kernel.matmul dtype mismatch 被拒绝。
 # 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_matmul_dtype_mismatch
 # 对应功能实现文件路径: kernel_gen/dialect/kernel.py

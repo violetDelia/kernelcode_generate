@@ -2,17 +2,17 @@
 
 
 功能说明:
-- 实现 `lower-dma-memory-hierarchy` pass，将仍停留在 `GM` 的 `kernel.*` 计算显式改写为
-  `GM -> SM -> LM` 的读路径与 `LM -> SM -> GM` 的写路径。
-- 本 pass 新增的 hierarchy 搬运统一使用 `dma.slice / dma.deslice` 表达，不引入
-  `dma.copy/load/store` 作为新增主语义。
-- 强制处理后的 `kernel.*` operand/out 仅使用 `LM` space，并同步刷新 op 的 `space` 属性为 `local`。
-- 文件内 helper 收口为 `_require_sm_lm_support`、`_memory_space`、`_with_space`、
-  `_const_symbol_int`、`_build_full_window_operands`、`_resolve_window_operands`
-  与 `_rewrite_kernel_binary_elewise_op`；这些 helper 仅供本文件内部复用。
+- 实现 `lower-dma-memory-hierarchy` pass 的两条公开执行路径。
+- 默认 `LowerDmaMemoryHierarchyPass()` 不配置 `apply_op` 时保持 no-op。
+- `fold=False` 且不配置 `apply_op` 时保留 legacy `GM -> SM -> LM` / `LM -> SM -> GM`
+  hierarchy 兼容路径。
+- 配置 `apply_op="matmul{[...]}"` 时，对 `kernel.matmul` 的非空 target operand
+  生成 `dma.alloc + dma.copy` 并替换 operand。
 
 API 列表:
-- `class LowerDmaMemoryHierarchyPass(fold: bool = True)`
+- `class LowerDmaMemoryHierarchyPass(fold: bool = True, apply_op: str | None = None)`
+- `LowerDmaMemoryHierarchyPass.from_options(options: dict[str, str]) -> LowerDmaMemoryHierarchyPass`
+- `LowerDmaMemoryHierarchyPass.apply(ctx: Context, module: ModuleOp) -> None`
 
 使用示例:
 - from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
@@ -25,6 +25,10 @@ API 列表:
 """
 
 from __future__ import annotations
+import json
+from dataclasses import dataclass
+
+import kernel_gen.target.registry as targetregistry
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.context import Context
@@ -39,13 +43,22 @@ from xdsl.dialects.builtin import (
 )
 from xdsl.ir import Block, Operation, SSAValue
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaSliceOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaSliceOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from kernel_gen.passes.pass_manager import Pass
-from kernel_gen.target import registry as target_registry
 
 
+_APPLY_OP_PREFIX = "matmul"
+_APPLY_TARGETS = {"", "shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
+_MATMUL_OPERAND_COUNT = 3
+
+
+@dataclass(frozen=True)
+class _ApplyOpRule:
+    """保存 `apply_op` 解析后的内部规则。"""
+
+    targets: tuple[str, str, str]
 
 
 def _require_sm_lm_support() -> None:
@@ -65,8 +78,8 @@ def _require_sm_lm_support() -> None:
     - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
-    sm_size = target_registry.get_current_target_hardware("sm_memory_size")
-    lm_size = target_registry.get_current_target_hardware("lm_memory_size")
+    sm_size = targetregistry.get_current_target_hardware("sm_memory_size")
+    lm_size = targetregistry.get_current_target_hardware("lm_memory_size")
     if sm_size is None or lm_size is None:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
             "target must be selected and provide SM/LM hardware size for lower-dma-memory-hierarchy"
@@ -82,7 +95,7 @@ def _memory_space(value_type: NnMemoryType) -> str:
 
 
     功能说明:
-    - 返回 `global/shared/local/tsm/tlm` 中的字符串。
+    - 返回 `global/shared/local/tsm/tlm1/tlm2/tlm3` 中的字符串。
 
     使用示例:
     - space = _memory_space(SSAValue.get(op.operands[0]).type)
@@ -94,6 +107,72 @@ def _memory_space(value_type: NnMemoryType) -> str:
     """
 
     return value_type.space.space.data
+
+
+def _parse_apply_op(apply_op: str | None) -> _ApplyOpRule | None:
+    """解析并校验 `lower-dma-memory-hierarchy` 的 `apply_op` 规则。
+
+
+    功能说明:
+    - 当前仅支持 `matmul{["", "tlm1", "tlm2"]}` 形式的单条规则。
+    - 列表固定对应 `kernel.matmul` 的 `out/lhs/rhs` 三个 operand。
+
+    使用示例:
+    - rule = _parse_apply_op('matmul{["", "tlm1", "tlm2"]}')
+
+    关联文件:
+    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
+    - test: test/passes/test_dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
+    """
+
+    if apply_op is None:
+        return None
+    text = apply_op.strip()
+    if not text.startswith(f"{_APPLY_OP_PREFIX}{{") or not text.endswith("}"):
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "unsupported apply_op; apply_op must be matmul{[...]}; only matmul is supported",
+        )
+    payload = text[len(_APPLY_OP_PREFIX) + 1 : -1]
+    try:
+        targets = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "apply_op matmul target list must be valid JSON",
+        ) from exc
+    if not isinstance(targets, list):
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "apply_op matmul target list must be a list",
+        )
+    if len(targets) != _MATMUL_OPERAND_COUNT:
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "apply_op matmul target list must contain exactly 3 entries for out/lhs/rhs",
+        )
+    normalized: list[str] = []
+    for target in targets:
+        if not isinstance(target, str):
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "apply_op matmul target entries must be strings",
+            )
+        if target not in _APPLY_TARGETS:
+            allowed = ", ".join(sorted(space for space in _APPLY_TARGETS if space))
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                f"apply_op matmul target space must be one of [{allowed}] or empty string",
+            )
+        normalized.append(target)
+    return _ApplyOpRule((normalized[0], normalized[1], normalized[2]))
 
 
 def _with_space(value_type: NnMemoryType, space: str) -> NnMemoryType:
@@ -188,6 +267,52 @@ def _build_full_window_operands(
     offsets = [zero] * rank
     strides = [one] * rank
     return ops, offsets, sizes, strides
+
+
+def _build_dynamic_shape_operands(
+    source: SSAValue,
+    source_type: NnMemoryType,
+) -> tuple[list[Operation], list[SSAValue]]:
+    """构造 `dma.alloc` 所需的动态 shape operand。
+
+
+    功能说明:
+    - 静态 shape 返回空列表，让 `dma.alloc` 使用零 operand 形式。
+    - 显式符号维度通过 `symbol.get_dim(source, axis)` 读取。
+    - 匿名动态维度 `?` 没有稳定 symbol 来源，必须显式失败。
+
+    使用示例:
+    - ops, dynamic_shape = _build_dynamic_shape_operands(lhs, lhs_type)
+
+    关联文件:
+    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
+    - test: test/passes/test_dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
+    """
+
+    source_type.verify()
+    ops: list[Operation] = []
+    dynamic_shape: list[SSAValue] = []
+    for axis, shape_dim in enumerate(source_type.shape.data):
+        if isinstance(shape_dim, IntAttr):
+            continue
+        if isinstance(shape_dim, StringAttr):
+            if shape_dim.data == "?":
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.PASS,
+                    "dynamic_shape must come from explicit symbol source; anonymous '?' dimension is unsupported in lower-dma-memory-hierarchy",
+                )
+            get_dim = SymbolGetDimOp(source, IntAttr(axis))
+            ops.append(get_dim)
+            dynamic_shape.append(get_dim.result)
+            continue
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "dynamic_shape result shape entries must be IntAttr or StringAttr",
+        )
+    return ops, dynamic_shape
 
 
 def _resolve_window_operands(
@@ -381,17 +506,16 @@ def _lower_gm_out_to_lm_with_writeback(
 
 
 class LowerDmaMemoryHierarchyPass(Pass):
-    """将 kernel/dma IR 显式改写为 GM/SM/LM hierarchy 路径的 lowering pass。
+    """执行 dma memory hierarchy 规则化 lowering。
 
 
     功能说明:
-    - 为 `kernel.*` operand/out 中仍在 `GM` 的 buffer 插入 staging：
-      - 读路径：`GM -> SM -> LM`（`dma.slice`）
-      - 写路径：`LM -> SM -> GM`（`dma.deslice`）
-    - 强制 `kernel.*` 仅在 `LM` 上计算，并把 op 的 `space` 属性设置为 `#nn.space<local>`。
+    - 默认无 `apply_op` 时保持 no-op。
+    - `fold=False` 且无 `apply_op` 时保留 legacy hierarchy 兼容路径。
+    - 有 `apply_op` 时按 `matmul{[...]}` 规则插入 `dma.alloc + dma.copy`。
 
     使用示例:
-    - LowerDmaMemoryHierarchyPass().apply(Context(), module)
+    - LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", "tlm2"]}').apply(Context(), module)
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
@@ -401,17 +525,68 @@ class LowerDmaMemoryHierarchyPass(Pass):
 
     name = "lower-dma-memory-hierarchy"
 
+    def __init__(self, fold: bool = True, apply_op: str | None = None) -> None:
+        """初始化 `lower-dma-memory-hierarchy` pass。
+
+
+        功能说明:
+        - 保存 `fold` 兼容开关。
+        - 解析可选 `apply_op` 规则。
+
+        使用示例:
+        - LowerDmaMemoryHierarchyPass(fold=False)
+        - LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", "tlm2"]}')
+
+        关联文件:
+        - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
+        - test: test/passes/test_dma_memory_hierarchy.py
+        - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
+        """
+
+        self.fold = fold
+        self.apply_op = apply_op
+        self._rule = _parse_apply_op(apply_op)
+
+    @classmethod
+    def from_options(cls, options: dict[str, str]) -> "LowerDmaMemoryHierarchyPass":
+        """通过 pass registry options 构造 pass。
+
+
+        功能说明:
+        - 当前只接受 `apply_op` pass 专属 option。
+        - registry 的通用 `fold` option 由 registry 层剥离后写回 `fold` 属性。
+
+        使用示例:
+        - LowerDmaMemoryHierarchyPass.from_options({"apply_op": "matmul{[\\"\\", \\"tlm1\\", \\"tlm2\\"]}"})
+
+        关联文件:
+        - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
+        - test: test/passes/test_dma_memory_hierarchy.py
+        - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
+        """
+
+        allowed = {"apply_op"}
+        unknown = sorted(set(options) - allowed)
+        if unknown:
+            names = ", ".join(unknown)
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                f"lower-dma-memory-hierarchy unsupported option(s): {names}",
+            )
+        return cls(apply_op=options.get("apply_op"))
+
     def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行 dma-memory-hierarchy lowering。
 
 
         功能说明:
-        - 遍历 module 内所有 `kernel.*` op，在其所在 block 内插入 `dma.alloc/slice/deslice`。
-        - 遇到目标不支持 SM/LM 或输入不满足边界时显式失败。
-        - 公开执行入口固定为 xdsl `ModulePass.apply(ctx, module)`，不再提供单 pass `run(...)` 兼容入口。
+        - 有 `apply_op` 时只处理 `kernel.matmul` 并生成 copy-based staging。
+        - 无 `apply_op` 且 `fold=True` 时 no-op。
+        - 无 `apply_op` 且 `fold=False` 时走 legacy hierarchy 兼容路径。
 
         使用示例:
-        - LowerDmaMemoryHierarchyPass().apply(Context(), module)
+        - LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", "tlm2"]}').apply(Context(), module)
 
         关联文件:
         - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
@@ -422,6 +597,75 @@ class LowerDmaMemoryHierarchyPass(Pass):
         _ = ctx
         if not isinstance(module, ModuleOp):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "module must be builtin.module")
+        if self._rule is not None:
+            self._apply_matmul_rule(module, self._rule)
+            return
+        if self.fold:
+            return
+        self._apply_legacy_hierarchy(module)
+
+    def _apply_matmul_rule(self, module: ModuleOp, rule: _ApplyOpRule) -> None:
+        """执行 `matmul{[...]}` copy-based rewrite。
+
+
+        功能说明:
+        - 遍历 module 内 `kernel.matmul` op。
+        - 对规则中非空 target operand 插入 `dma.alloc + dma.copy` 并替换 operand。
+
+        使用示例:
+        - self._apply_matmul_rule(module, rule)
+
+        关联文件:
+        - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
+        - test: test/passes/test_dma_memory_hierarchy.py
+        - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
+        """
+
+        for op in [candidate for candidate in module.walk() if candidate.name == "kernel.matmul"]:
+            if len(op.operands) != _MATMUL_OPERAND_COUNT:
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.PASS,
+                    "kernel.matmul must have exactly 3 operands for apply_op matmul",
+                )
+            block = op.parent
+            if not isinstance(block, Block):
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "kernel.matmul must live in a block")
+            for index, target_space in enumerate(rule.targets):
+                if target_space == "":
+                    continue
+                source = SSAValue.get(op.operands[index])
+                source_type = source.type
+                if not isinstance(source_type, NnMemoryType):
+                    raise KernelCodeError(
+                        ErrorKind.CONTRACT,
+                        ErrorModule.PASS,
+                        "apply_op matmul target operand must be nn.memory",
+                    )
+                target_type = _with_space(source_type, target_space)
+                shape_ops, dynamic_shape = _build_dynamic_shape_operands(source, source_type)
+                alloc = DmaAllocOp(dynamic_shape, target_type)
+                copy = DmaCopyOp(alloc.result, source)
+                block.insert_ops_before([*shape_ops, alloc, copy], op)
+                op.operands[index] = alloc.result
+
+    def _apply_legacy_hierarchy(self, module: ModuleOp) -> None:
+        """执行 legacy GM/SM/LM hierarchy 兼容路径。
+
+
+        功能说明:
+        - `fold=False` 且未配置 `apply_op` 时保留原 `dma.slice/dma.deslice` 行为。
+        - 该路径服务历史 pipeline/basic 合同，不参与 `apply_op` copy rewrite。
+
+        使用示例:
+        - self._apply_legacy_hierarchy(module)
+
+        关联文件:
+        - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
+        - test: test/passes/test_dma_memory_hierarchy.py
+        - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
+        """
+
         _require_sm_lm_support()
         if any(op.name.startswith("nn.") for op in module.walk()):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 

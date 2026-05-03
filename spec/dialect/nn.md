@@ -56,7 +56,7 @@
 
 ## 目标
 
-- 提供 `global/shared/local/tsm/tlm` 五种 memory space 的统一属性表示。
+- 提供 `global/shared/local/tsm/tlm1/tlm2/tlm3` 七种 memory space 的统一属性表示。
 - 提供可解析、可打印、可校验的 `!nn.memory<...>` 类型表示。
 - 为 `nn.add/sub/mul/div/truediv/floordiv/eq/ne/lt/le/gt/ge/select/cast/relu/sigmoid/tanh/leaky_relu/hard_sigmoid/exp/reduce_sum/reduce_min/reduce_max/broadcast/transpose/softmax/img2col1d/img2col2d/matmul` 提供稳定的方言层接口。
 - 明确 `nn dialect` 不支持逐元素隐式 broadcast，所有广播必须显式使用 `nn.broadcast`。
@@ -77,7 +77,7 @@
 - 上游 `fc/conv` 在方言层不定义独立 op，进入 `nn dialect` 后下沉为 `nn.matmul` / `nn.img2col1d` / `nn.img2col2d` 的组合与约束。
 - `nn.softmax` 在方言层只定义 `input/result/axis/space` 的结构化合同；`axis=-1` 默认值、负轴归一化与数值稳定公式属于上游 `operation/nn` 语义，不在方言层重复展开。
 - `nn.softmax` 仍然是合法输入 op；默认 lowering 链通过 `DecompassPass`（见 [`spec/pass/decompass.md`](../../spec/pass/decompass.md)）把 `nn.softmax` 分解成可继续 lowering 的 `nn` 链路，方言层不负责自动分解。
-- `NnMemorySpaceAttr` 仅允许 `global/shared/local/tsm/tlm` 五种取值。
+- `NnMemorySpaceAttr` 仅允许 `global/shared/local/tsm/tlm1/tlm2/tlm3` 七种取值。
 - `NnMemoryType.space` 与各 op 的 `space` attribute 必须使用同一语义口径。
 - `NnMemoryType` 中 `shape` 与 `stride` 的 rank 必须一致；每一维支持静态整数、符号或 `?`。
 - `shape` 中的 `?` 表示动态维度；`stride` 中的 `?` 不允许与同位置 `shape` 中的 `?` 直接成对出现。

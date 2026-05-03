@@ -292,6 +292,7 @@ op = DmaCopyOp(target, source)
 - `source.stride`、`target.stride` 必须一致。
 - `source.element_type`、`target.element_type` 必须一致。
 - `source.space` 与 `target.space` 可以相同，也可以不同；不同空间表示显式跨空间搬运。
+- `lower-dma-memory-hierarchy` 的 `apply_op` 规则使用 `dma.alloc + dma.copy` 表达整块跨空间 staging；该场景不使用 `dma.slice / dma.deslice` 表示规则搬运。
 
 - 返回值：
 

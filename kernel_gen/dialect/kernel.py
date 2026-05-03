@@ -841,7 +841,8 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
 
     功能说明:
     - 结构化矩阵乘 op，输入输出均为 nn.memory。
-    - verifier 强制二维输入、shape 机械一致及 element_type/space 对齐。
+    - verifier 强制二维输入、shape 机械一致及 element_type 对齐。
+    - 允许 out/lhs/rhs 使用不同合法 memory space，`space` attribute 只校验自身合法性。
 
     使用示例:
     - KernelMatmulOp(out, lhs, rhs, _make_space("global"))
@@ -859,33 +860,6 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
         rhs_type = _verify_memory_type(self.rhs.type, "rhs")
         out_type = _verify_memory_type(self.out.type, "out")
         self.space.verify()
-        if lhs_type.space.space.data != rhs_type.space.space.data:
-            raise VerifyException(
-                ERROR_TEMPLATE.format(
-                    scene=_ERROR_SCENE,
-                    expected="kernel.matmul operands must use the same space",
-                    actual=ERROR_ACTUAL,
-                    action=ERROR_ACTION,
-                )
-            )
-        if lhs_type.space.space.data != self.space.space.data:
-            raise VerifyException(
-                ERROR_TEMPLATE.format(
-                    scene=_ERROR_SCENE,
-                    expected="kernel.matmul attribute space must match operand space",
-                    actual=ERROR_ACTUAL,
-                    action=ERROR_ACTION,
-                )
-            )
-        if out_type.space.space.data != self.space.space.data:
-            raise VerifyException(
-                ERROR_TEMPLATE.format(
-                    scene=_ERROR_SCENE,
-                    expected="kernel.matmul attribute space must match result space",
-                    actual=ERROR_ACTUAL,
-                    action=ERROR_ACTION,
-                )
-            )
         _verify_matmul_shape(lhs_type.shape.data, rhs_type.shape.data, out_type.shape.data)
         _verify_element_type_match(
             [lhs_type, rhs_type, out_type],

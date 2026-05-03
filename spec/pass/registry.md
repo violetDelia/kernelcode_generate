@@ -73,6 +73,7 @@
   - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 pytest 与工具层统一解析。
 - tuning pass `launch-kernel-cost-func` 既可通过 pass registry 显式启用，也作为 `npu-demo-lowering` 的末尾 pass 运行；不自动进入 `default-lowering`。
 - `launch-kernel-cost-func` 默认 `cost_kind="DMA|MAC"`，并接受 `options={"cost_kind": "compute|memory"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
+- `lower-dma-memory-hierarchy` 接受 pass 专属 `options={"apply_op": "matmul{[\\"\\", \\"tlm1\\", \\"tlm2\\"]}"}`；registry 只负责透传该 option，规则语法与错误语义由 `LowerDmaMemoryHierarchyPass.from_options(...)` 承载。
 - registry 只解析 pass 通用 `fold` 选项；剩余 `options` 仅按字典透传给 pass 或 pipeline 构造入口。
 
 ### 当前公开路径与迁移矩阵
@@ -146,6 +147,7 @@
 - 与 `options` 相关的错误短语：
   - `PassRegistryError: pass '<name>' does not accept options`
   - `PassRegistryError: pass '<name>' option error`
+  - `PassRegistryError: pass '<name>' option error: <pass 专属原因>`
   - `PassRegistryError: option 'fold' expects bool`
   - `PassRegistryError: pipeline '<name>' does not accept options`
   - `PassRegistryError: pipeline '<name>' option error`
@@ -264,7 +266,8 @@ default_cost_pass = build_registered_pass("launch-kernel-cost-func")
 - pass 构造规则：
   - `options` 为空或 `None`：以无参构造为准（等价于 `pass_cls()` 可成功执行）。
   - `options` 非空：pass 类必须提供 `from_options(options)` 构造入口。
-  - `from_options` 失败或返回非 `ModulePass` 实例时，必须报告 `option error`。
+  - `from_options` 抛出 `KernelCodeError` 时，registry 必须报告 `option error` 前缀并保留 pass 专属原因。
+  - `from_options` 发生其他异常或返回非 `ModulePass` 实例时，必须报告 `option error`。
   - 无参构造失败时必须报告“不可构造”。
 
 - 返回值：
@@ -274,6 +277,7 @@ default_cost_pass = build_registered_pass("launch-kernel-cost-func")
   - `PassRegistryError: pass '<name>' is not constructible`
   - `PassRegistryError: pass '<name>' does not accept options`
   - `PassRegistryError: pass '<name>' option error`
+  - `PassRegistryError: pass '<name>' option error: <pass 专属原因>`
 
 ### `build_registered_pipeline(name: str, options: dict[str, str] | None = None) -> PassManager`
 
@@ -506,6 +510,7 @@ names = list_registered_passes()
 | TC-PASS-REGISTRY-006 | 公开入口 | build registered pipeline must return pass manager | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_pipeline_must_return_pass_manager`。 | 公开入口在“build registered pipeline must return pass manager”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_pipeline_must_return_pass_manager` |
 | TC-PASS-REGISTRY-007 | 公开入口 | list registered are sorted | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_list_registered_are_sorted`。 | 公开入口在“list registered are sorted”场景下可导入、构造、注册或按名称发现。 | `test_list_registered_are_sorted` |
 | TC-PASS-REGISTRY-008 | 公开入口 | build registered outline device kernel pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_outline_device_kernel_pass`。 | 公开入口在“build registered outline device kernel pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_outline_device_kernel_pass` |
+| TC-PASS-REGISTRY-008A | 公开入口 | lower-dma-memory-hierarchy apply_op options | 加载内置 pass。 | 运行 `test_build_registered_dma_memory_hierarchy_apply_op_pass`。 | registry 能构造 `lower-dma-memory-hierarchy`，透传 `apply_op`，并应用通用 `fold=false`。 | `test_build_registered_dma_memory_hierarchy_apply_op_pass` |
 | TC-PASS-REGISTRY-009 | 公开入口 | build registered tile analysis pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_tile_analysis_pass`。 | 公开入口在“build registered tile analysis pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_tile_analysis_pass` |
 | TC-PASS-REGISTRY-010 | 公开入口 | build registered tile reduce pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_tile_reduce_pass`。 | 公开入口在“build registered tile reduce pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_tile_reduce_pass` |
 | TC-PASS-REGISTRY-011 | 公开入口 | build registered tile elewise pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_tile_elewise_pass`。 | 公开入口在“build registered tile elewise pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_tile_elewise_pass` |

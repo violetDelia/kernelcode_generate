@@ -197,6 +197,8 @@ def _build_registered_pass_instance(
 
     功能说明:
     - 将 pass 无参构造与 `from_options(options)` 两条入口的错误转换收口到单一 helper。
+    - `from_options` 主动抛出的 `KernelCodeError` 保留原始原因，避免 registry 吞掉
+      pass 专属 option 诊断。
     - `passthrough_errors` 用于保留特定 pass 的原生异常，不被 registry 吞掉。
 
     使用示例:
@@ -215,6 +217,14 @@ def _build_registered_pass_instance(
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: pass '{name}' does not accept options")
         try:
             pass_obj = from_options(pass_options)
+        except KernelCodeError as exc:
+            if passthrough_errors and isinstance(exc, passthrough_errors):
+                raise
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                f"PassRegistryError: pass '{name}' option error: {exc}",
+            ) from exc
         except Exception as exc:  # pragma: no cover - exception detail not stable
             if passthrough_errors and isinstance(exc, passthrough_errors):
                 raise

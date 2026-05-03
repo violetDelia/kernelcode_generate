@@ -33,7 +33,7 @@
 ## 目标
 
 - 提供可解析、可校验的逐元素、结构化张量变换与 reduction/matmul 类 `kernel.*` op 集合。
-- 明确 `ins(...)` / `outs(...)` 形式下的类型、shape、stride、space 与关键 attrs 一致性校验规则。
+- 明确 `ins(...)` / `outs(...)` 形式下的类型、shape、stride、space 与关键 attrs 校验规则。
 - 明确 `NnLoweringPass` 面向 `kernel.binary_elewise`、`kernel.exp`、`kernel.reduce(kind=...)`、`kernel.matmul`、`kernel.img2col1d`、`kernel.img2col2d` 的目标 op 名字与输出消费链路；`kernel.reduce_min` 是当前保留的具名最小值归约 op，但 NnLoweringPass 产出以 `kernel.reduce(kind=...)` 为准。
 - 明确 `dma.alloc -> kernel.* -> func.return` 是真实消费链路：`out` operand 必须被目标 op 实际写入，不允许只命中 op 名称而缺失输出写回语义。
 
@@ -49,7 +49,7 @@
 - 对逐元素算术、比较与选择，输入 operand 默认要求 `shape/stride/space/element_type` 一致；`kernel` 层不提供 broadcast/transpose 形状变换入口（它们必须在 `dma` 层显式物化）。
 - `kernel.reduce` 是当前通用 reduction 入口；`kernel.reduce_min` 是现存保留具名 op，二者必须保持 op 名字与 verifier 语义区分。
 - `matmul`、`img2col1d`、`img2col2d` 的结构性变换必须在 verifier 阶段完成 rank / shape / attrs 的机械校验。
-- memory operand 的 `shape/stride/space` 必须在 verifier 阶段完成一致性校验。
+- 除 `kernel.matmul` 的 mixed-space 合同外，memory operand 的 `shape/stride/space` 必须在 verifier 阶段完成一致性校验；`kernel.matmul` 只放开 out/lhs/rhs 的 space 一致性要求，仍校验 rank、shape 与 element_type。
 
 ### 非公开旧名说明
 
@@ -276,6 +276,8 @@ func.return %out : !nn.memory<f32, [M, N], GM>
 - `lhs`、`rhs`、`out` 的 rank 都必须严格等于 `2`；任一 operand 不是二维 memory 时必须 verifier 失败，不能静默压扁、扩维或转交下游兜底。
 - `lhs.shape[1]` 必须等于 `rhs.shape[0]`，且 `out.shape` 必须机械等于 `[lhs.shape[0], rhs.shape[1]]`；任一 shape 不匹配都必须 verifier 失败。
 - `lhs.element_type`、`rhs.element_type`、`out.element_type` 必须一致；dtype mismatch 必须 verifier 失败，不能静默放行。
+- `lhs`、`rhs`、`out` 可以使用不同合法 memory space；该 mixed-space 只对 `kernel.matmul` 生效，不扩展到 `kernel.binary_elewise`、`kernel.select`、`kernel.exp`、`kernel.reduce` 或 `kernel.img2col*`。
+- `space` attribute 只要求是合法 `NnMemorySpaceAttr`；不要求与 `lhs/rhs/out` 任一 operand 的 space 相同，也不重新定义为 out space 或执行主导 space。
 - `kernel.matmul` 不接受批维 broadcast 或隐式 transpose。
 
 - 返回值：
@@ -383,6 +385,7 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 - 验证 `NnMemorySpaceAttr` 与 `NnMemoryType` 在 `kernel` 方言中的复用与校验行为。
 - 验证基础逐元素算术、比较与选择 op 的 verifier 约束。
 - 验证 `kernel.binary_elewise / kernel.exp / kernel.reduce / kernel.reduce_min / kernel.matmul / kernel.img2col*` 的 op 名字、关键 attrs 与 `out` 消费链路合同。
+- 验证 `kernel.matmul` mixed-space 合同只放开 out/lhs/rhs space 一致性，不放开 shape、rank 或 dtype。
 - 验证 `kernel.matmul` 对非二维 operand、`[M,K] x [K,N] -> [M,N]` 形状不匹配的 verifier 拒绝路径已被机械锁定。
 - 验证 `kernel.img2col1d/img2col2d` 的输入 rank/layout 合同与结构化输出合同已被机械锁定。
 - 验证 `kernel.img2col1d` 的 `input.shape + attrs -> W_out`、`kernel.img2col2d` 的 `input.shape + attrs -> OH/OW` 公式与拒绝路径已被机械锁定。
@@ -403,6 +406,7 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 | TC-KRN-010 | 执行结果 | op 不产生 SSA result | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_kernel_ops_no_result`。 | 命令返回码、输出、执行结果或状态变更体现“op 不产生 SSA result”场景。 | `test_kernel_ops_no_result` |
 | TC-KRN-013 | 符号语义 | `kernel.reduce_min` 正常路径并校验 `axis/keepdim` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_kernel_reduce_min_success`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`kernel.reduce_min` 正常路径并校验 `axis/keepdim`”场景。 | `test_kernel_reduce_min_success` |
 | TC-KRN-020 | 边界/异常 | `kernel.reduce_min` 拒绝越界 `axis`、非法 `keepdim` 与输出形状不匹配 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_kernel_reduce_min_axis_error` / `test_kernel_reduce_min_keepdim_error` / `test_kernel_reduce_min_out_shape_mismatch`。 | “`kernel.reduce_min` 拒绝越界 `axis`、非法 `keepdim` 与输出形状不匹配”场景按公开错误语义失败或被拒绝。 | `test_kernel_reduce_min_axis_error` / `test_kernel_reduce_min_keepdim_error` / `test_kernel_reduce_min_out_shape_mismatch` |
+| TC-KRN-014A | 内存/DMA | `kernel.matmul` 允许 out/lhs/rhs mixed-space | 准备 out@tsm、lhs@tlm1、rhs@tlm2 且 shape/dtype 合法的公开 memory operand。 | 运行 `test_kernel_matmul_allows_mixed_spaces`。 | `kernel.matmul` verifier 通过，不要求 operand space 与 `space` attribute 一致。 | `test_kernel_matmul_allows_mixed_spaces` |
 | TC-KRN-014 | 边界/异常 | `kernel.matmul` 拒绝 dtype mismatch | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_kernel_matmul_dtype_mismatch`。 | “`kernel.matmul` 拒绝 dtype mismatch”场景按公开错误语义失败或被拒绝。 | `test_kernel_matmul_dtype_mismatch` |
 | TC-KRN-015 | 边界/异常 | `kernel.matmul` 拒绝非二维 operand 与 `[M,K] x [K,N] -> [M,N]` shape 失配 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_kernel_matmul_rank_shape_contract`。 | “`kernel.matmul` 拒绝非二维 operand 与 `[M,K] x [K,N] -> [M,N]` shape 失配”场景按公开错误语义失败或被拒绝。 | `test_kernel_matmul_rank_shape_contract` |
 | TC-KRN-017 | 执行结果 | `kernel.img2col1d/img2col2d` 保持结构化输出与显式窗口 attrs | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_kernel_img2col_structured_contract`。 | 命令返回码、输出、执行结果或状态变更体现“`kernel.img2col1d/img2col2d` 保持结构化输出与显式窗口 attrs”场景。 | `test_kernel_img2col_structured_contract` |

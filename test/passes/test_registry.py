@@ -31,7 +31,9 @@ import importlib
 import pytest
 
 from xdsl.context import Context
-from xdsl.dialects.builtin import ModuleOp
+from xdsl.dialects import func
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, i32
+from xdsl.ir import Block, Region
 from xdsl.passes import ModulePass
 from kernel_gen.core.error import KernelCodeError
 
@@ -52,6 +54,52 @@ list_registered_pipelines = registry_module.list_registered_pipelines
 pass_manager_module = importlib.import_module("kernel_gen.passes.pass_manager")
 Pass = pass_manager_module.Pass
 PassManager = pass_manager_module.PassManager
+
+
+def _make_registry_memory_type(
+    *,
+    shape: tuple[int, int],
+    stride: tuple[int, int],
+    space: str,
+) -> "NnMemoryType":
+    """构造 registry 测试用公开 nn.memory type。"""
+
+    from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+
+    return NnMemoryType(
+        ArrayAttr([IntAttr(dim) for dim in shape]),
+        ArrayAttr([IntAttr(dim) for dim in stride]),
+        i32,
+        NnMemorySpaceAttr.from_name(space),
+    )
+
+
+def _build_registry_matmul_module() -> tuple[ModuleOp, "KernelMatmulOp"]:
+    """构造 registry apply_op 透传测试使用的 `kernel.matmul` module。"""
+
+    from kernel_gen.dialect.kernel import KernelMatmulOp
+    from kernel_gen.dialect.nn import NnMemorySpaceAttr
+
+    out_type = _make_registry_memory_type(shape=(2, 4), stride=(4, 1), space="shared")
+    lhs_type = _make_registry_memory_type(shape=(2, 3), stride=(3, 1), space="shared")
+    rhs_type = _make_registry_memory_type(shape=(3, 4), stride=(4, 1), space="shared")
+    func_type = FunctionType.from_lists([out_type, lhs_type, rhs_type], [])
+    block = Block(arg_types=[out_type, lhs_type, rhs_type])
+    matmul = KernelMatmulOp(
+        block.args[0],
+        block.args[1],
+        block.args[2],
+        NnMemorySpaceAttr.from_name("shared"),
+    )
+    block.add_ops([matmul, func.ReturnOp()])
+    func_op = func.FuncOp("matmul", func_type, Region(block))
+    return ModuleOp([func_op]), matmul
+
+
+def _registry_memory_space(value_type: "NnMemoryType") -> str:
+    """读取公开 nn.memory type 的 space 名称。"""
+
+    return value_type.space.space.data
 
 
 def _bind_registry_api(module: ModuleType) -> None:
@@ -270,6 +318,56 @@ def test_build_registered_outline_device_kernel_pass() -> None:
     assert pass_obj.name == "outline-device-kernel"
     assert type(pass_obj).__name__ == "OutlineDeviceKernelPass"
     assert isinstance(pass_obj, ModulePass)
+
+
+# TC-REGISTRY-007A-DMH
+# 功能说明: 验证 lower-dma-memory-hierarchy 通过 registry 接收 apply_op 与通用 fold option。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_dma_memory_hierarchy_apply_op_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_dma_memory_hierarchy_apply_op_pass() -> None:
+    load_builtin_passes()
+    module, matmul = _build_registry_matmul_module()
+
+    pass_obj = build_registered_pass(
+        "lower-dma-memory-hierarchy",
+        {"fold": "false", "apply_op": 'matmul{["", "tlm1", "tlm2"]}'},
+    )
+    pass_obj.apply(Context(), module)
+    from kernel_gen.dialect.dma import DmaCopyOp
+
+    assert pass_obj.name == "lower-dma-memory-hierarchy"
+    assert isinstance(pass_obj, ModulePass)
+    assert pass_obj.fold is False
+    assert len([op for op in module.walk() if isinstance(op, DmaCopyOp)]) == 2
+    assert _registry_memory_space(matmul.operands[1].type) == "tlm1"
+    assert _registry_memory_space(matmul.operands[2].type) == "tlm2"
+    module.verify()
+
+
+# TC-REGISTRY-007A-DMH-ERR
+# 功能说明: 验证 lower-dma-memory-hierarchy 的 apply_op 规则错误通过 registry 保留 pass 专属原因。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_dma_memory_hierarchy_apply_op_error_detail
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+@pytest.mark.parametrize(
+    ("apply_op", "detail"),
+    [
+        ('add{["", "tlm1", "tlm2"]}', "unsupported"),
+        ('matmul{["tlm1", "tlm2"]}', "apply_op"),
+        ('matmul{["global", "", ""]}', "apply_op"),
+    ],
+)
+def test_build_registered_dma_memory_hierarchy_apply_op_error_detail(apply_op: str, detail: str) -> None:
+    load_builtin_passes()
+
+    with pytest.raises(KernelCodeError) as exc_info:
+        build_registered_pass("lower-dma-memory-hierarchy", {"apply_op": apply_op})
+    message = str(exc_info.value)
+    assert message.startswith("PassRegistryError: pass 'lower-dma-memory-hierarchy' option error: ")
+    assert detail in message
 
 
 # TC-REGISTRY-007A-0
