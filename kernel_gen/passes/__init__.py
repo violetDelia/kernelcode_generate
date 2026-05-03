@@ -1,7 +1,5 @@
 """pass package.
 
-创建者: 李白
-最后一次更改: 大闸蟹
 
 功能说明:
 - 暴露 Pass 管理相关实现。
@@ -18,12 +16,10 @@
 
 API 列表:
 - `class Pass()`
-- `Pass.run(self: Pass, target: object) -> object`
-- `Pass.apply(self: Pass, ctx: Context, op: ModuleOp) -> None`
 - `class PassManager(name: str | None = None)`
 - `PassManager.add_pass(self: PassManager, pass_obj: XdslModulePass) -> None`
 - `PassManager.extend(self: PassManager, passes: Sequence[XdslModulePass]) -> None`
-- `PassManager.run(self: PassManager, target: object) -> object`
+- `PassManager.run(self: PassManager, target: ModuleOp) -> ModuleOp`
 - `class InlinePass()`
 - `class AttachArchInformationPass(target: str = "npu_demo")`
 - `class BufferResultsToOutParamsPass()`
@@ -86,16 +82,16 @@ API 列表:
   - spec/pass/outline_device_kernel.md
   - spec/pass/symbol_loop_hoist.md
 - test:
-  - test/pass/test_pass_manager.py
-  - test/pass/test_inline.py
-  - test/pass/test_attach_arch_information.py
-  - test/pass/test_buffer_results_to_out_params.py
-  - test/pass/decompass/test_softmax.py
-  - test/pass/outline_device_kernel/test_outline_device_kernel.py
-- test/pass/tile/test_analysis.py
-- test/pass/tile/test_elewise.py
-- test/pass/tile/test_reduce.py
-- test/pass/test_symbol_loop_hoist.py
+  - test/passes/test_pass_manager.py
+  - test/passes/test_inline.py
+  - test/passes/test_attach_arch_information.py
+  - test/passes/test_buffer_results_to_out_params.py
+  - test/passes/decompass/test_softmax.py
+  - test/passes/test_outline_device_kernel.py
+- test/passes/tile/test_analysis.py
+- test/passes/tile/test_elewise.py
+- test/passes/tile/test_reduce.py
+- test/passes/test_symbol_loop_hoist.py
 - 功能实现:
   - kernel_gen/passes/pass_manager.py
   - kernel_gen/passes/common.py

@@ -1,7 +1,5 @@
 """Target registry definitions.
 
-创建者: 我不是牛马
-最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 定义 target 注册与查询入口，用于管理 `arch` op 支持矩阵与硬件参数。
@@ -18,18 +16,18 @@ API 列表:
 - `get_current_target_hardware(key: str) -> int | None`
 
 helper 清单:
-- `_format_error(expected: str, actual: str = _ERROR_ACTUAL) -> str`
-- `_raise_value_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None`
-- `_raise_type_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None`
+- `_format_error(expected: str, actual: str = ERROR_ACTUAL) -> str`
+- `_raise_value_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None`
+- `_raise_type_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None`
 - `_validate_target_name(name: str) -> None`
 - `_validate_arch_ops(spec: TargetSpec) -> None`
 - `_validate_op_set(op_set: set[str], field_name: str, target_name: str) -> None`
 - `_validate_hardware_map(hardware: dict[str, int], target_name: str) -> None`
-- `_parse_ops_list(raw_ops: object, field_name: str, target_name: str) -> set[str]`
-- `_parse_arch_payload(raw_arch: object, target_name: str) -> tuple[set[str] | None, set[str]]`
-- `_parse_hardware_payload(raw_hardware: object, target_name: str) -> dict[str, int]`
-- `_parse_target_spec(payload: dict[str, object], path: Path) -> TargetSpec`
-- `_read_target_json(path: Path) -> dict[str, object]`
+- `_parse_ops_list(raw_ops: list[str], field_name: str, target_name: str) -> set[str]`
+- `_parse_arch_payload(raw_arch: TargetJsonPayload, target_name: str) -> tuple[set[str] | None, set[str]]`
+- `_parse_hardware_payload(raw_hardware: TargetJsonPayload, target_name: str) -> dict[str, int]`
+- `_parse_target_spec(payload: TargetJsonPayload, path: Path) -> TargetSpec`
+- `_read_target_json(path: Path) -> TargetJsonPayload`
 - `_parse_ops_text(text: str, field_name: str, target_name: str) -> set[str]`
 - `_parse_target_txt(path: Path) -> TargetSpec`
 - `_ensure_cpu_target() -> None`
@@ -48,7 +46,7 @@ helper 清单:
 
 关联文件:
 - spec: spec/target/registry.md
-- test: test/target/test_target_registry.py
+- test: test/target/test_registry.py
 - 功能实现: kernel_gen/target/registry.py
 """
 
@@ -58,7 +56,7 @@ from pathlib import Path
 import json
 import re
 
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
 
 _ALLOWED_ROOT_FIELDS = {"name", "arch", "hardware"}
 _ALLOWED_ARCH_FIELDS = {"supported_ops", "unsupported_ops"}
@@ -88,33 +86,31 @@ _DEFAULT_CPU_HARDWARE = {
     "tlm2_memory_size": 0,
     "tlm3_memory_size": 0,
 }
-_ERROR_ACTION = "请按接口约束传参"
-_ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "target registry"
+TargetJsonLeaf = str | int | bool
+TargetJsonPayload = dict[str, TargetJsonLeaf | list[str] | dict[str, TargetJsonLeaf | list[str]]]
 
 
-def _format_error(expected: str, actual: str = _ERROR_ACTUAL) -> str:
-    return _ERROR_TEMPLATE.format(
+def _format_error(expected: str, actual: str = ERROR_ACTUAL) -> str:
+    return ERROR_TEMPLATE.format(
         scene=_ERROR_SCENE,
         expected=expected,
         actual=actual,
-        action=_ERROR_ACTION,
+        action=ERROR_ACTION,
     )
 
 
-def _raise_value_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
+def _raise_value_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None:
     raise ValueError(_format_error(expected, actual))
 
 
-def _raise_type_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
+def _raise_type_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None:
     raise TypeError(_format_error(expected, actual))
 
 
 class TargetSpec:
     """单个 target 的元信息与 `arch` op 支持矩阵。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 记录 target 名称、`arch` op 支持矩阵与硬件参数。
@@ -124,7 +120,7 @@ class TargetSpec:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -142,8 +138,6 @@ class TargetSpec:
     ) -> None:
         """初始化 target 规范对象。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 存储 target 名称、`arch` op 支持/不支持集合与硬件参数表。
@@ -153,7 +147,7 @@ class TargetSpec:
 
         关联文件:
         - spec: spec/target/registry.md
-        - test: test/target/test_target_registry.py
+        - test: test/target/test_registry.py
         - 功能实现: kernel_gen/target/registry.py
         """
 
@@ -170,8 +164,6 @@ _CURRENT_TARGET: str | None = None
 def _validate_target_name(name: str) -> None:
     """校验 target 名称满足命名规则。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 约束 target 名称只能由小写字母、数字与下划线组成。
@@ -181,7 +173,7 @@ def _validate_target_name(name: str) -> None:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -192,8 +184,6 @@ def _validate_target_name(name: str) -> None:
 def _validate_arch_ops(spec: TargetSpec) -> None:
     """校验 target 中 arch op 支持矩阵的交集规则。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 确保 `arch_supported_ops`/`arch_unsupported_ops` 均为集合。
@@ -204,7 +194,7 @@ def _validate_arch_ops(spec: TargetSpec) -> None:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -225,8 +215,6 @@ def _validate_arch_ops(spec: TargetSpec) -> None:
 def _validate_op_set(op_set: set[str], field_name: str, target_name: str) -> None:
     """校验 op 集合的元素类型。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 保证 op 集合中的元素均为字符串。
@@ -236,7 +224,7 @@ def _validate_op_set(op_set: set[str], field_name: str, target_name: str) -> Non
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -248,8 +236,6 @@ def _validate_op_set(op_set: set[str], field_name: str, target_name: str) -> Non
 def _validate_hardware_map(hardware: dict[str, int], target_name: str) -> None:
     """校验 hardware 字段的 key/value 合法性。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 限制硬件字段为允许列表中的 key。
@@ -260,7 +246,7 @@ def _validate_hardware_map(hardware: dict[str, int], target_name: str) -> None:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -271,11 +257,9 @@ def _validate_hardware_map(hardware: dict[str, int], target_name: str) -> None:
             _raise_value_error(f"{target_name} hardware.{key} must be int")
 
 
-def _parse_ops_list(value: object, field_name: str, target_name: str) -> set[str]:
+def _parse_ops_list(value: list[str], field_name: str, target_name: str) -> set[str]:
     """解析并校验 JSON 列表形式的 op 集合。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 将 JSON 数组转换为 op 集合并校验元素类型。
@@ -285,7 +269,7 @@ def _parse_ops_list(value: object, field_name: str, target_name: str) -> set[str
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -296,11 +280,9 @@ def _parse_ops_list(value: object, field_name: str, target_name: str) -> set[str
     return op_set
 
 
-def _parse_arch_payload(payload: dict[str, object], target_name: str) -> tuple[set[str] | None, set[str]]:
+def _parse_arch_payload(payload: TargetJsonPayload, target_name: str) -> tuple[set[str] | None, set[str]]:
     """解析 target JSON 中的 `arch` 配置。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 将 `arch` 字段拆解为 supported/unsupported 集合。
@@ -310,7 +292,7 @@ def _parse_arch_payload(payload: dict[str, object], target_name: str) -> tuple[s
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -333,11 +315,9 @@ def _parse_arch_payload(payload: dict[str, object], target_name: str) -> tuple[s
     return supported_ops, unsupported_ops
 
 
-def _parse_hardware_payload(payload: dict[str, object], target_name: str) -> dict[str, int]:
+def _parse_hardware_payload(payload: TargetJsonPayload, target_name: str) -> dict[str, int]:
     """解析 JSON 中的 hardware 字段。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 校验硬件字段的 key/value 并返回字典。
@@ -347,7 +327,7 @@ def _parse_hardware_payload(payload: dict[str, object], target_name: str) -> dic
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -362,11 +342,9 @@ def _parse_hardware_payload(payload: dict[str, object], target_name: str) -> dic
     return hardware
 
 
-def _parse_target_spec(data: dict[str, object], source: Path) -> TargetSpec:
+def _parse_target_spec(data: TargetJsonPayload, source: Path) -> TargetSpec:
     """解析 JSON 并构造 target 规范对象。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 校验字段合法性、命名规则与文件名一致性。
@@ -377,7 +355,7 @@ def _parse_target_spec(data: dict[str, object], source: Path) -> TargetSpec:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -417,11 +395,9 @@ def _parse_target_spec(data: dict[str, object], source: Path) -> TargetSpec:
     return spec
 
 
-def _read_target_json(path: Path) -> dict[str, object]:
+def _read_target_json(path: Path) -> TargetJsonPayload:
     """读取并解析 target JSON 文件。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 读取 JSON 文本并返回字典形式内容。
@@ -431,7 +407,7 @@ def _read_target_json(path: Path) -> dict[str, object]:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -447,8 +423,6 @@ def _read_target_json(path: Path) -> dict[str, object]:
 def _parse_ops_text(value: str, field_name: str, target_name: str) -> set[str]:
     """解析 TXT 中的 op 列表字段。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 支持逗号分隔的 op 列表，空字符串表示空集合。
@@ -458,7 +432,7 @@ def _parse_ops_text(value: str, field_name: str, target_name: str) -> set[str]:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -475,8 +449,6 @@ def _parse_ops_text(value: str, field_name: str, target_name: str) -> set[str]:
 def _parse_target_txt(path: Path) -> TargetSpec:
     """解析 TXT 格式的 target 文件。
 
-    创建者: 我不是牛马
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 读取 key=value 格式文本并构造 TargetSpec。
@@ -487,7 +459,7 @@ def _parse_target_txt(path: Path) -> TargetSpec:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -560,8 +532,6 @@ def _parse_target_txt(path: Path) -> TargetSpec:
 def _ensure_cpu_target() -> None:
     """注册内置 cpu target。
 
-    创建者: 我不是牛马
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 确保 registry 始终包含 cpu target，且默认不支持 `arch.get_thread_id`。
@@ -571,7 +541,7 @@ def _ensure_cpu_target() -> None:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -589,8 +559,6 @@ def _ensure_cpu_target() -> None:
 def _ensure_npu_demo_target() -> None:
     """注册文件化 `npu_demo` target。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 确保 registry 始终包含 `kernel_gen/target/targets/npu_demo.txt` 定义的固定 target。
@@ -601,7 +569,7 @@ def _ensure_npu_demo_target() -> None:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -619,8 +587,6 @@ def _ensure_npu_demo_target() -> None:
 def _is_default_cpu_spec(spec: TargetSpec) -> bool:
     """判断 target 是否为内置 cpu 规范。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 用于识别内置 cpu 与外部 cpu.txt 的冲突覆盖场景。
@@ -630,7 +596,7 @@ def _is_default_cpu_spec(spec: TargetSpec) -> bool:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -645,8 +611,6 @@ def _is_default_cpu_spec(spec: TargetSpec) -> bool:
 def _same_target_spec(lhs: TargetSpec, rhs: TargetSpec) -> bool:
     """判断两个 target 规范是否等价。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 比较 name、arch 矩阵与 hardware 是否完全一致。
@@ -656,7 +620,7 @@ def _same_target_spec(lhs: TargetSpec, rhs: TargetSpec) -> bool:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -671,8 +635,6 @@ def _same_target_spec(lhs: TargetSpec, rhs: TargetSpec) -> bool:
 def _register_loaded_target(spec: TargetSpec) -> None:
     """注册 load_targets 解析出的 target。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 默认遵守“同名 target 不能重复注册”规则。
@@ -683,7 +645,7 @@ def _register_loaded_target(spec: TargetSpec) -> None:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -709,8 +671,6 @@ def _register_loaded_target(spec: TargetSpec) -> None:
 def register_target(spec: TargetSpec) -> None:
     """注册新的 target 规范。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 校验 target 规范，并写入 registry。
@@ -720,7 +680,7 @@ def register_target(spec: TargetSpec) -> None:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -735,8 +695,6 @@ def register_target(spec: TargetSpec) -> None:
 def load_targets(directory: Path) -> dict[str, TargetSpec]:
     """加载目录中的 JSON/TXT target 定义并注册。
 
-    创建者: 我不是牛马
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 扫描目录中的 `.json` 与 `.txt` 文件并注册合法 target。
@@ -746,7 +704,7 @@ def load_targets(directory: Path) -> dict[str, TargetSpec]:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -771,8 +729,6 @@ def load_targets(directory: Path) -> dict[str, TargetSpec]:
 def is_arch_op_supported(target: str, op_name: str) -> bool:
     """判断指定 target 是否支持某个 arch op。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 根据 target 的 supported/unsupported 集合判定 op 支持性。
@@ -782,7 +738,7 @@ def is_arch_op_supported(target: str, op_name: str) -> bool:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -798,8 +754,6 @@ def is_arch_op_supported(target: str, op_name: str) -> bool:
 def get_target_hardware(target: str, key: str) -> int | None:
     """读取指定 target 的硬件参数。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 按 target 名称读取硬件参数。
@@ -810,7 +764,7 @@ def get_target_hardware(target: str, key: str) -> int | None:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -822,8 +776,6 @@ def get_target_hardware(target: str, key: str) -> int | None:
 def _set_current_target(target: str | None) -> None:
     """设置当前启用的 target 名称。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 供 arch verifier 与测试启用/关闭 target registry 校验。
@@ -833,7 +785,7 @@ def _set_current_target(target: str | None) -> None:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -843,8 +795,6 @@ def _set_current_target(target: str | None) -> None:
 def _get_current_target() -> str | None:
     """获取当前启用的 target 名称。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 返回当前 target registry 校验使用的 target 名称。
@@ -854,7 +804,7 @@ def _get_current_target() -> str | None:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -864,8 +814,6 @@ def _get_current_target() -> str | None:
 def set_current_target(target: str | None) -> None:
     """设置当前启用的 target 名称。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 为 operation / dialect / test 提供稳定公开的 current target 设置入口。
@@ -877,7 +825,7 @@ def set_current_target(target: str | None) -> None:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -893,8 +841,6 @@ def set_current_target(target: str | None) -> None:
 def get_current_target() -> str | None:
     """获取当前启用的 target 名称。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 返回 current target registry 校验当前绑定的 target 名称。
@@ -905,7 +851,7 @@ def get_current_target() -> str | None:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 
@@ -915,8 +861,6 @@ def get_current_target() -> str | None:
 def get_current_target_hardware(key: str) -> int | None:
     """读取当前 target 的硬件参数。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 若未设置当前 target 或字段缺失，返回 None。
@@ -926,7 +870,7 @@ def get_current_target_hardware(key: str) -> int | None:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
+    - test: test/target/test_registry.py
     - 功能实现: kernel_gen/target/registry.py
     """
 

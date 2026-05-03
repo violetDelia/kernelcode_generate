@@ -1,7 +1,5 @@
 # requirements.txt
 #
-# 创建者: 金铲铲大作战
-# 最后修改人: 小李飞刀
 #
 # 功能说明:
 # - 汇总当前仓库直接导入可见的核心 Python 依赖：`pytest`、`sympy`、`xdsl`。

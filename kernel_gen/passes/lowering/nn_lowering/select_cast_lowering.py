@@ -1,7 +1,5 @@
 """select/cast/exp lowering 实现。
 
-创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - nn.select -> dma.alloc + kernel.select
@@ -9,15 +7,18 @@
 - nn.exp -> dma.alloc + kernel.exp
 - surviving 模块级接口为 `select_cast_patterns()`。
 
+API 列表:
+- `select_cast_patterns() -> list[RewritePattern]`
+
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import select_cast_patterns
 - patterns = select_cast_patterns()
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/spec.md
-- test: test/pass/nn_lowering/select.py
-- test: test/pass/nn_lowering/cast.py
-- test: test/pass/nn_lowering/exp.py
+- test: test/passes/lowering/nn_lowering/test_select.py
+- test: test/passes/lowering/nn_lowering/test_cast.py
+- test: test/passes/lowering/nn_lowering/test_exp.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
 """
 
@@ -54,8 +55,6 @@ def _build_alloc_dynamic_shape_from_source(
 ) -> tuple[list[Operation], list[SSAValue]]:
     """基于 memory operand 构造 dma.alloc 的 dynamic_shape。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅对符号维度使用 symbol.get_dim 读取 shape 对应维度。
@@ -68,7 +67,7 @@ def _build_alloc_dynamic_shape_from_source(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/select.py
+    - test: test/passes/lowering/nn_lowering/test_select.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 
@@ -97,8 +96,6 @@ def _build_alloc_dynamic_shape_from_source(
 def _lower_select_op(op: Operation, block: Block) -> None:
     """对 nn.select 执行 lowering。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 输出 memory 通过 dma.alloc 创建。
@@ -109,7 +106,7 @@ def _lower_select_op(op: Operation, block: Block) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/select.py
+    - test: test/passes/lowering/nn_lowering/test_select.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 
@@ -145,8 +142,6 @@ def _lower_select_op(op: Operation, block: Block) -> None:
 def _lower_cast_op(op: Operation, block: Block) -> None:
     """对 nn.cast 执行 lowering。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 输出 memory 通过 dma.alloc 创建。
@@ -157,7 +152,7 @@ def _lower_cast_op(op: Operation, block: Block) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/cast.py
+    - test: test/passes/lowering/nn_lowering/test_cast.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 
@@ -196,8 +191,6 @@ def _lower_cast_op(op: Operation, block: Block) -> None:
 def _lower_exp_op(op: Operation, block: Block) -> None:
     """对 nn.exp 执行 lowering。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 输出 memory 通过 dma.alloc 创建。
@@ -208,7 +201,7 @@ def _lower_exp_op(op: Operation, block: Block) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/exp.py
+    - test: test/passes/lowering/nn_lowering/test_exp.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 
@@ -238,8 +231,6 @@ def _lower_exp_op(op: Operation, block: Block) -> None:
 def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAValue:
     """确保 operand 为 symbol.int 或整数类型。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 支持 symbol.int 或 IntegerType。
@@ -249,7 +240,7 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/cast.py
+    - test: test/passes/lowering/nn_lowering/test_cast.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 
@@ -265,8 +256,6 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
 class _LowerSelectPattern(RewritePattern):
     """将单个 nn.select lowering 为 kernel.select。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnSelectOp`。
@@ -277,7 +266,7 @@ class _LowerSelectPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/select_cast_lowering.md
-    - test: test/pass/nn_lowering/select.py
+    - test: test/passes/lowering/nn_lowering/test_select.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 
@@ -294,8 +283,6 @@ class _LowerSelectPattern(RewritePattern):
 class _LowerCastPattern(RewritePattern):
     """将单个 nn.cast lowering 为 dma.cast。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnCastOp`。
@@ -306,7 +293,7 @@ class _LowerCastPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/select_cast_lowering.md
-    - test: test/pass/nn_lowering/cast.py
+    - test: test/passes/lowering/nn_lowering/test_cast.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 
@@ -323,8 +310,6 @@ class _LowerCastPattern(RewritePattern):
 class _LowerExpPattern(RewritePattern):
     """将单个 nn.exp lowering 为 kernel.exp。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnExpOp`。
@@ -335,7 +320,7 @@ class _LowerExpPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/select_cast_lowering.md
-    - test: test/pass/nn_lowering/exp.py
+    - test: test/passes/lowering/nn_lowering/test_exp.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 
@@ -352,8 +337,6 @@ class _LowerExpPattern(RewritePattern):
 def select_cast_patterns() -> list[RewritePattern]:
     """返回 select/cast/exp 的 rewrite pattern 集合。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 以单 op pattern 方式承载 nn.select / nn.cast / nn.exp lowering。
@@ -364,7 +347,7 @@ def select_cast_patterns() -> list[RewritePattern]:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/select_cast_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 

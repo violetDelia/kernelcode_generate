@@ -34,12 +34,10 @@ helper 清单:
 - npu_demo::build_contiguous_stride(shape, 2, stride);
 - Memory<GM, int> mem(data, shape, stride, 2);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 
@@ -101,12 +99,10 @@ inline bool memory_checked_add_non_negative(long long lhs, long long rhs, long l
 - long long stride[2] = {0, 0};
 - npu_demo::build_contiguous_stride(shape, 2, stride);
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 inline void build_contiguous_stride(const long long* shape, unsigned long long rank, long long* out_stride) {
@@ -129,12 +125,10 @@ inline void build_contiguous_stride(const long long* shape, unsigned long long r
 - long long stride[2] = {3, 1};
 - Memory<GM, int> mem(data, shape, stride, 2);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -156,12 +150,10 @@ inline Memory<Space, T>::Memory(
 - long long shape[2] = {2, 3};
 - Memory<GM, int> mem(data, shape, 2);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -181,12 +173,10 @@ inline Memory<Space, T>::Memory(
 使用示例:
 - int* ptr = mem.data();
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -201,12 +191,10 @@ inline T* Memory<Space, T>::data() {
 使用示例:
 - const int* ptr = const_mem.data();
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -221,12 +209,10 @@ inline const T* Memory<Space, T>::data() const {
 使用示例:
 - const long long* shape = mem.shape();
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -241,12 +227,10 @@ inline const long long* Memory<Space, T>::shape() const {
 使用示例:
 - const long long* stride = mem.stride();
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -261,12 +245,10 @@ inline const long long* Memory<Space, T>::stride() const {
 使用示例:
 - unsigned long long rank = mem.rank();
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -281,12 +263,10 @@ inline unsigned long long Memory<Space, T>::rank() const {
 使用示例:
 - MemoryFormat format = mem.format();
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -301,12 +281,10 @@ inline MemoryFormat Memory<Space, T>::format() const {
 使用示例:
 - MemorySpace space = mem.space();
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -321,12 +299,10 @@ inline MemorySpace Memory<Space, T>::space() const {
 使用示例:
 - long long n = mem.get_shape(0);
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -341,12 +317,10 @@ inline long long Memory<Space, T>::get_shape(unsigned long long axis) const {
 使用示例:
 - long long stride = mem.get_stride(0);
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -361,12 +335,10 @@ inline long long Memory<Space, T>::get_stride(unsigned long long axis) const {
 使用示例:
 - Memory<GM, float> tile = source.view<float>(offset, size, stride);
 
-创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/api/test_memory.py
+- test: test/include/api/memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -435,12 +407,10 @@ inline Memory<Space, ViewT> Memory<Space, T>::view(
 使用示例:
 - auto tile = npu_demo::view(source, tid * 16, 16, 1);
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/dsl/gen_kernel/test_gen_kernel.py
+- test: test/dsl/gen_kernel/gen_kernel.py
 - 功能实现: include/npu_demo/Memory.h
 */
 namespace npu_demo {
@@ -469,12 +439,10 @@ inline Memory<Space, T> view(
 使用示例:
 - Memory<GM, float> reshaped = source.reshape(shape_vec);
 
-创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/api/test_memory.py
+- test: test/include/api/memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -510,12 +478,10 @@ inline Memory<Space, T> Memory<Space, T>::reshape(const Vector& shape) const {
 使用示例:
 - long long count = mem.element_count();
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -534,12 +500,10 @@ inline long long Memory<Space, T>::element_count() const {
 使用示例:
 - bool contiguous = mem.is_contiguous();
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -563,12 +527,10 @@ inline bool Memory<Space, T>::is_contiguous() const {
 - long long index[2] = {1, 2};
 - long long offset = mem.linear_offset(index);
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -588,12 +550,10 @@ inline long long Memory<Space, T>::linear_offset(const long long* indices) const
 - long long index[2] = {1, 2};
 - int& value = mem.at(index);
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -609,12 +569,10 @@ inline T& Memory<Space, T>::at(const long long* indices) {
 - long long index[2] = {1, 2};
 - const int& value = const_mem.at(index);
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>

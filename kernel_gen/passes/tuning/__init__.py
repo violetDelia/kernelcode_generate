@@ -1,7 +1,5 @@
 """tuning pass package.
 
-创建者: 小李飞刀
-最后一次更改: 小李飞刀
 
 功能说明:
 - 提供 tuning 目录下 pass 的公开导出入口。
@@ -17,7 +15,7 @@ API 列表:
 
 关联文件:
 - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-- test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
+- test: [test/passes/tuning/test_launch_kernel_cost_func.py](test/passes/tuning/test_launch_kernel_cost_func.py)
 - 功能实现:
   - [kernel_gen/passes/tuning/__init__.py](kernel_gen/passes/tuning/__init__.py)
   - [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)

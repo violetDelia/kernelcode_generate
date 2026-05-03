@@ -1,19 +1,45 @@
 """Dialect package entry.
 
-创建者: 小李飞刀
-最后一次更改: 小李飞刀
 
 功能说明:
 - 暴露 nn 与 arch dialect 的 type、attr 与 op 定义，供包级导入复用。
 - 采用惰性导入避免在仅使用 `kernel_gen.dialect.*` 子模块时无条件加载全部 dialect，
   以降低重依赖导入带来的不稳定性。
 
+API 列表:
+- `Arch`
+- `class ArchGetBlockIdOp(result_type: Attribute | None = None)`
+- `class ArchGetBlockNumOp(result_type: Attribute | None = None)`
+- `class ArchGetThreadIdOp(result_type: Attribute | None = None)`
+- `class ArchGetThreadNumOp(result_type: Attribute | None = None)`
+- `class ArchGetSubthreadIdOp(result_type: Attribute | None = None)`
+- `class ArchGetSubthreadNumOp(result_type: Attribute | None = None)`
+- `class ArchGetDynamicMemoryOp(memory_space: NnMemorySpaceAttr, result_type: Attribute | None = None)`
+- `class ArchLaunchKernelOp(callee: str | Attribute, block: SSAValue | Operation, thread: SSAValue | Operation, subthread: SSAValue | Operation, shared_memory_size: SSAValue | Operation, args: Sequence[SSAValue | Operation] = ())`
+- `Nn`
+- `class NnAddOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnBroadcastOp(input_value: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnSubOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnMulOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnTrueDivOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnEqOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnNeOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnLtOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnLeOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnGtOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnGeOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnMatmulOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnImg2col1dOp(input_value: SSAValue, result_type: NnMemoryType, kw: SSAValue, sw: SSAValue, dw: SSAValue, pl: SSAValue, pr: SSAValue, space: NnMemorySpaceAttr)`
+- `class NnImg2col2dOp(input_value: SSAValue, result_type: NnMemoryType, kh: SSAValue, kw: SSAValue, sh: SSAValue, sw: SSAValue, dh: SSAValue, dw: SSAValue, ph: SSAValue, pw: SSAValue, pl: SSAValue, pr: SSAValue, space: NnMemorySpaceAttr)`
+- `class NnMemorySpaceAttr(space: StringAttr)`
+- `class NnMemoryType(shape: ArrayAttr[Attribute], stride: ArrayAttr[Attribute], element_type: Attribute, space: NnMemorySpaceAttr)`
+
 使用示例:
 - from kernel_gen.dialect import Arch, ArchLaunchKernelOp, Nn, NnAddOp, NnMemoryType
 
 关联文件:
 - spec: spec/dialect/arch.md
-- test: test/dialect/test_arch_dialect.py
+- test: test/dialect/test_arch.py
 - 功能实现: kernel_gen/dialect/__init__.py
 """
 
@@ -118,8 +144,6 @@ _LAZY_EXPORT_MODULE: dict[str, str] = {
 def __getattr__(name: str) -> Any:
     """按需加载 dialect 导出。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 避免包初始化时导入 `arch/nn`，仅在实际访问导出符号时再加载对应模块。

@@ -9,16 +9,21 @@
 
 ## API 列表
 
-- `loop(start, end, step, trip_count=1)`
-- `kernel_gen.operation.loop(start, end, step, trip_count=1)`
+- `class LoopRange(start: int | SymbolDim, end: int | SymbolDim, step: int | SymbolDim, trip_count: int | SymbolDim | None = 1)`
+- `LoopRange.start -> int | SymbolDim`
+- `LoopRange.end -> int | SymbolDim`
+- `LoopRange.step -> int | SymbolDim`
+- `LoopRange.trip_count -> int | SymbolDim`
+- `loop(start: int | SymbolDim, end: int | SymbolDim, step: int | SymbolDim, trip_count: int | SymbolDim | None = 1) -> range | LoopRange`
+- `kernel_gen.operation.loop(start: int | SymbolDim, end: int | SymbolDim, step: int | SymbolDim, trip_count: int | SymbolDim | None = 1) -> range | LoopRange`
 
 ## 文档信息
 
-- 创建者：`摸鱼小分队`
+- 创建者：`未记录`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/operation/scf.md`](../../spec/operation/scf.md)
 - `功能实现`：[`kernel_gen/operation/scf.py`](../../kernel_gen/operation/scf.py)
-- `test`：[`test/operation/test_operation_scf.py`](../../test/operation/test_operation_scf.py)
+- `test`：[`test/operation/test_scf.py`](../../test/operation/test_scf.py)
 
 ## 依赖
 
@@ -32,111 +37,210 @@
 - 保持与 operation 层其他接口一致的错误处理与边界约束。
 - 保持 `loop` 作为 operation 层最小范围迭代 helper，不把本轮文本合同扩成完整控制流体系。
 
-## 限制与边界
+## 额外补充
 
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 仅定义高层范围迭代语义，不提供 IR/lowering 规则。
 - 不负责实际执行优化、自动并行或向后端映射。
 - 仅支持 `for i in loop(start, end, step)` 形式，当前不定义 `loop(end)` 或 `loop(start, end)` 的简写。
 - 当前只覆盖最小 loop helper，不定义 `if / while / yield / region builder` 或其他控制流族。
-- `start/end/step` 只接受 `int | SymbolDim`，并显式拒绝 `bool`；不得依赖 Python `bool` 是 `int` 子类的行为绕过校验。
-- 不允许 `step == 0`；`step` 为 0 必须抛出错误。
-- 当 `start/end/step` 中存在 `SymbolDim` 时，不要求在 Python 运行期求值或展开，只保留符号表达语义。
-- 当 `start/end/step` 含 `SymbolDim` 且无法推导真实迭代次数时，引入 `trip_count`（可选 keyword，默认 `1`，由上游决定）；若 `trip_count` 为整数，则 operation/Python helper 层的迭代序列为 `start + step * i`，`i = 0..trip_count-1`。
-- 当 `trip_count` 本身也是 `SymbolDim` 时，当前 operation/Python helper 层只保守产出首项 `start`，不承诺在运行期按符号次数完整展开；lowering 仍只消费 `start/end/step` 的符号范围语义，不消费该有限展开结果。
-- `trip_count` 只接受 `int | SymbolDim | None`，并显式拒绝 `bool`；`None` 仅表示按默认值 `1` 归一化。
-- `trip_count <= 0` 必须抛出错误（建议 `ValueError`），不得 silent fallback 或默认当作 `1`。
-- `LoopRange(...)` 作为公开可直接构造入口，必须与 `loop(...)` 共用同一组输入校验与 `trip_count=None -> 1` 的归一化规则。
 - `kernel_gen.operation.scf` 是 scf family 的完整稳定入口；`kernel_gen.operation` 顶层只稳定重导出 `loop`，且对象身份必须与 `kernel_gen.operation.scf.loop` 一致。
 
-### package-root 导出边界
+### package-root 导出说明
 
 | 入口 | 稳定公开 API | 说明 |
 | --- | --- | --- |
 | `kernel_gen.operation.scf` | `loop` | scf family 的完整稳定入口 |
 | `kernel_gen.operation` | `loop` | 包根稳定重导出同一 `loop` helper；对象身份与 `kernel_gen.operation.scf` 保持一致 |
+## API详细说明
 
-## 公开接口
+### `class LoopRange(start: int | SymbolDim, end: int | SymbolDim, step: int | SymbolDim, trip_count: int | SymbolDim | None = 1)`
 
-### `loop(start, end, step, trip_count=1)`
+- api：`class LoopRange(start: int | SymbolDim, end: int | SymbolDim, step: int | SymbolDim, trip_count: int | SymbolDim | None = 1)`
+- 参数：
+  - `start`：范围起始值；类型 `int | SymbolDim`；无默认值；纯整数路径表示半开区间首项，符号路径保留为 `LoopRange.start`。
+  - `end`：范围结束值；类型 `int | SymbolDim`；无默认值；纯整数路径表示半开区间终止边界，符号路径保留为 `LoopRange.end`。
+  - `step`：范围步长；类型 `int | SymbolDim`；无默认值；纯整数路径按 Python `range` 步长推进，符号路径保留为 `LoopRange.step`。
+  - `trip_count`：符号路径的有限展开次数约束；类型 `int | SymbolDim | None`；默认值 `1`；`None` 归一化为 `1`。
+- 返回值：`LoopRange` 实例。
+- 使用示例：
 
-功能说明：
+  ```python
+  from kernel_gen.operation.scf import LoopRange
+  from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-- 创建范围迭代对象，支持在 `for` 语句中迭代。
-- 当输入为纯整数时，行为等价于 Python `range(start, end, step)` 的半开区间迭代。
-- 当输入包含 `SymbolDim` 时，返回符号范围迭代对象，迭代变量表示符号索引；可通过 `trip_count` 指定迭代次数。
+  n = SymbolDim("N")
+  s = SymbolDim("S")
+  loop_range = LoopRange(0, n, s, trip_count=3)
 
-参数说明：
+  assert loop_range.start == 0
+  assert loop_range.end is n
+  assert loop_range.step is s
+  assert loop_range.trip_count == 3
+  assert [item if isinstance(item, int) else item.get_value() for item in loop_range] == [
+      0,
+      "S",
+      "2*S",
+  ]
+  ```
+- 功能说明：保存符号范围表达，并在 Python helper 层按 `trip_count` 提供有限迭代序列。
+- 注意事项：
+  - `start`、`end`、`step` 只接受 `int | SymbolDim`；传入 `bool`、`str` 或其他类型必须抛出 `KernelCodeError`。
+  - `step == 0` 必须抛出 `KernelCodeError`。
+  - `trip_count` 只接受 `int | SymbolDim | None`；传入 `bool`、`str` 或其他类型必须抛出 `KernelCodeError`。
+  - `trip_count=None` 必须归一化为 `1`；`trip_count <= 0` 必须抛出 `KernelCodeError`。
+  - `trip_count` 为 `int` 时，迭代序列为 `start + step * i`，`i = 0..trip_count-1`。
+  - `trip_count` 为 `SymbolDim` 时，当前 Python helper 层只保守产出首项 `start`，不承诺按符号次数展开。
+  - 本类只提供 operation/Python helper 层的有限展开；lowering 不消费该有限展开结果。
 
-- `start (int | SymbolDim)`：起始索引。
-- `end (int | SymbolDim)`：结束索引（半开区间终止）。
-- `step (int | SymbolDim)`：步长，禁止为 `0`。
-- `trip_count (int | SymbolDim | None)`：可选 keyword 迭代次数；当 `start/end/step` 含 `SymbolDim` 且无法推导真实次数时使用；默认 `1`。若 `trip_count` 为整数，则运行期 helper 有限展开 `trip_count` 项；若 `trip_count` 为 `SymbolDim`，当前只保守产出首项。
+### `LoopRange.start -> int | SymbolDim`
 
-使用示例：
+- api：`LoopRange.start -> int | SymbolDim`
+- 参数：无。
+- 返回值：构造 `LoopRange` 时传入并校验后的 `start`。
+- 使用示例：
 
-```python
-from kernel_gen.symbol_variable.symbol_dim import SymbolDim
-from kernel_gen.operation.scf import loop
+  ```python
+  from kernel_gen.operation.scf import LoopRange
+  from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-# 纯整数范围
-for i in loop(0, 4, 1):
-    pass
+  loop_range = LoopRange(SymbolDim("M"), SymbolDim("N"), 1)
+  assert loop_range.start.get_value() == "M"
+  ```
+- 功能说明：只读返回符号范围起始值。
+- 注意事项：属性返回值不得在访问时重新求值；调用方应按只读语义消费。
 
-# 符号范围
-M = SymbolDim("M")
-K = SymbolDim("K")
-for i in loop(0, M, 1):
-    pass
+### `LoopRange.end -> int | SymbolDim`
 
-for j in loop(K, M, SymbolDim("S")):
-    pass
+- api：`LoopRange.end -> int | SymbolDim`
+- 参数：无。
+- 返回值：构造 `LoopRange` 时传入并校验后的 `end`。
+- 使用示例：
 
-# 上游显式指定 trip_count
-for t in loop(SymbolDim("S"), SymbolDim("S") + SymbolDim("K"), SymbolDim("K"), trip_count=3):
-    pass
-```
+  ```python
+  from kernel_gen.operation.scf import LoopRange
+  from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-注意事项：
+  loop_range = LoopRange(0, SymbolDim("N"), 1)
+  assert loop_range.end.get_value() == "N"
+  ```
+- 功能说明：只读返回符号范围结束值。
+- 注意事项：属性返回值不得在访问时重新求值；调用方应按只读语义消费。
 
-- 任意输入不是 `int` 或 `SymbolDim` 时必须抛出 `TypeError`。
-- `bool` 不属于合法 `int` 输入，`start/end/step/trip_count` 传入 `True/False` 必须抛出 `TypeError`。
-- `step == 0` 必须抛出 `ValueError`。
-- `trip_count <= 0` 必须抛出 `ValueError`；不得 silent fallback 或默认当作 `1`。
-- 当输入包含 `SymbolDim` 时，迭代变量代表符号索引，不要求在运行期展开为具体序列。
-- 当无法推导真实迭代次数时，上游可显式提供 `trip_count`；未提供时默认 `1`，且 `trip_count <= 0` 必须报错。
-- 当 `trip_count` 为整数时，operation/Python helper 层按 `start + step * i` 生成有限序列；当 `trip_count` 为 `SymbolDim` 时，当前只保守返回首项 `start`，避免在运行期伪造符号次数展开。
-- `trip_count` 的运行期作用仅限 operation/Python helper 层的有限展开；lowering 不消费该字段。
+### `LoopRange.step -> int | SymbolDim`
 
-返回与限制：
+- api：`LoopRange.step -> int | SymbolDim`
+- 参数：无。
+- 返回值：构造 `LoopRange` 时传入并校验后的 `step`。
+- 使用示例：
 
-- 返回可迭代对象 `LoopRange`（实现名可自定义，但语义需一致）。
-- 对纯整数输入，迭代行为与 `range(start, end, step)` 等价。
-- 对含 `SymbolDim` 输入，迭代变量的符号表达遵循 `start + k * step` 的语义约束，其中 `k` 为非负整数索引；当 `trip_count` 为整数时，运行期 helper 生成 `k = 0..trip_count-1` 的有限序列。
-- 当 `trip_count` 为 `SymbolDim` 时，当前运行期 helper 只保守返回首项 `start`，不承诺按符号次数完整展开。
-- 返回对象需公开只读的 `start/end/step/trip_count` 属性（或等价访问接口），以便上层 DSL 保留范围表达并用于测试校验。
-- `LoopRange(...)` 直接构造时，公开行为必须与 `loop(...)` 保持一致，不能绕过 `bool` / 非法类型 / 非法 `trip_count` 的显式校验。
+  ```python
+  from kernel_gen.operation.scf import LoopRange
+  from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+
+  loop_range = LoopRange(0, SymbolDim("N"), SymbolDim("S"))
+  assert loop_range.step.get_value() == "S"
+  ```
+- 功能说明：只读返回符号范围步长。
+- 注意事项：属性返回值不得在访问时重新求值；调用方应按只读语义消费。
+
+### `LoopRange.trip_count -> int | SymbolDim`
+
+- api：`LoopRange.trip_count -> int | SymbolDim`
+- 参数：无。
+- 返回值：构造 `LoopRange` 时传入并校验后的 `trip_count`；若构造时传入 `None`，返回 `1`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.operation.scf import LoopRange
+  from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+
+  loop_range = LoopRange(0, SymbolDim("N"), 1, trip_count=None)
+  assert loop_range.trip_count == 1
+  ```
+- 功能说明：只读返回符号范围有限展开次数约束。
+- 注意事项：属性返回值不得在访问时重新求值；调用方应按只读语义消费。
+
+### `loop(start: int | SymbolDim, end: int | SymbolDim, step: int | SymbolDim, trip_count: int | SymbolDim | None = 1) -> range | LoopRange`
+
+- api：`loop(start: int | SymbolDim, end: int | SymbolDim, step: int | SymbolDim, trip_count: int | SymbolDim | None = 1) -> range | LoopRange`
+- 参数：
+  - `start`：范围起始值；类型 `int | SymbolDim`；无默认值；纯整数路径表示半开区间首项，符号路径用于构造 `LoopRange.start`。
+  - `end`：范围结束值；类型 `int | SymbolDim`；无默认值；纯整数路径表示半开区间终止边界，符号路径用于构造 `LoopRange.end`。
+  - `step`：范围步长；类型 `int | SymbolDim`；无默认值；纯整数路径按 Python `range` 步长推进，符号路径用于构造 `LoopRange.step`。
+  - `trip_count`：符号路径的有限展开次数约束；类型 `int | SymbolDim | None`；默认值 `1`；`None` 归一化为 `1`。
+- 返回值：当 `start/end/step` 均为 `int` 时返回 `range`；任一参数为 `SymbolDim` 时返回 `LoopRange`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.operation.scf import loop
+  from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+
+  assert list(loop(0, 4, 1)) == [0, 1, 2, 3]
+
+  loop_range = loop(0, SymbolDim("N"), SymbolDim("S"), trip_count=3)
+  assert [item if isinstance(item, int) else item.get_value() for item in loop_range] == [
+      0,
+      "S",
+      "2*S",
+  ]
+  ```
+- 功能说明：创建 operation 层范围迭代对象，供 DSL 表达确定或符号循环范围。
+- 注意事项：
+  - `start`、`end`、`step` 只接受 `int | SymbolDim`；传入 `bool`、`str` 或其他类型必须抛出 `KernelCodeError`。
+  - `step == 0` 必须抛出 `KernelCodeError`。
+  - `trip_count` 只接受 `int | SymbolDim | None`；传入 `bool`、`str` 或其他类型必须抛出 `KernelCodeError`。
+  - `trip_count=None` 必须归一化为 `1`；`trip_count <= 0` 必须抛出 `KernelCodeError`。
+  - 当输入全部为 `int` 时，返回值行为必须等价于 `range(start, end, step)`。
+  - 当输入包含 `SymbolDim` 时，不要求在 Python 运行期求出真实迭代次数；若 `trip_count` 为 `int`，Python helper 层按 `start + step * i` 生成有限序列。
+  - `trip_count` 为 `SymbolDim` 时，当前 Python helper 层只保守产出首项 `start`。
+
+### `kernel_gen.operation.loop(start: int | SymbolDim, end: int | SymbolDim, step: int | SymbolDim, trip_count: int | SymbolDim | None = 1) -> range | LoopRange`
+
+- api：`kernel_gen.operation.loop(start: int | SymbolDim, end: int | SymbolDim, step: int | SymbolDim, trip_count: int | SymbolDim | None = 1) -> range | LoopRange`
+- 参数：
+  - `start`：范围起始值；类型 `int | SymbolDim`；无默认值；转发给 `kernel_gen.operation.scf.loop`。
+  - `end`：范围结束值；类型 `int | SymbolDim`；无默认值；转发给 `kernel_gen.operation.scf.loop`。
+  - `step`：范围步长；类型 `int | SymbolDim`；无默认值；转发给 `kernel_gen.operation.scf.loop`。
+  - `trip_count`：符号路径的有限展开次数约束；类型 `int | SymbolDim | None`；默认值 `1`；转发给 `kernel_gen.operation.scf.loop`。
+- 返回值：与 `kernel_gen.operation.scf.loop` 相同，返回 `range | LoopRange`。
+- 使用示例：
+
+  ```python
+  import kernel_gen.operation as operation
+
+  assert list(operation.loop(0, 4, 1)) == [0, 1, 2, 3]
+  ```
+- 功能说明：通过 `kernel_gen.operation` 包根稳定重导出 `loop`。
+- 注意事项：
+  - 包根 `loop` 必须与 `kernel_gen.operation.scf.loop` 保持对象身份一致。
+  - 参数、返回值与错误语义必须完全沿用 `kernel_gen.operation.scf.loop`。
 
 ## 测试
 
-- 测试文件：[`test/operation/test_operation_scf.py`](../../test/operation/test_operation_scf.py)
-- 相关顶层导出测试：[`test/operation/test_operation_package_api.py`](../../test/operation/test_operation_package_api.py)
-- 执行命令：`pytest -q test/operation/test_operation_scf.py`
-- 测试目标：
-  - 纯整数 `loop` 与 `range(start, end, step)` 的半开区间语义一致。
-  - `SymbolDim` 输入可构建 `LoopRange` 并保留 `start/end/step` 语义。
-  - `bool` 输入不会因为 Python `bool` 是 `int` 子类而被接受。
-  - `step == 0` 触发 `ValueError`。
-  - `trip_count <= 0` 触发错误，且不得 silent fallback。
-  - 当前只收口最小 loop helper，不扩到其他控制流构造。
-  - 非法类型输入触发 `TypeError`。
-  - 边界/半开区间语义与正负步长的停止条件一致。
-  - 验证 `kernel_gen.operation` 顶层继续稳定重导出 `loop`，且对象身份与 `kernel_gen.operation.scf.loop` 一致。
-- 功能与用例清单：
-  - TC-OP-SCF-001：纯整数 `loop(0, 4, 1)` 产生 `[0, 1, 2, 3]`。
-  - TC-OP-SCF-002：纯整数 `loop(4, 0, -1)` 产生 `[4, 3, 2, 1]`。
-  - TC-OP-SCF-003：`SymbolDim` 输入可返回 `LoopRange`，且 `start/end/step` 保留原值。
-  - TC-OP-SCF-004：`step == 0` 抛出 `ValueError`。
-  - TC-OP-SCF-005：`start/end/step` 存在非法类型时抛出 `TypeError`。
-  - TC-OP-SCF-006：隐式 `trip_count <= 0` 必须报错，不得 fallback。
-  - TC-OP-SCF-007：显式 `trip_count = 3` 时迭代语义为 `start`、`start + step`、`start + step * 2`。
-  - TC-OP-SCF-013：`trip_count = SymbolDim("T")` 时，当前运行期 helper 只保守返回首项 `start`，并保留 `trip_count` 本身供上层读取。
+- 测试文件：
+  - `test/operation/test_package.py`
+  - `test/operation/test_scf.py`
+- 执行命令：`pytest -q test/operation/test_scf.py`
+
+### 测试目标
+
+- 验证 `spec/operation/scf.md` 对应公开 API 的正常路径、边界条件与错误语义。
+- 验证公开执行入口的返回值、输出或状态变化符合预期。
+- 验证非法输入、边界条件和错误语义按公开合同失败。
+
+
+### 功能与用例清单
+
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-OPERATION-SCF-001 | 执行结果 | TC-OP-SCF-001：纯整数 `loop(0, 4, 1)` 产生 `[0, 1, 2, 3]`。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行覆盖 `TC-OP-SCF-001` 的公开测试用例。 | 命令返回码、输出、执行结果或状态变更体现“TC-OP-SCF-001：纯整数 `loop(0, 4, 1)` 产生 `[0, 1, 2, 3]`。”场景。 | `TC-OP-SCF-001` |
+| TC-OPERATION-SCF-002 | 执行结果 | TC-OP-SCF-002：纯整数 `loop(4, 0, -1)` 产生 `[4, 3, 2, 1]`。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行覆盖 `TC-OP-SCF-002` 的公开测试用例。 | 命令返回码、输出、执行结果或状态变更体现“TC-OP-SCF-002：纯整数 `loop(4, 0, -1)` 产生 `[4, 3, 2, 1]`。”场景。 | `TC-OP-SCF-002` |
+| TC-OPERATION-SCF-003 | 执行结果 | TC-OP-SCF-003：`SymbolDim` 输入可返回 `LoopRange`，且 `start/end/step` 保留原值。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行覆盖 `TC-OP-SCF-003` 的公开测试用例。 | 命令返回码、输出、执行结果或状态变更体现“TC-OP-SCF-003：`SymbolDim` 输入可返回 `LoopRange`，且 `start/end/step` 保留原值。”场景。 | `TC-OP-SCF-003` |
+| TC-OPERATION-SCF-004 | 边界/异常 | TC-OP-SCF-004：`step == 0` 抛出 `KernelCodeError`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行覆盖 `TC-OP-SCF-004` 的公开测试用例。 | “TC-OP-SCF-004：`step == 0` 抛出 `KernelCodeError`。”场景按公开错误语义失败或被拒绝。 | `TC-OP-SCF-004` |
+| TC-OPERATION-SCF-005 | 边界/异常 | TC-OP-SCF-005：`start/end/step` 存在非法类型时抛出 `KernelCodeError`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行覆盖 `TC-OP-SCF-005` 的公开测试用例。 | “TC-OP-SCF-005：`start/end/step` 存在非法类型时抛出 `KernelCodeError`。”场景按公开错误语义失败或被拒绝。 | `TC-OP-SCF-005` |
+| TC-OPERATION-SCF-006 | 边界/异常 | TC-OP-SCF-006：隐式 `trip_count <= 0` 必须报错，不得 fallback。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行覆盖 `TC-OP-SCF-006` 的公开测试用例。 | “TC-OP-SCF-006：隐式 `trip_count <= 0` 必须报错，不得 fallback。”场景按公开错误语义失败或被拒绝。 | `TC-OP-SCF-006` |
+| TC-OPERATION-SCF-007 | 执行结果 | TC-OP-SCF-007：显式 `trip_count = 3` 时迭代语义为 `start`、`start + step`、`start + step * 2`。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行覆盖 `TC-OP-SCF-007` 的公开测试用例。 | 命令返回码、输出、执行结果或状态变更体现“TC-OP-SCF-007：显式 `trip_count = 3` 时迭代语义为 `start`、`start + step`、`start + step * 2`。”场景。 | `TC-OP-SCF-007` |
+| TC-OPERATION-SCF-008 | 执行结果 | TC-OP-SCF-013：`trip_count = SymbolDim("T")` 时，当前运行期 helper 只保守返回首项 `start`，并保留 `trip_count` 本身供上层读取。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行覆盖 `TC-OP-SCF-013` 的公开测试用例。 | 命令返回码、输出、执行结果或状态变更体现“TC-OP-SCF-013：`trip_count = SymbolDim("T")` 时，当前运行期 helper 只保守返回首项 `start`，并保留 `trip_count` 本身供上层读取。”场景。 | `TC-OP-SCF-013` |

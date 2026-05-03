@@ -1,0 +1,53 @@
+# arch.md
+
+## 功能简介
+
+- 注册 `kernel_gen.operation.arch` 公开 helper 到 AST builtin registry。
+- 覆盖 block/thread/subthread 查询、dynamic memory、barrier 与 launch_kernel。
+- 注册项 builder 负责构造对应 arch AST 节点，并承接 arch helper 前端合同校验。
+
+## API 列表
+
+本文件不承载公开 API。
+
+## 文档信息
+
+- 创建者：`未记录`
+- 最后一次更改：`小李飞刀`
+- `spec`：[`spec/dsl/ast/plugin/arch.md`](../../../../spec/dsl/ast/plugin/arch.md)
+- `功能实现`：[`kernel_gen/dsl/ast/plugin/arch.py`](../../../../kernel_gen/dsl/ast/plugin/arch.py)
+- `test`：[`test/dsl/ast/plugin/test_arch.py`](../../../../test/dsl/ast/plugin/test_arch.py)
+
+## 依赖
+
+- [`spec/dsl/ast/plugin/registry.md`](../../../../spec/dsl/ast/plugin/registry.md)
+- [`spec/dsl/ast/nodes/arch.md`](../../../../spec/dsl/ast/nodes/arch.md)
+
+## 额外补充
+
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
+- 本文件只承载内部注册副作用；未列入上层公开 API 的 builder、注册函数或 helper 不得跨文件直接调用。
+- `launch_kernel` 注册必须对应四字段 launch AST：`block`、`thread`、`subthread`、`shared_memory_size`。
+- target 查询与 runtime launch 行为不在 plugin 层实现。
+
+## API详细说明
+
+本文件没有公开 API 详细条目；内部注册、目录组织与非公开 helper 边界见“额外补充”。
+
+## 测试
+
+- 测试文件：`test/dsl/ast/plugin/test_arch.py`
+- 执行命令：`pytest -q test/dsl/ast/plugin/test_arch.py`
+
+### 测试目标
+
+- Arch helper call 被注册表识别，并由 arch plugin builder 构造对应节点。
+
+### 功能与用例清单
+
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-DSL-AST-PLUGIN-ARCH-001 | 公开入口 | arch query helper uses specific ast node | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_arch_query_helper_uses_specific_ast_node`。 | 公开入口在“arch query helper uses specific ast node”场景下可导入、构造、注册或按名称发现。 | `test_arch_query_helper_uses_specific_ast_node` |
+| TC-DSL-AST-PLUGIN-ARCH-002 | 边界/异常 | arch query rejects invalid helper arity | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_arch_query_rejects_invalid_helper_arity`。 | “arch query rejects invalid helper arity”场景按公开错误语义失败或被拒绝。 | `test_arch_query_rejects_invalid_helper_arity` |

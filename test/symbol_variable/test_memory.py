@@ -1,7 +1,5 @@
 """memory tests.
 
-创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 Memory/MemorySpace/LocalSpaceMeta 构造、表示与转换行为。
@@ -50,10 +48,6 @@ def _make_unsimplified_division_dim() -> SymbolDim:
 
 
 # ME-001
-# 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-25 00:52:36 +0800
-# 最近一次运行成功时间: 2026-03-25 00:52:36 +0800
 # 测试目的: 验证默认空间为 GM，且默认 dtype/shape/stride/format 可通过公开接口获取。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_space
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -74,10 +68,6 @@ def test_default_space() -> None:
 
 
 # ME-002
-# 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-25 00:52:36 +0800
-# 最近一次运行成功时间: 2026-03-25 00:52:36 +0800
 # 测试目的: 验证指定空间写入。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_custom_space
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -89,10 +79,6 @@ def test_custom_space() -> None:
 
 
 # ME-002A
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-15 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-15 00:00:00 +0800
 # 测试目的: 验证公开 TLM 空间已拆分为 TLM1/TLM2/TLM3，且旧 TLM 成员不再对外暴露。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_tlm123_spaces_and_legacy_tlm_absent
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -113,10 +99,6 @@ def test_tlm123_spaces_and_legacy_tlm_absent() -> None:
 
 
 # ME-003
-# 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-25 00:52:36 +0800
-# 最近一次运行成功时间: 2026-03-25 00:52:36 +0800
 # 测试目的: 验证 __repr__ 包含空间名与张量字段表达。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_repr
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -135,10 +117,6 @@ def test_repr() -> None:
 
 
 # ME-004
-# 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-25 00:52:36 +0800
-# 最近一次运行成功时间: 2026-03-25 00:52:36 +0800
 # 测试目的: 验证 tensor-like 字段直入构造保持 shape/dtype/stride/format。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_construct_from_tensor_fields
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -166,10 +144,6 @@ def test_construct_from_tensor_fields() -> None:
 
 
 # ME-005
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-25 00:52:36 +0800
-# 最近一次运行成功时间: 2026-03-25 00:52:36 +0800
 # 测试目的: 验证显式 stride 列表输入可被规整为 SymbolShape，且 rank 不匹配时抛错。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_explicit_stride_list
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -184,10 +158,6 @@ def test_explicit_stride_list() -> None:
 
 
 # ME-006
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-25 00:52:36 +0800
-# 最近一次运行成功时间: 2026-03-25 00:52:36 +0800
 # 测试目的: 验证动态 shape/stride 输入保持动态维度语义，并通过公开接口序列化。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_dynamic_shape_stride
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -202,10 +172,6 @@ def test_dynamic_shape_stride() -> None:
 
 
 # ME-006A
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-18 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 00:00:00 +0800
 # 测试目的: 验证动态 shape 的公开序列化继承 SymbolDim.get_value()，而不是底层 sympy 结构文本。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_dynamic_shape_public_values_use_symbol_dim_get_value
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -221,10 +187,6 @@ def test_dynamic_shape_public_values_use_symbol_dim_get_value() -> None:
 
 
 # ME-007
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-25 00:52:36 +0800
-# 最近一次运行成功时间: 2026-03-25 00:52:36 +0800
 # 测试目的: 验证 shape/stride 可直接接收 SymbolShape。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_shape_stride_accept_symbol_shape
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -239,10 +201,6 @@ def test_shape_stride_accept_symbol_shape() -> None:
 
 
 # ME-008
-# 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-25 00:52:36 +0800
-# 最近一次运行成功时间: 2026-03-25 00:52:36 +0800
 # 测试目的: 验证默认 format 与显式 format 保持可见。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_format
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -256,10 +214,6 @@ def test_default_format() -> None:
 
 
 # ME-009
-# 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-25 00:52:36 +0800
-# 最近一次运行成功时间: 2026-03-25 00:52:36 +0800
 # 测试目的: 验证 LocalSpaceMeta 冻结与 MemorySpace 元信息字段。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_space_meta
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -276,10 +230,6 @@ def test_space_meta() -> None:
 
 
 # ME-017
-# 创建者: OpenAI
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-25 00:52:36 +0800
-# 最近一次运行成功时间: 2026-03-25 00:52:36 +0800
 # 测试目的: 验证未显式提供 stride 时默认生成连续行主序步幅。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_stride_generated_row_major
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -292,10 +242,6 @@ def test_default_stride_generated_row_major() -> None:
 
 
 # ME-018
-# 创建者: OpenAI
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-25 00:52:36 +0800
-# 最近一次运行成功时间: 2026-03-25 00:52:36 +0800
 # 测试目的: 验证符号维度默认 stride 使用无空格乘法表达式并保持字符串表示一致。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_stride_symbolic_expression_repr
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -315,10 +261,6 @@ def test_default_stride_symbolic_expression_repr() -> None:
 
 
 # ME-019
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-25 00:52:36 +0800
-# 最近一次运行成功时间: 2026-03-25 00:52:36 +0800
 # 测试目的: 验证字符串形状输入时默认 stride 生成与字符串表示一致。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_stride_symbolic_expression_from_strings
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -335,10 +277,6 @@ def test_default_stride_symbolic_expression_from_strings() -> None:
 
 
 # ME-020
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-06 00:19 +0800
-# 最近一次运行成功时间: 2026-04-06 00:19 +0800
 # 测试目的: 验证 clone 过程保留 stride 中的符号表达式结构。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_clone_with_dtype_preserves_symbolic_stride_expression
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -360,10 +298,6 @@ def test_clone_with_dtype_preserves_symbolic_stride_expression() -> None:
 
 
 # ME-020A
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 `Memory.clone(...)` 可按公开参数覆写 dtype/space，并保留其余公开元信息。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_memory_clone_overrides_dtype_and_space
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -386,10 +320,6 @@ def test_memory_clone_overrides_dtype_and_space() -> None:
 
 
 # ME-020B
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 `Memory.clone(...)` 默认继承 dtype/space/format 与公开 shape/stride。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_memory_clone_defaults_preserve_public_metadata
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -411,10 +341,6 @@ def test_memory_clone_defaults_preserve_public_metadata() -> None:
 
 
 # ME-020C
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 `Memory.clone(...)` 拒绝非法 dtype/space 输入。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_memory_clone_rejects_invalid_public_overrides
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -430,10 +356,6 @@ def test_memory_clone_rejects_invalid_public_overrides() -> None:
 
 
 # ME-021
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-18 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 00:00:00 +0800
 # 测试目的: 验证 Memory 运算前的 shape 校验按符号语义比较，而不是只比较序列化文本顺序。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_memory_shape_match_uses_symbol_dim_public_values
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py

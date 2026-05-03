@@ -1,7 +1,5 @@
 """Conv2d demo with static inputs and dynamic tiles.
 
-创建者: 大闸蟹
-最后一次更改: 大闸蟹
 
 功能说明:
 - 实现 `inputs 静 + tile 动` 的 NCHW conv2d kernel demo。
@@ -47,8 +45,6 @@ def conv2d_inputs_static_tile_dynamic_kernel(
 ) -> None:
     """执行静态输入、动态 tile 的 conv2d。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 输入 shape 固定，tile shape 使用当前 demo 的运行值。
@@ -102,8 +98,6 @@ def conv2d_inputs_static_tile_dynamic_kernel(
 def main() -> None:
     """运行静态输入、动态 tile 的 conv2d demo。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 构造真实 torch tensor 输入。

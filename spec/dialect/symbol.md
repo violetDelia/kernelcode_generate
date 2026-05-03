@@ -6,32 +6,39 @@
 
 ## API 列表
 
-- `方言公开构件`
-- `SymbolExprAttr`
-- `SymbolValueType`
-- `SymbolIterType`
-- `SymbolIterAttr`
-- `SymbolYieldOp`
-- `SymbolPtrType`
-- `文本语法`
-- `类型校验规则`
-- `Memory 相关符号标量归属`
-- `symbol.const`
-- `symbol.add` / `symbol.sub` / `symbol.mul` / `symbol.div` / `symbol.floordiv`
-- `symbol.eq` / `symbol.ne` / `symbol.lt` / `symbol.le` / `symbol.gt` / `symbol.ge`
-- `symbol.to_int`
-- `symbol.to_float`
-- `symbol.get_dim`
-- `symbol.get_stride`
-- `symbol.for`
-- `symbol.yield`
+- `class SymbolExprAttr(expr: StringAttr)`
+- `class SymbolDimType(expr: SymbolExprAttr)`
+- `class SymbolValueType(expr: SymbolExprAttr)`
+- `class SymbolIterAttr(start: StringAttr, end: StringAttr, step: StringAttr)`
+- `class SymbolIterType(iter_attr: SymbolIterAttr)`
+- `class SymbolPtrType(base_type: Attribute, shape: ArrayAttr[Attribute], stride: ArrayAttr[Attribute])`
+- `class SymbolConstOp(value: IntegerAttr | IntAttr | int)`
+- `class SymbolAddOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolSubOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolMulOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolDivOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolFloorDivOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolEqOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolNeOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolLtOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolLeOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolGtOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolGeOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolToFloatOp(value: SSAValue, result_type: Attribute)`
+- `class SymbolToIntOp(value: SSAValue, result_type: Attribute)`
+- `class SymbolCastOp(value: SSAValue, result_type: Attribute)`
+- `class SymbolGetDimOp(memory: SSAValue, index: int | IntAttr)`
+- `class SymbolGetStrideOp(memory: SSAValue, index: int | IntAttr)`
+- `class SymbolYieldOp(value: SSAValue | None = None)`
+- `class SymbolForOp(iter_attr: SymbolIterAttr, start: SSAValue, end: SSAValue, step: SSAValue, body: Region, init: SSAValue | None = None)`
+- `class Symbol(Dialect)`
 
 ## 文档信息
 
-- 创建者：`榕`
-- 最后一次更改：`金铲铲大作战`
+- 创建者：`未记录`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)
-- `test`：[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
+- `test`：[`test/dialect/test_symbol.py`](../../test/dialect/test_symbol.py)
 - `功能实现`：[`kernel_gen/dialect/symbol.py`](../../kernel_gen/dialect/symbol.py)
 
 ## 依赖
@@ -57,8 +64,11 @@
 - 保持类型表达尽量简单，优先服务开发者理解和方言间协同，而不是追求复杂的符号推导系统。
 - 本文件中的“符号值”指与 SSA value 绑定的单个整数值语义表达，可以是具名符号、整型表达式或整型常量，如 `N`、`M + 1`、`B * K`、`1`、`2`、`3`。
 
-## 限制与边界
+## 额外补充
 
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - `symbol dialect` 只定义符号值类型、最小整数符号算术 op、基础约束、`symbol.for` 的最小循环结构以及从 memory type 读取单个 dim/stride 值的查询接口；不定义张量类型、内存类型、通用控制流 op、通用内存搬运 op 或逐元素张量算术 op。
 - 本方言的重点是“值的符号语义如何表达”，不是“如何求值”或“如何解方程”。
 - 本方言不负责通用符号化简、约束求解、范围分析、证明或 SMT 集成。
@@ -70,6 +80,7 @@
 - `Memory`、`MemorySpace`、`LocalSpaceMeta` 这类高层内存容器或空间枚举不属于本方言；本方言只负责它们内部可能出现的单个整型符号值语义。
 - `symbol.get_dim` / `symbol.get_stride` 只读取 memory type 中已存在的单个维度或步幅分量，不引入新的 shape/stride 推导规则。
 - `symbol.get_dim` / `symbol.get_stride` 当前只接受 IR 层 memory SSA value；按当前方言体系，该 memory type 统一指向 `MemoryType`，其当前文本载体仍为 `!nn.memory<...>`。
+- `symbol.get_dim` / `symbol.get_stride` 查询到静态整数 shape/stride 条目时支持常量折叠，可在通用 folding 中物化为 `symbol.const`；符号表达与匿名动态值不得被折叠成常量。
 - 若目标维度或步幅条目为匿名动态值 `?`，由于无法稳定映射为 `!symbol.int<"...">`，必须报错；本接口只接受可表示为整数常量或符号表达的条目。
 - `symbol.get_dim` / `symbol.get_stride` 的轴号当前必须是静态整数索引；越界、负数或非整数轴号必须报错。
 - 本方言暂不定义“未知但无名字”的匿名符号值；若需要动态未知值，应优先使用具名符号或由其他方言以 SSA value 传递。
@@ -84,232 +95,18 @@
 - 当前不在 `symbol dialect` 中定义 `ptr.load`、`ptr.store`、pointer arithmetic、pointer compare、address cast 或任何基于 `symbol.ptr` 的 body-level 计算 op。
 - `symbol.const` 只用于生成整数常量的 `!symbol.int<"...">`，不承载其他类型或宽度。
 
-## 公开接口
-
-### 方言公开构件
-
-功能说明：
-
-- `symbol dialect` 的公开构件由五部分组成：
-  - `SymbolValueType`：带符号值语义的整型标量类型
-  - `SymbolExprAttr`：用于承载符号表达的 attribute
-  - `SymbolPtrType`：用于承载 `Ptr(dtype)` 的最小 pointer type
-  - `SymbolIterType`：用于承载循环迭代变量语义的 symbol 类型
-  - `SymbolYieldOp`：用于承载 `symbol.for` carried `!symbol.int<"...">` 的终止 op
-  - `SymbolForOp`：用于表达 `symbol.for` 循环的公开 op
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolForOp, SymbolIterType, SymbolPtrType, SymbolValueType, SymbolYieldOp
-```
-
-注意事项：
-
-- `SymbolValueType` 当前固定表示整数语义的符号值类型。
-- `SymbolExprAttr` 只承载单个标量值对应的整数值语义表达。
-- `SymbolPtrType` 只承载 pointee dtype，用于函数签名等类型位置的最小 pointer carrier。
-- `SymbolIterType` 表示循环迭代变量语义，表达式规则与 `SymbolValueType` 一致。
-- `SymbolYieldOp` 仅用于带单个 carried `!symbol.int<"...">` 的 `symbol.for` 终止位置。
-- `SymbolForOp` 兼容旧的无 carried 值语法与新的单个 carried `!symbol.int<"...">` 语法。
-
-返回与限制：
-
-- 返回 `symbol dialect` 对外暴露的类型与 attribute 定义。
-
-### `SymbolExprAttr`
-
-功能说明：
-
-- 表示一个可打印、可比较、可校验的整数值语义表达。
-- 用于给 `SymbolValueType` 提供值语义来源。
-
-参数说明：
-
-- `expr(string)`：整数值语义表达文本，例如 `N`、`M + 1`、`B * K`、`1`、`2`、`3`。
-
-使用示例：
-
-```python
-expr = SymbolExprAttr("N")
-expr2 = SymbolExprAttr("M + 1")
-```
-
-注意事项：
-
-- 表达式必须是非空字符串。
-- 表达式应使用稳定文本格式，避免同义但不同打印形式导致比较不一致。
-- 表达式中的名字应与项目中的符号命名规则保持一致；纯整数字面量同样合法。
-
-返回与限制：
-
-- 返回类型：`SymbolExprAttr`
-- 限制：仅承载单个标量值的符号表达。
-
-### `SymbolValueType`
-
-功能说明：
-
-- 表示“整数语义 + 符号值语义”的组合类型。
-- 对应的正式文本形式为 `!symbol.int<"expr">`，例如 `!symbol.int<"N">`、`!symbol.int<"M + 1">`。
-
-参数说明：
-
-- `expr(SymbolExprAttr)`：该值对应的符号表达。
-
-使用示例：
-
-```python
-ty = SymbolValueType.from_expr("N")
-const_ty = SymbolValueType.from_expr("3")
-```
-
-注意事项：
-
-- `expr` 必须存在，不允许创建无符号表达的 `SymbolValueType`。
-- 当前 `SymbolValueType` 只表示整数语义，不再携带或区分整型宽度。
-- `expr` 可以是具名符号，也可以是常量整数值，如 `1`、`2`、`3`。
-- `SymbolValueType` 的打印语义应稳定映射为 `!symbol.int<"expr">`。
-
-返回与限制：
-
-- 返回类型：`SymbolValueType`
-- 限制：只表示单个整型标量值的符号语义，不表示 shape 列表或张量。
-
-### `SymbolIterType`
-
-功能说明：
-
-- 表示循环迭代变量的 symbol 类型。
-- 对应的正式文本形式为 `!symbol.iter<start = "...", end = "...", step = "...">`，与 `!symbol.int<"expr">` 同样承载整数值语义，但额外记录迭代边界。
-
-参数说明：
-
-- `start(SymbolExprAttr)`：迭代区间起始表达式。
-- `end(SymbolExprAttr)`：迭代区间结束表达式。
-- `step(SymbolExprAttr)`：迭代步长表达式。
-
-使用示例：
-
-```python
-iter_ty = SymbolIterType.from_bounds("0", "N", "TILE_D0")
-```
-
-注意事项：
-
-- `start/end/step` 必须遵循 `SymbolExprAttr` 的表达式校验规则。
-- `SymbolIterType` 用于 `symbol.for` 的 block 参数类型，与 `#symbol.iter` attribute 对齐。
-
-返回与限制：
-
-- 返回类型：`SymbolIterType`
-- 限制：用于表达迭代变量语义，不表示 pointer 或 memory 布局信息。
-
-### `SymbolIterAttr`
-
-功能说明：
-
-- 表示 `symbol.for` 的迭代边界 attribute。
-- 对应的正式文本形式为 `#symbol.iter<start = "...", end = "...", step = "...">`。
-
-参数说明：
-
-- `start(SymbolExprAttr)`：迭代区间起始表达式。
-- `end(SymbolExprAttr)`：迭代区间结束表达式。
-- `step(SymbolExprAttr)`：迭代步长表达式。
-
-使用示例：
-
-```python
-iter_attr = SymbolIterAttr.from_bounds("0", "N", "TILE_D0")
-```
-
-注意事项：
-
-- `SymbolIterAttr` 必须与 `symbol.for` 的 `start/end/step` 一致。
-- `SymbolIterAttr` 不单独参与算术或比较 op，只用于表达 loop 边界。
-
-返回与限制：
-
-- 返回类型：`SymbolIterAttr`
-- 限制：仅用于 `symbol.for` 的迭代边界表达。
-
-### `SymbolYieldOp`
-
-功能说明：
-
-- 表示 `symbol.for` carried `!symbol.int<"...">` 循环体的终止 op。
-- 该 op 只承载一个 `!symbol.int<"...">` SSA value，并要求位于 `symbol.for` body 的最后一条指令位置。
-
-参数说明：
-
-- `value(value)`：循环体内的归约值，类型必须为 `!symbol.int<"...">`。
-
-使用示例：
-
-```text
-symbol.yield %next : !symbol.int<"NEXT">
-```
-
-注意事项：
-
-- `symbol.yield` 只能出现在带单个 carried `!symbol.int<"...">` 的 `symbol.for` 循环体末尾。
-- `value` 必须为 `!symbol.int<"...">`，不接受 `i1`、`i32`、`index`、`f32` 或其他类型。
-- 该 op 不定义多结果或多值 yield 语义。
-
-返回与限制：
-
-- 返回类型：无结果 op。
-- 限制：仅作为 `symbol.for` carried `!symbol.int<"...">` 的 terminator。
-
-### `SymbolPtrType`
-
-功能说明：
-
-- 表示“指向某个 pointee dtype 的最小 pointer type”。
-- 对应的正式文本形式为 `!symbol.ptr<dtype>`，例如 `!symbol.ptr<f32>`、`!symbol.ptr<i32>`。
-- 作为 DSL `Ptr(dtype)` 在 IR 类型层的唯一承载，不扩展为 body-level pointer 语义。
-
-参数说明：
-
-- `dtype(TypeAttribute)`：pointer 所指向的 pointee dtype。
-
-使用示例：
-
-```python
-from xdsl.dialects.builtin import f32
-
-ptr_ty = SymbolPtrType(f32)
-```
-
-注意事项：
-
-- `dtype` 必须是合法 `TypeAttribute`。
-- `dtype` 不得为 `!symbol.int<"...">`；`symbol.ptr` 不承载“指向 symbol.int”的二级语义。
-- `SymbolPtrType` 只负责类型承载，不定义 load/store、算术、比较或地址运算。
-- `SymbolPtrType` 不携带名字、shape、stride、offset 或 memory space。
-
-返回与限制：
-
-- 返回类型：`SymbolPtrType`
-- 限制：当前只表示最小 pointer carrier，不定义 pointer body op 或 runtime 地址行为。
-
 ### 文本语法
 
-功能说明：
+- 功能说明：
 
 - 规定 `symbol dialect` 在文档、打印和调试中的正式文本语法。
 
-参数说明：
+- 参数：
 
 - `expr`：符号表达。
 - `dtype`：pointer pointee dtype。
 
-使用示例：
+- 使用示例：
 
 ```text
 #symbol.expr<"N">
@@ -321,7 +118,7 @@ ptr_ty = SymbolPtrType(f32)
 !symbol.ptr<i32>
 ```
 
-注意事项：
+- 注意事项：
 
 - `SymbolExprAttr` 使用 `#symbol.expr<"expr">`。
 - `SymbolValueType` 使用 `!symbol.int<"expr">`。
@@ -329,23 +126,23 @@ ptr_ty = SymbolPtrType(f32)
 - `SymbolPtrType` 使用 `!symbol.ptr<dtype>`。
 - 当前不接受按位宽区分的 legacy 整型文本，或任何非整型文本变体；`symbol.ptr` 也不定义别名文本。
 
-返回与限制：
+- 返回值：
 
 - 返回类型：文本约定。
 - 限制：当前 spec 只定义上述四种正式语法，不额外定义等价别名。
 
 ### 类型校验规则
 
-功能说明：
+- 功能说明：
 
 - 规定 `SymbolValueType`、`SymbolIterType` 与 `SymbolPtrType` 的 verifier 行为。
 
-参数说明：
+- 参数：
 
 - `expr`：待校验符号表达。
 - `dtype`：待校验的 pointer pointee dtype。
 
-使用示例：
+- 使用示例：
 
 ```python
 SymbolValueType.from_expr("N")
@@ -353,7 +150,7 @@ SymbolIterType.from_bounds("0", "index", "1")
 SymbolPtrType(f32)
 ```
 
-注意事项：
+- 注意事项：
 
 - `expr` 不能为空。
 - `expr` 中若出现非法字符、空白后为空、或不可解析的表达式，必须报错。
@@ -367,23 +164,23 @@ SymbolPtrType(f32)
 - `SymbolPtrType` 的 `dtype` 不得为 `SymbolValueType`；`!symbol.ptr<!symbol.int<"N">>` 必须视为非法。
 - `!symbol.ptr<dtype>` 打印后再解析必须能得到等价类型对象。
 
-返回与限制：
+- 返回值：
 
 - 返回类型：校验规则定义。
 - 限制：仅校验整数符号类型表达与 pointer carrier 的合法性，不负责判断两个不同表达式是否数学等价，也不定义 pointer body 语义。
 
 ### Memory 相关符号标量归属
 
-功能说明：
+- 功能说明：
 
 - 规定 memory 相关符号值在 IR 层的归属边界。
 - 当 `shape`、`stride`、`offset`、`size` 等 memory 元信息被单独建模为整数标量 attribute/type 时，统一由 `symbol dialect` 负责其整数符号语义表达。
 
-参数说明：
+- 参数：
 
 - `expr(string)`：单个 memory 元信息标量对应的整数语义表达，例如 `N`、`K*N`、`3`。
 
-使用示例：
+- 使用示例：
 
 ```text
 #symbol.expr<"K*N">
@@ -391,359 +188,494 @@ SymbolPtrType(f32)
 !symbol.int<"N">
 ```
 
-注意事项：
+- 注意事项：
 
 - 本归属规则只覆盖“单个整数标量”的 symbol 语义，不直接承载 `shape=[M, N]` 这类多值结构。
 - `spec/symbol_variable/memory.md` 负责高层 `Memory` 对象、空间枚举与默认 stride 规则；`symbol dialect` 负责其中单个维度或步幅分量的整数 symbol 语义。
 - 常量整数分量与具名符号分量同样适用本规则；`!symbol.int<"1">`、`!symbol.int<"2">`、`!symbol.int<"3">` 都是合法 memory 元信息标量表达。
 
-返回与限制：
+- 返回值：
 
 - 返回类型：归属规则定义。
 - 限制：只定义 memory 元信息中的单值整型 symbol 语义，不定义 memory 容器、memory type 或 memory space。
 
 ### `symbol.const`
 
-功能说明：
+- 功能说明：
 
 - 定义整数常量进入 `symbol dialect` 的最小 op。
 - 以整数 attribute 记录常量值，并输出对应的 `!symbol.int<"...">` 结果类型。
 
-参数说明：
+- 参数：
 
 - `value(integer)`：整数常量。
 - `result_type(type)`：结果类型，必须为 `!symbol.int<"...">`。
 
-使用示例：
+- 使用示例：
 
 ```text
 %one = symbol.const 1 : !symbol.int<"1">
 %neg = symbol.const -4 : !symbol.int<"-4">
 ```
 
-注意事项：
+- 注意事项：
 
 - `value` 必须是整数 attribute；不接受布尔值或浮点值。
 - 结果类型必须为 `!symbol.int<"...">`，且表达式内容必须与常量值一致。
 - parse/print 必须稳定遵循 `symbol.const <value> : !symbol.int<"...">` 的公开文本形式。
 
-返回与限制：
+- 返回值：
 
 - 返回类型：`!symbol.int<"value">`
 - 限制：仅用于生成整数常量，不承载其他类型或宽度。
 
-### `symbol.add` / `symbol.sub` / `symbol.mul` / `symbol.div` / `symbol.floordiv`
-
-功能说明：
-
-- 定义 `symbol dialect` 内最小范围的整数符号算术 op。
-- `symbol.add` 表示两个 `!symbol.int<"expr">` 标量的整数加法。
-- `symbol.sub` 表示两个 `!symbol.int<"expr">` 标量的整数减法。
-- `symbol.mul` 表示两个 `!symbol.int<"expr">` 标量的整数乘法。
-- `symbol.div` 表示两个 `!symbol.int<"expr">` 标量的符号除法；若输入可静态化简为整除结果，结果类型可收敛为常量整数，否则保持 `/` 表达式文本。
-- `symbol.floordiv` 表示两个 `!symbol.int<"expr">` 标量的符号整除；静态整数输入按 Python `//` 语义收敛，动态输入保持 `//` 表达式文本。
-
-参数说明：
-
-- `lhs(value)`：左操作数，类型必须为 `!symbol.int<"expr">`。
-- `rhs(value)`：右操作数，类型必须为 `!symbol.int<"expr">`。
-- `result_type(type)`：结果类型，必须为 `!symbol.int<"expr">`。
-
-使用示例：
-
-```text
-%sum = symbol.add %m, %one : !symbol.int<"M">, !symbol.int<"1"> -> !symbol.int<"M + 1">
-%diff = symbol.sub %n, %one : !symbol.int<"N">, !symbol.int<"1"> -> !symbol.int<"N - 1">
-%prod = symbol.mul %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M*N">
-%quot = symbol.div %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M / N">
-%floor = symbol.floordiv %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M // N">
-```
-
-注意事项：
-
-- `lhs`、`rhs` 与结果都必须是 `!symbol.int<"expr">`；不接受普通整数、浮点、`index` 或其他 dialect 标量类型。
-- 这组 op 只表达整数符号值之间的标量算术，不承担张量逐元素计算、广播、循环控制或 memory 语义。
-- verifier 只约束类型一致性、结果类型合法性与 parse/print 稳定性；不要求在方言内证明不同表达式的数学等价性。
-- `symbol.add/sub/mul/div/floordiv` 可以用于构造后续 `symbol.for` 边界、memory 元信息或其他要求 `!symbol.int<"...">` 的整数标量值，但不会要求 dialect 内部完成复杂化简。
-- `symbol.div` 的结果文本允许包含 `/`；当输入是可整除的静态整数表达式时，可直接打印化简后的整数常量。
-- `symbol.floordiv` 的结果文本允许包含 `//`；静态整数输入按 Python `//` 语义化简。
-- parse/print 必须稳定遵循 `symbol.<op> %lhs, %rhs : !symbol.int<"...">, !symbol.int<"..."> -> !symbol.int<"...">` 的公开文本形式。
-- 错误信息至少应包含具体 op 名称、失败原因以及出错操作数或结果类型。
-
-返回与限制：
-
-- 返回类型：`!symbol.int<"expr">`
-- 返回语义：返回保留 symbol 整数值语义的单结果 SSA value。
-- 限制：当前只定义二元单结果算术 op，不定义一元取负、n 元折叠、常量折叠或跨类型提升规则。
-
-### `symbol.eq` / `symbol.ne` / `symbol.lt` / `symbol.le` / `symbol.gt` / `symbol.ge`
-
-功能说明：
-
-- 定义 `symbol dialect` 内最小范围的整数符号比较 op。
-- `symbol.eq` / `symbol.ne` 表示两个 `!symbol.int<"expr">` 标量的相等/不等比较。
-- `symbol.lt` / `symbol.le` / `symbol.gt` / `symbol.ge` 表示两个 `!symbol.int<"expr">` 标量的大小关系比较。
-- 比较结果统一表达 true/false 语义，结果类型固定为 `i1`。
-- 对 DSL 主链收口时，`a != b` 的目标 op 为 `symbol.ne`，`a < b` 的目标 op 为 `symbol.lt`，`a <= b` 的目标 op 为 `symbol.le`，`a > b` 的目标 op 为 `symbol.gt`。
-
-参数说明：
-
-- `lhs(value)`：左操作数，类型必须为 `!symbol.int<"expr">`。
-- `rhs(value)`：右操作数，类型必须为 `!symbol.int<"expr">`。
-- `result_type(type)`：结果类型，必须为 `i1`。
-
-使用示例：
-
-```text
-%is_same = symbol.eq %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1
-%is_not_same = symbol.ne %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1
-%is_less = symbol.lt %i, %end : !symbol.int<"i">, !symbol.int<"N"> -> i1
-%is_le = symbol.le %i, %end : !symbol.int<"i">, !symbol.int<"N"> -> i1
-%is_gt = symbol.gt %lhs, %rhs : !symbol.int<"M + 1">, !symbol.int<"N"> -> i1
-%is_last = symbol.ge %i, %limit : !symbol.int<"i">, !symbol.int<"N - 1"> -> i1
-```
-
-注意事项：
-
-- `lhs` 与 `rhs` 必须都是 `!symbol.int<"expr">`；不接受普通整数、浮点、`index` 或其他 dialect 标量类型。
-- 结果类型固定为 `i1`，用于表达 true/false 语义；不允许结果继续保留为 `!symbol.int<"...">` 或其他非布尔类型。
-- 这组 op 只表达标量比较关系，不承担分支、短路逻辑、张量级比较、广播或控制流语义。
-- `symbol.ne` / `symbol.lt` / `symbol.le` / `symbol.gt` 必须共享同一 compare family 合同：输入类型、结果类型、错误边界与公开文本格式保持一致，不能把四个 op 拆成互不一致的规则。
-- 对 DSL 主链而言，`Unsupported symbol compare op` 不是 `symbol.ne` / `symbol.lt` / `symbol.le` / `symbol.gt` 的长期合理边界；这四个 op 已属于本方言的稳定公开合同。
-- verifier 只约束操作数类型、结果类型、op 名称对应的语义类别与 parse/print 稳定性；不要求在方言内证明两个符号表达式的数学关系是否恒真或恒假。
-- parse/print 必须稳定遵循 `symbol.<cmp> %lhs, %rhs : !symbol.int<"...">, !symbol.int<"..."> -> i1` 的公开文本形式。
-- 错误信息至少应包含具体 op 名称、失败原因以及出错操作数或结果类型。
-
-返回与限制：
-
-- 返回类型：`i1`
-- 返回语义：返回表达 true/false 语义的单结果 SSA value。
-- 限制：当前只定义二元单结果比较 op，不定义三路比较、链式比较、逻辑与/或/非、谓词折叠或跨类型比较规则。
-
-### `symbol.to_int`
-
-功能说明：
-
-- 定义 `symbol.to_int` op，用于将 `!symbol.int<"...">` 标量显式转换为普通整型。
-- 该 op 仅负责类型转换，不做符号表达求值或简化。
-
-参数说明：
-
-- `source(value)`：输入操作数，必须为 `!symbol.int<"...">`。
-- `result_type(type)`：结果类型，必须为 builtin 整型（如 `i8`、`i16`、`i32`、`i64`）。
-
-使用示例：
-
-```text
-%i32 = symbol.to_int %n : !symbol.int<"N"> -> i32
-%i64 = symbol.to_int %n : !symbol.int<"N"> -> i64
-```
-
-注意事项：
-
-- `source` 必须是 `!symbol.int<"...">`；不接受 `i32`、`index`、`f64` 或其他非 symbol 标量类型作为输入。
-- 结果类型必须是 builtin 整型；当前覆盖各整型变体（如 `i8`、`i16`、`i32`、`i64`）。
-- `symbol.to_int` 不引入新的符号表达式语义；仅在 IR 层完成类型转换表述。
-- parse/print 必须稳定遵循 `symbol.to_int %source : !symbol.int<"..."> -> i32/i64/...` 的公开文本形式。
-- 错误信息至少应包含具体 op 名称与失败原因。
-
-返回与限制：
-
-- 返回类型：builtin 整型（`IntegerType`）。
-- 返回语义：返回 `source` 对应的整数表达值（仅转换类型，不做数值求值）。
-- 限制：当前只定义从 `!symbol.int<"...">` 到普通整型的显式转换，不定义反向转换。
-
-### `symbol.to_float`
-
-功能说明：
-
-- 定义 `symbol.to_float` op，用于将 `!symbol.int<"...">` 标量显式转换为 `f32`。
-- 该 op 仅负责类型转换，不做符号表达求值或简化。
-- 对 DSL 主链收口时，`float(n)` 的目标 op 为 `symbol.to_float`。
-
-参数说明：
-
-- `source(value)`：输入操作数，必须为 `!symbol.int<"...">`。
-- `result_type(type)`：结果类型，必须为 `f32`。
-
-使用示例：
-
-```text
-%f = symbol.to_float %n : !symbol.int<"N"> -> f32
-```
-
-注意事项：
-
-- `source` 必须是 `!symbol.int<"...">`；不接受 `i32`、`index`、`f64` 或其他非 symbol 标量类型。
-- 结果类型固定为 `f32`，不支持 `f64`、`bf16` 或其他浮点宽度。
-- `symbol.to_float` 不引入新的符号表达式语义；仅在 IR 层完成类型转换表述。
-- 对 DSL 主链而言，`float(symbol.int)` 进入 `symbol dialect` 后的稳定落点是 `symbol.to_float`，而不是把该转换继续视为未定义边界。
-- parse/print 必须稳定遵循 `symbol.to_float %source : !symbol.int<"..."> -> f32` 的公开文本形式。
-- 错误信息至少应包含具体 op 名称与失败原因。
-
-返回与限制：
-
-- 返回类型：`f32`
-- 返回语义：返回 `source` 对应的浮点表达值（仅转换类型，不做数值求值）。
-- 限制：当前只定义从 `!symbol.int<"...">` 到 `f32` 的转换，不定义反向或其他类型转换。
-
-### `symbol.get_dim`
-
-功能说明：
-
-- 从 memory SSA value 的 memory type 中读取指定轴上的真实 `shape` 分量，并返回对应的整数 symbol value。
-- 该接口只做“读取已有类型信息并转成 value”的语义收敛，不负责形状推导或约束求解。
-
-参数说明：
-
-- `source(SSA value)`：待读取的 memory 值；当前必须具有 `MemoryType`。
-- `axis(int)`：要读取的维度下标，按 `source.type.shape` 的顺序从 `0` 开始计数。
-
-使用示例：
-
-```text
-%d0 = symbol.get_dim %mem[0] : !nn.memory<[4, 8], [8, 1], i32, #nn.space<global>> -> !symbol.int<"4">
-%d1 = symbol.get_dim %mem[1] : !nn.memory<[M, N], [N, 1], i32, #nn.space<global>> -> !symbol.int<"N">
-```
-
-注意事项：
-
-- `source` 必须是 memory SSA value，且其类型当前必须为 `MemoryType`。
-- 返回值语义直接来自 `source.type.shape[axis]`：静态整数分量返回对应常量整数 value，符号分量返回对应符号表达 value。
-- 当目标分量为 `?`、轴号越界、轴号为负数或轴号不是静态整数时，必须报错。
-- 本接口只读取真实 dim，不读取 stride、offset、size 或 element type。
-
-返回与限制：
-
-- 返回类型：`!symbol.int<"expr">`
-- 限制：`expr` 必须可稳定表示为整数常量或符号表达；不支持匿名动态条目 `?`。
-
-### `symbol.get_stride`
-
-功能说明：
-
-- 从 memory SSA value 的 memory type 中读取指定轴上的真实 `stride` 分量，并返回对应的整数 symbol value。
-- 该接口只做“读取已有类型信息并转成 value”的语义收敛，不负责默认 stride 推导或布局修复。
-
-参数说明：
-
-- `source(SSA value)`：待读取的 memory 值；当前必须具有 `MemoryType`。
-- `axis(int)`：要读取的步幅下标，按 `source.type.stride` 的顺序从 `0` 开始计数。
-
-使用示例：
-
-```text
-%s0 = symbol.get_stride %mem[0] : !nn.memory<[4, 8], [8, 1], i32, #nn.space<global>> -> !symbol.int<"8">
-%s1 = symbol.get_stride %mem[1] : !nn.memory<[M, N], [K*N, N], i32, #nn.space<global>> -> !symbol.int<"N">
-```
-
-注意事项：
-
-- `source` 必须是 memory SSA value，且其类型当前必须为 `MemoryType`。
-- 返回值语义直接来自 `source.type.stride[axis]`：静态整数分量返回对应常量整数 value，符号分量返回对应符号表达 value。
-- 当目标分量为 `?`、轴号越界、轴号为负数或轴号不是静态整数时，必须报错。
-- 本接口只读取真实 stride，不读取 shape、offset、size 或 element type。
-
-返回与限制：
-
-- 返回类型：`!symbol.int<"expr">`
-- 限制：`expr` 必须可稳定表示为整数常量或符号表达；不支持匿名动态条目 `?`。
-
-### `symbol.for`
-
-功能说明：
-
-- 定义 `symbol dialect` 中面向整数符号值的循环 op。
-- 用于在 IR 层显式表达“以符号整数边界驱动的半开区间循环”，其中 `start`、`end`、`step` 采用 `!symbol.int<"expr">`，迭代变量 `it` 采用 `!symbol.iter<...>`。
-- 该 op 只负责循环边界与迭代变量的符号整数约束，不扩展为通用控制流方言；循环体内部承载的具体计算或访存语义仍由其他 dialect 负责。
-- `it` 的类型基线必须是 `SymbolIterType`；用户口径中的“symbol scf”迭代变量，本质上就是 `symbol.for` 暴露的 `!symbol.iter<...>` block argument。
-- 可选支持一个 loop-carried `!symbol.int<"...">` 累计值。无 carried-value 形式保持旧合同；带 carried-value 形式用于把循环体内生成的整数成本值通过 SSA 传回循环外。
-
-参数说明：
-
-- `start(value)`：循环起始值，类型必须为 `!symbol.int<"expr">`。
-- `end(value)`：循环结束值，类型必须为 `!symbol.int<"expr">`。
-- `step(value)`：循环步长值，类型必须为 `!symbol.int<"expr">`。
-- `it(block argument)`：循环体块参数，表示当前迭代值，类型必须为 `!symbol.iter<...>`，并与循环变量语义绑定。
-- `init(value | optional)`：可选初始累计值，类型固定为 `f64`。
-- `acc(block argument | optional)`：可选循环体累计块参数，类型固定为 `f64`；仅当 `init` 存在时出现，且必须位于 `it` 之后。
-- `yield(value | optional)`：可选循环体末尾传出的下一轮累计值，类型固定为 `f64`；仅当 `init/acc` 存在时必需。
-- `body(region)`：循环体 region；当前仅要求是单 region、单块结构。
-
-使用示例：
-
-```text
-symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = "M", end = "N", step = "1">} {
-  %d = symbol.get_dim %mem[0] : !nn.memory<[M, N], [N, 1], i32, #nn.space<global>> -> !symbol.int<"M">
-}
-```
-
-```text
-%zero = arith.constant 0.0 : f64
-%total = symbol.for %i = %start to %end step %step iter_args(%acc = %zero) {iter = #symbol.iter<start = "0", end = "M", step = "TILE_M">} -> !symbol.int<"TOTAL"> {
-  %local = tuner.cost(%tile_m) {cost_kind = "compute", op_name = "dma.copy"} : (!symbol.int<"TILE_M">) -> !symbol.int<"LOCAL">
-  %next = symbol.add %acc, %local : !symbol.int<"TOTAL">, !symbol.int<"LOCAL"> -> !symbol.int<"NEXT">
-  symbol.yield %next : !symbol.int<"NEXT">
-}
-```
-
-注意事项：
-
-- 语义采用半开区间：从 `start` 开始，每轮累加 `step`，当下一轮将不再满足区间进入条件时终止；不包含 `end` 本身。
-- `start`、`end`、`step` 必须是 `!symbol.int<"expr">`，`it` 必须是 `!symbol.iter<...>`；不接受普通整数类型、浮点类型或其他 dialect 的标量类型。
-- verifier 必须逐项校验 `it` 为 `SymbolIterType`；即使 `start/end/step` 合法，只要 `it` 为 `f32`、`f64`、`index`、普通 `i32` 或其他非 `SymbolIterType`，都必须报错。
-- 若存在 carried value，`init`、`acc`、`symbol.yield` value 与 `symbol.for` 结果类型必须全部为 `!symbol.int<"...">`；任一位置为 `f32`、`index`、普通整数或其他类型都必须报错。
-- V1 只允许一个 carried value。出现多个 `iter_args`、多个 carried block args、多个 `symbol.yield` values 或多个 op results 时必须报错。
-- 带 carried value 的循环体必须以 `symbol.yield <!symbol.int<"...">>` 结束；无 carried value 的旧形式仍可保持无 terminator 体，不因本轮新增能力而要求所有旧循环追加 terminator。
-- `it` 是循环体内部可见的迭代变量，其值语义应与当前迭代点一致；打印与解析时必须保持 `it` 的类型稳定。
-- 当使用 carried 语法时，`init`、`acc`、`result` 与 `symbol.yield` 的值类型必须全部为 `!symbol.int<"...">`，且 `symbol.yield` 必须位于 body 末尾。
-- 当前 verifier 只约束类型、region 结构、文本语法与可静态判定的错误路径；不要求在 `symbol dialect` 内完成一般符号大小关系证明。
-- 若 `step` 的表达式可静态判定为 `0`，必须报错；若 `step` 为纯符号表达且当前无法静态证明为非零，本 spec 不额外引入证明规则，由后续实现按最小可实现口径处理。
-- `symbol.for` 不负责推导循环 trip count，不负责循环展开、融合或 lowering 到其他控制流方言。
-- 当前文本语法中的类型段按 `start/end/step` 的顺序显式打印；无 carried 值时仅打印迭代边界与 body，带 carried 值时额外打印 `iter_args(%acc = %init) ... -> !symbol.int<"...">`。
-- `it` 类型由 `iter = #symbol.iter<...>` 属性与块参数共同约束，carried 语法下的 `acc` 则固定为 `!symbol.int<"...">`。
-- parse/print 必须保持 round-trip 稳定；错误信息至少应包含出错操作、失败原因以及相关操作数或 region 位置。
-
-返回与限制：
-
-- 返回类型：无 carried-value 时无结果；带 carried-value 时返回单个 `f64`。
-- 返回语义：通过 region 承载循环体，并在循环体块参数中暴露当前迭代变量 `it`；带 carried-value 时，循环外结果为最后一次 `symbol.yield` 传出的 `f64` 累计值。
-- 限制：当前只定义单迭代变量、单 region、单块的 `symbol.for`；仅允许一个 `!symbol.int<"...">` carried value，不定义任意类型 carried value、并行循环、多结果循环或提前退出语义。
-
-### `symbol.yield`
-
-功能说明：
-
-- 表示带 carried-value 的 `symbol.for` 循环体末尾 terminator。
-- 用于把当前轮次的下一个累计值从循环体末尾传回 `symbol.for` 结果与下一轮 `acc`。
-
-参数说明：
-
-- `value(f64)`：下一轮累计值，类型固定为 `f64`。
-
-使用示例：
-
-```text
-%next = arith.addf %acc, %local : f64
-symbol.yield %next : !symbol.int<"NEXT">
-```
-
-注意事项：
-
-- `symbol.yield` 只允许出现在带 carried-value 的 `symbol.for` 单块 region 末尾。
-- `symbol.yield` 的 value 数量固定为 1，且类型必须与 `symbol.for` carried value 一致，当前固定为 `!symbol.int<"...">`。
-- 无 carried-value 的旧 `symbol.for` 形式不要求出现 `symbol.yield`。
-- 当前不定义独立于 `symbol.for` 的通用 terminator 语义，不支持多值 yield 或其他类型 yield。
-
-返回与限制：
-
-- 返回类型：无结果。
-- 限制：仅服务 `symbol.for` 的单个 `!symbol.int<"...">` carried value 语义。
+## API详细说明
+
+### `class SymbolExprAttr(expr: StringAttr)`
+
+- api：`class SymbolExprAttr(expr: StringAttr)`
+- 参数：
+  - `expr`：符号表达式文本；类型 `StringAttr`；无默认值；不允许 None 或空字符串；必须可稳定打印和解析。
+- 返回值：`SymbolExprAttr` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolExprAttr
+
+    value = SymbolExprAttr(expr=expr)
+    ```
+- 功能说明：构造或表示 `SymbolExprAttr` 对应的 symbol dialect attribute。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolDimType(expr: SymbolExprAttr)`
+
+- api：`class SymbolDimType(expr: SymbolExprAttr)`
+- 参数：
+  - `expr`：符号表达式文本；类型 `SymbolExprAttr`；无默认值；不允许 None 或空字符串；必须可稳定打印和解析。
+- 返回值：`SymbolDimType` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolDimType
+
+    value = SymbolDimType(expr=expr)
+    ```
+- 功能说明：构造或表示 `SymbolDimType` 对应的 symbol dialect type。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolValueType(expr: SymbolExprAttr)`
+
+- api：`class SymbolValueType(expr: SymbolExprAttr)`
+- 参数：
+  - `expr`：符号表达式文本；类型 `SymbolExprAttr`；无默认值；不允许 None 或空字符串；必须可稳定打印和解析。
+- 返回值：`SymbolValueType` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolValueType
+
+    value = SymbolValueType(expr=expr)
+    ```
+- 功能说明：构造或表示 `SymbolValueType` 对应的 symbol dialect type。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolIterAttr(start: StringAttr, end: StringAttr, step: StringAttr)`
+
+- api：`class SymbolIterAttr(start: StringAttr, end: StringAttr, step: StringAttr)`
+- 参数：
+  - `start`：循环起始符号表达式；类型 `StringAttr`；无默认值；不允许 None。
+  - `end`：循环结束符号表达式；类型 `StringAttr`；无默认值；不允许 None。
+  - `step`：循环步长符号表达式；类型 `StringAttr`；无默认值；不允许 None。
+- 返回值：`SymbolIterAttr` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolIterAttr
+
+    value = SymbolIterAttr(start=start, end=end, step=step)
+    ```
+- 功能说明：构造或表示 `SymbolIterAttr` 对应的 symbol dialect attribute。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolIterType(iter_attr: SymbolIterAttr)`
+
+- api：`class SymbolIterType(iter_attr: SymbolIterAttr)`
+- 参数：
+  - `iter_attr`：循环迭代属性；类型 `SymbolIterAttr`；无默认值；不允许 None；承载 start/end/step 文本。
+- 返回值：`SymbolIterType` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolIterType
+
+    value = SymbolIterType(iter_attr=iter_attr)
+    ```
+- 功能说明：构造或表示 `SymbolIterType` 对应的 symbol dialect type。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolPtrType(base_type: Attribute, shape: ArrayAttr[Attribute], stride: ArrayAttr[Attribute])`
+
+- api：`class SymbolPtrType(base_type: Attribute, shape: ArrayAttr[Attribute], stride: ArrayAttr[Attribute])`
+- 参数：
+  - `base_type`：指针承载的基础类型；类型 `Attribute`；无默认值；不允许 None；必须是公开 xDSL Attribute。
+  - `shape`：形状序列；类型 `ArrayAttr[Attribute]`；无默认值；不允许 None；每个维度必须满足符号维度公开合同。
+  - `stride`：步幅序列；类型 `ArrayAttr[Attribute]`；无默认值；传入时长度必须与 shape 语义匹配。
+- 返回值：`SymbolPtrType` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolPtrType
+
+    value = SymbolPtrType(base_type=base_type, shape=shape, stride=stride)
+    ```
+- 功能说明：构造或表示 `SymbolPtrType` 对应的 symbol dialect type。
+- 注意事项：`base_type` 必须是合法 xDSL type attribute；不得把 `!symbol.int` 用作 pointer pointee。
+
+### `class SymbolConstOp(value: IntegerAttr | IntAttr | int)`
+
+- api：`class SymbolConstOp(value: IntegerAttr | IntAttr | int)`
+- 参数：
+  - `value`：输入值；类型 `IntegerAttr | IntAttr | int`；无默认值；不允许 None，除非签名显式允许；用于当前节点、op 或转换的主输入。
+- 返回值：`SymbolConstOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolConstOp
+
+    value = SymbolConstOp(value=value)
+    ```
+- 功能说明：构造或表示 `SymbolConstOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolAddOp(lhs: SSAValue, rhs: SSAValue)`
+
+- api：`class SymbolAddOp(lhs: SSAValue, rhs: SSAValue)`
+- 参数：
+  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
+  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- 返回值：`SymbolAddOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolAddOp
+
+    value = SymbolAddOp(lhs=lhs, rhs=rhs)
+    ```
+- 功能说明：构造或表示 `SymbolAddOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolSubOp(lhs: SSAValue, rhs: SSAValue)`
+
+- api：`class SymbolSubOp(lhs: SSAValue, rhs: SSAValue)`
+- 参数：
+  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
+  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- 返回值：`SymbolSubOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolSubOp
+
+    value = SymbolSubOp(lhs=lhs, rhs=rhs)
+    ```
+- 功能说明：构造或表示 `SymbolSubOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolMulOp(lhs: SSAValue, rhs: SSAValue)`
+
+- api：`class SymbolMulOp(lhs: SSAValue, rhs: SSAValue)`
+- 参数：
+  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
+  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- 返回值：`SymbolMulOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolMulOp
+
+    value = SymbolMulOp(lhs=lhs, rhs=rhs)
+    ```
+- 功能说明：构造或表示 `SymbolMulOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolDivOp(lhs: SSAValue, rhs: SSAValue)`
+
+- api：`class SymbolDivOp(lhs: SSAValue, rhs: SSAValue)`
+- 参数：
+  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
+  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- 返回值：`SymbolDivOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolDivOp
+
+    value = SymbolDivOp(lhs=lhs, rhs=rhs)
+    ```
+- 功能说明：构造或表示 `SymbolDivOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolFloorDivOp(lhs: SSAValue, rhs: SSAValue)`
+
+- api：`class SymbolFloorDivOp(lhs: SSAValue, rhs: SSAValue)`
+- 参数：
+  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
+  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- 返回值：`SymbolFloorDivOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolFloorDivOp
+
+    value = SymbolFloorDivOp(lhs=lhs, rhs=rhs)
+    ```
+- 功能说明：构造或表示 `SymbolFloorDivOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolEqOp(lhs: SSAValue, rhs: SSAValue)`
+
+- api：`class SymbolEqOp(lhs: SSAValue, rhs: SSAValue)`
+- 参数：
+  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
+  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- 返回值：`SymbolEqOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolEqOp
+
+    value = SymbolEqOp(lhs=lhs, rhs=rhs)
+    ```
+- 功能说明：构造或表示 `SymbolEqOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolNeOp(lhs: SSAValue, rhs: SSAValue)`
+
+- api：`class SymbolNeOp(lhs: SSAValue, rhs: SSAValue)`
+- 参数：
+  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
+  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- 返回值：`SymbolNeOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolNeOp
+
+    value = SymbolNeOp(lhs=lhs, rhs=rhs)
+    ```
+- 功能说明：构造或表示 `SymbolNeOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolLtOp(lhs: SSAValue, rhs: SSAValue)`
+
+- api：`class SymbolLtOp(lhs: SSAValue, rhs: SSAValue)`
+- 参数：
+  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
+  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- 返回值：`SymbolLtOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolLtOp
+
+    value = SymbolLtOp(lhs=lhs, rhs=rhs)
+    ```
+- 功能说明：构造或表示 `SymbolLtOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolLeOp(lhs: SSAValue, rhs: SSAValue)`
+
+- api：`class SymbolLeOp(lhs: SSAValue, rhs: SSAValue)`
+- 参数：
+  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
+  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- 返回值：`SymbolLeOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolLeOp
+
+    value = SymbolLeOp(lhs=lhs, rhs=rhs)
+    ```
+- 功能说明：构造或表示 `SymbolLeOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolGtOp(lhs: SSAValue, rhs: SSAValue)`
+
+- api：`class SymbolGtOp(lhs: SSAValue, rhs: SSAValue)`
+- 参数：
+  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
+  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- 返回值：`SymbolGtOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolGtOp
+
+    value = SymbolGtOp(lhs=lhs, rhs=rhs)
+    ```
+- 功能说明：构造或表示 `SymbolGtOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolGeOp(lhs: SSAValue, rhs: SSAValue)`
+
+- api：`class SymbolGeOp(lhs: SSAValue, rhs: SSAValue)`
+- 参数：
+  - `lhs`：左操作数；类型 `SSAValue`；无默认值；不允许 None；必须与右操作数满足同一 API 的类型约束。
+  - `rhs`：右操作数；类型 `SSAValue`；无默认值；不允许 None；必须与左操作数满足同一 API 的类型约束。
+- 返回值：`SymbolGeOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolGeOp
+
+    value = SymbolGeOp(lhs=lhs, rhs=rhs)
+    ```
+- 功能说明：构造或表示 `SymbolGeOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolToFloatOp(value: SSAValue, result_type: Attribute)`
+
+- api：`class SymbolToFloatOp(value: SSAValue, result_type: Attribute)`
+- 参数：
+  - `value`：输入值；类型 `SSAValue`；无默认值；不允许 None，除非签名显式允许；用于当前节点、op 或转换的主输入。
+  - `result_type`：`result_type` 参数；类型 `Attribute`；无默认值；不允许 None。
+- 返回值：`SymbolToFloatOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolToFloatOp
+
+    value = SymbolToFloatOp(value=value, result_type=result_type)
+    ```
+- 功能说明：构造或表示 `SymbolToFloatOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolToIntOp(value: SSAValue, result_type: Attribute)`
+
+- api：`class SymbolToIntOp(value: SSAValue, result_type: Attribute)`
+- 参数：
+  - `value`：输入值；类型 `SSAValue`；无默认值；不允许 None，除非签名显式允许；用于当前节点、op 或转换的主输入。
+  - `result_type`：`result_type` 参数；类型 `Attribute`；无默认值；不允许 None。
+- 返回值：`SymbolToIntOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolToIntOp
+
+    value = SymbolToIntOp(value=value, result_type=result_type)
+    ```
+- 功能说明：构造或表示 `SymbolToIntOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolCastOp(value: SSAValue, result_type: Attribute)`
+
+- api：`class SymbolCastOp(value: SSAValue, result_type: Attribute)`
+- 参数：
+  - `value`：输入值；类型 `SSAValue`；无默认值；不允许 None，除非签名显式允许；用于当前节点、op 或转换的主输入。
+  - `result_type`：`result_type` 参数；类型 `Attribute`；无默认值；不允许 None。
+- 返回值：`SymbolCastOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolCastOp
+
+    value = SymbolCastOp(value=value, result_type=result_type)
+    ```
+- 功能说明：构造或表示 `SymbolCastOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolGetDimOp(memory: SSAValue, index: int | IntAttr)`
+
+- api：`class SymbolGetDimOp(memory: SSAValue, index: int | IntAttr)`
+- 参数：
+  - `memory`：内存对象或 memory SSA value；类型 `SSAValue`；无默认值；不允许 None。
+  - `index`：维度或步幅索引；类型 `int | IntAttr`；无默认值；不允许 None；必须是非负静态整数。
+- 返回值：`SymbolGetDimOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolGetDimOp
+
+    value = SymbolGetDimOp(memory=memory, index=index)
+    ```
+- 功能说明：构造或表示 `SymbolGetDimOp` 对应的 symbol dialect operation。
+- 注意事项：只能读取 memory type 中可表示为整数常量或符号表达的静态条目；负数、越界或匿名动态条目必须失败。
+
+### `class SymbolGetStrideOp(memory: SSAValue, index: int | IntAttr)`
+
+- api：`class SymbolGetStrideOp(memory: SSAValue, index: int | IntAttr)`
+- 参数：
+  - `memory`：内存对象或 memory SSA value；类型 `SSAValue`；无默认值；不允许 None。
+  - `index`：维度或步幅索引；类型 `int | IntAttr`；无默认值；不允许 None；必须是非负静态整数。
+- 返回值：`SymbolGetStrideOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolGetStrideOp
+
+    value = SymbolGetStrideOp(memory=memory, index=index)
+    ```
+- 功能说明：构造或表示 `SymbolGetStrideOp` 对应的 symbol dialect operation。
+- 注意事项：只能读取 memory type 中可表示为整数常量或符号表达的静态条目；负数、越界或匿名动态条目必须失败。
+
+### `class SymbolYieldOp(value: SSAValue | None = None)`
+
+- api：`class SymbolYieldOp(value: SSAValue | None = None)`
+- 参数：
+  - `value`：输入值；类型 `SSAValue | None`；默认值 `None`；不允许 None，除非签名显式允许；用于当前节点、op 或转换的主输入。
+- 返回值：`SymbolYieldOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolYieldOp
+
+    value = SymbolYieldOp(value=value)
+    ```
+- 功能说明：构造或表示 `SymbolYieldOp` 对应的 symbol dialect operation。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
+
+### `class SymbolForOp(iter_attr: SymbolIterAttr, start: SSAValue, end: SSAValue, step: SSAValue, body: Region, init: SSAValue | None = None)`
+
+- api：`class SymbolForOp(iter_attr: SymbolIterAttr, start: SSAValue, end: SSAValue, step: SSAValue, body: Region, init: SSAValue | None = None)`
+- 参数：
+  - `iter_attr`：循环迭代属性；类型 `SymbolIterAttr`；无默认值；不允许 None；承载 start/end/step 文本。
+  - `start`：循环起始符号表达式；类型 `SSAValue`；无默认值；不允许 None。
+  - `end`：循环结束符号表达式；类型 `SSAValue`；无默认值；不允许 None。
+  - `step`：循环步长符号表达式；类型 `SSAValue`；无默认值；不允许 None。
+  - `body`：循环或函数体 region；类型 `Region`；无默认值；不允许 None。
+  - `init`：loop-carried 初始值；类型 `SSAValue | None`；默认值 `None`；None 表示无 carried value。
+- 返回值：`SymbolForOp` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import SymbolForOp
+
+    value = SymbolForOp(iter_attr=iter_attr, start=start, end=end, step=step, body=body, init=init)
+    ```
+- 功能说明：构造或表示 `SymbolForOp` 对应的 symbol dialect operation。
+- 注意事项：只承接公开 `symbol.for` 语法；loop-carried value 当前仅支持单个 `!symbol.int` 累计值。
+
+### `class Symbol(Dialect)`
+
+- api：`class Symbol(Dialect)`
+- 参数：
+  - `Dialect`：`Dialect` 参数；类型 `未显式标注`；无默认值；不允许 None。
+- 返回值：`Symbol` 实例。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dialect.symbol import Symbol
+
+    public_type = Symbol
+    ```
+- 功能说明：导出 symbol dialect 对象，向 xDSL 注册本文件声明的公开 attr、type 与 op。
+- 注意事项：只允许使用本 API 列表中的公开入口；测试不得直连当前文件之外的非公开 helper。
 
 ## 测试
 
-- 测试文件：[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
-- 执行命令：`pytest -q test/dialect/test_symbol_dialect.py`
+- 测试文件：`test/dialect/test_symbol.py`
+- 执行命令：`pytest -q test/dialect/test_symbol.py`
 
 ### 测试目标
 
@@ -760,6 +692,7 @@ symbol.yield %next : !symbol.int<"NEXT">
 - 验证 `symbol.to_float` 的整数符号到 `f32` 转换语义、类型约束与 parse/print 稳定性。
 - 验证 `SymbolPtrType` 的 `!symbol.ptr<dtype>` 文本语法、verifier 约束、parse/print 稳定性，以及拒绝 `!symbol.int<"...">` 作为 dtype 的错误路径。
 - 验证 `symbol.get_dim` / `symbol.get_stride` 能从 memory type 读取真实 dim/stride，并返回对应的 symbol value。
+- 验证 `symbol.get_dim` / `symbol.get_stride` 读取静态整数 dim/stride 时可折叠为 `symbol.const`，读取符号表达时不折叠。
 - 验证 `symbol.get_dim` / `symbol.get_stride` 的错误路径，包括非 memory type、轴号越界、匿名动态条目 `?` 与非法轴号。
 - 验证 `symbol.for` 的半开区间循环语义、`start/end/step` 的 `!symbol.int<"...">` 约束、`it` 的 `!symbol.iter<...>` 约束、parse/print 稳定性与 verifier 错误路径。
 - 验证 `symbol.for` 的迭代变量 `it` 必须为 `SymbolIterType`，不能是浮点、builtin 整数或其他非 `!symbol.iter<...>` 类型。
@@ -768,59 +701,61 @@ symbol.yield %next : !symbol.int<"NEXT">
 
 ### 功能与用例清单
 
-| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 对应测试 |
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
-| TC-SYM-001 | `SymbolExprAttr` | 基础符号表达 | 无 | 解析 `#symbol.expr<"N">` | verifier 通过；打印结果稳定 | `test_symbol_expr_attr_round_trip` |
-| TC-SYM-002 | `SymbolExprAttr` | 符号表达式 | 无 | 解析 `#symbol.expr<"M + 1">` | verifier 通过；打印结果稳定 | `test_symbol_expr_attr_round_trip` |
-| TC-SYM-003 | `SymbolExprAttr` | 空表达式与非法字符非法 | 无 | 构造空字符串表达式，或构造非法字符表达式 | verifier 报错 | `test_symbol_expr_attr_rejects_empty_expr`、`test_symbol_verifier_rejects_illegal_expression_characters` |
-| TC-SYM-004 | `SymbolValueType` | 基础整数符号值 | 无 | 解析 `!symbol.int<"N">` | verifier 通过 | `test_symbol_value_type_round_trip_for_integer_only_semantics` |
-| TC-SYM-005 | `SymbolValueType` | 整数表达式 | 无 | 解析 `!symbol.int<"M + 1">` | verifier 通过 | `test_symbol_value_type_round_trip_for_integer_only_semantics` |
-| TC-SYM-006 | `SymbolValueType` | 常量值语义 | 无 | 解析 `!symbol.int<"3">` | verifier 通过 | `test_symbol_value_type_round_trip_for_integer_only_semantics` |
-| TC-SYM-007 | `SymbolValueType` | legacy 文本或非法字符非法 | 无 | 解析 `!symbol.int64<"N">`，或构造非法字符表达式 | parse/verifier 报错 | `test_symbol_value_type_rejects_unsupported_legacy_text_forms`、`test_symbol_verifier_rejects_illegal_expression_characters` |
-| TC-SYM-008 | `SymbolValueType` | 缺少表达式 | 无 | 解析 `!symbol.int` | parse 报错 | `test_symbol_value_type_rejects_unsupported_legacy_text_forms` |
-| TC-SYM-052 | `SymbolIterType` | 迭代变量类型 | 无 | 解析 `!symbol.iter<start = "0", end = "index", step = "1">`（兼容旧 `!symbol.iter<"index">`） | verifier 通过；打印结果稳定 | `test_symbol_iter_type_round_trip` |
-| TC-SYM-009 | parse/print | 循环稳定 | 已实现文本语法 | parse 后再 print | attr/type 语义保持一致 | `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics` |
-| TC-SYM-010 | 相等性 | 相同表达式 | 无 | 比较两个 `!symbol.int<"N">` | 相等 | `test_symbol_value_type_equality_depends_on_expr_only` |
-| TC-SYM-011 | 相等性 | 不再区分整型宽度 | 无 | 在整数-only 语义下比较相同表达式类型 | 不因宽度差异产生额外类型分支 | `test_symbol_value_type_equality_depends_on_expr_only` |
-| TC-SYM-012 | 相等性 | 表达式不同 | 无 | 比较 `!symbol.int<"N">` 与 `!symbol.int<"M">` | 不相等 | `test_symbol_value_type_equality_depends_on_expr_only` |
-| TC-SYM-013 | memory 元信息标量 | 符号维度或步幅分量 | 无 | 解析 `#symbol.expr<"K*N">` 或 `!symbol.int<"N">` | 作为 memory 相关单值整数语义合法并稳定 round-trip | `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
-| TC-SYM-014 | memory 元信息标量 | 常量步幅或常量维度分量 | 无 | 解析 `!symbol.int<"1">`、`!symbol.int<"2">`、`!symbol.int<"3">` | 作为常量整数值语义合法 | `test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
-| TC-SYM-015 | `symbol.add/sub/mul/div/floordiv` | 基础算术合法路径 | `lhs/rhs/result` 均为 `!symbol.int<"...">` | 构造 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv` | verifier 通过；返回 `!symbol.int<"...">` | `test_symbol_arith_ops_verify_success` |
-| TC-SYM-016 | `symbol.add/sub/mul/div/floordiv` | parse/print 稳定 | 已实现公开文本语法 | parse 后再 print | 文本与结果类型稳定 | `test_symbol_arith_ops_round_trip` |
-| TC-SYM-017 | `symbol.add/sub/mul/div/floordiv` | 非 symbol 类型非法 | 任一操作数或结果不是 `!symbol.int<"...">` | 构造并校验 op | verifier 报错 | `test_symbol_arith_ops_reject_non_symbol_int_types` |
-| TC-SYM-018 | `symbol.add/sub/mul/div/floordiv` | 文本或结果签名非法 | 缺少结果类型、操作数数量错误或文本不完整 | parse / 构造并校验 op | parse/verifier 报错 | `test_symbol_arith_ops_reject_malformed_signatures` |
-| TC-SYM-019 | `symbol.add/sub/mul/div/floordiv` | 错误信息闭环 | 触发类型或签名错误 | verifier / parse 失败 | 错误信息包含具体 op 名称与失败原因 | `test_symbol_arith_ops_error_messages_include_context` |
-| TC-SYM-020 | `symbol.eq/ne/lt/le/gt/ge` | 基础比较合法路径 | `lhs/rhs` 为 `!symbol.int<"...">`，结果为 `i1` | 构造各比较 op | verifier 通过；返回 true/false 语义结果 | `test_symbol_compare_ops_verify_success` |
-| TC-SYM-021 | `symbol.eq/ne/lt/le/gt/ge` | parse/print 稳定 | 已实现公开文本语法 | parse 后再 print | 文本、谓词与结果类型稳定 | `test_symbol_compare_ops_round_trip` |
-| TC-SYM-022 | `symbol.eq/ne/lt/le/gt/ge` | 非 symbol 类型操作数非法 | 任一操作数不是 `!symbol.int<"...">` | 构造并校验 op | verifier 报错 | `test_symbol_compare_ops_reject_non_symbol_int_operands` |
-| TC-SYM-023 | `symbol.eq/ne/lt/le/gt/ge` | 非布尔结果非法 | 结果类型不是 `i1` | 构造并校验 op | verifier 报错 | `test_symbol_compare_ops_reject_non_i1_result` |
-| TC-SYM-024 | `symbol.eq/ne/lt/le/gt/ge` | 文本或签名非法 | 缺少结果类型、操作数数量错误或文本不完整 | parse / 构造并校验 op | parse/verifier 报错 | `test_symbol_compare_ops_reject_malformed_signatures` |
-| TC-SYM-025 | `symbol.eq/ne/lt/le/gt/ge` | 错误信息闭环 | 触发类型或签名错误 | verifier / parse 失败 | 错误信息包含具体 op 名称与失败原因 | `test_symbol_compare_ops_error_messages_include_context` |
-| TC-SYM-026 | `symbol.get_dim` | 静态维度读取 | `source.type.shape[axis]` 为静态整数 | 读取指定轴 dim | 返回对应 `!symbol.int<"...">` value | `test_symbol_get_dim_reads_static_dim_from_memory_type` |
-| TC-SYM-027 | `symbol.get_dim` | 符号维度读取 | `source.type.shape[axis]` 为符号表达 | 读取指定轴 dim | 返回对应符号表达 value | `test_symbol_get_dim_reads_symbolic_dim_from_memory_type` |
-| TC-SYM-028 | `symbol.get_stride` | 静态步幅读取 | `source.type.stride[axis]` 为静态整数 | 读取指定轴 stride | 返回对应 `!symbol.int<"...">` value | `test_symbol_get_stride_reads_static_stride_from_memory_type` |
-| TC-SYM-029 | `symbol.get_stride` | 符号步幅读取 | `source.type.stride[axis]` 为符号表达 | 读取指定轴 stride | 返回对应符号表达 value | `test_symbol_get_stride_reads_symbolic_stride_from_memory_type` |
-| TC-SYM-030 | `symbol.get_dim/get_stride` | 轴号非法 | `axis` 越界、负数或非静态整数 | 构造并校验 op | verifier 报错 | `test_symbol_get_dim_rejects_invalid_axis`、`test_symbol_get_stride_rejects_invalid_axis` |
-| TC-SYM-031 | `symbol.get_dim/get_stride` | memory type 非法或匿名动态条目非法 | `source` 非 `MemoryType`，或目标条目为 `?` | 构造并校验 op | verifier 报错 | `test_symbol_get_dim_rejects_non_memory_type`、`test_symbol_get_stride_rejects_unknown_entry` |
-| TC-SYM-032 | `symbol.for` | 基础半开区间循环 | `start/end/step` 为 `!symbol.int<"...">`，块参数 `it` 为 `!symbol.iter<...>` | 构造 `symbol.for %i = %start to %end step %step {iter = #symbol.iter<...>}` | verifier 通过；`it` 作为 `SymbolIterType` 块参数暴露；循环采用半开区间语义 | `test_symbol_for_accepts_symbol_int_bounds_and_iter_arg` |
-| TC-SYM-033 | `symbol.for` | parse/print 稳定 | 已实现 `symbol.for` 文本语法 | parse 后再 print | 文本与 region 结构稳定 round-trip | `test_symbol_for_round_trip` |
-| TC-SYM-034 | `symbol.for` | 非 symbol 类型非法 | `start/end/step` 含非 `!symbol.int<"...">`，或 `it` 含非 `!symbol.iter<...>` 类型，如 `f32`、`f64`、`index`、`i32` | 构造并校验 op | verifier 报错；`it` 不得为任何非 `SymbolIterType` | `test_symbol_for_rejects_non_symbol_int_operands` |
-| TC-SYM-035 | `symbol.for` | `step = 0` 非法 | `step` 可静态判定为 `!symbol.int<"0">` | 构造并校验 op | verifier 报错 | `test_symbol_for_rejects_zero_step` |
-| TC-SYM-036 | `symbol.for` | region 结构非法 | 缺少 region、块参数缺失或块参数类型不匹配 | 构造并校验 op | verifier 报错 | `test_symbol_for_rejects_invalid_region_shape` |
-| TC-SYM-037 | `symbol.for` | 文本语法非法 | 缺少 `to/step` 片段，或类型段数量不匹配 | parse `symbol.for` 文本 | parse 报错 | `test_symbol_for_parse_rejects_malformed_text` |
-| TC-SYM-038 | `symbol.for` | 错误信息闭环 | 操作数类型、步长或 region 校验失败 | 触发 verifier / parse 错误 | 错误信息包含 op 名称与失败原因 | `test_symbol_for_error_messages_include_context` |
-| TC-SYM-038A | `symbol.for` | 单个 `!symbol.int<"...">` carried value 合法路径 | `init`、累计块参数、`symbol.yield` 与 op 结果均为 `!symbol.int<"...">` | 构造 `symbol.for ... iter_args(%acc = %zero) ... -> !symbol.int<"...">` | verifier 通过；parse/print round-trip 稳定；旧无 carried-value 文本仍通过 | `test_symbol_for_loop_carried_symbol_int_round_trip` |
-| TC-SYM-038B | `symbol.for` | carried value 类型非法 | carried value 任一位置不是 `!symbol.int<"...">`，或数量不为 1 | 构造并校验 op | verifier 报错，错误信息包含 `symbol.for` 与 `loop-carried` | `test_symbol_for_rejects_invalid_loop_carried_symbol_int` |
-| TC-SYM-039 | `symbol.to_float` | 基础转换合法路径 | `source` 为 `!symbol.int<"...">`，结果为 `f32` | 构造 `symbol.to_float` | verifier 通过；返回 `f32` | `test_symbol_to_float_verify_success` |
-| TC-SYM-040 | `symbol.to_float` | parse/print 稳定 | 已实现公开文本语法 | parse 后再 print | 文本稳定 | `test_symbol_to_float_round_trip` |
-| TC-SYM-041 | `symbol.to_float` | 非法类型 | `source` 非 `!symbol.int<"...">` 或结果非 `f32` | 构造并校验 op | verifier 报错 | `test_symbol_to_float_rejects_invalid_types` |
-| TC-SYM-042 | `symbol.to_int` | 覆盖整型变体 | `source` 为 `!symbol.int<"...">`，结果为普通整型 | 以 `i8/i16/i32/i64` 构造 `symbol.to_int` | verifier 通过；结果类型保持对应整型变体 | `test_symbol_to_int_verify_success_for_integer_variants` |
-| TC-SYM-043 | `symbol.to_int` | parse/print 稳定 | 已实现公开文本语法 | parse 后再 print | `symbol.to_int` 文本与结果整型保持稳定 | `test_symbol_to_int_round_trip` |
-| TC-SYM-044 | `symbol.to_int` | 非法类型 | `source` 非 `!symbol.int<"...">` 或结果非整型 | 构造并校验 op | verifier 报错 | `test_symbol_to_int_rejects_invalid_types` |
-| TC-SYM-045 | `SymbolPtrType` | 基础 pointer type 合法路径 | `dtype` 为 builtin 或其他合法 `TypeAttribute` | 构造 `SymbolPtrType(f32)` 或解析 `!symbol.ptr<f32>` | verifier 通过；打印为 `!symbol.ptr<f32>` | `test_symbol_ptr_type_verify_success` |
-| TC-SYM-046 | `SymbolPtrType` | parse/print 稳定 | 已实现 `!symbol.ptr<dtype>` 文本语法 | parse 后再 print | pointer type 文本稳定 round-trip | `test_symbol_ptr_type_round_trip` |
-| TC-SYM-047 | `SymbolPtrType` | symbol.int 作为 dtype 非法 | `dtype` 为 `!symbol.int<"...">` | 构造并校验 `SymbolPtrType(SymbolValueType.from_expr("N"))` | verifier 报错 | `test_symbol_ptr_type_rejects_symbol_value_dtype` |
-| TC-SYM-048 | `SymbolPtrType` | 非 type attribute 非法 | `dtype` 不是 `TypeAttribute` | 构造并校验 `SymbolPtrType` | verifier 报错 | `test_symbol_ptr_type_rejects_non_type_dtype` |
-| TC-SYM-049 | `symbol.const` | 基础常量合法路径 | 无 | 构造 `symbol.const` | verifier 通过；返回 `!symbol.int<"...">` | `test_symbol_const_op_verify_success` |
-| TC-SYM-050 | `symbol.const` | parse/print 稳定 | 已实现公开文本语法 | parse 后再 print | 文本与结果类型稳定 | `test_symbol_const_op_round_trip` |
-| TC-SYM-051 | `symbol.const` | 结果类型不匹配 | 结果类型不是或不匹配 `!symbol.int<"...">` | 构造并校验 op | verifier 报错 | `test_symbol_const_op_rejects_mismatched_type` |
+| TC-SYM-001 | 解析/打印 | `SymbolExprAttr` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_expr_attr_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_expr_attr_round_trip` |
+| TC-SYM-002 | 解析/打印 | `SymbolExprAttr` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_expr_attr_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_expr_attr_round_trip` |
+| TC-SYM-003 | 边界/异常 | `SymbolExprAttr` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_expr_attr_rejects_empty_expr`、`test_symbol_verifier_rejects_illegal_expression_characters`。 | “`SymbolExprAttr`”场景按公开错误语义失败或被拒绝。 | `test_symbol_expr_attr_rejects_empty_expr`、`test_symbol_verifier_rejects_illegal_expression_characters` |
+| TC-SYM-004 | 解析/打印 | `SymbolValueType` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_value_type_round_trip_for_integer_only_semantics`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_value_type_round_trip_for_integer_only_semantics` |
+| TC-SYM-005 | 解析/打印 | `SymbolValueType` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_value_type_round_trip_for_integer_only_semantics`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_value_type_round_trip_for_integer_only_semantics` |
+| TC-SYM-006 | 解析/打印 | `SymbolValueType` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_value_type_round_trip_for_integer_only_semantics`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_value_type_round_trip_for_integer_only_semantics` |
+| TC-SYM-007 | 边界/异常 | `SymbolValueType` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_value_type_rejects_unsupported_legacy_text_forms`、`test_symbol_verifier_rejects_illegal_expression_characters`。 | “`SymbolValueType`”场景按公开错误语义失败或被拒绝。 | `test_symbol_value_type_rejects_unsupported_legacy_text_forms`、`test_symbol_verifier_rejects_illegal_expression_characters` |
+| TC-SYM-008 | 边界/异常 | `SymbolValueType` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_value_type_rejects_unsupported_legacy_text_forms`。 | “`SymbolValueType`”场景按公开错误语义失败或被拒绝。 | `test_symbol_value_type_rejects_unsupported_legacy_text_forms` |
+| TC-SYM-052 | 解析/打印 | `SymbolIterType` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_iter_type_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_iter_type_round_trip` |
+| TC-SYM-009 | 解析/打印 | parse/print | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics` |
+| TC-SYM-010 | 符号语义 | 相等性 | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_value_type_equality_depends_on_expr_only`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“相等性”场景。 | `test_symbol_value_type_equality_depends_on_expr_only` |
+| TC-SYM-011 | 符号语义 | 相等性 | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_value_type_equality_depends_on_expr_only`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“相等性”场景。 | `test_symbol_value_type_equality_depends_on_expr_only` |
+| TC-SYM-012 | 符号语义 | 相等性 | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_value_type_equality_depends_on_expr_only`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“相等性”场景。 | `test_symbol_value_type_equality_depends_on_expr_only` |
+| TC-SYM-013 | 解析/打印 | memory 元信息标量 | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
+| TC-SYM-014 | 解析/打印 | memory 元信息标量 | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
+| TC-SYM-015 | 符号语义 | `symbol.add/sub/mul/div/floordiv` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_arith_ops_verify_success`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.add/sub/mul/div/floordiv`”场景。 | `test_symbol_arith_ops_verify_success` |
+| TC-SYM-016 | 解析/打印 | `symbol.add/sub/mul/div/floordiv` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_arith_ops_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_arith_ops_round_trip` |
+| TC-SYM-017 | 边界/异常 | `symbol.add/sub/mul/div/floordiv` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_arith_ops_reject_non_symbol_int_types`。 | “`symbol.add/sub/mul/div/floordiv`”场景按公开错误语义失败或被拒绝。 | `test_symbol_arith_ops_reject_non_symbol_int_types` |
+| TC-SYM-018 | 边界/异常 | `symbol.add/sub/mul/div/floordiv` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_arith_ops_reject_malformed_signatures`。 | “`symbol.add/sub/mul/div/floordiv`”场景按公开错误语义失败或被拒绝。 | `test_symbol_arith_ops_reject_malformed_signatures` |
+| TC-SYM-019 | 边界/异常 | `symbol.add/sub/mul/div/floordiv` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_arith_ops_error_messages_include_context`。 | “`symbol.add/sub/mul/div/floordiv`”场景按公开错误语义失败或被拒绝。 | `test_symbol_arith_ops_error_messages_include_context` |
+| TC-SYM-020 | 符号语义 | `symbol.eq/ne/lt/le/gt/ge` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_compare_ops_verify_success`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.eq/ne/lt/le/gt/ge`”场景。 | `test_symbol_compare_ops_verify_success` |
+| TC-SYM-021 | 解析/打印 | `symbol.eq/ne/lt/le/gt/ge` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_compare_ops_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_compare_ops_round_trip` |
+| TC-SYM-022 | 边界/异常 | `symbol.eq/ne/lt/le/gt/ge` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_compare_ops_reject_non_symbol_int_operands`。 | “`symbol.eq/ne/lt/le/gt/ge`”场景按公开错误语义失败或被拒绝。 | `test_symbol_compare_ops_reject_non_symbol_int_operands` |
+| TC-SYM-023 | 边界/异常 | `symbol.eq/ne/lt/le/gt/ge` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_compare_ops_reject_non_i1_result`。 | “`symbol.eq/ne/lt/le/gt/ge`”场景按公开错误语义失败或被拒绝。 | `test_symbol_compare_ops_reject_non_i1_result` |
+| TC-SYM-024 | 边界/异常 | `symbol.eq/ne/lt/le/gt/ge` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_compare_ops_reject_malformed_signatures`。 | “`symbol.eq/ne/lt/le/gt/ge`”场景按公开错误语义失败或被拒绝。 | `test_symbol_compare_ops_reject_malformed_signatures` |
+| TC-SYM-025 | 边界/异常 | `symbol.eq/ne/lt/le/gt/ge` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_compare_ops_error_messages_include_context`。 | “`symbol.eq/ne/lt/le/gt/ge`”场景按公开错误语义失败或被拒绝。 | `test_symbol_compare_ops_error_messages_include_context` |
+| TC-SYM-026 | 内存/DMA | `symbol.get_dim` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_symbol_get_dim_reads_static_dim_from_memory_type`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`symbol.get_dim`”场景。 | `test_symbol_get_dim_reads_static_dim_from_memory_type` |
+| TC-SYM-026A | 符号语义 | `symbol.get_dim` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_get_dim_folds_static_dim_to_const_attr`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.get_dim`”场景。 | `test_symbol_get_dim_folds_static_dim_to_const_attr` |
+| TC-SYM-027 | 内存/DMA | `symbol.get_dim` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_symbol_get_dim_reads_symbolic_dim_from_memory_type`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`symbol.get_dim`”场景。 | `test_symbol_get_dim_reads_symbolic_dim_from_memory_type` |
+| TC-SYM-028 | 内存/DMA | `symbol.get_stride` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_symbol_get_stride_reads_static_stride_from_memory_type`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`symbol.get_stride`”场景。 | `test_symbol_get_stride_reads_static_stride_from_memory_type` |
+| TC-SYM-028A | 内存/DMA | `symbol.get_stride` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_symbol_get_stride_folds_static_stride_to_const_attr`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`symbol.get_stride`”场景。 | `test_symbol_get_stride_folds_static_stride_to_const_attr` |
+| TC-SYM-029 | 内存/DMA | `symbol.get_stride` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_symbol_get_stride_reads_symbolic_stride_from_memory_type`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`symbol.get_stride`”场景。 | `test_symbol_get_stride_reads_symbolic_stride_from_memory_type` |
+| TC-SYM-030 | 边界/异常 | `symbol.get_dim/get_stride` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_get_dim_rejects_invalid_axis`、`test_symbol_get_stride_rejects_invalid_axis`。 | “`symbol.get_dim/get_stride`”场景按公开错误语义失败或被拒绝。 | `test_symbol_get_dim_rejects_invalid_axis`、`test_symbol_get_stride_rejects_invalid_axis` |
+| TC-SYM-031 | 边界/异常 | `symbol.get_dim/get_stride` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_get_dim_rejects_non_memory_type`、`test_symbol_get_stride_rejects_unknown_entry`。 | “`symbol.get_dim/get_stride`”场景按公开错误语义失败或被拒绝。 | `test_symbol_get_dim_rejects_non_memory_type`、`test_symbol_get_stride_rejects_unknown_entry` |
+| TC-SYM-032 | 符号语义 | `symbol.for` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_for_accepts_symbol_int_bounds_and_iter_arg`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.for`”场景。 | `test_symbol_for_accepts_symbol_int_bounds_and_iter_arg` |
+| TC-SYM-033 | 解析/打印 | `symbol.for` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_for_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_for_round_trip` |
+| TC-SYM-034 | 边界/异常 | `symbol.for` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_for_rejects_non_symbol_int_operands`。 | “`symbol.for`”场景按公开错误语义失败或被拒绝。 | `test_symbol_for_rejects_non_symbol_int_operands` |
+| TC-SYM-035 | 边界/异常 | `symbol.for` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_for_rejects_zero_step`。 | “`symbol.for`”场景按公开错误语义失败或被拒绝。 | `test_symbol_for_rejects_zero_step` |
+| TC-SYM-036 | 边界/异常 | `symbol.for` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_for_rejects_invalid_region_shape`。 | “`symbol.for`”场景按公开错误语义失败或被拒绝。 | `test_symbol_for_rejects_invalid_region_shape` |
+| TC-SYM-037 | 边界/异常 | `symbol.for` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_for_parse_rejects_malformed_text`。 | “`symbol.for`”场景按公开错误语义失败或被拒绝。 | `test_symbol_for_parse_rejects_malformed_text` |
+| TC-SYM-038 | 边界/异常 | `symbol.for` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_for_error_messages_include_context`。 | “`symbol.for`”场景按公开错误语义失败或被拒绝。 | `test_symbol_for_error_messages_include_context` |
+| TC-SYM-038A | 解析/打印 | `symbol.for` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_for_loop_carried_symbol_int_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_for_loop_carried_symbol_int_round_trip` |
+| TC-SYM-038B | 边界/异常 | `symbol.for` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_for_rejects_invalid_loop_carried_symbol_int`。 | “`symbol.for`”场景按公开错误语义失败或被拒绝。 | `test_symbol_for_rejects_invalid_loop_carried_symbol_int` |
+| TC-SYM-039 | 符号语义 | `symbol.to_float` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_to_float_verify_success`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.to_float`”场景。 | `test_symbol_to_float_verify_success` |
+| TC-SYM-040 | 解析/打印 | `symbol.to_float` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_to_float_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_to_float_round_trip` |
+| TC-SYM-041 | 边界/异常 | `symbol.to_float` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_to_float_rejects_invalid_types`。 | “`symbol.to_float`”场景按公开错误语义失败或被拒绝。 | `test_symbol_to_float_rejects_invalid_types` |
+| TC-SYM-042 | 符号语义 | `symbol.to_int` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_to_int_verify_success_for_integer_variants`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.to_int`”场景。 | `test_symbol_to_int_verify_success_for_integer_variants` |
+| TC-SYM-043 | 解析/打印 | `symbol.to_int` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_to_int_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_to_int_round_trip` |
+| TC-SYM-044 | 边界/异常 | `symbol.to_int` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_to_int_rejects_invalid_types`。 | “`symbol.to_int`”场景按公开错误语义失败或被拒绝。 | `test_symbol_to_int_rejects_invalid_types` |
+| TC-SYM-045 | 符号语义 | `SymbolPtrType` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_ptr_type_verify_success`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`SymbolPtrType`”场景。 | `test_symbol_ptr_type_verify_success` |
+| TC-SYM-046 | 解析/打印 | `SymbolPtrType` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_ptr_type_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_ptr_type_round_trip` |
+| TC-SYM-047 | 边界/异常 | `SymbolPtrType` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_ptr_type_rejects_symbol_value_dtype`。 | “`SymbolPtrType`”场景按公开错误语义失败或被拒绝。 | `test_symbol_ptr_type_rejects_symbol_value_dtype` |
+| TC-SYM-048 | 边界/异常 | `SymbolPtrType` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_ptr_type_rejects_non_type_dtype`。 | “`SymbolPtrType`”场景按公开错误语义失败或被拒绝。 | `test_symbol_ptr_type_rejects_non_type_dtype` |
+| TC-SYM-049 | 符号语义 | `symbol.const` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_const_op_verify_success`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.const`”场景。 | `test_symbol_const_op_verify_success` |
+| TC-SYM-050 | 解析/打印 | `symbol.const` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_const_op_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_const_op_round_trip` |
+| TC-SYM-051 | 边界/异常 | `symbol.const` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_const_op_rejects_mismatched_type`。 | “`symbol.const`”场景按公开错误语义失败或被拒绝。 | `test_symbol_const_op_rejects_mismatched_type` |

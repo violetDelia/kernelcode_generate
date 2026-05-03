@@ -1,7 +1,5 @@
 """Type definitions for symbol variable.
 
-创建者: 小李飞刀
-最后一次更改: 榕
 
 功能说明:
 - 提供数值类型与格式枚举及其公开导出边界。
@@ -52,8 +50,6 @@ __all__ = [
 class NumericType(Enum):
     """数值类型枚举。
 
-    创建者: 小李飞刀
-    最后一次更改: 榕
 
     功能说明:
     - 提供常用数值类型标识。
@@ -86,8 +82,6 @@ class NumericType(Enum):
 class Farmat(Enum):
     """格式枚举（按实现命名）。
 
-    创建者: 小李飞刀
-    最后一次更改: 榕
 
     功能说明:
     - 仅公开 Norm 与 CLast 两种布局语义。
@@ -150,8 +144,6 @@ NN_FLOAT_DTYPES: Final[set[NumericType]] = FLOAT_DTYPES
 def is_integer_dtype(dtype: NumericType) -> bool:
     """判断 dtype 是否属于公开整数 family。
 
-    创建者: jcc你莫辜负
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 只接受 `NumericType` 输入。
@@ -173,8 +165,6 @@ def is_integer_dtype(dtype: NumericType) -> bool:
 def is_float_dtype(dtype: NumericType) -> bool:
     """判断 dtype 是否属于公开浮点 family。
 
-    创建者: jcc你莫辜负
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 只接受 `NumericType` 输入。

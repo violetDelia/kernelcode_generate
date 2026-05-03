@@ -31,12 +31,10 @@ helper 清单:
 - Status status = npu_demo::add<GM, float, float>(out, lhs, rhs);
 - Status status2 = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 守护最好的爱莉希雅
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 
@@ -56,12 +54,10 @@ namespace npu_demo {
 - Status st = npu_demo::add<GM, float, float>(out, lhs, rhs);
 - Status st2 = npu_demo::truediv<TSM, int32_t, float>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -81,12 +77,10 @@ Status truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, co
 - Status st = npu_demo::eq<GM, float, bool>(out, lhs, rhs);
 - Status st2 = npu_demo::ge<TSM, int32_t, bool>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -110,12 +104,10 @@ Status ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const M
 - Status st = npu_demo::exp<GM, float, float>(out, input);
 - Status st2 = npu_demo::select<GM, float, float>(out, cond, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -136,12 +128,10 @@ Status select(
 - Status st2 = npu_demo::reduce_min<TSM, int32_t, int32_t>(out, input, 0);
 - Status st3 = npu_demo::reduce_max<TSM, float, float>(out, input, 1);
 
-创建者: 小李飞刀
-最后修改人: 守护最好的爱莉希雅
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -160,12 +150,10 @@ Status reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType>& inpu
 - Status st = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs);
 - Status st2 = npu_demo::img2col1d<GM, TSM, float, float>(out, input, 3, 2, 1, 1, 1);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType>

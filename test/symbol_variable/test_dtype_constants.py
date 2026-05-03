@@ -1,7 +1,5 @@
 """dtype_constants tests.
 
-创建者: 金铲铲大作战
-最后一次更改: 榕
 
 功能说明:
 - 覆盖 dtype 常量兼容导出内容与 `type.py` 真源一致性约束。
@@ -20,10 +18,6 @@ from __future__ import annotations
 
 
 # DC-001
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 FLOAT_DTYPES 集合内容正确。
 # 使用示例: pytest -q test/symbol_variable/test_dtype_constants.py -k test_float_dtypes
 # 对应功能实现文件路径: kernel_gen/symbol_variable/dtype_constants.py
@@ -43,10 +37,6 @@ def test_float_dtypes() -> None:
 
 
 # DC-002
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 INT_DTYPES 集合内容正确。
 # 使用示例: pytest -q test/symbol_variable/test_dtype_constants.py -k test_int_dtypes
 # 对应功能实现文件路径: kernel_gen/symbol_variable/dtype_constants.py
@@ -70,10 +60,6 @@ def test_int_dtypes() -> None:
 
 
 # DC-003
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 NN_FLOAT_DTYPES 与 FLOAT_DTYPES 保持一致。
 # 使用示例: pytest -q test/symbol_variable/test_dtype_constants.py -k test_nn_float_matches_float
 # 对应功能实现文件路径: kernel_gen/symbol_variable/dtype_constants.py
@@ -86,10 +72,6 @@ def test_nn_float_matches_float() -> None:
 
 
 # DC-003A
-# 创建者: 大闸蟹
-# 最后一次更改: 大闸蟹
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 dtype_constants 复用 type.py 的公开 dtype family 真源，不再自维护重复集合。
 # 使用示例: pytest -q test/symbol_variable/test_dtype_constants.py -k test_dtype_constants_alias_type_public_families
 # 对应功能实现文件路径: kernel_gen/symbol_variable/dtype_constants.py
@@ -107,10 +89,6 @@ def test_dtype_constants_alias_type_public_families() -> None:
 
 
 # DC-004
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 arithmetic dtype 顺序与 rank 映射一致。
 # 使用示例: pytest -q test/symbol_variable/test_dtype_constants.py -k test_arithmetic_dtype_order_and_rank
 # 对应功能实现文件路径: kernel_gen/symbol_variable/dtype_constants.py

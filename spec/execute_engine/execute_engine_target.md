@@ -4,26 +4,19 @@
 
 - 定义执行引擎 `P0` 的 `target` 选择、target 专属 `include` 注入与 `entry shim` 合同。
 - 冻结 `entry_point` 命名、`ordered_args` 绑定顺序、编译器默认值与 flags 追加策略，使 `compile -> execute` 在不同 target 下保持机械一致。
-- 本文档覆盖 `target_registry / entry_shim_builder / compiler` 三类实现职责，因此属于一个接口 spec 对应多个实现文件的例外场景。
+- 本文档覆盖 target include、entry shim 与 compiler 三类职责，统一由 `kernel_gen/execute_engine/compiler.py` 承接实现。
 
 ## API 列表
 
-- `target_includes(target: str) -> tuple[str, ...]`
-- `default_compiler() -> str`
-- `class CompileArtifacts(soname_path: str, source_path: str, command: tuple[str, ...], stdout: str, stderr: str, return_code: int)`
-- `build_compile_unit(*, source: str, target_includes: tuple[str, ...], entry_shim_source: str) -> str`
-- `build_compile_command(*, compiler: str, source_path: str, output_path: str, compiler_flags: Iterable[str], link_flags: Iterable[str], include_dirs: Iterable[str]) -> tuple[str, ...]`
-- `compile_source(*, source: str, compiler: str, compiler_flags: tuple[str, ...], link_flags: tuple[str, ...], include_dirs: tuple[str, ...], work_dir: Path | None = None, dry_run: bool = True) -> CompileArtifacts`
-- `needs_entry_shim(source: str, entry_point: str) -> bool`
-- `build_entry_shim_source(*, function: str, entry_point: str, source: str | None = None) -> str`
+- 本文档不新增独立公开 API；target/include/entry shim 行为由 `ExecutionEngine.compile(...)` 承接。
 
 ## 文档信息
 
-- 创建者：咯咯咯
-- 最后一次更改：咯咯咯
-- spec：[`spec/execute_engine/execute_engine_target.md`](spec/execute_engine/execute_engine_target.md)
-- 功能实现：[`kernel_gen/execute_engine/target_registry.py`](kernel_gen/execute_engine/target_registry.py)、[`kernel_gen/execute_engine/entry_shim_builder.py`](kernel_gen/execute_engine/entry_shim_builder.py)、[`kernel_gen/execute_engine/compiler.py`](kernel_gen/execute_engine/compiler.py)
-- test：[`test/execute_engine/test_execute_engine_compile.py`](test/execute_engine/test_execute_engine_compile.py)、[`test/execute_engine/test_execute_engine_invoke.py`](test/execute_engine/test_execute_engine_invoke.py)、[`test/execute_engine/test_execute_engine_contract.py`](test/execute_engine/test_execute_engine_contract.py)
+- 创建者：`未记录`
+- 最后一次更改：`小李飞刀`
+- `spec`：[`spec/execute_engine/execute_engine_target.md`](spec/execute_engine/execute_engine_target.md)
+- `功能实现`：[`kernel_gen/execute_engine/compiler.py`](kernel_gen/execute_engine/compiler.py)
+- `test`：[`test/execute_engine/test_compile.py`](test/execute_engine/test_compile.py)、[`test/execute_engine/test_invoke.py`](test/execute_engine/test_invoke.py)、[`test/execute_engine/test_contract.py`](test/execute_engine/test_contract.py)
 
 ## 依赖
 
@@ -35,7 +28,7 @@
 
 - `target include set`：某个 `target` 在编译阶段必须注入并保持一致的头文件集合。
 - `entry shim`：为 C++ 符号或模板/重载函数补齐稳定 `extern "C"` 入口的适配层。
-- `ordered_args`：按目标函数形参顺序排列的 `KgArgSlot` 数组。
+- `ordered_args`：按目标函数形参顺序排列的 内部 ABI 槽位数组。
 
 ## 目标
 
@@ -44,302 +37,61 @@
 - 冻结从函数形参到 `ordered_args` 的顺序绑定规则。
 - 冻结编译器默认值与 flags 追加规则，避免不同 target 下的隐式回退。
 
-## 限制与边界
+## 额外补充
 
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - `P0` 仅支持 `target in {"cpu", "npu_demo"}`；不得扩展新 target。
 - `target` 选择只由 `CompileRequest.target` 驱动；不得因为源码内容自动切换到另一 target。
 - `target=npu_demo` 不允许以注入 `cpu` include 或回退调用 `cpu::*` 的方式完成编译。
 - `entry shim` 只负责统一入口与参数绑定；不改变 `function` 本身的数学语义与参数顺序。
 - `ordered_args` 绑定顺序必须与目标函数形参顺序严格一致；不得重排、推断或按名称重新排序。
 - 本文档只冻结 target/include/entry shim 合同；`stream`、输出回收与运行时参数类型校验沿用 [`spec/execute_engine/execute_engine.md`](spec/execute_engine/execute_engine.md) 与 [`spec/execute_engine/execute_engine_api.md`](spec/execute_engine/execute_engine_api.md)。
-
-## 公开接口
-
-### `target_includes(target: str) -> tuple[str, ...]`
-
-功能说明：
-
-- 根据 `CompileRequest.target` 为最终编译单元选择唯一 target，并注入对应 `include` 集合。
-
-参数说明：
-
-- `target(str)`: `"cpu"` 或 `"npu_demo"`。
-- `source(str)`: 原始 C++ 源码；编译前会与 target include set、可选 `entry shim` 一起组成最终编译单元。
-
-使用示例：
-
-```text
-target=npu_demo -> #include "include/npu_demo/npu_demo.h"
-target=cpu      -> #include "include/cpu/Memory.h"
-                  #include "include/cpu/Nn.h"
-```
-
-注意事项：
-
-- `target=npu_demo` 时，target include set 只能是 `#include "include/npu_demo/npu_demo.h"`。
-- `target=cpu` 时，target include set 必须同时包含 `#include "include/cpu/Memory.h"` 与 `#include "include/cpu/Nn.h"`。
-- 引擎必须保证最终编译单元与 `target` 对应的 include family 一致；不得注入另一 target 的 include 作为兜底。
-- 调用方显式提供的源码若已包含正确 target include，可保留；但最终结果仍必须满足唯一 target family。
-
-返回与限制：
-
-- 不支持的 `target`，或最终编译单元依赖了与 `target` 不一致的 include family，必须失败并返回 `target_header_mismatch`。
-- 在正确 include 已注入的前提下仍然编译失败，必须返回 `compile_failed`。
-
-### `default_compiler() -> str`
-
-功能说明：
-
-- 返回执行引擎 `P0` 的默认编译器名。
-
-参数说明：
-
-- 无。
-
-使用示例：
-
-```python
-compiler = default_compiler()
-assert compiler == "g++"
-```
-
-注意事项：
-
-- 仅在调用方未显式提供 `compiler` 时生效。
-
-返回与限制：
-
-- 当前固定返回 `"g++"`。
-
-### `class CompileArtifacts(soname_path: str, source_path: str, command: tuple[str, ...], stdout: str, stderr: str, return_code: int)`
-
-功能说明：
-
-- 承载编译阶段产物路径、命令与 stdout/stderr。
-
-参数说明：
-
-- `soname_path(str)`: 共享库产物路径。
-- `source_path(str)`: 编译单元源码路径。
-- `command(tuple[str, ...])`: 实际编译命令。
-- `stdout(str)`: 编译 stdout。
-- `stderr(str)`: 编译 stderr。
-- `return_code(int)`: 编译进程返回码。
-
-使用示例：
-
-```python
-artifacts = compile_source(
-    source="int main(){}",
-    compiler="g++",
-    compiler_flags=("-std=c++17",),
-    link_flags=(),
-    include_dirs=(".",),
-)
-assert isinstance(artifacts.command, tuple)
-```
-
-注意事项：
-
-- 内部自动创建临时目录时，会附带私有清理句柄；该句柄不是公开 API。
-
-返回与限制：
-
-- 只承载编译结果描述，不负责执行。
-
-### `build_compile_unit(*, source: str, target_includes: tuple[str, ...], entry_shim_source: str) -> str`
-
-功能说明：
-
-- 拼接最终编译单元：`target includes + source + entry shim`。
-
-参数说明：
-
-- `source(str)`: 原始 C++ 源码。
-- `target_includes(tuple[str, ...])`: target 对应的 include 集合。
-- `entry_shim_source(str)`: entry shim 源码片段。
-
-使用示例：
-
-```python
-unit = build_compile_unit(
-    source="int main(){}",
-    target_includes=('#include "include/cpu/Memory.h"',),
-    entry_shim_source="",
-)
-```
-
-注意事项：
-
-- 仅补齐 `source` 中缺失的 target include，不重复注入已存在项。
-
-返回与限制：
-
-- 返回最终单个 translation unit 文本。
-
-### `build_compile_command(*, compiler: str, source_path: str, output_path: str, compiler_flags: Iterable[str], link_flags: Iterable[str], include_dirs: Iterable[str]) -> tuple[str, ...]`
-
-功能说明：
-
-- 生成稳定顺序的编译命令。
-
-参数说明：
-
-- `compiler(str)`: 编译器可执行名。
-- `source_path(str)`: 输入源码路径。
-- `output_path(str)`: 输出共享库路径。
-- `compiler_flags(Iterable[str])`: 编译 flags。
-- `link_flags(Iterable[str])`: 链接 flags。
-- `include_dirs(Iterable[str])`: `-I` 目录列表。
-
-使用示例：
-
-```python
-command = build_compile_command(
-    compiler="g++",
-    source_path="kernel.cpp",
-    output_path="libkernel.so",
-    compiler_flags=("-std=c++17",),
-    link_flags=(),
-    include_dirs=(".",),
-)
-```
-
-注意事项：
-
-- 输出固定为 `-shared -fPIC` 共享库命令形态。
-
-返回与限制：
-
-- 返回编译命令元组，不直接执行。
-
-### `compile_source(*, source: str, compiler: str, compiler_flags: tuple[str, ...], link_flags: tuple[str, ...], include_dirs: tuple[str, ...], work_dir: Path | None = None, dry_run: bool = True) -> CompileArtifacts`
-
-功能说明：
-
-- 写入编译单元并执行或模拟编译流程。
-
-参数说明：
-
-- `source(str)`: 最终编译单元源码。
-- `compiler(str)`: 编译器可执行名。
-- `compiler_flags(tuple[str, ...])`: 编译 flags。
-- `link_flags(tuple[str, ...])`: 链接 flags。
-- `include_dirs(tuple[str, ...])`: include 目录集合。
-- `work_dir(Path | None)`: 可选工作目录；为 `None` 时内部自动创建。
-- `dry_run(bool)`: 是否仅生成占位产物并跳过真实编译。
-
-使用示例：
-
-```python
-artifacts = compile_source(
-    source="int main(){}",
-    compiler="g++",
-    compiler_flags=("-std=c++17",),
-    link_flags=(),
-    include_dirs=(".",),
-    dry_run=True,
-)
-```
-
-注意事项：
-
-- `dry_run=True` 时会创建空 `.so` 占位文件。
-
-返回与限制：
-
-- 返回 `CompileArtifacts`。
-
-### `needs_entry_shim(source: str, entry_point: str) -> bool`
-
-功能说明：
-
-- 判断源码是否已经显式提供同名 `extern "C"` 入口。
-
-参数说明：
-
-- `source(str)`: 原始或拼接后的源码文本。
-- `entry_point(str)`: 预期导出的入口名。
-
-使用示例：
-
-```python
-needs = needs_entry_shim('extern "C" int kg_execute_entry(...) { return 0; }', "kg_execute_entry")
-assert needs is False
-```
-
-注意事项：
-
-- 无法识别时保守返回 `True`。
-
-返回与限制：
-
-- `True` 表示需要生成 shim，`False` 表示可直接复用现有入口。
-
-### `build_entry_shim_source(*, function: str, entry_point: str, source: str | None = None) -> str`
-
-功能说明：
-
-- 为目标函数生成稳定的 C ABI 入口源码。
-
-参数说明：
-
-- `function(str)`: 目标函数符号。
-- `entry_point(str)`: 导出入口名。
-- `source(str | None)`: 可选原始源码；用于解析真实形参并生成运行时 shim。
-
-功能说明：
-
-- 冻结编译器选择与 compile/link flags 的基线规则，并生成或省略 entry shim。
-
-使用示例：
-
-```python
-shim = build_entry_shim_source(
-    function="cpu::add",
-    entry_point="kg_execute_entry",
-    source="void add(){}",
-)
-```
-
-注意事项：
-
-- 当 `compiler is None` 时，引擎必须按 `g++` 生成编译命令。
-- 有效编译 flags 必须保留 `-std=c++17` 这一基线；调用方追加的 flags 按 `CompileRequest.compiler_flags` 给出的顺序保留。
-- `link_flags` 仅作为调用方追加项；默认空元组不产生额外链接参数。
-- `entry_point` 默认名为 `kg_execute_entry`；若 `CompileRequest.entry_point` 显式指定其他名称，导出符号名必须与该值一致。
-- 下游执行阶段若 `ExecuteRequest.entry_point is None`，则使用 `CompiledKernel.entry_point`；若显式指定非空值，则按该值解析导出符号。
-- `entry shim` 必须用于以下场景：目标函数是 C++ 符号、存在重载/模板实例，或需要把 Python 侧有序参数统一收口到单一 C ABI 入口。
-- `entry shim` 仅可在以下场景省略：源码已显式提供稳定 `extern "C"` 入口，且该入口名与 `CompileRequest.entry_point` 一致、签名为 `int <entry_point>(const KgArgSlot* ordered_args, unsigned long long arg_count)`，并且参数顺序可直接对应 `ordered_args`。
-- `ordered_args[i]` 必须绑定到目标函数第 `i` 个形参：
-  - memory `RuntimeArg` -> `KgArgSlot.kind = KG_ARG_MEMORY`，并使用 `data/shape/stride/rank` 描述 memory view。
-  - integer `RuntimeArg` -> `KgArgSlot.kind = KG_ARG_INT`，并写入 `int_value`。
-  - float `RuntimeArg` -> `KgArgSlot.kind = KG_ARG_FLOAT`，并写入 `float_value`。
-
-返回与限制：
-
+### 内部编译行为
+
+- `ExecutionEngine.compile(...)` 根据 `CompileRequest.target` 选择 target include set。
+- `target="npu_demo"` 时只能注入 `#include "include/npu_demo/npu_demo.h"`。
+- `target="cpu"` 时必须同时注入 `#include "include/cpu/Memory.h"` 与 `#include "include/cpu/Nn.h"`。
+- 当 `compiler is None` 时，编译命令使用 `g++`。
+- 编译 flags 必须保留 `-std=c++17` 基线，并按调用方顺序追加 `CompileRequest.compiler_flags`。
+- entry shim 仅作为内部桥接逻辑：源码未提供同名 `extern "C"` 入口时，内部生成稳定 C ABI 入口；源码已提供同名入口时可省略。
+- `ordered_args` 是内部 ABI 槽位，不作为 Python 公开 API；执行侧只接收 `tuple[RuntimeInput, ...]` 运行时参数。
 - 编译器启动失败、返回非零或编译命令无法生成可执行产物时，必须失败并返回 `compile_failed`。
 - `entry_point` 或导出符号无法解析时，必须失败并返回 `symbol_resolve_failed`。
 - `ordered_args` 数量或顺序与目标函数形参不一致导致执行失败时，必须返回 `runtime_throw_or_abort`。
 
+## API详细说明
+
+本文档不定义独立 API 详细条目。`target`、include 注入、entry shim 与 `ordered_args` 绑定属于 `ExecutionEngine.compile(...)` 的行为约束；参数、返回值和调用示例由 [`spec/execute_engine/execute_engine.md`](spec/execute_engine/execute_engine.md) 与 [`spec/execute_engine/execute_engine_api.md`](spec/execute_engine/execute_engine_api.md) 承接。
+
 ## 测试
 
-- 测试文件：[`test/execute_engine/test_execute_engine_compile.py`](test/execute_engine/test_execute_engine_compile.py)、[`test/execute_engine/test_execute_engine_invoke.py`](test/execute_engine/test_execute_engine_invoke.py)、[`test/execute_engine/test_execute_engine_contract.py`](test/execute_engine/test_execute_engine_contract.py)
+- 测试文件：
+  - `test/execute_engine/test_compile.py`
+  - `test/execute_engine/test_contract.py`
+  - `test/execute_engine/test_invoke.py`
 - 执行命令：
-  - `pytest -q test/execute_engine/test_execute_engine_compile.py`
-  - `pytest -q test/execute_engine/test_execute_engine_invoke.py`
-  - `pytest -q test/execute_engine/test_execute_engine_contract.py`
-- 测试目标：
-  - 覆盖 `target=cpu` 与 `target=npu_demo` 的 include 注入结果。
-  - 覆盖默认 `compiler=g++`、默认 `-std=c++17` 与 flags 追加顺序。
-  - 覆盖默认 `entry_point=kg_execute_entry`、可选覆盖与 `entry shim` 省略条件。
-  - 覆盖 `ordered_args` 与函数形参顺序一致的绑定规则。
-  - 覆盖 `target_header_mismatch`、`compile_failed`、`symbol_resolve_failed`、`runtime_throw_or_abort` 的最小触发路径。
-- 功能与用例清单：
-  - `EE-TGT-001`：`target=npu_demo` 注入 `include/npu_demo/npu_demo.h`，且不回退到 `cpu` include。
-  - `EE-TGT-002`：`target=cpu` 同时注入 `include/cpu/Memory.h` 与 `include/cpu/Nn.h`。
-  - `EE-TGT-003`：`compiler=None` 时使用 `g++`，并保留 `-std=c++17` 基线。
-  - `EE-TGT-004`：默认 `entry_point=kg_execute_entry`，且 `ExecuteRequest.entry_point=None` 使用编译产物中的入口名。
-  - `EE-TGT-005`：源码已提供同名同签名 `extern "C"` 入口时可省略 `entry shim`。
-  - `EE-TGT-006`：target/include family 不一致时返回 `target_header_mismatch`。
-  - `EE-TGT-007`：导出入口无法解析时返回 `symbol_resolve_failed`。
+  - `pytest -q test/execute_engine/test_compile.py`
+  - `pytest -q test/execute_engine/test_invoke.py`
+  - `pytest -q test/execute_engine/test_contract.py`
+
+### 测试目标
+
+- 验证 `spec/execute_engine/execute_engine_target.md` 对应公开 API 的正常路径、边界条件与错误语义。
+- 验证公开导入、注册名、CLI 或命名空间入口只暴露 spec 定义的 API。
+- 验证 Memory/DMA 参数、布局、搬运或 verifier 行为。
+- 验证 DSL、IR 或 EmitC 生成文本与编译链路符合公开合同。
+
+
+### 功能与用例清单
+
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-001 | 公开入口 | `target=npu_demo` 注入 `include/npu_demo/npu_demo.h`，且不回退到 `cpu` include。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `EE-TGT-001`。 | 公开入口在“`target=npu_demo` 注入 `include/npu_demo/npu_demo.h`，且不回退到 `cpu` include。”场景下可导入、构造、注册或按名称发现。 | `EE-TGT-001` |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-002 | 内存/DMA | `target=cpu` 同时注入 `include/cpu/Memory.h` 与 `include/cpu/Nn.h`。 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `EE-TGT-002`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`target=cpu` 同时注入 `include/cpu/Memory.h` 与 `include/cpu/Nn.h`。”场景。 | `EE-TGT-002` |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-003 | 生成/编译 | `compiler=None` 时使用 `g++`，并保留 `-std=c++17` 基线。 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `EE-TGT-003`。 | 生成源码、IR 文本或编译结果体现“`compiler=None` 时使用 `g++`，并保留 `-std=c++17` 基线。”场景。 | `EE-TGT-003` |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-004 | 生成/编译 | 默认 `entry_point=kg_execute_entry`，且 `ExecuteRequest.entry_point=None` 使用编译产物中的入口名。 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `EE-TGT-004`。 | 生成源码、IR 文本或编译结果体现“默认 `entry_point=kg_execute_entry`，且 `ExecuteRequest.entry_point=None` 使用编译产物中的入口名。”场景。 | `EE-TGT-004` |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-005 | 生成/编译 | 源码已提供同名同签名 `extern "C"` 入口时可省略 `entry shim`。 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `EE-TGT-005`。 | 生成源码、IR 文本或编译结果体现“源码已提供同名同签名 `extern "C"` 入口时可省略 `entry shim`。”场景。 | `EE-TGT-005` |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-006 | 边界/异常 | target/include family 不一致时返回 `target_header_mismatch`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `EE-TGT-006`。 | “target/include family 不一致时返回 `target_header_mismatch`。”场景按公开错误语义失败或被拒绝。 | `EE-TGT-006` |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-007 | 边界/异常 | 导出入口无法解析时返回 `symbol_resolve_failed`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `EE-TGT-007`。 | “导出入口无法解析时返回 `symbol_resolve_failed`。”场景按公开错误语义失败或被拒绝。 | `EE-TGT-007` |

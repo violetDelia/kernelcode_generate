@@ -1,13 +1,16 @@
 """decompass pass。
 
-创建者: 朽木露琪亚
-最后一次更改: jcc你莫辜负
 
 功能说明:
 - 将 `func.func` 内命中的 `nn.softmax` 按 decompass 规则分解。
 - 内置 `nn.softmax` 固定展开为 `nn.reduce_max -> nn.broadcast -> nn.sub -> nn.exp -> nn.reduce_sum -> nn.broadcast -> nn.truediv`。
 - 在 pass 内显式拒绝负轴与越界 axis。
 - 仅停留在 `nn` 方言层，不承担 `nn -> kernel` lowering。
+
+API 列表:
+- `class DecompassPass(fold: bool = True)`
+- `class NnSoftmaxDecompPattern()`
+- `get_decompass_pass_patterns() -> list[RewritePattern]`
 
 使用示例:
 - from xdsl.context import Context
@@ -16,7 +19,7 @@
 
 关联文件:
 - spec: spec/pass/decompass.md
-- test: test/pass/decompass/test_softmax.py
+- test: test/passes/decompass/test_softmax.py
 - 功能实现: kernel_gen/passes/decompass.py
 """
 
@@ -55,8 +58,6 @@ from kernel_gen.passes.common import (
 class NnSoftmaxDecompPattern(RewritePattern):
     """`nn.softmax` 的固定分解 pattern。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnSoftmaxOp`。
@@ -69,7 +70,7 @@ class NnSoftmaxDecompPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/decompass.md
-    - test: test/pass/decompass/test_softmax.py
+    - test: test/passes/decompass/test_softmax.py
     - 功能实现: kernel_gen/passes/decompass.py
     """
 
@@ -143,8 +144,6 @@ class NnSoftmaxDecompPattern(RewritePattern):
 def get_decompass_pass_patterns() -> list[RewritePattern]:
     """返回 `decompass` pass 使用的公开 pattern 列表。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 为外部测试、组合 pass 与公开 API 提供稳定的 pattern 构造入口。
@@ -156,7 +155,7 @@ def get_decompass_pass_patterns() -> list[RewritePattern]:
 
     关联文件:
     - spec: spec/pass/decompass.md
-    - test: test/pass/decompass/test_softmax.py
+    - test: test/passes/decompass/test_softmax.py
     - 功能实现: kernel_gen/passes/decompass.py
     """
 
@@ -166,11 +165,10 @@ def get_decompass_pass_patterns() -> list[RewritePattern]:
 class DecompassPass(ModulePass):
     """执行 decompass 分解链。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 在 ModuleOp 的 func.func 内执行固定 `nn.softmax` 分解链。
+    - 公开执行入口固定为 xdsl `ModulePass.apply(ctx, module)`，不再提供单 pass `run(...)` 兼容入口。
 
     使用示例:
     - from xdsl.context import Context
@@ -178,7 +176,7 @@ class DecompassPass(ModulePass):
 
     关联文件:
     - spec: spec/pass/decompass.md
-    - test: test/pass/decompass/test_softmax.py
+    - test: test/passes/decompass/test_softmax.py
     - 功能实现: kernel_gen/passes/decompass.py
     """
 
@@ -187,8 +185,6 @@ class DecompassPass(ModulePass):
     def __init__(self: "DecompassPass", fold: bool = True) -> None:
         """初始化 decompass pass 公共选项。
 
-        创建者: 大闸蟹
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 记录 `fold` 开关，默认允许 pass 内 pattern walker 执行 folding。
@@ -199,17 +195,15 @@ class DecompassPass(ModulePass):
 
         关联文件:
         - spec: spec/pass/decompass.md
-        - test: test/pass/decompass/test_softmax.py
+        - test: test/passes/decompass/test_softmax.py
         - 功能实现: kernel_gen/passes/decompass.py
         """
 
-        object.__setattr__(self, "fold", bool(fold))
+        self.fold = bool(fold)
 
     def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行 `decompass` pass。
 
-        创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 校验 module 类型，随后执行 decompass 分解。
@@ -219,7 +213,7 @@ class DecompassPass(ModulePass):
 
         关联文件:
         - spec: spec/pass/decompass.md
-        - test: test/pass/decompass/test_softmax.py
+        - test: test/passes/decompass/test_softmax.py
         - 功能实现: kernel_gen/passes/decompass.py
         """
 
@@ -231,27 +225,6 @@ class DecompassPass(ModulePass):
                 *get_decompass_pass_patterns(),
             ], ctx=ctx, folding_enabled=self.fold, dce_enabled=False)
         ).rewrite_module(module)
-
-    def run(self, module: ModuleOp) -> ModuleOp:
-        """兼容旧 `run()` 入口。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 过渡期保留旧调用方式，内部复用 `apply()`。
-
-        使用示例:
-        - module = DecompassPass().run(module)
-
-        关联文件:
-        - spec: spec/pass/decompass.md
-        - test: test/pass/decompass/test_softmax.py
-        - 功能实现: kernel_gen/passes/decompass.py
-        """
-
-        self.apply(Context(), module)
-        return module
 
 __all__ = [
     "DecompassPass",

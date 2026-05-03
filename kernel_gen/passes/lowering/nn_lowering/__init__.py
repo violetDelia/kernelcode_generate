@@ -1,7 +1,5 @@
 """nn_lowering pass 公共入口。
 
-创建者: 小李飞刀
-最后一次更改: 小李飞刀
 
 功能说明:
 - 对外暴露 `NnLoweringPass` 与公开 pattern 集合入口。
@@ -19,7 +17,7 @@ API 列表:
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/spec.md
-- test: test/pass/nn_lowering/public_name.py
+- test: test/passes/lowering/nn_lowering/test_public_name.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/__init__.py
 """
 

@@ -1,10 +1,13 @@
 """SymbolShape implementation.
 
-创建者: 小李飞刀
-最后一次更改: 小李飞刀
 
 功能说明:
 - 提供符号形状列表的保存、访问与序列化能力。
+
+API 列表:
+- `class SymbolShape(shapes: Iterable[int | str | SymbolDim])`
+- `SymbolShape.get_shape(self) -> list[SymbolDim]`
+- `SymbolShape.get_values(self) -> list[int | str]`
 
 使用示例:
 - from kernel_gen.symbol_variable.symbol_shape import SymbolShape
@@ -22,12 +25,14 @@ from typing import Iterable, Iterator, List
 
 from .symbol_dim import SymbolDim
 
+SymbolShapeValue = int | str | SymbolDim
+SymbolShapeValues = Iterable[SymbolShapeValue]
+SymbolShapeAssignment = SymbolShapeValue | SymbolShapeValues
+
 
 class _SymbolList:
     """符号形状列表基类。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 负责保存 SymbolDim 列表，并提供序列化与索引行为。
@@ -41,11 +46,9 @@ class _SymbolList:
     - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
     """
 
-    def __init__(self, shapes: Iterable[object]) -> None:
+    def __init__(self, shapes: SymbolShapeValues) -> None:
         """初始化符号形状列表。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 遍历输入并将非 SymbolDim 元素转换为 SymbolDim。
@@ -61,7 +64,7 @@ class _SymbolList:
         self.shape = [self._normalize_value(value) for value in shapes]
 
     @staticmethod
-    def _normalize_value(value: object) -> SymbolDim:
+    def _normalize_value(value: SymbolShapeValue) -> SymbolDim:
         """将输入值规范化为 SymbolDim。"""
         if isinstance(value, SymbolDim):
             return value
@@ -82,11 +85,9 @@ class _SymbolList:
         public_value = dim.get_value()
         return public_value if isinstance(public_value, int) else str(public_value)
 
-    def _normalize_slice_values(self, value: object) -> List[SymbolDim]:
+    def _normalize_slice_values(self, value: SymbolShapeValues) -> List[SymbolDim]:
         """规范化切片赋值输入。
 
-        创建者: 大闸蟹
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 校验切片赋值必须为可迭代对象。
@@ -119,8 +120,6 @@ class _SymbolList:
     def __repr__(self) -> str:
         """返回列表字符串表示。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 以 List(d0, d1, ...) 格式返回。
@@ -138,8 +137,6 @@ class _SymbolList:
     def __len__(self) -> int:
         """返回维度数量。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 返回维度列表长度。
@@ -157,8 +154,6 @@ class _SymbolList:
     def __iter__(self) -> Iterator[SymbolDim]:
         """迭代维度元素。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 返回内部 shape 的迭代器。
@@ -176,8 +171,6 @@ class _SymbolList:
     def __reversed__(self) -> Iterator[SymbolDim]:
         """反向迭代维度元素。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 返回反向迭代器。
@@ -195,8 +188,6 @@ class _SymbolList:
     def __getitem__(self, key: int | slice) -> SymbolDim | List[SymbolDim]:
         """索引访问维度元素。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - int 索引越界抛 IndexError(\"下标超出范围\")。
@@ -218,11 +209,9 @@ class _SymbolList:
             return self.shape[key]
         raise TypeError("索引类型错误")
 
-    def __setitem__(self, key: int | slice, value: object) -> None:
+    def __setitem__(self, key: int | slice, value: SymbolShapeAssignment) -> None:
         """索引赋值。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - int 索引赋值时转换为 SymbolDim。
@@ -250,8 +239,6 @@ class _SymbolList:
     def get_shape(self) -> List[SymbolDim]:
         """返回内部形状列表。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 返回内部保存的 SymbolDim 列表。
@@ -269,8 +256,6 @@ class _SymbolList:
     def get_values(self) -> List[int | str]:
         """序列化为 int/str 列表。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 动态维度复用 `SymbolDim.get_value()` 的公开文本口径。
@@ -290,8 +275,6 @@ class _SymbolList:
 class SymbolList(_SymbolList):
     """对外公开的形状列表类型。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 提供序列化能力。
@@ -308,8 +291,6 @@ class SymbolList(_SymbolList):
     def to_symbols(self) -> List[int | str]:
         """序列化为 int/str 列表。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 与 get_values() 相同的序列化规则。
@@ -328,8 +309,6 @@ class SymbolList(_SymbolList):
 class SymbolShape(SymbolList):
     """具体形状类型。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 作为具体形状容器对外使用。
@@ -346,8 +325,6 @@ class SymbolShape(SymbolList):
     def __repr__(self) -> str:
         """返回 Shape(d0, d1, ...) 格式字符串。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 以 Shape(d0, d1, ...) 格式输出。

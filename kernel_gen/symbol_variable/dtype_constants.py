@@ -1,11 +1,16 @@
 """dtype constants for symbol_variable.
 
-创建者: 睡觉小分队
-最后一次更改: 榕
 
 功能说明:
 - 兼容导出 `kernel_gen.symbol_variable.type` 中的 dtype family 与 dtype promotion 常量。
 - 本文件不再自维护任何 dtype 常量；新代码应直接从 `kernel_gen.symbol_variable.type` 导入。
+
+API 列表:
+- `ARITHMETIC_DTYPE_ORDER: tuple[NumericType, ...]`
+- `ARITHMETIC_DTYPE_RANK: dict[NumericType, int]`
+- `FLOAT_DTYPES: tuple[NumericType, ...]`
+- `INT_DTYPES: tuple[NumericType, ...]`
+- `NN_FLOAT_DTYPES: tuple[NumericType, ...]`
 
 使用示例:
 - from kernel_gen.symbol_variable.dtype_constants import (

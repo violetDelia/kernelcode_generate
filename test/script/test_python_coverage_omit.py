@@ -1,7 +1,5 @@
 """python_coverage_omit.md tests.
 
-创建者: 金铲铲大作战
-最后一次更改: 榕
 
 功能说明:
 - 校验 coverage omit 清单只收录纯转发 / 薄包装模块，并排除带有实际逻辑的入口。
@@ -30,8 +28,6 @@ pytestmark = pytest.mark.infra
 def _manifest_text() -> str:
     """读取 coverage omit 清单文本。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 将文档读取封装为统一入口。
@@ -54,13 +50,6 @@ def test_python_coverage_omit_manifest_exists_and_lists_forwarding_modules() -> 
 
     text = _manifest_text()
     assert "kernel_gen/dsl/__init__.py" in text
-    assert "kernel_gen/dsl/mlir_gen/parse_env.py" in text
-    assert "kernel_gen/dsl/mlir_gen/signature.py" in text
-    assert "kernel_gen/dsl/mlir_gen/function_builder.py" in text
-    assert "kernel_gen/dsl/mlir_gen/module_builder.py" in text
-    assert "kernel_gen/dsl/mlir_gen/emit/call_nn.py" in text
-    assert "kernel_gen/dsl/mlir_gen/emit/core.py" in text
-    assert "kernel_gen/dsl/mlir_gen/emit/value.py" in text
     assert "kernel_gen/dsl/gen_kernel/emit/cpu/__init__.py" in text
     assert "kernel_gen/dsl/gen_kernel/emit/npu_demo/name.py" in text
     assert "kernel_gen/dsl/gen_kernel/emit/npu_demo/symbol/cast.py" in text
@@ -83,3 +72,6 @@ def test_python_coverage_omit_manifest_excludes_logic_modules() -> None:
     assert "| `kernel_gen/dsl/gen_kernel/__init__.py` |" not in text
     assert "| `kernel_gen/dsl/gen_kernel/emit/__init__.py` |" not in text
     assert "| `kernel_gen/passes/lowering/__init__.py` |" not in text
+    assert "| `kernel_gen/dsl/ast/emit_context.py` |" not in text
+    assert "| `kernel_gen/dsl/ast/emit_nn.py` |" not in text
+    assert "| `kernel_gen/dsl/mlir_gen.py` |" not in text

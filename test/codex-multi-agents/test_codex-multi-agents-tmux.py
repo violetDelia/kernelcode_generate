@@ -1,7 +1,5 @@
 """codex-multi-agents-tmux.sh tests.
 
-创建者: 榕
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 tmux 脚本的 talk / init-env / wake 主流程与错误返回码路径。
@@ -144,10 +142,6 @@ def default_talk_log_path(agents_file: Path) -> Path:
 
 
 # TC-001
-# 创建者: 榕
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-04 21:34:59 +0800
-# 最近一次运行成功时间: 2026-04-04 21:34:59 +0800
 # 测试目的: 验证 `-talk` 能通过 agents list 解析目标会话并发送格式化消息，同时向日志追加一行记录。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
@@ -191,10 +185,6 @@ def test_talk_send_and_append_log_success(tmp_path: Path) -> None:
 
 
 # TC-002
-# 创建者: 榕
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
-# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
 # 测试目的: 验证 `-talk` 在 agents list 解析出的目标会话不存在时返回 `RC=3`。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
@@ -231,10 +221,6 @@ def test_talk_target_session_not_found_returns_rc3(tmp_path: Path) -> None:
 
 
 # TC-003
-# 创建者: 榕
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
-# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
 # 测试目的: 验证 `-talk` 缺少 `-message` 时返回 `RC=1`。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
@@ -269,10 +255,6 @@ def test_talk_missing_message_returns_rc1(tmp_path: Path) -> None:
 
 
 # TC-004
-# 创建者: 榕
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
-# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
 # 测试目的: 验证运行环境缺少 `tmux` 时返回 `RC=2`。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
@@ -308,10 +290,6 @@ def test_tmux_not_found_returns_rc2(tmp_path: Path) -> None:
 
 
 # TC-005
-# 创建者: 榕
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
-# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
 # 测试目的: 验证 `-talk` 日志锁冲突时返回 `RC=4`。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
@@ -355,10 +333,6 @@ def test_talk_lock_conflict_returns_rc4(tmp_path: Path) -> None:
 
 
 # TC-006
-# 创建者: 榕
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-04 19:16:39 +0800
-# 最近一次运行成功时间: 2026-04-04 19:16:39 +0800
 # 测试目的: 验证 `-init-env` 能创建 codex 会话并发送 `codex` 与 `/rename` 初始化命令。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
@@ -393,10 +367,6 @@ def test_init_env_codex_creates_session_and_bootstraps(tmp_path: Path) -> None:
 
 
 # TC-007
-# 创建者: 榕
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
-# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
 # 测试目的: 验证 `-init-env` 在名单缺少目标角色时返回 `RC=3`。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
@@ -425,10 +395,6 @@ def test_init_env_missing_agent_returns_rc3(tmp_path: Path) -> None:
 
 
 # TC-008
-# 创建者: 榕
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-04 19:16:39 +0800
-# 最近一次运行成功时间: 2026-04-04 19:16:39 +0800
 # 测试目的: 验证 `-wake` 能创建 codex 会话并发送 `codex resume` 命令。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
@@ -464,10 +430,6 @@ def test_wake_codex_creates_session_and_resumes(tmp_path: Path) -> None:
 
 
 # TC-009
-# 创建者: 榕
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
-# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
 # 测试目的: 验证 `-wake` 不接受对话参数并返回 `RC=1`。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
@@ -490,10 +452,6 @@ def test_wake_does_not_accept_talk_arguments(tmp_path: Path) -> None:
 
 
 # TC-010
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 18:25:00 +0800
-# 最近一次运行成功时间: 2026-03-22 18:25:00 +0800
 # 测试目的: 验证 `-talk` 在 agents list 不存在目标角色时返回 `RC=3`。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md

@@ -1,7 +1,5 @@
 """npu_demo target naming rules.
 
-创建者: OpenAI Codex
-最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 注册 npu_demo target 的 block arg / symbol / tuner cost 命名规则。
@@ -17,7 +15,7 @@ API 列表:
 关联文件:
 - spec: [spec/dsl/gen_kernel/emit.md](../../../../../spec/dsl/gen_kernel/emit.md)
 - spec: [spec/dsl/gen_kernel/emit/register.md](../../../../../spec/dsl/gen_kernel/emit/register.md)
-- test: [test/dsl/gen_kernel/emit/test_emit.py](../../../../../test/dsl/gen_kernel/emit/test_emit.py)
+- test: [test/dsl/gen_kernel/emit/test_package.py](../../../../../test/dsl/gen_kernel/emit/test_package.py)
 - 功能实现: [kernel_gen/dsl/gen_kernel/emit/npu_demo/name.py](.)
 """
 
@@ -47,14 +45,11 @@ def _emit_npu_demo_block_arg_name(value: SSAValue, ctx) -> str:
 
 
 @emit_c_name_impl(SymbolConstOp, target="npu_demo")
-def _emit_npu_demo_symbol_const_name(value: SSAValue, _ctx) -> str:
+def _emit_npu_demo_symbol_const_name(value: SSAValue, ctx) -> str:
     owner = value.owner
     if not isinstance(owner, SymbolConstOp):
         raise ValueError("symbol.const name handler only supports SymbolConstOp")
-    literal = owner.value.data
-    if literal >= 0:
-        return f"c_{literal}"
-    return f"c_m{abs(literal)}"
+    return ctx.allocate_name("c_")
 
 
 @emit_c_name_impl(SymbolToIntOp, SymbolCastOp, target="npu_demo")
@@ -75,8 +70,6 @@ def _emit_npu_demo_symbol_cast_name(value: SSAValue, ctx) -> str:
 def _emit_npu_demo_dma_view_name(value: SSAValue, ctx) -> str:
     """生成 npu_demo `dma.view` 结果名称。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 基于 source 名称生成 `source_1` 风格结果名。

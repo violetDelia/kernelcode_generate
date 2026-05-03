@@ -17,8 +17,6 @@
 
 ## 文档信息
 
-- 创建者：`大闸蟹`
-- 最后修改人：`大闸蟹`
 - `文档`：[`ARCHITECTURE/reference_project_rvv_xdsl_research.md`](reference_project_rvv_xdsl_research.md)
 - `spec`：不适用；本文为外部参考项目调研文档，不对应本仓 `spec` 文件
 - `test`：

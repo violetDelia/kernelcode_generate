@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # notify-admin.sh
 #
-# 创建者: Codex
-# 最后修改人: 小李飞刀
 # 最后修改日期: 2026-04-12
 #
 # 功能说明:

@@ -6,15 +6,15 @@
 
 ## API 列表
 
-- `class Ptr(*dtype: object)`
-  - `dtype: object`
-  - `__init__(*dtype: object) -> None`
+- `class Ptr(dtype: Attribute)`
+  - `dtype: Attribute`
+  - `__init__(*dtype: Attribute) -> None`
   - `__repr__() -> str`
 
 ## 文档信息
 
-- 创建者：`咯咯咯`
-- 最后一次更改：`大闸蟹`
+- 创建者：`未记录`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/symbol_variable/ptr.md`](../../spec/symbol_variable/ptr.md)
 - `test`：[`test/symbol_variable/test_ptr.py`](../../test/symbol_variable/test_ptr.py)
 - `功能实现`：[`kernel_gen/symbol_variable/ptr.py`](../../kernel_gen/symbol_variable/ptr.py)
@@ -22,7 +22,7 @@
 ## 依赖
 
 - [`ARCHITECTURE/plan/ptr_symbol_func_input_plan.md`](../../ARCHITECTURE/plan/ptr_symbol_func_input_plan.md)：P1 任务来源与边界定义。
-- [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md)：包入口导出边界；当前明确 `Ptr` 不在包入口重导出集合中。
+- [`spec/symbol_variable/__init__.md`](../../spec/symbol_variable/__init__.md)：包入口导出边界；当前明确 `Ptr` 不在包入口重导出集合中。
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：用于明确 `Ptr` 与 `Memory` 的职责边界。
 - [`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)：用于明确 `Ptr` 与 `SymbolDim` 的职责边界。
 
@@ -34,211 +34,108 @@
 - 明确 `Ptr` 的构造参数约束与失败边界（缺参、多参）。
 - 明确 `Ptr` 不是 `Memory`，也不是 `SymbolDim`，三者无别名关系。
 
-## 限制与边界
+## 额外补充
 
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 本文件只定义 Python 上层 `Ptr` 对象，不定义 IR 文本（例如 `!symbol.ptr<...>`）。
-- 不定义包入口是否重导出 `Ptr` 以外的包级导出策略；这部分由 [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md) 负责。
+- 不定义包入口是否重导出 `Ptr` 以外的包级导出策略；这部分由 [`spec/symbol_variable/__init__.md`](../../spec/symbol_variable/__init__.md) 负责。
 - 本文件不定义 DSL AST、lowering、codegen、runtime/include、审查或复审规则。
-- `Ptr` 不带名字；禁止具名形式，例如 `Ptr("data", f32)`。
-- `Ptr` 不表示地址值，不表示 shape，不表示 stride。
-- `Ptr` 不是 `Memory`，也不是 `SymbolDim`。
-- `Ptr` 不得写成 `SymbolDim` 的别名、兼容名或 `Memory` 的特例。
 
-## 公开接口
-
-### `class Ptr(*dtype: object)`
-
-功能说明：
-
-- 表示“指向某个 element dtype 的指针类型对象”。
-- 公开最小构造入口为 `Ptr(dtype)`。
-
-参数说明：
-
-- `*dtype: object`：仅允许传入 1 个 pointee element dtype（如 `f32`）。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.ptr import Ptr
-from xdsl.dialects.builtin import f32
-
-ptr = Ptr(f32)
-```
-
-注意事项：
-
-- `Ptr` 只承载 pointee dtype，不承载地址名或地址值。
-- `Ptr` 不带名字；`Ptr(f32)` 与 `Ptr(f32)` 的等价性仅由 dtype 决定。
-- `Ptr` 与 `Memory`、`SymbolDim` 为不同对象职责，不能互相替代。
-
-返回与限制：
-
-- 返回 `Ptr` 对象。
-- 仅允许 1 个 dtype 参数；参数数量非法时必须抛 `TypeError`，消息包含 `Ptr requires exactly one dtype`。
-
-#### `dtype: object`
-
-功能说明：
-
-- 暴露当前 `Ptr` 实例承载的 pointee dtype。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.ptr import Ptr
-from xdsl.dialects.builtin import f32
-
-ptr = Ptr(f32)
-assert ptr.dtype is f32
-```
-
-注意事项：
-
-- `dtype` 只表示 pointee element dtype。
-- 不承载名字、shape、stride 或地址值。
-
-返回与限制：
-
-- 返回构造时传入的唯一 dtype 对象。
-
-#### `__init__(*dtype: object) -> None`
-
-功能说明：
-
-- 初始化 `Ptr(dtype)`。
-- 校验参数数量必须恰好为 1。
-
-参数说明：
-
-- `*dtype: object`：仅允许传入 1 个 pointee element dtype。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.ptr import Ptr
-from xdsl.dialects.builtin import f32
-
-ptr = Ptr(f32)
-```
-
-注意事项：
-
-- `Ptr()` 必须抛 `TypeError`，消息包含 `Ptr requires exactly one dtype`。
-- `Ptr(f32, f32)` 必须抛 `TypeError`，消息包含 `Ptr requires exactly one dtype`。
-
-返回与限制：
-
-- 返回 `None`。
-
-#### `__repr__() -> str`
-
-功能说明：
-
-- 返回稳定公开文本 `Ptr(<dtype>)`。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.ptr import Ptr
-from xdsl.dialects.builtin import f32
-
-assert repr(Ptr(f32)) == "Ptr(f32)"
-```
-
-注意事项：
-
-- 使用 `str(dtype)` 保持 `f32` 等 xDSL 类型文本稳定。
-
-返回与限制：
-
-- 返回 `str`。
-
-### 构造失败边界
-
-功能说明：
-
-- 冻结构造参数数量的失败口径。
-
-参数说明：
-
-- 无额外参数。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.ptr import Ptr
-from xdsl.dialects.builtin import f32
-
-# 缺少 dtype
-Ptr()
-
-# 多传参数
-Ptr(f32, f32)
-```
-
-注意事项：
-
-- `Ptr()` 必须抛 `TypeError`，消息包含 `Ptr requires exactly one dtype`。
-- `Ptr(f32, f32)` 必须抛 `TypeError`，消息包含 `Ptr requires exactly one dtype`。
-
-返回与限制：
-
-- 该场景无返回值；只定义错误行为口径。
-
-### 与 `Memory` / `SymbolDim` 的关系
-
-功能说明：
-
-- 明确 `Ptr` 的对象边界，防止与现有 `symbol_variable` 类型混淆。
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.memory import Memory
-from kernel_gen.symbol_variable.ptr import Ptr
-from kernel_gen.symbol_variable.symbol_dim import SymbolDim
-from xdsl.dialects.builtin import f32
-
-ptr = Ptr(f32)
-dim = SymbolDim("N")
-```
-
-注意事项：
-
-- `Ptr` 不是 `Memory`，不表示张量容器元信息。
-- `Ptr` 不是 `SymbolDim`，不表示整数符号维度表达。
-- 不存在公开别名关系：`Ptr != Memory`、`Ptr != SymbolDim`。
-
-返回与限制：
-
-- 该条目只定义类型职责边界，不定义运行时转换规则。
+## API详细说明
+
+### `class Ptr(dtype: Attribute)`
+
+- api：`class Ptr(dtype: Attribute)`
+- 参数：
+  - `dtype`：数据类型，定义张量、内存或符号对象的元素类型；类型 `Attribute`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：`Ptr` 实例。
+- 使用示例：
+
+  ```python
+  from kernel_gen.symbol_variable.ptr import Ptr
+  from xdsl.dialects.builtin import f32
+
+  ptr = Ptr(f32)
+  ```
+- 功能说明：表示“指向某个 element dtype 的指针类型对象”。
+- 注意事项：公开稳定调用方式为 `Ptr(dtype)` 的位置参数形式；`Ptr` 只承载 pointee dtype，不承载地址名、地址值、shape 或 stride；`Ptr` 不是 `Memory`，也不是 `SymbolDim`。
+
+### `dtype: Attribute`
+
+- api：`dtype: Attribute`
+- 参数：无。
+- 返回值：`Attribute`，构造时传入的唯一 pointee dtype 对象。
+- 使用示例：
+
+  ```python
+  from kernel_gen.symbol_variable.ptr import Ptr
+  from xdsl.dialects.builtin import f32
+
+  ptr = Ptr(f32)
+  assert ptr.dtype is f32
+  ```
+- 功能说明：读取当前 `Ptr` 实例承载的 pointee dtype。
+- 注意事项：`dtype` 只表示 pointee element dtype；不承载名字、shape、stride 或地址值。
+
+### `__init__(*dtype: Attribute) -> None`
+
+- api：`__init__(*dtype: Attribute) -> None`
+- 参数：
+  - `dtype`：数据类型，定义张量、内存或符号对象的元素类型；类型 `Attribute`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：无返回值；调用成功表示操作完成。
+- 使用示例：
+
+  ```python
+  from kernel_gen.symbol_variable.ptr import Ptr
+  from xdsl.dialects.builtin import f32
+
+  ptr = Ptr(f32)
+  ```
+- 功能说明：初始化 `Ptr(dtype)` 并校验参数数量。
+- 注意事项：该特殊方法只通过 `Ptr(...)` 构造入口承接 Python 协议语义；仅允许 1 个 dtype 参数；`Ptr()` 与 `Ptr(f32, f32)` 必须抛 `TypeError`，消息包含 `Ptr requires exactly one dtype`。
+
+### `__repr__() -> str`
+
+- api：`__repr__() -> str`
+- 参数：无。
+- 返回值：`str`，表示生成或格式化后的文本。
+- 使用示例：
+
+  ```python
+  from kernel_gen.symbol_variable.ptr import Ptr
+  from xdsl.dialects.builtin import f32
+
+  assert repr(Ptr(f32)) == "Ptr(f32)"
+  ```
+- 功能说明：返回稳定公开文本 `Ptr(<dtype>)`。
+- 注意事项：该特殊方法只承接 Python 对应协议语义；使用 `str(dtype)` 保持 `f32` 等 xDSL 类型文本稳定。
 
 ## 测试
 
-- 测试文件：[`test/symbol_variable/test_ptr.py`](../../test/symbol_variable/test_ptr.py)
+- 测试文件：`test/symbol_variable/test_ptr.py`
 - 执行命令：`pytest -q test/symbol_variable/test_ptr.py`
-- 文档核对命令：
-
-```bash
-rg -n 'class Ptr|Ptr\(f32\)|Ptr requires exactly one dtype|不带名字|不表示地址值|不是 Memory|不是 SymbolDim' spec/symbol_variable/ptr.md -S
-```
 
 ### 测试目标
 
 - `test_ptr_preserves_pointee_dtype`：
-  - 输入：`ptr = Ptr(f32)`。
-  - 预期输出：公开文本可表达 `Ptr(f32)`，且 pointee dtype 为 `f32`。
+- 输入：`ptr = Ptr(f32)`。
+- 预期输出：公开文本可表达 `Ptr(f32)`，且 pointee dtype 为 `f32`。
 - `test_ptr_rejects_missing_dtype`：
-  - 输入：`Ptr()`。
-  - 预期输出：抛 `TypeError`，消息包含 `Ptr requires exactly one dtype`。
+- 输入：`Ptr()`。
+- 预期输出：抛 `TypeError`，消息包含 `Ptr requires exactly one dtype`。
 - `test_ptr_rejects_extra_args`：
-  - 输入：`Ptr(f32, f32)`。
-  - 预期输出：抛 `TypeError`，消息包含 `Ptr requires exactly one dtype`。
+- 输入：`Ptr(f32, f32)`。
 - `test_ptr_is_not_memory_or_symbol_dim`：
-  - 输入：`Ptr(f32)` 与 `Memory(...)` / `SymbolDim("N")`。
-  - 预期输出：文档明确三者不是同类，不存在公开别名关系。
+- 输入：`Ptr(f32)` 与 `Memory(...)` / `SymbolDim("N")`。
+- 预期输出：文档明确三者不是同类，不存在公开别名关系。
+
+### 功能与用例清单
+
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SYMBOL-VARIABLE-PTR-001 | 公开入口 | ptr preserves pointee dtype | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_ptr_preserves_pointee_dtype`。 | 公开入口在“ptr preserves pointee dtype”场景下可导入、构造、注册或按名称发现。 | `test_ptr_preserves_pointee_dtype` |
+| TC-SYMBOL-VARIABLE-PTR-002 | 边界/异常 | ptr rejects missing dtype | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_ptr_rejects_missing_dtype`。 | “ptr rejects missing dtype”场景按公开错误语义失败或被拒绝。 | `test_ptr_rejects_missing_dtype` |
+| TC-SYMBOL-VARIABLE-PTR-003 | 边界/异常 | ptr rejects extra args | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_ptr_rejects_extra_args`。 | “ptr rejects extra args”场景按公开错误语义失败或被拒绝。 | `test_ptr_rejects_extra_args` |
+| TC-SYMBOL-VARIABLE-PTR-004 | 内存/DMA | ptr is not memory or symbol dim | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_ptr_is_not_memory_or_symbol_dim`。 | 内存类型、布局、搬运结果或 verifier 行为体现“ptr is not memory or symbol dim”场景。 | `test_ptr_is_not_memory_or_symbol_dim` |

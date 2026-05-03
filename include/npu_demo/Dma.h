@@ -14,12 +14,10 @@ API 列表:
 - #include "include/npu_demo/Dma.h"
 - Status status = npu_demo::slice(tile, source, offset, size, stride);
 
-创建者: 大闸蟹
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/test_dma.py
+- test: test/include/api/dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 
@@ -75,12 +73,10 @@ inline bool dma_checked_add_non_negative(long long lhs, long long rhs, long long
 使用示例:
 - Memory<TSM, float> tile = npu_demo::alloc<TSM, float>({16}, {1});
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/test_dma.py
+- test: test/include/api/dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace Space, typename T>
@@ -130,12 +126,10 @@ inline Memory<Space, T> alloc(
 使用示例:
 - Status status = npu_demo::fill<TSM, float>(target, 0.0f);
 
-创建者: 大闸蟹
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/test_dma.py
+- test: test/include/api/dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace Space, typename T>
@@ -177,12 +171,10 @@ inline Status fill(Memory<Space, T>& target, const T& value) {
 使用示例:
 - Status status = npu_demo::slice(tile, source, offset, size, stride);
 
-创建者: 大闸蟹
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/test_dma.py
+- test: test/include/api/dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
@@ -288,12 +280,10 @@ inline Status slice(
 使用示例:
 - Status status = npu_demo::slice(tile, source, 0, 16, 1);
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/dsl/gen_kernel/test_gen_kernel.py
+- test: test/dsl/gen_kernel/gen_kernel.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
@@ -319,12 +309,10 @@ inline Status slice(
 使用示例:
 - Status status = npu_demo::deslice(target, tile, offset, size, stride);
 
-创建者: 大闸蟹
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/test_dma.py
+- test: test/include/api/dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
@@ -430,12 +418,10 @@ inline Status deslice(
 使用示例:
 - Status status = npu_demo::deslice(target, tile, tid * 16, 16, 1);
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/dsl/gen_kernel/test_gen_kernel.py
+- test: test/dsl/gen_kernel/gen_kernel.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
@@ -463,8 +449,6 @@ inline Status deslice(
 使用示例:
 - Status status = store<GM, TSM, float, int32_t>(target, tile, Vector{0}, Vector{16}, Vector{1});
 
-创建者: Codex
-最后修改人: Codex
 
 关联文件:
 - spec: spec/dsl/gen_kernel/emit.md
@@ -556,12 +540,10 @@ inline Status store(
 使用示例:
 - Status status = transpose<TSM, TSM, float, float>(target, source, Vector{1, 0});
 
-创建者: 大闸蟹
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/test_dma.py
+- test: test/include/api/dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>
@@ -635,12 +617,10 @@ inline Status transpose(
 使用示例:
 - Status status = npu_demo::broadcast<TSM, TSM, float, float>(target, source);
 
-创建者: 大闸蟹
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/test_dma.py
+- test: test/include/api/dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>

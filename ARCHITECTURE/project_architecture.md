@@ -21,8 +21,6 @@
 
 ## 文档信息
 
-- 创建者：`大闸蟹`
-- 最后一次更改：`金铲铲大作战`
 - `文档`：[`ARCHITECTURE/project_architecture.md`](project_architecture.md)
 - `功能实现`：
   - [`kernel_gen/symbol_variable/memory.py`](../kernel_gen/symbol_variable/memory.py)

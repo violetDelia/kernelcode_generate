@@ -8,7 +8,7 @@
 
 ## API 列表
 
-- `TargetSpec(name: str, arch_supported_ops: set[str] | None, arch_unsupported_ops: set[str], hardware: dict[str, int])`
+- `class TargetSpec(name: str, arch_supported_ops: set[str] | None, arch_unsupported_ops: set[str], hardware: dict[str, int])`
 - `load_targets(directory: Path) -> dict[str, TargetSpec]`
 - `register_target(spec: TargetSpec) -> None`
 - `set_current_target(target: str | None) -> None`
@@ -19,11 +19,11 @@
 
 ## 文档信息
 
-- 创建者：`榕`
-- 最后一次更改：`朽木露琪亚`
+- 创建者：`未记录`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/target/registry.md`](../../spec/target/registry.md)
 - `功能实现`：[`kernel_gen/target/registry.py`](../../kernel_gen/target/registry.py)
-- `test`：[`test/target/test_target_registry.py`](../../test/target/test_target_registry.py)
+- `test`：[`test/target/test_registry.py`](../../test/target/test_registry.py)
 
 ## 依赖
 
@@ -38,17 +38,160 @@
 - 为约定 target 冻结目录文件语义、launch 能力上限与能力矩阵，避免下游 codegen/runtime 再次推断硬件值或误放开未支持能力。
 - 为 `operation/arch.py` 与 `dialect/arch.py` 提供合法的 current target 查询与设置公开入口，避免继续跨文件访问私有 helper。
 
-## 限制与边界
+## API详细说明
 
-- target 名称只能使用小写字母、数字、下划线，且必须与文件名（不含扩展名）一致。
-- 同名 target 不能重复注册。
-- `arch.supported_ops` 与 `arch.unsupported_ops` 不能有交集。
+### `class TargetSpec(name: str, arch_supported_ops: set[str] | None, arch_unsupported_ops: set[str], hardware: dict[str, int])`
+
+- api：`class TargetSpec(name: str, arch_supported_ops: set[str] | None, arch_unsupported_ops: set[str], hardware: dict[str, int])`
+- 参数：
+  - `name`：target 名称；类型 `str`；无默认值，调用方必须显式提供；只能使用小写字母、数字、下划线。
+  - `arch_supported_ops`：显式支持的 `arch.*` op 白名单；类型 `set[str] | None`；无默认值，调用方必须显式提供；`None` 表示未配置白名单。
+  - `arch_unsupported_ops`：显式不支持的 `arch.*` op 黑名单；类型 `set[str]`；无默认值，调用方必须显式提供。
+  - `hardware`：硬件参数表；类型 `dict[str, int]`；无默认值，调用方必须显式提供；key 必须属于 registry 支持的硬件字段集合，值必须是整数。
+- 返回值：`TargetSpec` 实例。
+- 使用示例：
+
+  ```python
+  from kernel_gen.target.registry import TargetSpec
+
+  spec = TargetSpec(
+      name="cpu",
+      arch_supported_ops=None,
+      arch_unsupported_ops={"arch.get_thread_id"},
+      hardware={"thread_num": 1, "sm_memory_size": 0},
+  )
+  ```
+- 功能说明：描述一个 target 的标准化元数据与能力。
+- 注意事项：`arch_supported_ops` 与 `arch_unsupported_ops` 不能有交集；同名 target 不能重复注册；实例字段是公开数据载体，未列入参数的缓存或派生字段不作为公开 API。
+
+### `load_targets(directory: Path) -> dict[str, TargetSpec]`
+
+- api：`load_targets(directory: Path) -> dict[str, TargetSpec]`
+- 参数：
+  - `directory`：目录路径，指定读取、写入或扫描的根目录；类型 `Path`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：`dict[str, TargetSpec]`。
+- 使用示例：
+
+  ```python
+  from pathlib import Path
+
+  from kernel_gen.target import registry
+
+  loaded = registry.load_targets(Path("kernel_gen/target/targets"))
+  ```
+- 功能说明：扫描目录并加载 `*.json` 与 `*.txt` target 文件。
+- 注意事项：返回值是本次加载集合；target 名称必须与文件名不含扩展名部分一致；`npu_demo` 的公开真源是目录中的 `npu_demo.txt`；加载会注册解析出的 target，重复加载默认目录必须保持幂等。
+
+### `register_target(spec: TargetSpec) -> None`
+
+- api：`register_target(spec: TargetSpec) -> None`
+- 参数：
+  - `spec`：`spec` 输入值，参与 `register_target` 的公开处理流程；类型 `TargetSpec`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：无返回值；调用成功表示操作完成。
+- 使用示例：
+
+  ```python
+  from kernel_gen.target.registry import TargetSpec, register_target
+
+  spec = TargetSpec("gpu", None, set(), {"thread_num": 256})
+  register_target(spec)
+  ```
+- 功能说明：注册单个 target。
+- 注意事项：注册名必须满足 target 命名规则；重复注册非默认 target 必须失败；该接口可用于测试或运行时增量注入。
+
+### `set_current_target(target: str | None) -> None`
+
+- api：`set_current_target(target: str | None) -> None`
+- 参数：
+  - `target`：目标对象、目标名称或目标缓冲区，指定当前操作写入或作用的位置；类型 `str | None`；无默认值，调用方必须显式提供；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：无返回值；调用成功表示操作完成。
+- 使用示例：
+
+  ```python
+  from kernel_gen.target.registry import set_current_target
+
+  set_current_target("cpu")
+  set_current_target(None)
+  ```
+- 功能说明：设置 current target 名称。
+- 注意事项：`None` 表示关闭 current target 校验；非 `None` 值必须已经完成注册；该接口会修改当前 target 公开状态。
+
+### `get_current_target() -> str | None`
+
+- api：`get_current_target() -> str | None`
+- 参数：无。
+- 返回值：`str | None`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.target.registry import get_current_target
+
+  target_name = get_current_target()
+  ```
+- 功能说明：读取 `current_target`。
+- 注意事项：未设置时返回 `None`；该接口只读取公开状态，不暴露 registry 内部可变结构。
+
+### `is_arch_op_supported(target: str, op_name: str) -> bool`
+
+- api：`is_arch_op_supported(target: str, op_name: str) -> bool`
+- 参数：
+  - `target`：目标对象、目标名称或目标缓冲区，指定当前操作写入或作用的位置；类型 `str`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `op_name`：公开名称或符号名；类型 `str`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：`bool`，表示判断结果。
+- 使用示例：
+
+  ```python
+  from kernel_gen.target.registry import is_arch_op_supported
+
+  supported = is_arch_op_supported("cpu", "arch.get_block_num")
+  ```
+- 功能说明：判断某个 `arch.*` 能力键是否被指定 target 支持。
+- 注意事项：`op_name` 的稳定输入域限定为 `arch.*` 能力键；`launch`、`barrier` 等未带 `arch.` 前缀的字符串不属于本接口稳定输入；对显式白名单 target，白名单外能力查询必须固定判定为未启用。
+
+### `get_target_hardware(target: str, key: str) -> int | None`
+
+- api：`get_target_hardware(target: str, key: str) -> int | None`
+- 参数：
+  - `target`：目标对象、目标名称或目标缓冲区，指定当前操作写入或作用的位置；类型 `str`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `key`：查找键或注册键，用于定位 registry、映射表或缓存中的公开条目；类型 `str`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：`int | None`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.target.registry import get_target_hardware
+
+  thread_num = get_target_hardware("cpu", "thread_num")
+  ```
+- 功能说明：读取 `target_hardware`。
+- 注意事项：缺失字段返回 `None`；registry 不自动补默认业务值，调用方必须使用自身回退逻辑；该接口只读取公开状态，不暴露 registry 内部可变结构。
+
+### `get_current_target_hardware(key: str) -> int | None`
+
+- api：`get_current_target_hardware(key: str) -> int | None`
+- 参数：
+  - `key`：查找键或注册键，用于定位 registry、映射表或缓存中的公开条目；类型 `str`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：`int | None`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.target.registry import get_current_target_hardware
+
+  thread_num = get_current_target_hardware("thread_num")
+  ```
+- 功能说明：读取 `current_target_hardware`。
+- 注意事项：未设置 current target 或字段缺失时返回 `None`；registry 不自动补默认业务值，调用方必须使用自身回退逻辑；该接口只读取公开状态，不暴露 registry 内部可变结构。
+
+
+## 额外补充
+
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - registry 只负责“配置解析与查询”；不负责具体后端驱动初始化、设备探测或运行时调度。
 - 当硬件字段缺失时，调用方必须使用自身回退逻辑（例如返回符号值或动态 shape），registry 不自动补默认业务值。
-- 对显式白名单 target，白名单外能力查询必须固定判定为未启用；不得把未列入白名单的 `arch.*` 能力视为默认可用。
-- `is_arch_op_supported(...)` 的稳定输入域是 `arch.*` 能力键；`launch`、`barrier` 这类未带 `arch.` 前缀的字符串不属于 registry 公共查询接口的稳定输入。
+- 下游实现与测试只能通过 `TargetSpec`、`load_targets(...)`、`register_target(...)`、`set_current_target(...)`、`get_current_target(...)`、`is_arch_op_supported(...)`、`get_target_hardware(...)` 与 `get_current_target_hardware(...)` 访问 target registry 能力。
 
-## 配置格式
+### 配置格式
 
 ### JSON 格式
 
@@ -155,108 +298,12 @@ hw.tlm3_memory_size=512
 - `sm_memory_size=0` 与 `lm_memory_size=0` 表示 `npu_demo` 不提供 `SM/LM` 动态内存容量；`tsm_memory_size=24576`、`tlm1_memory_size=1024`、`tlm2_memory_size=512`、`tlm3_memory_size=512` 为固定片上容量。
 - `npu_demo` 的标准注册入口是 `kernel_gen/target/targets/npu_demo.txt`；标准查询入口是 `is_arch_op_supported(...)`、`get_target_hardware(...)` 与 `get_current_target_hardware(...)`。
 
-## 公开接口
-
-### `TargetSpec`
-
-功能说明：
-
-- 描述一个 target 的标准化元数据与能力。
-
-字段：
-
-- `name: str`
-- `arch_supported_ops: set[str] | None`
-- `arch_unsupported_ops: set[str]`
-- `hardware: dict[str, int]`
-
-使用示例：
-
-```python
-spec = TargetSpec(
-    name="cpu",
-    arch_supported_ops=None,
-    arch_unsupported_ops={"arch.get_thread_id"},
-    hardware={"thread_num": 1, "sm_memory_size": 0},
-)
-```
-
-### `load_targets(directory: Path) -> dict[str, TargetSpec]`
-
-功能说明：
-
-- 扫描目录并加载 `*.json` 与 `*.txt` target 文件。
-- 成功加载后返回“本次加载集合”。
-- `npu_demo` 的公开真源是目录中的 `npu_demo.txt`；调用方不应再依赖 Python 内置模板口径。
-
-使用示例：
-
-```python
-from pathlib import Path
-from kernel_gen.target import registry
-
-loaded = registry.load_targets(Path("kernel_gen/target/targets"))
-```
-
-### `register_target(spec: TargetSpec) -> None`
-
-功能说明：
-
-- 注册单个 target；用于测试或运行时增量注入。
-- 即使 `npu_demo` 以 `npu_demo.txt` 作为公开真源，测试仍可通过该接口做临时注入。
-
-### `set_current_target(target: str | None) -> None`
-
-功能说明：
-
-- 设置 current target 名称，供 operation / dialect / test 读取当前 target 上下文。
-- `None` 表示关闭 current target 校验。
-- 非 `None` 值必须已经完成注册。
-
-### `get_current_target() -> str | None`
-
-功能说明：
-
-- 读取 current target 名称。
-- 为 operation / dialect 的支持性校验提供公开查询入口，不再要求跨文件访问私有 helper。
-
-### `is_arch_op_supported(target: str, op_name: str) -> bool`
-
-功能说明：
-
-- 判断某个 `arch.*` 能力键是否被指定 target 支持。
-- `op_name` 的稳定输入域限定为 `arch.*`；`launch`、`barrier` 等上层能力语义不作为本接口的标准输入。
-
-### `get_target_hardware(target: str, key: str) -> int | None`
-
-功能说明：
-
-- 按 target 名称读取硬件参数；缺失返回 `None`。
-
-### `get_current_target_hardware(key: str) -> int | None`
-
-功能说明：
-
-- 按“当前 target”读取硬件参数；未设置当前 target 或字段缺失时返回 `None`。
-
-## 公开 API 清单
-
-- `TargetSpec`
-- `load_targets(directory: Path) -> dict[str, TargetSpec]`
-- `register_target(spec: TargetSpec) -> None`
-- `set_current_target(target: str | None) -> None`
-- `get_current_target() -> str | None`
-- `is_arch_op_supported(target: str, op_name: str) -> bool`
-- `get_target_hardware(target: str, key: str) -> int | None`
-- `get_current_target_hardware(key: str) -> int | None`
-
-## helper 边界
+### helper 说明
 
 - 当前文件内存在若干解析、校验与默认 target 组装 helper。
 - 这些 helper 仅用于 `registry.py` 内部复用，不属于公开合同。
-- 下游实现与测试只能通过 `TargetSpec`、`load_targets(...)`、`register_target(...)`、`set_current_target(...)`、`get_current_target(...)`、`is_arch_op_supported(...)`、`get_target_hardware(...)` 与 `get_current_target_hardware(...)` 访问 target registry 能力。
 
-## 与 arch 层的联动约束
+### 与 arch 层的联动约束
 
 - `operation/arch` 与 include/runtime 需要区分“能力上限”和“当前 launch 值”：registry 只提供能力上限与静态容量，不直接承诺 launched body 中的当前 extent。
 - 在无 launch 上下文时，`operation/arch` 查询数量类 helper（如 `get_thread_num`）可读取 `hardware` 作为能力上限或静态回退值；一旦进入 launched body，当前值必须由 runtime 上下文提供。
@@ -265,7 +312,7 @@ loaded = registry.load_targets(Path("kernel_gen/target/targets"))
 - 当 `target="npu_demo"` 时，`block_num=1`、`thread_num=1`、`subthread_num=1` 必须作为 P0 能力上限读取；`SM/LM` 动态内存容量固定为 `0`，`TSM/TLM1/TLM2/TLM3` 动态内存容量固定为 `24576/1024/512/512`。
 - 当 `target="npu_demo"` 时，`arch.launch` 与 `arch.barrier` 通过 `is_arch_op_supported(...)` 查询必须返回已启用；旧名 `arch.launch_kernel` 必须保持未启用。
 
-## CPU TXT 示例
+### CPU TXT 示例
 
 以下是推荐的 `cpu.txt` 模板内容：
 
@@ -293,19 +340,33 @@ hw.tlm3_memory_size=0
 - 对 `cpu.txt` 而言，`arch.supported_ops=` 的空值会被归一化为 `None`（未配置白名单），因此 `cpu` 默认允许除 `arch.unsupported_ops` 外的 `arch.*` 查询 op。
 - 以上述示例为准，`arch.get_thread_id` 由黑名单拒绝，`arch.get_block_num` 等不在黑名单中的 op 默认可用。
 
-## 测试清单
+#
 
-- 能加载合法 `json` target。
-- 能加载合法 `txt` target。
-- `json` 与 `txt` 混合目录可同时加载。
-- 默认目录 `kernel_gen/target/targets` 加载后，`cpu.txt` 的 `arch.supported_ops=` 空值应归一化为 `None`，并保持 `arch.get_block_num` 可用、`arch.get_thread_id` 受黑名单限制。
-- 默认目录重复加载应保持幂等，不得因内置 `cpu` 与 `cpu.txt` 冲突而失败。
-- `npu_demo.txt` 应通过标准查询入口满足以下能力/容量值：`block_num=1`、`thread_num=1`、`subthread_num=1`、`sm_memory_size=0`、`lm_memory_size=0`、`tsm_memory_size=24576`、`tlm1_memory_size=1024`、`tlm2_memory_size=512`、`tlm3_memory_size=512`。
-- `npu_demo.txt` 作为唯一标准 target 数据源，必须能被 `load_targets(Path("kernel_gen/target/targets"))` 一并加载；默认目录重复加载应保持幂等，不得因 `npu_demo` 与内置注册冲突而失败。
-- `npu_demo` 的 `arch.launch` / `arch.barrier` 查询必须固定判定为已启用；旧名 `arch.launch_kernel` 与未带 `arch.` 前缀的 `launch` / `barrier` 不属于已启用能力。
-- `name` 缺失、格式非法、与文件名不一致时报错。
-- `arch.supported_ops` 与 `arch.unsupported_ops` 冲突时报错。
-- `hw.*` 非整数时报错。
-- 未知 key 报错。
-- `get_target_hardware` 与 `get_current_target_hardware` 在“存在/缺失/未设置当前 target”三类场景行为正确。
-- 下游待补验收标准建议使用 `test_target_registry_npu_demo_supports_launch_and_barrier_caps`：输入 `target="npu_demo"`；预期通过 `is_arch_op_supported(...)` 读取到 `arch.launch=True`、`arch.barrier=True`、`arch.launch_kernel=False`，并通过 `get_target_hardware(...)` / `get_current_target_hardware(...)` 读到 `block_num=1`、`thread_num=1`、`subthread_num=1`、`sm_memory_size=0`、`lm_memory_size=0`、`tsm_memory_size=24576`、`tlm1_memory_size=1024`、`tlm2_memory_size=512`、`tlm3_memory_size=512`。
+## 测试
+
+- 测试文件：`test/target/test_registry.py`
+- 执行命令：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/target/test_registry.py`
+
+### 测试目标
+
+- 验证本文件 `API 列表` 中公开 API 的稳定行为、边界和错误语义。
+
+### 功能与用例清单
+
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-TARGET-REGISTRY-001 | 公开入口 | target registry loads json specs | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_loads_json_specs`。 | 公开入口在“target registry loads json specs”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_loads_json_specs` |
+| TC-TARGET-REGISTRY-002 | 边界/异常 | target registry rejects invalid specs | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_target_registry_rejects_invalid_specs`。 | “target registry rejects invalid specs”场景按公开错误语义失败或被拒绝。 | `test_target_registry_rejects_invalid_specs` |
+| TC-TARGET-REGISTRY-003 | 边界/异常 | target registry rejects conflicting ops | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_target_registry_rejects_conflicting_ops`。 | “target registry rejects conflicting ops”场景按公开错误语义失败或被拒绝。 | `test_target_registry_rejects_conflicting_ops` |
+| TC-TARGET-REGISTRY-004 | 边界/异常 | target registry cpu rejects thread id | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_target_registry_cpu_rejects_thread_id`。 | “target registry cpu rejects thread id”场景按公开错误语义失败或被拒绝。 | `test_target_registry_cpu_rejects_thread_id` |
+| TC-TARGET-REGISTRY-005 | 公开入口 | target registry loads txt specs | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_loads_txt_specs`。 | 公开入口在“target registry loads txt specs”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_loads_txt_specs` |
+| TC-TARGET-REGISTRY-006 | 公开入口 | target registry loads mixed formats | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_loads_mixed_formats`。 | 公开入口在“target registry loads mixed formats”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_loads_mixed_formats` |
+| TC-TARGET-REGISTRY-007 | 公开入口 | target registry loads default cpu directory | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_loads_default_cpu_directory`。 | 公开入口在“target registry loads default cpu directory”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_loads_default_cpu_directory` |
+| TC-TARGET-REGISTRY-008 | 公开入口 | target registry default directory idempotent load | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_default_directory_idempotent_load`。 | 公开入口在“target registry default directory idempotent load”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_default_directory_idempotent_load` |
+| TC-TARGET-REGISTRY-009 | 边界/异常 | target registry rejects txt invalid fields | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_target_registry_rejects_txt_invalid_fields`。 | “target registry rejects txt invalid fields”场景按公开错误语义失败或被拒绝。 | `test_target_registry_rejects_txt_invalid_fields` |
+| TC-TARGET-REGISTRY-010 | 公开入口 | target registry current target hardware | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_current_target_hardware`。 | 公开入口在“target registry current target hardware”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_current_target_hardware` |
+| TC-TARGET-REGISTRY-011 | 边界/异常 | target registry set current target rejects unregistered target | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_target_registry_set_current_target_rejects_unregistered_target`。 | “target registry set current target rejects unregistered target”场景按公开错误语义失败或被拒绝。 | `test_target_registry_set_current_target_rejects_unregistered_target` |
+| TC-TARGET-REGISTRY-012 | 公开入口 | target registry public exports include current target API | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_public_exports_include_current_target_api`。 | 公开入口在“target registry public exports include current target API”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_public_exports_include_current_target_api` |
+| TC-TARGET-REGISTRY-013 | 公开入口 | target registry npu demo template | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_npu_demo_template`。 | 公开入口在“target registry npu demo template”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_npu_demo_template` |
+| TC-TARGET-REGISTRY-014 | 边界/异常 | target registry npu demo rejects unsupported ops | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_target_registry_npu_demo_rejects_unsupported_ops`。 | “target registry npu demo rejects unsupported ops”场景按公开错误语义失败或被拒绝。 | `test_target_registry_npu_demo_rejects_unsupported_ops` |
+| TC-TARGET-REGISTRY-015 | 公开入口 | target registry npu demo supports launch and barrier caps | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_npu_demo_supports_launch_and_barrier_caps`。 | 公开入口在“target registry npu demo supports launch and barrier caps”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_npu_demo_supports_launch_and_barrier_caps` |

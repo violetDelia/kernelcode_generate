@@ -1,10 +1,14 @@
 """SymbolDim implementation.
 
-创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供符号维度表达、基础算术运算与动态性判断。
+
+API 列表:
+- `class SymbolDim(sym: int | str | sp.Basic)`
+- `SymbolDim.get_symbol(self) -> sp.Basic`
+- `SymbolDim.get_value(self) -> int | float | str | sp.Basic`
+- `SymbolDim.is_dynamic(self) -> bool`
 
 使用示例:
 - from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -19,15 +23,16 @@
 from __future__ import annotations
 
 import re
+from typing import TypeAlias
 
 import sympy as sp
+
+SymbolDimOperand: TypeAlias = "int | str | sp.Basic | _SymbolDim"
 
 
 class _SymbolDim:
     """符号维度基类，封装 sympy 表达式与基础运算。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 统一保存与暴露 sympy 表达式，并提供算术与比较能力。
@@ -50,8 +55,6 @@ class _SymbolDim:
     def _is_numeric_literal_str(value: str) -> bool:
         """判断字符串是否属于数值字面量。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 识别整数、小数、科学计数法及带正负号的数值字面量字符串。
@@ -72,8 +75,6 @@ class _SymbolDim:
     def _normalize_str(value: str) -> str:
         """统一规范化字符串输入并校验。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 使用 strip() 去除首尾空白。
@@ -99,8 +100,6 @@ class _SymbolDim:
     def _is_truediv_expr(expr: sp.Basic) -> bool:
         """判断表达式是否属于真除法链。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 识别由 `__truediv__`/`__rtruediv__` 构造的嵌套 `Mul(..., Pow(..., -1))` 结构。
@@ -120,8 +119,6 @@ class _SymbolDim:
     def _split_truediv_expr(expr: sp.Basic) -> tuple[sp.Basic, list[sp.Basic]] | None:
         """拆解真除法链的分子与分母因子顺序。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 将内部 `Mul(lhs, Pow(rhs, -1))` 结构拆为 `(numerator, [denominator...])`。
@@ -160,8 +157,6 @@ class _SymbolDim:
     def _format_public_expr(expr: sp.Basic) -> str:
         """格式化对外公开表达式片段。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 对分子、分母因子进行最小必要的字符串格式化。
@@ -184,8 +179,6 @@ class _SymbolDim:
     def _format_public_value_expr(expr: sp.Basic) -> str:
         """格式化公开值表达式，优先保留 `/` 与 `//` 语义文本。
 
-        创建者: OpenAI Codex
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 对真除法链保留 `/` 文本与原始分母顺序。
@@ -270,8 +263,6 @@ class _SymbolDim:
     def _public_value(expr: sp.Basic) -> int | float | str | sp.Basic:
         """生成稳定的公开比较值。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 先按 SymPy 做最小必要简化，静态结果返回 Python 数值。
@@ -300,8 +291,6 @@ class _SymbolDim:
     def _should_use_simplified_quotient(expr: sp.Basic, simplified: sp.Basic) -> bool:
         """判断除法结果是否应采用简化表达式。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 仅在简化结果明显收短表达式时采用 `sp.simplify(...)` 的结果。
@@ -323,11 +312,9 @@ class _SymbolDim:
     def _symbol_from_str(value: str) -> sp.Symbol:
         """基于字符串创建带假设的符号。
 
-        创建者: 小李飞刀
-        最后一次更改: 我不是牛马
 
         功能说明:
-        - 统一使用 integer=True, real=True 的假设构造符号。
+        - 统一使用 integer=True, real=True 的假设构造符号或符号表达式。
 
         使用示例:
         - _SymbolDim._symbol_from_str("N")
@@ -337,14 +324,27 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        return sp.symbols(_SymbolDim._normalize_str(value), integer=True, real=True)
+        normalized = _SymbolDim._normalize_str(value)
+        if re.search(r"//|[+\-*/()]", normalized):
+            symbol_names = {
+                name
+                for name in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", normalized)
+                if name != "floor"
+            }
+            local_symbols = {
+                name: sp.symbols(name, integer=True, real=True)
+                for name in symbol_names
+            }
+            parsed = sp.sympify(normalized, locals=local_symbols)
+            if isinstance(parsed, tuple):
+                raise ValueError("SymbolDim expression string is invalid")
+            return _SymbolDim._normalize_symbol(parsed)
+        return sp.symbols(normalized, integer=True, real=True)
 
     @staticmethod
     def _normalize_symbol(sym: sp.Basic) -> sp.Basic:
         """规范化 sympy.Symbol 的默认假设。
 
-        创建者: 小李飞刀
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 当 sym 为未显式指定 is_integer/is_real 的 Symbol 时，按名称重建为 integer=True, real=True。
@@ -372,15 +372,13 @@ class _SymbolDim:
 
     @staticmethod
     def _coerce_symbol_expr(
-        value: int | str | sp.Basic | "_SymbolDim" | float | object,
+        value: SymbolDimOperand | float,
         *,
         float_error: str,
         type_error_prefix: str,
     ) -> sp.Basic:
         """统一将输入规整为内部 sympy 表达式。
 
-        创建者: 大闸蟹
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 统一处理 `_SymbolDim`、`int`、`str`、`sympy.Basic` 的规整逻辑。
@@ -412,8 +410,6 @@ class _SymbolDim:
     def __init__(self, sym: int | str | sp.Basic) -> None:
         """初始化符号维度。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - int 转为 sympy.Integer。
@@ -442,8 +438,6 @@ class _SymbolDim:
     def _normalize_operand(value: int | str | sp.Basic | "_SymbolDim") -> sp.Basic:
         """统一规范化操作数为 sympy 表达式。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 支持 int/str/sympy.Basic/_SymbolDim，其他类型抛 TypeError。
@@ -469,8 +463,6 @@ class _SymbolDim:
     def _quotient_expr(numerator: sp.Basic, denominator: sp.Basic) -> sp.Basic:
         """构造保留顺序的除法表达式。
 
-        创建者: OpenAI Codex
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 统一使用 `Mul(..., Pow(..., -1, evaluate=False))` 保存除法链顺序。
@@ -495,8 +487,6 @@ class _SymbolDim:
     ) -> "SymbolDim":
         """统一执行二元符号算术。
 
-        创建者: OpenAI Codex
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 统一处理正向与反向的加减乘路径。
@@ -523,8 +513,6 @@ class _SymbolDim:
     ) -> "SymbolDim":
         """统一执行真除法与整除。
 
-        创建者: OpenAI Codex
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 共用同一套操作数规整、顺序保留与最小必要简化逻辑。
@@ -554,8 +542,6 @@ class _SymbolDim:
     def get_symbol(self) -> sp.Basic:
         """获取内部 sympy 表达式。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 返回内部保存的 sympy 表达式对象。
@@ -573,8 +559,6 @@ class _SymbolDim:
     def get_value(self):
         """获取对外可比较的数值/表达式。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 静态整数/表达式返回 Python 数值。
@@ -594,8 +578,6 @@ class _SymbolDim:
     def __repr__(self) -> str:
         """返回符号维度的字符串表示。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 返回 str(get_symbol())。
@@ -613,8 +595,6 @@ class _SymbolDim:
     def __str__(self) -> str:
         """返回符号维度的公开字符串表示。
 
-        创建者: OpenAI Codex
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 复用 `get_value()` 的公开口径输出字符串。
@@ -633,8 +613,6 @@ class _SymbolDim:
     def __add__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度加法。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 支持 int/str/SymbolDim，加法结果返回 SymbolDim。
@@ -652,8 +630,6 @@ class _SymbolDim:
     def __radd__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向加法。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 支持 int/str/SymbolDim，返回 SymbolDim。
@@ -671,8 +647,6 @@ class _SymbolDim:
     def __sub__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度减法。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 支持 int/str/SymbolDim，返回 SymbolDim。
@@ -690,8 +664,6 @@ class _SymbolDim:
     def __rsub__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向减法。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 支持 int/str/SymbolDim，返回 SymbolDim。
@@ -709,8 +681,6 @@ class _SymbolDim:
     def __mul__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度乘法。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 支持 int/str/SymbolDim，返回 SymbolDim。
@@ -728,8 +698,6 @@ class _SymbolDim:
     def __rmul__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向乘法。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 支持 int/str/SymbolDim，返回 SymbolDim。
@@ -747,8 +715,6 @@ class _SymbolDim:
     def __truediv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度除法。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 支持 int/str/SymbolDim，返回 SymbolDim。
@@ -766,8 +732,6 @@ class _SymbolDim:
     def __rtruediv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向除法。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 支持 int/str/SymbolDim，返回 SymbolDim。
@@ -785,8 +749,6 @@ class _SymbolDim:
     def __floordiv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度整除。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 支持 int/str/SymbolDim，返回 SymbolDim。
@@ -804,8 +766,6 @@ class _SymbolDim:
     def __rfloordiv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向整除。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 支持 int/str/SymbolDim，返回 SymbolDim。
@@ -820,11 +780,9 @@ class _SymbolDim:
         """
         return self._quotient(other, reverse=True, floordiv=True)
 
-    def __eq__(self, other: object) -> bool:
+    def __eq__(self, other: SymbolDimOperand) -> bool:
         """比较符号维度表达式等价性。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 支持 int/str/sympy.Basic/SymbolDim，比较底层 sympy 表达式。
@@ -846,8 +804,6 @@ class _SymbolDim:
 class SymbolDim(_SymbolDim):
     """对外公开的符号维度类型。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 提供动态性判断能力。
@@ -864,8 +820,6 @@ class SymbolDim(_SymbolDim):
     def is_dynamic(self) -> bool:
         """判断符号维度是否为动态维度。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 当内部表达式包含自由符号时返回 True。

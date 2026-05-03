@@ -1,7 +1,5 @@
 """requirements.txt tests.
 
-创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
 
 功能说明:
 - 校验仓库根目录 `requirements.txt` 的说明头、依赖顺序与固定版本。
@@ -46,8 +44,6 @@ pytestmark = pytest.mark.infra
 def _read_requirements_text() -> str:
     """读取仓库根目录 `requirements.txt`。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 统一封装 `requirements.txt` 的文本读取入口。
@@ -67,8 +63,6 @@ def _read_requirements_text() -> str:
 def _read_execute_engine_api_spec() -> str:
     """读取 execute_engine 公开接口文档。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 统一封装 `spec/execute_engine/execute_engine_api.md` 的文本读取入口。
@@ -88,8 +82,6 @@ def _read_execute_engine_api_spec() -> str:
 def _package_lines() -> list[str]:
     """提取 `requirements.txt` 中的实际依赖行。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 过滤空行与注释行，只保留 `package==version` 形式的依赖项。
@@ -111,10 +103,6 @@ def _package_lines() -> list[str]:
 
 
 # TC-REQ-001
-# 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-18 16:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 16:00:00 +0800
 # 测试目的: 验证 requirements.txt 包含功能说明、使用示例与关联文件头注释。
 # 对应功能实现文件路径: requirements.txt
 # 对应 spec 文件路径: spec/script/pytest_config.md
@@ -133,10 +121,6 @@ def test_requirements_txt_has_documentation_header() -> None:
 
 
 # TC-REQ-002
-# 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-18 16:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 16:00:00 +0800
 # 测试目的: 验证 requirements.txt 的依赖顺序与固定版本符合当前收口结果。
 # 对应功能实现文件路径: requirements.txt
 # 对应 spec 文件路径: spec/execute_engine/execute_engine_api.md
@@ -147,10 +131,6 @@ def test_requirements_txt_pins_expected_dependencies() -> None:
 
 
 # TC-REQ-003
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-18 16:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 16:00:00 +0800
 # 测试目的: 验证 requirements.txt 覆盖 execute_engine 公开内存参数文档提到的 numpy/torch 依赖。
 # 对应功能实现文件路径: requirements.txt
 # 对应 spec 文件路径: spec/execute_engine/execute_engine_api.md

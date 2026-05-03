@@ -23,12 +23,10 @@ helper 清单:
 - Status status = npu_demo::slice(tile, source, offset, size, stride);
 - Status filled = npu_demo::fill(tile, 0.0f);
 
-创建者: 大闸蟹
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/test_dma.py
+- test: test/include/api/dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 
@@ -48,12 +46,10 @@ helper 清单:
 使用示例:
 - Memory<TSM, float> tile = npu_demo::alloc<TSM, float>({16}, {1});
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/test_dma.py
+- test: test/include/api/dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 namespace npu_demo {
@@ -71,12 +67,10 @@ Memory<Space, T> alloc(
 使用示例:
 - Status status = npu_demo::fill<TSM, float>(target, 0.0f);
 
-创建者: 大闸蟹
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/test_dma.py
+- test: test/include/api/dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace Space, typename T>
@@ -89,12 +83,10 @@ Status fill(Memory<Space, T>& target, const T& value);
 使用示例:
 - Status status = npu_demo::slice(tile, source, offset, size, stride);
 
-创建者: 大闸蟹
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/test_dma.py
+- test: test/include/api/dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
@@ -112,12 +104,10 @@ Status slice(
 使用示例:
 - Status status = npu_demo::deslice(target, tile, offset, size, stride);
 
-创建者: 大闸蟹
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/test_dma.py
+- test: test/include/api/dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
@@ -135,12 +125,10 @@ Status deslice(
 使用示例:
 - Status status = npu_demo::transpose(target, source, Vector{1, 0});
 
-创建者: 大闸蟹
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/test_dma.py
+- test: test/include/api/dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>
@@ -156,12 +144,10 @@ Status transpose(
 使用示例:
 - Status status = npu_demo::broadcast<TSM, TSM, float, float>(target, source);
 
-创建者: 大闸蟹
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/test_dma.py
+- test: test/include/api/dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>

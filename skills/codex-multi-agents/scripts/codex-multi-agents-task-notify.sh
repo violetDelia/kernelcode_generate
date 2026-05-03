@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # codex-multi-agents-task-notify.sh
 #
-# 创建者: OpenAI
-# 最后一次更改: 小李飞刀
 #
 # 功能说明:
 # - 执行 task 脚本的通知副作用：list -init、tmux -talk、任务消息拼装、管理员摘要发送。

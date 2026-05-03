@@ -1,7 +1,5 @@
 """lowering pass compatibility package.
 
-创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 nn -> kernel lowering pass 的公开入口。
@@ -52,15 +50,15 @@ API 列表:
   - [spec/pass/tile/README.md](spec/pass/tile/README.md)
   - [spec/pass/symbol_loop_hoist.md](spec/pass/symbol_loop_hoist.md)
 - test:
-  - [test/pass/nn_lowering/public_name.py](test/pass/nn_lowering/public_name.py)
-  - [test/pass/nn_lowering/test_lowering_nn_lowering.py](test/pass/nn_lowering/test_lowering_nn_lowering.py)
-  - [test/pass/test_dma_memory_hierarchy.py](test/pass/test_dma_memory_hierarchy.py)
-  - [test/pass/decompass/test_softmax.py](test/pass/decompass/test_softmax.py)
-  - [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
-  - [test/pass/tile/test_analysis.py](test/pass/tile/test_analysis.py)
-  - [test/pass/tile/test_elewise.py](test/pass/tile/test_elewise.py)
-  - [test/pass/tile/test_reduce.py](test/pass/tile/test_reduce.py)
-  - [test/pass/test_symbol_loop_hoist.py](test/pass/test_symbol_loop_hoist.py)
+  - [test/passes/lowering/nn_lowering/test_public_name.py](test/passes/lowering/nn_lowering/test_public_name.py)
+  - [test/passes/lowering/nn_lowering/test_nn_lowering.py](test/passes/lowering/nn_lowering/test_nn_lowering.py)
+  - [test/passes/test_dma_memory_hierarchy.py](test/passes/test_dma_memory_hierarchy.py)
+  - [test/passes/decompass/test_softmax.py](test/passes/decompass/test_softmax.py)
+  - [test/passes/test_outline_device_kernel.py](test/passes/test_outline_device_kernel.py)
+  - [test/passes/tile/test_analysis.py](test/passes/tile/test_analysis.py)
+  - [test/passes/tile/test_elewise.py](test/passes/tile/test_elewise.py)
+  - [test/passes/tile/test_reduce.py](test/passes/tile/test_reduce.py)
+  - [test/passes/test_symbol_loop_hoist.py](test/passes/test_symbol_loop_hoist.py)
 - 功能实现:
   - [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
   - [kernel_gen/passes/dma_memory_hierarchy.py](kernel_gen/passes/dma_memory_hierarchy.py)

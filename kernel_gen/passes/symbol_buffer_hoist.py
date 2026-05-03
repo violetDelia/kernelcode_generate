@@ -1,7 +1,5 @@
 """symbol-buffer-hoist pass.
 
-创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 定义 `symbol-buffer-hoist` 的公开 pass、公开 pattern 与公开 pattern getter。
@@ -14,9 +12,8 @@ API 列表:
 - `class DmaAllocInSymbolForHoistPattern()`
 - `DmaAllocInSymbolForHoistPattern.match_and_rewrite(op: DmaAllocOp, rewriter: PatternRewriter) -> None`
 - `get_symbol_buffer_hoist_patterns() -> list[RewritePattern]`
-- `class SymbolBufferHoistPass()`
+- `class SymbolBufferHoistPass(fold: bool = True)`
 - `SymbolBufferHoistPass.apply(ctx: Context, module: ModuleOp) -> None`
-- `SymbolBufferHoistPass.run(module: ModuleOp) -> ModuleOp`
 
 使用示例:
 - from xdsl.context import Context
@@ -27,8 +24,8 @@ API 列表:
 
 关联文件:
 - spec: spec/pass/symbol_buffer_hoist.md
-- test: test/pass/test_symbol_buffer_hoist.py
-- test: test/pass/test_pass_registry.py
+- test: test/passes/test_symbol_buffer_hoist.py
+- test: test/passes/test_registry.py
 - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
 """
 
@@ -59,8 +56,6 @@ from kernel_gen.passes.pass_manager import Pass
 def _is_loop_invariant_value(value: SSAValue, loop_block: Block) -> bool:
     """判断 SSA 值是否定义在当前 loop body 之外。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 当前专题只接受 shape operand 直接来自 loop 外 SSA。
@@ -71,7 +66,7 @@ def _is_loop_invariant_value(value: SSAValue, loop_block: Block) -> bool:
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/pass/test_symbol_buffer_hoist.py
+    - test: test/passes/test_symbol_buffer_hoist.py
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
@@ -86,8 +81,6 @@ def _is_loop_invariant_value(value: SSAValue, loop_block: Block) -> bool:
 def _shape_is_loop_invariant(op: DmaAllocOp, loop_block: Block) -> bool:
     """判断 `dma.alloc` 的 dynamic_shape 是否全部来自 loop 外。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 空 `dynamic_shape` 视为满足 invariant。
@@ -98,7 +91,7 @@ def _shape_is_loop_invariant(op: DmaAllocOp, loop_block: Block) -> bool:
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/pass/test_symbol_buffer_hoist.py
+    - test: test/passes/test_symbol_buffer_hoist.py
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
@@ -108,8 +101,6 @@ def _shape_is_loop_invariant(op: DmaAllocOp, loop_block: Block) -> bool:
 def _is_supported_direct_use(use: Use) -> bool:
     """判断 `dma.alloc` 的单个直接 use 是否属于当前公开白名单。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 输入 staging buffer：仅接受 `dma.slice` 的 `target` operand。
@@ -121,7 +112,7 @@ def _is_supported_direct_use(use: Use) -> bool:
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/pass/test_symbol_buffer_hoist.py
+    - test: test/passes/test_symbol_buffer_hoist.py
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
@@ -134,8 +125,6 @@ def _is_supported_direct_use(use: Use) -> bool:
 def _collect_direct_uses(result: SSAValue) -> tuple[Use, ...]:
     """收集 alloc 结果的直接 use 列表。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 把 xdsl use 链转成稳定 tuple，便于重复遍历与空 use 判定。
@@ -145,7 +134,7 @@ def _collect_direct_uses(result: SSAValue) -> tuple[Use, ...]:
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/pass/test_symbol_buffer_hoist.py
+    - test: test/passes/test_symbol_buffer_hoist.py
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
@@ -155,8 +144,6 @@ def _collect_direct_uses(result: SSAValue) -> tuple[Use, ...]:
 def _uses_are_hoist_safe(uses: Iterable[Use]) -> bool:
     """判断 alloc 结果的直接 use 集合是否满足当前公开外提条件。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 当前公开语义要求 alloc 至少存在一个 direct use。
@@ -167,7 +154,7 @@ def _uses_are_hoist_safe(uses: Iterable[Use]) -> bool:
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/pass/test_symbol_buffer_hoist.py
+    - test: test/passes/test_symbol_buffer_hoist.py
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
@@ -178,8 +165,6 @@ def _uses_are_hoist_safe(uses: Iterable[Use]) -> bool:
 class DmaAllocInSymbolForHoistPattern(RewritePattern):
     """`symbol.for` 内 `dma.alloc` 外提 pattern。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 只匹配当前 `symbol.for` body block 顶层的 `dma.alloc`。
@@ -190,7 +175,7 @@ class DmaAllocInSymbolForHoistPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/pass/test_symbol_buffer_hoist.py
+    - test: test/passes/test_symbol_buffer_hoist.py
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
@@ -198,8 +183,6 @@ class DmaAllocInSymbolForHoistPattern(RewritePattern):
     def match_and_rewrite(self, op: DmaAllocOp, rewriter: PatternRewriter, /) -> None:
         """对满足公开条件的 loop 内 `dma.alloc` 执行外提。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 仅当 alloc 位于 `symbol.for` 直接 body block 内时继续。
@@ -211,7 +194,7 @@ class DmaAllocInSymbolForHoistPattern(RewritePattern):
 
         关联文件:
         - spec: spec/pass/symbol_buffer_hoist.md
-        - test: test/pass/test_symbol_buffer_hoist.py
+        - test: test/passes/test_symbol_buffer_hoist.py
         - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
         """
 
@@ -233,8 +216,6 @@ class DmaAllocInSymbolForHoistPattern(RewritePattern):
 def get_symbol_buffer_hoist_patterns() -> list[RewritePattern]:
     """返回 `symbol-buffer-hoist` 公开 pattern 列表。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 当前专题只公开一个 `dma.alloc` 外提 pattern。
@@ -245,7 +226,7 @@ def get_symbol_buffer_hoist_patterns() -> list[RewritePattern]:
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/pass/test_symbol_buffer_hoist.py
+    - test: test/passes/test_symbol_buffer_hoist.py
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
@@ -255,8 +236,6 @@ def get_symbol_buffer_hoist_patterns() -> list[RewritePattern]:
 class SymbolBufferHoistPass(Pass):
     """`symbol-buffer-hoist` pass。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 通过 pattern walker 处理 module 中满足公开条件的 `dma.alloc` 外提。
@@ -271,8 +250,8 @@ class SymbolBufferHoistPass(Pass):
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
-    - test: test/pass/test_symbol_buffer_hoist.py
-    - test: test/pass/test_pass_registry.py
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - test: test/passes/test_registry.py
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
@@ -281,8 +260,6 @@ class SymbolBufferHoistPass(Pass):
     def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行 `symbol-buffer-hoist` ModulePass。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 只处理 `builtin.module`。
@@ -294,8 +271,8 @@ class SymbolBufferHoistPass(Pass):
 
         关联文件:
         - spec: spec/pass/symbol_buffer_hoist.md
-        - test: test/pass/test_symbol_buffer_hoist.py
-        - test: test/pass/test_pass_registry.py
+        - test: test/passes/test_symbol_buffer_hoist.py
+        - test: test/passes/test_registry.py
         - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
         """
 
@@ -314,30 +291,6 @@ class SymbolBufferHoistPass(Pass):
             module.verify()
         except VerifyException as exc:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"SymbolBufferHoistVerifierError: {exc}") from exc
-
-    def run(self, module: ModuleOp) -> ModuleOp:
-        """兼容旧 `Pass.run(module)` 入口。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 复用 `apply(Context(), module)` 执行 pass。
-        - 返回原 `module`，保持既有 `PassManager.run(...)` 兼容语义。
-
-        使用示例:
-        - result = SymbolBufferHoistPass().run(module)
-
-        关联文件:
-        - spec: spec/pass/symbol_buffer_hoist.md
-        - test: test/pass/test_symbol_buffer_hoist.py
-        - test: test/pass/test_pass_registry.py
-        - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
-        """
-
-        self.apply(Context(), module)
-        return module
-
 
 __all__ = [
     "DmaAllocInSymbolForHoistPattern",

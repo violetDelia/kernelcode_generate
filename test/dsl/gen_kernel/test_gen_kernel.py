@@ -1,7 +1,5 @@
 """gen_kernel tests.
 
-创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 func.func 到目标函数源码的组装行为。
@@ -10,7 +8,7 @@
 - pytest -q test/dsl/gen_kernel/test_gen_kernel.py
 
 覆盖率信息:
-- 覆盖率命令: coverage run -m pytest -q test/dsl/gen_kernel/emit/test_emit.py test/dsl/gen_kernel/test_gen_kernel.py && coverage report --include=kernel_gen/dsl/gen_kernel/emit/__init__.py,kernel_gen/dsl/gen_kernel/gen_kernel.py -m
+- 覆盖率命令: coverage run -m pytest -q test/dsl/gen_kernel/emit/test_package.py test/dsl/gen_kernel/test_gen_kernel.py && coverage report --include=kernel_gen/dsl/gen_kernel/emit/__init__.py,kernel_gen/dsl/gen_kernel/gen_kernel.py -m
 - 覆盖率结果: emit 100%, gen_kernel 100%（2026-03-23 22:45:14 +0800）
 - 达标线: 95%
 
@@ -22,6 +20,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 import os
 import shutil
@@ -52,7 +51,7 @@ from xdsl.dialects.builtin import (
     i1,
     i32,
 )
-from xdsl.ir import Block, Operation, Region
+from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.irdl import IRDLOperation, irdl_op_definition, result_def
 from xdsl.parser import Parser
 
@@ -87,7 +86,7 @@ from kernel_gen.dialect.symbol import (
 )
 from kernel_gen.dialect.tuner import TunerCostOp, TunerParamOp
 from kernel_gen.dsl.gen_kernel import EmitCContext, KernelEmitter, dsl_gen_kernel, emit_c, emit_c_op, emit_c_value, gen_kernel
-from kernel_gen.dsl.mlir_gen import build_func_op, mlir_gen
+from kernel_gen.dsl.ast.mlir_gen import mlir_gen
 from kernel_gen.operation.dma import alloc, deslice, slice
 from kernel_gen.operation.nn import matmul
 from kernel_gen.operation.scf import loop
@@ -108,11 +107,11 @@ def _reset_core_config() -> None:
 gen_kernel_module = importlib.import_module("kernel_gen.dsl.gen_kernel")
 gen_kernel_entry_module = importlib.import_module("kernel_gen.dsl.gen_kernel.gen_kernel")
 emit_context_module = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_context")
-tile_test_shared = importlib.import_module("test.pass.tile.shared")
+tile_test_shared = importlib.import_module("test.passes.tile.test_shared")
 tile_analysis_helpers = SimpleNamespace(
-    _build_module=tile_test_shared.build_elementwise_module,
-    _build_broadcast_module=tile_test_shared.build_broadcast_module,
-    _build_matmul_module=tile_test_shared.build_matmul_module,
+    build_module=tile_test_shared.build_elementwise_module,
+    build_broadcast_module=tile_test_shared.build_broadcast_module,
+    build_matmul_module=tile_test_shared.build_matmul_module,
 )
 tile_analysis_module = importlib.import_module("kernel_gen.passes.tile.analysis")
 tile_elewise_module = importlib.import_module("kernel_gen.passes.tile.elewise")
@@ -122,6 +121,8 @@ tile_reduce_impl = importlib.import_module("kernel_gen.passes.tile.reduce")
 TileAnalysisPass = tile_analysis_module.TileAnalysisPass
 TileElewisePass = tile_elewise_module.TileElewisePass
 TileReducePass = tile_reduce_module.TileReducePass
+DslRuntimeArg = Memory | SymbolDim | int | float | bool | str
+DslFunctionReturn = DslRuntimeArg | None
 
 
 @irdl_op_definition
@@ -166,10 +167,6 @@ def _npu_ctx() -> EmitCContext:
 
 
 # TC-GK-000A
-# 创建者: 大闸蟹
-# 最后一次更改: 大闸蟹
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 验证 `gen_kernel(...)` 根据公开 `dump_dir` 配置写出最终源码。
 # 测试目的: 锁定源码 dump 属于 gen_kernel 公共链路，不需要 runner 或 dsl_run 额外手写 source.cpp。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_dump_dir_writes_source
@@ -199,8 +196,6 @@ def test_gen_kernel_public_modules_exist_and_old_legacy_loader_path_is_gone() ->
 def _parse_npu_demo_launch_module(text: str) -> ModuleOp:
     """解析 `npu_demo` launch 测试 IR。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 复用仓库默认 dialect 上下文解析单函数 launch module。
@@ -218,7 +213,7 @@ def _parse_npu_demo_launch_module(text: str) -> ModuleOp:
     return Parser(build_default_context(), text).parse_module()
 
 
-def _make_memory_type(shape: list[int], stride: list[int], element_type: object = i32, space: str = "global") -> NnMemoryType:
+def _make_memory_type(shape: list[int], stride: list[int], element_type: Attribute = i32, space: str = "global") -> NnMemoryType:
     return NnMemoryType(
         ArrayAttr([IntAttr(dim) for dim in shape]),
         ArrayAttr([IntAttr(dim) for dim in stride]),
@@ -231,16 +226,22 @@ def _tensor_arg(shape: list[int | str], dtype: NumericType = NumericType.Int32) 
     return Memory(shape, dtype)
 
 
+def _func_from_mlir_gen(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> func.FuncOp:
+    module = mlir_gen(fn, *runtime_args)
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    return func_op.clone()
+
+
 def _arg_attrs(*names: str) -> ArrayAttr[DictionaryAttr]:
     return ArrayAttr([DictionaryAttr({"name": StringAttr(name)}) for name in names])
 
 
-def _func(name: str, input_types: list[object], result_types: list[object], block: Block, arg_names: tuple[str, ...]) -> func.FuncOp:
+def _func(name: str, input_types: list[Attribute], result_types: list[Attribute], block: Block, arg_names: tuple[str, ...]) -> func.FuncOp:
     func_type = FunctionType.from_lists(input_types, result_types)
     return func.FuncOp(name, func_type, Region(block), arg_attrs=_arg_attrs(*arg_names))
 
 
-def _alloc_ops(source_memory: object, mem_type: NnMemoryType) -> tuple[list[object], DmaAllocOp]:
+def _alloc_ops(source_memory: SSAValue, mem_type: NnMemoryType) -> tuple[list[Operation], DmaAllocOp]:
     shape_ops = [SymbolGetDimOp(source_memory, axis) for axis, _ in enumerate(mem_type.shape.data)]
     alloc = DmaAllocOp([op.result for op in shape_ops], mem_type)
     return [*shape_ops, alloc], alloc
@@ -266,8 +267,6 @@ def _make_npu_demo_add_barrier_module(
 ) -> ModuleOp:
     """构造 `npu_demo` launch wrapper/body 受控 module。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 生成 `body + wrapper` 双函数 module，覆盖 `gen_kernel(target="npu_demo")` 的受控 `builtin.module` 子集。
@@ -376,8 +375,6 @@ def _make_npu_demo_add_barrier_module(
 def _make_npu_demo_helper_func(name: str = "npu_demo_helper") -> func.FuncOp:
     """构造 `npu_demo` 受控 module 的 helper `func.func`。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 为 `target="npu_demo"` 的 module 顺序输出测试提供一个最小 helper。
@@ -400,8 +397,6 @@ def _make_npu_demo_helper_func(name: str = "npu_demo_helper") -> func.FuncOp:
 def _make_npu_demo_cost_func(name: str, cost_kind: str) -> func.FuncOp:
     """构造 `npu_demo` sibling cost `func.func`。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 为 `target="npu_demo"` 的 module 提供最小 sibling cost function，覆盖
@@ -436,8 +431,6 @@ def _make_npu_demo_cost_func(name: str, cost_kind: str) -> func.FuncOp:
 def _make_npu_demo_cost_function_module() -> ModuleOp:
     """构造同时包含 kernel 与 sibling cost functions 的 `npu_demo` module。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 复用 `body + wrapper` 受控 module 骨架，并追加 `compute/memory` 两个 sibling cost functions。
@@ -463,8 +456,6 @@ def _make_npu_demo_cost_function_module() -> ModuleOp:
 def _lower_func(func_op: func.FuncOp) -> func.FuncOp:
     """对单个 `func.func` 执行 `NnLoweringPass` 并返回改写后的函数。
 
-    创建者: 小李飞刀
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 为 I3 的 pass-after IR codegen 测试提供最小包装。
@@ -480,15 +471,13 @@ def _lower_func(func_op: func.FuncOp) -> func.FuncOp:
     """
 
     module = ModuleOp([func_op])
-    NnLoweringPass().run(module)
+    NnLoweringPass().apply(Context(), module)
     return next(op for op in module.ops if isinstance(op, func.FuncOp))
 
 
 def _rewrite_func(func_op: func.FuncOp) -> func.FuncOp:
     """对单个 `func.func` 执行 `BufferResultsToOutParamsPass` 并返回改写后的函数。
 
-    创建者: jcc你莫辜负
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 为 O5 的 rewrite-after-IR codegen 测试提供最小包装。
@@ -504,15 +493,13 @@ def _rewrite_func(func_op: func.FuncOp) -> func.FuncOp:
     """
 
     module = ModuleOp([func_op])
-    BufferResultsToOutParamsPass().run(module)
+    BufferResultsToOutParamsPass().apply(Context(), module)
     return next(op for op in module.ops if isinstance(op, func.FuncOp))
 
 
 def _lower_and_rewrite_func(func_op: func.FuncOp) -> func.FuncOp:
     """对单个 `func.func` 先 lowering 再执行 out-param rewrite。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 固定公开成功链路为 `NnLoweringPass -> BufferResultsToOutParamsPass`。
@@ -528,23 +515,21 @@ def _lower_and_rewrite_func(func_op: func.FuncOp) -> func.FuncOp:
     """
 
     module = ModuleOp([func_op])
-    NnLoweringPass().run(module)
-    BufferResultsToOutParamsPass().run(module)
+    NnLoweringPass().apply(Context(), module)
+    BufferResultsToOutParamsPass().apply(Context(), module)
     return next(op for op in module.ops if isinstance(op, func.FuncOp))
 
 
 def _tile_analysis_func(module: ModuleOp) -> func.FuncOp:
     """对单个 `func.func` 执行 tile-analysis。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 为 tile after-IR 负例测试提供只带 `tile.analysis + tile.tile_exprs` 的最小包装。
     - 返回被 pass 标注后的函数，便于后续人为构造缺环路/缺 `tuner.param` 的 malformed IR。
 
     使用示例:
-    - func_op = _tile_analysis_func(tile_analysis_helpers._build_module())
+    - func_op = _tile_analysis_func(tile_analysis_helpers.build_module())
 
     关联文件:
     - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -560,15 +545,13 @@ def _tile_analysis_func(module: ModuleOp) -> func.FuncOp:
 def _tile_elewise_func(module: ModuleOp) -> func.FuncOp:
     """对单个 `func.func` 先执行 tile-analysis 再执行 tile-elewise。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 为 tile-elewise 代码生成测试提供最小组合包装。
     - 返回被 pass 改写后的函数，便于后续交给 `gen_kernel(...)`。
 
     使用示例:
-    - func_op = _tile_elewise_func(tile_analysis_helpers._build_module())
+    - func_op = _tile_elewise_func(tile_analysis_helpers.build_module())
 
     关联文件:
     - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -585,15 +568,13 @@ def _tile_elewise_func(module: ModuleOp) -> func.FuncOp:
 def _tile_reduce_func(module: ModuleOp) -> func.FuncOp:
     """对单个 `func.func` 先执行 tile-analysis 再执行 tile-reduce。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 为 tile-reduce 代码生成/结构测试提供最小组合包装。
     - 返回被 pass 改写后的函数，便于后续交给 `gen_kernel(...)` 或直接断言 IR。
 
     使用示例:
-    - func_op = _tile_reduce_func(tile_analysis_helpers._build_matmul_module())
+    - func_op = _tile_reduce_func(tile_analysis_helpers.build_matmul_module())
 
     关联文件:
     - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -610,8 +591,6 @@ def _tile_reduce_func(module: ModuleOp) -> func.FuncOp:
 def test_tile_gen_kernel_paths_use_kernel_gen_tile_modules() -> None:
     """验证 tile family 的 canonical helper / implementation path 已收口到 `kernel_gen.passes.tile.*`。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 锁定 `tile-analysis` / `tile-elewise` / `tile-reduce` 的真实实现落点已迁到 `kernel_gen.passes.tile.*`。
@@ -639,8 +618,6 @@ def test_tile_gen_kernel_paths_use_kernel_gen_tile_modules() -> None:
 def _run_local_compile_command(command: list[str]) -> subprocess.CompletedProcess[str]:
     """执行当前测试文件使用的本地编译命令。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 为 `test_gen_kernel.py` 内的 compile-only / compile-and-run helper 提供统一的 `g++` 调用入口。
@@ -677,8 +654,6 @@ def _run_local_compile_command(command: list[str]) -> subprocess.CompletedProces
 def _compile_and_run(source: str) -> None:
     """编译并运行 `gen_kernel` 生成的 C++ 片段。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 使用 `g++ -std=c++17` 编译临时源码，并执行生成的可执行文件。
@@ -734,8 +709,6 @@ def _compile_and_run(source: str) -> None:
 def _compile_only(source: str) -> None:
     """仅编译 `gen_kernel` 生成的 C++ 片段。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 使用 `g++ -std=c++17 -c` 编译临时源码，验证目标 include/签名可通过编译。
@@ -787,8 +760,6 @@ def _compile_only(source: str) -> None:
 def _compile_and_run_npu_demo_add_barrier_source(source: str, *, prove_barrier_runtime: bool) -> None:
     """编译并运行 `npu_demo add+barrier` 生成源码。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 把 `gen_kernel(target="npu_demo")` 生成的 `add_barrier` 双函数源码拼接到最小可执行程序中。
@@ -934,8 +905,6 @@ int main() {{
 
 
 # GK-S7-004
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
 # 功能说明: 直接锁定 test_gen_kernel 本地编译 helper 继续复用当前文件内统一编译入口。
 # 测试目的: 防止 `_compile_only` / `_compile_and_run` 回退到各自维护独立编译流程，只靠人工读代码发现分叉。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_local_compile_helpers_delegate_local_compile_runner
@@ -948,12 +917,12 @@ def test_gen_kernel_local_compile_helpers_delegate_local_compile_runner(
     compile_calls: list[tuple[str, ...]] = []
     runtime_calls: list[tuple[str, ...]] = []
 
-    def _fake_run_local_compile_command(command: object) -> subprocess.CompletedProcess[str]:
+    def _fake_run_local_compile_command(command: list[str]) -> subprocess.CompletedProcess[str]:
         assert isinstance(command, list)
         compile_calls.append(tuple(str(part) for part in command))
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    def _fake_run(command: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def _fake_run(command: list[str], **kwargs: bool) -> subprocess.CompletedProcess[str]:
         assert isinstance(command, list)
         runtime_calls.append(tuple(str(part) for part in command))
         assert kwargs["check"] is False
@@ -987,10 +956,6 @@ def test_gen_kernel_local_compile_helpers_delegate_local_compile_runner(
 
 
 # GK-001
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
-# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证 func.func 可生成完整后端源码。
 # 测试目的: 验证 gen_kernel 返回签名与函数体文本。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_returns_target_source
@@ -1022,16 +987,12 @@ def test_gen_kernel_returns_target_source() -> None:
     memory_func = _func("memory_kernel", [mem], [mem], memory_block, ("input",))
     memory_source = gen_kernel(_rewrite_func(memory_func), _ctx())
     assert memory_source.startswith(
-        "void memory_kernel(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& input)"
+        "void memory_kernel(Memory<MemorySpace::GM, int32_t>& arg0, Memory<MemorySpace::GM, int32_t>& input)"
     )
     assert "out = input;" not in memory_source
 
 
 # GK-014B
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-22 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-22 00:00:00 +0800
 # 功能说明: 验证 `gen_kernel(...)` 直接使用模块本地 `emit_c_op` 时，仍会把 `KernelCodeError` 折回公开错误类型。
 # 测试目的: 锁定 canonical `gen_kernel.py` 的直接 emit 绑定语义，避免错误类型泄漏。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_converts_emit_error_to_gen_kernel_error
@@ -1039,7 +1000,7 @@ def test_gen_kernel_returns_target_source() -> None:
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 def test_gen_kernel_converts_emit_error_to_gen_kernel_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(_op: object, _ctx: EmitCContext) -> str:
+    def _boom(_op: Operation, _ctx: EmitCContext) -> str:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.GEN_KERNEL, "boom")
 
     monkeypatch.setattr(gen_kernel_entry_module, "emit_c_op", _boom)
@@ -1049,10 +1010,6 @@ def test_gen_kernel_converts_emit_error_to_gen_kernel_error(monkeypatch: pytest.
 
 
 # GK-014C
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-22 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-22 00:00:00 +0800
 # 功能说明: 验证 `gen_kernel.py` 模块本身只保留 `spec` 已定义的公开对象可达性。
 # 测试目的: 锁定 `kernel_gen.dsl.gen_kernel.gen_kernel` 的公开面只保留 `gen_kernel(...)` / `dsl_gen_kernel(...)`，避免内部 helper 或未入 `spec` 的模块元数据被当成跨文件入口。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_entry_module_hides_internal_emitter_entry
@@ -1073,10 +1030,6 @@ def test_gen_kernel_entry_module_hides_internal_emitter_entry() -> None:
 
 
 # GK-014
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-04 20:25:00 +0800
-# 最近一次运行成功时间: 2026-04-04 20:25:00 +0800
 # 功能说明: 验证 gen_kernel 包根与上下文子模块对外导出的公开对象可导入、可达。
 # 测试目的: 锁定 `kernel_gen.dsl.gen_kernel`、`gen_kernel.py` 与 `emit_context.py` 的公开导入行为，避免旧双接口或未入 `spec` 的模块元数据被当成稳定合同。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_is_the_package_public_entry
@@ -1122,10 +1075,6 @@ def test_gen_kernel_is_the_package_public_entry() -> None:
 
 
 # GK-014D
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 验证 `dsl_gen_kernel(...)` 复用公开 `mlir_gen(...) + gen_kernel(...)` 路径，不改变旧 IR 入口合同。
 # 测试目的: 锁定 callable 公开入口新增后，旧 `gen_kernel(module, ctx)` 链路仍是唯一源码生成后端。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_dsl_gen_kernel_matches_public_mlir_gen_plus_gen_kernel_path
@@ -1153,10 +1102,6 @@ def test_dsl_gen_kernel_matches_public_mlir_gen_plus_gen_kernel_path() -> None:
 
 
 # GK-014A
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
 # 功能说明: 验证 legacy `gen_signature/gen_body` 双接口不再作为公开稳定入口存在。
 # 测试目的: 锁定直接 attribute 访问和 `from ... import ...` 都不能再拿到旧双接口，避免“表面只测 gen_kernel，实际 legacy 双接口仍可直接使用”的假闭环。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_has_no_legacy_double_interface
@@ -1173,10 +1118,6 @@ def test_gen_kernel_has_no_legacy_double_interface() -> None:
 
 
 # GK-001A
-# 创建者: jcc你莫辜负
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
 # 功能说明: 验证单个普通 op 输入会直接委托给 canonical `gen_kernel.py` 的本地 `emit_c_op` 绑定。
 # 测试目的: 锁定 gen_kernel(op_or_func, ctx) 不再经过包根额外包装，直接复用节点级公开接口。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_delegates_single_op_input_to_emit_c
@@ -1187,7 +1128,7 @@ def test_gen_kernel_has_no_legacy_double_interface() -> None:
 def test_gen_kernel_delegates_single_op_input_to_emit_c(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
 
-    def _fake_emit(op: object, _ctx: EmitCContext) -> str:
+    def _fake_emit(op: Operation, _ctx: EmitCContext) -> str:
         seen.append(op.name)
         return "// single-op"
 
@@ -1200,18 +1141,14 @@ def test_gen_kernel_delegates_single_op_input_to_emit_c(monkeypatch: pytest.Monk
 
 
 # GK-002
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
-# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
-# 功能说明: 验证输入 Memory 参数使用只读签名。
-# 测试目的: 验证 gen_kernel 生成的完整源码对 Memory 输入使用 const 引用。
-# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_uses_readonly_memory_inputs
+# 功能说明: 验证输入 Memory 参数统一使用非 const 引用签名。
+# 测试目的: 验证 gen_kernel 生成的完整源码不再按读写语义拆分 Memory 参数 constness。
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_uses_mutable_memory_inputs
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 
-def test_gen_kernel_uses_readonly_memory_inputs() -> None:
+def test_gen_kernel_uses_mutable_memory_inputs() -> None:
     mem = _make_memory_type([2, 2], [2, 1])
     block = Block(arg_types=[mem])
     block.add_op(func.ReturnOp())
@@ -1219,14 +1156,10 @@ def test_gen_kernel_uses_readonly_memory_inputs() -> None:
 
     source = gen_kernel(func_op, _ctx())
 
-    assert source.startswith("void read_only(const Memory<MemorySpace::GM, int32_t>& input)")
+    assert source.startswith("void read_only(Memory<MemorySpace::GM, int32_t>& input)")
 
 
 # GK-O5-001
-# 创建者: jcc你莫辜负
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
 # 功能说明: 验证 rewritten 单 output memory 函数可被 gen_kernel 消费。
 # 测试目的: 锁定公开成功链路必须来自 rewrite 后 IR，源码签名使用前置 `arg0`，不再依赖旧 memory return ABI。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_accepts_rewritten_single_output_function
@@ -1242,16 +1175,12 @@ def test_gen_kernel_accepts_rewritten_single_output_function() -> None:
     source = gen_kernel(_rewrite_func(func_op), _ctx())
 
     assert source.startswith(
-        "void produce(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& input)"
+        "void produce(Memory<MemorySpace::GM, int32_t>& arg0, Memory<MemorySpace::GM, int32_t>& input)"
     )
     assert "out = input;" not in source
 
 
 # GK-O5-002
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 待运行
-# 最近一次运行成功时间: 待运行
 # 功能说明: 验证 rewritten `dma.deslice` memory return 会把可写 ABI 收口到前置 `arg0`。
 # 测试目的: 锁定 `buffer-results-to-out-params` 不只替换 return SSA，还会把 deslice 的真实写回目标改成 out-first 参数。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rewritten_deslice_memory_result_uses_front_out_param
@@ -1279,17 +1208,13 @@ def test_gen_kernel_rewritten_deslice_memory_result_uses_front_out_param() -> No
     source = gen_kernel(_rewrite_func(func_op), _ctx())
 
     assert source.startswith(
-        "void deslice_case(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::LM, int32_t>& src, const Memory<MemorySpace::GM, int32_t>& target)"
+        "void deslice_case(Memory<MemorySpace::GM, int32_t>& arg0, Memory<MemorySpace::LM, int32_t>& src, Memory<MemorySpace::GM, int32_t>& target)"
     )
     assert "arg0.at(dma0_dst_indices) = src.at(dma0_src_indices);" in source
     assert "target.at(dma0_dst_indices) = src.at(dma0_src_indices);" not in source
 
 
 # GK-004
-# 创建者: 金铲铲大作战
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
-# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证缺失参数名时仍生成稳定默认命名。
 # 测试目的: 验证 gen_kernel 在完整源码中保持标量参数顺序，并在缺失 `arg_attrs.name` 时使用 `arg{index}`。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_uses_default_arg_names_when_missing_attrs
@@ -1327,10 +1252,6 @@ def test_gen_kernel_uses_default_arg_names_when_missing_attrs() -> None:
 
 
 # GK-005
-# 创建者: 金铲铲大作战
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
-# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证完整源码中的普通 op 顺序与 IR 一致。
 # 测试目的: 验证 gen_kernel 的函数级主遍历不改变 IR 中的 op 顺序。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_ops_in_order
@@ -1354,10 +1275,6 @@ def test_gen_kernel_emits_ops_in_order() -> None:
 
 
 # GK-005A
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
 # 功能说明: 验证普通 op 逐个委托到 canonical `gen_kernel.py` 的本地 `emit_c_op`。
 # 测试目的: 锁定 gen_kernel 的函数级主遍历只把非 return op 委托给节点级公开接口。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_delegates_to_emit_c_for_non_return_ops
@@ -1375,7 +1292,7 @@ def test_gen_kernel_delegates_to_emit_c_for_non_return_ops(monkeypatch: pytest.M
     func_op = _func("ordered_body", [i32, i32], [], block, ("lhs", "rhs"))
     seen: list[str] = []
 
-    def _fake_emit(op: object, _ctx: EmitCContext) -> str:
+    def _fake_emit(op: Operation, _ctx: EmitCContext) -> str:
         seen.append(op.name)
         return f"{_ctx.current_indent}// {op.name}"
 
@@ -1390,10 +1307,6 @@ def test_gen_kernel_delegates_to_emit_c_for_non_return_ops(monkeypatch: pytest.M
 
 
 # GK-005B
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
 # 功能说明: 验证 func.return/out 绑定由函数级主遍历流程处理。
 # 测试目的: 锁定 return 收尾不走普通 emit_c_op 公开职责，避免 `func.return` 回流为节点级公开接口。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_handles_func_return_and_out_binding_in_main_flow
@@ -1407,7 +1320,7 @@ def test_gen_kernel_handles_func_return_and_out_binding_in_main_flow(monkeypatch
     second_block.add_op(func.ReturnOp(second_block.args[1]))
     second_func = _rewrite_func(_func("return_second", [mem, mem], [mem], second_block, ("lhs", "rhs")))
 
-    def _unexpected_emit(op: object, _ctx: EmitCContext) -> str:
+    def _unexpected_emit(op: Operation, _ctx: EmitCContext) -> str:
         raise AssertionError(f"emit_c_op should not see {op}")
 
     monkeypatch.setattr(gen_kernel_entry_module, "emit_c_op", _unexpected_emit)
@@ -1416,17 +1329,13 @@ def test_gen_kernel_handles_func_return_and_out_binding_in_main_flow(monkeypatch
 
     assert source.startswith(
         "void return_second(Memory<MemorySpace::GM, int32_t>& arg0, "
-        "const Memory<MemorySpace::GM, int32_t>& lhs, const Memory<MemorySpace::GM, int32_t>& rhs)"
+        "Memory<MemorySpace::GM, int32_t>& lhs, Memory<MemorySpace::GM, int32_t>& rhs)"
     )
     assert "func.return" not in source
     assert "out = rhs;" not in source
 
 
 # GK-005C
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 验证 `KernelEmitter.emit(...)` 的公开 dispatch 错误边界。
 # 测试目的: 锁定 unsupported attr、裸 `func.return` 与非 `npu_demo` `builtin.module` 都通过公开 `KernelEmitter` 暴露稳定错误。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_kernel_emitter_public_dispatch_error_boundaries
@@ -1447,10 +1356,6 @@ def test_kernel_emitter_public_dispatch_error_boundaries() -> None:
 
 
 # GK-005D
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 验证 `KernelEmitter` 的公开前导与类型分发入口。
 # 测试目的: 锁定 `emit_include()` / `emit_type()` 继续只通过 `EmitCContext` target 分发工作，不回退为私有入口。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_kernel_emitter_public_include_and_type_dispatch
@@ -1468,10 +1373,6 @@ def test_kernel_emitter_public_include_and_type_dispatch() -> None:
 
 
 # GK-006
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
-# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证 loop 片段可拼装到完整函数中。
 # 测试目的: 验证 gen_kernel 保留 scf.for 生成结果。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_assembles_loop_body
@@ -1500,10 +1401,6 @@ def test_gen_kernel_assembles_loop_body() -> None:
 
 
 # GK-007
-# 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
-# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证 emit_c 错误可向上抛出。
 # 测试目的: 验证 gen_kernel 不吞掉 emit_c 失败原因。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_propagates_emit_error
@@ -1524,10 +1421,6 @@ def test_gen_kernel_propagates_emit_error() -> None:
 
 
 # GK-008
-# 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
-# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证不合法返回形式时报错。
 # 测试目的: 验证 gen_kernel 拒绝不支持的返回形式与输入类型。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_unsupported_return_form
@@ -1560,10 +1453,6 @@ def test_gen_kernel_rejects_unsupported_return_form() -> None:
     assert source.startswith("void f16_arg(half arg0)")
 
 # GK-012
-# 创建者: jcc你莫辜负
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-01 15:07:50 +0800
-# 最近一次运行成功时间: 2026-04-01 15:07:50 +0800
 # 功能说明: 验证 f32/f64 标量与 Memory<Space, f32/f64> 可生成 float/double 与 Memory<MemorySpace::GM, float>/Memory<MemorySpace::GM, double> 形式签名。
 # 测试目的: 锁定 gen_kernel 在完整源码签名中的 f32/f64 类型映射，避免 conv2d 链路在函数级入口阶段被 TypeError 阻断或类型退化。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_supports_float32_scalar_and_memory
@@ -1580,7 +1469,7 @@ def test_gen_kernel_supports_float32_scalar_and_memory() -> None:
     source_f32 = gen_kernel(func_op_f32, _ctx())
 
     assert source_f32.startswith(
-        "void float_kernel(Memory<MemorySpace::GM, float>& arg0, const Memory<MemorySpace::GM, float>& input, float alpha)"
+        "void float_kernel(Memory<MemorySpace::GM, float>& arg0, Memory<MemorySpace::GM, float>& input, float alpha)"
     )
 
     mem_f64 = _make_memory_type([2, 2], [2, 1], element_type=f64)
@@ -1591,15 +1480,11 @@ def test_gen_kernel_supports_float32_scalar_and_memory() -> None:
     source_f64 = gen_kernel(func_op_f64, _ctx())
 
     assert source_f64.startswith(
-        "void double_kernel(Memory<MemorySpace::GM, double>& arg0, const Memory<MemorySpace::GM, double>& input, double alpha)"
+        "void double_kernel(Memory<MemorySpace::GM, double>& arg0, Memory<MemorySpace::GM, double>& input, double alpha)"
     )
 
 
 # GK-009
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-25 17:10:00 +0800
-# 最近一次运行成功时间: 2026-03-25 17:10:00 +0800
 # 功能说明: 验证生成源码保留函数名与参数名，并在缺失参数名时沿用默认命名。
 # 测试目的: 验证 gen_kernel 使用 IR 中定义的名称；当输入参数缺失 arg_attrs.name 时，源码中的签名参数名回退为 arg{index}。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_preserves_function_and_arg_names
@@ -1616,7 +1501,7 @@ def test_gen_kernel_preserves_function_and_arg_names() -> None:
     source = gen_kernel(func_op, _ctx())
 
     assert source.startswith(
-        "void named_kernel(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& tensor, int32_t scale)"
+        "void named_kernel(Memory<MemorySpace::GM, int32_t>& arg0, Memory<MemorySpace::GM, int32_t>& tensor, int32_t scale)"
     )
     assert "out = tensor;" not in source
 
@@ -1636,10 +1521,6 @@ def test_gen_kernel_preserves_function_and_arg_names() -> None:
 
 
 # GK-010
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-03-28 07:20:00 +0800
-# 最近一次运行成功时间: 2026-03-28 07:20:00 +0800
 # 功能说明: 验证 !symbol.int 返回在 cpu target 下可生成函数返回值。
 # 测试目的: 锁定 gen_kernel 对 symbol 标量返回的契约，避免退化为 unsupported return form。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_supports_symbol_scalar_return
@@ -1664,10 +1545,6 @@ def test_gen_kernel_supports_symbol_scalar_return() -> None:
 
 
 # GK-011
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-28 04:12:37 +0800
-# 最近一次运行成功时间: 2026-03-28 04:12:37 +0800
 # 功能说明: 验证非 cpu/npu_demo target 下 !symbol.int 返回必须报错。
 # 测试目的: 锁定 gen_kernel 对 symbol 标量返回的 target 白名单约束。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu
@@ -1691,10 +1568,6 @@ def test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu() -> None:
 
 
 # GK-013
-# 创建者: jcc你莫辜负
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-02 23:04:42 +0800
-# 最近一次运行成功时间: 2026-04-02 23:04:42 +0800
 # 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的 memory+memory add 在 cpu target 下可生成源码。
 # 测试目的: 清理 raw `nn.add` 直出源码的旧成功口径，锁定 pass 后逐元素加法已被消费为 `cpu::add(lhs, rhs, out)`。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu
@@ -1705,11 +1578,11 @@ def test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu() -> None:
     def add_direct(lhs: "Tensor[i32, 2, 2]", rhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
         return lhs + rhs
 
-    func_op = build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
+    func_op = _func_from_mlir_gen(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
     source = gen_kernel(_lower_and_rewrite_func(func_op), _ctx())
 
     assert source.startswith(
-        "void add_direct(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& arg1, const Memory<MemorySpace::GM, int32_t>& arg2)"
+        "void add_direct(Memory<MemorySpace::GM, int32_t>& arg0, Memory<MemorySpace::GM, int32_t>& arg1, Memory<MemorySpace::GM, int32_t>& arg2)"
     )
     assert "cpu::add(arg1, arg2, arg0);" in source
     assert "kernel." not in source
@@ -1718,10 +1591,6 @@ def test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu() -> None:
 
 
 # GK-014
-# 创建者: jcc你莫辜负
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-02 23:04:42 +0800
-# 最近一次运行成功时间: 2026-04-02 23:04:42 +0800
 # 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的 memory+const(i32) add 会先经 `dma.fill` 再生成源码。
 # 测试目的: 清理 raw mixed `nn.add` 直接出源码的旧成功口径，锁定 pass 后 `dma.fill + cpu::add(lhs, v0, out)` 文本。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu
@@ -1732,11 +1601,11 @@ def test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu() -> None:
     def add_const_direct(lhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
         return lhs + 1
 
-    func_op = build_func_op(add_const_direct, _tensor_arg([2, 2]))
+    func_op = _func_from_mlir_gen(add_const_direct, _tensor_arg([2, 2]))
     source = gen_kernel(_lower_and_rewrite_func(func_op), _ctx())
 
     assert source.startswith(
-        "void add_const_direct(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& arg1)"
+        "void add_const_direct(Memory<MemorySpace::GM, int32_t>& arg0, Memory<MemorySpace::GM, int32_t>& arg1)"
     )
     assert "cpu::add(arg1, v0, arg0);" in source
     assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in source
@@ -1747,10 +1616,6 @@ def test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu() -> None:
 
 
 # GK-015
-# 创建者: jcc你莫辜负
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-02 23:04:42 +0800
-# 最近一次运行成功时间: 2026-04-02 23:04:42 +0800
 # 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的 memory+symbol.int add 会先经 `dma.fill` 再生成源码。
 # 测试目的: 清理 raw `nn.add(memory, symbol.int)` 直接出源码的旧成功口径，锁定 pass 后 `dma.fill + cpu::add(lhs, v0, out)` 文本与 long long bias 签名。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_supports_lowered_nn_add_memory_symbol_on_cpu
@@ -1761,11 +1626,11 @@ def test_gen_kernel_supports_lowered_nn_add_memory_symbol_on_cpu() -> None:
     def add_symbol_direct(lhs: "Tensor[i32, 2, 2]", bias: int) -> "Tensor[i32, 2, 2]":
         return lhs + bias
 
-    func_op = build_func_op(add_symbol_direct, _tensor_arg([2, 2]), SymbolDim("bias"))
+    func_op = _func_from_mlir_gen(add_symbol_direct, _tensor_arg([2, 2]), SymbolDim("bias"))
     source = gen_kernel(_lower_and_rewrite_func(func_op), _ctx())
 
     assert source.startswith(
-        "void add_symbol_direct(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& arg1, long long arg2)"
+        "void add_symbol_direct(Memory<MemorySpace::GM, int32_t>& arg0, Memory<MemorySpace::GM, int32_t>& arg1, long long arg2)"
     )
     assert "cpu::add(arg1, v0, arg0);" in source
     assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in source
@@ -1780,10 +1645,6 @@ class Test_buffer_results_to_out_params_gen_kernel:
         test_gen_kernel_accepts_rewritten_single_output_function()
 
     # GK-O5-002
-    # 创建者: jcc你莫辜负
-    # 最后一次更改: 金铲铲大作战
-    # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
-    # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
     # 功能说明: 验证 rewritten mixed output 函数可被 gen_kernel 消费。
     # 测试目的: 锁定 memory 走前置 out、scalar 继续返回的 rewrite 后 ABI。
     # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_accepts_rewritten_mixed_output_function
@@ -1799,16 +1660,12 @@ class Test_buffer_results_to_out_params_gen_kernel:
         source = gen_kernel(_rewrite_func(func_op), _ctx())
 
         assert source.startswith(
-            "bool mixed_out(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& input, bool flag)"
+            "bool mixed_out(Memory<MemorySpace::GM, int32_t>& arg0, Memory<MemorySpace::GM, int32_t>& input, bool flag)"
         )
         assert "return flag;" in source
         assert "Memory<MemorySpace::GM, int32_t>& out" not in source
 
     # GK-O5-003
-    # 创建者: jcc你莫辜负
-    # 最后一次更改: 金铲铲大作战
-    # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
-    # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
     # 功能说明: 验证 rewrite 后成功链路不再残留旧 memory return ABI。
     # 测试目的: 黑盒检查 rewritten IR 与生成源码都不再依赖旧 memory return/out 推导路径。
     # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_rewritten_pipeline_has_no_memory_return_abi_left
@@ -1819,7 +1676,7 @@ class Test_buffer_results_to_out_params_gen_kernel:
         def add_direct(lhs: "Tensor[i32, 2, 2]", rhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
             return lhs + rhs
 
-        func_op = _lower_and_rewrite_func(build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2])))
+        func_op = _lower_and_rewrite_func(_func_from_mlir_gen(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2])))
         source = gen_kernel(func_op, _ctx())
         ir_text = str(func_op)
 
@@ -1830,10 +1687,6 @@ class Test_buffer_results_to_out_params_gen_kernel:
         assert "out = " not in source
 
     # GK-O5-005
-    # 创建者: 小李飞刀
-    # 最后一次更改: 小李飞刀
-    # 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
-    # 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
     # 功能说明: 验证仅 lowering 的 IR 仍会触发 gen_kernel 的 legacy ABI 拒绝。
     # 测试目的: 锁定下游合同：未执行 BufferResultsToOutParamsPass 时，gen_kernel 必须显式报错。
     # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_lowered_ir_without_buffer_results_to_out_params
@@ -1844,15 +1697,11 @@ class Test_buffer_results_to_out_params_gen_kernel:
         def add_direct(lhs: "Tensor[i32, 2, 2]", rhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
             return lhs + rhs
 
-        func_op = _lower_func(build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2])))
+        func_op = _lower_func(_func_from_mlir_gen(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2])))
         with pytest.raises(KernelCodeError, match="legacy memory return ABI is not supported"):
             gen_kernel(func_op, _ctx())
 
     # GK-O5-004
-    # 创建者: jcc你莫辜负
-    # 最后一次更改: jcc你莫辜负
-    # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
-    # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
     # 功能说明: 验证 half-rewritten IR 会被 gen_kernel 显式拒绝。
     # 测试目的: 防止“函数签名改了，但 outputs/return 仍保留旧 memory return ABI”的假闭环。
     # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_rewritten_pipeline_fails_on_half_rewritten_ir
@@ -1873,10 +1722,6 @@ class Test_buffer_results_to_out_params_gen_kernel:
 
 
 # GK-017
-# 创建者: 朽木露琪亚
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-02 21:00:00 +0800
-# 最近一次运行成功时间: 2026-04-02 21:00:00 +0800
 # 功能说明: 验证 npu_demo target 可生成无显式 KernelContext 参数的 body-level kernel 骨架。
 # 测试目的: 锁定生成源码不再暴露 `npu_demo::KernelContext& ctx`，并且查询文本显式限定为 `npu_demo::thread_id()` / `npu_demo::thread_num()`。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_body_level_kernel
@@ -1892,7 +1737,7 @@ def test_gen_kernel_emits_npu_demo_body_level_kernel() -> None:
 
     assert source.startswith('#include "include/npu_demo/npu_demo.h"\nusing namespace npu_demo;\n\n')
     assert (
-        "void demo_kernel(const Memory<MemorySpace::GM, float>& source, Memory<MemorySpace::GM, float>& out)"
+        "void demo_kernel(Memory<MemorySpace::GM, float>& source, Memory<MemorySpace::GM, float>& out)"
         in source
     )
     assert "S_INT tid = npu_demo::thread_id();" in source
@@ -1904,10 +1749,6 @@ def test_gen_kernel_emits_npu_demo_body_level_kernel() -> None:
 
 
 # GK-S12-001
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 功能说明: 验证 npu_demo 单函数 kernel family 会把最前置 out 参数生成为可写引用，并通过 Kernel helper 发射。
 # 测试目的: 锁定 `kernel.binary_elewise(kind="add")` 在 `target=npu_demo` 下的函数签名与 helper 调用都遵循 `out-first` 口径，防止把 out 误生成为 `const Memory&`。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_kernel_binary_signature_out_first
@@ -1939,18 +1780,14 @@ def test_gen_kernel_emits_npu_demo_kernel_binary_signature_out_first() -> None:
     source = gen_kernel(func_op, _npu_ctx())
 
     assert (
-        "void kernel_binary_add_case(Memory<TLM1, double>& arg0, const Memory<TLM1, int32_t>& arg1, const Memory<TLM1, int32_t>& arg2)"
+        "void kernel_binary_add_case(Memory<TLM1, double>& arg0, Memory<TLM1, int32_t>& arg1, Memory<TLM1, int32_t>& arg2)"
         in source
     )
-    assert "const Memory<TLM1, double>& arg0" not in source
+    assert "const Memory<TLM1" not in source
     assert "add<TLM1, int32_t, double>(arg0 /*out*/, arg1 /*lhs*/, arg2 /*rhs*/);" in source
 
 
 # GK-017A
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 功能说明: 验证 target=npu_demo 下单函数 `dma.alloc` module 可生成 helper 形式源码。
 # 测试目的: 锁定 `builtin.module -> func.func(dma.alloc)` 这条 `npu_demo` 子集会发射 `alloc<Space, T>(shape, stride)`，不再被 launch module 约束误拒绝。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_dma_alloc_module
@@ -2001,10 +1838,6 @@ def test_gen_kernel_emits_npu_demo_dma_alloc_module() -> None:
 
 
 # GK-017A
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-05 16:36:25 +0800
-# 最近一次运行成功时间: 2026-04-05 16:36:25 +0800
 # 功能说明: 验证 npu_demo target 的 gen_kernel 源码仅依赖 npu_demo.h 即可编译。
 # 测试目的: 补齐 compile smoke，确保只包含 `include/npu_demo/npu_demo.h` 也可通过编译。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_compiles_npu_demo_source_with_single_include
@@ -2024,10 +1857,6 @@ def test_gen_kernel_compiles_npu_demo_source_with_single_include() -> None:
 
 
 # GK-017A
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-15 11:10:00 +0800
-# 最近一次运行成功时间: N/A
 # 功能说明: 验证 npu_demo target 可生成并编译 tiled matmul 源码。
 # 测试目的: 锁定二维 `slice/deslice`、`symbol.for` 与 `matmul<...>(...)` 的最小编译闭环。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_compiles_npu_demo_tiled_matmul_source
@@ -2045,14 +1874,14 @@ def test_gen_kernel_compiles_npu_demo_tiled_matmul_source() -> None:
                 deslice(out, partial, [m0, n0], [16, 16], [1, 1])
         return out
 
-    func_op = build_func_op(
+    func_op = _func_from_mlir_gen(
         tiled_matmul,
         Memory([32, 16], NumericType.Float32),
         Memory([16, 32], NumericType.Float32),
     )
     module = ModuleOp([func_op])
-    NnLoweringPass().run(module)
-    BufferResultsToOutParamsPass().run(module)
+    NnLoweringPass().apply(Context(), module)
+    BufferResultsToOutParamsPass().apply(Context(), module)
     rewritten_func = next(op for op in module.ops if isinstance(op, func.FuncOp))
 
     source = gen_kernel(rewritten_func, _npu_ctx())
@@ -2068,10 +1897,6 @@ def test_gen_kernel_compiles_npu_demo_tiled_matmul_source() -> None:
 
 
 # GK-018
-# 创建者: 朽木露琪亚
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-02 21:00:00 +0800
-# 最近一次运行成功时间: 2026-04-02 21:00:00 +0800
 # 功能说明: 验证 npu_demo target 可生成固定的 dynamic memory/view/slice/deslice/add 管线。
 # 测试目的: 锁定 `TSM/TLM`、`view/slice/deslice/add` 固定顺序，并防止回退到 `.view/load/store` 风格。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_memory_pipeline
@@ -2107,10 +1932,6 @@ def test_gen_kernel_emits_npu_demo_memory_pipeline() -> None:
 
 
 # GK-019
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-02 21:25:00 +0800
-# 最近一次运行成功时间: 2026-04-02 21:25:00 +0800
 # 功能说明: 验证 npu_demo body-level kernel 若 body 含未知 op，必须继续报错。
 # 测试目的: 防止固定骨架静默吞掉非法 body 中的未知 op。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_npu_demo_body_level_kernel_with_unknown_body_op
@@ -2130,10 +1951,6 @@ def test_gen_kernel_rejects_npu_demo_body_level_kernel_with_unknown_body_op() ->
 
 
 # GK-020
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-02 21:25:00 +0800
-# 最近一次运行成功时间: 2026-04-02 21:25:00 +0800
 # 功能说明: 验证 npu_demo body-level kernel 若 body 非空但不含未知 op，仍必须报错。
 # 测试目的: 锁定当前冻结子集只接受空 body，避免非法 return 等结构被固定骨架吞掉。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_npu_demo_body_level_kernel_with_nonempty_body
@@ -2151,10 +1968,6 @@ def test_gen_kernel_rejects_npu_demo_body_level_kernel_with_nonempty_body() -> N
 
 
 # GK-021
-# 创建者: jcc你莫辜负
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
 # 功能说明: 验证函数级特化在黑盒 `gen_kernel(...)` 输出上保持既有合同。
 # 测试目的: 锁定 lowered add 与 `npu_demo` 两类函数级形态继续只通过 `gen_kernel(...)` 黑盒验证，不依赖内部 helper、内部策略函数或内部策略名。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_black_box_lowered_add_and_npu_demo_contracts
@@ -2166,7 +1979,7 @@ def test_gen_kernel_black_box_lowered_add_and_npu_demo_contracts() -> None:
         return lhs + rhs
 
     add_source = gen_kernel(
-        _lower_and_rewrite_func(build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))),
+        _lower_and_rewrite_func(_func_from_mlir_gen(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))),
         _ctx(),
     )
     assert "cpu::add(arg1, arg2, arg0);" in add_source
@@ -2182,8 +1995,6 @@ def test_gen_kernel_black_box_lowered_add_and_npu_demo_contracts() -> None:
 
 
 # GK-I2-001
-# 创建者: 大闸蟹
-# 最后一次更改: 朽木露琪亚
 # 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的三条 nn.add CPU 路径可生成源码并完成编译执行。
 # 测试目的: 作为 I4 的统一 smoke，确认公开成功链路来自 `build_func_op -> NnLoweringPass -> gen_kernel`，而不是 raw `nn.add` direct-return 特化。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_compiles_and_runs_lowered_nn_add_variants_on_cpu
@@ -2201,15 +2012,15 @@ def test_gen_kernel_compiles_and_runs_lowered_nn_add_variants_on_cpu() -> None:
         return lhs + bias
 
     pair_source = gen_kernel(
-        _lower_and_rewrite_func(build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))),
+        _lower_and_rewrite_func(_func_from_mlir_gen(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))),
         _ctx(),
     )
     const_source = gen_kernel(
-        _lower_and_rewrite_func(build_func_op(add_const_direct, _tensor_arg([2, 2]))),
+        _lower_and_rewrite_func(_func_from_mlir_gen(add_const_direct, _tensor_arg([2, 2]))),
         _ctx(),
     )
     symbol_source = gen_kernel(
-        _lower_and_rewrite_func(build_func_op(add_symbol_direct, _tensor_arg([2, 2]), SymbolDim("bias"))),
+        _lower_and_rewrite_func(_func_from_mlir_gen(add_symbol_direct, _tensor_arg([2, 2]), SymbolDim("bias"))),
         _ctx(),
     )
 
@@ -2292,10 +2103,6 @@ int main() {{
 
 
 # GK-S3-001
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 功能说明: 验证 gen_kernel 支持 tile-elewise after-IR 的单函数 tile loop 代码生成。
 # 测试目的: 锁定 tile 因子只能来自 `tuner.param : !symbol.int<...>`，并且必须在单函数内生成显式分块循环。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_tile_codegen_single_function_tile_loop
@@ -2303,7 +2110,7 @@ int main() {{
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 def test_gen_kernel_emits_tile_codegen_single_function_tile_loop() -> None:
-    func_op = _tile_elewise_func(tile_analysis_helpers._build_module())
+    func_op = _tile_elewise_func(tile_analysis_helpers.build_module())
 
     source = gen_kernel(func_op, _ctx())
 
@@ -2317,10 +2124,6 @@ def test_gen_kernel_emits_tile_codegen_single_function_tile_loop() -> None:
 
 
 # GK-S3-002
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 功能说明: 验证 tile codegen 缺少 tuner.param 时必须显式失败。
 # 测试目的: 禁止 silent fallback，确保失败短语包含 TileCodegenMalformed。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_tile_codegen_missing_tuner_param
@@ -2328,7 +2131,7 @@ def test_gen_kernel_emits_tile_codegen_single_function_tile_loop() -> None:
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 def test_gen_kernel_rejects_tile_codegen_missing_tuner_param() -> None:
-    func_op = _tile_analysis_func(tile_analysis_helpers._build_module())
+    func_op = _tile_analysis_func(tile_analysis_helpers.build_module())
     block = func_op.body.block
     start = FakeSymbolValueOp("0")
     end = FakeSymbolValueOp("8")
@@ -2342,10 +2145,6 @@ def test_gen_kernel_rejects_tile_codegen_missing_tuner_param() -> None:
 
 
 # GK-S3-003
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 功能说明: 验证 tile codegen 缺少显式分块结构（symbol.for）时必须失败。
 # 测试目的: 锁定 malformed tile IR 的 fail-fast 路径，禁止退化成未切分源码生成。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_tile_codegen_missing_loop
@@ -2353,17 +2152,13 @@ def test_gen_kernel_rejects_tile_codegen_missing_tuner_param() -> None:
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 def test_gen_kernel_rejects_tile_codegen_missing_loop() -> None:
-    func_op = _tile_analysis_func(tile_analysis_helpers._build_module())
+    func_op = _tile_analysis_func(tile_analysis_helpers.build_module())
 
     with pytest.raises(KernelCodeError, match="missing explicit tile loop"):
         gen_kernel(func_op, _ctx())
 
 
 # GK-S3-004
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 功能说明: 验证 tile codegen 不允许出现 helper/函数抽取式承接。
 # 测试目的: 当 tile IR 中出现 func.call 时必须报 TileCodegenUnexpectedHelperFunction。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_tile_codegen_with_helper_call
@@ -2371,7 +2166,7 @@ def test_gen_kernel_rejects_tile_codegen_missing_loop() -> None:
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 def test_gen_kernel_rejects_tile_codegen_with_helper_call() -> None:
-    func_op = _tile_elewise_func(tile_analysis_helpers._build_module())
+    func_op = _tile_elewise_func(tile_analysis_helpers.build_module())
 
     loop = next(op for op in func_op.body.block.ops if isinstance(op, SymbolForOp))
     loop_block = loop.body.blocks.first
@@ -2383,10 +2178,6 @@ def test_gen_kernel_rejects_tile_codegen_with_helper_call() -> None:
 
 
 # GK-S3-005
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 功能说明: 验证旧 split bridge 合同不再被接受。
 # 测试目的: 防止实现继续接受 `tuner.param : !symbol.dim<...>` 这类旧合同。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_legacy_split_tuner_param_contract
@@ -2405,10 +2196,6 @@ def test_gen_kernel_rejects_legacy_split_tuner_param_contract() -> None:
 
 
 # GK-S5-001
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 功能说明: 验证 tile-elewise after-IR 的 elementwise/broadcast 可生成稳定的 CPU 源码绑定。
 # 测试目的: 锁定 `tuner_param("TILE_D0")` 与 `cpu::add` / `cpu::broadcast` 的公开收口口径。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_tile_elewise_cpu_source_for_elementwise_and_broadcast
@@ -2419,13 +2206,13 @@ def test_gen_kernel_rejects_legacy_split_tuner_param_contract() -> None:
     ("builder", "expected_tuners", "expected_fragment"),
     [
         pytest.param(
-            tile_analysis_helpers._build_module,
+            tile_analysis_helpers.build_module,
             ("tuner_param(\"TILE_D0\")", "tuner_param(\"TILE_D1\")"),
             "cpu::add(",
             id="elementwise",
         ),
         pytest.param(
-            tile_analysis_helpers._build_broadcast_module,
+            tile_analysis_helpers.build_broadcast_module,
             ("tuner_param(\"TILE_D0\")",),
             "cpu::broadcast(",
             id="broadcast",
@@ -2433,7 +2220,7 @@ def test_gen_kernel_rejects_legacy_split_tuner_param_contract() -> None:
     ],
 )
 def test_gen_kernel_emits_tile_elewise_cpu_source_for_elementwise_and_broadcast(
-    builder: object,
+    builder: Callable[[], ModuleOp],
     expected_tuners: tuple[str, ...],
     expected_fragment: str,
 ) -> None:
@@ -2449,12 +2236,8 @@ def test_gen_kernel_emits_tile_elewise_cpu_source_for_elementwise_and_broadcast(
 
 
 # GK-S4-001
-# 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-06 12:40:00 +0800
-# 最近一次运行成功时间: 2026-04-06 12:40:00 +0800
 # 功能说明: 验证 `target=\"npu_demo\"` 的受控 module 输入可生成 wrapper + body 双函数源码，并允许 helper func.func 按 module 顺序输出。
-# 测试目的: 让 gate `-k 'npu_demo and barrier'` 命中真实正例，锁定 `launch<1, 1, 1, 0>`、双 barrier、helper 顺序与固定 body 语义。
+# 测试目的: 让 gate `-k 'npu_demo and barrier'` 命中真实正例，锁定 launch extent 独立常量、双 barrier、helper 顺序与固定 body 语义。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
@@ -2474,16 +2257,20 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
     assert source.startswith('#include "include/npu_demo/npu_demo.h"\nusing namespace npu_demo;\n\n')
     assert source.index("static void add_barrier_body(") < source.index("void add_barrier(") < source.index("void npu_demo_helper()")
     assert (
-        "static void add_barrier_body(const Memory<GM, float>& lhs, "
-        "const Memory<GM, float>& rhs, Memory<GM, float>& out)"
+        "static void add_barrier_body(Memory<GM, float>& lhs, "
+        "Memory<GM, float>& rhs, Memory<GM, float>& out)"
         in source
     )
     assert (
-        "void add_barrier(const Memory<MemorySpace::GM, float>& lhs, "
-        "const Memory<MemorySpace::GM, float>& rhs, Memory<MemorySpace::GM, float>& out)"
+        "void add_barrier(Memory<MemorySpace::GM, float>& lhs, "
+        "Memory<MemorySpace::GM, float>& rhs, Memory<MemorySpace::GM, float>& out)"
         in source
     )
-    assert "npu_demo::launch<1, 1, 1, 0>(add_barrier_body, lhs, rhs, out);" in source
+    assert "constexpr S_INT c_0 = 1;" in source
+    assert "constexpr S_INT c_1 = 1;" in source
+    assert "constexpr S_INT c_2 = 1;" in source
+    assert "constexpr S_INT c_3 = 0;" in source
+    assert "npu_demo::launch<c_0, c_1, c_2, c_3>(add_barrier_body, lhs, rhs, out);" in source
     assert source.count("npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);") == 2
     assert "npu_demo::KernelContext& ctx" not in source
     assert source.index("S_INT v0 = npu_demo::thread_id();") < source.index(
@@ -2501,10 +2288,6 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
 
 
 # GK-S4-002
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 12:40:00 +0800
-# 最近一次运行成功时间: 2026-04-06 12:40:00 +0800
 # 功能说明: 验证 `npu_demo add+barrier` 双函数源码可仅依赖 `include/npu_demo/npu_demo.h` 通过编译。
 # 测试目的: 防止 body/wrapper 输出在 include、签名、barrier 或 launch 模板参数上产生不可编译回退。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_compiles_npu_demo_launch_wrapper_and_barrier_body
@@ -2522,10 +2305,6 @@ def test_gen_kernel_compiles_npu_demo_launch_wrapper_and_barrier_body() -> None:
 
 
 # GK-018A
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 验证 `target="npu_demo"` 的完整 module 可继续输出普通 kernel 与 `compute/memory` sibling cost functions。
 # 测试目的: 锁定 `gen_kernel` 会为 `_cost_compute_*` / `_cost_memory_*` 生成 `S_INT` 返回签名、对应 Kind 的 `cost::add` helper 调用，以及稳定的 `return total;`。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_cost_functions_for_compute_and_memory
@@ -2552,10 +2331,6 @@ def test_gen_kernel_emits_npu_demo_cost_functions_for_compute_and_memory() -> No
 
 
 # GK-018B
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 验证包含 sibling cost functions 的 `npu_demo` module 只依赖 `include/npu_demo/npu_demo.h` 即可编译。
 # 测试目的: 锁定 `wrapper/body + _cost_compute_* + _cost_memory_*` 共存时，`S_INT` 返回签名、`return total;` 和单入口 include 合同不会回退。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_compiles_npu_demo_cost_function_module
@@ -2574,10 +2349,6 @@ def test_gen_kernel_compiles_npu_demo_cost_function_module() -> None:
 
 
 # GK-S4-002A
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 验证单函数 `npu_demo` launch IR 经过 outline 后，gen_kernel 先输出 body 前置声明再输出 wrapper/definition，并保持可编译。
 # 测试目的: 直接覆盖 outline 后 wrapper 先于 body 的源码顺序回退，防止 wrapper 先引用未声明 body。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_compiles_outlined_npu_demo_launch_module
@@ -2604,22 +2375,18 @@ builtin.module {
 """
     )
 
-    OutlineDeviceKernelPass().run(module)
+    OutlineDeviceKernelPass().apply(Context(), module)
     module.verify()
 
     source = gen_kernel(module, _npu_ctx())
 
     assert source.index("static void kernel_device(") < source.index("void kernel(")
     assert source.count("static void kernel_device(") == 2
-    assert "npu_demo::launch<1, 1, 1, 0>(kernel_device" in source
+    assert "npu_demo::launch<c_0, c_1, c_2, c_3>(kernel_device" in source
     _compile_only(source)
 
 
 # GK-S6-001
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 13:20:00 +0800
-# 最近一次运行成功时间: 2026-04-06 13:20:00 +0800
 # 功能说明: 验证 `npu_demo add+barrier` 受控 module 生成源码后可编译为真实可执行程序，并保留 barrier 运行时证明入口。
 # 测试目的: 让 gate `-k 'npu_demo_add_barrier_runtime_smoke'` 命中 `DSL -> gen_kernel -> C++ 编译` 闭环，避免只停留在源码文本断言。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_npu_demo_add_barrier_runtime_smoke
@@ -2637,10 +2404,6 @@ def test_gen_kernel_npu_demo_add_barrier_runtime_smoke() -> None:
 
 
 # GK-S4-003
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 12:40:00 +0800
-# 最近一次运行成功时间: 2026-04-06 12:40:00 +0800
 # 功能说明: 验证 wrapper 若引用缺失 body symbol，`gen_kernel` 必须显式失败且错误包含缺失 callee。
 # 测试目的: 锁定受控 module 的 fail-fast 边界，避免 silent fallback 到单函数 npu_demo body-level 生成。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_npu_demo_barrier_wrapper_missing_body_symbol
@@ -2655,10 +2418,6 @@ def test_gen_kernel_rejects_npu_demo_barrier_wrapper_missing_body_symbol() -> No
 
 
 # GK-S4-004
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 10:52:00 +0800
-# 最近一次运行成功时间: 2026-04-06 10:52:00 +0800
 # 功能说明: 验证 `npu_demo` 受控 module 的关键 fail-fast 门禁与错误短语保持稳定。
 # 测试目的: 锁定 module 顶层、wrapper 形态、callee、launch extent、barrier 属性与 target 边界，避免 silent fallback。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_npu_demo_barrier_fail_fast_boundaries

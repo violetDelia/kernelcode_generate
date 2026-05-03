@@ -12,24 +12,24 @@
 
 ## 文档信息
 
-- 创建者：`睡觉小分队`
-- 最后一次更改：`金铲铲大作战`
+- 创建者：`未记录`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/pass/lowering/nn_lowering/element_binary_lowering.md`](../../../../spec/pass/lowering/nn_lowering/element_binary_lowering.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py`](../../../../kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py)
 - `test`：
-  - [`test/pass/nn_lowering/element_binary_add.py`](../../../../test/pass/nn_lowering/element_binary_add.py)
-  - [`test/pass/nn_lowering/element_binary_sub.py`](../../../../test/pass/nn_lowering/element_binary_sub.py)
-  - [`test/pass/nn_lowering/element_binary_mul.py`](../../../../test/pass/nn_lowering/element_binary_mul.py)
-  - [`test/pass/nn_lowering/element_binary_div.py`](../../../../test/pass/nn_lowering/element_binary_div.py)
-  - [`test/pass/nn_lowering/element_binary_truediv.py`](../../../../test/pass/nn_lowering/element_binary_truediv.py)
-  - [`test/pass/nn_lowering/element_compare_eq.py`](../../../../test/pass/nn_lowering/element_compare_eq.py)
-  - [`test/pass/nn_lowering/element_compare_ne.py`](../../../../test/pass/nn_lowering/element_compare_ne.py)
-  - [`test/pass/nn_lowering/element_compare_lt.py`](../../../../test/pass/nn_lowering/element_compare_lt.py)
-  - [`test/pass/nn_lowering/element_compare_le.py`](../../../../test/pass/nn_lowering/element_compare_le.py)
-  - [`test/pass/nn_lowering/element_compare_gt.py`](../../../../test/pass/nn_lowering/element_compare_gt.py)
-  - [`test/pass/nn_lowering/element_compare_ge.py`](../../../../test/pass/nn_lowering/element_compare_ge.py)
-  - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_asset_cases.py`](../../../../test/pass/nn_lowering/test_nn_lowering_asset_cases.py)
+  - [`test/passes/lowering/nn_lowering/test_element_binary_add.py`](../../../../test/passes/lowering/nn_lowering/test_element_binary_add.py)
+  - [`test/passes/lowering/nn_lowering/test_element_binary_sub.py`](../../../../test/passes/lowering/nn_lowering/test_element_binary_sub.py)
+  - [`test/passes/lowering/nn_lowering/test_element_binary_mul.py`](../../../../test/passes/lowering/nn_lowering/test_element_binary_mul.py)
+  - [`test/passes/lowering/nn_lowering/test_element_binary_div.py`](../../../../test/passes/lowering/nn_lowering/test_element_binary_div.py)
+  - [`test/passes/lowering/nn_lowering/test_element_binary_truediv.py`](../../../../test/passes/lowering/nn_lowering/test_element_binary_truediv.py)
+  - [`test/passes/lowering/nn_lowering/test_element_compare_eq.py`](../../../../test/passes/lowering/nn_lowering/test_element_compare_eq.py)
+  - [`test/passes/lowering/nn_lowering/test_element_compare_ne.py`](../../../../test/passes/lowering/nn_lowering/test_element_compare_ne.py)
+  - [`test/passes/lowering/nn_lowering/test_element_compare_lt.py`](../../../../test/passes/lowering/nn_lowering/test_element_compare_lt.py)
+  - [`test/passes/lowering/nn_lowering/test_element_compare_le.py`](../../../../test/passes/lowering/nn_lowering/test_element_compare_le.py)
+  - [`test/passes/lowering/nn_lowering/test_element_compare_gt.py`](../../../../test/passes/lowering/nn_lowering/test_element_compare_gt.py)
+  - [`test/passes/lowering/nn_lowering/test_element_compare_ge.py`](../../../../test/passes/lowering/nn_lowering/test_element_compare_ge.py)
+  - [`test/passes/lowering/nn_lowering/test_public_name.py`](../../../../test/passes/lowering/nn_lowering/test_public_name.py)
+  - [`test/passes/lowering/nn_lowering/test_asset_cases.py`](../../../../test/passes/lowering/nn_lowering/test_asset_cases.py)
 
 ## 依赖
 
@@ -46,8 +46,11 @@
 - 为每个受支持 op 固定一个独立 pattern，并复用共享构造 helper 生成 `kernel.binary_elewise(kind=...)`。
 - 保持 mixed scalar / mixed compare 的桥接路径与 `nn_lowering` 总 spec 一致。
 
-## 限制与边界
+## 额外补充
 
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 仅覆盖 `nn.add`、`nn.sub`、`nn.mul`、`nn.div`、`nn.truediv`、`nn.eq`、`nn.ne`、`nn.lt`、`nn.le`、`nn.gt`、`nn.ge`。
 - 本模块不得定义额外 `*Pass` 作为公开入口，执行由 `NnLoweringPass` 统一调度。
 - 模块级 surviving 接口只允许 `element_binary_patterns()`；`lower_element_binary_family` 不属于公开入口，外部 caller 不得继续依赖 `block/op -> bool` family 分发。
@@ -57,86 +60,75 @@
 - 结果 shape 含符号维度时，才要求在 `dma.alloc` 前按 rank 顺序生成 `symbol.get_dim`。
 - mixed scalar element binary 需要先物化 `dma.alloc + dma.fill`，再写入 `kernel.binary_elewise`；该路径禁止回退为 `dma.broadcast`。
 - 任何空间、结果类型或 operand 校验失败必须抛出 `KernelCodeError`。
-
-## 公开接口
+## API详细说明
 
 ### `element_binary_patterns() -> list[RewritePattern]`
 
-功能说明：
+- api：`element_binary_patterns() -> list[RewritePattern]`
+- 参数：无。
+- 返回值：`list[RewritePattern]`。
+- 使用示例：
 
-- 返回 element binary / compare family 的有序 pattern 列表。
-- 供 `nn_lowering_patterns()` 直接拼接到主 driver 中。
+  ```python
+  from kernel_gen.passes.lowering.nn_lowering.element_binary_lowering import (
+      element_binary_patterns,
+  )
 
-参数说明：
-
-- 无。
-
-使用示例：
-
-```python
-from kernel_gen.passes.lowering.nn_lowering.element_binary_lowering import (
-    element_binary_patterns,
-)
-
-patterns = element_binary_patterns()
-```
-
-注意事项：
-
-- 返回顺序固定为 `add -> sub -> mul -> div -> truediv -> eq -> ne -> lt -> le -> gt -> ge`。
-- `_lower_typed_element_binary_pattern(...)` 与 `_lower_element_binary_op(...)` 只属于内部共享 helper，不属于公开合同。
-- 返回列表中不得出现 family dispatcher pattern 或 `lower_element_binary_family` 兼容入口。
-
-返回与限制：
-
-- 返回可直接传入 `GreedyRewritePatternApplier` 的 `RewritePattern` 列表。
+  patterns = element_binary_patterns()
+  ```
+- 功能说明：返回 element binary / compare family 的有序 pattern 列表，供 `nn_lowering_patterns()` 直接拼接到主 driver 中。
+- 注意事项：返回顺序固定为 `add -> sub -> mul -> div -> truediv -> eq -> ne -> lt -> le -> gt -> ge`；`_lower_typed_element_binary_pattern(...)` 与 `_lower_element_binary_op(...)` 只属于内部共享 helper，不属于公开合同；返回列表中不得出现 family dispatcher pattern 或 `lower_element_binary_family` 兼容入口；返回值可直接传入 `GreedyRewritePatternApplier`。
 
 ## 测试
 
 - 测试文件：
-  - [`test/pass/nn_lowering/element_binary_add.py`](../../../../test/pass/nn_lowering/element_binary_add.py)
-  - [`test/pass/nn_lowering/element_binary_sub.py`](../../../../test/pass/nn_lowering/element_binary_sub.py)
-  - [`test/pass/nn_lowering/element_binary_mul.py`](../../../../test/pass/nn_lowering/element_binary_mul.py)
-  - [`test/pass/nn_lowering/element_binary_div.py`](../../../../test/pass/nn_lowering/element_binary_div.py)
-  - [`test/pass/nn_lowering/element_binary_truediv.py`](../../../../test/pass/nn_lowering/element_binary_truediv.py)
-  - [`test/pass/nn_lowering/element_compare_eq.py`](../../../../test/pass/nn_lowering/element_compare_eq.py)
-  - [`test/pass/nn_lowering/element_compare_ne.py`](../../../../test/pass/nn_lowering/element_compare_ne.py)
-  - [`test/pass/nn_lowering/element_compare_lt.py`](../../../../test/pass/nn_lowering/element_compare_lt.py)
-  - [`test/pass/nn_lowering/element_compare_le.py`](../../../../test/pass/nn_lowering/element_compare_le.py)
-  - [`test/pass/nn_lowering/element_compare_gt.py`](../../../../test/pass/nn_lowering/element_compare_gt.py)
-  - [`test/pass/nn_lowering/element_compare_ge.py`](../../../../test/pass/nn_lowering/element_compare_ge.py)
-  - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_asset_cases.py`](../../../../test/pass/nn_lowering/test_nn_lowering_asset_cases.py)
+  - `test/passes/lowering/nn_lowering/test_asset_cases.py`
+  - `test/passes/lowering/nn_lowering/test_element_binary_add.py`
+  - `test/passes/lowering/nn_lowering/test_element_binary_div.py`
+  - `test/passes/lowering/nn_lowering/test_element_binary_mul.py`
+  - `test/passes/lowering/nn_lowering/test_element_binary_sub.py`
+  - `test/passes/lowering/nn_lowering/test_element_binary_truediv.py`
+  - `test/passes/lowering/nn_lowering/test_element_compare_eq.py`
+  - `test/passes/lowering/nn_lowering/test_element_compare_ge.py`
+  - `test/passes/lowering/nn_lowering/test_element_compare_gt.py`
+  - `test/passes/lowering/nn_lowering/test_element_compare_le.py`
+  - `test/passes/lowering/nn_lowering/test_element_compare_lt.py`
+  - `test/passes/lowering/nn_lowering/test_element_compare_ne.py`
+  - `test/passes/lowering/nn_lowering/test_public_name.py`
 - 执行命令：
-  - `pytest -q test/pass/nn_lowering/element_binary_add.py`
-  - `pytest -q test/pass/nn_lowering/element_binary_sub.py`
-  - `pytest -q test/pass/nn_lowering/element_binary_mul.py`
-  - `pytest -q test/pass/nn_lowering/element_binary_div.py`
-  - `pytest -q test/pass/nn_lowering/element_binary_truediv.py`
-  - `pytest -q test/pass/nn_lowering/element_compare_eq.py`
-  - `pytest -q test/pass/nn_lowering/element_compare_ne.py`
-  - `pytest -q test/pass/nn_lowering/element_compare_lt.py`
-  - `pytest -q test/pass/nn_lowering/element_compare_le.py`
-  - `pytest -q test/pass/nn_lowering/element_compare_gt.py`
-  - `pytest -q test/pass/nn_lowering/element_compare_ge.py`
-  - `pytest -q test/pass/nn_lowering/public_name.py -k patterns`
-  - `pytest -q test/pass/nn_lowering/test_nn_lowering_asset_cases.py -k "element_binary or element_compare"`
-- 测试目标：
-  - 验证每个 element binary / compare op 都由独立 pattern 处理，且 kind 映射一致。
-  - 验证 add/sub 静态 `memory + memory` case 的最小稳定输出为 `dma.alloc + kernel.binary_elewise + func.return`。
-  - 验证 add/sub 符号维度 case 在 `dma.alloc` 前逐维生成 `symbol.get_dim`。
-  - 验证 mixed scalar element binary 先物化 `dma.fill`，mixed compare 先物化 `dma.broadcast`。
-  - 验证 `public_name.py` 中的主 driver 顺序已不再包含 family dispatcher pattern。
-- 功能与用例清单：
-  - `test_lower_add_to_kernel_binary_elewise`
-  - `test_lower_sub_to_kernel_binary_elewise`
-  - `test_lower_mul_to_kernel_binary_elewise`
-  - `test_lower_div_to_kernel_binary_elewise`
-  - `test_lower_truediv_to_kernel_binary_elewise`
-  - `test_lower_eq_mixed_compare_to_kernel_binary_elewise`
-  - `test_lower_ne_to_kernel_binary_elewise`
-  - `test_lower_lt_to_kernel_binary_elewise`
-  - `test_lower_le_to_kernel_binary_elewise`
-  - `test_lower_gt_to_kernel_binary_elewise`
-  - `test_lower_ge_to_kernel_binary_elewise`
-  - `test_nn_lowering_asset_case`
+  - `pytest -q test/passes/lowering/nn_lowering/test_element_binary_add.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_element_binary_sub.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_element_binary_mul.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_element_binary_div.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_element_binary_truediv.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_element_compare_eq.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_element_compare_ne.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_element_compare_lt.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_element_compare_le.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_element_compare_gt.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_element_compare_ge.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_public_name.py -k patterns`
+  - `pytest -q test/passes/lowering/nn_lowering/test_asset_cases.py -k "element_binary or element_compare"`
+
+### 测试目标
+
+- 验证 `spec/pass/lowering/nn_lowering/element_binary_lowering.md` 对应公开 API 的正常路径、边界条件与错误语义。
+- 验证 pass 或 pipeline 对目标 IR 的改写、no-op 与顺序约束。
+
+
+### 功能与用例清单
+
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-001 | pass 改写 | `test_lower_add_to_kernel_binary_elewise` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_add_to_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_lower_add_to_kernel_binary_elewise`”场景。 | `test_lower_add_to_kernel_binary_elewise` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-002 | pass 改写 | `test_lower_sub_to_kernel_binary_elewise` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_sub_to_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_lower_sub_to_kernel_binary_elewise`”场景。 | `test_lower_sub_to_kernel_binary_elewise` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-003 | pass 改写 | `test_lower_mul_to_kernel_binary_elewise` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_mul_to_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_lower_mul_to_kernel_binary_elewise`”场景。 | `test_lower_mul_to_kernel_binary_elewise` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-004 | pass 改写 | `test_lower_div_to_kernel_binary_elewise` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_div_to_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_lower_div_to_kernel_binary_elewise`”场景。 | `test_lower_div_to_kernel_binary_elewise` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-005 | pass 改写 | `test_lower_truediv_to_kernel_binary_elewise` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_truediv_to_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_lower_truediv_to_kernel_binary_elewise`”场景。 | `test_lower_truediv_to_kernel_binary_elewise` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-006 | pass 改写 | `test_lower_eq_mixed_compare_to_kernel_binary_elewise` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_eq_mixed_compare_to_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_lower_eq_mixed_compare_to_kernel_binary_elewise`”场景。 | `test_lower_eq_mixed_compare_to_kernel_binary_elewise` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-007 | pass 改写 | `test_lower_ne_to_kernel_binary_elewise` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_ne_to_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_lower_ne_to_kernel_binary_elewise`”场景。 | `test_lower_ne_to_kernel_binary_elewise` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-008 | pass 改写 | `test_lower_lt_to_kernel_binary_elewise` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_lt_to_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_lower_lt_to_kernel_binary_elewise`”场景。 | `test_lower_lt_to_kernel_binary_elewise` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-009 | pass 改写 | `test_lower_le_to_kernel_binary_elewise` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_le_to_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_lower_le_to_kernel_binary_elewise`”场景。 | `test_lower_le_to_kernel_binary_elewise` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-010 | pass 改写 | `test_lower_gt_to_kernel_binary_elewise` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_gt_to_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_lower_gt_to_kernel_binary_elewise`”场景。 | `test_lower_gt_to_kernel_binary_elewise` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-011 | pass 改写 | `test_lower_ge_to_kernel_binary_elewise` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_ge_to_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_lower_ge_to_kernel_binary_elewise`”场景。 | `test_lower_ge_to_kernel_binary_elewise` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-012 | pass 改写 | `test_nn_lowering_asset_case` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_nn_lowering_asset_case`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`test_nn_lowering_asset_case`”场景。 | `test_nn_lowering_asset_case` |

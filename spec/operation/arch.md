@@ -8,25 +8,25 @@
 
 ## API 列表
 
-- `get_block_id()`
-- `get_block_num()`
-- `get_thread_id()`
-- `get_thread_num()`
-- `get_subthread_id()`
-- `get_subthread_num()`
-- `get_dynamic_memory(space)`
-- `BarrierVisibility`
-- `BarrierScope`
-- `barrier(*, visibility, scope)`
-- `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`
+- `get_block_id() -> SymbolDim`
+- `get_block_num() -> SymbolDim`
+- `get_thread_id() -> SymbolDim`
+- `get_thread_num() -> SymbolDim`
+- `get_subthread_id() -> SymbolDim`
+- `get_subthread_num() -> SymbolDim`
+- `get_dynamic_memory(space: MemorySpace) -> Memory`
+- `class BarrierVisibility()`
+- `class BarrierScope()`
+- `barrier(*, visibility: list[BarrierVisibility] | tuple[BarrierVisibility, ...], scope: BarrierScope) -> None`
+- `launch_kernel[block: int | SymbolDim, thread: int | SymbolDim, subthread: int | SymbolDim, shared_memory_size: int | SymbolDim](callee: FunctionType, *args: KernelArgument) -> None`
 
 ## 文档信息
 
-- 创建者：`咯咯咯`
-- 最后一次更改：`jcc你莫辜负`
+- 创建者：`未记录`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/operation/arch.md`](../../spec/operation/arch.md)
 - `功能实现`：[`kernel_gen/operation/arch.py`](../../kernel_gen/operation/arch.py)
-- `test`：[`test/operation/test_operation_arch.py`](../../test/operation/test_operation_arch.py)
+- `test`：[`test/operation/test_arch.py`](../../test/operation/test_arch.py)
 
 ## 依赖
 
@@ -44,10 +44,13 @@
 
 - 提供统一的 operation 层 `arch` helper 入口，使上层 Python/DSL 在不直接依赖 dialect op 类的前提下表达执行维度查询、动态片上内存入口、barrier 与 kernel 启动描述。
 - 明确 operation helper 与 `arch dialect` 的一一映射关系，避免在 operation 层引入与方言层不一致的附加语义。
-- 为后续实现任务明确 `kernel_gen/operation/arch.py` 与 `test/operation/test_operation_arch.py` 的公开接口范围、错误边界与测试清单。
+- 为后续实现任务明确 `kernel_gen/operation/arch.py` 与 `test/operation/test_arch.py` 的公开接口范围、错误边界与测试清单。
 
-## 限制与边界
+## 额外补充
 
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 本文件只约束 `kernel_gen/operation/arch.py` 的公开 helper 语义，不约束 `kernel_gen/operation/__init__.py` 的包级导出；若后续需要包级导出，必须由实现阶段或独立任务显式补齐。
 - operation 层 `arch` helper 只负责描述高层调用语义，不负责真实硬件调度、线程绑定、异步执行、同步原语、kernel 完成状态或返回值消费。
 - operation 层不得定义新的执行维度类型体系；执行维度查询 helper 的公开返回统一复用 `SymbolDim` 语义，对应 lowering 必须映射到 `arch dialect` 的固定 `!symbol.int<"...">` 结果类型。
@@ -60,387 +63,230 @@
 - `barrier` 采用关键字参数调用，`visibility/scope` 均为必填；`visibility` 只允许 `list[BarrierVisibility]` 或 `tuple[BarrierVisibility, ...]`，且必须且只能包含 `TSM/TLM` 各一次；`scope` 只允许 `BarrierScope.BLOCK/THREAD/SUBTHREAD/GLOBAL`。
 - `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 只描述一次启动请求，不返回新的 `Memory`、`SymbolDim` 或句柄对象；公开返回值固定为 `None`。
 - `launch_kernel` 的公开调用形态固定为 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`：四个 launch 字段位于下标，调用参数顺序固定为 `callee -> *args`。
-- `launch_kernel` 仅允许关键字参数名 `callee/block/thread/subthread`；缺失前四个必填参数或传入未知关键字参数属于调用边界错误，必须抛出 `TypeError`。
+- `launch_kernel` 仅允许关键字参数名 `callee/block/thread/subthread`；缺失前四个必填参数或传入未知关键字参数属于调用边界错误，必须抛出 `KernelCodeError`。
 - `launch_kernel[...]` 的 `callee` 只允许 Python 函数对象；不得接受字符串名、其他 callable、`Memory`、`SymbolDim` 或自由对象。
 - `launch_kernel[...]` 的 `block/thread/subthread` 只允许 `int` 或 `SymbolDim`，且不得接受 `bool`；若输入为静态整数，必须满足 `> 0`；operation 层不得接受浮点、`Memory`、列表或其他运行时对象。
 - operation 层与 dialect 层采用一一映射：`get_*` helper 分别映射到对应 `arch.get_*` op，`get_dynamic_memory` 映射到 `arch.get_dynamic_memory`，`barrier` 映射到 `arch.barrier`，`launch_kernel` 的支持性校验与 lowering 语义固定对应 `arch.launch`；不得通过其他 dialect 或 builtin op 绕过 `arch dialect`，也不得回退旧 launch op 命名。
-- 当 target registry 设置了 current target 时，所有 `arch` helper 在调用前都必须执行支持性校验；若当前 target 不支持对应 `arch.*` op，必须抛出 `ValueError`，且错误信息应包含 op 名与 target 名。
+- 当 target registry 设置了 current target 时，所有 `arch` helper 在调用前都必须执行支持性校验；若当前 target 不支持对应 `arch.*` op，必须抛出 `KernelCodeError`，且错误信息应包含 op 名与 target 名。
 - `get_block_num/get_thread_num/get_subthread_num` 在 target registry 提供对应硬件值时必须优先返回静态值；缺失时回退为各自 `SymbolDim("<name>")` 语义。
 - `get_dynamic_memory(space)` 在 target registry 提供对应 `*_memory_size` 时必须优先使用静态 size；缺失时回退为动态 `[?]`。
 
-## 公开接口
+## API详细说明
 
-### `get_block_id()`
+### `get_block_id() -> SymbolDim`
 
-功能说明：
+- api：`get_block_id() -> SymbolDim`
+- 参数：无。
+- 返回值：`SymbolDim`，公开值为 `"block_id"`。
+- 使用示例：
 
-- 返回当前 block 的执行索引高层语义。
-- lowering 后必须一一映射到 `arch.get_block_id`。
+  ```python
+  from kernel_gen.operation.arch import get_block_id
 
-参数说明：
+  bid = get_block_id()
+  assert bid.get_value() == "block_id"
+  ```
+- 功能说明：返回当前 block 的执行索引高层语义。
+- 注意事项：不接受 axis、device、rank 或其他附加参数；lowering 后必须一一映射到 `arch.get_block_id`；当设置 current target 时必须通过 target registry 校验 `arch.get_block_id` 支持性，不支持时抛出 `KernelCodeError`。
 
-- 无参数。
+### `get_block_num() -> SymbolDim`
 
-使用示例：
+- api：`get_block_num() -> SymbolDim`
+- 参数：无。
+- 返回值：`SymbolDim`，硬件值可用时承载静态 block 数量，缺失时公开值为 `"block_num"`。
+- 使用示例：
 
-```python
-bid = get_block_id()
-```
+  ```python
+  from kernel_gen.operation.arch import get_block_num
 
-注意事项：
+  bnum = get_block_num()
+  ```
+- 功能说明：返回当前 kernel 启动配置中的 block 数量高层语义。
+- 注意事项：不接受额外配置参数；target registry 提供硬件 `block_num` 时必须优先返回静态值，缺失时回退 `SymbolDim("block_num")`；lowering 后必须一一映射到 `arch.get_block_num`。
 
-- operation 层返回值语义应表现为 `SymbolDim` 风格的执行维度标量，不得退化为 Python `int` 常量或其他标量封装。
-- 公开 helper 不接受 axis、device 或 rank 参数。
-- 当设置 current target 时必须通过 target registry 校验 `arch.get_block_id` 支持性；不支持时抛出 `ValueError`。
+### `get_thread_id() -> SymbolDim`
 
-返回与限制：
+- api：`get_thread_id() -> SymbolDim`
+- 参数：无。
+- 返回值：`SymbolDim`，公开值为 `"thread_id"`。
+- 使用示例：
 
-- 返回类型：`SymbolDim`
-- 限制：lowering 后结果语义必须固定对应 `!symbol.int<"block_id">`。
+  ```python
+  from kernel_gen.operation.arch import get_thread_id
 
-### `get_block_num()`
+  tid = get_thread_id()
+  assert tid.get_value() == "thread_id"
+  ```
+- 功能说明：返回当前 block 内 thread 执行索引的高层语义。
+- 注意事项：不接受 axis、warp 或其他附加参数；lowering 后必须一一映射到 `arch.get_thread_id`；当设置 current target 时必须通过 target registry 校验 `arch.get_thread_id` 支持性，不支持时抛出 `KernelCodeError`。
 
-功能说明：
+### `get_thread_num() -> SymbolDim`
 
-- 返回当前 kernel 启动配置中的 block 数量高层语义。
-- lowering 后必须一一映射到 `arch.get_block_num`。
+- api：`get_thread_num() -> SymbolDim`
+- 参数：无。
+- 返回值：`SymbolDim`，硬件值可用时承载静态 thread 数量，缺失时公开值为 `"thread_num"`。
+- 使用示例：
 
-参数说明：
+  ```python
+  from kernel_gen.operation.arch import get_thread_num
 
-- 无参数。
+  tnum = get_thread_num()
+  ```
+- 功能说明：返回当前 block 内 thread 数量的高层语义。
+- 注意事项：不接受额外配置参数；target registry 提供硬件 `thread_num` 时必须优先返回静态值，缺失时回退 `SymbolDim("thread_num")`；lowering 后必须一一映射到 `arch.get_thread_num`。
 
-使用示例：
+### `get_subthread_id() -> SymbolDim`
 
-```python
-bnum = get_block_num()
-```
+- api：`get_subthread_id() -> SymbolDim`
+- 参数：无。
+- 返回值：`SymbolDim`，公开值为 `"subthread_id"`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.operation.arch import get_subthread_id
+
+  stid = get_subthread_id()
+  assert stid.get_value() == "subthread_id"
+  ```
+- 功能说明：返回当前 thread 内 subthread 执行索引的高层语义。
+- 注意事项：不接受 lane、rank 或其他附加参数；lowering 后必须一一映射到 `arch.get_subthread_id`；当设置 current target 时必须通过 target registry 校验 `arch.get_subthread_id` 支持性，不支持时抛出 `KernelCodeError`。
 
-注意事项：
-
-- operation 层返回值语义应表现为 `SymbolDim` 风格标量。
-- 不接受额外配置参数。
-- 当设置 current target 时必须通过 target registry 校验 `arch.get_block_num` 支持性；不支持时抛出 `ValueError`。
-- 当硬件 `block_num` 可用时必须优先返回静态值；缺失时回退 `SymbolDim("block_num")` 语义。
-
-返回与限制：
-
-- 返回类型：`SymbolDim`
-- 限制：lowering 后结果语义必须固定对应 `!symbol.int<"block_num">`。
-
-### `get_thread_id()`
-
-功能说明：
-
-- 返回当前 block 内 thread 执行索引的高层语义。
-- lowering 后必须一一映射到 `arch.get_thread_id`。
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-tid = get_thread_id()
-```
-
-注意事项：
-
-- operation 层返回值语义应表现为 `SymbolDim` 风格标量。
-- 不接受 axis、warp 或其他附加参数。
-- 当设置 current target 时必须通过 target registry 校验 `arch.get_thread_id` 支持性；不支持时抛出 `ValueError`。
-
-返回与限制：
-
-- 返回类型：`SymbolDim`
-- 限制：lowering 后结果语义必须固定对应 `!symbol.int<"thread_id">`。
-
-### `get_thread_num()`
-
-功能说明：
-
-- 返回当前 block 内 thread 数量的高层语义。
-- lowering 后必须一一映射到 `arch.get_thread_num`。
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-tnum = get_thread_num()
-```
-
-注意事项：
-
-- operation 层返回值语义应表现为 `SymbolDim` 风格标量。
-- 不接受额外配置参数。
-- 当设置 current target 时必须通过 target registry 校验 `arch.get_thread_num` 支持性；不支持时抛出 `ValueError`。
-- 当硬件 `thread_num` 可用时必须优先返回静态值；缺失时回退 `SymbolDim("thread_num")` 语义。
-
-返回与限制：
-
-- 返回类型：`SymbolDim`
-- 限制：lowering 后结果语义必须固定对应 `!symbol.int<"thread_num">`。
-
-### `get_subthread_id()`
-
-功能说明：
-
-- 返回当前 thread 内 subthread 执行索引的高层语义。
-- lowering 后必须一一映射到 `arch.get_subthread_id`。
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-stid = get_subthread_id()
-```
-
-注意事项：
-
-- operation 层返回值语义应表现为 `SymbolDim` 风格标量。
-- 不接受 lane、rank 或其他附加参数。
-- 当设置 current target 时必须通过 target registry 校验 `arch.get_subthread_id` 支持性；不支持时抛出 `ValueError`。
-
-返回与限制：
-
-- 返回类型：`SymbolDim`
-- 限制：lowering 后结果语义必须固定对应 `!symbol.int<"subthread_id">`。
-
-### `get_subthread_num()`
-
-功能说明：
-
-- 返回当前 thread 内 subthread 数量的高层语义。
-- lowering 后必须一一映射到 `arch.get_subthread_num`。
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-stnum = get_subthread_num()
-```
-
-注意事项：
-
-- operation 层返回值语义应表现为 `SymbolDim` 风格标量。
-- 不接受额外配置参数。
-- 当设置 current target 时必须通过 target registry 校验 `arch.get_subthread_num` 支持性；不支持时抛出 `ValueError`。
-- 当硬件 `subthread_num` 可用时必须优先返回静态值；缺失时回退 `SymbolDim("subthread_num")` 语义。
-
-返回与限制：
-
-- 返回类型：`SymbolDim`
-- 限制：lowering 后结果语义必须固定对应 `!symbol.int<"subthread_num">`。
-
-### `get_dynamic_memory(space)`
-
-功能说明：
-
-- 返回指定片上空间的运行期动态内存入口高层语义。
-- lowering 后必须一一映射到 `arch.get_dynamic_memory`。
-
-参数说明：
-
-- `space (MemorySpace)`：目标片上空间，只允许 `MemorySpace.SM`、`MemorySpace.LM`、`MemorySpace.TSM`、`MemorySpace.TLM1`、`MemorySpace.TLM2`、`MemorySpace.TLM3`。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.memory import MemorySpace
-
-smem = get_dynamic_memory(MemorySpace.SM)
-```
-
-注意事项：
-
-- 输入若不是 `MemorySpace`，必须抛出 `TypeError`。
-- 输入若为 `MemorySpace.GM`，必须抛出 `ValueError`。
-- 返回结果的公开语义必须是一维字节缓冲：`stride=[1]`、`dtype=NumericType.Int8`、`space=<输入空间>`；当 target registry 提供对应 `*_memory_size` 时 `shape=[size]`，缺失时回退 `shape=[?]`。
-- operation 层不得公开承诺容量、对齐或多维 view 语义；这些约束由后续 DMA/view helper 单独承担。
-- 当设置 current target 时必须通过 target registry 校验 `arch.get_dynamic_memory` 支持性；不支持时抛出 `ValueError`。
-- `MemorySpace.TLM1/TLM2/TLM3` 为真实动态片上空间；若调用方需要 barrier 聚合可见域，应改用 `BarrierVisibility.TLM`，不得把二者混用。
-
-返回与限制：
-
-- 返回类型：`Memory`
-- 限制：lowering 后结果必须对应 `!nn.memory<[?], [1], i8, #nn.space<space>>`，其中 `space` 与输入映射一致；若 operation 层持有静态 `shape=[size]`，该静态信息仅用于高层语义与类型推断，不改变 `arch.get_dynamic_memory` 的 IR 结果类型约束。
-
-### `BarrierVisibility`
-
-功能说明：
-
-- 定义 `barrier(visibility, scope)` 的公开聚合可见域枚举。
-- 当前稳定成员固定为 `BarrierVisibility.TSM` 与 `BarrierVisibility.TLM`。
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-from kernel_gen.operation.arch import BarrierVisibility
-
-visibility = BarrierVisibility.TLM
-```
-
-注意事项：
-
-- `BarrierVisibility.TLM` 只表示 barrier 聚合可见域，固定覆盖 `MemorySpace.TLM1/TLM2/TLM3`，不等于真实 `MemorySpace`。
-- `BarrierVisibility` 不用于 `get_dynamic_memory(space)` 的 `space` 参数；真实动态片上空间仍由 `MemorySpace` 表达。
-
-返回与限制：
-
-- 返回类型：`BarrierVisibility`
-- 限制：公开成员固定为 `TSM/TLM`，不得扩成真实内存空间枚举。
-
-### `BarrierScope`
-
-功能说明：
-
-- 定义 `barrier(visibility, scope)` 的公开同步范围枚举。
-- 当前稳定成员固定为 `BarrierScope.BLOCK`、`BarrierScope.THREAD`、`BarrierScope.SUBTHREAD`、`BarrierScope.GLOBAL`。
-
-参数说明：
-
-- 无参数。
-
-使用示例：
-
-```python
-from kernel_gen.operation.arch import BarrierScope
-
-scope = BarrierScope.THREAD
-```
-
-注意事项：
-
-- operation 层允许四个公开 scope；具体 target 若不支持其中某项，必须通过 target registry 显式失败，不得静默降级。
-
-返回与限制：
-
-- 返回类型：`BarrierScope`
-- 限制：公开成员固定为 `BLOCK/THREAD/SUBTHREAD/GLOBAL`。
-
-### `barrier(*, visibility, scope)`
-
-功能说明：
-
-- 记录一次 barrier 同步请求的高层语义。
-- target registry 支持性校验与 lowering 后的语义必须一一对应 `arch.barrier`。
-
-参数说明：
-
-- `visibility (list[BarrierVisibility] | tuple[BarrierVisibility, ...])`：必填；需要保证可见性的聚合可见域列表。
-- `scope (BarrierScope)`：必填；同步范围。
-
-使用示例：
-
-```python
-from kernel_gen.operation.arch import BarrierScope, BarrierVisibility, barrier
-
-barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.THREAD)
-```
-
-注意事项：
-
-- `visibility` 与 `scope` 都是必填关键字参数，不接受无参调用或位置参数。
-- `visibility` 必须非空，元素必须全部为 `BarrierVisibility`，不得重复，且必须且只能包含 `TSM/TLM` 各一次。
-- `scope` 必须是 `BarrierScope` 枚举成员。
-- `barrier` 只描述同步请求，不负责数据搬运、事件管理或 target 私有副作用。
-- 当设置 current target 时必须通过 target registry 校验 `arch.barrier` 支持性；不支持时抛出 `ValueError`。
-
-返回与限制：
-
-- 返回类型：`None`
-- 限制：公开合同固定为 `barrier(*, visibility, scope)`，不得回退为无参 barrier。
-
-### `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`
-
-功能说明：
-
-- 记录一次 kernel 启动请求的高层语义，包含 Python 函数对象 `callee`、block/thread/subthread/shared_memory_size 四层启动规模与尾部 kernel 实参。
-- target registry 支持性校验与 lowering 后的语义必须一一对应 `arch.launch`。
-
-参数说明：
-
-- 下标参数顺序：`block -> thread -> subthread -> shared_memory_size`。
-- 调用参数顺序：`callee -> *args`。
-- `block (int | SymbolDim)`：必填，下标字段 `#1`；block 规模。
-- `thread (int | SymbolDim)`：必填，下标字段 `#2`；thread 规模。
-- `subthread (int | SymbolDim)`：必填，下标字段 `#3`；subthread 规模。
-- `shared_memory_size (int | SymbolDim)`：必填，下标字段 `#4`；共享内存规模；静态整数必须 `>= 0`。
-- `callee (function)`：必填，调用参数 `#1`；Python 函数对象。
-- `*args (object)`：可选，位置参数；按原顺序透传给 `callee` 的 kernel 实参。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.symbol_dim import SymbolDim
-
-def my_kernel(lhs, rhs, out):
-    return None
-
-
-launch_kernel[SymbolDim("GRID_X"), 128, 4, 0](my_kernel, "lhs", "rhs", "out")
-```
-
-注意事项：
-
-- 四个 launch 字段必须全部在下标中给出；`callee` 与 `*args` 只允许按调用参数位置传入。
-- 下标字段个数不是 `4`、或在公开入口上传入关键字参数时，必须抛出 `TypeError`，并在进入语义校验前失败。
-- `callee` 只允许 Python 函数对象；字符串名称、其他 callable、`Memory`、`SymbolDim` 或自由对象都必须抛出 `TypeError`。
-- `block/thread/subthread` 若不是 `int` 或 `SymbolDim`，必须抛出 `TypeError`；`bool` 不得沿用 Python `bool is int` 语义混入。
-- 当 `block/thread/subthread` 为静态整数时，必须要求其大于 `0`；`0` 或负值必须抛出 `ValueError`。
-- `shared_memory_size` 若不是 `int` 或 `SymbolDim`，必须抛出 `TypeError`；`bool` 不得沿用 Python `bool is int` 语义混入。
-- 当 `shared_memory_size` 为静态整数时，必须要求其大于等于 `0`；负值必须抛出 `ValueError`。
-- 当输入为 `SymbolDim` 时，operation 层只保留符号语义，不要求在 Python 运行期求值。
-- operation 层 helper 只描述启动请求，不负责真正执行 kernel，也不返回事件、句柄或状态值。
-- 当 `callee` 在 Python 中被调用时，`get_block_num/get_thread_num/get_subthread_num` 必须优先暴露本次 launch 的 extent 语义，再在 launch 外回退 target hardware 或符号值。
-- 当设置 current target 时必须通过 target registry 校验 `arch.launch` 支持性；不支持时抛出 `ValueError`。
-
-返回与限制：
-
-- 返回类型：`None`
-- 限制：lowering 后四个规模 operand 必须保持 `!symbol.int<"expr">` 语义，不得退化为 builtin `index` 或普通整数类型；尾部 `*args` 必须按原顺序传给 `@callee`，不得被重排或静默丢弃。
+### `get_subthread_num() -> SymbolDim`
+
+- api：`get_subthread_num() -> SymbolDim`
+- 参数：无。
+- 返回值：`SymbolDim`，硬件值可用时承载静态 subthread 数量，缺失时公开值为 `"subthread_num"`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.operation.arch import get_subthread_num
+
+  stnum = get_subthread_num()
+  ```
+- 功能说明：返回当前 thread 内 subthread 数量的高层语义。
+- 注意事项：不接受额外配置参数；target registry 提供硬件 `subthread_num` 时必须优先返回静态值，缺失时回退 `SymbolDim("subthread_num")`；lowering 后必须一一映射到 `arch.get_subthread_num`。
+
+### `get_dynamic_memory(space: MemorySpace) -> Memory`
+
+- api：`get_dynamic_memory(space: MemorySpace) -> Memory`
+- 参数：
+  - `space`：动态片上内存所在空间；类型 `MemorySpace`；无默认值，调用方必须显式提供；只允许 `MemorySpace.SM`、`MemorySpace.LM`、`MemorySpace.TSM`、`MemorySpace.TLM1`、`MemorySpace.TLM2`、`MemorySpace.TLM3`；不允许 `None`、字符串、`MemorySpace.GM` 或其他对象，非法值必须抛出 `KernelCodeError`。
+- 返回值：`Memory`，一维字节缓冲；`stride=[1]`，`dtype=NumericType.Int8`，`space` 与输入一致，`shape` 在 target registry 提供 `*_memory_size` 时为 `[size]`，缺失时回退为动态符号大小。
+- 使用示例：
+
+  ```python
+  from kernel_gen.operation.arch import get_dynamic_memory
+  from kernel_gen.symbol_variable.memory import MemorySpace
+
+  smem = get_dynamic_memory(MemorySpace.SM)
+  ```
+- 功能说明：返回指定片上空间的运行期动态内存入口高层语义。
+- 注意事项：本接口不承诺容量、对齐或多维 view 语义；`MemorySpace.TLM1/TLM2/TLM3` 是真实动态片上空间，barrier 聚合可见域应使用 `BarrierVisibility.TLM`；lowering 后必须一一映射到 `arch.get_dynamic_memory`。
+
+### `class BarrierVisibility()`
+
+- api：`class BarrierVisibility()`
+- 参数：无公开构造参数；调用方通过稳定枚举成员 `BarrierVisibility.TSM` 与 `BarrierVisibility.TLM` 使用。
+- 返回值：`BarrierVisibility` 枚举类型；成员类型为 `BarrierVisibility`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.operation.arch import BarrierVisibility
+
+  visibility = BarrierVisibility.TLM
+  ```
+- 功能说明：定义 `barrier(visibility, scope)` 的公开聚合可见域。
+- 注意事项：稳定成员固定为 `TSM` 与 `TLM`；`BarrierVisibility.TLM` 表示聚合可见域，覆盖真实 `MemorySpace.TLM1/TLM2/TLM3`，不得作为 `get_dynamic_memory(space)` 的真实内存空间输入。
+
+### `class BarrierScope()`
+
+- api：`class BarrierScope()`
+- 参数：无公开构造参数；调用方通过稳定枚举成员 `BarrierScope.BLOCK`、`BarrierScope.THREAD`、`BarrierScope.SUBTHREAD` 与 `BarrierScope.GLOBAL` 使用。
+- 返回值：`BarrierScope` 枚举类型；成员类型为 `BarrierScope`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.operation.arch import BarrierScope
+
+  scope = BarrierScope.THREAD
+  ```
+- 功能说明：定义 `barrier(visibility, scope)` 的公开同步范围。
+- 注意事项：稳定成员固定为 `BLOCK`、`THREAD`、`SUBTHREAD` 与 `GLOBAL`；具体 target 若不支持某个 scope，必须通过 target registry 显式失败，不得静默降级。
+
+### `barrier(*, visibility: list[BarrierVisibility] | tuple[BarrierVisibility, ...], scope: BarrierScope) -> None`
+
+- api：`barrier(*, visibility: list[BarrierVisibility] | tuple[BarrierVisibility, ...], scope: BarrierScope) -> None`
+- 参数：
+  - `visibility`：需要保证可见性的聚合可见域列表；类型 `list[BarrierVisibility] | tuple[BarrierVisibility, ...]`；无默认值，调用方必须显式提供；必须且只能包含 `BarrierVisibility.TSM` 与 `BarrierVisibility.TLM` 各一次；不允许 `None`、空列表、重复项或非 `BarrierVisibility` 元素。
+  - `scope`：同步范围；类型 `BarrierScope`；无默认值，调用方必须显式提供；不允许 `None` 或非 `BarrierScope`。
+- 返回值：`None`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.operation.arch import BarrierScope, BarrierVisibility, barrier
+
+  barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.THREAD)
+  ```
+- 功能说明：记录一次 barrier 同步请求的高层语义。
+- 注意事项：`visibility` 与 `scope` 都是必填关键字参数，不接受无参调用或位置参数；本接口不负责数据搬运、事件管理或 target 私有副作用；当设置 current target 时必须通过 target registry 校验 `arch.barrier` 支持性，不支持时抛出 `KernelCodeError`。
+
+### `launch_kernel[block: int | SymbolDim, thread: int | SymbolDim, subthread: int | SymbolDim, shared_memory_size: int | SymbolDim](callee: FunctionType, *args: KernelArgument) -> None`
+
+- api：`launch_kernel[block: int | SymbolDim, thread: int | SymbolDim, subthread: int | SymbolDim, shared_memory_size: int | SymbolDim](callee: FunctionType, *args: KernelArgument) -> None`
+- 参数：
+  - `block`：下标字段 `#1`，block 规模；类型 `int | SymbolDim`；无默认值；不允许 `bool`、`None`、浮点、`Memory`、列表或其他对象；静态 `int` 必须 `> 0`。
+  - `thread`：下标字段 `#2`，thread 规模；类型 `int | SymbolDim`；无默认值；不允许 `bool`、`None`、浮点、`Memory`、列表或其他对象；静态 `int` 必须 `> 0`。
+  - `subthread`：下标字段 `#3`，subthread 规模；类型 `int | SymbolDim`；无默认值；不允许 `bool`、`None`、浮点、`Memory`、列表或其他对象；静态 `int` 必须 `> 0`。
+  - `shared_memory_size`：下标字段 `#4`，共享内存规模；类型 `int | SymbolDim`；无默认值；不允许 `bool`、`None`、浮点、`Memory`、列表或其他对象；静态 `int` 必须 `>= 0`。
+  - `callee`：调用参数 `#1`，Python 函数对象；类型 `FunctionType`；无默认值；不允许字符串名、其他 callable、`Memory`、`SymbolDim` 或自由对象。
+  - `args`：尾部 kernel 实参；类型 `tuple[KernelArgument, ...]`；默认空元组；按原顺序透传给 `callee`，元素允许 `Memory | SymbolDim | int | float | str | bool | None`。
+- 返回值：`None`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.operation.arch import launch_kernel
+  from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+
+  def my_kernel(lhs: str, rhs: str, out: str) -> None:
+      return None
+
+  launch_kernel[SymbolDim("GRID_X"), 128, 4, 0](my_kernel, "lhs", "rhs", "out")
+  ```
+- 功能说明：记录一次 kernel 启动请求的高层语义，包含函数对象、四层启动规模与尾部 kernel 实参。
+- 注意事项：四个 launch 字段必须全部在下标中给出；下标字段个数不是 `4`、或在公开入口上传入未知关键字参数时，必须抛出 `KernelCodeError`；本接口不负责真正执行设备 kernel，也不返回事件、句柄或状态值；当 `callee` 在 Python 中被调用时，`get_block_num/get_thread_num/get_subthread_num` 必须优先暴露本次 launch 的 extent 语义；当设置 current target 时必须通过 target registry 校验 `arch.launch` 支持性，不支持时抛出 `KernelCodeError`。
 
 ## 测试
 
-- 测试文件：[`test/operation/test_operation_arch.py`](../../test/operation/test_operation_arch.py)
-- 执行命令：`pytest -q test/operation/test_operation_arch.py`
-- 验收命令（barrier / launch 合同）：`pytest -q test/operation/test_operation_arch.py -k "barrier or launch_kernel"`
-- 测试目标：
-  - 验证六个执行维度查询 helper 的公开返回语义均为 `SymbolDim` 风格标量，并与 `arch dialect` 的固定结果语义一一对应。
-  - 验证 `get_dynamic_memory(space)` 只接受允许的片上空间 `SM/LM/TSM/TLM1/TLM2/TLM3`，且返回一维动态字节 `Memory` 语义。
-  - 验证 `BarrierVisibility` 的聚合语义、`barrier(*, visibility, scope)` 的关键字参数合同与 `arch.barrier` 支持性校验。
-  - 验证 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 的函数对象、extent、尾部参数与 launched body 上下文语义。
-  - 验证 `launch_kernel` 的参数列表/顺序/必填与默认值语义：公开入口只允许四个下标字段加 `callee, *args`，不允许缺字段、未知关键字或把 launch 字段写回调用参数。
-  - 验证 operation helper 到 `arch dialect` 的映射边界清晰，不引入新的方言或非 `arch` lowering 路径。
-  - 验证 target registry 硬件值优先生效，缺失时回退符号/动态语义。
-  - 验证当前 target 不支持的 `arch.*` helper 调用必须报错，并覆盖 target registry 缺失关键字段时的显式错误路径。
-- 功能与用例清单：
-  - `TC-OP-ARCH-001`：`get_block_id()` 返回 `SymbolDim` 风格 block 索引语义，并映射 `TC-ARCH-001`。
-  - `TC-OP-ARCH-002`：`get_block_num()` 返回 `SymbolDim` 风格 block 数量语义，并映射 `TC-ARCH-002`。
-  - `TC-OP-ARCH-003`：`get_thread_id()` 返回 `SymbolDim` 风格 thread 索引语义，并映射 `TC-ARCH-003`。
-  - `TC-OP-ARCH-004`：`get_thread_num()` 返回 `SymbolDim` 风格 thread 数量语义，并映射 `TC-ARCH-004`。
-  - `TC-OP-ARCH-005`：`get_subthread_id()` 返回 `SymbolDim` 风格 subthread 索引语义，并映射 `TC-ARCH-005`。
-  - `TC-OP-ARCH-006`：`get_subthread_num()` 返回 `SymbolDim` 风格 subthread 数量语义，并映射 `TC-ARCH-006`。
-  - `TC-OP-ARCH-007`：`get_dynamic_memory(space)` 在 `SM/LM/TSM/TLM1/TLM2/TLM3` 六类片上空间都返回 `shape=[?]`、`stride=[1]`、`dtype=NumericType.Int8` 的一维动态内存语义，并映射 `TC-ARCH-007`。
-  - `TC-OP-ARCH-008`：`get_dynamic_memory(...)` 对非法空间或非法类型报错，并覆盖 `MemorySpace.GM` 错误路径；对应 `TC-ARCH-008` 的方言边界。
-  - `TC-OP-ARCH-009`：`barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=...)` 接受合法聚合可见域与公开 scope 并返回 `None`。
-  - `TC-OP-ARCH-010`：`barrier(...)` 对缺参、空列表、重复 `visibility`、错误元素类型与非法 `scope` 报错。
-  - `TC-OP-ARCH-011`：`launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 接受合法 `function/int|SymbolDim` 输入与尾部 kernel 参数，并在 launched body 内暴露本次 launch extent。
-  - `TC-OP-ARCH-012`：`launch_kernel[...]` 对字符串或非函数 `callee`、非法类型与静态 `<= 0` 的规模输入报错。
-  - `TC-OP-ARCH-013`：`launch_kernel` 的公开入口固定为四个下标字段加 `callee, *args`；缺字段、未知关键字或把 launch 字段写进调用参数都必须在调用边界报 `TypeError`。
-  - `TC-OP-ARCH-014`：`launch_kernel[...]` 的公开语义、示例与错误路径不得回退为旧直调用写法。
-  - `TC-OP-ARCH-015`：target registry 提供硬件值时，launch 外的 `get_block_num()` / `get_thread_num()` / `get_subthread_num()` / `get_dynamic_memory()` 必须优先使用硬件值；launched body 内则优先暴露本次 launch extent。
-  - `TC-OP-ARCH-016`：当当前 target 不支持某个 `arch.*` op 时，对应 helper 的 target registry 支持性校验必须抛出 `ValueError` 并包含 op 名称；本条覆盖 `get_block_num()` / `get_thread_num()` / `get_subthread_num()` / `get_dynamic_memory()` / `barrier()` / `launch_kernel()` 的错误路径。
+- 测试文件：`test/operation/test_arch.py`
+- 执行命令：
+  - `pytest -q test/operation/test_arch.py`
+  - `pytest -q test/operation/test_arch.py -k "barrier or launch_kernel"`
+
+### 测试目标
+
+- 验证 `spec/operation/arch.md` 对应公开 API 的正常路径、边界条件与错误语义。
+- 验证公开执行入口的返回值、输出或状态变化符合预期。
+- 验证非法输入、边界条件和错误语义按公开合同失败。
+- 验证 Memory/DMA 参数、布局、搬运或 verifier 行为。
+
+
+### 功能与用例清单
+
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-OPERATION-ARCH-001 | 执行结果 | `get_block_id()` 返回 `SymbolDim` 风格 block 索引语义，并映射 `TC-ARCH-001`。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `TC-OP-ARCH-001`。 | 命令返回码、输出、执行结果或状态变更体现“`get_block_id()` 返回 `SymbolDim` 风格 block 索引语义，并映射 `TC-ARCH-001`。”场景。 | `TC-OP-ARCH-001` |
+| TC-OPERATION-ARCH-002 | 执行结果 | `get_block_num()` 返回 `SymbolDim` 风格 block 数量语义，并映射 `TC-ARCH-002`。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `TC-OP-ARCH-002`。 | 命令返回码、输出、执行结果或状态变更体现“`get_block_num()` 返回 `SymbolDim` 风格 block 数量语义，并映射 `TC-ARCH-002`。”场景。 | `TC-OP-ARCH-002` |
+| TC-OPERATION-ARCH-003 | 执行结果 | `get_thread_id()` 返回 `SymbolDim` 风格 thread 索引语义，并映射 `TC-ARCH-003`。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `TC-OP-ARCH-003`。 | 命令返回码、输出、执行结果或状态变更体现“`get_thread_id()` 返回 `SymbolDim` 风格 thread 索引语义，并映射 `TC-ARCH-003`。”场景。 | `TC-OP-ARCH-003` |
+| TC-OPERATION-ARCH-004 | 执行结果 | `get_thread_num()` 返回 `SymbolDim` 风格 thread 数量语义，并映射 `TC-ARCH-004`。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `TC-OP-ARCH-004`。 | 命令返回码、输出、执行结果或状态变更体现“`get_thread_num()` 返回 `SymbolDim` 风格 thread 数量语义，并映射 `TC-ARCH-004`。”场景。 | `TC-OP-ARCH-004` |
+| TC-OPERATION-ARCH-005 | 执行结果 | `get_subthread_id()` 返回 `SymbolDim` 风格 subthread 索引语义，并映射 `TC-ARCH-005`。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `TC-OP-ARCH-005`。 | 命令返回码、输出、执行结果或状态变更体现“`get_subthread_id()` 返回 `SymbolDim` 风格 subthread 索引语义，并映射 `TC-ARCH-005`。”场景。 | `TC-OP-ARCH-005` |
+| TC-OPERATION-ARCH-006 | 执行结果 | `get_subthread_num()` 返回 `SymbolDim` 风格 subthread 数量语义，并映射 `TC-ARCH-006`。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `TC-OP-ARCH-006`。 | 命令返回码、输出、执行结果或状态变更体现“`get_subthread_num()` 返回 `SymbolDim` 风格 subthread 数量语义，并映射 `TC-ARCH-006`。”场景。 | `TC-OP-ARCH-006` |
+| TC-OPERATION-ARCH-007 | 执行结果 | `get_dynamic_memory(space)` 在 `SM/LM/TSM/TLM1/TLM2/TLM3` 六类片上空间都返回 `shape=[?]`、`stride=[1]`、`dtype=NumericType.Int8` 的一维动态内存语义，并映射 `TC-ARCH-007`。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `TC-OP-ARCH-007`。 | 命令返回码、输出、执行结果或状态变更体现“`get_dynamic_memory(space)` 在 `SM/LM/TSM/TLM1/TLM2/TLM3` 六类片上空间都返回 `shape=[?]`、`stride=[1]`、`dtype=NumericType.Int8` 的一维动态内存语义，并映射 `TC-ARCH-007`。”场景。 | `TC-OP-ARCH-007` |
+| TC-OPERATION-ARCH-008 | 边界/异常 | `get_dynamic_memory(...)` 对非法空间或非法类型报错，并覆盖 `MemorySpace.GM` 错误路径；对应 `TC-ARCH-008` 的方言边界。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `TC-OP-ARCH-008`。 | “`get_dynamic_memory(...)` 对非法空间或非法类型报错，并覆盖 `MemorySpace.GM` 错误路径；对应 `TC-ARCH-008` 的方言边界。”场景按公开错误语义失败或被拒绝。 | `TC-OP-ARCH-008` |
+| TC-OPERATION-ARCH-009 | 执行结果 | `barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=...)` 接受合法聚合可见域与公开 scope 并返回 `None`。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `TC-OP-ARCH-009`。 | 命令返回码、输出、执行结果或状态变更体现“`barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=...)` 接受合法聚合可见域与公开 scope 并返回 `None`。”场景。 | `TC-OP-ARCH-009` |
+| TC-OPERATION-ARCH-010 | 边界/异常 | `barrier(...)` 对缺参、空列表、重复 `visibility`、错误元素类型与非法 `scope` 报错。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `TC-OP-ARCH-010`。 | “`barrier(...)` 对缺参、空列表、重复 `visibility`、错误元素类型与非法 `scope` 报错。”场景按公开错误语义失败或被拒绝。 | `TC-OP-ARCH-010` |
+| TC-OPERATION-ARCH-011 | 内存/DMA | `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 接受合法 `function/int\ | SymbolDim` 输入与尾部 kernel 参数，并在 launched body 内暴露本次 launch extent。 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `TC-OP-ARCH-011`。 | 内存类型、布局、搬运结果或 verifier 行为与场景描述一致。 |
+| TC-OPERATION-ARCH-012 | 边界/异常 | `launch_kernel[...]` 对字符串或非函数 `callee`、非法类型与静态 `<= 0` 的规模输入报错。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `TC-OP-ARCH-012`。 | “`launch_kernel[...]` 对字符串或非函数 `callee`、非法类型与静态 `<= 0` 的规模输入报错。”场景按公开错误语义失败或被拒绝。 | `TC-OP-ARCH-012` |
+| TC-OPERATION-ARCH-013 | 边界/异常 | `launch_kernel` 的公开入口固定为四个下标字段加 `callee, *args`；缺字段、未知关键字或把 launch 字段写进调用参数都必须在调用边界报 `KernelCodeError`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `TC-OP-ARCH-013`。 | “`launch_kernel` 的公开入口固定为四个下标字段加 `callee, *args`；缺字段、未知关键字或把 launch 字段写进调用参数都必须在调用边界报 `KernelCodeError`。”场景按公开错误语义失败或被拒绝。 | `TC-OP-ARCH-013` |
+| TC-OPERATION-ARCH-014 | 公开入口 | `launch_kernel[...]` 的公开语义、示例与错误路径不得回退为旧直调用写法。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `TC-OP-ARCH-014`。 | 公开入口在“`launch_kernel[...]` 的公开语义、示例与错误路径不得回退为旧直调用写法。”场景下可导入、构造、注册或按名称发现。 | `TC-OP-ARCH-014` |
+| TC-OPERATION-ARCH-015 | 公开入口 | target registry 提供硬件值时，launch 外的 `get_block_num()` / `get_thread_num()` / `get_subthread_num()` / `get_dynamic_memory()` 必须优先使用硬件值；launched body 内则优先暴露本次 launch extent。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `TC-OP-ARCH-015`。 | 公开入口在“target registry 提供硬件值时，launch 外的 `get_block_num()` / `get_thread_num()` / `get_subthread_num()` / `get_dynamic_memory()` 必须优先使用硬件值；launched body 内则优先暴露本次 launch extent。”场景下可导入、构造、注册或按名称发现。 | `TC-OP-ARCH-015` |
+| TC-OPERATION-ARCH-016 | 边界/异常 | 当当前 target 不支持某个 `arch.*` op 时，对应 helper 的 target registry 支持性校验必须抛出 `KernelCodeError` 并包含 op 名称；本条覆盖 `get_block_num()` / `get_thread_num()` / `get_subthread_num()` / `get_dynamic_memory()` / `barrier()` / `launch_kernel()` 的错误路径。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `TC-OP-ARCH-016`。 | “当当前 target 不支持某个 `arch.*` op 时，对应 helper 的 target registry 支持性校验必须抛出 `KernelCodeError` 并包含 op 名称；本条覆盖 `get_block_num()` / `get_thread_num()` / `get_subthread_num()` / `get_dynamic_memory()` / `barrier()` / `launch_kernel()` 的错误路径。”场景按公开错误语义失败或被拒绝。 | `TC-OP-ARCH-016` |

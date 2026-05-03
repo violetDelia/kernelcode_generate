@@ -32,12 +32,10 @@ helper 清单:
 - Vector dims{2, 3, 4};
 - Status status = StatusCode::kOk;
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 
@@ -54,12 +52,10 @@ helper 清单:
 - long long coords_buf[3] = {5, 0, 7};
 - Vector coords(coords_buf, 3);
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 inline Vector::Vector(long long* data, unsigned long long size)
@@ -73,12 +69,10 @@ inline Vector::Vector(long long* data, unsigned long long size)
 - const long long coords_buf[3] = {5, 0, 7};
 - Vector coords(coords_buf, 3);
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 inline Vector::Vector(const long long* data, unsigned long long size)
@@ -91,12 +85,10 @@ inline Vector::Vector(const long long* data, unsigned long long size)
 使用示例:
 - Vector dim{16};
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 inline Vector::Vector(long long value0)
@@ -109,12 +101,10 @@ inline Vector::Vector(long long value0)
 使用示例:
 - Vector shape{2, 3};
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 inline Vector::Vector(long long value0, long long value1)
@@ -127,12 +117,10 @@ inline Vector::Vector(long long value0, long long value1)
 使用示例:
 - Vector dims{2, 3, 4};
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 inline Vector::Vector(long long value0, long long value1, long long value2)
@@ -145,12 +133,10 @@ inline Vector::Vector(long long value0, long long value1, long long value2)
 使用示例:
 - Vector dims{1, 2, 3, 4};
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 inline Vector::Vector(long long value0, long long value1, long long value2, long long value3)
@@ -163,12 +149,10 @@ inline Vector::Vector(long long value0, long long value1, long long value2, long
 使用示例:
 - Vector copied = Vector{1, 2, 3};
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 inline Vector::Vector(const Vector& other)
@@ -184,12 +168,10 @@ inline Vector::Vector(const Vector& other)
 - Vector dims{1};
 - dims = Vector{2, 3};
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 inline Vector& Vector::operator=(const Vector& other) {
@@ -212,12 +194,10 @@ inline Vector& Vector::operator=(const Vector& other) {
 使用示例:
 - unsigned long long n = coords.size();
 
-创建者: jcc你莫辜负
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 inline unsigned long long Vector::size() const {
@@ -231,12 +211,10 @@ inline unsigned long long Vector::size() const {
 使用示例:
 - long long* raw = coords.data();
 
-创建者: jcc你莫辜负
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 inline long long* Vector::data() {
@@ -250,12 +228,10 @@ inline long long* Vector::data() {
 使用示例:
 - const long long* raw = coords.data();
 
-创建者: jcc你莫辜负
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 inline const long long* Vector::data() const {
@@ -269,12 +245,10 @@ inline const long long* Vector::data() const {
 使用示例:
 - long long axis0 = coords[0];
 
-创建者: jcc你莫辜负
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 inline long long& Vector::operator[](unsigned long long index) {
@@ -288,12 +262,10 @@ inline long long& Vector::operator[](unsigned long long index) {
 使用示例:
 - long long axis0 = coords[0];
 
-创建者: jcc你莫辜负
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 inline const long long& Vector::operator[](unsigned long long index) const {

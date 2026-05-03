@@ -14,14 +14,14 @@
 - `set_dump_dir(value: str | Path | None) -> None`
 - `get_dump_dir() -> Path | None`
 - `reset_config() -> None`
-- `CoreConfigSnapshot(target: str | None, dump_dir: Path | None)`
+- `class CoreConfigSnapshot(target: str | None, dump_dir: Path | None)`
 - `snapshot_config() -> CoreConfigSnapshot`
 - `restore_config(snapshot: CoreConfigSnapshot) -> None`
 
 ## 文档信息
 
-- 创建者：`OpenAI Codex`
-- 最后一次更改：`OpenAI Codex`
+- 创建者：`未记录`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/core/config.md`](../../spec/core/config.md)
 - `test`：[`test/core/test_config.py`](../../test/core/test_config.py)
 - `功能实现`：[`kernel_gen/core/config.py`](../../kernel_gen/core/config.py)
@@ -30,140 +30,145 @@
 
 - 无
 
-## 公开接口
-
-## 配置项说明
-
-### `target`
-
-设置说明：
-
-- 用于显式声明当前调用链预期使用的目标名称。
-- 推荐值示例：`cpu`、`npu_demo`。
-- 传入 `None` 表示清空当前显式目标，让后续调用方自行决定默认目标或继续保持未指定状态。
-
-示例：
-
-```python
-from kernel_gen.core.config import get_target, set_target
-
-set_target("npu_demo")
-assert get_target() == "npu_demo"
-
-set_target(None)
-assert get_target() is None
-```
-
-### `dump_dir`
-
-设置说明：
-
-- 用于显式声明当前 DSL/Pass 诊断产物根目录。
-- 推荐值示例：`"dump"`、`Path("dump")`。
-- 传入 `None` 或空字符串表示关闭诊断产物落盘。
-- `dsl_run(...)` 从本配置读取 `dump_dir`，不得另设公开 `dump_dir` 入参。
-
-示例：
-
-```python
-from pathlib import Path
-
-from kernel_gen.core.config import get_dump_dir, set_dump_dir
-
-set_dump_dir("dump")
-assert get_dump_dir() == Path("dump")
-
-set_dump_dir(None)
-assert get_dump_dir() is None
-
-set_dump_dir("")
-assert get_dump_dir() is None
-```
+## API详细说明
 
 ### `set_target(value: str | None) -> None`
 
-功能说明：
+- api：`set_target(value: str | None) -> None`
+- 参数：
+  - `value`：当前接口处理或写入的业务值，作为生成、转换、比较或存储语义的主要输入；类型 `str | None`；无默认值，调用方必须显式提供；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：无返回值；调用成功表示操作完成。
+- 使用示例：
 
-- 设置公开 `target` 配置。
-- 仅接受 `str` 或 `None`。
-- 当你希望一次执行链路明确绑定到某个目标时，应先调用这个接口。
-
-使用示例：
-
-```python
-from kernel_gen.core.config import get_target, set_target
-
-set_target("npu_demo")
-assert get_target() == "npu_demo"
-```
+  ```python
+  set_target(value=value)
+  ```
+- 功能说明：设置 `target`。
+- 注意事项：仅接受 `str | None`；传入 `None` 表示清空当前显式目标；target 配置只能通过 `set_target/get_target` 读写，不提供 `dict` 式任意 key 入口。
 
 ### `get_target() -> str | None`
 
-功能说明：
+- api：`get_target() -> str | None`
+- 参数：无。
+- 返回值：`str | None`。
+- 使用示例：
 
-- 读取公开 `target` 配置。
-- 返回 `None` 表示当前没有显式目标设置。
+  ```python
+  result = get_target()
+  ```
+- 功能说明：读取 `target`。
+- 注意事项：返回 `None` 表示当前没有显式 target 设置；调用方不得读取本模块内部变量替代该接口。
 
 ### `set_dump_dir(value: str | Path | None) -> None`
 
-功能说明：
+- api：`set_dump_dir(value: str | Path | None) -> None`
+- 参数：
+  - `value`：当前接口处理或写入的业务值，作为生成、转换、比较或存储语义的主要输入；类型 `str | Path | None`；无默认值，调用方必须显式提供；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：无返回值；调用成功表示操作完成。
+- 使用示例：
 
-- 设置公开 `dump_dir` 配置。
-- 仅接受 `str`、`Path` 或 `None`。
-- `None` 与空字符串都会关闭诊断落盘。
-- 当你希望一次执行链路写出诊断产物时，应先调用这个接口。
-
-使用示例：
-
-```python
-from pathlib import Path
-
-from kernel_gen.core.config import get_dump_dir, set_dump_dir
-
-set_dump_dir(Path("dump"))
-assert get_dump_dir() == Path("dump")
-```
+  ```python
+  set_dump_dir(value=value)
+  ```
+- 功能说明：设置 `dump_dir`。
+- 注意事项：仅接受 `str | Path | None`；`None` 与空字符串都关闭诊断产物落盘；`dsl_run(...)` 从本配置读取 `dump_dir`，不得另设公开 `dump_dir` 入参。
 
 ### `get_dump_dir() -> Path | None`
 
-功能说明：
+- api：`get_dump_dir() -> Path | None`
+- 参数：无。
+- 返回值：`Path | None`。
+- 使用示例：
 
-- 读取公开 `dump_dir` 配置。
-- 返回 `None` 表示当前未启用诊断产物落盘。
+  ```python
+  result = get_dump_dir()
+  ```
+- 功能说明：读取 `dump_dir`。
+- 注意事项：返回 `None` 表示当前未启用诊断产物落盘；调用方不得读取本模块内部变量替代该接口。
 
 ### `reset_config() -> None`
 
-功能说明：
+- api：`reset_config() -> None`
+- 参数：无。
+- 返回值：无返回值；调用成功表示操作完成。
+- 使用示例：
 
-- 恢复公开配置默认值。
-- `target` 与 `dump_dir` 恢复为 `None`。
+  ```python
+  reset_config()
+  ```
+- 功能说明：执行 `reset_config`。
+- 注意事项：该接口会把 `target` 与 `dump_dir` 恢复为 `None`；测试和工具入口应在跨 case 修改配置后调用该接口或使用 `snapshot_config/restore_config` 恢复现场。
+
+### `class CoreConfigSnapshot(target: str | None, dump_dir: Path | None)`
+
+- api：`class CoreConfigSnapshot(target: str | None, dump_dir: Path | None)`
+- 参数：
+  - `target`：目标对象、目标名称或目标缓冲区，指定当前操作写入或作用的位置；类型 `str | None`；无默认值，调用方必须显式提供；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `dump_dir`：诊断输出目录，指定 IR、源码或中间产物写入位置；类型 `Path | None`；无默认值，调用方必须显式提供；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：`CoreConfigSnapshot` 实例。
+- 使用示例：
+
+  ```python
+  core_config_snapshot = CoreConfigSnapshot(target=target, dump_dir=dump_dir)
+  ```
+- 功能说明：构造 `CoreConfigSnapshot` 实例。
+- 注意事项：该类型只保存公开 `target` 与 `dump_dir` 快照；不得塞入任意 dict、硬件配置、emit 上下文状态或临时生成状态。
 
 ### `snapshot_config() -> CoreConfigSnapshot`
 
-功能说明：
+- api：`snapshot_config() -> CoreConfigSnapshot`
+- 参数：无。
+- 返回值：`CoreConfigSnapshot`。
+- 使用示例：
 
-- 返回当前公开 target 与 dump_dir 配置的不可变快照。
-- 用于工具入口临时设置 target 后恢复调用前状态，避免 pytest 或嵌套调用串状态。
+  ```python
+  result = snapshot_config()
+  ```
+- 功能说明：执行 `snapshot_config`。
+- 注意事项：快照用于工具入口临时设置 target 或 dump_dir 后恢复调用前状态，避免 pytest 或嵌套调用串状态；不得把快照对象当作可变配置入口。
 
 ### `restore_config(snapshot: CoreConfigSnapshot) -> None`
 
-功能说明：
+- api：`restore_config(snapshot: CoreConfigSnapshot) -> None`
+- 参数：
+  - `snapshot`：快照数据，用于记录或比较当前对象在某一时刻的状态；类型 `CoreConfigSnapshot`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：无返回值；调用成功表示操作完成。
+- 使用示例：
 
-- 恢复由 `snapshot_config()` 产生的公开配置快照。
-- 只接受 `CoreConfigSnapshot`，不接受任意 dict。
+  ```python
+  restore_config(snapshot=snapshot)
+  ```
+- 功能说明：执行 `restore_config`。
+- 注意事项：只接受 `CoreConfigSnapshot`，不接受任意 dict；该接口会恢复快照中的 `target` 与 `dump_dir`，不会恢复未列入本文件 API 的内部状态。
 
-## 限制与边界
+## 额外补充
 
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 本文件只定义公共行为配置底座，不承载单次生成状态。
 - 未在本文件 `API 列表` 中显式列出的配置项，都不是公开配置。
 - target 配置对外只能通过 `set_target/get_target` 接口读写，不提供 `dict` 式任意 key 入口。
-- `EmitCContext` 的 SSA 名字表、缩进层级、runtime args、parse globals/builtins、callee registry/compiler 与 loop vars 都不是公共配置，不得迁入本文件。
+- `EmitCContext` 的 SSA 名字表、缩进层级、runtime args、解析环境、callee registry/compiler 与 loop vars 都不是公共配置，不得迁入本文件。
 - `hardware` 不属于公共 `config` 底座职责；这类硬件结构化信息应放在 `target` 侧收口。
 - `dump_dir` 只承载诊断产物根目录；pass IR 与 `gen_kernel(...)` 最终源码可按该目录落盘，但源码文本本身和执行结果不属于 config 状态。
 - 非公开 helper 仅允许存在于本文件内部，禁止跨文件调用。
 
 ## 测试
 
-- 测试文件：[`test/core/test_config.py`](../../test/core/test_config.py)
+- 测试文件：`test/core/test_config.py`
 - 执行命令：`pytest -q test/core/test_config.py`
-- 测试目标：验证 `set_target/get_target/set_dump_dir/get_dump_dir/reset/snapshot/restore` 公开接口的稳定行为，并验证非法类型输入会稳定失败。
+
+### 测试目标
+
+- 验证 `set_target/get_target/set_dump_dir/get_dump_dir/reset/snapshot/restore` 公开接口的稳定行为，并验证非法类型输入会稳定失败。
+
+### 功能与用例清单
+
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-CORE-CONFIG-001 | 解析/打印 | target round trip | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_target_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_target_round_trip` |
+| TC-CORE-CONFIG-002 | 解析/打印 | dump dir round trip | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_dump_dir_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_dump_dir_round_trip` |
+| TC-CORE-CONFIG-003 | 边界/异常 | config setters reject invalid types | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_config_setters_reject_invalid_types`。 | “config setters reject invalid types”场景按公开错误语义失败或被拒绝。 | `test_config_setters_reject_invalid_types` |
+| TC-CORE-CONFIG-004 | 公开入口 | reset config restores public defaults | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_reset_config_restores_public_defaults`。 | 公开入口在“reset config restores public defaults”场景下可导入、构造、注册或按名称发现。 | `test_reset_config_restores_public_defaults` |
+| TC-CORE-CONFIG-005 | 解析/打印 | snapshot and restore config round trip | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_snapshot_and_restore_config_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_snapshot_and_restore_config_round_trip` |

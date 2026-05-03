@@ -1,7 +1,5 @@
 """ircheck CLI tests.
 
-创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 `python -m kernel_gen.tools.ircheck <case-file>` 的最小 CLI 合同：
@@ -53,10 +51,6 @@ _SIMPLE_IR = """builtin.module {
 
 
 # TC-IRCHECK-CLI-001
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 23:13:57 +0800
-# 最近一次运行成功时间: 2026-04-08 23:13:57 +0800
 # 功能说明: 验证 CLI 匹配失败时 stdout 包含 failed_check 与 actual_ir，且退出码为 1。
 # 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_match_failure_outputs_actual_ir
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -83,10 +77,6 @@ def test_ircheck_cli_match_failure_outputs_actual_ir(tmp_path: Path, capsys: pyt
 
 
 # TC-IRCHECK-CLI-002
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-10 13:10:00 +0800
-# 最近一次运行成功时间: 2026-04-10 13:10:00 +0800
 # 功能说明: 验证 CLI 支持 `// -----` 分隔的多 case；全部通过时退出码为 0 且仅输出 true。
 # 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_multi_case_success
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -113,10 +103,6 @@ def test_ircheck_cli_multi_case_success(tmp_path: Path, capsys: pytest.CaptureFi
 
 
 # TC-IRCHECK-CLI-003
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-13 03:20:00 +0800
-# 最近一次运行成功时间: 2026-04-13 03:20:00 +0800
 # 功能说明: 验证 CLI `-irdump` 会生成 .irdump/<stem>/case_XX 目录与逐 step IR 文件。
 # 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_irdump_creates_files
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -177,10 +163,6 @@ def test_ircheck_cli_irdump_creates_files(
 
 
 # TC-IRCHECK-CLI-010
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-15 03:40:00 +0800
-# 最近一次运行成功时间: 2026-04-15 03:40:00 +0800
 # 功能说明: 验证 CLI 支持 `-emitc{target=cpu}` 并对源码文本执行 CHECK 匹配。
 # 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_emitc_cpu_success
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -203,10 +185,6 @@ def test_ircheck_cli_emitc_cpu_success(tmp_path: Path, capsys: pytest.CaptureFix
 
 
 # TC-IRCHECK-CLI-011
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-15 03:40:00 +0800
-# 最近一次运行成功时间: 2026-04-15 03:40:00 +0800
 # 功能说明: 验证 CLI 的 emitc 参数非法时返回固定错误前缀。
 # 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_invalid_emitc_arguments
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -234,10 +212,6 @@ def test_ircheck_cli_invalid_emitc_arguments(
 
 
 # TC-IRCHECK-CLI-013
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-15 14:40:00 +0800
-# 最近一次运行成功时间: 2026-04-15 14:40:00 +0800
 # 功能说明: 验证 CLI 的 `-emitc` 缺少 target 参数时返回固定错误前缀。
 # 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_emitc_missing_target_rejected
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -265,10 +239,6 @@ def test_ircheck_cli_emitc_missing_target_rejected(
 
 
 # TC-IRCHECK-CLI-012
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-15 03:40:00 +0800
-# 最近一次运行成功时间: 2026-04-15 03:40:00 +0800
 # 功能说明: 验证 CLI 的 `-emitc{target=npu_demo}` 失败时返回固定错误前缀，并输出进入源码分支前的最终 IR。
 # 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_emitc_npu_demo_failure_outputs_actual_ir
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -299,10 +269,6 @@ def test_ircheck_cli_emitc_npu_demo_failure_outputs_actual_ir(
 
 
 # TC-IRCHECK-CLI-014
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-15 14:40:00 +0800
-# 最近一次运行成功时间: 2026-04-15 14:40:00 +0800
 # 功能说明: 验证 CLI 支持 `-irdump` 与 `-emitc{target=cpu}` 组合，并写出 IR dump 与 emitc 结果文件。
 # 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_irdump_emitc_cpu_creates_files
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py

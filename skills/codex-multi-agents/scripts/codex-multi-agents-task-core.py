@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """codex-multi-agents-task-core.py.
 
-创建者: OpenAI
-最后一次更改: Codex
 
 功能说明:
 - 处理 `codex-multi-agents-task.sh` 的核心数据逻辑。
@@ -447,8 +445,6 @@ def count_doing_tasks(exec_rows: list[list[str]], assignee: str) -> int:
 def collect_doing_task_counts(exec_rows: list[list[str]]) -> dict[str, int]:
     """汇总每个角色的进行中任务数量。
 
-    创建者: OpenAI
-    最后一次更改: Codex
 
     功能说明:
     - 只统计 `状态=进行中` 且 `指派` 非空的运行中任务。
@@ -475,8 +471,6 @@ def collect_doing_task_counts(exec_rows: list[list[str]]) -> dict[str, int]:
 def ensure_single_active_task_per_assignee(exec_rows: list[list[str]]) -> None:
     """校验运行表中每个角色同一时刻至多一条进行中任务。
 
-    创建者: OpenAI
-    最后一次更改: Codex
 
     功能说明:
     - 若同一角色在运行表中出现多条 `状态=进行中` 任务，则直接报错。
@@ -498,8 +492,6 @@ def ensure_single_active_task_per_assignee(exec_rows: list[list[str]]) -> None:
 def expected_agent_status_from_exec_rows(exec_rows: list[list[str]], assignee: str) -> str:
     """根据运行表计算单个角色应有的 busy/free 状态。
 
-    创建者: OpenAI
-    最后一次更改: Codex
 
     功能说明:
     - 只统计 `状态=进行中` 的任务。
@@ -524,8 +516,6 @@ def ensure_agent_status_matches_exec_rows(
 ) -> int:
     """校验单个角色在 agents 表中的状态与运行表一致。
 
-    创建者: OpenAI
-    最后一次更改: Codex
 
     功能说明:
     - 只校验被当前命令直接读写的角色，不重算整张名单。
@@ -558,8 +548,6 @@ def update_agent_status_from_exec_rows(
 ) -> int:
     """仅更新单个角色的名单状态，避免整表重算。
 
-    创建者: OpenAI
-    最后一次更改: Codex
 
     功能说明:
     - 只更新命令直接影响到的角色。
@@ -616,8 +604,6 @@ def normalize_task_type(raw: str, code: int, context: str) -> str:
 def type_duty_keywords(kind: str) -> list[str]:
     """按任务类型返回专职关键词集合。
 
-    创建者: OpenAI
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 为专职匹配提供关键词集合。
@@ -651,8 +637,6 @@ def type_duty_keywords(kind: str) -> list[str]:
 def agent_matches_type(kind: str, duty: str) -> bool:
     """判断职责是否满足专职匹配条件。
 
-    创建者: OpenAI
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 按任务类型与关键词判断专职匹配。
@@ -678,8 +662,6 @@ def agent_matches_type(kind: str, duty: str) -> bool:
 def is_substitute_duty(duty: str) -> bool:
     """判断是否为候补职责。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 识别职责中包含“全能替补”的候补角色。
@@ -698,8 +680,6 @@ def is_substitute_duty(duty: str) -> bool:
 def is_merge_specialist_duty(duty: str) -> bool:
     """判断是否为可承接 merge 任务的合并专职职责。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅接受职责包含“合并”且未显式声明“不含合并”的角色。
@@ -727,8 +707,6 @@ def get_agent_duty(
 ) -> str:
     """读取角色表行中的职责文本。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 从 agents 表头中定位“职责”列。
@@ -750,8 +728,6 @@ def get_agent_duty(
 def is_specialist_candidate(kind: str, duty: str) -> bool:
     """判断是否满足专职候选条件。
 
-    创建者: jcc你莫辜负
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 使用任务类型关键词判断专职匹配。
@@ -775,8 +751,6 @@ def is_specialist_candidate(kind: str, duty: str) -> bool:
 def is_assignment_allowed_for_task(kind: str, duty: str) -> bool:
     """判断职责是否允许接手该任务类型。
 
-    创建者: OpenAI
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - `merge` 仅允许合并专职。
@@ -803,8 +777,6 @@ def is_assignment_allowed_for_task(kind: str, duty: str) -> bool:
 def assignment_role_label(kind: str) -> str:
     """返回任务类型对应的可分发角色标签。
 
-    创建者: OpenAI
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 统一显式分发失败时的职责提示短语。
@@ -841,8 +813,6 @@ def ensure_assignee_matches_task_type(
 ) -> None:
     """校验显式分发目标角色是否满足任务类型职责约束。
 
-    创建者: OpenAI
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - `merge` 仅允许合并专职。
@@ -879,8 +849,6 @@ def is_agent_eligible_for_auto(
 ) -> int:
     """判断角色是否满足自动续接的基础条件。
 
-    创建者: OpenAI
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 校验角色是否存在且状态为 free。
@@ -914,8 +882,6 @@ def is_agent_eligible_for_auto(
 def resolve_auto_random_seed() -> int | None:
     """解析自动续接随机种子。
 
-    创建者: 睡觉小分队
-    最后一次更改: 睡觉小分队
 
     功能说明:
     - 读取 CODEX_MULTI_AGENTS_AUTO_RANDOM_SEED，并归一化为整数种子。
@@ -940,8 +906,6 @@ def resolve_auto_random_seed() -> int | None:
 def build_auto_random() -> random.Random:
     """构造自动续接随机数生成器。
 
-    创建者: 睡觉小分队
-    最后一次更改: 睡觉小分队
 
     功能说明:
     - 若存在随机种子则构造可复现的 Random 实例。
@@ -972,8 +936,6 @@ def pick_next_auto_assignee(
 ) -> tuple[str, int] | None:
     """在候选人集合中选择自动续接接手人。
 
-    创建者: OpenAI
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 在专职候选集合中随机选择接手人。
@@ -1029,8 +991,6 @@ def dependencies_resolved_for_row(
 ) -> bool:
     """判断任务行的依赖是否已全部完成。
 
-    创建者: OpenAI
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 依赖任务只要仍存在于运行表或任务列表中，即视为未完成。
@@ -1060,8 +1020,6 @@ def pick_ready_task_auto_dispatch(
 ) -> tuple[int, str, int] | None:
     """从任务列表中挑选首个可自动启动的任务。
 
-    创建者: OpenAI
-    最后一次更改: Codex
 
     功能说明:
     - 只扫描依赖已清空的任务。
@@ -1106,8 +1064,6 @@ def auto_dispatch_ready_tasks(
 ) -> list[tuple[str, str]]:
     """按任务列表顺序自动拉起可执行任务。
 
-    创建者: OpenAI
-    最后一次更改: Codex
 
     功能说明:
     - 复用现有 ready 判定、候选人选择与任务类型约束。
@@ -1169,8 +1125,6 @@ def ensure_operator_permission(
 ) -> None:
     """校验管理员/架构师权限并给出稳定错误短语。
 
-    创建者: 小李飞刀
-    最后修改人: 金铲铲大作战
 
     功能说明:
     - 对 `new/dispatch/done/done-plan` 做权限校验。

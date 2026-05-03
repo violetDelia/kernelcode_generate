@@ -1,11 +1,17 @@
 # codex-multi-agents-tmux.md
 
+## 功能简介
+
 用于对 `codex-multi-agents` 的 tmux 会话进行消息发送与环境初始化。
+
+## API 列表
+
+- `codex-multi-agents-tmux.sh -talk -from <name> -to <name> -agents-list <path> -message <text> -> rc`
+- `codex-multi-agents-tmux.sh -init-env -file <agents-lists.md> -name <name> -> rc`
+- `codex-multi-agents-tmux.sh -wake -file <agents-lists.md> -name <name> -> rc`
 
 ## 文档信息
 
-- 创建者：`榕`
-- 最后一次更改：`榕`
 - `spec`：[`spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md`](../../../spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md)
 - `test`：[`test/codex-multi-agents/test_codex-multi-agents-tmux.py`](../../../test/codex-multi-agents/test_codex-multi-agents-tmux.py)
 - `功能实现`：[`skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh`](../../../skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh)
@@ -14,7 +20,98 @@
 
 - 脚本文件：[`skills/codex-multi-agents/scripts/codex-multi-agents-tmux`](../../../skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh)
 
-## 参数约定
+## 依赖
+
+- 无额外 spec 依赖。
+
+## API详细说明
+
+### `codex-multi-agents-tmux.sh -talk -from <name> -to <name> -agents-list <path> -message <text> -> rc`
+
+- api：`codex-multi-agents-tmux.sh -talk -from <name> -to <name> -agents-list <path> -message <text> -> rc`
+- 参数：
+  - `-talk`：发送会话消息动作开关；类型为 CLI flag；必填；不得和初始化动作同时出现。
+  - `-from`：发送方名称；类型为非空字符串；必填；用于格式化公开消息前缀。
+  - `-to`：接收方名称；类型为非空字符串；必填；必须能在 agents 名单中解析出会话。
+  - `-agents-list`：agents 名单文件路径；类型为路径字符串；必填；用于解析目标会话和默认日志路径。
+  - `-message`：消息正文；类型为非空字符串；必填；空消息必须返回参数错误。
+- 返回值：返回进程退出码 `rc`；`0` 表示成功，非 `0` 表示参数、文件、数据、锁或内部错误，具体错误语义以本接口 `注意事项` 和本文公开合同为准。
+- 使用示例：
+
+  ```python
+  import subprocess
+
+  subprocess.run([
+      'bash',
+      'skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh',
+      '-talk',
+      '-from',
+      '小李飞刀',
+      '-to',
+      '神秘人',
+      '-agents-list',
+      'agents/codex-multi-agents/agents-lists.md',
+      '-message',
+      '任务已完成，请推进。'
+  ], check=False)
+  ```
+- 功能说明：按公开消息格式向目标 tmux 会话发送文本，并追加默认 talk 日志。
+- 注意事项：本接口的命令参数、错误返回、文件副作用和消息副作用必须在本条目内维护；不得依赖统一补充章节承载接口级限制。调用方只允许通过公开脚本入口消费，不得绕过脚本直连内部 helper。
+
+### `codex-multi-agents-tmux.sh -init-env -file <agents-lists.md> -name <name> -> rc`
+
+- api：`codex-multi-agents-tmux.sh -init-env -file <agents-lists.md> -name <name> -> rc`
+- 参数：
+  - `-init-env`：初始化运行环境动作开关；类型为 CLI flag；必填；不得和发送消息动作同时出现。
+  - `-file`：agents 名单文件路径；类型为路径字符串；必填；用于读取角色提示词、worktree 和启动类型。
+  - `-name`：待初始化角色名；类型为非空字符串；必填；不存在或关键字段缺失必须返回数据错误。
+- 返回值：返回进程退出码 `rc`；`0` 表示成功，非 `0` 表示参数、文件、数据、锁或内部错误，具体错误语义以本接口 `注意事项` 和本文公开合同为准。
+- 使用示例：
+
+  ```python
+  import subprocess
+
+  subprocess.run([
+      'bash',
+      'skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh',
+      '-init-env',
+      '-file',
+      'agents/codex-multi-agents/agents-lists.md',
+      '-name',
+      '小李飞刀'
+  ], check=False)
+  ```
+- 功能说明：按 agents 名单中的角色配置向对应会话发送初始化命令。
+- 注意事项：本接口的命令参数、错误返回、文件副作用和消息副作用必须在本条目内维护；不得依赖统一补充章节承载接口级限制。调用方只允许通过公开脚本入口消费，不得绕过脚本直连内部 helper。
+
+### `codex-multi-agents-tmux.sh -wake -file <agents-lists.md> -name <name> -> rc`
+
+- api：`codex-multi-agents-tmux.sh -wake -file <agents-lists.md> -name <name> -> rc`
+- 参数：
+  - `-wake`：唤醒角色动作开关；类型为 CLI flag；必填；不得和发送消息动作同时出现。
+  - `-file`：agents 名单文件路径；类型为路径字符串；必填；用于读取角色会话字段。
+  - `-name`：待唤醒角色名；类型为非空字符串；必填；不存在或会话字段缺失必须返回数据错误。
+- 返回值：返回进程退出码 `rc`；`0` 表示成功，非 `0` 表示参数、文件、数据、锁或内部错误，具体错误语义以本接口 `注意事项` 和本文公开合同为准。
+- 使用示例：
+
+  ```python
+  import subprocess
+
+  subprocess.run([
+      'bash',
+      'skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh',
+      '-wake',
+      '-file',
+      'agents/codex-multi-agents/agents-lists.md',
+      '-name',
+      '小李飞刀'
+  ], check=False)
+  ```
+- 功能说明：按 agents 名单定位角色会话并发送唤醒命令。
+- 注意事项：本接口的命令参数、错误返回、文件副作用和消息副作用必须在本条目内维护；不得依赖统一补充章节承载接口级限制。调用方只允许通过公开脚本入口消费，不得绕过脚本直连内部 helper。
+## 额外补充
+
+### 参数约定
 
 - `-talk`：向目标会话发送消息并写入默认日志。
 - `-init-env`：按名单信息初始化目标角色运行环境。
@@ -26,11 +123,11 @@
 - `-file`：agents 名单文件路径（用于 `-init-env/-wake`）。
 - `-name`：待初始化或唤醒的角色名（用于 `-init-env/-wake`）。
 
-## 并发约束
+### 并发约束
 
 - `-talk` 追加日志时必须使用 `flock` 文件锁，避免并发写入冲突。
 
-## 功能
+### 功能
 
 ### 发送对话
 
@@ -60,7 +157,7 @@ codex-multi-agents-tmux.sh -talk -from "scheduler" -to "worker-a" -agents-list "
 - 目标角色不在名单中或 `会话` 字段为空时返回数据错误（`RC=3`）。
 - 写日志时使用 `flock` 加锁，锁超时或冲突返回锁错误（`RC=4`）。
 
-## 唤醒角色
+### 唤醒角色
 
 
 命令：
@@ -82,7 +179,7 @@ codex-multi-agents-tmux.sh -wake -file "agents-lists.md" -name xiaoming
 - 若名单文件缺失、不可读或格式不合法，返回文件错误。
 - 若角色不存在或关键字段读取失败，返回数据错误。
 
-## 返回与错误
+### 返回与错误
 
 ### 成功返回说明
 

@@ -8,12 +8,10 @@
 - long long shape[2] = {2, 3};
 - cpu::Memory<GM, int> mem(data, 2, shape);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_memory.py
+- test: test/include/cpu/memory.py
 - 功能实现: include/cpu/Memory.h
 */
 
@@ -43,12 +41,10 @@ enum class MemorySpace {
 - cpu::Memory<GM, float> gm_mem(data, 2, shape);
 - cpu::Memory<MemorySpace::GM, float> gm_mem2(data, 2, shape);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_memory.py
+- test: test/include/cpu/memory.py
 - 功能实现: include/cpu/Memory.h
 */
 inline constexpr MemorySpace GM = MemorySpace::GM;
@@ -71,12 +67,10 @@ public:
     - long long stride[2] = {3, 1};
     - cpu::Memory<SM, int> mem(data, 2, shape, stride);
 
-    创建者: 神秘人
-    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
-    - test: test/include/cpu/test_memory.py
+    - test: test/include/cpu/memory.py
     - 功能实现: include/cpu/Memory.h
     */
     Memory(
@@ -97,12 +91,10 @@ public:
     - long long shape[2] = {2, 3};
     - cpu::Memory<GM, int> mem(data, 2, shape);
 
-    创建者: 神秘人
-    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
-    - test: test/include/cpu/test_memory.py
+    - test: test/include/cpu/memory.py
     - 功能实现: include/cpu/Memory.h
     */
     Memory(
@@ -121,12 +113,10 @@ public:
     使用示例:
     - int* ptr = mem.data();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
-    - test: test/include/cpu/test_memory.py
+    - test: test/include/cpu/memory.py
     - 功能实现: include/cpu/Memory.h
     */
     T* data() {
@@ -140,12 +130,10 @@ public:
     使用示例:
     - const int* ptr = const_mem.data();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
-    - test: test/include/cpu/test_memory.py
+    - test: test/include/cpu/memory.py
     - 功能实现: include/cpu/Memory.h
     */
     const T* data() const {
@@ -159,12 +147,10 @@ public:
     使用示例:
     - const long long* shape = mem.shape();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
-    - test: test/include/cpu/test_memory.py
+    - test: test/include/cpu/memory.py
     - 功能实现: include/cpu/Memory.h
     */
     const long long* shape() const {
@@ -178,12 +164,10 @@ public:
     使用示例:
     - const long long* stride = mem.stride();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
-    - test: test/include/cpu/test_memory.py
+    - test: test/include/cpu/memory.py
     - 功能实现: include/cpu/Memory.h
     */
     const long long* stride() const {
@@ -197,12 +181,10 @@ public:
     使用示例:
     - unsigned long long rank = mem.rank();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
-    - test: test/include/cpu/test_memory.py
+    - test: test/include/cpu/memory.py
     - 功能实现: include/cpu/Memory.h
     */
     unsigned long long rank() const {
@@ -216,12 +198,10 @@ public:
     使用示例:
     - cpu::MemoryFormat format = mem.format();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
-    - test: test/include/cpu/test_memory.py
+    - test: test/include/cpu/memory.py
     - 功能实现: include/cpu/Memory.h
     */
     MemoryFormat format() const {
@@ -235,12 +215,10 @@ public:
     使用示例:
     - cpu::MemorySpace space = mem.space();
 
-    创建者: 神秘人
-    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
-    - test: test/include/cpu/test_memory.py
+    - test: test/include/cpu/memory.py
     - 功能实现: include/cpu/Memory.h
     */
     MemorySpace space() const {
@@ -254,12 +232,10 @@ public:
     使用示例:
     - long long count = mem.element_count();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
-    - test: test/include/cpu/test_memory.py
+    - test: test/include/cpu/memory.py
     - 功能实现: include/cpu/Memory.h
     */
     long long element_count() const {
@@ -277,12 +253,10 @@ public:
     使用示例:
     - bool contiguous = mem.is_contiguous();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
-    - test: test/include/cpu/test_memory.py
+    - test: test/include/cpu/memory.py
     - 功能实现: include/cpu/Memory.h
     */
     bool is_contiguous() const {
@@ -305,12 +279,10 @@ public:
     - long long index[2] = {1, 2};
     - long long offset = mem.linear_offset(index);
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
-    - test: test/include/cpu/test_memory.py
+    - test: test/include/cpu/memory.py
     - 功能实现: include/cpu/Memory.h
     */
     long long linear_offset(const long long* indices) const {
@@ -334,12 +306,10 @@ public:
     - long long index[2] = {1, 2};
     - int& value = mem.at(index);
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
-    - test: test/include/cpu/test_memory.py
+    - test: test/include/cpu/memory.py
     - 功能实现: include/cpu/Memory.h
     */
     T& at(const long long* indices) {
@@ -359,12 +329,10 @@ public:
     - long long index[2] = {1, 2};
     - const int& value = const_mem.at(index);
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
-    - test: test/include/cpu/test_memory.py
+    - test: test/include/cpu/memory.py
     - 功能实现: include/cpu/Memory.h
     */
     const T& at(const long long* indices) const {

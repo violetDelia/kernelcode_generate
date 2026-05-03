@@ -1,7 +1,5 @@
 """nn -> kernel lowering pass.
 
-创建者: 金铲铲大作战
-最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 将 nn dialect op 通过 pattern collection lower 为 kernel dialect op。
@@ -23,7 +21,7 @@ API 列表:
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/spec.md
-- test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+- test: test/passes/lowering/nn_lowering/test_nn_lowering.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 """
 
@@ -45,7 +43,6 @@ from xdsl.dialects.builtin import (
     i32,
 )
 from xdsl.ir import Block, Operation, Region, SSAValue
-from xdsl.passes import ModulePass
 from xdsl.pattern_rewriter import (
     GreedyRewritePatternApplier,
     PatternRewriteWalker,
@@ -87,8 +84,6 @@ _SUPPORTED_BINARY: dict[str, str] = {
 def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
     """获取并校验 nn op 的 space attribute。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 确认 op.attributes["space"] 为 NnMemorySpaceAttr。
@@ -98,7 +93,7 @@ def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -111,8 +106,6 @@ def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
 def _ensure_single_result(op: Operation) -> NnMemoryType:
     """获取并校验 op 的唯一输出类型。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 确认仅有一个结果，且结果类型为 nn.memory。
@@ -122,7 +115,7 @@ def _ensure_single_result(op: Operation) -> NnMemoryType:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -137,8 +130,6 @@ def _ensure_single_result(op: Operation) -> NnMemoryType:
 def _ensure_operand_count(op: Operation, count: int) -> None:
     """校验 op 的 operand 数量。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 确认 op.operands 数量与预期一致。
@@ -148,7 +139,7 @@ def _ensure_operand_count(op: Operation, count: int) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -159,8 +150,6 @@ def _ensure_operand_count(op: Operation, count: int) -> None:
 def _ensure_int_attr(op: Operation, name: str) -> int:
     """获取并校验 op 的 int attribute。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 从 op.attributes 获取指定 name。
@@ -171,7 +160,7 @@ def _ensure_int_attr(op: Operation, name: str) -> int:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -188,8 +177,6 @@ def _ensure_unary_result_matches_operand(
 ) -> list[int | str]:
     """校验 unary op 的结果类型与 operand 一致。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 要求 result/operand 的 shape、stride、element_type、space 完全一致。
@@ -199,7 +186,7 @@ def _ensure_unary_result_matches_operand(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/exp.py
+    - test: test/passes/lowering/nn_lowering/test_exp.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -227,8 +214,6 @@ def _collect_unary_dynamic_shape(
 ) -> list[SSAValue]:
     """收集 unary 结果的动态维度列表。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 对每个符号维度插入 symbol.get_dim 作为 dma.alloc 的 dynamic_shape。
@@ -239,7 +224,7 @@ def _collect_unary_dynamic_shape(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/exp.py
+    - test: test/passes/lowering/nn_lowering/test_exp.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -261,8 +246,6 @@ def _collect_unary_dynamic_shape(
 def _ensure_symbol_int(op: Operation, operand: SSAValue | Operation) -> SSAValue:
     """确保 operand 为 symbol.int 或 IntegerAttr。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 若 operand 为 int attr，则使用 arith.constant 转换为 SSAValue。
@@ -273,7 +256,7 @@ def _ensure_symbol_int(op: Operation, operand: SSAValue | Operation) -> SSAValue
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -289,8 +272,6 @@ def _ensure_symbol_int(op: Operation, operand: SSAValue | Operation) -> SSAValue
 def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAValue:
     """确保 operand 为 symbol.int 或 IntegerAttr。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 支持 symbol.int 或 arith.constant 整数。
@@ -300,7 +281,7 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -316,8 +297,6 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
 def _ensure_reduce_axis(op_name: str, axes_attr: ArrayAttr) -> int:
     """校验 reduce 轴参数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 确保 axes_attr 为 ArrayAttr 且仅包含一个 IntegerAttr。
@@ -327,7 +306,7 @@ def _ensure_reduce_axis(op_name: str, axes_attr: ArrayAttr) -> int:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -348,8 +327,6 @@ def _ensure_reduce_axis(op_name: str, axes_attr: ArrayAttr) -> int:
 def _ensure_reduce_keepdim(op_name: str, keepdim_attr: Attribute) -> bool:
     """校验 reduce keepdim 参数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - keepdim 支持 IntegerAttr/IntAttr 的 0 或 1。
@@ -360,7 +337,7 @@ def _ensure_reduce_keepdim(op_name: str, keepdim_attr: Attribute) -> bool:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -385,8 +362,6 @@ def _ensure_reduce_keepdim(op_name: str, keepdim_attr: Attribute) -> bool:
 def _normalize_shape_dims(shape: Iterable[Attribute]) -> list[int | str]:
     """将 shape 维度规范化为 int 或 str。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - IntAttr 转换为 int。
@@ -398,7 +373,7 @@ def _normalize_shape_dims(shape: Iterable[Attribute]) -> list[int | str]:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -428,8 +403,6 @@ def _collect_reduce_dynamic_shape(
 ) -> list[SSAValue]:
     """收集 reduce 结果的动态维度列表。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 遍历结果 shape 中的符号维度，按 axis/keepdim 映射回 operand 维度。
@@ -440,7 +413,7 @@ def _collect_reduce_dynamic_shape(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/reduce_min.py
+    - test: test/passes/lowering/nn_lowering/reduce_min.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -469,8 +442,6 @@ def _ensure_matmul_shape(
 ) -> None:
     """校验 nn.matmul 的 shape 合同。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 确认 lhs/rhs/out 均为 rank-2。
@@ -481,7 +452,7 @@ def _ensure_matmul_shape(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -499,8 +470,6 @@ def _ensure_matmul_shape(
 def _ensure_matmul_stride(mem_type: NnMemoryType) -> None:
     """校验 nn.matmul 的 stride 连续性。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 当 shape/stride 可静态求值时，要求 stride 为连续布局。
@@ -510,7 +479,7 @@ def _ensure_matmul_stride(mem_type: NnMemoryType) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -535,8 +504,6 @@ def _materialize_fill(
 ) -> SSAValue:
     """将标量填充为 nn.memory。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 插入 dma.alloc 与 dma.fill，将标量扩展为 memory。
@@ -546,7 +513,7 @@ def _materialize_fill(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -566,8 +533,6 @@ def _materialize_fill_for_mixed(
 ) -> tuple[SSAValue, SSAValue]:
     """处理 mixed symbol/nn.memory binary op。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 当只有一个 operand 为 nn.memory 时，将另一个标量填充为 memory。
@@ -577,7 +542,7 @@ def _materialize_fill_for_mixed(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -592,8 +557,6 @@ def _materialize_fill_for_mixed(
 def _lower_binary(block: Block, op: Operation) -> None:
     """lower binary ops。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 支持 element binary 与 compare family。
@@ -604,7 +567,7 @@ def _lower_binary(block: Block, op: Operation) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -639,8 +602,6 @@ def _lower_binary(block: Block, op: Operation) -> None:
 def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
     """lower reduce family。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 校验 axes / keepdim。
@@ -651,7 +612,7 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -700,8 +661,6 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
 def _lower_matmul(block: Block, op: Operation) -> None:
     """lower nn.matmul。
 
-    创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 校验 shape 与 stride。
@@ -713,7 +672,7 @@ def _lower_matmul(block: Block, op: Operation) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -759,8 +718,6 @@ def _ensure_img2col_params(
 ) -> tuple[SSAValue, list[SSAValue]]:
     """校验并提取 img2col 参数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验参数数量，并提取 dynamic 参数列表。
@@ -770,7 +727,7 @@ def _ensure_img2col_params(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -783,8 +740,6 @@ def _ensure_img2col_params(
 def _lower_img2col1d(block: Block, op: Operation) -> None:
     """lower nn.img2col1d。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 将 img2col1d 参数转换为 symbol.int。
@@ -795,7 +750,7 @@ def _lower_img2col1d(block: Block, op: Operation) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -814,8 +769,6 @@ def _lower_img2col1d(block: Block, op: Operation) -> None:
 def _lower_img2col2d(block: Block, op: Operation) -> None:
     """lower nn.img2col2d。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 将 img2col2d 参数转换为 symbol.int。
@@ -826,7 +779,7 @@ def _lower_img2col2d(block: Block, op: Operation) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
@@ -845,8 +798,6 @@ def _lower_img2col2d(block: Block, op: Operation) -> None:
 def nn_lowering_patterns() -> list[RewritePattern]:
     """返回 lower-nn 的 rewrite pattern 集合。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 汇总 nn_lowering 各 family pattern，作为 NnLoweringPass.apply(...) 的唯一 driver 输入。
@@ -857,7 +808,7 @@ def nn_lowering_patterns() -> list[RewritePattern]:
 
     关联文件:
     - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
-    - test: [test/pass/nn_lowering/public_name.py](test/pass/nn_lowering/public_name.py)
+    - test: [test/passes/lowering/nn_lowering/test_public_name.py](test/passes/lowering/nn_lowering/test_public_name.py)
     - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
     """
 
@@ -880,8 +831,6 @@ def nn_lowering_patterns() -> list[RewritePattern]:
 class _RejectUnsupportedNnOpPattern(RewritePattern):
     """拒绝未纳入 nn_lowering family 的 nn op。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 放在所有已支持 family pattern 之后。
@@ -892,7 +841,7 @@ class _RejectUnsupportedNnOpPattern(RewritePattern):
 
     关联文件:
     - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
-    - test: [test/pass/nn_lowering/public_name.py](test/pass/nn_lowering/public_name.py)
+    - test: [test/passes/lowering/nn_lowering/test_public_name.py](test/passes/lowering/nn_lowering/test_public_name.py)
     - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
     """
 
@@ -907,21 +856,18 @@ class _RejectUnsupportedNnOpPattern(RewritePattern):
 class NnLoweringPass(Pass):
     """nn -> kernel lowering pass。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 将 nn dialect op 降至 kernel / dma / symbol。
     - 通过 `PatternRewriteWalker` 驱动单个 nn op 的 rewrite。
-    - 兼容旧 `run(...)` 入口，同时对外满足 `ModulePass.apply(...)` 合同。
+    - 公开执行入口固定为 xdsl `ModulePass.apply(ctx, module)`，不再提供单 pass `run(...)` 兼容入口。
 
     使用示例:
     - NnLoweringPass().apply(Context(), module)
-    - NnLoweringPass().run(module)
 
     关联文件:
     - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
-    - test: [test/pass/nn_lowering/test_lowering_nn_lowering.py](test/pass/nn_lowering/test_lowering_nn_lowering.py)
+    - test: [test/passes/lowering/nn_lowering/test_nn_lowering.py](test/passes/lowering/nn_lowering/test_nn_lowering.py)
     - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
     """
 
@@ -930,8 +876,6 @@ class NnLoweringPass(Pass):
     def apply(self, ctx: Context, op: ModuleOp) -> None:
         """执行 nn lowering。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 守护最好的爱莉希雅
 
         功能说明:
         - 通过 canonical public path 取得 `nn_lowering_patterns()` 返回的 pattern driver。
@@ -943,7 +887,7 @@ class NnLoweringPass(Pass):
 
         关联文件:
         - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
-        - test: [test/pass/nn_lowering/public_name.py](test/pass/nn_lowering/public_name.py)
+        - test: [test/passes/lowering/nn_lowering/test_public_name.py](test/passes/lowering/nn_lowering/test_public_name.py)
         - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
         """
 
@@ -959,12 +903,6 @@ class NnLoweringPass(Pass):
                 dce_enabled=False,
             )
         ).rewrite_module(op)
-
-    def run(self, module: ModuleOp) -> ModuleOp:
-        """兼容旧 `run(...)` 入口。"""
-
-        self.apply(Context(), module)
-        return module
 
 
 __all__ = ["NnLoweringPass", "nn_lowering_patterns"]

@@ -1,11 +1,22 @@
 """Arch operation API.
 
-创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
 
 功能说明:
 - 提供 operation 层的 arch helper，覆盖执行维度查询、动态片上内存入口、barrier 与 kernel 启动描述。
 - 区分真实内存空间 `MemorySpace` 与聚合可见域 `BarrierVisibility`，补充 launched body 内的 launch extent 查询语义。
+
+API 列表:
+- `class BarrierVisibility()`
+- `class BarrierScope()`
+- `get_block_id() -> SymbolDim`
+- `get_block_num() -> SymbolDim`
+- `get_thread_id() -> SymbolDim`
+- `get_thread_num() -> SymbolDim`
+- `get_subthread_id() -> SymbolDim`
+- `get_subthread_num() -> SymbolDim`
+- `get_dynamic_memory(space: MemorySpace) -> Memory`
+- `barrier(*, visibility: list[BarrierVisibility] | tuple[BarrierVisibility, ...], scope: BarrierScope) -> None`
+- `launch_kernel[block: int | SymbolDim, thread: int | SymbolDim, subthread: int | SymbolDim, shared_memory_size: int | SymbolDim](callee: FunctionType, *args: KernelArgument) -> None`
 
 使用示例:
 - from kernel_gen.operation.arch import BarrierScope, BarrierVisibility, barrier, get_block_id, get_dynamic_memory, launch_kernel
@@ -16,7 +27,7 @@
 
 关联文件:
 - spec: spec/operation/arch.md
-- test: test/operation/test_operation_arch.py
+- test: test/operation/test_arch.py
 - 功能实现: kernel_gen/operation/arch.py
 """
 
@@ -27,8 +38,16 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum
 import inspect
+from types import FunctionType
 
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import (
+    ERROR_ACTION,
+    ERROR_ACTUAL,
+    ERROR_TEMPLATE,
+    ErrorKind,
+    ErrorModule,
+    kernel_code_error,
+)
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
@@ -36,6 +55,8 @@ from kernel_gen.target import registry as target_registry
 
 LaunchExtent = int | SymbolDim
 LaunchSharedMemorySize = int | SymbolDim
+BarrierVisibilityInput = list["BarrierVisibility"] | tuple["BarrierVisibility", ...]
+KernelArgument = Memory | SymbolDim | int | float | str | bool | None
 _DYNAMIC_MEMORY_SPACES = (
     MemorySpace.SM,
     MemorySpace.LM,
@@ -44,8 +65,6 @@ _DYNAMIC_MEMORY_SPACES = (
     MemorySpace.TLM2,
     MemorySpace.TLM3,
 )
-_ERROR_ACTION = "请按接口约束传参"
-_ERROR_ACTUAL = "不满足期望"
 _TARGET_ERROR_SCENE = "arch helper target registry 校验"
 _DYNAMIC_MEMORY_HARDWARE_KEYS = {
     MemorySpace.SM: "sm_memory_size",
@@ -64,12 +83,16 @@ _DYNAMIC_MEMORY_FALLBACK_SYMBOLS = {
     MemorySpace.TLM3: "TLM3_SIZE",
 }
 
+class _MissingArgument:
+    """标记 barrier 必填关键字未传入。"""
+
+
+_MISSING_ARGUMENT = _MissingArgument()
+
 
 class BarrierVisibility(Enum):
     """operation 层 barrier 聚合可见域枚举。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 区分 barrier 聚合可见域与真实内存空间。
@@ -80,7 +103,7 @@ class BarrierVisibility(Enum):
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -118,8 +141,6 @@ _ACTIVE_LAUNCH_CONTEXT: ContextVar[_LaunchContext | None] = ContextVar(
 def _verify_target_registry_support(op_name: str) -> None:
     """按当前 target registry 配置校验 arch helper 支持性。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 在启用 target registry 校验时，阻止不支持的 helper 被调用。
@@ -129,40 +150,40 @@ def _verify_target_registry_support(op_name: str) -> None:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
-    current_target = target_registry._get_current_target()
+    current_target = target_registry.get_current_target()
     if current_target is None:
         return
     try:
         supported = target_registry.is_arch_op_supported(current_target, op_name)
     except ValueError as exc:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=_TARGET_ERROR_SCENE,
                 expected=str(exc),
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         ) from exc
     except (AttributeError, TypeError, KeyError) as exc:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=_TARGET_ERROR_SCENE,
                 expected="current target registry missing required arch fields",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         ) from exc
     if not supported:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=_TARGET_ERROR_SCENE,
                 expected=f"{op_name} is not supported by target {current_target}",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         )
 
@@ -170,40 +191,38 @@ def _verify_target_registry_support(op_name: str) -> None:
 def _get_current_target_hardware_value(key: str) -> int | None:
     """安全读取当前 target registry 的设备字段。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 复用 `target_registry.get_current_target_hardware(...)` 读取设备值。
-    - 当当前 target 资产缺少 `hardware` 等关键字段时，统一抛出显式 `ValueError`。
+    - 当当前 target 资产缺少 `hardware` 等关键字段时，统一抛出显式 `KernelCodeError`。
 
     使用示例:
     - _get_current_target_hardware_value("thread_num")
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
     try:
         return target_registry.get_current_target_hardware(key)
     except ValueError as exc:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=_TARGET_ERROR_SCENE,
                 expected=str(exc),
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         ) from exc
     except (AttributeError, TypeError, KeyError) as exc:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=_TARGET_ERROR_SCENE,
                 expected=f"current target registry missing required hardware field: {key}",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         ) from exc
 
@@ -211,8 +230,6 @@ def _get_current_target_hardware_value(key: str) -> int | None:
 def _build_query_symbol(name: str) -> SymbolDim:
     """构造执行维度查询返回的 SymbolDim。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 为六个执行维度查询 helper 复用统一的 SymbolDim 构造路径。
@@ -222,7 +239,7 @@ def _build_query_symbol(name: str) -> SymbolDim:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -232,8 +249,6 @@ def _build_query_symbol(name: str) -> SymbolDim:
 def _coerce_launch_extent_symbol(value: LaunchExtent) -> SymbolDim:
     """把 launch extent 统一规整为 `SymbolDim`。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - launched body 查询命中当前 launch 上下文时，统一返回 `SymbolDim`。
@@ -244,7 +259,7 @@ def _coerce_launch_extent_symbol(value: LaunchExtent) -> SymbolDim:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -256,8 +271,6 @@ def _coerce_launch_extent_symbol(value: LaunchExtent) -> SymbolDim:
 def _resolve_launch_context_symbol(symbol_name: str) -> SymbolDim | None:
     """读取当前 launched body 的 launch extent 语义。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 在 `launch_kernel[...]` 启动请求执行期间，把 `block/thread/subthread` extent 暴露给数量类 helper。
@@ -268,7 +281,7 @@ def _resolve_launch_context_symbol(symbol_name: str) -> SymbolDim | None:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -287,8 +300,6 @@ def _resolve_launch_context_symbol(symbol_name: str) -> SymbolDim | None:
 def _require_current_target_hardware(op_name: str, hardware_key: str) -> int | None:
     """读取当前 target 需要的硬件字段，缺失时抛出一致错误。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 未启用 current target 时返回 `None`，保持 helper 的符号回退语义。
@@ -299,22 +310,22 @@ def _require_current_target_hardware(op_name: str, hardware_key: str) -> int | N
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
-    current_target = target_registry._get_current_target()
+    current_target = target_registry.get_current_target()
     if current_target is None:
         return None
     hardware_value = _get_current_target_hardware_value(hardware_key)
     if hardware_value is not None:
         return hardware_value
-    raise ValueError(
-        _ERROR_TEMPLATE.format(
+    raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+        ERROR_TEMPLATE.format(
             scene=_TARGET_ERROR_SCENE,
             expected=f"{op_name} requires target {current_target} hardware.{hardware_key}",
-            actual=_ERROR_ACTUAL,
-            action=_ERROR_ACTION,
+            actual=ERROR_ACTUAL,
+            action=ERROR_ACTION,
         )
     )
 
@@ -322,8 +333,6 @@ def _require_current_target_hardware(op_name: str, hardware_key: str) -> int | N
 def _resolve_query_symbol(op_name: str, symbol_name: str, hardware_key: str | None = None) -> SymbolDim:
     """构造执行维度查询 helper 的返回 SymbolDim。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 先执行 target registry 支持性校验。
@@ -335,7 +344,7 @@ def _resolve_query_symbol(op_name: str, symbol_name: str, hardware_key: str | No
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -353,8 +362,6 @@ def _resolve_query_symbol(op_name: str, symbol_name: str, hardware_key: str | No
 def _resolve_dynamic_memory_shape(space: MemorySpace) -> list[int | str]:
     """解析动态内存 helper 的 shape 返回。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 优先使用 target hardware 中的容量信息。
@@ -366,7 +373,7 @@ def _resolve_dynamic_memory_shape(space: MemorySpace) -> list[int | str]:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -379,11 +386,9 @@ def _resolve_dynamic_memory_shape(space: MemorySpace) -> list[int | str]:
     return [_DYNAMIC_MEMORY_FALLBACK_SYMBOLS[space]]
 
 
-def _ensure_dynamic_memory_space(space: object) -> MemorySpace:
+def _ensure_dynamic_memory_space(space: MemorySpace) -> MemorySpace:
     """校验动态内存 helper 的空间参数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅接受 `MemorySpace`。
@@ -394,36 +399,34 @@ def _ensure_dynamic_memory_space(space: object) -> MemorySpace:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
     if not isinstance(space, MemorySpace):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="arch.get_dynamic_memory 参数校验",
                 expected="space must be MemorySpace",
                 actual=type(space).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if space not in _DYNAMIC_MEMORY_SPACES:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="arch.get_dynamic_memory 参数校验",
                 expected="space must be on-chip MemorySpace",
                 actual=str(space),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     return space
 
 
-def _ensure_launch_extent(value: object, name: str) -> LaunchExtent:
+def _ensure_launch_extent(value: LaunchExtent, name: str) -> LaunchExtent:
     """校验 kernel 启动规模参数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅接受正整数或 `SymbolDim`。
@@ -434,36 +437,34 @@ def _ensure_launch_extent(value: object, name: str) -> LaunchExtent:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
     if isinstance(value, bool) or not isinstance(value, (int, SymbolDim)):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="arch.launch 参数校验",
                 expected=f"{name} must be int or SymbolDim",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if isinstance(value, int) and value <= 0:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="arch.launch 参数校验",
                 expected=f"{name} must be > 0",
                 actual=str(value),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
     )
     return value
 
 
-def _ensure_launch_shared_memory_size(value: object, name: str) -> LaunchSharedMemorySize:
+def _ensure_launch_shared_memory_size(value: LaunchSharedMemorySize, name: str) -> LaunchSharedMemorySize:
     """校验 kernel launch 的共享内存规模参数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅接受非负整数或 `SymbolDim`。
@@ -474,36 +475,34 @@ def _ensure_launch_shared_memory_size(value: object, name: str) -> LaunchSharedM
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
     if isinstance(value, bool) or not isinstance(value, (int, SymbolDim)):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="arch.launch 参数校验",
                 expected=f"{name} must be int or SymbolDim",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if isinstance(value, int) and value < 0:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="arch.launch 参数校验",
                 expected=f"{name} must be >= 0",
                 actual=str(value),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     return value
 
 
-def _ensure_launch_callee(callee: object) -> object:
+def _ensure_launch_callee(callee: FunctionType) -> FunctionType:
     """校验 `launch_kernel` 的 `callee` 参数。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅接受 Python 函数对象。
@@ -514,27 +513,25 @@ def _ensure_launch_callee(callee: object) -> object:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
     if not inspect.isfunction(callee):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="arch.launch 参数校验",
                 expected="callee must be function object",
                 actual=type(callee).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     return callee
 
 
-def _ensure_barrier_visibility(visibility: object) -> tuple[BarrierVisibility, ...]:
+def _ensure_barrier_visibility(visibility: BarrierVisibilityInput) -> tuple[BarrierVisibility, ...]:
     """校验 barrier 的 visibility 列表。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅接受 `list[BarrierVisibility] | tuple[BarrierVisibility, ...]`。
@@ -545,64 +542,62 @@ def _ensure_barrier_visibility(visibility: object) -> tuple[BarrierVisibility, .
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
     if not isinstance(visibility, (list, tuple)):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="arch.barrier 参数校验",
                 expected="visibility must be list[BarrierVisibility] or tuple[BarrierVisibility, ...]",
                 actual=type(visibility).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     normalized_visibility = tuple(visibility)
     if not normalized_visibility:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="arch.barrier 参数校验",
                 expected="visibility must not be empty",
                 actual="empty",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if any(not isinstance(space, BarrierVisibility) for space in normalized_visibility):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="arch.barrier 参数校验",
                 expected="visibility items must be BarrierVisibility",
                 actual=str(tuple(type(space).__name__ for space in normalized_visibility)),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if len(set(normalized_visibility)) != len(normalized_visibility):
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="arch.barrier 参数校验",
                 expected="visibility must not contain duplicates",
                 actual=str([visibility_item.name for visibility_item in normalized_visibility]),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if set(normalized_visibility) != set(_BARRIER_VISIBILITY_SPACES):
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="arch.barrier 参数校验",
                 expected="visibility must contain TSM and TLM exactly once",
                 actual=str([visibility_item.name for visibility_item in normalized_visibility]),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     return normalized_visibility
 
 
-def _ensure_barrier_scope(scope: object) -> BarrierScope:
+def _ensure_barrier_scope(scope: BarrierScope) -> BarrierScope:
     """校验 barrier 的 scope 参数。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅接受 `BarrierScope` 枚举。
@@ -613,17 +608,17 @@ def _ensure_barrier_scope(scope: object) -> BarrierScope:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
     if not isinstance(scope, BarrierScope):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="arch.barrier 参数校验",
                 expected="scope must be BarrierScope",
                 actual=type(scope).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     return scope
@@ -633,8 +628,6 @@ def _ensure_barrier_scope(scope: object) -> BarrierScope:
 def _launch_context(block: LaunchExtent, thread: LaunchExtent, subthread: LaunchExtent):
     """在 Python helper 中建立一次临时 launch 上下文。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 供 `launch_kernel[...]` 在调用 Python 函数对象时临时暴露 launch extent。
@@ -645,7 +638,7 @@ def _launch_context(block: LaunchExtent, thread: LaunchExtent, subthread: Launch
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -659,19 +652,17 @@ def _launch_context(block: LaunchExtent, thread: LaunchExtent, subthread: Launch
 def get_block_id() -> SymbolDim:
     """返回当前 block 的执行索引语义。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 对外表现为 `SymbolDim("block_id")` 风格标量。
-    - 当 target registry 启用且不支持该 op，抛 ValueError。
+    - 当 target registry 启用且不支持该 op，抛 KernelCodeError。
 
     使用示例:
     - get_block_id()
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -681,12 +672,10 @@ def get_block_id() -> SymbolDim:
 def get_block_num() -> SymbolDim:
     """返回当前 launch 的 block 数量语义。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 对外表现为 `SymbolDim("block_num")` 风格标量。
-    - 当 target registry 启用且不支持该 op，抛 ValueError。
+    - 当 target registry 启用且不支持该 op，抛 KernelCodeError。
     - launched body 内优先返回当前 launch 的 block extent。
     - 无 launch 上下文时，若当前 target 提供硬件 block_num，则优先使用硬件值。
 
@@ -695,7 +684,7 @@ def get_block_num() -> SymbolDim:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -705,19 +694,17 @@ def get_block_num() -> SymbolDim:
 def get_thread_id() -> SymbolDim:
     """返回当前 block 内 thread 执行索引语义。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 对外表现为 `SymbolDim("thread_id")` 风格标量。
-    - 当 target registry 启用且不支持该 op，抛 ValueError。
+    - 当 target registry 启用且不支持该 op，抛 KernelCodeError。
 
     使用示例:
     - get_thread_id()
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -727,12 +714,10 @@ def get_thread_id() -> SymbolDim:
 def get_thread_num() -> SymbolDim:
     """返回当前 block 内 thread 数量语义。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 对外表现为 `SymbolDim("thread_num")` 风格标量。
-    - 当 target registry 启用且不支持该 op，抛 ValueError。
+    - 当 target registry 启用且不支持该 op，抛 KernelCodeError。
     - launched body 内优先返回当前 launch 的 thread extent。
     - 无 launch 上下文时，若当前 target 提供硬件 thread_num，则优先使用硬件值。
 
@@ -741,7 +726,7 @@ def get_thread_num() -> SymbolDim:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -751,19 +736,17 @@ def get_thread_num() -> SymbolDim:
 def get_subthread_id() -> SymbolDim:
     """返回当前 thread 内 subthread 执行索引语义。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 对外表现为 `SymbolDim("subthread_id")` 风格标量。
-    - 当 target registry 启用且不支持该 op，抛 ValueError。
+    - 当 target registry 启用且不支持该 op，抛 KernelCodeError。
 
     使用示例:
     - get_subthread_id()
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -773,12 +756,10 @@ def get_subthread_id() -> SymbolDim:
 def get_subthread_num() -> SymbolDim:
     """返回当前 thread 内 subthread 数量语义。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 对外表现为 `SymbolDim("subthread_num")` 风格标量。
-    - 当 target registry 启用且不支持该 op，抛 ValueError。
+    - 当 target registry 启用且不支持该 op，抛 KernelCodeError。
     - launched body 内优先返回当前 launch 的 subthread extent。
     - 无 launch 上下文时，若当前 target 提供硬件 subthread_num，则优先使用硬件值。
 
@@ -787,23 +768,21 @@ def get_subthread_num() -> SymbolDim:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
     return _resolve_query_symbol("arch.get_subthread_num", "subthread_num", "subthread_num")
 
 
-def get_dynamic_memory(space: object) -> Memory:
+def get_dynamic_memory(space: MemorySpace) -> Memory:
     """返回指定片上空间的动态字节缓冲语义。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 返回 `shape=[?]`、`stride=[1]`、`dtype=NumericType.Int8` 的一维动态内存描述。
     - 仅允许片上空间 `SM/LM/TSM/TLM1/TLM2/TLM3`。
-    - 当 target registry 启用且不支持该 op，抛 ValueError。
+    - 当 target registry 启用且不支持该 op，抛 KernelCodeError。
     - 若当前 target 提供硬件容量，优先使用硬件 size 作为 shape。
 
     使用示例:
@@ -811,7 +790,7 @@ def get_dynamic_memory(space: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -821,26 +800,50 @@ def get_dynamic_memory(space: object) -> Memory:
     return Memory(shape, NumericType.Int8, space=normalized_space, stride=[1])
 
 
-def barrier(*, visibility: object, scope: object) -> None:
+def barrier(
+    *,
+    visibility: BarrierVisibilityInput | _MissingArgument = _MISSING_ARGUMENT,
+    scope: BarrierScope | _MissingArgument = _MISSING_ARGUMENT,
+) -> None:
     """记录一次 block 级 barrier 请求。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅接受 `visibility=[TSM, TLM]` 与公开 `BarrierScope` 枚举成员。
     - 对外只表达同步语义，不返回句柄或状态值。
-    - 当 target registry 启用且不支持该 op，抛 ValueError。
+    - 当 target registry 启用且不支持该 op，抛 KernelCodeError。
 
     使用示例:
     - barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.THREAD)
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
+    if visibility is _MISSING_ARGUMENT:
+        raise kernel_code_error(
+            ErrorKind.CONTRACT,
+            ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
+                scene="arch.barrier 参数校验",
+                expected="visibility is required",
+                actual="missing",
+                action=ERROR_ACTION,
+            ),
+        )
+    if scope is _MISSING_ARGUMENT:
+        raise kernel_code_error(
+            ErrorKind.CONTRACT,
+            ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
+                scene="arch.barrier 参数校验",
+                expected="scope is required",
+                actual="missing",
+                action=ERROR_ACTION,
+            ),
+        )
     _verify_target_registry_support("arch.barrier")
     _ensure_barrier_visibility(visibility)
     _ensure_barrier_scope(scope)
@@ -848,30 +851,28 @@ def barrier(*, visibility: object, scope: object) -> None:
 
 
 def _launch_kernel_impl(
-    callee: object,
+    callee: FunctionType,
     block: LaunchExtent,
     thread: LaunchExtent,
     subthread: LaunchExtent,
     shared_memory_size: LaunchSharedMemorySize,
-    args: tuple[object, ...],
+    args: tuple[KernelArgument, ...],
 ) -> None:
     """执行一次 kernel 启动请求的共有实现。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验 `callee` 与 launch 规模，并保留尾部 kernel 参数顺序。
     - 只在调用 Python 函数对象时临时建立 launch 上下文，让数量类 helper 暴露本次 launch extent。
     - 仅保留 operation 层启动语义，返回 `None`，不返回事件、句柄或状态值。
-    - 当 target registry 启用且不支持该 op，抛 `ValueError`。
+    - 当 target registry 启用且不支持该 op，抛 `KernelCodeError`。
 
     使用示例:
     - _launch_kernel_impl(my_kernel, 1, 128, 4, 0, (lhs, rhs, out))
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -890,8 +891,6 @@ def _launch_kernel_impl(
 class _LaunchKernelInvocation:
     """记录一次 `launch_kernel[...]` 下标式调用的 launch extent。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 绑定 `block/thread/subthread/shared_memory_size` 四个编译期 extent。
@@ -902,7 +901,7 @@ class _LaunchKernelInvocation:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
@@ -911,7 +910,7 @@ class _LaunchKernelInvocation:
     subthread: LaunchExtent
     shared_memory_size: LaunchSharedMemorySize
 
-    def __call__(self, callee: object, *args: object) -> None:
+    def __call__(self, callee: FunctionType, *args: KernelArgument) -> None:
         """按绑定好的 extent 执行一次 kernel 启动请求。"""
 
         return _launch_kernel_impl(callee, self.block, self.thread, self.subthread, self.shared_memory_size, args)
@@ -920,8 +919,6 @@ class _LaunchKernelInvocation:
 class _LaunchKernelBuilder:
     """公开 `launch_kernel` 入口的 builder 对象。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 公开入口固定为 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`。
@@ -932,31 +929,34 @@ class _LaunchKernelBuilder:
 
     关联文件:
     - spec: spec/operation/arch.md
-    - test: test/operation/test_operation_arch.py
+    - test: test/operation/test_arch.py
     - 功能实现: kernel_gen/operation/arch.py
     """
 
-    def __call__(self, *args: object, **kwargs: object) -> None:
+    def __call__(self, *args: KernelArgument, **kwargs: KernelArgument) -> None:
         """拒绝旧直调用，要求使用下标式公开入口。"""
 
         del args, kwargs
-        raise TypeError(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
             "launch_kernel public API is "
             "launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)"
         )
 
-    def __getitem__(self, extents: object) -> _LaunchKernelInvocation:
+    def __getitem__(
+        self,
+        extents: LaunchExtent | tuple[LaunchExtent, LaunchExtent, LaunchExtent, LaunchSharedMemorySize],
+    ) -> _LaunchKernelInvocation:
         """绑定 `launch_kernel[...]` 的四个 launch extent。"""
 
         if not isinstance(extents, tuple):
             extents = (extents,)
         if len(extents) != 4:
-            raise TypeError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene="arch.launch 参数校验",
                     expected="launch_kernel extents must contain block, thread, subthread, shared_memory_size",
                     actual=str(len(extents)),
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         block = _ensure_launch_extent(extents[0], "block")

@@ -1,7 +1,5 @@
 """CPU target emitter entry.
 
-创建者: OpenAI Codex
-最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 注册 CPU target 的 emit op / value / attr / name handler。
@@ -17,7 +15,7 @@ API 列表:
 关联文件:
 - spec: [spec/dsl/gen_kernel/emit.md](../../../../../spec/dsl/gen_kernel/emit.md)
 - spec: [spec/dsl/gen_kernel/emit/register.md](../../../../../spec/dsl/gen_kernel/emit/register.md)
-- test: [test/dsl/gen_kernel/emit/test_emit.py](../../../../../test/dsl/gen_kernel/emit/test_emit.py)
+- test: [test/dsl/gen_kernel/emit/test_package.py](../../../../../test/dsl/gen_kernel/emit/test_package.py)
 - 功能实现: [kernel_gen/dsl/gen_kernel/emit/cpu/__init__.py](.)
 """
 
@@ -65,7 +63,7 @@ from kernel_gen.dialect.symbol import (
 )
 
 from ...emit_context import EmitCContext
-from ..register import emit_c_attr_impl, emit_c_name_impl, emit_c_type_impl
+from ..register import emit_c_attr_impl, emit_c_impl, emit_c_name_impl, emit_c_type_impl, emit_c_value_impl
 
 _BINARY_SIGILS = {
     "arith.addi": "+",
@@ -101,7 +99,7 @@ _SPACE_NAME_MAP = {
 }
 
 
-def _block_arg_index(value: object) -> int | None:
+def _block_arg_index(value: SSAValue | BlockArgument) -> int | None:
     if isinstance(value, BlockArgument):
         return value.index
     return None
@@ -136,8 +134,6 @@ def _cpu_space_name(space_name: str) -> str:
 def _emit_cpu_integer_type(attr: IntegerType, _ctx) -> str:
     """发射 CPU 整数类型文本。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 将 xDSL 整数类型映射为 CPU C/C++ 标量类型文本。
@@ -156,8 +152,6 @@ def _emit_cpu_integer_type(attr: IntegerType, _ctx) -> str:
 def _emit_cpu_float16_type(_attr: Float16Type, _ctx) -> str:
     """发射 CPU half 类型文本。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 将 xDSL f16 类型映射为 CPU C/C++ half 类型文本。
@@ -173,8 +167,6 @@ def _emit_cpu_float16_type(_attr: Float16Type, _ctx) -> str:
 def _emit_cpu_bfloat16_type(_attr: BFloat16Type, _ctx) -> str:
     """发射 CPU bfloat16 类型文本。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 将 xDSL bf16 类型映射为 CPU C/C++ bfloat16 类型文本。
@@ -190,8 +182,6 @@ def _emit_cpu_bfloat16_type(_attr: BFloat16Type, _ctx) -> str:
 def _emit_cpu_float32_type(_attr: Float32Type, _ctx) -> str:
     """发射 CPU float 类型文本。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 将 xDSL f32 类型映射为 CPU C/C++ float 类型文本。
@@ -207,8 +197,6 @@ def _emit_cpu_float32_type(_attr: Float32Type, _ctx) -> str:
 def _emit_cpu_float64_type(_attr: Float64Type, _ctx) -> str:
     """发射 CPU double 类型文本。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 将 xDSL f64 类型映射为 CPU C/C++ double 类型文本。
@@ -224,8 +212,6 @@ def _emit_cpu_float64_type(_attr: Float64Type, _ctx) -> str:
 def _emit_cpu_index_type(_attr: IndexType, _ctx) -> str:
     """发射 CPU index 类型文本。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 将 xDSL index 类型映射为 CPU C/C++ long long 类型文本。
@@ -241,8 +227,6 @@ def _emit_cpu_index_type(_attr: IndexType, _ctx) -> str:
 def _emit_cpu_memory_type(attr: NnMemoryType, ctx) -> str:
     """发射 CPU nn.memory 类型文本。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 将 `nn.memory` 映射为 CPU `Memory<MemorySpace::..., element>` 类型文本。
@@ -261,8 +245,6 @@ def _emit_cpu_memory_type(attr: NnMemoryType, ctx) -> str:
 def _emit_cpu_symbol_value_type(_attr: SymbolValueType, _ctx) -> str:
     """发射 CPU symbol 标量类型文本。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 将 `!symbol.int` 映射为 CPU C/C++ long long 类型文本。
@@ -329,32 +311,6 @@ def _format_static_layout(values: Any, ctx: EmitCContext, subject: str) -> list[
 
 def _emit_long_long_buffer(name: str, values: list[str], ctx: EmitCContext) -> str:
     return f"{ctx.current_indent}long long {name}[{len(values)}] = {{{', '.join(values)}}};"
-
-
-def _allocate_temp_name(ctx: EmitCContext, prefix: str) -> str:
-    return ctx.allocate_name(prefix)
-
-
-def _is_symbol_const_like(op: object) -> bool:
-    if isinstance(op, SymbolConstOp):
-        return True
-    if not isinstance(op, Operation):
-        return False
-    op_name_attr = op.attributes.get("op_name__")
-    return (
-        op.name == "builtin.unregistered"
-        and isinstance(op_name_attr, StringAttr)
-        and op_name_attr.data == "symbol.const"
-    )
-
-
-def _format_alloc_layout(ctx: EmitCContext, values: Any, subject: str) -> list[str]:
-    formatted: list[str] = []
-    for value in values:
-        if not isinstance(value, IntAttr):
-            raise ctx.emit_error(subject, "only static memory layout is supported")
-        formatted.append(str(value.data))
-    return formatted
 
 
 def _maybe_static_numel(shape: Any) -> int | None:
@@ -446,7 +402,7 @@ def _emit_dma_copy_loop_nest(
 ) -> str:
     if not ctx.is_target("cpu"):
         raise ctx.emit_error("dma.copy", "dma ops are cpu-only")
-    base_name = _allocate_temp_name(ctx, "dma")
+    base_name = ctx.allocate_name("dma")
     source_indices_name = f"{base_name}_src_indices"
     target_indices_name = f"{base_name}_dst_indices"
     rank = len(sizes)
@@ -523,8 +479,8 @@ def _emit_dma_alloc_stmt(op: DmaAllocOp, ctx: EmitCContext) -> str:
         raise ctx.emit_error(op.name, "result must be nn.memory")
     shape_values = [_emit_c_value(value, ctx) for value in op.dynamic_shape]
     if not shape_values:
-        shape_values = _format_alloc_layout(ctx, result_type.shape.data, op.name)
-    stride_values = _format_alloc_layout(ctx, result_type.stride.data, f"{op.name} stride")
+        shape_values = _format_static_layout(result_type.shape.data, ctx, op.name)
+    stride_values = _format_static_layout(result_type.stride.data, ctx, f"{op.name} stride")
     return _emit_memory_decl(
         result_name,
         result_type,
@@ -540,7 +496,7 @@ def _emit_dma_fill_stmt(op: DmaFillOp, ctx: EmitCContext) -> str:
         raise ctx.emit_error(op.name, "dma ops are cpu-only")
     target_expr = _emit_c_value(op.target, ctx)
     value_expr = _emit_c_value(op.value, ctx)
-    loop_name = f"{_allocate_temp_name(ctx, 'fill')}_i"
+    loop_name = f"{ctx.allocate_name('fill')}_i"
     lines = [f"{ctx.current_indent}for (long long {loop_name} = 0; {loop_name} < {target_expr}.element_count(); ++{loop_name}) {{"]
     ctx.push_indent()
     lines.append(f"{ctx.current_indent}{target_expr}.data()[{loop_name}] = {value_expr};")
@@ -559,7 +515,7 @@ def _emit_dma_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
         raise ctx.emit_error(op.name, "result must be nn.memory")
     shape_values = [_emit_c_value(value, ctx) for value in op.shape]
     stride_values = [_emit_c_value(value, ctx) for value in op.stride]
-    base_offset_name = _allocate_temp_name(ctx, "view_offset")
+    base_offset_name = ctx.allocate_name("view_offset")
     offset_terms = [f"({_emit_c_value(value, ctx)} * {source_expr}.stride()[{index}])" for index, value in enumerate(op.offsets)]
     base_offset_expr = " + ".join(offset_terms) if offset_terms else "0"
     decl = _emit_memory_decl(
@@ -737,6 +693,7 @@ def _emit_symbol_const_stmt(op: Operation, ctx: EmitCContext) -> str:
     return f"{ctx.current_indent}S_INT {name} = {value_text};"
 
 
+@emit_c_value_impl(Operation, BlockArgument, target="cpu")
 def _emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     bound = ctx.lookup_name(value)
     if bound is not None:
@@ -750,7 +707,13 @@ def _emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
         raise ctx.emit_error(owner.name, f"invalid dependency for value {value}")
     if isinstance(owner, arith.ConstantOp):
         return _format_literal(owner, ctx)
-    if _is_symbol_const_like(owner):
+    op_name_attr = owner.attributes.get("op_name__") if isinstance(owner, Operation) else None
+    if isinstance(owner, SymbolConstOp) or (
+        isinstance(owner, Operation)
+        and owner.name == "builtin.unregistered"
+        and isinstance(op_name_attr, StringAttr)
+        and op_name_attr.data == "symbol.const"
+    ):
         if isinstance(owner, SymbolConstOp):
             return str(owner.value.data)
         if owner.results and isinstance(owner.results[0].type, SymbolValueType):
@@ -778,12 +741,19 @@ def _emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     raise ctx.emit_error(owner.name, f"invalid dependency for value {value}")
 
 
+@emit_c_impl(Operation, target="cpu")
 def _emit_c_op(op: Operation, ctx: EmitCContext) -> str:
     if op.name in _BINARY_SIGILS or op.name in _SYMBOL_COMPARE_SIGILS or isinstance(op, arith.CmpiOp):
         return _emit_assignment(op, ctx)
     if isinstance(op, arith.ConstantOp):
         return ""
-    if _is_symbol_const_like(op):
+    op_name_attr = op.attributes.get("op_name__") if isinstance(op, Operation) else None
+    if isinstance(op, SymbolConstOp) or (
+        isinstance(op, Operation)
+        and op.name == "builtin.unregistered"
+        and isinstance(op_name_attr, StringAttr)
+        and op_name_attr.data == "symbol.const"
+    ):
         return ""
     if isinstance(op, (SymbolToIntOp, SymbolCastOp, SymbolToFloatOp, SymbolGetDimOp, SymbolGetStrideOp)):
         return ""

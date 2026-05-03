@@ -1,16 +1,14 @@
 """Conv2d demo with static inputs and static tiles.
 
-创建者: 大闸蟹
-最后一次更改: 大闸蟹
 
 功能说明:
 - 实现 `inputs 静 + tile 静` 的 NCHW conv2d kernel demo。
 - 使用 `img2col2d + matmul` 实现卷积。
-- 输入固定为 `input[1, 3, 8, 8]`、`weight[4, 3, 3, 3]`、`out[1, 4, 6, 6]`。
+- 输入固定为 `input[12, 32, 256, 256]`、`weight[4, 32, 3, 3]`、`out[12, 4, 254, 254]`。
 - 通过 `dsl_run` 真实执行，并和 `torch.nn.functional.conv2d` 参考结果对齐。
 
 API 列表:
-- `conv2d_inputs_static_tile_static_kernel(out: Tensor[f32, 1, 4, 6, 6], input_tensor: Tensor[f32, 1, 3, 8, 8], weight: Tensor[f32, 4, 3, 3, 3]) -> None`
+- `conv2d_inputs_static_tile_static_kernel(out: Tensor[f32, 12, 4, 254, 254], input_tensor: Tensor[f32, 12, 32, 256, 256], weight: Tensor[f32, 4, 32, 3, 3]) -> None`
 - `main() -> None`
 
 使用示例:
@@ -35,25 +33,23 @@ if str(_REPO_ROOT) not in sys.path:
 
 from kernel.runner import run_torch_demo
 from kernel_gen.operation.dma import deslice, reshape, slice
-from kernel_gen.operation.nn import img2col2d, matmul, transpose
+from kernel_gen.operation.nn import img2col2d, matmul
 from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import MemorySpace
 
 
 def conv2d_inputs_static_tile_static_kernel(
-    out: "Tensor[f32, 1, 4, 6, 6]",
-    input_tensor: "Tensor[f32, 1, 3, 8, 8]",
-    weight: "Tensor[f32, 4, 3, 3, 3]",
+    out: "Tensor[f32, 12, 4, 254, 254]",
+    input_tensor: "Tensor[f32, 12, 32, 256, 256]",
+    weight: "Tensor[f32, 4, 32, 3, 3]",
 ) -> None:
     """执行静态输入、静态 tile 的 conv2d。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 输入布局为 `input[N, C, H, W]`，权重布局为 `weight[F, C, KH, KW]`，输出布局为 `out[N, F, Ho, Wo]`。
     - 固定 stride=1、dilation=1、padding=0。
-    - 固定 tile 为 `TF=2, TC=3, TN=1, THO=3, TWO=3`。
+    - 固定 tile 为 `TF=4, TC=32, TN=1, THO=127, TWO=127`。
 
     使用示例:
     - `conv2d_inputs_static_tile_static_kernel(out, input_tensor, weight)`
@@ -63,11 +59,11 @@ def conv2d_inputs_static_tile_static_kernel(
     f_size = weight.shape.get_shape()[0]
     kh_size = weight.shape.get_shape()[2]
     kw_size = weight.shape.get_shape()[3]
-    tile_f = 2
-    tile_c = 3
+    tile_f = 4
+    tile_c = 32
     tile_n = 1
-    tile_ho = 3
-    tile_wo = 3
+    tile_ho = 127
+    tile_wo = 127
     stride_h = 1
     stride_w = 1
     dilation_h = 1
@@ -90,7 +86,7 @@ def conv2d_inputs_static_tile_static_kernel(
                     for wo0 in loop(0, wo_size, tile_wo):
                         input_tile = slice(
                             input_tensor,
-                            [n0, c0, ho0 * stride_h, wo0 * stride_w],
+                            [n0, c0, ho0, wo0],
                             [tile_n, tile_c, input_h_tile, input_w_tile],
                             [1, 1, 1, 1],
                             MemorySpace.TSM,
@@ -100,16 +96,13 @@ def conv2d_inputs_static_tile_static_kernel(
                         col2 = reshape(col, [k_tile, out_tile])
                         weight2 = reshape(weight_tile, [tile_f, k_tile])
                         out2 = matmul(weight2, col2)
-                        out_fnhw = reshape(out2, [tile_f, tile_n, tile_ho, tile_wo])
-                        out_tile_mem = transpose(out_fnhw, [1, 0, 2, 3])
+                        out_tile_mem = reshape(out2, [tile_n, tile_f, tile_ho, tile_wo])
                         deslice(out, out_tile_mem, [n0, f0, ho0, wo0], [tile_n, tile_f, tile_ho, tile_wo], [1, 1, 1, 1])
 
 
 def main() -> None:
     """运行静态输入、静态 tile 的 conv2d demo。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 构造真实 torch tensor 输入。
@@ -120,9 +113,9 @@ def main() -> None:
     - `python3 kernel/conv2d/inputs_static_tile_static.py`
     """
 
-    input_tensor = torch.arange(1 * 3 * 8 * 8, dtype=torch.float32).reshape(1, 3, 8, 8) / 101.0
-    weight = torch.arange(4 * 3 * 3 * 3, dtype=torch.float32).reshape(4, 3, 3, 3) / 113.0
-    out = torch.empty((1, 4, 6, 6), dtype=torch.float32)
+    input_tensor = torch.arange(12 * 32 * 256 * 256, dtype=torch.float32).reshape(12, 32, 256, 256) / 100000000.0
+    weight = torch.arange(4 * 32 * 3 * 3, dtype=torch.float32).reshape(4, 32, 3, 3) / 100000.0
+    out = torch.empty((12, 4, 254, 254), dtype=torch.float32)
     expected = F.conv2d(input_tensor, weight)
     result = run_torch_demo(
         "conv2d/inputs_static_tile_static",

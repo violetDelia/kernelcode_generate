@@ -1,7 +1,5 @@
 """pytest config tests.
 
-创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
 
 功能说明:
 - 校验 `pytest.ini` 中 pytest 配置的关键合同项。
@@ -31,8 +29,6 @@ pytestmark = pytest.mark.infra
 def _load_pytest_ini() -> ConfigParser:
     """读取仓库根目录 `pytest.ini` 并解析为 `ConfigParser`。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 统一处理 pytest ini 配置文件的加载入口。
@@ -55,8 +51,6 @@ def _load_pytest_ini() -> ConfigParser:
 def _split_ini_lines(raw_value: str) -> list[str]:
     """把 pytest ini 多行值拆成去空白后的行列表。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 用于解析 `markers`、`testpaths` 与 `norecursedirs` 这类支持多行书写的配置项。
@@ -73,11 +67,9 @@ def _split_ini_lines(raw_value: str) -> list[str]:
     return [line.strip() for line in raw_value.splitlines() if line.strip()]
 
 
-def _pytest_options() -> dict[str, object]:
+def _pytest_options() -> dict[str, str | list[str]]:
     """提取 `pytest.ini` 中的 `[pytest]` 配置块。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 基于 `_load_pytest_ini()` 返回的解析结果读取 `[pytest]` 区段。
@@ -97,6 +89,7 @@ def _pytest_options() -> dict[str, object]:
         "markers": _split_ini_lines(parser.get("pytest", "markers", fallback="")),
         "filterwarnings": _split_ini_lines(parser.get("pytest", "filterwarnings", fallback="")),
         "testpaths": _split_ini_lines(parser.get("pytest", "testpaths", fallback="")),
+        "python_files": _split_ini_lines(parser.get("pytest", "python_files", fallback="")),
         "addopts": parser.get("pytest", "addopts", fallback="").strip(),
         "norecursedirs": _split_ini_lines(parser.get("pytest", "norecursedirs", fallback="")),
     }
@@ -109,12 +102,14 @@ def test_pytest_ini_options_present() -> None:
     markers = options.get("markers", [])
     assert "infra: 标记脚本与基础设施测试" in markers
     assert "nn_lowering: 标记 nn_lowering 相关测试" in markers
+    assert "npu_demo: 标记 npu_demo 端到端或运行时相关测试" in markers
 
 
 def test_pytest_config_values() -> None:
     """TC-PC-002: pytest 配置关键项与合同一致。"""
     options = _pytest_options()
     assert options.get("testpaths") == ["test"]
+    assert options.get("python_files") == ["test_*.py"]
     assert options.get("addopts") == "--import-mode=importlib"
     assert options.get("norecursedirs") == ["wt-*", "tmp", "tmp/*", "tmp/**", "__pycache__"]
     assert options.get("filterwarnings") == ["default"]

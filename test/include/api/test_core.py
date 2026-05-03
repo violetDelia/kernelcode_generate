@@ -1,7 +1,5 @@
 """API Core compile tests.
 
-创建者: jcc你莫辜负
-最后一次更改: jcc你莫辜负
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 include/api/Core.h 的 Vector 与 Status 语义，并使用 include/npu_demo/Core.h 提供实现。
@@ -38,8 +36,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def _compile_and_run(source: str) -> None:
     """编译并运行 C++ 测试片段。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 使用 g++ 编译临时源码并执行生成的程序。
@@ -93,10 +89,6 @@ def _compile_and_run(source: str) -> None:
 
 
 # API-CORE-001
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-03-31 01:09:50 +0800
-# 最近一次运行成功时间: 2026-03-31 01:09:50 +0800
 # 测试目的: 验证 Vector 固定为 int64 视图，size 与元素访问符合 A0 验收口径。
 # 使用示例: pytest -q test/include/api/test_core.py -k test_api_core_vector_uses_fixed_int64_without_template_parameter
 # 对应功能实现文件路径: include/npu_demo/Core.h
@@ -131,10 +123,6 @@ int main() {
 
 
 # API-CORE-002
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-21 21:00:00 +0800
-# 最近一次运行成功时间: 2026-04-21 21:00:00 +0800
 # 测试目的: 验证 Vector 花括号构造复制到对象自有存储，且 pointer-view 构造保持可用。
 # 使用示例: pytest -q test/include/api/test_core.py -k test_api_core_vector_brace_constructors_keep_owned_values_without_std_helpers
 # 对应功能实现文件链接: [include/npu_demo/Core.h](include/npu_demo/Core.h)

@@ -1,7 +1,5 @@
 """notify-admin.sh tests.
 
-创建者: 小李飞刀
-最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 `script/notify-admin.sh` 的默认循环配置、`1/3` 概率初始化分支、确定性随机钩子与 `-init` 入口。
@@ -149,10 +147,6 @@ def run_script(repo_root: Path, *args: str, random_roll: str | None = None) -> s
 
 
 # TC-NA-001
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 11:24:00 +0800
-# 最近一次运行成功时间: 2026-04-06 11:24:00 +0800
 # 测试目的: 验证循环模式默认使用 3600 秒间隔，先提醒管理员推进任务，再逐个提醒 busy 执行人。
 # 对应功能实现文件路径: script/notify-admin.sh
 # 对应 spec 文件路径: spec/script/notify-admin.md
@@ -192,10 +186,6 @@ def test_notify_admin_loop_uses_default_interval_and_message(tmp_path: Path) -> 
 
 
 # TC-NA-002
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 11:24:00 +0800
-# 最近一次运行成功时间: 2026-04-06 11:24:00 +0800
 # 测试目的: 验证循环模式命中 `1/3` 分支时会先执行一次管理员初始化。
 # 对应功能实现文件路径: script/notify-admin.sh
 # 对应 spec 文件路径: spec/script/notify-admin.md
@@ -219,10 +209,6 @@ def test_notify_admin_loop_may_trigger_admin_init(tmp_path: Path) -> None:
 
 
 # TC-NA-003
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 11:24:00 +0800
-# 最近一次运行成功时间: 2026-04-06 11:24:00 +0800
 # 测试目的: 验证循环模式未命中 `1/3` 分支时不会执行管理员初始化。
 # 对应功能实现文件路径: script/notify-admin.sh
 # 对应 spec 文件路径: spec/script/notify-admin.md
@@ -240,10 +226,6 @@ def test_notify_admin_loop_skips_admin_init_when_roll_misses(tmp_path: Path) -> 
 
 
 # TC-NA-004
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 11:24:00 +0800
-# 最近一次运行成功时间: 2026-04-06 11:24:00 +0800
 # 测试目的: 验证 `-init` 模式直接调用管理员初始化脚本并成功退出。
 # 对应功能实现文件路径: script/notify-admin.sh
 # 对应 spec 文件路径: spec/script/notify-admin.md
@@ -264,10 +246,6 @@ def test_notify_admin_init_mode_calls_list_script(tmp_path: Path) -> None:
 
 
 # TC-NA-005
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 12:22:00 +0800
-# 最近一次运行成功时间: 2026-04-06 12:22:00 +0800
 # 测试目的: 验证 `NOTIFY_ADMIN_RANDOM_ROLL` 超出 `0|1|2` 时脚本会 fail-fast 并给出稳定错误短语。
 # 对应功能实现文件路径: script/notify-admin.sh
 # 对应 spec 文件路径: spec/script/notify-admin.md
@@ -283,10 +261,6 @@ def test_notify_admin_rejects_invalid_random_roll(tmp_path: Path) -> None:
 
 
 # TC-NA-006
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 12:32:00 +0800
-# 最近一次运行成功时间: 2026-04-06 12:32:00 +0800
 # 测试目的: 验证 `NOTIFY_ADMIN_RANDOM_ROLL` 非数字时脚本同样 fail-fast，不会误发消息或初始化。
 # 对应功能实现文件路径: script/notify-admin.sh
 # 对应 spec 文件路径: spec/script/notify-admin.md
@@ -302,10 +276,6 @@ def test_notify_admin_rejects_non_numeric_random_roll(tmp_path: Path) -> None:
 
 
 # TC-NA-007
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 12:32:00 +0800
-# 最近一次运行成功时间: 2026-04-06 12:32:00 +0800
 # 测试目的: 验证脚本在仓库内保持可通过 `bash -n` 的语法检查。
 # 对应功能实现文件路径: script/notify-admin.sh
 # 对应 spec 文件路径: spec/script/notify-admin.md

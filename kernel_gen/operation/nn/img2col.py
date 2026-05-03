@@ -1,33 +1,36 @@
 """NN operation img2col family.
 
-创建者: 守护最好的爱莉希雅
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 img2col1d / img2col2d 运算与共享 shape helper。
 
 API 列表:
-- `img2col1d(value: object, kw: int | SymbolDim, sw: int | SymbolDim = 1, dw: int | SymbolDim = 1, pl: int | SymbolDim = 0, pr: int | SymbolDim = 0) -> Memory`
-- `img2col2d(value: object, kh: int | SymbolDim, kw: int | SymbolDim, sh: int | SymbolDim = 1, sw: int | SymbolDim = 1, dh: int | SymbolDim = 1, dw: int | SymbolDim = 1, ph: int | SymbolDim = 0, pw: int | SymbolDim = 0, pl: int | SymbolDim = 0, pr: int | SymbolDim = 0) -> Memory`
+- `img2col1d(value: Memory, kw: int | SymbolDim, sw: int | SymbolDim = 1, dw: int | SymbolDim = 1, pl: int | SymbolDim = 0, pr: int | SymbolDim = 0) -> Memory`
+- `img2col2d(value: Memory, kh: int | SymbolDim, kw: int | SymbolDim, sh: int | SymbolDim = 1, sw: int | SymbolDim = 1, dh: int | SymbolDim = 1, dw: int | SymbolDim = 1, ph: int | SymbolDim = 0, pw: int | SymbolDim = 0, pl: int | SymbolDim = 0, pr: int | SymbolDim = 0) -> Memory`
 
 使用示例:
 - from kernel_gen.operation.nn.img2col import img2col1d, img2col2d
 
 关联文件:
 - spec: spec/operation/nn.md
-- test: test/operation/test_operation_nn_structured.py
+- test: test/operation/nn/test_structured.py
 - 功能实现: kernel_gen/operation/nn/img2col.py
 """
 
 from __future__ import annotations
 
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import (
+    ERROR_ACTION,
+    ERROR_TEMPLATE,
+    ErrorKind,
+    ErrorModule,
+    kernel_code_error,
+)
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
-_ERROR_ACTION = "请按接口约束传参"
 
 
 def _normalize_symbolic_int_param(
@@ -39,8 +42,6 @@ def _normalize_symbolic_int_param(
 ) -> SymbolDim:
     """规范化 img2col 内部整型/符号参数。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅接受 `int | SymbolDim`，拒绝 `bool` 和其他类型。
@@ -54,31 +55,31 @@ def _normalize_symbolic_int_param(
     expected_positive = f"{owner} {name} must be > 0"
     expected_integer = f"{owner} {name} must be integer"
     if isinstance(value, bool):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=scene,
                 expected=expected_type,
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if isinstance(value, int):
         if allow_zero and value < 0:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene=scene,
                     expected=expected_non_negative,
                     actual=str(value),
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         if not allow_zero and value <= 0:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene=scene,
                     expected=expected_positive,
                     actual=str(value),
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         return SymbolDim(value)
@@ -86,47 +87,45 @@ def _normalize_symbolic_int_param(
         if not value.is_dynamic():
             resolved = value.get_value()
             if not isinstance(resolved, int):
-                raise ValueError(
-                    _ERROR_TEMPLATE.format(
+                raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                    ERROR_TEMPLATE.format(
                         scene=scene,
                         expected=expected_integer,
                         actual=str(resolved),
-                        action=_ERROR_ACTION,
+                        action=ERROR_ACTION,
                     )
                 )
             if allow_zero and resolved < 0:
-                raise ValueError(
-                    _ERROR_TEMPLATE.format(
+                raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                    ERROR_TEMPLATE.format(
                         scene=scene,
                         expected=expected_non_negative,
                         actual=str(resolved),
-                        action=_ERROR_ACTION,
+                        action=ERROR_ACTION,
                     )
                 )
             if not allow_zero and resolved <= 0:
-                raise ValueError(
-                    _ERROR_TEMPLATE.format(
+                raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                    ERROR_TEMPLATE.format(
                         scene=scene,
                         expected=expected_positive,
                         actual=str(resolved),
-                        action=_ERROR_ACTION,
+                        action=ERROR_ACTION,
                     )
                 )
         return value
-    raise TypeError(
-        _ERROR_TEMPLATE.format(
+    raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+        ERROR_TEMPLATE.format(
             scene=scene,
             expected=expected_type,
             actual=type(value).__name__,
-            action=_ERROR_ACTION,
+            action=ERROR_ACTION,
         )
     )
 
 def _normalize_img2col_param(name: str, value: int | SymbolDim, allow_zero: bool) -> SymbolDim:
     """规范化 img2col 参数为 SymbolDim。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅接受 int 或 SymbolDim。
@@ -137,7 +136,7 @@ def _normalize_img2col_param(name: str, value: int | SymbolDim, allow_zero: bool
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_structured.py
+    - test: test/operation/nn/test_structured.py
     - 功能实现: kernel_gen/operation/nn/img2col.py
     """
     return _normalize_symbolic_int_param(
@@ -158,8 +157,6 @@ def _img2col_output_dim(
 ) -> SymbolDim:
     """计算 img2col 的输出维度。
 
-    创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 按 floor((size + pad_low + pad_high - dilation*(kernel-1) - 1) / stride) + 1 计算。
@@ -169,13 +166,13 @@ def _img2col_output_dim(
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_structured.py
+    - test: test/operation/nn/test_structured.py
     - 功能实现: kernel_gen/operation/nn/img2col.py
     """
     return ((size + pad_low + pad_high - dilation * (kernel - 1) - 1) // stride) + 1
 
 def img2col1d(
-    value: object,
+    value: Memory,
     kw: int | SymbolDim,
     sw: int | SymbolDim = 1,
     dw: int | SymbolDim = 1,
@@ -184,8 +181,6 @@ def img2col1d(
 ) -> Memory:
     """一维窗口展开高层语义推导。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 校验输入类型与 rank。
@@ -197,25 +192,25 @@ def img2col1d(
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_structured.py
+    - test: test/operation/nn/test_structured.py
     - 功能实现: kernel_gen/operation/nn/img2col.py
     """
     if not isinstance(value, Memory):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.img2col1d 参数校验",
                 expected="img2col1d value must be Memory",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if len(value.shape) != 3:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.img2col1d 参数校验",
                 expected="img2col1d value must be rank-3 Memory",
                 actual=f"rank={len(value.shape)}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
@@ -230,24 +225,24 @@ def img2col1d(
     elif value.format is Farmat.CLast:
         n_dim, w_dim, c_dim = value.shape.get_shape()
     else:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.img2col1d 参数校验",
                 expected="img2col1d value format must be Norm or CLast",
                 actual=str(value.format),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     w_out = _img2col_output_dim(w_dim, kw_dim, sw_dim, dw_dim, pl_dim, pr_dim)
 
     w_out_value = w_out.get_value()
     if isinstance(w_out_value, int) and w_out_value <= 0:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.img2col1d 参数校验",
                 expected="img2col1d output width must be positive",
                 actual=str(w_out_value),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
@@ -263,7 +258,7 @@ def img2col1d(
     )
 
 def img2col2d(
-    value: object,
+    value: Memory,
     kh: int | SymbolDim,
     kw: int | SymbolDim,
     sh: int | SymbolDim = 1,
@@ -277,8 +272,6 @@ def img2col2d(
 ) -> Memory:
     """二维窗口展开高层语义推导。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 校验输入类型与 rank。
@@ -290,13 +283,13 @@ def img2col2d(
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_structured.py
+    - test: test/operation/nn/test_structured.py
     - 功能实现: kernel_gen/operation/nn/img2col.py
     """
     return _img2col(value, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr)
 
 def _img2col(
-    value: object,
+    value: Memory,
     kh: int | SymbolDim,
     kw: int | SymbolDim,
     sh: int | SymbolDim,
@@ -310,8 +303,6 @@ def _img2col(
 ) -> Memory:
     """img2col2d 的内部展开实现。
 
-    创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 供 img2col2d 复用的内部实现。
@@ -323,25 +314,25 @@ def _img2col(
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_structured.py
+    - test: test/operation/nn/test_structured.py
     - 功能实现: kernel_gen/operation/nn/img2col.py
     """
     if not isinstance(value, Memory):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.img2col 参数校验",
                 expected="img2col value must be Memory",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if len(value.shape) != 4:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.img2col 参数校验",
                 expected="img2col value must be rank-4 Memory",
                 actual=f"rank={len(value.shape)}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
@@ -361,12 +352,12 @@ def _img2col(
     elif value.format is Farmat.CLast:
         n_dim, h_dim, w_dim, c_dim = value.shape.get_shape()
     else:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.img2col 参数校验",
                 expected="img2col value format must be Norm or CLast",
                 actual=str(value.format),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     h_out = _img2col_output_dim(h_dim, kh_dim, sh_dim, dh_dim, ph_dim, pw_dim)
@@ -374,22 +365,22 @@ def _img2col(
 
     h_out_value = h_out.get_value()
     if isinstance(h_out_value, int) and h_out_value <= 0:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.img2col 参数校验",
                 expected="img2col output height must be positive",
                 actual=str(h_out_value),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     w_out_value = w_out.get_value()
     if isinstance(w_out_value, int) and w_out_value <= 0:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.img2col 参数校验",
                 expected="img2col output width must be positive",
                 actual=str(w_out_value),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 

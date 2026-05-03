@@ -1,7 +1,5 @@
 """ircheck matcher public contract tests.
 
-创建者: 小李飞刀
-最后一次更改: 小李飞刀
 
 功能说明:
 - 通过 `run_ircheck_text(...)` 公开入口覆盖 CHECK / CHECK-NEXT / CHECK-NOT 的可观察语义。
@@ -38,8 +36,6 @@ from kernel_gen.tools.ircheck import run_ircheck_text
 def _ircheck_case(*, checks: list[str], input_ir: str) -> str:
     """组装最小 public ircheck case 文本。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 为 `run_ircheck_text(...)` 统一生成 `--pass no-op` 的 inline case。
@@ -58,10 +54,6 @@ def _ircheck_case(*, checks: list[str], input_ir: str) -> str:
 
 
 # TC-IRCHECK-MATCH-001
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 CHECK 继续从上一条 positive 命中行之后搜索。
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
@@ -83,10 +75,6 @@ def test_run_ircheck_text_reports_sequential_check_search_failure() -> None:
 
 
 # TC-IRCHECK-MATCH-002
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 CHECK-NEXT 只能命中下一行。
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
@@ -108,10 +96,6 @@ def test_run_ircheck_text_reports_check_next_failure() -> None:
 
 
 # TC-IRCHECK-MATCH-003
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 CHECK-NOT 在两个 positive 命中之间出现时失败。
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
@@ -134,10 +118,6 @@ def test_run_ircheck_text_reports_check_not_between_positives_failure() -> None:
 
 
 # TC-IRCHECK-MATCH-004
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证首条 positive 之前的 CHECK-NOT 仍约束起始区间。
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
@@ -159,10 +139,6 @@ def test_run_ircheck_text_reports_check_not_before_first_positive_failure() -> N
 
 
 # TC-IRCHECK-MATCH-005
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证末尾 CHECK-NOT 约束最后一条 positive 命中后的区间。
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
@@ -184,10 +160,6 @@ def test_run_ircheck_text_reports_check_not_after_last_positive_failure() -> Non
 
 
 # TC-IRCHECK-MATCH-006
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证公开入口支持 `[[NAME:REGEX]]` 捕获与 `[[NAME]]` 复用。
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md

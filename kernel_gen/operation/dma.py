@@ -1,24 +1,22 @@
 """DMA operation API.
 
-创建者: 金铲铲大作战
-最后一次更改: 大闸蟹
 
 功能说明:
 - 提供 Memory 的数据搬运、视图变换、整块初始化与显式转换 API，包括 alloc/free/fill/copy/load/store/slice/deslice/view/reshape/flatten/cast。
 
 API 列表:
-- `alloc(shape: Sequence[int | str] | SymbolShape, dtype: NumericType, space: MemorySpace = MemorySpace.GM, stride: Sequence[int | str] | SymbolShape | None = None, format: Farmat = Farmat.Norm) -> Memory`
-- `free(memory: object) -> None`
-- `fill(target: object, value: object) -> None`
-- `copy(source: object, target: object) -> Memory`
-- `load(source: object, offsets: Sequence[int | str] | SymbolShape, sizes: Sequence[int | str] | SymbolShape, strides: Sequence[int | str] | SymbolShape | None = None, space: MemorySpace | None = None) -> Memory`
-- `store(target: object, source: object, offsets: Sequence[int | str] | SymbolShape, sizes: Sequence[int | str] | SymbolShape, strides: Sequence[int | str] | SymbolShape | None = None) -> None`
-- `slice(memory: object, dim: Sequence[int | SymbolDim], offset: Sequence[int | SymbolDim], size: Sequence[int | SymbolDim], stride: Sequence[int | SymbolDim]) -> Memory`
-- `deslice(target: object, source: object, dim: Sequence[int | SymbolDim], offset: Sequence[int | SymbolDim], size: Sequence[int | SymbolDim], stride: Sequence[int | SymbolDim]) -> Memory`
-- `view(memory: object, shape: Sequence[int | str] | SymbolShape, stride: Sequence[int | str] | SymbolShape | None = None, format: Farmat | None = None) -> Memory`
-- `reshape(memory: object, shape: Sequence[int | str] | SymbolShape) -> Memory`
-- `flatten(memory: object) -> Memory`
-- `cast(memory: object, dtype: NumericType) -> Memory`
+- `alloc(shape: ShapeInput, dtype: NumericType, space: MemorySpace = MemorySpace.GM, stride: ShapeInput | None = None, format: Farmat = Farmat.Norm) -> Memory`
+- `free(memory: Memory) -> None`
+- `fill(target: Memory, value: FillValue) -> None`
+- `copy(source: Memory, space: MemorySpace) -> Memory`
+- `load(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
+- `store(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
+- `slice(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
+- `deslice(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
+- `view(source: Memory, offset: ShapeInput, size: ShapeInput, stride: ShapeInput) -> Memory`
+- `reshape(source: Memory, shape: ShapeInput) -> Memory`
+- `flatten(source: Memory) -> Memory`
+- `cast(source: Memory, dtype: NumericType, memoryspace: MemorySpace | None = None) -> Memory`
 
 使用示例:
 - from kernel_gen.operation.dma import copy, cast, fill, view, flatten
@@ -28,7 +26,7 @@ API 列表:
 
 关联文件:
 - spec: spec/operation/dma.md
-- test: test/operation/test_operation_dma.py
+- test: test/operation/test_dma.py
 - 功能实现: kernel_gen/operation/dma.py
 """
 
@@ -38,52 +36,63 @@ from collections.abc import Sequence
 
 from kernel_gen.core.contracts import default_stride as _common_default_stride
 from kernel_gen.core.contracts import shape_numel as _common_shape_numel
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import (
+    ERROR_ACTION,
+    ERROR_TEMPLATE,
+    ErrorKind,
+    ErrorModule,
+    kernel_code_error,
+)
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import FLOAT_DTYPES, INT_DTYPES, Farmat, NumericType
 
-_ERROR_ACTION = "请按接口约束传参"
 _ERROR_SCENE = "dma operation 参数校验"
-_REQUIRED_SPACE = object()
 _ALLOWED_FILL_STRING_LITERALS = frozenset({"inf", "-inf"})
 
+DimInput = int | str | SymbolDim
+ShapeInput = Sequence[DimInput] | SymbolShape
+FillValue = int | float | str | SymbolDim
 
-def _ensure_memory(value: object, name: str) -> Memory:
+
+class _RequiredSpaceSentinel:
+    """标记 `space` 参数没有默认值。"""
+
+
+_REQUIRED_SPACE = _RequiredSpaceSentinel()
+
+
+def _ensure_memory(value: Memory, name: str) -> Memory:
     """确保输入为 Memory。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 非 Memory 输入抛 TypeError。
+    - 非 Memory 输入抛 KernelCodeError。
 
     使用示例:
     - _ensure_memory(mem, "source")
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     if not isinstance(value, Memory):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected=f"{name} must be Memory",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     return value
 
 
-def _ensure_shape_value(value: object, name: str) -> SymbolShape:
+def _ensure_shape_value(value: ShapeInput, name: str) -> SymbolShape:
     """校验并规范化 alloc 的 shape/stride。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 字符串或字节串视为非法输入并报错。
@@ -94,42 +103,40 @@ def _ensure_shape_value(value: object, name: str) -> SymbolShape:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     if isinstance(value, (str, bytes)):
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="dma.alloc 参数校验",
                 expected=f"{name} must be a dimension sequence",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     try:
         return SymbolShape(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="dma.alloc 参数校验",
                 expected=f"{name} must be a valid dimension sequence",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         ) from exc
 
 
 def alloc(
-    shape: Sequence[int | str] | SymbolShape,
+    shape: ShapeInput,
     dtype: NumericType,
     space: MemorySpace = MemorySpace.GM,
-    stride: Sequence[int | str] | SymbolShape | None = None,
+    stride: ShapeInput | None = None,
     format: Farmat = Farmat.Norm,
 ) -> Memory:
     """分配新的 Memory 描述对象。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 返回包含 shape/dtype/space/stride/format 的 Memory 对象。
@@ -139,34 +146,34 @@ def alloc(
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     if not isinstance(dtype, NumericType):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="dma.alloc 参数校验",
                 expected="alloc dtype must be NumericType",
                 actual=type(dtype).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if not isinstance(space, MemorySpace):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="dma.alloc 参数校验",
                 expected="alloc space must be MemorySpace",
                 actual=type(space).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if not isinstance(format, Farmat):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="dma.alloc 参数校验",
                 expected="alloc format must be Farmat",
                 actual=type(format).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     shape_value = _ensure_shape_value(shape, "shape")
@@ -174,22 +181,20 @@ def alloc(
     if stride is not None:
         stride_value = _ensure_shape_value(stride, "stride")
         if len(stride_value) != len(shape_value):
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene="dma.alloc 参数校验",
                     expected="stride rank mismatch",
                     actual=f"shape_rank={len(shape_value)} stride_rank={len(stride_value)}",
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
     return Memory(shape_value, dtype, space=space, stride=stride_value, format=format)
 
 
-def free(value: object) -> None:
+def free(value: Memory) -> None:
     """释放 Memory 生命周期。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅接受 Memory 输入并返回 None。
@@ -199,22 +204,20 @@ def free(value: object) -> None:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     _ensure_memory(value, "value")
     return None
 
 
-def _validate_fill_value(value: object) -> object:
+def _validate_fill_value(value: FillValue) -> FillValue:
     """校验 `dma.fill` 的公开 value 合同。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 接受 `int`、`float`、`SymbolDim` 与 `"inf"/"-inf"`。
-    - 其他字符串抛 `ValueError`，其他类型抛 `TypeError`。
+    - 其他字符串抛 `KernelCodeError`，其他类型抛 `KernelCodeError`。
 
     使用示例:
     - _validate_fill_value(0)
@@ -222,46 +225,44 @@ def _validate_fill_value(value: object) -> object:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     if isinstance(value, bool):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="dma.fill 参数校验",
                 expected="fill value must be int/float/SymbolDim/'inf'/'-inf'",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if isinstance(value, str):
         if value not in _ALLOWED_FILL_STRING_LITERALS:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene="dma.fill 参数校验",
                     expected='fill string literal must be "inf" or "-inf"',
                     actual=value,
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         return value
     if isinstance(value, (int, float, SymbolDim)):
         return value
-    raise TypeError(
-        _ERROR_TEMPLATE.format(
+    raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+        ERROR_TEMPLATE.format(
             scene="dma.fill 参数校验",
             expected="fill value must be int/float/SymbolDim/'inf'/'-inf'",
             actual=type(value).__name__,
-            action=_ERROR_ACTION,
+            action=ERROR_ACTION,
         )
     )
 
 
-def fill(target: object, value: object) -> None:
+def fill(target: Memory, value: FillValue) -> None:
     """表达对整块 memory 的公开填充语义。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 只校验公开 helper 合同，不分配新 buffer。
@@ -273,7 +274,7 @@ def fill(target: object, value: object) -> None:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     _ensure_memory(target, "target")
@@ -281,11 +282,9 @@ def fill(target: object, value: object) -> None:
     return None
 
 
-def _normalize_index_list(value: object, name: str) -> SymbolShape:
+def _normalize_index_list(value: ShapeInput, name: str) -> SymbolShape:
     """规范化索引列表。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 接收 SymbolShape 或可迭代对象，并规范化为 SymbolShape。
@@ -295,7 +294,7 @@ def _normalize_index_list(value: object, name: str) -> SymbolShape:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     if isinstance(value, SymbolShape):
@@ -304,20 +303,18 @@ def _normalize_index_list(value: object, name: str) -> SymbolShape:
 
 
 def _resolve_memory_space(
-    space: object,
+    space: MemorySpace | None,
     *,
     scene: str,
-    default: MemorySpace | object = _REQUIRED_SPACE,
+    default: MemorySpace | _RequiredSpaceSentinel = _REQUIRED_SPACE,
 ) -> MemorySpace:
     """统一解析 `MemorySpace` 参数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 统一处理 `copy/load/slice` 的 `space` 参数校验。
     - `default` 非哨兵时允许 `space=None` 回落到默认值。
-    - 非 `MemorySpace` 输入保持原有 `TypeError` 文案。
+    - 非 `MemorySpace` 输入保持原有 `KernelCodeError` 文案。
 
     使用示例:
     - _resolve_memory_space(MemorySpace.SM, scene="dma.copy 参数校验")
@@ -325,18 +322,18 @@ def _resolve_memory_space(
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     if space is None and default is not _REQUIRED_SPACE:
         return default
     if not isinstance(space, MemorySpace):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=scene,
                 expected="space must be MemorySpace",
                 actual=type(space).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     return space
@@ -345,8 +342,6 @@ def _resolve_memory_space(
 def _ensure_index_rank(memory: Memory, offsets: SymbolShape, sizes: SymbolShape, strides: SymbolShape | None) -> None:
     """校验索引列表长度与 rank 一致。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - offsets/sizes/strides 长度必须与 memory.rank 一致。
@@ -356,26 +351,26 @@ def _ensure_index_rank(memory: Memory, offsets: SymbolShape, sizes: SymbolShape,
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     rank = len(memory.shape)
     if len(offsets) != rank or len(sizes) != rank:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected="Index rank mismatch",
                 actual=f"rank={rank} offsets={len(offsets)} sizes={len(sizes)}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if strides is not None and len(strides) != rank:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected="Index rank mismatch",
                 actual=f"rank={rank} strides={len(strides)}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
@@ -383,8 +378,6 @@ def _ensure_index_rank(memory: Memory, offsets: SymbolShape, sizes: SymbolShape,
 def _ensure_sizes_positive(sizes: SymbolShape) -> None:
     """校验 sizes 正长度约束。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 静态长度必须大于 0，动态长度保持不变。
@@ -394,17 +387,17 @@ def _ensure_sizes_positive(sizes: SymbolShape) -> None:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     for dim in sizes.get_values():
         if isinstance(dim, int) and dim <= 0:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="Invalid size",
                     actual=str(dim),
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
 
@@ -412,8 +405,6 @@ def _ensure_sizes_positive(sizes: SymbolShape) -> None:
 def _ensure_offsets_non_negative(offsets: SymbolShape) -> None:
     """校验 offsets 静态值非负。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 静态 offset 必须为非负整数。
@@ -423,17 +414,17 @@ def _ensure_offsets_non_negative(offsets: SymbolShape) -> None:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     for dim in offsets.get_values():
         if isinstance(dim, int) and dim < 0:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="Invalid offset",
                     actual=str(dim),
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
 
@@ -441,8 +432,6 @@ def _ensure_offsets_non_negative(offsets: SymbolShape) -> None:
 def _ensure_strides_positive(strides: SymbolShape | None) -> None:
     """校验 strides 静态值为正。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 静态 stride 必须为正整数。
@@ -452,19 +441,19 @@ def _ensure_strides_positive(strides: SymbolShape | None) -> None:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     if strides is None:
         return
     for dim in strides.get_values():
         if isinstance(dim, int) and dim <= 0:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="Invalid stride",
                     actual=str(dim),
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
 
@@ -472,8 +461,6 @@ def _ensure_strides_positive(strides: SymbolShape | None) -> None:
 def _clone_symbol_list(value: SymbolShape | None) -> SymbolShape | None:
     """克隆符号列表对象。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 复制 SymbolShape 容器，避免别名共享。
@@ -483,7 +470,7 @@ def _clone_symbol_list(value: SymbolShape | None) -> SymbolShape | None:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     if value is None:
@@ -494,9 +481,9 @@ def _clone_symbol_list(value: SymbolShape | None) -> SymbolShape | None:
 def _normalize_and_validate_access_region(
     memory: Memory,
     *,
-    offsets: object,
-    sizes: object,
-    strides: object | None = None,
+    offsets: ShapeInput,
+    sizes: ShapeInput,
+    strides: ShapeInput | None = None,
     offset_name: str = "offsets",
     size_name: str = "sizes",
     stride_name: str = "strides",
@@ -506,8 +493,6 @@ def _normalize_and_validate_access_region(
 ) -> tuple[SymbolShape, SymbolShape, SymbolShape | None]:
     """统一规整并校验访问区域参数。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 统一复用 offsets/sizes/strides 的规范化、rank 校验、正值校验与静态越界校验。
@@ -518,7 +503,7 @@ def _normalize_and_validate_access_region(
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     offsets_shape = offset_normalizer(offsets, offset_name)
@@ -540,8 +525,6 @@ def _ensure_bounds(
 ) -> None:
     """在可静态判定时校验切片边界。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - offsets/sizes/strides 与 memory.shape 全为静态时检查越界。
@@ -552,7 +535,7 @@ def _ensure_bounds(
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     shape_values = memory.shape.get_values()
@@ -564,42 +547,42 @@ def _ensure_bounds(
         stride_values = strides.get_values()
     for dim, offset, size, stride in zip(shape_values, offset_values, size_values, stride_values):
         if isinstance(offset, int) and offset < 0:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="Invalid offset",
                     actual=str(offset),
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         if isinstance(size, int) and size <= 0:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="Invalid size",
                     actual=str(size),
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         if isinstance(stride, int) and stride <= 0:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="Invalid stride",
                     actual=str(stride),
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         if not all(isinstance(value, int) for value in (dim, offset, size, stride)):
             continue
         last_index = offset + (size - 1) * stride
         if last_index >= dim:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="Index out of bounds",
                     actual=f"dim={dim} offset={offset} size={size} stride={stride}",
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
 
@@ -607,8 +590,6 @@ def _ensure_bounds(
 def _is_contiguous(memory: Memory) -> bool:
     """判断 Memory 是否为连续行主序布局。
 
-    创建者: ChatGPT
-    最后一次更改: ChatGPT
 
     功能说明:
     - 将当前 stride 与默认连续 stride 比较。
@@ -618,7 +599,7 @@ def _is_contiguous(memory: Memory) -> bool:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     if memory.stride is None:
@@ -632,8 +613,6 @@ def _is_contiguous(memory: Memory) -> bool:
 def _shape_numel(shape: SymbolShape) -> SymbolDim:
     """计算 shape 的元素总数表达式。
 
-    创建者: ChatGPT
-    最后一次更改: ChatGPT
 
     功能说明:
     - 静态维度返回静态乘积。
@@ -644,7 +623,7 @@ def _shape_numel(shape: SymbolShape) -> SymbolDim:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     return _common_shape_numel(shape)
@@ -653,11 +632,9 @@ def _shape_numel(shape: SymbolShape) -> SymbolDim:
 def _ensure_view_numel_compatible(source: Memory, shape: SymbolShape) -> None:
     """在可判定时校验 view 前后元素总数一致。
 
-    创建者: ChatGPT
-    最后一次更改: ChatGPT
 
     功能说明:
-    - 若乘积表达式可化简为确定不相等，则抛 ValueError。
+    - 若乘积表达式可化简为确定不相等，则抛 KernelCodeError。
     - 动态情况下无法判定时，保持由调用方保证。
 
     使用示例:
@@ -665,7 +642,7 @@ def _ensure_view_numel_compatible(source: Memory, shape: SymbolShape) -> None:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     source_numel = _shape_numel(source.shape).get_symbol()
@@ -674,12 +651,12 @@ def _ensure_view_numel_compatible(source: Memory, shape: SymbolShape) -> None:
     if diff == 0:
         return
     if not diff.free_symbols:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="dma.view 参数校验",
                 expected="View shape numel mismatch",
                 actual=f"source={source_numel} target={target_numel}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
@@ -687,8 +664,6 @@ def _ensure_view_numel_compatible(source: Memory, shape: SymbolShape) -> None:
 def _combine_view_stride(source_stride: SymbolShape, view_stride: SymbolShape) -> SymbolShape:
     """组合 source 物理 stride 与 view 逻辑 stride。
 
-    创建者: OpenAI
-    最后一次更改: OpenAI
 
     功能说明:
     - `dma.view` 的 stride 表示在 source 既有物理 stride 基础上的额外步长。
@@ -699,7 +674,7 @@ def _combine_view_stride(source_stride: SymbolShape, view_stride: SymbolShape) -
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     combined = [
@@ -712,8 +687,6 @@ def _combine_view_stride(source_stride: SymbolShape, view_stride: SymbolShape) -
 def _is_supported_cast(source: NumericType, target: NumericType) -> bool:
     """判断是否支持 dtype 转换。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 当前支持 float/int 数值类型之间的显式转换。
@@ -723,7 +696,7 @@ def _is_supported_cast(source: NumericType, target: NumericType) -> bool:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     if source is target:
@@ -734,11 +707,9 @@ def _is_supported_cast(source: NumericType, target: NumericType) -> bool:
     return False
 
 
-def copy(source: object, space: object) -> Memory:
+def copy(source: Memory, space: MemorySpace) -> Memory:
     """整块拷贝。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 返回新的 Memory 描述，仅覆盖目标 space。
@@ -748,7 +719,7 @@ def copy(source: object, space: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
@@ -757,16 +728,14 @@ def copy(source: object, space: object) -> Memory:
 
 
 def load(
-    source: object,
-    offsets: Sequence[int | str] | SymbolShape,
-    sizes: Sequence[int | str] | SymbolShape,
-    strides: Sequence[int | str] | SymbolShape | None = None,
+    source: Memory,
+    offsets: ShapeInput,
+    sizes: ShapeInput,
+    strides: ShapeInput | None = None,
     space: MemorySpace | None = None,
 ) -> Memory:
     """从 source 读取切片块。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 返回新的 Memory 块。
@@ -776,7 +745,7 @@ def load(
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
@@ -797,16 +766,14 @@ def load(
 
 
 def store(
-    target: object,
-    source: object,
-    offsets: Sequence[int | str] | SymbolShape,
-    sizes: Sequence[int | str] | SymbolShape,
-    strides: Sequence[int | str] | SymbolShape | None = None,
+    target: Memory,
+    source: Memory,
+    offsets: ShapeInput,
+    sizes: ShapeInput,
+    strides: ShapeInput | None = None,
 ) -> None:
     """把 source 块写回 target 区域。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
 
     功能说明:
     - target-first：第一个参数固定为写回目标。
@@ -817,18 +784,18 @@ def store(
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     dst = _ensure_memory(target, "target")
     src = _ensure_memory(source, "source")
     if src.dtype is not dst.dtype:
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="dma.store 参数校验",
                 expected="Memory dtype mismatch",
                 actual=f"source={src.dtype} target={dst.dtype}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     offsets_shape, sizes_shape, strides_shape = _normalize_and_validate_access_region(
@@ -838,28 +805,26 @@ def store(
         strides=strides,
     )
     if src.shape.get_values() != sizes_shape.get_values():
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="dma.store 参数校验",
                 expected="Store size mismatch",
                 actual=f"source={src.shape.get_values()} sizes={sizes_shape.get_values()}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     return None
 
 
 def slice(
-    source: object,
-    offsets: Sequence[int | str] | SymbolShape,
-    sizes: Sequence[int | str] | SymbolShape,
-    strides: Sequence[int | str] | SymbolShape | None = None,
+    source: Memory,
+    offsets: ShapeInput,
+    sizes: ShapeInput,
+    strides: ShapeInput | None = None,
     space: MemorySpace | None = None,
 ) -> Memory:
     """从 source 抽取切片块。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 返回新的 Memory 块，强调切片语义。
@@ -870,7 +835,7 @@ def slice(
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
@@ -885,16 +850,14 @@ def slice(
 
 
 def deslice(
-    target: object,
-    source: object,
-    offsets: Sequence[int | str] | SymbolShape,
-    sizes: Sequence[int | str] | SymbolShape,
-    strides: Sequence[int | str] | SymbolShape | None = None,
+    target: Memory,
+    source: Memory,
+    offsets: ShapeInput,
+    sizes: ShapeInput,
+    strides: ShapeInput | None = None,
 ) -> None:
     """把切片块写回 target 区域。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - target 为写回目标，source.shape 必须与 sizes 一致。
@@ -904,22 +867,20 @@ def deslice(
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     return store(target, source, offsets, sizes, strides=strides)
 
 
 def view(
-    source: object,
-    offset: Sequence[int | str] | SymbolShape,
-    size: Sequence[int | str] | SymbolShape,
-    stride: Sequence[int | str] | SymbolShape,
+    source: Memory,
+    offset: ShapeInput,
+    size: ShapeInput,
+    stride: ShapeInput,
 ) -> Memory:
     """返回 source 的子视图结果。
 
-    创建者: ChatGPT
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅保留 `offset/size/stride` 子视图参数，不做数据搬运。
@@ -931,7 +892,7 @@ def view(
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
@@ -956,11 +917,9 @@ def view(
     )
 
 
-def reshape(source: object, shape: Sequence[int | str] | SymbolShape) -> Memory:
+def reshape(source: Memory, shape: ShapeInput) -> Memory:
     """返回 source 的形状重塑结果。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅调整 `shape/stride` 元信息，不做数据搬运。
@@ -971,19 +930,19 @@ def reshape(source: object, shape: Sequence[int | str] | SymbolShape) -> Memory:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
     shape_value = _ensure_shape_value(shape, "shape")
     _ensure_view_numel_compatible(src, shape_value)
     if not _is_contiguous(src):
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="dma.reshape 参数校验",
                 expected="Reshape requires contiguous source",
                 actual="non-contiguous",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     return Memory(
@@ -995,11 +954,9 @@ def reshape(source: object, shape: Sequence[int | str] | SymbolShape) -> Memory:
     )
 
 
-def flatten(source: object) -> Memory:
+def flatten(source: Memory) -> Memory:
     """将 source 展平成一维视图。
 
-    创建者: ChatGPT
-    最后一次更改: ChatGPT
 
     功能说明:
     - 要求 source 为连续布局。
@@ -1010,17 +967,17 @@ def flatten(source: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
     if not _is_contiguous(src):
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="dma.flatten 参数校验",
                 expected="Flatten requires contiguous source",
                 actual="non-contiguous",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     flattened = _shape_numel(src.shape)
@@ -1033,11 +990,9 @@ def flatten(source: object) -> Memory:
     )
 
 
-def cast(source: object, dtype: NumericType, memoryspace: MemorySpace | None = None) -> Memory:
+def cast(source: Memory, dtype: NumericType, memoryspace: MemorySpace | None = None) -> Memory:
     """显式转换 Memory dtype。
 
-    创建者: 小李飞刀
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 返回 shape/stride/format 保持一致的新 Memory，space 可选覆盖。
@@ -1047,35 +1002,37 @@ def cast(source: object, dtype: NumericType, memoryspace: MemorySpace | None = N
 
     关联文件:
     - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
+    - test: test/operation/test_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
     if not isinstance(dtype, NumericType):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="dma.cast 参数校验",
                 expected="cast dtype must be NumericType",
                 actual=type(dtype).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if memoryspace is not None and not isinstance(memoryspace, MemorySpace):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="dma.cast 参数校验",
                 expected="cast memoryspace must be MemorySpace",
                 actual=type(memoryspace).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if not _is_supported_cast(src.dtype, dtype):
-        raise NotImplementedError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(
+            ErrorKind.UNIMPLEMENTED,
+            ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="dma.cast 参数校验",
                 expected="Unsupported cast conversion",
                 actual=f"{src.dtype}->{dtype}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     target_space = src.space if memoryspace is None else memoryspace

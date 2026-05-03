@@ -1,7 +1,5 @@
 """symbol-loop-hoist pass.
 
-创建者: 朽木露琪亚
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 作为 `ModulePass` 实现 `symbol-loop-hoist` pass，仅处理 `symbol.for`；当 module 中不存在
@@ -10,17 +8,20 @@
   的符号常量、参数与元信息计算。
 - 通过 `PatternRewriteWalker` 以单 op pattern 驱动外提到稳定态，不做通用 LICM。
 
+API 列表:
+- `class SymbolLoopHoistPass(fold: bool = True)`
+- `get_symbol_loop_hoist_patterns() -> list[RewritePattern]`
+
 使用示例:
 - from xdsl.context import Context
 - from xdsl.dialects.builtin import ModuleOp
 - from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
 - module = ModuleOp([])
 - SymbolLoopHoistPass().apply(Context(), module)
-- # 兼容旧调用方仍可使用 SymbolLoopHoistPass().run(module)
 
 关联文件:
 - spec: spec/pass/symbol_loop_hoist.md
-- test: test/pass/test_symbol_loop_hoist.py
+- test: test/passes/test_symbol_loop_hoist.py
 - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
 """
 
@@ -30,7 +31,6 @@ from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.ir import Block, BlockArgument, Operation, SSAValue
-from xdsl.passes import ModulePass
 from xdsl.pattern_rewriter import (
     GreedyRewritePatternApplier,
     PatternRewriteWalker,
@@ -304,8 +304,6 @@ class SymbolFloorDivHoistPattern(RewritePattern):
 def get_symbol_loop_hoist_patterns() -> list[RewritePattern]:
     """返回 `symbol-loop-hoist` pass 使用的公开 pattern 列表。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 以“每种受支持 op 一个 pattern”的形式公开当前 pass 的 pattern 列表。
@@ -317,7 +315,7 @@ def get_symbol_loop_hoist_patterns() -> list[RewritePattern]:
 
     关联文件:
     - spec: spec/pass/symbol_loop_hoist.md
-    - test: test/pass/test_symbol_loop_hoist.py
+    - test: test/passes/test_symbol_loop_hoist.py
     - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
     """
 
@@ -334,11 +332,9 @@ def get_symbol_loop_hoist_patterns() -> list[RewritePattern]:
     ]
 
 
-class SymbolLoopHoistPass(Pass, ModulePass):
+class SymbolLoopHoistPass(Pass):
     """symbol-loop-hoist pass。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 作为 `ModulePass` 通过 pattern 驱动遍历 module 中的 `symbol.for` 并外提循环 invariant 的对象。
@@ -352,7 +348,7 @@ class SymbolLoopHoistPass(Pass, ModulePass):
 
     关联文件:
     - spec: spec/pass/symbol_loop_hoist.md
-    - test: test/pass/test_symbol_loop_hoist.py
+    - test: test/passes/test_symbol_loop_hoist.py
     - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
     """
 
@@ -361,8 +357,6 @@ class SymbolLoopHoistPass(Pass, ModulePass):
     def apply(self: "SymbolLoopHoistPass", ctx: Context, module: ModuleOp) -> None:
         """执行 symbol-loop-hoist ModulePass。
 
-        创建者: 朽木露琪亚
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 通过 `PatternRewriteWalker` 以单 op pattern 驱动 `symbol.for` 外提。
@@ -377,7 +371,7 @@ class SymbolLoopHoistPass(Pass, ModulePass):
 
         关联文件:
         - spec: spec/pass/symbol_loop_hoist.md
-        - test: test/pass/test_symbol_loop_hoist.py
+        - test: test/passes/test_symbol_loop_hoist.py
         - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
         """
 
@@ -395,30 +389,6 @@ class SymbolLoopHoistPass(Pass, ModulePass):
             module.verify()
         except VerifyException as exc:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"SymbolLoopHoistVerifierError: {exc}") from exc
-
-    def run(self: "SymbolLoopHoistPass", module: ModuleOp) -> ModuleOp:
-        """兼容旧 Pass 接口的执行入口。
-
-        创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
-
-        功能说明:
-        - 保持旧 `run(module)` 调用方可继续工作。
-        - 内部直接复用 `apply(Context(), module)`。
-
-        使用示例:
-- from xdsl.dialects.builtin import ModuleOp
-- module = ModuleOp([])
-- SymbolLoopHoistPass().run(module)
-
-        关联文件:
-        - spec: spec/pass/symbol_loop_hoist.md
-        - test: test/pass/test_symbol_loop_hoist.py
-        - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
-        """
-
-        self.apply(Context(), module)
-        return module
 
 __all__ = [
     "SymbolLoopHoistPass",

@@ -1,7 +1,5 @@
 """NN operation common helpers.
 
-创建者: 小李飞刀
-最后一次更改: 榕
 
 功能说明:
 - 提供 `kernel_gen.operation.nn` 各公开 helper 共享的类型、常量与参数校验内部逻辑。
@@ -15,10 +13,10 @@ API 列表:
 
 关联文件:
 - spec: spec/operation/nn.md
-- test: test/operation/test_operation_nn_elementwise.py
-- test: test/operation/test_operation_nn_broadcast.py
-- test: test/operation/test_operation_nn_structured.py
-- test: test/operation/test_operation_nn_reduction.py
+- test: test/operation/nn/test_elementwise.py
+- test: test/operation/nn/test_broadcast.py
+- test: test/operation/nn/test_structured.py
+- test: test/operation/nn/test_reduction.py
 - 功能实现: kernel_gen/operation/nn/common.py
 """
 
@@ -27,16 +25,23 @@ from __future__ import annotations
 from collections.abc import Sequence
 import math
 
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import (
+    ERROR_ACTION,
+    ERROR_TEMPLATE,
+    ErrorKind,
+    ErrorModule,
+    kernel_code_error,
+)
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import ARITHMETIC_DTYPE_RANK, NN_FLOAT_DTYPES, Farmat, NumericType
 
 ScalarArithmeticValue = int | float | SymbolDim
+ScalarValue = int | float | bool
+BinaryOperand = Memory | ScalarArithmeticValue | bool
 ArithmeticResult = Memory | ScalarArithmeticValue
 
-_ERROR_ACTION = "请按接口约束传参"
 _ERROR_SCENE = "nn operation 参数校验"
 
 
@@ -49,8 +54,6 @@ def _normalize_symbolic_int_param(
 ) -> SymbolDim:
     """规范化 nn family 的整型/符号参数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 统一校验 `int | SymbolDim` 参数，拒绝 `bool` 和其他类型。
@@ -62,7 +65,7 @@ def _normalize_symbolic_int_param(
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_structured.py
+    - test: test/operation/nn/test_structured.py
     - 功能实现: kernel_gen/operation/nn/common.py
     """
     expected_type = f"{owner} {name} must be int or SymbolDim"
@@ -70,31 +73,31 @@ def _normalize_symbolic_int_param(
     expected_positive = f"{owner} {name} must be > 0"
     expected_integer = f"{owner} {name} must be integer"
     if isinstance(value, bool):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=scene,
                 expected=expected_type,
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if isinstance(value, int):
         if allow_zero and value < 0:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene=scene,
                     expected=expected_non_negative,
                     actual=str(value),
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         if not allow_zero and value <= 0:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene=scene,
                     expected=expected_positive,
                     actual=str(value),
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         return SymbolDim(value)
@@ -102,47 +105,45 @@ def _normalize_symbolic_int_param(
         if not value.is_dynamic():
             resolved = value.get_value()
             if not isinstance(resolved, int):
-                raise ValueError(
-                    _ERROR_TEMPLATE.format(
+                raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                    ERROR_TEMPLATE.format(
                         scene=scene,
                         expected=expected_integer,
                         actual=str(resolved),
-                        action=_ERROR_ACTION,
+                        action=ERROR_ACTION,
                     )
                 )
             if allow_zero and resolved < 0:
-                raise ValueError(
-                    _ERROR_TEMPLATE.format(
+                raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                    ERROR_TEMPLATE.format(
                         scene=scene,
                         expected=expected_non_negative,
                         actual=str(resolved),
-                        action=_ERROR_ACTION,
+                        action=ERROR_ACTION,
                     )
                 )
             if not allow_zero and resolved <= 0:
-                raise ValueError(
-                    _ERROR_TEMPLATE.format(
+                raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                    ERROR_TEMPLATE.format(
                         scene=scene,
                         expected=expected_positive,
                         actual=str(resolved),
-                        action=_ERROR_ACTION,
+                        action=ERROR_ACTION,
                     )
                 )
         return value
-    raise TypeError(
-        _ERROR_TEMPLATE.format(
+    raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+        ERROR_TEMPLATE.format(
             scene=scene,
             expected=expected_type,
             actual=type(value).__name__,
-            action=_ERROR_ACTION,
+            action=ERROR_ACTION,
         )
     )
 
 class _AddStrideDim(SymbolDim):
     """nn.add 默认 stride 的符号维度包装。
 
-    创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 对含符号表达式的维度返回字符串形式，避免对外泄露 sympy 表达式。
@@ -152,7 +153,7 @@ class _AddStrideDim(SymbolDim):
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/common.py
     """
 
@@ -166,8 +167,6 @@ class _AddStrideDim(SymbolDim):
 def _build_add_stride(shape: SymbolShape) -> SymbolShape:
     """构建 nn.add 默认 stride。
 
-    创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 按连续行主序生成 stride。
@@ -178,7 +177,7 @@ def _build_add_stride(shape: SymbolShape) -> SymbolShape:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/common.py
     """
     stride_values: list[SymbolDim] = []
@@ -193,31 +192,29 @@ def _build_add_stride(shape: SymbolShape) -> SymbolShape:
 def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
     """解析 nn 算术的 dtype 决议。
 
-    创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 按固定优先级选择顺序更靠后的类型。
-    - 不支持的 dtype 触发 TypeError。
+    - 不支持的 dtype 触发 KernelCodeError。
 
     使用示例:
     - _resolve_add_dtype(NumericType.Int32, NumericType.Float32)
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/common.py
     """
     try:
         lhs_rank = ARITHMETIC_DTYPE_RANK[lhs]
         rhs_rank = ARITHMETIC_DTYPE_RANK[rhs]
     except KeyError as exc:
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.add 参数校验",
                 expected="Unsupported dtype for nn.add",
                 actual=f"lhs={lhs} rhs={rhs}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         ) from exc
     return lhs if lhs_rank >= rhs_rank else rhs
@@ -226,8 +223,6 @@ def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
 def _resolve_scalar_dtype(memory_dtype: NumericType) -> NumericType:
     """解析 Memory/标量路径的 dtype 决议。
 
-    创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 标量按 Int32 参与类型提升规则。
@@ -237,7 +232,7 @@ def _resolve_scalar_dtype(memory_dtype: NumericType) -> NumericType:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/common.py
     """
     return _resolve_add_dtype(memory_dtype, NumericType.Int32)
@@ -246,8 +241,6 @@ def _resolve_scalar_dtype(memory_dtype: NumericType) -> NumericType:
 def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
     """合并两个维度为隐式 broadcast 目标维度。
 
-    创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 维度相等时返回该维度。
@@ -259,18 +252,18 @@ def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_broadcast.py
+    - test: test/operation/nn/test_broadcast.py
     - 功能实现: kernel_gen/operation/nn/common.py
     """
     if lhs_dim == "?" or rhs_dim == "?":
         if lhs_dim == rhs_dim:
             return lhs_dim
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.add 参数校验",
                 expected="Implicit broadcast dimension mismatch",
                 actual=f"lhs={lhs_dim} rhs={rhs_dim}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if lhs_dim == rhs_dim:
@@ -279,21 +272,19 @@ def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
         return rhs_dim
     if rhs_dim == 1:
         return lhs_dim
-    raise ValueError(
-        _ERROR_TEMPLATE.format(
+    raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+        ERROR_TEMPLATE.format(
             scene="nn.add 参数校验",
             expected="Implicit broadcast dimension mismatch",
             actual=f"lhs={lhs_dim} rhs={rhs_dim}",
-            action=_ERROR_ACTION,
+            action=ERROR_ACTION,
         )
     )
 
 
-def _ensure_memory_operand(lhs: object, rhs: object) -> None:
+def _ensure_memory_operand(lhs: BinaryOperand, rhs: BinaryOperand) -> None:
     """校验至少一侧为 Memory。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅允许 Memory 或与 Memory 组合的二元运算。
@@ -303,25 +294,23 @@ def _ensure_memory_operand(lhs: object, rhs: object) -> None:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/common.py
     """
     if not isinstance(lhs, Memory) and not isinstance(rhs, Memory):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected="At least one operand must be Memory",
                 actual=f"lhs={type(lhs).__name__} rhs={type(rhs).__name__}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
 
-def _ensure_scalar_value(value: object) -> None:
+def _ensure_scalar_value(value: ScalarValue) -> None:
     """校验标量输入类型。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅允许 int/float/bool 标量。
@@ -331,27 +320,25 @@ def _ensure_scalar_value(value: object) -> None:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/common.py
     """
     if isinstance(value, bool):
         return
     if not isinstance(value, (int, float)):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected="Unsupported scalar type for nn operation",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
 
-def _ensure_scalar_arithmetic_value(value: object) -> None:
+def _ensure_scalar_arithmetic_value(value: ScalarArithmeticValue | bool) -> None:
     """校验纯标量算术输入类型。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 允许 int/float/bool/SymbolDim 参与纯标量算术。
@@ -361,7 +348,7 @@ def _ensure_scalar_arithmetic_value(value: object) -> None:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/common.py
     """
     if isinstance(value, SymbolDim):
@@ -369,11 +356,9 @@ def _ensure_scalar_arithmetic_value(value: object) -> None:
     _ensure_scalar_value(value)
 
 
-def _ensure_float_memory(value: object, op_name: str) -> Memory:
+def _ensure_float_memory(value: Memory, op_name: str) -> Memory:
     """校验激活函数的 Memory 与浮点 dtype 输入。
 
-    创建者: 我不是牛马
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 Memory 输入。
@@ -384,35 +369,33 @@ def _ensure_float_memory(value: object, op_name: str) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/common.py
     """
     if not isinstance(value, Memory):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=f"nn.{op_name} 参数校验",
                 expected=f"{op_name} value must be Memory",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if value.dtype not in NN_FLOAT_DTYPES:
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=f"nn.{op_name} 参数校验",
                 expected=f"{op_name} value dtype must be float",
                 actual=str(value.dtype),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     return value
 
 
-def _ensure_activation_scalar(name: str, value: object) -> None:
+def _ensure_activation_scalar(name: str, value: int | float | SymbolDim) -> None:
     """校验激活函数数值参数。
 
-    创建者: 我不是牛马
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 int/float，不接受 bool 或 SymbolDim。
@@ -423,34 +406,34 @@ def _ensure_activation_scalar(name: str, value: object) -> None:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/common.py
     """
     if isinstance(value, bool) or isinstance(value, SymbolDim):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.activation 参数校验",
                 expected=f"{name} must be int or float",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if not isinstance(value, (int, float)):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.activation 参数校验",
                 expected=f"{name} must be int or float",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if not math.isfinite(value):
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.activation 参数校验",
                 expected=f"{name} must be finite",
                 actual=str(value),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
@@ -461,14 +444,14 @@ __all__ = [
     "MemorySpace",
     "NN_FLOAT_DTYPES",
     "NumericType",
+    "BinaryOperand",
     "ScalarArithmeticValue",
+    "ScalarValue",
     "Sequence",
     "SymbolDim",
     "SymbolShape",
     "_AddStrideDim",
-    "_ERROR_ACTION",
     "_ERROR_SCENE",
-    "_ERROR_TEMPLATE",
     "_build_add_stride",
     "_ensure_activation_scalar",
     "_ensure_float_memory",

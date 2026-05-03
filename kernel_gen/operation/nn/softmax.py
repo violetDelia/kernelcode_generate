@@ -1,36 +1,37 @@
 """NN operation softmax helper.
 
-创建者: 守护最好的爱莉希雅
-最后一次更改: 大闸蟹
 
 功能说明:
 - 提供 softmax 归一化运算。
 
 API 列表:
-- `softmax(value: object, axis: int = -1) -> Memory`
+- `softmax(value: Memory, axis: int = -1) -> Memory`
 
 使用示例:
 - from kernel_gen.operation.nn.softmax import softmax
 
 关联文件:
 - spec: spec/operation/nn.md
-- test: test/operation/test_operation_nn_structured.py
+- test: test/operation/nn/test_structured.py
 - 功能实现: kernel_gen/operation/nn/softmax.py
 """
 
 from __future__ import annotations
 
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import (
+    ERROR_ACTION,
+    ERROR_TEMPLATE,
+    ErrorKind,
+    ErrorModule,
+    kernel_code_error,
+)
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.type import FLOAT_DTYPES
 
-_ERROR_ACTION = "请按接口约束传参"
 
-def softmax(value: object, axis: int = -1) -> Memory:
+def softmax(value: Memory, axis: int = -1) -> Memory:
     """沿指定轴执行 softmax 归一化。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 仅接受 Memory 输入，并校验 dtype 与 axis。
@@ -43,44 +44,44 @@ def softmax(value: object, axis: int = -1) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_structured.py
+    - test: test/operation/nn/test_structured.py
     - 功能实现: kernel_gen/operation/nn/softmax.py
     """
     if not isinstance(value, Memory):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.softmax 参数校验",
                 expected="softmax value must be Memory",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if value.dtype not in FLOAT_DTYPES:
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.softmax 参数校验",
                 expected="softmax value dtype must be float",
                 actual=str(value.dtype),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if isinstance(axis, bool) or not isinstance(axis, int):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.softmax 参数校验",
                 expected="softmax axis must be int",
                 actual=type(axis).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     rank = len(value.shape)
     if axis < -rank or axis >= rank:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.softmax 参数校验",
                 expected="softmax axis out of range",
                 actual=f"axis={axis} rank={rank}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     _ = axis + rank if axis < 0 else axis

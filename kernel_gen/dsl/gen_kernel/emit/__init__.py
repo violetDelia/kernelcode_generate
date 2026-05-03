@@ -1,12 +1,15 @@
 """`gen_kernel.emit` 公开入口。
 
-创建者: OpenAI Codex
-最后修改人: 守护最好的爱莉希雅
 
 功能说明:
 - 提供 `emit_c(...)`、`emit_c_op(...)`、`emit_c_value(...)` 三个公开入口。
 - 按 `target` 分发节点级 op/value 发射。
 - 对 `func.func` / `builtin.module` 复用 [`kernel_gen.dsl.gen_kernel.kernel_emitter.KernelEmitter`](../kernel_emitter.py)。
+
+API 列表:
+- `emit_c_op(op: Operation, ctx: EmitCContext) -> str`
+- `emit_c_value(value: SSAValue, ctx: EmitCContext) -> str`
+- `emit_c(obj: EmitCInput, ctx: EmitCContext) -> str`
 
 使用示例:
 - from kernel_gen.dsl.gen_kernel.emit import emit_c
@@ -14,46 +17,71 @@
 
 关联文件:
 - spec: [spec/dsl/gen_kernel/emit.md](../../../../spec/dsl/gen_kernel/emit.md)
-- test: [test/dsl/gen_kernel/emit/test_emit.py](../../../../test/dsl/gen_kernel/emit/test_emit.py)
+- test: [test/dsl/gen_kernel/emit/test_package.py](../../../../test/dsl/gen_kernel/emit/test_package.py)
 - 功能实现: [kernel_gen/dsl/gen_kernel/emit/__init__.py](.)
 """
 
 from __future__ import annotations
+from typing import TypeAlias
+
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
-from xdsl.dialects import func
-from xdsl.dialects.builtin import ModuleOp
-from xdsl.ir import Operation, SSAValue
+from xdsl.dialects import arith, func
+from xdsl.dialects.builtin import FloatAttr, IntAttr, IntegerAttr, ModuleOp
+from xdsl.ir import BlockArgument, Operation, SSAValue
 
+from kernel_gen.dialect.nn import NnMemoryType
 from ..emit_context import EmitCContext
-from . import cpu as _cpu
-from . import npu_demo as _npu_demo
+from . import cpu as _cpu  # noqa: F401
+from . import npu_demo as _npu_demo  # noqa: F401
+from .register import dispatch_op, dispatch_op_for_target, dispatch_value
 
-_TARGET_MODULES = {"cpu": _cpu, "npu_demo": _npu_demo}
-
-
-def _dispatch_target(ctx: EmitCContext, *, for_value: bool = False):
-    target_impl = ctx.target_entry(_TARGET_MODULES)
-    if target_impl is not None:
-        return target_impl
-    if not for_value:
-        return _cpu
-    raise ctx.emit_error("emit_c", "unsupported target")
+EmitCInput: TypeAlias = "SSAValue | Operation | func.FuncOp | ModuleOp"
 
 
 def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
     """把单个 op 发射为目标相关源码语句。"""
 
-    return _dispatch_target(ctx)._emit_c_op(op, ctx)
+    if isinstance(op, arith.ConstantOp):
+        return ""
+    if ctx.is_target("cpu") or ctx.is_target("npu_demo"):
+        dispatched = dispatch_op(op, ctx)
+    else:
+        dispatched = dispatch_op_for_target(op, ctx, "cpu")
+    if dispatched is not None:
+        return dispatched
+    raise ctx.emit_error(op.name, "unsupported op")
 
 
 def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     """把 SSA value 发射为目标相关右值表达式。"""
 
-    return _dispatch_target(ctx, for_value=True)._emit_c_value(value, ctx)
+    bound = ctx.lookup_name(value)
+    if bound is not None:
+        return bound
+    if not ctx.is_target("cpu") and not ctx.is_target("npu_demo"):
+        raise ctx.emit_error("emit_c", "unsupported target")
+    dispatched = dispatch_value(value, ctx)
+    if dispatched is not None:
+        return dispatched
+    if isinstance(value, BlockArgument):
+        return ctx.create_or_get_name(value)
+    if ctx.is_target("npu_demo") and isinstance(value.type, NnMemoryType):
+        return ctx.create_or_get_name(value)
+    owner = value.owner
+    if isinstance(owner, arith.ConstantOp):
+        literal_value = owner.value
+        if isinstance(literal_value, IntegerAttr):
+            return str(literal_value.value.data)
+        if isinstance(literal_value, IntAttr):
+            return str(literal_value.data)
+        if isinstance(literal_value, FloatAttr):
+            return str(literal_value.value.data)
+        raise ctx.emit_error(owner.name, "unsupported constant literal")
+    raise ctx.emit_error(owner.name, f"invalid dependency for value {value}")
 
 
-def emit_c(obj: object, ctx: EmitCContext) -> str:
+def emit_c(obj: EmitCInput, ctx: EmitCContext) -> str:
     """统一发射节点、函数或 module 源码。
 
     说明:

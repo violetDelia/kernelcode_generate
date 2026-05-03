@@ -1,7 +1,5 @@
 """Symbol dialect definitions.
 
-创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
 
 功能说明:
 - 定义仅表示整数符号值语义的 symbol dialect。
@@ -10,7 +8,6 @@
 - 在导入 sympy 前设置 `SYMPY_GMPY=0`，规避外部 gmpy 引发的 SystemError。
 
 API 列表:
-- `build_public_symbol_expr(lhs: object, rhs: object, op: str) -> str`
 - `class SymbolExprAttr(expr: StringAttr)`
 - `class SymbolDimType(expr: SymbolExprAttr)`
 - `class SymbolValueType(expr: SymbolExprAttr)`
@@ -43,7 +40,7 @@ API 列表:
 
 关联文件:
 - spec: spec/dialect/symbol.md
-- test: test/dialect/test_symbol_dialect.py
+- test: test/dialect/test_symbol.py
 - 功能实现: kernel_gen/dialect/symbol.py
 """
 
@@ -55,7 +52,7 @@ import re
 from collections.abc import Sequence
 from typing import ClassVar, TYPE_CHECKING
 
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
 os.environ.setdefault("SYMPY_GMPY", "0")
 from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerType, StringAttr, f32, f64, i1, i32
 from xdsl.dialect_interfaces.constant_materialization import ConstantMaterializationInterface
@@ -77,7 +74,7 @@ from xdsl.irdl import (
 from xdsl.interfaces import HasFolderInterface
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
-from xdsl.traits import IsTerminator, NoTerminator
+from xdsl.traits import IsTerminator, NoTerminator, Pure
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemoryType
@@ -90,33 +87,31 @@ _SYMBOL_EXPR_PATTERN = re.compile(
     rf"^(?:{_SYMBOL_TOKEN_PATTERN}(?:\s*(?://|[+\-*/])\s*{_SYMBOL_TOKEN_PATTERN})*|floor\(\s*{_SYMBOL_TOKEN_PATTERN}\s*/\s*{_SYMBOL_TOKEN_PATTERN}\s*\))$"
 )
 _SYMBOL_DIM_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_ERROR_ACTION = "请按接口约束传参"
-_ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.symbol"
 
 
-def _format_error(expected: str, actual: str = _ERROR_ACTUAL) -> str:
-    return _ERROR_TEMPLATE.format(
+def _format_error(expected: str, actual: str = ERROR_ACTUAL) -> str:
+    return ERROR_TEMPLATE.format(
         scene=_ERROR_SCENE,
         expected=expected,
         actual=actual,
-        action=_ERROR_ACTION,
+        action=ERROR_ACTION,
     )
 
 
-def _raise_verify_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
+def _raise_verify_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None:
     """统一抛出 symbol dialect verifier 错误。"""
 
     raise VerifyException(_format_error(expected, actual))
 
 
-def _raise_value_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
+def _raise_value_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None:
     """统一抛出 symbol dialect value error。"""
 
     raise ValueError(_format_error(expected, actual))
 
 
-def _raise_type_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
+def _raise_type_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None:
     """统一抛出 symbol dialect type error。"""
 
     raise TypeError(_format_error(expected, actual))
@@ -125,8 +120,6 @@ def _raise_type_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
 def _normalize_symbol_dim_name(name: str) -> str:
     """规范化 symbol.dim 名称。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 去除首尾空白并校验名称合法性。
@@ -137,7 +130,7 @@ def _normalize_symbol_dim_name(name: str) -> str:
 
     关联文件:
     - spec: spec/dialect/tuner.md
-    - test: test/dialect/test_tuner_dialect.py
+    - test: test/dialect/test_tuner.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -152,8 +145,6 @@ def _normalize_symbol_dim_name(name: str) -> str:
 def _normalize_expr(expr: str) -> str:
     """标准化符号表达字符串。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 去除首尾空白，供 verifier 与打印使用。
@@ -163,7 +154,7 @@ def _normalize_expr(expr: str) -> str:
 
     关联文件:
     - spec: spec/dialect/symbol.md
-    - test: test/dialect/test_symbol_dialect.py
+    - test: test/dialect/test_symbol.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -175,8 +166,6 @@ def _normalize_expr(expr: str) -> str:
 def _evaluate_concrete_expr(expr: str) -> int | None:
     """尝试计算不含符号名的整数表达式。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 对仅由整数常量与 `+/-/*` 组成的表达式返回具体整数值。
@@ -187,7 +176,7 @@ def _evaluate_concrete_expr(expr: str) -> int | None:
 
     关联文件:
     - spec: spec/dialect/symbol.md
-    - test: test/dialect/test_symbol_dialect.py
+    - test: test/dialect/test_symbol.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -197,54 +186,69 @@ def _evaluate_concrete_expr(expr: str) -> int | None:
     except SyntaxError:
         return None
 
-    def _eval(node: py_ast.AST) -> int:
-        if isinstance(node, py_ast.Expression):
-            return _eval(node.body)
-        if isinstance(node, py_ast.Constant) and isinstance(node.value, int):
-            return int(node.value)
-        if isinstance(node, py_ast.UnaryOp) and isinstance(node.op, (py_ast.UAdd, py_ast.USub)):
-            operand = _eval(node.operand)
-            return operand if isinstance(node.op, py_ast.UAdd) else -operand
-        if isinstance(node, py_ast.BinOp) and isinstance(node.op, (py_ast.Add, py_ast.Sub, py_ast.Mult, py_ast.Div, py_ast.FloorDiv)):
-            lhs = _eval(node.left)
-            rhs = _eval(node.right)
-            if isinstance(node.op, py_ast.Add):
-                return lhs + rhs
-            if isinstance(node.op, py_ast.Sub):
-                return lhs - rhs
-            if isinstance(node.op, py_ast.Mult):
-                return lhs * rhs
-            if rhs == 0:
-                _raise_value_error("division by zero is not a concrete integer expression")
-            if isinstance(node.op, py_ast.FloorDiv):
-                return lhs // rhs
-            if lhs % rhs == 0:
-                return lhs // rhs
-            _raise_value_error("division result is not an exact integer expression")
-        _raise_value_error("expression is not a concrete integer expression")
-
     try:
-        return _eval(parsed)
+        return _evaluate_concrete_expr_ast(parsed)
     except ValueError:
         return None
+
+
+def _evaluate_concrete_expr_ast(node: py_ast.AST) -> int:
+    """计算不含符号名的整数 AST。
+
+
+    功能说明:
+    - 支持整数常量、一元 `+` / `-` 和二元 `+` / `-` / `*` / `/` / `//`。
+    - 不满足精确整数语义时抛出 `ValueError`，由调用方转为 `None`。
+
+    使用示例:
+    - _evaluate_concrete_expr_ast(py_ast.parse("2 + 3", mode="eval"))
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    if isinstance(node, py_ast.Expression):
+        return _evaluate_concrete_expr_ast(node.body)
+    if isinstance(node, py_ast.Constant) and isinstance(node.value, int):
+        return int(node.value)
+    if isinstance(node, py_ast.UnaryOp) and isinstance(node.op, (py_ast.UAdd, py_ast.USub)):
+        operand = _evaluate_concrete_expr_ast(node.operand)
+        return operand if isinstance(node.op, py_ast.UAdd) else -operand
+    if isinstance(node, py_ast.BinOp) and isinstance(node.op, (py_ast.Add, py_ast.Sub, py_ast.Mult, py_ast.Div, py_ast.FloorDiv)):
+        lhs = _evaluate_concrete_expr_ast(node.left)
+        rhs = _evaluate_concrete_expr_ast(node.right)
+        if isinstance(node.op, py_ast.Add):
+            return lhs + rhs
+        if isinstance(node.op, py_ast.Sub):
+            return lhs - rhs
+        if isinstance(node.op, py_ast.Mult):
+            return lhs * rhs
+        if rhs == 0:
+            _raise_value_error("division by zero is not a concrete integer expression")
+        if isinstance(node.op, py_ast.FloorDiv):
+            return lhs // rhs
+        if lhs % rhs == 0:
+            return lhs // rhs
+        _raise_value_error("division result is not an exact integer expression")
+    _raise_value_error("expression is not a concrete integer expression")
 
 
 def _make_symbol_runtime_value(expr: str) -> int | "SymbolDim":
     """将公开 symbol 表达解析为运行时可比较值。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 以 `SymbolDim` 的运行时算术语义解释 `+/-/*///` 与 `floor(...)`。
+    - 以 `SymbolDim` 的运行时算术语义解释 `+` / `-` / `*` / `/` / `//` 与 `floor(...)`。
     - 对纯常量表达直接返回 `int`；对符号表达返回 `SymbolDim`。
 
     使用示例:
     - _make_symbol_runtime_value("4 + N")
 
     关联文件:
-    - spec: spec/dsl/mlir_gen.md
-    - test: test/dsl/ast/test_visitor_integration.py
+    - spec: spec/dsl/ast/mlir_gen.md
+    - test: test/dsl/ast/test_mlir_gen.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -275,56 +279,70 @@ def _make_symbol_runtime_value(expr: str) -> int | "SymbolDim":
         concrete_value = _evaluate_concrete_expr(str(parsed_expr))
         return concrete_value if concrete_value is not None else SymbolDim(parsed_expr)
 
-    def _eval(node: py_ast.AST) -> int | SymbolDim:
-        if isinstance(node, py_ast.Expression):
-            return _eval(node.body)
-        if isinstance(node, py_ast.Constant) and isinstance(node.value, int):
-            return int(node.value)
-        if isinstance(node, py_ast.Name):
-            return SymbolDim(node.id)
-        if isinstance(node, py_ast.UnaryOp) and isinstance(node.op, py_ast.UAdd):
-            return _eval(node.operand)
-        if isinstance(node, py_ast.UnaryOp) and isinstance(node.op, py_ast.USub):
-            operand = _eval(node.operand)
-            return -operand if isinstance(operand, int) else 0 - operand
-        if isinstance(node, py_ast.BinOp):
-            lhs = _eval(node.left)
-            rhs = _eval(node.right)
-            if isinstance(node.op, py_ast.Add):
-                return lhs + rhs
-            if isinstance(node.op, py_ast.Sub):
-                return lhs - rhs
-            if isinstance(node.op, py_ast.Mult):
-                return lhs * rhs
-            if isinstance(node.op, py_ast.Div):
-                return lhs / rhs
-            if isinstance(node.op, py_ast.FloorDiv):
-                return lhs // rhs
-        if isinstance(node, py_ast.Call):
-            if (
-                isinstance(node.func, py_ast.Name)
-                and node.func.id == "floor"
-                and not node.keywords
-                and len(node.args) == 1
-            ):
-                arg_value = _eval(node.args[0])
-                if isinstance(arg_value, int):
-                    return arg_value
-                try:
-                    import sympy as sp  # pylint: disable=import-error
-                except Exception:
-                    _raise_value_error("unsupported public symbol expression")
-                return SymbolDim(sp.floor(arg_value.get_symbol()))
-        _raise_value_error("unsupported public symbol expression")
+    return _make_symbol_runtime_value_ast(parsed, SymbolDim)
 
-    return _eval(parsed)
+
+def _make_symbol_runtime_value_ast(node: py_ast.AST, symbol_dim_type: type["SymbolDim"]) -> int | "SymbolDim":
+    """将 Python AST 解释为 `int` 或 `SymbolDim`。
+
+
+    功能说明:
+    - 支持公开 symbol 表达式中的常量、名称、一元 `+` / `-`、二元 `+` / `-` / `*` / `/` / `//` 与 `floor(...)`。
+
+    使用示例:
+    - _make_symbol_runtime_value_ast(parsed, SymbolDim)
+
+    关联文件:
+    - spec: spec/dsl/ast/mlir_gen.md
+    - test: test/dsl/ast/test_mlir_gen.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    if isinstance(node, py_ast.Expression):
+        return _make_symbol_runtime_value_ast(node.body, symbol_dim_type)
+    if isinstance(node, py_ast.Constant) and isinstance(node.value, int):
+        return int(node.value)
+    if isinstance(node, py_ast.Name):
+        return symbol_dim_type(node.id)
+    if isinstance(node, py_ast.UnaryOp) and isinstance(node.op, py_ast.UAdd):
+        return _make_symbol_runtime_value_ast(node.operand, symbol_dim_type)
+    if isinstance(node, py_ast.UnaryOp) and isinstance(node.op, py_ast.USub):
+        operand = _make_symbol_runtime_value_ast(node.operand, symbol_dim_type)
+        return -operand if isinstance(operand, int) else 0 - operand
+    if isinstance(node, py_ast.BinOp):
+        lhs = _make_symbol_runtime_value_ast(node.left, symbol_dim_type)
+        rhs = _make_symbol_runtime_value_ast(node.right, symbol_dim_type)
+        if isinstance(node.op, py_ast.Add):
+            return lhs + rhs
+        if isinstance(node.op, py_ast.Sub):
+            return lhs - rhs
+        if isinstance(node.op, py_ast.Mult):
+            return lhs * rhs
+        if isinstance(node.op, py_ast.Div):
+            return lhs / rhs
+        if isinstance(node.op, py_ast.FloorDiv):
+            return lhs // rhs
+    if isinstance(node, py_ast.Call):
+        if (
+            isinstance(node.func, py_ast.Name)
+            and node.func.id == "floor"
+            and not node.keywords
+            and len(node.args) == 1
+        ):
+            arg_value = _make_symbol_runtime_value_ast(node.args[0], symbol_dim_type)
+            if isinstance(arg_value, int):
+                return arg_value
+            try:
+                import sympy as sp  # pylint: disable=import-error
+            except Exception:
+                _raise_value_error("unsupported public symbol expression")
+            return symbol_dim_type(sp.floor(arg_value.get_symbol()))
+    _raise_value_error("unsupported public symbol expression")
 
 
 def _canonicalize_symbolic_expr(expr: str) -> str:
     """生成对外比较用的稳定符号表达文本。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 基于 `SymbolDim` 运行时语义生成公开比较文本。
@@ -333,8 +351,8 @@ def _canonicalize_symbolic_expr(expr: str) -> str:
     - _canonicalize_symbolic_expr("4 + N")
 
     关联文件:
-    - spec: spec/dsl/mlir_gen.md
-    - test: test/dsl/ast/test_visitor_integration.py
+    - spec: spec/dsl/ast/mlir_gen.md
+    - test: test/dsl/ast/test_mlir_gen.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -342,41 +360,12 @@ def _canonicalize_symbolic_expr(expr: str) -> str:
     return str(value if isinstance(value, int) else value.get_value())
 
 
-def build_public_symbol_expr(lhs_expr: str, rhs_expr: str, op_symbol: str) -> str:
-    """按运行时 symbol 语义构造公开表达文本。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 统一收敛 lowering 结果类型上的公开 `symbol.int<expr>` 文本。
-    - 构造表达式时保留操作数边界，避免 `A - 1` 与 `* B` 拼接后被解析成 `A - 1 * B`。
-
-    使用示例:
-    - build_public_symbol_expr("N", "4", "*")
-
-    关联文件:
-    - spec: spec/dsl/mlir_gen.md
-    - test: test/dsl/ast/test_visitor_integration.py
-    - 功能实现: kernel_gen/dialect/symbol.py
-    """
-
-    value = _make_symbol_runtime_value(f"({lhs_expr}) {op_symbol} ({rhs_expr})")
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    if isinstance(value, int):
-        return str(value)
-    return str(value.get_value())
-
-
 def _is_supported_symbol_expr(expr: str) -> bool:
     """判断符号表达是否属于当前 dialect 支持的最小语法。 
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 允许整数常量、标识符、一元 `+/-`、二元 `+/-/*///` 与 `floor(...)`。
+    - 允许整数常量、标识符、一元 `+` / `-`、二元 `+` / `-` / `*` / `/` / `//` 与 `floor(...)`。
     - 用于替代纯正则匹配，接受 SymPy 规范化后的 `-N + M`、`floor(7/N)` 等公开文本。
 
     使用示例:
@@ -384,7 +373,7 @@ def _is_supported_symbol_expr(expr: str) -> bool:
 
     关联文件:
     - spec: spec/dialect/symbol.md
-    - test: test/dialect/test_symbol_dialect.py
+    - test: test/dialect/test_symbol.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -393,37 +382,53 @@ def _is_supported_symbol_expr(expr: str) -> bool:
     except SyntaxError:
         return False
 
-    def _check(node: py_ast.AST) -> bool:
-        if isinstance(node, py_ast.Expression):
-            return _check(node.body)
-        if isinstance(node, py_ast.Name):
-            return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", node.id))
-        if isinstance(node, py_ast.Constant):
-            return isinstance(node.value, int)
-        if isinstance(node, py_ast.UnaryOp):
-            return isinstance(node.op, (py_ast.UAdd, py_ast.USub)) and _check(node.operand)
-        if isinstance(node, py_ast.BinOp):
-            return isinstance(node.op, (py_ast.Add, py_ast.Sub, py_ast.Mult, py_ast.Div, py_ast.FloorDiv)) and _check(
-                node.left
-            ) and _check(node.right)
-        if isinstance(node, py_ast.Call):
-            return (
-                isinstance(node.func, py_ast.Name)
-                and node.func.id == "floor"
-                and not node.keywords
-                and len(node.args) == 1
-                and _check(node.args[0])
-            )
-        return False
+    return _is_supported_symbol_expr_ast(parsed)
 
-    return _check(parsed)
+
+def _is_supported_symbol_expr_ast(node: py_ast.AST) -> bool:
+    """判断 Python AST 是否属于公开 symbol 表达式子集。
+
+
+    功能说明:
+    - 支持整数常量、标识符、一元 `+` / `-`、二元 `+` / `-` / `*` / `/` / `//` 与 `floor(...)`。
+
+    使用示例:
+    - _is_supported_symbol_expr_ast(py_ast.parse("N + 1", mode="eval"))
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    if isinstance(node, py_ast.Expression):
+        return _is_supported_symbol_expr_ast(node.body)
+    if isinstance(node, py_ast.Name):
+        return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", node.id))
+    if isinstance(node, py_ast.Constant):
+        return isinstance(node.value, int)
+    if isinstance(node, py_ast.UnaryOp):
+        return isinstance(node.op, (py_ast.UAdd, py_ast.USub)) and _is_supported_symbol_expr_ast(node.operand)
+    if isinstance(node, py_ast.BinOp):
+        return (
+            isinstance(node.op, (py_ast.Add, py_ast.Sub, py_ast.Mult, py_ast.Div, py_ast.FloorDiv))
+            and _is_supported_symbol_expr_ast(node.left)
+            and _is_supported_symbol_expr_ast(node.right)
+        )
+    if isinstance(node, py_ast.Call):
+        return (
+            isinstance(node.func, py_ast.Name)
+            and node.func.id == "floor"
+            and not node.keywords
+            and len(node.args) == 1
+            and _is_supported_symbol_expr_ast(node.args[0])
+        )
+    return False
 
 
 def _verify_axis(axis: Attribute, rank: int, op_name: str) -> int:
     """校验 axis attribute 并返回轴号。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 统一校验 `symbol.get_dim/get_stride` 的静态整数轴号约束。
@@ -433,7 +438,7 @@ def _verify_axis(axis: Attribute, rank: int, op_name: str) -> int:
 
     关联文件:
     - spec: spec/dialect/symbol.md
-    - test: test/dialect/test_symbol_dialect.py
+    - test: test/dialect/test_symbol.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -447,8 +452,6 @@ def _verify_axis(axis: Attribute, rank: int, op_name: str) -> int:
 def _entry_to_expr(entry: Attribute, op_name: str, field_name: str) -> str:
     """将 memory 元信息条目转换为 symbol 表达。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 将 `NnMemoryType` 中的 `shape/stride` 条目收敛为 `!symbol.int<\"expr\">` 所需字符串。
@@ -458,7 +461,7 @@ def _entry_to_expr(entry: Attribute, op_name: str, field_name: str) -> str:
 
     关联文件:
     - spec: spec/dialect/symbol.md
-    - test: test/dialect/test_symbol_dialect.py
+    - test: test/dialect/test_symbol.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -477,8 +480,6 @@ def _infer_result_type(
 ) -> SymbolValueType:
     """根据 memory type 推导查询 op 的结果类型。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 从 `NnMemoryType` 的 `shape/stride` 中读取真实条目，并推导 `SymbolValueType`。
@@ -489,7 +490,7 @@ def _infer_result_type(
 
     关联文件:
     - spec: spec/dialect/symbol.md
-    - test: test/dialect/test_symbol_dialect.py
+    - test: test/dialect/test_symbol.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -509,8 +510,6 @@ def _infer_result_type(
 def _is_symbol_int_type(attr: Attribute) -> bool:
     """判断 attribute 是否为 symbol.int 类型。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 为 `symbol.for` 与 `symbol.get_*` verifier 复用统一的 symbol 类型判断。
@@ -520,7 +519,7 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
 
     关联文件:
     - spec: spec/dialect/symbol.md
-    - test: test/dialect/test_symbol_dialect.py
+    - test: test/dialect/test_symbol.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -530,8 +529,6 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
 def _get_concrete_symbol_int_value(attr: Attribute) -> int | None:
     """提取静态可求值的 `!symbol.int` 整数值。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅当 `attr` 是静态整数 `SymbolValueType` 时返回具体整数。
@@ -542,7 +539,7 @@ def _get_concrete_symbol_int_value(attr: Attribute) -> int | None:
 
     关联文件:
     - spec: spec/dialect/symbol.md
-    - test: test/dialect/test_symbol_dialect.py
+    - test: test/dialect/test_symbol.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -589,8 +586,6 @@ class SymbolExprAttr(ParametrizedAttribute):
     def from_expr(cls: type["SymbolExprAttr"], expr: str) -> "SymbolExprAttr":
         """从字符串构造符号表达 attribute。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 为测试与实现提供统一的构造入口。
@@ -600,7 +595,7 @@ class SymbolExprAttr(ParametrizedAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -618,8 +613,6 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
     def __post_init__(self: "SymbolDimType") -> None:
         """延迟 symbol.dim 构造期校验。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 跳过构造期校验，改由显式 verify 或 op/module verify 触发。
@@ -630,7 +623,7 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
+        - test: test/dialect/test_tuner.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -641,8 +634,6 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
     def parse_parameters(cls: type["SymbolDimType"], parser: AttrParser) -> Sequence[Attribute]:
         """解析 symbol.dim 类型参数。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 解析 `!symbol.dim<"name">` 的名称参数。
@@ -652,7 +643,7 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
+        - test: test/dialect/test_tuner.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -664,8 +655,6 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
     def print_parameters(self: "SymbolDimType", printer: Printer) -> None:
         """打印 symbol.dim 类型参数。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 输出 `!symbol.dim<\"name\">` 的名称参数。
@@ -675,7 +664,7 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
+        - test: test/dialect/test_tuner.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -686,8 +675,6 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
     def verify(self: "SymbolDimType") -> None:
         """校验 symbol.dim 名称合法性。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 拒绝空名称或非法标识符。
@@ -697,7 +684,7 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
+        - test: test/dialect/test_tuner.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -706,8 +693,6 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
     def __str__(self: "SymbolDimType") -> str:
         """返回公开的 symbol.dim 文本表示。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 生成 `symbol.dim<name>` 形式的字符串表示。
@@ -717,7 +702,7 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
+        - test: test/dialect/test_tuner.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -727,8 +712,6 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
     def from_name(cls: type["SymbolDimType"], name: str) -> "SymbolDimType":
         """从名称构造 symbol.dim 类型。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 对名称执行规范化校验并返回类型实例。
@@ -738,7 +721,7 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
+        - test: test/dialect/test_tuner.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -782,8 +765,6 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
     def get_value(self: "SymbolValueType") -> int | str:
         """返回 symbol.int 的公开值。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 对常量表达返回 `int`。
@@ -794,7 +775,7 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -805,8 +786,6 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
     def is_symbol(self: "SymbolValueType") -> bool:
         """判断当前值是否为非字面量符号表达。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 纯数字常量返回 `False`。
@@ -817,7 +796,7 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -827,8 +806,6 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
     def from_expr(cls: type["SymbolValueType"], expr: str) -> "SymbolValueType":
         """从字符串构造整数符号值类型。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 统一创建只表示整数类型的 symbol value type。
@@ -838,7 +815,7 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -859,8 +836,6 @@ class SymbolIterAttr(ParametrizedAttribute):
     def parse_parameters(cls: type["SymbolIterAttr"], parser: AttrParser) -> Sequence[Attribute]:
         """解析 symbol.iter attribute 参数。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 解析 `#symbol.iter<start = "...", end = "...", step = "...">` 语法。
@@ -870,7 +845,7 @@ class SymbolIterAttr(ParametrizedAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -896,8 +871,6 @@ class SymbolIterAttr(ParametrizedAttribute):
     def print_parameters(self: "SymbolIterAttr", printer: Printer) -> None:
         """打印 symbol.iter attribute 参数。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 输出 `#symbol.iter<start = "...", end = "...", step = "...">` 语法。
@@ -907,7 +880,7 @@ class SymbolIterAttr(ParametrizedAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -922,8 +895,6 @@ class SymbolIterAttr(ParametrizedAttribute):
     def verify(self: "SymbolIterAttr") -> None:
         """校验 symbol.iter attribute 参数。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 校验 start/end/step 的 symbol 表达式合法性。
@@ -933,7 +904,7 @@ class SymbolIterAttr(ParametrizedAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -945,8 +916,6 @@ class SymbolIterAttr(ParametrizedAttribute):
     def from_bounds(cls: type["SymbolIterAttr"], start: str, end: str, step: str) -> "SymbolIterAttr":
         """从 start/end/step 字符串构造 symbol.iter attribute。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 统一构造 `#symbol.iter<start = "...", end = "...", step = "...">`。
@@ -956,7 +925,7 @@ class SymbolIterAttr(ParametrizedAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -981,8 +950,6 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
     def parse_parameters(cls: type["SymbolIterType"], parser: AttrParser) -> Sequence[Attribute]:
         """解析循环迭代类型参数。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 解析 `!symbol.iter<start = "...", end = "...", step = "...">` 语法。
@@ -993,7 +960,7 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1026,8 +993,6 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
     def print_parameters(self: "SymbolIterType", printer: Printer) -> None:
         """打印循环迭代类型参数。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 输出 `!symbol.iter<start = "...", end = "...", step = "...">` 的表达式参数。
@@ -1037,7 +1002,7 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1052,8 +1017,6 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
     def verify(self: "SymbolIterType") -> None:
         """校验循环迭代类型参数。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 复用 symbol.expr 的合法性校验，确保 start/end/step 都合法。
@@ -1063,7 +1026,7 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1074,8 +1037,6 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
     def __str__(self: "SymbolIterType") -> str:
         """返回公开的 symbol.iter 文本表示。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 生成 `symbol.iter<start,end,step>` 形式的字符串表示。
@@ -1085,7 +1046,7 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1100,8 +1061,6 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
     def from_bounds(cls: type["SymbolIterType"], start: str, end: str, step: str) -> "SymbolIterType":
         """从 start/end/step 构造循环迭代类型。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 统一创建 `!symbol.iter<start = "...", end = "...", step = "...">`。
@@ -1111,7 +1070,7 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1125,8 +1084,6 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
     def from_attr(cls: type["SymbolIterType"], attr: SymbolIterAttr) -> "SymbolIterType":
         """从 symbol.iter attribute 构造循环迭代类型。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 将 `#symbol.iter<...>` 转换为对应的 `!symbol.iter<...>` 类型。
@@ -1136,7 +1093,7 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1146,8 +1103,6 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
     def from_expr(cls: type["SymbolIterType"], expr: str) -> "SymbolIterType":
         """从字符串构造循环迭代类型（legacy 语义）。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 兼容旧的 `!symbol.iter<"expr">` 语义，补齐 `start=0` 与 `step=1`。
@@ -1157,7 +1112,7 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1168,8 +1123,6 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
 class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
     """符号指针类型。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 表示 `!symbol.ptr<dtype>` 的指针类型承载。
@@ -1180,7 +1133,7 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
 
     关联文件:
     - spec: spec/dialect/symbol.md
-    - test: test/dialect/test_symbol_dialect.py
+    - test: test/dialect/test_symbol.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -1192,8 +1145,6 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
     def parse_parameters(cls: type["SymbolPtrType"], parser: AttrParser) -> Sequence[Attribute]:
         """解析 symbol.ptr 类型参数。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 解析 `!symbol.ptr<dtype>` 中的 dtype。
@@ -1203,7 +1154,7 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1215,8 +1166,6 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
     def print_parameters(self: "SymbolPtrType", printer: Printer) -> None:
         """打印 symbol.ptr 类型参数。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 输出 `!symbol.ptr<dtype>` 的 dtype 部分。
@@ -1226,7 +1175,7 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1237,8 +1186,6 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
     def verify(self: "SymbolPtrType") -> None:
         """校验 symbol.ptr 的 dtype。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 要求 dtype 为合法 TypeAttribute。
@@ -1249,7 +1196,7 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1262,6 +1209,7 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
 class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
     """symbol 二元整数算术 op 基类。"""
 
+    traits = traits_def(Pure())
     lhs = operand_def(Attribute)
     rhs = operand_def(Attribute)
     result = result_def(Attribute)
@@ -1274,8 +1222,6 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
     ) -> None:
         """初始化 symbol 二元整数算术 op。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 设置两个 `!symbol.int<"expr">` 操作数与单个 `!symbol.int<"expr">` 结果类型。
@@ -1285,7 +1231,7 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1294,8 +1240,6 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
     def verify_(self: "_BaseSymbolBinaryArithOp") -> None:
         """校验 symbol 二元整数算术 op 的类型约束。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 校验 `lhs`、`rhs` 与 `result` 均为 `!symbol.int<"expr">`。
@@ -1305,7 +1249,7 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1319,8 +1263,6 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
     def fold(self: "_BaseSymbolBinaryArithOp") -> Sequence[SSAValue | Attribute] | None:
         """折叠静态整数 symbol 二元算术 op。
 
-        创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 仅当 lhs/rhs/result 都是静态整数 `!symbol.int` 时折叠。
@@ -1331,7 +1273,7 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1398,6 +1340,7 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
 class _BaseSymbolCompareOp(IRDLOperation):
     """symbol 二元整数比较 op 基类。"""
 
+    traits = traits_def(Pure())
     lhs = operand_def(Attribute)
     rhs = operand_def(Attribute)
     result = result_def(Attribute)
@@ -1410,8 +1353,6 @@ class _BaseSymbolCompareOp(IRDLOperation):
     ) -> None:
         """初始化 symbol 二元整数比较 op。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 设置两个 `!symbol.int<"expr">` 操作数与单个 `i1` 结果类型。
@@ -1421,7 +1362,7 @@ class _BaseSymbolCompareOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1430,8 +1371,6 @@ class _BaseSymbolCompareOp(IRDLOperation):
     def verify_(self: "_BaseSymbolCompareOp") -> None:
         """校验 symbol 二元整数比较 op 的类型约束。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 校验 `lhs` 与 `rhs` 均为 `!symbol.int<"expr">`。
@@ -1442,7 +1381,7 @@ class _BaseSymbolCompareOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1491,6 +1430,7 @@ class SymbolConstOp(IRDLOperation):
     """创建 symbol.int 常量。"""
 
     name = "symbol.const"
+    traits = traits_def(Pure())
 
     value = attr_def(IntAttr)
     result = result_def(SymbolValueType)
@@ -1502,8 +1442,6 @@ class SymbolConstOp(IRDLOperation):
     ) -> None:
         """初始化 symbol.const。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 记录整数常量 attribute，并生成对应的 `!symbol.int<"...">` 结果类型。
@@ -1513,7 +1451,7 @@ class SymbolConstOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1524,8 +1462,6 @@ class SymbolConstOp(IRDLOperation):
     def verify_(self: "SymbolConstOp") -> None:
         """校验 symbol.const 的类型约束。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 校验 value 必须为整型 attribute。
@@ -1536,7 +1472,7 @@ class SymbolConstOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1551,8 +1487,6 @@ class SymbolConstOp(IRDLOperation):
     def print(self: "SymbolConstOp", printer: Printer) -> None:
         """打印 symbol.const 自定义文本语法。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 输出 `symbol.const <value> : !symbol.int<"...">` 的文本形式。
@@ -1562,7 +1496,7 @@ class SymbolConstOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1575,8 +1509,6 @@ class SymbolConstOp(IRDLOperation):
     def parse(cls: type["SymbolConstOp"], parser: AttrParser) -> "SymbolConstOp":
         """解析 symbol.const 自定义文本语法。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 解析整数常量与 `!symbol.int<"...">` 结果类型。
@@ -1586,7 +1518,7 @@ class SymbolConstOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1599,8 +1531,6 @@ class SymbolConstOp(IRDLOperation):
 class SymbolConstantMaterializationInterface(ConstantMaterializationInterface):
     """将 folded 整数属性 materialize 回 symbol.const。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受与 `SymbolValueType` 一致的静态整数常量。
@@ -1611,7 +1541,7 @@ class SymbolConstantMaterializationInterface(ConstantMaterializationInterface):
 
     关联文件:
     - spec: spec/dialect/symbol.md
-    - test: test/dialect/test_symbol_dialect.py
+    - test: test/dialect/test_symbol.py
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
@@ -1709,6 +1639,7 @@ class SymbolToFloatOp(IRDLOperation):
     """将 symbol.int 标量转换为 f32。"""
 
     name = "symbol.to_float"
+    traits = traits_def(Pure())
 
     source = operand_def(Attribute)
     result = result_def(Attribute)
@@ -1720,8 +1651,6 @@ class SymbolToFloatOp(IRDLOperation):
     ) -> None:
         """初始化 symbol.to_float。
 
-        创建者: 我不是牛马
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 设置单个 `!symbol.int<"expr">` 操作数与浮点结果类型。
@@ -1731,7 +1660,7 @@ class SymbolToFloatOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1740,8 +1669,6 @@ class SymbolToFloatOp(IRDLOperation):
     def verify_(self: "SymbolToFloatOp") -> None:
         """校验 symbol.to_float 的类型约束。
 
-        创建者: 我不是牛马
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 校验 source 必须为 `!symbol.int<"expr">`。
@@ -1752,7 +1679,7 @@ class SymbolToFloatOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1790,6 +1717,7 @@ class SymbolToIntOp(IRDLOperation):
     """将 symbol.int 标量转换为普通整型。"""
 
     name = "symbol.to_int"
+    traits = traits_def(Pure())
 
     source = operand_def(Attribute)
     result = result_def(Attribute)
@@ -1801,8 +1729,6 @@ class SymbolToIntOp(IRDLOperation):
     ) -> None:
         """初始化 symbol.to_int。
 
-        创建者: 摸鱼小分队
-        最后一次更改: 摸鱼小分队
 
         功能说明:
         - 设置单个 `!symbol.int<"expr">` 操作数与普通整型结果类型。
@@ -1812,7 +1738,7 @@ class SymbolToIntOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1821,8 +1747,6 @@ class SymbolToIntOp(IRDLOperation):
     def verify_(self: "SymbolToIntOp") -> None:
         """校验 symbol.to_int 的类型约束。
 
-        创建者: 摸鱼小分队
-        最后一次更改: 摸鱼小分队
 
         功能说明:
         - 校验 source 必须为 `!symbol.int<"expr">`。
@@ -1833,7 +1757,7 @@ class SymbolToIntOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1871,6 +1795,7 @@ class SymbolCastOp(IRDLOperation):
     """将 symbol.int 标量转换为普通整型。"""
 
     name = "symbol.cast"
+    traits = traits_def(Pure())
 
     source = operand_def(Attribute)
     result = result_def(Attribute)
@@ -1882,8 +1807,6 @@ class SymbolCastOp(IRDLOperation):
     ) -> None:
         """初始化 symbol.cast。
 
-        创建者: jcc你莫辜负
-        最后修改人: jcc你莫辜负
 
         功能说明:
         - 设置单个 `!symbol.int<"expr">` 操作数与普通整型结果类型。
@@ -1894,7 +1817,7 @@ class SymbolCastOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dsl/gen_kernel/emit.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1903,8 +1826,6 @@ class SymbolCastOp(IRDLOperation):
     def verify_(self: "SymbolCastOp") -> None:
         """校验 symbol.cast 的类型约束。
 
-        创建者: jcc你莫辜负
-        最后修改人: jcc你莫辜负
 
         功能说明:
         - 校验 source 必须为 `!symbol.int<"expr">`。
@@ -1915,7 +1836,7 @@ class SymbolCastOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dsl/gen_kernel/emit.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
         source_value = SSAValue.get(self.source)
@@ -1945,9 +1866,10 @@ class SymbolCastOp(IRDLOperation):
         return cls(source, result_type)
 
 
-class _BaseSymbolMemoryQueryOp(IRDLOperation):
+class _BaseSymbolMemoryQueryOp(IRDLOperation, HasFolderInterface):
     """memory 元信息查询 op 基类。"""
 
+    traits = traits_def(Pure())
     source = operand_def(Attribute)
     axis = attr_def(Attribute)
     result = result_def(SymbolValueType)
@@ -1961,8 +1883,6 @@ class _BaseSymbolMemoryQueryOp(IRDLOperation):
     ) -> None:
         """初始化 memory 元信息查询 op。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 设置 source operand、静态轴号 attribute 与推导后的 symbol 结果类型。
@@ -1972,7 +1892,7 @@ class _BaseSymbolMemoryQueryOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -1986,8 +1906,6 @@ class _BaseSymbolMemoryQueryOp(IRDLOperation):
     def verify_(self: "_BaseSymbolMemoryQueryOp") -> None:
         """校验 memory 元信息查询 op。
 
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 校验 source 必须为 `NnMemoryType`、axis 合法，且目标条目不是匿名动态值 `?`。
@@ -1997,7 +1915,7 @@ class _BaseSymbolMemoryQueryOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -2010,6 +1928,41 @@ class _BaseSymbolMemoryQueryOp(IRDLOperation):
         expected = SymbolValueType.from_expr(_entry_to_expr(entries[axis], self.name, self.FIELD_NAME))
         if self.result.type != expected:
             _raise_verify_error(f"{self.name} result type must match source {self.FIELD_NAME} entry")
+
+    def fold(self: "_BaseSymbolMemoryQueryOp") -> Sequence[SSAValue | Attribute] | None:
+        """折叠静态 memory 元信息查询 op。
+
+
+        功能说明:
+        - 当 `symbol.get_dim/get_stride` 读取到静态整数 shape/stride 条目时，返回 `IntAttr` 交给
+          `SymbolConstantMaterializationInterface` 物化为 `symbol.const`。
+        - 动态符号表达、未知 `?`、非法 source/axis 或 result type 不匹配时保守不折叠。
+
+        使用示例:
+        - SymbolGetDimOp(source, 0).fold()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        source_type = SSAValue.get(self.source).type
+        if not isinstance(source_type, NnMemoryType):
+            return None
+        entries = source_type.shape.data if self.FIELD_NAME == "shape" else source_type.stride.data
+        if not isinstance(self.axis, IntAttr) or self.axis.data < 0 or self.axis.data >= len(entries):
+            return None
+        try:
+            expected_type = SymbolValueType.from_expr(_entry_to_expr(entries[self.axis.data], self.name, self.FIELD_NAME))
+        except VerifyException:
+            return None
+        if SSAValue.get(self.result).type != expected_type:
+            return None
+        concrete_value = _get_concrete_symbol_int_value(expected_type)
+        if concrete_value is None:
+            return None
+        return (IntAttr(concrete_value),)
 
 
 @irdl_op_definition
@@ -2040,8 +1993,6 @@ class SymbolYieldOp(IRDLOperation):
     def __init__(self: "SymbolYieldOp", value: SSAValue | Operation) -> None:
         """初始化 symbol.yield。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 构造仅承载一个 `!symbol.int<"...">` operand 的 terminator。
@@ -2052,7 +2003,7 @@ class SymbolYieldOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -2061,8 +2012,6 @@ class SymbolYieldOp(IRDLOperation):
     def verify_(self: "SymbolYieldOp") -> None:
         """校验 symbol.yield 只能在 carried symbol.for 末尾使用。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 要求 `value` 类型固定为 `!symbol.int<"...">`。
@@ -2073,7 +2022,7 @@ class SymbolYieldOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -2093,8 +2042,6 @@ class SymbolYieldOp(IRDLOperation):
     def print(self: "SymbolYieldOp", printer: Printer) -> None:
         """打印 symbol.yield 自定义文本语法。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 输出 `symbol.yield %value : !symbol.int<"...">` 形式文本。
@@ -2104,7 +2051,7 @@ class SymbolYieldOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -2117,8 +2064,6 @@ class SymbolYieldOp(IRDLOperation):
     def parse(cls: type["SymbolYieldOp"], parser: AttrParser) -> "SymbolYieldOp":
         """解析 symbol.yield 自定义文本语法。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 解析 `symbol.yield %value : !symbol.int<"...">`。
@@ -2129,7 +2074,7 @@ class SymbolYieldOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -2167,8 +2112,6 @@ class SymbolForOp(IRDLOperation):
     ) -> None:
         """初始化 symbol.for。
 
-        创建者: 我不是牛马
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 设置 `start/end/step` 三个 `!symbol.int<"...">` 操作数与单块循环体。
@@ -2181,7 +2124,7 @@ class SymbolForOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -2211,8 +2154,6 @@ class SymbolForOp(IRDLOperation):
     def verify_(self: "SymbolForOp") -> None:
         """校验 symbol.for 约束。
 
-        创建者: 我不是牛马
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 校验 start/end/step 均为 `!symbol.int<\"expr\">`。
@@ -2226,7 +2167,7 @@ class SymbolForOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -2295,8 +2236,6 @@ class SymbolForOp(IRDLOperation):
     def print(self: "SymbolForOp", printer: Printer) -> None:
         """打印 symbol.for 自定义文本语法。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 无 carried-value 时输出旧文本语法。
@@ -2307,7 +2246,7 @@ class SymbolForOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
@@ -2353,8 +2292,6 @@ class SymbolForOp(IRDLOperation):
     def parse(cls: type["SymbolForOp"], parser: AttrParser) -> "SymbolForOp":
         """解析 symbol.for 自定义文本语法。
 
-        创建者: 我不是牛马
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 解析旧的 `symbol.for %it = %start to %end step %step {iter = #symbol.iter<...>} { ... }`。
@@ -2366,7 +2303,7 @@ class SymbolForOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - test: test/dialect/test_symbol.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 

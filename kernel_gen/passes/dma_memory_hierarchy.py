@@ -1,7 +1,5 @@
 """dma-memory-hierarchy lowering pass.
 
-创建者: 朽木露琪亚
-最后一次更改: jcc你莫辜负
 
 功能说明:
 - 实现 `lower-dma-memory-hierarchy` pass，将仍停留在 `GM` 的 `kernel.*` 计算显式改写为
@@ -14,22 +12,22 @@
   与 `_rewrite_kernel_binary_elewise_op`；这些 helper 仅供本文件内部复用。
 
 API 列表:
-- `class LowerDmaMemoryHierarchyPass()`
-- `LowerDmaMemoryHierarchyPass.run(self: LowerDmaMemoryHierarchyPass, module: ModuleOp) -> ModuleOp`
+- `class LowerDmaMemoryHierarchyPass(fold: bool = True)`
 
 使用示例:
 - from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
-- module = LowerDmaMemoryHierarchyPass().run(module)
+- LowerDmaMemoryHierarchyPass().apply(Context(), module)
 
 关联文件:
 - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-- test: test/pass/test_dma_memory_hierarchy.py
+- test: test/passes/test_dma_memory_hierarchy.py
 - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
 """
 
 from __future__ import annotations
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
+from xdsl.context import Context
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import (
     IntAttr,
@@ -53,8 +51,6 @@ from kernel_gen.target import registry as target_registry
 def _require_sm_lm_support() -> None:
     """校验当前 target 支持 SM/LM，否则显式失败。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 读取当前 target 的 `sm_memory_size` 与 `lm_memory_size`。
@@ -65,7 +61,7 @@ def _require_sm_lm_support() -> None:
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/pass/test_dma_memory_hierarchy.py
+    - test: test/passes/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
@@ -84,8 +80,6 @@ def _require_sm_lm_support() -> None:
 def _memory_space(value_type: NnMemoryType) -> str:
     """读取 nn.memory 的 space 名称。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 返回 `global/shared/local/tsm/tlm` 中的字符串。
@@ -95,7 +89,7 @@ def _memory_space(value_type: NnMemoryType) -> str:
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/pass/test_dma_memory_hierarchy.py
+    - test: test/passes/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
@@ -105,8 +99,6 @@ def _memory_space(value_type: NnMemoryType) -> str:
 def _with_space(value_type: NnMemoryType, space: str) -> NnMemoryType:
     """构造同 shape/stride/element_type、不同 space 的 nn.memory type。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 用于为 staging buffer 生成 `SM/LM` 空间的类型。
@@ -116,7 +108,7 @@ def _with_space(value_type: NnMemoryType, space: str) -> NnMemoryType:
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/pass/test_dma_memory_hierarchy.py
+    - test: test/passes/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
@@ -131,8 +123,6 @@ def _with_space(value_type: NnMemoryType, space: str) -> NnMemoryType:
 def _const_symbol_int(value: int) -> tuple[arith.ConstantOp, UnrealizedConversionCastOp]:
     """构造 `!symbol.int<\"value\">` 常量的 IR op 对。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 先创建 i32 常量，再用 `builtin.unrealized_conversion_cast` 转成 `!symbol.int<\"expr\">`。
@@ -145,7 +135,7 @@ def _const_symbol_int(value: int) -> tuple[arith.ConstantOp, UnrealizedConversio
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/pass/test_dma_memory_hierarchy.py
+    - test: test/passes/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
@@ -164,8 +154,6 @@ def _build_full_window_operands(
 ) -> tuple[list[Operation], list[SSAValue], list[SSAValue], list[SSAValue]]:
     """为整块窗口搬运构造 offsets/sizes/strides operand。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - offsets: 全 0
@@ -178,7 +166,7 @@ def _build_full_window_operands(
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/pass/test_dma_memory_hierarchy.py
+    - test: test/passes/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
@@ -211,8 +199,6 @@ def _resolve_window_operands(
 ) -> tuple[list[Operation], SSAValue, list[SSAValue], list[SSAValue], list[SSAValue]]:
     """解析 GM 侧窗口参数与基准 source/target。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 若 operand 来自 `dma.view`，保留其 offsets/shape 作为 window 参数，并将 base 设为 view.source。
@@ -224,7 +210,7 @@ def _resolve_window_operands(
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/pass/test_dma_memory_hierarchy.py
+    - test: test/passes/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
@@ -244,8 +230,6 @@ def _resolve_window_operands(
 def _ensure_static_rank(memory_type: NnMemoryType, context: str) -> int:
     """确保 nn.memory 的 rank 可确定，返回 rank。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 目前 rank 由 shape 列表长度决定；这里同步触发类型校验并返回 rank。
@@ -255,7 +239,7 @@ def _ensure_static_rank(memory_type: NnMemoryType, context: str) -> int:
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/pass/test_dma_memory_hierarchy.py
+    - test: test/passes/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
@@ -269,8 +253,6 @@ def _ensure_static_rank(memory_type: NnMemoryType, context: str) -> int:
 def _is_kernel_op(op: Operation) -> bool:
     """判断 op 是否为 kernel dialect op。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 当前以 `op.name.startswith(\"kernel.\")` 判定。
@@ -280,7 +262,7 @@ def _is_kernel_op(op: Operation) -> bool:
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/pass/test_dma_memory_hierarchy.py
+    - test: test/passes/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
@@ -298,8 +280,6 @@ def _lower_gm_operand_to_lm(
 ) -> tuple[list[Operation], SSAValue]:
     """将单个 GM operand 改写为 GM->SM->LM 并返回 LM buffer。
 
-    创建者: 朽木露琪亚
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 为 operand 分配 SM/LM staging buffer，并插入两段 `dma.slice`：
@@ -313,7 +293,7 @@ def _lower_gm_operand_to_lm(
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/pass/test_dma_memory_hierarchy.py
+    - test: test/passes/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
@@ -346,8 +326,6 @@ def _lower_gm_out_to_lm_with_writeback(
 ) -> tuple[list[Operation], list[Operation], SSAValue]:
     """将 GM out operand 改写为 LM out，并构造 LM->SM->GM 写回链路。
 
-    创建者: 朽木露琪亚
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 在 `anchor_op` 前插入 SM/LM alloc（out staging）。
@@ -364,7 +342,7 @@ def _lower_gm_out_to_lm_with_writeback(
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/pass/test_dma_memory_hierarchy.py
+    - test: test/passes/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
@@ -405,8 +383,6 @@ def _lower_gm_out_to_lm_with_writeback(
 class LowerDmaMemoryHierarchyPass(Pass):
     """将 kernel/dma IR 显式改写为 GM/SM/LM hierarchy 路径的 lowering pass。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 为 `kernel.*` operand/out 中仍在 `GM` 的 buffer 插入 staging：
@@ -415,35 +391,35 @@ class LowerDmaMemoryHierarchyPass(Pass):
     - 强制 `kernel.*` 仅在 `LM` 上计算，并把 op 的 `space` 属性设置为 `#nn.space<local>`。
 
     使用示例:
-    - module = LowerDmaMemoryHierarchyPass().run(module)
+    - LowerDmaMemoryHierarchyPass().apply(Context(), module)
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-    - test: test/pass/test_dma_memory_hierarchy.py
+    - test: test/passes/test_dma_memory_hierarchy.py
     - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     name = "lower-dma-memory-hierarchy"
 
-    def run(self, module: ModuleOp) -> ModuleOp:
+    def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行 dma-memory-hierarchy lowering。
 
-        创建者: 朽木露琪亚
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 遍历 module 内所有 `kernel.*` op，在其所在 block 内插入 `dma.alloc/slice/deslice`。
         - 遇到目标不支持 SM/LM 或输入不满足边界时显式失败。
+        - 公开执行入口固定为 xdsl `ModulePass.apply(ctx, module)`，不再提供单 pass `run(...)` 兼容入口。
 
         使用示例:
-        - module = LowerDmaMemoryHierarchyPass().run(module)
+        - LowerDmaMemoryHierarchyPass().apply(Context(), module)
 
         关联文件:
         - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
-        - test: test/pass/test_dma_memory_hierarchy.py
+        - test: test/passes/test_dma_memory_hierarchy.py
         - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
         """
 
+        _ = ctx
         if not isinstance(module, ModuleOp):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "module must be builtin.module")
         _require_sm_lm_support()
@@ -540,8 +516,6 @@ class LowerDmaMemoryHierarchyPass(Pass):
                 )
 
             op.attributes["space"] = NnMemorySpaceAttr.from_name("local")
-
-        return module
 
 
 __all__ = ["LowerDmaMemoryHierarchyPass"]

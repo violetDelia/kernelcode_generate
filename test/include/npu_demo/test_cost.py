@@ -1,7 +1,5 @@
 """npu_demo cost public namespace compile tests.
 
-创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `include/npu_demo/npu_demo.h` 对 cost family 的聚合入口。
@@ -36,8 +34,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def _compile_and_run(source: str) -> None:
     """编译并运行 npu_demo cost 测试片段。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 使用 `g++ -std=c++17 -pthread` 编译临时源码并执行生成程序。
@@ -100,8 +96,6 @@ def _compile_and_run(source: str) -> None:
 
 
 # NPU-DEMO-COST-001
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
 # 测试目的: 验证 `include/npu_demo/npu_demo.h` 可直接消费 `npu_demo::cost::{CostKind, add, copy}` 公共入口。
 # 使用示例: `pytest -q test/include/npu_demo/test_cost.py -k test_npu_demo_cost_public_namespace_compiles`
 # 对应功能实现文件路径: `include/npu_demo/npu_demo.h`
@@ -143,8 +137,6 @@ int main() {
 
 
 # NPU-DEMO-COST-002
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
 # 测试目的: 验证 `include/npu_demo/npu_demo.h` 已聚合 cost family，且不再残留 kind2 / kind3 文本。
 # 使用示例: `pytest -q test/include/npu_demo/test_cost.py -k test_npu_demo_public_header_aggregates_cost_family`
 # 对应功能实现文件路径: `include/npu_demo/npu_demo.h`

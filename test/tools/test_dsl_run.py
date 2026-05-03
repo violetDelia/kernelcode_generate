@@ -1,7 +1,5 @@
 """dsl_run tests.
 
-创建者: 朽木露琪亚
-最后一次更改: 大闸蟹
 
 功能说明:
 - 覆盖 `dsl_run(func, real_args, pipeline)` 的正向执行、错误合同与结果模型口径。
@@ -32,8 +30,6 @@ from xdsl.ir import Block, Region
 def _find_repo_root(start: Path) -> Path:
     """向上定位当前仓库根目录。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 兼容 worktree 与主仓两种执行环境，优先返回包含 `spec/tools/dsl_run.md` 的最近祖先目录。
@@ -65,7 +61,7 @@ from kernel_gen.dialect.symbol import SymbolConstOp
 from kernel_gen.operation import deslice, loop, matmul, slice, store
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import build_registered_pipeline, load_builtin_passes
-from kernel_gen.tools.dsl_run import dsl_run
+from kernel_gen.tools.dsl_run import DslRunResult, dsl_run
 from kernel_gen.target import registry as target_registry
 from kernel_gen.symbol_variable.memory import MemorySpace
 
@@ -85,12 +81,17 @@ _EXPECTED_NPU_DEMO_WRAPPER_MESSAGE = (
     "DslRunInternalError: lowered npu_demo module must contain exactly one wrapper func with arch.launch"
 )
 
+DslRunArray = torch.Tensor | np.ndarray
+
+
+class _NonModulePipelineResult:
+    """Sentinel result used to exercise public pipeline return validation."""
+
 
 @pytest.fixture(autouse=True)
 def _isolated_target_registry() -> None:
     """隔离 `dsl_run` 测试期间的 target registry 全局状态。
 
-    创建者: 金铲铲大作战
     最后更改: 金铲铲大作战
 
     功能说明:
@@ -122,7 +123,6 @@ def _isolated_target_registry() -> None:
 def _build_npu_demo_lowering_pipeline() -> PassManager:
     """构造 `npu-demo-lowering` pipeline。
 
-    创建者: 朽木露琪亚
     最后更改: 朽木露琪亚
 
     功能说明:
@@ -173,7 +173,6 @@ def add_kernel(
 ) -> None:
     """最小 add 样例，仅通过显式 out 参数写回结果。
 
-    创建者: 朽木露琪亚
     最后更改: 朽木露琪亚
 
     功能说明:
@@ -262,15 +261,14 @@ def matmul_out_kernel(
 
 
 def _assert_result_contract(
-    result: object,
-    out: object,
-    expected: object,
+    result: DslRunResult,
+    out: DslRunArray,
+    expected: DslRunArray,
     *,
     helper_snippet: str = "add<",
 ) -> None:
     """断言 `dsl_run(...)` 的最小公开结果合同。
 
-    创建者: 朽木露琪亚
     最后更改: 朽木露琪亚
 
     功能说明:
@@ -311,10 +309,6 @@ def _assert_result_contract(
 
 
 # TC-DSL-RUN-001
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 dsl_run 的正向结果模型与字符串 pipeline 行为。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -335,10 +329,6 @@ def test_dsl_run_string_pipeline_with_torch_numpy_mix() -> None:
 
 
 # TC-DSL-RUN-001A
-# 创建者: 大闸蟹
-# 最后一次更改: 大闸蟹
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 dump_dir 会按 kernel 名写入初始 IR、逐 pass IR 与最终源码。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -367,10 +357,6 @@ def test_dsl_run_dump_dir_writes_pass_ir_and_source(tmp_path: Path) -> None:
 
 
 # TC-DSL-RUN-001B
-# 创建者: 大闸蟹
-# 最后一次更改: 大闸蟹
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 dump_dir 为空字符串时不会写出诊断产物。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -393,10 +379,6 @@ def test_dsl_run_empty_dump_dir_disables_dump(tmp_path: Path, monkeypatch: pytes
 
 
 # TC-DSL-RUN-002
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 dsl_run 对现成 PassManager 的直接接受能力，并覆盖 list real_args。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -418,10 +400,7 @@ def test_dsl_run_pass_manager_with_list_real_args() -> None:
 
 
 # TC-DSL-RUN-003
-# 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 dsl_run 对 numpy 输出位的支持。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -442,10 +421,7 @@ def test_dsl_run_numpy_output() -> None:
 
 
 # TC-DSL-RUN-003A
-# 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 slice + store add 在 worktree 实现下可通过主线合同真实执行。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -474,10 +450,7 @@ def test_dsl_run_add_slice_store_matches_public_contract() -> None:
 
 
 # TC-DSL-RUN-003A2
-# 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定可整除 tile 的 for-loop add 在 worktree 实现下可通过主线合同真实执行。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -505,10 +478,7 @@ def test_dsl_run_add_for_loop_matches_public_contract() -> None:
 
 
 # TC-DSL-RUN-003B
-# 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 execute_engine/npu_demo/sub.py 的 lowering 与 compile/execute 公开合同在当前 worktree 下可直接复现。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -533,10 +503,7 @@ def test_dsl_run_sub_matches_public_contract() -> None:
 
 
 # TC-DSL-RUN-003C
-# 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 execute_engine/npu_demo/mul.py 的 lowering 与 compile/execute 公开合同在当前 worktree 下可直接复现。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -561,10 +528,7 @@ def test_dsl_run_mul_matches_public_contract() -> None:
 
 
 # TC-DSL-RUN-003F
-# 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 dsl_run + npu-demo-lowering 对 tiled matmul 合同的正向链路，覆盖 TSM、kernel.matmul、npu_demo 源码和真实执行结果。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -602,10 +566,6 @@ def test_dsl_run_supports_tiled_matmul_kernel_on_npu_demo() -> None:
 
 
 # TC-DSL-RUN-003G
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 npu_demo lowered module 在 wrapper 不唯一/缺失时必须显式失败，避免静默回退到首个普通 func.func。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -624,10 +584,7 @@ def test_dsl_run_rejects_npu_demo_module_without_unique_wrapper() -> None:
 
 
 # TC-DSL-RUN-004
-# 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 DSL 值返回函数的固定失败短语。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -644,11 +601,44 @@ def test_dsl_run_rejects_value_return_kernel() -> None:
         )
 
 
+# TC-DSL-RUN-004A
+# 测试目的: 锁定 dsl_run 不再为 kernel 隐式注入 operation helper，缺少 import 时必须失败。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_rejects_missing_operation_helper_import() -> None:
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+    original_store = globals().pop("store")
+    try:
+        with pytest.raises(KernelCodeError, match="Unsupported call expression"):
+            dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
+        assert "store" not in globals()
+    finally:
+        globals()["store"] = original_store
+
+
+# TC-DSL-RUN-004B
+# 测试目的: 锁定 dsl_run / AST visitor 不再隐式注入 MemorySpace 等 enum 名称，缺少 import 时必须失败。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_rejects_missing_memory_space_import() -> None:
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+    original_memory_space = globals().pop("MemorySpace")
+    try:
+        with pytest.raises(KernelCodeError, match="Unknown name"):
+            dsl_run(add_slice_store_kernel, (out, lhs, rhs), "npu-demo-lowering")
+        assert "MemorySpace" not in globals()
+    finally:
+        globals()["MemorySpace"] = original_memory_space
+
+
 # TC-DSL-RUN-005
-# 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定未设置 core config target 的固定失败短语。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -664,10 +654,7 @@ def test_dsl_run_rejects_missing_core_target() -> None:
 
 
 # TC-DSL-RUN-006
-# 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 target 配置类型错误时仍会在公开入口显式失败。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -683,10 +670,7 @@ def test_dsl_run_rejects_invalid_core_target_type() -> None:
 
 
 # TC-DSL-RUN-007
-# 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定未知 pipeline 名称的固定失败短语。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -701,10 +685,7 @@ def test_dsl_run_rejects_unknown_pipeline_name() -> None:
 
 
 # TC-DSL-RUN-008
-# 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定非法 pipeline 类型的固定失败短语。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -719,10 +700,6 @@ def test_dsl_run_rejects_invalid_pipeline_type() -> None:
 
 
 # TC-DSL-RUN-008A
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 real_args 容器本身必须是 tuple/list，避免把 dict 或其他对象静默当成参数序列。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -741,10 +718,6 @@ def test_dsl_run_rejects_invalid_real_args_container() -> None:
 
 
 # TC-DSL-RUN-008B
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 core config target 为空字符串时仍会在公开入口显式失败。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -763,10 +736,7 @@ def test_dsl_run_rejects_empty_core_target_name() -> None:
 
 
 # TC-DSL-RUN-009
-# 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定非法 runtime 参数类型的固定失败短语。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -781,10 +751,7 @@ def test_dsl_run_rejects_unsupported_runtime_arg_type() -> None:
 
 
 # TC-DSL-RUN-010
-# 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 runtime 参数数量不匹配的固定失败短语。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -798,10 +765,6 @@ def test_dsl_run_rejects_arity_mismatch() -> None:
 
 
 # TC-DSL-RUN-010A
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 pipeline 若返回空 builtin.module，dsl_run 会在公开入口显式拒绝。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -821,10 +784,6 @@ def test_dsl_run_rejects_pipeline_returning_empty_module() -> None:
 
 
 # TC-DSL-RUN-010B
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 npu_demo 唯一 wrapper 若指向缺失 body func，dsl_run 会在公开入口显式失败。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -846,10 +805,6 @@ def test_dsl_run_rejects_npu_demo_wrapper_without_body_func() -> None:
 
 
 # TC-DSL-RUN-010C
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定非 npu_demo target 若收到仅含 launch wrapper 的 module，会继续透传公开 gen_kernel 失败而不是静默吞掉。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -869,18 +824,14 @@ def test_dsl_run_re_raises_codegen_failure_for_cpu_launch_wrapper() -> None:
 
 
 # TC-DSL-RUN-010D
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 pipeline 若返回非 builtin.module，dsl_run 会在公开入口显式拒绝。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
 def test_dsl_run_rejects_pipeline_returning_non_module() -> None:
     class NonModulePipeline(PassManager):
-        def run(self, module: ModuleOp) -> object:
-            return object()
+        def run(self, module: ModuleOp) -> _NonModulePipelineResult:
+            return _NonModulePipelineResult()
 
     out = torch.empty((6,), dtype=torch.int32)
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
@@ -892,10 +843,7 @@ def test_dsl_run_rejects_pipeline_returning_non_module() -> None:
 
 
 # TC-DSL-RUN-011
-# 创建者: 朽木露琪亚
 # 最后更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 确认 spec、实现与测试文件都已落到当前工作书。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md

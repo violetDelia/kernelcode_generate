@@ -8,45 +8,41 @@
 
 ## API 列表
 
-- `coverage omit 清单`
-- `选择标准`
-- `排除边界`
+- `coverage_omit.paths: tuple[str, ...]`
+- `coverage_omit.selection_rules: tuple[str, ...]`
+- `coverage_omit.exclusion_rules: tuple[str, ...]`
 
 ## 文档信息
 
-- 创建者：`金铲铲大作战`
-- 最后一次更改：`金铲铲大作战`
+- 创建者：`未记录`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/script/python_coverage_omit.md`](../../spec/script/python_coverage_omit.md)
-- `spec`：[`spec/script/python_coverage_check.md`](../../spec/script/python_coverage_check.md)
 - `功能实现`：[`script/check_python_coverage.py`](../../script/check_python_coverage.py)
 - `test`：[`test/script/test_python_coverage_omit.py`](../../test/script/test_python_coverage_omit.py)
 
-## 选择标准
+## 依赖
 
-- 文件只包含模块 docstring、注释、`import` / `from ... import ...`、`__all__`、类型检查保护导入、简单别名绑定，或仅承载“由包根公开 API 调度的内部拆分逻辑”。
-- 若文件本身未在对应 `spec` 和文件级 `API 列表` 中声明为公开 API，且行为只通过包根公开入口验收，则可列入 omit。
-- 只要文件本身承载独立公开 API、稳定 CLI 入口、公开错误类型、注册副作用、对外可直接 import 的契约，或其公开行为需单独计入 coverage，则不得列入 omit。
+- [`spec/script/python_coverage_check.md`](../../spec/script/python_coverage_check.md)：coverage gate 工具入口合同。
 
-## Omit 清单
+## API详细说明
+
+### `coverage_omit.paths: tuple[str, ...]`
+
+- api：`coverage_omit.paths: tuple[str, ...]`
+- 参数：无。
+- 返回值：`tuple[str, ...]`，列出 coverage gate 排除的仓库相对路径。
+- 使用示例：
+
+  ```bash
+  PYTHONPATH=. python3 script/check_python_coverage.py --module kernel_gen
+  ```
+- 功能说明：定义 `script/check_python_coverage.py` 在全量与 scoped gate 中统一应用的 omit 路径集合。
+- 注意事项：路径必须是仓库相对路径；列入 omit 的文件不得承载独立公开 API、稳定 CLI 入口、公开错误类型或需要单独计入 coverage 的对外行为；清单如下。
 
 | 路径 | 排除理由 | 覆盖率影响 |
 | --- | --- | --- |
 | `kernel_gen/dsl/__init__.py` | 仅汇总 DSL 公开入口 | 不计入 line / branch 阈值 |
 | `kernel_gen/dsl/ast/__init__.py` | 仅转发 AST 公开接口 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/__init__.py` | 仅汇总 mlir_gen 公开入口 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/parse_env.py` | 仅为 `build_func_op(...)` / `mlir_gen(...)` 提供内部解析环境辅助逻辑 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/signature.py` | 仅为 `build_func_op(...)` / `mlir_gen(...)` 提供内部签名辅助逻辑 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/emit/call_arch.py` | `emit_mlir(...)` 的 arch family 内部拆分实现 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/emit/call_dma.py` | `emit_mlir(...)` 的 dma family 内部拆分实现 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/emit/call_nn.py` | `emit_mlir(...)` 的 nn family 内部拆分实现 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/emit/call_symbol.py` | `emit_mlir(...)` 的 symbol family 内部拆分实现 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/emit/core.py` | `kernel_gen.dsl.mlir_gen.emit` 包根公开 facade 背后的内部 lowering 拆分实现 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/emit/control_flow.py` | `emit_mlir(...)` 的 control-flow 内部拆分实现 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/emit/shape_utils.py` | `emit_mlir(...)` 共享的 shape/index 内部辅助逻辑 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/emit/type_utils.py` | `emit_mlir(...)` 共享的类型推导内部辅助逻辑 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/emit/value.py` | `emit_mlir(...)` 共享的 value 内部辅助逻辑 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/function_builder.py` | `kernel_gen.dsl.mlir_gen` 包根公开 `build_func_op(...)` / `build_func_op_from_ast(...)` 的内部实现拆分 | 不计入 line / branch 阈值 |
-| `kernel_gen/dsl/mlir_gen/module_builder.py` | `kernel_gen.dsl.mlir_gen` 包根公开 `KernelCodeError(...)` / `mlir_gen(...)` 的内部实现拆分 | 不计入 line / branch 阈值 |
 | `kernel_gen/execute_engine/__init__.py` | 仅转发执行引擎公开入口 | 不计入 line / branch 阈值 |
 | `kernel_gen/operation/__init__.py` | 仅汇总 operation 公开入口 | 不计入 line / branch 阈值 |
 | `kernel_gen/operation/nn/common.py` | `kernel_gen.operation.nn` 各公开 helper 共享的内部校验与类型辅助逻辑 | 不计入 line / branch 阈值 |
@@ -63,16 +59,52 @@
 | `kernel_gen/dsl/gen_kernel/emit/npu_demo/symbol/const.py` | 仅承载 npu_demo target 私有 `symbol.const` 注册实现 | 不计入 line / branch 阈值 |
 | `kernel_gen/dsl/gen_kernel/emit/npu_demo/symbol/for_loop.py` | 仅承载 npu_demo target 私有 `symbol.for` 注册实现 | 不计入 line / branch 阈值 |
 
-## 排除边界
+### `coverage_omit.selection_rules: tuple[str, ...]`
 
-- `kernel_gen/__init__.py` 不在 omit 清单内，因为它承载惰性导出分发逻辑。
-- `kernel_gen/dialect/__init__.py` 不在 omit 清单内，因为它承载惰性导入与缓存逻辑。
-- `kernel_gen/dsl/gen_kernel/__init__.py` 不在 omit 清单内，因为它承载兼容包装与发射分发逻辑。
-- `kernel_gen/dsl/gen_kernel/emit/__init__.py` 不在 omit 清单内，因为它承载 target 分发与公开 emit 合同。
-- `kernel_gen/passes/lowering/__init__.py` 不在 omit 清单内，因为它承载兼容 alias 与 `sys.modules` 注册。
-- `kernel_gen/dsl/mlir_gen/emit/__init__.py` 不在 omit 清单内，因为它承载 `EmitContext(...)`、`emit_mlir(...)` 与 `memory_type_from_memory(...)` 公开入口。
+- api：`coverage_omit.selection_rules: tuple[str, ...]`
+- 参数：无。
+- 返回值：`tuple[str, ...]`，列出路径可进入 omit 清单的稳定选择规则。
+- 使用示例：
 
-## 使用方式
+  ```bash
+  PYTHONPATH=. python3 script/check_python_coverage.py --module kernel_gen --include-module kernel_gen.dsl
+  ```
+- 功能说明：定义新增 omit 项必须满足的选择条件。
+- 注意事项：文件只包含模块 docstring、注释、`import` / `from ... import ...`、`__all__`、类型检查保护导入、简单别名绑定，或仅承载由包根公开 API 调度的内部拆分逻辑时，才可列入 omit；若文件本身未在对应 `spec` 和文件级 `API 列表` 中声明为公开 API，且行为只通过包根公开入口验收，也可列入 omit。
 
-- 在 S6 阶段用作 “内部拆分文件不计入 coverage gate” 的公开合同真源。
-- 在 `script/check_python_coverage.py` 中先应用本清单，再汇总全量 `kernel_gen` 或 `--include-module` 范围。
+### `coverage_omit.exclusion_rules: tuple[str, ...]`
+
+- api：`coverage_omit.exclusion_rules: tuple[str, ...]`
+- 参数：无。
+- 返回值：`tuple[str, ...]`，列出不得进入 omit 清单的稳定排除条件。
+- 使用示例：
+
+  ```bash
+  PYTHONPATH=. python3 script/check_python_coverage.py --module kernel_gen
+  ```
+- 功能说明：定义 coverage omit 清单的排除边界。
+- 注意事项：承载独立公开 API、稳定 CLI 入口、公开错误类型、注册副作用、对外可直接 import 契约，或其公开行为需单独计入 coverage 的文件，不得列入 omit；`kernel_gen/__init__.py`、`kernel_gen/dialect/__init__.py`、`kernel_gen/dsl/gen_kernel/__init__.py`、`kernel_gen/dsl/gen_kernel/emit/__init__.py`、`kernel_gen/passes/lowering/__init__.py` 与 `kernel_gen/dsl/ast/mlir_gen.py` 不在 omit 清单内；已删除的 `kernel_gen/dsl/ast/emit_context.py` 与 `kernel_gen/dsl/ast/emit_nn.py` 不得作为 omit 清单项。
+
+## 额外补充
+
+### 使用方式
+
+- 本文件作为内部拆分文件不计入 coverage gate 的公开合同真源。
+- `script/check_python_coverage.py` 必须先应用本清单，再汇总全量 `kernel_gen` 或 `--include-module` 范围。
+
+## 测试
+
+- 测试文件：`test/script/test_python_coverage_omit.py`
+- 执行命令：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/script/test_python_coverage_omit.py`
+
+### 测试目标
+
+- 验证 coverage omit 清单与 `script/check_python_coverage.py` 的公开排除行为一致。
+
+### 功能与用例清单
+
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRIPT-PYTHON-COVERAGE-OMIT-001 | 公开入口 | 清单中路径被 coverage gate 排除。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `PCO-001`。 | 公开入口在“清单中路径被 coverage gate 排除。”场景下可导入、构造、注册或按名称发现。 | `PCO-001` |
+| TC-SCRIPT-PYTHON-COVERAGE-OMIT-002 | 公开入口 | 未列入清单且承载公开入口的文件继续计入 coverage gate。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `PCO-002`。 | 公开入口在“未列入清单且承载公开入口的文件继续计入 coverage gate。”场景下可导入、构造、注册或按名称发现。 | `PCO-002` |
+| TC-SCRIPT-PYTHON-COVERAGE-OMIT-003 | 公开入口 | 已删除文件不得继续作为 omit 清单项。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `PCO-003`。 | 公开入口在“已删除文件不得继续作为 omit 清单项。”场景下可导入、构造、注册或按名称发现。 | `PCO-003` |

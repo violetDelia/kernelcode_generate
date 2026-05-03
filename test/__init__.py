@@ -1,18 +1,16 @@
 """测试包入口。
 
-创建者: 小李飞刀
-最后一次更改: 榕
 
 功能说明:
 - 为测试用例补齐包路径，避免标准库同名模块导致导入混淆。
 - 在 worktree 中运行测试时补齐主仓 `kernel_gen` 的模块搜索路径。
 
 使用示例:
-- pytest -q test/pass/nn_lowering/select.py
+- pytest -q test/passes/lowering/nn_lowering/test_select.py
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/spec.md
-- test: test/pass/nn_lowering/select.py
+- test: test/passes/lowering/nn_lowering/test_select.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
 """
 

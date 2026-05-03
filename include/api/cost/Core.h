@@ -21,12 +21,10 @@ helper 清单:
 - npu_demo::cost::CostKind kind = npu_demo::compute;
 - S_INT cost = 0;
 
-创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/cost/Core.md
-- test: test/include/api/test_cost.py
+- test: test/include/api/cost.py
 - 功能实现: include/npu_demo/cost/Core.h
 */
 
@@ -48,12 +46,10 @@ namespace cost {
 - cost::CostKind compute_kind = cost::CostKind::Compute;
 - cost::CostKind memory_kind = cost::CostKind::Memory;
 
-创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/cost/Core.md
-- test: test/include/api/test_cost.py
+- test: test/include/api/cost.py
 - 功能实现: include/npu_demo/cost/Core.h
 */
 enum class CostKind {
@@ -74,12 +70,10 @@ enum class CostKind {
 - S_INT add_cost = npu_demo::cost::add<GM, float, float, npu_demo::compute>(out, lhs, rhs);
 - S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::memory>(target, source);
 
-创建者: OpenAI Codex
-最后修改人: OpenAI Codex
 
 关联文件:
 - spec: spec/include/api/cost/Core.md
-- test: test/include/api/test_cost.py
+- test: test/include/api/cost.py
 - 功能实现: include/npu_demo/cost/Core.h
 */
 inline constexpr cost::CostKind compute = cost::CostKind::Compute;

@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Python coverage threshold check CLI.
 
-创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 读取 `coverage.py` 生成的 JSON 报告。
@@ -58,8 +56,6 @@ class CoverageCheckError(RuntimeError):
 def _build_parser() -> argparse.ArgumentParser:
     """构造覆盖率检查命令行解析器。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 固定公开参数 `--coverage-json`、`--line-min`、`--branch-min`、`--include-module`。
@@ -91,8 +87,6 @@ def _build_parser() -> argparse.ArgumentParser:
 def _load_report(path: Path) -> dict[str, Any]:
     """读取并解析 coverage JSON 报告。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验报告文件存在且为合法 JSON。
@@ -123,8 +117,6 @@ def _load_report(path: Path) -> dict[str, Any]:
 def _normalize_module_prefix(module: str) -> str:
     """把模块名归一化为适合路径前缀匹配的形式。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 接受 `kernel_gen.passes` 与 `kernel_gen/passes` 两种写法。
@@ -149,8 +141,6 @@ def _normalize_module_prefix(module: str) -> str:
 def _normalize_repo_path(path: str) -> str:
     """把 coverage JSON 路径归一化为仓内 `kernel_gen/...` 相对路径。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 统一处理 coverage JSON 中的绝对路径、相对路径与 Windows 风格路径。
@@ -175,8 +165,6 @@ def _normalize_repo_path(path: str) -> str:
 def _omit_manifest_path() -> Path:
     """返回 coverage omit 清单路径。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 固定定位当前仓库的 `spec/script/python_coverage_omit.md`。
@@ -197,8 +185,6 @@ def _omit_manifest_path() -> Path:
 def _load_omit_paths(path: Path) -> set[str]:
     """从 omit 清单解析需要排除的仓内文件路径。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 只解析 markdown 表格中的 ``kernel_gen/...`` 路径。
@@ -228,8 +214,6 @@ def _load_omit_paths(path: Path) -> set[str]:
 def _path_matches_module(path: str, module: str) -> bool:
     """判断 coverage 文件路径是否属于指定模块前缀。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 使用路径段前缀匹配，而不是文本子串匹配，避免误命中同名目录。
@@ -270,8 +254,6 @@ def _path_matches_module(path: str, module: str) -> bool:
 def _require_int(value: Any, field: str, scope: str) -> int:
     """把 coverage 数值字段强制转换为整数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - coverage JSON 的计数值应为整数；缺失或非法值直接视为输入异常。
@@ -296,8 +278,6 @@ def _require_int(value: Any, field: str, scope: str) -> int:
 def _summary_metrics(summary: Any, scope: str) -> dict[str, int]:
     """把 coverage summary 转换为统一的计数指标。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 提取 line / branch 计算所需的四个计数值。
@@ -329,8 +309,6 @@ def _summary_metrics(summary: Any, scope: str) -> dict[str, int]:
 def _aggregate_metrics(items: list[dict[str, int]]) -> dict[str, int]:
     """把多个模块的 summary 指标汇总为一个总计。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 对 `--include-module` 命中的多个文件做加总。
@@ -360,8 +338,6 @@ def _collect_file_metrics(
 ) -> tuple[list[dict[str, int]], list[str]]:
     """收集未命中 omit 的文件 summary，并按模块前缀过滤。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 先按 omit 清单排除内部拆分或薄包装文件。
@@ -396,8 +372,6 @@ def _collect_file_metrics(
 def _select_metrics(report: dict[str, Any], include_modules: list[str]) -> tuple[dict[str, int], str]:
     """从 coverage 报告中选择需要检查的 metrics。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 优先按 `files` 聚合覆盖率，并先应用 omit 清单再做模块过滤。
@@ -437,8 +411,6 @@ def _select_metrics(report: dict[str, Any], include_modules: list[str]) -> tuple
 def _coverage_percent(covered: int, total: int) -> float:
     """根据分子分母计算覆盖率百分比。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 当总量为 0 时按 100% 处理，和 coverage.py 的零分母语义保持一致。
@@ -460,8 +432,6 @@ def _coverage_percent(covered: int, total: int) -> float:
 def check_coverage(report_path: Path, line_min: float, branch_min: float, include_modules: list[str]) -> dict[str, Any]:
     """检查 coverage JSON 是否满足给定阈值。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 读取 coverage 报告并计算 line / branch 覆盖率。
@@ -501,8 +471,6 @@ def check_coverage(report_path: Path, line_min: float, branch_min: float, includ
 def main(argv: list[str] | None = None) -> int:
     """命令行入口。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 解析 CLI 参数，执行覆盖率检查并返回进程退出码。

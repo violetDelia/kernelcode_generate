@@ -1,11 +1,14 @@
 """pass common helpers.
 
-创建者: 守护最好的爱莉希雅
-最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 提供 `kernel_gen.passes` 共享的 pass 合同校验 helper。
 - 提供 pass 级公共校验 helper，避免在多个 pass 中重复定义模块类型校验、统一报错入口和新生成 op verifier 包装逻辑。
+
+API 列表:
+- `ensure_builtin_module(module: ModuleOp) -> ModuleOp`
+- `raise_pass_contract_error(keyword: str, detail: str) -> None`
+- `verify_generated_ops(ops: Sequence[Operation]) -> None`
 
 使用示例:
 - from kernel_gen.passes.common import ensure_builtin_module, raise_pass_contract_error, verify_generated_ops
@@ -16,8 +19,8 @@
 关联文件:
 - spec: spec/pass/decompass.md
 - spec: spec/pass/buffer_results_to_out_params.md
-- test: test/pass/decompass/test_softmax.py
-- test: test/pass/test_buffer_results_to_out_params.py
+- test: test/passes/decompass/test_softmax.py
+- test: test/passes/test_buffer_results_to_out_params.py
 - 功能实现: kernel_gen/passes/common.py
 """
 
@@ -33,11 +36,9 @@ from xdsl.utils.exceptions import VerifyException
 
 
 
-def ensure_builtin_module(module: object) -> ModuleOp:
+def ensure_builtin_module(module: ModuleOp) -> ModuleOp:
     """校验 pass 输入必须是 `builtin.module`。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 为 pass 入口提供统一的 `ModuleOp` 类型校验。
@@ -49,8 +50,8 @@ def ensure_builtin_module(module: object) -> ModuleOp:
     关联文件:
     - spec: spec/pass/decompass.md
     - spec: spec/pass/buffer_results_to_out_params.md
-    - test: test/pass/decompass/test_softmax.py
-    - test: test/pass/test_buffer_results_to_out_params.py
+    - test: test/passes/decompass/test_softmax.py
+    - test: test/passes/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/common.py
     """
 
@@ -62,8 +63,6 @@ def ensure_builtin_module(module: object) -> ModuleOp:
 def raise_pass_contract_error(keyword: str, detail: str) -> None:
     """抛出统一格式的 pass 合同错误。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 为需要 `Keyword: detail` 失败文本的 pass 提供统一构造入口。
@@ -74,7 +73,7 @@ def raise_pass_contract_error(keyword: str, detail: str) -> None:
 
     关联文件:
     - spec: spec/pass/tile/README.md
-    - test: test/pass/tile/test_package.py
+    - test: test/passes/tile/test_package.py
     - 功能实现: kernel_gen/passes/common.py
     """
 
@@ -84,8 +83,6 @@ def raise_pass_contract_error(keyword: str, detail: str) -> None:
 def verify_generated_ops(ops: Sequence[Operation]) -> None:
     """逐个调用 verifier 校验新生成 op。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 把方言 verifier 抛出的 `VerifyException` 统一包装成 `KernelCodeError`。
@@ -97,8 +94,8 @@ def verify_generated_ops(ops: Sequence[Operation]) -> None:
     关联文件:
     - spec: spec/pass/decompass.md
     - spec: spec/pass/buffer_results_to_out_params.md
-    - test: test/pass/decompass/test_softmax.py
-    - test: test/pass/test_buffer_results_to_out_params.py
+    - test: test/passes/decompass/test_softmax.py
+    - test: test/passes/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/common.py
     """
 

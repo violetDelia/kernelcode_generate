@@ -1,10 +1,5 @@
 """NPU demo KernelContext include tests.
 
-创建者: 朽木露琪亚
-最后一次更改: 金铲铲大作战
-最后修改人: 金铲铲大作战
-最近一次运行测试时间: 2026-04-05 16:05:57 +0800
-最近一次运行成功时间: 2026-04-05 16:05:57 +0800
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `include/npu_demo/npu_demo.h` 的 `KernelContext` 运行时视图、
@@ -42,9 +37,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def _compile_and_run(source: str) -> None:
     """编译并运行 C++ 测试片段。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 金铲铲大作战
-    最后修改人: 金铲铲大作战
 
     功能说明:
     - 使用 `g++` 编译临时源码并执行生成程序，用于验收头文件契约。
@@ -126,11 +118,6 @@ def _compile_and_run(source: str) -> None:
 
 
 # NPU-DEMO-KC-001
-# 创建者: 朽木露琪亚
-# 最后一次更改: 小李飞刀
-# 最后修改人: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 06:05:00 +0800
-# 最近一次运行成功时间: 2026-04-06 06:05:00 +0800
 # 测试目的: 验证 launched body 中的 KernelContext 查询返回本次 launch 的运行时 extent 与索引。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_runtime_view_tracks_launch_extent
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -206,10 +193,6 @@ int main() {
 
 
 # NPU-DEMO-KC-001B
-# 创建者: 大闸蟹
-# 最后一次更改: 大闸蟹
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 npu_demo::launch 支持无显式 KernelContext 参数的 callee，并通过 free helper 读取活动上下文。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_launch_accepts_context_free_callee_with_free_helpers
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -253,11 +236,6 @@ int main() {
 
 
 # NPU-DEMO-KC-001A
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最后修改人: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 06:05:00 +0800
-# 最近一次运行成功时间: 2026-04-06 06:05:00 +0800
 # 测试目的: 验证 KernelContext::barrier 需要显式 visibility / scope，且只接受 {BarrierVisibility::TSM, BarrierVisibility::TLM} + BLOCK。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_barrier_requires_visibility_and_block_scope
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -355,11 +333,6 @@ int main() {
 
 
 # NPU-DEMO-KC-001B
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最后修改人: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 06:05:00 +0800
-# 最近一次运行成功时间: 2026-04-06 06:05:00 +0800
 # 测试目的: 验证 npu_demo::launch 对不受支持的 extent 显式返回失败而不是静默回退。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_launch_rejects_unsupported_extent_without_fallback
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -398,11 +371,6 @@ int main() {
 
 
 # NPU-DEMO-KC-002
-# 创建者: 朽木露琪亚
-# 最后一次更改: 金铲铲大作战
-# 最后修改人: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-05 10:44:47 +0800
-# 最近一次运行成功时间: 2026-04-05 10:44:47 +0800
 # 测试目的: 验证 get_dynamic_memory<TSM>() 返回固定 shape/stride/space 的 Memory 视图。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_returns_typed_tsm_memory
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -436,11 +404,6 @@ int main() {
 
 
 # NPU-DEMO-KC-003
-# 创建者: 朽木露琪亚
-# 最后一次更改: 金铲铲大作战
-# 最后修改人: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-05 10:44:47 +0800
-# 最近一次运行成功时间: 2026-04-05 10:44:47 +0800
 # 测试目的: 验证 get_dynamic_memory<TLM1/TLM2/TLM3>() 返回各自独立的 shape/stride/space Memory 视图。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_returns_typed_tlm123_memory
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -500,11 +463,6 @@ int main() {
 
 
 # NPU-DEMO-KC-004
-# 创建者: 朽木露琪亚
-# 最后一次更改: 金铲铲大作战
-# 最后修改人: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-05 10:44:47 +0800
-# 最近一次运行成功时间: 2026-04-05 10:44:47 +0800
 # 测试目的: 验证 get_dynamic_memory<SM, float>() 在 sm_memory_size=0 时抛出带关键字的运行期错误。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_rejects_sm_when_size_zero
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -540,11 +498,6 @@ int main() {
 
 
 # NPU-DEMO-KC-005
-# 创建者: 朽木露琪亚
-# 最后一次更改: 金铲铲大作战
-# 最后修改人: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-05 10:44:47 +0800
-# 最近一次运行成功时间: 2026-04-05 10:44:47 +0800
 # 测试目的: 验证 get_dynamic_memory<LM, float>() 在 lm_memory_size=0 时抛出带关键字的运行期错误。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_rejects_lm_when_size_zero
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -580,11 +533,6 @@ int main() {
 
 
 # NPU-DEMO-KC-005B
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最后修改人: 金铲铲大作战
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 验证 get_dynamic_memory 模板空间入口的成功与失败路径可编译并返回稳定结果，且 TLM1/TLM2/TLM3 容量各自独立。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_get_dynamic_memory_template_space_contract
 # 对应功能实现文件链接: [include/npu_demo/Arch.h](include/npu_demo/Arch.h)
@@ -653,11 +601,6 @@ int main() {
 
 
 # NPU-DEMO-KC-006
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最后修改人: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-05 10:44:47 +0800
-# 最近一次运行成功时间: 2026-04-05 10:44:47 +0800
 # 测试目的: 验证 view/slice/deslice 在 1-D 子集下返回正确视图与数据搬运结果。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_dma_view_slice_deslice_supports_1d_subset
 # 对应功能实现文件链接: [include/npu_demo/Dma.h](include/npu_demo/Dma.h)
@@ -723,9 +666,6 @@ int main() {
 
 
 # NPU-DEMO-KC-008
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最后修改人: 金铲铲大作战
 # 测试目的: 验证成员式 `view<T>(...)` 在 1-D 子集下对非法 offset/size/stride、越界与 rank!=1 明确失败（抛出 runtime_error 并携带关键字）。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_dma_view_rejects_invalid_params
 # 对应功能实现文件链接: [include/npu_demo/Memory.h](include/npu_demo/Memory.h)
@@ -902,9 +842,6 @@ int main() {
 
 
 # NPU-DEMO-KC-009
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最后修改人: 金铲铲大作战
 # 测试目的: 验证成员式 `view<T>(...)` 对 last_index/linear_offset/stride 的 overflow 风险明确失败并锁定 `overflow` 关键字。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_dma_view_rejects_overflow_params
 # 对应功能实现文件链接: [include/npu_demo/Memory.h](include/npu_demo/Memory.h)
@@ -998,9 +935,6 @@ int main() {
 
 
 # NPU-DEMO-KC-010
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最后修改人: 金铲铲大作战
 # 测试目的: 验证 Vector 版 slice/deslice 对 overflow 参数返回 kError。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_dma_slice_deslice_rejects_overflow_params
 # 对应功能实现文件链接: [include/npu_demo/Dma.h](include/npu_demo/Dma.h)
@@ -1062,11 +996,6 @@ int main() {
 
 
 # NPU-DEMO-KC-007
-# 创建者: 金铲铲大作战
-# 最后一次更改: jcc你莫辜负
-# 最后修改人: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-05 16:05:57 +0800
-# 最近一次运行成功时间: 2026-04-05 16:05:57 +0800
 # 测试目的: 验证 `npu_demo::add<GM, float, float>(out, lhs, rhs)` 在 1-D 子集下执行逐元素加法，并对 shape 不一致与任一 operand 的 rank!=1 返回失败。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_add_supports_1d_subset
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -1123,8 +1052,6 @@ int main() {
 
 
 # NPU-DEMO-KC-008
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
 # 测试目的: 锁定 `include/npu_demo/npu_demo.h` 不再重新聚合 `include/npu_demo/Nn.h`，同时单入口仍能承接 bare `add(lhs, rhs, out)`。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_single_entry_keeps_kernel_bridge_without_reexporting_nn_header
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)

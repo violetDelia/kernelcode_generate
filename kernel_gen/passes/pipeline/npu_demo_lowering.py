@@ -1,12 +1,10 @@
 """npu-demo-lowering pipeline.
 
-创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
 
 功能说明:
 - 提供 `npu-demo-lowering` pipeline 的 builder。
 - 固定 `dsl_run` 的 npu_demo 正向链路为
-  `InlinePass -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> SymbolBufferHoistPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> LaunchKernelCostFuncPass`。
+  `InlinePass -> CommonSubexpressionElimination -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> CommonSubexpressionElimination -> TileAnalysisPass -> SymbolBufferHoistPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> LaunchKernelCostFuncPass`。
 - 通过 registry 装饰器完成 pipeline 注册。
 
 API 列表:
@@ -19,11 +17,13 @@ API 列表:
 
 关联文件:
 - spec: [spec/pass/pipeline/npu_demo_lowering.md](spec/pass/pipeline/npu_demo_lowering.md)
-- test: [test/pass/test_pipeline_npu_demo_lowering.py](test/pass/test_pipeline_npu_demo_lowering.py)
+- test: [test/passes/pipeline/test_npu_demo_lowering.py](test/passes/pipeline/test_npu_demo_lowering.py)
 - 功能实现: [kernel_gen/passes/pipeline/npu_demo_lowering.py](kernel_gen/passes/pipeline/npu_demo_lowering.py)
 """
 
 from __future__ import annotations
+
+from xdsl.transforms.common_subexpression_elimination import CommonSubexpressionElimination
 
 from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
 from kernel_gen.passes.decompass import DecompassPass
@@ -34,6 +34,7 @@ from kernel_gen.passes.registry import register_pipeline
 from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
 from kernel_gen.passes.symbol_buffer_hoist import SymbolBufferHoistPass
 from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
+from kernel_gen.passes.tile.analysis import TileAnalysisPass
 from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
 
 
@@ -41,16 +42,17 @@ from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFun
 def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> PassManager:
     """构造 npu-demo-lowering pipeline。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 返回 `PassManager(name="npu-demo-lowering")`。
     - 固定 pass 顺序为
-      `InlinePass -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> SymbolBufferHoistPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> LaunchKernelCostFuncPass`。
+      `InlinePass -> CommonSubexpressionElimination -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> CommonSubexpressionElimination -> TileAnalysisPass -> SymbolBufferHoistPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> LaunchKernelCostFuncPass`。
+    - `CommonSubexpressionElimination` 紧跟 `InlinePass`，用于消除 inline 展平后产生的重复纯常量与等价表达式。
+    - 第二个 `CommonSubexpressionElimination` 紧跟 `SymbolLoopHoistPass`，用于消除 loop 外提后产生的重复纯常量与等价表达式。
+    - `TileAnalysisPass` 紧跟 `SymbolLoopHoistPass` 后置 CSE，只补充 tile 分析属性，不生成 tile 循环。
     - `SymbolLoopHoistPass` 在没有 `symbol.for` 的模块上应保持 no-op，因此可直接用于
       dsl_run 的最小 npu_demo 正向合同。
-    - `SymbolBufferHoistPass` 位于 `SymbolLoopHoistPass` 之后，用于把 loop 内安全 `dma.alloc`
+    - `SymbolBufferHoistPass` 位于 `TileAnalysisPass` 之后，用于把 loop 内安全 `dma.alloc`
       外提到 loop 之前。
     - `LaunchKernelCostFuncPass` 位于 pipeline 最后，使用默认 `cost_kind="DMA|MAC"` 生成 sibling
       cost function。
@@ -63,7 +65,7 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
 
     关联文件:
     - spec: [spec/pass/pipeline/npu_demo_lowering.md](spec/pass/pipeline/npu_demo_lowering.md)
-    - test: [test/pass/test_pipeline_npu_demo_lowering.py](test/pass/test_pipeline_npu_demo_lowering.py)
+    - test: [test/passes/pipeline/test_npu_demo_lowering.py](test/passes/pipeline/test_npu_demo_lowering.py)
     - 功能实现: [kernel_gen/passes/pipeline/npu_demo_lowering.py](kernel_gen/passes/pipeline/npu_demo_lowering.py)
     """
 
@@ -77,9 +79,12 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
 
     pm = PassManager(name="npu-demo-lowering")
     pm.add_pass(InlinePass())
+    pm.add_pass(CommonSubexpressionElimination())
     pm.add_pass(DecompassPass())
     pm.add_pass(NnLoweringPass())
     pm.add_pass(SymbolLoopHoistPass())
+    pm.add_pass(CommonSubexpressionElimination())
+    pm.add_pass(TileAnalysisPass())
     pm.add_pass(SymbolBufferHoistPass())
     pm.add_pass(AttachArchInformationPass(target=target))
     pm.add_pass(OutlineDeviceKernelPass())

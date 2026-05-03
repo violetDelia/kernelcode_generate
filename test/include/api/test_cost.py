@@ -1,7 +1,5 @@
 """API cost compile tests.
 
-创建者: 金铲铲大作战
-最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `include/api/cost/*.h` 的公开成本 helper 声明。
@@ -40,8 +38,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def _compile_and_run(source: str) -> None:
     """编译并运行 C++ 成本接口测试片段。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 使用 `g++` 编译临时源码并执行生成程序。
@@ -103,8 +99,6 @@ def _compile_and_run(source: str) -> None:
 
 
 # COST-API-001
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
 # 测试目的: 验证 `include/api/cost/Core.h` 公开 compute / memory / DMA / MAC 四种 kind，且不再残留 kind2 / kind3。
 # 使用示例: `pytest -q test/include/api/test_cost.py -k test_include_api_cost_core_exports_compute_and_memory`
 # 对应功能实现文件路径: `include/api/cost/Core.h`
@@ -148,8 +142,6 @@ int main() {
 
 
 # COST-API-002
-# 创建者: 金铲铲大作战
-# 最后一次更改: 守护最好的爱莉希雅
 # 测试目的: 验证 `include/api/cost/Kernel.h` 的 add / reduce_max / matmul 成本接口可独立实例化并返回 `S_INT`。
 # 使用示例: `pytest -q test/include/api/test_cost.py -k test_include_api_cost_kernel_signatures_compile`
 # 对应功能实现文件路径: `include/api/cost/Kernel.h`
@@ -200,8 +192,6 @@ int main() {
 
 
 # COST-API-003
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
 # 测试目的: 验证 `include/api/cost/Dma.h` 的 copy / slice / deslice 成本接口可独立实例化并返回 `S_INT`。
 # 使用示例: `pytest -q test/include/api/test_cost.py -k test_include_api_cost_dma_signatures_compile`
 # 对应功能实现文件路径: `include/api/cost/Dma.h`

@@ -17,12 +17,10 @@ API 列表:
 - #include "include/npu_demo/cost/Kernel.h"
 - S_INT add_cost = npu_demo::cost::add<GM, float, float, npu_demo::compute>(out, lhs, rhs);
 
-创建者: 金铲铲大作战
-最后修改人: 守护最好的爱莉希雅
 
 关联文件:
 - spec: spec/include/api/cost/Kernel.md
-- test: test/include/npu_demo/test_cost.py
+- test: test/include/npu_demo/cost.py
 - 功能实现: include/npu_demo/cost/Kernel.h
 */
 
@@ -52,12 +50,10 @@ inline S_INT zero_cost(Args&&...) {
 使用示例:
 - S_INT add_cost = npu_demo::cost::add<GM, float, float, npu_demo::compute>(out, lhs, rhs);
 
-创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/cost/Kernel.md
-- test: test/include/npu_demo/test_cost.py
+- test: test/include/npu_demo/cost.py
 - 功能实现: include/npu_demo/cost/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, CostKind Kind>
@@ -96,12 +92,10 @@ inline S_INT truediv(
 使用示例:
 - S_INT eq_cost = npu_demo::cost::eq<GM, float, bool, npu_demo::compute>(out, lhs, rhs);
 
-创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/cost/Kernel.md
-- test: test/include/npu_demo/test_cost.py
+- test: test/include/npu_demo/cost.py
 - 功能实现: include/npu_demo/cost/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, CostKind Kind>
@@ -155,12 +149,10 @@ inline S_INT ge(
 - S_INT exp_cost = npu_demo::cost::exp<GM, float, float, npu_demo::compute>(out, input);
 - S_INT max_cost = npu_demo::cost::reduce_max<GM, float, float, npu_demo::memory>(out, input, 1);
 
-创建者: 金铲铲大作战
-最后修改人: 守护最好的爱莉希雅
 
 关联文件:
 - spec: spec/include/api/cost/Kernel.md
-- test: test/include/npu_demo/test_cost.py
+- test: test/include/npu_demo/cost.py
 - 功能实现: include/npu_demo/cost/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, CostKind Kind>
@@ -195,12 +187,10 @@ inline S_INT reduce_max(const Memory<Space, OutType>& out, const Memory<Space, I
 使用示例:
 - S_INT matmul_cost = npu_demo::cost::matmul<TSM, TSM, TLM1, float, float, float, npu_demo::memory>(out, lhs, rhs);
 
-创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/cost/Kernel.md
-- test: test/include/npu_demo/test_cost.py
+- test: test/include/npu_demo/cost.py
 - 功能实现: include/npu_demo/cost/Kernel.h
 */
 template <

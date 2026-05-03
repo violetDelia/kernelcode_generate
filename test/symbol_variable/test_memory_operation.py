@@ -1,7 +1,5 @@
 """memory operation tests.
 
-创建者: 金铲铲大作战
-最后一次更改: OpenAI Codex
 
 功能说明:
 - 覆盖 Memory 的逐元素算术、比较和 helper 边界。

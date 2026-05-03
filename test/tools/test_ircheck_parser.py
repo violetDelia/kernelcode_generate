@@ -1,7 +1,5 @@
 """ircheck parser tests.
 
-创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 kernel_gen/tools/ircheck.py 的 case 文件解析行为与错误短语约束。
@@ -42,10 +40,6 @@ from kernel_gen.tools.ircheck import (
 
 
 # TC-IRCHECK-PARSE-001
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
-# 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
 # 功能说明: 验证可稳定解析 COMPILE_ARGS/CHECK 指令并提取输入 IR 正文。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_basic
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -76,10 +70,6 @@ builtin.module {
 
 
 # TC-IRCHECK-PARSE-002
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
-# 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
 # 功能说明: 验证缺失 COMPILE_ARGS 会报告稳定错误短语。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_missing_compile_args_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -97,10 +87,6 @@ builtin.module {}
 
 
 # TC-IRCHECK-PARSE-003
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
-# 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
 # 功能说明: 验证重复 COMPILE_ARGS 会报告稳定错误短语。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_duplicate_compile_args_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -119,10 +105,6 @@ builtin.module {}
 
 
 # TC-IRCHECK-PARSE-004
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
-# 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
 # 功能说明: 验证缺失输入 IR 正文会报告稳定错误短语。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_missing_input_ir_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -139,10 +121,6 @@ def test_parse_ircheck_file_missing_input_ir_fails(tmp_path: Path) -> None:
 
 
 # TC-IRCHECK-PARSE-005
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-09 03:00:50 +0800
-# 最近一次运行成功时间: 2026-04-09 03:00:50 +0800
 # 功能说明: 验证 COMPILE_ARGS 冒号后文本为空时必须解析失败并报告稳定错误短语。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_empty_compile_args_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -161,10 +139,6 @@ builtin.module {}
 
 
 # TC-IRCHECK-PARSE-006
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-09 03:00:50 +0800
-# 最近一次运行成功时间: 2026-04-09 03:00:50 +0800
 # 功能说明: 验证 CHECK/CHECK-NOT/CHECK-NEXT 冒号后文本为空时必须解析失败并报告稳定错误短语。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_empty_check_text_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -195,10 +169,6 @@ builtin.module {{
 
 
 # TC-IRCHECK-PARSE-007
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-09 03:00:50 +0800
-# 最近一次运行成功时间: 2026-04-09 03:00:50 +0800
 # 功能说明: 验证 CHECK-NEXT 不得作为第一条 positive check；否则必须解析失败。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_check_next_first_positive_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -222,10 +192,6 @@ builtin.module {
 
 
 # TC-IRCHECK-PARSE-007A
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
-# 最近一次运行成功时间: 待本轮验证后补充
 # 功能说明: 验证旧 CHECK-REGEX 系列语法不再兼容，必须直接解析失败。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_legacy_regex_directives_fail
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -256,10 +222,6 @@ builtin.module {{
 
 
 # TC-IRCHECK-PARSE-008
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-10 13:10:00 +0800
-# 最近一次运行成功时间: 2026-04-10 13:10:00 +0800
 # 功能说明: 验证 parse_ircheck_file 仅支持单 case；出现 `// -----` 多 case 分隔符时必须解析失败。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_rejects_multi_case_separator
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -283,10 +245,6 @@ builtin.module {}
 
 
 # TC-IRCHECK-PARSE-009
-# 创建者: 朽木露琪亚
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
-# 最近一次运行成功时间: 待本轮验证后补充
 # 功能说明: 验证 parser 可识别 CHECK/CHECK-NEXT/CHECK-NOT 里的变量定义与引用。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_variable_directives
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -320,10 +278,6 @@ builtin.module {
 
 
 # TC-IRCHECK-PARSE-010
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 14:10 +0800
-# 最近一次运行成功时间: 2026-04-14 14:10 +0800
 # 功能说明: 验证非法变量 regex 写法会返回稳定错误短语 `invalid regex check`。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_invalid_variable_regex_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -346,10 +300,6 @@ builtin.module {
 
 
 # TC-IRCHECK-PARSE-010A
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 15:05 +0800
-# 最近一次运行成功时间: 2026-04-14 15:05 +0800
 # 功能说明: 验证未闭合的转义 `[[` 变量片段也会返回稳定错误短语 `invalid regex check`。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_unclosed_escaped_variable_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -372,10 +322,6 @@ builtin.module {
 
 
 # TC-IRCHECK-PARSE-010B
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 21:02 +0800
-# 最近一次运行成功时间: 2026-04-14 21:02 +0800
 # 功能说明: 验证按 spec 转义的字面量 `[[...]]` 不会被 parser 误判成非法变量片段。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_escaped_double_brackets_literal_ok
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -399,10 +345,6 @@ builtin.module attributes {note = "[[LIT]]"} {
 
 
 # TC-IRCHECK-PARSE-010C
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 21:08 +0800
-# 最近一次运行成功时间: 2026-04-14 21:08 +0800
 # 功能说明: 验证按 spec 转义的字面量 `[[` 前缀不会被 parser 误判成非法变量片段。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_escaped_double_open_brackets_prefix_ok
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -426,10 +368,6 @@ builtin.module attributes {note = "[["} {
 
 
 # TC-IRCHECK-PARSE-011
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 14:10 +0800
-# 最近一次运行成功时间: 2026-04-14 14:10 +0800
 # 功能说明: 验证引用未定义变量会返回稳定错误短语 `undefined regex variable`。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_undefined_variable_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -452,10 +390,6 @@ builtin.module {
 
 
 # TC-IRCHECK-PARSE-012
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 14:10 +0800
-# 最近一次运行成功时间: 2026-04-14 14:10 +0800
 # 功能说明: 验证重复定义变量与 CHECK-NOT 定义变量都会返回稳定错误短语。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_duplicate_or_not_variable_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -493,8 +427,6 @@ builtin.module {{
 
 
 # TC-IRCHECK-PARSE-013
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
 # 功能说明: 验证多 case 文本执行时，第二个 case 失败会保留 `[case 2]` 后缀。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_run_ircheck_text_multi_case_failure_reports_case_suffix
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -520,8 +452,6 @@ builtin.module {}
 
 
 # TC-IRCHECK-PARSE-014
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
 # 功能说明: 验证 run_ircheck_text 遇到单独 case 分隔符时会映射为公开解析失败口径。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_run_ircheck_text_separator_only_maps_to_parse_error
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -535,8 +465,6 @@ def test_run_ircheck_text_separator_only_maps_to_parse_error() -> None:
 
 
 # TC-IRCHECK-PARSE-015
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
 # 功能说明: 验证 run_ircheck_file 对缺失文件返回公开解析失败口径。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_run_ircheck_file_missing_file_maps_to_parse_error
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py

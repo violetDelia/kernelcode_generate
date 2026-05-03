@@ -7,12 +7,10 @@
 - #include "include/npu_demo/cost/Core.h"
 - npu_demo::cost::CostKind kind = npu_demo::memory;
 
-创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/cost/Core.md
-- test: test/include/npu_demo/test_cost.py
+- test: test/include/npu_demo/cost.py
 - 功能实现: include/npu_demo/cost/Core.h
 */
 

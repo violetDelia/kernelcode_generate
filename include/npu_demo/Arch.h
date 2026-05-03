@@ -27,12 +27,10 @@ helper 清单:
 - #include "include/npu_demo/Arch.h"
 - Status status = npu_demo::launch<1, 4, 1, 0>(kernel_body, output);
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
 
@@ -77,12 +75,10 @@ static constexpr long long kTlm3MemorySize = 512;
 使用示例:
 - npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&ctx);
 
-创建者: OpenAI Codex
-最后修改人: OpenAI Codex
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
 inline thread_local const KernelContext* active_kernel_context = nullptr;
@@ -94,12 +90,10 @@ inline thread_local const KernelContext* active_kernel_context = nullptr;
 使用示例:
 - npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&ctx);
 
-创建者: OpenAI Codex
-最后修改人: OpenAI Codex
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
 class ScopedActiveKernelContext {
@@ -111,12 +105,10 @@ public:
     使用示例:
     - npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&ctx);
 
-    创建者: OpenAI Codex
-    最后修改人: OpenAI Codex
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
     explicit ScopedActiveKernelContext(const KernelContext* ctx)
@@ -131,12 +123,10 @@ public:
     使用示例:
     - { npu_demo::detail::ScopedActiveKernelContext scoped_ctx(&ctx); }
 
-    创建者: OpenAI Codex
-    最后修改人: OpenAI Codex
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
     ~ScopedActiveKernelContext() {
@@ -157,12 +147,10 @@ private:
 使用示例:
 - auto tsm = npu_demo::detail::make_linear_memory<TSM, float>(24576);
 
-创建者: 小李飞刀
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
 template <MemorySpace Space, typename T>
@@ -179,12 +167,10 @@ inline Memory<Space, T> make_linear_memory(long long size) {
 使用示例:
 - npu_demo::detail::throw_zero_sized_memory("sm_memory_size=0");
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
 inline void throw_zero_sized_memory(const char* message) {
@@ -198,12 +184,10 @@ inline void throw_zero_sized_memory(const char* message) {
 使用示例:
 - auto barrier = std::make_shared<npu_demo::detail::LaunchBarrierState>(4);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
 class LaunchBarrierState {
@@ -215,12 +199,10 @@ public:
     使用示例:
     - npu_demo::detail::LaunchBarrierState barrier(4);
 
-    创建者: 小李飞刀
-    最后修改人: 小李飞刀
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
     explicit LaunchBarrierState(long long participants)
@@ -233,12 +215,10 @@ public:
     使用示例:
     - barrier.arrive_and_wait();
 
-    创建者: 小李飞刀
-    最后修改人: 小李飞刀
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
     inline void arrive_and_wait() {
@@ -273,12 +253,10 @@ private:
 - long long tid = ctx.thread_id();
 - ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
 class KernelContext {
@@ -290,12 +268,10 @@ public:
     使用示例:
     - npu_demo::KernelContext ctx;
 
-    创建者: 小李飞刀
-    最后修改人: 小李飞刀
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
     KernelContext()
@@ -314,12 +290,10 @@ public:
     使用示例:
     - npu_demo::KernelContext ctx(0, 1, 2, 4, 0, 1, barrier);
 
-    创建者: 小李飞刀
-    最后修改人: 小李飞刀
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
     KernelContext(
@@ -345,12 +319,10 @@ public:
     使用示例:
     - long long bid = ctx.block_id();
 
-    创建者: 小李飞刀
-    最后修改人: 小李飞刀
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
     long long block_id() const {
@@ -364,12 +336,10 @@ public:
     使用示例:
     - long long bnum = ctx.block_num();
 
-    创建者: 小李飞刀
-    最后修改人: 小李飞刀
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
     long long block_num() const {
@@ -383,12 +353,10 @@ public:
     使用示例:
     - long long tid = ctx.thread_id();
 
-    创建者: 小李飞刀
-    最后修改人: 小李飞刀
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
     long long thread_id() const {
@@ -402,12 +370,10 @@ public:
     使用示例:
     - long long tnum = ctx.thread_num();
 
-    创建者: 小李飞刀
-    最后修改人: 小李飞刀
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
     long long thread_num() const {
@@ -421,12 +387,10 @@ public:
     使用示例:
     - long long sid = ctx.subthread_id();
 
-    创建者: 小李飞刀
-    最后修改人: 小李飞刀
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
     long long subthread_id() const {
@@ -440,12 +404,10 @@ public:
     使用示例:
     - long long snum = ctx.subthread_num();
 
-    创建者: 小李飞刀
-    最后修改人: 小李飞刀
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
     long long subthread_num() const {
@@ -459,12 +421,10 @@ public:
     使用示例:
     - ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
 
-    创建者: 小李飞刀
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
     inline void barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const {
@@ -522,12 +482,10 @@ public:
     使用示例:
     - auto tsm = ctx.get_dynamic_memory<TSM, float>();
 
-    创建者: 小李飞刀
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/npu_demo/kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
     template <MemorySpace Space, typename T>
@@ -573,12 +531,10 @@ private:
 使用示例:
 - const npu_demo::KernelContext& ctx = npu_demo::current_kernel_context();
 
-创建者: OpenAI Codex
-最后修改人: OpenAI Codex
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
 inline const KernelContext& current_kernel_context() {
@@ -593,12 +549,10 @@ inline const KernelContext& current_kernel_context() {
 使用示例:
 - S_INT tid = npu_demo::thread_id();
 
-创建者: OpenAI Codex
-最后修改人: OpenAI Codex
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
 inline S_INT thread_id() {
@@ -612,12 +566,10 @@ inline S_INT thread_id() {
 使用示例:
 - S_INT tnum = npu_demo::thread_num();
 
-创建者: OpenAI Codex
-最后修改人: OpenAI Codex
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
 inline S_INT thread_num() {
@@ -632,12 +584,10 @@ inline S_INT thread_num() {
 使用示例:
 - Memory<TSM, float> tsm = npu_demo::get_dynamic_memory<TSM>();
 
-创建者: OpenAI Codex
-最后修改人: OpenAI Codex
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
 template <MemorySpace Space>
@@ -652,12 +602,10 @@ inline ::DynamicMemoryRef<Space> get_dynamic_memory() {
 使用示例:
 - npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
 
-创建者: 大闸蟹
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/npu_demo/kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
 inline void barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) {
@@ -673,12 +621,10 @@ inline void barrier(std::initializer_list<BarrierVisibility> visibility, Barrier
 使用示例:
 - Memory<TSM, float> tsm = get_dynamic_memory<TSM>();
 
-创建者: OpenAI Codex
-最后修改人: OpenAI Codex
 
 关联文件:
 - spec: spec/include/api/Arch.md
-- test: test/include/api/test_arch.py
+- test: test/include/api/arch.py
 - 功能实现: include/npu_demo/Arch.h
 */
 template <MemorySpace Space>
@@ -692,12 +638,10 @@ inline DynamicMemoryRef<Space>::DynamicMemoryRef(const void* context)
 使用示例:
 - Memory<TSM, float> tsm = get_dynamic_memory<TSM>();
 
-创建者: OpenAI Codex
-最后修改人: OpenAI Codex
 
 关联文件:
 - spec: spec/include/api/Arch.md
-- test: test/include/api/test_arch.py
+- test: test/include/api/arch.py
 - 功能实现: include/npu_demo/Arch.h
 */
 template <MemorySpace Space>
@@ -714,12 +658,10 @@ inline DynamicMemoryRef<Space>::operator Memory<Space, T>() const {
 使用示例:
 - S_INT tid = thread_id();
 
-创建者: OpenAI Codex
-最后修改人: OpenAI Codex
 
 关联文件:
 - spec: spec/include/api/Arch.md
-- test: test/include/api/test_arch.py
+- test: test/include/api/arch.py
 - 功能实现: include/npu_demo/Arch.h
 */
 inline S_INT thread_id() {
@@ -733,12 +675,10 @@ inline S_INT thread_id() {
 使用示例:
 - S_INT tnum = thread_num();
 
-创建者: OpenAI Codex
-最后修改人: OpenAI Codex
 
 关联文件:
 - spec: spec/include/api/Arch.md
-- test: test/include/api/test_arch.py
+- test: test/include/api/arch.py
 - 功能实现: include/npu_demo/Arch.h
 */
 inline S_INT thread_num() {
@@ -753,12 +693,10 @@ inline S_INT thread_num() {
 使用示例:
 - Memory<TSM, float> tsm = get_dynamic_memory<TSM>();
 
-创建者: OpenAI Codex
-最后修改人: OpenAI Codex
 
 关联文件:
 - spec: spec/include/api/Arch.md
-- test: test/include/api/test_arch.py
+- test: test/include/api/arch.py
 - 功能实现: include/npu_demo/Arch.h
 */
 template <MemorySpace Space>
@@ -774,12 +712,10 @@ inline DynamicMemoryRef<Space> get_dynamic_memory() {
 使用示例:
 - Status status = launch<1, 4, 1, 0>(kernel_body, output);
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Arch.md
-- test: test/include/api/test_arch.py
+- test: test/include/api/arch.py
 - 功能实现: include/npu_demo/Arch.h
 */
 template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args>

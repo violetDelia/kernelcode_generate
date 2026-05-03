@@ -1,7 +1,5 @@
 """Operation API 入口。
 
-创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
 
 功能说明:
 - 暴露 nn 顶层稳定子集：逐元素算术、比较与 `matmul`。
@@ -40,10 +38,10 @@ API 列表:
 - spec: spec/operation/nn.md
 - spec: spec/operation/dma.md
 - spec: spec/operation/scf.md
-- test: test/operation/test_operation_nn.py
-- test: test/operation/test_operation_dma.py
-- test: test/operation/test_operation_scf.py
-- test: test/operation/test_operation_package_api.py
+- test: test/operation/nn/test_package.py
+- test: test/operation/test_dma.py
+- test: test/operation/test_scf.py
+- test: test/operation/test_package.py
 - 功能实现: kernel_gen/operation/nn/__init__.py
 - 功能实现: kernel_gen/operation/dma.py
 - 功能实现: kernel_gen/operation/scf.py

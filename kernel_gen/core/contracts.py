@@ -1,15 +1,13 @@
 """Core reusable contracts.
 
-创建者: 金铲铲大作战
-最后一次更改: 榕
 
 功能说明:
-- 提供 kernel_gen 内部可复用的类型、shape、dtype、错误与 verifier 辅助逻辑。
+- 提供 kernel_gen 内部可复用的类型、shape、dtype 与 verifier 辅助逻辑。
+- 错误模板文字统一从 `kernel_gen.core.error` 读取。
 - 该模块仅承载公共实现，不改变 dialect/operation/symbol_variable 的对外合同。
 
 API 列表:
-- `_ERROR_TEMPLATE: str`
-- `raise_verify_error(scene: str, expected: str, *, actual: str = _ERROR_ACTUAL, action: str = _ERROR_ACTION) -> None`
+- `raise_verify_error(scene: str, expected: str, *, actual: str = ERROR_ACTUAL, action: str = ERROR_ACTION) -> None`
 - `verify_memory_type(value: Attribute, field_name: str, *, scene: str) -> NnMemoryType`
 - `verify_i64_attr(attr: IntegerAttr, field_name: str, *, scene: str) -> int`
 - `verify_i64_attr_range(attr: IntegerAttr, field_name: str, *, min_value: int, max_value: int, scene: str) -> int`
@@ -29,7 +27,7 @@ API 列表:
 
 关联文件:
 - spec: spec/core/contracts.md
-- test: test/common/test_contracts.py
+- test: test/core/test_contracts.py
 - 功能实现: kernel_gen/core/contracts.py
 """
 
@@ -41,10 +39,7 @@ from xdsl.dialects.builtin import IntAttr, IntegerAttr, IntegerType, StringAttr
 from xdsl.ir import Attribute
 from xdsl.utils.exceptions import VerifyException
 
-_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
-
-_ERROR_ACTION = "请按接口约束传参"
-_ERROR_ACTUAL = "不满足期望"
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
 
 __all__ = [
     "build_contiguous_stride",
@@ -59,7 +54,6 @@ __all__ = [
     "verify_i64_attr_range",
     "verify_i64_attr_value",
     "verify_memory_type",
-    "_ERROR_TEMPLATE",
 ]
 
 
@@ -67,13 +61,11 @@ def raise_verify_error(
     scene: str,
     expected: str,
     *,
-    actual: str = _ERROR_ACTUAL,
-    action: str = _ERROR_ACTION,
+    actual: str = ERROR_ACTUAL,
+    action: str = ERROR_ACTION,
 ) -> None:
     """统一抛出 verifier 错误。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 统一 kernel_gen 内部 verifier 的错误模板拼接。
@@ -84,12 +76,12 @@ def raise_verify_error(
 
     关联文件:
     - spec: spec/core/contracts.md
-    - test: test/common/test_contracts.py
+    - test: test/core/test_contracts.py
     - 功能实现: kernel_gen/core/contracts.py
     """
 
     raise VerifyException(
-        _ERROR_TEMPLATE.format(
+        ERROR_TEMPLATE.format(
             scene=scene,
             expected=expected,
             actual=actual,
@@ -101,8 +93,6 @@ def raise_verify_error(
 def verify_memory_type(value: Attribute, field_name: str, *, scene: str) -> "NnMemoryType":
     """校验并返回 nn.memory type。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 确认输入为 `NnMemoryType`。
@@ -113,7 +103,7 @@ def verify_memory_type(value: Attribute, field_name: str, *, scene: str) -> "NnM
 
     关联文件:
     - spec: spec/core/contracts.md
-    - test: test/common/test_contracts.py
+    - test: test/core/test_contracts.py
     - 功能实现: kernel_gen/core/contracts.py
     """
 
@@ -128,8 +118,6 @@ def verify_memory_type(value: Attribute, field_name: str, *, scene: str) -> "NnM
 def verify_i64_attr(attr: IntegerAttr, field_name: str, *, scene: str) -> int:
     """校验 i64 属性并返回整数值。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验属性类型为 i64。
@@ -140,7 +128,7 @@ def verify_i64_attr(attr: IntegerAttr, field_name: str, *, scene: str) -> int:
 
     关联文件:
     - spec: spec/core/contracts.md
-    - test: test/common/test_contracts.py
+    - test: test/core/test_contracts.py
     - 功能实现: kernel_gen/core/contracts.py
     """
 
@@ -163,8 +151,6 @@ def verify_i64_attr_range(
 ) -> int:
     """校验 i64 属性并限制在闭区间。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 先要求属性为 i64。
@@ -175,7 +161,7 @@ def verify_i64_attr_range(
 
     关联文件:
     - spec: spec/core/contracts.md
-    - test: test/common/test_contracts.py
+    - test: test/core/test_contracts.py
     - 功能实现: kernel_gen/core/contracts.py
     """
 
@@ -191,8 +177,6 @@ def verify_i64_attr_range(
 def verify_i64_attr_value(attr: IntegerAttr, field_name: str, *, allow_zero: bool, scene: str) -> int:
     """校验 i64 属性并施加正负数约束。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 先要求属性为 i64。
@@ -203,7 +187,7 @@ def verify_i64_attr_value(attr: IntegerAttr, field_name: str, *, allow_zero: boo
 
     关联文件:
     - spec: spec/core/contracts.md
-    - test: test/common/test_contracts.py
+    - test: test/core/test_contracts.py
     - 功能实现: kernel_gen/core/contracts.py
     """
 
@@ -225,8 +209,6 @@ def verify_i64_attr_group(
 ) -> list[int]:
     """校验一组 i64 属性并返回整数列表。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 统一校验属性类型为 i64。
@@ -238,7 +220,7 @@ def verify_i64_attr_group(
 
     关联文件:
     - spec: spec/core/contracts.md
-    - test: test/common/test_contracts.py
+    - test: test/core/test_contracts.py
     - 功能实现: kernel_gen/core/contracts.py
     """
 
@@ -263,8 +245,6 @@ def verify_i64_attr_group(
 def collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
     """提取静态整数维度列表。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 当所有维度均为 `IntAttr` 时返回整数列表。
@@ -275,7 +255,7 @@ def collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
 
     关联文件:
     - spec: spec/core/contracts.md
-    - test: test/common/test_contracts.py
+    - test: test/core/test_contracts.py
     - 功能实现: kernel_gen/core/contracts.py
     """
 
@@ -290,8 +270,6 @@ def collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
 def build_contiguous_stride(shape: Sequence[int]) -> list[int]:
     """根据静态 shape 构造连续布局 stride。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 采用行主序布局，从尾轴向前累计 stride。
@@ -301,7 +279,7 @@ def build_contiguous_stride(shape: Sequence[int]) -> list[int]:
 
     关联文件:
     - spec: spec/core/contracts.md
-    - test: test/common/test_contracts.py
+    - test: test/core/test_contracts.py
     - 功能实现: kernel_gen/core/contracts.py
     """
 
@@ -317,8 +295,6 @@ def build_contiguous_stride(shape: Sequence[int]) -> list[int]:
 def dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     """判断两个维度是否语义一致。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 支持 IntAttr 与 StringAttr 的值一致性判断。
@@ -329,7 +305,7 @@ def dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
 
     关联文件:
     - spec: spec/core/contracts.md
-    - test: test/common/test_contracts.py
+    - test: test/core/test_contracts.py
     - 功能实现: kernel_gen/core/contracts.py
     """
 
@@ -343,8 +319,6 @@ def dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
 def public_dim_values(shape: SymbolShape) -> list[int | str]:
     """按 SymbolDim.get_value() 生成公开比较值序列。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 静态分量返回整数，动态分量返回稳定字符串。
@@ -355,7 +329,7 @@ def public_dim_values(shape: SymbolShape) -> list[int | str]:
 
     关联文件:
     - spec: spec/core/contracts.md
-    - test: test/common/test_contracts.py
+    - test: test/core/test_contracts.py
     - 功能实现: kernel_gen/core/contracts.py
     """
 
@@ -372,8 +346,6 @@ def public_dim_values(shape: SymbolShape) -> list[int | str]:
 def default_stride(shape: SymbolShape) -> SymbolShape:
     """按连续行主序生成默认 stride。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 最后一维默认 stride 为 1。
@@ -385,7 +357,7 @@ def default_stride(shape: SymbolShape) -> SymbolShape:
 
     关联文件:
     - spec: spec/core/contracts.md
-    - test: test/common/test_contracts.py
+    - test: test/core/test_contracts.py
     - 功能实现: kernel_gen/core/contracts.py
     """
 
@@ -404,8 +376,6 @@ def default_stride(shape: SymbolShape) -> SymbolShape:
 def shape_numel(shape: SymbolShape) -> SymbolDim:
     """计算 shape 的元素总数表达式。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 静态维度返回静态乘积。
@@ -416,7 +386,7 @@ def shape_numel(shape: SymbolShape) -> SymbolDim:
 
     关联文件:
     - spec: spec/core/contracts.md
-    - test: test/common/test_contracts.py
+    - test: test/core/test_contracts.py
     - 功能实现: kernel_gen/core/contracts.py
     """
 

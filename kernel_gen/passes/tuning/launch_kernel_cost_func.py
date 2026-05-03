@@ -1,31 +1,29 @@
 """launch-kernel-cost-func tuning pass.
 
-创建者: 小李飞刀
-最后一次更改: OpenAI Codex
 
 功能说明:
 - 为 module 中被 `arch.launch` 引用的 device function 生成 sibling cost function。
 - 在 cost function 中保留 `symbol.for` 结构，复制必要 helper op，并为受支持的 `dma/kernel/arch` op 生成 `tuner.cost` 与 `symbol.add` 累计链。
-- 保持原 host wrapper 与原 device function 不变；当前文件不公开 helper 函数或 helper 类，重写细节只属于 `LaunchKernelCostFuncPass.run(...)` 内部实现。
+- 保持原 host wrapper 与原 device function 不变；当前文件不公开 helper 函数或 helper 类，重写细节只属于 `LaunchKernelCostFuncPass.apply(...)` 内部实现。
 
 API 列表:
 - `class LaunchKernelCostFuncPass(cost_kind: str = "DMA|MAC", fold: bool = True)`
 - `LaunchKernelCostFuncPass.from_options(options: dict[str, str]) -> LaunchKernelCostFuncPass`
-- `LaunchKernelCostFuncPass.run(module: object) -> ModuleOp`
 
 使用示例:
 - from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
-- module = LaunchKernelCostFuncPass().run(module)
-- module = LaunchKernelCostFuncPass(cost_kind="compute|latency|bandwidth").run(module)
+- LaunchKernelCostFuncPass().apply(Context(), module)
+- LaunchKernelCostFuncPass(cost_kind="compute|latency|bandwidth").apply(Context(), module)
 
 关联文件:
 - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
-- test: [test/pass/test_launch_kernel_cost_func.py](../../../test/pass/test_launch_kernel_cost_func.py)
+- test: [test/passes/tuning/test_launch_kernel_cost_func.py](../../../test/passes/tuning/test_launch_kernel_cost_func.py)
 - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
 """
 
 from __future__ import annotations
 
+from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp, StringAttr
 from xdsl.ir import Block, Region, SSAValue
@@ -60,8 +58,6 @@ INVALID_COST_KIND_DETAIL = "cost_kind must be a non-empty '|' separated list of 
 class LaunchKernelCostFuncPass(Pass):
     """launch-kernel-cost-func pass。
 
-    创建者: 小李飞刀
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 固定公开名称为 `launch-kernel-cost-func`。
@@ -70,11 +66,11 @@ class LaunchKernelCostFuncPass(Pass):
 
     使用示例:
     - from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
-    - module = LaunchKernelCostFuncPass(cost_kind="compute|memory|latency").run(module)
+    - LaunchKernelCostFuncPass(cost_kind="compute|memory|latency").apply(Context(), module)
 
     关联文件:
     - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](../../../test/pass/test_launch_kernel_cost_func.py)
+    - test: [test/passes/tuning/test_launch_kernel_cost_func.py](../../../test/passes/tuning/test_launch_kernel_cost_func.py)
     - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
     """
 
@@ -87,8 +83,6 @@ class LaunchKernelCostFuncPass(Pass):
     ) -> None:
         """初始化 pass 选项。
 
-        创建者: 小李飞刀
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 记录公开 `cost_kind` 字符串。
@@ -102,7 +96,7 @@ class LaunchKernelCostFuncPass(Pass):
 
         关联文件:
         - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
-        - test: [test/pass/test_launch_kernel_cost_func.py](../../../test/pass/test_launch_kernel_cost_func.py)
+        - test: [test/passes/tuning/test_launch_kernel_cost_func.py](../../../test/passes/tuning/test_launch_kernel_cost_func.py)
         - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
         """
 
@@ -128,8 +122,6 @@ class LaunchKernelCostFuncPass(Pass):
     ) -> "LaunchKernelCostFuncPass":
         """从 registry options 构造 pass。
 
-        创建者: 小李飞刀
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 支持 `{"cost_kind": "compute|memory|latency"}` 形式的 registry 入口。
@@ -142,7 +134,7 @@ class LaunchKernelCostFuncPass(Pass):
 
         关联文件:
         - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
-        - test: [test/pass/test_launch_kernel_cost_func.py](../../../test/pass/test_launch_kernel_cost_func.py)
+        - test: [test/passes/tuning/test_launch_kernel_cost_func.py](../../../test/passes/tuning/test_launch_kernel_cost_func.py)
         - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
         """
 
@@ -154,26 +146,26 @@ class LaunchKernelCostFuncPass(Pass):
             )
         return cls(cost_kind=options.get("cost_kind", DEFAULT_COST_KIND))
 
-    def run(self: "LaunchKernelCostFuncPass", module: object) -> ModuleOp:
+    def apply(self: "LaunchKernelCostFuncPass", ctx: Context, module: ModuleOp) -> None:
         """执行 launch-kernel-cost-func pass。
 
-        创建者: 小李飞刀
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 校验 module 输入与 `arch.launch -> device func` 关系。
         - 为每个 unique device callee 和每个请求的 `cost_kind` 生成 sibling cost function。
         - 若发现非法 `cost_kind`、callee 缺失、metadata attr 冲突、非支持 op 或重名 cost function，显式失败。
+        - 公开执行入口固定为 xdsl `ModulePass.apply(ctx, module)`，不再提供单 pass `run(...)` 兼容入口。
 
         使用示例:
-        - module = LaunchKernelCostFuncPass(cost_kind="compute|memory").run(module)
+        - LaunchKernelCostFuncPass(cost_kind="compute|memory").apply(Context(), module)
 
         关联文件:
         - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
-        - test: [test/pass/test_launch_kernel_cost_func.py](../../../test/pass/test_launch_kernel_cost_func.py)
+        - test: [test/passes/tuning/test_launch_kernel_cost_func.py](../../../test/passes/tuning/test_launch_kernel_cost_func.py)
         - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
         """
 
+        _ = ctx
         if not isinstance(module, ModuleOp):
             raise_pass_contract_error("LaunchKernelCostFuncError", "module must be builtin.module")
 
@@ -197,7 +189,7 @@ class LaunchKernelCostFuncPass(Pass):
             seen_device_names.add(callee_name)
             device_funcs.append(device_func)
         if not device_funcs:
-            return module
+            return
 
         existing_names = {
             op.sym_name.data for op in module.ops if isinstance(op, func.FuncOp)
@@ -400,8 +392,6 @@ class LaunchKernelCostFuncPass(Pass):
                 verify_generated_ops([cost_func])
                 module.body.block.insert_op_after(cost_func, anchor)
                 anchor = cost_func
-
-        return module
 
 
 __all__ = ["LaunchKernelCostFuncPass"]

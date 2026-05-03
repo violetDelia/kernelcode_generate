@@ -1,7 +1,5 @@
 """attach-arch-information pass.
 
-创建者: 金铲铲大作战
-最后一次更改: jcc你莫辜负
 
 功能说明:
 - 为 `builtin.module` 中的入口 `func.func` 补齐 `launch_block / launch_thread / launch_subthread / shared_memory_size`。
@@ -11,15 +9,14 @@
 API 列表:
 - `class AttachArchInformationPass(target: str = "npu_demo")`
 - `AttachArchInformationPass.from_options(options: dict[str, str]) -> AttachArchInformationPass`
-- `AttachArchInformationPass.run(module: object) -> ModuleOp`
 
 使用示例:
 - from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
-- module = AttachArchInformationPass(target="npu_demo").run(module)
+- AttachArchInformationPass(target="npu_demo").apply(Context(), module)
 
 关联文件:
 - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
-- test: [test/pass/test_attach_arch_information.py](../../test/pass/test_attach_arch_information.py)
+- test: [test/passes/test_attach_arch_information.py](../../test/passes/test_attach_arch_information.py)
 - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
 """
 
@@ -29,31 +26,28 @@ from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import IntAttr, IntegerAttr, ModuleOp, StringAttr
-from xdsl.passes import ModulePass
 
 from kernel_gen.passes.pass_manager import Pass
 from kernel_gen.target import registry as target_registry
 
 
-class AttachArchInformationPass(Pass, ModulePass):
+class AttachArchInformationPass(Pass):
     """attach-arch-information pass。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 固定公开名称为 `attach-arch-information`。
     - 为入口 `func.func` 从 target registry 补齐 launch extent 与 `shared_memory_size`。
-    - 公开业务入口固定为 `run(module)`；`apply(ctx, module)` 仅保留给 xdsl `ModulePass` 协议。
+    - 公开执行入口固定为 xdsl `ModulePass.apply(ctx, module)`。
 
     使用示例:
     - from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
-    - module = AttachArchInformationPass(target="npu_demo").run(module)
+    - AttachArchInformationPass(target="npu_demo").apply(Context(), module)
     - AttachArchInformationPass.from_options({"target": "npu_demo"})
 
     关联文件:
     - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
-    - test: [test/pass/test_attach_arch_information.py](../../test/pass/test_attach_arch_information.py)
+    - test: [test/passes/test_attach_arch_information.py](../../test/passes/test_attach_arch_information.py)
     - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
     """
 
@@ -62,8 +56,6 @@ class AttachArchInformationPass(Pass, ModulePass):
     def __init__(self: "AttachArchInformationPass", target: str = "npu_demo", fold: bool = True) -> None:
         """初始化 attach-arch-information pass。
 
-        创建者: 金铲铲大作战
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 记录当前 attach 的 target 名称。
@@ -77,7 +69,7 @@ class AttachArchInformationPass(Pass, ModulePass):
 
         关联文件:
         - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
-        - test: [test/pass/test_attach_arch_information.py](../../test/pass/test_attach_arch_information.py)
+        - test: [test/passes/test_attach_arch_information.py](../../test/passes/test_attach_arch_information.py)
         - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
         """
 
@@ -90,8 +82,6 @@ class AttachArchInformationPass(Pass, ModulePass):
     ) -> "AttachArchInformationPass":
         """从 registry options 构造 pass。
 
-        创建者: 金铲铲大作战
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 支持 `{"target": "npu_demo"}` 形式的 registry 入口。
@@ -102,7 +92,7 @@ class AttachArchInformationPass(Pass, ModulePass):
 
         关联文件:
         - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
-        - test: [test/pass/test_attach_arch_information.py](../../test/pass/test_attach_arch_information.py)
+        - test: [test/passes/test_attach_arch_information.py](../../test/passes/test_attach_arch_information.py)
         - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
         """
 
@@ -119,11 +109,9 @@ class AttachArchInformationPass(Pass, ModulePass):
     def _apply_to_module(self: "AttachArchInformationPass", module: ModuleOp) -> None:
         """执行当前文件内的 attach 主逻辑。
 
-        创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
 
         功能说明:
-        - 统一承载 `run(module)` 与 xdsl `apply(ctx, module)` 共享的业务步骤。
+        - 统一承载 xdsl `apply(ctx, module)` 的业务步骤。
         - 不把当前文件内的属性检查与写回流程暴露成跨文件调用入口。
 
         使用示例:
@@ -131,7 +119,7 @@ class AttachArchInformationPass(Pass, ModulePass):
 
         关联文件:
         - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
-        - test: [test/pass/test_attach_arch_information.py](../../test/pass/test_attach_arch_information.py)
+        - test: [test/passes/test_attach_arch_information.py](../../test/passes/test_attach_arch_information.py)
         - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
         """
 
@@ -230,48 +218,20 @@ class AttachArchInformationPass(Pass, ModulePass):
     def apply(self: "AttachArchInformationPass", ctx: Context, module: ModuleOp) -> None:
         """满足 xdsl `ModulePass` 协议的 hook。
 
-        创建者: 金铲铲大作战
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 保留给 xdsl `ModulePass` 协议消费。
-        - 业务路径仍以 `run(module)` 为稳定入口。
+        - 不再提供单 pass `run(module)` 兼容入口。
 
         使用示例:
         - AttachArchInformationPass(target="npu_demo").apply(Context(), module)
 
         关联文件:
         - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
-        - test: [test/pass/test_attach_arch_information.py](../../test/pass/test_attach_arch_information.py)
+        - test: [test/passes/test_attach_arch_information.py](../../test/passes/test_attach_arch_information.py)
         - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
         """
 
         _ = ctx
         self._apply_to_module(module)
-
-    def run(self: "AttachArchInformationPass", module: object) -> ModuleOp:
-        """兼容 `PassManager` 的 `run(module)` 执行入口。
-
-        创建者: 金铲铲大作战
-        最后一次更改: jcc你莫辜负
-
-        功能说明:
-        - 保持 `Pass` 风格调用方可继续工作。
-        - 直接复用当前文件内 attach 主逻辑，不把 `apply(ctx, module)` 变成业务必经步骤。
-
-        使用示例:
-        - module = AttachArchInformationPass().run(module)
-
-        关联文件:
-        - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
-        - test: [test/pass/test_attach_arch_information.py](../../test/pass/test_attach_arch_information.py)
-        - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
-        """
-
-        if not isinstance(module, ModuleOp):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "AttachArchInformationError: module must be builtin.module")
-        self._apply_to_module(module)
-        return module
-
-
 __all__ = ["AttachArchInformationPass"]

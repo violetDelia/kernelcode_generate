@@ -1,17 +1,16 @@
 """dsl_run tool entry.
 
-创建者: 朽木露琪亚
-最后一次更改: 大闸蟹
 
 功能说明:
 - 提供 `dsl_run(func, real_args, pipeline)` 的一体化入口。
 - 负责把 DSL 函数解析为 module，按指定 pipeline 做 lowering，再生成源码并交给执行引擎真实编译/执行。
 - 只承载公开合同，不把内部 parse / pass / emit / execute 细节暴露为外部依赖。
+- 不向 DSL 函数隐式注入 operation helper；kernel 体使用的 helper 必须由调用方显式 import 或闭包绑定。
 - `dump_dir` 诊断开关统一从 `kernel_gen.core.config` 读取，不作为 `dsl_run(...)` 入参。
 
 API 列表:
-- `DslRunResult(func_op: func.FuncOp, module: ModuleOp, source: str, compiled_kernel: CompiledKernel, execute_result: ExecuteResult, runtime_args: tuple[object, ...])`
-- `dsl_run(func_obj: Callable[..., object], real_args: tuple[object, ...] | list[object], pipeline: str | PassManager) -> DslRunResult`
+- `DslRunResult(func_op: func.FuncOp, module: ModuleOp, source: str, compiled_kernel: CompiledKernel, execute_result: ExecuteResult, runtime_args: tuple[RuntimeRealArg, ...])`
+- `dsl_run(func_obj: Callable[..., DslFunctionReturn], real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg], pipeline: str | PassManager) -> DslRunResult`
 
 使用示例:
 - from kernel_gen.tools.dsl_run import dsl_run
@@ -25,93 +24,27 @@ API 列表:
 """
 
 from __future__ import annotations
-from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 import inspect
 from pathlib import Path
 import re
-from typing import Any
+from typing import Protocol, TypeAlias
 
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp
 
 from kernel_gen.core.config import get_dump_dir, get_target, restore_config, set_dump_dir, snapshot_config
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
-from kernel_gen.dsl.mlir_gen import mlir_gen
+from kernel_gen.dsl.ast.mlir_gen import mlir_gen
 from kernel_gen.execute_engine import CompiledKernel, ExecuteResult, ExecutionEngine
-from kernel_gen.operation import loop as _operation_loop
-from kernel_gen.operation import alloc as _operation_alloc
-from kernel_gen.operation import add as _operation_add
-from kernel_gen.operation import cast as _operation_cast
-from kernel_gen.operation import copy as _operation_copy
-from kernel_gen.operation import deslice as _operation_deslice
-from kernel_gen.operation import eq as _operation_eq
-from kernel_gen.operation import free as _operation_free
-from kernel_gen.operation import ge as _operation_ge
-from kernel_gen.operation import gt as _operation_gt
-from kernel_gen.operation import le as _operation_le
-from kernel_gen.operation import load as _operation_load
-from kernel_gen.operation import lt as _operation_lt
-from kernel_gen.operation import matmul as _operation_matmul
-from kernel_gen.operation import mul as _operation_mul
-from kernel_gen.operation import ne as _operation_ne
-from kernel_gen.operation import reshape as _operation_reshape
-from kernel_gen.operation import slice as _operation_slice
-from kernel_gen.operation import store as _operation_store
-from kernel_gen.operation import sub as _operation_sub
-from kernel_gen.operation import truediv as _operation_truediv
-from kernel_gen.operation import view as _operation_view
-from kernel_gen.operation.arch import (
-    BarrierScope,
-    BarrierVisibility,
-    barrier as _arch_barrier,
-    get_block_id as _arch_get_block_id,
-    get_block_num as _arch_get_block_num,
-    get_dynamic_memory as _arch_get_dynamic_memory,
-    get_subthread_id as _arch_get_subthread_id,
-    get_subthread_num as _arch_get_subthread_num,
-    get_thread_id as _arch_get_thread_id,
-    get_thread_num as _arch_get_thread_num,
-    launch_kernel as _arch_launch_kernel,
-)
-from kernel_gen.operation.nn import (
-    add as _nn_add,
-    broadcast as _nn_broadcast,
-    broadcast_to as _nn_broadcast_to,
-    conv as _nn_conv,
-    eq as _nn_eq,
-    exp as _nn_exp,
-    fc as _nn_fc,
-    floordiv as _nn_floordiv,
-    ge as _nn_ge,
-    gt as _nn_gt,
-    hard_sigmoid as _nn_hard_sigmoid,
-    le as _nn_le,
-    leaky_relu as _nn_leaky_relu,
-    lt as _nn_lt,
-    matmul as _nn_matmul,
-    mul as _nn_mul,
-    ne as _nn_ne,
-    reduce_max as _nn_reduce_max,
-    reduce_min as _nn_reduce_min,
-    reduce_sum as _nn_reduce_sum,
-    relu as _nn_relu,
-    sigmoid as _nn_sigmoid,
-    softmax as _nn_softmax,
-    sub as _nn_sub,
-    tanh as _nn_tanh,
-    transpose as _nn_transpose,
-    truediv as _nn_truediv,
-    img2col1d as _nn_img2col1d,
-    img2col2d as _nn_img2col2d,
-)
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import build_registered_pipeline, load_builtin_passes
-from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
-from kernel_gen.symbol_variable.type import Farmat, NumericType
+from kernel_gen.symbol_variable.type import NumericType
 
 RETURN_VALUE_ERROR = "DslRunReturnValueUnsupported: dsl_run only supports functions without DSL return values"
 PIPELINE_NAME_ERROR = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline'"
@@ -120,11 +53,27 @@ REAL_ARG_TYPE_ERROR = "DslRunUnsupportedRealArg: real_args only supports torch.T
 ARITY_ERROR = "DslRunArityMismatch: real_args count does not match function signature"
 NPU_DEMO_WRAPPER_ERROR = "DslRunInternalError: lowered npu_demo module must contain exactly one wrapper func with arch.launch"
 
+
+class _StringLike(Protocol):
+    """运行时 dtype 的最小字符串化协议。"""
+
+    def __str__(self) -> str:
+        """返回 dtype 文本。"""
+
+
+class RuntimeRealArg(Protocol):
+    """`dsl_run(...)` 支持的真实运行时数组参数协议。"""
+
+    shape: Iterable[int]
+    dtype: _StringLike
+
+
+DslFunctionReturn: TypeAlias = "Memory | SymbolDim | int | float | bool | str | None"
+
+
 def _sanitize_dump_component(value: str) -> str:
     """把 dump 路径片段规整为安全文件名。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 保留常见可读字符，其他字符替换为 `_`。
@@ -143,12 +92,10 @@ def _sanitize_dump_component(value: str) -> str:
 
 
 def _resolve_dump_kernel_dir(
-    func_obj: Callable[..., object],
+    func_obj: Callable[..., DslFunctionReturn],
 ) -> Path | None:
     """从公开 config 解析 `dsl_run(...)` 的 kernel 级 dump 目录。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - `kernel_gen.core.config.get_dump_dir() is None` 时禁用落盘。
@@ -174,8 +121,6 @@ def _resolve_dump_kernel_dir(
 def _write_dump_file(path: Path, content: str) -> None:
     """写入 `dsl_run(...)` 的 dump 文件。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 自动创建父目录。
@@ -194,11 +139,9 @@ def _write_dump_file(path: Path, content: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _runtime_module_name(value: object) -> str:
+def _runtime_module_name(value: RuntimeRealArg) -> str:
     """提取运行时对象的模块名，用于轻量类型判断。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 复用 `__module__` 前缀判断 `torch.Tensor` 与 `numpy.ndarray`。
@@ -216,11 +159,9 @@ def _runtime_module_name(value: object) -> str:
     return getattr(value.__class__, "__module__", "") or ""
 
 
-def _is_torch_tensor(value: object) -> bool:
+def _is_torch_tensor(value: RuntimeRealArg) -> bool:
     """判断是否为 `torch.Tensor`。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 仅按模块名前缀做轻量识别，配合执行引擎的运行时参数判定口径。
@@ -237,11 +178,9 @@ def _is_torch_tensor(value: object) -> bool:
     return _runtime_module_name(value).startswith("torch")
 
 
-def _is_numpy_array(value: object) -> bool:
+def _is_numpy_array(value: RuntimeRealArg) -> bool:
     """判断是否为 `numpy.ndarray`。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 仅按模块名前缀做轻量识别，避免在工具导入阶段强依赖 numpy 具体类。
@@ -258,62 +197,9 @@ def _is_numpy_array(value: object) -> bool:
     return _runtime_module_name(value).startswith("numpy")
 
 
-def _build_dsl_globals_table(fn: Callable[..., object]) -> dict[str, object]:
-    """为 DSL 函数解析补齐最小 helper globals。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 把 `kernel_gen.operation`、`kernel_gen.operation.arch`、`kernel_gen.operation.nn` 等 helper 以名称方式注入。
-    - 仅填充当前函数全局命名空间里缺失的名称，避免覆盖调用方已有绑定。
-    - 这一步专门收口 expectation 里未显式 import 的 `store(...)` / `barrier(...)` / `launch_kernel(...)` 等 helper。
-
-    使用示例:
-    - globals_table = _build_dsl_globals_table(add_kernel)
-
-    关联文件:
-    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
-    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
-    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
-    """
-
-    helper_globals: dict[str, object] = {}
-    fn_globals = getattr(fn, "__globals__", {}) or {}
-    helper_modules = (
-        ("operation", __import__("kernel_gen.operation", fromlist=["*"])),
-        ("arch", __import__("kernel_gen.operation.arch", fromlist=["*"])),
-        ("nn", __import__("kernel_gen.operation.nn", fromlist=["*"])),
-        ("dma", __import__("kernel_gen.operation.dma", fromlist=["*"])),
-        ("scf", __import__("kernel_gen.operation.scf", fromlist=["*"])),
-    )
-    for alias, module in helper_modules:
-        if alias not in fn_globals:
-            helper_globals[alias] = module
-        public_names = getattr(module, "__all__", None)
-        if not public_names:
-            public_names = [name for name in dir(module) if not name.startswith("_")]
-        for name in public_names:
-            if not isinstance(name, str) or name in fn_globals or name in helper_globals:
-                continue
-            helper_globals[name] = getattr(module, name)
-    helper_globals.setdefault("Memory", Memory)
-    helper_globals.setdefault("MemorySpace", MemorySpace)
-    helper_globals.setdefault("NumericType", NumericType)
-    helper_globals.setdefault("SymbolDim", SymbolDim)
-    helper_globals.setdefault("Farmat", Farmat)
-    helper_globals.setdefault("BarrierVisibility", BarrierVisibility)
-    helper_globals.setdefault("BarrierScope", BarrierScope)
-    helper_globals.setdefault("loop", _operation_loop)
-    helper_globals.setdefault("floordiv", _nn_floordiv)
-    return helper_globals
-
-
-def _normalize_real_args(real_args: tuple[object, ...] | list[object]) -> tuple[object, ...]:
+def _normalize_real_args(real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg]) -> tuple[RuntimeRealArg, ...]:
     """把 `real_args` 规整为 tuple，方便后续统一校验与执行。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 允许调用方传入 tuple 或 list。
@@ -335,11 +221,115 @@ def _normalize_real_args(real_args: tuple[object, ...] | list[object]) -> tuple[
     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInvalidRealArgs: real_args must be tuple or list")
 
 
+def _runtime_arg_shape(value: RuntimeRealArg) -> tuple[int, ...]:
+    """从真实运行时参数提取 DSL shape。
+
+
+    功能说明:
+    - 读取 torch.Tensor / numpy.ndarray 的公开 `shape` 属性。
+    - 将维度统一规整为 Python `int`，用于构造 DSL `Memory`。
+
+    使用示例:
+    - shape = _runtime_arg_shape(tensor)
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    shape = getattr(value, "shape", None)
+    if shape is None:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, REAL_ARG_TYPE_ERROR)
+    return tuple(int(dim) for dim in shape)
+
+
+def _runtime_arg_stride(value: RuntimeRealArg) -> tuple[int, ...]:
+    """从真实运行时参数提取元素单位 stride。
+
+
+    功能说明:
+    - torch.Tensor 的 `stride()` 已是元素单位。
+    - numpy.ndarray 的 `strides` 是字节单位，需除以 `itemsize`。
+
+    使用示例:
+    - stride = _runtime_arg_stride(array)
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    if _is_torch_tensor(value):
+        return tuple(int(dim) for dim in value.stride())
+    strides = getattr(value, "strides", None)
+    itemsize = getattr(value, "itemsize", None)
+    if strides is None or not isinstance(itemsize, int) or itemsize <= 0:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, REAL_ARG_TYPE_ERROR)
+    return tuple(int(dim) // itemsize for dim in strides)
+
+
+def _runtime_arg_dtype(value: RuntimeRealArg) -> NumericType:
+    """把真实运行时 dtype 映射为 DSL `NumericType`。
+
+
+    功能说明:
+    - numpy dtype 优先使用 `.name`。
+    - torch dtype 使用字符串尾部名称。
+    - `torch.bfloat16` 映射到 `NumericType.BFloat16` 的公开值名 `bf16`。
+
+    使用示例:
+    - dtype = _runtime_arg_dtype(tensor)
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    dtype = getattr(value, "dtype", None)
+    dtype_name = getattr(dtype, "name", None)
+    if not isinstance(dtype_name, str) or not dtype_name:
+        dtype_name = str(dtype).rsplit(".", 1)[-1]
+    if dtype_name == "bfloat16":
+        dtype_name = "bf16"
+    try:
+        return NumericType(dtype_name)
+    except ValueError as exc:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, REAL_ARG_TYPE_ERROR) from exc
+
+
+def _build_dsl_runtime_args(runtime_args: tuple[RuntimeRealArg, ...]) -> tuple[Memory, ...]:
+    """把真实运行时参数转换为 `mlir_gen(...)` 需要的 DSL `Memory`。
+
+
+    功能说明:
+    - `dsl_run(...)` 对外接收真实 torch/numpy 参数。
+    - `mlir_gen(...)` 只需要 shape/stride/dtype 元信息，真实对象继续留给执行阶段。
+
+    使用示例:
+    - dsl_args = _build_dsl_runtime_args((out, lhs, rhs))
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    return tuple(
+        Memory(
+            _runtime_arg_shape(arg),
+            _runtime_arg_dtype(arg),
+            stride=_runtime_arg_stride(arg),
+        )
+        for arg in runtime_args
+    )
+
+
 def _resolve_pipeline(pipeline: str | PassManager) -> PassManager:
     """把 pipeline 参数解析为 PassManager。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 接受已构造好的 `PassManager`，直接复用。
@@ -369,8 +359,6 @@ def _resolve_pipeline(pipeline: str | PassManager) -> PassManager:
 def _pipeline_uses_config_dump(pipeline: PassManager) -> bool:
     """判断 pipeline 是否使用标准 `PassManager.run(...)` 的 config dump。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 标准 `PassManager.run(...)` 从 `kernel_gen.core.config.get_dump_dir()` 读取 dump 目录。
@@ -391,11 +379,9 @@ def _run_pipeline_with_optional_dump(
     pipeline: PassManager,
     module: ModuleOp,
     dump_dir: Path | None,
-) -> object:
+) -> ModuleOp:
     """执行 pipeline，并在可用时写入 pass IR dump。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 标准 `PassManager` 由自身写入 `01-first-ir.mlir` 和逐 pass IR。
@@ -430,8 +416,6 @@ def _run_pipeline_with_optional_dump(
 def _emitc_target_name(emit_context: EmitCContext) -> str:
     """读取当前公开 target 名称。
 
-    创建者: OpenAI Codex
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 统一从 `kernel_gen.core.config.get_target()` 读取目标名。
@@ -462,8 +446,6 @@ def _emitc_target_name(emit_context: EmitCContext) -> str:
 def _find_first_func(module: ModuleOp) -> func.FuncOp:
     """从 module 中找出首个 `func.func`。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 作为 `dsl_run(...)` 的默认入口函数选择策略。
@@ -487,8 +469,6 @@ def _find_first_func(module: ModuleOp) -> func.FuncOp:
 def _find_func_by_sym_name(module: ModuleOp, sym_name: str) -> func.FuncOp:
     """按符号名在 lowered module 中查找 `func.func`。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 用于 npu_demo outline wrapper 场景，把 `arch.launch` 指向的 device body 精确找回。
@@ -512,8 +492,6 @@ def _find_func_by_sym_name(module: ModuleOp, sym_name: str) -> func.FuncOp:
 def _select_source_and_entry(module: ModuleOp, emit_context: EmitCContext) -> tuple[str, str, func.FuncOp]:
     """根据 lowered module 选择源码生成入口与执行入口名。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 单函数 module 时，直接按该函数生成源码并以该函数名作为执行入口。
@@ -555,8 +533,6 @@ def _select_source_and_entry(module: ModuleOp, emit_context: EmitCContext) -> tu
 class DslRunResult:
     """`dsl_run(...)` 的一次执行结果。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 记录 lowered module、选中的 `func.func`、生成源码、编译产物与执行结果。
@@ -577,22 +553,21 @@ class DslRunResult:
     source: str
     compiled_kernel: CompiledKernel
     execute_result: ExecuteResult
-    runtime_args: tuple[object, ...]
+    runtime_args: tuple[RuntimeRealArg, ...]
 
 
 def dsl_run(
-    func_obj: Callable[..., object],
-    real_args: tuple[object, ...] | list[object],
+    func_obj: Callable[..., DslFunctionReturn],
+    real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg],
     pipeline: str | PassManager,
 ) -> DslRunResult:
     """把 DSL 函数按指定 pipeline 真实 lowering 并执行。
 
-    创建者: 朽木露琪亚
-        最后更改: 大闸蟹
 
     功能说明:
     - 先解析全局公开 target 配置、pipeline 与 `real_args`。
     - 通过 `mlir_gen(...)` 生成 `builtin.module`，拒绝带 DSL 返回值的函数。
+    - 不补写 `func_obj.__globals__`；kernel 体缺少显式导入的 helper 时由 DSL parser 报错。
     - 按 pipeline 对 module 做 lowering，使用 `gen_kernel(...)` 生成目标源码，再交给 `ExecutionEngine` 真实编译与执行。
     - `kernel_gen.core.config.dump_dir` 非空时按 `dump_dir/<kernel name>/` 写入初始 IR、每个 pass 后 IR 与最终源码。
     - 结果以 `DslRunResult` 返回，外部可以继续读取 `func_op/module/source/compiled_kernel/execute_result/runtime_args`。
@@ -625,9 +600,9 @@ def dsl_run(
     for arg in runtime_args:
         if not (_is_torch_tensor(arg) or _is_numpy_array(arg)):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, REAL_ARG_TYPE_ERROR)
+    dsl_args = _build_dsl_runtime_args(runtime_args)
 
-    globals_table = _build_dsl_globals_table(func_obj)
-    module = mlir_gen(func_obj, *runtime_args, globals=globals_table)
+    module = mlir_gen(func_obj, *dsl_args)
     if not isinstance(module, ModuleOp):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInternalError: mlir_gen must return builtin.module")
 

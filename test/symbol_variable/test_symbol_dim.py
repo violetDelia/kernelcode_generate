@@ -1,7 +1,5 @@
 """symbol_dim tests.
 
-创建者: 小李飞刀
-最后一次更改: OpenAI Codex
 
 功能说明:
 - 覆盖 SymbolDim 的构造、公开值格式化、算术、比较和异常分支。

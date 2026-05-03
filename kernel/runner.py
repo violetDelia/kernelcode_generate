@@ -1,7 +1,5 @@
 """Kernel demo runner.
 
-创建者: 大闸蟹
-最后一次更改: 大闸蟹
 
 功能说明:
 - 为 `kernel/` 下的本地 demo 脚本提供统一的 `dsl_run -> npu-demo-lowering -> execute` 运行入口。
@@ -13,15 +11,15 @@
 API 列表:
 - `KERNEL_DUMP_ROOT: Path`
 - `KernelTorchDemoResult(case_name: str, dsl_result: DslRunResult, max_abs_diff: float, atol: float, rtol: float)`
-- `run_torch_demo(case_name: str, kernel_fn: Callable[..., object], real_args: tuple[object, ...] | list[object], output: object, expected: object, *, atol: float = 1e-4, rtol: float = 1e-4) -> KernelTorchDemoResult`
-- `run_lowering_demo(case_name: str, kernel_fn: Callable[..., object], *runtime_args: object) -> tuple[ModuleOp, str]`
+- `run_torch_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], real_args: tuple[torch.Tensor | np.ndarray, ...] | list[torch.Tensor | np.ndarray], output: torch.Tensor | np.ndarray, expected: torch.Tensor | np.ndarray, *, atol: float = 1e-4, rtol: float = 1e-4) -> KernelTorchDemoResult`
+- `run_lowering_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], *runtime_args: Memory | SymbolDim | int | float | bool | str) -> tuple[ModuleOp, str]`
 
 使用示例:
 - `result = run_torch_demo("matmul/static_shape", matmul_kernel, (out, lhs, rhs), out, lhs @ rhs)`
 - `module, source = run_lowering_demo("matmul/static_shape", matmul_kernel, lhs, rhs, out)`
 
 关联文件:
-- spec: `spec/kernel/README.md`
+- spec: `spec/kernel/runner.md`
 - 功能实现: `kernel/runner.py`
 """
 
@@ -31,14 +29,21 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 import re
+from typing import TYPE_CHECKING
 
 from xdsl.dialects.builtin import ModuleOp
 
 from kernel_gen.core.config import restore_config, set_dump_dir, set_target, snapshot_config
 from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
-from kernel_gen.dsl.mlir_gen import mlir_gen
+from kernel_gen.dsl.ast.mlir_gen import mlir_gen
 from kernel_gen.passes.pipeline import build_npu_demo_lowering_pipeline
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.tools.dsl_run import DslRunResult, dsl_run
+
+if TYPE_CHECKING:
+    import numpy as np
+    import torch
 
 KERNEL_DUMP_ROOT = Path(__file__).resolve().parent / "dump"
 
@@ -46,8 +51,6 @@ KERNEL_DUMP_ROOT = Path(__file__).resolve().parent / "dump"
 def _sanitize_case_name(case_name: str) -> Path:
     """规整 demo case 名称为相对 dump 路径。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 允许调用方传入 `operator/case` 形式的相对路径。
@@ -70,11 +73,9 @@ def _sanitize_case_name(case_name: str) -> Path:
     return Path(*parts)
 
 
-def _runtime_module_name(value: object) -> str:
+def _runtime_module_name(value: torch.Tensor | np.ndarray) -> str:
     """提取运行时对象模块名。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 用于轻量识别 torch tensor 与 numpy ndarray。
@@ -87,11 +88,9 @@ def _runtime_module_name(value: object) -> str:
     return getattr(value.__class__, "__module__", "") or ""
 
 
-def _is_torch_tensor(value: object) -> bool:
+def _is_torch_tensor(value: torch.Tensor | np.ndarray) -> bool:
     """判断对象是否为 torch tensor。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 按公开运行时对象模块名前缀判断。
@@ -104,11 +103,9 @@ def _is_torch_tensor(value: object) -> bool:
     return _runtime_module_name(value).startswith("torch")
 
 
-def _is_numpy_array(value: object) -> bool:
+def _is_numpy_array(value: torch.Tensor | np.ndarray) -> bool:
     """判断对象是否为 numpy ndarray。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 按公开运行时对象模块名前缀判断。
@@ -123,16 +120,14 @@ def _is_numpy_array(value: object) -> bool:
 
 def _assert_outputs_close(
     case_name: str,
-    output: object,
-    expected: object,
+    output: torch.Tensor | np.ndarray,
+    expected: torch.Tensor | np.ndarray,
     *,
     atol: float,
     rtol: float,
 ) -> float:
     """校验真实执行结果与 PyTorch/NumPy 参考结果一致。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 支持 torch tensor 与 numpy ndarray 两类 `dsl_run` 运行时输出。
@@ -176,8 +171,6 @@ def _assert_outputs_close(
 def _write_current_source_dump(path: Path, source: str) -> None:
     """写入当前 demo 的最终源码 dump 镜像。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - `dsl_run` 的公开 dump 会写入函数名子目录；这里额外维护 case 根目录下的 `source.cpp`。
@@ -197,8 +190,6 @@ def _write_current_source_dump(path: Path, source: str) -> None:
 class KernelTorchDemoResult:
     """`run_torch_demo(...)` 的执行与校验结果。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 保存 `dsl_run(...)` 的完整结果对象。
@@ -217,18 +208,16 @@ class KernelTorchDemoResult:
 
 def run_torch_demo(
     case_name: str,
-    kernel_fn: Callable[..., object],
-    real_args: tuple[object, ...] | list[object],
-    output: object,
-    expected: object,
+    kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None],
+    real_args: tuple[torch.Tensor | np.ndarray, ...] | list[torch.Tensor | np.ndarray],
+    output: torch.Tensor | np.ndarray,
+    expected: torch.Tensor | np.ndarray,
     *,
     atol: float = 1e-4,
     rtol: float = 1e-4,
 ) -> KernelTorchDemoResult:
     """通过 `dsl_run` 执行 kernel demo，并和参考结果对齐。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 设置公开 core config target 为 `npu_demo`。
@@ -264,13 +253,11 @@ def run_torch_demo(
 
 def run_lowering_demo(
     case_name: str,
-    kernel_fn: Callable[..., object],
-    *runtime_args: object,
+    kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None],
+    *runtime_args: Memory | SymbolDim | int | float | bool | str,
 ) -> tuple[ModuleOp, str]:
     """运行一个 kernel demo 并写出 IR/source dump。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 使用 `mlir_gen(...)` 生成初始 module。

@@ -16,18 +16,24 @@
 - `is_integer_dtype(dtype: NumericType) -> bool`
 - `is_float_dtype(dtype: NumericType) -> bool`
 
+## 文档信息
+
+- 创建者：`小李飞刀`
+- 最后一次更改：`小李飞刀`
+- `spec`：`spec/symbol_variable/type.md`
+- `功能实现`：`kernel_gen/symbol_variable/type.py`
+- `test`：`test/symbol_variable/test_type.py`
+
 ## [immutable]文档信息
 
-- 创建者：`摸鱼小分队`
-- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)
-- `test`：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py)
+- `test`：[`test/symbol_variable/type.py`](../../test/symbol_variable/type.py)
 - `功能实现`：[`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py)
 
 ## 依赖
 
 - `enum.Enum`：用于定义枚举。
-- [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md)：包级重导出与 legacy 路径边界来源。
+- [`spec/symbol_variable/__init__.md`](../../spec/symbol_variable/__init__.md)：包级重导出与 legacy 路径边界来源。
 
 ## 目标
 
@@ -37,28 +43,164 @@
 - 为上游比较类公开接口提供稳定的布尔 dtype 标识 `NumericType.Bool`。
 - 为 `Memory.clone(...)`、operation family 与 pass/DSL 公共入口提供最小 dtype family 查询能力。
 
-## 限制与边界
+## 额外补充
 
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - [immutable]仅定义 `NumericType` 与 `Farmat` 两个枚举类型。
 - [immutable]不负责内存对象、张量对象或其他模块的运行时语义。
 - [immutable]不提供工厂函数、转换函数或其他辅助 API。
 - 上述旧口径在本轮继续保持“不提供工厂构造、转换、promotion、字符串解析或包根重导出 helper”的含义；当前新增公开范围仅限下文列出的 dtype family 常量与两个 dtype family 查询 helper。
 - 当前额外公开的模块级 dtype family 真源为 `FLOAT_DTYPES` / `INT_DTYPES` / `NN_FLOAT_DTYPES`，dtype promotion 常量真源为 `ARITHMETIC_DTYPE_ORDER` / `ARITHMETIC_DTYPE_RANK`，查询 helper 为 `is_integer_dtype(...)` 与 `is_float_dtype(...)`；helper 只接受 `NumericType`，不承担工厂构造、字符串解析或自动转换。
 - 仅定义 arithmetic promotion 的稳定顺序与 rank 常量，不定义完整 dtype 推导、布局转换或字符串解析逻辑。
-- 当前支持从 `kernel_gen.symbol_variable.type` 直接导入，也支持通过 `kernel_gen.symbol_variable` 包入口重导出导入；包级入口边界由 [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md) 负责。
+- 当前支持从 `kernel_gen.symbol_variable.type` 直接导入，也支持通过 `kernel_gen.symbol_variable` 包入口重导出导入；包级入口边界由 [`spec/symbol_variable/__init__.md`](../../spec/symbol_variable/__init__.md) 负责。
 - `FLOAT_DTYPES`、`INT_DTYPES`、`NN_FLOAT_DTYPES`、`ARITHMETIC_DTYPE_ORDER`、`ARITHMETIC_DTYPE_RANK`、`is_integer_dtype(...)` 与 `is_float_dtype(...)` 只在 `kernel_gen.symbol_variable.type` 子模块公开，不进入 `kernel_gen.symbol_variable` 包根稳定导出集合。
 - 不提供旧路径 `symbol_variable.type` 的兼容入口；该规则与包级 legacy 路径禁用保持一致。
 - 不扩展到量化类型、复数类型、稀疏布局或其他未公开的枚举成员。
+## API详细说明
 
-## 相邻边界
+### `class NumericType(Enum)`
 
-- `package_api.md` 负责包级导出集合、`kernel_gen.symbol_variable` 的 `__all__` 与 `import *`；本文件只定义 `type.py` 模块本身的枚举语义与模块级导出边界。
+- api：`class NumericType(Enum)`
+- 参数：无。
+- 返回值：`NumericType` 枚举类型对象。
+- 使用示例：
+
+  ```python
+  numeric_type = NumericType()
+  ```
+- 功能说明：定义 `NumericType` 公开枚举类型。
+- 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
+
+### `class Farmat(Enum)`
+
+- api：`class Farmat(Enum)`
+- 参数：无。
+- 返回值：`Farmat` 枚举类型对象。
+- 使用示例：
+
+  ```python
+  farmat = Farmat()
+  ```
+- 功能说明：定义 `Farmat` 公开枚举类型。
+- 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
+
+### `FLOAT_DTYPES`
+
+- api：`FLOAT_DTYPES`
+- 参数：无。
+- 返回值：公开常量值。
+- 使用示例：
+
+  ```python
+from kernel_gen.symbol_variable.type import FLOAT_DTYPES
+
+api_ref = FLOAT_DTYPES
+```
+- 功能说明：定义 `FLOAT_DTYPES` 公开常量。
+- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；未列入 API 的内部状态不对外承诺。
+
+### `INT_DTYPES`
+
+- api：`INT_DTYPES`
+- 参数：无。
+- 返回值：公开常量值。
+- 使用示例：
+
+  ```python
+from kernel_gen.symbol_variable.type import INT_DTYPES
+
+api_ref = INT_DTYPES
+```
+- 功能说明：定义 `INT_DTYPES` 公开常量。
+- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；未列入 API 的内部状态不对外承诺。
+
+### `ARITHMETIC_DTYPE_ORDER`
+
+- api：`ARITHMETIC_DTYPE_ORDER`
+- 参数：无。
+- 返回值：公开常量值。
+- 使用示例：
+
+  ```python
+from kernel_gen.symbol_variable.type import ARITHMETIC_DTYPE_ORDER
+
+api_ref = ARITHMETIC_DTYPE_ORDER
+```
+- 功能说明：定义 `ARITHMETIC_DTYPE_ORDER` 公开常量。
+- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；未列入 API 的内部状态不对外承诺。
+
+### `ARITHMETIC_DTYPE_RANK`
+
+- api：`ARITHMETIC_DTYPE_RANK`
+- 参数：无。
+- 返回值：公开常量值。
+- 使用示例：
+
+  ```python
+from kernel_gen.symbol_variable.type import ARITHMETIC_DTYPE_RANK
+
+api_ref = ARITHMETIC_DTYPE_RANK
+```
+- 功能说明：定义 `ARITHMETIC_DTYPE_RANK` 公开常量。
+- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；未列入 API 的内部状态不对外承诺。
+
+### `NN_FLOAT_DTYPES`
+
+- api：`NN_FLOAT_DTYPES`
+- 参数：无。
+- 返回值：公开常量值。
+- 使用示例：
+
+  ```python
+from kernel_gen.symbol_variable.type import NN_FLOAT_DTYPES
+
+api_ref = NN_FLOAT_DTYPES
+```
+- 功能说明：定义 `NN_FLOAT_DTYPES` 公开常量。
+- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；未列入 API 的内部状态不对外承诺。
+
+### `is_integer_dtype(dtype: NumericType) -> bool`
+
+- api：`is_integer_dtype(dtype: NumericType) -> bool`
+- 参数：
+  - `dtype`：数据类型，定义张量、内存或符号对象的元素类型；类型 `NumericType`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：`bool`，表示判断结果。
+- 使用示例：
+
+  ```python
+  result = is_integer_dtype(dtype=sample_dtype)
+  ```
+- 功能说明：执行 `is_integer_dtype`。
+- 注意事项：该接口只读取公开状态；返回对象的内部可变结构不作为额外公开合同。
+
+### `is_float_dtype(dtype: NumericType) -> bool`
+
+- api：`is_float_dtype(dtype: NumericType) -> bool`
+- 参数：
+  - `dtype`：数据类型，定义张量、内存或符号对象的元素类型；类型 `NumericType`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：`bool`，表示判断结果。
+- 使用示例：
+
+  ```python
+  result = is_float_dtype(dtype=sample_dtype)
+  ```
+- 功能说明：执行 `is_float_dtype`。
+- 注意事项：该接口只读取公开状态；返回对象的内部可变结构不作为额外公开合同。
+
+
+## 额外补充
+
+### 相邻值说明
+
+- `__init__.md` 负责包级导出集合、`kernel_gen.symbol_variable` 的 `__all__` 与 `import *`；本文件只定义 `type.py` 模块本身的枚举语义与模块级导出边界。
 - `memory.md` 负责 `NumericType` / `Farmat` 在 `Memory` 中如何被消费，本文件不定义内存对象行为。
 - `operation/nn` 相关测试只把 `NumericType.Bool` 当作公开成员消费，不在本文件重复定义比较算子语义。
 
-## 公开语义说明
+### 公开语义说明
 
-### `NumericType` 枚举成员与兼容边界
+### `NumericType` 枚举成员与兼容说明
 
 功能说明：
 
@@ -106,7 +248,7 @@ assert NumericType.Int32 is not NumericType.Float32
 - 成员支持 `is` 与 `==` 比较，语义与标准 `Enum` 一致。
 - `.value` 属于公开接口，必须保持为当前 spec 列出的 dtype 字符串。
 
-### `Farmat` 枚举成员与兼容边界
+### `Farmat` 枚举成员与兼容说明
 
 功能说明：
 
@@ -324,12 +466,12 @@ assert is_float_dtype(NumericType.Int32) is False
 ## 测试
 
 - 测试文件：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py)
-- 执行命令：`pytest -q test/symbol_variable/test_type.py`；`pytest -q test/operation/test_operation_nn.py -k 'test_nn_compare_predicate or test_nn_compare_alias or test_nn_compare_implicit_broadcast'`
+- 执行命令：`pytest -q test/symbol_variable/test_type.py`；`pytest -q test/operation/nn/test_package.py -k 'test_nn_compare_predicate or test_nn_compare_alias or test_nn_compare_implicit_broadcast'`
 
 ### 测试分层
 
 - 主测试：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py) 负责枚举成员、`FLOAT_DTYPES` / `INT_DTYPES`、`is_integer_dtype(...)` / `is_float_dtype(...)`、模块级公开 API 可达性、模块级 `import *` 与 legacy 子模块路径。
-- 交叉验证：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py) 只验证 `NumericType.Bool` 被上游比较接口稳定消费。
+- 交叉验证：[`test/operation/nn/test_package.py`](../../test/operation/nn/test_package.py) 只验证 `NumericType.Bool` 被上游比较接口稳定消费。
 
 ### 测试目标
 

@@ -1,7 +1,5 @@
 """reduce/softmax boundary lowering 实现。
 
-创建者: 小李飞刀
-最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 提供 nn.reduce_* 的单 op pattern lowering 入口。
@@ -17,8 +15,8 @@ API 列表:
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-- test: test/pass/nn_lowering/test_reduce_lowering.py
-- test: test/pass/nn_lowering/public_name.py
+- test: test/passes/lowering/nn_lowering/test_reduce_lowering.py
+- test: test/passes/lowering/nn_lowering/test_public_name.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
 """
 
@@ -46,8 +44,6 @@ from .nn_lowering_utility import ensure_expected_op_name
 def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
     """获取并校验 nn op 的 space attribute。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 在当前文件内保持 reduce/softmax family 所需的 `space` 校验逻辑。
@@ -58,7 +54,7 @@ def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/test_reduce_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_reduce_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -71,8 +67,6 @@ def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
 def _ensure_single_result(op: Operation) -> NnMemoryType:
     """获取并校验 op 的唯一输出类型。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 在当前文件内保持 `nn.memory` 单结果校验逻辑。
@@ -83,7 +77,7 @@ def _ensure_single_result(op: Operation) -> NnMemoryType:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/test_reduce_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_reduce_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -98,8 +92,6 @@ def _ensure_single_result(op: Operation) -> NnMemoryType:
 def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAValue:
     """确保 operand 为 symbol.int 或整数 SSAValue。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 在当前文件内保持 reduce family 第二操作数的最小校验逻辑。
@@ -111,7 +103,7 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -127,8 +119,6 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
 def _ensure_reduce_axis(op_name: str, axes_attr: ArrayAttr) -> int:
     """校验 reduce 轴参数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 确保 axes_attr 为 ArrayAttr 且仅包含一个 IntegerAttr。
@@ -138,7 +128,7 @@ def _ensure_reduce_axis(op_name: str, axes_attr: ArrayAttr) -> int:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/test_reduce_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_reduce_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -159,8 +149,6 @@ def _ensure_reduce_axis(op_name: str, axes_attr: ArrayAttr) -> int:
 def _ensure_reduce_keepdim(op_name: str, keepdim_attr: Attribute) -> bool:
     """校验 reduce keepdim 参数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - keepdim 支持 IntegerAttr/IntAttr 的 0 或 1。
@@ -171,7 +159,7 @@ def _ensure_reduce_keepdim(op_name: str, keepdim_attr: Attribute) -> bool:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/test_reduce_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_reduce_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -202,8 +190,6 @@ def _build_alloc_dynamic_shape_from_operand(
 ) -> list[SSAValue]:
     """基于 operand 构造 dma.alloc 的 dynamic_shape。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 针对 result_type 的符号维度插入 symbol.get_dim。
@@ -214,7 +200,7 @@ def _build_alloc_dynamic_shape_from_operand(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/test_reduce_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_reduce_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -235,8 +221,6 @@ def _build_alloc_dynamic_shape_from_operand(
 def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
     """lower reduce family。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 校验 axes / keepdim。
@@ -247,7 +231,7 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/test_reduce_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_reduce_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -343,8 +327,6 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
 class _LowerNnReduceSumPattern(RewritePattern):
     """将单个 nn.reduce_sum lowering 为 kernel.reduce(kind=sum)。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnReduceSumOp`。
@@ -355,7 +337,7 @@ class _LowerNnReduceSumPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -372,8 +354,6 @@ class _LowerNnReduceSumPattern(RewritePattern):
 class _LowerNnReduceMinPattern(RewritePattern):
     """将单个 nn.reduce_min lowering 为 kernel.reduce(kind=min)。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnReduceMinOp`。
@@ -384,7 +364,7 @@ class _LowerNnReduceMinPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -401,8 +381,6 @@ class _LowerNnReduceMinPattern(RewritePattern):
 class _LowerNnReduceMaxPattern(RewritePattern):
     """将单个 nn.reduce_max lowering 为 kernel.reduce(kind=max)。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnReduceMaxOp`。
@@ -413,7 +391,7 @@ class _LowerNnReduceMaxPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -430,8 +408,6 @@ class _LowerNnReduceMaxPattern(RewritePattern):
 class _RejectNnSoftmaxPattern(RewritePattern):
     """拒绝 direct nn.softmax lowering。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnSoftmaxOp`。
@@ -442,7 +418,7 @@ class _RejectNnSoftmaxPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -456,8 +432,6 @@ class _RejectNnSoftmaxPattern(RewritePattern):
 def reduce_softmax_patterns() -> list[RewritePattern]:
     """返回 reduce/softmax 边界 rewrite pattern 集合。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 提供 nn_lowering 主 driver 的 reduce 单 op pattern 注册入口。
@@ -468,7 +442,7 @@ def reduce_softmax_patterns() -> list[RewritePattern]:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 

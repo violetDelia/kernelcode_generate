@@ -1,20 +1,18 @@
 """NN operation transpose helper.
 
-创建者: 守护最好的爱莉希雅
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 transpose 运算与 perm 规范化 helper。
 
 API 列表:
-- `transpose(value: object, perm: object) -> Memory`
+- `transpose(value: Memory, perm: Sequence[int]) -> Memory`
 
 使用示例:
 - from kernel_gen.operation.nn.transpose import transpose
 
 关联文件:
 - spec: spec/operation/nn.md
-- test: test/operation/test_operation_nn_structured.py
+- test: test/operation/nn/test_structured.py
 - 功能实现: kernel_gen/operation/nn/transpose.py
 """
 
@@ -23,17 +21,20 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from kernel_gen.core.contracts import default_stride
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import (
+    ERROR_ACTION,
+    ERROR_TEMPLATE,
+    ErrorKind,
+    ErrorModule,
+    kernel_code_error,
+)
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 
-_ERROR_ACTION = "请按接口约束传参"
 
-def _normalize_transpose_perm(perm: object, rank: int) -> list[int]:
+def _normalize_transpose_perm(perm: Sequence[int], rank: int) -> list[int]:
     """规范化 transpose 的 perm 参数。
 
-    创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 要求 perm 为非字符串序列，且元素必须是 int 但不能是 bool。
@@ -44,58 +45,56 @@ def _normalize_transpose_perm(perm: object, rank: int) -> list[int]:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_structured.py
+    - test: test/operation/nn/test_structured.py
     - 功能实现: kernel_gen/operation/nn/transpose.py
     """
     if isinstance(perm, (str, bytes)) or not isinstance(perm, Sequence):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.transpose 参数校验",
                 expected="transpose perm must be a sequence of int",
                 actual=type(perm).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
     normalized_perm = list(perm)
     if len(normalized_perm) != rank:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.transpose 参数校验",
                 expected="transpose perm length must equal input rank",
                 actual=f"perm_len={len(normalized_perm)} rank={rank}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
     for index, axis in enumerate(normalized_perm):
         if isinstance(axis, bool) or not isinstance(axis, int):
-            raise TypeError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene="nn.transpose 参数校验",
                     expected="transpose perm element must be int",
                     actual=f"index={index} type={type(axis).__name__}",
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
 
     if sorted(normalized_perm) != list(range(rank)):
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.transpose 参数校验",
                 expected="transpose perm must be a permutation of input axes",
                 actual=f"perm={normalized_perm} rank={rank}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
     return normalized_perm
 
-def transpose(value: object, perm: object) -> Memory:
+def transpose(value: Memory, perm: Sequence[int]) -> Memory:
     """按指定 perm 物化转置 Memory 的轴顺序。
 
-    创建者: 小李飞刀
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 仅接受 Memory 输入，输出保留输入的 dtype/space/format。
@@ -107,16 +106,16 @@ def transpose(value: object, perm: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_structured.py
+    - test: test/operation/nn/test_structured.py
     - 功能实现: kernel_gen/operation/nn/transpose.py
     """
     if not isinstance(value, Memory):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.transpose 参数校验",
                 expected="transpose value must be Memory",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 

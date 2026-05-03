@@ -1,25 +1,28 @@
 """Tuner dialect definitions.
 
-创建者: 我不是牛马
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 定义 tuner dialect 的超参数声明与局部成本节点接口。
 - `tuner.param` 返回 `!symbol.dim<"name">` 超参数标量，`tuner.cost` 透传原 op operands 与公开 metadata，并固定返回 `!symbol.int<"expr">` 局部成本。
 - `tuner.cost.cost_kind` 接受任意非空字符串 attr。
 
+API 列表:
+- `class TunerParamOp(result_type: Attribute)`
+- `class TunerCostOp(operands: list[SSAValue | Operation], *, cost_kind: Attribute, op_name: Attribute, extra_attrs: dict[str, Attribute] | None = None, result_type: Attribute = SymbolValueType.from_expr("COST"))`
+- `Tuner`
+
 使用示例:
 - from kernel_gen.dialect.tuner import Tuner, TunerParamOp, TunerCostOp
 
 关联文件:
 - spec: spec/dialect/tuner.md
-- test: test/dialect/test_tuner_dialect.py
+- test: test/dialect/test_tuner.py
 - 功能实现: kernel_gen/dialect/tuner.py
 """
 
 from __future__ import annotations
 
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
 from xdsl.dialects.builtin import StringAttr
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, result_def, var_operand_def
@@ -29,14 +32,10 @@ from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.symbol import SymbolDimType, SymbolValueType
 
-_ERROR_ACTION = "请按接口约束传参"
-_ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.tuner verifier"
 def _raise_verify_error(expected: str) -> None:
     """统一抛出 tuner verifier 错误。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 复用 tuner dialect 统一错误模板，生成带固定 scene/action/actual 的 `VerifyException`。
@@ -47,23 +46,21 @@ def _raise_verify_error(expected: str) -> None:
 
     关联文件:
     - spec: spec/dialect/tuner.md
-    - test: test/dialect/test_tuner_dialect.py
+    - test: test/dialect/test_tuner.py
     - 功能实现: kernel_gen/dialect/tuner.py
     """
 
     raise VerifyException(
-        _ERROR_TEMPLATE.format(
+        ERROR_TEMPLATE.format(
             scene=_ERROR_SCENE,
             expected=expected,
-            actual=_ERROR_ACTUAL,
-            action=_ERROR_ACTION,
+            actual=ERROR_ACTUAL,
+            action=ERROR_ACTION,
         )
     )
 def _verify_symbol_dim_result_type(result_type: Attribute, op_name: str) -> SymbolDimType:
     """校验 tuner.param 的结果类型。
 
-    创建者: 我不是牛马
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 要求结果类型必须为 `!symbol.dim<"name">` 并通过自身校验。
@@ -74,17 +71,17 @@ def _verify_symbol_dim_result_type(result_type: Attribute, op_name: str) -> Symb
 
     关联文件:
     - spec: spec/dialect/tuner.md
-    - test: test/dialect/test_tuner_dialect.py
+    - test: test/dialect/test_tuner.py
     - 功能实现: kernel_gen/dialect/tuner.py
     """
 
     if not isinstance(result_type, SymbolDimType):
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected=f"{op_name} result type must be !symbol.dim<\"name\">",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         )
     result_type.verify()
@@ -102,8 +99,6 @@ class TunerParamOp(IRDLOperation):
     def __init__(self: "TunerParamOp", result_type: Attribute) -> None:
         """初始化 tuner.param 操作。
 
-        创建者: 我不是牛马
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 构造仅含结果类型的 tuner.param op。
@@ -113,7 +108,7 @@ class TunerParamOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
+        - test: test/dialect/test_tuner.py
         - 功能实现: kernel_gen/dialect/tuner.py
         """
 
@@ -122,8 +117,6 @@ class TunerParamOp(IRDLOperation):
     def verify_(self: "TunerParamOp") -> None:
         """校验 tuner.param 的结果类型。
 
-        创建者: 我不是牛马
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 要求结果类型为 `!symbol.dim<"name">`。
@@ -133,7 +126,7 @@ class TunerParamOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
+        - test: test/dialect/test_tuner.py
         - 功能实现: kernel_gen/dialect/tuner.py
         """
 
@@ -142,8 +135,6 @@ class TunerParamOp(IRDLOperation):
     def print(self: "TunerParamOp", printer: Printer) -> None:
         """打印 tuner.param 自定义文本语法。
 
-        创建者: 我不是牛马
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 输出 `tuner.param : !symbol.dim<"name">`。
@@ -153,7 +144,7 @@ class TunerParamOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
+        - test: test/dialect/test_tuner.py
         - 功能实现: kernel_gen/dialect/tuner.py
         """
 
@@ -164,8 +155,6 @@ class TunerParamOp(IRDLOperation):
     def parse(cls: type["TunerParamOp"], parser: AttrParser) -> "TunerParamOp":
         """解析 tuner.param 自定义文本语法。
 
-        创建者: 我不是牛马
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 解析 `tuner.param : !symbol.dim<"name">` 格式。
@@ -175,7 +164,7 @@ class TunerParamOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
+        - test: test/dialect/test_tuner.py
         - 功能实现: kernel_gen/dialect/tuner.py
         """
 
@@ -205,8 +194,6 @@ class TunerCostOp(IRDLOperation):
     ) -> None:
         """初始化 tuner.cost。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 构造透传原 op operands 的 `tuner.cost(...)->!symbol.int<"...">`。
@@ -217,7 +204,7 @@ class TunerCostOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
+        - test: test/dialect/test_tuner.py
         - 功能实现: kernel_gen/dialect/tuner.py
         """
 
@@ -233,8 +220,6 @@ class TunerCostOp(IRDLOperation):
     def verify_(self: "TunerCostOp") -> None:
         """校验 tuner.cost metadata 与整数结果。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 要求结果类型固定为 `!symbol.int<"expr">`。
@@ -246,7 +231,7 @@ class TunerCostOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
+        - test: test/dialect/test_tuner.py
         - 功能实现: kernel_gen/dialect/tuner.py
         """
 
@@ -271,8 +256,6 @@ class TunerCostOp(IRDLOperation):
     def print(self: "TunerCostOp", printer: Printer) -> None:
         """打印 tuner.cost 自定义文本语法。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 输出 `tuner.cost(%args) {attrs} : (types) -> !symbol.int<"...">` 形式文本。
@@ -283,7 +266,7 @@ class TunerCostOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
+        - test: test/dialect/test_tuner.py
         - 功能实现: kernel_gen/dialect/tuner.py
         """
 
@@ -306,8 +289,6 @@ class TunerCostOp(IRDLOperation):
     def parse(cls: type["TunerCostOp"], parser: AttrParser) -> "TunerCostOp":
         """解析 tuner.cost 自定义文本语法。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 解析 `tuner.cost(%args) {attrs} : (types) -> !symbol.int<"...">`。
@@ -318,7 +299,7 @@ class TunerCostOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
+        - test: test/dialect/test_tuner.py
         - 功能实现: kernel_gen/dialect/tuner.py
         """
 

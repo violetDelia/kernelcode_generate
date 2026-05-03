@@ -6,21 +6,21 @@
 
 ## API 列表
 
-- `-status`
-- `-dispatch`
-- `-done`
-- `-pause`
-- `-continue`
-- `-reassign`
-- `-next`
-- `-delete`
-- `-new`
-- `-done-plan`
+- `codex-multi-agents-task.sh -file <TODO.md> -status (-doing | -task-list | -plan-list) -> rc`
+- `codex-multi-agents-task.sh -file <TODO.md> -dispatch -task_id <id> -to <name> -agents-list <path> [-type <kind>] [-message <text>] -> rc`
+- `codex-multi-agents-task.sh(-file <TODO.md>, -done, -task_id <id>, -log <path>, -agents-list <path>) -> rc`
+- `codex-multi-agents-task.sh(-file <TODO.md>, -pause, -task_id <id>, -agents-list <path>) -> rc`
+- `codex-multi-agents-task.sh(-file <TODO.md>, -continue, -task_id <id>, -agents-list <path>) -> rc`
+- `codex-multi-agents-task.sh(-file <TODO.md>, -reassign, -task_id <id>, -to <name>, -agents-list <path>) -> rc`
+- `codex-multi-agents-task.sh -file <TODO.md> -next -task_id <id> -from <name> -type <kind> -message <text> -agents-list <path> [-to <name>] [-auto] -> rc`
+- `codex-multi-agents-task.sh(-file <TODO.md>, -delete, -task_id <id>) -> rc`
+- `codex-multi-agents-task.sh -file <TODO.md> -new -info <text> -type <kind> -worktree <path> -depends <ids|None> -plan <path|None> [-to <name>] [-from <name>] [-log <path>] -> rc`
+- `codex-multi-agents-task.sh(-file <TODO.md>, -done-plan, -plan <path>) -> rc`
 
 ## 文档信息
 
-- 创建者：`榕`
-- 最后一次更改：`Codex`
+- 创建者：`未记录`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/codex-multi-agents/scripts/codex-multi-agents-task.md`](../../../spec/codex-multi-agents/scripts/codex-multi-agents-task.md)
 - `test`：[`test/codex-multi-agents/test_codex-multi-agents-task.py`](../../../test/codex-multi-agents/test_codex-multi-agents-task.py)
 - `功能实现`：
@@ -57,7 +57,9 @@
 - 在 `-dispatch` 成功后发送固定格式的任务消息；在 `-reassign` 成功后同时通知旧接手人与新接手人；在 `-next` 成功后固定向管理员发送阶段摘要；当 `-next` 触发自动续接时，额外发送自动续接消息。
 - 在参数错误、文件错误、数据错误、锁冲突与内部错误时返回稳定返回码。
 
-## 实现分层
+## 额外补充
+
+### 实现分层
 
 - `codex-multi-agents-task.sh`：入口层；负责参数解析、参数合法性校验、文件加锁、调用核心模块、在成功后触发通知模块。
 - `codex-multi-agents-task-core.py`：核心数据层；负责解析与写回 `TODO.md`、`DONE.md`、`agents-lists.md`，并实现 `dispatch/done/pause/continue/reassign/next/new/delete/done-plan/status-*` 的状态流转。
@@ -67,26 +69,24 @@
   - 核心数据层不直接发送消息；
   - 通知副作用层不决定任务流转规则。
 
-## 限制与边界
+## API详细说明
 
-- 命令级限制、文件结构要求、权限、锁顺序与状态一致性约束均写在对应 API 的 `注意事项` 与 `返回与限制` 中，本节不再重复展开。
+### `codex-multi-agents-task.sh -file <TODO.md> -status (-doing | -task-list | -plan-list) -> rc`
 
-## 公开接口
+- api：`codex-multi-agents-task.sh -file <TODO.md> -status (-doing | -task-list | -plan-list) -> rc`
 
-### `-status`
-
-功能说明：
+- 功能说明：
 
 - 只读输出 `正在执行的任务`、`任务列表` 或 `计划书` 表格。
 
-参数说明：
+- 参数：
 
 - `-status(开关)`：启用状态查询。
 - `-doing(开关)`：输出运行中任务表。
 - `-task-list(开关)`：输出任务列表表。
 - `-plan-list(开关)`：输出计划统计表。
 
-使用示例：
+- 使用示例：
 
 ```bash
 codex-multi-agents-task.sh \
@@ -95,7 +95,7 @@ codex-multi-agents-task.sh \
   -plan-list
 ```
 
-注意事项：
+- 注意事项：
 
 - `-doing/-task-list/-plan-list` 必须且只能三选一。
 - `-status` 不修改任何文件。
@@ -106,17 +106,19 @@ codex-multi-agents-task.sh \
   - `任务列表`：`| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 任务类型 | 依赖任务 | 计划书 | 指派 | 记录文件 |`
   - `计划书`：`| 计划书 | 总任务数 | 已完成任务 | 待完成任务 | 完成状态 |`
 
-返回与限制：
+- 返回值：
 
 - 成功返回 `0`；参数组合不合法返回 `1`；表结构非法返回 `2`。
 
-### `-dispatch`
+### `codex-multi-agents-task.sh -file <TODO.md> -dispatch -task_id <id> -to <name> -agents-list <path> [-type <kind>] [-message <text>] -> rc`
 
-功能说明：
+- api：`codex-multi-agents-task.sh -file <TODO.md> -dispatch -task_id <id> -to <name> -agents-list <path> [-type <kind>] [-message <text>] -> rc`
+
+- 功能说明：
 
 - 将任务从 `任务列表` 移入 `正在执行的任务`，同步角色状态为 `busy`，并在成功后发送一条任务消息。
 
-参数说明：
+- 参数：
 
 - `-dispatch(开关)`：启用分发。
 - `-task_id(字符串)`：待分发任务 ID。
@@ -125,7 +127,7 @@ codex-multi-agents-task.sh \
 - `-type(枚举，可选)`：任务类型；未提供时直接使用任务记录中的 `任务类型`，提供时必须与任务记录一致。
 - `-message(字符串，可选)`：补充说明；提供后追加在默认任务消息末尾。
 
-使用示例：
+- 使用示例：
 
 ```bash
 codex-multi-agents-task.sh \
@@ -136,7 +138,7 @@ codex-multi-agents-task.sh \
   -agents-list "./agents/codex-multi-agents/agents-lists.md"
 ```
 
-注意事项：
+- 注意事项：
 
 - `-dispatch` 仅管理员可执行。
 - `-agents-list` 必须显式提供，且必须与配置解析出的 canonical `AGENTS_FILE` 指向同一文件；不允许写入其他名单副本。
@@ -162,24 +164,26 @@ codex-multi-agents-task.sh \
 - 提供 `-message` 时，仅作为默认任务消息后的补充说明。
 - 锁顺序固定为：先锁 `TODO.md`，再锁 `agents-lists.md`。
 
-返回与限制：
+- 返回值：
 
 - 成功返回 `0`；任务不存在、目标角色不存在、角色忙碌、依赖未清空、任务类型不一致、目标角色职责不匹配或并发人数超限时返回 `3`。
 
-### `-done`
+### `codex-multi-agents-task.sh(-file <TODO.md>, -done, -task_id <id>, -log <path>, -agents-list <path>) -> rc`
 
-功能说明：
+- api：`codex-multi-agents-task.sh(-file <TODO.md>, -done, -task_id <id>, -log <path>, -agents-list <path>) -> rc`
+
+- 功能说明：
 
 - 将运行中任务移出 `TODO.md`，追加到 `DONE.md`，并按需更新角色状态与计划统计。
 
-参数说明：
+- 参数：
 
 - `-done(开关)`：启用完成操作。
 - `-task_id(字符串)`：目标任务 ID。
 - `-log(路径)`：写入 `DONE.md` 的日志文件路径。
 - `-agents-list(路径)`：角色列表文件。
 
-使用示例：
+- 使用示例：
 
 ```bash
 codex-multi-agents-task.sh \
@@ -190,7 +194,7 @@ codex-multi-agents-task.sh \
   -agents-list "./agents/codex-multi-agents/agents-lists.md"
 ```
 
-注意事项：
+- 注意事项：
 
 - `-agents-list` 必须显式提供，且必须与配置解析出的 canonical `AGENTS_FILE` 指向同一文件；不允许写入其他名单副本。
 - `-log` 只写入记录，不检查目标文件是否存在。
@@ -204,23 +208,25 @@ codex-multi-agents-task.sh \
 - `-done` 默认由管理员执行；但 `merge` 任务在合并完成后必须由合并角色自行执行 `-done`。合并角色仅可处理“指派给自身且任务类型为 `merge` 的运行中任务”，不得对其他类型或他人任务执行。
 - 锁顺序固定为：先锁 `TODO.md`，再锁 `DONE.md`，最后锁 `agents-lists.md`。
 
-返回与限制：
+- 返回值：
 
 - 成功返回 `0`；任务不存在返回 `3`。
 
-### `-pause`
+### `codex-multi-agents-task.sh(-file <TODO.md>, -pause, -task_id <id>, -agents-list <path>) -> rc`
 
-功能说明：
+- api：`codex-multi-agents-task.sh(-file <TODO.md>, -pause, -task_id <id>, -agents-list <path>) -> rc`
+
+- 功能说明：
 
 - 将运行中任务状态从 `进行中` 改为 `暂停`，并在该角色无其他运行中任务时释放为 `free`。
 
-参数说明：
+- 参数：
 
 - `-pause(开关)`：启用暂停操作。
 - `-task_id(字符串)`：目标任务 ID。
 - `-agents-list(路径)`：角色列表文件。
 
-使用示例：
+- 使用示例：
 
 ```bash
 codex-multi-agents-task.sh \
@@ -230,7 +236,7 @@ codex-multi-agents-task.sh \
   -agents-list "./agents/codex-multi-agents/agents-lists.md"
 ```
 
-注意事项：
+- 注意事项：
 
 - `-agents-list` 必须显式提供，且必须与配置解析出的 canonical `AGENTS_FILE` 指向同一文件；不允许写入其他名单副本。
 - 若运行表已存在同一角色多条 `状态=进行中` 的脏数据，`-pause` 必须直接失败。
@@ -240,23 +246,25 @@ codex-multi-agents-task.sh \
 - 若当前接手角色在 `agents-lists.md` 中的状态与运行表不一致，`-pause` 必须直接失败，不能静默修正。
 - 锁顺序固定为：先锁 `TODO.md`，再锁 `agents-lists.md`。
 
-返回与限制：
+- 返回值：
 
 - 成功返回 `0`；任务不存在返回 `3`。
 
-### `-continue`
+### `codex-multi-agents-task.sh(-file <TODO.md>, -continue, -task_id <id>, -agents-list <path>) -> rc`
 
-功能说明：
+- api：`codex-multi-agents-task.sh(-file <TODO.md>, -continue, -task_id <id>, -agents-list <path>) -> rc`
+
+- 功能说明：
 
 - 将已暂停任务恢复为 `进行中`，并将对应角色状态设为 `busy`。
 
-参数说明：
+- 参数：
 
 - `-continue(开关)`：启用继续操作。
 - `-task_id(字符串)`：目标任务 ID。
 - `-agents-list(路径)`：角色列表文件。
 
-使用示例：
+- 使用示例：
 
 ```bash
 codex-multi-agents-task.sh \
@@ -266,7 +274,7 @@ codex-multi-agents-task.sh \
   -agents-list "./agents/codex-multi-agents/agents-lists.md"
 ```
 
-注意事项：
+- 注意事项：
 
 - `-agents-list` 必须显式提供，且必须与配置解析出的 canonical `AGENTS_FILE` 指向同一文件；不允许写入其他名单副本。
 - 若运行表已存在同一角色多条 `状态=进行中` 的脏数据，`-continue` 必须直接失败。
@@ -276,25 +284,27 @@ codex-multi-agents-task.sh \
 - 恢复后的接手角色必须在运行表中没有其他 `状态=进行中` 的任务；若已存在其他运行中任务，则继续失败。
 - 锁顺序固定为：先锁 `TODO.md`，再锁 `agents-lists.md`。
 
-返回与限制：
+- 返回值：
 
 - 成功返回 `0`；任务不存在或状态不合法返回 `3`。
 
-### `-reassign`
+### `codex-multi-agents-task.sh(-file <TODO.md>, -reassign, -task_id <id>, -to <name>, -agents-list <path>) -> rc`
 
-功能说明：
+- api：`codex-multi-agents-task.sh(-file <TODO.md>, -reassign, -task_id <id>, -to <name>, -agents-list <path>) -> rc`
+
+- 功能说明：
 
 - 在 `正在执行的任务` 中替换指派对象，并只更新旧角色与新角色的状态。
 - 改派成功后同步通知被取消任务的旧角色与新的接手角色。
 
-参数说明：
+- 参数：
 
 - `-reassign(开关)`：启用改派操作。
 - `-task_id(字符串)`：目标任务 ID。
 - `-to(字符串)`：新的目标角色。
 - `-agents-list(路径)`：角色列表文件。
 
-使用示例：
+- 使用示例：
 
 ```bash
 codex-multi-agents-task.sh \
@@ -305,7 +315,7 @@ codex-multi-agents-task.sh \
   -agents-list "./agents/codex-multi-agents/agents-lists.md"
 ```
 
-注意事项：
+- 注意事项：
 
 - `-agents-list` 必须显式提供，且必须与配置解析出的 canonical `AGENTS_FILE` 指向同一文件；不允许写入其他名单副本。
 - 若运行表已存在同一角色多条 `状态=进行中` 的脏数据，`-reassign` 必须直接失败。
@@ -320,17 +330,19 @@ codex-multi-agents-task.sh \
 - 旧角色收到“停止当前处理”的提示，新角色收到与 `-dispatch` 一致的默认任务消息模板。
 - 锁顺序固定为：先锁 `TODO.md`，再锁 `agents-lists.md`。
 
-返回与限制：
+- 返回值：
 
 - 成功返回 `0`；任务不存在、目标角色不存在、目标角色忙碌或目标角色职责不匹配返回 `3`。
 
-### `-next`
+### `codex-multi-agents-task.sh -file <TODO.md> -next -task_id <id> -from <name> -type <kind> -message <text> -agents-list <path> [-to <name>] [-auto] -> rc`
 
-功能说明：
+- api：`codex-multi-agents-task.sh -file <TODO.md> -next -task_id <id> -from <name> -type <kind> -message <text> -agents-list <path> [-to <name>] [-auto] -> rc`
+
+- 功能说明：
 
 - 将当前运行中任务改写为下一阶段；默认退回 `任务列表`，随后尝试自动启动 `任务列表` 中首个 ready 任务；带 `-to` 时手动指派给指定角色；`-auto` 仅作为兼容开关保留。
 
-参数说明：
+- 参数：
 
 - `-next(开关)`：启用续接操作。
 - `-task_id(字符串)`：目标任务 ID。
@@ -341,7 +353,7 @@ codex-multi-agents-task.sh \
 - `-agents-list(路径)`：角色列表文件；普通 `-next`、`-next -to`、`-next -auto` 都必须显式提供。
 - `-auto(开关，可选)`：兼容开关；与不带 `-auto` 的自动续接逻辑一致。
 
-使用示例：
+- 使用示例：
 
 ```bash
 codex-multi-agents-task.sh \
@@ -374,7 +386,7 @@ codex-multi-agents-task.sh \
   -auto
 ```
 
-注意事项：
+- 注意事项：
 
 - `-agents-list` 必须显式提供，且必须与配置解析出的 canonical `AGENTS_FILE` 指向同一文件；不允许写入其他名单副本。
 - 若运行表已存在同一角色多条 `状态=进行中` 的脏数据，`-next` 必须直接失败。
@@ -430,28 +442,30 @@ codex-multi-agents-task.sh \
 请处理任务 <task_id>（<desc>）。worktree=<worktree>；计划书=<plan_doc>；记录文件=<record_file>；若任务有独立 worktree，常规任务日志必须写入该 worktree 下的对应记录文件；只有无独立 worktree 的计划互评、专题 spec 互评、终验或归档结论，才按规则写入计划书、专题 spec 正文或 done_plan 记录文件。完成后按 <repo_root>/agents/standard/任务记录约定.md 记录并回报管理员；流程不清楚请询问管理员；实现/架构问题请询问架构师。
 ```
 
-使用示例：
+- 使用示例：
 
 ```
-请处理任务 EX-2（下一阶段：补齐边界用例）。worktree=/tmp/wt-ex2；计划书=ARCHITECTURE/plan/demo.md；记录文件=./log/ex2.md；若任务有独立 worktree，常规任务日志必须写入该 worktree 下的对应记录文件；只有无独立 worktree 的计划互评、专题 spec 互评、终验或归档结论，才按规则写入计划书、专题 spec 正文或 done_plan 记录文件。完成后按 /home/lfr/kernelcode_generate/agents/standard/任务记录约定.md 记录并回报管理员；流程不清楚请询问管理员；实现/架构问题请询问架构师。
+请处理任务 EX-2（下一阶段：补齐边界用例）。worktree=/tmp/wt-ex2；计划书=ARCHITECTURE/plan/demo.md；记录文件=./log/ex2.md；若任务有独立 worktree，常规任务日志必须写入该 worktree 下的对应记录文件；只有无独立 worktree 的计划互评、专题 spec 互评、终验或归档结论，才按规则写入计划书、专题 spec 正文或 done_plan 记录文件。完成后按 <repo_root>/agents/standard/任务记录约定.md 记录并回报管理员；流程不清楚请询问管理员；实现/架构问题请询问架构师。
 ```
 
-返回与限制：
+- 返回值：
 
 - 成功返回 `0`；任务不存在、目标角色不存在、目标角色忙碌、目标角色职责不匹配或并发人数超限时返回 `3`。
 
-### `-delete`
+### `codex-multi-agents-task.sh(-file <TODO.md>, -delete, -task_id <id>) -> rc`
 
-功能说明：
+- api：`codex-multi-agents-task.sh(-file <TODO.md>, -delete, -task_id <id>) -> rc`
+
+- 功能说明：
 
 - 删除待分发任务，或删除已暂停的运行中任务。
 
-参数说明：
+- 参数：
 
 - `-delete(开关)`：启用删除操作。
 - `-task_id(字符串)`：目标任务 ID。
 
-使用示例：
+- 使用示例：
 
 ```bash
 codex-multi-agents-task.sh \
@@ -460,23 +474,25 @@ codex-multi-agents-task.sh \
   -task_id "EX-3"
 ```
 
-注意事项：
+- 注意事项：
 
 - 删除不会写入 `DONE.md`。
 - `-delete` 只能删除 `任务列表` 中的任务，或 `正在执行的任务` 中 `状态=暂停` 的任务；不能删除 `状态=进行中` 的任务。
 - 若写操作需要维护计划统计而 `TODO.md` 中缺少 `## 计划书`，则会自动补齐该段落及表头。
 
-返回与限制：
+- 返回值：
 
 - 成功返回 `0`；任务不存在或任务仍在运行中返回 `3`。
 
-### `-new`
+### `codex-multi-agents-task.sh -file <TODO.md> -new -info <text> -type <kind> -worktree <path> -depends <ids|None> -plan <path|None> [-to <name>] [-from <name>] [-log <path>] -> rc`
 
-功能说明：
+- api：`codex-multi-agents-task.sh -file <TODO.md> -new -info <text> -type <kind> -worktree <path> -depends <ids|None> -plan <path|None> [-to <name>] [-from <name>] [-log <path>] -> rc`
+
+- 功能说明：
 
 - 在 `任务列表` 追加一条新任务，并在需要时同步更新计划统计。
 
-参数说明：
+- 参数：
 
 - `-new(开关)`：启用新建操作。
 - `-info(字符串)`：任务描述。
@@ -488,7 +504,7 @@ codex-multi-agents-task.sh \
 - `-from(字符串，可选)`：发起人；未提供时由环境或配置解析。
 - `-log(路径，可选)`：记录文件。
 
-使用示例：
+- 使用示例：
 
 ```bash
 codex-multi-agents-task.sh \
@@ -502,7 +518,7 @@ codex-multi-agents-task.sh \
   -to "worker-b"
 ```
 
-注意事项：
+- 注意事项：
 
 - `-new` 仅管理员或架构师可执行。
 - 任务 ID 由脚本按 `T-YYYYMMDD-<8位hash>` 生成。
@@ -516,22 +532,24 @@ codex-multi-agents-task.sh \
 - 新写入的 `worktree` 在 `正在执行的任务` 与 `任务列表` 中必须唯一。
 - 新生成的 `任务 ID` 在 `正在执行的任务` 与 `任务列表` 中必须全局唯一。
 
-返回与限制：
+- 返回值：
 
 - 成功返回 `0`；缺少必填参数返回 `1`；`worktree` 重复或依赖不存在返回 `3`。
 
-### `-done-plan`
+### `codex-multi-agents-task.sh(-file <TODO.md>, -done-plan, -plan <path>) -> rc`
 
-功能说明：
+- api：`codex-multi-agents-task.sh(-file <TODO.md>, -done-plan, -plan <path>) -> rc`
+
+- 功能说明：
 
 - 删除 `完成待检查` 的计划统计行，表示该计划已从任务层完全收口。
 
-参数说明：
+- 参数：
 
 - `-done-plan(开关)`：启用计划归档操作。
 - `-plan(路径)`：目标计划书路径。
 
-使用示例：
+- 使用示例：
 
 ```bash
 codex-multi-agents-task.sh \
@@ -540,7 +558,7 @@ codex-multi-agents-task.sh \
   -plan "ARCHITECTURE/plan/x.md"
 ```
 
-注意事项：
+- 注意事项：
 
 - `-done-plan` 仅管理员可执行。
 - 目标计划若仍有任务残留在 `正在执行的任务` 或 `任务列表`，则不能执行 `-done-plan`。
@@ -549,96 +567,102 @@ codex-multi-agents-task.sh \
 - `-done-plan` 只能处理 `完成状态=完成待检查` 且 `待完成任务=0` 的计划书记录。
 - 若双架构师对同一计划的最新终验结论仍为“不通过”，应先由架构师补建修复任务并完成重新验收，再执行 `-done-plan`。
 
-返回与限制：
+- 返回值：
 
 - 成功返回 `0`；计划状态不满足条件时返回 `3`。
 
 ## 测试
 
-- 测试文件：[`test/codex-multi-agents/test_codex-multi-agents-task.py`](../../../test/codex-multi-agents/test_codex-multi-agents-task.py)
+- 测试文件：`test/codex-multi-agents/test_codex-multi-agents-task.py`
 - 执行命令：`pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py`
-- 测试目标：
-  - 验证各主操作的参数校验、状态迁移、计划统计与角色状态同步。
-  - 验证分发前初始化、分发后消息发送、默认模板拼接与消息失败语义。
-  - 验证 `-next` 清空指派并向管理员发送摘要；验证 `-next -to` 手动续接、角色状态同步与会话消息；验证普通 `-next` 只会扫描并拉起 `任务列表` 中首个 ready 任务，`-next -auto` 会继续拉起所有 ready 任务，并按接手人场景发送摘要与会话消息。
-  - 验证文件不存在、表结构非法、依赖未清空、角色忙碌、并行人数超限与锁冲突路径。
-  - 验证权限规则：管理员专属操作、管理员/架构师专属操作，以及合并角色执行 `-done` 的范围。
-- 功能与用例清单：
-  - `TC-001` `test_dispatch_task_success`：分发成功，任务移入运行表，角色变为 `busy`
-  - `TC-001B` `test_dispatch_accepts_execute_task_type`：分发计划级 `execute` 任务给 `execute` 专职角色
-  - `TC-002` `test_dispatch_missing_task_returns_rc3`：分发不存在任务，返回 `3`
-  - `TC-003` `test_done_task_moves_to_done_file_success`：完成成功，任务移出 TODO，追加到 DONE
-  - `TC-004` `test_done_missing_task_returns_rc3`：完成不存在任务，返回 `3`
-  - `TC-005` `test_pause_task_success`：暂停成功，运行中任务状态改为 `暂停`
-  - `TC-006` `test_pause_missing_task_returns_rc3`：暂停不存在任务，返回 `3`
-  - `TC-007` `test_new_task_with_assignee_success`：新建任务并带默认指派，任务列表新增一行
-  - `TC-008` `test_new_task_without_assignee_success`：新建任务且不带默认指派，指派为空
-  - `TC-008A` `test_new_accepts_execute_task_type`：新建计划级 `execute` 任务
-  - `TC-009` `test_argument_error_returns_rc1`：缺少必填参数，返回 `1`
-  - `TC-010` `test_file_not_found_returns_rc2`：`TODO.md` 不存在，返回 `2`
-  - `TC-011` `test_invalid_todo_structure_returns_rc2`：表结构非法，返回 `2`
-  - `TC-012` `test_lock_conflict_returns_rc4`：文件锁冲突，返回 `4`
-  - `TC-013` `test_status_doing_outputs_running_table`：查询运行中任务，输出运行表
-  - `TC-014` `test_status_task_list_outputs_list_table`：查询任务列表，输出任务列表表
-  - `TC-015` `test_status_requires_exactly_one_mode`：`-status` 模式参数不合法，返回 `1`
-  - `TC-016` `test_status_invalid_table_returns_rc2`：`-status` 遇到坏表头，返回 `2`
-  - `TC-017` `test_dispatch_with_message_sends_talk_success`：显式消息发送成功
-  - `TC-018` `test_dispatch_with_message_failure_keeps_dispatch_result`：显式消息发送失败但分发结果保留
-  - `TC-019` `test_dispatch_runs_init_before_dispatch`：分发前初始化
-  - `TC-020` `test_dispatch_without_message_talk_failure_is_warning`：默认模板发送失败，仅输出告警
-  - `TC-021` `test_dispatch_without_message_template_includes_worktree_and_plan`：默认模板包含 `worktree` 与 `计划书`
-  - `TC-022` `test_continue_task_success`：继续暂停任务，状态恢复为 `进行中`
-  - `TC-023` `test_continue_missing_task_returns_rc3`：继续不存在任务，返回 `3`
-  - `TC-024` `test_continue_requires_paused_status`：继续非暂停任务，返回 `3`
-  - `TC-025` `test_continue_requires_agents_list`：继续任务缺少角色列表，返回 `1`
-  - `TC-026` `test_reassign_task_success`：改派成功，任务指派更新，只更新旧/新接手人状态，并通知旧/新接手人
-  - `TC-027` `test_reassign_missing_task_returns_rc3`：改派不存在任务，返回 `3`
-  - `TC-028` `test_reassign_requires_agents_list`：改派缺少角色列表，返回 `1`
-  - `TC-028A` `test_reassign_rejects_busy_agent`：改派目标角色忙碌，返回 `3`
-  - `TC-028B` `test_reassign_rejects_merge_task_for_substitute`：`merge` 改派到候补角色被拒绝
-  - `TC-028C` `test_reassign_rejects_merge_task_for_non_merge_specialist`：`merge` 改派到非合并专职被拒绝
-  - `TC-028D` `test_reassign_rejects_build_task_for_review_specialist`：`build` 改派到 `review` 专职被拒绝
-  - `TC-029` `test_delete_task_list_success`：删除任务列表任务
-  - `TC-030` `test_delete_missing_task_returns_rc3`：删除不存在任务，返回 `3`
-  - `TC-031` `test_delete_running_task_returns_rc3`：删除运行中任务，返回 `3`
-  - `TC-032` `test_delete_paused_running_task_success`：删除已暂停运行中任务
-  - `TC-033` `test_next_task_moves_running_to_task_list_success`：续接成功，任务回到列表，描述与类型更新
-  - `TC-033A` `test_next_to_dispatches_same_task_and_updates_agent_status`：手动续接到指定角色，任务回到运行表并同步旧/新角色状态
-  - `TC-030B` `test_next_to_rejects_build_task_for_review_specialist`：`-next -to` 不能把 `build` 手动续接给 `review` 专职
-  - `TC-034` `test_next_requires_message`：续接缺少描述，返回 `1`
-  - `TC-035` `test_next_requires_type`：续接缺少任务类型，返回 `1`
-  - `TC-036` `test_new_restricted_for_non_privileged_operator`：普通执行人调用 `-new`，返回 `3`
-  - `TC-037` `test_done_restricted_for_non_privileged_operator`：非管理员且不满足合并角色条件调用 `-done`，返回 `3`
-  - `TC-037A` `test_done_allows_merge_operator`：合并角色完成自身 `merge` 任务，返回 `0`
-  - `TC-038` `test_new_requires_worktree`：新建缺少 `-worktree`，返回 `1`
-  - `TC-039` `test_dispatch_blocked_by_unresolved_dependency`：分发时依赖未清空，返回 `3`
-  - `TC-040` `test_dispatch_rejects_busy_agent`：目标角色为 `busy`，返回 `3`
-  - `TC-036A` `test_dispatch_rejects_merge_task_for_substitute`：`merge` 分发到候补角色被拒绝
-  - `TC-036B` `test_dispatch_rejects_merge_task_for_non_merge_specialist`：`merge` 分发到非合并专职被拒绝
-  - `TC-036C` `test_dispatch_rejects_build_task_for_review_specialist`：`build` 分发到 `review` 专职被拒绝
-  - `TC-041` `test_next_requires_agents_list`：续接缺少角色列表，返回 `1`
-  - `TC-041A` `test_next_requires_from`：续接缺少发起人，返回 `1`
-  - `TC-042` `test_new_requires_depends_and_plan`：新建缺少 `-depends/-plan`，返回 `1`
-  - `TC-043` `test_status_plan_list_outputs_plan_table`：查询计划统计表
-  - `TC-044` `test_new_requires_existing_dependencies`：新建任务依赖不存在，返回 `3`
-  - `TC-045` `test_new_updates_plan_progress_table`：新建任务更新计划统计
-  - `TC-046` `test_done_last_plan_task_marks_plan_waiting_review`：完成最后一个计划任务，计划状态改为 `完成待检查`
-  - `TC-047` `test_done_plan_removes_review_ready_plan`：归档完成待检查计划
-  - `TC-048` `test_done_plan_requires_review_ready_status`：归档非 `完成待检查` 计划，返回 `3`
-  - `TC-049` `test_done_plan_restricted_for_non_privileged_operator`：非管理员调用 `-done-plan`，返回 `3`
-  - `TC-050` `test_dispatch_rejects_when_parallel_limit_reached`：并发人数达到上限，返回 `3`
-  - `TC-051` `test_dispatch_restricted_for_non_admin_operator`：非管理员调用 `-dispatch`，返回 `3`
-  - `TC-052` `test_next_auto_reassigns_same_task_to_operator`：自动续接给当前执行者，任务 ID 不变
-  - `TC-053` `test_next_auto_reassigns_same_task_to_other_agent`：自动续接给其他匹配角色，并发送任务消息
-  - `TC-054` `test_next_auto_failure_notifies_admin`：自动续接失败，任务保留在列表并通知管理员推进
-  - `TC-055` `test_auto_only_supports_next`：`-auto` 与其他命令组合，返回 `1`
-  - `TC-056` `test_next_auto_random_assignment_with_seed`：设置随机种子时自动续接结果可复现
-  - `TC-057` `test_next_auto_random_assignment_seed_changes`：不同随机种子会触发不同接手人
-  - `TC-057A` `test_next_auto_starts_first_ready_task_from_task_list`：普通 `-next` 会自动启动任务列表中首个 ready 任务
-  - `TC-058` `test_next_auto_spec_dedicated_first`：`spec` 专职可用时仅从专职池选择
-  - `TC-058A` `test_next_auto_execute_dedicated_first`：`execute` 专职可用时仅从专职池选择
-  - `TC-059` `test_next_auto_build_dedicated_first`：`build` 专职可用时仅从专职池选择
-  - `TC-060` `test_next_auto_build_falls_back_to_substitute`：`build` 专职不可用时回退到候补池
-  - `TC-061` `test_next_auto_review_dedicated_first`：`review` 专职可用时仅从专职池选择
-  - `TC-062` `test_next_auto_merge_rejects_fallback`：`merge` 无专职且仅候补可用时自动续接失败
-  - `TC-062A` `test_next_auto_merge_rejects_non_merge_specialist`：`merge` 自动续接不会错误挑选非合并专职
+
+### 测试目标
+
+- 验证 `spec/codex-multi-agents/scripts/codex-multi-agents-task.md` 对应公开 API 的正常路径、边界条件与错误语义。
+- 验证公开执行入口的返回值、输出或状态变化符合预期。
+- 验证公开导入、注册名、CLI 或命名空间入口只暴露 spec 定义的 API。
+- 验证非法输入、边界条件和错误语义按公开合同失败。
+
+
+### 功能与用例清单
+
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-001 | 执行结果 | `TC-001` `test_dispatch_task_success`：分发成功，任务移入运行表，角色变为 `busy` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_dispatch_task_success`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-001` `test_dispatch_task_success`：分发成功，任务移入运行表，角色变为 `busy`”场景。 | `test_dispatch_task_success` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-002 | 执行结果 | `TC-001B` `test_dispatch_accepts_execute_task_type`：分发计划级 `execute` 任务给 `execute` 专职角色 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_dispatch_accepts_execute_task_type`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-001B` `test_dispatch_accepts_execute_task_type`：分发计划级 `execute` 任务给 `execute` 专职角色”场景。 | `test_dispatch_accepts_execute_task_type` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-003 | 执行结果 | `TC-002` `test_dispatch_missing_task_returns_rc3`：分发不存在任务，返回 `3` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_dispatch_missing_task_returns_rc3`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-002` `test_dispatch_missing_task_returns_rc3`：分发不存在任务，返回 `3`”场景。 | `test_dispatch_missing_task_returns_rc3` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-004 | 执行结果 | `TC-003` `test_done_task_moves_to_done_file_success`：完成成功，任务移出 TODO，追加到 DONE | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_done_task_moves_to_done_file_success`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-003` `test_done_task_moves_to_done_file_success`：完成成功，任务移出 TODO，追加到 DONE”场景。 | `test_done_task_moves_to_done_file_success` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-005 | 执行结果 | `TC-004` `test_done_missing_task_returns_rc3`：完成不存在任务，返回 `3` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_done_missing_task_returns_rc3`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-004` `test_done_missing_task_returns_rc3`：完成不存在任务，返回 `3`”场景。 | `test_done_missing_task_returns_rc3` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-006 | 公开入口 | `TC-005` `test_pause_task_success`：暂停成功，运行中任务状态改为 `暂停` | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_pause_task_success`。 | 公开入口在“`TC-005` `test_pause_task_success`：暂停成功，运行中任务状态改为 `暂停`”场景下可导入、构造、注册或按名称发现。 | `test_pause_task_success` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-007 | 执行结果 | `TC-006` `test_pause_missing_task_returns_rc3`：暂停不存在任务，返回 `3` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_pause_missing_task_returns_rc3`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-006` `test_pause_missing_task_returns_rc3`：暂停不存在任务，返回 `3`”场景。 | `test_pause_missing_task_returns_rc3` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-008 | 公开入口 | `TC-007` `test_new_task_with_assignee_success`：新建任务并带默认指派，任务列表新增一行 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_new_task_with_assignee_success`。 | 公开入口在“`TC-007` `test_new_task_with_assignee_success`：新建任务并带默认指派，任务列表新增一行”场景下可导入、构造、注册或按名称发现。 | `test_new_task_with_assignee_success` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-009 | 公开入口 | `TC-008` `test_new_task_without_assignee_success`：新建任务且不带默认指派，指派为空 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_new_task_without_assignee_success`。 | 公开入口在“`TC-008` `test_new_task_without_assignee_success`：新建任务且不带默认指派，指派为空”场景下可导入、构造、注册或按名称发现。 | `test_new_task_without_assignee_success` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-010 | 执行结果 | `TC-008A` `test_new_accepts_execute_task_type`：新建计划级 `execute` 任务 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_new_accepts_execute_task_type`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-008A` `test_new_accepts_execute_task_type`：新建计划级 `execute` 任务”场景。 | `test_new_accepts_execute_task_type` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-011 | 边界/异常 | `TC-009` `test_argument_error_returns_rc1`：缺少必填参数，返回 `1` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_argument_error_returns_rc1`。 | “`TC-009` `test_argument_error_returns_rc1`：缺少必填参数，返回 `1`”场景按公开错误语义失败或被拒绝。 | `test_argument_error_returns_rc1` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-012 | 执行结果 | `TC-010` `test_file_not_found_returns_rc2`：`TODO.md` 不存在，返回 `2` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_file_not_found_returns_rc2`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-010` `test_file_not_found_returns_rc2`：`TODO.md` 不存在，返回 `2`”场景。 | `test_file_not_found_returns_rc2` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-013 | 边界/异常 | `TC-011` `test_invalid_todo_structure_returns_rc2`：表结构非法，返回 `2` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_invalid_todo_structure_returns_rc2`。 | “`TC-011` `test_invalid_todo_structure_returns_rc2`：表结构非法，返回 `2`”场景按公开错误语义失败或被拒绝。 | `test_invalid_todo_structure_returns_rc2` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-014 | 执行结果 | `TC-012` `test_lock_conflict_returns_rc4`：文件锁冲突，返回 `4` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_lock_conflict_returns_rc4`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-012` `test_lock_conflict_returns_rc4`：文件锁冲突，返回 `4`”场景。 | `test_lock_conflict_returns_rc4` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-015 | 执行结果 | `TC-013` `test_status_doing_outputs_running_table`：查询运行中任务，输出运行表 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_status_doing_outputs_running_table`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-013` `test_status_doing_outputs_running_table`：查询运行中任务，输出运行表”场景。 | `test_status_doing_outputs_running_table` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-016 | 执行结果 | `TC-014` `test_status_task_list_outputs_list_table`：查询任务列表，输出任务列表表 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_status_task_list_outputs_list_table`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-014` `test_status_task_list_outputs_list_table`：查询任务列表，输出任务列表表”场景。 | `test_status_task_list_outputs_list_table` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-017 | 边界/异常 | `TC-015` `test_status_requires_exactly_one_mode`：`-status` 模式参数不合法，返回 `1` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_status_requires_exactly_one_mode`。 | “`TC-015` `test_status_requires_exactly_one_mode`：`-status` 模式参数不合法，返回 `1`”场景按公开错误语义失败或被拒绝。 | `test_status_requires_exactly_one_mode` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-018 | 边界/异常 | `TC-016` `test_status_invalid_table_returns_rc2`：`-status` 遇到坏表头，返回 `2` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_status_invalid_table_returns_rc2`。 | “`TC-016` `test_status_invalid_table_returns_rc2`：`-status` 遇到坏表头，返回 `2`”场景按公开错误语义失败或被拒绝。 | `test_status_invalid_table_returns_rc2` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-019 | 执行结果 | `TC-017` `test_dispatch_with_message_sends_talk_success`：显式消息发送成功 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_dispatch_with_message_sends_talk_success`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-017` `test_dispatch_with_message_sends_talk_success`：显式消息发送成功”场景。 | `test_dispatch_with_message_sends_talk_success` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-020 | 边界/异常 | `TC-018` `test_dispatch_with_message_failure_keeps_dispatch_result`：显式消息发送失败但分发结果保留 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dispatch_with_message_failure_keeps_dispatch_result`。 | “`TC-018` `test_dispatch_with_message_failure_keeps_dispatch_result`：显式消息发送失败但分发结果保留”场景按公开错误语义失败或被拒绝。 | `test_dispatch_with_message_failure_keeps_dispatch_result` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-021 | 执行结果 | `TC-019` `test_dispatch_runs_init_before_dispatch`：分发前初始化 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_dispatch_runs_init_before_dispatch`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-019` `test_dispatch_runs_init_before_dispatch`：分发前初始化”场景。 | `test_dispatch_runs_init_before_dispatch` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-022 | 边界/异常 | `TC-020` `test_dispatch_without_message_talk_failure_is_warning`：默认模板发送失败，仅输出告警 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dispatch_without_message_talk_failure_is_warning`。 | “`TC-020` `test_dispatch_without_message_talk_failure_is_warning`：默认模板发送失败，仅输出告警”场景按公开错误语义失败或被拒绝。 | `test_dispatch_without_message_talk_failure_is_warning` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-023 | 执行结果 | `TC-021` `test_dispatch_without_message_template_includes_worktree_and_plan`：默认模板包含 `worktree` 与 `计划书` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_dispatch_without_message_template_includes_worktree_and_plan`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-021` `test_dispatch_without_message_template_includes_worktree_and_plan`：默认模板包含 `worktree` 与 `计划书`”场景。 | `test_dispatch_without_message_template_includes_worktree_and_plan` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-024 | 公开入口 | `TC-022` `test_continue_task_success`：继续暂停任务，状态恢复为 `进行中` | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_continue_task_success`。 | 公开入口在“`TC-022` `test_continue_task_success`：继续暂停任务，状态恢复为 `进行中`”场景下可导入、构造、注册或按名称发现。 | `test_continue_task_success` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-025 | 执行结果 | `TC-023` `test_continue_missing_task_returns_rc3`：继续不存在任务，返回 `3` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_continue_missing_task_returns_rc3`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-023` `test_continue_missing_task_returns_rc3`：继续不存在任务，返回 `3`”场景。 | `test_continue_missing_task_returns_rc3` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-026 | 边界/异常 | `TC-024` `test_continue_requires_paused_status`：继续非暂停任务，返回 `3` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_continue_requires_paused_status`。 | “`TC-024` `test_continue_requires_paused_status`：继续非暂停任务，返回 `3`”场景按公开错误语义失败或被拒绝。 | `test_continue_requires_paused_status` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-027 | 边界/异常 | `TC-025` `test_continue_requires_agents_list`：继续任务缺少角色列表，返回 `1` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_continue_requires_agents_list`。 | “`TC-025` `test_continue_requires_agents_list`：继续任务缺少角色列表，返回 `1`”场景按公开错误语义失败或被拒绝。 | `test_continue_requires_agents_list` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-028 | 公开入口 | `TC-026` `test_reassign_task_success`：改派成功，任务指派更新，只更新旧/新接手人状态，并通知旧/新接手人 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_reassign_task_success`。 | 公开入口在“`TC-026` `test_reassign_task_success`：改派成功，任务指派更新，只更新旧/新接手人状态，并通知旧/新接手人”场景下可导入、构造、注册或按名称发现。 | `test_reassign_task_success` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-029 | 执行结果 | `TC-027` `test_reassign_missing_task_returns_rc3`：改派不存在任务，返回 `3` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_reassign_missing_task_returns_rc3`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-027` `test_reassign_missing_task_returns_rc3`：改派不存在任务，返回 `3`”场景。 | `test_reassign_missing_task_returns_rc3` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-030 | 边界/异常 | `TC-028` `test_reassign_requires_agents_list`：改派缺少角色列表，返回 `1` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_reassign_requires_agents_list`。 | “`TC-028` `test_reassign_requires_agents_list`：改派缺少角色列表，返回 `1`”场景按公开错误语义失败或被拒绝。 | `test_reassign_requires_agents_list` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-031 | 边界/异常 | `TC-028A` `test_reassign_rejects_busy_agent`：改派目标角色忙碌，返回 `3` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_reassign_rejects_busy_agent`。 | “`TC-028A` `test_reassign_rejects_busy_agent`：改派目标角色忙碌，返回 `3`”场景按公开错误语义失败或被拒绝。 | `test_reassign_rejects_busy_agent` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-032 | 边界/异常 | `TC-028B` `test_reassign_rejects_merge_task_for_substitute`：`merge` 改派到候补角色被拒绝 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_reassign_rejects_merge_task_for_substitute`。 | “`TC-028B` `test_reassign_rejects_merge_task_for_substitute`：`merge` 改派到候补角色被拒绝”场景按公开错误语义失败或被拒绝。 | `test_reassign_rejects_merge_task_for_substitute` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-033 | 边界/异常 | `TC-028C` `test_reassign_rejects_merge_task_for_non_merge_specialist`：`merge` 改派到非合并专职被拒绝 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_reassign_rejects_merge_task_for_non_merge_specialist`。 | “`TC-028C` `test_reassign_rejects_merge_task_for_non_merge_specialist`：`merge` 改派到非合并专职被拒绝”场景按公开错误语义失败或被拒绝。 | `test_reassign_rejects_merge_task_for_non_merge_specialist` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-034 | 边界/异常 | `TC-028D` `test_reassign_rejects_build_task_for_review_specialist`：`build` 改派到 `review` 专职被拒绝 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_reassign_rejects_build_task_for_review_specialist`。 | “`TC-028D` `test_reassign_rejects_build_task_for_review_specialist`：`build` 改派到 `review` 专职被拒绝”场景按公开错误语义失败或被拒绝。 | `test_reassign_rejects_build_task_for_review_specialist` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-035 | 公开入口 | `TC-029` `test_delete_task_list_success`：删除任务列表任务 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_delete_task_list_success`。 | 公开入口在“`TC-029` `test_delete_task_list_success`：删除任务列表任务”场景下可导入、构造、注册或按名称发现。 | `test_delete_task_list_success` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-036 | 执行结果 | `TC-030` `test_delete_missing_task_returns_rc3`：删除不存在任务，返回 `3` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_delete_missing_task_returns_rc3`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-030` `test_delete_missing_task_returns_rc3`：删除不存在任务，返回 `3`”场景。 | `test_delete_missing_task_returns_rc3` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-037 | 执行结果 | `TC-031` `test_delete_running_task_returns_rc3`：删除运行中任务，返回 `3` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_delete_running_task_returns_rc3`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-031` `test_delete_running_task_returns_rc3`：删除运行中任务，返回 `3`”场景。 | `test_delete_running_task_returns_rc3` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-038 | 执行结果 | `TC-032` `test_delete_paused_running_task_success`：删除已暂停运行中任务 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_delete_paused_running_task_success`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-032` `test_delete_paused_running_task_success`：删除已暂停运行中任务”场景。 | `test_delete_paused_running_task_success` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-039 | 执行结果 | `TC-033` `test_next_task_moves_running_to_task_list_success`：续接成功，任务回到列表，描述与类型更新 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_next_task_moves_running_to_task_list_success`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-033` `test_next_task_moves_running_to_task_list_success`：续接成功，任务回到列表，描述与类型更新”场景。 | `test_next_task_moves_running_to_task_list_success` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-040 | 执行结果 | `TC-033A` `test_next_to_dispatches_same_task_and_updates_agent_status`：手动续接到指定角色，任务回到运行表并同步旧/新角色状态 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_next_to_dispatches_same_task_and_updates_agent_status`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-033A` `test_next_to_dispatches_same_task_and_updates_agent_status`：手动续接到指定角色，任务回到运行表并同步旧/新角色状态”场景。 | `test_next_to_dispatches_same_task_and_updates_agent_status` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-041 | 边界/异常 | `TC-030B` `test_next_to_rejects_build_task_for_review_specialist`：`-next -to` 不能把 `build` 手动续接给 `review` 专职 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_next_to_rejects_build_task_for_review_specialist`。 | “`TC-030B` `test_next_to_rejects_build_task_for_review_specialist`：`-next -to` 不能把 `build` 手动续接给 `review` 专职”场景按公开错误语义失败或被拒绝。 | `test_next_to_rejects_build_task_for_review_specialist` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-042 | 边界/异常 | `TC-034` `test_next_requires_message`：续接缺少描述，返回 `1` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_next_requires_message`。 | “`TC-034` `test_next_requires_message`：续接缺少描述，返回 `1`”场景按公开错误语义失败或被拒绝。 | `test_next_requires_message` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-043 | 边界/异常 | `TC-035` `test_next_requires_type`：续接缺少任务类型，返回 `1` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_next_requires_type`。 | “`TC-035` `test_next_requires_type`：续接缺少任务类型，返回 `1`”场景按公开错误语义失败或被拒绝。 | `test_next_requires_type` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-044 | 执行结果 | `TC-036` `test_new_restricted_for_non_privileged_operator`：普通执行人调用 `-new`，返回 `3` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_new_restricted_for_non_privileged_operator`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-036` `test_new_restricted_for_non_privileged_operator`：普通执行人调用 `-new`，返回 `3`”场景。 | `test_new_restricted_for_non_privileged_operator` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-045 | 执行结果 | `TC-037` `test_done_restricted_for_non_privileged_operator`：非管理员且不满足合并角色条件调用 `-done`，返回 `3` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_done_restricted_for_non_privileged_operator`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-037` `test_done_restricted_for_non_privileged_operator`：非管理员且不满足合并角色条件调用 `-done`，返回 `3`”场景。 | `test_done_restricted_for_non_privileged_operator` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-046 | 执行结果 | `TC-037A` `test_done_allows_merge_operator`：合并角色完成自身 `merge` 任务，返回 `0` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_done_allows_merge_operator`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-037A` `test_done_allows_merge_operator`：合并角色完成自身 `merge` 任务，返回 `0`”场景。 | `test_done_allows_merge_operator` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-047 | 边界/异常 | `TC-038` `test_new_requires_worktree`：新建缺少 `-worktree`，返回 `1` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_new_requires_worktree`。 | “`TC-038` `test_new_requires_worktree`：新建缺少 `-worktree`，返回 `1`”场景按公开错误语义失败或被拒绝。 | `test_new_requires_worktree` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-048 | 执行结果 | `TC-039` `test_dispatch_blocked_by_unresolved_dependency`：分发时依赖未清空，返回 `3` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_dispatch_blocked_by_unresolved_dependency`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-039` `test_dispatch_blocked_by_unresolved_dependency`：分发时依赖未清空，返回 `3`”场景。 | `test_dispatch_blocked_by_unresolved_dependency` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-049 | 边界/异常 | `TC-040` `test_dispatch_rejects_busy_agent`：目标角色为 `busy`，返回 `3` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dispatch_rejects_busy_agent`。 | “`TC-040` `test_dispatch_rejects_busy_agent`：目标角色为 `busy`，返回 `3`”场景按公开错误语义失败或被拒绝。 | `test_dispatch_rejects_busy_agent` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-050 | 边界/异常 | `TC-036A` `test_dispatch_rejects_merge_task_for_substitute`：`merge` 分发到候补角色被拒绝 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dispatch_rejects_merge_task_for_substitute`。 | “`TC-036A` `test_dispatch_rejects_merge_task_for_substitute`：`merge` 分发到候补角色被拒绝”场景按公开错误语义失败或被拒绝。 | `test_dispatch_rejects_merge_task_for_substitute` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-051 | 边界/异常 | `TC-036B` `test_dispatch_rejects_merge_task_for_non_merge_specialist`：`merge` 分发到非合并专职被拒绝 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dispatch_rejects_merge_task_for_non_merge_specialist`。 | “`TC-036B` `test_dispatch_rejects_merge_task_for_non_merge_specialist`：`merge` 分发到非合并专职被拒绝”场景按公开错误语义失败或被拒绝。 | `test_dispatch_rejects_merge_task_for_non_merge_specialist` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-052 | 边界/异常 | `TC-036C` `test_dispatch_rejects_build_task_for_review_specialist`：`build` 分发到 `review` 专职被拒绝 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dispatch_rejects_build_task_for_review_specialist`。 | “`TC-036C` `test_dispatch_rejects_build_task_for_review_specialist`：`build` 分发到 `review` 专职被拒绝”场景按公开错误语义失败或被拒绝。 | `test_dispatch_rejects_build_task_for_review_specialist` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-053 | 边界/异常 | `TC-041` `test_next_requires_agents_list`：续接缺少角色列表，返回 `1` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_next_requires_agents_list`。 | “`TC-041` `test_next_requires_agents_list`：续接缺少角色列表，返回 `1`”场景按公开错误语义失败或被拒绝。 | `test_next_requires_agents_list` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-054 | 边界/异常 | `TC-041A` `test_next_requires_from`：续接缺少发起人，返回 `1` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_next_requires_from`。 | “`TC-041A` `test_next_requires_from`：续接缺少发起人，返回 `1`”场景按公开错误语义失败或被拒绝。 | `test_next_requires_from` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-055 | 边界/异常 | `TC-042` `test_new_requires_depends_and_plan`：新建缺少 `-depends/-plan`，返回 `1` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_new_requires_depends_and_plan`。 | “`TC-042` `test_new_requires_depends_and_plan`：新建缺少 `-depends/-plan`，返回 `1`”场景按公开错误语义失败或被拒绝。 | `test_new_requires_depends_and_plan` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-056 | 执行结果 | `TC-043` `test_status_plan_list_outputs_plan_table`：查询计划统计表 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_status_plan_list_outputs_plan_table`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-043` `test_status_plan_list_outputs_plan_table`：查询计划统计表”场景。 | `test_status_plan_list_outputs_plan_table` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-057 | 边界/异常 | `TC-044` `test_new_requires_existing_dependencies`：新建任务依赖不存在，返回 `3` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_new_requires_existing_dependencies`。 | “`TC-044` `test_new_requires_existing_dependencies`：新建任务依赖不存在，返回 `3`”场景按公开错误语义失败或被拒绝。 | `test_new_requires_existing_dependencies` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-058 | 公开入口 | `TC-045` `test_new_updates_plan_progress_table`：新建任务更新计划统计 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_new_updates_plan_progress_table`。 | 公开入口在“`TC-045` `test_new_updates_plan_progress_table`：新建任务更新计划统计”场景下可导入、构造、注册或按名称发现。 | `test_new_updates_plan_progress_table` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-059 | 执行结果 | `TC-046` `test_done_last_plan_task_marks_plan_waiting_review`：完成最后一个计划任务，计划状态改为 `完成待检查` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_done_last_plan_task_marks_plan_waiting_review`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-046` `test_done_last_plan_task_marks_plan_waiting_review`：完成最后一个计划任务，计划状态改为 `完成待检查`”场景。 | `test_done_last_plan_task_marks_plan_waiting_review` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-060 | 执行结果 | `TC-047` `test_done_plan_removes_review_ready_plan`：归档完成待检查计划 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_done_plan_removes_review_ready_plan`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-047` `test_done_plan_removes_review_ready_plan`：归档完成待检查计划”场景。 | `test_done_plan_removes_review_ready_plan` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-061 | 边界/异常 | `TC-048` `test_done_plan_requires_review_ready_status`：归档非 `完成待检查` 计划，返回 `3` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_done_plan_requires_review_ready_status`。 | “`TC-048` `test_done_plan_requires_review_ready_status`：归档非 `完成待检查` 计划，返回 `3`”场景按公开错误语义失败或被拒绝。 | `test_done_plan_requires_review_ready_status` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-062 | 执行结果 | `TC-049` `test_done_plan_restricted_for_non_privileged_operator`：非管理员调用 `-done-plan`，返回 `3` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_done_plan_restricted_for_non_privileged_operator`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-049` `test_done_plan_restricted_for_non_privileged_operator`：非管理员调用 `-done-plan`，返回 `3`”场景。 | `test_done_plan_restricted_for_non_privileged_operator` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-063 | 边界/异常 | `TC-050` `test_dispatch_rejects_when_parallel_limit_reached`：并发人数达到上限，返回 `3` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dispatch_rejects_when_parallel_limit_reached`。 | “`TC-050` `test_dispatch_rejects_when_parallel_limit_reached`：并发人数达到上限，返回 `3`”场景按公开错误语义失败或被拒绝。 | `test_dispatch_rejects_when_parallel_limit_reached` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-064 | 执行结果 | `TC-051` `test_dispatch_restricted_for_non_admin_operator`：非管理员调用 `-dispatch`，返回 `3` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_dispatch_restricted_for_non_admin_operator`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-051` `test_dispatch_restricted_for_non_admin_operator`：非管理员调用 `-dispatch`，返回 `3`”场景。 | `test_dispatch_restricted_for_non_admin_operator` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-065 | 执行结果 | `TC-052` `test_next_auto_reassigns_same_task_to_operator`：自动续接给当前执行者，任务 ID 不变 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_next_auto_reassigns_same_task_to_operator`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-052` `test_next_auto_reassigns_same_task_to_operator`：自动续接给当前执行者，任务 ID 不变”场景。 | `test_next_auto_reassigns_same_task_to_operator` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-066 | 公开入口 | `TC-053` `test_next_auto_reassigns_same_task_to_other_agent`：自动续接给其他匹配角色，并发送任务消息 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_next_auto_reassigns_same_task_to_other_agent`。 | 公开入口在“`TC-053` `test_next_auto_reassigns_same_task_to_other_agent`：自动续接给其他匹配角色，并发送任务消息”场景下可导入、构造、注册或按名称发现。 | `test_next_auto_reassigns_same_task_to_other_agent` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-067 | 边界/异常 | `TC-054` `test_next_auto_failure_notifies_admin`：自动续接失败，任务保留在列表并通知管理员推进 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_next_auto_failure_notifies_admin`。 | “`TC-054` `test_next_auto_failure_notifies_admin`：自动续接失败，任务保留在列表并通知管理员推进”场景按公开错误语义失败或被拒绝。 | `test_next_auto_failure_notifies_admin` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-068 | 执行结果 | `TC-055` `test_auto_only_supports_next`：`-auto` 与其他命令组合，返回 `1` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_auto_only_supports_next`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-055` `test_auto_only_supports_next`：`-auto` 与其他命令组合，返回 `1`”场景。 | `test_auto_only_supports_next` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-069 | 公开入口 | `TC-056` `test_next_auto_random_assignment_with_seed`：设置随机种子时自动续接结果可复现 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_next_auto_random_assignment_with_seed`。 | 公开入口在“`TC-056` `test_next_auto_random_assignment_with_seed`：设置随机种子时自动续接结果可复现”场景下可导入、构造、注册或按名称发现。 | `test_next_auto_random_assignment_with_seed` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-070 | 公开入口 | `TC-057` `test_next_auto_random_assignment_seed_changes`：不同随机种子会触发不同接手人 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_next_auto_random_assignment_seed_changes`。 | 公开入口在“`TC-057` `test_next_auto_random_assignment_seed_changes`：不同随机种子会触发不同接手人”场景下可导入、构造、注册或按名称发现。 | `test_next_auto_random_assignment_seed_changes` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-071 | 公开入口 | `TC-057A` `test_next_auto_starts_first_ready_task_from_task_list`：普通 `-next` 会自动启动任务列表中首个 ready 任务 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_next_auto_starts_first_ready_task_from_task_list`。 | 公开入口在“`TC-057A` `test_next_auto_starts_first_ready_task_from_task_list`：普通 `-next` 会自动启动任务列表中首个 ready 任务”场景下可导入、构造、注册或按名称发现。 | `test_next_auto_starts_first_ready_task_from_task_list` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-072 | 公开入口 | `TC-058` `test_next_auto_spec_dedicated_first`：`spec` 专职可用时仅从专职池选择 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_next_auto_spec_dedicated_first`。 | 公开入口在“`TC-058` `test_next_auto_spec_dedicated_first`：`spec` 专职可用时仅从专职池选择”场景下可导入、构造、注册或按名称发现。 | `test_next_auto_spec_dedicated_first` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-073 | 执行结果 | `TC-058A` `test_next_auto_execute_dedicated_first`：`execute` 专职可用时仅从专职池选择 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_next_auto_execute_dedicated_first`。 | 命令返回码、输出、执行结果或状态变更体现“`TC-058A` `test_next_auto_execute_dedicated_first`：`execute` 专职可用时仅从专职池选择”场景。 | `test_next_auto_execute_dedicated_first` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-074 | 公开入口 | `TC-059` `test_next_auto_build_dedicated_first`：`build` 专职可用时仅从专职池选择 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_next_auto_build_dedicated_first`。 | 公开入口在“`TC-059` `test_next_auto_build_dedicated_first`：`build` 专职可用时仅从专职池选择”场景下可导入、构造、注册或按名称发现。 | `test_next_auto_build_dedicated_first` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-075 | 公开入口 | `TC-060` `test_next_auto_build_falls_back_to_substitute`：`build` 专职不可用时回退到候补池 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_next_auto_build_falls_back_to_substitute`。 | 公开入口在“`TC-060` `test_next_auto_build_falls_back_to_substitute`：`build` 专职不可用时回退到候补池”场景下可导入、构造、注册或按名称发现。 | `test_next_auto_build_falls_back_to_substitute` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-076 | 内存/DMA | `TC-061` `test_next_auto_review_dedicated_first`：`review` 专职可用时仅从专职池选择 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_next_auto_review_dedicated_first`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`TC-061` `test_next_auto_review_dedicated_first`：`review` 专职可用时仅从专职池选择”场景。 | `test_next_auto_review_dedicated_first` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-077 | 边界/异常 | `TC-062` `test_next_auto_merge_rejects_fallback`：`merge` 无专职且仅候补可用时自动续接失败 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_next_auto_merge_rejects_fallback`。 | “`TC-062` `test_next_auto_merge_rejects_fallback`：`merge` 无专职且仅候补可用时自动续接失败”场景按公开错误语义失败或被拒绝。 | `test_next_auto_merge_rejects_fallback` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-078 | 边界/异常 | `TC-062A` `test_next_auto_merge_rejects_non_merge_specialist`：`merge` 自动续接不会错误挑选非合并专职 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_next_auto_merge_rejects_non_merge_specialist`。 | “`TC-062A` `test_next_auto_merge_rejects_non_merge_specialist`：`merge` 自动续接不会错误挑选非合并专职”场景按公开错误语义失败或被拒绝。 | `test_next_auto_merge_rejects_non_merge_specialist` |

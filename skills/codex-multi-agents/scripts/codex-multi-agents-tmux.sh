@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # codex-multi-agents-tmux.sh
 #
-# 创建者: 榕
-# 最后一次更改: 金铲铲大作战
 #
 # 功能:
 # - 发送标准格式对话到目标会话，并将对话追加到默认日志文件。

@@ -1,7 +1,5 @@
 """API Kernel compile tests.
 
-创建者: 小李飞刀
-最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `include/api/Kernel.h` 的公开 helper 声明，
@@ -38,8 +36,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def _compile_and_run(source: str) -> None:
     """编译并运行 C++ 测试片段。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 使用 `g++` 编译临时源码并执行生成的程序。
@@ -96,8 +92,6 @@ def _compile_and_run(source: str) -> None:
 def _compile_expect_failure(source: str) -> str:
     """编译并断言 C++ 片段失败，返回编译 stderr。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 使用 `g++` 编译临时源码，并验证其因公开接口顺序错误而失败。
@@ -136,10 +130,6 @@ def _compile_expect_failure(source: str) -> str:
 
 
 # API-KERNEL-001
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 验证 `Kernel` 公共层只保留新 helper 集合，并且公共 `Nn` 头文件已删除。
 # 使用示例: `pytest -q test/include/api/test_kernel.py -k test_include_api_kernel_exports_only_public_kernel_helpers`
 # 对应功能实现文件路径: `include/api/Kernel.h`
@@ -162,10 +152,6 @@ def test_include_api_kernel_exports_only_public_kernel_helpers() -> None:
 
 
 # API-KERNEL-002
-# 创建者: 小李飞刀
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 验证 `Kernel` 公共层可按 `out-first` 口径编译并运行 add/matmul 基础路径。
 # 使用示例: `pytest -q test/include/api/test_kernel.py -k test_include_api_kernel_compiles_out_first_helpers`
 # 对应功能实现文件路径: `include/npu_demo/Kernel.h`
@@ -233,10 +219,6 @@ int main() {
 
 
 # API-KERNEL-002B
-# 创建者: 大闸蟹
-# 最后一次更改: 大闸蟹
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 验证 `Kernel` same-shape 逐元素 helper 支持二维中间张量。
 # 使用示例: `pytest -q test/include/api/test_kernel.py -k test_include_api_kernel_elementwise_supports_same_shape_2d`
 # 对应功能实现文件路径: `include/npu_demo/Kernel.h`
@@ -289,10 +271,6 @@ int main() {
 
 
 # API-KERNEL-002A
-# 创建者: 大闸蟹
-# 最后一次更改: 大闸蟹
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 验证 `img2col1d/img2col2d` 公开 helper 按结构化布局真实物化窗口。
 # 使用示例: `pytest -q test/include/api/test_kernel.py -k test_include_api_kernel_img2col_helpers_materialize_windows`
 # 对应功能实现文件路径: `include/npu_demo/Kernel.h`
@@ -363,10 +341,6 @@ int main() {
 
 
 # API-KERNEL-003
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 验证旧 `lhs/rhs/out` 顺序不再属于公开 `Kernel` helper 合同。
 # 使用示例: `pytest -q test/include/api/test_kernel.py -k test_include_api_kernel_rejects_old_lhs_rhs_out_order`
 # 对应功能实现文件路径: `include/api/Kernel.h`

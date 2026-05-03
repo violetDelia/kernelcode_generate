@@ -1,7 +1,5 @@
 """Project-wide common config definitions.
 
-创建者: OpenAI Codex
-最后一次更改: 大闸蟹
 
 功能说明:
 - 定义项目级公共行为配置底座，统一承载显式公开的 target、dump_dir 配置与稳定读写接口。
@@ -73,8 +71,6 @@ _dump_dir: Path | None = None
 class CoreConfigSnapshot:
     """公开配置快照。
 
-    创建者: OpenAI Codex
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 保存 `kernel_gen.core.config` 中的公开 target 与 dump_dir 配置。
@@ -92,8 +88,6 @@ class CoreConfigSnapshot:
 def set_target(value: str | None) -> None:
     """设置公开 target 配置。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 更新项目公共配置中的 `target`。
@@ -117,8 +111,6 @@ def set_target(value: str | None) -> None:
 def get_target() -> str | None:
     """读取公开 target 配置。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 返回当前公共配置中的 `target` 值。
@@ -137,8 +129,6 @@ def get_target() -> str | None:
 def set_dump_dir(value: str | Path | None) -> None:
     """设置公开 dump_dir 配置。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 更新项目公共配置中的 `dump_dir`。
@@ -165,8 +155,6 @@ def set_dump_dir(value: str | Path | None) -> None:
 def get_dump_dir() -> Path | None:
     """读取公开 dump_dir 配置。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 返回当前公共配置中的 `dump_dir` 值。
@@ -183,8 +171,6 @@ def get_dump_dir() -> Path | None:
 def reset_config() -> None:
     """恢复公开配置默认值。
 
-    创建者: OpenAI Codex
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 将 `target` 与 `dump_dir` 恢复为 `None`。
@@ -206,8 +192,6 @@ def reset_config() -> None:
 def snapshot_config() -> CoreConfigSnapshot:
     """保存当前公开配置。
 
-    创建者: OpenAI Codex
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 返回不可变 `CoreConfigSnapshot`。
@@ -225,8 +209,6 @@ def snapshot_config() -> CoreConfigSnapshot:
 def restore_config(snapshot: CoreConfigSnapshot) -> None:
     """恢复公开配置快照。
 
-    创建者: OpenAI Codex
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 将 `snapshot_config()` 返回的快照恢复为当前公开配置。

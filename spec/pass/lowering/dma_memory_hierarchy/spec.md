@@ -9,16 +9,16 @@
 
 ## API 列表
 
-- `LowerDmaMemoryHierarchyPass`
-  - `—— run(module)`
+- `class LowerDmaMemoryHierarchyPass(fold: bool = True)`
+- `LowerDmaMemoryHierarchyPass.apply(ctx: Context, module: ModuleOp) -> None`
 
 ## 文档信息
 
-- 创建者：`咯咯咯`
-- 最后一次更改：`睡觉小分队`
+- 创建者：`未记录`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/pass/lowering/dma_memory_hierarchy/spec.md`](../../../../spec/pass/lowering/dma_memory_hierarchy/spec.md)
 - `功能实现`：[`kernel_gen/passes/dma_memory_hierarchy.py`](../../../../kernel_gen/passes/dma_memory_hierarchy.py)
-- `test`：[`test/pass/test_dma_memory_hierarchy.py`](../../../../test/pass/test_dma_memory_hierarchy.py)
+- `test`：[`test/passes/test_dma_memory_hierarchy.py`](../../../../test/passes/test_dma_memory_hierarchy.py)
 
 ## 依赖
 
@@ -43,8 +43,11 @@
 - 冻结窗口链路口径：`GM -> SM` 与 `SM -> GM` 必须保留原窗口 `offsets/sizes`，并继续使用 unit stride；`SM -> LM` 与 `LM -> SM` 必须改写为 `zero offsets + unit strides`。
 - 冻结 dynamic shape 口径：staging `dma.alloc` 只能消费已有显式 symbol 来源；匿名 `?` 且无可恢复来源必须失败。
 
-## 限制与边界
+## 额外补充
 
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 本 pass 只能位于 `NnLoweringPass` 与 `BufferResultsToOutParamsPass` 之后，且输入不得包含 `nn.*`。
 - 不改写函数 ABI；caller/callee 的 out-param 合同仍由 `BufferResultsToOutParamsPass` 负责。
 - 本 pass 新增的 hierarchy 搬运不得使用 `dma.copy` / `dma.load` / `dma.store`；若输入中已有这些 op，本 pass 不要求重写，但也不得用它们表达新增的层级主语义。
@@ -55,20 +58,18 @@
 - 目标不支持 `SM` 或 `LM` 时必须显式失败，禁止静默降级；失败短语必须包含 `dynamic_shape` / `SM` / `LM` 关键字之一。
 - 公开导入入口固定为 `kernel_gen.passes.dma_memory_hierarchy`；`kernel_gen.passes.lowering.dma_memory_hierarchy` 不再属于公开合同，必须以 `ModuleNotFoundError` 失败。
 
-## 公开接口
-
 ### `class LowerDmaMemoryHierarchyPass(Pass)`
 
-功能说明：
+- 功能说明：
 
 - 表示 DMA memory hierarchy lowering pass。
-- 通过 `run(module)` 执行改写。
+- 通过 `apply(ctx, module)` 执行原地改写。
 
-参数说明：
+- 参数：
 
 - `name (str)`：固定为 `"lower-dma-memory-hierarchy"`。
 
-使用示例：
+- 使用示例：
 
 ```python
 from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
@@ -83,12 +84,12 @@ pm.add_pass(LowerDmaMemoryHierarchyPass())
 module = pm.run(module)
 ```
 
-注意事项：
+- 注意事项：
 
 - pass 顺序必须固定为 `NnLoweringPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
 - 新增 hierarchy 搬运必须使用 `dma.slice / dma.deslice`；整块搬运是全量窗口特例（`offsets=0`、`sizes=shape`、`strides=1`）。
 - 处理后的 `kernel.*` 只允许 `LM` memory 作为 operand/out。
-- staging `dma.alloc` 的 `dynamic_shape` 只能来自显式 symbol 来源；若 full-window 输入含匿名 `?`，`run` 必须显式失败而不是静默补默认值。
+- staging `dma.alloc` 的 `dynamic_shape` 只能来自显式 symbol 来源；若 full-window 输入含匿名 `?`，`apply` 必须显式失败而不是静默补默认值。
 
 前置条件：
 
@@ -100,36 +101,36 @@ module = pm.run(module)
 - 输出 module 中 `kernel.*` operand/out 全部为 `LM`。
 - 读路径明确包含 `GM -> SM -> LM` 的 `dma.slice` 链路，写路径明确包含 `LM -> SM -> GM` 的 `dma.deslice` 链路。
 
-返回与限制：
+- 返回值：
 
-- 返回改写后的 module（可原地修改或返回新对象，以实现为准）。
+- 原地改写输入 module，返回 `None`。
 - 遇到不满足输入合同或目标缺失 `SM/LM` 时必须抛出错误并中止。
 
-### `LowerDmaMemoryHierarchyPass.run(module)`
+### `LowerDmaMemoryHierarchyPass.apply(Context(), module)`
 
-功能说明：
+- 功能说明：
 
 - 对输入 module 执行 DMA hierarchy lowering。
 - 为 `GM` 上的计算 operand/out 构造 `SM/LM` staging，并插入 `dma.slice / dma.deslice`。
 
-参数说明：
+- 参数：
 
 - `module (builtin.module)`：包含 `kernel/dma/func` 的 IR module。
 
-使用示例：
+- 使用示例：
 
 ```python
 pass_obj = LowerDmaMemoryHierarchyPass()
-module = pass_obj.run(module)
+pass_obj.apply(Context(), module)
 ```
 
-注意事项：
+- 注意事项：
 
 - 读路径示例（整块窗口）：
 
 ```text
-%sm = dma.alloc ... space=SM
-%lm = dma.alloc ... space=LM
+%sm = dma.alloc value space=SM
+%lm = dma.alloc value space=LM
 dma.slice(%sm, %gm, zero_offsets, full_sizes, unit_strides)
 dma.slice(%lm, %sm, zero_offsets, full_sizes, unit_strides)
 ```
@@ -137,7 +138,7 @@ dma.slice(%lm, %sm, zero_offsets, full_sizes, unit_strides)
 - 写路径示例（整块窗口）：
 
 ```text
-%sm = dma.alloc ... space=SM
+%sm = dma.alloc value space=SM
 dma.deslice(%sm, %lm, zero_offsets, full_sizes, unit_strides)
 dma.deslice(%gm, %sm, zero_offsets, full_sizes, unit_strides)
 ```
@@ -154,36 +155,73 @@ dma.deslice(%gm, %sm, zero_offsets, full_sizes, unit_strides)
 
 - 若成功完成，module 中不存在仍以 `GM/SM` 作为 `kernel.*` operand/out 的路径。
 
-返回与限制：
+- 返回值：
 
 - 返回改写后的 module。
 - 不支持的输入或目标缺失 `SM/LM` 时必须显式失败，禁止静默降级。
 
+## API详细说明
+
+### `class LowerDmaMemoryHierarchyPass(fold: bool = True)`
+
+- api：`class LowerDmaMemoryHierarchyPass(fold: bool = True)`
+- 参数：无。
+- 返回值：`LowerDmaMemoryHierarchyPass` 实例。
+- 使用示例：
+
+  ```python
+  from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
+
+  pass_obj = LowerDmaMemoryHierarchyPass()
+  assert pass_obj.name == "lower-dma-memory-hierarchy"
+  ```
+- 功能说明：执行 `LowerDmaMemoryHierarchyPass`。
+- 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
+
+### `LowerDmaMemoryHierarchyPass.apply(ctx: Context, module: ModuleOp) -> None`
+
+- api：`LowerDmaMemoryHierarchyPass.apply(ctx: Context, module: ModuleOp) -> None`
+- 参数：
+  - `ctx`：公开上下文对象，提供代码生成、emit、pass 或工具执行所需的配置与状态；类型 `Context`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `module`：模块级 IR 对象，作为 pass、校验或代码生成的处理主体；类型 `ModuleOp`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：无返回值；调用成功表示操作完成。
+- 使用示例：
+
+  ```python
+  from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
+
+  LowerDmaMemoryHierarchyPass().apply(ctx=ctx, module=module)
+  ```
+- 功能说明：对模块执行 `LowerDmaMemoryHierarchyPass` pass。
+- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
+
 ## 测试
 
-- 测试文件：[`test/pass/test_dma_memory_hierarchy.py`](../../../../test/pass/test_dma_memory_hierarchy.py)
-- 执行命令：`pytest -q test/pass/test_dma_memory_hierarchy.py`
-- 测试目标：
-  - 验证读路径 `GM -> SM -> LM` 与写路径 `LM -> SM -> GM` 通过 `dma.slice / dma.deslice` 表达。
-  - 验证处理后的 `kernel.*` 只消费/写回 `LM`。
-  - 验证新增 hierarchy 搬运不引入 `dma.copy/load/store`。
-  - 验证目标缺失 `SM/LM` 时显式失败。
-  - 验证输入残留 `nn.*` 时显式失败。
-  - 验证窗口链路中 `GM -> SM` / `SM -> GM` 保留原窗口 `offsets/sizes` 且保持 unit stride，而 `SM -> LM` / `LM -> SM` 固定为 `zero offsets + unit strides`。
-  - 验证显式 symbol shape 可透传到 staging `dma.alloc(dynamic_shape=...)`。
-  - 验证匿名 `?` 且无可恢复 shape 来源时显式失败，并包含 `dynamic_shape` 关键字。
-  - 验证公开导入入口使用 `kernel_gen.passes.dma_memory_hierarchy`，旧 lowering 路径失败边界由 `test/pass/test_pass_registry.py` 与 `test/pass/test_pass_manager.py` 单列锁定。
-- 功能与用例清单：
+- 测试文件：
+  - `test/passes/test_dma_memory_hierarchy.py`
+  - `test/passes/test_pass_manager.py`
+  - `test/passes/test_registry.py`
+- 执行命令：`pytest -q test/passes/test_dma_memory_hierarchy.py`
 
-| 用例 ID | 约束点 | 对应测试 |
-| --- | --- | --- |
-| COV-DMH-001 | 读路径 `GM -> SM -> LM` 使用 `dma.slice` | `test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback` |
-| COV-DMH-002 | 写路径 `LM -> SM -> GM` 使用 `dma.deslice` | `test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback` |
-| COV-DMH-003 | `kernel.*` 仅使用 `LM` operand/out | `test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback` |
-| COV-DMH-004 | 禁止新增 `dma.copy/load/store` | `test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback` |
-| COV-DMH-005 | 目标缺失 `SM/LM` 必须失败 | `test_dma_memory_hierarchy_requires_sm_lm` |
-| COV-DMH-006 | LM-only 输入不插入 staging（no-op） | `test_dma_memory_hierarchy_lm_only_is_noop` |
-| COV-DMH-007 | 输入残留 `nn.*` 必须显式失败 | `test_dma_memory_hierarchy_rejects_nn_ops_in_input` |
-| COV-DMH-008 | 窗口链路中 `GM -> SM` / `SM -> GM` 保留原窗口 `offsets/sizes` 并使用 unit stride，`SM -> LM` / `LM -> SM` 使用 `zero offsets + unit strides` | `test_dma_memory_hierarchy_window_offsets_and_unit_strides` |
-| COV-DMH-009 | 显式 symbol shape 可透传到 staging `dma.alloc(dynamic_shape=...)` | `test_dma_memory_hierarchy_symbol_shape_passthrough` |
-| COV-DMH-010 | 匿名 `?` 且无可恢复 shape 来源时必须以 `dynamic_shape` 失败 | `test_dma_memory_hierarchy_rejects_anonymous_dynamic_shape` |
+### 测试目标
+
+- 验证 `spec/pass/lowering/dma_memory_hierarchy/spec.md` 对应公开 API 的正常路径、边界条件与错误语义。
+- 验证 Memory/DMA 参数、布局、搬运或 verifier 行为。
+- 验证非法输入、边界条件和错误语义按公开合同失败。
+- 验证 pass 或 pipeline 对目标 IR 的改写、no-op 与顺序约束。
+
+
+### 功能与用例清单
+
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-COV-DMH-001 | 内存/DMA | 读路径 `GM -> SM -> LM` 使用 `dma.slice` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback`。 | 内存类型、布局、搬运结果或 verifier 行为体现“读路径 `GM -> SM -> LM` 使用 `dma.slice`”场景。 | `test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback` |
+| TC-COV-DMH-002 | 内存/DMA | 写路径 `LM -> SM -> GM` 使用 `dma.deslice` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback`。 | 内存类型、布局、搬运结果或 verifier 行为体现“写路径 `LM -> SM -> GM` 使用 `dma.deslice`”场景。 | `test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback` |
+| TC-COV-DMH-003 | 内存/DMA | `kernel.*` 仅使用 `LM` operand/out | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`kernel.*` 仅使用 `LM` operand/out”场景。 | `test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback` |
+| TC-COV-DMH-004 | 内存/DMA | 禁止新增 `dma.copy/load/store` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback`。 | 内存类型、布局、搬运结果或 verifier 行为体现“禁止新增 `dma.copy/load/store`”场景。 | `test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback` |
+| TC-COV-DMH-005 | 边界/异常 | 目标缺失 `SM/LM` 必须失败 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_memory_hierarchy_requires_sm_lm`。 | “目标缺失 `SM/LM` 必须失败”场景按公开错误语义失败或被拒绝。 | `test_dma_memory_hierarchy_requires_sm_lm` |
+| TC-COV-DMH-006 | 内存/DMA | LM-only 输入不插入 staging（no-op） | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_memory_hierarchy_lm_only_is_noop`。 | 内存类型、布局、搬运结果或 verifier 行为体现“LM-only 输入不插入 staging（no-op）”场景。 | `test_dma_memory_hierarchy_lm_only_is_noop` |
+| TC-COV-DMH-007 | 边界/异常 | 输入残留 `nn.*` 必须显式失败 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_memory_hierarchy_rejects_nn_ops_in_input`。 | “输入残留 `nn.*` 必须显式失败”场景按公开错误语义失败或被拒绝。 | `test_dma_memory_hierarchy_rejects_nn_ops_in_input` |
+| TC-COV-DMH-008 | 内存/DMA | 窗口链路中 `GM -> SM` / `SM -> GM` 保留原窗口 `offsets/sizes` 并使用 unit stride，`SM -> LM` / `LM -> SM` 使用 `zero offsets + unit strides` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_memory_hierarchy_window_offsets_and_unit_strides`。 | 内存类型、布局、搬运结果或 verifier 行为体现“窗口链路中 `GM -> SM` / `SM -> GM` 保留原窗口 `offsets/sizes` 并使用 unit stride，`SM -> LM` / `LM -> SM` 使用 `zero offsets + unit strides`”场景。 | `test_dma_memory_hierarchy_window_offsets_and_unit_strides` |
+| TC-COV-DMH-009 | pass 改写 | 显式 symbol shape 可透传到 staging `dma.alloc(dynamic_shape=...)` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_dma_memory_hierarchy_symbol_shape_passthrough`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“显式 symbol shape 可透传到 staging `dma.alloc(dynamic_shape=...)`”场景。 | `test_dma_memory_hierarchy_symbol_shape_passthrough` |
+| TC-COV-DMH-010 | 边界/异常 | 匿名 `?` 且无可恢复 shape 来源时必须以 `dynamic_shape` 失败 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_memory_hierarchy_rejects_anonymous_dynamic_shape`。 | “匿名 `?` 且无可恢复 shape 来源时必须以 `dynamic_shape` 失败”场景按公开错误语义失败或被拒绝。 | `test_dma_memory_hierarchy_rejects_anonymous_dynamic_shape` |

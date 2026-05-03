@@ -2,8 +2,6 @@
 
 ## 文档信息
 
-- 创建者：`榕`
-- 最后一次更改：`大闸蟹`
 - `spec`：
   - [`spec/codex-multi-agents/scripts/codex-multi-agents-list.md`](../../../spec/codex-multi-agents/scripts/codex-multi-agents-list.md)
   - [`spec/codex-multi-agents/scripts/codex-multi-agents-task.md`](../../../spec/codex-multi-agents/scripts/codex-multi-agents-task.md)

@@ -1,7 +1,5 @@
 """emit_c expectation helper runner tests.
 
-创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 `kernel_gen.tools.emitc_case_runner` 的 case 解析与源码片段断言行为。
@@ -34,8 +32,6 @@ _MEM_TYPE = "!nn.memory<[4], [1], f32, #nn.space<global>>"
 
 
 # TC-EMITC-CASE-RUNNER-001
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
 # 功能说明: 验证 helper 可把 `tuner.cost(kernel.add)` expectation case 执行到 npu_demo 源码文本。
 # 使用示例: pytest -q test/tools/test_emitc_case_runner.py -k test_run_emitc_case_lowers_npu_demo_tuner_cost_kernel_add
 # 对应功能实现文件路径: kernel_gen/tools/emitc_case_runner.py
@@ -75,8 +71,6 @@ builtin.module {{
 
 
 # TC-EMITC-CASE-RUNNER-002
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
 # 功能说明: 验证 helper 只接受当前 expectation 需要的最小 `COMPILE_ARGS` 集合。
 # 使用示例: pytest -q test/tools/test_emitc_case_runner.py -k test_run_emitc_case_rejects_unsupported_compile_args
 # 对应功能实现文件路径: kernel_gen/tools/emitc_case_runner.py
@@ -103,8 +97,6 @@ builtin.module {
 
 
 # TC-EMITC-CASE-RUNNER-003
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
 # 功能说明: 验证 helper 可执行不带 `arch.launch` wrapper 的 npu_demo plain symbol module。
 # 使用示例: pytest -q test/tools/test_emitc_case_runner.py -k test_run_emitc_case_lowers_plain_symbol_cast_module_without_launch_wrapper
 # 对应功能实现文件路径: kernel_gen/tools/emitc_case_runner.py
@@ -128,8 +120,8 @@ builtin.module {
         op_name="symbol.cast",
         expected_snippets=[
             "void symbol_cast_case()",
-            "S_INT c_9 = 9;",
-            "int32_t c_9_cast_int32_t = c_9;",
+            "S_INT c_0 = 9;",
+            "int32_t c_0_cast_int32_t = c_0;",
         ],
         forbidden_snippets=["launch<", "arch.launch"],
     )
@@ -138,8 +130,6 @@ builtin.module {
 
 
 # TC-EMITC-CASE-RUNNER-003A
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
 # 功能说明: 验证 helper 可执行不带 `arch.launch` wrapper 的 npu_demo return-only plain module。
 # 使用示例: pytest -q test/tools/test_emitc_case_runner.py -k test_run_emitc_case_lowers_return_only_plain_module_without_launch_wrapper
 # 对应功能实现文件路径: kernel_gen/tools/emitc_case_runner.py
@@ -171,8 +161,6 @@ builtin.module {
 
 
 # TC-EMITC-CASE-RUNNER-004
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
 # 功能说明: 验证 helper 支持 `--pass buffer-results-to-out-params` 预处理后再发射 `dma.cast`。
 # 使用示例: pytest -q test/tools/test_emitc_case_runner.py -k test_run_emitc_case_applies_buffer_results_to_out_params_before_emit_c
 # 对应功能实现文件路径: kernel_gen/tools/emitc_case_runner.py
@@ -196,12 +184,10 @@ builtin.module {
         forbidden_snippets=["dma.cast"],
     )
 
-    assert "void dma_cast_case(Memory<GM, int32_t>& arg0, const Memory<GM, float>& arg1)" in source
+    assert "void dma_cast_case(Memory<GM, int32_t>& arg0, Memory<GM, float>& arg1)" in source
 
 
 # TC-EMITC-CASE-RUNNER-005
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
 # 功能说明: 验证 helper 允许“只校验 forbidden_snippets”的 expectation 合同。
 # 使用示例: pytest -q test/tools/test_emitc_case_runner.py -k test_run_emitc_case_allows_forbidden_only_contract
 # 对应功能实现文件路径: kernel_gen/tools/emitc_case_runner.py

@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # codex-multi-agents-task.sh
 #
-# 创建者: 榕
-# 最后一次更改: Codex
 #
 # 功能说明:
 # - 管理 TODO.md 任务流转: 分发、完成、暂停、继续、改派、续接、新建、删除、计划归档。

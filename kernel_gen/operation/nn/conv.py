@@ -1,32 +1,35 @@
 """NN operation conv helper.
 
-创建者: 守护最好的爱莉希雅
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供二维卷积运算与参数规范化 helper。
 
 API 列表:
-- `conv(value: object, weight: object, bias: object | None = None, sh: int | SymbolDim = 1, sw: int | SymbolDim = 1, dh: int | SymbolDim = 1, dw: int | SymbolDim = 1, ph: int | SymbolDim = 0, pw: int | SymbolDim = 0, pl: int | SymbolDim = 0, pr: int | SymbolDim = 0) -> Memory`
+- `conv(value: Memory, weight: Memory, bias: Memory | None = None, sh: int | SymbolDim = 1, sw: int | SymbolDim = 1, dh: int | SymbolDim = 1, dw: int | SymbolDim = 1, ph: int | SymbolDim = 0, pw: int | SymbolDim = 0, pl: int | SymbolDim = 0, pr: int | SymbolDim = 0) -> Memory`
 
 使用示例:
 - from kernel_gen.operation.nn.conv import conv
 
 关联文件:
 - spec: spec/operation/nn.md
-- test: test/operation/test_operation_nn_structured.py
+- test: test/operation/nn/test_structured.py
 - 功能实现: kernel_gen/operation/nn/conv.py
 """
 
 from __future__ import annotations
 
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import (
+    ERROR_ACTION,
+    ERROR_TEMPLATE,
+    ErrorKind,
+    ErrorModule,
+    kernel_code_error,
+)
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
-_ERROR_ACTION = "请按接口约束传参"
 
 
 def _normalize_symbolic_int_param(
@@ -38,8 +41,6 @@ def _normalize_symbolic_int_param(
 ) -> SymbolDim:
     """规范化 conv 内部整型/符号参数。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅接受 `int | SymbolDim`，拒绝 `bool` 和其他类型。
@@ -53,31 +54,31 @@ def _normalize_symbolic_int_param(
     expected_positive = f"{owner} {name} must be > 0"
     expected_integer = f"{owner} {name} must be integer"
     if isinstance(value, bool):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=scene,
                 expected=expected_type,
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if isinstance(value, int):
         if allow_zero and value < 0:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene=scene,
                     expected=expected_non_negative,
                     actual=str(value),
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         if not allow_zero and value <= 0:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene=scene,
                     expected=expected_positive,
                     actual=str(value),
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         return SymbolDim(value)
@@ -85,39 +86,39 @@ def _normalize_symbolic_int_param(
         if not value.is_dynamic():
             resolved = value.get_value()
             if not isinstance(resolved, int):
-                raise ValueError(
-                    _ERROR_TEMPLATE.format(
+                raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                    ERROR_TEMPLATE.format(
                         scene=scene,
                         expected=expected_integer,
                         actual=str(resolved),
-                        action=_ERROR_ACTION,
+                        action=ERROR_ACTION,
                     )
                 )
             if allow_zero and resolved < 0:
-                raise ValueError(
-                    _ERROR_TEMPLATE.format(
+                raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                    ERROR_TEMPLATE.format(
                         scene=scene,
                         expected=expected_non_negative,
                         actual=str(resolved),
-                        action=_ERROR_ACTION,
+                        action=ERROR_ACTION,
                     )
                 )
             if not allow_zero and resolved <= 0:
-                raise ValueError(
-                    _ERROR_TEMPLATE.format(
+                raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                    ERROR_TEMPLATE.format(
                         scene=scene,
                         expected=expected_positive,
                         actual=str(resolved),
-                        action=_ERROR_ACTION,
+                        action=ERROR_ACTION,
                     )
                 )
         return value
-    raise TypeError(
-        _ERROR_TEMPLATE.format(
+    raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+        ERROR_TEMPLATE.format(
             scene=scene,
             expected=expected_type,
             actual=type(value).__name__,
-            action=_ERROR_ACTION,
+            action=ERROR_ACTION,
         )
     )
 
@@ -132,8 +133,6 @@ def _img2col_output_dim(
 ) -> SymbolDim:
     """计算 conv 使用的单轴输出维度。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 保持 `((size + pad_low + pad_high - dilation * (kernel - 1) - 1) // stride) + 1` 的公开公式。
@@ -146,8 +145,6 @@ def _img2col_output_dim(
 def _normalize_conv_param(name: str, value: int | SymbolDim, allow_zero: bool) -> SymbolDim:
     """规范化 conv 参数为 SymbolDim。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅接受 int 或 SymbolDim。
@@ -158,7 +155,7 @@ def _normalize_conv_param(name: str, value: int | SymbolDim, allow_zero: bool) -
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_structured.py
+    - test: test/operation/nn/test_structured.py
     - 功能实现: kernel_gen/operation/nn/conv.py
     """
     return _normalize_symbolic_int_param(
@@ -170,9 +167,9 @@ def _normalize_conv_param(name: str, value: int | SymbolDim, allow_zero: bool) -
     )
 
 def conv(
-    value: object,
-    weight: object,
-    bias: object | None = None,
+    value: Memory,
+    weight: Memory,
+    bias: Memory | None = None,
     sh: int | SymbolDim = 1,
     sw: int | SymbolDim = 1,
     dh: int | SymbolDim = 1,
@@ -184,8 +181,6 @@ def conv(
 ) -> Memory:
     """二维卷积（NCHW）语义推导。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 校验输入类型、rank、空间与 dtype 一致性。
@@ -197,121 +192,121 @@ def conv(
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_structured.py
+    - test: test/operation/nn/test_structured.py
     - 功能实现: kernel_gen/operation/nn/conv.py
     """
     if not isinstance(value, Memory):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.conv 参数校验",
                 expected="conv value must be Memory",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if not isinstance(weight, Memory):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.conv 参数校验",
                 expected="conv weight must be Memory",
                 actual=type(weight).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if len(value.shape) != 4:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.conv 参数校验",
                 expected="conv value must be rank-4 Memory",
                 actual=f"rank={len(value.shape)}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if len(weight.shape) != 4:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.conv 参数校验",
                 expected="conv weight must be rank-4 Memory",
                 actual=f"rank={len(weight.shape)}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
     n_dim, c_in_dim, h_dim, w_dim = value.shape.get_shape()
     c_out_dim, c_in_weight_dim, kh_dim, kw_dim = weight.shape.get_shape()
     if c_in_dim != c_in_weight_dim:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.conv 参数校验",
                 expected="conv input channel mismatch",
                 actual=f"value={c_in_dim} weight={c_in_weight_dim}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if value.dtype is not weight.dtype:
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.conv 参数校验",
                 expected="conv dtype mismatch",
                 actual=f"value={value.dtype} weight={weight.dtype}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if value.space is not weight.space:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.conv 参数校验",
                 expected="conv space mismatch",
                 actual=f"value={value.space} weight={weight.space}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
     if bias is not None:
         if not isinstance(bias, Memory):
-            raise TypeError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene="nn.conv 参数校验",
                     expected="conv bias must be Memory",
                     actual=type(bias).__name__,
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         if len(bias.shape) != 1:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene="nn.conv 参数校验",
                     expected="conv bias must be rank-1 Memory",
                     actual=f"rank={len(bias.shape)}",
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         bias_dim = bias.shape.get_shape()[0]
         if bias_dim != c_out_dim:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene="nn.conv 参数校验",
                     expected="conv bias shape mismatch",
                     actual=f"bias={bias_dim} out={c_out_dim}",
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         if bias.dtype is not value.dtype:
-            raise TypeError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene="nn.conv 参数校验",
                     expected="conv bias dtype mismatch",
                     actual=f"bias={bias.dtype} value={value.dtype}",
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
         if bias.space is not value.space:
-            raise ValueError(
-                _ERROR_TEMPLATE.format(
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
                     scene="nn.conv 参数校验",
                     expected="conv bias space mismatch",
                     actual=f"bias={bias.space} value={value.space}",
-                    action=_ERROR_ACTION,
+                    action=ERROR_ACTION,
                 )
             )
 
@@ -329,22 +324,22 @@ def conv(
 
     h_out_value = h_out.get_value()
     if isinstance(h_out_value, int) and h_out_value <= 0:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.conv 参数校验",
                 expected="conv output height must be positive",
                 actual=str(h_out_value),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     w_out_value = w_out.get_value()
     if isinstance(w_out_value, int) and w_out_value <= 0:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.conv 参数校验",
                 expected="conv output width must be positive",
                 actual=str(w_out_value),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 

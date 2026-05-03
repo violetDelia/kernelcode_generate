@@ -1,7 +1,5 @@
 """Emit registry helpers for `gen_kernel.emit`.
 
-创建者: OpenAI Codex
-最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 定义 `emit` 层公开注册器与 dispatch 合同。
@@ -15,6 +13,7 @@ API 列表:
 - `emit_c_include_impl(target: str) -> Callable[[IncludeHandler], IncludeHandler]`
 - `emit_c_name_impl(*types: type[Any], target: str) -> Callable[[NameHandler], NameHandler]`
 - `dispatch_op(op: Operation, ctx: EmitCContext) -> str | None`
+- `dispatch_op_for_target(op: Operation, ctx: EmitCContext, target: str) -> str | None`
 - `dispatch_value(value: SSAValue, ctx: EmitCContext) -> str | None`
 - `dispatch_type(attr: Any, ctx: EmitCContext) -> str | None`
 - `dispatch_attr(attr: Any, ctx: EmitCContext) -> str | None`
@@ -27,7 +26,7 @@ API 列表:
 
 关联文件:
 - spec: [spec/dsl/gen_kernel/emit/register.md](../../../../spec/dsl/gen_kernel/emit/register.md)
-- test: [test/dsl/gen_kernel/emit/test_emit.py](../../../../test/dsl/gen_kernel/emit/test_emit.py)
+- test: [test/dsl/gen_kernel/emit/test_package.py](../../../../test/dsl/gen_kernel/emit/test_package.py)
 - 功能实现: [kernel_gen/dsl/gen_kernel/emit/register.py](.)
 """
 
@@ -58,18 +57,13 @@ _TARGET_INCLUDE_REGISTRY: dict[str, IncludeHandler] = {}
 _TARGET_NAME_REGISTRY: dict[str, dict[type[Any], NameHandler]] = {}
 
 
-def _register(
-    registry: dict[type[Any], Callable[..., str]],
-    target_registry: dict[str, dict[type[Any], Callable[..., str]]],
-    *types: type[Any],
-    target: str | None = None,
-) -> Callable[[Callable[..., str]], Callable[..., str]]:
-    def decorator(func: Callable[..., str]) -> Callable[..., str]:
+def emit_c_impl(*types: type[Any], target: str | None = None) -> Callable[[OpHandler], OpHandler]:
+    def decorator(func: OpHandler) -> OpHandler:
         if target is None:
             for typ in types:
-                registry[typ] = func
+                _OP_REGISTRY[typ] = func
         else:
-            scoped = target_registry.setdefault(target, {})
+            scoped = _TARGET_OP_REGISTRY.setdefault(target, {})
             for typ in types:
                 scoped[typ] = func
         return func
@@ -77,20 +71,38 @@ def _register(
     return decorator
 
 
-def emit_c_impl(*types: type[Any], target: str | None = None) -> Callable[[OpHandler], OpHandler]:
-    return _register(_OP_REGISTRY, _TARGET_OP_REGISTRY, *types, target=target)
-
-
 def emit_c_value_impl(*types: type[Any], target: str | None = None) -> Callable[[ValueHandler], ValueHandler]:
-    return _register(_VALUE_REGISTRY, _TARGET_VALUE_REGISTRY, *types, target=target)
+    def decorator(func: ValueHandler) -> ValueHandler:
+        if target is None:
+            for typ in types:
+                _VALUE_REGISTRY[typ] = func
+        else:
+            scoped = _TARGET_VALUE_REGISTRY.setdefault(target, {})
+            for typ in types:
+                scoped[typ] = func
+        return func
+
+    return decorator
 
 
 def emit_c_type_impl(*types: type[Any], target: str) -> Callable[[TypeHandler], TypeHandler]:
-    return _register({}, _TARGET_TYPE_REGISTRY, *types, target=target)
+    def decorator(func: TypeHandler) -> TypeHandler:
+        scoped = _TARGET_TYPE_REGISTRY.setdefault(target, {})
+        for typ in types:
+            scoped[typ] = func
+        return func
+
+    return decorator
 
 
 def emit_c_attr_impl(*types: type[Any], target: str) -> Callable[[AttrHandler], AttrHandler]:
-    return _register({}, _TARGET_ATTR_REGISTRY, *types, target=target)
+    def decorator(func: AttrHandler) -> AttrHandler:
+        scoped = _TARGET_ATTR_REGISTRY.setdefault(target, {})
+        for typ in types:
+            scoped[typ] = func
+        return func
+
+    return decorator
 
 
 def emit_c_include_impl(*, target: str) -> Callable[[IncludeHandler], IncludeHandler]:
@@ -102,11 +114,45 @@ def emit_c_include_impl(*, target: str) -> Callable[[IncludeHandler], IncludeHan
 
 
 def emit_c_name_impl(*types: type[Any], target: str) -> Callable[[NameHandler], NameHandler]:
-    return _register({}, _TARGET_NAME_REGISTRY, *types, target=target)
+    def decorator(func: NameHandler) -> NameHandler:
+        scoped = _TARGET_NAME_REGISTRY.setdefault(target, {})
+        for typ in types:
+            scoped[typ] = func
+        return func
+
+    return decorator
 
 
 def dispatch_op(op: Operation, ctx: EmitCContext) -> str | None:
     target_registry = ctx.target_entry(_TARGET_OP_REGISTRY, {})
+    return _dispatch_op_with_registry(op, ctx, target_registry)
+
+
+def dispatch_op_for_target(op: Operation, ctx: EmitCContext, target: str) -> str | None:
+    """按显式 target 名称分发 op。
+
+
+    功能说明:
+    - 供根级 emit 入口保留历史 unknown target -> cpu 诊断路径。
+    - 不暴露 target 实现模块中的私有 helper。
+
+    使用示例:
+    - dispatch_op_for_target(op, ctx, "cpu")
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel/emit/register.md
+    - test: test/dsl/gen_kernel/emit/test_package.py
+    - 功能实现: kernel_gen/dsl/gen_kernel/emit/register.py
+    """
+
+    return _dispatch_op_with_registry(op, ctx, _TARGET_OP_REGISTRY.get(target, {}))
+
+
+def _dispatch_op_with_registry(
+    op: Operation,
+    ctx: EmitCContext,
+    target_registry: dict[type[Any], OpHandler],
+) -> str | None:
     for cls in type(op).__mro__:
         handler = target_registry.get(cls)
         if handler is not None:
@@ -118,8 +164,17 @@ def dispatch_op(op: Operation, ctx: EmitCContext) -> str | None:
 
 
 def dispatch_value(value: SSAValue, ctx: EmitCContext) -> str | None:
-    owner = value.owner
     target_registry = ctx.target_entry(_TARGET_VALUE_REGISTRY, {})
+    if isinstance(value, BlockArgument):
+        for cls in type(value).__mro__:
+            handler = target_registry.get(cls)
+            if handler is not None:
+                return handler(value, ctx)
+            handler = _VALUE_REGISTRY.get(cls)
+            if handler is not None:
+                return handler(value, ctx)
+        return None
+    owner = value.owner
     for cls in type(owner).__mro__:
         handler = target_registry.get(cls)
         if handler is not None:
@@ -175,6 +230,7 @@ __all__ = [
     "dispatch_include",
     "dispatch_name",
     "dispatch_op",
+    "dispatch_op_for_target",
     "dispatch_type",
     "dispatch_value",
     "emit_c_attr_impl",

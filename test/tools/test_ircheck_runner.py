@@ -1,7 +1,5 @@
 """ircheck runner tests.
 
-创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 kernel_gen/tools/ircheck.py 的 run 行为：compile args 解析、pass/pipeline 执行、检查语义与退出码。
@@ -57,10 +55,6 @@ _SIMPLE_IR = """builtin.module {
 
 
 # TC-IRCHECK-RUN-001
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
-# 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
 # 功能说明: 验证 --pass no-op 可执行，并能通过 CHECK/CHECK-NEXT/CHECK-NOT 组合检查。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_pass_ok
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -81,10 +75,6 @@ def test_run_ircheck_text_pass_ok() -> None:
 
 
 # TC-IRCHECK-RUN-001B
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-20 23:57:30 +0800
-# 最近一次运行成功时间: 2026-04-20 23:57:30 +0800
 # 功能说明: 验证 ircheck 可直接执行 ModulePass 公开入口，不再受旧 Pass 类型门槛限制。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_module_pass_ok
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -112,10 +102,6 @@ def test_run_ircheck_text_module_pass_ok() -> None:
 
 
 # TC-IRCHECK-RUN-001A
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
-# 最近一次运行成功时间: 待运行
 # 功能说明: 验证默认 ircheck context 已加载 arch dialect，可直接解析含 arch.launch / arch.barrier 的输入 IR。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_pass_ok_with_arch_dialect
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -150,10 +136,6 @@ builtin.module {
 
 
 # TC-IRCHECK-RUN-002
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
-# 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
 # 功能说明: 验证不支持的 COMPILE_ARGS 会返回 exit_code=2 与稳定错误短语前缀。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_unsupported_compile_args
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -172,10 +154,6 @@ def test_run_ircheck_text_unsupported_compile_args() -> None:
 
 
 # TC-IRCHECK-RUN-007
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-09 03:00:50 +0800
-# 最近一次运行成功时间: 2026-04-09 03:00:50 +0800
 # 功能说明: 验证解析期约束（如首条 positive check 为 CHECK-NEXT）会映射为 exit_code=2。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_parse_error_maps_to_exit_code_2
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -194,10 +172,6 @@ def test_run_ircheck_text_parse_error_maps_to_exit_code_2() -> None:
 
 
 # TC-IRCHECK-RUN-003
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
-# 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
 # 功能说明: 验证 CHECK 找不到时返回 exit_code=1 与稳定错误短语前缀，并给出 failed_check。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_check_not_found
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -218,10 +192,6 @@ def test_run_ircheck_text_check_not_found() -> None:
 
 
 # TC-IRCHECK-RUN-004
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
-# 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
 # 功能说明: 验证 CHECK-NEXT 必须在下一行命中，否则返回稳定错误短语前缀。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_check_next_failure
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -243,8 +213,6 @@ def test_run_ircheck_text_check_next_failure() -> None:
 
 
 # TC-IRCHECK-RUN-004A
-# 创建者: jcc你莫辜负
-# 最后修改人: jcc你莫辜负
 # 功能说明: 验证 `target=npu_demo` 的单函数 symbol case 可直接生成源码文本，不再要求双函数模块。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_npu_demo_single_symbol_func
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -271,10 +239,6 @@ builtin.module {
 
 
 # TC-IRCHECK-RUN-005
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
-# 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
 # 功能说明: 验证 CHECK-NOT 在相邻 positive check 命中行之间命中会失败，并报告稳定错误短语前缀。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_check_not_failure_between_positives
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -297,10 +261,6 @@ def test_run_ircheck_text_check_not_failure_between_positives() -> None:
 
 
 # TC-IRCHECK-RUN-020
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-12 11:20:00 +0800
-# 最近一次运行成功时间: 2026-04-12 11:20:00 +0800
 # 功能说明: 验证带 options 的 pass 可被解析并透传给 from_options。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_pass_with_options
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -317,8 +277,9 @@ def test_run_ircheck_text_pass_with_options() -> None:
             cls.seen_options = dict(options)
             return cls()
 
-        def run(self: "OptionPass", target: object) -> object:
-            return target
+        def apply(self: "OptionPass", ctx: Context, target: ModuleOp) -> None:
+            _ = ctx
+            _ = target
 
     text = f"""// COMPILE_ARGS: --pass "option-pass={{mode=fast}}"
 // CHECK: builtin.module
@@ -330,10 +291,6 @@ def test_run_ircheck_text_pass_with_options() -> None:
 
 
 # TC-IRCHECK-RUN-021
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-12 11:20:00 +0800
-# 最近一次运行成功时间: 2026-04-12 11:20:00 +0800
 # 功能说明: 验证未加引号的 options 写法会被视为不支持的 compile args。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_unquoted_options_rejected
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -352,10 +309,6 @@ def test_run_ircheck_text_unquoted_options_rejected() -> None:
 
 
 # TC-IRCHECK-RUN-030
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-15 03:40:00 +0800
-# 最近一次运行成功时间: 2026-04-15 03:40:00 +0800
 # 功能说明: 验证 emitc_target=cpu 会在 compile steps 后切到源码文本匹配。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_cpu_success
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -374,10 +327,6 @@ def test_run_ircheck_text_emitc_cpu_success() -> None:
 
 
 # TC-IRCHECK-RUN-031
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-15 03:40:00 +0800
-# 最近一次运行成功时间: 2026-04-15 03:40:00 +0800
 # 功能说明: 验证 emitc_target=npu_demo 对空 func.func 壳显式失败，并保留生成前的 IR 作为 actual_ir。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_npu_demo_failure_keeps_ir
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -397,10 +346,6 @@ def test_run_ircheck_text_emitc_npu_demo_failure_keeps_ir() -> None:
 
 
 # TC-IRCHECK-RUN-031A
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 功能说明: 验证 `emitc_target=npu_demo` 可接受单函数 `dma.alloc` module 子集，并返回 helper 形式源码。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_npu_demo_plain_dma_alloc_success
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -430,10 +375,6 @@ builtin.module {
 
 
 # TC-IRCHECK-RUN-032
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-15 03:40:00 +0800
-# 最近一次运行成功时间: 2026-04-15 03:40:00 +0800
 # 功能说明: 验证 emitc_target 非法时返回固定错误前缀，并保留 compile steps 后的最终 IR。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_invalid_target
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -454,10 +395,6 @@ def test_run_ircheck_text_emitc_invalid_target() -> None:
 
 
 # TC-IRCHECK-RUN-022
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-12 11:20:00 +0800
-# 最近一次运行成功时间: 2026-04-12 11:20:00 +0800
 # 功能说明: 验证非法 options 语法会回落到 compile args 不支持路径。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_invalid_options_syntax
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -476,10 +413,6 @@ def test_run_ircheck_text_invalid_options_syntax() -> None:
 
 
 # TC-IRCHECK-RUN-023
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-12 11:20:00 +0800
-# 最近一次运行成功时间: 2026-04-12 11:20:00 +0800
 # 功能说明: 验证带 options 的 pipeline 会透传 options 并正常执行。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_pipeline_with_options
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -503,10 +436,6 @@ def test_run_ircheck_text_pipeline_with_options() -> None:
 
 
 # TC-IRCHECK-RUN-006
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
-# 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
 # 功能说明: 验证 --pipeline 可通过 pass registry 构造并执行。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_pipeline_ok
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -523,10 +452,6 @@ def test_run_ircheck_text_pipeline_ok() -> None:
 
 
 # TC-IRCHECK-RUN-008
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-10 13:10:00 +0800
-# 最近一次运行成功时间: 2026-04-10 13:10:00 +0800
 # 功能说明: 验证 run_ircheck_text 支持 `// -----` 分隔的多 case 顺序执行；全部通过时返回成功。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_multi_case_ok
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -550,10 +475,6 @@ def test_run_ircheck_text_multi_case_ok() -> None:
 
 
 # TC-IRCHECK-RUN-009
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-10 13:10:00 +0800
-# 最近一次运行成功时间: 2026-04-10 13:10:00 +0800
 # 功能说明: 验证多 case 场景下失败时 fail-fast，并在 message 中标识失败 case 序号。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_multi_case_failfast_marks_case_index
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -578,10 +499,6 @@ def test_run_ircheck_text_multi_case_failfast_marks_case_index() -> None:
 
 
 # TC-IRCHECK-RUN-010
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-12 10:20:00 +0800
-# 最近一次运行成功时间: 2026-04-12 10:20:00 +0800
 # 功能说明: 验证 --pass "name={k=v}" 能解析并走 from_options 构造路径。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_pass_with_options_ok
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -601,8 +518,9 @@ def test_run_ircheck_text_pass_with_options_ok() -> None:
                 raise ValueError("bad options")
             return cls(options["mode"])
 
-        def run(self, target: object) -> object:
-            return target
+        def apply(self, ctx: Context, target: ModuleOp) -> None:
+            _ = ctx
+            _ = target
 
     text = f"""// COMPILE_ARGS: --pass "opt-pass={{mode=fast}}"
 // CHECK: builtin.module
@@ -614,10 +532,6 @@ def test_run_ircheck_text_pass_with_options_ok() -> None:
 
 
 # TC-IRCHECK-RUN-011
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-12 10:20:00 +0800
-# 最近一次运行成功时间: 2026-04-12 10:20:00 +0800
 # 功能说明: 验证 --pipeline "name={k=v}" 能解析并调用带参 builder。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_pipeline_with_options_ok
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -638,10 +552,6 @@ def test_run_ircheck_text_pipeline_with_options_ok() -> None:
 
 
 # TC-IRCHECK-RUN-012
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-12 10:20:00 +0800
-# 最近一次运行成功时间: 2026-04-12 10:20:00 +0800
 # 功能说明: 验证 option 语法不合法会映射为 compile args 不支持错误。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_rejects_invalid_option_syntax
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -660,10 +570,6 @@ def test_run_ircheck_text_rejects_invalid_option_syntax() -> None:
 
 
 # TC-IRCHECK-RUN-013
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-12 11:10:00 +0800
-# 最近一次运行成功时间: 2026-04-12 11:10:00 +0800
 # 功能说明: 验证带参 pass 必须使用引号包装 name={k=v} 写法。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_rejects_unquoted_pass_options
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -682,10 +588,6 @@ def test_run_ircheck_text_rejects_unquoted_pass_options() -> None:
 
 
 # TC-IRCHECK-RUN-014
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-12 11:10:00 +0800
-# 最近一次运行成功时间: 2026-04-12 11:10:00 +0800
 # 功能说明: 验证带参 pipeline 必须使用引号包装 name={k=v} 写法。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_rejects_unquoted_pipeline_options
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -704,10 +606,6 @@ def test_run_ircheck_text_rejects_unquoted_pipeline_options() -> None:
 
 
 # TC-IRCHECK-RUN-024
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-13 03:43:00 +0800
-# 最近一次运行成功时间: 2026-04-13 03:43:00 +0800
 # 功能说明: 验证单个 case 支持 pass/pipeline 混合多 step 顺序执行。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_multi_pass_sequence
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -720,25 +618,28 @@ def test_run_ircheck_text_multi_pass_sequence() -> None:
     class PassA(Pass):
         name = "pass-a"
 
-        def run(self, target: object) -> object:
+        def apply(self, ctx: Context, target: ModuleOp) -> None:
+            _ = ctx
+            _ = target
             executed.append("pass-a")
-            return target
 
     @registry_module.register_pass
     class PassB(Pass):
         name = "pass-b"
 
-        def run(self, target: object) -> object:
+        def apply(self, ctx: Context, target: ModuleOp) -> None:
+            _ = ctx
+            _ = target
             executed.append("pass-b")
-            return target
 
     @registry_module.register_pass
     class PassC(Pass):
         name = "pass-c"
 
-        def run(self, target: object) -> object:
+        def apply(self, ctx: Context, target: ModuleOp) -> None:
+            _ = ctx
+            _ = target
             executed.append("pass-c")
-            return target
 
     @registry_module.register_pipeline("pipe-b")
     def _build_pipe() -> PassManager:
@@ -757,10 +658,6 @@ def test_run_ircheck_text_multi_pass_sequence() -> None:
 
 
 # TC-IRCHECK-RUN-025
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-13 06:30:00 +0800
-# 最近一次运行成功时间: 2026-04-13 06:30:00 +0800
 # 功能说明: 验证多 step 失败时 message 标明失败 step，actual_ir 返回失败前一刻 IR。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_failing_step_reports_actual_ir
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -771,7 +668,9 @@ def test_run_ircheck_text_failing_step_reports_actual_ir() -> None:
     class FailingPass(Pass):
         name = "failing-pass"
 
-        def run(self, target: object) -> object:
+        def apply(self, ctx: Context, target: ModuleOp) -> None:
+            _ = ctx
+            _ = target
             raise RuntimeError("boom from failing-pass")
 
     text = """// COMPILE_ARGS: --pass no-op --pass failing-pass --pass no-op
@@ -797,10 +696,6 @@ builtin.module {
 
 
 # TC-IRCHECK-RUN-026
-# 创建者: 朽木露琪亚
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
-# 最近一次运行成功时间: 待本轮验证后补充
 # 功能说明: 验证 CHECK/CHECK-NEXT 支持 alias、变量捕获与跨指令引用。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_variable_success
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -827,10 +722,6 @@ builtin.module {
 
 
 # TC-IRCHECK-RUN-027
-# 创建者: 朽木露琪亚
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
-# 最近一次运行成功时间: 待本轮验证后补充
 # 功能说明: 验证变量 regex 语法错误会映射为 exit_code=2 与稳定错误短语前缀。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_invalid_variable_regex_maps_to_exit_code_2
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -849,10 +740,6 @@ def test_run_ircheck_text_invalid_variable_regex_maps_to_exit_code_2() -> None:
 
 
 # TC-IRCHECK-RUN-027A
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 15:05 +0800
-# 最近一次运行成功时间: 2026-04-14 15:05 +0800
 # 功能说明: 验证未闭合的转义 `[[` 变量片段会在解析阶段映射为 exit_code=2。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_unclosed_escaped_variable_maps_to_exit_code_2
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -871,10 +758,6 @@ def test_run_ircheck_text_unclosed_escaped_variable_maps_to_exit_code_2() -> Non
 
 
 # TC-IRCHECK-RUN-027B
-# 创建者: 朽木露琪亚
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
-# 最近一次运行成功时间: 待本轮验证后补充
 # 功能说明: 验证按 spec 转义的字面量 `[[...]]` 可作为普通 CHECK 文本参与匹配。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_escaped_double_brackets_literal_ok
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -897,10 +780,6 @@ builtin.module attributes {note = "[[LIT]]"} {
 
 
 # TC-IRCHECK-RUN-027C
-# 创建者: 朽木露琪亚
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
-# 最近一次运行成功时间: 待本轮验证后补充
 # 功能说明: 验证按 spec 转义的字面量 `[[` 前缀可作为普通 CHECK 文本参与匹配。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_escaped_double_open_brackets_prefix_ok
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -923,10 +802,6 @@ builtin.module attributes {note = "[["} {
 
 
 # TC-IRCHECK-RUN-028
-# 创建者: 朽木露琪亚
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
-# 最近一次运行成功时间: 待本轮验证后补充
 # 功能说明: 验证 CHECK-NOT 定义变量会映射为 exit_code=2 与稳定错误短语前缀。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_check_not_define_variable_maps_to_exit_code_2
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -946,10 +821,6 @@ def test_run_ircheck_text_check_not_define_variable_maps_to_exit_code_2() -> Non
 
 
 # TC-IRCHECK-RUN-029
-# 创建者: 朽木露琪亚
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
-# 最近一次运行成功时间: 待本轮验证后补充
 # 功能说明: 验证多 case 下变量作用域按 case 隔离，同名变量可在不同 case 重新定义。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_variables_are_case_local
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -982,10 +853,6 @@ builtin.module {
 
 
 # TC-IRCHECK-RUN-030
-# 创建者: 朽木露琪亚
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
-# 最近一次运行成功时间: 待本轮验证后补充
 # 功能说明: 验证 `{reg}` 同时支持符号名与数字 SSA id，满足合同的 memory/alloc 匹配。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_reg_alias_matches_ssa_ids
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -1010,10 +877,6 @@ builtin.module {
 
 
 # TC-IRCHECK-RUN-030A
-# 创建者: 榕
-# 最后一次更改: 榕
-# 最近一次运行测试时间: 2026-04-21 00:30:50 +0800
-# 最近一次运行成功时间: 2026-04-21 00:30:50 +0800
 # 功能说明: 验证 `{val}` 可用于源码或文本里的标识符匹配，不会退化成数字 id。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_val_alias_matches_identifiers
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -1036,10 +899,6 @@ builtin.module {
 
 
 # TC-IRCHECK-RUN-030B
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 待本轮验证后补充
-# 最近一次运行成功时间: 待本轮验证后补充
 # 功能说明: 验证 numeric SSA 形参在函数签名里保持紧贴冒号，避免被归一成 `%0 :`。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_numeric_ssa_signature_keeps_colon_tight
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -1063,10 +922,6 @@ builtin.module {
 
 
 # TC-IRCHECK-RUN-031
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-15 08:55 +0800
-# 最近一次运行成功时间: 2026-04-15 08:55 +0800
 # 功能说明: 验证 `emitc_target="cpu"` 会在 compile steps 后切换到生成源码匹配，并把源码写回 `actual_ir`。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_cpu_matches_generated_source
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -1093,10 +948,6 @@ builtin.module {
 
 
 # TC-IRCHECK-RUN-032
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-15 08:55 +0800
-# 最近一次运行成功时间: 2026-04-15 08:55 +0800
 # 功能说明: 验证 `emitc` 路径匹配失败时，`CHECK*` 面向生成源码而非规范化 IR，且 `actual_ir` 返回源码文本。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_cpu_match_failure_reports_generated_source
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -1124,10 +975,6 @@ builtin.module {
 
 
 # TC-IRCHECK-RUN-033
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-15 08:55 +0800
-# 最近一次运行成功时间: 2026-04-15 08:55 +0800
 # 功能说明: 验证 `emitc_target="npu_demo"` 对不满足双函数形态的多函数模块仍显式失败，并映射为稳定错误前缀。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_npu_demo_maps_generation_failure
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py

@@ -1,7 +1,5 @@
 """本地端到端运行入口。
 
-创建者: 金铲铲大作战
-最后一次更改: 大闸蟹
 
 功能说明:
 - 演示一个 tiled matmul DSL 函数如何通过 `dsl_run(...)` 走完
@@ -9,6 +7,10 @@
 - 使用显式 out 参数，符合当前 `dsl_run` 不支持 DSL 值返回的公开合同。
 - 运行后会打印 lowered IR、host source、kernel source、完整 source、执行结果和数值校验摘要。
 - host/kernel 段均从同一次 lowered module 的真实发射结果中提取，不手写拼接源码。
+
+API 列表:
+- `matmul_kernel(out: "Tensor[f32, 32, 32]", lhs: "Tensor[f32, 32, 16]", rhs: "Tensor[f32, 16, 32]") -> None`
+- `main() -> None`
 
 使用示例:
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 main.py`
@@ -29,6 +31,7 @@ import numpy as np
 import torch
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp
+from xdsl.ir import Operation
 
 from kernel_gen.core.config import set_target
 from kernel_gen.dialect.arch import ArchLaunchOp
@@ -46,11 +49,9 @@ if str(REPO_ROOT) not in sys.path:
 _NPU_DEMO_PRELUDE = '#include "include/npu_demo/npu_demo.h"\nusing namespace npu_demo;\n\n'
 
 
-def _walk_ops(op: object) -> list[object]:
+def _walk_ops(op: Operation) -> list[Operation]:
     """深度遍历并收集 op 子树中的所有 operation。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 递归扫描 operation / region / block 层级，便于在 lowered module 中定位 wrapper 与 kernel。
@@ -65,7 +66,7 @@ def _walk_ops(op: object) -> list[object]:
     - 功能实现: [`main.py`](main.py)
     """
 
-    items: list[object] = [op]
+    items: list[Operation] = [op]
     regions = getattr(op, "regions", ())
     for region in regions:
         for block in getattr(region, "blocks", ()):
@@ -77,8 +78,6 @@ def _walk_ops(op: object) -> list[object]:
 def _is_npu_demo_wrapper(func_op: func.FuncOp) -> bool:
     """判断 lowered module 里的 `func.func` 是否为 npu_demo wrapper。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - wrapper 的唯一机械特征是其子树中含有 `arch.launch`。
@@ -99,8 +98,6 @@ def _is_npu_demo_wrapper(func_op: func.FuncOp) -> bool:
 def _select_npu_demo_source_functions(module: ModuleOp) -> tuple[func.FuncOp, func.FuncOp]:
     """从 lowered module 中定位唯一 host wrapper 与 device kernel。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 允许 module 在 wrapper 与 device kernel 之外继续包含 sibling cost function。
@@ -134,8 +131,6 @@ def _select_npu_demo_source_functions(module: ModuleOp) -> tuple[func.FuncOp, fu
 def _strip_npu_demo_prelude(source: str) -> str:
     """去掉 npu_demo 公共 prelude，便于单独展示 host/kernel 区段。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - `gen_kernel(target="npu_demo")` 会自动加上统一 prelude。
@@ -158,8 +153,6 @@ def _strip_npu_demo_prelude(source: str) -> str:
 def _extract_npu_demo_function_source(source: str, function_name: str) -> str:
     """从完整 source 中截取 npu_demo 的单个函数定义。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - `dsl_run(...)` 的完整 source 已包含 host wrapper 与 device kernel。
@@ -201,8 +194,6 @@ def _extract_npu_demo_function_source(source: str, function_name: str) -> str:
 def _iterate_source_lines(source: str) -> list[tuple[int, str]]:
     """列举 source 中的每一行及其起始偏移。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 为 `_extract_npu_demo_function_source(...)` 提供行首偏移，便于定位 definition 起点。
@@ -232,8 +223,6 @@ def matmul_kernel(
 ) -> None:
     """固定 tile 的 matmul DSL 样例。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 以 `16x16` tile 切分输出的 M/N 轴。
@@ -260,8 +249,6 @@ def matmul_kernel(
 def main() -> None:
     """运行 tiled matmul 端到端样例并校验输出。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 构造 torch/numpy 混合真实参数。

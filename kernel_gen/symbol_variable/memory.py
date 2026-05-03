@@ -1,7 +1,5 @@
 """Memory implementation.
 
-创建者: 小李飞刀
-最后一次更改: 榕
 
 功能说明:
 - 定义内存空间枚举与 Memory 对象，描述 shape/dtype/stride/format/space 元信息。
@@ -44,14 +42,13 @@ from .symbol_shape import SymbolShape
 from .type import ARITHMETIC_DTYPE_RANK, Farmat, NumericType
 
 ShapeLike = SymbolShape | Sequence[SymbolDim | int | str]
+ScalarInput = int | bool
 
 
 @dataclass(frozen=True)
 class LocalSpaceMeta:
     """空间元信息描述。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 描述空间名称、最大容量与对齐要求。
@@ -74,8 +71,6 @@ class LocalSpaceMeta:
 class MemorySpace(Enum):
     """内存空间枚举。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 定义 GM/SM/LM/TSM/TLM1/TLM2/TLM3 等空间枚举项。
@@ -102,8 +97,6 @@ class MemorySpace(Enum):
 class Memory:
     """内存对象，独立描述形状与空间信息。
 
-    创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 记录所在空间，并保存 shape/dtype/stride/format 元信息。
@@ -128,8 +121,6 @@ class Memory:
     ) -> None:
         """初始化 Memory。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 规范化 shape/stride，并记录 space/format/dtype。
@@ -154,8 +145,6 @@ class Memory:
     def _normalize_shape(value: ShapeLike) -> SymbolShape:
         """规范化 shape/stride 输入为 SymbolShape。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 若已为 SymbolShape，直接返回。
@@ -176,8 +165,6 @@ class Memory:
     def _normalize_stride(self: "Memory", value: ShapeLike) -> SymbolShape:
         """规范化 stride 并校验 rank 一致性。
 
-        创建者: 金铲铲大作战
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 将 stride 规整为 SymbolShape。
@@ -207,8 +194,6 @@ class Memory:
     def _clone_shape_like(value: SymbolShape | None) -> SymbolShape | None:
         """克隆 SymbolShape，避免元数据别名共享。
 
-        创建者: 金铲铲大作战
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 逐维复制 SymbolDim，保留 sympy 表达式结构。
@@ -241,8 +226,6 @@ class Memory:
     def _default_stride(shape: SymbolShape) -> SymbolShape:
         """按连续行主序生成默认 stride。
 
-        创建者: OpenAI
-        最后一次更改: OpenAI
 
         功能说明:
         - 最后一维默认 stride 为 1。
@@ -262,8 +245,6 @@ class Memory:
     def get_shape(self: "Memory") -> list[int | str]:
         """返回序列化后的 shape 列表。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 动态维度以字符串返回，静态维度以整数返回。
@@ -281,8 +262,6 @@ class Memory:
     def get_stride(self: "Memory") -> list[int | SymbolDim]:
         """返回 stride 列表，动态分量保留 SymbolDim。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 静态分量返回整数。
@@ -301,8 +280,6 @@ class Memory:
     def get_type(self: "Memory") -> NumericType:
         """返回 Memory 的 dtype。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 对外暴露 dtype 元信息。
@@ -320,8 +297,6 @@ class Memory:
     def get_space(self: "Memory") -> MemorySpace:
         """返回 Memory 的空间枚举。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 对外暴露 space 元信息。
@@ -339,8 +314,6 @@ class Memory:
     def get_format(self: "Memory") -> Farmat:
         """返回 Memory 的格式枚举。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 对外暴露 format 元信息。
@@ -362,8 +335,6 @@ class Memory:
     ) -> "Memory":
         """按公开元信息克隆 `Memory`。
 
-        创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 默认继承当前对象的 `shape/stride/dtype/space/format`。
@@ -393,8 +364,6 @@ class Memory:
     def __repr__(self: "Memory") -> str:
         """返回 Memory 的字符串表示。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 返回 Memory(<space name>,Tensor(shape=..., dtype=..., stride=..., format=...))。
@@ -412,8 +381,6 @@ class Memory:
     def __str__(self: "Memory") -> str:
         """返回 Memory 的字符串表示。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 直接复用 __repr__ 的输出格式。
@@ -445,8 +412,6 @@ class Memory:
     def _ensure_same_shape(self: "Memory", other: "Memory") -> None:
         """校验 Memory 形状一致。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 按静态值或符号语义比较 shape，不支持广播。
@@ -465,8 +430,6 @@ class Memory:
     def _ensure_same_dtype(self: "Memory", other: "Memory") -> None:
         """校验 Memory 数据类型兼容性。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 比较运算要求 dtype 完全一致。
@@ -482,11 +445,9 @@ class Memory:
         if self.dtype is not other.dtype:
             raise TypeError("Memory dtype mismatch")
 
-    def _ensure_scalar_compatible(self: "Memory", value: object) -> None:
+    def _ensure_scalar_compatible(self: "Memory", value: ScalarInput) -> None:
         """校验标量输入兼容性。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 支持 int/bool 标量，bool 视作 int，且需与 dtype 兼容。
@@ -504,11 +465,9 @@ class Memory:
             raise TypeError("Scalar incompatible with Memory dtype")
 
     @staticmethod
-    def _normalize_scalar(value: object) -> int:
+    def _normalize_scalar(value: ScalarInput) -> int:
         """统一校验并规整标量输入。
 
-        创建者: 金铲铲大作战
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 接受 int/bool，bool 视作 int。
@@ -529,11 +488,9 @@ class Memory:
         raise TypeError("Unsupported scalar type for Memory operation")
 
     @staticmethod
-    def _scalar_dtype(value: object) -> NumericType:
+    def _scalar_dtype(value: ScalarInput) -> NumericType:
         """返回标量输入对应的 NumericType。
 
-        创建者: 金铲铲大作战
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 复用 `_normalize_scalar(...)` 的输入边界。
@@ -553,8 +510,6 @@ class Memory:
     def _clone_with_dtype(self: "Memory", dtype: NumericType) -> "Memory":
         """按指定 dtype 克隆 Memory。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 继承 shape/stride/format/space，替换 dtype，并避免元数据别名复用。
@@ -569,11 +524,9 @@ class Memory:
         """
         return self.clone(dtype=dtype)
 
-    def _binary_arithmetic(self: "Memory", other: object) -> "Memory":
+    def _binary_arithmetic(self: "Memory", other: MemoryBinaryOperand) -> "Memory":
         """逐元素算术运算入口。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 支持 Memory/Memory 与 Memory/int/bool，bool 视作 int，返回 Memory。
@@ -595,11 +548,9 @@ class Memory:
         result_dtype = self._promote_ranked_dtype(self.dtype, scalar_dtype)
         return self._clone_with_dtype(result_dtype)
 
-    def _binary_compare(self: "Memory", other: object) -> "Memory":
+    def _binary_compare(self: "Memory", other: MemoryBinaryOperand) -> "Memory":
         """逐元素比较运算入口。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype（Bool）。
@@ -619,18 +570,19 @@ class Memory:
         self._ensure_scalar_compatible(other)
         return self._clone_with_dtype(NumericType.Bool)
 
-def _make_memory_binary_method(method_name: str, delegate_name: str, summary: str, example: str):
-    """生成委托到共享实现的 Memory 二元运算方法。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
+MemoryBinaryOperand = Memory | ScalarInput
+
+
+def _memory_binary_arithmetic_method(self: Memory, other: MemoryBinaryOperand) -> Memory:
+    """Memory 逐元素算术 dunder 共享实现。
+
 
     功能说明:
-    - 为多个同语义 dunder 统一生成方法体与文档。
-    - 保留每个公开运算入口的独立方法名，同时只维护一份委托实现。
+    - 供 `__add__`、`__sub__`、`__mul__`、`__truediv__`、`__floordiv__` 及其反向方法复用。
 
     使用示例:
-    - _make_memory_binary_method("__add__", "_binary_arithmetic", "逐元素加法", "mem + 1")
+    - _memory_binary_arithmetic_method(mem, 1)
 
     关联文件:
     - spec: spec/symbol_variable/memory.md
@@ -638,46 +590,41 @@ def _make_memory_binary_method(method_name: str, delegate_name: str, summary: st
     - 功能实现: kernel_gen/symbol_variable/memory.py
     """
 
-    def method(self: Memory, other: object) -> Memory:
-        return getattr(self, delegate_name)(other)
-
-    method.__name__ = method_name
-    method.__qualname__ = f"Memory.{method_name}"
-    method.__doc__ = f"""{summary}。
-
-        创建者: OpenAI Codex
-        最后一次更改: OpenAI Codex
-
-        功能说明:
-        - 复用 `{delegate_name}(...)` 的统一规则与错误边界。
-
-        使用示例:
-        - {example}
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-    return method
+    return self._binary_arithmetic(other)
 
 
-for _name, _delegate, _summary, _example in (
-    ("__add__", "_binary_arithmetic", "逐元素加法", "mem + 1"),
-    ("__radd__", "_binary_arithmetic", "逐元素反向加法", "1 + mem"),
-    ("__sub__", "_binary_arithmetic", "逐元素减法", "mem - 1"),
-    ("__rsub__", "_binary_arithmetic", "逐元素反向减法", "1 - mem"),
-    ("__mul__", "_binary_arithmetic", "逐元素乘法", "mem * 2"),
-    ("__rmul__", "_binary_arithmetic", "逐元素反向乘法", "2 * mem"),
-    ("__truediv__", "_binary_arithmetic", "逐元素除法", "mem / 2"),
-    ("__rtruediv__", "_binary_arithmetic", "逐元素反向除法", "2 / mem"),
-    ("__floordiv__", "_binary_arithmetic", "逐元素整除", "mem // 2"),
-    ("__rfloordiv__", "_binary_arithmetic", "逐元素反向整除", "2 // mem"),
-    ("__eq__", "_binary_compare", "逐元素相等比较", "mem == other"),
-    ("__ne__", "_binary_compare", "逐元素不等比较", "mem != other"),
-    ("__lt__", "_binary_compare", "逐元素小于比较", "mem < other"),
-    ("__le__", "_binary_compare", "逐元素小于等于比较", "mem <= other"),
-    ("__gt__", "_binary_compare", "逐元素大于比较", "mem > other"),
-    ("__ge__", "_binary_compare", "逐元素大于等于比较", "mem >= other"),
+def _memory_binary_compare_method(self: Memory, other: MemoryBinaryOperand) -> Memory:
+    """Memory 逐元素比较 dunder 共享实现。
+
+
+    功能说明:
+    - 供 `__eq__`、`__ne__`、`__lt__`、`__le__`、`__gt__`、`__ge__` 复用。
+
+    使用示例:
+    - _memory_binary_compare_method(mem, other)
+
+    关联文件:
+    - spec: spec/symbol_variable/memory.md
+    - test: test/symbol_variable/test_memory_operation.py
+    - 功能实现: kernel_gen/symbol_variable/memory.py
+    """
+
+    return self._binary_compare(other)
+
+
+for _name in (
+    "__add__",
+    "__radd__",
+    "__sub__",
+    "__rsub__",
+    "__mul__",
+    "__rmul__",
+    "__truediv__",
+    "__rtruediv__",
+    "__floordiv__",
+    "__rfloordiv__",
 ):
-    setattr(Memory, _name, _make_memory_binary_method(_name, _delegate, _summary, _example))
+    setattr(Memory, _name, _memory_binary_arithmetic_method)
+
+for _name in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"):
+    setattr(Memory, _name, _memory_binary_compare_method)

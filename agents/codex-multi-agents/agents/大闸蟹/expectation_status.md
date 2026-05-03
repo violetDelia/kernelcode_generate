@@ -4,8 +4,6 @@
 - 功能说明：记录 `expectation/` 下可执行验收脚本的最近一次批量运行结果，作为后续质量巡检与差异跟踪的统一台账。
 - 使用示例：查看最近结果可执行 `sed -n '1,120p' agents/codex-multi-agents/agents/大闸蟹/expectation_status.md`。
 - 使用示例：更新台账时，从仓库根目录执行 `find expectation -type f ! -path "*/__pycache__/*" ! -path "expectation/utils/*" | sort | while IFS= read -r f; do PYTHONPATH=. python "$f"; done`，然后按本文件格式覆盖。
-- 创建者：大闸蟹
-- 最后修改人：大闸蟹
 - spec：无单一 spec；本文件记录 [expectation](../../../../expectation) 下验收基线的运行状态。
 - test：覆盖 `expectation/` 下所有可执行验收脚本，明确排除 `expectation/utils/*` 与 `__pycache__`。
 - 功能实现：各 expectation 脚本自行定义验收行为，本文件只记录状态，不改变 expectation 契约。

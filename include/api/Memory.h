@@ -45,12 +45,10 @@ helper 清单:
 - npu_demo::build_contiguous_stride(shape, 2, stride);
 - Memory<SM, int> mem(data, shape, stride, 2, MemoryFormat::CLast);
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/api/test_memory.py
+- test: test/include/api/memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 
@@ -66,12 +64,10 @@ helper 清单:
 使用示例:
 - MemoryFormat format = MemoryFormat::CLast;
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/api/test_memory.py
+- test: test/include/api/memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 enum class MemoryFormat {
@@ -86,12 +82,10 @@ enum class MemoryFormat {
 使用示例:
 - MemorySpace space = MemorySpace::TLM1;
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/api/test_memory.py
+- test: test/include/api/memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 enum class MemorySpace {
@@ -112,12 +106,10 @@ enum class MemorySpace {
 - Memory<GM, float> gm_mem(data, shape, stride, 2);
 - Memory<MemorySpace::GM, float> gm_mem2(data, shape, stride, 2);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/api/test_memory.py
+- test: test/include/api/memory.py
 - 功能实现: include/api/Memory.h
 */
 inline constexpr MemorySpace GM = MemorySpace::GM;
@@ -137,12 +129,10 @@ inline constexpr MemorySpace TLM3 = MemorySpace::TLM3;
 - long long stride[2] = {0, 0};
 - npu_demo::build_contiguous_stride(shape, 2, stride);
 
-创建者: 神秘人
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/api/test_memory.py
+- test: test/include/api/memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 namespace npu_demo {
@@ -162,12 +152,10 @@ void build_contiguous_stride(const long long* shape, unsigned long long rank, lo
 - npu_demo::build_contiguous_stride(shape, 2, stride);
 - Memory<GM, int> mem(data, shape, stride, 2);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/api/test_memory.py
+- test: test/include/api/memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -182,12 +170,10 @@ public:
     - long long stride[2] = {3, 1};
     - Memory<GM, int> mem(data, shape, stride, 2);
 
-    创建者: 神秘人
-    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     Memory(
@@ -205,12 +191,10 @@ public:
     - long long shape[2] = {2, 3};
     - Memory<GM, int> mem(data, shape, 2);
 
-    创建者: 神秘人
-    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     Memory(
@@ -226,12 +210,10 @@ public:
     使用示例:
     - int* ptr = mem.data();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     T* data();
@@ -243,12 +225,10 @@ public:
     使用示例:
     - const int* ptr = const_mem.data();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     const T* data() const;
@@ -260,12 +240,10 @@ public:
     使用示例:
     - const long long* shape = mem.shape();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     const long long* shape() const;
@@ -277,12 +255,10 @@ public:
     使用示例:
     - const long long* stride = mem.stride();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     const long long* stride() const;
@@ -294,12 +270,10 @@ public:
     使用示例:
     - unsigned long long rank = mem.rank();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     unsigned long long rank() const;
@@ -311,12 +285,10 @@ public:
     使用示例:
     - MemoryFormat format = mem.format();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     MemoryFormat format() const;
@@ -328,12 +300,10 @@ public:
     使用示例:
     - MemorySpace space = mem.space();
 
-    创建者: 神秘人
-    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     MemorySpace space() const;
@@ -345,12 +315,10 @@ public:
     使用示例:
     - long long n = mem.get_shape(0);
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     long long get_shape(unsigned long long axis) const;
@@ -362,12 +330,10 @@ public:
     使用示例:
     - long long stride = mem.get_stride(0);
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     long long get_stride(unsigned long long axis) const;
@@ -379,12 +345,10 @@ public:
     使用示例:
     - Memory<GM, float> tile = source.view<float>(offset, size, stride);
 
-    创建者: 金铲铲大作战
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     template <typename ViewT>
@@ -400,12 +364,10 @@ public:
     使用示例:
     - Memory<GM, float> reshaped = source.reshape(shape_vec);
 
-    创建者: 金铲铲大作战
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     Memory<Space, T> reshape(const Vector& shape) const;
@@ -417,12 +379,10 @@ public:
     使用示例:
     - long long count = mem.element_count();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     long long element_count() const;
@@ -434,12 +394,10 @@ public:
     使用示例:
     - bool contiguous = mem.is_contiguous();
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     bool is_contiguous() const;
@@ -453,12 +411,10 @@ public:
     - long long index[2] = {1, 2};
     - long long offset = mem.linear_offset(index);
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     long long linear_offset(const long long* indices) const;
@@ -472,12 +428,10 @@ public:
     - long long index[2] = {1, 2};
     - int& value = mem.at(index);
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     T& at(const long long* indices);
@@ -491,12 +445,10 @@ public:
     - long long index[2] = {1, 2};
     - const int& value = const_mem.at(index);
 
-    创建者: 神秘人
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/api/test_memory.py
+    - test: test/include/api/memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     const T& at(const long long* indices) const;

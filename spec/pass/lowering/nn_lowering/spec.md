@@ -9,20 +9,19 @@
 ## API 列表
 
 - `class NnLoweringPass()`
-- `NnLoweringPass.apply(ctx: Context, module: builtin.module) -> None`
-- `NnLoweringPass.run(module: builtin.module) -> builtin.module`
+- `NnLoweringPass.apply(ctx: Context, module: ModuleOp) -> None`
 - `nn_lowering_patterns() -> list[RewritePattern]`
 
 ## 文档信息
 
-- 创建者：`睡觉小分队`
-- 最后一次更改：`金铲铲大作战`
+- 创建者：`未记录`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/pass/lowering/nn_lowering/spec.md`](../../../../spec/pass/lowering/nn_lowering/spec.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/nn_lowering.py`](../../../../kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
 - `test`：
-  - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/nn_lowering/test_lowering_nn_lowering.py`](../../../../test/pass/nn_lowering/test_lowering_nn_lowering.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_asset_cases.py`](../../../../test/pass/nn_lowering/test_nn_lowering_asset_cases.py)
+  - [`test/passes/lowering/nn_lowering/test_public_name.py`](../../../../test/passes/lowering/nn_lowering/test_public_name.py)
+  - [`test/passes/lowering/nn_lowering/test_nn_lowering.py`](../../../../test/passes/lowering/nn_lowering/test_nn_lowering.py)
+  - [`test/passes/lowering/nn_lowering/test_asset_cases.py`](../../../../test/passes/lowering/nn_lowering/test_asset_cases.py)
 
 ## 依赖
 
@@ -48,8 +47,77 @@
 - 明确 `kernel.binary_elewise` 与 `kernel.reduce` 的公开合同已就绪，并在测试中验证可用性。
 - `lower-nn` 为唯一公开 pass 名称，对外不再保留旧名入口。
 
-## 限制与边界
+## API详细说明
 
+### `class NnLoweringPass()`
+
+- api：`class NnLoweringPass()`
+- 参数：无。
+- 返回值：`NnLoweringPass` 实例。
+- 使用示例：
+
+  ```python
+  from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
+
+  pass_obj = NnLoweringPass()
+  ```
+- 功能说明：表示 `nn -> kernel/dma` lowering pass。
+- 注意事项：固定公开名称为 `"lower-nn"`；公开执行入口固定为 `apply(ctx, module)`；不再保留 `run(module)` 兼容入口；若出现不支持的 op 或校验失败，必须抛出 `KernelCodeError`。
+
+### `NnLoweringPass.apply(ctx: Context, module: ModuleOp) -> None`
+
+- api：`NnLoweringPass.apply(ctx: Context, module: ModuleOp) -> None`
+- 参数：
+  - `ctx`：公开上下文对象，提供代码生成、emit、pass 或工具执行所需的配置与状态；类型 `Context`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `module`：模块级 IR 对象，作为 pass、校验或代码生成的处理主体；类型 `ModuleOp`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：无返回值；调用成功表示操作完成。
+- 使用示例：
+
+  ```python
+  from xdsl.context import Context
+
+  from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
+
+  NnLoweringPass().apply(Context(), module)
+  ```
+- 功能说明：对输入 module 执行 `nn -> kernel/dma` lowering，并原地改写 `module`。
+- 注意事项：`module` 不是 `builtin.module` 时必须抛出 `KernelCodeError`；`apply(...)` 必须直接消费 `nn_lowering_patterns()` 返回的顺序化 pattern 列表，构造 `PatternRewriteWalker(GreedyRewritePatternApplier(...))`，不得回退为手写 `while progress` 或 family 分发循环；返回 `None`。
+
+### `nn_lowering_patterns() -> list[RewritePattern]`
+
+- api：`nn_lowering_patterns() -> list[RewritePattern]`
+- 参数：无。
+- 返回值：`list[RewritePattern]`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.passes.lowering.nn_lowering import nn_lowering_patterns
+
+  patterns = nn_lowering_patterns()
+  ```
+- 功能说明：返回 `lower-nn` 主 driver 使用的有序 pattern 列表。
+- 注意事项：将 element binary、select/cast/exp、dma structured、matmul/img2col、reduce/softmax reject 组合为同一条 rewrite 主链；返回顺序必须稳定，且 `_RejectUnsupportedNnOpPattern` 必须位于最后；列表中不得再出现 family dispatcher 占位 pattern 名称，例如 `_LowerElementBinaryFamilyPattern`、`_LowerDmaStructuredFamilyPattern`、`_LowerMatmulImg2colFamilyPattern`、`_LowerReduceSoftmaxFamilyPattern`；返回值可直接传入 `GreedyRewritePatternApplier`。
+
+## 额外补充
+
+- 文件职责与 child spec 边界：
+  - `nn_lowering.py`：唯一公开 pass、`nn_lowering_patterns()`、顶层 driver 顺序、错误汇总。
+  - `nn_lowering_utility.py`：公共校验与 helper（module/space/result/operand 等）。
+  - `element_binary_lowering.py`：`element_binary_patterns()` 与 element binary / compare 共享构造逻辑。
+  - `select_cast_lowering.py`：`select_cast_patterns()`，覆盖 `nn.select` / `nn.cast` / `nn.exp`。
+  - `dma_structured_lowering.py`：`dma_structured_patterns()`，覆盖 `nn.broadcast` / `nn.transpose`。
+  - `matmul_img2col_lowering.py`：`matmul_img2col_patterns()`，覆盖 `nn.matmul` / `nn.img2col1d` / `nn.img2col2d`。
+  - `reduce_softmax_lowering.py`：`reduce_softmax_patterns()`，覆盖 `nn.reduce_*` 与 direct `nn.softmax` 拒绝。
+- `nn_lowering` family 的 surviving 模块级接口只包括：
+  - `NnLoweringPass`
+  - `KernelCodeError`
+  - `nn_lowering_patterns()`
+  - 各 child 模块的 `*_patterns()`
+- `lower_*_family` 只属于待清理的旧 helper 名称，不能作为 build/review 的通过证据。
+
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 公开构造入口固定为 `build_registered_pass("lower-nn")` 与 `kernel_gen.passes.lowering.nn_lowering.NnLoweringPass`。
 - `NnLoweringPass.apply(...)` 必须直接使用 `nn_lowering_patterns()` 构造 `PatternRewriteWalker(GreedyRewritePatternApplier(...))`，不得回退为手写 `while progress` 或 family 分发循环。
 - `nn_lowering_patterns()` 的注册顺序固定为：
@@ -110,226 +178,41 @@ from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
   - 结果含符号维度时，允许在 `dma.alloc` 前按 rank 顺序生成 `symbol.get_dim` 以构造 dynamic shape operand，但 mixed scalar binary 的物化路径仍固定为 `dma.fill`。
 - 遇到不支持的 op、结果类型非法、缺失 `nn.space`、operand 数量不匹配或 kernel 校验失败时，必须抛出 `KernelCodeError` 并终止。
 
-## 公开接口
-
-### `class NnLoweringPass(Pass)`
-
-功能说明：
-
-- 表示 `nn -> kernel/dma` lowering pass。
-- 通过 `apply(ctx, module)` 执行原地改写，并保留 `run(module)` 兼容入口。
-
-参数说明：
-
-- `name(str)`：固定为 `"lower-nn"`。
-
-使用示例：
-
-```python
-from xdsl.context import Context
-from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
-
-pass_obj = NnLoweringPass()
-pass_obj.apply(Context(), module)
-```
-
-注意事项：
-
-- pass 仅对 `func.func` 中的 `nn` op 生效。
-- 输出 Memory 由 `dma.alloc` 创建，并作为 `kernel/dma` op 的 `out` operand。
-
-返回与限制：
-
-- 不直接返回值；通过实例方法 `apply(...)` / `run(...)` 使用。
-- 若出现不支持的 op 或校验失败，必须抛出 `KernelCodeError`。
-
-### `NnLoweringPass.apply(ctx: Context, module: builtin.module) -> None`
-
-功能说明：
-
-- 对输入 module 执行 `nn -> kernel/dma` lowering，并原地改写 `module`。
-
-参数说明：
-
-- `ctx(Context)`：`GreedyRewritePatternApplier` 所使用的上下文。
-- `module (builtin.module)`：包含 `func.func` 的 IR module。
-
-使用示例：
-
-```python
-from xdsl.context import Context
-
-NnLoweringPass().apply(Context(), module)
-```
-
-注意事项：
-
-- `module` 不是 `builtin.module` 时必须抛出 `KernelCodeError`。
-- `apply(...)` 必须直接消费 `nn_lowering_patterns()` 返回的顺序化 pattern 列表。
-
-返回与限制：
-
-- 原地修改 `module`，返回 `None`。
-
-### `NnLoweringPass.run(module: builtin.module) -> builtin.module`
-
-功能说明：
-
-- 兼容旧 `run(...)` 调用形式，并复用 `apply(...)` 的单 op pattern driver。
-
-参数说明：
-
-- `module (builtin.module)`：待改写的 module。
-
-使用示例：
-
-```python
-module = NnLoweringPass().run(module)
-```
-
-注意事项：
-
-- `run(...)` 只作为兼容入口；行为必须与 `apply(Context(), module)` 一致。
-
-返回与限制：
-
-- 返回同一个、已经被原地改写的 `module`。
-
-### `nn_lowering_patterns() -> list[RewritePattern]`
-
-功能说明：
-
-- 返回 `lower-nn` 主 driver 使用的有序 pattern 列表。
-- 将 element binary、select/cast/exp、dma structured、matmul/img2col、reduce/softmax reject 组合为同一条 rewrite 主链。
-
-参数说明：
-
-- 无。
-
-使用示例：
-
-```python
-patterns = nn_lowering_patterns()
-```
-
-注意事项：
-
-- 返回顺序必须稳定，且 `_RejectUnsupportedNnOpPattern` 必须位于最后。
-- 列表中不得再出现 family dispatcher 占位 pattern 名称，例如 `_LowerElementBinaryFamilyPattern`、`_LowerDmaStructuredFamilyPattern`、`_LowerMatmulImg2colFamilyPattern`、`_LowerReduceSoftmaxFamilyPattern`。
-
-返回与限制：
-
-- 返回可直接传入 `GreedyRewritePatternApplier` 的 `RewritePattern` 列表。
-
-### 失败类型
-
-功能说明：
-
-- 表示 `nn_lowering` 过程中的错误类型。
-
-参数说明：
-
-- `message(str)`：错误信息。
-
-使用示例：
-
-```python
-raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "module must be builtin.module")
-```
-
-注意事项：
-
-- 对底层异常应保留可诊断信息。
-
-返回与限制：
-
-- 该错误用于终止 pass。
-
-### `ensure_module_op(module)`
-
-功能说明：
-
-- 校验并返回 `builtin.module` 类型的 module。
-
-参数说明：
-
-- `module(Operation)`：待校验对象。
-
-使用示例：
-
-```python
-module_op = ensure_module_op(module)
-```
-
-注意事项：
-
-- `module` 不是 `builtin.module` 或 `module.ops` 不可遍历时必须抛出 `KernelCodeError`。
-
-返回与限制：
-
-- 返回 `ModuleOp`。
-
-## 额外补充
-
-- 文件职责与 child spec 边界：
-  - `nn_lowering.py`：唯一公开 pass、`nn_lowering_patterns()`、顶层 driver 顺序、错误汇总。
-  - `nn_lowering_utility.py`：公共校验与 helper（module/space/result/operand 等）。
-  - `element_binary_lowering.py`：`element_binary_patterns()` 与 element binary / compare 共享构造逻辑。
-  - `select_cast_lowering.py`：`select_cast_patterns()`，覆盖 `nn.select` / `nn.cast` / `nn.exp`。
-  - `dma_structured_lowering.py`：`dma_structured_patterns()`，覆盖 `nn.broadcast` / `nn.transpose`。
-  - `matmul_img2col_lowering.py`：`matmul_img2col_patterns()`，覆盖 `nn.matmul` / `nn.img2col1d` / `nn.img2col2d`。
-  - `reduce_softmax_lowering.py`：`reduce_softmax_patterns()`，覆盖 `nn.reduce_*` 与 direct `nn.softmax` 拒绝。
-- `nn_lowering` family 的 surviving 模块级接口只包括：
-  - `NnLoweringPass`
-  - `KernelCodeError`
-  - `nn_lowering_patterns()`
-  - 各 child 模块的 `*_patterns()`
-- `lower_*_family` 只属于待清理的旧 helper 名称，不能作为 build/review 的通过证据。
-
 ## 测试
 
 - 测试文件：
-  - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/nn_lowering/test_lowering_nn_lowering.py`](../../../../test/pass/nn_lowering/test_lowering_nn_lowering.py)
-  - [`test/pass/nn_lowering/test_nn_lowering_asset_cases.py`](../../../../test/pass/nn_lowering/test_nn_lowering_asset_cases.py)
+  - `test/passes/lowering/nn_lowering/test_asset_cases.py`
+  - `test/passes/lowering/nn_lowering/test_nn_lowering.py`
+  - `test/passes/lowering/nn_lowering/test_public_name.py`
 - 执行命令：
-  - `pytest -q test/pass/nn_lowering/public_name.py`
-  - `pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py`
-  - `pytest -q test/pass/nn_lowering/test_nn_lowering_asset_cases.py`
-  - `pytest -q test/pass/nn_lowering`
-- 测试目标：
-  - 验证 `NnLoweringPass` 的公开名字与 canonical import path 稳定。
-  - 验证 `kernel_gen.passes.lowering.nn_to_kernel` 旧模块导入失败，且 `LowerNnToKernelPass` 不再作为 surviving public contract。
-  - 验证 `nn_lowering_patterns()` 的注册顺序稳定，且 family dispatcher 占位 pattern 已退场。
-  - 验证 `NnLoweringPass.apply(...)` 直接使用 `PatternRewriteWalker + GreedyRewritePatternApplier + nn_lowering_patterns()` 驱动改写。
-  - 验证 `KernelCodeError` 与 `NnLoweringPass` 的 canonical public import 可用。
-  - 验证 collectable 公开资产入口当前桥接的非 `test_*.py` helper / boundary case 可直接执行。
-  - 验证 `kernel.binary_elewise` 与 `kernel.reduce` 在 lowering 输出中可解析与可校验。
-  - 验证 add/sub 的静态 `memory + memory` lowering 不把 `symbol.get_dim` 作为必现前置行。
-  - 验证 add/sub 的符号维度 lowering 在 `dma.alloc` 前按维度生成 `symbol.get_dim`。
-  - 验证 `nn.exp` -> `kernel.exp` 的 lowering 目标与输出消费链路。
-  - 验证 `nn.reduce_sum/min/max` -> `kernel.reduce(kind=...)` 的 lowering 目标与 `axis/keepdim` 传递。
-  - 验证 direct `nn.softmax` 会被拒绝，并提示需先完成分解。
-  - 验证 `nn.matmul` -> `kernel.matmul` 的 lowering 目标与输出 memory 约束。
-  - 验证 `nn.img2col1d/nn.img2col2d` -> `kernel.img2col1d/kernel.img2col2d` 的 lowering 目标与 symbol.int operand 约束。
-- 功能与用例清单：
+  - `pytest -q test/passes/lowering/nn_lowering/test_public_name.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_nn_lowering.py`
+  - `pytest -q test/passes/lowering/nn_lowering/test_asset_cases.py`
+  - `pytest -q test/passes/nn_lowering`
 
-| 用例 ID | 功能 | 对应测试 |
-| --- | --- | --- |
-| TC-PASS-NNL-001 | `NnLoweringPass` 公开名称 | `test_nn_lowering_pass_public_name` |
-| TC-PASS-NNL-002 | canonical import 成功、旧 compat 模块失败 | `test_nn_lowering_pass_public_exports` |
-| TC-PASS-NNL-003 | `nn_lowering_patterns()` 通过公开 `*_patterns()` 组合且 reject-last 规则稳定 | `test_nn_lowering_patterns_compose_public_family_exports` |
-| TC-PASS-NNL-004 | `NnLoweringPass.apply(...)` 直接使用 pattern driver | `test_nn_lowering_apply_uses_pattern_driver` |
-| TC-PASS-NNL-005 | collectable 公开资产入口可直接执行当前已纳入的非 `test_*.py` helper / boundary case | `test_nn_lowering_asset_case` |
+### 测试目标
 
-- collectable 资产入口当前只覆盖可直接通过的非 `test_*.py` 资产 case。
-- `img2col1d/2d` 的 `accepts_noncanonical_symbol_names` 仍由各自资产文件单独维护，不属于 `test_nn_lowering_asset_cases.py` 的当前公开入口范围。
-| TC-PASS-NNL-010 | `nn.add` lowering 为 `kernel.binary_elewise(kind="add")` | `test_lower_add_to_kernel` |
-| TC-PASS-NNL-011 | `nn.truediv` lowering 为 `kernel.binary_elewise(kind="div")` | `test_lower_div_to_kernel` |
-| TC-PASS-NNL-012 | `nn.reduce_min` lowering 为 `kernel.reduce(kind="min")` | `test_lower_reduce_min_to_kernel` |
-| TC-PASS-NNL-013 | `nn.reduce_sum` lowering 为 `kernel.reduce(kind="sum")` | `test_lower_reduce_sum_to_kernel` |
-| TC-PASS-NNL-014 | `nn.reduce_max` lowering 为 `kernel.reduce(kind="max")` | `test_lower_reduce_max_to_kernel` |
-| TC-PASS-NNL-020 | direct `nn.softmax` 需先分解后再进入 `lower-nn` | `test_lower_softmax_requires_decompass` |
-| TC-PASS-NNL-021 | `nn.matmul` lowering 目标为 `kernel.matmul` | `test_lower_matmul_to_kernel` |
-| TC-PASS-NNL-022 | `nn.img2col1d` lowering 目标为 `kernel.img2col1d` | `test_lower_img2col1d_to_kernel` |
-| TC-PASS-NNL-023 | `nn.img2col2d` lowering 目标为 `kernel.img2col2d` | `test_lower_img2col2d_to_kernel` |
+- 验证 `spec/pass/lowering/nn_lowering/spec.md` 对应公开 API 的正常路径、边界条件与错误语义。
+- 验证公开导入、注册名、CLI 或命名空间入口只暴露 spec 定义的 API。
+- 验证非法输入、边界条件和错误语义按公开合同失败。
+- 验证 pass 或 pipeline 对目标 IR 的改写、no-op 与顺序约束。
+
+
+### 功能与用例清单
+
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-PASS-NNL-001 | 公开入口 | `NnLoweringPass` 公开名称 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_nn_lowering_pass_public_name`。 | 公开入口在“`NnLoweringPass` 公开名称”场景下可导入、构造、注册或按名称发现。 | `test_nn_lowering_pass_public_name` |
+| TC-PASS-NNL-002 | 公开入口 | canonical import 成功、旧 compat 模块失败 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_nn_lowering_pass_public_exports`。 | 公开入口在“canonical import 成功、旧 compat 模块失败”场景下可导入、构造、注册或按名称发现。 | `test_nn_lowering_pass_public_exports` |
+| TC-PASS-NNL-003 | 边界/异常 | `nn_lowering_patterns()` 通过公开 `*_patterns()` 组合且 reject-last 规则稳定 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_nn_lowering_patterns_compose_public_family_exports`。 | “`nn_lowering_patterns()` 通过公开 `*_patterns()` 组合且 reject-last 规则稳定”场景按公开错误语义失败或被拒绝。 | `test_nn_lowering_patterns_compose_public_family_exports` |
+| TC-PASS-NNL-004 | pass 改写 | `NnLoweringPass.apply(...)` 直接使用 pattern driver | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_nn_lowering_apply_uses_pattern_driver`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`NnLoweringPass.apply(...)` 直接使用 pattern driver”场景。 | `test_nn_lowering_apply_uses_pattern_driver` |
+| TC-PASS-NNL-005 | pass 改写 | collectable 公开资产入口可直接执行当前已纳入的非 `test_*.py` helper / boundary case | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_nn_lowering_asset_case`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“collectable 公开资产入口可直接执行当前已纳入的非 `test_*.py` helper / boundary case”场景。 | `test_nn_lowering_asset_case` |
+| TC-PASS-NNL-010 | pass 改写 | `nn.add` lowering 为 `kernel.binary_elewise(kind="add")` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_add_to_kernel`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`nn.add` lowering 为 `kernel.binary_elewise(kind="add")`”场景。 | `test_lower_add_to_kernel` |
+| TC-PASS-NNL-011 | pass 改写 | `nn.truediv` lowering 为 `kernel.binary_elewise(kind="div")` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_div_to_kernel`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`nn.truediv` lowering 为 `kernel.binary_elewise(kind="div")`”场景。 | `test_lower_div_to_kernel` |
+| TC-PASS-NNL-012 | pass 改写 | `nn.reduce_min` lowering 为 `kernel.reduce(kind="min")` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_reduce_min_to_kernel`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`nn.reduce_min` lowering 为 `kernel.reduce(kind="min")`”场景。 | `test_lower_reduce_min_to_kernel` |
+| TC-PASS-NNL-013 | pass 改写 | `nn.reduce_sum` lowering 为 `kernel.reduce(kind="sum")` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_reduce_sum_to_kernel`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`nn.reduce_sum` lowering 为 `kernel.reduce(kind="sum")`”场景。 | `test_lower_reduce_sum_to_kernel` |
+| TC-PASS-NNL-014 | pass 改写 | `nn.reduce_max` lowering 为 `kernel.reduce(kind="max")` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_reduce_max_to_kernel`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`nn.reduce_max` lowering 为 `kernel.reduce(kind="max")`”场景。 | `test_lower_reduce_max_to_kernel` |
+| TC-PASS-NNL-020 | 边界/异常 | direct `nn.softmax` 需先分解后再进入 `lower-nn` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_lower_softmax_requires_decompass`。 | “direct `nn.softmax` 需先分解后再进入 `lower-nn`”场景按公开错误语义失败或被拒绝。 | `test_lower_softmax_requires_decompass` |
+| TC-PASS-NNL-021 | pass 改写 | `nn.matmul` lowering 目标为 `kernel.matmul` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_matmul_to_kernel`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`nn.matmul` lowering 目标为 `kernel.matmul`”场景。 | `test_lower_matmul_to_kernel` |
+| TC-PASS-NNL-022 | pass 改写 | `nn.img2col1d` lowering 目标为 `kernel.img2col1d` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_img2col1d_to_kernel`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`nn.img2col1d` lowering 目标为 `kernel.img2col1d`”场景。 | `test_lower_img2col1d_to_kernel` |
+| TC-PASS-NNL-023 | pass 改写 | `nn.img2col2d` lowering 目标为 `kernel.img2col2d` | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_lower_img2col2d_to_kernel`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`nn.img2col2d` lowering 目标为 `kernel.img2col2d`”场景。 | `test_lower_img2col2d_to_kernel` |

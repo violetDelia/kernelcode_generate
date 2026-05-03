@@ -20,8 +20,6 @@
 
 ## 文档信息
 
-- 创建者：`摸鱼小分队`
-- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)
 - `功能实现`：[`kernel_gen/symbol_variable/symbol_dim.py`](../../kernel_gen/symbol_variable/symbol_dim.py)
 - `test`：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
@@ -29,7 +27,7 @@
 ## 依赖
 
 - `sympy`：负责静态整数、符号与混合表达式的底层表示。
-- [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md)：包级导入边界来源。
+- [`spec/symbol_variable/__init__.md`](../../spec/symbol_variable/__init__.md)：包级导入边界来源。
 
 ## 目标
 
@@ -38,39 +36,159 @@
 - 明确 `get_symbol()` 与 `get_value()` 的职责分层：前者暴露内部 `sympy.Basic` 表达式，后者暴露稳定的公开比较值。
 - 明确 `+`、`-`、`*`、`/`、`//` 在静态值、动态值、可约表达式、链式除法与链式整除下的公开行为，为实现与测试同步收口提供直接依据。
 
-## 限制与边界
-
-- `SymbolDim` 只表示整数维度及其整型符号表达，不负责广播、约束求解、形状推导或高阶张量语义。
-- 公开接口限定为 `SymbolDim(value)`、`get_symbol()`、`get_value()`、`is_dynamic()`、`__repr__()`、`__eq__()`，以及 `+`、`-`、`*`、`/`、`//` 对应的正向/反向运算；不新增其他对外入口。
-- 构造输入仅允许：
-  - `int`：表示静态整数维度。
-  - `str`：表示符号名；字符串执行 `strip()` 后不能为空，且不能是数值字面量字符串。
-  - `sympy.Basic`：表示已构造好的整数符号或整数表达式。
-- 数值字面量字符串包括但不限于 `"12"`、`"3.14"`、`".5"`、`"1e3"`、`"+1"`、`"-2"`；这些输入在构造、算术操作数、比较操作数路径上都必须抛出 `ValueError`。
-- 空字符串或仅空白字符串在构造、算术操作数、比较操作数路径上都必须抛出 `ValueError`。
-- 浮点构造输入与浮点算术操作数均不受支持：
-  - `SymbolDim(1.5)` 必须抛出 `NotImplementedError`。
-  - `SymbolDim(...)+1.5`、`-1.5`、`*1.5`、`/1.5`、`//1.5` 及对应反向运算必须抛出 `NotImplementedError`。
-- 除浮点外的其他非法类型必须抛出 `TypeError`。
-- 动态性判断以表达式是否含自由符号为准：
-  - 静态整数输入、静态整数之间的 `+`、`-`、`*`、`/`、`//` 结果必须保持 `is_dynamic() == False`。
-  - 只要任一操作数含自由符号，结果必须保持 `is_dynamic() == True`。
-- `get_symbol()` 返回内部 `sympy.Basic` 表达式：
-  - 加、减、乘与显然更短的可约除法/整除结果可以直接以简化后的内部表达出现，例如 `A + A -> 2*A`、`A - A -> 0`、`A / A -> 1`、`(A*B) / B -> A`、`(A*3) // 3 -> A`。
-  - 顺序敏感的链式真除法与整除在内部表达上仍需保持可区分性，例如 `(A / B) / 3` 与 `(A / 3) / B` 必须保留不同的 `sympy.Basic` 结构，`A // B // 3` 与 `A // 3 // B` 也必须保留不同的嵌套 `floor(...)` 结构。
-- `get_value()` 的公开返回值为 `int | float | str`：
-  - 静态表达式返回可直接与 Python 运算结果比较的具体值。
-  - 动态加、减、乘与其他非链式真除法表达式返回 `str(sp.simplify(expr))` 对应的稳定文本。
-  - 动态真除法链返回保持顺序可区分的公开文本，例如 `A / B / 3 -> "A/(3*B)"`，`A / 3 / B -> "A/(B*3)"`。
-  - 动态整除链保持嵌套 `floor(...)` 的顺序信息，例如 `A // B // 3 -> "floor(floor(A/B)/3)"`，`A // 3 // B -> "floor(floor(A/3)/B)"`。
-  - 若结果已经化简为静态值或单个动态符号，公开结果直接返回该值对应的 `int`、`float` 或 `str`，例如 `A / A -> 1`、`(A*B) / B -> "A"`。
-- `__repr__()` 返回 `str(get_symbol())`，因此它描述的是内部表达，不承诺与 `get_value()` 完全相同。
-- `sympy.Symbol` 若未显式声明整数假设，实现需统一为整数语义。
-- 不额外承诺异常消息文本；兼容性只要求异常类型与公开行为稳定。
-
-## 公开接口
+## API详细说明
 
 ### `SymbolDim(value)`
+
+- api：`SymbolDim(value)`
+- 参数：
+  - `value`：当前接口处理或写入的业务值，作为生成、转换、比较或存储语义的主要输入；类型 `int | str | Expr | Symbol`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，除非该 API 明确说明会修改输入。
+- 返回值：`SymbolDim` 实例。
+- 使用示例：
+
+  ```python
+  symbol_dim = SymbolDim(value=sample_value)
+  ```
+- 功能说明：构造 `SymbolDim` 实例。
+- 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
+
+### `get_symbol()`
+
+- api：`get_symbol()`
+- 参数：无。
+- 返回值：`get_symbol` 的公开结果值。
+- 使用示例：
+
+  ```python
+  result = get_symbol()
+  ```
+- 功能说明：读取 `symbol`。
+- 注意事项：该接口只读取公开状态；返回对象的内部可变结构不作为额外公开合同。
+
+### `get_value()`
+
+- api：`get_value()`
+- 参数：无。
+- 返回值：`get_value` 的公开结果值。
+- 使用示例：
+
+  ```python
+  result = get_value()
+  ```
+- 功能说明：读取 `value`。
+- 注意事项：该接口只读取公开状态；返回对象的内部可变结构不作为额外公开合同。
+
+### `__repr__()`
+
+- api：`__repr__()`
+- 参数：无。
+- 返回值：`__repr__` 的公开结果值。
+- 使用示例：
+
+  ```python
+  result = __repr__()
+  ```
+- 功能说明：返回调试表示文本。
+- 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
+
+### `__add__() / __radd__()`
+
+- api：`__add__() / __radd__()`
+- 参数：无。
+- 返回值：`__add__` 的公开结果值。
+- 使用示例：
+
+  ```python
+  result = __add__()
+  ```
+- 功能说明：执行 `__add__`。
+- 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
+
+### `__sub__() / __rsub__()`
+
+- api：`__sub__() / __rsub__()`
+- 参数：无。
+- 返回值：`__sub__` 的公开结果值。
+- 使用示例：
+
+  ```python
+  result = __sub__()
+  ```
+- 功能说明：执行 `__sub__`。
+- 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
+
+### `__mul__() / __rmul__()`
+
+- api：`__mul__() / __rmul__()`
+- 参数：无。
+- 返回值：`__mul__` 的公开结果值。
+- 使用示例：
+
+  ```python
+  result = __mul__()
+  ```
+- 功能说明：执行 `__mul__`。
+- 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
+
+### `__truediv__() / __rtruediv__()`
+
+- api：`__truediv__() / __rtruediv__()`
+- 参数：无。
+- 返回值：`__truediv__` 的公开结果值。
+- 使用示例：
+
+  ```python
+  result = __truediv__()
+  ```
+- 功能说明：执行 `__truediv__`。
+- 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
+
+### `__floordiv__() / __rfloordiv__()`
+
+- api：`__floordiv__() / __rfloordiv__()`
+- 参数：无。
+- 返回值：`__floordiv__` 的公开结果值。
+- 使用示例：
+
+  ```python
+  result = __floordiv__()
+  ```
+- 功能说明：执行 `__floordiv__`。
+- 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
+
+### `__eq__(other)`
+
+- api：`__eq__(other)`
+- 参数：
+  - `other`：另一侧操作数或比较对象，用于和当前对象组合、比较或广播；类型 `int | str | Expr | Symbol | SymbolDim`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，除非该 API 明确说明会修改输入。
+- 返回值：`__eq__` 的公开结果值。
+- 使用示例：
+
+  ```python
+  result = __eq__(other=sample_other)
+  ```
+- 功能说明：执行 `__eq__`。
+- 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
+
+### `is_dynamic()`
+
+- api：`is_dynamic()`
+- 参数：无。
+- 返回值：`is_dynamic` 的公开结果值。
+- 使用示例：
+
+  ```python
+  result = is_dynamic()
+  ```
+- 功能说明：执行 `is_dynamic`。
+- 注意事项：该接口只读取公开状态；返回对象的内部可变结构不作为额外公开合同。
+
+
+## 额外补充
+
+### 公开接口
+
+#### 补充：`SymbolDim(value)`
 
 功能说明：
 
@@ -101,9 +219,9 @@ SymbolDim(sp.Symbol("M", integer=True, real=True) + 1)
 返回与限制：
 
 - 返回 `SymbolDim` 实例。
-- 非法输入按“限制与边界”中的异常类型处理。
+- 非法输入按对应 API `注意事项` 中的异常类型处理。
 
-### `get_symbol()`
+#### 补充：`get_symbol()`
 
 功能说明：
 
@@ -138,7 +256,7 @@ assert str((A // B // 3).get_symbol()) == "floor(floor(A/B)/3)"
 
 - 返回 `sympy.Basic`。
 
-### `get_value()`
+#### 补充：`get_value()`
 
 功能说明：
 
@@ -176,7 +294,7 @@ assert (A // B // 3).get_value() == "floor(floor(A/B)/3)"
 
 - 返回 `int | float | str`；动态表达式不返回 `sympy.Basic`。
 
-### `__repr__()`
+#### 补充：`__repr__()`
 
 功能说明：
 
@@ -207,7 +325,7 @@ assert repr(A / B / 3) == "(A/B)/3"
 
 - 返回 `str`。
 
-### `__add__() / __radd__()`
+#### 补充：`__add__() / __radd__()`
 
 功能说明：
 
@@ -238,7 +356,7 @@ dynamic_sum = 3 + SymbolDim("N")
 
 - 返回 `SymbolDim`。
 
-### `__sub__() / __rsub__()`
+#### 补充：`__sub__() / __rsub__()`
 
 功能说明：
 
@@ -259,7 +377,7 @@ dynamic_diff = SymbolDim(9) - SymbolDim("N")
 
 注意事项：
 
-- 结果动态性遵循“限制与边界”中的传播规则。
+- 结果动态性遵循对应 API `注意事项` 中的传播规则。
 - `str` 操作数复用构造路径的字符串词法校验；数值字面量字符串必须抛出 `ValueError`。
 - `A - A` 的内部表达与公开值都应表现为 `0`。
 - 链式减法的公开值使用 `str(sp.simplify(expr))` 对应的稳定文本。
@@ -269,7 +387,7 @@ dynamic_diff = SymbolDim(9) - SymbolDim("N")
 
 - 返回 `SymbolDim`。
 
-### `__mul__() / __rmul__()`
+#### 补充：`__mul__() / __rmul__()`
 
 功能说明：
 
@@ -290,7 +408,7 @@ dynamic_prod = SymbolDim(3) * SymbolDim("N")
 
 注意事项：
 
-- 结果动态性遵循“限制与边界”中的传播规则。
+- 结果动态性遵循对应 API `注意事项` 中的传播规则。
 - `str` 操作数复用构造路径的字符串词法校验；数值字面量字符串必须抛出 `ValueError`。
 - `A * 1` 的内部表达与公开值都应表现为 `A`。
 - 浮点操作数必须抛出 `NotImplementedError`。
@@ -299,7 +417,7 @@ dynamic_prod = SymbolDim(3) * SymbolDim("N")
 
 - 返回 `SymbolDim`。
 
-### `__truediv__() / __rtruediv__()`
+#### 补充：`__truediv__() / __rtruediv__()`
 
 功能说明：
 
@@ -334,7 +452,7 @@ assert (A / A).get_value() == 1
 
 - 返回 `SymbolDim`。
 
-### `__floordiv__() / __rfloordiv__()`
+#### 补充：`__floordiv__() / __rfloordiv__()`
 
 功能说明：
 
@@ -369,7 +487,7 @@ assert (A // A).get_value() == 1
 
 - 返回 `SymbolDim`。
 
-### `__eq__(other)`
+#### 补充：`__eq__(other)`
 
 功能说明：
 
@@ -399,7 +517,7 @@ assert SymbolDim("N") == SymbolDim("N")
 
 - 返回 `bool`。
 
-### `is_dynamic()`
+#### 补充：`is_dynamic()`
 
 功能说明：
 
@@ -429,10 +547,40 @@ assert (SymbolDim(8) + SymbolDim("N")).is_dynamic() is True
 
 ## 额外补充
 
-- [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md) 负责包级导入边界；本文件只定义 `SymbolDim` 对象本身的构造、算术、比较与动态性语义。
+- [`spec/symbol_variable/__init__.md`](../../spec/symbol_variable/__init__.md) 负责包级导入边界；本文件只定义 `SymbolDim` 对象本身的构造、算术、比较与动态性语义。
 - [`spec/symbol_variable/symbol_shape.md`](../../spec/symbol_variable/symbol_shape.md) 负责多个 `SymbolDim` 的容器行为；本文件不定义切片、索引赋值或列表序列化。
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md) 负责 `Memory` 如何消费 `SymbolDim` 组成的 `shape/stride`；本文件不定义 `Memory` 的 dtype、space、format 或默认 stride 生成。
 
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
+- `SymbolDim` 只表示整数维度及其整型符号表达，不负责广播、约束求解、形状推导或高阶张量语义。
+- 公开接口限定为 `SymbolDim(value)`、`get_symbol()`、`get_value()`、`is_dynamic()`、`__repr__()`、`__eq__()`，以及 `+`、`-`、`*`、`/`、`//` 对应的正向/反向运算；不新增其他对外入口。
+- 构造输入仅允许：
+  - `int`：表示静态整数维度。
+  - `str`：表示符号名；字符串执行 `strip()` 后不能为空，且不能是数值字面量字符串。
+  - `sympy.Basic`：表示已构造好的整数符号或整数表达式。
+- 数值字面量字符串包括但不限于 `"12"`、`"3.14"`、`".5"`、`"1e3"`、`"+1"`、`"-2"`；这些输入在构造、算术操作数、比较操作数路径上都必须抛出 `ValueError`。
+- 空字符串或仅空白字符串在构造、算术操作数、比较操作数路径上都必须抛出 `ValueError`。
+- 浮点构造输入与浮点算术操作数均不受支持：
+  - `SymbolDim(1.5)` 必须抛出 `NotImplementedError`。
+  - `SymbolDim(...)+1.5`、`-1.5`、`*1.5`、`/1.5`、`//1.5` 及对应反向运算必须抛出 `NotImplementedError`。
+- 除浮点外的其他非法类型必须抛出 `TypeError`。
+- 动态性判断以表达式是否含自由符号为准：
+  - 静态整数输入、静态整数之间的 `+`、`-`、`*`、`/`、`//` 结果必须保持 `is_dynamic() == False`。
+  - 只要任一操作数含自由符号，结果必须保持 `is_dynamic() == True`。
+- `get_symbol()` 返回内部 `sympy.Basic` 表达式：
+  - 加、减、乘与显然更短的可约除法/整除结果可以直接以简化后的内部表达出现，例如 `A + A -> 2*A`、`A - A -> 0`、`A / A -> 1`、`(A*B) / B -> A`、`(A*3) // 3 -> A`。
+  - 顺序敏感的链式真除法与整除在内部表达上仍需保持可区分性，例如 `(A / B) / 3` 与 `(A / 3) / B` 必须保留不同的 `sympy.Basic` 结构，`A // B // 3` 与 `A // 3 // B` 也必须保留不同的嵌套 `floor(...)` 结构。
+- `get_value()` 的公开返回值为 `int | float | str`：
+  - 静态表达式返回可直接与 Python 运算结果比较的具体值。
+  - 动态加、减、乘与其他非链式真除法表达式返回 `str(sp.simplify(expr))` 对应的稳定文本。
+  - 动态真除法链返回保持顺序可区分的公开文本，例如 `A / B / 3 -> "A/(3*B)"`，`A / 3 / B -> "A/(B*3)"`。
+  - 动态整除链保持嵌套 `floor(...)` 的顺序信息，例如 `A // B // 3 -> "floor(floor(A/B)/3)"`，`A // 3 // B -> "floor(floor(A/3)/B)"`。
+  - 若结果已经化简为静态值或单个动态符号，公开结果直接返回该值对应的 `int`、`float` 或 `str`，例如 `A / A -> 1`、`(A*B) / B -> "A"`。
+- `__repr__()` 返回 `str(get_symbol())`，因此它描述的是内部表达，不承诺与 `get_value()` 完全相同。
+- `sympy.Symbol` 若未显式声明整数假设，实现需统一为整数语义。
+- 不额外承诺异常消息文本；兼容性只要求异常类型与公开行为稳定。
 ## 测试
 
 - 测试文件：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)

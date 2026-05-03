@@ -1,12 +1,10 @@
 """NN dialect definitions.
 
-创建者: 小李飞刀
-最后一次更改: 小李飞刀
 
 功能说明:
 - 定义 nn dialect 的 memory type、space attribute 与逐元素/广播 op。
-- 约定 `nn.truediv` 为唯一公开除法 op，`nn.div` alias 已移除。
-- `nn.select` 不在 nn dialect 中提供，相关 lowering 由 pass 层按 op 名称处理。
+- 保留 `nn.div` 与 `nn.truediv` 两个公开除法 op；两者分别由 `NnDivOp` 与 `NnTrueDivOp` 承载。
+- `nn.select` 是公开 nn dialect op，相关 lowering 由 pass 层按 op 名称处理。
 
 API 列表:
 - `class NnMemorySpaceAttr(space: StringAttr)`
@@ -47,13 +45,12 @@ API 列表:
 
 关联文件:
 - spec: spec/dialect/nn.md
-- test: test/dialect/test_nn_dialect.py
+- test: test/dialect/test_nn.py
 - 功能实现: kernel_gen/dialect/nn.py
 """
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 
 from kernel_gen.core.contracts import (
@@ -65,7 +62,8 @@ from kernel_gen.core.contracts import (
     verify_i64_attr_value as _common_verify_i64_attr_value,
     verify_memory_type as _common_verify_memory_type,
 )
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from xdsl.dialects.builtin import (
     ArrayAttr,
     BFloat16Type,
@@ -89,127 +87,172 @@ from xdsl.irdl import (
     param_def,
     result_def,
 )
-from xdsl.parser import AttrParser
+from xdsl.parser import AttrParser, Parser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
 
 _VALID_SPACES = {"global", "shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
-_ERROR_ACTION = "请按接口约束传参"
-_ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.nn verifier"
-_DIM_EXPR_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_$.]*|\d+|//|[()+*-]")
 
-
-def _raise_verify_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
+def _raise_verify_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None:
     """统一抛出 nn dialect verifier 错误。"""
 
     raise VerifyException(
-        _ERROR_TEMPLATE.format(
+        ERROR_TEMPLATE.format(
             scene=_ERROR_SCENE,
             expected=expected,
             actual=actual,
-            action=_ERROR_ACTION,
+            action=ERROR_ACTION,
         )
     )
 
 
-def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
-    """解析 shape 或 stride 维度列表。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+def _parse_raw_memory_parameters(parser: AttrParser) -> Sequence[Attribute]:
+    """按原文解析 `!nn.memory<...>` 参数。
 
     功能说明:
-    - 支持非负整数、`?` 与符号标识符。
-    - 允许 `+` / `-` / `*` / `//` / `()` 组成的维度表达式，并按原文本保留。
-    - 当前只承接 `xdsl` 公开 parser token 接口可稳定消费的文本范围，不承诺 `/` 原文 round-trip。
+    - 规避 xDSL 词法层把 `//` 识别为注释的问题。
+    - 仅对 `shape/stride` 维度列表做原文解析，element type 与 space 仍委托 xDSL parser。
 
     使用示例:
-    - _parse_dim_list(parser)
-
-    关联文件:
-    - spec: [spec/dialect/nn.md](spec/dialect/nn.md)
-    - test: [test/dialect/test_nn_dialect.py](test/dialect/test_nn_dialect.py)
-    - 功能实现: [kernel_gen/dialect/nn.py](kernel_gen/dialect/nn.py)
-    """
-
-    dims: list[Attribute] = []
-    parser.parse_punctuation("[", "Expected dimension list.")
-    if parser.parse_optional_punctuation("]") is not None:
-        return ArrayAttr(dims)
-
-    while True:
-        if parser.parse_optional_punctuation("?") is not None:
-            dims.append(StringAttr("?"))
-        else:
-            start_pos = parser.pos
-            input_text = parser.lexer.input.content
-            depth = 0
-            end_pos = None
-            pos = start_pos
-            while pos < len(input_text):
-                ch = input_text[pos]
-                if ch == "(":
-                    depth += 1
-                elif ch == ")" and depth > 0:
-                    depth -= 1
-                elif depth == 0 and ch in {",", "]"}:
-                    end_pos = pos
-                    break
-                pos += 1
-            if end_pos is None:
-                parser.raise_error("Expected dimension list terminator.")
-            raw_text = input_text[start_pos:end_pos]
-            expr = raw_text.strip()
-            if not expr:
-                parser.raise_error("Expected dimension symbol.")
-            _consume_raw_dim_expr(parser, expr, end_pos)
-            if expr.isdecimal():
-                dims.append(IntAttr(int(expr)))
-            else:
-                dims.append(StringAttr(expr))
-
-        if parser.parse_optional_punctuation(",") is None:
-            break
-
-    parser.parse_punctuation("]", "Expected dimension list terminator.")
-    return ArrayAttr(dims)
-
-
-def _consume_raw_dim_expr(parser: AttrParser, expr: str, end_pos: int) -> None:
-    """校验并消费维度表达式的原始文本片段。
-
-    创建者: 小李飞刀
-    最后一次更改: 榕
-
-    功能说明:
-    - 先校验标识符、整数、`+`、`-`、`*`、`//` 与括号组成的表达式文本。
-    - 再把 parser 推进到当前维度片段结尾。
-    - `//` 在 MLIR lexer 中是注释起始，无法通过普通 token 消费；这里必须按
-      `nn.memory` 自定义类型 parser 的原始片段边界推进。
-
-    使用示例:
-    - _consume_raw_dim_expr(parser, "M // 2", end_pos)
+    - params = _parse_raw_memory_parameters(parser)
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
-    compact_expr = re.sub(r"\s+", "", expr)
-    tokens = _DIM_EXPR_TOKEN_RE.findall(compact_expr)
-    if not tokens or "".join(tokens) != compact_expr:
-        parser.raise_error("Expected dimension symbol.")
+    content = parser.lexer.input.content
+    start = parser.pos
+    if start >= len(content) or content[start] != "<":
+        parser.parse_punctuation("<", "Expected '<' for nn memory type.")
 
-    parser._resume_from(end_pos)
+    try:
+        end = _find_matching_parameter_end(content, start)
+        body = content[start + 1 : end]
+        fields = _split_top_level_fields(body, expected_count=4)
+        shape = _parse_raw_dim_list(fields[0])
+        stride = _parse_raw_dim_list(fields[1])
+    except VerifyException as exc:
+        parser.raise_error(str(exc))
+    element_type = Parser(parser.ctx, fields[2]).parse_attribute()
+    space = Parser(parser.ctx, fields[3]).parse_attribute()
+    # xDSL 词法层会把 `//` 当注释；这里必须在原文扫描后恢复 parser token 流。
+    parser._resume_from(end + 1)
+    if not isinstance(space, NnMemorySpaceAttr):
+        _raise_verify_error("nn memory type space must be #nn.space<...>")
+    return (shape, stride, element_type, space)
+
+
+def _find_matching_parameter_end(content: str, start: int) -> int:
+    """查找 `!nn.memory<...>` 参数体的结束 `>` 位置。"""
+
+    depth = 0
+    in_string = False
+    index = start
+    while index < len(content):
+        char = content[index]
+        if char == '"' and (index == 0 or content[index - 1] != "\\"):
+            in_string = not in_string
+        elif not in_string:
+            if char == "<":
+                depth += 1
+            elif char == ">":
+                depth -= 1
+                if depth == 0:
+                    return index
+        index += 1
+    raise VerifyException("Expected '>' for nn memory type.")
+
+
+def _split_top_level_fields(text: str, *, expected_count: int) -> list[str]:
+    """按顶层逗号拆分参数字段。"""
+
+    fields: list[str] = []
+    depth = 0
+    in_string = False
+    start = 0
+    pairs = {"[": "]", "(": ")", "{": "}", "<": ">"}
+    closing = {value: key for key, value in pairs.items()}
+    stack: list[str] = []
+    for index, char in enumerate(text):
+        if char == '"' and (index == 0 or text[index - 1] != "\\"):
+            in_string = not in_string
+        elif not in_string:
+            if char in pairs:
+                stack.append(char)
+                depth += 1
+            elif char in closing:
+                if not stack or stack[-1] != closing[char]:
+                    raise VerifyException("Malformed nn memory type parameters.")
+                stack.pop()
+                depth -= 1
+            elif char == "," and depth == 0:
+                fields.append(text[start:index].strip())
+                start = index + 1
+    fields.append(text[start:].strip())
+    if len(fields) != expected_count or any(not field for field in fields):
+        raise VerifyException("nn memory type requires shape, stride, element type and space")
+    return fields
+
+
+def _parse_raw_dim_list(text: str) -> ArrayAttr[Attribute]:
+    """解析原文维度列表，按 SymbolDim 合同校验动态维度。"""
+
+    stripped = text.strip()
+    if not stripped.startswith("[") or not stripped.endswith("]"):
+        raise VerifyException("Expected dimension list.")
+    inner = stripped[1:-1].strip()
+    if not inner:
+        return ArrayAttr([])
+    dims: list[Attribute] = []
+    for item in _split_top_level_dim_items(inner):
+        dim = item.strip()
+        if dim == "?":
+            dims.append(StringAttr("?"))
+        elif dim.isdecimal():
+            dims.append(IntAttr(int(dim)))
+        else:
+            _verify_raw_dim_expr(dim)
+            dims.append(StringAttr(dim))
+    return ArrayAttr(dims)
+
+
+def _split_top_level_dim_items(text: str) -> list[str]:
+    """按顶层逗号拆分维度表达式。"""
+
+    items: list[str] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(text):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth < 0:
+                raise VerifyException("Malformed dimension expression.")
+        elif char == "," and depth == 0:
+            items.append(text[start:index])
+            start = index + 1
+    if depth != 0:
+        raise VerifyException("Malformed dimension expression.")
+    items.append(text[start:])
+    return items
+
+
+def _verify_raw_dim_expr(text: str) -> None:
+    """校验原文维度表达式，合法范围与 SymbolDim 字符串一致。"""
+
+    try:
+        SymbolDim(text)
+    except (TypeError, ValueError) as exc:
+        raise VerifyException("dimension expression must be a valid SymbolDim string") from exc
 
 
 def _print_dim_list(printer: Printer, dims: ArrayAttr[Attribute]) -> None:
     """打印 shape 或 stride 维度列表。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 按 `[d0, d1, ...]` 文本格式输出维度。
@@ -219,7 +262,7 @@ def _print_dim_list(printer: Printer, dims: ArrayAttr[Attribute]) -> None:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -239,8 +282,6 @@ def _print_dim_list(printer: Printer, dims: ArrayAttr[Attribute]) -> None:
 def _verify_dim_entry(dim: Attribute, field_name: str) -> None:
     """校验单个维度条目合法性。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅接受 IntAttr 与非空 StringAttr。
@@ -250,7 +291,7 @@ def _verify_dim_entry(dim: Attribute, field_name: str) -> None:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -269,8 +310,6 @@ def _verify_dim_entry(dim: Attribute, field_name: str) -> None:
 class NnMemorySpaceAttr(ParametrizedAttribute):
     """NN memory space attribute。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 显式建模 `global`、`shared`、`local`、`tsm`、`tlm1`、`tlm2`、`tlm3` 七种 memory space。
@@ -280,7 +319,7 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -314,8 +353,6 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
     def from_name(cls, space: str) -> "NnMemorySpaceAttr":
         """从字符串构造 space attribute。
 
-        创建者: 小李飞刀
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 简化 `global/shared/local/tsm/tlm1/tlm2/tlm3` 的构造。
@@ -325,7 +362,7 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
 
@@ -336,8 +373,6 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
 class NnMemoryType(ParametrizedAttribute, TypeAttribute):
     """NN memory type。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 建模 `shape`、`stride`、`element_type` 与 `space` 四类信息。
@@ -347,7 +382,7 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -362,18 +397,7 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
     def parse_parameters(cls, parser: AttrParser) -> Sequence[Attribute]:
         """解析 memory type 参数。"""
 
-        parser.parse_punctuation("<", "Expected '<' for nn memory type.")
-        shape = _parse_dim_list(parser)
-        parser.parse_punctuation(",", "Expected ',' after shape.")
-        stride = _parse_dim_list(parser)
-        parser.parse_punctuation(",", "Expected ',' after stride.")
-        element_type = parser.parse_attribute()
-        parser.parse_punctuation(",", "Expected ',' after element type.")
-        space = parser.parse_attribute()
-        parser.parse_punctuation(">", "Expected '>' for nn memory type.")
-        if not isinstance(space, NnMemorySpaceAttr):
-            _raise_verify_error("nn memory type space must be #nn.space<...>")
-        return (shape, stride, element_type, space)
+        return _parse_raw_memory_parameters(parser)
 
     def print_parameters(self, printer: Printer) -> None:
         """打印 memory type 参数。"""
@@ -419,8 +443,6 @@ def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
 def _verify_binary_memory_op(op: "_BaseNnBinaryOp", compare_result: bool) -> None:
     """统一校验 nn 二元 op。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 检查 operand/result 类型、shape/stride、element_type 与 space 一致性。
@@ -430,7 +452,7 @@ def _verify_binary_memory_op(op: "_BaseNnBinaryOp", compare_result: bool) -> Non
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -467,8 +489,6 @@ _ADD_DTYPE_ATTR = {"i32": i32, "f16": Float16Type(), "f32": Float32Type()}
 def _is_symbol_int_type(attr: Attribute) -> bool:
     """判断 attribute 是否为 symbol.int。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 仅通过 `name` 字段判断是否为 `symbol.int` 类型，避免 nn/symbol 循环依赖。
@@ -478,7 +498,7 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -488,8 +508,6 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
 def _is_int_or_symbol_type(attr: Attribute) -> bool:
     """判断类型是否为整数或 symbol.int。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 允许任意位宽的 IntegerType。
@@ -501,7 +519,7 @@ def _is_int_or_symbol_type(attr: Attribute) -> bool:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -511,8 +529,6 @@ def _is_int_or_symbol_type(attr: Attribute) -> bool:
 def _static_int_from_operand(operand: SSAValue) -> int | None:
     """尝试从 operand 提取静态整数值。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 支持 `arith.constant`/`symbol.const` 以及单层 `builtin.unrealized_conversion_cast`。
@@ -523,7 +539,7 @@ def _static_int_from_operand(operand: SSAValue) -> int | None:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -560,8 +576,6 @@ def _verify_img2col_param_operands(
 ) -> list[int | None]:
     """校验 img2col 参数 operand 类型并提取静态值。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 要求每个 operand 为 IntegerType 或 symbol.int。
@@ -573,7 +587,7 @@ def _verify_img2col_param_operands(
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -595,8 +609,6 @@ def _verify_img2col_param_operands(
 def _resolve_add_dtype_key(attr: Attribute) -> str | None:
     """解析 nn.add 标量/element_type 的 promotion key。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 支持 i32/f16/f32 三种类型；
@@ -608,7 +620,7 @@ def _resolve_add_dtype_key(attr: Attribute) -> str | None:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -626,8 +638,6 @@ def _resolve_add_dtype_key(attr: Attribute) -> str | None:
 def _is_float_element_type(attr: Attribute) -> bool:
     """判断 element_type 是否为浮点类型。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 允许 f16/bf16/f32/f64 四类浮点类型。
@@ -637,7 +647,7 @@ def _is_float_element_type(attr: Attribute) -> bool:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -647,8 +657,6 @@ def _is_float_element_type(attr: Attribute) -> bool:
 def _promote_add_dtype(lhs_type: Attribute, rhs_type: Attribute) -> Attribute | None:
     """计算 nn.add 的 dtype promotion 结果类型。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 按 i32 < f16 < f32 顺序进行 promotion。
@@ -658,7 +666,7 @@ def _promote_add_dtype(lhs_type: Attribute, rhs_type: Attribute) -> Attribute | 
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -673,8 +681,6 @@ def _promote_add_dtype(lhs_type: Attribute, rhs_type: Attribute) -> Attribute | 
 def _verify_add_op(op: "NnAddOp") -> None:
     """校验 nn.add，支持 memory + scalar/symbol。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 允许 `nn.memory + scalar`、`scalar + nn.memory`、`nn.memory + !symbol.int`；
@@ -686,7 +692,7 @@ def _verify_add_op(op: "NnAddOp") -> None:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -728,8 +734,6 @@ def _verify_add_op(op: "NnAddOp") -> None:
 def _verify_mixed_scalar_binary_op(op: "_BaseNnBinaryOp", op_name: str) -> None:
     """校验支持 mixed memory+scalar/symbol 的 nn 二元算术 op。
 
-    创建者: OpenAI
-    最后一次更改: OpenAI
 
     功能说明:
     - 允许 `nn.memory + scalar`、`scalar + nn.memory`、`nn.memory + !symbol.int`。
@@ -740,7 +744,7 @@ def _verify_mixed_scalar_binary_op(op: "_BaseNnBinaryOp", op_name: str) -> None:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -782,28 +786,26 @@ def _verify_mixed_scalar_binary_op(op: "_BaseNnBinaryOp", op_name: str) -> None:
 def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     """判断两个维度是否语义一致。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
-    - 仅在同类型且内容相等时认为一致。
+    - IntAttr 按数值比较，StringAttr 按去除空白后的公开维度表达式比较。
 
     使用示例:
     - _dims_equal(IntAttr(1), IntAttr(1))
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
+    if isinstance(lhs, StringAttr) and isinstance(rhs, StringAttr):
+        return "".join(lhs.data.split()) == "".join(rhs.data.split())
     return _common_dims_equal(lhs, rhs)
 
 
 def _verify_broadcast_compat(input_type: NnMemoryType, result_type: NnMemoryType) -> None:
     """校验 nn.broadcast 的 shape 兼容性。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 按尾维对齐规则检查输入与输出 shape。
@@ -814,7 +816,7 @@ def _verify_broadcast_compat(input_type: NnMemoryType, result_type: NnMemoryType
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
     input_dims = input_type.shape.data
@@ -833,8 +835,6 @@ def _verify_broadcast_compat(input_type: NnMemoryType, result_type: NnMemoryType
 def _verify_transpose_perm(perm: ArrayAttr, rank: int) -> list[int]:
     """校验 nn.transpose 的 perm 合法性并返回序列。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 校验 perm 长度与 rank 一致。
@@ -845,7 +845,7 @@ def _verify_transpose_perm(perm: ArrayAttr, rank: int) -> list[int]:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
     if len(perm.data) != rank:
@@ -871,8 +871,6 @@ def _verify_transpose_layout(
 ) -> None:
     """校验 nn.transpose 的 shape 与物化结果 stride。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 按 perm 重排 input shape，并与 result shape 对齐校验。
@@ -883,7 +881,7 @@ def _verify_transpose_layout(
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
     expected_shape = [input_type.shape.data[index] for index in perm_values]
@@ -900,8 +898,6 @@ def _verify_transpose_layout(
 def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
     """按默认连续布局生成行主序 stride。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 静态维度返回 `IntAttr` 乘积。
@@ -913,7 +909,7 @@ def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -952,8 +948,6 @@ def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
 def _normalize_i64_attr(value: int | IntegerAttr | IntAttr, field_name: str) -> IntegerAttr:
     """将数值规范化为 i64 IntegerAttr。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持传入 int/IntAttr/IntegerAttr，统一为 i64 IntegerAttr。
@@ -964,7 +958,7 @@ def _normalize_i64_attr(value: int | IntegerAttr | IntAttr, field_name: str) -> 
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -978,8 +972,6 @@ def _normalize_i64_attr(value: int | IntegerAttr | IntAttr, field_name: str) -> 
 def _verify_i64_attr_value(attr: IntegerAttr, field_name: str, *, allow_zero: bool) -> int:
     """校验 i64 属性值并返回整数。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 校验属性类型为 i64。
@@ -990,7 +982,7 @@ def _verify_i64_attr_value(attr: IntegerAttr, field_name: str, *, allow_zero: bo
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1010,8 +1002,6 @@ def _verify_i64_attr_group(
 ) -> list[int]:
     """校验一组 i64 属性值并返回整数列表。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验属性类型为 i64，且满足正数/非负数约束。
@@ -1022,7 +1012,7 @@ def _verify_i64_attr_group(
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1037,8 +1027,6 @@ def _verify_i64_attr_group(
 def _verify_i64_attr(attr: IntegerAttr, field_name: str) -> int:
     """校验 i64 属性并返回整数值。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验属性类型为 i64，但不限制符号正负。
@@ -1049,7 +1037,7 @@ def _verify_i64_attr(attr: IntegerAttr, field_name: str) -> int:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1059,8 +1047,6 @@ def _verify_i64_attr(attr: IntegerAttr, field_name: str) -> int:
 def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
     """提取维度中的整数值列表。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅当所有维度均为 IntAttr 时返回整数列表。
@@ -1071,7 +1057,7 @@ def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1081,8 +1067,6 @@ def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
 def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
     """按连续行主序构建 stride 列表。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 以最后一维 stride=1 计算前序 stride。
@@ -1092,7 +1076,7 @@ def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1102,8 +1086,6 @@ def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
 def _normalize_axes_attr(axes: Sequence[int] | ArrayAttr) -> ArrayAttr:
     """将归约 axes 规范化为 i64 ArrayAttr。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 支持传入轴序列或 ArrayAttr。
@@ -1114,7 +1096,7 @@ def _normalize_axes_attr(axes: Sequence[int] | ArrayAttr) -> ArrayAttr:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1126,8 +1108,6 @@ def _normalize_axes_attr(axes: Sequence[int] | ArrayAttr) -> ArrayAttr:
 def _normalize_bool_attr(value: bool | int | IntegerAttr | IntAttr, field_name: str) -> IntegerAttr:
     """将布尔语义规范化为 i1 IntegerAttr。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 支持 bool/int/IntAttr/IntegerAttr 输入，统一为 i1 IntegerAttr。
@@ -1138,7 +1118,7 @@ def _normalize_bool_attr(value: bool | int | IntegerAttr | IntAttr, field_name: 
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1150,11 +1130,11 @@ def _normalize_bool_attr(value: bool | int | IntegerAttr | IntAttr, field_name: 
         value = 1 if value else 0
     if not isinstance(value, int):
         raise TypeError(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene="dialect.nn 参数校验",
                 expected=f"{field_name} must be bool/int or i1 attr",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     return IntegerAttr(int(value), IntegerType(1))
@@ -1163,8 +1143,6 @@ def _normalize_bool_attr(value: bool | int | IntegerAttr | IntAttr, field_name: 
 def _verify_exp_op(op: "NnExpOp") -> None:
     """校验 nn.exp 的结构化合同。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验 operand/result 必须是 nn.memory 且输入为浮点类型。
@@ -1175,7 +1153,7 @@ def _verify_exp_op(op: "NnExpOp") -> None:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1209,8 +1187,6 @@ def _verify_unary_float_op(
 ) -> None:
     """校验逐元素浮点 unary op 的公共合同。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 统一校验 `relu/sigmoid/tanh/exp` 这类浮点 unary op 的输入、输出与 memory space 约束。
@@ -1221,7 +1197,7 @@ def _verify_unary_float_op(
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1247,8 +1223,6 @@ def _verify_unary_float_op(
 def _verify_activation_scalar_operand(value: SSAValue, field_name: str) -> None:
     """校验激活函数额外标量参数类型。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验 `leaky_relu` / `hard_sigmoid` 的附加标量参数只能是整数或浮点标量。
@@ -1259,7 +1233,7 @@ def _verify_activation_scalar_operand(value: SSAValue, field_name: str) -> None:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1273,8 +1247,6 @@ def _verify_activation_scalar_operand(value: SSAValue, field_name: str) -> None:
 def _verify_reduce_axes(axes: ArrayAttr, rank: int) -> list[int]:
     """校验归约 axes 并返回整数列表。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验 axes 非空、元素唯一且在合法范围内。
@@ -1285,7 +1257,7 @@ def _verify_reduce_axes(axes: ArrayAttr, rank: int) -> list[int]:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1314,8 +1286,6 @@ def _verify_reduce_axes(axes: ArrayAttr, rank: int) -> list[int]:
 def _verify_keepdim_attr(keepdim: IntegerAttr) -> bool:
     """校验 keepdim 的 i1 布尔属性并返回布尔值。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅接受 i1 IntegerAttr，且值必须为 0/1/-1（i1 真值可能以 -1 表示）。
@@ -1325,7 +1295,7 @@ def _verify_keepdim_attr(keepdim: IntegerAttr) -> bool:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1348,8 +1318,6 @@ def _build_reduce_result_shape(
 ) -> list[Attribute]:
     """构造归约结果的 shape 属性列表。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - keepdim=true 时将归约轴替换为 1。
@@ -1360,7 +1328,7 @@ def _build_reduce_result_shape(
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1376,8 +1344,6 @@ def _build_reduce_result_shape(
 def _verify_reduce_result_shape(result_type: NnMemoryType, expected_shape: Sequence[Attribute]) -> None:
     """校验归约结果 shape 合同。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 比较结果 shape 与期望 shape 的长度与逐维一致性。
@@ -1387,7 +1353,7 @@ def _verify_reduce_result_shape(result_type: NnMemoryType, expected_shape: Seque
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1402,8 +1368,6 @@ def _verify_reduce_result_shape(result_type: NnMemoryType, expected_shape: Seque
 def _verify_reduce_result_stride(result_type: NnMemoryType, expected_shape: Sequence[Attribute]) -> None:
     """校验归约结果 stride 必须为连续布局。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅在结果 shape 静态可判定时校验 stride 等于连续布局。
@@ -1413,7 +1377,7 @@ def _verify_reduce_result_stride(result_type: NnMemoryType, expected_shape: Sequ
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1433,8 +1397,6 @@ def _verify_reduce_result_stride(result_type: NnMemoryType, expected_shape: Sequ
 def _verify_non_empty_reduction_extent(input_dims: Sequence[Attribute], axes: Sequence[int]) -> None:
     """校验静态归约轴的维度不为空。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 对静态维度为 0 的归约轴直接报错。
@@ -1444,7 +1406,7 @@ def _verify_non_empty_reduction_extent(input_dims: Sequence[Attribute], axes: Se
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1457,8 +1419,6 @@ def _verify_non_empty_reduction_extent(input_dims: Sequence[Attribute], axes: Se
 def _verify_reduce_op(op: "NnReduceSumOp | NnReduceMinOp | NnReduceMaxOp", *, require_non_empty: bool) -> None:
     """统一校验 nn.reduce_* 的结构化合同。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验 input/result 类型、axes/keepdim、shape/stride 与空间一致性。
@@ -1469,7 +1429,7 @@ def _verify_reduce_op(op: "NnReduceSumOp | NnReduceMinOp | NnReduceMaxOp", *, re
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1510,8 +1470,6 @@ def _img2col_output_dim(
 ) -> int:
     """计算 img2col 输出维度。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 复用卷积输出维度公式并返回整数结果。
@@ -1521,7 +1479,7 @@ def _img2col_output_dim(
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1565,8 +1523,6 @@ class NnAddOp(_BaseNnBinaryOp):
     def verify_(self) -> None:
         """校验 nn.add 的 memory/scalar 组合。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 支持 memory+scalar/symbol 的 verifier 校验。
@@ -1576,7 +1532,7 @@ class NnAddOp(_BaseNnBinaryOp):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
 
@@ -1611,8 +1567,6 @@ class NnMulOp(_BaseNnBinaryOp):
 class NnDivOp(_BaseNnBinaryOp):
     """nn.div。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 定义 nn.div 方言 op 与 verifier 约束。
@@ -1623,7 +1577,7 @@ class NnDivOp(_BaseNnBinaryOp):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1632,8 +1586,6 @@ class NnDivOp(_BaseNnBinaryOp):
     def verify_(self) -> None:
         """校验 nn.div 的 verifier 合同。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 复用统一二元 memory verifier。
@@ -1643,7 +1595,7 @@ class NnDivOp(_BaseNnBinaryOp):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
 
@@ -1738,8 +1690,6 @@ class NnGeOp(_BaseNnBinaryOp):
 def _verify_select_op(op: "NnSelectOp") -> None:
     """校验 nn.select 的结构化合同。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验 cond/lhs/rhs/result 均为 nn.memory。
@@ -1751,7 +1701,7 @@ def _verify_select_op(op: "NnSelectOp") -> None:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1785,8 +1735,6 @@ def _verify_select_op(op: "NnSelectOp") -> None:
 class NnSelectOp(IRDLOperation):
     """nn.select。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 定义 nn.select 方言 op 与 verifier 约束。
@@ -1796,7 +1744,7 @@ class NnSelectOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1818,8 +1766,6 @@ class NnSelectOp(IRDLOperation):
     ) -> None:
         """初始化 nn.select op。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 绑定 cond/lhs/rhs、结果类型与 space。
@@ -1829,7 +1775,7 @@ class NnSelectOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
 
@@ -1842,8 +1788,6 @@ class NnSelectOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 nn.select 的 verifier 合同。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 调用统一 select 校验逻辑。
@@ -1853,7 +1797,7 @@ class NnSelectOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
 
@@ -1863,8 +1807,6 @@ class NnSelectOp(IRDLOperation):
 def _verify_cast_op(op: "NnCastOp") -> None:
     """校验 nn.cast 的结构化合同。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验 input/result 必须为 nn.memory。
@@ -1875,7 +1817,7 @@ def _verify_cast_op(op: "NnCastOp") -> None:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1898,8 +1840,6 @@ def _verify_cast_op(op: "NnCastOp") -> None:
 class NnCastOp(IRDLOperation):
     """nn.cast。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 定义 nn.cast 方言 op 与 verifier 约束。
@@ -1909,7 +1849,7 @@ class NnCastOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -1927,8 +1867,6 @@ class NnCastOp(IRDLOperation):
     ) -> None:
         """初始化 nn.cast op。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 绑定输入、结果类型与 space。
@@ -1938,7 +1876,7 @@ class NnCastOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
 
@@ -1951,8 +1889,6 @@ class NnCastOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 nn.cast 的 verifier 合同。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 调用统一 cast 校验逻辑。
@@ -1962,7 +1898,7 @@ class NnCastOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
 
@@ -1976,8 +1912,6 @@ def _verify_matmul_shape(
 ) -> None:
     """校验 matmul 的形状约束。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验 matmul 的 rank=2 以及 contracting/result 维度约束。
@@ -1987,7 +1921,7 @@ def _verify_matmul_shape(
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -2004,8 +1938,6 @@ def _verify_matmul_shape(
 def _verify_softmax_op(op: "NnSoftmaxOp") -> None:
     """校验 nn.softmax 的结构化合同。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验 operand/result 必须是 nn.memory，且 rank/axis 合法。
@@ -2016,7 +1948,7 @@ def _verify_softmax_op(op: "NnSoftmaxOp") -> None:
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -2053,8 +1985,6 @@ def _verify_softmax_op(op: "NnSoftmaxOp") -> None:
 class NnSoftmaxOp(IRDLOperation):
     """nn.softmax。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 定义 nn.softmax 方言 op 与 verifier 约束。
@@ -2064,7 +1994,7 @@ class NnSoftmaxOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -2084,8 +2014,6 @@ class NnSoftmaxOp(IRDLOperation):
     ) -> None:
         """初始化 softmax op。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 绑定输入、结果类型、axis 与 space 属性。
@@ -2096,7 +2024,7 @@ class NnSoftmaxOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
         axis_attr = _normalize_i64_attr(axis, "axis")
@@ -2109,8 +2037,6 @@ class NnSoftmaxOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 nn.softmax 的 verifier 合同。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 调用统一的 softmax 合同校验逻辑。
@@ -2120,7 +2046,7 @@ class NnSoftmaxOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
         _verify_softmax_op(self)
@@ -2130,8 +2056,6 @@ class NnSoftmaxOp(IRDLOperation):
 class NnBroadcastOp(IRDLOperation):
     """nn.broadcast。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 表达 nn dialect 的显式 broadcast。
@@ -2142,7 +2066,7 @@ class NnBroadcastOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -2160,8 +2084,6 @@ class NnBroadcastOp(IRDLOperation):
     ) -> None:
         """初始化 broadcast op。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 绑定输入 operand、结果类型与 space 属性。
@@ -2171,7 +2093,7 @@ class NnBroadcastOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
         super().__init__(
@@ -2203,8 +2125,6 @@ class NnBroadcastOp(IRDLOperation):
 class NnTransposeOp(IRDLOperation):
     """nn.transpose。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 定义 nn.transpose 方言 op 与 verifier 约束。
@@ -2214,7 +2134,7 @@ class NnTransposeOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -2234,8 +2154,6 @@ class NnTransposeOp(IRDLOperation):
     ) -> None:
         """初始化 transpose op。
 
-        创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
 
         功能说明:
         - 绑定输入、结果类型、perm 与 space 属性。
@@ -2245,7 +2163,7 @@ class NnTransposeOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
         perm_attr = perm if isinstance(perm, ArrayAttr) else ArrayAttr([IntAttr(value) for value in perm])
@@ -2394,8 +2312,6 @@ class NnHardSigmoidOp(IRDLOperation):
 class NnExpOp(IRDLOperation):
     """nn.exp。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 定义 nn.exp 方言 op 与 verifier 约束。
@@ -2405,7 +2321,7 @@ class NnExpOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -2423,8 +2339,6 @@ class NnExpOp(IRDLOperation):
     ) -> None:
         """初始化 exp op。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 绑定输入、结果类型与 space 属性。
@@ -2434,7 +2348,7 @@ class NnExpOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
 
@@ -2447,8 +2361,6 @@ class NnExpOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 nn.exp verifier 合同。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 调用统一的 nn.exp 合同校验逻辑。
@@ -2458,7 +2370,7 @@ class NnExpOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
         _verify_exp_op(self)
@@ -2468,8 +2380,6 @@ class NnExpOp(IRDLOperation):
 class NnReduceSumOp(IRDLOperation):
     """nn.reduce_sum。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 定义 nn.reduce_sum 方言 op 与 verifier 约束。
@@ -2479,7 +2389,7 @@ class NnReduceSumOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -2501,8 +2411,6 @@ class NnReduceSumOp(IRDLOperation):
     ) -> None:
         """初始化 reduce_sum op。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 绑定输入、结果类型、axes/keepdim 与 space 属性。
@@ -2512,7 +2420,7 @@ class NnReduceSumOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
         axes_attr = _normalize_axes_attr(axes)
@@ -2530,8 +2438,6 @@ class NnReduceSumOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 nn.reduce_sum verifier 合同。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 调用统一的归约合同校验逻辑。
@@ -2541,7 +2447,7 @@ class NnReduceSumOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
         _verify_reduce_op(self, require_non_empty=False)
@@ -2551,8 +2457,6 @@ class NnReduceSumOp(IRDLOperation):
 class NnReduceMinOp(IRDLOperation):
     """nn.reduce_min。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 定义 nn.reduce_min 方言 op 与 verifier 约束。
@@ -2562,7 +2466,7 @@ class NnReduceMinOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -2584,8 +2488,6 @@ class NnReduceMinOp(IRDLOperation):
     ) -> None:
         """初始化 reduce_min op。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 绑定输入、结果类型、axes/keepdim 与 space 属性。
@@ -2595,7 +2497,7 @@ class NnReduceMinOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
         axes_attr = _normalize_axes_attr(axes)
@@ -2613,8 +2515,6 @@ class NnReduceMinOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 nn.reduce_min verifier 合同。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 调用归约合同校验逻辑，并拒绝静态空归约域。
@@ -2624,7 +2524,7 @@ class NnReduceMinOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
         _verify_reduce_op(self, require_non_empty=True)
@@ -2634,8 +2534,6 @@ class NnReduceMinOp(IRDLOperation):
 class NnReduceMaxOp(IRDLOperation):
     """nn.reduce_max。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 定义 nn.reduce_max 方言 op 与 verifier 约束。
@@ -2645,7 +2543,7 @@ class NnReduceMaxOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -2667,8 +2565,6 @@ class NnReduceMaxOp(IRDLOperation):
     ) -> None:
         """初始化 reduce_max op。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 绑定输入、结果类型、axes/keepdim 与 space 属性。
@@ -2678,7 +2574,7 @@ class NnReduceMaxOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
         axes_attr = _normalize_axes_attr(axes)
@@ -2696,8 +2592,6 @@ class NnReduceMaxOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 nn.reduce_max verifier 合同。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 调用归约合同校验逻辑，并拒绝静态空归约域。
@@ -2707,7 +2601,7 @@ class NnReduceMaxOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
         _verify_reduce_op(self, require_non_empty=True)
@@ -2717,8 +2611,6 @@ class NnReduceMaxOp(IRDLOperation):
 class NnImg2col1dOp(IRDLOperation):
     """nn.img2col1d。
 
-    创建者: jcc你莫辜负
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 定义一维 img2col 方言 op 与 verifier 约束。
@@ -2728,7 +2620,7 @@ class NnImg2col1dOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -2756,8 +2648,6 @@ class NnImg2col1dOp(IRDLOperation):
     ) -> None:
         """初始化 img2col1d op。
 
-        创建者: jcc你莫辜负
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 绑定输入 operand、结果类型、窗口参数 operand 与 space 属性。
@@ -2767,7 +2657,7 @@ class NnImg2col1dOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
 
@@ -2780,8 +2670,6 @@ class NnImg2col1dOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 nn.img2col1d。
 
-        创建者: jcc你莫辜负
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 校验 operand rank、窗口参数 operand 合法性、result rank/type/space 与合同约束。
@@ -2791,7 +2679,7 @@ class NnImg2col1dOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
 
@@ -2858,8 +2746,6 @@ class NnImg2col1dOp(IRDLOperation):
 class NnImg2col2dOp(IRDLOperation):
     """nn.img2col2d。
 
-    创建者: jcc你莫辜负
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 定义二维 img2col 方言 op 与 verifier 约束。
@@ -2869,7 +2755,7 @@ class NnImg2col2dOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -2907,8 +2793,6 @@ class NnImg2col2dOp(IRDLOperation):
     ) -> None:
         """初始化 img2col2d op。
 
-        创建者: jcc你莫辜负
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 绑定输入 operand、结果类型、窗口参数 operand 与 space 属性。
@@ -2918,7 +2802,7 @@ class NnImg2col2dOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
 
@@ -2931,8 +2815,6 @@ class NnImg2col2dOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 nn.img2col2d。
 
-        创建者: jcc你莫辜负
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 校验 operand rank、窗口参数 operand 合法性、result rank/type/space 与合同约束。
@@ -2942,7 +2824,7 @@ class NnImg2col2dOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
 
@@ -3026,8 +2908,6 @@ class NnImg2col2dOp(IRDLOperation):
 class NnMatmulOp(IRDLOperation):
     """nn.matmul。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 定义 nn.matmul 方言 op 与 verifier 约束。
@@ -3037,7 +2917,7 @@ class NnMatmulOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
+    - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
@@ -3057,8 +2937,6 @@ class NnMatmulOp(IRDLOperation):
     ) -> None:
         """初始化 matmul op。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 构造 nn.matmul op 并绑定 operands/attributes。
@@ -3068,7 +2946,7 @@ class NnMatmulOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
+        - test: test/dialect/test_nn.py
         - 功能实现: kernel_gen/dialect/nn.py
         """
 

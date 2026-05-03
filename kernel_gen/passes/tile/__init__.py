@@ -1,7 +1,5 @@
 """tile helper and implementation package.
 
-创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 tile family 在 S7 后的 canonical helper / logic path。
@@ -22,10 +20,10 @@ API 列表:
 - spec: [spec/pass/tile/analysis.md](spec/pass/tile/analysis.md)
 - spec: [spec/pass/tile/elewise.md](spec/pass/tile/elewise.md)
 - spec: [spec/pass/tile/reduce.md](spec/pass/tile/reduce.md)
-- test: [test/pass/tile/test_package.py](test/pass/tile/test_package.py)
-- test: [test/pass/tile/test_analysis.py](test/pass/tile/test_analysis.py)
-- test: [test/pass/tile/test_elewise.py](test/pass/tile/test_elewise.py)
-- test: [test/pass/tile/test_reduce.py](test/pass/tile/test_reduce.py)
+- test: [test/passes/tile/test_package.py](test/passes/tile/test_package.py)
+- test: [test/passes/tile/test_analysis.py](test/passes/tile/test_analysis.py)
+- test: [test/passes/tile/test_elewise.py](test/passes/tile/test_elewise.py)
+- test: [test/passes/tile/test_reduce.py](test/passes/tile/test_reduce.py)
 - 功能实现: [kernel_gen/passes/tile/__init__.py](kernel_gen/passes/tile/__init__.py)
 """
 

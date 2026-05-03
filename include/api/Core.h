@@ -30,12 +30,10 @@ helper 清单:
 - Vector coords(coords_buf, 3);
 - Status status = StatusCode::kOk;
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 
@@ -49,12 +47,10 @@ helper 清单:
 使用示例:
 - StatusCode code = StatusCode::kOk;
 
-创建者: jcc你莫辜负
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 enum StatusCode {
@@ -69,12 +65,10 @@ enum StatusCode {
 使用示例:
 - Status status = StatusCode::kOk;
 
-创建者: jcc你莫辜负
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 using Status = StatusCode;
@@ -86,12 +80,10 @@ using Status = StatusCode;
 使用示例:
 - S_INT dim = 16;
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/dsl/gen_kernel/test_gen_kernel.py
+- test: test/dsl/gen_kernel/gen_kernel.py
 - 功能实现: include/api/Core.h
 */
 using S_INT = long long;
@@ -106,12 +98,10 @@ using S_INT = long long;
 - Vector coords(coords_buf, 3);
 - Vector dims{2, 3, 4};
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Core.md
-- test: test/include/api/test_core.py
+- test: test/include/api/core.py
 - 功能实现: include/npu_demo/Core.h
 */
 class Vector {
@@ -124,12 +114,10 @@ public:
     - long long coords_buf[3] = {5, 0, 7};
     - Vector coords(coords_buf, 3);
 
-    创建者: jcc你莫辜负
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Core.md
-    - test: test/include/api/test_core.py
+    - test: test/include/api/core.py
     - 功能实现: include/npu_demo/Core.h
     */
     Vector(long long* data, unsigned long long size);
@@ -142,12 +130,10 @@ public:
     - const long long coords_buf[3] = {5, 0, 7};
     - Vector coords(coords_buf, 3);
 
-    创建者: jcc你莫辜负
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Core.md
-    - test: test/include/api/test_core.py
+    - test: test/include/api/core.py
     - 功能实现: include/npu_demo/Core.h
     */
     Vector(const long long* data, unsigned long long size);
@@ -159,12 +145,10 @@ public:
     使用示例:
     - Vector dim{16};
 
-    创建者: jcc你莫辜负
-    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/api/Core.md
-    - test: test/include/api/test_core.py
+    - test: test/include/api/core.py
     - 功能实现: include/npu_demo/Core.h
     */
     Vector(long long value0);
@@ -176,12 +160,10 @@ public:
     使用示例:
     - Vector shape{2, 3};
 
-    创建者: jcc你莫辜负
-    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/api/Core.md
-    - test: test/include/api/test_core.py
+    - test: test/include/api/core.py
     - 功能实现: include/npu_demo/Core.h
     */
     Vector(long long value0, long long value1);
@@ -193,12 +175,10 @@ public:
     使用示例:
     - Vector dims{2, 3, 4};
 
-    创建者: jcc你莫辜负
-    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/api/Core.md
-    - test: test/include/api/test_core.py
+    - test: test/include/api/core.py
     - 功能实现: include/npu_demo/Core.h
     */
     Vector(long long value0, long long value1, long long value2);
@@ -210,12 +190,10 @@ public:
     使用示例:
     - Vector dims{1, 2, 3, 4};
 
-    创建者: jcc你莫辜负
-    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/api/Core.md
-    - test: test/include/api/test_core.py
+    - test: test/include/api/core.py
     - 功能实现: include/npu_demo/Core.h
     */
     Vector(long long value0, long long value1, long long value2, long long value3);
@@ -227,12 +205,10 @@ public:
     使用示例:
     - Vector copied = Vector{1, 2, 3};
 
-    创建者: jcc你莫辜负
-    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/api/Core.md
-    - test: test/include/api/test_core.py
+    - test: test/include/api/core.py
     - 功能实现: include/npu_demo/Core.h
     */
     Vector(const Vector& other);
@@ -245,12 +221,10 @@ public:
     - Vector dims{1};
     - dims = Vector{2, 3};
 
-    创建者: jcc你莫辜负
-    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/api/Core.md
-    - test: test/include/api/test_core.py
+    - test: test/include/api/core.py
     - 功能实现: include/npu_demo/Core.h
     */
     Vector& operator=(const Vector& other);
@@ -262,12 +236,10 @@ public:
     使用示例:
     - unsigned long long n = coords.size();
 
-    创建者: jcc你莫辜负
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Core.md
-    - test: test/include/api/test_core.py
+    - test: test/include/api/core.py
     - 功能实现: include/npu_demo/Core.h
     */
     unsigned long long size() const;
@@ -279,12 +251,10 @@ public:
     使用示例:
     - long long* raw = coords.data();
 
-    创建者: jcc你莫辜负
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Core.md
-    - test: test/include/api/test_core.py
+    - test: test/include/api/core.py
     - 功能实现: include/npu_demo/Core.h
     */
     long long* data();
@@ -296,12 +266,10 @@ public:
     使用示例:
     - const long long* raw = coords.data();
 
-    创建者: jcc你莫辜负
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Core.md
-    - test: test/include/api/test_core.py
+    - test: test/include/api/core.py
     - 功能实现: include/npu_demo/Core.h
     */
     const long long* data() const;
@@ -313,12 +281,10 @@ public:
     使用示例:
     - long long axis0 = coords[0];
 
-    创建者: jcc你莫辜负
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Core.md
-    - test: test/include/api/test_core.py
+    - test: test/include/api/core.py
     - 功能实现: include/npu_demo/Core.h
     */
     long long& operator[](unsigned long long index);
@@ -330,12 +296,10 @@ public:
     使用示例:
     - long long axis0 = coords[0];
 
-    创建者: jcc你莫辜负
-    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Core.md
-    - test: test/include/api/test_core.py
+    - test: test/include/api/core.py
     - 功能实现: include/npu_demo/Core.h
     */
     const long long& operator[](unsigned long long index) const;

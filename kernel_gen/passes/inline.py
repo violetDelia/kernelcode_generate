@@ -1,21 +1,22 @@
 """inline pass.
 
-创建者: 金铲铲大作战
-最后一次更改: 大闸蟹
 
 功能说明:
 - 在 `builtin.module` 内把可内联的本地 `func.call` 展平到调用点。
 - 首版固定支持单 block helper `func.func`，并在内联完成后清理失效的 private helper。
 - 不承担通用跨 module inline，也不处理外部声明或复杂 CFG。
 
+API 列表:
+- `class InlinePass()`
+
 使用示例:
 - from xdsl.context import Context
 - from kernel_gen.passes.inline import InlinePass
-- module = InlinePass().run(module)
+- InlinePass().apply(Context(), module)
 
 关联文件:
 - spec: [spec/pass/inline.md](../../spec/pass/inline.md)
-- test: [test/pass/test_inline.py](../../test/pass/test_inline.py)
+- test: [test/passes/test_inline.py](../../test/passes/test_inline.py)
 - 功能实现: [kernel_gen/passes/inline.py](../../kernel_gen/passes/inline.py)
 """
 
@@ -25,31 +26,27 @@ from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.ir import SSAValue
-from xdsl.passes import ModulePass
 
 from kernel_gen.passes.common import raise_pass_contract_error
 from kernel_gen.passes.pass_manager import Pass
 
 
-class InlinePass(Pass, ModulePass):
+class InlinePass(Pass):
     """inline pass。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 固定公开名称为 `inline`。
     - 对本地可内联 helper 执行模块内展平，并清理失效的 private helper。
-    - 兼容 `PassManager` 与 xdsl `ModulePass` 协议执行入口。
+    - 公开执行入口固定为 xdsl `ModulePass.apply(ctx, module)`。
 
     使用示例:
     - from kernel_gen.passes.inline import InlinePass
-    - module = InlinePass().run(module)
-    - module = InlinePass().run(module)
+    - InlinePass().apply(Context(), module)
 
     关联文件:
     - spec: [spec/pass/inline.md](../../spec/pass/inline.md)
-    - test: [test/pass/test_inline.py](../../test/pass/test_inline.py)
+    - test: [test/passes/test_inline.py](../../test/passes/test_inline.py)
     - 功能实现: [kernel_gen/passes/inline.py](../../kernel_gen/passes/inline.py)
     """
 
@@ -58,8 +55,6 @@ class InlinePass(Pass, ModulePass):
     def apply(self: "InlinePass", ctx: Context, module: ModuleOp) -> None:
         """执行 inline pass。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 只接受 `builtin.module` 输入。
@@ -71,7 +66,7 @@ class InlinePass(Pass, ModulePass):
 
         关联文件:
         - spec: [spec/pass/inline.md](../../spec/pass/inline.md)
-        - test: [test/pass/test_inline.py](../../test/pass/test_inline.py)
+        - test: [test/passes/test_inline.py](../../test/passes/test_inline.py)
         - 功能实现: [kernel_gen/passes/inline.py](../../kernel_gen/passes/inline.py)
         """
 
@@ -204,30 +199,5 @@ class InlinePass(Pass, ModulePass):
             if op.sym_name.data in remaining_targets:
                 continue
             op.detach()
-
-    def run(self: "InlinePass", module: ModuleOp) -> ModuleOp:
-        """兼容旧 Pass 接口的执行入口。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 大闸蟹
-
-        功能说明:
-        - 保持旧 `run(module)` 调用方可继续工作。
-        - 内部直接复用 `apply(Context(), module)`。
-
-        使用示例:
-        - module = InlinePass().run(module)
-
-        关联文件:
-        - spec: [spec/pass/inline.md](../../spec/pass/inline.md)
-        - test: [test/pass/test_inline.py](../../test/pass/test_inline.py)
-        - 功能实现: [kernel_gen/passes/inline.py](../../kernel_gen/passes/inline.py)
-        """
-
-        if not isinstance(module, ModuleOp):
-            raise_pass_contract_error("InlineError", "module must be builtin.module")
-        self.apply(Context(), module)
-        return module
-
 
 __all__ = ["InlinePass"]

@@ -1,19 +1,28 @@
 """Kernel dialect definitions.
 
-创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
 
 功能说明:
 - 定义 kernel dialect 的逐元素算术、比较、选择、指数、归约与结构化 kernel op。
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
 - 所有结果通过 outs(...) 写回，不产生 SSA result。
 
+API 列表:
+- `class KernelBinaryElewiseOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, *, kind: str | StringAttr, space: NnMemorySpaceAttr)`
+- `class KernelMatmulOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr)`
+- `class KernelImg2col1dOp(out: SSAValue | Operation, input_value: SSAValue | Operation, k: SSAValue | Operation, s: SSAValue | Operation, d: SSAValue | Operation, p_left: SSAValue | Operation, p_right: SSAValue | Operation, space: NnMemorySpaceAttr)`
+- `class KernelImg2col2dOp(out: SSAValue | Operation, input_value: SSAValue | Operation, kh: SSAValue | Operation, kw: SSAValue | Operation, sh: SSAValue | Operation, sw: SSAValue | Operation, dh: SSAValue | Operation, dw: SSAValue | Operation, ph: SSAValue | Operation, pw: SSAValue | Operation, pl: SSAValue | Operation, pr: SSAValue | Operation, space: NnMemorySpaceAttr)`
+- `class KernelSelectOp(out: SSAValue | Operation, cond: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr)`
+- `class KernelExpOp(input_value: SSAValue | Operation, out: SSAValue | Operation, space: NnMemorySpaceAttr)`
+- `class KernelReduceOp(out: SSAValue | Operation, input_value: SSAValue | Operation, *, kind: str | StringAttr, axis: int | IntegerAttr | IntAttr, keepdim: bool | int | IntegerAttr | IntAttr, space: NnMemorySpaceAttr)`
+- `class KernelReduceMinOp(out: SSAValue | Operation, input_value: SSAValue | Operation, axis: int | IntegerAttr | IntAttr, keepdim: bool | int | IntegerAttr | IntAttr, space: NnMemorySpaceAttr)`
+- `Kernel`
+
 使用示例:
 - from kernel_gen.dialect.kernel import Kernel, KernelBinaryElewiseOp
 
 关联文件:
 - spec: spec/dialect/kernel.md
-- test: test/dialect/test_kernel_dialect.py
+- test: test/dialect/test_kernel.py
 - 功能实现: kernel_gen/dialect/kernel.py
 """
 
@@ -28,7 +37,7 @@ from kernel_gen.core.contracts import (
     verify_i64_attr_range as _common_verify_i64_attr_range,
     verify_memory_type as _common_verify_memory_type,
 )
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
 from xdsl.dialects.builtin import (
     BFloat16Type,
     Float16Type,
@@ -46,8 +55,6 @@ from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 
-_ERROR_ACTION = "请按接口约束传参"
-_ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.kernel verifier"
 _BINARY_ELEWISE_ARITH_KINDS = {"add", "sub", "mul", "div", "truediv"}
 _BINARY_ELEWISE_COMPARE_KINDS = {"eq", "ne", "lt", "le", "gt", "ge"}
@@ -58,8 +65,6 @@ _REDUCE_KINDS = {"sum", "min", "max"}
 def _is_compare_output_element_type(value: Attribute) -> bool:
     """判断 compare 输出元素类型是否可接受。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - compare 输出只接受 builtin `i1`。
@@ -69,7 +74,7 @@ def _is_compare_output_element_type(value: Attribute) -> bool:
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -85,8 +90,6 @@ def _normalize_kind_attr(
 ) -> StringAttr:
     """规范化并校验 kind attribute。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 支持 str 与 StringAttr 作为 kind 输入。
@@ -97,7 +100,7 @@ def _normalize_kind_attr(
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -107,21 +110,21 @@ def _normalize_kind_attr(
         kind_attr = StringAttr(kind)
     else:
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected=f"{op_name} {field_name} must be string",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         )
     if kind_attr.data not in allowed:
         allowed_text = ", ".join(sorted(allowed))
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected=f"{op_name} {field_name} must be one of [{allowed_text}]",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         )
     return kind_attr
@@ -129,8 +132,6 @@ def _normalize_kind_attr(
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """校验并返回 nn.memory type。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 确认类型为 nn.memory 并触发类型校验。
@@ -140,7 +141,7 @@ def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -150,8 +151,6 @@ def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
 def _verify_same_layout(types: Iterable[NnMemoryType], op_space: NnMemorySpaceAttr) -> None:
     """校验多 operand 的 shape/stride/space 一致性。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 要求 shape/stride/space 全部一致。
@@ -162,7 +161,7 @@ def _verify_same_layout(types: Iterable[NnMemoryType], op_space: NnMemorySpaceAt
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -174,38 +173,38 @@ def _verify_same_layout(types: Iterable[NnMemoryType], op_space: NnMemorySpaceAt
     for other in types[1:]:
         if other.space.space.data != base.space.space.data:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel op operands must use the same space",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if other.shape != base.shape:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel op shape must match across operands",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if other.stride != base.stride:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel op stride must match across operands",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
     if base.space.space.data != op_space.space.data:
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected="kernel op attribute space must match operand space",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         )
 
@@ -213,8 +212,6 @@ def _verify_same_layout(types: Iterable[NnMemoryType], op_space: NnMemorySpaceAt
 def _verify_element_type_match(types: Iterable[NnMemoryType], message: str) -> None:
     """校验 element_type 一致性。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 要求所有类型的 element_type 相同。
@@ -224,7 +221,7 @@ def _verify_element_type_match(types: Iterable[NnMemoryType], message: str) -> N
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -235,11 +232,11 @@ def _verify_element_type_match(types: Iterable[NnMemoryType], message: str) -> N
     for other in types[1:]:
         if other.element_type != base_type:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected=message,
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
 
@@ -251,8 +248,6 @@ def _verify_matmul_shape(
 ) -> None:
     """校验 kernel.matmul 的形状约束。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 要求 lhs/rhs/out 皆为 rank-2。
@@ -263,7 +258,7 @@ def _verify_matmul_shape(
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -272,29 +267,29 @@ def _verify_matmul_shape(
     out_shape = list(out_shape)
     if len(lhs_shape) != 2 or len(rhs_shape) != 2 or len(out_shape) != 2:
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected="kernel.matmul requires rank-2 memory types",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         )
     if lhs_shape[1] != rhs_shape[0]:
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected="kernel.matmul contracting dimensions must match",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         )
     if out_shape[0] != lhs_shape[0] or out_shape[1] != rhs_shape[1]:
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected="kernel.matmul result shape must match lhs/rhs",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         )
 
@@ -302,8 +297,6 @@ def _verify_matmul_shape(
 def _normalize_i64_attr(value: int | IntegerAttr | IntAttr, field_name: str) -> IntegerAttr:
     """将数值规整为 i64 IntegerAttr。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 支持传入 int/IntAttr/IntegerAttr，统一为 i64 IntegerAttr。
@@ -314,7 +307,7 @@ def _normalize_i64_attr(value: int | IntegerAttr | IntAttr, field_name: str) -> 
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -330,8 +323,6 @@ def _normalize_i64_attr(value: int | IntegerAttr | IntAttr, field_name: str) -> 
 def _verify_i64_attr_range(attr: IntegerAttr, field_name: str, *, min_value: int, max_value: int) -> int:
     """校验 i64 属性并返回整数值。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验属性类型为 i64。
@@ -342,7 +333,7 @@ def _verify_i64_attr_range(attr: IntegerAttr, field_name: str, *, min_value: int
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -358,8 +349,6 @@ def _verify_i64_attr_range(attr: IntegerAttr, field_name: str, *, min_value: int
 def _is_symbol_int_type(attr: Attribute) -> bool:
     """判断类型是否为 symbol.int。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 仅通过 name 字段判断是否为 symbol.int，避免 kernel/symbol 循环依赖。
@@ -369,7 +358,7 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -379,8 +368,6 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
 def _is_int_or_symbol_type(attr: Attribute) -> bool:
     """判断类型是否为整数或 symbol.int。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 允许任意位宽的 IntegerType。
@@ -392,7 +379,7 @@ def _is_int_or_symbol_type(attr: Attribute) -> bool:
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -402,8 +389,6 @@ def _is_int_or_symbol_type(attr: Attribute) -> bool:
 def _static_int_from_operand(operand: SSAValue) -> int | None:
     """尝试从 operand 提取静态整数值。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 支持 `arith.constant`/`symbol.const` 以及单层 `builtin.unrealized_conversion_cast`。
@@ -414,7 +399,7 @@ def _static_int_from_operand(operand: SSAValue) -> int | None:
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -451,8 +436,6 @@ def _verify_img2col_param_operands(
 ) -> list[int | None]:
     """校验 img2col 参数 operand 类型并提取静态值。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 要求每个 operand 为 IntegerType 或 symbol.int。
@@ -464,7 +447,7 @@ def _verify_img2col_param_operands(
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -472,11 +455,11 @@ def _verify_img2col_param_operands(
     for operand in operands:
         if not _is_int_or_symbol_type(operand.type):
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected=type_error_phrase,
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         static_value = _static_int_from_operand(operand)
@@ -484,20 +467,20 @@ def _verify_img2col_param_operands(
             if allow_zero:
                 if static_value < 0:
                     raise VerifyException(
-                        _ERROR_TEMPLATE.format(
+                        ERROR_TEMPLATE.format(
                             scene=_ERROR_SCENE,
                             expected=value_error_phrase,
-                            actual=_ERROR_ACTUAL,
-                            action=_ERROR_ACTION,
+                            actual=ERROR_ACTUAL,
+                            action=ERROR_ACTION,
                         )
                     )
             elif static_value <= 0:
                 raise VerifyException(
-                    _ERROR_TEMPLATE.format(
+                    ERROR_TEMPLATE.format(
                         scene=_ERROR_SCENE,
                         expected=value_error_phrase,
-                        actual=_ERROR_ACTUAL,
-                        action=_ERROR_ACTION,
+                        actual=ERROR_ACTUAL,
+                        action=ERROR_ACTION,
                     )
                 )
         values.append(static_value)
@@ -507,8 +490,6 @@ def _verify_img2col_param_operands(
 def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
     """提取静态整数维度列表。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 当所有维度均为 `IntAttr` 时返回整数列表。
@@ -519,7 +500,7 @@ def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -529,8 +510,6 @@ def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
 def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
     """根据静态 shape 构造连续布局 stride。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 采用行主序布局，从尾轴向前累计 stride。
@@ -541,7 +520,7 @@ def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -551,8 +530,6 @@ def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
 def _img2col_output_dim(size: int, kernel: int, stride: int, dilation: int, pad_before: int, pad_after: int) -> int:
     """根据 img2col 参数计算单轴输出尺寸。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 计算 `floor((size + pad_before + pad_after - dilation * (kernel - 1) - 1) / stride) + 1`。
@@ -563,7 +540,7 @@ def _img2col_output_dim(size: int, kernel: int, stride: int, dilation: int, pad_
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -573,8 +550,6 @@ def _img2col_output_dim(size: int, kernel: int, stride: int, dilation: int, pad_
 def _normalize_bool_attr(value: bool | int | IntegerAttr | IntAttr, field_name: str) -> IntegerAttr:
     """将布尔语义规整为 i1 IntegerAttr。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 支持 bool/int/IntAttr/IntegerAttr 输入，统一为 i1 IntegerAttr。
@@ -585,7 +560,7 @@ def _normalize_bool_attr(value: bool | int | IntegerAttr | IntAttr, field_name: 
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -601,8 +576,6 @@ def _normalize_bool_attr(value: bool | int | IntegerAttr | IntAttr, field_name: 
 def _verify_bool_attr(attr: IntegerAttr, field_name: str) -> bool:
     """校验 i1 bool attr 并返回布尔值。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 要求类型为 i1 IntegerAttr。
@@ -613,28 +586,28 @@ def _verify_bool_attr(attr: IntegerAttr, field_name: str) -> bool:
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
     if not isinstance(attr.type, IntegerType):
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected=f"{field_name} must be i1",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         )
     width_attr = attr.type.width
     width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
     if width_value != 1:
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected=f"{field_name} must be i1",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         )
     value = attr.value.data
@@ -642,11 +615,11 @@ def _verify_bool_attr(attr: IntegerAttr, field_name: str) -> bool:
         return True
     if value not in (0, 1):
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected=f"{field_name} must be bool",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         )
     return value == 1
@@ -655,8 +628,6 @@ def _verify_bool_attr(attr: IntegerAttr, field_name: str) -> bool:
 def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     """判断两个维度是否语义一致。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅在同类型且内容相等时认为一致。
@@ -666,7 +637,7 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -680,8 +651,6 @@ def _build_reduce_result_shape(
 ) -> list[Attribute]:
     """构造 reduce 结果的 shape 维度列表。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - keepdim=true 时将归约轴替换为 1。
@@ -692,7 +661,7 @@ def _build_reduce_result_shape(
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -712,8 +681,6 @@ def _verify_reduce_result_shape(
 ) -> None:
     """校验 reduce 结果 shape 合同。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 比较结果 shape 与期望 shape 的长度与逐维一致性。
@@ -723,28 +690,28 @@ def _verify_reduce_result_shape(
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
     if len(result_type.shape.data) != len(expected_shape):
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected=f"{op_name} out shape must match reduce contract",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         )
 
     for expected_dim, actual_dim in zip(expected_shape, result_type.shape.data, strict=True):
         if not _dims_equal(expected_dim, actual_dim):
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected=f"{op_name} out shape must match reduce contract",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
 
@@ -773,8 +740,6 @@ class _BaseKernelBinaryOp(IRDLOperation):
 class KernelBinaryElewiseOp(IRDLOperation):
     """kernel.binary_elewise。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 定义统一的二元逐元素算术/比较 op。
@@ -785,7 +750,7 @@ class KernelBinaryElewiseOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -808,8 +773,6 @@ class KernelBinaryElewiseOp(IRDLOperation):
     ) -> None:
         """初始化 kernel.binary_elewise op。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 绑定输入、输出与 kind/space 属性。
@@ -819,7 +782,7 @@ class KernelBinaryElewiseOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/kernel.md
-        - test: test/dialect/test_kernel_dialect.py
+        - test: test/dialect/test_kernel.py
         - 功能实现: kernel_gen/dialect/kernel.py
         """
 
@@ -834,8 +797,6 @@ class KernelBinaryElewiseOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 kernel.binary_elewise 的 verifier 合同。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 校验 layout/space 约束。
@@ -846,7 +807,7 @@ class KernelBinaryElewiseOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/kernel.md
-        - test: test/dialect/test_kernel_dialect.py
+        - test: test/dialect/test_kernel.py
         - 功能实现: kernel_gen/dialect/kernel.py
         """
 
@@ -860,11 +821,11 @@ class KernelBinaryElewiseOp(IRDLOperation):
         if kind_value in _BINARY_ELEWISE_COMPARE_KINDS:
             if not _is_compare_output_element_type(out_type.element_type):
                 raise VerifyException(
-                    _ERROR_TEMPLATE.format(
+                    ERROR_TEMPLATE.format(
                         scene=_ERROR_SCENE,
                         expected="kernel.binary_elewise compare output element_type must be i1",
-                        actual=_ERROR_ACTUAL,
-                        action=_ERROR_ACTION,
+                        actual=ERROR_ACTUAL,
+                        action=ERROR_ACTION,
                     )
                 )
             return
@@ -877,8 +838,6 @@ class KernelBinaryElewiseOp(IRDLOperation):
 class KernelMatmulOp(_BaseKernelBinaryOp):
     """kernel.matmul。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 结构化矩阵乘 op，输入输出均为 nn.memory。
@@ -889,7 +848,7 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -902,29 +861,29 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
         self.space.verify()
         if lhs_type.space.space.data != rhs_type.space.space.data:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.matmul operands must use the same space",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if lhs_type.space.space.data != self.space.space.data:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.matmul attribute space must match operand space",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if out_type.space.space.data != self.space.space.data:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.matmul attribute space must match result space",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         _verify_matmul_shape(lhs_type.shape.data, rhs_type.shape.data, out_type.shape.data)
@@ -938,8 +897,6 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
 class KernelImg2col1dOp(IRDLOperation):
     """kernel.img2col1d。
 
-    创建者: 小李飞刀
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 定义一维 img2col 的 kernel 目标 op。
@@ -950,7 +907,7 @@ class KernelImg2col1dOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -978,8 +935,6 @@ class KernelImg2col1dOp(IRDLOperation):
     ) -> None:
         """初始化 img2col1d op。
 
-        创建者: 小李飞刀
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 绑定输入/输出 operand 与窗口参数 operand。
@@ -989,7 +944,7 @@ class KernelImg2col1dOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/kernel.md
-        - test: test/dialect/test_kernel_dialect.py
+        - test: test/dialect/test_kernel.py
         - 功能实现: kernel_gen/dialect/kernel.py
         """
 
@@ -1001,8 +956,6 @@ class KernelImg2col1dOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 kernel.img2col1d 合同。
 
-        创建者: 小李飞刀
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 校验输入输出 rank、元素类型、空间、窗口参数 operand 与结构化结果布局。
@@ -1012,7 +965,7 @@ class KernelImg2col1dOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/kernel.md
-        - test: test/dialect/test_kernel_dialect.py
+        - test: test/dialect/test_kernel.py
         - 功能实现: kernel_gen/dialect/kernel.py
         """
 
@@ -1022,47 +975,47 @@ class KernelImg2col1dOp(IRDLOperation):
 
         if len(input_type.shape.data) != 3:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.img2col1d requires rank-3 input",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if len(out_type.shape.data) != 4:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.img2col1d requires rank-4 result",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if input_type.space.space.data != self.space.space.data:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.img2col1d attribute space must match input space",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if out_type.space.space.data != self.space.space.data:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.img2col1d attribute space must match result space",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if out_type.element_type != input_type.element_type:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.img2col1d result element_type must match input",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
 
@@ -1084,11 +1037,11 @@ class KernelImg2col1dOp(IRDLOperation):
         if k_value is not None:
             if not isinstance(out_shape[2], IntAttr) or out_shape[2].data != k_value:
                 raise VerifyException(
-                    _ERROR_TEMPLATE.format(
+                    ERROR_TEMPLATE.format(
                         scene=_ERROR_SCENE,
                         expected="kernel.img2col1d result shape/stride must match img2col1d contract",
-                        actual=_ERROR_ACTUAL,
-                        action=_ERROR_ACTION,
+                        actual=ERROR_ACTUAL,
+                        action=ERROR_ACTION,
                     )
                 )
 
@@ -1097,11 +1050,11 @@ class KernelImg2col1dOp(IRDLOperation):
         if input_dims is not None and input_strides is not None:
             if input_strides != _build_contiguous_stride(input_dims):
                 raise VerifyException(
-                    _ERROR_TEMPLATE.format(
+                    ERROR_TEMPLATE.format(
                         scene=_ERROR_SCENE,
                         expected="kernel.img2col1d input layout must be contiguous",
-                        actual=_ERROR_ACTUAL,
-                        action=_ERROR_ACTION,
+                        actual=ERROR_ACTUAL,
+                        action=ERROR_ACTION,
                     )
                 )
 
@@ -1118,11 +1071,11 @@ class KernelImg2col1dOp(IRDLOperation):
         expected_stride = _build_contiguous_stride(expected_shape)
         if w_out_dim < 1 or out_dims != expected_shape or out_strides != expected_stride:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.img2col1d result shape/stride must match img2col1d contract",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
 
@@ -1131,8 +1084,6 @@ class KernelImg2col1dOp(IRDLOperation):
 class KernelImg2col2dOp(IRDLOperation):
     """kernel.img2col2d。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 定义二维 img2col 的 kernel 目标 op。
@@ -1143,7 +1094,7 @@ class KernelImg2col2dOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -1181,8 +1132,6 @@ class KernelImg2col2dOp(IRDLOperation):
     ) -> None:
         """初始化 img2col2d op。
 
-        创建者: 朽木露琪亚
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 绑定输入/输出 operand 与窗口参数 operand。
@@ -1192,7 +1141,7 @@ class KernelImg2col2dOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/kernel.md
-        - test: test/dialect/test_kernel_dialect.py
+        - test: test/dialect/test_kernel.py
         - 功能实现: kernel_gen/dialect/kernel.py
         """
 
@@ -1204,8 +1153,6 @@ class KernelImg2col2dOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 kernel.img2col2d 合同。
 
-        创建者: 朽木露琪亚
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 校验输入输出 rank、元素类型、空间、窗口参数 operand 与结构化结果布局。
@@ -1215,7 +1162,7 @@ class KernelImg2col2dOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/kernel.md
-        - test: test/dialect/test_kernel_dialect.py
+        - test: test/dialect/test_kernel.py
         - 功能实现: kernel_gen/dialect/kernel.py
         """
 
@@ -1225,47 +1172,47 @@ class KernelImg2col2dOp(IRDLOperation):
 
         if len(input_type.shape.data) != 4:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.img2col2d requires rank-4 input",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if len(out_type.shape.data) != 6:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.img2col2d requires rank-6 result",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if input_type.space.space.data != self.space.space.data:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.img2col2d attribute space must match input space",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if out_type.space.space.data != self.space.space.data:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.img2col2d attribute space must match result space",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if out_type.element_type != input_type.element_type:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.img2col2d result element_type must match input",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
 
@@ -1287,21 +1234,21 @@ class KernelImg2col2dOp(IRDLOperation):
         if kh_value is not None:
             if not isinstance(out_shape[2], IntAttr) or out_shape[2].data != kh_value:
                 raise VerifyException(
-                    _ERROR_TEMPLATE.format(
+                    ERROR_TEMPLATE.format(
                         scene=_ERROR_SCENE,
                         expected="kernel.img2col2d result shape/stride must match img2col2d contract",
-                        actual=_ERROR_ACTUAL,
-                        action=_ERROR_ACTION,
+                        actual=ERROR_ACTUAL,
+                        action=ERROR_ACTION,
                     )
                 )
         if kw_value is not None:
             if not isinstance(out_shape[3], IntAttr) or out_shape[3].data != kw_value:
                 raise VerifyException(
-                    _ERROR_TEMPLATE.format(
+                    ERROR_TEMPLATE.format(
                         scene=_ERROR_SCENE,
                         expected="kernel.img2col2d result shape/stride must match img2col2d contract",
-                        actual=_ERROR_ACTUAL,
-                        action=_ERROR_ACTION,
+                        actual=ERROR_ACTUAL,
+                        action=ERROR_ACTION,
                     )
                 )
 
@@ -1310,11 +1257,11 @@ class KernelImg2col2dOp(IRDLOperation):
         if input_dims is not None and input_strides is not None:
             if input_strides != _build_contiguous_stride(input_dims):
                 raise VerifyException(
-                    _ERROR_TEMPLATE.format(
+                    ERROR_TEMPLATE.format(
                         scene=_ERROR_SCENE,
                         expected="kernel.img2col2d input layout must be contiguous",
-                        actual=_ERROR_ACTUAL,
-                        action=_ERROR_ACTION,
+                        actual=ERROR_ACTUAL,
+                        action=ERROR_ACTION,
                     )
                 )
 
@@ -1346,11 +1293,11 @@ class KernelImg2col2dOp(IRDLOperation):
         expected_stride = _build_contiguous_stride(expected_shape)
         if oh_dim < 1 or ow_dim < 1 or out_dims != expected_shape or out_strides != expected_stride:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.img2col2d result shape/stride must match img2col2d contract",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
 
@@ -1386,11 +1333,11 @@ class KernelSelectOp(IRDLOperation):
         out_type = _verify_memory_type(self.out.type, "out")
         if cond_type.element_type != i1:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.select cond element_type must be i1",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         _verify_same_layout([cond_type, lhs_type, rhs_type, out_type], self.space)
@@ -1430,11 +1377,11 @@ class KernelExpOp(IRDLOperation):
         )
         if not isinstance(input_type.element_type, (BFloat16Type, Float16Type, Float32Type, Float64Type)):
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.exp element_type must be float",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
 
@@ -1443,8 +1390,6 @@ class KernelExpOp(IRDLOperation):
 class KernelReduceOp(IRDLOperation):
     """kernel.reduce。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 定义带 kind 的 reduce op 与 verifier 约束。
@@ -1454,7 +1399,7 @@ class KernelReduceOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -1479,8 +1424,6 @@ class KernelReduceOp(IRDLOperation):
     ) -> None:
         """初始化 kernel.reduce op。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 绑定输入/输出 operand。
@@ -1491,7 +1434,7 @@ class KernelReduceOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/kernel.md
-        - test: test/dialect/test_kernel_dialect.py
+        - test: test/dialect/test_kernel.py
         - 功能实现: kernel_gen/dialect/kernel.py
         """
 
@@ -1513,8 +1456,6 @@ class KernelReduceOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 kernel.reduce 的 verifier 合同。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 校验 kind/axis/keepdim/out.shape 约束。
@@ -1525,7 +1466,7 @@ class KernelReduceOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/kernel.md
-        - test: test/dialect/test_kernel_dialect.py
+        - test: test/dialect/test_kernel.py
         - 功能实现: kernel_gen/dialect/kernel.py
         """
 
@@ -1540,30 +1481,30 @@ class KernelReduceOp(IRDLOperation):
         keepdim_value = _verify_bool_attr(self.keepdim, "keepdim")
         if input_type.element_type != out_type.element_type:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.reduce element_type must match across operands",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         self.space.verify()
         if input_type.space.space.data != out_type.space.space.data:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.reduce out space must match input",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if input_type.space.space.data != self.space.space.data:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.reduce attribute space must match input",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         expected_shape = _build_reduce_result_shape(
@@ -1576,8 +1517,6 @@ class KernelReduceOp(IRDLOperation):
 class KernelReduceMinOp(IRDLOperation):
     """kernel.reduce_min。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 定义 kernel.reduce_min op 与 verifier 约束。
@@ -1587,7 +1526,7 @@ class KernelReduceMinOp(IRDLOperation):
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
+    - test: test/dialect/test_kernel.py
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
@@ -1609,8 +1548,6 @@ class KernelReduceMinOp(IRDLOperation):
     ) -> None:
         """初始化 reduce_min op。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 绑定输入/输出 operand。
@@ -1621,7 +1558,7 @@ class KernelReduceMinOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/kernel.md
-        - test: test/dialect/test_kernel_dialect.py
+        - test: test/dialect/test_kernel.py
         - 功能实现: kernel_gen/dialect/kernel.py
         """
 
@@ -1635,8 +1572,6 @@ class KernelReduceMinOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 kernel.reduce_min 的 verifier 合同。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 校验 axis/keepdim/out.shape 约束。
@@ -1647,7 +1582,7 @@ class KernelReduceMinOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/kernel.md
-        - test: test/dialect/test_kernel_dialect.py
+        - test: test/dialect/test_kernel.py
         - 功能实现: kernel_gen/dialect/kernel.py
         """
 
@@ -1659,30 +1594,30 @@ class KernelReduceMinOp(IRDLOperation):
         keepdim_value = _verify_bool_attr(self.keepdim, "keepdim")
         if input_type.element_type != out_type.element_type:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.reduce_min element_type must match across operands",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         self.space.verify()
         if input_type.space.space.data != out_type.space.space.data:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.reduce_min out space must match input",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if input_type.space.space.data != self.space.space.data:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="kernel.reduce_min attribute space must match input",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         expected_shape = _build_reduce_result_shape(

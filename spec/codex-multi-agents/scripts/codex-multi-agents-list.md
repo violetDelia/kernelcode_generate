@@ -1,11 +1,20 @@
 # codex-multi-agents-list.md
 
+## 功能简介
+
 用于对 `codex-multi-agents` 的 agents 名单进行读取和维护。
+
+## API 列表
+
+- `codex-multi-agents-list.sh -file <agents-lists.md> -status -> rc`
+- `codex-multi-agents-list.sh -file <agents-lists.md> -find -name <name> -key <field> -> rc`
+- `codex-multi-agents-list.sh -file <agents-lists.md> -replace -name <name> -key <field> -value <value> -> rc`
+- `codex-multi-agents-list.sh -file <agents-lists.md> -add -name <name> -type <type> -> rc`
+- `codex-multi-agents-list.sh -file <agents-lists.md> -delete -name <name> -> rc`
+- `codex-multi-agents-list.sh -file <agents-lists.md> -init -name <name> -> rc`
 
 ## 文档信息
 
-- 创建者：`榕`
-- 最后一次更改：`榕`
 - `spec`：[`spec/codex-multi-agents/scripts/codex-multi-agents-list.md`](../../../spec/codex-multi-agents/scripts/codex-multi-agents-list.md)
 - `test`：[`test/codex-multi-agents/test_codex-multi-agents-list.py`](../../../test/codex-multi-agents/test_codex-multi-agents-list.py)
 - `功能实现`：[`skills/codex-multi-agents/scripts/codex-multi-agents-list.sh`](../../../skills/codex-multi-agents/scripts/codex-multi-agents-list.sh)
@@ -13,13 +22,185 @@
 ## [immutable]文件位置
 
 - 脚本文件：[`skills/codex-multi-agents/scripts/codex-multi-agents-list`](../../../skills/codex-multi-agents/scripts/codex-multi-agents-list.sh)
-- 测试文件：[`test/codex-multi-agents/test_codex-multi-agents-list.py`](../../../test/codex-multi-agents/test_codex-multi-agents-list.py)
+- 测试文件：[`test/codex-multi-agents/codex-multi-agents-list.py`](../../../test/codex-multi-agents/codex-multi-agents-list.py)
 
 ## [immutable]参考
 
 - 名单参考文件：[`agents-lists.md`](../../examples/scripts/codex-multi-agents-list/agents-lists.md)
 
-## 参数约定
+## 依赖
+
+- 无额外 spec 依赖。
+
+## API详细说明
+
+### `codex-multi-agents-list.sh -file <agents-lists.md> -status -> rc`
+
+- api：`codex-multi-agents-list.sh -file <agents-lists.md> -status -> rc`
+- 参数：
+  - `-file`：agents 名单文件路径；类型为路径字符串；必填；文件缺失、不可读或格式非法必须返回文件错误。
+  - `-status`：名单状态查询开关；类型为 CLI flag；必填；输出名单表头与数据行。
+- 返回值：返回进程退出码 `rc`；`0` 表示成功，非 `0` 表示参数、文件、数据、锁或内部错误，具体错误语义以本接口 `注意事项` 和本文公开合同为准。
+- 使用示例：
+
+  ```python
+  import subprocess
+
+  subprocess.run([
+      'bash',
+      'skills/codex-multi-agents/scripts/codex-multi-agents-list.sh',
+      '-file',
+      'agents/codex-multi-agents/agents-lists.md',
+      '-status'
+  ], check=False)
+  ```
+- 功能说明：读取并展示 agents 名单，不修改名单文件。
+- 注意事项：本接口的命令参数、错误返回、文件副作用和消息副作用必须在本条目内维护；不得依赖统一补充章节承载接口级限制。调用方只允许通过公开脚本入口消费，不得绕过脚本直连内部 helper。
+
+### `codex-multi-agents-list.sh -file <agents-lists.md> -find -name <name> -key <field> -> rc`
+
+- api：`codex-multi-agents-list.sh -file <agents-lists.md> -find -name <name> -key <field> -> rc`
+- 参数：
+  - `-file`：agents 名单文件路径；类型为路径字符串；必填。
+  - `-find`：字段查询动作开关；类型为 CLI flag；必填；不得和写动作同时出现。
+  - `-name`：待查询角色名；类型为非空字符串；必填；不存在必须返回数据错误。
+  - `-key`：待查询字段名；类型为非空字符串；必填；字段不存在必须返回数据错误。
+- 返回值：返回进程退出码 `rc`；`0` 表示成功，非 `0` 表示参数、文件、数据、锁或内部错误，具体错误语义以本接口 `注意事项` 和本文公开合同为准。
+- 使用示例：
+
+  ```python
+  import subprocess
+
+  subprocess.run([
+      'bash',
+      'skills/codex-multi-agents/scripts/codex-multi-agents-list.sh',
+      '-file',
+      'agents/codex-multi-agents/agents-lists.md',
+      '-find',
+      '-name',
+      '小李飞刀',
+      '-key',
+      '会话'
+  ], check=False)
+  ```
+- 功能说明：按角色名查询名单中的指定字段，并在标准输出返回字段值。
+- 注意事项：本接口的命令参数、错误返回、文件副作用和消息副作用必须在本条目内维护；不得依赖统一补充章节承载接口级限制。调用方只允许通过公开脚本入口消费，不得绕过脚本直连内部 helper。
+
+### `codex-multi-agents-list.sh -file <agents-lists.md> -replace -name <name> -key <field> -value <value> -> rc`
+
+- api：`codex-multi-agents-list.sh -file <agents-lists.md> -replace -name <name> -key <field> -value <value> -> rc`
+- 参数：
+  - `-file`：agents 名单文件路径；类型为路径字符串；必填；写入失败必须返回文件错误。
+  - `-replace`：字段替换动作开关；类型为 CLI flag；必填；不得和其他写动作同时出现。
+  - `-name`：待修改角色名；类型为非空字符串；必填；不存在必须返回数据错误。
+  - `-key`：待修改字段名；类型为非空字符串；必填；字段不可修改或不存在必须返回数据错误。
+  - `-value`：新字段值；类型为字符串；必填；允许空值仅限字段合同明确允许的场景。
+- 返回值：返回进程退出码 `rc`；`0` 表示成功，非 `0` 表示参数、文件、数据、锁或内部错误，具体错误语义以本接口 `注意事项` 和本文公开合同为准。
+- 使用示例：
+
+  ```python
+  import subprocess
+
+  subprocess.run([
+      'bash',
+      'skills/codex-multi-agents/scripts/codex-multi-agents-list.sh',
+      '-file',
+      'agents/codex-multi-agents/agents-lists.md',
+      '-replace',
+      '-name',
+      '小李飞刀',
+      '-key',
+      '状态',
+      '-value',
+      '空闲'
+  ], check=False)
+  ```
+- 功能说明：按角色名修改名单中的指定字段，并使用文件锁保护写入。
+- 注意事项：本接口的命令参数、错误返回、文件副作用和消息副作用必须在本条目内维护；不得依赖统一补充章节承载接口级限制。调用方只允许通过公开脚本入口消费，不得绕过脚本直连内部 helper。
+
+### `codex-multi-agents-list.sh -file <agents-lists.md> -add -name <name> -type <type> -> rc`
+
+- api：`codex-multi-agents-list.sh -file <agents-lists.md> -add -name <name> -type <type> -> rc`
+- 参数：
+  - `-file`：agents 名单文件路径；类型为路径字符串；必填。
+  - `-add`：新增角色动作开关；类型为 CLI flag；必填；不得和其他写动作同时出现。
+  - `-name`：新增角色名；类型为非空字符串；必填；重复名称必须返回数据错误。
+  - `-type`：启动类型；类型为非空字符串；必填；非法启动类型必须返回参数错误。
+- 返回值：返回进程退出码 `rc`；`0` 表示成功，非 `0` 表示参数、文件、数据、锁或内部错误，具体错误语义以本接口 `注意事项` 和本文公开合同为准。
+- 使用示例：
+
+  ```python
+  import subprocess
+
+  subprocess.run([
+      'bash',
+      'skills/codex-multi-agents/scripts/codex-multi-agents-list.sh',
+      '-file',
+      'agents/codex-multi-agents/agents-lists.md',
+      '-add',
+      '-name',
+      '新角色',
+      '-type',
+      'codex'
+  ], check=False)
+  ```
+- 功能说明：向 agents 名单新增角色行，并初始化启动类型字段。
+- 注意事项：本接口的命令参数、错误返回、文件副作用和消息副作用必须在本条目内维护；不得依赖统一补充章节承载接口级限制。调用方只允许通过公开脚本入口消费，不得绕过脚本直连内部 helper。
+
+### `codex-multi-agents-list.sh -file <agents-lists.md> -delete -name <name> -> rc`
+
+- api：`codex-multi-agents-list.sh -file <agents-lists.md> -delete -name <name> -> rc`
+- 参数：
+  - `-file`：agents 名单文件路径；类型为路径字符串；必填。
+  - `-delete`：删除角色动作开关；类型为 CLI flag；必填；不得和其他写动作同时出现。
+  - `-name`：待删除角色名；类型为非空字符串；必填；不存在必须返回数据错误。
+- 返回值：返回进程退出码 `rc`；`0` 表示成功，非 `0` 表示参数、文件、数据、锁或内部错误，具体错误语义以本接口 `注意事项` 和本文公开合同为准。
+- 使用示例：
+
+  ```python
+  import subprocess
+
+  subprocess.run([
+      'bash',
+      'skills/codex-multi-agents/scripts/codex-multi-agents-list.sh',
+      '-file',
+      'agents/codex-multi-agents/agents-lists.md',
+      '-delete',
+      '-name',
+      '新角色'
+  ], check=False)
+  ```
+- 功能说明：从 agents 名单删除指定角色行，并使用文件锁保护写入。
+- 注意事项：本接口的命令参数、错误返回、文件副作用和消息副作用必须在本条目内维护；不得依赖统一补充章节承载接口级限制。调用方只允许通过公开脚本入口消费，不得绕过脚本直连内部 helper。
+
+### `codex-multi-agents-list.sh -file <agents-lists.md> -init -name <name> -> rc`
+
+- api：`codex-multi-agents-list.sh -file <agents-lists.md> -init -name <name> -> rc`
+- 参数：
+  - `-file`：agents 名单文件路径；类型为路径字符串；必填。
+  - `-init`：初始化角色动作开关；类型为 CLI flag；必填；不得和写名单动作同时出现。
+  - `-name`：待初始化角色名；类型为非空字符串；必填；不存在或会话字段为空必须返回数据错误。
+- 返回值：返回进程退出码 `rc`；`0` 表示成功，非 `0` 表示参数、文件、数据、锁或内部错误，具体错误语义以本接口 `注意事项` 和本文公开合同为准。
+- 使用示例：
+
+  ```python
+  import subprocess
+
+  subprocess.run([
+      'bash',
+      'skills/codex-multi-agents/scripts/codex-multi-agents-list.sh',
+      '-file',
+      'agents/codex-multi-agents/agents-lists.md',
+      '-init',
+      '-name',
+      '小李飞刀'
+  ], check=False)
+  ```
+- 功能说明：按名单中角色配置向对应会话发送初始化消息。
+- 注意事项：本接口的命令参数、错误返回、文件副作用和消息副作用必须在本条目内维护；不得依赖统一补充章节承载接口级限制。调用方只允许通过公开脚本入口消费，不得绕过脚本直连内部 helper。
+## 额外补充
+
+### 参数约定
 
 - `-file`：名单文件路径。
 - `-status`：读取并展示名单信息（按列宽对齐输出）。
@@ -33,7 +214,7 @@
 - `-value`：待写入字段值。
 - `-type`：新增人员时写入启动类型（如 `codex`、`claude`）。
 
-## 字段约束
+### 字段约束
 
 - `姓名` 为不可修改字段，不允许通过 `-replace` 修改。
 - `姓名` 在名单文件中必须唯一。
@@ -42,13 +223,13 @@
 - 启动字段支持两种列名：`启动设置` 或 `启动类型`。
 - `worktree` 为可选列；若存在则参与 `-add` 生成与 `-init` 读取。
 
-## 并发约束
+### 并发约束
 
 - 写操作（`-replace`、`-add`、`-delete`）使用 `flock` 文件锁，避免并发写入冲突。
 - 非写文件操作（`-status`、`-find`、`-init`）不加锁，仅进行读取、解析或外部会话调用。
 - 锁对象为目标名单文件本身，不创建 `<file>.lock` 等额外锁文件。
 
-## 功能
+### 功能
 
 ### 读取 agents 名单
 
@@ -180,7 +361,7 @@ codex-multi-agents-list.sh -compact -file "agents-lists.md" -name "xiaoming"
 - 若运行环境缺少 `tmux`，返回 `RC=2`。
 - `职责` 列为可选列；若不存在或为空，消息中的职责部分按空值处理。
 
-## 返回与错误
+### 返回与错误
 
 ### 成功返回说明
 

@@ -1,7 +1,5 @@
 """API Arch compile tests.
 
-创建者: 小李飞刀
-最后一次更改: 小李飞刀
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `include/api/Arch.h` 的公开 launch / barrier 接口面，
@@ -38,8 +36,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def _compile_and_run(source: str) -> None:
     """编译并运行 C++ 测试片段。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 使用 `g++` 编译临时源码并执行生成的程序。
@@ -96,8 +92,6 @@ def _compile_and_run(source: str) -> None:
 def _compile_expect_failure(source: str) -> str:
     """编译并断言 C++ 片段失败，返回编译 stderr。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 使用 `g++` 编译临时源码，并验证其因公开合同违例而编译失败。
@@ -138,8 +132,6 @@ def _compile_expect_failure(source: str) -> str:
 def _compile_only(source: str) -> None:
     """仅编译 C++ 测试片段，不执行链接或运行。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 使用 `g++ -c` 校验 `include/api/Arch.h` 的公开声明是否可被源码侧直接引用。
@@ -182,10 +174,6 @@ def _compile_only(source: str) -> None:
 
 
 # API-ARCH-001
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 06:05:00 +0800
-# 最近一次运行成功时间: 2026-04-06 06:05:00 +0800
 # 测试目的: 验证 `BarrierScope` 与 `launch<block, thread, subthread, shared_memory_size>(callee, args...)` 的公开接口面可配合后端实现编译运行。
 # 使用示例: `pytest -q test/include/api/test_arch.py -k test_include_api_arch_exports_public_launch_and_scope_contract`
 # 对应功能实现文件路径: `include/npu_demo/Arch.h`
@@ -240,10 +228,6 @@ int main() {
 
 
 # API-ARCH-002
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 06:05:00 +0800
-# 最近一次运行成功时间: 2026-04-06 06:05:00 +0800
 # 测试目的: 验证字符串 callee 不属于公开 launch 合同。
 # 使用示例: `pytest -q test/include/api/test_arch.py -k test_include_api_arch_rejects_string_callee_contract`
 # 对应功能实现文件路径: `include/npu_demo/Arch.h`
@@ -265,10 +249,6 @@ int main() {
 
 
 # API-ARCH-003
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-06 06:05:00 +0800
-# 最近一次运行成功时间: 2026-04-06 06:05:00 +0800
 # 测试目的: 验证 `include/api/Arch.h` 仅保留公共声明，不混入 npu_demo 私有实现细节。
 # 使用示例: `pytest -q test/include/api/test_arch.py -k test_include_api_arch_keeps_backend_impl_out_of_api_header`
 # 对应功能实现文件路径: `include/npu_demo/Arch.h`
@@ -299,10 +279,6 @@ def test_include_api_arch_keeps_backend_impl_out_of_api_header() -> None:
 
 
 # API-ARCH-004
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-15 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-15 00:00:00 +0800
 # 测试目的: 验证 npu_demo KernelContext 已暴露 TLM1/TLM2/TLM3 三块动态内存视图，且容量与公开合同一致。
 # 使用示例: `pytest -q test/include/api/test_arch.py -k test_include_api_arch_exposes_tlm123_dynamic_memory_contract`
 # 对应功能实现文件路径: `include/npu_demo/Arch.h`
@@ -336,10 +312,6 @@ int main() {
 
 
 # API-ARCH-005
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-19 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-19 00:00:00 +0800
 # 测试目的: 验证 `include/api/Arch.h` 已显式声明抽象 `KernelContext` 接口面，且源码侧可在不引入后端实现的前提下引用这些公开声明。
 # 使用示例: `pytest -q test/include/api/test_arch.py -k test_include_api_arch_declares_public_kernel_context_surface`
 # 对应功能实现文件路径: `include/api/Arch.h`

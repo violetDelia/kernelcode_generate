@@ -1,7 +1,5 @@
 """Matmul demo with static inputs and static tiles.
 
-创建者: 大闸蟹
-最后一次更改: 大闸蟹
 
 功能说明:
 - 实现 `inputs 静 + tile 静` 的二维 matmul kernel demo。
@@ -46,8 +44,6 @@ def matmul_inputs_static_tile_static_kernel(
 ) -> None:
     """执行静态输入、静态 tile 的 matmul。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 读取 `lhs/rhs/out` 的静态 shape。
@@ -75,8 +71,6 @@ def matmul_inputs_static_tile_static_kernel(
 def main() -> None:
     """运行静态输入、静态 tile 的 matmul demo。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 构造真实 torch tensor 输入。

@@ -6,40 +6,40 @@
 
 ## API 列表
 
-- `alloc(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)`
-- `fill(target, value)`
-- `free(value)`
-- `copy(source, space)`
-- `load(source, offsets, sizes, strides=None, space=None)`
-- `store(target, source, offsets, sizes, strides=None)`
-- `slice(source, offsets, sizes, strides=None, space=None)`
-- `deslice(target, source, offsets, sizes, strides=None)`
-- `view(source, offset, size, stride)`
-- `reshape(source, shape)`
-- `flatten(source)`
-- `cast(source, dtype, memoryspace=None)`
-- `kernel_gen.operation.alloc(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)`
-- `kernel_gen.operation.dma.fill(target, value)`
-- `kernel_gen.operation.free(value)`
-- `kernel_gen.operation.copy(source, space)`
-- `kernel_gen.operation.load(source, offsets, sizes, strides=None, space=None)`
-- `kernel_gen.operation.store(target, source, offsets, sizes, strides=None)`
-- `kernel_gen.operation.slice(source, offsets, sizes, strides=None, space=None)`
-- `kernel_gen.operation.deslice(target, source, offsets, sizes, strides=None)`
-- `kernel_gen.operation.view(source, offset, size, stride)`
-- `kernel_gen.operation.reshape(source, shape)`
-- `kernel_gen.operation.flatten(source)`
-- `kernel_gen.operation.cast(source, dtype, memoryspace=None)`
+- `alloc(shape: ShapeInput, dtype: NumericType, space: MemorySpace = MemorySpace.GM, stride: ShapeInput | None = None, format: Farmat = Farmat.Norm) -> Memory`
+- `fill(target: Memory, value: int | float | str | SymbolDim) -> None`
+- `free(value: Memory) -> None`
+- `copy(source: Memory, space: MemorySpace) -> Memory`
+- `load(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
+- `store(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
+- `slice(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
+- `deslice(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
+- `view(source: Memory, offset: ShapeInput, size: ShapeInput, stride: ShapeInput) -> Memory`
+- `reshape(source: Memory, shape: ShapeInput) -> Memory`
+- `flatten(source: Memory) -> Memory`
+- `cast(source: Memory, dtype: NumericType, memoryspace: MemorySpace | None = None) -> Memory`
+- `kernel_gen.operation.alloc(shape: ShapeInput, dtype: NumericType, space: MemorySpace = MemorySpace.GM, stride: ShapeInput | None = None, format: Farmat = Farmat.Norm) -> Memory`
+- `kernel_gen.operation.dma.fill(target: Memory, value: int | float | str | SymbolDim) -> None`
+- `kernel_gen.operation.free(value: Memory) -> None`
+- `kernel_gen.operation.copy(source: Memory, space: MemorySpace) -> Memory`
+- `kernel_gen.operation.load(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
+- `kernel_gen.operation.store(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
+- `kernel_gen.operation.slice(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
+- `kernel_gen.operation.deslice(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
+- `kernel_gen.operation.view(source: Memory, offset: ShapeInput, size: ShapeInput, stride: ShapeInput) -> Memory`
+- `kernel_gen.operation.reshape(source: Memory, shape: ShapeInput) -> Memory`
+- `kernel_gen.operation.flatten(source: Memory) -> Memory`
+- `kernel_gen.operation.cast(source: Memory, dtype: NumericType, memoryspace: MemorySpace | None = None) -> Memory`
 
 ## 文档信息
 
-- 创建者：`榕`
-- 最后一次更改：`金铲铲大作战`
+- 创建者：`未记录`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/operation/dma.md`](../../spec/operation/dma.md)
 - `功能实现`：[`kernel_gen/operation/dma.py`](../../kernel_gen/operation/dma.py)
 - `test`：
-  - [`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
-  - [`test/operation/test_operation_package_api.py`](../../test/operation/test_operation_package_api.py)
+  - [`test/operation/test_dma.py`](../../test/operation/test_dma.py)
+  - [`test/operation/test_package.py`](../../test/operation/test_package.py)
   - [`test/dsl/ast/test_package.py`](../../test/dsl/ast/test_package.py)
 
 ## 依赖
@@ -58,39 +58,6 @@
 - 明确 `alloc/fill/free/copy/cast/load/store/slice/deslice/view/reshape/flatten` 的输入约束、输出语义与错误边界。
 - 保留动态 `shape` 与 `offsets/sizes/strides` 的表达能力，支持后续 lowering 保留切片信息。
 
-## 限制与边界
-
-- 不负责真实 DMA 硬件调度、带宽估算、异步执行或同步原语（event/barrier/token/stream）。
-- 不负责逐元素算术、比较、广播、归约等计算语义。
-- 不负责隐式元素类型转换；元素表示变化必须通过显式 `cast` 描述。
-- 不负责自动选择最优搬运空间、tile 大小或 stride。
-- `alloc/free` 仅定义高层生命周期语义，不承担搬运语义。
-- `fill` 只定义“把同一个标量值写入现有 `Memory` 每个逻辑元素”的高层初始化语义；它不分配新 `Memory`，也不返回新的 `Memory`。
-- 搬运操作不改变元素值语义，只改变数据的逻辑位置、覆盖范围或所在空间。
-- `fill` 的 `value` 允许 Python 数值标量、symbol 整型标量，以及字符串字面量形式的正/负无穷；字符串字面量的稳定拼写只允许 `"inf"` 与 `"-inf"`，不接受其他别名、大小写变体、前后空白或任意普通字符串。
-- `view/reshape/flatten` 不做数据搬运，仅调整张量视图的 `shape/stride` 描述。
-- `offsets/sizes/strides` 长度必须与相关 `Memory.rank` 一致；`sizes` 中静态维度必须为正。
-- `offsets` 中静态值必须为非负整数；`sizes/strides` 中静态值必须为正整数；动态值使用符号整型表达。
-- 对于可静态判定的场景，必须检查边界：`offset + (size - 1) * stride < dim`，越界时显式报错。
-- `load/slice` 的 `strides` 仅作为访问步进参与校验，不会写入返回 `Memory.stride`。
-- `load/slice/store/deslice` 允许非单位 `strides` 作为访问步进并执行边界校验；但当前 `dma dialect` 仅支持单位步长语义，进入方言层时任一维 `stride != 1` 必须显式报错，以避免生成无法验证的方言 op。
-- `store/deslice` 的 `sizes` 必须与 `source.shape` 一致。
-- `copy/cast` 仅改变 `Memory` 规格，不负责数据填充或变形。
-- `fill` 的高层 helper 合同不承诺固定 lower 为单个 `dma.fill`；若下游链路选择映射到 [`spec/dialect/dma.md`](../../spec/dialect/dma.md) 的 `dma.fill`，仍需满足该方言对 `i32` / `!symbol.int<"...">` 与 `i32 memory` 的更窄 verifier 约束。
-- `view` 不提供 `space` 或 `memoryspec` 参数；返回值总是继承 `source` 的 `dtype/space/format`，`stride` 由 source 物理 stride 与 view 逻辑 stride 逐维组合得到。
-- `view` 的 `stride` 参数只用于描述 subview 窗口步进与边界检查，不会直接替换返回值的 `Memory.stride`。
-- `view` 在 operation 层不要求 `source.shape` 与 `size` 的 `numel` 相等，只要求窗口边界合法。
-- operation 到 dialect 的映射边界：`view` 的 `offset/size/stride` 必须在调用点直接保留并传递给方言；仅依赖 `view` 返回的 `Memory` 无法恢复完整 subview 参数。
-- `kernel_gen.operation.dma` 是 dma family 的完整稳定入口；`kernel_gen.operation` 顶层同时稳定重导出 `alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast`，且这些对象在顶层与子模块中的身份必须一致。
-- `fill` 当前只属于 `kernel_gen.operation.dma` 子模块公开 API，不属于 `kernel_gen.operation` 顶层稳定导出集合；测试与消费者不得把 `kernel_gen.operation.fill` 当作兼容入口。
-
-### package-root 导出边界
-
-| 入口 | 稳定公开 API | 说明 |
-| --- | --- | --- |
-| `kernel_gen.operation.dma` | `alloc / fill / free / copy / cast / load / store / slice / deslice / view / reshape / flatten` | dma family 的完整稳定入口；`fill` 只在该子模块路径公开 |
-| `kernel_gen.operation` | `alloc / free / copy / cast / load / store / slice / deslice / view / reshape / flatten` | 包根重导出同一组 dma helper；不包含 `fill`，且对象身份与 `kernel_gen.operation.dma` 保持一致 |
-
 ## 额外补充
 
 ### 关系图
@@ -100,7 +67,7 @@ alloc -> 产出新的 Memory 规格
 fill -> 对现有 Memory 做整块标量初始化，不分配新 Memory
 copy -> 保留 shape/stride/format，仅切换目标 space
 load -> 从 source 读取窗口，直接返回结果块
-slice -> 用户侧返回值式 helper；lowering 时桥接为 alloc(target) + dma.slice(target, source, ...)
+slice -> 用户侧返回值式 helper；lowering 时桥接为 alloc(target) + dma.slice(target, source, value)
 view -> 仅保留 subview 窗口信息，不做搬运
 reshape/flatten -> 仅改 shape/stride 元信息，不做搬运
 store/deslice -> 把 source 写回 target 指定窗口
@@ -110,7 +77,7 @@ store/deslice -> 把 source 写回 target 指定窗口
 
 | helper | 核对对象 | 统一规则 |
 | --- | --- | --- |
-| `load` | `offsets/sizes/strides` 对 `source.shape` | 对可静态判定场景执行 `offset + (size - 1) * stride < dim`，越界时报 `ValueError` |
+| `load` | `offsets/sizes/strides` 对 `source.shape` | 对可静态判定场景执行 `offset + (size - 1) * stride < dim`，越界时报 `KernelCodeError` |
 | `slice` | `offsets/sizes/strides` 对 `source.shape` | 与 `load` 共享同一组 rank / 正长度 / 越界规则 |
 | `store` | `offsets/sizes/strides` 对 `target.shape`，且 `sizes == source.shape` | 先校验 rank，再校验 `sizes` 与源块一致，最后执行静态越界检查 |
 | `deslice` | `offsets/sizes/strides` 对 `target.shape`，且 `sizes == source.shape` | 与 `store` 共享同一组大小与越界规则 |
@@ -118,464 +85,472 @@ store/deslice -> 把 source 写回 target 指定窗口
 | `reshape` | `shape` 对 `source` 连续布局与 `numel` | 不做窗口越界检查；只校验连续布局和静态 `numel` 一致 |
 | `flatten` | `source` 连续布局 | 不做窗口越界检查；只校验连续布局 |
 
-## 公开接口
-
-### alloc(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)
-
-功能说明：
-
-- 分配新的 `Memory` 描述对象，定义逻辑 `shape/dtype/space/stride`。
-
-参数说明：
-
-- `shape: Sequence | SymbolShape`：维度序列或 `SymbolShape`，元素可为正整数、符号名或符号整型表达。
-- `dtype: NumericType`：元素类型。
-- `space: MemorySpace`：内存空间，默认 `MemorySpace.GM`。
-- `stride: Sequence | SymbolShape | None`：可选步长序列；未传入时生成默认连续 stride。
-- `format: Farmat`：布局格式，默认 `Farmat.Norm`。
-
-使用示例：
-
-```python
-buf = alloc(
-    [SymbolDim("M"), SymbolDim("N")],
-    NumericType.Float16,
-    space=MemorySpace.LM,
-    stride=[1, 1],
-    format=Farmat.CLast,
-)
-```
-
-注意事项：
-
-- `shape/stride` 必须可被 `SymbolShape` 规范化，且 rank 必须一致。
-- `dtype` 必须为 `NumericType`，`space` 必须为 `MemorySpace`，`format` 必须为 `Farmat`。
-- 未提供 `stride` 时，按连续布局生成默认 stride。
-- 未提供 `format` 时，必须显式使用默认值 `Farmat.Norm`，不得依赖 `Memory` 默认格式隐式绕过。
-
-非法输入：
-
-- `shape/stride` 无法规范化或 rank 不一致时必须抛出 `ValueError`。
-- `dtype` 非 `NumericType`、`space` 非 `MemorySpace` 或 `format` 非 `Farmat` 时必须抛出 `TypeError`。
-
-返回与限制：
-
-- 返回新的 `Memory`，`format` 必须等于 `format` 参数。
-- 不隐含数据搬运、初始化填充或跨空间拷贝。
-
-### free(value)
-
-功能说明：
-
-- 结束某个 `Memory` 描述对象的高层生命周期。
-
-参数说明：
-
-- `value: Memory`：待释放对象。
-
-使用示例：
-
-```python
-free(buf)
-```
-
-注意事项：
-
-- 非 `Memory` 输入必须报 `TypeError`。
-
-非法输入：
-
-- `value` 不是 `Memory` 时必须抛出 `TypeError`。
-
-返回与限制：
-
-- 返回 `None`，不产生新的 `Memory`。
-
-### fill(target, value)
-
-功能说明：
-
-- 将单个标量值写入 `target` 的每个逻辑元素，表达整块初始化意图。
-- `fill` 只作用于已有 `Memory`，不分配新 buffer，也不承诺固定 lower 为单个方言 op。
-
-参数说明：
-
-- `target: Memory`：待初始化的目标内存。
-- `value: int | float | SymbolDim | str`：写入标量；字符串字面量仅允许 `"inf"` 与 `"-inf"`。
-
-使用示例：
-
-```python
-from kernel_gen.operation.dma import alloc, fill
-
-buf = alloc([16, 16], NumericType.Float32, MemorySpace.TSM)
-fill(buf, 0)
-fill(buf, "-inf")
-```
-
-注意事项：
-
-- `target` 必须是 `Memory`。
-- `fill` 只承诺“同一个标量值写满整个 target”的 helper 语义；是否 lower 为 `dma.fill`、`arith.constant + dma.fill` 或其他合法化链路，取决于下游实现与目标 `dtype`。
-- 当 `value` 是字符串字面量时，当前稳定拼写只允许 `"inf"` 与 `"-inf"`；`"+inf"`、`"Infinity"`、`"nan"`、空字符串及其他普通字符串都不在公开合同内。
-- 本 helper 的公开导入路径是 `kernel_gen.operation.dma.fill`；`kernel_gen.operation` 顶层不导出 `fill`。
-
-非法输入：
-
-- `target` 不是 `Memory` 时必须抛出 `TypeError`。
-- `value` 是字符串但不是 `"inf"` 或 `"-inf"` 时必须抛出 `ValueError`。
-- `value` 不是数值标量、symbol 整型标量或上述两个字符串字面量时必须抛出 `TypeError`。
-
-返回与限制：
-
-- 返回 `None`。
-- 不返回新的 `Memory`，也不改变 `target.shape/stride/space/format`。
-
-### copy(source, space)
-
-功能说明：
-
-- 返回新的 `Memory` 描述，保留 `source` 的规格，仅切换到目标空间。
-
-参数说明：
-
-- `source: Memory`：源内存。
-- `space: MemorySpace`：目标内存空间。
-
-使用示例：
-
-```python
-dst = copy(src, MemorySpace.SM)
-```
-
-```python
-def copy_kernel(src: "Tensor[f32, 8, 8]") -> "Tensor[f32, 8, 8]":
-    from kernel_gen.operation.dma import copy
-    return copy(src, MemorySpace.SM)
-
-# 目标 raw IR：dma.alloc + dma.copy(target, source) + func.return
-# 非法例：copy(src, "SM") 必须在 helper/build_func_op 边界显式报错
-```
-
-注意事项：
-
-- `source` 必须为 `Memory`，`space` 必须为 `MemorySpace`。
-- 返回结果仅描述搬运意图，不执行实际数据拷贝。
-- 类型校验必须在 helper/build_func_op 边界完成；例如 `copy(src, "SM")` 必须抛出 `TypeError`，错误信息包含 `MemorySpace`。
-
-非法输入：
-
-- `source` 不是 `Memory` 时必须抛出 `TypeError`（错误信息需包含 `Memory` 关键字）。
-- `space` 不是 `MemorySpace` 时必须抛出 `TypeError`（错误信息需包含 `MemorySpace` 关键字）。
-
-返回与限制：
-
-- 返回新的 `Memory`，`shape/stride/dtype/format` 继承 `source`，`space` 由参数决定。
-- lowering 必须显式生成 `dma.alloc + dma.copy(target, source)`，并返回 alloc 结果。
-
-### cast(source, dtype, memoryspace=None)
-
-功能说明：
-
-- 显式转换 `source` 的元素类型，并返回新的 `Memory` 描述。
-
-参数说明：
-
-- `source: Memory`：源块。
-- `dtype: NumericType`：目标元素类型。
-- `memoryspace: MemorySpace | None`：可选目标空间；`None` 表示沿用 `source.space`。
-
-使用示例：
-
-```python
-dst = cast(src, NumericType.Float16, memoryspace=MemorySpace.GM)
-```
-
-注意事项：
-
-- `dtype` 必须为合法的 `NumericType`，`memoryspace` 若提供必须为 `MemorySpace`。
-- 当前实现支持数值类型之间的显式转换，返回值的 `dtype` 由目标参数决定。
-
-非法输入：
-
-- `source` 不是 `Memory`、`dtype` 非 `NumericType` 或 `memoryspace` 非 `MemorySpace|None` 时必须抛出 `TypeError`。
-- 数值类型之间的转换按当前实现全部支持；非法 `dtype` / `memoryspace` 仍必须抛出 `TypeError`。
-
-返回与限制：
-
-- 返回新的 `Memory`，其 `shape/stride/format` 继承 `source`，`dtype` 与 `space` 按参数覆盖。
-
-### load(source, offsets, sizes, strides=None, space=None)
-
-功能说明：
-
-- 从 `source` 读取切片块并返回新的结果块。
-
-参数说明：
-
-- `source: Memory`：源内存。
-- `offsets: Sequence | SymbolShape`：索引列表或 `SymbolShape`。
-- `sizes: Sequence | SymbolShape`：索引列表或 `SymbolShape`，作为返回块 `shape`。
-- `strides: Sequence | SymbolShape | None`：可选步进序列；`None` 表示单位步进。
-- `space: MemorySpace | None`：目标空间；`None` 表示沿用 `source.space`。
-
-使用示例：
-
-```python
-tile = load(src, offsets=[0, 0], sizes=[32, 32], strides=[1, 1], space=MemorySpace.SM)
-```
-
-注意事项：
-
-- `offsets/sizes/strides` 长度必须与 `source.rank` 一致。
-- `sizes` 中静态维度必须为正。
-- 对于可静态判定的场景，必须进行边界检查。
-- 当 `offsets/sizes/strides` 含 `SymbolDim` 或 `?` 且无法静态判定越界时，允许通过并保留符号表达。
-
-非法输入：
-
-- `source` 不是 `Memory` 时必须抛出 `TypeError`（错误信息需包含 `Memory` 关键字）。
-- `space` 非 `MemorySpace|None` 时必须抛出 `TypeError`（错误信息需包含 `MemorySpace` 关键字）。
-- `offsets/sizes/strides` 与 `source.rank` 不一致时必须抛出 `ValueError`（错误信息需包含 `rank` 关键字）。
-- `sizes` 含非正静态维度时必须抛出 `ValueError`（错误信息需包含 `size` 关键字）。
-- 静态边界校验失败时必须抛出 `ValueError`（错误信息需包含 `out of bounds` 关键字）。
-
-返回与限制：
-
-- 返回新的 `Memory`，其 `shape == sizes`，`dtype/format` 继承 `source`。
-- 返回结果 `stride` 按连续布局生成，与 `strides` 无关。
-- lowering 必须直接生成 `dma.load`，不得额外分配临时结果。
-
-### slice(source, offsets, sizes, strides=None, space=None)
-
-功能说明：
-
-- 从 `source` 抽取切片块并返回 `Memory`；该接口是用户侧表达式式 helper。
-- `slice(...)` 在 operation 层保持“返回值式”写法，用于表达“需要一个切片结果块”的意图。
-
-参数说明：
-
-- `source: Memory`：源内存。
-- `offsets: Sequence | SymbolShape`：索引列表或 `SymbolShape`。
-- `sizes: Sequence | SymbolShape`：索引列表或 `SymbolShape`。
-- `strides: Sequence | SymbolShape | None`：可选步进序列；`None` 表示单位步进。
-- `space: MemorySpace | None`：目标空间；`None` 表示沿用 `source.space`。
-
-使用示例：
-
-```python
-sub = slice(src, offsets=[32], sizes=[16], strides=[1], space=MemorySpace.TSM)
-```
-
-注意事项：
-
-- 校验规则与 `load` 一致。
-- operation 层签名固定为 `slice(source, offsets, sizes, strides, space)`，不向用户暴露 include/api 的目标式 `target` 参数。
-- lowering 必须显式桥接到目标式链路：先创建 `target = alloc(shape=sizes, dtype=source.dtype, space=space)`，再发射 `dma.slice(target, source, offsets, sizes, strides)`。
-- `slice(...)` 的表达式返回值必须绑定到上述自动分配 `target`；不得把 `dma.slice` 误写为“自身返回新 memory result”。
-- 若某个 lowering pass 需要把整块搬运收口到 `slice(...)`，必须使用 full-window 特例：`offsets=0`、`sizes=source.shape`、`strides=1`；若输入来自窗口 `view(...)`，lowering 只能保留原窗口的 `offsets/sizes`，生成到 `dma.slice` 的 `strides` 仍必须规范化为单位步长。
-- 例如 `offsets=[32]`、`sizes=[16]`、`strides=[1]`、`space=MemorySpace.TSM` 时，返回值语义必须是 `shape=[16]`、`space=TSM` 的 `Memory<float>`（`dtype` 继承 `source`）。
-
-非法输入：
-
-- `source` 不是 `Memory` 时必须抛出 `TypeError`（错误信息需包含 `Memory` 关键字）。
-- `space` 非 `MemorySpace|None` 时必须抛出 `TypeError`（错误信息需包含 `MemorySpace` 关键字）。
-- 其余 rank/边界/`sizes` 约束与 `load` 相同，违反时必须抛出 `ValueError`，并沿用 `load` 的关键短语约定。
-
-返回与限制：
-
-- 返回新的 `Memory`；其 `shape == sizes`，`space` 由 `space` 参数决定（`None` 时沿用 `source.space`），`dtype/format` 继承 `source`。
-- 返回值对应 lowering 自动分配的 `target`，而不是 `dma.slice` 的直接返回结果。
-
-### store(target, source, offsets, sizes, strides=None)
-
-功能说明：
-
-- 将 `source` 块写回 `target` 的指定区域。
-
-参数说明：
-
-- `target: Memory`：目标内存。
-- `source: Memory`：源块。
-- `offsets: Sequence | SymbolShape`：索引列表或 `SymbolShape`。
-- `sizes: Sequence | SymbolShape`：索引列表或 `SymbolShape`，必须与 `source.shape` 一致。
-- `strides: Sequence | SymbolShape | None`：可选步进序列；`None` 表示单位步进。
-
-使用示例：
-
-```python
-store(dst, tile, offsets=[0, 0], sizes=[32, 32], strides=[1, 1])
-```
-
-注意事项：
-
-- `source.dtype == target.dtype`。
-- `offsets/sizes/strides` 长度必须与 `target.rank` 一致。
-- `source.shape` 必须与 `sizes` 一致。
-- 对于可静态判定的场景，必须进行边界检查。
-
-非法输入：
-
-- `source` 或 `target` 不是 `Memory` 时必须抛出 `TypeError`。
-- `source.dtype != target.dtype` 时必须抛出 `TypeError`。
-- `sizes` 与 `source.shape` 不一致、或静态边界校验失败时必须抛出 `ValueError`。
-
-返回与限制：
-
-- 返回 `None`。
-
-### deslice(target, source, offsets, sizes, strides=None)
-
-功能说明：
-
-- 将切片块写回 `target` 的指定区域；语义等价于 `store`，强调“局部区域更新”。
-
-参数说明：
-
-- `source: Memory`：源块。
-- `target: Memory`：目标内存。
-- `offsets: Sequence | SymbolShape`：索引列表或 `SymbolShape`。
-- `sizes: Sequence | SymbolShape`：索引列表或 `SymbolShape`，必须与 `source.shape` 一致。
-- `strides: Sequence | SymbolShape | None`：可选步进序列；`None` 表示单位步进。
-
-使用示例：
-
-```python
-deslice(dst, sub, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
-```
-
-注意事项：
-
-- 校验规则与 `store` 一致。
-- 若某个 lowering pass 需要把整块写回收口到 `deslice(...)`，必须使用 full-window 特例：`offsets=0`、`sizes=target.shape`、`strides=1`；若目标来自窗口 `view(...)`，lowering 只能保留原窗口的 `offsets/sizes`，生成到 `dma.deslice` 的 `strides` 仍必须规范化为单位步长。
-
-非法输入：
-
-- `source` 或 `target` 不是 `Memory` 时必须抛出 `TypeError`。
-- `source.dtype != target.dtype` 时必须抛出 `TypeError`。
-- 其余大小/边界约束与 `store` 相同，违反时必须抛出 `ValueError`。
-
-返回与限制：
-
-- 返回 `None`。
-
-### view(source, offset, size, stride)
-
-功能说明：
-
-- 返回 `source` 的子视图结果，仅描述从 `source` 上切出的逻辑窗口。
-- `offset/size/stride` 用于保留 subview lowering 所需的范围信息；该操作本身不做数据搬运。
-
-参数说明：
-
-- `source: Memory`：源内存。
-- `offset: Sequence | SymbolShape`：子视图起始偏移，长度必须与 `source.rank` 一致。
-- `size: Sequence | SymbolShape`：子视图逻辑大小，返回结果的 `shape` 固定等于该参数。
-- `stride: Sequence | SymbolShape`：子视图步进，长度必须与 `source.rank` 一致。
-
-使用示例：
-
-```python
-src = Memory(["M", "K"], NumericType.Float32)
-sub = view(src, offset=["M_t", "K_t"], size=[2, 2], stride=["stride", 1])
-```
-
-注意事项：
-
-- `offset/size/stride` 都必须可被 `SymbolShape` 规范化，且长度必须与 `source.rank` 一致。
-- `size` 中静态维度必须为正。
-- `stride` 仅用于描述子视图访问步进；返回 `Memory.stride` 仍应反映 source 物理 stride 与 view stride 的组合结果，而不是直接沿用 source 或直接替换为入参。
-- `view` 仅做窗口合法性检查，不要求 `source.shape` 与 `size` 的 `numel` 在 operation 层相等。
-- 对于可静态判定的场景，必须进行边界检查。
-- 当 `offset/size/stride` 含 `SymbolDim` 或 `?` 且无法静态判定越界时，允许通过并保留符号表达。
-
-非法输入：
-
-- `source` 不是 `Memory` 时必须抛出 `TypeError`。
-- `offset/size/stride` 长度与 rank 不一致、`offset` 含负值、`size/stride` 含非正静态值或静态边界校验失败时必须抛出 `ValueError`。
-
-返回与限制：
-
-- 返回新的 `Memory`，其 `shape == size`，`dtype/space/format/stride` 继承 `source`。
-
-### reshape(source, shape)
-
-功能说明：
-
-- 返回 `source` 的形状重塑结果，仅调整 `shape/stride` 元信息。
-- 等价于对连续布局的 `source` 进行视图重塑。
-
-参数说明：
-
-- `source: Memory`：源内存。
-- `shape: Sequence | SymbolShape`：目标形状。
-
-使用示例：
-
-```python
-src = Memory([2, 3, 4], NumericType.Float32)
-dst = reshape(src, shape=[6, 4])
-```
-
-注意事项：
-
-- `shape` 必须可被 `SymbolShape` 规范化。
-- `source` 必须是连续布局；非连续布局必须显式报错。
-- 若可判定，`shape` 的元素总数必须与 `source.shape` 一致。
-
-非法输入：
-
-- `source` 不是 `Memory` 时必须抛出 `TypeError`（错误信息需包含 `Memory` 关键字）。
-- `shape` 无法规范化时必须抛出 `ValueError`（错误信息需包含 `shape` 关键字）。
-- `source` 非连续布局时必须抛出 `ValueError`（错误信息需包含 `contiguous` 关键字）。
-- 静态元素总数不一致时必须抛出 `ValueError`（错误信息需包含 `numel` 关键字）。
-
-返回与限制：
-
-- 返回新的 `Memory`，其 `dtype/space/format` 继承 `source`。
-- 返回的 `stride` 按连续行主序生成。
-- lowering 必须生成 `dma.reshape`，返回值绑定其结果。
-
-### flatten(source)
-
-功能说明：
-
-- 将 `source` 展平成一维视图，返回新的 `Memory`。
-- 语义等价于把 `source` 视为连续内存并生成 `shape=[prod(shape)]` 的视图。
-
-参数说明：
-
-- `source: Memory`：源内存。
-
-使用示例：
-
-```python
-src = Memory([2, 3, 4], NumericType.Float32)
-dst = flatten(src)
-```
-
-注意事项：
-
-- `source` 必须是连续布局；非连续布局必须显式报错。
-- 展平后的 `shape` 为所有维度长度的乘积；符号维度使用无空格 `*` 表达式。
-
-非法输入：
-
-- `source` 不是 `Memory` 时必须抛出 `TypeError`（错误信息需包含 `Memory` 关键字）。
-- `source` 非连续布局时必须抛出 `ValueError`（错误信息需包含 `contiguous` 关键字）。
-
-返回与限制：
-
-- 返回新的 `Memory`，其 `shape` 为一维，`stride` 为 `[1]`。
-- 返回结果的 `dtype/space/format` 继承 `source`。
-- lowering 必须生成 `dma.reshape`，返回值绑定其结果。
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
+- 本文件只定义 operation 层高层 API，不负责真实 DMA 硬件调度、带宽估算、异步执行、同步原语或 tile 策略选择。
+- 本文件不负责逐元素算术、比较、广播、归约或隐式 dtype 转换；元素表示变化必须通过显式 `cast` 描述。
+- operation 到 dialect 的具体映射由 [`spec/dialect/dma.md`](../../spec/dialect/dma.md) 定义。
+- `kernel_gen.operation.dma` 是 dma family 的完整稳定入口；`kernel_gen.operation` 顶层稳定重导出除 `fill` 外的 dma helper。
+- `fill` 当前只属于 `kernel_gen.operation.dma` 子模块公开 API，不属于 `kernel_gen.operation` 顶层稳定导出集合。
+
+### package-root 导出说明
+
+| 入口 | 稳定公开 API | 说明 |
+| --- | --- | --- |
+| `kernel_gen.operation.dma` | `alloc / fill / free / copy / cast / load / store / slice / deslice / view / reshape / flatten` | dma family 的完整稳定入口；`fill` 只在该子模块路径公开 |
+| `kernel_gen.operation` | `alloc / free / copy / cast / load / store / slice / deslice / view / reshape / flatten` | 包根重导出同一组 dma helper；不包含 `fill`，且对象身份与 `kernel_gen.operation.dma` 保持一致 |
+
+## API详细说明
+
+### `alloc(shape: ShapeInput, dtype: NumericType, space: MemorySpace = MemorySpace.GM, stride: ShapeInput | None = None, format: Farmat = Farmat.Norm) -> Memory`
+
+- api：`alloc(shape: ShapeInput, dtype: NumericType, space: MemorySpace = MemorySpace.GM, stride: ShapeInput | None = None, format: Farmat = Farmat.Norm) -> Memory`
+- 参数：
+  - `shape`：形状序列；类型 `ShapeInput`；无默认值；不允许 None；每个维度必须满足符号维度公开合同。
+  - `dtype`：数值类型；类型 `NumericType`；无默认值；不允许 None；必须是公开 NumericType 或公开类型属性。
+  - `space`：内存空间；类型 `MemorySpace`；默认值 `MemorySpace.GM`；传入时必须是公开 MemorySpace 或 MemorySpaceAttrAST。
+  - `stride`：步幅序列；类型 `ShapeInput | None`；默认值 `None`；传入时长度必须与 shape 语义匹配。
+  - `format`：内存布局格式；类型 `Farmat`；默认值 `Farmat.Norm`；必须是公开 Farmat 成员。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    from kernel_gen.operation import dma
+
+    result = dma.alloc(shape=shape, dtype=dtype, space=space, stride=stride, format=format)
+    ```
+- 功能说明：执行 DMA operation `alloc` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `fill(target: Memory, value: int | float | str | SymbolDim) -> None`
+
+- api：`fill(target: Memory, value: int | float | str | SymbolDim) -> None`
+- 参数：
+  - `target`：目标内存或目标节点；类型 `Memory`；无默认值；不允许 None；作为写入、填充或回写位置。
+  - `value`：输入值；类型 `int | float | str | SymbolDim`；无默认值；不允许 None，除非签名显式允许；用于当前节点、op 或转换的主输入。
+- 返回值：无返回值；调用成功表示对应 AST、IR 或 runtime 动作已完成。
+- 使用示例：
+
+  ```python
+    from kernel_gen.operation import dma
+
+    result = dma.fill(target=target, value=value)
+    ```
+- 功能说明：执行 DMA operation `fill` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `free(value: Memory) -> None`
+
+- api：`free(value: Memory) -> None`
+- 参数：
+  - `value`：输入值；类型 `Memory`；无默认值；不允许 None，除非签名显式允许；用于当前节点、op 或转换的主输入。
+- 返回值：无返回值；调用成功表示对应 AST、IR 或 runtime 动作已完成。
+- 使用示例：
+
+  ```python
+    from kernel_gen.operation import dma
+
+    result = dma.free(value=value)
+    ```
+- 功能说明：执行 DMA operation `free` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `copy(source: Memory, space: MemorySpace) -> Memory`
+
+- api：`copy(source: Memory, space: MemorySpace) -> Memory`
+- 参数：
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `space`：内存空间；类型 `MemorySpace`；无默认值；传入时必须是公开 MemorySpace 或 MemorySpaceAttrAST。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    from kernel_gen.operation import dma
+
+    result = dma.copy(source=source, space=space)
+    ```
+- 功能说明：执行 DMA operation `copy` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `load(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
+
+- api：`load(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
+- 参数：
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `offsets`：偏移序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 sizes 匹配。
+  - `sizes`：大小序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 offsets 匹配。
+  - `strides`：步幅序列；类型 `ShapeInput | None`；默认值 `None`；传入时长度必须与 sizes 或 shape 匹配。
+  - `space`：内存空间；类型 `MemorySpace | None`；默认值 `None`；传入时必须是公开 MemorySpace 或 MemorySpaceAttrAST。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    from kernel_gen.operation import dma
+
+    result = dma.load(source=source, offsets=offsets, sizes=sizes, strides=strides, space=space)
+    ```
+- 功能说明：执行 DMA operation `load` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `store(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
+
+- api：`store(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
+- 参数：
+  - `target`：目标内存或目标节点；类型 `Memory`；无默认值；不允许 None；作为写入、填充或回写位置。
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `offsets`：偏移序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 sizes 匹配。
+  - `sizes`：大小序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 offsets 匹配。
+  - `strides`：步幅序列；类型 `ShapeInput | None`；默认值 `None`；传入时长度必须与 sizes 或 shape 匹配。
+- 返回值：无返回值；调用成功表示对应 AST、IR 或 runtime 动作已完成。
+- 使用示例：
+
+  ```python
+    from kernel_gen.operation import dma
+
+    result = dma.store(target=target, source=source, offsets=offsets, sizes=sizes, strides=strides)
+    ```
+- 功能说明：执行 DMA operation `store` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `slice(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
+
+- api：`slice(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
+- 参数：
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `offsets`：偏移序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 sizes 匹配。
+  - `sizes`：大小序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 offsets 匹配。
+  - `strides`：步幅序列；类型 `ShapeInput | None`；默认值 `None`；传入时长度必须与 sizes 或 shape 匹配。
+  - `space`：内存空间；类型 `MemorySpace | None`；默认值 `None`；传入时必须是公开 MemorySpace 或 MemorySpaceAttrAST。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    from kernel_gen.operation import dma
+
+    result = dma.slice(source=source, offsets=offsets, sizes=sizes, strides=strides, space=space)
+    ```
+- 功能说明：执行 DMA operation `slice` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `deslice(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
+
+- api：`deslice(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
+- 参数：
+  - `target`：目标内存或目标节点；类型 `Memory`；无默认值；不允许 None；作为写入、填充或回写位置。
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `offsets`：偏移序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 sizes 匹配。
+  - `sizes`：大小序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 offsets 匹配。
+  - `strides`：步幅序列；类型 `ShapeInput | None`；默认值 `None`；传入时长度必须与 sizes 或 shape 匹配。
+- 返回值：无返回值；调用成功表示对应 AST、IR 或 runtime 动作已完成。
+- 使用示例：
+
+  ```python
+    from kernel_gen.operation import dma
+
+    result = dma.deslice(target=target, source=source, offsets=offsets, sizes=sizes, strides=strides)
+    ```
+- 功能说明：执行 DMA operation `deslice` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `view(source: Memory, offset: ShapeInput, size: ShapeInput, stride: ShapeInput) -> Memory`
+
+- api：`view(source: Memory, offset: ShapeInput, size: ShapeInput, stride: ShapeInput) -> Memory`
+- 参数：
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `offset`：偏移序列；类型 `ShapeInput`；无默认值；不允许 None；每个偏移必须是公开 ShapeInput。
+  - `size`：大小序列；类型 `ShapeInput`；无默认值；不允许 None；每个分量必须是公开 ShapeInput。
+  - `stride`：步幅序列；类型 `ShapeInput`；无默认值；传入时长度必须与 shape 语义匹配。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    from kernel_gen.operation import dma
+
+    result = dma.view(source=source, offset=offset, size=size, stride=stride)
+    ```
+- 功能说明：执行 DMA operation `view` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `reshape(source: Memory, shape: ShapeInput) -> Memory`
+
+- api：`reshape(source: Memory, shape: ShapeInput) -> Memory`
+- 参数：
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `shape`：形状序列；类型 `ShapeInput`；无默认值；不允许 None；每个维度必须满足符号维度公开合同。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    from kernel_gen.operation import dma
+
+    result = dma.reshape(source=source, shape=shape)
+    ```
+- 功能说明：执行 DMA operation `reshape` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `flatten(source: Memory) -> Memory`
+
+- api：`flatten(source: Memory) -> Memory`
+- 参数：
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    from kernel_gen.operation import dma
+
+    result = dma.flatten(source=source)
+    ```
+- 功能说明：执行 DMA operation `flatten` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `cast(source: Memory, dtype: NumericType, memoryspace: MemorySpace | None = None) -> Memory`
+
+- api：`cast(source: Memory, dtype: NumericType, memoryspace: MemorySpace | None = None) -> Memory`
+- 参数：
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `dtype`：数值类型；类型 `NumericType`；无默认值；不允许 None；必须是公开 NumericType 或公开类型属性。
+  - `memoryspace`：目标内存空间；类型 `MemorySpace | None`；默认值 `None`；None 表示沿用源对象空间。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    from kernel_gen.operation import dma
+
+    result = dma.cast(source=source, dtype=dtype, memoryspace=memoryspace)
+    ```
+- 功能说明：执行 DMA operation `cast` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `kernel_gen.operation.alloc(shape: ShapeInput, dtype: NumericType, space: MemorySpace = MemorySpace.GM, stride: ShapeInput | None = None, format: Farmat = Farmat.Norm) -> Memory`
+
+- api：`kernel_gen.operation.alloc(shape: ShapeInput, dtype: NumericType, space: MemorySpace = MemorySpace.GM, stride: ShapeInput | None = None, format: Farmat = Farmat.Norm) -> Memory`
+- 参数：
+  - `shape`：形状序列；类型 `ShapeInput`；无默认值；不允许 None；每个维度必须满足符号维度公开合同。
+  - `dtype`：数值类型；类型 `NumericType`；无默认值；不允许 None；必须是公开 NumericType 或公开类型属性。
+  - `space`：内存空间；类型 `MemorySpace`；默认值 `MemorySpace.GM`；传入时必须是公开 MemorySpace 或 MemorySpaceAttrAST。
+  - `stride`：步幅序列；类型 `ShapeInput | None`；默认值 `None`；传入时长度必须与 shape 语义匹配。
+  - `format`：内存布局格式；类型 `Farmat`；默认值 `Farmat.Norm`；必须是公开 Farmat 成员。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    import kernel_gen.operation as operation
+
+    result = operation.alloc(shape=shape, dtype=dtype, space=space, stride=stride, format=format)
+    ```
+- 功能说明：执行 DMA operation `kernel_gen.operation.alloc` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `kernel_gen.operation.dma.fill(target: Memory, value: int | float | str | SymbolDim) -> None`
+
+- api：`kernel_gen.operation.dma.fill(target: Memory, value: int | float | str | SymbolDim) -> None`
+- 参数：
+  - `target`：目标内存或目标节点；类型 `Memory`；无默认值；不允许 None；作为写入、填充或回写位置。
+  - `value`：输入值；类型 `int | float | str | SymbolDim`；无默认值；不允许 None，除非签名显式允许；用于当前节点、op 或转换的主输入。
+- 返回值：无返回值；调用成功表示对应 AST、IR 或 runtime 动作已完成。
+- 使用示例：
+
+  ```python
+    import kernel_gen.operation as operation
+
+    result = operation.fill(target=target, value=value)
+    ```
+- 功能说明：执行 DMA operation `kernel_gen.operation.dma.fill` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `kernel_gen.operation.free(value: Memory) -> None`
+
+- api：`kernel_gen.operation.free(value: Memory) -> None`
+- 参数：
+  - `value`：输入值；类型 `Memory`；无默认值；不允许 None，除非签名显式允许；用于当前节点、op 或转换的主输入。
+- 返回值：无返回值；调用成功表示对应 AST、IR 或 runtime 动作已完成。
+- 使用示例：
+
+  ```python
+    import kernel_gen.operation as operation
+
+    result = operation.free(value=value)
+    ```
+- 功能说明：执行 DMA operation `kernel_gen.operation.free` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `kernel_gen.operation.copy(source: Memory, space: MemorySpace) -> Memory`
+
+- api：`kernel_gen.operation.copy(source: Memory, space: MemorySpace) -> Memory`
+- 参数：
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `space`：内存空间；类型 `MemorySpace`；无默认值；传入时必须是公开 MemorySpace 或 MemorySpaceAttrAST。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    import kernel_gen.operation as operation
+
+    result = operation.copy(source=source, space=space)
+    ```
+- 功能说明：执行 DMA operation `kernel_gen.operation.copy` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `kernel_gen.operation.load(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
+
+- api：`kernel_gen.operation.load(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
+- 参数：
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `offsets`：偏移序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 sizes 匹配。
+  - `sizes`：大小序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 offsets 匹配。
+  - `strides`：步幅序列；类型 `ShapeInput | None`；默认值 `None`；传入时长度必须与 sizes 或 shape 匹配。
+  - `space`：内存空间；类型 `MemorySpace | None`；默认值 `None`；传入时必须是公开 MemorySpace 或 MemorySpaceAttrAST。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    import kernel_gen.operation as operation
+
+    result = operation.load(source=source, offsets=offsets, sizes=sizes, strides=strides, space=space)
+    ```
+- 功能说明：执行 DMA operation `kernel_gen.operation.load` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `kernel_gen.operation.store(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
+
+- api：`kernel_gen.operation.store(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
+- 参数：
+  - `target`：目标内存或目标节点；类型 `Memory`；无默认值；不允许 None；作为写入、填充或回写位置。
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `offsets`：偏移序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 sizes 匹配。
+  - `sizes`：大小序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 offsets 匹配。
+  - `strides`：步幅序列；类型 `ShapeInput | None`；默认值 `None`；传入时长度必须与 sizes 或 shape 匹配。
+- 返回值：无返回值；调用成功表示对应 AST、IR 或 runtime 动作已完成。
+- 使用示例：
+
+  ```python
+    import kernel_gen.operation as operation
+
+    result = operation.store(target=target, source=source, offsets=offsets, sizes=sizes, strides=strides)
+    ```
+- 功能说明：执行 DMA operation `kernel_gen.operation.store` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `kernel_gen.operation.slice(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
+
+- api：`kernel_gen.operation.slice(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
+- 参数：
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `offsets`：偏移序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 sizes 匹配。
+  - `sizes`：大小序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 offsets 匹配。
+  - `strides`：步幅序列；类型 `ShapeInput | None`；默认值 `None`；传入时长度必须与 sizes 或 shape 匹配。
+  - `space`：内存空间；类型 `MemorySpace | None`；默认值 `None`；传入时必须是公开 MemorySpace 或 MemorySpaceAttrAST。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    import kernel_gen.operation as operation
+
+    result = operation.slice(source=source, offsets=offsets, sizes=sizes, strides=strides, space=space)
+    ```
+- 功能说明：执行 DMA operation `kernel_gen.operation.slice` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `kernel_gen.operation.deslice(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
+
+- api：`kernel_gen.operation.deslice(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
+- 参数：
+  - `target`：目标内存或目标节点；类型 `Memory`；无默认值；不允许 None；作为写入、填充或回写位置。
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `offsets`：偏移序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 sizes 匹配。
+  - `sizes`：大小序列；类型 `ShapeInput`；无默认值；不允许 None；长度必须与 offsets 匹配。
+  - `strides`：步幅序列；类型 `ShapeInput | None`；默认值 `None`；传入时长度必须与 sizes 或 shape 匹配。
+- 返回值：无返回值；调用成功表示对应 AST、IR 或 runtime 动作已完成。
+- 使用示例：
+
+  ```python
+    import kernel_gen.operation as operation
+
+    result = operation.deslice(target=target, source=source, offsets=offsets, sizes=sizes, strides=strides)
+    ```
+- 功能说明：执行 DMA operation `kernel_gen.operation.deslice` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `kernel_gen.operation.view(source: Memory, offset: ShapeInput, size: ShapeInput, stride: ShapeInput) -> Memory`
+
+- api：`kernel_gen.operation.view(source: Memory, offset: ShapeInput, size: ShapeInput, stride: ShapeInput) -> Memory`
+- 参数：
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `offset`：偏移序列；类型 `ShapeInput`；无默认值；不允许 None；每个偏移必须是公开 ShapeInput。
+  - `size`：大小序列；类型 `ShapeInput`；无默认值；不允许 None；每个分量必须是公开 ShapeInput。
+  - `stride`：步幅序列；类型 `ShapeInput`；无默认值；传入时长度必须与 shape 语义匹配。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    import kernel_gen.operation as operation
+
+    result = operation.view(source=source, offset=offset, size=size, stride=stride)
+    ```
+- 功能说明：执行 DMA operation `kernel_gen.operation.view` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `kernel_gen.operation.reshape(source: Memory, shape: ShapeInput) -> Memory`
+
+- api：`kernel_gen.operation.reshape(source: Memory, shape: ShapeInput) -> Memory`
+- 参数：
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `shape`：形状序列；类型 `ShapeInput`；无默认值；不允许 None；每个维度必须满足符号维度公开合同。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    import kernel_gen.operation as operation
+
+    result = operation.reshape(source=source, shape=shape)
+    ```
+- 功能说明：执行 DMA operation `kernel_gen.operation.reshape` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `kernel_gen.operation.flatten(source: Memory) -> Memory`
+
+- api：`kernel_gen.operation.flatten(source: Memory) -> Memory`
+- 参数：
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    import kernel_gen.operation as operation
+
+    result = operation.flatten(source=source)
+    ```
+- 功能说明：执行 DMA operation `kernel_gen.operation.flatten` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+
+### `kernel_gen.operation.cast(source: Memory, dtype: NumericType, memoryspace: MemorySpace | None = None) -> Memory`
+
+- api：`kernel_gen.operation.cast(source: Memory, dtype: NumericType, memoryspace: MemorySpace | None = None) -> Memory`
+- 参数：
+  - `source`：源码对象或 source 属性；类型 `Memory`；无默认值；不得写入不可序列化的公开状态。
+  - `dtype`：数值类型；类型 `NumericType`；无默认值；不允许 None；必须是公开 NumericType 或公开类型属性。
+  - `memoryspace`：目标内存空间；类型 `MemorySpace | None`；默认值 `None`；None 表示沿用源对象空间。
+- 返回值：`Memory`；失败路径按本 API 的 `注意事项` 处理。
+- 使用示例：
+
+  ```python
+    import kernel_gen.operation as operation
+
+    result = operation.cast(source=source, dtype=dtype, memoryspace=memoryspace)
+    ```
+- 功能说明：执行 DMA operation `kernel_gen.operation.cast` 的公开 Python 入口，返回或修改 `Memory` 对象。
+- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
 
 ## 测试
 
-- 测试文件：[`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
-- 相关顶层导出测试：[`test/operation/test_operation_package_api.py`](../../test/operation/test_operation_package_api.py)
-- 相关 AST/helper 入口测试：[`test/dsl/ast/test_package.py`](../../test/dsl/ast/test_package.py)
-- 执行命令：`pytest -q test/operation/test_operation_dma.py test/operation/test_operation_package_api.py test/dsl/ast/test_package.py`
+- 测试文件：
+  - `test/dsl/ast/test_package.py`
+  - `test/operation/test_dma.py`
+  - `test/operation/test_dma_alloc_lifecycle.py`
+  - `test/operation/test_package.py`
+- 执行命令：`pytest -q test/operation/test_dma.py test/operation/test_package.py test/dsl/ast/test_package.py`
 
 ### 测试目标
 
@@ -592,50 +567,45 @@ dst = flatten(src)
 
 ### 功能与用例清单
 
-| 用例 ID | 测试点 | 说明 | 建议测试 | 测试文件 |
-| --- | --- | --- | --- | --- |
-| TC-OP-DMA-AF-001 | `alloc` 基础分配 | 返回带指定 `shape/dtype/space` 的 `Memory` | `test_alloc_returns_memory` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-AF-007 | `alloc` 默认 space/stride | 未提供 `space` 时默认 `MemorySpace.GM`，未提供 `stride` 时按连续布局生成默认 stride | `test_alloc_default_stride_for_symbolic_shape` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-AF-002 | `alloc` 显式 stride | 显式 `stride` 被正确保留到返回 `Memory` | `test_alloc_preserves_explicit_stride` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-AF-003 | `alloc` 非法 shape/stride | 非法 `shape` 或 rank/stride 不一致时报错 | `test_alloc_invalid_shape_or_stride` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-AF-004 | `free` 基础释放 | `free` 接受 `Memory` 并返回 `None` | `test_free_returns_none` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-AF-005 | `free` 类型错误 | 非 `Memory` 输入触发 `TypeError` | `test_free_type_error` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-AF-006 | `alloc` 类型错误 | `dtype/space` 类型不合法触发错误 | `test_alloc_invalid_dtype_or_space` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-001 | `copy` 目标空间 | `copy` 返回新 `Memory`，仅 `space` 被覆盖 | `test_copy_success` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-002 | `copy` 类型错误 | `source` 或 `space` 类型非法时报错 | `test_copy_type_error` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-003 | `load` 结果空间 | `load` 返回结果块并切换到目标空间 | `test_load_result_space` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-004 | `slice` 结果形状 | `slice` 返回块的 `shape` 等于 `sizes` | `test_slice_result_shape` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-005 | `store` 大小校验 | `source.shape` 与写回大小不一致时报错 | `test_store_size_mismatch` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-006 | `deslice` 大小校验 | `source.shape` 与回写区域大小不一致时报错 | `test_deslice_size_mismatch` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-007 | 索引长度约束 | `offsets/sizes/strides` 长度与 rank 不一致时报错 | `test_dma_index_rank_mismatch` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-008 | stride 边界 | 非单位 stride 需进行边界校验 | `test_dma_non_unit_stride_checked` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-009 | 类型错误 | 非 `Memory` 输入触发 `TypeError` | `test_dma_type_error` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-010 | `copy` 规格继承 | `copy` 继承 `shape/stride/format` | `test_copy_preserves_spec` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-011 | `cast` 基础转换 | `cast` 返回相同 `shape/stride/space`、新 `dtype` 的 `Memory` | `test_cast_changes_dtype` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-012 | `cast` 非法 dtype | 非法目标 `dtype` 触发 `TypeError` | `test_cast_invalid_dtype` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-013 | `cast` 数值类型转换 | 支持从浮点到整数的显式转换 | `test_cast_numeric_conversion_supported` | `test/operation/test_operation_dma_alloc_lifecycle.py` |
-| TC-OP-DMA-014 | `view` 子视图基础语义 | `view` 返回 `shape == size` 的 `Memory` | `test_view_subview_returns_memory` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-015 | `view` 规格与 stride 组合 | `view` 返回 `dtype/space/format` 继承 `source`，`stride` 由 source/view 组合 | `test_view_inherits_source_memoryspec` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-016 | `view` 边界校验 | `view` 在静态场景下对 `offset + (size - 1) * stride` 执行边界检查 | `test_view_bounds_check` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-017 | `flatten` 连续布局 | 连续布局下 `flatten` 返回一维 `shape` 与 `stride=[1]` | `test_flatten_contiguous` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-018 | `flatten` 非连续布局 | 非连续布局触发错误 | `test_flatten_non_contiguous_rejected` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-019 | `reshape` 基础变换 | `reshape` 返回新 `Memory` 且 `dtype/space/format` 继承 | `test_reshape_returns_memory` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-020 | `reshape` 连续布局 | 连续布局下 `reshape` 生成默认步幅 | `test_reshape_default_stride_contiguous` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-021 | `reshape` 非法参数 | 非法 `shape` 或非连续布局触发错误 | `test_reshape_invalid_shape_or_stride` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-022 | `cast` 空间覆盖 | `memoryspace` 覆盖结果 `space` | `test_cast_overrides_space` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-023 | `load` 空间类型错误 | `space` 类型不合法触发 `TypeError` | `test_load_invalid_space_type` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-024 | `load` sizes 正长度 | `sizes` 包含非正维度触发错误 | `test_dma_invalid_sizes` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-025 | `store/deslice` dtype mismatch | `source/target` dtype 不一致触发 `TypeError` | `test_store_dtype_mismatch` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-026 | `store` 基础写回 | 合法写回返回 `None` | `test_store_success` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-027 | `cast` 支持转换 | 支持同 dtype 或整数类型间转换 | `test_cast_supported_conversions` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-028 | `view` 非法参数 | `offset/size/stride` rank 不一致、负 offset 或非正 stride 显式报错 | `test_view_invalid_offset_size_stride` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-029 | `fill` 基础初始化 | `fill(target, value)` 只写入现有 `target`，返回 `None` | `test_dma_facade_fill_returns_none` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-030 | `fill` 字符串字面量白名单 | 字符串输入仅允许 `"inf"` 与 `"-inf"` | `test_dma_facade_fill_rejects_invalid_string_literal` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-031 | `fill` 顶层导出边界 | `kernel_gen.operation` 顶层不导出 `fill`，子模块对象路径保持稳定 | `test_operation_dma_fill_is_public_only_in_dma_submodule` | `test/operation/test_operation_package_api.py` |
-| TC-OP-DMA-032 | `fill` AST 公开 helper 路径 | parser 只接受显式 import 绑定到 `kernel_gen.operation.dma.fill` 的 helper 调用，不依赖 helper Python 签名 | `test_parse_function_accepts_import_bound_fill_helper`、`test_parse_function_accepts_import_bound_fill_helper_without_signature_coupling` | `test/dsl/ast/test_package.py` |
-| TC-OP-DMA-033 | `fill` kernel 只读合同资产 | `expectation/kernel/flash_attention.py` 与 `expectation/kernel/matmul.py` 仅作为只读 kernel 合同资产，不计入本轮 diff 测试 | 只读核对，不新增写入 | `expectation/kernel/flash_attention.py`, `expectation/kernel/matmul.py` |
-
-### 只读合同验收资产
-
-- [expectation/kernel/flash_attention.py](/home/lfr/kernelcode_generate/expectation/kernel/flash_attention.py)：只读 kernel 合同资产。该文件当前通过 `fill(o_acc, 0)`、`fill(m_acc, "-inf")`、`fill(l_acc, 0)` 表达“整块初始化”意图，但它不是本轮 `spec` 的可写目标，也不计入 `Diff 反推自测`。本轮只要求公开 helper 合同与字符串字面量边界能解释这份只读资产的意图来源。
-- [expectation/kernel/matmul.py](/home/lfr/kernelcode_generate/expectation/kernel/matmul.py)：只读 sibling kernel 合同资产。该文件当前不依赖 `fill`，用于约束本轮范围不要顺手扩到无关 kernel helper 集合或改写其他 kernel 公开入口。
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-OP-DMA-AF-001 | 内存/DMA | `alloc` 基础分配 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`alloc` 基础分配”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-AF-007 | 内存/DMA | `alloc` 默认 space/stride | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`alloc` 默认 space/stride”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-AF-002 | 内存/DMA | `alloc` 显式 stride | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`alloc` 显式 stride”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-AF-003 | 边界/异常 | `alloc` 非法 shape/stride | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test/operation/test_dma.py`。 | “`alloc` 非法 shape/stride”场景按公开错误语义失败或被拒绝。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-AF-004 | 内存/DMA | `free` 基础释放 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`free` 基础释放”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-AF-005 | 内存/DMA | `free` 类型错误 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`free` 类型错误”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-AF-006 | 内存/DMA | `alloc` 类型错误 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`alloc` 类型错误”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-001 | 内存/DMA | `copy` 目标空间 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`copy` 目标空间”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-002 | 内存/DMA | `copy` 类型错误 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`copy` 类型错误”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-003 | 内存/DMA | `load` 结果空间 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`load` 结果空间”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-004 | 内存/DMA | `slice` 结果形状 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`slice` 结果形状”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-005 | 内存/DMA | `store` 大小校验 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`store` 大小校验”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-006 | 内存/DMA | `deslice` 大小校验 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`deslice` 大小校验”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-007 | 内存/DMA | 索引长度约束 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“索引长度约束”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-008 | 内存/DMA | stride 边界 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“stride 边界”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-009 | 内存/DMA | 类型错误 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“类型错误”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-010 | 内存/DMA | `copy` 规格继承 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`copy` 规格继承”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-011 | 内存/DMA | `cast` 基础转换 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`cast` 基础转换”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-012 | 边界/异常 | `cast` 非法 dtype | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test/operation/test_dma.py`。 | “`cast` 非法 dtype”场景按公开错误语义失败或被拒绝。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-013 | 内存/DMA | `cast` 数值类型转换 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma_alloc_lifecycle.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`cast` 数值类型转换”场景。 | `test/operation/test_dma_alloc_lifecycle.py` |
+| TC-OP-DMA-014 | 内存/DMA | `view` 子视图基础语义 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`view` 子视图基础语义”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-015 | 内存/DMA | `view` 规格与 stride 组合 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`view` 规格与 stride 组合”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-016 | 内存/DMA | `view` 边界校验 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`view` 边界校验”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-017 | 内存/DMA | `flatten` 连续布局 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`flatten` 连续布局”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-018 | 内存/DMA | `flatten` 非连续布局 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`flatten` 非连续布局”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-019 | 内存/DMA | `reshape` 基础变换 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`reshape` 基础变换”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-020 | 内存/DMA | `reshape` 连续布局 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`reshape` 连续布局”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-021 | 边界/异常 | `reshape` 非法参数 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test/operation/test_dma.py`。 | “`reshape` 非法参数”场景按公开错误语义失败或被拒绝。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-022 | 内存/DMA | `cast` 空间覆盖 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`cast` 空间覆盖”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-023 | 内存/DMA | `load` 空间类型错误 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`load` 空间类型错误”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-024 | 内存/DMA | `load` sizes 正长度 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`load` sizes 正长度”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-025 | 边界/异常 | `store/deslice` dtype mismatch | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test/operation/test_dma.py`。 | “`store/deslice` dtype mismatch”场景按公开错误语义失败或被拒绝。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-026 | 内存/DMA | `store` 基础写回 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`store` 基础写回”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-027 | 内存/DMA | `cast` 支持转换 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`cast` 支持转换”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-028 | 边界/异常 | `view` 非法参数 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test/operation/test_dma.py`。 | “`view` 非法参数”场景按公开错误语义失败或被拒绝。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-029 | 内存/DMA | `fill` 基础初始化 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`fill` 基础初始化”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-030 | 内存/DMA | `fill` 字符串字面量白名单 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test/operation/test_dma.py`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`fill` 字符串字面量白名单”场景。 | `test/operation/test_dma.py` |
+| TC-OP-DMA-031 | 公开入口 | `fill` 顶层导出边界 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test/operation/test_package.py`。 | 公开入口在“`fill` 顶层导出边界”场景下可导入、构造、注册或按名称发现。 | `test/operation/test_package.py` |
+| TC-OP-DMA-032 | 公开入口 | `fill` AST 公开 helper 路径 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test/dsl/ast/test_package.py`。 | 公开入口在“`fill` AST 公开 helper 路径”场景下可导入、构造、注册或按名称发现。 | `test/dsl/ast/test_package.py` |
+| TC-OP-DMA-033 | 公开入口 | `fill` kernel 只读合同资产 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `expectation/kernel/flash_attention.py`, `expectation/kernel/matmul.py`。 | 公开入口在“`fill` kernel 只读合同资产”场景下可导入、构造、注册或按名称发现。 | `expectation/kernel/flash_attention.py`, `expectation/kernel/matmul.py` |

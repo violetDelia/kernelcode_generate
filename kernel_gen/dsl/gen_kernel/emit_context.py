@@ -1,7 +1,5 @@
 """`gen_kernel.emit` 公开上下文定义。
 
-创建者: 小李飞刀
-最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 定义 `EmitCContext` 稳定公开入口。
@@ -12,8 +10,8 @@ API 列表:
 - `EmitCContext()`
 - `EmitCContext.create_or_get_name(value: SSAValue) -> str`
 - `EmitCContext.allocate_name(prefix: str) -> str`
-- `EmitCContext.lookup_cached_name(scope: str, key: object) -> str | None`
-- `EmitCContext.bind_cached_name(scope: str, key: object, name: str) -> str`
+- `EmitCContext.lookup_cached_name(scope: str, key: CacheKey) -> str | None`
+- `EmitCContext.bind_cached_name(scope: str, key: CacheKey, name: str) -> str`
 - `EmitCContext.is_target(name: str) -> bool`
 - `EmitCContext.target_entry(table: Mapping[str, T], default: T | None = None) -> T | None`
 - `EmitCContext.emit_error(subject: str, reason: str) -> KernelCodeError`
@@ -40,7 +38,7 @@ helper 清单:
 关联文件:
 - spec: [spec/dsl/gen_kernel/emit_context.md](../../../spec/dsl/gen_kernel/emit_context.md)
 - spec: [spec/dsl/gen_kernel/emit.md](../../../spec/dsl/gen_kernel/emit.md)
-- test: [test/dsl/gen_kernel/emit/test_emit.py](../../../test/dsl/gen_kernel/emit/test_emit.py)
+- test: [test/dsl/gen_kernel/emit/test_package.py](../../../test/dsl/gen_kernel/emit/test_package.py)
 - 功能实现: [kernel_gen/dsl/gen_kernel/emit_context.py](../../../kernel_gen/dsl/gen_kernel/emit_context.py)
 """
 
@@ -49,7 +47,7 @@ from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 import re
 from collections.abc import Mapping
-from typing import Any, TypeVar
+from typing import Any, TypeAlias, TypeVar
 
 from xdsl.ir import SSAValue
 from xdsl.ir import Operation
@@ -58,6 +56,7 @@ from kernel_gen.core.config import get_target
 
 
 T = TypeVar("T")
+CacheKey: TypeAlias = "int | str | tuple[int | str | None, ...]"
 
 
 class EmitCContext:
@@ -71,8 +70,6 @@ class EmitCContext:
     def __init__(self) -> None:
         """初始化公开 `EmitCContext`。
 
-        创建者: 朽木露琪亚
-        最后一次更改: 守护最好的爱莉希雅
 
         功能说明:
         - 从 `kernel_gen.core.config.get_target()` 读取当前公开 target 配置。
@@ -85,7 +82,7 @@ class EmitCContext:
 
         关联文件:
         - spec: spec/dsl/gen_kernel/emit_context.md
-        - test: test/dsl/gen_kernel/emit/test_emit.py
+        - test: test/dsl/gen_kernel/emit/test_package.py
         - 功能实现: kernel_gen/dsl/gen_kernel/emit_context.py
         """
 
@@ -102,8 +99,6 @@ class EmitCContext:
     def is_target(self, name: str) -> bool:
         """判断当前上下文是否使用指定 target。
 
-        创建者: 守护最好的爱莉希雅
-        最后一次更改: 守护最好的爱莉希雅
 
         功能说明:
         - 供 emit 内部按 target 分支，不对外暴露原始 target 字符串属性。
@@ -118,8 +113,6 @@ class EmitCContext:
     def target_entry(self, table: Mapping[str, T], default: T | None = None) -> T | None:
         """按当前 target 从表中选择条目。
 
-        创建者: 守护最好的爱莉希雅
-        最后一次更改: 守护最好的爱莉希雅
 
         功能说明:
         - 供 target registry 查表使用，避免跨文件直接读取 target 字符串属性。
@@ -133,8 +126,6 @@ class EmitCContext:
     def emit_error(self, subject: str, reason: str) -> KernelCodeError:
         """构造带 target 前缀的 gen_kernel 合同错误。
 
-        创建者: 守护最好的爱莉希雅
-        最后一次更改: 守护最好的爱莉希雅
 
         功能说明:
         - 统一当前 emit context 的错误拼接逻辑。
@@ -157,8 +148,6 @@ class EmitCContext:
     def allocate_name(self, prefix: str) -> str:
         """按前缀分配当前上下文内递增名称。
 
-        创建者: 守护最好的爱莉希雅
-        最后一次更改: 守护最好的爱莉希雅
 
         功能说明:
         - 替代对内部状态字典的直接访问。
@@ -175,11 +164,9 @@ class EmitCContext:
         counters[prefix] = current + 1
         return f"{prefix}{current}"
 
-    def lookup_cached_name(self, scope: str, key: object) -> str | None:
+    def lookup_cached_name(self, scope: str, key: CacheKey) -> str | None:
         """读取当前上下文内按 scope/key 缓存的名称。
 
-        创建者: 守护最好的爱莉希雅
-        最后一次更改: 守护最好的爱莉希雅
 
         功能说明:
         - 只返回名称字符串，不暴露可变状态字典。
@@ -198,11 +185,9 @@ class EmitCContext:
             raise self.emit_error(f"state {scope}", "cached name must be str")
         return cached
 
-    def bind_cached_name(self, scope: str, key: object, name: str) -> str:
+    def bind_cached_name(self, scope: str, key: CacheKey, name: str) -> str:
         """写入当前上下文内按 scope/key 缓存的名称。
 
-        创建者: 守护最好的爱莉希雅
-        最后一次更改: 守护最好的爱莉希雅
 
         功能说明:
         - 替代直接修改内部状态字典。
@@ -237,8 +222,6 @@ class EmitCContext:
     def _dedupe_name(self, name: str) -> str:
         """生成当前上下文内不冲突的变量名。
 
-        创建者: OpenAI Codex
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 若候选名未被占用则原样返回。
@@ -265,8 +248,6 @@ class EmitCContext:
     def _allocate_name(self, value: SSAValue) -> str:
         """分配兜底 SSA 名称。
 
-        创建者: OpenAI Codex
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 生成 `vN` 递增临时名。
@@ -312,8 +293,6 @@ class EmitCContext:
     def dispatch_type(self, attr: Any) -> str:
         """把 xDSL / 仓库类型 attr 发射为 C/C++ 类型文本。
 
-        创建者: OpenAI Codex
-        最后一次更改: 守护最好的爱莉希雅
 
         功能说明:
         - 只通过 target type registry 发射类型文本。

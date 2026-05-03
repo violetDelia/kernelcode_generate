@@ -16,12 +16,10 @@ helper 清单:
 - #include "include/api/cost/Dma.h"
 - S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA>(target, source);
 
-创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/cost/Dma.md
-- test: test/include/api/test_cost.py
+- test: test/include/api/cost.py
 - 功能实现: include/npu_demo/cost/Dma.h
 */
 
@@ -41,12 +39,10 @@ namespace cost {
 使用示例:
 - S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA>(target, source);
 
-创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/cost/Dma.md
-- test: test/include/api/test_cost.py
+- test: test/include/api/cost.py
 - 功能实现: include/npu_demo/cost/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind>
@@ -60,12 +56,10 @@ S_INT copy(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& s
 - S_INT slice_cost = npu_demo::cost::slice<TSM, GM, float, npu_demo::DMA>(target, source, offset, size, stride);
 - S_INT deslice_cost = npu_demo::cost::deslice<GM, TSM, float, npu_demo::DMA>(target, source, offset, size, stride);
 
-创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/cost/Dma.md
-- test: test/include/api/test_cost.py
+- test: test/include/api/cost.py
 - 功能实现: include/npu_demo/cost/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind>

@@ -1,7 +1,5 @@
 """emit_c expectation helper runner.
 
-创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
 
 功能说明:
 - 为 `expectation/dsl/emit_c/**` 提供可复用的“文本 IR -> emit_c 源码 -> 片段断言”执行 helper。
@@ -33,8 +31,6 @@ from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutPar
 def _extract_compile_args(case_text: str) -> str | None:
     """提取 case 头部中的 `COMPILE_ARGS` 文本。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 扫描 expectation case 头部的注释行。
@@ -62,8 +58,6 @@ def _extract_compile_args(case_text: str) -> str | None:
 def _extract_input_ir(case_text: str) -> str:
     """从 expectation case 文本中剥离注释头，返回可解析的 IR 正文。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 去掉 case 头部中的 `COMPILE_ARGS` / `CHECK` 注释。
@@ -89,8 +83,6 @@ def _extract_input_ir(case_text: str) -> str:
 def _apply_compile_args(module, *, compile_args: str | None, ctx) -> None:
     """按 expectation 头部的 `COMPILE_ARGS` 对输入 module 运行最小预处理。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 当前显式支持 `None` / `--pass no-op` / `--pass buffer-results-to-out-params`。
@@ -127,8 +119,6 @@ def run_emitc_case(
 ) -> str:
     """执行单条 emit_c expectation case，并校验源码片段。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 解析带注释头的 expectation case 文本。

@@ -6,12 +6,10 @@
 - #include "include/cpu/Nn.h"
 - cpu::add(A, B, C);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 
@@ -32,12 +30,10 @@ namespace detail {
 - long long indices[MAX_DIM];
 - cpu::detail::init_indices(3, indices);
 
-创建者: 小李飞刀
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 inline void init_indices(unsigned long long rank, long long* indices) {
@@ -53,12 +49,10 @@ inline void init_indices(unsigned long long rank, long long* indices) {
 使用示例:
 - cpu::detail::advance_indices(rank, shape, indices);
 
-创建者: 小李飞刀
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 inline void advance_indices(unsigned long long rank, const long long* shape, long long* indices) {
@@ -79,12 +73,10 @@ inline void advance_indices(unsigned long long rank, const long long* shape, lon
 使用示例:
 - cpu::detail::contract_or_trap(rank == 3);
 
-创建者: 小李飞刀
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 inline void contract_or_trap(bool condition) {
@@ -104,12 +96,10 @@ inline void contract_or_trap(bool condition) {
 使用示例:
 - bool ok = cpu::detail::has_contiguous_rank(mem, 3);
 
-创建者: 小李飞刀
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T>
@@ -124,12 +114,10 @@ bool has_contiguous_rank(const Memory<Space, T>& mem, unsigned long long expecte
 使用示例:
 - long long wo = cpu::detail::compute_img2col1d_output_width(width, 3, 1, 1, 1, 1);
 
-创建者: 小李飞刀
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 inline long long compute_img2col1d_output_width(
@@ -149,12 +137,10 @@ inline long long compute_img2col1d_output_width(
 使用示例:
 - cpu::detail::verify_img2col1d_contract(value, out, 3, 1, 1, 1, 1);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T>
@@ -192,12 +178,10 @@ void verify_img2col1d_contract(
 使用示例:
 - long long ho = cpu::detail::compute_img2col2d_output_extent(height, 3, 1, 1, 1, 1);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 inline long long compute_img2col2d_output_extent(
@@ -217,12 +201,10 @@ inline long long compute_img2col2d_output_extent(
 使用示例:
 - cpu::detail::verify_img2col2d_contract(value, out, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T>
@@ -273,12 +255,10 @@ void verify_img2col2d_contract(
 使用示例:
 - cpu::detail::apply_binary(lhs, rhs, out, [](float a, float b) { return a + b; });
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T, typename Op>
@@ -299,12 +279,10 @@ void apply_binary(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memo
 使用示例:
 - cpu::detail::apply_binary_scalar_rhs(lhs, 3.0f, out, [](float a, float b) { return a + b; });
 
-创建者: 金铲铲大作战
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T, typename Op>
@@ -325,12 +303,10 @@ void apply_binary_scalar_rhs(const Memory<Space, T>& lhs, T rhs_scalar, Memory<S
 使用示例:
 - cpu::detail::apply_binary_scalar_lhs(3.0f, rhs, out, [](float a, float b) { return a + b; });
 
-创建者: 金铲铲大作战
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T, typename Op>
@@ -351,12 +327,10 @@ void apply_binary_scalar_lhs(T lhs_scalar, const Memory<Space, T>& rhs, Memory<S
 使用示例:
 - cpu::detail::apply_compare(lhs, rhs, out, [](float a, float b) { return a < b; });
 
-创建者: 小李飞刀
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T, typename PredT, typename Op>
@@ -383,12 +357,10 @@ void apply_compare(
 - cpu::detail::reduce_impl(value, out, axes, 1, false,
   [](float a, float b) { return a + b; }, 0.0f, false, false);
 
-创建者: 金铲铲大作战
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename Op>
@@ -526,12 +498,10 @@ void reduce_impl(
 使用示例:
 - cpu::add(lhs, rhs, out);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T>
@@ -548,12 +518,10 @@ void add(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space,
 - long long bias = 7;
 - cpu::add(lhs, bias, out);
 
-创建者: 金铲铲大作战
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T, typename ScalarT>
@@ -568,12 +536,10 @@ void add(const Memory<Space, T>& lhs, ScalarT rhs_scalar, Memory<Space, T>& out)
 使用示例:
 - cpu::add(3.0f, rhs, out);
 
-创建者: 金铲铲大作战
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T>
@@ -588,12 +554,10 @@ void add(T lhs_scalar, const Memory<Space, T>& rhs, Memory<Space, T>& out) {
 使用示例:
 - cpu::sub(lhs, rhs, out);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T>
@@ -608,12 +572,10 @@ void sub(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space,
 使用示例:
 - cpu::mul(lhs, rhs, out);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T>
@@ -628,12 +590,10 @@ void mul(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space,
 使用示例:
 - cpu::truediv(lhs, rhs, out);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T>
@@ -648,12 +608,10 @@ void truediv(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Sp
 使用示例:
 - cpu::exp(value, out);
 
-创建者: 金铲铲大作战
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space>
@@ -691,12 +649,10 @@ void exp(const Memory<Space, float>& value, Memory<Space, float>& out) {
 使用示例:
 - cpu::reduce_sum(value, out, axes, 2, false);
 
-创建者: 金铲铲大作战
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space>
@@ -725,12 +681,10 @@ void reduce_sum(
 使用示例:
 - cpu::reduce_min(value, out, axes, 1, false);
 
-创建者: 金铲铲大作战
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space>
@@ -759,12 +713,10 @@ void reduce_min(
 使用示例:
 - cpu::reduce_max(value, out, axes, 1, true);
 
-创建者: 金铲铲大作战
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space>
@@ -793,12 +745,10 @@ void reduce_max(
 使用示例:
 - cpu::eq(lhs, rhs, out);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T, typename PredT>
@@ -813,12 +763,10 @@ void eq(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, 
 使用示例:
 - cpu::ne(lhs, rhs, out);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T, typename PredT>
@@ -833,12 +781,10 @@ void ne(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, 
 使用示例:
 - cpu::lt(lhs, rhs, out);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T, typename PredT>
@@ -853,12 +799,10 @@ void lt(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, 
 使用示例:
 - cpu::le(lhs, rhs, out);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T, typename PredT>
@@ -873,12 +817,10 @@ void le(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, 
 使用示例:
 - cpu::gt(lhs, rhs, out);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T, typename PredT>
@@ -893,12 +835,10 @@ void gt(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, 
 使用示例:
 - cpu::ge(lhs, rhs, out);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T, typename PredT>
@@ -913,12 +853,10 @@ void ge(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, 
 使用示例:
 - cpu::broadcast(input, out);
 
-创建者: 神秘人
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space, typename T>
@@ -951,12 +889,10 @@ void broadcast(const Memory<Space, T>& input, Memory<Space, T>& out) {
 使用示例:
 - cpu::img2col1d(value, out, 3, 1, 1, 1, 1);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space>
@@ -1008,12 +944,10 @@ void img2col1d(
 使用示例:
 - cpu::img2col2d(value, out, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
 
-创建者: 小李飞刀
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
-- test: test/include/cpu/test_nn.py
+- test: test/include/cpu/nn.py
 - 功能实现: include/cpu/Nn.h
 */
 template <MemorySpace Space>

@@ -1,7 +1,5 @@
 """NPU demo public namespace compile tests.
 
-创建者: jcc你莫辜负
-最后一次更改: jcc你莫辜负
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 include/npu_demo/npu_demo.h 的最小 public function namespace 消费面。
@@ -38,8 +36,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def _compile_and_run(source: str) -> None:
     """编译并运行 C++ public namespace 测试片段。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 使用 `g++ -std=c++17 -pthread` 编译临时源码并执行生成程序。
@@ -102,8 +98,6 @@ def _compile_and_run(source: str) -> None:
 def _compile_expect_failure(source: str) -> str:
     """编译并断言 C++ public namespace 测试片段失败。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 使用 `g++ -std=c++17 -pthread` 编译临时源码，并返回失败 stderr。
@@ -149,10 +143,6 @@ def _compile_expect_failure(source: str) -> str:
 
 
 # NPU-DEMO-PUBLIC-001
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-21 21:00:00 +0800
-# 最近一次运行成功时间: 2026-04-21 21:00:00 +0800
 # 测试目的: 验证 npu_demo public function 最小正向调用可通过单入口头文件编译运行。
 # 使用示例: pytest -q test/include/npu_demo/test_public_namespace.py -k test_npu_demo_public_namespace_smoke_compiles_vector_kernel_and_launch
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -211,10 +201,6 @@ int main() {
 
 
 # NPU-DEMO-PUBLIC-002
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 验证 Memory/Dma public function 通过 npu_demo:: 命名空间调用，且 Vector{...} 可直接作为参数。
 # 使用示例: pytest -q test/include/npu_demo/test_public_namespace.py -k test_npu_demo_public_namespace_memory_dma_helpers
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -322,10 +308,6 @@ int main() {
 
 
 # NPU-DEMO-PUBLIC-003
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 验证旧全局 Memory/Dma helper 不再作为成功消费面。
 # 使用示例: pytest -q test/include/npu_demo/test_public_namespace.py -k test_npu_demo_public_namespace_rejects_global_memory_dma_helpers
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)

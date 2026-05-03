@@ -1,12 +1,16 @@
 """buffer-results-to-out-params lowering pass.
 
-创建者: 朽木露琪亚
-最后一次更改: jcc你莫辜负
 
 功能说明:
 - 将 `func.func` 中所有 `memory` 返回值改写为最前置 out 参数。
 - 同步改写模块内可解析 `func.call`，把 caller 侧旧 memory result SSA 收口为显式 out 实参。
 - 当前覆盖单个 `memory` 返回、多 `memory` 返回和 `memory + scalar` 混合返回；external declaration 仍显式失败。
+
+API 列表:
+- `class BufferResultsToOutParamsPass(fold: bool = True)`
+- `class BufferResultsToOutParamsCallPattern(targets: dict[str, RewriteTarget])`
+- `class BufferResultsToOutParamsFuncPattern(targets: dict[str, RewriteTarget])`
+- `get_buffer_results_to_out_params_pass_patterns(targets: dict[str, RewriteTarget]) -> list[RewritePattern]`
 
 使用示例:
 - from xdsl.context import Context
@@ -15,7 +19,7 @@
 
 关联文件:
 - spec: spec/pass/buffer_results_to_out_params.md
-- test: test/pass/test_buffer_results_to_out_params.py
+- test: test/passes/test_buffer_results_to_out_params.py
 - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
 """
 
@@ -48,8 +52,6 @@ from kernel_gen.passes.common import ensure_builtin_module
 class OutputSignature:
     """封装函数输出的 memory/scalar 结果分解信息。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 统一收敛 `memory` 与 `scalar` 输出索引划分。
@@ -60,7 +62,7 @@ class OutputSignature:
 
     关联文件:
     - spec: spec/pass/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
+    - test: test/passes/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
 
@@ -73,8 +75,6 @@ class OutputSignature:
 class RewriteTarget:
     """记录待改写函数的输入/输出签名信息。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 把 `func.func` 与其输出拆分签名绑定，避免后续重复推导。
@@ -85,7 +85,7 @@ class RewriteTarget:
 
     关联文件:
     - spec: spec/pass/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
+    - test: test/passes/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
 
@@ -98,8 +98,6 @@ class RewriteTarget:
 class BufferResultsToOutParamsCallPattern(RewritePattern):
     """按 `func.call` 重写 buffer-results-to-out-params。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅处理模块内命中的旧 `memory result` callsite。
@@ -110,7 +108,7 @@ class BufferResultsToOutParamsCallPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
+    - test: test/passes/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
 
@@ -160,8 +158,6 @@ class BufferResultsToOutParamsCallPattern(RewritePattern):
 class BufferResultsToOutParamsFuncPattern(RewritePattern):
     """按 `func.func` 重写 buffer-results-to-out-params。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 将命中的 memory 返回函数改写为前置 out 参数。
@@ -172,7 +168,7 @@ class BufferResultsToOutParamsFuncPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
+    - test: test/passes/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
 
@@ -234,8 +230,6 @@ class BufferResultsToOutParamsFuncPattern(RewritePattern):
 class BufferResultsToOutParamsPass(ModulePass):
     """将 `memory` 返回值改写为最前置 out 参数的 lowering pass。
 
-    创建者: 朽木露琪亚
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 在模块级先做候选校验。
@@ -248,7 +242,7 @@ class BufferResultsToOutParamsPass(ModulePass):
 
     关联文件:
     - spec: spec/pass/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
+    - test: test/passes/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
 
@@ -257,8 +251,6 @@ class BufferResultsToOutParamsPass(ModulePass):
     def __init__(self: "BufferResultsToOutParamsPass", fold: bool = True) -> None:
         """初始化 buffer-results-to-out-params pass 公共选项。
 
-        创建者: 大闸蟹
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 记录 `fold` 开关，默认允许 pass 内 pattern walker 执行 folding。
@@ -269,17 +261,15 @@ class BufferResultsToOutParamsPass(ModulePass):
 
         关联文件:
         - spec: spec/pass/buffer_results_to_out_params.md
-        - test: test/pass/test_buffer_results_to_out_params.py
+        - test: test/passes/test_buffer_results_to_out_params.py
         - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
         """
 
-        object.__setattr__(self, "fold", bool(fold))
+        self.fold = bool(fold)
 
     def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行最小骨架改写。
 
-        创建者: 朽木露琪亚
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 先收集并校验候选函数。
@@ -290,7 +280,7 @@ class BufferResultsToOutParamsPass(ModulePass):
 
         关联文件:
         - spec: spec/pass/buffer_results_to_out_params.md
-        - test: test/pass/test_buffer_results_to_out_params.py
+        - test: test/passes/test_buffer_results_to_out_params.py
         - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
         """
 
@@ -381,35 +371,11 @@ class BufferResultsToOutParamsPass(ModulePass):
             )
         ).rewrite_module(module)
 
-    def run(self, module: ModuleOp) -> ModuleOp:
-        """兼容旧 `run()` 入口。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 过渡期保留旧调用方式，内部复用 `apply()`。
-
-        使用示例:
-        - module = BufferResultsToOutParamsPass().run(module)
-
-        关联文件:
-        - spec: spec/pass/buffer_results_to_out_params.md
-        - test: test/pass/test_buffer_results_to_out_params.py
-        - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-        """
-
-        self.apply(Context(), module)
-        return module
-
-
 def get_buffer_results_to_out_params_pass_patterns(
     targets: dict[str, RewriteTarget],
 ) -> list[RewritePattern]:
     """返回 `buffer-results-to-out-params` pass 使用的公开 pattern 列表。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 为外部测试、组合 pass 和公开 API 提供稳定的 pattern 构造入口。
@@ -421,7 +387,7 @@ def get_buffer_results_to_out_params_pass_patterns(
 
     关联文件:
     - spec: spec/pass/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
+    - test: test/passes/test_buffer_results_to_out_params.py
     - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
 

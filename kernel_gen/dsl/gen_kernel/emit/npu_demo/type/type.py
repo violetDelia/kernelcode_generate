@@ -1,7 +1,5 @@
 """`target=npu_demo` 的 type 到 C/C++ 类型文本映射。
 
-创建者: OpenAI Codex
-最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 注册 `npu_demo` target 的 xDSL / 仓库类型到 C/C++ 类型文本映射。
@@ -15,7 +13,7 @@ API 列表:
 
 关联文件:
 - spec: spec/dsl/gen_kernel/emit.md
-- test: test/dsl/gen_kernel/emit/test_emit.py
+- test: test/dsl/gen_kernel/emit/test_package.py
 - 功能实现: kernel_gen/dsl/gen_kernel/emit/npu_demo/type/type.py
 """
 
@@ -37,16 +35,12 @@ from kernel_gen.dialect.symbol import SymbolValueType
 from ...register import emit_c_type_impl
 
 
-def _integer_type_to_c(attr: IntegerType) -> str:
+@emit_c_type_impl(IntegerType, target="npu_demo")
+def _emit_npu_demo_integer_type(attr: IntegerType, _ctx) -> str:
     if attr.width.data == 1:
         return "bool"
     prefix = "uint" if attr.signedness.data == Signedness.UNSIGNED else "int"
     return f"{prefix}{attr.width.data}_t"
-
-
-@emit_c_type_impl(IntegerType, target="npu_demo")
-def _emit_npu_demo_integer_type(attr: IntegerType, _ctx) -> str:
-    return _integer_type_to_c(attr)
 
 
 @emit_c_type_impl(Float16Type, target="npu_demo")
@@ -63,8 +57,6 @@ def _emit_npu_demo_bfloat16_type(_attr: BFloat16Type, _ctx) -> str:
 def _emit_npu_demo_float32_type(_attr: Float32Type, _ctx) -> str:
     """发射 npu_demo float 类型文本。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 将 xDSL f32 类型映射为 npu_demo C/C++ float 类型文本。

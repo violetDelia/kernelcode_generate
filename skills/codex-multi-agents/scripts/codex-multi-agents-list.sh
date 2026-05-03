@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # codex-multi-agents-list.sh
 #
-# 创建者: 榕
-# 最后一次更改: 榕
 #
 # 功能:
 # - 读取/维护 agents 名单（Markdown 表格）。

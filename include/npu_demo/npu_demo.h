@@ -28,12 +28,10 @@ helper 清单:
 - #include "include/npu_demo/npu_demo.h"
 - Status status = npu_demo::launch<1, 4, 1, 0>(kernel_body, output);
 
-创建者: 朽木露琪亚
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
-- test: [test/include/npu_demo/test_public_namespace.py](test/include/npu_demo/test_public_namespace.py)
+- test: [test/include/npu_demo/public_namespace.py](test/include/npu_demo/public_namespace.py)
 - 功能实现: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 */
 

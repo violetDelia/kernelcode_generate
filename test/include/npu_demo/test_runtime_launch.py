@@ -1,7 +1,5 @@
 """NPU demo runtime launch tests.
 
-创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `npu_demo::launch<1, 4, 1, 0>` 的运行时行为：
@@ -32,8 +30,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def _compile_and_run(source: str, *, timeout_s: float = 5.0) -> None:
     """编译并运行 C++ 测试片段（带超时保护）。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 使用 `g++ -std=c++17 -pthread` 编译临时源码并执行生成程序。
@@ -122,10 +118,6 @@ def _compile_and_run(source: str, *, timeout_s: float = 5.0) -> None:
 
 
 # NPU-DEMO-RT-001
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-06 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-06 00:00:00 +0800
 # 测试目的: 验证 `launch<1, 4, 1, 0>` 必须真实启动 4 线程，并共享同一 barrier 状态（禁止串行模拟/私有 barrier）。
 # 使用示例: pytest -q test/include/npu_demo/test_runtime_launch.py -k test_npu_demo_launch_spawns_threads_and_barrier_waits_for_all_participants
 # 对应功能实现文件链接: [include/npu_demo/Arch.h](include/npu_demo/Arch.h)

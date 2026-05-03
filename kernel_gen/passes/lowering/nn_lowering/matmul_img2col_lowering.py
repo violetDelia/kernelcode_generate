@@ -1,12 +1,13 @@
 """matmul/img2col lowering 实现。
 
-创建者: 小李飞刀
-最后一次更改: 小李飞刀
 
 功能说明:
 - 将 nn.matmul / nn.img2col1d / nn.img2col2d lower 为对应 kernel op。
 - 统一在 lowering 内部创建 dma.alloc 结果 memory。
 - surviving 模块级接口为 `matmul_img2col_patterns()`。
+
+API 列表:
+- `matmul_img2col_patterns() -> list[RewritePattern]`
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering.matmul_img2col_lowering import matmul_img2col_patterns
@@ -14,7 +15,7 @@
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-- test: test/pass/nn_lowering/matmul.py
+- test: test/passes/lowering/nn_lowering/test_matmul.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
 """
 
@@ -38,8 +39,8 @@ from kernel_gen.dialect.symbol import (
     SymbolMulOp,
     SymbolSubOp,
     SymbolValueType,
-    build_public_symbol_expr,
 )
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from .nn_lowering_utility import (
     ensure_operand_count,
     ensure_single_result,
@@ -47,11 +48,52 @@ from .nn_lowering_utility import (
 )
 
 
+def _coerce_symbol_expr_operand(expr: str) -> int | SymbolDim:
+    """将 symbol 表达式文本转换为公开 SymbolDim 运算操作数。
+
+    功能说明:
+    - 数字文本转换为 `int`，其余文本交给公开 `SymbolDim` 语义解析。
+    使用示例:
+    - operand = _coerce_symbol_expr_operand("W + PL")
+    """
+
+    normalized = str(expr).strip()
+    try:
+        return int(normalized)
+    except ValueError:
+        return SymbolDim(normalized)
+
+
+def _build_symbol_expr(lhs_expr: str, rhs_expr: str, op_symbol: str) -> str:
+    """按公开 SymbolDim 语义构造当前文件内部使用的 symbol 表达式。
+
+    功能说明:
+    - 保留二元表达式操作数边界，避免 `A - 1` 与 `* B` 拼接后被解析成 `A - 1 * B`。
+    - 该 helper 只服务本文件内部 img2col lowering，不作为跨文件公开 API。
+    使用示例:
+    - expr = _build_symbol_expr("W - 1", "SW", "//")
+    """
+
+    lhs = SymbolDim(_coerce_symbol_expr_operand(lhs_expr))
+    rhs = _coerce_symbol_expr_operand(rhs_expr)
+    if op_symbol == "+":
+        value = lhs + rhs
+    elif op_symbol == "-":
+        value = lhs - rhs
+    elif op_symbol == "*":
+        value = lhs * rhs
+    elif op_symbol == "/":
+        value = lhs / rhs
+    elif op_symbol == "//":
+        value = lhs // rhs
+    else:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"unsupported symbol op: {op_symbol}")
+    return str(value.get_value())
+
+
 def _normalize_shape_dims(shape: Iterable[Attribute]) -> list[int | str]:
     """将 shape 维度规范化为 int 或 str。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - IntAttr/IntegerAttr 转换为 int。
@@ -63,7 +105,7 @@ def _normalize_shape_dims(shape: Iterable[Attribute]) -> list[int | str]:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/matmul.py
+    - test: test/passes/lowering/nn_lowering/test_matmul.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -89,8 +131,6 @@ def _ensure_matmul_shape(
 ) -> None:
     """校验 nn.matmul 的 shape 合同。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 确认 lhs/rhs/out 均为 rank-2。
@@ -101,7 +141,7 @@ def _ensure_matmul_shape(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/matmul.py
+    - test: test/passes/lowering/nn_lowering/test_matmul.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -119,8 +159,6 @@ def _ensure_matmul_shape(
 def _ensure_matmul_stride(mem_type: NnMemoryType) -> None:
     """校验 nn.matmul 的 stride 连续性。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 当 shape/stride 可静态求值时，要求 stride 为连续布局。
@@ -130,7 +168,7 @@ def _ensure_matmul_stride(mem_type: NnMemoryType) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/matmul.py
+    - test: test/passes/lowering/nn_lowering/test_matmul.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -155,8 +193,6 @@ def _ensure_symbol_int(
 ) -> tuple[SSAValue, SymbolConstOp | None]:
     """确保 img2col 参数为 symbol.int。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 若 operand 为 symbol.const，则克隆为新的 symbol.const 并返回。
@@ -168,7 +204,7 @@ def _ensure_symbol_int(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/img2col1d.py
+    - test: test/passes/lowering/nn_lowering/test_img2col1d.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -194,8 +230,6 @@ def _ensure_img2col_params(
 ) -> tuple[SSAValue, list[SSAValue], list[SymbolConstOp]]:
     """校验并提取 img2col 参数。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 校验参数数量，并提取 dynamic 参数列表。
@@ -205,7 +239,7 @@ def _ensure_img2col_params(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/img2col1d.py
+    - test: test/passes/lowering/nn_lowering/test_img2col1d.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -224,8 +258,6 @@ def _ensure_img2col_params(
 def _symbol_expr(value: SSAValue) -> str:
     """读取 symbol.int 的表达式字符串。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 将 `!symbol.int<"...">` 的表达式文本提取为字符串。
@@ -236,7 +268,7 @@ def _symbol_expr(value: SSAValue) -> str:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/img2col1d.py
+    - test: test/passes/lowering/nn_lowering/test_img2col1d.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -248,8 +280,6 @@ def _symbol_expr(value: SSAValue) -> str:
 def _build_symbol_attr(value: SSAValue, *, prefer_i64: bool) -> Attribute:
     """将 symbol.int SSAValue 转为适配的 attribute。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 数值表达式转为 IntAttr / IntegerAttr。
@@ -260,7 +290,7 @@ def _build_symbol_attr(value: SSAValue, *, prefer_i64: bool) -> Attribute:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/img2col2d.py
+    - test: test/passes/lowering/nn_lowering/test_img2col2d.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -282,8 +312,6 @@ def _get_symbol_dim_by_axis(
 ) -> SSAValue:
     """按轴读取输入 memory 的符号维度。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅当指定轴为符号维度时，插入一次 `symbol.get_dim`。
@@ -294,7 +322,7 @@ def _get_symbol_dim_by_axis(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/img2col1d.py
+    - test: test/passes/lowering/nn_lowering/test_img2col1d.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -324,8 +352,6 @@ def _build_img2col1d_dynamic_dims(
 ) -> list[SSAValue]:
     """构造 img2col1d 的 dynamic shape operand 列表。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 当输出包含符号维度时，生成 `symbol.get_dim` 与 `symbol` 算术链。
@@ -336,7 +362,7 @@ def _build_img2col1d_dynamic_dims(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/img2col1d.py
+    - test: test/passes/lowering/nn_lowering/test_img2col1d.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -386,7 +412,7 @@ def _build_img2col1d_dynamic_dims(
     w_div = SymbolFloorDivOp(w_minus_one, sw, SymbolValueType.from_expr(w_div_expr))
     block.insert_op_before(w_div, op)
 
-    w_out_expr = build_public_symbol_expr(w_div_expr, one_expr, "+")
+    w_out_expr = _build_symbol_expr(w_div_expr, one_expr, "+")
     w_out = SymbolAddOp(w_div, one, SymbolValueType.from_expr(w_out_expr))
     block.insert_op_before(w_out, op)
 
@@ -415,8 +441,6 @@ def _build_img2col2d_dynamic_dims(
 ) -> list[SSAValue]:
     """构造 img2col2d 的 dynamic shape operand 列表。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 当输出包含符号维度时，生成 `symbol.get_dim` 与 `symbol` 算术链。
@@ -427,7 +451,7 @@ def _build_img2col2d_dynamic_dims(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/img2col2d.py
+    - test: test/passes/lowering/nn_lowering/test_img2col2d.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -485,7 +509,7 @@ def _build_img2col2d_dynamic_dims(
     h_div_expr = f"({h_minus_one_expr}) // {sh_expr}"
     h_div = SymbolFloorDivOp(h_minus_one, sh, SymbolValueType.from_expr(h_div_expr))
     block.insert_op_before(h_div, op)
-    h_out_expr = build_public_symbol_expr(h_div_expr, one_expr, "+")
+    h_out_expr = _build_symbol_expr(h_div_expr, one_expr, "+")
     h_out = SymbolAddOp(h_div, one, SymbolValueType.from_expr(h_out_expr))
     block.insert_op_before(h_out, op)
 
@@ -504,7 +528,7 @@ def _build_img2col2d_dynamic_dims(
     w_div_expr = f"({w_minus_one_expr}) // {sw_expr}"
     w_div = SymbolFloorDivOp(w_minus_one, sw, SymbolValueType.from_expr(w_div_expr))
     block.insert_op_before(w_div, op)
-    w_out_expr = build_public_symbol_expr(w_div_expr, one_expr, "+")
+    w_out_expr = _build_symbol_expr(w_div_expr, one_expr, "+")
     w_out = SymbolAddOp(w_div, one, SymbolValueType.from_expr(w_out_expr))
     block.insert_op_before(w_out, op)
 
@@ -531,8 +555,6 @@ def _build_img2col2d_dynamic_dims(
 def _lower_matmul(block: Block, op: Operation) -> None:
     """lower nn.matmul。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 校验 shape 与 stride。
@@ -544,7 +566,7 @@ def _lower_matmul(block: Block, op: Operation) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/matmul.py
+    - test: test/passes/lowering/nn_lowering/test_matmul.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -580,8 +602,6 @@ def _lower_matmul(block: Block, op: Operation) -> None:
 def _lower_img2col1d(block: Block, op: Operation) -> None:
     """lower nn.img2col1d。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 将 img2col1d 参数转换为 symbol.int。
@@ -592,7 +612,7 @@ def _lower_img2col1d(block: Block, op: Operation) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/img2col1d.py
+    - test: test/passes/lowering/nn_lowering/test_img2col1d.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -623,8 +643,6 @@ def _lower_img2col1d(block: Block, op: Operation) -> None:
 def _lower_img2col2d(block: Block, op: Operation) -> None:
     """lower nn.img2col2d。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 将 img2col2d 参数转换为 symbol.int。
@@ -635,7 +653,7 @@ def _lower_img2col2d(block: Block, op: Operation) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/img2col2d.py
+    - test: test/passes/lowering/nn_lowering/test_img2col2d.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -676,8 +694,6 @@ def _lower_img2col2d(block: Block, op: Operation) -> None:
 class _LowerNnMatmulPattern(RewritePattern):
     """将单个 nn.matmul lowering 为 kernel.matmul。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 只匹配 NnMatmulOp，避免 family 级 op.name 分派。
@@ -688,7 +704,7 @@ class _LowerNnMatmulPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -704,8 +720,6 @@ class _LowerNnMatmulPattern(RewritePattern):
 class _LowerNnImg2col1dPattern(RewritePattern):
     """将单个 nn.img2col1d lowering 为 kernel.img2col1d。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 只匹配 NnImg2col1dOp，避免 family 级 op.name 分派。
@@ -716,7 +730,7 @@ class _LowerNnImg2col1dPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/img2col1d.py
+    - test: test/passes/lowering/nn_lowering/test_img2col1d.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -732,8 +746,6 @@ class _LowerNnImg2col1dPattern(RewritePattern):
 class _LowerNnImg2col2dPattern(RewritePattern):
     """将单个 nn.img2col2d lowering 为 kernel.img2col2d。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 只匹配 NnImg2col2dOp，避免 family 级 op.name 分派。
@@ -744,7 +756,7 @@ class _LowerNnImg2col2dPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/img2col2d.py
+    - test: test/passes/lowering/nn_lowering/test_img2col2d.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
@@ -760,8 +772,6 @@ class _LowerNnImg2col2dPattern(RewritePattern):
 def matmul_img2col_patterns() -> list[RewritePattern]:
     """返回 matmul/img2col rewrite pattern 集合。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 提供 nn_lowering 主 driver 的单 op pattern 注册入口。
@@ -772,7 +782,7 @@ def matmul_img2col_patterns() -> list[RewritePattern]:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 

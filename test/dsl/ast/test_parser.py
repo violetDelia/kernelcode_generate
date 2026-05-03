@@ -1,11 +1,9 @@
 """DSL AST parser tests.
 
-创建者: OpenAI
-最后一次更改: 榕
 
 功能说明:
-- 覆盖 `parse_function(...)` 的基础解析与诊断路径。
-- 覆盖 `parse_function_with_env(...)` 的显式环境入口。
+- 覆盖 `parse(...)` / `parse_function(...)` 的基础解析与诊断路径。
+- 测试结构对应 `spec/dsl/ast/parser.md` 与 `kernel_gen/dsl/ast/parser.py`。
 
 当前覆盖率信息:
 - 当前覆盖率: 未统计（本任务验证未启用 coverage 统计）。
@@ -25,19 +23,23 @@
 
 from __future__ import annotations
 
-import importlib
-import sys
-from pathlib import Path
+from collections.abc import Callable
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dsl.ast import CompareExprAST, ConstAST, ForAST, FunctionAST, IfAST, NnUnaryAST, ScalarArgAST, TensorAST, parse_function
-from kernel_gen.dsl.ast.parser import parse_function_with_env
+from kernel_gen.dsl.ast import (
+    ConstValueAST,
+    ForAST,
+    FunctionAST,
+    IfAST,
+    MemoryAST,
+    SymbolDimAST,
+    SymbolLtAST,
+    parse,
+    parse_function,
+)
+from kernel_gen.operation.dma import store
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
@@ -47,97 +49,80 @@ ROWS = 6
 COLS = 2
 DIV_ROWS = 8
 
-facade = importlib.import_module("kernel_gen.dsl.ast")
-
 
 def test_parse_function_basic_assignment() -> None:
     """解析基础赋值函数并生成 FunctionAST。"""
 
-    def copy_kernel(x: "Tensor[f32, 1]"):
+    memory = Memory([1], NumericType.Float32)
+
+    def copy_kernel(x):
         y = x
         return y
 
-    func_ast = parse_function(copy_kernel)
+    func_ast = parse_function(copy_kernel, memory)
 
     assert isinstance(func_ast, FunctionAST)
     assert func_ast.name == "copy_kernel"
-    assert func_ast.has_explicit_return is True
+    assert func_ast.has_explicit_return.raw_value is True
 
 
 def test_parse_function_for_loop() -> None:
     """解析 for range(...) 语法并生成 ForAST。"""
 
-    def loop_kernel(x: "Tensor[f32, 1]"):
+    memory = Memory([1], NumericType.Float32)
+
+    def loop_kernel(x):
         for i in range(0, 4, 1):
             x = x
         return x
 
-    func_ast = parse_function(loop_kernel)
+    func_ast = parse_function(loop_kernel, memory)
     for_nodes = [node for node in func_ast.body.statements if isinstance(node, ForAST)]
 
     assert for_nodes, "expected ForAST in function body"
     step_node = for_nodes[0].step
-    assert isinstance(step_node, ConstAST)
-    assert step_node.value == 1
+    assert isinstance(step_node, ConstValueAST)
+    assert step_node.raw_value == 1
 
 
 def test_parse_function_if_else() -> None:
     """解析 if/else 语法并生成 IfAST。"""
 
-    def if_kernel(target: "Tensor[f32, 4]", source: "Tensor[f32, 2]", lhs: int, rhs: int):
-        from kernel_gen.operation.dma import store
+    target = Memory([4], NumericType.Float32)
+    source = Memory([2], NumericType.Float32)
 
+    def if_kernel(target, source, lhs, rhs):
         if lhs < rhs:
             store(target, source, [0], [2], [1])
         else:
             store(target, source, [1], [2], [1])
 
-    func_ast = parse_function(if_kernel)
+    func_ast = parse_function(if_kernel, target, source, 0, 1)
     if_nodes = [node for node in func_ast.body.statements if isinstance(node, IfAST)]
 
     assert if_nodes, "expected IfAST in function body"
-    assert isinstance(if_nodes[0].condition, CompareExprAST)
-    assert if_nodes[0].condition.op == "lt"
+    assert isinstance(if_nodes[0].condition, SymbolLtAST)
     assert len(if_nodes[0].true_body.statements) == 1
     assert if_nodes[0].false_body is not None
     assert len(if_nodes[0].false_body.statements) == 1
 
 
-def test_parse_function_helper_call() -> None:
-    """解析 helper 调用入口并生成相应 AST。"""
-
-    def helper_kernel(x: "Tensor[f32, 1]"):
-        from kernel_gen.operation.nn import relu
-
-        return relu(x)
-
-    func_ast = parse_function(helper_kernel)
-
-    assert any(isinstance(node, NnUnaryAST) for node in func_ast.body.statements)
-
-
-def test_parse_function_with_env_infers_runtime_annotation() -> None:
-    """显式环境入口允许通过 runtime_table 推断缺失注解。"""
+def test_parse_infers_runtime_annotation() -> None:
+    """公开 parse 入口允许通过 runtime args 推断缺失注解。"""
 
     memory = Memory([SymbolDim("M")], NumericType.Float32)
 
     def env_kernel(x):
         return x
 
-    func_ast = parse_function_with_env(
-        env_kernel,
-        globals_table=dict(getattr(env_kernel, "__globals__", {})),
-        builtins_table=(__builtins__ if isinstance(__builtins__, dict) else __builtins__.__dict__),
-        runtime_table={"x": memory},
-        config=None,
-    )
+    func_ast = parse(env_kernel, memory).functions[0]
 
-    assert isinstance(func_ast.inputs[0], TensorAST)
+    assert isinstance(func_ast.inputs[0], MemoryAST)
     assert func_ast.inputs[0].memory == memory
 
 
 def test_parse_function_reports_diagnostics() -> None:
-    """缺失注解时返回带位置信息的 KernelCodeError。"""
+    """缺失 runtime arg 时返回稳定 KernelCodeError 消息。"""
 
     def kernel(x):
         return x
@@ -145,65 +130,87 @@ def test_parse_function_reports_diagnostics() -> None:
     with pytest.raises(KernelCodeError) as exc_info:
         parse_function(kernel)
 
-    assert exc_info.value.diagnostics
-    assert exc_info.value.diagnostics[0].message == "Missing annotation"
-
-
-def test_parse_function_rejects_invalid_helper_arity() -> None:
-    """解析 helper 非法参数形态并报稳定错误。"""
-
-    def kernel(x: "Tensor[f32, 1]"):
-        from kernel_gen.operation.arch import get_block_id
-
-        return get_block_id(1)
-
-    with pytest.raises(KernelCodeError, match="Unsupported get_block_id arity"):
-        parse_function(kernel)
+    assert exc_info.value.message() == "Missing runtime argument"
 
 
 def test_parse_function_step_zero_rejected() -> None:
     """for range(..., step=0) 在解析阶段直接报错。"""
 
-    def invalid_step_kernel(x: "Tensor[f32, 1]"):
+    memory = Memory([1], NumericType.Float32)
+
+    def invalid_step_kernel(x):
         for i in range(0, 4, 0):
             x = x
         return x
 
     with pytest.raises(KernelCodeError, match="for range step must not be zero"):
-        parse_function(invalid_step_kernel)
+        parse_function(invalid_step_kernel, memory)
 
 
-def test_ast_facade_does_not_export_parser_private_helpers() -> None:
-    """facade 只暴露公开 AST API，不穿透 parser 私有 helper。"""
+def test_ast_parse_function_uses_runtime_memory_not_annotation() -> None:
+    """annotation 不参与 DSL 类型解析，runtime Memory 是唯一张量来源。"""
 
-    assert hasattr(facade, "parse_function")
-    assert not hasattr(facade, "_ParseFailure")
-    assert not hasattr(facade, "_parse_function_impl")
+    memory = Memory([SymbolDim("N"), 4], NumericType.Float32)
+
+    def kernel(x: "Tensor[f32, 1, 1]"):
+        return x
+
+    func_ast = parse_function(kernel, memory)
+
+    assert isinstance(func_ast, FunctionAST)
+    assert isinstance(func_ast.inputs[0], MemoryAST)
+    assert func_ast.inputs[0].memory == memory
 
 
-def test_parse_function_supports_formatted_tensor_annotation_arithmetic_variants() -> None:
-    """格式化 Tensor 注解支持 `- + - * / //` 的当前公开组合。"""
+def test_ast_parse_requires_runtime_args_for_parameters() -> None:
+    """缺少 runtime arg 时稳定失败，不回退到 annotation 解析。"""
+
+    def kernel(x: "Tensor[f32, 4]"):
+        return x
+
+    with pytest.raises(KernelCodeError, match="Missing runtime argument"):
+        parse_function(kernel)
+
+
+def test_ast_parse_module_entry_returns_module_ast() -> None:
+    """包根 parse 入口返回包含 FunctionAST 的 ModuleAST。"""
+
+    memory = Memory([4], NumericType.Float32)
+
+    def kernel(x):
+        return x
+
+    module_ast = parse(kernel, memory)
+
+    assert len(module_ast.functions) == 1
+    assert isinstance(module_ast.functions[0], FunctionAST)
+
+
+def test_parse_function_ignores_formatted_tensor_annotation_arithmetic_variants() -> None:
+    """annotation 不参与输入类型解析，runtime Memory 是唯一张量来源。"""
+
+    memory = Memory([4, 8, 4, 12, 4, 4], NumericType.Float32)
 
     def kernel(
         x: f"Tensor[f32, {-NEG_ROWS}, {ROWS + COLS}, {ROWS - COLS}, {ROWS * COLS}, {DIV_ROWS / 2}, {DIV_ROWS // 2}]"
     ):
         return x
 
-    func_ast = parse_function(kernel)
+    func_ast = parse_function(kernel, memory)
 
-    assert isinstance(func_ast.inputs[0], TensorAST)
-    assert func_ast.inputs[0].memory.shape.get_values() == [4, 8, 4, 12, 4, 4]
+    assert isinstance(func_ast.inputs[0], MemoryAST)
+    assert func_ast.inputs[0].memory == memory
 
 
 @pytest.mark.parametrize(
-    ("builder", "expected_message"),
+    ("builder", "case_label"),
     [
         pytest.param(
             lambda: (
                 (lambda: None),
                 f"Tensor[f32, {ROWS!r}]",
             ),
-            "Unsupported annotation",
+            "repr-conversion",
             id="repr-conversion",
         ),
         pytest.param(
@@ -211,7 +218,7 @@ def test_parse_function_supports_formatted_tensor_annotation_arithmetic_variants
                 (lambda: None),
                 f"Tensor[f32, {ROWS:02d}]",
             ),
-            "Unsupported annotation",
+            "format-spec",
             id="format-spec",
         ),
         pytest.param(
@@ -219,66 +226,63 @@ def test_parse_function_supports_formatted_tensor_annotation_arithmetic_variants
                 (lambda: None),
                 f"Tensor[f32, {DIV_ROWS / 3}]",
             ),
-            "Unsupported annotation",
+            "non-exact-division",
             id="non-exact-division",
         ),
     ],
 )
-def test_parse_function_rejects_unsupported_formatted_tensor_annotations(
-    builder: object,
-    expected_message: str,
+def test_parse_function_ignores_unsupported_formatted_tensor_annotations(
+    builder: Callable[[], tuple[Callable[[], None], str]],
+    case_label: str,
 ) -> None:
-    """格式化 Tensor 注解的 conversion / format-spec / 非整除当前必须失败。"""
+    """格式化 Tensor annotation 不参与解析，runtime Memory 决定 AST 输入。"""
 
+    del case_label
     _, annotation = builder()
+    memory = Memory([ROWS], NumericType.Float32)
 
     def kernel(x: annotation):
         return x
 
-    with pytest.raises(KernelCodeError) as exc_info:
-        parse_function(kernel)
+    func_ast = parse_function(kernel, memory)
 
-    assert exc_info.value.diagnostics
-    assert exc_info.value.diagnostics[0].message == expected_message
+    assert isinstance(func_ast.inputs[0], MemoryAST)
+    assert func_ast.inputs[0].memory == memory
 
 
-def test_parse_function_rejects_direct_tensor_annotation_expression_element() -> None:
-    """直接 `Tensor[...]` 注解不接受表达式元素。"""
+def test_parse_function_ignores_direct_tensor_annotation_expression_element() -> None:
+    """直接 `Tensor[...]` annotation 不参与 DSL 类型解析。"""
+
+    memory = Memory([ROWS + 1], NumericType.Float32)
 
     def kernel(x: Tensor[f32, ROWS + 1]):
         return x
 
-    with pytest.raises(KernelCodeError) as exc_info:
-        parse_function(kernel)
+    func_ast = parse_function(kernel, memory)
 
-    assert exc_info.value.diagnostics
-    assert exc_info.value.diagnostics[0].message == "Unsupported tensor annotation element"
+    assert isinstance(func_ast.inputs[0], MemoryAST)
+    assert func_ast.inputs[0].memory == memory
 
 
-def test_parse_function_supports_symboldim_union_annotations() -> None:
-    """PEP 604 `int | SymbolDim` 继续收口为 symbolic int 标量。"""
+def test_parse_function_uses_runtime_symboldim_over_union_annotation() -> None:
+    """PEP 604 annotation 不参与解析，runtime SymbolDim 决定 symbolic scalar。"""
+
+    symbol = SymbolDim("N")
 
     def kernel(x: int | SymbolDim) -> int | SymbolDim:
         return x
 
-    func_ast = parse_function(kernel)
+    func_ast = parse_function(kernel, symbol)
 
-    assert isinstance(func_ast.inputs[0], ScalarArgAST)
-    assert func_ast.inputs[0].value_type is int
-    assert func_ast.inputs[0].is_symbolic is True
-    assert isinstance(func_ast.outputs[0], ScalarArgAST)
-    assert func_ast.outputs[0].value_type is int
-    assert func_ast.outputs[0].is_symbolic is True
+    assert isinstance(func_ast.inputs[0], SymbolDimAST)
 
 
-def test_parse_function_rejects_unsupported_union_annotation() -> None:
-    """除 `int | SymbolDim` 外的 PEP 604 联合注解当前不属于公开合同。"""
+def test_parse_function_ignores_unsupported_union_annotation() -> None:
+    """不支持的 annotation 不再触发诊断，runtime arg 决定输入。"""
 
     def kernel(x: int | float):
         return x
 
-    with pytest.raises(KernelCodeError) as exc_info:
-        parse_function(kernel)
+    func_ast = parse_function(kernel, 1)
 
-    assert exc_info.value.diagnostics
-    assert exc_info.value.diagnostics[0].message == "Unsupported annotation"
+    assert isinstance(func_ast.inputs[0], SymbolDimAST)

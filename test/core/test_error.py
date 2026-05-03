@@ -1,10 +1,8 @@
 """core error tests.
 
-创建者: OpenAI Codex
-最后一次更改: OpenAI Codex
 
 功能说明:
-- 覆盖 `kernel_gen.core.error` 中公共错误底座的枚举值、消息文本和统一构造入口。
+- 覆盖 `kernel_gen.core.error` 中公共错误底座的枚举值、模板文本、消息文本和统一构造入口。
 
 使用示例:
 - pytest -q test/core/test_error.py
@@ -17,15 +15,11 @@
 
 from __future__ import annotations
 
-from kernel_gen.core.error import KernelCodeError
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE, KernelCodeError
 from kernel_gen.core.error import ErrorKind, ErrorModule, kernel_code_error
 
 
 # CE-001
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 ErrorModule 的稳定公开枚举值保持不变。
 # 使用示例: pytest -q test/core/test_error.py -k test_error_module_values
 # 对应功能实现文件路径: kernel_gen/core/error.py
@@ -45,10 +39,6 @@ def test_error_module_values() -> None:
 
 
 # CE-002
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 ErrorKind 的稳定公开枚举值保持不变。
 # 使用示例: pytest -q test/core/test_error.py -k test_error_kind_values
 # 对应功能实现文件路径: kernel_gen/core/error.py
@@ -64,32 +54,35 @@ def test_error_kind_values() -> None:
     assert ErrorKind.INTERNAL == "internal"
 
 
+# CE-007
+# 测试目的: 验证公共错误模板文本只从 core.error 暴露。
+# 使用示例: pytest -q test/core/test_error.py -k test_error_template_text_values
+# 对应功能实现文件路径: kernel_gen/core/error.py
+# 对应 spec 文件路径: spec/core/error.md
+# 对应测试文件路径: test/core/test_error.py
+def test_error_template_text_values() -> None:
+    assert ERROR_TEMPLATE == "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
+    assert ERROR_ACTION == "请按接口约束传参"
+    assert ERROR_ACTUAL == "不满足期望"
+
+
 # CE-003
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 KernelCodeError 会稳定返回 message/kind/module，并让 str(err) 等于 message。
 # 使用示例: pytest -q test/core/test_error.py -k test_kernel_code_error_methods_and_str
 # 对应功能实现文件路径: kernel_gen/core/error.py
 # 对应 spec 文件路径: spec/core/error.md
 # 对应测试文件路径: test/core/test_error.py
 def test_kernel_code_error_methods_and_str() -> None:
-    err = KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "invalid pass input", location="line 1")
+    err = KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "invalid pass input")
 
     assert err.kind() == "contract"
     assert err.module() == "pass"
     assert err.message() == "invalid pass input"
     assert err.message_text == "invalid pass input"
-    assert err.location == "line 1"
     assert str(err) == "invalid pass input"
 
 
 # CE-004
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 kernel_code_error(...) 会返回统一错误类型，并接受公开枚举输入。
 # 使用示例: pytest -q test/core/test_error.py -k test_kernel_code_error_factory
 # 对应功能实现文件路径: kernel_gen/core/error.py
@@ -105,10 +98,6 @@ def test_kernel_code_error_factory() -> None:
 
 
 # CE-005
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证字符串输入会按名称和值两种形式做规范化。
 # 使用示例: pytest -q test/core/test_error.py -k test_kernel_code_error_string_normalization
 # 对应功能实现文件路径: kernel_gen/core/error.py
@@ -123,16 +112,13 @@ def test_kernel_code_error_string_normalization() -> None:
 
 
 # CE-006
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
-# 测试目的: 验证非法 kind 或 module 会稳定失败。
+# 测试目的: 验证非法 kind/module 会稳定失败，且 KernelCodeError 不再接收 metadata 可变关键字。
 # 使用示例: pytest -q test/core/test_error.py -k test_kernel_code_error_rejects_unknown_kind_or_module
 # 对应功能实现文件路径: kernel_gen/core/error.py
 # 对应 spec 文件路径: spec/core/error.md
 # 对应测试文件路径: test/core/test_error.py
 def test_kernel_code_error_rejects_unknown_kind_or_module() -> None:
+    import inspect
     import pytest
 
     with pytest.raises(ValueError, match="unknown error kind: weird"):
@@ -140,3 +126,8 @@ def test_kernel_code_error_rejects_unknown_kind_or_module() -> None:
 
     with pytest.raises(ValueError, match="unknown error module: weird"):
         KernelCodeError(ErrorKind.CONTRACT, "weird", "bad module")
+
+    assert all(
+        parameter.kind is not inspect.Parameter.VAR_KEYWORD
+        for parameter in inspect.signature(KernelCodeError).parameters.values()
+    )

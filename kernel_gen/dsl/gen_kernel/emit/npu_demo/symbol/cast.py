@@ -1,7 +1,5 @@
 """npu_demo symbol cast emitter.
 
-创建者: OpenAI Codex
-最后一次更改: OpenAI Codex
 
 功能说明:
 - 生成 npu_demo target 下 `symbol.cast` / `symbol.to_int` 的源码片段。
@@ -16,7 +14,7 @@ API 列表:
 
 关联文件:
 - spec: [spec/dsl/gen_kernel/emit.md](../../../../../../spec/dsl/gen_kernel/emit.md)
-- test: [test/dsl/gen_kernel/emit/test_emit.py](../../../../../../test/dsl/gen_kernel/emit/test_emit.py)
+- test: [test/dsl/gen_kernel/emit/test_package.py](../../../../../../test/dsl/gen_kernel/emit/test_package.py)
 - 功能实现: [kernel_gen/dsl/gen_kernel/emit/npu_demo/symbol/cast.py](.)
 """
 

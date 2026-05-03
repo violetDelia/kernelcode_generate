@@ -6,16 +6,16 @@
 
 ## API 列表
 
-- `FLOAT_DTYPES`
-- `ARITHMETIC_DTYPE_ORDER`
-- `ARITHMETIC_DTYPE_RANK`
-- `INT_DTYPES`
-- `NN_FLOAT_DTYPES`
+- `FLOAT_DTYPES: set[NumericType]`
+- `ARITHMETIC_DTYPE_ORDER: tuple[NumericType, ...]`
+- `ARITHMETIC_DTYPE_RANK: dict[NumericType, int]`
+- `INT_DTYPES: set[NumericType]`
+- `NN_FLOAT_DTYPES: set[NumericType]`
 
 ## 文档信息
 
-- 创建者：`睡觉小分队`
-- 最后一次更改：`榕`
+- 创建者：`未记录`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/symbol_variable/dtype_constants.md`](../../spec/symbol_variable/dtype_constants.md)
 - `test`：[`test/symbol_variable/test_dtype_constants.py`](../../test/symbol_variable/test_dtype_constants.py)
 - `功能实现`：[`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py)
@@ -25,183 +25,104 @@
 
 - [`kernel_gen.symbol_variable.type`](../../kernel_gen/symbol_variable/type.py)：提供 `NumericType`、`FLOAT_DTYPES`、`INT_DTYPES`、`ARITHMETIC_DTYPE_ORDER`、`ARITHMETIC_DTYPE_RANK`、`NN_FLOAT_DTYPES` 真源。
 
-## 公开接口
+## API详细说明
 
-### `FLOAT_DTYPES`
+### `FLOAT_DTYPES: set[NumericType]`
 
-功能说明：
+- api：`FLOAT_DTYPES: set[NumericType]`
+- 参数：无。
+- 返回值：`set[NumericType]`，包含 `NumericType.Float16`、`NumericType.BFloat16`、`NumericType.Float32` 与 `NumericType.Float64`。
+- 使用示例：
 
-- 统一浮点 dtype 集合。
+  ```python
+  from kernel_gen.symbol_variable.dtype_constants import FLOAT_DTYPES
+  from kernel_gen.symbol_variable.type import NumericType
 
-参数说明：
+  assert NumericType.Float16 in FLOAT_DTYPES
+  ```
+- 功能说明：兼容导出浮点 dtype 集合。
+- 注意事项：仅包含浮点 dtype，不包含 `NumericType.Bool`；该对象必须与 `kernel_gen.symbol_variable.type.FLOAT_DTYPES` 保持同一对象身份。
 
-- `set[NumericType]`，包含：
-  - `NumericType.Float16`
-  - `NumericType.BFloat16`
-  - `NumericType.Float32`
-  - `NumericType.Float64`
+### `ARITHMETIC_DTYPE_ORDER: tuple[NumericType, ...]`
 
-使用示例：
+- api：`ARITHMETIC_DTYPE_ORDER: tuple[NumericType, ...]`
+- 参数：无。
+- 返回值：`tuple[NumericType, ...]`，按 arithmetic promotion 稳定顺序排列。
+- 使用示例：
 
-```python
-from kernel_gen.symbol_variable.dtype_constants import FLOAT_DTYPES
-from kernel_gen.symbol_variable.type import NumericType
+  ```python
+  from kernel_gen.symbol_variable.dtype_constants import ARITHMETIC_DTYPE_ORDER
 
-assert NumericType.Float16 in FLOAT_DTYPES
-```
+  assert ARITHMETIC_DTYPE_ORDER[0].name == "Int8"
+  ```
+- 功能说明：兼容导出 arithmetic promotion 的稳定 dtype 顺序。
+- 注意事项：顺序必须与 `kernel_gen.symbol_variable.type.ARITHMETIC_DTYPE_ORDER` 保持一致；变更 promotion 规则时必须同步 `Memory` 与 `nn` 相关实现和测试。
 
-注意事项：
+### `ARITHMETIC_DTYPE_RANK: dict[NumericType, int]`
 
-- 仅包含浮点 dtype；不包含 `NumericType.Bool`。
-- 该对象必须与 `kernel_gen.symbol_variable.type.FLOAT_DTYPES` 保持同一对象身份；本文件仅做兼容 re-export。
+- api：`ARITHMETIC_DTYPE_RANK: dict[NumericType, int]`
+- 参数：无。
+- 返回值：`dict[NumericType, int]`，键集合与 `ARITHMETIC_DTYPE_ORDER` 一致。
+- 使用示例：
 
-返回与限制：
+  ```python
+  from kernel_gen.symbol_variable.dtype_constants import ARITHMETIC_DTYPE_RANK
+  from kernel_gen.symbol_variable.type import NumericType
 
-- 返回类型为 `set[NumericType]`。
+  assert ARITHMETIC_DTYPE_RANK[NumericType.Float32] > ARITHMETIC_DTYPE_RANK[NumericType.Int32]
+  ```
+- 功能说明：兼容导出由 `ARITHMETIC_DTYPE_ORDER` 派生的 dtype 优先级映射。
+- 注意事项：必须与 `ARITHMETIC_DTYPE_ORDER` 保持一致；不得在本文件自维护独立 rank 字典。
 
-### `ARITHMETIC_DTYPE_ORDER`
+### `INT_DTYPES: set[NumericType]`
 
-功能说明：
+- api：`INT_DTYPES: set[NumericType]`
+- 参数：无。
+- 返回值：`set[NumericType]`，包含 `NumericType.Int8`、`NumericType.Int16`、`NumericType.Int32`、`NumericType.Int64`、`NumericType.Uint8`、`NumericType.Uint16`、`NumericType.Uint32` 与 `NumericType.Uint64`。
+- 使用示例：
 
-- 定义 arithmetic promotion 的稳定顺序。
-- 该顺序同时供 `Memory` dtype promotion 与 `nn` family dtype promotion 共享。
+  ```python
+  from kernel_gen.symbol_variable.dtype_constants import INT_DTYPES
+  from kernel_gen.symbol_variable.type import NumericType
 
-参数说明：
+  assert NumericType.Uint32 in INT_DTYPES
+  ```
+- 功能说明：兼容导出整数 dtype 集合。
+- 注意事项：不包含浮点 dtype，不包含 `NumericType.Bool`；该对象必须与 `kernel_gen.symbol_variable.type.INT_DTYPES` 保持同一对象身份。
 
-- `tuple[NumericType, ...]`，顺序为：
-  - `NumericType.Int8`
-  - `NumericType.Uint8`
-  - `NumericType.Int16`
-  - `NumericType.Uint16`
-  - `NumericType.Int32`
-  - `NumericType.Uint32`
-  - `NumericType.Int64`
-  - `NumericType.Uint64`
-  - `NumericType.Float16`
-  - `NumericType.BFloat16`
-  - `NumericType.Float32`
-  - `NumericType.Float64`
+### `NN_FLOAT_DTYPES: set[NumericType]`
 
-使用示例：
+- api：`NN_FLOAT_DTYPES: set[NumericType]`
+- 参数：无。
+- 返回值：`set[NumericType]`，内容与 `FLOAT_DTYPES` 相同。
+- 使用示例：
 
-```python
-from kernel_gen.symbol_variable.dtype_constants import ARITHMETIC_DTYPE_ORDER
+  ```python
+  from kernel_gen.symbol_variable.dtype_constants import NN_FLOAT_DTYPES
+  from kernel_gen.symbol_variable.type import NumericType
 
-assert ARITHMETIC_DTYPE_ORDER[0].name == "Int8"
-```
-
-注意事项：
-
-- 顺序是公共合同；若变更 promotion 规则，必须同步更新 `memory` 与 `nn` 相关实现与测试。
-
-返回与限制：
-
-- 返回类型为 `tuple[NumericType, ...]`。
-
-### `ARITHMETIC_DTYPE_RANK`
-
-功能说明：
-
-- 由 `ARITHMETIC_DTYPE_ORDER` 派生的 dtype 优先级映射。
-- 用于 `Memory` 与 `nn` family 的 dtype promotion 决议，避免各模块自维护 rank 字典。
-
-参数说明：
-
-- `dict[NumericType, int]`，键与 `ARITHMETIC_DTYPE_ORDER` 一致。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.dtype_constants import ARITHMETIC_DTYPE_RANK
-from kernel_gen.symbol_variable.type import NumericType
-
-assert ARITHMETIC_DTYPE_RANK[NumericType.Float32] > ARITHMETIC_DTYPE_RANK[NumericType.Int32]
-```
-
-注意事项：
-
-- `ARITHMETIC_DTYPE_RANK` 必须与 `ARITHMETIC_DTYPE_ORDER` 保持一致。
-
-返回与限制：
-
-- 返回类型为 `dict[NumericType, int]`。
-
-### `INT_DTYPES`
-
-功能说明：
-
-- 统一整数 dtype 集合。
-
-参数说明：
-
-- `set[NumericType]`，包含：
-  - `NumericType.Int8`
-  - `NumericType.Int16`
-  - `NumericType.Int32`
-  - `NumericType.Int64`
-  - `NumericType.Uint8`
-  - `NumericType.Uint16`
-  - `NumericType.Uint32`
-  - `NumericType.Uint64`
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.dtype_constants import INT_DTYPES
-from kernel_gen.symbol_variable.type import NumericType
-
-assert NumericType.Uint32 in INT_DTYPES
-```
-
-注意事项：
-
-- 不包含浮点 dtype；不包含 `NumericType.Bool`。
-- 该对象必须与 `kernel_gen.symbol_variable.type.INT_DTYPES` 保持同一对象身份。
-
-返回与限制：
-
-- 返回类型为 `set[NumericType]`。
-
-### `NN_FLOAT_DTYPES`
-
-功能说明：
-
-- `nn` 系列算子约束的浮点 dtype 集合，语义与 `FLOAT_DTYPES` 一致。
-
-参数说明：
-
-- `set[NumericType]`，内容与 `FLOAT_DTYPES` 相同。
-
-使用示例：
-
-```python
-from kernel_gen.symbol_variable.dtype_constants import NN_FLOAT_DTYPES
-from kernel_gen.symbol_variable.type import NumericType
-
-assert NumericType.BFloat16 in NN_FLOAT_DTYPES
-```
-
-注意事项：
-
-- `NN_FLOAT_DTYPES` 与 `FLOAT_DTYPES` 需保持一致，避免出现双重来源。
-- 该对象必须复用 `kernel_gen.symbol_variable.type.FLOAT_DTYPES`；本文件仅做兼容 re-export。
-
-返回与限制：
-
-- 返回类型为 `set[NumericType]`。
+  assert NumericType.BFloat16 in NN_FLOAT_DTYPES
+  ```
+- 功能说明：兼容导出 `nn` 系列算子约束的浮点 dtype 集合。
+- 注意事项：必须与 `FLOAT_DTYPES` 保持一致，并复用 `kernel_gen.symbol_variable.type.FLOAT_DTYPES`；本文件仅做兼容 re-export。
 
 ## 测试
 
-- 测试文件：[`test/symbol_variable/test_dtype_constants.py`](../../test/symbol_variable/test_dtype_constants.py)
+- 测试文件：`test/symbol_variable/test_dtype_constants.py`
 - 执行命令：`pytest -q test/symbol_variable/test_dtype_constants.py`
-- 测试目标：
-  - 验证 `FLOAT_DTYPES` 与 `INT_DTYPES` 集合内容。
-  - 验证 `NN_FLOAT_DTYPES` 与 `FLOAT_DTYPES` 一致。
-  - 验证 `dtype_constants` 中的 dtype family 与 promotion 常量复用 `type.py` 的公开真源。
-  - 验证 `ARITHMETIC_DTYPE_ORDER` / `ARITHMETIC_DTYPE_RANK` 的排序与映射关系。
-- 功能与用例清单：
-  - `DC-001`：浮点 dtype 集合正确。
-  - `DC-002`：整数 dtype 集合正确。
-  - `DC-003`：`NN_FLOAT_DTYPES` 与 `FLOAT_DTYPES` 一致。
-  - `DC-003A`：`dtype_constants` 复用 `type.py` 的 dtype family 真源。
-  - `DC-004`：arithmetic dtype 顺序与 rank 映射正确。
+
+### 测试目标
+
+- 验证 `spec/symbol_variable/dtype_constants.md` 对应公开 API 的正常路径、边界条件与错误语义。
+- 验证公开导入、注册名、CLI 或命名空间入口只暴露 spec 定义的 API。
+
+
+### 功能与用例清单
+
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SYMBOL-VARIABLE-DTYPE-CONSTANTS-001 | 公开入口 | 浮点 dtype 集合正确。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `DC-001`。 | 公开入口在“浮点 dtype 集合正确。”场景下可导入、构造、注册或按名称发现。 | `DC-001` |
+| TC-SYMBOL-VARIABLE-DTYPE-CONSTANTS-002 | 公开入口 | 整数 dtype 集合正确。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `DC-002`。 | 公开入口在“整数 dtype 集合正确。”场景下可导入、构造、注册或按名称发现。 | `DC-002` |
+| TC-SYMBOL-VARIABLE-DTYPE-CONSTANTS-003 | 公开入口 | `NN_FLOAT_DTYPES` 与 `FLOAT_DTYPES` 一致。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `DC-003`。 | 公开入口在“`NN_FLOAT_DTYPES` 与 `FLOAT_DTYPES` 一致。”场景下可导入、构造、注册或按名称发现。 | `DC-003` |
+| TC-SYMBOL-VARIABLE-DTYPE-CONSTANTS-004 | 公开入口 | `dtype_constants` 复用 `type.py` 的 dtype family 真源。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `DC-003A`。 | 公开入口在“`dtype_constants` 复用 `type.py` 的 dtype family 真源。”场景下可导入、构造、注册或按名称发现。 | `DC-003A` |
+| TC-SYMBOL-VARIABLE-DTYPE-CONSTANTS-005 | 公开入口 | arithmetic dtype 顺序与 rank 映射正确。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `DC-004`。 | 公开入口在“arithmetic dtype 顺序与 rank 映射正确。”场景下可导入、构造、注册或按名称发现。 | `DC-004` |

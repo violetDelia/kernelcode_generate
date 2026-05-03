@@ -1,7 +1,5 @@
 """ircheck: IR transform check tool.
 
-创建者: 睡觉小分队
-最后一次更改: 大闸蟹
 
 功能说明:
 - 提供轻量的 IR 变换验证工具：读取单文件 case，按 `COMPILE_ARGS` 顺序运行 pass / pipeline，
@@ -65,7 +63,7 @@ from kernel_gen.passes.registry import (
     build_registered_pipeline,
     load_builtin_passes,
 )
-from kernel_gen.passes.pass_manager import Pass, PassManager
+from kernel_gen.passes.pass_manager import PassManager
 
 CheckKind = Literal[
     "CHECK",
@@ -87,8 +85,6 @@ _REGEX_ALIASES = {
 def _build_default_context() -> Context:
     """构造用于解析与打印的默认 xdsl Context。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 复用 `kernel_gen.core.context.build_default_context()` 的基础 dialect 组合。
@@ -113,8 +109,6 @@ def _build_default_context() -> Context:
 def _render_operation_text(value: Operation) -> str:
     """把 xDSL operation 渲染为当前工具使用的稳定文本。
 
-    创建者: 榕
-    最后一次更改: 榕
 
     功能说明:
     - 使用 xDSL `Printer` 将 operation 打印为字符串。
@@ -140,8 +134,6 @@ def _render_operation_text(value: Operation) -> str:
 class IrcheckCaseBlock:
     """由分隔符切分得到的原始 case 文本块。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 表示一个尚未解析的 case 文本块及其在原始文本中的起始行号。
@@ -165,8 +157,6 @@ class IrcheckCaseBlock:
 class CheckDirective:
     """一条检查指令。
 
-    创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 表示头部注释区中的一条 `CHECK*:` 指令。
@@ -189,8 +179,6 @@ class CheckDirective:
 class IrcheckCase:
     """解析后的 case 对象（尚未执行）。
 
-    创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 保存 `compile_args`、检查指令列表与输入 IR 正文。
@@ -215,8 +203,6 @@ class IrcheckCase:
 class IrcheckResult:
     """一次执行结果。
 
-    创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 汇总执行是否成功、退出码、规范化后的 IR 与失败信息。
@@ -242,8 +228,6 @@ class IrcheckResult:
 class IrcheckCompileStep:
     """compile args 解析后的单步执行指令。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 表示 `COMPILE_ARGS` 中的一条 `--pass` 或 `--pipeline` 指令。
@@ -266,8 +250,6 @@ class IrcheckCompileStep:
 def _tokenize_check_pattern(text: str) -> list[tuple[str, str, str | None]]:
     """把 `CHECK*` 文本拆成 literal/ref/define 片段。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 识别 `[[NAME]]` 引用与 `[[NAME:REGEX]]` 定义。
@@ -313,8 +295,6 @@ def _tokenize_check_pattern(text: str) -> list[tuple[str, str, str | None]]:
 def _decode_literal_check_fragment(literal: str) -> str:
     r"""把 literal 模式下的兼容转义还原成字面量文本。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 的普通文本默认按字面量匹配。
@@ -351,8 +331,6 @@ def _decode_literal_check_fragment(literal: str) -> str:
 def _contains_invalid_regex_literal_fragment(literal: str) -> bool:
     r"""判断 literal 片段里是否残留了非法 regex 变量痕迹。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 原样出现的 `[[` / `]]` 视为未被 token 化的变量片段，必须报解析失败。
@@ -399,8 +377,6 @@ def _contains_invalid_regex_literal_fragment(literal: str) -> bool:
 def _compile_literal_fragment(literal: str) -> str:
     r"""把 CHECK literal 片段编译为 regex 片段。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 默认仍按字面量匹配（`re.escape`）。
@@ -438,8 +414,6 @@ def _compile_literal_fragment(literal: str) -> str:
 def _expand_regex_aliases(regex_text: str) -> str:
     """展开 `[[NAME:REGEX]]` 中支持的内置 alias。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 仅展开 `{reg}`、`{val}`、`{dim}`、`{int}` 四个 alias。
@@ -460,8 +434,6 @@ def _expand_regex_aliases(regex_text: str) -> str:
 def _validate_pattern_directive(text: str, kind: CheckKind, declared_variables: set[str]) -> list[str]:
     """校验 `CHECK*` 指令中的变量语法与 pattern 合法性。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 校验 `[[NAME:REGEX]]` / `[[NAME]]` 的结构是否合法。
@@ -516,8 +488,6 @@ def _compile_pattern_directive(
 ) -> tuple[re.Pattern[str], list[str]]:
     """按当前变量表把 `CHECK*` 指令编译为可执行的单行 pattern。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 将 `[[NAME]]` 引用替换为前序已捕获变量的字面量匹配。
@@ -558,8 +528,6 @@ def _compile_pattern_directive(
 def parse_ircheck_file(path: str) -> IrcheckCase:
     """从磁盘读取并解析单个 case 文件。
 
-    创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 解析头部注释区指令（`COMPILE_ARGS:` 与 `CHECK*:`）与输入 IR 正文。
@@ -586,8 +554,6 @@ def run_ircheck_file(
 ) -> IrcheckResult:
     """运行单个 case 文件。
 
-    创建者: 睡觉小分队
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 读取并解析 case 文件后执行 pass/pipeline。
@@ -629,8 +595,6 @@ def run_ircheck_text(
 ) -> IrcheckResult:
     """运行一段 case 文本。
 
-    创建者: 睡觉小分队
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 直接运行完整 case 文本（无需写入文件），其语义与 `run_ircheck_file` 一致。
@@ -668,8 +632,6 @@ builtin.module {}
 def _split_ircheck_text_into_case_blocks(text: str) -> list[IrcheckCaseBlock]:
     """按 lit 风格分隔符把文本切成多个 case 文本块。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 支持使用 `// -----` 作为 case 分隔符。
@@ -721,8 +683,6 @@ def _split_ircheck_text_into_case_blocks(text: str) -> list[IrcheckCaseBlock]:
 def _parse_ircheck_cases(text: str, *, source_path: str | None) -> list[IrcheckCase]:
     """解析文本中的一个或多个 case。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 单 case：行为与 `_parse_ircheck_text` 完全一致。
@@ -760,8 +720,6 @@ def _run_ircheck_cases(
 ) -> IrcheckResult:
     """顺序执行多个 case，并按 fail-fast 返回结果。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 顺序执行每个 case。
@@ -815,8 +773,6 @@ def _run_ircheck_cases(
 def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int = 0) -> IrcheckCase:
     """解析 case 文本为结构化对象。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 按 `spec/tools/ircheck.md` 解析头部注释区与输入 IR 正文。
@@ -933,8 +889,6 @@ def _run_ircheck_case(
 ) -> IrcheckResult:
     """执行单个解析后的 case。
 
-    创建者: 小李飞刀
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 解析 compile args 为 step 列表并按顺序执行 pass/pipeline。
@@ -1075,8 +1029,6 @@ def _run_ircheck_case(
 def _render_emitc_text(operation: Operation, emitc_target: str) -> str:
     """把 compile steps 结果转换为 emitc 目标源码文本。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - `target=cpu` 时接受单个 `func.func`，或仅包含一个顶层 `func.func` 的 `builtin.module`。
@@ -1130,8 +1082,6 @@ def _render_emitc_text(operation: Operation, emitc_target: str) -> str:
 def _is_empty_npu_demo_func(func_op: func.FuncOp) -> bool:
     """判断 `npu_demo` emitc 输入是否只是空函数壳。
 
-    创建者: 大闸蟹
-    最后修改人: 金铲铲大作战
 
     功能说明:
     - `ircheck` 的 `target=npu_demo` 源码分支只接受实际含有可发射 body 的函数。
@@ -1161,8 +1111,6 @@ def _is_empty_npu_demo_func(func_op: func.FuncOp) -> bool:
 def _normalize_emitc_text(text: str, *, emitc_target: str, source_path: str | None) -> str:
     """按目标后端规整 `ircheck` 的源码匹配视图。
 
-    创建者: 大闸蟹
-    最后修改人: 大闸蟹
 
     功能说明:
     - 保持真实 `gen_kernel` 生成源码不变，只在 `ircheck` 的 `CHECK*` 匹配文本里做 target 级切换。
@@ -1183,8 +1131,6 @@ def _normalize_emitc_text(text: str, *, emitc_target: str, source_path: str | No
 def _parse_cli_args(args: Sequence[str]) -> tuple[str, bool, str | None] | None:
     """解析 ircheck CLI 的文件路径、`-irdump` 与 `-emitc` 组合。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 支持 `<case-file>`、`-irdump <case-file>`、`-emitc{target=...} <case-file>` 以及两 flag 组合。
@@ -1237,8 +1183,6 @@ def _parse_cli_args(args: Sequence[str]) -> tuple[str, bool, str | None] | None:
 def _build_irdump_root(source_path: str | None, *, enabled: bool) -> Path | None:
     """构造 `.irdump/<stem>/` 根目录路径。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 当 `enabled=False` 时返回 `None`，不触发写盘行为。
@@ -1267,8 +1211,6 @@ def _build_irdump_root(source_path: str | None, *, enabled: bool) -> Path | None
 def _write_irdump_file(path: Path, content: str) -> None:
     """写入单个 IR dump 文件。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 自动创建父目录，并将规范化后的 IR 文本写入指定路径。
@@ -1291,8 +1233,6 @@ def _write_irdump_file(path: Path, content: str) -> None:
 def _parse_name_and_options(value: str) -> tuple[str, dict[str, str]] | None:
     """解析 name 与可选的 {k=v} 选项块。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 支持 `name` 与 `name={k=v}` 两种形态。
@@ -1340,8 +1280,6 @@ def _parse_name_and_options(value: str) -> tuple[str, dict[str, str]] | None:
 def _parse_compile_args(compile_args: str) -> list[IrcheckCompileStep] | None:
     """解析 `COMPILE_ARGS:` 字段为有序 step 列表。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 支持重复的 `--pass` / `--pipeline`，按文本顺序解析为多个 step。
@@ -1392,12 +1330,10 @@ def _parse_compile_args(compile_args: str) -> list[IrcheckCompileStep] | None:
 def _run_compile_step(ctx: Context, module: Operation, step: IrcheckCompileStep) -> Operation:
     """按单个 compile step 执行 pass 或 pipeline。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - `step.kind == "pass"`：构造并运行单个 pass。
-      兼容 legacy `Pass.run(...)` 与直接实现 `ModulePass.apply(...)` 的公开 pass。
+      只支持 xdsl `ModulePass.apply(ctx, module)` 公开入口。
     - `step.kind == "pipeline"`：构造并运行 pipeline（PassManager）。
 
     使用示例:
@@ -1414,15 +1350,12 @@ def _run_compile_step(ctx: Context, module: Operation, step: IrcheckCompileStep)
     options = step.options
     if kind == "pass":
         pass_obj = build_registered_pass(name, options)
-        if isinstance(pass_obj, Pass):
-            out = pass_obj.run(module)
-        elif isinstance(pass_obj, ModulePass):
-            if not isinstance(module, ModuleOp):
-                raise TypeError("built pass requires builtin.module target")
-            pass_obj.apply(ctx, module)
-            out = module
-        else:
+        if not isinstance(pass_obj, ModulePass):
             raise TypeError("built pass is not supported pass instance")
+        if not isinstance(module, ModuleOp):
+            raise TypeError("built pass requires builtin.module target")
+        pass_obj.apply(ctx, module)
+        out = module
     elif kind == "pipeline":
         pm = build_registered_pipeline(name, options)
         if not isinstance(pm, PassManager):
@@ -1439,8 +1372,6 @@ def _run_compile_step(ctx: Context, module: Operation, step: IrcheckCompileStep)
 def _normalize_ir(value: Operation) -> str:
     """打印 operation 为规范化 IR 文本。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 使用 xdsl `Printer` 将 operation 打印为文本，用于后续的 line-based 匹配。
@@ -1470,13 +1401,111 @@ def _normalize_ir(value: Operation) -> str:
     return text
 
 
+def _match_fail(
+    source_path: str | None,
+    prefix: str,
+    directive: CheckDirective,
+    detail: str,
+) -> tuple[bool, CheckDirective, str]:
+    """构造 ircheck 匹配失败结果。
+
+
+    功能说明:
+    - 统一附带 source path 与 directive 行号。
+
+    使用示例:
+    - _match_fail("case.ir", "IrcheckMatchError", directive, "not found")
+
+    关联文件:
+    - spec: spec/tools/ircheck.md
+    - test: test/tools/test_ircheck_runner.py
+    - 功能实现: kernel_gen/tools/ircheck.py
+    """
+
+    location = f"{source_path}:{directive.line_no}" if source_path else f"line {directive.line_no}"
+    return (
+        False,
+        directive,
+        f"{prefix}: {detail} ({location})",
+    )
+
+
+def _check_not_range(
+    lines: list[str],
+    pending_not: list[CheckDirective],
+    bound_variables: dict[str, str],
+    source_path: str | None,
+    start_line: int,
+    end_line_exclusive: int,
+) -> tuple[bool, CheckDirective | None, str | None]:
+    """检查 pending `CHECK-NOT` 是否在指定范围内命中。
+
+
+    功能说明:
+    - 命中禁止文本时返回标准失败三元组。
+
+    使用示例:
+    - _check_not_range(lines, pending_not, {}, "case.ir", 0, 3)
+
+    关联文件:
+    - spec: spec/tools/ircheck.md
+    - test: test/tools/test_ircheck_runner.py
+    - 功能实现: kernel_gen/tools/ircheck.py
+    """
+
+    for directive in pending_not:
+        pattern, _ = _compile_pattern_directive(directive, bound_variables)
+        for line in lines[start_line:end_line_exclusive]:
+            if pattern.search(line):
+                prefix = "IrcheckMatchError: CHECK-NOT matched forbidden text"
+                return _match_fail(
+                    source_path,
+                    prefix,
+                    directive,
+                    f"forbidden pattern '{directive.text}' matched",
+                )
+    return (True, None, None)
+
+
+def _find_check_line(
+    lines: list[str],
+    bound_variables: dict[str, str],
+    start_line: int,
+    directive: CheckDirective,
+) -> tuple[int | None, dict[str, str] | None]:
+    """从指定行开始查找一个正向 CHECK。
+
+
+    功能说明:
+    - 返回匹配行号与本次新增捕获变量。
+
+    使用示例:
+    - line_no, captured = _find_check_line(lines, {}, 0, directive)
+
+    关联文件:
+    - spec: spec/tools/ircheck.md
+    - test: test/tools/test_ircheck_runner.py
+    - 功能实现: kernel_gen/tools/ircheck.py
+    """
+
+    pattern, definition_names = _compile_pattern_directive(directive, bound_variables)
+    for idx in range(start_line, len(lines)):
+        match = pattern.search(lines[idx])
+        if match is None:
+            continue
+        captured = {
+            name: match.group(name)
+            for name in definition_names
+        }
+        return idx, captured
+    return None, None
+
+
 def _match_checks(
     actual_ir: str, checks: Sequence[CheckDirective], *, source_path: str | None
 ) -> tuple[bool, CheckDirective | None, str | None]:
     """在规范化 IR 文本上执行检查指令匹配。
 
-    创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 按 `spec/tools/ircheck.md` 定义的 FileCheck 风格逐行语义实现：
@@ -1502,42 +1531,6 @@ def _match_checks(
     pending_not: list[CheckDirective] = []
     bound_variables: dict[str, str] = {}
 
-    def _fail(prefix: str, directive: CheckDirective, detail: str) -> tuple[bool, CheckDirective, str]:
-        location = f"{source_path}:{directive.line_no}" if source_path else f"line {directive.line_no}"
-        return (
-            False,
-            directive,
-            f"{prefix}: {detail} ({location})",
-        )
-
-    def _check_not_range(start_line: int, end_line_exclusive: int) -> tuple[bool, CheckDirective | None, str | None]:
-        for directive in pending_not:
-            pattern, _ = _compile_pattern_directive(directive, bound_variables)
-            for line in lines[start_line:end_line_exclusive]:
-                if pattern.search(line):
-                    prefix = "IrcheckMatchError: CHECK-NOT matched forbidden text"
-                    return _fail(
-                        prefix,
-                        directive,
-                        f"forbidden pattern '{directive.text}' matched",
-                    )
-        return (True, None, None)
-
-    def _find_check_line(
-        start_line: int, directive: CheckDirective
-    ) -> tuple[int | None, dict[str, str] | None]:
-        pattern, definition_names = _compile_pattern_directive(directive, bound_variables)
-        for idx in range(start_line, len(lines)):
-            match = pattern.search(lines[idx])
-            if match is None:
-                continue
-            captured = {
-                name: match.group(name)
-                for name in definition_names
-            }
-            return idx, captured
-        return None, None
-
     for directive in checks:
         if directive.kind == "CHECK-NOT":
             pending_not.append(directive)
@@ -1545,14 +1538,15 @@ def _match_checks(
 
         if directive.kind == "CHECK":
             start_line = 0 if last_positive_line is None else last_positive_line + 1
-            match_line, captured = _find_check_line(start_line, directive)
+            match_line, captured = _find_check_line(lines, bound_variables, start_line, directive)
             if match_line is None:
-                return _fail(
+                return _match_fail(
+                    source_path,
                     "IrcheckMatchError: CHECK not found",
                     directive,
                     f"pattern '{directive.text}' not found",
                 )
-            ok, failed, message = _check_not_range(start_line, match_line)
+            ok, failed, message = _check_not_range(lines, pending_not, bound_variables, source_path, start_line, match_line)
             if not ok:
                 return (ok, failed, message)
             pending_not.clear()
@@ -1563,18 +1557,20 @@ def _match_checks(
 
         if directive.kind == "CHECK-NEXT":
             if last_positive_line is None:
-                return _fail(
+                return _match_fail(
+                    source_path,
                     "IrcheckMatchError: CHECK-NEXT not found on next line",
                     directive,
                     "CHECK-NEXT requires previous positive check",
                 )
             start_line = last_positive_line + 1
             match_line = start_line
-            ok, failed, message = _check_not_range(start_line, match_line)
+            ok, failed, message = _check_not_range(lines, pending_not, bound_variables, source_path, start_line, match_line)
             if not ok:
                 return (ok, failed, message)
             if match_line >= len(lines):
-                return _fail(
+                return _match_fail(
+                    source_path,
                     "IrcheckMatchError: CHECK-NEXT not found on next line",
                     directive,
                     f"pattern '{directive.text}' not found on next line",
@@ -1582,7 +1578,8 @@ def _match_checks(
             pattern, definition_names = _compile_pattern_directive(directive, bound_variables)
             match = pattern.search(lines[match_line])
             if match is None:
-                return _fail(
+                return _match_fail(
+                    source_path,
                     "IrcheckMatchError: CHECK-NEXT not found on next line",
                     directive,
                     f"pattern '{directive.text}' not found on next line",
@@ -1593,7 +1590,8 @@ def _match_checks(
             last_positive_line = match_line
             continue
 
-        return _fail(  # pragma: no cover - internal invariant
+        return _match_fail(  # pragma: no cover - internal invariant
+            source_path,
             "IrcheckMatchError: CHECK not found",
             directive,
             f"unknown directive kind {directive.kind!r}",
@@ -1601,7 +1599,7 @@ def _match_checks(
 
     if pending_not:
         start_line = 0 if last_positive_line is None else last_positive_line + 1
-        ok, failed, message = _check_not_range(start_line, len(lines))
+        ok, failed, message = _check_not_range(lines, pending_not, bound_variables, source_path, start_line, len(lines))
         if not ok:
             return (ok, failed, message)
 
@@ -1611,8 +1609,6 @@ def _match_checks(
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI 入口：`python -m kernel_gen.tools.ircheck <case-file>`。
 
-    创建者: 睡觉小分队
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 运行单个 case 文件并在标准输出打印 `true/false`。

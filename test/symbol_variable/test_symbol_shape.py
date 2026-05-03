@@ -1,7 +1,5 @@
 """symbol_shape tests.
 
-创建者: 小李飞刀
-最后一次更改: OpenAI Codex
 
 功能说明:
 - 覆盖 SymbolShape / SymbolList 的构造、访问、序列化与异常路径。
@@ -18,12 +16,13 @@
 from __future__ import annotations
 
 import pytest
+import sympy as sp
 
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolList, SymbolShape
 
 
-def _symbols(values: list[SymbolDim]) -> list[object]:
+def _symbols(values: list[SymbolDim]) -> list[sp.Basic]:
     """提取测试中的底层符号列表。"""
     return [value.get_symbol() for value in values]
 

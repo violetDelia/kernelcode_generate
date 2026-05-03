@@ -1,7 +1,5 @@
 """CPU NN include tests.
 
-创建者: 小李飞刀
-最后一次更改: 我不是牛马
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 include/cpu/Nn.h 的逐元素、broadcast 与 img2col 语义。
@@ -37,8 +35,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def _compile_and_run(source: str) -> None:
     """编译并运行 C++ 测试片段。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 使用 g++ 编译临时源码并执行生成的程序。
@@ -94,8 +90,6 @@ def _compile_and_run(source: str) -> None:
 def _compile_expect_failure(source: str, expected_stderr: str) -> None:
     """编译 C++ 片段并断言其编译失败且报错包含指定关键字。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 使用 g++ 编译临时源码，并验证失败信息命中指定关键字。
@@ -141,8 +135,6 @@ def _compile_expect_failure(source: str, expected_stderr: str) -> None:
 def _compile_and_run_expect_failure(source: str) -> None:
     """编译并运行 C++ 片段，断言程序因契约失败而非零退出。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 使用 g++ 编译临时源码，并验证运行结果为非零退出码。
@@ -196,10 +188,6 @@ def _compile_and_run_expect_failure(source: str) -> None:
 
 
 # INC-NN-001
-# 创建者: 小李飞刀
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
-# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
 # 测试目的: 验证逐元素加法输出正确。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_add_success
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -235,10 +223,6 @@ int main() {
 
 
 # INC-NN-002
-# 创建者: 小李飞刀
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
-# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
 # 测试目的: 验证逐元素比较输出 predicate 语义结果。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_compare_eq
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -277,10 +261,6 @@ int main() {
 
 
 # INC-NN-003
-# 创建者: 小李飞刀
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
-# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
 # 测试目的: 验证 broadcast 支持 singleton 扩张。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_broadcast_success
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -320,10 +300,6 @@ int main() {
 
 
 # INC-NN-004
-# 创建者: 小李飞刀
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
-# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
 # 测试目的: 验证 broadcast 支持前置维插入。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_broadcast_prepend_dim
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -363,10 +339,6 @@ int main() {
 
 
 # INC-NN-005
-# 创建者: 小李飞刀
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
-# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
 # 测试目的: 验证逐元素乘法输出正确。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_mul_success
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -402,10 +374,6 @@ int main() {
 
 
 # INC-NN-006
-# 创建者: 金铲铲大作战
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
-# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
 # 测试目的: 验证逐元素减法输出正确。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_sub_success
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -441,10 +409,6 @@ int main() {
 
 
 # INC-NN-007
-# 创建者: 金铲铲大作战
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
-# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
 # 测试目的: 验证逐元素除法输出正确。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_truediv_success
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -480,10 +444,6 @@ int main() {
 
 
 # INC-NN-008
-# 创建者: 金铲铲大作战
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
-# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
 # 测试目的: 验证逐元素不等比较输出 predicate 语义结果。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_compare_ne
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -519,10 +479,6 @@ int main() {
 
 
 # INC-NN-009
-# 创建者: 金铲铲大作战
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
-# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
 # 测试目的: 验证逐元素小于比较输出 predicate 语义结果。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_compare_lt
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -558,10 +514,6 @@ int main() {
 
 
 # INC-NN-010
-# 创建者: 金铲铲大作战
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
-# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
 # 测试目的: 验证逐元素小于等于比较输出 predicate 语义结果。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_compare_le
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -597,10 +549,6 @@ int main() {
 
 
 # INC-NN-011
-# 创建者: 金铲铲大作战
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
-# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
 # 测试目的: 验证逐元素大于比较输出 predicate 语义结果。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_compare_gt
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -636,10 +584,6 @@ int main() {
 
 
 # INC-NN-012
-# 创建者: 金铲铲大作战
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
-# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
 # 测试目的: 验证逐元素大于等于比较输出 predicate 语义结果。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_compare_ge
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -675,10 +619,6 @@ int main() {
 
 
 # INC-NN-013
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-29 18:20:00 +0800
-# 最近一次运行成功时间: 2026-03-29 18:20:00 +0800
 # 测试目的: 验证 cpu::img2col1d 的固定签名与成功展开语义。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_img2col1d_success_and_signature
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -729,10 +669,6 @@ int main() {
 
 
 # INC-NN-014
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-29 18:20:00 +0800
-# 最近一次运行成功时间: 2026-03-29 18:20:00 +0800
 # 测试目的: 验证 cpu::img2col2d 的固定签名与成功展开语义。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_img2col2d_success_and_signature
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -788,10 +724,6 @@ int main() {
 
 
 # INC-NN-015
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-29 18:20:00 +0800
-# 最近一次运行成功时间: 2026-03-29 18:20:00 +0800
 # 测试目的: 验证 cpu::img2col1d 在 rank 前置条件不满足时触发契约失败。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_img2col1d_contract_violation_traps
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -821,10 +753,6 @@ int main() {
 
 
 # INC-NN-016
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-29 18:20:00 +0800
-# 最近一次运行成功时间: 2026-03-29 18:20:00 +0800
 # 测试目的: 验证 cpu::img2col2d 在 shape 前置条件不满足时触发契约失败。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_img2col2d_contract_violation_traps
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -854,10 +782,6 @@ int main() {
 
 
 # INC-NN-017
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-29 18:20:00 +0800
-# 最近一次运行成功时间: 2026-03-29 18:20:00 +0800
 # 测试目的: 验证 cpu::img2col1d 在 stride 前置条件不满足时触发契约失败。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_img2col1d_stride_violation_traps
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -887,10 +811,6 @@ int main() {
 
 
 # INC-NN-018
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-29 18:20:00 +0800
-# 最近一次运行成功时间: 2026-03-29 18:20:00 +0800
 # 测试目的: 验证 include/cpu/Nn.h 不暴露笼统 cpu::img2col 公开名。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_img2col_generic_name_is_forbidden
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -911,10 +831,6 @@ int main() {
 
 
 # INC-NN-019
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
-# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
 # 测试目的: 验证 cpu::exp 逐元素计算与元信息一致性。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_exp_success
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -959,10 +875,6 @@ int main() {
 
 
 # INC-NN-020
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
-# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
 # 测试目的: 验证 cpu::exp 在 rank/shape/stride 不匹配时触发契约失败。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_exp_contract_violation_traps
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -990,10 +902,6 @@ int main() {
 
 
 # INC-NN-021
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
-# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
 # 测试目的: 验证 cpu::reduce_sum 归约成功路径与 keepdim=false 输出契约。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_reduce_sum_success
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -1036,10 +944,6 @@ int main() {
 
 
 # INC-NN-022
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
-# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
 # 测试目的: 验证 cpu::reduce_sum 在轴集合非法时触发契约失败。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_reduce_sum_axis_contract_violation_traps
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -1069,10 +973,6 @@ int main() {
 
 
 # INC-NN-023
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
-# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
 # 测试目的: 验证 cpu::reduce_min 归约成功路径与输出契约。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_reduce_min_success
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -1118,10 +1018,6 @@ int main() {
 
 
 # INC-NN-024
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
-# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
 # 测试目的: 验证 cpu::reduce_min 在空归约域时触发契约失败。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_reduce_min_empty_extent_traps
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -1151,10 +1047,6 @@ int main() {
 
 
 # INC-NN-025
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
-# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
 # 测试目的: 验证 cpu::reduce_max 归约成功路径与 keepdim=true 输出契约。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_reduce_max_success
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -1190,10 +1082,6 @@ int main() {
 
 
 # INC-NN-026
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
-# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
 # 测试目的: 验证 cpu::reduce_max 在空归约域时触发契约失败。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_reduce_max_empty_extent_traps
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -1222,10 +1110,6 @@ int main() {
     _compile_and_run_expect_failure(source)
 
 # INC-NN-027
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-29 21:03:08 +0800
-# 最近一次运行成功时间: 2026-03-29 21:03:08 +0800
 # 测试目的: 验证 cpu::add 支持 Memory + scalar overload。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_add_scalar_rhs_success
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -1259,8 +1143,6 @@ int main() {
 
 
 # INC-NN-027A
-# 创建者: 大闸蟹
-# 最后一次更改: 大闸蟹
 # 测试目的: 验证 cpu::add 支持 `Memory<int32_t> + long long`，以承接 `memory + symbol.int` 的 CPU 公开口径。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_add_scalar_rhs_long_long_success
 # 对应功能实现文件路径: include/cpu/Nn.h
@@ -1296,10 +1178,6 @@ int main() {
 
 
 # INC-NN-028
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-29 21:03:08 +0800
-# 最近一次运行成功时间: 2026-03-29 21:03:08 +0800
 # 测试目的: 验证 cpu::add 支持 scalar + Memory overload。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_add_scalar_lhs_success
 # 对应功能实现文件路径: include/cpu/Nn.h

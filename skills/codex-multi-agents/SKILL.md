@@ -6,8 +6,6 @@ description: 基于 tmux 的多会话协作框架。
 # codex-multi-agents
 
 ## 文档信息
-- 创建者：`榕`
-- 最后一次更改：`榕`
 
 ## 约定
 - 如无特别说明，`agents/` 位于项目根目录。

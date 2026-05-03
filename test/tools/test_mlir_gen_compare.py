@@ -1,7 +1,5 @@
 """mlir_gen compare tests.
 
-创建者: 睡觉小分队
-最后一次更改: 榕
 
 功能说明:
 - 覆盖 mlir_gen_compare(...) / mlir_gen_compare_text(...) / compare_mlir_file(...) 的 True/False 路径与非法文本返回 False 的行为。
@@ -17,10 +15,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import sys
 from pathlib import Path
+from typing import TypeAlias
 
 import pytest
+from xdsl.dialects.builtin import ArrayAttr, IntAttr, ModuleOp, StringAttr, i32
 from xdsl.parser import Parser
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -28,7 +29,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.core.context import build_default_context
-import kernel_gen.dsl.mlir_gen as public_mlir_gen
+from kernel_gen.dialect import NnMemorySpaceAttr, NnMemoryType
+import kernel_gen.dsl.ast.mlir_gen as public_mlir_gen
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.tools import mlir_gen_compare as compare_module
 
 _SIMPLE_MODULE_TEXT = """builtin.module {
@@ -55,12 +59,21 @@ _SCF_MODULE_TEXT = """builtin.module {
 }
 """
 
+DslRuntimeArg: TypeAlias = "Memory | SymbolDim | int | float | bool | str"
+MlirGenArgument: TypeAlias = "Callable[..., None] | DslRuntimeArg | tuple[DslRuntimeArg, ...] | None"
+MlirGenKeyword: TypeAlias = "DslRuntimeArg | tuple[DslRuntimeArg, ...] | None | str"
+
+
+class _InvalidMlirGenResult:
+    """Sentinel returned by stubs that intentionally violate the public result contract."""
+
+
+MlirGenStubResult: TypeAlias = "ModuleOp | _InvalidMlirGenResult"
+
 
 def _dummy_kernel() -> None:
     """占位 kernel，用于 mlir_gen_compare 测试。
 
-    创建者: 睡觉小分队
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 作为 mlir_gen_compare 的入参占位，便于测试走通比较逻辑。
@@ -77,11 +90,9 @@ def _dummy_kernel() -> None:
     return None
 
 
-def _stub_mlir_gen(*_args: object, **_kwargs: object) -> object:
+def _stub_mlir_gen(*_args: MlirGenArgument, **_kwargs: MlirGenKeyword) -> ModuleOp:
     """生成用于测试的固定 builtin.module。
 
-    创建者: 睡觉小分队
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 返回固定 builtin.module，便于验证 mlir_gen_compare 的比较逻辑。
@@ -109,15 +120,13 @@ def test_build_default_context_parses_scf_if() -> None:
 
 def _install_public_mlir_gen_stub(
     monkeypatch: pytest.MonkeyPatch,
-    stub: object,
+    stub: Callable[..., MlirGenStubResult],
 ) -> None:
     """通过公开 mlir_gen 入口安装测试 stub。
 
-    创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
 
     功能说明:
-    - 只 monkeypatch `kernel_gen.dsl.mlir_gen.mlir_gen` 这个公开入口。
+    - 只 monkeypatch `kernel_gen.dsl.ast.mlir_gen.mlir_gen` 这个公开入口。
     - 避免测试再直连 `mlir_gen_compare.py` 的内部导入辅助逻辑。
 
     使用示例:
@@ -132,11 +141,9 @@ def _install_public_mlir_gen_stub(
     monkeypatch.setattr(public_mlir_gen, "mlir_gen", stub)
 
 
-def _build_module_with_unregistered_op() -> object:
+def _build_module_with_unregistered_op() -> ModuleOp:
     """构造一个包含未注册 op 的最小 builtin.module。
 
-    创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 用于覆盖 `normalize_module_text(...)` 二次解析失败时 `mlir_gen_compare` 返回 False 的公开行为。
@@ -151,7 +158,7 @@ def _build_module_with_unregistered_op() -> object:
     - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
     """
 
-    from xdsl.dialects.builtin import ModuleOp, UnregisteredOp
+    from xdsl.dialects.builtin import UnregisteredOp
     from xdsl.dialects.func import FuncOp, ReturnOp
     from xdsl.ir import Block, Region
 
@@ -163,11 +170,41 @@ def _build_module_with_unregistered_op() -> object:
     return ModuleOp([func])
 
 
+def _build_module_with_memory_floor_div_expr() -> ModuleOp:
+    """构造一个含 `//` memory shape 表达式的 builtin.module。
+
+    创建者: 榕
+    最后一次更改: 榕
+
+    功能说明:
+    - 用于覆盖 mlir_gen_compare 对 `!nn.memory` floor-div 文本的兜底比较路径。
+    - 该文本不能通过 xdsl parser 直接解析，因为 `//` 会先被词法层识别为注释。
+
+    使用示例:
+    - module = _build_module_with_memory_floor_div_expr()
+
+    关联文件:
+    - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
+    - test: [test/tools/test_mlir_gen_compare.py](test/tools/test_mlir_gen_compare.py)
+    - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
+    """
+
+    from xdsl.dialects.func import FuncOp, ReturnOp
+    from xdsl.ir import Block, Region
+
+    memory_type = NnMemoryType(
+        ArrayAttr([StringAttr("M // S + 1")]),
+        ArrayAttr([IntAttr(1)]),
+        i32,
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    block = Block(arg_types=[memory_type])
+    block.add_op(ReturnOp())
+    func = FuncOp.from_region("main", [memory_type], [], Region(block))
+    return ModuleOp([func])
+
+
 # TC-MLIR-GEN-COMPARE-001
-# 创建者: 睡觉小分队
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 对齐 mlir_gen_compare 的一致性比较路径。
 # 测试目的: 验证 mlir_gen_compare 在预期一致时返回 True。
 # 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_true
@@ -189,10 +226,6 @@ def test_mlir_gen_compare_true(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
 
 # TC-MLIR-GEN-COMPARE-011
-# 创建者: 睡觉小分队
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 对齐 compare_mlir_file 兼容接口与 mlir_gen_compare 的等价行为。
 # 测试目的: 验证 compare_mlir_file 在预期一致时返回 True。
 # 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_compare_mlir_file_alias_true
@@ -214,10 +247,6 @@ def test_compare_mlir_file_alias_true(tmp_path: Path, monkeypatch: pytest.Monkey
 
 
 # TC-MLIR-GEN-COMPARE-002
-# 创建者: 睡觉小分队
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 对齐 mlir_gen_compare 的不一致返回路径。
 # 测试目的: 验证 mlir_gen_compare 在预期不一致时返回 False。
 # 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_returns_false_on_mismatch
@@ -243,10 +272,6 @@ def test_mlir_gen_compare_returns_false_on_mismatch(
 
 
 # TC-MLIR-GEN-COMPARE-003
-# 创建者: 睡觉小分队
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 对齐 mlir_gen_compare 的非法文本返回路径。
 # 测试目的: 验证 mlir_gen_compare 在非法文本时返回 False。
 # 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_returns_false_on_invalid_text
@@ -270,10 +295,6 @@ def test_mlir_gen_compare_returns_false_on_invalid_text(
 
 
 # TC-MLIR-GEN-COMPARE-004
-# 创建者: 睡觉小分队
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 对齐 mlir_gen_compare 读取非 UTF-8 文本时返回 False 的分支。
 # 测试目的: 验证遇到 UnicodeError 时 mlir_gen_compare 返回 False（不抛异常）。
 # 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_returns_false_on_non_utf8_text
@@ -297,10 +318,6 @@ def test_mlir_gen_compare_returns_false_on_non_utf8_text(
 
 
 # TC-MLIR-GEN-COMPARE-005
-# 创建者: 睡觉小分队
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 对齐 mlir_gen_compare 的 arith dialect 场景解析与归一化比较。
 # 测试目的: 验证 mlir_gen_compare 在 actual/expected 含 arith.constant 时返回 True（不抛 ParseError）。
 # 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_true_with_arith
@@ -313,7 +330,7 @@ def test_mlir_gen_compare_true_with_arith(
     expected_path = tmp_path / "expected_arith.mlir"
     expected_path.write_text(_ARITH_MODULE_TEXT, encoding="utf-8")
 
-    def _stub_mlir_gen_arith(*_args: object, **_kwargs: object) -> object:
+    def _stub_mlir_gen_arith(*_args: MlirGenArgument, **_kwargs: MlirGenKeyword) -> ModuleOp:
         ctx = build_default_context()
         return Parser(ctx, _ARITH_MODULE_TEXT).parse_module()
 
@@ -329,10 +346,6 @@ def test_mlir_gen_compare_true_with_arith(
 
 
 # TC-MLIR-GEN-COMPARE-006
-# 创建者: 睡觉小分队
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 对齐 mlir_gen_compare 的“归一化二次解析失败 -> False”兜底行为。
 # 测试目的: 验证当默认 Context 未加载 arith 时，normalize 过程解析失败不应抛异常，应返回 False。
 # 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_returns_false_on_normalize_parse_error
@@ -358,10 +371,6 @@ def test_mlir_gen_compare_returns_false_on_normalize_parse_error(
 
 
 # TC-MLIR-GEN-COMPARE-007
-# 创建者: 睡觉小分队
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 对齐 mlir_gen_compare 默认 Context 的 dialect 覆盖集合。
 # 测试目的: 验证默认 Context 至少加载 builtin/func/arith 与 nn/kernel/symbol/dma/arch。
 # 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_default_context_loads_required_dialects
@@ -379,10 +388,6 @@ def test_default_context_loads_required_dialects() -> None:
 
 
 # TC-MLIR-GEN-COMPARE-008
-# 创建者: 睡觉小分队
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 对齐 mlir_gen_compare 在 actual 非 builtin.module 时的返回语义。
 # 测试目的: 验证当 mlir_gen(...) 返回值不是 builtin.module 时，mlir_gen_compare 返回 False（不抛 TypeError）。
 # 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_returns_false_when_actual_not_module
@@ -394,7 +399,7 @@ def test_mlir_gen_compare_returns_false_when_actual_not_module(
 ) -> None:
     expected_path = tmp_path / "expected.mlir"
     expected_path.write_text(_SIMPLE_MODULE_TEXT, encoding="utf-8")
-    _install_public_mlir_gen_stub(monkeypatch, lambda *_a, **_k: object())
+    _install_public_mlir_gen_stub(monkeypatch, lambda *_a, **_k: _InvalidMlirGenResult())
 
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
@@ -406,10 +411,7 @@ def test_mlir_gen_compare_returns_false_when_actual_not_module(
 
 
 # TC-MLIR-GEN-COMPARE-003A
-# 创建者: 金铲铲大作战
 # 最后更改: 金铲铲大作战
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 验证 mlir_gen_compare 不再对旧 expectation 中的 dma.view 结果 dtype 做兼容修补。
 # 测试目的: 锁定 expected 文本若仍保留旧 f32 结果类型，会直接比较失败。
 # 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_does_not_repair_legacy_dma_view_result_dtype
@@ -432,7 +434,7 @@ def test_mlir_gen_compare_does_not_repair_legacy_dma_view_result_dtype(
         1,
     )
 
-    def _stub_mlir_gen_dma(*_args: object, **_kwargs: object) -> object:
+    def _stub_mlir_gen_dma(*_args: MlirGenArgument, **_kwargs: MlirGenKeyword) -> ModuleOp:
         ctx = build_default_context()
         return Parser(ctx, actual_text).parse_module()
 
@@ -447,11 +449,65 @@ def test_mlir_gen_compare_does_not_repair_legacy_dma_view_result_dtype(
     assert ok is False
 
 
+# TC-MLIR-GEN-COMPARE-012
+# 功能说明: 对齐 `!nn.memory` 中 `//` shape 表达式的文本兜底比较。
+# 测试目的: 验证 expected 文本因 `//` 无法被 xdsl parser 解析时，仍能按空白归一化文本比较成功。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_handles_memory_floor_div_expr
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_mlir_gen_compare_text_handles_memory_floor_div_expr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actual_module = _build_module_with_memory_floor_div_expr()
+    expected_text = """builtin.module {
+  func.func @main(
+      %0 : !nn.memory<[M // S + 1], [1], i32, #nn.space<global>>) {
+    func.return
+  }
+}
+"""
+    _install_public_mlir_gen_stub(monkeypatch, lambda *_a, **_k: actual_module)
+
+    ok = compare_module.mlir_gen_compare_text(
+        fn=_dummy_kernel,
+        runtime_args=None,
+        mlir_text=expected_text,
+    )
+
+    assert ok is True
+
+
+# TC-MLIR-GEN-COMPARE-013
+# 功能说明: 对齐 `!nn.memory` 中 `//` shape 表达式文本兜底比较的不一致路径。
+# 测试目的: 验证兜底比较不会把不同 floor-div 表达式误判为一致。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_rejects_memory_floor_div_mismatch
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_mlir_gen_compare_text_rejects_memory_floor_div_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actual_module = _build_module_with_memory_floor_div_expr()
+    expected_text = """builtin.module {
+  func.func @main(
+      %0 : !nn.memory<[M // S + 2], [1], i32, #nn.space<global>>) {
+    func.return
+  }
+}
+"""
+    _install_public_mlir_gen_stub(monkeypatch, lambda *_a, **_k: actual_module)
+
+    ok = compare_module.mlir_gen_compare_text(
+        fn=_dummy_kernel,
+        runtime_args=None,
+        mlir_text=expected_text,
+    )
+
+    assert ok is False
+
+
 # TC-MLIR-GEN-COMPARE-009
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 对齐 mlir_gen_compare_text 的一致性比较路径。
 # 测试目的: 验证 mlir_gen_compare_text 在预期一致时返回 True。
 # 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_true
@@ -470,11 +526,31 @@ def test_mlir_gen_compare_text_true(monkeypatch: pytest.MonkeyPatch) -> None:
     assert ok is True
 
 
+def test_mlir_gen_compare_text_ignores_line_comment_slashes_for_memory_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """expected 注释中的 `//` 不应触发 memory floor-div 原始文本比较。"""
+
+    memory_module_text = """builtin.module {
+  func.func @main(%0 : !nn.memory<[4], [1], i32, #nn.space<global>>) {
+    func.return
+  }
+}
+"""
+    expected_text = "// expected file comment with // slashes\n" + memory_module_text
+    actual_module = Parser(build_default_context(), memory_module_text).parse_module()
+    _install_public_mlir_gen_stub(monkeypatch, lambda *_a, **_k: actual_module)
+
+    ok = compare_module.mlir_gen_compare_text(
+        fn=_dummy_kernel,
+        runtime_args=None,
+        mlir_text=expected_text,
+    )
+
+    assert ok is True
+
+
 # TC-MLIR-GEN-COMPARE-010
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 功能说明: 对齐 mlir_gen_compare_text 的非法文本返回路径。
 # 测试目的: 验证 mlir_gen_compare_text 在非法文本时返回 False（不抛 ParseError）。
 # 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_returns_false_on_invalid_text

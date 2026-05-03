@@ -1,7 +1,5 @@
 """codex-multi-agents-task.sh tests.
 
-创建者: 榕
-最后一次更改: Codex
 
 功能说明:
 - 覆盖 task 脚本的任务分发、完成、暂停、继续、改派、新建、删除、状态查询与错误返回码路径。
@@ -43,8 +41,6 @@ pytestmark = pytest.mark.infra
 def _default_agents_list_path() -> Path:
     """返回当前测试现场可读的 canonical `agents-lists.md` 路径。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 优先使用当前 `REPO_ROOT` 下的 `agents/codex-multi-agents/agents-lists.md`。
@@ -431,10 +427,6 @@ def get_agent_status(path: Path, name: str) -> str:
 
 
 # TC-001
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:16:41 +0800
-# 最近一次运行成功时间: 2026-03-22 17:16:41 +0800
 # 测试目的: 验证 -dispatch 成功将任务从任务列表移入正在执行并写入指派/状态。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -481,8 +473,6 @@ def test_dispatch_task_success(tmp_path: Path) -> None:
 
 
 # TC-001A
-# 创建者: OpenAI
-# 最后一次更改: OpenAI
 # 测试目的: 验证 -dispatch 不要求显式提供 -type，直接使用任务记录中的任务类型。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -505,8 +495,6 @@ def test_dispatch_does_not_require_type(tmp_path: Path) -> None:
 
 
 # TC-001B
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
 # 测试目的: 验证 -dispatch 可以分发计划级 execute 任务给 execute 专职角色。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -563,10 +551,6 @@ def test_dispatch_accepts_execute_task_type(tmp_path: Path) -> None:
 
 
 # TC-002
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:16:41 +0800
-# 最近一次运行成功时间: 2026-03-22 17:16:41 +0800
 # 测试目的: 验证 -dispatch 任务不存在返回 RC=3。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -597,8 +581,6 @@ def test_dispatch_missing_task_returns_rc3(tmp_path: Path) -> None:
 
 
 # TC-002A
-# 创建者: OpenAI
-# 最后一次更改: Codex
 # 测试目的: 验证 -dispatch 缺少 -agents-list 参数时返回 RC=1。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -624,8 +606,6 @@ def test_dispatch_requires_agents_list(tmp_path: Path) -> None:
 
 
 # TC-002B
-# 创建者: Codex
-# 最后一次更改: Codex
 # 测试目的: 验证 -dispatch 传入的 -agents-list 必须与配置中的 canonical AGENTS_FILE 一致。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -659,8 +639,6 @@ def test_dispatch_rejects_non_canonical_agents_list(tmp_path: Path) -> None:
 
 
 # TC-002C
-# 创建者: Codex
-# 最后一次更改: Codex
 # 测试目的: 验证 -dispatch 只更新目标角色状态，不会重置未触及角色。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -715,8 +693,6 @@ def test_dispatch_updates_only_target_agent_status(tmp_path: Path) -> None:
 
 
 # TC-002D
-# 创建者: Codex
-# 最后一次更改: Codex
 # 测试目的: 验证 -dispatch 会拒绝把任务继续分给已经拥有运行中任务的角色，即使名单状态是 stale free。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -779,10 +755,6 @@ def test_dispatch_rejects_assignee_with_existing_running_task_even_if_status_is_
 
 
 # TC-003
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:16:41 +0800
-# 最近一次运行成功时间: 2026-03-22 17:16:41 +0800
 # 测试目的: 验证 -done 成功移除任务并写入 DONE.md。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -814,10 +786,6 @@ def test_done_task_moves_to_done_file_success(tmp_path: Path) -> None:
 
 
 # TC-003A
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-13 07:40:00 +0800
-# 最近一次运行成功时间: 2026-04-13 07:40:00 +0800
 # 测试目的: 验证 合并角色调用 -done 可成功完成任务。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -880,10 +848,6 @@ def test_done_allows_merge_operator(tmp_path: Path) -> None:
 
 
 # TC-003B
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-13 07:40:00 +0800
-# 最近一次运行成功时间: 2026-04-13 07:40:00 +0800
 # 测试目的: 验证 合并角色不能完成非 merge 任务。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -939,10 +903,6 @@ def test_done_rejects_merge_operator_for_non_merge_task(tmp_path: Path) -> None:
 
 
 # TC-003C
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-13 07:40:00 +0800
-# 最近一次运行成功时间: 2026-04-13 07:40:00 +0800
 # 测试目的: 验证 合并角色不能完成他人 merge 任务。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -999,10 +959,6 @@ def test_done_rejects_merge_operator_for_other_assignee(tmp_path: Path) -> None:
 
 
 # TC-004
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:16:41 +0800
-# 最近一次运行成功时间: 2026-03-22 17:16:41 +0800
 # 测试目的: 验证 -done 任务不存在返回 RC=3。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1019,8 +975,6 @@ def test_done_missing_task_returns_rc3(tmp_path: Path) -> None:
 
 
 # TC-004A
-# 创建者: OpenAI
-# 最后一次更改: Codex
 # 测试目的: 验证 -done 缺少 -agents-list 参数时返回 RC=1。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1035,8 +989,6 @@ def test_done_requires_agents_list(tmp_path: Path) -> None:
 
 
 # TC-004B
-# 创建者: Codex
-# 最后一次更改: Codex
 # 测试目的: 验证 -done 只更新完成任务对应角色状态，不会重置未触及角色。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1105,8 +1057,6 @@ def test_done_updates_only_completed_assignee_status(tmp_path: Path) -> None:
 
 
 # TC-004C
-# 创建者: Codex
-# 最后一次更改: Codex
 # 测试目的: 验证 -done 遇到当前任务接手人状态与运行表不一致时直接失败，不会偷偷重置名单。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1152,10 +1102,6 @@ def test_done_rejects_current_assignee_status_mismatch(tmp_path: Path) -> None:
 
 
 # TC-005
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:16:41 +0800
-# 最近一次运行成功时间: 2026-03-22 17:16:41 +0800
 # 测试目的: 验证 -pause 成功将任务状态更新为 暂停。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1177,10 +1123,6 @@ def test_pause_task_success(tmp_path: Path) -> None:
 
 
 # TC-006
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:16:41 +0800
-# 最近一次运行成功时间: 2026-03-22 17:16:41 +0800
 # 测试目的: 验证 -pause 任务不存在返回 RC=3。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1197,8 +1139,6 @@ def test_pause_missing_task_returns_rc3(tmp_path: Path) -> None:
 
 
 # TC-006A
-# 创建者: OpenAI
-# 最后一次更改: Codex
 # 测试目的: 验证 -pause 缺少 -agents-list 参数时返回 RC=1。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1213,10 +1153,6 @@ def test_pause_requires_agents_list(tmp_path: Path) -> None:
 
 
 # TC-007
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:16:41 +0800
-# 最近一次运行成功时间: 2026-03-22 17:16:41 +0800
 # 测试目的: 验证 -new 带指派创建任务并写入任务列表。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1263,10 +1199,6 @@ def test_new_task_with_assignee_success(tmp_path: Path) -> None:
 
 
 # TC-008
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:16:41 +0800
-# 最近一次运行成功时间: 2026-03-22 17:16:41 +0800
 # 测试目的: 验证 -new 不带指派创建任务并写入任务列表。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1307,8 +1239,6 @@ def test_new_task_without_assignee_success(tmp_path: Path) -> None:
 
 
 # TC-008A
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
 # 测试目的: 验证 -new 接受计划级 execute 任务类型并写入任务列表。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1339,10 +1269,6 @@ def test_new_accepts_execute_task_type(tmp_path: Path) -> None:
 
 
 # TC-009
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:16:41 +0800
-# 最近一次运行成功时间: 2026-03-22 17:16:41 +0800
 # 测试目的: 验证缺少必填参数返回 RC=1。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1357,10 +1283,6 @@ def test_argument_error_returns_rc1(tmp_path: Path) -> None:
 
 
 # TC-010
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:16:41 +0800
-# 最近一次运行成功时间: 2026-03-22 17:16:41 +0800
 # 测试目的: 验证 TODO 文件不存在返回 RC=2。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1388,10 +1310,6 @@ def test_file_not_found_returns_rc2(tmp_path: Path) -> None:
 
 
 # TC-011
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:16:41 +0800
-# 最近一次运行成功时间: 2026-03-22 17:16:41 +0800
 # 测试目的: 验证表结构不合法返回 RC=2。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1432,10 +1350,6 @@ def test_invalid_todo_structure_returns_rc2(tmp_path: Path) -> None:
 
 
 # TC-012
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:16:41 +0800
-# 最近一次运行成功时间: 2026-03-22 17:16:41 +0800
 # 测试目的: 验证锁冲突时返回 RC=4。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1468,10 +1382,6 @@ def test_lock_conflict_returns_rc4(tmp_path: Path) -> None:
 
 
 # TC-013
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:16:41 +0800
-# 最近一次运行成功时间: 2026-03-22 17:16:41 +0800
 # 测试目的: 验证 -status -doing 输出正在执行任务表。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1489,10 +1399,6 @@ def test_status_doing_outputs_running_table(tmp_path: Path) -> None:
 
 
 # TC-014
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:16:41 +0800
-# 最近一次运行成功时间: 2026-03-22 17:16:41 +0800
 # 测试目的: 验证 -status -task-list 输出任务列表表。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1510,10 +1416,6 @@ def test_status_task_list_outputs_list_table(tmp_path: Path) -> None:
 
 
 # TC-015
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-25 03:41:48 +0800
-# 最近一次运行成功时间: 2026-03-25 03:41:48 +0800
 # 测试目的: 验证 -status 参数组合错误返回 RC=1。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1531,10 +1433,6 @@ def test_status_requires_exactly_one_mode(tmp_path: Path) -> None:
 
 
 # TC-015A
-# 创建者: 榕
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-08 06:47:00 +0800
-# 最近一次运行成功时间: 2026-04-08 06:47:00 +0800
 # 测试目的: 验证 -status 在 TODO 表头不匹配时返回 RC=2（不应误返回 RC=0）。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1564,10 +1462,6 @@ def test_status_invalid_table_returns_rc2(tmp_path: Path) -> None:
 
 
 # TC-016
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-25 03:41:48 +0800
-# 最近一次运行成功时间: 2026-03-25 03:41:48 +0800
 # 测试目的: 验证 -dispatch 携带 -message 时，会先执行一次 -init，再调用 tmux 对话脚本向目标会话发消息。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1622,10 +1516,6 @@ def test_dispatch_with_message_sends_talk_success(tmp_path: Path) -> None:
 
 
 # TC-017
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:24:46 +0800
-# 最近一次运行成功时间: 2026-03-22 17:24:46 +0800
 # 测试目的: 验证 -dispatch 携带 -message 时，即使分发前 -init 失败，仍会保留已提交的分发结果并在消息发送失败时返回错误。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1673,10 +1563,6 @@ def test_dispatch_with_message_failure_keeps_dispatch_result(tmp_path: Path) -> 
 
 
 # TC-018
-# 创建者: 榕
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-25 03:41:48 +0800
-# 最近一次运行成功时间: 2026-03-25 03:41:48 +0800
 # 测试目的: 验证 -dispatch 在真正分发前会固定调用一次 list -init，并在未提供 -message 时发送默认模板消息。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1723,10 +1609,6 @@ def test_dispatch_runs_init_before_dispatch(tmp_path: Path) -> None:
 
 
 # TC-046
-# 创建者: 榕
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-08 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-08 00:00:00 +0800
 # 测试目的: 验证 -dispatch 未提供 -message 时，若默认消息发送失败仅告警且不回滚分发结果。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1768,10 +1650,6 @@ def test_dispatch_without_message_talk_failure_is_warning(tmp_path: Path) -> Non
 
 
 # TC-047
-# 创建者: 榕
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-08 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-08 00:00:00 +0800
 # 测试目的: 验证 -dispatch 未提供 -message 时，默认模板消息会按实际存在的 worktree/计划书拼接字段。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1831,10 +1709,6 @@ def test_dispatch_without_message_template_includes_worktree_and_plan(tmp_path: 
 
 
 # TC-019
-# 创建者: 榕
-# 最后一次更改: 榕
-# 最近一次运行测试时间: 2026-03-26 00:00:00 +0800
-# 最近一次运行成功时间: 2026-03-26 00:00:00 +0800
 # 测试目的: 验证 -continue 成功将暂停任务恢复为进行中并同步角色状态为 busy。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1862,10 +1736,6 @@ def test_continue_task_success(tmp_path: Path) -> None:
 
 
 # TC-020
-# 创建者: 榕
-# 最后一次更改: 榕
-# 最近一次运行测试时间: 2026-03-26 00:00:00 +0800
-# 最近一次运行成功时间: 2026-03-26 00:00:00 +0800
 # 测试目的: 验证 -continue 任务不存在时返回 RC=3。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1882,10 +1752,6 @@ def test_continue_missing_task_returns_rc3(tmp_path: Path) -> None:
 
 
 # TC-021
-# 创建者: 榕
-# 最后一次更改: 榕
-# 最近一次运行测试时间: 2026-03-26 00:00:00 +0800
-# 最近一次运行成功时间: 2026-03-26 00:00:00 +0800
 # 测试目的: 验证 -continue 仅允许继续状态为暂停的任务。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1902,10 +1768,6 @@ def test_continue_requires_paused_status(tmp_path: Path) -> None:
 
 
 # TC-022
-# 创建者: 榕
-# 最后一次更改: 榕
-# 最近一次运行测试时间: 2026-03-26 00:00:00 +0800
-# 最近一次运行成功时间: 2026-03-26 00:00:00 +0800
 # 测试目的: 验证 -continue 缺少 -agents-list 参数时返回 RC=1。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -1920,10 +1782,6 @@ def test_continue_requires_agents_list(tmp_path: Path) -> None:
 
 
 # TC-023
-# 创建者: 神秘人
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-26 11:00:00 +0800
-# 最近一次运行成功时间: 2026-03-26 11:00:00 +0800
 # 测试目的: 验证 -reassign 成功更新任务指派、同步旧/新角色状态，并通知旧/新接手人。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2014,10 +1872,6 @@ def test_reassign_task_success(tmp_path: Path) -> None:
 
 
 # TC-024
-# 创建者: 神秘人
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-26 11:00:00 +0800
-# 最近一次运行成功时间: 2026-03-26 11:00:00 +0800
 # 测试目的: 验证 -reassign 任务不存在时返回 RC=3。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2034,10 +1888,6 @@ def test_reassign_missing_task_returns_rc3(tmp_path: Path) -> None:
 
 
 # TC-025
-# 创建者: 神秘人
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-26 11:00:00 +0800
-# 最近一次运行成功时间: 2026-03-26 11:00:00 +0800
 # 测试目的: 验证 -reassign 缺少 -agents-list 参数时返回 RC=1。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2052,10 +1902,6 @@ def test_reassign_requires_agents_list(tmp_path: Path) -> None:
 
 
 # TC-028A
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
 # 测试目的: 验证 -reassign 目标角色已有进行中任务时返回 RC=3。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2082,8 +1928,6 @@ def test_reassign_rejects_busy_agent(tmp_path: Path) -> None:
 
 
 # TC-028AA
-# 创建者: Codex
-# 最后一次更改: Codex
 # 测试目的: 验证 -reassign 会拒绝把任务改派给已经拥有运行中任务的角色，即使名单状态是 stale free。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2106,8 +1950,6 @@ def test_reassign_rejects_assignee_with_existing_running_task_even_if_status_is_
 
 
 # TC-028B
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
 # 测试目的: 验证 merge 任务改派时只允许合并专职，候补不可接手。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2163,8 +2005,6 @@ def test_reassign_rejects_merge_task_for_substitute(tmp_path: Path) -> None:
 
 
 # TC-028C
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
 # 测试目的: 验证 merge 任务改派时，非候补但不含合并职责的普通专职角色也不能接手。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2220,8 +2060,6 @@ def test_reassign_rejects_merge_task_for_non_merge_specialist(tmp_path: Path) ->
 
 
 # TC-028D
-# 创建者: OpenAI
-# 最后一次更改: Codex
 # 测试目的: 验证 -reassign 不允许把 build 任务改派给审查角色。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2273,10 +2111,6 @@ def test_reassign_rejects_build_task_for_review_specialist(tmp_path: Path) -> No
 
 
 # TC-026
-# 创建者: 神秘人
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-29 19:15:00 +0800
-# 最近一次运行成功时间: 2026-03-29 19:15:00 +0800
 # 测试目的: 验证 -delete 成功删除任务列表中的任务。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2296,10 +2130,6 @@ def test_delete_task_list_success(tmp_path: Path) -> None:
 
 
 # TC-027
-# 创建者: 神秘人
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-29 19:15:00 +0800
-# 最近一次运行成功时间: 2026-03-29 19:15:00 +0800
 # 测试目的: 验证 -delete 任务不存在返回 RC=3。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2314,10 +2144,6 @@ def test_delete_missing_task_returns_rc3(tmp_path: Path) -> None:
 
 
 # TC-028
-# 创建者: 神秘人
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-29 19:15:00 +0800
-# 最近一次运行成功时间: 2026-03-29 19:15:00 +0800
 # 测试目的: 验证 -delete 任务位于正在执行列表时返回 RC=3。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2335,10 +2161,6 @@ def test_delete_running_task_returns_rc3(tmp_path: Path) -> None:
 
 
 # TC-029
-# 创建者: 神秘人
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-31 10:20:00 +0800
-# 最近一次运行成功时间: 2026-03-31 10:20:00 +0800
 # 测试目的: 验证 -delete 允许删除状态为暂停的正在执行任务。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2367,10 +2189,6 @@ def test_delete_paused_running_task_success(tmp_path: Path) -> None:
 
 
 # TC-030
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-08 13:40:00 +0800
-# 最近一次运行成功时间: 2026-04-08 13:40:00 +0800
 # 测试目的: 验证 -next 成功将运行中任务回退到任务列表并更新描述。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2440,8 +2258,6 @@ def test_next_task_moves_running_to_task_list_success(tmp_path: Path) -> None:
 
 
 # TC-030A
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
 # 测试目的: 验证 -next -to 手动续接到指定角色时，任务直接回到运行表并同步旧/新角色状态。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2528,8 +2344,6 @@ def test_next_to_dispatches_same_task_and_updates_agent_status(tmp_path: Path) -
 
 
 # TC-030B
-# 创建者: OpenAI
-# 最后一次更改: Codex
 # 测试目的: 验证 -next -to 不允许把 build 任务直接续接给审查角色。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2593,10 +2407,6 @@ def test_next_to_rejects_build_task_for_review_specialist(tmp_path: Path) -> Non
 
 
 # TC-031
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 13:40:00 +0800
-# 最近一次运行成功时间: 2026-04-08 13:40:00 +0800
 # 测试目的: 验证 -next 缺少 -message 返回 RC=1。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2625,8 +2435,6 @@ def test_next_requires_message(tmp_path: Path) -> None:
 
 
 # TC-031A
-# 创建者: OpenAI
-# 最后一次更改: OpenAI
 # 测试目的: 验证 -next 必须显式提供 -type。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2655,10 +2463,6 @@ def test_next_requires_type(tmp_path: Path) -> None:
 
 
 # TC-032
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 13:40:00 +0800
-# 最近一次运行成功时间: 2026-04-08 13:40:00 +0800
 # 测试目的: 验证 非架构师/管理员 调用 -new 被拒绝。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2693,10 +2497,6 @@ def test_new_restricted_for_non_privileged_operator(tmp_path: Path) -> None:
 
 
 # TC-033
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-08 13:40:00 +0800
-# 最近一次运行成功时间: 2026-04-08 13:40:00 +0800
 # 测试目的: 验证 非管理员 调用 -done 被拒绝。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2718,10 +2518,6 @@ def test_done_restricted_for_non_privileged_operator(tmp_path: Path) -> None:
 
 
 # TC-034
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 14:25:00 +0800
-# 最近一次运行成功时间: 2026-04-08 14:25:00 +0800
 # 测试目的: 验证 -new 缺少 -worktree 返回 RC=1。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2755,10 +2551,6 @@ def test_new_requires_worktree(tmp_path: Path) -> None:
 
 
 # TC-035
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 14:25:00 +0800
-# 最近一次运行成功时间: 2026-04-08 14:25:00 +0800
 # 测试目的: 验证 -dispatch 在依赖任务未完成时返回 RC=3。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2824,10 +2616,6 @@ def test_dispatch_blocked_by_unresolved_dependency(tmp_path: Path) -> None:
 
 
 # TC-036
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 15:30:00 +0800
-# 最近一次运行成功时间: 2026-04-08 15:30:00 +0800
 # 测试目的: 验证 -dispatch 指派给已有进行中任务的角色时返回 RC=3。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2870,8 +2658,6 @@ def test_dispatch_rejects_busy_agent(tmp_path: Path) -> None:
 
 
 # TC-036A
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
 # 测试目的: 验证 merge 任务分发时只允许合并专职，候补不可接手。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2932,8 +2718,6 @@ def test_dispatch_rejects_merge_task_for_substitute(tmp_path: Path) -> None:
 
 
 # TC-036B
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
 # 测试目的: 验证 merge 任务分发时，非候补但不含合并职责的普通专职角色也不能接手。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -2994,8 +2778,6 @@ def test_dispatch_rejects_merge_task_for_non_merge_specialist(tmp_path: Path) ->
 
 
 # TC-036C
-# 创建者: OpenAI
-# 最后一次更改: Codex
 # 测试目的: 验证 build 任务分发时不能直接分给审查角色。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -3056,10 +2838,6 @@ def test_dispatch_rejects_build_task_for_review_specialist(tmp_path: Path) -> No
 
 
 # TC-037
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 15:30:00 +0800
-# 最近一次运行成功时间: 2026-04-08 15:30:00 +0800
 # 测试目的: 验证 -next 缺少 -agents-list 返回 RC=1。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -3086,8 +2864,6 @@ def test_next_requires_agents_list(tmp_path: Path) -> None:
 
 
 # TC-037B
-# 创建者: OpenAI
-# 最后一次更改: Codex
 # 测试目的: 验证 -next -auto 缺少 -agents-list 返回 RC=1。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -3115,8 +2891,6 @@ def test_next_auto_requires_agents_list(tmp_path: Path) -> None:
 
 
 # TC-037A
-# 创建者: OpenAI
-# 最后一次更改: OpenAI
 # 测试目的: 验证 -next 缺少 -from 返回 RC=1。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -3145,8 +2919,6 @@ def test_next_requires_from(tmp_path: Path) -> None:
 
 
 # TC-050
-# 创建者: OpenAI
-# 最后一次更改: OpenAI
 # 测试目的: 验证 -next -auto 会把同一任务重新续接给当前执行者，并向管理员发送固定摘要。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -3224,8 +2996,6 @@ def test_next_auto_reassigns_same_task_to_operator(tmp_path: Path) -> None:
 
 
 # TC-051
-# 创建者: OpenAI
-# 最后一次更改: jcc你莫辜负
 # 测试目的: 验证 -next -auto 会把同一任务续接给其他匹配角色，并输出默认任务消息模板与管理员摘要。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -3312,8 +3082,6 @@ def test_next_auto_reassigns_same_task_to_other_agent(tmp_path: Path) -> None:
 
 
 # TC-051A
-# 创建者: OpenAI
-# 最后一次更改: Codex
 # 测试目的: 验证不带 -auto 的 -next 也会自动拉起任务列表中首个依赖已清空的可启动任务。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -3401,8 +3169,6 @@ def test_next_auto_starts_first_ready_task_from_task_list(tmp_path: Path) -> Non
 
 
 # TC-051AA
-# 创建者: Codex
-# 最后一次更改: Codex
 # 测试目的: 验证 -next -auto 只更新旧接手人与新接手人状态，不会重置未触及角色。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -3509,8 +3275,6 @@ def test_next_auto_updates_only_involved_agent_statuses(tmp_path: Path) -> None:
 
 
 # TC-051B
-# 创建者: OpenAI
-# 最后一次更改: Codex
 # 测试目的: 验证 -next -auto 会继续拉起任务列表中所有 ready 任务，并且每个接手人只收到自己的任务消息。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -3638,8 +3402,6 @@ def test_next_auto_starts_all_ready_tasks_from_task_list(tmp_path: Path) -> None
 
 
 # TC-058
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
 # 测试目的: 验证 spec 自动续接优先选择专职角色。
 # 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_spec_dedicated_first
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
@@ -3715,8 +3477,6 @@ def test_next_auto_spec_dedicated_first(tmp_path: Path) -> None:
 
 
 # TC-058A
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
 # 测试目的: 验证 execute 自动续接优先分配给计划级 execute 专职角色。
 # 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_execute_dedicated_first
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
@@ -3791,8 +3551,6 @@ def test_next_auto_execute_dedicated_first(tmp_path: Path) -> None:
 
 
 # TC-059
-# 创建者: jcc你莫辜负
-# 最后一次更改: 朽木露琪亚
 # 测试目的: 验证 build 自动续接优先分配给专职角色。
 # 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_build_dedicated_first
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
@@ -3868,8 +3626,6 @@ def test_next_auto_build_dedicated_first(tmp_path: Path) -> None:
 
 
 # TC-060
-# 创建者: jcc你莫辜负
-# 最后一次更改: 朽木露琪亚
 # 测试目的: 验证 build 专职不可用时自动续接回退到候补角色。
 # 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_build_falls_back_to_substitute
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
@@ -3958,8 +3714,6 @@ def test_next_auto_build_falls_back_to_substitute(tmp_path: Path) -> None:
 
 
 # TC-061
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
 # 测试目的: 验证 review 自动续接优先选择专职角色。
 # 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_review_dedicated_first
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
@@ -4035,8 +3789,6 @@ def test_next_auto_review_dedicated_first(tmp_path: Path) -> None:
 
 
 # TC-062
-# 创建者: jcc你莫辜负
-# 最后一次更改: 朽木露琪亚
 # 测试目的: 验证 merge 只允许专职角色，候补不可接续。
 # 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_merge_rejects_fallback
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
@@ -4114,8 +3866,6 @@ def test_next_auto_merge_rejects_fallback(tmp_path: Path) -> None:
 
 
 # TC-062A
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
 # 测试目的: 验证 merge 自动续接不会错误挑选非候补但不含合并职责的普通专职角色。
 # 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_merge_rejects_non_merge_specialist
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
@@ -4195,8 +3945,6 @@ def test_next_auto_merge_rejects_non_merge_specialist(tmp_path: Path) -> None:
 
 
 # TC-056
-# 创建者: OpenAI
-# 最后一次更改: 睡觉小分队
 # 测试目的: 验证 -next -auto 在设置随机种子时可复现自动续接结果。
 # 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k "next_auto_random_assignment_with_seed"
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
@@ -4278,8 +4026,6 @@ def test_next_auto_random_assignment_with_seed(tmp_path: Path) -> None:
 
 
 # TC-057
-# 创建者: OpenAI
-# 最后一次更改: 睡觉小分队
 # 测试目的: 验证更换随机种子会触发不同的自动续接结果。
 # 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k "next_auto_random_assignment_seed_changes"
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
@@ -4359,8 +4105,6 @@ def test_next_auto_random_assignment_seed_changes(tmp_path: Path) -> None:
 
 
 # TC-052
-# 创建者: OpenAI
-# 最后一次更改: OpenAI
 # 测试目的: 验证 -next -auto 无法续接时，会保留在任务列表并通知管理员推进。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -4436,8 +4180,6 @@ def test_next_auto_failure_notifies_admin(tmp_path: Path) -> None:
 
 
 # TC-053
-# 创建者: OpenAI
-# 最后一次更改: OpenAI
 # 测试目的: 验证 -auto 只能与 -next 组合使用。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -4469,10 +4211,6 @@ def test_auto_only_supports_next(tmp_path: Path) -> None:
 
 
 # TC-038
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 15:30:00 +0800
-# 最近一次运行成功时间: 2026-04-08 15:30:00 +0800
 # 测试目的: 验证 -new 缺少 -depends 或 -plan 返回 RC=1。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -4490,10 +4228,6 @@ def test_new_requires_depends_and_plan(tmp_path: Path) -> None:
 
 
 # TC-039
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 22:20:00 +0800
-# 最近一次运行成功时间: 2026-04-08 22:20:00 +0800
 # 测试目的: 验证 -status -plan-list 输出计划书进度表。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -4509,10 +4243,6 @@ def test_status_plan_list_outputs_plan_table(tmp_path: Path) -> None:
 
 
 # TC-040
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 22:20:00 +0800
-# 最近一次运行成功时间: 2026-04-08 22:20:00 +0800
 # 测试目的: 验证 -new 的 -depends 任务不存在时返回 RC=3。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -4572,10 +4302,6 @@ def test_new_requires_existing_dependencies(tmp_path: Path) -> None:
 
 
 # TC-041
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 22:20:00 +0800
-# 最近一次运行成功时间: 2026-04-08 22:20:00 +0800
 # 测试目的: 验证 -new 会创建并更新计划书进度表。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -4611,10 +4337,6 @@ def test_new_updates_plan_progress_table(tmp_path: Path) -> None:
 
 
 # TC-042
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 22:20:00 +0800
-# 最近一次运行成功时间: 2026-04-08 22:20:00 +0800
 # 测试目的: 验证最后一个计划任务 -done 后计划状态变为完成待检查。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -4653,10 +4375,6 @@ def test_done_last_plan_task_marks_plan_waiting_review(tmp_path: Path) -> None:
 
 
 # TC-043
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 22:20:00 +0800
-# 最近一次运行成功时间: 2026-04-08 22:20:00 +0800
 # 测试目的: 验证 -done-plan 会移除已完成待检查的计划。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -4701,10 +4419,6 @@ def test_done_plan_removes_review_ready_plan(tmp_path: Path) -> None:
 
 
 # TC-044
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 22:20:00 +0800
-# 最近一次运行成功时间: 2026-04-08 22:20:00 +0800
 # 测试目的: 验证 -done-plan 仅接受完成待检查的计划。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -4748,10 +4462,6 @@ def test_done_plan_requires_review_ready_status(tmp_path: Path) -> None:
 
 
 # TC-045
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 22:20:00 +0800
-# 最近一次运行成功时间: 2026-04-08 22:20:00 +0800
 # 测试目的: 验证 非管理员 调用 -done-plan 被拒绝。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -4794,10 +4504,6 @@ def test_done_plan_restricted_for_non_privileged_operator(tmp_path: Path) -> Non
 
 
 # TC-048
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 23:15:00 +0800
-# 最近一次运行成功时间: 2026-04-08 23:15:00 +0800
 # 测试目的: 验证 -dispatch 在达到并行人数上限时返回 RC=3。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -4831,10 +4537,6 @@ def test_dispatch_rejects_when_parallel_limit_reached(tmp_path: Path) -> None:
 
 
 # TC-049
-# 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
-# 最近一次运行测试时间: 2026-04-08 23:15:00 +0800
-# 最近一次运行成功时间: 2026-04-08 23:15:00 +0800
 # 测试目的: 验证 非管理员 调用 -dispatch 被拒绝。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md

@@ -1,7 +1,5 @@
 """Matmul demo with dynamic inputs and dynamic tiles.
 
-创建者: 大闸蟹
-最后一次更改: 大闸蟹
 
 功能说明:
 - 实现 `inputs 动 + tile 动` 的二维 matmul kernel demo。
@@ -46,8 +44,6 @@ def matmul_inputs_dynamic_tile_dynamic_kernel(
 ) -> None:
     """执行动态输入、动态 tile 的 matmul。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 输入和输出 shape 全部来自 `Tensor[...]` 符号维度。
@@ -75,8 +71,6 @@ def matmul_inputs_dynamic_tile_dynamic_kernel(
 def main() -> None:
     """运行动态输入、动态 tile 的 matmul demo。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 构造真实 torch tensor 输入，shape 绑定到 `M/K/N`。

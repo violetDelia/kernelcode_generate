@@ -1,34 +1,32 @@
 """DMA dialect definitions.
 
-创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 定义 dma dialect 的 alloc/fill/copy/load/store/slice/deslice/view/reshape/cast/broadcast op 与 verifier 规则。
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
 
 API 列表:
+- `class DmaAllocOp(dynamic_shape: Sequence[SSAValue], result_type: NnMemoryType)`
+- `class DmaFillOp(target: SSAValue | Operation, value: SSAValue | Operation)`
+- `class DmaFreeOp(source: SSAValue | Operation)`
+- `class DmaCopyOp(target: SSAValue | Operation, source: SSAValue | Operation)`
+- `class DmaBroadcastOp(target: SSAValue | Operation, source: SSAValue | Operation)`
+- `class DmaTransposeOp(target: SSAValue | Operation, source: SSAValue | Operation, perm: Sequence[int] | ArrayAttr)`
+- `class DmaLoadOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
+- `class DmaStoreOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
+- `class DmaSliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
+- `class DmaDesliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue], result_type: NnMemoryType)`
+- `class DmaViewOp(source: SSAValue | Operation, offsets: Sequence[SSAValue], shape: Sequence[SSAValue], stride: Sequence[SSAValue], result_type: NnMemoryType)`
+- `class DmaReshapeOp(source: SSAValue | Operation, shape: Sequence[SSAValue], result_type: NnMemoryType)`
+- `class DmaCastOp(target: SSAValue | Operation, source: SSAValue | Operation)`
 - `Dma`
-- `DmaAllocOp`
-- `DmaFillOp`
-- `DmaFreeOp`
-- `DmaCopyOp`
-- `DmaBroadcastOp`
-- `DmaTransposeOp`
-- `DmaLoadOp`
-- `DmaStoreOp`
-- `DmaSliceOp`
-- `DmaDesliceOp`
-- `DmaViewOp`
-- `DmaReshapeOp`
-- `DmaCastOp`
 
 使用示例:
 - from kernel_gen.dialect.dma import Dma, DmaCopyOp
 
 关联文件:
 - spec: spec/dialect/dma.md
-- test: test/dialect/test_dma_dialect.py
+- test: test/dialect/test_dma.py
 - 功能实现: kernel_gen/dialect/dma.py
 """
 
@@ -73,8 +71,6 @@ from kernel_gen.dialect.symbol import SymbolIterType, SymbolValueType
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """校验并返回 nn.memory type。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 确认类型为 nn.memory 并触发类型校验。
@@ -84,7 +80,7 @@ def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -94,8 +90,6 @@ def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
 def _verify_memory_operand(value: SSAValue, field_name: str) -> NnMemoryType:
     """校验 SSA operand 为 nn.memory type。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 统一处理 SSA operand 的 nn.memory 类型校验与内部验证。
@@ -105,7 +99,7 @@ def _verify_memory_operand(value: SSAValue, field_name: str) -> NnMemoryType:
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -115,8 +109,6 @@ def _verify_memory_operand(value: SSAValue, field_name: str) -> NnMemoryType:
 def _verify_fill_value_operand(value: SSAValue, field_name: str) -> SSAValue:
     """校验 `dma.fill` 的整数标量 operand。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 当前仅接受 builtin `i32` 或 `!symbol.int<"expr">`。
@@ -127,7 +119,7 @@ def _verify_fill_value_operand(value: SSAValue, field_name: str) -> SSAValue:
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -142,8 +134,6 @@ def _verify_fill_value_operand(value: SSAValue, field_name: str) -> SSAValue:
 def _operand_int_value(value: SSAValue) -> int | None:
     """尝试从 `!symbol.int<"expr">` SSA operand 恢复静态整型值。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅识别字面量整数表达式，例如 `!symbol.int<"4">`。
@@ -154,7 +144,7 @@ def _operand_int_value(value: SSAValue) -> int | None:
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -174,8 +164,6 @@ def _verify_symbol_int_operands(
 ) -> Sequence[SSAValue]:
     """校验 `!symbol.int<"expr">` operand 列表。
 
-    创建者: OpenAI
-    最后一次更改: OpenAI
 
     功能说明:
     - 确保所有 operand 类型为 `!symbol.int<"expr">`。
@@ -186,7 +174,7 @@ def _verify_symbol_int_operands(
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -205,8 +193,6 @@ def _verify_symbol_index_operands(
 ) -> Sequence[SSAValue]:
     """校验 `!symbol.int` / `!symbol.iter` operand 列表。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 确保 operand 类型为 `!symbol.int` 或 `!symbol.iter`。
@@ -217,7 +203,7 @@ def _verify_symbol_index_operands(
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -234,8 +220,6 @@ def _verify_symbol_index_operands(
 def _verify_rank_match(values: Sequence[SSAValue], rank: int, field_name: str) -> None:
     """校验标量 operand 列表长度与 rank 一致。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 用于验证切片大小与 shape 的对应关系。
@@ -245,7 +229,7 @@ def _verify_rank_match(values: Sequence[SSAValue], rank: int, field_name: str) -
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -260,8 +244,6 @@ def _verify_operands_match_layout(
 ) -> None:
     """校验 operand 列表与类型中可静态判定的布局一致。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 若布局维度为 `IntAttr`，对应 operand 必须是相同值的 `!symbol.int<"n">`。
@@ -272,7 +254,7 @@ def _verify_operands_match_layout(
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -290,8 +272,6 @@ def _verify_dynamic_shape_matches_result(
 ) -> None:
     """校验 dma.alloc 的 dynamic_shape 与结果 shape 的一致性。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 支持两种形态：
@@ -304,7 +284,7 @@ def _verify_dynamic_shape_matches_result(
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -341,8 +321,6 @@ def _verify_broadcast_compat(
 ) -> None:
     """校验 dma.broadcast 的 shape 兼容性。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 按尾维对齐规则检查 source/target shape。
@@ -353,7 +331,7 @@ def _verify_broadcast_compat(
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -377,8 +355,6 @@ def _verify_broadcast_compat(
 def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     """判断 shape/stride 维度是否一致。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 支持 IntAttr 与 StringAttr 的值一致性判断。
@@ -389,7 +365,7 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -399,8 +375,6 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
 def _verify_transpose_perm(perm: ArrayAttr, rank: int) -> list[int]:
     """校验 dma.transpose 的 perm 合法性并返回序列。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 校验 perm 长度与 rank 一致。
@@ -411,7 +385,7 @@ def _verify_transpose_perm(perm: ArrayAttr, rank: int) -> list[int]:
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -438,8 +412,6 @@ def _verify_transpose_layout(
 ) -> None:
     """校验 dma.transpose 的目标 shape 与连续 stride。
 
-    创建者: 小李飞刀
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 按 perm 重排 source shape，并与 target shape 对齐校验。
@@ -450,7 +422,7 @@ def _verify_transpose_layout(
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -470,8 +442,6 @@ def _verify_transpose_layout(
 def _verify_unit_stride_operands(strides: Sequence[SSAValue]) -> None:
     """校验 stride operand 是否全为常量 1。
 
-    创建者: OpenAI
-    最后一次更改: OpenAI
 
     功能说明:
     - 当前阶段仅支持单位步长语义。
@@ -482,7 +452,7 @@ def _verify_unit_stride_operands(strides: Sequence[SSAValue]) -> None:
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -494,8 +464,6 @@ def _verify_unit_stride_operands(strides: Sequence[SSAValue]) -> None:
 def _element_byte_size(element_type: Attribute) -> int | None:
     """解析 element_type 的字节大小。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 支持 i1/i8/i16/i32/i64 与 f16/bf16/f32/f64。
@@ -505,7 +473,7 @@ def _element_byte_size(element_type: Attribute) -> int | None:
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -532,8 +500,6 @@ def _element_byte_size(element_type: Attribute) -> int | None:
 def _is_i8_byte_pool(memory_type: NnMemoryType) -> bool:
     """判断是否为 i8 一维 byte pool。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 要求 element_type 为 i8，且 rank 为 1。
@@ -543,7 +509,7 @@ def _is_i8_byte_pool(memory_type: NnMemoryType) -> bool:
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -560,8 +526,6 @@ def _linear_max_index(
 ) -> int | None:
     """计算 view 的静态最大线性索引（元素单位）。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 当 offsets/shape/stride 都可静态还原时，返回最大线性索引。
@@ -572,7 +536,7 @@ def _linear_max_index(
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -589,8 +553,6 @@ def _linear_max_index(
 def _maybe_numel(shape: ArrayAttr[Attribute]) -> int | None:
     """尝试计算 shape 的元素总数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅在全部维度为 IntAttr 时返回乘积。
@@ -600,7 +562,7 @@ def _maybe_numel(shape: ArrayAttr[Attribute]) -> int | None:
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -621,8 +583,6 @@ def _verify_static_view_bounds(
 ) -> None:
     """校验 dma.view 可静态判定的边界约束。
 
-    创建者: OpenAI
-    最后一次更改: OpenAI
 
     功能说明:
     - 当 `source.shape/source.stride` 与 `offsets/shape/stride` 都可静态恢复时，
@@ -633,7 +593,7 @@ def _verify_static_view_bounds(
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -661,8 +621,6 @@ def _verify_static_view_bounds(
 def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
     """按默认连续布局生成行主序 stride。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 静态维度返回 `IntAttr` 乘积。
@@ -674,7 +632,7 @@ def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -714,8 +672,6 @@ def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
 def _parse_symbolic_dim_attr(value: Attribute) -> sp.Basic | None:
     """解析 stride 维度 attribute 为 sympy 表达式。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - `IntAttr` 解析为整数表达式。
@@ -727,7 +683,7 @@ def _parse_symbolic_dim_attr(value: Attribute) -> sp.Basic | None:
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -749,8 +705,6 @@ def _parse_symbolic_dim_attr(value: Attribute) -> sp.Basic | None:
 def _stride_attrs_equal(lhs: Attribute, rhs: Attribute) -> bool:
     """判断两个 stride 维度是否等价。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 优先复用公共维度比较。
@@ -761,7 +715,7 @@ def _stride_attrs_equal(lhs: Attribute, rhs: Attribute) -> bool:
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -777,8 +731,6 @@ def _stride_attrs_equal(lhs: Attribute, rhs: Attribute) -> bool:
 def _is_contiguous(memory_type: NnMemoryType) -> bool:
     """检查 memory type 是否连续行主序。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 静态 stride 直接比较整数。
@@ -789,7 +741,7 @@ def _is_contiguous(memory_type: NnMemoryType) -> bool:
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -805,8 +757,6 @@ def _is_contiguous(memory_type: NnMemoryType) -> bool:
 def _verify_default_contiguous_stride(memory_type: NnMemoryType, message: str) -> None:
     """校验 memory type 的 stride 是否匹配默认连续布局。
 
-    创建者: OpenAI
-    最后一次更改: OpenAI
 
     功能说明:
     - 根据 `shape` 生成默认连续布局。
@@ -817,7 +767,7 @@ def _verify_default_contiguous_stride(memory_type: NnMemoryType, message: str) -
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
@@ -843,8 +793,6 @@ class DmaAllocOp(IRDLOperation):
     ) -> None:
         """初始化 dma.alloc。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 设置动态 shape operand 与结果类型。
@@ -854,7 +802,7 @@ class DmaAllocOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -863,8 +811,6 @@ class DmaAllocOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 dma.alloc。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 结果类型必须为 nn.memory。
@@ -876,7 +822,7 @@ class DmaAllocOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -897,8 +843,6 @@ class DmaFillOp(IRDLOperation):
     def __init__(self, target: SSAValue | Operation, value: SSAValue | Operation) -> None:
         """初始化 dma.fill。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 设置被写入的 `target` memory 与标量 `value` operand。
@@ -908,7 +852,7 @@ class DmaFillOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -917,8 +861,6 @@ class DmaFillOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 dma.fill。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - `target` 必须为 `!nn.memory<..., i32, ...>`。
@@ -929,7 +871,7 @@ class DmaFillOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -950,8 +892,6 @@ class DmaFreeOp(IRDLOperation):
     def __init__(self, source: SSAValue | Operation) -> None:
         """初始化 dma.free。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 设置待释放的 source operand。
@@ -961,7 +901,7 @@ class DmaFreeOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -970,8 +910,6 @@ class DmaFreeOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 dma.free。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - source 必须为 nn.memory。
@@ -981,7 +919,7 @@ class DmaFreeOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1000,8 +938,6 @@ class DmaCopyOp(IRDLOperation):
     def __init__(self, target: SSAValue | Operation, source: SSAValue | Operation) -> None:
         """初始化 dma.copy。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 设置 target 与 source operand。
@@ -1011,7 +947,7 @@ class DmaCopyOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1020,8 +956,6 @@ class DmaCopyOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 dma.copy。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - source/target 的 shape/stride/element_type 必须一致。
@@ -1031,7 +965,7 @@ class DmaCopyOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1057,8 +991,6 @@ class DmaBroadcastOp(IRDLOperation):
     def __init__(self, target: SSAValue | Operation, source: SSAValue | Operation) -> None:
         """初始化 dma.broadcast。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 设置 target 与 source operand。
@@ -1068,7 +1000,7 @@ class DmaBroadcastOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1077,8 +1009,6 @@ class DmaBroadcastOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 dma.broadcast。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - target 必须为 nn.memory。
@@ -1090,7 +1020,7 @@ class DmaBroadcastOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1134,8 +1064,6 @@ class DmaTransposeOp(IRDLOperation):
     ) -> None:
         """初始化 dma.transpose。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 设置 target/source operand 与 perm 属性。
@@ -1145,7 +1073,7 @@ class DmaTransposeOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1155,8 +1083,6 @@ class DmaTransposeOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 dma.transpose。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - target/source 必须为 nn.memory。
@@ -1169,7 +1095,7 @@ class DmaTransposeOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1207,8 +1133,6 @@ class DmaLoadOp(IRDLOperation):
     ) -> None:
         """初始化 dma.load。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 设置 target/source 与 offsets/sizes/strides。
@@ -1219,7 +1143,7 @@ class DmaLoadOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1230,8 +1154,6 @@ class DmaLoadOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 dma.load。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - offsets/sizes/strides 长度与 source rank 一致。
@@ -1243,7 +1165,7 @@ class DmaLoadOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1288,8 +1210,6 @@ class DmaStoreOp(IRDLOperation):
     ) -> None:
         """初始化 dma.store。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 设置 target/source 与 offsets/sizes/strides。
@@ -1300,7 +1220,7 @@ class DmaStoreOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1309,8 +1229,6 @@ class DmaStoreOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 dma.store。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - source.shape 必须与 sizes 对齐。
@@ -1322,7 +1240,7 @@ class DmaStoreOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1365,8 +1283,6 @@ class DmaSliceOp(IRDLOperation):
     ) -> None:
         """初始化 dma.slice。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 设置 target/source 与 offsets/sizes/strides。
@@ -1377,7 +1293,7 @@ class DmaSliceOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1386,8 +1302,6 @@ class DmaSliceOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 dma.slice。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - offsets/sizes/strides 长度与 source rank 一致。
@@ -1400,7 +1314,7 @@ class DmaSliceOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1447,8 +1361,6 @@ class DmaDesliceOp(IRDLOperation):
     ) -> None:
         """初始化 dma.deslice。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 设置 target/source、offsets/sizes/strides 与结果类型。
@@ -1459,7 +1371,7 @@ class DmaDesliceOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1471,8 +1383,6 @@ class DmaDesliceOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 dma.deslice。
 
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - source.shape 必须与 sizes 对齐。
@@ -1485,7 +1395,7 @@ class DmaDesliceOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1531,8 +1441,6 @@ class DmaViewOp(IRDLOperation):
     ) -> None:
         """初始化 dma.view。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 设置 source、动态 offsets/shape/stride operand 与结果类型。
@@ -1543,7 +1451,7 @@ class DmaViewOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1555,8 +1463,6 @@ class DmaViewOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 dma.view。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - `space` 必须一致；`element_type` 必须一致（i8 byte pool 允许不同 element_type）。
@@ -1571,7 +1477,7 @@ class DmaViewOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1633,8 +1539,6 @@ class DmaReshapeOp(IRDLOperation):
     ) -> None:
         """初始化 dma.reshape。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 设置 source、动态 shape operand 与结果类型。
@@ -1644,7 +1548,7 @@ class DmaReshapeOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1653,8 +1557,6 @@ class DmaReshapeOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 dma.reshape。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - element_type/space 必须一致。
@@ -1666,7 +1568,7 @@ class DmaReshapeOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1703,8 +1605,6 @@ class DmaCastOp(IRDLOperation):
     def __init__(self, target: SSAValue | Operation, source: SSAValue | Operation) -> None:
         """初始化 dma.cast。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 设置 target 与 source。
@@ -1714,7 +1614,7 @@ class DmaCastOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1723,8 +1623,6 @@ class DmaCastOp(IRDLOperation):
     def verify_(self) -> None:
         """校验 dma.cast。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - target/source 的 shape/stride/space 必须一致，仅 element_type 可变化。
@@ -1734,7 +1632,7 @@ class DmaCastOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/dma.md
-        - test: test/dialect/test_dma_dialect.py
+        - test: test/dialect/test_dma.py
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
@@ -1751,8 +1649,6 @@ class DmaCastOp(IRDLOperation):
 class Dma(Dialect):
     """DMA dialect 入口。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 注册 dma dialect 的 op 定义。
@@ -1762,7 +1658,7 @@ class Dma(Dialect):
 
     关联文件:
     - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
+    - test: test/dialect/test_dma.py
     - 功能实现: kernel_gen/dialect/dma.py
     """
 

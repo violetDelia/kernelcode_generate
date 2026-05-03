@@ -1,12 +1,17 @@
 """tile-reduce pass module.
 
-创建者: 金铲铲大作战
-最后一次更改: OpenAI Codex
 
 功能说明:
 - 承接 `tile-reduce` 的公开 pattern、getter、`ModulePass` 与当前实现逻辑。
 - 对外 canonical public path 固定为 `kernel_gen.passes.tile.reduce`。
 - 不再拆分额外实现文件，当前 pass 逻辑全部保留在本文件。
+
+API 列表:
+- `class TileReduceMatmulPattern(RewritePattern)`
+- `get_tile_reduce_pass_patterns() -> list[RewritePattern]`
+- `class TileReducePass(ModulePass)`
+- `TileReducePass.__init__(fold: bool = True) -> None`
+- `TileReducePass.apply(ctx: Context, module: ModuleOp) -> None`
 
 使用示例:
 - from kernel_gen.passes.tile.reduce import (
@@ -19,7 +24,7 @@
 
 关联文件:
 - spec: [spec/pass/tile/reduce.md](spec/pass/tile/reduce.md)
-- test: [test/pass/tile/test_reduce.py](test/pass/tile/test_reduce.py)
+- test: [test/passes/tile/test_reduce.py](test/passes/tile/test_reduce.py)
 - test: [test/dsl/gen_kernel/test_gen_kernel.py](test/dsl/gen_kernel/test_gen_kernel.py)
 - 功能实现: [kernel_gen/passes/tile/reduce.py](kernel_gen/passes/tile/reduce.py)
 """
@@ -50,8 +55,6 @@ from kernel_gen.passes.common import ensure_builtin_module, raise_pass_contract_
 class TileReduceMatmulPattern(RewritePattern):
     """匹配 `kernel.matmul` 的公开 tile-reduce pattern。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 命中顶层 `kernel.matmul` 后，就地把当前 op 改写为“只切 reduce 轴”的结构。
@@ -63,7 +66,7 @@ class TileReduceMatmulPattern(RewritePattern):
 
     关联文件:
     - spec: [spec/pass/tile/reduce.md](spec/pass/tile/reduce.md)
-    - test: [test/pass/tile/test_reduce.py](test/pass/tile/test_reduce.py)
+    - test: [test/passes/tile/test_reduce.py](test/passes/tile/test_reduce.py)
     - 功能实现: [kernel_gen/passes/tile/reduce.py](kernel_gen/passes/tile/reduce.py)
     """
 
@@ -265,8 +268,6 @@ class TileReduceMatmulPattern(RewritePattern):
 def get_tile_reduce_pass_patterns() -> list[RewritePattern]:
     """返回 `tile-reduce` pass 使用的公开 pattern 列表。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 为外部测试、组合 pass 和公开 API 提供稳定的 pattern 构造入口。
@@ -277,7 +278,7 @@ def get_tile_reduce_pass_patterns() -> list[RewritePattern]:
 
     关联文件:
     - spec: [spec/pass/tile/reduce.md](spec/pass/tile/reduce.md)
-    - test: [test/pass/tile/test_reduce.py](test/pass/tile/test_reduce.py)
+    - test: [test/passes/tile/test_reduce.py](test/passes/tile/test_reduce.py)
     - 功能实现: [kernel_gen/passes/tile/reduce.py](kernel_gen/passes/tile/reduce.py)
     """
 
@@ -292,8 +293,6 @@ class TileReducePass(ModulePass):
     def __init__(self: "TileReducePass", fold: bool = True) -> None:
         """初始化 tile-reduce pass 公共选项。
 
-        创建者: 大闸蟹
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 记录 `fold` 开关，默认允许 pass 内 pattern walker 执行 folding。
@@ -304,11 +303,11 @@ class TileReducePass(ModulePass):
 
         关联文件:
         - spec: [spec/pass/tile/reduce.md](spec/pass/tile/reduce.md)
-        - test: [test/pass/tile/test_reduce.py](test/pass/tile/test_reduce.py)
+        - test: [test/passes/tile/test_reduce.py](test/passes/tile/test_reduce.py)
         - 功能实现: [kernel_gen/passes/tile/reduce.py](kernel_gen/passes/tile/reduce.py)
         """
 
-        object.__setattr__(self, "fold", bool(fold))
+        self.fold = bool(fold)
 
     def apply(self: "TileReducePass", ctx: Context, module: ModuleOp) -> None:
         ensure_builtin_module(module)

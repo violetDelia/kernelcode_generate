@@ -1,7 +1,5 @@
 """API DMA compile tests.
 
-创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `include/api/Dma.h` 的 `slice/deslice` 声明，
@@ -38,8 +36,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def _compile_and_run(source: str) -> None:
     """编译并运行 C++ 测试片段。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 使用 `g++` 编译临时源码并执行生成的程序。
@@ -113,8 +109,6 @@ def _compile_and_run(source: str) -> None:
 def _compile_expect_failure(source: str) -> str:
     """编译并断言 C++ 片段失败，返回编译 stderr。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 使用 `g++` 编译临时源码，并验证其因 DMA 旧公共接口已删除而编译失败。
@@ -158,11 +152,7 @@ def _compile_expect_failure(source: str) -> str:
 
 
 # API-DMA-001
-# 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
 # 功能说明: 验证成员式 `view` 配合 `slice/deslice` 的基础调用链可编译并正确运行。
-# 最近一次运行测试时间: 2026-04-05 23:44:24 +0800
-# 最近一次运行成功时间: 2026-04-05 23:44:24 +0800
 # 测试目的: 验证 `source.view<T>(...)` 与 `slice/deslice` 的公共层组合调用可配合 `npu_demo` 后端完成 1-D 基础路径。
 # 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_member_view_and_target_first_deslice_contract`
 # 对应功能实现文件路径: `include/npu_demo/Dma.h`
@@ -239,11 +229,7 @@ int main() {
 
 
 # API-DMA-002
-# 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
 # 功能说明: 验证成员式 `view` 与 DMA 入口在非法 vector rank 下保持稳定错误边界。
-# 最近一次运行测试时间: 2026-04-05 23:44:24 +0800
-# 最近一次运行成功时间: 2026-04-05 23:44:24 +0800
 # 测试目的: 验证 `include/api/Dma.h` 入口在非法 vector rank 下保持后端约定的错误边界。
 # 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_cross_space_templates_rejects_invalid_vector_rank`
 # 对应功能实现文件路径: `include/npu_demo/Dma.h`
@@ -316,11 +302,7 @@ int main() {
 
 
 # API-DMA-003
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 target-first `deslice` 在跨空间模板参数下可编译并返回成功。
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 验证 `deslice` 接口允许 `SourceSpace/TargetSpace` 跨空间模板组合。
 # 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_deslice_supports_cross_space_templates`
 # 对应功能实现文件路径: `include/npu_demo/Dma.h`
@@ -374,11 +356,7 @@ int main() {
 
 
 # API-DMA-003T
-# 创建者: 大闸蟹
-# 最后一次更改: 大闸蟹
 # 功能说明: 验证 target-first `transpose` 在跨空间与跨元素类型模板参数下可编译并返回成功。
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 验证 `transpose` 接口按 `perm[target_axis] = source_axis` 物化转置。
 # 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_transpose_materializes_permuted_layout`
 # 对应功能实现文件路径: `include/npu_demo/Dma.h`
@@ -429,11 +407,7 @@ int main() {
 
 
 # API-DMA-003B
-# 创建者: 大闸蟹
-# 最后一次更改: 大闸蟹
 # 功能说明: 验证 `fill/broadcast` 在 npu_demo 后端可编译并物化目标块。
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 锁定 `fill` 与 trailing-dimension `broadcast` 的公共 DMA helper 语义。
 # 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_fill_and_broadcast_materialize_target`
 # 对应功能实现文件路径: `include/npu_demo/Dma.h`
@@ -492,11 +466,7 @@ int main() {
 
 
 # API-DMA-003A
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
 # 功能说明: 验证 `alloc<Space, T>(shape, stride)` helper 可配合 npu_demo 后端编译运行。
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 锁定 DMA helper temporary memory 的公开源码形态存在对应实现，支持静态与动态 shape/stride。
 # 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_alloc_helper_contract`
 # 对应功能实现文件路径: `include/npu_demo/Dma.h`
@@ -550,10 +520,6 @@ int main() {
 
 
 # API-DMA-004
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 验证旧自由函数 `view(source, ...)` 已退出 DMA 公共层稳定口径，且头文件中的 `deslice` 声明保持 target-first。
 # 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_rejects_legacy_free_view_contract`
 # 对应功能实现文件路径: `include/api/Dma.h`

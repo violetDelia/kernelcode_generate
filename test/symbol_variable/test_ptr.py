@@ -1,7 +1,5 @@
 """ptr module tests.
 
-创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 `kernel_gen.symbol_variable.ptr` 的 P1 最小公开语义。
@@ -30,10 +28,6 @@ from xdsl.dialects.builtin import f32
 
 
 # PTR-001
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-01 03:32:00 +0800
-# 最近一次运行成功时间: 2026-04-01 03:32:00 +0800
 # 测试目的: 验证 Ptr 保留公开 pointee dtype，并输出稳定的 `Ptr(f32)` 文本。
 # 使用示例: pytest -q test/symbol_variable/test_ptr.py -k test_ptr_preserves_pointee_dtype
 # 对应功能实现文件路径: kernel_gen/symbol_variable/ptr.py
@@ -49,10 +43,6 @@ def test_ptr_preserves_pointee_dtype() -> None:
 
 
 # PTR-002
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-01 03:32:00 +0800
-# 最近一次运行成功时间: 2026-04-01 03:32:00 +0800
 # 测试目的: 验证 Ptr 缺少 dtype 参数时抛出固定 TypeError。
 # 使用示例: pytest -q test/symbol_variable/test_ptr.py -k test_ptr_rejects_missing_dtype
 # 对应功能实现文件路径: kernel_gen/symbol_variable/ptr.py
@@ -66,10 +56,6 @@ def test_ptr_rejects_missing_dtype() -> None:
 
 
 # PTR-003
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-01 03:32:00 +0800
-# 最近一次运行成功时间: 2026-04-01 03:32:00 +0800
 # 测试目的: 验证 Ptr 多传参数时抛出固定 TypeError。
 # 使用示例: pytest -q test/symbol_variable/test_ptr.py -k test_ptr_rejects_extra_args
 # 对应功能实现文件路径: kernel_gen/symbol_variable/ptr.py
@@ -83,10 +69,6 @@ def test_ptr_rejects_extra_args() -> None:
 
 
 # PTR-004
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-01 03:32:00 +0800
-# 最近一次运行成功时间: 2026-04-01 03:32:00 +0800
 # 测试目的: 验证 Ptr 不是 Memory，也不是 SymbolDim。
 # 使用示例: pytest -q test/symbol_variable/test_ptr.py -k test_ptr_is_not_memory_or_symbol_dim
 # 对应功能实现文件路径: kernel_gen/symbol_variable/ptr.py

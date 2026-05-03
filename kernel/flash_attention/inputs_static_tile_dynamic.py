@@ -1,7 +1,5 @@
 """Flash attention demo with static inputs and dynamic tiles.
 
-创建者: 大闸蟹
-最后一次更改: 大闸蟹
 
 功能说明:
 - 实现 `inputs 静 + tile 动` 的 Flash Attention kernel demo。
@@ -47,8 +45,6 @@ def flash_attention_inputs_static_tile_dynamic_kernel(
 ) -> None:
     """执行静态输入、动态 tile 的 Flash Attention。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 输入 shape 固定。
@@ -86,8 +82,6 @@ def flash_attention_inputs_static_tile_dynamic_kernel(
 def main() -> None:
     """运行静态输入、动态 tile 的 Flash Attention demo。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 构造真实 torch tensor 输入。

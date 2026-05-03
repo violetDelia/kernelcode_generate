@@ -1,12 +1,19 @@
 """tile-elewise pass module.
 
-创建者: 金铲铲大作战
-最后一次更改: OpenAI Codex
 
 功能说明:
 - 承接 `tile-elewise` 的公开 pattern、getter、`ModulePass` 与当前实现逻辑。
 - 对外 canonical public path 固定为 `kernel_gen.passes.tile.elewise`。
 - 不再拆分额外实现文件，当前 pass 逻辑全部保留在本文件。
+
+API 列表:
+- `class TileElewiseBinaryPattern(RewritePattern)`
+- `class TileElewiseBroadcastPattern(RewritePattern)`
+- `class TileElewiseMatmulPattern(RewritePattern)`
+- `get_tile_elewise_pass_patterns() -> list[RewritePattern]`
+- `class TileElewisePass(ModulePass)`
+- `TileElewisePass.__init__(fold: bool = True) -> None`
+- `TileElewisePass.apply(ctx: Context, module: ModuleOp) -> None`
 
 使用示例:
 - from kernel_gen.passes.tile.elewise import (
@@ -21,7 +28,7 @@
 
 关联文件:
 - spec: [spec/pass/tile/elewise.md](spec/pass/tile/elewise.md)
-- test: [test/pass/tile/test_elewise.py](test/pass/tile/test_elewise.py)
+- test: [test/passes/tile/test_elewise.py](test/passes/tile/test_elewise.py)
 - test: [test/dsl/gen_kernel/test_gen_kernel.py](test/dsl/gen_kernel/test_gen_kernel.py)
 - 功能实现: [kernel_gen/passes/tile/elewise.py](kernel_gen/passes/tile/elewise.py)
 """
@@ -54,8 +61,6 @@ from kernel_gen.passes.common import ensure_builtin_module, raise_pass_contract_
 class TileElewiseBinaryPattern(RewritePattern):
     """匹配 `kernel.binary_elewise` 的公开 elewise tile pattern。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 命中受支持的 `kernel.binary_elewise` 后，就地把当前 op 改写为显式 `symbol.for + dma.view` 结构。
@@ -66,7 +71,7 @@ class TileElewiseBinaryPattern(RewritePattern):
 
     关联文件:
     - spec: [spec/pass/tile/elewise.md](spec/pass/tile/elewise.md)
-    - test: [test/pass/tile/test_elewise.py](test/pass/tile/test_elewise.py)
+    - test: [test/passes/tile/test_elewise.py](test/passes/tile/test_elewise.py)
     - 功能实现: [kernel_gen/passes/tile/elewise.py](kernel_gen/passes/tile/elewise.py)
     """
 
@@ -468,6 +473,45 @@ class TileElewiseBroadcastPattern(RewritePattern):
         rewriter.notify_op_modified(parent_op)
 
 
+def _matches_tile_matmul_roles(
+    out_value: SSAValue,
+    lhs_value: SSAValue,
+    rhs_value: SSAValue,
+) -> bool:
+    """判断三个 memory 是否符合 matmul 的 out/lhs/rhs 角色。
+
+
+    功能说明:
+    - 校验 rank 与 `lhs[M,K] * rhs[K,N] -> out[M,N]` 的 shape 关系。
+
+    使用示例:
+    - _matches_tile_matmul_roles(out, lhs, rhs)
+
+    关联文件:
+    - spec: spec/pass/tile/elewise.md
+    - test: test/passes/tile/test_elewise.py
+    - 功能实现: kernel_gen/passes/tile/elewise.py
+    """
+
+    if not (
+        isinstance(out_value.type, NnMemoryType)
+        and isinstance(lhs_value.type, NnMemoryType)
+        and isinstance(rhs_value.type, NnMemoryType)
+    ):
+        return False
+    if (
+        len(out_value.type.shape.data) != 2
+        or len(lhs_value.type.shape.data) != 2
+        or len(rhs_value.type.shape.data) != 2
+    ):
+        return False
+    return (
+        lhs_value.type.shape.data[0] == out_value.type.shape.data[0]
+        and lhs_value.type.shape.data[1] == rhs_value.type.shape.data[0]
+        and rhs_value.type.shape.data[1] == out_value.type.shape.data[1]
+    )
+
+
 class TileElewiseMatmulPattern(RewritePattern):
     """匹配 `kernel.matmul` 的公开 elewise tile pattern。"""
 
@@ -488,37 +532,14 @@ class TileElewiseMatmulPattern(RewritePattern):
         if not all(isinstance(value.type, NnMemoryType) for value in candidate_memories):
             return
 
-        def _matches_matmul_roles(
-            out_value: SSAValue,
-            lhs_value: SSAValue,
-            rhs_value: SSAValue,
-        ) -> bool:
-            if not (
-                isinstance(out_value.type, NnMemoryType)
-                and isinstance(lhs_value.type, NnMemoryType)
-                and isinstance(rhs_value.type, NnMemoryType)
-            ):
-                return False
-            if (
-                len(out_value.type.shape.data) != 2
-                or len(lhs_value.type.shape.data) != 2
-                or len(rhs_value.type.shape.data) != 2
-            ):
-                return False
-            return (
-                lhs_value.type.shape.data[0] == out_value.type.shape.data[0]
-                and lhs_value.type.shape.data[1] == rhs_value.type.shape.data[0]
-                and rhs_value.type.shape.data[1] == out_value.type.shape.data[1]
-            )
-
         out_index, lhs_index, rhs_index = 0, 1, 2
         out, lhs, rhs = candidate_memories[out_index], candidate_memories[lhs_index], candidate_memories[rhs_index]
-        if not _matches_matmul_roles(out, lhs, rhs):
+        if not _matches_tile_matmul_roles(out, lhs, rhs):
             for out_candidate_index, lhs_candidate_index, rhs_candidate_index in permutations(range(3), 3):
                 out_candidate = candidate_memories[out_candidate_index]
                 lhs_candidate = candidate_memories[lhs_candidate_index]
                 rhs_candidate = candidate_memories[rhs_candidate_index]
-                if _matches_matmul_roles(out_candidate, lhs_candidate, rhs_candidate):
+                if _matches_tile_matmul_roles(out_candidate, lhs_candidate, rhs_candidate):
                     out_index, lhs_index, rhs_index = (
                         out_candidate_index,
                         lhs_candidate_index,
@@ -671,8 +692,6 @@ class TileElewiseMatmulPattern(RewritePattern):
 def get_tile_elewise_pass_patterns() -> list[RewritePattern]:
     """返回 `tile-elewise` pass 使用的公开 pattern 列表。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 为外部测试、组合 pass 和公开 API 提供稳定的 pattern 构造入口。
@@ -683,7 +702,7 @@ def get_tile_elewise_pass_patterns() -> list[RewritePattern]:
 
     关联文件:
     - spec: [spec/pass/tile/elewise.md](spec/pass/tile/elewise.md)
-    - test: [test/pass/tile/test_elewise.py](test/pass/tile/test_elewise.py)
+    - test: [test/passes/tile/test_elewise.py](test/passes/tile/test_elewise.py)
     - 功能实现: [kernel_gen/passes/tile/elewise.py](kernel_gen/passes/tile/elewise.py)
     """
 
@@ -702,8 +721,6 @@ class TileElewisePass(ModulePass):
     def __init__(self: "TileElewisePass", fold: bool = True) -> None:
         """初始化 tile-elewise pass 公共选项。
 
-        创建者: 大闸蟹
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 记录 `fold` 开关，默认允许 pass 内 pattern walker 执行 folding。
@@ -714,11 +731,11 @@ class TileElewisePass(ModulePass):
 
         关联文件:
         - spec: [spec/pass/tile/elewise.md](spec/pass/tile/elewise.md)
-        - test: [test/pass/tile/test_elewise.py](test/pass/tile/test_elewise.py)
+        - test: [test/passes/tile/test_elewise.py](test/passes/tile/test_elewise.py)
         - 功能实现: [kernel_gen/passes/tile/elewise.py](kernel_gen/passes/tile/elewise.py)
         """
 
-        object.__setattr__(self, "fold", bool(fold))
+        self.fold = bool(fold)
 
     def apply(self: "TileElewisePass", ctx: Context, module: ModuleOp) -> None:
         ensure_builtin_module(module)

@@ -1,7 +1,5 @@
 """outline-device-kernel pass.
 
-创建者: 朽木露琪亚
-最后一次更改: OpenAI Codex
 
 功能说明:
 - 作为 `ModulePass` 为带显式 launch 属性的 `func.func` 执行 host-launch outline。
@@ -11,7 +9,6 @@
 API 列表:
 - `class OutlineDeviceKernelPass()`
 - `OutlineDeviceKernelPass.apply(ctx: Context, module: ModuleOp) -> None`
-- `OutlineDeviceKernelPass.run(module: object) -> ModuleOp`
 
 使用示例:
 - from xdsl.context import Context
@@ -19,11 +16,10 @@ API 列表:
 - from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
 - module = ModuleOp([])
 - OutlineDeviceKernelPass().apply(Context(), module)
-- # 兼容旧调用方仍可使用 OutlineDeviceKernelPass().run(module)
 
 关联文件:
 - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-- test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+- test: [test/passes/test_outline_device_kernel.py](test/passes/test_outline_device_kernel.py)
 - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
 """
 
@@ -55,8 +51,6 @@ from kernel_gen.passes.common import (
 class _OutlineDeviceKernelFuncPattern(RewritePattern):
     """按单个 `func.func` 执行 outline-device-kernel 改写。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 一个 `func.func` 对应一个 pattern。
@@ -67,7 +61,7 @@ class _OutlineDeviceKernelFuncPattern(RewritePattern):
 
     关联文件:
     - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - test: [test/passes/test_outline_device_kernel.py](test/passes/test_outline_device_kernel.py)
     - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
@@ -149,8 +143,6 @@ def _get_outline_device_kernel_pass_patterns(
 ) -> list[RewritePattern]:
     """返回 `outline-device-kernel` pass 的内部 pattern 列表。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 供当前文件内部构造 rewrite walker。
@@ -161,7 +153,7 @@ def _get_outline_device_kernel_pass_patterns(
 
     关联文件:
     - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - test: [test/passes/test_outline_device_kernel.py](test/passes/test_outline_device_kernel.py)
     - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
@@ -171,8 +163,6 @@ def _get_outline_device_kernel_pass_patterns(
 class OutlineDeviceKernelPass(ModulePass):
     """outline-device-kernel pass。
 
-    创建者: 朽木露琪亚
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 固定公开名称为 `outline-device-kernel`。
@@ -187,7 +177,7 @@ class OutlineDeviceKernelPass(ModulePass):
 
     关联文件:
     - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - test: [test/passes/test_outline_device_kernel.py](test/passes/test_outline_device_kernel.py)
     - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
@@ -196,8 +186,6 @@ class OutlineDeviceKernelPass(ModulePass):
     def __init__(self: "OutlineDeviceKernelPass", fold: bool = True) -> None:
         """初始化 outline-device-kernel pass 公共选项。
 
-        创建者: 大闸蟹
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 记录 `fold` 开关，默认允许 pass 内 pattern walker 执行 folding。
@@ -208,17 +196,15 @@ class OutlineDeviceKernelPass(ModulePass):
 
         关联文件:
         - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-        - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+        - test: [test/passes/test_outline_device_kernel.py](test/passes/test_outline_device_kernel.py)
         - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
         """
 
-        object.__setattr__(self, "fold", bool(fold))
+        self.fold = bool(fold)
 
     def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行 outline-device-kernel ModulePass。
 
-        创建者: 朽木露琪亚
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 仅接受 `builtin.module` 作为 ModulePass 输入。
@@ -232,7 +218,7 @@ class OutlineDeviceKernelPass(ModulePass):
 
         关联文件:
         - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-        - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+        - test: [test/passes/test_outline_device_kernel.py](test/passes/test_outline_device_kernel.py)
         - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
         """
 
@@ -313,29 +299,5 @@ class OutlineDeviceKernelPass(ModulePass):
                 dce_enabled=False,
             )
         ).rewrite_module(module)
-
-    def run(self, module: object) -> ModuleOp:
-        """兼容旧 Pass 接口的执行入口。
-
-        创建者: 朽木露琪亚
-        最后一次更改: OpenAI Codex
-
-        功能说明:
-        - 保持旧 `run(module)` 调用方可继续工作。
-        - 内部直接复用 `apply(Context(), module)`。
-
-        使用示例:
-        - from xdsl.dialects.builtin import ModuleOp
-        - module = OutlineDeviceKernelPass().run(ModuleOp([]))
-
-        关联文件:
-        - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
-        - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
-        - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
-        """
-
-        self.apply(Context(), module)  # type: ignore[arg-type]
-        return module  # type: ignore[return-value]
-
 
 __all__ = ["OutlineDeviceKernelPass"]

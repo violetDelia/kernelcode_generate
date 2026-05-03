@@ -1,7 +1,5 @@
 """kernel_gen IR parsing Context helpers.
 
-创建者: 小李飞刀
-最后一次更改: 榕
 
 功能说明:
 - 提供仓库内统一的 xdsl Context 构造函数，用于“解析 + 打印”类工具的默认上下文。
@@ -9,7 +7,7 @@
 - 该模块只负责“dialect 注册/加载”，不负责 pass 执行，也不负责对 IR 做任何变换。
 
 API 列表:
-- `build_default_context() -> Context`
+- `build_default_context() -> xdsl.context.Context`
 
 使用示例:
 - from xdsl.parser import Parser
@@ -32,14 +30,12 @@ from __future__ import annotations
 
 import os
 
-from xdsl.context import Context
+from xdsl.context import Context as XdslContext
 
 
-def build_default_context() -> Context:
+def build_default_context() -> XdslContext:
     """构造用于 IR 解析与打印的默认 xdsl Context。
 
-    创建者: 小李飞刀
-    最后一次更改: 榕
 
     功能说明:
     - 加载基础 dialect：builtin/func/arith/scf。
@@ -73,7 +69,7 @@ def build_default_context() -> Context:
     from kernel_gen.dialect.symbol import Symbol
     from kernel_gen.dialect.tuner import Tuner
 
-    ctx = Context()
+    ctx = XdslContext()
     ctx.load_dialect(Builtin)
     ctx.load_dialect(Func)
     ctx.load_dialect(Arith)

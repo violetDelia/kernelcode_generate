@@ -23,12 +23,10 @@ API 列表:
 - Status st = npu_demo::add<GM, float, float>(out, lhs, rhs);
 - Status st2 = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 
@@ -52,12 +50,10 @@ namespace detail {
 使用示例:
 - bool ok = npu_demo::detail::is_non_null(mem.data());
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <typename T>
@@ -73,12 +69,10 @@ inline bool is_non_null(const T* ptr) {
 使用示例:
 - Status st = npu_demo::detail::elementwise_binary_same_shape(out, lhs, rhs, [](auto a, auto b) { return a + b; });
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, typename BinaryFn>
@@ -129,12 +123,10 @@ inline Status elementwise_binary_same_shape(
 使用示例:
 - Status st = npu_demo::detail::elementwise_unary_same_shape(out, input, [](auto value) { return value; });
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, typename UnaryFn>
@@ -184,12 +176,10 @@ inline Status elementwise_unary_same_shape(
 使用示例:
 - Status st = npu_demo::detail::compare_same_shape(out, lhs, rhs, [](auto a, auto b) { return a == b; });
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, typename CompareFn>
@@ -210,12 +200,10 @@ inline Status compare_same_shape(
 使用示例:
 - Status st = npu_demo::add<GM, float, float>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -230,12 +218,10 @@ inline Status add(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 使用示例:
 - Status st = npu_demo::sub<GM, float, float>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -250,12 +236,10 @@ inline Status sub(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 使用示例:
 - Status st = npu_demo::mul<GM, float, float>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -270,12 +254,10 @@ inline Status mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 使用示例:
 - Status st = npu_demo::truediv<GM, float, float>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -296,12 +278,10 @@ inline Status truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& 
 使用示例:
 - Status st = npu_demo::eq<GM, float, bool>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -316,12 +296,10 @@ inline Status eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 使用示例:
 - Status st = npu_demo::ne<GM, float, bool>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -336,12 +314,10 @@ inline Status ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 使用示例:
 - Status st = npu_demo::lt<GM, float, bool>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -356,12 +332,10 @@ inline Status lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 使用示例:
 - Status st = npu_demo::le<GM, float, bool>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -376,12 +350,10 @@ inline Status le(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 使用示例:
 - Status st = npu_demo::gt<GM, float, bool>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -396,12 +368,10 @@ inline Status gt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 使用示例:
 - Status st = npu_demo::ge<GM, float, bool>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -416,12 +386,10 @@ inline Status ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 使用示例:
 - Status st = npu_demo::exp<GM, float, float>(out, input);
 
-创建者: 小李飞刀
-最后修改人: 大闸蟹
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -438,12 +406,10 @@ inline Status exp(Memory<Space, OutType>& out, const Memory<Space, InType>& inpu
 使用示例:
 - Status st = npu_demo::select<GM, float, float>(out, cond, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -480,12 +446,10 @@ inline Status select(
 使用示例:
 - Status st = npu_demo::reduce_sum<GM, float, float>(out, input, 1);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -536,12 +500,10 @@ inline Status reduce_sum(Memory<Space, OutType>& out, const Memory<Space, InType
 使用示例:
 - Status st = npu_demo::reduce_min<GM, float, float>(out, input, 1);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -596,12 +558,10 @@ inline Status reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType
 使用示例:
 - Status st = npu_demo::reduce_max<GM, float, float>(out, input, 1);
 
-创建者: 守护最好的爱莉希雅
-最后修改人: 守护最好的爱莉希雅
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -656,12 +616,10 @@ inline Status reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType
 使用示例:
 - Status st = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType>
@@ -714,12 +672,10 @@ inline Status matmul(
 使用示例:
 - Status st = npu_demo::img2col1d<GM, TSM, float, float>(out, input, 3, 2, 1, 1, 1);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType>
@@ -788,12 +744,10 @@ inline Status img2col1d(
 使用示例:
 - Status st = npu_demo::img2col2d<GM, TSM, float, float>(out, input, 3, 2, 1, 2, 1, 1, 1, 0, 0, 1);
 
-创建者: 小李飞刀
-最后修改人: 小李飞刀
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/test_kernel.py
+- test: test/include/api/kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType>
@@ -884,12 +838,10 @@ inline Status img2col2d(
 使用示例:
 - Status st = add(lhs_tsm, rhs_tsm, out_tlm);
 
-创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
-- test: test/dsl/gen_kernel/test_gen_kernel.py
+- test: test/dsl/gen_kernel/gen_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename T>

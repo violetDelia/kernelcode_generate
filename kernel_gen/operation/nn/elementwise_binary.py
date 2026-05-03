@@ -1,47 +1,51 @@
 """NN operation elementwise binary family.
 
-创建者: 守护最好的爱莉希雅
-最后一次更改: 大闸蟹
 
 功能说明:
 - 提供逐元素算术 family 与共享隐式 broadcast helper。
 
 API 列表:
-- `add(lhs: object, rhs: object) -> ArithmeticResult`
-- `sub(lhs: object, rhs: object) -> ArithmeticResult`
-- `mul(lhs: object, rhs: object) -> ArithmeticResult`
-- `truediv(lhs: object, rhs: object) -> ArithmeticResult`
-- `floordiv(lhs: object, rhs: object) -> ArithmeticResult`
+- `add(lhs: BinaryOperand, rhs: BinaryOperand) -> ArithmeticResult`
+- `sub(lhs: BinaryOperand, rhs: BinaryOperand) -> ArithmeticResult`
+- `mul(lhs: BinaryOperand, rhs: BinaryOperand) -> ArithmeticResult`
+- `truediv(lhs: BinaryOperand, rhs: BinaryOperand) -> ArithmeticResult`
+- `floordiv(lhs: BinaryOperand, rhs: BinaryOperand) -> ArithmeticResult`
 
 使用示例:
 - from kernel_gen.operation.nn.elementwise_binary import add, sub, mul
 
 关联文件:
 - spec: spec/operation/nn.md
-- test: test/operation/test_operation_nn_elementwise.py
+- test: test/operation/nn/test_elementwise.py
 - 功能实现: kernel_gen/operation/nn/elementwise_binary.py
 """
 
 from __future__ import annotations
 
+from types import NotImplementedType
+
 from kernel_gen.core.contracts import default_stride
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import (
+    ERROR_ACTION,
+    ERROR_TEMPLATE,
+    ErrorKind,
+    ErrorModule,
+    kernel_code_error,
+)
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
-from kernel_gen.symbol_variable.type import Farmat
+from kernel_gen.symbol_variable.type import Farmat, NumericType
 
-ScalarArithmeticValue = int | float | SymbolDim
+ScalarArithmeticValue = int | float | bool | SymbolDim
+BinaryOperand = Memory | ScalarArithmeticValue
 ArithmeticResult = Memory | ScalarArithmeticValue
-_ERROR_ACTION = "请按接口约束传参"
 _ERROR_SCENE = "nn operation 参数校验"
 
 
-def _resolve_add_dtype(lhs: object, rhs: object) -> object:
+def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
     """按公开 `Memory` 算术语义推导 nn 算术结果 dtype。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 复用 `Memory` 的公开加法路径推导 dtype。
@@ -54,21 +58,19 @@ def _resolve_add_dtype(lhs: object, rhs: object) -> object:
     try:
         return (Memory([1], lhs) + Memory([1], rhs)).get_type()
     except TypeError as exc:
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.add 参数校验",
                 expected="Unsupported dtype for nn.add",
                 actual=f"lhs={lhs} rhs={rhs}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         ) from exc
 
 
-def _resolve_scalar_dtype(memory_dtype: object) -> object:
+def _resolve_scalar_dtype(memory_dtype: NumericType) -> NumericType:
     """解析 `Memory/标量` 路径的 dtype 决议。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 标量按 `Int32` 参与公开算术类型提升规则。
@@ -85,8 +87,6 @@ def _resolve_scalar_dtype(memory_dtype: object) -> object:
 def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
     """合并两个维度为隐式 broadcast 目标维度。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 维度相等时返回该维度。
@@ -100,12 +100,12 @@ def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
     if lhs_dim == "?" or rhs_dim == "?":
         if lhs_dim == rhs_dim:
             return lhs_dim
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.add 参数校验",
                 expected="Implicit broadcast dimension mismatch",
                 actual=f"lhs={lhs_dim} rhs={rhs_dim}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     if lhs_dim == rhs_dim:
@@ -114,21 +114,19 @@ def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
         return rhs_dim
     if rhs_dim == 1:
         return lhs_dim
-    raise ValueError(
-        _ERROR_TEMPLATE.format(
+    raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+        ERROR_TEMPLATE.format(
             scene="nn.add 参数校验",
             expected="Implicit broadcast dimension mismatch",
             actual=f"lhs={lhs_dim} rhs={rhs_dim}",
-            action=_ERROR_ACTION,
+            action=ERROR_ACTION,
         )
     )
 
 
-def _ensure_memory_operand(lhs: object, rhs: object) -> None:
+def _ensure_memory_operand(lhs: BinaryOperand, rhs: BinaryOperand) -> None:
     """校验至少一侧为 `Memory`。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅允许 `Memory` 或与 `Memory` 组合的二元运算。
@@ -138,21 +136,19 @@ def _ensure_memory_operand(lhs: object, rhs: object) -> None:
     """
 
     if not isinstance(lhs, Memory) and not isinstance(rhs, Memory):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected="At least one operand must be Memory",
                 actual=f"lhs={type(lhs).__name__} rhs={type(rhs).__name__}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
 
-def _ensure_scalar_value(value: object) -> None:
+def _ensure_scalar_value(value: ScalarArithmeticValue) -> None:
     """校验公开标量输入类型。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅允许 `int/float/bool` 作为与 `Memory` 组合的公开标量。
@@ -164,21 +160,19 @@ def _ensure_scalar_value(value: object) -> None:
     if isinstance(value, bool):
         return
     if not isinstance(value, (int, float)):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected="Unsupported scalar type for nn operation",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
 
-def _ensure_scalar_arithmetic_value(value: object) -> None:
+def _ensure_scalar_arithmetic_value(value: ScalarArithmeticValue) -> None:
     """校验纯标量算术输入类型。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 允许 `int/float/bool/SymbolDim` 参与纯标量算术。
@@ -194,8 +188,6 @@ def _ensure_scalar_arithmetic_value(value: object) -> None:
 def _infer_implicit_broadcast_shape(lhs: Memory, rhs: Memory) -> SymbolShape:
     """推导逐元素隐式 broadcast 的共同目标 shape。
 
-    创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 按尾维对齐规则合并维度。
@@ -206,7 +198,7 @@ def _infer_implicit_broadcast_shape(lhs: Memory, rhs: Memory) -> SymbolShape:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_binary.py
     """
     lhs_values = lhs.shape.get_values()
@@ -226,8 +218,6 @@ def _infer_implicit_broadcast_shape(lhs: Memory, rhs: Memory) -> SymbolShape:
 def _binary_memory_result(lhs: Memory, rhs: Memory) -> Memory:
     """逐元素算术 Memory/Memory 结果推导。
 
-    创建者: 小李飞刀
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 支持隐式 broadcast 推导目标 shape。
@@ -239,7 +229,7 @@ def _binary_memory_result(lhs: Memory, rhs: Memory) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_binary.py
     """
     result_dtype = _resolve_add_dtype(lhs.dtype, rhs.dtype)
@@ -269,8 +259,6 @@ def _binary_memory_result(lhs: Memory, rhs: Memory) -> Memory:
 def _binary_add_result(lhs: Memory, rhs: Memory) -> Memory:
     """逐元素加法 Memory/Memory 结果推导。
 
-    创建者: 小李飞刀
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 支持隐式 broadcast 推导目标 shape。
@@ -282,7 +270,7 @@ def _binary_add_result(lhs: Memory, rhs: Memory) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_binary.py
     """
     result_dtype = _resolve_add_dtype(lhs.dtype, rhs.dtype)
@@ -309,11 +297,44 @@ def _binary_add_result(lhs: Memory, rhs: Memory) -> Memory:
         format=Farmat.Norm,
     )
 
-def _apply_scalar_operator(lhs: object, rhs: object, op: str, rop: str) -> ScalarArithmeticValue:
+
+def _call_scalar_operator(
+    target: ScalarArithmeticValue,
+    method_name: str,
+    operand: ScalarArithmeticValue,
+) -> ScalarArithmeticValue | NotImplementedType:
+    """调用单个标量 dunder 方法。
+
+
+    功能说明:
+    - 缺失方法或方法拒绝当前 operand 时统一返回 `NotImplemented`。
+
+    使用示例:
+    - _call_scalar_operator(SymbolDim("M"), "__add__", 2)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/nn/test_elementwise.py
+    - 功能实现: kernel_gen/operation/nn/elementwise_binary.py
+    """
+
+    method = getattr(target, method_name, None)
+    if method is None:
+        return NotImplemented
+    try:
+        return method(operand)
+    except TypeError:
+        return NotImplemented
+
+
+def _apply_scalar_operator(
+    lhs: ScalarArithmeticValue,
+    rhs: ScalarArithmeticValue,
+    op: str,
+    rop: str,
+) -> ScalarArithmeticValue:
     """执行纯标量算术并保持 Python 操作数顺序语义。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 优先尝试左操作数实现，失败后回退到右操作数反向实现。
@@ -324,42 +345,36 @@ def _apply_scalar_operator(lhs: object, rhs: object, op: str, rop: str) -> Scala
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_binary.py
     """
-
-    def _call_operator(target: object, method_name: str, operand: object) -> object:
-        method = getattr(target, method_name, None)
-        if method is None:
-            return NotImplemented
-        try:
-            return method(operand)
-        except TypeError:
-            return NotImplemented
 
     _ensure_scalar_arithmetic_value(lhs)
     _ensure_scalar_arithmetic_value(rhs)
 
-    direct_result = _call_operator(lhs, op, rhs)
+    direct_result = _call_scalar_operator(lhs, op, rhs)
     if direct_result is not NotImplemented:
         return direct_result
-    reverse_result = _call_operator(rhs, rop, lhs)
+    reverse_result = _call_scalar_operator(rhs, rop, lhs)
     if reverse_result is not NotImplemented:
         return reverse_result
-    raise TypeError(
-        _ERROR_TEMPLATE.format(
+    raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+        ERROR_TEMPLATE.format(
             scene=_ERROR_SCENE,
             expected="Unsupported scalar type for nn operation",
             actual=f"lhs={type(lhs).__name__} rhs={type(rhs).__name__}",
-            action=_ERROR_ACTION,
+            action=ERROR_ACTION,
         )
     )
 
-def _dispatch_scalar_binary(lhs: object, rhs: object, op: str, rop: str) -> ScalarArithmeticValue | None:
+def _dispatch_scalar_binary(
+    lhs: BinaryOperand,
+    rhs: BinaryOperand,
+    op: str,
+    rop: str,
+) -> ScalarArithmeticValue | None:
     """在无 Memory 参与时执行纯标量算术调度。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 当两侧都不是 Memory 时，直接返回 Python/SymbolDim 算术结果。
@@ -370,18 +385,16 @@ def _dispatch_scalar_binary(lhs: object, rhs: object, op: str, rop: str) -> Scal
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_binary.py
     """
     if isinstance(lhs, Memory) or isinstance(rhs, Memory):
         return None
     return _apply_scalar_operator(lhs, rhs, op, rop)
 
-def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> ArithmeticResult:
+def _dispatch_binary(lhs: BinaryOperand, rhs: BinaryOperand, op: str, rop: str) -> ArithmeticResult:
     """二元算术调度。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 根据 Memory 所在侧选择正向或反向运算。
@@ -391,7 +404,7 @@ def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> ArithmeticR
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_binary.py
     """
     scalar_result = _dispatch_scalar_binary(lhs, rhs, op, rop)
@@ -406,11 +419,9 @@ def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> ArithmeticR
     _ensure_scalar_value(lhs)
     return rhs.clone(dtype=_resolve_scalar_dtype(rhs.dtype))
 
-def add(lhs: object, rhs: object) -> ArithmeticResult:
+def add(lhs: BinaryOperand, rhs: BinaryOperand) -> ArithmeticResult:
     """逐元素加法。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 支持 Memory 与 Memory/标量的加法。
@@ -422,7 +433,7 @@ def add(lhs: object, rhs: object) -> ArithmeticResult:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_binary.py
     返回与限制：
 
@@ -441,11 +452,9 @@ def add(lhs: object, rhs: object) -> ArithmeticResult:
     _ensure_scalar_value(lhs)
     return rhs.clone(dtype=_resolve_scalar_dtype(rhs.dtype))
 
-def sub(lhs: object, rhs: object) -> ArithmeticResult:
+def sub(lhs: BinaryOperand, rhs: BinaryOperand) -> ArithmeticResult:
     """逐元素减法。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的减法。
@@ -457,7 +466,7 @@ def sub(lhs: object, rhs: object) -> ArithmeticResult:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_binary.py
     返回与限制：
 
@@ -466,11 +475,9 @@ def sub(lhs: object, rhs: object) -> ArithmeticResult:
     """
     return _dispatch_binary(lhs, rhs, "__sub__", "__rsub__")
 
-def mul(lhs: object, rhs: object) -> ArithmeticResult:
+def mul(lhs: BinaryOperand, rhs: BinaryOperand) -> ArithmeticResult:
     """逐元素乘法。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的乘法。
@@ -482,7 +489,7 @@ def mul(lhs: object, rhs: object) -> ArithmeticResult:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_binary.py
     返回与限制：
 
@@ -491,11 +498,9 @@ def mul(lhs: object, rhs: object) -> ArithmeticResult:
     """
     return _dispatch_binary(lhs, rhs, "__mul__", "__rmul__")
 
-def truediv(lhs: object, rhs: object) -> ArithmeticResult:
+def truediv(lhs: BinaryOperand, rhs: BinaryOperand) -> ArithmeticResult:
     """逐元素除法。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的除法。
@@ -507,7 +512,7 @@ def truediv(lhs: object, rhs: object) -> ArithmeticResult:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_binary.py
     返回与限制：
 
@@ -516,11 +521,9 @@ def truediv(lhs: object, rhs: object) -> ArithmeticResult:
     """
     return _dispatch_binary(lhs, rhs, "__truediv__", "__rtruediv__")
 
-def floordiv(lhs: object, rhs: object) -> ArithmeticResult:
+def floordiv(lhs: BinaryOperand, rhs: BinaryOperand) -> ArithmeticResult:
     """逐元素整除。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 支持 Memory 与 Memory/标量的整除。
@@ -532,7 +535,7 @@ def floordiv(lhs: object, rhs: object) -> ArithmeticResult:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_binary.py
     返回与限制：
 

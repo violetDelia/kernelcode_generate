@@ -1,7 +1,5 @@
 """core config tests.
 
-创建者: OpenAI Codex
-最后一次更改: 大闸蟹
 
 功能说明:
 - 覆盖 `kernel_gen.core.config` 中公共 target、dump_dir 配置底座的显式接口与类型约束。
@@ -43,8 +41,6 @@ from kernel_gen.core.config import (
 def _reset_common_config() -> None:
     """重置公共配置测试现场。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 在每条测试开始前恢复 `kernel_gen.core.config` 的默认配置状态。
@@ -60,8 +56,6 @@ def _reset_common_config() -> None:
 def _reset_config_fixture() -> None:
     """为每条测试自动重置公共配置现场。
 
-    创建者: OpenAI Codex
-    最后一次更改: OpenAI Codex
 
     功能说明:
     - 保证测试之间不会互相污染公共配置状态。
@@ -76,10 +70,6 @@ def _reset_config_fixture() -> None:
 
 
 # CCFG-001
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 target 配置通过公开 set/get 接口稳定往返。
 # 使用示例: pytest -q test/core/test_config.py -k test_target_round_trip
 # 对应功能实现文件路径: kernel_gen/core/config.py
@@ -94,10 +84,6 @@ def test_target_round_trip() -> None:
 
 
 # CCFG-001A
-# 创建者: 大闸蟹
-# 最后一次更改: 大闸蟹
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 dump_dir 配置通过公开 set/get 接口稳定往返。
 # 使用示例: pytest -q test/core/test_config.py -k test_dump_dir_round_trip
 # 对应功能实现文件路径: kernel_gen/core/config.py
@@ -118,10 +104,6 @@ def test_dump_dir_round_trip(tmp_path: Path) -> None:
 
 
 # CCFG-002
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证公开配置 setter 对非法类型输入会稳定失败。
 # 使用示例: pytest -q test/core/test_config.py -k test_config_setters_reject_invalid_types
 # 对应功能实现文件路径: kernel_gen/core/config.py
@@ -135,10 +117,6 @@ def test_config_setters_reject_invalid_types() -> None:
 
 
 # CCFG-003
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 reset_config 会恢复公开配置默认值。
 # 使用示例: pytest -q test/core/test_config.py -k test_reset_config_restores_public_defaults
 # 对应功能实现文件路径: kernel_gen/core/config.py
@@ -155,10 +133,6 @@ def test_reset_config_restores_public_defaults() -> None:
 
 
 # CCFG-004
-# 创建者: OpenAI Codex
-# 最后一次更改: OpenAI Codex
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 snapshot_config / restore_config 只保存并恢复公开 target 配置。
 # 使用示例: pytest -q test/core/test_config.py -k test_snapshot_and_restore_config_round_trip
 # 对应功能实现文件路径: kernel_gen/core/config.py

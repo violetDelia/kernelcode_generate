@@ -1,7 +1,5 @@
 """element binary/compare lowering 实现。
 
-创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 统一 nn element binary/compare 的 lowering 目标为 kernel.binary_elewise(kind=...)。
@@ -11,13 +9,16 @@
 - 主 lowering driver 按单个 nn op 注册独立 RewritePattern，不再通过 family pattern 做名称分发。
 - surviving 模块级接口为 `element_binary_patterns()`。
 
+API 列表:
+- `element_binary_patterns() -> list[RewritePattern]`
+
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering.element_binary_lowering import element_binary_patterns
 - patterns = element_binary_patterns()
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/spec.md
-- test: test/pass/nn_lowering/element_binary_add.py
+- test: test/passes/lowering/nn_lowering/test_element_binary_add.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
 """
 
@@ -75,8 +76,6 @@ _SYMBOL_ARITH_OPS: dict[str, type[Operation]] = {
 def _select_memory_operand(op: Operation) -> SSAValue:
     """选择 element binary 的 memory operand 作为 shape 来源。
 
-    创建者: 小李飞刀
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 从 operands 中选择第一个 nn.memory 作为 shape 来源。
@@ -87,7 +86,7 @@ def _select_memory_operand(op: Operation) -> SSAValue:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_compare_eq.py
+    - test: test/passes/lowering/nn_lowering/test_element_compare_eq.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -104,8 +103,6 @@ def _build_alloc_dynamic_shape_from_source(
 ) -> tuple[list[Operation], list[SSAValue]]:
     """基于 memory operand 构造 dma.alloc 的 dynamic_shape。
 
-    创建者: 小李飞刀
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 逐维使用 symbol.get_dim 读取 shape 对应维度。
@@ -117,7 +114,7 @@ def _build_alloc_dynamic_shape_from_source(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_binary_add.py
+    - test: test/passes/lowering/nn_lowering/test_element_binary_add.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -157,8 +154,6 @@ def _materialize_element_binary_scalar_operand(
 ) -> tuple[list[Operation], SSAValue]:
     """把 element binary 标量 operand 物化为 memory。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 为标量创建与 source 同布局的临时 memory。
@@ -169,7 +164,7 @@ def _materialize_element_binary_scalar_operand(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_compare_eq.py
+    - test: test/passes/lowering/nn_lowering/test_element_compare_eq.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -191,8 +186,6 @@ def _materialize_compare_scalar_operand(
 ) -> tuple[list[Operation], SSAValue]:
     """把 compare 标量 operand 物化为 memory。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 为 compare 标量创建与 source 同布局的临时 memory。
@@ -203,7 +196,7 @@ def _materialize_compare_scalar_operand(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_compare_eq.py
+    - test: test/passes/lowering/nn_lowering/test_element_compare_eq.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -221,8 +214,6 @@ def _materialize_compare_scalar_operand(
 def _normalize_symbol_ops(block: Block, anchor: Operation) -> None:
     """规范化 anchor 之前的 symbol 常量/算术 op。
 
-    创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 将 symbol.const 与符号算术 op 规范化为可重复使用的形式。
@@ -233,7 +224,7 @@ def _normalize_symbol_ops(block: Block, anchor: Operation) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_binary_add.py
+    - test: test/passes/lowering/nn_lowering/test_element_binary_add.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -286,8 +277,6 @@ def _lower_element_binary_op(
 ) -> None:
     """对单个 element binary/compare op 执行 lowering。
 
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 统一转换为 kernel.binary_elewise(kind=...)。
@@ -300,7 +289,7 @@ def _lower_element_binary_op(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_binary_add.py
+    - test: test/passes/lowering/nn_lowering/test_element_binary_add.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -387,8 +376,6 @@ def _lower_typed_element_binary_pattern(
 ) -> None:
     """执行单 op element binary/compare pattern 的公共动作。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 根据具体 pattern 传入的 kind 与 compare 标记调用 lowering helper。
@@ -400,7 +387,7 @@ def _lower_typed_element_binary_pattern(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/element_binary_lowering.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -415,8 +402,6 @@ def _lower_typed_element_binary_pattern(
 class _LowerNnAddPattern(RewritePattern):
     """将单个 nn.add lowering 为 kernel.binary_elewise(kind="add")。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 直接匹配 NnAddOp，并调用共享 helper 生成 kind="add" 的 kernel.binary_elewise。
@@ -427,7 +412,7 @@ class _LowerNnAddPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_binary_add.py
+    - test: test/passes/lowering/nn_lowering/test_element_binary_add.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -441,8 +426,6 @@ class _LowerNnAddPattern(RewritePattern):
 class _LowerNnSubPattern(RewritePattern):
     """将单个 nn.sub lowering 为 kernel.binary_elewise(kind="sub")。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 直接匹配 NnSubOp，并调用共享 helper 生成 kind="sub" 的 kernel.binary_elewise。
@@ -453,7 +436,7 @@ class _LowerNnSubPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_binary_sub.py
+    - test: test/passes/lowering/nn_lowering/test_element_binary_sub.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -467,8 +450,6 @@ class _LowerNnSubPattern(RewritePattern):
 class _LowerNnMulPattern(RewritePattern):
     """将单个 nn.mul lowering 为 kernel.binary_elewise(kind="mul")。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 直接匹配 NnMulOp，并调用共享 helper 生成 kind="mul" 的 kernel.binary_elewise。
@@ -479,7 +460,7 @@ class _LowerNnMulPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_binary_mul.py
+    - test: test/passes/lowering/nn_lowering/test_element_binary_mul.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -493,8 +474,6 @@ class _LowerNnMulPattern(RewritePattern):
 class _LowerNnDivPattern(RewritePattern):
     """将单个 nn.div lowering 为 kernel.binary_elewise(kind="div")。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 直接匹配 NnDivOp，并调用共享 helper 生成 kind="div" 的 kernel.binary_elewise。
@@ -505,7 +484,7 @@ class _LowerNnDivPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_binary_div.py
+    - test: test/passes/lowering/nn_lowering/test_element_binary_div.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -519,8 +498,6 @@ class _LowerNnDivPattern(RewritePattern):
 class _LowerNnTrueDivPattern(RewritePattern):
     """将单个 nn.truediv lowering 为 kernel.binary_elewise(kind="div")。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 直接匹配 NnTrueDivOp，并调用共享 helper 生成 kind="div" 的 kernel.binary_elewise。
@@ -531,7 +508,7 @@ class _LowerNnTrueDivPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_binary_truediv.py
+    - test: test/passes/lowering/nn_lowering/test_element_binary_truediv.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -545,8 +522,6 @@ class _LowerNnTrueDivPattern(RewritePattern):
 class _LowerNnEqPattern(RewritePattern):
     """将单个 nn.eq lowering 为 kernel.binary_elewise(kind="eq")。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 直接匹配 NnEqOp，并调用共享 helper 生成 kind="eq" 的 kernel.binary_elewise。
@@ -557,7 +532,7 @@ class _LowerNnEqPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_compare_eq.py
+    - test: test/passes/lowering/nn_lowering/test_element_compare_eq.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -571,8 +546,6 @@ class _LowerNnEqPattern(RewritePattern):
 class _LowerNnNePattern(RewritePattern):
     """将单个 nn.ne lowering 为 kernel.binary_elewise(kind="ne")。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 直接匹配 NnNeOp，并调用共享 helper 生成 kind="ne" 的 kernel.binary_elewise。
@@ -583,7 +556,7 @@ class _LowerNnNePattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_compare_ne.py
+    - test: test/passes/lowering/nn_lowering/test_element_compare_ne.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -597,8 +570,6 @@ class _LowerNnNePattern(RewritePattern):
 class _LowerNnLtPattern(RewritePattern):
     """将单个 nn.lt lowering 为 kernel.binary_elewise(kind="lt")。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 直接匹配 NnLtOp，并调用共享 helper 生成 kind="lt" 的 kernel.binary_elewise。
@@ -609,7 +580,7 @@ class _LowerNnLtPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_compare_lt.py
+    - test: test/passes/lowering/nn_lowering/test_element_compare_lt.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -623,8 +594,6 @@ class _LowerNnLtPattern(RewritePattern):
 class _LowerNnLePattern(RewritePattern):
     """将单个 nn.le lowering 为 kernel.binary_elewise(kind="le")。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 直接匹配 NnLeOp，并调用共享 helper 生成 kind="le" 的 kernel.binary_elewise。
@@ -635,7 +604,7 @@ class _LowerNnLePattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_compare_le.py
+    - test: test/passes/lowering/nn_lowering/test_element_compare_le.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -649,8 +618,6 @@ class _LowerNnLePattern(RewritePattern):
 class _LowerNnGtPattern(RewritePattern):
     """将单个 nn.gt lowering 为 kernel.binary_elewise(kind="gt")。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 直接匹配 NnGtOp，并调用共享 helper 生成 kind="gt" 的 kernel.binary_elewise。
@@ -661,7 +628,7 @@ class _LowerNnGtPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_compare_gt.py
+    - test: test/passes/lowering/nn_lowering/test_element_compare_gt.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -675,8 +642,6 @@ class _LowerNnGtPattern(RewritePattern):
 class _LowerNnGePattern(RewritePattern):
     """将单个 nn.ge lowering 为 kernel.binary_elewise(kind="ge")。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 直接匹配 NnGeOp，并调用共享 helper 生成 kind="ge" 的 kernel.binary_elewise。
@@ -687,7 +652,7 @@ class _LowerNnGePattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/element_compare_ge.py
+    - test: test/passes/lowering/nn_lowering/test_element_compare_ge.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
@@ -701,8 +666,6 @@ class _LowerNnGePattern(RewritePattern):
 def element_binary_patterns() -> list[RewritePattern]:
     """返回 element binary/compare rewrite pattern 集合。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 提供 nn_lowering 主 driver 的单 op pattern 注册入口。
@@ -713,7 +676,7 @@ def element_binary_patterns() -> list[RewritePattern]:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/element_binary_lowering.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 

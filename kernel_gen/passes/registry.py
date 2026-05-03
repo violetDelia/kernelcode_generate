@@ -1,7 +1,5 @@
 """Pass registry API.
 
-创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 pass / pipeline 的进程内注册表，统一“名字 -> 构造器”的解析入口。
@@ -26,7 +24,7 @@ API 列表:
 
 关联文件:
 - spec: [spec/pass/registry.md](spec/pass/registry.md)
-- test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+- test: [test/passes/test_registry.py](test/passes/test_registry.py)
 - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
 """
 
@@ -38,6 +36,8 @@ import inspect
 from typing import TypeVar
 
 from .pass_manager import Pass, PassManager
+from xdsl.context import Context
+from xdsl.dialects.builtin import ModuleOp
 from xdsl.passes import ModulePass as XdslModulePass
 
 PassType = TypeVar("PassType", bound=XdslModulePass)
@@ -48,14 +48,56 @@ _PIPELINE_REGISTRY: dict[str, Callable[..., PassManager]] = {}
 _BUILTINS_LOADED = False
 
 
+class _NoOpPass(Pass):
+    """内置 no-op pass。
+
+
+    功能说明:
+    - 作为 pass registry smoke test 与 no-op pipeline 的最小 pass。
+
+    使用示例:
+    - _NoOpPass().apply(Context(), module)
+
+    关联文件:
+    - spec: spec/pass/registry.md
+    - test: test/passes/test_registry.py
+    - 功能实现: kernel_gen/passes/registry.py
+    """
+
+    name = "no-op"
+
+    def apply(self: "_NoOpPass", ctx: Context, module: ModuleOp) -> None:
+        _ = ctx
+        _ = module
+
+
+def _build_no_op_pipeline() -> PassManager:
+    """构造内置 no-op pipeline。
+
+
+    功能说明:
+    - 保持 registry 内置 pipeline 构造逻辑在当前文件顶层 helper 中。
+
+    使用示例:
+    - pm = _build_no_op_pipeline()
+
+    关联文件:
+    - spec: spec/pass/registry.md
+    - test: test/passes/test_registry.py
+    - 功能实现: kernel_gen/passes/registry.py
+    """
+
+    pm = PassManager(name="no-op-pipeline")
+    pm.add_pass(_NoOpPass())
+    return pm
+
+
 def _set_pass_fold_option(pass_obj: XdslModulePass, fold: bool) -> None:
     """设置 pass 实例的通用 fold 开关。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
-    - 统一处理 `ModulePass` / frozen dataclass pass 的属性写入。
+    - 统一处理 `ModulePass` 的属性写入。
     - 仅供 registry 在解析通用 `fold` 选项后设置实例状态。
 
     使用示例:
@@ -63,18 +105,16 @@ def _set_pass_fold_option(pass_obj: XdslModulePass, fold: bool) -> None:
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
-    object.__setattr__(pass_obj, "fold", bool(fold))
+    pass_obj.fold = bool(fold)
 
 
 def _parse_bool_option(name: str, value: str) -> bool:
     """解析 registry bool 选项。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 接受常见 true/false 文本。
@@ -85,7 +125,7 @@ def _parse_bool_option(name: str, value: str) -> bool:
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
@@ -100,8 +140,6 @@ def _parse_bool_option(name: str, value: str) -> bool:
 def _split_fold_option(options: dict[str, str]) -> tuple[dict[str, str], bool | None]:
     """从 pass options 中拆出通用 `fold` 选项。
 
-    创建者: 大闸蟹
-    最后一次更改: 大闸蟹
 
     功能说明:
     - `fold` 是所有 pass 的通用 registry 选项，默认由 pass 构造器自身决定。
@@ -112,7 +150,7 @@ def _split_fold_option(options: dict[str, str]) -> tuple[dict[str, str], bool | 
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
@@ -129,8 +167,6 @@ def _register_registry_entry(
 ) -> None:
     """把单个注册项写入 registry 并保留重复名失败语义。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 统一 pass / pipeline 的同名重复注册检查。
@@ -141,7 +177,7 @@ def _register_registry_entry(
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
@@ -158,8 +194,6 @@ def _build_registered_pass_instance(
 ) -> XdslModulePass:
     """根据注册的 pass 类构造实例，并统一错误转换。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 将 pass 无参构造与 `from_options(options)` 两条入口的错误转换收口到单一 helper。
@@ -170,7 +204,7 @@ def _build_registered_pass_instance(
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
@@ -210,8 +244,6 @@ def _build_registered_pipeline_manager(
 ) -> PassManager:
     """根据注册的 pipeline builder 构造 PassManager，并统一错误转换。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 将 pipeline 无参构造、options 传参与返回值校验收口到单一 helper。
@@ -222,7 +254,7 @@ def _build_registered_pipeline_manager(
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
@@ -248,8 +280,6 @@ def _build_registered_pipeline_manager(
 def register_pass(pass_cls: type[PassType]) -> type[PassType]:
     """注册公开 pass 类。
 
-    创建者: 睡觉小分队
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 装饰器：注册一个公开 pass 类（`ModulePass` 子类），使用 `pass_cls.name` 作为 key。
@@ -259,11 +289,11 @@ def register_pass(pass_cls: type[PassType]) -> type[PassType]:
     - @register_pass
       class TileReducePass(Pass):
           name = "tile-reduce"
-          def run(self, module): return module
+          def apply(self, ctx, module): pass
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
@@ -279,8 +309,6 @@ def register_pass(pass_cls: type[PassType]) -> type[PassType]:
 def register_pipeline(name: str) -> Callable[[Callable[..., PassManager]], Callable[..., PassManager]]:
     """注册公开 pipeline builder。
 
-    创建者: 睡觉小分队
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 装饰器工厂：注册一个公开 pipeline builder，使用 `name` 作为 key。
@@ -294,7 +322,7 @@ def register_pipeline(name: str) -> Callable[[Callable[..., PassManager]], Calla
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
@@ -315,8 +343,6 @@ def register_pipeline(name: str) -> Callable[[Callable[..., PassManager]], Calla
 def _normalize_options(options: dict[str, str] | None) -> dict[str, str]:
     """规整 build_registered_* 的 options 参数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 将 None 规整为空字典。
@@ -328,7 +354,7 @@ def _normalize_options(options: dict[str, str] | None) -> dict[str, str]:
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
@@ -340,8 +366,6 @@ def _normalize_options(options: dict[str, str] | None) -> dict[str, str]:
 def _pipeline_accepts_options(builder: Callable[..., PassManager]) -> bool:
     """判断 pipeline builder 是否接收 options 参数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 基于函数签名判断是否支持单个 options 参数。
@@ -352,7 +376,7 @@ def _pipeline_accepts_options(builder: Callable[..., PassManager]) -> bool:
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
@@ -369,8 +393,6 @@ def _pipeline_accepts_options(builder: Callable[..., PassManager]) -> bool:
 def build_registered_pass(name: str, options: dict[str, str] | None = None) -> XdslModulePass:
     """根据名称构造 pass 实例。
 
-    创建者: 睡觉小分队
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 根据 pass name 构造并返回 pass 实例。
@@ -384,7 +406,7 @@ def build_registered_pass(name: str, options: dict[str, str] | None = None) -> X
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
@@ -406,8 +428,6 @@ def build_registered_pass(name: str, options: dict[str, str] | None = None) -> X
 def build_registered_pipeline(name: str, options: dict[str, str] | None = None) -> PassManager:
     """根据名称构造 pipeline 对应的 PassManager。
 
-    创建者: 睡觉小分队
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 根据 pipeline name 调用 builder 构造并返回 `PassManager`。
@@ -423,7 +443,7 @@ def build_registered_pipeline(name: str, options: dict[str, str] | None = None) 
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
@@ -437,8 +457,6 @@ def build_registered_pipeline(name: str, options: dict[str, str] | None = None) 
 def load_builtin_passes() -> None:
     """加载仓库内置 pass / pipeline。
 
-    创建者: 睡觉小分队
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 主动加载仓库内置 pass / pipeline，使装饰器注册与显式注册生效。
@@ -451,7 +469,7 @@ def load_builtin_passes() -> None:
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
@@ -459,19 +477,8 @@ def load_builtin_passes() -> None:
     if _BUILTINS_LOADED:
         return
 
-    class NoOpPass(Pass):
-        name = "no-op"
-
-        def run(self: "NoOpPass", target: object) -> object:
-            return target
-
-    def _build_no_op_pipeline() -> PassManager:
-        pm = PassManager(name="no-op-pipeline")
-        pm.add_pass(NoOpPass())
-        return pm
-
-    if NoOpPass.name not in _PASS_REGISTRY:
-        register_pass(NoOpPass)
+    if _NoOpPass.name not in _PASS_REGISTRY:
+        register_pass(_NoOpPass)
     if "no-op-pipeline" not in _PIPELINE_REGISTRY:
         register_pipeline("no-op-pipeline")(_build_no_op_pipeline)
 
@@ -527,8 +534,6 @@ def load_builtin_passes() -> None:
 def list_registered_passes() -> list[str]:
     """列出当前已注册 pass 名称。
 
-    创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 返回当前已注册 pass 名称列表。
@@ -540,7 +545,7 @@ def list_registered_passes() -> list[str]:
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
@@ -550,8 +555,6 @@ def list_registered_passes() -> list[str]:
 def list_registered_pipelines() -> list[str]:
     """列出当前已注册 pipeline 名称。
 
-    创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 返回当前已注册 pipeline 名称列表。
@@ -563,7 +566,7 @@ def list_registered_pipelines() -> list[str]:
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
@@ -573,8 +576,6 @@ def list_registered_pipelines() -> list[str]:
 def _reset_registry_for_test() -> None:
     """清空注册表状态，仅用于测试隔离。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 清空 pass / pipeline registry，并重置内置加载标记。
@@ -586,7 +587,7 @@ def _reset_registry_for_test() -> None:
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
-    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - test: [test/passes/test_registry.py](test/passes/test_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 

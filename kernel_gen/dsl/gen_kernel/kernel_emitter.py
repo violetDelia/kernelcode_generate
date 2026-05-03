@@ -1,7 +1,5 @@
 """Function-level C-like kernel generation helpers.
 
-创建者: 金铲铲大作战
-最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 按 `emit_c` 的节点级规则，组装 `func.func` 的完整函数源码。
@@ -31,7 +29,6 @@ API 列表:
 from __future__ import annotations
 from kernel_gen.core.error import KernelCodeError
 
-from dataclasses import dataclass
 from typing import Any
 from typing import Callable
 import re
@@ -51,10 +48,10 @@ from xdsl.dialects.builtin import (
     StringAttr,
     SymbolRefAttr,
 )
-from xdsl.ir import BlockArgument, Operation, SSAValue
+from xdsl.ir import Operation, SSAValue
 
 from kernel_gen.dialect.arch import ArchBarrierOp, ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp, ArchLaunchOp
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaTransposeOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaCastOp, DmaReshapeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolValueType
 from kernel_gen.core.config import restore_config, set_target, snapshot_config
@@ -66,315 +63,9 @@ from .emit_context import EmitCContext
 
 
 
-def _normalize_memory_stmt(stmt: str) -> str:
-    if not stmt or "Memory<" not in stmt:
-        return stmt
-    normalized = stmt
-    normalized = re.sub(
-        r"Memory<\s*MemorySpace::(\w+)\s*,\s*(?:cpu::)?\1\s*,",
-        r"Memory<MemorySpace::\1,",
-        normalized,
-    )
-    normalized = re.sub(
-        r"Memory<\s*(?:cpu::)?(GM|TSM|TLM1|TLM2|TLM3|LM|SM)\s*,",
-        r"Memory<MemorySpace::\1,",
-        normalized,
-    )
-    normalized = re.sub(r"Memory<\s*(?!MemorySpace::)([^>]+)\s*>", r"Memory<MemorySpace::GM, \1>", normalized)
-    normalized = re.sub(r",\s*MemorySpace::GM\s*\)", ")", normalized)
-    normalized = re.sub(
-        r"(Memory<[^>]+>\s+\w+\()\s*([^,]+),\s*([A-Za-z_][A-Za-z0-9_]*)_shape,\s*([A-Za-z_][A-Za-z0-9_]*)_stride,\s*([0-9]+),\s*([^)]+)\)",
-        r"\1\2, \5, \3_shape, \4_stride, \6)",
-        normalized,
-    )
-    return normalized
-
-
-def _build_error(ctx: EmitCContext, func_name: str, reason: str) -> KernelCodeError:
-    return ctx.emit_error(f"func {func_name}", reason)
-
-
-def _walk_ops(op: Operation) -> list[Operation]:
-    """深度遍历并收集 op 子树中的所有 Operation。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 用于在 `gen_kernel(...)` 入口做 fail-fast 的结构预检。
-    - 递归扫描 op 的 regions/blocks/ops，包含 op 自身。
-
-    使用示例:
-    - all_ops = _walk_ops(func_op)
-    - assert any(item.name == "func.call" for item in all_ops)
-
-    关联文件:
-    - spec: spec/dsl/gen_kernel/gen_kernel.md
-    - test: test/dsl/gen_kernel/test_gen_kernel.py
-    - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
-    """
-
-    items: list[Operation] = [op]
-    for region in op.regions:
-        for block in region.blocks:
-            for inner in block.ops:
-                items.extend(_walk_ops(inner))
-    return items
-
-
-def _is_tile_codegen_function(func_op: func.FuncOp) -> bool:
-    ops = _walk_ops(func_op)
-    return any(
-        (
-            op.name == "tuner.param"
-            and op.results
-            and isinstance(op.results[0].type, SymbolValueType)
-        )
-        or "tile.analysis" in op.attributes
-        or "tile.tile_exprs" in op.attributes
-        for op in ops
-    )
-
-
-def _validate_tile_codegen_contract(func_op: func.FuncOp, ctx: EmitCContext) -> None:
-    """校验 tile after-IR 单函数 codegen 前置条件。
-
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - tile after-IR 只接受 `target=cpu`。
-    - 必须保留显式 `symbol.for`，并通过 `tuner.param : !symbol.int<"...">` 绑定 tile 因子。
-    - 不允许回退到 `kernel_split.*` / `tile.step_value` / `tile.symbol_literal` 旧桥接口径。
-
-    使用示例:
-    - _validate_tile_codegen_contract(func_op, EmitCContext())
-
-    关联文件:
-    - spec: [spec/dsl/gen_kernel/gen_kernel.md](spec/dsl/gen_kernel/gen_kernel.md)
-    - test: [test/dsl/gen_kernel/test_gen_kernel.py](test/dsl/gen_kernel/test_gen_kernel.py)
-    - 功能实现: [kernel_gen/dsl/gen_kernel/gen_kernel.py](kernel_gen/dsl/gen_kernel/gen_kernel.py)
-    """
-
-    func_name = func_op.sym_name.data
-    if not ctx.is_target("cpu"):
-        raise _build_error(ctx, func_name, "TileCodegenMalformed: tile codegen is cpu-only")
-
-    ops = list(func_op.body.block.ops)
-    if not any(op.name == "symbol.for" for op in ops):
-        raise _build_error(ctx, func_name, "TileCodegenMalformed: missing explicit tile loop (symbol.for)")
-    if not any(op.name == "tuner.param" and op.results and isinstance(op.results[0].type, SymbolValueType) for op in ops):
-        raise _build_error(ctx, func_name, "TileCodegenMalformed: missing tuner.param")
-    if any(op.name in {"kernel_split.tile_value", "tile.step_value", "kernel_split.symbol_literal", "tile.symbol_literal"} for op in ops):
-        raise _build_error(ctx, func_name, "TileCodegenMalformed: legacy bridge ops are not allowed")
-    if any(item.name == "func.call" for item in _walk_ops(func_op)):
-        raise _build_error(ctx, func_name, "TileCodegenUnexpectedHelperFunction: func.call is not allowed in tile codegen")
-
-
-def _extract_arg_names(func_op: func.FuncOp) -> list[str]:
-    names: list[str] = []
-    attrs = func_op.arg_attrs
-    if isinstance(attrs, ArrayAttr):
-        for index, attr in enumerate(attrs.data):
-            if isinstance(attr, DictionaryAttr):
-                name_attr = attr.data.get("name")
-                if isinstance(name_attr, StringAttr) and name_attr.data:
-                    names.append(name_attr.data)
-                    continue
-            names.append(f"arg{index}")
-        return names
-    return [f"arg{index}" for index, _ in enumerate(func_op.args)]
-
-
-def _leading_rewritten_out_param_count(func_op: func.FuncOp) -> int:
-    """识别 rewrite 后 IR 的最前置 out 参数个数。
-
-    创建者: jcc你莫辜负
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 仅把最前面连续的 `arg0/arg1/...` memory 参数识别为 out 参数。
-    - 这组参数由 `BufferResultsToOutParamsPass` 固定前置，用于让 `gen_kernel(...)` 只消费 rewrite 后 ABI。
-
-    使用示例:
-    - count = _leading_rewritten_out_param_count(func_op)
-
-    关联文件:
-    - spec: spec/dsl/gen_kernel/gen_kernel.md
-    - test: test/dsl/gen_kernel/test_gen_kernel.py
-    - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
-    """
-
-    input_types = list(func_op.function_type.inputs.data)
-    attrs = func_op.arg_attrs
-    count = 0
-    for index, arg_type in enumerate(input_types):
-        if not isinstance(arg_type, NnMemoryType):
-            break
-        if not isinstance(attrs, ArrayAttr):
-            break
-        if index >= len(attrs.data):
-            break
-        attr = attrs.data[index]
-        if not isinstance(attr, DictionaryAttr):
-            break
-        name_attr = attr.data.get("name")
-        if not isinstance(name_attr, StringAttr) or name_attr.data != f"arg{index}":
-            break
-        count += 1
-    return count
-
-
-def _block_arg_index(value: object) -> int | None:
-    if isinstance(value, BlockArgument):
-        return value.index
-    return None
-
-
-def _kernel_out_operand(value_op: Operation) -> SSAValue | None:
-    """返回 codegen 视角下的 kernel 输出 operand。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 当前公开 kernel 合同统一把第一个 `nn.memory` operand 视作 out。
-    - 对只读 expectation 中遗留的 `kernel.binary_elewise(lhs, rhs, out)` 文本，
-      按 block argument 位置做最小规整，继续把真正的 out 识别为最前置参数。
-
-    使用示例:
-    - out_value = _kernel_out_operand(op)
-
-    关联文件:
-    - spec: spec/dsl/gen_kernel/gen_kernel.md
-    - test: test/dsl/gen_kernel/test_gen_kernel.py
-    - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
-    """
-
-    candidate_arity = {
-        "kernel.binary_elewise": 3,
-        "kernel.matmul": 3,
-        "kernel.exp": 2,
-        "kernel.reduce": 2,
-        "kernel.reduce_min": 2,
-        "kernel.img2col1d": 2,
-        "kernel.img2col2d": 2,
-        "kernel.select": 4,
-    }.get(value_op.name)
-    if candidate_arity is None or len(value_op.operands) < candidate_arity:
-        if not value_op.operands:
-            return None
-        candidate = SSAValue.get(value_op.operands[0])
-        return candidate if isinstance(candidate.type, NnMemoryType) else None
-
-    candidates = [SSAValue.get(value_op.operands[index]) for index in range(candidate_arity)]
-    if not all(isinstance(candidate.type, NnMemoryType) for candidate in candidates):
-        return None
-
-    block_arg_indices = [_block_arg_index(candidate) for candidate in candidates]
-    if all(index is not None for index in block_arg_indices):
-        min_index = min(block_arg_indices)
-        min_pos = block_arg_indices.index(min_index)
-        return candidates[min_pos]
-    return candidates[0]
-
-
-def _leading_out_param_count_from_body(func_op: func.FuncOp) -> int:
-    """从函数体推断前置 out 参数个数。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 仅在函数没有 `memory return`、也没有 rewrite 后显式 `arg0/arg1/...` 标记时启用。
-    - 逐个检查最前面连续的 memory 参数，若它们作为 kernel/dma 写路径的 target/out 出现，则视为 out 参数。
-
-    使用示例:
-    - count = _leading_out_param_count_from_body(func_op)
-
-    关联文件:
-    - spec: spec/dsl/gen_kernel/gen_kernel.md
-    - test: test/dsl/gen_kernel/test_gen_kernel.py
-    - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
-    """
-
-    out_args: set[SSAValue] = set()
-    for op in _walk_ops(func_op):
-        if op.name.startswith("kernel."):
-            out_value = _kernel_out_operand(op)
-            if out_value is not None:
-                out_args.add(out_value)
-        elif isinstance(op, DmaDesliceOp):
-            out_args.add(SSAValue.get(op.target))
-
-    count = 0
-    for arg in func_op.args:
-        if not isinstance(arg.type, NnMemoryType):
-            break
-        if arg not in out_args:
-            break
-        count += 1
-    return count
-
-
-def _memory_rank(memory_type: NnMemoryType) -> int:
-    """返回 `nn.memory` 的静态 rank。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 为 `gen_kernel` 的固定骨架特化提供统一的 rank 读取。
-    - 仅读取 `shape` 条目数量，不额外校验各维是否为静态值。
-
-    使用示例:
-    - _memory_rank(mem_type) == 4
-
-    关联文件:
-    - spec: spec/dsl/gen_kernel/gen_kernel.md
-    - test: test/dsl/gen_kernel/test_gen_kernel.py
-    - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
-    """
-
-    return len(memory_type.shape.data)
-
-
-@dataclass(frozen=True)
-class _FunctionStrategy:
-    """`func.func` 发射策略描述。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 作为 `KernelEmitter` 的内部策略描述，统一收口函数级特化的匹配、签名与 body 发射。
-    - 不构成公开稳定接口；仅供 `gen_kernel(...)` 在函数级主流程中选择内部策略。
-
-    使用示例:
-    - strategy = _FunctionStrategy("default", lambda op: True, emitter.emit_default_function_body)
-
-    关联文件:
-    - spec: spec/dsl/gen_kernel/gen_kernel.md
-    - test: test/dsl/gen_kernel/test_gen_kernel.py
-    - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
-    """
-
-    name: str
-    matches: Callable[[func.FuncOp], bool]
-    emit_body: Callable[[func.FuncOp], str]
-    emit_signature: Callable[[func.FuncOp], str] | None = None
-
-    def build_signature(self, func_op: func.FuncOp, default_signature: Callable[[func.FuncOp], str]) -> str:
-        if self.emit_signature is None:
-            return default_signature(func_op)
-        return self.emit_signature(func_op)
-
-
 class KernelEmitter:
     """统一的 `gen_kernel` 内部发射器。
 
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 统一承接单个 op / `func.func` 的发射。
@@ -399,11 +90,94 @@ class KernelEmitter:
         self.ctx = ctx
         self._emit_op_impl = emit_op
 
+
+    def _normalize_memory_stmt(self, stmt: str) -> str:
+        if not stmt or "Memory<" not in stmt:
+            return stmt
+        normalized = stmt
+        normalized = re.sub(
+            r"Memory<\s*MemorySpace::(\w+)\s*,\s*(?:cpu::)?\1\s*,",
+            r"Memory<MemorySpace::\1,",
+            normalized,
+        )
+        normalized = re.sub(
+            r"Memory<\s*(?:cpu::)?(GM|TSM|TLM1|TLM2|TLM3|LM|SM)\s*,",
+            r"Memory<MemorySpace::\1,",
+            normalized,
+        )
+        normalized = re.sub(r"Memory<\s*(?!MemorySpace::)([^>]+)\s*>", r"Memory<MemorySpace::GM, \1>", normalized)
+        normalized = re.sub(r",\s*MemorySpace::GM\s*\)", ")", normalized)
+        normalized = re.sub(
+            r"(Memory<[^>]+>\s+\w+\()\s*([^,]+),\s*([A-Za-z_][A-Za-z0-9_]*)_shape,\s*([A-Za-z_][A-Za-z0-9_]*)_stride,\s*([0-9]+),\s*([^)]+)\)",
+            r"\1\2, \5, \3_shape, \4_stride, \6)",
+            normalized,
+        )
+        return normalized
+
+    def _walk_ops(self, op: Operation) -> list[Operation]:
+        items: list[Operation] = [op]
+        for region in op.regions:
+            for block in region.blocks:
+                for inner in block.ops:
+                    items.extend(self._walk_ops(inner))
+        return items
+
+    def _is_tile_codegen_function(self, func_op: func.FuncOp) -> bool:
+        has_symbol_tuner = any(
+            (
+                op.name == "tuner.param"
+                and op.results
+                and isinstance(op.results[0].type, SymbolValueType)
+            )
+            for op in self._walk_ops(func_op)
+        )
+        if has_symbol_tuner:
+            return True
+        if not self.ctx.is_target("cpu"):
+            return False
+        return any(
+            "tile.analysis" in op.attributes or "tile.tile_exprs" in op.attributes
+            for op in self._walk_ops(func_op)
+        )
+
+    def _validate_tile_codegen_contract(self, func_op: func.FuncOp) -> None:
+        func_name = func_op.sym_name.data
+        if not self.ctx.is_target("cpu"):
+            raise self._error(func_name, "TileCodegenMalformed: tile codegen is cpu-only")
+
+        ops = list(func_op.body.block.ops)
+        if not any(op.name == "symbol.for" for op in ops):
+            raise self._error(func_name, "TileCodegenMalformed: missing explicit tile loop (symbol.for)")
+        if not any(op.name == "tuner.param" and op.results and isinstance(op.results[0].type, SymbolValueType) for op in ops):
+            raise self._error(func_name, "TileCodegenMalformed: missing tuner.param")
+        if any(op.name in {"kernel_split.tile_value", "tile.step_value", "kernel_split.symbol_literal", "tile.symbol_literal"} for op in ops):
+            raise self._error(func_name, "TileCodegenMalformed: legacy bridge ops are not allowed")
+        if any(item.name == "func.call" for item in self._walk_ops(func_op)):
+            raise self._error(func_name, "TileCodegenUnexpectedHelperFunction: func.call is not allowed in tile codegen")
+
+    def _leading_rewritten_out_param_count(self, func_op: func.FuncOp) -> int:
+        input_types = list(func_op.function_type.inputs.data)
+        attrs = func_op.arg_attrs
+        count = 0
+        for index, arg_type in enumerate(input_types):
+            if not isinstance(arg_type, NnMemoryType):
+                break
+            if not isinstance(attrs, ArrayAttr):
+                break
+            if index >= len(attrs.data):
+                break
+            attr = attrs.data[index]
+            if not isinstance(attr, DictionaryAttr):
+                break
+            name_attr = attr.data.get("name")
+            if not isinstance(name_attr, StringAttr) or name_attr.data != f"arg{index}":
+                break
+            count += 1
+        return count
+
     def emit_include(self) -> str:
         """返回当前 target 需要的源码前导。
 
-        创建者: OpenAI Codex
-        最后一次更改: OpenAI Codex
 
         功能说明:
         - 统一收口 `gen_kernel(...)` / `emit_c(...)` 的 target 级 `#include` 与 `using namespace` 文本。
@@ -423,8 +197,6 @@ class KernelEmitter:
     def _type_to_c(self, attr: Any) -> str:
         """按当前 target 生成类型名。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 统一收口 `EmitCContext.dispatch_type(...)`，避免在多处重复判断 target。
@@ -465,10 +237,21 @@ class KernelEmitter:
             restore_config(snapshot)
 
     def _error(self, func_name: str, reason: str) -> KernelCodeError:
-        return _build_error(self.ctx, func_name, reason)
+        return self.ctx.emit_error(f"func {func_name}", reason)
 
     def _arg_names(self, func_op: func.FuncOp) -> list[str]:
-        return _extract_arg_names(func_op)
+        names: list[str] = []
+        attrs = func_op.arg_attrs
+        if isinstance(attrs, ArrayAttr):
+            for index, attr in enumerate(attrs.data):
+                if isinstance(attr, DictionaryAttr):
+                    name_attr = attr.data.get("name")
+                    if isinstance(name_attr, StringAttr) and name_attr.data:
+                        names.append(name_attr.data)
+                        continue
+                names.append(f"arg{index}")
+            return names
+        return [f"arg{index}" for index, _ in enumerate(func_op.args)]
 
     def emit(self, op_or_func: Any) -> str:
         if isinstance(op_or_func, ModuleOp):
@@ -486,8 +269,6 @@ class KernelEmitter:
     def emit_module(self, module_op: ModuleOp) -> str:
         """发射 `target=npu_demo` 的受控 `builtin.module` 双函数源码。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 仅对 `target="npu_demo"` 放行受控 `builtin.module` 子集。
@@ -547,8 +328,6 @@ class KernelEmitter:
     def _get_npu_demo_plain_func(self, module_op: ModuleOp) -> func.FuncOp | None:
         """识别单函数 `npu_demo` module 的普通 emit_c 子集。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 允许 `builtin.module` 只包含一个 `func.func`，且该函数不是 `arch.launch` 双函数 module。
@@ -593,31 +372,19 @@ class KernelEmitter:
         return func_op
 
     def emit_func(self, func_op: func.FuncOp) -> str:
-        strategy = self._select_func_strategy(func_op)
-        signature = strategy.build_signature(func_op, self._emit_default_signature)
-        self.ctx.push_indent()
-        body = strategy.emit_body(func_op)
-        self.ctx.pop_indent()
+        if self._is_npu_demo_body_level_kernel(func_op):
+            signature = self._emit_npu_demo_body_level_kernel_signature(func_op)
+            self.ctx.push_indent()
+            body = self._emit_npu_demo_body_level_kernel_body(func_op)
+            self.ctx.pop_indent()
+        else:
+            signature = self._emit_default_signature(func_op)
+            self.ctx.push_indent()
+            body = self._emit_default_function_body(func_op)
+            self.ctx.pop_indent()
         if body:
             return f"{signature} {{\n{body}\n}}"
         return f"{signature} {{\n}}"
-
-    def _function_strategies(self) -> tuple[_FunctionStrategy, ...]:
-        return (
-            _FunctionStrategy(
-                "npu_demo_body_level_kernel",
-                self._is_npu_demo_body_level_kernel,
-                self._emit_npu_demo_body_level_kernel_body,
-                self._emit_npu_demo_body_level_kernel_signature,
-            ),
-            _FunctionStrategy("default", lambda _func_op: True, self._emit_default_function_body),
-        )
-
-    def _select_func_strategy(self, func_op: func.FuncOp) -> _FunctionStrategy:
-        for strategy in self._function_strategies():
-            if strategy.matches(func_op):
-                return strategy
-        raise _build_error(self.ctx, func_op.sym_name.data, "no function emission strategy")
 
     def _is_npu_demo_body_level_kernel(self, func_op: func.FuncOp) -> bool:
         if not self.ctx.is_target("npu_demo"):
@@ -705,8 +472,6 @@ class KernelEmitter:
     ) -> tuple[list[Any], int]:
         """校验 body 函数签名。
 
-        创建者: 小李飞刀
-        最后一次更改: 守护最好的爱莉希雅
 
         功能说明:
         - body 兼容可选 `ctx` 参数、至少三个连续 memory 参数、零返回形式。
@@ -766,8 +531,6 @@ class KernelEmitter:
     ) -> tuple[list[NnMemoryType], int]:
         """校验 wrapper 函数签名与 launch 参数透传关系。
 
-        创建者: 小李飞刀
-        最后一次更改: 守护最好的爱莉希雅
 
         功能说明:
         - wrapper 必须与 body 的非 ctx 参数完全一致，并保持零返回形式。
@@ -822,8 +585,6 @@ class KernelEmitter:
     def _emit_npu_demo_launch_body_function(self, func_op: func.FuncOp) -> str:
         """生成 npu_demo launch body 函数源码。
 
-        创建者: 小李飞刀
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 输出 `static` body 签名，并按 lowered IR 的实际 op 顺序逐条发射源码。
@@ -902,8 +663,6 @@ class KernelEmitter:
     def _emit_npu_demo_launch_body_declaration(self, func_op: func.FuncOp) -> str:
         """生成 npu_demo launch body 的前置声明。
 
-        创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 为 `npu_demo` launch module 提供与定义完全一致的 body 前置声明。
@@ -929,8 +688,6 @@ class KernelEmitter:
     ) -> str:
         """生成 npu_demo launch body 的函数签名。
 
-        创建者: jcc你莫辜负
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 统一构造不显式暴露 `KernelContext` 的 `static void <body>(...)` 签名。
@@ -949,15 +706,10 @@ class KernelEmitter:
         func_name = func_op.sym_name.data
         arg_names = self._arg_names(func_op)
         body_arg_names = arg_names[body_arg_offset:]
-        mutable_memory_args = self._mutable_memory_arg_indices(func_op)
         params: list[str] = []
-        for arg_index, (arg_name, arg_type) in enumerate(
-            zip(body_arg_names, body_input_types, strict=True),
-            start=body_arg_offset,
-        ):
+        for arg_name, arg_type in zip(body_arg_names, body_input_types, strict=True):
             if isinstance(arg_type, NnMemoryType):
-                qualifier = "" if arg_index in mutable_memory_args else "const "
-                params.append(f"{qualifier}{self._type_to_c(arg_type)}& {arg_name}")
+                params.append(f"{self._type_to_c(arg_type)}& {arg_name}")
                 continue
             if isinstance(arg_type, SymbolValueType):
                 params.append(f"{self._type_to_c(arg_type)} {arg_name}")
@@ -968,13 +720,13 @@ class KernelEmitter:
     def _emit_npu_demo_launch_wrapper_function(self, wrapper_func: func.FuncOp, body_func: func.FuncOp) -> str:
         """生成 npu_demo wrapper 函数源码。
 
-        创建者: 小李飞刀
-        最后一次更改: 朽木露琪亚
 
         功能说明:
         - wrapper 负责把 `lhs/rhs/out` 与 trailing `!symbol.int` 参数原样透传给
           `npu_demo::launch<block, thread, subthread, shared_memory_size>(body, ...)`。
-        - 不生成 `KernelContext` 参数，也不引入旧同步接口。
+        - launch extent 对应 wrapper IR 中的独立 `symbol.const`，源码中用独立
+          `constexpr S_INT` 名称承接，避免 wrapper 发射阶段把常量折成模板字面量。
+        - wrapper 与 body 均不显式暴露 `KernelContext` 参数，body 通过 npu_demo free helper 读取活动上下文。
 
         使用示例:
         - source = self._emit_npu_demo_launch_wrapper_function(wrapper_func, body_func)
@@ -985,20 +737,17 @@ class KernelEmitter:
         - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
         """
 
-        body_input_types, body_arg_offset = self._validate_npu_demo_launch_wrapper_signature(wrapper_func, body_func)
+        self._validate_npu_demo_launch_wrapper_signature(wrapper_func, body_func)
         arg_names = self._arg_names(wrapper_func)
         launch_op = self._filtered_launch_ops(wrapper_func)[0]
         block_extent, thread_extent, subthread_extent, shared_memory_size_extent = self._launch_extents_from_wrapper(
             launch_op,
             wrapper_func.sym_name.data,
         )
-        mutable_memory_args = self._mutable_memory_arg_indices(body_func)
         params: list[str] = []
         for index, (arg_name, arg_type) in enumerate(zip(arg_names, wrapper_func.function_type.inputs.data, strict=True)):
-            body_arg_index = body_arg_offset + index
             if isinstance(arg_type, NnMemoryType):
-                qualifier = "" if body_arg_index in mutable_memory_args else "const "
-                params.append(f"{qualifier}{self._signature_type_to_c(arg_type)}& {arg_name}")
+                params.append(f"{self._signature_type_to_c(arg_type)}& {arg_name}")
                 continue
             if isinstance(arg_type, SymbolValueType):
                 params.append(f"{self._signature_type_to_c(arg_type)} {arg_name}")
@@ -1006,12 +755,20 @@ class KernelEmitter:
             raise self._error(wrapper_func.sym_name.data, "unsupported npu_demo launch wrapper signature")
         signature = f"void {wrapper_func.sym_name.data}({', '.join(params)})"
         self.ctx.push_indent()
+        extent_names: list[str] = []
+        extent_lines: list[str] = []
+        for extent in (block_extent, thread_extent, subthread_extent, shared_memory_size_extent):
+            extent_name = self.ctx.allocate_name("c_")
+            extent_names.append(extent_name)
+            extent_lines.append(f"{self.ctx.current_indent}constexpr S_INT {extent_name} = {extent};")
+        block_name, thread_name, subthread_name, shared_memory_size_name = extent_names
         call_args = ", ".join(arg_names)
-        body = (
-            f"{self.ctx.current_indent}npu_demo::launch<{block_extent}, {thread_extent}, {subthread_extent}, {shared_memory_size_extent}>({body_func.sym_name.data}, {call_args});"
+        launch_line = (
+            f"{self.ctx.current_indent}npu_demo::launch<{block_name}, {thread_name}, {subthread_name}, {shared_memory_size_name}>({body_func.sym_name.data}, {call_args});"
             if call_args
-            else f"{self.ctx.current_indent}npu_demo::launch<{block_extent}, {thread_extent}, {subthread_extent}, {shared_memory_size_extent}>({body_func.sym_name.data});"
+            else f"{self.ctx.current_indent}npu_demo::launch<{block_name}, {thread_name}, {subthread_name}, {shared_memory_size_name}>({body_func.sym_name.data});"
         )
+        body = "\n".join([*extent_lines, launch_line])
         self.ctx.pop_indent()
         return f"{signature} {{\n{body}\n}}"
 
@@ -1051,15 +808,13 @@ class KernelEmitter:
             self.ctx.bind_name(arg_value, arg_name)
         source_name = self.ctx.lookup_name(func_op.args[1]) or arg_names[1]
         return (
-            f"void {func_op.sym_name.data}(const {self._signature_type_to_c(source_type)}& {source_name}, "
+            f"void {func_op.sym_name.data}({self._signature_type_to_c(source_type)}& {source_name}, "
             f"{self._signature_type_to_c(out_type)}& out)"
         )
 
     def _emit_npu_demo_body_level_kernel_body(self, func_op: func.FuncOp) -> str:
         """生成 npu_demo body-level kernel 的固定函数体骨架。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 输出 `thread_id/thread_num -> get_dynamic_memory -> view/slice/add/deslice` 的受控顺序。
@@ -1126,12 +881,10 @@ class KernelEmitter:
     def _emit_default_signature(self, func_op: func.FuncOp) -> str:
         """生成默认 rewrite-after-IR 函数签名。
 
-        创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 默认 CPU/通用路径只消费已经过 `BufferResultsToOutParamsPass` 的 IR。
-        - 最前面连续且显式命名为 `arg0/arg1/...` 的 `Memory` 参数生成为 out 参数，其余 `Memory` 参数保持只读输入。
+        - 所有 `Memory` 参数统一生成为非 const 引用，避免在源码签名层按读写语义拆分两套 ABI。
         - 若函数仍保留旧 `memory return` ABI，则显式报错，阻止后端继续隐式推导 `out`。
 
         使用示例:
@@ -1146,38 +899,24 @@ class KernelEmitter:
         input_types = list(func_op.function_type.inputs.data)
         result_types = list(func_op.function_type.outputs.data)
         if len(result_types) > 1:
-            raise _build_error(self.ctx, func_name, "unsupported return form")
+            raise self._error(func_name, "unsupported return form")
         if result_types and isinstance(result_types[0], NnMemoryType):
-            raise _build_error(
-                self.ctx,
+            raise self._error(
                 func_name,
                 "legacy memory return ABI is not supported; run BufferResultsToOutParamsPass first",
             )
         if result_types:
             result_type = result_types[0]
             if isinstance(result_type, SymbolValueType) and not (self.ctx.is_target("cpu") or self.ctx.is_target("npu_demo")):
-                raise _build_error(self.ctx, func_name, "symbol scalar return is only supported on cpu and npu_demo")
+                raise self._error(func_name, "symbol scalar return is only supported on cpu and npu_demo")
             self._type_to_c(result_type)
 
-        mutable_memory_args = self._mutable_memory_arg_indices(func_op)
-        arg_names = _extract_arg_names(func_op)
-        leading_out_params = _leading_rewritten_out_param_count(func_op)
-        if mutable_memory_args:
-            contiguous_mutable_prefix = 0
-            while (
-                contiguous_mutable_prefix < leading_out_params
-                and contiguous_mutable_prefix in mutable_memory_args
-            ):
-                contiguous_mutable_prefix += 1
-            leading_out_params = contiguous_mutable_prefix
+        arg_names = self._arg_names(func_op)
         params: list[str] = []
         for index, (arg_name, arg_type, arg_value) in enumerate(zip(arg_names, input_types, func_op.args, strict=True)):
             self.ctx.bind_name(arg_value, arg_name)
             if isinstance(arg_type, NnMemoryType):
-                if index < leading_out_params or index in mutable_memory_args:
-                    params.append(f"{self._type_to_c(arg_type)}& {arg_name}")
-                else:
-                    params.append(f"const {self._type_to_c(arg_type)}& {arg_name}")
+                params.append(f"{self._type_to_c(arg_type)}& {arg_name}")
             else:
                 params.append(f"{self._type_to_c(arg_type)} {arg_name}")
 
@@ -1186,53 +925,6 @@ class KernelEmitter:
             return_type = self._type_to_c(result_types[0])
 
         return f"{return_type} {func_name}({', '.join(params)})"
-
-    def _mutable_memory_arg_indices(self, func_op: func.FuncOp) -> set[int]:
-        """推断普通函数签名里需要可写引用的 memory 参数位置。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 递归扫描当前函数里已知的写入类 op，把其 `target/out` 所对应的 block argument 记为可写参数。
-        - 覆盖 `symbol.for` / `scf.for` region 内的 `dma.store`，避免把循环内写回的 out 参数误生成 `const&`。
-        - 供 `npu_demo` 单函数 module 的默认签名复用，避免把 `dst` 一律误生成为 `const&`。
-
-        使用示例:
-        - mutable = self._mutable_memory_arg_indices(func_op)
-
-        关联文件:
-        - spec: spec/dsl/gen_kernel/gen_kernel.md
-        - test: test/dsl/gen_kernel/test_gen_kernel.py
-        - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
-        """
-
-        arg_to_index = {arg: index for index, arg in enumerate(func_op.args)}
-        mutable: set[int] = set()
-        for op in _walk_ops(func_op):
-            for value in self._mutable_memory_operands(op):
-                if isinstance(value, BlockArgument) and value in arg_to_index:
-                    mutable.add(arg_to_index[value])
-        return mutable
-
-    def _mutable_memory_operands(self, op: Operation) -> tuple[BlockArgument, ...]:
-        """返回当前 op 中会被写入的 block argument operand。"""
-
-        candidates: list[object] = []
-        if op.name.startswith("kernel."):
-            out_value = _kernel_out_operand(op)
-            if out_value is not None:
-                candidates.append(out_value)
-        if isinstance(op, (DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaTransposeOp)):
-            if not isinstance(op, DmaCastOp) or len(op.operands) == 2:
-                candidates.append(op.target)
-        if isinstance(op, (DmaDesliceOp, DmaStoreOp)):
-            candidates.append(op.target)
-        mutable_args: list[BlockArgument] = []
-        for candidate in candidates:
-            if isinstance(candidate, BlockArgument):
-                mutable_args.append(candidate)
-        return tuple(mutable_args)
 
     def _is_returned_output_alloc(self, func_op: func.FuncOp, op: DmaAllocOp) -> bool:
         if not self.ctx.is_target("cpu"):
@@ -1260,8 +952,6 @@ class KernelEmitter:
     def _bind_transparent_unrealized_conversion_cast(self, op: Operation) -> bool:
         """透明绑定单层 `builtin.unrealized_conversion_cast`。
 
-        创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
 
         功能说明:
         - lowering 链路中会残留少量 `unrealized_conversion_cast`，主要用于把常量包装成 `!symbol.int`。
@@ -1279,15 +969,13 @@ class KernelEmitter:
         if op.name != "builtin.unrealized_conversion_cast":
             return False
         if len(op.operands) != 1 or len(op.results) != 1:
-            raise _build_error(self.ctx, op.name, "unrealized_conversion_cast must have exactly one operand and one result")
+            raise self._error(op.name, "unrealized_conversion_cast must have exactly one operand and one result")
         self.ctx.bind_name(op.results[0], emit_c_value(op.operands[0], self.ctx))
         return True
 
     def _emit_npu_demo_return_symbol_assignment(self, op: Operation) -> str | None:
         """为 `npu_demo` 的 `%total` 累计值生成稳定赋值语句。
 
-        创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
 
         功能说明:
         - sibling cost function 会把 `%total : !symbol.int` 作为最终返回值。
@@ -1330,8 +1018,6 @@ class KernelEmitter:
     ) -> str | None:
         """生成默认路径下的 `func.return` 收尾语句。
 
-        创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - rewrite-after-IR 默认路径只允许无返回或单一非 `Memory` 标量返回。
@@ -1349,24 +1035,22 @@ class KernelEmitter:
         result_types = list(func_op.function_type.outputs.data)
         if not result_types:
             if return_op.arguments:
-                raise _build_error(self.ctx, func_op.sym_name.data, "unsupported return form")
+                raise self._error(func_op.sym_name.data, "unsupported return form")
             return None
         if len(result_types) != 1:
-            raise _build_error(self.ctx, func_op.sym_name.data, "unsupported return form")
+            raise self._error(func_op.sym_name.data, "unsupported return form")
         result_type = result_types[0]
         if len(return_op.arguments) != 1:
-            raise _build_error(self.ctx, func_op.sym_name.data, "unsupported return form")
+            raise self._error(func_op.sym_name.data, "unsupported return form")
         if return_op.arguments[0].type != result_type:
-            raise _build_error(self.ctx, func_op.sym_name.data, "unsupported return form")
+            raise self._error(func_op.sym_name.data, "unsupported return form")
         if isinstance(result_type, NnMemoryType):
-            raise _build_error(
-                self.ctx,
+            raise self._error(
                 func_op.sym_name.data,
                 "legacy memory return ABI is not supported; run BufferResultsToOutParamsPass first",
             )
         if isinstance(result_type, SymbolValueType) and not (self.ctx.is_target("cpu") or self.ctx.is_target("npu_demo")):
-            raise _build_error(
-                self.ctx,
+            raise self._error(
                 func_op.sym_name.data,
                 "symbol scalar return is only supported on cpu and npu_demo",
             )
@@ -1376,8 +1060,6 @@ class KernelEmitter:
     def _emit_default_function_body(self, func_op: func.FuncOp) -> str:
         """生成默认 rewrite-after-IR 函数体。
 
-        创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 按 IR 顺序逐个委托普通 op 到 `emit_c_op(...)`。
@@ -1392,38 +1074,34 @@ class KernelEmitter:
         - test: test/dsl/gen_kernel/test_gen_kernel.py
         - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
         """
-        is_tile_codegen = _is_tile_codegen_function(func_op)
+        is_tile_codegen = self._is_tile_codegen_function(func_op)
         if is_tile_codegen:
-            _validate_tile_codegen_contract(func_op, self.ctx)
+            self._validate_tile_codegen_contract(func_op)
 
         tile_var_by_expr: dict[str, str] = {}
         emitted_tile_exprs: set[str] = set()
 
-        def _tile_var_name(dim_name: str) -> str:
-            return dim_name.strip().lower()
-
         lines: list[str] = []
         for op in func_op.body.block.ops:
             if op.name in {"kernel_split.symbol_literal", "tile.symbol_literal", "kernel_split.tile_value", "tile.step_value"}:
-                raise _build_error(
-                    self.ctx,
+                raise self._error(
                     func_op.sym_name.data,
                     "TileCodegenMalformed: legacy bridge ops are not allowed",
                 )
 
             if op.name == "tuner.param":
                 if not op.results:
-                    raise _build_error(self.ctx, func_op.sym_name.data, "TileCodegenMalformed: tuner.param must have a result")
+                    raise self._error(func_op.sym_name.data, "TileCodegenMalformed: tuner.param must have a result")
                 result_type = op.results[0].type
                 if isinstance(result_type, SymbolValueType):
                     expr_name = result_type.expr.expr.data
-                    var_name = tile_var_by_expr.setdefault(expr_name, _tile_var_name(expr_name))
+                    var_name = tile_var_by_expr.setdefault(expr_name, expr_name.strip().lower())
                     self.ctx.bind_name(op.results[0], var_name)
                     if expr_name not in emitted_tile_exprs:
                         lines.append(f'{self.ctx.current_indent}long long {var_name} = tuner_param("{expr_name}");')
                         emitted_tile_exprs.add(expr_name)
                     continue
-                raise _build_error(self.ctx, func_op.sym_name.data, "TileCodegenMalformed: tuner.param result must be !symbol.int")
+                raise self._error(func_op.sym_name.data, "TileCodegenMalformed: tuner.param result must be !symbol.int")
 
             if isinstance(op, func.ReturnOp):
                 stmt = self._emit_return_statement(func_op, op)
@@ -1442,7 +1120,7 @@ class KernelEmitter:
             self._bind_rewritten_out_result(func_op, op)
             stmt = self.emit_op(op)
             if stmt and self.ctx.is_target("cpu"):
-                stmt = _normalize_memory_stmt(stmt)
+                stmt = self._normalize_memory_stmt(stmt)
             if stmt:
                 lines.append(stmt)
         return "\n".join(lines)
@@ -1450,8 +1128,6 @@ class KernelEmitter:
 def __getattr__(name: str) -> Any:
     """拒绝回流的 legacy 双接口公开访问。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 对历史 `gen_signature` / `gen_body` 名称给出统一的缺失语义，避免其被误当成公开稳定入口回流。

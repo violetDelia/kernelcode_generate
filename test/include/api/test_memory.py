@@ -1,7 +1,5 @@
 """API Memory compile tests.
 
-创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 include/api/Memory.h 的 `Memory` 视图声明，
@@ -38,8 +36,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def _compile_and_run(source: str) -> None:
     """编译并运行 C++ 测试片段。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 使用 g++ 编译临时源码并执行生成的程序。
@@ -95,8 +91,6 @@ def _compile_and_run(source: str) -> None:
 def _compile_expect_failure(source: str) -> str:
     """编译并断言 C++ 片段失败，返回编译 stderr。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 使用 g++ 编译临时源码，并验证其因公开 MemorySpace 合同违例而失败。
@@ -134,10 +128,6 @@ def _compile_expect_failure(source: str) -> str:
 
 
 # API-MEMORY-001
-# 创建者: 小李飞刀
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-06 19:05:00 +0800
-# 最近一次运行成功时间: 2026-04-06 19:05:00 +0800
 # 测试目的: 验证 Memory API 声明可配合 npu_demo 实现编译运行，基础访问语义符合规范。
 # 对应功能实现文件路径: include/npu_demo/Memory.h
 # 对应 spec 文件路径: spec/include/api/Memory.md
@@ -200,10 +190,6 @@ int main() {
 
 
 # API-MEMORY-SPACE-TEMPLATE-001
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-06 19:05:00 +0800
-# 最近一次运行成功时间: 2026-04-06 19:05:00 +0800
 # 测试目的: 验证 Memory<Space, T> 模板签名可用，Memory<GM, T> 与 Memory<MemorySpace::GM, T> 等价口径可编译运行。
 # 使用示例: pytest -q test/include/api/test_memory.py -k space_template_contract
 # 对应功能实现文件路径: include/api/Memory.h
@@ -251,10 +237,6 @@ int main() {
 
 
 # API-MEMORY-SPACE-TEMPLATE-002
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-15 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-15 00:00:00 +0800
 # 测试目的: 验证公开 MemorySpace 已拒绝旧 TLM 成员，调用方不能再以 `MemorySpace::TLM` 作为模板参数。
 # 使用示例: pytest -q test/include/api/test_memory.py -k test_memory_space_rejects_legacy_tlm_contract
 # 对应功能实现文件路径: include/api/Memory.h
@@ -279,10 +261,6 @@ int main() {
 
 
 # API-MEMORY-002
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 验证成员式 `source.view<T>(...)` 与 `source.reshape(shape)` 已成为公共层稳定视图接口。
 # 使用示例: pytest -q test/include/api/test_memory.py -k test_memory_member_view_and_reshape_contract
 # 对应功能实现文件路径: include/npu_demo/Memory.h
@@ -343,10 +321,6 @@ int main() {
 
 
 # API-MEMORY-003
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: N/A
-# 最近一次运行成功时间: N/A
 # 测试目的: 验证旧自由函数 `reshape(source, shape)` 已退出公共层稳定口径。
 # 使用示例: pytest -q test/include/api/test_memory.py -k test_memory_rejects_legacy_free_reshape_contract
 # 对应功能实现文件路径: include/api/Memory.h

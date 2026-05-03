@@ -1,7 +1,5 @@
 """type module tests.
 
-创建者: 金铲铲大作战
-最后一次更改: 榕
 
 功能说明:
 - 覆盖 kernel_gen.symbol_variable.type 的枚举语义、导出边界与旧路径禁用约束。
@@ -31,10 +29,6 @@ import pytest
 
 
 # TY-001
-# 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 14:28:43 +0800
-# 最近一次运行成功时间: 2026-03-22 14:28:43 +0800
 # 测试目的: 验证 NumericType 枚举名称和值保持稳定。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_numeric_type_values
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
@@ -58,10 +52,6 @@ def test_numeric_type_values() -> None:
 
 
 # TY-005
-# 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 14:28:43 +0800
-# 最近一次运行成功时间: 2026-03-22 14:28:43 +0800
 # 测试目的: 验证新增基础类型成员可直接访问。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_numeric_type_member_access
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
@@ -85,10 +75,6 @@ def test_numeric_type_member_access() -> None:
 
 
 # TY-002
-# 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 14:28:43 +0800
-# 最近一次运行成功时间: 2026-03-22 14:28:43 +0800
 # 测试目的: 验证 Farmat 仅公开 Norm/CLast 成员。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_farmat_public_members
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
@@ -105,10 +91,6 @@ def test_farmat_public_members() -> None:
 
 
 # TY-003
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 14:28:43 +0800
-# 最近一次运行成功时间: 2026-03-22 14:28:43 +0800
 # 测试目的: 验证 `kernel_gen.symbol_variable.type` 模块的公开 API 可达，且测试边界不依赖 `__all__` 元数据。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_python_type_module_public_api_boundary
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
@@ -131,10 +113,6 @@ def test_python_type_module_public_api_boundary() -> None:
 
 
 # TY-004
-# 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 14:28:43 +0800
-# 最近一次运行成功时间: 2026-03-22 14:28:43 +0800
 # 测试目的: 验证 import * 仅暴露 type 模块约定的公开符号。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_python_type_import_star_exports_only_public_names
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
@@ -159,10 +137,6 @@ def test_python_type_import_star_exports_only_public_names() -> None:
 
 
 # TY-004A
-# 创建者: 大闸蟹
-# 最后一次更改: 大闸蟹
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 `FLOAT_DTYPES` / `INT_DTYPES` 成为 type.py 的公开 dtype family 真源。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_python_type_public_dtype_family_constants
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
@@ -193,10 +167,6 @@ def test_python_type_public_dtype_family_constants() -> None:
 
 
 # TY-004B
-# 创建者: 榕
-# 最后一次更改: 榕
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 arithmetic dtype promotion 常量已整合到 type.py 真源。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_python_type_public_arithmetic_dtype_order_and_rank
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
@@ -224,10 +194,6 @@ def test_python_type_public_arithmetic_dtype_order_and_rank() -> None:
 
 
 # TY-006
-# 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 14:28:43 +0800
-# 最近一次运行成功时间: 2026-03-22 14:28:43 +0800
 # 测试目的: 验证旧路径 symbol_variable.type 不可导入。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_legacy_type_import_disabled
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
@@ -255,10 +221,6 @@ def test_legacy_type_import_disabled() -> None:
 
 
 # TY-008
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 `is_integer_dtype(...)` 仅把公开整数成员判为 True。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_is_integer_dtype_public_family
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
@@ -274,10 +236,6 @@ def test_is_integer_dtype_public_family() -> None:
 
 
 # TY-009
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 `is_float_dtype(...)` 仅把公开浮点成员判为 True。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_is_float_dtype_public_family
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
@@ -293,10 +251,6 @@ def test_is_float_dtype_public_family() -> None:
 
 
 # TY-010
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
 # 测试目的: 验证 dtype family helper 拒绝非 `NumericType` 输入。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_dtype_family_helpers_reject_non_numeric_type
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py

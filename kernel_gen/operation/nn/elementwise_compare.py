@@ -1,43 +1,46 @@
 """NN operation elementwise compare family.
 
-创建者: 守护最好的爱莉希雅
-最后一次更改: 大闸蟹
 
 功能说明:
 - 提供逐元素比较 family。
 
 API 列表:
-- `eq(lhs: object, rhs: object) -> Memory`
-- `ne(lhs: object, rhs: object) -> Memory`
-- `lt(lhs: object, rhs: object) -> Memory`
-- `le(lhs: object, rhs: object) -> Memory`
-- `gt(lhs: object, rhs: object) -> Memory`
-- `ge(lhs: object, rhs: object) -> Memory`
+- `eq(lhs: CompareOperand, rhs: CompareOperand) -> Memory`
+- `ne(lhs: CompareOperand, rhs: CompareOperand) -> Memory`
+- `lt(lhs: CompareOperand, rhs: CompareOperand) -> Memory`
+- `le(lhs: CompareOperand, rhs: CompareOperand) -> Memory`
+- `gt(lhs: CompareOperand, rhs: CompareOperand) -> Memory`
+- `ge(lhs: CompareOperand, rhs: CompareOperand) -> Memory`
 
 使用示例:
 - from kernel_gen.operation.nn.elementwise_compare import eq, lt, ge
 
 关联文件:
 - spec: spec/operation/nn.md
-- test: test/operation/test_operation_nn_elementwise.py
+- test: test/operation/nn/test_elementwise.py
 - 功能实现: kernel_gen/operation/nn/elementwise_compare.py
 """
 
 from __future__ import annotations
 
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import (
+    ERROR_ACTION,
+    ERROR_TEMPLATE,
+    ErrorKind,
+    ErrorModule,
+    kernel_code_error,
+)
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import NumericType
 
-_ERROR_ACTION = "请按接口约束传参"
+CompareScalar = int | float | bool
+CompareOperand = Memory | CompareScalar
 
 
 def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
     """合并两个维度为隐式 broadcast 目标维度。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 维度相等时返回该维度。
@@ -54,12 +57,12 @@ def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
         return rhs_dim
     if rhs_dim == 1:
         return lhs_dim
-    raise ValueError(
-        _ERROR_TEMPLATE.format(
+    raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+        ERROR_TEMPLATE.format(
             scene="nn.compare 参数校验",
             expected="Implicit broadcast dimension mismatch",
             actual=f"lhs={lhs_dim} rhs={rhs_dim}",
-            action=_ERROR_ACTION,
+            action=ERROR_ACTION,
         )
     )
 
@@ -67,8 +70,6 @@ def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
 def _infer_implicit_broadcast_shape(lhs: Memory, rhs: Memory) -> SymbolShape:
     """推导逐元素隐式 broadcast 的共同目标 shape。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 按尾维对齐规则合并维度。
@@ -91,11 +92,9 @@ def _infer_implicit_broadcast_shape(lhs: Memory, rhs: Memory) -> SymbolShape:
     return SymbolShape(list(reversed(result_reversed)))
 
 
-def _ensure_memory_operand(lhs: object, rhs: object) -> None:
+def _ensure_memory_operand(lhs: CompareOperand, rhs: CompareOperand) -> None:
     """校验至少一侧为 `Memory`。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅允许 `Memory` 或与 `Memory` 组合的二元运算。
@@ -105,21 +104,19 @@ def _ensure_memory_operand(lhs: object, rhs: object) -> None:
     """
 
     if not isinstance(lhs, Memory) and not isinstance(rhs, Memory):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.compare 参数校验",
                 expected="At least one operand must be Memory",
                 actual=f"lhs={type(lhs).__name__} rhs={type(rhs).__name__}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
 
-def _ensure_scalar_value(value: object) -> None:
+def _ensure_scalar_value(value: CompareScalar) -> None:
     """校验公开标量输入类型。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅允许 `int/float/bool` 作为与 `Memory` 组合的公开标量。
@@ -131,12 +128,12 @@ def _ensure_scalar_value(value: object) -> None:
     if isinstance(value, bool):
         return
     if not isinstance(value, (int, float)):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.compare 参数校验",
                 expected="Unsupported scalar type for nn operation",
                 actual=type(value).__name__,
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
@@ -144,8 +141,6 @@ def _ensure_scalar_value(value: object) -> None:
 def _compare_memory_result(lhs: Memory, rhs: Memory) -> Memory:
     """逐元素比较 Memory/Memory 结果推导。
 
-    创建者: 小李飞刀
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 支持隐式 broadcast 推导目标 shape。
@@ -156,16 +151,16 @@ def _compare_memory_result(lhs: Memory, rhs: Memory) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_compare.py
     """
     if lhs.dtype is not rhs.dtype:
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
                 scene="nn.compare 参数校验",
                 expected="Memory dtype mismatch",
                 actual=f"lhs={lhs.dtype} rhs={rhs.dtype}",
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
     lhs_values = lhs.shape.get_values()
@@ -175,11 +170,9 @@ def _compare_memory_result(lhs: Memory, rhs: Memory) -> Memory:
     target_shape = _infer_implicit_broadcast_shape(lhs, rhs)
     return Memory(target_shape, NumericType.Bool, space=lhs.space, stride=None, format=lhs.format)
 
-def _dispatch_compare(lhs: object, rhs: object, op: str, rop: str) -> Memory:
+def _dispatch_compare(lhs: CompareOperand, rhs: CompareOperand, op: str, rop: str) -> Memory:
     """二元比较调度。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 大闸蟹
 
     功能说明:
     - 保持比较方向的调度规则。
@@ -189,7 +182,7 @@ def _dispatch_compare(lhs: object, rhs: object, op: str, rop: str) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_compare.py
     """
     _ensure_memory_operand(lhs, rhs)
@@ -201,11 +194,9 @@ def _dispatch_compare(lhs: object, rhs: object, op: str, rop: str) -> Memory:
     _ensure_scalar_value(lhs)
     return rhs.clone(dtype=NumericType.Bool)
 
-def eq(lhs: object, rhs: object) -> Memory:
+def eq(lhs: CompareOperand, rhs: CompareOperand) -> Memory:
     """逐元素相等比较。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的相等比较。
@@ -215,16 +206,14 @@ def eq(lhs: object, rhs: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_compare.py
     """
     return _dispatch_compare(lhs, rhs, "__eq__", "__eq__")
 
-def ne(lhs: object, rhs: object) -> Memory:
+def ne(lhs: CompareOperand, rhs: CompareOperand) -> Memory:
     """逐元素不等比较。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的不等比较。
@@ -234,16 +223,14 @@ def ne(lhs: object, rhs: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_compare.py
     """
     return _dispatch_compare(lhs, rhs, "__ne__", "__ne__")
 
-def lt(lhs: object, rhs: object) -> Memory:
+def lt(lhs: CompareOperand, rhs: CompareOperand) -> Memory:
     """逐元素小于比较。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的小于比较。
@@ -253,16 +240,14 @@ def lt(lhs: object, rhs: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_compare.py
     """
     return _dispatch_compare(lhs, rhs, "__lt__", "__gt__")
 
-def le(lhs: object, rhs: object) -> Memory:
+def le(lhs: CompareOperand, rhs: CompareOperand) -> Memory:
     """逐元素小于等于比较。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的小于等于比较。
@@ -272,16 +257,14 @@ def le(lhs: object, rhs: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_compare.py
     """
     return _dispatch_compare(lhs, rhs, "__le__", "__ge__")
 
-def gt(lhs: object, rhs: object) -> Memory:
+def gt(lhs: CompareOperand, rhs: CompareOperand) -> Memory:
     """逐元素大于比较。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的大于比较。
@@ -291,16 +274,14 @@ def gt(lhs: object, rhs: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_compare.py
     """
     return _dispatch_compare(lhs, rhs, "__gt__", "__lt__")
 
-def ge(lhs: object, rhs: object) -> Memory:
+def ge(lhs: CompareOperand, rhs: CompareOperand) -> Memory:
     """逐元素大于等于比较。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的大于等于比较。
@@ -310,7 +291,7 @@ def ge(lhs: object, rhs: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn_elementwise.py
+    - test: test/operation/nn/test_elementwise.py
     - 功能实现: kernel_gen/operation/nn/elementwise_compare.py
     """
     return _dispatch_compare(lhs, rhs, "__ge__", "__le__")

@@ -1,7 +1,5 @@
 """dma_structured lowering 实现。
 
-创建者: 小李飞刀
-最后一次更改: 守护最好的爱莉希雅
 
 功能说明:
 - 负责 nn.broadcast / nn.transpose 的 lowering。
@@ -17,7 +15,7 @@ API 列表:
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
-- test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+- test: test/passes/lowering/nn_lowering/test_nn_lowering.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
 """
 
@@ -37,8 +35,6 @@ from .nn_lowering_utility import ensure_single_result
 def _find_block_symbol_dim(block: Block, dim: str, before_op: Operation | None = None) -> SSAValue | None:
     """查找当前 block 中可直接复用的 symbol 维度参数。
 
-    创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 在 block 参数中查找公开值等于 `dim` 的 `!symbol.int<"...">`。
@@ -50,7 +46,7 @@ def _find_block_symbol_dim(block: Block, dim: str, before_op: Operation | None =
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
     """
 
@@ -69,8 +65,6 @@ def _find_block_symbol_dim(block: Block, dim: str, before_op: Operation | None =
 def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAValue:
     """确保 operand 为 symbol.int 或 IntegerType。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 支持 symbol.int 或 IntegerType。
@@ -80,7 +74,7 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
     """
 
@@ -103,8 +97,6 @@ def _get_symbol_dim_from_source(
 ) -> SSAValue:
     """获取 broadcast 结果动态维度的 SSA 值。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 守护最好的爱莉希雅
 
     功能说明:
     - 使用 SymbolGetDimOp 从 operand 上读取来自 source 的动态维度。
@@ -117,7 +109,7 @@ def _get_symbol_dim_from_source(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
     """
 
@@ -156,6 +148,31 @@ def _get_symbol_dim_from_source(
     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "NnLoweringBroadcastSymbolDimNotFromSource: symbol mismatch")
 
 
+def _broadcast_shape_value(dim: Attribute) -> int | str:
+    """读取 broadcast shape 维度值。
+
+
+    功能说明:
+    - 统一支持 `StringAttr`、`IntAttr` 与 `IntegerAttr`。
+
+    使用示例:
+    - _broadcast_shape_value(IntAttr(4))
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
+    """
+
+    if isinstance(dim, StringAttr):
+        return dim.data
+    if isinstance(dim, IntAttr):
+        return dim.data
+    if isinstance(dim, IntegerAttr):
+        return dim.value.data
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.broadcast shape must be IntAttr or StringAttr")
+
+
 def _ensure_broadcast_shape(
     op: Operation,
     result_type: NnMemoryType,
@@ -163,8 +180,6 @@ def _ensure_broadcast_shape(
 ) -> tuple[list[int | str], list[int | str]]:
     """校验 nn.broadcast 的 shape 合法性。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 校验 operand 与 result shape 兼容。
@@ -174,7 +189,7 @@ def _ensure_broadcast_shape(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
     """
 
@@ -183,17 +198,8 @@ def _ensure_broadcast_shape(
     if not isinstance(operand_type, NnMemoryType):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.broadcast operand must be nn.memory")
 
-    def _shape_value(dim: Attribute) -> int | str:
-        if isinstance(dim, StringAttr):
-            return dim.data
-        if isinstance(dim, IntAttr):
-            return dim.data
-        if isinstance(dim, IntegerAttr):
-            return dim.value.data
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.broadcast shape must be IntAttr or StringAttr")
-
-    result_shape = [_shape_value(dim) for dim in result_type.shape.data]
-    operand_shape = [_shape_value(dim) for dim in operand_type.shape.data]
+    result_shape = [_broadcast_shape_value(dim) for dim in result_type.shape.data]
+    operand_shape = [_broadcast_shape_value(dim) for dim in operand_type.shape.data]
 
     if len(result_shape) < len(operand_shape):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.broadcast result rank must be >= operand rank")
@@ -208,8 +214,6 @@ def _ensure_broadcast_shape(
 def _ensure_broadcast_compat(result_shape: list[int | str], operand_shape: list[int | str]) -> None:
     """校验 nn.broadcast 的 shape 兼容性。
 
-    创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 按尾维对齐规则检查 operand/result 维度。
@@ -221,7 +225,7 @@ def _ensure_broadcast_compat(result_shape: list[int | str], operand_shape: list[
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
     """
 
@@ -246,8 +250,6 @@ def _ensure_broadcast_compat(result_shape: list[int | str], operand_shape: list[
 def _lower_broadcast(block: Block, op: Operation) -> None:
     """lower nn.broadcast。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 允许动态 shape，并使用 symbol.get_dim。
@@ -259,7 +261,7 @@ def _lower_broadcast(block: Block, op: Operation) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
     """
 
@@ -306,8 +308,6 @@ def _lower_broadcast(block: Block, op: Operation) -> None:
 def _lower_transpose(block: Block, op: Operation) -> None:
     """lower nn.transpose。
 
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 校验 perm / shape / stride。
@@ -319,7 +319,7 @@ def _lower_transpose(block: Block, op: Operation) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
     """
 
@@ -358,8 +358,6 @@ def _lower_transpose(block: Block, op: Operation) -> None:
 class _LowerNnBroadcastPattern(RewritePattern):
     """将单个 nn.broadcast lowering 为 dma.broadcast。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 只匹配 NnBroadcastOp，避免 family 级 op.name 分派。
@@ -370,7 +368,7 @@ class _LowerNnBroadcastPattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
     """
 
@@ -386,8 +384,6 @@ class _LowerNnBroadcastPattern(RewritePattern):
 class _LowerNnTransposePattern(RewritePattern):
     """将单个 nn.transpose lowering 为 dma.transpose。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 只匹配 NnTransposeOp，避免 family 级 op.name 分派。
@@ -398,7 +394,7 @@ class _LowerNnTransposePattern(RewritePattern):
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
     """
 
@@ -414,8 +410,6 @@ class _LowerNnTransposePattern(RewritePattern):
 def dma_structured_patterns() -> list[RewritePattern]:
     """返回 dma structured rewrite pattern 集合。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 提供 nn_lowering 主 driver 的单 op pattern 注册入口。
@@ -426,7 +420,7 @@ def dma_structured_patterns() -> list[RewritePattern]:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
     """
 

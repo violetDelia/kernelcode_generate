@@ -8,18 +8,19 @@
 
 ## API 列表
 
-- `tuner.param`
-- `tuner.cost`
+- `class Tuner(Dialect)`
+- `class TunerParamOp(result_type: Attribute)`
+- `class TunerCostOp(operands: list[SSAValue | Operation], *, cost_kind: Attribute, op_name: Attribute, extra_attrs: dict[str, Attribute] | None = None, result_type: Attribute = SymbolValueType.from_expr("COST"))`
 
 ## 文档信息
 
-- 创建者：`咯咯咯`
+- 创建者：`未记录`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dialect/tuner.md`](../../spec/dialect/tuner.md)
 - `功能实现`：[`kernel_gen/dialect/tuner.py`](../../kernel_gen/dialect/tuner.py)
 - `test`：
-  - [`test/dialect/test_tuner_dialect.py`](../../test/dialect/test_tuner_dialect.py)
-  - [`test/pass/test_launch_kernel_cost_func.py`](../../test/pass/test_launch_kernel_cost_func.py)
+  - [`test/dialect/test_tuner.py`](../../test/dialect/test_tuner.py)
+  - [`test/passes/tuning/test_launch_kernel_cost_func.py`](../../test/passes/tuning/test_launch_kernel_cost_func.py)
 
 ## 依赖
 
@@ -34,8 +35,11 @@
 - 保持 `parse/print` 与 verifier 约束清晰，保证超参数名可稳定打印与校验。
 - 当前 `tuner.cost.cost_kind` 的公开方向为任意非空字符串 attr。
 
-## 限制与边界
+## 额外补充
 
+### 模块级补充
+
+- 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - `tuner` dialect 当前公开 op 包含：
   - `tuner.param`
   - `tuner.cost`
@@ -48,86 +52,89 @@
 - `tuner.cost` 不求值、不查表、不裁剪节点；“不同 `cost_kind` 下某类 op 是否为 0”属于后续 evaluator 语义。
 - 本方言不定义任何超参数值求解、范围约束、搜索策略、默认值逻辑或真实 cost evaluator。
 
-## 公开接口
+## API详细说明
 
-### `tuner.param`
+### `class Tuner(Dialect)`
 
-功能说明：
+- api：`class Tuner(Dialect)`
+- 参数：无。
+- 返回值：`Tuner` 实例。
+- 使用示例：
 
-- 声明一个超参数并返回对应的符号维度标量。
+  ```python
+  from kernel_gen.dialect.tuner import Tuner
 
-参数说明：
+  tuner = Tuner()
+  ```
+- 功能说明：定义 `Tuner` 公开类型。
+- 注意事项：`Tuner` 只注册 `tuner.param` 与 `tuner.cost` 两类公开 op；不定义运行期求值、调度策略、搜索空间算法或真实 cost table。
 
-- 无参数。
+### `class TunerParamOp(result_type: Attribute)`
 
-使用示例：
+- api：`class TunerParamOp(result_type: Attribute)`
+- 参数：
+  - `result_type`：类型对象或类型名称；类型 `Attribute`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：`TunerParamOp` 实例。
+- 使用示例：
 
-```text
-%tile_m = tuner.param : !symbol.dim<"BLOCK_M">
-```
+  ```python
+  from kernel_gen.dialect.symbol import SymbolDimType
+  from kernel_gen.dialect.tuner import TunerParamOp
 
-注意事项：
+  tuner_param_op = TunerParamOp(SymbolDimType.from_name("BLOCK_M"))
+  ```
+- 功能说明：声明一个超参数并返回对应的符号维度标量。
+- 注意事项：`tuner.param` 无 operand、无 region、单结果；`result_type` 必须为 `!symbol.dim<"name">`；`name` 必须为非空标识符，只能包含字母、数字与下划线，并以字母或下划线开头；不得使用 `!symbol.int<"...">`、builtin `index`、普通整数或其他类型替代。
 
-- `parse/print` 必须保持无 operand、单结果形式。
-- verifier 必须拒绝任何非 `!symbol.dim<"name">` 的结果类型。
-- `name` 为空或包含非法字符必须报错。
+### `class TunerCostOp(operands: list[SSAValue | Operation], *, cost_kind: Attribute, op_name: Attribute, extra_attrs: dict[str, Attribute] | None = None, result_type: Attribute = SymbolValueType.from_expr("COST"))`
 
-返回与限制：
+- api：`class TunerCostOp(operands: list[SSAValue | Operation], *, cost_kind: Attribute, op_name: Attribute, extra_attrs: dict[str, Attribute] | None = None, result_type: Attribute = SymbolValueType.from_expr("COST"))`
+- 参数：
+  - `operands`：输入操作数序列；类型 `list[SSAValue | Operation]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按可变容器传入时，是否修改输入必须以本接口功能说明和注意事项为准；非法值按该 API 的公开错误语义处理。
+  - `cost_kind`：`cost_kind` 输入值，参与 `TunerCostOp` 的公开处理流程；类型 `Attribute`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `op_name`：公开名称或符号名；类型 `Attribute`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `extra_attrs`：`extra_attrs` 输入值，参与 `TunerCostOp` 的公开处理流程；类型 `dict[str, Attribute] | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按可变容器传入时，是否修改输入必须以本接口功能说明和注意事项为准；非法值按该 API 的公开错误语义处理。
+  - `result_type`：类型对象或类型名称；类型 `Attribute`；默认值 `SymbolValueType.from_expr("COST")`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：`TunerCostOp` 实例。
+- 使用示例：
 
-- 返回类型：`!symbol.dim<"name">`
-- 限制：不接受 `!symbol.int<"...">`、builtin `index` 或普通整数结果类型。
+  ```python
+  from xdsl.dialects.builtin import StringAttr
 
-### `tuner.cost`
+  from kernel_gen.dialect.symbol import SymbolDimType
+  from kernel_gen.dialect.tuner import TunerCostOp, TunerParamOp
 
-功能说明：
-
-- 表示 cost function 内某个原 op 的局部成本。
-- 该 op 只记录原 op operands、原 attrs 与 pass-owned metadata，并返回一个 `!symbol.int<"expr">` 局部成本值。
-
-参数说明：
-
-- `operands(SSA value...)`：原 op operands，数量与顺序必须与原 op 一致；原 op 无 operands 时本列表为空。
-- `cost_kind(str attr)`：当前 cost function 的统计视角；允许任意非空字符串。
-- `op_name(str attr)`：原 op 名称，例如 `"dma.copy"`、`"kernel.matmul"`、`"arch.barrier"`。
-
-使用示例：
-
-```text
-%cost0 = tuner.cost(%tile_m, %k) {cost_kind = "memory", op_name = "dma.copy"} : (!symbol.int<"TILE_M">, !symbol.int<"K">) -> !symbol.int<"LOCAL">
-%cost1 = tuner.cost() {cost_kind = "latency", op_name = "arch.barrier", scope = #arch.scope<global>} : () -> !symbol.int<"BARRIER_COST">
-```
-
-注意事项：
-
-- `tuner.cost` 只传原 op operands，不额外插入摘要 operand。
-- 原 op attributes 必须平铺保留；若原 op 已存在 `cost_kind / op_name` 任一同名 attr，生成方必须显式失败，不得覆盖或静默改名。
-- 原 op 若存在业务字段 `kind`，生成方必须先改名为领域字段，例如 `kernel_kind`；`tuner.cost` 自身仍不公开旧 metadata attr `kind`。
-- `cost_kind` 表示当前 cost function 的统计视角；是否保留节点、如何累计属于外层 pass 语义。
-- 空串、全空白字符串不属于当前公开输入域。
-- 本 op 不负责把局部成本汇总成函数返回值；汇总由外层 cost function 通过 `symbol.add` 与 `symbol.for` carried `!symbol.int<"...">` 完成。
-
-返回与限制：
-
-- 返回类型：固定单结果 `!symbol.int<"expr">`。
-- 限制：无 region；不支持多结果；不公开 `kind`、`device_func` attrs。
+  value = TunerParamOp(SymbolDimType.from_name("BLOCK_M")).result
+  tuner_cost_op = TunerCostOp(
+      [value],
+      cost_kind=StringAttr("memory"),
+      op_name=StringAttr("dma.copy"),
+  )
+  ```
+- 功能说明：表示 cost function 内某个原 op 的局部成本，记录原 op operands、原 attrs 与 pass-owned metadata，并返回 `!symbol.int<"expr">` 局部成本值。
+- 注意事项：`operands` 按原 op operands 原顺序透传，原 op 无 operands 时传空列表；`cost_kind` 表示当前 cost function 的统计视角，允许任意非空字符串 attr；`op_name` 必须为非空字符串 attr；`extra_attrs` 用于平铺保留原 op attributes；若原 op 存在业务字段 `kind`，生成方必须先改名为领域字段，例如 `kernel_kind`；`tuner.cost` 自身不公开旧 metadata attr `kind` 或 `device_func`，verifier 必须拒绝这两个字段；结果类型固定为单结果 `!symbol.int<"expr">`；本 op 无 region、不支持多结果、不负责把局部成本汇总成函数返回值。
 
 ## 测试
 
-- 测试文件：[`test/dialect/test_tuner_dialect.py`](../../test/dialect/test_tuner_dialect.py)
-- 执行命令：`pytest -q test/dialect/test_tuner_dialect.py -k "tuner_cost"`
-- 测试目标：验证 `tuner.cost` 的 parse/print、operand 透传、`!symbol.int<"...">` 结果类型、open-kind verifier 与错误路径。
+- 测试文件：
+  - `test/dialect/test_tuner.py`
+  - `test/passes/tuning/test_launch_kernel_cost_func.py`
+- 执行命令：
+  - `pytest -q test/dialect/test_tuner.py -k "tuner_cost"`
+  - `pytest -q test/passes/tuning/test_launch_kernel_cost_func.py -k "launch_kernel_cost_func"`
 
-- 测试文件：[`test/pass/test_launch_kernel_cost_func.py`](../../test/pass/test_launch_kernel_cost_func.py)
-- 执行命令：`pytest -q test/pass/test_launch_kernel_cost_func.py -k "launch_kernel_cost_func"`
-- 测试目标：验证 `launch-kernel-cost-func` 消费 `tuner.cost` 时的 kind 口径与错误路径一致。
+### 测试目标
+
+- 验证 `tuner.cost` 的 parse/print、operand 透传、`!symbol.int<"...">` 结果类型、open-kind verifier 与错误路径。
+- 验证 `launch-kernel-cost-func` 消费 `tuner.cost` 时的 kind 口径与错误路径一致。
 
 ### 功能与用例清单
 
-| 用例 ID | 约束点 | 对应测试 |
-| --- | --- | --- |
-| TC-TUNER-001 | `tuner.param` parse/print 与返回类型稳定 | `test_tuner_param_round_trip` |
-| TC-TUNER-002 | `tuner.param` 结果类型必须为 `!symbol.dim<"name">` | `test_tuner_param_rejects_invalid_result_type` |
-| TC-TUNER-003 | `tuner.param` 的 `name` 非法时报错 | `test_tuner_param_rejects_invalid_name` |
-| TC-TUNER-004 | `tuner.cost` parse/print 与 operand 透传稳定，结果类型固定为 `!symbol.int<"...">` | `test_tuner_cost_round_trip` |
-| TC-TUNER-005 | `tuner.cost.cost_kind` 必须是非空字符串，并拒绝旧 `kind / device_func` attrs | `test_tuner_cost_rejects_invalid_kind_attrs` |
-| TC-TUNER-006 | `tuner.cost` 必须包含 `cost_kind / op_name`，且结果类型必须为 `!symbol.int<"...">` | `test_tuner_cost_rejects_missing_attrs_or_invalid_result_type` |
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-TUNER-001 | 解析/打印 | `tuner.param` parse/print 与返回类型稳定 | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_tuner_param_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_tuner_param_round_trip` |
+| TC-TUNER-002 | 边界/异常 | `tuner.param` 结果类型必须为 `!symbol.dim<"name">` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_tuner_param_rejects_invalid_result_type`。 | “`tuner.param` 结果类型必须为 `!symbol.dim<"name">`”场景按公开错误语义失败或被拒绝。 | `test_tuner_param_rejects_invalid_result_type` |
+| TC-TUNER-003 | 边界/异常 | `tuner.param` 的 `name` 非法时报错 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_tuner_param_rejects_invalid_name`。 | “`tuner.param` 的 `name` 非法时报错”场景按公开错误语义失败或被拒绝。 | `test_tuner_param_rejects_invalid_name` |
+| TC-TUNER-004 | 解析/打印 | `tuner.cost` parse/print 与 operand 透传稳定，结果类型固定为 `!symbol.int<"...">` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_tuner_cost_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_tuner_cost_round_trip` |
+| TC-TUNER-005 | 边界/异常 | `tuner.cost.cost_kind` 必须是非空字符串，并拒绝旧 `kind / device_func` attrs | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_tuner_cost_rejects_invalid_kind_attrs`。 | “`tuner.cost.cost_kind` 必须是非空字符串，并拒绝旧 `kind / device_func` attrs”场景按公开错误语义失败或被拒绝。 | `test_tuner_cost_rejects_invalid_kind_attrs` |
+| TC-TUNER-006 | 边界/异常 | `tuner.cost` 必须包含 `cost_kind / op_name`，且结果类型必须为 `!symbol.int<"...">` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_tuner_cost_rejects_missing_attrs_or_invalid_result_type`。 | “`tuner.cost` 必须包含 `cost_kind / op_name`，且结果类型必须为 `!symbol.int<"...">`”场景按公开错误语义失败或被拒绝。 | `test_tuner_cost_rejects_missing_attrs_or_invalid_result_type` |

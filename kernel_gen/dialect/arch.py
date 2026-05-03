@@ -1,18 +1,33 @@
 """Arch dialect definitions.
 
-创建者: 朽木露琪亚
-最后一次更改: jcc你莫辜负
 
 功能说明:
 - 定义 arch dialect 的执行维度查询、动态片上内存入口、barrier 与 launch op。
 - 复用 symbol dialect 的 `!symbol.int<"expr">` 与 nn dialect 的 `nn.memory/#nn.space`。
+
+API 列表:
+- `class ArchScopeAttr(scope: StringAttr)`
+- `ArchScopeAttr.from_name(name: str) -> ArchScopeAttr`
+- `class ArchVisibilityAttr(visibility: StringAttr)`
+- `ArchVisibilityAttr.from_name(name: str) -> ArchVisibilityAttr`
+- `class ArchGetBlockIdOp(result_type: Attribute | None = None)`
+- `class ArchGetBlockNumOp(result_type: Attribute | None = None)`
+- `class ArchGetThreadIdOp(result_type: Attribute | None = None)`
+- `class ArchGetThreadNumOp(result_type: Attribute | None = None)`
+- `class ArchGetSubthreadIdOp(result_type: Attribute | None = None)`
+- `class ArchGetSubthreadNumOp(result_type: Attribute | None = None)`
+- `class ArchGetDynamicMemoryOp(memory_space: NnMemorySpaceAttr, result_type: Attribute | None = None)`
+- `class ArchBarrierOp(scope: ArchScopeAttr, visibility: ArrayAttr[Attribute])`
+- `class ArchLaunchOp(callee: str | Attribute, block: SSAValue | Operation, thread: SSAValue | Operation, subthread: SSAValue | Operation, shared_memory_size: SSAValue | Operation, args: Sequence[SSAValue | Operation] = ())`
+- `ArchLaunchKernelOp = ArchLaunchOp`
+- `Arch`
 
 使用示例:
 - from kernel_gen.dialect.arch import Arch, ArchBarrierOp, ArchGetBlockIdOp, ArchLaunchOp
 
 关联文件:
 - spec: spec/dialect/arch.md
-- test: test/dialect/test_arch_dialect.py
+- test: test/dialect/test_arch.py
 - 功能实现: kernel_gen/dialect/arch.py
 """
 
@@ -21,7 +36,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import ClassVar
 
-from kernel_gen.core.contracts import _ERROR_TEMPLATE
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, SymbolRefAttr, i8
 from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue
 from xdsl.irdl import (
@@ -44,18 +59,14 @@ from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.target import registry as target_registry
 
 _DYNAMIC_MEMORY_SPACES = {"shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
-_ERROR_ACTION = "请按接口约束传参"
-_ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.arch verifier"
 _BARRIER_SCOPE_VALUES = {"block", "thread", "subthread", "global"}
 _BARRIER_VISIBLE_SPACES = {"tsm", "tlm"}
 
 
-def _raise_verify_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
+def _raise_verify_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None:
     """统一抛出 arch dialect verifier 错误。
 
-    创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 复用统一错误模板，保持 barrier/launch 边界短语稳定。
@@ -65,16 +76,16 @@ def _raise_verify_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch_dialect.py
+    - test: test/dialect/test_arch.py
     - 功能实现: kernel_gen/dialect/arch.py
     """
 
     raise VerifyException(
-        _ERROR_TEMPLATE.format(
+        ERROR_TEMPLATE.format(
             scene=_ERROR_SCENE,
             expected=expected,
             actual=actual,
-            action=_ERROR_ACTION,
+            action=ERROR_ACTION,
         )
     )
 
@@ -82,8 +93,6 @@ def _raise_verify_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
 def _verify_symbol_int_operand(value: SSAValue, field_name: str, op_name: str) -> SymbolValueType:
     """校验单个启动维度 operand 为 `!symbol.int<\"expr\">`。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 统一校验 `arch.launch` 的维度输入类型。
@@ -93,17 +102,17 @@ def _verify_symbol_int_operand(value: SSAValue, field_name: str, op_name: str) -
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch_dialect.py
+    - test: test/dialect/test_arch.py
     - 功能实现: kernel_gen/dialect/arch.py
     """
 
     if not isinstance(value.type, SymbolValueType):
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected=f"{op_name} {field_name} must have type !symbol.int<\"expr\">",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         )
     value.type.verify()
@@ -113,8 +122,6 @@ def _verify_symbol_int_operand(value: SSAValue, field_name: str, op_name: str) -
 def _verify_positive_static_symbol(operand_type: SymbolValueType, field_name: str, op_name: str) -> None:
     """校验可静态求值的 symbol.int 启动维度为正整数。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 对字面量整数表达式执行 `> 0` 约束。
@@ -125,18 +132,18 @@ def _verify_positive_static_symbol(operand_type: SymbolValueType, field_name: st
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch_dialect.py
+    - test: test/dialect/test_arch.py
     - 功能实现: kernel_gen/dialect/arch.py
     """
 
     static_value = operand_type.get_value()
     if isinstance(static_value, int) and static_value <= 0:
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected=f"{op_name} {field_name} must be > 0 when statically known",
                 actual=str(static_value),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
@@ -144,8 +151,6 @@ def _verify_positive_static_symbol(operand_type: SymbolValueType, field_name: st
 def _verify_non_negative_static_symbol(operand_type: SymbolValueType, field_name: str, op_name: str) -> None:
     """校验可静态求值的 symbol.int 启动规模为非负整数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 对字面量整数表达式执行 `>= 0` 约束。
@@ -156,18 +161,18 @@ def _verify_non_negative_static_symbol(operand_type: SymbolValueType, field_name
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch_dialect.py
+    - test: test/dialect/test_arch.py
     - 功能实现: kernel_gen/dialect/arch.py
     """
 
     static_value = operand_type.get_value()
     if isinstance(static_value, int) and static_value < 0:
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected=f"{op_name} {field_name} must be >= 0 when statically known",
                 actual=str(static_value),
-                action=_ERROR_ACTION,
+                action=ERROR_ACTION,
             )
         )
 
@@ -175,8 +180,6 @@ def _verify_non_negative_static_symbol(operand_type: SymbolValueType, field_name
 def _verify_launch_callee_attr(callee: Attribute) -> SymbolRefAttr:
     """校验 launch 的 `@callee` symbol ref 属性。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅接受无嵌套的 `@callee` 形式 `SymbolRefAttr`。
@@ -186,7 +189,7 @@ def _verify_launch_callee_attr(callee: Attribute) -> SymbolRefAttr:
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch_dialect.py
+    - test: test/dialect/test_arch.py
     - 功能实现: kernel_gen/dialect/arch.py
     """
 
@@ -202,8 +205,6 @@ def _verify_launch_callee_attr(callee: Attribute) -> SymbolRefAttr:
 def _verify_barrier_visibility_attr(visibility: Attribute) -> ArrayAttr[Attribute]:
     """校验 barrier visibility 列表。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - visibility 必须是非空 `ArrayAttr`。
@@ -214,7 +215,7 @@ def _verify_barrier_visibility_attr(visibility: Attribute) -> ArrayAttr[Attribut
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch_dialect.py
+    - test: test/dialect/test_arch.py
     - 功能实现: kernel_gen/dialect/arch.py
     """
 
@@ -249,8 +250,6 @@ class ArchVisibilityAttr(ParametrizedAttribute):
     def parse_parameters(cls: type["ArchVisibilityAttr"], parser: AttrParser) -> Sequence[Attribute]:
         """解析 arch.visibility 参数。
 
-        创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 支持 `#arch.visibility<tsm>` 与 `#arch.visibility<tlm>` 的文本。
@@ -260,7 +259,7 @@ class ArchVisibilityAttr(ParametrizedAttribute):
 
         关联文件:
         - spec: spec/dialect/arch.md
-        - test: test/dialect/test_arch_dialect.py
+        - test: test/dialect/test_arch.py
         - 功能实现: kernel_gen/dialect/arch.py
         """
 
@@ -286,8 +285,6 @@ class ArchVisibilityAttr(ParametrizedAttribute):
     def from_name(cls: type["ArchVisibilityAttr"], name: str) -> "ArchVisibilityAttr":
         """按名称构造 arch.visibility 属性。
 
-        创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 为测试与实现提供统一的 barrier 可见域构造入口。
@@ -297,7 +294,7 @@ class ArchVisibilityAttr(ParametrizedAttribute):
 
         关联文件:
         - spec: spec/dialect/arch.md
-        - test: test/dialect/test_arch_dialect.py
+        - test: test/dialect/test_arch.py
         - 功能实现: kernel_gen/dialect/arch.py
         """
 
@@ -316,8 +313,6 @@ class ArchScopeAttr(ParametrizedAttribute):
     def parse_parameters(cls: type["ArchScopeAttr"], parser: AttrParser) -> Sequence[Attribute]:
         """解析 arch.scope 参数。
 
-        创建者: 小李飞刀
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 支持 `#arch.scope<block>` / `thread` / `subthread` / `global>` 的文本。
@@ -327,7 +322,7 @@ class ArchScopeAttr(ParametrizedAttribute):
 
         关联文件:
         - spec: spec/dialect/arch.md
-        - test: test/dialect/test_arch_dialect.py
+        - test: test/dialect/test_arch.py
         - 功能实现: kernel_gen/dialect/arch.py
         """
 
@@ -353,8 +348,6 @@ class ArchScopeAttr(ParametrizedAttribute):
     def from_name(cls: type["ArchScopeAttr"], name: str) -> "ArchScopeAttr":
         """按名称构造 arch.scope 属性。
 
-        创建者: 小李飞刀
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 为测试与实现提供统一的构造入口。
@@ -364,7 +357,7 @@ class ArchScopeAttr(ParametrizedAttribute):
 
         关联文件:
         - spec: spec/dialect/arch.md
-        - test: test/dialect/test_arch_dialect.py
+        - test: test/dialect/test_arch.py
         - 功能实现: kernel_gen/dialect/arch.py
         """
 
@@ -374,8 +367,6 @@ class ArchScopeAttr(ParametrizedAttribute):
 def _dynamic_memory_result_type(space: NnMemorySpaceAttr) -> NnMemoryType:
     """构造动态 memory 入口的固定结果类型。
 
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`。
@@ -385,7 +376,7 @@ def _dynamic_memory_result_type(space: NnMemorySpaceAttr) -> NnMemoryType:
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch_dialect.py
+    - test: test/dialect/test_arch.py
     - 功能实现: kernel_gen/dialect/arch.py
     """
 
@@ -400,8 +391,6 @@ def _dynamic_memory_result_type(space: NnMemorySpaceAttr) -> NnMemoryType:
 def _verify_target_registry_support(op_name: str) -> None:
     """按当前 target registry 配置校验 arch op 支持性。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
 
     功能说明:
     - 在启用 target registry 校验时，检查 arch op 是否被当前 target 支持。
@@ -411,30 +400,30 @@ def _verify_target_registry_support(op_name: str) -> None:
 
     关联文件:
     - spec: spec/target/registry.md
-    - test: test/dialect/test_arch_dialect.py
+    - test: test/dialect/test_arch.py
     - 功能实现: kernel_gen/dialect/arch.py
     """
 
-    current_target = target_registry._get_current_target()
+    current_target = target_registry.get_current_target()
     if current_target is None:
         return
     try:
         if not target_registry.is_arch_op_supported(current_target, op_name):
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected=f"{op_name} is not supported by target {current_target}",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
     except ValueError as exc:
         raise VerifyException(
-            _ERROR_TEMPLATE.format(
+            ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected=str(exc),
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
             )
         ) from exc
 
@@ -452,8 +441,6 @@ class _BaseArchIndexQueryOp(IRDLOperation):
     ) -> None:
         """初始化固定结果类型的 arch 查询 op。
 
-        创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
 
         功能说明:
         - 支持默认构造固定结果类型，也支持 parser 注入显式结果类型后由 verifier 校验。
@@ -463,7 +450,7 @@ class _BaseArchIndexQueryOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/arch.md
-        - test: test/dialect/test_arch_dialect.py
+        - test: test/dialect/test_arch.py
         - 功能实现: kernel_gen/dialect/arch.py
         """
 
@@ -472,8 +459,6 @@ class _BaseArchIndexQueryOp(IRDLOperation):
     def verify_(self: "_BaseArchIndexQueryOp") -> None:
         """校验固定结果类型查询 op。
 
-        创建者: 朽木露琪亚
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 校验固定结果类型并在启用 target registry 时执行支持性检查。
@@ -483,18 +468,18 @@ class _BaseArchIndexQueryOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/arch.md
-        - test: test/dialect/test_arch_dialect.py
+        - test: test/dialect/test_arch.py
         - 功能实现: kernel_gen/dialect/arch.py
         """
 
         expected = SymbolValueType.from_expr(self.RESULT_EXPR)
         if self.result.type != expected:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected=f"{self.name} result type must be !symbol.int<\"{self.RESULT_EXPR}\">",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         _verify_target_registry_support(self.name)
@@ -577,8 +562,6 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
     ) -> None:
         """初始化 arch.get_dynamic_memory。
 
-        创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
 
         功能说明:
         - 记录 memory space，并默认推导固定结果类型。
@@ -588,7 +571,7 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/arch.md
-        - test: test/dialect/test_arch_dialect.py
+        - test: test/dialect/test_arch.py
         - 功能实现: kernel_gen/dialect/arch.py
         """
 
@@ -600,8 +583,6 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
     def verify_(self: "ArchGetDynamicMemoryOp") -> None:
         """校验动态 memory 入口 op。
 
-        创建者: 朽木露琪亚
-        最后一次更改: 我不是牛马
 
         功能说明:
         - 校验 memory_space 与结果类型，并在启用 target registry 时执行支持性检查。
@@ -611,7 +592,7 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/arch.md
-        - test: test/dialect/test_arch_dialect.py
+        - test: test/dialect/test_arch.py
         - 功能实现: kernel_gen/dialect/arch.py
         """
 
@@ -620,21 +601,21 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
         space_name = self.memory_space.space.data
         if space_name not in _DYNAMIC_MEMORY_SPACES:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="arch.get_dynamic_memory memory_space must be shared/local/tsm/tlm1/tlm2/tlm3",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
 
         if not isinstance(self.result.type, NnMemoryType):
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="arch.get_dynamic_memory result type must be nn.memory",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
 
@@ -643,56 +624,56 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
 
         if len(result_type.shape.data) != 1:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="arch.get_dynamic_memory result must be 1-D",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if len(result_type.stride.data) != 1:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="arch.get_dynamic_memory result stride rank must be 1",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if result_type.shape.data[0] != StringAttr("?"):
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="arch.get_dynamic_memory result shape must be [?]",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if result_type.stride.data[0] != IntAttr(1):
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="arch.get_dynamic_memory result stride must be [1]",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if result_type.element_type != i8:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="arch.get_dynamic_memory result element type must be i8",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         if result_type.space != self.memory_space:
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="arch.get_dynamic_memory result space must match memory_space",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
 
@@ -711,11 +692,11 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
         memory_space = parser.parse_attribute()
         if not isinstance(memory_space, NnMemorySpaceAttr):
             raise VerifyException(
-                _ERROR_TEMPLATE.format(
+                ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected="arch.get_dynamic_memory memory_space must be #nn.space<...>",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
                 )
             )
         parser.parse_characters(":", f" in {cls.name}")
@@ -738,8 +719,6 @@ class ArchBarrierOp(IRDLOperation):
     ) -> None:
         """初始化 arch.barrier。
 
-        创建者: 小李飞刀
-        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 记录 barrier 的 scope 与 visibility。
@@ -749,7 +728,7 @@ class ArchBarrierOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/arch.md
-        - test: test/dialect/test_arch_dialect.py
+        - test: test/dialect/test_arch.py
         - 功能实现: kernel_gen/dialect/arch.py
         """
 
@@ -758,8 +737,6 @@ class ArchBarrierOp(IRDLOperation):
     def verify_(self: "ArchBarrierOp") -> None:
         """校验 arch.barrier 输入约束。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 校验 scope 必须是公开 `#arch.scope<...>` 成员之一。
@@ -770,7 +747,7 @@ class ArchBarrierOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/arch.md
-        - test: test/dialect/test_arch_dialect.py
+        - test: test/dialect/test_arch.py
         - 功能实现: kernel_gen/dialect/arch.py
         """
 
@@ -831,8 +808,6 @@ class ArchLaunchOp(IRDLOperation):
     ) -> None:
         """初始化 arch.launch。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 记录 `@callee`、block/thread/subthread/shared_memory_size 与尾部 args。
@@ -842,7 +817,7 @@ class ArchLaunchOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/arch.md
-        - test: test/dialect/test_arch_dialect.py
+        - test: test/dialect/test_arch.py
         - 功能实现: kernel_gen/dialect/arch.py
         """
 
@@ -855,8 +830,6 @@ class ArchLaunchOp(IRDLOperation):
     def verify_(self: "ArchLaunchOp") -> None:
         """校验 arch.launch 输入约束。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
 
         功能说明:
         - 校验 `@callee` 与四字段 extent。
@@ -868,7 +841,7 @@ class ArchLaunchOp(IRDLOperation):
 
         关联文件:
         - spec: spec/dialect/arch.md
-        - test: test/dialect/test_arch_dialect.py
+        - test: test/dialect/test_arch.py
         - 功能实现: kernel_gen/dialect/arch.py
         """
 

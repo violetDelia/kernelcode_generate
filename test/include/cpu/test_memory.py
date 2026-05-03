@@ -1,7 +1,5 @@
 """CPU Memory compile tests.
 
-创建者: 神秘人
-最后一次更改: jcc你莫辜负
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 include/cpu/Memory.h 的公开接口与核心语义。
@@ -39,8 +37,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def _compile_and_run(source: str) -> None:
     """编译并运行 C++ 测试片段。
 
-    创建者: 神秘人
-    最后一次更改: 神秘人
 
     功能说明:
     - 使用 g++ 编译临时源码并执行生成的程序。
@@ -96,8 +92,6 @@ def _compile_and_run(source: str) -> None:
 def _compile_and_run_expect_failure(source: str) -> None:
     """编译并运行应当失败的 C++ 测试片段。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 使用 g++ 编译临时源码并验证生成程序以非零状态退出。
@@ -147,10 +141,6 @@ def _compile_and_run_expect_failure(source: str) -> None:
 
 
 # CPU-MEM-001 / CPU-MEM-002 / CPU-MEM-003 / CPU-MEM-004 / CPU-MEM-005
-# 创建者: 神秘人
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-06 19:05:00 +0800
-# 最近一次运行成功时间: 2026-04-06 19:05:00 +0800
 # 测试目的: 验证运行期 rank 的显式 stride、自动连续 stride、element_count、linear_offset、at 与 is_contiguous 语义。
 # 使用示例: pytest -q test/include/cpu/test_memory.py -k test_cpu_memory_header_compiles_and_runs
 # 对应功能实现文件路径: include/cpu/Memory.h
@@ -235,10 +225,6 @@ int main() {
 
 
 # CPU-MEM-SPACE-TEMPLATE-001
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-06 19:05:00 +0800
-# 最近一次运行成功时间: 2026-04-06 19:05:00 +0800
 # 测试目的: 验证 cpu::Memory<Space, T> 模板签名可用，cpu::Memory<GM, T> 与 cpu::Memory<MemorySpace::GM, T> 等价口径可编译运行。
 # 使用示例: pytest -q test/include/cpu/test_memory.py -k space_template_contract
 # 对应功能实现文件路径: include/cpu/Memory.h
@@ -273,10 +259,6 @@ int main() {
 
 
 # CPU-MEM-005
-# 创建者: 神秘人
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-06 19:05:00 +0800
-# 最近一次运行成功时间: 2026-04-06 19:05:00 +0800
 # 测试目的: 验证头文件自身不依赖标准库头文件即可被最小程序编译。
 # 使用示例: pytest -q test/include/cpu/test_memory.py -k test_cpu_memory_header_without_std_headers
 # 对应功能实现文件路径: include/cpu/Memory.h
@@ -297,10 +279,6 @@ int main() {
 
 
 # CPU-MEM-006
-# 创建者: 金铲铲大作战
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-06 19:05:00 +0800
-# 最近一次运行成功时间: 2026-04-06 19:05:00 +0800
 # 测试目的: 验证运行期 rank 支持 MAX_DIM=8 的默认 stride 推导与索引访问。
 # 使用示例: pytest -q test/include/cpu/test_memory.py -k test_cpu_memory_runtime_rank_max_dim
 # 对应功能实现文件路径: include/cpu/Memory.h
@@ -348,10 +326,6 @@ int main() {
 
 
 # CPU-MEM-007
-# 创建者: 金铲铲大作战
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-06 19:05:00 +0800
-# 最近一次运行成功时间: 2026-04-06 19:05:00 +0800
 # 测试目的: 验证 rank>MAX_DIM=8 违反前置条件时触发显式失败，不做静默截断。
 # 使用示例: pytest -q test/include/cpu/test_memory.py -k test_cpu_memory_runtime_rank_over_max_dim_fails
 # 对应功能实现文件路径: include/cpu/Memory.h

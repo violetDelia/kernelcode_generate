@@ -1,11 +1,16 @@
 """nn_lowering 公共辅助函数。
 
-创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 nn_lowering pass 的公共校验与辅助构造入口。
 - 统一 nn op 的空间、名称、结果数量与 operand 计数检查。
+
+API 列表:
+- `ensure_module_op(module: Operation) -> ModuleOp`
+- `ensure_space_attr(op: Operation) -> NnMemorySpaceAttr`
+- `ensure_single_result(op: Operation) -> NnMemoryType`
+- `ensure_operand_count(op: Operation, expected: int) -> None`
+- `ensure_expected_op_name(op: Operation, expected: str) -> None`
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering.nn_lowering_utility import ensure_space_attr
@@ -13,7 +18,7 @@
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/spec.md
-- test: test/pass/nn_lowering/public_name.py
+- test: test/passes/lowering/nn_lowering/test_public_name.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
 """
 
@@ -28,8 +33,6 @@ from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 def ensure_module_op(module: Operation) -> ModuleOp:
     """校验 module 是否为 builtin.module 并确保 ops 可遍历。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 用于 nn_lowering pass 的统一入口校验。
@@ -39,7 +42,7 @@ def ensure_module_op(module: Operation) -> ModuleOp:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
     """
 
@@ -55,8 +58,6 @@ def ensure_module_op(module: Operation) -> ModuleOp:
 def ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
     """获取并校验 nn op 的 space attribute。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 统一 `nn` op 的空间属性校验逻辑。
@@ -66,7 +67,7 @@ def ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
     """
 
@@ -79,8 +80,6 @@ def ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
 def ensure_single_result(op: Operation) -> NnMemoryType:
     """校验 nn op 仅有单个结果且类型为 nn.memory。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - 要求结果数量为 1。
@@ -91,7 +90,7 @@ def ensure_single_result(op: Operation) -> NnMemoryType:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
     """
 
@@ -106,8 +105,6 @@ def ensure_single_result(op: Operation) -> NnMemoryType:
 def ensure_operand_count(op: Operation, expected: int) -> None:
     """校验 nn op 的 operand 数量。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
 
     功能说明:
     - operand 数量不匹配时直接抛错。
@@ -117,7 +114,7 @@ def ensure_operand_count(op: Operation, expected: int) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/public_name.py
+    - test: test/passes/lowering/nn_lowering/test_public_name.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
     """
 
@@ -130,8 +127,6 @@ def ensure_operand_count(op: Operation, expected: int) -> None:
 def ensure_expected_op_name(op: Operation, expected: str) -> None:
     """校验具体 pattern 命中的 op 名称未被篡改。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 单 op pattern 先按具体 Python 类型命中。
@@ -142,7 +137,7 @@ def ensure_expected_op_name(op: Operation, expected: str) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
     """
 

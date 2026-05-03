@@ -1,21 +1,24 @@
 """memory-pool pass.
 
-创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 `memory-pool` pass 的生命周期摘要分析接口。
 - 汇总 `dma.alloc/dma.free` 的生命周期区间与 peak 统计。
 - 支持直线路径的 pool 改写：`dma.alloc -> i8 byte pool + dma.view`。
 
+API 列表:
+- `class MemoryPoolPass(rewrite: bool = False, fold: bool = True)`
+- `MemoryPoolPass.get_summary(func_name: str) -> MemoryPoolSummary`
+- `MemoryPoolPass.all_summaries() -> dict[str, MemoryPoolSummary]`
+
 使用示例:
 - from kernel_gen.passes.memory_pool import MemoryPoolPass
-- module = MemoryPoolPass(rewrite=False).run(module)
+- MemoryPoolPass(rewrite=False).apply(Context(), module)
 - summary = MemoryPoolPass(rewrite=False).get_summary("main")
 
 关联文件:
 - spec: spec/pass/lowering/memory_pool.md
-- test: test/pass/test_memory_pool.py
+- test: test/passes/test_memory_pool.py
 - 功能实现: kernel_gen/passes/memory_pool.py
 """
 
@@ -25,6 +28,7 @@ from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from dataclasses import dataclass
 
 import sympy as sp
+from xdsl.context import Context
 from xdsl.dialects import arith, func
 from xdsl.dialects.builtin import (
     ArrayAttr,
@@ -43,7 +47,7 @@ from xdsl.dialects.builtin import (
 )
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaViewOp, _is_contiguous
+from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp, SymbolValueType
 from kernel_gen.passes.common import raise_pass_contract_error
@@ -54,8 +58,6 @@ from kernel_gen.passes.pass_manager import Pass
 class MemoryPoolInterval:
     """单个 allocation 的生命周期摘要。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 记录 alloc 的 bucket、字节大小表达式、词法起止索引与复用 offset。
@@ -65,7 +67,7 @@ class MemoryPoolInterval:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -81,8 +83,6 @@ class MemoryPoolInterval:
 class _AllocInfo:
     """改写阶段使用的 alloc 生命周期信息。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 记录 alloc/free 对、bucket、字节大小表达式与词法区间，供直线路径改写使用。
@@ -92,7 +92,7 @@ class _AllocInfo:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -104,12 +104,13 @@ class _AllocInfo:
     end_index: int
 
 
+SlotKey = MemoryPoolInterval | _AllocInfo
+
+
 @dataclass(frozen=True)
 class MemoryPoolSummary:
     """memory-pool summary 结构体。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 汇总单个 func 的区间列表、peak 统计与 bucket 数量。
@@ -120,7 +121,7 @@ class MemoryPoolSummary:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -132,8 +133,6 @@ class MemoryPoolSummary:
     def to_text(self) -> str:
         """以稳定文本格式输出 summary。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 用于 expectation 与测试的稳定文本比对。
@@ -143,7 +142,7 @@ class MemoryPoolSummary:
 
         关联文件:
         - spec: spec/pass/lowering/memory_pool.md
-        - test: test/pass/test_memory_pool.py
+        - test: test/passes/test_memory_pool.py
         - 功能实现: kernel_gen/passes/memory_pool.py
         """
 
@@ -173,19 +172,17 @@ class MemoryPoolSummary:
 class MemoryPoolPass(Pass):
     """memory-pool pass。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 统计 `dma.alloc/dma.free` 生命周期并生成 summary。
     - `rewrite=True` 时对直线路径执行 pool 改写。
 
     使用示例:
-    - summary = MemoryPoolPass(rewrite=False).run(module)
+    - MemoryPoolPass(rewrite=False).apply(Context(), module)
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -194,8 +191,6 @@ class MemoryPoolPass(Pass):
     def __init__(self, rewrite: bool = False, fold: bool = True) -> None:
         """初始化 memory-pool pass。
 
-        创建者: 大闸蟹
-        最后一次更改: 大闸蟹
 
         功能说明:
         - 记录是否执行 pool 改写。
@@ -207,7 +202,7 @@ class MemoryPoolPass(Pass):
 
         关联文件:
         - spec: spec/pass/lowering/memory_pool.md
-        - test: test/pass/test_memory_pool.py
+        - test: test/passes/test_memory_pool.py
         - 功能实现: kernel_gen/passes/memory_pool.py
         """
 
@@ -218,8 +213,6 @@ class MemoryPoolPass(Pass):
     def get_summary(self, func_name: str) -> MemoryPoolSummary:
         """查询单个 func 的 summary。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 按函数名返回 summary；不存在则报错。
@@ -229,7 +222,7 @@ class MemoryPoolPass(Pass):
 
         关联文件:
         - spec: spec/pass/lowering/memory_pool.md
-        - test: test/pass/test_memory_pool.py
+        - test: test/passes/test_memory_pool.py
         - 功能实现: kernel_gen/passes/memory_pool.py
         """
 
@@ -240,8 +233,6 @@ class MemoryPoolPass(Pass):
     def all_summaries(self) -> dict[str, MemoryPoolSummary]:
         """返回全部 summary 的拷贝。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 复制返回内部缓存，避免外部修改。
@@ -251,30 +242,30 @@ class MemoryPoolPass(Pass):
 
         关联文件:
         - spec: spec/pass/lowering/memory_pool.md
-        - test: test/pass/test_memory_pool.py
+        - test: test/passes/test_memory_pool.py
         - 功能实现: kernel_gen/passes/memory_pool.py
         """
 
         return dict(self._summaries)
 
-    def run(self, module: ModuleOp) -> ModuleOp:
+    def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行 memory-pool 分析。
 
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 遍历 module 内每个 `func.func` 并生成 summary。
+        - 公开执行入口固定为 xdsl `ModulePass.apply(ctx, module)`，不再提供单 pass `run(...)` 兼容入口。
 
         使用示例:
-        - module = MemoryPoolPass(rewrite=False).run(module)
+        - MemoryPoolPass(rewrite=False).apply(Context(), module)
 
         关联文件:
         - spec: spec/pass/lowering/memory_pool.md
-        - test: test/pass/test_memory_pool.py
+        - test: test/passes/test_memory_pool.py
         - 功能实现: kernel_gen/passes/memory_pool.py
         """
 
+        _ = ctx
         if not isinstance(module, ModuleOp):
             raise_pass_contract_error("MemoryPoolInvalidModule", "module must be builtin.module")
 
@@ -286,7 +277,6 @@ class MemoryPoolPass(Pass):
             self._summaries[summary.func_name] = summary
             if self.rewrite:
                 _rewrite_func(op)
-        return module
 
 
 _SPACE_TOKENS = {
@@ -301,8 +291,6 @@ _SPACE_TOKENS = {
 def _expr_text(expr: sp.Basic) -> str:
     """将 sympy 表达式转为稳定文本。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 统一使用 str(expr) 输出。
@@ -312,7 +300,7 @@ def _expr_text(expr: sp.Basic) -> str:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -322,8 +310,6 @@ def _expr_text(expr: sp.Basic) -> str:
 def _bucket_text(bucket: tuple[str]) -> str:
     """格式化 bucket 输出。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 用于 summary 文本输出。
@@ -333,7 +319,7 @@ def _bucket_text(bucket: tuple[str]) -> str:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -345,8 +331,6 @@ def _bucket_text(bucket: tuple[str]) -> str:
 def _space_token(mem_type: NnMemoryType) -> str:
     """将 memory space 映射为固定 token。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 将 `global/shared/local/tsm/tlm` 统一映射到 `#GM/#SM/#LM/#TSM/#TLM`。
@@ -356,7 +340,7 @@ def _space_token(mem_type: NnMemoryType) -> str:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -367,8 +351,6 @@ def _space_token(mem_type: NnMemoryType) -> str:
 def _dtype_string(element_type: Attribute) -> str:
     """生成稳定 dtype 字符串。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 当前直接复用 str(element_type)。
@@ -378,7 +360,7 @@ def _dtype_string(element_type: Attribute) -> str:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -388,8 +370,6 @@ def _dtype_string(element_type: Attribute) -> str:
 def _element_size(element_type: Attribute) -> int | None:
     """解析 element_type 的字节大小。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 支持 i1/i8/i16/i32/i64 与 f16/bf16/f32/f64。
@@ -399,7 +379,7 @@ def _element_size(element_type: Attribute) -> int | None:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -426,8 +406,6 @@ def _element_size(element_type: Attribute) -> int | None:
 def _layout_family(mem_type: NnMemoryType) -> str:
     """解析 memory type 的 layout 族。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 第一版仅支持 contiguous layout。
@@ -437,11 +415,11 @@ def _layout_family(mem_type: NnMemoryType) -> str:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    if not _is_contiguous(mem_type):
+    if not _is_contiguous_memory_type(mem_type):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
             "MemoryPoolUnsupportedNonLinearAlloc: custom stride is not supported in v1"
         )
@@ -451,8 +429,6 @@ def _layout_family(mem_type: NnMemoryType) -> str:
 def _dim_expr(dim: Attribute) -> sp.Basic:
     """将 shape 维度属性转换为 sympy 表达式。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - IntAttr 转为 Integer。
@@ -463,7 +439,7 @@ def _dim_expr(dim: Attribute) -> sp.Basic:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -476,11 +452,43 @@ def _dim_expr(dim: Attribute) -> sp.Basic:
     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"MemoryPoolUnsupportedShape: {dim}")
 
 
+def _is_contiguous_memory_type(mem_type: NnMemoryType) -> bool:
+    """检查 memory-pool 当前支持的默认连续布局。
+
+
+    功能说明:
+    - 在本文件内按 `shape` 推导默认 row-major stride，避免跨文件调用 dma 私有 helper。
+    - 使用 `sympy` 比较等价表达式，允许符号乘法因子顺序不同。
+
+    使用示例:
+    - _is_contiguous_memory_type(result_type)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    if len(mem_type.shape.data) != len(mem_type.stride.data):
+        return False
+    expected: list[sp.Basic] = []
+    running: sp.Basic = sp.Integer(1)
+    for shape_dim in reversed(mem_type.shape.data):
+        expected.insert(0, running)
+        running = sp.simplify(running * _dim_expr(shape_dim))
+    for stride_dim, expected_expr in zip(mem_type.stride.data, expected, strict=True):
+        try:
+            stride_expr = _dim_expr(stride_dim)
+        except KernelCodeError:
+            return False
+        if sp.simplify(stride_expr - expected_expr) != 0:
+            return False
+    return True
+
+
 def _shape_product(mem_type: NnMemoryType) -> sp.Basic:
     """将 memory shape 转为乘积表达式。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 逐维累乘生成 size 表达式。
@@ -490,7 +498,7 @@ def _shape_product(mem_type: NnMemoryType) -> sp.Basic:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -503,8 +511,6 @@ def _shape_product(mem_type: NnMemoryType) -> sp.Basic:
 def _maybe_int(expr: sp.Basic) -> int | None:
     """尝试将 sympy 表达式转换为整数。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 当表达式为可解析的整数时返回 int，否则返回 None。
@@ -514,7 +520,7 @@ def _maybe_int(expr: sp.Basic) -> int | None:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -531,8 +537,6 @@ def _maybe_int(expr: sp.Basic) -> int | None:
 def _const_symbol_int(value: int) -> tuple[arith.ConstantOp, UnrealizedConversionCastOp]:
     """构造 `!symbol.int<"value">` 常量的 IR op 对。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 先创建 i32 常量，再用 `builtin.unrealized_conversion_cast` 转成 `!symbol.int<"expr">`。
@@ -545,7 +549,7 @@ def _const_symbol_int(value: int) -> tuple[arith.ConstantOp, UnrealizedConversio
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -558,8 +562,6 @@ def _const_symbol_int(value: int) -> tuple[arith.ConstantOp, UnrealizedConversio
 def _symbol_value_expr(expr: str) -> tuple[list[Operation], SSAValue]:
     """构造 `!symbol.int<"expr">` 的 SSA value。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 当 expr 可解析为整数时，使用 `_const_symbol_int` 生成常量。
@@ -571,7 +573,7 @@ def _symbol_value_expr(expr: str) -> tuple[list[Operation], SSAValue]:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -592,8 +594,6 @@ def _symbol_value_expr(expr: str) -> tuple[list[Operation], SSAValue]:
 def _symbol_expr(expr: sp.Basic) -> tuple[list[Operation], SSAValue]:
     """将 sympy 表达式转换为 `!symbol.int<"expr">` SSA value。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 统一通过 `_symbol_value_expr` 生成可插入的 IR op 列表。
@@ -603,7 +603,7 @@ def _symbol_expr(expr: sp.Basic) -> tuple[list[Operation], SSAValue]:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -613,8 +613,6 @@ def _symbol_expr(expr: sp.Basic) -> tuple[list[Operation], SSAValue]:
 def _shape_dim_attr(expr: sp.Basic) -> Attribute:
     """将 size 表达式转换为 shape 维度 attribute。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 整数表达式转为 `IntAttr`。
@@ -625,7 +623,7 @@ def _shape_dim_attr(expr: sp.Basic) -> Attribute:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -637,8 +635,6 @@ def _shape_dim_attr(expr: sp.Basic) -> Attribute:
 def _layout_operands(layout: ArrayAttr[Attribute]) -> tuple[list[Operation], list[SSAValue]]:
     """将 layout 属性转换为 `!symbol.int<"expr">` operand 列表。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - IntAttr 转为常量 `!symbol.int<"n">`。
@@ -649,7 +645,7 @@ def _layout_operands(layout: ArrayAttr[Attribute]) -> tuple[list[Operation], lis
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -665,8 +661,6 @@ def _layout_operands(layout: ArrayAttr[Attribute]) -> tuple[list[Operation], lis
 def _bucket_key(mem_type: NnMemoryType) -> tuple[str]:
     """生成 bucket key。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 规则: (space,)；layout 仅用于校验。
@@ -676,7 +670,7 @@ def _bucket_key(mem_type: NnMemoryType) -> tuple[str]:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -687,8 +681,6 @@ def _bucket_key(mem_type: NnMemoryType) -> tuple[str]:
 def _collect_ops(block: Block) -> list[Operation]:
     """按词法顺序收集 block 及子 region 内 op。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 先收集当前 block op，再递归收集其子 region 的 op。
@@ -698,7 +690,7 @@ def _collect_ops(block: Block) -> list[Operation]:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -714,8 +706,6 @@ def _collect_ops(block: Block) -> list[Operation]:
 def _parent_block(op: Operation) -> Block | None:
     """安全获取 op 的 parent block。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 在不同版本的 xdsl 上兼容 parent_block API。
@@ -725,11 +715,79 @@ def _parent_block(op: Operation) -> Block | None:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     return getattr(op, "parent_block", lambda: None)()
+
+
+def _visit_ops_with_loops(
+    ops_list: list[Operation],
+    current_loop: SymbolForOp | None,
+    reject_other_regions: bool,
+    ops: list[Operation],
+    loop_bounds: dict[SymbolForOp, tuple[int, int]],
+    op_loop: dict[Operation, SymbolForOp | None],
+    index: int,
+) -> int:
+    """递归收集 op 并返回最新词法索引。
+
+
+    功能说明:
+    - 作为 `_collect_ops_with_loops(...)` 的当前文件私有递归 helper。
+    - 避免在函数体内定义嵌套 visitor。
+
+    使用示例:
+    - index = _visit_ops_with_loops(list(block.ops), None, True, ops, loop_bounds, op_loop, 0)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    for op in ops_list:
+        ops.append(op)
+        op_loop[op] = current_loop
+        index += 1
+        if not op.regions:
+            continue
+        if isinstance(op, SymbolForOp):
+            blocks = list(op.body.blocks)
+            if len(blocks) != 1:
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS,
+                    "MemoryPoolUnsupportedRegionEscape: symbol.for must have single block"
+                )
+            loop_start = index
+            index = _visit_ops_with_loops(
+                list(blocks[0].ops),
+                op,
+                reject_other_regions,
+                ops,
+                loop_bounds,
+                op_loop,
+                index,
+            )
+            loop_end = index - 1
+            loop_bounds[op] = (loop_start, loop_end)
+            continue
+        if reject_other_regions:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS,
+                "MemoryPoolUnsupportedRegionEscape: nested regions are not supported"
+            )
+        for region in op.regions:
+            for block in region.blocks:
+                index = _visit_ops_with_loops(
+                    list(block.ops),
+                    current_loop,
+                    reject_other_regions,
+                    ops,
+                    loop_bounds,
+                    op_loop,
+                    index,
+                )
+    return index
 
 
 def _collect_ops_with_loops(
@@ -739,8 +797,6 @@ def _collect_ops_with_loops(
 ) -> tuple[list[Operation], dict[SymbolForOp, tuple[int, int]], dict[Operation, SymbolForOp | None]]:
     """收集 op 列表并记录 symbol.for 的词法范围。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 按词法顺序收集 op，并为每个 op 记录所在的最内层 symbol.for。
@@ -751,7 +807,7 @@ def _collect_ops_with_loops(
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -760,35 +816,16 @@ def _collect_ops_with_loops(
     op_loop: dict[Operation, SymbolForOp | None] = {}
     index = 0
 
-    def visit(ops_list: list[Operation], current_loop: SymbolForOp | None) -> None:
-        nonlocal index
-        for op in ops_list:
-            ops.append(op)
-            op_loop[op] = current_loop
-            index += 1
-            if not op.regions:
-                continue
-            if isinstance(op, SymbolForOp):
-                blocks = list(op.body.blocks)
-                if len(blocks) != 1:
-                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
-                        "MemoryPoolUnsupportedRegionEscape: symbol.for must have single block"
-                    )
-                loop_start = index
-                visit(list(blocks[0].ops), op)
-                loop_end = index - 1
-                loop_bounds[op] = (loop_start, loop_end)
-                continue
-            if reject_other_regions:
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
-                    "MemoryPoolUnsupportedRegionEscape: nested regions are not supported"
-                )
-            for region in op.regions:
-                for block in region.blocks:
-                    visit(list(block.ops), current_loop)
-
     for block in blocks:
-        visit(list(block.ops), None)
+        index = _visit_ops_with_loops(
+            list(block.ops),
+            None,
+            reject_other_regions,
+            ops,
+            loop_bounds,
+            op_loop,
+            index,
+        )
 
     return ops, loop_bounds, op_loop
 
@@ -798,8 +835,6 @@ def _collect_straight_line_ops(
 ) -> tuple[Block, list[Operation], dict[Operation, int], dict[SymbolForOp, tuple[int, int]], dict[Operation, SymbolForOp | None]]:
     """收集可改写路径的 op 列表。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅允许单 block。
@@ -811,7 +846,7 @@ def _collect_straight_line_ops(
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -832,8 +867,6 @@ def _has_escaping_use(
 ) -> bool:
     """判断 alloc 是否存在 escaping use。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 返回 True 表示 alloc 结果逃逸到 loop 外或被直接 return。
@@ -843,7 +876,7 @@ def _has_escaping_use(
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -858,12 +891,10 @@ def _has_escaping_use(
 
 
 def _assign_slots(
-    items: list[tuple[int, int, object]],
-) -> tuple[dict[object, int], int]:
+    items: list[tuple[int, int, SlotKey]],
+) -> tuple[dict[SlotKey, int], int]:
     """基于词法区间为条目分配 slot。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 输入 (begin, end, key) 列表，输出每个 key 的 slot 以及最大 slot 数。
@@ -874,14 +905,14 @@ def _assign_slots(
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     ordered = sorted(items, key=lambda item: (item[0], item[1]))
     active: list[tuple[int, int]] = []
     free_slots: list[int] = []
-    slot_map: dict[object, int] = {}
+    slot_map: dict[SlotKey, int] = {}
     next_slot = 0
 
     for begin, end, key in ordered:
@@ -907,8 +938,6 @@ def _assign_slots(
 def _alloc_name(value: SSAValue, index: int) -> str:
     """生成 alloc 的稳定名称。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 优先使用 SSAValue 的 name_hint，否则使用 alloc{index}。
@@ -918,7 +947,7 @@ def _alloc_name(value: SSAValue, index: int) -> str:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -931,8 +960,6 @@ def _alloc_name(value: SSAValue, index: int) -> str:
 def _peak_bytes(intervals: list[MemoryPoolInterval]) -> sp.Basic:
     """计算 bucket 内的 peak 字节数量。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 按 begin/end 索引构造事件流，取最大并发表达式。
@@ -942,7 +969,7 @@ def _peak_bytes(intervals: list[MemoryPoolInterval]) -> sp.Basic:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -968,8 +995,6 @@ def _peak_bytes(intervals: list[MemoryPoolInterval]) -> sp.Basic:
 def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
     """生成单个 func 的 summary。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 解析 alloc/free 区间并计算 peak 统计。
@@ -979,7 +1004,7 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
@@ -1096,8 +1121,6 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
 def _rewrite_func(func_op: func.FuncOp) -> None:
     """对直线路径执行 pool 改写。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅支持单 block，允许 `symbol.for`，其余 region 直接报错。
@@ -1108,7 +1131,7 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
-    - test: test/pass/test_memory_pool.py
+    - test: test/passes/test_memory_pool.py
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
