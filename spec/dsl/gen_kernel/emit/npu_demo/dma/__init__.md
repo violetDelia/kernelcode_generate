@@ -45,6 +45,8 @@
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 本目录只定义 `npu_demo` target 的 `dma` 节点映射。
+- `dma.alloc` 发射必须用 `dynamic_shape` operand 绑定运行期符号值，并根据 result memory type 重建完整 shape 与默认连续 stride；部分动态 shape operand 只覆盖符号维度，静态维度仍从 result type 补回。
+- `dma.alloc` 中含 `min(...)` 的动态尾块维度必须映射到已发射 C++ 变量名，不能把 `symbol.iter` 的 IR 文本直接写进 helper 参数。
 - 目录内未列入公开 API 的注册函数与 helper 不得跨文件直接调用。
 
 ## API详细说明
@@ -119,3 +121,4 @@
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-DMA-053 | 生成/编译 | emit c maps NN space to template param | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_emit_c_maps_nn_space_to_template_param`。 | 生成源码、IR 文本或编译结果体现“emit c maps NN space to template param”场景。 | `test_emit_c_maps_nn_space_to_template_param` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-DMA-054 | pass 改写 | emit c lowers npu demo slice deslice add pipeline | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo slice deslice add pipeline”场景。 | `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-DMA-055 | pass 改写 | emit c lowers npu demo tiled matmul pipeline | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tiled_matmul_pipeline`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo tiled matmul pipeline”场景。 | `test_emit_c_lowers_npu_demo_tiled_matmul_pipeline` |
+| TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-DMA-056 | pass 改写 | emit c lowers npu demo DMA alloc dynamic shape and stride | 准备带部分动态 shape 与 `min(...)` 维度的 `dma.alloc` IR。 | 运行 `test_emit_c_lowers_npu_demo_dma_alloc_helper_contract`。 | 源码 helper 参数包含完整 shape 与默认连续 stride，动态维度映射到已发射 C++ 变量。 | `test_emit_c_lowers_npu_demo_dma_alloc_helper_contract` |

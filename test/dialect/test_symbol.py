@@ -56,6 +56,7 @@ from kernel_gen.dialect.symbol import (
     SymbolLeOp,
     SymbolLtOp,
     SymbolMulOp,
+    SymbolMinOp,
     SymbolNeOp,
     SymbolSubOp,
     SymbolIterType,
@@ -195,11 +196,22 @@ def _make_symbol_value(expr: str):
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_expr_attr_round_trip() -> None:
     ctx = _build_context()
-    for text in ['#symbol.expr<"N">', '#symbol.expr<"M + 1">', '#symbol.expr<"B*K">']:
+    for text in ['#symbol.expr<"N">', '#symbol.expr<"M + 1">', '#symbol.expr<"B*K">', '#symbol.expr<"min(T, N - i)">']:
         expr = Parser(ctx, text).parse_attribute()
         assert isinstance(expr, SymbolExprAttr)
         expr.verify()
         assert _print_attr(expr) == text
+
+
+# TC-SYM-009A
+# 测试目的: 验证公开 symbol 表达式只接受小写 `min(lhs, rhs)`，不接受 `Min(lhs, rhs)` 别名。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_expr_attr_rejects_uppercase_min_alias() -> None:
+    with pytest.raises(VerifyException, match=r"min\(lhs, rhs\)"):
+        SymbolExprAttr.from_expr("Min(T, N - i)").verify()
+    with pytest.raises(VerifyException, match=r"min\(lhs, rhs\)"):
+        SymbolValueType.from_expr("Min(T, N - i)").verify()
 
 
 # TC-SYM-003
@@ -217,7 +229,7 @@ def test_symbol_expr_attr_rejects_empty_expr() -> None:
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_value_type_round_trip_for_integer_only_semantics() -> None:
     ctx = _build_context()
-    for text in ['!symbol.int<"N">', '!symbol.int<"M + 1">', '!symbol.int<"3">']:
+    for text in ['!symbol.int<"N">', '!symbol.int<"M + 1">', '!symbol.int<"3">', '!symbol.int<"min(T, N - i)">']:
         ty = Parser(ctx, text).parse_attribute()
         assert isinstance(ty, SymbolValueType)
         ty.verify()
@@ -283,6 +295,7 @@ builtin.module {
         (SymbolMulOp, 6, 5, "30", 30),
         (SymbolDivOp, 6, 3, "2", 2),
         (SymbolFloorDivOp, 7, 3, "2", 2),
+        (SymbolMinOp, 7, 3, "3", 3),
     ],
 )
 def test_symbol_binary_arith_fold_constant_operands(
@@ -407,18 +420,21 @@ def test_symbol_arith_ops_verify_success() -> None:
         _make_symbol_value("N"),
         SymbolValueType.from_expr("M // N"),
     )
+    min_op = SymbolMinOp(_make_symbol_value("T"), _make_symbol_value("N - i"), SymbolValueType.from_expr("min(T, N - i)"))
 
     add_op.verify()
     sub_op.verify()
     mul_op.verify()
     div_op.verify()
     floordiv_op.verify()
+    min_op.verify()
 
     assert _print_attr(add_op.result.type) == '!symbol.int<"M + 1">'
     assert _print_attr(sub_op.result.type) == '!symbol.int<"N - 1">'
     assert _print_attr(mul_op.result.type) == '!symbol.int<"M*N">'
     assert _print_attr(div_op.result.type) == '!symbol.int<"M / N">'
     assert _print_attr(floordiv_op.result.type) == '!symbol.int<"M // N">'
+    assert _print_attr(min_op.result.type) == '!symbol.int<"min(T, N - i)">'
 
 
 # TC-SYM-015B
@@ -449,6 +465,7 @@ builtin.module {
   %prod = symbol.mul %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M*N">
   %quot = symbol.div %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M / N">
   %floor = symbol.floordiv %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M // N">
+  %tail = symbol.min %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"min(M, N)">
 }
 """,
     ).parse_module()
@@ -460,6 +477,7 @@ builtin.module {
     assert "symbol.mul %m, %n : !symbol.int<\"M\">, !symbol.int<\"N\"> -> !symbol.int<\"M*N\">" in printed
     assert "symbol.div %m, %n : !symbol.int<\"M\">, !symbol.int<\"N\"> -> !symbol.int<\"M / N\">" in printed
     assert "symbol.floordiv %m, %n : !symbol.int<\"M\">, !symbol.int<\"N\"> -> !symbol.int<\"M // N\">" in printed
+    assert "symbol.min %m, %n : !symbol.int<\"M\">, !symbol.int<\"N\"> -> !symbol.int<\"min(M, N)\">" in printed
 
 
 # TC-SYM-017

@@ -9,6 +9,7 @@
 - 诊断落盘根目录统一来自 `kernel_gen.core.config.set_dump_dir(...)`，不作为 `dsl_run(...)` 入参。
 - 失败统一抛出 `KernelCodeError(ErrorModule.TOOLS, message)`；不再定义或导出工具专属错误类。
 - `dsl_run(...)` 不向 kernel 函数隐式注入 operation helper、`MemorySpace`、`NumericType` 或 `SymbolDim`；kernel 体引用的名称必须来自显式 import、闭包或函数全局绑定，缺失时必须报错。
+- `real_args` 支持真实 tensor/array 参数和运行期标量参数；`int | float` 标量原样绑定到 DSL 函数形参，供 runtime tile、stride、padding 等 `SymbolDim` 形参使用。
 
 ## API 列表
 
@@ -42,6 +43,7 @@
 
 - 当前文件内 `_runtime_module_name(...)`、`_normalize_real_args(...)`、`_resolve_pipeline(...)`、`_run_pipeline_with_optional_dump(...)`、`_select_source_and_entry(...)` 等下划线 helper 只服务当前文件内部实现。
 - 实现、测试和外部调用方不得跨文件导入或断言这些 helper；公开行为只能通过 `DslRunResult(...)` 与 `dsl_run(...)` 观察。
+- `RuntimeRealArg` 是文档类型别名，表示 `torch.Tensor | numpy.ndarray | int | float`；它不新增独立可调用公开入口。
 
 ## API详细说明
 
@@ -91,7 +93,11 @@
 - 注意事项：
   - target 只能来自 `kernel_gen.core.config.get_target()`；未设置或不是非空 `str` 时必须失败，固定短语为 `DslRunInvalidTarget: core config target must be non-empty str`。
   - `pipeline` 仅接受 `str | PassManager`。
-  - `real_args` 容器仅接受 `tuple | list`，元素仅允许 `torch.Tensor` 或 `numpy.ndarray`。
+  - `real_args` 容器仅接受 `tuple | list`，元素仅允许 `torch.Tensor`、`numpy.ndarray`、`int` 或 `float`。
+  - `bool` 不属于运行期标量参数；不允许借 `bool` 是 `int` 子类的 Python 行为进入 DSL runtime。
+  - `int | float` 运行期标量不构造成 `Memory`，必须按原值传入 `mlir_gen(...)` 并继续作为执行阶段真实参数。
+  - 名称以 `tile_` 开头的运行期标量必须是正整数；`0`、负数、`float` 或 `bool` 必须失败，固定短语为 `DslRunInvalidTileValue: tile runtime scalar must be positive int`。
+  - 非 tensor/array 且非合法标量的元素必须失败，固定短语为 `DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray, int and float`。
   - DSL 函数只要存在值返回，就必须失败。
   - DSL 函数体引用未显式导入或绑定的 helper / enum 名称时，必须由 DSL parser 显式失败；`dsl_run(...)` 不得补写 `func.__globals__`。
   - `core.config.target` 决定源码生成与执行目标，不做跨 target 自动猜测。
@@ -154,3 +160,5 @@
 | TC-TOOLS-DSL-RUN-028 | 公开入口 | tools package public exports | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_tools_package_public_exports`。 | 公开入口在“tools package public exports”场景下可导入、构造、注册或按名称发现。 | `test_tools_package_public_exports` |
 | TC-TOOLS-DSL-RUN-029 | 公开入口 | tools package supports direct DSL run import | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_tools_package_supports_direct_dsl_run_import`。 | 公开入口在“tools package supports direct DSL run import”场景下可导入、构造、注册或按名称发现。 | `test_tools_package_supports_direct_dsl_run_import` |
 | TC-TOOLS-DSL-RUN-030 | 边界/异常 | tools package rejects unknown public name | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_tools_package_rejects_unknown_public_name`。 | “tools package rejects unknown public name”场景按公开错误语义失败或被拒绝。 | `test_tools_package_rejects_unknown_public_name` |
+| TC-TOOLS-DSL-RUN-031 | 执行结果 | DSL run accepts runtime scalar tile args | 准备带 `tile_*` 形参的公开 DSL kernel 和真实 torch/numpy 张量。 | 运行 `test_dsl_run_add_dynamic_tile_scalar_matches_public_contract`。 | `int` runtime tile 绑定到 `SymbolDim` 形参，生成并执行 npu_demo 链路。 | `test_dsl_run_add_dynamic_tile_scalar_matches_public_contract` |
+| TC-TOOLS-DSL-RUN-032 | 边界/异常 | DSL run rejects non-positive tile scalar | 准备 `tile_*` 形参并传入 `0` 或负数。 | 运行 `test_dsl_run_rejects_non_positive_tile_runtime_scalar`。 | 按 `DslRunInvalidTileValue: tile runtime scalar must be positive int` 失败。 | `test_dsl_run_rejects_non_positive_tile_runtime_scalar` |

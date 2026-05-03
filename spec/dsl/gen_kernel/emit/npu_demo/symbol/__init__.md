@@ -39,6 +39,7 @@
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 本目录只通过注册体系生效。
 - `symbol.const` emit 不允许按字面值合并不同 SSA op；每条 `symbol.const` 必须生成独立 `S_INT` 声明，名称按发射顺序分配，不得从常量字面值派生，避免 EmitC 阶段隐式执行常量合并或让变量名伪装成数值语义。
+- `symbol.min` 必须发射为 C++ 三目表达式 `((lhs) < (rhs) ? (lhs) : (rhs))` 对应的 `S_INT` 语义；不新增 npu_demo 专属公开 helper。
 - 目录内未列入公开 API 的注册函数与 helper 不得跨文件直接调用。
 
 ## API详细说明
@@ -113,3 +114,4 @@
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-SYMBOL-053 | 生成/编译 | emit c maps NN space to template param | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_emit_c_maps_nn_space_to_template_param`。 | 生成源码、IR 文本或编译结果体现“emit c maps NN space to template param”场景。 | `test_emit_c_maps_nn_space_to_template_param` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-SYMBOL-054 | pass 改写 | emit c lowers npu demo slice deslice add pipeline | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo slice deslice add pipeline”场景。 | `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-SYMBOL-055 | pass 改写 | emit c lowers npu demo tiled matmul pipeline | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tiled_matmul_pipeline`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo tiled matmul pipeline”场景。 | `test_emit_c_lowers_npu_demo_tiled_matmul_pipeline` |
+| TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-SYMBOL-056 | pass 改写 | emit c lowers npu demo symbol min as ternary | 准备包含 `symbol.min` 的公开 IR 输入。 | 运行 `test_emit_c_op_lowers_npu_demo_symbol_min_as_ternary`。 | 生成源码使用三目表达式表达 `min(lhs, rhs)`，不新增公开 helper。 | `test_emit_c_op_lowers_npu_demo_symbol_min_as_ternary` |

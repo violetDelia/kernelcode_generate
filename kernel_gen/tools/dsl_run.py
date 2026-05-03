@@ -49,7 +49,8 @@ from kernel_gen.symbol_variable.type import NumericType
 RETURN_VALUE_ERROR = "DslRunReturnValueUnsupported: dsl_run only supports functions without DSL return values"
 PIPELINE_NAME_ERROR = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline'"
 PIPELINE_TYPE_ERROR = "DslRunInvalidPipeline: pipeline must be str or PassManager"
-REAL_ARG_TYPE_ERROR = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor and numpy.ndarray"
+REAL_ARG_TYPE_ERROR = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray, int and float"
+TILE_VALUE_ERROR = "DslRunInvalidTileValue: tile runtime scalar must be positive int"
 ARITY_ERROR = "DslRunArityMismatch: real_args count does not match function signature"
 NPU_DEMO_WRAPPER_ERROR = "DslRunInternalError: lowered npu_demo module must contain exactly one wrapper func with arch.launch"
 
@@ -61,13 +62,14 @@ class _StringLike(Protocol):
         """返回 dtype 文本。"""
 
 
-class RuntimeRealArg(Protocol):
+class TensorRuntimeArg(Protocol):
     """`dsl_run(...)` 支持的真实运行时数组参数协议。"""
 
     shape: Iterable[int]
     dtype: _StringLike
 
 
+RuntimeRealArg: TypeAlias = "TensorRuntimeArg | int | float"
 DslFunctionReturn: TypeAlias = "Memory | SymbolDim | int | float | bool | str | None"
 
 
@@ -139,7 +141,7 @@ def _write_dump_file(path: Path, content: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _runtime_module_name(value: RuntimeRealArg) -> str:
+def _runtime_module_name(value: TensorRuntimeArg) -> str:
     """提取运行时对象的模块名，用于轻量类型判断。
 
 
@@ -221,7 +223,53 @@ def _normalize_real_args(real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRea
     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInvalidRealArgs: real_args must be tuple or list")
 
 
-def _runtime_arg_shape(value: RuntimeRealArg) -> tuple[int, ...]:
+def _is_runtime_scalar(value: RuntimeRealArg) -> bool:
+    """判断是否为 `dsl_run(...)` 支持的真实标量参数。
+
+    功能说明:
+    - `int` 和 `float` 是公开 runtime scalar；`bool` 不作为数值标量接受。
+
+    使用示例:
+    - is_scalar = _is_runtime_scalar(4)
+    """
+
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_tensor_runtime_arg(value: RuntimeRealArg) -> bool:
+    """判断是否为 `dsl_run(...)` 支持的真实 tensor/array 参数。
+
+    功能说明:
+    - 复用 torch/numpy 运行时对象判断，和后续 shape/stride/dtype 提取保持同一边界。
+
+    使用示例:
+    - is_tensor_arg = _is_tensor_runtime_arg(tensor)
+    """
+
+    return _is_torch_tensor(value) or _is_numpy_array(value)
+
+
+def _validate_runtime_arg(parameter: inspect.Parameter, value: RuntimeRealArg) -> None:
+    """校验单个 `dsl_run(...)` 真实运行时参数。
+
+    功能说明:
+    - tensor/array 参数交给 memory 元数据构造链路处理。
+    - runtime scalar 允许普通卷积参数与 tile 参数；`tile_*` 必须是正整数。
+
+    使用示例:
+    - _validate_runtime_arg(parameter, value)
+    """
+
+    if _is_tensor_runtime_arg(value):
+        return
+    if _is_runtime_scalar(value):
+        if parameter.name.startswith("tile_") and (not isinstance(value, int) or value <= 0):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, TILE_VALUE_ERROR)
+        return
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, REAL_ARG_TYPE_ERROR)
+
+
+def _runtime_arg_shape(value: TensorRuntimeArg) -> tuple[int, ...]:
     """从真实运行时参数提取 DSL shape。
 
 
@@ -244,7 +292,7 @@ def _runtime_arg_shape(value: RuntimeRealArg) -> tuple[int, ...]:
     return tuple(int(dim) for dim in shape)
 
 
-def _runtime_arg_stride(value: RuntimeRealArg) -> tuple[int, ...]:
+def _runtime_arg_stride(value: TensorRuntimeArg) -> tuple[int, ...]:
     """从真实运行时参数提取元素单位 stride。
 
 
@@ -270,7 +318,7 @@ def _runtime_arg_stride(value: RuntimeRealArg) -> tuple[int, ...]:
     return tuple(int(dim) // itemsize for dim in strides)
 
 
-def _runtime_arg_dtype(value: RuntimeRealArg) -> NumericType:
+def _runtime_arg_dtype(value: TensorRuntimeArg) -> NumericType:
     """把真实运行时 dtype 映射为 DSL `NumericType`。
 
 
@@ -300,7 +348,7 @@ def _runtime_arg_dtype(value: RuntimeRealArg) -> NumericType:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, REAL_ARG_TYPE_ERROR) from exc
 
 
-def _build_dsl_runtime_args(runtime_args: tuple[RuntimeRealArg, ...]) -> tuple[Memory, ...]:
+def _build_dsl_runtime_args(runtime_args: tuple[RuntimeRealArg, ...]) -> tuple[Memory | int | float, ...]:
     """把真实运行时参数转换为 `mlir_gen(...)` 需要的 DSL `Memory`。
 
 
@@ -317,14 +365,19 @@ def _build_dsl_runtime_args(runtime_args: tuple[RuntimeRealArg, ...]) -> tuple[M
     - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
     """
 
-    return tuple(
-        Memory(
-            _runtime_arg_shape(arg),
-            _runtime_arg_dtype(arg),
-            stride=_runtime_arg_stride(arg),
+    dsl_args: list[Memory | int | float] = []
+    for arg in runtime_args:
+        if _is_runtime_scalar(arg):
+            dsl_args.append(arg)
+            continue
+        dsl_args.append(
+            Memory(
+                _runtime_arg_shape(arg),
+                _runtime_arg_dtype(arg),
+                stride=_runtime_arg_stride(arg),
+            )
         )
-        for arg in runtime_args
-    )
+    return tuple(dsl_args)
 
 
 def _resolve_pipeline(pipeline: str | PassManager) -> PassManager:
@@ -597,9 +650,8 @@ def dsl_run(
     ]
     if len(runtime_args) != len(positional_params):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, ARITY_ERROR)
-    for arg in runtime_args:
-        if not (_is_torch_tensor(arg) or _is_numpy_array(arg)):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, REAL_ARG_TYPE_ERROR)
+    for parameter, arg in zip(positional_params, runtime_args, strict=True):
+        _validate_runtime_arg(parameter, arg)
     dsl_args = _build_dsl_runtime_args(runtime_args)
 
     module = mlir_gen(func_obj, *dsl_args)

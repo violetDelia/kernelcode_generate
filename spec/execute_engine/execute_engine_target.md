@@ -57,6 +57,7 @@
 - 编译 flags 必须保留 `-std=c++17` 基线，并按调用方顺序追加 `CompileRequest.compiler_flags`。
 - entry shim 仅作为内部桥接逻辑：源码未提供同名 `extern "C"` 入口时，内部生成稳定 C ABI 入口；源码已提供同名入口时可省略。
 - `ordered_args` 是内部 ABI 槽位，不作为 Python 公开 API；执行侧只接收 `tuple[RuntimeInput, ...]` 运行时参数。
+- `target="npu_demo"` entry shim 的函数形参解析必须把 `S_INT` 视为整数标量参数槽位，与 `int` / `long` / `int64_t` 等整型形参按同一 `ordered_args` 顺序绑定。
 - 编译器启动失败、返回非零或编译命令无法生成可执行产物时，必须失败并返回 `compile_failed`。
 - `entry_point` 或导出符号无法解析时，必须失败并返回 `symbol_resolve_failed`。
 - `ordered_args` 数量或顺序与目标函数形参不一致导致执行失败时，必须返回 `runtime_throw_or_abort`。
@@ -95,3 +96,4 @@
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-005 | 生成/编译 | 源码已提供同名同签名 `extern "C"` 入口时可省略 `entry shim`。 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `EE-TGT-005`。 | 生成源码、IR 文本或编译结果体现“源码已提供同名同签名 `extern "C"` 入口时可省略 `entry shim`。”场景。 | `EE-TGT-005` |
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-006 | 边界/异常 | target/include family 不一致时返回 `target_header_mismatch`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `EE-TGT-006`。 | “target/include family 不一致时返回 `target_header_mismatch`。”场景按公开错误语义失败或被拒绝。 | `EE-TGT-006` |
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-007 | 边界/异常 | 导出入口无法解析时返回 `symbol_resolve_failed`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `EE-TGT-007`。 | “导出入口无法解析时返回 `symbol_resolve_failed`。”场景按公开错误语义失败或被拒绝。 | `EE-TGT-007` |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-008 | 生成/编译 | npu_demo entry shim 绑定 `S_INT` 标量形参。 | 准备包含 `S_INT` 形参的 npu_demo 源码和整数 runtime arg。 | 运行 `test_execute_engine_compile_unit_binds_npu_demo_s_int_arg`。 | entry shim 生成的 C ABI 入口按函数形参顺序绑定 `S_INT` 参数，编译成功。 | `test_execute_engine_compile_unit_binds_npu_demo_s_int_arg` |

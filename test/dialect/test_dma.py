@@ -627,6 +627,54 @@ def test_dma_reshape_accepts_equivalent_symbolic_contiguous_source_stride() -> N
     op.verify()
 
 
+# TC-DMA-017C
+# 功能说明: 验证 dma.reshape 接受包含 `min(...)` 尾块表达式的等价连续 source stride。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_reshape_accepts_min_symbolic_contiguous_source_stride
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_reshape_accepts_min_symbolic_contiguous_source_stride() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr(
+            [
+                StringAttr("min(1, 1-n0)"),
+                StringAttr("min(3, 3-c0)"),
+                IntAttr(3),
+                IntAttr(3),
+                StringAttr("min(4, 6-ho0)"),
+                StringAttr("min(5, 6-wo0)"),
+            ]
+        ),
+        stride=ArrayAttr(
+            [
+                StringAttr("9*min(3, 3-c0)*min(4, 6-ho0)*min(5, 6-wo0)"),
+                StringAttr("9*min(4, 6-ho0)*min(5, 6-wo0)"),
+                StringAttr("3*min(4, 6-ho0)*min(5, 6-wo0)"),
+                StringAttr("min(4, 6-ho0)*min(5, 6-wo0)"),
+                StringAttr("min(5, 6-wo0)"),
+                IntAttr(1),
+            ]
+        ),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr(
+            [
+                StringAttr("9*min(3, 3-c0)"),
+                StringAttr("min(1, 1-n0)*min(4, 6-ho0)*min(5, 6-wo0)"),
+            ]
+        ),
+        stride=ArrayAttr([StringAttr("min(1, 1-n0)*min(4, 6-ho0)*min(5, 6-wo0)"), IntAttr(1)]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    op = DmaReshapeOp(
+        source,
+        _make_symbol_operands(["9*min(3, 3-c0)", "min(1, 1-n0)*min(4, 6-ho0)*min(5, 6-wo0)"]),
+        result_type,
+    )
+
+    op.verify()
+
+
 # TC-DMA-018
 # 功能说明: 验证 dma.reshape 在 SSA shape operand 与 source 元素总数不一致时会报错。
 # 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_reshape_numel_mismatch

@@ -122,6 +122,27 @@ def test_execute_engine_compile_unit_injects_includes_and_shim() -> None:
         kernel.close()
 
 
+def test_execute_engine_compile_unit_binds_npu_demo_s_int_arg() -> None:
+    """EE-S2-C-001A: npu_demo 生成源码中的 S_INT 参数应作为 int runtime arg 绑定。"""
+
+    source = """
+#include "include/npu_demo/npu_demo.h"
+using namespace npu_demo;
+
+void scalar_kernel(S_INT tile_n) {
+    (void)tile_n;
+}
+"""
+    engine = ExecutionEngine(target="npu_demo")
+    kernel = engine.compile(source=source, function="scalar_kernel")
+    try:
+        unit = (Path(kernel.soname_path).parent / "kernel.cpp").read_text(encoding="utf-8")
+        assert "S_INT arg0 = static_cast<S_INT>(ordered_args[0].int_value);" in unit
+        assert "scalar_kernel(arg0);" in unit
+    finally:
+        kernel.close()
+
+
 # EE-S2-C-002
 # 功能说明: 覆盖 compile 成功路径与编译命令生成。
 # 使用示例: pytest -q test/execute_engine/test_compile.py -k "S2-C-002"

@@ -89,6 +89,18 @@ def test_blank_string_rejected_on_operands_and_compare() -> None:
         _ = dim == " "
 
 
+def test_expression_string_accepts_lowercase_min_only() -> None:
+    dim = SymbolDim("min(N, 4)")
+
+    assert dim.get_symbol() == sp.Min(_sym("N"), sp.Integer(4))
+    assert dim.get_value() == "min(4, N)"
+
+    with pytest.raises(ValueError, match="SymbolDim expression string is invalid"):
+        SymbolDim("Min(N, 4)")
+    with pytest.raises(ValueError, match="SymbolDim expression string is invalid"):
+        _ = SymbolDim("N") + "Min(N, 4)"
+
+
 def test_invalid_type_and_float_constructor_rejected() -> None:
     float_expr = _sym("F") + sp.Float(0.5)
 

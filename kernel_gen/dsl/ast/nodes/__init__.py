@@ -11,7 +11,7 @@ API 列表:
 - `IntTypeAttrAST`, `FloatTypeAttrAST`, `BoolTypeAttrAST`, `MemorySpaceAttrAST`
 - `ModuleAST`, `FunctionAST`, `MemoryAST`, `SymbolDimAST`, `ConstValueAST`, `BoolValueAST`, `SymbolListAST`
 - `BoundExprAST`, `BlockAST`, `ReturnAST`, `ForAST`, `IfAST`, `CallAST`
-- `SymbolAddAST`, `SymbolSubAST`, `SymbolMulAST`, `SymbolTrueDivAST`, `SymbolFloorDivAST`
+- `SymbolAddAST`, `SymbolSubAST`, `SymbolMulAST`, `SymbolTrueDivAST`, `SymbolFloorDivAST`, `SymbolMinAST`
 - `SymbolEqAST`, `SymbolNeAST`, `SymbolLtAST`, `SymbolLeAST`, `SymbolGtAST`, `SymbolGeAST`
 - `SymbolToFloatAST`, `TensorAxisAccessAST`
 - `DmaAllocAST`, `DmaCopyAST`, `DmaCastAST`, `DmaViewAST`, `DmaReshapeAST`, `DmaFlattenAST`, `DmaFreeAST`
@@ -73,6 +73,7 @@ __all__ = [
     "SymbolMulAST",
     "SymbolTrueDivAST",
     "SymbolFloorDivAST",
+    "SymbolMinAST",
     "SymbolCompareAST",
     "SymbolEqAST",
     "SymbolNeAST",

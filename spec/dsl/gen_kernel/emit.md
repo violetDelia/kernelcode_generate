@@ -45,6 +45,9 @@
 - 不得把 type、space、include 再拆成平行公开工具模块。
 - 注册器与 dispatch 合同单独定义在 [`spec/dsl/gen_kernel/emit/register.md`](../../../spec/dsl/gen_kernel/emit/register.md)。
 - `_dispatch_target`、target-specific helper、`KernelEmitter` 与 `kernel_emitter.py` 中的辅助步骤都不是当前 package 公开 API；实现、其他模块与测试不得跨文件直连。
+- `symbol.min` 在 `cpu` 与 `npu_demo` target 下必须通过注册体系发射为 C/C++ 三目表达式 `((lhs) < (rhs) ? (lhs) : (rhs))` 语义，不新增公开 helper 或 target-specific 公共入口。
+- `target="npu_demo"` 的 `dma.alloc` 发射必须以 `DmaAllocOp.dynamic_shape` 绑定运行期符号值，并从 result memory type 重建完整 shape 与默认连续 stride；只提供部分动态 shape operand 时，静态维度仍必须进入 helper 参数。
+- 上述 target-specific 注册函数和布局辅助函数均不是公开 API；测试只能通过 `emit_c(...)`、`emit_c_op(...)` 或 `emit_c_value(...)` 观察。
 
 ## API详细说明
 
@@ -165,3 +168,5 @@
 | TC-DSL-GEN-KERNEL-EMIT-053 | 生成/编译 | emit c maps NN space to template param | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_emit_c_maps_nn_space_to_template_param`。 | 生成源码、IR 文本或编译结果体现“emit c maps NN space to template param”场景。 | `test_emit_c_maps_nn_space_to_template_param` |
 | TC-DSL-GEN-KERNEL-EMIT-054 | pass 改写 | emit c lowers npu demo slice deslice add pipeline | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo slice deslice add pipeline”场景。 | `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline` |
 | TC-DSL-GEN-KERNEL-EMIT-055 | pass 改写 | emit c lowers npu demo tiled matmul pipeline | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tiled_matmul_pipeline`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo tiled matmul pipeline”场景。 | `test_emit_c_lowers_npu_demo_tiled_matmul_pipeline` |
+| TC-DSL-GEN-KERNEL-EMIT-056 | pass 改写 | emit c lowers npu demo symbol min as ternary | 准备包含 `symbol.min` 的公开 IR 输入。 | 运行 `test_emit_c_op_lowers_npu_demo_symbol_min_as_ternary`。 | 生成源码使用三目表达式表达 `min(lhs, rhs)`，不新增公开 helper。 | `test_emit_c_op_lowers_npu_demo_symbol_min_as_ternary` |
+| TC-DSL-GEN-KERNEL-EMIT-057 | pass 改写 | emit c lowers npu demo DMA alloc dynamic shape and stride | 准备带部分动态 shape 与 `min(...)` 维度的 `dma.alloc` IR。 | 运行 `test_emit_c_lowers_npu_demo_dma_alloc_helper_contract`。 | 源码 helper 参数包含完整 shape 与默认连续 stride，动态维度映射到已发射 C++ 变量。 | `test_emit_c_lowers_npu_demo_dma_alloc_helper_contract` |

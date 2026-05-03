@@ -695,6 +695,16 @@ def _emit_symbol_const_stmt(op: Operation, ctx: EmitCContext) -> str:
 
 @emit_c_value_impl(Operation, BlockArgument, target="cpu")
 def _emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
+    """发射 CPU target 的 SSA value 表达式。
+
+    功能说明:
+    - 统一处理已命名 SSA、常量、memory value、symbol 算术/比较与 `symbol.min`。
+    - `symbol.min` 使用三目表达式，和 npu_demo target 的公开发射合同保持一致。
+
+    使用示例:
+    - expr = _emit_c_value(value, ctx)
+    """
+
     bound = ctx.lookup_name(value)
     if bound is not None:
         return bound
@@ -719,6 +729,10 @@ def _emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
         if owner.results and isinstance(owner.results[0].type, SymbolValueType):
             return owner.results[0].type.expr.expr.data
         raise ctx.emit_error(owner.name, "symbol.const result must be !symbol.int")
+    if owner.name == "symbol.min":
+        lhs = _emit_c_value(owner.operands[0], ctx)
+        rhs = _emit_c_value(owner.operands[1], ctx)
+        return f"(({lhs}) < ({rhs}) ? ({lhs}) : ({rhs}))"
     if owner.name in _BINARY_SIGILS:
         return f"({_emit_c_value(owner.operands[0], ctx)} {_BINARY_SIGILS[owner.name]} {_emit_c_value(owner.operands[1], ctx)})"
     if owner.name in _SYMBOL_COMPARE_SIGILS:
@@ -743,7 +757,17 @@ def _emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
 
 @emit_c_impl(Operation, target="cpu")
 def _emit_c_op(op: Operation, ctx: EmitCContext) -> str:
-    if op.name in _BINARY_SIGILS or op.name in _SYMBOL_COMPARE_SIGILS or isinstance(op, arith.CmpiOp):
+    """发射 CPU target 的通用 op 语句。
+
+    功能说明:
+    - 将 symbol/arith 计算 op 收口为赋值语句。
+    - 对只作为 value dependency 的转换类 op 返回空语句，避免重复发射。
+
+    使用示例:
+    - stmt = _emit_c_op(op, ctx)
+    """
+
+    if op.name in _BINARY_SIGILS or op.name == "symbol.min" or op.name in _SYMBOL_COMPARE_SIGILS or isinstance(op, arith.CmpiOp):
         return _emit_assignment(op, ctx)
     if isinstance(op, arith.ConstantOp):
         return ""

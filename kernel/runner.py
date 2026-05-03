@@ -11,7 +11,7 @@
 API 列表:
 - `KERNEL_DUMP_ROOT: Path`
 - `KernelTorchDemoResult(case_name: str, dsl_result: DslRunResult, max_abs_diff: float, atol: float, rtol: float)`
-- `run_torch_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], real_args: tuple[torch.Tensor | np.ndarray, ...] | list[torch.Tensor | np.ndarray], output: torch.Tensor | np.ndarray, expected: torch.Tensor | np.ndarray, *, atol: float = 1e-4, rtol: float = 1e-4) -> KernelTorchDemoResult`
+- `run_torch_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], real_args: tuple[torch.Tensor | np.ndarray | int | float, ...] | list[torch.Tensor | np.ndarray | int | float], output: torch.Tensor | np.ndarray, expected: torch.Tensor | np.ndarray, *, atol: float = 1e-4, rtol: float = 1e-4) -> KernelTorchDemoResult`
 - `run_lowering_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], *runtime_args: Memory | SymbolDim | int | float | bool | str) -> tuple[ModuleOp, str]`
 
 使用示例:
@@ -29,7 +29,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 from xdsl.dialects.builtin import ModuleOp
 
@@ -44,6 +44,8 @@ from kernel_gen.tools.dsl_run import DslRunResult, dsl_run
 if TYPE_CHECKING:
     import numpy as np
     import torch
+
+TorchDemoRuntimeArg: TypeAlias = "torch.Tensor | np.ndarray | int | float"
 
 KERNEL_DUMP_ROOT = Path(__file__).resolve().parent / "dump"
 
@@ -209,7 +211,7 @@ class KernelTorchDemoResult:
 def run_torch_demo(
     case_name: str,
     kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None],
-    real_args: tuple[torch.Tensor | np.ndarray, ...] | list[torch.Tensor | np.ndarray],
+    real_args: tuple[TorchDemoRuntimeArg, ...] | list[TorchDemoRuntimeArg],
     output: torch.Tensor | np.ndarray,
     expected: torch.Tensor | np.ndarray,
     *,

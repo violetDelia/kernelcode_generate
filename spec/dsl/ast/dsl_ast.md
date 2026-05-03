@@ -355,8 +355,8 @@
     visitor = DslAstVisitor(kernel)
     result = visitor.visit_Call(node=node)
     ```
-- 功能说明：访问标准库 `Call` AST 节点并返回对应 DSL AST 公开节点。
-- 注意事项：输入必须来自标准库 `ast` 与公开 DSL runtime 类型；不支持的语法必须通过公开 `KernelCodeError` 失败，不得静默生成内部占位节点。
+- 功能说明：访问标准库 `Call` AST 节点并返回对应 DSL AST 公开节点；当 callee 是内置名称 `min` 且恰有两个位置参数时，返回 `SymbolMinAST`。
+- 注意事项：输入必须来自标准库 `ast` 与公开 DSL runtime 类型；不支持的语法必须通过公开 `KernelCodeError` 失败，不得静默生成内部占位节点；`min(...)` 不接受关键字参数、多参数或非符号 DSL 值扩展。
 
 ### `DslAstVisitor.visit_List(node: ast.List) -> SymbolListAST | TupleAST`
 
@@ -525,3 +525,4 @@
 | TC-DSL-AST-DSL-AST-014 | 解析/打印 | parse function ignores direct tensor annotation expression element | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_parse_function_ignores_direct_tensor_annotation_expression_element`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_parse_function_ignores_direct_tensor_annotation_expression_element` |
 | TC-DSL-AST-DSL-AST-015 | 解析/打印 | parse function uses runtime symboldim over union annotation | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_parse_function_uses_runtime_symboldim_over_union_annotation`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_parse_function_uses_runtime_symboldim_over_union_annotation` |
 | TC-DSL-AST-DSL-AST-016 | 解析/打印 | parse function ignores unsupported union annotation | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_parse_function_ignores_unsupported_union_annotation`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_parse_function_ignores_unsupported_union_annotation` |
+| TC-DSL-AST-DSL-AST-017 | 符号语义 | visit call lowers DSL min to SymbolMinAST | 准备包含 `min(tile, extent - i)` 的 DSL kernel。 | 运行 `test_mlir_gen_lowers_symbol_min_and_iter_arithmetic`。 | parser/visitor 生成 `SymbolMinAST` 并最终 lowered 为 `symbol.min`。 | `test_mlir_gen_lowers_symbol_min_and_iter_arithmetic` |

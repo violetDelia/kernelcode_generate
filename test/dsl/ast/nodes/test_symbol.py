@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import importlib
 
-from kernel_gen.dsl.ast.nodes.symbol import ConstValueAST, SymbolAddAST, SymbolDimAST, SymbolListAST
+from kernel_gen.dsl.ast.nodes.symbol import ConstValueAST, SymbolAddAST, SymbolDimAST, SymbolListAST, SymbolMinAST
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 
@@ -29,6 +29,7 @@ def test_symbol_nodes_live_in_symbol_module() -> None:
     basic_module = importlib.import_module("kernel_gen.dsl.ast.nodes.basic")
 
     assert symbol_module.SymbolAddAST is SymbolAddAST
+    assert symbol_module.SymbolMinAST is SymbolMinAST
     assert symbol_module.SymbolDimAST is SymbolDimAST
     assert not hasattr(basic_module, "SymbolAddAST")
     assert not hasattr(basic_module, "SymbolDimAST")
@@ -42,9 +43,11 @@ def test_symbol_binary_and_list_expose_result_symbol_semantics() -> None:
     lhs = SymbolDimAST("n", runtime_symbol=runtime_symbol)
     rhs = ConstValueAST(2)
     expr = SymbolAddAST(lhs, rhs)
-    shape = SymbolListAST([lhs, rhs, expr])
+    tail = SymbolMinAST(lhs, rhs)
+    shape = SymbolListAST([lhs, rhs, expr, tail])
 
     assert lhs.result_symbol() == runtime_symbol
     assert rhs.result_symbol() == 2
     assert expr.result_symbol() == runtime_symbol + 2
-    assert shape.result_symbols() == [runtime_symbol, 2, runtime_symbol + 2]
+    assert str(tail.result_symbol().get_value()) == "min(2, N)"
+    assert shape.result_symbols() == [runtime_symbol, 2, runtime_symbol + 2, tail.result_symbol()]

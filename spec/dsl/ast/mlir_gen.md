@@ -4,6 +4,8 @@
 
 - `kernel_gen.dsl.ast.mlir_gen` 提供 AST 架构下唯一公开 MLIR 生成入口。
 - `mlir_gen(fn, *runtime_args)` 返回 xDSL `ModuleOp`，不是字符串，也不是 `ModuleAST`。
+- DSL 函数体中的二元 `min(lhs, rhs)` 在左右参数为符号值时必须 lowered 为 `symbol.min`，用于 runtime tile 尾块表达式。
+- 当 `min(lhs + const, rhs - const)` 这类复合 operand 进入 `symbol.min` 时，MLIR 文本必须先物化两侧整数常量，再按左 operand、右 operand、`symbol.min` 的顺序发射算术 op，保证只读合同文本稳定。
 
 ## API 列表
 
@@ -38,7 +40,7 @@
   module_op = mlir_gen(kernel, lhs, rhs)
   ```
 - 功能说明：固定执行 `parse(fn, *runtime_args).emit_mlir(ctx, None)`，其中 `ctx` 由本入口创建。
-- 注意事项：不接受 `globals`、`builtins`、`config` 参数；缺少 runtime arg 必须报 `mlir_gen requires explicit runtime args for <fn>: expected <n>, got <m>`。
+- 注意事项：不接受 `globals`、`builtins`、`config` 参数；缺少 runtime arg 必须报 `mlir_gen requires explicit runtime args for <fn>: expected <n>, got <m>`；DSL `min(lhs, rhs)` 仅支持两个位置参数且不得带关键字参数。
 
 ## 测试
 
@@ -93,3 +95,5 @@
 | TC-DSL-AST-MLIR-GEN-038 | pass 改写 | MLIR gen lowers symbolic loop and DMA chain | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_mlir_gen_lowers_symbolic_loop_and_dma_chain`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“MLIR gen lowers symbolic loop and DMA chain”场景。 | `test_mlir_gen_lowers_symbolic_loop_and_dma_chain` |
 | TC-DSL-AST-MLIR-GEN-039 | 符号语义 | MLIR gen normalizes softmax default axis to last dimension | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_mlir_gen_normalizes_softmax_default_axis_to_last_dimension`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“MLIR gen normalizes softmax default axis to last dimension”场景。 | `test_mlir_gen_normalizes_softmax_default_axis_to_last_dimension` |
 | TC-DSL-AST-MLIR-GEN-040 | 符号语义 | MLIR gen normalizes softmax negative axis to positive axis | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_mlir_gen_normalizes_softmax_negative_axis_to_positive_axis`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“MLIR gen normalizes softmax negative axis to positive axis”场景。 | `test_mlir_gen_normalizes_softmax_negative_axis_to_positive_axis` |
+| TC-DSL-AST-MLIR-GEN-041 | 符号语义 | MLIR gen lowers DSL min and symbol.iter arithmetic | 准备含 `for` 迭代变量和 runtime tile 的公开 DSL kernel。 | 运行 `test_mlir_gen_lowers_symbol_min_and_iter_arithmetic`。 | `min(tile, extent - iter)` lowered 为 `symbol.min`，且 `symbol.iter` 可参与尾块算术表达式。 | `test_mlir_gen_lowers_symbol_min_and_iter_arithmetic` |
+| TC-DSL-AST-MLIR-GEN-042 | 符号语义 | MLIR gen materializes symbol min operand consts before arithmetic | 准备 `return min(lhs + 1, rhs - 2)` 与两个公开 `SymbolDim` runtime args。 | 运行 `test_mlir_gen_materializes_symbol_min_operand_consts_before_arithmetic`。 | `symbol.const 1`、`symbol.const 2` 先于 `symbol.add`、`symbol.sub`、`symbol.min` 发射，且结果类型保持 `min(lhs + 1, rhs - 2)`。 | `test_mlir_gen_materializes_symbol_min_operand_consts_before_arithmetic` |

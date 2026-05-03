@@ -102,6 +102,7 @@
 #### 默认连续 stride 推导（符号维度）
 
 - 当 `shape` 中包含 `StringAttr` 时，默认连续 stride 仍按从右到左的累计乘积推导；单个符号如 `N` 直接参与乘积，多维组合可形成 `M*N` 等字符串表达。
+- `StringAttr` 维度可包含 `min(lhs, rhs)` 形式的整数符号最小值；默认连续 stride 与 contiguous verifier 必须按符号表达式等价关系判断，而不是只比较原始字符串。
 - 若维度为 `StringAttr("?")` 或包含 `?` 的表达式，视为未知：该维度及其左侧更高维的默认 stride 统一退化为 `StringAttr("?")`，右侧维度仍按既有规则生成（末维为 `1`）。
 - 该规则仅用于 `dma.alloc` / `dma.reshape` 的默认连续 stride 推导与 verifier 校验，不替代显式 `!symbol.int<"expr">` SSA operand 建模；`offsets` 允许 `!symbol.int<"expr">` 或 `!symbol.iter<"expr">`，`sizes/strides` 仍必须通过 `!symbol.int<"expr">` SSA operand 传入。
 
@@ -149,6 +150,7 @@
 - `dma.view` 的动态 `offsets/shape/stride` operand 数量与 rank 不一致必须报错；`shape/stride` 不是 `!symbol.int<"expr">` 时必须报错；`offsets` 仅允许 `!symbol.int<"expr">` 或 `!symbol.iter<"expr">`；`dma.reshape` 的动态 `shape` operand 数量与 rank 不一致必须报错，且其 operand 必须为 `!symbol.int<"expr">`。
 - `dma.view` 的 `offsets` 必须为非负整数；当 `source.shape/offsets/shape/stride` 可静态判定时，必须进行边界校验并在越界时报错。
 - `dma.view` 的 `result.stride` rank 与 `result.shape` 不一致必须报错；`dma.reshape` 的 `result.stride` 非连续行主序必须报错。
+- `dma.reshape` 的连续行主序校验必须接受含 `min(lhs, rhs)` 的等价符号 stride 表达式；例如动态尾块 shape 中出现 `min(tile, extent - iter)` 时，不得仅因乘法因子打印顺序或 `min` 文本形式不同而拒绝。
 - `dma.cast` 中 `source/result` 的 `shape/stride/space` 不一致必须报错。
 - `strides` 当前仅允许单位步长语义；若当前实现限制 stride 为 1，则 `stride != 1` 的切片搬运必须显式报错，不得 silently 接受。
 - `dma` 的布局/索引类标量输入以 `!symbol.int<"expr">` 为主，`offsets` 额外允许 `!symbol.iter<"expr">`；parse/print 不得再使用 builtin `index` 作为这些 operand 的公开文本语义。`dma.fill.value` 是当前唯一例外，公开口径允许 builtin `i32` 与 `!symbol.int<"expr">`。
@@ -599,6 +601,7 @@ op = DmaReshapeOp(source, shape, result_type)
 - `source` 必须可视为连续布局；`result.stride` 必须满足 `result.shape` 的连续行主序校验规则。
 - `shape` operand 数量必须与结果 rank 一致，且每个 operand 都必须是 `!symbol.int<"expr">`。
 - `result.stride` 不作为输入，而是由 `shape` 和默认连续布局规则推导。
+- 含 `min(lhs, rhs)` 的动态尾块维度必须按符号等价关系参与连续布局判断；`min` 表达式的无关空白和乘法因子顺序不得改变 verifier 结论。
 - 若 `source.shape` 与 `result.shape` 的元素总数可判定不一致，必须报错。
 
 - 返回值：
@@ -655,7 +658,7 @@ op = DmaCastOp(source, result_type)
 - 验证 `dma.free` 的内存类型约束与无返回值语义。
 - 验证 `dma.view/reshape` 的元素类型/空间一致性与形状约束，其中 `dma.view` 覆盖动态 `offsets`（允许 `!symbol.iter<"expr">`）、`shape/stride`（`!symbol.int<"expr">`）operand 与边界校验，`dma.reshape` 覆盖动态 `shape` 的 `!symbol.int<"expr">` operand。
 - 验证 `dma.view` 在 DSL helper / 合同链路中不仅要生成 op，还要求返回 `Memory` 类型与 `dma.view.result_type` 一致；当直接 `func.return` 时，`EXPECTED_MEMORY` 比对必须成功。
-- 验证默认连续 stride 在符号维度（如 `N` / `M*N` / `?`）下的推导与退化规则已覆盖。
+- 验证默认连续 stride 在符号维度（如 `N` / `M*N` / `min(tile, extent - iter)` / `?`）下的推导、等价判断与退化规则已覆盖。
 - 验证 `dma.cast` 只允许改变元素类型，且保持 `shape/stride/space` 不变。
 - 验证当前阶段对 stride 的限制会在 verifier 阶段明确报错。
 - 验证 `dma` 的布局/索引类标量输入以 `!symbol.int<"expr">` 为主，`offsets` 允许 `!symbol.iter<"expr">`，并拒绝 builtin `index`、浮点或其他非 symbol 标量类型；同时验证 `dma.fill.value` 只允许 builtin `i32` 与 `!symbol.int<"expr">` 这两个当前公开例外（包含拒绝未定义的其他 scalar family）。
@@ -684,6 +687,7 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-016 | 边界/异常 | `dma.reshape` 连续约束 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_reshape_requires_contiguous`。 | “`dma.reshape` 连续约束”场景按公开错误语义失败或被拒绝。 | `test_dma_reshape_requires_contiguous` |
 | TC-DMA-017 | 内存/DMA | `dma.reshape` 动态形状连续 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_reshape_allows_dynamic_symbol_int_shape_operands`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.reshape` 动态形状连续”场景。 | `test_dma_reshape_allows_dynamic_symbol_int_shape_operands` |
 | TC-DMA-018 | 边界/异常 | `dma.reshape` 元素总数不一致 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_reshape_numel_mismatch`。 | “`dma.reshape` 元素总数不一致”场景按公开错误语义失败或被拒绝。 | `test_dma_reshape_numel_mismatch` |
+| TC-DMA-018A | 内存/DMA | `dma.reshape` 接受 `min(...)` 符号连续 stride | 准备含 `min(tile, extent - iter)` shape/stride 的 `DmaReshapeOp`。 | 运行 `test_dma_reshape_accepts_min_symbolic_contiguous_source_stride`。 | verifier 接受等价连续 stride，不因 `min` 表达式文本形式失败。 | `test_dma_reshape_accepts_min_symbolic_contiguous_source_stride` |
 | TC-DMA-019 | 内存/DMA | `dma.view` 动态布局输入 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_view_dynamic_symbol_int_layout_operands_valid`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.view` 动态布局输入”场景。 | `test_dma_view_dynamic_symbol_int_layout_operands_valid` |
 | TC-DMA-019A | 边界/异常 | `dma.view` offsets 边界 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_view_rejects_invalid_offsets_or_bounds`。 | “`dma.view` offsets 边界”场景按公开错误语义失败或被拒绝。 | `test_dma_view_rejects_invalid_offsets_or_bounds` |
 | TC-DMA-019B | 内存/DMA | `dma.view` 显式 stride 布局 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_view_accepts_matching_numel_subset_with_explicit_stride`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.view` 显式 stride 布局”场景。 | `test_dma_view_accepts_matching_numel_subset_with_explicit_stride` |

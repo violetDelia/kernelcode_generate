@@ -3,7 +3,7 @@
 
 功能说明:
 - 定义仅表示整数符号值语义的 symbol dialect。
-- 提供 `SymbolExprAttr`、`SymbolValueType`、`SymbolDimType`、`SymbolIterAttr`、`SymbolIterType`、`symbol.add/sub/mul/div/floordiv`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_int/symbol.to_float`、`symbol.get_dim/get_stride`，以及带单个 loop-carried `!symbol.int<"...">` 的 `symbol.for` / `symbol.yield`。
+- 提供 `SymbolExprAttr`、`SymbolValueType`、`SymbolDimType`、`SymbolIterAttr`、`SymbolIterType`、`symbol.add/sub/mul/div/floordiv/min`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_int/symbol.to_float`、`symbol.get_dim/get_stride`，以及带单个 loop-carried `!symbol.int<"...">` 的 `symbol.for` / `symbol.yield`。
 - `symbol.for` 同时兼容旧的无 carried-value 形式和新的 `iter_args(%acc = %zero) ... -> !symbol.int<"...">` 文本语法。
 - 在导入 sympy 前设置 `SYMPY_GMPY=0`，规避外部 gmpy 引发的 SystemError。
 
@@ -20,6 +20,7 @@ API 列表:
 - `class SymbolMulOp(lhs: SSAValue, rhs: SSAValue)`
 - `class SymbolDivOp(lhs: SSAValue, rhs: SSAValue)`
 - `class SymbolFloorDivOp(lhs: SSAValue, rhs: SSAValue)`
+- `class SymbolMinOp(lhs: SSAValue, rhs: SSAValue)`
 - `class SymbolEqOp(lhs: SSAValue, rhs: SSAValue)`
 - `class SymbolNeOp(lhs: SSAValue, rhs: SSAValue)`
 - `class SymbolLtOp(lhs: SSAValue, rhs: SSAValue)`
@@ -36,7 +37,7 @@ API 列表:
 - `Symbol`
 
 使用示例:
-- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolConstOp, SymbolDivOp, SymbolEqOp, SymbolFloorDivOp, SymbolForOp, SymbolYieldOp, SymbolSubOp, SymbolMulOp, SymbolToIntOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
+- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolConstOp, SymbolDivOp, SymbolEqOp, SymbolFloorDivOp, SymbolForOp, SymbolYieldOp, SymbolSubOp, SymbolMulOp, SymbolMinOp, SymbolToIntOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
 
 关联文件:
 - spec: spec/dialect/symbol.md
@@ -197,7 +198,7 @@ def _evaluate_concrete_expr_ast(node: py_ast.AST) -> int:
 
 
     功能说明:
-    - 支持整数常量、一元 `+` / `-` 和二元 `+` / `-` / `*` / `/` / `//`。
+        - 支持整数常量、一元 `+` / `-`、二元 `+` / `-` / `*` / `/` / `//` 与 `min(lhs, rhs)`。
     - 不满足精确整数语义时抛出 `ValueError`，由调用方转为 `None`。
 
     使用示例:
@@ -232,6 +233,16 @@ def _evaluate_concrete_expr_ast(node: py_ast.AST) -> int:
         if lhs % rhs == 0:
             return lhs // rhs
         _raise_value_error("division result is not an exact integer expression")
+    if (
+        isinstance(node, py_ast.Call)
+        and isinstance(node.func, py_ast.Name)
+        and node.func.id == "min"
+        and not node.keywords
+        and len(node.args) == 2
+    ):
+        lhs = _evaluate_concrete_expr_ast(node.args[0])
+        rhs = _evaluate_concrete_expr_ast(node.args[1])
+        return min(lhs, rhs)
     _raise_value_error("expression is not a concrete integer expression")
 
 
@@ -287,7 +298,7 @@ def _make_symbol_runtime_value_ast(node: py_ast.AST, symbol_dim_type: type["Symb
 
 
     功能说明:
-    - 支持公开 symbol 表达式中的常量、名称、一元 `+` / `-`、二元 `+` / `-` / `*` / `/` / `//` 与 `floor(...)`。
+    - 支持公开 symbol 表达式中的常量、名称、一元 `+` / `-`、二元 `+` / `-` / `*` / `/` / `//`、`floor(...)` 与 `min(lhs, rhs)`。
 
     使用示例:
     - _make_symbol_runtime_value_ast(parsed, SymbolDim)
@@ -337,6 +348,23 @@ def _make_symbol_runtime_value_ast(node: py_ast.AST, symbol_dim_type: type["Symb
             except Exception:
                 _raise_value_error("unsupported public symbol expression")
             return symbol_dim_type(sp.floor(arg_value.get_symbol()))
+        if (
+            isinstance(node.func, py_ast.Name)
+            and node.func.id == "min"
+            and not node.keywords
+            and len(node.args) == 2
+        ):
+            lhs = _make_symbol_runtime_value_ast(node.args[0], symbol_dim_type)
+            rhs = _make_symbol_runtime_value_ast(node.args[1], symbol_dim_type)
+            if isinstance(lhs, int) and isinstance(rhs, int):
+                return min(lhs, rhs)
+            try:
+                import sympy as sp  # pylint: disable=import-error
+            except Exception:
+                _raise_value_error("unsupported public symbol expression")
+            lhs_symbol = lhs if isinstance(lhs, int) else lhs.get_symbol()
+            rhs_symbol = rhs if isinstance(rhs, int) else rhs.get_symbol()
+            return symbol_dim_type(sp.Min(lhs_symbol, rhs_symbol))
     _raise_value_error("unsupported public symbol expression")
 
 
@@ -356,8 +384,49 @@ def _canonicalize_symbolic_expr(expr: str) -> str:
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
+    if _has_symbol_min_call(expr):
+        return _normalize_symbol_min_expr(expr)
     value = _make_symbol_runtime_value(expr)
     return str(value if isinstance(value, int) else value.get_value())
+
+
+def _has_symbol_min_call(expr: str) -> bool:
+    """判断公开 symbol 表达式是否包含 `min(lhs, rhs)` 调用。
+
+    功能说明:
+    - 用于决定是否保留 `min(...)` 文本形态，避免 SymPy 把它转换为 `Min(...)`。
+
+    使用示例:
+    - has_min = _has_symbol_min_call("min(N, 4)")
+    """
+
+    try:
+        parsed = py_ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return False
+    return any(
+        isinstance(node, py_ast.Call)
+        and isinstance(node.func, py_ast.Name)
+        and node.func.id == "min"
+        for node in py_ast.walk(parsed)
+    )
+
+
+def _normalize_symbol_min_expr(expr: str) -> str:
+    """规范化包含 `min(lhs, rhs)` 的公开 symbol 表达式文本。
+
+    功能说明:
+    - 使用 Python AST 保留公开 DSL 语法下的小写 `min(...)`，并规整空白。
+
+    使用示例:
+    - text = _normalize_symbol_min_expr("min( N,4 )")
+    """
+
+    try:
+        parsed = py_ast.parse(expr.strip(), mode="eval")
+    except SyntaxError:
+        return expr.strip()
+    return py_ast.unparse(parsed.body)
 
 
 def _is_supported_symbol_expr(expr: str) -> bool:
@@ -365,7 +434,7 @@ def _is_supported_symbol_expr(expr: str) -> bool:
 
 
     功能说明:
-    - 允许整数常量、标识符、一元 `+` / `-`、二元 `+` / `-` / `*` / `/` / `//` 与 `floor(...)`。
+    - 允许整数常量、标识符、一元 `+` / `-`、二元 `+` / `-` / `*` / `/` / `//`、`floor(...)` 与 `min(lhs, rhs)`。
     - 用于替代纯正则匹配，接受 SymPy 规范化后的 `-N + M`、`floor(7/N)` 等公开文本。
 
     使用示例:
@@ -390,7 +459,7 @@ def _is_supported_symbol_expr_ast(node: py_ast.AST) -> bool:
 
 
     功能说明:
-    - 支持整数常量、标识符、一元 `+` / `-`、二元 `+` / `-` / `*` / `/` / `//` 与 `floor(...)`。
+    - 支持整数常量、标识符、一元 `+` / `-`、二元 `+` / `-` / `*` / `/` / `//`、`floor(...)` 与 `min(lhs, rhs)`。
 
     使用示例:
     - _is_supported_symbol_expr_ast(py_ast.parse("N + 1", mode="eval"))
@@ -416,13 +485,13 @@ def _is_supported_symbol_expr_ast(node: py_ast.AST) -> bool:
             and _is_supported_symbol_expr_ast(node.right)
         )
     if isinstance(node, py_ast.Call):
-        return (
-            isinstance(node.func, py_ast.Name)
-            and node.func.id == "floor"
-            and not node.keywords
-            and len(node.args) == 1
-            and _is_supported_symbol_expr_ast(node.args[0])
-        )
+        if not isinstance(node.func, py_ast.Name) or node.keywords:
+            return False
+        if node.func.id == "floor":
+            return len(node.args) == 1 and _is_supported_symbol_expr_ast(node.args[0])
+        if node.func.id == "min":
+            return len(node.args) == 2 and all(_is_supported_symbol_expr_ast(arg) for arg in node.args)
+        return False
     return False
 
 
@@ -526,6 +595,19 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
     return isinstance(attr, SymbolValueType)
 
 
+def _is_symbol_arith_operand_type(attr: Attribute) -> bool:
+    """判断 attribute 是否可作为 symbol 算术/比较 operand。
+
+    功能说明:
+    - symbol 算术允许 `!symbol.int` 与 loop-carried `!symbol.iter`，供 tail `min(tile, dim - idx)` 使用。
+
+    使用示例:
+    - ok = _is_symbol_arith_operand_type(SymbolValueType.from_expr("N"))
+    """
+
+    return isinstance(attr, (SymbolValueType, SymbolIterType))
+
+
 def _get_concrete_symbol_int_value(attr: Attribute) -> int | None:
     """提取静态可求值的 `!symbol.int` 整数值。
 
@@ -580,7 +662,7 @@ class SymbolExprAttr(ParametrizedAttribute):
         if not expr:
             _raise_verify_error("symbol expr must not be empty")
         if not _is_supported_symbol_expr(expr):
-            _raise_verify_error("symbol expr must contain identifiers, integers, +, -, *, /, // or floor(...)")
+            _raise_verify_error("symbol expr must contain identifiers, integers, +, -, *, /, //, floor(...) or min(lhs, rhs)")
 
     @classmethod
     def from_expr(cls: type["SymbolExprAttr"], expr: str) -> "SymbolExprAttr":
@@ -1242,7 +1324,8 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
 
 
         功能说明:
-        - 校验 `lhs`、`rhs` 与 `result` 均为 `!symbol.int<"expr">`。
+        - 校验 `lhs`、`rhs` 为 `!symbol.int<"expr">` 或循环迭代 `!symbol.iter<...>`。
+        - 校验 `result` 为 `!symbol.int<"expr">`。
 
         使用示例:
         - SymbolMulOp(lhs, rhs, SymbolValueType.from_expr("M*N")).verify_()
@@ -1255,8 +1338,8 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
 
         for field_name in ("lhs", "rhs"):
             operand = SSAValue.get(getattr(self, field_name))
-            if not _is_symbol_int_type(operand.type):
-                _raise_verify_error(f"{self.name} {field_name} must have type !symbol.int<\"expr\">")
+            if not _is_symbol_arith_operand_type(operand.type):
+                _raise_verify_error(f"{self.name} {field_name} must have type !symbol.int<\"expr\"> or !symbol.iter<...>")
         if not _is_symbol_int_type(self.result.type):
             _raise_verify_error(f"{self.name} result type must be !symbol.int<\"expr\">")
 
@@ -1297,6 +1380,8 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
             if rhs_value == 0:
                 return None
             result_value = lhs_value // rhs_value
+        elif self.name == "symbol.min":
+            result_value = min(lhs_value, rhs_value)
         else:
             return None
 
@@ -1373,7 +1458,7 @@ class _BaseSymbolCompareOp(IRDLOperation):
 
 
         功能说明:
-        - 校验 `lhs` 与 `rhs` 均为 `!symbol.int<"expr">`。
+        - 校验 `lhs` 与 `rhs` 均为 `!symbol.int<"expr">` 或循环迭代 `!symbol.iter<...>`。
         - 校验 `result` 固定为 `i1`。
 
         使用示例:
@@ -1387,8 +1472,8 @@ class _BaseSymbolCompareOp(IRDLOperation):
 
         for field_name in ("lhs", "rhs"):
             operand = SSAValue.get(getattr(self, field_name))
-            if not _is_symbol_int_type(operand.type):
-                _raise_verify_error(f"{self.name} {field_name} must have type !symbol.int<\"expr\">")
+            if not _is_symbol_arith_operand_type(operand.type):
+                _raise_verify_error(f"{self.name} {field_name} must have type !symbol.int<\"expr\"> or !symbol.iter<...>")
         if self.result.type != i1:
             _raise_verify_error(f"{self.name} result type must be i1")
 
@@ -1590,6 +1675,13 @@ class SymbolFloorDivOp(_BaseSymbolBinaryArithOp):
     """两个 symbol.int 值的符号整除。"""
 
     name = "symbol.floordiv"
+
+
+@irdl_op_definition
+class SymbolMinOp(_BaseSymbolBinaryArithOp):
+    """两个 symbol.int 值的整数最小值。"""
+
+    name = "symbol.min"
 
 
 @irdl_op_definition
@@ -2354,6 +2446,7 @@ Symbol = Dialect(
         SymbolMulOp,
         SymbolDivOp,
         SymbolFloorDivOp,
+        SymbolMinOp,
         SymbolEqOp,
         SymbolNeOp,
         SymbolLtOp,
@@ -2393,6 +2486,7 @@ __all__ = [
     "SymbolGeOp",
     "SymbolGetDimOp",
     "SymbolMulOp",
+    "SymbolMinOp",
     "SymbolGtOp",
     "SymbolLeOp",
     "SymbolLtOp",

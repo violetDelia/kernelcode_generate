@@ -410,7 +410,7 @@ class _ParamSpec:
 
 _INT_TYPE_PATTERN = re.compile(
     r"^(?:const\s+)?(?P<type>"
-    r"int|short|long|long\s+long|"
+    r"S_INT|int|short|long|long\s+long|"
     r"unsigned\s+int|unsigned\s+long|unsigned\s+long\s+long|"
     r"int32_t|int64_t|uint32_t|uint64_t|size_t"
     r")(?:\s*&)?\s+\w+$"

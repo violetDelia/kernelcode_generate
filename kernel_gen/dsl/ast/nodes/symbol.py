@@ -16,18 +16,19 @@ API 列表:
 - `SymbolListAST.result_symbols() -> list[int | SymbolDim] | None`
 - `SymbolToFloatAST(source: ValueAST, location: SourceLocation | None = None)`
 - `TensorAxisAccessAST(tensor: MemoryAST, kind: PythonObjectAttrAST, axis: ConstValueAST, location: SourceLocation | None = None)`
-- `SymbolAddAST(lhs: SymbolDimAST | ConstValueAST, rhs: SymbolDimAST | ConstValueAST, location: SourceLocation | None = None)`
-- `SymbolSubAST(lhs: SymbolDimAST | ConstValueAST, rhs: SymbolDimAST | ConstValueAST, location: SourceLocation | None = None)`
-- `SymbolMulAST(lhs: SymbolDimAST | ConstValueAST, rhs: SymbolDimAST | ConstValueAST, location: SourceLocation | None = None)`
-- `SymbolTrueDivAST(lhs: SymbolDimAST | ConstValueAST, rhs: SymbolDimAST | ConstValueAST, location: SourceLocation | None = None)`
-- `SymbolFloorDivAST(lhs: SymbolDimAST | ConstValueAST, rhs: SymbolDimAST | ConstValueAST, location: SourceLocation | None = None)`
+- `SymbolAddAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `SymbolSubAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `SymbolMulAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `SymbolTrueDivAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `SymbolFloorDivAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `SymbolMinAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `SymbolBinaryAST.result_symbol() -> int | SymbolDim | None`
-- `SymbolEqAST(lhs: SymbolDimAST | ConstValueAST, rhs: SymbolDimAST | ConstValueAST, location: SourceLocation | None = None)`
-- `SymbolNeAST(lhs: SymbolDimAST | ConstValueAST, rhs: SymbolDimAST | ConstValueAST, location: SourceLocation | None = None)`
-- `SymbolLtAST(lhs: SymbolDimAST | ConstValueAST, rhs: SymbolDimAST | ConstValueAST, location: SourceLocation | None = None)`
-- `SymbolLeAST(lhs: SymbolDimAST | ConstValueAST, rhs: SymbolDimAST | ConstValueAST, location: SourceLocation | None = None)`
-- `SymbolGtAST(lhs: SymbolDimAST | ConstValueAST, rhs: SymbolDimAST | ConstValueAST, location: SourceLocation | None = None)`
-- `SymbolGeAST(lhs: SymbolDimAST | ConstValueAST, rhs: SymbolDimAST | ConstValueAST, location: SourceLocation | None = None)`
+- `SymbolEqAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `SymbolNeAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `SymbolLtAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `SymbolLeAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `SymbolGtAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `SymbolGeAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 
 使用示例:
 - from kernel_gen.dsl.ast.nodes.symbol import SymbolAddAST, SymbolDimAST
@@ -63,6 +64,7 @@ from kernel_gen.dialect.symbol import (
     SymbolIterType,
     SymbolLeOp,
     SymbolLtOp,
+    SymbolMinOp,
     SymbolMulOp,
     SymbolNeOp,
     SymbolSubOp,
@@ -96,6 +98,7 @@ __all__ = [
     "SymbolMulAST",
     "SymbolTrueDivAST",
     "SymbolFloorDivAST",
+    "SymbolMinAST",
     "SymbolCompareAST",
     "SymbolEqAST",
     "SymbolNeAST",
@@ -432,12 +435,117 @@ class TensorAxisAccessAST(ValueAST):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"Unsupported tensor axis access: {kind_value}")
 
 
+def _normalize_symbol_operand_expr(value: int | str) -> int | str:
+    """把 symbol operand 表达规整为 `SymbolDim` 可消费的输入。
+
+    功能说明:
+    - 将纯整数字符串转换为 `int`，保留动态 symbol 文本不变。
+    - 供 symbol 二元表达组合逻辑复用，避免每个 op 重复处理整数字面量。
+
+    使用示例:
+    - normalized = _normalize_symbol_operand_expr("4")
+    - symbolic = _normalize_symbol_operand_expr("N - 1")
+    """
+
+    if isinstance(value, int):
+        return value
+    return int(value) if value.lstrip("-").isdigit() else value
+
+
+def _symbol_expr_from_ssa(value: SSAValue) -> int | str:
+    """从 symbol SSA value 提取公开表达文本。
+
+    功能说明:
+    - 从 `!symbol.int` 类型读取已记录的表达文本。
+    - 对 `!symbol.iter` 使用稳定 `name_hint` 承接循环迭代变量表达。
+    - 非 symbol SSA value 按公开 MLIR 生成合同报错。
+
+    使用示例:
+    - expr = _symbol_expr_from_ssa(symbol_value)
+    """
+
+    if isinstance(value.type, SymbolValueType):
+        return value.type.get_value()
+    if isinstance(value.type, SymbolIterType) and isinstance(value.name_hint, str) and value.name_hint:
+        return value.name_hint
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "symbol operands must have !symbol.int or !symbol.iter type")
+
+
+def _compose_symbol_binary_expr(op_name: str, lhs: int | str, rhs: int | str) -> str:
+    """按公开 symbol 算术语义生成结果类型表达。
+
+    功能说明:
+    - 对可由 `SymbolDim` 解析的表达复用解析期算术语义。
+    - 对含 `symbol.iter` 等运行期文本的表达保留可读 infix 文本。
+    - `min` 在双整数输入时直接折叠，否则生成 `min(lhs, rhs)` 文本。
+
+    使用示例:
+    - expr = _compose_symbol_binary_expr("add", "N", 1)
+    - min_expr = _compose_symbol_binary_expr("min", "tile", "N - i")
+    """
+
+    lhs_operand = _normalize_symbol_operand_expr(lhs)
+    rhs_operand = _normalize_symbol_operand_expr(rhs)
+    if op_name == "min":
+        return str(min(lhs_operand, rhs_operand)) if isinstance(lhs_operand, int) and isinstance(rhs_operand, int) else f"min({lhs_operand}, {rhs_operand})"
+    try:
+        lhs_symbol = SymbolDim(lhs_operand)
+        rhs_symbol = SymbolDim(rhs_operand)
+        if op_name == "add":
+            result = lhs_symbol + rhs_symbol
+        elif op_name == "sub":
+            result = lhs_symbol - rhs_symbol
+        elif op_name == "mul":
+            result = lhs_symbol * rhs_symbol
+        elif op_name == "truediv":
+            result = lhs_symbol / rhs_symbol
+        elif op_name == "floordiv":
+            result = lhs_symbol // rhs_symbol
+        else:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbol binary AST")
+        return str(result.get_value())
+    except (TypeError, ValueError):
+        sigil = {
+            "add": "+",
+            "sub": "-",
+            "mul": "*",
+            "truediv": "/",
+            "floordiv": "//",
+        }.get(op_name)
+        if sigil is None:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbol binary AST")
+        return f"{lhs} {sigil} {rhs}"
+
+
+def _symbol_min_runtime_value(lhs: int | SymbolDim, rhs: int | SymbolDim) -> int | SymbolDim:
+    """返回 `min(lhs, rhs)` 的解析期 symbol 语义。
+
+    功能说明:
+    - 双整数输入直接返回 Python `min(...)` 结果。
+    - 动态 symbol 输入通过 `sympy.Min` 构造 `SymbolDim`，保持解析期表达可继续组合。
+    - 缺少动态表达依赖时按 MLIR 生成合同公开失败。
+
+    使用示例:
+    - value = _symbol_min_runtime_value(4, SymbolDim("N"))
+    """
+
+    if isinstance(lhs, int) and isinstance(rhs, int):
+        return min(lhs, rhs)
+    try:
+        import sympy as sp
+    except Exception as exc:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "symbol.min requires sympy for dynamic operands") from exc
+    lhs_symbol = lhs if isinstance(lhs, int) else lhs.get_symbol()
+    rhs_symbol = rhs if isinstance(rhs, int) else rhs.get_symbol()
+    return SymbolDim(sp.Min(lhs_symbol, rhs_symbol))
+
+
 @dataclass
 class SymbolBinaryAST(ValueAST):
     """符号二元计算抽象节点。"""
 
-    lhs: SymbolDimAST | ConstValueAST
-    rhs: SymbolDimAST | ConstValueAST
+    lhs: ValueAST
+    rhs: ValueAST
     location: SourceLocation | None = None
 
     def result_symbol(self) -> int | SymbolDim | None:
@@ -460,26 +568,47 @@ class SymbolBinaryAST(ValueAST):
             return None
         lhs_symbol = lhs if isinstance(lhs, SymbolDim) else SymbolDim(lhs)
         rhs_symbol = rhs if isinstance(rhs, SymbolDim) else SymbolDim(rhs)
-        if isinstance(self, SymbolAddAST):
-            result = lhs_symbol + rhs_symbol
-        elif isinstance(self, SymbolSubAST):
-            result = lhs_symbol - rhs_symbol
-        elif isinstance(self, SymbolMulAST):
-            result = lhs_symbol * rhs_symbol
-        elif isinstance(self, SymbolTrueDivAST):
-            result = lhs_symbol / rhs_symbol
-        elif isinstance(self, SymbolFloorDivAST):
-            result = lhs_symbol // rhs_symbol
-        else:
+        try:
+            if isinstance(self, SymbolAddAST):
+                result = lhs_symbol + rhs_symbol
+            elif isinstance(self, SymbolSubAST):
+                result = lhs_symbol - rhs_symbol
+            elif isinstance(self, SymbolMulAST):
+                result = lhs_symbol * rhs_symbol
+            elif isinstance(self, SymbolTrueDivAST):
+                result = lhs_symbol / rhs_symbol
+            elif isinstance(self, SymbolFloorDivAST):
+                result = lhs_symbol // rhs_symbol
+            elif isinstance(self, SymbolMinAST):
+                return _symbol_min_runtime_value(lhs, rhs)
+            else:
+                return None
+        except (TypeError, ValueError):
             return None
         result_value = result.get_value()
         return result_value if isinstance(result_value, int) else result
 
     def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """发射符号二元计算 op。"""
+        """发射符号二元计算 op。
+
+        功能说明:
+        - 普通 symbol 二元算术按左右 operand 顺序发射对应 `symbol.*` op。
+        - `SymbolMinAST` 先预物化复合 operand 中的直接整数常量，再发射算术和最终 `symbol.min`。
+        - 该顺序锁定 `min(lhs + 1, rhs - 2)` 的 MLIR 文本合同，避免常量插入位置随递归路径漂移。
+
+        使用示例:
+        - value = SymbolMinAST(SymbolAddAST(SymbolDimAST("N"), ConstValueAST(1)), SymbolDimAST("M")).emit_mlir(ctx, block)
+        """
 
         assert isinstance(ctx, Context)
         assert isinstance(block, Block)
+        if isinstance(self, SymbolMinAST):
+            pre_emitted: dict[int, SSAValue] = {}
+            _preemit_symbol_int_constants(self.lhs, ctx, block, pre_emitted)
+            _preemit_symbol_int_constants(self.rhs, ctx, block, pre_emitted)
+            lhs = _emit_symbol_value_ast(self.lhs, ctx, block, pre_emitted)
+            rhs = _emit_symbol_value_ast(self.rhs, ctx, block, pre_emitted)
+            return _emit_symbol_binary_op(self, lhs, rhs, block)
         lhs = self.lhs.emit_mlir(ctx, block)
         if isinstance(lhs, Operation):
             block.add_op(lhs)
@@ -490,24 +619,20 @@ class SymbolBinaryAST(ValueAST):
             rhs = rhs.results[0]
         if not isinstance(lhs, SSAValue) or not isinstance(rhs, SSAValue):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "symbol operands must lower to SSA values")
-        lhs_value = lhs.type.get_value() if isinstance(lhs.type, SymbolValueType) else None
-        rhs_value = rhs.type.get_value() if isinstance(rhs.type, SymbolValueType) else None
-        if lhs_value is None or rhs_value is None:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "symbol operands must have !symbol.int type")
-        lhs_operand = int(lhs_value) if isinstance(lhs_value, str) and lhs_value.lstrip("-").isdigit() else lhs_value
-        rhs_operand = int(rhs_value) if isinstance(rhs_value, str) and rhs_value.lstrip("-").isdigit() else rhs_value
-        lhs_symbol = SymbolDim(lhs_operand)
-        rhs_symbol = SymbolDim(rhs_operand)
+        lhs_value = _symbol_expr_from_ssa(lhs)
+        rhs_value = _symbol_expr_from_ssa(rhs)
         if isinstance(self, SymbolAddAST):
-            op = SymbolAddOp(lhs, rhs, SymbolValueType.from_expr(str((lhs_symbol + rhs_symbol).get_value())))
+            op = SymbolAddOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("add", lhs_value, rhs_value)))
         elif isinstance(self, SymbolSubAST):
-            op = SymbolSubOp(lhs, rhs, SymbolValueType.from_expr(str((lhs_symbol - rhs_symbol).get_value())))
+            op = SymbolSubOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("sub", lhs_value, rhs_value)))
         elif isinstance(self, SymbolMulAST):
-            op = SymbolMulOp(lhs, rhs, SymbolValueType.from_expr(str((lhs_symbol * rhs_symbol).get_value())))
+            op = SymbolMulOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("mul", lhs_value, rhs_value)))
         elif isinstance(self, SymbolTrueDivAST):
-            op = SymbolDivOp(lhs, rhs, SymbolValueType.from_expr(str((lhs_symbol / rhs_symbol).get_value())))
+            op = SymbolDivOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("truediv", lhs_value, rhs_value)))
         elif isinstance(self, SymbolFloorDivAST):
-            op = SymbolFloorDivOp(lhs, rhs, SymbolValueType.from_expr(str((lhs_symbol // rhs_symbol).get_value())))
+            op = SymbolFloorDivOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("floordiv", lhs_value, rhs_value)))
+        elif isinstance(self, SymbolMinAST):
+            op = SymbolMinOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("min", lhs_value, rhs_value)))
         else:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbol binary AST")
         block.add_op(op)
@@ -534,12 +659,137 @@ class SymbolFloorDivAST(SymbolBinaryAST):
     """符号整除节点。"""
 
 
+class SymbolMinAST(SymbolBinaryAST):
+    """符号最小值节点。"""
+
+
+def _preemit_symbol_int_constants(
+    value: ValueAST,
+    ctx: Context,
+    block: Block,
+    pre_emitted: dict[int, SSAValue],
+) -> None:
+    """预先物化 `symbol.min` 两侧表达式中的整数常量。
+
+    功能说明:
+    - 递归扫描 `symbol.min` 左右 operand 的 `SymbolBinaryAST` 子树。
+    - 只提前发射直接整数常量，动态 symbol 与其它 operand 保持原发射路径。
+    - 通过 `pre_emitted` 缓存避免同一 AST 节点重复生成 `symbol.const`。
+
+    使用示例:
+    - pre_emitted: dict[int, SSAValue] = {}
+    - _preemit_symbol_int_constants(expr, ctx, block, pre_emitted)
+    """
+
+    if isinstance(value, SymbolBinaryAST):
+        _preemit_symbol_int_constants(value.lhs, ctx, block, pre_emitted)
+        _preemit_symbol_int_constants(value.rhs, ctx, block, pre_emitted)
+        return
+    if id(value) in pre_emitted:
+        return
+    if not _is_preemittable_symbol_int_const(value):
+        return
+    emitted = value.emit_mlir(ctx, block)
+    if isinstance(emitted, Operation):
+        block.add_op(emitted)
+        emitted = emitted.results[0]
+    if not isinstance(emitted, SSAValue):
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "symbol const must lower to SSA value")
+    pre_emitted[id(value)] = emitted
+
+
+def _is_preemittable_symbol_int_const(value: ValueAST) -> bool:
+    """判断 AST 节点是否会直接发射 `symbol.const`。
+
+    功能说明:
+    - 识别 `ConstValueAST` 中的非 bool 整数常量。
+    - 识别承载整数值的 `SymbolDimAST`。
+    - 其它节点不提前物化，避免改变动态 symbol 的发射时序。
+
+    使用示例:
+    - should_preemit = _is_preemittable_symbol_int_const(ConstValueAST(1))
+    """
+
+    if isinstance(value, ConstValueAST):
+        raw_value = value.raw_value
+        return isinstance(raw_value, int) and not isinstance(raw_value, bool)
+    if isinstance(value, SymbolDimAST):
+        raw_value = value.symbol.get_value()
+        return isinstance(raw_value, int) and not isinstance(raw_value, bool)
+    return False
+
+
+def _emit_symbol_value_ast(
+    value: ValueAST,
+    ctx: Context,
+    block: Block,
+    pre_emitted: dict[int, SSAValue],
+) -> SSAValue:
+    """发射 `symbol.min` operand，并复用已提前物化的整数常量。
+
+    功能说明:
+    - 优先返回 `_preemit_symbol_int_constants(...)` 已缓存的 `symbol.const` SSA value。
+    - 对嵌套 `SymbolBinaryAST` 递归发射左右 operand，再发射对应二元 op。
+    - 对普通 `ValueAST` 走其公开 `emit_mlir(...)` 行为，并校验结果为 SSA value。
+
+    使用示例:
+    - operand = _emit_symbol_value_ast(expr, ctx, block, pre_emitted)
+    """
+
+    cached = pre_emitted.get(id(value))
+    if cached is not None:
+        return cached
+    if isinstance(value, SymbolBinaryAST):
+        lhs = _emit_symbol_value_ast(value.lhs, ctx, block, pre_emitted)
+        rhs = _emit_symbol_value_ast(value.rhs, ctx, block, pre_emitted)
+        return _emit_symbol_binary_op(value, lhs, rhs, block)
+    emitted = value.emit_mlir(ctx, block)
+    if isinstance(emitted, Operation):
+        block.add_op(emitted)
+        emitted = emitted.results[0]
+    if not isinstance(emitted, SSAValue):
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "symbol operand must lower to SSA value")
+    return emitted
+
+
+def _emit_symbol_binary_op(value: SymbolBinaryAST, lhs: SSAValue, rhs: SSAValue, block: Block) -> SSAValue:
+    """根据 `SymbolBinaryAST` 子类发射对应 symbol 二元 op。
+
+    功能说明:
+    - 根据具体 `SymbolBinaryAST` 子类选择 `symbol.add/sub/mul/div/floordiv/min` op。
+    - 通过 `_compose_symbol_binary_expr(...)` 同步生成结果 `!symbol.int` 表达文本。
+    - 仅在当前文件内服务 `SymbolMinAST` 递归 operand 发射，不作为跨文件公开入口。
+
+    使用示例:
+    - result = _emit_symbol_binary_op(SymbolAddAST(lhs_ast, rhs_ast), lhs_value, rhs_value, block)
+    """
+
+    lhs_value = _symbol_expr_from_ssa(lhs)
+    rhs_value = _symbol_expr_from_ssa(rhs)
+    if isinstance(value, SymbolAddAST):
+        op = SymbolAddOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("add", lhs_value, rhs_value)))
+    elif isinstance(value, SymbolSubAST):
+        op = SymbolSubOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("sub", lhs_value, rhs_value)))
+    elif isinstance(value, SymbolMulAST):
+        op = SymbolMulOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("mul", lhs_value, rhs_value)))
+    elif isinstance(value, SymbolTrueDivAST):
+        op = SymbolDivOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("truediv", lhs_value, rhs_value)))
+    elif isinstance(value, SymbolFloorDivAST):
+        op = SymbolFloorDivOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("floordiv", lhs_value, rhs_value)))
+    elif isinstance(value, SymbolMinAST):
+        op = SymbolMinOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("min", lhs_value, rhs_value)))
+    else:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbol binary AST")
+    block.add_op(op)
+    return op.results[0]
+
+
 @dataclass
 class SymbolCompareAST(ValueAST):
     """符号比较抽象节点。"""
 
-    lhs: SymbolDimAST | ConstValueAST
-    rhs: SymbolDimAST | ConstValueAST
+    lhs: ValueAST
+    rhs: ValueAST
     location: SourceLocation | None = None
 
     def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:

@@ -33,7 +33,7 @@ from kernel_gen.core.context import build_default_context
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaReshapeOp, DmaSliceOp
 from kernel_gen.dialect.nn import NnAddOp, NnMatmulOp, NnMemorySpaceAttr, NnMemoryType, NnSoftmaxOp
-from kernel_gen.dialect.symbol import SymbolForOp, SymbolGetDimOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolForOp, SymbolGetDimOp, SymbolMinOp, SymbolMulOp, SymbolValueType
 from kernel_gen.dsl import parse_function
 from kernel_gen.dsl.ast import parse
 from kernel_gen.dsl.ast.mlir_gen import mlir_gen
@@ -112,6 +112,23 @@ def _memory_type(
         i8,
         NnMemorySpaceAttr.from_name(space),
     )
+
+
+def _symbol_min_iter_kernel(out: Memory, src: Memory, tile_n: SymbolDim) -> None:
+    """提供模块级 DSL kernel，避免测试函数内定义非装饰器嵌套函数。"""
+
+    n_size = src.shape.get_shape()[0]
+    for index in loop(0, n_size, tile_n):
+        offset = index * 1
+        cur_n = min(tile_n, n_size - index)
+        tile_buf = slice(src, [offset], [cur_n], [1], MemorySpace.TSM)
+        deslice(out, tile_buf, [offset], [cur_n], [1])
+
+
+def _symbol_min_dynamic_expr_kernel(lhs: SymbolDim, rhs: SymbolDim) -> int:
+    """提供动态 symbol.min 复合 operand DSL kernel。"""
+
+    return min(lhs + 1, rhs - 2)
 
 
 def test_mlir_gen_requires_runtime_args() -> None:
@@ -235,6 +252,41 @@ def test_mlir_gen_supports_kernel_contract_loop_local_rebinding() -> None:
     assert '"nn.add"' in module_text
     assert '"dma.reshape"' in module_text
     assert '"dma.deslice"' in module_text
+
+
+def test_mlir_gen_lowers_symbol_min_and_iter_arithmetic() -> None:
+    """TC-MLIR-GEN-SYM-MIN-001: DSL min 与 loop 迭代变量算术生成 symbol dialect。"""
+
+    source = Memory([6], NumericType.Int32)
+    output = Memory([6], NumericType.Int32)
+    tile = SymbolDim("TILE_N")
+
+    module = mlir_gen(_symbol_min_iter_kernel, output, source, tile)
+    module_text = str(module)
+
+    assert "symbol.min" in module_text
+    assert "symbol.mul" in module_text
+    root_op = list(module.body.block.ops)[0]
+    assert isinstance(root_op, func.FuncOp)
+    assert any(isinstance(op, SymbolForOp) for op in root_op.body.block.ops)
+    loop_op = next(op for op in root_op.body.block.ops if isinstance(op, SymbolForOp))
+    assert any(isinstance(op, SymbolMinOp) for op in loop_op.body.block.ops)
+    assert any(isinstance(op, SymbolMulOp) for op in loop_op.body.block.ops)
+
+
+def test_mlir_gen_materializes_symbol_min_operand_consts_before_arithmetic() -> None:
+    """TC-MLIR-GEN-SYM-MIN-002: 复合 operand 的常量先于二元算术发射。"""
+
+    module = mlir_gen(_symbol_min_dynamic_expr_kernel, SymbolDim("W"), SymbolDim("HBOGU"))
+    module_text = str(module)
+
+    const_one_index = module_text.index("symbol.const 1")
+    const_two_index = module_text.index("symbol.const 2")
+    add_index = module_text.index("symbol.add")
+    sub_index = module_text.index("symbol.sub")
+    min_index = module_text.index("symbol.min")
+
+    assert const_one_index < const_two_index < add_index < sub_index < min_index
 
 
 def test_mlir_gen_uses_runtime_args_for_symbol_signature() -> None:

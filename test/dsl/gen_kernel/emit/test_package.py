@@ -52,7 +52,7 @@ from kernel_gen.dialect.kernel import (
     KernelSelectOp,
 )
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolToFloatOp, SymbolToIntOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolMinOp, SymbolToFloatOp, SymbolToIntOp, SymbolValueType
 from kernel_gen.dialect.tuner import TunerCostOp
 from kernel_gen.dsl.ast import BlockAST
 from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c, emit_c_op, emit_c_value, gen_kernel
@@ -678,6 +678,23 @@ def test_emit_c_op_lowers_npu_demo_symbol_binary_and_compare() -> None:
     assert emit_c_op(eq, ctx) == "bool v1 = (lhs == rhs);"
 
 
+def test_emit_c_op_lowers_npu_demo_symbol_min_as_ternary() -> None:
+    """EC-008B2: npu_demo 下 symbol.min 发射为 S_INT 三目表达式。"""
+
+    lhs_type = SymbolValueType.from_expr("L")
+    rhs_type = SymbolValueType.from_expr("R")
+    min_type = SymbolValueType.from_expr("min(L, R)")
+    block = Block(arg_types=[lhs_type, rhs_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "lhs")
+    ctx.bind_name(block.args[1], "rhs")
+
+    min_op = SymbolMinOp(block.args[0], block.args[1], min_type)
+
+    assert emit_c_value(min_op.result, ctx) == "((lhs) < (rhs) ? (lhs) : (rhs))"
+    assert emit_c_op(min_op, ctx) == "S_INT v0 = ((lhs) < (rhs) ? (lhs) : (rhs));"
+
+
 # EC-008C
 # 测试目的: 验证 npu_demo 下 symbol.get_dim/get_stride 会生成 `S_INT` 成员查询局部变量语句。
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/__init__.py
@@ -1036,6 +1053,40 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
 
     assert dyn_stmt == (
         "Memory<TSM, float> v0 = alloc<TSM, float>({m, n} /*shape*/, {n, 1} /*stride*/);"
+    )
+
+    partial_dyn_alloc_type = NnMemoryType(
+        ArrayAttr([StringAttr("M"), IntAttr(3), StringAttr("N")]),
+        ArrayAttr([StringAttr("3*N"), StringAttr("N"), IntAttr(1)]),
+        f32,
+        NnMemorySpaceAttr.from_name("tsm"),
+    )
+    partial_dyn_alloc = DmaAllocOp([dyn_block.args[0], dyn_block.args[1]], partial_dyn_alloc_type)
+
+    partial_dyn_stmt = emit_c_op(partial_dyn_alloc, dyn_ctx)
+
+    assert partial_dyn_stmt == (
+        "Memory<TSM, float> v1 = alloc<TSM, float>({m, 3, n} /*shape*/, {3*n, n, 1} /*stride*/);"
+    )
+
+    cur_c = SymbolValueType.from_expr("min(3, 3 - c0)")
+    cur_wo = SymbolValueType.from_expr("min(5, 6 - wo0)")
+    min_block = Block(arg_types=[cur_c, cur_wo])
+    min_ctx = _npu_ctx()
+    min_ctx.bind_name(min_block.args[0], "cur_c")
+    min_ctx.bind_name(min_block.args[1], "cur_wo")
+    min_alloc_type = NnMemoryType(
+        ArrayAttr([StringAttr("min(3, 3 - c0)"), IntAttr(3), StringAttr("min(5, 6 - wo0)")]),
+        ArrayAttr([StringAttr("3*min(5, 6 - wo0)"), StringAttr("min(5, 6 - wo0)"), IntAttr(1)]),
+        f32,
+        NnMemorySpaceAttr.from_name("tsm"),
+    )
+    min_alloc = DmaAllocOp([min_block.args[0], min_block.args[1]], min_alloc_type)
+
+    min_stmt = emit_c_op(min_alloc, min_ctx)
+
+    assert min_stmt == (
+        "Memory<TSM, float> v0 = alloc<TSM, float>({cur_c, 3, cur_wo} /*shape*/, {3*cur_wo, cur_wo, 1} /*stride*/);"
     )
 
 

@@ -92,6 +92,7 @@ from kernel_gen.dsl.ast.nodes import (
     SymbolLeAST,
     SymbolListAST,
     SymbolLtAST,
+    SymbolMinAST,
     SymbolMulAST,
     SymbolNeAST,
     SymbolSubAST,
@@ -1120,7 +1121,7 @@ class DslAstVisitor(py_ast.NodeVisitor):
                     callee_obj = self.import_states[node.func.id]
                 elif node.func.id not in self.scope:
                     callee_obj = self.globals_table.get(node.func.id)
-                if callee_obj is None and node.func.id != "float":
+                if callee_obj is None and node.func.id not in {"float", "min"}:
                     location = SourceLocation.from_py_ast(node)
                     if node.func.id in _DEFAULT_DSL_HELPERS:
                         diagnostic = Diagnostic("Unsupported call expression", location)
@@ -1166,6 +1167,18 @@ class DslAstVisitor(py_ast.NodeVisitor):
                 diagnostic = Diagnostic("Unsupported float arity", location)
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
             return SymbolToFloatAST(args[0], location=location)
+        if call_name == "min":
+            if len(args) != 2 or kwargs:
+                diagnostic = Diagnostic("Unsupported min arity", location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
+            lhs, rhs = args
+            if not isinstance(lhs, ValueAST) or not isinstance(rhs, ValueAST):
+                diagnostic = Diagnostic("min arguments must be symbol values", location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
+            if lhs.result_symbol() is None or rhs.result_symbol() is None:
+                diagnostic = Diagnostic("min arguments must be symbol values", location)
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
+            return SymbolMinAST(lhs, rhs, location=location)
         if entry is not None and entry.ast_node is not None:
             builtin_call = BuiltinCall(
                 source=node,

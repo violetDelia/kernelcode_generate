@@ -64,6 +64,7 @@ from kernel_gen.passes.registry import build_registered_pipeline, load_builtin_p
 from kernel_gen.tools.dsl_run import DslRunResult, dsl_run
 from kernel_gen.target import registry as target_registry
 from kernel_gen.symbol_variable.memory import MemorySpace
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 try:
     import torch
@@ -75,7 +76,8 @@ _EXPECTED_RETURN_VALUE_MESSAGE = "DslRunReturnValueUnsupported: dsl_run only sup
 _EXPECTED_TARGET_MESSAGE = "DslRunInvalidTarget: core config target must be non-empty str"
 _EXPECTED_PIPELINE_NAME_MESSAGE = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline'"
 _EXPECTED_PIPELINE_TYPE_MESSAGE = "DslRunInvalidPipeline: pipeline must be str or PassManager"
-_EXPECTED_REAL_ARG_TYPE_MESSAGE = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor and numpy.ndarray"
+_EXPECTED_REAL_ARG_TYPE_MESSAGE = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray, int and float"
+_EXPECTED_TILE_VALUE_MESSAGE = "DslRunInvalidTileValue: tile runtime scalar must be positive int"
 _EXPECTED_ARITY_MESSAGE = "DslRunArityMismatch: real_args count does not match function signature"
 _EXPECTED_NPU_DEMO_WRAPPER_MESSAGE = (
     "DslRunInternalError: lowered npu_demo module must contain exactly one wrapper func with arch.launch"
@@ -223,6 +225,21 @@ def add_for_loop_kernel(
         lhs_tile = slice(lhs, [index], [3], [1], MemorySpace.TSM)
         rhs_tile = slice(rhs, [index], [3], [1], MemorySpace.TSM)
         store(out, lhs_tile + rhs_tile, [index], [3], [1])
+
+
+def add_dynamic_tile_kernel(
+    out: "Tensor[i32, 6]",
+    lhs: "Tensor[i32, 6]",
+    rhs: "Tensor[i32, 6]",
+    tile_n: SymbolDim,
+) -> None:
+    """动态 tile runtime scalar 版本的 for-loop add 样例。"""
+
+    for index in loop(0, 6, tile_n):
+        cur_n = min(tile_n, 6 - index)
+        lhs_tile = slice(lhs, [index], [cur_n], [1], MemorySpace.TSM)
+        rhs_tile = slice(rhs, [index], [cur_n], [1], MemorySpace.TSM)
+        store(out, lhs_tile + rhs_tile, [index], [cur_n], [1])
 
 
 def sub_store_kernel(
@@ -475,6 +492,33 @@ def test_dsl_run_add_for_loop_matches_public_contract() -> None:
     assert "kernel.binary_elewise" in lowered_text
     assert "kind = \"add\"" in lowered_text
     _assert_result_contract(result, out, expected, helper_snippet="add<")
+
+
+# TC-DSL-RUN-003A3
+# 测试目的: 锁定 dsl_run 支持 int runtime scalar tile，并通过 DSL min 处理尾块。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_add_dynamic_tile_scalar_matches_public_contract() -> None:
+    out = torch.full((6,), -7, dtype=torch.int32)
+    lhs = torch.tensor([10, 11, 12, 13, 14, 15], dtype=torch.int32)
+    rhs = np.array([1, 2, 3, 4, 5, 6], dtype=np.int32)
+    expected = lhs + torch.from_numpy(rhs)
+
+    result = dsl_run(
+        add_dynamic_tile_kernel,
+        (out, lhs, rhs, 4),
+        "npu-demo-lowering",
+    )
+
+    lowered_text = str(result.func_op)
+    assert result.execute_result.ok is True
+    assert result.execute_result.failure_phrase is None
+    assert isinstance(result.runtime_args, tuple)
+    assert result.runtime_args[-1] == 4
+    assert "symbol.min" in lowered_text
+    assert "? " in result.source
+    assert torch.equal(out, expected)
 
 
 # TC-DSL-RUN-003B
@@ -748,6 +792,20 @@ def test_dsl_run_rejects_unsupported_runtime_arg_type() -> None:
 
     with pytest.raises(KernelCodeError, match=_EXPECTED_REAL_ARG_TYPE_MESSAGE):
         dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
+
+
+# TC-DSL-RUN-009A
+# 测试目的: 锁定 tile_* runtime scalar 必须是正整数。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_rejects_non_positive_tile_runtime_scalar() -> None:
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+
+    with pytest.raises(KernelCodeError, match=_EXPECTED_TILE_VALUE_MESSAGE):
+        dsl_run(add_dynamic_tile_kernel, (out, lhs, rhs, 0), "npu-demo-lowering")
 
 
 # TC-DSL-RUN-010

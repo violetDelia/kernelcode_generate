@@ -3,6 +3,7 @@
 
 功能说明:
 - 提供符号维度表达、基础算术运算与动态性判断。
+- 字符串表达支持 `min(lhs, rhs)`，用于 DSL tile 尾块表达。
 
 API 列表:
 - `class SymbolDim(sym: int | str | sp.Basic)`
@@ -257,6 +258,10 @@ class _SymbolDim:
                 if len(denominator_parts) == 1:
                     return f"{numerator_text} // {denominator_parts[0]}"
                 return f"{numerator_text} // ({'*'.join(denominator_parts)})"
+        if expr.func == sp.Min and len(expr.args) == 2:
+            lhs_text = _SymbolDim._format_public_value_expr(expr.args[0])
+            rhs_text = _SymbolDim._format_public_value_expr(expr.args[1])
+            return f"min({lhs_text}, {rhs_text})"
         return _SymbolDim._format_public_expr(expr)
 
     @staticmethod
@@ -315,6 +320,7 @@ class _SymbolDim:
 
         功能说明:
         - 统一使用 integer=True, real=True 的假设构造符号或符号表达式。
+        - 表达式字符串仅放行 `floor(...)` 与小写 `min(...)` 函数。
 
         使用示例:
         - _SymbolDim._symbol_from_str("N")
@@ -326,15 +332,22 @@ class _SymbolDim:
         """
         normalized = _SymbolDim._normalize_str(value)
         if re.search(r"//|[+\-*/()]", normalized):
+            function_names = set(
+                re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", normalized)
+            )
+            if function_names - {"floor", "min"}:
+                raise ValueError("SymbolDim expression string is invalid")
             symbol_names = {
                 name
                 for name in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", normalized)
-                if name != "floor"
+                if name not in {"floor", "min"}
             }
             local_symbols = {
                 name: sp.symbols(name, integer=True, real=True)
                 for name in symbol_names
             }
+            local_symbols["floor"] = sp.floor
+            local_symbols["min"] = sp.Min
             parsed = sp.sympify(normalized, locals=local_symbols)
             if isinstance(parsed, tuple):
                 raise ValueError("SymbolDim expression string is invalid")

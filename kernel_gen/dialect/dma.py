@@ -676,6 +676,7 @@ def _parse_symbolic_dim_attr(value: Attribute) -> sp.Basic | None:
     功能说明:
     - `IntAttr` 解析为整数表达式。
     - `StringAttr` 解析为符号表达式，并为所有标识符创建同名整数符号。
+    - `min(...)` 按 `sympy.Min` 解析，用于判定动态尾块连续 stride。
     - 无法解析或未知动态维度时返回 `None`。
 
     使用示例:
@@ -695,7 +696,9 @@ def _parse_symbolic_dim_attr(value: Attribute) -> sp.Basic | None:
     if text == "?":
         return None
     names = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text))
-    local_dict = {name: sp.Symbol(name, integer=True, real=True) for name in names}
+    function_names = {"floor", "min"}
+    local_dict = {name: sp.Symbol(name, integer=True, real=True) for name in names if name not in function_names}
+    local_dict.update({"floor": sp.floor, "min": sp.Min})
     try:
         return sp.sympify(text, locals=local_dict)
     except (TypeError, ValueError, SyntaxError, sp.SympifyError):
