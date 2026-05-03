@@ -7,11 +7,12 @@
 - demo 输入规模固定在 `N≈12, C≈32, H≈256, W≈256`，运行时按固定 seed 在 `N[11,13] / C[30,34] / H,W[248,264]` 内取值。
 - stride、dilation、padding 与 tile 作为 `int` 编译参数进入 `run_lowering_demo(...)`，并以同值 runtime scalar 传给 `ExecutionEngine` device entry。
 - 当 `tile_c < C` 时在 `c0` tile 循环内对同一个输出 tile 做 C 维累计和，而不是拆成固定两段 matmul 后相加。
-- 编译期用 `Memory[s1, ...]` 符号形状走 `gen_kernel` 生成动态 memory IR/source。
+- 编译期用 `B/N/C/XH/XW/KH/KW` 语义化符号形状走 `gen_kernel` 生成动态 memory IR/source。
+- output 编译期 memory 形状为 `B, C, -KH + XH + 1, -KW + XW + 1`，对应当前 stride=1、dilation=1、padding=0 的真实符号计算结果。
 - 运行期仍传入真实 torch tensor 静态 shape，并和 `torch.nn.functional.conv2d` 参考结果对齐。
 
 API 列表:
-- `conv2d_inputs_dynamic_tile_dynamic_kernel(out: Tensor[f32, N, F, HO, WO], input_tensor: Tensor[f32, N, C, H, W], weight: Tensor[f32, F, C, KH, KW], stride_h: SymbolDim, stride_w: SymbolDim, dilation_h: SymbolDim, dilation_w: SymbolDim, pad_top: SymbolDim, pad_bottom: SymbolDim, pad_left: SymbolDim, pad_right: SymbolDim, tile_f: SymbolDim, tile_c: SymbolDim, tile_n: SymbolDim, tile_ho: SymbolDim, tile_wo: SymbolDim) -> None`
+- `conv2d_inputs_dynamic_tile_dynamic_kernel(out: Tensor[f32, B, C, HO, WO], input_tensor: Tensor[f32, B, N, XH, XW], weight: Tensor[f32, C, N, KH, KW], stride_h: SymbolDim, stride_w: SymbolDim, dilation_h: SymbolDim, dilation_w: SymbolDim, pad_top: SymbolDim, pad_bottom: SymbolDim, pad_left: SymbolDim, pad_right: SymbolDim, tile_f: SymbolDim, tile_c: SymbolDim, tile_n: SymbolDim, tile_ho: SymbolDim, tile_wo: SymbolDim) -> None`
 - `main() -> None`
 
 使用示例:
@@ -52,9 +53,9 @@ Conv2dRuntimeArg: TypeAlias = "torch.Tensor | int"
 
 
 def conv2d_inputs_dynamic_tile_dynamic_kernel(
-    out: "Tensor[f32, N, F, HO, WO]",
-    input_tensor: "Tensor[f32, N, C, H, W]",
-    weight: "Tensor[f32, F, C, KH, KW]",
+    out: "Tensor[f32, B, C, HO, WO]",
+    input_tensor: "Tensor[f32, B, N, XH, XW]",
+    weight: "Tensor[f32, C, N, KH, KW]",
     stride_h: SymbolDim,
     stride_w: SymbolDim,
     dilation_h: SymbolDim,
@@ -73,7 +74,7 @@ def conv2d_inputs_dynamic_tile_dynamic_kernel(
 
 
     功能说明:
-    - 输入、输出与权重维度来自 `Tensor[...]` 符号维度。
+    - 输入、输出与权重维度来自 `Tensor[...]` 符号维度，布局为 input[B,N,XH,XW]、weight[C,N,KH,KW]、out[B,C,HO,WO]。
     - stride/dilation/padding/tile shape 使用 runtime scalar 绑定。
     - C 维按 `tile_c` 循环分块，并在写回前累计所有 partial。
 
@@ -132,7 +133,8 @@ def _symbolic_compile_args(
 
 
     功能说明:
-    - output/input/weight 的编译期 memory shape 使用 `s1/s2/...` 符号维度。
+    - output/input/weight 的编译期 memory shape 使用 conv2d 语义化符号维度。
+    - output 空间维使用当前 stride/dilation/padding 下的真实符号计算表达式。
     - stride、dilation、padding 与 tile 仍保持 int 标量，运行期继续传入同一组静态实际值。
     - 只服务本 demo 的符号编译入口，不新增跨文件公开 API。
 
@@ -140,10 +142,17 @@ def _symbolic_compile_args(
     - `_symbolic_compile_args((1, 1), (1, 1), (0, 0, 0, 0), (2, 16, 1, 64, 64))`
     """
 
+    xh_dim = SymbolDim("XH")
+    xw_dim = SymbolDim("XW")
+    kh_dim = SymbolDim("KH")
+    kw_dim = SymbolDim("KW")
+    output_h_dim = ((xh_dim + padding_args[0] + padding_args[1] - dilation_args[0] * (kh_dim - 1) - 1) // stride_args[0]) + 1
+    output_w_dim = ((xw_dim + padding_args[2] + padding_args[3] - dilation_args[1] * (kw_dim - 1) - 1) // stride_args[1]) + 1
+
     return (
-        Memory(["s1", "s2", "s3", "s4"], NumericType.Float32),
-        Memory(["s1", "s5", "s6", "s7"], NumericType.Float32),
-        Memory(["s2", "s5", 3, 3], NumericType.Float32),
+        Memory(["B", "C", output_h_dim, output_w_dim], NumericType.Float32),
+        Memory(["B", "N", "XH", "XW"], NumericType.Float32),
+        Memory(["C", "N", "KH", "KW"], NumericType.Float32),
         *stride_args,
         *dilation_args,
         *padding_args,
@@ -161,10 +170,11 @@ def _assert_dynamic_memory_ir(
 
 
     功能说明:
-    - 确认输出 memory 类型包含 `!nn.memory<[s1, s2, s3, s4]`。
-    - 确认输入 memory 类型包含 `!nn.memory<[s1, s5, s6, s7]`。
-    - 确认权重 memory 类型包含 `!nn.memory<[s2, s5, 3, 3]`。
+    - 确认输出 memory 类型包含 `!nn.memory<[B, C, -KH + XH + 1, -KW + XW + 1]`。
+    - 确认输入 memory 类型包含 `!nn.memory<[B, N, XH, XW]`。
+    - 确认权重 memory 类型包含 `!nn.memory<[C, N, KH, KW]`。
     - 确认 IR 不回退为本次真实运行的 output/input/weight 静态 shape。
+    - 确认 IR 不回退为旧 `s1/s2/...` 匿名符号 shape。
     - 失败时抛出 `AssertionError`，让 demo 脚本直接暴露编译形态回退。
 
     使用示例:
@@ -172,14 +182,19 @@ def _assert_dynamic_memory_ir(
     """
 
     dynamic_memory_fragments = (
-        ("output", "!nn.memory<[s1, s2, s3, s4]"),
-        ("input", "!nn.memory<[s1, s5, s6, s7]"),
-        ("weight", "!nn.memory<[s2, s5, 3, 3]"),
+        ("output", "!nn.memory<[B, C, -KH + XH + 1, -KW + XW + 1]"),
+        ("input", "!nn.memory<[B, N, XH, XW]"),
+        ("weight", "!nn.memory<[C, N, KH, KW]"),
     )
     static_memory_fragments = (
         ("output", f"!nn.memory<[{actual_output_shape[0]}, {actual_output_shape[1]}, {actual_output_shape[2]}, {actual_output_shape[3]}]"),
         ("input", f"!nn.memory<[{actual_input_shape[0]}, {actual_input_shape[1]}, {actual_input_shape[2]}, {actual_input_shape[3]}]"),
         ("weight", f"!nn.memory<[{actual_weight_shape[0]}, {actual_weight_shape[1]}, {actual_weight_shape[2]}, {actual_weight_shape[3]}]"),
+    )
+    old_symbol_fragments = (
+        ("old output", "!nn.memory<[s1, s2, s3, s4]"),
+        ("old input", "!nn.memory<[s1, s5, s6, s7]"),
+        ("old weight", "!nn.memory<[s2, s5, 3, 3]"),
     )
     for label, fragment in dynamic_memory_fragments:
         if fragment not in module_text:
@@ -187,6 +202,9 @@ def _assert_dynamic_memory_ir(
     for label, fragment in static_memory_fragments:
         if fragment in module_text:
             raise AssertionError(f"lowered IR unexpectedly contains static {label} memory shape: {fragment}")
+    for label, fragment in old_symbol_fragments:
+        if fragment in module_text:
+            raise AssertionError(f"lowered IR unexpectedly contains {label} anonymous memory shape: {fragment}")
 
 
 def _execute_device_source(source: str, real_args: tuple[Conv2dRuntimeArg, ...]) -> None:
@@ -298,7 +316,7 @@ def main() -> None:
     max_abs_diff = _assert_outputs_close(out, expected, atol=1e-4, rtol=1e-4)
     print(module_text)
     print(source)
-    print("[IR] dynamic memory evidence: output/input/weight symbolic memory present; static output/input/weight shapes absent")
+    print("[IR] dynamic memory evidence: output/input/weight semantic symbolic memory present; static and old anonymous shapes absent")
     print(f"[CHECK] {CASE_NAME} max_abs_diff={max_abs_diff}")
 
 

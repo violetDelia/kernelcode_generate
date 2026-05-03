@@ -4,11 +4,12 @@
 功能说明:
 - 实现 `inputs 静 + tile 静` 的 NCHW conv2d kernel demo。
 - 使用 `img2col2d + matmul` 实现卷积，tile 尾块显式通过 DSL `min(...)` 收口。
-- 输入固定为 `input[12, 32, 256, 256]`、`weight[4, 32, 3, 3]`、`out[12, 4, 254, 254]`。
+- 输入尺寸由固定 seed `20260503` 生成并固化为具体数字：`input[11, 28, 260, 264]`、`weight[2, 28, 3, 3]`、`out[11, 2, 258, 262]`。
+- lowering 后 IR 必须保持上述具体数字 static shape，不得变成动态符号 shape。
 - 通过 `dsl_run` 真实执行，并和 `torch.nn.functional.conv2d` 参考结果对齐。
 
 API 列表:
-- `conv2d_inputs_static_tile_static_kernel(out: Tensor[f32, 12, 4, 254, 254], input_tensor: Tensor[f32, 12, 32, 256, 256], weight: Tensor[f32, 4, 32, 3, 3]) -> None`
+- `conv2d_inputs_static_tile_static_kernel(out: Tensor[f32, 11, 2, 258, 262], input_tensor: Tensor[f32, 11, 28, 260, 264], weight: Tensor[f32, 2, 28, 3, 3]) -> None`
 - `main() -> None`
 
 使用示例:
@@ -21,6 +22,7 @@ API 列表:
 
 from __future__ import annotations
 
+import random
 import sys
 from pathlib import Path
 
@@ -37,17 +39,30 @@ from kernel_gen.operation.nn import img2col2d, matmul, transpose
 from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import MemorySpace
 
+_STATIC_SHAPE_SEED = 20260503
+_STATIC_SHAPE_RNG = random.Random(_STATIC_SHAPE_SEED)
+_STATIC_BATCH = _STATIC_SHAPE_RNG.randint(10, 14)
+_STATIC_IN_CHANNELS = _STATIC_SHAPE_RNG.randint(28, 36)
+_STATIC_INPUT_H = _STATIC_SHAPE_RNG.randint(248, 264)
+_STATIC_INPUT_W = _STATIC_SHAPE_RNG.randint(248, 264)
+_STATIC_OUT_CHANNELS = _STATIC_SHAPE_RNG.randint(2, 5)
+_STATIC_KERNEL_H = 3
+_STATIC_KERNEL_W = 3
+_STATIC_OUTPUT_H = _STATIC_INPUT_H - _STATIC_KERNEL_H + 1
+_STATIC_OUTPUT_W = _STATIC_INPUT_W - _STATIC_KERNEL_W + 1
+
 
 def conv2d_inputs_static_tile_static_kernel(
-    out: "Tensor[f32, 12, 4, 254, 254]",
-    input_tensor: "Tensor[f32, 12, 32, 256, 256]",
-    weight: "Tensor[f32, 4, 32, 3, 3]",
+    out: "Tensor[f32, 11, 2, 258, 262]",
+    input_tensor: "Tensor[f32, 11, 28, 260, 264]",
+    weight: "Tensor[f32, 2, 28, 3, 3]",
 ) -> None:
     """执行静态输入、静态 tile 的 conv2d。
 
 
     功能说明:
     - 输入布局为 `input[N, C, H, W]`，权重布局为 `weight[F, C, KH, KW]`，输出布局为 `out[N, F, Ho, Wo]`。
+    - 输入 shape 为固定 seed 生成并固化的具体数字。
     - 固定 stride=1、dilation=1、padding=0。
     - 固定 tile 为 `TF=4, TC=32, TN=1, THO=127, TWO=127`。
 
@@ -106,22 +121,59 @@ def conv2d_inputs_static_tile_static_kernel(
                         deslice(out, out_tile_mem, [n0, f0, ho0, wo0], [cur_n, cur_f, cur_ho, cur_wo], [1, 1, 1, 1])
 
 
+def _assert_static_memory_ir(module_text: str) -> None:
+    """校验 lowering 后 IR 保留具体 static memory 形状。
+
+
+    功能说明:
+    - 确认 output/input/weight memory 类型包含固定 seed 生成的具体数字 shape。
+    - 确认 IR 不包含 dynamic demo 的语义化符号 shape 或旧匿名 `s1/s2/...` shape。
+    - 失败时抛出 `AssertionError`，让 demo 脚本直接暴露 static shape 回退。
+
+    使用示例:
+    - `_assert_static_memory_ir(str(result.dsl_result.module))`
+    """
+
+    static_fragments = (
+        ("output", f"!nn.memory<[{_STATIC_BATCH}, {_STATIC_OUT_CHANNELS}, {_STATIC_OUTPUT_H}, {_STATIC_OUTPUT_W}]"),
+        ("input", f"!nn.memory<[{_STATIC_BATCH}, {_STATIC_IN_CHANNELS}, {_STATIC_INPUT_H}, {_STATIC_INPUT_W}]"),
+        ("weight", f"!nn.memory<[{_STATIC_OUT_CHANNELS}, {_STATIC_IN_CHANNELS}, {_STATIC_KERNEL_H}, {_STATIC_KERNEL_W}]"),
+    )
+    dynamic_fragments = (
+        ("semantic output", "!nn.memory<[B, C, -KH + XH + 1, -KW + XW + 1]"),
+        ("semantic input", "!nn.memory<[B, N, XH, XW]"),
+        ("semantic weight", "!nn.memory<[C, N, KH, KW]"),
+        ("anonymous dynamic", "!nn.memory<[s1"),
+    )
+    for label, fragment in static_fragments:
+        if fragment not in module_text:
+            raise AssertionError(f"static {label} memory shape missing from lowered IR: {fragment}")
+    for label, fragment in dynamic_fragments:
+        if fragment in module_text:
+            raise AssertionError(f"lowered IR unexpectedly contains {label} memory shape: {fragment}")
+
+
 def main() -> None:
     """运行静态输入、静态 tile 的 conv2d demo。
 
 
     功能说明:
-    - 构造真实 torch tensor 输入。
+    - 使用固定 seed 生成并固化的具体 shape 构造真实 torch tensor 输入。
     - 写入 `kernel/dump/conv2d/inputs_static_tile_static/`。
+    - 校验 lowered IR 保持具体数字 static shape。
     - 用 `torch.nn.functional.conv2d` 校验输出。
 
     使用示例:
     - `python3 kernel/conv2d/inputs_static_tile_static.py`
     """
 
-    input_tensor = torch.arange(12 * 32 * 256 * 256, dtype=torch.float32).reshape(12, 32, 256, 256) / 100000000.0
-    weight = torch.arange(4 * 32 * 3 * 3, dtype=torch.float32).reshape(4, 32, 3, 3) / 100000.0
-    out = torch.empty((12, 4, 254, 254), dtype=torch.float32)
+    input_tensor = torch.arange(_STATIC_BATCH * _STATIC_IN_CHANNELS * _STATIC_INPUT_H * _STATIC_INPUT_W, dtype=torch.float32).reshape(
+        _STATIC_BATCH, _STATIC_IN_CHANNELS, _STATIC_INPUT_H, _STATIC_INPUT_W
+    ) / 100000000.0
+    weight = torch.arange(_STATIC_OUT_CHANNELS * _STATIC_IN_CHANNELS * _STATIC_KERNEL_H * _STATIC_KERNEL_W, dtype=torch.float32).reshape(
+        _STATIC_OUT_CHANNELS, _STATIC_IN_CHANNELS, _STATIC_KERNEL_H, _STATIC_KERNEL_W
+    ) / 100000.0
+    out = torch.empty((_STATIC_BATCH, _STATIC_OUT_CHANNELS, _STATIC_OUTPUT_H, _STATIC_OUTPUT_W), dtype=torch.float32)
     expected = F.conv2d(input_tensor, weight)
     result = run_torch_demo(
         "conv2d/inputs_static_tile_static",
@@ -130,8 +182,10 @@ def main() -> None:
         out,
         expected,
     )
+    _assert_static_memory_ir(str(result.dsl_result.module))
     print(result.dsl_result.module)
     print(result.dsl_result.source)
+    print("[IR] static memory evidence: output/input/weight concrete shapes present; dynamic symbol shapes absent")
     print(f"[CHECK] {result.case_name} max_abs_diff={result.max_abs_diff}")
 
 
