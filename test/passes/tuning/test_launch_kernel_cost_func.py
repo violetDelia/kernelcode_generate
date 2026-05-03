@@ -283,7 +283,7 @@ def _build_launch_kernel_module(
         space=NnMemorySpaceAttr(StringAttr("global")),
     )
     if conflict_attr:
-        kernel_add.attributes["cost_kind"] = StringAttr("memory")
+        kernel_add.attributes["cost_kind"] = StringAttr("VECTOR1")
     loop_block.add_op(view)
     loop_block.add_op(reshape)
     loop_block.add_op(dma_copy)
@@ -313,7 +313,7 @@ def _build_launch_kernel_module(
         ops.append(extra_wrapper)
     ops.append(device)
     if preexisting_cost_func:
-        ops.append(func.FuncOp("_cost_compute__device_kernel", ([], [])))
+        ops.append(func.FuncOp("_cost_DMA1__device_kernel", ([], [])))
     module = ModuleOp(ops)
     return module
 
@@ -329,44 +329,54 @@ def test_launch_kernel_cost_func_pass_registry_name() -> None:
 
 
 # TC-LKCF-001A
-# 功能说明: 验证默认 `cost_kind` 固定为 `DMA|MAC`。
+# 功能说明: 验证默认 `cost_kind` 固定为七类公开成本 kind。
 # 使用示例: pytest -q test/passes/tuning/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_default_kind_is_dma_mac
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
 # 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
 # 对应测试文件路径: test/passes/tuning/test_launch_kernel_cost_func.py
-def test_launch_kernel_cost_func_default_kind_is_dma_mac() -> None:
+def test_launch_kernel_cost_func_default_kind_is_full_npu_demo_cost_set() -> None:
     module = _build_launch_kernel_module()
 
     pass_obj = LaunchKernelCostFuncPass()
     pass_obj.apply(Context(), module)
     module.verify()
 
-    assert pass_obj.cost_kind == "DMA|MAC"
+    assert pass_obj.cost_kind == "DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2"
     funcs = [op.sym_name.data for op in module.ops if isinstance(op, func.FuncOp)]
-    assert funcs == ["wrapper", "_device_kernel", "_cost_DMA__device_kernel", "_cost_MAC__device_kernel"]
+    assert funcs == [
+        "wrapper",
+        "_device_kernel",
+        "_cost_DMA1__device_kernel",
+        "_cost_DMA2__device_kernel",
+        "_cost_DMA3__device_kernel",
+        "_cost_DMA4__device_kernel",
+        "_cost_MAC__device_kernel",
+        "_cost_VECTOR1__device_kernel",
+        "_cost_VECTOR2__device_kernel",
+    ]
     printed = _print_ir(module)
-    assert printed.count('cost_kind = "DMA"') == 2
-    assert printed.count('cost_kind = "MAC"') == 2
+    for kind in ("DMA1", "DMA2", "DMA3", "DMA4", "MAC", "VECTOR1", "VECTOR2"):
+        assert printed.count(f'cost_kind = "{kind}"') == 2
 
 
 # TC-LKCF-002
-# 功能说明: 验证 `cost_kind=compute` 成功路径会新增 cost function，并生成 `tuner.cost + symbol.add` 累计链。
-# 使用示例: pytest -q test/passes/tuning/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_builds_cost_function_for_compute_kind
+# 功能说明: 验证 `cost_kind=VECTOR1` 成功路径会新增 cost function，并生成 `tuner.cost + symbol.add` 累计链。
+# 使用示例: pytest -q test/passes/tuning/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_builds_cost_function_for_vector1_kind
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
 # 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
 # 对应测试文件路径: test/passes/tuning/test_launch_kernel_cost_func.py
-def test_launch_kernel_cost_func_builds_cost_function_for_compute_kind() -> None:
+def test_launch_kernel_cost_func_builds_cost_function_for_vector1_kind() -> None:
     module = _build_launch_kernel_module()
 
-    LaunchKernelCostFuncPass(cost_kind="compute").apply(Context(), module)
+    LaunchKernelCostFuncPass(cost_kind="VECTOR1").apply(Context(), module)
     module.verify()
 
     funcs = [op for op in module.ops if isinstance(op, func.FuncOp)]
-    assert [op.sym_name.data for op in funcs] == ["wrapper", "_device_kernel", "_cost_compute__device_kernel"]
+    assert [op.sym_name.data for op in funcs] == ["wrapper", "_device_kernel", "_cost_VECTOR1__device_kernel"]
 
     printed = _print_ir(module)
-    assert "@_cost_compute__device_kernel" in printed
-    assert printed.count('cost_kind = "compute"') == 2
+    assert "@_cost_VECTOR1__device_kernel" in printed
+    assert printed.count('cost_kind = "VECTOR1"') == 2
     assert 'op_name = "dma.copy"' in printed
     assert 'op_name = "kernel.add"' in printed
     assert "symbol.for" in printed
@@ -377,8 +387,7 @@ def test_launch_kernel_cost_func_builds_cost_function_for_compute_kind() -> None
     assert '"dma.reshape"' in printed
     assert 'op_name = "dma.view"' not in printed
     assert 'op_name = "dma.reshape"' not in printed
-    assert ' kind = "compute"' not in printed
-    assert ' kind = "memory"' not in printed
+    assert ' kind = "VECTOR1"' not in printed
     assert printed.count("tuner.cost") == 2
 
 
@@ -401,25 +410,25 @@ def test_launch_kernel_cost_func_preserves_kernel_reduce_kind_as_kernel_kind() -
 
 
 # TC-LKCF-003
-# 功能说明: 验证 `cost_kind=memory` 不裁剪成本节点，仅切换 metadata 值。
-# 使用示例: pytest -q test/passes/tuning/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_memory_keeps_compute_nodes
+# 功能说明: 验证 `cost_kind=DMA1` 不裁剪成本节点，仅切换 metadata 值。
+# 使用示例: pytest -q test/passes/tuning/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_dma1_keeps_all_cost_nodes
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
 # 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
 # 对应测试文件路径: test/passes/tuning/test_launch_kernel_cost_func.py
-def test_launch_kernel_cost_func_memory_keeps_compute_nodes() -> None:
+def test_launch_kernel_cost_func_dma1_keeps_all_cost_nodes() -> None:
     module = _build_launch_kernel_module()
 
-    LaunchKernelCostFuncPass(cost_kind="memory").apply(Context(), module)
+    LaunchKernelCostFuncPass(cost_kind="DMA1").apply(Context(), module)
 
     printed = _print_ir(module)
-    assert "@_cost_memory__device_kernel" in printed
-    assert printed.count('cost_kind = "memory"') == 2
+    assert "@_cost_DMA1__device_kernel" in printed
+    assert printed.count('cost_kind = "DMA1"') == 2
     assert 'op_name = "dma.copy"' in printed
     assert 'op_name = "kernel.add"' in printed
 
 
 # TC-LKCF-002B
-# 功能说明: 验证 open-kind 多值列表会按顺序新增对应数量的 cost function。
+# 功能说明: 验证公开多值列表会按顺序新增对应数量的 cost function。
 # 使用示例: pytest -q test/passes/tuning/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_builds_cost_functions_for_multi_kind_order
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
 # 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
@@ -427,20 +436,20 @@ def test_launch_kernel_cost_func_memory_keeps_compute_nodes() -> None:
 def test_launch_kernel_cost_func_builds_cost_functions_for_multi_kind_order() -> None:
     module = _build_launch_kernel_module()
 
-    LaunchKernelCostFuncPass(cost_kind="compute|memory|latency").apply(Context(), module)
+    LaunchKernelCostFuncPass(cost_kind="DMA1|MAC|VECTOR1").apply(Context(), module)
     module.verify()
 
     funcs = [op for op in module.ops if isinstance(op, func.FuncOp)]
     assert [op.sym_name.data for op in funcs] == [
         "wrapper",
         "_device_kernel",
-        "_cost_compute__device_kernel",
-        "_cost_memory__device_kernel",
-        "_cost_latency__device_kernel",
+        "_cost_DMA1__device_kernel",
+        "_cost_MAC__device_kernel",
+        "_cost_VECTOR1__device_kernel",
     ]
 
     printed = _print_ir(module)
-    for kind in ("compute", "memory", "latency"):
+    for kind in ("DMA1", "MAC", "VECTOR1"):
         assert printed.count(f'cost_kind = "{kind}"') == 2
         assert f'_cost_{kind}__device_kernel' in printed
     assert printed.count("tuner.cost") == 6
@@ -456,10 +465,10 @@ def test_launch_kernel_cost_func_builds_cost_functions_for_multi_kind_order() ->
 def test_launch_kernel_cost_func_shared_callee_once() -> None:
     module = _build_launch_kernel_module(duplicate_launch=True)
 
-    LaunchKernelCostFuncPass(cost_kind="compute").apply(Context(), module)
+    LaunchKernelCostFuncPass(cost_kind="DMA1").apply(Context(), module)
 
     funcs = [op.sym_name.data for op in module.ops if isinstance(op, func.FuncOp)]
-    assert funcs == ["wrapper", "wrapper_2", "_device_kernel", "_cost_compute__device_kernel"]
+    assert funcs == ["wrapper", "wrapper_2", "_device_kernel", "_cost_DMA1__device_kernel"]
 
 
 # TC-LKCF-005A
@@ -473,14 +482,16 @@ def test_launch_kernel_cost_func_shared_callee_once() -> None:
     [
         "",
         "   ",
-        "compute||memory",
-        "compute| latency |compute",
+        "DMA1||MAC",
+        "DMA1| VECTOR1 |DMA1",
+        "compute",
+        "DMA|MAC",
     ],
 )
 def test_launch_kernel_cost_func_rejects_invalid_cost_kind(cost_kind: str) -> None:
     with pytest.raises(
         KernelCodeError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be '\|' separated names from \[DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2\]$",
     ):
         LaunchKernelCostFuncPass(cost_kind=cost_kind)
 
@@ -496,9 +507,9 @@ def test_launch_kernel_cost_func_rejects_invalid_cost_kind_via_registry() -> Non
 
     with pytest.raises(
         KernelCodeError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be '\|' separated names from \[DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2\]$",
     ):
-        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "memory|latency|memory"})
+        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "DMA1|VECTOR1|DMA1"})
 
 
 # TC-LKCF-006
@@ -514,7 +525,7 @@ def test_launch_kernel_cost_func_rejects_metadata_attr_conflict() -> None:
         KernelCodeError,
         match=r"reserved attr 'cost_kind'$",
     ):
-        LaunchKernelCostFuncPass(cost_kind="compute").apply(Context(), module)
+        LaunchKernelCostFuncPass(cost_kind="VECTOR1").apply(Context(), module)
 
 
 # TC-LKCF-007
@@ -530,7 +541,7 @@ def test_launch_kernel_cost_func_rejects_missing_callee() -> None:
         KernelCodeError,
         match=r"arch\.launch callee 'missing_kernel' not found",
     ):
-        LaunchKernelCostFuncPass(cost_kind="compute").apply(Context(), module)
+        LaunchKernelCostFuncPass(cost_kind="VECTOR1").apply(Context(), module)
 
 
 # TC-LKCF-008
@@ -546,7 +557,7 @@ def test_launch_kernel_cost_func_rejects_unsupported_op() -> None:
         KernelCodeError,
         match=r"unsupported op 'test\.unsupported' in device function '_device_kernel'",
     ):
-        LaunchKernelCostFuncPass(cost_kind="compute").apply(Context(), module)
+        LaunchKernelCostFuncPass(cost_kind="VECTOR1").apply(Context(), module)
 
 
 # TC-LKCF-009
@@ -560,6 +571,6 @@ def test_launch_kernel_cost_func_rejects_existing_cost_func() -> None:
 
     with pytest.raises(
         KernelCodeError,
-        match=r"cost function '_cost_compute__device_kernel' already exists",
+        match=r"cost function '_cost_DMA1__device_kernel' already exists",
     ):
-        LaunchKernelCostFuncPass(cost_kind="compute").apply(Context(), module)
+        LaunchKernelCostFuncPass(cost_kind="DMA1").apply(Context(), module)

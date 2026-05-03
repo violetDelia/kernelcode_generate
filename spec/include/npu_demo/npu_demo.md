@@ -82,7 +82,7 @@
 - `include/npu_demo/npu_demo.h` 是唯一聚合入口，不新增第二套 target include。
 - `Kernel` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md) 冻结；`npu_demo` 只负责承接实现，不得重新发明旧 `Nn` 公共别名。
 - `cost` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/cost/Core.md`](../../../spec/include/api/cost/Core.md)、[`spec/include/api/cost/Dma.md`](../../../spec/include/api/cost/Dma.md)、[`spec/include/api/cost/Kernel.md`](../../../spec/include/api/cost/Kernel.md) 冻结；`npu_demo` 只负责承接默认实现，不得额外引入 `kind2/kind3` 或 target 私有成本命名。
-- `gen_kernel(target="npu_demo")` 生成的完整源码若同时包含普通 kernel function 与 `_cost_DMA_*` / `_cost_MAC_*` / `_cost_compute_*` / `_cost_memory_*` sibling cost function，仍只允许依赖本头文件；不得额外要求包含 `include/npu_demo/cost/*.h`、`include/api/cost/*.h` 或额外 `using namespace npu_demo::cost;`。
+- `gen_kernel(target="npu_demo")` 生成的完整源码若同时包含普通 kernel function 与 `_cost_DMA1_*` / `_cost_DMA2_*` / `_cost_DMA3_*` / `_cost_DMA4_*` / `_cost_MAC_*` / `_cost_VECTOR1_*` / `_cost_VECTOR2_*` sibling cost function，仍只允许依赖本头文件；不得额外要求包含 `include/npu_demo/cost/*.h`、`include/api/cost/*.h` 或额外 `using namespace npu_demo::cost;`。
 - `KernelContext` 只表示当前 launched body 的运行时视图；生成源码不得再显式声明 `npu_demo::KernelContext& ctx` 参数，不要求公开默认构造、复制持久化或脱离 launch 生命周期独立使用。
 - P0 launch 子集固定为：`block=1`、`subthread=1`、`shared_memory_size=0`、`2 <= thread <= registry.hardware.thread_num`；不支持的 extent 必须显式失败，禁止静默回退到单线程或忽略部分 extent。
 - `block_num()` / `thread_num()` / `subthread_num()` 的公开语义是“当前 launch 值”；`target.registry` 中的 `block_num/thread_num/subthread_num` 只作为能力上限与容量校验基线，不再直接等于 launched body 中可见的当前值。
@@ -444,11 +444,11 @@ auto subthreads = ctx.subthread_num();
 - 使用示例：
 
   ```cpp
-  S_INT add_cost = npu_demo::cost::add<GM, float, float, npu_demo::compute>(out, lhs, rhs);
-  S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::memory>(tile, source);
+  S_INT add_cost = npu_demo::cost::add<GM, float, float, npu_demo::VECTOR1>(out, lhs, rhs);
+  S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA1>(tile, source);
   ```
 - 功能说明：承接 `npu_demo` 后端的公开成本 helper 子命名空间。
-- 注意事项：`npu_demo::cost` 是当前公开子命名空间；生成源码可在 `using namespace npu_demo;` 后使用 `cost::...`；不得引入 `kind2/kind3` 或 target 私有成本命名。
+- 注意事项：`npu_demo::cost` 是当前公开子命名空间；生成源码可在 `using namespace npu_demo;` 后使用 `cost::...`；不得引入 `kind2/kind3` 或 target 私有成本命名；`dsl_cost_run(...)` 的 DMA 聚合不得依赖跨文件 `npu_demo::cost::detail` 非公开状态。
 
 ## 测试
 
@@ -458,6 +458,7 @@ auto subthreads = ctx.subthread_num();
   - `test/include/api/test_dma.py`
   - `test/include/api/test_memory.py`
   - `test/include/npu_demo/test_kernel_context.py`
+  - `test/include/npu_demo/test_cost.py`
   - `test/include/npu_demo/test_public_namespace.py`
   - `test/include/npu_demo/test_runtime_launch.py`
   - `test/target/test_registry.py`
@@ -465,6 +466,7 @@ auto subthreads = ctx.subthread_num();
   - `pytest -q test/include/api/test_memory.py test/include/api/test_dma.py`
   - `pytest -q test/include/api/test_arch.py`
   - `pytest -q test/include/npu_demo/test_kernel_context.py test/include/npu_demo/test_runtime_launch.py`
+  - `pytest -q test/include/npu_demo/test_cost.py`
   - `pytest -q test/include/npu_demo/test_public_namespace.py`
   - `pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k "tuner_cost or cost_function or npu_demo"`
   - `pytest -q test/target/test_registry.py -k "npu_demo and launch"`
@@ -489,3 +491,4 @@ auto subthreads = ctx.subthread_num();
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-006 | 公开入口 | 锁定 `Memory/Dma` public function 只通过 `npu_demo::` 正向消费，未限定的全局 helper 不作为成功路径。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_npu_demo_public_namespace_memory_dma_helpers`。 | 公开入口在“锁定 `Memory/Dma` public function 只通过 `npu_demo::` 正向消费，未限定的全局 helper 不作为成功路径。”场景下可导入、构造、注册或按名称发现。 | `test_npu_demo_public_namespace_memory_dma_helpers` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-007 | 生成/编译 | 锁定 `include/npu_demo/npu_demo.h` 对 `gen_kernel` 输出的 wrapper/body kernel + sibling cost function 模块仍是单入口 compile-only 头文件。 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_gen_kernel_compiles_npu_demo_cost_function_module`。 | 生成源码、IR 文本或编译结果体现“锁定 `include/npu_demo/npu_demo.h` 对 `gen_kernel` 输出的 wrapper/body kernel + sibling cost function 模块仍是单入口 compile-only 头文件。”场景。 | `test_gen_kernel_compiles_npu_demo_cost_function_module` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-008 | 公开入口 | 锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `thread_num=8` 上限语义。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_npu_demo_supports_launch_and_barrier_caps`。 | 公开入口在“锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `thread_num=8` 上限语义。”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_npu_demo_supports_launch_and_barrier_caps` |
+| TC-INCLUDE-NPU-DEMO-NPU-DEMO-009 | 边界/异常 | 锁定 cost DMA include 不依赖跨文件非公开 detail 聚合状态。 | 读取公开 include 文本。 | 运行 `test_npu_demo_cost_dma_has_no_cross_file_detail_accumulator`。 | `include/npu_demo/cost/Core.h` 不承载 DMA 聚合状态，`include/npu_demo/cost/Dma.h` 不包含或调用该非公开状态。 | `test_npu_demo_cost_dma_has_no_cross_file_detail_accumulator` |

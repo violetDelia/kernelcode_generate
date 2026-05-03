@@ -72,7 +72,7 @@
   - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前。
   - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 pytest 与工具层统一解析。
 - tuning pass `launch-kernel-cost-func` 既可通过 pass registry 显式启用，也作为 `npu-demo-lowering` 的末尾 pass 运行；不自动进入 `default-lowering`。
-- `launch-kernel-cost-func` 默认 `cost_kind="DMA|MAC"`，并接受 `options={"cost_kind": "compute|memory"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
+- `launch-kernel-cost-func` 默认 `cost_kind="DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2"`，并接受该七值集合的去重子集，例如 `options={"cost_kind": "DMA1|MAC|VECTOR1"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
 - `lower-dma-memory-hierarchy` 接受 pass 专属 `options={"apply_op": "matmul{[\\"\\", \\"tlm1\\", \\"tlm2\\"]}"}`；registry 只负责透传该 option，规则语法与错误语义由 `LowerDmaMemoryHierarchyPass.from_options(...)` 承载。
 - `memory-pool` 接受 pass 专属 `options={"rewrite": "true|false", "alignment": "<non-negative-int>"}`；`fold` 仍由 registry 通用 option 处理。`rewrite` 非 bool、`alignment` 负数或非整数、未知 option 必须由 `MemoryPoolPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'memory-pool' option error: <原因>`。
 - registry 只解析 pass 通用 `fold` 选项；剩余 `options` 仅按字典透传给 pass 或 pipeline 构造入口。
@@ -257,7 +257,7 @@ pass_obj = build_registered_pass("tile-reduce")
 inline_pass = build_registered_pass("inline")
 attach_pass = build_registered_pass("attach-arch-information")
 hoist_pass = build_registered_pass("symbol-buffer-hoist")
-cost_pass = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "compute|memory"})
+cost_pass = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "DMA1|MAC|VECTOR1"})
 memory_pool_pass = build_registered_pass("memory-pool", {"rewrite": "true", "fold": "false", "alignment": "0"})
 default_cost_pass = build_registered_pass("launch-kernel-cost-func")
 ```

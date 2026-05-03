@@ -11,11 +11,14 @@
 API 列表:
 - `DslRunResult(func_op: func.FuncOp, module: ModuleOp, source: str, compiled_kernel: CompiledKernel, execute_result: ExecuteResult, runtime_args: tuple[RuntimeRealArg, ...])`
 - `dsl_run(func_obj: Callable[..., DslFunctionReturn], real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg], pipeline: str | PassManager) -> DslRunResult`
+- `dsl_cost_run(func_obj: Callable[..., DslFunctionReturn], real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg], pipeline: str | PassManager, cost_kind: str) -> int`
 
 使用示例:
 - from kernel_gen.tools.dsl_run import dsl_run
 - result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
 - assert result.execute_result.ok is True
+- from kernel_gen.tools.dsl_run import dsl_cost_run
+- cost = dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")
 
 关联文件:
 - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
@@ -53,6 +56,160 @@ REAL_ARG_TYPE_ERROR = "DslRunUnsupportedRealArg: real_args only supports torch.T
 TILE_VALUE_ERROR = "DslRunInvalidTileValue: tile runtime scalar must be positive int"
 ARITY_ERROR = "DslRunArityMismatch: real_args count does not match function signature"
 NPU_DEMO_WRAPPER_ERROR = "DslRunInternalError: lowered npu_demo module must contain exactly one wrapper func with arch.launch"
+VALID_DSL_COST_KINDS = ("DMA1", "DMA2", "DMA3", "DMA4", "MAC", "VECTOR1", "VECTOR2")
+DMA_DSL_COST_KINDS = ("DMA1", "DMA2", "DMA3", "DMA4")
+DSL_COST_KIND_ERROR = "DslCostRunInvalidCostKind: cost_kind must be one of [DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2]"
+DSL_COST_TARGET_ERROR = "DslCostRunInvalidTarget: dsl_cost_run only supports target 'npu_demo'"
+DSL_COST_OUTPUT_ERROR = "DslCostRunExecutionFailed: cost wrapper execution failed"
+DMA_COST_RAW_HELPER_SOURCE = r"""
+template <typename T>
+S_INT kg_cost_dma_raw_bytes_for_elements(S_INT elements) {
+    if (elements <= 0) {
+        return 0;
+    }
+    return elements * static_cast<S_INT>(sizeof(T));
+}
+
+S_INT kg_cost_dma_raw_vector_element_count(const Vector& size) {
+    S_INT count = 1;
+    for (unsigned long long i = 0; i < size.size(); ++i) {
+        count *= size[i];
+    }
+    return count;
+}
+
+template <MemorySpace Space>
+constexpr bool kg_cost_dma_is_gm_space() {
+    return Space == GM;
+}
+
+template <MemorySpace Space>
+constexpr bool kg_cost_dma_is_tsm_space() {
+    return Space == TSM;
+}
+
+template <MemorySpace Space>
+constexpr bool kg_cost_dma_is_tlm_space() {
+    return Space == TLM1 || Space == TLM2 || Space == TLM3;
+}
+
+template <MemorySpace Space>
+constexpr bool kg_cost_dma_is_tsm_or_tlm_space() {
+    return kg_cost_dma_is_tsm_space<Space>() || kg_cost_dma_is_tlm_space<Space>();
+}
+
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, cost::CostKind Kind>
+constexpr bool kg_cost_dma_matches_kind() {
+    if constexpr (Kind == cost::CostKind::DMA1) {
+        return kg_cost_dma_is_gm_space<SourceSpace>() && kg_cost_dma_is_tsm_or_tlm_space<TargetSpace>();
+    }
+    if constexpr (Kind == cost::CostKind::DMA2) {
+        return kg_cost_dma_is_tsm_or_tlm_space<SourceSpace>() && kg_cost_dma_is_gm_space<TargetSpace>();
+    }
+    if constexpr (Kind == cost::CostKind::DMA3) {
+        return kg_cost_dma_is_tsm_space<SourceSpace>() && kg_cost_dma_is_tlm_space<TargetSpace>();
+    }
+    if constexpr (Kind == cost::CostKind::DMA4) {
+        return kg_cost_dma_is_tsm_space<SourceSpace>() && kg_cost_dma_is_tsm_space<TargetSpace>();
+    }
+    return false;
+}
+
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, cost::CostKind Kind>
+S_INT kg_cost_dma_bytes_copy(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source) {
+    (void)source;
+    if constexpr (kg_cost_dma_matches_kind<TargetSpace, SourceSpace, Kind>()) {
+        return kg_cost_dma_raw_bytes_for_elements<T>(target.element_count());
+    }
+    return 0;
+}
+
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, cost::CostKind Kind>
+S_INT kg_cost_dma_bytes_slice(
+    const Memory<TargetSpace, T>& target,
+    const Memory<SourceSpace, T>& source,
+    const Vector& offset,
+    const Vector& size,
+    const Vector& stride) {
+    (void)target;
+    (void)source;
+    (void)offset;
+    (void)stride;
+    if constexpr (kg_cost_dma_matches_kind<TargetSpace, SourceSpace, Kind>()) {
+        return kg_cost_dma_raw_bytes_for_elements<T>(kg_cost_dma_raw_vector_element_count(size));
+    }
+    return 0;
+}
+
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, cost::CostKind Kind>
+S_INT kg_cost_dma_bytes_deslice(
+    const Memory<TargetSpace, T>& target,
+    const Memory<SourceSpace, T>& source,
+    const Vector& offset,
+    const Vector& size,
+    const Vector& stride) {
+    (void)target;
+    (void)source;
+    (void)offset;
+    (void)stride;
+    if constexpr (kg_cost_dma_matches_kind<TargetSpace, SourceSpace, Kind>()) {
+        return kg_cost_dma_raw_bytes_for_elements<T>(kg_cost_dma_raw_vector_element_count(size));
+    }
+    return 0;
+}
+
+template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType, cost::CostKind Kind>
+S_INT kg_cost_dma_bytes_img2col1d(
+    const Memory<OutputSpace, OutType>& out,
+    const Memory<InputSpace, InType>& input,
+    long long k,
+    long long s,
+    long long d,
+    long long p_left,
+    long long p_right) {
+    (void)input;
+    (void)k;
+    (void)s;
+    (void)d;
+    (void)p_left;
+    (void)p_right;
+    if constexpr (Kind == cost::CostKind::DMA3) {
+        return kg_cost_dma_raw_bytes_for_elements<OutType>(out.element_count());
+    }
+    return 0;
+}
+
+template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType, cost::CostKind Kind>
+S_INT kg_cost_dma_bytes_img2col2d(
+    const Memory<OutputSpace, OutType>& out,
+    const Memory<InputSpace, InType>& input,
+    long long kh,
+    long long kw,
+    long long sh,
+    long long sw,
+    long long dh,
+    long long dw,
+    long long ph,
+    long long pw,
+    long long pl,
+    long long pr) {
+    (void)input;
+    (void)kh;
+    (void)kw;
+    (void)sh;
+    (void)sw;
+    (void)dh;
+    (void)dw;
+    (void)ph;
+    (void)pw;
+    (void)pl;
+    (void)pr;
+    if constexpr (Kind == cost::CostKind::DMA3) {
+        return kg_cost_dma_raw_bytes_for_elements<OutType>(out.element_count());
+    }
+    return 0;
+}
+"""
 
 
 class _StringLike(Protocol):
@@ -582,6 +739,269 @@ def _select_source_and_entry(module: ModuleOp, emit_context: EmitCContext) -> tu
         raise
 
 
+def _validate_dsl_cost_kind(cost_kind: str) -> None:
+    """校验 `dsl_cost_run(...)` 的公开 cost kind。
+
+
+    功能说明:
+    - 只接受计划确认的 `DMA1/DMA2/DMA3/DMA4/MAC/VECTOR1/VECTOR2` 七类 kind。
+    - 不把旧 `compute/memory/DMA` 或任意 open-kind 继续作为执行入口合同。
+
+    使用示例:
+    - _validate_dsl_cost_kind("VECTOR1")
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_cost_run.py](test/tools/test_dsl_cost_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    if cost_kind not in VALID_DSL_COST_KINDS:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, DSL_COST_KIND_ERROR)
+
+
+def _find_cost_func_by_sym_name(module: ModuleOp, sym_name: str) -> func.FuncOp:
+    """按公开 cost function 符号名查找 `func.func`。
+
+
+    功能说明:
+    - `dsl_cost_run(...)` 需要 pipeline 生成 `_cost_<kind>_<device>` sibling 函数。
+    - 缺失时返回稳定合同错误，避免后续源码 wrapper 指向不存在入口。
+
+    使用示例:
+    - cost_func = _find_cost_func_by_sym_name(module, "_cost_VECTOR1_add_kernel_device")
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_cost_run.py](test/tools/test_dsl_cost_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    for op in module.ops:
+        if isinstance(op, func.FuncOp) and op.sym_name.data == sym_name:
+            return op
+    raise KernelCodeError(
+        ErrorKind.CONTRACT,
+        ErrorModule.TOOLS,
+        f"DslCostRunMissingCostFunction: cost function '{sym_name}' not found",
+    )
+
+
+def _split_cpp_params(params_text: str) -> tuple[str, ...]:
+    """按 C++ 函数形参顶层逗号切分参数。
+
+
+    功能说明:
+    - 忽略模板参数、括号与数组维度内部的逗号。
+    - 仅服务 `dsl_cost_run(...)` 当前文件内生成的 cost 捕获 wrapper，不外露为工具 API。
+
+    使用示例:
+    - params = _split_cpp_params("Memory<GM, float>& out, Memory<GM, float>& lhs")
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_cost_run.py](test/tools/test_dsl_cost_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    if not params_text.strip():
+        return ()
+    parts: list[str] = []
+    current: list[str] = []
+    angle_depth = 0
+    paren_depth = 0
+    bracket_depth = 0
+    for ch in params_text:
+        if ch == "<":
+            angle_depth += 1
+        elif ch == ">":
+            angle_depth = max(0, angle_depth - 1)
+        elif ch == "(":
+            paren_depth += 1
+        elif ch == ")":
+            paren_depth = max(0, paren_depth - 1)
+        elif ch == "[":
+            bracket_depth += 1
+        elif ch == "]":
+            bracket_depth = max(0, bracket_depth - 1)
+        if ch == "," and angle_depth == 0 and paren_depth == 0 and bracket_depth == 0:
+            item = "".join(current).strip()
+            if item:
+                parts.append(item)
+            current = []
+            continue
+        current.append(ch)
+    item = "".join(current).strip()
+    if item:
+        parts.append(item)
+    return tuple(parts)
+
+
+def _cpp_param_name(param_text: str) -> str:
+    """提取 C++ 函数形参名。
+
+
+    功能说明:
+    - 从 `Memory<GM, float>& out` 这类参数文本中取出末尾变量名。
+    - 解析失败时抛出 `DslCostRunInvalidSource`，防止生成错误 wrapper。
+
+    使用示例:
+    - name = _cpp_param_name("Memory<GM, float>& out")
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_cost_run.py](test/tools/test_dsl_cost_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    match = re.search(r"([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*$", param_text.strip())
+    if match is None:
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.TOOLS,
+            f"DslCostRunInvalidSource: cannot parse parameter name from '{param_text}'",
+        )
+    return match.group(1)
+
+
+def _insert_dma_cost_raw_helpers(source: str) -> str:
+    """向生成源码插入 `dsl_cost_run(...)` 专用 DMA raw-bytes helper。
+
+
+    功能说明:
+    - helper 只存在于本次生成源码中，用于 DMA kind 把匹配 helper 的返回值改为 raw bytes。
+    - 不依赖 `include/npu_demo/cost/detail`，也不把 DMA 聚合状态写成 include 公开或非公开跨文件 hook。
+
+    使用示例:
+    - source = _insert_dma_cost_raw_helpers(source)
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_cost_run.py](test/tools/test_dsl_cost_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    marker = "using namespace npu_demo;\n"
+    if marker not in source:
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.TOOLS,
+            "DslCostRunInvalidSource: generated npu_demo source is missing namespace import",
+        )
+    return source.replace(marker, f"{marker}\n{DMA_COST_RAW_HELPER_SOURCE.strip()}\n\n", 1)
+
+
+def _rewrite_dma_cost_helpers_to_raw_bytes(source: str) -> str:
+    """把 DMA cost sibling 中的公开 cost helper 调用改写为 raw-bytes helper。
+
+
+    功能说明:
+    - `include/npu_demo/cost` 公开 helper 保持节点级 `ceil(bytes / 64)` 语义。
+    - `dsl_cost_run(...)` 的 DMA 聚合合同要求同一 cost function 内先加总 raw bytes，再统一取整。
+    - 因此只在当前生成源码中重写成本 sibling 的 DMA/Img2Col 成本 helper 调用，不修改 include 公开 API。
+
+    使用示例:
+    - source = _rewrite_dma_cost_helpers_to_raw_bytes(source)
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_cost_run.py](test/tools/test_dsl_cost_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    rewritten = source
+    replacements = (
+        ("cost::copy<", "kg_cost_dma_bytes_copy<"),
+        ("cost::slice<", "kg_cost_dma_bytes_slice<"),
+        ("cost::deslice<", "kg_cost_dma_bytes_deslice<"),
+        ("cost::img2col1d<", "kg_cost_dma_bytes_img2col1d<"),
+        ("cost::img2col2d<", "kg_cost_dma_bytes_img2col2d<"),
+    )
+    for old, new in replacements:
+        rewritten = rewritten.replace(old, new)
+    return _insert_dma_cost_raw_helpers(rewritten)
+
+
+def _append_cost_capture_wrapper(source: str, cost_entry_name: str, cost_kind: str) -> tuple[str, str]:
+    """为 cost 函数源码追加可执行捕获 wrapper。
+
+
+    功能说明:
+    - 当前执行引擎公开 `execute(...)` 只返回执行状态，不捕获 C++ 函数返回值。
+    - 这里在生成源码末尾追加 `void` wrapper，把 `S_INT` cost 返回值写入额外 `Memory<GM, S_INT>&` 输出参数。
+    - DMA kind 先在当前生成源码中把匹配 cost helper 改写为 raw bytes helper，再由 wrapper 返回 `ceil(total_bytes/64)`。
+    - wrapper 只在当前文件内部为 `dsl_cost_run(...)` 服务，不新增执行引擎公开 API。
+
+    使用示例:
+    - wrapped_source, wrapper_name = _append_cost_capture_wrapper(source, "_cost_VECTOR1_add", "VECTOR1")
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_cost_run.py](test/tools/test_dsl_cost_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    pattern = re.compile(rf"\bS_INT\s+{re.escape(cost_entry_name)}\s*\((?P<params>.*?)\)\s*\{{", re.DOTALL)
+    match = pattern.search(source)
+    if match is None:
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.TOOLS,
+            f"DslCostRunMissingCostFunction: cost function '{cost_entry_name}' not found in generated source",
+        )
+    params = _split_cpp_params(match.group("params"))
+    param_names = tuple(_cpp_param_name(param) for param in params)
+    wrapper_name = f"_kg_capture_{_sanitize_dump_component(cost_entry_name)}"
+    params_text = ", ".join((*params, "Memory<GM, S_INT>& __kg_cost_output"))
+    call_args = ", ".join(param_names)
+    call_text = f"{cost_entry_name}({call_args})" if call_args else f"{cost_entry_name}()"
+    if cost_kind in DMA_DSL_COST_KINDS:
+        source = _rewrite_dma_cost_helpers_to_raw_bytes(source)
+        body = (
+            f"    S_INT __kg_total_dma_bytes = {call_text};\n"
+            "    __kg_cost_output.data()[0] = __kg_total_dma_bytes <= 0 ? 0 : ((__kg_total_dma_bytes + 63) / 64);\n"
+        )
+    else:
+        body = f"    __kg_cost_output.data()[0] = static_cast<S_INT>({call_text});\n"
+    suffix = (
+        "\n"
+        f"void {wrapper_name}({params_text}) {{\n"
+        f"{body}"
+        "}\n"
+    )
+    return source.rstrip() + "\n" + suffix, wrapper_name
+
+
+def _select_source_and_cost_entry(
+    module: ModuleOp,
+    emit_context: EmitCContext,
+    cost_kind: str,
+) -> tuple[str, str, func.FuncOp]:
+    """根据 lowered module 选择 cost 源码与执行入口。
+
+
+    功能说明:
+    - 复用 `npu_demo` wrapper/body 公开选择规则，找到 device body 后拼出 sibling cost 函数名。
+    - 只支持 `target="npu_demo"`，其他 target 直接按公开错误失败。
+
+    使用示例:
+    - source, entry_name, func_op = _select_source_and_cost_entry(module, EmitCContext(), "VECTOR1")
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_cost_run.py](test/tools/test_dsl_cost_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    if _emitc_target_name(emit_context) != "npu_demo":
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, DSL_COST_TARGET_ERROR)
+    source, body_entry_name, body_func = _select_source_and_entry(module, emit_context)
+    cost_entry_name = f"_cost_{cost_kind}_{body_entry_name}"
+    cost_func = _find_cost_func_by_sym_name(module, cost_entry_name)
+    _ = body_func
+    return source, cost_entry_name, cost_func
+
+
 @dataclass(frozen=True)
 class DslRunResult:
     """`dsl_run(...)` 的一次执行结果。
@@ -686,7 +1106,88 @@ def dsl_run(
     )
 
 
+def dsl_cost_run(
+    func_obj: Callable[..., DslFunctionReturn],
+    real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg],
+    pipeline: str | PassManager,
+    cost_kind: str,
+) -> int:
+    """把 DSL 函数 lowering 到 npu_demo cost function 并返回真实 cost。
+
+
+    功能说明:
+    - 公开入口固定要求调用方显式传入 `cost_kind`，不设置默认值。
+    - 只接受 `DMA1/DMA2/DMA3/DMA4/MAC/VECTOR1/VECTOR2` 七类 kind。
+    - 复用 `dsl_run(...)` 的真实参数校验、DSL 解析、pipeline lowering、npu_demo wrapper/body 选择与执行引擎编译执行。
+    - 通过当前文件内生成的捕获 wrapper 读取 cost 函数 `S_INT` 返回值，不改执行引擎公开 API。
+
+    使用示例:
+    - cost = dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")
+    - assert isinstance(cost, int)
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_cost_run.py](test/tools/test_dsl_cost_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    _validate_dsl_cost_kind(cost_kind)
+    if not isinstance(get_target(), str) or not get_target():
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInvalidTarget: core config target must be non-empty str")
+    emit_context = EmitCContext()
+    if _emitc_target_name(emit_context) != "npu_demo":
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, DSL_COST_TARGET_ERROR)
+    resolved_pipeline = _resolve_pipeline(pipeline)
+    runtime_args = _normalize_real_args(real_args)
+    dump_kernel_dir = _resolve_dump_kernel_dir(func_obj)
+
+    positional_params = [
+        param
+        for param in inspect.signature(func_obj).parameters.values()
+        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if len(runtime_args) != len(positional_params):
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, ARITY_ERROR)
+    for parameter, arg in zip(positional_params, runtime_args, strict=True):
+        _validate_runtime_arg(parameter, arg)
+    dsl_args = _build_dsl_runtime_args(runtime_args)
+
+    module = mlir_gen(func_obj, *dsl_args)
+    if not isinstance(module, ModuleOp):
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInternalError: mlir_gen must return builtin.module")
+
+    root_func = _find_first_func(module)
+    if root_func.function_type.outputs.data:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, RETURN_VALUE_ERROR)
+
+    lowered_module = _run_pipeline_with_optional_dump(resolved_pipeline, module, dump_kernel_dir)
+    if not isinstance(lowered_module, ModuleOp):
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInternalError: pipeline must return builtin.module")
+
+    source_snapshot = snapshot_config()
+    try:
+        if dump_kernel_dir is not None:
+            set_dump_dir(dump_kernel_dir)
+        source, cost_entry_name, _ = _select_source_and_cost_entry(lowered_module, emit_context, cost_kind)
+    finally:
+        restore_config(source_snapshot)
+    cost_source, wrapper_name = _append_cost_capture_wrapper(source, cost_entry_name, cost_kind)
+    if dump_kernel_dir is not None:
+        _write_dump_file(dump_kernel_dir / "99-cost-source.cpp", cost_source)
+
+    import numpy
+
+    cost_output = numpy.zeros((1,), dtype=numpy.int64)
+    engine = ExecutionEngine(target=_emitc_target_name(emit_context))
+    compiled_kernel = engine.compile(source=cost_source, function=wrapper_name)
+    execute_result = compiled_kernel.execute(args=(*runtime_args, cost_output))
+    if not execute_result.ok:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, DSL_COST_OUTPUT_ERROR)
+    return int(cost_output[0])
+
+
 __all__ = [
     "DslRunResult",
+    "dsl_cost_run",
     "dsl_run",
 ]

@@ -557,7 +557,7 @@ def test_build_registered_nn_lowering_pass_is_module_pass() -> None:
 
 
 # TC-REGISTRY-007B
-# 功能说明: 验证内置 pass 加载后可通过稳定名称构造 launch-kernel-cost-func，并透传 cost_kind 选项。
+# 功能说明: 验证内置 pass 加载后可通过稳定名称构造 launch-kernel-cost-func，并透传公开 cost_kind 选项。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_launch_kernel_cost_func_pass
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
@@ -565,15 +565,15 @@ def test_build_registered_nn_lowering_pass_is_module_pass() -> None:
 def test_build_registered_launch_kernel_cost_func_pass() -> None:
     load_builtin_passes()
 
-    pass_obj = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "compute|memory|latency"})
+    pass_obj = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "DMA1|MAC|VECTOR1"})
 
     assert pass_obj.name == "launch-kernel-cost-func"
     assert type(pass_obj).__name__ == "LaunchKernelCostFuncPass"
-    assert getattr(pass_obj, "cost_kind") == "compute|memory|latency"
+    assert getattr(pass_obj, "cost_kind") == "DMA1|MAC|VECTOR1"
 
 
 # TC-REGISTRY-007BA
-# 功能说明: 验证 registry 无参构造 launch-kernel-cost-func 时使用公开默认 `DMA|MAC`。
+# 功能说明: 验证 registry 无参构造 launch-kernel-cost-func 时使用公开默认七类成本 kind。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_launch_kernel_cost_func_default_kind
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
@@ -585,7 +585,7 @@ def test_build_registered_launch_kernel_cost_func_default_kind() -> None:
 
     assert pass_obj.name == "launch-kernel-cost-func"
     assert type(pass_obj).__name__ == "LaunchKernelCostFuncPass"
-    assert getattr(pass_obj, "cost_kind") == "DMA|MAC"
+    assert getattr(pass_obj, "cost_kind") == "DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2"
 
 
 # TC-REGISTRY-007C
@@ -599,9 +599,9 @@ def test_build_registered_launch_kernel_cost_func_rejects_invalid_kind() -> None
 
     with pytest.raises(
         KernelCodeError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be '\|' separated names from \[DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2\]$",
     ):
-        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "memory|latency|memory"})
+        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "DMA1|VECTOR1|DMA1"})
 
 
 # TC-REGISTRY-007D

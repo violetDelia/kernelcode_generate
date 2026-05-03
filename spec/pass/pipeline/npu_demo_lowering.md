@@ -45,7 +45,7 @@
 - `symbol-buffer-hoist`：`SymbolBufferHoistPass` 的公开 pass 名称。
 - `attach-arch-information`：在 outline 前为目标函数附加 launch / shared memory 等 arch 元信息的阶段。
 - `outline-device-kernel`：将带 arch 元信息的函数 outline 成 host wrapper + device body 的阶段。
-- `launch-kernel-cost-func`：在 pipeline 末尾为 outlined device body 生成 sibling cost function 的阶段，默认 `cost_kind` 为 `DMA|MAC`。
+- `launch-kernel-cost-func`：在 pipeline 末尾为 outlined device body 生成 sibling cost function 的阶段，默认 `cost_kind` 为 `DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2`。
 
 ## 目标
 
@@ -53,7 +53,7 @@
 - 明确 `symbol-loop-hoist` 在无 `symbol.for` 时可以 no-op，因此可安全加入该最小 pipeline。
 - 明确 `tile-analysis` 位于 `symbol-loop-hoist` 后置 `cse` 之后、`symbol-buffer-hoist` 之前，只记录 tile 分析结果，不生成 tile 循环。
 - 明确 `symbol-buffer-hoist` 位于 `tile-analysis` 之后，对 `symbol.for` 内安全 `dma.alloc` 做 buffer 外提；无可外提 buffer 时保持 no-op。
-- 明确该 pipeline 的最终输出为 host wrapper + device body + `_cost_DMA_*` / `_cost_MAC_*` sibling cost function IR，供 `gen_kernel(...)` 直接消费。
+- 明确该 pipeline 的最终输出为 host wrapper + device body + `_cost_DMA1_*` / `_cost_DMA2_*` / `_cost_DMA3_*` / `_cost_DMA4_*` / `_cost_MAC_*` / `_cost_VECTOR1_*` / `_cost_VECTOR2_*` sibling cost function IR，供 `gen_kernel(...)` 直接消费。
 - 当输入 DSL callable 除 `lhs/rhs/out` 外还包含公开 `SymbolDim` tile / shape 参数时，pipeline 输出的 host wrapper、device body 与 sibling cost function 必须继续保留这些 trailing `!symbol.int` 参数，供 `gen_kernel(...)` 直接消费。
 - 保持 `default-lowering` 作为独立公开 builder，不与本 pipeline 混用。
 
@@ -99,7 +99,7 @@
   module = pm.run(module)
   ```
 - 功能说明：构造 `npu-demo-lowering` pipeline，并返回 `PassManager`。
-- 注意事项：pipeline 名称必须固定为 `npu-demo-lowering`；pass 顺序必须固定为 `inline -> cse -> decompass -> lower-nn -> symbol-loop-hoist -> cse -> tile-analysis -> symbol-buffer-hoist -> attach-arch-information -> outline-device-kernel -> launch-kernel-cost-func`；`cse` 必须紧跟 `inline`，第二个 `cse` 必须紧跟 `symbol-loop-hoist`；`tile-analysis` 只添加 `tile.analysis` / `tile.tile_exprs` 等分析属性，不生成 `symbol.for` 或 `dma.view`；pipeline 中的 `LaunchKernelCostFuncPass` 使用 pass 默认 `cost_kind="DMA|MAC"`，builder 不新增 cost kind 选项；`only-kernel`、`only_kernel` 或其他未知 options 输入必须显式失败。
+- 注意事项：pipeline 名称必须固定为 `npu-demo-lowering`；pass 顺序必须固定为 `inline -> cse -> decompass -> lower-nn -> symbol-loop-hoist -> cse -> tile-analysis -> symbol-buffer-hoist -> attach-arch-information -> outline-device-kernel -> launch-kernel-cost-func`；`cse` 必须紧跟 `inline`，第二个 `cse` 必须紧跟 `symbol-loop-hoist`；`tile-analysis` 只添加 `tile.analysis` / `tile.tile_exprs` 等分析属性，不生成 `symbol.for` 或 `dma.view`；pipeline 中的 `LaunchKernelCostFuncPass` 使用 pass 默认 `cost_kind="DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2"`，builder 不新增 cost kind 选项；`only-kernel`、`only_kernel` 或其他未知 options 输入必须显式失败。
 
 ## 测试
 

@@ -3,17 +3,17 @@
 
 功能说明:
 - 为 module 中被 `arch.launch` 引用的 device function 生成 sibling cost function。
-- 在 cost function 中保留 `symbol.for` 结构，复制必要 helper op，并为受支持的 `dma/kernel/arch` op 生成 `tuner.cost` 与 `symbol.add` 累计链。
+- 在 cost function 中保留 `symbol.for` 结构，复制必要 helper op，并为受支持的 `dma/kernel/arch` op 生成 `tuner.cost` 与 `symbol.add` 累计链；`dma.store` 按写回方向成本节点保留。
 - 保持原 host wrapper 与原 device function 不变；当前文件不公开 helper 函数或 helper 类，重写细节只属于 `LaunchKernelCostFuncPass.apply(...)` 内部实现。
 
 API 列表:
-- `class LaunchKernelCostFuncPass(cost_kind: str = "DMA|MAC", fold: bool = True)`
+- `class LaunchKernelCostFuncPass(cost_kind: str = "DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2", fold: bool = True)`
 - `LaunchKernelCostFuncPass.from_options(options: dict[str, str]) -> LaunchKernelCostFuncPass`
 
 使用示例:
 - from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
 - LaunchKernelCostFuncPass().apply(Context(), module)
-- LaunchKernelCostFuncPass(cost_kind="compute|latency|bandwidth").apply(Context(), module)
+- LaunchKernelCostFuncPass(cost_kind="DMA1|MAC|VECTOR1").apply(Context(), module)
 
 关联文件:
 - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
@@ -23,10 +23,12 @@ API 列表:
 
 from __future__ import annotations
 
+from typing import TypedDict
+
 from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp, StringAttr
-from xdsl.ir import Block, Region, SSAValue
+from xdsl.ir import Block, Operation, Region, SSAValue
 
 from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolForOp, SymbolYieldOp
@@ -44,15 +46,25 @@ HELPER_OP_NAMES = (
 )
 DROPPED_HELPER_OP_NAMES = (
     "dma.load",
-    "dma.store",
     "dma.free",
     "dma.broadcast",
     "dma.fill",
     "dma.cast",
     "dma.transpose",
 )
-DEFAULT_COST_KIND = "DMA|MAC"
-INVALID_COST_KIND_DETAIL = "cost_kind must be a non-empty '|' separated list of unique kind names"
+VALID_COST_KINDS = ("DMA1", "DMA2", "DMA3", "DMA4", "MAC", "VECTOR1", "VECTOR2")
+DEFAULT_COST_KIND = "|".join(VALID_COST_KINDS)
+INVALID_COST_KIND_DETAIL = "cost_kind must be '|' separated names from [DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2]"
+
+
+class _CostTraversalFrame(TypedDict):
+    source_block: Block
+    target_block: Block
+    ops: list[Operation]
+    index: int
+    value_mapper: dict[SSAValue, SSAValue]
+    acc_value: SSAValue
+    loop_op: "SymbolForOp | None"
 
 
 class LaunchKernelCostFuncPass(Pass):
@@ -62,11 +74,11 @@ class LaunchKernelCostFuncPass(Pass):
     功能说明:
     - 固定公开名称为 `launch-kernel-cost-func`。
     - 从 `arch.launch -> device func` 关系生成 sibling cost function。
-    - `cost_kind` 接受任意非空、`|` 分隔且去重后的 kind 名列表。
+    - `cost_kind` 接受 `DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2` 子集的 `|` 分隔且去重后的 kind 名列表。
 
     使用示例:
     - from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
-    - LaunchKernelCostFuncPass(cost_kind="compute|memory|latency").apply(Context(), module)
+    - LaunchKernelCostFuncPass(cost_kind="DMA1|MAC|VECTOR1").apply(Context(), module)
 
     关联文件:
     - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
@@ -91,7 +103,7 @@ class LaunchKernelCostFuncPass(Pass):
 
         使用示例:
         - pass_obj = LaunchKernelCostFuncPass()
-        - pass_obj = LaunchKernelCostFuncPass(cost_kind="compute|memory|latency")
+        - pass_obj = LaunchKernelCostFuncPass(cost_kind="DMA1|MAC|VECTOR1")
         - pass_obj = LaunchKernelCostFuncPass(fold=False)
 
         关联文件:
@@ -109,7 +121,7 @@ class LaunchKernelCostFuncPass(Pass):
         normalized_kinds: list[str] = []
         seen_kinds: set[str] = set()
         for kind in raw_kinds:
-            if kind in seen_kinds:
+            if kind not in VALID_COST_KINDS or kind in seen_kinds:
                 raise_pass_contract_error("LaunchKernelCostFuncError", INVALID_COST_KIND_DETAIL)
             seen_kinds.add(kind)
             normalized_kinds.append(kind)
@@ -124,13 +136,13 @@ class LaunchKernelCostFuncPass(Pass):
 
 
         功能说明:
-        - 支持 `{"cost_kind": "compute|memory|latency"}` 形式的 registry 入口。
-        - 未提供 `cost_kind` 时使用默认 `DMA|MAC`。
+        - 支持 `{"cost_kind": "DMA1|MAC|VECTOR1"}` 形式的 registry 入口。
+        - 未提供 `cost_kind` 时使用默认七 kind 列表。
         - 拒绝未知选项，避免静默吞参。
 
         使用示例:
         - pass_obj = LaunchKernelCostFuncPass.from_options({})
-        - pass_obj = LaunchKernelCostFuncPass.from_options({"cost_kind": "compute|memory|latency"})
+        - pass_obj = LaunchKernelCostFuncPass.from_options({"cost_kind": "DMA1|MAC|VECTOR1"})
 
         关联文件:
         - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
@@ -157,7 +169,7 @@ class LaunchKernelCostFuncPass(Pass):
         - 公开执行入口固定为 xdsl `ModulePass.apply(ctx, module)`，不再提供单 pass `run(...)` 兼容入口。
 
         使用示例:
-        - LaunchKernelCostFuncPass(cost_kind="compute|memory").apply(Context(), module)
+        - LaunchKernelCostFuncPass(cost_kind="DMA1|MAC").apply(Context(), module)
 
         关联文件:
         - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
@@ -219,7 +231,7 @@ class LaunchKernelCostFuncPass(Pass):
                 zero = SymbolConstOp(0)
                 cost_block.add_op(zero)
 
-                frames: list[dict[str, object]] = [
+                frames: list[_CostTraversalFrame] = [
                     {
                         "source_block": source_blocks[0],
                         "target_block": cost_block,

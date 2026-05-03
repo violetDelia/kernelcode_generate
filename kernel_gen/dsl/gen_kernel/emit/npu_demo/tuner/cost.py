@@ -3,6 +3,7 @@
 
 功能说明:
 - 发射 `tuner.cost` 到 `npu_demo::cost::*` 公开 helper 调用。
+- `dma.store` 写回成本复用公开 `cost::deslice` helper，不新增 cost namespace 公开接口。
 - 当前文件内 helper 只服务本文件的 cost emit 细节，不作为跨文件公开 API。
 
 API 列表:
@@ -37,6 +38,7 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
 
     功能说明:
     - 将受支持的 `op_name` 映射到公开 `npu_demo::cost::*` helper。
+    - `op_name="dma.store"` 按写回方向发射为 `cost::deslice`，用于 DMA2 聚合合同。
     - `cost_kind` 按 IR 文本原样透传为模板实参。
 
     使用示例:
@@ -243,7 +245,7 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
             f"cost::copy<{ctx.dispatch_attr(target_type)}, {ctx.dispatch_attr(source_type)}, {target_dtype}, {helper_kind}>"
             f"({target_expr} /*target*/, {source_expr} /*source*/);"
         )
-    if helper_name in ("dma.slice", "dma.deslice"):
+    if helper_name in ("dma.slice", "dma.deslice", "dma.store"):
         if len(operands) < 2:
             raise ctx.emit_error("tuner.cost", f"op_name={helper_name} requires target, source, offsets, sizes, strides")
         if not isinstance(operands[0].type, NnMemoryType):

@@ -54,8 +54,8 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
       dsl_run 的最小 npu_demo 正向合同。
     - `SymbolBufferHoistPass` 位于 `TileAnalysisPass` 之后，用于把 loop 内安全 `dma.alloc`
       外提到 loop 之前。
-    - `LaunchKernelCostFuncPass` 位于 pipeline 最后，使用默认 `cost_kind="DMA|MAC"` 生成 sibling
-      cost function。
+    - `LaunchKernelCostFuncPass` 位于 pipeline 最后，使用默认
+      `cost_kind="DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2"` 生成 sibling cost function。
     - 仅允许 `target` 选项；当前默认 target 为 `npu_demo`，`only-kernel` 等历史选项必须显式失败。
 
     使用示例:

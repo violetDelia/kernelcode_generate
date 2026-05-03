@@ -5,7 +5,7 @@
 - `dsl_run(func, real_args, pipeline)` 是面向测试和脚本的单入口工具。
 - 负责串起 `mlir_gen -> pass/pipeline -> gen_kernel -> ExecutionEngine.compile/execute`。
 - 公开合同只覆盖这条一体化路径，不扩展到无关 pass、无关 dialect、无关工具。
-- `kernel_gen.tools` 包根稳定暴露 `DslRunResult` 与属性入口 `kernel_gen.tools.dsl_run(...)`，不把 `dsl_run` 子模块对象当作公开合同。
+- `kernel_gen.tools` 包根稳定暴露 `DslRunResult`、`kernel_gen.tools.dsl_run(...)` 与 `kernel_gen.tools.dsl_cost_run(...)`，不把 `dsl_run` 子模块对象当作公开合同。
 - 诊断落盘根目录统一来自 `kernel_gen.core.config.set_dump_dir(...)`，不作为 `dsl_run(...)` 入参。
 - 失败统一抛出 `KernelCodeError(ErrorModule.TOOLS, message)`；不再定义或导出工具专属错误类。
 - `dsl_run(...)` 不向 kernel 函数隐式注入 operation helper、`MemorySpace`、`NumericType` 或 `SymbolDim`；kernel 体引用的名称必须来自显式 import、闭包或函数全局绑定，缺失时必须报错。
@@ -15,6 +15,7 @@
 
 - `class DslRunResult(func_op: func.FuncOp, module: ModuleOp, source: str, compiled_kernel: CompiledKernel, execute_result: ExecuteResult, runtime_args: tuple[RuntimeRealArg, ...])`
 - `dsl_run(func_obj: Callable[..., DslFunctionReturn], real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg], pipeline: str | PassManager) -> DslRunResult`
+- `dsl_cost_run(func_obj: Callable[..., DslFunctionReturn], real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg], pipeline: str | PassManager, cost_kind: str) -> int`
 
 ## 文档信息
 
@@ -35,14 +36,14 @@
 
 ### 导入约定
 
-- 直接模块入口：`from kernel_gen.tools.dsl_run import DslRunResult, dsl_run`。
-- 包根稳定入口：`import kernel_gen.tools as tools`，再使用 `tools.DslRunResult`、`tools.dsl_run(...)`。
-- 包根稳定导入：`from kernel_gen.tools import DslRunResult, dsl_run`。
+- 直接模块入口：`from kernel_gen.tools.dsl_run import DslRunResult, dsl_run, dsl_cost_run`。
+- 包根稳定入口：`import kernel_gen.tools as tools`，再使用 `tools.DslRunResult`、`tools.dsl_run(...)`、`tools.dsl_cost_run(...)`。
+- 包根稳定导入：`from kernel_gen.tools import DslRunResult, dsl_run, dsl_cost_run`。
 
 ### helper 边界
 
-- 当前文件内 `_runtime_module_name(...)`、`_normalize_real_args(...)`、`_resolve_pipeline(...)`、`_run_pipeline_with_optional_dump(...)`、`_select_source_and_entry(...)` 等下划线 helper 只服务当前文件内部实现。
-- 实现、测试和外部调用方不得跨文件导入或断言这些 helper；公开行为只能通过 `DslRunResult(...)` 与 `dsl_run(...)` 观察。
+- 当前文件内 `_runtime_module_name(...)`、`_normalize_real_args(...)`、`_resolve_pipeline(...)`、`_run_pipeline_with_optional_dump(...)`、`_select_source_and_entry(...)`、`_append_cost_capture_wrapper(...)` 等下划线 helper 只服务当前文件内部实现。
+- 实现、测试和外部调用方不得跨文件导入或断言这些 helper；公开行为只能通过 `DslRunResult(...)`、`dsl_run(...)` 与 `dsl_cost_run(...)` 观察。
 - `RuntimeRealArg` 是文档类型别名，表示 `torch.Tensor | numpy.ndarray | int | float`；它不新增独立可调用公开入口。
 
 ## API详细说明
@@ -115,12 +116,46 @@
   - `dump_dir` 只用于诊断，不改变 `module/source/compile/execute` 正常路径语义。
   - 调用方不得依赖实现内部状态。
 
+### `dsl_cost_run(func_obj: Callable[..., DslFunctionReturn], real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg], pipeline: str | PassManager, cost_kind: str) -> int`
+
+- api：`dsl_cost_run(func_obj: Callable[..., DslFunctionReturn], real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg], pipeline: str | PassManager, cost_kind: str) -> int`
+- 参数：
+  - `func_obj`：函数对象；类型 `Callable[..., DslFunctionReturn]`；无默认值，调用方必须显式提供。
+  - `real_args`：运行期真实实参序列；类型 `tuple[RuntimeRealArg, ...] | list[RuntimeRealArg]`；校验规则与 `dsl_run(...)` 一致。
+  - `pipeline`：pass pipeline 名称或 `PassManager` 对象；类型 `str | PassManager`；校验规则与 `dsl_run(...)` 一致。
+  - `cost_kind`：成本统计视角；类型 `str`；无默认值；只接受 `DMA1`、`DMA2`、`DMA3`、`DMA4`、`MAC`、`VECTOR1`、`VECTOR2`。
+- 返回值：`int`，来自 `_cost_<cost_kind>_<device body>` sibling cost function 的 `S_INT` 返回值。
+- 使用示例：
+
+  ```python
+  from kernel_gen.core.config import set_target
+  from kernel_gen.operation import store
+  from kernel_gen.tools.dsl_run import dsl_cost_run
+
+  def add_kernel(out, lhs, rhs):
+      store(out, lhs + rhs, [0], [128], [1])
+
+  set_target("npu_demo")
+  cost = dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")
+  assert isinstance(cost, int)
+  ```
+- 功能说明：执行 `dsl_cost_run` 工具入口，生成并执行 `npu_demo` cost sibling function。
+- 注意事项：
+  - `dsl_cost_run(...)` 不修改 `dsl_run(...)` 返回模型，不接受默认 `cost_kind`，也不在缺少 cost sibling 时 fallback 到普通 kernel。
+  - `DMA1/DMA2/DMA3/DMA4` 返回同一 cost function 内匹配 DMA helper 的有效字节总和取整结果，即 `ceil(total_matching_bytes / 64)`。
+  - DMA 聚合只允许通过 `dsl_cost_run(...)` 生成源码中的本地 raw-bytes helper 完成；生成源码和 include 公开层不得跨文件调用 `npu_demo::cost::detail` 非公开聚合状态。
+  - target 只能是 `npu_demo`；其他 target 必须失败，固定短语为 `DslCostRunInvalidTarget: dsl_cost_run only supports target 'npu_demo'`。
+  - 非法 `cost_kind` 必须失败，固定短语为 `DslCostRunInvalidCostKind: cost_kind must be one of [DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2]`。
+  - lowering 后缺少目标 cost sibling 必须失败，固定短语前缀为 `DslCostRunMissingCostFunction:`。
+  - cost 函数返回值通过工具层当前文件内部追加的捕获 wrapper 写入临时 `S_INT` 输出参数；该 wrapper 不作为执行引擎或 include 的公开 API。
+
 ## 测试
 
 - 测试文件：
   - `test/tools/test_dsl_run.py`
+  - `test/tools/test_dsl_cost_run.py`
   - `test/tools/test_package.py`
-- 执行命令：`pytest -q test/tools/test_dsl_run.py`
+- 执行命令：`pytest -q test/tools/test_dsl_run.py test/tools/test_dsl_cost_run.py test/tools/test_package.py`
 
 ### 测试目标
 
@@ -167,3 +202,13 @@
 | TC-TOOLS-DSL-RUN-035 | 边界/异常 | DSL run rejects target cleared after pipeline | 传入公开 `PassManager` 子类，在 `run(...)` 后使 core target 变为空字符串。 | 运行 `test_dsl_run_rejects_target_cleared_after_pipeline`。 | 源码生成入口按公开 target 错误 `DslRunInvalidTarget` 失败。 | `test_dsl_run_rejects_target_cleared_after_pipeline` |
 | TC-TOOLS-DSL-RUN-036 | 边界/异常 | DSL run rejects unsupported numpy dtype | 传入 `numpy.ndarray` 且 dtype 不在 DSL `NumericType` 公开枚举中。 | 运行 `test_dsl_run_rejects_unsupported_numpy_dtype`。 | real_args 转换阶段按 `DslRunUnsupportedRealArg` 失败。 | `test_dsl_run_rejects_unsupported_numpy_dtype` |
 | TC-TOOLS-DSL-RUN-037 | 边界/异常 | DSL run maps bfloat16 runtime dtype before pipeline validation | 传入 `torch.bfloat16` tensors 与返回非 module 的公开 `PassManager` 子类。 | 运行 `test_dsl_run_maps_bfloat16_runtime_dtype_before_pipeline_validation`。 | dtype 先映射为 DSL `bf16`，再按公开 pipeline 结果错误失败。 | `test_dsl_run_maps_bfloat16_runtime_dtype_before_pipeline_validation` |
+| TC-TOOLS-DSL-RUN-038 | 执行结果 | DSL cost run returns VECTOR1 cost | 准备 npu_demo add kernel 与公开真实参数。 | 运行 `test_dsl_cost_run_returns_public_vector1_cost`。 | `dsl_cost_run(...)` 返回 `int` 且为当前 vector cost 公式的非零结果。 | `test_dsl_cost_run_returns_public_vector1_cost` |
+| TC-TOOLS-DSL-RUN-039 | 执行结果 | DSL cost run returns DMA aggregate cost | 准备两路 GM->TSM slice 与一路 TSM->GM store，且单路字节数不能整除 64 的 npu_demo add kernel。 | 运行 `test_dsl_cost_run_returns_dma1_aggregate_cost`。 | `DMA1` 返回 `ceil((lhs_bytes + rhs_bytes) / 64)`，`DMA2` 返回 `ceil(out_bytes / 64)`。 | `test_dsl_cost_run_returns_dma1_aggregate_cost` |
+| TC-TOOLS-DSL-RUN-040 | 边界/异常 | DSL cost run DMA source avoids private detail | 开启 `dump_dir` 并运行 DMA1 cost。 | 运行 `test_dsl_cost_run_dma_source_avoids_non_public_detail_helpers`。 | 生成源码不出现 `npu_demo::cost::detail`、`reset_dma_cost_accumulator` 或 `finalize_dma_cost_accumulator`。 | `test_dsl_cost_run_dma_source_avoids_non_public_detail_helpers` |
+| TC-TOOLS-DSL-RUN-040A | 执行结果 | DSL cost run rank2 store layout compiles | 准备 rank=2 显式 `slice + add + store` kernel。 | 运行 `test_dsl_cost_run_compiles_rank2_store_vector_layout`。 | `DMA1/DMA2` 返回公开公式成本，生成源码中的普通 `store(...)` 行不再使用裸 `{..}` layout，并可真实编译执行。 | `test_dsl_cost_run_compiles_rank2_store_vector_layout` |
+| TC-TOOLS-DSL-RUN-041 | 执行结果 | DSL cost run returns zero for VECTOR2 | 准备 npu_demo add kernel 与公开真实参数。 | 运行 `test_dsl_cost_run_returns_zero_for_vector2_reserved_kind`。 | `VECTOR2` 当前保留 kind 返回 `0`。 | `test_dsl_cost_run_returns_zero_for_vector2_reserved_kind` |
+| TC-TOOLS-DSL-RUN-042 | 边界/异常 | DSL cost run rejects old cost kind | 传入旧 `compute` kind。 | 运行 `test_dsl_cost_run_rejects_old_cost_kind`。 | 按 `DslCostRunInvalidCostKind` 公开错误失败。 | `test_dsl_cost_run_rejects_old_cost_kind` |
+| TC-TOOLS-DSL-RUN-043 | 公开入口 | tools package supports direct DSL cost run import | 从 `kernel_gen.tools` 包根导入 `dsl_cost_run`。 | 运行 `test_tools_package_supports_direct_dsl_cost_run_import`。 | 包根公开入口可达且指向可调用公开函数。 | `test_tools_package_supports_direct_dsl_cost_run_import` |
+| TC-TOOLS-DSL-RUN-044 | 边界/异常 | DSL cost run rejects missing cost sibling without fallback | 准备不包含 `LaunchKernelCostFuncPass` 的公开 `PassManager` 链路。 | 运行 `test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback`。 | 按 `DslCostRunMissingCostFunction` 公开错误失败，输出参数保持原值，不 fallback 到普通 kernel。 | `test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback` |
+| TC-TOOLS-DSL-RUN-045 | 边界/异常 | DSL cost run rejects non npu demo target | 通过公开 target 配置设置 `target="cpu"`。 | 运行 `test_dsl_cost_run_rejects_non_npu_demo_target`。 | 按 `DslCostRunInvalidTarget` 公开错误失败。 | `test_dsl_cost_run_rejects_non_npu_demo_target` |
+| TC-TOOLS-DSL-RUN-046 | 执行结果 | DSL cost run accepts numpy torch mixed real args | 准备 `torch.Tensor` 输出、`numpy.ndarray` 输入和 `torch.Tensor` 输入。 | 运行 `test_dsl_cost_run_accepts_numpy_torch_mixed_real_args`。 | `dsl_cost_run(...)` 返回 `int` 且为当前 vector cost 公式的非零结果。 | `test_dsl_cost_run_accepts_numpy_torch_mixed_real_args` |

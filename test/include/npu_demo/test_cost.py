@@ -118,16 +118,18 @@ int main() {
     Memory<TSM, float> tile(out_data, shape, stride, 1, MemoryFormat::Norm);
 
     S_INT add_cost =
-        npu_demo::cost::add<GM, float, float, npu_demo::MAC>(out, source, source);
+        npu_demo::cost::add<GM, float, float, npu_demo::VECTOR1>(out, source, source);
     S_INT copy_cost =
-        npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA>(tile, source);
-    if (add_cost != 0 || copy_cost != 0) {
+        npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA1>(tile, source);
+    S_INT vector2_cost =
+        npu_demo::cost::add<GM, float, float, npu_demo::VECTOR2>(out, source, source);
+    if (add_cost != 1 || copy_cost != 1 || vector2_cost != 0) {
         return fail(1);
     }
-    if (npu_demo::compute == npu_demo::memory) {
+    if (npu_demo::DMA1 == npu_demo::DMA2) {
         return fail(2);
     }
-    if (npu_demo::DMA == npu_demo::MAC) {
+    if (npu_demo::MAC == npu_demo::VECTOR1) {
         return fail(3);
     }
     return 0;
@@ -153,3 +155,21 @@ def test_npu_demo_public_header_aggregates_cost_family() -> None:
     assert '#include "include/npu_demo/cost/Kernel.h"' in header
     assert "kind2" not in header
     assert "kind3" not in header
+
+
+# NPU-DEMO-COST-003
+# 测试目的: 验证 DMA cost include 不依赖跨文件非公开 detail 聚合状态。
+# 使用示例: `pytest -q test/include/npu_demo/test_cost.py -k test_npu_demo_cost_dma_has_no_cross_file_detail_accumulator`
+# 对应功能实现文件路径: `include/npu_demo/cost/Core.h`
+# 对应功能实现文件路径: `include/npu_demo/cost/Dma.h`
+# 对应 spec 文件路径: `spec/include/npu_demo/npu_demo.md`
+# 对应测试文件路径: `test/include/npu_demo/test_cost.py`
+def test_npu_demo_cost_dma_has_no_cross_file_detail_accumulator() -> None:
+    core_header = (REPO_ROOT / "include" / "npu_demo" / "cost" / "Core.h").read_text(encoding="utf-8")
+    dma_header = (REPO_ROOT / "include" / "npu_demo" / "cost" / "Dma.h").read_text(encoding="utf-8")
+
+    assert "dma_cost_accumulator" not in core_header
+    assert "reset_dma_cost_accumulator" not in core_header
+    assert "finalize_dma_cost_accumulator" not in core_header
+    assert '#include "include/npu_demo/cost/Core.h"' not in dma_header
+    assert "record_dma_cost_bytes" not in dma_header

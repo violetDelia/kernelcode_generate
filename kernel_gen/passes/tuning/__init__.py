@@ -11,7 +11,7 @@ API 列表:
 使用示例:
 - from kernel_gen.passes.tuning import LaunchKernelCostFuncPass
 - pass_obj = LaunchKernelCostFuncPass()
-- pass_obj = LaunchKernelCostFuncPass(cost_kind="compute|memory")
+- pass_obj = LaunchKernelCostFuncPass(cost_kind="DMA1|MAC|VECTOR1")
 
 关联文件:
 - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)

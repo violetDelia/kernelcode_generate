@@ -219,7 +219,7 @@ def test_main_npu_demo_pipeline_prints_host_kernel_source_sections() -> None:
     assert "npu_demo::launch<c_0, c_1, c_2, c_3>(matmul_kernel_device" in stdout
     assert "static void matmul_kernel_device(npu_demo::KernelContext& ctx" not in stdout
     assert "static void matmul_kernel_device(" in stdout
-    assert "_cost_DMA_matmul_kernel_device" in stdout
+    assert "_cost_DMA1_matmul_kernel_device" in stdout
     assert "_cost_MAC_matmul_kernel_device" in stdout
     assert "output matches torch.matmul" in stdout
     assert "npu_demo::launch<1, 1, 1>(" not in stdout
@@ -265,7 +265,7 @@ def test_main_npu_demo_pipeline_helpers_split_wrapper_and_kernel_sources() -> No
 
     assert wrapper_func.sym_name.data == "matmul_kernel"
     assert body_func.sym_name.data == "matmul_kernel_device"
-    assert "_cost_DMA_matmul_kernel_device" in result.source
+    assert "_cost_DMA1_matmul_kernel_device" in result.source
     assert "_cost_MAC_matmul_kernel_device" in result.source
     assert host_source.startswith("void matmul_kernel(")
     assert "npu_demo::launch<c_0, c_1, c_2, c_3>(matmul_kernel_device" in host_source

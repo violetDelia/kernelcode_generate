@@ -32,8 +32,11 @@ def test_tools_package_public_exports() -> None:
     assert public_names == ["DslRunResult"]
     assert namespace["DslRunResult"] is tools_package.DslRunResult
     assert callable(tools_package.dsl_run)
+    assert callable(tools_package.dsl_cost_run)
     assert tools_package.dsl_run.__name__ == "dsl_run"
     assert tools_package.dsl_run.__module__ == "kernel_gen.tools"
+    assert tools_package.dsl_cost_run.__name__ == "dsl_cost_run"
+    assert tools_package.dsl_cost_run.__module__ == "kernel_gen.tools"
     assert tools_package.DslRunResult.__name__ == "DslRunResult"
 
 
@@ -46,6 +49,17 @@ def test_tools_package_supports_direct_dsl_run_import() -> None:
     assert callable(imported_dsl_run)
     assert imported_dsl_run is tools_package.dsl_run
     assert imported_dsl_run.__module__ == "kernel_gen.tools"
+
+
+def test_tools_package_supports_direct_dsl_cost_run_import() -> None:
+    """TC-TOOLS-PKG-001B: `from kernel_gen.tools import dsl_cost_run` should resolve to the package-root public function."""
+
+    from kernel_gen.tools import dsl_cost_run as imported_dsl_cost_run
+
+    tools_package = importlib.import_module("kernel_gen.tools")
+    assert callable(imported_dsl_cost_run)
+    assert imported_dsl_cost_run is tools_package.dsl_cost_run
+    assert imported_dsl_cost_run.__module__ == "kernel_gen.tools"
 
 
 def test_tools_package_rejects_unknown_public_name() -> None:

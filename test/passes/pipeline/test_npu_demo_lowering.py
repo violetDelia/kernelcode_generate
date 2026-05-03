@@ -203,7 +203,7 @@ def test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain(
         reset_config()
 
     assert "void matmul_kernel(" in source
-    assert "S_INT _cost_DMA_matmul_kernel_device(" in source
+    assert "S_INT _cost_DMA1_matmul_kernel_device(" in source
     assert "S_INT _cost_MAC_matmul_kernel_device(" in source
     assert ", long long arg3, long long arg4" in source
     assert "static void matmul_kernel_device(" in source

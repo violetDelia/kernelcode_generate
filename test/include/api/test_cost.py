@@ -3,7 +3,7 @@
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `include/api/cost/*.h` 的公开成本 helper 声明。
-- 结合 `include/npu_demo/cost/*.h` 提供的默认实现，锁定 compute / memory / DMA / MAC 四种 kind 与 `S_INT` 返回合同。
+- 结合 `include/npu_demo/cost/*.h` 提供的默认实现，锁定 DMA1/DMA2/DMA3/DMA4/MAC/VECTOR1/VECTOR2 七种 kind 与 `S_INT` 返回合同。
 
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路为 C++ 头文件，按规则豁免 `pytest-cov` 覆盖率统计。
@@ -99,43 +99,41 @@ def _compile_and_run(source: str) -> None:
 
 
 # COST-API-001
-# 测试目的: 验证 `include/api/cost/Core.h` 公开 compute / memory / DMA / MAC 四种 kind，且不再残留 kind2 / kind3。
-# 使用示例: `pytest -q test/include/api/test_cost.py -k test_include_api_cost_core_exports_compute_and_memory`
+# 测试目的: 验证 `include/api/cost/Core.h` 公开七种 npu_demo cost kind，且不再残留旧 compute / memory / DMA 别名。
+# 使用示例: `pytest -q test/include/api/test_cost.py -k test_include_api_cost_core_exports_npu_demo_cost_kinds`
 # 对应功能实现文件路径: `include/api/cost/Core.h`
 # 对应 spec 文件路径: `spec/include/api/cost/Core.md`
 # 对应测试文件路径: `test/include/api/test_cost.py`
-def test_include_api_cost_core_exports_compute_and_memory() -> None:
+def test_include_api_cost_core_exports_npu_demo_cost_kinds() -> None:
     public_header = (REPO_ROOT / "include" / "api" / "cost" / "Core.h").read_text(encoding="utf-8")
 
     assert "enum class CostKind" in public_header
-    assert "Compute" in public_header
-    assert "Memory" in public_header
-    assert "DMA" in public_header
-    assert "MAC" in public_header
-    assert "inline constexpr cost::CostKind compute" in public_header
-    assert "inline constexpr cost::CostKind memory" in public_header
-    assert "inline constexpr cost::CostKind DMA" in public_header
-    assert "inline constexpr cost::CostKind MAC" in public_header
-    assert "Kind2" not in public_header
-    assert "Kind3" not in public_header
+    for kind in ("DMA1", "DMA2", "DMA3", "DMA4", "MAC", "VECTOR1", "VECTOR2"):
+        assert f"inline constexpr cost::CostKind {kind}" in public_header
+        assert f"CostKind::{kind}" in public_header
+    assert "CostKind::Compute" not in public_header
+    assert "CostKind::Memory" not in public_header
+    assert "inline constexpr cost::CostKind compute" not in public_header
+    assert "inline constexpr cost::CostKind memory" not in public_header
+    assert "inline constexpr cost::CostKind DMA =" not in public_header
 
     source = r"""
 #include "include/api/cost/Core.h"
 #include "include/npu_demo/cost/Core.h"
 
 int main() {
-    npu_demo::cost::CostKind compute_kind = npu_demo::compute;
-    npu_demo::cost::CostKind memory_kind = npu_demo::memory;
-    npu_demo::cost::CostKind dma_kind = npu_demo::DMA;
+    npu_demo::cost::CostKind dma1_kind = npu_demo::DMA1;
+    npu_demo::cost::CostKind dma4_kind = npu_demo::DMA4;
     npu_demo::cost::CostKind mac_kind = npu_demo::MAC;
-    S_INT cost = compute_kind == npu_demo::compute ? 0 : 1;
-    if (memory_kind != npu_demo::memory) {
+    npu_demo::cost::CostKind vector1_kind = npu_demo::VECTOR1;
+    npu_demo::cost::CostKind vector2_kind = npu_demo::VECTOR2;
+    if (dma1_kind != npu_demo::DMA1 || dma4_kind != npu_demo::DMA4) {
         return 1;
     }
-    if (dma_kind != npu_demo::DMA || mac_kind != npu_demo::MAC) {
+    if (mac_kind != npu_demo::MAC || vector1_kind != npu_demo::VECTOR1 || vector2_kind != npu_demo::VECTOR2) {
         return 2;
     }
-    return static_cast<int>(cost);
+    return 0;
 }
 """
     _compile_and_run(source)
@@ -171,9 +169,9 @@ int main() {
     Memory<TLM1, float> out_mat(out_data, mat_shape, mat_stride, 2, MemoryFormat::Norm);
 
     S_INT add_cost =
-        npu_demo::cost::add<GM, float, float, npu_demo::MAC>(out, lhs, rhs);
+        npu_demo::cost::add<GM, float, float, npu_demo::VECTOR1>(out, lhs, rhs);
     S_INT reduce_max_cost =
-        npu_demo::cost::reduce_max<TSM, float, float, npu_demo::compute>(lhs_mat, rhs_mat, 1);
+        npu_demo::cost::reduce_max<TSM, float, float, npu_demo::VECTOR1>(lhs_mat, rhs_mat, 1);
     S_INT matmul_cost = npu_demo::cost::matmul<
         TSM,
         TSM,
@@ -182,7 +180,7 @@ int main() {
         float,
         float,
         npu_demo::MAC>(out_mat, lhs_mat, rhs_mat);
-    if (add_cost != 0 || reduce_max_cost != 0 || matmul_cost != 0) {
+    if (add_cost != 1 || reduce_max_cost != 1 || matmul_cost != 1) {
         return fail(1);
     }
     return 0;
@@ -217,15 +215,18 @@ int main() {
     Vector step(step_buf, 1);
 
     Memory<GM, float> source(source_data, shape, stride, 1, MemoryFormat::Norm);
-    Memory<TSM, float> target(target_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<TSM, float> tile(target_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<GM, float> target(target_data, shape, stride, 1, MemoryFormat::Norm);
 
     S_INT copy_cost =
-        npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA>(target, source);
+        npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA1>(tile, source);
     S_INT slice_cost =
-        npu_demo::cost::slice<TSM, GM, float, npu_demo::memory>(target, source, offset, size, step);
+        npu_demo::cost::slice<TSM, GM, float, npu_demo::DMA1>(tile, source, offset, size, step);
     S_INT deslice_cost =
-        npu_demo::cost::deslice<TSM, GM, float, npu_demo::compute>(target, source, offset, size, step);
-    if (copy_cost != 0 || slice_cost != 0 || deslice_cost != 0) {
+        npu_demo::cost::deslice<GM, TSM, float, npu_demo::DMA2>(target, tile, offset, size, step);
+    S_INT miss_cost =
+        npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA2>(tile, source);
+    if (copy_cost != 1 || slice_cost != 1 || deslice_cost != 1 || miss_cost != 0) {
         return fail(1);
     }
     return 0;

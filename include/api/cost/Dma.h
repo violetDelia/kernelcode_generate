@@ -14,7 +14,7 @@ helper 清单:
 
 使用示例:
 - #include "include/api/cost/Dma.h"
-- S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA>(target, source);
+- S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA1>(target, source);
 
 
 关联文件:
@@ -37,7 +37,7 @@ namespace cost {
 - 声明 `dma.copy` 对应的公共成本 helper。
 
 使用示例:
-- S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA>(target, source);
+- S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA1>(target, source);
 
 
 关联文件:
@@ -53,8 +53,8 @@ S_INT copy(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& s
 - 声明 `slice/deslice` 成本 helper，参数顺序与 include/api/Dma.h 保持一致。
 
 使用示例:
-- S_INT slice_cost = npu_demo::cost::slice<TSM, GM, float, npu_demo::DMA>(target, source, offset, size, stride);
-- S_INT deslice_cost = npu_demo::cost::deslice<GM, TSM, float, npu_demo::DMA>(target, source, offset, size, stride);
+- S_INT slice_cost = npu_demo::cost::slice<TSM, GM, float, npu_demo::DMA1>(target, source, offset, size, stride);
+- S_INT deslice_cost = npu_demo::cost::deslice<GM, TSM, float, npu_demo::DMA2>(target, source, offset, size, stride);
 
 
 关联文件:

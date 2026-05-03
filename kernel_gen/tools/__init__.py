@@ -3,14 +3,15 @@
 
 功能说明:
 - 暴露面向脚本与测试的轻量工具模块（例如 ircheck）。
-- 包根惰性暴露 `DslRunResult` 公开类型，以及稳定的 `dsl_run(...)` 公开函数入口。
+- 包根惰性暴露 `DslRunResult` 公开类型，以及稳定的 `dsl_run(...)` / `dsl_cost_run(...)` 公开函数入口。
 
 API 列表:
 - `DslRunResult(func_op: func.FuncOp, module: ModuleOp, source: str, compiled_kernel: CompiledKernel, execute_result: ExecuteResult, runtime_args: tuple[RuntimeRealArg, ...])`
 - `dsl_run(func_obj: Callable[..., DslFunctionReturn], real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg], pipeline: str | PassManager) -> DslRunResult`
+- `dsl_cost_run(func_obj: Callable[..., DslFunctionReturn], real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg], pipeline: str | PassManager, cost_kind: str) -> int`
 
 helper 清单:
-- `_load_dsl_run_exports() -> tuple[type[DslRunResult], Callable[..., DslRunResult]]`
+- `_load_dsl_run_exports() -> tuple[type[DslRunResult], Callable[..., DslRunResult], Callable[..., int]]`
 - `__getattr__(name: str) -> type[DslRunResult]`
 
 使用示例:
@@ -23,6 +24,7 @@ builtin.module {}
 \"\"\")
 - assert result.ok is True
 - result = tools.dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
+- cost = tools.dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")
 
 关联文件:
 - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
@@ -62,31 +64,34 @@ DslFunctionReturn: TypeAlias = "Memory | SymbolDim | int | float | bool | str | 
 
 __all__ = ["DslRunResult"]
 _PACKAGE_ROOT_DSL_RUN: Callable[..., "DslRunResult"] | None = None
+_PACKAGE_ROOT_DSL_COST_RUN: Callable[..., int] | None = None
 
 
-def _load_dsl_run_exports() -> tuple[type["DslRunResult"], Callable[..., "DslRunResult"]]:
+def _load_dsl_run_exports() -> tuple[type["DslRunResult"], Callable[..., "DslRunResult"], Callable[..., int]]:
     """加载 `dsl_run` 公开导出对象。
 
 
     功能说明:
     - 集中导入 `kernel_gen.tools.dsl_run` 模块中的稳定公开名。
-    - 供包根 `DslRunResult` 惰性导出与 `dsl_run(...)` 包装函数共用，避免重复写导入语句。
-    - 每次子模块导入后都会把包根 `dsl_run` 重新绑定回公开函数，消除同名子模块覆盖带来的导入顺序差异。
+    - 供包根 `DslRunResult` 惰性导出与 `dsl_run(...)` / `dsl_cost_run(...)` 包装函数共用，避免重复写导入语句。
+    - 每次子模块导入后都会把包根工具函数重新绑定回公开函数，消除同名子模块覆盖带来的导入顺序差异。
 
     使用示例:
-    - dsl_run_result, dsl_run_func = _load_dsl_run_exports()
+    - dsl_run_result, dsl_run_func, dsl_cost_run_func = _load_dsl_run_exports()
 
     关联文件:
     - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
-    - test: [test/tools/test_package.py](test_package_api.py)
+    - test: [test/tools/test_package.py](test/tools/test_package.py)
     - 功能实现: [kernel_gen/tools/__init__.py](.)
     """
 
-    from .dsl_run import DslRunResult, dsl_run as dsl_run_func
+    from .dsl_run import DslRunResult, dsl_cost_run as dsl_cost_run_func, dsl_run as dsl_run_func
 
     if _PACKAGE_ROOT_DSL_RUN is not None:
         globals()["dsl_run"] = _PACKAGE_ROOT_DSL_RUN
-    return DslRunResult, dsl_run_func
+    if _PACKAGE_ROOT_DSL_COST_RUN is not None:
+        globals()["dsl_cost_run"] = _PACKAGE_ROOT_DSL_COST_RUN
+    return DslRunResult, dsl_run_func, dsl_cost_run_func
 
 
 def dsl_run(
@@ -108,15 +113,46 @@ def dsl_run(
 
     关联文件:
     - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
-    - test: [test/tools/test_package.py](test_package_api.py)
+    - test: [test/tools/test_package.py](test/tools/test_package.py)
     - 功能实现: [kernel_gen/tools/__init__.py](.)
     """
 
-    _, dsl_run_func = _load_dsl_run_exports()
+    _, dsl_run_func, _ = _load_dsl_run_exports()
     return dsl_run_func(func_obj, real_args, pipeline)
 
 
 _PACKAGE_ROOT_DSL_RUN = dsl_run
+
+
+def dsl_cost_run(
+    func_obj: Callable[..., DslFunctionReturn],
+    real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg],
+    pipeline: str | "PassManager",
+    cost_kind: str,
+) -> int:
+    """通过 `kernel_gen.tools` 包根转发 `dsl_cost_run(...)` 公开入口。
+
+
+    功能说明:
+    - 为 `kernel_gen.tools` 包根提供稳定的 `dsl_cost_run(...)` 公开函数。
+    - 运行时按需加载 [`kernel_gen.tools.dsl_run`](dsl_run.py) 中的真实实现，避免包导入时直接拉起整条 lowering 链。
+    - `cost_kind` 必须由调用方显式提供，不在包根添加默认值。
+
+    使用示例:
+    - import kernel_gen.tools as tools
+    - cost = tools.dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_package.py](test_package_api.py)
+    - 功能实现: [kernel_gen/tools/__init__.py](.)
+    """
+
+    _, _, dsl_cost_run_func = _load_dsl_run_exports()
+    return dsl_cost_run_func(func_obj, real_args, pipeline, cost_kind)
+
+
+_PACKAGE_ROOT_DSL_COST_RUN = dsl_cost_run
 
 
 def __getattr__(name: str) -> type["DslRunResult"]:
@@ -137,6 +173,6 @@ def __getattr__(name: str) -> type["DslRunResult"]:
     """
 
     if name == "DslRunResult":
-        dsl_run_result, _ = _load_dsl_run_exports()
+        dsl_run_result, _, _ = _load_dsl_run_exports()
         return dsl_run_result
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

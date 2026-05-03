@@ -6,6 +6,7 @@
 
 - 当前成功路径覆盖 `tuner.cost(op_name="dma.copy") -> npu_demo::cost::copy(...)` 与 `tuner.cost(op_name="dma.slice" | "dma.deslice") -> npu_demo::cost::{slice, deslice}(...)`。
 - `slice` / `deslice` 成本 helper 的模板顺序与参数顺序必须与 `include/api/Dma.h` 对齐。
+- `DMA1/DMA2/DMA3/DMA4` 的命中由 `TargetSpace/SourceSpace` 判定；非命中 op-kind 组合稳定返回 `0`。
 - `alloc` 当前不属于成本 helper 输入域；`launch-kernel-cost-func` 现阶段不会为 `dma.alloc` 生成 `tuner.cost`。
 
 ## API 列表
@@ -38,6 +39,7 @@
 - 提供 `dma.copy`、`dma.slice` 与 `dma.deslice` 的稳定成本 helper 名：`npu_demo::cost::copy/slice/deslice`。
 - 统一 DMA 成本 helper 的返回类型为 `S_INT`。
 - 固定 `slice` / `deslice` 成本 helper 与 `Dma` 公共 helper 的参数顺序一致，便于后续直接扩展。
+- 固定真实公式为 `ceil(bytes / 64)`；`copy` 按 target 元素数计字节，`slice/deslice` 按 `size` 向量乘积计有效字节。
 
 ## 额外补充
 
@@ -48,6 +50,7 @@
 - `alloc` 没有对应成本 helper；若后续需要表达分配成本，应在新专题里单独补公开合同。
 - `slice` / `deslice` 是 `npu-demo-lowering` pipeline 末尾 cost pass 的可发射成本 helper；不得扩展到 `alloc` 或未定义的 DMA 旧别名。
 - 成本 helper 不负责搬运真实数据，也不替代 [`spec/include/api/Dma.md`](../../../../spec/include/api/Dma.md) 的运行时 DMA public function。
+- `DMA1` 命中 `GM -> TSM/TLM`，`DMA2` 命中 `TSM/TLM -> GM`，`DMA3` 命中 `TSM -> TLM`，`DMA4` 命中 `TSM -> TSM`；其它 kind 或 space 组合返回 `0`。
 
 ## API详细说明
 
@@ -64,7 +67,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT copy_cost = cost::copy<TSM, GM, float, memory>(target, source);
+  S_INT copy_cost = cost::copy<TSM, GM, float, DMA1>(target, source);
   ```
 - 功能说明：定义 `tuner.cost(op_name="dma.copy")` 的稳定 C++ 成本 helper。
 - 注意事项：输入 memory 和 dtype 必须符合 DMA operation 合同；参数顺序固定为 `target -> source`；模板顺序固定为 `TargetSpace -> SourceSpace -> T -> Kind`；当前不接收 `offset`、`size` 或 `stride`，这些由 `slice` / `deslice` 成本 helper 表达；非法组合必须稳定失败。
@@ -85,7 +88,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT slice_cost = cost::slice<TSM, GM, float, memory>(target, source, offset, size, stride);
+  S_INT slice_cost = cost::slice<TSM, GM, float, DMA1>(target, source, offset, size, stride);
   ```
 - 功能说明：定义 `tuner.cost(op_name="dma.slice")` 的稳定 C++ 成本 helper。
 - 注意事项：输入 memory、offset、size、stride 和 dtype 必须符合 DMA operation 合同；参数顺序与 [`spec/include/api/Dma.md`](../../../../spec/include/api/Dma.md) 的 `slice` 完全一致；模板顺序固定为 `TargetSpace -> SourceSpace -> T -> Kind`；不得扩展为 `alloc` 成本 helper 或未定义 DMA 旧别名；非法组合必须稳定失败。
@@ -106,7 +109,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT deslice_cost = cost::deslice<GM, TSM, float, memory>(target, source, offset, size, stride);
+  S_INT deslice_cost = cost::deslice<GM, TSM, float, DMA2>(target, source, offset, size, stride);
   ```
 - 功能说明：定义 `tuner.cost(op_name="dma.deslice")` 的稳定 C++ 成本 helper。
 - 注意事项：输入 memory、offset、size、stride 和 dtype 必须符合 DMA operation 合同；参数顺序与 [`spec/include/api/Dma.md`](../../../../spec/include/api/Dma.md) 的 `deslice` 完全一致；模板顺序固定为 `TargetSpace -> SourceSpace -> T -> Kind`；不得扩展为 `alloc` 成本 helper 或未定义 DMA 旧别名；非法组合必须稳定失败。

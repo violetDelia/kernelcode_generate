@@ -435,7 +435,7 @@ def _make_npu_demo_cost_func(name: str, cost_kind: str) -> func.FuncOp:
       `S_INT total = ...; return total;` 的公开源码合同。
 
     使用示例:
-    - cost_func = _make_npu_demo_cost_func("_cost_compute_add_barrier_body", "compute")
+    - cost_func = _make_npu_demo_cost_func("_cost_VECTOR1_add_barrier_body", "VECTOR1")
 
     关联文件:
     - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -463,7 +463,7 @@ def _make_npu_demo_cost_function_module() -> ModuleOp:
 
 
     功能说明:
-    - 复用 `body + wrapper` 受控 module 骨架，并追加 `compute/memory` 两个 sibling cost functions。
+    - 复用 `body + wrapper` 受控 module 骨架，并追加 `VECTOR1/MAC` 两个 sibling cost functions。
     - 供 `gen_kernel(target="npu_demo")` 的完整 module 源码与 compile-only 回归复用。
 
     使用示例:
@@ -477,8 +477,8 @@ def _make_npu_demo_cost_function_module() -> ModuleOp:
 
     return _make_npu_demo_add_barrier_module(
         top_level_extra_ops=(
-            _make_npu_demo_cost_func("_cost_compute_add_barrier_body", "compute"),
-            _make_npu_demo_cost_func("_cost_memory_add_barrier_body", "memory"),
+            _make_npu_demo_cost_func("_cost_VECTOR1_add_barrier_body", "VECTOR1"),
+            _make_npu_demo_cost_func("_cost_MAC_add_barrier_body", "MAC"),
         )
     )
 
@@ -2669,25 +2669,25 @@ def test_gen_kernel_compiles_npu_demo_launch_wrapper_and_barrier_body() -> None:
 
 
 # GK-018A
-# 功能说明: 验证 `target="npu_demo"` 的完整 module 可继续输出普通 kernel 与 `compute/memory` sibling cost functions。
-# 测试目的: 锁定 `gen_kernel` 会为 `_cost_compute_*` / `_cost_memory_*` 生成 `S_INT` 返回签名、对应 Kind 的 `cost::add` helper 调用，以及稳定的 `return total;`。
-# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_cost_functions_for_compute_and_memory
+# 功能说明: 验证 `target="npu_demo"` 的完整 module 可继续输出普通 kernel 与 `VECTOR1/MAC` sibling cost functions。
+# 测试目的: 锁定 `gen_kernel` 会为 `_cost_VECTOR1_*` / `_cost_MAC_*` 生成 `S_INT` 返回签名、对应 Kind 的 `cost::add` helper 调用，以及稳定的 `return total;`。
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_cost_functions_for_vector1_and_mac
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
-def test_gen_kernel_emits_npu_demo_cost_functions_for_compute_and_memory() -> None:
+def test_gen_kernel_emits_npu_demo_cost_functions_for_vector1_and_mac() -> None:
     module = _make_npu_demo_cost_function_module()
 
     source = gen_kernel(module, _npu_ctx())
 
     assert source.startswith('#include "include/npu_demo/npu_demo.h"\nusing namespace npu_demo;\n\n')
     assert source.index("static void add_barrier_body(") < source.index("void add_barrier(")
-    assert source.index("void add_barrier(") < source.index("S_INT _cost_compute_add_barrier_body(")
-    assert source.index("S_INT _cost_compute_add_barrier_body(") < source.index("S_INT _cost_memory_add_barrier_body(")
-    assert "S_INT _cost_compute_add_barrier_body(" in source
-    assert "S_INT _cost_memory_add_barrier_body(" in source
-    assert "S_INT cost0 = cost::add<GM, float, float, compute>(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);" in source
-    assert "S_INT cost1 = cost::add<GM, float, float, memory>(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);" in source
+    assert source.index("void add_barrier(") < source.index("S_INT _cost_VECTOR1_add_barrier_body(")
+    assert source.index("S_INT _cost_VECTOR1_add_barrier_body(") < source.index("S_INT _cost_MAC_add_barrier_body(")
+    assert "S_INT _cost_VECTOR1_add_barrier_body(" in source
+    assert "S_INT _cost_MAC_add_barrier_body(" in source
+    assert "S_INT cost0 = cost::add<GM, float, float, VECTOR1>(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);" in source
+    assert "S_INT cost1 = cost::add<GM, float, float, MAC>(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);" in source
     assert "S_INT total = (cost0 + cost0);" in source
     assert "S_INT total = (cost1 + cost1);" in source
     assert source.count("return total;") == 2
@@ -2696,7 +2696,7 @@ def test_gen_kernel_emits_npu_demo_cost_functions_for_compute_and_memory() -> No
 
 # GK-018B
 # 功能说明: 验证包含 sibling cost functions 的 `npu_demo` module 只依赖 `include/npu_demo/npu_demo.h` 即可编译。
-# 测试目的: 锁定 `wrapper/body + _cost_compute_* + _cost_memory_*` 共存时，`S_INT` 返回签名、`return total;` 和单入口 include 合同不会回退。
+# 测试目的: 锁定 `wrapper/body + _cost_VECTOR1_* + _cost_MAC_*` 共存时，`S_INT` 返回签名、`return total;` 和单入口 include 合同不会回退。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_compiles_npu_demo_cost_function_module
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md

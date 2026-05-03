@@ -1682,7 +1682,12 @@ def test_emit_c_lowers_npu_demo_dma_indexed_and_fill_helpers() -> None:
     assert f"S_INT {fill_const_name} = 7;" in joined
     assert f"int32_t {fill_cast_name} = {fill_const_name};" in joined
     assert "load<GM, GM, int32_t, int32_t>(dst /*dst*/, src /*source*/, {1, 2} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);" in joined
-    assert "store<GM, GM, int32_t, int32_t>(dst /*dst*/, src /*source*/, {1, 2} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);" in joined
+    assert (
+        "store<GM, GM, int32_t, int32_t>(dst /*dst*/, src /*source*/, "
+        "Vector(static_cast<long long>(1), static_cast<long long>(2)) /*offset*/, "
+        "Vector(static_cast<long long>(2), static_cast<long long>(3)) /*size*/, "
+        "Vector(static_cast<long long>(1), static_cast<long long>(1)) /*stride*/);"
+    ) in joined
     assert f"fill<GM, int32_t>(dst /*dst*/, {fill_cast_name} /*value*/);" in joined
 
 
@@ -1959,7 +1964,7 @@ def test_emit_c_package_registers_tuner_cost_op() -> None:
         result_types=[SymbolValueType.from_expr("COST")],
         attributes={
             "space": NnMemorySpaceAttr.from_name("global"),
-            "cost_kind": StringAttr("compute"),
+            "cost_kind": StringAttr("VECTOR1"),
             "op_name": StringAttr("kernel.add"),
         },
     )
@@ -1982,12 +1987,12 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_add() -> None:
     ctx.bind_name(block.args[0], "out")
     ctx.bind_name(block.args[1], "lhs")
     ctx.bind_name(block.args[2], "rhs")
-    op = _make_tuner_cost_op("kernel.add", "compute", [block.args[0], block.args[1], block.args[2]])
+    op = _make_tuner_cost_op("kernel.add", "VECTOR1", [block.args[0], block.args[1], block.args[2]])
 
     stmt = emit_c_op(op, ctx)
 
     assert stmt == (
-        "S_INT cost0 = cost::add<GM, float, float, compute>"
+        "S_INT cost0 = cost::add<GM, float, float, VECTOR1>"
         "(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);"
     )
     assert emit_c_value(op.result, ctx) == "cost0"
@@ -2060,7 +2065,7 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_exp_select_reduce() -> None:
     exp_op = _make_tuner_cost_op("kernel.exp", "MAC", [block.args[0], block.args[1]])
     select_op = _make_tuner_cost_op(
         "kernel.select",
-        "DMA",
+        "VECTOR1",
         [block.args[0], block.args[2], block.args[1], block.args[1]],
     )
     reduce_max_op = _make_tuner_cost_op(
@@ -2071,13 +2076,13 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_exp_select_reduce() -> None:
     )
     reduce_sum_op = _make_tuner_cost_op(
         "kernel.reduce",
-        "MEMORY",
+        "VECTOR1",
         [block.args[3], block.args[1]],
         extra_attrs={"kernel_kind": StringAttr("sum"), "axis": IntegerAttr(0, i32)},
     )
     reduce_min_op = _make_tuner_cost_op(
         "kernel.reduce_min",
-        "DMA",
+        "VECTOR1",
         [block.args[3], block.args[1]],
         extra_attrs={"axis": IntegerAttr(1, i32)},
     )
@@ -2087,7 +2092,7 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_exp_select_reduce() -> None:
         "(out /*out*/, input /*input*/);"
     )
     assert emit_c_op(select_op, ctx) == (
-        "S_INT cost1 = cost::select<TSM, float, float, DMA>"
+        "S_INT cost1 = cost::select<TSM, float, float, VECTOR1>"
         "(out /*out*/, cond /*cond*/, input /*lhs*/, input /*rhs*/);"
     )
     assert emit_c_op(reduce_max_op, ctx) == (
@@ -2095,11 +2100,11 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_exp_select_reduce() -> None:
         "(reduce_out /*out*/, input /*input*/, 1 /*axis*/);"
     )
     assert emit_c_op(reduce_sum_op, ctx) == (
-        "S_INT cost3 = cost::reduce_sum<TSM, float, float, MEMORY>"
+        "S_INT cost3 = cost::reduce_sum<TSM, float, float, VECTOR1>"
         "(reduce_out /*out*/, input /*input*/, 0 /*axis*/);"
     )
     assert emit_c_op(reduce_min_op, ctx) == (
-        "S_INT cost4 = cost::reduce_min<TSM, float, float, DMA>"
+        "S_INT cost4 = cost::reduce_min<TSM, float, float, VECTOR1>"
         "(reduce_out /*out*/, input /*input*/, 1 /*axis*/);"
     )
 
@@ -2120,12 +2125,12 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_matmul() -> None:
     ctx.bind_name(block.args[0], "out")
     ctx.bind_name(block.args[1], "lhs")
     ctx.bind_name(block.args[2], "rhs")
-    op = _make_tuner_cost_op("kernel.matmul", "memory", [block.args[0], block.args[1], block.args[2]])
+    op = _make_tuner_cost_op("kernel.matmul", "MAC", [block.args[0], block.args[1], block.args[2]])
 
     stmt = emit_c_op(op, ctx)
 
     assert stmt == (
-        "S_INT cost0 = cost::matmul<TSM, TSM, TLM1, float, float, float, memory>"
+        "S_INT cost0 = cost::matmul<TSM, TSM, TLM1, float, float, float, MAC>"
         "(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);"
     )
     assert emit_c_value(op.result, ctx) == "cost0"
@@ -2150,7 +2155,7 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_img2col2d() -> None:
     c3 = SymbolConstOp(3)
     op = _make_tuner_cost_op(
         "kernel.img2col2d",
-        "DMA",
+        "DMA3",
         [
             block.args[0],
             block.args[1],
@@ -2170,7 +2175,7 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_img2col2d() -> None:
     stmt = emit_c_op(op, ctx)
 
     assert stmt == (
-        "S_INT cost0 = cost::img2col2d<TSM, TSM, float, float, DMA>"
+        "S_INT cost0 = cost::img2col2d<TSM, TSM, float, float, DMA3>"
         "(out /*out*/, input /*input*/, 3 /*kh*/, 3 /*kw*/, 1 /*sh*/, 1 /*sw*/, "
         "1 /*dh*/, 1 /*dw*/, 0 /*ph*/, 0 /*pw*/, 0 /*pl*/, 0 /*pr*/);"
     )
@@ -2195,14 +2200,14 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_img2col1d() -> None:
     c3 = SymbolConstOp(3)
     op = _make_tuner_cost_op(
         "kernel.img2col1d",
-        "LOAD_STORE",
+        "DMA3",
         [block.args[0], block.args[1], c3.result, c1.result, c1.result, c0.result, c0.result],
     )
 
     stmt = emit_c_op(op, ctx)
 
     assert stmt == (
-        "S_INT cost0 = cost::img2col1d<TSM, TSM, float, float, LOAD_STORE>"
+        "S_INT cost0 = cost::img2col1d<TSM, TSM, float, float, DMA3>"
         "(out /*out*/, input /*input*/, 3 /*k*/, 1 /*s*/, 1 /*d*/, 0 /*p_left*/, 0 /*p_right*/);"
     )
 
@@ -2221,12 +2226,12 @@ def test_emit_c_lowers_npu_demo_tuner_cost_dma_copy() -> None:
     ctx = _npu_ctx()
     ctx.bind_name(block.args[0], "target")
     ctx.bind_name(block.args[1], "source")
-    op = _make_tuner_cost_op("dma.copy", "memory", [block.args[0], block.args[1]])
+    op = _make_tuner_cost_op("dma.copy", "DMA1", [block.args[0], block.args[1]])
 
     stmt = emit_c_op(op, ctx)
 
     assert stmt == (
-        "S_INT cost0 = cost::copy<TSM, GM, float, memory>"
+        "S_INT cost0 = cost::copy<TSM, GM, float, DMA1>"
         "(target /*target*/, source /*source*/);"
     )
     assert emit_c_value(op.result, ctx) == "cost0"
@@ -2252,7 +2257,7 @@ def test_emit_c_lowers_npu_demo_tuner_cost_dma_slice_and_deslice() -> None:
     slice_ctx.bind_name(block.args[1], "source")
     slice_op = _make_tuner_cost_op(
         "dma.slice",
-        "DMA",
+        "DMA1",
         [block.args[0], block.args[1], *zeros, *sizes, *ones],
     )
 
@@ -2261,17 +2266,17 @@ def test_emit_c_lowers_npu_demo_tuner_cost_dma_slice_and_deslice() -> None:
     deslice_ctx.bind_name(block.args[1], "source")
     deslice_op = _make_tuner_cost_op(
         "dma.deslice",
-        "DMA",
+        "DMA1",
         [block.args[0], block.args[1], *zeros, *sizes, *ones],
     )
 
     assert emit_c_op(slice_op, slice_ctx) == (
-        "S_INT cost0 = cost::slice<TSM, GM, float, DMA>"
+        "S_INT cost0 = cost::slice<TSM, GM, float, DMA1>"
         "(target /*target*/, source /*source*/, Vector{0, 0} /*offset*/, "
         "Vector{2, 2} /*size*/, Vector{1, 1} /*stride*/);"
     )
     assert emit_c_op(deslice_op, deslice_ctx) == (
-        "S_INT cost0 = cost::deslice<TSM, GM, float, DMA>"
+        "S_INT cost0 = cost::deslice<TSM, GM, float, DMA1>"
         "(target /*target*/, source /*source*/, Vector{0, 0} /*offset*/, "
         "Vector{2, 2} /*size*/, Vector{1, 1} /*stride*/);"
     )
@@ -2291,13 +2296,13 @@ def test_emit_c_lowers_npu_demo_symbol_add_with_tuner_cost_value() -> None:
     ctx.bind_name(block.args[0], "out")
     ctx.bind_name(block.args[1], "lhs")
     ctx.bind_name(block.args[2], "rhs")
-    cost_op = _make_tuner_cost_op("kernel.add", "compute", [block.args[0], block.args[1], block.args[2]])
+    cost_op = _make_tuner_cost_op("kernel.add", "VECTOR1", [block.args[0], block.args[1], block.args[2]])
     add_op = SymbolAddOp(cost_op.result, cost_op.result, SymbolValueType.from_expr("DOUBLE_COST"))
 
     stmt = "\n".join([emit_c_op(cost_op, ctx), emit_c_op(add_op, ctx)])
 
     assert stmt.count("cost::add<") == 1
-    assert "S_INT cost0 = cost::add<GM, float, float, compute>" in stmt
+    assert "S_INT cost0 = cost::add<GM, float, float, VECTOR1>" in stmt
     assert "(cost0 + cost0)" in stmt
 
 
@@ -2312,7 +2317,7 @@ def test_emit_c_rejects_unknown_npu_demo_tuner_cost_op_name() -> None:
     memory_type = _make_memory_type([4, 4], [4, 1], space="global", element_type=f32)
     block = Block(arg_types=[memory_type, memory_type, memory_type])
     ctx = _npu_ctx()
-    op = _make_tuner_cost_op("kernel.unknown", "compute", [block.args[0], block.args[1], block.args[2]])
+    op = _make_tuner_cost_op("kernel.unknown", "VECTOR1", [block.args[0], block.args[1], block.args[2]])
 
     with pytest.raises(KernelCodeError, match=r"tuner\.cost: unsupported op_name=kernel\.unknown"):
         emit_c_op(op, ctx)
@@ -2331,7 +2336,7 @@ def test_emit_c_preserves_raw_npu_demo_tuner_cost_kind_and_rejects_invalid_memor
     memory_block = Block(arg_types=[memory_type, memory_type, memory_type])
     ctx = _npu_ctx()
     invalid_kind = _make_tuner_cost_op("kernel.add", "kind2", [memory_block.args[0], memory_block.args[1], memory_block.args[2]])
-    invalid_type = _make_tuner_cost_op("dma.copy", "memory", [scalar_block.args[0], scalar_block.args[1]])
+    invalid_type = _make_tuner_cost_op("dma.copy", "DMA1", [scalar_block.args[0], scalar_block.args[1]])
 
     assert emit_c_op(invalid_kind, ctx) == (
         "S_INT cost0 = cost::add<GM, float, float, kind2>"
@@ -2366,37 +2371,37 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
             r"tuner\.cost: cost_kind must be string attr",
         ),
         (
-            TunerCostOp([block.args[0]], cost_kind=StringAttr("compute"), op_name=IntegerAttr(1, i32)),
+            TunerCostOp([block.args[0]], cost_kind=StringAttr("VECTOR1"), op_name=IntegerAttr(1, i32)),
             r"tuner\.cost: op_name must be string attr",
         ),
         (
-            _make_tuner_cost_op("kernel.add", "compute", [block.args[0], block.args[1]]),
+            _make_tuner_cost_op("kernel.add", "VECTOR1", [block.args[0], block.args[1]]),
             r"tuner\.cost: op_name=kernel\.add requires out, lhs, rhs",
         ),
         (
-            _make_tuner_cost_op("kernel.add", "compute", [scalar_block.args[0], block.args[1], block.args[1]]),
+            _make_tuner_cost_op("kernel.add", "VECTOR1", [scalar_block.args[0], block.args[1], block.args[1]]),
             r"tuner\.cost: out must be nn\.memory",
         ),
         (
-            _make_tuner_cost_op("kernel.add", "compute", [block.args[0], scalar_block.args[0], block.args[1]]),
+            _make_tuner_cost_op("kernel.add", "VECTOR1", [block.args[0], scalar_block.args[0], block.args[1]]),
             r"tuner\.cost: lhs must be nn\.memory",
         ),
         (
-            _make_tuner_cost_op("kernel.add", "compute", [block.args[0], block.args[1], scalar_block.args[0]]),
+            _make_tuner_cost_op("kernel.add", "VECTOR1", [block.args[0], block.args[1], scalar_block.args[0]]),
             r"tuner\.cost: rhs must be nn\.memory",
         ),
         (
-            _make_tuner_cost_op("kernel.add", "compute", [block.args[0], block.args[1], block.args[2]]),
+            _make_tuner_cost_op("kernel.add", "VECTOR1", [block.args[0], block.args[1], block.args[2]]),
             r"tuner\.cost: kernel\.add operands must share memory space",
         ),
         (
-            _make_tuner_cost_op("kernel.add", "compute", [block.args[0], block.args[1], block.args[3]]),
+            _make_tuner_cost_op("kernel.add", "VECTOR1", [block.args[0], block.args[1], block.args[3]]),
             r"tuner\.cost: kernel\.add lhs/rhs element type must match",
         ),
         (
             _make_tuner_cost_op(
                 "kernel.binary_elewise",
-                "compute",
+                "VECTOR1",
                 [block.args[0], block.args[1], block.args[1]],
             ),
             r"tuner\.cost: kernel\.binary_elewise requires kernel_kind string attr",
@@ -2404,7 +2409,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.binary_elewise",
-                "compute",
+                "VECTOR1",
                 [block.args[0], block.args[1]],
                 extra_attrs={"kernel_kind": StringAttr("add")},
             ),
@@ -2413,7 +2418,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.binary_elewise",
-                "compute",
+                "VECTOR1",
                 [block.args[0], block.args[1], block.args[1]],
                 extra_attrs={"kernel_kind": StringAttr("pow")},
             ),
@@ -2422,7 +2427,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.binary_elewise",
-                "compute",
+                "VECTOR1",
                 [scalar_block.args[0], block.args[1], block.args[1]],
                 extra_attrs={"kernel_kind": StringAttr("add")},
             ),
@@ -2431,7 +2436,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.binary_elewise",
-                "compute",
+                "VECTOR1",
                 [block.args[0], scalar_block.args[0], block.args[1]],
                 extra_attrs={"kernel_kind": StringAttr("add")},
             ),
@@ -2440,7 +2445,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.binary_elewise",
-                "compute",
+                "VECTOR1",
                 [block.args[0], block.args[1], scalar_block.args[0]],
                 extra_attrs={"kernel_kind": StringAttr("add")},
             ),
@@ -2449,7 +2454,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.binary_elewise",
-                "compute",
+                "VECTOR1",
                 [block.args[0], block.args[1], block.args[2]],
                 extra_attrs={"kernel_kind": StringAttr("add")},
             ),
@@ -2458,36 +2463,36 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.binary_elewise",
-                "compute",
+                "VECTOR1",
                 [block.args[0], block.args[1], block.args[3]],
                 extra_attrs={"kernel_kind": StringAttr("add")},
             ),
             r"tuner\.cost: kernel\.binary_elewise lhs/rhs element type must match",
         ),
         (
-            _make_tuner_cost_op("kernel.exp", "compute", [block.args[0]]),
+            _make_tuner_cost_op("kernel.exp", "VECTOR1", [block.args[0]]),
             r"tuner\.cost: op_name=kernel\.exp requires out, input",
         ),
         (
-            _make_tuner_cost_op("kernel.exp", "compute", [scalar_block.args[0], block.args[1]]),
+            _make_tuner_cost_op("kernel.exp", "VECTOR1", [scalar_block.args[0], block.args[1]]),
             r"tuner\.cost: out must be nn\.memory",
         ),
         (
-            _make_tuner_cost_op("kernel.exp", "compute", [block.args[0], scalar_block.args[0]]),
+            _make_tuner_cost_op("kernel.exp", "VECTOR1", [block.args[0], scalar_block.args[0]]),
             r"tuner\.cost: input must be nn\.memory",
         ),
         (
-            _make_tuner_cost_op("kernel.exp", "compute", [block.args[0], block.args[2]]),
+            _make_tuner_cost_op("kernel.exp", "VECTOR1", [block.args[0], block.args[2]]),
             r"tuner\.cost: kernel\.exp operands must share memory space",
         ),
         (
-            _make_tuner_cost_op("kernel.select", "compute", [block.args[0], block.args[4], block.args[1]]),
+            _make_tuner_cost_op("kernel.select", "VECTOR1", [block.args[0], block.args[4], block.args[1]]),
             r"tuner\.cost: op_name=kernel\.select requires out, cond, lhs, rhs",
         ),
         (
             _make_tuner_cost_op(
                 "kernel.select",
-                "compute",
+                "VECTOR1",
                 [scalar_block.args[0], block.args[4], block.args[1], block.args[1]],
             ),
             r"tuner\.cost: out must be nn\.memory",
@@ -2495,7 +2500,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.select",
-                "compute",
+                "VECTOR1",
                 [block.args[0], scalar_block.args[0], block.args[1], block.args[1]],
             ),
             r"tuner\.cost: cond must be nn\.memory",
@@ -2503,7 +2508,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.select",
-                "compute",
+                "VECTOR1",
                 [block.args[0], block.args[4], scalar_block.args[0], block.args[1]],
             ),
             r"tuner\.cost: lhs must be nn\.memory",
@@ -2511,7 +2516,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.select",
-                "compute",
+                "VECTOR1",
                 [block.args[0], block.args[4], block.args[1], scalar_block.args[0]],
             ),
             r"tuner\.cost: rhs must be nn\.memory",
@@ -2519,27 +2524,27 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.select",
-                "compute",
+                "VECTOR1",
                 [block.args[0], block.args[4], block.args[1], block.args[2]],
             ),
             r"tuner\.cost: kernel\.select operands must share memory space",
         ),
         (
-            _make_tuner_cost_op("kernel.select", "compute", [block.args[0], block.args[1], block.args[1], block.args[1]]),
+            _make_tuner_cost_op("kernel.select", "VECTOR1", [block.args[0], block.args[1], block.args[1], block.args[1]]),
             r"tuner\.cost: kernel\.select cond element type must be bool",
         ),
         (
-            _make_tuner_cost_op("kernel.select", "compute", [block.args[0], block.args[4], block.args[1], block.args[3]]),
+            _make_tuner_cost_op("kernel.select", "VECTOR1", [block.args[0], block.args[4], block.args[1], block.args[3]]),
             r"tuner\.cost: kernel\.select lhs/rhs element type must match",
         ),
         (
-            _make_tuner_cost_op("kernel.reduce", "compute", [block.args[5], block.args[1]]),
+            _make_tuner_cost_op("kernel.reduce", "VECTOR1", [block.args[5], block.args[1]]),
             r"tuner\.cost: kernel\.reduce requires kernel_kind string attr",
         ),
         (
             _make_tuner_cost_op(
                 "kernel.reduce",
-                "compute",
+                "VECTOR1",
                 [block.args[5]],
                 extra_attrs={"kernel_kind": StringAttr("sum"), "axis": IntegerAttr(0, i32)},
             ),
@@ -2548,7 +2553,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.reduce",
-                "compute",
+                "VECTOR1",
                 [block.args[5], block.args[1]],
                 extra_attrs={"kernel_kind": StringAttr("prod"), "axis": IntegerAttr(0, i32)},
             ),
@@ -2557,7 +2562,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.reduce",
-                "compute",
+                "VECTOR1",
                 [scalar_block.args[0], block.args[1]],
                 extra_attrs={"kernel_kind": StringAttr("sum"), "axis": IntegerAttr(0, i32)},
             ),
@@ -2566,7 +2571,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.reduce",
-                "compute",
+                "VECTOR1",
                 [block.args[5], scalar_block.args[0]],
                 extra_attrs={"kernel_kind": StringAttr("sum"), "axis": IntegerAttr(0, i32)},
             ),
@@ -2575,7 +2580,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.reduce",
-                "compute",
+                "VECTOR1",
                 [block.args[5], block.args[2]],
                 extra_attrs={"kernel_kind": StringAttr("sum"), "axis": IntegerAttr(0, i32)},
             ),
@@ -2584,43 +2589,43 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.reduce_min",
-                "compute",
+                "VECTOR1",
                 [block.args[5], block.args[1]],
             ),
             r"tuner\.cost: kernel\.reduce_min requires integer axis attr",
         ),
         (
-            _make_tuner_cost_op("dma.copy", "memory", [block.args[0]]),
+            _make_tuner_cost_op("dma.copy", "DMA1", [block.args[0]]),
             r"tuner\.cost: op_name=dma\.copy requires target, source",
         ),
         (
-            _make_tuner_cost_op("dma.copy", "memory", [block.args[0], scalar_block.args[0]]),
+            _make_tuner_cost_op("dma.copy", "DMA1", [block.args[0], scalar_block.args[0]]),
             r"tuner\.cost: source must be nn\.memory",
         ),
         (
-            _make_tuner_cost_op("dma.copy", "memory", [block.args[0], block.args[3]]),
+            _make_tuner_cost_op("dma.copy", "DMA1", [block.args[0], block.args[3]]),
             r"tuner\.cost: dma\.copy source/target element type must match",
         ),
         (
-            _make_tuner_cost_op("dma.slice", "memory", [block.args[0]]),
+            _make_tuner_cost_op("dma.slice", "DMA1", [block.args[0]]),
             r"tuner\.cost: op_name=dma\.slice requires target, source, offsets, sizes, strides",
         ),
         (
-            _make_tuner_cost_op("dma.slice", "memory", [scalar_block.args[0], block.args[0]]),
+            _make_tuner_cost_op("dma.slice", "DMA1", [scalar_block.args[0], block.args[0]]),
             r"tuner\.cost: target must be nn\.memory",
         ),
         (
-            _make_tuner_cost_op("dma.slice", "memory", [block.args[0], scalar_block.args[0]]),
+            _make_tuner_cost_op("dma.slice", "DMA1", [block.args[0], scalar_block.args[0]]),
             r"tuner\.cost: source must be nn\.memory",
         ),
         (
-            _make_tuner_cost_op("dma.slice", "memory", [block.args[0], block.args[0], c0.result]),
+            _make_tuner_cost_op("dma.slice", "DMA1", [block.args[0], block.args[0], c0.result]),
             r"tuner\.cost: op_name=dma\.slice requires target, source, offsets, sizes, strides",
         ),
         (
             _make_tuner_cost_op(
                 "dma.slice",
-                "memory",
+                "DMA1",
                 [block.args[3], block.args[0], c0.result, c0.result, c1.result, c1.result, c1.result, c1.result],
             ),
             r"tuner\.cost: dma\.slice source/target element type must match",
@@ -2628,47 +2633,47 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "dma.slice",
-                "memory",
+                "DMA1",
                 [block.args[6], block.args[6], c0.result, c0.result, c0.result, c0.result, c0.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result],
             ),
             r"tuner\.cost: op_name=dma\.slice npu_demo Vector supports 1\.\.4 values",
         ),
         (
-            _make_tuner_cost_op("kernel.matmul", "compute", [block.args[0], block.args[1]]),
+            _make_tuner_cost_op("kernel.matmul", "MAC", [block.args[0], block.args[1]]),
             r"tuner\.cost: op_name=kernel\.matmul requires out, lhs, rhs",
         ),
         (
-            _make_tuner_cost_op("kernel.matmul", "compute", [scalar_block.args[0], block.args[1], block.args[1]]),
+            _make_tuner_cost_op("kernel.matmul", "MAC", [scalar_block.args[0], block.args[1], block.args[1]]),
             r"tuner\.cost: out must be nn\.memory",
         ),
         (
-            _make_tuner_cost_op("kernel.matmul", "compute", [block.args[0], scalar_block.args[0], block.args[1]]),
+            _make_tuner_cost_op("kernel.matmul", "MAC", [block.args[0], scalar_block.args[0], block.args[1]]),
             r"tuner\.cost: lhs must be nn\.memory",
         ),
         (
-            _make_tuner_cost_op("kernel.matmul", "compute", [block.args[0], block.args[1], scalar_block.args[0]]),
+            _make_tuner_cost_op("kernel.matmul", "MAC", [block.args[0], block.args[1], scalar_block.args[0]]),
             r"tuner\.cost: rhs must be nn\.memory",
         ),
         (
-            _make_tuner_cost_op("kernel.img2col1d", "compute", [block.args[0], block.args[1]]),
+            _make_tuner_cost_op("kernel.img2col1d", "DMA3", [block.args[0], block.args[1]]),
             r"tuner\.cost: op_name=kernel\.img2col1d requires out, input, k, s, d, p_left, p_right",
         ),
         (
-            _make_tuner_cost_op("kernel.img2col1d", "compute", [scalar_block.args[0], block.args[1], c0.result, c1.result, c1.result, c0.result, c0.result]),
+            _make_tuner_cost_op("kernel.img2col1d", "DMA3", [scalar_block.args[0], block.args[1], c0.result, c1.result, c1.result, c0.result, c0.result]),
             r"tuner\.cost: out must be nn\.memory",
         ),
         (
-            _make_tuner_cost_op("kernel.img2col1d", "compute", [block.args[0], scalar_block.args[0], c0.result, c1.result, c1.result, c0.result, c0.result]),
+            _make_tuner_cost_op("kernel.img2col1d", "DMA3", [block.args[0], scalar_block.args[0], c0.result, c1.result, c1.result, c0.result, c0.result]),
             r"tuner\.cost: input must be nn\.memory",
         ),
         (
-            _make_tuner_cost_op("kernel.img2col2d", "compute", [block.args[0], block.args[1]]),
+            _make_tuner_cost_op("kernel.img2col2d", "DMA3", [block.args[0], block.args[1]]),
             r"tuner\.cost: op_name=kernel\.img2col2d requires out, input, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr",
         ),
         (
             _make_tuner_cost_op(
                 "kernel.img2col2d",
-                "compute",
+                "DMA3",
                 [scalar_block.args[0], block.args[1], c0.result, c0.result, c1.result, c1.result, c1.result, c1.result, c0.result, c0.result, c0.result, c0.result],
             ),
             r"tuner\.cost: out must be nn\.memory",
@@ -2676,7 +2681,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
         (
             _make_tuner_cost_op(
                 "kernel.img2col2d",
-                "compute",
+                "DMA3",
                 [block.args[0], scalar_block.args[1], c0.result, c0.result, c1.result, c1.result, c1.result, c1.result, c0.result, c0.result, c0.result, c0.result],
             ),
             r"tuner\.cost: input must be nn\.memory",

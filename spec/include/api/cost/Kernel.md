@@ -65,6 +65,8 @@
 - 当前不公开 `broadcast`、`softmax`、`cast` 或旧 `Nn` helper 的成本接口。
 - cost helper 只表达当前 op 的局部成本承接，不负责累计、调度或运行时执行。
 - `kind2`、`kind3` 与其他旧 kind 不再属于当前 helper 输入域。
+- `MAC` 命中 `matmul`，`VECTOR1` 命中当前非 matmul kernel op，`DMA3` 命中 `img2col1d/2d`，`VECTOR2` 与未命中组合返回 `0`。
+- `MAC` 公式为 `ceil(flops / (16 * 16 * 16 * 2))`；`VECTOR1` 公式为 `ceil(out.element_count() / 64)`；`DMA3` 的 `img2col` 公式为 `ceil(out.element_count() * sizeof(OutType) / 64)`。
 
 ## API详细说明
 
@@ -82,7 +84,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT add_cost = cost::add<GM, float, float, compute>(out, lhs, rhs);
+  S_INT add_cost = cost::add<GM, float, float, VECTOR1>(out, lhs, rhs);
   ```
 - 功能说明：定义逐元素加法的成本 helper。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；参数顺序固定为 `out -> lhs -> rhs`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；不公开 `cost::kernel::add`、`cost<OpTag, ...>` 或旧 `Nn` 成本别名；非法组合必须稳定失败。
@@ -101,7 +103,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT sub_cost = cost::sub<GM, float, float, compute>(out, lhs, rhs);
+  S_INT sub_cost = cost::sub<GM, float, float, VECTOR1>(out, lhs, rhs);
   ```
 - 功能说明：定义逐元素减法的成本 helper。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；参数顺序固定为 `out -> lhs -> rhs`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；不公开 `cost::kernel::sub`、`cost<OpTag, ...>` 或旧 `Nn` 成本别名；非法组合必须稳定失败。
@@ -120,7 +122,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT mul_cost = cost::mul<GM, float, float, compute>(out, lhs, rhs);
+  S_INT mul_cost = cost::mul<GM, float, float, VECTOR1>(out, lhs, rhs);
   ```
 - 功能说明：定义逐元素乘法的成本 helper。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；参数顺序固定为 `out -> lhs -> rhs`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；不公开 `cost::kernel::mul`、`cost<OpTag, ...>` 或旧 `Nn` 成本别名；非法组合必须稳定失败。
@@ -139,7 +141,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT div_cost = cost::truediv<TSM, float, float, memory>(out, lhs, rhs);
+  S_INT div_cost = cost::truediv<TSM, float, float, VECTOR1>(out, lhs, rhs);
   ```
 - 功能说明：定义逐元素真除法的成本 helper。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；参数顺序固定为 `out -> lhs -> rhs`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；不公开 `cost::kernel::truediv`、`cost<OpTag, ...>` 或旧 `Nn` 成本别名；非法组合必须稳定失败。
@@ -158,7 +160,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT eq_cost = cost::eq<GM, float, bool, compute>(out, lhs, rhs);
+  S_INT eq_cost = cost::eq<GM, float, bool, VECTOR1>(out, lhs, rhs);
   ```
 - 功能说明：定义逐元素相等比较的成本 helper。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；参数顺序固定为 `out -> lhs -> rhs`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；本轮不开放额外 predicate 容器类型；非法组合必须稳定失败。
@@ -177,7 +179,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT ne_cost = cost::ne<GM, float, bool, compute>(out, lhs, rhs);
+  S_INT ne_cost = cost::ne<GM, float, bool, VECTOR1>(out, lhs, rhs);
   ```
 - 功能说明：定义逐元素不等比较的成本 helper。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；参数顺序固定为 `out -> lhs -> rhs`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；本轮不开放额外 predicate 容器类型；非法组合必须稳定失败。
@@ -196,7 +198,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT lt_cost = cost::lt<GM, float, bool, compute>(out, lhs, rhs);
+  S_INT lt_cost = cost::lt<GM, float, bool, VECTOR1>(out, lhs, rhs);
   ```
 - 功能说明：定义逐元素小于比较的成本 helper。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；参数顺序固定为 `out -> lhs -> rhs`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；本轮不开放额外 predicate 容器类型；非法组合必须稳定失败。
@@ -215,7 +217,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT le_cost = cost::le<GM, float, bool, compute>(out, lhs, rhs);
+  S_INT le_cost = cost::le<GM, float, bool, VECTOR1>(out, lhs, rhs);
   ```
 - 功能说明：定义逐元素小于等于比较的成本 helper。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；参数顺序固定为 `out -> lhs -> rhs`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；本轮不开放额外 predicate 容器类型；非法组合必须稳定失败。
@@ -234,7 +236,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT gt_cost = cost::gt<GM, float, bool, compute>(out, lhs, rhs);
+  S_INT gt_cost = cost::gt<GM, float, bool, VECTOR1>(out, lhs, rhs);
   ```
 - 功能说明：定义逐元素大于比较的成本 helper。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；参数顺序固定为 `out -> lhs -> rhs`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；本轮不开放额外 predicate 容器类型；非法组合必须稳定失败。
@@ -253,7 +255,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT ge_cost = cost::ge<GM, float, bool, compute>(out, lhs, rhs);
+  S_INT ge_cost = cost::ge<GM, float, bool, VECTOR1>(out, lhs, rhs);
   ```
 - 功能说明：定义逐元素大于等于比较的成本 helper。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；参数顺序固定为 `out -> lhs -> rhs`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；本轮不开放额外 predicate 容器类型；非法组合必须稳定失败。
@@ -271,7 +273,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT exp_cost = cost::exp<TSM, float, float, compute>(out, input);
+  S_INT exp_cost = cost::exp<TSM, float, float, VECTOR1>(out, input);
   ```
 - 功能说明：定义一元指数运算的成本 helper。
 - 注意事项：输入 shape、dtype 和 space 必须符合对应 operation 合同；参数顺序固定为 `out -> input`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；非法组合必须稳定失败。
@@ -291,7 +293,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT select_cost = cost::select<GM, float, float, compute>(out, cond, lhs, rhs);
+  S_INT select_cost = cost::select<GM, float, float, VECTOR1>(out, cond, lhs, rhs);
   ```
 - 功能说明：定义条件选择运算的成本 helper。
 - 注意事项：输入 shape、dtype、space 和条件缓冲区必须符合对应 operation 合同；参数顺序固定为 `out -> cond -> lhs -> rhs`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；非法组合必须稳定失败。
@@ -310,7 +312,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT reduce_cost = cost::reduce_sum<GM, float, float, memory>(out, input, 1);
+  S_INT reduce_cost = cost::reduce_sum<GM, float, float, VECTOR1>(out, input, 1);
   ```
 - 功能说明：定义求和归约的成本 helper。
 - 注意事项：输入 shape、dtype、space 和 `axis` 必须符合对应 operation 合同；参数顺序固定为 `out -> input -> axis`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；本轮不定义 keepdim 或 axis 容器变体；非法组合必须稳定失败。
@@ -329,7 +331,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT min_cost = cost::reduce_min<GM, float, float, memory>(out, input, 1);
+  S_INT min_cost = cost::reduce_min<GM, float, float, VECTOR1>(out, input, 1);
   ```
 - 功能说明：定义最小值归约的成本 helper。
 - 注意事项：输入 shape、dtype、space 和 `axis` 必须符合对应 operation 合同；参数顺序固定为 `out -> input -> axis`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；本轮不定义 keepdim 或 axis 容器变体；非法组合必须稳定失败。
@@ -348,7 +350,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT max_cost = cost::reduce_max<GM, float, float, memory>(out, input, 1);
+  S_INT max_cost = cost::reduce_max<GM, float, float, VECTOR1>(out, input, 1);
   ```
 - 功能说明：定义最大值归约的成本 helper。
 - 注意事项：输入 shape、dtype、space 和 `axis` 必须符合对应 operation 合同；参数顺序固定为 `out -> input -> axis`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；本轮不定义 keepdim 或 axis 容器变体；非法组合必须稳定失败。
@@ -367,7 +369,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT matmul_cost = cost::matmul<TSM, TSM, TLM1, float, float, float, compute>(out, lhs, rhs);
+  S_INT matmul_cost = cost::matmul<TSM, TSM, TLM1, float, float, float, MAC>(out, lhs, rhs);
   ```
 - 功能说明：定义矩阵乘法的成本 helper。
 - 注意事项：输入 shape、dtype 和 space 必须符合对应 operation 合同；参数顺序固定为 `out -> lhs -> rhs`；模板顺序固定为 `LhsSpace -> RhsSpace -> OutSpace -> LhsType -> RhsType -> OutType -> Kind`；多空间 helper 的模板参数顺序不得为了成本接口单独重排；非法组合必须稳定失败。
@@ -390,7 +392,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT img2col_cost = cost::img2col1d<GM, TSM, float, float, compute>(out, input, 3, 1, 1, 0, 0);
+  S_INT img2col_cost = cost::img2col1d<GM, TSM, float, float, DMA3>(out, input, 3, 1, 1, 0, 0);
   ```
 - 功能说明：定义一维 `img2col` 的成本 helper。
 - 注意事项：输入 shape、dtype、space、kernel、stride、dilation 和 padding 必须符合对应 operation 合同；模板与参数顺序跟随对应 `Kernel` helper，并在模板末尾追加 `Kind`；非法组合必须稳定失败。
@@ -418,7 +420,7 @@
   #include "include/npu_demo/npu_demo.h"
 
   using namespace npu_demo;
-  S_INT img2col_cost = cost::img2col2d<GM, TSM, float, float, compute>(
+  S_INT img2col_cost = cost::img2col2d<GM, TSM, float, float, DMA3>(
       out, input, 3, 3, 1, 1, 1, 1, 0, 0, 0, 0);
   ```
 - 功能说明：定义二维 `img2col` 的成本 helper。

@@ -47,7 +47,7 @@ builtin.module {{
     %1 : {_MEM_TYPE},
     %2 : {_MEM_TYPE}
   ) {{
-    %3 = tuner.cost(%0, %1, %2) {{space = #nn.space<global>, cost_kind = "compute", op_name = "kernel.add"}} : ({_MEM_TYPE}, {_MEM_TYPE}, {_MEM_TYPE}) -> !symbol.int<"LOCAL">
+    %3 = tuner.cost(%0, %1, %2) {{space = #nn.space<global>, cost_kind = "VECTOR1", op_name = "kernel.add"}} : ({_MEM_TYPE}, {_MEM_TYPE}, {_MEM_TYPE}) -> !symbol.int<"LOCAL">
     %4 = symbol.add %3, %3 : !symbol.int<"LOCAL">, !symbol.int<"LOCAL"> -> !symbol.int<"LOCAL">
     func.return
   }}
@@ -58,7 +58,7 @@ builtin.module {{
         source_path="inline#kernel_add",
         expected_snippets=[
             '#include "include/npu_demo/npu_demo.h"',
-            "S_INT cost0 = cost::add<GM, float, float, compute>(arg0 /*out*/, arg1 /*lhs*/, arg2 /*rhs*/);",
+            "S_INT cost0 = cost::add<GM, float, float, VECTOR1>(arg0 /*out*/, arg1 /*lhs*/, arg2 /*rhs*/);",
             "S_INT v0 = (cost0 + cost0);",
         ],
         forbidden_snippets=[
