@@ -340,7 +340,8 @@ public:
 
     /*
     功能说明:
-    - 返回成员式子视图，当前 expectation 子集下要求 `ViewT` 与原始元素类型一致。
+    - 返回成员式子视图，`offset/size/stride` 的 rank 必须与源 Memory rank 一致。
+    - 结果 shape 等于 `size`，结果 stride 等于源 physical stride 与 view logical stride 的逐维乘积。
 
     使用示例:
     - Memory<GM, float> tile = source.view<float>(offset, size, stride);

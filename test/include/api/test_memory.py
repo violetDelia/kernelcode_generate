@@ -261,7 +261,7 @@ int main() {
 
 
 # API-MEMORY-002
-# 测试目的: 验证成员式 `source.view<T>(...)` 与 `source.reshape(shape)` 已成为公共层稳定视图接口。
+# 测试目的: 验证成员式 `source.view<T>(...)` 与 `source.reshape(shape)` 已成为公共层稳定视图接口，且多维 view stride 由源 physical stride 与 logical stride 相乘得到。
 # 使用示例: pytest -q test/include/api/test_memory.py -k test_memory_member_view_and_reshape_contract
 # 对应功能实现文件路径: include/npu_demo/Memory.h
 # 对应 spec 文件路径: spec/include/api/Memory.md
@@ -277,42 +277,45 @@ static int fail(int code) {
 
 int main() {
     float data[6] = {0, 1, 2, 3, 4, 5};
-    long long shape[1] = {6};
-    long long stride[1] = {1};
-    Memory<GM, float> source(data, shape, stride, 1, MemoryFormat::Norm);
+    long long shape[2] = {2, 3};
+    long long stride[2] = {3, 1};
+    Memory<GM, float> source(data, shape, stride, 2, MemoryFormat::Norm);
 
-    long long offset_buf[1] = {2};
-    long long size_buf[1] = {2};
-    long long stride_buf[1] = {2};
-    Vector offset(offset_buf, 1);
-    Vector size(size_buf, 1);
-    Vector view_stride(stride_buf, 1);
+    long long offset_buf[2] = {1, 1};
+    long long size_buf[2] = {1, 2};
+    long long stride_buf[2] = {1, 1};
+    Vector offset(offset_buf, 2);
+    Vector size(size_buf, 2);
+    Vector view_stride(stride_buf, 2);
 
     Memory<GM, float> tile = source.view<float>(offset, size, view_stride);
-    if (tile.rank() != 1) {
+    if (tile.rank() != 2) {
         return fail(1);
     }
-    if (tile.get_shape(0) != 2 || tile.get_stride(0) != 2) {
+    if (tile.get_shape(0) != 1 || tile.get_shape(1) != 2) {
         return fail(2);
     }
-    if (tile.data() != source.data() + 2) {
+    if (tile.get_stride(0) != 3 || tile.get_stride(1) != 1) {
         return fail(3);
+    }
+    if (tile.data() != source.data() + 4) {
+        return fail(4);
     }
 
     long long reshape_buf[2] = {2, 3};
     Vector reshape_shape(reshape_buf, 2);
     Memory<GM, float> reshaped = source.reshape(reshape_shape);
     if (reshaped.rank() != 2) {
-        return fail(4);
-    }
-    if (reshaped.get_shape(0) != 2 || reshaped.get_shape(1) != 3) {
         return fail(5);
     }
-    if (reshaped.get_stride(0) != 3 || reshaped.get_stride(1) != 1) {
+    if (reshaped.get_shape(0) != 2 || reshaped.get_shape(1) != 3) {
         return fail(6);
     }
-    if (reshaped.data() != source.data()) {
+    if (reshaped.get_stride(0) != 3 || reshaped.get_stride(1) != 1) {
         return fail(7);
+    }
+    if (reshaped.data() != source.data()) {
+        return fail(8);
     }
     return 0;
 }

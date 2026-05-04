@@ -507,7 +507,7 @@ def test_dma_view_type_or_space_mismatch() -> None:
     source = _TestOp(result_types=[source_type]).results[0]
     offsets = _make_symbol_operands([0, 0])
     shape = _make_symbol_operands([2, 4])
-    stride = _make_symbol_operands([4, 1])
+    stride = _make_symbol_operands([1, 1])
 
     result_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
     op = DmaViewOp(source, offsets, shape, stride, result_type)
@@ -531,13 +531,13 @@ def test_dma_view_numel_mismatch() -> None:
     source = _TestOp(result_types=[source_type]).results[0]
     result_type = _make_memory_type(
         shape=ArrayAttr([IntAttr(2), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(5), IntAttr(1)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
     )
     op = DmaViewOp(
         source,
         _make_symbol_operands([0, 0]),
         _make_symbol_operands([2, 5]),
-        _make_symbol_operands([5, 1]),
+        _make_symbol_operands([1, 1]),
         result_type,
     )
     with pytest.raises(VerifyException, match="numel mismatch"):
@@ -714,33 +714,33 @@ def test_dma_view_dynamic_symbol_int_layout_operands_valid() -> None:
     )
     result_type = _make_memory_type(
         shape=ArrayAttr([StringAttr("TM"), StringAttr("TN")]),
-        stride=ArrayAttr([StringAttr("TN"), IntAttr(1)]),
+        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     op = DmaViewOp(
         source,
         _make_symbol_operands(["TO", "TI"]),
         _make_symbol_operands(["TM", "TN"]),
-        _make_symbol_operands(["TN", 1]),
+        _make_symbol_operands([1, 1]),
         result_type,
     )
     op.verify()
 
 
 # TC-DMA-019B
-# 功能说明: 验证 dma.view 在 numel 匹配时可接受与 source 不同的显式 stride/result 布局。
-# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_view_accepts_matching_numel_subset_with_explicit_stride
+# 功能说明: 验证 dma.view 的 result stride 等于 source physical stride 与 view logical stride 的逐维乘积。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_view_result_stride_uses_source_physical_stride
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma.py
-def test_dma_view_accepts_matching_numel_subset_with_explicit_stride() -> None:
+def test_dma_view_result_stride_uses_source_physical_stride() -> None:
     source_type = _make_memory_type(
         shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
         stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
     )
     result_type = _make_memory_type(
         shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     op = DmaViewOp(
@@ -751,6 +751,20 @@ def test_dma_view_accepts_matching_numel_subset_with_explicit_stride() -> None:
         result_type,
     )
     op.verify()
+
+    bad_stride_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+    )
+    bad_stride_op = DmaViewOp(
+        source,
+        _make_symbol_operands([0, 0]),
+        _make_symbol_operands([2, 2]),
+        _make_symbol_operands([1, 1]),
+        bad_stride_type,
+    )
+    with pytest.raises(VerifyException, match="source physical stride"):
+        bad_stride_op.verify()
 
 
 # TC-DMA-019D
@@ -947,7 +961,7 @@ def test_dma_view_rejects_invalid_offsets_or_bounds() -> None:
     source = _TestOp(result_types=[source_type]).results[0]
     result_type = _make_memory_type(
         shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
     )
 
     with pytest.raises(VerifyException, match="offsets length must match rank"):
@@ -1031,7 +1045,7 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
     alloc_type = _make_memory_type()
     view_type = _make_memory_type(
         shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
     )
     reshape_type = _make_memory_type(
         shape=ArrayAttr([IntAttr(4), IntAttr(2)]),

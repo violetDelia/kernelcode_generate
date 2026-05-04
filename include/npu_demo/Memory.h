@@ -330,7 +330,8 @@ inline long long Memory<Space, T>::get_stride(unsigned long long axis) const {
 
 /*
 功能说明:
-- 返回成员式子视图，当前 npu_demo 先覆盖一维 expectation 子集。
+- 返回成员式子视图，支持 rank `1..8` 的多维 view。
+- 结果 shape 等于 `size`，结果 stride 等于源 physical stride 与 view logical stride 的逐维乘积。
 
 使用示例:
 - Memory<GM, float> tile = source.view<float>(offset, size, stride);
@@ -351,34 +352,37 @@ inline Memory<Space, ViewT> Memory<Space, T>::view(
         std::is_same<ViewT, T>::value,
         "Memory::view currently requires the same element type as the source view");
 
-    npu_demo::detail::memory_contract_or_throw(rank_ == 1, "memory.view: unsupported rank!=1");
+    npu_demo::detail::memory_contract_or_throw(rank_ > 0, "memory.view: invalid rank");
+    npu_demo::detail::memory_contract_or_throw(
+        rank_ <= npu_demo::detail::kMaxMemoryHelperRank,
+        "memory.view: rank_too_large");
     npu_demo::detail::memory_contract_or_throw(offset.size() == rank_, "memory.view: vector_rank_mismatch");
     npu_demo::detail::memory_contract_or_throw(size.size() == rank_, "memory.view: vector_rank_mismatch");
     npu_demo::detail::memory_contract_or_throw(stride.size() == rank_, "memory.view: vector_rank_mismatch");
-
-    long long span = 0;
-    npu_demo::detail::memory_contract_or_throw(offset[0] >= 0, "memory.view: invalid offset/size/stride");
-    npu_demo::detail::memory_contract_or_throw(size[0] > 0, "memory.view: invalid offset/size/stride");
-    npu_demo::detail::memory_contract_or_throw(stride[0] > 0, "memory.view: invalid offset/size/stride");
-    npu_demo::detail::memory_contract_or_throw(shape_[0] > 0, "memory.view: invalid source shape");
-    npu_demo::detail::memory_contract_or_throw(stride_[0] > 0, "memory.view: invalid source stride");
-    npu_demo::detail::memory_contract_or_throw(
-        npu_demo::detail::memory_checked_mul_non_negative(size[0] - 1, stride[0], &span),
-        "memory.view: overflow");
-
-    long long last_index = 0;
-    npu_demo::detail::memory_contract_or_throw(
-        npu_demo::detail::memory_checked_add_non_negative(offset[0], span, &last_index),
-        "memory.view: overflow");
-    npu_demo::detail::memory_contract_or_throw(last_index < shape_[0], "memory.view: out_of_bounds");
 
     long long shape_buf[npu_demo::detail::kMaxMemoryHelperRank] = {0};
     long long stride_buf[npu_demo::detail::kMaxMemoryHelperRank] = {0};
     long long linear_offset = 0;
 
     for (unsigned long long i = 0; i < rank_; ++i) {
+        npu_demo::detail::memory_contract_or_throw(offset[i] >= 0, "memory.view: invalid offset/size/stride");
+        npu_demo::detail::memory_contract_or_throw(size[i] > 0, "memory.view: invalid offset/size/stride");
+        npu_demo::detail::memory_contract_or_throw(stride[i] > 0, "memory.view: invalid offset/size/stride");
+        npu_demo::detail::memory_contract_or_throw(shape_[i] > 0, "memory.view: invalid source shape");
+        npu_demo::detail::memory_contract_or_throw(stride_[i] > 0, "memory.view: invalid source stride");
+
+        long long span = 0;
+        npu_demo::detail::memory_contract_or_throw(
+            npu_demo::detail::memory_checked_mul_non_negative(size[i] - 1, stride[i], &span),
+            "memory.view: overflow");
+
+        long long last_index = 0;
+        npu_demo::detail::memory_contract_or_throw(
+            npu_demo::detail::memory_checked_add_non_negative(offset[i], span, &last_index),
+            "memory.view: overflow");
+        npu_demo::detail::memory_contract_or_throw(last_index < shape_[i], "memory.view: out_of_bounds");
+
         shape_buf[i] = size[i];
-        npu_demo::detail::memory_contract_or_throw(shape_buf[i] > 0, "memory.view: invalid offset/size/stride");
         npu_demo::detail::memory_contract_or_throw(
             npu_demo::detail::memory_checked_mul_non_negative(stride_[i], stride[i], &stride_buf[i]),
             "memory.view: overflow");

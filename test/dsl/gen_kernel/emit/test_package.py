@@ -1840,6 +1840,30 @@ def test_emit_c_op_lowers_dma_alloc_and_view() -> None:
         "Memory<GM, float> v0(const_cast<float*>(source.data()) + view_offset0, 2, v0_shape, v0_stride, source.format());"
     )
 
+    npu_source_type = _make_memory_type([8, 4], [4, 1], element_type=f32)
+    npu_view_type = _make_memory_type([2, 3], [4, 1], element_type=f32)
+    npu_block = Block(arg_types=[npu_source_type])
+    npu_ctx = _npu_ctx()
+    npu_ctx.bind_name(npu_block.args[0], "source")
+    npu_c0 = arith.ConstantOp(IntegerAttr(0, i32))
+    npu_c1 = arith.ConstantOp(IntegerAttr(1, i32))
+    npu_c2 = arith.ConstantOp(IntegerAttr(2, i32))
+    npu_c3 = arith.ConstantOp(IntegerAttr(3, i32))
+    npu_view = DmaViewOp(
+        npu_block.args[0],
+        [npu_c1.result, npu_c0.result],
+        [npu_c2.result, npu_c3.result],
+        [npu_c1.result, npu_c1.result],
+        npu_view_type,
+    )
+
+    npu_view_stmt = emit_c_op(npu_view, npu_ctx)
+
+    assert npu_view_stmt == (
+        "Memory<GM, float> source_1 = "
+        "source.view<float>(Vector{1, 0} /*offset*/, Vector{2, 3} /*size*/, Vector{1, 1} /*stride*/);"
+    )
+
 
 # EC-010
 # 功能说明: 验证 emit_c 可生成 symbol.for + dma.alloc + dma.slice + nn.img2col2d + dma.deslice 的真实链路片段。
@@ -2813,9 +2837,9 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     assert "S_INT tid = npu_demo::thread_id();" in stmt
     assert "S_INT tnum = npu_demo::thread_num();" in stmt
     assert "Memory<TSM, float> tsm = npu_demo::get_dynamic_memory<TSM>();" in stmt
-    assert "Memory<GM, float> src_view = source.view<float>({tid} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
-    assert "Memory<TSM, float> work_tile = tsm.view<float>({0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
-    assert "Memory<TSM, float> out_tile = tsm.view<float>({0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
+    assert "Memory<GM, float> src_view = source.view<float>(Vector{tid} /*offset*/, Vector{16} /*size*/, Vector{1} /*stride*/);" in stmt
+    assert "Memory<TSM, float> work_tile = tsm.view<float>(Vector{0} /*offset*/, Vector{16} /*size*/, Vector{1} /*stride*/);" in stmt
+    assert "Memory<TSM, float> out_tile = tsm.view<float>(Vector{0} /*offset*/, Vector{16} /*size*/, Vector{1} /*stride*/);" in stmt
     assert "slice(work_tile /*dst*/, src_view /*source*/, 0 /*offset*/, 16 /*size*/, 1 /*stride*/);" in stmt
     assert "add<TSM, float, float>(out_tile /*out*/, work_tile /*lhs*/, work_tile /*rhs*/);" in stmt
     assert "deslice(out /*target*/, out_tile /*source*/, tid /*offset*/, 16 /*size*/, 1 /*stride*/);" in stmt

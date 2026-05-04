@@ -266,6 +266,36 @@ def _verify_operands_match_layout(
                 raise VerifyException(mismatch_message)
 
 
+def _parse_symbolic_expr_text(text: str) -> sp.Basic | None:
+    """解析符号整数表达式文本。
+
+
+    功能说明:
+    - 将整数、符号乘法、`floor(...)` 与 `min(...)` 文本解析为 sympy 表达式。
+    - 无法解析或未知动态维度时返回 `None`，由调用方决定是否跳过静态比较。
+
+    使用示例:
+    - _parse_symbolic_expr_text("TILE_H*4")
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    stripped = text.strip()
+    if stripped == "?":
+        return None
+    names = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", stripped))
+    function_names = {"floor", "min"}
+    local_dict = {name: sp.Symbol(name, integer=True, real=True) for name in names if name not in function_names}
+    local_dict.update({"floor": sp.floor, "min": sp.Min})
+    try:
+        return sp.sympify(stripped, locals=local_dict)
+    except (TypeError, ValueError, SyntaxError, sp.SympifyError):
+        return None
+
+
 def _verify_dynamic_shape_matches_result(
     dynamic_shape: Sequence[SSAValue],
     result_shape: ArrayAttr[Attribute],
@@ -614,7 +644,7 @@ def _verify_static_view_bounds(
         if offset_int is None or size_int is None or stride_int is None:
             return
         linear_start += offset_int * source_step_attr.data
-        linear_extent += (size_int - 1) * stride_int
+        linear_extent += (size_int - 1) * stride_int * source_step_attr.data
     if linear_start + linear_extent >= source_numel:
         raise VerifyException("dma.view bounds mismatch")
 
@@ -693,17 +723,29 @@ def _parse_symbolic_dim_attr(value: Attribute) -> sp.Basic | None:
         return sp.Integer(value.data)
     if not isinstance(value, StringAttr):
         return None
-    text = value.data.strip()
-    if text == "?":
+    return _parse_symbolic_expr_text(value.data)
+
+
+def _parse_symbol_value_expr(value: SSAValue) -> sp.Basic | None:
+    """解析 `!symbol.int<"expr">` operand 为 sympy 表达式。
+
+
+    功能说明:
+    - 仅解析 `SymbolValueType` 的公开表达式文本。
+    - 无法解析或未知动态值时返回 `None`，由调用方跳过静态比较。
+
+    使用示例:
+    - _parse_symbol_value_expr(op.stride[0])
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if not isinstance(value.type, SymbolValueType):
         return None
-    names = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text))
-    function_names = {"floor", "min"}
-    local_dict = {name: sp.Symbol(name, integer=True, real=True) for name in names if name not in function_names}
-    local_dict.update({"floor": sp.floor, "min": sp.Min})
-    try:
-        return sp.sympify(text, locals=local_dict)
-    except (TypeError, ValueError, SyntaxError, sp.SympifyError):
-        return None
+    return _parse_symbolic_expr_text(value.type.expr.expr.data)
 
 
 def _stride_attrs_equal(lhs: Attribute, rhs: Attribute) -> bool:
@@ -730,6 +772,37 @@ def _stride_attrs_equal(lhs: Attribute, rhs: Attribute) -> bool:
     if lhs_expr is None or rhs_expr is None:
         return False
     return sp.simplify(lhs_expr - rhs_expr) == 0
+
+
+def _verify_view_result_stride(
+    source_stride: ArrayAttr[Attribute],
+    stride_operands: Sequence[SSAValue],
+    result_stride: ArrayAttr[Attribute],
+) -> None:
+    """校验 dma.view 结果 stride 来自源物理 stride 与逻辑 stride 的乘积。
+
+
+    功能说明:
+    - 对可解析维度执行 `result_stride == source_stride * stride_operand` 比较。
+    - 含未知 `?` 或不可解析符号时跳过该维静态比较，保留动态 IR 表达能力。
+
+    使用示例:
+    - _verify_view_result_stride(source_type.stride, op.stride, result_type.stride)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    for source_attr, stride_value, result_attr in zip(source_stride.data, stride_operands, result_stride.data, strict=True):
+        source_expr = _parse_symbolic_dim_attr(source_attr)
+        stride_expr = _parse_symbol_value_expr(stride_value)
+        result_expr = _parse_symbolic_dim_attr(result_attr)
+        if source_expr is None or stride_expr is None or result_expr is None:
+            continue
+        if sp.simplify(result_expr - (source_expr * stride_expr)) != 0:
+            raise VerifyException("stride must match source physical stride * view stride")
 
 
 def _is_contiguous(memory_type: NnMemoryType) -> bool:
@@ -1473,6 +1546,7 @@ class DmaViewOp(IRDLOperation):
         - 非 byte pool 场景下 source/result rank 必须一致；byte pool 允许 rank 不一致。
         - `offsets` 允许 `!symbol.int` 与 `!symbol.iter`，`shape`/`stride` 仍需 `!symbol.int`。
         - `offsets`/`shape`/`stride` 长度与结果 rank 一致。
+        - 非 byte pool 场景下，结果 stride 必须等于 source physical stride 与 view logical stride 的逐维乘积。
         - 当边界可静态判定时，必须满足 `offset + (size - 1) * stride < dim`。
         - 非 byte pool 场景下可判定 numel 不一致必须报错；byte pool 需满足字节数一致与字节边界可达。
 
@@ -1497,13 +1571,13 @@ class DmaViewOp(IRDLOperation):
         _verify_rank_match(shape, rank, "shape")
         _verify_rank_match(stride, rank, "stride")
         _verify_operands_match_layout(shape, result_type.shape, "shape must match result shape")
-        _verify_operands_match_layout(stride, result_type.stride, "stride must match result stride")
         if source_type.space.space.data != result_type.space.space.data:
             raise VerifyException("dma.view space mismatch")
 
         source_numel = _maybe_numel(source_type.shape)
         result_numel = _maybe_numel(result_type.shape)
         if _is_i8_byte_pool(source_type):
+            _verify_operands_match_layout(stride, result_type.stride, "stride must match result stride")
             result_elem_size = _element_byte_size(result_type.element_type)
             if result_elem_size is None:
                 raise VerifyException("dma.view element_type unsupported for byte pool")
@@ -1516,6 +1590,7 @@ class DmaViewOp(IRDLOperation):
                 if byte_end > source_numel:
                     raise VerifyException("dma.view byte bounds mismatch")
         else:
+            _verify_view_result_stride(source_type.stride, stride, result_type.stride)
             if source_type.element_type != result_type.element_type:
                 raise VerifyException("dma.view element_type mismatch")
             if source_numel is not None and result_numel is not None and source_numel != result_numel:

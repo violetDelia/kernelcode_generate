@@ -296,11 +296,29 @@ class KernelEmitter:
         return [op for op in func_op.body.block.ops if not self._is_launch_helper_op(op)]
 
     def _normalize_npu_demo_stmt(self, stmt: str) -> str:
+        """归一化 npu_demo 函数体内的公开 helper 调用文本。
+
+
+        功能说明:
+        - 将未限定的线程 / 动态内存 helper 补成 `npu_demo::` 命名空间调用。
+        - 仅对 `.view<...>` 的三个 Vector 实参做精确归一化，避免影响普通 brace-list。
+
+        使用示例:
+        - stmt = self._normalize_npu_demo_stmt(stmt)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel/gen_kernel.md
+        - test: test/dsl/gen_kernel/emit/test_package.py
+        - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
+        """
+
         stmt = re.sub(r"(?<![\\w:])thread_id\\(\\)", "npu_demo::thread_id()", stmt)
         stmt = re.sub(r"(?<![\\w:])thread_num\\(\\)", "npu_demo::thread_num()", stmt)
         stmt = re.sub(r"(?<![\\w:])get_dynamic_memory<", "npu_demo::get_dynamic_memory<", stmt)
         if ".view<" in stmt:
-            stmt = stmt.replace("({", "(Vector{").replace(", {", ", Vector{")
+            stmt = re.sub(r"(\.view<[^>]+>\()\{", r"\1Vector{", stmt)
+            stmt = re.sub(r"(/\*offset\*/,\s*)\{", r"\1Vector{", stmt)
+            stmt = re.sub(r"(/\*size\*/,\s*)\{", r"\1Vector{", stmt)
         return stmt
 
     def _get_npu_demo_plain_func(self, module_op: ModuleOp) -> func.FuncOp | None:

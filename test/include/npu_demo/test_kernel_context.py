@@ -666,7 +666,7 @@ int main() {
 
 
 # NPU-DEMO-KC-008
-# 测试目的: 验证成员式 `view<T>(...)` 在 1-D 子集下对非法 offset/size/stride、越界与 rank!=1 明确失败（抛出 runtime_error 并携带关键字）。
+# 测试目的: 验证成员式 `view<T>(...)` 对非法 offset/size/stride、越界明确失败，并支持 rank2 view 的 physical stride 传播。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_dma_view_rejects_invalid_params
 # 对应功能实现文件链接: [include/npu_demo/Memory.h](include/npu_demo/Memory.h)
 # 对应 spec 文件链接: [spec/include/api/Memory.md](spec/include/api/Memory.md)
@@ -815,24 +815,27 @@ int main() {
         }
     }
 
-    // rank!=1：1-D 子集实现必须明确拒绝。
-    float data2[6] = {0};
+    // rank2：result stride 必须等于 source physical stride 与 view logical stride 的逐维乘积。
+    float data2[6] = {0, 1, 2, 3, 4, 5};
     long long shape2[2] = {2, 3};
     long long stride2[2] = {3, 1};
     Memory<MemorySpace::GM, float> source2(data2, shape2, stride2, 2, MemoryFormat::Norm);
 
-    Vector offset2(offset_bad_rank_buf, 2);
-    Vector size2(size_bad_rank_buf, 2);
-    Vector stride2_vec(stride_bad_rank_buf, 2);
-    try {
-        auto bad = source2.view<float>(offset2, size2, stride2_vec);
-        (void)bad;
+    long long offset2_buf[2] = {1, 1};
+    long long size2_buf[2] = {1, 2};
+    long long stride2_view_buf[2] = {1, 1};
+    Vector offset2(offset2_buf, 2);
+    Vector size2(size2_buf, 2);
+    Vector stride2_vec(stride2_view_buf, 2);
+    auto tile2 = source2.view<float>(offset2, size2, stride2_vec);
+    if (tile2.rank() != 2 || tile2.get_shape(0) != 1 || tile2.get_shape(1) != 2) {
         return fail(15);
-    } catch (const std::runtime_error& err) {
-        const int status = expect_runtime_error_contains(err, "rank!=1", 16);
-        if (status != 0) {
-            return status;
-        }
+    }
+    if (tile2.get_stride(0) != 3 || tile2.get_stride(1) != 1) {
+        return fail(16);
+    }
+    if (tile2.data() != source2.data() + 4) {
+        return fail(17);
     }
 
     return 0;

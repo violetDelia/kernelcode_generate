@@ -28,7 +28,7 @@ def _emit_npu_demo_dma_view(op: DmaViewOp, ctx) -> str:
     """发射 npu_demo `dma.view` C++ 语句。
 
     功能说明:
-    - 根据 `DmaViewOp` 的 source、offset、shape 与 stride 生成 memory `view<...>(...)` 语句。
+    - 根据 `DmaViewOp` 的 source、offset、shape 与 stride 生成 memory `view<...>(Vector{...})` 语句。
     - 仅作为当前文件内注册实现使用，不作为跨文件公开 API。
 
     使用示例:
@@ -41,9 +41,9 @@ def _emit_npu_demo_dma_view(op: DmaViewOp, ctx) -> str:
     result_name = ctx.create_or_get_name(op.result)
     result_type = ctx.dispatch_type(op.result.type)
     element_type = ctx.dispatch_type(op.result.type.element_type)
-    offset_expr = "{" + ", ".join(emit_c_value(value, ctx) for value in op.offsets) + "}"
-    size_expr = "{" + ", ".join(emit_c_value(value, ctx) for value in op.shape) + "}"
-    stride_expr = "{" + ", ".join(emit_c_value(value, ctx) for value in op.stride) + "}"
+    offset_expr = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in op.offsets) + "}"
+    size_expr = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in op.shape) + "}"
+    stride_expr = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in op.stride) + "}"
     return (
         f"{ctx.current_indent}{result_type} {result_name} = "
         f"{source_expr}.view<{element_type}>({offset_expr} /*offset*/, {size_expr} /*size*/, {stride_expr} /*stride*/);"

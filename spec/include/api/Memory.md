@@ -73,7 +73,7 @@
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - `Memory<Space, T>` 是视图类型，不分配、释放或拥有底层数据。
 - `space()` 返回模板参数 `Space` 对应的常量，不提供运行期可变 `space` 成员。
-- 本规范不承诺运行时边界检查，不对空指针、越界索引、非法 `shape/stride` 提供保护。
+- 除各 API `注意事项` 已写明的稳定失败语义外，本规范不额外承诺运行时边界检查，不对空指针、越界索引、非法 `shape/stride` 提供额外保护。
 - 调用方需要保证 `rank > 0`、`shape[i] > 0`、`stride[i] > 0`。
 - 本规范不引入标准库容器、异常或动态分配依赖；实现需避免这些能力。
 - `MemoryFormat` 仅公开 `Norm` 与 `CLast`，不定义字符串别名或额外布局成员。
@@ -408,8 +408,8 @@ auto stride0 = memory.get_stride(0);
   ```cpp
 auto tile = memory.view<float>(offset, size, stride);
 ```
-- 功能说明：执行 `view`。
-- 注意事项：输入 memory、offset、size、stride 和 dtype 必须符合 DMA operation 合同；非法组合必须稳定失败。
+- 功能说明：返回源 memory 的成员式子视图，不复制底层数据。
+- 注意事项：`offset/size/stride` 的 rank 必须与源 memory rank 一致；npu_demo 实现支持 rank `1..8`；`offset[i] >= 0`、`size[i] > 0`、`stride[i] > 0`、`source.shape[i] > 0`、`source.stride[i] > 0`；结果 shape 等于 `size`，结果 stride 等于源 physical stride 与 view logical stride 的逐维乘积，结果 data 指针等于源 data 加多维线性 offset。公开失败关键字固定为 `memory.view: invalid rank`、`memory.view: vector_rank_mismatch`、`memory.view: invalid offset/size/stride`、`memory.view: invalid source shape`、`memory.view: invalid source stride`、`memory.view: overflow`、`memory.view: out_of_bounds` 或 `memory.view: rank_too_large`。
 
 ### `Memory::reshape(const Vector& shape) const -> Memory<Space, T>`
 
