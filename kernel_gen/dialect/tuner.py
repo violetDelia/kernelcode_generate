@@ -3,7 +3,7 @@
 
 功能说明:
 - 定义 tuner dialect 的超参数声明与局部成本节点接口。
-- `tuner.param` 返回 `!symbol.dim<"name">` 超参数标量，`tuner.cost` 透传原 op operands 与公开 metadata，并固定返回 `!symbol.int<"expr">` 局部成本。
+- `tuner.param` 返回 `!symbol.int<#symbol.expr<name>>` 超参数标量，`tuner.cost` 透传原 op operands 与公开 metadata，并固定返回 `!symbol.int<#symbol.expr<expr>>` 局部成本。
 - `tuner.cost.cost_kind` 接受任意非空字符串 attr。
 
 API 列表:
@@ -22,6 +22,8 @@ API 列表:
 
 from __future__ import annotations
 
+import re
+
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
 from xdsl.dialects.builtin import StringAttr
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
@@ -30,9 +32,12 @@ from xdsl.parser import AttrParser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.dialect.symbol import SymbolDimType, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolValueType
 
 _ERROR_SCENE = "dialect.tuner verifier"
+_TUNER_PARAM_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
 def _raise_verify_error(expected: str) -> None:
     """统一抛出 tuner verifier 错误。
 
@@ -42,7 +47,7 @@ def _raise_verify_error(expected: str) -> None:
     - 供 `tuner.param`、`tuner.cost` 等 verifier 与 parser 共享错误格式，保持报错文本一致。
 
     使用示例:
-    - _raise_verify_error('tuner.cost result type must be !symbol.int<"expr">')
+    - _raise_verify_error("tuner.cost result type must be !symbol.int<#symbol.expr<expr>>")
 
     关联文件:
     - spec: spec/dialect/tuner.md
@@ -58,16 +63,16 @@ def _raise_verify_error(expected: str) -> None:
             action=ERROR_ACTION,
         )
     )
-def _verify_symbol_dim_result_type(result_type: Attribute, op_name: str) -> SymbolDimType:
+def _verify_symbol_value_result_type(result_type: Attribute, op_name: str) -> SymbolValueType:
     """校验 tuner.param 的结果类型。
 
 
     功能说明:
-    - 要求结果类型必须为 `!symbol.dim<"name">` 并通过自身校验。
-    - 使用 `SymbolDimType` 的命名校验确保 name 合法。
+    - 要求结果类型必须为 `!symbol.int<#symbol.expr<name>>` 并通过自身校验。
+    - 要求表达式为单个公开名称，避免 tuner 参数退化为常量或复合表达式。
 
     使用示例:
-    - _verify_symbol_dim_result_type(SymbolDimType.from_name("BLOCK_M"), "tuner.param")
+    - _verify_symbol_value_result_type(SymbolValueType.from_expr("BLOCK_M"), "tuner.param")
 
     关联文件:
     - spec: spec/dialect/tuner.md
@@ -75,22 +80,32 @@ def _verify_symbol_dim_result_type(result_type: Attribute, op_name: str) -> Symb
     - 功能实现: kernel_gen/dialect/tuner.py
     """
 
-    if not isinstance(result_type, SymbolDimType):
+    if not isinstance(result_type, SymbolValueType):
         raise VerifyException(
             ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
-                expected=f"{op_name} result type must be !symbol.dim<\"name\">",
+                expected=f"{op_name} result type must be !symbol.int<#symbol.expr<name>>",
                 actual=ERROR_ACTUAL,
                 action=ERROR_ACTION,
             )
         )
     result_type.verify()
+    value = result_type.get_value()
+    if not isinstance(value, str) or _TUNER_PARAM_NAME_PATTERN.fullmatch(value) is None:
+        raise VerifyException(
+            ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{op_name} result symbol name must match [A-Za-z_][A-Za-z0-9_]*",
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
+            )
+        )
     return result_type
 
 
 @irdl_op_definition
 class TunerParamOp(IRDLOperation):
-    """声明超参数并返回符号维度标量。"""
+    """声明超参数并返回符号值标量。"""
 
     name = "tuner.param"
 
@@ -104,7 +119,7 @@ class TunerParamOp(IRDLOperation):
         - 构造仅含结果类型的 tuner.param op。
 
         使用示例:
-        - TunerParamOp(SymbolDimType.from_name("BLOCK_M"))
+        - TunerParamOp(SymbolValueType.from_expr("BLOCK_M"))
 
         关联文件:
         - spec: spec/dialect/tuner.md
@@ -119,10 +134,10 @@ class TunerParamOp(IRDLOperation):
 
 
         功能说明:
-        - 要求结果类型为 `!symbol.dim<"name">`。
+        - 要求结果类型为 `!symbol.int<#symbol.expr<name>>`。
 
         使用示例:
-        - TunerParamOp(SymbolDimType.from_name("BLOCK_M")).verify()
+        - TunerParamOp(SymbolValueType.from_expr("BLOCK_M")).verify()
 
         关联文件:
         - spec: spec/dialect/tuner.md
@@ -130,17 +145,17 @@ class TunerParamOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/tuner.py
         """
 
-        _verify_symbol_dim_result_type(self.result.type, self.name)
+        _verify_symbol_value_result_type(self.result.type, self.name)
 
     def print(self: "TunerParamOp", printer: Printer) -> None:
         """打印 tuner.param 自定义文本语法。
 
 
         功能说明:
-        - 输出 `tuner.param : !symbol.dim<"name">`。
+        - 输出 `tuner.param : !symbol.int<#symbol.expr<name>>`。
 
         使用示例:
-        - TunerParamOp(SymbolDimType.from_name("BLOCK_M")).print(printer)
+        - TunerParamOp(SymbolValueType.from_expr("BLOCK_M")).print(printer)
 
         关联文件:
         - spec: spec/dialect/tuner.md
@@ -157,7 +172,7 @@ class TunerParamOp(IRDLOperation):
 
 
         功能说明:
-        - 解析 `tuner.param : !symbol.dim<"name">` 格式。
+        - 解析 `tuner.param : !symbol.int<#symbol.expr<name>>` 格式。
 
         使用示例:
         - TunerParamOp.parse(parser)
@@ -196,7 +211,7 @@ class TunerCostOp(IRDLOperation):
 
 
         功能说明:
-        - 构造透传原 op operands 的 `tuner.cost(...)->!symbol.int<"...">`。
+        - 构造透传原 op operands 的 `tuner.cost(...)->!symbol.int<#symbol.expr<expr>>`。
         - 保留原 op attrs，并显式要求公开 metadata attrs `cost_kind/op_name`。
 
         使用示例:
@@ -222,7 +237,7 @@ class TunerCostOp(IRDLOperation):
 
 
         功能说明:
-        - 要求结果类型固定为 `!symbol.int<"expr">`。
+        - 要求结果类型固定为 `!symbol.int<#symbol.expr<expr>>`。
         - 要求 `cost_kind/op_name` 两个 metadata attr 满足公开合同。
         - 显式拒绝旧 `kind/device_func` attrs。
 
@@ -236,7 +251,7 @@ class TunerCostOp(IRDLOperation):
         """
 
         if not isinstance(self.result.type, SymbolValueType):
-            _raise_verify_error('tuner.cost result type must be !symbol.int<"expr">')
+            _raise_verify_error("tuner.cost result type must be !symbol.int<#symbol.expr<expr>>")
         self.result.type.verify()
 
         for attr_name in ("cost_kind", "op_name"):
@@ -258,7 +273,7 @@ class TunerCostOp(IRDLOperation):
 
 
         功能说明:
-        - 输出 `tuner.cost(%args) {attrs} : (types) -> !symbol.int<"...">` 形式文本。
+        - 输出 `tuner.cost(%args) {attrs} : (types) -> !symbol.int<#symbol.expr<expr>>` 形式文本。
         - 保持 operands、attrs、类型段顺序稳定，便于 round-trip。
 
         使用示例:
@@ -291,7 +306,7 @@ class TunerCostOp(IRDLOperation):
 
 
         功能说明:
-        - 解析 `tuner.cost(%args) {attrs} : (types) -> !symbol.int<"...">`。
+        - 解析 `tuner.cost(%args) {attrs} : (types) -> !symbol.int<#symbol.expr<expr>>`。
         - 在解析阶段按类型段解析 unresolved operands，确保 print 后再 parse 可闭环。
 
         使用示例:

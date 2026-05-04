@@ -46,7 +46,6 @@ from kernel_gen.dialect.symbol import (
     SymbolCastOp,
     SymbolConstOp,
     SymbolDivOp,
-    SymbolDimType,
     SymbolEqOp,
     SymbolExprAttr,
     SymbolFloorDivOp,
@@ -564,20 +563,13 @@ def test_symbol_value_type_public_non_concrete_division_edges() -> None:
 
 
 # TC-SYM-059
-# 测试目的: 验证 symbol.dim 与 symbol.iter 公开构造、字符串化和 parser 兼容边界。
+# 测试目的: 验证旧 symbol dim type 删除后，symbol.iter 公开构造、字符串化和 parser 兼容边界稳定。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
-def test_symbol_dim_and_iter_public_constructor_matrix() -> None:
+def test_symbol_iter_public_constructor_matrix_and_removed_dim_type() -> None:
     ctx = _build_context()
-    rng = random.Random(20260505)
-    for name in rng.sample(["BLOCK_M", "tile_n", "_inner0"], k=3):
-        dim_type = SymbolDimType.from_name(name)
-        dim_type.verify()
-        assert str(dim_type) == f"symbol.dim<{name}>"
-
-    for name, message in [(" ", "must not be empty"), ("1bad", "must match")]:
-        with pytest.raises(VerifyException, match=message):
-            SymbolDimType.from_name(name)
+    with pytest.raises(ParseError):
+        Parser(ctx, '!symbol.dim<"BLOCK_M">').parse_attribute()
 
     iter_attr = SymbolIterAttr.from_bounds("0", "N", "TILE_N")
     iter_type = SymbolIterType.from_attr(iter_attr)

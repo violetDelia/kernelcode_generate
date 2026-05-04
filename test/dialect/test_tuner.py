@@ -3,7 +3,7 @@
 
 功能说明:
 - 覆盖 tuner dialect 的 `tuner.param` 与 `tuner.cost` parse/print、verifier 与错误路径。
-- `tuner.param` 负责返回 `!symbol.dim<"name">` 的超参数标量；`tuner.cost` 负责透传原 op operands 并固定返回 `!symbol.int<"expr">` 局部成本。
+- `tuner.param` 负责返回 `!symbol.int<#symbol.expr<name>>` 的超参数标量；`tuner.cost` 负责透传原 op operands 并固定返回 `!symbol.int<#symbol.expr<expr>>` 局部成本。
 
 使用示例:
 - pytest -q test/dialect/test_tuner.py
@@ -39,7 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.symbol import Symbol, SymbolDimType, SymbolValueType
+from kernel_gen.dialect.symbol import Symbol, SymbolValueType
 from kernel_gen.dialect.tuner import Tuner, TunerCostOp, TunerParamOp
 
 
@@ -104,7 +104,7 @@ def test_tuner_param_round_trip() -> None:
         ctx,
         """
 builtin.module {
-  %p0 = tuner.param : !symbol.dim<"BLOCK_M">
+  %p0 = tuner.param : !symbol.int<#symbol.expr<BLOCK_M>>
 }
 """,
     ).parse_module()
@@ -116,53 +116,43 @@ builtin.module {
 
 
 # TC-TUNER-002
-# 测试目的: 验证 tuner.param 拒绝非 !symbol.dim<"name"> 的结果类型。
+# 测试目的: 验证 tuner.param 拒绝非 !symbol.int<#symbol.expr<name>> 的结果类型。
 # 对应功能实现文件路径: kernel_gen/dialect/tuner.py
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_param_rejects_invalid_result_type() -> None:
     invalid_types = [
-        SymbolValueType.from_expr("BLOCK_M"),
         IndexType(),
         IntegerType(32),
     ]
     for invalid_type in invalid_types:
         op = TunerParamOp(invalid_type)
-        with pytest.raises(VerifyException, match='tuner.param result type must be !symbol.dim<"name">'):
+        with pytest.raises(VerifyException, match="tuner.param result type must be !symbol.int"):
             op.verify()
 
 
 # TC-TUNER-003
-# 测试目的: 验证 tuner.param 对非法 name 的错误路径。
+# 测试目的: 验证 tuner.param 对非名称 symbol.int 的错误路径。
 # 对应功能实现文件路径: kernel_gen/dialect/tuner.py
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_param_rejects_invalid_name() -> None:
-    with pytest.raises(VerifyException, match="symbol dim name must not be empty"):
-        SymbolDimType(StringAttr("")).verify()
-
-    with pytest.raises(VerifyException, match="symbol dim name must match"):
-        SymbolDimType(StringAttr("BLOCK-M")).verify()
+    for result_type in [
+        SymbolValueType.from_expr("1"),
+        SymbolValueType.from_expr("?"),
+        SymbolValueType.from_expr("BLOCK_M + 1"),
+    ]:
+        with pytest.raises(VerifyException, match="tuner.param result symbol name must match"):
+            TunerParamOp(result_type).verify()
 
     ctx = _build_context()
-    module_empty = Parser(
-        ctx,
-        """
-builtin.module {
-  %p0 = tuner.param : !symbol.dim<"">
-}
-""",
-    ).parse_module()
-    with pytest.raises(VerifyException, match="symbol dim name must not be empty"):
-        module_empty.verify()
-
     module_bad = Parser(
         ctx,
         """
 builtin.module {
-  %p0 = tuner.param : !symbol.dim<"BLOCK-M">
+  %p0 = tuner.param : !symbol.int<#symbol.expr<BLOCK_M + 1>>
 }
 """,
     ).parse_module()
-    with pytest.raises(VerifyException, match="symbol dim name must match"):
+    with pytest.raises(VerifyException, match="tuner.param result symbol name must match"):
         module_bad.verify()
 
 
@@ -176,9 +166,9 @@ def test_tuner_cost_round_trip() -> None:
         ctx,
         """
 builtin.module {
-  %tile_m = "test.op"() : () -> !symbol.int<"TILE_M">
-  %k = "test.op"() : () -> !symbol.int<"K">
-  %cost0 = tuner.cost(%tile_m, %k) {cost_kind = "memory", op_name = "dma.copy"} : (!symbol.int<"TILE_M">, !symbol.int<"K">) -> !symbol.int<"LOCAL">
+  %tile_m = "test.op"() : () -> !symbol.int<#symbol.expr<TILE_M>>
+  %k = "test.op"() : () -> !symbol.int<#symbol.expr<K>>
+  %cost0 = tuner.cost(%tile_m, %k) {cost_kind = "memory", op_name = "dma.copy"} : (!symbol.int<#symbol.expr<TILE_M>>, !symbol.int<#symbol.expr<K>>) -> !symbol.int<#symbol.expr<LOCAL>>
 }
 """,
     ).parse_module()
@@ -205,11 +195,11 @@ def test_tuner_cost_accepts_arbitrary_non_empty_cost_kinds() -> None:
         ctx,
         """
 builtin.module {
-  %tile_m = "test.op"() : () -> !symbol.int<"TILE_M">
-  %cost0 = tuner.cost(%tile_m) {cost_kind = "compute", op_name = "dma.copy"} : (!symbol.int<"TILE_M">) -> !symbol.int<"LOCAL">
-  %cost1 = tuner.cost(%tile_m) {cost_kind = "memory", op_name = "dma.copy"} : (!symbol.int<"TILE_M">) -> !symbol.int<"LOCAL">
-  %cost2 = tuner.cost(%tile_m) {cost_kind = "latency", op_name = "dma.copy"} : (!symbol.int<"TILE_M">) -> !symbol.int<"LOCAL">
-  %cost3 = tuner.cost(%tile_m) {cost_kind = "memory_traffic", op_name = "dma.copy"} : (!symbol.int<"TILE_M">) -> !symbol.int<"LOCAL">
+  %tile_m = "test.op"() : () -> !symbol.int<#symbol.expr<TILE_M>>
+  %cost0 = tuner.cost(%tile_m) {cost_kind = "compute", op_name = "dma.copy"} : (!symbol.int<#symbol.expr<TILE_M>>) -> !symbol.int<#symbol.expr<LOCAL>>
+  %cost1 = tuner.cost(%tile_m) {cost_kind = "memory", op_name = "dma.copy"} : (!symbol.int<#symbol.expr<TILE_M>>) -> !symbol.int<#symbol.expr<LOCAL>>
+  %cost2 = tuner.cost(%tile_m) {cost_kind = "latency", op_name = "dma.copy"} : (!symbol.int<#symbol.expr<TILE_M>>) -> !symbol.int<#symbol.expr<LOCAL>>
+  %cost3 = tuner.cost(%tile_m) {cost_kind = "memory_traffic", op_name = "dma.copy"} : (!symbol.int<#symbol.expr<TILE_M>>) -> !symbol.int<#symbol.expr<LOCAL>>
 }
 """,
     ).parse_module()
@@ -226,7 +216,7 @@ builtin.module {
 # 对应功能实现文件路径: kernel_gen/dialect/tuner.py
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_cost_rejects_invalid_kind_attrs() -> None:
-    value = TunerParamOp(SymbolDimType.from_name("BLOCK_M")).result
+    value = TunerParamOp(SymbolValueType.from_expr("BLOCK_M")).result
 
     with pytest.raises(
         VerifyException,
@@ -261,9 +251,9 @@ def test_tuner_cost_rejects_invalid_kind_attrs() -> None:
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_cost_rejects_missing_attrs_or_invalid_result_type() -> None:
     ctx = _build_context()
-    value = TunerParamOp(SymbolDimType.from_name("BLOCK_M")).result
+    value = TunerParamOp(SymbolValueType.from_expr("BLOCK_M")).result
 
-    with pytest.raises(VerifyException, match='tuner.cost result type must be !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match="tuner.cost result type must be !symbol.int<#symbol.expr<expr>>"):
         TunerCostOp(
             [value],
             cost_kind=StringAttr("compute"),
@@ -276,8 +266,8 @@ def test_tuner_cost_rejects_missing_attrs_or_invalid_result_type() -> None:
             ctx,
             """
 builtin.module {
-  %tile_m = "test.op"() : () -> !symbol.int<"TILE_M">
-  %cost0 = tuner.cost(%tile_m) {cost_kind = "compute"} : (!symbol.int<"TILE_M">) -> !symbol.int<"LOCAL">
+  %tile_m = "test.op"() : () -> !symbol.int<#symbol.expr<TILE_M>>
+  %cost0 = tuner.cost(%tile_m) {cost_kind = "compute"} : (!symbol.int<#symbol.expr<TILE_M>>) -> !symbol.int<#symbol.expr<LOCAL>>
 }
 """,
         ).parse_module()

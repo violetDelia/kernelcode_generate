@@ -43,7 +43,6 @@ from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolConstOp,
-    SymbolDimType,
     SymbolDivOp,
     SymbolFloorDivOp,
     SymbolForOp,
@@ -175,7 +174,7 @@ def _make_module_for_tuner_param_hoist() -> ModuleOp:
     ops.extend([c0, c1, c2])
 
     loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
-    loop_block.add_ops([TunerParamOp(SymbolDimType.from_name("TILE_D0"))])
+    loop_block.add_ops([TunerParamOp(SymbolValueType.from_expr("TILE_D0"))])
     loop = SymbolForOp(c0.result, c1.result, c2.result, loop_block)
     ops.append(loop)
     ops.append(func.ReturnOp())
@@ -205,8 +204,8 @@ def _make_module_for_symbol_elewise_hoist() -> ModuleOp:
     add = SymbolAddOp(c4.result, c5.result, SymbolValueType.from_expr("4 + 5"))
     sub = SymbolSubOp(c6.result, c1.result, SymbolValueType.from_expr("6 - 1"))
     mul = SymbolMulOp(c4.result, c2.result, SymbolValueType.from_expr("4 * 1"))
-    div = SymbolDivOp(c8.result, c2.result, SymbolValueType.from_expr("8 / 1"))
-    floordiv = SymbolFloorDivOp(c7.result, c2.result, SymbolValueType.from_expr("7 // 1"))
+    div = SymbolDivOp(c8.result, c2.result, SymbolValueType.from_expr("8 floordiv 1"))
+    floordiv = SymbolFloorDivOp(c7.result, c2.result, SymbolValueType.from_expr("7 floordiv 1"))
     loop_block.add_ops([add, sub, mul, div, floordiv])
     loop = SymbolForOp(c0.result, c1.result, c2.result, loop_block)
     ops.append(loop)
@@ -277,8 +276,8 @@ def _make_module_for_loop_local_symbol_inputs() -> ModuleOp:
     add = SymbolAddOp(local_symbol.results[0], c1.result, SymbolValueType.from_expr("3 + 1"))
     sub = SymbolSubOp(local_symbol.results[0], c1.result, SymbolValueType.from_expr("3 - 1"))
     mul = SymbolMulOp(local_symbol.results[0], c1.result, SymbolValueType.from_expr("3 * 1"))
-    div = SymbolDivOp(local_symbol.results[0], c1.result, SymbolValueType.from_expr("3 / 1"))
-    floordiv = SymbolFloorDivOp(local_symbol.results[0], c1.result, SymbolValueType.from_expr("3 // 1"))
+    div = SymbolDivOp(local_symbol.results[0], c1.result, SymbolValueType.from_expr("3 floordiv 1"))
+    floordiv = SymbolFloorDivOp(local_symbol.results[0], c1.result, SymbolValueType.from_expr("3 floordiv 1"))
     loop_block.add_ops([
         local_const,
         local_symbol,
@@ -321,8 +320,8 @@ def _make_module_for_loop_carried_symbol_elewise() -> ModuleOp:
     add = SymbolAddOp(carried, c1.result, SymbolValueType.from_expr("TOTAL + 1"))
     sub = SymbolSubOp(carried, c1.result, SymbolValueType.from_expr("TOTAL - 1"))
     mul = SymbolMulOp(carried, c1.result, SymbolValueType.from_expr("TOTAL * 1"))
-    div = SymbolDivOp(carried, c1.result, SymbolValueType.from_expr("TOTAL / 1"))
-    floordiv = SymbolFloorDivOp(carried, c1.result, SymbolValueType.from_expr("TOTAL // 1"))
+    div = SymbolDivOp(carried, c1.result, SymbolValueType.from_expr("TOTAL floordiv 1"))
+    floordiv = SymbolFloorDivOp(carried, c1.result, SymbolValueType.from_expr("TOTAL floordiv 1"))
     loop_block.add_ops([add, sub, mul, div, floordiv, SymbolYieldOp(add.result)])
     loop = SymbolForOp(
         c0.result,

@@ -8,8 +8,6 @@
 
 - `class SymbolExprAttr(expr: StringAttr)`
 - `SymbolExprAttr.from_expr(expr: str) -> SymbolExprAttr`
-- `class SymbolDimType(dim: StringAttr)`
-- `SymbolDimType.from_name(name: str) -> SymbolDimType`
 - `class SymbolValueType(expr: SymbolExprAttr)`
 - `SymbolValueType.from_expr(expr: str) -> SymbolValueType`
 - `SymbolValueType.get_value(self) -> int | str`
@@ -313,39 +311,6 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
   ```
 - 功能说明：从公开字符串构造 `SymbolExprAttr`，并立即按 canonical 规则归一。
 - 注意事项：该入口不接受裸 `/` 或 `//`；除法相关表达必须写作 `floordiv`、`ceildiv` 或 `mod`。
-
-### `class SymbolDimType(dim: StringAttr)`
-
-- api：`class SymbolDimType(dim: StringAttr)`
-- 参数：
-  - `dim`：符号维度名称；类型 `StringAttr`；无默认值；不允许 `None` 或空字符串；必须匹配 `[A-Za-z_][A-Za-z0-9_]*`。
-- 返回值：`SymbolDimType` 实例。
-- 使用示例：
-
-  ```python
-  from xdsl.dialects.builtin import StringAttr
-  from kernel_gen.dialect.symbol import SymbolDimType
-
-  value = SymbolDimType(StringAttr("BLOCK_M"))
-  ```
-- 功能说明：构造或表示 `SymbolDimType` 对应的 symbol dialect type。
-- 注意事项：`SymbolDimType` 本轮不删除，但 `SymbolExprAttr` 内部不引入 `dim<...>` 表达节点。
-
-### `SymbolDimType.from_name(name: str) -> SymbolDimType`
-
-- api：`SymbolDimType.from_name(name: str) -> SymbolDimType`
-- 参数：
-  - `name`：符号维度名称；类型 `str`；无默认值；不允许 `None` 或空字符串；必须匹配 `[A-Za-z_][A-Za-z0-9_]*`。
-- 返回值：`SymbolDimType` 实例。
-- 使用示例：
-
-  ```python
-  from kernel_gen.dialect.symbol import SymbolDimType
-
-  value = SymbolDimType.from_name("BLOCK_M")
-  ```
-- 功能说明：从公开字符串名称构造 `SymbolDimType`。
-- 注意事项：该入口只承接 symbol dim 名称，不承接 `SymbolExprAttr` 表达式。
 
 ### `class SymbolValueType(expr: SymbolExprAttr)`
 
@@ -958,7 +923,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 | TC-SYM-051A | 边界/异常 | `SymbolConstOp` 拒绝 `IntegerAttr` 输入 | 准备 `IntegerAttr(3, i32)`。 | 运行 `test_symbol_const_op_rejects_integer_attr_input`。 | `SymbolConstOp(...)` 公开构造只接受 `int | IntAttr`，`IntegerAttr` 被稳定拒绝。 | `test_symbol_const_op_rejects_integer_attr_input` |
 | TC-SYM-051B | 边界/异常 | `SymbolConstOp` 拒绝 bool 输入 | 准备 `True`、`False`、`IntAttr(data=True)` 与 `IntAttr(data=False)`。 | 运行 `test_symbol_const_op_rejects_boolean_inputs`。 | `SymbolConstOp(...)` 公开构造拒绝 bool 与 bool-backed `IntAttr`，不把布尔值误当作 `!symbol.int<#symbol.expr<1>>` 或 `!symbol.int<#symbol.expr<0>>`。 | `test_symbol_const_op_rejects_boolean_inputs` |
 | TC-SYM-058 | 符号语义 | `SymbolValueType.get_value()/is_symbol()` 对常量、负数、`floordiv`、`ceildiv` 与 `mod` 的公开值语义 | 准备公开 `!symbol.int<#symbol.expr<...>>` 文本与构造入口。 | 运行 `test_symbol_value_type_public_expression_matrix`。 | 常量表达归一为整数，符号表达返回 canonical 文本，`is_symbol()` 与公开值语义一致。 | `test_symbol_value_type_public_expression_matrix` |
-| TC-SYM-059 | 解析/打印 | `SymbolDimType` 与 `SymbolIterType` 公开构造、字符串化和 legacy iter parser | 准备公开 symbol dim 名称、iter bounds 与 legacy iter 文本。 | 运行 `test_symbol_dim_and_iter_public_constructor_matrix`。 | 合法名称与 iter 文本稳定，空名称、非法名称和 malformed iter 文本按公开错误语义失败。 | `test_symbol_dim_and_iter_public_constructor_matrix` |
+| TC-SYM-059 | 解析/打印 | `SymbolIterType` 公开构造、字符串化和 legacy iter parser，且 legacy `symbol.dim` 文本不再注册 | 准备 iter bounds、legacy iter 文本与 legacy `!symbol.dim<...>` 文本。 | 运行 `test_symbol_iter_public_constructor_matrix_and_removed_dim_type`。 | iter 文本稳定，malformed iter 文本按公开错误语义失败，legacy `symbol.dim` 文本被 parser 拒绝。 | `test_symbol_iter_public_constructor_matrix_and_removed_dim_type` |
 | TC-SYM-060 | 边界/异常 | `symbol.add/div/floordiv` 公开 folding 拒绝除零、非整除与 result type 不匹配 | 准备公开 `Folder.try_fold(...)` 入口和 `symbol.const` 操作数。 | 运行 `test_symbol_binary_arith_fold_public_rejection_matrix`。 | 除零、非整除和 result type 不匹配均不发生错误折叠。 | `test_symbol_binary_arith_fold_public_rejection_matrix` |
 | TC-SYM-061 | 边界/异常 | `SymbolValueType.is_symbol()` 对除零和 raw division 的公开边界 | 准备公开 `!symbol.int<#symbol.expr<7 floordiv 0>>`、`#symbol.expr<N / 2>` 与 `#symbol.expr<N // 2>` 文本。 | 运行 `test_symbol_value_type_public_non_concrete_division_edges`、`test_symbol_expr_attr_rejects_raw_division_tokens`。 | 除零和 raw `/` / `//` 均被拒绝，不被误归一为符号表达。 | `test_symbol_value_type_public_non_concrete_division_edges`、`test_symbol_expr_attr_rejects_raw_division_tokens` |
 | TC-SYM-062 | 边界/异常 | `symbol.get_dim/get_stride` 公开 folding 拒绝非 memory、非静态轴号、越界轴号与匿名动态条目 | 准备公开 memory SSA value、非 memory value、`?` shape/stride 与非法 axis。 | 运行 `test_symbol_memory_query_fold_public_rejection_matrix`。 | 非可折叠输入均返回 `None`，不产生错误常量折叠。 | `test_symbol_memory_query_fold_public_rejection_matrix` |

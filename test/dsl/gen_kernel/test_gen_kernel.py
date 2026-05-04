@@ -54,6 +54,7 @@ from xdsl.dialects.builtin import (
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.irdl import IRDLOperation, irdl_op_definition, result_def
 from xdsl.parser import Parser
+from xdsl.utils.exceptions import ParseError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -78,7 +79,6 @@ from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolCastOp,
     SymbolConstOp,
-    SymbolDimType,
     SymbolForOp,
     SymbolGetDimOp,
     SymbolIterType,
@@ -135,19 +135,8 @@ class UnsupportedOp(IRDLOperation):
 
 
 @irdl_op_definition
-class FakeSymbolDimOp(IRDLOperation):
-    """测试用的 `!symbol.dim<"...">` 产生 op。"""
-
-    name = "test.fake_symbol_dim"
-    result = result_def(SymbolDimType)
-
-    def __init__(self: "FakeSymbolDimOp", name: str) -> None:
-        super().__init__(result_types=[SymbolDimType.from_name(name)])
-
-
-@irdl_op_definition
 class FakeSymbolValueOp(IRDLOperation):
-    """测试用的 `!symbol.int<"...">` 产生 op。"""
+    """测试用的 `!symbol.int<#symbol.expr<...>>` 产生 op。"""
 
     name = "test.fake_symbol_value"
     result = result_def(SymbolValueType)
@@ -2488,20 +2477,24 @@ def test_gen_kernel_rejects_tile_codegen_with_helper_call() -> None:
 
 # GK-S3-005
 # 功能说明: 验证旧 split bridge 合同不再被接受。
-# 测试目的: 防止实现继续接受 `tuner.param : !symbol.dim<...>` 这类旧合同。
+# 测试目的: 防止实现继续接受 legacy `tuner.param : !symbol.dim<...>` 文本合同。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rejects_legacy_split_tuner_param_contract
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 def test_gen_kernel_rejects_legacy_split_tuner_param_contract() -> None:
-    mem_type = _make_memory_type([8, 4], [4, 1])
-    block = Block(arg_types=[mem_type])
-    tuner = TunerParamOp(SymbolDimType.from_name("TILE_M"))
-    block.add_ops([tuner, func.ReturnOp()])
-    func_op = func.FuncOp("legacy_split_contract", FunctionType.from_lists([mem_type], []), Region(block))
-
-    with pytest.raises(KernelCodeError, match="TileCodegenMalformed"):
-        gen_kernel(func_op, _ctx())
+    with pytest.raises(ParseError):
+        Parser(
+            build_default_context(),
+            """
+builtin.module {
+  func.func @legacy_split_contract() {
+    %tile = tuner.param : !symbol.dim<"TILE_M">
+    func.return
+  }
+}
+""",
+        ).parse_module()
 
 
 # GK-S3-006
