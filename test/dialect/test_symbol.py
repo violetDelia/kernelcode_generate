@@ -199,11 +199,21 @@ def _make_symbol_value(expr: str):
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_expr_attr_round_trip() -> None:
     ctx = _build_context()
-    for text in ['#symbol.expr<"N">', '#symbol.expr<"M + 1">', '#symbol.expr<"B*K">', '#symbol.expr<"min(T, N - i)">', '#symbol.expr<"?">']:
+    cases = [
+        ("#symbol.expr<N>", "#symbol.expr<N>"),
+        ("#symbol.expr<1 + N>", "#symbol.expr<N + 1>"),
+        ("#symbol.expr<B*K>", "#symbol.expr<B*K>"),
+        ("#symbol.expr<min(T, N - i)>", "#symbol.expr<min(N - i, T)>"),
+        ("#symbol.expr<N floordiv 2>", "#symbol.expr<N floordiv 2>"),
+        ("#symbol.expr<N ceildiv TILE>", "#symbol.expr<N ceildiv TILE>"),
+        ("#symbol.expr<N mod 2>", "#symbol.expr<N mod 2>"),
+        ("#symbol.expr<?>", "#symbol.expr<?>"),
+    ]
+    for text, expected in cases:
         expr = Parser(ctx, text).parse_attribute()
         assert isinstance(expr, SymbolExprAttr)
         expr.verify()
-        assert _print_attr(expr) == text
+        assert _print_attr(expr) == expected
 
 
 # TC-SYM-009A
@@ -211,9 +221,9 @@ def test_symbol_expr_attr_round_trip() -> None:
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_expr_attr_rejects_uppercase_min_alias() -> None:
-    with pytest.raises(VerifyException, match=r"min\(lhs, rhs\)"):
+    with pytest.raises(VerifyException, match="trailing tokens"):
         SymbolExprAttr.from_expr("Min(T, N - i)").verify()
-    with pytest.raises(VerifyException, match=r"min\(lhs, rhs\)"):
+    with pytest.raises(VerifyException, match="trailing tokens"):
         SymbolValueType.from_expr("Min(T, N - i)").verify()
 
 
@@ -232,15 +242,22 @@ def test_symbol_expr_attr_rejects_empty_expr() -> None:
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_value_type_round_trip_for_integer_only_semantics() -> None:
     ctx = _build_context()
-    for text in ['!symbol.int<"N">', '!symbol.int<"M + 1">', '!symbol.int<"3">', '!symbol.int<"min(T, N - i)">', '!symbol.int<"?">']:
+    cases = [
+        ("!symbol.int<#symbol.expr<N>>", "!symbol.int<#symbol.expr<N>>"),
+        ("!symbol.int<#symbol.expr<1 + M>>", "!symbol.int<#symbol.expr<M + 1>>"),
+        ("!symbol.int<#symbol.expr<3>>", "!symbol.int<#symbol.expr<3>>"),
+        ("!symbol.int<#symbol.expr<min(T, N - i)>>", "!symbol.int<#symbol.expr<min(N - i, T)>>"),
+        ("!symbol.int<#symbol.expr<?>>", "!symbol.int<#symbol.expr<?>>"),
+    ]
+    for text, expected in cases:
         ty = Parser(ctx, text).parse_attribute()
         assert isinstance(ty, SymbolValueType)
         ty.verify()
-        assert _print_attr(ty) == text
+        assert _print_attr(ty) == expected
 
 
 # TC-SYM-006A
-# 测试目的: 验证 `!symbol.int<"?">` 的公开 unknown 语义与旧 iter<...> 表达文本拒绝路径。
+# 测试目的: 验证 `!symbol.int<#symbol.expr<?>>` 的公开 unknown 语义与旧 iter<...> 表达文本拒绝路径。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_value_type_unknown_public_semantics() -> None:
@@ -250,9 +267,9 @@ def test_symbol_value_type_unknown_public_semantics() -> None:
     assert unknown_type.get_value() == "?"
     assert unknown_type.is_symbol() is False
 
-    with pytest.raises(VerifyException, match=r"symbol expr must contain identifiers, \?"):
+    with pytest.raises(VerifyException, match="unsupported public symbol expression"):
         SymbolExprAttr.from_expr("iter<0, 8, 1>").verify()
-    with pytest.raises(VerifyException, match=r"symbol expr must contain identifiers, \?"):
+    with pytest.raises(VerifyException, match="unsupported public symbol expression"):
         SymbolValueType.from_expr("2 - iter<0, 8, 1>").verify()
 
 
@@ -264,10 +281,10 @@ def test_symbol_value_type_unknown_public_semantics() -> None:
 # 对应测试文件路径: test/dialect/test_symbol.py
 def test_symbol_iter_type_round_trip() -> None:
     ctx = _build_context()
-    ty = Parser(ctx, '!symbol.iter<start = "0", end = "index", step = "1">').parse_attribute()
+    ty = Parser(ctx, '!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<index>, step = #symbol.expr<1>>').parse_attribute()
     assert isinstance(ty, SymbolIterType)
     ty.verify()
-    assert _print_attr(ty) == '!symbol.iter<start = "0", end = "index", step = "1">'
+    assert _print_attr(ty) == '!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<index>, step = #symbol.expr<1>>'
 
 
 # TC-SYM-049
@@ -277,7 +294,7 @@ def test_symbol_iter_type_round_trip() -> None:
 def test_symbol_const_op_verify_success() -> None:
     op = SymbolConstOp(3)
     op.verify()
-    assert _print_attr(op.result.type) == '!symbol.int<"3">'
+    assert _print_attr(op.result.type) == '!symbol.int<#symbol.expr<3>>'
 
 
 # TC-SYM-050
@@ -290,16 +307,16 @@ def test_symbol_const_op_round_trip() -> None:
         ctx,
         """
 builtin.module {
-  %c0 = symbol.const 0 : !symbol.int<"0">
-  %c1 = symbol.const -4 : !symbol.int<"-4">
+  %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+  %c1 = symbol.const -4 : !symbol.int<#symbol.expr<-4>>
 }
 """,
     ).parse_module()
 
     module.verify()
     printed = _print_op(module)
-    assert 'symbol.const 0 : !symbol.int<"0">' in printed
-    assert 'symbol.const -4 : !symbol.int<"-4">' in printed
+    assert 'symbol.const 0 : !symbol.int<#symbol.expr<0>>' in printed
+    assert 'symbol.const -4 : !symbol.int<#symbol.expr<-4>>' in printed
 
 
 # TC-SYM-052 / TC-SYM-053 / TC-SYM-054 / TC-SYM-055 / TC-SYM-056
@@ -465,9 +482,9 @@ def test_memory_scalar_components_round_trip_through_symbol_dialect() -> None:
     dim_type.verify()
     unit_type.verify()
 
-    assert _print_attr(stride_expr) == '#symbol.expr<"K*N">'
-    assert _print_attr(dim_type) == '!symbol.int<"N">'
-    assert _print_attr(unit_type) == '!symbol.int<"1">'
+    assert _print_attr(stride_expr) == '#symbol.expr<K*N>'
+    assert _print_attr(dim_type) == '!symbol.int<#symbol.expr<N>>'
+    assert _print_attr(unit_type) == '!symbol.int<#symbol.expr<1>>'
 
 
 # TC-SYM-007 / TC-SYM-008
@@ -493,7 +510,7 @@ def test_symbol_value_type_equality_depends_on_expr_only() -> None:
 
     assert lhs == rhs
     assert lhs != other
-    assert _print_attr(lhs) == '!symbol.int<"N">'
+    assert _print_attr(lhs) == '!symbol.int<#symbol.expr<N>>'
 
 
 # TC-SYM-058
@@ -504,25 +521,24 @@ def test_symbol_value_type_public_expression_matrix() -> None:
     ctx = _build_context()
     rng = random.Random(20260505)
     cases = [
-        ("+4", 4, False, '!symbol.int<"4">'),
-        ("-4", -4, False, '!symbol.int<"-4">'),
-        ("7 - 4", 3, False, '!symbol.int<"3">'),
-        ("2 + 3 * 4", 14, False, '!symbol.int<"14">'),
-        ("8 / 2", 4, False, '!symbol.int<"4">'),
-        ("7 // 3", 2, False, '!symbol.int<"2">'),
-        ("+N", "N", True, '!symbol.int<"+N">'),
-        ("N + 1", "N + 1", True, '!symbol.int<"N + 1">'),
-        ("N - T", "N - T", True, '!symbol.int<"N - T">'),
-        ("N * T", "N*T", True, '!symbol.int<"N * T">'),
-        ("-N + M", "M - N", True, '!symbol.int<"-N + M">'),
-        ("floor(7)", "7", True, '!symbol.int<"floor(7)">'),
-        ("floor(7/N)", "7 // N", True, '!symbol.int<"floor(7/N)">'),
-        ("floor((N + 1) / T)", "(N + 1) // T", True, '!symbol.int<"floor((N + 1) / T)">'),
-        ("N // 2", "N // 2", True, '!symbol.int<"N // 2">'),
+        ("+4", 4, False, '!symbol.int<#symbol.expr<4>>'),
+        ("-4", -4, False, '!symbol.int<#symbol.expr<-4>>'),
+        ("7 - 4", 3, False, '!symbol.int<#symbol.expr<3>>'),
+        ("2 + 3 * 4", 14, False, '!symbol.int<#symbol.expr<14>>'),
+        ("8 floordiv 2", 4, False, '!symbol.int<#symbol.expr<4>>'),
+        ("7 ceildiv 3", 3, False, '!symbol.int<#symbol.expr<3>>'),
+        ("7 mod 3", 1, False, '!symbol.int<#symbol.expr<1>>'),
+        ("+N", "N", True, '!symbol.int<#symbol.expr<N>>'),
+        ("N + 1", "N + 1", True, '!symbol.int<#symbol.expr<N + 1>>'),
+        ("N - T", "N - T", True, '!symbol.int<#symbol.expr<N - T>>'),
+        ("N * T", "N*T", True, '!symbol.int<#symbol.expr<N*T>>'),
+        ("N floordiv 2", "N floordiv 2", True, '!symbol.int<#symbol.expr<N floordiv 2>>'),
+        ("(N + 1) ceildiv T", "(N + 1) ceildiv T", True, '!symbol.int<#symbol.expr<(N + 1) ceildiv T>>'),
+        ("N mod 2", "N mod 2", True, '!symbol.int<#symbol.expr<N mod 2>>'),
     ]
 
     for expr, expected_value, expected_symbol, expected_text in rng.sample(cases, k=len(cases)):
-        parsed = Parser(ctx, f'!symbol.int<"{expr}">').parse_attribute()
+        parsed = Parser(ctx, f'!symbol.int<#symbol.expr<{expr}>>').parse_attribute()
         assert isinstance(parsed, SymbolValueType)
         parsed.verify()
         assert parsed.get_value() == expected_value
@@ -531,19 +547,20 @@ def test_symbol_value_type_public_expression_matrix() -> None:
 
 
 # TC-SYM-061
-# 测试目的: 验证公开 symbol.int 对除零和非整除表达式保持非静态符号语义，不误归一为整数常量。
+# 测试目的: 验证公开 symbol.int 拒绝裸除法并支持 affine 风格动态整除表达式。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_value_type_public_non_concrete_division_edges() -> None:
     ctx = _build_context()
-    cases = ["7 / 0", "7 / 2"]
+    for expr in ["7 / 0", "7 // 2"]:
+        with pytest.raises(ParseError):
+            Parser(ctx, f"!symbol.int<#symbol.expr<{expr}>>").parse_attribute()
 
-    for expr in cases:
-        parsed = Parser(ctx, f'!symbol.int<"{expr}">').parse_attribute()
-        assert isinstance(parsed, SymbolValueType)
-        parsed.verify()
-        assert parsed.is_symbol()
-        assert _print_attr(parsed) == f'!symbol.int<"{expr}">'
+    parsed = Parser(ctx, "!symbol.int<#symbol.expr<7 floordiv N>>").parse_attribute()
+    assert isinstance(parsed, SymbolValueType)
+    parsed.verify()
+    assert parsed.is_symbol()
+    assert _print_attr(parsed) == "!symbol.int<#symbol.expr<7 floordiv N>>"
 
 
 # TC-SYM-059
@@ -566,11 +583,10 @@ def test_symbol_dim_and_iter_public_constructor_matrix() -> None:
     iter_type = SymbolIterType.from_attr(iter_attr)
     assert str(iter_type) == "symbol.iter<start=0, end=N, step=TILE_N>"
 
-    legacy = Parser(ctx, '!symbol.iter<"index">').parse_attribute()
-    assert isinstance(legacy, SymbolIterType)
-    assert _print_attr(legacy) == '!symbol.iter<start = "0", end = "index", step = "1">'
+    with pytest.raises(ParseError):
+        Parser(ctx, '!symbol.iter<"index">').parse_attribute()
 
-    with pytest.raises(ParseError, match="Expected quoted symbol expression"):
+    with pytest.raises(ParseError, match="SymbolExprAttr"):
         Parser(ctx, "!symbol.iter<start = 0, end = \"N\", step = \"1\">").parse_attribute()
 
 
@@ -598,13 +614,13 @@ def test_symbol_binary_arith_fold_public_rejection_matrix() -> None:
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_verifier_rejects_illegal_expression_characters() -> None:
-    with pytest.raises(VerifyException, match="must contain identifiers"):
+    with pytest.raises(VerifyException):
         SymbolExprAttr.from_expr("N@2").verify()
-    with pytest.raises(VerifyException, match="must contain identifiers"):
+    with pytest.raises(VerifyException):
         SymbolValueType.from_expr("N@1").verify()
-    with pytest.raises(VerifyException, match="must contain identifiers"):
+    with pytest.raises(VerifyException):
         SymbolExprAttr.from_expr("N +").verify()
-    with pytest.raises(VerifyException, match="must contain identifiers"):
+    with pytest.raises(VerifyException):
         SymbolExprAttr.from_expr("[]").verify()
 
 
@@ -616,11 +632,11 @@ def test_symbol_arith_ops_verify_success() -> None:
     add_op = SymbolAddOp(_make_symbol_value("M"), _make_symbol_value("1"), SymbolValueType.from_expr("M + 1"))
     sub_op = SymbolSubOp(_make_symbol_value("N"), _make_symbol_value("1"), SymbolValueType.from_expr("N - 1"))
     mul_op = SymbolMulOp(_make_symbol_value("M"), _make_symbol_value("N"), SymbolValueType.from_expr("M*N"))
-    div_op = SymbolDivOp(_make_symbol_value("M"), _make_symbol_value("N"), SymbolValueType.from_expr("M / N"))
+    div_op = SymbolDivOp(_make_symbol_value("M"), _make_symbol_value("N"), SymbolValueType.from_expr("M floordiv N"))
     floordiv_op = SymbolFloorDivOp(
         _make_symbol_value("M"),
         _make_symbol_value("N"),
-        SymbolValueType.from_expr("M // N"),
+        SymbolValueType.from_expr("M floordiv N"),
     )
     min_op = SymbolMinOp(_make_symbol_value("T"), _make_symbol_value("N - i"), SymbolValueType.from_expr("min(T, N - i)"))
 
@@ -631,16 +647,16 @@ def test_symbol_arith_ops_verify_success() -> None:
     floordiv_op.verify()
     min_op.verify()
 
-    assert _print_attr(add_op.result.type) == '!symbol.int<"M + 1">'
-    assert _print_attr(sub_op.result.type) == '!symbol.int<"N - 1">'
-    assert _print_attr(mul_op.result.type) == '!symbol.int<"M*N">'
-    assert _print_attr(div_op.result.type) == '!symbol.int<"M / N">'
-    assert _print_attr(floordiv_op.result.type) == '!symbol.int<"M // N">'
-    assert _print_attr(min_op.result.type) == '!symbol.int<"min(T, N - i)">'
+    assert _print_attr(add_op.result.type) == '!symbol.int<#symbol.expr<M + 1>>'
+    assert _print_attr(sub_op.result.type) == '!symbol.int<#symbol.expr<N - 1>>'
+    assert _print_attr(mul_op.result.type) == '!symbol.int<#symbol.expr<M*N>>'
+    assert _print_attr(div_op.result.type) == '!symbol.int<#symbol.expr<M floordiv N>>'
+    assert _print_attr(floordiv_op.result.type) == '!symbol.int<#symbol.expr<M floordiv N>>'
+    assert _print_attr(min_op.result.type) == '!symbol.int<#symbol.expr<min(N - i, T)>>'
 
 
 # TC-SYM-015A
-# 测试目的: 验证 `?` 与 `symbol.iter` 参与 symbol 算术时 result 必须保守为 `!symbol.int<"?">`。
+# 测试目的: 验证 `?` 与 `symbol.iter` 参与 symbol 算术时 result 必须保守为 `!symbol.int<#symbol.expr<?>>`。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_arith_ops_require_unknown_result_for_unknown_or_iter_operands() -> None:
@@ -652,9 +668,9 @@ def test_symbol_arith_ops_require_unknown_result_for_unknown_or_iter_operands() 
     SymbolSubOp(concrete_value, iter_value, SymbolValueType.from_expr("?")).verify()
     SymbolMulOp(concrete_value, concrete_value, SymbolValueType.from_expr("?")).verify()
 
-    with pytest.raises(VerifyException, match=r'result type must be !symbol\.int<"\?">'):
+    with pytest.raises(VerifyException, match="result type must be"):
         SymbolAddOp(unknown_value, concrete_value, SymbolValueType.from_expr("N + 1")).verify()
-    with pytest.raises(VerifyException, match=r'result type must be !symbol\.int<"\?">'):
+    with pytest.raises(VerifyException, match="result type must be"):
         SymbolSubOp(concrete_value, iter_value, SymbolValueType.from_expr("2 - f0")).verify()
 
 
@@ -678,27 +694,27 @@ def test_symbol_arith_ops_round_trip() -> None:
         ctx,
         """
 builtin.module {
-  %m = "test.op"() : () -> !symbol.int<"M">
-  %n = "test.op"() : () -> !symbol.int<"N">
-  %one = "test.op"() : () -> !symbol.int<"1">
-  %sum = symbol.add %m, %one : !symbol.int<"M">, !symbol.int<"1"> -> !symbol.int<"M + 1">
-  %diff = symbol.sub %n, %one : !symbol.int<"N">, !symbol.int<"1"> -> !symbol.int<"N - 1">
-  %prod = symbol.mul %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M*N">
-  %quot = symbol.div %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M / N">
-  %floor = symbol.floordiv %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M // N">
-  %tail = symbol.min %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"min(M, N)">
+  %m = "test.op"() : () -> !symbol.int<#symbol.expr<M>>
+  %n = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %one = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  %sum = symbol.add %m, %one : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<1>> -> !symbol.int<#symbol.expr<M + 1>>
+  %diff = symbol.sub %n, %one : !symbol.int<#symbol.expr<N>>, !symbol.int<#symbol.expr<1>> -> !symbol.int<#symbol.expr<N - 1>>
+  %prod = symbol.mul %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<M*N>>
+  %quot = symbol.div %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<M floordiv N>>
+  %floor = symbol.floordiv %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<M floordiv N>>
+  %tail = symbol.min %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<min(M, N)>>
 }
 """,
     ).parse_module()
 
     module.verify()
     printed = _print_op(module)
-    assert "symbol.add %m, %one : !symbol.int<\"M\">, !symbol.int<\"1\"> -> !symbol.int<\"M + 1\">" in printed
-    assert "symbol.sub %n, %one : !symbol.int<\"N\">, !symbol.int<\"1\"> -> !symbol.int<\"N - 1\">" in printed
-    assert "symbol.mul %m, %n : !symbol.int<\"M\">, !symbol.int<\"N\"> -> !symbol.int<\"M*N\">" in printed
-    assert "symbol.div %m, %n : !symbol.int<\"M\">, !symbol.int<\"N\"> -> !symbol.int<\"M / N\">" in printed
-    assert "symbol.floordiv %m, %n : !symbol.int<\"M\">, !symbol.int<\"N\"> -> !symbol.int<\"M // N\">" in printed
-    assert "symbol.min %m, %n : !symbol.int<\"M\">, !symbol.int<\"N\"> -> !symbol.int<\"min(M, N)\">" in printed
+    assert "symbol.add %m, %one : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<1>> -> !symbol.int<#symbol.expr<M + 1>>" in printed
+    assert "symbol.sub %n, %one : !symbol.int<#symbol.expr<N>>, !symbol.int<#symbol.expr<1>> -> !symbol.int<#symbol.expr<N - 1>>" in printed
+    assert "symbol.mul %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<M*N>>" in printed
+    assert "symbol.div %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<M floordiv N>>" in printed
+    assert "symbol.floordiv %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<M floordiv N>>" in printed
+    assert "symbol.min %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<min(M, N)>>" in printed
 
 
 # TC-SYM-017
@@ -709,15 +725,15 @@ def test_symbol_arith_ops_reject_non_symbol_int_types() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     symbol_value = _make_symbol_value("N")
 
-    with pytest.raises(VerifyException, match='symbol.add lhs must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.add lhs must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolAddOp(non_symbol_value, symbol_value, SymbolValueType.from_expr("N")).verify()
-    with pytest.raises(VerifyException, match='symbol.sub rhs must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.sub rhs must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolSubOp(symbol_value, non_symbol_value, SymbolValueType.from_expr("N")).verify()
-    with pytest.raises(VerifyException, match='symbol.mul result type must be !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.mul result type must be !symbol.int<#symbol.expr<expr>>'):
         SymbolMulOp(symbol_value, symbol_value, i32).verify()
-    with pytest.raises(VerifyException, match='symbol.div lhs must have type !symbol.int<"expr">'):
-        SymbolDivOp(non_symbol_value, symbol_value, SymbolValueType.from_expr("N / 2")).verify()
-    with pytest.raises(VerifyException, match='symbol.floordiv result type must be !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.div lhs must have type !symbol.int<#symbol.expr<expr>>'):
+        SymbolDivOp(non_symbol_value, symbol_value, SymbolValueType.from_expr("N floordiv 2")).verify()
+    with pytest.raises(VerifyException, match='symbol.floordiv result type must be !symbol.int<#symbol.expr<expr>>'):
         SymbolFloorDivOp(symbol_value, symbol_value, i32).verify()
 
 
@@ -733,9 +749,9 @@ def test_symbol_arith_ops_reject_malformed_signatures() -> None:
             ctx,
             """
 builtin.module {
-  %m = "test.op"() : () -> !symbol.int<"M">
-  %one = "test.op"() : () -> !symbol.int<"1">
-  %sum = symbol.add %m, %one : !symbol.int<"M">, !symbol.int<"1">
+  %m = "test.op"() : () -> !symbol.int<#symbol.expr<M>>
+  %one = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  %sum = symbol.add %m, %one : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<1>>
 }
 """,
         ).parse_module()
@@ -744,9 +760,9 @@ builtin.module {
             ctx,
             """
 builtin.module {
-  %m = "test.op"() : () -> !symbol.int<"M">
-  %n = "test.op"() : () -> !symbol.int<"N">
-  %prod = symbol.mul %m : !symbol.int<"M"> -> !symbol.int<"M*N">
+  %m = "test.op"() : () -> !symbol.int<#symbol.expr<M>>
+  %n = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %prod = symbol.mul %m : !symbol.int<#symbol.expr<M>> -> !symbol.int<#symbol.expr<M * N>>
 }
 """,
         ).parse_module()
@@ -755,9 +771,9 @@ builtin.module {
             ctx,
             """
 builtin.module {
-  %m = "test.op"() : () -> !symbol.int<"M">
-  %n = "test.op"() : () -> !symbol.int<"N">
-  %floor = symbol.floordiv %m : !symbol.int<"M"> -> !symbol.int<"M // N">
+  %m = "test.op"() : () -> !symbol.int<#symbol.expr<M>>
+  %n = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %floor = symbol.floordiv %m : !symbol.int<#symbol.expr<M>> -> !symbol.int<#symbol.expr<M floordiv N>>
 }
 """,
         ).parse_module()
@@ -772,16 +788,16 @@ def test_symbol_arith_ops_error_messages_include_context() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     ctx = _build_context()
 
-    with pytest.raises(VerifyException, match='symbol.add lhs must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.add lhs must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolAddOp(non_symbol_value, symbol_value, SymbolValueType.from_expr("N + 1")).verify()
     with pytest.raises(ParseError, match="symbol.sub"):
         Parser(
             ctx,
             """
 builtin.module {
-  %n = "test.op"() : () -> !symbol.int<"N">
-  %one = "test.op"() : () -> !symbol.int<"1">
-  %diff = symbol.sub %n %one : !symbol.int<"N">, !symbol.int<"1"> -> !symbol.int<"N - 1">
+  %n = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %one = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  %diff = symbol.sub %n %one : !symbol.int<#symbol.expr<N>>, !symbol.int<#symbol.expr<1>> -> !symbol.int<#symbol.expr<N - 1>>
 }
 """,
         ).parse_module()
@@ -790,9 +806,9 @@ builtin.module {
             ctx,
             """
 builtin.module {
-  %n = "test.op"() : () -> !symbol.int<"N">
-  %one = "test.op"() : () -> !symbol.int<"1">
-  %quot = symbol.div %n %one : !symbol.int<"N">, !symbol.int<"1"> -> !symbol.int<"N / 1">
+  %n = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %one = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  %quot = symbol.div %n %one : !symbol.int<#symbol.expr<N>>, !symbol.int<#symbol.expr<1>> -> !symbol.int<#symbol.expr<N floordiv 1>>
 }
 """,
         ).parse_module()
@@ -891,26 +907,26 @@ def test_symbol_compare_ops_round_trip() -> None:
         ctx,
         """
 builtin.module {
-  %m = "test.op"() : () -> !symbol.int<"M">
-  %n = "test.op"() : () -> !symbol.int<"N">
-  %eq = symbol.eq %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1
-  %ne = symbol.ne %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1
-  %lt = symbol.lt %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1
-  %le = symbol.le %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1
-  %gt = symbol.gt %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1
-  %ge = symbol.ge %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1
+  %m = "test.op"() : () -> !symbol.int<#symbol.expr<M>>
+  %n = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %eq = symbol.eq %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> i1
+  %ne = symbol.ne %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> i1
+  %lt = symbol.lt %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> i1
+  %le = symbol.le %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> i1
+  %gt = symbol.gt %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> i1
+  %ge = symbol.ge %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> i1
 }
 """,
     ).parse_module()
 
     module.verify()
     printed = _print_op(module)
-    assert 'symbol.eq %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1' in printed
-    assert 'symbol.ne %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1' in printed
-    assert 'symbol.lt %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1' in printed
-    assert 'symbol.le %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1' in printed
-    assert 'symbol.gt %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1' in printed
-    assert 'symbol.ge %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1' in printed
+    assert 'symbol.eq %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> i1' in printed
+    assert 'symbol.ne %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> i1' in printed
+    assert 'symbol.lt %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> i1' in printed
+    assert 'symbol.le %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> i1' in printed
+    assert 'symbol.gt %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> i1' in printed
+    assert 'symbol.ge %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> i1' in printed
 
 
 # TC-SYM-022
@@ -921,9 +937,9 @@ def test_symbol_compare_ops_reject_non_symbol_int_operands() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     symbol_value = _make_symbol_value("N")
 
-    with pytest.raises(VerifyException, match='symbol.eq lhs must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.eq lhs must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolEqOp(non_symbol_value, symbol_value, i1).verify()
-    with pytest.raises(VerifyException, match='symbol.ge rhs must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.ge rhs must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolGeOp(symbol_value, non_symbol_value, i1).verify()
 
 
@@ -952,9 +968,9 @@ def test_symbol_compare_ops_reject_malformed_signatures() -> None:
             ctx,
             """
 builtin.module {
-  %m = "test.op"() : () -> !symbol.int<"M">
-  %n = "test.op"() : () -> !symbol.int<"N">
-  %eq = symbol.eq %m, %n : !symbol.int<"M">, !symbol.int<"N">
+  %m = "test.op"() : () -> !symbol.int<#symbol.expr<M>>
+  %n = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %eq = symbol.eq %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>>
 }
 """,
         ).parse_module()
@@ -963,8 +979,8 @@ builtin.module {
             ctx,
             """
 builtin.module {
-  %m = "test.op"() : () -> !symbol.int<"M">
-  %gt = symbol.gt %m : !symbol.int<"M"> -> i1
+  %m = "test.op"() : () -> !symbol.int<#symbol.expr<M>>
+  %gt = symbol.gt %m : !symbol.int<#symbol.expr<M>> -> i1
 }
 """,
         ).parse_module()
@@ -979,16 +995,16 @@ def test_symbol_compare_ops_error_messages_include_context() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     ctx = _build_context()
 
-    with pytest.raises(VerifyException, match='symbol.le rhs must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.le rhs must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolLeOp(symbol_value, non_symbol_value, i1).verify()
     with pytest.raises(ParseError, match="symbol.ge"):
         Parser(
             ctx,
             """
 builtin.module {
-  %m = "test.op"() : () -> !symbol.int<"M">
-  %n = "test.op"() : () -> !symbol.int<"N">
-  %ge = symbol.ge %m %n : !symbol.int<"M">, !symbol.int<"N"> -> i1
+  %m = "test.op"() : () -> !symbol.int<#symbol.expr<M>>
+  %n = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %ge = symbol.ge %m %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> i1
 }
 """,
         ).parse_module()
@@ -1015,15 +1031,15 @@ def test_symbol_to_float_round_trip() -> None:
         ctx,
         """
 builtin.module {
-  %n = "test.op"() : () -> !symbol.int<"N">
-  %f = symbol.to_float %n : !symbol.int<"N"> -> f32
+  %n = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %f = symbol.to_float %n : !symbol.int<#symbol.expr<N>> -> f32
 }
 """,
     ).parse_module()
 
     module.verify()
     printed = _print_op(module)
-    assert 'symbol.to_float %n : !symbol.int<"N"> -> f32' in printed
+    assert 'symbol.to_float %n : !symbol.int<#symbol.expr<N>> -> f32' in printed
 
 
 # TC-SYM-041
@@ -1034,7 +1050,7 @@ def test_symbol_to_float_rejects_invalid_types() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     symbol_value = _make_symbol_value("N")
 
-    with pytest.raises(VerifyException, match='symbol.to_float source must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.to_float source must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolToFloatOp(non_symbol_value, f32).verify()
     for result_type in (f16, bf16, f32, f64):
         SymbolToFloatOp(symbol_value, result_type).verify()
@@ -1052,17 +1068,17 @@ def test_symbol_cast_round_trip() -> None:
         ctx,
         """
 builtin.module {
-  %n = "test.op"() : () -> !symbol.int<"N">
-  %i8 = symbol.cast %n : !symbol.int<"N"> -> i8
-  %i32 = symbol.cast %n : !symbol.int<"N"> -> i32
+  %n = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %i8 = symbol.cast %n : !symbol.int<#symbol.expr<N>> -> i8
+  %i32 = symbol.cast %n : !symbol.int<#symbol.expr<N>> -> i32
 }
 """,
     ).parse_module()
 
     module.verify()
     printed = _print_op(module)
-    assert 'symbol.cast %n : !symbol.int<"N"> -> i8' in printed
-    assert 'symbol.cast %n : !symbol.int<"N"> -> i32' in printed
+    assert 'symbol.cast %n : !symbol.int<#symbol.expr<N>> -> i8' in printed
+    assert 'symbol.cast %n : !symbol.int<#symbol.expr<N>> -> i32' in printed
 
 
 # TC-SYM-041B
@@ -1073,7 +1089,7 @@ def test_symbol_cast_rejects_invalid_types() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     symbol_value = _make_symbol_value("N")
 
-    with pytest.raises(VerifyException, match='symbol.cast source must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.cast source must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolCastOp(non_symbol_value, i32).verify()
     with pytest.raises(VerifyException, match="symbol.cast result type must be integer"):
         SymbolCastOp(symbol_value, f32).verify()
@@ -1104,19 +1120,19 @@ def test_symbol_to_int_round_trip() -> None:
         ctx,
         """
 builtin.module {
-  %n = "test.op"() : () -> !symbol.int<"N">
-  %i8 = symbol.to_int %n : !symbol.int<"N"> -> i8
-  %i32 = symbol.to_int %n : !symbol.int<"N"> -> i32
-  %i64 = symbol.to_int %n : !symbol.int<"N"> -> i64
+  %n = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %i8 = symbol.to_int %n : !symbol.int<#symbol.expr<N>> -> i8
+  %i32 = symbol.to_int %n : !symbol.int<#symbol.expr<N>> -> i32
+  %i64 = symbol.to_int %n : !symbol.int<#symbol.expr<N>> -> i64
 }
 """,
     ).parse_module()
 
     module.verify()
     printed = _print_op(module)
-    assert 'symbol.to_int %n : !symbol.int<"N"> -> i8' in printed
-    assert 'symbol.to_int %n : !symbol.int<"N"> -> i32' in printed
-    assert 'symbol.to_int %n : !symbol.int<"N"> -> i64' in printed
+    assert 'symbol.to_int %n : !symbol.int<#symbol.expr<N>> -> i8' in printed
+    assert 'symbol.to_int %n : !symbol.int<#symbol.expr<N>> -> i32' in printed
+    assert 'symbol.to_int %n : !symbol.int<#symbol.expr<N>> -> i64' in printed
 
 
 # TC-SYM-044
@@ -1127,7 +1143,7 @@ def test_symbol_to_int_rejects_invalid_types() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     symbol_value = _make_symbol_value("N")
 
-    with pytest.raises(VerifyException, match='symbol.to_int source must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.to_int source must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolToIntOp(non_symbol_value, i32).verify()
     with pytest.raises(VerifyException, match="symbol.to_int result type must be integer"):
         SymbolToIntOp(symbol_value, f32).verify()
@@ -1195,7 +1211,7 @@ def test_symbol_get_dim_reads_static_dim_from_memory_type() -> None:
     op = SymbolGetDimOp(source, 0)
 
     op.verify()
-    assert _print_attr(op.result.type) == '!symbol.int<"4">'
+    assert _print_attr(op.result.type) == '!symbol.int<#symbol.expr<4>>'
 
 
 # TC-SYM-026A
@@ -1226,7 +1242,7 @@ def test_symbol_get_dim_reads_symbolic_dim_from_memory_type() -> None:
     op = SymbolGetDimOp(source, 1)
 
     op.verify()
-    assert _print_attr(op.result.type) == '!symbol.int<"N">'
+    assert _print_attr(op.result.type) == '!symbol.int<#symbol.expr<N>>'
 
 
 # TC-SYM-028
@@ -1241,7 +1257,7 @@ def test_symbol_get_stride_reads_static_stride_from_memory_type() -> None:
     op = SymbolGetStrideOp(source, 0)
 
     op.verify()
-    assert _print_attr(op.result.type) == '!symbol.int<"8">'
+    assert _print_attr(op.result.type) == '!symbol.int<#symbol.expr<8>>'
 
 
 # TC-SYM-028A
@@ -1295,7 +1311,53 @@ def test_symbol_get_stride_reads_symbolic_stride_from_memory_type() -> None:
     op = SymbolGetStrideOp(source, 1)
 
     op.verify()
-    assert _print_attr(op.result.type) == '!symbol.int<"N">'
+    assert _print_attr(op.result.type) == '!symbol.int<#symbol.expr<N>>'
+
+
+# TC-SYM-029A
+# 测试目的: 验证 symbol.get_dim/get_stride 可从公开 IR 中解析带 `#symbol.expr<...>` 的 nn.memory shape/stride 条目。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_memory_query_parses_symbol_expr_entries_from_public_ir() -> None:
+    """验证公开 IR 中的结构化 memory 条目可被 symbol 查询 op 推导。
+
+    功能说明:
+    - 通过公开 parser 与 verifier 验证 `!nn.memory<[#symbol.expr<...>], ...>` 的 get_dim/get_stride 路径。
+
+    使用示例:
+    - pytest -q test/dialect/test_symbol.py -k symbol_memory_query_parses_symbol_expr_entries_from_public_ir
+    """
+
+    ctx = _build_context()
+    memory_type = (
+        "!nn.memory<[#symbol.expr<4>, #symbol.expr<N>], "
+        "[#symbol.expr<N>, #symbol.expr<1>], "
+        "f32, #nn.space<global>>"
+    )
+    module = Parser(
+        ctx,
+        f"""
+builtin.module {{
+  %memory = "test.op"() : () -> {memory_type}
+  %0 = "symbol.get_dim"(%memory) {{axis = #builtin.int<0>}} : ({memory_type}) -> !symbol.int<#symbol.expr<4>>
+  %1 = "symbol.get_stride"(%memory) {{axis = #builtin.int<0>}} : ({memory_type}) -> !symbol.int<#symbol.expr<N>>
+}}
+""",
+    ).parse_module()
+
+    query_ops = [
+        op
+        for op in module.walk()
+        if op.name in {"symbol.get_dim", "symbol.get_stride"}
+    ]
+
+    assert len(query_ops) == 2
+    for op in query_ops:
+        op.verify()
+    assert [_print_attr(op.results[0].type) for op in query_ops] == [
+        "!symbol.int<#symbol.expr<4>>",
+        "!symbol.int<#symbol.expr<N>>",
+    ]
 
 
 # TC-SYM-030
@@ -1376,7 +1438,7 @@ def test_symbol_for_accepts_symbol_int_bounds_and_iter_arg() -> None:
     op.verify()
     assert len(op.body.block.args) == 1
     assert isinstance(op.body.block.args[0].type, SymbolIterType)
-    assert _print_attr(op.body.block.args[0].type) == '!symbol.iter<start = "M", end = "N", step = "1">'
+    assert _print_attr(op.body.block.args[0].type) == '!symbol.iter<start = #symbol.expr<M>, end = #symbol.expr<N>, step = #symbol.expr<1>>'
 
 
 # TC-SYM-033
@@ -1389,10 +1451,10 @@ def test_symbol_for_round_trip() -> None:
         ctx,
         """
 builtin.module {
-  %start = "test.op"() : () -> !symbol.int<"M">
-  %end = "test.op"() : () -> !symbol.int<"N">
-  %step = "test.op"() : () -> !symbol.int<"1">
-  symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = "M", end = "N", step = "1">} {
+  %start = "test.op"() : () -> !symbol.int<#symbol.expr<M>>
+  %end = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %step = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = #symbol.expr<M>, end = #symbol.expr<N>, step = #symbol.expr<1>>} {
   }
 }
 """,
@@ -1402,7 +1464,7 @@ builtin.module {
     assert isinstance(op, SymbolForOp)
     assert (
         _print_op(op)
-        == 'symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = "M", end = "N", step = "1">} {\n}'
+        == 'symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = #symbol.expr<M>, end = #symbol.expr<N>, step = #symbol.expr<1>>} {\n}'
     )
 
 
@@ -1420,7 +1482,7 @@ def test_symbol_for_rejects_non_symbol_int_operands() -> None:
         _TestOp(result_types=[IndexType()]).results[0],
     ]
 
-    with pytest.raises(VerifyException, match='symbol.for start must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.for start must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolForOp(non_symbol_value, symbol_value, symbol_value, Block(arg_types=[SymbolIterType.from_bounds("N", "N", "N")])).verify()
     for non_symbol_it in non_symbol_it_values:
         with pytest.raises(VerifyException, match="symbol.for it must have type !symbol.iter<...>"):
@@ -1479,10 +1541,10 @@ def test_symbol_for_parse_rejects_malformed_text() -> None:
             ctx,
             """
 builtin.module {
-  %start = "test.op"() : () -> !symbol.int<"M">
-  %end = "test.op"() : () -> !symbol.int<"N">
-  %step = "test.op"() : () -> !symbol.int<"1">
-  symbol.for %i = %start %end step %step {iter = #symbol.iter<start = "M", end = "N", step = "1">} {
+  %start = "test.op"() : () -> !symbol.int<#symbol.expr<M>>
+  %end = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %step = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  symbol.for %i = %start %end step %step {iter = #symbol.iter<start = #symbol.expr<M>, end = #symbol.expr<N>, step = #symbol.expr<1>>} {
   }
 }
 """,
@@ -1492,10 +1554,10 @@ builtin.module {
             ctx,
             """
 builtin.module {
-  %start = "test.op"() : () -> !symbol.int<"0">
-  %end = "test.op"() : () -> !symbol.int<"N">
-  %step = "test.op"() : () -> !symbol.int<"1">
-  symbol.for %i = %start to %end step %step {iter = #symbol.expr<"N">} {
+  %start = "test.op"() : () -> !symbol.int<#symbol.expr<0>>
+  %end = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %step = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  symbol.for %i = %start to %end step %step {iter = #symbol.expr<N>} {
   }
 }
 """,
@@ -1505,10 +1567,10 @@ builtin.module {
             ctx,
             """
 builtin.module {
-  %start = "test.op"() : () -> !symbol.int<"0">
-  %end = "test.op"() : () -> !symbol.int<"N">
-  %step = "test.op"() : () -> !symbol.int<"1">
-  symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = "0", end = "N", step = "1">} -> !symbol.int<"N"> {
+  %start = "test.op"() : () -> !symbol.int<#symbol.expr<0>>
+  %end = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %step = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>} -> !symbol.int<#symbol.expr<N>> {
   }
 }
 """,
@@ -1518,11 +1580,11 @@ builtin.module {
             ctx,
             """
 builtin.module {
-  %start = "test.op"() : () -> !symbol.int<"0">
-  %end = "test.op"() : () -> !symbol.int<"N">
-  %step = "test.op"() : () -> !symbol.int<"1">
-  %zero = symbol.const 0 : !symbol.int<"0">
-  symbol.for %i = %start to %end step %step iter_args(%acc = %zero) {iter = #symbol.iter<start = "0", end = "N", step = "1">} -> f32 {
+  %start = "test.op"() : () -> !symbol.int<#symbol.expr<0>>
+  %end = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %step = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  %zero = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+  symbol.for %i = %start to %end step %step iter_args(%acc = %zero) {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>} -> f32 {
   }
 }
 """,
@@ -1532,10 +1594,10 @@ builtin.module {
             ctx,
             """
 builtin.module {
-  %start = "test.op"() : () -> !symbol.int<"M">
-  %end = "test.op"() : () -> !symbol.int<"N">
-  %step = "test.op"() : () -> !symbol.int<"1">
-  symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = "M", end = "N">} {
+  %start = "test.op"() : () -> !symbol.int<#symbol.expr<M>>
+  %end = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %step = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = #symbol.expr<M>, end = #symbol.expr<N>>} {
   }
 }
 """,
@@ -1560,10 +1622,10 @@ def test_symbol_for_error_messages_include_context() -> None:
             ctx,
             """
 builtin.module {
-  %start = "test.op"() : () -> !symbol.int<"M">
-  %end = "test.op"() : () -> !symbol.int<"N">
-  %step = "test.op"() : () -> !symbol.int<"1">
-  symbol.for %i = %start to %end %step {iter = #symbol.iter<start = "M", end = "N", step = "1">} {
+  %start = "test.op"() : () -> !symbol.int<#symbol.expr<M>>
+  %end = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+  %step = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  symbol.for %i = %start to %end %step {iter = #symbol.iter<start = #symbol.expr<M>, end = #symbol.expr<N>, step = #symbol.expr<1>>} {
   }
 }
 """,
@@ -1684,7 +1746,7 @@ def test_symbol_for_loop_carried_symbol_int_round_trip() -> None:
     acc = block.args[1]
     local = SymbolConstOp(1)
     block.add_op(local)
-    next_op = SymbolAddOp(acc, local.result, SymbolValueType.from_expr("NEXT"))
+    next_op = SymbolAddOp(acc, local.result, SymbolValueType.from_expr("ACC + 1"))
     block.add_op(next_op)
     block.add_op(SymbolYieldOp(next_op.result))
 
@@ -1699,14 +1761,14 @@ def test_symbol_for_loop_carried_symbol_int_round_trip() -> None:
         ctx,
         """
 builtin.module {
-  %start = "test.op"() : () -> !symbol.int<"0">
-  %end = "test.op"() : () -> !symbol.int<"M">
-  %step = "test.op"() : () -> !symbol.int<"TILE_M">
-  %zero = symbol.const 0 : !symbol.int<"0">
-  %total = symbol.for %i = %start to %end step %step iter_args(%acc = %zero) {iter = #symbol.iter<start = "0", end = "M", step = "TILE_M">} -> !symbol.int<"TOTAL"> {
-    %one = symbol.const 1 : !symbol.int<"1">
-    %next = symbol.add %acc, %one : !symbol.int<"TOTAL">, !symbol.int<"1"> -> !symbol.int<"NEXT">
-    symbol.yield %next : !symbol.int<"NEXT">
+  %start = "test.op"() : () -> !symbol.int<#symbol.expr<0>>
+  %end = "test.op"() : () -> !symbol.int<#symbol.expr<M>>
+  %step = "test.op"() : () -> !symbol.int<#symbol.expr<TILE_M>>
+  %zero = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+  %total = symbol.for %i = %start to %end step %step iter_args(%acc = %zero) {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<M>, step = #symbol.expr<TILE_M>>} -> !symbol.int<#symbol.expr<TOTAL>> {
+    %one = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %next = symbol.add %acc, %one : !symbol.int<#symbol.expr<TOTAL>>, !symbol.int<#symbol.expr<1>> -> !symbol.int<#symbol.expr<TOTAL + 1>>
+    symbol.yield %next : !symbol.int<#symbol.expr<TOTAL + 1>>
   }
 }
 """,
@@ -1716,8 +1778,8 @@ builtin.module {
     reparsed = Parser(ctx, printed).parse_module()
     reparsed.verify()
     assert "iter_args(%acc = %zero)" in printed
-    assert 'symbol.yield %next : !symbol.int<"NEXT">' in printed
-    assert ' -> !symbol.int<"TOTAL"> {' in printed
+    assert "symbol.yield %next : !symbol.int<#symbol.expr<TOTAL + 1>>" in printed
+    assert ' -> !symbol.int<#symbol.expr<TOTAL>> {' in printed
     assert printed == _print_op(reparsed).rstrip()
 
 
@@ -1731,7 +1793,7 @@ def test_symbol_for_rejects_invalid_loop_carried_symbol_int() -> None:
     step = _make_symbol_value("TILE_M")
     valid_init = SymbolConstOp(0).result
 
-    with pytest.raises(VerifyException, match='symbol.for loop-carried init must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.for loop-carried init must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolForOp(
             start,
             end,
@@ -1741,7 +1803,7 @@ def test_symbol_for_rejects_invalid_loop_carried_symbol_int() -> None:
             result_type=SymbolValueType.from_expr("TOTAL"),
         ).verify()
 
-    with pytest.raises(VerifyException, match='symbol.for loop-carried acc must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.for loop-carried acc must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolForOp(
             start,
             end,
@@ -1751,7 +1813,7 @@ def test_symbol_for_rejects_invalid_loop_carried_symbol_int() -> None:
             result_type=SymbolValueType.from_expr("TOTAL"),
         ).verify()
 
-    with pytest.raises(VerifyException, match='symbol.for loop-carried result must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.for loop-carried result must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolForOp(
             start,
             end,
@@ -1774,7 +1836,7 @@ def test_symbol_for_rejects_invalid_loop_carried_symbol_int() -> None:
 
     block_bad_yield = Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TILE_M"), SymbolValueType.from_expr("ACC")])
     block_bad_yield.add_op(SymbolYieldOp(_TestOp(result_types=[f32]).results[0]))
-    with pytest.raises(VerifyException, match='symbol.yield value must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match='symbol.yield value must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolForOp(
             start,
             end,
