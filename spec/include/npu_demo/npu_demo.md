@@ -7,7 +7,7 @@
 
 - `KernelContext` 是由 `launch` 创建并绑定到当前线程的运行时上下文视图，不再是生成源码 body 签名中的显式参数。
 - `thread_num()` / `block_num()` / `subthread_num()` 返回本次 launch 的 extent，而不是 target registry 的固定模板值；`shared_memory_size` 作为 launch metadata 以编译期模板参数承接。
-- `include/npu_demo/npu_demo.h` 作为单入口头文件，需透传 `include/api/Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `cost/*.h` 的统一声明，并汇聚 `include/npu_demo/Core.h` / `Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `cost/*.h` 的后端实现。
+- `include/npu_demo/npu_demo.h` 作为单入口头文件，需透传 `include/api/Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `Trance.h` / `cost/*.h` 的统一声明，并汇聚 `include/npu_demo/Core.h` / `Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `Trance.h` / `cost/*.h` 的后端实现。
 - `npu_demo::add/sub/mul/...`、`npu_demo::launch(...)`、`npu_demo::build_contiguous_stride(...)`、`npu_demo::view(...)`、`npu_demo::alloc(...)`、`npu_demo::fill(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)`、`npu_demo::transpose(...)`、`npu_demo::broadcast(...)` 以及 `npu_demo::cost::add/copy/...` 是 public function 的唯一成功消费方向；`detail` 只服务实现内部。
 
 ## API 列表
@@ -42,7 +42,7 @@
 - 创建者：`未记录`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/include/npu_demo/npu_demo.md`](../../../spec/include/npu_demo/npu_demo.md)
-- `功能实现`：[`include/npu_demo/npu_demo.h`](../../../include/npu_demo/npu_demo.h)、[`include/npu_demo/Memory.h`](../../../include/npu_demo/Memory.h)、[`include/npu_demo/Dma.h`](../../../include/npu_demo/Dma.h)、[`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h)、[`include/npu_demo/Kernel.h`](../../../include/npu_demo/Kernel.h)、[`include/npu_demo/cost/Core.h`](../../../include/npu_demo/cost/Core.h)、[`include/npu_demo/cost/Dma.h`](../../../include/npu_demo/cost/Dma.h)、[`include/npu_demo/cost/Kernel.h`](../../../include/npu_demo/cost/Kernel.h)
+- `功能实现`：[`include/npu_demo/npu_demo.h`](../../../include/npu_demo/npu_demo.h)、[`include/npu_demo/Memory.h`](../../../include/npu_demo/Memory.h)、[`include/npu_demo/Dma.h`](../../../include/npu_demo/Dma.h)、[`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h)、[`include/npu_demo/Trance.h`](../../../include/npu_demo/Trance.h)、[`include/npu_demo/Kernel.h`](../../../include/npu_demo/Kernel.h)、[`include/npu_demo/cost/Core.h`](../../../include/npu_demo/cost/Core.h)、[`include/npu_demo/cost/Dma.h`](../../../include/npu_demo/cost/Dma.h)、[`include/npu_demo/cost/Kernel.h`](../../../include/npu_demo/cost/Kernel.h)
 - `test`：[`test/include/api/test_memory.py`](../../../test/include/api/test_memory.py)、[`test/include/api/test_dma.py`](../../../test/include/api/test_dma.py)、[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/include/npu_demo/test_public_namespace.py`](../../../test/include/npu_demo/test_public_namespace.py)、[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/api/test_kernel.py`](../../../test/include/api/test_kernel.py)、`test/include/api/test_cost.py`、`test/include/npu_demo/test_cost.py`、[`test/dsl/gen_kernel/test_gen_kernel.py`](../../../test/dsl/gen_kernel/test_gen_kernel.py)、[`test/target/test_registry.py`](../../../test/target/test_registry.py)
 
 ## 依赖
@@ -52,6 +52,7 @@
 - [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：统一 `Memory<Space, T>`、`MemorySpace`、`MemoryFormat`、`npu_demo::build_contiguous_stride(...)` 与成员式 `view<T>` / `reshape` 语义。
 - [`spec/include/api/Dma.md`](../../../spec/include/api/Dma.md)：统一 `npu_demo::alloc/slice/deslice/transpose` 对 `Memory<Space, T>` 的公开职责。
 - [`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md)：统一 `Kernel` helper 公共接口职责。
+- [`spec/include/api/Trance.md`](../../../spec/include/api/Trance.md)：统一 runtime trance sink、入口打印、参数打印和文件回退语义。
 - [`spec/include/api/cost/Core.md`](../../../spec/include/api/cost/Core.md)：统一 `npu_demo::cost::CostKind` 与 `S_INT` 成本返回语义。
 - [`spec/include/api/cost/Dma.md`](../../../spec/include/api/cost/Dma.md)：统一 `npu_demo::cost::copy/slice/deslice` 的公共合同。
 - [`spec/include/api/cost/Kernel.md`](../../../spec/include/api/cost/Kernel.md)：统一 `npu_demo::cost::add/matmul/...` 的公共合同。
@@ -76,6 +77,7 @@
 - 本规范是后端私有 include/runtime 合同，不面向业务侧直接公开；业务侧只经由生成源码或后端封装间接消费。
 - `include/npu_demo/npu_demo.h` 只聚合当前公共 API 与后端实现；`include/api/Nn.h` 不再属于可聚合的公开层。
 - `include/npu_demo/npu_demo.h` 必须继续包含 `include/api/cost/*.h` 与 `include/npu_demo/cost/*.h`；`npu_demo::cost` 是当前公开子命名空间的一部分。
+- `include/npu_demo/npu_demo.h` 必须继续包含 `include/api/Trance.h` 与 `include/npu_demo/Trance.h`；`TRANCE` 未开启时该聚合不得引入 runtime 日志副作用。
 - `include/api/Arch.h` 只冻结名称、参数面与最小返回语义；真实线程启动、barrier 共享对象与运行时注入必须由 [`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h) 承接。
 - public function 必须位于 `namespace npu_demo`；基础类型与 enum 可以继续来自 `include/api` 全局公开类型。
 - `npu_demo::detail` 只用于实现内部复用；公开测试、spec 示例、生成源码不得直接消费 `npu_demo::detail` 或 `*_detail` 名称。
@@ -455,6 +457,7 @@ auto subthreads = ctx.subthread_num();
 - 测试文件：
   - `test/dsl/gen_kernel/test_gen_kernel.py`
   - `test/include/api/test_arch.py`
+  - `test/include/api/test_trance.py`
   - `test/include/api/test_dma.py`
   - `test/include/api/test_memory.py`
   - `test/include/npu_demo/test_kernel_context.py`
@@ -465,6 +468,7 @@ auto subthreads = ctx.subthread_num();
 - 执行命令：
   - `pytest -q test/include/api/test_memory.py test/include/api/test_dma.py`
   - `pytest -q test/include/api/test_arch.py`
+  - `pytest -q test/include/api/test_trance.py`
   - `pytest -q test/include/npu_demo/test_kernel_context.py test/include/npu_demo/test_runtime_launch.py`
   - `pytest -q test/include/npu_demo/test_cost.py`
   - `pytest -q test/include/npu_demo/test_public_namespace.py`
@@ -492,3 +496,4 @@ auto subthreads = ctx.subthread_num();
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-007 | 生成/编译 | 锁定 `include/npu_demo/npu_demo.h` 对 `gen_kernel` 输出的 wrapper/body kernel + sibling cost function 模块仍是单入口 compile-only 头文件。 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_gen_kernel_compiles_npu_demo_cost_function_module`。 | 生成源码、IR 文本或编译结果体现“锁定 `include/npu_demo/npu_demo.h` 对 `gen_kernel` 输出的 wrapper/body kernel + sibling cost function 模块仍是单入口 compile-only 头文件。”场景。 | `test_gen_kernel_compiles_npu_demo_cost_function_module` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-008 | 公开入口 | 锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `thread_num=8` 上限语义。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_npu_demo_supports_launch_and_barrier_caps`。 | 公开入口在“锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `thread_num=8` 上限语义。”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_npu_demo_supports_launch_and_barrier_caps` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-009 | 边界/异常 | 锁定 cost DMA include 不依赖跨文件非公开 detail 聚合状态。 | 读取公开 include 文本。 | 运行 `test_npu_demo_cost_dma_has_no_cross_file_detail_accumulator`。 | `include/npu_demo/cost/Core.h` 不承载 DMA 聚合状态，`include/npu_demo/cost/Dma.h` 不包含或调用该非公开状态。 | `test_npu_demo_cost_dma_has_no_cross_file_detail_accumulator` |
+| TC-INCLUDE-NPU-DEMO-NPU-DEMO-010 | 执行结果 | 单入口头文件聚合 runtime trance，`TRANCE` 开启时输出 Memory 与 launch 参数。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE`，构造 `Memory<GM, float>` 并作为 forwarded arg 执行 `npu_demo::launch<1, 2, 1, 0>(...)`。 | 运行 `test_npu_demo_trance_stdout_memory_and_launch_format`。 | stdout 包含 launch `template=<...>`、`arg0 = callable[kernel_body]`、`arg1 = mem[...] [2, 3] [3, 1] f32 GM` 与 `arg2 = 7`。 | `test_npu_demo_trance_stdout_memory_and_launch_format` |

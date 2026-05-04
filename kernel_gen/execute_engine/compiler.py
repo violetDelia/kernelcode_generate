@@ -5,6 +5,7 @@
 - 承接执行引擎的编译命令生成、target include 注入、entry shim 构造与 `ExecutionEngine` 编译/执行入口实现。
 - 统一 target include、entry shim 与执行引擎编译/执行内部职责，避免 execute_engine 下多个无独立公开边界的实现文件。
 - `kernel_gen.execute_engine` 包入口继续重导出执行引擎公开 API；target/compile/shim 细节仅作为本文件内部实现。
+- 当公开 core config 的 `trance_enabled` 开启时，编译链注入 `TRANCE` 宏、kernel 名称与 trace sink 路径。
 
 API 列表:
 - `class CompileRequest(source: str, target: str, function: str, entry_point: str = "kg_execute_entry", compiler: str | None = None, compiler_flags: tuple[str, ...] = ("-std=c++17",), link_flags: tuple[str, ...] = ())`
@@ -48,6 +49,7 @@ import subprocess
 import tempfile
 from typing import Callable, Literal, Protocol, TypeAlias
 
+from kernel_gen.core.config import get_dump_dir, get_trance_enabled
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 _COMPILER_ICE_MARKERS = (
@@ -272,6 +274,84 @@ def _compose_compile_command(
         *tuple(link_flags),
     )
     return tuple(command)
+
+
+def _sanitize_trance_kernel_name(value: str) -> str:
+    """规整 runtime trance 使用的 kernel 名称。
+
+
+    功能说明:
+    - 以公开编译入口 `function` 名为来源，去掉命名空间并替换路径不安全字符。
+    - 只在本文件内部用于 `KG_TRANCE_KERNEL_NAME` 与 `<kernel_name>_trace.txt`。
+
+    使用示例:
+    - _sanitize_trance_kernel_name("npu_demo::add_kernel") == "add_kernel"
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_target.md
+    - test: test/execute_engine/test_compile.py
+    - 功能实现: kernel_gen/execute_engine/compiler.py
+    """
+
+    short_name = value.rsplit("::", 1)[-1].strip()
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", short_name)
+    return safe_name or "kernel"
+
+
+def _cpp_string_define_arg(name: str, value: str) -> str:
+    """生成 C++ 字符串宏的编译参数。
+
+
+    功能说明:
+    - 将 Python 字符串转成 `-DNAME="value"` 形式，供 `subprocess` 无 shell 调用直接传给编译器。
+    - 仅转义反斜杠和双引号，避免路径中的普通字符改变宏语义。
+
+    使用示例:
+    - arg = _cpp_string_define_arg("KG_TRANCE_KERNEL_NAME", "add_kernel")
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_target.md
+    - test: test/execute_engine/test_compile.py
+    - 功能实现: kernel_gen/execute_engine/compiler.py
+    """
+
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'-D{name}="{escaped}"'
+
+
+def _trance_compiler_flags(
+    *,
+    function: str,
+    compiler_flags: tuple[str, ...],
+) -> tuple[str, ...]:
+    """按公开 core config 追加 runtime trance 编译宏。
+
+
+    功能说明:
+    - `trance_enabled=False` 时保持原 flags 不变。
+    - `trance_enabled=True` 时追加 `TRANCE`、`KG_TRANCE_KERNEL_NAME` 与 `KG_TRANCE_FILE_PATH`。
+    - `dump_dir=None` 时把文件路径宏置为空字符串，运行时按 stdout sink 输出。
+
+    使用示例:
+    - flags = _trance_compiler_flags(function="add", compiler_flags=("-std=c++17",))
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_target.md
+    - test: test/execute_engine/test_compile.py
+    - 功能实现: kernel_gen/execute_engine/compiler.py
+    """
+
+    if not get_trance_enabled():
+        return compiler_flags
+    kernel_name = _sanitize_trance_kernel_name(function)
+    dump_dir = get_dump_dir()
+    trace_path = "" if dump_dir is None else str(dump_dir / f"{kernel_name}_trace.txt")
+    return (
+        *compiler_flags,
+        "-DTRANCE",
+        _cpp_string_define_arg("KG_TRANCE_KERNEL_NAME", kernel_name),
+        _cpp_string_define_arg("KG_TRANCE_FILE_PATH", trace_path),
+    )
 
 
 def _compile_unit_source(
@@ -598,8 +678,15 @@ def _build_runtime_entry_shim_source(
         f"  if (arg_count != {len(runtime_params)}ULL) {{",
         "    return -1;",
         "  }",
+        "#ifdef TRANCE",
+        "  kernelcode::trance::ScopedTranceSink __kg_trance_scope;",
+        "  const kernelcode::trance::TranceSink& __kg_trance_sink = kernelcode::trance::current_sink();",
+        '  kernelcode::trance::print_func_begin(__kg_trance_sink, KG_TRANCE_KERNEL_NAME, "template=<none>");',
+        '  kernelcode::trance::write_line(__kg_trance_sink, "args =");',
+        "#endif",
     ]
     call_args: list[str] = []
+    trance_arg_lines: list[str] = []
     runtime_arg_index = 0
     for spec in params:
         if spec.kind == "kernel_context":
@@ -625,6 +712,7 @@ def _build_runtime_entry_shim_source(
                 ]
             )
             call_args.append(f"arg{runtime_idx}")
+            trance_arg_lines.append(f'  arg{runtime_idx}.trance_print(__kg_trance_sink, "arg{runtime_idx}");')
             continue
         if spec.kind == "int":
             lines.extend(
@@ -636,6 +724,7 @@ def _build_runtime_entry_shim_source(
                 ]
             )
             call_args.append(f"arg{runtime_idx}")
+            trance_arg_lines.append(f'  kernelcode::trance::print_value_arg(__kg_trance_sink, "arg{runtime_idx}", arg{runtime_idx});')
             continue
         lines.extend(
             [
@@ -646,7 +735,16 @@ def _build_runtime_entry_shim_source(
             ]
         )
         call_args.append(f"arg{runtime_idx}")
+        trance_arg_lines.append(f'  kernelcode::trance::print_value_arg(__kg_trance_sink, "arg{runtime_idx}", arg{runtime_idx});')
     call_args_text = ", ".join(call_args)
+    if trance_arg_lines:
+        lines.extend(
+            [
+                "#ifdef TRANCE",
+                *trance_arg_lines,
+                "#endif",
+            ]
+        )
     lines.extend(
         [
             f"  {function}({call_args_text});",
@@ -1813,6 +1911,10 @@ class ExecutionEngine:
                 _SYMBOL_RESOLVE_FAILED,
                 "entry_point is empty",
             )
+        compiler_flags = _trance_compiler_flags(
+            function=function,
+            compiler_flags=compiler_flags,
+        )
 
         target_headers = _include_lines_for_target(target)
         if not target_headers:

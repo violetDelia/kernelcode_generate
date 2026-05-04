@@ -1,6 +1,7 @@
 /*
 功能说明:
 - 提供 include/api/Memory.h 的 npu_demo 实现，补全 `Memory<Space, T>` 视图方法、成员式 `view/reshape` 与 stride 构造逻辑。
+- 补全 `Memory::trance_print(...)`，供 runtime trance kernel log 打印参数信息。
 
 API 列表:
 - `enum class MemoryFormat { Norm, CLast }`
@@ -22,9 +23,10 @@ API 列表:
 - `Memory::reshape(const Vector& shape) const -> Memory<Space, T>`
 - `Memory::element_count() const -> long long`
 - `Memory::is_contiguous() const -> bool`
+- `Memory::trance_print(const kernelcode::trance::TranceSink& sink, const char* name) const -> void`
 
 helper 清单:
-- `npu_demo::detail::*`：stride 校验、offset 线性化与 `view/reshape` 边界辅助逻辑。
+- `npu_demo::detail::*`：stride 校验、offset 线性化、`view/reshape` 边界与 runtime trance 参数格式辅助逻辑。
 
 使用示例:
 - #include "include/npu_demo/Memory.h"
@@ -50,6 +52,7 @@ helper 清单:
 
 #include "include/api/Memory.h"
 #include "include/npu_demo/Core.h"
+#include "include/npu_demo/Trance.h"
 
 namespace npu_demo {
 namespace detail {
@@ -87,6 +90,91 @@ inline bool memory_checked_add_non_negative(long long lhs, long long rhs, long l
     *out = lhs + rhs;
     return true;
 }
+
+#ifdef TRANCE
+/*
+功能说明:
+- 返回 runtime trance Memory 参数名；空指针按空串处理。
+
+使用示例:
+- const char* label = npu_demo::detail::memory_trance_value_or_empty(name);
+
+
+关联文件:
+- spec: spec/include/api/Memory.md
+- test: test/include/api/test_trance.py
+- 功能实现: include/npu_demo/Memory.h
+*/
+inline const char* memory_trance_value_or_empty(const char* value) {
+    return value == nullptr ? "" : value;
+}
+
+/*
+功能说明:
+- 将 Memory 元素类型映射为 runtime trance dtype 文本。
+
+使用示例:
+- const char* dtype = npu_demo::detail::memory_trance_dtype_name<float>();
+
+
+关联文件:
+- spec: spec/include/api/Memory.md
+- test: test/include/api/test_trance.py
+- 功能实现: include/npu_demo/Memory.h
+*/
+template <typename T>
+inline const char* memory_trance_dtype_name() {
+    if constexpr (std::is_same<T, float>::value) {
+        return "f32";
+    }
+    if constexpr (std::is_same<T, double>::value) {
+        return "f64";
+    }
+    if constexpr (std::is_same<T, int>::value) {
+        return "i32";
+    }
+    if constexpr (std::is_same<T, long long>::value) {
+        return "i64";
+    }
+    if constexpr (std::is_same<T, bool>::value) {
+        return "bool";
+    }
+    return "unknown";
+}
+
+/*
+功能说明:
+- 将 MemorySpace 映射为 runtime trance Memory 参数打印文本。
+
+使用示例:
+- const char* space = npu_demo::detail::memory_trance_space_name(MemorySpace::GM);
+
+
+关联文件:
+- spec: spec/include/api/Memory.md
+- test: test/include/api/test_trance.py
+- 功能实现: include/npu_demo/Memory.h
+*/
+inline const char* memory_trance_space_name(MemorySpace space) {
+    switch (space) {
+        case MemorySpace::GM:
+            return "GM";
+        case MemorySpace::SM:
+            return "SM";
+        case MemorySpace::LM:
+            return "LM";
+        case MemorySpace::TSM:
+            return "TSM";
+        case MemorySpace::TLM1:
+            return "TLM1";
+        case MemorySpace::TLM2:
+            return "TLM2";
+        case MemorySpace::TLM3:
+            return "TLM3";
+    }
+    return "unknown";
+}
+#endif  // TRANCE
 
 }  // namespace detail
 
@@ -521,6 +609,50 @@ inline bool Memory<Space, T>::is_contiguous() const {
         expected *= shape_[i];
     }
     return true;
+}
+
+/*
+功能说明:
+- 按 runtime trance 参数格式打印当前 Memory 视图。
+- `TRANCE` 开启时输出 `name = mem[address] [shape...] [stride...] dtype space`。
+- `TRANCE` 关闭时保持无副作用，不访问标准库打印或文件管理逻辑。
+
+使用示例:
+- kernelcode::trance::ScopedTranceSink scope;
+- mem.trance_print(kernelcode::trance::current_sink(), "arg0");
+
+
+关联文件:
+- spec: spec/include/api/Memory.md
+- test: test/include/api/memory.py
+- 功能实现: include/npu_demo/Memory.h
+*/
+template <MemorySpace Space, typename T>
+inline void Memory<Space, T>::trance_print(const kernelcode::trance::TranceSink& sink, const char* name) const {
+#ifdef TRANCE
+    std::ostringstream line;
+    line << "  " << npu_demo::detail::memory_trance_value_or_empty(name)
+         << " = mem[" << static_cast<const void*>(data_) << "] [";
+    for (unsigned long long i = 0; i < rank_; ++i) {
+        if (i != 0) {
+            line << ", ";
+        }
+        line << shape_[i];
+    }
+    line << "] [";
+    for (unsigned long long i = 0; i < rank_; ++i) {
+        if (i != 0) {
+            line << ", ";
+        }
+        line << stride_[i];
+    }
+    line << "] " << npu_demo::detail::memory_trance_dtype_name<T>()
+         << " " << npu_demo::detail::memory_trance_space_name(Space);
+    kernelcode::trance::write_line(sink, line.str().c_str());
+#else
+    (void)sink;
+    (void)name;
+#endif
 }
 
 /*

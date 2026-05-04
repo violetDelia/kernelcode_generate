@@ -54,7 +54,7 @@ REPO_ROOT = _find_repo_root(Path(__file__).resolve().parents[2])
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.core.config import reset_config, set_dump_dir, set_target
+from kernel_gen.core.config import reset_config, set_dump_dir, set_target, set_trance_enabled
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dialect.symbol import SymbolConstOp
@@ -398,6 +398,57 @@ def test_dsl_run_dump_dir_writes_pass_ir_and_source(tmp_path: Path) -> None:
     source_text = (kernel_dump_dir / "source.cpp").read_text(encoding="utf-8")
     assert source_text == result.source + ("\n" if not result.source.endswith("\n") else "")
     assert '#include "include/npu_demo/npu_demo.h"' in source_text
+
+
+# TC-DSL-RUN-001A1
+# 测试目的: 锁定 runtime trance 无 dump_dir 时通过 stdout 输出 entry 与真实运行参数摘要。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_trance_stdout_logs_entry_and_runtime_args(capfd: pytest.CaptureFixture[str]) -> None:
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+
+    set_trance_enabled(True)
+    result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
+    captured = capfd.readouterr()
+    entry_name = result.func_op.sym_name.data
+
+    assert result.execute_result.ok is True
+    assert f"in func: {entry_name} template=<none>" in captured.out
+    assert "args =" in captured.out
+    assert "arg0 = mem[" in captured.out
+    assert "[6] [1] i32 GM" in captured.out
+
+
+# TC-DSL-RUN-001A2
+# 测试目的: 锁定 runtime trance 有 dump_dir 时写入 kernel 子目录下的 trace 文件并覆盖旧内容。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_trance_dump_dir_writes_and_overwrites_trace_file(tmp_path: Path) -> None:
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+
+    set_dump_dir(tmp_path)
+    set_trance_enabled(True)
+    result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
+    trace_path = tmp_path / "add_kernel" / f"{result.func_op.sym_name.data}_trace.txt"
+    trace_text = trace_path.read_text(encoding="utf-8")
+
+    trace_path.write_text("stale\n", encoding="utf-8")
+    out.fill_(0)
+    result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
+    overwritten_text = trace_path.read_text(encoding="utf-8")
+
+    assert result.execute_result.ok is True
+    assert "in func:" in trace_text
+    assert "arg0 = mem[" in trace_text
+    assert "stale" not in overwritten_text
+    assert "in func:" in overwritten_text
+    assert "arg0 = mem[" in overwritten_text
 
 
 # TC-DSL-RUN-001B

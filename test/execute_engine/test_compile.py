@@ -33,6 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.config import reset_config, set_dump_dir, set_trance_enabled
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.execute_engine import (
     CompileRequest,
@@ -331,6 +332,57 @@ def test_execute_engine_compile_request_compiler_flags_order() -> None:
         assert "-lm" in command
     finally:
         kernel.close()
+
+
+# EE-TRANCE-001
+# 功能说明: 覆盖 `trance_enabled=True` 时 compile 公开入口追加 runtime trance 编译宏。
+# 使用示例: pytest -q test/execute_engine/test_compile.py -k "EE-TRANCE-001"
+# 测试目的: 验证 `ExecutionEngine.compile(...)` 从 core config 注入 TRANCE、kernel name 与 trace 文件路径宏。
+# 对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
+# 对应 spec 文件路径: spec/execute_engine/execute_engine_target.md
+# 对应测试文件路径: test/execute_engine/test_compile.py
+def test_execute_engine_compile_injects_trance_macros_from_core_config(tmp_path: Path) -> None:
+    reset_config()
+    set_trance_enabled(True)
+    set_dump_dir(tmp_path)
+    engine = ExecutionEngine(target="cpu")
+    kernel = engine.compile(source="int main(){}", function="npu_demo::add_kernel")
+    try:
+        command = kernel.compile_stdout.replace("dry-run: ", "").split()
+        trace_path = tmp_path / "add_kernel_trace.txt"
+        assert "-DTRANCE" in command
+        assert '-DKG_TRANCE_KERNEL_NAME="add_kernel"' in command
+        assert f'-DKG_TRANCE_FILE_PATH="{trace_path}"' in command
+    finally:
+        kernel.close()
+        reset_config()
+
+
+# EE-TRANCE-002
+# 功能说明: 覆盖 runtime trance 字符串宏在真实 npu_demo 编译执行路径可用。
+# 使用示例: pytest -q test/execute_engine/test_compile.py -k "EE-TRANCE-002"
+# 测试目的: 验证 g++ 直收 `KG_TRANCE_*` 字符串宏后可打开 trace 文件并写入 entry 日志。
+# 对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
+# 对应 spec 文件路径: spec/execute_engine/execute_engine_target.md
+# 对应测试文件路径: test/execute_engine/test_compile.py
+def test_execute_engine_compile_trance_file_sink_runs_on_npu_demo(tmp_path: Path) -> None:
+    reset_config()
+    set_trance_enabled(True)
+    set_dump_dir(tmp_path)
+    source = """
+void no_arg_kernel() {
+}
+"""
+    kernel = ExecutionEngine(target="npu_demo").compile(source=source, function="no_arg_kernel")
+    try:
+        result = kernel.execute(args=())
+        trace_text = (tmp_path / "no_arg_kernel_trace.txt").read_text(encoding="utf-8")
+        assert result.ok is True
+        assert "in func: no_arg_kernel template=<none>" in trace_text
+        assert "args =" in trace_text
+    finally:
+        kernel.close()
+        reset_config()
 
 
 # EE-TGT-001/002/004/005

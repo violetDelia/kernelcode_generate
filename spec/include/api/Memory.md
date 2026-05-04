@@ -38,6 +38,7 @@
 - `Memory::reshape(const Vector& shape) const -> Memory<Space, T>`
 - `Memory::element_count() const -> long long`
 - `Memory::is_contiguous() const -> bool`
+- `Memory::trance_print(const kernelcode::trance::TranceSink& sink, const char* name) const -> void`
 - `Memory::linear_offset(const long long* indices) const -> long long`
 - `Memory::at(const long long* indices) -> T&`
 - `Memory::at(const long long* indices) const -> const T&`
@@ -51,11 +52,13 @@
 - `功能实现`：[`include/npu_demo/Memory.h`](../../../include/npu_demo/Memory.h)
 - `test`：
   - [`test/include/api/test_memory.py`](../../../test/include/api/test_memory.py)
+  - [`test/include/api/test_trance.py`](../../../test/include/api/test_trance.py)
   - [`test/include/npu_demo/test_public_namespace.py`](../../../test/include/npu_demo/test_public_namespace.py)
 
 ## 依赖
 
 - [`spec/include/api/Core.md`](../../../spec/include/api/Core.md)：统一 `Vector`、`Status`、`StatusCode` 语义。
+- [`spec/include/api/Trance.md`](../../../spec/include/api/Trance.md)：定义 runtime trance sink 与参数打印入口。
 
 ## 目标
 
@@ -76,6 +79,7 @@
 - 除各 API `注意事项` 已写明的稳定失败语义外，本规范不额外承诺运行时边界检查，不对空指针、越界索引、非法 `shape/stride` 提供额外保护。
 - 调用方需要保证 `rank > 0`、`shape[i] > 0`、`stride[i] > 0`。
 - 本规范不引入标准库容器、异常或动态分配依赖；实现需避免这些能力。
+- `TRANCE` 未开启时，`Memory::trance_print(...)` 必须保持 no-op，不得引入运行期打印、副作用或文件管理行为。
 - `MemoryFormat` 仅公开 `Norm` 与 `CLast`，不定义字符串别名或额外布局成员。
 - `MemorySpace` 仅公开 `GM`、`SM`、`LM`、`TSM`、`TLM1`、`TLM2`、`TLM3`，只表达空间分类，不表达容量、对齐或同步规则。
 - `MemorySpace::TLM` 不再作为公开输入；需要聚合语义时应使用 `BarrierVisibility::TLM`。
@@ -451,6 +455,22 @@ auto contiguous = memory.is_contiguous();
 - 功能说明：执行 `is_contiguous`。
 - 注意事项：该接口只读取公开状态；返回对象的内部可变结构不作为额外公开合同。
 
+### `Memory::trance_print(const kernelcode::trance::TranceSink& sink, const char* name) const -> void`
+
+- api：`Memory::trance_print(const kernelcode::trance::TranceSink& sink, const char* name) const -> void`
+- 参数：
+  - `sink`：runtime trance 输出 sink；类型 `const kernelcode::trance::TranceSink&`；必填；由 `kernelcode::trance::current_sink()` 或调用方显式构造。
+  - `name`：参数名或调试名；类型 `const char*`；必填；空指针按空字符串处理。
+- 返回值：无返回值；调用成功表示参数行已经按当前 `TRANCE` 状态处理。
+- 使用示例：
+
+  ```cpp
+  kernelcode::trance::ScopedTranceSink scope;
+  mem.trance_print(kernelcode::trance::current_sink(), "arg0");
+  ```
+- 功能说明：按 runtime trance 参数格式打印当前 `Memory` 视图。
+- 注意事项：`TRANCE` 关闭时必须无副作用；`TRANCE` 开启时输出格式固定为 `name = mem[address] [shape...] [stride...] dtype space`，其中 `dtype` 使用 `f32/f64/i32/i64/bool/unknown`，`space` 使用 `GM/SM/LM/TSM/TLM1/TLM2/TLM3`。
+
 ### `Memory::linear_offset(const long long* indices) const -> long long`
 
 - api：`Memory::linear_offset(const long long* indices) const -> long long`
@@ -503,6 +523,7 @@ auto& item = memory.at(indices);
   - `test/include/npu_demo/test_public_namespace.py`
 - 执行命令：
   - `pytest -q test/include/api/test_memory.py`
+  - `pytest -q test/include/api/test_trance.py`
   - `pytest -q test/include/npu_demo/test_public_namespace.py`
 
 ### 测试目标
@@ -518,3 +539,4 @@ auto& item = memory.at(indices);
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-INCLUDE-API-MEMORY-001 | 内存/DMA | `Memory<Space, T>` 的最小构造与查询语义可工作。 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `API-MEMORY-001`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`Memory<Space, T>` 的最小构造与查询语义可工作。”场景。 | `API-MEMORY-001` |
 | TC-INCLUDE-API-MEMORY-002 | 公开入口 | `npu_demo::build_contiguous_stride` 可经 `include/npu_demo/npu_demo.h` 正向编译运行，未限定的全局函数不作为成功路径。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `NPU-DEMO-PUBLIC-002`。 | 公开入口在“`npu_demo::build_contiguous_stride` 可经 `include/npu_demo/npu_demo.h` 正向编译运行，未限定的全局函数不作为成功路径。”场景下可导入、构造、注册或按名称发现。 | `NPU-DEMO-PUBLIC-002` |
+| TC-INCLUDE-API-MEMORY-003 | 执行结果 | `Memory::trance_print(...)` 在 TRANCE 开启时输出参数摘要。 | 准备 `Memory<GM, float>`、`ScopedTranceSink` 与 stdout sink，并通过 `launch` forwarded args 触发 Memory 参数打印。 | 运行 `test_npu_demo_trance_stdout_memory_and_launch_format`。 | 输出包含 `arg1 = mem[...] [2, 3] [3, 1] f32 GM`。 | `test_npu_demo_trance_stdout_memory_and_launch_format` |

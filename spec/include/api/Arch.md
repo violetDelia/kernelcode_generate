@@ -36,6 +36,7 @@
 
 - [`spec/include/api/Core.md`](../../../spec/include/api/Core.md)：统一 `Status` / `StatusCode` 返回语义。
 - [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：统一 `MemorySpace` 枚举语义，提供 `TLM1/TLM2/TLM3` 三块实际空间定义。
+- [`spec/include/api/Trance.md`](../../../spec/include/api/Trance.md)：统一 `TRANCE` 开启时的 runtime sink 与日志输出格式。
 - [`spec/include/npu_demo/npu_demo.md`](../../../spec/include/npu_demo/npu_demo.md)：后端私有 runtime 行为与 `KernelContext` 运行时视图由该层承接。
 - [`spec/operation/arch.md`](../../../spec/operation/arch.md)：高层 helper 与 include/api 命名需保持一致。
 - [`spec/dialect/arch.md`](../../../spec/dialect/arch.md)：`arch.launch` / `arch.barrier` 的 IR 语义与 include/api 源码形态保持同名职责映射。
@@ -62,6 +63,7 @@
 - include/api 层不定义具体 `KernelContext` 的存储布局、生命周期、默认构造、线程绑定或注入方式；这些职责由后端私有 include 承接。
 - `KernelContext::thread_id()` / `KernelContext::thread_num()` / `KernelContext::barrier(...)` / `KernelContext::get_dynamic_memory<Space, T>()` 是 include/api 层公开承诺的最小运行时接口面；后端可以补实现细节，但不得改名、改参数面或改成 target 私有别名。
 - `thread_id()` / `thread_num()` / `get_dynamic_memory<Space>()` 是公开代码生成口径；后端必须保证它们可在已绑定 launch 上下文时直接调用。
+- `TRANCE` 开启时，后端 launch 实现必须输出 `in func: npu_demo::launch template=<block=..., thread=..., subthread=..., shared_memory_size=...>`、`args =`、`arg0` callable 参数摘要，以及按 forwarded args 原始顺序输出的 `arg1`、`arg2`、... 参数摘要；关闭时不得产生诊断输出。
 
 ## API详细说明
 
@@ -218,8 +220,14 @@ Memory<TSM, float> memory = get_dynamic_memory<TSM>();
 
 ## 测试
 
-- 测试文件：`test/include/api/test_arch.py`
-- 执行命令：`pytest -q test/include/api/test_arch.py`
+- 测试文件：
+  - `test/include/api/test_arch.py`
+  - `test/include/api/test_public_namespace.py`
+  - `test/include/api/test_trance.py`
+- 执行命令：
+  - `pytest -q test/include/api/test_arch.py`
+  - `pytest -q test/include/api/test_public_namespace.py`
+  - `pytest -q test/include/api/test_trance.py`
 
 ### 测试目标
 
@@ -235,3 +243,4 @@ Memory<TSM, float> memory = get_dynamic_memory<TSM>();
 | TC-INCLUDE-API-ARCH-001 | 公开入口 | 锁定 `BarrierScope` 与 `launch<...>` 的公开符号面。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_include_api_arch_exports_public_launch_and_scope_contract`。 | 公开入口在“锁定 `BarrierScope` 与 `launch<...>` 的公开符号面。”场景下可导入、构造、注册或按名称发现。 | `test_include_api_arch_exports_public_launch_and_scope_contract` |
 | TC-INCLUDE-API-ARCH-002 | 边界/异常 | 锁定字符串 callee 不属于长期公开合同。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_include_api_arch_rejects_string_callee_contract`。 | “锁定字符串 callee 不属于长期公开合同。”场景按公开错误语义失败或被拒绝。 | `test_include_api_arch_rejects_string_callee_contract` |
 | TC-INCLUDE-API-ARCH-003 | 公开入口 | 锁定 `include/api/Arch.h` 不混入 `npu_demo` 私有实现。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_include_api_arch_keeps_backend_impl_out_of_api_header`。 | 公开入口在“锁定 `include/api/Arch.h` 不混入 `npu_demo` 私有实现。”场景下可导入、构造、注册或按名称发现。 | `test_include_api_arch_keeps_backend_impl_out_of_api_header` |
+| TC-INCLUDE-API-ARCH-004 | 执行结果 | `TRANCE` 开启时 launch 输出模板参数、callable 与 forwarded args 参数摘要。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE`，执行公开 `npu_demo::launch<1, 2, 1, 0>(...)` 并传入两个运行期参数。 | 运行 `test_npu_demo_trance_stdout_memory_and_launch_format`。 | stdout 包含 `in func: npu_demo::launch template=<block=1, thread=2, subthread=1, shared_memory_size=0>`、`arg0 = callable[kernel_body]`、`arg1 = mem[...]` 与 `arg2 = 7`，且 `arg1` 先于 `arg2` 输出。 | `test_npu_demo_trance_stdout_memory_and_launch_format` |

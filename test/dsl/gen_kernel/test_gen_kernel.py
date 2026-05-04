@@ -59,7 +59,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.core.config import reset_config, set_dump_dir, set_target
+from kernel_gen.core.config import reset_config, set_dump_dir, set_target, set_trance_enabled
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.core.context import build_default_context
 from kernel_gen.dialect.arch import (
@@ -215,6 +215,26 @@ def test_gen_kernel_dump_dir_writes_source(tmp_path: Path) -> None:
     assert source_path.is_file()
     assert source_path.read_text(encoding="utf-8") == source + ("\n" if not source.endswith("\n") else "")
     assert "dump_kernel" in source
+
+
+# TC-GK-000B
+# 功能说明: 验证 `trance_enabled` 不改变 `gen_kernel(...)` 的静态源码 dump 边界。
+# 测试目的: 锁定 runtime trance 只在编译/运行链路生效，gen_kernel 仍只写 `source.cpp`。
+# 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_trance_config_does_not_emit_runtime_trace
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
+# 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
+def test_gen_kernel_trance_config_does_not_emit_runtime_trace(tmp_path: Path) -> None:
+    block = Block(arg_types=[])
+    block.add_op(func.ReturnOp())
+    func_op = func.FuncOp("dump_kernel", ([], []), Region(block))
+    set_dump_dir(tmp_path)
+    set_trance_enabled(True)
+
+    gen_kernel(func_op, _ctx())
+
+    assert (tmp_path / "source.cpp").is_file()
+    assert tuple(tmp_path.glob("*_trace.txt")) == ()
 
 
 def test_gen_kernel_public_modules_exist_and_old_legacy_loader_path_is_gone() -> None:

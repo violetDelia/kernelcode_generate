@@ -38,6 +38,7 @@
 - 避免在本模块内再维护第二份 emit 逻辑或 target 特化逻辑。
 - 让 pass/pipeline 输出的 host wrapper + device body 双函数 IR 统一经由 `gen_kernel(...)` 消费，不要求调用方感知内部 emitter 拆分。
 - `kernel_gen.core.config.dump_dir` 非空时，`gen_kernel(...)` 必须把最终源码同步写入 `dump_dir/source.cpp`；调用方只负责设置 dump 目录，不再自行重复写源码。
+- `kernel_gen.core.config.trance_enabled` 只影响后续编译/运行链路；`gen_kernel(...)` 不读取该开关来改变源码内容，也不创建 runtime trace 文件。
 
 ## 额外补充
 
@@ -48,6 +49,7 @@
 - `dsl_gen_kernel(...)` 只接受 Python DSL callable + `runtime_args`；实现必须先调用公开 `mlir_gen(fn, *runtime_args)` 生成 `builtin.module`，再调用公开 `gen_kernel(module_or_func, ctx)` 生成源码。
 - `gen_kernel(...)` 继续只消费 op / `func.func` / 受控 `builtin.module` IR；`dsl_gen_kernel(...)` 不是 `gen_kernel(...)` 的别名模式，也不能接管 `dsl_run`、`ircheck` 这类已有 IR 路径消费者。
 - `dump_dir` 只控制诊断落盘，不改变 `gen_kernel(...)` 的返回值、target 选择或源码内容；为空时不得创建 `source.cpp`。
+- `trance_enabled` 不属于源码生成语义；即使该开关为 `True`，`gen_kernel(...)` 仍只按 `dump_dir` 写 `source.cpp`，不得写 `<kernel>_trace.txt`。
 - 本文件当前允许实现的公开入口只有 `gen_kernel(...)` 与 `dsl_gen_kernel(...)`；除 sibling spec 已单独定义的包根 re-export 外，不得再新增平行 callable 别名或隐藏快捷入口。
 - 若输入为普通 op，只允许直接委托节点级 `emit_c_op(...)`。
 - `KernelEmitter`、`kernel_emitter.py` 内的 `_` 前缀 helper、`mlir_gen` 子系统的 parse-env / module-builder 私有 helper，以及 `emit_include()` 都不是当前文件公开 API；实现、其他模块与测试不得把它们当成稳定跨文件入口。
@@ -105,6 +107,7 @@
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-DSL-GEN-KERNEL-GEN-KERNEL-001 | 生成/编译 | gen kernel dump dir writes source | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_gen_kernel_dump_dir_writes_source`。 | 生成源码、IR 文本或编译结果体现“gen kernel dump dir writes source”场景。 | `test_gen_kernel_dump_dir_writes_source` |
+| TC-DSL-GEN-KERNEL-GEN-KERNEL-001A | 生成/编译 | gen kernel trance config does not emit runtime trace | 设置 `dump_dir` 与 `set_trance_enabled(True)` 后调用公开 `gen_kernel(...)`。 | 运行 `test_gen_kernel_trance_config_does_not_emit_runtime_trace`。 | 仅写出 `source.cpp`；不创建 runtime `<kernel>_trace.txt` 文件，返回源码不受 trance 开关影响。 | `test_gen_kernel_trance_config_does_not_emit_runtime_trace` |
 | TC-DSL-GEN-KERNEL-GEN-KERNEL-002 | 公开入口 | gen kernel public modules exist and old legacy loader path is gone | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_gen_kernel_public_modules_exist_and_old_legacy_loader_path_is_gone`。 | 公开入口在“gen kernel public modules exist and old legacy loader path is gone”场景下可导入、构造、注册或按名称发现。 | `test_gen_kernel_public_modules_exist_and_old_legacy_loader_path_is_gone` |
 | TC-DSL-GEN-KERNEL-GEN-KERNEL-003 | pass 改写 | tile gen kernel paths use kernel gen tile modules | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_tile_gen_kernel_paths_use_kernel_gen_tile_modules`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“tile gen kernel paths use kernel gen tile modules”场景。 | `test_tile_gen_kernel_paths_use_kernel_gen_tile_modules` |
 | TC-DSL-GEN-KERNEL-GEN-KERNEL-004 | 生成/编译 | gen kernel local compile helpers delegate local compile runner | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_gen_kernel_local_compile_helpers_delegate_local_compile_runner`。 | 生成源码、IR 文本或编译结果体现“gen kernel local compile helpers delegate local compile runner”场景。 | `test_gen_kernel_local_compile_helpers_delegate_local_compile_runner` |

@@ -1,7 +1,7 @@
 /*
 功能说明:
 - 定义 npu_demo 单入口 include，透传 include/api 的统一声明并汇聚后端实现。
- - 当前聚合 `Core / Memory / Dma / Kernel / Arch / cost` 六类头文件，不再重新聚合 `Nn.h`。
+- 当前聚合 `Core / Trance / Memory / Dma / Kernel / Arch / cost` 七类头文件，不再重新聚合 `Nn.h`。
 - 调用方应通过 `npu_demo::` 消费后端 public function；基础类型继续沿用 include/api 的公开类型。
 
 API 列表:
@@ -20,6 +20,7 @@ API 列表:
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::transpose(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& perm)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::broadcast(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source)`
 - `namespace npu_demo::cost`
+- `namespace kernelcode::trance`
 
 helper 清单:
 - 无；当前文件只做公开聚合入口，不承接独立 helper 实现。
@@ -31,7 +32,7 @@ helper 清单:
 
 关联文件:
 - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
-- test: [test/include/npu_demo/public_namespace.py](test/include/npu_demo/public_namespace.py)
+- test: [test/include/npu_demo/test_public_namespace.py](test/include/npu_demo/test_public_namespace.py)
 - 功能实现: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 */
 
@@ -39,6 +40,7 @@ helper 清单:
 #define KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_NPU_DEMO_H_
 
 #include "include/api/Arch.h"
+#include "include/api/Trance.h"
 #include "include/api/Memory.h"
 #include "include/api/Dma.h"
 #include "include/api/Kernel.h"
@@ -46,6 +48,7 @@ helper 清单:
 #include "include/api/cost/Dma.h"
 #include "include/api/cost/Kernel.h"
 #include "include/npu_demo/Core.h"
+#include "include/npu_demo/Trance.h"
 #include "include/npu_demo/Arch.h"
 #include "include/npu_demo/Memory.h"
 #include "include/npu_demo/Dma.h"

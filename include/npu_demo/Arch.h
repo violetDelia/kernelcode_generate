@@ -1,6 +1,7 @@
 /*
 功能说明:
 - 提供 npu_demo 后端的 launch / barrier 运行时实现与 KernelContext 运行时视图。
+- `TRANCE` 开启时在 launch 边界打印函数名、模板参数、callable 与 forwarded args 参数摘要。
 
 API 列表:
 - `template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args> Status npu_demo::launch(Callable&& callee, Args&&... args)`
@@ -42,6 +43,7 @@ helper 清单:
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <tuple>
 #include <type_traits>
@@ -51,6 +53,7 @@ helper 清单:
 #include "include/api/Arch.h"
 #include "include/npu_demo/Core.h"
 #include "include/npu_demo/Memory.h"
+#include "include/npu_demo/Trance.h"
 
 namespace npu_demo {
 
@@ -738,6 +741,28 @@ inline Status launch(Callable&& callee, Args&&... args) {
         || thread > npu_demo::detail::kThreadCapability) {
         return StatusCode::kError;
     }
+
+#ifdef TRANCE
+    const kernelcode::trance::TranceSink& __kg_trance_sink = kernelcode::trance::current_sink();
+    std::ostringstream __kg_trance_template;
+    __kg_trance_template
+        << "template=<block=" << block
+        << ", thread=" << thread
+        << ", subthread=" << subthread
+        << ", shared_memory_size=" << shared_memory_size
+        << ">";
+    kernelcode::trance::print_func_begin(
+        __kg_trance_sink,
+        "npu_demo::launch",
+        __kg_trance_template.str().c_str());
+    kernelcode::trance::write_line(__kg_trance_sink, "args =");
+    kernelcode::trance::print_callable_arg(__kg_trance_sink, "arg0", callee);
+    long long __kg_trance_arg_index = 1;
+    ((kernelcode::trance::print_value_arg(
+         __kg_trance_sink,
+         (std::string("arg") + std::to_string(__kg_trance_arg_index++)).c_str(),
+         args)), ...);
+#endif
 
     auto barrier_state = std::make_shared<npu_demo::detail::LaunchBarrierState>(thread);
     typename std::decay<Callable>::type callable(std::forward<Callable>(callee));

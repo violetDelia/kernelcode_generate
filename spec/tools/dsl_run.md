@@ -7,6 +7,7 @@
 - 公开合同只覆盖这条一体化路径，不扩展到无关 pass、无关 dialect、无关工具。
 - `kernel_gen.tools` 包根稳定暴露 `DslRunResult`、`kernel_gen.tools.dsl_run(...)` 与 `kernel_gen.tools.dsl_cost_run(...)`，不把 `dsl_run` 子模块对象当作公开合同。
 - 诊断落盘根目录统一来自 `kernel_gen.core.config.set_dump_dir(...)`，不作为 `dsl_run(...)` 入参。
+- runtime trance kernel log 开关统一来自 `kernel_gen.core.config.set_trance_enabled(...)`，不作为 `dsl_run(...)` 或 `dsl_cost_run(...)` 入参。
 - 失败统一抛出 `KernelCodeError(ErrorModule.TOOLS, message)`；不再定义或导出工具专属错误类。
 - `dsl_run(...)` 不向 kernel 函数隐式注入 operation helper、`MemorySpace`、`NumericType` 或 `SymbolDim`；kernel 体引用的名称必须来自显式 import、闭包或函数全局绑定，缺失时必须报错。
 - `real_args` 支持真实 tensor/array 参数和运行期标量参数；`int | float` 标量原样绑定到 DSL 函数形参，供 runtime tile、stride、padding 等 `SymbolDim` 形参使用。
@@ -109,6 +110,9 @@
   - lowering 后残留的透明 `builtin.unrealized_conversion_cast` 允许由工具层源码生成自动吞掉。
   - `dump_dir` 由 `kernel_gen.core.config.set_dump_dir(...)` 配置；配置为 `None` 或空字符串时不写诊断文件，非空时按 `dump_dir/<kernel name>/` 写入诊断文件。
   - `kernel_gen.core.config.dump_dir` 非空时，`dsl_run(...)` 必须按 DSL 函数名创建 kernel 子目录，例如 `dump/add_kernel/`。
+  - `kernel_gen.core.config.trance_enabled` 为 `True` 且 `dump_dir is None` 时，runtime trance 必须把日志输出到 stdout；日志至少包含 `in func: <entry> template=<none>`、`args =` 与真实运行参数摘要。
+  - `kernel_gen.core.config.trance_enabled` 为 `True` 且 `dump_dir` 非空时，runtime trance 文件必须写入 `dump_dir/<kernel name>/<entry>_trace.txt`，其中 `<kernel name>` 是 DSL 函数名目录，`<entry>` 是执行引擎实际编译入口名；同名文件再次执行时必须覆盖旧内容。
+  - runtime trance 只作为诊断输出，不改变 `DslRunResult` 字段、执行结果、源码文本或数学语义。
   - kernel 子目录内必须写入 `01-first-ir.mlir`，内容为 `mlir_gen(...)` 之后、pipeline 执行前的初始 IR。
   - 标准 `PassManager` pipeline 必须写入每个 pass 后的 `NN-<pass-name>.mlir`；文件第一行为 pass 名称文本，后续为 pass 后 IR。
   - 自定义 `PassManager` 子类若覆盖 `run(module)` 且不使用标准 config dump，工具层只保证写入初始 IR 与 `02-pipeline.mlir` 粗粒度结果。
@@ -148,6 +152,7 @@
   - 非法 `cost_kind` 必须失败，固定短语为 `DslCostRunInvalidCostKind: cost_kind must be one of [DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2]`。
   - lowering 后缺少目标 cost sibling 必须失败，固定短语前缀为 `DslCostRunMissingCostFunction:`。
   - cost 函数返回值通过工具层当前文件内部追加的捕获 wrapper 写入临时 `S_INT` 输出参数；该 wrapper 不作为执行引擎或 include 的公开 API。
+  - `kernel_gen.core.config.trance_enabled` 为 `True` 时，cost 捕获 wrapper 必须在执行期间输出 `return = <cost>`；该输出只作为 runtime trance 诊断，不改变返回值或缺 sibling 失败语义。
 
 ## 测试
 
@@ -212,3 +217,6 @@
 | TC-TOOLS-DSL-RUN-044 | 边界/异常 | DSL cost run rejects missing cost sibling without fallback | 准备不包含 `LaunchKernelCostFuncPass` 的公开 `PassManager` 链路。 | 运行 `test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback`。 | 按 `DslCostRunMissingCostFunction` 公开错误失败，输出参数保持原值，不 fallback 到普通 kernel。 | `test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback` |
 | TC-TOOLS-DSL-RUN-045 | 边界/异常 | DSL cost run rejects non npu demo target | 通过公开 target 配置设置 `target="cpu"`。 | 运行 `test_dsl_cost_run_rejects_non_npu_demo_target`。 | 按 `DslCostRunInvalidTarget` 公开错误失败。 | `test_dsl_cost_run_rejects_non_npu_demo_target` |
 | TC-TOOLS-DSL-RUN-046 | 执行结果 | DSL cost run accepts numpy torch mixed real args | 准备 `torch.Tensor` 输出、`numpy.ndarray` 输入和 `torch.Tensor` 输入。 | 运行 `test_dsl_cost_run_accepts_numpy_torch_mixed_real_args`。 | `dsl_cost_run(...)` 返回 `int` 且为当前 vector cost 公式的非零结果。 | `test_dsl_cost_run_accepts_numpy_torch_mixed_real_args` |
+| TC-TOOLS-DSL-RUN-047 | 执行结果 | DSL run runtime trance stdout logs entry and args | 设置 `set_trance_enabled(True)` 且不设置 `dump_dir`，准备公开 add kernel 与真实运行参数。 | 运行 `test_dsl_run_trance_stdout_logs_entry_and_runtime_args`。 | stdout 包含 `in func:`、`template=<none>`、`args =` 和 `Memory` 参数摘要。 | `test_dsl_run_trance_stdout_logs_entry_and_runtime_args` |
+| TC-TOOLS-DSL-RUN-048 | 执行结果 | DSL run runtime trance dump file writes and overwrites | 设置 `set_dump_dir(tmp_path)` 与 `set_trance_enabled(True)`，重复执行同一公开 kernel。 | 运行 `test_dsl_run_trance_dump_dir_writes_and_overwrites_trace_file`。 | `dump/<kernel>/<entry>_trace.txt` 存在并包含参数摘要；第二次执行覆盖旧文件内容。 | `test_dsl_run_trance_dump_dir_writes_and_overwrites_trace_file` |
+| TC-TOOLS-DSL-RUN-049 | 执行结果 | DSL cost run runtime trance logs return value | 设置 `set_trance_enabled(True)`，执行 `dsl_cost_run(...)` 正向 VECTOR1 成本链路。 | 运行 `test_dsl_cost_run_trance_logs_return_value`。 | stdout 包含 `return = <cost>`，Python 返回值仍是同一 `int` 成本。 | `test_dsl_cost_run_trance_logs_return_value` |

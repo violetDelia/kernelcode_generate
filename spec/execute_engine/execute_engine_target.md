@@ -5,6 +5,7 @@
 - 定义执行引擎 `P0` 的 `target` 选择、target 专属 `include` 注入与 `entry shim` 合同。
 - 冻结 `entry_point` 命名、`ordered_args` 绑定顺序、编译器默认值与 flags 追加策略，使 `compile -> execute` 在不同 target 下保持机械一致。
 - 本文档覆盖 target include、entry shim 与 compiler 三类职责，统一由 `kernel_gen/execute_engine/compiler.py` 承接实现。
+- runtime trance kernel log 的编译期宏由 `kernel_gen.core.config.set_trance_enabled(...)` 控制；`ExecutionEngine.compile(...)` 不新增同义入参。
 
 ## API 列表
 
@@ -61,6 +62,15 @@
 - 编译器启动失败、返回非零或编译命令无法生成可执行产物时，必须失败并返回 `compile_failed`。
 - `entry_point` 或导出符号无法解析时，必须失败并返回 `symbol_resolve_failed`。
 - `ordered_args` 数量或顺序与目标函数形参不一致导致执行失败时，必须返回 `runtime_throw_or_abort`。
+### runtime trance 编译行为
+
+- `kernel_gen.core.config.get_trance_enabled() == False` 时，编译命令不得追加 `TRANCE`、`KG_TRANCE_KERNEL_NAME` 或 `KG_TRANCE_FILE_PATH` 宏。
+- `kernel_gen.core.config.get_trance_enabled() == True` 时，编译命令必须追加 `-DTRANCE`、`-DKG_TRANCE_KERNEL_NAME="<kernel_name>"` 与 `-DKG_TRANCE_FILE_PATH="<trace_path>"`。
+- `kernel_name` 来自 `ExecutionEngine.compile(..., function=...)` 的短名，去掉 `::` 命名空间前缀后做文件名安全化；空结果回退为 `kernel`。
+- `dump_dir is None` 时 `KG_TRANCE_FILE_PATH` 必须为空字符串，运行期由 stdout sink 输出；`dump_dir` 非空时 trace 文件路径为 `dump_dir/<kernel_name>_trace.txt`。
+- entry shim 在 `TRANCE` 开启时负责建立 `ScopedTranceSink`，先输出 `in func: <kernel_name> template=<none>`，再输出 `args =` 和按 `ordered_args` 顺序排列的参数行。
+- Memory 参数行必须委托 `Memory::trance_print(...)` 输出；整型与浮点参数使用 `kernelcode::trance::print_value_arg(...)` 输出。
+- runtime trance 只新增诊断输出，不改变目标函数调用顺序、实参绑定、返回码或失败短语。
 
 ## API详细说明
 
@@ -99,3 +109,5 @@
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-008 | 生成/编译 | npu_demo entry shim 绑定 `S_INT` 标量形参。 | 准备包含 `S_INT` 形参的 npu_demo 源码和整数 runtime arg。 | 运行 `test_execute_engine_compile_unit_binds_npu_demo_s_int_arg`。 | entry shim 生成的 C ABI 入口按函数形参顺序绑定 `S_INT` 参数，编译成功。 | `test_execute_engine_compile_unit_binds_npu_demo_s_int_arg` |
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-009 | 生成/编译 | entry shim 按 memory/int/float/KernelContext 形参顺序生成 runtime 绑定源码。 | 通过公开 `ExecutionEngine.compile(...)` 编译含 `KernelContext`、`Memory`、整型与浮点形参的源码。 | 运行 `test_execute_engine_compile_entry_shim_public_param_matrix`。 | 生成的编译单元包含默认 `KernelContext`、runtime 参数个数校验、memory/int/float 参数转换与顺序调用。 | `test_execute_engine_compile_entry_shim_public_param_matrix` |
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-010 | 生成/编译 | 目标函数形参不可解析时生成稳定占位 entry shim。 | 通过公开 `ExecutionEngine.compile(...)` 编译含未支持形参类型的源码。 | 运行 `test_execute_engine_compile_entry_shim_placeholder_for_unsupported_params`。 | 编译单元包含占位 `kg_execute_entry`，并保持 `ordered_args/arg_count` 消费与 `return 0` 兼容行为。 | `test_execute_engine_compile_entry_shim_placeholder_for_unsupported_params` |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-011 | 生成/编译 | runtime trance 编译宏由 core config 注入。 | 调用 `set_trance_enabled(True)` 与 `set_dump_dir(tmp_path)` 后通过公开 `ExecutionEngine.compile(...)` 编译。 | 运行 `test_execute_engine_compile_injects_trance_macros_from_core_config`。 | 编译命令包含 `-DTRANCE`、`KG_TRANCE_KERNEL_NAME` 与 `KG_TRANCE_FILE_PATH`，关闭时不出现这些宏。 | `test_execute_engine_compile_injects_trance_macros_from_core_config` |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-TARGET-012 | 执行结果 | runtime trance 字符串宏在真实 npu_demo 编译执行路径可用。 | 使用 `target="npu_demo"`、无参数 kernel、`trance_enabled=True` 和非空 `dump_dir`。 | 运行 `test_execute_engine_compile_trance_file_sink_runs_on_npu_demo`。 | 真实执行成功，trace 文件包含 `in func: <kernel> template=<none>` 与 `args =`。 | `test_execute_engine_compile_trance_file_sink_runs_on_npu_demo` |

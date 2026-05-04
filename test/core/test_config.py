@@ -2,11 +2,12 @@
 
 
 功能说明:
-- 覆盖 `kernel_gen.core.config` 中公共 target、dump_dir 配置底座的显式接口与类型约束。
+- 覆盖 `kernel_gen.core.config` 中公共 target、dump_dir、trance_enabled 配置底座的显式接口与类型约束。
 
 API 列表:
 - `test_target_round_trip() -> None`
 - `test_dump_dir_round_trip() -> None`
+- `test_trance_enabled_round_trip() -> None`
 - `test_config_setters_reject_invalid_types() -> None`
 - `test_reset_config_restores_public_defaults() -> None`
 - `test_snapshot_and_restore_config_round_trip() -> None`
@@ -30,10 +31,12 @@ from kernel_gen.core.config import (
     CoreConfigSnapshot,
     get_dump_dir,
     get_target,
+    get_trance_enabled,
     reset_config,
     restore_config,
     set_dump_dir,
     set_target,
+    set_trance_enabled,
     snapshot_config,
 )
 
@@ -103,6 +106,22 @@ def test_dump_dir_round_trip(tmp_path: Path) -> None:
     assert get_dump_dir() is None
 
 
+# CCFG-001B
+# 测试目的: 验证 runtime trance kernel log 开关通过公开 set/get 接口稳定往返。
+# 使用示例: pytest -q test/core/test_config.py -k test_trance_enabled_round_trip
+# 对应功能实现文件路径: kernel_gen/core/config.py
+# 对应 spec 文件路径: spec/core/config.md
+# 对应测试文件路径: test/core/test_config.py
+def test_trance_enabled_round_trip() -> None:
+    assert get_trance_enabled() is False
+
+    set_trance_enabled(True)
+    assert get_trance_enabled() is True
+
+    set_trance_enabled(False)
+    assert get_trance_enabled() is False
+
+
 # CCFG-002
 # 测试目的: 验证公开配置 setter 对非法类型输入会稳定失败。
 # 使用示例: pytest -q test/core/test_config.py -k test_config_setters_reject_invalid_types
@@ -114,6 +133,8 @@ def test_config_setters_reject_invalid_types() -> None:
         set_target(1)  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="dump_dir must be str, Path or None"):
         set_dump_dir(1)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="trance_enabled must be bool"):
+        set_trance_enabled(1)  # type: ignore[arg-type]
 
 
 # CCFG-003
@@ -125,11 +146,13 @@ def test_config_setters_reject_invalid_types() -> None:
 def test_reset_config_restores_public_defaults() -> None:
     set_target("npu_demo")
     set_dump_dir("dump")
+    set_trance_enabled(True)
 
     reset_config()
 
     assert get_target() is None
     assert get_dump_dir() is None
+    assert get_trance_enabled() is False
 
 
 # CCFG-004
@@ -141,15 +164,17 @@ def test_reset_config_restores_public_defaults() -> None:
 def test_snapshot_and_restore_config_round_trip() -> None:
     set_target("cpu")
     set_dump_dir("dump")
+    set_trance_enabled(True)
     snapshot = snapshot_config()
 
-    assert snapshot == CoreConfigSnapshot(target="cpu", dump_dir=Path("dump"))
+    assert snapshot == CoreConfigSnapshot(target="cpu", dump_dir=Path("dump"), trance_enabled=True)
 
     reset_config()
     restore_config(snapshot)
 
     assert get_target() == "cpu"
     assert get_dump_dir() == Path("dump")
+    assert get_trance_enabled() is True
 
     with pytest.raises(TypeError, match="snapshot must be CoreConfigSnapshot"):
-        restore_config({"target": "npu_demo", "dump_dir": "dump"})  # type: ignore[arg-type]
+        restore_config({"target": "npu_demo", "dump_dir": "dump", "trance_enabled": True})  # type: ignore[arg-type]

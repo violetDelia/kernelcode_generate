@@ -2,6 +2,7 @@
 功能说明:
 - 定义 include/api/Memory.h 的统一 `Memory<Space, T>` 视图类型与 `MemoryFormat/MemorySpace` 声明。
 - 固定公共层成员式 `view<T>(...)` / `reshape(shape)` 接口，以及 `get_shape(axis)` / `get_stride(axis)` 查询口径。
+- 新增 `trance_print(...)` 作为 runtime trance 参数打印接口；未开启 `TRANCE` 时实现无副作用。
 
 API 列表:
 - `enum class MemoryFormat { Norm, CLast }`
@@ -30,6 +31,7 @@ API 列表:
 - `Memory::reshape(const Vector& shape) const -> Memory<Space, T>`
 - `Memory::element_count() const -> long long`
 - `Memory::is_contiguous() const -> bool`
+- `Memory::trance_print(const kernelcode::trance::TranceSink& sink, const char* name) const -> void`
 - `Memory::linear_offset(const long long* indices) const -> long long`
 - `Memory::at(const long long* indices) -> T&`
 - `Memory::at(const long long* indices) const -> const T&`
@@ -56,6 +58,7 @@ helper 清单:
 #define KERNELCODE_GENERATE_INCLUDE_API_MEMORY_H_
 
 #include "include/api/Core.h"
+#include "include/api/Trance.h"
 
 /*
 功能说明:
@@ -402,6 +405,24 @@ public:
     - 功能实现: include/npu_demo/Memory.h
     */
     bool is_contiguous() const;
+
+    /*
+    功能说明:
+    - 将当前 Memory 视图按 runtime trance 格式打印为参数行。
+    - 输出格式固定包含参数名、data 地址、shape、stride、dtype 与 memory space。
+    - `TRANCE` 未开启时后端实现必须保持无副作用。
+
+    使用示例:
+    - kernelcode::trance::ScopedTranceSink scope;
+    - mem.trance_print(kernelcode::trance::current_sink(), "arg0");
+
+
+    关联文件:
+    - spec: spec/include/api/Memory.md
+    - test: test/include/api/memory.py
+    - 功能实现: include/npu_demo/Memory.h
+    */
+    void trance_print(const kernelcode::trance::TranceSink& sink, const char* name) const;
 
     /*
     功能说明:

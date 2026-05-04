@@ -6,7 +6,7 @@
 - 负责把 DSL 函数解析为 module，按指定 pipeline 做 lowering，再生成源码并交给执行引擎真实编译/执行。
 - 只承载公开合同，不把内部 parse / pass / emit / execute 细节暴露为外部依赖。
 - 不向 DSL 函数隐式注入 operation helper；kernel 体使用的 helper 必须由调用方显式 import 或闭包绑定。
-- `dump_dir` 诊断开关统一从 `kernel_gen.core.config` 读取，不作为 `dsl_run(...)` 入参。
+- `dump_dir` 与 runtime `trance` 诊断开关统一从 `kernel_gen.core.config` 读取，不作为 `dsl_run(...)` 入参。
 
 API 列表:
 - `DslRunResult(func_op: func.FuncOp, module: ModuleOp, source: str, compiled_kernel: CompiledKernel, execute_result: ExecuteResult, runtime_args: tuple[RuntimeRealArg, ...])`
@@ -959,14 +959,20 @@ def _append_cost_capture_wrapper(source: str, cost_entry_name: str, cost_kind: s
         source = _rewrite_dma_cost_helpers_to_raw_bytes(source)
         body = (
             f"    S_INT __kg_total_dma_bytes = {call_text};\n"
-            "    __kg_cost_output.data()[0] = __kg_total_dma_bytes <= 0 ? 0 : ((__kg_total_dma_bytes + 63) / 64);\n"
+            "    S_INT __kg_cost_result = __kg_total_dma_bytes <= 0 ? 0 : ((__kg_total_dma_bytes + 63) / 64);\n"
         )
     else:
-        body = f"    __kg_cost_output.data()[0] = static_cast<S_INT>({call_text});\n"
+        body = (
+            f"    S_INT __kg_cost_result = static_cast<S_INT>({call_text});\n"
+        )
     suffix = (
         "\n"
         f"void {wrapper_name}({params_text}) {{\n"
         f"{body}"
+        "#ifdef TRANCE\n"
+        "    kernelcode::trance::print_return_i64(kernelcode::trance::current_sink(), __kg_cost_result);\n"
+        "#endif\n"
+        "    __kg_cost_output.data()[0] = __kg_cost_result;\n"
         "}\n"
     )
     return source.rstrip() + "\n" + suffix, wrapper_name
@@ -1091,10 +1097,10 @@ def dsl_run(
         if dump_kernel_dir is not None:
             set_dump_dir(dump_kernel_dir)
         source, entry_name, func_op = _select_source_and_entry(lowered_module, emit_context)
+        engine = ExecutionEngine(target=_emitc_target_name(emit_context))
+        compiled_kernel = engine.compile(source=source, function=entry_name)
     finally:
         restore_config(source_snapshot)
-    engine = ExecutionEngine(target=_emitc_target_name(emit_context))
-    compiled_kernel = engine.compile(source=source, function=entry_name)
     execute_result = compiled_kernel.execute(args=runtime_args)
     return DslRunResult(
         func_op=func_op,
@@ -1169,17 +1175,17 @@ def dsl_cost_run(
         if dump_kernel_dir is not None:
             set_dump_dir(dump_kernel_dir)
         source, cost_entry_name, _ = _select_source_and_cost_entry(lowered_module, emit_context, cost_kind)
+        cost_source, wrapper_name = _append_cost_capture_wrapper(source, cost_entry_name, cost_kind)
+        if dump_kernel_dir is not None:
+            _write_dump_file(dump_kernel_dir / "99-cost-source.cpp", cost_source)
+        engine = ExecutionEngine(target=_emitc_target_name(emit_context))
+        compiled_kernel = engine.compile(source=cost_source, function=wrapper_name)
     finally:
         restore_config(source_snapshot)
-    cost_source, wrapper_name = _append_cost_capture_wrapper(source, cost_entry_name, cost_kind)
-    if dump_kernel_dir is not None:
-        _write_dump_file(dump_kernel_dir / "99-cost-source.cpp", cost_source)
 
     import numpy
 
     cost_output = numpy.zeros((1,), dtype=numpy.int64)
-    engine = ExecutionEngine(target=_emitc_target_name(emit_context))
-    compiled_kernel = engine.compile(source=cost_source, function=wrapper_name)
     execute_result = compiled_kernel.execute(args=(*runtime_args, cost_output))
     if not execute_result.ok:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, DSL_COST_OUTPUT_ERROR)

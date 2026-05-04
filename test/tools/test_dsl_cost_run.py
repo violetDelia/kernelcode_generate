@@ -56,7 +56,7 @@ REPO_ROOT = _find_repo_root(Path(__file__).resolve().parents[2])
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.core.config import reset_config, set_dump_dir, set_target
+from kernel_gen.core.config import reset_config, set_dump_dir, set_target, set_trance_enabled
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.operation import slice, store
 from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
@@ -226,6 +226,25 @@ def test_dsl_cost_run_returns_public_vector1_cost() -> None:
 
     assert isinstance(cost, int)
     assert cost >= 2
+
+
+# TC-DSL-COST-RUN-001A
+# 功能说明: 验证 runtime trance 打开时 `dsl_cost_run(...)` 会记录 cost wrapper 返回值。
+# 使用示例: pytest -q test/tools/test_dsl_cost_run.py -k test_dsl_cost_run_trance_logs_return_value
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_cost_run.py
+def test_dsl_cost_run_trance_logs_return_value(capfd: pytest.CaptureFixture[str]) -> None:
+    out = np.zeros((128,), dtype=np.int32)
+    lhs = np.arange(128, dtype=np.int32)
+    rhs = np.arange(128, dtype=np.int32)
+
+    set_trance_enabled(True)
+    cost = dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")
+    captured = capfd.readouterr()
+
+    assert isinstance(cost, int)
+    assert f"return = {cost}" in captured.out
 
 
 # TC-DSL-COST-RUN-002

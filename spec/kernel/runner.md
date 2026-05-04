@@ -5,6 +5,7 @@
 - 定义 [`kernel/runner.py`](../../kernel/runner.py) 的 demo 执行入口。
 - 统一提供 `dsl_run -> npu-demo-lowering -> execute` 的真实执行链，以及 `mlir_gen -> npu-demo-lowering -> gen_kernel` 的源码生成链。
 - 统一把诊断产物写入 `kernel/dump/<case_name>/`，并把最终源码镜像为 `source.cpp`。
+- runtime trance kernel log 开关只来自 [`spec/core/config.md`](../core/config.md) 的 `set_trance_enabled(...)`；runner 不新增同义入口参数。
 - 本文件只定义 runner API，不定义 `expectation/kernel` 合同资产矩阵；`expectation` 仍只读。
 
 ## API 列表
@@ -27,7 +28,7 @@
 - [`spec/core/config.md`](../core/config.md)：target 与 dump_dir 全局配置。
 - [`spec/dsl/ast/mlir_gen.md`](../dsl/ast/mlir_gen.md)：`mlir_gen(...)` 生成入口。
 - [`spec/dsl/gen_kernel/gen_kernel.md`](../dsl/gen_kernel/gen_kernel.md)：`gen_kernel(...)` 源码生成入口。
-- [`spec/tools/dsl_run.md`](../tools/dsl_run.md)：真实执行入口。
+- [`spec/tools/dsl_run.md`](../tools/dsl_run.md)：真实执行入口；`run_torch_demo(...)` 通过该入口继承 runtime trance 执行日志语义。
 - [`spec/pass/pipeline/npu_demo_lowering.md`](../pass/pipeline/npu_demo_lowering.md)：`npu-demo-lowering` pipeline。
 - [`spec/symbol_variable/memory.md`](../symbol_variable/memory.md)：runner callable 可接受的 `Memory` 参数。
 - [`spec/symbol_variable/symbol_dim.md`](../symbol_variable/symbol_dim.md)：runner callable 可接受的 `SymbolDim` 参数。
