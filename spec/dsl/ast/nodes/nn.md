@@ -351,7 +351,7 @@
     result = MatmulAST(lhs=lhs, rhs=rhs, memoryspace=memoryspace, location=location)
     ```
 - 功能说明：执行 `MatmulAST`，把 DSL AST 节点转换为公开 MLIR/IR 结果或读取节点公开属性。
-- 注意事项：构造参数必须是公开 AST 节点、公开 symbol/memory 类型或签名声明的 Python 基础值；不得传入内部 visitor/helper 状态。
+- 注意事项：构造参数必须是公开 AST 节点、公开 symbol/memory 类型或签名声明的 Python 基础值；不得传入内部 visitor/helper 状态；matmul 两侧 contracting 维度必须可证明相等，静态、命名符号与 runtime type-level 符号均要求完全一致；不得把任意两个 `runtime_dim_*` 互相匹配。
 
 ### `class FCAST(value: ValueAST, weight: ValueAST, location: SourceLocation | None = None)`
 

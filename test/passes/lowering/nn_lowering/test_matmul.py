@@ -212,6 +212,96 @@ def test_nn_lowering_matmul_dynamic_output_dims() -> None:
     assert len([op for op in symbolic_stride_module.walk() if isinstance(op, KernelMatmulOp)]) == 1
 
 
+# TC-PASS-NNL-020C
+# 测试目的: 验证 DSL runtime type-level 维度在 matmul contracting 轴同名时可通过公开 NnLoweringPass。
+# 使用示例: pytest -q test/passes/lowering/nn_lowering/test_matmul.py -k test_nn_lowering_matmul_accepts_runtime_contract_dims
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
+# 对应测试文件路径: test/passes/lowering/nn_lowering/test_matmul.py
+def test_nn_lowering_matmul_accepts_runtime_contract_dims() -> None:
+    space = NnMemorySpaceAttr(StringAttr("global"))
+    lhs_type = NnMemoryType(
+        ArrayAttr([StringAttr("runtime_dim_0"), StringAttr("runtime_dim_1")]),
+        ArrayAttr([StringAttr("runtime_dim_1"), IntAttr(1)]),
+        f32,
+        space,
+    )
+    rhs_type = NnMemoryType(
+        ArrayAttr([StringAttr("runtime_dim_1"), StringAttr("runtime_dim_2")]),
+        ArrayAttr([StringAttr("runtime_dim_2"), IntAttr(1)]),
+        f32,
+        space,
+    )
+    result_type = NnMemoryType(
+        ArrayAttr([StringAttr("runtime_dim_0"), StringAttr("runtime_dim_2")]),
+        ArrayAttr([StringAttr("runtime_dim_2"), IntAttr(1)]),
+        f32,
+        space,
+    )
+    block = Block(arg_types=[lhs_type, rhs_type])
+    matmul_op = NnMatmulOp(block.args[0], block.args[1], result_type, space)
+    block.add_op(matmul_op)
+    block.add_op(func.ReturnOp(matmul_op.result))
+    module = ModuleOp(
+        [
+            func.FuncOp(
+                "matmul_runtime_contract_dims",
+                FunctionType.from_lists([lhs_type, rhs_type], [result_type]),
+                Region(block),
+            )
+        ]
+    )
+
+    NnLoweringPass().apply(Context(), module)
+
+    assert len([op for op in module.walk() if isinstance(op, KernelMatmulOp)]) == 1
+    assert not any(isinstance(op, NnMatmulOp) for op in module.walk())
+
+
+# TC-PASS-NNL-020A2
+# 测试目的: 验证 nn.matmul lowering 不把不同 runtime_dim_* contracting 维度互相匹配。
+# 使用示例: pytest -q test/passes/lowering/nn_lowering/test_matmul.py -k test_nn_lowering_matmul_rejects_unrelated_runtime_contract_dims
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
+# 对应测试文件路径: test/passes/lowering/nn_lowering/test_matmul.py
+def test_nn_lowering_matmul_rejects_unrelated_runtime_contract_dims() -> None:
+    space = NnMemorySpaceAttr(StringAttr("global"))
+    lhs_type = NnMemoryType(
+        ArrayAttr([StringAttr("runtime_dim_0"), StringAttr("runtime_dim_1")]),
+        ArrayAttr([StringAttr("runtime_dim_1"), IntAttr(1)]),
+        f32,
+        space,
+    )
+    rhs_type = NnMemoryType(
+        ArrayAttr([StringAttr("runtime_dim_2"), StringAttr("runtime_dim_3")]),
+        ArrayAttr([StringAttr("runtime_dim_3"), IntAttr(1)]),
+        f32,
+        space,
+    )
+    result_type = NnMemoryType(
+        ArrayAttr([StringAttr("runtime_dim_0"), StringAttr("runtime_dim_3")]),
+        ArrayAttr([StringAttr("runtime_dim_3"), IntAttr(1)]),
+        f32,
+        space,
+    )
+    block = Block(arg_types=[lhs_type, rhs_type])
+    matmul_op = NnMatmulOp(block.args[0], block.args[1], result_type, space)
+    block.add_op(matmul_op)
+    block.add_op(func.ReturnOp(matmul_op.result))
+    module = ModuleOp(
+        [
+            func.FuncOp(
+                "matmul_unrelated_runtime_contract_dims",
+                FunctionType.from_lists([lhs_type, rhs_type], [result_type]),
+                Region(block),
+            )
+        ]
+    )
+
+    with pytest.raises(KernelCodeError, match="matmul contracting dimensions must match"):
+        NnLoweringPass().apply(Context(), module)
+
+
 # TC-PASS-NNL-020B
 # 测试目的: 验证 nn.matmul shape/stride/operand 错误经公开 NnLoweringPass 保持稳定错误语义。
 # 使用示例: pytest -q test/passes/lowering/nn_lowering/test_matmul.py -k test_nn_lowering_matmul_public_error_matrix

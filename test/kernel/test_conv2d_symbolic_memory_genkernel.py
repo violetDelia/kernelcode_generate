@@ -175,7 +175,7 @@ def test_inputs_static_tile_dynamic_gen_kernel_keeps_seeded_static_shapes() -> N
 # 对应 spec 文件路径: spec/kernel/runner.md
 # 对应测试文件路径: test/kernel/test_conv2d_symbolic_memory_genkernel.py
 def test_inputs_static_tile_static_gen_kernel_keeps_seeded_static_shapes() -> None:
-    module, _source = run_lowering_demo(
+    module, source = run_lowering_demo(
         "test_conv2d/inputs_static_tile_static_seeded_static_memory",
         conv2d_inputs_static_tile_static_kernel,
         *_seeded_static_conv2d_compile_args(),
@@ -192,3 +192,5 @@ def test_inputs_static_tile_static_gen_kernel_keeps_seeded_static_shapes() -> No
     assert SEMANTIC_INPUT_MEMORY not in module_text
     assert SEMANTIC_WEIGHT_MEMORY not in module_text
     assert "!nn.memory<[s1" not in module_text
+    assert "? -" not in module_text
+    assert "? -" not in source

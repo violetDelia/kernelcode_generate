@@ -40,8 +40,10 @@
 - 会产生 memory 值的 DMA 节点必须实现 `result_memory() -> Memory | None`：`DmaAllocAST`、`DmaCopyAST`、`DmaCastAST`、`DmaViewAST`、`DmaReshapeAST`、`DmaFlattenAST`、`DmaLoadAST`、`DmaSliceAST`。
 - `result_memory()` 只能读取自身成员节点的 `result_memory()` / `result_symbols()`，不得依赖 `DslAstVisitor` 私有状态。
 - emit 阶段构造 runtime `Memory` 对应 `NnMemoryType` 时复用 `MemoryAST.type_from_memory(...)`，不得复制 dtype/space 分支表。
-- `DmaCopyAST.emit_mlir(...)`、`DmaCastAST.emit_mlir(...)`、`DmaViewAST.emit_mlir(...)`、`DmaReshapeAST.emit_mlir(...)`、`DmaFlattenAST.emit_mlir(...)`、`DmaLoadAST.emit_mlir(...)` 与 `DmaSliceAST.emit_mlir(...)` 必须从自身 `result_memory()` 获取结果类型；若 AST 无法给出结果 memory，必须稳定失败，不得从已发射 SSA type 反推 shape、stride、dtype 或 space。
+- `DmaCopyAST.emit_mlir(...)`、`DmaCastAST.emit_mlir(...)`、`DmaViewAST.emit_mlir(...)`、`DmaReshapeAST.emit_mlir(...)`、`DmaFlattenAST.emit_mlir(...)`、`DmaLoadAST.emit_mlir(...)` 与 `DmaSliceAST.emit_mlir(...)` 必须从自身 `result_memory()` 获取结果类型；若 AST 无法给出结果 memory，必须稳定失败，不得从已发射 SSA type 反推 dtype 或 space；`DmaLoadAST` / `DmaSliceAST` 可用公开 `size` 参数名构造结果 shape/stride type。
+- `DmaLoadAST.emit_mlir(...)` 与 `DmaSliceAST.emit_mlir(...)` 若结果类型包含匿名 `?` 生成的 `runtime_dim_*` shape，或公开 size 名与 SSA operand 的 symbol 文本不一致，`dma.alloc` 必须使用 full-rank dynamic shape operands，避免符号子集形态把未知 operand 与结果 shape 误判为不一致。
 - 公开 AST 测试必须覆盖动态 `alloc` shape / stride、`IntTypeAttrAST` signed / unsigned dtype、`load` / `slice` 动态 `TensorAxisAccessAST` size、`fill` bool / int / float / symbol / string value matrix、Operation source/target 公开输入、动态 flatten shape 以及 `free` / `fill` / `view` / `reshape` / `flatten` / `load` / `slice` / `store` / `deslice` 的公开错误矩阵；对应测试入口为 `test_dma_alloc_emit_mlir_handles_parameterized_public_shape_expressions`、`test_dma_emit_mlir_handles_dynamic_public_memory_paths`、`test_dma_fill_emit_mlir_handles_public_value_and_dtype_matrix`、`test_dma_emit_mlir_reports_public_error_matrix` 与 `test_dma_flatten_public_dynamic_and_scalar_shape_matrix`。
+- 读类 DMA 对公开命名但 SSA 类型未知的 alloc 边界由 `test_dma_slice_uses_full_rank_dynamic_shape_for_unknown_named_result` 覆盖。
 
 ## API详细说明
 

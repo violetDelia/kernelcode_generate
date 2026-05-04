@@ -4,11 +4,26 @@
 功能说明:
 - 提供符号维度表达、基础算术运算与动态性判断。
 - 字符串表达支持 `min(lhs, rhs)`，用于 DSL tile 尾块表达。
+- 匿名运行期未知维度 `?` 参与表达式时保守传播为 `?`，避免生成不可解析的派生文本。
 
 API 列表:
 - `class SymbolDim(sym: int | str | sp.Basic)`
+- `SymbolDim.__init__(self, sym: int | str | sp.Basic) -> None`
 - `SymbolDim.get_symbol(self) -> sp.Basic`
 - `SymbolDim.get_value(self) -> int | float | str | sp.Basic`
+- `SymbolDim.__repr__(self) -> str`
+- `SymbolDim.__str__(self) -> str`
+- `SymbolDim.__add__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__radd__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__sub__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__rsub__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__mul__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__rmul__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__truediv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__rtruediv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__floordiv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__rfloordiv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__eq__(self, other: int | str | sp.Basic | SymbolDim) -> bool`
 - `SymbolDim.is_dynamic(self) -> bool`
 
 使用示例:
@@ -23,10 +38,12 @@ API 列表:
 
 from __future__ import annotations
 
+import ast
 import re
 from typing import TypeAlias
 
 import sympy as sp
+from sympy.parsing.sympy_parser import parse_expr
 
 SymbolDimOperand: TypeAlias = "int | str | sp.Basic | _SymbolDim"
 
@@ -51,6 +68,215 @@ class _SymbolDim:
     _NUMERIC_LITERAL_RE = re.compile(
         r"^[+-]?(?:(?:\d(?:_?\d)*)(?:\.(?:\d(?:_?\d)*)?)?|\.(?:\d(?:_?\d)*))(?:[eE][+-]?\d(?:_?\d)*)?$"
     )
+    _UNKNOWN_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])\?(?![A-Za-z0-9_])")
+    _UNKNOWN_PARSE_NAME = "__kg_unknown_dim__"
+
+    @staticmethod
+    def _unknown_symbol() -> sp.Symbol:
+        """构造匿名未知维度符号。
+
+
+        功能说明:
+        - 统一使用 `?` 表示运行期无法在编译期命名的动态维度。
+
+        使用示例:
+        - unknown = _SymbolDim._unknown_symbol()
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+
+        return sp.symbols("?", integer=True, real=True)
+
+    @staticmethod
+    def _contains_unknown_token(value: str) -> bool:
+        """判断字符串表达式是否包含独立匿名未知 token。
+
+
+        功能说明:
+        - 仅识别独立 `?` token，避免把普通符号名中的字符误判为未知维度。
+
+        使用示例:
+        - _SymbolDim._contains_unknown_token("? - 2")
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+
+        return _SymbolDim._UNKNOWN_TOKEN_RE.search(value) is not None
+
+    @staticmethod
+    def _replace_unknown_tokens_for_parse(value: str) -> str:
+        """将匿名未知 token 替换成可被 Python/SymPy 解析的内部符号名。
+
+
+        功能说明:
+        - 仅替换独立 `?` token，保留其它文本用于后续语法校验。
+        - 返回值只服务当前文件内部解析，不作为公开表达式输出。
+
+        使用示例:
+        - parsed_text = _SymbolDim._replace_unknown_tokens_for_parse("? - 2")
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+
+        return _SymbolDim._UNKNOWN_TOKEN_RE.sub(_SymbolDim._UNKNOWN_PARSE_NAME, value)
+
+    @staticmethod
+    def _raise_invalid_expr() -> None:
+        """抛出统一的 SymbolDim 表达式错误。
+
+
+        功能说明:
+        - 保持字符串表达式非法输入的公开错误消息稳定。
+
+        使用示例:
+        - _SymbolDim._raise_invalid_expr()
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+
+        raise ValueError("SymbolDim expression string is invalid")
+
+    @staticmethod
+    def _validate_expr_ast_node(node: ast.AST) -> None:
+        """递归校验 SymbolDim 表达式 AST 节点。
+
+
+        功能说明:
+        - 只允许整数常量、符号名、整数算术、一元正负号、`floor(arg)` 和 `min(lhs, rhs)`。
+        - 拒绝比较、布尔、条件、容器、属性、下标、幂运算和其它非公开表达式形态。
+
+        使用示例:
+        - _SymbolDim._validate_expr_ast_node(ast.parse("min(N, 4)", mode="eval"))
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+
+        if isinstance(node, ast.Expression):
+            _SymbolDim._validate_expr_ast_node(node.body)
+            return
+        if isinstance(node, ast.Name):
+            return
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, bool) or not isinstance(node.value, int):
+                _SymbolDim._raise_invalid_expr()
+            return
+        if isinstance(node, ast.UnaryOp):
+            if not isinstance(node.op, (ast.UAdd, ast.USub)):
+                _SymbolDim._raise_invalid_expr()
+            _SymbolDim._validate_expr_ast_node(node.operand)
+            return
+        if isinstance(node, ast.BinOp):
+            if not isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv)):
+                _SymbolDim._raise_invalid_expr()
+            _SymbolDim._validate_expr_ast_node(node.left)
+            _SymbolDim._validate_expr_ast_node(node.right)
+            return
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name):
+                _SymbolDim._raise_invalid_expr()
+            expected_arity = {"floor": 1, "min": 2}.get(node.func.id)
+            if expected_arity is None or node.keywords or len(node.args) != expected_arity:
+                _SymbolDim._raise_invalid_expr()
+            for arg in node.args:
+                _SymbolDim._validate_expr_ast_node(arg)
+            return
+        _SymbolDim._raise_invalid_expr()
+
+    @staticmethod
+    def _validate_expr_ast(value: str) -> None:
+        """校验 SymbolDim 表达式的公开语法范围。
+
+
+        功能说明:
+        - 在交给 SymPy 前先拒绝语法不完整或超出公开整数算术范围的表达式。
+        - 仅允许整数算术、`floor(arg)` 与 `min(lhs, rhs)` 两个公开函数形态。
+
+        使用示例:
+        - _SymbolDim._validate_expr_ast("min(N, 4)")
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+
+        try:
+            parsed_ast = ast.parse(value, mode="eval")
+        except SyntaxError as exc:
+            raise ValueError("SymbolDim expression string is invalid") from exc
+        _SymbolDim._validate_expr_ast_node(parsed_ast)
+
+    @staticmethod
+    def _parse_expr_str(value: str) -> sp.Basic:
+        """解析并校验公开 SymbolDim 表达式字符串。
+
+
+        功能说明:
+        - 统一处理函数白名单、函数参数数量、符号假设和 SymPy 解析错误。
+        - 非法表达式稳定转换为 `ValueError("SymbolDim expression string is invalid")`。
+
+        使用示例:
+        - expr = _SymbolDim._parse_expr_str("min(N, 4)")
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+
+        _SymbolDim._validate_expr_ast(value)
+        symbol_names = {
+            name
+            for name in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", value)
+            if name not in {"floor", "min"}
+        }
+        local_symbols = {
+            name: sp.symbols(name, integer=True, real=True)
+            for name in symbol_names
+        }
+        local_symbols["floor"] = sp.floor
+        local_symbols["min"] = sp.Min
+        try:
+            parsed = parse_expr(value, local_dict=local_symbols, evaluate=True)
+        except (sp.SympifyError, SyntaxError, TypeError, ValueError) as exc:
+            raise ValueError("SymbolDim expression string is invalid") from exc
+        if isinstance(parsed, tuple):
+            raise ValueError("SymbolDim expression string is invalid")
+        return _SymbolDim._normalize_symbol(parsed)
+
+    @staticmethod
+    def _is_unknown_expr(expr: sp.Basic) -> bool:
+        """判断 sympy 表达式是否含匿名未知维度。
+
+
+        功能说明:
+        - 只要表达式自由符号中包含 `?`，该维度表达式对外折回匿名未知。
+
+        使用示例:
+        - _SymbolDim._is_unknown_expr(SymbolDim("?").get_symbol())
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+
+        return any(symbol.name == "?" for symbol in expr.free_symbols)
 
     @staticmethod
     def _is_numeric_literal_str(value: str) -> bool:
@@ -196,6 +422,8 @@ class _SymbolDim:
         """
         if expr.is_number:
             return str(sp.simplify(expr))
+        if _SymbolDim._is_unknown_expr(expr):
+            return "?"
         if expr.is_Add:
             terms = expr.as_ordered_terms()
             formatted_terms: list[str] = []
@@ -282,11 +510,17 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
+        if _SymbolDim._is_unknown_expr(expr):
+            return "?"
+
         simplified = sp.simplify(expr)
         if simplified.is_number:
             if simplified.is_integer:
                 return int(simplified)
             return float(simplified)
+
+        if _SymbolDim._is_unknown_expr(simplified):
+            return "?"
 
         if expr.free_symbols:
             return _SymbolDim._format_public_value_expr(expr)
@@ -314,7 +548,7 @@ class _SymbolDim:
         return sp.count_ops(simplified) < sp.count_ops(expr)
 
     @staticmethod
-    def _symbol_from_str(value: str) -> sp.Symbol:
+    def _symbol_from_str(value: str) -> sp.Basic:
         """基于字符串创建带假设的符号。
 
 
@@ -331,27 +565,12 @@ class _SymbolDim:
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
         normalized = _SymbolDim._normalize_str(value)
+        if _SymbolDim._contains_unknown_token(normalized):
+            parse_text = _SymbolDim._replace_unknown_tokens_for_parse(normalized)
+            _SymbolDim._parse_expr_str(parse_text)
+            return _SymbolDim._unknown_symbol()
         if re.search(r"//|[+\-*/()]", normalized):
-            function_names = set(
-                re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", normalized)
-            )
-            if function_names - {"floor", "min"}:
-                raise ValueError("SymbolDim expression string is invalid")
-            symbol_names = {
-                name
-                for name in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", normalized)
-                if name not in {"floor", "min"}
-            }
-            local_symbols = {
-                name: sp.symbols(name, integer=True, real=True)
-                for name in symbol_names
-            }
-            local_symbols["floor"] = sp.floor
-            local_symbols["min"] = sp.Min
-            parsed = sp.sympify(normalized, locals=local_symbols)
-            if isinstance(parsed, tuple):
-                raise ValueError("SymbolDim expression string is invalid")
-            return _SymbolDim._normalize_symbol(parsed)
+            return _SymbolDim._parse_expr_str(normalized)
         return sp.symbols(normalized, integer=True, real=True)
 
     @staticmethod
@@ -515,6 +734,8 @@ class _SymbolDim:
         """
         lhs = self._normalize_operand(other) if reverse else self.get_symbol()
         rhs = self.get_symbol() if reverse else self._normalize_operand(other)
+        if self._is_unknown_expr(lhs) or self._is_unknown_expr(rhs):
+            return SymbolDim(self._unknown_symbol())
         return SymbolDim(operator(lhs, rhs))
 
     def _quotient(
@@ -542,6 +763,8 @@ class _SymbolDim:
         """
         lhs = self._normalize_operand(other) if reverse else self.get_symbol()
         rhs = self.get_symbol() if reverse else self._normalize_operand(other)
+        if self._is_unknown_expr(lhs) or self._is_unknown_expr(rhs):
+            return SymbolDim(self._unknown_symbol())
         if floordiv and not lhs.free_symbols and not rhs.free_symbols:
             return SymbolDim(sp.Integer(int(sp.simplify(lhs)) // int(sp.simplify(rhs))))
 

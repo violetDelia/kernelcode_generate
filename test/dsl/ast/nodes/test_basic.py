@@ -215,6 +215,24 @@ def test_memory_ast_builds_mlir_type_from_runtime_memory() -> None:
     assert str(memory_type) == "!nn.memory<[2, 4], [4, 1], f32, #nn.space<tsm>>"
 
 
+def test_memory_ast_type_from_memory_names_anonymous_shape_stride_conflict() -> None:
+    """MemoryAST.type_from_memory() 会规避匿名 shape/stride 同轴 `?` 组合。"""
+
+    memory = Memory(
+        ["?", "?", "?"],
+        NumericType.Float32,
+        space=MemorySpace.TSM,
+    )
+    memory_type = MemoryAST.type_from_memory(Context(), memory)
+
+    assert isinstance(memory_type, NnMemoryType)
+    assert str(memory_type) == (
+        "!nn.memory<[runtime_dim_0, runtime_dim_1, runtime_dim_2], "
+        "[runtime_dim_1*runtime_dim_2, runtime_dim_2, 1], f32, #nn.space<tsm>>"
+    )
+    assert "?" not in str(memory_type)
+
+
 def test_memory_ast_public_dtype_space_and_binding_edges() -> None:
     """MemoryAST 公开 dtype/space 映射、字段归一和 SSA 绑定查找保持稳定。"""
 

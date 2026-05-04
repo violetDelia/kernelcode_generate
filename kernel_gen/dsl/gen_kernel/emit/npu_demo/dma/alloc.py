@@ -2,6 +2,7 @@
 
 功能说明:
 - 注册 target=`npu_demo` 的 `dma.alloc` EmitC 发射实现。
+- rank 等长的 `dynamic_shape` 作为完整运行期 shape 发射，避免把 type 级语义标签写成 C++ 变量。
 - 本文件不提供跨文件公开 API；调用方必须通过 emit registry 与 `emit_c_op(...)` 公开入口调度。
 
 API 列表:
@@ -100,6 +101,25 @@ def _format_shape_values(op: DmaAllocOp, bindings: dict[str, str], ctx) -> list[
     return shape_values
 
 
+def _format_full_rank_dynamic_shape_values(op: DmaAllocOp, dynamic_shape_values: list[str]) -> list[str] | None:
+    """按 rank 等长 `dynamic_shape` 取得完整运行期 shape。
+
+    功能说明:
+    - `runtime_dim_*` 这类 type 级语义标签不是 C++ 变量，不能直接写入 `alloc(...)`。
+    - 当 `dynamic_shape` 与 result rank 等长时，它已经逐维承载真实运行期 shape，应优先用于源码发射。
+
+    使用示例:
+    - shape_values = _format_full_rank_dynamic_shape_values(op, ["m", "n"])
+    """
+
+    result_type = op.result.type
+    if not isinstance(result_type, NnMemoryType):
+        return None
+    if len(dynamic_shape_values) != len(result_type.shape.data):
+        return None
+    return list(dynamic_shape_values)
+
+
 def _stride_term(value: str) -> str:
     """格式化参与 stride 乘法的单项。
 
@@ -155,16 +175,20 @@ def _emit_npu_demo_dma_alloc(op: DmaAllocOp, ctx) -> str:
     if not isinstance(result_type, NnMemoryType):
         raise ctx.emit_error(op.name, "result must be nn.memory")
     symbol_bindings: dict[str, str] = {}
+    dynamic_shape_values: list[str] = []
     for value in op.dynamic_shape:
         value_type = value.type
         if isinstance(value_type, SymbolValueType):
             value_expr = value_type.expr.expr.data
             value_name = emit_c_value(value, ctx)
+            dynamic_shape_values.append(value_name)
             _bind_symbol_expr(symbol_bindings, value_expr, value_name)
             public_value = value_type.get_value()
             if isinstance(public_value, str):
                 _bind_symbol_expr(symbol_bindings, public_value, value_name)
-    shape_values = _format_shape_values(op, symbol_bindings, ctx)
+    shape_values = _format_full_rank_dynamic_shape_values(op, dynamic_shape_values) or _format_shape_values(
+        op, symbol_bindings, ctx
+    )
     stride_values = _default_stride_values(shape_values)
     space_expr = ctx.dispatch_attr(result_type)
     element_type = ctx.dispatch_type(result_type.element_type)

@@ -6,17 +6,24 @@
 
 ## API 列表
 
-- `SymbolDim(value)`
-- `get_symbol()`
-- `get_value()`
-- `__repr__()`
-- `__add__() / __radd__()`
-- `__sub__() / __rsub__()`
-- `__mul__() / __rmul__()`
-- `__truediv__() / __rtruediv__()`
-- `__floordiv__() / __rfloordiv__()`
-- `__eq__(other)`
-- `is_dynamic()`
+- `class SymbolDim(sym: int | str | sp.Basic)`
+- `SymbolDim.__init__(self, sym: int | str | sp.Basic) -> None`
+- `SymbolDim.get_symbol(self) -> sp.Basic`
+- `SymbolDim.get_value(self) -> int | float | str | sp.Basic`
+- `SymbolDim.__repr__(self) -> str`
+- `SymbolDim.__str__(self) -> str`
+- `SymbolDim.__add__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__radd__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__sub__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__rsub__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__mul__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__rmul__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__truediv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__rtruediv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__floordiv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__rfloordiv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- `SymbolDim.__eq__(self, other: int | str | sp.Basic | SymbolDim) -> bool`
+- `SymbolDim.is_dynamic(self) -> bool`
 
 ## 文档信息
 
@@ -31,154 +38,172 @@
 
 ## 目标
 
-- 提供统一的 `SymbolDim(value)` 公开入口，覆盖静态整数、动态符号与整数表达式。
+- 提供统一的 `SymbolDim(sym)` 公开入口，覆盖静态整数、动态符号与整数表达式。
 - 明确字符串输入域：`int` 合法，按符号名语义规整后的 `str` 合法，数值字面量字符串非法。
 - 明确 `get_symbol()` 与 `get_value()` 的职责分层：前者暴露内部 `sympy.Basic` 表达式，后者暴露稳定的公开比较值。
 - 明确 `+`、`-`、`*`、`/`、`//` 在静态值、动态值、可约表达式、链式除法与链式整除下的公开行为，为实现与测试同步收口提供直接依据。
 
 ## API详细说明
 
-### `SymbolDim(value)`
+### `class SymbolDim(sym: int | str | sp.Basic)`
 
-- api：`SymbolDim(value)`
+- api：`class SymbolDim(sym: int | str | sp.Basic)`
 - 参数：
-  - `value`：当前接口处理或写入的业务值，作为生成、转换、比较或存储语义的主要输入；类型 `int | str | Expr | Symbol`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，除非该 API 明确说明会修改输入。
+  - `sym`：当前接口处理或写入的业务值，作为生成、转换、比较或存储语义的主要输入；类型 `int | str | sp.Basic`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，除非该 API 明确说明会修改输入。
 - 返回值：`SymbolDim` 实例。
 - 使用示例：
 
   ```python
-  symbol_dim = SymbolDim(value=sample_value)
+  symbol_dim = SymbolDim(sym=sample_value)
   ```
 - 功能说明：构造 `SymbolDim` 实例。
 - 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
 
-### `get_symbol()`
+### `SymbolDim.get_symbol(self) -> sp.Basic`
 
-- api：`get_symbol()`
+- api：`SymbolDim.get_symbol(self) -> sp.Basic`
 - 参数：无。
 - 返回值：`get_symbol` 的公开结果值。
 - 使用示例：
 
   ```python
-  result = get_symbol()
+  result = symbol_dim.get_symbol()
   ```
 - 功能说明：读取 `symbol`。
 - 注意事项：该接口只读取公开状态；返回对象的内部可变结构不作为额外公开合同。
 
-### `get_value()`
+### `SymbolDim.get_value(self) -> int | float | str | sp.Basic`
 
-- api：`get_value()`
+- api：`SymbolDim.get_value(self) -> int | float | str | sp.Basic`
 - 参数：无。
 - 返回值：`get_value` 的公开结果值。
 - 使用示例：
 
   ```python
-  result = get_value()
+  result = symbol_dim.get_value()
   ```
 - 功能说明：读取 `value`。
 - 注意事项：该接口只读取公开状态；返回对象的内部可变结构不作为额外公开合同。
 
-### `__repr__()`
+### `SymbolDim.__repr__(self) -> str`
 
-- api：`__repr__()`
+- api：`SymbolDim.__repr__(self) -> str`
 - 参数：无。
 - 返回值：`__repr__` 的公开结果值。
 - 使用示例：
 
   ```python
-  result = __repr__()
+  result = repr(symbol_dim)
   ```
 - 功能说明：返回调试表示文本。
 - 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
 
-### `__add__() / __radd__()`
+### `SymbolDim.__str__(self) -> str`
 
-- api：`__add__() / __radd__()`
+- api：`SymbolDim.__str__(self) -> str`
 - 参数：无。
+- 返回值：公开字符串表示；类型 `str`。
+- 使用示例：
+
+  ```python
+  result = str(SymbolDim("N") // 2)
+  ```
+- 功能说明：返回面向公开消费的字符串表示，复用 `get_value()` 的公开口径。
+- 注意事项：该特殊方法只承接 Python 对应协议语义；输出必须等价于 `str(get_value())`。当 `get_symbol()` 与 `get_value()` 文本不同步时，`__str__()` 以 `get_value()` 的公开文本为准，例如整除公开文本保留 `//` 语义而不是暴露 `floor(...)` 内部表达。
+
+### `SymbolDim.__add__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim` / `SymbolDim.__radd__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+
+- api：`SymbolDim.__add__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim` / `SymbolDim.__radd__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- 参数：
+  - `other`：另一侧操作数或比较对象，用于和当前对象组合、比较或广播；类型 `int | str | sp.Basic | SymbolDim`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，除非该 API 明确说明会修改输入。
 - 返回值：`__add__` 的公开结果值。
 - 使用示例：
 
   ```python
-  result = __add__()
+  result = symbol_dim + other
   ```
 - 功能说明：执行 `__add__`。
 - 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
 
-### `__sub__() / __rsub__()`
+### `SymbolDim.__sub__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim` / `SymbolDim.__rsub__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
 
-- api：`__sub__() / __rsub__()`
-- 参数：无。
+- api：`SymbolDim.__sub__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim` / `SymbolDim.__rsub__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- 参数：
+  - `other`：另一侧操作数或比较对象，用于和当前对象组合、比较或广播；类型 `int | str | sp.Basic | SymbolDim`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，除非该 API 明确说明会修改输入。
 - 返回值：`__sub__` 的公开结果值。
 - 使用示例：
 
   ```python
-  result = __sub__()
+  result = symbol_dim - other
   ```
 - 功能说明：执行 `__sub__`。
 - 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
 
-### `__mul__() / __rmul__()`
+### `SymbolDim.__mul__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim` / `SymbolDim.__rmul__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
 
-- api：`__mul__() / __rmul__()`
-- 参数：无。
+- api：`SymbolDim.__mul__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim` / `SymbolDim.__rmul__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- 参数：
+  - `other`：另一侧操作数或比较对象，用于和当前对象组合、比较或广播；类型 `int | str | sp.Basic | SymbolDim`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，除非该 API 明确说明会修改输入。
 - 返回值：`__mul__` 的公开结果值。
 - 使用示例：
 
   ```python
-  result = __mul__()
+  result = symbol_dim * other
   ```
 - 功能说明：执行 `__mul__`。
 - 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
 
-### `__truediv__() / __rtruediv__()`
+### `SymbolDim.__truediv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim` / `SymbolDim.__rtruediv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
 
-- api：`__truediv__() / __rtruediv__()`
-- 参数：无。
+- api：`SymbolDim.__truediv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim` / `SymbolDim.__rtruediv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- 参数：
+  - `other`：另一侧操作数或比较对象，用于和当前对象组合、比较或广播；类型 `int | str | sp.Basic | SymbolDim`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，除非该 API 明确说明会修改输入。
 - 返回值：`__truediv__` 的公开结果值。
 - 使用示例：
 
   ```python
-  result = __truediv__()
+  result = symbol_dim / other
   ```
 - 功能说明：执行 `__truediv__`。
 - 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
 
-### `__floordiv__() / __rfloordiv__()`
+### `SymbolDim.__floordiv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim` / `SymbolDim.__rfloordiv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
 
-- api：`__floordiv__() / __rfloordiv__()`
-- 参数：无。
+- api：`SymbolDim.__floordiv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim` / `SymbolDim.__rfloordiv__(self, other: int | str | sp.Basic | SymbolDim) -> SymbolDim`
+- 参数：
+  - `other`：另一侧操作数或比较对象，用于和当前对象组合、比较或广播；类型 `int | str | sp.Basic | SymbolDim`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，除非该 API 明确说明会修改输入。
 - 返回值：`__floordiv__` 的公开结果值。
 - 使用示例：
 
   ```python
-  result = __floordiv__()
+  result = symbol_dim // other
   ```
 - 功能说明：执行 `__floordiv__`。
 - 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
 
-### `__eq__(other)`
+### `SymbolDim.__eq__(self, other: int | str | sp.Basic | SymbolDim) -> bool`
 
-- api：`__eq__(other)`
+- api：`SymbolDim.__eq__(self, other: int | str | sp.Basic | SymbolDim) -> bool`
 - 参数：
-  - `other`：另一侧操作数或比较对象，用于和当前对象组合、比较或广播；类型 `int | str | Expr | Symbol | SymbolDim`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，除非该 API 明确说明会修改输入。
+  - `other`：另一侧操作数或比较对象，用于和当前对象组合、比较或广播；类型 `int | str | sp.Basic | SymbolDim`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，除非该 API 明确说明会修改输入。
 - 返回值：`__eq__` 的公开结果值。
 - 使用示例：
 
   ```python
-  result = __eq__(other=sample_other)
+  result = symbol_dim == other
   ```
 - 功能说明：执行 `__eq__`。
 - 注意事项：该特殊方法只承接 Python 对应协议语义；不得额外暴露内部字段。
 
-### `is_dynamic()`
+### `SymbolDim.is_dynamic(self) -> bool`
 
-- api：`is_dynamic()`
+- api：`SymbolDim.is_dynamic(self) -> bool`
 - 参数：无。
 - 返回值：`is_dynamic` 的公开结果值。
 - 使用示例：
 
   ```python
-  result = is_dynamic()
+  result = symbol_dim.is_dynamic()
   ```
 - 功能说明：执行 `is_dynamic`。
 - 注意事项：该接口只读取公开状态；返回对象的内部可变结构不作为额外公开合同。
@@ -188,7 +213,7 @@
 
 ### 公开接口
 
-#### 补充：`SymbolDim(value)`
+#### 补充：`SymbolDim(sym)`
 
 功能说明：
 
@@ -196,7 +221,7 @@
 
 参数说明：
 
-- `value`（`int | str | sympy.Basic`）：维度输入。
+- `sym`（`int | str | sympy.Basic`）：维度输入。
 
 使用示例：
 
@@ -320,6 +345,37 @@ assert repr(A / B / 3) == "(A/B)/3"
 
 - 输出等于 `str(get_symbol())`。
 - 当 `get_symbol()` 与 `get_value()` 的职责不同步时，`__repr__()` 以内部表达为准；例如 `repr(A / B / 3)` 与 `(A / B / 3).get_value()` 的文本可以不同。
+
+返回与限制：
+
+- 返回 `str`。
+
+#### 补充：`__str__()`
+
+功能说明：
+
+- 返回当前维度的公开字符串表示。
+
+参数说明：
+
+- 无参数。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+
+A = SymbolDim("A")
+B = SymbolDim("B")
+
+assert str(SymbolDim("N")) == "N"
+assert str(A // B + 1) == "A // B + 1"
+```
+
+注意事项：
+
+- 输出等于 `str(get_value())`。
+- 当 `get_symbol()` 与 `get_value()` 的职责不同步时，`__str__()` 以公开值为准；例如整除链的公开文本可以保留 `//`，不要求暴露内部 `floor(...)` 表达。
 
 返回与限制：
 
@@ -555,13 +611,14 @@ assert (SymbolDim(8) + SymbolDim("N")).is_dynamic() is True
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - `SymbolDim` 只表示整数维度及其整型符号表达，不负责广播、约束求解、形状推导或高阶张量语义。
-- 公开接口限定为 `SymbolDim(value)`、`get_symbol()`、`get_value()`、`is_dynamic()`、`__repr__()`、`__eq__()`，以及 `+`、`-`、`*`、`/`、`//` 对应的正向/反向运算；不新增其他对外入口。
+- 公开接口限定为 `SymbolDim(sym)`、`get_symbol()`、`get_value()`、`is_dynamic()`、`__repr__()`、`__str__()`、`__eq__()`，以及 `+`、`-`、`*`、`/`、`//` 对应的正向/反向运算；不新增其他对外入口。
 - 构造输入仅允许：
   - `int`：表示静态整数维度。
   - `str`：表示符号名；字符串执行 `strip()` 后不能为空，且不能是数值字面量字符串。
   - `sympy.Basic`：表示已构造好的整数符号或整数表达式。
 - 数值字面量字符串包括但不限于 `"12"`、`"3.14"`、`".5"`、`"1e3"`、`"+1"`、`"-2"`；这些输入在构造、算术操作数、比较操作数路径上都必须抛出 `ValueError`。
 - 空字符串或仅空白字符串在构造、算术操作数、比较操作数路径上都必须抛出 `ValueError`。
+- 字符串表达式仅允许完整语法的整数算术、`floor(arg)` 与 `min(lhs, rhs)`；含独立匿名未知 token `?` 的合法表达式可保守传播为 `?`，但 `"? +"`、`"? bad"`、`"? **"`、`"min(?, )"`、`"? < 2"`、`"? and 2"`、`"[?]"` 等语法不完整、arity 不合法或超出公开整数算术范围的输入必须先抛出 `ValueError`，不得吞成匿名未知维度。
 - 浮点构造输入与浮点算术操作数均不受支持：
   - `SymbolDim(1.5)` 必须抛出 `NotImplementedError`。
   - `SymbolDim(...)+1.5`、`-1.5`、`*1.5`、`/1.5`、`//1.5` 及对应反向运算必须抛出 `NotImplementedError`。
@@ -579,13 +636,14 @@ assert (SymbolDim(8) + SymbolDim("N")).is_dynamic() is True
   - 动态整除链保持嵌套 `floor(...)` 的顺序信息，例如 `A // B // 3 -> "floor(floor(A/B)/3)"`，`A // 3 // B -> "floor(floor(A/3)/B)"`。
   - 若结果已经化简为静态值或单个动态符号，公开结果直接返回该值对应的 `int`、`float` 或 `str`，例如 `A / A -> 1`、`(A*B) / B -> "A"`。
 - `__repr__()` 返回 `str(get_symbol())`，因此它描述的是内部表达，不承诺与 `get_value()` 完全相同。
+- `__str__()` 返回 `str(get_value())`，因此它描述的是公开值文本；当内部表达与公开值不同步时不承诺与 `__repr__()` 完全相同。
 - `sympy.Symbol` 若未显式声明整数假设，实现需统一为整数语义。
 - 不额外承诺异常消息文本；兼容性只要求异常类型与公开行为稳定。
 ## 测试
 
 - 测试文件：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
 - 执行命令：`pytest -q test/symbol_variable/test_symbol_dim.py`
-- 测试目标：保持输入域、动态性、异常分支回归覆盖，并锁定 `get_symbol()` 与 `get_value()` 在静态值、可约表达式、链式真除法、链式整除下的公开行为。
+- 测试目标：保持输入域、动态性、异常分支回归覆盖，并锁定 `get_symbol()`、`get_value()` 与 `__str__()` 在静态值、可约表达式、链式真除法、链式整除下的公开行为。
 - 功能与用例清单：
   - `test_init_accepts_int`：验证 `int` 输入可构造 `SymbolDim`，且保持静态值语义。
   - `test_init_accepts_symbol_string`：验证符号名字符串在 `strip()` 后可构造 `SymbolDim`，并返回规整后的公开值。
@@ -595,11 +653,13 @@ assert (SymbolDim(8) + SymbolDim("N")).is_dynamic() is True
   - `test_is_dynamic`：验证 `is_dynamic()` 能区分静态整数与动态符号。
   - `test_numeric_string_rejected`：验证数值字面量字符串在构造、操作数、比较路径上均抛出 `ValueError`。
   - `test_blank_string_rejected`：验证空字符串与空白字符串在构造、操作数、比较路径上均抛出 `ValueError`。
+  - `test_unknown_symbol_invalid_expressions_are_rejected`：验证含独立 `?` 的非法表达式不会被吞成匿名未知维度。
   - `test_invalid_type_rejected`：验证除浮点外的其他非法类型在构造、操作数、比较路径上抛出 `TypeError`。
   - `test_static_arithmetic_get_value_semantics`：验证静态整数之间的 `+`、`-`、`*`、`/`、`//` 结果保持非动态，且 `get_value()` 可直接与 Python 结果比较。
   - `test_dynamic_mixed_add_sub_mul_semantics`：验证动态加、减、乘及链式减法在 `get_value()` 上的稳定文本。
   - `test_truediv_get_value_and_order_semantics`：验证真除法的内部表达、公开值、同项约分与链式顺序区分。
   - `test_floordiv_get_value_and_order_semantics`：验证整除的内部表达、公开值、同项约分与嵌套 `floor(...)` 顺序区分。
+  - `test_public_text_keeps_slashslash_semantics`：验证 `str(SymbolDim(...))` 使用公开值文本，并保留整除 `//` 语义。
   - `test_mixed_expression_get_value_semantics`：验证混合表达式的动态性传播与 `get_value()` 稳定性。
   - `test_float_constructor_rejected`：验证浮点构造输入抛出 `NotImplementedError`。
   - `test_float_operands_rejected`：验证浮点算术操作数在正向/反向路径上抛出 `NotImplementedError`。

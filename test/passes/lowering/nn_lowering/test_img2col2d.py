@@ -28,6 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.kernel import KernelImg2col2dOp
 from kernel_gen.dialect.nn import NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
@@ -198,6 +199,102 @@ def test_nn_lowering_img2col2d_accepts_noncanonical_symbol_names() -> None:
     assert not any(isinstance(op, NnImg2col2dOp) for op in module.walk())
     assert '(-DIL_H_DIM*(KH_DIM - 1) + HEIGHT_DIM + PAD_H0_DIM + PAD_H1_DIM - 1) // STEP_H_DIM + 1' in module_text
     assert '(-DIL_W_DIM*(KW_DIM - 1) + PAD_W0_DIM + PAD_W1_DIM + WIDTH_DIM - 1) // STEP_W_DIM + 1' in module_text
+
+
+def test_nn_lowering_img2col2d_runtime_dim_result_uses_full_rank_alloc_shape() -> None:
+    """匿名 runtime 维度 img2col2d 结果通过 full-rank dma.alloc dynamic_shape 验证。"""
+
+    space = NnMemorySpaceAttr(StringAttr("global"))
+    input_type = NnMemoryType(
+        ArrayAttr(
+            [
+                StringAttr("runtime_dim_0"),
+                StringAttr("runtime_dim_1"),
+                StringAttr("runtime_dim_2"),
+                StringAttr("runtime_dim_3"),
+            ]
+        ),
+        ArrayAttr(
+            [
+                StringAttr("runtime_dim_1*runtime_dim_2*runtime_dim_3"),
+                StringAttr("runtime_dim_2*runtime_dim_3"),
+                StringAttr("runtime_dim_3"),
+                IntAttr(1),
+            ]
+        ),
+        f32,
+        space,
+    )
+    result_type = NnMemoryType(
+        ArrayAttr(
+            [
+                StringAttr("runtime_dim_0"),
+                StringAttr("runtime_dim_1"),
+                IntAttr(3),
+                IntAttr(3),
+                StringAttr("runtime_dim_4"),
+                StringAttr("runtime_dim_5"),
+            ]
+        ),
+        ArrayAttr(
+            [
+                StringAttr("9*runtime_dim_1*runtime_dim_4*runtime_dim_5"),
+                StringAttr("9*runtime_dim_4*runtime_dim_5"),
+                StringAttr("3*runtime_dim_4*runtime_dim_5"),
+                StringAttr("runtime_dim_4*runtime_dim_5"),
+                StringAttr("runtime_dim_5"),
+                IntAttr(1),
+            ]
+        ),
+        f32,
+        space,
+    )
+    block = Block(arg_types=[input_type])
+    params = [
+        SymbolConstOp(3),
+        SymbolConstOp(3),
+        SymbolConstOp(1),
+        SymbolConstOp(1),
+        SymbolConstOp(1),
+        SymbolConstOp(1),
+        SymbolConstOp(0),
+        SymbolConstOp(0),
+        SymbolConstOp(0),
+        SymbolConstOp(0),
+    ]
+    img2col = NnImg2col2dOp(
+        block.args[0],
+        result_type,
+        kh=params[0].result,
+        kw=params[1].result,
+        sh=params[2].result,
+        sw=params[3].result,
+        dh=params[4].result,
+        dw=params[5].result,
+        ph=params[6].result,
+        pw=params[7].result,
+        pl=params[8].result,
+        pr=params[9].result,
+        space=space,
+    )
+    for op in [*params, img2col]:
+        block.add_op(op)
+    block.add_op(func.ReturnOp(img2col.result))
+    module = ModuleOp(
+        [
+            func.FuncOp(
+                "runtime_dim_img2col2d",
+                FunctionType.from_lists([input_type], [result_type]),
+                Region(block),
+            )
+        ]
+    )
+
+    NnLoweringPass().apply(Context(), module)
+
+    allocs = [op for op in module.walk() if isinstance(op, DmaAllocOp)]
+    assert any(len(op.dynamic_shape) == 6 and len(op.results[0].type.shape.data) == 6 for op in allocs)
+    assert len([op for op in module.walk() if isinstance(op, KernelImg2col2dOp)]) == 1
 
 
 # TC-PASS-NNL-022B

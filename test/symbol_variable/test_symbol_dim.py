@@ -222,6 +222,71 @@ def test_dynamic_mixed_add_sub_mul_semantics() -> None:
     assert chain_expr.get_value() == "A - B - C"
 
 
+def test_unknown_symbol_arithmetic_propagates_anonymous_value() -> None:
+    unknown = SymbolDim("?")
+    results = [
+        unknown + 2,
+        2 + unknown,
+        unknown - 2,
+        2 - unknown,
+        unknown * 3,
+        3 * unknown,
+        unknown / 2,
+        2 / unknown,
+        unknown // 2,
+        2 // unknown,
+        SymbolDim("? + 2"),
+        SymbolDim("2 + ?"),
+        SymbolDim("? - 2"),
+        SymbolDim("2 - ?"),
+        SymbolDim("? * 3"),
+        SymbolDim("3 * ?"),
+        SymbolDim("? / 2"),
+        SymbolDim("2 / ?"),
+        SymbolDim("? // 2"),
+        SymbolDim("2 // ?"),
+        SymbolDim("floor(? / 2)"),
+        SymbolDim("min(?, 4)"),
+    ]
+
+    for result in results:
+        assert isinstance(result, SymbolDim)
+        assert result.is_dynamic() is True
+        assert result.get_value() == "?"
+        assert repr(result) == "?"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "? +",
+        "? bad",
+        "? **",
+        "min(?, )",
+        "? < 2",
+        "? == 2",
+        "? and 2",
+        "? or 2",
+        "not ?",
+        "? if N else 2",
+        "[?]",
+        "{?}",
+        "? ** 2",
+        "?.real",
+        "N[?]",
+        "lambda N: ?",
+        "N @ ?",
+        "? + 1.5",
+        "True + ?",
+    ],
+)
+def test_unknown_symbol_invalid_expressions_are_rejected(value: str) -> None:
+    """含匿名 `?` 的非法表达式不能被吞成匿名未知维度。"""
+
+    with pytest.raises(ValueError, match="SymbolDim expression string is invalid"):
+        SymbolDim(value)
+
+
 def test_truediv_get_value_and_order_semantics() -> None:
     static_expr = SymbolDim(9) / SymbolDim(4)
     dynamic_expr = SymbolDim(9) / SymbolDim("N")
@@ -290,6 +355,8 @@ def test_public_text_keeps_slashslash_semantics() -> None:
     expr = (SymbolDim("N") // SymbolDim("S")) + 1
     mul_expr = SymbolDim("A") * expr
 
+    assert str(SymbolDim("N")) == "N"
+    assert str(SymbolDim(8)) == "8"
     assert str(expr) == "N // S + 1"
     assert mul_expr.get_value() == "A*(N // S + 1)"
 

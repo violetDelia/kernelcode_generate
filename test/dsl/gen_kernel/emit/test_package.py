@@ -1144,6 +1144,23 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
         "Memory<TSM, float> v0 = alloc<TSM, float>({m, n} /*shape*/, {n, 1} /*stride*/);"
     )
 
+    runtime_dim_ctx = _npu_ctx()
+    runtime_dim_ctx.bind_name(dyn_block.args[0], "m")
+    runtime_dim_ctx.bind_name(dyn_block.args[1], "n")
+    runtime_dim_alloc_type = NnMemoryType(
+        ArrayAttr([StringAttr("runtime_dim_0"), StringAttr("runtime_dim_1")]),
+        ArrayAttr([StringAttr("runtime_dim_1"), IntAttr(1)]),
+        f32,
+        NnMemorySpaceAttr.from_name("tsm"),
+    )
+    runtime_dim_alloc = DmaAllocOp([dyn_block.args[0], dyn_block.args[1]], runtime_dim_alloc_type)
+
+    runtime_dim_stmt = emit_c_op(runtime_dim_alloc, runtime_dim_ctx)
+
+    assert runtime_dim_stmt == (
+        "Memory<TSM, float> v0 = alloc<TSM, float>({m, n} /*shape*/, {n, 1} /*stride*/);"
+    )
+
     partial_dyn_alloc_type = NnMemoryType(
         ArrayAttr([StringAttr("M"), IntAttr(3), StringAttr("N")]),
         ArrayAttr([StringAttr("3*N"), StringAttr("N"), IntAttr(1)]),

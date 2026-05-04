@@ -58,6 +58,7 @@
 - 需要 `dma.broadcast` 桥接的 mixed compare 行为必须遵循总 spec 中的规则。
 - `memory + memory` 的静态 add/sub 输出只要求收口到 `dma.alloc + kernel.binary_elewise + func.return`；不把 `symbol.get_dim` 视为必现前置行。
 - 结果 shape 含符号维度时，才要求在 `dma.alloc` 前按 rank 顺序生成 `symbol.get_dim`。
+- 结果 shape 含匿名 `?` 时仅允许来源 memory 本身由 `dma.alloc` full-rank dynamic_shape 产生，并复用同轴 dynamic_shape operand；其它匿名 `?` result shape 仍按 `KernelCodeError` 拒绝。
 - mixed scalar element binary 需要先物化 `dma.alloc + dma.fill`，再写入 `kernel.binary_elewise`；该路径禁止回退为 `dma.broadcast`。
 - 任何空间、结果类型或 operand 校验失败必须抛出 `KernelCodeError`。
 ## API详细说明
@@ -137,3 +138,4 @@
 | TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-013 | pass 改写 | `test_lower_element_binary_public_dynamic_scalar_and_symbol_matrix` | 准备动态 shape、左侧 scalar、symbol.const/symbol.add 前置链等公开 IR 输入。 | 通过公开 `NnLoweringPass.apply(...)` 运行 lowering。 | 动态 shape 生成 `symbol.get_dim`，mixed scalar 走 `dma.fill`，symbol 前置链规范化后不残留 `nn.*`。 | `test_lower_element_binary_public_dynamic_scalar_and_symbol_matrix` |
 | TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-014 | pass 改写 | `test_lower_compare_public_left_scalar_matrix` | 准备左侧 scalar、右侧 memory 的公开 compare IR 输入。 | 通过公开 `NnLoweringPass.apply(...)` 运行 lowering。 | mixed compare scalar 走 `dma.broadcast`，不混入 `dma.fill`。 | `test_lower_compare_public_left_scalar_matrix` |
 | TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-015 | 边界/异常 | `test_lower_element_binary_public_error_matrix` | 准备无 memory、rank 不匹配、`?` result shape、scalar 类型不匹配与 compare 输出类型非法输入。 | 通过公开 `NnLoweringPass.apply(...)` 运行 lowering。 | 按稳定 `KernelCodeError` 文本拒绝非法 element binary / compare 输入。 | `test_lower_element_binary_public_error_matrix` |
+| TC-PASS-LOWERING-NN-LOWERING-ELEMENT-BINARY-LOWERING-016 | pass 改写 | `test_lower_add_reuses_anonymous_dynamic_alloc_shape` | 准备来源为 full-rank dynamic_shape `dma.alloc` 的匿名 `?` memory 输入。 | 通过公开 `NnLoweringPass.apply(...)` 运行 lowering。 | 输出 alloc 复用来源同轴 dynamic_shape operand，改写为 `kernel.binary_elewise(kind="add")`，不残留 `nn.*`。 | `test_lower_add_reuses_anonymous_dynamic_alloc_shape` |

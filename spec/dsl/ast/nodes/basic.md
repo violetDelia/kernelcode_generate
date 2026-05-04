@@ -61,6 +61,7 @@
 - `ValueAST.result_memory()` / `result_symbol()` / `result_scalar()` 是解析期结果语义的公开入口，默认返回 `None` 或 `result_symbol()`。
 - `ValueAST.binding_value()` / `bind_target(...)` 是赋值绑定公开入口；`DslAstVisitor.visit_Assign(...)` 只通过这两个入口更新后续名称绑定，不维护 visitor 侧 DMA/NN/symbol 中央推导表。
 - `MemoryAST.type_from_memory(...)` 是 runtime `Memory` 到 `NnMemoryType` 的统一构造入口；DMA/NN 节点不得各自复制 dtype/space 分支表。
+- `MemoryAST.type_from_memory(...)` 遇到匿名动态 shape 与 stride 同轴均为 `?` 时，必须生成稳定类型级符号并重建连续 stride，避免发射 verifier 拒绝的 `[?]/[?]` 组合。
 - `FunctionAST.input_from_runtime_arg(...)` 是 runtime 参数到函数输入 AST 的统一构造入口；visitor 不得在 `visit_FunctionDef(...)` 中复制 runtime 类型工厂。
 - `FunctionAST.input_from_bound_value(...)` 是 Python callee 参数从 caller 侧 DSL 值复制输入语义的统一构造入口；只允许 memory、symbol、bool、const 这类公开输入节点。
 - `basic.py` 不定义 `SymbolAddAST`、`SymbolDimAST`、`SymbolListAST` 等 symbol dialect 节点，也不定义 `ForAST` / `IfAST` 控制流节点；调用方应从对应子模块或包根 `kernel_gen.dsl.ast.nodes` 导入。
@@ -118,7 +119,7 @@
   - `location`：源码位置；类型 `SourceLocation | None`；默认值 `None`。
 - 返回值：`NnMemoryType`。
 - 功能说明：统一 shape、stride、dtype、space 到 MLIR memory type 的映射。
-- 注意事项：dtype 与 space 映射只能通过公开 attr 节点完成。
+- 注意事项：dtype 与 space 映射只能通过公开 attr 节点完成；匿名动态 shape 与 stride 同轴均为 `?` 时，仅调整 type attribute 的稳定符号表达，不新增公开 API 或改写 runtime `Memory`。
 
 ## 测试
 
@@ -145,3 +146,4 @@
 | TC-DSL-AST-NODES-BASIC-010 | 执行结果 | basic emit mlir public block bound return and bool edges | 准备 `BlockAST`、`BoundExprAST`、`ReturnAST`、`BoolValueAST` 与公开 `ValueAST.emit_mlir` 结果。 | 运行 `test_basic_emit_mlir_public_block_bound_return_and_bool_edges`。 | block/bound/return/bool 发射协作生成 SSA 或 return，非法 return 值按稳定错误失败。 | `test_basic_emit_mlir_public_block_bound_return_and_bool_edges` |
 | TC-DSL-AST-NODES-BASIC-011 | 执行结果 | function and module emit public input and return edges | 准备 memory/symbol/bool/const 输入函数、显式返回函数和模块包装。 | 运行 `test_function_and_module_emit_public_input_and_return_edges`。 | `FunctionAST.emit_mlir(...)` 生成 `func.func`，`ModuleAST.emit_mlir(...)` 生成 `builtin.module`，非法 runtime/bound 输入按公开错误失败。 | `test_function_and_module_emit_public_input_and_return_edges` |
 | TC-DSL-AST-NODES-BASIC-012 | 执行结果 | call ast emit public argument and error edges | 准备无返回 callee 与公开 `ValueAST` 参数。 | 运行 `test_call_ast_emit_public_argument_and_error_edges`。 | `CallAST.emit_mlir(...)` 生成 `func.call`，非法 callee/arity/argument emit 结果按公开错误失败。 | `test_call_ast_emit_public_argument_and_error_edges` |
+| TC-DSL-AST-NODES-BASIC-013 | 执行结果 | memory ast type from memory names anonymous shape stride conflict | 准备 shape/stride 同轴均为匿名 `?` 的 runtime `Memory`。 | 运行 `test_memory_ast_type_from_memory_names_anonymous_shape_stride_conflict`。 | 生成稳定类型级符号与连续 stride，不发射 `[?]/[?]` 组合。 | `test_memory_ast_type_from_memory_names_anonymous_shape_stride_conflict` |

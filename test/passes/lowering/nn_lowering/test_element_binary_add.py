@@ -22,7 +22,7 @@ from collections.abc import Callable
 
 from xdsl.context import Context
 from xdsl.dialects import arith, func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, IntegerAttr, ModuleOp, f32, i32
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, IntegerAttr, ModuleOp, StringAttr, f32, i32
 from xdsl.ir import Attribute, Block, Operation, Region
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -32,6 +32,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 
 
@@ -54,6 +55,56 @@ def _make_memory_type(element_type: Attribute = f32) -> NnMemoryType:
     shape = ArrayAttr([IntAttr(4), IntAttr(8)])
     stride = ArrayAttr([IntAttr(8), IntAttr(1)])
     return NnMemoryType(shape, stride, element_type, NnMemorySpaceAttr.from_name("global"))
+
+
+def _make_anonymous_dynamic_memory_type(element_type: Attribute = i32) -> NnMemoryType:
+    """构造匿名动态一维 memory type。
+
+
+    功能说明:
+    - 生成 shape 为 `?` 且 stride 为 1 的 nn.memory 类型，用于公开 lowering 链路测试。
+
+    使用示例:
+    - mem_type = _make_anonymous_dynamic_memory_type()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/spec.md
+    - test: test/passes/lowering/nn_lowering/test_element_binary_add.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
+    """
+
+    shape = ArrayAttr([StringAttr("?")])
+    stride = ArrayAttr([IntAttr(1)])
+    return NnMemoryType(shape, stride, element_type, NnMemorySpaceAttr.from_name("global"))
+
+
+def _build_anonymous_dynamic_add_ops(block: Block) -> list[Operation]:
+    """构造匿名动态 alloc 输入的 nn.add op 列表。
+
+
+    功能说明:
+    - 通过公开 DmaAllocOp full-rank dynamic_shape 物化两个 `?` memory operand。
+    - 返回包含两个 alloc 与一个 nn.add 的 op 列表，供公开 NnLoweringPass 测试使用。
+
+    使用示例:
+    - ops = _build_anonymous_dynamic_add_ops(block)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/spec.md
+    - test: test/passes/lowering/nn_lowering/test_element_binary_add.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
+    """
+
+    memory_type = _make_anonymous_dynamic_memory_type()
+    lhs_alloc = DmaAllocOp([block.args[0]], memory_type)
+    rhs_alloc = DmaAllocOp([block.args[0]], memory_type)
+    nn_op = NnAddOp(
+        lhs_alloc.result,
+        rhs_alloc.result,
+        memory_type,
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    return [lhs_alloc, rhs_alloc, nn_op]
 
 
 def _build_module(
@@ -150,3 +201,28 @@ def test_lower_add_mixed_scalar_uses_dma_fill() -> None:
         "kernel.binary_elewise",
         "func.return",
     ]
+
+
+# TC-PASS-NNL-S2-001B
+# 测试目的: 验证 runtime tail 形态的匿名动态 alloc 输入可 lower 为 kernel.binary_elewise。
+# 使用示例: pytest -q test/passes/lowering/nn_lowering/test_element_binary_add.py -k test_lower_add_reuses_anonymous_dynamic_alloc_shape
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
+# 对应测试文件路径: test/passes/lowering/nn_lowering/test_element_binary_add.py
+def test_lower_add_reuses_anonymous_dynamic_alloc_shape() -> None:
+    result_type = _make_anonymous_dynamic_memory_type()
+    module, block = _build_module(
+        [SymbolValueType.from_expr("?")],
+        result_type,
+        _build_anonymous_dynamic_add_ops,
+    )
+
+    NnLoweringPass().apply(Context(), module)
+
+    ops = list(block.ops)
+    alloc_ops = [op for op in ops if isinstance(op, DmaAllocOp)]
+    kernel_ops = [op for op in ops if isinstance(op, KernelBinaryElewiseOp)]
+    assert len(alloc_ops) == 3
+    assert alloc_ops[-1].dynamic_shape[0] is block.args[0]
+    assert kernel_ops and kernel_ops[0].kind.data == "add"
+    assert not any(op.name.startswith("nn.") for op in ops)

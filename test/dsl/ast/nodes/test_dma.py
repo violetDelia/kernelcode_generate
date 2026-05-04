@@ -24,6 +24,7 @@ from xdsl.ir import Block, Operation, SSAValue
 
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp
+from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.dsl.ast.nodes.attr import BoolTypeAttrAST, FloatTypeAttrAST, IntTypeAttrAST, MemorySpaceAttrAST
 from kernel_gen.dsl.ast.nodes.basic import MemoryAST, ValueAST
 from kernel_gen.dsl.ast.nodes.symbol import ConstValueAST, SymbolListAST
@@ -323,6 +324,36 @@ def test_dma_emit_mlir_handles_dynamic_public_memory_paths() -> None:
     dynamic_size = [TensorAxisAccessAST(source, "shape", 0), 4]
     assert isinstance(DmaLoadAST(source, [0, 0], dynamic_size, None, MemorySpace.SM).emit_mlir(ctx, block), SSAValue)
     assert isinstance(DmaSliceAST(source, [0, 0], dynamic_size, None, MemorySpace.SM).emit_mlir(ctx, block), SSAValue)
+
+
+def test_dma_slice_uses_full_rank_dynamic_shape_for_unknown_named_result() -> None:
+    """DmaSliceAST 对公开命名但 SSA 类型未知的结果使用 full-rank dynamic_shape。"""
+
+    source = MemoryAST.from_memory("source", Memory([8, 8, 3, 3], NumericType.Float32))
+    ctx = Context()
+    block = Block(arg_types=[source.to_mlir_type(ctx), SymbolValueType.from_expr("?"), SymbolValueType.from_expr("?")])
+    block.args[0].name_hint = "source"
+    block.args[1].name_hint = "tile_m"
+    block.args[2].name_hint = "tile_n"
+    node = DmaSliceAST(
+        source,
+        [0, 0, 0, 0],
+        [
+            SymbolDimAST("tile_m", runtime_symbol=SymbolDim("?")),
+            SymbolDimAST("tile_n", runtime_symbol=SymbolDim("?")),
+            3,
+            3,
+        ],
+        None,
+        MemorySpace.SM,
+    )
+
+    emitted = node.emit_mlir(ctx, block)
+
+    assert isinstance(emitted, SSAValue)
+    assert isinstance(emitted.owner, DmaAllocOp)
+    assert len(emitted.owner.dynamic_shape) == 4
+    emitted.owner.verify()
 
 
 def test_dma_fill_emit_mlir_handles_public_value_and_dtype_matrix() -> None:

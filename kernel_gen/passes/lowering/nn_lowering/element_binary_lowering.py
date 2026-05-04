@@ -6,6 +6,7 @@
 - mixed element binary 标量 operand 通过 dma.alloc + dma.fill 物化。
 - mixed compare 标量 operand 继续通过 dma.alloc + dma.broadcast 物化。
 - 输出 memory 通过 dma.alloc 显式创建。
+- 来源 memory 为全 rank dynamic_shape alloc 时，允许匿名 `?` 结果维复用来源动态维度 operand。
 - 主 lowering driver 按单个 nn op 注册独立 RewritePattern，不再通过 family pattern 做名称分发。
 - surviving 模块级接口为 `element_binary_patterns()`。
 
@@ -105,8 +106,8 @@ def _build_alloc_dynamic_shape_from_source(
 
 
     功能说明:
-    - 逐维使用 symbol.get_dim 读取 shape 对应维度。
-    - 禁止结果 shape 包含匿名维度 '?'。
+    - 逐维使用 symbol.get_dim 读取命名符号或静态 shape 对应维度。
+    - 匿名 `?` 结果维仅允许复用来源 dma.alloc 的同轴 full-rank dynamic_shape operand。
     - source 与 result rank 不一致时抛出 KernelCodeError。
 
     使用示例:
@@ -126,25 +127,66 @@ def _build_alloc_dynamic_shape_from_source(
 
     ops: list[Operation] = []
     operands: list[SSAValue] = []
-    has_dynamic = False
-    for dim in result_type.shape.data:
+    rank = len(result_type.shape.data)
+    has_dynamic = any(isinstance(dim, StringAttr) for dim in result_type.shape.data)
+    if not has_dynamic:
+        for dim in result_type.shape.data:
+            if not isinstance(dim, IntAttr):
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary result shape must be int or symbol")
+        return ops, operands
+
+    for axis, dim in enumerate(result_type.shape.data):
         if isinstance(dim, StringAttr):
             if dim.data == "?":
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary result shape must not contain '?'")
-            has_dynamic = True
+                source_dim = source_type.shape.data[axis]
+                dynamic_operand = _source_alloc_dynamic_dim(source, axis, rank)
+                if not (
+                    isinstance(source_dim, StringAttr)
+                    and source_dim.data == "?"
+                    and dynamic_operand is not None
+                ):
+                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary result shape must not contain '?'")
+                operands.append(dynamic_operand)
+                continue
+            get_dim = SymbolGetDimOp(source, IntAttr(axis))
+            ops.append(get_dim)
+            operands.append(get_dim.result)
             continue
         if isinstance(dim, IntAttr):
+            get_dim = SymbolGetDimOp(source, IntAttr(axis))
+            ops.append(get_dim)
+            operands.append(get_dim.result)
             continue
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary result shape must be int or symbol")
 
-    if not has_dynamic:
-        return ops, operands
-
-    for axis, _ in enumerate(result_type.shape.data):
-        get_dim = SymbolGetDimOp(source, IntAttr(axis))
-        ops.append(get_dim)
-        operands.append(get_dim.result)
     return ops, operands
+
+
+def _source_alloc_dynamic_dim(source: SSAValue, axis: int, rank: int) -> SSAValue | None:
+    """从来源 alloc 中取同轴 dynamic_shape operand。
+
+
+    功能说明:
+    - 仅当 source 由 DmaAllocOp 产生且该 alloc 使用 full-rank dynamic_shape 时返回同轴 operand。
+    - 非 alloc 来源或非 full-rank dynamic_shape 返回 None，由调用方保持原错误边界。
+
+    使用示例:
+    - dynamic_dim = _source_alloc_dynamic_dim(source, axis=0, rank=1)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/spec.md
+    - test: test/passes/lowering/nn_lowering/test_element_binary_add.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
+    """
+
+    owner = source.owner
+    if not isinstance(owner, DmaAllocOp):
+        return None
+    if owner.result is not source:
+        return None
+    if len(owner.dynamic_shape) != rank:
+        return None
+    return SSAValue.get(owner.dynamic_shape[axis])
 
 
 def _materialize_element_binary_scalar_operand(

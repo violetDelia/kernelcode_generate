@@ -393,6 +393,38 @@ def test_nn_emit_mlir_handles_structured_public_nodes_and_dynamic_conv() -> None
         ConvAST(DmaAllocAST([1, 3, 8, 8], NumericType.Float32, MemorySpace.GM), DmaAllocAST([4, 3, 3, 3], NumericType.Float32, MemorySpace.GM), [ConstValueAST(1), ConstValueAST(1)], [ConstValueAST(0), ConstValueAST(0), ConstValueAST(0), ConstValueAST(0)], [ConstValueAST(1), ConstValueAST(1)]).emit_mlir(ctx, block)
 
 
+def test_nn_matmul_rejects_unrelated_anonymous_runtime_contracting_dims() -> None:
+    """matmul 不把不可证明相同的匿名运行期 contracting 维度互相匹配。"""
+
+    lhs = MemoryAST.from_memory("lhs", Memory(["?", "?"], NumericType.Float32))
+    rhs = MemoryAST.from_memory("rhs", Memory(["?", "?"], NumericType.Float32))
+    ctx, block = _block_for_memories(lhs, rhs)
+
+    with pytest.raises(KernelCodeError, match="matmul contracting dimension mismatch"):
+        MatmulAST(lhs, rhs).emit_mlir(ctx, block)
+
+
+def test_nn_conv_uses_shared_runtime_contracting_dim_for_matmul() -> None:
+    """conv 公开 AST 在匿名运行期 shape 下生成可验证的 reshape/matmul 类型。"""
+
+    conv_input = MemoryAST.from_memory("conv_input", Memory(["?", "?", "?", "?"], NumericType.Float32))
+    conv_weight = MemoryAST.from_memory("conv_weight", Memory(["?", "?", 3, 3], NumericType.Float32))
+    ctx, block = _block_for_memories(conv_input, conv_weight)
+
+    result = ConvAST(
+        conv_input,
+        conv_weight,
+        [ConstValueAST(1), ConstValueAST(1)],
+        [ConstValueAST(1), ConstValueAST(1), ConstValueAST(1), ConstValueAST(1)],
+        [ConstValueAST(1), ConstValueAST(1)],
+    ).emit_mlir(ctx, block)
+
+    matmul_ops = [op for op in block.ops if op.name == "nn.matmul"]
+    assert isinstance(result, Operation)
+    assert len(matmul_ops) == 1
+    matmul_ops[0].verify()
+
+
 def test_nn_emit_mlir_reports_public_operation_value_errors() -> None:
     """公开 NN 节点在成员节点先发射 Operation 或非法值时保持稳定错误语义。"""
 

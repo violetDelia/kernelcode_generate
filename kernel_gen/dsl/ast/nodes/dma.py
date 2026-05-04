@@ -3,6 +3,9 @@
 
 功能说明:
 - 定义 DMA helper 对应的 AST 节点，节点只保存 DSL 语义数据，不执行 lowering。
+- 读类 DMA 节点在匿名 runtime 维度类型化后使用 full-rank dynamic shape，保持 `dma.alloc` verifier 合同。
+- 读类 DMA 节点优先用公开 size 变量名构造结果 type，避免后续同形状 memory 误判为隐式 broadcast。
+- `DmaReshapeAST` 对匿名 runtime shape 优先沿用公开 shape 变量名，保持后续 matmul contracting 维度可判定。
 
 API 列表:
 - `DmaAllocAST(shape: SymbolListAST, dtype: IntTypeAttrAST | FloatTypeAttrAST | BoolTypeAttrAST, space: MemorySpaceAttrAST = ..., stride: SymbolListAST | None = None, location: SourceLocation | None = None)`
@@ -36,7 +39,7 @@ from typing import ClassVar, TypeAlias
 
 from xdsl.context import Context
 from xdsl.dialects import arith
-from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, FloatAttr, IntAttr, IntegerType, StringAttr, i1
+from xdsl.dialects.builtin import ArrayAttr, BFloat16Type, Float16Type, Float32Type, Float64Type, FloatAttr, IntAttr, IntegerType, StringAttr, i1
 from xdsl.ir import Block, Operation, SSAValue
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaViewOp
@@ -73,6 +76,177 @@ from .symbol import (
 )
 
 SymbolRuntimeValue: TypeAlias = "int | float | str | bool | SymbolDim"
+_RUNTIME_DIM_PREFIX = "runtime_dim_"
+
+
+def _uses_runtime_dim_shape(result_type: NnMemoryType) -> bool:
+    """判断结果类型是否包含匿名 runtime type-level shape 维度。
+
+    功能说明:
+    - 识别 `MemoryAST.type_from_memory(...)` 为匿名 `?` 维度生成的 `runtime_dim_*` shape。
+    - 该 helper 只服务本文件内部 DMA AST 发射，不作为跨文件公开 API。
+
+    使用示例:
+    - if _uses_runtime_dim_shape(result_type):
+    -     ...
+    """
+
+    return any(
+        isinstance(dim, StringAttr) and dim.data.startswith(_RUNTIME_DIM_PREFIX)
+        for dim in result_type.shape.data
+    )
+
+
+def _alloc_dynamic_shape_for_result(
+    symbol_dynamic_shape: list[SSAValue],
+    full_rank_shape: list[SSAValue],
+    result_type: NnMemoryType,
+) -> list[SSAValue]:
+    """为 `dma.alloc` 选择与结果类型匹配的 dynamic shape operands。
+
+    功能说明:
+    - 普通命名符号类型沿用仅符号维度列表，保持现有 IR 紧凑形态。
+    - 若公开 size 名与 SSA operand 的 symbol 文本不一致，使用 full-rank 形态满足 verifier 的逐维校验合同。
+    - 匿名 runtime type-level 维度使用 full-rank shape operands，避免 `?` operand 与 `runtime_dim_*` 结果 shape 在 verifier 中误判不一致。
+
+    使用示例:
+    - dynamic_shape = _alloc_dynamic_shape_for_result(symbol_dynamic_shape, sizes, result_type)
+    """
+
+    if _uses_runtime_dim_shape(result_type):
+        return full_rank_shape
+    expected_symbol_dims = [dim.data for dim in result_type.shape.data if isinstance(dim, StringAttr)]
+    if len(symbol_dynamic_shape) != len(expected_symbol_dims):
+        return full_rank_shape
+    for operand, expected in zip(symbol_dynamic_shape, expected_symbol_dims, strict=True):
+        if not isinstance(operand.type, SymbolValueType):
+            return full_rank_shape
+        if operand.type.get_value() != expected:
+            return full_rank_shape
+    return symbol_dynamic_shape
+
+
+def _shape_attr_from_reshape_item(
+    item: ValueAST,
+    operand: SSAValue,
+    fallback: SymbolRuntimeValue,
+    axis: int,
+) -> IntAttr | StringAttr:
+    """从 reshape 公开 shape 项生成结果类型维度。
+
+    功能说明:
+    - 静态整数保持 `IntAttr`。
+    - 匿名 `?` 优先使用 `SymbolDimAST` 的公开绑定名或 SSA `name_hint`，让同一个 shape 变量在多个 reshape 结果中保持同名。
+    - 无绑定名时退回到轴向稳定名，避免继续生成 `[?]/[?]` 类型组合。
+
+    使用示例:
+    - attr = _shape_attr_from_reshape_item(item, operand, fallback, 0)
+    """
+
+    if isinstance(fallback, bool):
+        return IntAttr(int(fallback))
+    if isinstance(fallback, int):
+        return IntAttr(fallback)
+    if isinstance(item, SymbolDimAST):
+        item_name = item.name.replace(" ", "")
+        if item_name and item_name != "?":
+            return StringAttr(item_name)
+    operand_value = operand.type.get_value() if isinstance(operand.type, SymbolValueType) else None
+    if isinstance(operand_value, int):
+        return IntAttr(operand_value)
+    if isinstance(operand_value, str):
+        operand_text = operand_value.replace(" ", "")
+        if operand_text and operand_text != "?":
+            return StringAttr(operand_text)
+    if operand.name_hint:
+        return StringAttr(str(operand.name_hint).replace(" ", ""))
+    if isinstance(fallback, SymbolDim):
+        public_value = fallback.get_value()
+        if isinstance(public_value, int):
+            return IntAttr(public_value)
+        fallback_text = str(public_value).replace(" ", "")
+        if fallback_text and fallback_text != "?":
+            return StringAttr(fallback_text)
+    if isinstance(fallback, str):
+        fallback_text = fallback.replace(" ", "")
+        if fallback_text and fallback_text != "?":
+            return StringAttr(fallback_text)
+    return StringAttr(f"reshape_dim_{axis}")
+
+
+def _memory_type_from_shape_items(
+    ctx: Context,
+    result_memory: Memory,
+    shape_items: list[ValueAST],
+    shape_operands: list[SSAValue],
+    shape_values: list[SymbolRuntimeValue],
+    location: SourceLocation | None,
+) -> NnMemoryType:
+    """按公开 shape 参数构造结果 memory type。
+
+    功能说明:
+    - dtype 与 space 复用 `MemoryAST.type_from_memory(...)` 的公开映射。
+    - shape attr 直接来自 shape 参数，匿名运行期值使用公开变量名承接。
+    - stride 在当前文件内用连续布局重建，不调用跨文件非公开 helper。
+
+    使用示例:
+    - result_type = _memory_type_from_shape_items(ctx, memory, items, operands, values, location)
+    """
+
+    base_type = MemoryAST.type_from_memory(ctx, result_memory, location)
+    if len(shape_items) != len(shape_operands) or len(shape_items) != len(shape_values):
+        raise KernelCodeError(ErrorKind.INTERNAL, ErrorModule.MLIR_GEN, "reshape shape metadata length mismatch")
+    shape_attrs = [
+        _shape_attr_from_reshape_item(item, operand, fallback, axis)
+        for axis, (item, operand, fallback) in enumerate(zip(shape_items, shape_operands, shape_values, strict=True))
+    ]
+    stride_attrs = _contiguous_stride_attrs(shape_attrs)
+    return NnMemoryType(ArrayAttr(shape_attrs), stride_attrs, base_type.element_type, base_type.space)
+
+
+def _reshape_result_type_from_shape_items(
+    ctx: Context,
+    result_memory: Memory,
+    shape_items: list[ValueAST],
+    shape_operands: list[SSAValue],
+    shape_values: list[SymbolRuntimeValue],
+    location: SourceLocation | None,
+) -> NnMemoryType:
+    """按 reshape 的公开 shape 参数构造结果 memory type。
+
+    功能说明:
+    - 保留 reshape 调用点语义名称，内部复用通用 shape type 构造。
+
+    使用示例:
+    - result_type = _reshape_result_type_from_shape_items(ctx, memory, items, operands, values, location)
+    """
+
+    return _memory_type_from_shape_items(ctx, result_memory, shape_items, shape_operands, shape_values, location)
+
+
+def _contiguous_stride_attrs(shape_attrs: list[IntAttr | StringAttr]) -> ArrayAttr[IntAttr | StringAttr]:
+    """根据 shape attr 生成连续 stride attr。
+
+    功能说明:
+    - 静态维度生成整数乘积。
+    - 符号维度生成无空格乘法表达式，保持 dma.reshape verifier 可解析。
+
+    使用示例:
+    - stride = _contiguous_stride_attrs([StringAttr("M"), StringAttr("N")])
+    """
+
+    stride_attrs: list[IntAttr | StringAttr] = []
+    running: int | str = 1
+    for dim in reversed(shape_attrs):
+        stride_attrs.insert(0, IntAttr(running) if isinstance(running, int) else StringAttr(str(running)))
+        dim_value = dim.data
+        if isinstance(dim_value, int) and isinstance(running, int):
+            running = dim_value * running
+        elif running == 1:
+            running = str(dim_value)
+        else:
+            running = f"{dim_value}*{running}"
+    return ArrayAttr(stride_attrs)
 
 
 @dataclass
@@ -641,7 +815,7 @@ class DmaReshapeAST(ValueAST):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reshape source must be nn.memory")
         if not isinstance(result_memory, Memory):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reshape result memory must be known from AST")
-        result_type = MemoryAST.type_from_memory(ctx, result_memory, self.location)
+        result_type = _reshape_result_type_from_shape_items(ctx, result_memory, shape_items, shape_operands, shape_values, self.location)
         return DmaReshapeOp(source, shape_operands, result_type)
 
 @dataclass
@@ -932,19 +1106,21 @@ class _ReadSliceDmaAST(ValueAST):
         *,
         allow_iter: bool = False,
         collect_dynamic: bool = False,
-    ) -> tuple[list[SSAValue], list[SSAValue]]:
+    ) -> tuple[list[SSAValue], list[SSAValue], list[SymbolRuntimeValue]]:
         """发射 symbol operand 列表。
 
         功能说明:
         - offset 可选择接受 loop iterator。
         - size 可按非静态维度收集 dynamic shape。
+        - 同时返回公开语义值，供结果 memory type 沿用 DSL size 变量名。
 
         使用示例:
-        - operands, dynamic_shape = self._emit_symbol_operands(ctx, block, items, message)
+        - operands, dynamic_shape, values = self._emit_symbol_operands(ctx, block, items, message)
         """
 
         operands: list[SSAValue] = []
         dynamic_shape: list[SSAValue] = []
+        values: list[SymbolRuntimeValue] = []
         valid_types = (SymbolValueType, SymbolIterType) if allow_iter else (SymbolValueType,)
         for item in items:
             emitted = item.emit_mlir(ctx, block)
@@ -956,11 +1132,16 @@ class _ReadSliceDmaAST(ValueAST):
             if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, valid_types):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, message)
             operands.append(emitted_value)
+            if isinstance(emitted_value.type, SymbolIterType):
+                values.append(SymbolDim(emitted_value.name_hint or "it"))
+            else:
+                raw_value = emitted_value.type.get_value()
+                values.append(raw_value if isinstance(raw_value, int) else SymbolDim(raw_value.replace(" ", "") if isinstance(raw_value, str) else raw_value))
             if collect_dynamic:
                 value = emitted_value.type.get_value()
                 if not isinstance(value, int):
                     dynamic_shape.append(emitted_value)
-        return operands, dynamic_shape
+        return operands, dynamic_shape, values
 
     def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
         """将读取类 DMA 节点发射为 `dma.alloc + dma.slice`。
@@ -981,21 +1162,22 @@ class _ReadSliceDmaAST(ValueAST):
             source = source.results[0]
         if not isinstance(source, SSAValue):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{self._op_name} source must lower to SSA value")
-        offsets, _ = self._emit_symbol_operands(
+        offsets, _, _ = self._emit_symbol_operands(
             ctx,
             block,
             list(self.offset.items),
             f"{self._op_name} offset must lower to symbol.int",
             allow_iter=True,
         )
-        sizes, dynamic_shape = self._emit_symbol_operands(
+        size_items = list(self.size.items)
+        sizes, dynamic_shape, size_values = self._emit_symbol_operands(
             ctx,
             block,
-            list(self.size.items),
+            size_items,
             f"{self._op_name} size must lower to symbol.int",
             collect_dynamic=True,
         )
-        strides, _ = self._emit_symbol_operands(
+        strides, _, _ = self._emit_symbol_operands(
             ctx,
             block,
             self._stride_items(),
@@ -1006,8 +1188,9 @@ class _ReadSliceDmaAST(ValueAST):
         result_memory = self.result_memory()
         if not isinstance(result_memory, Memory):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{self._op_name} result memory must be known from AST")
-        result_type = MemoryAST.type_from_memory(ctx, result_memory, self.location)
-        alloc_op = DmaAllocOp(dynamic_shape, result_type)
+        result_type = _memory_type_from_shape_items(ctx, result_memory, size_items, sizes, size_values, self.location)
+        alloc_dynamic_shape = _alloc_dynamic_shape_for_result(dynamic_shape, sizes, result_type)
+        alloc_op = DmaAllocOp(alloc_dynamic_shape, result_type)
         block.add_op(alloc_op)
         block.add_op(DmaSliceOp(alloc_op.results[0], source, offsets, sizes, strides))
         return alloc_op.results[0]

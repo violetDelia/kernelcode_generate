@@ -3,6 +3,9 @@
 
 功能说明:
 - 定义 NN helper 对应的 AST 节点，节点只保存 DSL 语义数据，不执行 lowering。
+- Matmul 仅在 runtime contracting 维度可证明为同一类型级符号时保持动态兼容判断。
+- Matmul/transpose 结果类型继承已发射 operand 的匿名运行期维度语义名。
+- ConvAST 在 img2col/reshape/matmul 链路中为匿名运行期维度生成语义一致的类型级符号。
 
 API 列表:
 - `NnImg2Col1dAST(source: ValueAST, kw: SymbolDimAST | ConstValueAST, sw: SymbolDimAST | ConstValueAST = ..., dw: SymbolDimAST | ConstValueAST = ..., pl: SymbolDimAST | ConstValueAST = ..., pr: SymbolDimAST | ConstValueAST = ..., location: SourceLocation | None = None)`
@@ -89,6 +92,7 @@ from .symbol import ConstValueAST, SymbolListAST
 ReduceAxisElement: TypeAlias = "int | float | bool | str | SymbolDim | ValueAST"
 ReduceAxisValue: TypeAlias = "ReduceAxisElement | list[ReduceAxisElement] | tuple[ReduceAxisElement, ...] | None"
 ReduceKeepdimValue: TypeAlias = "bool | ValueAST | None"
+_RUNTIME_DIM_PREFIX = "runtime_dim_"
 
 
 def _is_singleton_dim(dim: Attribute) -> bool:
@@ -105,6 +109,160 @@ def _is_singleton_dim(dim: Attribute) -> bool:
     """
 
     return isinstance(dim, IntAttr) and dim.data == 1
+
+
+def _is_runtime_dim_attr(dim: Attribute) -> bool:
+    """判断维度 attr 是否为匿名运行期维度的类型级符号。
+
+    功能说明:
+    - 识别 `MemoryAST.type_from_memory(...)` 为规避 `[?]/[?]` 组合生成的稳定符号。
+    - 仅服务当前文件内 matmul contract 维度兼容判断。
+
+    使用示例:
+    - is_runtime = _is_runtime_dim_attr(StringAttr("runtime_dim_0"))
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/nn.md
+    - test: test/dsl/ast/nodes/test_nn.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
+    """
+
+    return isinstance(dim, StringAttr) and dim.data.startswith(_RUNTIME_DIM_PREFIX)
+
+
+def _matmul_contract_dims_match(lhs_dim: Attribute, rhs_dim: Attribute) -> bool:
+    """判断 matmul contracting 维度是否可兼容。
+
+    功能说明:
+    - 静态、命名符号与匿名运行期类型级符号都必须完全一致。
+    - 不把任意两个 `runtime_dim_*` 互相匹配；只有同一语义名才可证明相等。
+
+    使用示例:
+    - ok = _matmul_contract_dims_match(lhs_dim, rhs_dim)
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/nn.md
+    - test: test/dsl/ast/nodes/test_nn.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
+    """
+
+    if lhs_dim == rhs_dim:
+        return True
+    if _is_runtime_dim_attr(lhs_dim) or _is_runtime_dim_attr(rhs_dim):
+        return False
+    return False
+
+
+def _shape_attr_from_value(value: int | str | SymbolDim) -> Attribute:
+    """把公开 shape 值转换为 memory type 维度 attr。
+
+    功能说明:
+    - 静态整数保持 `IntAttr`。
+    - 符号、表达式与匿名运行期语义标签转换为 `StringAttr`。
+
+    使用示例:
+    - attr = _shape_attr_from_value("conv_kernel_flat")
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/nn.md
+    - test: test/dsl/ast/nodes/test_nn.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
+    """
+
+    if isinstance(value, int):
+        return IntAttr(value)
+    if isinstance(value, SymbolDim):
+        public_value = value.get_value()
+        return IntAttr(public_value) if isinstance(public_value, int) else StringAttr(str(public_value))
+    return StringAttr(value)
+
+
+def _semantic_runtime_dim(label: str, fallback: int | SymbolDim) -> int | str:
+    """为匿名运行期维度选择稳定的语义类型名。
+
+    功能说明:
+    - 静态整数与已命名符号维度保持原值，避免改变可证明的 shape。
+    - 匿名 `?` 或通用 `runtime_dim_*` 维度改写为调用点提供的语义标签。
+
+    使用示例:
+    - dim = _semantic_runtime_dim("conv_kernel_flat", SymbolDim("?"))
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/nn.md
+    - test: test/dsl/ast/nodes/test_nn.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
+    """
+
+    if isinstance(fallback, int):
+        return fallback
+    public_value = fallback.get_value()
+    if isinstance(public_value, int):
+        return public_value
+    text = str(public_value)
+    if text == "?" or text.startswith(_RUNTIME_DIM_PREFIX):
+        return label
+    return text
+
+
+def _memory_type_from_shape_values(
+    ctx: Context,
+    memory: Memory,
+    shape_values: list[int | str | SymbolDim],
+    location: SourceLocation | None,
+) -> NnMemoryType:
+    """按指定 shape 值构造连续布局 memory type。
+
+    功能说明:
+    - dtype 与 memory space 仍复用 `MemoryAST.type_from_memory(...)` 的公开映射。
+    - shape 使用调用方给出的语义维度，stride 在当前文件内按连续布局重建。
+
+    使用示例:
+    - result_type = _memory_type_from_shape_values(ctx, memory, ["M", "N"], location)
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/nn.md
+    - test: test/dsl/ast/nodes/test_nn.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
+    """
+
+    base_type = MemoryAST.type_from_memory(ctx, memory, location)
+    shape_attrs = [_shape_attr_from_value(value) for value in shape_values]
+    return NnMemoryType(
+        ArrayAttr(shape_attrs),
+        _contiguous_stride_attrs(shape_attrs),
+        base_type.element_type,
+        base_type.space,
+    )
+
+
+def _memory_type_from_shape_attrs(
+    ctx: Context,
+    memory: Memory,
+    shape_attrs: list[Attribute],
+    location: SourceLocation | None,
+) -> NnMemoryType:
+    """按现有 operand shape attr 构造连续布局 memory type。
+
+    功能说明:
+    - dtype 与 memory space 复用 `MemoryAST.type_from_memory(...)` 的公开映射。
+    - shape 直接继承已发射 operand 的公开 memory type，避免匿名 runtime 维度在结果类型中重新编号。
+
+    使用示例:
+    - result_type = _memory_type_from_shape_attrs(ctx, memory, [lhs_dim, rhs_dim], location)
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/nn.md
+    - test: test/dsl/ast/nodes/test_nn.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
+    """
+
+    base_type = MemoryAST.type_from_memory(ctx, memory, location)
+    return NnMemoryType(
+        ArrayAttr(shape_attrs),
+        _contiguous_stride_attrs(shape_attrs),
+        base_type.element_type,
+        base_type.space,
+    )
 
 
 def _contiguous_stride_attrs(shape_attrs: list[Attribute]) -> ArrayAttr[Attribute]:
@@ -536,7 +694,8 @@ class NnTransposeAST(ValueAST):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "transpose perm must be static int list")
             perm_values.append(item)
         result_memory = nn_ops.transpose(self.value.memory, perm_values)
-        result_type = MemoryAST.type_from_memory(ctx, result_memory, self.location)
+        result_shape = [value.type.shape.data[axis] for axis in perm_values]
+        result_type = _memory_type_from_shape_attrs(ctx, result_memory, result_shape, self.location)
         return NnTransposeOp(value, result_type, perm_values, result_type.space)
 
 @dataclass
@@ -1085,7 +1244,7 @@ class MatmulAST(ValueAST):
         rhs_shape = rhs.type.shape.data
         if len(lhs_shape) != 2 or len(rhs_shape) != 2:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "matmul operands must be rank-2 Memory")
-        if lhs_shape[1] != rhs_shape[0]:
+        if not _matmul_contract_dims_match(lhs_shape[1], rhs_shape[0]):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "matmul contracting dimension mismatch")
         if lhs.type.space.space.data != rhs.type.space.space.data:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "matmul space mismatch")
@@ -1094,7 +1253,7 @@ class MatmulAST(ValueAST):
         result_memory = self.result_memory()
         if result_memory is None:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "matmul result memory is unavailable")
-        result_type = MemoryAST.type_from_memory(ctx, result_memory, self.location)
+        result_type = _memory_type_from_shape_attrs(ctx, result_memory, [lhs_shape[0], rhs_shape[1]], self.location)
         return NnMatmulOp(lhs, rhs, result_type, result_type.space)
 
 @dataclass
@@ -1349,7 +1508,9 @@ class ConvAST(ValueAST):
             block.add_op(second_kernel_mul)
             kernel_flat_weight_value = second_kernel_mul.results[0]
         weight_reshape_memory = dma_ops.reshape(self.weight.memory, [c_out_shape_value, kernel_flat_shape_value])
-        weight_reshape_type = MemoryAST.type_from_memory(ctx, weight_reshape_memory, self.location)
+        c_out_type_dim = _semantic_runtime_dim("conv_c_out", c_out_shape_value)
+        kernel_flat_type_dim = _semantic_runtime_dim("conv_kernel_flat", kernel_flat_shape_value)
+        weight_reshape_type = _memory_type_from_shape_values(ctx, weight_reshape_memory, [c_out_type_dim, kernel_flat_type_dim], self.location)
         weight_reshape_op = DmaReshapeOp(weight, [c_out_weight_op.results[0], kernel_flat_weight_value], weight_reshape_type)
         block.add_op(weight_reshape_op)
 
@@ -1380,12 +1541,13 @@ class ConvAST(ValueAST):
         batch_h_w_public = batch_h_w_mul.results[0].type.get_value()
         batch_h_w_shape_value: int | SymbolDim = batch_h_w_public if isinstance(batch_h_w_public, int) else SymbolDim(batch_h_w_public)
         img_reshape_memory = dma_ops.reshape(img2col_memory, [kernel_flat_shape_value, batch_h_w_shape_value])
-        img_reshape_type = MemoryAST.type_from_memory(ctx, img_reshape_memory, self.location)
+        batch_h_w_type_dim = _semantic_runtime_dim("conv_batch_h_w", batch_h_w_shape_value)
+        img_reshape_type = _memory_type_from_shape_values(ctx, img_reshape_memory, [kernel_flat_type_dim, batch_h_w_type_dim], self.location)
         img_reshape_op = DmaReshapeOp(img2col_value, [kernel_flat_img_value, batch_h_w_mul.results[0]], img_reshape_type)
         block.add_op(img_reshape_op)
 
         matmul_memory = nn_ops.matmul(weight_reshape_memory, img_reshape_memory)
-        matmul_type = MemoryAST.type_from_memory(ctx, matmul_memory, self.location)
+        matmul_type = _memory_type_from_shape_values(ctx, matmul_memory, [c_out_type_dim, batch_h_w_type_dim], self.location)
         matmul_op = NnMatmulOp(weight_reshape_op.results[0], img_reshape_op.results[0], matmul_type, value.type.space)
         block.add_op(matmul_op)
 
