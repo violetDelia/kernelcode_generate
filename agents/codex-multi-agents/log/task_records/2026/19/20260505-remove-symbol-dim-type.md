@@ -292,3 +292,17 @@
   - `env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/passes/test_symbol_loop_hoist.py -ra`：`12 passed, 1 warning in 0.34s`。
   - `env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m py_compile kernel_gen/dialect/symbol.py kernel_gen/dialect/tuner.py`：通过。
 - 结论：merge 前核对通过；可暂存上述 9 个当前任务文件并提交到主分支。
+
+## merge 提交与推送记录
+
+- 时间：2026-05-05 01:59 +0800
+- 经办人：李白
+- 任务：T-20260505-4904dd97
+- 改动：已按任务范围暂存并提交 9 个文件；未带入 `expectation/`、`.skills/`、`TODO.md`、`DONE.md`、未点名标准文档或角色提示词。
+- 提交：
+  - `git commit -m "T-20260505-4904dd97 merge remove SymbolDimType"`
+  - 结果：`4398aec5 T-20260505-4904dd97 merge remove SymbolDimType`
+- 推送：
+  - `git push origin HEAD:main`
+  - 结果：`1c065ec4..4398aec5 HEAD -> main`
+- 结论：业务改动与任务记录已推送到 `origin/main`；继续补录本段记录后执行 `-done` 并清理已完成 worktree / 本地任务分支。
