@@ -359,3 +359,24 @@ merge 前复核验证：
 - `git diff --check`：通过，退出码 0。
 
 结论：merge 前核对通过；可暂存上述当前任务范围文件并提交到 `main`。
+
+---
+
+时间：2026-05-06 03:20 +0800
+经办人：李白
+任务：T-20260506-b5c74eac；merge 后 latest main 验收阻塞
+任务目标：在业务提交推送后，于主仓最新 `main` 复核 `python3 -m expectation.dialect` 是否为后续 `T-20260506-03682d98` 解锁提供绿灯。
+改动：
+- 已在任务 worktree 提交并推送 `T-20260506-b5c74eac merge dialect refactor`，提交号 `c4b4b0af7b4c78482f2e80997e829edb9133b22c`。
+- 已在主仓根目录执行 `git fetch origin --prune` 与 `git merge --ff-only origin/main`，主仓 `HEAD=origin/main=c4b4b0af7b4c78482f2e80997e829edb9133b22c`。
+- 按分发要求在 latest main 继续复核 `expectation.dialect`；该项未通过，因此未执行 `-done`，未清理当前任务 worktree / 本地任务分支。
+验证：
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m expectation.dialect`：失败，退出码 1。
+- 失败摘要：
+  - `dialect-arch-operation-dynamic_memory` 3 个 case 失败，表现为 latest main 现场先触发 `shape dimensions must be SymbolExprAttr` 或错误文本不匹配。
+  - `dialect-dma-operation-alloc-parse-alias-positive-1` 失败：`undefined symbol alias '#C_1'`。
+  - `dialect-kernel` 多组 operation 失败，主要为构造 memory 时触发 `shape dimensions must be SymbolExprAttr`。
+  - `dialect-nn-operation-elewise` 2 个负例错误文本与 expectation 预期不一致。
+  - `dialect-symbol` 中 `symbol.const` alias 正例出现 `undefined symbol alias '#C_10'`，`get_dim/get_stride` 仍触发 memory shape 维度类型错误。
+  - `dialect-tuner` 中 `cost` 错误文本与 expectation 预期不一致，`param` 旧 `symbol.dim` 负例 parse 路径不匹配。
+结论：阻塞。业务提交已推送，但 latest main 的 `expectation.dialect` 未绿；按任务说明与依赖要求，当前不执行 `-done`，不解锁 `T-20260506-03682d98`，需管理员 / 架构师确认下一步是补纳管 expectation 合同资产、退回执行修复，还是按其它裁定处理。
