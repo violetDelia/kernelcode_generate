@@ -135,7 +135,43 @@ def _make_space(name: str = "global") -> NnMemorySpaceAttr:
     return NnMemorySpaceAttr(StringAttr(name))
 
 
-def _make_memory_type(shape: list[IntAttr | StringAttr], stride: list[IntAttr | StringAttr]) -> NnMemoryType:
+def _expr_attr(value: int | str) -> SymbolExprAttr:
+    """构造公开 SymbolExprAttr。
+
+    功能说明:
+    - 为 symbol.get_dim/get_stride 测试统一生成结构化 memory shape/stride 表达。
+
+    使用示例:
+    - _expr_attr("N")
+    """
+
+    return SymbolExprAttr.from_expr(str(value))
+
+
+def _normalize_dims(values: list[Attribute]) -> list[Attribute]:
+    """规范化测试 memory shape/stride 维度。
+
+    功能说明:
+    - 将测试输入中的 IntAttr/StringAttr 便利写法转换为公开 SymbolExprAttr。
+
+    使用示例:
+    - _normalize_dims([IntAttr(4), StringAttr("N")])
+    """
+
+    normalized: list[Attribute] = []
+    for value in values:
+        if isinstance(value, SymbolExprAttr):
+            normalized.append(value)
+        elif isinstance(value, IntAttr):
+            normalized.append(_expr_attr(value.data))
+        elif isinstance(value, StringAttr):
+            normalized.append(_expr_attr(value.data))
+        else:
+            normalized.append(value)
+    return normalized
+
+
+def _make_memory_type(shape: list[Attribute], stride: list[Attribute]) -> NnMemoryType:
     """构造 nn.memory type。
 
 
@@ -151,7 +187,7 @@ def _make_memory_type(shape: list[IntAttr | StringAttr], stride: list[IntAttr | 
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
-    return NnMemoryType(ArrayAttr(shape), ArrayAttr(stride), i32, _make_space())
+    return NnMemoryType(ArrayAttr(_normalize_dims(shape)), ArrayAttr(_normalize_dims(stride)), i32, _make_space())
 
 
 def _make_memory_value(memory_type: NnMemoryType):
@@ -266,9 +302,9 @@ def test_symbol_value_type_unknown_public_semantics() -> None:
     assert unknown_type.get_value() == "?"
     assert unknown_type.is_symbol() is False
 
-    with pytest.raises(VerifyException, match="unsupported public symbol expression"):
+    with pytest.raises(VerifyException, match="symbol expr contains unsupported token"):
         SymbolExprAttr.from_expr("iter<0, 8, 1>").verify()
-    with pytest.raises(VerifyException, match="unsupported public symbol expression"):
+    with pytest.raises(VerifyException, match="symbol expr contains unsupported token"):
         SymbolValueType.from_expr("2 - iter<0, 8, 1>").verify()
 
 
@@ -543,6 +579,64 @@ def test_symbol_value_type_public_expression_matrix() -> None:
         assert parsed.get_value() == expected_value
         assert parsed.is_symbol() is expected_symbol
         assert _print_attr(parsed) == expected_text
+
+
+# TC-SYM-058A
+# 测试目的: 验证公开 SymbolExprAttr canonical 边界覆盖 unknown、identity、min/max 与关键字整除规则。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_expr_attr_public_canonical_edge_matrix() -> None:
+    cases = [
+        ("? + 1", "#symbol.expr<?>"),
+        ("N + 0", "#symbol.expr<N>"),
+        ("0 + 0", "#symbol.expr<0>"),
+        ("N + -1", "#symbol.expr<N - 1>"),
+        ("N + -T", "#symbol.expr<-T + N>"),
+        ("N - 0", "#symbol.expr<N>"),
+        ("0 - N", "#symbol.expr<-N>"),
+        ("N - N", "#symbol.expr<0>"),
+        ("? - N", "#symbol.expr<?>"),
+        ("N * 0", "#symbol.expr<0>"),
+        ("N * 1", "#symbol.expr<N>"),
+        ("? * N", "#symbol.expr<?>"),
+        ("N floordiv 1", "#symbol.expr<N>"),
+        ("N ceildiv 1", "#symbol.expr<N>"),
+        ("N mod 1", "#symbol.expr<0>"),
+        ("? floordiv N", "#symbol.expr<?>"),
+        ("min(N, N)", "#symbol.expr<N>"),
+        ("min(2, 3)", "#symbol.expr<2>"),
+        ("min(?, N)", "#symbol.expr<?>"),
+        ("max(N, N)", "#symbol.expr<N>"),
+        ("max(2, 3)", "#symbol.expr<3>"),
+        ("max(T, N - 1)", "#symbol.expr<max(N - 1, T)>"),
+        ("max(?, N)", "#symbol.expr<?>"),
+        ("(N + 1) * T", "#symbol.expr<(N + 1)*T>"),
+    ]
+
+    for expr, expected in cases:
+        attr = SymbolExprAttr.from_expr(expr)
+        attr.verify()
+        assert _print_attr(attr) == expected
+
+
+# TC-SYM-058B
+# 测试目的: 验证公开 SymbolExprAttr 对关键字、非法字符和除零边界给出稳定拒绝。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_expr_attr_public_rejection_edge_matrix() -> None:
+    for expr, match in [
+        ("N floordiv 0", "division by zero"),
+        ("N mod 0", "division by zero"),
+        ("floordiv", "symbol expr must contain"),
+        ("N / 2", "bare /"),
+        ('"N"', "quoted string"),
+    ]:
+        with pytest.raises(VerifyException, match=match):
+            SymbolExprAttr.from_expr(expr).verify()
+
+    ctx = _build_context()
+    with pytest.raises(ParseError, match="keyword cannot be used"):
+        Parser(ctx, "#symbol.expr<floordiv>").parse_attribute()
 
 
 # TC-SYM-061
@@ -1387,7 +1481,7 @@ def test_symbol_get_stride_rejects_invalid_axis() -> None:
 
 
 # TC-SYM-031
-# 测试目的: 验证 symbol.get_dim 在 source 不是 nn.memory 或目标 dim 为匿名动态值时会报 verifier 错误。
+# 测试目的: 验证 symbol.get_dim 在 source 不是 nn.memory 时会报 verifier 错误，目标 dim 为匿名动态值时返回 `?`。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_get_dim_rejects_non_memory_type() -> None:
@@ -1398,12 +1492,14 @@ def test_symbol_get_dim_rejects_non_memory_type() -> None:
 
     with pytest.raises(VerifyException, match="source must be nn.memory"):
         SymbolGetDimOp(non_memory_source, 0).verify()
-    with pytest.raises(VerifyException, match="does not support unknown shape entry"):
-        SymbolGetDimOp(unknown_dim_source, 0).verify()
+    unknown_op = SymbolGetDimOp(unknown_dim_source, 0)
+    unknown_op.verify()
+    assert _print_attr(unknown_op.result.type) == "!symbol.int<#symbol.expr<?>>"
+    assert unknown_op.fold() is None
 
 
 # TC-SYM-031
-# 测试目的: 验证 symbol.get_stride 在目标 stride 为匿名动态值时会报 verifier 错误。
+# 测试目的: 验证 symbol.get_stride 在目标 stride 为匿名动态值时返回 `?`。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_get_stride_rejects_unknown_entry() -> None:
@@ -1411,8 +1507,10 @@ def test_symbol_get_stride_rejects_unknown_entry() -> None:
         _make_memory_type([StringAttr("N"), IntAttr(8)], [StringAttr("?"), IntAttr(1)])
     )
 
-    with pytest.raises(VerifyException, match="does not support unknown stride entry"):
-        SymbolGetStrideOp(source, 0).verify()
+    op = SymbolGetStrideOp(source, 0)
+    op.verify()
+    assert _print_attr(op.result.type) == "!symbol.int<#symbol.expr<?>>"
+    assert op.fold() is None
 
 
 # TC-SYM-032

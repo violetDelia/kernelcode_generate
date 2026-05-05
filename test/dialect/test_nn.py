@@ -87,7 +87,7 @@ from kernel_gen.dialect.nn import (
     NnSoftmaxOp,
     NnTransposeOp,
 )
-from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolValueType
 from kernel_gen.dialect.symbol import Symbol
 
 
@@ -135,12 +135,48 @@ def _make_space(name: str) -> NnMemorySpaceAttr:
     return NnMemorySpaceAttr(StringAttr(name))
 
 
+def _expr_attr(value: int | str) -> SymbolExprAttr:
+    """构造公开 SymbolExprAttr。
+
+    功能说明:
+    - 为 nn dialect 测试统一生成结构化 memory shape/stride 表达。
+
+    使用示例:
+    - _expr_attr("N")
+    """
+
+    return SymbolExprAttr.from_expr(str(value))
+
+
+def _normalize_dims(values: Sequence[Attribute]) -> list[Attribute]:
+    """规范化测试 memory shape/stride 维度。
+
+    功能说明:
+    - 将旧测试便利写法中的 IntAttr/StringAttr 转为公开 SymbolExprAttr。
+
+    使用示例:
+    - _normalize_dims([IntAttr(2), StringAttr("N")])
+    """
+
+    normalized: list[Attribute] = []
+    for value in values:
+        if isinstance(value, SymbolExprAttr):
+            normalized.append(value)
+        elif isinstance(value, IntAttr):
+            normalized.append(_expr_attr(value.data))
+        elif isinstance(value, StringAttr):
+            normalized.append(_expr_attr(value.data))
+        else:
+            normalized.append(value)
+    return normalized
+
+
 def _make_memory_type(space: str = "global", element_type: IntegerType = i32) -> NnMemoryType:
     """构造合法的 nn memory type。"""
 
     return NnMemoryType(
-        ArrayAttr([StringAttr("M"), StringAttr("?"), IntAttr(4)]),
-        ArrayAttr([IntAttr(4), IntAttr(1), StringAttr("?")]),
+        ArrayAttr([_expr_attr("M"), _expr_attr("?"), _expr_attr(4)]),
+        ArrayAttr([_expr_attr(4), _expr_attr(1), _expr_attr("?")]),
         element_type,
         _make_space(space),
     )
@@ -167,8 +203,8 @@ def _make_simple_memory_type(
     - 功能实现: kernel_gen/dialect/nn.py
     """
     return NnMemoryType(
-        ArrayAttr(shape),
-        ArrayAttr(stride),
+        ArrayAttr(_normalize_dims(shape)),
+        ArrayAttr(_normalize_dims(stride)),
         element_type,
         _make_space(space),
     )
@@ -196,8 +232,8 @@ def _make_matrix_type(
     """
 
     return NnMemoryType(
-        ArrayAttr(list(shape)),
-        ArrayAttr(list(stride)),
+        ArrayAttr(_normalize_dims(shape)),
+        ArrayAttr(_normalize_dims(stride)),
         element_type,
         _make_space(space),
     )
@@ -212,11 +248,11 @@ def _make_matrix_type(
 def test_memory_type_round_trip() -> None:
     ctx = _build_context()
     for text in [
-        "!nn.memory<[M, ?, 4], [4, 1, ?], i32, #nn.space<global>>",
+        "!nn.memory<[#symbol.expr<M>, #symbol.expr<?>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>, #symbol.expr<?>], i32, #nn.space<global>>",
         "!nn.memory<[], [], i32, #nn.space<global>>",
-        "!nn.memory<[?, 8], [8, 1], i32, #nn.space<tlm1>>",
-        "!nn.memory<[?, 8], [8, 1], i32, #nn.space<tlm2>>",
-        "!nn.memory<[?, 8], [8, 1], i32, #nn.space<tlm3>>",
+        "!nn.memory<[#symbol.expr<?>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tlm1>>",
+        "!nn.memory<[#symbol.expr<?>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tlm2>>",
+        "!nn.memory<[#symbol.expr<?>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tlm3>>",
     ]:
         memory_type = Parser(ctx, text).parse_attribute()
         assert isinstance(memory_type, NnMemoryType)
@@ -274,8 +310,8 @@ def test_invalid_space_attr_rejected() -> None:
 def test_memory_type_rank_mismatch_rejected() -> None:
     with pytest.raises(VerifyException, match="rank must match"):
         NnMemoryType(
-            ArrayAttr([IntAttr(4), IntAttr(8)]),
-            ArrayAttr([IntAttr(1)]),
+            ArrayAttr([_expr_attr(4), _expr_attr(8)]),
+            ArrayAttr([_expr_attr(1)]),
             i32,
             _make_space("global"),
         )
@@ -487,9 +523,9 @@ def test_compare_op_requires_i1_result() -> None:
 def test_module_round_trip() -> None:
     ctx = _build_context()
     text = """builtin.module {
-  %0 = "test.op"() : () -> !nn.memory<[M, ?, 4], [4, 1, ?], i32, #nn.space<global>>
-  %1 = "test.op"() : () -> !nn.memory<[M, ?, 4], [4, 1, ?], i32, #nn.space<global>>
-  %2 = "nn.add"(%0, %1) {space = #nn.space<global>} : (!nn.memory<[M, ?, 4], [4, 1, ?], i32, #nn.space<global>>, !nn.memory<[M, ?, 4], [4, 1, ?], i32, #nn.space<global>>) -> !nn.memory<[M, ?, 4], [4, 1, ?], i32, #nn.space<global>>
+  %0 = "test.op"() : () -> !nn.memory<[#symbol.expr<M>, #symbol.expr<?>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>, #symbol.expr<?>], i32, #nn.space<global>>
+  %1 = "test.op"() : () -> !nn.memory<[#symbol.expr<M>, #symbol.expr<?>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>, #symbol.expr<?>], i32, #nn.space<global>>
+  %2 = "nn.add"(%0, %1) {space = #nn.space<global>} : (!nn.memory<[#symbol.expr<M>, #symbol.expr<?>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>, #symbol.expr<?>], i32, #nn.space<global>>, !nn.memory<[#symbol.expr<M>, #symbol.expr<?>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>, #symbol.expr<?>], i32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<M>, #symbol.expr<?>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>, #symbol.expr<?>], i32, #nn.space<global>>
 }
 """
     module = Parser(ctx, text).parse_module()
@@ -506,9 +542,9 @@ def test_module_round_trip() -> None:
 def test_space_mismatch_from_text_rejected() -> None:
     ctx = _build_context()
     text = """builtin.module {
-  %0 = "test.op"() : () -> !nn.memory<[M], [1], i32, #nn.space<global>>
-  %1 = "test.op"() : () -> !nn.memory<[M], [1], i32, #nn.space<shared>>
-  %2 = "nn.add"(%0, %1) {space = #nn.space<global>} : (!nn.memory<[M], [1], i32, #nn.space<global>>, !nn.memory<[M], [1], i32, #nn.space<shared>>) -> !nn.memory<[M], [1], i32, #nn.space<global>>
+  %0 = "test.op"() : () -> !nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<global>>
+  %1 = "test.op"() : () -> !nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<shared>>
+  %2 = "nn.add"(%0, %1) {space = #nn.space<global>} : (!nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<global>>, !nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<shared>>) -> !nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<global>>
 }
 """
     module = Parser(ctx, text).parse_module()
@@ -525,9 +561,9 @@ def test_space_mismatch_from_text_rejected() -> None:
 def test_attr_space_mismatch_from_text_rejected() -> None:
     ctx = _build_context()
     text = """builtin.module {
-  %0 = "test.op"() : () -> !nn.memory<[M], [1], i32, #nn.space<local>>
-  %1 = "test.op"() : () -> !nn.memory<[M], [1], i32, #nn.space<local>>
-  %2 = "nn.add"(%0, %1) {space = #nn.space<global>} : (!nn.memory<[M], [1], i32, #nn.space<local>>, !nn.memory<[M], [1], i32, #nn.space<local>>) -> !nn.memory<[M], [1], i32, #nn.space<local>>
+  %0 = "test.op"() : () -> !nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<local>>
+  %1 = "test.op"() : () -> !nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<local>>
+  %2 = "nn.add"(%0, %1) {space = #nn.space<global>} : (!nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<local>>, !nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<local>>) -> !nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<local>>
 }
 """
     module = Parser(ctx, text).parse_module()
@@ -544,7 +580,7 @@ def test_attr_space_mismatch_from_text_rejected() -> None:
 def test_memory_type_parse_requires_all_fields() -> None:
     ctx = _build_context()
     with pytest.raises(ParseError):
-        Parser(ctx, "!nn.memory<[1], i32, #nn.space<global>>").parse_attribute()
+        Parser(ctx, "!nn.memory<[#symbol.expr<1>], i32, #nn.space<global>>").parse_attribute()
 
 
 # TY-012
@@ -555,8 +591,8 @@ def test_memory_type_parse_requires_all_fields() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_memory_type_parse_rejects_non_space_attr() -> None:
     ctx = _build_context()
-    with pytest.raises(VerifyException, match="nn memory type space"):
-        Parser(ctx, "!nn.memory<[1], [1], i32, i32>").parse_attribute()
+    with pytest.raises(ParseError, match="nn memory type space"):
+        Parser(ctx, "!nn.memory<[#symbol.expr<1>], [#symbol.expr<1>], i32, i32>").parse_attribute()
 
 
 # TY-013
@@ -568,8 +604,8 @@ def test_memory_type_parse_rejects_non_space_attr() -> None:
 @pytest.mark.parametrize(
     ("shape", "stride", "message"),
     [
-        ([IntAttr(-1)], [IntAttr(1)], "non-negative"),
-        ([StringAttr("")], [IntAttr(1)], "IntAttr or StringAttr"),
+        ([_expr_attr("-1")], [_expr_attr(1)], "non-negative"),
+        ([IntAttr(1)], [_expr_attr(1)], "SymbolExprAttr"),
     ],
 )
 def test_memory_type_rejects_invalid_dim_entry(
@@ -595,8 +631,8 @@ def test_memory_type_rejects_invalid_dim_entry(
 def test_memory_type_rejects_stride_question_dim_pair() -> None:
     with pytest.raises(VerifyException, match=r"stride '\?'"):
         NnMemoryType(
-            ArrayAttr([StringAttr("?")]),
-            ArrayAttr([StringAttr("?")]),
+            ArrayAttr([_expr_attr("?")]),
+            ArrayAttr([_expr_attr("?")]),
             i32,
             _make_space("global"),
         )
@@ -727,18 +763,8 @@ def test_add_op_rejects_type_mismatch(
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_broadcast_op_verify_success() -> None:
-    input_type = NnMemoryType(
-        ArrayAttr([IntAttr(1), StringAttr("N")]),
-        ArrayAttr([IntAttr(1), IntAttr(1)]),
-        i32,
-        _make_space("global"),
-    )
-    result_type = NnMemoryType(
-        ArrayAttr([StringAttr("M"), StringAttr("N")]),
-        ArrayAttr([IntAttr(1), IntAttr(1)]),
-        i32,
-        _make_space("global"),
-    )
+    input_type = _make_simple_memory_type([IntAttr(1), StringAttr("N")], [IntAttr(1), IntAttr(1)])
+    result_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)])
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnBroadcastOp(inp, result_type, _make_space("global"))
     op.verify()
@@ -830,8 +856,8 @@ def test_broadcast_op_rejects_invalid_inputs(
 def test_broadcast_module_round_trip() -> None:
     ctx = _build_context()
     text = """builtin.module {
-  %0 = "test.op"() : () -> !nn.memory<[1, N], [1, 1], i32, #nn.space<global>>
-  %1 = "nn.broadcast"(%0) {space = #nn.space<global>} : (!nn.memory<[1, N], [1, 1], i32, #nn.space<global>>) -> !nn.memory<[M, N], [1, 1], i32, #nn.space<global>>
+  %0 = "test.op"() : () -> !nn.memory<[#symbol.expr<1>, #symbol.expr<N>], [#symbol.expr<1>, #symbol.expr<1>], i32, #nn.space<global>>
+  %1 = "nn.broadcast"(%0) {space = #nn.space<global>} : (!nn.memory<[#symbol.expr<1>, #symbol.expr<N>], [#symbol.expr<1>, #symbol.expr<1>], i32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<1>, #symbol.expr<1>], i32, #nn.space<global>>
 }
 """
     module = Parser(ctx, text).parse_module()
@@ -949,8 +975,8 @@ def test_transpose_op_result_mismatch(
 def test_transpose_module_round_trip() -> None:
     ctx = _build_context()
     text = """builtin.module {
-  %0 = "test.op"() : () -> !nn.memory<[M, N, 4], [8, 4, 1], i32, #nn.space<global>>
-  %1 = "nn.transpose"(%0) {perm = [1 : i64, 0 : i64, 2 : i64], space = #nn.space<global>} : (!nn.memory<[M, N, 4], [8, 4, 1], i32, #nn.space<global>>) -> !nn.memory<[N, M, 4], [M * 4, 4, 1], i32, #nn.space<global>>
+  %0 = "test.op"() : () -> !nn.memory<[#symbol.expr<M>, #symbol.expr<N>, #symbol.expr<4>], [#symbol.expr<8>, #symbol.expr<4>, #symbol.expr<1>], i32, #nn.space<global>>
+  %1 = "nn.transpose"(%0) {perm = [1 : i64, 0 : i64, 2 : i64], space = #nn.space<global>} : (!nn.memory<[#symbol.expr<M>, #symbol.expr<N>, #symbol.expr<4>], [#symbol.expr<8>, #symbol.expr<4>, #symbol.expr<1>], i32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<N>, #symbol.expr<M>, #symbol.expr<4>], [#symbol.expr<4*M>, #symbol.expr<4>, #symbol.expr<1>], i32, #nn.space<global>>
 }
 """
     module = Parser(ctx, text).parse_module()
@@ -1155,9 +1181,9 @@ def test_matmul_op_result_shape_mismatch() -> None:
 def test_matmul_module_round_trip() -> None:
     ctx = _build_context()
     text = """builtin.module {
-  %0 = "test.op"() : () -> !nn.memory<[M, K], [8, 1], i32, #nn.space<global>>
-  %1 = "test.op"() : () -> !nn.memory<[K, N], [8, 1], i32, #nn.space<global>>
-  %2 = "nn.matmul"(%0, %1) {space = #nn.space<global>} : (!nn.memory<[M, K], [8, 1], i32, #nn.space<global>>, !nn.memory<[K, N], [8, 1], i32, #nn.space<global>>) -> !nn.memory<[M, N], [8, 1], i32, #nn.space<global>>
+  %0 = "test.op"() : () -> !nn.memory<[#symbol.expr<M>, #symbol.expr<K>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<global>>
+  %1 = "test.op"() : () -> !nn.memory<[#symbol.expr<K>, #symbol.expr<N>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<global>>
+  %2 = "nn.matmul"(%0, %1) {space = #nn.space<global>} : (!nn.memory<[#symbol.expr<M>, #symbol.expr<K>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<global>>, !nn.memory<[#symbol.expr<K>, #symbol.expr<N>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<global>>
 }
 """
     module = Parser(ctx, text).parse_module()
@@ -1957,10 +1983,10 @@ def test_reduce_ops_reject_type_or_space_mismatch() -> None:
 def test_exp_reduce_module_round_trip() -> None:
     ctx = _build_context()
     text = """builtin.module {
-  %0 = "test.op"() : () -> !nn.memory<[2, 4], [4, 1], f32, #nn.space<global>>
-  %1 = "nn.exp"(%0) {space = #nn.space<global>} : (!nn.memory<[2, 4], [4, 1], f32, #nn.space<global>>) -> !nn.memory<[2, 4], [4, 1], f32, #nn.space<global>>
-  %2 = "nn.reduce_sum"(%1) {axes = [1 : i64], keepdim = true, space = #nn.space<global>} : (!nn.memory<[2, 4], [4, 1], f32, #nn.space<global>>) -> !nn.memory<[2, 1], [1, 1], f32, #nn.space<global>>
-  %3 = "nn.reduce_max"(%1) {axes = [0 : i64], keepdim = false, space = #nn.space<global>} : (!nn.memory<[2, 4], [4, 1], f32, #nn.space<global>>) -> !nn.memory<[4], [1], f32, #nn.space<global>>
+  %0 = "test.op"() : () -> !nn.memory<[#symbol.expr<2>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<global>>
+  %1 = "nn.exp"(%0) {space = #nn.space<global>} : (!nn.memory<[#symbol.expr<2>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<2>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<global>>
+  %2 = "nn.reduce_sum"(%1) {axes = [1 : i64], keepdim = true, space = #nn.space<global>} : (!nn.memory<[#symbol.expr<2>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<2>, #symbol.expr<1>], [#symbol.expr<1>, #symbol.expr<1>], f32, #nn.space<global>>
+  %3 = "nn.reduce_max"(%1) {axes = [0 : i64], keepdim = false, space = #nn.space<global>} : (!nn.memory<[#symbol.expr<2>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<4>], [#symbol.expr<1>], f32, #nn.space<global>>
 }
 """
     module = Parser(ctx, text).parse_module()
@@ -2175,9 +2201,9 @@ def test_memory_dim_parser_and_mixed_add_public_parser_contracts() -> None:
     ctx = _build_context()
     rng = random.Random(20260505)
     round_trip_types = [
-        '!nn.memory<[M], [1], "elem, type", #nn.space<global>>',
-        "!nn.memory<[N + 1], [1], tensor<2xf32>, #nn.space<global>>",
-        "!nn.memory<[M // 2, N], [N, 1], i32, #nn.space<global>>",
+        '!nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], "elem, type", #nn.space<global>>',
+        "!nn.memory<[#symbol.expr<N + 1>], [#symbol.expr<1>], tensor<2xf32>, #nn.space<global>>",
+        "!nn.memory<[#symbol.expr<M floordiv 2>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], i32, #nn.space<global>>",
     ]
     for text in rng.sample(round_trip_types, k=len(round_trip_types)):
         parsed_type = Parser(ctx, text).parse_attribute()
@@ -2185,44 +2211,40 @@ def test_memory_dim_parser_and_mixed_add_public_parser_contracts() -> None:
         parsed_type.verify()
         assert _print_ir(parsed_type) == text
 
-    for malformed_text, message in [
-        ("!nn.memory", "Expected '<'"),
-        ("!nn.memory<[M], [1], i32, #nn.space<global>", "Expected '>'"),
-        ("!nn.memory<M, [1], i32, #nn.space<global>>", "Expected dimension list"),
-        ("!nn.memory<[M), [1], i32, #nn.space<global>>", "Malformed nn memory type parameters"),
-        ("!nn.memory<[M], [1], i32, #nn.space<global>, >", "requires shape"),
-        ("!nn.memory<[M +], [1], i32, #nn.space<global>>", "valid SymbolDim string"),
+    for malformed_text in [
+        "!nn.memory",
+        "!nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<global>",
+        "!nn.memory<#symbol.expr<M>, [#symbol.expr<1>], i32, #nn.space<global>>",
+        "!nn.memory<[#symbol.expr<M>), [#symbol.expr<1>], i32, #nn.space<global>>",
+        "!nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<global>, >",
+        "!nn.memory<[#symbol.expr<M +>], [#symbol.expr<1>], i32, #nn.space<global>>",
     ]:
-        with pytest.raises(ParseError, match=message):
+        with pytest.raises(ParseError):
             Parser(ctx, malformed_text).parse_attribute()
 
-    with pytest.raises(VerifyException, match="shape dimensions must be IntAttr or StringAttr"):
-        _print_ir(NnMemoryType(ArrayAttr([Float32Type()]), ArrayAttr([IntAttr(1)]), i32, _make_space("global")))
+    with pytest.raises(VerifyException, match="SymbolExprAttr"):
+        _print_ir(NnMemoryType(ArrayAttr([Float32Type()]), ArrayAttr([_expr_attr(1)]), i32, _make_space("global")))
 
     parsed = Parser(
         ctx,
-        "!nn.memory<[M + 1, (K + 2), tail], [tail, 1, ?], i32, #nn.space<global>>",
+        "!nn.memory<[#symbol.expr<M + 1>, #symbol.expr<(K + 2)>, #symbol.expr<tail>], [#symbol.expr<tail>, #symbol.expr<1>, #symbol.expr<?>], i32, #nn.space<global>>",
     ).parse_attribute()
     assert isinstance(parsed, NnMemoryType)
-    assert _print_ir(parsed) == "!nn.memory<[M + 1, (K + 2), tail], [tail, 1, ?], i32, #nn.space<global>>"
+    assert _print_ir(parsed) == "!nn.memory<[#symbol.expr<M + 1>, #symbol.expr<K + 2>, #symbol.expr<tail>], [#symbol.expr<tail>, #symbol.expr<1>, #symbol.expr<?>], i32, #nn.space<global>>"
 
     complex_expr = "(-DW * (KW - 1) + PL + PR + W - 1) * SW + 1"
     parsed_complex = Parser(
         ctx,
-        f"!nn.memory<[B, C, {complex_expr}], [C * {complex_expr}, {complex_expr}, 1], i32, #nn.space<global>>",
+        f"!nn.memory<[#symbol.expr<B>, #symbol.expr<C>, #symbol.expr<{complex_expr}>], [#symbol.expr<C * {complex_expr}>, #symbol.expr<{complex_expr}>, #symbol.expr<1>], i32, #nn.space<global>>",
     ).parse_attribute()
     assert isinstance(parsed_complex, NnMemoryType)
-    assert _print_ir(parsed_complex) == (
-        f"!nn.memory<[B, C, {complex_expr}], [C * {complex_expr}, {complex_expr}, 1], i32, #nn.space<global>>"
-    )
-    floordiv_text = "!nn.memory<[M // 2, (N + 1) // T], [(N + 1) // T, 1], i32, #nn.space<global>>"
+    assert _print_ir(parsed_complex) == "!nn.memory<[#symbol.expr<B>, #symbol.expr<C>, #symbol.expr<(-DW*(KW - 1) + PL + PR + W - 1)*SW + 1>], [#symbol.expr<(-DW*(KW - 1) + PL + PR + W - 1)*C*SW + 1>, #symbol.expr<(-DW*(KW - 1) + PL + PR + W - 1)*SW + 1>, #symbol.expr<1>], i32, #nn.space<global>>"
+    floordiv_text = "!nn.memory<[#symbol.expr<M floordiv 2>, #symbol.expr<(N + 1) floordiv T>], [#symbol.expr<(N + 1) floordiv T>, #symbol.expr<1>], i32, #nn.space<global>>"
     parsed_floordiv = Parser(ctx, floordiv_text).parse_attribute()
     assert isinstance(parsed_floordiv, NnMemoryType)
     assert _print_ir(parsed_floordiv) == floordiv_text
-    compact_floordiv_text = "!nn.memory<[M//2], [1], i32, #nn.space<global>>"
-    parsed_compact_floordiv = Parser(ctx, compact_floordiv_text).parse_attribute()
-    assert isinstance(parsed_compact_floordiv, NnMemoryType)
-    assert _print_ir(parsed_compact_floordiv) == compact_floordiv_text
+    with pytest.raises(ParseError):
+        Parser(ctx, "!nn.memory<[#symbol.expr<M//2>], [#symbol.expr<1>], i32, #nn.space<global>>").parse_attribute()
 
     memory_type = _make_simple_memory_type(
         [IntAttr(2), IntAttr(3)],

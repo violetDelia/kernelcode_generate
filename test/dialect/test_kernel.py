@@ -55,7 +55,7 @@ from kernel_gen.dialect.kernel import (
     KernelSelectOp,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolValueType
 
 
 def _make_space(name: str) -> NnMemorySpaceAttr:
@@ -75,6 +75,44 @@ def _make_space(name: str) -> NnMemorySpaceAttr:
     """
 
     return NnMemorySpaceAttr(StringAttr(name))
+
+
+def _expr_attr(value: int | str) -> SymbolExprAttr:
+    """构造公开 SymbolExprAttr。
+
+    功能说明:
+    - 为 kernel dialect 测试统一生成结构化 memory shape/stride 表达。
+
+    使用示例:
+    - _expr_attr("N")
+    """
+
+    return SymbolExprAttr.from_expr(str(value))
+
+
+def _normalize_dims(dims: ArrayAttr | None, default_values: list[int | str]) -> ArrayAttr[Attribute]:
+    """规范化测试 memory shape/stride 维度。
+
+    功能说明:
+    - 将测试输入中的 IntAttr/StringAttr 便利写法转换为公开 SymbolExprAttr。
+
+    使用示例:
+    - _normalize_dims(ArrayAttr([IntAttr(2)]), [2])
+    """
+
+    if dims is None:
+        return ArrayAttr([_expr_attr(value) for value in default_values])
+    normalized: list[Attribute] = []
+    for dim in dims.data:
+        if isinstance(dim, SymbolExprAttr):
+            normalized.append(dim)
+        elif isinstance(dim, IntAttr):
+            normalized.append(_expr_attr(dim.data))
+        elif isinstance(dim, StringAttr):
+            normalized.append(_expr_attr(dim.data))
+        else:
+            normalized.append(dim)
+    return ArrayAttr(normalized)
 
 
 def _make_memory_type(
@@ -98,10 +136,8 @@ def _make_memory_type(
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
-    if shape is None:
-        shape = ArrayAttr([IntAttr(2), IntAttr(4)])
-    if stride is None:
-        stride = ArrayAttr([IntAttr(4), IntAttr(1)])
+    shape = _normalize_dims(shape, [2, 4])
+    stride = _normalize_dims(stride, [4, 1])
     return NnMemoryType(shape, stride, element_type, _make_space(space))
 
 

@@ -254,9 +254,8 @@ class TunerCostOp(IRDLOperation):
             _raise_verify_error("tuner.cost result type must be !symbol.int<#symbol.expr<expr>>")
         self.result.type.verify()
 
-        for attr_name in ("cost_kind", "op_name"):
-            attr_value = getattr(self, attr_name)
-            if not hasattr(attr_value, "data") or not isinstance(attr_value.data, str):
+        for attr_name, attr_value in (("cost_kind", self.cost_kind), ("op_name", self.op_name)):
+            if not isinstance(attr_value, StringAttr):
                 _raise_verify_error(f"tuner.cost {attr_name} must be string attr")
         if "kind" in self.attributes:
             _raise_verify_error("tuner.cost kind attr is not part of public contract")

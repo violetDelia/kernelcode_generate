@@ -7,7 +7,7 @@
 ## API 列表
 
 - `class NnMemorySpaceAttr(space: StringAttr)`
-- `class NnMemoryType(shape: ArrayAttr[Attribute], stride: ArrayAttr[Attribute], element_type: Attribute, space: NnMemorySpaceAttr)`
+- `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr)`
 - `class NnAddOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
 - `class NnSubOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
 - `class NnMulOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
@@ -79,7 +79,7 @@
 - `nn.softmax` 仍然是合法输入 op；默认 lowering 链通过 `DecompassPass`（见 [`spec/pass/decompass.md`](../../spec/pass/decompass.md)）把 `nn.softmax` 分解成可继续 lowering 的 `nn` 链路，方言层不负责自动分解。
 - `NnMemorySpaceAttr` 仅允许 `global/shared/local/tsm/tlm1/tlm2/tlm3` 七种取值。
 - `NnMemoryType.space` 与各 op 的 `space` attribute 必须使用同一语义口径。
-- `NnMemoryType` 中 `shape` 与 `stride` 的 rank 必须一致；每一维支持静态整数、符号或 `?`。
+- `NnMemoryType` 中 `shape` 与 `stride` 的 rank 必须一致；每一维必须由 `SymbolExprAttr` 承载，表达式可表示静态整数、符号或 `?`。
 - `shape` 中的 `?` 表示动态维度；`stride` 中的 `?` 不允许与同位置 `shape` 中的 `?` 直接成对出现。
 - 二元逐元素 op 的 `lhs/rhs/result` 必须满足 `shape/stride/space` 的 verifier 约束，不能依赖方言层做隐式 broadcast。
 - 比较 op 的结果 `element_type` 必须为 `i1`。
@@ -107,12 +107,12 @@
 - 功能说明：构造 `NnMemorySpaceAttr` 实例。
 - 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
 
-### `class NnMemoryType(shape: ArrayAttr[Attribute], stride: ArrayAttr[Attribute], element_type: Attribute, space: NnMemorySpaceAttr)`
+### `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr)`
 
-- api：`class NnMemoryType(shape: ArrayAttr[Attribute], stride: ArrayAttr[Attribute], element_type: Attribute, space: NnMemorySpaceAttr)`
+- api：`class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr)`
 - 参数：
-  - `shape`：形状序列，定义张量、内存或符号对象的维度大小；类型 `Sequence[Attribute]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `stride`：步长序列，定义各维度在底层线性布局中的跨距；类型 `Sequence[Attribute]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `shape`：形状序列，定义张量、内存或符号对象的维度大小；类型 `ArrayAttr[SymbolExprAttr]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `stride`：步长序列，定义各维度在底层线性布局中的跨距；类型 `ArrayAttr[SymbolExprAttr]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `element_type`：类型对象或类型名称；类型 `Attribute`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `space`：内存空间标识，定义对象所在的 GM、SM、LM 或其他公开空间；类型 `NnMemorySpaceAttr`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
 - 返回值：`NnMemoryType` 实例。
@@ -122,7 +122,7 @@
   nn_memory_type = NnMemoryType(shape=shape, stride=stride, element_type=element_type, space=space)
   ```
 - 功能说明：构造 `NnMemoryType` 实例。
-- 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
+- 注意事项：构造参数必须符合本条目参数说明；`shape/stride` 只公开 `ArrayAttr[SymbolExprAttr]`，raw `IntAttr/StringAttr` 或其它 `Attribute` 容器不是公开兼容入口；实例内部缓存、状态字典和派生字段不作为外部可变入口。
 
 ### `class NnAddOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
 

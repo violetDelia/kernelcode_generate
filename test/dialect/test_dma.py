@@ -3,8 +3,8 @@
 
 功能说明:
 - 覆盖 dma dialect 的 op verifier 与类型复用约束。
-- 覆盖 SSA `!symbol.int<"expr">` operand 动态布局、parse/print round-trip 与默认连续 stride 约束。
-- 覆盖 `dma.fill` 的 `i32 | !symbol.int<"expr"> -> i32 memory` 最小 verifier 闭环。
+- 覆盖 SSA `!symbol.int<#symbol.expr<expr>>` operand 动态布局、parse/print round-trip 与默认连续 stride 约束。
+- 覆盖 `dma.fill` 的 `i32 | !symbol.int<#symbol.expr<expr>> -> i32 memory` 最小 verifier 闭环。
 
 使用示例:
 - pytest -q test/dialect/test_dma.py
@@ -74,7 +74,7 @@ from kernel_gen.dialect.dma import (
     DmaViewOp,
 )
 from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import Symbol, SymbolIterType, SymbolValueType
+from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolIterType, SymbolValueType
 
 
 def _build_context() -> Context:
@@ -149,6 +149,54 @@ def _make_space(name: str) -> NnMemorySpaceAttr:
     return NnMemorySpaceAttr(StringAttr(name))
 
 
+def _expr_attr(value: int | str) -> SymbolExprAttr:
+    """构造公开 SymbolExprAttr。
+
+    功能说明:
+    - 为 dma dialect 测试统一生成结构化 memory shape/stride 表达。
+
+    使用示例:
+    - _expr_attr("N")
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    return SymbolExprAttr.from_expr(str(value))
+
+
+def _normalize_memory_dims(dims: ArrayAttr | None, default_values: list[int | str]) -> ArrayAttr[Attribute]:
+    """规范化测试 memory shape/stride 维度。
+
+    功能说明:
+    - 将测试中旧的 `IntAttr/StringAttr` 便利写法转换为公开 `SymbolExprAttr`。
+
+    使用示例:
+    - _normalize_memory_dims(ArrayAttr([IntAttr(2), StringAttr("N")]), [2, "N"])
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if dims is None:
+        return ArrayAttr([_expr_attr(value) for value in default_values])
+    normalized: list[Attribute] = []
+    for dim in dims.data:
+        if isinstance(dim, SymbolExprAttr):
+            normalized.append(dim)
+        elif isinstance(dim, IntAttr):
+            normalized.append(_expr_attr(dim.data))
+        elif isinstance(dim, StringAttr):
+            normalized.append(_expr_attr(dim.data))
+        else:
+            normalized.append(dim)
+    return ArrayAttr(normalized)
+
+
 def _make_memory_type(
     shape: ArrayAttr | None = None,
     stride: ArrayAttr | None = None,
@@ -172,21 +220,37 @@ def _make_memory_type(
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    if shape is None:
-        shape = ArrayAttr([IntAttr(2), IntAttr(4)])
-    if stride is None:
-        stride = ArrayAttr([IntAttr(4), IntAttr(1)])
+    shape = _normalize_memory_dims(shape, [2, 4])
+    stride = _normalize_memory_dims(stride, [4, 1])
     if element_type is None:
         element_type = i32
     return NnMemoryType(shape, stride, element_type, _make_space(space))
 
 
+def _raise_memory_verify_rank_mismatch(_: NnMemoryType) -> None:
+    """构造 monkeypatch 使用的 memory verifier 失败路径。
+
+    功能说明:
+    - 为 `test_dma_nn_memory_type_verifier_passthrough` 提供顶层 helper，避免测试内嵌套函数。
+
+    使用示例:
+    - monkeypatch.setattr(NnMemoryType, "verify", _raise_memory_verify_rank_mismatch)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    raise VerifyException("nn memory shape and stride rank must match")
+
+
 def _make_symbol_operands(values: list[int | str | None]) -> list[SSAValue]:
-    """构造 `!symbol.int<"expr">` operand 列表。
+    """构造 `!symbol.int<#symbol.expr<expr>>` operand 列表。
 
 
     功能说明:
-    - `int` 映射为 `!symbol.int<"n">`。
+    - `int` 映射为 `!symbol.int<#symbol.expr<n>>`。
     - `str` 映射为对应的符号表达式。
     - `None` 映射为运行期符号 SSA 值。
 
@@ -285,7 +349,7 @@ def test_dma_load_accepts_symbol_iter_offset() -> None:
     target_type = _make_memory_type()
     source = _TestOp(result_types=[source_type]).results[0]
     target = _TestOp(result_types=[target_type]).results[0]
-    iter_offset = _TestOp(result_types=[SymbolIterType.from_expr("index")]).results[0]
+    iter_offset = _TestOp(result_types=[SymbolIterType.from_bounds("0", "N", "1")]).results[0]
     zero_offset = _make_symbol_operands([0])[0]
     offsets = [iter_offset, zero_offset]
     sizes = _make_symbol_operands([2, 4])
@@ -388,16 +452,13 @@ def test_dma_nn_memory_type_verifier_passthrough(monkeypatch: pytest.MonkeyPatch
     target = _TestOp(result_types=[memory_type]).results[0]
     op = DmaCopyOp(target, source)
 
-    def _raise_verify(_: NnMemoryType) -> None:
-        raise VerifyException("nn memory shape and stride rank must match")
-
-    monkeypatch.setattr(NnMemoryType, "verify", _raise_verify)
+    monkeypatch.setattr(NnMemoryType, "verify", _raise_memory_verify_rank_mismatch)
     with pytest.raises(VerifyException, match="nn memory shape and stride rank must match"):
         op.verify()
 
 
 # TC-DMA-010
-# 功能说明: 验证动态 offsets/sizes/strides 通过 SSA `!symbol.int<"expr">` operand 传入时，load/store/slice/deslice 均可通过 verifier。
+# 功能说明: 验证动态 offsets/sizes/strides 通过 SSA `!symbol.int<#symbol.expr<expr>>` operand 传入时，load/store/slice/deslice 均可通过 verifier。
 # 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_dynamic_symbol_int_operands_valid
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
@@ -774,11 +835,11 @@ def test_dma_view_result_stride_uses_source_physical_stride() -> None:
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_view_byte_pool_typed_view() -> None:
-    source_type = NnMemoryType(
-        ArrayAttr([IntAttr(16)]),
-        ArrayAttr([IntAttr(1)]),
-        i8,
-        _make_space("global"),
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(16)]),
+        stride=ArrayAttr([IntAttr(1)]),
+        element_type=i8,
+        space="global",
     )
     source = _TestOp(result_types=[source_type]).results[0]
 
@@ -1030,7 +1091,7 @@ def test_dma_alloc_dynamic_symbol_int_shape_operands_valid() -> None:
 
 
 # TC-DMA-021
-# 功能说明: 验证 SSA `!symbol.int<"expr">` operand 版本的 dma.alloc/fill/view/load/store/slice/deslice/reshape/cast 支持 generic parse/print round-trip。
+# 功能说明: 验证 SSA `!symbol.int<#symbol.expr<expr>>` operand 版本的 dma.alloc/fill/view/load/store/slice/deslice/reshape/cast 支持 generic parse/print round-trip。
 # 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_dynamic_symbol_int_parse_print_round_trip
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
@@ -1110,7 +1171,7 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
 
 
 # TC-DMA-022
-# 功能说明: 验证 dma 受影响标量输入若使用 builtin `index` 等非 `!symbol.int<"expr">` 类型会被 verifier 拒绝。
+# 功能说明: 验证 dma 受影响标量输入若使用 builtin `index` 等非 `!symbol.int<#symbol.expr<expr>>` 类型会被 verifier 拒绝。
 # 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_rejects_non_symbol_int_scalar_operands
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
@@ -1188,11 +1249,11 @@ def test_dma_fill_accepts_symbol_int_scalar_operand() -> None:
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_fill_rejects_non_i32_target_or_unsupported_scalar() -> None:
-    bad_target_type = NnMemoryType(
-        ArrayAttr([IntAttr(2), IntAttr(4)]),
-        ArrayAttr([IntAttr(4), IntAttr(1)]),
-        i1,
-        _make_space("global"),
+    bad_target_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        element_type=i1,
+        space="global",
     )
     bad_target = _TestOp(result_types=[bad_target_type]).results[0]
     value = _TestOp(result_types=[i32]).results[0]
@@ -1282,11 +1343,11 @@ def test_dma_reshape_rejects_element_or_space_mismatch() -> None:
     source = _TestOp(result_types=[source_type]).results[0]
     shape = _make_symbol_operands([4, 2])
 
-    bad_element_type = NnMemoryType(
-        ArrayAttr([IntAttr(4), IntAttr(2)]),
-        ArrayAttr([IntAttr(2), IntAttr(1)]),
-        i1,
-        source_type.space,
+    bad_element_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(4), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        element_type=i1,
+        space="global",
     )
     op = DmaReshapeOp(source, shape, bad_element_type)
     with pytest.raises(VerifyException, match="dma.reshape element_type mismatch"):

@@ -32,12 +32,11 @@ from collections.abc import Iterable, Sequence
 
 from kernel_gen.core.contracts import (
     build_contiguous_stride as _common_build_contiguous_stride,
-    collect_int_dims as _common_collect_int_dims,
-    dims_equal as _common_dims_equal,
     verify_i64_attr_range as _common_verify_i64_attr_range,
     verify_memory_type as _common_verify_memory_type,
 )
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from xdsl.dialects.arith import ConstantOp
 from xdsl.dialects.builtin import (
     BFloat16Type,
     Float16Type,
@@ -54,6 +53,7 @@ from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
 
 _ERROR_SCENE = "dialect.kernel verifier"
 _BINARY_ELEWISE_ARITH_KINDS = {"add", "sub", "mul", "div", "truediv"}
@@ -362,7 +362,7 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
-    return getattr(attr, "name", None) == "symbol.int"
+    return isinstance(attr, SymbolValueType)
 
 
 def _is_int_or_symbol_type(attr: Attribute) -> bool:
@@ -406,11 +406,9 @@ def _static_int_from_operand(operand: SSAValue) -> int | None:
     owner = operand.owner
     if owner is None:
         return None
-    owner_name = getattr(owner, "name", None)
+    owner_name = owner.name
     if owner_name == "arith.constant":
-        value_attr = owner.attributes.get("value")
-        if value_attr is None:
-            value_attr = getattr(owner, "value", None)
+        value_attr = owner.value if isinstance(owner, ConstantOp) else owner.attributes.get("value")
         if isinstance(value_attr, IntegerAttr):
             return int(value_attr.value.data)
         if isinstance(value_attr, IntAttr):
@@ -492,7 +490,7 @@ def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
 
 
     功能说明:
-    - 当所有维度均为 `IntAttr` 时返回整数列表。
+    - 当所有维度均为静态 `SymbolExprAttr` 整数表达时返回整数列表。
     - 任一维度非静态整数时返回 `None`，交由后续阶段处理。
 
     使用示例:
@@ -504,7 +502,13 @@ def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
-    return _common_collect_int_dims(dims)
+    values: list[int] = []
+    for dim in dims:
+        static_value = _static_int_from_dim(dim)
+        if static_value is None:
+            return None
+        values.append(static_value)
+    return values
 
 
 def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
@@ -630,10 +634,11 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
 
 
     功能说明:
-    - 仅在同类型且内容相等时认为一致。
+    - 对 `SymbolExprAttr` 比较 canonical 文本。
+    - 其它 attribute 仅在同类型且内容相等时认为一致。
 
     使用示例:
-    - _dims_equal(IntAttr(1), IntAttr(1))
+    - _dims_equal(SymbolExprAttr.from_expr("1"), SymbolExprAttr.from_expr("1"))
 
     关联文件:
     - spec: spec/dialect/kernel.md
@@ -641,7 +646,34 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
-    return _common_dims_equal(lhs, rhs)
+    if isinstance(lhs, SymbolExprAttr) and isinstance(rhs, SymbolExprAttr):
+        return lhs.expr.data == rhs.expr.data
+    return lhs == rhs
+
+
+def _static_int_from_dim(dim: Attribute) -> int | None:
+    """从结构化维度提取静态整数。
+
+
+    功能说明:
+    - 仅接受 `SymbolExprAttr` 表达的静态整数。
+    - 动态符号、`?` 或非结构化属性返回 None。
+
+    使用示例:
+    - _static_int_from_dim(SymbolExprAttr.from_expr("4"))
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    if not isinstance(dim, SymbolExprAttr):
+        return None
+    try:
+        return int(dim.expr.data)
+    except ValueError:
+        return None
 
 
 def _build_reduce_result_shape(
@@ -657,7 +689,7 @@ def _build_reduce_result_shape(
     - keepdim=false 时移除归约轴；若结果 rank 为 0 则规范为 [1]。
 
     使用示例:
-    - _build_reduce_result_shape([IntAttr(2), IntAttr(3)], axis=0, keepdim=False)
+    - _build_reduce_result_shape([SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("3")], axis=0, keepdim=False)
 
     关联文件:
     - spec: spec/dialect/kernel.md
@@ -666,11 +698,11 @@ def _build_reduce_result_shape(
     """
 
     if keepdim:
-        return [IntAttr(1) if index == axis else dim for index, dim in enumerate(input_dims)]
+        return [SymbolExprAttr.from_expr("1") if index == axis else dim for index, dim in enumerate(input_dims)]
 
     result_dims = [dim for index, dim in enumerate(input_dims) if index != axis]
     if not result_dims:
-        return [IntAttr(1)]
+        return [SymbolExprAttr.from_expr("1")]
     return result_dims
 
 
@@ -1009,7 +1041,7 @@ class KernelImg2col1dOp(IRDLOperation):
         input_shape = list(input_type.shape.data)
         out_shape = list(out_type.shape.data)
         if k_value is not None:
-            if not isinstance(out_shape[2], IntAttr) or out_shape[2].data != k_value:
+            if _static_int_from_dim(out_shape[2]) != k_value:
                 raise VerifyException(
                     ERROR_TEMPLATE.format(
                         scene=_ERROR_SCENE,
@@ -1206,7 +1238,7 @@ class KernelImg2col2dOp(IRDLOperation):
         input_shape = list(input_type.shape.data)
         out_shape = list(out_type.shape.data)
         if kh_value is not None:
-            if not isinstance(out_shape[2], IntAttr) or out_shape[2].data != kh_value:
+            if _static_int_from_dim(out_shape[2]) != kh_value:
                 raise VerifyException(
                     ERROR_TEMPLATE.format(
                         scene=_ERROR_SCENE,
@@ -1216,7 +1248,7 @@ class KernelImg2col2dOp(IRDLOperation):
                     )
                 )
         if kw_value is not None:
-            if not isinstance(out_shape[3], IntAttr) or out_shape[3].data != kw_value:
+            if _static_int_from_dim(out_shape[3]) != kw_value:
                 raise VerifyException(
                     ERROR_TEMPLATE.format(
                         scene=_ERROR_SCENE,

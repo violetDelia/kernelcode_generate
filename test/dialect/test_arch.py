@@ -66,7 +66,7 @@ from kernel_gen.dialect import (
 )
 import kernel_gen.dialect as dialect_pkg
 from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import Symbol, SymbolValueType
+from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolValueType
 from kernel_gen.target import registry as target_registry
 
 
@@ -141,6 +141,24 @@ def _make_space(name: str) -> NnMemorySpaceAttr:
     return NnMemorySpaceAttr(StringAttr(name))
 
 
+def _expr_attr(expr: str | int) -> SymbolExprAttr:
+    """构造公开 SymbolExprAttr。
+
+    功能说明:
+    - 让 arch dialect 测试统一使用结构化 memory shape/stride 表达。
+
+    使用示例:
+    - _expr_attr("SM_SIZE")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch.py
+    """
+
+    return SymbolExprAttr.from_expr(str(expr))
+
+
 def _make_visibility(name: str) -> ArchVisibilityAttr:
     """构造 arch.visibility attribute。
 
@@ -210,8 +228,8 @@ def _make_dynamic_memory_type(
         "tlm3": "TLM3_SIZE",
     }
     return NnMemoryType(
-        shape or ArrayAttr([StringAttr(capacity_by_space[space])]),
-        stride or ArrayAttr([IntAttr(1)]),
+        shape or ArrayAttr([_expr_attr(capacity_by_space[space])]),
+        stride or ArrayAttr([_expr_attr(1)]),
         element_type,
         _make_space(space),
     )
@@ -255,11 +273,11 @@ def _assert_fixed_result_type(op: Operation, expected: str) -> None:
     op.verify()
     result = op.results[0]
     assert result.type == SymbolValueType.from_expr(expected)
-    assert _print_ir(op) == f"%0 = {op.name} : !symbol.int<\"{expected}\">"
+    assert _print_ir(op) == f"%0 = {op.name} : !symbol.int<#symbol.expr<{expected}>>"
 
 
 # TC-ARCH-001
-# 测试目的: 验证 arch.get_block_id 固定返回 !symbol.int<"block_id">。
+# 测试目的: 验证 arch.get_block_id 固定返回 !symbol.int<#symbol.expr<block_id>>。
 # 对应功能实现文件路径: kernel_gen/dialect/arch.py
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_block_id_result_type() -> None:
@@ -267,7 +285,7 @@ def test_arch_get_block_id_result_type() -> None:
 
 
 # TC-ARCH-002
-# 测试目的: 验证 arch.get_block_num 固定返回 !symbol.int<"block_num">。
+# 测试目的: 验证 arch.get_block_num 固定返回 !symbol.int<#symbol.expr<block_num>>。
 # 对应功能实现文件路径: kernel_gen/dialect/arch.py
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_block_num_result_type() -> None:
@@ -275,7 +293,7 @@ def test_arch_get_block_num_result_type() -> None:
 
 
 # TC-ARCH-003
-# 测试目的: 验证 arch.get_thread_id 固定返回 !symbol.int<"thread_id">。
+# 测试目的: 验证 arch.get_thread_id 固定返回 !symbol.int<#symbol.expr<thread_id>>。
 # 对应功能实现文件路径: kernel_gen/dialect/arch.py
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_thread_id_result_type() -> None:
@@ -283,7 +301,7 @@ def test_arch_get_thread_id_result_type() -> None:
 
 
 # TC-ARCH-004
-# 测试目的: 验证 arch.get_thread_num 固定返回 !symbol.int<"thread_num">。
+# 测试目的: 验证 arch.get_thread_num 固定返回 !symbol.int<#symbol.expr<thread_num>>。
 # 对应功能实现文件路径: kernel_gen/dialect/arch.py
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_thread_num_result_type() -> None:
@@ -291,7 +309,7 @@ def test_arch_get_thread_num_result_type() -> None:
 
 
 # TC-ARCH-005
-# 测试目的: 验证 arch.get_subthread_id 固定返回 !symbol.int<"subthread_id">。
+# 测试目的: 验证 arch.get_subthread_id 固定返回 !symbol.int<#symbol.expr<subthread_id>>。
 # 对应功能实现文件路径: kernel_gen/dialect/arch.py
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_subthread_id_result_type() -> None:
@@ -299,7 +317,7 @@ def test_arch_get_subthread_id_result_type() -> None:
 
 
 # TC-ARCH-006
-# 测试目的: 验证 arch.get_subthread_num 固定返回 !symbol.int<"subthread_num">。
+# 测试目的: 验证 arch.get_subthread_num 固定返回 !symbol.int<#symbol.expr<subthread_num>>。
 # 对应功能实现文件路径: kernel_gen/dialect/arch.py
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_subthread_num_result_type() -> None:
@@ -333,7 +351,7 @@ def test_arch_get_dynamic_memory_success() -> None:
     op = ArchGetDynamicMemoryOp(_make_space("shared"))
     op.verify()
     assert op.result.type == _make_dynamic_memory_type()
-    assert _print_ir(op) == "%0 = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[SM_SIZE], [1], i8, #nn.space<shared>>"
+    assert _print_ir(op) == "%0 = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[#symbol.expr<SM_SIZE>], [#symbol.expr<1>], i8, #nn.space<shared>>"
 
 
 # TC-ARCH-007A
@@ -346,7 +364,7 @@ def test_arch_get_dynamic_memory_supports_tlm123() -> None:
         op.verify()
         assert op.result.type == _make_dynamic_memory_type(space=space)
         assert _print_ir(op) == (
-            f"%0 = arch.get_dynamic_memory #nn.space<{space}> : !nn.memory<[{space.upper()}_SIZE], [1], i8, #nn.space<{space}>>"
+            f"%0 = arch.get_dynamic_memory #nn.space<{space}> : !nn.memory<[#symbol.expr<{space.upper()}_SIZE>], [#symbol.expr<1>], i8, #nn.space<{space}>>"
         )
 
 
@@ -365,15 +383,15 @@ def test_arch_get_dynamic_memory_verify_errors() -> None:
         ArchGetDynamicMemoryOp(
             _make_space("shared"),
             _make_dynamic_memory_type(
-                shape=ArrayAttr([StringAttr("?"), IntAttr(4)]),
-                stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+                shape=ArrayAttr([_expr_attr("?"), _expr_attr(4)]),
+                stride=ArrayAttr([_expr_attr(4), _expr_attr(1)]),
             ),
         ).verify()
 
-    with pytest.raises(VerifyException, match="result stride must be \\[1\\]"):
+    with pytest.raises(VerifyException, match=r"result stride must be \[#symbol\.expr<1>\]"):
         ArchGetDynamicMemoryOp(
             _make_space("shared"),
-            _make_dynamic_memory_type(stride=ArrayAttr([IntAttr(2)])),
+            _make_dynamic_memory_type(stride=ArrayAttr([_expr_attr(2)])),
         ).verify()
 
     with pytest.raises(VerifyException, match="result element type must be i8"):
@@ -385,8 +403,34 @@ def test_arch_get_dynamic_memory_verify_errors() -> None:
     with pytest.raises(VerifyException, match="result space must match memory_space"):
         ArchGetDynamicMemoryOp(
             _make_space("shared"),
-            _make_dynamic_memory_type(space="local", shape=ArrayAttr([StringAttr("SM_SIZE")])),
+            _make_dynamic_memory_type(space="local", shape=ArrayAttr([_expr_attr("SM_SIZE")])),
         ).verify()
+
+    with pytest.raises(VerifyException, match="base attribute nn.memory"):
+        ArchGetDynamicMemoryOp(_make_space("shared"), i32).verify()
+
+    with pytest.raises(VerifyException, match="shape and stride rank must match"):
+        ArchGetDynamicMemoryOp(
+            _make_space("shared"),
+            _make_dynamic_memory_type(stride=ArrayAttr([_expr_attr(1), _expr_attr(1)])),
+        ).verify()
+
+    with pytest.raises(VerifyException, match=r"result shape must be \[#symbol\.expr<SM_SIZE>\]"):
+        ArchGetDynamicMemoryOp(
+            _make_space("shared"),
+            _make_dynamic_memory_type(shape=ArrayAttr([_expr_attr("LM_SIZE")])),
+        ).verify()
+
+    ctx = _build_context()
+    with pytest.raises(VerifyException, match="memory_space must be #nn.space"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %mem = arch.get_dynamic_memory #arch.scope<block> : !nn.memory<[#symbol.expr<SM_SIZE>], [#symbol.expr<1>], i8, #nn.space<shared>>
+}
+""",
+        ).parse_module()
 
 
 # TC-ARCH-009
@@ -433,6 +477,15 @@ def test_arch_barrier_verify_errors() -> None:
             ArrayAttr([_make_visibility("tsm"), _make_space("tlm1")]),
         ).verify()
 
+    with pytest.raises(VerifyException, match="base attribute array"):
+        ArchBarrierOp(ArchScopeAttr.from_name("block"), _make_visibility("tsm")).verify()
+
+    with pytest.raises(VerifyException, match="contain both"):
+        ArchBarrierOp(ArchScopeAttr.from_name("block"), ArrayAttr([_make_visibility("tsm")])).verify()
+
+    with pytest.raises(VerifyException, match="arch.visibility must be tsm/tlm"):
+        _make_visibility("global")
+
 
 # TC-ARCH-011
 # 测试目的: 验证 arch.launch 使用 `arch.launch<...>(@callee, args...)` 文本与合法 verifier 边界。
@@ -450,7 +503,7 @@ def test_arch_launch_success() -> None:
 
     op.verify()
     assert _print_ir(op) == (
-        'arch.launch<%0, %1, %2, %3>(@my_kernel, %4) : (!symbol.int<"arg_n">) -> ()'
+        "arch.launch<%0, %1, %2, %3>(@my_kernel, %4) : (!symbol.int<#symbol.expr<arg_n>>) -> ()"
     )
 
 
@@ -471,7 +524,25 @@ def test_arch_launch_verify_errors() -> None:
             _make_symbol_value("0"),
         ).verify()
 
-    with pytest.raises(VerifyException, match='block must have type !symbol.int<"expr">'):
+    with pytest.raises(VerifyException, match="base attribute symbol_ref"):
+        ArchLaunchOp(
+            StringAttr("my_kernel"),
+            _make_symbol_value("1"),
+            _make_symbol_value("1"),
+            _make_symbol_value("1"),
+            _make_symbol_value("0"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match="callee must not be empty"):
+        ArchLaunchOp(
+            SymbolRefAttr(""),
+            _make_symbol_value("1"),
+            _make_symbol_value("1"),
+            _make_symbol_value("1"),
+            _make_symbol_value("0"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match='block must have type !symbol.int<#symbol.expr<expr>>'):
         ArchLaunchOp(
             "my_kernel",
             non_symbol_value,
@@ -508,6 +579,54 @@ def test_arch_launch_verify_errors() -> None:
         ).verify()
 
 
+# TC-ARCH-012A
+# 测试目的: 验证 arch 固定查询与 launch parser 对公开结果/参数类型段的失败边界。
+# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应 spec 文件路径: spec/dialect/arch.md
+def test_arch_result_and_launch_parser_rejection_edges() -> None:
+    with pytest.raises(VerifyException, match="base attribute symbol.int"):
+        ArchGetBlockIdOp(i32).verify()
+
+    ctx = _build_context()
+    common_prefix = """
+builtin.module {
+  %block = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  %thread = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  %subthread = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  %smem = "test.op"() : () -> !symbol.int<#symbol.expr<0>>
+  %arg = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
+"""
+    with pytest.raises(VerifyException, match="result types must be"):
+        Parser(
+            ctx,
+            common_prefix
+            + """
+  arch.launch<%block, %thread, %subthread, %smem>(@my_kernel) : () -> (!symbol.int<#symbol.expr<N>>)
+}
+""",
+        ).parse_module()
+
+    with pytest.raises(VerifyException, match="arg type list must match operand count"):
+        Parser(
+            ctx,
+            common_prefix
+            + """
+  arch.launch<%block, %thread, %subthread, %smem>(@my_kernel, %arg) : () -> ()
+}
+""",
+        ).parse_module()
+
+    with pytest.raises(VerifyException, match="arg types must match operand types"):
+        Parser(
+            ctx,
+            common_prefix
+            + """
+  arch.launch<%block, %thread, %subthread, %smem>(@my_kernel, %arg) : (i32) -> ()
+}
+""",
+        ).parse_module()
+
+
 # TC-ARCH-013
 # 测试目的: 验证 arch dialect 文本可完成包含 barrier/launch 的 parse/print round-trip，并拒绝字符串 callee。
 # 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch.py -k test_arch_parse_print_round_trip
@@ -520,21 +639,21 @@ def test_arch_parse_print_round_trip() -> None:
         ctx,
         """
 builtin.module {
-  %block = "test.op"() : () -> !symbol.int<"grid_x">
-  %thread = "test.op"() : () -> !symbol.int<"block_x">
-  %subthread = "test.op"() : () -> !symbol.int<"subthread_x">
-  %arg = "test.op"() : () -> !symbol.int<"arg_n">
-  %bid = arch.get_block_id : !symbol.int<"block_id">
-  %bnum = arch.get_block_num : !symbol.int<"block_num">
-  %tid = arch.get_thread_id : !symbol.int<"thread_id">
-  %tnum = arch.get_thread_num : !symbol.int<"thread_num">
-  %stid = arch.get_subthread_id : !symbol.int<"subthread_id">
-  %stnum = arch.get_subthread_num : !symbol.int<"subthread_num">
-  %smem_size = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[SM_SIZE], [1], i8, #nn.space<shared>>
-  %tlm1 = arch.get_dynamic_memory #nn.space<tlm1> : !nn.memory<[TLM1_SIZE], [1], i8, #nn.space<tlm1>>
+  %block = "test.op"() : () -> !symbol.int<#symbol.expr<grid_x>>
+  %thread = "test.op"() : () -> !symbol.int<#symbol.expr<block_x>>
+  %subthread = "test.op"() : () -> !symbol.int<#symbol.expr<subthread_x>>
+  %arg = "test.op"() : () -> !symbol.int<#symbol.expr<arg_n>>
+  %bid = arch.get_block_id : !symbol.int<#symbol.expr<block_id>>
+  %bnum = arch.get_block_num : !symbol.int<#symbol.expr<block_num>>
+  %tid = arch.get_thread_id : !symbol.int<#symbol.expr<thread_id>>
+  %tnum = arch.get_thread_num : !symbol.int<#symbol.expr<thread_num>>
+  %stid = arch.get_subthread_id : !symbol.int<#symbol.expr<subthread_id>>
+  %stnum = arch.get_subthread_num : !symbol.int<#symbol.expr<subthread_num>>
+  %smem_size = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[#symbol.expr<SM_SIZE>], [#symbol.expr<1>], i8, #nn.space<shared>>
+  %tlm1 = arch.get_dynamic_memory #nn.space<tlm1> : !nn.memory<[#symbol.expr<TLM1_SIZE>], [#symbol.expr<1>], i8, #nn.space<tlm1>>
   arch.barrier {scope = #arch.scope<global>, visibility = [#arch.visibility<tsm>, #arch.visibility<tlm>]}
-  %smem = "test.op"() : () -> !symbol.int<"smem_n">
-  arch.launch<%block, %thread, %subthread, %smem>(@my_kernel, %arg) : (!symbol.int<"arg_n">) -> ()
+  %smem = "test.op"() : () -> !symbol.int<#symbol.expr<smem_n>>
+  arch.launch<%block, %thread, %subthread, %smem>(@my_kernel, %arg) : (!symbol.int<#symbol.expr<arg_n>>) -> ()
 }
 """,
     ).parse_module()
@@ -549,10 +668,10 @@ builtin.module {
         ctx,
         """
 builtin.module {
-  %block = "test.op"() : () -> !symbol.int<"grid_x">
-  %thread = "test.op"() : () -> !symbol.int<"block_x">
-  %subthread = "test.op"() : () -> !symbol.int<"subthread_x">
-  %smem = "test.op"() : () -> !symbol.int<"smem_n">
+  %block = "test.op"() : () -> !symbol.int<#symbol.expr<grid_x>>
+  %thread = "test.op"() : () -> !symbol.int<#symbol.expr<block_x>>
+  %subthread = "test.op"() : () -> !symbol.int<#symbol.expr<subthread_x>>
+  %smem = "test.op"() : () -> !symbol.int<#symbol.expr<smem_n>>
   arch.launch<%block, %thread, %subthread, %smem>("my_kernel") : () -> ()
 }
 """,

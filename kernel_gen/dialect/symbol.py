@@ -581,7 +581,7 @@ def _tokenize_symbol_expr(expr: str) -> list[_SymbolExprToken]:
             break
         match = _SYMBOL_EXPR_TOKEN_PATTERN.match(expr, position)
         if match is None:
-            _raise_verify_error("unsupported public symbol expression")
+            _raise_verify_error("symbol expr contains unsupported token")
         position = match.end()
         if text := match.group("int"):
             tokens.append(_SymbolExprToken("int", text))
@@ -593,7 +593,7 @@ def _tokenize_symbol_expr(expr: str) -> list[_SymbolExprToken]:
             invalid = match.group("invalid") or ""
             if invalid in {"/", '"'}:
                 _raise_verify_error("symbol expr does not support quoted string, bare / or //; use floordiv, ceildiv or mod")
-            _raise_verify_error("unsupported public symbol expression")
+            _raise_verify_error("symbol expr contains unsupported token")
     return tokens
 
 
@@ -924,7 +924,7 @@ def _format_symbol_expr_node(node: _SymbolExprNode, parent_precedence: int = 0) 
     elif node.kind == "max":
         text = f"max({_format_symbol_expr_node(node.args[0])}, {_format_symbol_expr_node(node.args[1])})"
     else:
-        _raise_verify_error("unsupported public symbol expression")
+        _raise_verify_error("symbol expr contains unsupported token")
     if _symbol_expr_precedence(node) < parent_precedence:
         return f"({text})"
     return text
@@ -1051,8 +1051,8 @@ def _unwrap_symbol_expr_attr_text(expr: str) -> str:
     """提取 memory 条目中内联 `#symbol.expr<...>` 的表达式正文。
 
     功能说明:
-    - 兼容 `NnMemoryType` raw parser 当前把 `#symbol.expr<...>` 条目保存为 `StringAttr` 的事实。
-    - 对裸 `N`、`K*N`、`?` 等旧条目保持原文本返回，不在 symbol 层调整 nn parser。
+    - 仅服务解析器内部对 `#symbol.expr<...>` 文本片段的规范化。
+    - 不把裸 `StringAttr("N")` 或 `IntAttr(1)` 解释为公开 memory shape/stride 输入。
 
     使用示例:
     - _unwrap_symbol_expr_attr_text("#symbol.expr<N>")
@@ -1096,7 +1096,7 @@ def _entry_to_expr(entry: Attribute, op_name: str, field_name: str) -> str:
     - 将 `NnMemoryType` 中的 `shape/stride` 条目收敛为 `!symbol.int<#symbol.expr<...>>` 所需字符串。
 
     使用示例:
-    - _entry_to_expr(IntAttr(4), "symbol.get_dim", "shape")
+    - _entry_to_expr(SymbolExprAttr.from_expr("4"), "symbol.get_dim", "shape")
 
     关联文件:
     - spec: spec/dialect/symbol.md
@@ -1890,8 +1890,8 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
-        for field_name in ("lhs", "rhs"):
-            operand = SSAValue.get(getattr(self, field_name))
+        for field_name, field_operand in (("lhs", self.lhs), ("rhs", self.rhs)):
+            operand = SSAValue.get(field_operand)
             if not _is_symbol_arith_operand_type(operand.type):
                 _raise_verify_error(f"{self.name} {field_name} must have type !symbol.int<#symbol.expr<expr>> or !symbol.iter<...>")
         if not _is_symbol_int_type(self.result.type):
@@ -2037,8 +2037,8 @@ class _BaseSymbolCompareOp(IRDLOperation, HasFolderInterface):
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
-        for field_name in ("lhs", "rhs"):
-            operand = SSAValue.get(getattr(self, field_name))
+        for field_name, field_operand in (("lhs", self.lhs), ("rhs", self.rhs)):
+            operand = SSAValue.get(field_operand)
             if not _is_symbol_arith_operand_type(operand.type):
                 _raise_verify_error(f"{self.name} {field_name} must have type !symbol.int<#symbol.expr<expr>> or !symbol.iter<...>")
         if self.result.type != i1:

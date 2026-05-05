@@ -4,7 +4,7 @@
 
 - 定义 `arch` dialect 的硬件执行维度查询、barrier 与内核启动描述接口。
 - 该方言只覆盖 block/thread/subthread/shared_memory_size 四层执行索引、执行规模查询、动态内存入口、barrier 与启动描述，不负责实际调度、循环或 memory 读写语义。
-- 执行维度标量统一使用 `!symbol.int<"expr">` 表达，以便与现有 `symbol`、`dma`、`dsl` 链路保持一致。
+- 执行维度标量统一使用 `!symbol.int<#symbol.expr<expr>>` 表达，以便与现有 `symbol`、`dma`、`dsl` 链路保持一致。
 
 ## API 列表
 
@@ -35,7 +35,7 @@
 
 ## 依赖
 
-- [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)：提供执行维度标量统一使用的 `!symbol.int<"expr">` 类型语义。
+- [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)：提供执行维度标量统一使用的 `!symbol.int<#symbol.expr<expr>>` 类型语义。
 - [`spec/dialect/nn.md`](../../spec/dialect/nn.md)：提供 `NnMemoryType` 与 `NnMemorySpaceAttr` 的文本与校验规则。
 - [`kernel_gen/dialect/__init__.py`](../../kernel_gen/dialect/__init__.py)：共享 `kernel_gen.dialect` 包入口；本 spec 只约束其中 `arch` 相关公开导出，`nn` 导出边界仍由各自 spec 单独约束。
 
@@ -53,14 +53,14 @@
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - `arch` dialect 只定义执行维度查询、动态内存入口、barrier 与启动描述；不定义网格调度策略、kernel body、memory copy 或张量算术。
 - `arch.get_block_id`、`arch.get_block_num`、`arch.get_thread_id`、`arch.get_thread_num`、`arch.get_subthread_id`、`arch.get_subthread_num` 都是无 operand、单结果 op。
-- 上述查询 op 的结果类型必须分别固定为 `!symbol.int<"block_id">`、`!symbol.int<"block_num">`、`!symbol.int<"thread_id">`、`!symbol.int<"thread_num">`、`!symbol.int<"subthread_id">`、`!symbol.int<"subthread_num">`，不得改写为 builtin `index`、普通整数或其他符号表达。
+- 上述查询 op 的结果类型必须分别固定为 `!symbol.int<#symbol.expr<block_id>>`、`!symbol.int<#symbol.expr<block_num>>`、`!symbol.int<#symbol.expr<thread_id>>`、`!symbol.int<#symbol.expr<thread_num>>`、`!symbol.int<#symbol.expr<subthread_id>>`、`!symbol.int<#symbol.expr<subthread_num>>`，不得改写为 builtin `index`、普通整数或其他符号表达。
 - `arch.get_dynamic_memory` 只描述“获取某个 memory space 对应的动态 memory 入口”；不负责容量求值、分配策略或布局推导。
 - `arch.get_dynamic_memory` 的结果类型当前统一为一维 named-capacity 字节缓冲：`!nn.memory<[SM_SIZE], [1], i8, #nn.space<shared>>`、`!nn.memory<[LM_SIZE], [1], i8, #nn.space<local>>`、`!nn.memory<[TSM_SIZE], [1], i8, #nn.space<tsm>>`、`!nn.memory<[TLM1_SIZE], [1], i8, #nn.space<tlm1>>`、`!nn.memory<[TLM2_SIZE], [1], i8, #nn.space<tlm2>>`、`!nn.memory<[TLM3_SIZE], [1], i8, #nn.space<tlm3>>`。
 - `arch.get_dynamic_memory` 的 `memory_space` 只允许 `shared`、`local`、`tsm`、`tlm1`、`tlm2`、`tlm3`；`global` 与旧 `tlm` 不属于动态片上内存入口范围，必须报错。
 - `arch.barrier` 只描述同步请求；不负责数据搬运、事件管理或 target 私有副作用。
 - `arch.barrier` 的 `scope` 只允许 `block/thread/subthread/global`，`visibility` 必须且只能包含 `#arch.visibility<tsm>` 与 `#arch.visibility<tlm>` 各一次。
 - `arch.launch` 只描述一次 kernel 启动请求，不定义返回值、region、异步句柄或启动完成语义。
-- `arch.launch` 的 `block`、`thread`、`subthread`、`shared_memory_size` operand 必须为 `!symbol.int<"expr">`，其中前三者表达正整数启动规模，`shared_memory_size` 表达非负共享内存规模；负值、零值与非整型 symbol 标量不属于合法公开语义。
+- `arch.launch` 的 `block`、`thread`、`subthread`、`shared_memory_size` operand 必须为 `!symbol.int<#symbol.expr<expr>>`，其中前三者表达正整数启动规模，`shared_memory_size` 表达非负共享内存规模；负值、零值与非整型 symbol 标量不属于合法公开语义。
 - 本文件只约束公开 IR 形式与 verifier 边界；不承诺 host/runtime 如何消费这些 op。
 - `kernel_gen/dialect/__init__.py` 属于共享包入口文件，是本 spec “每个 spec 原则上只对应一个源文件”的例外；本文件只定义该包入口中 `Arch`、`ArchGetBlockIdOp`、`ArchGetBlockNumOp`、`ArchGetThreadIdOp`、`ArchGetThreadNumOp`、`ArchGetSubthreadIdOp`、`ArchGetSubthreadNumOp`、`ArchGetDynamicMemoryOp`、`ArchLaunchOp` / `ArchLaunchKernelOp` 这些 `arch` 公开符号的导出边界，不延伸约束同文件中的 `nn` 导出。
 
@@ -324,12 +324,12 @@
 
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
-| TC-ARCH-001 | 执行结果 | `arch.get_block_id` 固定返回 `!symbol.int<"block_id">` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_block_id_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_block_id` 固定返回 `!symbol.int<"block_id">`”场景。 | `test_arch_get_block_id_result_type` |
-| TC-ARCH-002 | 执行结果 | `arch.get_block_num` 固定返回 `!symbol.int<"block_num">` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_block_num_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_block_num` 固定返回 `!symbol.int<"block_num">`”场景。 | `test_arch_get_block_num_result_type` |
-| TC-ARCH-003 | 执行结果 | `arch.get_thread_id` 固定返回 `!symbol.int<"thread_id">` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_thread_id_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_thread_id` 固定返回 `!symbol.int<"thread_id">`”场景。 | `test_arch_get_thread_id_result_type` |
-| TC-ARCH-004 | 执行结果 | `arch.get_thread_num` 固定返回 `!symbol.int<"thread_num">` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_thread_num_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_thread_num` 固定返回 `!symbol.int<"thread_num">`”场景。 | `test_arch_get_thread_num_result_type` |
-| TC-ARCH-005 | 执行结果 | `arch.get_subthread_id` 固定返回 `!symbol.int<"subthread_id">` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_subthread_id_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_subthread_id` 固定返回 `!symbol.int<"subthread_id">`”场景。 | `test_arch_get_subthread_id_result_type` |
-| TC-ARCH-006 | 执行结果 | `arch.get_subthread_num` 固定返回 `!symbol.int<"subthread_num">` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_subthread_num_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_subthread_num` 固定返回 `!symbol.int<"subthread_num">`”场景。 | `test_arch_get_subthread_num_result_type` |
+| TC-ARCH-001 | 执行结果 | `arch.get_block_id` 固定返回 `!symbol.int<#symbol.expr<block_id>>` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_block_id_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_block_id` 固定返回 `!symbol.int<#symbol.expr<block_id>>`”场景。 | `test_arch_get_block_id_result_type` |
+| TC-ARCH-002 | 执行结果 | `arch.get_block_num` 固定返回 `!symbol.int<#symbol.expr<block_num>>` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_block_num_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_block_num` 固定返回 `!symbol.int<#symbol.expr<block_num>>`”场景。 | `test_arch_get_block_num_result_type` |
+| TC-ARCH-003 | 执行结果 | `arch.get_thread_id` 固定返回 `!symbol.int<#symbol.expr<thread_id>>` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_thread_id_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_thread_id` 固定返回 `!symbol.int<#symbol.expr<thread_id>>`”场景。 | `test_arch_get_thread_id_result_type` |
+| TC-ARCH-004 | 执行结果 | `arch.get_thread_num` 固定返回 `!symbol.int<#symbol.expr<thread_num>>` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_thread_num_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_thread_num` 固定返回 `!symbol.int<#symbol.expr<thread_num>>`”场景。 | `test_arch_get_thread_num_result_type` |
+| TC-ARCH-005 | 执行结果 | `arch.get_subthread_id` 固定返回 `!symbol.int<#symbol.expr<subthread_id>>` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_subthread_id_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_subthread_id` 固定返回 `!symbol.int<#symbol.expr<subthread_id>>`”场景。 | `test_arch_get_subthread_id_result_type` |
+| TC-ARCH-006 | 执行结果 | `arch.get_subthread_num` 固定返回 `!symbol.int<#symbol.expr<subthread_num>>` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_arch_get_subthread_num_result_type`。 | 命令返回码、输出、执行结果或状态变更体现“`arch.get_subthread_num` 固定返回 `!symbol.int<#symbol.expr<subthread_num>>`”场景。 | `test_arch_get_subthread_num_result_type` |
 | TC-ARCH-007 | 内存/DMA | `arch.get_dynamic_memory` 合法路径 | 准备 `shared/tlm1/tlm2/tlm3` 等公开 memory space。 | 运行 `test_arch_get_dynamic_memory_success` 与 `test_arch_get_dynamic_memory_supports_tlm123`。 | verifier 接受合法 space，并打印对应 `SM_SIZE/TLM1_SIZE/TLM2_SIZE/TLM3_SIZE` named capacity。 | `test_arch_get_dynamic_memory_success` / `test_arch_get_dynamic_memory_supports_tlm123` |
 | TC-ARCH-008 | 边界/异常 | `arch.get_dynamic_memory` 非法 `memory_space`/结果类型被拒绝 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_arch_get_dynamic_memory_verify_errors`。 | “`arch.get_dynamic_memory` 非法 `memory_space`/结果类型被拒绝”场景按公开错误语义失败或被拒绝。 | `test_arch_get_dynamic_memory_verify_errors` |
 | TC-ARCH-009 | 公开入口 | `arch.launch` 合法路径 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_arch_launch_kernel_success`。 | 公开入口在“`arch.launch` 合法路径”场景下可导入、构造、注册或按名称发现。 | `test_arch_launch_kernel_success` |

@@ -46,7 +46,6 @@ from xdsl.dialects.builtin import (
     IntAttr,
     IntegerAttr,
     IntegerType,
-    StringAttr,
     i32,
 )
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
@@ -62,11 +61,10 @@ from xdsl.irdl import (
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.core.contracts import (
-    dims_equal as _common_dims_equal,
     verify_memory_type as _common_verify_memory_type,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolIterType, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolIterType, SymbolValueType
 
 
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
@@ -112,8 +110,8 @@ def _verify_fill_value_operand(value: SSAValue, field_name: str) -> SSAValue:
 
 
     功能说明:
-    - 当前仅接受 builtin `i32` 或 `!symbol.int<"expr">`。
-    - 若为 `!symbol.int<"expr">`，同步触发其类型校验。
+    - 当前仅接受 builtin `i32` 或 `!symbol.int<#symbol.expr<expr>>`。
+    - 若为 `!symbol.int<#symbol.expr<expr>>`，同步触发其类型校验。
 
     使用示例:
     - _verify_fill_value_operand(op.value, "value")
@@ -133,11 +131,11 @@ def _verify_fill_value_operand(value: SSAValue, field_name: str) -> SSAValue:
 
 
 def _operand_int_value(value: SSAValue) -> int | None:
-    """尝试从 `!symbol.int<"expr">` SSA operand 恢复静态整型值。
+    """尝试从 `!symbol.int<#symbol.expr<expr>>` SSA operand 恢复静态整型值。
 
 
     功能说明:
-    - 仅识别字面量整数表达式，例如 `!symbol.int<"4">`。
+    - 仅识别字面量整数表达式，例如 `!symbol.int<#symbol.expr<4>>`。
     - `!symbol.iter<start = "...", end = "...", step = "...">` 视为运行期值，不参与静态比较。
 
     使用示例:
@@ -163,11 +161,11 @@ def _operand_int_value(value: SSAValue) -> int | None:
 def _verify_symbol_int_operands(
     values: Sequence[SSAValue], field_name: str, *, min_value: int
 ) -> Sequence[SSAValue]:
-    """校验 `!symbol.int<"expr">` operand 列表。
+    """校验 `!symbol.int<#symbol.expr<expr>>` operand 列表。
 
 
     功能说明:
-    - 确保所有 operand 类型为 `!symbol.int<"expr">`。
+    - 确保所有 operand 类型为 `!symbol.int<#symbol.expr<expr>>`。
     - 若 operand 可静态恢复为整型常量，则施加最小值约束。
 
     使用示例:
@@ -238,6 +236,84 @@ def _verify_rank_match(values: Sequence[SSAValue], rank: int, field_name: str) -
         raise VerifyException(f"{field_name} length must match rank")
 
 
+def _symbol_expr_attr_from_expr(expr: str) -> SymbolExprAttr:
+    """构造公开 SymbolExprAttr。
+
+    功能说明:
+    - 统一 dma dialect 内部 shape/stride 推导的结构化表达构造。
+
+    使用示例:
+    - _symbol_expr_attr_from_expr("N")
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    return SymbolExprAttr.from_expr(expr)
+
+
+def _dim_expr_text(dim: Attribute) -> str:
+    """读取 memory shape/stride 的 SymbolExprAttr 文本。
+
+    功能说明:
+    - 拒绝旧 IntAttr/StringAttr shape/stride 入口。
+
+    使用示例:
+    - _dim_expr_text(SymbolExprAttr.from_expr("N"))
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if not isinstance(dim, SymbolExprAttr):
+        raise VerifyException("memory layout entries must be SymbolExprAttr")
+    dim.verify()
+    return dim.expr.data
+
+
+def _static_int_from_expr_text(expr: str) -> int | None:
+    """尝试从 SymbolExprAttr 文本提取静态整数。
+
+    功能说明:
+    - 仅识别十进制整数字面量；动态表达式返回 None。
+
+    使用示例:
+    - _static_int_from_expr_text("4")
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    signless = expr[1:] if expr.startswith("-") else expr
+    if signless.isdecimal():
+        return int(expr)
+    return None
+
+
+def _static_int_from_dim(dim: Attribute) -> int | None:
+    """尝试从 SymbolExprAttr 维度提取静态整数。
+
+    功能说明:
+    - 对 `#symbol.expr<4>` 返回 4；动态维度返回 None。
+
+    使用示例:
+    - _static_int_from_dim(SymbolExprAttr.from_expr("4"))
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    return _static_int_from_expr_text(_dim_expr_text(dim))
+
+
 def _verify_operands_match_layout(
     values: Sequence[SSAValue],
     layout: ArrayAttr[Attribute],
@@ -247,8 +323,8 @@ def _verify_operands_match_layout(
 
 
     功能说明:
-    - 若布局维度为 `IntAttr`，对应 operand 必须是相同值的 `!symbol.int<"n">`。
-    - 若布局维度为符号属性，则只要求存在 `!symbol.int<"expr">` SSA operand。
+    - 若布局维度为静态 `SymbolExprAttr`，对应 operand 必须是相同值的 `!symbol.int<#symbol.expr<n>>`。
+    - 若布局维度为符号表达式，则 operand 的公开表达式必须一致。
 
     使用示例:
     - _verify_operands_match_layout(op.sizes, result_type.shape, "shape must match sizes")
@@ -260,10 +336,17 @@ def _verify_operands_match_layout(
     """
 
     for value, expected in zip(values, layout.data, strict=True):
-        if isinstance(expected, IntAttr):
+        expected_int = _static_int_from_dim(expected)
+        if expected_int is not None:
             static_value = _operand_int_value(value)
-            if static_value != expected.data:
+            if static_value != expected_int:
                 raise VerifyException(mismatch_message)
+            continue
+        expected_expr = _dim_expr_text(expected)
+        if expected_expr == "?":
+            continue
+        if not isinstance(value.type, SymbolValueType) or value.type.get_value() != expected_expr:
+            raise VerifyException(mismatch_message)
 
 
 def _parse_symbolic_expr_text(text: str) -> sp.Basic | None:
@@ -327,14 +410,12 @@ def _verify_dynamic_shape_matches_result(
 
     symbol_dims: list[str] = []
     for dim in result_shape.data:
-        if isinstance(dim, IntAttr):
+        dim_expr = _dim_expr_text(dim)
+        if _static_int_from_dim(dim) is not None:
             continue
-        if isinstance(dim, StringAttr):
-            if dim.data == "?":
-                raise VerifyException(f"{field_name} must not contain '?'")
-            symbol_dims.append(dim.data)
-            continue
-        raise VerifyException(f"{field_name} entries must be IntAttr or StringAttr")
+        if dim_expr == "?":
+            raise VerifyException(f"{field_name} must not contain '?'")
+        symbol_dims.append(dim_expr)
 
     if len(dynamic_shape) != len(symbol_dims):
         raise VerifyException(f"{field_name} length must match symbol rank")
@@ -373,13 +454,11 @@ def _verify_broadcast_compat(
 
     for offset in range(1, len(target_dims) + 1):
         target_dim = target_dims[-offset]
-        source_dim = source_dims[-offset] if offset <= len(source_dims) else IntAttr(1)
-        if isinstance(source_dim, IntAttr) and isinstance(target_dim, IntAttr):
-            if (
-                source_dim.data != target_dim.data
-                and source_dim.data != 1
-                and target_dim.data != 1
-            ):
+        source_dim = source_dims[-offset] if offset <= len(source_dims) else _symbol_expr_attr_from_expr("1")
+        source_value = _static_int_from_dim(source_dim)
+        target_value = _static_int_from_dim(target_dim)
+        if source_value is not None and target_value is not None:
+            if source_value != target_value and source_value != 1 and target_value != 1:
                 raise VerifyException("dma.broadcast shape mismatch")
 
 
@@ -388,11 +467,10 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
 
 
     功能说明:
-    - 支持 IntAttr 与 StringAttr 的值一致性判断。
-    - 其他类型统一视为不一致。
+    - 支持 SymbolExprAttr 的 canonical 文本一致性判断。
 
     使用示例:
-    - _dims_equal(IntAttr(2), IntAttr(2))
+    - _dims_equal(SymbolExprAttr.from_expr("N"), SymbolExprAttr.from_expr("N"))
 
     关联文件:
     - spec: spec/dialect/dma.md
@@ -400,7 +478,9 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    return _common_dims_equal(lhs, rhs)
+    if isinstance(lhs, SymbolExprAttr) and isinstance(rhs, SymbolExprAttr):
+        return lhs.expr.data == rhs.expr.data
+    return False
 
 
 def _verify_transpose_perm(perm: ArrayAttr, rank: int) -> list[int]:
@@ -476,7 +556,7 @@ def _verify_unit_stride_operands(strides: Sequence[SSAValue]) -> None:
 
     功能说明:
     - 当前阶段仅支持单位步长语义。
-    - 每个 operand 都必须是值为 `1` 的 `!symbol.int<"1">`。
+    - 每个 operand 都必须是值为 `1` 的 `!symbol.int<#symbol.expr<1>>`。
 
     使用示例:
     - _verify_unit_stride_operands(op.strides)
@@ -586,10 +666,10 @@ def _maybe_numel(shape: ArrayAttr[Attribute]) -> int | None:
 
 
     功能说明:
-    - 仅在全部维度为 IntAttr 时返回乘积。
+    - 仅在全部维度为静态整数 SymbolExprAttr 时返回乘积。
 
     使用示例:
-    - _maybe_numel(ArrayAttr([IntAttr(2), IntAttr(4)]))
+    - _maybe_numel(ArrayAttr([SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("4")]))
 
     关联文件:
     - spec: spec/dialect/dma.md
@@ -599,9 +679,10 @@ def _maybe_numel(shape: ArrayAttr[Attribute]) -> int | None:
 
     numel = 1
     for dim in shape.data:
-        if not isinstance(dim, IntAttr):
+        value = _static_int_from_dim(dim)
+        if value is None:
             return None
-        numel *= dim.data
+        numel *= value
     return numel
 
 
@@ -636,15 +717,16 @@ def _verify_static_view_bounds(
     for source_step_attr, offset_value, size_value, stride_value in zip(
         source_stride.data, offsets, shape, stride, strict=True
     ):
-        if not isinstance(source_step_attr, IntAttr):
+        source_step = _static_int_from_dim(source_step_attr)
+        if source_step is None:
             return
         offset_int = _operand_int_value(offset_value)
         size_int = _operand_int_value(size_value)
         stride_int = _operand_int_value(stride_value)
         if offset_int is None or size_int is None or stride_int is None:
             return
-        linear_start += offset_int * source_step_attr.data
-        linear_extent += (size_int - 1) * stride_int * source_step_attr.data
+        linear_start += offset_int * source_step
+        linear_extent += (size_int - 1) * stride_int * source_step
     if linear_start + linear_extent >= source_numel:
         raise VerifyException("dma.view bounds mismatch")
 
@@ -654,12 +736,12 @@ def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
 
 
     功能说明:
-    - 静态维度返回 `IntAttr` 乘积。
-    - 符号维度返回无空格 `*` 连接的乘法表达式。
-    - `?` 维度会把更高维 stride 退化为 `?`。
+    - 静态维度返回 `#symbol.expr<整数>`。
+    - 符号维度返回 canonical `#symbol.expr<乘积>`。
+    - `#symbol.expr<?>` 维度会把更高维 stride 退化为 `#symbol.expr<?>`。
 
     使用示例:
-    - _default_contiguous_stride(ArrayAttr([IntAttr(2), IntAttr(4)]))
+    - _default_contiguous_stride(ArrayAttr([SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("4")]))
 
     关联文件:
     - spec: spec/dialect/dma.md
@@ -668,34 +750,23 @@ def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
     """
 
     stride: list[Attribute] = []
-    running: int | str | None = 1
+    running: str | None = "1"
     for dim in reversed(shape.data):
         if running is None:
-            stride.append(StringAttr("?"))
-        elif isinstance(running, int):
-            stride.append(IntAttr(running))
+            stride.append(_symbol_expr_attr_from_expr("?"))
         else:
-            stride.append(StringAttr(running))
+            stride.append(_symbol_expr_attr_from_expr(running))
         if running is None:
             continue
-        if isinstance(dim, IntAttr):
-            if dim.data == 1:
-                continue
-            if isinstance(running, int):
-                running *= dim.data
-            else:
-                running = f"{dim.data}*{running}"
-            continue
-        if isinstance(dim, StringAttr):
-            if dim.data == "?":
-                running = None
-            elif running == 1:
-                running = dim.data
-            else:
-                running = f"{dim.data}*{running}"
-            continue
-        if running is not None:
+        dim_expr = _dim_expr_text(dim)
+        if dim_expr == "?":
             running = None
+        elif dim_expr == "1":
+            continue
+        elif running == "1":
+            running = dim_expr
+        else:
+            running = _dim_expr_text(_symbol_expr_attr_from_expr(f"{dim_expr}*{running}"))
     stride.reverse()
     return stride
 
@@ -705,13 +776,12 @@ def _parse_symbolic_dim_attr(value: Attribute) -> sp.Basic | None:
 
 
     功能说明:
-    - `IntAttr` 解析为整数表达式。
-    - `StringAttr` 解析为符号表达式，并为所有标识符创建同名整数符号。
+    - `SymbolExprAttr` 解析为符号表达式，并为所有标识符创建同名整数符号。
     - `min(...)` 按 `sympy.Min` 解析，用于判定动态尾块连续 stride。
     - 无法解析或未知动态维度时返回 `None`。
 
     使用示例:
-    - _parse_symbolic_dim_attr(StringAttr("KH*KW*TC"))
+    - _parse_symbolic_dim_attr(SymbolExprAttr.from_expr("KH*KW*TC"))
 
     关联文件:
     - spec: spec/dialect/dma.md
@@ -719,15 +789,13 @@ def _parse_symbolic_dim_attr(value: Attribute) -> sp.Basic | None:
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    if isinstance(value, IntAttr):
-        return sp.Integer(value.data)
-    if not isinstance(value, StringAttr):
+    if not isinstance(value, SymbolExprAttr):
         return None
-    return _parse_symbolic_expr_text(value.data)
+    return _parse_symbolic_expr_text(value.expr.data)
 
 
 def _parse_symbol_value_expr(value: SSAValue) -> sp.Basic | None:
-    """解析 `!symbol.int<"expr">` operand 为 sympy 表达式。
+    """解析 `!symbol.int<#symbol.expr<expr>>` operand 为 sympy 表达式。
 
 
     功能说明:
@@ -757,7 +825,7 @@ def _stride_attrs_equal(lhs: Attribute, rhs: Attribute) -> bool:
     - 当文本不同但表达式等价时，使用 sympy 简化差值判断。
 
     使用示例:
-    - _stride_attrs_equal(StringAttr("TC*KH*KW"), StringAttr("KH*KW*TC"))
+    - _stride_attrs_equal(SymbolExprAttr.from_expr("TC*KH*KW"), SymbolExprAttr.from_expr("KH*KW*TC"))
 
     关联文件:
     - spec: spec/dialect/dma.md
@@ -765,7 +833,7 @@ def _stride_attrs_equal(lhs: Attribute, rhs: Attribute) -> bool:
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    if _common_dims_equal(lhs, rhs):
+    if _dims_equal(lhs, rhs):
         return True
     lhs_expr = _parse_symbolic_dim_attr(lhs)
     rhs_expr = _parse_symbolic_dim_attr(rhs)
@@ -941,7 +1009,7 @@ class DmaFillOp(IRDLOperation):
 
         功能说明:
         - `target` 必须为 `!nn.memory<..., i32, ...>`。
-        - `value` 当前仅允许 builtin `i32` 或 `!symbol.int<"expr">`。
+        - `value` 当前仅允许 builtin `i32` 或 `!symbol.int<#symbol.expr<expr>>`。
 
         使用示例:
         - DmaFillOp(...).verify_()
@@ -1625,7 +1693,7 @@ class DmaSubviewOp(IRDLOperation):
 
         功能说明:
         - 设置一维 i8 backing memory、元素单位 offset/size/stride 与一维 typed result。
-        - `offset/size/stride` 均为单个 `!symbol.int<"expr">` operand。
+        - `offset/size/stride` 均为单个 `!symbol.int<#symbol.expr<expr>>` operand。
 
         使用示例:
         - DmaSubviewOp(pool, offset, size, stride, flat_result_type)
@@ -1651,7 +1719,7 @@ class DmaSubviewOp(IRDLOperation):
         功能说明:
         - source 必须是一维 i8 backing memory。
         - result 必须是一维 contiguous typed memory，且 space 与 source 一致。
-        - offset/size/stride 都必须是单个 `!symbol.int<"expr">`；size 必须匹配 result flat shape。
+        - offset/size/stride 都必须是单个 `!symbol.int<#symbol.expr<expr>>`；size 必须匹配 result flat shape。
 
         使用示例:
         - DmaSubviewOp(...).verify_()

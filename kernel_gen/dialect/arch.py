@@ -3,7 +3,7 @@
 
 功能说明:
 - 定义 arch dialect 的执行维度查询、动态片上内存入口、barrier 与 launch op。
-- 复用 symbol dialect 的 `!symbol.int<"expr">` 与 nn dialect 的 `nn.memory/#nn.space`。
+- 复用 symbol dialect 的 `!symbol.int<#symbol.expr<...>>` 与 nn dialect 的 `nn.memory/#nn.space`。
 
 API 列表:
 - `class ArchScopeAttr(scope: StringAttr)`
@@ -55,7 +55,7 @@ from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
 from kernel_gen.target import registry as target_registry
 
 _DYNAMIC_MEMORY_SPACES = {"shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
@@ -99,7 +99,7 @@ def _raise_verify_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None:
 
 
 def _verify_symbol_int_operand(value: SSAValue, field_name: str, op_name: str) -> SymbolValueType:
-    """校验单个启动维度 operand 为 `!symbol.int<\"expr\">`。
+    """校验单个启动维度 operand 为 `!symbol.int<#symbol.expr<expr>>`。
 
 
     功能说明:
@@ -118,7 +118,7 @@ def _verify_symbol_int_operand(value: SSAValue, field_name: str, op_name: str) -
         raise VerifyException(
             ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
-                expected=f"{op_name} {field_name} must have type !symbol.int<\"expr\">",
+                expected=f"{op_name} {field_name} must have type !symbol.int<#symbol.expr<expr>>",
                 actual=ERROR_ACTUAL,
                 action=ERROR_ACTION,
             )
@@ -377,7 +377,7 @@ def _dynamic_memory_result_type(space: NnMemorySpaceAttr) -> NnMemoryType:
 
 
     功能说明:
-    - 返回 `!nn.memory<[<SPACE>_SIZE], [1], i8, #nn.space<space>>`。
+    - 返回 `!nn.memory<[#symbol.expr<<SPACE>_SIZE>], [#symbol.expr<1>], i8, #nn.space<space>>`。
 
     使用示例:
     - _dynamic_memory_result_type(NnMemorySpaceAttr.from_name("shared"))
@@ -389,8 +389,8 @@ def _dynamic_memory_result_type(space: NnMemorySpaceAttr) -> NnMemoryType:
     """
 
     return NnMemoryType(
-        ArrayAttr([StringAttr(_DYNAMIC_MEMORY_CAPACITY_SYMBOLS.get(space.space.data, "?"))]),
-        ArrayAttr([IntAttr(1)]),
+        ArrayAttr([SymbolExprAttr.from_expr(_DYNAMIC_MEMORY_CAPACITY_SYMBOLS.get(space.space.data, "?"))]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
         i8,
         space,
     )
@@ -485,7 +485,7 @@ class _BaseArchIndexQueryOp(IRDLOperation):
             raise VerifyException(
                 ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
-                    expected=f"{self.name} result type must be !symbol.int<\"{self.RESULT_EXPR}\">",
+                    expected=f"{self.name} result type must be !symbol.int<#symbol.expr<{self.RESULT_EXPR}>>",
                     actual=ERROR_ACTUAL,
                     action=ERROR_ACTION,
                 )
@@ -649,23 +649,23 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
                 )
             )
         expected_capacity = _DYNAMIC_MEMORY_CAPACITY_SYMBOLS[space_name]
-        if result_type.shape.data[0] != StringAttr(expected_capacity):
+        if result_type.shape.data[0] != SymbolExprAttr.from_expr(expected_capacity):
             raise VerifyException(
                 ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected=(
                         "arch.get_dynamic_memory result shape must be "
-                        f"[{expected_capacity}]"
+                        f"[#symbol.expr<{expected_capacity}>]"
                     ),
                     actual=ERROR_ACTUAL,
                     action=ERROR_ACTION,
                 )
             )
-        if result_type.stride.data[0] != IntAttr(1):
+        if result_type.stride.data[0] != SymbolExprAttr.from_expr("1"):
             raise VerifyException(
                 ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
-                    expected="arch.get_dynamic_memory result stride must be [1]",
+                    expected="arch.get_dynamic_memory result stride must be [#symbol.expr<1>]",
                     actual=ERROR_ACTUAL,
                     action=ERROR_ACTION,
                 )
@@ -860,8 +860,12 @@ class ArchLaunchOp(IRDLOperation):
         _verify_target_registry_support(self.name)
         _verify_launch_callee_attr(self.callee)
 
-        for field_name in ("block", "thread", "subthread"):
-            operand_value = SSAValue.get(getattr(self, field_name))
+        for field_name, operand in (
+            ("block", self.block),
+            ("thread", self.thread),
+            ("subthread", self.subthread),
+        ):
+            operand_value = SSAValue.get(operand)
             operand_type = _verify_symbol_int_operand(operand_value, field_name, self.name)
             _verify_positive_static_symbol(operand_type, field_name, self.name)
         shared_memory_size = SSAValue.get(self.shared_memory_size)

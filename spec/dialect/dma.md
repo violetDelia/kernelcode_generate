@@ -35,7 +35,7 @@
 - [`kernel_gen/dialect/dma.py`](../../kernel_gen/dialect/dma.py)：`dma dialect` 的方言实现入口。
 - [`kernel_gen/dialect/nn.py`](../../kernel_gen/dialect/nn.py)：提供 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 - [`spec/dialect/nn.md`](../../spec/dialect/nn.md)：定义被 `dma dialect` 复用的 memory type / memory space 语义。
-- [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)：定义 `!symbol.int<"expr">` 标量值语义，供 `dma` 标量输入统一复用。
+- [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)：定义 `!symbol.int<#symbol.expr<expr>>` 标量值语义，供 `dma` 标量输入统一复用。
 - [`spec/operation/dma.md`](../../spec/operation/dma.md)：定义高层 `alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast` API 的分层语义。
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：说明高层 `Memory` 概念与 `shape/stride/dtype/space` 元信息来源。
 
@@ -43,11 +43,11 @@
 
 - 为项目提供统一的数据搬运、布局转换与显式数据转换方言层表示。
 - 让整块拷贝、切片读取、切片回写、跨空间搬运与显式数据转换在 IR 中有明确 op 语义。
-- 为 `const(i32)` / `!symbol.int<"expr">` 到临时 memory 的真实物化提供稳定方言层原语，避免只生成空 `dma.alloc` 占位。
+- 为 `const(i32)` / `!symbol.int<#symbol.expr<expr>>` 到临时 memory 的真实物化提供稳定方言层原语，避免只生成空 `dma.alloc` 占位。
 - 为 `nn.broadcast/transpose` 与 mixed compare 桥接提供稳定 lowering 目标面：`dma.broadcast` / `dma.transpose`。
-- 保留 `shape/stride/offsets/sizes/strides` 等搬运元信息，覆盖静态与动态场景，并统一将这些运行期标量输入建模为 `!symbol.int<"expr">` SSA value；其中 `offsets` 允许使用 `!symbol.iter<"expr">` 表达迭代变量来源。
+- 保留 `shape/stride/offsets/sizes/strides` 等搬运元信息，覆盖静态与动态场景，并统一将这些运行期标量输入建模为 `!symbol.int<#symbol.expr<expr>>` SSA value；其中 `offsets` 允许使用 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>` 表达迭代变量来源。
 - 为后续 lowering 到 `tensor.extract_slice`、`tensor.insert_slice`、`memref.copy`、后端 DMA 指令或 runtime API 提供稳定中间层。
-- 参考 `memref.subview` / `memref.reinterpret_cast` 的设计习惯，将动态布局信息建模为显式 SSA 标量操作数，而不是仅放在 attribute 中；当前项目统一使用 `!symbol.int<"expr">` 承载这些整数标量输入。
+- 参考 `memref.subview` / `memref.reinterpret_cast` 的设计习惯，将动态布局信息建模为显式 SSA 标量操作数，而不是仅放在 attribute 中；当前项目统一使用 `!symbol.int<#symbol.expr<expr>>` 承载这些整数标量输入。
 
 ## 额外补充
 
@@ -79,44 +79,44 @@
 - 对 `dma.copy/load/store/slice/deslice`，相关 `element_type` 必须一致，不允许隐式类型转换。
 - 对 `dma.cast`，只允许 `element_type` 发生显式变化；`shape/stride/space` 必须保持一致。
 - `shape/stride` 的 rank 必须与相关 `offsets/sizes/strides` 列表长度一致。
-- `offsets` 允许使用 `!symbol.int<"expr">` 或 `!symbol.iter<"expr">`；`sizes`、`strides`、动态 `shape`、动态 `stride` 必须建模为显式 `!symbol.int<"expr">` SSA 操作数列表；不得只靠 `StringAttr("?")`、`ArrayAttr` 或其他 attribute 独立表达运行期值。
-- index-like 标量 operand 中，`offsets` 允许 `!symbol.int<"expr">` 或 `!symbol.iter<"expr">`；其余仍仅接受 `!symbol.int<"expr">` SSA value。禁止直接使用 Python `int/float` 或 builtin 数值类型替代，静态常量必须先 materialize 为 `!symbol.int<"expr">`。
-- `dma.fill.value` 不属于 index-like 布局 operand。当前公开口径仅接受 builtin `i32` 或 `!symbol.int<"expr">` 两类整数标量，并要求 `target.element_type == i32`；`f16/f32` 或更宽整数的 scalar materialize 不在本轮范围内。
+- `offsets` 允许使用 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`；`sizes`、`strides`、动态 `shape`、动态 `stride` 必须建模为显式 `!symbol.int<#symbol.expr<expr>>` SSA 操作数列表；不得只靠 `StringAttr("?")`、`ArrayAttr` 或其他 attribute 独立表达运行期值。
+- index-like 标量 operand 中，`offsets` 允许 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`；其余仍仅接受 `!symbol.int<#symbol.expr<expr>>` SSA value。禁止直接使用 Python `int/float` 或 builtin 数值类型替代，静态常量必须先 materialize 为 `!symbol.int<#symbol.expr<expr>>`。
+- `dma.fill.value` 不属于 index-like 布局 operand。当前公开口径仅接受 builtin `i32` 或 `!symbol.int<#symbol.expr<expr>>` 两类整数标量，并要求 `target.element_type == i32`；`f16/f32` 或更宽整数的 scalar materialize 不在本轮范围内。
 - `!nn.memory<...>` 类型仍负责承载 rank、元素类型、内存空间以及可静态判定的布局信息；凡是运行期才确定的布局值，必须由 op operand 传入。
-- 若实现保留静态维度或静态 stride 在类型中，assembly 中的静态值也应允许通过 `!symbol.int<"1">` 这类 symbol 常量值、或等价 materialize 后的 `!symbol.int<"expr">` SSA value 显式传入 operand，保证“布局参数来源统一为 operand”。
-- `dma.load/store/slice/deslice` 的 `offsets` 必须为 variadic `!symbol.int<"expr">` 或 `!symbol.iter<"expr">` operand；`sizes/strides` 仍为 variadic `!symbol.int<"expr">` operand。
+- 若实现保留静态维度或静态 stride 在类型中，assembly 中的静态值也应允许通过 `!symbol.int<#symbol.expr<1>>` 这类 symbol 常量值、或等价 materialize 后的 `!symbol.int<#symbol.expr<expr>>` SSA value 显式传入 operand，保证“布局参数来源统一为 operand”。
+- `dma.load/store/slice/deslice` 的 `offsets` 必须为 variadic `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>` operand；`sizes/strides` 仍为 variadic `!symbol.int<#symbol.expr<expr>>` operand。
 - `dma.slice` 必须采用目标式 `dma.slice(target, source, offsets, sizes, strides)`：由 `target` 承载切片结果，op 本身不产生 result。
 - `dma.slice` 的稳定搬运路径语义固定为 `source.space -> target.space`；逻辑字节数按 `sizes` 对应的元素数乘以 `element_type` 字节大小计算。
-- `dma.view` 中与动态布局相关的 `offsets` 允许 `!symbol.int<"expr">` 或 `!symbol.iter<"expr">`，`shape/stride` 仍需 `!symbol.int<"expr">` operand 显式传入；不得仅依赖结果类型里的符号维度推断。
-- `dma.subview` 只表达一维 `i8` backing memory 到一维 typed memory 的连续切分；`offset/size/stride` 必须各由一个 `!symbol.int<"expr">` SSA operand 提供，且 `offset >= 0`、`size >= 1`、`stride >= 1`。
+- `dma.view` 中与动态布局相关的 `offsets` 允许 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`，`shape/stride` 仍需 `!symbol.int<#symbol.expr<expr>>` operand 显式传入；不得仅依赖结果类型里的符号维度推断。
+- `dma.subview` 只表达一维 `i8` backing memory 到一维 typed memory 的连续切分；`offset/size/stride` 必须各由一个 `!symbol.int<#symbol.expr<expr>>` SSA operand 提供，且 `offset >= 0`、`size >= 1`、`stride >= 1`。
 - `dma.subview` 的 `source` 必须是一维 `i8` memory，`result` 必须是一维 contiguous memory，`source.space == result.space`，`size` 必须与 `result_type.shape` 完全一致。
 - `dma.view` 的 `result_type.shape` 必须由 `shape` operand（DSL `view(..., size, ...)`）确定；非 byte pool 场景下，`result_type.stride` 必须等于 `source.stride * stride operand` 的逐维乘积，不得只因“生成了 `dma.view` op”就视为合同对齐成功。
 - 当 `dma.view` 结果直接参与 `func.return` 时，返回的 `!nn.memory<...>` 类型必须与同一份 `result_type` 完全一致；`test/dsl/ast/test_mlir_gen.py` 中的 `EXPECTED_MEMORY` 比对依赖这一边界。
 - 静态可判定时 `dma.view` 的 `source/result` `numel` 必须一致；若 `source` 为一维 `i8` byte pool，则要求字节数一致且静态边界不越界。
-- `dma.reshape` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<"expr">`；结果 `stride` 按 `shape` 的默认连续布局语义生成。
-- `dma.alloc` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<"expr">`；允许两种形态：与结果 rank 等长的全量列表，或仅包含结果 `shape` 中符号维度的列表（按出现顺序）；`stride` 不作为输入，而是按默认连续布局语义生成。
-- 对 mixed add 等需要 `scalar -> memory` 合法化的链路，当前唯一公开合法原语是 `dma.alloc + dma.fill(target, value)`：`dma.alloc` 负责生成 temporary memory，`dma.fill` 负责把 `const(i32)` / `!symbol.int<"expr">` 真实写入该 memory 的每个逻辑元素。仅生成空 `dma.alloc` 占位，或生成 `dma.fill` 后其 `target` 在下游 IR 中 `users=[]`，都不属于当前链路的通过口径。
+- `dma.reshape` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<#symbol.expr<expr>>`；结果 `stride` 按 `shape` 的默认连续布局语义生成。
+- `dma.alloc` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<#symbol.expr<expr>>`；允许两种形态：与结果 rank 等长的全量列表，或仅包含结果 `shape` 中符号维度的列表（按出现顺序）；`stride` 不作为输入，而是按默认连续布局语义生成。
+- 对 mixed add 等需要 `scalar -> memory` 合法化的链路，当前唯一公开合法原语是 `dma.alloc + dma.fill(target, value)`：`dma.alloc` 负责生成 temporary memory，`dma.fill` 负责把 `const(i32)` / `!symbol.int<#symbol.expr<expr>>` 真实写入该 memory 的每个逻辑元素。仅生成空 `dma.alloc` 占位，或生成 `dma.fill` 后其 `target` 在下游 IR 中 `users=[]`，都不属于当前链路的通过口径。
 - `strides` 当前每一维仍限制为单位步长语义，但该约束应体现在 operand 校验阶段，而不是要求使用 `IntAttr(1)` attribute。
 - operation 层允许非单位 `strides` 作为切片步进，但本方言仅实现单位步长语义；因此含非单位 `strides` 的 `dma.load/store/slice/deslice` 必须在 lowering/verifier 阶段拒绝。原因：现有 lowering 目标与 verifier 规则仅覆盖单位步长切片。
 - 若上层 pass 需要把窗口化 hierarchy 搬运收口到 `dma.slice/dma.deslice`，只能复用原窗口的 `offsets/sizes`；新插入的 hierarchy 路径 `strides` 必须继续物化为全 `1`，不得借此扩展本方言到非单位或符号 stride 语义。
-- `sizes` 中每一维必须具有正整数语义，不允许负值；若 `!symbol.int<"expr">` 不能静态证明为正值，则至少要拒绝 `!symbol.int<"0">` 与可静态判定的负值。
+- `sizes` 中每一维必须具有正整数语义，不允许负值；若 `!symbol.int<#symbol.expr<expr>>` 不能静态证明为正值，则至少要拒绝 `!symbol.int<#symbol.expr<0>>` 与可静态判定的负值。
 - 若 op 带有目标空间 attribute，则其值必须与结果 type 或目标 type 的 `space` 一致。
 
 #### 默认连续 stride 推导（符号维度）
 
-- 当 `shape` 中包含 `StringAttr` 时，默认连续 stride 仍按从右到左的累计乘积推导；单个符号如 `N` 直接参与乘积，多维组合可形成 `M*N` 等字符串表达。
-- `StringAttr` 维度可包含 `min(lhs, rhs)` 形式的整数符号最小值；默认连续 stride 与 contiguous verifier 必须按符号表达式等价关系判断，而不是只比较原始字符串。
-- 若维度为 `StringAttr("?")` 或包含 `?` 的表达式，视为未知：该维度及其左侧更高维的默认 stride 统一退化为 `StringAttr("?")`，右侧维度仍按既有规则生成（末维为 `1`）。
-- 该规则仅用于 `dma.alloc` / `dma.reshape` 的默认连续 stride 推导与 verifier 校验，不替代显式 `!symbol.int<"expr">` SSA operand 建模；`offsets` 允许 `!symbol.int<"expr">` 或 `!symbol.iter<"expr">`，`sizes/strides` 仍必须通过 `!symbol.int<"expr">` SSA operand 传入。
+- 当 `shape` 中包含动态 `SymbolExprAttr` 时，默认连续 stride 仍按从右到左的累计乘积推导；单个符号如 `#symbol.expr<N>` 直接参与乘积，多维组合可形成 `#symbol.expr<M*N>` 等结构化表达。
+- `SymbolExprAttr` 维度可包含 `min(lhs, rhs)` 形式的整数符号最小值；默认连续 stride 与 contiguous verifier 必须按符号表达式等价关系判断，而不是只比较原始文本。
+- 若维度为 `#symbol.expr<?>` 或包含 `?` 的表达式，视为未知：该维度及其左侧更高维的默认 stride 统一退化为 `#symbol.expr<?>`，右侧维度仍按既有规则生成（末维为 `#symbol.expr<1>`）。
+- 该规则仅用于 `dma.alloc` / `dma.reshape` 的默认连续 stride 推导与 verifier 校验，不替代显式 `!symbol.int<#symbol.expr<expr>>` SSA operand 建模；`offsets` 允许 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`，`sizes/strides` 仍必须通过 `!symbol.int<#symbol.expr<expr>>` SSA operand 传入。
 
 ### operation API 映射
 
-对照 [`spec/operation/dma.md`](../../spec/operation/dma.md)，operation 层 API 与 `dma dialect` op 的对应关系如下。operation 层 `Memory/shape/stride` 等信息在进入方言层时必须落到 `!nn.memory<...>` 与 `!symbol.int<"expr">` 形式。
+对照 [`spec/operation/dma.md`](../../spec/operation/dma.md)，operation 层 API 与 `dma dialect` op 的对应关系如下。operation 层 `Memory/shape/stride` 等信息在进入方言层时必须落到 `!nn.memory<...>` 与 `!symbol.int<#symbol.expr<expr>>` 形式。
 
 | operation API | dialect op | 说明 |
 | --- | --- | --- |
 | `alloc(shape, dtype, space=MemorySpace.GM, stride=None)` | `dma.alloc` | 创建内存对象。 |
-| `（无直接 DSL helper；pass 侧合法化原语）` | `dma.fill` | 将 `const(i32)` / `!symbol.int<"expr">` 真实写入 `target` 的每个逻辑元素；当前用于 mixed add 的 `scalar -> memory` 合法化。 |
+| `（无直接 DSL helper；pass 侧合法化原语）` | `dma.fill` | 将 `const(i32)` / `!symbol.int<#symbol.expr<expr>>` 真实写入 `target` 的每个逻辑元素；当前用于 mixed add 的 `scalar -> memory` 合法化。 |
 | `free(value)` | `dma.free` | 释放内存对象。 |
 | `copy(source, space)` | `dma.copy` | 跨空间搬运。 |
 | `cast(source, dtype, memoryspace=None)` | `dma.cast` | 显式元素类型转换。 |
@@ -145,20 +145,20 @@
 - assembly 缺失必要字段时，必须在 parse 阶段失败。
 - `NnMemorySpaceAttr` 非法值、`NnMemoryType.shape` 与 `stride` rank 不一致等类型错误，必须按 `nn dialect` 规则报错。
 - `dma.copy` 中 `source/target` 的 `shape/stride/element_type` 不一致必须报错。
-- `dma.alloc` 的动态 `shape` operand 必须与结果 rank 等长，或仅覆盖结果 `shape` 中符号维度（按出现顺序）；任一 `shape` operand 不是 `!symbol.int<"expr">` 时必须报错；结果类型非法必须报错。
-- `dma.fill` 中 `target` 不是 `!nn.memory<...>`、`target.element_type != i32`、或 `value` 既不是 builtin `i32` 也不是 `!symbol.int<"expr">` 时必须报错。
+- `dma.alloc` 的动态 `shape` operand 必须与结果 rank 等长，或仅覆盖结果 `shape` 中符号维度（按出现顺序）；任一 `shape` operand 不是 `!symbol.int<#symbol.expr<expr>>` 时必须报错；结果类型非法必须报错。
+- `dma.fill` 中 `target` 不是 `!nn.memory<...>`、`target.element_type != i32`、或 `value` 既不是 builtin `i32` 也不是 `!symbol.int<#symbol.expr<expr>>` 时必须报错。
 - `dma.free` 的 operand 不是 `!nn.memory<...>` 时必须报错。
-- `dma.load/slice` 中 `offsets/sizes/strides` 长度与输入 rank 不一致必须报错；`sizes/strides` 不是 `!symbol.int<"expr">` 时必须报错；`offsets` 仅允许 `!symbol.int<"expr">` 或 `!symbol.iter<"expr">`。
+- `dma.load/slice` 中 `offsets/sizes/strides` 长度与输入 rank 不一致必须报错；`sizes/strides` 不是 `!symbol.int<#symbol.expr<expr>>` 时必须报错；`offsets` 仅允许 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`。
 - `dma.store/deslice` 中 `source.shape` 与切片目标大小不一致必须报错。
 - `dma.view/reshape` 中 `source/result` 的 `space` 不一致必须报错；`element_type` 不一致仅在 `source` 为一维 `i8` byte pool 时允许；`source/result` rank 不一致仅在 byte pool 场景允许；可判定的 `numel` 不一致必须报错（byte pool 场景按字节数判断）。
-- `dma.view` 的动态 `offsets/shape/stride` operand 数量与 rank 不一致必须报错；`shape/stride` 不是 `!symbol.int<"expr">` 时必须报错；`offsets` 仅允许 `!symbol.int<"expr">` 或 `!symbol.iter<"expr">`；`dma.reshape` 的动态 `shape` operand 数量与 rank 不一致必须报错，且其 operand 必须为 `!symbol.int<"expr">`。
+- `dma.view` 的动态 `offsets/shape/stride` operand 数量与 rank 不一致必须报错；`shape/stride` 不是 `!symbol.int<#symbol.expr<expr>>` 时必须报错；`offsets` 仅允许 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`；`dma.reshape` 的动态 `shape` operand 数量与 rank 不一致必须报错，且其 operand 必须为 `!symbol.int<#symbol.expr<expr>>`。
 - `dma.view` 的 `offsets` 必须为非负整数；当 `source.shape/offsets/shape/stride` 可静态判定时，必须进行边界校验并在越界时报错。
 - `dma.view` 的 `result.stride` rank 与 `result.shape` 不一致必须报错；非 byte pool 场景下，`result.stride` 与 `source.stride * stride operand` 不一致必须报错；`dma.reshape` 的 `result.stride` 非连续行主序必须报错。
-- `dma.subview` 的 `source` 非一维 `i8` memory、`result` 非一维 contiguous memory、`source/result` space 不一致、`offset/size/stride` 非单个 `!symbol.int<"expr">`、`size` 与结果 shape 不一致，或静态可判定 byte 边界越界时必须报错。
+- `dma.subview` 的 `source` 非一维 `i8` memory、`result` 非一维 contiguous memory、`source/result` space 不一致、`offset/size/stride` 非单个 `!symbol.int<#symbol.expr<expr>>`、`size` 与结果 shape 不一致，或静态可判定 byte 边界越界时必须报错。
 - `dma.reshape` 的连续行主序校验必须接受含 `min(lhs, rhs)` 的等价符号 stride 表达式；例如动态尾块 shape 中出现 `min(tile, extent - iter)` 时，不得仅因乘法因子打印顺序或 `min` 文本形式不同而拒绝。
 - `dma.cast` 中 `source/result` 的 `shape/stride/space` 不一致必须报错。
 - `strides` 当前仅允许单位步长语义；若当前实现限制 stride 为 1，则 `stride != 1` 的切片搬运必须显式报错，不得 silently 接受。
-- `dma` 的布局/索引类标量输入以 `!symbol.int<"expr">` 为主，`offsets` 额外允许 `!symbol.iter<"expr">`；parse/print 不得再使用 builtin `index` 作为这些 operand 的公开文本语义。`dma.fill.value` 是当前唯一例外，公开口径允许 builtin `i32` 与 `!symbol.int<"expr">`。
+- `dma` 的布局/索引类标量输入以 `!symbol.int<#symbol.expr<expr>>` 为主，`offsets` 额外允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`；parse/print 不得再使用 builtin `index` 作为这些 operand 的公开文本语义。`dma.fill.value` 是当前唯一例外，公开口径允许 builtin `i32` 与 `!symbol.int<#symbol.expr<expr>>`。
 ## API详细说明
 
 ### `class Dma(Dialect)`
@@ -188,7 +188,7 @@
 
 - 参数：
 
-- `dynamic_shape`：variadic `!symbol.int<"expr">` operand，按 rank 顺序提供运行期 shape。
+- `dynamic_shape`：variadic `!symbol.int<#symbol.expr<expr>>` operand，按 rank 顺序提供运行期 shape。
 - `result_type`：结果类型，必须为 `!nn.memory<...>`。
 
 - 使用示例：
@@ -200,7 +200,7 @@ op = DmaAllocOp(dynamic_shape, result_type)
 - 注意事项：
 
 - `result_type` 中的 `shape/stride/element_type/space` 必须完整且合法。
-- 若结果布局含运行期 shape 信息，则对应符号维必须由 `dynamic_shape` operand 提供，静态维可省略；每个 operand 都必须是 `!symbol.int<"expr">`。
+- 若结果布局含运行期 shape 信息，则对应符号维必须由 `dynamic_shape` operand 提供，静态维可省略；每个 operand 都必须是 `!symbol.int<#symbol.expr<expr>>`。
 - `dynamic_shape` 支持两种形态：与结果 rank 等长的全量列表，或仅包含结果 `shape` 中符号维度的列表（按出现顺序）。
 - 结果 `stride` 不作为输入，由 `result_type.shape` 与默认连续布局规则共同确定。
 - 当前版本不额外定义 base offset；`dma.alloc` 只负责产生新的 memory 对象。
@@ -217,12 +217,12 @@ op = DmaAllocOp(dynamic_shape, result_type)
 - 功能说明：
 
 - 表示将单个整数标量真实写入 `target` 的每个逻辑元素，完成 `scalar -> memory` 物化。
-- 当前用于 mixed add 等链路把 `const(i32)` / `!symbol.int<"expr">` 合法化为可被下游 IR 消费的 temporary memory。
+- 当前用于 mixed add 等链路把 `const(i32)` / `!symbol.int<#symbol.expr<expr>>` 合法化为可被下游 IR 消费的 temporary memory。
 
 - 参数：
 
 - `target`：被写入的目标内存，类型为 `!nn.memory<...>`。
-- `value`：待物化的整数标量，当前仅接受 builtin `i32` 或 `!symbol.int<"expr">`。
+- `value`：待物化的整数标量，当前仅接受 builtin `i32` 或 `!symbol.int<#symbol.expr<expr>>`。
 
 - 使用示例：
 
@@ -233,8 +233,8 @@ op = DmaFillOp(target, value)
 - 注意事项：
 
 - `target.element_type` 当前固定为 `i32`；更宽整数、`f16`、`f32` 等其他 scalar family 不在本轮公开范围内。
-- 当 `value` 为 builtin `i32` 时，对应 `const(i32)` 物化路径；当 `value` 为 `!symbol.int<"expr">` 时，对应 `symbol.int` 物化路径；两者都必须以真实 SSA operand 进入 `dma.fill`，不得退化为 attribute 占位。
-- 若上层 DSL `fill(...)` helper 接受字符串字面量并继续 lower 到当前链路，公开字符串只允许表示正无穷 / 负无穷的两种规范语义；当前文面固定为 `"inf"` 与 `"-inf"`，不得放宽到其他大小写、别名或任意字符串。该规则属于更高层 helper 边界，不能扩展 `dma.fill.value` 在本层仍只接受 builtin `i32` / `!symbol.int<"expr">` 的事实。
+- 当 `value` 为 builtin `i32` 时，对应 `const(i32)` 物化路径；当 `value` 为 `!symbol.int<#symbol.expr<expr>>` 时，对应 `symbol.int` 物化路径；两者都必须以真实 SSA operand 进入 `dma.fill`，不得退化为 attribute 占位。
+- 若上层 DSL `fill(...)` helper 接受字符串字面量并继续 lower 到当前链路，公开字符串只允许表示正无穷 / 负无穷的两种规范语义；当前文面固定为 `"inf"` 与 `"-inf"`，不得放宽到其他大小写、别名或任意字符串。该规则属于更高层 helper 边界，不能扩展 `dma.fill.value` 在本层仍只接受 builtin `i32` / `!symbol.int<#symbol.expr<expr>>` 的事实。
 - `dma.fill` 必须把同一个标量值写入 `target` 的每个逻辑元素；它不是 `dma.alloc` 的语法糖，也不等价于“只创建 memory 但不写值”。
 - `dma.fill` 只负责标量写入，不承担 memory-memory 广播、逐元素算术或 dtype promotion。
 - verifier 只检查 `dma.fill` 的局部类型与接口合法性；“该 `target` 是否在下游 IR 中被实际消费”属于链路级验收边界。对 mixed add 当前最低通过口径，必须出现 `dma.alloc + dma.fill + downstream use(target)` 的完整片段，`users=[]` 的 dead temporary memory 不能计为通过。
@@ -242,7 +242,7 @@ op = DmaFillOp(target, value)
 - 返回值：
 
 - 返回类型为无返回值；当前 op result 数量固定为 `0`。
-- 当前只收为 `i32 | !symbol.int<"expr"> -> !nn.memory<..., i32, ...>` 的最小公开子集；若后续需要浮点或更宽整数 materialize，必须新增独立 spec 收口。
+- 当前只收为 `i32 | !symbol.int<#symbol.expr<expr>> -> !nn.memory<..., i32, ...>` 的最小公开子集；若后续需要浮点或更宽整数 materialize，必须新增独立 spec 收口。
 
 ### `class DmaFreeOp(source: SSAValue | Operation)`
 
@@ -321,7 +321,7 @@ op = DmaCopyOp(target, source)
 - `source`：广播源，可为：
   - `!nn.memory<...>`（memory-to-memory 广播物化）
   - builtin 标量（如 `i32/f16/f32` 等）
-  - `!symbol.int<"expr">`（整数标量）
+  - `!symbol.int<#symbol.expr<expr>>`（整数标量）
 
 - 使用示例：
 
@@ -339,7 +339,7 @@ dma.broadcast(%rhs_b, %c7) : (!nn.memory<[M, N], i32, #nn.space<LM>>, i32) -> ()
   - `source.space` 必须等于 `target.space`（跨空间广播不在本轮公开合同范围内）。
   - 广播规则固定为尾维对齐：对齐后任一维若两侧均为静态整数且既不相等也不包含 `1`，verifier 必须失败；否则视为兼容（不做数值求解）。
 - 当 `source` 为标量时：
-  - 标量类型必须与 `target.element_type` 一致；`!symbol.int<"expr">` 仅用于整数 element_type 的标量输入。
+  - 标量类型必须与 `target.element_type` 一致；`!symbol.int<#symbol.expr<expr>>` 仅用于整数 element_type 的标量输入。
 - 禁止 silent fallback：不允许把不兼容的广播或类型失配默认为“成功但不写入”，verifier 必须失败或在 pass 层显式报错。
 
 - 返回值：
@@ -394,9 +394,9 @@ dma.transpose(%src, %out) {perm = [1, 0]} : (!nn.memory<[M, N], f16, #nn.space<L
 - 参数：
 
 - `source`：源内存，类型为 `!nn.memory<...>`。
-- `offsets`：variadic `!symbol.int<"expr">` 或 `!symbol.iter<"expr">` operand，长度必须与 `source.rank` 一致；每一维表示对应维度的起始索引。
-- `sizes`：variadic `!symbol.int<"expr">` operand，长度必须与 `source.rank` 一致；每一维表示对应维度的切片大小。
-- `strides`：variadic `!symbol.int<"expr">` operand，长度必须与 `source.rank` 一致；每一维表示对应维度的切片步长，当前每一维必须具有单位步长语义。
+- `offsets`：variadic `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>` operand，长度必须与 `source.rank` 一致；每一维表示对应维度的起始索引。
+- `sizes`：variadic `!symbol.int<#symbol.expr<expr>>` operand，长度必须与 `source.rank` 一致；每一维表示对应维度的切片大小。
+- `strides`：variadic `!symbol.int<#symbol.expr<expr>>` operand，长度必须与 `source.rank` 一致；每一维表示对应维度的切片步长，当前每一维必须具有单位步长语义。
 - `space`：结果空间，使用 `NnMemorySpaceAttr` 表示。
 - `result_type`：结果类型，必须为 `!nn.memory<...>`。
 
@@ -418,12 +418,12 @@ op = DmaLoadOp(
 - `result.shape` 由 `sizes` 决定。
 - `result.space` 必须与 op `space` 一致。
 - `result.element_type` 必须与 `source.element_type` 一致。
-- `offsets/sizes/strides` 必须全部通过 operand 提供；若是静态常量，也应先 materialize 为 `!symbol.int<"1">` 这类 symbol 常量值或等价的 `!symbol.int<"expr">` SSA value 后传入；`offsets` 允许使用 `!symbol.iter<"expr">`。
+- `offsets/sizes/strides` 必须全部通过 operand 提供；若是静态常量，也应先 materialize 为 `!symbol.int<#symbol.expr<1>>` 这类 symbol 常量值或等价的 `!symbol.int<#symbol.expr<expr>>` SSA value 后传入；`offsets` 允许使用 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`。
 
 - 返回值：
 
 - 返回新的 `!nn.memory<...>` 结果块。
-- 当前支持 SSA 动态 `!symbol.int<"expr">` 标量输入；`offsets` 也允许 `!symbol.iter<"expr">`；但仍不支持非单位 stride 语义。
+- 当前支持 SSA 动态 `!symbol.int<#symbol.expr<expr>>` 标量输入；`offsets` 也允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`；但仍不支持非单位 stride 语义。
 
 ### `class DmaStoreOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
 
@@ -438,9 +438,9 @@ op = DmaLoadOp(
 
 - `target`：被更新的目标内存，类型为 `!nn.memory<...>`。
 - `source`：待写回的源块，类型为 `!nn.memory<...>`。
-- `offsets`：variadic `!symbol.int<"expr">` 或 `!symbol.iter<"expr">` operand；每一维表示 `target` 对应维度的写回起始索引，长度必须与 `target.rank` 一致。
-- `sizes`：variadic `!symbol.int<"expr">` operand；每一维表示写回区域在 `target` 对应维度的大小，长度必须与 `target.rank` 一致。
-- `strides`：variadic `!symbol.int<"expr">` operand；每一维表示 `target` 对应维度的写回步长，长度必须与 `target.rank` 一致，当前每一维必须具有单位步长语义。
+- `offsets`：variadic `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>` operand；每一维表示 `target` 对应维度的写回起始索引，长度必须与 `target.rank` 一致。
+- `sizes`：variadic `!symbol.int<#symbol.expr<expr>>` operand；每一维表示写回区域在 `target` 对应维度的大小，长度必须与 `target.rank` 一致。
+- `strides`：variadic `!symbol.int<#symbol.expr<expr>>` operand；每一维表示 `target` 对应维度的写回步长，长度必须与 `target.rank` 一致，当前每一维必须具有单位步长语义。
 
 - 使用示例：
 
@@ -452,8 +452,8 @@ op = DmaStoreOp(target, source, offsets, sizes, strides)
 
 - `source.shape` 必须与 `sizes` 对应的切片形状一致。
 - `source.element_type` 必须与 `target.element_type` 一致。
-- `offsets/sizes/strides` 长度必须与 `target.rank` 一致；`offsets` 允许 `!symbol.int<"expr">` 或 `!symbol.iter<"expr">`，`sizes/strides` 仍必须是 `!symbol.int<"expr">`。
-- `offsets/sizes/strides` 必须全部通过 operand 提供，其中 `offsets` 允许 `!symbol.iter<"expr">`，`sizes/strides` 仍为 `!symbol.int<"expr">`。
+- `offsets/sizes/strides` 长度必须与 `target.rank` 一致；`offsets` 允许 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`，`sizes/strides` 仍必须是 `!symbol.int<#symbol.expr<expr>>`。
+- `offsets/sizes/strides` 必须全部通过 operand 提供，其中 `offsets` 允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`，`sizes/strides` 仍为 `!symbol.int<#symbol.expr<expr>>`。
 
 - 返回值：
 
@@ -473,9 +473,9 @@ op = DmaStoreOp(target, source, offsets, sizes, strides)
 
 - `target`：切片写入目标内存，类型为 `!nn.memory<...>`。
 - `source`：源内存，类型为 `!nn.memory<...>`。
-- `offsets`：variadic `!symbol.int<"expr">` 或 `!symbol.iter<"expr">` operand；每一维表示对应维度的起始索引，长度必须与 `source.rank` 一致。
-- `sizes`：variadic `!symbol.int<"expr">` operand；每一维表示对应维度的切片大小，长度必须与 `source.rank` 一致。
-- `strides`：variadic `!symbol.int<"expr">` operand；每一维表示对应维度的切片步长，长度必须与 `source.rank` 一致，当前每一维必须具有单位步长语义。
+- `offsets`：variadic `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>` operand；每一维表示对应维度的起始索引，长度必须与 `source.rank` 一致。
+- `sizes`：variadic `!symbol.int<#symbol.expr<expr>>` operand；每一维表示对应维度的切片大小，长度必须与 `source.rank` 一致。
+- `strides`：variadic `!symbol.int<#symbol.expr<expr>>` operand；每一维表示对应维度的切片步长，长度必须与 `source.rank` 一致，当前每一维必须具有单位步长语义。
 
 - 使用示例：
 
@@ -489,7 +489,7 @@ op = DmaSliceOp(target, source, offsets, sizes, strides)
 - `target.element_type` 必须与 `source.element_type` 一致。
 - 当前阶段必须限制 `strides` 为全 1；出现其他值时 verifier 必须报错。
 - 若某个 lowering pass 用 `dma.slice` 表达整块 hierarchy 搬运，必须把整块路径编码为 full-window 特例：`offsets=0`、`sizes=source.shape`、`strides=1`；若输入来自 `dma.view`，仅允许继承该窗口的 `offsets/sizes`，不得继承非单位 `stride`。
-- `offsets/sizes/strides` 必须全部通过 operand 提供，其中 `offsets` 允许 `!symbol.iter<"expr">`，`sizes/strides` 仍为 `!symbol.int<"expr">`。
+- `offsets/sizes/strides` 必须全部通过 operand 提供，其中 `offsets` 允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`，`sizes/strides` 仍为 `!symbol.int<#symbol.expr<expr>>`。
 - `target` 与 `source` 必须是同 rank 且兼容布局的 `!nn.memory<...>`；该约束用于保证切片写入合法。
 - `dma.slice` 不负责返回新内存，若上层 API 需要切片表达式返回值，必须通过 `dma.alloc` 先构造 `target` 并返回该 `target`。
 
@@ -511,9 +511,9 @@ op = DmaSliceOp(target, source, offsets, sizes, strides)
 
 - `source`：待回写的切片块，类型为 `!nn.memory<...>`。
 - `target`：被更新的较大目标内存，类型为 `!nn.memory<...>`。
-- `offsets`：variadic `!symbol.int<"expr">` 或 `!symbol.iter<"expr">` operand；每一维表示 `target` 对应维度的回写起始索引，长度必须与 `target.rank` 一致。
-- `sizes`：variadic `!symbol.int<"expr">` operand；每一维表示回写区域在 `target` 对应维度的大小，长度必须与 `target.rank` 一致。
-- `strides`：variadic `!symbol.int<"expr">` operand；每一维表示 `target` 对应维度的回写步长，长度必须与 `target.rank` 一致，当前每一维必须具有单位步长语义。
+- `offsets`：variadic `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>` operand；每一维表示 `target` 对应维度的回写起始索引，长度必须与 `target.rank` 一致。
+- `sizes`：variadic `!symbol.int<#symbol.expr<expr>>` operand；每一维表示回写区域在 `target` 对应维度的大小，长度必须与 `target.rank` 一致。
+- `strides`：variadic `!symbol.int<#symbol.expr<expr>>` operand；每一维表示 `target` 对应维度的回写步长，长度必须与 `target.rank` 一致，当前每一维必须具有单位步长语义。
 - `result_type`：结果类型，必须为 `!nn.memory<...>`，且必须与 `target` 类型一致。
 
 - 使用示例：
@@ -528,7 +528,7 @@ op = DmaDesliceOp(target, source, offsets, sizes, strides, result_type)
 - `source.element_type` 必须与 `target.element_type` 一致。
 - 当前阶段必须限制 `strides` 为全 1；出现其他值时 verifier 必须报错。
 - 若某个 lowering pass 用 `dma.deslice` 表达整块 hierarchy 写回，必须把整块路径编码为 full-window 特例：`offsets=0`、`sizes=target.shape`、`strides=1`；若写回目标来自 `dma.view`，仅允许继承该窗口的 `offsets/sizes`，回写 `strides` 仍必须保持单位步长。
-- `offsets/sizes/strides` 必须全部通过 operand 提供，其中 `offsets` 允许 `!symbol.iter<"expr">`，`sizes/strides` 仍为 `!symbol.int<"expr">`。
+- `offsets/sizes/strides` 必须全部通过 operand 提供，其中 `offsets` 允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`，`sizes/strides` 仍为 `!symbol.int<#symbol.expr<expr>>`。
 
 - 返回值：
 
@@ -548,9 +548,9 @@ op = DmaDesliceOp(target, source, offsets, sizes, strides, result_type)
 - 参数：
 
 - `source`：源 backing memory；类型必须为一维 `!nn.memory<[N], [1], i8, #nn.space<...>>`。
-- `offset`：单个 `!symbol.int<"expr">` operand；按 `result_type.element_type` 的元素单位表达；必须非负。
-- `size`：单个 `!symbol.int<"expr">` operand；按 `result_type.element_type` 的元素数量表达；必须与 `result_type.shape` 一致。
-- `stride`：单个 `!symbol.int<"expr">` operand；按 `result_type.element_type` 的元素单位表达；当前合法路径使用 `1`，静态负值或 0 必须被拒绝。
+- `offset`：单个 `!symbol.int<#symbol.expr<expr>>` operand；按 `result_type.element_type` 的元素单位表达；必须非负。
+- `size`：单个 `!symbol.int<#symbol.expr<expr>>` operand；按 `result_type.element_type` 的元素数量表达；必须与 `result_type.shape` 一致。
+- `stride`：单个 `!symbol.int<#symbol.expr<expr>>` operand；按 `result_type.element_type` 的元素单位表达；当前合法路径使用 `1`，静态负值或 0 必须被拒绝。
 - `result_type`：一维 contiguous typed memory；类型必须为 `NnMemoryType`。
 
 - 使用示例：
@@ -583,9 +583,9 @@ op = DmaSubviewOp(source, offset, size, stride, result_type)
 - 参数：
 
 - `source`：源内存，类型为 `!nn.memory<...>`。
-- `offsets`：variadic `!symbol.int<"expr">` 或 `!symbol.iter<"expr">` operand，按 rank 顺序提供子视图起始偏移。
-- `shape`：variadic `!symbol.int<"expr">` operand，按 rank 顺序提供结果视图的 shape。
-- `stride`：variadic `!symbol.int<"expr">` operand，按 rank 顺序提供结果视图的 stride。
+- `offsets`：variadic `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>` operand，按 rank 顺序提供子视图起始偏移。
+- `shape`：variadic `!symbol.int<#symbol.expr<expr>>` operand，按 rank 顺序提供结果视图的 shape。
+- `stride`：variadic `!symbol.int<#symbol.expr<expr>>` operand，按 rank 顺序提供结果视图的 stride。
 - `result_type`：结果类型，必须为 `!nn.memory<...>`。
 
 - 使用示例：
@@ -600,7 +600,7 @@ op = DmaViewOp(source, offsets, shape, stride, result_type)
 - `result.element_type` 必须与 `source.element_type` 一致；若 `source` 为一维 `i8` byte pool，则允许 `result.element_type` 不同。
 - 若 `source.shape` 与 `result.shape` 的元素总数可判定不一致，必须报错；byte pool 场景需满足字节数一致。
 - `dma.view` 不要求 `source` 为连续布局，但 `result.stride` 必须与 `result.shape` rank 一致。
-- `offsets/shape/stride` operand 数量必须与结果 rank 一致；`offsets` 允许 `!symbol.int<"expr">` 或 `!symbol.iter<"expr">`，`shape/stride` 仍必须是 `!symbol.int<"expr">`。
+- `offsets/shape/stride` operand 数量必须与结果 rank 一致；`offsets` 允许 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`，`shape/stride` 仍必须是 `!symbol.int<#symbol.expr<expr>>`。
 - `shape` operand 必须与 `result_type.shape` 对齐；非 byte pool 场景下，`result_type.stride` 必须与 `source.stride * stride operand` 对齐。
 - 对 DSL `view(source, offset, size, stride)` lowering，`result_type.shape` 必须来自 `size`，`result_type.stride` 必须来自 source physical stride 与 `stride` 的逐维乘积；不得回退为复用上层 `Memory` 既有元信息或仅把 logical stride 原样写入 result type。
 - `offsets` 必须为非负整数；若可静态判定为负值，必须报错。
@@ -625,7 +625,7 @@ op = DmaViewOp(source, offsets, shape, stride, result_type)
 - 参数：
 
 - `source`：源内存，类型为 `!nn.memory<...>`。
-- `shape`：variadic `!symbol.int<"expr">` operand，按 rank 顺序提供结果视图的 shape。
+- `shape`：variadic `!symbol.int<#symbol.expr<expr>>` operand，按 rank 顺序提供结果视图的 shape。
 - `result_type`：结果类型，必须为 `!nn.memory<...>`。
 
 - 使用示例：
@@ -639,7 +639,7 @@ op = DmaReshapeOp(source, shape, result_type)
 - `result.element_type` 必须与 `source.element_type` 一致。
 - `result.space` 必须与 `source.space` 一致。
 - `source` 必须可视为连续布局；`result.stride` 必须满足 `result.shape` 的连续行主序校验规则。
-- `shape` operand 数量必须与结果 rank 一致，且每个 operand 都必须是 `!symbol.int<"expr">`。
+- `shape` operand 数量必须与结果 rank 一致，且每个 operand 都必须是 `!symbol.int<#symbol.expr<expr>>`。
 - `result.stride` 不作为输入，而是由 `shape` 和默认连续布局规则推导。
 - 含 `min(lhs, rhs)` 的动态尾块维度必须按符号等价关系参与连续布局判断；`min` 表达式的无关空白和乘法因子顺序不得改变 verifier 结论。
 - 若 `source.shape` 与 `result.shape` 的元素总数可判定不一致，必须报错。
@@ -691,18 +691,18 @@ op = DmaCastOp(source, result_type)
 
 - 验证 `dma` op 复用 `NnMemorySpaceAttr` / `NnMemoryType` 时，与 `nn dialect` 的类型规则保持一致。
 - 验证 `dma.copy` 的整块搬运约束。
-- 验证 `dma.load/slice` 的结果形状、目标空间与标量输入长度约束，并覆盖动态 `!symbol.int<"expr">` operand 表达；`offsets` 允许 `!symbol.iter<"expr">`。
+- 验证 `dma.load/slice` 的结果形状、目标空间与标量输入长度约束，并覆盖动态 `!symbol.int<#symbol.expr<expr>>` operand 表达；`offsets` 允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`。
 - 验证 `dma.store/deslice` 的源块与目标切片大小匹配约束。
 - 验证 `dma.alloc` 结果类型约束与结果数量。
-- 验证 `dma.fill` 能将 `const(i32)` / `!symbol.int<"expr">` 真实写入 `i32 memory`，并锁定它不是“空 `dma.alloc` 占位”的替代说法。
+- 验证 `dma.fill` 能将 `const(i32)` / `!symbol.int<#symbol.expr<expr>>` 真实写入 `i32 memory`，并锁定它不是“空 `dma.alloc` 占位”的替代说法。
 - 验证 `dma.free` 的内存类型约束与无返回值语义。
-- 验证 `dma.view/reshape` 的元素类型/空间一致性与形状约束，其中 `dma.view` 覆盖动态 `offsets`（允许 `!symbol.iter<"expr">`）、`shape/stride`（`!symbol.int<"expr">`）operand 与边界校验，`dma.reshape` 覆盖动态 `shape` 的 `!symbol.int<"expr">` operand。
+- 验证 `dma.view/reshape` 的元素类型/空间一致性与形状约束，其中 `dma.view` 覆盖动态 `offsets`（允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`）、`shape/stride`（`!symbol.int<#symbol.expr<expr>>`）operand 与边界校验，`dma.reshape` 覆盖动态 `shape` 的 `!symbol.int<#symbol.expr<expr>>` operand。
 - 验证 `dma.subview` 的一维 `i8` backing memory、一维 typed result、元素单位 `offset/size/stride`、space 一致性、size 对齐与静态 byte bounds 边界。
 - 验证 `dma.view` 在 DSL helper / 合同链路中不仅要生成 op，还要求返回 `Memory` 类型与 `dma.view.result_type` 一致；当直接 `func.return` 时，`EXPECTED_MEMORY` 比对必须成功。
 - 验证默认连续 stride 在符号维度（如 `N` / `M*N` / `min(tile, extent - iter)` / `?`）下的推导、等价判断与退化规则已覆盖。
 - 验证 `dma.cast` 只允许改变元素类型，且保持 `shape/stride/space` 不变。
 - 验证当前阶段对 stride 的限制会在 verifier 阶段明确报错。
-- 验证 `dma` 的布局/索引类标量输入以 `!symbol.int<"expr">` 为主，`offsets` 允许 `!symbol.iter<"expr">`，并拒绝 builtin `index`、浮点或其他非 symbol 标量类型；同时验证 `dma.fill.value` 只允许 builtin `i32` 与 `!symbol.int<"expr">` 这两个当前公开例外（包含拒绝未定义的其他 scalar family）。
+- 验证 `dma` 的布局/索引类标量输入以 `!symbol.int<#symbol.expr<expr>>` 为主，`offsets` 允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`，并拒绝 builtin `index`、浮点或其他非 symbol 标量类型；同时验证 `dma.fill.value` 只允许 builtin `i32` 与 `!symbol.int<#symbol.expr<expr>>` 这两个当前公开例外（包含拒绝未定义的其他 scalar family）。
 - 验证 mixed add 使用 `scalar -> memory` 原语时，被填充的 temporary memory 必须在下游 IR 中有真实 use；`dma.alloc` alone 或 `dma.alloc + dma.fill` 但无消费都不构成通过口径。
 
 ### 功能与用例清单

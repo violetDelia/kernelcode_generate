@@ -8,7 +8,7 @@
 
 API 列表:
 - `class NnMemorySpaceAttr(space: StringAttr)`
-- `class NnMemoryType(shape: ArrayAttr[Attribute], stride: ArrayAttr[Attribute], element_type: Attribute, space: NnMemorySpaceAttr)`
+- `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr)`
 - `class NnAddOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
 - `class NnSubOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
 - `class NnMulOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
@@ -55,13 +55,11 @@ from collections.abc import Sequence
 
 from kernel_gen.core.contracts import (
     build_contiguous_stride as _common_build_contiguous_stride,
-    collect_int_dims as _common_collect_int_dims,
-    dims_equal as _common_dims_equal,
     verify_i64_attr as _common_verify_i64_attr,
     verify_memory_type as _common_verify_memory_type,
 )
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
-from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from xdsl.dialects.arith import ConstantOp
 from xdsl.dialects.builtin import (
     ArrayAttr,
     BFloat16Type,
@@ -85,7 +83,7 @@ from xdsl.irdl import (
     param_def,
     result_def,
 )
-from xdsl.parser import AttrParser, Parser
+from xdsl.parser import AttrParser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
 
@@ -103,149 +101,6 @@ def _raise_verify_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None:
             action=ERROR_ACTION,
         )
     )
-
-
-def _parse_raw_memory_parameters(parser: AttrParser) -> Sequence[Attribute]:
-    """按原文解析 `!nn.memory<...>` 参数。
-
-    功能说明:
-    - 规避 xDSL 词法层把 `//` 识别为注释的问题。
-    - 仅对 `shape/stride` 维度列表做原文解析，element type 与 space 仍委托 xDSL parser。
-
-    使用示例:
-    - params = _parse_raw_memory_parameters(parser)
-
-    关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn.py
-    - 功能实现: kernel_gen/dialect/nn.py
-    """
-
-    content = parser.lexer.input.content
-    start = parser.pos
-    if start >= len(content) or content[start] != "<":
-        parser.parse_punctuation("<", "Expected '<' for nn memory type.")
-
-    try:
-        end = _find_matching_parameter_end(content, start)
-        body = content[start + 1 : end]
-        fields = _split_top_level_fields(body, expected_count=4)
-        shape = _parse_raw_dim_list(fields[0])
-        stride = _parse_raw_dim_list(fields[1])
-    except VerifyException as exc:
-        parser.raise_error(str(exc))
-    element_type = Parser(parser.ctx, fields[2]).parse_attribute()
-    space = Parser(parser.ctx, fields[3]).parse_attribute()
-    # xDSL 词法层会把 `//` 当注释；这里必须在原文扫描后恢复 parser token 流。
-    parser._resume_from(end + 1)
-    if not isinstance(space, NnMemorySpaceAttr):
-        _raise_verify_error("nn memory type space must be #nn.space<...>")
-    return (shape, stride, element_type, space)
-
-
-def _find_matching_parameter_end(content: str, start: int) -> int:
-    """查找 `!nn.memory<...>` 参数体的结束 `>` 位置。"""
-
-    depth = 0
-    in_string = False
-    index = start
-    while index < len(content):
-        char = content[index]
-        if char == '"' and (index == 0 or content[index - 1] != "\\"):
-            in_string = not in_string
-        elif not in_string:
-            if char == "<":
-                depth += 1
-            elif char == ">":
-                depth -= 1
-                if depth == 0:
-                    return index
-        index += 1
-    raise VerifyException("Expected '>' for nn memory type.")
-
-
-def _split_top_level_fields(text: str, *, expected_count: int) -> list[str]:
-    """按顶层逗号拆分参数字段。"""
-
-    fields: list[str] = []
-    depth = 0
-    in_string = False
-    start = 0
-    pairs = {"[": "]", "(": ")", "{": "}", "<": ">"}
-    closing = {value: key for key, value in pairs.items()}
-    stack: list[str] = []
-    for index, char in enumerate(text):
-        if char == '"' and (index == 0 or text[index - 1] != "\\"):
-            in_string = not in_string
-        elif not in_string:
-            if char in pairs:
-                stack.append(char)
-                depth += 1
-            elif char in closing:
-                if not stack or stack[-1] != closing[char]:
-                    raise VerifyException("Malformed nn memory type parameters.")
-                stack.pop()
-                depth -= 1
-            elif char == "," and depth == 0:
-                fields.append(text[start:index].strip())
-                start = index + 1
-    fields.append(text[start:].strip())
-    if len(fields) != expected_count or any(not field for field in fields):
-        raise VerifyException("nn memory type requires shape, stride, element type and space")
-    return fields
-
-
-def _parse_raw_dim_list(text: str) -> ArrayAttr[Attribute]:
-    """解析原文维度列表，按 SymbolDim 合同校验动态维度。"""
-
-    stripped = text.strip()
-    if not stripped.startswith("[") or not stripped.endswith("]"):
-        raise VerifyException("Expected dimension list.")
-    inner = stripped[1:-1].strip()
-    if not inner:
-        return ArrayAttr([])
-    dims: list[Attribute] = []
-    for item in _split_top_level_dim_items(inner):
-        dim = item.strip()
-        if dim == "?":
-            dims.append(StringAttr("?"))
-        elif dim.isdecimal():
-            dims.append(IntAttr(int(dim)))
-        else:
-            _verify_raw_dim_expr(dim)
-            dims.append(StringAttr(dim))
-    return ArrayAttr(dims)
-
-
-def _split_top_level_dim_items(text: str) -> list[str]:
-    """按顶层逗号拆分维度表达式。"""
-
-    items: list[str] = []
-    depth = 0
-    start = 0
-    for index, char in enumerate(text):
-        if char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-            if depth < 0:
-                raise VerifyException("Malformed dimension expression.")
-        elif char == "," and depth == 0:
-            items.append(text[start:index])
-            start = index + 1
-    if depth != 0:
-        raise VerifyException("Malformed dimension expression.")
-    items.append(text[start:])
-    return items
-
-
-def _verify_raw_dim_expr(text: str) -> None:
-    """校验原文维度表达式，合法范围与 SymbolDim 字符串一致。"""
-
-    try:
-        SymbolDim(text)
-    except (TypeError, ValueError) as exc:
-        raise VerifyException("dimension expression must be a valid SymbolDim string") from exc
 
 
 def _print_dim_list(printer: Printer, dims: ArrayAttr[Attribute]) -> None:
@@ -268,12 +123,9 @@ def _print_dim_list(printer: Printer, dims: ArrayAttr[Attribute]) -> None:
     for index, dim in enumerate(dims.data):
         if index:
             printer.print_string(", ")
-        if isinstance(dim, IntAttr):
-            printer.print_string(str(dim.data))
-        elif isinstance(dim, StringAttr):
-            printer.print_string(dim.data)
-        else:
-            _raise_verify_error("Dimension list only supports IntAttr or StringAttr")
+        if not _is_symbol_expr_attr(dim):
+            _raise_verify_error("dimension list only supports SymbolExprAttr")
+        printer.print_attribute(dim)
     printer.print_string("]")
 
 
@@ -282,10 +134,11 @@ def _verify_dim_entry(dim: Attribute, field_name: str) -> None:
 
 
     功能说明:
-    - 仅接受 IntAttr 与非空 StringAttr。
+    - 仅接受 `SymbolExprAttr`。
+    - 若表达式可静态判定为整数，则 shape/stride 维度必须非负。
 
     使用示例:
-    - _verify_dim_entry(StringAttr(\"N\"), \"shape\")
+    - _verify_dim_entry(SymbolExprAttr.from_expr(\"N\"), \"shape\")
 
     关联文件:
     - spec: spec/dialect/nn.md
@@ -293,15 +146,112 @@ def _verify_dim_entry(dim: Attribute, field_name: str) -> None:
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
-    if isinstance(dim, IntAttr):
-        if dim.data < 0:
-            _raise_verify_error(f"{field_name} dimensions must be non-negative")
-        return
+    if not _is_symbol_expr_attr(dim):
+        _raise_verify_error(f"{field_name} dimensions must be SymbolExprAttr")
+    dim.verify()
+    value = _static_int_from_dim(dim)
+    if value is not None and value < 0:
+        _raise_verify_error(f"{field_name} dimensions must be non-negative")
 
-    if isinstance(dim, StringAttr) and dim.data:
-        return
 
-    _raise_verify_error(f"{field_name} dimensions must be IntAttr or StringAttr")
+def _symbol_expr_attr_from_expr(expr: str) -> Attribute:
+    """构造公开 SymbolExprAttr。
+
+    功能说明:
+    - 延迟导入 `SymbolExprAttr`，避免 nn/symbol 模块初始化互相依赖。
+
+    使用示例:
+    - _symbol_expr_attr_from_expr("N")
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    from kernel_gen.dialect.symbol import SymbolExprAttr
+
+    return SymbolExprAttr.from_expr(expr)
+
+
+def _is_symbol_expr_attr(attr: Attribute) -> bool:
+    """判断属性是否是公开 SymbolExprAttr。
+
+    功能说明:
+    - 通过延迟导入的公开 class 判断 memory shape/stride 条目。
+
+    使用示例:
+    - _is_symbol_expr_attr(SymbolExprAttr.from_expr("N"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    from kernel_gen.dialect.symbol import SymbolExprAttr
+
+    return isinstance(attr, SymbolExprAttr)
+
+
+def _dim_expr_text(dim: Attribute) -> str:
+    """读取 SymbolExprAttr 的规范表达式文本。
+
+    功能说明:
+    - 统一 shape/stride 的比较、静态求值和 stride 推导入口。
+
+    使用示例:
+    - _dim_expr_text(SymbolExprAttr.from_expr("N + 1"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    if not _is_symbol_expr_attr(dim):
+        _raise_verify_error("dimension entries must be SymbolExprAttr")
+    dim.verify()
+    return dim.expr.data
+
+
+def _static_int_from_expr_text(expr: str) -> int | None:
+    """尝试从规范表达式文本提取静态整数。
+
+    功能说明:
+    - 仅识别十进制整数字面量，动态表达式返回 None。
+
+    使用示例:
+    - _static_int_from_expr_text("4")
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    signless = expr[1:] if expr.startswith("-") else expr
+    if signless.isdecimal():
+        return int(expr)
+    return None
+
+
+def _static_int_from_dim(dim: Attribute) -> int | None:
+    """尝试从 SymbolExprAttr 维度提取静态整数。
+
+    功能说明:
+    - 对 `#symbol.expr<4>` 返回 4；动态维度返回 None。
+
+    使用示例:
+    - _static_int_from_dim(SymbolExprAttr.from_expr("4"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    return _static_int_from_expr_text(_dim_expr_text(dim))
 
 
 @irdl_attr_definition
@@ -376,7 +326,7 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
     - 建模 `shape`、`stride`、`element_type` 与 `space` 四类信息。
 
     使用示例:
-    - NnMemoryType(ArrayAttr([IntAttr(4)]), ArrayAttr([IntAttr(1)]), IntegerType(32), NnMemorySpaceAttr.from_name(\"global\"))
+    - NnMemoryType(ArrayAttr([SymbolExprAttr.from_expr(\"4\")]), ArrayAttr([SymbolExprAttr.from_expr(\"1\")]), IntegerType(32), NnMemorySpaceAttr.from_name(\"global\"))
 
     关联文件:
     - spec: spec/dialect/nn.md
@@ -393,12 +343,42 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
 
     @classmethod
     def parse_parameters(cls, parser: AttrParser) -> Sequence[Attribute]:
-        """解析 memory type 参数。"""
+        """解析 memory type 参数。
 
-        return _parse_raw_memory_parameters(parser)
+        功能说明:
+        - 解析 `!nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], i32, #nn.space<global>>`。
+        - shape/stride 必须是 `ArrayAttr[SymbolExprAttr]`，不兼容旧 bare string 或 IntAttr 写法。
+
+        使用示例:
+        - Parser(ctx, "!nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], i32, #nn.space<global>>").parse_attribute()
+        """
+
+        parser.parse_punctuation("<", "Expected '<' for nn memory type.")
+        shape = parser.parse_attribute()
+        parser.parse_punctuation(",", "Expected ',' after nn memory shape.")
+        stride = parser.parse_attribute()
+        parser.parse_punctuation(",", "Expected ',' after nn memory stride.")
+        element_type = parser.parse_attribute()
+        parser.parse_punctuation(",", "Expected ',' after nn memory element type.")
+        space = parser.parse_attribute()
+        parser.parse_punctuation(">", "Expected '>' for nn memory type.")
+        if not isinstance(shape, ArrayAttr):
+            parser.raise_error("nn memory shape must be ArrayAttr[SymbolExprAttr]")
+        if not isinstance(stride, ArrayAttr):
+            parser.raise_error("nn memory stride must be ArrayAttr[SymbolExprAttr]")
+        if not isinstance(space, NnMemorySpaceAttr):
+            parser.raise_error("nn memory type space must be #nn.space<...>")
+        return (shape, stride, element_type, space)
 
     def print_parameters(self, printer: Printer) -> None:
-        """打印 memory type 参数。"""
+        """打印 memory type 参数。
+
+        功能说明:
+        - 输出结构化 `SymbolExprAttr` shape/stride 列表。
+
+        使用示例:
+        - printer.print_attribute(memory_type)
+        """
 
         printer.print_string("<")
         _print_dim_list(printer, self.shape)
@@ -411,7 +391,15 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
         printer.print_string(">")
 
     def verify(self) -> None:
-        """校验 memory type。"""
+        """校验 memory type。
+
+        功能说明:
+        - 要求 shape/stride rank 一致。
+        - 要求 shape/stride 每个条目均为 `SymbolExprAttr`。
+
+        使用示例:
+        - memory_type.verify()
+        """
 
         self.space.verify()
         if len(self.shape.data) != len(self.stride.data):
@@ -424,10 +412,8 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
 
         for shape_dim, stride_dim in zip(self.shape.data, self.stride.data, strict=True):
             if (
-                isinstance(stride_dim, StringAttr)
-                and stride_dim.data == "?"
-                and isinstance(shape_dim, StringAttr)
-                and shape_dim.data == "?"
+                _dim_expr_text(stride_dim) == "?"
+                and _dim_expr_text(shape_dim) == "?"
             ):
                 _raise_verify_error("stride '?' requires corresponding shape dimension to be symbol or integer")
 
@@ -500,7 +486,7 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
-    return getattr(attr, "name", None) == "symbol.int"
+    return isinstance(attr, ParametrizedAttribute) and attr.name == "symbol.int"
 
 
 def _is_int_or_symbol_type(attr: Attribute) -> bool:
@@ -544,11 +530,9 @@ def _static_int_from_operand(operand: SSAValue) -> int | None:
     owner = operand.owner
     if owner is None:
         return None
-    owner_name = getattr(owner, "name", None)
+    owner_name = owner.name
     if owner_name == "arith.constant":
-        value_attr = owner.attributes.get("value")
-        if value_attr is None:
-            value_attr = getattr(owner, "value", None)
+        value_attr = owner.value if isinstance(owner, ConstantOp) else owner.attributes.get("value")
         if isinstance(value_attr, IntegerAttr):
             return int(value_attr.value.data)
         if isinstance(value_attr, IntAttr):
@@ -786,19 +770,19 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
 
 
     功能说明:
-    - IntAttr 按数值比较，StringAttr 按去除空白后的公开维度表达式比较。
+    - SymbolExprAttr 按 canonical 表达式文本比较。
 
     使用示例:
-    - _dims_equal(IntAttr(1), IntAttr(1))
+    - _dims_equal(SymbolExprAttr.from_expr("N + 1"), SymbolExprAttr.from_expr("1 + N"))
 
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
-    if isinstance(lhs, StringAttr) and isinstance(rhs, StringAttr):
-        return "".join(lhs.data.split()) == "".join(rhs.data.split())
-    return _common_dims_equal(lhs, rhs)
+    if _is_symbol_expr_attr(lhs) and _is_symbol_expr_attr(rhs):
+        return _dim_expr_text(lhs) == _dim_expr_text(rhs)
+    return False
 
 
 def _verify_broadcast_compat(input_type: NnMemoryType, result_type: NnMemoryType) -> None:
@@ -825,7 +809,7 @@ def _verify_broadcast_compat(input_type: NnMemoryType, result_type: NnMemoryType
     for input_dim, result_dim in zip(reversed(input_dims), reversed(result_dims), strict=False):
         if _dims_equal(input_dim, result_dim):
             continue
-        if isinstance(input_dim, IntAttr) and input_dim.data == 1:
+        if _static_int_from_dim(input_dim) == 1:
             continue
         _raise_verify_error("result-shape-must-match-broadcast-contract")
 
@@ -898,12 +882,12 @@ def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
 
 
     功能说明:
-    - 静态维度返回 `IntAttr` 乘积。
-    - 符号维度返回无空格 `*` 连接的乘法表达式。
-    - `?` 维度会把更高维 stride 退化为 `?`。
+    - 静态维度返回 `#symbol.expr<整数>`。
+    - 符号维度返回 canonical `#symbol.expr<乘积>`。
+    - `#symbol.expr<?>` 维度会把更高维 stride 退化为 `#symbol.expr<?>`。
 
     使用示例:
-    - _default_contiguous_stride(ArrayAttr([IntAttr(2), IntAttr(4)]))
+    - _default_contiguous_stride(ArrayAttr([SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("4")]))
 
     关联文件:
     - spec: spec/dialect/nn.md
@@ -912,33 +896,23 @@ def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
     """
 
     stride: list[Attribute] = []
-    running: int | str | None = 1
+    running: str | None = "1"
     for dim in reversed(shape.data):
         if running is None:
-            stride.append(StringAttr("?"))
-        elif isinstance(running, int):
-            stride.append(IntAttr(running))
+            stride.append(_symbol_expr_attr_from_expr("?"))
         else:
-            stride.append(StringAttr(running))
+            stride.append(_symbol_expr_attr_from_expr(running))
         if running is None:
             continue
-        if isinstance(dim, IntAttr):
-            if dim.data == 1:
-                continue
-            if isinstance(running, int):
-                running *= dim.data
-            else:
-                running = f"{dim.data}*{running}"
+        dim_expr = _dim_expr_text(dim)
+        if dim_expr == "?":
+            running = None
+        elif dim_expr == "1":
             continue
-        if isinstance(dim, StringAttr):
-            if dim.data == "?":
-                running = None
-            elif running == 1:
-                running = dim.data
-            else:
-                running = f"{dim.data}*{running}"
-            continue
-        running = None
+        elif running == "1":
+            running = dim_expr
+        else:
+            running = _dim_expr_text(_symbol_expr_attr_from_expr(f"{dim_expr}*{running}"))
     stride.reverse()
     return stride
 
@@ -992,11 +966,11 @@ def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
 
 
     功能说明:
-    - 仅当所有维度均为 IntAttr 时返回整数列表。
-    - 任何非 IntAttr 维度返回 None，表示无法进行数值合同校验。
+    - 仅当所有维度均为静态整数 SymbolExprAttr 时返回整数列表。
+    - 任何动态 SymbolExprAttr 维度返回 None，表示无法进行数值合同校验。
 
     使用示例:
-    - _collect_int_dims([IntAttr(1), IntAttr(2)])
+    - _collect_int_dims([SymbolExprAttr.from_expr("1"), SymbolExprAttr.from_expr("2")])
 
     关联文件:
     - spec: spec/dialect/nn.md
@@ -1004,7 +978,13 @@ def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
-    return _common_collect_int_dims(dims)
+    values: list[int] = []
+    for dim in dims:
+        value = _static_int_from_dim(dim)
+        if value is None:
+            return None
+        values.append(value)
+    return values
 
 
 def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
@@ -1267,7 +1247,7 @@ def _build_reduce_result_shape(
     - keepdim=false 时移除归约轴；若结果 rank 为 0 则规范为 [1]。
 
     使用示例:
-    - _build_reduce_result_shape([IntAttr(2), IntAttr(3)], {0}, keepdim=False)
+    - _build_reduce_result_shape([SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("3")], {0}, keepdim=False)
 
     关联文件:
     - spec: spec/dialect/nn.md
@@ -1276,11 +1256,12 @@ def _build_reduce_result_shape(
     """
 
     if keepdim:
-        return [IntAttr(1) if index in axes else dim for index, dim in enumerate(input_dims)]
+        one = _symbol_expr_attr_from_expr("1")
+        return [one if index in axes else dim for index, dim in enumerate(input_dims)]
 
     result_dims = [dim for index, dim in enumerate(input_dims) if index not in axes]
     if not result_dims:
-        return [IntAttr(1)]
+        return [_symbol_expr_attr_from_expr("1")]
     return result_dims
 
 
@@ -1345,7 +1326,7 @@ def _verify_non_empty_reduction_extent(input_dims: Sequence[Attribute], axes: Se
     - 对静态维度为 0 的归约轴直接报错。
 
     使用示例:
-    - _verify_non_empty_reduction_extent([IntAttr(2), IntAttr(0)], [1])
+    - _verify_non_empty_reduction_extent([SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("0")], [1])
 
     关联文件:
     - spec: spec/dialect/nn.md
@@ -1355,7 +1336,7 @@ def _verify_non_empty_reduction_extent(input_dims: Sequence[Attribute], axes: Se
 
     for axis in axes:
         dim = input_dims[axis]
-        if isinstance(dim, IntAttr) and dim.data == 0:
+        if _static_int_from_dim(dim) == 0:
             _raise_verify_error("empty-reduction-extent-must-be-rejected-when-static")
 
 
@@ -2662,8 +2643,7 @@ class NnImg2col1dOp(IRDLOperation):
             _raise_verify_error("result-element-type-matches-input")
 
         input_dims = _collect_int_dims(input_type.shape.data)
-        result_dims = _collect_int_dims(result_type.shape.data)
-        if input_dims is None or result_dims is None:
+        if input_dims is None:
             return
         if any(value is None for value in (kw_value, sw_value, dw_value, pl_value, pr_value)):
             return
@@ -2674,8 +2654,9 @@ class NnImg2col1dOp(IRDLOperation):
             _raise_verify_error("result-shape-stride-must-match-img2col1d-contract")
 
         expected_shape = [n_dim, c_dim, kw_value, w_out]
-        if result_dims != expected_shape:
-            _raise_verify_error("result-shape-stride-must-match-img2col1d-contract")
+        for actual_dim, expected_dim in zip(result_type.shape.data, expected_shape, strict=True):
+            if _static_int_from_dim(actual_dim) != expected_dim:
+                _raise_verify_error("result-shape-stride-must-match-img2col1d-contract")
 
         result_strides = _collect_int_dims(result_type.stride.data)
         if result_strides is None:
@@ -2807,8 +2788,7 @@ class NnImg2col2dOp(IRDLOperation):
             _raise_verify_error("result-element-type-matches-input")
 
         input_dims = _collect_int_dims(input_type.shape.data)
-        result_dims = _collect_int_dims(result_type.shape.data)
-        if input_dims is None or result_dims is None:
+        if input_dims is None:
             return
         if any(
             value is None
@@ -2836,8 +2816,9 @@ class NnImg2col2dOp(IRDLOperation):
             _raise_verify_error("result-shape-stride-must-match-img2col2d-contract")
 
         expected_shape = [n_dim, c_dim, kh_value, kw_value, h_out, w_out]
-        if result_dims != expected_shape:
-            _raise_verify_error("result-shape-stride-must-match-img2col2d-contract")
+        for actual_dim, expected_dim in zip(result_type.shape.data, expected_shape, strict=True):
+            if _static_int_from_dim(actual_dim) != expected_dim:
+                _raise_verify_error("result-shape-stride-must-match-img2col2d-contract")
 
         result_strides = _collect_int_dims(result_type.stride.data)
         if result_strides is None:
