@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TypeAlias
 
 import pytest
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, ModuleOp, StringAttr, i32
+from xdsl.dialects.builtin import ArrayAttr, ModuleOp, i32
 from xdsl.parser import Parser
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +30,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.core.context import build_default_context
 from kernel_gen.dialect import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolExprAttr
 import kernel_gen.dsl.ast.mlir_gen as public_mlir_gen
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -171,14 +172,11 @@ def _build_module_with_unregistered_op() -> ModuleOp:
 
 
 def _build_module_with_memory_floor_div_expr() -> ModuleOp:
-    """构造一个含 `//` memory shape 表达式的 builtin.module。
-
-    创建者: 榕
-    最后一次更改: 榕
+    """构造一个含 `floordiv` memory shape 表达式的 builtin.module。
 
     功能说明:
-    - 用于覆盖 mlir_gen_compare 对 `!nn.memory` floor-div 文本的兜底比较路径。
-    - 该文本不能通过 xdsl parser 直接解析，因为 `//` 会先被词法层识别为注释。
+    - 用于覆盖 mlir_gen_compare 对 `!nn.memory` floor-div 文本的比较路径。
+    - 该文本使用当前公开的 `SymbolExprAttr` 结构化 memory layout。
 
     使用示例:
     - module = _build_module_with_memory_floor_div_expr()
@@ -193,8 +191,8 @@ def _build_module_with_memory_floor_div_expr() -> ModuleOp:
     from xdsl.ir import Block, Region
 
     memory_type = NnMemoryType(
-        ArrayAttr([StringAttr("M // S + 1")]),
-        ArrayAttr([IntAttr(1)]),
+        ArrayAttr([SymbolExprAttr.from_expr("M floordiv S + 1")]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
         i32,
         NnMemorySpaceAttr.from_name("global"),
     )
@@ -422,15 +420,15 @@ def test_mlir_gen_compare_does_not_repair_legacy_dma_view_result_dtype(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     actual_text = """builtin.module {
-  func.func @main(%0 : !nn.memory<[2], [1], f16, #nn.space<global>>, %1 : i32, %2 : i32, %3 : i32, %4 : i32, %5 : i32, %6 : i32) {
-    %7 = "dma.view"(%0, %1, %2, %3, %4, %5, %6) <{operandSegmentSizes = array<i32: 1, 2, 2, 2>}> : (!nn.memory<[2], [1], f16, #nn.space<global>>, i32, i32, i32, i32, i32, i32) -> !nn.memory<[2], [1], f16, #nn.space<global>>
+  func.func @main(%0 : !nn.memory<[#symbol.expr<2>], [#symbol.expr<1>], f16, #nn.space<global>>, %1 : i32, %2 : i32, %3 : i32, %4 : i32, %5 : i32, %6 : i32) {
+    %7 = "dma.view"(%0, %1, %2, %3, %4, %5, %6) <{operandSegmentSizes = array<i32: 1, 2, 2, 2>}> : (!nn.memory<[#symbol.expr<2>], [#symbol.expr<1>], f16, #nn.space<global>>, i32, i32, i32, i32, i32, i32) -> !nn.memory<[#symbol.expr<2>], [#symbol.expr<1>], f16, #nn.space<global>>
     func.return
   }
 }
 """
     expected_text = actual_text.replace(
-        "-> !nn.memory<[2], [1], f16, #nn.space<global>>",
-        "-> !nn.memory<[2], [1], f32, #nn.space<global>>",
+        "-> !nn.memory<[#symbol.expr<2>], [#symbol.expr<1>], f16, #nn.space<global>>",
+        "-> !nn.memory<[#symbol.expr<2>], [#symbol.expr<1>], f32, #nn.space<global>>",
         1,
     )
 
@@ -450,8 +448,8 @@ def test_mlir_gen_compare_does_not_repair_legacy_dma_view_result_dtype(
 
 
 # TC-MLIR-GEN-COMPARE-012
-# 功能说明: 对齐 `!nn.memory` 中 `//` shape 表达式的文本兜底比较。
-# 测试目的: 验证 expected 文本因 `//` 无法被 xdsl parser 解析时，仍能按空白归一化文本比较成功。
+# 功能说明: 对齐 `!nn.memory` 中 `floordiv` shape 表达式的文本比较。
+# 测试目的: 验证 expected 文本含结构化 `SymbolExprAttr` floor-div 时仍能比较成功。
 # 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_handles_memory_floor_div_expr
 # 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
 # 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
@@ -462,7 +460,7 @@ def test_mlir_gen_compare_text_handles_memory_floor_div_expr(
     actual_module = _build_module_with_memory_floor_div_expr()
     expected_text = """builtin.module {
   func.func @main(
-      %0 : !nn.memory<[M // S + 1], [1], i32, #nn.space<global>>) {
+      %0 : !nn.memory<[#symbol.expr<M floordiv S + 1>], [#symbol.expr<1>], i32, #nn.space<global>>) {
     func.return
   }
 }
@@ -479,8 +477,8 @@ def test_mlir_gen_compare_text_handles_memory_floor_div_expr(
 
 
 # TC-MLIR-GEN-COMPARE-013
-# 功能说明: 对齐 `!nn.memory` 中 `//` shape 表达式文本兜底比较的不一致路径。
-# 测试目的: 验证兜底比较不会把不同 floor-div 表达式误判为一致。
+# 功能说明: 对齐 `!nn.memory` 中 `floordiv` shape 表达式文本比较的不一致路径。
+# 测试目的: 验证比较不会把不同 floor-div 表达式误判为一致。
 # 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_rejects_memory_floor_div_mismatch
 # 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
 # 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
@@ -491,7 +489,7 @@ def test_mlir_gen_compare_text_rejects_memory_floor_div_mismatch(
     actual_module = _build_module_with_memory_floor_div_expr()
     expected_text = """builtin.module {
   func.func @main(
-      %0 : !nn.memory<[M // S + 2], [1], i32, #nn.space<global>>) {
+      %0 : !nn.memory<[#symbol.expr<M floordiv S + 2>], [#symbol.expr<1>], i32, #nn.space<global>>) {
     func.return
   }
 }
@@ -532,7 +530,7 @@ def test_mlir_gen_compare_text_ignores_line_comment_slashes_for_memory_types(
     """expected 注释中的 `//` 不应触发 memory floor-div 原始文本比较。"""
 
     memory_module_text = """builtin.module {
-  func.func @main(%0 : !nn.memory<[4], [1], i32, #nn.space<global>>) {
+  func.func @main(%0 : !nn.memory<[#symbol.expr<4>], [#symbol.expr<1>], i32, #nn.space<global>>) {
     func.return
   }
 }

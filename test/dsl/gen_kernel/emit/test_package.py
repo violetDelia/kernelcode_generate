@@ -30,7 +30,7 @@ import sys
 import pytest
 from xdsl.context import Context
 from xdsl.dialects import arith, func, scf
-from xdsl.dialects.builtin import ArrayAttr, BFloat16Type, DenseIntOrFPElementsAttr, FloatAttr, Float16Type, FunctionType, IndexType, IntAttr, IntegerAttr, ModuleOp, StringAttr, TensorType, f16, f32, f64, i1, i32
+from xdsl.dialects.builtin import ArrayAttr, BFloat16Type, DenseIntOrFPElementsAttr, FloatAttr, Float16Type, FunctionType, IndexType, IntAttr, IntegerAttr, ModuleOp, StringAttr, TensorType, UnrealizedConversionCastOp, f16, f32, f64, i1, i32
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.irdl import IRDLOperation, irdl_op_definition, result_def
 
@@ -53,7 +53,7 @@ from kernel_gen.dialect.kernel import (
     KernelSelectOp,
 )
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolMinOp, SymbolToFloatOp, SymbolToIntOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolExprAttr, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolMinOp, SymbolToFloatOp, SymbolToIntOp, SymbolValueType, SymbolYieldOp
 from kernel_gen.dialect.tuner import TunerCostOp
 from kernel_gen.dsl.ast import BlockAST
 from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c, emit_c_op, emit_c_value, gen_kernel
@@ -283,11 +283,15 @@ def _make_memory_type(
     element_type: Attribute = i32,
 ) -> NnMemoryType:
     return NnMemoryType(
-        ArrayAttr([IntAttr(dim) for dim in shape]),
-        ArrayAttr([IntAttr(dim) for dim in stride]),
+        ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in shape]),
+        ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in stride]),
         element_type,
         NnMemorySpaceAttr.from_name(space),
     )
+
+
+def _memory_symbol_expr_attr(value: int | str) -> SymbolExprAttr:
+    return SymbolExprAttr.from_expr(str(value))
 
 
 def _lower_single_op_func(
@@ -594,8 +598,8 @@ def test_emit_c_op_rejects_unsupported_op() -> None:
     assert "test.unsupported" in str(exc_info.value)
 
     bad_memory = NnMemoryType(
-        ArrayAttr([IntAttr(1)]),
-        ArrayAttr([IntAttr(1)]),
+        ArrayAttr([_memory_symbol_expr_attr(1)]),
+        ArrayAttr([_memory_symbol_expr_attr(1)]),
         TensorType(i32, [2]),
         NnMemorySpaceAttr.from_name("global"),
     )
@@ -820,6 +824,127 @@ def test_emit_c_op_lowers_npu_demo_symbol_for() -> None:
     assert emit_c_op(end, ctx) == "S_INT c_1 = 8;"
     assert emit_c_op(step, ctx) == "S_INT c_2 = 2;"
     assert emit_c_op(loop, ctx) == "for (S_INT i0 = c_0; i0 < c_1; i0 += c_2) {\n}"
+
+
+def test_emit_c_op_lowers_npu_demo_symbol_for_loop_carried_value() -> None:
+    """验证 npu_demo 下带 loop-carried value 的 symbol.for 发射。
+
+    功能说明:
+    - 通过公开 `emit_c_op(...)` 入口覆盖 `symbol.for iter_args` 发射路径。
+    - 确认 carried 变量在循环前初始化、循环内更新，并绑定到 `symbol.for` result。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_op_lowers_npu_demo_symbol_for_loop_carried_value
+    """
+
+    ctx = _npu_ctx()
+    start = SymbolConstOp(0)
+    end = SymbolConstOp(8)
+    step = SymbolConstOp(2)
+    init = SymbolConstOp(0)
+    for const_op in (start, end, step, init):
+        emit_c_op(const_op, ctx)
+    body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "2"), SymbolValueType.from_expr("ACC")])
+    one = SymbolConstOp(1)
+    body.add_op(one)
+    next_value = SymbolAddOp(body.args[1], one.result, SymbolValueType.from_expr("ACC + 1"))
+    body.add_op(next_value)
+    body.add_op(SymbolYieldOp(next_value.result))
+    loop = SymbolForOp(
+        start.result,
+        end.result,
+        step.result,
+        body,
+        init=init.result,
+        result_type=SymbolValueType.from_expr("TOTAL"),
+    )
+    assert emit_c_op(loop, ctx) == (
+        "S_INT v0 = c_3;\n"
+        "for (S_INT i0 = c_0; i0 < c_1; i0 += c_2) {\n"
+        "    S_INT c_4 = 1;\n"
+        "    S_INT v1 = (v0 + c_4);\n"
+        "    v0 = v1;\n"
+        "}"
+    )
+    assert ctx.create_or_get_name(loop.result) == "v0"
+
+
+def test_emit_c_op_lowers_npu_demo_symbol_for_loop_carried_cast_paths() -> None:
+    """验证 npu_demo 下 loop-carried symbol.for 的 cast 分支发射。
+
+    功能说明:
+    - 通过公开 `emit_c_op(...)` 入口覆盖 `scf.yield` 跳过、`builtin.unrealized_conversion_cast`
+      透传别名和 `symbol.yield` 更新路径。
+    - malformed cast 必须保持公开 `KernelCodeError` 失败语义。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_op_lowers_npu_demo_symbol_for_loop_carried_cast_paths
+    """
+
+    ctx = _npu_ctx()
+    start = SymbolConstOp(0)
+    end = SymbolConstOp(4)
+    step = SymbolConstOp(1)
+    init = SymbolConstOp(0)
+    for const_op in (start, end, step, init):
+        emit_c_op(const_op, ctx)
+    body = Block(arg_types=[SymbolIterType.from_bounds("0", "4", "1"), SymbolValueType.from_expr("ACC")])
+    body.add_op(scf.YieldOp())
+    cast_op = UnrealizedConversionCastOp.get([body.args[1]], [body.args[1].type])
+    body.add_op(cast_op)
+    body.add_op(SymbolYieldOp(cast_op.results[0]))
+    loop = SymbolForOp(
+        start.result,
+        end.result,
+        step.result,
+        body,
+        init=init.result,
+        result_type=SymbolValueType.from_expr("TOTAL"),
+    )
+    assert emit_c_op(loop, ctx) == (
+        "S_INT v0 = c_3;\n"
+        "for (S_INT i0 = c_0; i0 < c_1; i0 += c_2) {\n"
+        "    v0 = v0;\n"
+        "}"
+    )
+    assert ctx.create_or_get_name(loop.result) == "v0"
+
+    bad_body = Block(arg_types=[SymbolIterType.from_bounds("0", "4", "1"), SymbolValueType.from_expr("ACC")])
+    bad_body.add_op(UnrealizedConversionCastOp.get([], []))
+    bad_loop = SymbolForOp(
+        start.result,
+        end.result,
+        step.result,
+        bad_body,
+        init=init.result,
+        result_type=SymbolValueType.from_expr("TOTAL"),
+    )
+    with pytest.raises(KernelCodeError, match="unrealized_conversion_cast must have exactly one operand and one result"):
+        emit_c_op(bad_loop, ctx)
+
+
+def test_emit_c_op_rejects_npu_demo_symbol_for_loop_carried_without_result() -> None:
+    """验证 loop-carried symbol.for 缺少 result 时的公开失败语义。
+
+    功能说明:
+    - 通过公开 `emit_c_op(...)` 入口覆盖 `symbol.for` loop-carried init/result 不对称的错误分支。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_op_rejects_npu_demo_symbol_for_loop_carried_without_result
+    """
+
+    ctx = _npu_ctx()
+    start = SymbolConstOp(0)
+    end = SymbolConstOp(4)
+    step = SymbolConstOp(1)
+    init = SymbolConstOp(0)
+    for const_op in (start, end, step, init):
+        emit_c_op(const_op, ctx)
+    body = Block(arg_types=[SymbolIterType.from_bounds("0", "4", "1")])
+    loop = SymbolForOp(start.result, end.result, step.result, body, init=init.result)
+
+    with pytest.raises(KernelCodeError, match="requires result and accumulator block argument"):
+        emit_c_op(loop, ctx)
 
 
 # EC-008E
@@ -1131,8 +1256,8 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
     dyn_ctx.bind_name(dyn_block.args[0], "m")
     dyn_ctx.bind_name(dyn_block.args[1], "n")
     dyn_alloc_type = NnMemoryType(
-        ArrayAttr([StringAttr("M"), StringAttr("N")]),
-        ArrayAttr([StringAttr("N"), IntAttr(1)]),
+        ArrayAttr([_memory_symbol_expr_attr("M"), _memory_symbol_expr_attr("N")]),
+        ArrayAttr([_memory_symbol_expr_attr("N"), _memory_symbol_expr_attr(1)]),
         f32,
         NnMemorySpaceAttr.from_name("tsm"),
     )
@@ -1148,8 +1273,8 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
     runtime_dim_ctx.bind_name(dyn_block.args[0], "m")
     runtime_dim_ctx.bind_name(dyn_block.args[1], "n")
     runtime_dim_alloc_type = NnMemoryType(
-        ArrayAttr([StringAttr("runtime_dim_0"), StringAttr("runtime_dim_1")]),
-        ArrayAttr([StringAttr("runtime_dim_1"), IntAttr(1)]),
+        ArrayAttr([_memory_symbol_expr_attr("runtime_dim_0"), _memory_symbol_expr_attr("runtime_dim_1")]),
+        ArrayAttr([_memory_symbol_expr_attr("runtime_dim_1"), _memory_symbol_expr_attr(1)]),
         f32,
         NnMemorySpaceAttr.from_name("tsm"),
     )
@@ -1162,8 +1287,8 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
     )
 
     partial_dyn_alloc_type = NnMemoryType(
-        ArrayAttr([StringAttr("M"), IntAttr(3), StringAttr("N")]),
-        ArrayAttr([StringAttr("3*N"), StringAttr("N"), IntAttr(1)]),
+        ArrayAttr([_memory_symbol_expr_attr("M"), _memory_symbol_expr_attr(3), _memory_symbol_expr_attr("N")]),
+        ArrayAttr([_memory_symbol_expr_attr("3*N"), _memory_symbol_expr_attr("N"), _memory_symbol_expr_attr(1)]),
         f32,
         NnMemorySpaceAttr.from_name("tsm"),
     )
@@ -1182,8 +1307,16 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
     min_ctx.bind_name(min_block.args[0], "cur_c")
     min_ctx.bind_name(min_block.args[1], "cur_wo")
     min_alloc_type = NnMemoryType(
-        ArrayAttr([StringAttr("min(3, 3 - c0)"), IntAttr(3), StringAttr("min(5, 6 - wo0)")]),
-        ArrayAttr([StringAttr("3*min(5, 6 - wo0)"), StringAttr("min(5, 6 - wo0)"), IntAttr(1)]),
+        ArrayAttr([
+            _memory_symbol_expr_attr("min(3, 3 - c0)"),
+            _memory_symbol_expr_attr(3),
+            _memory_symbol_expr_attr("min(5, 6 - wo0)"),
+        ]),
+        ArrayAttr([
+            _memory_symbol_expr_attr("3*min(5, 6 - wo0)"),
+            _memory_symbol_expr_attr("min(5, 6 - wo0)"),
+            _memory_symbol_expr_attr(1),
+        ]),
         f32,
         NnMemorySpaceAttr.from_name("tsm"),
     )
@@ -1194,6 +1327,9 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
     assert min_stmt == (
         "Memory<TSM, float> v0 = alloc<TSM, float>({cur_c, 3, cur_wo} /*shape*/, {3*cur_wo, cur_wo, 1} /*stride*/);"
     )
+
+    with pytest.raises(KernelCodeError, match="result must be nn.memory"):
+        emit_c_op(DmaAllocOp([], i32), _npu_ctx())
 
 
 # EC-I3-001B
@@ -1268,6 +1404,49 @@ def test_emit_c_lowers_npu_demo_dma_misc_helper_contracts() -> None:
     assert free_stmt == "free<GM, float>(dst /*source*/);"
     assert transpose_stmt == "transpose<GM, GM, float, float>(dst /*dst*/, dst /*source*/, {1, 0} /*perm*/);"
     assert "Memory<GM, float> v0 = dst.reshape({3, 2} /*shape*/);" == reshape_stmt
+
+
+def test_emit_c_lowers_npu_demo_dma_slice_deslice_vector2_contracts() -> None:
+    """验证 npu_demo 下 2D slice/deslice 使用 Vector 参数发射。
+
+    功能说明:
+    - 通过公开 `emit_c_op(...)` 入口覆盖非 1D/3D 的 `dma.slice` 与 `dma.deslice` 发射路径。
+    - 锁定 2D offset/size/stride 以 `Vector{...}` 形式传给 npu_demo helper。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_slice_deslice_vector2_contracts
+    """
+
+    mem_type = _make_memory_type([2, 2], [2, 1], space="global", element_type=f32)
+    block = Block(arg_types=[mem_type, mem_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "dst")
+    ctx.bind_name(block.args[1], "src")
+    zero = SymbolConstOp(0)
+    one = SymbolConstOp(1)
+    two = SymbolConstOp(2)
+    slice_op = DmaSliceOp(
+        block.args[0],
+        block.args[1],
+        [zero.result, one.result],
+        [two.result, two.result],
+        [one.result, one.result],
+    )
+    deslice_op = DmaDesliceOp(
+        block.args[0],
+        block.args[1],
+        [zero.result, one.result],
+        [two.result, two.result],
+        [one.result, one.result],
+        mem_type,
+    )
+
+    assert emit_c_op(slice_op, ctx) == (
+        "slice(dst /*dst*/, src /*source*/, Vector{0, 1} /*offset*/, Vector{2, 2} /*size*/, Vector{1, 1} /*stride*/);"
+    )
+    assert emit_c_op(deslice_op, ctx) == (
+        "deslice(dst /*target*/, src /*source*/, Vector{0, 1} /*offset*/, Vector{2, 2} /*size*/, Vector{1, 1} /*stride*/);"
+    )
 
 
 # EC-S7-001
@@ -1444,8 +1623,8 @@ def test_emit_c_private_additional_error_matrix(
     dynamic_alloc = DmaAllocOp([dynamic_dim.result], _make_memory_type([4], [1], element_type=f32))
     assert "v0_shape[1] = {4};" in emit_c_op(dynamic_alloc, dynamic_alloc_ctx)
     dynamic_shape_type = NnMemoryType(
-        ArrayAttr([StringAttr("N")]),
-        ArrayAttr([IntAttr(1)]),
+        ArrayAttr([_memory_symbol_expr_attr("N")]),
+        ArrayAttr([_memory_symbol_expr_attr(1)]),
         f32,
         NnMemorySpaceAttr.from_name("global"),
     )
@@ -1823,8 +2002,8 @@ def test_emit_c_op_lowers_dma_alloc_and_view() -> None:
     dyn_ctx.bind_name(dyn_block.args[0], "N")
     dyn_ctx.bind_name(dyn_block.args[1], "c3")
     dyn_alloc_type = NnMemoryType(
-        ArrayAttr([StringAttr("N"), IntAttr(3)]),
-        ArrayAttr([IntAttr(3), IntAttr(1)]),
+        ArrayAttr([_memory_symbol_expr_attr("N"), _memory_symbol_expr_attr(3)]),
+        ArrayAttr([_memory_symbol_expr_attr(3), _memory_symbol_expr_attr(1)]),
         f32,
         NnMemorySpaceAttr.from_name("shared"),
     )

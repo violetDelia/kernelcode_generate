@@ -19,11 +19,9 @@ API 列表:
 
 from __future__ import annotations
 
-from xdsl.dialects.builtin import IntAttr, StringAttr
-
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
 
 from ...register import emit_c_impl
 
@@ -91,11 +89,8 @@ def _format_shape_values(op: DmaAllocOp, bindings: dict[str, str], ctx) -> list[
     result_type = op.result.type
     shape_values: list[str] = []
     for value in result_type.shape.data:
-        if isinstance(value, IntAttr):
-            shape_values.append(str(value.data))
-            continue
-        if isinstance(value, StringAttr):
-            shape_values.append(_format_layout_expr(value.data, bindings))
+        if isinstance(value, SymbolExprAttr):
+            shape_values.append(_format_layout_expr(value.expr.data, bindings))
             continue
         raise ctx.emit_error(op.name, "unsupported alloc layout value")
     return shape_values

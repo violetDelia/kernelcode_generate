@@ -28,7 +28,6 @@ import sys
 import importlib
 import subprocess
 import tempfile
-from types import SimpleNamespace
 
 import pytest
 from xdsl.context import Context
@@ -72,13 +71,14 @@ from kernel_gen.dialect.arch import (
     ArchScopeAttr,
     ArchVisibilityAttr,
 )
-from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaSliceOp, DmaViewOp
-from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaSliceOp, DmaViewOp
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolCastOp,
     SymbolConstOp,
+    SymbolExprAttr,
     SymbolForOp,
     SymbolGetDimOp,
     SymbolIterType,
@@ -107,12 +107,6 @@ def _reset_core_config() -> None:
 gen_kernel_module = importlib.import_module("kernel_gen.dsl.gen_kernel")
 gen_kernel_entry_module = importlib.import_module("kernel_gen.dsl.gen_kernel.gen_kernel")
 emit_context_module = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_context")
-tile_test_shared = importlib.import_module("test.passes.tile.test_shared")
-tile_analysis_helpers = SimpleNamespace(
-    build_module=tile_test_shared.build_elementwise_module,
-    build_broadcast_module=tile_test_shared.build_broadcast_module,
-    build_matmul_module=tile_test_shared.build_matmul_module,
-)
 tile_analysis_module = importlib.import_module("kernel_gen.passes.tile.analysis")
 tile_elewise_module = importlib.import_module("kernel_gen.passes.tile.elewise")
 tile_reduce_module = importlib.import_module("kernel_gen.passes.tile.reduce")
@@ -252,13 +246,72 @@ def _parse_npu_demo_launch_module(text: str) -> ModuleOp:
     return Parser(build_default_context(), text).parse_module()
 
 
-def _make_memory_type(shape: list[int], stride: list[int], element_type: Attribute = i32, space: str = "global") -> NnMemoryType:
+def _make_memory_type(
+    shape: list[int | str],
+    stride: list[int | str],
+    element_type: Attribute = i32,
+    space: str = "global",
+) -> NnMemoryType:
     return NnMemoryType(
-        ArrayAttr([IntAttr(dim) for dim in shape]),
-        ArrayAttr([IntAttr(dim) for dim in stride]),
+        ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in shape]),
+        ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in stride]),
         element_type,
         NnMemorySpaceAttr.from_name(space),
     )
+
+
+def _memory_symbol_expr_attr(value: int | str) -> SymbolExprAttr:
+    return SymbolExprAttr.from_expr(str(value))
+
+
+def _make_tile_memory_type(shape_names: list[str]) -> NnMemoryType:
+    return _make_memory_type(shape_names, [f"S{axis}" for axis in range(len(shape_names))])
+
+
+def _build_tile_elementwise_module(kind: str = "add") -> ModuleOp:
+    mem_type = _make_tile_memory_type(["M", "N"])
+    block = Block(arg_types=[mem_type, mem_type, mem_type])
+    space = NnMemorySpaceAttr.from_name("global")
+    block.add_ops(
+        [
+            KernelBinaryElewiseOp(block.args[2], block.args[0], block.args[1], kind=kind, space=space),
+            func.ReturnOp(),
+        ]
+    )
+    func_op = func.FuncOp(
+        f"tile_{kind}",
+        FunctionType.from_lists([mem_type, mem_type, mem_type], []),
+        Region(block),
+    )
+    return ModuleOp([func_op])
+
+
+def _build_tile_broadcast_module() -> ModuleOp:
+    target_type = _make_tile_memory_type(["M", "N"])
+    source_type = _make_tile_memory_type(["N"])
+    block = Block(arg_types=[target_type, source_type])
+    block.add_ops([DmaBroadcastOp(block.args[0], block.args[1]), func.ReturnOp()])
+    func_op = func.FuncOp(
+        "tile_broadcast",
+        FunctionType.from_lists([target_type, source_type], []),
+        Region(block),
+    )
+    return ModuleOp([func_op])
+
+
+def _build_tile_matmul_module() -> ModuleOp:
+    lhs_type = _make_tile_memory_type(["M", "K"])
+    rhs_type = _make_tile_memory_type(["K", "N"])
+    out_type = _make_tile_memory_type(["M", "N"])
+    block = Block(arg_types=[lhs_type, rhs_type, out_type])
+    space = NnMemorySpaceAttr.from_name("global")
+    block.add_ops([KernelMatmulOp(block.args[2], block.args[0], block.args[1], space), func.ReturnOp()])
+    func_op = func.FuncOp(
+        "tile_matmul",
+        FunctionType.from_lists([lhs_type, rhs_type, out_type], []),
+        Region(block),
+    )
+    return ModuleOp([func_op])
 
 
 def _tensor_arg(shape: list[int | str], dtype: NumericType = NumericType.Int32) -> Memory:
@@ -635,7 +688,7 @@ def _tile_analysis_func(module: ModuleOp) -> func.FuncOp:
     - 返回被 pass 标注后的函数，便于后续人为构造缺环路/缺 `tuner.param` 的 malformed IR。
 
     使用示例:
-    - func_op = _tile_analysis_func(tile_analysis_helpers.build_module())
+    - func_op = _tile_analysis_func(_build_tile_elementwise_module())
 
     关联文件:
     - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -657,7 +710,7 @@ def _tile_elewise_func(module: ModuleOp) -> func.FuncOp:
     - 返回被 pass 改写后的函数，便于后续交给 `gen_kernel(...)`。
 
     使用示例:
-    - func_op = _tile_elewise_func(tile_analysis_helpers.build_module())
+    - func_op = _tile_elewise_func(_build_tile_elementwise_module())
 
     关联文件:
     - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -680,7 +733,7 @@ def _tile_reduce_func(module: ModuleOp) -> func.FuncOp:
     - 返回被 pass 改写后的函数，便于后续交给 `gen_kernel(...)` 或直接断言 IR。
 
     使用示例:
-    - func_op = _tile_reduce_func(tile_analysis_helpers.build_matmul_module())
+    - func_op = _tile_reduce_func(_build_tile_matmul_module())
 
     关联文件:
     - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -2065,8 +2118,8 @@ def test_gen_kernel_emits_npu_demo_dma_alloc_module() -> None:
     dyn_m = SymbolValueType.from_expr("M")
     dyn_n = SymbolValueType.from_expr("N")
     dynamic_type = NnMemoryType(
-        ArrayAttr([StringAttr("M"), StringAttr("N")]),
-        ArrayAttr([StringAttr("N"), IntAttr(1)]),
+        ArrayAttr([_memory_symbol_expr_attr("M"), _memory_symbol_expr_attr("N")]),
+        ArrayAttr([_memory_symbol_expr_attr("N"), _memory_symbol_expr_attr(1)]),
         f32,
         NnMemorySpaceAttr.from_name("tsm"),
     )
@@ -2408,7 +2461,7 @@ int main() {{
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 def test_gen_kernel_emits_tile_codegen_single_function_tile_loop() -> None:
-    func_op = _tile_elewise_func(tile_analysis_helpers.build_module())
+    func_op = _tile_elewise_func(_build_tile_elementwise_module())
 
     source = gen_kernel(func_op, _ctx())
 
@@ -2429,7 +2482,7 @@ def test_gen_kernel_emits_tile_codegen_single_function_tile_loop() -> None:
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 def test_gen_kernel_rejects_tile_codegen_missing_tuner_param() -> None:
-    func_op = _tile_analysis_func(tile_analysis_helpers.build_module())
+    func_op = _tile_analysis_func(_build_tile_elementwise_module())
     block = func_op.body.block
     start = FakeSymbolValueOp("0")
     end = FakeSymbolValueOp("8")
@@ -2450,7 +2503,7 @@ def test_gen_kernel_rejects_tile_codegen_missing_tuner_param() -> None:
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 def test_gen_kernel_rejects_tile_codegen_missing_loop() -> None:
-    func_op = _tile_analysis_func(tile_analysis_helpers.build_module())
+    func_op = _tile_analysis_func(_build_tile_elementwise_module())
 
     with pytest.raises(KernelCodeError, match="missing explicit tile loop"):
         gen_kernel(func_op, _ctx())
@@ -2464,7 +2517,7 @@ def test_gen_kernel_rejects_tile_codegen_missing_loop() -> None:
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/test_gen_kernel.py
 def test_gen_kernel_rejects_tile_codegen_with_helper_call() -> None:
-    func_op = _tile_elewise_func(tile_analysis_helpers.build_module())
+    func_op = _tile_elewise_func(_build_tile_elementwise_module())
 
     loop = next(op for op in func_op.body.block.ops if isinstance(op, SymbolForOp))
     loop_block = loop.body.blocks.first
@@ -2561,13 +2614,13 @@ def test_gen_kernel_rejects_tile_codegen_public_malformed_matrix(
     ("builder", "expected_tuners", "expected_fragment"),
     [
         pytest.param(
-            tile_analysis_helpers.build_module,
+            _build_tile_elementwise_module,
             ("tuner_param(\"TILE_D0\")", "tuner_param(\"TILE_D1\")"),
             "cpu::add(",
             id="elementwise",
         ),
         pytest.param(
-            tile_analysis_helpers.build_broadcast_module,
+            _build_tile_broadcast_module,
             ("tuner_param(\"TILE_D0\")",),
             "cpu::broadcast(",
             id="broadcast",
@@ -2632,11 +2685,11 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
         "Memory<TSM, float> v2 = npu_demo::get_dynamic_memory<TSM>();"
     )
     assert f"Memory<{space_enum}, float> v3 = npu_demo::get_dynamic_memory<{space_enum}>();" in source
-    assert "npu_demo::thread_id() * 16" in source
+    assert "16*npu_demo::thread_id()" in source
     assert source.index("slice(v2_1 /*dst*/, lhs_1 /*source*/, 0 /*offset*/, 16 /*size*/, 1 /*stride*/);") < source.index(
         "add<TSM, float, float>(v2_3 /*out*/, v2_1 /*lhs*/, v2_2 /*rhs*/);"
     ) < source.index(
-        "deslice(out /*target*/, v2_3 /*source*/, npu_demo::thread_id() * 16 /*offset*/, 16 /*size*/, 1 /*stride*/);"
+        "deslice(out /*target*/, v2_3 /*source*/, 16*npu_demo::thread_id() /*offset*/, 16 /*size*/, 1 /*stride*/);"
     )
     assert "arch.launch_kernel" not in source
     assert "ctx.sync_threads" not in source
@@ -2737,9 +2790,9 @@ def test_gen_kernel_compiles_outlined_npu_demo_launch_module() -> None:
         """
 builtin.module {
   func.func @kernel(
-    %lhs : !nn.memory<[4], [1], f32, #nn.space<global>>,
-    %rhs : !nn.memory<[4], [1], f32, #nn.space<global>>,
-    %out : !nn.memory<[4], [1], f32, #nn.space<global>>
+    %lhs : !nn.memory<[#symbol.expr<4>], [#symbol.expr<1>], f32, #nn.space<global>>,
+    %rhs : !nn.memory<[#symbol.expr<4>], [#symbol.expr<1>], f32, #nn.space<global>>,
+    %out : !nn.memory<[#symbol.expr<4>], [#symbol.expr<1>], f32, #nn.space<global>>
   ) attributes {
     launch_block = 1 : i64,
     launch_thread = 1 : i64,

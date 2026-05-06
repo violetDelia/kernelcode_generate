@@ -52,6 +52,7 @@ from kernel_gen.dialect.dma import (
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
+    SymbolExprAttr,
     SymbolCastOp,
     SymbolConstOp,
     SymbolForOp,
@@ -303,9 +304,12 @@ def _format_indices(indices: tuple[SSAValue, ...], ctx: EmitCContext) -> str:
 def _format_static_layout(values: Any, ctx: EmitCContext, subject: str) -> list[str]:
     formatted: list[str] = []
     for value in values:
-        if not isinstance(value, IntAttr):
+        if not isinstance(value, SymbolExprAttr):
             raise ctx.emit_error(subject, "only static memory layout is supported")
-        formatted.append(str(value.data))
+        expr = value.expr.data
+        if not expr.isdecimal():
+            raise ctx.emit_error(subject, "only static memory layout is supported")
+        formatted.append(expr)
     return formatted
 
 
@@ -316,9 +320,9 @@ def _emit_long_long_buffer(name: str, values: list[str], ctx: EmitCContext) -> s
 def _maybe_static_numel(shape: Any) -> int | None:
     numel = 1
     for dim in shape:
-        if not isinstance(dim, IntAttr):
+        if not isinstance(dim, SymbolExprAttr) or not dim.expr.data.isdecimal():
             return None
-        numel *= dim.data
+        numel *= int(dim.expr.data)
     return numel
 
 
@@ -387,7 +391,7 @@ def _emit_memory_decl(
 def _is_unit_tile(memory_type: NnMemoryType) -> bool:
     if len(memory_type.shape.data) == 0:
         return False
-    return all(isinstance(dim, IntAttr) and dim.data == 1 for dim in memory_type.shape.data)
+    return all(isinstance(dim, SymbolExprAttr) and dim.expr.data == "1" for dim in memory_type.shape.data)
 
 
 def _emit_dma_copy_loop_nest(
