@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from xdsl.context import Context
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, i8
+from xdsl.dialects.builtin import ArrayAttr, i8
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dialect.arch import (
@@ -43,6 +43,7 @@ from kernel_gen.dialect.arch import (
     ArchVisibilityAttr,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolExprAttr
 from kernel_gen.operation.arch import BarrierScope, BarrierVisibility
 from kernel_gen.symbol_variable.memory import MemorySpace
 from .attr import EmitMlirResult, MemorySpaceAttrAST, PythonObjectAttrAST, SourceLocation
@@ -204,7 +205,12 @@ class ArchGetDynamicMemoryAST(ValueAST):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "get_dynamic_memory space must be on-chip MemorySpace")
         return ArchGetDynamicMemoryOp(
             space_attr,
-            NnMemoryType(ArrayAttr([StringAttr(size_symbol)]), ArrayAttr([IntAttr(1)]), i8, space_attr),
+            NnMemoryType(
+                ArrayAttr([SymbolExprAttr.from_expr(size_symbol)]),
+                ArrayAttr([SymbolExprAttr.from_expr("1")]),
+                i8,
+                space_attr,
+            ),
         )
 
 @dataclass

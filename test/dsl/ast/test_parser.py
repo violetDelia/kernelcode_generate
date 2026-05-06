@@ -66,6 +66,13 @@ def test_parse_function_basic_assignment() -> None:
     assert func_ast.has_explicit_return.raw_value is True
 
 
+def test_parse_rejects_non_callable_public_input() -> None:
+    """parse 公开入口拒绝非 callable 输入并返回稳定错误。"""
+
+    with pytest.raises(KernelCodeError, match="parse expects a callable"):
+        parse(1)
+
+
 def test_parse_function_for_loop() -> None:
     """解析 for range(...) 语法并生成 ForAST。"""
 

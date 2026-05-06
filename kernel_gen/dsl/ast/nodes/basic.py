@@ -48,6 +48,7 @@ API 列表:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -56,19 +57,52 @@ from xdsl.dialects import arith, func
 from xdsl.dialects.builtin import (
     ArrayAttr,
     FunctionType,
-    IntAttr,
     ModuleOp,
-    StringAttr,
     i1,
 )
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import Farmat, NumericType
+
+
+def _symbol_expr_attr_from_value(value: int | str | SymbolDim) -> SymbolExprAttr:
+    """把 runtime memory 维度值转换为 `SymbolExprAttr`。
+
+    功能说明:
+    - 当前文件内统一 `NnMemoryType` shape/stride 条目的构造。
+    - 避免继续向 `nn.memory` 写入旧 `IntAttr` / `StringAttr` 维度。
+
+    使用示例:
+    - attr = _symbol_expr_attr_from_value("N")
+    """
+
+    return SymbolExprAttr.from_expr(_symbol_expr_text_from_value(value))
+
+
+def _symbol_expr_text_from_value(value: int | str | SymbolDim) -> str:
+    """把 Python / SymbolDim 表达规整为 `SymbolExprAttr` 支持的文本。
+
+    功能说明:
+    - 将历史 `SymbolDim` 输出的 `/`、`//` 除法文本转换为 `floordiv`。
+    - 仅服务当前文件内 type 构造，不作为跨文件公开入口。
+
+    使用示例:
+    - text = _symbol_expr_text_from_value(SymbolDim("M") // 2)
+    """
+
+    if isinstance(value, SymbolDim):
+        value = value.get_value()
+    text = str(value).strip()
+    if text.startswith("floor(") and text.endswith(")"):
+        text = text[len("floor(") : -1].strip()
+    text = text.replace("//", " floordiv ")
+    text = re.sub(r"(?<!/)/(?!/)", " floordiv ", text)
+    return " ".join(text.split())
 
 
 class DSLNode:
@@ -464,8 +498,8 @@ class MemoryAST(ValueAST):
 
         assert isinstance(ctx, Context)
         shape_values, stride_values = cls._type_layout_values(memory)
-        shape_attr = ArrayAttr([IntAttr(dim) if isinstance(dim, int) else StringAttr(str(dim)) for dim in shape_values])
-        stride_attr = ArrayAttr([IntAttr(dim) if isinstance(dim, int) else StringAttr(str(dim)) for dim in stride_values])
+        shape_attr = ArrayAttr([_symbol_expr_attr_from_value(dim) for dim in shape_values])
+        stride_attr = ArrayAttr([_symbol_expr_attr_from_value(dim) for dim in stride_values])
         element_type = cls.dtype_attr_from_numeric_type(memory.get_type(), location).emit_mlir(ctx, None)
         space_attr = MemorySpaceAttrAST(memory.get_space(), location).emit_mlir(ctx, None)
         if not isinstance(element_type, Attribute):
@@ -863,11 +897,11 @@ class FunctionAST(DSLNode):
             elif isinstance(item, SymbolDimAST):
                 symbol_value = item.result_symbol()
                 if isinstance(symbol_value, SymbolDim):
-                    input_types.append(SymbolValueType.from_expr(str(symbol_value.get_symbol())))
+                    input_types.append(SymbolValueType.from_expr(_symbol_expr_text_from_value(symbol_value)))
                 elif isinstance(symbol_value, int):
-                    input_types.append(SymbolValueType.from_expr(str(symbol_value)))
+                    input_types.append(SymbolValueType.from_expr(_symbol_expr_text_from_value(symbol_value)))
                 else:
-                    input_types.append(SymbolValueType.from_expr(str(item.symbol.get_value())))
+                    input_types.append(SymbolValueType.from_expr(_symbol_expr_text_from_value(item.symbol)))
             elif isinstance(item, BoolValueAST):
                 input_types.append(i1)
             elif isinstance(item, ConstValueAST):

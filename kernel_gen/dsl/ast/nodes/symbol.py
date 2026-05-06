@@ -43,6 +43,7 @@ API 列表:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from xdsl.context import Context
@@ -453,6 +454,46 @@ def _normalize_symbol_operand_expr(value: int | str) -> int | str:
     return int(value) if value.lstrip("-").isdigit() else value
 
 
+def _symbol_expr_text_from_value(value: int | str | SymbolDim) -> str:
+    """把 Python / SymbolDim 表达规整为 `SymbolExprAttr` 支持的文本。
+
+    功能说明:
+    - 将历史 `SymbolDim` 输出的 `/`、`//` 除法文本转换为 `floordiv`。
+    - 仅服务当前 symbol AST 结果类型构造，不作为跨文件公开入口。
+
+    使用示例:
+    - text = _symbol_expr_text_from_value(SymbolDim("M") // 2)
+    """
+
+    if isinstance(value, SymbolDim):
+        value = value.get_value()
+    text = str(value).strip()
+    if text.startswith("floor(") and text.endswith(")"):
+        text = text[len("floor(") : -1].strip()
+    text = text.replace("//", " floordiv ")
+    text = re.sub(r"(?<!/)/(?!/)", " floordiv ", text)
+    return " ".join(text.split())
+
+
+def _parenthesize_symbol_expr_operand(value: int | str) -> str:
+    """按 `SymbolExprAttr` 表达语法为复合 operand 补括号。
+
+    功能说明:
+    - 单个整数、标识符或 `?` 保持原样。
+    - 复合加减乘除与 `min/max` 表达补括号，避免组合二元表达时改变优先级。
+
+    使用示例:
+    - text = _parenthesize_symbol_expr_operand("M + 1")
+    """
+
+    text = str(value)
+    if re.fullmatch(r"-?\d+|[A-Za-z_][A-Za-z0-9_]*|\?", text):
+        return text
+    if text.startswith("(") and text.endswith(")"):
+        return text
+    return f"({text})"
+
+
 def _symbol_expr_from_ssa(value: SSAValue) -> int | str:
     """从 symbol SSA value 提取公开表达文本。
 
@@ -487,37 +528,31 @@ def _compose_symbol_binary_expr(op_name: str, lhs: int | str, rhs: int | str) ->
 
     if lhs == "?" or rhs == "?":
         return "?"
-    lhs_operand = _normalize_symbol_operand_expr(lhs)
-    rhs_operand = _normalize_symbol_operand_expr(rhs)
+    lhs_text = _symbol_expr_text_from_value(lhs)
+    rhs_text = _symbol_expr_text_from_value(rhs)
+    lhs_operand = _normalize_symbol_operand_expr(lhs_text)
+    rhs_operand = _normalize_symbol_operand_expr(rhs_text)
     if op_name == "min":
         return str(min(lhs_operand, rhs_operand)) if isinstance(lhs_operand, int) and isinstance(rhs_operand, int) else f"min({lhs_operand}, {rhs_operand})"
-    try:
-        lhs_symbol = SymbolDim(lhs_operand)
-        rhs_symbol = SymbolDim(rhs_operand)
+    if isinstance(lhs_operand, int) and isinstance(rhs_operand, int):
         if op_name == "add":
-            result = lhs_symbol + rhs_symbol
-        elif op_name == "sub":
-            result = lhs_symbol - rhs_symbol
-        elif op_name == "mul":
-            result = lhs_symbol * rhs_symbol
-        elif op_name == "truediv":
-            result = lhs_symbol / rhs_symbol
-        elif op_name == "floordiv":
-            result = lhs_symbol // rhs_symbol
-        else:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbol binary AST")
-        return str(result.get_value())
-    except (TypeError, ValueError):
-        sigil = {
-            "add": "+",
-            "sub": "-",
-            "mul": "*",
-            "truediv": "/",
-            "floordiv": "//",
-        }.get(op_name)
-        if sigil is None:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbol binary AST")
-        return f"{lhs} {sigil} {rhs}"
+            return str(lhs_operand + rhs_operand)
+        if op_name == "sub":
+            return str(lhs_operand - rhs_operand)
+        if op_name == "mul":
+            return str(lhs_operand * rhs_operand)
+        if op_name in {"truediv", "floordiv"}:
+            return str(lhs_operand // rhs_operand)
+    sigil = {
+        "add": "+",
+        "sub": "-",
+        "mul": "*",
+        "truediv": "floordiv",
+        "floordiv": "floordiv",
+    }.get(op_name)
+    if sigil is None:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbol binary AST")
+    return f"{_parenthesize_symbol_expr_operand(lhs_operand)} {sigil} {_parenthesize_symbol_expr_operand(rhs_operand)}"
 
 
 def _symbol_min_runtime_value(lhs: int | SymbolDim, rhs: int | SymbolDim) -> int | SymbolDim:

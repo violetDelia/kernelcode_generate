@@ -135,7 +135,7 @@ def test_arch_dynamic_memory_emits_all_on_chip_spaces(
 
     assert isinstance(op, ArchGetDynamicMemoryOp)
     assert op.memory_space.space.data == space_name
-    assert op.result.type.shape.data[0].data == size_symbol
+    assert op.result.type.shape.data[0].expr.data == size_symbol
 
 
 def test_arch_dynamic_memory_rejects_global_space() -> None:

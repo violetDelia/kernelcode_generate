@@ -311,6 +311,21 @@ def test_symbol_binary_public_emit_mlir_matrix_and_errors(node_type: type, expec
         node_type(ConstValueAST(True), ConstValueAST(2)).emit_mlir(ctx, Block())
 
 
+def test_symbol_binary_public_emit_mlir_uses_symbol_expr_division_text() -> None:
+    """公开 symbol 除法节点生成 `SymbolExprAttr` 支持的 floordiv 结果类型。"""
+
+    ctx = Context()
+    block = Block(arg_types=[SymbolValueType.from_expr("M + 1"), SymbolValueType.from_expr("N")])
+
+    div_result = SymbolTrueDivAST(DetachedSymbolTypedValueAST(block.args[0].type), DetachedSymbolTypedValueAST(block.args[1].type)).emit_mlir(ctx, block)
+    floor_result = SymbolFloorDivAST(DetachedSymbolTypedValueAST(block.args[0].type), DetachedSymbolTypedValueAST(block.args[1].type)).emit_mlir(ctx, block)
+
+    assert isinstance(div_result, SSAValue)
+    assert isinstance(floor_result, SSAValue)
+    assert div_result.type == SymbolValueType.from_expr("(M + 1) floordiv N")
+    assert floor_result.type == SymbolValueType.from_expr("(M + 1) floordiv N")
+
+
 def test_symbol_binary_public_emit_mlir_propagates_unknown_for_unknown_and_iter_operands() -> None:
     """symbol 二元 AST 对 `?` 和 `symbol.iter` operand 发射 unknown result。"""
 

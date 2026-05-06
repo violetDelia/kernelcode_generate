@@ -33,18 +33,19 @@ API 列表:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import ClassVar, TypeAlias
 
 from xdsl.context import Context
 from xdsl.dialects import arith
-from xdsl.dialects.builtin import ArrayAttr, BFloat16Type, Float16Type, Float32Type, Float64Type, FloatAttr, IntAttr, IntegerType, StringAttr, i1
+from xdsl.dialects.builtin import ArrayAttr, BFloat16Type, Float16Type, Float32Type, Float64Type, FloatAttr, IntegerType, i1
 from xdsl.ir import Block, Operation, SSAValue
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolDivOp, SymbolFloorDivOp, SymbolGetDimOp, SymbolIterType, SymbolMulOp, SymbolSubOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolDivOp, SymbolExprAttr, SymbolFloorDivOp, SymbolGetDimOp, SymbolIterType, SymbolMulOp, SymbolSubOp, SymbolValueType
 from kernel_gen.operation import dma
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -79,6 +80,135 @@ SymbolRuntimeValue: TypeAlias = "int | float | str | bool | SymbolDim"
 _RUNTIME_DIM_PREFIX = "runtime_dim_"
 
 
+def _symbol_expr_attr_from_value(value: int | str | SymbolDim) -> SymbolExprAttr:
+    """把 DMA 结果 type 维度值转换为 `SymbolExprAttr`。
+
+    功能说明:
+    - 当前文件内统一 `NnMemoryType` shape/stride 条目构造。
+    - 避免继续用旧 `IntAttr` / `StringAttr` 作为 memory 维度。
+
+    使用示例:
+    - attr = _symbol_expr_attr_from_value("M")
+    """
+
+    return SymbolExprAttr.from_expr(_symbol_expr_text_from_value(value))
+
+
+def _symbol_expr_text_from_value(value: int | str | SymbolDim) -> str:
+    """把 Python / SymbolDim 表达规整为 `SymbolExprAttr` 支持的文本。
+
+    功能说明:
+    - 将历史 `SymbolDim` 输出的 `/`、`//` 除法文本转换为 `floordiv`。
+    - 仅服务当前 DMA AST type 构造与 symbol 结果类型，不作为跨文件公开入口。
+
+    使用示例:
+    - text = _symbol_expr_text_from_value(SymbolDim("M") // 2)
+    """
+
+    if isinstance(value, SymbolDim):
+        value = value.get_value()
+    text = str(value).strip()
+    if text.startswith("floor(") and text.endswith(")"):
+        text = text[len("floor(") : -1].strip()
+    text = text.replace("//", " floordiv ")
+    text = re.sub(r"(?<!/)/(?!/)", " floordiv ", text)
+    return " ".join(text.split())
+
+
+def _symbol_dim_from_expr_text(text: int | str) -> SymbolDim:
+    """把 `SymbolExprAttr` 文本还原为当前 operation 层可消费的 `SymbolDim`。
+
+    功能说明:
+    - `SymbolDim` 仍接受 Python 风格 `//` 表达，当前文件内只做语法桥接。
+    - 保留解析期 memory 语义供后续 DMA operation 公开 helper 使用。
+
+    使用示例:
+    - dim = _symbol_dim_from_expr_text("M floordiv 2")
+    """
+
+    if isinstance(text, int):
+        return SymbolDim(text)
+    return SymbolDim(str(text).replace(" floordiv ", "//"))
+
+
+def _symbol_expr_text(dim: SymbolExprAttr) -> str:
+    """读取 `SymbolExprAttr` 的 canonical 表达文本。
+
+    功能说明:
+    - 当前文件内用于动态维度识别与连续 stride 重建。
+
+    使用示例:
+    - text = _symbol_expr_text(SymbolExprAttr.from_expr("N"))
+    """
+
+    return dim.expr.data
+
+
+def _static_int_from_symbol_expr(dim: SymbolExprAttr) -> int | None:
+    """读取静态整数维度。
+
+    功能说明:
+    - 对 `#symbol.expr<4>` 返回 4。
+    - 动态 symbol 或 `?` 返回 None。
+
+    使用示例:
+    - value = _static_int_from_symbol_expr(SymbolExprAttr.from_expr("4"))
+    """
+
+    expr = _symbol_expr_text(dim)
+    signless = expr[1:] if expr.startswith("-") else expr
+    return int(expr) if signless.isdecimal() else None
+
+
+def _is_dynamic_dim_attr(dim: SymbolExprAttr) -> bool:
+    """判断 memory type 维度是否需要 dynamic shape operand。
+
+    功能说明:
+    - 静态整数字面量不需要 dynamic shape。
+    - 具名 symbol、表达式和 `?` 均需要通过 `symbol.get_dim` 或已发射 shape operand 表达。
+
+    使用示例:
+    - dynamic = _is_dynamic_dim_attr(SymbolExprAttr.from_expr("N"))
+    """
+
+    return _static_int_from_symbol_expr(dim) is None
+
+
+def _parenthesize_symbol_expr(expr: str) -> str:
+    """在乘法组合中按需为复合 symbol 表达式加括号。
+
+    功能说明:
+    - 保持 `N + 1` 这类 shape 维度参与 stride 乘法时语义不变。
+
+    使用示例:
+    - text = _parenthesize_symbol_expr("N + 1")
+    """
+
+    if expr == "?" or expr.replace("_", "").isalnum() or expr.lstrip("-").isdigit():
+        return expr
+    return f"({expr})"
+
+
+def _symbol_expr_product(lhs: int | str, rhs: int | str) -> int | str:
+    """组合两个公开 symbol 表达式乘积。
+
+    功能说明:
+    - 静态整数直接折叠。
+    - 动态表达式以 `SymbolExprAttr` 可解析文本返回。
+
+    使用示例:
+    - expr = _symbol_expr_product("M", "N")
+    """
+
+    if lhs == 1:
+        return rhs
+    if rhs == 1:
+        return lhs
+    if isinstance(lhs, int) and isinstance(rhs, int):
+        return lhs * rhs
+    return f"{_parenthesize_symbol_expr(str(lhs))} * {_parenthesize_symbol_expr(str(rhs))}"
+
+
 def _uses_runtime_dim_shape(result_type: NnMemoryType) -> bool:
     """判断结果类型是否包含匿名 runtime type-level shape 维度。
 
@@ -92,9 +222,24 @@ def _uses_runtime_dim_shape(result_type: NnMemoryType) -> bool:
     """
 
     return any(
-        isinstance(dim, StringAttr) and dim.data.startswith(_RUNTIME_DIM_PREFIX)
+        isinstance(dim, SymbolExprAttr) and _symbol_expr_text(dim).startswith(_RUNTIME_DIM_PREFIX)
         for dim in result_type.shape.data
     )
+
+
+def _uses_unknown_dim_shape(result_type: NnMemoryType) -> bool:
+    """判断结果类型是否包含 `#symbol.expr<?>` shape 维度。
+
+    功能说明:
+    - `dma.alloc` 的紧凑 dynamic_shape 形态不接受结果 shape 中的 `?`。
+    - 当前文件内据此切换到 full-rank dynamic_shape。
+
+    使用示例:
+    - if _uses_unknown_dim_shape(result_type):
+    -     ...
+    """
+
+    return any(isinstance(dim, SymbolExprAttr) and _symbol_expr_text(dim) == "?" for dim in result_type.shape.data)
 
 
 def _alloc_dynamic_shape_for_result(
@@ -113,9 +258,13 @@ def _alloc_dynamic_shape_for_result(
     - dynamic_shape = _alloc_dynamic_shape_for_result(symbol_dynamic_shape, sizes, result_type)
     """
 
-    if _uses_runtime_dim_shape(result_type):
+    if _uses_runtime_dim_shape(result_type) or _uses_unknown_dim_shape(result_type):
         return full_rank_shape
-    expected_symbol_dims = [dim.data for dim in result_type.shape.data if isinstance(dim, StringAttr)]
+    expected_symbol_dims = [
+        _symbol_expr_text(dim)
+        for dim in result_type.shape.data
+        if isinstance(dim, SymbolExprAttr) and _is_dynamic_dim_attr(dim)
+    ]
     if len(symbol_dynamic_shape) != len(expected_symbol_dims):
         return full_rank_shape
     for operand, expected in zip(symbol_dynamic_shape, expected_symbol_dims, strict=True):
@@ -131,47 +280,93 @@ def _shape_attr_from_reshape_item(
     operand: SSAValue,
     fallback: SymbolRuntimeValue,
     axis: int,
-) -> IntAttr | StringAttr:
+) -> SymbolExprAttr:
     """从 reshape 公开 shape 项生成结果类型维度。
 
     功能说明:
-    - 静态整数保持 `IntAttr`。
-    - 匿名 `?` 优先使用 `SymbolDimAST` 的公开绑定名或 SSA `name_hint`，让同一个 shape 变量在多个 reshape 结果中保持同名。
-    - 无绑定名时退回到轴向稳定名，避免继续生成 `[?]/[?]` 类型组合。
+    - 静态整数保持 `#symbol.expr<int>`。
+    - SSA 类型已携带公开 symbol 表达时优先继承该表达，满足 dialect verifier 的 operand/type 一致合同。
+    - SSA 类型仍为 `?` 时结果类型保持 `#symbol.expr<?>`，不从 Python 变量名反推不可证明的类型关系。
+    - 无 SSA 类型表达时退回 `SymbolDimAST` 的公开绑定名、解析期公开 symbol 值或轴向稳定名。
 
     使用示例:
     - attr = _shape_attr_from_reshape_item(item, operand, fallback, 0)
     """
 
     if isinstance(fallback, bool):
-        return IntAttr(int(fallback))
+        return _symbol_expr_attr_from_value(int(fallback))
     if isinstance(fallback, int):
-        return IntAttr(fallback)
+        return _symbol_expr_attr_from_value(fallback)
+    operand_value = operand.type.get_value() if isinstance(operand.type, SymbolValueType) else None
+    if isinstance(operand_value, int):
+        return _symbol_expr_attr_from_value(operand_value)
+    if isinstance(operand_value, str):
+        operand_text = operand_value.replace(" ", "")
+        if operand_text == "?":
+            return _symbol_expr_attr_from_value("?")
+        if operand_text and operand_text != "?":
+            return _symbol_expr_attr_from_value(operand_text)
     if isinstance(item, SymbolDimAST):
         item_name = item.name.replace(" ", "")
         if item_name and item_name != "?":
-            return StringAttr(item_name)
-    operand_value = operand.type.get_value() if isinstance(operand.type, SymbolValueType) else None
-    if isinstance(operand_value, int):
-        return IntAttr(operand_value)
-    if isinstance(operand_value, str):
-        operand_text = operand_value.replace(" ", "")
-        if operand_text and operand_text != "?":
-            return StringAttr(operand_text)
-    if operand.name_hint:
-        return StringAttr(str(operand.name_hint).replace(" ", ""))
+            return _symbol_expr_attr_from_value(item_name)
     if isinstance(fallback, SymbolDim):
         public_value = fallback.get_value()
         if isinstance(public_value, int):
-            return IntAttr(public_value)
+            return _symbol_expr_attr_from_value(public_value)
         fallback_text = str(public_value).replace(" ", "")
         if fallback_text and fallback_text != "?":
-            return StringAttr(fallback_text)
+            return _symbol_expr_attr_from_value(fallback_text)
     if isinstance(fallback, str):
         fallback_text = fallback.replace(" ", "")
         if fallback_text and fallback_text != "?":
-            return StringAttr(fallback_text)
-    return StringAttr(f"reshape_dim_{axis}")
+            return _symbol_expr_attr_from_value(fallback_text)
+    return _symbol_expr_attr_from_value(f"reshape_dim_{axis}")
+
+
+def _stride_factor_from_reshape_item(
+    item: ValueAST,
+    operand: SSAValue,
+    fallback: SymbolRuntimeValue,
+    axis: int,
+) -> int | str:
+    """从 shape 项生成连续 stride 计算使用的维度表达式。
+
+    功能说明:
+    - 优先使用 SSA 已证明的公开表达式。
+    - SSA 类型为 `?` 时使用 DSL 公开变量名、解析期公开 symbol 值或轴向稳定名，避免 stride 也退化成 `#symbol.expr<?>`。
+
+    使用示例:
+    - factor = _stride_factor_from_reshape_item(item, operand, fallback, 0)
+    """
+
+    if isinstance(fallback, bool):
+        return int(fallback)
+    if isinstance(fallback, int):
+        return fallback
+    operand_value = operand.type.get_value() if isinstance(operand.type, SymbolValueType) else None
+    if isinstance(operand_value, int):
+        return operand_value
+    if isinstance(operand_value, str):
+        operand_text = operand_value.replace(" ", "")
+        if operand_text and operand_text != "?":
+            return operand_text
+    if isinstance(item, SymbolDimAST):
+        item_name = item.name.replace(" ", "")
+        if item_name and item_name != "?":
+            return item_name
+    if isinstance(fallback, SymbolDim):
+        public_value = fallback.get_value()
+        if isinstance(public_value, int):
+            return public_value
+        fallback_text = str(public_value).replace(" ", "")
+        if fallback_text and fallback_text != "?":
+            return fallback_text
+    if isinstance(fallback, str):
+        fallback_text = fallback.replace(" ", "")
+        if fallback_text and fallback_text != "?":
+            return fallback_text
+    return f"reshape_dim_{axis}"
 
 
 def _memory_type_from_shape_items(
@@ -200,7 +395,11 @@ def _memory_type_from_shape_items(
         _shape_attr_from_reshape_item(item, operand, fallback, axis)
         for axis, (item, operand, fallback) in enumerate(zip(shape_items, shape_operands, shape_values, strict=True))
     ]
-    stride_attrs = _contiguous_stride_attrs(shape_attrs)
+    stride_factors = [
+        _stride_factor_from_reshape_item(item, operand, fallback, axis)
+        for axis, (item, operand, fallback) in enumerate(zip(shape_items, shape_operands, shape_values, strict=True))
+    ]
+    stride_attrs = _contiguous_stride_attrs(stride_factors)
     return NnMemoryType(ArrayAttr(shape_attrs), stride_attrs, base_type.element_type, base_type.space)
 
 
@@ -224,28 +423,25 @@ def _reshape_result_type_from_shape_items(
     return _memory_type_from_shape_items(ctx, result_memory, shape_items, shape_operands, shape_values, location)
 
 
-def _contiguous_stride_attrs(shape_attrs: list[IntAttr | StringAttr]) -> ArrayAttr[IntAttr | StringAttr]:
-    """根据 shape attr 生成连续 stride attr。
+def _contiguous_stride_attrs(shape_values: list[int | str]) -> ArrayAttr[SymbolExprAttr]:
+    """根据公开 shape 表达生成连续 `SymbolExprAttr` stride attr。
 
     功能说明:
     - 静态维度生成整数乘积。
-    - 符号维度生成无空格乘法表达式，保持 dma.reshape verifier 可解析。
+    - 符号维度生成 `SymbolExprAttr` 可解析的乘法表达式。
 
     使用示例:
-    - stride = _contiguous_stride_attrs([StringAttr("M"), StringAttr("N")])
+    - stride = _contiguous_stride_attrs(["M", "N"])
     """
 
-    stride_attrs: list[IntAttr | StringAttr] = []
+    stride_attrs: list[SymbolExprAttr] = []
     running: int | str = 1
-    for dim in reversed(shape_attrs):
-        stride_attrs.insert(0, IntAttr(running) if isinstance(running, int) else StringAttr(str(running)))
-        dim_value = dim.data
+    for dim_value in reversed(shape_values):
+        stride_attrs.insert(0, _symbol_expr_attr_from_value(running))
         if isinstance(dim_value, int) and isinstance(running, int):
             running = dim_value * running
-        elif running == 1:
-            running = str(dim_value)
         else:
-            running = f"{dim_value}*{running}"
+            running = _symbol_expr_product(dim_value, running)
     return ArrayAttr(stride_attrs)
 
 
@@ -395,21 +591,21 @@ class DmaAllocAST(ValueAST):
                 lhs_symbol = SymbolDim(lhs_operand)
                 rhs_symbol = SymbolDim(rhs_operand)
                 if isinstance(item, SymbolAddAST):
-                    shape_op = SymbolAddOp(lhs, rhs, SymbolValueType.from_expr(str((lhs_symbol + rhs_symbol).get_value())))
+                    shape_op = SymbolAddOp(lhs, rhs, SymbolValueType.from_expr(_symbol_expr_text_from_value(lhs_symbol + rhs_symbol)))
                 elif isinstance(item, SymbolSubAST):
-                    shape_op = SymbolSubOp(lhs, rhs, SymbolValueType.from_expr(str((lhs_symbol - rhs_symbol).get_value())))
+                    shape_op = SymbolSubOp(lhs, rhs, SymbolValueType.from_expr(_symbol_expr_text_from_value(lhs_symbol - rhs_symbol)))
                 elif isinstance(item, SymbolMulAST):
-                    shape_op = SymbolMulOp(lhs, rhs, SymbolValueType.from_expr(str((lhs_symbol * rhs_symbol).get_value())))
+                    shape_op = SymbolMulOp(lhs, rhs, SymbolValueType.from_expr(_symbol_expr_text_from_value(lhs_symbol * rhs_symbol)))
                 elif isinstance(item, SymbolTrueDivAST):
-                    shape_op = SymbolDivOp(lhs, rhs, SymbolValueType.from_expr(str((lhs_symbol / rhs_symbol).get_value())))
+                    shape_op = SymbolDivOp(lhs, rhs, SymbolValueType.from_expr(_symbol_expr_text_from_value(f"{lhs_symbol.get_value()} floordiv {rhs_symbol.get_value()}")))
                 elif isinstance(item, SymbolFloorDivAST):
-                    shape_op = SymbolFloorDivOp(lhs, rhs, SymbolValueType.from_expr(str((lhs_symbol // rhs_symbol).get_value())))
+                    shape_op = SymbolFloorDivOp(lhs, rhs, SymbolValueType.from_expr(_symbol_expr_text_from_value(f"{lhs_symbol.get_value()} floordiv {rhs_symbol.get_value()}")))
                 else:
                     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported alloc shape expression")
                 block.add_op(shape_op)
                 emitted_value = shape_op.results[0]
                 value = emitted_value.type.get_value()
-                shape_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
+                shape_values.append(value if isinstance(value, int) else _symbol_dim_from_expr_text(value))
                 shape_attr_values.append(value)
                 dynamic_shape.append(emitted_value)
             elif isinstance(item, ValueAST):
@@ -516,7 +712,7 @@ class DmaCopyAST(ValueAST):
         result_type = MemoryAST.type_from_memory(ctx, result_memory, self.location)
         dynamic_shape: list[SSAValue] = []
         for axis, dim in enumerate(result_type.shape.data):
-            if isinstance(dim, StringAttr):
+            if isinstance(dim, SymbolExprAttr) and _is_dynamic_dim_attr(dim):
                 get_dim = SymbolGetDimOp(source, axis)
                 block.add_op(get_dim)
                 dynamic_shape.append(get_dim.results[0])
@@ -610,7 +806,7 @@ class DmaCastAST(ValueAST):
         result_type = MemoryAST.type_from_memory(ctx, result_memory, self.location)
         dynamic_shape: list[SSAValue] = []
         for axis, dim in enumerate(result_type.shape.data):
-            if isinstance(dim, StringAttr):
+            if isinstance(dim, SymbolExprAttr) and _is_dynamic_dim_attr(dim):
                 get_dim = SymbolGetDimOp(source, axis)
                 block.add_op(get_dim)
                 dynamic_shape.append(get_dim.results[0])
@@ -876,11 +1072,13 @@ class DmaFlattenAST(ValueAST):
         result_memory = self.result_memory()
         if not isinstance(result_memory, Memory):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "flatten result memory must be known from AST")
-        if all(isinstance(dim, IntAttr) for dim in source_type.shape.data):
+        if all(isinstance(dim, SymbolExprAttr) and _static_int_from_symbol_expr(dim) is not None for dim in source_type.shape.data):
             flattened_size = 1
             for dim in source_type.shape.data:
-                assert isinstance(dim, IntAttr)
-                flattened_size *= dim.data
+                assert isinstance(dim, SymbolExprAttr)
+                dim_value = _static_int_from_symbol_expr(dim)
+                assert dim_value is not None
+                flattened_size *= dim_value
             flattened_const = ConstValueAST(flattened_size, location=self.location).emit_mlir(ctx, block)
             if isinstance(flattened_const, Operation):
                 block.add_op(flattened_const)
@@ -889,8 +1087,9 @@ class DmaFlattenAST(ValueAST):
             shape_operand = flattened_const
         else:
             for axis, dim in enumerate(source_type.shape.data):
-                if isinstance(dim, IntAttr):
-                    dim_op = ConstValueAST(dim.data, location=self.location).emit_mlir(ctx, block)
+                dim_static = _static_int_from_symbol_expr(dim) if isinstance(dim, SymbolExprAttr) else None
+                if dim_static is not None:
+                    dim_op = ConstValueAST(dim_static, location=self.location).emit_mlir(ctx, block)
                     if isinstance(dim_op, Operation):
                         block.add_op(dim_op)
                         dim_op = dim_op.results[0]

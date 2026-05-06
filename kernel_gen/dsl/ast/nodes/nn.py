@@ -37,13 +37,14 @@ API 列表:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import ClassVar, TypeAlias
 
 from xdsl.context import Context
 from xdsl.dialects import arith
-from xdsl.dialects.builtin import ArrayAttr, BFloat16Type, Float16Type, Float32Type, Float64Type, FloatAttr, IntAttr, IntegerType, Signedness, StringAttr, f32, i1, i8, i32, i64
+from xdsl.dialects.builtin import ArrayAttr, BFloat16Type, Float16Type, Float32Type, Float64Type, FloatAttr, IntegerType, Signedness, f32, i1, i8, i32, i64
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 from xdsl.utils.exceptions import VerifyException
 
@@ -79,7 +80,7 @@ from kernel_gen.dialect.nn import (
     NnTransposeOp,
     NnTrueDivOp,
 )
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolGetDimOp, SymbolMulOp, SymbolToFloatOp, SymbolToIntOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolExprAttr, SymbolGetDimOp, SymbolMulOp, SymbolToFloatOp, SymbolToIntOp, SymbolValueType
 from kernel_gen.operation import dma as dma_ops
 from kernel_gen.operation import nn as nn_ops
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
@@ -95,6 +96,121 @@ ReduceKeepdimValue: TypeAlias = "bool | ValueAST | None"
 _RUNTIME_DIM_PREFIX = "runtime_dim_"
 
 
+def _symbol_expr_attr_from_value(value: int | str | SymbolDim) -> SymbolExprAttr:
+    """把 NN 结果 type 维度值转换为 `SymbolExprAttr`。
+
+    功能说明:
+    - 当前文件内统一 `NnMemoryType` shape/stride 条目构造。
+    - 避免继续用旧 `IntAttr` / `StringAttr` 作为 memory 维度。
+
+    使用示例:
+    - attr = _symbol_expr_attr_from_value("M")
+    """
+
+    return SymbolExprAttr.from_expr(_symbol_expr_text_from_value(value))
+
+
+def _symbol_expr_text_from_value(value: int | str | SymbolDim) -> str:
+    """把 Python / SymbolDim 表达规整为 `SymbolExprAttr` 支持的文本。
+
+    功能说明:
+    - 将历史 `SymbolDim` 输出的 `/`、`//` 除法文本转换为 `floordiv`。
+    - 仅服务当前 NN AST type 构造与 symbol 结果类型，不作为跨文件公开入口。
+
+    使用示例:
+    - text = _symbol_expr_text_from_value(SymbolDim("M") // 2)
+    """
+
+    if isinstance(value, SymbolDim):
+        value = value.get_value()
+    text = str(value).strip()
+    if text.startswith("floor(") and text.endswith(")"):
+        text = text[len("floor(") : -1].strip()
+    text = text.replace("//", " floordiv ")
+    text = re.sub(r"(?<!/)/(?!/)", " floordiv ", text)
+    return " ".join(text.split())
+
+
+def _symbol_dim_from_expr_text(text: int | str) -> SymbolDim:
+    """把 `SymbolExprAttr` 文本还原为当前 operation 层可消费的 `SymbolDim`。
+
+    功能说明:
+    - `SymbolDim` 仍接受 Python 风格 `//` 表达，当前文件内只做语法桥接。
+    - 保留解析期 memory 语义供当前 NN lowering 链路调用公开 operation helper。
+
+    使用示例:
+    - dim = _symbol_dim_from_expr_text("M floordiv 2")
+    """
+
+    if isinstance(text, int):
+        return SymbolDim(text)
+    return SymbolDim(str(text).replace(" floordiv ", "//"))
+
+
+def _symbol_expr_text(dim: SymbolExprAttr) -> str:
+    """读取 `SymbolExprAttr` 的 canonical 表达文本。
+
+    功能说明:
+    - 当前文件内用于动态维度识别、matmul 合同判断与连续 stride 重建。
+
+    使用示例:
+    - text = _symbol_expr_text(SymbolExprAttr.from_expr("N"))
+    """
+
+    return dim.expr.data
+
+
+def _static_int_from_symbol_expr(dim: SymbolExprAttr) -> int | None:
+    """读取静态整数维度。
+
+    功能说明:
+    - 对 `#symbol.expr<4>` 返回 4。
+    - 动态 symbol 或 `?` 返回 None。
+
+    使用示例:
+    - value = _static_int_from_symbol_expr(SymbolExprAttr.from_expr("4"))
+    """
+
+    expr = _symbol_expr_text(dim)
+    signless = expr[1:] if expr.startswith("-") else expr
+    return int(expr) if signless.isdecimal() else None
+
+
+def _parenthesize_symbol_expr(expr: str) -> str:
+    """在乘法组合中按需为复合 symbol 表达式加括号。
+
+    功能说明:
+    - 保持 `N + 1` 这类 shape 维度参与 stride 乘法时语义不变。
+
+    使用示例:
+    - text = _parenthesize_symbol_expr("N + 1")
+    """
+
+    if expr == "?" or expr.replace("_", "").isalnum() or expr.lstrip("-").isdigit():
+        return expr
+    return f"({expr})"
+
+
+def _symbol_expr_product(lhs: int | str, rhs: int | str) -> int | str:
+    """组合两个公开 symbol 表达式乘积。
+
+    功能说明:
+    - 静态整数直接折叠。
+    - 动态表达式以 `SymbolExprAttr` 可解析文本返回。
+
+    使用示例:
+    - expr = _symbol_expr_product("M", "N")
+    """
+
+    if lhs == 1:
+        return rhs
+    if rhs == 1:
+        return lhs
+    if isinstance(lhs, int) and isinstance(rhs, int):
+        return lhs * rhs
+    return f"{_parenthesize_symbol_expr(str(lhs))} * {_parenthesize_symbol_expr(str(rhs))}"
+
+
 def _is_singleton_dim(dim: Attribute) -> bool:
     """判断 shape attr 是否为静态 singleton 维度。
 
@@ -105,10 +221,10 @@ def _is_singleton_dim(dim: Attribute) -> bool:
     - 服务当前文件内 NN compare 节点的隐式 broadcast emit。
 
     使用示例:
-    - _is_singleton_dim(IntAttr(1))
+    - _is_singleton_dim(SymbolExprAttr.from_expr("1"))
     """
 
-    return isinstance(dim, IntAttr) and dim.data == 1
+    return isinstance(dim, SymbolExprAttr) and _static_int_from_symbol_expr(dim) == 1
 
 
 def _is_runtime_dim_attr(dim: Attribute) -> bool:
@@ -119,7 +235,7 @@ def _is_runtime_dim_attr(dim: Attribute) -> bool:
     - 仅服务当前文件内 matmul contract 维度兼容判断。
 
     使用示例:
-    - is_runtime = _is_runtime_dim_attr(StringAttr("runtime_dim_0"))
+    - is_runtime = _is_runtime_dim_attr(SymbolExprAttr.from_expr("runtime_dim_0"))
 
     关联文件:
     - spec: spec/dsl/ast/nodes/nn.md
@@ -127,7 +243,7 @@ def _is_runtime_dim_attr(dim: Attribute) -> bool:
     - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
     """
 
-    return isinstance(dim, StringAttr) and dim.data.startswith(_RUNTIME_DIM_PREFIX)
+    return isinstance(dim, SymbolExprAttr) and _symbol_expr_text(dim).startswith(_RUNTIME_DIM_PREFIX)
 
 
 def _matmul_contract_dims_match(lhs_dim: Attribute, rhs_dim: Attribute) -> bool:
@@ -153,12 +269,11 @@ def _matmul_contract_dims_match(lhs_dim: Attribute, rhs_dim: Attribute) -> bool:
     return False
 
 
-def _shape_attr_from_value(value: int | str | SymbolDim) -> Attribute:
+def _shape_attr_from_value(value: int | str | SymbolDim) -> SymbolExprAttr:
     """把公开 shape 值转换为 memory type 维度 attr。
 
     功能说明:
-    - 静态整数保持 `IntAttr`。
-    - 符号、表达式与匿名运行期语义标签转换为 `StringAttr`。
+    - 静态整数、符号、表达式与匿名运行期语义标签均转换为 `SymbolExprAttr`。
 
     使用示例:
     - attr = _shape_attr_from_value("conv_kernel_flat")
@@ -169,12 +284,7 @@ def _shape_attr_from_value(value: int | str | SymbolDim) -> Attribute:
     - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
     """
 
-    if isinstance(value, int):
-        return IntAttr(value)
-    if isinstance(value, SymbolDim):
-        public_value = value.get_value()
-        return IntAttr(public_value) if isinstance(public_value, int) else StringAttr(str(public_value))
-    return StringAttr(value)
+    return _symbol_expr_attr_from_value(value)
 
 
 def _semantic_runtime_dim(label: str, fallback: int | SymbolDim) -> int | str:
@@ -238,7 +348,7 @@ def _memory_type_from_shape_values(
 def _memory_type_from_shape_attrs(
     ctx: Context,
     memory: Memory,
-    shape_attrs: list[Attribute],
+    shape_attrs: list[SymbolExprAttr],
     location: SourceLocation | None,
 ) -> NnMemoryType:
     """按现有 operand shape attr 构造连续布局 memory type。
@@ -265,7 +375,7 @@ def _memory_type_from_shape_attrs(
     )
 
 
-def _contiguous_stride_attrs(shape_attrs: list[Attribute]) -> ArrayAttr[Attribute]:
+def _contiguous_stride_attrs(shape_attrs: list[SymbolExprAttr]) -> ArrayAttr[SymbolExprAttr]:
     """根据 shape attr 生成连续 stride attr。
 
     创建者: 榕
@@ -275,20 +385,22 @@ def _contiguous_stride_attrs(shape_attrs: list[Attribute]) -> ArrayAttr[Attribut
     - 服务当前文件内 NN compare 节点的隐式 broadcast 结果类型构造。
 
     使用示例:
-    - _contiguous_stride_attrs([IntAttr(4), IntAttr(8)])
+    - _contiguous_stride_attrs([SymbolExprAttr.from_expr("4"), SymbolExprAttr.from_expr("8")])
     """
 
-    stride_attrs: list[Attribute] = []
+    stride_attrs: list[SymbolExprAttr] = []
     running: int | str = 1
     for dim in reversed(shape_attrs):
-        stride_attrs.insert(0, IntAttr(running) if isinstance(running, int) else StringAttr(str(running)))
-        dim_value = dim.data if isinstance(dim, (IntAttr, StringAttr)) else str(dim)
+        stride_attrs.insert(0, _symbol_expr_attr_from_value(running))
+        dim_value = _static_int_from_symbol_expr(dim)
+        if dim_value is None:
+            dim_value = _symbol_expr_text(dim)
         if isinstance(dim_value, int) and isinstance(running, int):
             running = dim_value * running
         elif running == 1:
             running = dim_value
         else:
-            running = f"{dim_value}*{running}"
+            running = _symbol_expr_product(dim_value, running)
     return ArrayAttr(stride_attrs)
 
 
@@ -323,8 +435,8 @@ def _emit_compare_with_broadcast_and_cast(
     target_shape_reversed: list[Attribute] = []
     max_rank = max(len(lhs_shape), len(rhs_shape))
     for index in range(1, max_rank + 1):
-        lhs_dim = lhs_shape[-index] if index <= len(lhs_shape) else IntAttr(1)
-        rhs_dim = rhs_shape[-index] if index <= len(rhs_shape) else IntAttr(1)
+        lhs_dim = lhs_shape[-index] if index <= len(lhs_shape) else _symbol_expr_attr_from_value(1)
+        rhs_dim = rhs_shape[-index] if index <= len(rhs_shape) else _symbol_expr_attr_from_value(1)
         if lhs_dim == rhs_dim:
             target_shape_reversed.append(lhs_dim)
         elif _is_singleton_dim(lhs_dim):
@@ -1468,9 +1580,9 @@ class ConvAST(ValueAST):
         batch_value = batch_op.results[0].type.get_value()
         out_h_value = out_h_op.results[0].type.get_value()
         out_w_value = out_w_op.results[0].type.get_value()
-        batch_shape_value: int | SymbolDim = batch_value if isinstance(batch_value, int) else SymbolDim(batch_value)
-        out_h_shape_value: int | SymbolDim = out_h_value if isinstance(out_h_value, int) else SymbolDim(out_h_value)
-        out_w_shape_value: int | SymbolDim = out_w_value if isinstance(out_w_value, int) else SymbolDim(out_w_value)
+        batch_shape_value: int | SymbolDim = batch_value if isinstance(batch_value, int) else _symbol_dim_from_expr_text(batch_value)
+        out_h_shape_value: int | SymbolDim = out_h_value if isinstance(out_h_value, int) else _symbol_dim_from_expr_text(out_h_value)
+        out_w_shape_value: int | SymbolDim = out_w_value if isinstance(out_w_value, int) else _symbol_dim_from_expr_text(out_w_value)
 
         c_out_dim = weight_dims[0]
         if isinstance(c_out_dim, int):
@@ -1500,10 +1612,10 @@ class ConvAST(ValueAST):
             else:
                 c_in_weight_op = SymbolGetDimOp(weight, 1)
             block.add_op(c_in_weight_op)
-            first_kernel_expr = str((SymbolDim(kernel_factor_values[0]) * kernel_factor_values[1]).get_value())
+            first_kernel_expr = _symbol_expr_text_from_value(SymbolDim(kernel_factor_values[0]) * kernel_factor_values[1])
             first_kernel_mul = SymbolMulOp(c_in_weight_op.results[0], param_operands["kh"], SymbolValueType.from_expr(first_kernel_expr))
             block.add_op(first_kernel_mul)
-            second_kernel_expr = str(kernel_flat_public)
+            second_kernel_expr = _symbol_expr_text_from_value(kernel_flat_public)
             second_kernel_mul = SymbolMulOp(first_kernel_mul.results[0], param_operands["kw"], SymbolValueType.from_expr(second_kernel_expr))
             block.add_op(second_kernel_mul)
             kernel_flat_weight_value = second_kernel_mul.results[0]
@@ -1524,22 +1636,22 @@ class ConvAST(ValueAST):
             else:
                 c_in_img_op = SymbolGetDimOp(weight, 1)
             block.add_op(c_in_img_op)
-            first_img_kernel_expr = str((SymbolDim(kernel_factor_values[0]) * kernel_factor_values[1]).get_value())
+            first_img_kernel_expr = _symbol_expr_text_from_value(SymbolDim(kernel_factor_values[0]) * kernel_factor_values[1])
             first_img_kernel_mul = SymbolMulOp(c_in_img_op.results[0], param_operands["kh"], SymbolValueType.from_expr(first_img_kernel_expr))
             block.add_op(first_img_kernel_mul)
-            second_img_kernel_expr = str(kernel_flat_public)
+            second_img_kernel_expr = _symbol_expr_text_from_value(kernel_flat_public)
             second_img_kernel_mul = SymbolMulOp(first_img_kernel_mul.results[0], param_operands["kw"], SymbolValueType.from_expr(second_img_kernel_expr))
             block.add_op(second_img_kernel_mul)
             kernel_flat_img_value = second_img_kernel_mul.results[0]
         batch_h_symbol = SymbolDim(batch_shape_value) * out_h_shape_value
-        batch_h_expr = str(batch_h_symbol.get_value())
+        batch_h_expr = _symbol_expr_text_from_value(batch_h_symbol)
         batch_h_mul = SymbolMulOp(batch_op.results[0], out_h_op.results[0], SymbolValueType.from_expr(batch_h_expr))
         block.add_op(batch_h_mul)
-        batch_h_w_expr = str((batch_h_symbol * out_w_shape_value).get_value())
+        batch_h_w_expr = _symbol_expr_text_from_value(batch_h_symbol * out_w_shape_value)
         batch_h_w_mul = SymbolMulOp(batch_h_mul.results[0], out_w_op.results[0], SymbolValueType.from_expr(batch_h_w_expr))
         block.add_op(batch_h_w_mul)
         batch_h_w_public = batch_h_w_mul.results[0].type.get_value()
-        batch_h_w_shape_value: int | SymbolDim = batch_h_w_public if isinstance(batch_h_w_public, int) else SymbolDim(batch_h_w_public)
+        batch_h_w_shape_value: int | SymbolDim = batch_h_w_public if isinstance(batch_h_w_public, int) else _symbol_dim_from_expr_text(batch_h_w_public)
         img_reshape_memory = dma_ops.reshape(img2col_memory, [kernel_flat_shape_value, batch_h_w_shape_value])
         batch_h_w_type_dim = _semantic_runtime_dim("conv_batch_h_w", batch_h_w_shape_value)
         img_reshape_type = _memory_type_from_shape_values(ctx, img_reshape_memory, [kernel_flat_type_dim, batch_h_w_type_dim], self.location)

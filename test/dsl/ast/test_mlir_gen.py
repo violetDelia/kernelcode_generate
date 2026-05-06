@@ -26,14 +26,14 @@ from __future__ import annotations
 
 import pytest
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, ModuleOp, StringAttr, i8
+from xdsl.dialects.builtin import ArrayAttr, ModuleOp, i8
 
 from kernel_gen.core.config import reset_config
 from kernel_gen.core.context import build_default_context
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaReshapeOp, DmaSliceOp
 from kernel_gen.dialect.nn import NnAddOp, NnMatmulOp, NnMemorySpaceAttr, NnMemoryType, NnSoftmaxOp
-from kernel_gen.dialect.symbol import SymbolForOp, SymbolGetDimOp, SymbolMinOp, SymbolMulOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolForOp, SymbolGetDimOp, SymbolMinOp, SymbolMulOp, SymbolValueType
 from kernel_gen.dsl import parse_function
 from kernel_gen.dsl.ast import parse
 from kernel_gen.dsl.ast.mlir_gen import mlir_gen
@@ -119,6 +119,20 @@ def _tensor_arg(
     return Memory(shape, dtype, space=space)
 
 
+def _memory_symbol_expr_attr(value: int | str) -> SymbolExprAttr:
+    """构造测试用 symbol 表达 attr。
+
+
+    功能说明:
+    - 为 `_memory_type(...)` 提供模块级 helper，避免测试函数内嵌套函数。
+
+    使用示例:
+    - attr = _memory_symbol_expr_attr("M + 1")
+    """
+
+    return SymbolExprAttr.from_expr(str(value))
+
+
 def _memory_type(
     shape: list[int | str],
     stride: list[int | str],
@@ -140,17 +154,13 @@ def _memory_type(
     - 功能实现: [kernel_gen/dsl/ast/mlir_gen.py](kernel_gen/dsl/ast/mlir_gen.py)
     """
 
-    def _attr(value: int | str) -> IntAttr | StringAttr:
-        if isinstance(value, int):
-            return IntAttr(value)
-        return StringAttr(value)
-
     return NnMemoryType(
-        ArrayAttr([_attr(dim) for dim in shape]),
-        ArrayAttr([_attr(dim) for dim in stride]),
+        ArrayAttr([_memory_symbol_expr_attr(dim) for dim in shape]),
+        ArrayAttr([_memory_symbol_expr_attr(dim) for dim in stride]),
         i8,
         NnMemorySpaceAttr.from_name(space),
     )
+
 
 def _symbol_min_iter_kernel(out: Memory, src: Memory, tile_n: SymbolDim) -> None:
     """提供模块级 DSL kernel，避免测试函数内定义非装饰器嵌套函数。"""
@@ -385,7 +395,7 @@ def test_mlir_gen_lowers_symbol_min_and_iter_arithmetic() -> None:
 
     assert "symbol.min" in module_text
     assert "symbol.mul" in module_text
-    assert '!symbol.int<"?">' in module_text
+    assert "!symbol.int<#symbol.expr<?>>" in module_text
     assert "N - f0" not in module_text
     assert "2 - f0" not in module_text
     root_op = list(module.body.block.ops)[0]
@@ -469,7 +479,7 @@ def test_mlir_gen_supports_dma_alloc_helper_with_symbol_shape_args() -> None:
         SymbolValueType.from_expr(rhs_expr),
     ]
     assert len(alloc_ops) == 1
-    assert [attr.data for attr in alloc_ops[0].result.type.shape.data] == [lhs_expr, rhs_expr]
+    assert [attr.expr.data for attr in alloc_ops[0].result.type.shape.data] == [lhs_expr, rhs_expr]
     assert list(root_op.function_type.outputs) == [alloc_ops[0].result.type]
 
 
@@ -522,8 +532,8 @@ def test_mlir_gen_supports_flatten_return_annotation() -> None:
     assert isinstance(root_op, func.FuncOp)
     result_type = list(root_op.function_type.outputs)[0]
 
-    assert [attr.data for attr in result_type.shape.data] == [16]
-    assert [attr.data for attr in result_type.stride.data] == [1]
+    assert [attr.expr.data for attr in result_type.shape.data] == ["16"]
+    assert [attr.expr.data for attr in result_type.stride.data] == ["1"]
 
 
 def test_mlir_gen_matches_public_parse_function() -> None:
@@ -870,8 +880,8 @@ def test_mlir_gen_lowers_nn_matmul_public_helper() -> None:
 
     matmul_ops = [op for op in func_op.body.block.ops if isinstance(op, NnMatmulOp)]
     assert len(matmul_ops) == 1
-    assert matmul_ops[0].result.type.shape.data[0].data == 2
-    assert matmul_ops[0].result.type.shape.data[1].data == 4
+    assert matmul_ops[0].result.type.shape.data[0].expr.data == "2"
+    assert matmul_ops[0].result.type.shape.data[1].expr.data == "4"
 
 
 def test_mlir_gen_lowers_nn_activation_reduce_public_helpers() -> None:

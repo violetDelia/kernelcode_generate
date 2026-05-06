@@ -212,7 +212,11 @@ def test_memory_ast_builds_mlir_type_from_runtime_memory() -> None:
     memory_type = MemoryAST.type_from_memory(Context(), memory.memory)
 
     assert isinstance(memory_type, NnMemoryType)
-    assert str(memory_type) == "!nn.memory<[2, 4], [4, 1], f32, #nn.space<tsm>>"
+    assert str(memory_type) == "!nn.memory<[#symbol.expr<2>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<tsm>>"
+
+    divided_memory = Memory([SymbolDim("M") // 2, 4], NumericType.Float32, space=MemorySpace.TSM)
+    divided_type = MemoryAST.type_from_memory(Context(), divided_memory)
+    assert str(divided_type) == "!nn.memory<[#symbol.expr<M floordiv 2>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<tsm>>"
 
 
 def test_memory_ast_type_from_memory_names_anonymous_shape_stride_conflict() -> None:
@@ -227,8 +231,8 @@ def test_memory_ast_type_from_memory_names_anonymous_shape_stride_conflict() -> 
 
     assert isinstance(memory_type, NnMemoryType)
     assert str(memory_type) == (
-        "!nn.memory<[runtime_dim_0, runtime_dim_1, runtime_dim_2], "
-        "[runtime_dim_1*runtime_dim_2, runtime_dim_2, 1], f32, #nn.space<tsm>>"
+        "!nn.memory<[#symbol.expr<runtime_dim_0>, #symbol.expr<runtime_dim_1>, #symbol.expr<runtime_dim_2>], "
+        "[#symbol.expr<runtime_dim_1*runtime_dim_2>, #symbol.expr<runtime_dim_2>, #symbol.expr<1>], f32, #nn.space<tsm>>"
     )
     assert "?" not in str(memory_type)
 

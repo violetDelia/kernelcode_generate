@@ -24,7 +24,7 @@ from xdsl.ir import Block, Operation, SSAValue
 
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp
-from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
 from kernel_gen.dsl.ast.nodes.attr import BoolTypeAttrAST, FloatTypeAttrAST, IntTypeAttrAST, MemorySpaceAttrAST
 from kernel_gen.dsl.ast.nodes.basic import MemoryAST, ValueAST
 from kernel_gen.dsl.ast.nodes.symbol import ConstValueAST, SymbolListAST
@@ -155,6 +155,48 @@ class RawEmitAST(ValueAST):
         return self.value
 
 
+class SymbolConstEmitAST(ValueAST):
+    """返回公开 SymbolConstOp，用于验证 AST 接受 Operation-return 子节点。"""
+
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+    def result_symbol(self) -> int:
+        """返回解析期公开 symbol 语义。"""
+
+        return self.value
+
+    def emit_mlir(self, ctx: Context, block: Block | None = None) -> Operation:
+        """发射公开 `symbol.const` operation。"""
+
+        _ = (ctx, block)
+        return SymbolConstOp(self.value)
+
+
+class BlockArgSymbolAST(ValueAST):
+    """返回公开 block argument symbol SSA，用于测试公开类型传播。"""
+
+    def __init__(self, index: int, symbol: int | str | SymbolDim | None = None) -> None:
+        self.index = index
+        self.symbol = symbol
+
+    def result_symbol(self) -> int | SymbolDim | None:
+        """返回测试显式提供的公开解析期 symbol 语义。"""
+
+        if self.symbol is None:
+            return None
+        if isinstance(self.symbol, (int, SymbolDim)):
+            return self.symbol
+        return SymbolDim(self.symbol)
+
+    def emit_mlir(self, ctx: Context, block: Block | None = None) -> SSAValue:
+        """发射指定 block argument，不通过 SSA 名称构造表达式。"""
+
+        _ = ctx
+        assert isinstance(block, Block)
+        return block.args[self.index]
+
+
 def test_dma_result_nodes_require_ast_result_memory_for_result_type() -> None:
     """DMA result op 不再从 SSA type 反推结果 memory。"""
 
@@ -272,6 +314,13 @@ def test_dma_alloc_emit_mlir_handles_parameterized_public_shape_expressions() ->
     assert isinstance(emitted, DmaAllocOp)
     assert len(emitted.dynamic_shape) == len(shape_exprs)
 
+    symbol_block = Block(arg_types=[SymbolValueType.from_expr("M")])
+    symbol_alloc = DmaAllocAST([SymbolFloorDivAST(BlockArgSymbolAST(0, "M"), ConstValueAST(2))], NumericType.Float32, MemorySpace.SM).emit_mlir(
+        Context(), symbol_block
+    )
+    assert isinstance(symbol_alloc, DmaAllocOp)
+    assert symbol_alloc.result.type.shape.data[0].expr.data == "M floordiv 2"
+
     bool_alloc = DmaAllocAST([2], NumericType.Bool, MemorySpace.LM).emit_mlir(Context(), Block())
     int_alloc = DmaAllocAST([2], NumericType.Uint16, MemorySpace.LM).emit_mlir(Context(), Block())
     signed_alloc = DmaAllocAST([2], IntTypeAttrAST(64, True), MemorySpace.LM).emit_mlir(Context(), Block())
@@ -333,14 +382,12 @@ def test_dma_slice_uses_full_rank_dynamic_shape_for_unknown_named_result() -> No
     ctx = Context()
     block = Block(arg_types=[source.to_mlir_type(ctx), SymbolValueType.from_expr("?"), SymbolValueType.from_expr("?")])
     block.args[0].name_hint = "source"
-    block.args[1].name_hint = "tile_m"
-    block.args[2].name_hint = "tile_n"
     node = DmaSliceAST(
         source,
         [0, 0, 0, 0],
         [
-            SymbolDimAST("tile_m", runtime_symbol=SymbolDim("?")),
-            SymbolDimAST("tile_n", runtime_symbol=SymbolDim("?")),
+            BlockArgSymbolAST(1, "?"),
+            BlockArgSymbolAST(2, "?"),
             3,
             3,
         ],
@@ -354,6 +401,100 @@ def test_dma_slice_uses_full_rank_dynamic_shape_for_unknown_named_result() -> No
     assert isinstance(emitted.owner, DmaAllocOp)
     assert len(emitted.owner.dynamic_shape) == 4
     emitted.owner.verify()
+
+
+def test_dma_alloc_lowers_public_symbol_binary_shape_to_symbol_expr_type() -> None:
+    """DmaAllocAST 通过公开 symbol AST 生成结构化 shape/stride 类型。"""
+
+    ctx = Context()
+    block = Block(arg_types=[SymbolValueType.from_expr("M"), SymbolValueType.from_expr("N")])
+    node = DmaAllocAST(
+        [
+            SymbolAddAST(BlockArgSymbolAST(0, "M"), ConstValueAST(1)),
+            SymbolMulAST(ConstValueAST(2), BlockArgSymbolAST(1, "N")),
+        ],
+        NumericType.Float32,
+        MemorySpace.SM,
+    )
+
+    emitted = node.emit_mlir(ctx, block)
+
+    assert isinstance(emitted, DmaAllocOp)
+    assert [dim.expr.data for dim in emitted.result.type.shape.data] == ["M + 1", "2*N"]
+    assert [dim.expr.data for dim in emitted.result.type.stride.data] == ["2*N", "1"]
+    assert len(emitted.dynamic_shape) == 2
+    emitted.verify()
+
+
+def test_dma_alloc_emit_mlir_covers_public_dtype_and_symbol_sub_matrix() -> None:
+    """DmaAllocAST 覆盖公开 bool/int dtype 与 symbol sub shape。"""
+
+    ctx = Context()
+    block = Block(arg_types=[SymbolValueType.from_expr("M"), SymbolValueType.from_expr("N")])
+
+    bool_alloc = DmaAllocAST(
+        [SymbolSubAST(BlockArgSymbolAST(0, "M"), ConstValueAST(1))],
+        BoolTypeAttrAST(),
+        MemorySpace.GM,
+    ).emit_mlir(ctx, block)
+    int_alloc = DmaAllocAST(
+        [BlockArgSymbolAST(1, "N")],
+        IntTypeAttrAST(16, False),
+        MemorySpace.SM,
+    ).emit_mlir(ctx, block)
+
+    assert isinstance(bool_alloc, DmaAllocOp)
+    assert isinstance(int_alloc, DmaAllocOp)
+    assert bool_alloc.result.type.shape.data[0].expr.data == "M - 1"
+    assert int_alloc.result.type.shape.data[0].expr.data == "N"
+    bool_alloc.verify()
+    int_alloc.verify()
+
+
+def test_dma_emit_mlir_accepts_public_operation_returning_symbol_nodes() -> None:
+    """DMA 公开节点接受返回 Operation 的 symbol 子节点。"""
+
+    target = MemoryAST.from_memory("target", Memory([4], NumericType.Float32))
+    source = MemoryAST.from_memory("source", Memory([4], NumericType.Float32))
+    tile = MemoryAST.from_memory("tile", Memory([2], NumericType.Float32))
+    ctx, block = _block_for_memories(target, source, tile)
+
+    alloc = DmaAllocAST(
+        [SymbolConstEmitAST(4), SymbolConstEmitAST(2)],
+        NumericType.Float32,
+        MemorySpace.SM,
+        stride=[SymbolConstEmitAST(2), SymbolConstEmitAST(1)],
+    ).emit_mlir(ctx, block)
+    view = DmaViewAST(
+        source,
+        [SymbolConstEmitAST(0)],
+        [SymbolConstEmitAST(2)],
+        [SymbolConstEmitAST(1)],
+    ).emit_mlir(ctx, block)
+    loaded = DmaLoadAST(
+        source,
+        [SymbolConstEmitAST(0)],
+        [SymbolConstEmitAST(2)],
+        [SymbolConstEmitAST(1)],
+        MemorySpace.SM,
+    ).emit_mlir(ctx, block)
+    reshaped = DmaReshapeAST(source, [SymbolConstEmitAST(4)]).emit_mlir(ctx, block)
+    store_op = DmaStoreAST(
+        target,
+        tile,
+        [SymbolConstEmitAST(0)],
+        [SymbolConstEmitAST(2)],
+        [SymbolConstEmitAST(1)],
+    ).emit_mlir(ctx, block)
+
+    assert isinstance(alloc, DmaAllocOp)
+    assert isinstance(view, Operation)
+    assert isinstance(loaded, SSAValue)
+    assert isinstance(reshaped, Operation)
+    assert isinstance(store_op, Operation)
+    alloc.verify()
+    loaded.owner.verify()
+    reshaped.verify()
 
 
 def test_dma_fill_emit_mlir_handles_public_value_and_dtype_matrix() -> None:
@@ -419,6 +560,7 @@ def test_dma_emit_mlir_reports_public_error_matrix() -> None:
         (DmaStoreAST(target, tile, [target], [2, 4], [1, 1]), "store offset must lower to symbol.int"),
         (DmaStoreAST(target, tile, [0, 0], [target], [1, 1]), "store size must lower to symbol.int"),
         (DmaStoreAST(target, tile, [0, 0], [2, 4], [target]), "store stride must lower to symbol.int"),
+        (DmaStoreAST(1, tile, [0], [1], [1]), "store target must be MemoryAST"),
         (DmaDesliceAST(ConstValueAST(1), tile, [0, 0], [2, 4], [1, 1]), "deslice target must be nn.memory"),
         (DmaDesliceAST(target, tile, [target], [2, 4], [1, 1]), "deslice offset must lower to symbol.int"),
         (DmaDesliceAST(target, tile, [0, 0], [target], [1, 1]), "deslice size must lower to symbol.int"),
