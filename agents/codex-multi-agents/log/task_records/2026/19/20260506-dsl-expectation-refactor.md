@@ -459,3 +459,19 @@ diff / 禁止修改面：
 - Coverage gate：`kernel_gen.dsl.gen_kernel` 精确 `--deselect` 16 个用户确认的 pass 红点后运行 pytest，并追加只读 `expectation.dsl.emit_c.npu_demo` 覆盖补充，退出 `0`，`139 passed, 16 deselected, 2 warnings`，`line=95.26%`、`branch=87.61%`。
 - 格式与边界：`git diff --check && git diff --cached --check` 退出 `0`；diff-only 新增行扫描 `hasattr/getattr/callable(getattr)`、跨文件私有 import / 私有调用、`object` / `Any` 新签名、skip/xfail、coverage ignore、非装饰器嵌套函数均无输出。
 结论：merge 前复核通过；准备只提交上述允许范围并 push `origin/main`，随后执行 `-done` 并清理已完成 worktree / 分支。
+
+---
+
+时间：2026-05-06 23:42 CST
+经办人：李白
+任务：T-20260506-b086cde2 / dsl_expectation_refactor_green_plan merge 完成记录
+任务目标：记录实际主仓合入、推送结果与后续状态推进前置。
+改动：
+- 任务分支提交：在 `/home/lfr/kernelcode_generate/wt-20260506-dsl-expectation-refactor` 提交 `c398d5912fdab01d833d6d7aa1dcf850dc56f9c3`，提交内容为允许范围内的 DSL gen_kernel emit / test / tools 改动和本任务记录。
+- 主仓合入：在 `/home/lfr/kernelcode_generate` 执行 `git merge --ff-only task/dsl-expectation-refactor`，从 `49476a112335389d9ccf3d8615dd85388625c16c` 快进到 `c398d5912fdab01d833d6d7aa1dcf850dc56f9c3`。
+- 远端推送：执行 `git push origin main` 成功，远端 `main` 更新为 `c398d5912fdab01d833d6d7aa1dcf850dc56f9c3`。
+验证：
+- `git diff-tree --no-commit-id --name-only -r c398d5912fdab01d833d6d7aa1dcf850dc56f9c3 -- expectation kernel_gen/passes`：无输出，业务合入提交不含 `expectation/` 或 `kernel_gen/passes/**`。
+- 主仓 `git rev-parse HEAD origin/main`：两者均为 `c398d5912fdab01d833d6d7aa1dcf850dc56f9c3`。
+- 主仓 `git status --short --branch`：仅显示保留中的任务 worktree 目录 `?? wt-20260506-dsl-expectation-refactor/`；该目录将在 `-done` 成功后按要求清理。
+结论：业务合入与推送已完成；补录本完成记录后继续提交记录收口、执行 `-done`、通知管理员并清理完成 worktree / 分支。
