@@ -2180,3 +2180,18 @@ pytest / coverage / compile / diff check：
  - 主仓禁止修改面：未合入 `expectation/`、`.skills`、`ARCHITECTURE/plan`、`agents/standard`、`TODO.md` 或 `DONE.md` 手工改动
  - 同步资产处理：`/home/lfr/kernelcode_generate/wt-20260507-core-print-alias-expectation-sync` 仅作为终验 / merge 前只读合同验收路径；`/home/lfr/kernelcode_generate/wt-20260507-core-print-expectation-contract-sync` 未引用、未合并、未清理
 结论：业务合并与 push 已完成，等待执行 `-done`。
+
+---
+
+时间：2026-05-07 22:01 +0800
+经办人：李白
+任务：T-20260507-bfc9a0e0 / core_print_alias_dump merge 状态收尾
+任务目标：记录 `-done`、管理员回报和任务 worktree / branch 清理结果。
+改动：通过任务脚本执行 `-done`，并在主仓清理已完成任务 worktree `/home/lfr/kernelcode_generate/wt-20260507-core-print-alias-dump` 与本地分支 `task/core-print-alias-dump`；保留 `/home/lfr/kernelcode_generate/wt-20260507-core-print-alias-expectation-sync` 与 `/home/lfr/kernelcode_generate/wt-20260507-core-print-expectation-contract-sync`，未清理、未合并、未引用其作为新的通过依据。
+验证：
+ - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260507-bfc9a0e0 -log agents/codex-multi-agents/log/task_records/2026/19/20260507-core-print-alias-dump.md -agents-list agents/codex-multi-agents/agents-lists.md` -> `OK: done T-20260507-bfc9a0e0`、`OK: replace 李白 状态`
+ - `rg -n "T-20260507-bfc9a0e0" TODO.md DONE.md` -> 仅 `DONE.md` 存在已完成记录
+ - `git worktree remove /home/lfr/kernelcode_generate/wt-20260507-core-print-alias-dump` + `git branch -D task/core-print-alias-dump` -> 通过
+ - `git rev-parse HEAD` / `git rev-parse origin/main` -> `6d63d3e52309541ebfd7e90aa1dcb686350eae06`，本地与远端一致
+ - `bash skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh -talk -from 李白 -to 神秘人 ...` -> `OK: talk 李白 -> 神秘人 (神秘人)`
+结论：T-20260507-bfc9a0e0 已完成 merge/push/-done 与任务 worktree/branch 清理；等待管理员后续归档 / done-plan 流转。
