@@ -2166,3 +2166,17 @@ pytest / coverage / compile / diff check：
  - `git diff --name-only -- expectation .skills ARCHITECTURE/plan agents/standard TODO.md DONE.md`、`git diff --cached --name-only -- expectation .skills ARCHITECTURE/plan agents/standard TODO.md DONE.md`、`git status --porcelain -- expectation .skills ARCHITECTURE/plan agents/standard TODO.md DONE.md` -> 均无输出
  - 静态扫描：`object` 签名、`ctx` 能力探测、跨文件下划线 helper 导入、嵌套函数、skip/xfail 与 coverage 配置弱化扫描均未发现新增违规
 结论：通过，允许进入 merge/push/-done。
+
+---
+
+时间：2026-05-07 21:58 +0800
+经办人：李白
+任务：T-20260507-bfc9a0e0 / core_print_alias_dump merge 完成
+任务目标：记录本轮实际合并、推送与状态推进结果。
+改动：已在主仓 `/home/lfr/kernelcode_generate` 通过 `git merge --ff-only task/core-print-alias-dump` 快进合入任务分支，并执行 `git push origin main`。业务合并提交为 `6f19c67193ae7e1c02e47c2e7b0209e0340475a0`；合入范围为本任务已通过终验的 `kernel/`、`kernel_gen/`、`spec/`、`test/` 改动及本任务记录文件。
+验证：
+ - `git merge --ff-only task/core-print-alias-dump` -> 通过
+ - `git push origin main` -> 通过，`origin/main=6f19c67193ae7e1c02e47c2e7b0209e0340475a0`
+ - 主仓禁止修改面：未合入 `expectation/`、`.skills`、`ARCHITECTURE/plan`、`agents/standard`、`TODO.md` 或 `DONE.md` 手工改动
+ - 同步资产处理：`/home/lfr/kernelcode_generate/wt-20260507-core-print-alias-expectation-sync` 仅作为终验 / merge 前只读合同验收路径；`/home/lfr/kernelcode_generate/wt-20260507-core-print-expectation-contract-sync` 未引用、未合并、未清理
+结论：业务合并与 push 已完成，等待执行 `-done`。
