@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 from xdsl.dialects import arith, func
 from xdsl.context import Context
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, Region, StringAttr, i32
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, Region, StringAttr, i32
 from xdsl.ir import Attribute, Block, Operation
 from xdsl.passes import ModulePass
 from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewrite_pattern
@@ -45,6 +45,7 @@ from kernel_gen.passes.lowering.nn_lowering.nn_lowering_utility import (
     ensure_single_result,
     ensure_space_attr,
 )
+from test.passes.lowering.nn_lowering.memory_type_utils import symbol_array
 
 nn_lowering_pkg = importlib.import_module("kernel_gen.passes.lowering.nn_lowering")
 element_binary_module = importlib.import_module(
@@ -70,13 +71,13 @@ def _nn_memory_type(
     shape: tuple[Attribute, ...],
     stride: tuple[Attribute, ...],
 ) -> NnMemoryType:
-    return NnMemoryType(ArrayAttr(list(shape)), ArrayAttr(list(stride)), i32, SPACE_GLOBAL)
+    return NnMemoryType(symbol_array(shape), symbol_array(stride), i32, SPACE_GLOBAL)
 
 
 def _build_add_module() -> ModuleOp:
-    lhs_type = _nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)))
-    rhs_type = _nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)))
-    result_type = _nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)))
+    lhs_type = _nn_memory_type((2, 2), (2, 1))
+    rhs_type = _nn_memory_type((2, 2), (2, 1))
+    result_type = _nn_memory_type((2, 2), (2, 1))
     block = Block(arg_types=[lhs_type, rhs_type])
     add_op = NnAddOp(block.args[0], block.args[1], result_type, SPACE_GLOBAL)
     block.add_op(add_op)

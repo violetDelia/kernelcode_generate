@@ -28,6 +28,7 @@ from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.nn import NnExpOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.tools.ircheck import run_ircheck_text
+from test.passes.lowering.nn_lowering.memory_type_utils import memory_type
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
@@ -37,18 +38,18 @@ if str(REPO_ROOT) not in sys.path:
 CASE_TEXT_STATIC = """// COMPILE_ARGS: --pass lower-nn
 // CASE: 正例：静态 nn.exp 输入应 lower 为 dma.alloc + kernel.exp + func.return。
 // CHECK: builtin.module {
-// CHECK-NEXT: func.func @exp_kernel(%arg0 : !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>) -> !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>> {
-// CHECK-NEXT: %0 = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>
-// CHECK-NEXT: "kernel.exp"(%0, %arg0) {space = #nn.space<global>} : (!nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>, !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>) -> ()
-// CHECK-NEXT: func.return %0 : !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>
+// CHECK-NEXT: func.func @exp_kernel(%arg0 : !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], f32, #nn.space<global>> {
+// CHECK-NEXT: %0 = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], f32, #nn.space<global>>
+// CHECK-NEXT: "kernel.exp"(%0, %arg0) {space = #nn.space<global>} : (!nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], f32, #nn.space<global>>, !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], f32, #nn.space<global>>) -> ()
+// CHECK-NEXT: func.return %0 : !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], f32, #nn.space<global>>
 // CHECK-NEXT: }
 // CHECK-NEXT: }
 // CHECK-NOT: nn.exp
 
 builtin.module {
-  func.func @exp_kernel(%arg0: !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>) -> !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>> {
-    %0 = "nn.exp"(%arg0) {space = #nn.space<global>} : (!nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>) -> !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>
-    func.return %0 : !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>
+  func.func @exp_kernel(%arg0: !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], f32, #nn.space<global>> {
+    %0 = "nn.exp"(%arg0) {space = #nn.space<global>} : (!nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], f32, #nn.space<global>>
+    func.return %0 : !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], f32, #nn.space<global>>
   }
 }
 """
@@ -56,20 +57,20 @@ builtin.module {
 CASE_TEXT_DYNAMIC = """// COMPILE_ARGS: --pass lower-nn
 // CASE: 正例：符号维度 nn.exp 输入应 lower 为 dma.alloc + kernel.exp + func.return。
 // CHECK: builtin.module {
-// CHECK-NEXT: func.func @exp_kernel(%arg0 : !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !nn.memory<[M, N], [N, 1], f32, #nn.space<global>> {
-// CHECK-NEXT: %0 = "symbol.get_dim"(%arg0) {axis = #builtin.int<0>} : (!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !symbol.int<"M">
-// CHECK-NEXT: %1 = "symbol.get_dim"(%arg0) {axis = #builtin.int<1>} : (!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !symbol.int<"N">
-// CHECK-NEXT: %2 = "dma.alloc"(%0, %1) <{operandSegmentSizes = array<i32: 2>}> : (!symbol.int<"M">, !symbol.int<"N">) -> !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>
-// CHECK-NEXT: "kernel.exp"(%2, %arg0) {space = #nn.space<global>} : (!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>, !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> ()
-// CHECK-NEXT: func.return %2 : !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>
+// CHECK-NEXT: func.func @exp_kernel(%arg0 : !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>> {
+// CHECK-NEXT: %0 = "symbol.get_dim"(%arg0) {axis = #builtin.int<0>} : (!nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>>) -> !symbol.int<#symbol.expr<M>>
+// CHECK-NEXT: %1 = "symbol.get_dim"(%arg0) {axis = #builtin.int<1>} : (!nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>>) -> !symbol.int<#symbol.expr<N>>
+// CHECK-NEXT: %2 = "dma.alloc"(%0, %1) <{operandSegmentSizes = array<i32: 2>}> : (!symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>>) -> !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>>
+// CHECK-NEXT: "kernel.exp"(%2, %arg0) {space = #nn.space<global>} : (!nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>>, !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>>) -> ()
+// CHECK-NEXT: func.return %2 : !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>>
 // CHECK-NEXT: }
 // CHECK-NEXT: }
 // CHECK-NOT: nn.exp
 
 builtin.module {
-  func.func @exp_kernel(%arg0: !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !nn.memory<[M, N], [N, 1], f32, #nn.space<global>> {
-    %0 = "nn.exp"(%arg0) {space = #nn.space<global>} : (!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>
-    func.return %0 : !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>
+  func.func @exp_kernel(%arg0: !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>> {
+    %0 = "nn.exp"(%arg0) {space = #nn.space<global>} : (!nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>>
+    func.return %0 : !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>>
   }
 }
 """
@@ -121,7 +122,6 @@ def _make_memory_type(
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
-    shape_attr = ArrayAttr([IntAttr(dim) if isinstance(dim, int) else StringAttr(dim) for dim in shape])
     stride_values: list[int] = []
     running = 1
     for dim in reversed(shape):
@@ -129,8 +129,7 @@ def _make_memory_type(
         stride_values.append(running)
         running *= dim_value
     stride_values.reverse()
-    stride_attr = ArrayAttr([IntAttr(value) for value in stride_values])
-    return NnMemoryType(shape_attr, stride_attr, element_type, NnMemorySpaceAttr.from_name(space))
+    return memory_type(shape, stride_values, element_type, NnMemorySpaceAttr.from_name(space))
 
 
 def _build_module(input_type: NnMemoryType, result_type: NnMemoryType) -> ModuleOp:

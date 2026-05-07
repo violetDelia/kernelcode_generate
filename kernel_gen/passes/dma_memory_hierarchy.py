@@ -37,7 +37,6 @@ from xdsl.dialects.builtin import (
     IntAttr,
     IntegerAttr,
     ModuleOp,
-    StringAttr,
     UnrealizedConversionCastOp,
     i32,
 )
@@ -45,13 +44,52 @@ from xdsl.ir import Block, Operation, SSAValue
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaSliceOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolGetDimOp, SymbolValueType
 from kernel_gen.passes.pass_manager import Pass
 
 
 _APPLY_OP_PREFIX = "matmul"
 _APPLY_TARGETS = {"", "shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
 _MATMUL_OPERAND_COUNT = 3
+
+
+def _symbol_expr_text(attr: SymbolExprAttr) -> str:
+    """读取 `SymbolExprAttr` 的表达文本。
+
+    功能说明:
+    - 当前文件内用于读取 `NnMemoryType` shape/stride 的 `SymbolExprAttr` 文本。
+
+    使用示例:
+    - text = _symbol_expr_text(SymbolExprAttr.from_expr("M"))
+
+    关联文件:
+    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
+    - test: test/passes/test_dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
+    """
+
+    return attr.expr.data
+
+
+def _static_int_from_symbol_expr(attr: SymbolExprAttr) -> int | None:
+    """从 `SymbolExprAttr` 读取静态整数。
+
+    功能说明:
+    - `#symbol.expr<4>` 返回 4。
+    - 命名符号、复合表达式与 `?` 返回 None。
+
+    使用示例:
+    - value = _static_int_from_symbol_expr(SymbolExprAttr.from_expr("4"))
+
+    关联文件:
+    - spec: spec/pass/lowering/dma_memory_hierarchy/spec.md
+    - test: test/passes/test_dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
+    """
+
+    text = _symbol_expr_text(attr)
+    signless = text[1:] if text.startswith("-") else text
+    return int(text) if signless.isdecimal() else None
 
 
 @dataclass(frozen=True)
@@ -257,7 +295,13 @@ def _build_full_window_operands(
     sizes: list[SSAValue] = []
     for axis in range(rank):
         shape_dim = source_type.shape.data[axis]
-        if isinstance(shape_dim, StringAttr) and shape_dim.data == "?":
+        if not isinstance(shape_dim, SymbolExprAttr):
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "dynamic_shape source shape entries must be SymbolExprAttr",
+            )
+        if _symbol_expr_text(shape_dim) == "?":
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                 "dynamic_shape must come from explicit symbol source; anonymous '?' dimension is unsupported in lower-dma-memory-hierarchy"
             )
@@ -278,7 +322,7 @@ def _build_dynamic_shape_operands(
 
     功能说明:
     - 静态 shape 返回空列表，让 `dma.alloc` 使用零 operand 形式。
-    - 显式符号维度通过 `symbol.get_dim(source, axis)` 读取。
+    - 非静态 `SymbolExprAttr` 符号维度通过 `symbol.get_dim(source, axis)` 读取。
     - 匿名动态维度 `?` 没有稳定 symbol 来源，必须显式失败。
 
     使用示例:
@@ -294,24 +338,25 @@ def _build_dynamic_shape_operands(
     ops: list[Operation] = []
     dynamic_shape: list[SSAValue] = []
     for axis, shape_dim in enumerate(source_type.shape.data):
-        if isinstance(shape_dim, IntAttr):
+        if not isinstance(shape_dim, SymbolExprAttr):
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "dynamic_shape result shape entries must be SymbolExprAttr",
+            )
+        expr = _symbol_expr_text(shape_dim)
+        if expr == "?":
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "dynamic_shape must come from explicit symbol source; anonymous '?' dimension is unsupported in lower-dma-memory-hierarchy",
+            )
+        if _static_int_from_symbol_expr(shape_dim) is not None:
             continue
-        if isinstance(shape_dim, StringAttr):
-            if shape_dim.data == "?":
-                raise KernelCodeError(
-                    ErrorKind.CONTRACT,
-                    ErrorModule.PASS,
-                    "dynamic_shape must come from explicit symbol source; anonymous '?' dimension is unsupported in lower-dma-memory-hierarchy",
-                )
-            get_dim = SymbolGetDimOp(source, IntAttr(axis))
-            ops.append(get_dim)
-            dynamic_shape.append(get_dim.result)
-            continue
-        raise KernelCodeError(
-            ErrorKind.CONTRACT,
-            ErrorModule.PASS,
-            "dynamic_shape result shape entries must be IntAttr or StringAttr",
-        )
+        get_dim = SymbolGetDimOp(source, IntAttr(axis))
+        ops.append(get_dim)
+        dynamic_shape.append(get_dim.result)
+        continue
     return ops, dynamic_shape
 
 

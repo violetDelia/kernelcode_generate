@@ -8,6 +8,7 @@
   - 不再支持 `CHECK-REGEX*` 变体，整行 regex 需求统一收口到 `[[NAME:REGEX]]` 的局部片段内。
   最终输出 `true/false`。
 - CLI 支持 `--help` / `-h`、`-irdump` 与 `-emitc{target=...}`。
+- `-irdump` 诊断文件默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias IR。
 - 对外公开 API 包括 CLI `main(...)`、公开数据模型与三条函数入口：
   `parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text`，便于 CLI / pytest / 脚本复用。
 
@@ -64,6 +65,7 @@ from xdsl.passes import ModulePass
 from xdsl.printer import Printer
 
 from kernel_gen.core.context import build_default_context as _build_default_context_base
+from kernel_gen.core.print import print_operation_with_aliases
 from kernel_gen.passes.registry import (
     build_registered_pass,
     build_registered_pipeline,
@@ -141,6 +143,26 @@ def _render_operation_text(value: Operation) -> str:
     stream = StringIO()
     Printer(stream=stream).print_op(value)
     return stream.getvalue().rstrip()
+
+
+def _render_operation_dump_text(value: Operation) -> str:
+    """把 xDSL operation 渲染为 `-irdump` 诊断文本。
+
+
+    功能说明:
+    - 只服务 `-irdump` 落盘文件，默认输出 core.print alias IR。
+    - 不改变 `_normalize_ir(...)` 的 CHECK 匹配文本，避免诊断格式影响 ircheck 合同匹配。
+
+    使用示例:
+    - text = _render_operation_dump_text(module)
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test: [test/tools/test_ircheck_cli.py](test/tools/test_ircheck_cli.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    return print_operation_with_aliases(value).rstrip()
 
 
 
@@ -954,12 +976,14 @@ def _run_ircheck_case(
             message=f"IrcheckRunError: pass execution failed: failed to print input ({exc})",
         )
 
+    input_dump_ir = _render_operation_dump_text(module) if dump_dir is not None else input_ir
     if dump_dir is not None:
-        _write_irdump_file(dump_dir / "00-input.mlir", input_ir)
+        _write_irdump_file(dump_dir / "00-input.mlir", input_dump_ir)
 
     load_builtin_passes()
     current = module
     last_success_ir = input_ir
+    last_success_dump_ir = input_dump_ir
     for index, step in enumerate(compile_steps, start=1):
         try:
             output = _run_compile_step(ctx, current, step)
@@ -967,7 +991,7 @@ def _run_ircheck_case(
             if dump_dir is not None:
                 _write_irdump_file(
                     dump_dir / f"{index:02d}-before-failed-{step.kind}-{step.name}.mlir",
-                    last_success_ir,
+                    last_success_dump_ir,
                 )
             return IrcheckResult(
                 ok=False,
@@ -986,7 +1010,7 @@ def _run_ircheck_case(
             if dump_dir is not None:
                 _write_irdump_file(
                     dump_dir / f"{index:02d}-before-failed-{step.kind}-{step.name}.mlir",
-                    last_success_ir,
+                    last_success_dump_ir,
                 )
             return IrcheckResult(
                 ok=False,
@@ -999,10 +1023,12 @@ def _run_ircheck_case(
                 ),
             )
 
+        actual_dump_ir = _render_operation_dump_text(output) if dump_dir is not None else actual_ir
         if dump_dir is not None:
-            _write_irdump_file(dump_dir / f"{index:02d}-{step.kind}-{step.name}.mlir", actual_ir)
+            _write_irdump_file(dump_dir / f"{index:02d}-{step.kind}-{step.name}.mlir", actual_dump_ir)
         current = output
         last_success_ir = actual_ir
+        last_success_dump_ir = actual_dump_ir
 
     actual_text = last_success_ir
     if emitc_target is not None:
@@ -1013,7 +1039,7 @@ def _run_ircheck_case(
             if dump_dir is not None:
                 _write_irdump_file(
                     dump_dir / f"{len(compile_steps) + 1:02d}-before-failed-emitc-{emitc_target}.mlir",
-                    last_success_ir,
+                    last_success_dump_ir,
                 )
             return IrcheckResult(
                 ok=False,

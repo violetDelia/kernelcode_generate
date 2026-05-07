@@ -131,23 +131,23 @@ def _assert_static_symbolic_tile_ir(module_text: str) -> None:
     """
 
     required_fragments = (
-        "!nn.memory<[32, 32]",
-        "!nn.memory<[32, 16]",
-        "!nn.memory<[16, 32]",
-        '!symbol.int<"TILE_H">',
-        '!symbol.int<"TILE_W">',
-        '!symbol.int<"TILE_K">',
-        'step = "TILE_K"',
+        "!nn.memory<[#symbol.expr<32>, #symbol.expr<32>]",
+        "!nn.memory<[#symbol.expr<32>, #symbol.expr<16>]",
+        "!nn.memory<[#symbol.expr<16>, #symbol.expr<32>]",
+        "!symbol.int<#symbol.expr<TILE_H>>",
+        "!symbol.int<#symbol.expr<TILE_W>>",
+        "!symbol.int<#symbol.expr<TILE_K>>",
+        "step = #symbol.expr<TILE_K>",
         '"kernel.matmul"',
         '"kernel.binary_elewise"',
         '"dma.view"',
         '"dma.deslice"',
     )
     forbidden_fragments = (
-        "!nn.memory<[H, W]",
-        "!nn.memory<[H, K]",
-        "!nn.memory<[K, W]",
-        "!nn.memory<[s1",
+        "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]",
+        "!nn.memory<[#symbol.expr<H>, #symbol.expr<K>]",
+        "!nn.memory<[#symbol.expr<K>, #symbol.expr<W>]",
+        "!nn.memory<[#symbol.expr<s1>",
     )
     for fragment in required_fragments:
         if fragment not in module_text:

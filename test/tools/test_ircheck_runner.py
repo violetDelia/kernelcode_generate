@@ -114,16 +114,16 @@ def test_run_ircheck_text_pass_ok_with_arch_dialect() -> None:
 // CHECK: arch.barrier
 
 builtin.module {
-  func.func @host(%arg0 : !nn.memory<[4], [1], f32, #nn.space<global>>) {
-    %c1 = symbol.const 1 : !symbol.int<"1">
-    %c1_1 = symbol.const 1 : !symbol.int<"1">
-    %c1_2 = symbol.const 1 : !symbol.int<"1">
-    %c0 = symbol.const 0 : !symbol.int<"0">
-    arch.launch<%c1, %c1_1, %c1_2, %c0>(@_device, %arg0) : (!nn.memory<[4], [1], f32, #nn.space<global>>) -> ()
+  func.func @host(%arg0 : !nn.memory<[#symbol.expr<4>], [#symbol.expr<1>], f32, #nn.space<global>>) {
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %c1_1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %c1_2 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    arch.launch<%c1, %c1_1, %c1_2, %c0>(@_device, %arg0) : (!nn.memory<[#symbol.expr<4>], [#symbol.expr<1>], f32, #nn.space<global>>) -> ()
     func.return
   }
 
-  func.func @_device(%arg0 : !nn.memory<[4], [1], f32, #nn.space<global>>) {
+  func.func @_device(%arg0 : !nn.memory<[#symbol.expr<4>], [#symbol.expr<1>], f32, #nn.space<global>>) {
     arch.barrier {scope = #arch.scope<block>, visibility = [#arch.visibility<tsm>]}
     func.return
   }
@@ -227,8 +227,8 @@ def test_run_ircheck_text_emitc_npu_demo_single_symbol_func() -> None:
 // CHECK-NEXT: }
 
 builtin.module {
-  func.func @symbol_cast_case(%0 : !symbol.int<"N">) {
-    %1 = "symbol.cast"(%0) : (!symbol.int<"N">) -> i32
+  func.func @symbol_cast_case(%0 : !symbol.int<#symbol.expr<N>>) {
+    %1 = "symbol.cast"(%0) : (!symbol.int<#symbol.expr<N>>) -> i32
     func.return
   }
 }
@@ -361,7 +361,7 @@ def test_run_ircheck_text_emitc_npu_demo_plain_dma_alloc_success() -> None:
 
 builtin.module {
   func.func @dma_alloc_case() {
-    %0 = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[2, 3], [3, 1], ui8, #nn.space<global>>
+    %0 = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<2>, #symbol.expr<3>], [#symbol.expr<3>, #symbol.expr<1>], ui8, #nn.space<global>>
     func.return
   }
 }
@@ -606,6 +606,36 @@ def test_run_ircheck_text_rejects_unquoted_pipeline_options() -> None:
     assert result.message.startswith("IrcheckCompileArgsError: unsupported compile args")
 
 
+# TC-IRCHECK-RUN-014A
+# 功能说明: 验证 compile args 带参语法的公开拒绝边界，覆盖空 pass 名、空 option 块、空 key/value 与重复 key。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_rejects_option_edge_matrix
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+@pytest.mark.parametrize(
+    "compile_args",
+    [
+        '--pass "={mode=fast}"',
+        '--pass "opt-pass={}"',
+        '--pass "opt-pass={=fast}"',
+        '--pass "opt-pass={mode=}"',
+        '--pass "opt-pass={mode=fast,mode=slow}"',
+        "--pass",
+    ],
+)
+def test_run_ircheck_text_rejects_option_edge_matrix(compile_args: str) -> None:
+    text = f"""// COMPILE_ARGS: {compile_args}
+// CHECK: builtin.module
+
+{_SIMPLE_IR}"""
+    result = run_ircheck_text(text, source_path="inline_option_edges.ircheck")
+
+    assert result.ok is False
+    assert result.exit_code == 2
+    assert result.message is not None
+    assert result.message.startswith("IrcheckCompileArgsError: unsupported compile args")
+
+
 # TC-IRCHECK-RUN-024
 # 功能说明: 验证单个 case 支持 pass/pipeline 混合多 step 顺序执行。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_multi_pass_sequence
@@ -802,6 +832,61 @@ builtin.module attributes {note = "[["} {
     assert 'note = "[["' in result.actual_ir
 
 
+# TC-IRCHECK-RUN-027D
+# 功能说明: 验证 CHECK 行内 regex 与未 token 化变量片段的公开解析边界。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_regex_literal_edge_matrix
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+@pytest.mark.parametrize(
+    ("check_line", "expected_ok", "expected_code", "expected_message"),
+    [
+        ("// CHECK: builtin{.*}module", True, 0, None),
+        ("// CHECK: {{}}", False, 2, "IrcheckParseError: invalid regex check"),
+        ("// CHECK: [[BROKEN", False, 2, "IrcheckParseError: invalid regex check"),
+    ],
+)
+def test_run_ircheck_text_regex_literal_edge_matrix(
+    check_line: str,
+    expected_ok: bool,
+    expected_code: int,
+    expected_message: str | None,
+) -> None:
+    text = f"""// COMPILE_ARGS: --pass no-op
+{check_line}
+
+{_SIMPLE_IR}"""
+    result = run_ircheck_text(text, source_path="inline_regex.ircheck")
+
+    assert result.ok is expected_ok
+    assert result.exit_code == expected_code
+    if expected_message is None:
+        assert result.message is None
+    else:
+        assert result.message is not None
+        assert result.message.startswith(expected_message)
+
+
+# TC-IRCHECK-RUN-027E
+# 功能说明: 验证多 case 分隔符末尾空 case 会按公开解析错误返回。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_rejects_trailing_empty_case
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_rejects_trailing_empty_case() -> None:
+    text = f"""// COMPILE_ARGS: --pass no-op
+// CHECK: builtin.module
+
+{_SIMPLE_IR}// -----
+"""
+    result = run_ircheck_text(text, source_path="inline_empty_case.ircheck")
+
+    assert result.ok is False
+    assert result.exit_code == 2
+    assert result.message is not None
+    assert result.message.startswith("IrcheckParseError: invalid ircheck header")
+
+
 # TC-IRCHECK-RUN-028
 # 功能说明: 验证 CHECK-NOT 定义变量会映射为 exit_code=2 与稳定错误短语前缀。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_check_not_define_variable_maps_to_exit_code_2
@@ -861,14 +946,14 @@ builtin.module {
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
 def test_run_ircheck_text_reg_alias_matches_ssa_ids() -> None:
     text = """// COMPILE_ARGS: --pass no-op
-// CHECK: func.func @main(%arg0 : !nn.memory<[[[M:{reg}]], [[N:{reg}]]], [[[N]], 1], f32, #nn.space<global>>) -> !nn.memory<[[[M]], [[N]]], [[[N]], 1], f32, #nn.space<global>> {
-// CHECK-NEXT: %[[ALLOC:{reg}]] = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[[[M]], [[N]]], [[[N]], 1], f32, #nn.space<global>>
-// CHECK-NEXT: func.return %[[ALLOC]] : !nn.memory<[[[M]], [[N]]], [[[N]], 1], f32, #nn.space<global>>
+// CHECK: func.func @main(%arg0 : !nn.memory<[#symbol.expr<[[M:{reg}]]>, #symbol.expr<[[N:{reg}]]>], [#symbol.expr<[[N]]>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<[[M]]>, #symbol.expr<[[N]]>], [#symbol.expr<[[N]]>, #symbol.expr<1>], f32, #nn.space<global>> {
+// CHECK-NEXT: %[[ALLOC:{reg}]] = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<[[M]]>, #symbol.expr<[[N]]>], [#symbol.expr<[[N]]>, #symbol.expr<1>], f32, #nn.space<global>>
+// CHECK-NEXT: func.return %[[ALLOC]] : !nn.memory<[#symbol.expr<[[M]]>, #symbol.expr<[[N]]>], [#symbol.expr<[[N]]>, #symbol.expr<1>], f32, #nn.space<global>>
 
 builtin.module {
-  func.func @main(%arg0: !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !nn.memory<[M, N], [N, 1], f32, #nn.space<global>> {
-    %0 = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>
-    func.return %0 : !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>
+  func.func @main(%arg0: !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>> {
+    %0 = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>>
+    func.return %0 : !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<global>>
   }
 }
 """
@@ -907,11 +992,11 @@ builtin.module {
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
 def test_run_ircheck_text_numeric_ssa_signature_keeps_colon_tight() -> None:
     text = """// COMPILE_ARGS: --pass no-op
-// CHECK: func.func @copy(%0: !nn.memory<[9], [1], i8, #nn.space<tsm>> {name = "arg0"}, %1: !nn.memory<[9], [1], i8, #nn.space<tsm>> {name = "src"}) {
+// CHECK: func.func @copy(%0: !nn.memory<[#symbol.expr<9>], [#symbol.expr<1>], i8, #nn.space<tsm>> {name = "arg0"}, %1: !nn.memory<[#symbol.expr<9>], [#symbol.expr<1>], i8, #nn.space<tsm>> {name = "src"}) {
 // CHECK-NEXT: func.return
 
 builtin.module {
-  func.func @copy(%0: !nn.memory<[9], [1], i8, #nn.space<tsm>> {name = "arg0"}, %1: !nn.memory<[9], [1], i8, #nn.space<tsm>> {name = "src"}) {
+  func.func @copy(%0: !nn.memory<[#symbol.expr<9>], [#symbol.expr<1>], i8, #nn.space<tsm>> {name = "arg0"}, %1: !nn.memory<[#symbol.expr<9>], [#symbol.expr<1>], i8, #nn.space<tsm>> {name = "src"}) {
     func.return
   }
 }

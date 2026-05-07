@@ -53,9 +53,29 @@ from xdsl.pattern_rewriter import (
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaViewOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import Symbol, SymbolForOp, SymbolGetDimOp, SymbolIterType, SymbolValueType
+from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolForOp, SymbolGetDimOp, SymbolIterType, SymbolValueType
 from kernel_gen.dialect.tuner import TunerParamOp
 from kernel_gen.passes.common import ensure_builtin_module, raise_pass_contract_error
+
+
+def _symbol_expr_attr(expr: str | int) -> SymbolExprAttr:
+    """构造 tile pass 内部新建 memory type 使用的 symbol 表达式 attr。
+
+
+    功能说明:
+    - 当前 `NnMemoryType` 公开合同要求 shape/stride 维度均为 `SymbolExprAttr`。
+    - tile-elewise rewrite 新建 view result type 时通过本 helper 统一写入合法维度。
+
+    使用示例:
+    - tile_dim = _symbol_expr_attr("TILE_D0")
+
+    关联文件:
+    - spec: [spec/pass/tile/elewise.md](spec/pass/tile/elewise.md)
+    - test: [test/passes/tile/test_elewise.py](test/passes/tile/test_elewise.py)
+    - 功能实现: [kernel_gen/passes/tile/elewise.py](kernel_gen/passes/tile/elewise.py)
+    """
+
+    return SymbolExprAttr.from_expr(str(expr))
 
 
 class TileElewiseBinaryPattern(RewritePattern):
@@ -220,8 +240,8 @@ class TileElewiseBinaryPattern(RewritePattern):
         for value in ordered_memory_values:
             value_type = value.type
             assert isinstance(value_type, NnMemoryType)
-            shape_attrs: list[Attribute] = [StringAttr(tile_name) for tile_name in tile_names]
-            stride_attrs: list[Attribute] = [IntAttr(1) for _ in range(rank)]
+            shape_attrs: list[Attribute] = [_symbol_expr_attr(tile_name) for tile_name in tile_names]
+            stride_attrs: list[Attribute] = [_symbol_expr_attr(1) for _ in range(rank)]
             if use_unit_stride_operands:
                 stride_values = [const_one.results[0] for _ in range(rank)]
             elif rank == 1:
@@ -392,16 +412,16 @@ class TileElewiseBroadcastPattern(RewritePattern):
         for axis in range(rank):
             target_offsets.append(loop_vars.get(axis, starts[axis]))
             if axis in param_by_axis:
-                target_shape_attrs.append(StringAttr(axis_to_tile[axis]))
+                target_shape_attrs.append(_symbol_expr_attr(axis_to_tile[axis]))
                 target_shape_values.append(param_by_axis[axis].result)
             elif roles[0][axis] == "expand":
-                target_shape_attrs.append(IntAttr(1))
+                target_shape_attrs.append(_symbol_expr_attr(1))
                 target_shape_values.append(const_one.results[0])
             else:
                 dim_attr = target.type.shape.data[axis]
                 target_shape_attrs.append(dim_attr)
                 target_shape_values.append(ends[axis])
-        target_stride_attrs: list[Attribute] = [IntAttr(1) for _ in range(rank)]
+        target_stride_attrs: list[Attribute] = [_symbol_expr_attr(1) for _ in range(rank)]
         target_view = DmaViewOp(
             target,
             target_offsets,
@@ -427,12 +447,12 @@ class TileElewiseBroadcastPattern(RewritePattern):
                 role = roles[1][target_axis]
                 if target_axis in loop_vars and role != "expand":
                     source_offsets.append(loop_vars[target_axis])
-                    source_shape_attrs.append(StringAttr(axis_to_tile[target_axis]))
+                    source_shape_attrs.append(_symbol_expr_attr(axis_to_tile[target_axis]))
                     source_shape_values.append(param_by_axis[target_axis].result)
                 else:
                     source_offsets.append(starts[target_axis])
                     if role == "expand":
-                        source_shape_attrs.append(IntAttr(1))
+                        source_shape_attrs.append(_symbol_expr_attr(1))
                         source_shape_values.append(const_one.results[0])
                     else:
                         dim_attr = source.type.shape.data[source_axis]
@@ -440,7 +460,7 @@ class TileElewiseBroadcastPattern(RewritePattern):
                         source_shape_values.append(ends[target_axis])
         else:
             return
-        source_stride_attrs: list[Attribute] = [IntAttr(1) for _ in range(len(source_shape_attrs))]
+        source_stride_attrs: list[Attribute] = [_symbol_expr_attr(1) for _ in range(len(source_shape_attrs))]
         source_view = DmaViewOp(
             source,
             source_offsets,
@@ -629,8 +649,8 @@ class TileElewiseMatmulPattern(RewritePattern):
             [tile_m.result, dim_k.result],
             [const_one.results[0], const_one.results[0]],
             NnMemoryType(
-                ArrayAttr([StringAttr("TILE_D0"), lhs.type.shape.data[1]]),
-                ArrayAttr([IntAttr(1), IntAttr(1)]),
+                ArrayAttr([_symbol_expr_attr("TILE_D0"), lhs.type.shape.data[1]]),
+                ArrayAttr([_symbol_expr_attr(1), _symbol_expr_attr(1)]),
                 lhs.type.element_type,
                 lhs.type.space,
             ),
@@ -641,8 +661,8 @@ class TileElewiseMatmulPattern(RewritePattern):
             [dim_k.result, tile_n.result],
             [const_one.results[0], const_one.results[0]],
             NnMemoryType(
-                ArrayAttr([rhs.type.shape.data[0], StringAttr("TILE_D1")]),
-                ArrayAttr([IntAttr(1), IntAttr(1)]),
+                ArrayAttr([rhs.type.shape.data[0], _symbol_expr_attr("TILE_D1")]),
+                ArrayAttr([_symbol_expr_attr(1), _symbol_expr_attr(1)]),
                 rhs.type.element_type,
                 rhs.type.space,
             ),
@@ -653,8 +673,8 @@ class TileElewiseMatmulPattern(RewritePattern):
             [tile_m.result, tile_n.result],
             [const_one.results[0], const_one.results[0]],
             NnMemoryType(
-                ArrayAttr([StringAttr("TILE_D0"), StringAttr("TILE_D1")]),
-                ArrayAttr([IntAttr(1), IntAttr(1)]),
+                ArrayAttr([_symbol_expr_attr("TILE_D0"), _symbol_expr_attr("TILE_D1")]),
+                ArrayAttr([_symbol_expr_attr(1), _symbol_expr_attr(1)]),
                 out.type.element_type,
                 out.type.space,
             ),

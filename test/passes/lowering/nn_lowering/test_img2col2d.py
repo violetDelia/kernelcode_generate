@@ -34,6 +34,7 @@ from kernel_gen.dialect.nn import NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
+from test.passes.lowering.nn_lowering.memory_type_utils import memory_type
 
 
 # TC-PASS-NNL-022
@@ -44,18 +45,8 @@ from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_img2col2d.py
 def test_nn_lowering_img2col2d_target() -> None:
     space = NnMemorySpaceAttr(StringAttr("global"))
-    input_type = NnMemoryType(
-        ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
-        ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
-        f32,
-        space,
-    )
-    result_type = NnMemoryType(
-        ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
-        ArrayAttr([IntAttr(243), IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
-        f32,
-        space,
-    )
+    input_type = memory_type([1, 3, 5, 5], [75, 25, 5, 1], f32, space)
+    result_type = memory_type([1, 3, 3, 3, 3, 3], [243, 81, 27, 9, 3, 1], f32, space)
 
     block = Block(arg_types=[input_type])
     kh = SymbolConstOp(3)
@@ -112,47 +103,22 @@ def test_nn_lowering_img2col2d_accepts_noncanonical_symbol_names() -> None:
     """TC-PASS-NNL-022A: 动态 img2col2d 不应依赖固定符号名。"""
 
     space = NnMemorySpaceAttr(StringAttr("global"))
-    input_type = NnMemoryType(
-        ArrayAttr(
-            [
-                StringAttr("BATCH_DIM"),
-                StringAttr("CHANNEL_DIM"),
-                StringAttr("HEIGHT_DIM"),
-                StringAttr("WIDTH_DIM"),
-            ]
-        ),
-        ArrayAttr(
-            [
-                StringAttr("CHANNEL_DIM*HEIGHT_DIM*WIDTH_DIM"),
-                StringAttr("HEIGHT_DIM*WIDTH_DIM"),
-                StringAttr("WIDTH_DIM"),
-                IntAttr(1),
-            ]
-        ),
+    input_type = memory_type(
+        ["BATCH_DIM", "CHANNEL_DIM", "HEIGHT_DIM", "WIDTH_DIM"],
+        ["CHANNEL_DIM*HEIGHT_DIM*WIDTH_DIM", "HEIGHT_DIM*WIDTH_DIM", "WIDTH_DIM", 1],
         f32,
         space,
     )
-    result_type = NnMemoryType(
-        ArrayAttr(
-            [
-                StringAttr("BATCH_DIM"),
-                StringAttr("CHANNEL_DIM"),
-                StringAttr("KH_DIM"),
-                StringAttr("KW_DIM"),
-                StringAttr("OH_DIM"),
-                StringAttr("OW_DIM"),
-            ]
-        ),
-        ArrayAttr(
-            [
-                StringAttr("CHANNEL_DIM*KH_DIM*KW_DIM*OH_DIM*OW_DIM"),
-                StringAttr("KH_DIM*KW_DIM*OH_DIM*OW_DIM"),
-                StringAttr("KW_DIM*OH_DIM*OW_DIM"),
-                StringAttr("OH_DIM*OW_DIM"),
-                StringAttr("OW_DIM"),
-                IntAttr(1),
-            ]
-        ),
+    result_type = memory_type(
+        ["BATCH_DIM", "CHANNEL_DIM", "KH_DIM", "KW_DIM", "OH_DIM", "OW_DIM"],
+        [
+            "CHANNEL_DIM*KH_DIM*KW_DIM*OH_DIM*OW_DIM",
+            "KH_DIM*KW_DIM*OH_DIM*OW_DIM",
+            "KW_DIM*OH_DIM*OW_DIM",
+            "OH_DIM*OW_DIM",
+            "OW_DIM",
+            1,
+        ],
         f32,
         space,
     )
@@ -197,55 +163,36 @@ def test_nn_lowering_img2col2d_accepts_noncanonical_symbol_names() -> None:
     kernel_ops = [op for op in module.walk() if isinstance(op, KernelImg2col2dOp)]
     assert len(kernel_ops) == 1
     assert not any(isinstance(op, NnImg2col2dOp) for op in module.walk())
-    assert '(-DIL_H_DIM*(KH_DIM - 1) + HEIGHT_DIM + PAD_H0_DIM + PAD_H1_DIM - 1) // STEP_H_DIM + 1' in module_text
-    assert '(-DIL_W_DIM*(KW_DIM - 1) + PAD_W0_DIM + PAD_W1_DIM + WIDTH_DIM - 1) // STEP_W_DIM + 1' in module_text
+    assert "symbol.floordiv" in module_text
+    assert "(HEIGHT_DIM + PAD_H0_DIM + PAD_H1_DIM - DIL_H_DIM*(KH_DIM - 1) - 1) floordiv STEP_H_DIM + 1" in module_text
+    assert "(PAD_W0_DIM + PAD_W1_DIM + WIDTH_DIM - DIL_W_DIM*(KW_DIM - 1) - 1) floordiv STEP_W_DIM + 1" in module_text
 
 
 def test_nn_lowering_img2col2d_runtime_dim_result_uses_full_rank_alloc_shape() -> None:
     """匿名 runtime 维度 img2col2d 结果通过 full-rank dma.alloc dynamic_shape 验证。"""
 
     space = NnMemorySpaceAttr(StringAttr("global"))
-    input_type = NnMemoryType(
-        ArrayAttr(
-            [
-                StringAttr("runtime_dim_0"),
-                StringAttr("runtime_dim_1"),
-                StringAttr("runtime_dim_2"),
-                StringAttr("runtime_dim_3"),
-            ]
-        ),
-        ArrayAttr(
-            [
-                StringAttr("runtime_dim_1*runtime_dim_2*runtime_dim_3"),
-                StringAttr("runtime_dim_2*runtime_dim_3"),
-                StringAttr("runtime_dim_3"),
-                IntAttr(1),
-            ]
-        ),
+    input_type = memory_type(
+        ["runtime_dim_0", "runtime_dim_1", "runtime_dim_2", "runtime_dim_3"],
+        [
+            "runtime_dim_1*runtime_dim_2*runtime_dim_3",
+            "runtime_dim_2*runtime_dim_3",
+            "runtime_dim_3",
+            1,
+        ],
         f32,
         space,
     )
-    result_type = NnMemoryType(
-        ArrayAttr(
-            [
-                StringAttr("runtime_dim_0"),
-                StringAttr("runtime_dim_1"),
-                IntAttr(3),
-                IntAttr(3),
-                StringAttr("runtime_dim_4"),
-                StringAttr("runtime_dim_5"),
-            ]
-        ),
-        ArrayAttr(
-            [
-                StringAttr("9*runtime_dim_1*runtime_dim_4*runtime_dim_5"),
-                StringAttr("9*runtime_dim_4*runtime_dim_5"),
-                StringAttr("3*runtime_dim_4*runtime_dim_5"),
-                StringAttr("runtime_dim_4*runtime_dim_5"),
-                StringAttr("runtime_dim_5"),
-                IntAttr(1),
-            ]
-        ),
+    result_type = memory_type(
+        ["runtime_dim_0", "runtime_dim_1", 3, 3, "runtime_dim_4", "runtime_dim_5"],
+        [
+            "9*runtime_dim_1*runtime_dim_4*runtime_dim_5",
+            "9*runtime_dim_4*runtime_dim_5",
+            "3*runtime_dim_4*runtime_dim_5",
+            "runtime_dim_4*runtime_dim_5",
+            "runtime_dim_5",
+            1,
+        ],
         f32,
         space,
     )
@@ -305,15 +252,10 @@ def test_nn_lowering_img2col2d_runtime_dim_result_uses_full_rank_alloc_shape() -
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_img2col2d.py
 def test_nn_lowering_img2col2d_public_error_matrix() -> None:
     space = NnMemorySpaceAttr(StringAttr("global"))
-    input_type = NnMemoryType(
-        ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
-        ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
-        f32,
-        space,
-    )
-    result_type = NnMemoryType(
-        ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), StringAttr("OH_DIM"), StringAttr("OW_DIM")]),
-        ArrayAttr([StringAttr("243"), StringAttr("81"), StringAttr("27"), StringAttr("9"), StringAttr("OW_DIM"), IntAttr(1)]),
+    input_type = memory_type([1, 3, 5, 5], [75, 25, 5, 1], f32, space)
+    result_type = memory_type(
+        [1, 3, 3, 3, "OH_DIM", "OW_DIM"],
+        [243, 81, 27, 9, "OW_DIM", 1],
         f32,
         space,
     )
@@ -390,35 +332,23 @@ def test_nn_lowering_img2col2d_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="nn img2col symbolic dim must come from symbolic source axis"):
         NnLoweringPass().apply(Context(), static_source_module)
 
-    dynamic_input_type = NnMemoryType(
-        ArrayAttr([StringAttr("BATCH_DIM"), StringAttr("CHANNEL_DIM"), StringAttr("HEIGHT_DIM"), StringAttr("WIDTH_DIM")]),
-        ArrayAttr([StringAttr("CHANNEL_DIM*HEIGHT_DIM*WIDTH_DIM"), StringAttr("HEIGHT_DIM*WIDTH_DIM"), StringAttr("WIDTH_DIM"), IntAttr(1)]),
+    dynamic_input_type = memory_type(
+        ["BATCH_DIM", "CHANNEL_DIM", "HEIGHT_DIM", "WIDTH_DIM"],
+        ["CHANNEL_DIM*HEIGHT_DIM*WIDTH_DIM", "HEIGHT_DIM*WIDTH_DIM", "WIDTH_DIM", 1],
         f32,
         space,
     )
-    rank_result_type = NnMemoryType(
-        ArrayAttr(
-            [
-                StringAttr("BATCH_DIM"),
-                StringAttr("CHANNEL_DIM"),
-                StringAttr("KH_DIM"),
-                StringAttr("KW_DIM"),
-                StringAttr("OH_DIM"),
-                StringAttr("OW_DIM"),
-                StringAttr("EXTRA_DIM"),
-            ]
-        ),
-        ArrayAttr(
-            [
-                StringAttr("CHANNEL_DIM*KH_DIM*KW_DIM*OH_DIM*OW_DIM*EXTRA_DIM"),
-                StringAttr("KH_DIM*KW_DIM*OH_DIM*OW_DIM*EXTRA_DIM"),
-                StringAttr("KW_DIM*OH_DIM*OW_DIM*EXTRA_DIM"),
-                StringAttr("OH_DIM*OW_DIM*EXTRA_DIM"),
-                StringAttr("OW_DIM*EXTRA_DIM"),
-                StringAttr("EXTRA_DIM"),
-                IntAttr(1),
-            ]
-        ),
+    rank_result_type = memory_type(
+        ["BATCH_DIM", "CHANNEL_DIM", "KH_DIM", "KW_DIM", "OH_DIM", "OW_DIM", "EXTRA_DIM"],
+        [
+            "CHANNEL_DIM*KH_DIM*KW_DIM*OH_DIM*OW_DIM*EXTRA_DIM",
+            "KH_DIM*KW_DIM*OH_DIM*OW_DIM*EXTRA_DIM",
+            "KW_DIM*OH_DIM*OW_DIM*EXTRA_DIM",
+            "OH_DIM*OW_DIM*EXTRA_DIM",
+            "OW_DIM*EXTRA_DIM",
+            "EXTRA_DIM",
+            1,
+        ],
         f32,
         space,
     )

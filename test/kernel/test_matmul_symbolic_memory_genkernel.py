@@ -101,20 +101,20 @@ def test_dynamic_matmul_demo_uses_symbolic_memory_and_tile_reduce_accumulator() 
     )
     module_text = str(module)
 
-    assert "!nn.memory<[H, W]" in module_text
-    assert "!nn.memory<[H, K]" in module_text
-    assert "!nn.memory<[K, W]" in module_text
-    assert '!symbol.int<"TILE_H">' in module_text
-    assert '!symbol.int<"TILE_W">' in module_text
-    assert '!symbol.int<"TILE_K">' in module_text
-    assert 'step = "TILE_K"' in module_text
+    assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" in module_text
+    assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<K>]" in module_text
+    assert "!nn.memory<[#symbol.expr<K>, #symbol.expr<W>]" in module_text
+    assert "!symbol.int<#symbol.expr<TILE_H>>" in module_text
+    assert "!symbol.int<#symbol.expr<TILE_W>>" in module_text
+    assert "!symbol.int<#symbol.expr<TILE_K>>" in module_text
+    assert "step = #symbol.expr<TILE_K>" in module_text
     assert '"kernel.matmul"' in module_text
     assert '"kernel.binary_elewise"' in module_text
     assert '"dma.view"' in module_text
     assert '"dma.deslice"' in module_text
     assert ".view<" in source
-    assert "!nn.memory<[17, 19]" not in module_text
-    assert "!nn.memory<[s1" not in module_text
+    assert "!nn.memory<[#symbol.expr<17>, #symbol.expr<19>]" not in module_text
+    assert "!nn.memory<[#symbol.expr<s1>" not in module_text
     _assert_source_uses_accumulator(source)
 
 
@@ -133,20 +133,20 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
     )
     module_text = str(module)
 
-    assert "!nn.memory<[32, 32]" in module_text
-    assert "!nn.memory<[32, 16]" in module_text
-    assert "!nn.memory<[16, 32]" in module_text
-    assert '!symbol.int<"TILE_H">' in module_text
-    assert '!symbol.int<"TILE_W">' in module_text
-    assert '!symbol.int<"TILE_K">' in module_text
-    assert 'step = "TILE_K"' in module_text
+    assert "!nn.memory<[#symbol.expr<32>, #symbol.expr<32>]" in module_text
+    assert "!nn.memory<[#symbol.expr<32>, #symbol.expr<16>]" in module_text
+    assert "!nn.memory<[#symbol.expr<16>, #symbol.expr<32>]" in module_text
+    assert "!symbol.int<#symbol.expr<TILE_H>>" in module_text
+    assert "!symbol.int<#symbol.expr<TILE_W>>" in module_text
+    assert "!symbol.int<#symbol.expr<TILE_K>>" in module_text
+    assert "step = #symbol.expr<TILE_K>" in module_text
     assert '"kernel.matmul"' in module_text
     assert '"kernel.binary_elewise"' in module_text
     assert '"dma.view"' in module_text
     assert '"dma.deslice"' in module_text
     assert ".view<" in source
-    assert "!nn.memory<[H, W]" not in module_text
-    assert "!nn.memory<[s1" not in module_text
+    assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" not in module_text
+    assert "!nn.memory<[#symbol.expr<s1>" not in module_text
     _assert_source_uses_accumulator(source)
 
 

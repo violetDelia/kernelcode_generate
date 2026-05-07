@@ -25,6 +25,7 @@ from xdsl.ir import Block, Operation, Region
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolExprAttr
 
 
 def make_memory_type(shape_names: list[str]) -> NnMemoryType:
@@ -44,8 +45,8 @@ def make_memory_type(shape_names: list[str]) -> NnMemoryType:
     - 功能实现: [test/passes/tile/test_shared.py](../../../test/passes/tile/test_shared.py)
     """
 
-    shape = ArrayAttr([StringAttr(name) for name in shape_names])
-    stride = ArrayAttr([StringAttr(f"S{axis}") for axis in range(len(shape_names))])
+    shape = ArrayAttr([SymbolExprAttr.from_expr(name) for name in shape_names])
+    stride = ArrayAttr([SymbolExprAttr.from_expr(f"S{axis}") for axis in range(len(shape_names))])
     return NnMemoryType(shape, stride, i32, NnMemorySpaceAttr.from_name("global"))
 
 

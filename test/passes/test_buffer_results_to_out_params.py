@@ -42,6 +42,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolExprAttr
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.passes.pass_manager import PassManager
 
@@ -107,8 +108,8 @@ def _make_memory_type() -> NnMemoryType:
     """
 
     return NnMemoryType(
-        ArrayAttr([IntAttr(2), IntAttr(3)]),
-        ArrayAttr([IntAttr(3), IntAttr(1)]),
+        ArrayAttr([SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("3")]),
+        ArrayAttr([SymbolExprAttr.from_expr("3"), SymbolExprAttr.from_expr("1")]),
         i32,
         NnMemorySpaceAttr.from_name("global"),
     )
@@ -138,8 +139,8 @@ def _make_memory_type_with_shape(shape: tuple[int, ...], *, space: str = "global
         acc *= dim
     stride.reverse()
     return NnMemoryType(
-        ArrayAttr([IntAttr(dim) for dim in shape]),
-        ArrayAttr([IntAttr(dim) for dim in stride]),
+        ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in shape]),
+        ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in stride]),
         i32,
         NnMemorySpaceAttr.from_name(space),
     )

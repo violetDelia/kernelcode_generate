@@ -31,7 +31,7 @@ os.environ.setdefault("SYMPY_GMPY", "0")
 import sympy as sp
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, IntegerType, ModuleOp, StringAttr, bf16, f16, f32, f64, i1, i8, i16, i32, i64
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntegerType, ModuleOp, StringAttr, bf16, f16, f32, f64, i1, i8, i16, i32, i64
 from xdsl.dialects.test import TestOp as _TestOp
 from xdsl.ir import Block, Operation, Region, SSAValue
 
@@ -43,7 +43,7 @@ from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaReshapeOp, DmaSubviewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolForOp, SymbolIterType, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolForOp, SymbolIterType, SymbolValueType, SymbolYieldOp
 from kernel_gen.passes.memory_pool import MemoryPoolInterval, MemoryPoolPass, MemoryPoolSummary
 from kernel_gen.tools.ircheck import run_ircheck_text
 
@@ -65,6 +65,12 @@ def _make_space(space: str = "global") -> NnMemorySpaceAttr:
     """
 
     return NnMemorySpaceAttr.from_name(space)
+
+
+def _symbol_expr_attr(value: int | str) -> SymbolExprAttr:
+    """构造测试用 SymbolExprAttr 维度。"""
+
+    return SymbolExprAttr.from_expr(str(value))
 
 
 def _make_memory_type(
@@ -89,8 +95,8 @@ def _make_memory_type(
     """
 
     return NnMemoryType(
-        ArrayAttr([IntAttr(value) for value in shape]),
-        ArrayAttr([IntAttr(value) for value in stride]),
+        ArrayAttr([_symbol_expr_attr(value) for value in shape]),
+        ArrayAttr([_symbol_expr_attr(value) for value in stride]),
         element_type,
         _make_space(space),
     )
@@ -293,6 +299,66 @@ def test_memory_pool_public_summary_access_edges() -> None:
     assert "(#GM, #SM) -> 8" in manual.to_text()
 
 
+# TC-MP-022
+# 功能说明: 验证 MemoryPoolPass 公开构造参数与 registry option 的错误边界。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_public_option_matrix
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_public_option_matrix() -> None:
+    invalid_ctor_cases = [
+        ({"rewrite": "true"}, "rewrite must be bool"),
+        ({"fold": "false"}, "fold must be bool"),
+        ({"alignment": True}, "alignment must be non-negative integer"),
+        ({"alignment": -1}, "alignment must be non-negative integer"),
+    ]
+    for kwargs, expected in invalid_ctor_cases:
+        try:
+            MemoryPoolPass(**kwargs)
+        except KernelCodeError as exc:
+            assert expected in str(exc)
+        else:
+            raise AssertionError(f"expected KernelCodeError for {kwargs}")
+
+    parsed = MemoryPoolPass.from_options({"rewrite": "off", "fold": "no", "alignment": "0"})
+    assert parsed.rewrite is False
+    assert parsed.fold is False
+    assert parsed.alignment == 0
+
+    invalid_option_cases = [
+        ({"rewrite": "maybe"}, "rewrite must be bool"),
+        ({"fold": "maybe"}, "fold must be bool"),
+        ({"alignment": "invalid"}, "alignment must be non-negative integer"),
+        ({"unknown": "true"}, "unknown option: unknown"),
+    ]
+    for options, expected in invalid_option_cases:
+        try:
+            MemoryPoolPass.from_options(options)
+        except KernelCodeError as exc:
+            assert expected in str(exc)
+        else:
+            raise AssertionError(f"expected KernelCodeError for {options}")
+
+
+# TC-MP-026
+# 功能说明: 验证 summary 优先使用 dma.alloc 结果的公开 SSA name hint。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_summary_uses_alloc_name_hint
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_summary_uses_alloc_name_hint() -> None:
+    mem_type = _make_memory_type(shape=(2,), stride=(1,), space="shared")
+    alloc = DmaAllocOp(_make_symbol_operands([2]), mem_type)
+    alloc.result.name_hint = "scratch"
+    free = DmaFreeOp(alloc.result)
+    module = _build_module("name_hint", [alloc, free])
+
+    pass_obj = MemoryPoolPass(rewrite=False)
+    pass_obj.apply(Context(), module)
+
+    assert pass_obj.get_summary("name_hint").intervals[0].name == "scratch"
+
+
 # TC-MP-002
 # 功能说明: 验证 interval 的 begin/end 索引随词法顺序变化。
 # 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_interval_indices
@@ -463,6 +529,45 @@ def test_memory_pool_rewrite_overlap() -> None:
     assert offsets == [0, 8]
 
 
+# TC-MP-023
+# 功能说明: 验证 rank-0/rank-1 allocation 经公开 rewrite 后的 flat subview 与 reshape 形态。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_rewrite_rank_zero_and_rank_one
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_rewrite_rank_zero_and_rank_one() -> None:
+    rank0_type = NnMemoryType(
+        ArrayAttr([]),
+        ArrayAttr([]),
+        i32,
+        _make_space("shared"),
+    )
+    rank0_alloc = DmaAllocOp([], rank0_type)
+    rank0_free = DmaFreeOp(rank0_alloc.result)
+    rank0_module = _build_module("rank0", [rank0_alloc, rank0_free])
+
+    MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), rank0_module)
+
+    rank0_ops = _collect_ops_recursive(rank0_module.body.block)
+    rank0_subviews = [op for op in rank0_ops if isinstance(op, DmaSubviewOp)]
+    rank0_reshapes = [op for op in rank0_ops if isinstance(op, DmaReshapeOp)]
+    assert [op.size[0].type.get_value() for op in rank0_subviews] == [1]
+    assert rank0_reshapes[0].result.type == rank0_type
+
+    rank1_type = _make_memory_type(shape=(4,), stride=(1,), space="shared")
+    rank1_alloc = DmaAllocOp(_make_symbol_operands([4]), rank1_type)
+    rank1_free = DmaFreeOp(rank1_alloc.result)
+    rank1_module = _build_module("rank1", [rank1_alloc, rank1_free])
+
+    MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), rank1_module)
+
+    rank1_ops = _collect_ops_recursive(rank1_module.body.block)
+    rank1_subviews = [op for op in rank1_ops if isinstance(op, DmaSubviewOp)]
+    rank1_reshapes = [op for op in rank1_ops if isinstance(op, DmaReshapeOp)]
+    assert [op.size[0].type.get_value() for op in rank1_subviews] == [4]
+    assert rank1_reshapes[0].result.type == rank1_type
+
+
 # TC-MP-019
 # 功能说明: 验证 MemoryPoolPass 的公开 dtype 矩阵、非内置 dtype 拒绝与符号 shape rewrite 行为。
 # 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_dtype_and_symbolic_shape_matrix
@@ -520,8 +625,8 @@ def test_memory_pool_dtype_and_symbolic_shape_matrix() -> None:
         raise AssertionError("expected KernelCodeError for unsupported integer width")
 
     symbolic_type = NnMemoryType(
-        ArrayAttr([StringAttr("N"), IntAttr(4)]),
-        ArrayAttr([IntAttr(4), IntAttr(1)]),
+        ArrayAttr([_symbol_expr_attr("N"), _symbol_expr_attr(4)]),
+        ArrayAttr([_symbol_expr_attr(4), _symbol_expr_attr(1)]),
         i32,
         _make_space("shared"),
     )
@@ -558,8 +663,8 @@ def test_memory_pool_dtype_and_symbolic_shape_matrix() -> None:
 # 对应测试文件路径: test/passes/test_memory_pool.py
 def test_memory_pool_public_invalid_shape_stride_and_free_edges() -> None:
     anonymous_stride = NnMemoryType(
-        ArrayAttr([IntAttr(2)]),
-        ArrayAttr([StringAttr("?")]),
+        ArrayAttr([_symbol_expr_attr(2)]),
+        ArrayAttr([_symbol_expr_attr("?")]),
         i32,
         _make_space("global"),
     )
@@ -591,6 +696,272 @@ def test_memory_pool_public_invalid_shape_stride_and_free_edges() -> None:
         assert "MemoryPoolLifetimeError: multiple dma.free for alloc" in str(exc)
     else:
         raise AssertionError("expected KernelCodeError for duplicate dma.free")
+
+
+# TC-MP-024
+# 功能说明: 验证公开 rewrite 对 dynamic shape、alignment 与生命周期顺序的拒绝边界。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_public_rewrite_error_edges
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_public_rewrite_error_edges() -> None:
+    mem_type = _make_memory_type(space="shared")
+    free_before_alloc = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    free_before_free = DmaFreeOp(free_before_alloc.result)
+    free_before_module = _build_module(
+        "free_before_alloc",
+        [free_before_free, free_before_alloc],
+    )
+    try:
+        MemoryPoolPass(rewrite=False).apply(Context(), free_before_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolLifetimeError: dma.free before alloc" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for dma.free before alloc")
+
+    dynamic_type = NnMemoryType(
+        ArrayAttr([_symbol_expr_attr("N"), _symbol_expr_attr(4)]),
+        ArrayAttr([_symbol_expr_attr(4), _symbol_expr_attr(1)]),
+        i32,
+        _make_space("shared"),
+    )
+    n_value = _TestOp(result_types=[SymbolValueType.from_expr("N")])
+    dynamic_alloc = DmaAllocOp([n_value.results[0]], dynamic_type)
+    dynamic_free = DmaFreeOp(dynamic_alloc.result)
+    static_alloc = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    static_free = DmaFreeOp(static_alloc.result)
+    dynamic_alignment_module = _build_module(
+        "dynamic_alignment",
+        [n_value, dynamic_alloc, dynamic_free, static_alloc, static_free],
+    )
+    try:
+        MemoryPoolPass(rewrite=True, alignment=1024).apply(Context(), dynamic_alignment_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolUnsupportedAlignment: dynamic aligned offset is not supported" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for dynamic aligned offset")
+
+    missing_operand_type = NnMemoryType(
+        ArrayAttr([_symbol_expr_attr("M"), _symbol_expr_attr(4)]),
+        ArrayAttr([_symbol_expr_attr(4), _symbol_expr_attr(1)]),
+        i32,
+        _make_space("shared"),
+    )
+    n_arg = _TestOp(result_types=[SymbolValueType.from_expr("N")])
+    missing_alloc = DmaAllocOp([n_arg.results[0]], missing_operand_type)
+    missing_free = DmaFreeOp(missing_alloc.result)
+    missing_module = _build_module("missing_dynamic_operand", [n_arg, missing_alloc, missing_free])
+    try:
+        MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), missing_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolUnsupportedShape: dynamic shape operand not found for M" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for missing dynamic shape operand")
+
+    bad_dynamic_operand = _TestOp(result_types=[i32])
+    bad_dynamic_alloc = DmaAllocOp([bad_dynamic_operand.results[0]], dynamic_type)
+    bad_dynamic_free = DmaFreeOp(bad_dynamic_alloc.result)
+    bad_dynamic_module = _build_module(
+        "bad_dynamic_shape_type",
+        [bad_dynamic_operand, bad_dynamic_alloc, bad_dynamic_free],
+    )
+    try:
+        MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), bad_dynamic_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolUnsupportedShape: dynamic shape must be !symbol.int" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for non-symbol dynamic shape operand")
+
+    anonymous_type = NnMemoryType(
+        ArrayAttr([_symbol_expr_attr("?")]),
+        ArrayAttr([_symbol_expr_attr(1)]),
+        i32,
+        _make_space("shared"),
+    )
+    anonymous_value = _TestOp(result_types=[SymbolValueType.from_expr("N")])
+    anonymous_alloc = DmaAllocOp([anonymous_value.results[0]], anonymous_type)
+    anonymous_free = DmaFreeOp(anonymous_alloc.result)
+    anonymous_module = _build_module("anonymous_rewrite", [anonymous_value, anonymous_alloc, anonymous_free])
+    try:
+        MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), anonymous_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolUnsupportedShape: anonymous shape is not supported" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for anonymous rewrite shape")
+
+    global_type = _make_memory_type(shape=(2, 4), stride=(4, 1), space="global")
+    global_alloc = DmaAllocOp(_make_symbol_operands([2, 4]), global_type)
+    global_free = DmaFreeOp(global_alloc.result)
+    global_module = _build_module("global_rewrite", [global_alloc, global_free])
+    try:
+        MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), global_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolUnsupportedPoolBucket" in str(exc)
+        assert "global" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for unsupported rewrite bucket")
+
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "4", "1")])
+    loop_alloc = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    loop_block.add_ops([loop_alloc])
+    loop_op = SymbolForOp(_symbol_value(0), _symbol_value(4), _symbol_value(1), loop_block)
+    outer_free = DmaFreeOp(loop_alloc.result)
+    loop_escape_module = _build_module("loop_escape", [loop_op, outer_free])
+    try:
+        MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), loop_escape_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolEscapingAlloc: alloc escapes current region" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for loop alloc escaping to outer free")
+
+    loop_init = SymbolConstOp(1)
+    carried_block = Block(
+        arg_types=[
+            SymbolIterType.from_bounds("0", "4", "1"),
+            SymbolValueType.from_expr("ACC"),
+        ],
+    )
+    carried_type = _make_memory_type(shape=("ACC",), stride=(1,), space="shared")
+    carried_alloc = DmaAllocOp([carried_block.args[1]], carried_type)
+    carried_free = DmaFreeOp(carried_alloc.result)
+    carried_block.add_ops([carried_alloc, carried_free, SymbolYieldOp(carried_block.args[1])])
+    carried_loop = SymbolForOp(
+        _symbol_value(0),
+        _symbol_value(4),
+        _symbol_value(1),
+        carried_block,
+        init=loop_init.result,
+        result_type=SymbolValueType.from_expr("ACC"),
+    )
+    later_alloc = DmaAllocOp(_make_symbol_operands([2]), _make_memory_type(shape=(2,), stride=(1,), space="shared"))
+    later_free = DmaFreeOp(later_alloc.result)
+    carried_module = _build_module(
+        "loop_carried_dynamic",
+        [loop_init, carried_loop, later_alloc, later_free],
+    )
+    try:
+        MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), carried_module)
+    except KernelCodeError as exc:
+        assert "dynamic loop alloc size does not dominate later offset" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for non-dominating dynamic loop size")
+
+
+# TC-MP-025
+# 功能说明: 验证 mixed dtype 的公开 rewrite 分支覆盖整除、不可整除与动态 ratio offset。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_mixed_dtype_rewrite_edges
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_mixed_dtype_rewrite_edges() -> None:
+    f16_ok_type = _make_memory_type(shape=(2,), stride=(1,), element_type=f16, space="shared")
+    f16_ok_alloc = DmaAllocOp(_make_symbol_operands([2]), f16_ok_type)
+    f16_ok_free = DmaFreeOp(f16_ok_alloc.result)
+    i32_ok_type = _make_memory_type(shape=(2,), stride=(1,), element_type=i32, space="shared")
+    i32_ok_alloc = DmaAllocOp(_make_symbol_operands([2]), i32_ok_type)
+    i32_ok_free = DmaFreeOp(i32_ok_alloc.result)
+    static_ok_module = _build_module(
+        "static_mixed_ok",
+        [f16_ok_alloc, f16_ok_free, i32_ok_alloc, i32_ok_free],
+    )
+
+    MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), static_ok_module)
+
+    static_ok_subviews = [
+        op for op in _collect_ops_recursive(static_ok_module.body.block) if isinstance(op, DmaSubviewOp)
+    ]
+    assert [op.offset[0].type.get_value() for op in static_ok_subviews] == [0, 1]
+
+    f16_second_type = _make_memory_type(shape=(4,), stride=(1,), element_type=f16, space="shared")
+    f16_first_alloc = DmaAllocOp(_make_symbol_operands([2]), f16_ok_type)
+    f16_first_free = DmaFreeOp(f16_first_alloc.result)
+    f16_second_alloc = DmaAllocOp(_make_symbol_operands([4]), f16_second_type)
+    f16_second_free = DmaFreeOp(f16_second_alloc.result)
+    i32_third_alloc = DmaAllocOp(_make_symbol_operands([2]), i32_ok_type)
+    i32_third_free = DmaFreeOp(i32_third_alloc.result)
+    static_three_module = _build_module(
+        "static_mixed_three",
+        [
+            f16_first_alloc,
+            f16_first_free,
+            f16_second_alloc,
+            f16_second_free,
+            i32_third_alloc,
+            i32_third_free,
+        ],
+    )
+
+    MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), static_three_module)
+
+    static_three_subviews = [
+        op for op in _collect_ops_recursive(static_three_module.body.block) if isinstance(op, DmaSubviewOp)
+    ]
+    assert [op.offset[0].type.get_value() for op in static_three_subviews] == [0, 2, 3]
+
+    f16_type = _make_memory_type(shape=(3,), stride=(1,), element_type=f16, space="shared")
+    f16_alloc = DmaAllocOp(_make_symbol_operands([3]), f16_type)
+    f16_free = DmaFreeOp(f16_alloc.result)
+    i32_type = _make_memory_type(shape=(2,), stride=(1,), element_type=i32, space="shared")
+    i32_alloc = DmaAllocOp(_make_symbol_operands([2]), i32_type)
+    i32_free = DmaFreeOp(i32_alloc.result)
+    static_bad_module = _build_module("static_mixed_bad", [f16_alloc, f16_free, i32_alloc, i32_free])
+    try:
+        MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), static_bad_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolTypedViewOutOfBounds: byte offset is not divisible by dtype size" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for indivisible mixed dtype offset")
+
+    f16_align_alloc = DmaAllocOp(_make_symbol_operands([3]), f16_type)
+    f16_align_free = DmaFreeOp(f16_align_alloc.result)
+    i32_align_alloc = DmaAllocOp(_make_symbol_operands([2]), i32_type)
+    i32_align_free = DmaFreeOp(i32_align_alloc.result)
+    static_align_bad_module = _build_module(
+        "static_mixed_alignment_bad",
+        [f16_align_alloc, f16_align_free, i32_align_alloc, i32_align_free],
+    )
+    try:
+        MemoryPoolPass(rewrite=True, alignment=1).apply(Context(), static_align_bad_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolTypedViewOutOfBounds: byte offset is not divisible by dtype size" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for aligned indivisible mixed dtype offset")
+
+    n_bad = _TestOp(result_types=[SymbolValueType.from_expr("N")])
+    dynamic_f16_type = _make_memory_type(shape=("N",), stride=(1,), element_type=f16, space="shared")
+    dynamic_f16_alloc = DmaAllocOp([n_bad.results[0]], dynamic_f16_type)
+    dynamic_f16_free = DmaFreeOp(dynamic_f16_alloc.result)
+    i32_after_dynamic_alloc = DmaAllocOp(_make_symbol_operands([2]), i32_type)
+    i32_after_dynamic_free = DmaFreeOp(i32_after_dynamic_alloc.result)
+    dynamic_bad_module = _build_module(
+        "dynamic_mixed_bad",
+        [n_bad, dynamic_f16_alloc, dynamic_f16_free, i32_after_dynamic_alloc, i32_after_dynamic_free],
+    )
+    try:
+        MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), dynamic_bad_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolTypedViewOutOfBounds: byte offset is not divisible by dtype size" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for dynamic mixed dtype ratio")
+
+    n_value = _TestOp(result_types=[SymbolValueType.from_expr("N")])
+    dynamic_i32_type = _make_memory_type(shape=("N",), stride=(1,), element_type=i32, space="shared")
+    dynamic_i32_alloc = DmaAllocOp([n_value.results[0]], dynamic_i32_type)
+    dynamic_i32_free = DmaFreeOp(dynamic_i32_alloc.result)
+    f16_type_ok = _make_memory_type(shape=(2,), stride=(1,), element_type=f16, space="shared")
+    f16_alloc_ok = DmaAllocOp(_make_symbol_operands([2]), f16_type_ok)
+    f16_free_ok = DmaFreeOp(f16_alloc_ok.result)
+    dynamic_ratio_module = _build_module(
+        "dynamic_mixed_ratio",
+        [n_value, dynamic_i32_alloc, dynamic_i32_free, f16_alloc_ok, f16_free_ok],
+    )
+
+    MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), dynamic_ratio_module)
+
+    subview_ops = [
+        op for op in _collect_ops_recursive(dynamic_ratio_module.body.block) if isinstance(op, DmaSubviewOp)
+    ]
+    assert [op.offset[0].type.get_value() for op in subview_ops] == [0, "2*N"]
 
 
 # TC-MP-021
@@ -705,8 +1076,8 @@ def test_memory_pool_unpaired_alloc() -> None:
 # 对应测试文件路径: test/passes/test_memory_pool.py
 def test_memory_pool_anonymous_dim() -> None:
     mem_type = NnMemoryType(
-        ArrayAttr([StringAttr("?"), IntAttr(4)]),
-        ArrayAttr([IntAttr(4), IntAttr(1)]),
+        ArrayAttr([_symbol_expr_attr("?"), _symbol_expr_attr(4)]),
+        ArrayAttr([_symbol_expr_attr(4), _symbol_expr_attr(1)]),
         i32,
         _make_space("global"),
     )
@@ -799,8 +1170,8 @@ def test_memory_pool_symbol_for_reuse() -> None:
 def test_memory_pool_symbol_for_dynamic_alloc_dominates_later_offset() -> None:
     static_type = _make_memory_type(space="shared")
     dynamic_type = NnMemoryType(
-        ArrayAttr([StringAttr("N"), IntAttr(4)]),
-        ArrayAttr([IntAttr(4), IntAttr(1)]),
+        ArrayAttr([_symbol_expr_attr("N"), _symbol_expr_attr(4)]),
+        ArrayAttr([_symbol_expr_attr(4), _symbol_expr_attr(1)]),
         i32,
         _make_space("shared"),
     )

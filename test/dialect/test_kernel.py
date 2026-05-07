@@ -90,29 +90,17 @@ def _expr_attr(value: int | str) -> SymbolExprAttr:
     return SymbolExprAttr.from_expr(str(value))
 
 
-def _normalize_dims(dims: ArrayAttr | None, default_values: list[int | str]) -> ArrayAttr[Attribute]:
-    """规范化测试 memory shape/stride 维度。
+def _dim_array(values: list[int | str | SymbolExprAttr]) -> ArrayAttr[Attribute]:
+    """构造 memory shape/stride 结构化维度。
 
     功能说明:
-    - 将测试输入中的 IntAttr/StringAttr 便利写法转换为公开 SymbolExprAttr。
+    - 使用公开 SymbolExprAttr 表达 memory layout，避免旧 IntAttr/StringAttr layout 入口。
 
     使用示例:
-    - _normalize_dims(ArrayAttr([IntAttr(2)]), [2])
+    - _dim_array([2, "N"])
     """
 
-    if dims is None:
-        return ArrayAttr([_expr_attr(value) for value in default_values])
-    normalized: list[Attribute] = []
-    for dim in dims.data:
-        if isinstance(dim, SymbolExprAttr):
-            normalized.append(dim)
-        elif isinstance(dim, IntAttr):
-            normalized.append(_expr_attr(dim.data))
-        elif isinstance(dim, StringAttr):
-            normalized.append(_expr_attr(dim.data))
-        else:
-            normalized.append(dim)
-    return ArrayAttr(normalized)
+    return ArrayAttr([value if isinstance(value, SymbolExprAttr) else _expr_attr(value) for value in values])
 
 
 def _make_memory_type(
@@ -136,8 +124,10 @@ def _make_memory_type(
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
-    shape = _normalize_dims(shape, [2, 4])
-    stride = _normalize_dims(stride, [4, 1])
+    if shape is None:
+        shape = _dim_array([2, 4])
+    if stride is None:
+        stride = _dim_array([4, 1])
     return NnMemoryType(shape, stride, element_type, _make_space(space))
 
 
@@ -251,7 +241,7 @@ def test_kernel_space_attr_invalid() -> None:
 # 对应测试文件路径: test/dialect/test_kernel.py
 def test_kernel_memory_type_rank_mismatch() -> None:
     with pytest.raises(VerifyException, match="shape and stride rank"):
-        _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]), stride=ArrayAttr([IntAttr(1)]))
+        _make_memory_type(shape=_dim_array([2, 4]), stride=_dim_array([1]))
 
 
 # TC-KRN-004
@@ -276,9 +266,9 @@ def test_kernel_binary_elewise_add_success() -> None:
 # 对应 spec 文件路径: spec/dialect/kernel.md
 # 对应测试文件路径: test/dialect/test_kernel.py
 def test_kernel_binary_elewise_add_layout_mismatch() -> None:
-    lhs_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
-    rhs_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(5)]))
-    out_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
+    lhs_type = _make_memory_type(shape=_dim_array([2, 4]))
+    rhs_type = _make_memory_type(shape=_dim_array([2, 5]))
+    out_type = _make_memory_type(shape=_dim_array([2, 4]))
     op = KernelBinaryElewiseOp(
         _make_value(out_type),
         _make_value(lhs_type),
@@ -289,9 +279,9 @@ def test_kernel_binary_elewise_add_layout_mismatch() -> None:
     with pytest.raises(VerifyException, match="shape must match"):
         op.verify()
 
-    lhs_type = _make_memory_type(stride=ArrayAttr([IntAttr(4), IntAttr(1)]))
-    rhs_type = _make_memory_type(stride=ArrayAttr([IntAttr(5), IntAttr(1)]))
-    out_type = _make_memory_type(stride=ArrayAttr([IntAttr(4), IntAttr(1)]))
+    lhs_type = _make_memory_type(stride=_dim_array([4, 1]))
+    rhs_type = _make_memory_type(stride=_dim_array([5, 1]))
+    out_type = _make_memory_type(stride=_dim_array([4, 1]))
     op = KernelBinaryElewiseOp(
         _make_value(out_type),
         _make_value(lhs_type),
@@ -535,13 +525,13 @@ def test_kernel_ops_no_result() -> None:
     exp_output = _make_value(_make_memory_type(element_type=Float32Type()))
     exp_op = KernelExpOp(exp_output, exp_input, _make_space("global"))
     img2col_input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
+        shape=_dim_array([1, 3, 5, 5]),
+        stride=_dim_array([75, 25, 5, 1]),
         element_type=Float32Type(),
     )
     img2col_output_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(243), IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 3, 3, 3]),
+        stride=_dim_array([243, 81, 27, 9, 3, 1]),
         element_type=Float32Type(),
     )
     img2col_op = KernelImg2col2dOp(
@@ -560,13 +550,13 @@ def test_kernel_ops_no_result() -> None:
         space=_make_space("global"),
     )
     img2col1d_input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(15), IntAttr(5), IntAttr(1)]),
+        shape=_dim_array([1, 3, 5]),
+        stride=_dim_array([15, 5, 1]),
         element_type=Float32Type(),
     )
     img2col1d_output_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 3]),
+        stride=_dim_array([27, 9, 3, 1]),
         element_type=Float32Type(),
     )
     img2col1d_op = KernelImg2col1dOp(
@@ -639,18 +629,18 @@ def test_kernel_exp_requires_float() -> None:
 # 对应测试文件路径: test/dialect/test_kernel.py
 def test_kernel_matmul_allows_mixed_spaces() -> None:
     lhs_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([2, 3]),
+        stride=_dim_array([3, 1]),
         space="tlm1",
     )
     rhs_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(3), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([3, 4]),
+        stride=_dim_array([4, 1]),
         space="tlm2",
     )
     out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([2, 4]),
+        stride=_dim_array([4, 1]),
         space="tsm",
     )
     op = KernelMatmulOp(
@@ -670,15 +660,15 @@ def test_kernel_matmul_allows_mixed_spaces() -> None:
 # 对应测试文件路径: test/dialect/test_kernel.py
 def test_kernel_matmul_dtype_mismatch() -> None:
     lhs_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
+        shape=_dim_array([2, 3]),
         element_type=Float32Type(),
     )
     rhs_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(3), IntAttr(4)]),
+        shape=_dim_array([3, 4]),
         element_type=Float16Type(),
     )
     out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        shape=_dim_array([2, 4]),
         element_type=Float32Type(),
     )
     op = KernelMatmulOp(
@@ -698,12 +688,12 @@ def test_kernel_matmul_dtype_mismatch() -> None:
 # 对应 spec 文件路径: spec/dialect/kernel.md
 # 对应测试文件路径: test/dialect/test_kernel.py
 def test_kernel_matmul_rank_shape_contract() -> None:
-    lhs_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(3)]))
+    lhs_type = _make_memory_type(shape=_dim_array([2, 3]))
     rhs_rank3_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(3), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(12), IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([2, 3, 4]),
+        stride=_dim_array([12, 4, 1]),
     )
-    out_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
+    out_type = _make_memory_type(shape=_dim_array([2, 4]))
     op = KernelMatmulOp(
         _make_value(out_type),
         _make_value(lhs_type),
@@ -713,7 +703,7 @@ def test_kernel_matmul_rank_shape_contract() -> None:
     with pytest.raises(VerifyException, match="kernel.matmul requires rank-2"):
         op.verify()
 
-    rhs_mismatch_type = _make_memory_type(shape=ArrayAttr([IntAttr(5), IntAttr(4)]))
+    rhs_mismatch_type = _make_memory_type(shape=_dim_array([5, 4]))
     op = KernelMatmulOp(
         _make_value(out_type),
         _make_value(lhs_type),
@@ -723,11 +713,11 @@ def test_kernel_matmul_rank_shape_contract() -> None:
     with pytest.raises(VerifyException, match="kernel.matmul contracting dimensions"):
         op.verify()
 
-    out_shape_mismatch_type = _make_memory_type(shape=ArrayAttr([IntAttr(3), IntAttr(4)]))
+    out_shape_mismatch_type = _make_memory_type(shape=_dim_array([3, 4]))
     op = KernelMatmulOp(
         _make_value(out_shape_mismatch_type),
         _make_value(lhs_type),
-        _make_value(_make_memory_type(shape=ArrayAttr([IntAttr(3), IntAttr(4)]))),
+        _make_value(_make_memory_type(shape=_dim_array([3, 4]))),
         _make_space("global"),
     )
     with pytest.raises(VerifyException, match="kernel.matmul result shape"):
@@ -747,17 +737,17 @@ def test_kernel_matmul_space_contract_matrix() -> None:
         ("tsm", "tlm1", "tlm2", "global"),
     ]:
         lhs_type = _make_memory_type(
-            shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
+            shape=_dim_array([2, 3]),
             element_type=Float32Type(),
             space=lhs_space,
         )
         rhs_type = _make_memory_type(
-            shape=ArrayAttr([IntAttr(3), IntAttr(4)]),
+            shape=_dim_array([3, 4]),
             element_type=Float32Type(),
             space=rhs_space,
         )
         out_type = _make_memory_type(
-            shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+            shape=_dim_array([2, 4]),
             element_type=Float32Type(),
             space=out_space,
         )
@@ -769,17 +759,17 @@ def test_kernel_matmul_space_contract_matrix() -> None:
         ).verify()
 
     lhs_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
+        shape=_dim_array([2, 3]),
         element_type=Float32Type(),
         space="global",
     )
     rhs_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(3), IntAttr(4)]),
+        shape=_dim_array([3, 4]),
         element_type=Float32Type(),
         space="global",
     )
     out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        shape=_dim_array([2, 4]),
         element_type=Float32Type(),
         space="global",
     )
@@ -800,13 +790,13 @@ def test_kernel_matmul_space_contract_matrix() -> None:
 # 对应测试文件路径: test/dialect/test_kernel.py
 def test_kernel_img2col_structured_contract() -> None:
     img2col1d_input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(15), IntAttr(5), IntAttr(1)]),
+        shape=_dim_array([1, 3, 5]),
+        stride=_dim_array([15, 5, 1]),
         element_type=Float32Type(),
     )
     img2col1d_output_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 3]),
+        stride=_dim_array([27, 9, 3, 1]),
         element_type=Float32Type(),
     )
     KernelImg2col1dOp(
@@ -821,13 +811,13 @@ def test_kernel_img2col_structured_contract() -> None:
     ).verify()
 
     img2col2d_input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
+        shape=_dim_array([1, 3, 5, 5]),
+        stride=_dim_array([75, 25, 5, 1]),
         element_type=Float32Type(),
     )
     img2col2d_output_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(243), IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 3, 3, 3]),
+        stride=_dim_array([243, 81, 27, 9, 3, 1]),
         element_type=Float32Type(),
     )
     KernelImg2col2dOp(
@@ -855,13 +845,13 @@ def test_kernel_img2col_structured_contract() -> None:
 # 对应测试文件路径: test/dialect/test_kernel.py
 def test_kernel_img2col_input_rank_layout_contract() -> None:
     img2col1d_output_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 3]),
+        stride=_dim_array([27, 9, 3, 1]),
         element_type=Float32Type(),
     )
     rank2_input = _make_memory_type(
-        shape=ArrayAttr([IntAttr(3), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(5), IntAttr(1)]),
+        shape=_dim_array([3, 5]),
+        stride=_dim_array([5, 1]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col1d requires rank-3 input"):
@@ -877,8 +867,8 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         ).verify()
 
     non_contiguous_1d_input = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(15), IntAttr(1), IntAttr(3)]),
+        shape=_dim_array([1, 3, 5]),
+        stride=_dim_array([15, 1, 3]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col1d input layout must be contiguous"):
@@ -894,13 +884,13 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         ).verify()
 
     img2col1d_input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(15), IntAttr(5), IntAttr(1)]),
+        shape=_dim_array([1, 3, 5]),
+        stride=_dim_array([15, 5, 1]),
         element_type=Float32Type(),
     )
     rank3_output = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(9), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3]),
+        stride=_dim_array([9, 3, 1]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col1d requires rank-4 result"):
@@ -916,13 +906,13 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         ).verify()
 
     img2col2d_output_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(243), IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 3, 3, 3]),
+        stride=_dim_array([243, 81, 27, 9, 3, 1]),
         element_type=Float32Type(),
     )
     rank3_2d_input = _make_memory_type(
-        shape=ArrayAttr([IntAttr(3), IntAttr(5), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(25), IntAttr(5), IntAttr(1)]),
+        shape=_dim_array([3, 5, 5]),
+        stride=_dim_array([25, 5, 1]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d requires rank-4 input"):
@@ -943,8 +933,8 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         ).verify()
 
     non_contiguous_2d_input = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(75), IntAttr(1), IntAttr(15), IntAttr(3)]),
+        shape=_dim_array([1, 3, 5, 5]),
+        stride=_dim_array([75, 1, 15, 3]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d input layout must be contiguous"):
@@ -965,13 +955,13 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         ).verify()
 
     img2col2d_input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
+        shape=_dim_array([1, 3, 5, 5]),
+        stride=_dim_array([75, 25, 5, 1]),
         element_type=Float32Type(),
     )
     rank5_output = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 3, 3]),
+        stride=_dim_array([81, 27, 9, 3, 1]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d requires rank-6 result"):
@@ -1000,13 +990,13 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
 # 对应测试文件路径: test/dialect/test_kernel.py
 def test_kernel_img2col_output_extent_contract() -> None:
     img2col1d_input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(15), IntAttr(5), IntAttr(1)]),
+        shape=_dim_array([1, 3, 5]),
+        stride=_dim_array([15, 5, 1]),
         element_type=Float32Type(),
     )
     bad_window_axis_1d_output = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(2), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(18), IntAttr(6), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 2, 3]),
+        stride=_dim_array([18, 6, 3, 1]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
@@ -1022,8 +1012,8 @@ def test_kernel_img2col_output_extent_contract() -> None:
         ).verify()
 
     bad_extent_1d_output = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(18), IntAttr(6), IntAttr(2), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 2]),
+        stride=_dim_array([18, 6, 2, 1]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
@@ -1039,8 +1029,8 @@ def test_kernel_img2col_output_extent_contract() -> None:
         ).verify()
 
     bad_stride_1d_output = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(30), IntAttr(10), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 3]),
+        stride=_dim_array([30, 10, 3, 1]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
@@ -1056,13 +1046,13 @@ def test_kernel_img2col_output_extent_contract() -> None:
         ).verify()
 
     short_1d_input = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(1)]),
-        stride=ArrayAttr([IntAttr(3), IntAttr(1), IntAttr(1)]),
+        shape=_dim_array([1, 3, 1]),
+        stride=_dim_array([3, 1, 1]),
         element_type=Float32Type(),
     )
     short_1d_output = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(1)]),
-        stride=ArrayAttr([IntAttr(9), IntAttr(3), IntAttr(1), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 1]),
+        stride=_dim_array([9, 3, 1, 1]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
@@ -1078,13 +1068,13 @@ def test_kernel_img2col_output_extent_contract() -> None:
         ).verify()
 
     img2col2d_input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
+        shape=_dim_array([1, 3, 5, 5]),
+        stride=_dim_array([75, 25, 5, 1]),
         element_type=Float32Type(),
     )
     bad_window_axis_2d_output = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(2), IntAttr(3), IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(162), IntAttr(54), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 2, 3, 3, 3]),
+        stride=_dim_array([162, 54, 27, 9, 3, 1]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
@@ -1105,8 +1095,8 @@ def test_kernel_img2col_output_extent_contract() -> None:
         ).verify()
 
     bad_extent_2d_output = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(2), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(162), IntAttr(54), IntAttr(18), IntAttr(6), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 3, 2, 3]),
+        stride=_dim_array([162, 54, 18, 6, 3, 1]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
@@ -1127,8 +1117,8 @@ def test_kernel_img2col_output_extent_contract() -> None:
         ).verify()
 
     bad_stride_2d_output = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(200), IntAttr(80), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 3, 3, 3]),
+        stride=_dim_array([200, 80, 27, 9, 3, 1]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
@@ -1149,13 +1139,13 @@ def test_kernel_img2col_output_extent_contract() -> None:
         ).verify()
 
     short_2d_input = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(1), IntAttr(1)]),
-        stride=ArrayAttr([IntAttr(3), IntAttr(1), IntAttr(1), IntAttr(1)]),
+        shape=_dim_array([1, 3, 1, 1]),
+        stride=_dim_array([3, 1, 1, 1]),
         element_type=Float32Type(),
     )
     short_2d_output = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(1), IntAttr(1)]),
-        stride=ArrayAttr([IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1), IntAttr(1), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 3, 1, 1]),
+        stride=_dim_array([27, 9, 3, 1, 1, 1]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
@@ -1184,13 +1174,13 @@ def test_kernel_img2col_output_extent_contract() -> None:
 # 对应测试文件路径: test/dialect/test_kernel.py
 def test_kernel_img2col1d_public_param_operand_matrix() -> None:
     input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(15), IntAttr(5), IntAttr(1)]),
+        shape=_dim_array([1, 3, 5]),
+        stride=_dim_array([15, 5, 1]),
         element_type=Float32Type(),
     )
     output_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 3]),
+        stride=_dim_array([27, 9, 3, 1]),
         element_type=Float32Type(),
     )
 
@@ -1228,8 +1218,8 @@ def test_kernel_img2col1d_public_param_operand_matrix() -> None:
     ).verify()
 
     dynamic_input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), StringAttr("W")]),
-        stride=ArrayAttr([StringAttr("3 * W"), StringAttr("W"), IntAttr(1)]),
+        shape=_dim_array([1, 3, "W"]),
+        stride=_dim_array(["3 * W", "W", 1]),
         element_type=Float32Type(),
     )
     KernelImg2col1dOp(
@@ -1289,14 +1279,14 @@ def test_kernel_img2col1d_public_param_operand_matrix() -> None:
 # 对应测试文件路径: test/dialect/test_kernel.py
 def test_kernel_img2col2d_public_contract_matrix() -> None:
     input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
+        shape=_dim_array([1, 3, 5, 5]),
+        stride=_dim_array([75, 25, 5, 1]),
         element_type=Float32Type(),
         space="global",
     )
     output_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(243), IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 3, 3, 3]),
+        stride=_dim_array([243, 81, 27, 9, 3, 1]),
         element_type=Float32Type(),
         space="global",
     )
@@ -1305,8 +1295,8 @@ def test_kernel_img2col2d_public_contract_matrix() -> None:
         KernelImg2col2dOp(
             _make_value(output_type),
             _make_value(_make_memory_type(
-                shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
-                stride=ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
+                shape=_dim_array([1, 3, 5, 5]),
+                stride=_dim_array([75, 25, 5, 1]),
                 element_type=Float32Type(),
                 space="local",
             )),
@@ -1326,8 +1316,8 @@ def test_kernel_img2col2d_public_contract_matrix() -> None:
     with pytest.raises(VerifyException, match="kernel.img2col2d attribute space must match result space"):
         KernelImg2col2dOp(
             _make_value(_make_memory_type(
-                shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
-                stride=ArrayAttr([IntAttr(243), IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+                shape=_dim_array([1, 3, 3, 3, 3, 3]),
+                stride=_dim_array([243, 81, 27, 9, 3, 1]),
                 element_type=Float32Type(),
                 space="local",
             )),
@@ -1348,8 +1338,8 @@ def test_kernel_img2col2d_public_contract_matrix() -> None:
     with pytest.raises(VerifyException, match="kernel.img2col2d result element_type must match input"):
         KernelImg2col2dOp(
             _make_value(_make_memory_type(
-                shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
-                stride=ArrayAttr([IntAttr(243), IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+                shape=_dim_array([1, 3, 3, 3, 3, 3]),
+                stride=_dim_array([243, 81, 27, 9, 3, 1]),
                 element_type=Float16Type(),
             )),
             _make_value(input_type),
@@ -1367,8 +1357,8 @@ def test_kernel_img2col2d_public_contract_matrix() -> None:
         ).verify()
 
     bad_kw_output_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(2), IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(162), IntAttr(54), IntAttr(18), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([1, 3, 3, 2, 3, 3]),
+        stride=_dim_array([162, 54, 18, 9, 3, 1]),
         element_type=Float32Type(),
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
@@ -1406,8 +1396,8 @@ def test_kernel_img2col2d_public_contract_matrix() -> None:
     ).verify()
 
     dynamic_input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(3), StringAttr("H"), StringAttr("W")]),
-        stride=ArrayAttr([StringAttr("3 * H * W"), StringAttr("H * W"), StringAttr("W"), IntAttr(1)]),
+        shape=_dim_array([1, 3, "H", "W"]),
+        stride=_dim_array(["3 * H * W", "H * W", "W", 1]),
         element_type=Float32Type(),
     )
     KernelImg2col2dOp(
@@ -1436,8 +1426,8 @@ def test_kernel_img2col2d_public_contract_matrix() -> None:
 def test_kernel_reduce_min_success() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
-        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        shape=_dim_array([2, 1]),
+        stride=_dim_array([1, 1]),
         element_type=Float32Type(),
     )
     op = KernelReduceMinOp(
@@ -1459,8 +1449,8 @@ def test_kernel_reduce_min_success() -> None:
 def test_kernel_reduce_min_axis_error() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
-        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        shape=_dim_array([2, 1]),
+        stride=_dim_array([1, 1]),
         element_type=Float32Type(),
     )
     op = KernelReduceMinOp(
@@ -1483,8 +1473,8 @@ def test_kernel_reduce_min_axis_error() -> None:
 def test_kernel_reduce_min_out_shape_mismatch() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        shape=_dim_array([2, 2]),
+        stride=_dim_array([2, 1]),
         element_type=Float32Type(),
     )
     op = KernelReduceMinOp(
@@ -1507,8 +1497,8 @@ def test_kernel_reduce_min_out_shape_mismatch() -> None:
 def test_kernel_reduce_min_keepdim_error() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
-        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        shape=_dim_array([2, 1]),
+        stride=_dim_array([1, 1]),
         element_type=Float32Type(),
     )
     op = KernelReduceMinOp(
@@ -1530,18 +1520,18 @@ def test_kernel_reduce_min_keepdim_error() -> None:
 # 对应测试文件路径: test/dialect/test_kernel.py
 def test_kernel_reduce_public_kind_axis_keepdim_matrix() -> None:
     input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([2, 3]),
+        stride=_dim_array([3, 1]),
         element_type=Float32Type(),
     )
     keepdim_out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
-        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        shape=_dim_array([2, 1]),
+        stride=_dim_array([1, 1]),
         element_type=Float32Type(),
     )
     squeeze_out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(1)]),
+        shape=_dim_array([2]),
+        stride=_dim_array([1]),
         element_type=Float32Type(),
     )
 
@@ -1563,13 +1553,13 @@ def test_kernel_reduce_public_kind_axis_keepdim_matrix() -> None:
     ).verify()
 
     rank1_input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(1)]),
+        shape=_dim_array([3]),
+        stride=_dim_array([1]),
         element_type=Float32Type(),
     )
     scalar_out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1)]),
-        stride=ArrayAttr([IntAttr(1)]),
+        shape=_dim_array([1]),
+        stride=_dim_array([1]),
         element_type=Float32Type(),
     )
     KernelReduceOp(
@@ -1594,8 +1584,8 @@ def test_kernel_reduce_public_kind_axis_keepdim_matrix() -> None:
     with pytest.raises(VerifyException, match="kernel.reduce element_type must match"):
         KernelReduceOp(
             _make_value(_make_memory_type(
-                shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
-                stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+                shape=_dim_array([2, 1]),
+                stride=_dim_array([1, 1]),
                 element_type=Float16Type(),
             )),
             _make_value(input_type),
@@ -1608,8 +1598,8 @@ def test_kernel_reduce_public_kind_axis_keepdim_matrix() -> None:
     with pytest.raises(VerifyException, match="kernel.reduce out space must match input"):
         KernelReduceOp(
             _make_value(_make_memory_type(
-                shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
-                stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+                shape=_dim_array([2, 1]),
+                stride=_dim_array([1, 1]),
                 element_type=Float32Type(),
                 space="local",
             )),
@@ -1633,8 +1623,8 @@ def test_kernel_reduce_public_kind_axis_keepdim_matrix() -> None:
     with pytest.raises(VerifyException, match="kernel.reduce out shape must match reduce contract"):
         KernelReduceOp(
             _make_value(_make_memory_type(
-                shape=ArrayAttr([IntAttr(3)]),
-                stride=ArrayAttr([IntAttr(1)]),
+                shape=_dim_array([3]),
+                stride=_dim_array([1]),
                 element_type=Float32Type(),
             )),
             _make_value(input_type),
@@ -1654,16 +1644,16 @@ def test_kernel_reduce_public_kind_axis_keepdim_matrix() -> None:
 def test_kernel_reduce_min_dtype_space_matrix() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     keepdim_out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
-        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        shape=_dim_array([2, 1]),
+        stride=_dim_array([1, 1]),
         element_type=Float32Type(),
     )
 
     with pytest.raises(VerifyException, match="kernel.reduce_min element_type must match"):
         KernelReduceMinOp(
             _make_value(_make_memory_type(
-                shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
-                stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+                shape=_dim_array([2, 1]),
+                stride=_dim_array([1, 1]),
                 element_type=Float16Type(),
             )),
             _make_value(input_type),
@@ -1675,8 +1665,8 @@ def test_kernel_reduce_min_dtype_space_matrix() -> None:
     with pytest.raises(VerifyException, match="kernel.reduce_min out space must match input"):
         KernelReduceMinOp(
             _make_value(_make_memory_type(
-                shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
-                stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+                shape=_dim_array([2, 1]),
+                stride=_dim_array([1, 1]),
                 element_type=Float32Type(),
                 space="local",
             )),

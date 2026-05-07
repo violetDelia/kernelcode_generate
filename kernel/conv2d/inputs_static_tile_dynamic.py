@@ -139,15 +139,30 @@ def _assert_static_memory_ir(module_text: str) -> None:
     """
 
     static_fragments = (
-        ("output", f"!nn.memory<[{_STATIC_BATCH}, {_STATIC_OUT_CHANNELS}, {_STATIC_OUTPUT_H}, {_STATIC_OUTPUT_W}]"),
-        ("input", f"!nn.memory<[{_STATIC_BATCH}, {_STATIC_IN_CHANNELS}, {_STATIC_INPUT_H}, {_STATIC_INPUT_W}]"),
-        ("weight", f"!nn.memory<[{_STATIC_OUT_CHANNELS}, {_STATIC_IN_CHANNELS}, {_STATIC_KERNEL_H}, {_STATIC_KERNEL_W}]"),
+        (
+            "output",
+            f"!nn.memory<[#symbol.expr<{_STATIC_BATCH}>, #symbol.expr<{_STATIC_OUT_CHANNELS}>, "
+            f"#symbol.expr<{_STATIC_OUTPUT_H}>, #symbol.expr<{_STATIC_OUTPUT_W}>]",
+        ),
+        (
+            "input",
+            f"!nn.memory<[#symbol.expr<{_STATIC_BATCH}>, #symbol.expr<{_STATIC_IN_CHANNELS}>, "
+            f"#symbol.expr<{_STATIC_INPUT_H}>, #symbol.expr<{_STATIC_INPUT_W}>]",
+        ),
+        (
+            "weight",
+            f"!nn.memory<[#symbol.expr<{_STATIC_OUT_CHANNELS}>, #symbol.expr<{_STATIC_IN_CHANNELS}>, "
+            f"#symbol.expr<{_STATIC_KERNEL_H}>, #symbol.expr<{_STATIC_KERNEL_W}>]",
+        ),
     )
     dynamic_fragments = (
-        ("semantic output", "!nn.memory<[B, C, -KH + XH + 1, -KW + XW + 1]"),
-        ("semantic input", "!nn.memory<[B, N, XH, XW]"),
-        ("semantic weight", "!nn.memory<[C, N, KH, KW]"),
-        ("anonymous dynamic", "!nn.memory<[s1"),
+        (
+            "semantic output",
+            "!nn.memory<[#symbol.expr<B>, #symbol.expr<C>, #symbol.expr<-KH + XH + 1>, #symbol.expr<-KW + XW + 1>]",
+        ),
+        ("semantic input", "!nn.memory<[#symbol.expr<B>, #symbol.expr<N>, #symbol.expr<XH>, #symbol.expr<XW>]"),
+        ("semantic weight", "!nn.memory<[#symbol.expr<C>, #symbol.expr<N>, #symbol.expr<KH>, #symbol.expr<KW>]"),
+        ("anonymous dynamic", "!nn.memory<[#symbol.expr<s1>"),
     )
     for label, fragment in static_fragments:
         if fragment not in module_text:

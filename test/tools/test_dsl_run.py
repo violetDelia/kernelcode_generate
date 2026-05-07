@@ -392,9 +392,14 @@ def test_dsl_run_dump_dir_writes_pass_ir_and_source(tmp_path: Path) -> None:
     kernel_dump_dir = tmp_path / "add_kernel"
     assert result.execute_result.ok is True
     assert (kernel_dump_dir / "01-first-ir.mlir").is_file()
+    first_ir_text = (kernel_dump_dir / "01-first-ir.mlir").read_text(encoding="utf-8")
+    assert "#C" in first_ir_text
+    assert "#symbol.expr<" not in first_ir_text.split("builtin.module", 1)[1]
     pass_dumps = sorted(path for path in kernel_dump_dir.glob("*.mlir") if path.name != "01-first-ir.mlir")
     assert pass_dumps
-    assert pass_dumps[0].read_text(encoding="utf-8").splitlines()[0]
+    pass_dump_text = pass_dumps[0].read_text(encoding="utf-8")
+    assert pass_dump_text.splitlines()[0]
+    assert "#symbol.expr<" not in pass_dump_text.split("builtin.module", 1)[1]
     source_text = (kernel_dump_dir / "source.cpp").read_text(encoding="utf-8")
     assert source_text == result.source + ("\n" if not result.source.endswith("\n") else "")
     assert '#include "include/npu_demo/npu_demo.h"' in source_text
@@ -506,9 +511,13 @@ def test_dsl_run_custom_pipeline_dump_uses_public_fallback_name(tmp_path: Path) 
 
     dump_dir = tmp_path / "add_kernel"
     assert (dump_dir / "01-first-ir.mlir").is_file()
+    first_ir_text = (dump_dir / "01-first-ir.mlir").read_text(encoding="utf-8")
+    assert "#symbol.expr<" not in first_ir_text.split("builtin.module", 1)[1]
     pipeline_dump = dump_dir / "02-pipeline.mlir"
     assert pipeline_dump.is_file()
-    assert pipeline_dump.read_text(encoding="utf-8").splitlines()[0] == "pipeline"
+    pipeline_dump_text = pipeline_dump.read_text(encoding="utf-8")
+    assert pipeline_dump_text.splitlines()[0] == "pipeline"
+    assert "#symbol.expr<" not in pipeline_dump_text.split("builtin.module", 1)[1]
 
 
 # TC-DSL-RUN-002

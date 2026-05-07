@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, i1, i32
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, StringAttr, i1, i32
 from xdsl.ir import Block, Region
 from xdsl.parser import Parser
 from xdsl.passes import ModulePass
@@ -57,7 +57,12 @@ load_builtin_passes = registry_module.load_builtin_passes
 from kernel_gen.dialect.dma import DmaBroadcastOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolExprAttr
 from kernel_gen.core.context import build_default_context
+
+
+def _symbol_shape_data(values: list[str | int]) -> tuple[SymbolExprAttr, ...]:
+    return tuple(SymbolExprAttr.from_expr(str(value)) for value in values)
 
 
 def test_tile_elewise_public_api_surface_is_stable() -> None:
@@ -173,9 +178,7 @@ def test_tile_elewise_binary_pattern_public_compare_and_boundary_matrix() -> Non
     TileElewiseBinaryPattern().match_and_rewrite(rank3_op, PatternRewriter(rank3_op))
     rank3_views = [op for op in collect_ops(rank3_module) if op.name == "dma.view"]
     assert [op.name for op in collect_ops(rank3_module)].count("symbol.for") == 3
-    assert all(view.result.type.shape.data == ArrayAttr(
-        [StringAttr("TILE_D0"), StringAttr("TILE_D1"), StringAttr("TILE_D2")]
-    ).data for view in rank3_views)
+    assert all(view.result.type.shape.data == _symbol_shape_data(["TILE_D0", "TILE_D1", "TILE_D2"]) for view in rank3_views)
 
     no_analysis_module = build_elementwise_module()
     no_analysis_op = next(op for op in collect_ops(no_analysis_module) if op.name == "kernel.binary_elewise")
@@ -355,10 +358,8 @@ def test_tile_elewise_broadcast_pattern_public_boundary_matrix() -> None:
     views = [op for op in collect_ops(expand_module) if op.name == "dma.view"]
     assert len([op for op in collect_ops(expand_module) if op.name == "symbol.for"]) == 2
     assert len(views) == 2
-    assert views[0].result.type.shape.data == ArrayAttr(
-        [IntAttr(1), StringAttr("TILE_D0"), StringAttr("TILE_D1")]
-    ).data
-    assert views[1].result.type.shape.data == ArrayAttr([StringAttr("TILE_D0"), StringAttr("TILE_D1")]).data
+    assert views[0].result.type.shape.data == _symbol_shape_data([1, "TILE_D0", "TILE_D1"])
+    assert views[1].result.type.shape.data == _symbol_shape_data(["TILE_D0", "TILE_D1"])
 
     partial_target_type = make_memory_type(["M", "N"])
     partial_source_type = make_memory_type(["M", "N"])
@@ -383,8 +384,8 @@ def test_tile_elewise_broadcast_pattern_public_boundary_matrix() -> None:
     TileElewiseBroadcastPattern().match_and_rewrite(partial_op, PatternRewriter(partial_op))
     partial_views = [op for op in collect_ops(partial_module) if op.name == "dma.view"]
     assert len([op for op in collect_ops(partial_module) if op.name == "symbol.for"]) == 1
-    assert partial_views[0].result.type.shape.data == ArrayAttr([IntAttr(1), StringAttr("TILE_D0")]).data
-    assert partial_views[1].result.type.shape.data == ArrayAttr([StringAttr("M"), StringAttr("TILE_D0")]).data
+    assert partial_views[0].result.type.shape.data == _symbol_shape_data([1, "TILE_D0"])
+    assert partial_views[1].result.type.shape.data == _symbol_shape_data(["M", "TILE_D0"])
 
     bad_len_block = Block(arg_types=[target_type, source_type])
     bad_len_op = DmaBroadcastOp(bad_len_block.args[0], bad_len_block.args[1])
@@ -448,12 +449,12 @@ def test_tile_elewise_matmul_pattern_rewrites_single_matmul_op() -> None:
     assert isinstance(lhs_view_type, NnMemoryType)
     assert isinstance(rhs_view_type, NnMemoryType)
     assert isinstance(out_view_type, NnMemoryType)
-    assert lhs_view_type.shape.data == ArrayAttr([StringAttr("TILE_D0"), StringAttr("K")]).data
-    assert lhs_view_type.stride.data == ArrayAttr([IntAttr(1), IntAttr(1)]).data
-    assert rhs_view_type.shape.data == ArrayAttr([StringAttr("K"), StringAttr("TILE_D1")]).data
-    assert rhs_view_type.stride.data == ArrayAttr([IntAttr(1), IntAttr(1)]).data
-    assert out_view_type.shape.data == ArrayAttr([StringAttr("TILE_D0"), StringAttr("TILE_D1")]).data
-    assert out_view_type.stride.data == ArrayAttr([IntAttr(1), IntAttr(1)]).data
+    assert lhs_view_type.shape.data == _symbol_shape_data(["TILE_D0", "K"])
+    assert lhs_view_type.stride.data == _symbol_shape_data([1, 1])
+    assert rhs_view_type.shape.data == _symbol_shape_data(["K", "TILE_D1"])
+    assert rhs_view_type.stride.data == _symbol_shape_data([1, 1])
+    assert out_view_type.shape.data == _symbol_shape_data(["TILE_D0", "TILE_D1"])
+    assert out_view_type.stride.data == _symbol_shape_data([1, 1])
 
 
 def test_tile_elewise_pass_rewrites_multiple_top_level_plans() -> None:
@@ -518,10 +519,10 @@ def test_tile_elewise_matmul_pattern_accepts_legacy_operand_order_without_reorde
         """
 builtin.module {
   func.func @tile_matmul_legacy(
-      %lhs : !nn.memory<[4, 8], [8, 1], i32, #nn.space<global>>,
-      %rhs : !nn.memory<[8, 16], [16, 1], i32, #nn.space<global>>,
-      %out : !nn.memory<[4, 16], [16, 1], i32, #nn.space<global>>) {
-    "kernel.matmul"(%lhs, %rhs, %out) {space = #nn.space<global>, tile.analysis = [["elewise", "reduce"], ["reduce", "elewise"], ["elewise", "elewise"]], tile.tile_exprs = [["", ""], ["", ""], ["", ""]]} : (!nn.memory<[4, 8], [8, 1], i32, #nn.space<global>>, !nn.memory<[8, 16], [16, 1], i32, #nn.space<global>>, !nn.memory<[4, 16], [16, 1], i32, #nn.space<global>>) -> ()
+      %lhs : !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %rhs : !nn.memory<[#symbol.expr<8>, #symbol.expr<16>], [#symbol.expr<16>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %out : !nn.memory<[#symbol.expr<4>, #symbol.expr<16>], [#symbol.expr<16>, #symbol.expr<1>], i32, #nn.space<global>>) {
+    "kernel.matmul"(%lhs, %rhs, %out) {space = #nn.space<global>, tile.analysis = [["elewise", "reduce"], ["reduce", "elewise"], ["elewise", "elewise"]], tile.tile_exprs = [["", ""], ["", ""], ["", ""]]} : (!nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<global>>, !nn.memory<[#symbol.expr<8>, #symbol.expr<16>], [#symbol.expr<16>, #symbol.expr<1>], i32, #nn.space<global>>, !nn.memory<[#symbol.expr<4>, #symbol.expr<16>], [#symbol.expr<16>, #symbol.expr<1>], i32, #nn.space<global>>) -> ()
     func.return
   }
 }
@@ -539,9 +540,9 @@ builtin.module {
     assert isinstance(lhs_type, NnMemoryType)
     assert isinstance(rhs_type, NnMemoryType)
     assert isinstance(out_type, NnMemoryType)
-    assert lhs_type.shape.data == ArrayAttr([StringAttr("TILE_D0"), IntAttr(8)]).data
-    assert rhs_type.shape.data == ArrayAttr([IntAttr(8), StringAttr("TILE_D1")]).data
-    assert out_type.shape.data == ArrayAttr([StringAttr("TILE_D0"), StringAttr("TILE_D1")]).data
+    assert lhs_type.shape.data == _symbol_shape_data(["TILE_D0", 8])
+    assert rhs_type.shape.data == _symbol_shape_data([8, "TILE_D1"])
+    assert out_type.shape.data == _symbol_shape_data(["TILE_D0", "TILE_D1"])
 
 
 def test_tile_elewise_matmul_pattern_public_noop_shape_boundaries() -> None:

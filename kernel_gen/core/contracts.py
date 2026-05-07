@@ -14,9 +14,9 @@ API 列表:
 - `verify_i64_attr_value(attr: IntegerAttr, field_name: str, *, allow_zero: bool, scene: str) -> int`
 - `verify_i64_attr_group(attrs: Sequence[IntegerAttr], *, allow_zero: bool, error_phrase: str, scene: str) -> list[int]`
 - `collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None`
-- `build_contiguous_stride(shape: Sequence[Attribute]) -> ArrayAttr[Attribute]`
-- `dims_equal(lhs: Sequence[Attribute], rhs: Sequence[Attribute]) -> bool`
-- `public_dim_values(dims: Sequence[Attribute]) -> list[int | str]`
+- `build_contiguous_stride(shape: Sequence[int]) -> list[int]`
+- `dims_equal(lhs: Attribute, rhs: Attribute) -> bool`
+- `public_dim_values(shape: SymbolShape) -> list[int | str]`
 - `default_stride(shape: SymbolShape) -> SymbolShape`
 - `shape_numel(shape: SymbolShape) -> SymbolDim`
 
@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from xdsl.dialects.builtin import IntAttr, IntegerAttr, IntegerType, StringAttr
+from xdsl.dialects.builtin import IntAttr, IntegerAttr, IntegerType
 from xdsl.ir import Attribute
 from xdsl.utils.exceptions import VerifyException
 
@@ -55,6 +55,21 @@ __all__ = [
     "verify_i64_attr_value",
     "verify_memory_type",
 ]
+
+
+def _is_symbol_expr_attr(attr: Attribute) -> bool:
+    """判断 attribute 是否为公开 SymbolExprAttr。
+
+    功能说明:
+    - 延迟导入公开 `SymbolExprAttr`，避免 core/contracts 与 dialect 初始化形成循环依赖。
+
+    使用示例:
+    - _is_symbol_expr_attr(dim)
+    """
+
+    from kernel_gen.dialect.symbol import SymbolExprAttr
+
+    return isinstance(attr, SymbolExprAttr)
 
 
 def raise_verify_error(
@@ -247,11 +262,11 @@ def collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
 
 
     功能说明:
-    - 当所有维度均为 `IntAttr` 时返回整数列表。
+    - 当所有维度均为静态整数 `SymbolExprAttr` 时返回整数列表。
     - 任一维度非静态整数时返回 `None`。
 
     使用示例:
-    - collect_int_dims([IntAttr(1), IntAttr(2)])
+    - collect_int_dims([SymbolExprAttr.from_expr("1"), SymbolExprAttr.from_expr("2")])
 
     关联文件:
     - spec: spec/core/contracts.md
@@ -261,9 +276,12 @@ def collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
 
     values: list[int] = []
     for dim in dims:
-        if not isinstance(dim, IntAttr):
+        if not _is_symbol_expr_attr(dim):
             return None
-        values.append(dim.data)
+        expr = dim.expr.data
+        if not expr.lstrip("-").isdigit():
+            return None
+        values.append(int(expr))
     return values
 
 
@@ -297,11 +315,11 @@ def dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
 
 
     功能说明:
-    - 支持 IntAttr 与 StringAttr 的值一致性判断。
+    - 支持 `SymbolExprAttr` canonical 文本一致性判断。
     - 其他类型统一视为不一致。
 
     使用示例:
-    - dims_equal(IntAttr(2), IntAttr(2))
+    - dims_equal(SymbolExprAttr.from_expr("N"), SymbolExprAttr.from_expr("N"))
 
     关联文件:
     - spec: spec/core/contracts.md
@@ -309,10 +327,8 @@ def dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     - 功能实现: kernel_gen/core/contracts.py
     """
 
-    if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
-        return lhs.data == rhs.data
-    if isinstance(lhs, StringAttr) and isinstance(rhs, StringAttr):
-        return lhs.data == rhs.data
+    if _is_symbol_expr_attr(lhs) and _is_symbol_expr_attr(rhs):
+        return lhs.expr.data == rhs.expr.data
     return False
 
 

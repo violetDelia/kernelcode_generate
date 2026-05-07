@@ -167,14 +167,14 @@ def _expr_attr(value: int | str) -> SymbolExprAttr:
     return SymbolExprAttr.from_expr(str(value))
 
 
-def _normalize_memory_dims(dims: ArrayAttr | None, default_values: list[int | str]) -> ArrayAttr[Attribute]:
-    """规范化测试 memory shape/stride 维度。
+def _dim_array(values: list[int | str | SymbolExprAttr]) -> ArrayAttr[Attribute]:
+    """构造 memory shape/stride 结构化维度。
 
     功能说明:
-    - 将测试中旧的 `IntAttr/StringAttr` 便利写法转换为公开 `SymbolExprAttr`。
+    - 使用公开 `SymbolExprAttr` 表达 memory layout，避免旧 `IntAttr/StringAttr` layout 入口。
 
     使用示例:
-    - _normalize_memory_dims(ArrayAttr([IntAttr(2), StringAttr("N")]), [2, "N"])
+    - _dim_array([2, "N"])
 
     关联文件:
     - spec: spec/dialect/dma.md
@@ -182,19 +182,7 @@ def _normalize_memory_dims(dims: ArrayAttr | None, default_values: list[int | st
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    if dims is None:
-        return ArrayAttr([_expr_attr(value) for value in default_values])
-    normalized: list[Attribute] = []
-    for dim in dims.data:
-        if isinstance(dim, SymbolExprAttr):
-            normalized.append(dim)
-        elif isinstance(dim, IntAttr):
-            normalized.append(_expr_attr(dim.data))
-        elif isinstance(dim, StringAttr):
-            normalized.append(_expr_attr(dim.data))
-        else:
-            normalized.append(dim)
-    return ArrayAttr(normalized)
+    return ArrayAttr([value if isinstance(value, SymbolExprAttr) else _expr_attr(value) for value in values])
 
 
 def _make_memory_type(
@@ -220,8 +208,10 @@ def _make_memory_type(
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    shape = _normalize_memory_dims(shape, [2, 4])
-    stride = _normalize_memory_dims(stride, [4, 1])
+    if shape is None:
+        shape = _dim_array([2, 4])
+    if stride is None:
+        stride = _dim_array([4, 1])
     if element_type is None:
         element_type = i32
     return NnMemoryType(shape, stride, element_type, _make_space(space))
@@ -305,8 +295,8 @@ def test_dma_copy_verify_success() -> None:
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_copy_shape_mismatch() -> None:
-    source_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
-    target_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(8)]))
+    source_type = _make_memory_type(shape=_dim_array([2, 4]))
+    target_type = _make_memory_type(shape=_dim_array([2, 8]))
     source = _TestOp(result_types=[source_type]).results[0]
     target = _TestOp(result_types=[target_type]).results[0]
     op = DmaCopyOp(target, source)
@@ -331,7 +321,7 @@ def test_dma_load_result_space_mismatch() -> None:
     op = DmaLoadOp(target, source, offsets, sizes, strides)
     op.verify()
 
-    bad_target_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(3)]), space="shared")
+    bad_target_type = _make_memory_type(shape=_dim_array([2, 3]), space="shared")
     bad_target = _TestOp(result_types=[bad_target_type]).results[0]
     op = DmaLoadOp(bad_target, source, offsets, sizes, strides)
     with pytest.raises(VerifyException, match="target shape must match sizes"):
@@ -378,7 +368,7 @@ def test_dma_slice_rank_mismatch() -> None:
     offsets = _make_symbol_operands([0, 0])
     sizes = _make_symbol_operands([2, 4])
     strides = _make_symbol_operands([1, 1])
-    target_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(3)]))
+    target_type = _make_memory_type(shape=_dim_array([2, 3]))
     target = _TestOp(result_types=[target_type]).results[0]
     op = DmaSliceOp(target, source, offsets, sizes, strides)
     with pytest.raises(VerifyException, match="shape must match sizes"):
@@ -410,8 +400,8 @@ def test_dma_slice_non_unit_stride_rejected() -> None:
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_store_size_mismatch() -> None:
-    source_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
-    target_type = _make_memory_type(shape=ArrayAttr([IntAttr(8), IntAttr(4)]))
+    source_type = _make_memory_type(shape=_dim_array([2, 4]))
+    target_type = _make_memory_type(shape=_dim_array([8, 4]))
     source = _TestOp(result_types=[source_type]).results[0]
     target = _TestOp(result_types=[target_type]).results[0]
     offsets = _make_symbol_operands([0, 0])
@@ -429,8 +419,8 @@ def test_dma_store_size_mismatch() -> None:
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_deslice_verify_success() -> None:
-    source_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
-    target_type = _make_memory_type(shape=ArrayAttr([IntAttr(8), IntAttr(4)]))
+    source_type = _make_memory_type(shape=_dim_array([2, 4]))
+    target_type = _make_memory_type(shape=_dim_array([8, 4]))
     source = _TestOp(result_types=[source_type]).results[0]
     target = _TestOp(result_types=[target_type]).results[0]
     offsets = _make_symbol_operands([0, 0])
@@ -465,12 +455,12 @@ def test_dma_nn_memory_type_verifier_passthrough(monkeypatch: pytest.MonkeyPatch
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_dynamic_symbol_int_operands_valid() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("TM"), StringAttr("TN")]),
-        stride=ArrayAttr([StringAttr("TN"), IntAttr(1)]),
+        shape=_dim_array(["TM", "TN"]),
+        stride=_dim_array(["TN", 1]),
     )
     result_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("TM"), StringAttr("TN")]),
-        stride=ArrayAttr([StringAttr("TN"), IntAttr(1)]),
+        shape=_dim_array(["TM", "TN"]),
+        stride=_dim_array(["TN", 1]),
         space="shared",
     )
     source = _TestOp(result_types=[source_type]).results[0]
@@ -511,12 +501,12 @@ def test_dma_cast_layout_or_space_mismatch() -> None:
     source_type = _make_memory_type()
     source = _TestOp(result_types=[source_type]).results[0]
 
-    target_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(5)]))
+    target_type = _make_memory_type(shape=_dim_array([2, 5]))
     op = DmaCastOp(_TestOp(result_types=[target_type]).results[0], source)
     with pytest.raises(VerifyException, match="dma.cast shape mismatch"):
         op.verify()
 
-    target_type = _make_memory_type(stride=ArrayAttr([IntAttr(5), IntAttr(1)]))
+    target_type = _make_memory_type(stride=_dim_array([5, 1]))
     op = DmaCastOp(_TestOp(result_types=[target_type]).results[0], source)
     with pytest.raises(VerifyException, match="dma.cast stride mismatch"):
         op.verify()
@@ -588,11 +578,11 @@ def test_dma_view_type_or_space_mismatch() -> None:
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_view_numel_mismatch() -> None:
-    source_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
+    source_type = _make_memory_type(shape=_dim_array([2, 4]))
     source = _TestOp(result_types=[source_type]).results[0]
     result_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(5)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([2, 5]),
+        stride=_dim_array([4, 1]),
     )
     op = DmaViewOp(
         source,
@@ -613,12 +603,12 @@ def test_dma_view_numel_mismatch() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_reshape_requires_contiguous() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(5), IntAttr(1)]),
+        shape=_dim_array([2, 4]),
+        stride=_dim_array([5, 1]),
     )
     result_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(4), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        shape=_dim_array([4, 2]),
+        stride=_dim_array([2, 1]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     op = DmaReshapeOp(source, _make_symbol_operands([4, 2]), result_type)
@@ -634,20 +624,20 @@ def test_dma_reshape_requires_contiguous() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_reshape_allows_dynamic_symbol_int_shape_operands() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([2, 4]),
+        stride=_dim_array([4, 1]),
     )
     result_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
-        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
+        shape=_dim_array(["M", "N"]),
+        stride=_dim_array(["N", 1]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     op = DmaReshapeOp(source, _make_symbol_operands(["M", "N"]), result_type)
     op.verify()
 
     bad_result_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
-        stride=ArrayAttr([StringAttr("M"), IntAttr(1)]),
+        shape=_dim_array(["M", "N"]),
+        stride=_dim_array(["M", 1]),
     )
     op = DmaReshapeOp(source, _make_symbol_operands(["M", "N"]), bad_result_type)
     with pytest.raises(VerifyException, match="dma.reshape requires contiguous result stride"):
@@ -662,30 +652,12 @@ def test_dma_reshape_allows_dynamic_symbol_int_shape_operands() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_reshape_accepts_equivalent_symbolic_contiguous_source_stride() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr(
-            [
-                StringAttr("TN"),
-                StringAttr("TC"),
-                StringAttr("KH"),
-                StringAttr("KW"),
-                StringAttr("THO"),
-                StringAttr("TWO"),
-            ]
-        ),
-        stride=ArrayAttr(
-            [
-                StringAttr("KH*KW*TC*THO*TWO"),
-                StringAttr("KH*KW*THO*TWO"),
-                StringAttr("KW*THO*TWO"),
-                StringAttr("THO*TWO"),
-                StringAttr("TWO"),
-                IntAttr(1),
-            ]
-        ),
+        shape=_dim_array(["TN", "TC", "KH", "KW", "THO", "TWO"]),
+        stride=_dim_array(["KH*KW*TC*THO*TWO", "KH*KW*THO*TWO", "KW*THO*TWO", "THO*TWO", "TWO", 1]),
     )
     result_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("KH*KW*TC"), StringAttr("THO*TN*TWO")]),
-        stride=ArrayAttr([StringAttr("THO*TN*TWO"), IntAttr(1)]),
+        shape=_dim_array(["KH*KW*TC", "THO*TN*TWO"]),
+        stride=_dim_array(["THO*TN*TWO", 1]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     op = DmaReshapeOp(source, _make_symbol_operands(["KH*KW*TC", "THO*TN*TWO"]), result_type)
@@ -701,35 +673,21 @@ def test_dma_reshape_accepts_equivalent_symbolic_contiguous_source_stride() -> N
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_reshape_accepts_min_symbolic_contiguous_source_stride() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr(
+        shape=_dim_array(["min(1, 1-n0)", "min(3, 3-c0)", 3, 3, "min(4, 6-ho0)", "min(5, 6-wo0)"]),
+        stride=_dim_array(
             [
-                StringAttr("min(1, 1-n0)"),
-                StringAttr("min(3, 3-c0)"),
-                IntAttr(3),
-                IntAttr(3),
-                StringAttr("min(4, 6-ho0)"),
-                StringAttr("min(5, 6-wo0)"),
-            ]
-        ),
-        stride=ArrayAttr(
-            [
-                StringAttr("9*min(3, 3-c0)*min(4, 6-ho0)*min(5, 6-wo0)"),
-                StringAttr("9*min(4, 6-ho0)*min(5, 6-wo0)"),
-                StringAttr("3*min(4, 6-ho0)*min(5, 6-wo0)"),
-                StringAttr("min(4, 6-ho0)*min(5, 6-wo0)"),
-                StringAttr("min(5, 6-wo0)"),
-                IntAttr(1),
+                "9*min(3, 3-c0)*min(4, 6-ho0)*min(5, 6-wo0)",
+                "9*min(4, 6-ho0)*min(5, 6-wo0)",
+                "3*min(4, 6-ho0)*min(5, 6-wo0)",
+                "min(4, 6-ho0)*min(5, 6-wo0)",
+                "min(5, 6-wo0)",
+                1,
             ]
         ),
     )
     result_type = _make_memory_type(
-        shape=ArrayAttr(
-            [
-                StringAttr("9*min(3, 3-c0)"),
-                StringAttr("min(1, 1-n0)*min(4, 6-ho0)*min(5, 6-wo0)"),
-            ]
-        ),
-        stride=ArrayAttr([StringAttr("min(1, 1-n0)*min(4, 6-ho0)*min(5, 6-wo0)"), IntAttr(1)]),
+        shape=_dim_array(["9*min(3, 3-c0)", "min(1, 1-n0)*min(4, 6-ho0)*min(5, 6-wo0)"]),
+        stride=_dim_array(["min(1, 1-n0)*min(4, 6-ho0)*min(5, 6-wo0)", 1]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     op = DmaReshapeOp(
@@ -749,12 +707,12 @@ def test_dma_reshape_accepts_min_symbolic_contiguous_source_stride() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_reshape_numel_mismatch() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([2, 4]),
+        stride=_dim_array([4, 1]),
     )
     result_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(3), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([3, 3]),
+        stride=_dim_array([3, 1]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     op = DmaReshapeOp(source, _make_symbol_operands([3, 3]), result_type)
@@ -770,12 +728,12 @@ def test_dma_reshape_numel_mismatch() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_view_dynamic_symbol_int_layout_operands_valid() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
-        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
+        shape=_dim_array(["M", "N"]),
+        stride=_dim_array(["N", 1]),
     )
     result_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("TM"), StringAttr("TN")]),
-        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
+        shape=_dim_array(["TM", "TN"]),
+        stride=_dim_array(["N", 1]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     op = DmaViewOp(
@@ -796,12 +754,12 @@ def test_dma_view_dynamic_symbol_int_layout_operands_valid() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_view_result_stride_uses_source_physical_stride() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        shape=_dim_array([2, 2]),
+        stride=_dim_array([2, 1]),
     )
     result_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        shape=_dim_array([2, 2]),
+        stride=_dim_array([2, 1]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     op = DmaViewOp(
@@ -814,8 +772,8 @@ def test_dma_view_result_stride_uses_source_physical_stride() -> None:
     op.verify()
 
     bad_stride_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        shape=_dim_array([2, 2]),
+        stride=_dim_array([1, 1]),
     )
     bad_stride_op = DmaViewOp(
         source,
@@ -836,16 +794,16 @@ def test_dma_view_result_stride_uses_source_physical_stride() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_view_byte_pool_typed_view() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(16)]),
-        stride=ArrayAttr([IntAttr(1)]),
+        shape=_dim_array([16]),
+        stride=_dim_array([1]),
         element_type=i8,
         space="global",
     )
     source = _TestOp(result_types=[source_type]).results[0]
 
     result_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        shape=_dim_array([2, 2]),
+        stride=_dim_array([2, 1]),
         element_type=i32,
         space="global",
     )
@@ -859,8 +817,8 @@ def test_dma_view_byte_pool_typed_view() -> None:
     op.verify()
 
     bad_length_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(3), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        shape=_dim_array([3, 2]),
+        stride=_dim_array([2, 1]),
         element_type=i32,
         space="global",
     )
@@ -875,8 +833,8 @@ def test_dma_view_byte_pool_typed_view() -> None:
         op.verify()
 
     bad_stride_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([2, 2]),
+        stride=_dim_array([3, 1]),
         element_type=i32,
         space="global",
     )
@@ -899,15 +857,15 @@ def test_dma_view_byte_pool_typed_view() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_subview_byte_pool_typed_result_valid() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(64)]),
-        stride=ArrayAttr([IntAttr(1)]),
+        shape=_dim_array([64]),
+        stride=_dim_array([1]),
         element_type=i8,
         space="shared",
     )
     source = _TestOp(result_types=[source_type]).results[0]
     result_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(8)]),
-        stride=ArrayAttr([IntAttr(1)]),
+        shape=_dim_array([8]),
+        stride=_dim_array([1]),
         element_type=i32,
         space="shared",
     )
@@ -932,15 +890,15 @@ def test_dma_subview_byte_pool_typed_result_valid() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_subview_rejects_invalid_contract_edges() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(16)]),
-        stride=ArrayAttr([IntAttr(1)]),
+        shape=_dim_array([16]),
+        stride=_dim_array([1]),
         element_type=i8,
         space="shared",
     )
     source = _TestOp(result_types=[source_type]).results[0]
     result_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(1)]),
+        shape=_dim_array([4]),
+        stride=_dim_array([1]),
         element_type=i32,
         space="shared",
     )
@@ -948,8 +906,8 @@ def test_dma_subview_rejects_invalid_contract_edges() -> None:
     non_i8_source = _TestOp(
         result_types=[
             _make_memory_type(
-                shape=ArrayAttr([IntAttr(16)]),
-                stride=ArrayAttr([IntAttr(1)]),
+                shape=_dim_array([16]),
+                stride=_dim_array([1]),
                 element_type=i32,
                 space="shared",
             )
@@ -965,8 +923,8 @@ def test_dma_subview_rejects_invalid_contract_edges() -> None:
         ).verify()
 
     two_dim_result = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        shape=_dim_array([2, 2]),
+        stride=_dim_array([2, 1]),
         element_type=i32,
         space="shared",
     )
@@ -986,8 +944,8 @@ def test_dma_subview_rejects_invalid_contract_edges() -> None:
             _make_symbol_operands([4])[0],
             _make_symbol_operands([1])[0],
             _make_memory_type(
-                shape=ArrayAttr([IntAttr(4)]),
-                stride=ArrayAttr([IntAttr(1)]),
+                shape=_dim_array([4]),
+                stride=_dim_array([1]),
                 element_type=i32,
                 space="local",
             ),
@@ -1021,8 +979,8 @@ def test_dma_view_rejects_invalid_offsets_or_bounds() -> None:
     source_type = _make_memory_type()
     source = _TestOp(result_types=[source_type]).results[0]
     result_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([2, 4]),
+        stride=_dim_array([4, 1]),
     )
 
     with pytest.raises(VerifyException, match="offsets length must match rank"):
@@ -1069,22 +1027,22 @@ def test_dma_view_rejects_invalid_offsets_or_bounds() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_alloc_dynamic_symbol_int_shape_operands_valid() -> None:
     result_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
-        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
+        shape=_dim_array(["M", "N"]),
+        stride=_dim_array(["N", 1]),
     )
     op = DmaAllocOp(_make_symbol_operands(["M", "N"]), result_type)
     op.verify()
 
     non_contiguous_result_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
-        stride=ArrayAttr([IntAttr(1), StringAttr("M")]),
+        shape=_dim_array(["M", "N"]),
+        stride=_dim_array([1, "M"]),
     )
     op = DmaAllocOp(_make_symbol_operands(["M", "N"]), non_contiguous_result_type)
     op.verify()
 
     mixed_result_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("M"), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        shape=_dim_array(["M", 4]),
+        stride=_dim_array([4, 1]),
     )
     op = DmaAllocOp(_make_symbol_operands(["M"]), mixed_result_type)
     op.verify()
@@ -1105,12 +1063,12 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
 
     alloc_type = _make_memory_type()
     view_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([2, 4]),
+        stride=_dim_array([4, 1]),
     )
     reshape_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(4), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        shape=_dim_array([4, 2]),
+        stride=_dim_array([2, 1]),
     )
     load_type = _make_memory_type(space="shared")
 
@@ -1250,8 +1208,8 @@ def test_dma_fill_accepts_symbol_int_scalar_operand() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_fill_rejects_non_i32_target_or_unsupported_scalar() -> None:
     bad_target_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([2, 4]),
+        stride=_dim_array([4, 1]),
         element_type=i1,
         space="global",
     )
@@ -1270,7 +1228,7 @@ def test_dma_copy_rejects_stride_or_element_type_mismatch() -> None:
     source_type = _make_memory_type()
     source = _TestOp(result_types=[source_type]).results[0]
 
-    stride_mismatch = _make_memory_type(stride=ArrayAttr([IntAttr(8), IntAttr(1)]))
+    stride_mismatch = _make_memory_type(stride=_dim_array([8, 1]))
     op = DmaCopyOp(_TestOp(result_types=[stride_mismatch]).results[0], source)
     with pytest.raises(VerifyException, match="dma.copy source/target stride mismatch"):
         op.verify()
@@ -1287,7 +1245,7 @@ def test_dma_copy_rejects_stride_or_element_type_mismatch() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_transfer_ops_reject_element_space_or_result_mismatch() -> None:
     source_type = _make_memory_type()
-    target_type = _make_memory_type(shape=ArrayAttr([IntAttr(8), IntAttr(4)]))
+    target_type = _make_memory_type(shape=_dim_array([8, 4]))
     source = _TestOp(result_types=[source_type]).results[0]
     target = _TestOp(result_types=[target_type]).results[0]
     offsets = _make_symbol_operands([0, 0])
@@ -1313,7 +1271,7 @@ def test_dma_transfer_ops_reject_element_space_or_result_mismatch() -> None:
         op.verify()
 
     deslice_source = _TestOp(result_types=[source_type]).results[0]
-    deslice_target_type = _make_memory_type(shape=ArrayAttr([IntAttr(8), IntAttr(4)]))
+    deslice_target_type = _make_memory_type(shape=_dim_array([8, 4]))
     deslice_target = _TestOp(result_types=[deslice_target_type]).results[0]
     bad_deslice_source_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
     bad_deslice_source = _TestOp(result_types=[bad_deslice_source_type]).results[0]
@@ -1328,7 +1286,7 @@ def test_dma_transfer_ops_reject_element_space_or_result_mismatch() -> None:
     with pytest.raises(VerifyException, match="dma.deslice element_type mismatch"):
         op.verify()
 
-    bad_result_type = _make_memory_type(shape=ArrayAttr([IntAttr(8), IntAttr(4)]), space="shared")
+    bad_result_type = _make_memory_type(shape=_dim_array([8, 4]), space="shared")
     op = DmaDesliceOp(deslice_target, deslice_source, offsets, sizes, strides, bad_result_type)
     with pytest.raises(VerifyException, match="dma.deslice result must match target type"):
         op.verify()
@@ -1344,8 +1302,8 @@ def test_dma_reshape_rejects_element_or_space_mismatch() -> None:
     shape = _make_symbol_operands([4, 2])
 
     bad_element_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(4), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        shape=_dim_array([4, 2]),
+        stride=_dim_array([2, 1]),
         element_type=i1,
         space="global",
     )
@@ -1354,8 +1312,8 @@ def test_dma_reshape_rejects_element_or_space_mismatch() -> None:
         op.verify()
 
     bad_space_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(4), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        shape=_dim_array([4, 2]),
+        stride=_dim_array([2, 1]),
         space="shared",
     )
     op = DmaReshapeOp(source, shape, bad_space_type)
@@ -1371,12 +1329,12 @@ def test_dma_reshape_rejects_element_or_space_mismatch() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_broadcast_accepts_memory_source() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([1, 4]),
+        stride=_dim_array([4, 1]),
     )
     target_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([2, 4]),
+        stride=_dim_array([4, 1]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     target = _TestOp(result_types=[target_type]).results[0]
@@ -1405,12 +1363,12 @@ def test_dma_broadcast_accepts_symbol_int_scalar() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_broadcast_rejects_static_shape_mismatch() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([2, 4]),
+        stride=_dim_array([4, 1]),
     )
     target_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(3), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([3, 4]),
+        stride=_dim_array([4, 1]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     target = _TestOp(result_types=[target_type]).results[0]
@@ -1441,12 +1399,12 @@ def test_dma_broadcast_rejects_scalar_type_mismatch() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_transpose_accepts_valid_perm() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([2, 3]),
+        stride=_dim_array([3, 1]),
     )
     target_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(3), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        shape=_dim_array([3, 2]),
+        stride=_dim_array([2, 1]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     target = _TestOp(result_types=[target_type]).results[0]
@@ -1462,12 +1420,12 @@ def test_dma_transpose_accepts_valid_perm() -> None:
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_transpose_rejects_invalid_perm() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([2, 3]),
+        stride=_dim_array([3, 1]),
     )
     target_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(3), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        shape=_dim_array([3, 2]),
+        stride=_dim_array([2, 1]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
     target = _TestOp(result_types=[target_type]).results[0]
@@ -1487,8 +1445,8 @@ def test_dma_public_verifier_boundary_matrix() -> None:
         DmaAllocOp(
             _make_symbol_operands(["N"]),
             _make_memory_type(
-                shape=ArrayAttr([StringAttr("?"), IntAttr(4)]),
-                stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+                shape=_dim_array(["?", 4]),
+                stride=_dim_array([4, 1]),
             ),
         ).verify()
 
@@ -1496,8 +1454,8 @@ def test_dma_public_verifier_boundary_matrix() -> None:
         DmaAllocOp(
             _make_symbol_operands(["N"]),
             _make_memory_type(
-                shape=ArrayAttr([StringAttr("N"), StringAttr("M")]),
-                stride=ArrayAttr([StringAttr("M"), IntAttr(1)]),
+                shape=_dim_array(["N", "M"]),
+                stride=_dim_array(["M", 1]),
             ),
         ).verify()
 
@@ -1505,18 +1463,18 @@ def test_dma_public_verifier_boundary_matrix() -> None:
         DmaAllocOp(
             _make_symbol_operands(["M"]),
             _make_memory_type(
-                shape=ArrayAttr([StringAttr("N"), IntAttr(4)]),
-                stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+                shape=_dim_array(["N", 4]),
+                stride=_dim_array([4, 1]),
             ),
         ).verify()
 
     source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(3), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(12), IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([2, 3, 4]),
+        stride=_dim_array([12, 4, 1]),
     )
     target_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(3), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        shape=_dim_array([3, 4]),
+        stride=_dim_array([4, 1]),
     )
     with pytest.raises(VerifyException, match="dma.broadcast source rank must be <= target rank"):
         DmaBroadcastOp(
@@ -1529,14 +1487,14 @@ def test_dma_public_verifier_boundary_matrix() -> None:
         DmaBroadcastOp(
             target,
             _TestOp(
-                result_types=[_make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]), element_type=i1)]
+                result_types=[_make_memory_type(shape=_dim_array([2, 4]), element_type=i1)]
             ).results[0],
         ).verify()
     with pytest.raises(VerifyException, match="dma.broadcast space mismatch"):
         DmaBroadcastOp(
             target,
             _TestOp(
-                result_types=[_make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]), space="shared")]
+                result_types=[_make_memory_type(shape=_dim_array([2, 4]), space="shared")]
             ).results[0],
         ).verify()
     with pytest.raises(VerifyException, match="dma.broadcast symbol.int target must be integer element_type"):
@@ -1546,15 +1504,15 @@ def test_dma_public_verifier_boundary_matrix() -> None:
         ).verify()
 
     transpose_source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
-        stride=ArrayAttr([IntAttr(3), IntAttr(1)]),
+        shape=_dim_array([2, 3]),
+        stride=_dim_array([3, 1]),
     )
     transpose_source = _TestOp(result_types=[transpose_source_type]).results[0]
     transpose_target = _TestOp(
         result_types=[
             _make_memory_type(
-                shape=ArrayAttr([IntAttr(3), IntAttr(2)]),
-                stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+                shape=_dim_array([3, 2]),
+                stride=_dim_array([2, 1]),
             )
         ]
     ).results[0]
@@ -1565,29 +1523,29 @@ def test_dma_public_verifier_boundary_matrix() -> None:
     ).verify()
     for target_type_case, perm, message in [
         (
-            _make_memory_type(shape=ArrayAttr([IntAttr(3)]), stride=ArrayAttr([IntAttr(1)])),
+            _make_memory_type(shape=_dim_array([3]), stride=_dim_array([1])),
             [1, 0],
             "dma.transpose target rank mismatch",
         ),
         (
-            _make_memory_type(shape=ArrayAttr([IntAttr(4), IntAttr(2)]), stride=ArrayAttr([IntAttr(2), IntAttr(1)])),
+            _make_memory_type(shape=_dim_array([4, 2]), stride=_dim_array([2, 1])),
             [1, 0],
             "dma.transpose target shape mismatch",
         ),
         (
-            _make_memory_type(shape=ArrayAttr([IntAttr(3), IntAttr(2)]), stride=ArrayAttr([IntAttr(3), IntAttr(1)])),
+            _make_memory_type(shape=_dim_array([3, 2]), stride=_dim_array([3, 1])),
             [1, 0],
             "dma.transpose target stride mismatch",
         ),
         (
-            _make_memory_type(shape=ArrayAttr([IntAttr(3), IntAttr(2)]), stride=ArrayAttr([IntAttr(2), IntAttr(1)])),
+            _make_memory_type(shape=_dim_array([3, 2]), stride=_dim_array([2, 1])),
             [1],
             "dma.transpose perm must match source rank",
         ),
         (
             _make_memory_type(
-                shape=ArrayAttr([IntAttr(3), IntAttr(2)]),
-                stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+                shape=_dim_array([3, 2]),
+                stride=_dim_array([2, 1]),
                 element_type=i1,
             ),
             [1, 0],
@@ -1595,8 +1553,8 @@ def test_dma_public_verifier_boundary_matrix() -> None:
         ),
         (
             _make_memory_type(
-                shape=ArrayAttr([IntAttr(3), IntAttr(2)]),
-                stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+                shape=_dim_array([3, 2]),
+                stride=_dim_array([2, 1]),
                 space="shared",
             ),
             [1, 0],
@@ -1619,7 +1577,7 @@ def test_dma_public_verifier_boundary_matrix() -> None:
     load_source = _TestOp(result_types=[_make_memory_type()]).results[0]
     with pytest.raises(VerifyException, match="dma.load target rank must match source rank"):
         DmaLoadOp(
-            _TestOp(result_types=[_make_memory_type(shape=ArrayAttr([IntAttr(8)]), stride=ArrayAttr([IntAttr(1)]))]).results[0],
+            _TestOp(result_types=[_make_memory_type(shape=_dim_array([8]), stride=_dim_array([1]))]).results[0],
             load_source,
             _make_symbol_operands([0, 0]),
             _make_symbol_operands([2, 4]),
@@ -1635,7 +1593,7 @@ def test_dma_public_verifier_boundary_matrix() -> None:
         ).verify()
     with pytest.raises(VerifyException, match="dma.slice target rank must match source rank"):
         DmaSliceOp(
-            _TestOp(result_types=[_make_memory_type(shape=ArrayAttr([IntAttr(8)]), stride=ArrayAttr([IntAttr(1)]))]).results[0],
+            _TestOp(result_types=[_make_memory_type(shape=_dim_array([8]), stride=_dim_array([1]))]).results[0],
             load_source,
             _make_symbol_operands([0, 0]),
             _make_symbol_operands([2, 4]),
@@ -1656,7 +1614,7 @@ def test_dma_public_verifier_boundary_matrix() -> None:
             _make_symbol_operands([0]),
             _make_symbol_operands([8]),
             _make_symbol_operands([1]),
-            _make_memory_type(shape=ArrayAttr([IntAttr(8)]), stride=ArrayAttr([IntAttr(1)])),
+            _make_memory_type(shape=_dim_array([8]), stride=_dim_array([1])),
         ).verify()
 
     byte_sizes = [
@@ -1670,13 +1628,13 @@ def test_dma_public_verifier_boundary_matrix() -> None:
     ]
     for element_type, element_size in byte_sizes:
         byte_source_type = _make_memory_type(
-            shape=ArrayAttr([IntAttr(2 * element_size)]),
-            stride=ArrayAttr([IntAttr(1)]),
+            shape=_dim_array([2 * element_size]),
+            stride=_dim_array([1]),
             element_type=i8,
         )
         result_type = _make_memory_type(
-            shape=ArrayAttr([IntAttr(2)]),
-            stride=ArrayAttr([IntAttr(1)]),
+            shape=_dim_array([2]),
+            stride=_dim_array([1]),
             element_type=element_type,
         )
         DmaViewOp(
@@ -1688,8 +1646,8 @@ def test_dma_public_verifier_boundary_matrix() -> None:
         ).verify()
 
     byte_source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(16)]),
-        stride=ArrayAttr([IntAttr(1)]),
+        shape=_dim_array([16]),
+        stride=_dim_array([1]),
         element_type=i8,
     )
     with pytest.raises(VerifyException, match="dma.view element_type unsupported for byte pool"):
@@ -1698,12 +1656,12 @@ def test_dma_public_verifier_boundary_matrix() -> None:
             _make_symbol_operands([0]),
             _make_symbol_operands([2]),
             _make_symbol_operands([1]),
-            _make_memory_type(shape=ArrayAttr([IntAttr(2)]), stride=ArrayAttr([IntAttr(1)]), element_type=IndexType()),
+            _make_memory_type(shape=_dim_array([2]), stride=_dim_array([1]), element_type=IndexType()),
         ).verify()
     DmaViewOp(
         _TestOp(result_types=[byte_source_type]).results[0],
         _make_symbol_operands(["O"]),
         _make_symbol_operands([16]),
         _make_symbol_operands([1]),
-        _make_memory_type(shape=ArrayAttr([IntAttr(16)]), stride=ArrayAttr([IntAttr(1)]), element_type=i8),
+        _make_memory_type(shape=_dim_array([16]), stride=_dim_array([1]), element_type=i8),
     ).verify()

@@ -31,7 +31,7 @@ from xdsl.dialects.builtin import ModuleOp, StringAttr
 from xdsl.ir import Block, Operation, Region, SSAValue
 
 from kernel_gen.dialect.arch import ArchLaunchOp
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolForOp, SymbolYieldOp
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolForOp, SymbolValueType, SymbolYieldOp
 from kernel_gen.dialect.tuner import TunerCostOp
 from kernel_gen.passes.common import raise_pass_contract_error, verify_generated_ops
 from kernel_gen.passes.pass_manager import Pass
@@ -55,6 +55,28 @@ DROPPED_HELPER_OP_NAMES = (
 VALID_COST_KINDS = ("DMA1", "DMA2", "DMA3", "DMA4", "MAC", "VECTOR1", "VECTOR2")
 DEFAULT_COST_KIND = "|".join(VALID_COST_KINDS)
 INVALID_COST_KIND_DETAIL = "cost_kind must be '|' separated names from [DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2]"
+
+
+def _symbol_value_expr(value: SSAValue) -> str:
+    """读取 symbol.int SSA 值的表达式文本。
+
+
+    功能说明:
+    - cost function 累计链只接受 `!symbol.int` 值。
+    - 返回文本用于构造下一段 `symbol.add` 的 canonical result type。
+
+    使用示例:
+    - expr = _symbol_value_expr(cost_op.result)
+
+    关联文件:
+    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
+    - test: [test/passes/tuning/test_launch_kernel_cost_func.py](../../../test/passes/tuning/test_launch_kernel_cost_func.py)
+    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
+    """
+
+    if not isinstance(value.type, SymbolValueType):
+        raise_pass_contract_error("LaunchKernelCostFuncError", "cost accumulator must be symbol.int")
+    return str(value.type.get_value())
 
 
 class _CostTraversalFrame(TypedDict):
@@ -388,7 +410,9 @@ class LaunchKernelCostFuncPass(Pass):
                     add_op = SymbolAddOp(
                         acc_value,
                         cost_op.result,
-                        result_type=acc_value.type,
+                        result_type=SymbolValueType.from_expr(
+                            f"{_symbol_value_expr(acc_value)} + {_symbol_value_expr(cost_op.result)}"
+                        ),
                     )
                     target_block.add_op(add_op)
                     frame["acc_value"] = add_op.result

@@ -38,6 +38,7 @@ from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaSliceOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolExprAttr
 import kernel_gen.passes.registry as passregistry
 from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
 import kernel_gen.target.registry as targetregistry
@@ -62,6 +63,12 @@ def _make_space(name: str) -> NnMemorySpaceAttr:
     return NnMemorySpaceAttr.from_name(name)
 
 
+def _symbol_expr_attr(value: int | str) -> SymbolExprAttr:
+    """构造测试用 SymbolExprAttr 维度。"""
+
+    return SymbolExprAttr.from_expr(str(value))
+
+
 def _make_memory_type(
     *,
     shape: tuple[int, ...] = (2, 4),
@@ -71,8 +78,8 @@ def _make_memory_type(
     """构造静态 `nn.memory` 类型。"""
 
     return NnMemoryType(
-        ArrayAttr([IntAttr(dim) for dim in shape]),
-        ArrayAttr([IntAttr(dim) for dim in stride]),
+        ArrayAttr([_symbol_expr_attr(dim) for dim in shape]),
+        ArrayAttr([_symbol_expr_attr(dim) for dim in stride]),
         i32,
         _make_space(space),
     )
@@ -82,8 +89,8 @@ def _make_symbolic_memory_type(space: str = "global") -> NnMemoryType:
     """构造含显式符号维度的 `nn.memory` 类型。"""
 
     return NnMemoryType(
-        ArrayAttr([StringAttr("M"), IntAttr(4)]),
-        ArrayAttr([IntAttr(4), IntAttr(1)]),
+        ArrayAttr([_symbol_expr_attr("M"), _symbol_expr_attr(4)]),
+        ArrayAttr([_symbol_expr_attr(4), _symbol_expr_attr(1)]),
         i32,
         _make_space(space),
     )
@@ -93,8 +100,8 @@ def _make_anonymous_dynamic_memory_type(space: str = "global") -> NnMemoryType:
     """构造含匿名动态维度的 `nn.memory` 类型。"""
 
     return NnMemoryType(
-        ArrayAttr([StringAttr("?"), IntAttr(4)]),
-        ArrayAttr([IntAttr(4), IntAttr(1)]),
+        ArrayAttr([_symbol_expr_attr("?"), _symbol_expr_attr(4)]),
+        ArrayAttr([_symbol_expr_attr(4), _symbol_expr_attr(1)]),
         i32,
         _make_space(space),
     )

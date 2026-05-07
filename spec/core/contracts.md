@@ -13,9 +13,9 @@
 - `verify_i64_attr_value(attr: IntegerAttr, field_name: str, *, allow_zero: bool, scene: str) -> int`
 - `verify_i64_attr_group(attrs: Sequence[IntegerAttr], *, allow_zero: bool, error_phrase: str, scene: str) -> list[int]`
 - `collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None`
-- `build_contiguous_stride(shape: Sequence[Attribute]) -> ArrayAttr[Attribute]`
-- `dims_equal(lhs: Sequence[Attribute], rhs: Sequence[Attribute]) -> bool`
-- `public_dim_values(dims: Sequence[Attribute]) -> list[int | str]`
+- `build_contiguous_stride(shape: Sequence[int]) -> list[int]`
+- `dims_equal(lhs: Attribute, rhs: Attribute) -> bool`
+- `public_dim_values(shape: SymbolShape) -> list[int | str]`
 - `default_stride(shape: SymbolShape) -> SymbolShape`
 - `shape_numel(shape: SymbolShape) -> SymbolDim`
 
@@ -147,14 +147,14 @@
   result = collect_int_dims(dims=dims)
   ```
 - 功能说明：执行 `collect_int_dims`。
-- 注意事项：仅当所有维度均为 `IntAttr` 时返回整数列表；任一维度非静态整数时返回 `None`，不得抛错替代该分支。
+- 注意事项：仅当所有维度均为静态整数 `SymbolExprAttr` 时返回整数列表；任一维度不是 `SymbolExprAttr` 或不是静态整数时返回 `None`，不得抛错替代该分支。
 
-### `build_contiguous_stride(shape: Sequence[Attribute]) -> ArrayAttr[Attribute]`
+### `build_contiguous_stride(shape: Sequence[int]) -> list[int]`
 
-- api：`build_contiguous_stride(shape: Sequence[Attribute]) -> ArrayAttr[Attribute]`
+- api：`build_contiguous_stride(shape: Sequence[int]) -> list[int]`
 - 参数：
-  - `shape`：形状序列，定义张量、内存或符号对象的维度大小；类型 `Sequence[Attribute]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-- 返回值：`ArrayAttr[Attribute]`。
+  - `shape`：形状序列，定义静态各轴大小；类型 `Sequence[int]`；无默认值，调用方必须显式提供；不允许 `None`；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+- 返回值：`list[int]`。
 - 使用示例：
 
   ```python
@@ -163,12 +163,12 @@
 - 功能说明：构建 `contiguous_stride`。
 - 注意事项：只面向静态 shape 生成连续行主序 stride；若 shape 中存在非静态维度，调用方必须先按自身 API 边界处理，不得依赖本接口做动态 stride 推导。
 
-### `dims_equal(lhs: Sequence[Attribute], rhs: Sequence[Attribute]) -> bool`
+### `dims_equal(lhs: Attribute, rhs: Attribute) -> bool`
 
-- api：`dims_equal(lhs: Sequence[Attribute], rhs: Sequence[Attribute]) -> bool`
+- api：`dims_equal(lhs: Attribute, rhs: Attribute) -> bool`
 - 参数：
-  - `lhs`：左操作数，参与二元运算、比较或矩阵乘语义；类型 `Sequence[Attribute]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `rhs`：右操作数，参与二元运算、比较或矩阵乘语义；类型 `Sequence[Attribute]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `lhs`：左侧维度 attribute；类型 `Attribute`；无默认值，调用方必须显式提供；不允许 `None`；按值或只读语义消费，调用方不得依赖输入对象被修改。
+  - `rhs`：右侧维度 attribute；类型 `Attribute`；无默认值，调用方必须显式提供；不允许 `None`；按值或只读语义消费，调用方不得依赖输入对象被修改。
 - 返回值：`bool`，表示判断结果。
 - 使用示例：
 
@@ -176,18 +176,18 @@
   result = dims_equal(lhs=lhs, rhs=rhs)
   ```
 - 功能说明：执行 `dims_equal`。
-- 注意事项：只比较两个维度序列中的公开 `IntAttr` 与 `StringAttr` 值；长度或公开值不一致时返回 `False`，不得抛错替代普通不等分支。
+- 注意事项：只比较两个公开 `SymbolExprAttr` 维度的 canonical 表达文本；任一输入不是 `SymbolExprAttr` 或表达文本不一致时返回 `False`，不得抛错替代普通不等分支。
 
-### `public_dim_values(dims: Sequence[Attribute]) -> list[int | str]`
+### `public_dim_values(shape: SymbolShape) -> list[int | str]`
 
-- api：`public_dim_values(dims: Sequence[Attribute]) -> list[int | str]`
+- api：`public_dim_values(shape: SymbolShape) -> list[int | str]`
 - 参数：
-  - `dims`：维度列表，定义符号形状或内存对象的各轴大小；类型 `Sequence[Attribute]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `shape`：公开 `SymbolShape` 对象；类型 `SymbolShape`；无默认值，调用方必须显式提供；不允许 `None`；按值或只读语义消费，调用方不得依赖输入对象被修改。
 - 返回值：`list[int | str]`。
 - 使用示例：
 
   ```python
-  result = public_dim_values(dims=dims)
+  result = public_dim_values(shape=shape)
   ```
 - 功能说明：执行 `public_dim_values`。
 - 注意事项：输出只包含公开可比较的 `int | str`；动态维度必须保持稳定字符串表达，不得暴露内部 attribute 对象。

@@ -91,6 +91,7 @@ from kernel_gen.passes.buffer_results_to_out_params import (
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
+from test.passes.lowering.nn_lowering.memory_type_utils import symbol_array
 pass_module = importlib.import_module("kernel_gen.passes.lowering.nn_lowering")
 NnLoweringPass = pass_module.NnLoweringPass
 
@@ -110,7 +111,7 @@ def nn_memory_type(
     - 将 shape/stride 的 tuple 转为 ArrayAttr。
 
     使用示例:
-    - nn_memory_type((IntAttr(2),), (IntAttr(1),), i32)
+    - nn_memory_type((2,), (1,), i32)
 
     关联文件:
     - spec: spec/dialect/nn.md
@@ -118,7 +119,7 @@ def nn_memory_type(
     - 功能实现: test/passes/lowering/nn_lowering/test_nn_lowering.py
     """
 
-    return NnMemoryType(ArrayAttr(list(shape)), ArrayAttr(list(stride)), element_type, space)
+    return NnMemoryType(symbol_array(shape), symbol_array(stride), element_type, space)
 
 
 def add_block_arg(block: Block, arg_type: Attribute) -> SSAValue:
@@ -129,7 +130,7 @@ def add_block_arg(block: Block, arg_type: Attribute) -> SSAValue:
     - 使用 insert_arg 在末尾插入 block argument。
 
     使用示例:
-    - lhs = add_block_arg(block, nn_memory_type((IntAttr(2),), (IntAttr(1),), i32))
+    - lhs = add_block_arg(block, nn_memory_type((2,), (1,), i32))
 
     关联文件:
     - spec: spec/dialect/nn.md
@@ -304,9 +305,9 @@ def _lowered_func_block(module: ModuleOp) -> Block:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_add_to_kernel() -> None:
     block = Block()
-    lhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    rhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    lhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
     lhs = add_block_arg(block, lhs_type)
     rhs = add_block_arg(block, rhs_type)
     add_op = NnAddOp(lhs, rhs, res_type, SPACE_GLOBAL)
@@ -330,9 +331,9 @@ def test_lower_add_to_kernel() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_div_to_kernel() -> None:
     block = Block()
-    lhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    rhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
+    lhs_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
     lhs = add_block_arg(block, lhs_type)
     rhs = add_block_arg(block, rhs_type)
     div_op = NnTrueDivOp(lhs, rhs, res_type, SPACE_GLOBAL)
@@ -356,9 +357,9 @@ def test_lower_div_to_kernel() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_eq_to_kernel() -> None:
     block = Block()
-    lhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    rhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i1, SPACE_GLOBAL)
+    lhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 2), (2, 1), i1, SPACE_GLOBAL)
     lhs = add_block_arg(block, lhs_type)
     rhs = add_block_arg(block, rhs_type)
     eq_op = NnEqOp(lhs, rhs, res_type, SPACE_GLOBAL)
@@ -382,9 +383,9 @@ def test_lower_eq_to_kernel() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_ne_to_kernel() -> None:
     block = Block()
-    lhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    rhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i1, SPACE_GLOBAL)
+    lhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 2), (2, 1), i1, SPACE_GLOBAL)
     lhs = add_block_arg(block, lhs_type)
     rhs = add_block_arg(block, rhs_type)
     ne_op = NnNeOp(lhs, rhs, res_type, SPACE_GLOBAL)
@@ -408,9 +409,9 @@ def test_lower_ne_to_kernel() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_le_to_kernel() -> None:
     block = Block()
-    lhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    rhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i1, SPACE_GLOBAL)
+    lhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 2), (2, 1), i1, SPACE_GLOBAL)
     lhs = add_block_arg(block, lhs_type)
     rhs = add_block_arg(block, rhs_type)
     le_op = NnLeOp(lhs, rhs, res_type, SPACE_GLOBAL)
@@ -434,9 +435,9 @@ def test_lower_le_to_kernel() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_lt_to_kernel() -> None:
     block = Block()
-    lhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    rhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i1, SPACE_GLOBAL)
+    lhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 2), (2, 1), i1, SPACE_GLOBAL)
     lhs = add_block_arg(block, lhs_type)
     rhs = add_block_arg(block, rhs_type)
     lt_op = NnLtOp(lhs, rhs, res_type, SPACE_GLOBAL)
@@ -460,9 +461,9 @@ def test_lower_lt_to_kernel() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_gt_to_kernel() -> None:
     block = Block()
-    lhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    rhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i1, SPACE_GLOBAL)
+    lhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 2), (2, 1), i1, SPACE_GLOBAL)
     lhs = add_block_arg(block, lhs_type)
     rhs = add_block_arg(block, rhs_type)
     gt_op = NnGtOp(lhs, rhs, res_type, SPACE_GLOBAL)
@@ -486,9 +487,9 @@ def test_lower_gt_to_kernel() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_ge_to_kernel() -> None:
     block = Block()
-    lhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    rhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i1, SPACE_GLOBAL)
+    lhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 2), (2, 1), i1, SPACE_GLOBAL)
     lhs = add_block_arg(block, lhs_type)
     rhs = add_block_arg(block, rhs_type)
     ge_op = NnGeOp(lhs, rhs, res_type, SPACE_GLOBAL)
@@ -512,8 +513,8 @@ def test_lower_ge_to_kernel() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_exp_to_kernel() -> None:
     block = Block()
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
     operand = add_block_arg(block, operand_type)
     exp_op = NnExpOp(operand, res_type, SPACE_GLOBAL)
     block.add_op(exp_op)
@@ -536,8 +537,8 @@ def test_lower_exp_to_kernel() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_reduce_min_to_kernel() -> None:
     block = Block()
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(1)), (IntAttr(1), IntAttr(1)), f32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 1), (1, 1), f32, SPACE_GLOBAL)
     operand = add_block_arg(block, operand_type)
     reduce_op = NnReduceMinOp(
         operand,
@@ -566,8 +567,8 @@ def test_lower_reduce_min_to_kernel() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_reduce_sum_to_kernel() -> None:
     block = Block()
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(1), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((1, 2), (2, 1), f32, SPACE_GLOBAL)
     operand = add_block_arg(block, operand_type)
     reduce_op = NnReduceSumOp(
         operand,
@@ -596,8 +597,8 @@ def test_lower_reduce_sum_to_kernel() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_reduce_max_to_kernel() -> None:
     block = Block()
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(1)), (IntAttr(1), IntAttr(1)), f32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 1), (1, 1), f32, SPACE_GLOBAL)
     operand = add_block_arg(block, operand_type)
     reduce_op = NnReduceMaxOp(
         operand,
@@ -626,8 +627,8 @@ def test_lower_reduce_max_to_kernel() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_softmax_requires_decompass() -> None:
     block = Block()
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
     operand = add_block_arg(block, operand_type)
     softmax_op = NnSoftmaxOp(
         operand,
@@ -651,9 +652,9 @@ def test_lower_softmax_requires_decompass() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_matmul_to_kernel() -> None:
     block = Block()
-    lhs_type = nn_memory_type((IntAttr(2), IntAttr(3)), (IntAttr(3), IntAttr(1)), f32, SPACE_GLOBAL)
-    rhs_type = nn_memory_type((IntAttr(3), IntAttr(4)), (IntAttr(4), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(4)), (IntAttr(4), IntAttr(1)), f32, SPACE_GLOBAL)
+    lhs_type = nn_memory_type((2, 3), (3, 1), f32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((3, 4), (4, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 4), (4, 1), f32, SPACE_GLOBAL)
     lhs = add_block_arg(block, lhs_type)
     rhs = add_block_arg(block, rhs_type)
     matmul_op = NnMatmulOp(lhs, rhs, res_type, SPACE_GLOBAL)
@@ -678,14 +679,14 @@ def test_lower_matmul_to_kernel() -> None:
 def test_lower_img2col1d_to_kernel() -> None:
     block = Block()
     operand_type = nn_memory_type(
-        (IntAttr(2), IntAttr(2), IntAttr(2)),
-        (IntAttr(4), IntAttr(2), IntAttr(1)),
+        (2, 2, 2),
+        (4, 2, 1),
         f32,
         SPACE_GLOBAL,
     )
     res_type = nn_memory_type(
-        (IntAttr(2), IntAttr(2), IntAttr(2)),
-        (IntAttr(4), IntAttr(2), IntAttr(1)),
+        (2, 2, 2),
+        (4, 2, 1),
         f32,
         SPACE_GLOBAL,
     )
@@ -735,14 +736,14 @@ def test_lower_img2col1d_to_kernel() -> None:
 def test_lower_img2col2d_to_kernel() -> None:
     block = Block()
     operand_type = nn_memory_type(
-        (IntAttr(2), IntAttr(2), IntAttr(2), IntAttr(2)),
-        (IntAttr(8), IntAttr(4), IntAttr(2), IntAttr(1)),
+        (2, 2, 2, 2),
+        (8, 4, 2, 1),
         f32,
         SPACE_GLOBAL,
     )
     res_type = nn_memory_type(
-        (IntAttr(2), IntAttr(2), IntAttr(2), IntAttr(2)),
-        (IntAttr(8), IntAttr(4), IntAttr(2), IntAttr(1)),
+        (2, 2, 2, 2),
+        (8, 4, 2, 1),
         f32,
         SPACE_GLOBAL,
     )
@@ -816,14 +817,14 @@ def test_lower_img2col2d_to_kernel() -> None:
 def test_lower_broadcast_dma() -> None:
     block = Block()
     operand_type = nn_memory_type(
-        (IntAttr(2), IntAttr(2)),
-        (IntAttr(2), IntAttr(1)),
+        (2, 2),
+        (2, 1),
         i32,
         SPACE_GLOBAL,
     )
     result_type = nn_memory_type(
-        (IntAttr(2), IntAttr(2), IntAttr(2)),
-        (IntAttr(4), IntAttr(2), IntAttr(1)),
+        (2, 2, 2),
+        (4, 2, 1),
         i32,
         SPACE_GLOBAL,
     )
@@ -858,14 +859,14 @@ def test_lower_broadcast_dma() -> None:
 def test_lower_transpose_to_kernel() -> None:
     block = Block()
     operand_type = nn_memory_type(
-        (IntAttr(2), IntAttr(4)),
-        (IntAttr(4), IntAttr(1)),
+        (2, 4),
+        (4, 1),
         f32,
         SPACE_GLOBAL,
     )
     result_type = nn_memory_type(
-        (IntAttr(4), IntAttr(2)),
-        (IntAttr(2), IntAttr(1)),
+        (4, 2),
+        (2, 1),
         f32,
         SPACE_GLOBAL,
     )
@@ -900,8 +901,8 @@ def test_lower_transpose_to_kernel() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_cast_to_dma_cast() -> None:
     block = Block()
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    result_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    result_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
     operand = add_block_arg(block, operand_type)
     cast_op = NnCastOp(operand, result_type, SPACE_GLOBAL)
     block.add_op(cast_op)
@@ -924,10 +925,10 @@ def test_lower_cast_to_dma_cast() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_select_to_kernel_select() -> None:
     block = Block()
-    cond_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i1, SPACE_GLOBAL)
-    lhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    rhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    cond_type = nn_memory_type((2, 2), (2, 1), i1, SPACE_GLOBAL)
+    lhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
     cond = add_block_arg(block, cond_type)
     lhs = add_block_arg(block, lhs_type)
     rhs = add_block_arg(block, rhs_type)
@@ -952,14 +953,14 @@ def test_lower_select_to_kernel_select() -> None:
 def test_lower_broadcast_with_symbol_dim() -> None:
     block = Block()
     operand_type = nn_memory_type(
-        (IntAttr(2), StringAttr("M")),
-        (IntAttr(2), IntAttr(1)),
+        (2, "M"),
+        (2, 1),
         i32,
         SPACE_GLOBAL,
     )
     result_type = nn_memory_type(
-        (IntAttr(2), StringAttr("M")),
-        (IntAttr(2), IntAttr(1)),
+        (2, "M"),
+        (2, 1),
         i32,
         SPACE_GLOBAL,
     )
@@ -995,15 +996,15 @@ def test_lower_broadcast_with_symbol_dim() -> None:
 def test_lower_add_mixed_symbol_to_kernel() -> None:
     block = Block()
     lhs_type = nn_memory_type(
-        (IntAttr(2), IntAttr(2)),
-        (IntAttr(2), IntAttr(1)),
+        (2, 2),
+        (2, 1),
         i32,
         SPACE_GLOBAL,
     )
     rhs_type = SymbolValueType.from_expr("K")
     res_type = nn_memory_type(
-        (IntAttr(2), IntAttr(2)),
-        (IntAttr(2), IntAttr(1)),
+        (2, 2),
+        (2, 1),
         i32,
         SPACE_GLOBAL,
     )
@@ -1033,15 +1034,15 @@ def test_lower_add_mixed_symbol_to_kernel() -> None:
 def test_lower_eq_mixed_symbol_uses_broadcast_only() -> None:
     block = Block()
     lhs_type = nn_memory_type(
-        (IntAttr(2), IntAttr(2)),
-        (IntAttr(2), IntAttr(1)),
+        (2, 2),
+        (2, 1),
         i32,
         SPACE_GLOBAL,
     )
     rhs_type = SymbolValueType.from_expr("K")
     res_type = nn_memory_type(
-        (IntAttr(2), IntAttr(2)),
-        (IntAttr(2), IntAttr(1)),
+        (2, 2),
+        (2, 1),
         i1,
         SPACE_GLOBAL,
     )
@@ -1070,8 +1071,8 @@ def test_lower_eq_mixed_symbol_uses_broadcast_only() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_element_binary_public_dynamic_scalar_and_symbol_matrix() -> None:
     dynamic_type = nn_memory_type(
-        (StringAttr("M"), StringAttr("N")),
-        (StringAttr("N"), IntAttr(1)),
+        ("M", "N"),
+        ("N", 1),
         i32,
         SPACE_GLOBAL,
     )
@@ -1088,7 +1089,7 @@ def test_lower_element_binary_public_dynamic_scalar_and_symbol_matrix() -> None:
     dynamic_alloc = next(op for op in dynamic_lowered_block.ops if isinstance(op, DmaAllocOp))
     assert len(dynamic_alloc.dynamic_shape) == 2
 
-    scalar_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    scalar_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
     scalar_block = Block(arg_types=[scalar_type])
     scalar_const = arith.ConstantOp(IntegerAttr(3, i32))
     scalar_op = NnAddOp(scalar_const.result, scalar_block.args[0], scalar_type, SPACE_GLOBAL)
@@ -1154,8 +1155,8 @@ def test_lower_element_binary_public_dynamic_scalar_and_symbol_matrix() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering/element_binary_lowering.md
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_compare_public_left_scalar_matrix() -> None:
-    memory_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    result_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i1, SPACE_GLOBAL)
+    memory_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    result_type = nn_memory_type((2, 2), (2, 1), i1, SPACE_GLOBAL)
     block = Block(arg_types=[memory_type])
     scalar_const = arith.ConstantOp(IntegerAttr(7, i32))
     compare_op = NnEqOp(scalar_const.result, block.args[0], result_type, SPACE_GLOBAL)
@@ -1178,8 +1179,8 @@ def test_lower_compare_public_left_scalar_matrix() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering/element_binary_lowering.md
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_element_binary_public_error_matrix() -> None:
-    memory_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    result_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    memory_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    result_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
     no_memory_block = Block(arg_types=[i32, i32])
     no_memory_op = NnAddOp(no_memory_block.args[0], no_memory_block.args[1], result_type, SPACE_GLOBAL)
     no_memory_block.add_op(no_memory_op)
@@ -1188,7 +1189,7 @@ def test_lower_element_binary_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="nn element binary must provide at least one nn.memory operand"):
         NnLoweringPass().apply(Context(), no_memory_module)
 
-    compare_result_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i1, SPACE_GLOBAL)
+    compare_result_type = nn_memory_type((2, 2), (2, 1), i1, SPACE_GLOBAL)
     compare_no_memory_block = Block(arg_types=[i32, i32])
     compare_no_memory_op = NnEqOp(compare_no_memory_block.args[0], compare_no_memory_block.args[1], compare_result_type, SPACE_GLOBAL)
     compare_no_memory_block.add_op(compare_no_memory_op)
@@ -1202,7 +1203,7 @@ def test_lower_element_binary_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="nn compare must provide at least one nn.memory operand"):
         NnLoweringPass().apply(Context(), compare_no_memory_module)
 
-    compare_shape_type = nn_memory_type((IntAttr(3), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    compare_shape_type = nn_memory_type((3, 2), (2, 1), i32, SPACE_GLOBAL)
     compare_shape_block = Block(arg_types=[memory_type, compare_shape_type])
     compare_shape_op = NnEqOp(compare_shape_block.args[0], compare_shape_block.args[1], compare_result_type, SPACE_GLOBAL)
     compare_shape_block.add_op(compare_shape_op)
@@ -1229,7 +1230,7 @@ def test_lower_element_binary_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="kernel.binary_elewise compare output element_type must be i1"):
         NnLoweringPass().apply(Context(), compare_bad_result_module)
 
-    rank_result_type = nn_memory_type((IntAttr(2),), (IntAttr(1),), i32, SPACE_GLOBAL)
+    rank_result_type = nn_memory_type((2,), (1,), i32, SPACE_GLOBAL)
     rank_block = Block(arg_types=[memory_type, memory_type])
     rank_op = NnAddOp(rank_block.args[0], rank_block.args[1], rank_result_type, SPACE_GLOBAL)
     rank_block.add_op(rank_op)
@@ -1238,8 +1239,8 @@ def test_lower_element_binary_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="nn element binary operand/result rank mismatch"):
         NnLoweringPass().apply(Context(), rank_module)
 
-    unknown_result_type = nn_memory_type((StringAttr("?"),), (IntAttr(1),), i32, SPACE_GLOBAL)
-    source_type = nn_memory_type((StringAttr("M"),), (IntAttr(1),), i32, SPACE_GLOBAL)
+    unknown_result_type = nn_memory_type(("?",), (1,), i32, SPACE_GLOBAL)
+    source_type = nn_memory_type(("M",), (1,), i32, SPACE_GLOBAL)
     unknown_block = Block(arg_types=[source_type, source_type])
     unknown_op = NnAddOp(unknown_block.args[0], unknown_block.args[1], unknown_result_type, SPACE_GLOBAL)
     unknown_block.add_op(unknown_op)
@@ -1248,12 +1249,12 @@ def test_lower_element_binary_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="nn element binary result shape must not contain '\\?'"):
         NnLoweringPass().apply(Context(), unknown_module)
 
-    scalar_mismatch_block = Block(arg_types=[nn_memory_type((IntAttr(2),), (IntAttr(1),), f32, SPACE_GLOBAL)])
+    scalar_mismatch_block = Block(arg_types=[nn_memory_type((2,), (1,), f32, SPACE_GLOBAL)])
     scalar_mismatch_const = arith.ConstantOp(IntegerAttr(3, i32))
     scalar_mismatch_op = NnAddOp(
         scalar_mismatch_block.args[0],
         scalar_mismatch_const.result,
-        nn_memory_type((IntAttr(2),), (IntAttr(1),), f32, SPACE_GLOBAL),
+        nn_memory_type((2,), (1,), f32, SPACE_GLOBAL),
         SPACE_GLOBAL,
     )
     scalar_mismatch_block.add_op(scalar_mismatch_const)
@@ -1261,16 +1262,16 @@ def test_lower_element_binary_public_error_matrix() -> None:
     scalar_mismatch_block.add_op(func.ReturnOp(scalar_mismatch_op.results[0]))
     scalar_mismatch_module = _module_from_block(
         "element_binary_scalar_mismatch",
-        [nn_memory_type((IntAttr(2),), (IntAttr(1),), f32, SPACE_GLOBAL)],
-        [nn_memory_type((IntAttr(2),), (IntAttr(1),), f32, SPACE_GLOBAL)],
+        [nn_memory_type((2,), (1,), f32, SPACE_GLOBAL)],
+        [nn_memory_type((2,), (1,), f32, SPACE_GLOBAL)],
         scalar_mismatch_block,
     )
     with pytest.raises(KernelCodeError, match="nn element binary scalar type mismatch"):
         NnLoweringPass().apply(Context(), scalar_mismatch_module)
 
-    compare_mismatch_block = Block(arg_types=[nn_memory_type((IntAttr(2),), (IntAttr(1),), f32, SPACE_GLOBAL)])
+    compare_mismatch_block = Block(arg_types=[nn_memory_type((2,), (1,), f32, SPACE_GLOBAL)])
     compare_mismatch_const = arith.ConstantOp(IntegerAttr(3, i32))
-    compare_mismatch_result_type = nn_memory_type((IntAttr(2),), (IntAttr(1),), i1, SPACE_GLOBAL)
+    compare_mismatch_result_type = nn_memory_type((2,), (1,), i1, SPACE_GLOBAL)
     compare_mismatch_op = NnEqOp(
         compare_mismatch_block.args[0],
         compare_mismatch_const.result,
@@ -1282,7 +1283,7 @@ def test_lower_element_binary_public_error_matrix() -> None:
     compare_mismatch_block.add_op(func.ReturnOp(compare_mismatch_op.results[0]))
     compare_mismatch_module = _module_from_block(
         "compare_scalar_mismatch",
-        [nn_memory_type((IntAttr(2),), (IntAttr(1),), f32, SPACE_GLOBAL)],
+        [nn_memory_type((2,), (1,), f32, SPACE_GLOBAL)],
         [compare_mismatch_result_type],
         compare_mismatch_block,
     )
@@ -1299,14 +1300,14 @@ def test_lower_element_binary_public_error_matrix() -> None:
 def test_lower_cast_preserves_symbol_dim() -> None:
     block = Block()
     operand_type = nn_memory_type(
-        (IntAttr(2), StringAttr("M")),
-        (IntAttr(2), IntAttr(1)),
+        (2, "M"),
+        (2, 1),
         i32,
         SPACE_GLOBAL,
     )
     result_type = nn_memory_type(
-        (IntAttr(2), StringAttr("M")),
-        (IntAttr(2), IntAttr(1)),
+        (2, "M"),
+        (2, 1),
         f32,
         SPACE_GLOBAL,
     )
@@ -1332,10 +1333,10 @@ def test_lower_cast_preserves_symbol_dim() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_select_preserves_symbol_dim() -> None:
     block = Block()
-    cond_type = nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), i1, SPACE_GLOBAL)
-    lhs_type = nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    rhs_type = nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
+    cond_type = nn_memory_type((2, "M"), (2, 1), i1, SPACE_GLOBAL)
+    lhs_type = nn_memory_type((2, "M"), (2, 1), f32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((2, "M"), (2, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, "M"), (2, 1), f32, SPACE_GLOBAL)
     cond = add_block_arg(block, cond_type)
     lhs = add_block_arg(block, lhs_type)
     rhs = add_block_arg(block, rhs_type)
@@ -1359,10 +1360,10 @@ def test_select_preserves_symbol_dim() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_broadcast_with_implicit_expand() -> None:
     block = Block()
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
     result_type = nn_memory_type(
-        (IntAttr(1), IntAttr(2), IntAttr(2)),
-        (IntAttr(4), IntAttr(2), IntAttr(1)),
+        (1, 2, 2),
+        (4, 2, 1),
         i32,
         SPACE_GLOBAL,
     )
@@ -1404,14 +1405,14 @@ def _build_broadcast_exp_reduce_min_func() -> func.FuncOp:
     - 功能实现: test/passes/lowering/nn_lowering/test_nn_lowering.py
     """
 
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    result_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    result_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
     region = Region()
     block = Block(arg_types=[operand_type])
     region.add_block(block)
     broadcast_type = nn_memory_type(
-        (IntAttr(2), IntAttr(2), IntAttr(2)),
-        (IntAttr(4), IntAttr(2), IntAttr(1)),
+        (2, 2, 2),
+        (4, 2, 1),
         i32,
         SPACE_GLOBAL,
     )
@@ -1479,9 +1480,9 @@ def test_lower_combined_ops_alloc() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_rejects_invalid_add_shape() -> None:
-    lhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    rhs_type = nn_memory_type((IntAttr(3), IntAttr(3)), (IntAttr(3), IntAttr(1)), i32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    lhs_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((3, 3), (3, 1), i32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
     region = Region()
     block = Block(arg_types=[lhs_type, rhs_type])
     region.add_block(block)
@@ -1504,8 +1505,8 @@ def test_lower_rejects_invalid_add_shape() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_broadcast_rejects_unknown_dim() -> None:
     operand_type = nn_memory_type(
-        (IntAttr(2), StringAttr("?")),
-        (IntAttr(2), IntAttr(1)),
+        (2, "?"),
+        (2, 1),
         i32,
         SPACE_GLOBAL,
     )
@@ -1529,8 +1530,8 @@ def test_lower_broadcast_rejects_unknown_dim() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_cast_symbol_dim_rejects_mismatch() -> None:
-    operand_type = nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    result_type = nn_memory_type((IntAttr(2), StringAttr("N")), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, "M"), (2, 1), i32, SPACE_GLOBAL)
+    result_type = nn_memory_type((2, "N"), (2, 1), f32, SPACE_GLOBAL)
     region = Region()
     block = Block(arg_types=[operand_type])
     region.add_block(block)
@@ -1552,10 +1553,10 @@ def test_lower_cast_symbol_dim_rejects_mismatch() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_select_preserves_symbol_dim() -> None:
     block = Block()
-    cond_type = nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), i1, SPACE_GLOBAL)
-    lhs_type = nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    rhs_type = nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
+    cond_type = nn_memory_type((2, "M"), (2, 1), i1, SPACE_GLOBAL)
+    lhs_type = nn_memory_type((2, "M"), (2, 1), f32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((2, "M"), (2, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, "M"), (2, 1), f32, SPACE_GLOBAL)
     cond = add_block_arg(block, cond_type)
     lhs = add_block_arg(block, lhs_type)
     rhs = add_block_arg(block, rhs_type)
@@ -1579,14 +1580,14 @@ def test_select_preserves_symbol_dim() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_transpose_dynamic() -> None:
     operand_type = nn_memory_type(
-        (StringAttr("M"), StringAttr("N")),
-        (IntAttr(2), IntAttr(1)),
+        ("M", "N"),
+        (2, 1),
         f32,
         SPACE_GLOBAL,
     )
     result_type = nn_memory_type(
-        (StringAttr("N"), StringAttr("M")),
-        (StringAttr("M"), IntAttr(1)),
+        ("N", "M"),
+        ("M", 1),
         f32,
         SPACE_GLOBAL,
     )
@@ -1614,10 +1615,10 @@ def test_lower_transpose_dynamic() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_bfloat16_cast() -> None:
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
     result_type = nn_memory_type(
-        (IntAttr(2), IntAttr(2)),
-        (IntAttr(2), IntAttr(1)),
+        (2, 2),
+        (2, 1),
         BFloat16Type(),
         SPACE_GLOBAL,
     )
@@ -1646,8 +1647,8 @@ def test_lower_bfloat16_cast() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_rejects_unknown_op() -> None:
     block = Block()
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
     operand = add_block_arg(block, operand_type)
     unknown_op = NnAddOp(operand, operand, res_type, SPACE_GLOBAL)
     unknown_op.name = "nn.unknown"
@@ -1667,14 +1668,14 @@ def test_lower_rejects_unknown_op() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_reduce_min_rejects_invalid_rank() -> None:
     operand_type = nn_memory_type(
-        (IntAttr(2), StringAttr("M")),
-        (IntAttr(2), IntAttr(1)),
+        (2, "M"),
+        (2, 1),
         f32,
         SPACE_GLOBAL,
     )
     res_type = nn_memory_type(
-        (IntAttr(2), IntAttr(1)),
-        (IntAttr(1), IntAttr(1)),
+        (2, 1),
+        (1, 1),
         f32,
         SPACE_GLOBAL,
     )
@@ -1705,8 +1706,8 @@ def test_reduce_min_rejects_invalid_rank() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_reduce_min_rejects_bad_keepdim() -> None:
     block = Block()
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(1)), (IntAttr(1), IntAttr(1)), f32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 1), (1, 1), f32, SPACE_GLOBAL)
     operand = add_block_arg(block, operand_type)
     reduce_op = NnReduceMinOp(
         operand,
@@ -1732,8 +1733,8 @@ def test_reduce_min_rejects_bad_keepdim() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_reduce_min_rejects_keepdim_negative_one() -> None:
     block = Block()
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(1)), (IntAttr(1), IntAttr(1)), f32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 1), (1, 1), f32, SPACE_GLOBAL)
     operand = add_block_arg(block, operand_type)
     reduce_op = NnReduceMinOp(
         operand,
@@ -1758,12 +1759,12 @@ def test_reduce_min_rejects_keepdim_negative_one() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_reduce_public_keepdim_and_scalar_matrix() -> None:
     dynamic_type = nn_memory_type(
-        (StringAttr("M"), StringAttr("N")),
-        (StringAttr("N"), IntAttr(1)),
+        ("M", "N"),
+        ("N", 1),
         f32,
         SPACE_GLOBAL,
     )
-    keep_false_result_type = nn_memory_type((StringAttr("M"),), (IntAttr(1),), f32, SPACE_GLOBAL)
+    keep_false_result_type = nn_memory_type(("M",), (1,), f32, SPACE_GLOBAL)
     keep_false_block = Block(arg_types=[dynamic_type])
     keep_false_op = NnReduceSumOp(keep_false_block.args[0], keep_false_result_type, [1], False, SPACE_GLOBAL)
     keep_false_block.add_op(keep_false_op)
@@ -1777,8 +1778,8 @@ def test_lower_reduce_public_keepdim_and_scalar_matrix() -> None:
     keep_false_reduce = next(op for op in keep_false_lowered_block.ops if isinstance(op, KernelReduceOp))
     assert keep_false_reduce.keepdim.value.data == 0
 
-    keep_true_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    keep_true_result_type = nn_memory_type((IntAttr(2), IntAttr(1)), (IntAttr(1), IntAttr(1)), f32, SPACE_GLOBAL)
+    keep_true_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
+    keep_true_result_type = nn_memory_type((2, 1), (1, 1), f32, SPACE_GLOBAL)
     keep_true_block = Block(arg_types=[keep_true_type])
     keep_true_op = NnReduceMinOp(
         keep_true_block.args[0],
@@ -1832,8 +1833,8 @@ def test_lower_reduce_public_keepdim_and_scalar_matrix() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_reduce_public_attribute_error_matrix() -> None:
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    result_type = nn_memory_type((IntAttr(2), IntAttr(1)), (IntAttr(1), IntAttr(1)), f32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
+    result_type = nn_memory_type((2, 1), (1, 1), f32, SPACE_GLOBAL)
 
     space_missing_block = Block(arg_types=[operand_type])
     space_missing_op = NnReduceSumOp(space_missing_block.args[0], result_type, [1], True, SPACE_GLOBAL)
@@ -1956,13 +1957,13 @@ def test_lower_reduce_public_attribute_error_matrix() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_reduce_public_shape_error_matrix() -> None:
     dynamic_type = nn_memory_type(
-        (StringAttr("M"), StringAttr("N")),
-        (StringAttr("N"), IntAttr(1)),
+        ("M", "N"),
+        ("N", 1),
         f32,
         SPACE_GLOBAL,
     )
 
-    reduced_symbol_result_type = nn_memory_type((StringAttr("M"), StringAttr("N")), (StringAttr("N"), IntAttr(1)), f32, SPACE_GLOBAL)
+    reduced_symbol_result_type = nn_memory_type(("M", "N"), ("N", 1), f32, SPACE_GLOBAL)
     reduced_symbol_block = Block(arg_types=[dynamic_type])
     reduced_symbol_op = NnReduceMinOp(reduced_symbol_block.args[0], reduced_symbol_result_type, [1], True, SPACE_GLOBAL)
     reduced_symbol_block.add_op(reduced_symbol_op)
@@ -1976,7 +1977,7 @@ def test_lower_reduce_public_shape_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="reduce keepdim dimension must be 1"):
         NnLoweringPass().apply(Context(), reduced_symbol_module)
 
-    reduced_static_result_type = nn_memory_type((StringAttr("M"), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
+    reduced_static_result_type = nn_memory_type(("M", 2), (2, 1), f32, SPACE_GLOBAL)
     reduced_static_block = Block(arg_types=[dynamic_type])
     reduced_static_op = NnReduceMinOp(reduced_static_block.args[0], reduced_static_result_type, [1], True, SPACE_GLOBAL)
     reduced_static_block.add_op(reduced_static_op)
@@ -1990,7 +1991,7 @@ def test_lower_reduce_public_shape_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="reduce keepdim dimension must be 1"):
         NnLoweringPass().apply(Context(), reduced_static_module)
 
-    keepdim_symbol_mismatch_type = nn_memory_type((StringAttr("K"), IntAttr(1)), (IntAttr(1), IntAttr(1)), f32, SPACE_GLOBAL)
+    keepdim_symbol_mismatch_type = nn_memory_type(("K", 1), (1, 1), f32, SPACE_GLOBAL)
     keepdim_symbol_block = Block(arg_types=[dynamic_type])
     keepdim_symbol_op = NnReduceMinOp(keepdim_symbol_block.args[0], keepdim_symbol_mismatch_type, [1], True, SPACE_GLOBAL)
     keepdim_symbol_block.add_op(keepdim_symbol_op)
@@ -2004,8 +2005,8 @@ def test_lower_reduce_public_shape_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="reduce shape mismatch"):
         NnLoweringPass().apply(Context(), keepdim_symbol_module)
 
-    keepdim_static_input_type = nn_memory_type((IntAttr(2), IntAttr(3)), (IntAttr(3), IntAttr(1)), f32, SPACE_GLOBAL)
-    keepdim_static_mismatch_type = nn_memory_type((IntAttr(4), IntAttr(1)), (IntAttr(1), IntAttr(1)), f32, SPACE_GLOBAL)
+    keepdim_static_input_type = nn_memory_type((2, 3), (3, 1), f32, SPACE_GLOBAL)
+    keepdim_static_mismatch_type = nn_memory_type((4, 1), (1, 1), f32, SPACE_GLOBAL)
     keepdim_static_block = Block(arg_types=[keepdim_static_input_type])
     keepdim_static_op = NnReduceMinOp(keepdim_static_block.args[0], keepdim_static_mismatch_type, [1], True, SPACE_GLOBAL)
     keepdim_static_block.add_op(keepdim_static_op)
@@ -2019,7 +2020,7 @@ def test_lower_reduce_public_shape_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="reduce shape mismatch"):
         NnLoweringPass().apply(Context(), keepdim_static_module)
 
-    keepdim_type_mismatch_type = nn_memory_type((IntAttr(2), IntAttr(1)), (IntAttr(1), IntAttr(1)), f32, SPACE_GLOBAL)
+    keepdim_type_mismatch_type = nn_memory_type((2, 1), (1, 1), f32, SPACE_GLOBAL)
     keepdim_type_block = Block(arg_types=[dynamic_type])
     keepdim_type_op = NnReduceMinOp(keepdim_type_block.args[0], keepdim_type_mismatch_type, [1], True, SPACE_GLOBAL)
     keepdim_type_block.add_op(keepdim_type_op)
@@ -2033,7 +2034,7 @@ def test_lower_reduce_public_shape_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="reduce shape mismatch"):
         NnLoweringPass().apply(Context(), keepdim_type_module)
 
-    no_keepdim_symbol_type = nn_memory_type((StringAttr("K"),), (IntAttr(1),), f32, SPACE_GLOBAL)
+    no_keepdim_symbol_type = nn_memory_type(("K",), (1,), f32, SPACE_GLOBAL)
     no_keepdim_symbol_block = Block(arg_types=[dynamic_type])
     no_keepdim_symbol_op = NnReduceMinOp(no_keepdim_symbol_block.args[0], no_keepdim_symbol_type, [1], False, SPACE_GLOBAL)
     no_keepdim_symbol_block.add_op(no_keepdim_symbol_op)
@@ -2047,7 +2048,7 @@ def test_lower_reduce_public_shape_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="reduce shape mismatch"):
         NnLoweringPass().apply(Context(), no_keepdim_symbol_module)
 
-    no_keepdim_static_type = nn_memory_type((IntAttr(4),), (IntAttr(1),), f32, SPACE_GLOBAL)
+    no_keepdim_static_type = nn_memory_type((4,), (1,), f32, SPACE_GLOBAL)
     no_keepdim_static_block = Block(arg_types=[keepdim_static_input_type])
     no_keepdim_static_op = NnReduceMinOp(no_keepdim_static_block.args[0], no_keepdim_static_type, [1], False, SPACE_GLOBAL)
     no_keepdim_static_block.add_op(no_keepdim_static_op)
@@ -2061,7 +2062,7 @@ def test_lower_reduce_public_shape_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="reduce shape mismatch"):
         NnLoweringPass().apply(Context(), no_keepdim_static_module)
 
-    no_keepdim_type_mismatch_type = nn_memory_type((IntAttr(2),), (IntAttr(1),), f32, SPACE_GLOBAL)
+    no_keepdim_type_mismatch_type = nn_memory_type((2,), (1,), f32, SPACE_GLOBAL)
     no_keepdim_type_block = Block(arg_types=[dynamic_type])
     no_keepdim_type_op = NnReduceMinOp(no_keepdim_type_block.args[0], no_keepdim_type_mismatch_type, [1], False, SPACE_GLOBAL)
     no_keepdim_type_block.add_op(no_keepdim_type_op)
@@ -2083,10 +2084,10 @@ def test_lower_reduce_public_shape_error_matrix() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_broadcast_rejects_invalid_shape() -> None:
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
     result_type = nn_memory_type(
-        (IntAttr(3), IntAttr(2)),
-        (IntAttr(2), IntAttr(1)),
+        (3, 2),
+        (2, 1),
         i32,
         SPACE_GLOBAL,
     )
@@ -2113,8 +2114,8 @@ def test_lower_broadcast_rejects_invalid_shape() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_broadcast_rejects_invalid_scalar() -> None:
     block = Block()
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
-    result_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
+    result_type = nn_memory_type((2, 2), (2, 1), i32, SPACE_GLOBAL)
     operand = add_block_arg(block, operand_type)
     scalar = add_block_arg(block, StringAttr)
     broadcast_op = NnBroadcastOp(operand, result_type, SPACE_GLOBAL)
@@ -2134,10 +2135,10 @@ def test_broadcast_rejects_invalid_scalar() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_broadcast_public_dynamic_dim_and_scalar_matrix() -> None:
-    operand_type = nn_memory_type((StringAttr("M"),), (IntAttr(1),), i32, SPACE_GLOBAL)
+    operand_type = nn_memory_type(("M",), (1,), i32, SPACE_GLOBAL)
     result_type = nn_memory_type(
-        (StringAttr("K"), StringAttr("M")),
-        (StringAttr("M"), IntAttr(1)),
+        ("K", "M"),
+        ("M", 1),
         i32,
         SPACE_GLOBAL,
     )
@@ -2159,10 +2160,10 @@ def test_lower_broadcast_public_dynamic_dim_and_scalar_matrix() -> None:
     alloc_op = next(op for op in lowered_block.ops if isinstance(op, DmaAllocOp))
     assert len(alloc_op.dynamic_shape) == 2
 
-    repeated_type = nn_memory_type((StringAttr("M"),), (IntAttr(1),), i32, SPACE_GLOBAL)
+    repeated_type = nn_memory_type(("M",), (1,), i32, SPACE_GLOBAL)
     repeated_result_type = nn_memory_type(
-        (StringAttr("M"), StringAttr("M")),
-        (StringAttr("M"), IntAttr(1)),
+        ("M", "M"),
+        ("M", 1),
         i32,
         SPACE_GLOBAL,
     )
@@ -2177,10 +2178,10 @@ def test_lower_broadcast_public_dynamic_dim_and_scalar_matrix() -> None:
     _assert_single_op(repeated_lowered_block, DmaBroadcastOp)
     assert len([op for op in repeated_lowered_block.ops if isinstance(op, SymbolGetDimOp)]) == 1
 
-    source_reuse_type = nn_memory_type((IntAttr(1), StringAttr("M")), (StringAttr("M"), IntAttr(1)), i32, SPACE_GLOBAL)
+    source_reuse_type = nn_memory_type((1, "M"), ("M", 1), i32, SPACE_GLOBAL)
     source_reuse_result_type = nn_memory_type(
-        (StringAttr("M"), StringAttr("M")),
-        (StringAttr("M"), IntAttr(1)),
+        ("M", "M"),
+        ("M", 1),
         i32,
         SPACE_GLOBAL,
     )
@@ -2200,16 +2201,16 @@ def test_lower_broadcast_public_dynamic_dim_and_scalar_matrix() -> None:
     _assert_single_op(source_reuse_lowered_block, DmaBroadcastOp)
     assert len([op for op in source_reuse_lowered_block.ops if isinstance(op, SymbolGetDimOp)]) == 1
 
-    seed_type = nn_memory_type((StringAttr("K"),), (IntAttr(1),), i32, SPACE_GLOBAL)
-    expand_type = nn_memory_type((IntAttr(1), StringAttr("M")), (StringAttr("M"), IntAttr(1)), i32, SPACE_GLOBAL)
+    seed_type = nn_memory_type(("K",), (1,), i32, SPACE_GLOBAL)
+    expand_type = nn_memory_type((1, "M"), ("M", 1), i32, SPACE_GLOBAL)
     expand_result_type = nn_memory_type(
-        (StringAttr("K"), StringAttr("M")),
-        (StringAttr("M"), IntAttr(1)),
+        ("K", "M"),
+        ("M", 1),
         i32,
         SPACE_GLOBAL,
     )
     expand_block = Block(arg_types=[seed_type, expand_type])
-    seed_symbol = SymbolGetDimOp(expand_block.args[0], IntAttr(0))
+    seed_symbol = SymbolGetDimOp(expand_block.args[0], 0)
     expand_block.add_op(seed_symbol)
     expand_op = NnBroadcastOp(expand_block.args[1], expand_result_type, SPACE_GLOBAL)
     expand_block.add_op(expand_op)
@@ -2221,7 +2222,7 @@ def test_lower_broadcast_public_dynamic_dim_and_scalar_matrix() -> None:
     _assert_single_op(expand_lowered_block, DmaBroadcastOp)
     assert len([op for op in expand_lowered_block.ops if isinstance(op, SymbolGetDimOp)]) == 2
 
-    scalar_type = nn_memory_type((IntAttr(2),), (IntAttr(1),), i32, SPACE_GLOBAL)
+    scalar_type = nn_memory_type((2,), (1,), i32, SPACE_GLOBAL)
     scalar_block = Block(arg_types=[scalar_type, i32, SymbolValueType.from_expr("S")])
     int_scalar_op = NnBroadcastOp(scalar_block.args[0], scalar_type, SPACE_GLOBAL)
     int_scalar_op.operands = (scalar_block.args[0], scalar_block.args[1])
@@ -2250,12 +2251,12 @@ def test_lower_broadcast_public_dynamic_dim_and_scalar_matrix() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_broadcast_public_error_matrix() -> None:
     rank_operand_type = nn_memory_type(
-        (StringAttr("M"), StringAttr("N")),
-        (StringAttr("N"), IntAttr(1)),
+        ("M", "N"),
+        ("N", 1),
         i32,
         SPACE_GLOBAL,
     )
-    rank_result_type = nn_memory_type((StringAttr("M"),), (IntAttr(1),), i32, SPACE_GLOBAL)
+    rank_result_type = nn_memory_type(("M",), (1,), i32, SPACE_GLOBAL)
     rank_block = Block(arg_types=[rank_operand_type])
     rank_op = NnBroadcastOp(rank_block.args[0], rank_result_type, SPACE_GLOBAL)
     rank_block.add_op(rank_op)
@@ -2264,8 +2265,8 @@ def test_lower_broadcast_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="nn.broadcast result rank must be >= operand rank"):
         NnLoweringPass().apply(Context(), rank_module)
 
-    int_operand_type = nn_memory_type((IntAttr(2),), (IntAttr(1),), i32, SPACE_GLOBAL)
-    symbol_result_type = nn_memory_type((StringAttr("M"),), (IntAttr(1),), i32, SPACE_GLOBAL)
+    int_operand_type = nn_memory_type((2,), (1,), i32, SPACE_GLOBAL)
+    symbol_result_type = nn_memory_type(("M",), (1,), i32, SPACE_GLOBAL)
     int_block = Block(arg_types=[int_operand_type])
     int_op = NnBroadcastOp(int_block.args[0], symbol_result_type, SPACE_GLOBAL)
     int_block.add_op(int_op)
@@ -2274,10 +2275,10 @@ def test_lower_broadcast_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="NnLoweringBroadcastSymbolDimNotFromSource: result dim not in source"):
         NnLoweringPass().apply(Context(), int_module)
 
-    source_one_type = nn_memory_type((IntAttr(1), StringAttr("M")), (StringAttr("M"), IntAttr(1)), i32, SPACE_GLOBAL)
+    source_one_type = nn_memory_type((1, "M"), ("M", 1), i32, SPACE_GLOBAL)
     missing_symbol_result_type = nn_memory_type(
-        (StringAttr("K"), StringAttr("M")),
-        (StringAttr("M"), IntAttr(1)),
+        ("K", "M"),
+        ("M", 1),
         i32,
         SPACE_GLOBAL,
     )
@@ -2295,12 +2296,12 @@ def test_lower_broadcast_public_error_matrix() -> None:
         NnLoweringPass().apply(Context(), missing_symbol_module)
 
     source_axis_result_type = nn_memory_type(
-        (StringAttr("K"), StringAttr("M")),
-        (StringAttr("M"), IntAttr(1)),
+        ("K", "M"),
+        ("M", 1),
         i32,
         SPACE_GLOBAL,
     )
-    source_axis_block = Block(arg_types=[operand_type := nn_memory_type((StringAttr("M"),), (IntAttr(1),), i32, SPACE_GLOBAL)])
+    source_axis_block = Block(arg_types=[operand_type := nn_memory_type(("M",), (1,), i32, SPACE_GLOBAL)])
     source_axis_op = NnBroadcastOp(source_axis_block.args[0], source_axis_result_type, SPACE_GLOBAL)
     source_axis_block.add_op(source_axis_op)
     source_axis_block.add_op(func.ReturnOp(source_axis_op.results[0]))
@@ -2308,8 +2309,8 @@ def test_lower_broadcast_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="NnLoweringBroadcastSymbolDimNotFromSource: axis out of range"):
         NnLoweringPass().apply(Context(), source_axis_module)
 
-    mismatch_operand_type = nn_memory_type((StringAttr("M"),), (IntAttr(1),), i32, SPACE_GLOBAL)
-    mismatch_result_type = nn_memory_type((StringAttr("N"),), (IntAttr(1),), i32, SPACE_GLOBAL)
+    mismatch_operand_type = nn_memory_type(("M",), (1,), i32, SPACE_GLOBAL)
+    mismatch_result_type = nn_memory_type(("N",), (1,), i32, SPACE_GLOBAL)
     mismatch_block = Block(arg_types=[mismatch_operand_type])
     mismatch_op = NnBroadcastOp(mismatch_block.args[0], mismatch_result_type, SPACE_GLOBAL)
     mismatch_block.add_op(mismatch_op)
@@ -2318,7 +2319,7 @@ def test_lower_broadcast_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="NnLoweringBroadcastSymbolDimNotFromSource: symbol mismatch"):
         NnLoweringPass().apply(Context(), mismatch_module)
 
-    invalid_target_type = nn_memory_type((IntAttr(2),), (IntAttr(1),), i32, SPACE_GLOBAL)
+    invalid_target_type = nn_memory_type((2,), (1,), i32, SPACE_GLOBAL)
     invalid_target_block = Block(arg_types=[mismatch_operand_type])
     invalid_target_op = NnBroadcastOp(invalid_target_block.args[0], invalid_target_type, SPACE_GLOBAL)
     invalid_target_block.add_op(invalid_target_op)
@@ -2357,7 +2358,7 @@ def test_lower_broadcast_public_error_matrix() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_lower_transpose_public_error_matrix() -> None:
-    static_type = nn_memory_type((IntAttr(2),), (IntAttr(1),), f32, SPACE_GLOBAL)
+    static_type = nn_memory_type((2,), (1,), f32, SPACE_GLOBAL)
     non_memory_block = Block(arg_types=[i32])
     non_memory_op = NnTransposeOp(non_memory_block.args[0], static_type, [0], SPACE_GLOBAL)
     non_memory_block.add_op(non_memory_op)
@@ -2375,8 +2376,8 @@ def test_lower_transpose_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="nn.transpose perm must be ArrayAttr"):
         NnLoweringPass().apply(Context(), bad_perm_module)
 
-    matrix_type = nn_memory_type((IntAttr(2), IntAttr(3)), (IntAttr(3), IntAttr(1)), f32, SPACE_GLOBAL)
-    matrix_result_type = nn_memory_type((IntAttr(3), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
+    matrix_type = nn_memory_type((2, 3), (3, 1), f32, SPACE_GLOBAL)
+    matrix_result_type = nn_memory_type((3, 2), (2, 1), f32, SPACE_GLOBAL)
     rank_block = Block(arg_types=[matrix_type])
     rank_op = NnTransposeOp(rank_block.args[0], matrix_result_type, [1], SPACE_GLOBAL)
     rank_block.add_op(rank_op)
@@ -2385,17 +2386,17 @@ def test_lower_transpose_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="nn.transpose perm rank mismatch"):
         NnLoweringPass().apply(Context(), rank_module)
 
-    unknown_type = nn_memory_type((StringAttr("?"),), (IntAttr(1),), f32, SPACE_GLOBAL)
+    unknown_type = nn_memory_type(("?",), (1,), f32, SPACE_GLOBAL)
     unknown_block = Block(arg_types=[unknown_type])
     unknown_op = NnTransposeOp(unknown_block.args[0], unknown_type, [0], SPACE_GLOBAL)
     unknown_block.add_op(unknown_op)
     unknown_block.add_op(func.ReturnOp(unknown_op.results[0]))
-    unknown_module = _module_from_block("transpose_unknown_dim_error", [unknown_type], [unknown_type], unknown_block)
-    with pytest.raises(KernelCodeError, match="nn.transpose operand shape must not contain '\\?'"):
-        NnLoweringPass().apply(Context(), unknown_module)
+    unknown_module = _module_from_block("transpose_unknown_dim", [unknown_type], [unknown_type], unknown_block)
+    NnLoweringPass().apply(Context(), unknown_module)
+    _assert_single_op(unknown_block, DmaTransposeOp)
 
-    source_symbol_type = nn_memory_type((StringAttr("M"),), (IntAttr(1),), f32, SPACE_GLOBAL)
-    missing_result_type = nn_memory_type((StringAttr("N"),), (IntAttr(1),), f32, SPACE_GLOBAL)
+    source_symbol_type = nn_memory_type(("M",), (1,), f32, SPACE_GLOBAL)
+    missing_result_type = nn_memory_type(("N",), (1,), f32, SPACE_GLOBAL)
     missing_block = Block(arg_types=[source_symbol_type])
     missing_op = NnTransposeOp(missing_block.args[0], missing_result_type, [0], SPACE_GLOBAL)
     missing_block.add_op(missing_op)
@@ -2413,9 +2414,9 @@ def test_lower_transpose_public_error_matrix() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_matmul_requires_contiguous_stride() -> None:
     block = Block()
-    lhs_type = nn_memory_type((IntAttr(2), IntAttr(3)), (IntAttr(3), IntAttr(1)), f32, SPACE_GLOBAL)
-    rhs_type = nn_memory_type((IntAttr(3), IntAttr(4)), (IntAttr(4), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(4)), (IntAttr(5), IntAttr(1)), f32, SPACE_GLOBAL)
+    lhs_type = nn_memory_type((2, 3), (3, 1), f32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((3, 4), (4, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 4), (5, 1), f32, SPACE_GLOBAL)
     lhs = add_block_arg(block, lhs_type)
     rhs = add_block_arg(block, rhs_type)
     matmul_op = NnMatmulOp(lhs, rhs, res_type, SPACE_GLOBAL)
@@ -2435,8 +2436,8 @@ def test_matmul_requires_contiguous_stride() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_reduce_axes_validation() -> None:
     block = Block()
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(1)), (IntAttr(1), IntAttr(1)), f32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 1), (1, 1), f32, SPACE_GLOBAL)
     operand = add_block_arg(block, operand_type)
     reduce_op = NnReduceMinOp(
         operand,
@@ -2461,8 +2462,8 @@ def test_reduce_axes_validation() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_reduce_keepdim_validation() -> None:
     block = Block()
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(1)), (IntAttr(1), IntAttr(1)), f32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 1), (1, 1), f32, SPACE_GLOBAL)
     operand = add_block_arg(block, operand_type)
     reduce_op = NnReduceMinOp(
         operand,
@@ -2487,8 +2488,8 @@ def test_reduce_keepdim_validation() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_nn_lowering.py
 def test_softmax_requires_decompass_before_axis_validation() -> None:
     block = Block()
-    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
-    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
+    operand_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((2, 2), (2, 1), f32, SPACE_GLOBAL)
     operand = add_block_arg(block, operand_type)
     softmax_op = NnSoftmaxOp(
         operand,

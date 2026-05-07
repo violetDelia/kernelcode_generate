@@ -40,14 +40,76 @@ from kernel_gen.dialect.nn import (
 )
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.tools.ircheck import run_ircheck_text
+from test.passes.lowering.nn_lowering.memory_type_utils import memory_type
 
 GLOBAL_SPACE = "#nn.space<global>"
-STATIC_INPUT_TYPE = f"!nn.memory<[4, 8], [8, 1], f32, {GLOBAL_SPACE}>"
-STATIC_RESULT_TYPE = f"!nn.memory<[4, 1], [1, 1], f32, {GLOBAL_SPACE}>"
-DYNAMIC_INPUT_TYPE = f"!nn.memory<[M, N], [N, 1], f32, {GLOBAL_SPACE}>"
-DYNAMIC_RESULT_TYPE = f"!nn.memory<[M, 1], [1, 1], f32, {GLOBAL_SPACE}>"
-SYMBOL_DIM_RESULT_TYPE = f"!nn.memory<[1, N], [N, 1], f32, {GLOBAL_SPACE}>"
 ReduceOpType = type[NnReduceSumOp] | type[NnReduceMinOp] | type[NnReduceMaxOp]
+
+
+def _symbol_expr_text(value: int | str) -> str:
+    """构造 `#symbol.expr` 文本。
+
+
+    功能说明:
+    - 让 ircheck case 使用当前 `nn.memory` 公开文本合同。
+
+    使用示例:
+    - text = _symbol_expr_text("N")
+
+    关联文件:
+    - spec: [spec/dialect/nn.md](spec/dialect/nn.md)
+    - test: [test/passes/lowering/nn_lowering/test_reduce_lowering.py](test/passes/lowering/nn_lowering/test_reduce_lowering.py)
+    - 功能实现: [kernel_gen/dialect/symbol.py](kernel_gen/dialect/symbol.py)
+    """
+
+    return f"#symbol.expr<{value}>"
+
+
+def _symbol_int_text(value: int | str) -> str:
+    """构造 `!symbol.int` 文本。
+
+
+    功能说明:
+    - 与当前 `SymbolValueType` 打印合同保持一致。
+
+    使用示例:
+    - text = _symbol_int_text("M")
+
+    关联文件:
+    - spec: [spec/dialect/symbol.md](spec/dialect/symbol.md)
+    - test: [test/passes/lowering/nn_lowering/test_reduce_lowering.py](test/passes/lowering/nn_lowering/test_reduce_lowering.py)
+    - 功能实现: [kernel_gen/dialect/symbol.py](kernel_gen/dialect/symbol.py)
+    """
+
+    return f"!symbol.int<{_symbol_expr_text(value)}>"
+
+
+def _memory_text(shape: Sequence[int | str], stride: Sequence[int | str]) -> str:
+    """构造 `!nn.memory` 文本。
+
+
+    功能说明:
+    - 将 shape/stride 维度统一写成 `#symbol.expr<...>` 结构化合同。
+
+    使用示例:
+    - text = _memory_text([4, "N"], ["N", 1])
+
+    关联文件:
+    - spec: [spec/dialect/nn.md](spec/dialect/nn.md)
+    - test: [test/passes/lowering/nn_lowering/test_reduce_lowering.py](test/passes/lowering/nn_lowering/test_reduce_lowering.py)
+    - 功能实现: [kernel_gen/dialect/nn.py](kernel_gen/dialect/nn.py)
+    """
+
+    shape_text = ", ".join(_symbol_expr_text(value) for value in shape)
+    stride_text = ", ".join(_symbol_expr_text(value) for value in stride)
+    return f"!nn.memory<[{shape_text}], [{stride_text}], f32, {GLOBAL_SPACE}>"
+
+
+STATIC_INPUT_TYPE = _memory_text([4, 8], [8, 1])
+STATIC_RESULT_TYPE = _memory_text([4, 1], [1, 1])
+DYNAMIC_INPUT_TYPE = _memory_text(["M", "N"], ["N", 1])
+DYNAMIC_RESULT_TYPE = _memory_text(["M", 1], [1, 1])
+SYMBOL_DIM_RESULT_TYPE = _memory_text([1, "N"], ["N", 1])
 
 
 def _make_ircheck_case_text(
@@ -121,8 +183,8 @@ CASE_TEXT_SUM_DYNAMIC = _make_ircheck_case_text(
     result_type=DYNAMIC_RESULT_TYPE,
     op_name="nn.reduce_sum",
     check_body_lines=(
-        f'%0 = "symbol.get_dim"(%arg0) {{axis = #builtin.int<0>}} : ({DYNAMIC_INPUT_TYPE}) -> !symbol.int<"M">',
-        f'%1 = "dma.alloc"(%0) <{{operandSegmentSizes = array<i32: 1>}}> : (!symbol.int<"M">) -> {DYNAMIC_RESULT_TYPE}',
+        f'%0 = "symbol.get_dim"(%arg0) {{axis = #builtin.int<0>}} : ({DYNAMIC_INPUT_TYPE}) -> {_symbol_int_text("M")}',
+        f'%1 = "dma.alloc"(%0) <{{operandSegmentSizes = array<i32: 1>}}> : ({_symbol_int_text("M")}) -> {DYNAMIC_RESULT_TYPE}',
         f'"kernel.reduce"(%1, %arg0) {{axis = 1 : i64, keepdim = true, kind = "sum", space = {GLOBAL_SPACE}}} : ({DYNAMIC_RESULT_TYPE}, {DYNAMIC_INPUT_TYPE}) -> ()',
         f'func.return %1 : {DYNAMIC_RESULT_TYPE}',
     ),
@@ -156,8 +218,8 @@ CASE_TEXT_MIN_DYNAMIC = _make_ircheck_case_text(
     result_type=DYNAMIC_RESULT_TYPE,
     op_name="nn.reduce_min",
     check_body_lines=(
-        f'%0 = "symbol.get_dim"(%arg0) {{axis = #builtin.int<0>}} : ({DYNAMIC_INPUT_TYPE}) -> !symbol.int<"M">',
-        f'%1 = "dma.alloc"(%0) <{{operandSegmentSizes = array<i32: 1>}}> : (!symbol.int<"M">) -> {DYNAMIC_RESULT_TYPE}',
+        f'%0 = "symbol.get_dim"(%arg0) {{axis = #builtin.int<0>}} : ({DYNAMIC_INPUT_TYPE}) -> {_symbol_int_text("M")}',
+        f'%1 = "dma.alloc"(%0) <{{operandSegmentSizes = array<i32: 1>}}> : ({_symbol_int_text("M")}) -> {DYNAMIC_RESULT_TYPE}',
         f'"kernel.reduce"(%1, %arg0) {{axis = 1 : i64, keepdim = true, kind = "min", space = {GLOBAL_SPACE}}} : ({DYNAMIC_RESULT_TYPE}, {DYNAMIC_INPUT_TYPE}) -> ()',
         f'func.return %1 : {DYNAMIC_RESULT_TYPE}',
     ),
@@ -174,8 +236,8 @@ CASE_TEXT_MIN_SYMBOL_DIM = _make_ircheck_case_text(
     result_type=SYMBOL_DIM_RESULT_TYPE,
     op_name="nn.reduce_min",
     check_body_lines=(
-        f'%0 = "symbol.get_dim"(%arg0) {{axis = #builtin.int<1>}} : ({DYNAMIC_INPUT_TYPE}) -> !symbol.int<"N">',
-        f'%1 = "dma.alloc"(%0) <{{operandSegmentSizes = array<i32: 1>}}> : (!symbol.int<"N">) -> {SYMBOL_DIM_RESULT_TYPE}',
+        f'%0 = "symbol.get_dim"(%arg0) {{axis = #builtin.int<1>}} : ({DYNAMIC_INPUT_TYPE}) -> {_symbol_int_text("N")}',
+        f'%1 = "dma.alloc"(%0) <{{operandSegmentSizes = array<i32: 1>}}> : ({_symbol_int_text("N")}) -> {SYMBOL_DIM_RESULT_TYPE}',
         f'"kernel.reduce"(%1, %arg0) {{axis = 0 : i64, keepdim = true, kind = "min", space = {GLOBAL_SPACE}}} : ({SYMBOL_DIM_RESULT_TYPE}, {DYNAMIC_INPUT_TYPE}) -> ()',
         f'func.return %1 : {SYMBOL_DIM_RESULT_TYPE}',
     ),
@@ -209,8 +271,8 @@ CASE_TEXT_MAX_DYNAMIC = _make_ircheck_case_text(
     result_type=DYNAMIC_RESULT_TYPE,
     op_name="nn.reduce_max",
     check_body_lines=(
-        f'%0 = "symbol.get_dim"(%arg0) {{axis = #builtin.int<0>}} : ({DYNAMIC_INPUT_TYPE}) -> !symbol.int<"M">',
-        f'%1 = "dma.alloc"(%0) <{{operandSegmentSizes = array<i32: 1>}}> : (!symbol.int<"M">) -> {DYNAMIC_RESULT_TYPE}',
+        f'%0 = "symbol.get_dim"(%arg0) {{axis = #builtin.int<0>}} : ({DYNAMIC_INPUT_TYPE}) -> {_symbol_int_text("M")}',
+        f'%1 = "dma.alloc"(%0) <{{operandSegmentSizes = array<i32: 1>}}> : ({_symbol_int_text("M")}) -> {DYNAMIC_RESULT_TYPE}',
         f'"kernel.reduce"(%1, %arg0) {{axis = 1 : i64, keepdim = true, kind = "max", space = {GLOBAL_SPACE}}} : ({DYNAMIC_RESULT_TYPE}, {DYNAMIC_INPUT_TYPE}) -> ()',
         f'func.return %1 : {DYNAMIC_RESULT_TYPE}',
     ),
@@ -269,7 +331,6 @@ def _make_memory_type(
     - 功能实现: [kernel_gen/dialect/nn.py](kernel_gen/dialect/nn.py)
     """
 
-    shape_attr = ArrayAttr([IntAttr(dim) if isinstance(dim, int) else StringAttr(dim) for dim in shape])
     stride_values: list[int] = []
     running = 1
     for dim in reversed(shape):
@@ -277,8 +338,7 @@ def _make_memory_type(
         stride_values.append(running)
         running *= dim_value
     stride_values.reverse()
-    stride_attr = ArrayAttr([IntAttr(value) for value in stride_values])
-    return NnMemoryType(shape_attr, stride_attr, element_type, NnMemorySpaceAttr.from_name(space))
+    return memory_type(shape, stride_values, element_type, NnMemorySpaceAttr.from_name(space))
 
 
 def _build_reduce_module(

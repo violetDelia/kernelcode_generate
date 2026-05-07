@@ -36,7 +36,7 @@
 
 - 将 `nn.matmul` lower 为 `kernel.matmul`，结果由 `dma.alloc` 创建；若输出包含符号维度，需从输入插入 `symbol.get_dim` 并作为 `dma.alloc` 的 dynamic shape。
 - 将 `nn.img2col1d/nn.img2col2d` lower 为对应的 `kernel.img2col*`，参数必须为 `symbol.int`；若输出含符号维度，需使用 `symbol.get_dim` 与 `symbol` 算术构造 `dma.alloc` 的 dynamic shape。
-- `img2col1d/img2col2d` 动态输出 extent 的文本必须沿用 `SymbolDim` 字符串口径；`(expr // stride) + 1` 以 `//` 形式保留，不得回退为 `floor(expr/stride) + 1`。
+- `img2col1d/img2col2d` 动态输出 extent 必须使用 `SymbolExprAttr` 结构化表达；除法以 `symbol.floordiv` 公开文本表示，不使用原始 `/` 或 `//` 文本。
 - 通过 `matmul_img2col_patterns()` 提供单 op `RewritePattern` 集合。
 
 ## 额外补充

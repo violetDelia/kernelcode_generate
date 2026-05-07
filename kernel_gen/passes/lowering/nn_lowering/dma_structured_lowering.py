@@ -22,13 +22,13 @@ API 列表:
 from __future__ import annotations
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, IntegerType, StringAttr
+from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, IntegerType
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewrite_pattern
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaTransposeOp
 from kernel_gen.dialect.nn import NnBroadcastOp, NnMemoryType, NnTransposeOp
-from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolGetDimOp, SymbolValueType
 from .nn_lowering_utility import ensure_single_result
 
 
@@ -85,6 +85,28 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
     if isinstance(operand.type, IntegerType):
         return operand
     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "broadcast scalar must be int or symbol")
+
+
+def _shape_dim_expr_text(dim: Attribute) -> str:
+    """读取 structured lowering 的 shape 维度表达式。
+
+
+    功能说明:
+    - 只支持当前公开 `SymbolExprAttr` memory layout。
+    - 不支持的维度类型沿用 broadcast shape 类型错误。
+
+    使用示例:
+    - dim_text = _shape_dim_expr_text(dim)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
+    """
+
+    if isinstance(dim, SymbolExprAttr):
+        return dim.expr.data
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.broadcast shape must be SymbolExprAttr")
 
 
 def _get_symbol_dim_from_source(
@@ -153,10 +175,10 @@ def _broadcast_shape_value(dim: Attribute) -> int | str:
 
 
     功能说明:
-    - 统一支持 `StringAttr`、`IntAttr` 与 `IntegerAttr`。
+    - 统一把 `SymbolExprAttr` layout 维度转换为 int 或 str。
 
     使用示例:
-    - _broadcast_shape_value(IntAttr(4))
+    - _broadcast_shape_value(SymbolExprAttr.from_expr("4"))
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
@@ -164,13 +186,34 @@ def _broadcast_shape_value(dim: Attribute) -> int | str:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
     """
 
-    if isinstance(dim, StringAttr):
-        return dim.data
-    if isinstance(dim, IntAttr):
-        return dim.data
-    if isinstance(dim, IntegerAttr):
-        return dim.value.data
-    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.broadcast shape must be IntAttr or StringAttr")
+    dim_text = _shape_dim_expr_text(dim)
+    if dim_text.lstrip("-").isdigit():
+        return int(dim_text)
+    return dim_text
+
+
+def _perm_axis_value(entry: Attribute) -> int:
+    """读取 transpose perm 条目的静态轴号。
+
+
+    功能说明:
+    - 支持 `IntegerAttr` 与 `IntAttr` 两种公开整数 attribute。
+    - 非整数 perm 条目返回稳定 pass 错误。
+
+    使用示例:
+    - axis = _perm_axis_value(IntegerAttr(1, 64))
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
+    - test: test/passes/lowering/nn_lowering/test_nn_lowering.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
+    """
+
+    if isinstance(entry, IntegerAttr):
+        return int(entry.value.data)
+    if isinstance(entry, IntAttr):
+        return entry.data
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.transpose perm entries must be integer")
 
 
 def _ensure_broadcast_shape(
@@ -333,21 +376,23 @@ def _lower_transpose(block: Block, op: Operation) -> None:
     perm = perm_attr.data
     if len(perm) != len(result_type.shape.data):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.transpose perm rank mismatch")
+    result_shape_texts = [_shape_dim_expr_text(dim) for dim in result_type.shape.data]
+    operand_shape_texts = [_shape_dim_expr_text(dim) for dim in operand.type.shape.data]
+    has_unknown_result_dim = "?" in result_shape_texts
     symbol_dims: list[SSAValue] = []
-    symbol_map: dict[str, SSAValue] = {}
-    for axis, dim in enumerate(operand.type.shape.data):
-        if isinstance(dim, StringAttr):
-            if dim.data == "?":
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.transpose operand shape must not contain '?'")
-            symbol_op = SymbolGetDimOp(operand, IntAttr(axis))
-            block.insert_op_before(symbol_op, op)
-            symbol_map[dim.data] = symbol_op.result
-    for dim in result_type.shape.data:
-        if isinstance(dim, StringAttr):
-            symbol_value = symbol_map.get(dim.data)
-            if symbol_value is None:
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.transpose result dim not in source")
-            symbol_dims.append(symbol_value)
+    for result_axis, perm_entry in enumerate(perm):
+        source_axis = _perm_axis_value(perm_entry)
+        if source_axis < 0 or source_axis >= len(operand_shape_texts):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.transpose perm axis out of range")
+        result_dim_text = result_shape_texts[result_axis]
+        source_dim_text = operand_shape_texts[source_axis]
+        if result_dim_text != source_dim_text:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.transpose result dim not in source")
+        if not has_unknown_result_dim and result_dim_text.lstrip("-").isdigit():
+            continue
+        symbol_op = SymbolGetDimOp(operand, IntAttr(source_axis))
+        block.insert_op_before(symbol_op, op)
+        symbol_dims.append(symbol_op.result)
     alloc = DmaAllocOp(symbol_dims, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]

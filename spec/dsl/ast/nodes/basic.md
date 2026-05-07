@@ -21,7 +21,7 @@
 - `class ModuleAST(functions: list[FunctionAST], runtime_args: tuple[PythonObjectAttrAST, ...] = (), source_fn: PythonObjectAttrAST = ...)`
 - `ModuleAST.emit_mlir(ctx: Context, block: Block | None = None) -> ModuleOp`
 - `class FunctionAST(name: str, inputs: list[MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST], outputs: list[MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST], body: BlockAST, location: SourceLocation | None = None, source: PythonObjectAttrAST = ..., py_ast: PythonObjectAttrAST = ..., diagnostics: PythonObjectAttrAST = ..., has_explicit_return: BoolValueAST = ..., returns_none: BoolValueAST = ..., runtime_args: tuple[PythonObjectAttrAST, ...] = ())`
-- `FunctionAST.input_from_runtime_arg(name: str, value: object, location: SourceLocation | None = None) -> MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST`
+- `FunctionAST.input_from_runtime_arg(name: str, value: Memory | SymbolDim | bool | int | float | NnMemoryType, location: SourceLocation | None = None) -> MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST`
 - `FunctionAST.input_from_bound_value(name: str, value: ValueAST, location: SourceLocation | None = None) -> MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST`
 - `FunctionAST.iter_inputs() -> Iterable[MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST]`
 - `class MemoryAST(name: str, shape: SymbolListAST, stride: SymbolListAST, type: IntTypeAttrAST | FloatTypeAttrAST | BoolTypeAttrAST, space: MemorySpaceAttrAST, location: SourceLocation | None = None, format: PythonObjectAttrAST = ...)`
@@ -88,12 +88,12 @@
 - 功能说明：根据当前值节点公开结果语义构造赋值目标节点；memory 绑定为 `MemoryAST`，symbol 绑定为 `SymbolDimAST`，布尔与浮点绑定为对应常量节点，无解析期结果时返回当前值节点。
 - 注意事项：该接口只负责名称绑定目标构造；不得创建额外 MLIR operation。
 
-### `FunctionAST.input_from_runtime_arg(name: str, value: object, location: SourceLocation | None = None) -> MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST`
+### `FunctionAST.input_from_runtime_arg(name: str, value: Memory | SymbolDim | bool | int | float | NnMemoryType, location: SourceLocation | None = None) -> MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST`
 
-- api：`FunctionAST.input_from_runtime_arg(name: str, value: object, location: SourceLocation | None = None) -> MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST`
+- api：`FunctionAST.input_from_runtime_arg(name: str, value: Memory | SymbolDim | bool | int | float | NnMemoryType, location: SourceLocation | None = None) -> MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST`
 - 参数：
   - `name`：函数参数名；类型 `str`；无默认值。
-  - `value`：runtime 参数；类型 `object`；无默认值。
+  - `value`：runtime 参数；类型 `Memory | SymbolDim | bool | int | float | NnMemoryType`；无默认值。
   - `location`：源码位置；类型 `SourceLocation | None`；默认值 `None`。
 - 返回值：函数输入 AST 节点。
 - 功能说明：统一 runtime 参数到 `FunctionAST.inputs` 的构造规则。

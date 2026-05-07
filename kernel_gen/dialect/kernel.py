@@ -392,6 +392,7 @@ def _static_int_from_operand(operand: SSAValue) -> int | None:
 
     功能说明:
     - 支持 `arith.constant`/`symbol.const` 以及单层 `builtin.unrealized_conversion_cast`。
+    - block argument 没有定义 op，直接返回 None。
     - 无法解析时返回 None。
 
     使用示例:
@@ -404,7 +405,7 @@ def _static_int_from_operand(operand: SSAValue) -> int | None:
     """
 
     owner = operand.owner
-    if owner is None:
+    if owner is None or not isinstance(owner, Operation):
         return None
     owner_name = owner.name
     if owner_name == "arith.constant":
@@ -635,7 +636,7 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
 
     功能说明:
     - 对 `SymbolExprAttr` 比较 canonical 文本。
-    - 其它 attribute 仅在同类型且内容相等时认为一致。
+    - 其它 attribute 统一视为不一致，避免旧 bare layout 条目继续参与 verifier。
 
     使用示例:
     - _dims_equal(SymbolExprAttr.from_expr("1"), SymbolExprAttr.from_expr("1"))
@@ -648,7 +649,7 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
 
     if isinstance(lhs, SymbolExprAttr) and isinstance(rhs, SymbolExprAttr):
         return lhs.expr.data == rhs.expr.data
-    return lhs == rhs
+    return False
 
 
 def _static_int_from_dim(dim: Attribute) -> int | None:

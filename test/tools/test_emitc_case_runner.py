@@ -28,7 +28,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.tools.emitc_case_runner import run_emitc_case
 
 
-_MEM_TYPE = "!nn.memory<[4], [1], f32, #nn.space<global>>"
+_MEM_TYPE = "!nn.memory<[#symbol.expr<4>], [#symbol.expr<1>], f32, #nn.space<global>>"
 
 
 # TC-EMITC-CASE-RUNNER-001
@@ -47,8 +47,8 @@ builtin.module {{
     %1 : {_MEM_TYPE},
     %2 : {_MEM_TYPE}
   ) {{
-    %3 = tuner.cost(%0, %1, %2) {{space = #nn.space<global>, cost_kind = "VECTOR1", op_name = "kernel.add"}} : ({_MEM_TYPE}, {_MEM_TYPE}, {_MEM_TYPE}) -> !symbol.int<"LOCAL">
-    %4 = symbol.add %3, %3 : !symbol.int<"LOCAL">, !symbol.int<"LOCAL"> -> !symbol.int<"LOCAL">
+    %3 = tuner.cost(%0, %1, %2) {{space = #nn.space<global>, cost_kind = "VECTOR1", op_name = "kernel.add"}} : ({_MEM_TYPE}, {_MEM_TYPE}, {_MEM_TYPE}) -> !symbol.int<#symbol.expr<LOCAL>>
+    %4 = symbol.add %3, %3 : !symbol.int<#symbol.expr<LOCAL>>, !symbol.int<#symbol.expr<LOCAL>> -> !symbol.int<#symbol.expr<LOCAL>>
     func.return
   }}
 }}"""
@@ -108,8 +108,8 @@ def test_run_emitc_case_lowers_plain_symbol_cast_module_without_launch_wrapper()
 
 builtin.module {
   func.func @symbol_cast_case() {
-    %0 = symbol.const 9 : !symbol.int<"9">
-    %1 = "symbol.cast"(%0) : (!symbol.int<"9">) -> i32
+    %0 = symbol.const 9 : !symbol.int<#symbol.expr<9>>
+    %1 = "symbol.cast"(%0) : (!symbol.int<#symbol.expr<9>>) -> i32
     func.return
   }
 }"""
@@ -170,9 +170,9 @@ def test_run_emitc_case_applies_buffer_results_to_out_params_before_emit_c() -> 
     case_text = """// COMPILE_ARGS: --pass buffer-results-to-out-params
 
 builtin.module {
-  func.func @dma_cast_case(%0 : !nn.memory<[2, 3], [3, 1], f32, #nn.space<global>>) -> !nn.memory<[2, 3], [3, 1], i32, #nn.space<global>> {
-    %1 = "dma.cast"(%0) : (!nn.memory<[2, 3], [3, 1], f32, #nn.space<global>>) -> !nn.memory<[2, 3], [3, 1], i32, #nn.space<global>>
-    func.return %1 : !nn.memory<[2, 3], [3, 1], i32, #nn.space<global>>
+  func.func @dma_cast_case(%0 : !nn.memory<[#symbol.expr<2>, #symbol.expr<3>], [#symbol.expr<3>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<2>, #symbol.expr<3>], [#symbol.expr<3>, #symbol.expr<1>], i32, #nn.space<global>> {
+    %1 = "dma.cast"(%0) : (!nn.memory<[#symbol.expr<2>, #symbol.expr<3>], [#symbol.expr<3>, #symbol.expr<1>], f32, #nn.space<global>>) -> !nn.memory<[#symbol.expr<2>, #symbol.expr<3>], [#symbol.expr<3>, #symbol.expr<1>], i32, #nn.space<global>>
+    func.return %1 : !nn.memory<[#symbol.expr<2>, #symbol.expr<3>], [#symbol.expr<3>, #symbol.expr<1>], i32, #nn.space<global>>
   }
 }"""
 
@@ -198,10 +198,10 @@ def test_run_emitc_case_allows_forbidden_only_contract() -> None:
 
 builtin.module {
   func.func @kernel_exp_case(
-    %0 : !nn.memory<[2, 3], [3, 1], f32, #nn.space<global>>,
-    %1 : !nn.memory<[2, 3], [3, 1], f32, #nn.space<global>>
+    %0 : !nn.memory<[#symbol.expr<2>, #symbol.expr<3>], [#symbol.expr<3>, #symbol.expr<1>], f32, #nn.space<global>>,
+    %1 : !nn.memory<[#symbol.expr<2>, #symbol.expr<3>], [#symbol.expr<3>, #symbol.expr<1>], f32, #nn.space<global>>
   ) {
-    "kernel.exp"(%1, %0) {space = #nn.space<global>} : (!nn.memory<[2, 3], [3, 1], f32, #nn.space<global>>, !nn.memory<[2, 3], [3, 1], f32, #nn.space<global>>) -> ()
+    "kernel.exp"(%1, %0) {space = #nn.space<global>} : (!nn.memory<[#symbol.expr<2>, #symbol.expr<3>], [#symbol.expr<3>, #symbol.expr<1>], f32, #nn.space<global>>, !nn.memory<[#symbol.expr<2>, #symbol.expr<3>], [#symbol.expr<3>, #symbol.expr<1>], f32, #nn.space<global>>) -> ()
     func.return
   }
 }"""

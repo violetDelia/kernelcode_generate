@@ -26,8 +26,8 @@ API 列表:
 from __future__ import annotations
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
-from xdsl.dialects.builtin import IntAttr, StringAttr
-from xdsl.ir import Block, Operation, SSAValue
+from xdsl.dialects.builtin import IntAttr
+from xdsl.ir import Attribute, Block, Operation, SSAValue
 from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewrite_pattern
 from xdsl.utils.exceptions import VerifyException
 
@@ -51,6 +51,7 @@ from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolConstOp,
     SymbolDivOp,
+    SymbolExprAttr,
     SymbolFloorDivOp,
     SymbolGetDimOp,
     SymbolMulOp,
@@ -72,6 +73,50 @@ _SYMBOL_ARITH_OPS: dict[str, type[Operation]] = {
     "symbol.div": SymbolDivOp,
     "symbol.floordiv": SymbolFloorDivOp,
 }
+
+
+def _shape_dim_expr_text(dim: Attribute) -> str:
+    """读取 memory shape 维度表达文本。
+
+
+    功能说明:
+    - 公开 `NnMemoryType` shape 维度由 `SymbolExprAttr` 承载，此处读取其表达文本。
+    - 不再接受旧 `IntAttr` / `StringAttr` memory layout 分支。
+
+    使用示例:
+    - expr = _shape_dim_expr_text(result_type.shape.data[0])
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/spec.md
+    - test: test/tools/test_dsl_run.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
+    """
+
+    if isinstance(dim, SymbolExprAttr):
+        return dim.expr.data
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary result shape must be SymbolExprAttr")
+
+
+def _shape_dim_is_static_int(dim: Attribute) -> bool:
+    """判断 memory shape 维度是否为静态整数。
+
+
+    功能说明:
+    - 数字 `SymbolExprAttr` 按静态整数处理。
+    - 符号名、`?` 和复合表达式保持动态 shape operand 生成路径。
+
+    使用示例:
+    - if _shape_dim_is_static_int(dim):
+    -     ...
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/spec.md
+    - test: test/tools/test_dsl_run.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
+    """
+
+    expr = _shape_dim_expr_text(dim)
+    return expr.lstrip("-").isdigit()
 
 
 def _select_memory_operand(op: Operation) -> SSAValue:
@@ -128,36 +173,25 @@ def _build_alloc_dynamic_shape_from_source(
     ops: list[Operation] = []
     operands: list[SSAValue] = []
     rank = len(result_type.shape.data)
-    has_dynamic = any(isinstance(dim, StringAttr) for dim in result_type.shape.data)
+    has_dynamic = any(not _shape_dim_is_static_int(dim) for dim in result_type.shape.data)
     if not has_dynamic:
-        for dim in result_type.shape.data:
-            if not isinstance(dim, IntAttr):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary result shape must be int or symbol")
         return ops, operands
 
     for axis, dim in enumerate(result_type.shape.data):
-        if isinstance(dim, StringAttr):
-            if dim.data == "?":
-                source_dim = source_type.shape.data[axis]
-                dynamic_operand = _source_alloc_dynamic_dim(source, axis, rank)
-                if not (
-                    isinstance(source_dim, StringAttr)
-                    and source_dim.data == "?"
-                    and dynamic_operand is not None
-                ):
-                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary result shape must not contain '?'")
-                operands.append(dynamic_operand)
-                continue
-            get_dim = SymbolGetDimOp(source, IntAttr(axis))
-            ops.append(get_dim)
-            operands.append(get_dim.result)
+        dim_expr = _shape_dim_expr_text(dim)
+        if dim_expr == "?":
+            source_dim = source_type.shape.data[axis]
+            dynamic_operand = _source_alloc_dynamic_dim(source, axis, rank)
+            if not (
+                _shape_dim_expr_text(source_dim) == "?"
+                and dynamic_operand is not None
+            ):
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary result shape must not contain '?'")
+            operands.append(dynamic_operand)
             continue
-        if isinstance(dim, IntAttr):
-            get_dim = SymbolGetDimOp(source, IntAttr(axis))
-            ops.append(get_dim)
-            operands.append(get_dim.result)
-            continue
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn element binary result shape must be int or symbol")
+        get_dim = SymbolGetDimOp(source, IntAttr(axis))
+        ops.append(get_dim)
+        operands.append(get_dim.result)
 
     return ops, operands
 

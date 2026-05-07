@@ -34,9 +34,11 @@ from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import FunctionType, ModuleOp
 from xdsl.ir import Block, Region
+from xdsl.parser import Parser
 from xdsl.passes import ModulePass
 
 from kernel_gen.core.config import reset_config, set_dump_dir
+from kernel_gen.core.context import build_default_context
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -50,6 +52,21 @@ pipeline_module = importlib.import_module("kernel_gen.passes.pipeline")
 build_default_lowering_pipeline = pipeline_module.build_default_lowering_pipeline
 buffer_results_module = importlib.import_module("kernel_gen.passes.buffer_results_to_out_params")
 BufferResultsToOutParamsPass = buffer_results_module.BufferResultsToOutParamsPass
+
+
+def _parse_module(source_ir: str) -> ModuleOp:
+    """解析测试用完整 module。
+
+    功能说明:
+    - 使用公开默认 context 构造含项目 dialect 的 module。
+
+    使用示例:
+    - module = _parse_module("builtin.module {}")
+    """
+
+    parsed = Parser(build_default_context(), source_ir).parse_module()
+    assert isinstance(parsed, ModuleOp)
+    return parsed
 
 
 def _reload_registry_module():
@@ -169,7 +186,16 @@ def test_pass_manager_dump_dir_writes_pass_ir(tmp_path: Path) -> None:
 
     pm = PassManager(name="dump-pipeline")
     pm.add_pass(NoOpPass())
-    module = ModuleOp([])
+    module = _parse_module(
+        """
+builtin.module {
+  func.func @dump_alias(%n : !symbol.int<#symbol.expr<N>>) {
+    %zero = "symbol.const"() {value = #builtin.int<0>} : () -> !symbol.int<#symbol.expr<0>>
+    func.return
+  }
+}
+"""
+    )
 
     try:
         set_dump_dir(tmp_path)
@@ -180,8 +206,13 @@ def test_pass_manager_dump_dir_writes_pass_ir(tmp_path: Path) -> None:
     first_ir = (tmp_path / "01-first-ir.mlir").read_text(encoding="utf-8")
     pass_ir = (tmp_path / "02-no-op.mlir").read_text(encoding="utf-8")
     assert "builtin.module" in first_ir
+    assert "#C0 = #symbol.expr<0>" in first_ir
+    assert "#S_N = #symbol.expr<N>" in first_ir
+    assert "#symbol.expr<" not in first_ir.split("builtin.module", 1)[1]
     assert pass_ir.splitlines()[0] == "no-op"
     assert "builtin.module" in pass_ir
+    assert "#S_N = #symbol.expr<N>" in pass_ir
+    assert "#symbol.expr<" not in pass_ir.split("builtin.module", 1)[1]
 
 
 # TC-PASS-003B
@@ -222,12 +253,12 @@ def test_pass_manager_folds_symbol_ops_by_default() -> None:
     assert result is module
     module_text = str(module)
     assert "symbol.add" not in module_text
-    assert 'symbol.const 5 : !symbol.int<"5">' in module_text
-    assert 'symbol.const 2 : !symbol.int<"2">' not in module_text
-    assert 'symbol.const 3 : !symbol.int<"3">' not in module_text
-    assert 'symbol.const 7 : !symbol.int<"7">' not in module_text
-    assert 'symbol.const 8 : !symbol.int<"8">' not in module_text
-    assert 'symbol.const 15 : !symbol.int<"15">' not in module_text
+    assert "symbol.const 5 : !symbol.int<#symbol.expr<5>>" in module_text
+    assert "symbol.const 2 : !symbol.int<#symbol.expr<2>>" not in module_text
+    assert "symbol.const 3 : !symbol.int<#symbol.expr<3>>" not in module_text
+    assert "symbol.const 7 : !symbol.int<#symbol.expr<7>>" not in module_text
+    assert "symbol.const 8 : !symbol.int<#symbol.expr<8>>" not in module_text
+    assert "symbol.const 15 : !symbol.int<#symbol.expr<15>>" not in module_text
 
 
 # TC-PASS-003B1
@@ -240,7 +271,7 @@ def test_pass_manager_folds_static_get_dim_by_default() -> None:
     from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, i32
 
     from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-    from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
+    from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolGetDimOp, SymbolValueType
 
     class NoOpPass(Pass):
         name = "no-op"
@@ -250,8 +281,8 @@ def test_pass_manager_folds_static_get_dim_by_default() -> None:
             assert isinstance(target, ModuleOp)
 
     memory_type = NnMemoryType(
-        ArrayAttr([IntAttr(12), StringAttr("N")]),
-        ArrayAttr([IntAttr(32), IntAttr(1)]),
+        ArrayAttr([SymbolExprAttr.from_expr("12"), SymbolExprAttr.from_expr("N")]),
+        ArrayAttr([SymbolExprAttr.from_expr("32"), SymbolExprAttr.from_expr("1")]),
         i32,
         NnMemorySpaceAttr(StringAttr("global")),
     )
@@ -272,7 +303,7 @@ def test_pass_manager_folds_static_get_dim_by_default() -> None:
     assert result is module
     module_text = str(module)
     assert "symbol.get_dim" not in module_text
-    assert 'symbol.const 12 : !symbol.int<"12">' in module_text
+    assert "symbol.const 12 : !symbol.int<#symbol.expr<12>>" in module_text
 
 
 # TC-PASS-003C

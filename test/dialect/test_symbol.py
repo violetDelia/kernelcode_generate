@@ -148,30 +148,20 @@ def _expr_attr(value: int | str) -> SymbolExprAttr:
     return SymbolExprAttr.from_expr(str(value))
 
 
-def _normalize_dims(values: list[Attribute]) -> list[Attribute]:
-    """规范化测试 memory shape/stride 维度。
+def _symbol_dims(values: list[int | str | SymbolExprAttr]) -> list[Attribute]:
+    """构造 memory shape/stride 结构化维度。
 
     功能说明:
-    - 将测试输入中的 IntAttr/StringAttr 便利写法转换为公开 SymbolExprAttr。
+    - 使用公开 SymbolExprAttr 表达 memory layout，避免旧 IntAttr/StringAttr layout 入口。
 
     使用示例:
-    - _normalize_dims([IntAttr(4), StringAttr("N")])
+    - _symbol_dims([4, "N"])
     """
 
-    normalized: list[Attribute] = []
-    for value in values:
-        if isinstance(value, SymbolExprAttr):
-            normalized.append(value)
-        elif isinstance(value, IntAttr):
-            normalized.append(_expr_attr(value.data))
-        elif isinstance(value, StringAttr):
-            normalized.append(_expr_attr(value.data))
-        else:
-            normalized.append(value)
-    return normalized
+    return [value if isinstance(value, SymbolExprAttr) else _expr_attr(value) for value in values]
 
 
-def _make_memory_type(shape: list[Attribute], stride: list[Attribute]) -> NnMemoryType:
+def _make_memory_type(shape: list[int | str | SymbolExprAttr], stride: list[int | str | SymbolExprAttr]) -> NnMemoryType:
     """构造 nn.memory type。
 
 
@@ -179,7 +169,7 @@ def _make_memory_type(shape: list[Attribute], stride: list[Attribute]) -> NnMemo
     - 为 symbol.get_dim/get_stride 测试构造最小合法 memory type。
 
     使用示例:
-    - _make_memory_type([IntAttr(4)], [IntAttr(1)])
+    - _make_memory_type([4], [1])
 
     关联文件:
     - spec: spec/dialect/symbol.md
@@ -187,7 +177,7 @@ def _make_memory_type(shape: list[Attribute], stride: list[Attribute]) -> NnMemo
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
-    return NnMemoryType(ArrayAttr(_normalize_dims(shape)), ArrayAttr(_normalize_dims(stride)), i32, _make_space())
+    return NnMemoryType(ArrayAttr(_symbol_dims(shape)), ArrayAttr(_symbol_dims(stride)), i32, _make_space())
 
 
 def _make_memory_value(memory_type: NnMemoryType):
@@ -588,6 +578,8 @@ def test_symbol_value_type_public_expression_matrix() -> None:
 def test_symbol_expr_attr_public_canonical_edge_matrix() -> None:
     cases = [
         ("? + 1", "#symbol.expr<?>"),
+        ("-?", "#symbol.expr<?>"),
+        ("--N", "#symbol.expr<N>"),
         ("N + 0", "#symbol.expr<N>"),
         ("0 + 0", "#symbol.expr<0>"),
         ("N + -1", "#symbol.expr<N - 1>"),
@@ -1291,7 +1283,7 @@ def test_symbol_ptr_type_rejects_non_type_dtype() -> None:
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_get_dim_reads_static_dim_from_memory_type() -> None:
     source = _make_memory_value(
-        _make_memory_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)])
+        _make_memory_type([4, 8], [8, 1])
     )
 
     op = SymbolGetDimOp(source, 0)
@@ -1306,7 +1298,7 @@ def test_symbol_get_dim_reads_static_dim_from_memory_type() -> None:
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_get_dim_folds_static_dim_to_const_attr() -> None:
     source = _make_memory_value(
-        _make_memory_type([IntAttr(4), StringAttr("N")], [IntAttr(8), IntAttr(1)])
+        _make_memory_type([4, "N"], [8, 1])
     )
 
     static_op = SymbolGetDimOp(source, 0)
@@ -1322,7 +1314,7 @@ def test_symbol_get_dim_folds_static_dim_to_const_attr() -> None:
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_get_dim_reads_symbolic_dim_from_memory_type() -> None:
     source = _make_memory_value(
-        _make_memory_type([StringAttr("M"), StringAttr("N")], [StringAttr("N"), IntAttr(1)])
+        _make_memory_type(["M", "N"], ["N", 1])
     )
 
     op = SymbolGetDimOp(source, 1)
@@ -1337,7 +1329,7 @@ def test_symbol_get_dim_reads_symbolic_dim_from_memory_type() -> None:
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_get_stride_reads_static_stride_from_memory_type() -> None:
     source = _make_memory_value(
-        _make_memory_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)])
+        _make_memory_type([4, 8], [8, 1])
     )
 
     op = SymbolGetStrideOp(source, 0)
@@ -1352,7 +1344,7 @@ def test_symbol_get_stride_reads_static_stride_from_memory_type() -> None:
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_get_stride_folds_static_stride_to_const_attr() -> None:
     source = _make_memory_value(
-        _make_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(16), StringAttr("N")])
+        _make_memory_type(["M", "N"], [16, "N"])
     )
 
     static_op = SymbolGetStrideOp(source, 0)
@@ -1369,13 +1361,13 @@ def test_symbol_get_stride_folds_static_stride_to_const_attr() -> None:
 def test_symbol_memory_query_fold_public_rejection_matrix() -> None:
     non_memory_source = _TestOp(result_types=[i32]).results[0]
     static_source = _make_memory_value(
-        _make_memory_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)])
+        _make_memory_type([4, 8], [8, 1])
     )
     unknown_dim_source = _make_memory_value(
-        _make_memory_type([StringAttr("?"), IntAttr(8)], [IntAttr(8), IntAttr(1)])
+        _make_memory_type(["?", 8], [8, 1])
     )
     unknown_stride_source = _make_memory_value(
-        _make_memory_type([IntAttr(4), IntAttr(8)], [StringAttr("?"), IntAttr(1)])
+        _make_memory_type([4, 8], ["?", 1])
     )
 
     assert SymbolGetDimOp(non_memory_source, 0).fold() is None
@@ -1391,7 +1383,7 @@ def test_symbol_memory_query_fold_public_rejection_matrix() -> None:
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_get_stride_reads_symbolic_stride_from_memory_type() -> None:
     source = _make_memory_value(
-        _make_memory_type([StringAttr("M"), StringAttr("N")], [StringAttr("K*N"), StringAttr("N")])
+        _make_memory_type(["M", "N"], ["K*N", "N"])
     )
 
     op = SymbolGetStrideOp(source, 1)
@@ -1452,7 +1444,7 @@ builtin.module {{
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_get_dim_rejects_invalid_axis() -> None:
     source = _make_memory_value(
-        _make_memory_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)])
+        _make_memory_type([4, 8], [8, 1])
     )
 
     with pytest.raises(VerifyException, match="axis out of range"):
@@ -1469,7 +1461,7 @@ def test_symbol_get_dim_rejects_invalid_axis() -> None:
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_get_stride_rejects_invalid_axis() -> None:
     source = _make_memory_value(
-        _make_memory_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)])
+        _make_memory_type([4, 8], [8, 1])
     )
 
     with pytest.raises(VerifyException, match="axis out of range"):
@@ -1487,7 +1479,7 @@ def test_symbol_get_stride_rejects_invalid_axis() -> None:
 def test_symbol_get_dim_rejects_non_memory_type() -> None:
     non_memory_source = _TestOp(result_types=[i32]).results[0]
     unknown_dim_source = _make_memory_value(
-        _make_memory_type([StringAttr("?"), IntAttr(8)], [IntAttr(8), IntAttr(1)])
+        _make_memory_type(["?", 8], [8, 1])
     )
 
     with pytest.raises(VerifyException, match="source must be nn.memory"):
@@ -1504,7 +1496,7 @@ def test_symbol_get_dim_rejects_non_memory_type() -> None:
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_get_stride_rejects_unknown_entry() -> None:
     source = _make_memory_value(
-        _make_memory_type([StringAttr("N"), IntAttr(8)], [StringAttr("?"), IntAttr(1)])
+        _make_memory_type(["N", 8], ["?", 1])
     )
 
     op = SymbolGetStrideOp(source, 0)

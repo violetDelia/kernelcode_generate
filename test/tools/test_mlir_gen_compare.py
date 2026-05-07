@@ -505,6 +505,54 @@ def test_mlir_gen_compare_text_rejects_memory_floor_div_mismatch(
     assert ok is False
 
 
+# TC-MLIR-GEN-COMPARE-014
+# 功能说明: 验证带 `//` 的 memory 文本会走当前文件内 raw compare 兜底。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_handles_memory_floor_div_raw_compare
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_mlir_gen_compare_text_handles_memory_floor_div_raw_compare(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actual_module = _build_module_with_memory_floor_div_expr()
+    expected_text = """// comment with "quoted value" keeps string handling live
+builtin.module {
+  func.func @main(
+      %0 : !nn.memory<[#symbol.expr<M // S + 1>], [#symbol.expr<1>], i32, #nn.space<global>>) {
+    func.return
+  }
+}
+"""
+    _install_public_mlir_gen_stub(monkeypatch, lambda *_a, **_k: actual_module)
+
+    ok = compare_module.mlir_gen_compare_text(
+        fn=_dummy_kernel,
+        runtime_args=None,
+        mlir_text=expected_text,
+    )
+
+    assert ok is False
+
+
+# TC-MLIR-GEN-COMPARE-015
+# 功能说明: 验证公开 mlir_gen_compare 的 runtime_args 类型边界稳定报错。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_rejects_invalid_runtime_args_type
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_mlir_gen_compare_rejects_invalid_runtime_args_type() -> None:
+    try:
+        compare_module.mlir_gen_compare_text(
+            fn=_dummy_kernel,
+            runtime_args=42,
+            mlir_text=_SIMPLE_MODULE_TEXT,
+        )
+    except TypeError as exc:
+        assert "runtime_args must be list, tuple, or None" in str(exc)
+    else:
+        raise AssertionError("expected TypeError for invalid runtime_args type")
+
+
 # TC-MLIR-GEN-COMPARE-009
 # 功能说明: 对齐 mlir_gen_compare_text 的一致性比较路径。
 # 测试目的: 验证 mlir_gen_compare_text 在预期一致时返回 True。

@@ -170,9 +170,9 @@ def _assert_dynamic_memory_ir(
 
 
     功能说明:
-    - 确认输出 memory 类型包含 `!nn.memory<[B, C, -KH + XH + 1, -KW + XW + 1]`。
-    - 确认输入 memory 类型包含 `!nn.memory<[B, N, XH, XW]`。
-    - 确认权重 memory 类型包含 `!nn.memory<[C, N, KH, KW]`。
+    - 确认输出 memory 类型包含 `!nn.memory<[#symbol.expr<B>, #symbol.expr<C>, #symbol.expr<-KH + XH + 1>, #symbol.expr<-KW + XW + 1>]`。
+    - 确认输入 memory 类型包含 `!nn.memory<[#symbol.expr<B>, #symbol.expr<N>, #symbol.expr<XH>, #symbol.expr<XW>]`。
+    - 确认权重 memory 类型包含 `!nn.memory<[#symbol.expr<C>, #symbol.expr<N>, #symbol.expr<KH>, #symbol.expr<KW>]`。
     - 确认 IR 不回退为本次真实运行的 output/input/weight 静态 shape。
     - 确认 IR 不回退为旧 `s1/s2/...` 匿名符号 shape。
     - 失败时抛出 `AssertionError`，让 demo 脚本直接暴露编译形态回退。
@@ -182,19 +182,34 @@ def _assert_dynamic_memory_ir(
     """
 
     dynamic_memory_fragments = (
-        ("output", "!nn.memory<[B, C, -KH + XH + 1, -KW + XW + 1]"),
-        ("input", "!nn.memory<[B, N, XH, XW]"),
-        ("weight", "!nn.memory<[C, N, KH, KW]"),
+        (
+            "output",
+            "!nn.memory<[#symbol.expr<B>, #symbol.expr<C>, #symbol.expr<-KH + XH + 1>, #symbol.expr<-KW + XW + 1>]",
+        ),
+        ("input", "!nn.memory<[#symbol.expr<B>, #symbol.expr<N>, #symbol.expr<XH>, #symbol.expr<XW>]"),
+        ("weight", "!nn.memory<[#symbol.expr<C>, #symbol.expr<N>, #symbol.expr<KH>, #symbol.expr<KW>]"),
     )
     static_memory_fragments = (
-        ("output", f"!nn.memory<[{actual_output_shape[0]}, {actual_output_shape[1]}, {actual_output_shape[2]}, {actual_output_shape[3]}]"),
-        ("input", f"!nn.memory<[{actual_input_shape[0]}, {actual_input_shape[1]}, {actual_input_shape[2]}, {actual_input_shape[3]}]"),
-        ("weight", f"!nn.memory<[{actual_weight_shape[0]}, {actual_weight_shape[1]}, {actual_weight_shape[2]}, {actual_weight_shape[3]}]"),
+        (
+            "output",
+            f"!nn.memory<[#symbol.expr<{actual_output_shape[0]}>, #symbol.expr<{actual_output_shape[1]}>, "
+            f"#symbol.expr<{actual_output_shape[2]}>, #symbol.expr<{actual_output_shape[3]}>]",
+        ),
+        (
+            "input",
+            f"!nn.memory<[#symbol.expr<{actual_input_shape[0]}>, #symbol.expr<{actual_input_shape[1]}>, "
+            f"#symbol.expr<{actual_input_shape[2]}>, #symbol.expr<{actual_input_shape[3]}>]",
+        ),
+        (
+            "weight",
+            f"!nn.memory<[#symbol.expr<{actual_weight_shape[0]}>, #symbol.expr<{actual_weight_shape[1]}>, "
+            f"#symbol.expr<{actual_weight_shape[2]}>, #symbol.expr<{actual_weight_shape[3]}>]",
+        ),
     )
     old_symbol_fragments = (
-        ("old output", "!nn.memory<[s1, s2, s3, s4]"),
-        ("old input", "!nn.memory<[s1, s5, s6, s7]"),
-        ("old weight", "!nn.memory<[s2, s5, 3, 3]"),
+        ("old output", "!nn.memory<[#symbol.expr<s1>, #symbol.expr<s2>, #symbol.expr<s3>, #symbol.expr<s4>]"),
+        ("old input", "!nn.memory<[#symbol.expr<s1>, #symbol.expr<s5>, #symbol.expr<s6>, #symbol.expr<s7>]"),
+        ("old weight", "!nn.memory<[#symbol.expr<s2>, #symbol.expr<s5>, #symbol.expr<3>, #symbol.expr<3>]"),
     )
     for label, fragment in dynamic_memory_fragments:
         if fragment not in module_text:

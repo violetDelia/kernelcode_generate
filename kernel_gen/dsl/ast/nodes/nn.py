@@ -211,6 +211,95 @@ def _symbol_expr_product(lhs: int | str, rhs: int | str) -> int | str:
     return f"{_parenthesize_symbol_expr(str(lhs))} * {_parenthesize_symbol_expr(str(rhs))}"
 
 
+def _contiguous_stride_values(shape_values: list[int | str]) -> list[int | str]:
+    """按公开 shape 表达生成连续 stride 值。
+
+    功能说明:
+    - 复用当前文件内 `SymbolExprAttr` 乘积文本规则。
+    - 返回值继续交给 `SymbolExprAttr` 构造，避免跨文件调用非公开 stride helper。
+
+    使用示例:
+    - values = _contiguous_stride_values(["M", "N"])
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/nn.md
+    - test: test/dsl/ast/nodes/test_nn.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
+    """
+
+    stride_values: list[int | str] = []
+    running: int | str = 1
+    for dim_value in reversed(shape_values):
+        stride_values.insert(0, running)
+        if isinstance(dim_value, int) and isinstance(running, int):
+            running = dim_value * running
+        else:
+            running = _symbol_expr_product(dim_value, running)
+    return stride_values
+
+
+def _shape_value_from_symbol_operand(value: SSAValue, axis: int) -> int | str:
+    """从公开 symbol SSA 类型读取 shape 表达。
+
+    功能说明:
+    - `!symbol.int<#symbol.expr<expr>>` 优先使用公开类型表达。
+    - 匿名 `?` 维度使用 SSA `name_hint` 承接 DSL 变量名，避免 transpose stride 退化为不可比较的匿名符号。
+    - 仍缺少名称时退回稳定 `runtime_dim_<axis>`。
+
+    使用示例:
+    - dim = _shape_value_from_symbol_operand(shape_operand, axis=0)
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/nn.md
+    - test: test/dsl/ast/nodes/test_nn.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
+    """
+
+    value_type = value.type
+    if isinstance(value_type, SymbolValueType):
+        public_value = value_type.get_value()
+        if isinstance(public_value, int):
+            return public_value
+        value_text = str(public_value).replace(" ", "")
+        if value_text and value_text != "?":
+            return value_text
+    if value.name_hint:
+        return value.name_hint.replace(" ", "")
+    return f"{_RUNTIME_DIM_PREFIX}{axis}"
+
+
+def _source_shape_values_for_transpose(source: SSAValue) -> list[int | str]:
+    """读取 transpose source 的类型级 shape 语义。
+
+    功能说明:
+    - `dma.reshape` source 优先从公开 shape operands 读取调用点变量名。
+    - 其它 source 使用 `NnMemoryType.shape` 的公开 `SymbolExprAttr` 文本。
+    - 匿名 `?` 维度退回稳定 `runtime_dim_<axis>`。
+
+    使用示例:
+    - dims = _source_shape_values_for_transpose(source)
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/nn.md
+    - test: test/dsl/ast/nodes/test_nn.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
+    """
+
+    owner = source.owner
+    if isinstance(owner, DmaReshapeOp) and owner.result is source:
+        return [
+            _shape_value_from_symbol_operand(SSAValue.get(operand), axis)
+            for axis, operand in enumerate(owner.shape)
+        ]
+    if not isinstance(source.type, NnMemoryType):
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "transpose value must lower to nn.memory")
+    shape_values: list[int | str] = []
+    for axis, dim in enumerate(source.type.shape.data):
+        dim_text = _symbol_expr_text(dim)
+        shape_values.append(f"{_RUNTIME_DIM_PREFIX}{axis}" if dim_text == "?" else dim_text)
+    return shape_values
+
+
 def _is_singleton_dim(dim: Attribute) -> bool:
     """判断 shape attr 是否为静态 singleton 维度。
 
@@ -375,6 +464,43 @@ def _memory_type_from_shape_attrs(
     )
 
 
+def _memory_type_from_shape_attrs_and_stride_values(
+    ctx: Context,
+    memory: Memory,
+    shape_attrs: list[SymbolExprAttr],
+    stride_values: list[int | str | SymbolDim],
+    location: SourceLocation | None,
+) -> NnMemoryType:
+    """按现有 shape attr 与解析期 stride 值构造 memory type。
+
+
+    功能说明:
+    - shape 继承已发射 operand 的公开 memory type，保持 `?` / 命名符号不被重新编号。
+    - stride 使用 operation 层公开 `Memory` 结果中的语义表达；匿名 `?` stride 改写为稳定 `runtime_dim_<axis>`，避免生成非法 `[?]/[?]` 布局。
+
+    使用示例:
+    - result_type = _memory_type_from_shape_attrs_and_stride_values(ctx, memory, shape_attrs, [\"N\", 1], location)
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/nn.md
+    - test: test/dsl/ast/nodes/test_nn.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
+    """
+
+    base_type = MemoryAST.type_from_memory(ctx, memory, location)
+    return NnMemoryType(
+        ArrayAttr(shape_attrs),
+        ArrayAttr(
+            [
+                _symbol_expr_attr_from_value(f"{_RUNTIME_DIM_PREFIX}{axis}" if _symbol_expr_text_from_value(value) == "?" else value)
+                for axis, value in enumerate(stride_values)
+            ]
+        ),
+        base_type.element_type,
+        base_type.space,
+    )
+
+
 def _contiguous_stride_attrs(shape_attrs: list[SymbolExprAttr]) -> ArrayAttr[SymbolExprAttr]:
     """根据 shape attr 生成连续 stride attr。
 
@@ -382,7 +508,8 @@ def _contiguous_stride_attrs(shape_attrs: list[SymbolExprAttr]) -> ArrayAttr[Sym
     最后一次更改: 2026-05-02
 
     功能说明:
-    - 服务当前文件内 NN compare 节点的隐式 broadcast 结果类型构造。
+    - 服务当前文件内 NN 节点结果类型构造。
+    - shape 维度为 `?` 时，在参与更高维 stride 乘积前使用稳定 `runtime_dim_<axis>` 名称，避免生成非法 `[?]/[?]` 同轴布局。
 
     使用示例:
     - _contiguous_stride_attrs([SymbolExprAttr.from_expr("4"), SymbolExprAttr.from_expr("8")])
@@ -390,11 +517,13 @@ def _contiguous_stride_attrs(shape_attrs: list[SymbolExprAttr]) -> ArrayAttr[Sym
 
     stride_attrs: list[SymbolExprAttr] = []
     running: int | str = 1
-    for dim in reversed(shape_attrs):
+    for axis, dim in reversed(list(enumerate(shape_attrs))):
         stride_attrs.insert(0, _symbol_expr_attr_from_value(running))
         dim_value = _static_int_from_symbol_expr(dim)
         if dim_value is None:
             dim_value = _symbol_expr_text(dim)
+        if dim_value == "?":
+            dim_value = f"{_RUNTIME_DIM_PREFIX}{axis}"
         if isinstance(dim_value, int) and isinstance(running, int):
             running = dim_value * running
         elif running == 1:
@@ -807,7 +936,15 @@ class NnTransposeAST(ValueAST):
             perm_values.append(item)
         result_memory = nn_ops.transpose(self.value.memory, perm_values)
         result_shape = [value.type.shape.data[axis] for axis in perm_values]
-        result_type = _memory_type_from_shape_attrs(ctx, result_memory, result_shape, self.location)
+        source_shape_values = _source_shape_values_for_transpose(value)
+        result_stride = _contiguous_stride_values([source_shape_values[axis] for axis in perm_values])
+        result_type = _memory_type_from_shape_attrs_and_stride_values(
+            ctx,
+            result_memory,
+            result_shape,
+            result_stride,
+            self.location,
+        )
         return NnTransposeOp(value, result_type, perm_values, result_type.space)
 
 @dataclass

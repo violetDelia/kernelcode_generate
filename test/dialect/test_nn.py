@@ -148,27 +148,17 @@ def _expr_attr(value: int | str) -> SymbolExprAttr:
     return SymbolExprAttr.from_expr(str(value))
 
 
-def _normalize_dims(values: Sequence[Attribute]) -> list[Attribute]:
-    """规范化测试 memory shape/stride 维度。
+def _symbol_dims(values: Sequence[int | str | SymbolExprAttr]) -> list[Attribute]:
+    """构造 memory shape/stride 结构化维度。
 
     功能说明:
-    - 将旧测试便利写法中的 IntAttr/StringAttr 转为公开 SymbolExprAttr。
+    - 使用公开 SymbolExprAttr 表达 memory layout，避免旧 IntAttr/StringAttr layout 入口。
 
     使用示例:
-    - _normalize_dims([IntAttr(2), StringAttr("N")])
+    - _symbol_dims([2, "N"])
     """
 
-    normalized: list[Attribute] = []
-    for value in values:
-        if isinstance(value, SymbolExprAttr):
-            normalized.append(value)
-        elif isinstance(value, IntAttr):
-            normalized.append(_expr_attr(value.data))
-        elif isinstance(value, StringAttr):
-            normalized.append(_expr_attr(value.data))
-        else:
-            normalized.append(value)
-    return normalized
+    return [value if isinstance(value, SymbolExprAttr) else _expr_attr(value) for value in values]
 
 
 def _make_memory_type(space: str = "global", element_type: IntegerType = i32) -> NnMemoryType:
@@ -183,8 +173,8 @@ def _make_memory_type(space: str = "global", element_type: IntegerType = i32) ->
 
 
 def _make_simple_memory_type(
-    shape: list[Attribute],
-    stride: list[Attribute],
+    shape: list[int | str | SymbolExprAttr],
+    stride: list[int | str | SymbolExprAttr],
     space: str = "global",
     element_type: IntegerType = i32,
 ) -> NnMemoryType:
@@ -195,7 +185,7 @@ def _make_simple_memory_type(
     - 便于构造 broadcast 与隐式广播拒绝测试所需类型。
 
     使用示例:
-    - _make_simple_memory_type([IntAttr(1), StringAttr(\"N\")], [IntAttr(1), IntAttr(1)])
+    - _make_simple_memory_type([1, "N"], [1, 1])
 
     关联文件:
     - spec: spec/dialect/nn.md
@@ -203,16 +193,16 @@ def _make_simple_memory_type(
     - 功能实现: kernel_gen/dialect/nn.py
     """
     return NnMemoryType(
-        ArrayAttr(_normalize_dims(shape)),
-        ArrayAttr(_normalize_dims(stride)),
+        ArrayAttr(_symbol_dims(shape)),
+        ArrayAttr(_symbol_dims(stride)),
         element_type,
         _make_space(space),
     )
 
 
 def _make_matrix_type(
-    shape: Sequence[Attribute],
-    stride: Sequence[Attribute],
+    shape: Sequence[int | str | SymbolExprAttr],
+    stride: Sequence[int | str | SymbolExprAttr],
     space: str = "global",
     element_type: IntegerType = i32,
 ) -> NnMemoryType:
@@ -223,7 +213,7 @@ def _make_matrix_type(
     - 便于构造 matmul 用的 rank=2 memory type。
 
     使用示例:
-    - _make_matrix_type([StringAttr(\"M\"), StringAttr(\"N\")], [IntAttr(8), IntAttr(1)])
+    - _make_matrix_type(["M", "N"], [8, 1])
 
     关联文件:
     - spec: spec/dialect/nn.md
@@ -232,8 +222,8 @@ def _make_matrix_type(
     """
 
     return NnMemoryType(
-        ArrayAttr(_normalize_dims(shape)),
-        ArrayAttr(_normalize_dims(stride)),
+        ArrayAttr(_symbol_dims(shape)),
+        ArrayAttr(_symbol_dims(stride)),
         element_type,
         _make_space(space),
     )
@@ -339,9 +329,9 @@ def test_add_op_verify_success() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_div_op_verify_success() -> None:
     space = _make_space("global")
-    lhs_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
-    rhs_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
-    result_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    lhs_type = _make_matrix_type([4, 8], [8, 1], element_type=i32)
+    rhs_type = _make_matrix_type([4, 8], [8, 1], element_type=i32)
+    result_type = _make_matrix_type([4, 8], [8, 1], element_type=i32)
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     NnDivOp(lhs, rhs, result_type, space).verify_()
@@ -355,9 +345,9 @@ def test_div_op_verify_success() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_div_op_rejects_shape_mismatch() -> None:
     space = _make_space("global")
-    lhs_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
-    rhs_type = _make_matrix_type([IntAttr(4), IntAttr(7)], [IntAttr(7), IntAttr(1)], element_type=i32)
-    result_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    lhs_type = _make_matrix_type([4, 8], [8, 1], element_type=i32)
+    rhs_type = _make_matrix_type([4, 7], [7, 1], element_type=i32)
+    result_type = _make_matrix_type([4, 8], [8, 1], element_type=i32)
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnDivOp(lhs, rhs, result_type, space)
@@ -373,8 +363,8 @@ def test_div_op_rejects_shape_mismatch() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_add_op_accepts_memory_const_rhs() -> None:
     memory_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         space="global",
     )
     lhs = _TestOp(result_types=[memory_type]).results[0]
@@ -391,9 +381,9 @@ def test_add_op_accepts_memory_const_rhs() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_select_op_verify_success() -> None:
     space = _make_space("global")
-    cond_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i1)
-    data_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
-    result_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    cond_type = _make_matrix_type([4, 8], [8, 1], element_type=i1)
+    data_type = _make_matrix_type([4, 8], [8, 1], element_type=i32)
+    result_type = _make_matrix_type([4, 8], [8, 1], element_type=i32)
     cond = _TestOp(result_types=[cond_type]).results[0]
     lhs = _TestOp(result_types=[data_type]).results[0]
     rhs = _TestOp(result_types=[data_type]).results[0]
@@ -408,9 +398,9 @@ def test_select_op_verify_success() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_select_op_rejects_cond_element_type() -> None:
     space = _make_space("global")
-    cond_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
-    data_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
-    result_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    cond_type = _make_matrix_type([4, 8], [8, 1], element_type=i32)
+    data_type = _make_matrix_type([4, 8], [8, 1], element_type=i32)
+    result_type = _make_matrix_type([4, 8], [8, 1], element_type=i32)
     cond = _TestOp(result_types=[cond_type]).results[0]
     lhs = _TestOp(result_types=[data_type]).results[0]
     rhs = _TestOp(result_types=[data_type]).results[0]
@@ -427,8 +417,8 @@ def test_select_op_rejects_cond_element_type() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_cast_op_verify_success() -> None:
     space = _make_space("global")
-    input_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
-    result_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=IntegerType(16))
+    input_type = _make_matrix_type([4, 8], [8, 1], element_type=i32)
+    result_type = _make_matrix_type([4, 8], [8, 1], element_type=IntegerType(16))
     input_value = _TestOp(result_types=[input_type]).results[0]
     NnCastOp(input_value, result_type, space).verify_()
 
@@ -441,8 +431,8 @@ def test_cast_op_verify_success() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_cast_op_rejects_shape_mismatch() -> None:
     space = _make_space("global")
-    input_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
-    result_type = _make_matrix_type([IntAttr(4), IntAttr(7)], [IntAttr(7), IntAttr(1)], element_type=IntegerType(16))
+    input_type = _make_matrix_type([4, 8], [8, 1], element_type=i32)
+    result_type = _make_matrix_type([4, 7], [7, 1], element_type=IntegerType(16))
     input_value = _TestOp(result_types=[input_type]).results[0]
     op = NnCastOp(input_value, result_type, space)
     with pytest.raises(VerifyException, match="nn.cast shape must match input"):
@@ -457,8 +447,8 @@ def test_cast_op_rejects_shape_mismatch() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_add_op_accepts_memory_symbol_rhs() -> None:
     memory_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         space="global",
     )
     lhs = _TestOp(result_types=[memory_type]).results[0]
@@ -676,7 +666,7 @@ def test_compare_ops_verify_success(op_cls: type[Operation]) -> None:
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_add_op_rejects_pure_scalar_operands() -> None:
-    result_type = _make_simple_memory_type([IntAttr(2), IntAttr(3)], [IntAttr(3), IntAttr(1)], space="global")
+    result_type = _make_simple_memory_type([2, 3], [3, 1], space="global")
     lhs = _TestOp(result_types=[i32]).results[0]
     rhs = _TestOp(result_types=[Float32Type()]).results[0]
     op = NnAddOp(lhs, rhs, result_type, _make_space("global"))
@@ -692,13 +682,13 @@ def test_add_op_rejects_pure_scalar_operands() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_add_op_rejects_mixed_result_shape_mismatch() -> None:
     memory_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         space="global",
     )
     result_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(2)],
-        [IntAttr(2), IntAttr(1)],
+        [2, 2],
+        [2, 1],
         space="global",
     )
     lhs = _TestOp(result_types=[memory_type]).results[0]
@@ -718,27 +708,27 @@ def test_add_op_rejects_mixed_result_shape_mismatch() -> None:
     ("lhs_type", "rhs_type", "result_type", "message"),
     [
         (
-            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global"),
-            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global"),
-            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="shared"),
+            _make_simple_memory_type(["M"], [1], space="global"),
+            _make_simple_memory_type(["M"], [1], space="global"),
+            _make_simple_memory_type(["M"], [1], space="shared"),
             "result space",
         ),
         (
-            _make_simple_memory_type([StringAttr("M")], [IntAttr(2)], space="global"),
-            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global"),
-            _make_simple_memory_type([StringAttr("M")], [IntAttr(2)], space="global"),
+            _make_simple_memory_type(["M"], [2], space="global"),
+            _make_simple_memory_type(["M"], [1], space="global"),
+            _make_simple_memory_type(["M"], [2], space="global"),
             "stride must match",
         ),
         (
-            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global", element_type=i32),
-            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global", element_type=IntegerType(16)),
-            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global", element_type=i32),
+            _make_simple_memory_type(["M"], [1], space="global", element_type=i32),
+            _make_simple_memory_type(["M"], [1], space="global", element_type=IntegerType(16)),
+            _make_simple_memory_type(["M"], [1], space="global", element_type=i32),
             "operand element_type",
         ),
         (
-            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global", element_type=i32),
-            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global", element_type=i32),
-            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global", element_type=IntegerType(16)),
+            _make_simple_memory_type(["M"], [1], space="global", element_type=i32),
+            _make_simple_memory_type(["M"], [1], space="global", element_type=i32),
+            _make_simple_memory_type(["M"], [1], space="global", element_type=IntegerType(16)),
             "arithmetic result element_type",
         ),
     ],
@@ -763,14 +753,14 @@ def test_add_op_rejects_type_mismatch(
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_broadcast_op_verify_success() -> None:
-    input_type = _make_simple_memory_type([IntAttr(1), StringAttr("N")], [IntAttr(1), IntAttr(1)])
-    result_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)])
+    input_type = _make_simple_memory_type([1, "N"], [1, 1])
+    result_type = _make_simple_memory_type(["M", "N"], [1, 1])
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnBroadcastOp(inp, result_type, _make_space("global"))
     op.verify()
 
-    int_input = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="global")
-    int_result = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="global")
+    int_input = _make_simple_memory_type([2], [1], space="global")
+    int_result = _make_simple_memory_type([2], [1], space="global")
     int_value = _TestOp(result_types=[int_input]).results[0]
     int_op = NnBroadcastOp(int_value, int_result, _make_space("global"))
     int_op.verify()
@@ -816,20 +806,20 @@ def test_broadcast_op_element_type_mismatch() -> None:
     ("input_type", "result_type", "space", "message"),
     [
         (
-            _make_simple_memory_type([IntAttr(1)], [IntAttr(1)], space="global"),
-            _make_simple_memory_type([IntAttr(1)], [IntAttr(1)], space="global"),
+            _make_simple_memory_type([1], [1], space="global"),
+            _make_simple_memory_type([1], [1], space="global"),
             "shared",
             "result-space-must-match-input-and-attr",
         ),
         (
-            _make_simple_memory_type([IntAttr(1), StringAttr("N")], [IntAttr(1), IntAttr(1)], space="global"),
-            _make_simple_memory_type([StringAttr("N")], [IntAttr(1)], space="global"),
+            _make_simple_memory_type([1, "N"], [1, 1], space="global"),
+            _make_simple_memory_type(["N"], [1], space="global"),
             "global",
             "result-rank-must-be-greater-or-equal-to-input",
         ),
         (
-            _make_simple_memory_type([IntAttr(2), StringAttr("N")], [IntAttr(1), IntAttr(1)], space="global"),
-            _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)], space="global"),
+            _make_simple_memory_type([2, "N"], [1, 1], space="global"),
+            _make_simple_memory_type(["M", "N"], [1, 1], space="global"),
             "global",
             "result-shape-must-match-broadcast-contract",
         ),
@@ -874,13 +864,13 @@ def test_broadcast_module_round_trip() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_transpose_op_verify_success() -> None:
     input_type = _make_simple_memory_type(
-        [StringAttr("M"), StringAttr("N"), IntAttr(4)],
-        [IntAttr(8), IntAttr(4), IntAttr(1)],
+        ["M", "N", 4],
+        [8, 4, 1],
         space="global",
     )
     result_type = _make_simple_memory_type(
-        [StringAttr("N"), StringAttr("M"), IntAttr(4)],
-        [StringAttr("M*4"), IntAttr(4), IntAttr(1)],
+        ["N", "M", 4],
+        ["M*4", 4, 1],
         space="global",
     )
     inp = _TestOp(result_types=[input_type]).results[0]
@@ -904,8 +894,8 @@ def test_transpose_op_verify_success() -> None:
     ],
 )
 def test_transpose_op_rejects_invalid_perm(perm: Sequence[int], message: str) -> None:
-    input_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(2), IntAttr(1)])
-    result_type = _make_simple_memory_type([StringAttr("N"), StringAttr("M")], [IntAttr(1), IntAttr(2)])
+    input_type = _make_simple_memory_type(["M", "N"], [2, 1])
+    result_type = _make_simple_memory_type(["N", "M"], [1, 2])
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnTransposeOp(inp, result_type, perm=perm, space=_make_space("global"))
     with pytest.raises(VerifyException, match=message):
@@ -923,31 +913,31 @@ def test_transpose_op_rejects_invalid_perm(perm: Sequence[int], message: str) ->
     ("result_type", "space", "message"),
     [
         (
-            _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(2)]),
+            _make_simple_memory_type(["M", "N"], [1, 2]),
             "global",
             "result shape",
         ),
         (
-            _make_simple_memory_type([StringAttr("N"), StringAttr("M")], [IntAttr(2), IntAttr(1)]),
+            _make_simple_memory_type(["N", "M"], [2, 1]),
             "global",
             "result stride",
         ),
         (
             _make_simple_memory_type(
-                [StringAttr("N"), StringAttr("M")],
-                [IntAttr(1), IntAttr(2)],
+                ["N", "M"],
+                [1, 2],
                 element_type=IntegerType(16),
             ),
             "global",
             "element_type",
         ),
         (
-            _make_simple_memory_type([StringAttr("N"), StringAttr("M")], [IntAttr(1), IntAttr(2)], space="shared"),
+            _make_simple_memory_type(["N", "M"], [1, 2], space="shared"),
             "global",
             "input/result must use the same space",
         ),
         (
-            _make_simple_memory_type([StringAttr("N"), StringAttr("M")], [IntAttr(1), IntAttr(2)]),
+            _make_simple_memory_type(["N", "M"], [1, 2]),
             "shared",
             "attribute space",
         ),
@@ -958,7 +948,7 @@ def test_transpose_op_result_mismatch(
     space: str,
     message: str,
 ) -> None:
-    input_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(2), IntAttr(1)])
+    input_type = _make_simple_memory_type(["M", "N"], [2, 1])
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnTransposeOp(inp, result_type, perm=[1, 0], space=_make_space(space))
     with pytest.raises(VerifyException, match=message):
@@ -993,13 +983,13 @@ def test_transpose_module_round_trip() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_softmax_op_verify_success() -> None:
     input_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         element_type=Float32Type(),
     )
     result_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         element_type=Float32Type(),
     )
     inp = _TestOp(result_types=[input_type]).results[0]
@@ -1019,8 +1009,8 @@ def test_softmax_op_verify_success() -> None:
     [
         (
             _make_simple_memory_type(
-                [IntAttr(2), IntAttr(3)],
-                [IntAttr(3), IntAttr(1)],
+                [2, 3],
+                [3, 1],
                 element_type=Float32Type(),
             ),
             2,
@@ -1060,8 +1050,8 @@ def test_softmax_op_rejects_invalid_axis_or_rank(
     [
         (
             _make_simple_memory_type(
-                [IntAttr(2), IntAttr(2)],
-                [IntAttr(2), IntAttr(1)],
+                [2, 2],
+                [2, 1],
                 element_type=Float32Type(),
             ),
             "global",
@@ -1069,8 +1059,8 @@ def test_softmax_op_rejects_invalid_axis_or_rank(
         ),
         (
             _make_simple_memory_type(
-                [IntAttr(2), IntAttr(3)],
-                [IntAttr(1), IntAttr(1)],
+                [2, 3],
+                [1, 1],
                 element_type=Float32Type(),
             ),
             "global",
@@ -1078,8 +1068,8 @@ def test_softmax_op_rejects_invalid_axis_or_rank(
         ),
         (
             _make_simple_memory_type(
-                [IntAttr(2), IntAttr(3)],
-                [IntAttr(3), IntAttr(1)],
+                [2, 3],
+                [3, 1],
                 element_type=i32,
             ),
             "global",
@@ -1087,8 +1077,8 @@ def test_softmax_op_rejects_invalid_axis_or_rank(
         ),
         (
             _make_simple_memory_type(
-                [IntAttr(2), IntAttr(3)],
-                [IntAttr(3), IntAttr(1)],
+                [2, 3],
+                [3, 1],
                 element_type=Float32Type(),
                 space="shared",
             ),
@@ -1097,8 +1087,8 @@ def test_softmax_op_rejects_invalid_axis_or_rank(
         ),
         (
             _make_simple_memory_type(
-                [IntAttr(2), IntAttr(3)],
-                [IntAttr(3), IntAttr(1)],
+                [2, 3],
+                [3, 1],
                 element_type=Float32Type(),
             ),
             "shared",
@@ -1112,8 +1102,8 @@ def test_softmax_op_rejects_result_mismatch(
     message: str,
 ) -> None:
     input_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         element_type=Float32Type(),
     )
     inp = _TestOp(result_types=[input_type]).results[0]
@@ -1129,9 +1119,9 @@ def test_softmax_op_rejects_result_mismatch(
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_matmul_op_verify_success() -> None:
-    lhs_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)])
-    rhs_type = _make_matrix_type([StringAttr("K"), StringAttr("N")], [IntAttr(8), IntAttr(1)])
-    result_type = _make_matrix_type([StringAttr("M"), StringAttr("N")], [IntAttr(8), IntAttr(1)])
+    lhs_type = _make_matrix_type(["M", "K"], [8, 1])
+    rhs_type = _make_matrix_type(["K", "N"], [8, 1])
+    result_type = _make_matrix_type(["M", "N"], [8, 1])
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
@@ -1145,9 +1135,9 @@ def test_matmul_op_verify_success() -> None:
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_matmul_op_shape_mismatch() -> None:
-    lhs_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)])
-    rhs_type = _make_matrix_type([StringAttr("Q"), StringAttr("N")], [IntAttr(8), IntAttr(1)])
-    result_type = _make_matrix_type([StringAttr("M"), StringAttr("N")], [IntAttr(8), IntAttr(1)])
+    lhs_type = _make_matrix_type(["M", "K"], [8, 1])
+    rhs_type = _make_matrix_type(["Q", "N"], [8, 1])
+    result_type = _make_matrix_type(["M", "N"], [8, 1])
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
@@ -1162,9 +1152,9 @@ def test_matmul_op_shape_mismatch() -> None:
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_matmul_op_result_shape_mismatch() -> None:
-    lhs_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)])
-    rhs_type = _make_matrix_type([StringAttr("K"), StringAttr("N")], [IntAttr(8), IntAttr(1)])
-    result_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)])
+    lhs_type = _make_matrix_type(["M", "K"], [8, 1])
+    rhs_type = _make_matrix_type(["K", "N"], [8, 1])
+    result_type = _make_matrix_type(["M", "K"], [8, 1])
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
@@ -1198,9 +1188,9 @@ def test_matmul_module_round_trip() -> None:
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_matmul_op_space_mismatch() -> None:
-    lhs_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)], space="global")
-    rhs_type = _make_matrix_type([StringAttr("K"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="shared")
-    result_type = _make_matrix_type([StringAttr("M"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="global")
+    lhs_type = _make_matrix_type(["M", "K"], [8, 1], space="global")
+    rhs_type = _make_matrix_type(["K", "N"], [8, 1], space="shared")
+    result_type = _make_matrix_type(["M", "N"], [8, 1], space="global")
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
@@ -1215,9 +1205,9 @@ def test_matmul_op_space_mismatch() -> None:
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_matmul_op_attr_space_mismatch() -> None:
-    lhs_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)], space="local")
-    rhs_type = _make_matrix_type([StringAttr("K"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="local")
-    result_type = _make_matrix_type([StringAttr("M"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="local")
+    lhs_type = _make_matrix_type(["M", "K"], [8, 1], space="local")
+    rhs_type = _make_matrix_type(["K", "N"], [8, 1], space="local")
+    result_type = _make_matrix_type(["M", "N"], [8, 1], space="local")
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
@@ -1232,9 +1222,9 @@ def test_matmul_op_attr_space_mismatch() -> None:
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_matmul_op_result_space_mismatch() -> None:
-    lhs_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)], space="global")
-    rhs_type = _make_matrix_type([StringAttr("K"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="global")
-    result_type = _make_matrix_type([StringAttr("M"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="shared")
+    lhs_type = _make_matrix_type(["M", "K"], [8, 1], space="global")
+    rhs_type = _make_matrix_type(["K", "N"], [8, 1], space="global")
+    result_type = _make_matrix_type(["M", "N"], [8, 1], space="shared")
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
@@ -1250,8 +1240,8 @@ def test_matmul_op_result_space_mismatch() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_matmul_op_rank_mismatch() -> None:
     lhs_type = _make_memory_type("global")
-    rhs_type = _make_matrix_type([StringAttr("K"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="global")
-    result_type = _make_matrix_type([StringAttr("M"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="global")
+    rhs_type = _make_matrix_type(["K", "N"], [8, 1], space="global")
+    result_type = _make_matrix_type(["M", "N"], [8, 1], space="global")
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
@@ -1266,9 +1256,9 @@ def test_matmul_op_rank_mismatch() -> None:
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_matmul_op_element_type_mismatch() -> None:
-    lhs_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)], element_type=i32)
-    rhs_type = _make_matrix_type([StringAttr("K"), StringAttr("N")], [IntAttr(8), IntAttr(1)], element_type=i32)
-    result_type = _make_matrix_type([StringAttr("M"), StringAttr("N")], [IntAttr(8), IntAttr(1)], element_type=IntegerType(16))
+    lhs_type = _make_matrix_type(["M", "K"], [8, 1], element_type=i32)
+    rhs_type = _make_matrix_type(["K", "N"], [8, 1], element_type=i32)
+    result_type = _make_matrix_type(["M", "N"], [8, 1], element_type=IntegerType(16))
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
@@ -1283,9 +1273,9 @@ def test_matmul_op_element_type_mismatch() -> None:
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_add_op_rejects_implicit_broadcast_shape_mismatch() -> None:
-    lhs_type = _make_simple_memory_type([IntAttr(1), StringAttr("N")], [IntAttr(1), IntAttr(1)])
-    rhs_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)])
-    result_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)])
+    lhs_type = _make_simple_memory_type([1, "N"], [1, 1])
+    rhs_type = _make_simple_memory_type(["M", "N"], [1, 1])
+    result_type = _make_simple_memory_type(["M", "N"], [1, 1])
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnAddOp(lhs, rhs, result_type, _make_space("global"))
@@ -1300,9 +1290,9 @@ def test_add_op_rejects_implicit_broadcast_shape_mismatch() -> None:
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_compare_op_rejects_implicit_broadcast_shape_mismatch() -> None:
-    lhs_type = _make_simple_memory_type([IntAttr(1), StringAttr("N")], [IntAttr(1), IntAttr(1)])
-    rhs_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)])
-    result_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)])
+    lhs_type = _make_simple_memory_type([1, "N"], [1, 1])
+    rhs_type = _make_simple_memory_type(["M", "N"], [1, 1])
+    result_type = _make_simple_memory_type(["M", "N"], [1, 1])
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnEqOp(lhs, rhs, result_type, _make_space("global"))
@@ -1317,9 +1307,9 @@ def test_compare_op_rejects_implicit_broadcast_shape_mismatch() -> None:
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_explicit_broadcast_then_add_verify_success() -> None:
-    input_type = _make_simple_memory_type([IntAttr(1), StringAttr("N")], [IntAttr(1), IntAttr(1)])
-    target_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)])
-    other_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)])
+    input_type = _make_simple_memory_type([1, "N"], [1, 1])
+    target_type = _make_simple_memory_type(["M", "N"], [1, 1])
+    other_type = _make_simple_memory_type(["M", "N"], [1, 1])
     inp = _TestOp(result_types=[input_type]).results[0]
     other = _TestOp(result_types=[other_type]).results[0]
     broadcast_op = NnBroadcastOp(inp, target_type, _make_space("global"))
@@ -1337,13 +1327,13 @@ def test_explicit_broadcast_then_add_verify_success() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_nn_dialect_img2col1d_contract_v1() -> None:
     input_type = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(2), IntAttr(8)],
-        [IntAttr(16), IntAttr(8), IntAttr(1)],
+        [1, 2, 8],
+        [16, 8, 1],
         space="global",
     )
     result_type = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)],
-        [IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(1)],
+        [1, 2, 3, 8],
+        [48, 24, 8, 1],
         space="global",
     )
     inp = _TestOp(result_types=[input_type]).results[0]
@@ -1357,7 +1347,7 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
 
     cases = [
         (
-            _make_simple_memory_type([IntAttr(1), IntAttr(2)], [IntAttr(2), IntAttr(1)], space="global"),
+            _make_simple_memory_type([1, 2], [2, 1], space="global"),
             result_type,
             {"kw": 3, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
             "global",
@@ -1373,8 +1363,8 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(2), IntAttr(3)],
-                [IntAttr(6), IntAttr(3), IntAttr(1)],
+                [1, 2, 3],
+                [6, 3, 1],
                 space="global",
             ),
             {"kw": 3, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
@@ -1384,8 +1374,8 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)],
-                [IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(1)],
+                [1, 2, 3, 8],
+                [48, 24, 8, 1],
                 space="shared",
             ),
             {"kw": 3, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
@@ -1395,8 +1385,8 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(2), IntAttr(4), IntAttr(8)],
-                [IntAttr(64), IntAttr(32), IntAttr(8), IntAttr(1)],
+                [1, 2, 4, 8],
+                [64, 32, 8, 1],
                 space="global",
             ),
             {"kw": 3, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
@@ -1413,8 +1403,8 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)],
-                [IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(1)],
+                [1, 2, 3, 8],
+                [48, 24, 8, 1],
                 space="global",
                 element_type=IntegerType(16),
             ),
@@ -1425,8 +1415,8 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)],
-                [IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(2)],
+                [1, 2, 3, 8],
+                [48, 24, 8, 2],
                 space="global",
             ),
             {"kw": 3, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
@@ -1435,13 +1425,13 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
         ),
         (
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(2), IntAttr(2)],
-                [IntAttr(4), IntAttr(2), IntAttr(1)],
+                [1, 2, 2],
+                [4, 2, 1],
                 space="global",
             ),
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(1)],
-                [IntAttr(6), IntAttr(3), IntAttr(1), IntAttr(1)],
+                [1, 2, 3, 1],
+                [6, 3, 1, 1],
                 space="global",
             ),
             {"kw": 3, "sw": 1, "dw": 1, "pl": 0, "pr": 0},
@@ -1479,13 +1469,13 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_nn_dialect_img2col2d_contract_v1() -> None:
     input_type = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)],
-        [IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)],
+        [1, 3, 5, 5],
+        [75, 25, 5, 1],
         space="global",
     )
     result_type = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(5)],
-        [IntAttr(675), IntAttr(225), IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)],
+        [1, 3, 3, 3, 5, 5],
+        [675, 225, 75, 25, 5, 1],
         space="global",
     )
     inp = _TestOp(result_types=[input_type]).results[0]
@@ -1519,8 +1509,8 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
     cases = [
         (
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(3), IntAttr(5)],
-                [IntAttr(15), IntAttr(5), IntAttr(1)],
+                [1, 3, 5],
+                [15, 5, 1],
                 space="global",
             ),
             result_type,
@@ -1538,8 +1528,8 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(3), IntAttr(3)],
-                [IntAttr(9), IntAttr(3), IntAttr(1)],
+                [1, 3, 3],
+                [9, 3, 1],
                 space="global",
             ),
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 1, "pw": 1, "pl": 1, "pr": 1},
@@ -1549,8 +1539,8 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(5)],
-                [IntAttr(675), IntAttr(225), IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)],
+                [1, 3, 3, 3, 5, 5],
+                [675, 225, 75, 25, 5, 1],
                 space="shared",
             ),
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 1, "pw": 1, "pl": 1, "pr": 1},
@@ -1560,8 +1550,8 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(4), IntAttr(5), IntAttr(5)],
-                [IntAttr(900), IntAttr(300), IntAttr(100), IntAttr(25), IntAttr(5), IntAttr(1)],
+                [1, 3, 3, 4, 5, 5],
+                [900, 300, 100, 25, 5, 1],
                 space="global",
             ),
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 1, "pw": 1, "pl": 1, "pr": 1},
@@ -1578,8 +1568,8 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(5)],
-                [IntAttr(675), IntAttr(225), IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)],
+                [1, 3, 3, 3, 5, 5],
+                [675, 225, 75, 25, 5, 1],
                 space="global",
                 element_type=IntegerType(16),
             ),
@@ -1590,8 +1580,8 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(5)],
-                [IntAttr(675), IntAttr(225), IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(2)],
+                [1, 3, 3, 3, 5, 5],
+                [675, 225, 75, 25, 5, 2],
                 space="global",
             ),
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 1, "pw": 1, "pl": 1, "pr": 1},
@@ -1600,13 +1590,13 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
         ),
         (
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(3), IntAttr(2), IntAttr(5)],
-                [IntAttr(30), IntAttr(10), IntAttr(5), IntAttr(1)],
+                [1, 3, 2, 5],
+                [30, 10, 5, 1],
                 space="global",
             ),
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(1), IntAttr(3)],
-                [IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(3), IntAttr(1)],
+                [1, 3, 3, 3, 1, 3],
+                [81, 27, 9, 3, 3, 1],
                 space="global",
             ),
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 0, "pw": 0, "pl": 0, "pr": 0},
@@ -1615,13 +1605,13 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
         ),
         (
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(2)],
-                [IntAttr(30), IntAttr(10), IntAttr(2), IntAttr(1)],
+                [1, 3, 5, 2],
+                [30, 10, 2, 1],
                 space="global",
             ),
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(1)],
-                [IntAttr(135), IntAttr(45), IntAttr(15), IntAttr(5), IntAttr(1), IntAttr(1)],
+                [1, 3, 3, 3, 5, 1],
+                [135, 45, 15, 5, 1, 1],
                 space="global",
             ),
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 0, "pw": 0, "pl": 0, "pr": 0},
@@ -1668,14 +1658,14 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_exp_op_verify_success() -> None:
     input_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(4)],
-        [IntAttr(4), IntAttr(1)],
+        [2, 4],
+        [4, 1],
         space="global",
         element_type=Float32Type(),
     )
     result_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(4)],
-        [IntAttr(4), IntAttr(1)],
+        [2, 4],
+        [4, 1],
         space="global",
         element_type=Float32Type(),
     )
@@ -1692,28 +1682,28 @@ def test_exp_op_verify_success() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_exp_op_rejects_invalid_inputs() -> None:
     float_input = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(4)],
-        [IntAttr(4), IntAttr(1)],
+        [2, 4],
+        [4, 1],
         space="global",
         element_type=Float32Type(),
     )
     float_result = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(4)],
-        [IntAttr(4), IntAttr(1)],
+        [2, 4],
+        [4, 1],
         space="global",
         element_type=Float32Type(),
     )
     cases = [
         (
             _make_simple_memory_type(
-                [IntAttr(2), IntAttr(4)],
-                [IntAttr(4), IntAttr(1)],
+                [2, 4],
+                [4, 1],
                 space="global",
                 element_type=i32,
             ),
             _make_simple_memory_type(
-                [IntAttr(2), IntAttr(4)],
-                [IntAttr(4), IntAttr(1)],
+                [2, 4],
+                [4, 1],
                 space="global",
                 element_type=i32,
             ),
@@ -1723,8 +1713,8 @@ def test_exp_op_rejects_invalid_inputs() -> None:
         (
             float_input,
             _make_simple_memory_type(
-                [IntAttr(2), IntAttr(5)],
-                [IntAttr(5), IntAttr(1)],
+                [2, 5],
+                [5, 1],
                 space="global",
                 element_type=Float32Type(),
             ),
@@ -1734,8 +1724,8 @@ def test_exp_op_rejects_invalid_inputs() -> None:
         (
             float_input,
             _make_simple_memory_type(
-                [IntAttr(2), IntAttr(4)],
-                [IntAttr(5), IntAttr(1)],
+                [2, 4],
+                [5, 1],
                 space="global",
                 element_type=Float32Type(),
             ),
@@ -1745,8 +1735,8 @@ def test_exp_op_rejects_invalid_inputs() -> None:
         (
             float_input,
             _make_simple_memory_type(
-                [IntAttr(2), IntAttr(4)],
-                [IntAttr(4), IntAttr(1)],
+                [2, 4],
+                [4, 1],
                 space="global",
                 element_type=Float16Type(),
             ),
@@ -1756,8 +1746,8 @@ def test_exp_op_rejects_invalid_inputs() -> None:
         (
             float_input,
             _make_simple_memory_type(
-                [IntAttr(2), IntAttr(4)],
-                [IntAttr(4), IntAttr(1)],
+                [2, 4],
+                [4, 1],
                 space="shared",
                 element_type=Float32Type(),
             ),
@@ -1786,8 +1776,8 @@ def test_exp_op_rejects_invalid_inputs() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_reduce_sum_op_shape_contract() -> None:
     input_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3), IntAttr(4)],
-        [IntAttr(12), IntAttr(4), IntAttr(1)],
+        [2, 3, 4],
+        [12, 4, 1],
         space="global",
     )
     inp = _TestOp(result_types=[input_type]).results[0]
@@ -1796,8 +1786,8 @@ def test_reduce_sum_op_shape_contract() -> None:
             [1],
             True,
             _make_simple_memory_type(
-                [IntAttr(2), IntAttr(1), IntAttr(4)],
-                [IntAttr(4), IntAttr(4), IntAttr(1)],
+                [2, 1, 4],
+                [4, 4, 1],
                 space="global",
             ),
         ),
@@ -1805,8 +1795,8 @@ def test_reduce_sum_op_shape_contract() -> None:
             [1],
             False,
             _make_simple_memory_type(
-                [IntAttr(2), IntAttr(4)],
-                [IntAttr(4), IntAttr(1)],
+                [2, 4],
+                [4, 1],
                 space="global",
             ),
         ),
@@ -1824,13 +1814,13 @@ def test_reduce_sum_op_shape_contract() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_reduce_sum_op_rejects_invalid_axes() -> None:
     input_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3), IntAttr(4)],
-        [IntAttr(12), IntAttr(4), IntAttr(1)],
+        [2, 3, 4],
+        [12, 4, 1],
         space="global",
     )
     result_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3), IntAttr(4)],
-        [IntAttr(12), IntAttr(4), IntAttr(1)],
+        [2, 3, 4],
+        [12, 4, 1],
         space="global",
     )
     inp = _TestOp(result_types=[input_type]).results[0]
@@ -1856,13 +1846,13 @@ def test_reduce_sum_op_rejects_invalid_axes() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_reduce_min_op_contract_and_empty_extent_rejection() -> None:
     input_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         space="global",
     )
     result_type = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [1, 3],
+        [3, 1],
         space="global",
     )
     inp = _TestOp(result_types=[input_type]).results[0]
@@ -1870,13 +1860,13 @@ def test_reduce_min_op_contract_and_empty_extent_rejection() -> None:
     op.verify()
 
     empty_input_type = _make_simple_memory_type(
-        [IntAttr(0), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [0, 3],
+        [3, 1],
         space="global",
     )
     empty_result_type = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [1, 3],
+        [3, 1],
         space="global",
     )
     empty_inp = _TestOp(result_types=[empty_input_type]).results[0]
@@ -1893,13 +1883,13 @@ def test_reduce_min_op_contract_and_empty_extent_rejection() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_reduce_max_op_contract_and_empty_extent_rejection() -> None:
     input_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3), IntAttr(4)],
-        [IntAttr(12), IntAttr(4), IntAttr(1)],
+        [2, 3, 4],
+        [12, 4, 1],
         space="global",
     )
     result_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(4)],
-        [IntAttr(4), IntAttr(1)],
+        [2, 4],
+        [4, 1],
         space="global",
     )
     inp = _TestOp(result_types=[input_type]).results[0]
@@ -1907,13 +1897,13 @@ def test_reduce_max_op_contract_and_empty_extent_rejection() -> None:
     op.verify()
 
     empty_input_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(0), IntAttr(4)],
-        [IntAttr(0), IntAttr(0), IntAttr(1)],
+        [2, 0, 4],
+        [0, 0, 1],
         space="global",
     )
     empty_result_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(4)],
-        [IntAttr(4), IntAttr(1)],
+        [2, 4],
+        [4, 1],
         space="global",
     )
     empty_inp = _TestOp(result_types=[empty_input_type]).results[0]
@@ -1930,8 +1920,8 @@ def test_reduce_max_op_contract_and_empty_extent_rejection() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_reduce_ops_reject_type_or_space_mismatch() -> None:
     input_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         space="global",
         element_type=i32,
     )
@@ -1939,8 +1929,8 @@ def test_reduce_ops_reject_type_or_space_mismatch() -> None:
     cases = [
         (
             _make_simple_memory_type(
-                [IntAttr(2)],
-                [IntAttr(1)],
+                [2],
+                [1],
                 space="global",
                 element_type=Float32Type(),
             ),
@@ -1949,8 +1939,8 @@ def test_reduce_ops_reject_type_or_space_mismatch() -> None:
         ),
         (
             _make_simple_memory_type(
-                [IntAttr(2)],
-                [IntAttr(1)],
+                [2],
+                [1],
                 space="shared",
                 element_type=i32,
             ),
@@ -1959,8 +1949,8 @@ def test_reduce_ops_reject_type_or_space_mismatch() -> None:
         ),
         (
             _make_simple_memory_type(
-                [IntAttr(2)],
-                [IntAttr(1)],
+                [2],
+                [1],
                 space="global",
                 element_type=i32,
             ),
@@ -2002,13 +1992,13 @@ def test_exp_reduce_module_round_trip() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_reduce_ops_reject_non_i1_keepdim_attr() -> None:
     input_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3), IntAttr(4)],
-        [IntAttr(12), IntAttr(4), IntAttr(1)],
+        [2, 3, 4],
+        [12, 4, 1],
         space="global",
     )
     result_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(4)],
-        [IntAttr(4), IntAttr(1)],
+        [2, 4],
+        [4, 1],
         space="global",
     )
     op_types = (NnReduceSumOp, NnReduceMinOp, NnReduceMaxOp)
@@ -2028,13 +2018,13 @@ def test_reduce_ops_reject_non_i1_keepdim_attr() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_reduce_ops_reject_non_contiguous_result_stride() -> None:
     input_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3), IntAttr(4)],
-        [IntAttr(12), IntAttr(4), IntAttr(1)],
+        [2, 3, 4],
+        [12, 4, 1],
         space="global",
     )
     bad_result_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(4)],
-        [IntAttr(5), IntAttr(1)],
+        [2, 4],
+        [5, 1],
         space="global",
     )
     op_types = (NnReduceSumOp, NnReduceMinOp, NnReduceMaxOp)
@@ -2052,16 +2042,16 @@ def test_reduce_ops_reject_non_contiguous_result_stride() -> None:
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_nn_public_validation_branches() -> None:
-    good_input = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="global", element_type=Float32Type())
-    bad_input = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="global", element_type=i32)
-    good_result = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="global", element_type=Float32Type())
+    good_input = _make_simple_memory_type([2], [1], space="global", element_type=Float32Type())
+    bad_input = _make_simple_memory_type([2], [1], space="global", element_type=i32)
+    good_result = _make_simple_memory_type([2], [1], space="global", element_type=Float32Type())
     good_input_value = _TestOp(result_types=[good_input]).results[0]
     with pytest.raises(VerifyException, match="operand-element-type-must-be-float"):
         NnExpOp(_TestOp(result_types=[bad_input]).results[0], good_result, _make_space("global")).verify()
     with pytest.raises(VerifyException, match="result-shape-stride-must-match-input"):
         NnExpOp(
             good_input_value,
-            _make_simple_memory_type([IntAttr(2)], [IntAttr(2)], space="global"),
+            _make_simple_memory_type([2], [2], space="global"),
             _make_space("global"),
         ).verify()
     with pytest.raises(VerifyException, match="alpha must be int or float scalar"):
@@ -2073,14 +2063,14 @@ def test_nn_public_validation_branches() -> None:
         ).verify()
 
     img2col_input = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(2), IntAttr(8)],
-        [IntAttr(16), IntAttr(8), IntAttr(1)],
+        [1, 2, 8],
+        [16, 8, 1],
         space="global",
         element_type=Float32Type(),
     )
     img2col_result = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)],
-        [IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(1)],
+        [1, 2, 3, 8],
+        [48, 24, 8, 1],
         space="global",
         element_type=Float32Type(),
     )
@@ -2118,13 +2108,13 @@ def test_nn_public_validation_branches() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_unary_float_family_and_reduce_helper_edges() -> None:
     input_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         element_type=Float32Type(),
     )
     result_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         element_type=Float32Type(),
     )
     inp = _TestOp(result_types=[input_type]).results[0]
@@ -2145,14 +2135,14 @@ def test_unary_float_family_and_reduce_helper_edges() -> None:
         NnHardSigmoidOp(inp, alpha, symbol_value, result_type, _make_space("global")).verify()
 
     reduce_input_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3), IntAttr(4)],
-        [IntAttr(12), IntAttr(4), IntAttr(1)],
+        [2, 3, 4],
+        [12, 4, 1],
         element_type=Float32Type(),
     )
     reduce_input = _TestOp(result_types=[reduce_input_type]).results[0]
     reduce_result = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(4)],
-        [IntAttr(4), IntAttr(1)],
+        [2, 4],
+        [4, 1],
         element_type=Float32Type(),
     )
     NnReduceSumOp(reduce_input, reduce_result, axes=[1], keepdim=False, space=_make_space("global")).verify()
@@ -2247,8 +2237,8 @@ def test_memory_dim_parser_and_mixed_add_public_parser_contracts() -> None:
         Parser(ctx, "!nn.memory<[#symbol.expr<M//2>], [#symbol.expr<1>], i32, #nn.space<global>>").parse_attribute()
 
     memory_type = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         space="global",
         element_type=Float32Type(),
     )
@@ -2256,8 +2246,8 @@ def test_memory_dim_parser_and_mixed_add_public_parser_contracts() -> None:
     scalar = _TestOp(result_types=[SymbolValueType.from_expr("N")]).results[0]
 
     wrong_space_result = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         space="global",
         element_type=Float32Type(),
     )
@@ -2265,8 +2255,8 @@ def test_memory_dim_parser_and_mixed_add_public_parser_contracts() -> None:
         NnAddOp(lhs, scalar, wrong_space_result, _make_space("shared")).verify()
 
     wrong_stride = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(1), IntAttr(1)],
+        [2, 3],
+        [1, 1],
         space="global",
         element_type=Float32Type(),
     )
@@ -2274,8 +2264,8 @@ def test_memory_dim_parser_and_mixed_add_public_parser_contracts() -> None:
         NnAddOp(lhs, scalar, wrong_stride, _make_space("global")).verify()
 
     wrong_dtype = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         space="global",
         element_type=Float16Type(),
     )
@@ -2294,14 +2284,14 @@ def test_mixed_scalar_binary_family_public_contracts() -> None:
     rng = random.Random(20260505)
     op_classes = rng.sample([NnSubOp, NnMulOp, NnTrueDivOp, NnFloorDivOp], k=4)
     memory_i32 = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         space="global",
         element_type=i32,
     )
     result_f16 = _make_simple_memory_type(
-        [IntAttr(2), IntAttr(3)],
-        [IntAttr(3), IntAttr(1)],
+        [2, 3],
+        [3, 1],
         space="global",
         element_type=Float16Type(),
     )
@@ -2324,8 +2314,8 @@ def test_mixed_scalar_binary_family_public_contracts() -> None:
             op_cls(memory_value, scalar_f16, result_f16, _make_space("shared")).verify()
 
         wrong_space_result = _make_simple_memory_type(
-            [IntAttr(2), IntAttr(3)],
-            [IntAttr(3), IntAttr(1)],
+            [2, 3],
+            [3, 1],
             space="shared",
             element_type=Float16Type(),
         )
@@ -2333,8 +2323,8 @@ def test_mixed_scalar_binary_family_public_contracts() -> None:
             op_cls(memory_value, scalar_f16, wrong_space_result, _make_space("global")).verify()
 
         wrong_shape = _make_simple_memory_type(
-            [IntAttr(2), IntAttr(4)],
-            [IntAttr(4), IntAttr(1)],
+            [2, 4],
+            [4, 1],
             space="global",
             element_type=Float16Type(),
         )
@@ -2342,8 +2332,8 @@ def test_mixed_scalar_binary_family_public_contracts() -> None:
             op_cls(memory_value, scalar_f16, wrong_shape, _make_space("global")).verify()
 
         wrong_stride = _make_simple_memory_type(
-            [IntAttr(2), IntAttr(3)],
-            [IntAttr(1), IntAttr(1)],
+            [2, 3],
+            [1, 1],
             space="global",
             element_type=Float16Type(),
         )
@@ -2359,8 +2349,8 @@ def test_mixed_scalar_binary_family_public_contracts() -> None:
             ).verify()
 
         wrong_dtype = _make_simple_memory_type(
-            [IntAttr(2), IntAttr(3)],
-            [IntAttr(3), IntAttr(1)],
+            [2, 3],
+            [3, 1],
             space="global",
             element_type=i32,
         )
@@ -2377,13 +2367,13 @@ def test_mixed_scalar_binary_family_public_contracts() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_transpose_dynamic_stride_public_contract() -> None:
     input_type = _make_simple_memory_type(
-        [StringAttr("?"), IntAttr(2)],
-        [IntAttr(2), IntAttr(1)],
+        ["?", 2],
+        [2, 1],
         space="global",
     )
     result_type = _make_simple_memory_type(
-        [IntAttr(2), StringAttr("?")],
-        [StringAttr("?"), IntAttr(1)],
+        [2, "?"],
+        ["?", 1],
         space="global",
     )
     inp = _TestOp(result_types=[input_type]).results[0]
@@ -2399,9 +2389,9 @@ def test_transpose_dynamic_stride_public_contract() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_select_cast_activation_public_error_matrix() -> None:
     cond = _TestOp(
-        result_types=[_make_simple_memory_type([IntAttr(2)], [IntAttr(1)], element_type=i1)]
+        result_types=[_make_simple_memory_type([2], [1], element_type=i1)]
     ).results[0]
-    data_type = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], element_type=Float32Type())
+    data_type = _make_simple_memory_type([2], [1], element_type=Float32Type())
     data = _TestOp(result_types=[data_type]).results[0]
 
     select_cases = [
@@ -2409,7 +2399,7 @@ def test_select_cast_activation_public_error_matrix() -> None:
             data,
             _TestOp(
                 result_types=[
-                    _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="shared", element_type=Float32Type())
+                    _make_simple_memory_type([2], [1], space="shared", element_type=Float32Type())
                 ]
             ).results[0],
             data_type,
@@ -2426,14 +2416,14 @@ def test_select_cast_activation_public_error_matrix() -> None:
         (
             data,
             data,
-            _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="shared", element_type=Float32Type()),
+            _make_simple_memory_type([2], [1], space="shared", element_type=Float32Type()),
             "global",
             "nn.select attribute space must match result space",
         ),
         (
             data,
             _TestOp(
-                result_types=[_make_simple_memory_type([IntAttr(3)], [IntAttr(1)], element_type=Float32Type())]
+                result_types=[_make_simple_memory_type([3], [1], element_type=Float32Type())]
             ).results[0],
             data_type,
             "global",
@@ -2442,7 +2432,7 @@ def test_select_cast_activation_public_error_matrix() -> None:
         (
             data,
             _TestOp(
-                result_types=[_make_simple_memory_type([IntAttr(2)], [IntAttr(2)], element_type=Float32Type())]
+                result_types=[_make_simple_memory_type([2], [2], element_type=Float32Type())]
             ).results[0],
             data_type,
             "global",
@@ -2450,7 +2440,7 @@ def test_select_cast_activation_public_error_matrix() -> None:
         ),
         (
             data,
-            _TestOp(result_types=[_make_simple_memory_type([IntAttr(2)], [IntAttr(1)], element_type=i32)]).results[0],
+            _TestOp(result_types=[_make_simple_memory_type([2], [1], element_type=i32)]).results[0],
             data_type,
             "global",
             "nn.select operand element_type must match",
@@ -2458,7 +2448,7 @@ def test_select_cast_activation_public_error_matrix() -> None:
         (
             data,
             data,
-            _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], element_type=i32),
+            _make_simple_memory_type([2], [1], element_type=i32),
             "global",
             "nn.select result element_type must match operand element_type",
         ),
@@ -2472,23 +2462,23 @@ def test_select_cast_activation_public_error_matrix() -> None:
     with pytest.raises(VerifyException, match="nn.cast attribute space must match result space"):
         NnCastOp(
             data,
-            _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="shared", element_type=Float16Type()),
+            _make_simple_memory_type([2], [1], space="shared", element_type=Float16Type()),
             _make_space("global"),
         ).verify()
     with pytest.raises(VerifyException, match="nn.cast stride must match input"):
         NnCastOp(
             data,
-            _make_simple_memory_type([IntAttr(2)], [IntAttr(2)], element_type=Float16Type()),
+            _make_simple_memory_type([2], [2], element_type=Float16Type()),
             _make_space("global"),
         ).verify()
 
-    wrong_shape = _make_simple_memory_type([IntAttr(3)], [IntAttr(1)], element_type=Float32Type())
+    wrong_shape = _make_simple_memory_type([3], [1], element_type=Float32Type())
     with pytest.raises(VerifyException, match="result-shape-stride-must-match-input"):
         NnReluOp(data, wrong_shape, _make_space("global")).verify()
-    wrong_dtype = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], element_type=Float16Type())
+    wrong_dtype = _make_simple_memory_type([2], [1], element_type=Float16Type())
     with pytest.raises(VerifyException, match="result-element-type-must-match-input"):
         NnSigmoidOp(data, wrong_dtype, _make_space("global")).verify()
-    wrong_space = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="shared", element_type=Float32Type())
+    wrong_space = _make_simple_memory_type([2], [1], space="shared", element_type=Float32Type())
     with pytest.raises(VerifyException, match="result-space-must-match-input-and-attr"):
         NnTanhOp(data, wrong_space, _make_space("global")).verify()
     with pytest.raises(VerifyException, match="result-space-must-match-input-and-attr"):
@@ -2506,13 +2496,13 @@ def test_select_cast_activation_public_error_matrix() -> None:
 # 对应测试文件路径: test/dialect/test_nn.py
 def test_img2col_public_symbol_dynamic_error_matrix() -> None:
     input_1d = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(2), IntAttr(8)],
-        [IntAttr(16), IntAttr(8), IntAttr(1)],
+        [1, 2, 8],
+        [16, 8, 1],
         element_type=Float32Type(),
     )
     result_1d = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)],
-        [IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(1)],
+        [1, 2, 3, 8],
+        [48, 24, 8, 1],
         element_type=Float32Type(),
     )
     input_1d_value = _TestOp(result_types=[input_1d]).results[0]
@@ -2535,8 +2525,8 @@ def test_img2col_public_symbol_dynamic_error_matrix() -> None:
         ).verify()
 
     dynamic_input_1d = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(2), StringAttr("W")],
-        [StringAttr("2*W"), StringAttr("W"), IntAttr(1)],
+        [1, 2, "W"],
+        ["2*W", "W", 1],
         element_type=Float32Type(),
     )
     NnImg2col1dOp(
@@ -2564,8 +2554,8 @@ def test_img2col_public_symbol_dynamic_error_matrix() -> None:
         NnImg2col1dOp(
             input_1d_value,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)],
-                [StringAttr("S"), IntAttr(24), IntAttr(8), IntAttr(1)],
+                [1, 2, 3, 8],
+                ["S", 24, 8, 1],
                 element_type=Float32Type(),
             ),
             three,
@@ -2577,20 +2567,20 @@ def test_img2col_public_symbol_dynamic_error_matrix() -> None:
         ).verify()
 
     input_2d = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)],
-        [IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)],
+        [1, 3, 5, 5],
+        [75, 25, 5, 1],
         element_type=Float32Type(),
     )
     result_2d = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(5)],
-        [IntAttr(675), IntAttr(225), IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)],
+        [1, 3, 3, 3, 5, 5],
+        [675, 225, 75, 25, 5, 1],
         element_type=Float32Type(),
     )
     input_2d_value = _TestOp(result_types=[input_2d]).results[0]
     NnImg2col2dOp(input_2d_value, result_2d, three, three, one, one, one, one, one, one, one, one, _make_space("global")).verify()
     dynamic_input_2d = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(3), StringAttr("H"), IntAttr(5)],
-        [StringAttr("15*H"), StringAttr("5*H"), IntAttr(5), IntAttr(1)],
+        [1, 3, "H", 5],
+        ["15*H", "5*H", 5, 1],
         element_type=Float32Type(),
     )
     NnImg2col2dOp(
@@ -2643,8 +2633,8 @@ def test_img2col_public_symbol_dynamic_error_matrix() -> None:
         NnImg2col2dOp(
             input_2d_value,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(5)],
-                [StringAttr("S"), IntAttr(225), IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)],
+                [1, 3, 3, 3, 5, 5],
+                ["S", 225, 75, 25, 5, 1],
                 element_type=Float32Type(),
             ),
             three,

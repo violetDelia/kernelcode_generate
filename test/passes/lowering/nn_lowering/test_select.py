@@ -34,6 +34,7 @@ from kernel_gen.dialect.kernel import KernelSelectOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType, NnSelectOp
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
+from test.passes.lowering.nn_lowering.memory_type_utils import symbol_array
 
 
 def _make_memory_type(element_type: Attribute = i32) -> NnMemoryType:
@@ -52,8 +53,8 @@ def _make_memory_type(element_type: Attribute = i32) -> NnMemoryType:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 
-    shape = ArrayAttr([IntAttr(4), IntAttr(8)])
-    stride = ArrayAttr([IntAttr(8), IntAttr(1)])
+    shape = symbol_array([4, 8])
+    stride = symbol_array([8, 1])
     return NnMemoryType(shape, stride, element_type, NnMemorySpaceAttr.from_name("global"))
 
 
@@ -184,12 +185,7 @@ def test_lower_select_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="nn.select rhs must be nn.memory"):
         NnLoweringPass().apply(Context(), rhs_error_module)
 
-    rank_result_type = NnMemoryType(
-        ArrayAttr([IntAttr(4)]),
-        ArrayAttr([IntAttr(1)]),
-        i32,
-        space,
-    )
+    rank_result_type = NnMemoryType(symbol_array([4]), symbol_array([1]), i32, space)
     rank_error_block = Block(arg_types=[cond_type, value_type, value_type])
     rank_error_op = NnSelectOp(rank_error_block.args[0], rank_error_block.args[1], rank_error_block.args[2], rank_result_type, space)
     rank_error_block.add_op(rank_error_op)
@@ -206,12 +202,7 @@ def test_lower_select_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="nn select/cast operand/result rank mismatch"):
         NnLoweringPass().apply(Context(), rank_error_module)
 
-    unknown_result_type = NnMemoryType(
-        ArrayAttr([StringAttr("?"), IntAttr(8)]),
-        ArrayAttr([IntAttr(8), IntAttr(1)]),
-        i32,
-        space,
-    )
+    unknown_result_type = NnMemoryType(symbol_array(["?", 8]), symbol_array([8, 1]), i32, space)
     unknown_error_block = Block(arg_types=[cond_type, value_type, value_type])
     unknown_error_op = NnSelectOp(
         unknown_error_block.args[0],

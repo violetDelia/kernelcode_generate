@@ -6,7 +6,7 @@
 - 负责串起 `mlir_gen -> pass/pipeline -> gen_kernel -> ExecutionEngine.compile/execute`。
 - 公开合同只覆盖这条一体化路径，不扩展到无关 pass、无关 dialect、无关工具。
 - `kernel_gen.tools` 包根稳定暴露 `DslRunResult`、`kernel_gen.tools.dsl_run(...)` 与 `kernel_gen.tools.dsl_cost_run(...)`，不把 `dsl_run` 子模块对象当作公开合同。
-- 诊断落盘根目录统一来自 `kernel_gen.core.config.set_dump_dir(...)`，不作为 `dsl_run(...)` 入参。
+- 诊断落盘根目录统一来自 `kernel_gen.core.config.set_dump_dir(...)`，不作为 `dsl_run(...)` 入参；IR dump 文件默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias IR。
 - runtime trance kernel log 开关统一来自 `kernel_gen.core.config.set_trance_enabled(...)`，不作为 `dsl_run(...)` 或 `dsl_cost_run(...)` 入参。
 - 失败统一抛出 `KernelCodeError(ErrorModule.TOOLS, message)`；不再定义或导出工具专属错误类。
 - `dsl_run(...)` 不向 kernel 函数隐式注入 operation helper、`MemorySpace`、`NumericType` 或 `SymbolDim`；kernel 体引用的名称必须来自显式 import、闭包或函数全局绑定，缺失时必须报错。
@@ -113,9 +113,10 @@
   - `kernel_gen.core.config.trance_enabled` 为 `True` 且 `dump_dir is None` 时，runtime trance 必须把日志输出到 stdout；日志至少包含 `in func: <entry> template=<none>`、`args =` 与真实运行参数摘要。
   - `kernel_gen.core.config.trance_enabled` 为 `True` 且 `dump_dir` 非空时，runtime trance 文件必须写入 `dump_dir/<kernel name>/<entry>_trace.txt`，其中 `<kernel name>` 是 DSL 函数名目录，`<entry>` 是执行引擎实际编译入口名；同名文件再次执行时必须覆盖旧内容。
   - runtime trance 只作为诊断输出，不改变 `DslRunResult` 字段、执行结果、源码文本或数学语义。
-  - kernel 子目录内必须写入 `01-first-ir.mlir`，内容为 `mlir_gen(...)` 之后、pipeline 执行前的初始 IR。
+  - kernel 子目录内必须写入 `01-first-ir.mlir`，内容为 `mlir_gen(...)` 之后、pipeline 执行前的初始 alias IR。
   - 标准 `PassManager` pipeline 必须写入每个 pass 后的 `NN-<pass-name>.mlir`；文件第一行为 pass 名称文本，后续为 pass 后 IR。
-  - 自定义 `PassManager` 子类若覆盖 `run(module)` 且不使用标准 config dump，工具层只保证写入初始 IR 与 `02-pipeline.mlir` 粗粒度结果。
+  - 自定义 `PassManager` 子类若覆盖 `run(module)` 且不使用标准 config dump，工具层只保证写入初始 alias IR 与 `02-pipeline.mlir` 粗粒度 alias IR 结果。
+  - `dump_dir/<kernel name>/*.mlir` 的 IR 正文默认使用 alias IR；普通 `str(op)`、raw attr/type 打印和比较工具默认文本不因 `dsl_run(...)` 改变。
   - 源码生成成功后必须由 `gen_kernel(...)` 的公开 dump 链路写入 `source.cpp`，内容与 `DslRunResult.source` 一致。
   - `dump_dir` 只用于诊断，不改变 `module/source/compile/execute` 正常路径语义。
   - 调用方不得依赖实现内部状态。
@@ -171,7 +172,7 @@
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-TOOLS-DSL-RUN-001 | pass 改写 | DSL run string pipeline with torch numpy mix | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_dsl_run_string_pipeline_with_torch_numpy_mix`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“DSL run string pipeline with torch numpy mix”场景。 | `test_dsl_run_string_pipeline_with_torch_numpy_mix` |
-| TC-TOOLS-DSL-RUN-002 | pass 改写 | DSL run dump dir writes pass IR and source | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_dsl_run_dump_dir_writes_pass_ir_and_source`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“DSL run dump dir writes pass IR and source”场景。 | `test_dsl_run_dump_dir_writes_pass_ir_and_source` |
+| TC-TOOLS-DSL-RUN-002 | pass 改写 | DSL run dump dir writes alias pass IR and source | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_dsl_run_dump_dir_writes_pass_ir_and_source`。 | dump `.mlir` 文件使用 alias IR，源码文件内容与 `DslRunResult.source` 一致。 | `test_dsl_run_dump_dir_writes_pass_ir_and_source` |
 | TC-TOOLS-DSL-RUN-003 | 执行结果 | DSL run empty dump dir disables dump | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_dsl_run_empty_dump_dir_disables_dump`。 | 命令返回码、输出、执行结果或状态变更体现“DSL run empty dump dir disables dump”场景。 | `test_dsl_run_empty_dump_dir_disables_dump` |
 | TC-TOOLS-DSL-RUN-004 | pass 改写 | DSL run pass manager with list real args | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_dsl_run_pass_manager_with_list_real_args`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“DSL run pass manager with list real args”场景。 | `test_dsl_run_pass_manager_with_list_real_args` |
 | TC-TOOLS-DSL-RUN-005 | 执行结果 | DSL run numpy output | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_dsl_run_numpy_output`。 | 命令返回码、输出、执行结果或状态变更体现“DSL run numpy output”场景。 | `test_dsl_run_numpy_output` |
@@ -203,7 +204,7 @@
 | TC-TOOLS-DSL-RUN-031 | 执行结果 | DSL run accepts runtime scalar tile args | 准备带 `tile_*` 形参的公开 DSL kernel 和真实 torch/numpy 张量。 | 运行 `test_dsl_run_add_dynamic_tile_scalar_matches_public_contract`。 | `int` runtime tile 绑定到 `SymbolDim` 形参，生成并执行 npu_demo 链路。 | `test_dsl_run_add_dynamic_tile_scalar_matches_public_contract` |
 | TC-TOOLS-DSL-RUN-032 | 边界/异常 | DSL run rejects non-positive tile scalar | 准备 `tile_*` 形参并传入 `0` 或负数。 | 运行 `test_dsl_run_rejects_non_positive_tile_runtime_scalar`。 | 按 `DslRunInvalidTileValue: tile runtime scalar must be positive int` 失败。 | `test_dsl_run_rejects_non_positive_tile_runtime_scalar` |
 | TC-TOOLS-DSL-RUN-033 | 边界/异常 | DSL run empty function name uses kernel dump fallback | 设置 `dump_dir` 且 DSL 函数名为空，同时传入 arity 不匹配的公开参数。 | 运行 `test_dsl_run_empty_function_name_uses_kernel_dump_fallback`。 | `dsl_run(...)` 先稳定解析 dump 子目录 fallback，再按公开 arity 错误失败。 | `test_dsl_run_empty_function_name_uses_kernel_dump_fallback` |
-| TC-TOOLS-DSL-RUN-034 | 边界/异常 | DSL run custom pipeline dump uses public fallback name | 设置 `dump_dir` 并传入覆盖 `run(...)`、名称为空的公开 `PassManager` 子类。 | 运行 `test_dsl_run_custom_pipeline_dump_uses_public_fallback_name`。 | 工具写出 `01-first-ir.mlir` 与 `02-pipeline.mlir`，pipeline dump 首行回退为 `pipeline`，后续 CPU 源码生成按公开错误失败。 | `test_dsl_run_custom_pipeline_dump_uses_public_fallback_name` |
+| TC-TOOLS-DSL-RUN-034 | 边界/异常 | DSL run custom pipeline dump uses public fallback name | 设置 `dump_dir` 并传入覆盖 `run(...)`、名称为空的公开 `PassManager` 子类。 | 运行 `test_dsl_run_custom_pipeline_dump_uses_public_fallback_name`。 | 工具写出 alias `01-first-ir.mlir` 与 alias `02-pipeline.mlir`，pipeline dump 首行回退为 `pipeline`，后续 CPU 源码生成按公开错误失败。 | `test_dsl_run_custom_pipeline_dump_uses_public_fallback_name` |
 | TC-TOOLS-DSL-RUN-035 | 边界/异常 | DSL run rejects target cleared after pipeline | 传入公开 `PassManager` 子类，在 `run(...)` 后使 core target 变为空字符串。 | 运行 `test_dsl_run_rejects_target_cleared_after_pipeline`。 | 源码生成入口按公开 target 错误 `DslRunInvalidTarget` 失败。 | `test_dsl_run_rejects_target_cleared_after_pipeline` |
 | TC-TOOLS-DSL-RUN-036 | 边界/异常 | DSL run rejects unsupported numpy dtype | 传入 `numpy.ndarray` 且 dtype 不在 DSL `NumericType` 公开枚举中。 | 运行 `test_dsl_run_rejects_unsupported_numpy_dtype`。 | real_args 转换阶段按 `DslRunUnsupportedRealArg` 失败。 | `test_dsl_run_rejects_unsupported_numpy_dtype` |
 | TC-TOOLS-DSL-RUN-037 | 边界/异常 | DSL run maps bfloat16 runtime dtype before pipeline validation | 传入 `torch.bfloat16` tensors 与返回非 module 的公开 `PassManager` 子类。 | 运行 `test_dsl_run_maps_bfloat16_runtime_dtype_before_pipeline_validation`。 | dtype 先映射为 DSL `bf16`，再按公开 pipeline 结果错误失败。 | `test_dsl_run_maps_bfloat16_runtime_dtype_before_pipeline_validation` |

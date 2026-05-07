@@ -89,18 +89,18 @@ def test_tile_analysis_binary_pattern_marks_existing_tile_shape_inside_symbol_fo
         """
 builtin.module {
   func.func @tile_binary_nested(
-      %out : !nn.memory<[16, 32], [32, 1], i32, #nn.space<global>>,
-      %lhs : !nn.memory<[16, 32], [32, 1], i32, #nn.space<global>>,
-      %rhs : !nn.memory<[16, 32], [32, 1], i32, #nn.space<global>>) {
-    %c0 = symbol.const 0 : !symbol.int<"0">
-    %c4 = symbol.const 4 : !symbol.int<"4">
-    %c8 = symbol.const 8 : !symbol.int<"8">
-    symbol.for %it0 = %c0 to %c4 step %c4 {iter = #symbol.iter<start = "0", end = "4", step = "4">} {
-      symbol.for %it1 = %c0 to %c8 step %c8 {iter = #symbol.iter<start = "0", end = "8", step = "8">} {
-        %tile_out = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>
-        %tile_lhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>
-        %tile_rhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>
-        "kernel.binary_elewise"(%tile_out, %tile_lhs, %tile_rhs) {kind = "add", space = #nn.space<tsm>} : (!nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>, !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>, !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>) -> ()
+      %out : !nn.memory<[#symbol.expr<16>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %lhs : !nn.memory<[#symbol.expr<16>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %rhs : !nn.memory<[#symbol.expr<16>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>) {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %c8 = symbol.const 8 : !symbol.int<#symbol.expr<8>>
+    symbol.for %it0 = %c0 to %c4 step %c4 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<4>, step = #symbol.expr<4>>} {
+      symbol.for %it1 = %c0 to %c8 step %c8 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<8>, step = #symbol.expr<8>>} {
+        %tile_out = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>
+        %tile_lhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>
+        %tile_rhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>
+        "kernel.binary_elewise"(%tile_out, %tile_lhs, %tile_rhs) {kind = "add", space = #nn.space<tsm>} : (!nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>) -> ()
       }
     }
     func.return
@@ -129,17 +129,17 @@ def test_tile_analysis_binary_pattern_marks_only_loop_covered_dim_inside_single_
         """
 builtin.module {
   func.func @tile_binary_partial_nested(
-      %out : !nn.memory<[16, 32], [32, 1], i32, #nn.space<global>>,
-      %lhs : !nn.memory<[16, 32], [32, 1], i32, #nn.space<global>>,
-      %rhs : !nn.memory<[16, 32], [32, 1], i32, #nn.space<global>>) {
-    %c0 = symbol.const 0 : !symbol.int<"0">
-    %c16 = symbol.const 16 : !symbol.int<"16">
-    %c8 = symbol.const 8 : !symbol.int<"8">
-    symbol.for %it = %c0 to %c16 step %c8 {iter = #symbol.iter<start = "0", end = "16", step = "8">} {
-      %tile_out = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>
-      %tile_lhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>
-      %tile_rhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>
-      "kernel.binary_elewise"(%tile_out, %tile_lhs, %tile_rhs) {kind = "add", space = #nn.space<tsm>} : (!nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>, !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>, !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>) -> ()
+      %out : !nn.memory<[#symbol.expr<16>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %lhs : !nn.memory<[#symbol.expr<16>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %rhs : !nn.memory<[#symbol.expr<16>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>) {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c16 = symbol.const 16 : !symbol.int<#symbol.expr<16>>
+    %c8 = symbol.const 8 : !symbol.int<#symbol.expr<8>>
+    symbol.for %it = %c0 to %c16 step %c8 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<16>, step = #symbol.expr<8>>} {
+      %tile_out = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      %tile_lhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      %tile_rhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      "kernel.binary_elewise"(%tile_out, %tile_lhs, %tile_rhs) {kind = "add", space = #nn.space<tsm>} : (!nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>) -> ()
     }
     func.return
   }
@@ -193,15 +193,15 @@ def test_tile_analysis_broadcast_pattern_marks_non_expand_tile_shape_inside_symb
         """
 builtin.module {
   func.func @tile_broadcast_nested(
-      %target : !nn.memory<[16, 32], [32, 1], i32, #nn.space<global>>,
-      %source : !nn.memory<[32], [1], i32, #nn.space<global>>) {
-    %c0 = symbol.const 0 : !symbol.int<"0">
-    %c32 = symbol.const 32 : !symbol.int<"32">
-    %c8 = symbol.const 8 : !symbol.int<"8">
-    symbol.for %it = %c0 to %c32 step %c8 {iter = #symbol.iter<start = "0", end = "32", step = "8">} {
-      %tile_target = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>
-      %tile_source = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[1, 8], [8, 1], i32, #nn.space<tsm>>
-      "dma.broadcast"(%tile_target, %tile_source) : (!nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>, !nn.memory<[1, 8], [8, 1], i32, #nn.space<tsm>>) -> ()
+      %target : !nn.memory<[#symbol.expr<16>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %source : !nn.memory<[#symbol.expr<32>], [#symbol.expr<1>], i32, #nn.space<global>>) {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c32 = symbol.const 32 : !symbol.int<#symbol.expr<32>>
+    %c8 = symbol.const 8 : !symbol.int<#symbol.expr<8>>
+    symbol.for %it = %c0 to %c32 step %c8 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<32>, step = #symbol.expr<8>>} {
+      %tile_target = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      %tile_source = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<1>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      "dma.broadcast"(%tile_target, %tile_source) : (!nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<1>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>) -> ()
     }
     func.return
   }
@@ -256,18 +256,18 @@ def test_tile_analysis_matmul_pattern_marks_existing_tile_shape_inside_symbol_fo
         """
 builtin.module {
   func.func @tile_matmul_nested(
-      %out : !nn.memory<[16, 32], [32, 1], i32, #nn.space<global>>,
-      %lhs : !nn.memory<[16, 8], [8, 1], i32, #nn.space<global>>,
-      %rhs : !nn.memory<[8, 32], [32, 1], i32, #nn.space<global>>) {
-    %c0 = symbol.const 0 : !symbol.int<"0">
-    %c4 = symbol.const 4 : !symbol.int<"4">
-    %c32 = symbol.const 32 : !symbol.int<"32">
-    symbol.for %it0 = %c0 to %c4 step %c4 {iter = #symbol.iter<start = "0", end = "4", step = "4">} {
-      symbol.for %it1 = %c0 to %c32 step %c32 {iter = #symbol.iter<start = "0", end = "32", step = "32">} {
-        %tile_out = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 32], [32, 1], i32, #nn.space<tsm>>
-        %tile_lhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>
-        %tile_rhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[8, 32], [32, 1], i32, #nn.space<tsm>>
-        "kernel.matmul"(%tile_out, %tile_lhs, %tile_rhs) {space = #nn.space<tsm>} : (!nn.memory<[4, 32], [32, 1], i32, #nn.space<tsm>>, !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>, !nn.memory<[8, 32], [32, 1], i32, #nn.space<tsm>>) -> ()
+      %out : !nn.memory<[#symbol.expr<16>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %lhs : !nn.memory<[#symbol.expr<16>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %rhs : !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>) {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %c32 = symbol.const 32 : !symbol.int<#symbol.expr<32>>
+    symbol.for %it0 = %c0 to %c4 step %c4 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<4>, step = #symbol.expr<4>>} {
+      symbol.for %it1 = %c0 to %c32 step %c32 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<32>, step = #symbol.expr<32>>} {
+        %tile_out = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>
+        %tile_lhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>
+        %tile_rhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>
+        "kernel.matmul"(%tile_out, %tile_lhs, %tile_rhs) {space = #nn.space<tsm>} : (!nn.memory<[#symbol.expr<4>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>) -> ()
       }
     }
     func.return
@@ -303,17 +303,17 @@ def test_tile_analysis_matmul_pattern_marks_only_loop_covered_dim_inside_single_
         """
 builtin.module {
   func.func @tile_matmul_partial_nested(
-      %out : !nn.memory<[16, 32], [32, 1], i32, #nn.space<global>>,
-      %lhs : !nn.memory<[16, 8], [8, 1], i32, #nn.space<global>>,
-      %rhs : !nn.memory<[8, 32], [32, 1], i32, #nn.space<global>>) {
-    %c0 = symbol.const 0 : !symbol.int<"0">
-    %c64 = symbol.const 64 : !symbol.int<"64">
-    %c32 = symbol.const 32 : !symbol.int<"32">
-    symbol.for %it = %c0 to %c64 step %c32 {iter = #symbol.iter<start = "0", end = "64", step = "32">} {
-      %tile_out = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 32], [32, 1], i32, #nn.space<tsm>>
-      %tile_lhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>
-      %tile_rhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[8, 32], [32, 1], i32, #nn.space<tsm>>
-      "kernel.matmul"(%tile_out, %tile_lhs, %tile_rhs) {space = #nn.space<tsm>} : (!nn.memory<[4, 32], [32, 1], i32, #nn.space<tsm>>, !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>, !nn.memory<[8, 32], [32, 1], i32, #nn.space<tsm>>) -> ()
+      %out : !nn.memory<[#symbol.expr<16>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %lhs : !nn.memory<[#symbol.expr<16>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %rhs : !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>) {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c64 = symbol.const 64 : !symbol.int<#symbol.expr<64>>
+    %c32 = symbol.const 32 : !symbol.int<#symbol.expr<32>>
+    symbol.for %it = %c0 to %c64 step %c32 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<64>, step = #symbol.expr<32>>} {
+      %tile_out = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      %tile_lhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      %tile_rhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      "kernel.matmul"(%tile_out, %tile_lhs, %tile_rhs) {space = #nn.space<tsm>} : (!nn.memory<[#symbol.expr<4>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>) -> ()
     }
     func.return
   }
@@ -341,17 +341,17 @@ def test_tile_analysis_matmul_pattern_ignores_reduce_only_loop_inside_symbol_for
         """
 builtin.module {
   func.func @tile_matmul_reduce_only_nested(
-      %out : !nn.memory<[16, 32], [32, 1], i32, #nn.space<global>>,
-      %lhs : !nn.memory<[16, 8], [8, 1], i32, #nn.space<global>>,
-      %rhs : !nn.memory<[8, 32], [32, 1], i32, #nn.space<global>>) {
-    %c0 = symbol.const 0 : !symbol.int<"0">
-    %c16 = symbol.const 16 : !symbol.int<"16">
-    %c8 = symbol.const 8 : !symbol.int<"8">
-    symbol.for %it = %c0 to %c16 step %c8 {iter = #symbol.iter<start = "0", end = "16", step = "8">} {
-      %tile_out = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 32], [32, 1], i32, #nn.space<tsm>>
-      %tile_lhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>
-      %tile_rhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[8, 32], [32, 1], i32, #nn.space<tsm>>
-      "kernel.matmul"(%tile_out, %tile_lhs, %tile_rhs) {space = #nn.space<tsm>} : (!nn.memory<[4, 32], [32, 1], i32, #nn.space<tsm>>, !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>, !nn.memory<[8, 32], [32, 1], i32, #nn.space<tsm>>) -> ()
+      %out : !nn.memory<[#symbol.expr<16>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %lhs : !nn.memory<[#symbol.expr<16>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %rhs : !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>) {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c16 = symbol.const 16 : !symbol.int<#symbol.expr<16>>
+    %c8 = symbol.const 8 : !symbol.int<#symbol.expr<8>>
+    symbol.for %it = %c0 to %c16 step %c8 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<16>, step = #symbol.expr<8>>} {
+      %tile_out = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      %tile_lhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      %tile_rhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>
+      "kernel.matmul"(%tile_out, %tile_lhs, %tile_rhs) {space = #nn.space<tsm>} : (!nn.memory<[#symbol.expr<4>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>) -> ()
     }
     func.return
   }
@@ -379,20 +379,20 @@ def test_tile_analysis_matmul_pattern_ignores_reduce_loop_and_keeps_n_loop_insid
         """
 builtin.module {
   func.func @tile_matmul_reduce_n_nested(
-      %out : !nn.memory<[16, 32], [32, 1], i32, #nn.space<global>>,
-      %lhs : !nn.memory<[16, 8], [8, 1], i32, #nn.space<global>>,
-      %rhs : !nn.memory<[8, 32], [32, 1], i32, #nn.space<global>>) {
-    %c0 = symbol.const 0 : !symbol.int<"0">
-    %c16 = symbol.const 16 : !symbol.int<"16">
-    %c8 = symbol.const 8 : !symbol.int<"8">
-    %c64 = symbol.const 64 : !symbol.int<"64">
-    %c32 = symbol.const 32 : !symbol.int<"32">
-    symbol.for %itk = %c0 to %c16 step %c8 {iter = #symbol.iter<start = "0", end = "16", step = "8">} {
-      symbol.for %itn = %c0 to %c64 step %c32 {iter = #symbol.iter<start = "0", end = "64", step = "32">} {
-        %tile_out = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 32], [32, 1], i32, #nn.space<tsm>>
-        %tile_lhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>
-        %tile_rhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[8, 32], [32, 1], i32, #nn.space<tsm>>
-        "kernel.matmul"(%tile_out, %tile_lhs, %tile_rhs) {space = #nn.space<tsm>} : (!nn.memory<[4, 32], [32, 1], i32, #nn.space<tsm>>, !nn.memory<[4, 8], [8, 1], i32, #nn.space<tsm>>, !nn.memory<[8, 32], [32, 1], i32, #nn.space<tsm>>) -> ()
+      %out : !nn.memory<[#symbol.expr<16>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %lhs : !nn.memory<[#symbol.expr<16>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<global>>,
+      %rhs : !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>) {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c16 = symbol.const 16 : !symbol.int<#symbol.expr<16>>
+    %c8 = symbol.const 8 : !symbol.int<#symbol.expr<8>>
+    %c64 = symbol.const 64 : !symbol.int<#symbol.expr<64>>
+    %c32 = symbol.const 32 : !symbol.int<#symbol.expr<32>>
+    symbol.for %itk = %c0 to %c16 step %c8 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<16>, step = #symbol.expr<8>>} {
+      symbol.for %itn = %c0 to %c64 step %c32 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<64>, step = #symbol.expr<32>>} {
+        %tile_out = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>
+        %tile_lhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>
+        %tile_rhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>
+        "kernel.matmul"(%tile_out, %tile_lhs, %tile_rhs) {space = #nn.space<tsm>} : (!nn.memory<[#symbol.expr<4>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>) -> ()
       }
     }
     func.return

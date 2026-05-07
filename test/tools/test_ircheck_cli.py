@@ -135,13 +135,13 @@ def test_ircheck_cli_irdump_creates_files(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     case_one_ir = """builtin.module {
-  func.func @case_one() {
+  func.func @case_one(%n : !symbol.int<#symbol.expr<N>>) {
     func.return
   }
 }
 """
     case_two_ir = """builtin.module {
-  func.func @case_two() {
+  func.func @case_two(%m : !symbol.int<#symbol.expr<M>>) {
     func.return
   }
 }
@@ -181,6 +181,13 @@ def test_ircheck_cli_irdump_creates_files(
     ]
     missing = [str(path) for path in expected_files if not path.is_file()]
     assert not missing, f"missing dump files: {missing}"
+    case_one_dump = (case_01 / "00-input.mlir").read_text(encoding="utf-8")
+    case_two_dump = (case_02 / "02-pipeline-no-op-pipeline.mlir").read_text(encoding="utf-8")
+    assert "#S_N = #symbol.expr<N>" in case_one_dump
+    assert "!symbol.int<#S_N>" in case_one_dump
+    assert "#symbol.expr<" not in case_one_dump.split("builtin.module", 1)[1]
+    assert "#S_M = #symbol.expr<M>" in case_two_dump
+    assert "#symbol.expr<" not in case_two_dump.split("builtin.module", 1)[1]
 
 
 # TC-IRCHECK-CLI-010

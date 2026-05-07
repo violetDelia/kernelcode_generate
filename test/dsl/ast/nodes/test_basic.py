@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 
 import pytest
 from xdsl.context import Context
@@ -107,6 +108,9 @@ def test_function_ast_iter_inputs_returns_declared_inputs() -> None:
 
 def test_function_ast_constructs_inputs_from_runtime_args() -> None:
     """FunctionAST.input_from_runtime_arg() 统一 runtime 参数到输入 AST 的构造。"""
+
+    value_annotation = inspect.signature(FunctionAST.input_from_runtime_arg).parameters["value"].annotation
+    assert "object" not in str(value_annotation)
 
     memory = Memory([SymbolDim("N")], NumericType.Float32, space=MemorySpace.TSM)
     memory_input = FunctionAST.input_from_runtime_arg("x", memory)

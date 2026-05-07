@@ -27,8 +27,8 @@ from pathlib import Path
 
 import pytest
 from xdsl.dialects import arith, func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, IntegerAttr, ModuleOp, StringAttr, i32
-from xdsl.ir import Block, Region, SSAValue
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, IntegerAttr, ModuleOp, i32
+from xdsl.ir import Block, Operation, Region, SSAValue
 from xdsl.dialects.builtin import UnrealizedConversionCastOp
 from xdsl.context import Context
 from xdsl.passes import ModulePass
@@ -44,6 +44,7 @@ from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolConstOp,
     SymbolDivOp,
+    SymbolExprAttr,
     SymbolFloorDivOp,
     SymbolForOp,
     SymbolGetDimOp,
@@ -81,15 +82,15 @@ def _const_symbol_int(value: int) -> tuple[arith.ConstantOp, UnrealizedConversio
 
 
 def _memory_type(shape: tuple[int | str, ...]) -> NnMemoryType:
-    strides: list[object] = []
+    strides: list[int | str] = []
     running: int | str | None = 1
     for dim in reversed(shape):
         if running is None:
-            strides.append(StringAttr("?"))
+            strides.append("?")
         elif isinstance(running, int):
-            strides.append(IntAttr(running))
+            strides.append(running)
         else:
-            strides.append(StringAttr(running))
+            strides.append(running)
         if running is None:
             continue
         if isinstance(dim, int):
@@ -111,8 +112,8 @@ def _memory_type(shape: tuple[int | str, ...]) -> NnMemoryType:
         running = None
     strides.reverse()
     return NnMemoryType(
-        ArrayAttr([IntAttr(d) if isinstance(d, int) else StringAttr(d) for d in shape]),
-        ArrayAttr([s if isinstance(s, (IntAttr, StringAttr)) else StringAttr(str(s)) for s in strides]),
+        ArrayAttr([SymbolExprAttr.from_expr(str(d)) for d in shape]),
+        ArrayAttr([SymbolExprAttr.from_expr(str(s)) for s in strides]),
         i32,
         NnMemorySpaceAttr.from_name("global"),
     )
@@ -121,7 +122,7 @@ def _memory_type(shape: tuple[int | str, ...]) -> NnMemoryType:
 def _make_module_for_symbol_dim_hoist() -> ModuleOp:
     mem_type = _memory_type(("M", 128))
     block = Block(arg_types=[mem_type])
-    ops: list[object] = []
+    ops: list[Operation] = []
     c0, c0_cast, zero = _const_symbol_int(0)
     c1, c1_cast, one = _const_symbol_int(1)
     ops.extend([c0, c0_cast, c1, c1_cast])
@@ -144,7 +145,7 @@ def _make_module_for_symbol_dim_hoist() -> ModuleOp:
 
 def _make_module_for_const_hoist() -> ModuleOp:
     block = Block(arg_types=[])
-    ops: list[object] = []
+    ops: list[Operation] = []
     c0 = SymbolConstOp(0)
     c1 = SymbolConstOp(1)
     c2 = SymbolConstOp(1)
@@ -167,7 +168,7 @@ def _make_module_for_const_hoist() -> ModuleOp:
 
 def _make_module_for_tuner_param_hoist() -> ModuleOp:
     block = Block(arg_types=[])
-    ops: list[object] = []
+    ops: list[Operation] = []
     c0 = SymbolConstOp(0)
     c1 = SymbolConstOp(1)
     c2 = SymbolConstOp(1)
@@ -189,7 +190,7 @@ def _make_module_for_tuner_param_hoist() -> ModuleOp:
 
 def _make_module_for_symbol_elewise_hoist() -> ModuleOp:
     block = Block(arg_types=[])
-    ops: list[object] = []
+    ops: list[Operation] = []
     c0 = SymbolConstOp(0)
     c1 = SymbolConstOp(1)
     c2 = SymbolConstOp(1)
@@ -221,7 +222,7 @@ def _make_module_for_symbol_elewise_hoist() -> ModuleOp:
 
 def _make_module_for_loop_carried_symbol_add() -> ModuleOp:
     block = Block(arg_types=[])
-    ops: list[object] = []
+    ops: list[Operation] = []
     c0 = SymbolConstOp(0)
     c1 = SymbolConstOp(1)
     c2 = SymbolConstOp(1)
@@ -258,7 +259,7 @@ def _make_module_for_loop_carried_symbol_add() -> ModuleOp:
 def _make_module_for_loop_local_symbol_inputs() -> ModuleOp:
     mem_type = _memory_type((4,))
     block = Block(arg_types=[])
-    ops: list[object] = []
+    ops: list[Operation] = []
     c0 = SymbolConstOp(0)
     c1 = SymbolConstOp(1)
     c2 = SymbolConstOp(1)
@@ -304,7 +305,7 @@ def _make_module_for_loop_local_symbol_inputs() -> ModuleOp:
 
 def _make_module_for_loop_carried_symbol_elewise() -> ModuleOp:
     block = Block(arg_types=[])
-    ops: list[object] = []
+    ops: list[Operation] = []
     c0 = SymbolConstOp(0)
     c1 = SymbolConstOp(1)
     c2 = SymbolConstOp(1)
@@ -357,7 +358,7 @@ def _make_module_without_symbol_for() -> ModuleOp:
 def _make_module_with_step_zero() -> ModuleOp:
     mem_type = _memory_type(("M", 128))
     block = Block(arg_types=[mem_type, mem_type, mem_type])
-    ops: list[object] = []
+    ops: list[Operation] = []
     c0, c0_cast, zero = _const_symbol_int(0)
     c1, c1_cast, one = _const_symbol_int(1)
     ops.extend([c0, c0_cast, c1, c1_cast])

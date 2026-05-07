@@ -39,12 +39,14 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 Conv2dCompileArg: TypeAlias = "Memory | int"
-STATIC_OUTPUT_MEMORY = "!nn.memory<[11, 2, 258, 262]"
-STATIC_INPUT_MEMORY = "!nn.memory<[11, 28, 260, 264]"
-STATIC_WEIGHT_MEMORY = "!nn.memory<[2, 28, 3, 3]"
-SEMANTIC_OUTPUT_MEMORY = "!nn.memory<[B, C, -KH + XH + 1, -KW + XW + 1]"
-SEMANTIC_INPUT_MEMORY = "!nn.memory<[B, N, XH, XW]"
-SEMANTIC_WEIGHT_MEMORY = "!nn.memory<[C, N, KH, KW]"
+STATIC_OUTPUT_MEMORY = "!nn.memory<[#symbol.expr<11>, #symbol.expr<2>, #symbol.expr<258>, #symbol.expr<262>]"
+STATIC_INPUT_MEMORY = "!nn.memory<[#symbol.expr<11>, #symbol.expr<28>, #symbol.expr<260>, #symbol.expr<264>]"
+STATIC_WEIGHT_MEMORY = "!nn.memory<[#symbol.expr<2>, #symbol.expr<28>, #symbol.expr<3>, #symbol.expr<3>]"
+SEMANTIC_OUTPUT_MEMORY = (
+    "!nn.memory<[#symbol.expr<B>, #symbol.expr<C>, #symbol.expr<-KH + XH + 1>, #symbol.expr<-KW + XW + 1>]"
+)
+SEMANTIC_INPUT_MEMORY = "!nn.memory<[#symbol.expr<B>, #symbol.expr<N>, #symbol.expr<XH>, #symbol.expr<XW>]"
+SEMANTIC_WEIGHT_MEMORY = "!nn.memory<[#symbol.expr<C>, #symbol.expr<N>, #symbol.expr<KH>, #symbol.expr<KW>]"
 
 
 def _symbolic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]:
@@ -124,12 +126,12 @@ def test_inputs_dynamic_tile_dynamic_gen_kernel_keeps_symbolic_memory_shapes() -
     assert SEMANTIC_OUTPUT_MEMORY in module_text
     assert SEMANTIC_INPUT_MEMORY in module_text
     assert SEMANTIC_WEIGHT_MEMORY in module_text
-    assert "!nn.memory<[s1, s2, s3, s4]" not in module_text
-    assert "!nn.memory<[s1, s5, s6, s7]" not in module_text
-    assert "!nn.memory<[s2, s5, 3, 3]" not in module_text
-    assert "!nn.memory<[11, 4, 258, 262]" not in module_text
-    assert "!nn.memory<[11, 30, 260, 264]" not in module_text
-    assert "!nn.memory<[4, 30, 3, 3]" not in module_text
+    assert "!nn.memory<[#symbol.expr<s1>, #symbol.expr<s2>, #symbol.expr<s3>, #symbol.expr<s4>]" not in module_text
+    assert "!nn.memory<[#symbol.expr<s1>, #symbol.expr<s5>, #symbol.expr<s6>, #symbol.expr<s7>]" not in module_text
+    assert "!nn.memory<[#symbol.expr<s2>, #symbol.expr<s5>, #symbol.expr<3>, #symbol.expr<3>]" not in module_text
+    assert "!nn.memory<[#symbol.expr<11>, #symbol.expr<4>, #symbol.expr<258>, #symbol.expr<262>]" not in module_text
+    assert "!nn.memory<[#symbol.expr<11>, #symbol.expr<30>, #symbol.expr<260>, #symbol.expr<264>]" not in module_text
+    assert "!nn.memory<[#symbol.expr<4>, #symbol.expr<30>, #symbol.expr<3>, #symbol.expr<3>]" not in module_text
     assert "arg1.get_shape(2)" in source
     assert "arg1.get_shape(3)" in source
     assert "S_INT c_6 = 258" not in source
@@ -158,13 +160,13 @@ def test_inputs_static_tile_dynamic_gen_kernel_keeps_seeded_static_shapes() -> N
     assert STATIC_OUTPUT_MEMORY in module_text
     assert STATIC_INPUT_MEMORY in module_text
     assert STATIC_WEIGHT_MEMORY in module_text
-    assert "!nn.memory<[12, 4, 254, 254]" not in module_text
-    assert "!nn.memory<[12, 32, 256, 256]" not in module_text
-    assert "!nn.memory<[4, 32, 3, 3]" not in module_text
+    assert "!nn.memory<[#symbol.expr<12>, #symbol.expr<4>, #symbol.expr<254>, #symbol.expr<254>]" not in module_text
+    assert "!nn.memory<[#symbol.expr<12>, #symbol.expr<32>, #symbol.expr<256>, #symbol.expr<256>]" not in module_text
+    assert "!nn.memory<[#symbol.expr<4>, #symbol.expr<32>, #symbol.expr<3>, #symbol.expr<3>]" not in module_text
     assert SEMANTIC_OUTPUT_MEMORY not in module_text
     assert SEMANTIC_INPUT_MEMORY not in module_text
     assert SEMANTIC_WEIGHT_MEMORY not in module_text
-    assert "!nn.memory<[s1" not in module_text
+    assert "!nn.memory<[#symbol.expr<s1>" not in module_text
 
 
 # TC-KERNEL-CONV2D-SYMBOLIC-MEMORY-003
@@ -185,12 +187,12 @@ def test_inputs_static_tile_static_gen_kernel_keeps_seeded_static_shapes() -> No
     assert STATIC_OUTPUT_MEMORY in module_text
     assert STATIC_INPUT_MEMORY in module_text
     assert STATIC_WEIGHT_MEMORY in module_text
-    assert "!nn.memory<[12, 4, 254, 254]" not in module_text
-    assert "!nn.memory<[12, 32, 256, 256]" not in module_text
-    assert "!nn.memory<[4, 32, 3, 3]" not in module_text
+    assert "!nn.memory<[#symbol.expr<12>, #symbol.expr<4>, #symbol.expr<254>, #symbol.expr<254>]" not in module_text
+    assert "!nn.memory<[#symbol.expr<12>, #symbol.expr<32>, #symbol.expr<256>, #symbol.expr<256>]" not in module_text
+    assert "!nn.memory<[#symbol.expr<4>, #symbol.expr<32>, #symbol.expr<3>, #symbol.expr<3>]" not in module_text
     assert SEMANTIC_OUTPUT_MEMORY not in module_text
     assert SEMANTIC_INPUT_MEMORY not in module_text
     assert SEMANTIC_WEIGHT_MEMORY not in module_text
-    assert "!nn.memory<[s1" not in module_text
+    assert "!nn.memory<[#symbol.expr<s1>" not in module_text
     assert "? -" not in module_text
     assert "? -" not in source

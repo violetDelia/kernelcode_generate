@@ -1094,6 +1094,7 @@ def _entry_to_expr(entry: Attribute, op_name: str, field_name: str) -> str:
 
     功能说明:
     - 将 `NnMemoryType` 中的 `shape/stride` 条目收敛为 `!symbol.int<#symbol.expr<...>>` 所需字符串。
+    - 只接受当前 memory layout 合同中的 `SymbolExprAttr`。
 
     使用示例:
     - _entry_to_expr(SymbolExprAttr.from_expr("4"), "symbol.get_dim", "shape")
@@ -1104,15 +1105,9 @@ def _entry_to_expr(entry: Attribute, op_name: str, field_name: str) -> str:
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
-    if isinstance(entry, IntAttr):
-        return str(entry.data)
     if isinstance(entry, SymbolExprAttr):
         return entry.expr.data
-    if isinstance(entry, StringAttr):
-        expr = _unwrap_symbol_expr_attr_text(entry.data)
-        if expr != "?":
-            return expr
-    _raise_verify_error(f"{op_name} does not support unknown {field_name} entry '?'")
+    _raise_verify_error(f"{op_name} {field_name} entry must be SymbolExprAttr")
 
 
 def _infer_result_type(

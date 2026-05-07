@@ -6,6 +6,7 @@
 - 固定 `kernel_gen.passes.pass_manager` 只承载 Pass 抽象与 PassManager，不再承载默认 pipeline builder。
 - 当前文件不额外公开 helper；内部状态仅通过 `Pass` / `PassManager` 两个公开入口对外生效。
 - `PassManager.run(...)` 从 `kernel_gen.core.config.get_dump_dir()` 读取诊断产物落盘开关，不改变 pass 执行语义。
+- dump IR 默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias 文本。
 - pass 实例默认 `fold=True`；管理器在每个 pass 后对 `ModuleOp` 执行一次 folding + DCE sweep。
 
 API 列表:
@@ -42,6 +43,7 @@ from xdsl.passes import ModulePass as XdslModulePass
 from xdsl.pattern_rewriter import GreedyRewritePatternApplier, PatternRewriteWalker
 
 from kernel_gen.core.config import get_dump_dir
+from kernel_gen.core.print import print_operation_with_aliases
 
 
 class Pass(XdslModulePass):
@@ -133,8 +135,8 @@ def _format_dump_ir(target: ModuleOp | Operation | str) -> str:
 
 
     功能说明:
-    - 优先复用对象自身 `str(...)` 表示。
-    - 不在 dump 路径引入额外 IR parser/printer 依赖，避免诊断功能改变业务路径。
+    - 对 xDSL operation 使用公开 alias printer，保证诊断 dump 默认是 alias IR。
+    - 字符串输入保持原样，用于已经格式化好的错误或测试文本。
 
     使用示例:
     - _format_dump_ir(module)
@@ -144,7 +146,9 @@ def _format_dump_ir(target: ModuleOp | Operation | str) -> str:
     - test: [test/passes/test_pass_manager.py](test/passes/test_pass_manager.py)
     - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
     """
-    return str(target)
+    if isinstance(target, str):
+        return target
+    return print_operation_with_aliases(target).rstrip()
 
 
 def _load_fold_dialects(ctx: Context) -> None:

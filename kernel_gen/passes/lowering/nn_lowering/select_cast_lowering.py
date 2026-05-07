@@ -25,7 +25,7 @@ API 列表:
 from __future__ import annotations
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
-from xdsl.dialects.builtin import IntAttr, StringAttr
+from xdsl.dialects.builtin import IntAttr
 from xdsl.dialects.builtin import IntegerType
 from xdsl.dialects.builtin import (
     BFloat16Type,
@@ -33,20 +33,64 @@ from xdsl.dialects.builtin import (
     Float32Type,
     Float64Type,
 )
-from xdsl.ir import Block, Operation, SSAValue
+from xdsl.ir import Attribute, Block, Operation, SSAValue
 from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewrite_pattern
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaCastOp
 from kernel_gen.dialect.kernel import KernelExpOp, KernelSelectOp
 from kernel_gen.dialect.nn import NnCastOp, NnExpOp, NnMemoryType, NnSelectOp
-from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolGetDimOp, SymbolValueType
 from .nn_lowering_utility import (
     ensure_expected_op_name,
     ensure_operand_count,
     ensure_single_result,
     ensure_space_attr,
 )
+
+
+def _shape_dim_expr_text(dim: Attribute) -> str:
+    """读取 select/cast/exp 结果 shape 维度表达式。
+
+
+    功能说明:
+    - 支持当前公开 `SymbolExprAttr` 维度。
+    - 不支持的维度类型按现有 select/cast 错误语义报错。
+
+    使用示例:
+    - dim_text = _shape_dim_expr_text(dim)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/spec.md
+    - test: test/passes/lowering/nn_lowering/test_select.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
+    """
+
+    if isinstance(dim, SymbolExprAttr):
+        return dim.expr.data
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn select/cast result shape must be SymbolExprAttr")
+
+
+def _shape_dim_is_static_int(dim: Attribute) -> bool:
+    """判断 shape 维度是否为静态整数。
+
+
+    功能说明:
+    - 数字 `SymbolExprAttr` 按静态整数处理。
+    - 非数字表达式保持动态维度，由 `symbol.get_dim` 获取运行期值。
+
+    使用示例:
+    - if _shape_dim_is_static_int(dim):
+    -     continue
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/spec.md
+    - test: test/passes/lowering/nn_lowering/test_cast.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
+    """
+
+    dim_text = _shape_dim_expr_text(dim)
+    return dim_text.lstrip("-").isdigit()
 
 
 def _build_alloc_dynamic_shape_from_source(
@@ -80,16 +124,14 @@ def _build_alloc_dynamic_shape_from_source(
     ops: list[Operation] = []
     operands: list[SSAValue] = []
     for axis, dim in enumerate(result_type.shape.data):
-        if isinstance(dim, IntAttr):
+        dim_text = _shape_dim_expr_text(dim)
+        if dim_text == "?":
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn select/cast result shape must not contain '?'")
+        if _shape_dim_is_static_int(dim):
             continue
-        if isinstance(dim, StringAttr):
-            if dim.data == "?":
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn select/cast result shape must not contain '?'")
-            get_dim = SymbolGetDimOp(source, IntAttr(axis))
-            ops.append(get_dim)
-            operands.append(get_dim.result)
-            continue
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn select/cast result shape must be int or symbol")
+        get_dim = SymbolGetDimOp(source, IntAttr(axis))
+        ops.append(get_dim)
+        operands.append(get_dim.result)
     return ops, operands
 
 

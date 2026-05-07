@@ -42,10 +42,8 @@ from xdsl.dialects.builtin import (
     Float16Type,
     Float32Type,
     Float64Type,
-    IntAttr,
     IntegerType,
     ModuleOp,
-    StringAttr,
     i8,
 )
 from xdsl.ir import Attribute, Block, Operation, SSAValue
@@ -57,6 +55,7 @@ from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolConstOp,
+    SymbolExprAttr,
     SymbolFloorDivOp,
     SymbolForOp,
     SymbolMulOp,
@@ -545,11 +544,12 @@ def _dim_expr(dim: Attribute) -> sp.Basic:
 
 
     功能说明:
-    - IntAttr 转为 Integer。
-    - StringAttr 转为整数符号；匿名 `?` 直接失败。
+    - 只接受当前公开 memory 合同中的 `SymbolExprAttr` 维度。
+    - 静态整数表达式转为 `Integer`；具名符号或复合表达式转为 sympy 表达式。
+    - 匿名 `?` 直接失败，不恢复旧 bare attribute 维度入口。
 
     使用示例:
-    - expr = _dim_expr(StringAttr("M"))
+    - expr = _dim_expr(SymbolExprAttr.from_expr("M"))
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -557,16 +557,15 @@ def _dim_expr(dim: Attribute) -> sp.Basic:
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    if isinstance(dim, IntAttr):
-        return sp.Integer(dim.data)
-    if isinstance(dim, StringAttr):
-        if not dim.data or dim.data == "?":
+    if isinstance(dim, SymbolExprAttr):
+        text = dim.expr.data
+        if not text or text == "?":
             raise KernelCodeError(
                 ErrorKind.CONTRACT,
                 ErrorModule.PASS,
                 "MemoryPoolUnsupportedShape: anonymous shape is not supported",
             )
-        return sp.Symbol(dim.data, integer=True, positive=True)
+        return _sympy_expr_from_text(text)
     raise KernelCodeError(
         ErrorKind.CONTRACT,
         ErrorModule.PASS,
@@ -1316,15 +1315,15 @@ def _floordiv_material(
     return op, _SymbolMaterial(op.result, expr_text, expr)
 
 
-def _find_dynamic_shape_value(info: _AllocInfo, dim: StringAttr, index: int) -> SSAValue:
-    """从 dma.alloc dynamic_shape 中查找指定维度的 symbol SSA。
+def _dynamic_shape_dim_text(dim: SymbolExprAttr) -> str:
+    """读取 dynamic shape 维度的公开表达文本。
 
 
     功能说明:
-    - 支持 full-rank dynamic_shape 与仅符号维 dynamic_shape 两种公开输入形态。
+    - 只从当前公开 memory 合同中的 `SymbolExprAttr` 读取表达文本。
 
     使用示例:
-    - value = _find_dynamic_shape_value(info, StringAttr("M"), 0)
+    - dim_text = _dynamic_shape_dim_text(SymbolExprAttr.from_expr("M"))
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -1332,16 +1331,36 @@ def _find_dynamic_shape_value(info: _AllocInfo, dim: StringAttr, index: int) -> 
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
+    return dim.expr.data
+
+
+def _find_dynamic_shape_value(info: _AllocInfo, dim: SymbolExprAttr, index: int) -> SSAValue:
+    """从 dma.alloc dynamic_shape 中查找指定维度的 symbol SSA。
+
+
+    功能说明:
+    - 支持 full-rank dynamic_shape 与仅符号维 dynamic_shape 两种公开输入形态。
+
+    使用示例:
+    - value = _find_dynamic_shape_value(info, SymbolExprAttr.from_expr("M"), 0)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    dim_text = _dynamic_shape_dim_text(dim)
     dynamic_values = list(info.alloc_op.dynamic_shape)
     if len(dynamic_values) == len(info.alloc_op.result.type.shape.data):
         return dynamic_values[index]
     for value in dynamic_values:
-        if _symbol_expr_from_type(value) == dim.data:
+        if _symbol_expr_from_type(value) == dim_text:
             return value
     raise KernelCodeError(
         ErrorKind.CONTRACT,
         ErrorModule.PASS,
-        f"MemoryPoolUnsupportedShape: dynamic shape operand not found for {dim.data}",
+        f"MemoryPoolUnsupportedShape: dynamic shape operand not found for {dim_text}",
     )
 
 
@@ -1371,18 +1390,19 @@ def _shape_materials(info: _AllocInfo) -> tuple[list[Operation], tuple[_SymbolMa
     ops: list[Operation] = []
     values: list[_SymbolMaterial] = []
     for index, dim in enumerate(result_type.shape.data):
-        if isinstance(dim, IntAttr):
-            op, material = _const_material(dim.data)
-            ops.append(op)
-            values.append(material)
-            continue
-        if isinstance(dim, StringAttr):
-            if dim.data == "?":
+        if isinstance(dim, SymbolExprAttr):
+            dim_text = dim.expr.data
+            if dim_text == "?":
                 raise KernelCodeError(
                     ErrorKind.CONTRACT,
                     ErrorModule.PASS,
                     "MemoryPoolUnsupportedShape: anonymous shape is not supported",
                 )
+            if dim_text.lstrip("-").isdigit():
+                op, material = _const_material(int(dim_text))
+                ops.append(op)
+                values.append(material)
+                continue
             values.append(_material_from_existing(_find_dynamic_shape_value(info, dim, index)))
             continue
         raise KernelCodeError(
@@ -1729,14 +1749,13 @@ def _flat_result_type(info: _AllocInfo, numel: _SymbolMaterial) -> NnMemoryType:
             ErrorModule.PASS,
             "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
         )
-    shape_attr: Attribute
     if isinstance(numel.expr, sp.Integer):
-        shape_attr = IntAttr(int(numel.expr))
+        shape_attr = SymbolExprAttr.from_expr(str(int(numel.expr)))
     else:
-        shape_attr = StringAttr(numel.expr_text)
+        shape_attr = SymbolExprAttr.from_expr(numel.expr_text)
     return NnMemoryType(
         ArrayAttr([shape_attr]),
-        ArrayAttr([IntAttr(1)]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
         result_type.element_type,
         result_type.space,
     )

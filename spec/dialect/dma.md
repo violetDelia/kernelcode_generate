@@ -107,6 +107,7 @@
 - 当 `shape` 中包含动态 `SymbolExprAttr` 时，默认连续 stride 仍按从右到左的累计乘积推导；单个符号如 `#symbol.expr<N>` 直接参与乘积，多维组合可形成 `#symbol.expr<M*N>` 等结构化表达。
 - `SymbolExprAttr` 维度可包含 `min(lhs, rhs)` 形式的整数符号最小值；默认连续 stride 与 contiguous verifier 必须按符号表达式等价关系判断，而不是只比较原始文本。
 - 若维度为 `#symbol.expr<?>` 或包含 `?` 的表达式，视为未知：该维度及其左侧更高维的默认 stride 统一退化为 `#symbol.expr<?>`，右侧维度仍按既有规则生成（末维为 `#symbol.expr<1>`）。
+- 当默认连续 stride 的期望值因匿名动态维度退化为 `#symbol.expr<?>` 时，调用点已通过 `shape` operand 保留的动态语义名可以继续出现在实际 stride 中，例如 `cur_f * cur_ho * cur_wo` 或 `runtime_dim_1 * runtime_dim_2`；verifier 不因该类不可静态证明的动态语义表达拒绝，但静态可判定的不一致仍必须报错。
 - 该规则仅用于 `dma.alloc` / `dma.reshape` 的默认连续 stride 推导与 verifier 校验，不替代显式 `!symbol.int<#symbol.expr<expr>>` SSA operand 建模；`offsets` 允许 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`，`sizes/strides` 仍必须通过 `!symbol.int<#symbol.expr<expr>>` SSA operand 传入。
 
 ### operation API 映射
@@ -154,8 +155,10 @@
 - `dma.view` 的动态 `offsets/shape/stride` operand 数量与 rank 不一致必须报错；`shape/stride` 不是 `!symbol.int<#symbol.expr<expr>>` 时必须报错；`offsets` 仅允许 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`；`dma.reshape` 的动态 `shape` operand 数量与 rank 不一致必须报错，且其 operand 必须为 `!symbol.int<#symbol.expr<expr>>`。
 - `dma.view` 的 `offsets` 必须为非负整数；当 `source.shape/offsets/shape/stride` 可静态判定时，必须进行边界校验并在越界时报错。
 - `dma.view` 的 `result.stride` rank 与 `result.shape` 不一致必须报错；非 byte pool 场景下，`result.stride` 与 `source.stride * stride operand` 不一致必须报错；`dma.reshape` 的 `result.stride` 非连续行主序必须报错。
+- `dma.reshape` 的连续行主序校验必须接受匿名动态 shape 推导出的高维动态语义 stride；当期望 stride 为未知动态值且实际 stride 也是非静态 `!symbol.int<#symbol.expr<expr>>` 表达时通过，静态 stride 错误仍必须报错。
 - `dma.subview` 的 `source` 非一维 `i8` memory、`result` 非一维 contiguous memory、`source/result` space 不一致、`offset/size/stride` 非单个 `!symbol.int<#symbol.expr<expr>>`、`size` 与结果 shape 不一致，或静态可判定 byte 边界越界时必须报错。
 - `dma.reshape` 的连续行主序校验必须接受含 `min(lhs, rhs)` 的等价符号 stride 表达式；例如动态尾块 shape 中出现 `min(tile, extent - iter)` 时，不得仅因乘法因子打印顺序或 `min` 文本形式不同而拒绝。
+- `dma.transpose` 的目标 stride 必须是目标 shape 的默认连续布局；若目标 shape 包含匿名动态维度并导致高维期望 stride 不可静态证明，目标 stride 可以保留调用点动态语义表达，静态可判定的不一致仍必须报错。
 - `dma.cast` 中 `source/result` 的 `shape/stride/space` 不一致必须报错。
 - `strides` 当前仅允许单位步长语义；若当前实现限制 stride 为 1，则 `stride != 1` 的切片搬运必须显式报错，不得 silently 接受。
 - `dma` 的布局/索引类标量输入以 `!symbol.int<#symbol.expr<expr>>` 为主，`offsets` 额外允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`；parse/print 不得再使用 builtin `index` 作为这些 operand 的公开文本语义。`dma.fill.value` 是当前唯一例外，公开口径允许 builtin `i32` 与 `!symbol.int<#symbol.expr<expr>>`。
@@ -642,6 +645,7 @@ op = DmaReshapeOp(source, shape, result_type)
 - `shape` operand 数量必须与结果 rank 一致，且每个 operand 都必须是 `!symbol.int<#symbol.expr<expr>>`。
 - `result.stride` 不作为输入，而是由 `shape` 和默认连续布局规则推导。
 - 含 `min(lhs, rhs)` 的动态尾块维度必须按符号等价关系参与连续布局判断；`min` 表达式的无关空白和乘法因子顺序不得改变 verifier 结论。
+- 当 `result.shape` 包含匿名动态维度时，`result.stride` 中保留来自 `shape` operand 的动态语义表达属于合法连续布局；该例外只适用于不可静态证明的动态维度，不放宽静态 stride mismatch。
 - 若 `source.shape` 与 `result.shape` 的元素总数可判定不一致，必须报错。
 
 - 返回值：

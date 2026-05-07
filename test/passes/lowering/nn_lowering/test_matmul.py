@@ -39,6 +39,7 @@ from kernel_gen.operation.scf import loop
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
+from test.passes.lowering.nn_lowering.memory_type_utils import memory_type
 
 
 # TC-PASS-NNL-020
@@ -49,24 +50,9 @@ from kernel_gen.symbol_variable.type import NumericType
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_matmul.py
 def test_nn_lowering_matmul_target() -> None:
     space = NnMemorySpaceAttr(StringAttr("global"))
-    lhs_type = NnMemoryType(
-        ArrayAttr([IntAttr(2), IntAttr(3)]),
-        ArrayAttr([IntAttr(3), IntAttr(1)]),
-        f32,
-        space,
-    )
-    rhs_type = NnMemoryType(
-        ArrayAttr([IntAttr(3), IntAttr(4)]),
-        ArrayAttr([IntAttr(4), IntAttr(1)]),
-        f32,
-        space,
-    )
-    result_type = NnMemoryType(
-        ArrayAttr([IntAttr(2), IntAttr(4)]),
-        ArrayAttr([IntAttr(4), IntAttr(1)]),
-        f32,
-        space,
-    )
+    lhs_type = memory_type([2, 3], [3, 1], f32, space)
+    rhs_type = memory_type([3, 4], [4, 1], f32, space)
+    result_type = memory_type([2, 4], [4, 1], f32, space)
 
     block = Block(arg_types=[lhs_type, rhs_type])
     matmul = NnMatmulOp(block.args[0], block.args[1], result_type, space)
@@ -126,24 +112,9 @@ def test_nn_lowering_matmul_inside_symbol_for() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_matmul.py
 def test_nn_lowering_matmul_dynamic_output_dims() -> None:
     space = NnMemorySpaceAttr(StringAttr("global"))
-    lhs_type = NnMemoryType(
-        ArrayAttr([StringAttr("M"), IntAttr(3)]),
-        ArrayAttr([StringAttr("K"), IntAttr(1)]),
-        f32,
-        space,
-    )
-    rhs_type = NnMemoryType(
-        ArrayAttr([IntAttr(3), StringAttr("N")]),
-        ArrayAttr([StringAttr("N"), IntAttr(1)]),
-        f32,
-        space,
-    )
-    result_type = NnMemoryType(
-        ArrayAttr([StringAttr("M"), StringAttr("N")]),
-        ArrayAttr([StringAttr("N"), IntAttr(1)]),
-        f32,
-        space,
-    )
+    lhs_type = memory_type(["M", 3], ["K", 1], f32, space)
+    rhs_type = memory_type([3, "N"], ["N", 1], f32, space)
+    result_type = memory_type(["M", "N"], ["N", 1], f32, space)
 
     block = Block(arg_types=[lhs_type, rhs_type])
     matmul_op = NnMatmulOp(block.args[0], block.args[1], result_type, space)
@@ -167,24 +138,9 @@ def test_nn_lowering_matmul_dynamic_output_dims() -> None:
     assert len(symbol_dims) == 2
     assert not any(isinstance(op, NnMatmulOp) for op in module.walk())
 
-    symbolic_stride_lhs_type = NnMemoryType(
-        ArrayAttr([IntAttr(2), IntAttr(3)]),
-        ArrayAttr([StringAttr("K"), IntAttr(1)]),
-        f32,
-        space,
-    )
-    symbolic_stride_rhs_type = NnMemoryType(
-        ArrayAttr([IntAttr(3), IntAttr(4)]),
-        ArrayAttr([StringAttr("N"), IntAttr(1)]),
-        f32,
-        space,
-    )
-    symbolic_stride_result_type = NnMemoryType(
-        ArrayAttr([IntAttr(2), IntAttr(4)]),
-        ArrayAttr([StringAttr("N"), IntAttr(1)]),
-        f32,
-        space,
-    )
+    symbolic_stride_lhs_type = memory_type([2, 3], ["K", 1], f32, space)
+    symbolic_stride_rhs_type = memory_type([3, 4], ["N", 1], f32, space)
+    symbolic_stride_result_type = memory_type([2, 4], ["N", 1], f32, space)
     symbolic_stride_block = Block(arg_types=[symbolic_stride_lhs_type, symbolic_stride_rhs_type])
     symbolic_stride_op = NnMatmulOp(
         symbolic_stride_block.args[0],
@@ -220,24 +176,9 @@ def test_nn_lowering_matmul_dynamic_output_dims() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_matmul.py
 def test_nn_lowering_matmul_accepts_runtime_contract_dims() -> None:
     space = NnMemorySpaceAttr(StringAttr("global"))
-    lhs_type = NnMemoryType(
-        ArrayAttr([StringAttr("runtime_dim_0"), StringAttr("runtime_dim_1")]),
-        ArrayAttr([StringAttr("runtime_dim_1"), IntAttr(1)]),
-        f32,
-        space,
-    )
-    rhs_type = NnMemoryType(
-        ArrayAttr([StringAttr("runtime_dim_1"), StringAttr("runtime_dim_2")]),
-        ArrayAttr([StringAttr("runtime_dim_2"), IntAttr(1)]),
-        f32,
-        space,
-    )
-    result_type = NnMemoryType(
-        ArrayAttr([StringAttr("runtime_dim_0"), StringAttr("runtime_dim_2")]),
-        ArrayAttr([StringAttr("runtime_dim_2"), IntAttr(1)]),
-        f32,
-        space,
-    )
+    lhs_type = memory_type(["runtime_dim_0", "runtime_dim_1"], ["runtime_dim_1", 1], f32, space)
+    rhs_type = memory_type(["runtime_dim_1", "runtime_dim_2"], ["runtime_dim_2", 1], f32, space)
+    result_type = memory_type(["runtime_dim_0", "runtime_dim_2"], ["runtime_dim_2", 1], f32, space)
     block = Block(arg_types=[lhs_type, rhs_type])
     matmul_op = NnMatmulOp(block.args[0], block.args[1], result_type, space)
     block.add_op(matmul_op)
@@ -266,24 +207,9 @@ def test_nn_lowering_matmul_accepts_runtime_contract_dims() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_matmul.py
 def test_nn_lowering_matmul_rejects_unrelated_runtime_contract_dims() -> None:
     space = NnMemorySpaceAttr(StringAttr("global"))
-    lhs_type = NnMemoryType(
-        ArrayAttr([StringAttr("runtime_dim_0"), StringAttr("runtime_dim_1")]),
-        ArrayAttr([StringAttr("runtime_dim_1"), IntAttr(1)]),
-        f32,
-        space,
-    )
-    rhs_type = NnMemoryType(
-        ArrayAttr([StringAttr("runtime_dim_2"), StringAttr("runtime_dim_3")]),
-        ArrayAttr([StringAttr("runtime_dim_3"), IntAttr(1)]),
-        f32,
-        space,
-    )
-    result_type = NnMemoryType(
-        ArrayAttr([StringAttr("runtime_dim_0"), StringAttr("runtime_dim_3")]),
-        ArrayAttr([StringAttr("runtime_dim_3"), IntAttr(1)]),
-        f32,
-        space,
-    )
+    lhs_type = memory_type(["runtime_dim_0", "runtime_dim_1"], ["runtime_dim_1", 1], f32, space)
+    rhs_type = memory_type(["runtime_dim_2", "runtime_dim_3"], ["runtime_dim_3", 1], f32, space)
+    result_type = memory_type(["runtime_dim_0", "runtime_dim_3"], ["runtime_dim_3", 1], f32, space)
     block = Block(arg_types=[lhs_type, rhs_type])
     matmul_op = NnMatmulOp(block.args[0], block.args[1], result_type, space)
     block.add_op(matmul_op)
@@ -310,9 +236,9 @@ def test_nn_lowering_matmul_rejects_unrelated_runtime_contract_dims() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_matmul.py
 def test_nn_lowering_matmul_public_error_matrix() -> None:
     space = NnMemorySpaceAttr(StringAttr("global"))
-    lhs_type = NnMemoryType(ArrayAttr([IntAttr(2), IntAttr(3)]), ArrayAttr([IntAttr(3), IntAttr(1)]), f32, space)
-    rhs_type = NnMemoryType(ArrayAttr([IntAttr(3), IntAttr(4)]), ArrayAttr([IntAttr(4), IntAttr(1)]), f32, space)
-    result_type = NnMemoryType(ArrayAttr([IntAttr(2), IntAttr(4)]), ArrayAttr([IntAttr(4), IntAttr(1)]), f32, space)
+    lhs_type = memory_type([2, 3], [3, 1], f32, space)
+    rhs_type = memory_type([3, 4], [4, 1], f32, space)
+    result_type = memory_type([2, 4], [4, 1], f32, space)
 
     non_memory_block = Block(arg_types=[lhs_type, i32])
     non_memory_op = NnMatmulOp(non_memory_block.args[0], non_memory_block.args[1], result_type, space)
@@ -330,7 +256,7 @@ def test_nn_lowering_matmul_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="nn.matmul operands must be nn.memory"):
         NnLoweringPass().apply(Context(), non_memory_module)
 
-    rank_lhs_type = NnMemoryType(ArrayAttr([IntAttr(6)]), ArrayAttr([IntAttr(1)]), f32, space)
+    rank_lhs_type = memory_type([6], [1], f32, space)
     rank_block = Block(arg_types=[rank_lhs_type, rhs_type])
     rank_op = NnMatmulOp(rank_block.args[0], rank_block.args[1], result_type, space)
     rank_block.add_op(rank_op)
@@ -347,12 +273,7 @@ def test_nn_lowering_matmul_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="matmul requires rank-2 memory types"):
         NnLoweringPass().apply(Context(), rank_module)
 
-    bad_contract_rhs_type = NnMemoryType(
-        ArrayAttr([IntAttr(5), IntAttr(4)]),
-        ArrayAttr([IntAttr(4), IntAttr(1)]),
-        f32,
-        space,
-    )
+    bad_contract_rhs_type = memory_type([5, 4], [4, 1], f32, space)
     contract_block = Block(arg_types=[lhs_type, bad_contract_rhs_type])
     contract_op = NnMatmulOp(contract_block.args[0], contract_block.args[1], result_type, space)
     contract_block.add_op(contract_op)
@@ -369,7 +290,7 @@ def test_nn_lowering_matmul_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="matmul contracting dimensions must match"):
         NnLoweringPass().apply(Context(), contract_module)
 
-    bad_result_type = NnMemoryType(ArrayAttr([IntAttr(2), IntAttr(5)]), ArrayAttr([IntAttr(5), IntAttr(1)]), f32, space)
+    bad_result_type = memory_type([2, 5], [5, 1], f32, space)
     result_block = Block(arg_types=[lhs_type, rhs_type])
     result_op = NnMatmulOp(result_block.args[0], result_block.args[1], bad_result_type, space)
     result_block.add_op(result_op)
@@ -386,12 +307,7 @@ def test_nn_lowering_matmul_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="matmul output shape must match operands"):
         NnLoweringPass().apply(Context(), result_module)
 
-    bad_stride_rhs_type = NnMemoryType(
-        ArrayAttr([IntAttr(3), IntAttr(4)]),
-        ArrayAttr([IntAttr(1), IntAttr(4)]),
-        f32,
-        space,
-    )
+    bad_stride_rhs_type = memory_type([3, 4], [1, 4], f32, space)
     stride_value_block = Block(arg_types=[lhs_type, bad_stride_rhs_type])
     stride_value_op = NnMatmulOp(stride_value_block.args[0], stride_value_block.args[1], result_type, space)
     stride_value_block.add_op(stride_value_op)

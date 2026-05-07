@@ -32,7 +32,7 @@ import pytest
 
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, i32
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, i32
 from xdsl.ir import Block, Region
 from xdsl.passes import ModulePass
 from kernel_gen.core.error import KernelCodeError
@@ -65,10 +65,11 @@ def _make_registry_memory_type(
     """构造 registry 测试用公开 nn.memory type。"""
 
     from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+    from kernel_gen.dialect.symbol import SymbolExprAttr
 
     return NnMemoryType(
-        ArrayAttr([IntAttr(dim) for dim in shape]),
-        ArrayAttr([IntAttr(dim) for dim in stride]),
+        ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in shape]),
+        ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in stride]),
         i32,
         NnMemorySpaceAttr.from_name(space),
     )

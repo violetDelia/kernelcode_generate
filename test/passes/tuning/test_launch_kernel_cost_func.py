@@ -37,7 +37,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolIterType, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolForOp, SymbolIterType, SymbolValueType
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
 from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
 
@@ -174,8 +174,8 @@ def _make_memory_type(space: str = "global") -> NnMemoryType:
     """
 
     return NnMemoryType(
-        ArrayAttr([IntAttr(4), IntAttr(4)]),
-        ArrayAttr([IntAttr(4), IntAttr(1)]),
+        ArrayAttr([SymbolExprAttr.from_expr("4"), SymbolExprAttr.from_expr("4")]),
+        ArrayAttr([SymbolExprAttr.from_expr("4"), SymbolExprAttr.from_expr("1")]),
         Float32Type(),
         NnMemorySpaceAttr(StringAttr(space)),
     )

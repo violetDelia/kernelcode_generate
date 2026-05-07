@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, ModuleOp, StringAttr, UnregisteredOp, i32
+from xdsl.dialects.builtin import ArrayAttr, IntegerAttr, ModuleOp, StringAttr, UnregisteredOp, i32
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 from xdsl.passes import ModulePass
 from xdsl.pattern_rewriter import (
@@ -47,7 +47,7 @@ from xdsl.pattern_rewriter import (
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp, DmaViewOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import Symbol, SymbolForOp, SymbolGetDimOp, SymbolIterType, SymbolValueType
+from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolForOp, SymbolGetDimOp, SymbolIterType, SymbolValueType
 from kernel_gen.dialect.tuner import TunerParamOp
 from kernel_gen.passes.common import ensure_builtin_module, raise_pass_contract_error
 
@@ -207,9 +207,9 @@ class TileReduceMatmulPattern(RewritePattern):
 
         m_expr = dim_m.result.type.expr.expr.data
         n_expr = dim_n.result.type.expr.expr.data
-        m_attr = IntAttr(int(m_expr)) if m_expr.lstrip("-").isdigit() else StringAttr(m_expr)
-        n_attr = IntAttr(int(n_expr)) if n_expr.lstrip("-").isdigit() else StringAttr(n_expr)
-        tile_r_attr = StringAttr(tile_r_name)
+        m_attr = SymbolExprAttr.from_expr(m_expr)
+        n_attr = SymbolExprAttr.from_expr(n_expr)
+        tile_r_attr = SymbolExprAttr.from_expr(tile_r_name)
 
         lhs_view = DmaViewOp(
             lhs,
@@ -218,7 +218,7 @@ class TileReduceMatmulPattern(RewritePattern):
             [const_one.results[0], const_one.results[0]],
             NnMemoryType(
                 ArrayAttr([m_attr, tile_r_attr]),
-                ArrayAttr([IntAttr(1), IntAttr(1)]),
+                ArrayAttr([SymbolExprAttr.from_expr("1"), SymbolExprAttr.from_expr("1")]),
                 lhs.type.element_type,
                 lhs.type.space,
             ),
@@ -230,7 +230,7 @@ class TileReduceMatmulPattern(RewritePattern):
             [const_one.results[0], const_one.results[0]],
             NnMemoryType(
                 ArrayAttr([tile_r_attr, n_attr]),
-                ArrayAttr([IntAttr(1), IntAttr(1)]),
+                ArrayAttr([SymbolExprAttr.from_expr("1"), SymbolExprAttr.from_expr("1")]),
                 rhs.type.element_type,
                 rhs.type.space,
             ),

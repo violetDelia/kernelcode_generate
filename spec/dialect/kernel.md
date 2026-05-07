@@ -102,7 +102,7 @@
 
 ```mlir
 %out = dma.alloc value : !nn.memory<f32, [N, C], GM>
-kernel.binary_elewise %lhs, %rhs, %out {kind = "add", space = #nn.space<global>} : value
+kernel.binary_elewise %out, %lhs, %rhs {kind = "add", space = #nn.space<global>} : value
 func.return %out : !nn.memory<f32, [N, C], GM>
 ```
 
@@ -318,6 +318,7 @@ func.return %out : !nn.memory<f16, [N, C, K, W_out], GM>
 - `input` 必须是 rank=`3` 的 `!nn.memory<elem, [N, C, W], space>`，轴语义固定为 `N/C/W`；不接受压扁输入、缺失 channel 轴或其他 layout 解释。
 - `out.shape[2]` 必须机械等于 `k`，`W_out` 必须机械满足 `W_out = floor((W + p_left + p_right - d * (k - 1) - 1) / s) + 1`；若 `out.shape[2] != k`、按 `input.shape[2]` 与 attrs 计算得到的 `W_out` 与 `out.shape[3]` 不一致，或计算结果 `< 1`，必须 verifier 失败。
 - `k/s/d/p_left/p_right` 必须与 `input.shape -> out.shape` 的上述关系机械一致，不能只校验 attrs 显式存在而放行错误输出形状。
+- `k/s/d/p_left/p_right` 可以来自 `arith.constant`、`symbol.const`、单层 `builtin.unrealized_conversion_cast` 或函数 block argument；当参数或参与公式的 shape 维度不是静态整数时，verifier 只校验 operand 类型、正数/非负静态边界、rank、space、dtype 与窗口轴静态可判定部分，不把动态参数误判为公式不匹配。
 - `out` 必须是 rank=`4` 的 `!nn.memory<elem, [N, C, K, W_out], space>`，并与 `input` 保持同一 `element_type` 与 `space`。
 
 - 返回值：
@@ -363,6 +364,7 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 - `input` 必须是 rank=`4` 的 `!nn.memory<elem, [N, C, H, W], space>`，轴语义固定为 `N/C/H/W`；不接受 NHWC、压扁输入或其他 layout 解释。
 - `out.shape[2:4]` 必须机械等于 `[kh, kw]`；`OH` 必须机械满足 `OH = floor((H + ph + pw - dh * (kh - 1) - 1) / sh) + 1`，`OW` 必须机械满足 `OW = floor((W + pl + pr - dw * (kw - 1) - 1) / sw) + 1`；若 `out.shape[2:4] != [kh, kw]`、按 `input.shape[2:4]` 与 attrs 计算得到的 `OH/OW` 与 `out.shape[4:6]` 不一致，或任一计算结果 `< 1`，必须 verifier 失败。
 - `kh/kw/sh/sw/dh/dw/ph/pw/pl/pr` 必须与 `input.shape -> out.shape` 的上述关系机械一致，不能只校验 attrs 显式存在而放行错误输出形状。
+- `kh/kw/sh/sw/dh/dw/ph/pw/pl/pr` 可以来自 `arith.constant`、`symbol.const`、单层 `builtin.unrealized_conversion_cast` 或函数 block argument；当参数或参与公式的 shape 维度不是静态整数时，verifier 只校验 operand 类型、正数/非负静态边界、rank、space、dtype 与窗口轴静态可判定部分，不把动态参数误判为公式不匹配。
 - `out` 必须是 rank=`6` 的 `!nn.memory<elem, [N, C, KH, KW, OH, OW], space>`，并与 `input` 保持同一 `element_type` 与 `space`。
 - `kernel.img2col2d` 的 attrs 必须显式可见，不允许把窗口参数隐藏在“实现自定”逻辑中。
 

@@ -34,7 +34,7 @@
 - 统一 Pass 的注册、执行与错误传播规则，便于后续实现与测试闭环。
 - PassManager 只负责 Pass 编排与执行，不承载默认 pipeline builder；默认 builder 见 [`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)。
 - PassManager 固定支持两类公开对象：`Pass` 与 xdsl `ModulePass`；执行时内部创建并复用单个 `Context`。
-- `dump_dir` 是来自 `kernel_gen.core.config` 的诊断开关；非空时写入初始 IR 与逐 pass 后 IR，不改变 pass 执行结果。
+- `dump_dir` 是来自 `kernel_gen.core.config` 的诊断开关；非空时写入初始 IR 与逐 pass 后 IR，不改变 pass 执行结果；IR dump 文本默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias IR。
 - fold 是 pass 级通用开关；未声明 `fold` 的第三方 `ModulePass` 按 `fold=True` 处理，只有显式 `fold=False` 才关闭 pass 后 folding + DCE sweep。
 - 通用 fold sweep 启用 folding 与 DCE；DCE 仅删除无使用者且无副作用的 op，不承担 CSE、业务重写或 canonicalization pattern。
 - 业务顺序约束不属于 PassManager 职责；具体 lowering / tuning / tile / backend pipeline 的顺序由对应 builder 与其 spec 固定。
@@ -252,7 +252,7 @@ result = pm.run(module)
 - 每个 pass 必须原地改写同一 `ModuleOp`。
 - 任何 Pass 抛出的异常应原样传播。
 - 所有 pass 固定走 `apply(ctx, module)`；不再按“是否额外提供 run/apply”做兼容优先级分支。
-- `kernel_gen.core.config.dump_dir` 非空时，目录内必须包含 `01-first-ir.mlir`；每个 pass 完成后写入 `NN-<pass-name>.mlir`。
+- `kernel_gen.core.config.dump_dir` 非空时，目录内必须包含 `01-first-ir.mlir`；每个 pass 完成后写入 `NN-<pass-name>.mlir`；这些 `.mlir` 文件的 IR 正文必须使用 alias IR，普通 `str(op)` 与比较工具默认文本不因本接口改变。
 - 每个 pass 后 dump 文件第一行必须是当前 pass 的可解析名称文本，后续内容为该 pass 后的 IR 文本。
 
 前置条件：
@@ -378,7 +378,7 @@ result = pm.run(module)
 
 - 验证 Pass 注册与执行顺序一致。
 - 验证空管理器执行返回原输入。
-- 验证 `dump_dir` 写入初始 IR 与逐 pass 后 IR。
+- 验证 `dump_dir` 写入初始 alias IR 与逐 pass 后 alias IR。
 - 验证显式注册非法 Pass 时触发 `TypeError`。
 - 验证 Pass 异常可向上抛出。
 - 验证 PassManager 不承载旧默认 builder 兼容入口。

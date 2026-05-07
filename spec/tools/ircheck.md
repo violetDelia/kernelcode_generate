@@ -54,7 +54,7 @@
 
 - api：`python -m kernel_gen.tools.ircheck(argv: Sequence[str]) -> int`
 - 参数：
-  - `irdump`：CLI 布尔开关，控制是否输出 IR dump 诊断信息；类型 `CLI flag`；默认值 `False`；不允许 `None` 或空值作为稳定输入；按只读命令行参数消费；非法组合必须触发稳定错误。
+  - `irdump`：CLI 布尔开关，控制是否输出 IR dump 诊断信息；类型 `CLI flag`；默认值 `False`；不允许 `None` 或空值作为稳定输入；按只读命令行参数消费；非法组合必须触发稳定错误；输出 `.mlir` 诊断文件时默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias IR。
   - `emitc_target`：EmitC 目标名称，用于选择 `-emitc{target=<target>}` 的输出后端；类型 `str | None`；默认值 `None`；仅默认值允许空目标；按只读命令行参数消费；未知 target 必须触发稳定错误。
   - `case_file`：待检查的 case 文件路径，提供 `ircheck` 读取和验证的输入资产；类型 `str`；无默认值，调用方必须显式提供；不允许 `None` 或空路径；按只读路径参数消费；路径不存在或内容非法必须触发稳定错误。
 - 返回值：进程退出码；`0` 表示成功，`1` 表示匹配失败，`2` 表示解析、compile args、pass/pipeline 或 emitc 生成失败。
@@ -188,7 +188,7 @@
 - api：`run_ircheck_file(path: str, *, irdump: bool = False, emitc_target: str | None = None) -> IrcheckResult`
 - 参数：
   - `path`：文件或目录路径，指定读取、写入、加载或诊断产物的位置；类型 `str`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `irdump`：`irdump` 输入值，参与 `run_ircheck_file` 的公开处理流程；类型 `bool`；默认值 `False`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `irdump`：`irdump` 输入值，参与 `run_ircheck_file` 的公开处理流程；类型 `bool`；默认值 `False`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理；为 `True` 时写出的 `.mlir` dump 默认是 alias IR。
   - `emitc_target`：目标后端名称或目标配置；类型 `str | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
 - 返回值：`IrcheckResult`。
 - 使用示例：
@@ -198,7 +198,8 @@
   ```
 - 功能说明：运行 `ircheck_file`。
 - 注意事项：
-  - `irdump=True` 时允许输出 IR dump 诊断文件；`irdump=False` 时不承诺写入诊断产物。
+  - `irdump=True` 时允许输出 alias IR dump 诊断文件；`irdump=False` 时不承诺写入诊断产物。
+  - CHECK 匹配仍使用 `run_ircheck_file(...)` 的规范化实际 IR，不因 `-irdump` 诊断 alias 文本改变。
   - `emitc_target` 非空时匹配对象切换为生成的源码文本；不做 IR / 源码双路径混合匹配。
   - compile args 不支持时返回 `IrcheckResult(ok=False, exit_code=2, ...)`，消息必须使用 `IrcheckCompileArgsError: unsupported compile args` 前缀。
   - pass / pipeline 执行失败时返回 `exit_code=2`，消息必须使用 `IrcheckRunError: pass execution failed` 前缀。
@@ -261,7 +262,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-TOOLS-IRCHECK-001 | 边界/异常 | ircheck cli match failure outputs actual IR | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_ircheck_cli_match_failure_outputs_actual_ir`。 | “ircheck cli match failure outputs actual IR”场景按公开错误语义失败或被拒绝。 | `test_ircheck_cli_match_failure_outputs_actual_ir` |
 | TC-TOOLS-IRCHECK-002 | 公开入口 | ircheck cli multi case success | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_ircheck_cli_multi_case_success`。 | 公开入口在“ircheck cli multi case success”场景下可导入、构造、注册或按名称发现。 | `test_ircheck_cli_multi_case_success` |
-| TC-TOOLS-IRCHECK-003 | 公开入口 | ircheck cli irdump creates files | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_ircheck_cli_irdump_creates_files`。 | 公开入口在“ircheck cli irdump creates files”场景下可导入、构造、注册或按名称发现。 | `test_ircheck_cli_irdump_creates_files` |
+| TC-TOOLS-IRCHECK-003 | 公开入口 | ircheck cli irdump creates alias files | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_ircheck_cli_irdump_creates_files`。 | `-irdump` 写出逐 step `.mlir` 文件，dump IR 正文使用 alias IR，CHECK 匹配文本保持公开规范化 IR。 | `test_ircheck_cli_irdump_creates_files` |
 | TC-TOOLS-IRCHECK-004 | 生成/编译 | ircheck cli emitc cpu success | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_ircheck_cli_emitc_cpu_success`。 | 生成源码、IR 文本或编译结果体现“ircheck cli emitc cpu success”场景。 | `test_ircheck_cli_emitc_cpu_success` |
 | TC-TOOLS-IRCHECK-005 | 边界/异常 | ircheck cli invalid emitc arguments | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_ircheck_cli_invalid_emitc_arguments`。 | “ircheck cli invalid emitc arguments”场景按公开错误语义失败或被拒绝。 | `test_ircheck_cli_invalid_emitc_arguments` |
 | TC-TOOLS-IRCHECK-006 | 边界/异常 | ircheck cli emitc missing target rejected | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_ircheck_cli_emitc_missing_target_rejected`。 | “ircheck cli emitc missing target rejected”场景按公开错误语义失败或被拒绝。 | `test_ircheck_cli_emitc_missing_target_rejected` |

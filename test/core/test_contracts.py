@@ -43,6 +43,7 @@ from kernel_gen.core.contracts import (
     verify_memory_type,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolExprAttr
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 
@@ -51,8 +52,8 @@ def _make_memory_type() -> NnMemoryType:
     """构造合法 nn.memory type 用于公共 helper 测试。"""
 
     return NnMemoryType(
-        ArrayAttr([IntAttr(2), IntAttr(4)]),
-        ArrayAttr([IntAttr(4), IntAttr(1)]),
+        ArrayAttr([SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("4")]),
+        ArrayAttr([SymbolExprAttr.from_expr("4"), SymbolExprAttr.from_expr("1")]),
         i32,
         NnMemorySpaceAttr(StringAttr("global")),
     )
@@ -124,17 +125,18 @@ def test_verify_i64_attr_family() -> None:
 
 
 def test_collect_dims_and_stride_helpers() -> None:
-    assert collect_int_dims([IntAttr(1), IntAttr(2), IntAttr(3)]) == [1, 2, 3]
-    assert collect_int_dims([IntAttr(1), StringAttr("N")]) is None
+    assert collect_int_dims([SymbolExprAttr.from_expr("1"), SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("3")]) == [1, 2, 3]
+    assert collect_int_dims([SymbolExprAttr.from_expr("1"), SymbolExprAttr.from_expr("N")]) is None
+    assert collect_int_dims([IntAttr(1), IntAttr(2)]) is None
     assert build_contiguous_stride([2, 3, 4]) == [12, 4, 1]
 
 
 def test_dims_equal() -> None:
-    assert dims_equal(IntAttr(2), IntAttr(2))
-    assert not dims_equal(IntAttr(2), IntAttr(3))
-    assert dims_equal(StringAttr("N"), StringAttr("N"))
-    assert not dims_equal(StringAttr("N"), StringAttr("M"))
-    assert not dims_equal(IntAttr(2), StringAttr("2"))
+    assert dims_equal(SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("2"))
+    assert not dims_equal(SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("3"))
+    assert dims_equal(SymbolExprAttr.from_expr("N"), SymbolExprAttr.from_expr("N"))
+    assert not dims_equal(SymbolExprAttr.from_expr("N"), SymbolExprAttr.from_expr("M"))
+    assert not dims_equal(IntAttr(2), SymbolExprAttr.from_expr("2"))
 
 
 def test_public_dim_values_default_stride_shape_numel() -> None:

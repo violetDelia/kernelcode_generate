@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, f32
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, f32
 from xdsl.ir import Attribute, Block, Operation, Region
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -41,6 +41,7 @@ from kernel_gen.dialect.nn import (
     NnSubOp,
     NnTrueDivOp,
 )
+from kernel_gen.dialect.symbol import SymbolExprAttr
 from kernel_gen.passes.decompass import (
     DecompassPass,
     NnSoftmaxDecompPattern,
@@ -73,7 +74,7 @@ def _build_contiguous_stride(shape: tuple[int | str, ...]) -> ArrayAttr[Attribut
     strides: list[Attribute] = []
     for _dim in reversed(shape):
         if not factors:
-            strides.append(IntAttr(1))
+            strides.append(SymbolExprAttr.from_expr("1"))
         else:
             int_product = 1
             expr_parts: list[str] = []
@@ -87,9 +88,9 @@ def _build_contiguous_stride(shape: tuple[int | str, ...]) -> ArrayAttr[Attribut
                 if int_product != 1:
                     parts.append(str(int_product))
                 parts.extend(expr_parts)
-                strides.append(StringAttr("*".join(parts)))
+                strides.append(SymbolExprAttr.from_expr("*".join(parts)))
             else:
-                strides.append(IntAttr(int_product))
+                strides.append(SymbolExprAttr.from_expr(str(int_product)))
         factors.insert(0, _dim)
     strides.reverse()
     return ArrayAttr(strides)
@@ -98,9 +99,7 @@ def _build_contiguous_stride(shape: tuple[int | str, ...]) -> ArrayAttr[Attribut
 def _make_memory_type(shape: tuple[int | str, ...]) -> NnMemoryType:
     """构造测试用 `nn.memory` 类型。"""
 
-    shape_attr = ArrayAttr(
-        [IntAttr(dim) if isinstance(dim, int) else StringAttr(dim) for dim in shape]
-    )
+    shape_attr = ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in shape])
     return NnMemoryType(
         shape_attr,
         _build_contiguous_stride(shape),
@@ -179,8 +178,8 @@ def test_decompose_softmax_into_fixed_nn_chain() -> None:
     assert exp_op.result.type == mem_type
     assert div_op.result.type == mem_type
     assert return_op.arguments[0] == div_op.result
-    assert list(reduce_max.result.type.shape.data) == [IntAttr(2), IntAttr(1)]
-    assert list(reduce_max.result.type.stride.data) == [IntAttr(1), IntAttr(1)]
+    assert list(reduce_max.result.type.shape.data) == [SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("1")]
+    assert list(reduce_max.result.type.stride.data) == [SymbolExprAttr.from_expr("1"), SymbolExprAttr.from_expr("1")]
 
 
 def test_decompose_softmax_preserves_symbolic_reduce_stride_contract() -> None:
@@ -195,8 +194,16 @@ def test_decompose_softmax_preserves_symbolic_reduce_stride_contract() -> None:
     reduce_sum = next(op for op in body_ops if isinstance(op, NnReduceSumOp))
     broadcasts = [op for op in body_ops if isinstance(op, NnBroadcastOp)]
 
-    assert list(reduce_max.result.type.shape.data) == [IntAttr(1), StringAttr("N"), IntAttr(4)]
-    assert list(reduce_max.result.type.stride.data) == [StringAttr("4*N"), IntAttr(4), IntAttr(1)]
+    assert list(reduce_max.result.type.shape.data) == [
+        SymbolExprAttr.from_expr("1"),
+        SymbolExprAttr.from_expr("N"),
+        SymbolExprAttr.from_expr("4"),
+    ]
+    assert list(reduce_max.result.type.stride.data) == [
+        SymbolExprAttr.from_expr("4 * N"),
+        SymbolExprAttr.from_expr("4"),
+        SymbolExprAttr.from_expr("1"),
+    ]
     assert reduce_sum.result.type == reduce_max.result.type
     assert all(broadcast.result.type == mem_type for broadcast in broadcasts)
 
@@ -247,8 +254,8 @@ def test_decompose_softmax_rejects_normalized_axis_out_of_range() -> None:
 def test_decompose_softmax_rejects_result_type_mismatch() -> None:
     input_type = _make_memory_type((2, 3))
     bad_result_type = NnMemoryType(
-        ArrayAttr([IntAttr(2), IntAttr(3)]),
-        ArrayAttr([IntAttr(1), IntAttr(3)]),
+        ArrayAttr([SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("3")]),
+        ArrayAttr([SymbolExprAttr.from_expr("1"), SymbolExprAttr.from_expr("3")]),
         f32,
         NnMemorySpaceAttr.from_name("global"),
     )

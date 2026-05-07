@@ -7,6 +7,7 @@
 - 只承载公开合同，不把内部 parse / pass / emit / execute 细节暴露为外部依赖。
 - 不向 DSL 函数隐式注入 operation helper；kernel 体使用的 helper 必须由调用方显式 import 或闭包绑定。
 - `dump_dir` 与 runtime `trance` 诊断开关统一从 `kernel_gen.core.config` 读取，不作为 `dsl_run(...)` 入参。
+- IR dump 文件默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias 文本。
 
 API 列表:
 - `DslRunResult(func_op: func.FuncOp, module: ModuleOp, source: str, compiled_kernel: CompiledKernel, execute_result: ExecuteResult, runtime_args: tuple[RuntimeRealArg, ...])`
@@ -40,6 +41,7 @@ from xdsl.dialects.builtin import ModuleOp
 
 from kernel_gen.core.config import get_dump_dir, get_target, restore_config, set_dump_dir, snapshot_config
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
+from kernel_gen.core.print import print_operation_with_aliases
 from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
 from kernel_gen.dsl.ast.mlir_gen import mlir_gen
 from kernel_gen.execute_engine import CompiledKernel, ExecuteResult, ExecutionEngine
@@ -595,7 +597,7 @@ def _run_pipeline_with_optional_dump(
 
     功能说明:
     - 标准 `PassManager` 由自身写入 `01-first-ir.mlir` 和逐 pass IR。
-    - 覆盖 `run(module)` 的自定义 pipeline 不强制改签名，只写入初始 IR 与 pipeline 后 IR。
+    - 覆盖 `run(module)` 的自定义 pipeline 不强制改签名，只写入 alias 初始 IR 与 alias pipeline 后 IR。
 
     使用示例:
     - lowered = _run_pipeline_with_optional_dump(pm, module, Path("dump/kernel"))
@@ -614,12 +616,12 @@ def _run_pipeline_with_optional_dump(
             return pipeline.run(module)
         finally:
             restore_config(snapshot)
-    _write_dump_file(dump_dir / "01-first-ir.mlir", str(module))
+    _write_dump_file(dump_dir / "01-first-ir.mlir", print_operation_with_aliases(module))
     output = pipeline.run(module)
     pipeline_name = getattr(pipeline, "name", "pipeline")
     if not isinstance(pipeline_name, str) or not pipeline_name:
         pipeline_name = "pipeline"
-    _write_dump_file(dump_dir / "02-pipeline.mlir", f"{pipeline_name}\n{output}")
+    _write_dump_file(dump_dir / "02-pipeline.mlir", f"{pipeline_name}\n{print_operation_with_aliases(output)}")
     return output
 
 

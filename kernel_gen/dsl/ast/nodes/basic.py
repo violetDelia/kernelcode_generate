@@ -21,7 +21,7 @@ API 列表:
 - `StatementAST`
 - `ModuleAST(functions: list[FunctionAST], runtime_args: tuple[PythonObjectAttrAST, ...] = (), source_fn: PythonObjectAttrAST = ...)`
 - `FunctionAST(name: str, inputs: list[MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST], outputs: list[MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST], body: BlockAST, ..., runtime_args: tuple[PythonObjectAttrAST, ...] = ())`
-- `FunctionAST.input_from_runtime_arg(name: str, value: object, location: SourceLocation | None = None) -> MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST`
+- `FunctionAST.input_from_runtime_arg(name: str, value: Memory | SymbolDim | bool | int | float | NnMemoryType, location: SourceLocation | None = None) -> MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST`
 - `FunctionAST.input_from_bound_value(name: str, value: ValueAST, location: SourceLocation | None = None) -> MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST`
 - `FunctionAST.iter_inputs() -> Iterable[MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST]`
 - `MemoryAST(name: str, shape: SymbolListAST, stride: SymbolListAST, type: IntTypeAttrAST | FloatTypeAttrAST | BoolTypeAttrAST, space: MemorySpaceAttrAST, location: SourceLocation | None = None, format: PythonObjectAttrAST = ...)`
@@ -809,18 +809,15 @@ class FunctionAST(DSLNode):
     def input_from_runtime_arg(
         cls,
         name: str,
-        value: object,
+        value: Memory | SymbolDim | bool | int | float | NnMemoryType,
         location: SourceLocation | None = None,
     ) -> MemoryAST | SymbolDimAST | ConstValueAST | BoolValueAST:
         """根据 runtime 参数构造函数输入 AST 节点。
 
-        创建者: 榕
-        最后一次更改: 2026-05-03
-
         功能说明:
         - 统一 runtime 参数到 `FunctionAST.inputs` 的构造规则。
         - visitor 只调用该公开入口，不再在 `visit_FunctionDef` 中维护 runtime 类型工厂。
-        - `Memory`、`SymbolDim`、`int`、`float`、`bool` 保持当前公开解析语义。
+        - `Memory`、`SymbolDim`、`bool`、`int`、`float` 保持当前公开解析语义，`NnMemoryType` 走公开拒绝语义。
 
         使用示例:
         - input_node = FunctionAST.input_from_runtime_arg("x", memory, location)

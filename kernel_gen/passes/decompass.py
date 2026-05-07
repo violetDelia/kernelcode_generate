@@ -27,7 +27,7 @@ from __future__ import annotations
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.context import Context
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, ModuleOp, StringAttr
+from xdsl.dialects.builtin import ArrayAttr, ModuleOp
 from xdsl.ir import Attribute
 from xdsl.passes import ModulePass
 from xdsl.pattern_rewriter import (
@@ -48,11 +48,90 @@ from kernel_gen.dialect.nn import (
     NnSubOp,
     NnTrueDivOp,
 )
-from kernel_gen.dialect.symbol import Symbol
+from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr
 from kernel_gen.passes.common import (
     ensure_builtin_module,
     verify_generated_ops,
 )
+
+
+def _symbol_expr_text(dim: Attribute) -> str:
+    """读取 nn.memory shape/stride 的公开 symbol 表达文本。
+
+
+    功能说明:
+    - 只支持当前公开 `SymbolExprAttr`。
+    - 不接受其它 attribute，避免 decompass 生成无法验证的 memory type。
+
+    使用示例:
+    - text = _symbol_expr_text(SymbolExprAttr.from_expr("N"))
+
+    关联文件:
+    - spec: spec/pass/decompass.md
+    - test: test/passes/decompass/test_softmax.py
+    - 功能实现: kernel_gen/passes/decompass.py
+    """
+
+    if isinstance(dim, SymbolExprAttr):
+        return dim.expr.data
+    raise KernelCodeError(
+        ErrorKind.CONTRACT,
+        ErrorModule.PASS,
+        "shape entries must be SymbolExprAttr",
+    )
+
+
+def _symbol_expr_attr(expr: int | str) -> SymbolExprAttr:
+    """构造 decompass 输出 memory 使用的公开 symbol expr attr。
+
+
+    功能说明:
+    - 统一把 decompass 新生成的 shape/stride 维度写成 `SymbolExprAttr`。
+
+    使用示例:
+    - attr = _symbol_expr_attr("N*4")
+
+    关联文件:
+    - spec: spec/pass/decompass.md
+    - test: test/passes/decompass/test_softmax.py
+    - 功能实现: kernel_gen/passes/decompass.py
+    """
+
+    return SymbolExprAttr.from_expr(str(expr))
+
+
+def _reduce_stride_attr(suffix_factors: list[Attribute]) -> SymbolExprAttr:
+    """根据后缀 shape 因子生成 reduce 中间 memory stride。
+
+
+    功能说明:
+    - 对静态整数因子做乘积折叠。
+    - 对符号因子保留公开 symbol expr 文本，输出始终为 `SymbolExprAttr`。
+
+    使用示例:
+    - stride = _reduce_stride_attr([SymbolExprAttr.from_expr("N"), SymbolExprAttr.from_expr("4")])
+
+    关联文件:
+    - spec: spec/pass/decompass.md
+    - test: test/passes/decompass/test_softmax.py
+    - 功能实现: kernel_gen/passes/decompass.py
+    """
+
+    int_product = 1
+    expr_parts: list[str] = []
+    for factor in suffix_factors:
+        factor_text = _symbol_expr_text(factor)
+        if factor_text.lstrip("-").isdigit():
+            int_product *= int(factor_text)
+            continue
+        expr_parts.append(factor_text)
+    parts: list[str] = []
+    if int_product != 1:
+        parts.append(str(int_product))
+    parts.extend(part for part in expr_parts if part != "1")
+    if not parts:
+        return _symbol_expr_attr(1)
+    return _symbol_expr_attr(" * ".join(parts))
 
 
 class NnSoftmaxDecompPattern(RewritePattern):
@@ -88,31 +167,11 @@ class NnSoftmaxDecompPattern(RewritePattern):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "normalized axis out of range")
 
         reduce_shape = list(input_type.shape.data)
-        reduce_shape[axis] = IntAttr(1)
+        reduce_shape[axis] = _symbol_expr_attr(1)
         suffix_factors: list[Attribute] = []
         reduce_strides: list[Attribute] = []
         for dim in reversed(reduce_shape):
-            int_product = 1
-            expr_parts: list[str] = []
-            for factor in suffix_factors:
-                if isinstance(factor, IntAttr):
-                    int_product *= factor.data
-                    continue
-                if isinstance(factor, StringAttr):
-                    expr_parts.append(factor.data)
-                    continue
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "shape entries must be IntAttr or StringAttr")
-            if not expr_parts:
-                reduce_strides.append(IntAttr(int_product))
-            else:
-                parts: list[str] = []
-                if int_product != 1:
-                    parts.append(str(int_product))
-                parts.extend(part for part in expr_parts if part != "1")
-                if not parts:
-                    reduce_strides.append(IntAttr(1))
-                else:
-                    reduce_strides.append(StringAttr("*".join(parts)))
+            reduce_strides.append(_reduce_stride_attr(suffix_factors))
             suffix_factors.insert(0, dim)
         reduce_strides.reverse()
         reduce_type = NnMemoryType(

@@ -157,7 +157,7 @@
     result = NnTransposeAST(value=value, perm=perm, location=location)
     ```
 - 功能说明：执行 `NnTransposeAST`，把 DSL AST 节点转换为公开 MLIR/IR 结果或读取节点公开属性。
-- 注意事项：构造参数必须是公开 AST 节点、公开 symbol/memory 类型或签名声明的 Python 基础值；不得传入内部 visitor/helper 状态。
+- 注意事项：构造参数必须是公开 AST 节点、公开 symbol/memory 类型或签名声明的 Python 基础值；不得传入内部 visitor/helper 状态；当输入来自 `dma.reshape` 且 shape operand 携带匿名动态维度时，transpose 结果连续 stride 必须优先保留这些 operand 的公开语义名，缺少名称时才使用稳定 `runtime_dim_<axis>` 作为类型级动态维度名。
 
 ### `class NnReluAST(value: ValueAST, location: SourceLocation | None = None)`
 

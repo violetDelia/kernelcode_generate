@@ -66,6 +66,8 @@ from kernel_gen.core.contracts import (
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolIterType, SymbolValueType
 
+_RUNTIME_DIM_PREFIX = "runtime_dim_"
+
 
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """校验并返回 nn.memory type。
@@ -325,6 +327,7 @@ def _verify_operands_match_layout(
     功能说明:
     - 若布局维度为静态 `SymbolExprAttr`，对应 operand 必须是相同值的 `!symbol.int<#symbol.expr<n>>`。
     - 若布局维度为符号表达式，则 operand 的公开表达式必须一致。
+    - `runtime_dim_*` 是 DSL 类型级临时名，允许由 full-rank dynamic shape 中的 `?` SSA 承接真实运行期维度。
 
     使用示例:
     - _verify_operands_match_layout(op.sizes, result_type.shape, "shape must match sizes")
@@ -344,6 +347,12 @@ def _verify_operands_match_layout(
             continue
         expected_expr = _dim_expr_text(expected)
         if expected_expr == "?":
+            continue
+        if (
+            expected_expr.startswith(_RUNTIME_DIM_PREFIX)
+            and isinstance(value.type, SymbolValueType)
+            and value.type.get_value() == "?"
+        ):
             continue
         if not isinstance(value.type, SymbolValueType) or value.type.get_value() != expected_expr:
             raise VerifyException(mismatch_message)
@@ -526,7 +535,7 @@ def _verify_transpose_layout(
 
     功能说明:
     - 按 perm 重排 source shape，并与 target shape 对齐校验。
-    - target stride 必须是 target shape 的默认连续 stride。
+    - target stride 必须是 target shape 的默认连续 stride；匿名动态 shape 的高维 stride 可保留调用点动态语义表达。
 
     使用示例:
     - _verify_transpose_layout(source_type, target_type, [1, 0])
@@ -547,6 +556,8 @@ def _verify_transpose_layout(
     expected_stride = _default_contiguous_stride(target_type.shape)
     for expected_dim, actual_dim in zip(expected_stride, target_type.stride.data, strict=True):
         if not _stride_attrs_equal(expected_dim, actual_dim):
+            if _dim_expr_text(expected_dim) == "?" and _static_int_from_dim(actual_dim) is None:
+                continue
             raise VerifyException("dma.transpose target stride mismatch")
 
 
@@ -880,6 +891,7 @@ def _is_contiguous(memory_type: NnMemoryType) -> bool:
     功能说明:
     - 静态 stride 直接比较整数。
     - 符号 stride 使用表达式等价判断，允许乘法因子顺序不同。
+    - 由匿名动态 shape 推导出的未知高维 stride 接受动态语义表达，保留调用点变量名。
 
     使用示例:
     - _is_contiguous(memory_type)
@@ -895,6 +907,8 @@ def _is_contiguous(memory_type: NnMemoryType) -> bool:
         return False
     for expected_dim, stride_dim in zip(expected, memory_type.stride.data, strict=True):
         if not _stride_attrs_equal(expected_dim, stride_dim):
+            if _dim_expr_text(expected_dim) == "?" and _static_int_from_dim(stride_dim) is None:
+                continue
             return False
     return True
 

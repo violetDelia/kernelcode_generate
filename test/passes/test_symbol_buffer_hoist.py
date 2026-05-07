@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, i32
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, i32
 from xdsl.ir import Block, Region, SSAValue
 from xdsl.passes import ModulePass
 from xdsl.pattern_rewriter import GreedyRewritePatternApplier, PatternRewriteWalker
@@ -36,7 +36,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaSliceOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolIterType, SymbolValueType, SymbolYieldOp
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolForOp, SymbolIterType, SymbolValueType, SymbolYieldOp
 
 pass_module = importlib.import_module("kernel_gen.passes.symbol_buffer_hoist")
 package_module = importlib.import_module("kernel_gen.passes")
@@ -66,10 +66,10 @@ def _memory_type(shape: tuple[int | str, ...]) -> NnMemoryType:
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
-    strides: list[object] = []
+    strides: list[int | str] = []
     running: int | str = 1
     for dim in reversed(shape):
-        strides.append(IntAttr(running) if isinstance(running, int) else StringAttr(running))
+        strides.append(running)
         if isinstance(dim, int):
             running = running * dim if isinstance(running, int) else f"{dim}*{running}"
         elif running == 1:
@@ -78,8 +78,8 @@ def _memory_type(shape: tuple[int | str, ...]) -> NnMemoryType:
             running = f"{dim}*{running}"
     strides.reverse()
     return NnMemoryType(
-        ArrayAttr([IntAttr(dim) if isinstance(dim, int) else StringAttr(dim) for dim in shape]),
-        ArrayAttr([stride if isinstance(stride, (IntAttr, StringAttr)) else StringAttr(str(stride)) for stride in strides]),
+        ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in shape]),
+        ArrayAttr([SymbolExprAttr.from_expr(str(stride)) for stride in strides]),
         i32,
         NnMemorySpaceAttr.from_name("global"),
     )
@@ -122,7 +122,7 @@ def _build_slice_module() -> ModuleOp:
     """
 
     source_type = _memory_type((32, 64))
-    tile_type = _memory_type(("TM", "TK"))
+    tile_type = _memory_type((8, 16))
     zero = _const_symbol(0)
     one = _const_symbol(1)
     tm = _const_symbol(8)
@@ -162,7 +162,7 @@ def _build_deslice_module() -> ModuleOp:
     """
 
     target_type = _memory_type((32, 64))
-    scratch_type = _memory_type(("TM", "TN"))
+    scratch_type = _memory_type((8, 16))
     zero = _const_symbol(0)
     one = _const_symbol(1)
     tm = _const_symbol(8)
@@ -203,7 +203,7 @@ def _build_loop_carried_shape_module() -> ModuleOp:
     """
 
     source_type = _memory_type((32, 64))
-    tile_type = _memory_type(("ACC", "TK"))
+    tile_type = _memory_type(("ACC", 16))
     zero = _const_symbol(0)
     one = _const_symbol(1)
     init = _const_symbol(8)
@@ -255,7 +255,7 @@ def _build_invalid_verify_module() -> ModuleOp:
     """
 
     source_type = _memory_type((32, 64))
-    tile_type = _memory_type(("ACC", "TK"))
+    tile_type = _memory_type(("ACC", 16))
     zero = _const_symbol(0)
     one = _const_symbol(1)
     init = _const_symbol(8)

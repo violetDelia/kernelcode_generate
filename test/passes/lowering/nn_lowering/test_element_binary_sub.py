@@ -32,6 +32,7 @@ from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType, NnSubOp
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
+from test.passes.lowering.nn_lowering.memory_type_utils import symbol_array
 
 
 def _make_memory_type(element_type: Attribute = f32) -> NnMemoryType:
@@ -50,8 +51,8 @@ def _make_memory_type(element_type: Attribute = f32) -> NnMemoryType:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
-    shape = ArrayAttr([IntAttr(4), IntAttr(8)])
-    stride = ArrayAttr([IntAttr(8), IntAttr(1)])
+    shape = symbol_array([4, 8])
+    stride = symbol_array([8, 1])
     return NnMemoryType(shape, stride, element_type, NnMemorySpaceAttr.from_name("global"))
 
 

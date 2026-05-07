@@ -23,7 +23,7 @@ API 列表:
 from __future__ import annotations
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, IntegerType, StringAttr
+from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, IntegerType
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewrite_pattern
 
@@ -37,7 +37,7 @@ from kernel_gen.dialect.nn import (
     NnReduceSumOp,
     NnSoftmaxOp,
 )
-from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolGetDimOp, SymbolValueType
 from .nn_lowering_utility import ensure_expected_op_name
 
 
@@ -114,6 +114,51 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
     if isinstance(operand.type, IntegerType):
         return operand
     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "broadcast scalar must be int or symbol")
+
+
+def _shape_dim_expr_text(dim: Attribute) -> str:
+    """读取 reduce 相关 memory shape 维度表达式。
+
+
+    功能说明:
+    - 只支持当前公开 `SymbolExprAttr` memory layout。
+    - 不支持的维度类型按 reduce shape mismatch 处理。
+
+    使用示例:
+    - dim_text = _shape_dim_expr_text(dim)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+    - test: test/passes/lowering/nn_lowering/test_reduce_lowering.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
+    """
+
+    if isinstance(dim, SymbolExprAttr):
+        return dim.expr.data
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce shape mismatch")
+
+
+def _shape_dim_static_int(dim: Attribute) -> int | None:
+    """读取静态整数维度。
+
+
+    功能说明:
+    - 数字 `SymbolExprAttr` 返回整数。
+    - 非数字表达式返回 `None`，由调用方按动态符号维处理。
+
+    使用示例:
+    - static_dim = _shape_dim_static_int(dim)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+    - test: test/passes/lowering/nn_lowering/test_reduce_lowering.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
+    """
+
+    dim_text = _shape_dim_expr_text(dim)
+    if dim_text.lstrip("-").isdigit():
+        return int(dim_text)
+    return None
 
 
 def _ensure_reduce_axis(op_name: str, axes_attr: ArrayAttr) -> int:
@@ -209,7 +254,7 @@ def _build_alloc_dynamic_shape_from_operand(
 
     dynamic_shape: list[SSAValue] = []
     for result_axis, dim in enumerate(result_type.shape.data):
-        if not isinstance(dim, StringAttr):
+        if _shape_dim_static_int(dim) is not None:
             continue
         operand_axis = axis_map[result_axis]
         symbol_op = SymbolGetDimOp(operand, IntAttr(operand_axis))
@@ -263,30 +308,13 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
         for idx, operand_dim in enumerate(operand_shape):
             result_dim = result_shape[idx]
             if idx == axis:
-                if isinstance(result_dim, StringAttr):
-                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce keepdim dimension must be 1")
-                if isinstance(result_dim, IntegerAttr):
-                    dim_value = result_dim.value.data
-                elif isinstance(result_dim, IntAttr):
-                    dim_value = result_dim.data
-                else:
+                dim_value = _shape_dim_static_int(result_dim)
+                if dim_value is None:
                     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce keepdim dimension must be 1")
                 if dim_value != 1:
                     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce keepdim dimension must be 1")
             else:
-                if isinstance(result_dim, StringAttr) and isinstance(operand_dim, StringAttr):
-                    if result_dim.data != operand_dim.data:
-                        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce shape mismatch")
-                elif isinstance(result_dim, (IntegerAttr, IntAttr)) and isinstance(
-                    operand_dim, (IntegerAttr, IntAttr)
-                ):
-                    result_value = result_dim.value.data if isinstance(result_dim, IntegerAttr) else result_dim.data
-                    operand_value = (
-                        operand_dim.value.data if isinstance(operand_dim, IntegerAttr) else operand_dim.data
-                    )
-                    if result_value != operand_value:
-                        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce shape mismatch")
-                else:
+                if _shape_dim_expr_text(result_dim) != _shape_dim_expr_text(operand_dim):
                     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce shape mismatch")
     if keepdim:
         axis_map = list(range(operand_rank))
@@ -298,17 +326,7 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
         for result_axis, operand_axis in enumerate(axis_map):
             result_dim = result_shape[result_axis]
             operand_dim = operand_shape[operand_axis]
-            if isinstance(result_dim, StringAttr) and isinstance(operand_dim, StringAttr):
-                if result_dim.data != operand_dim.data:
-                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce shape mismatch")
-            elif isinstance(result_dim, (IntegerAttr, IntAttr)) and isinstance(
-                operand_dim, (IntegerAttr, IntAttr)
-            ):
-                result_value = result_dim.value.data if isinstance(result_dim, IntegerAttr) else result_dim.data
-                operand_value = operand_dim.value.data if isinstance(operand_dim, IntegerAttr) else operand_dim.data
-                if result_value != operand_value:
-                    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce shape mismatch")
-            else:
+            if _shape_dim_expr_text(result_dim) != _shape_dim_expr_text(operand_dim):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "reduce shape mismatch")
     dynamic_shape = _build_alloc_dynamic_shape_from_operand(block, op, operand, result_type, axis_map)
     alloc = DmaAllocOp(dynamic_shape, result_type)

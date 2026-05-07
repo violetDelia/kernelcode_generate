@@ -29,8 +29,8 @@ API 列表:
 from __future__ import annotations
 
 from xdsl.context import Context
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, ModuleOp, StringAttr
-from xdsl.ir import Operation, SSAValue
+from xdsl.dialects.builtin import ArrayAttr, ModuleOp, StringAttr
+from xdsl.ir import Attribute, Operation, SSAValue
 from xdsl.passes import ModulePass
 from xdsl.pattern_rewriter import (
     GreedyRewritePatternApplier,
@@ -43,7 +43,7 @@ from xdsl.pattern_rewriter import (
 from kernel_gen.dialect.dma import DmaBroadcastOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.dialect.symbol import Symbol, SymbolForOp, SymbolValueType
+from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolForOp, SymbolValueType
 from kernel_gen.passes.common import ensure_builtin_module
 
 
@@ -105,7 +105,7 @@ def _collect_ancestor_loop_step_exprs(op: Operation) -> list[str]:
 
 def _build_tile_expr_row_from_matching_dims(
     roles: list[str],
-    dim_attrs: list[IntAttr | StringAttr],
+    dim_attrs: list[Attribute],
     loop_step_exprs: list[str],
 ) -> list[str]:
     """按 loop step 与实际 shape 维度匹配结果写回 tile 表达式。"""
@@ -129,12 +129,25 @@ def _build_tile_expr_row_from_matching_dims(
     return row
 
 
-def _dim_expr_text(dim_attr: IntAttr | StringAttr) -> str:
-    """返回 shape 维度 attr 的稳定字符串文本。"""
+def _dim_expr_text(dim_attr: Attribute) -> str:
+    """返回 shape 维度 attr 的稳定字符串文本。
 
-    if isinstance(dim_attr, IntAttr):
-        return str(dim_attr.data)
-    return dim_attr.data
+
+    功能说明:
+    - 只读取公开 `SymbolExprAttr` 维度表达，供 tile-analysis 匹配 loop step。
+
+    使用示例:
+    - expr = _dim_expr_text(memory_type.shape.data[0])
+
+    关联文件:
+    - spec: [spec/pass/tile/analysis.md](spec/pass/tile/analysis.md)
+    - test: [test/passes/tile/test_analysis.py](test/passes/tile/test_analysis.py)
+    - 功能实现: [kernel_gen/passes/tile/analysis.py](kernel_gen/passes/tile/analysis.py)
+    """
+
+    if isinstance(dim_attr, SymbolExprAttr):
+        return dim_attr.expr.data
+    raise ValueError("tile-analysis memory layout entries must be SymbolExprAttr")
 
 
 class TileAnalysisBinaryPattern(RewritePattern):
@@ -218,25 +231,13 @@ class TileAnalysisBroadcastPattern(RewritePattern):
         target_roles = ["elewise"] * len(target_dims)
         if isinstance(source.type, NnMemoryType):
             source_dims = list(source.type.shape.data)
-            aligned_source_dims = [IntAttr(1)] * max(len(target_dims) - len(source_dims), 0) + source_dims
+            aligned_source_dims = [SymbolExprAttr.from_expr("1")] * max(len(target_dims) - len(source_dims), 0) + source_dims
             source_roles: list[str] = []
             for src_dim, tgt_dim in zip(aligned_source_dims, target_dims):
-                same_dim = (
-                    isinstance(src_dim, IntAttr)
-                    and isinstance(tgt_dim, IntAttr)
-                    and src_dim.data == tgt_dim.data
-                ) or (
-                    isinstance(src_dim, StringAttr)
-                    and isinstance(tgt_dim, StringAttr)
-                    and src_dim.data == tgt_dim.data
-                )
-                unit_dim = (
-                    isinstance(src_dim, IntAttr)
-                    and src_dim.data == 1
-                ) or (
-                    isinstance(src_dim, StringAttr)
-                    and src_dim.data == "1"
-                )
+                src_text = _dim_expr_text(src_dim)
+                tgt_text = _dim_expr_text(tgt_dim)
+                same_dim = src_text == tgt_text
+                unit_dim = src_text == "1"
                 if same_dim:
                     source_roles.append("elewise")
                 elif unit_dim:
@@ -246,7 +247,7 @@ class TileAnalysisBroadcastPattern(RewritePattern):
             roles = [target_roles, source_roles]
         else:
             roles = [target_roles, ["expand"] * len(target_dims)]
-            aligned_source_dims = [IntAttr(1)] * len(target_dims)
+            aligned_source_dims = [SymbolExprAttr.from_expr("1")] * len(target_dims)
         tile_expr_rows = [[""] * len(row) for row in roles]
         loop_step_exprs = _collect_ancestor_loop_step_exprs(op)
         if loop_step_exprs:

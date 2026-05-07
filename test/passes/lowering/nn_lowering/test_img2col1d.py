@@ -33,6 +33,7 @@ from kernel_gen.dialect.nn import NnImg2col1dOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
+from test.passes.lowering.nn_lowering.memory_type_utils import memory_type
 
 
 # TC-PASS-NNL-021
@@ -43,18 +44,8 @@ from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_img2col1d.py
 def test_nn_lowering_img2col1d_target() -> None:
     space = NnMemorySpaceAttr(StringAttr("global"))
-    input_type = NnMemoryType(
-        ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5)]),
-        ArrayAttr([IntAttr(15), IntAttr(5), IntAttr(1)]),
-        f32,
-        space,
-    )
-    result_type = NnMemoryType(
-        ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(5)]),
-        ArrayAttr([IntAttr(45), IntAttr(15), IntAttr(5), IntAttr(1)]),
-        f32,
-        space,
-    )
+    input_type = memory_type([1, 3, 5], [15, 5, 1], f32, space)
+    result_type = memory_type([1, 3, 3, 5], [45, 15, 5, 1], f32, space)
 
     block = Block(arg_types=[input_type])
     kw = SymbolConstOp(3)
@@ -96,29 +87,20 @@ def test_nn_lowering_img2col1d_accepts_noncanonical_symbol_names() -> None:
     """TC-PASS-NNL-021A: 动态 img2col1d 不应依赖固定符号名。"""
 
     space = NnMemorySpaceAttr(StringAttr("global"))
-    input_type = NnMemoryType(
-        ArrayAttr([StringAttr("BATCH_DIM"), StringAttr("CHANNEL_DIM"), StringAttr("WIDTH_DIM")]),
-        ArrayAttr([StringAttr("CHANNEL_DIM*WIDTH_DIM"), StringAttr("WIDTH_DIM"), IntAttr(1)]),
+    input_type = memory_type(
+        ["BATCH_DIM", "CHANNEL_DIM", "WIDTH_DIM"],
+        ["CHANNEL_DIM*WIDTH_DIM", "WIDTH_DIM", 1],
         f32,
         space,
     )
-    result_type = NnMemoryType(
-        ArrayAttr(
-            [
-                StringAttr("BATCH_DIM"),
-                StringAttr("CHANNEL_DIM"),
-                StringAttr("WIN_DIM"),
-                StringAttr("OUT_EXTENT_DIM"),
-            ]
-        ),
-        ArrayAttr(
-            [
-                StringAttr("CHANNEL_DIM*WIN_DIM*OUT_EXTENT_DIM"),
-                StringAttr("WIN_DIM*OUT_EXTENT_DIM"),
-                StringAttr("OUT_EXTENT_DIM"),
-                IntAttr(1),
-            ]
-        ),
+    result_type = memory_type(
+        ["BATCH_DIM", "CHANNEL_DIM", "WIN_DIM", "OUT_EXTENT_DIM"],
+        [
+            "CHANNEL_DIM*WIN_DIM*OUT_EXTENT_DIM",
+            "WIN_DIM*OUT_EXTENT_DIM",
+            "OUT_EXTENT_DIM",
+            1,
+        ],
         f32,
         space,
     )
@@ -153,7 +135,8 @@ def test_nn_lowering_img2col1d_accepts_noncanonical_symbol_names() -> None:
     kernel_ops = [op for op in module.walk() if isinstance(op, KernelImg2col1dOp)]
     assert len(kernel_ops) == 1
     assert not any(isinstance(op, NnImg2col1dOp) for op in module.walk())
-    assert '(-DILATION_DIM*(WIN_DIM - 1) + PAD_LEFT_DIM + PAD_RIGHT_DIM + WIDTH_DIM - 1) // STEP_DIM + 1' in module_text
+    assert "symbol.floordiv" in module_text
+    assert "(PAD_LEFT_DIM + PAD_RIGHT_DIM + WIDTH_DIM - DILATION_DIM*(WIN_DIM - 1) - 1) floordiv STEP_DIM + 1" in module_text
 
 
 # TC-PASS-NNL-021B
@@ -164,15 +147,10 @@ def test_nn_lowering_img2col1d_accepts_noncanonical_symbol_names() -> None:
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_img2col1d.py
 def test_nn_lowering_img2col1d_public_error_matrix() -> None:
     space = NnMemorySpaceAttr(StringAttr("global"))
-    input_type = NnMemoryType(
-        ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5)]),
-        ArrayAttr([IntAttr(15), IntAttr(5), IntAttr(1)]),
-        f32,
-        space,
-    )
-    result_type = NnMemoryType(
-        ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), StringAttr("OUT_EXTENT_DIM")]),
-        ArrayAttr([StringAttr("3*OUT_EXTENT_DIM"), StringAttr("OUT_EXTENT_DIM"), StringAttr("OUT_EXTENT_DIM"), IntAttr(1)]),
+    input_type = memory_type([1, 3, 5], [15, 5, 1], f32, space)
+    result_type = memory_type(
+        [1, 3, 3, "OUT_EXTENT_DIM"],
+        ["3*OUT_EXTENT_DIM", "OUT_EXTENT_DIM", "OUT_EXTENT_DIM", 1],
         f32,
         space,
     )
@@ -238,31 +216,21 @@ def test_nn_lowering_img2col1d_public_error_matrix() -> None:
     with pytest.raises(KernelCodeError, match="nn img2col symbolic dim must come from symbolic source axis"):
         NnLoweringPass().apply(Context(), static_source_module)
 
-    dynamic_input_type = NnMemoryType(
-        ArrayAttr([StringAttr("BATCH_DIM"), StringAttr("CHANNEL_DIM"), StringAttr("WIDTH_DIM")]),
-        ArrayAttr([StringAttr("CHANNEL_DIM*WIDTH_DIM"), StringAttr("WIDTH_DIM"), IntAttr(1)]),
+    dynamic_input_type = memory_type(
+        ["BATCH_DIM", "CHANNEL_DIM", "WIDTH_DIM"],
+        ["CHANNEL_DIM*WIDTH_DIM", "WIDTH_DIM", 1],
         f32,
         space,
     )
-    rank_result_type = NnMemoryType(
-        ArrayAttr(
-            [
-                StringAttr("BATCH_DIM"),
-                StringAttr("CHANNEL_DIM"),
-                StringAttr("WIN_DIM"),
-                StringAttr("OUT_EXTENT_DIM"),
-                StringAttr("EXTRA_DIM"),
-            ]
-        ),
-        ArrayAttr(
-            [
-                StringAttr("CHANNEL_DIM*WIN_DIM*OUT_EXTENT_DIM*EXTRA_DIM"),
-                StringAttr("WIN_DIM*OUT_EXTENT_DIM*EXTRA_DIM"),
-                StringAttr("OUT_EXTENT_DIM*EXTRA_DIM"),
-                StringAttr("EXTRA_DIM"),
-                IntAttr(1),
-            ]
-        ),
+    rank_result_type = memory_type(
+        ["BATCH_DIM", "CHANNEL_DIM", "WIN_DIM", "OUT_EXTENT_DIM", "EXTRA_DIM"],
+        [
+            "CHANNEL_DIM*WIN_DIM*OUT_EXTENT_DIM*EXTRA_DIM",
+            "WIN_DIM*OUT_EXTENT_DIM*EXTRA_DIM",
+            "OUT_EXTENT_DIM*EXTRA_DIM",
+            "EXTRA_DIM",
+            1,
+        ],
         f32,
         space,
     )

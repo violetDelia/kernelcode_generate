@@ -36,6 +36,7 @@ from kernel_gen.dialect.nn import NnImg2col1dOp, NnImg2col2dOp, NnMatmulOp, NnMe
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolConstOp,
+    SymbolExprAttr,
     SymbolFloorDivOp,
     SymbolGetDimOp,
     SymbolMulOp,
@@ -96,13 +97,98 @@ def _build_symbol_expr(lhs_expr: str, rhs_expr: str, op_symbol: str) -> str:
     return str(value.get_value())
 
 
+def _build_floor_div_expr(lhs_expr: str, rhs_expr: str) -> str:
+    """构造当前 symbol parser 可接受的 floordiv 表达式。
+
+
+    功能说明:
+    - 当前 `SymbolExprAttr` 公开文本不接受裸 `/` 或 `//`。
+    - img2col lowering 仍使用 `symbol.floordiv` op，结果类型表达式写成 `floordiv` 关键字形式。
+
+    使用示例:
+    - expr = _build_floor_div_expr("W - 1", "SW")
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
+    - test: test/passes/lowering/nn_lowering/test_img2col1d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
+    """
+
+    return f"({lhs_expr}) floordiv ({rhs_expr})"
+
+
+def _shape_dim_expr_text(dim: Attribute) -> str:
+    """读取 nn.memory shape/stride 维度表达文本。
+
+
+    功能说明:
+    - 公开 `NnMemoryType` 使用 `SymbolExprAttr` 表示维度，本 helper 提取其中表达式。
+    - 不再兼容旧 `IntAttr` / `StringAttr` memory layout。
+
+    使用示例:
+    - expr = _shape_dim_expr_text(mem_type.shape.data[0])
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
+    - test: test/tools/test_dsl_run.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
+    """
+
+    if isinstance(dim, SymbolExprAttr):
+        return dim.expr.data
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "matmul shape must be SymbolExprAttr")
+
+
+def _shape_dim_static_int(dim: Attribute) -> int | None:
+    """把静态整数维度转换为 int。
+
+
+    功能说明:
+    - 数字 `SymbolExprAttr` 视为静态整数。
+    - 符号名、`?` 和复合表达式返回 None，交给 dynamic shape 路径处理。
+
+    使用示例:
+    - value = _shape_dim_static_int(result_type.shape.data[0])
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
+    - test: test/tools/test_dsl_run.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
+    """
+
+    expr = _shape_dim_expr_text(dim)
+    if expr.lstrip("-").isdigit():
+        return int(expr)
+    return None
+
+
+def _shape_dim_is_symbolic(dim: Attribute) -> bool:
+    """判断维度是否需要 dynamic shape operand。
+
+
+    功能说明:
+    - 非静态整数维度均按符号维度处理，包括命名符号、`?` 和复合表达式。
+
+    使用示例:
+    - if _shape_dim_is_symbolic(dim):
+    -     ...
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
+    - test: test/tools/test_dsl_run.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
+    """
+
+    return _shape_dim_static_int(dim) is None
+
+
 def _normalize_shape_dims(shape: Iterable[Attribute]) -> list[int | str]:
     """将 shape 维度规范化为 int 或 str。
 
 
     功能说明:
-    - IntAttr/IntegerAttr 转换为 int。
-    - StringAttr 转换为 str。
+    - 静态整数 `SymbolExprAttr` 转换为 int。
+    - 其它符号表达转换为 str。
     - 其它类型抛出 KernelCodeError。
 
     使用示例:
@@ -116,16 +202,11 @@ def _normalize_shape_dims(shape: Iterable[Attribute]) -> list[int | str]:
 
     dims: list[int | str] = []
     for dim in shape:
-        if isinstance(dim, IntAttr):
-            dims.append(dim.data)
-            continue
-        if isinstance(dim, IntegerAttr):
-            dims.append(dim.value.data)
-            continue
-        if isinstance(dim, StringAttr):
-            dims.append(dim.data)
-            continue
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "matmul shape must be IntAttr or StringAttr")
+        static_value = _shape_dim_static_int(dim)
+        if static_value is not None:
+            dims.append(static_value)
+        else:
+            dims.append(_shape_dim_expr_text(dim))
     return dims
 
 
@@ -213,13 +294,9 @@ def _result_static_symbol(block: Block, op: Operation, result_type: NnMemoryType
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
-    dim = result_type.shape.data[axis]
-    if isinstance(dim, IntAttr):
-        const = SymbolConstOp(dim.data)
-        block.insert_op_before(const, op)
-        return const.result
-    if isinstance(dim, IntegerAttr):
-        const = SymbolConstOp(dim.value.data)
+    dim_value = _shape_dim_static_int(result_type.shape.data[axis])
+    if dim_value is not None:
+        const = SymbolConstOp(dim_value)
         block.insert_op_before(const, op)
         return const.result
     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn img2col static result dim must be integer")
@@ -278,13 +355,15 @@ def _ensure_matmul_stride(mem_type: NnMemoryType) -> None:
     stride = mem_type.stride.data
     if len(shape) != 2 or len(stride) != 2:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "matmul stride must be contiguous")
-    if not all(isinstance(dim, IntAttr) for dim in shape):
+    shape_values = [_shape_dim_static_int(dim) for dim in shape]
+    stride_values = [_shape_dim_static_int(dim) for dim in stride]
+    if any(value is None for value in shape_values):
         return
-    if not all(isinstance(dim, IntAttr) for dim in stride):
+    if any(value is None for value in stride_values):
         return
-    expected_stride0 = shape[1].data
+    expected_stride0 = shape_values[1]
     expected_stride1 = 1
-    if stride[0].data != expected_stride0 or stride[1].data != expected_stride1:
+    if stride_values[0] != expected_stride0 or stride_values[1] != expected_stride1:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "matmul stride must be contiguous")
 
 
@@ -437,7 +516,7 @@ def _get_symbol_dim_by_axis(
     if axis < 0 or axis >= len(dims):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn img2col operand axis out of range")
     dim = dims[axis]
-    if not isinstance(dim, StringAttr):
+    if not _shape_dim_is_symbolic(dim):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn img2col symbolic dim must come from symbolic source axis")
     symbol_op = SymbolGetDimOp(operand, axis)
     block.insert_op_before(symbol_op, op)
@@ -468,7 +547,7 @@ def _build_img2col1d_dynamic_dims(
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
-    if not any(isinstance(dim, StringAttr) for dim in result_type.shape.data):
+    if not any(_shape_dim_is_symbolic(dim) for dim in result_type.shape.data):
         return []
     if len(result_type.shape.data) != 4:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn img2col1d result rank must be 4")
@@ -476,7 +555,7 @@ def _build_img2col1d_dynamic_dims(
     block.insert_op_before(one, op)
     source_dims: dict[int, SSAValue] = {}
     for axis in range(3):
-        if isinstance(operand.type.shape.data[axis], StringAttr):
+        if _shape_dim_is_symbolic(operand.type.shape.data[axis]):
             _get_symbol_dim_by_axis(block, op, operand, axis, source_dims)
     kw, sw, dw, pl, pr = params
     w = _get_symbol_dim_by_axis(block, op, operand, 2, source_dims)
@@ -512,20 +591,20 @@ def _build_img2col1d_dynamic_dims(
     w_minus_one = SymbolSubOp(w_minus_dw, one, SymbolValueType.from_expr(w_minus_one_expr))
     block.insert_op_before(w_minus_one, op)
 
-    w_div_expr = f"({w_minus_one_expr}) // {sw_expr}"
+    w_div_expr = _build_floor_div_expr(w_minus_one_expr, sw_expr)
     w_div = SymbolFloorDivOp(w_minus_one, sw, SymbolValueType.from_expr(w_div_expr))
     block.insert_op_before(w_div, op)
 
-    w_out_expr = _build_symbol_expr(w_div_expr, one_expr, "+")
+    w_out_expr = f"{w_div_expr} + {one_expr}"
     w_out = SymbolAddOp(w_div, one, SymbolValueType.from_expr(w_out_expr))
     block.insert_op_before(w_out, op)
 
     full_rank_dims: list[SSAValue] = [
         _get_symbol_dim_by_axis(block, op, operand, 0, source_dims)
-        if isinstance(result_type.shape.data[0], StringAttr)
+        if _shape_dim_is_symbolic(result_type.shape.data[0])
         else _result_static_symbol(block, op, result_type, 0),
         _get_symbol_dim_by_axis(block, op, operand, 1, source_dims)
-        if isinstance(result_type.shape.data[1], StringAttr)
+        if _shape_dim_is_symbolic(result_type.shape.data[1])
         else _result_static_symbol(block, op, result_type, 1),
         kw,
         w_out.result,
@@ -534,7 +613,7 @@ def _build_img2col1d_dynamic_dims(
         return full_rank_dims
     dynamic_dims: list[SSAValue] = []
     for axis, dim in enumerate(result_type.shape.data):
-        if isinstance(dim, StringAttr):
+        if _shape_dim_is_symbolic(dim):
             if axis < len(full_rank_dims):
                 dynamic_dims.append(full_rank_dims[axis])
             else:
@@ -565,7 +644,7 @@ def _build_img2col2d_dynamic_dims(
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
-    if not any(isinstance(dim, StringAttr) for dim in result_type.shape.data):
+    if not any(_shape_dim_is_symbolic(dim) for dim in result_type.shape.data):
         return []
     if len(result_type.shape.data) != 6:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn img2col2d result rank must be 6")
@@ -573,7 +652,7 @@ def _build_img2col2d_dynamic_dims(
     block.insert_op_before(one, op)
     source_dims: dict[int, SSAValue] = {}
     for axis in range(4):
-        if isinstance(operand.type.shape.data[axis], StringAttr):
+        if _shape_dim_is_symbolic(operand.type.shape.data[axis]):
             _get_symbol_dim_by_axis(block, op, operand, axis, source_dims)
     kh, kw, sh, sw, dh, dw, ph, pw, pl, pr = params
     h = _get_symbol_dim_by_axis(block, op, operand, 2, source_dims)
@@ -618,10 +697,10 @@ def _build_img2col2d_dynamic_dims(
     h_minus_one_expr = f"{h_minus_dh_expr} - {one_expr}"
     h_minus_one = SymbolSubOp(h_minus_dh, one, SymbolValueType.from_expr(h_minus_one_expr))
     block.insert_op_before(h_minus_one, op)
-    h_div_expr = f"({h_minus_one_expr}) // {sh_expr}"
+    h_div_expr = _build_floor_div_expr(h_minus_one_expr, sh_expr)
     h_div = SymbolFloorDivOp(h_minus_one, sh, SymbolValueType.from_expr(h_div_expr))
     block.insert_op_before(h_div, op)
-    h_out_expr = _build_symbol_expr(h_div_expr, one_expr, "+")
+    h_out_expr = f"{h_div_expr} + {one_expr}"
     h_out = SymbolAddOp(h_div, one, SymbolValueType.from_expr(h_out_expr))
     block.insert_op_before(h_out, op)
 
@@ -637,19 +716,19 @@ def _build_img2col2d_dynamic_dims(
     w_minus_one_expr = f"{w_minus_dw_expr} - {one_expr}"
     w_minus_one = SymbolSubOp(w_minus_dw, one, SymbolValueType.from_expr(w_minus_one_expr))
     block.insert_op_before(w_minus_one, op)
-    w_div_expr = f"({w_minus_one_expr}) // {sw_expr}"
+    w_div_expr = _build_floor_div_expr(w_minus_one_expr, sw_expr)
     w_div = SymbolFloorDivOp(w_minus_one, sw, SymbolValueType.from_expr(w_div_expr))
     block.insert_op_before(w_div, op)
-    w_out_expr = _build_symbol_expr(w_div_expr, one_expr, "+")
+    w_out_expr = f"{w_div_expr} + {one_expr}"
     w_out = SymbolAddOp(w_div, one, SymbolValueType.from_expr(w_out_expr))
     block.insert_op_before(w_out, op)
 
     full_rank_dims: list[SSAValue] = [
         _get_symbol_dim_by_axis(block, op, operand, 0, source_dims)
-        if isinstance(result_type.shape.data[0], StringAttr)
+        if _shape_dim_is_symbolic(result_type.shape.data[0])
         else _result_static_symbol(block, op, result_type, 0),
         _get_symbol_dim_by_axis(block, op, operand, 1, source_dims)
-        if isinstance(result_type.shape.data[1], StringAttr)
+        if _shape_dim_is_symbolic(result_type.shape.data[1])
         else _result_static_symbol(block, op, result_type, 1),
         kh,
         kw,
@@ -660,7 +739,7 @@ def _build_img2col2d_dynamic_dims(
         return full_rank_dims
     dynamic_dims: list[SSAValue] = []
     for axis, dim in enumerate(result_type.shape.data):
-        if isinstance(dim, StringAttr):
+        if _shape_dim_is_symbolic(dim):
             if axis < len(full_rank_dims):
                 dynamic_dims.append(full_rank_dims[axis])
             else:

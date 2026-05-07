@@ -5,6 +5,8 @@
 - 提供 `default-lowering` pipeline 的 builder。
 - 固定默认 lowering pass 顺序，避免重复拼装。
 - 通过 registry 装饰器完成 pipeline 注册。
+- 默认 pipeline 显式启用 `lower-dma-memory-hierarchy` 的 legacy hierarchy 兼容路径，
+  保持公开黑盒输出包含 `dma.slice / dma.deslice` 链。
 
 API 列表:
 - `build_default_lowering_pipeline() -> PassManager`
@@ -38,6 +40,8 @@ def build_default_lowering_pipeline() -> PassManager:
     功能说明:
     - 返回 `PassManager(name="default-lowering")`。
     - 固定 pass 顺序为 `DecompassPass -> NnLoweringPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
+    - `LowerDmaMemoryHierarchyPass(fold=False)` 是 default-lowering 的公开黑盒合同，
+      用于生成 legacy `dma.slice / dma.deslice` staging 链。
 
     使用示例:
     - pm = build_default_lowering_pipeline()
@@ -55,7 +59,7 @@ def build_default_lowering_pipeline() -> PassManager:
             DecompassPass(),
             NnLoweringPass(),
             BufferResultsToOutParamsPass(),
-            LowerDmaMemoryHierarchyPass(),
+            LowerDmaMemoryHierarchyPass(fold=False),
         ]
     )
     return pm

@@ -137,23 +137,23 @@ def _assert_dynamic_memory_ir(
     """
 
     required_fragments = (
-        "!nn.memory<[H, W]",
-        "!nn.memory<[H, K]",
-        "!nn.memory<[K, W]",
-        '!symbol.int<"TILE_H">',
-        '!symbol.int<"TILE_W">',
-        '!symbol.int<"TILE_K">',
-        'step = "TILE_K"',
+        "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]",
+        "!nn.memory<[#symbol.expr<H>, #symbol.expr<K>]",
+        "!nn.memory<[#symbol.expr<K>, #symbol.expr<W>]",
+        "!symbol.int<#symbol.expr<TILE_H>>",
+        "!symbol.int<#symbol.expr<TILE_W>>",
+        "!symbol.int<#symbol.expr<TILE_K>>",
+        "step = #symbol.expr<TILE_K>",
         '"kernel.matmul"',
         '"kernel.binary_elewise"',
         '"dma.view"',
         '"dma.deslice"',
     )
     forbidden_fragments = (
-        f"!nn.memory<[{actual_output_shape[0]}, {actual_output_shape[1]}]",
-        f"!nn.memory<[{actual_lhs_shape[0]}, {actual_lhs_shape[1]}]",
-        f"!nn.memory<[{actual_rhs_shape[0]}, {actual_rhs_shape[1]}]",
-        "!nn.memory<[s1",
+        f"!nn.memory<[#symbol.expr<{actual_output_shape[0]}>, #symbol.expr<{actual_output_shape[1]}>]",
+        f"!nn.memory<[#symbol.expr<{actual_lhs_shape[0]}>, #symbol.expr<{actual_lhs_shape[1]}>]",
+        f"!nn.memory<[#symbol.expr<{actual_rhs_shape[0]}>, #symbol.expr<{actual_rhs_shape[1]}>]",
+        "!nn.memory<[#symbol.expr<s1>",
     )
     for fragment in required_fragments:
         if fragment not in module_text:

@@ -44,6 +44,7 @@ from kernel_gen.dialect.arch import (
 from kernel_gen.dialect.dma import DmaDesliceOp, DmaSliceOp, DmaViewOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolExprAttr
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.dsl.gen_kernel import EmitCContext
 
@@ -97,8 +98,8 @@ def _make_memory_type(shape: list[int], stride: list[int], element_type: Attribu
     """
 
     return NnMemoryType(
-        ArrayAttr([IntAttr(dim) for dim in shape]),
-        ArrayAttr([IntAttr(dim) for dim in stride]),
+        ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in shape]),
+        ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in stride]),
         element_type,
         NnMemorySpaceAttr.from_name(space),
     )
