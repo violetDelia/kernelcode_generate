@@ -1802,3 +1802,21 @@ ignored expectation 合同资产同步 scope：
 - 主仓 ignored expectation scope 复核：`git check-ignore -v expectation/pass/memory_pool/{alignment.py,basic.py,dynamic.py,spaces.py}` 均命中 `.gitignore:21:expectation`；`find /home/lfr/kernelcode_generate/expectation -type f -newermt '2026-05-10 16:00:00'` 仅列出 `alignment.py`、`basic.py`、`dynamic.py`、`spaces.py`；`.skills` 无 tracked / untracked / mtime 变化。
 - 静态扫描：`object` 签名、`ctx` 能力探测、跨文件 private import、skip/xfail/collect ignore 未发现新增违规；`git diff -U0 -- '*.py' | rg '^\\+\\s+def '` 仅命中 class 作用域 `_SymbolDim._simplify_quiet(...)` 与 `DmaSubviewOp.__init__(...)`，不是函数体内非装饰器嵌套函数。
 结论：合并前复核通过；允许进入提交、快进主仓、push 与 `-done`。本次 merge 提交不得带入 `expectation/`、`.skills`、计划书、标准文档或手工状态文件；ignored expectation 合同资产仅作为本地授权验收资产记录，不作为普通任务 diff 提交。
+
+---
+
+时间：2026-05-10 16:43 +0800
+经办人：李白
+任务：T-20260508-bd2ec3b2 / ast_symbol_pipeline_conv2d_dynamic merge 完成
+任务目标：记录业务提交、主仓快进、push 和后续状态推进准备。
+改动：
+- 已在任务 worktree 提交 `T-20260508-bd2ec3b2 merge ast symbol pipeline conv2d dynamic`，业务提交为 `7c9c649c143452d26d34128c5811bad703aeafcd`。
+- 已在主仓 `/home/lfr/kernelcode_generate` 执行 `git merge --ff-only task/ast-symbol-pipeline-conv2d-dynamic` 并 `git push origin main`；`origin/main=7c9c649c143452d26d34128c5811bad703aeafcd`。
+- 合入范围为本任务已通过 review / 双架构最终复核的 `include/`、`kernel/`、`kernel_gen/`、`spec/`、`test/`、`main.py` 与本任务记录文件。
+- 未合入 `expectation/`、`.skills`、`ARCHITECTURE/plan`、`agents/standard`、`TODO.md` 或 `DONE.md` 手工改动；ignored expectation 合同资产同步仅作为本地授权验收资产记录，不作为普通任务 diff 提交。
+验证：
+- `git commit -m "T-20260508-bd2ec3b2 merge ast symbol pipeline conv2d dynamic"`：通过。
+- `git merge --ff-only task/ast-symbol-pipeline-conv2d-dynamic`：通过。
+- `git push origin main`：通过。
+- `git rev-parse HEAD` / `git rev-parse origin/main`：均为 `7c9c649c143452d26d34128c5811bad703aeafcd`。
+结论：业务合并和 push 已完成；下一步执行 `-done` 并清理已完成任务 worktree / branch。
