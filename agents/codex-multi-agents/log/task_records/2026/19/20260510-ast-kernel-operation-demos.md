@@ -302,6 +302,25 @@ merge 结论：
 - 业务 diff 已合入并推送。
 - 待执行共享状态 `-done`；执行前补录本段真实合并记录。
 
+时间：2026-05-11 00:41 +0800
+经办人：李白
+任务：T-20260510-afe3f1ec / ast_kernel_operation_demos_green_plan
+任务目标：执行 `-done` 并回收已完成 worktree / 本地任务分支。
+
+共享状态：
+- 执行 `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260510-afe3f1ec -log agents/codex-multi-agents/log/task_records/2026/19/20260510-ast-kernel-operation-demos.md -agents-list agents/codex-multi-agents/agents-lists.md`。
+- 脚本输出：`OK: done T-20260510-afe3f1ec`、`OK: replace 李白 状态`。
+- `rg -n "T-20260510-afe3f1ec|ast-kernel-operation-demos" TODO.md DONE.md agents/codex-multi-agents/agents-lists.md`：DONE.md 中存在该任务 `已完成` 记录，完成时间 `2026-05-11 00:40:55 +0800`；TODO.md 中未再命中该任务。
+
+清理：
+- 清理前 `git -C /home/lfr/kernelcode_generate/wt-20260510-ast-kernel-operation-demos status --porcelain --branch`：`## task/ast-kernel-operation-demos...origin/main [behind 1]`，无未提交或未跟踪任务资产。
+- `git merge-base --is-ancestor task/ast-kernel-operation-demos origin/main`：退出码 0，确认任务分支已并入远端主线。
+- 执行 `git worktree remove /home/lfr/kernelcode_generate/wt-20260510-ast-kernel-operation-demos`：成功。
+- 执行 `git branch -d task/ast-kernel-operation-demos`：成功，删除本地任务分支 `a64a868a`。
+- `git worktree list` 仅剩主仓 `/home/lfr/kernelcode_generate 695d6282 [main]`。
+- `git branch --list 'task/ast-kernel-operation-demos' -vv`：无输出。
+- 主仓 `git status --short --branch`：`## main...origin/main`，清理后无未提交改动。
+
 时间：2026-05-11 00:27 +0800
 经办人：大闸蟹
 任务：T-20260510-afe3f1ec / ast_kernel_operation_demos_green_plan
