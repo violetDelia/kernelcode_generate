@@ -285,6 +285,23 @@ merge 结论：
 - 合并前 gate 通过，授权范围未超出，未发现 `.skills` 或未授权 expectation diff。
 - 可暂存任务 diff 与记录文件并执行 merge/push/-done。
 
+时间：2026-05-11 00:39 +0800
+经办人：李白
+任务：T-20260510-afe3f1ec / ast_kernel_operation_demos_green_plan
+任务目标：执行主仓快进合并与推送，并准备共享状态 -done。
+
+合并与推送：
+- 在 worktree `task/ast-kernel-operation-demos` 暂存任务 diff 与本记录文件；确认 `git diff --cached --name-only -- expectation .skills ARCHITECTURE/plan agents/standard TODO.md DONE.md` 无输出。
+- 执行 `git diff --cached --check`：退出码 0。
+- 生成任务分支提交：`a64a868a32e6d06f718cc402112baa7f6e980e98`（`T-20260510-afe3f1ec merge ast kernel operation demos`）。
+- 在主仓 `/home/lfr/kernelcode_generate` 执行 `git merge --ff-only task/ast-kernel-operation-demos`：快进成功。
+- 执行 `git push origin main`：成功，`origin/main` 已更新到 `a64a868a32e6d06f718cc402112baa7f6e980e98`。
+- 主仓 `git rev-parse HEAD` 与 `git rev-parse origin/main` 均为 `a64a868a32e6d06f718cc402112baa7f6e980e98`。
+
+状态：
+- 业务 diff 已合入并推送。
+- 待执行共享状态 `-done`；执行前补录本段真实合并记录。
+
 时间：2026-05-11 00:27 +0800
 经办人：大闸蟹
 任务：T-20260510-afe3f1ec / ast_kernel_operation_demos_green_plan
