@@ -38,15 +38,17 @@ from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
-Conv2dCompileArg: TypeAlias = "Memory | int"
+Conv2dCompileArg: TypeAlias = "Memory | SymbolDim"
 STATIC_OUTPUT_MEMORY = "!nn.memory<[#symbol.expr<11>, #symbol.expr<2>, #symbol.expr<258>, #symbol.expr<262>]"
 STATIC_INPUT_MEMORY = "!nn.memory<[#symbol.expr<11>, #symbol.expr<28>, #symbol.expr<260>, #symbol.expr<264>]"
 STATIC_WEIGHT_MEMORY = "!nn.memory<[#symbol.expr<2>, #symbol.expr<28>, #symbol.expr<3>, #symbol.expr<3>]"
 SEMANTIC_OUTPUT_MEMORY = (
     "!nn.memory<[#symbol.expr<B>, #symbol.expr<C>, #symbol.expr<-KH + XH + 1>, #symbol.expr<-KW + XW + 1>]"
 )
+SEMANTIC_OUTPUT_PREFIX = "!nn.memory<[#symbol.expr<B>, #symbol.expr<C>,"
 SEMANTIC_INPUT_MEMORY = "!nn.memory<[#symbol.expr<B>, #symbol.expr<N>, #symbol.expr<XH>, #symbol.expr<XW>]"
 SEMANTIC_WEIGHT_MEMORY = "!nn.memory<[#symbol.expr<C>, #symbol.expr<N>, #symbol.expr<KH>, #symbol.expr<KW>]"
+SEMANTIC_RUNTIME_SYMBOLS = ("SH", "SW", "DH", "DW", "PT", "PB", "PL", "PR", "TF", "TC", "TN", "THO", "TWO")
 
 
 def _symbolic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]:
@@ -55,8 +57,8 @@ def _symbolic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]:
 
     功能说明:
     - 用 conv2d 语义化符号名表达 output/input/weight memory 的编译期动态形状。
-    - output 空间维使用当前 stride/dilation/padding 下的真实符号计算表达式。
-    - 标量参数保持本 demo 的固定真实值，避免扩大到未确认的符号 scalar 合同。
+    - output 空间维使用 stride/dilation/padding 的完整符号表达式。
+    - 标量参数均使用 runtime `SymbolDim`，锁定公开 scalar real args 合同。
 
     使用示例:
     - `_symbolic_conv2d_compile_args()`
@@ -66,26 +68,39 @@ def _symbolic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]:
     xw_dim = SymbolDim("XW")
     kh_dim = SymbolDim("KH")
     kw_dim = SymbolDim("KW")
-    output_h_dim = ((xh_dim - (kh_dim - 1) - 1) // 1) + 1
-    output_w_dim = ((xw_dim - (kw_dim - 1) - 1) // 1) + 1
+    sh_dim = SymbolDim("SH")
+    sw_dim = SymbolDim("SW")
+    dh_dim = SymbolDim("DH")
+    dw_dim = SymbolDim("DW")
+    pt_dim = SymbolDim("PT")
+    pb_dim = SymbolDim("PB")
+    pl_dim = SymbolDim("PL")
+    pr_dim = SymbolDim("PR")
+    tf_dim = SymbolDim("TF")
+    tc_dim = SymbolDim("TC")
+    tn_dim = SymbolDim("TN")
+    tho_dim = SymbolDim("THO")
+    two_dim = SymbolDim("TWO")
+    output_h_dim = ((xh_dim + pt_dim + pb_dim - dh_dim * (kh_dim - 1) - 1) // sh_dim) + 1
+    output_w_dim = ((xw_dim + pl_dim + pr_dim - dw_dim * (kw_dim - 1) - 1) // sw_dim) + 1
 
     return (
         Memory(["B", "C", output_h_dim, output_w_dim], NumericType.Float32),
         Memory(["B", "N", "XH", "XW"], NumericType.Float32),
         Memory(["C", "N", "KH", "KW"], NumericType.Float32),
-        1,
-        1,
-        1,
-        1,
-        0,
-        0,
-        0,
-        0,
-        2,
-        16,
-        1,
-        64,
-        64,
+        sh_dim,
+        sw_dim,
+        dh_dim,
+        dw_dim,
+        pt_dim,
+        pb_dim,
+        pl_dim,
+        pr_dim,
+        tf_dim,
+        tc_dim,
+        tn_dim,
+        tho_dim,
+        two_dim,
     )
 
 
@@ -123,9 +138,16 @@ def test_inputs_dynamic_tile_dynamic_gen_kernel_keeps_symbolic_memory_shapes() -
     )
     module_text = str(module)
 
-    assert SEMANTIC_OUTPUT_MEMORY in module_text
+    assert SEMANTIC_OUTPUT_PREFIX in module_text
     assert SEMANTIC_INPUT_MEMORY in module_text
     assert SEMANTIC_WEIGHT_MEMORY in module_text
+    for symbol_name in SEMANTIC_RUNTIME_SYMBOLS:
+        assert symbol_name in module_text
+    assert "arch.get_dynamic_memory" in module_text
+    assert "dma.view" in module_text
+    assert "dma.subview" not in module_text
+    assert "dma.alloc" not in module_text
+    assert "allalloc" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>, #symbol.expr<s2>, #symbol.expr<s3>, #symbol.expr<s4>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>, #symbol.expr<s5>, #symbol.expr<s6>, #symbol.expr<s7>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s2>, #symbol.expr<s5>, #symbol.expr<3>, #symbol.expr<3>]" not in module_text
@@ -134,6 +156,9 @@ def test_inputs_dynamic_tile_dynamic_gen_kernel_keeps_symbolic_memory_shapes() -
     assert "!nn.memory<[#symbol.expr<4>, #symbol.expr<30>, #symbol.expr<3>, #symbol.expr<3>]" not in module_text
     assert "arg1.get_shape(2)" in source
     assert "arg1.get_shape(3)" in source
+    assert "npu_demo::get_dynamic_memory<TSM>()" in source
+    assert ".view<float>(Vector{" in source
+    assert "alloc<TSM" not in source
     assert "S_INT c_6 = 258" not in source
 
 
@@ -150,10 +175,10 @@ def test_inputs_static_tile_dynamic_gen_kernel_keeps_seeded_static_shapes() -> N
         conv2d_inputs_static_tile_dynamic_kernel,
         *_seeded_static_conv2d_compile_args(),
         2,
-        16,
+        2,
         1,
-        64,
-        64,
+        1,
+        7,
     )
     module_text = str(module)
 

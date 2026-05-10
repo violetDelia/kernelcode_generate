@@ -4,8 +4,8 @@
 功能说明:
 - 将 nn.matmul / nn.img2col1d / nn.img2col2d lower 为对应 kernel op。
 - 统一在 lowering 内部创建 dma.alloc 结果 memory。
-- 仅允许可证明同名的 runtime type-level 维度在 matmul contracting 轴上互相匹配。
-- img2col 结果含匿名 runtime type-level 维度时使用 full-rank dynamic shape，避免公式 operand 与类型临时名误配。
+- 仅允许可证明相等的静态维度、命名符号或结构化符号表达式在 matmul contracting 轴上互相匹配。
+- img2col 结果使用 `SymbolExprAttr` 表达动态 shape，不生成类型级 runtime 维度占位。
 - surviving 模块级接口为 `matmul_img2col_patterns()`。
 
 API 列表:
@@ -49,9 +49,6 @@ from .nn_lowering_utility import (
     ensure_single_result,
     ensure_space_attr,
 )
-
-
-_RUNTIME_DIM_PREFIX = "runtime_dim_"
 
 
 def _coerce_symbol_expr_operand(expr: str) -> int | SymbolDim:
@@ -210,34 +207,13 @@ def _normalize_shape_dims(shape: Iterable[Attribute]) -> list[int | str]:
     return dims
 
 
-def _is_runtime_dim(value: int | str) -> bool:
-    """判断维度文本是否为当前 DSL 生成的匿名 runtime type-level 维度。
-
-
-    功能说明:
-    - 仅识别 `MemoryAST.type_from_memory` 为匿名 `?` 维度生成的 `runtime_dim_*` 形态。
-    - 该 helper 只服务本文件内部 matmul shape 校验，不作为跨文件公开 API。
-
-    使用示例:
-    - if _is_runtime_dim("runtime_dim_0"):
-    -     ...
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/passes/lowering/nn_lowering/test_matmul.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
-    """
-
-    return isinstance(value, str) and value.startswith(_RUNTIME_DIM_PREFIX)
-
-
 def _matmul_contract_dims_match(lhs_dim: int | str, rhs_dim: int | str) -> bool:
     """校验 matmul contracting 维度是否兼容。
 
 
     功能说明:
-    - 静态维度、命名符号与 runtime type-level 维度都要求精确相等。
-    - 不把任意两个 `runtime_dim_*` 互相匹配，避免 lowering 放行 verifier 无法证明的 contracting 维度。
+    - 静态维度、命名符号与结构化符号表达式都要求精确相等。
+    - 匿名 `?` 不能证明相等，避免 lowering 放行 verifier 无法证明的 contracting 维度。
 
     使用示例:
     - if not _matmul_contract_dims_match(lhs_shape[1], rhs_shape[0]):
@@ -249,32 +225,9 @@ def _matmul_contract_dims_match(lhs_dim: int | str, rhs_dim: int | str) -> bool:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
-    if lhs_dim == rhs_dim:
-        return True
-    if _is_runtime_dim(lhs_dim) or _is_runtime_dim(rhs_dim):
+    if lhs_dim == "?" or rhs_dim == "?":
         return False
-    return False
-
-
-def _uses_runtime_dim_shape(mem_type: NnMemoryType) -> bool:
-    """判断 memory 类型 shape 是否包含匿名 runtime type-level 维度。
-
-
-    功能说明:
-    - 仅识别 DSL 为匿名 `?` 维度生成的 `runtime_dim_*` shape。
-    - 该 helper 只服务本文件内部 alloc dynamic shape 选择。
-
-    使用示例:
-    - if _uses_runtime_dim_shape(result_type):
-    -     ...
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/passes/lowering/nn_lowering/test_img2col2d.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
-    """
-
-    return any(_is_runtime_dim(dim) for dim in _normalize_shape_dims(mem_type.shape.data))
+    return lhs_dim == rhs_dim
 
 
 def _result_static_symbol(block: Block, op: Operation, result_type: NnMemoryType, axis: int) -> SSAValue:
@@ -313,7 +266,7 @@ def _ensure_matmul_shape(
     功能说明:
     - 确认 lhs/rhs/out 均为 rank-2。
     - 校验 `[M, K] x [K, N] -> [M, N]` 规则。
-    - contracting 轴仅允许双侧维度文本完全一致；runtime type-level 维度也必须同名。
+    - contracting 轴仅允许双侧维度文本完全一致；匿名 `?` 不可证明相等。
 
     使用示例:
     - _ensure_matmul_shape(lhs_type, rhs_type, out_type)
@@ -442,6 +395,7 @@ def _symbol_expr(value: SSAValue) -> str:
 
     功能说明:
     - 将 `!symbol.int<"...">` 的表达式文本提取为字符串。
+    - 匿名 `?` 优先使用 SSA `name_hint` 承接 DSL 绑定名。
     - 非 `symbol.int` 时抛出 `KernelCodeError`。
 
     使用示例:
@@ -455,7 +409,12 @@ def _symbol_expr(value: SSAValue) -> str:
 
     if not isinstance(value.type, SymbolValueType):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "symbol expression must be symbol.int")
-    return value.type.expr.expr.data
+    text = value.type.expr.expr.data
+    if text == "?":
+        name_hint = getattr(value, "name_hint", None)
+        if isinstance(name_hint, str) and name_hint:
+            return name_hint.replace(" ", "")
+    return text
 
 
 def _build_symbol_attr(value: SSAValue, *, prefer_i64: bool) -> Attribute:
@@ -609,8 +568,6 @@ def _build_img2col1d_dynamic_dims(
         kw,
         w_out.result,
     ]
-    if _uses_runtime_dim_shape(result_type):
-        return full_rank_dims
     dynamic_dims: list[SSAValue] = []
     for axis, dim in enumerate(result_type.shape.data):
         if _shape_dim_is_symbolic(dim):
@@ -735,8 +692,6 @@ def _build_img2col2d_dynamic_dims(
         h_out.result,
         w_out.result,
     ]
-    if _uses_runtime_dim_shape(result_type):
-        return full_rank_dims
     dynamic_dims: list[SSAValue] = []
     for axis, dim in enumerate(result_type.shape.data):
         if _shape_dim_is_symbolic(dim):

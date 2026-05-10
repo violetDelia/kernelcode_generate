@@ -8,7 +8,7 @@
 - 节点只保留当前公开 AST API；不再保留旧 `TensorAST`、`ConstAST`、`BinaryExprAST` 等兼容节点。
 - `emit_mlir(ctx, block)` 由当前节点递归调用成员节点实现，最终生成 xDSL MLIR operation。
 - 表达式节点在传入 `block` 时插入自身产生的 op 并返回结果 SSA；`block=None` 时返回 unattached op，供节点级测试与容器节点构造使用。
-- `MemoryAST.type_from_memory(...)` 在匿名动态 shape 与 stride 同轴冲突时生成稳定类型级符号，避免把非法 `[?]/[?]` 组合写入 `nn.memory`。
+- `MemoryAST.type_from_memory(...)` 直接保留公开 `Memory` 的 shape/stride 文本，不再生成类型级 runtime 占位符。
 
 API 列表:
 - `DSLNode.emit_mlir(ctx: Context, block: Block | None = None) -> EmitMlirResult`
@@ -514,8 +514,8 @@ class MemoryAST(ValueAST):
 
 
         功能说明:
-        - 默认直接沿用 `Memory.get_shape()` 与 `Memory.get_stride()` 的公开值。
-        - 当同轴 shape/stride 均为匿名 `?` 时，为匿名 shape 生成稳定类型级符号并重建连续 stride。
+        - 直接沿用 `Memory.get_shape()` 与 `Memory.get_stride()` 的公开值。
+        - 不再为匿名动态维度生成类型级 runtime 占位符。
 
         使用示例:
         - shape_values, stride_values = MemoryAST._type_layout_values(memory)
@@ -531,39 +531,7 @@ class MemoryAST(ValueAST):
             value if isinstance(value, int) else str(value)
             for value in memory.get_stride()
         ]
-        if not any(shape == "?" and stride == "?" for shape, stride in zip(shape_values, stride_values, strict=True)):
-            return shape_values, stride_values
-
-        named_shape_values: list[int | str] = [
-            f"runtime_dim_{axis}" if shape == "?" else shape
-            for axis, shape in enumerate(shape_values)
-        ]
-        return named_shape_values, MemoryAST._contiguous_stride_values(named_shape_values)
-
-    @staticmethod
-    def _contiguous_stride_values(shape_values: list[int | str]) -> list[int | str]:
-        """根据 type 级 shape 值重建连续 stride。
-
-
-        功能说明:
-        - 复用 `SymbolDim` 公开算术语义生成稳定字符串，避免手写表达式优先级。
-
-        使用示例:
-        - stride_values = MemoryAST._contiguous_stride_values(["M", "N"])
-
-        关联文件:
-        - spec: spec/dsl/ast/nodes/basic.md
-        - test: test/dsl/ast/nodes/test_basic.py
-        - 功能实现: kernel_gen/dsl/ast/nodes/basic.py
-        """
-
-        stride_values: list[int | str] = []
-        running = SymbolDim(1)
-        for dim in reversed(shape_values):
-            running_value = running.get_value()
-            stride_values.insert(0, running_value if isinstance(running_value, str) else int(running_value))
-            running = SymbolDim(dim) * running
-        return stride_values
+        return shape_values, stride_values
 
     @property
     def memory(self) -> Memory:

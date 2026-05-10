@@ -3,9 +3,9 @@
 
 功能说明:
 - 定义 DMA helper 对应的 AST 节点，节点只保存 DSL 语义数据，不执行 lowering。
-- 读类 DMA 节点在匿名 runtime 维度类型化后使用 full-rank dynamic shape，保持 `dma.alloc` verifier 合同。
+- 读类 DMA 节点在匿名 `?` 维度类型化后使用 full-rank dynamic shape，保持 `dma.alloc` verifier 合同。
 - 读类 DMA 节点优先用公开 size 变量名构造结果 type，避免后续同形状 memory 误判为隐式 broadcast。
-- `DmaReshapeAST` 对匿名 runtime shape 优先沿用公开 shape 变量名，保持后续 matmul contracting 维度可判定。
+- `DmaReshapeAST` 对匿名 shape 优先沿用公开 shape 变量名，保持后续 matmul contracting 维度可判定。
 
 API 列表:
 - `DmaAllocAST(shape: SymbolListAST, dtype: IntTypeAttrAST | FloatTypeAttrAST | BoolTypeAttrAST, space: MemorySpaceAttrAST = ..., stride: SymbolListAST | None = None, location: SourceLocation | None = None)`
@@ -77,7 +77,6 @@ from .symbol import (
 )
 
 SymbolRuntimeValue: TypeAlias = "int | float | str | bool | SymbolDim"
-_RUNTIME_DIM_PREFIX = "runtime_dim_"
 
 
 def _symbol_expr_attr_from_value(value: int | str | SymbolDim) -> SymbolExprAttr:
@@ -209,24 +208,6 @@ def _symbol_expr_product(lhs: int | str, rhs: int | str) -> int | str:
     return f"{_parenthesize_symbol_expr(str(lhs))} * {_parenthesize_symbol_expr(str(rhs))}"
 
 
-def _uses_runtime_dim_shape(result_type: NnMemoryType) -> bool:
-    """判断结果类型是否包含匿名 runtime type-level shape 维度。
-
-    功能说明:
-    - 识别 `MemoryAST.type_from_memory(...)` 为匿名 `?` 维度生成的 `runtime_dim_*` shape。
-    - 该 helper 只服务本文件内部 DMA AST 发射，不作为跨文件公开 API。
-
-    使用示例:
-    - if _uses_runtime_dim_shape(result_type):
-    -     ...
-    """
-
-    return any(
-        isinstance(dim, SymbolExprAttr) and _symbol_expr_text(dim).startswith(_RUNTIME_DIM_PREFIX)
-        for dim in result_type.shape.data
-    )
-
-
 def _uses_unknown_dim_shape(result_type: NnMemoryType) -> bool:
     """判断结果类型是否包含 `#symbol.expr<?>` shape 维度。
 
@@ -252,13 +233,13 @@ def _alloc_dynamic_shape_for_result(
     功能说明:
     - 普通命名符号类型沿用仅符号维度列表，保持现有 IR 紧凑形态。
     - 若公开 size 名与 SSA operand 的 symbol 文本不一致，使用 full-rank 形态满足 verifier 的逐维校验合同。
-    - 匿名 runtime type-level 维度使用 full-rank shape operands，避免 `?` operand 与 `runtime_dim_*` 结果 shape 在 verifier 中误判不一致。
+    - 匿名 `?` 维度使用 full-rank shape operands，避免符号子集形态丢失逐维运行时值。
 
     使用示例:
     - dynamic_shape = _alloc_dynamic_shape_for_result(symbol_dynamic_shape, sizes, result_type)
     """
 
-    if _uses_runtime_dim_shape(result_type) or _uses_unknown_dim_shape(result_type):
+    if _uses_unknown_dim_shape(result_type):
         return full_rank_shape
     expected_symbol_dims = [
         _symbol_expr_text(dim)
@@ -286,7 +267,8 @@ def _shape_attr_from_reshape_item(
     功能说明:
     - 静态整数保持 `#symbol.expr<int>`。
     - SSA 类型已携带公开 symbol 表达时优先继承该表达，满足 dialect verifier 的 operand/type 一致合同。
-    - SSA 类型仍为 `?` 时结果类型保持 `#symbol.expr<?>`，不从 Python 变量名反推不可证明的类型关系。
+    - SSA 类型仍为 `?` 时优先使用公开赋值名作为 runtime 维度别名；没有稳定名称时才保持
+      `#symbol.expr<?>`。
     - 无 SSA 类型表达时退回 `SymbolDimAST` 的公开绑定名、解析期公开 symbol 值或轴向稳定名。
 
     使用示例:
@@ -303,6 +285,13 @@ def _shape_attr_from_reshape_item(
     if isinstance(operand_value, str):
         operand_text = operand_value.replace(" ", "")
         if operand_text == "?":
+            if isinstance(item, SymbolDimAST):
+                item_name = item.name.replace(" ", "")
+                if item_name and item_name != "?":
+                    return _symbol_expr_attr_from_value(item_name)
+            operand_name = value_name.replace(" ", "") if (value_name := operand.name_hint) else ""
+            if operand_name and operand_name != "?":
+                return _symbol_expr_attr_from_value(operand_name)
             return _symbol_expr_attr_from_value("?")
         if operand_text and operand_text != "?":
             return _symbol_expr_attr_from_value(operand_text)

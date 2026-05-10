@@ -145,7 +145,7 @@ private:
 
 /*
 功能说明:
-- 构造固定一维连续布局的 Memory 视图，供动态片上内存入口复用。
+- 构造固定一维连续布局的 Memory 视图，并为运行期动态片上内存提供当前线程可写 backing storage。
 
 使用示例:
 - auto tsm = npu_demo::detail::make_linear_memory<TSM, float>(24576);
@@ -160,7 +160,12 @@ template <MemorySpace Space, typename T>
 inline Memory<Space, T> make_linear_memory(long long size) {
     long long shape[1] = {size};
     long long stride[1] = {1};
-    return Memory<Space, T>(static_cast<T*>(nullptr), shape, stride, 1, MemoryFormat::Norm);
+    thread_local std::vector<T> storage;
+    if (size > 0 && storage.size() < static_cast<unsigned long long>(size)) {
+        storage.resize(static_cast<unsigned long long>(size));
+    }
+    T* data = size > 0 ? storage.data() : static_cast<T*>(nullptr);
+    return Memory<Space, T>(data, shape, stride, 1, MemoryFormat::Norm);
 }
 
 /*

@@ -10,7 +10,7 @@
 - runtime trance kernel log 开关统一来自 `kernel_gen.core.config.set_trance_enabled(...)`，不作为 `dsl_run(...)` 或 `dsl_cost_run(...)` 入参。
 - 失败统一抛出 `KernelCodeError(ErrorModule.TOOLS, message)`；不再定义或导出工具专属错误类。
 - `dsl_run(...)` 不向 kernel 函数隐式注入 operation helper、`MemorySpace`、`NumericType` 或 `SymbolDim`；kernel 体引用的名称必须来自显式 import、闭包或函数全局绑定，缺失时必须报错。
-- `real_args` 支持真实 tensor/array 参数和运行期标量参数；`int | float` 标量原样绑定到 DSL 函数形参，供 runtime tile、stride、padding 等 `SymbolDim` 形参使用。
+- `real_args` 支持真实 tensor/array 参数和运行期整数标量参数；Python `int` 与 numpy integer 标量会规整为 Python `int` 后绑定到 DSL 函数形参，供 runtime tile、stride、padding 等 `SymbolDim` 形参使用；`bool` 与 `float` 必须拒绝。
 
 ## API 列表
 
@@ -45,7 +45,7 @@
 
 - 当前文件内 `_runtime_module_name(...)`、`_normalize_real_args(...)`、`_resolve_pipeline(...)`、`_run_pipeline_with_optional_dump(...)`、`_select_source_and_entry(...)`、`_append_cost_capture_wrapper(...)` 等下划线 helper 只服务当前文件内部实现。
 - 实现、测试和外部调用方不得跨文件导入或断言这些 helper；公开行为只能通过 `DslRunResult(...)`、`dsl_run(...)` 与 `dsl_cost_run(...)` 观察。
-- `RuntimeRealArg` 是文档类型别名，表示 `torch.Tensor | numpy.ndarray | int | float`；它不新增独立可调用公开入口。
+- `RuntimeRealArg` 是文档类型别名，表示 `torch.Tensor | numpy.ndarray | int`；Python `int` 与 numpy integer 属于合法整数 scalar，`bool` 与 `float` 不属于合法 runtime scalar。该别名不新增独立可调用公开入口。
 
 ## API详细说明
 
@@ -95,11 +95,11 @@
 - 注意事项：
   - target 只能来自 `kernel_gen.core.config.get_target()`；未设置或不是非空 `str` 时必须失败，固定短语为 `DslRunInvalidTarget: core config target must be non-empty str`。
   - `pipeline` 仅接受 `str | PassManager`。
-  - `real_args` 容器仅接受 `tuple | list`，元素仅允许 `torch.Tensor`、`numpy.ndarray`、`int` 或 `float`。
+  - `real_args` 容器仅接受 `tuple | list`，元素仅允许 `torch.Tensor`、`numpy.ndarray`、Python `int` 或 numpy integer 标量。
   - `bool` 不属于运行期标量参数；不允许借 `bool` 是 `int` 子类的 Python 行为进入 DSL runtime。
-  - `int | float` 运行期标量不构造成 `Memory`，必须按原值传入 `mlir_gen(...)` 并继续作为执行阶段真实参数。
+  - 运行期整数标量不构造成 `Memory`，必须规整为 Python `int` 后传入 `mlir_gen(...)` 并继续作为执行阶段真实参数。
   - 名称以 `tile_` 开头的运行期标量必须是正整数；`0`、负数、`float` 或 `bool` 必须失败，固定短语为 `DslRunInvalidTileValue: tile runtime scalar must be positive int`。
-  - 非 tensor/array 且非合法标量的元素必须失败，固定短语为 `DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray, int and float`。
+  - 非 tensor/array 且非合法整数标量的元素必须失败，固定短语为 `DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray and integer scalar`。
   - DSL 函数只要存在值返回，就必须失败。
   - DSL 函数体引用未显式导入或绑定的 helper / enum 名称时，必须由 DSL parser 显式失败；`dsl_run(...)` 不得补写 `func.__globals__`。
   - `core.config.target` 决定源码生成与执行目标，不做跨 target 自动猜测。

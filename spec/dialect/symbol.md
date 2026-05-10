@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”以及“最小 pointer type 承载”。同时提供 `!symbol.iter<start = #symbol.expr<...>, end = #symbol.expr<...>, step = #symbol.expr<...>>` 用于表达循环迭代变量语义，与 `!symbol.int<#symbol.expr<expr>>` 同样承载整数值语义，但额外记录迭代边界。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<#symbol.expr<N>>` 表示“这是一个整数值，其值语义为符号 `N`”，`!symbol.int<#symbol.expr<?>>` 表示“该整数值当前无法由稳定符号名或常量表达确定”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘、除、整除、最小值以及比较计算，并提供 `symbol.to_int`（转为普通整型）与 `symbol.to_float`（转为 `f32`）两类显式类型转换 op；同时提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 在 IR 类型层的唯一最小载体。`symbol.for` 现支持旧的无 carried-value 形式，也支持单个 loop-carried `!symbol.int<#symbol.expr<...>>` 的 `iter_args(%acc = %init) ... -> !symbol.int<#symbol.expr<...>>` 公开语法，并通过 `symbol.yield` 终止循环体。该方言不负责张量、内存容器、通用控制流、pointer body op，或超出最小整数符号算术/比较范围的数值计算语义。
+定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”以及“最小 pointer type 承载”。同时提供 `!symbol.iter<start = #symbol.expr<...>, end = #symbol.expr<...>, step = #symbol.expr<...>>` 用于表达循环迭代变量语义，与 `!symbol.int<#symbol.expr<expr>>` 同样承载整数值语义，但额外记录迭代边界。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<#symbol.expr<N>>` 表示“这是一个整数值，其值语义为符号 `N`”，`!symbol.int<#symbol.expr<?>>` 表示“该整数值当前无法由稳定符号名或常量表达确定”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘、除、整除、最小值、最大值以及比较计算，并提供 `symbol.to_int`（转为普通整型）与 `symbol.to_float`（转为 `f32`）两类显式类型转换 op；同时提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 在 IR 类型层的唯一最小载体。`symbol.for` 现支持旧的无 carried-value 形式，也支持单个 loop-carried `!symbol.int<#symbol.expr<...>>` 的 `iter_args(%acc = %init) ... -> !symbol.int<#symbol.expr<...>>` 公开语法，并通过 `symbol.yield` 终止循环体。该方言不负责张量、内存容器、通用控制流、pointer body op，或超出最小整数符号算术/比较范围的数值计算语义。
 
 ## API 列表
 
@@ -25,6 +25,7 @@
 - `class SymbolDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 - `class SymbolFloorDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 - `class SymbolMinOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- `class SymbolMaxOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 - `class SymbolEqOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 - `class SymbolNeOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 - `class SymbolLtOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
@@ -61,7 +62,7 @@
 - 收敛 memory 相关符号标量的方言归属：`Memory`、`MemoryType`、`dma` 相关 op 若需要表达单个维度、步幅、偏移或切片大小的整数符号语义，应统一复用 `SymbolExprAttr` / `SymbolValueType`，而不是在各自 spec 中再定义一套标量 symbol type。
 - 提供从 memory type 读取单个维度或步幅并返回 symbol value 的查询接口，避免其他方言重复定义 `dim/stride -> value` 读取语义。
 - 为后续 `nn`、`dma`、`kernel`、`dsl` 等方言提供统一的符号值口径，避免每个方言各自维护一套符号标量表达。
-- 提供最小整数符号算术与比较接口，使 `!symbol.int<#symbol.expr<expr>>` 标量可在方言内完成基础加、减、乘、除、整除、最小值组合与相等/大小关系判断，而无需回退到其他算术方言。
+- 提供最小整数符号算术与比较接口，使 `!symbol.int<#symbol.expr<expr>>` 标量可在方言内完成基础加、减、乘、除、整除、最小值、最大值组合与相等/大小关系判断，而无需回退到其他算术方言。
 - 明确 `symbol.gt` / `symbol.le` / `symbol.lt` / `symbol.ne` 与 `symbol.to_float` 的 dialect 合同，使上游 `a > b`、`a <= b`、`a < b`、`a != b` 与 `float(n)` 在进入 `symbol dialect` 后拥有稳定目标 op。
 - 提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 的最小 IR pointer type 载体，使函数签名 lowering 可以稳定表达“指向某个 pointee dtype 的指针输入”。
 - 提供 `SymbolIterType`，用于表达循环迭代变量语义，并支持 `!symbol.iter<start = #symbol.expr<...>, end = #symbol.expr<...>, step = #symbol.expr<...>>` 文本形式。
@@ -94,9 +95,9 @@
 - `symbol.for` 支持的循环承载值仅限一个 `!symbol.int<#symbol.expr<...>>` 累计值；该能力服务于成本函数一类“循环内累计、循环外返回”的 IR 表达，不扩展为通用多值控制流。
 - `symbol.ptr` 只定义 `!symbol.ptr<dtype>` 这一类最小 pointer type；它只承载 pointee dtype，不承载名字、地址值、shape、stride、offset 或 memory space。
 - `!symbol.ptr<dtype>` 中的 `dtype` 必须是合法 `TypeAttribute`，且不得为 `!symbol.int<#symbol.expr<...>>`；当前不定义 `!symbol.ptr<!symbol.int<#symbol.expr<...>>>` 这类“指向 symbol.int”的 pointer carrier。
-- 当前最小算术/比较 op 范围仅包含 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`、`symbol.min`、`symbol.eq`、`symbol.ne`、`symbol.lt`、`symbol.le`、`symbol.gt`、`symbol.ge`；不定义取模 op、按位运算、布尔逻辑组合、广播或张量级算术。`SymbolExprAttr` 文本表达允许 `mod`，但该能力不等于新增 `symbol.mod` operation。
+- 当前最小算术/比较 op 范围仅包含 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`、`symbol.min`、`symbol.max`、`symbol.eq`、`symbol.ne`、`symbol.lt`、`symbol.le`、`symbol.gt`、`symbol.ge`；不定义取模 op、按位运算、布尔逻辑组合、广播或张量级算术。`SymbolExprAttr` 文本表达允许 `mod`，但该能力不等于新增 `symbol.mod` operation。
 - `symbol.min(lhs, rhs)` 是二元整数符号最小值 op，结果类型必须为 `!symbol.int<#symbol.expr<min(lhs, rhs)>>` 或等价常量表达；它不定义多参数 `min`、张量级最小值或比较谓词结果。
-- `SymbolExprAttr` 表达式层允许二元 `min(lhs, rhs)` 与 `max(lhs, rhs)`；`max` 只属于 attribute 表达式语法，本轮不新增 `symbol.max` operation。
+- `symbol.max(lhs, rhs)` 是二元整数符号最大值 op，结果类型必须为 `!symbol.int<#symbol.expr<max(lhs, rhs)>>` 或等价常量表达；它不定义多参数 `max`、张量级最大值或比较谓词结果。
 - 当前仅定义 `symbol.to_int` 与 `symbol.to_float` 两类转换：`symbol.to_int` 将 `!symbol.int<#symbol.expr<...>>` 转为普通整型（覆盖各整型变体），`symbol.to_float` 将 `!symbol.int<#symbol.expr<...>>` 转为 `f32`；不定义反向转换或其他跨类型规则。
 - `symbol.ne` / `symbol.lt` / `symbol.le` / `symbol.gt` 属于同一 compare family：统一采用二元 `!symbol.int<#symbol.expr<...>>, !symbol.int<#symbol.expr<...>> -> i1` 签名、统一 verifier 约束与统一 parse/print 规则，不能拆成互不一致的四套合同。
 - 当前不在 `symbol dialect` 中定义 `ptr.load`、`ptr.store`、pointer arithmetic、pointer compare、address cast 或任何基于 `symbol.ptr` 的 body-level 计算 op。
@@ -205,8 +206,8 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 
 - 注意事项：
 
-- `symbol.add/sub/mul/div/floordiv/min` 任一 operand 为 `!symbol.iter<...>` 时，result type 必须为 `!symbol.int<#symbol.expr<?>>`。
-- `symbol.add/sub/mul/div/floordiv/min` 任一 operand 为 `!symbol.int<#symbol.expr<?>>` 时，result type 必须为 `!symbol.int<#symbol.expr<?>>`。
+- `symbol.add/sub/mul/div/floordiv/min/max` 任一 operand 为 `!symbol.iter<...>` 时，result type 必须为 `!symbol.int<#symbol.expr<?>>`。
+- `symbol.add/sub/mul/div/floordiv/min/max` 任一 operand 为 `!symbol.int<#symbol.expr<?>>` 时，result type 必须为 `!symbol.int<#symbol.expr<?>>`。
 - 两个 operand 均为确定 `!symbol.int` 时，result type 可以是确定表达，也可以保守写成 `!symbol.int<#symbol.expr<?>>`。
 - fold 只在当前 operand 均为静态整数时发生；result type 为 `!symbol.int<#symbol.expr<?>>` 时仍应物化为确定 `symbol.const`。
 - 当前 operand 为 `!symbol.int<#symbol.expr<?>>`、动态符号表达或 `!symbol.iter<...>` 时不得 fold 为常量。
@@ -214,7 +215,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 
 - 返回值：
 
-- 返回类型：arith op 返回 `SymbolAddOp` / `SymbolSubOp` / `SymbolMulOp` / `SymbolDivOp` / `SymbolFloorDivOp` / `SymbolMinOp` 实例；compare op 返回 `SymbolEqOp` / `SymbolNeOp` / `SymbolLtOp` / `SymbolLeOp` / `SymbolGtOp` / `SymbolGeOp` 实例。
+- 返回类型：arith op 返回 `SymbolAddOp` / `SymbolSubOp` / `SymbolMulOp` / `SymbolDivOp` / `SymbolFloorDivOp` / `SymbolMinOp` / `SymbolMaxOp` 实例；compare op 返回 `SymbolEqOp` / `SymbolNeOp` / `SymbolLtOp` / `SymbolLeOp` / `SymbolGtOp` / `SymbolGeOp` 实例。
 - 限制：`?` 仅表示 unknown scalar symbol value，不定义 `!symbol.bool<?>`，不允许 compare 返回 `!symbol.int<#symbol.expr<...>>`。
 
 ### Memory 相关符号标量归属
@@ -594,6 +595,21 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 - 功能说明：构造或表示 `symbol.min`，结果为左右整数符号值的最小值。
 - 注意事项：只允许二元 `min`；不得扩展为多参数、张量级或浮点最小值；涉及 `symbol.iter` 或 `?` 时结果必须保守为 `!symbol.int<#symbol.expr<?>>`。
 
+### `class SymbolMaxOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+
+- api：`class SymbolMaxOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- 参数：同 `SymbolAddOp`。
+- 返回值：`SymbolMaxOp` 实例。
+- 使用示例：
+
+  ```python
+  from kernel_gen.dialect.symbol import SymbolMaxOp, SymbolValueType
+
+  value = SymbolMaxOp(lhs, rhs, SymbolValueType.from_expr("max(T, N)"))
+  ```
+- 功能说明：构造或表示 `symbol.max`，结果为左右整数符号值的最大值。
+- 注意事项：只允许二元 `max`；不得扩展为多参数、张量级或浮点最大值；涉及 `symbol.iter` 或 `?` 时结果必须保守为 `!symbol.int<#symbol.expr<?>>`。
+
 ### `class SymbolEqOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 
 - api：`class SymbolEqOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
@@ -841,7 +857,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 - 验证 legacy 宽度整型文本、空表达式、非法表达式的错误路径。
 - 验证 parse/print 循环稳定。
 - 验证 memory 相关标量语义复用同一套整数-only symbol 规则，包括具名维度表达、乘法步幅表达与常量步幅表达。
-- 验证 `symbol.add/sub/mul/div/floordiv/min` 的最小整数符号算术语义、`!symbol.int<#symbol.expr<...>>` 类型约束、parse/print 稳定性与错误路径。
+- 验证 `symbol.add/sub/mul/div/floordiv/min/max` 的最小整数符号算术语义、`!symbol.int<#symbol.expr<...>>` 类型约束、parse/print 稳定性与错误路径。
 - 验证 `symbol.eq/ne/lt/le/gt/ge` 的最小整数符号比较语义、`!symbol.int<#symbol.expr<...>> -> i1` 约束、parse/print 稳定性与错误路径。
 - 验证 `symbol.to_int` 的整数符号到普通整型转换语义、整型变体覆盖、类型约束与 parse/print 稳定性。
 - 验证 `symbol.to_float` 的整数符号到 `f32` 转换语义、类型约束与 parse/print 稳定性。
@@ -874,13 +890,13 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 | TC-SYM-012 | 符号语义 | 相等性 | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_value_type_equality_depends_on_expr_only`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“相等性”场景。 | `test_symbol_value_type_equality_depends_on_expr_only` |
 | TC-SYM-013 | 解析/打印 | memory 元信息标量 | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
 | TC-SYM-014 | 解析/打印 | memory 元信息标量 | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
-| TC-SYM-015 | 符号语义 | `symbol.add/sub/mul/div/floordiv/min` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_arith_ops_verify_success`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.add/sub/mul/div/floordiv/min`”场景。 | `test_symbol_arith_ops_verify_success` |
+| TC-SYM-015 | 符号语义 | `symbol.add/sub/mul/div/floordiv/min/max` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_arith_ops_verify_success`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.add/sub/mul/div/floordiv/min/max`”场景。 | `test_symbol_arith_ops_verify_success` |
 | TC-SYM-015A | 边界/异常 | `?` 与 `symbol.iter` 算术结果必须为 unknown | 准备 `!symbol.int<#symbol.expr<?>>` 与 `!symbol.iter<...>` operand。 | 运行 `test_symbol_arith_ops_require_unknown_result_for_unknown_or_iter_operands`。 | 合法 unknown result 通过 verifier，`N + 1`、`2 - f0` 这类 result type 被拒绝。 | `test_symbol_arith_ops_require_unknown_result_for_unknown_or_iter_operands` |
-| TC-SYM-016 | 解析/打印 | `symbol.add/sub/mul/div/floordiv/min` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_arith_ops_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_arith_ops_round_trip` |
-| TC-SYM-017 | 边界/异常 | `symbol.add/sub/mul/div/floordiv/min` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_arith_ops_reject_non_symbol_int_types`。 | “`symbol.add/sub/mul/div/floordiv/min`”场景按公开错误语义失败或被拒绝。 | `test_symbol_arith_ops_reject_non_symbol_int_types` |
-| TC-SYM-018 | 边界/异常 | `symbol.add/sub/mul/div/floordiv/min` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_arith_ops_reject_malformed_signatures`。 | “`symbol.add/sub/mul/div/floordiv/min`”场景按公开错误语义失败或被拒绝。 | `test_symbol_arith_ops_reject_malformed_signatures` |
-| TC-SYM-019 | 边界/异常 | `symbol.add/sub/mul/div/floordiv/min` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_arith_ops_error_messages_include_context`。 | “`symbol.add/sub/mul/div/floordiv/min`”场景按公开错误语义失败或被拒绝。 | `test_symbol_arith_ops_error_messages_include_context` |
-| TC-SYM-019A | 解析/打印 | `symbol.min` 类型和值语义 | 准备 `!symbol.int` 或 `!symbol.iter` 操作数。 | 运行 `test_symbol_arith_ops_verify_success` 与 `test_symbol_arith_ops_round_trip`。 | `symbol.min` 可打印解析，结果类型保留 `min(lhs, rhs)` 或等价常量语义。 | `test_symbol_arith_ops_verify_success`、`test_symbol_arith_ops_round_trip` |
+| TC-SYM-016 | 解析/打印 | `symbol.add/sub/mul/div/floordiv/min/max` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_arith_ops_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_arith_ops_round_trip` |
+| TC-SYM-017 | 边界/异常 | `symbol.add/sub/mul/div/floordiv/min/max` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_arith_ops_reject_non_symbol_int_types`。 | “`symbol.add/sub/mul/div/floordiv/min/max`”场景按公开错误语义失败或被拒绝。 | `test_symbol_arith_ops_reject_non_symbol_int_types` |
+| TC-SYM-018 | 边界/异常 | `symbol.add/sub/mul/div/floordiv/min/max` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_arith_ops_reject_malformed_signatures`。 | “`symbol.add/sub/mul/div/floordiv/min/max`”场景按公开错误语义失败或被拒绝。 | `test_symbol_arith_ops_reject_malformed_signatures` |
+| TC-SYM-019 | 边界/异常 | `symbol.add/sub/mul/div/floordiv/min/max` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_arith_ops_error_messages_include_context`。 | “`symbol.add/sub/mul/div/floordiv/min/max`”场景按公开错误语义失败或被拒绝。 | `test_symbol_arith_ops_error_messages_include_context` |
+| TC-SYM-019A | 解析/打印 | `symbol.min/max` 类型和值语义 | 准备 `!symbol.int` 或 `!symbol.iter` 操作数。 | 运行 `test_symbol_arith_ops_verify_success` 与 `test_symbol_arith_ops_round_trip`。 | `symbol.min` / `symbol.max` 可打印解析，结果类型保留 `min(lhs, rhs)` / `max(lhs, rhs)` 或等价常量语义。 | `test_symbol_arith_ops_verify_success`、`test_symbol_arith_ops_round_trip` |
 | TC-SYM-020 | 符号语义 | `symbol.eq/ne/lt/le/gt/ge` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_compare_ops_verify_success`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.eq/ne/lt/le/gt/ge`”场景。 | `test_symbol_compare_ops_verify_success` |
 | TC-SYM-020A | 符号语义 | compare 静态整数 fold 为 `i1` | 准备静态整数 `symbol.const` operand。 | 运行 `test_symbol_compare_ops_fold_static_operands_to_i1_bool`。 | eq/ne/lt/le/gt/ge 均可在静态整数输入下 fold 为 `arith.constant` i1。 | `test_symbol_compare_ops_fold_static_operands_to_i1_bool` |
 | TC-SYM-020B | 边界/异常 | compare 动态、`?` 与 `symbol.iter` 不 fold | 准备动态 symbol、unknown 与 iter operand。 | 运行 `test_symbol_compare_ops_reject_dynamic_unknown_and_iter_fold`。 | compare result 仍为 `i1`，但不发生常量 fold。 | `test_symbol_compare_ops_reject_dynamic_unknown_and_iter_fold` |

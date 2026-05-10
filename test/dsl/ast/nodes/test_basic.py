@@ -223,8 +223,8 @@ def test_memory_ast_builds_mlir_type_from_runtime_memory() -> None:
     assert str(divided_type) == "!nn.memory<[#symbol.expr<M floordiv 2>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<tsm>>"
 
 
-def test_memory_ast_type_from_memory_names_anonymous_shape_stride_conflict() -> None:
-    """MemoryAST.type_from_memory() 会规避匿名 shape/stride 同轴 `?` 组合。"""
+def test_memory_ast_type_from_memory_preserves_anonymous_shape_stride() -> None:
+    """MemoryAST.type_from_memory() 保留匿名 shape/stride `?` 布局。"""
 
     memory = Memory(
         ["?", "?", "?"],
@@ -235,10 +235,10 @@ def test_memory_ast_type_from_memory_names_anonymous_shape_stride_conflict() -> 
 
     assert isinstance(memory_type, NnMemoryType)
     assert str(memory_type) == (
-        "!nn.memory<[#symbol.expr<runtime_dim_0>, #symbol.expr<runtime_dim_1>, #symbol.expr<runtime_dim_2>], "
-        "[#symbol.expr<runtime_dim_1*runtime_dim_2>, #symbol.expr<runtime_dim_2>, #symbol.expr<1>], f32, #nn.space<tsm>>"
+        "!nn.memory<[#symbol.expr<?>, #symbol.expr<?>, #symbol.expr<?>], "
+        "[#symbol.expr<?>, #symbol.expr<?>, #symbol.expr<1>], f32, #nn.space<tsm>>"
     )
-    assert "?" not in str(memory_type)
+    assert "runtime" + "_dim_" not in str(memory_type)
 
 
 def test_memory_ast_public_dtype_space_and_binding_edges() -> None:

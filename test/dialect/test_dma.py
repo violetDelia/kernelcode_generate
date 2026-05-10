@@ -644,6 +644,33 @@ def test_dma_reshape_allows_dynamic_symbol_int_shape_operands() -> None:
         op.verify()
 
 
+# TC-DMA-017D
+# 功能说明: 验证 dma.reshape 允许 `?` shape operand 通过 SSA name_hint 承接显式 runtime 维度别名。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_reshape_allows_named_unknown_shape_operands
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_reshape_allows_named_unknown_shape_operands() -> None:
+    source_type = _make_memory_type(
+        shape=_dim_array(["TOTAL"]),
+        stride=_dim_array([1]),
+    )
+    result_type = _make_memory_type(
+        shape=_dim_array(["k_tile", "out_tile"]),
+        stride=_dim_array(["out_tile", 1]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    shape_operands = [
+        _TestOp(result_types=[SymbolValueType.from_expr("?")]).results[0],
+        _TestOp(result_types=[SymbolValueType.from_expr("?")]).results[0],
+    ]
+    shape_operands[0].name_hint = "k_tile"
+    shape_operands[1].name_hint = "out_tile"
+    op = DmaReshapeOp(source, shape_operands, result_type)
+
+    op.verify()
+
+
 # TC-DMA-017B
 # 功能说明: 验证 dma.reshape 接受符号乘法因子顺序不同但等价的连续 source stride。
 # 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_reshape_accepts_equivalent_symbolic_contiguous_source_stride
@@ -787,21 +814,36 @@ def test_dma_view_result_stride_uses_source_physical_stride() -> None:
 
 
 # TC-DMA-019D
-# 功能说明: 验证 dma.view 支持 i8 byte pool typed view 的字节数与边界校验。
+# 功能说明: 验证 dma.view 支持 i8 byte pool typed 子区间 view 与边界校验。
 # 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_view_byte_pool_typed_view
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_view_byte_pool_typed_view() -> None:
     source_type = _make_memory_type(
-        shape=_dim_array([16]),
+        shape=_dim_array([32]),
         stride=_dim_array([1]),
         element_type=i8,
         space="global",
     )
     source = _TestOp(result_types=[source_type]).results[0]
 
-    result_type = _make_memory_type(
+    result_type_1d = _make_memory_type(
+        shape=_dim_array([4]),
+        stride=_dim_array([1]),
+        element_type=i32,
+        space="global",
+    )
+    op = DmaViewOp(
+        source,
+        _make_symbol_operands([2]),
+        _make_symbol_operands([4]),
+        _make_symbol_operands([1]),
+        result_type_1d,
+    )
+    op.verify()
+
+    result_type_2d = _make_memory_type(
         shape=_dim_array([2, 2]),
         stride=_dim_array([2, 1]),
         element_type=i32,
@@ -809,27 +851,27 @@ def test_dma_view_byte_pool_typed_view() -> None:
     )
     op = DmaViewOp(
         source,
-        _make_symbol_operands([0, 0]),
+        _make_symbol_operands([2, 0]),
         _make_symbol_operands([2, 2]),
         _make_symbol_operands([2, 1]),
-        result_type,
+        result_type_2d,
     )
     op.verify()
 
-    bad_length_type = _make_memory_type(
-        shape=_dim_array([3, 2]),
-        stride=_dim_array([2, 1]),
+    out_of_bounds_type = _make_memory_type(
+        shape=_dim_array([4]),
+        stride=_dim_array([1]),
         element_type=i32,
         space="global",
     )
     op = DmaViewOp(
         source,
-        _make_symbol_operands([0, 0]),
-        _make_symbol_operands([3, 2]),
-        _make_symbol_operands([2, 1]),
-        bad_length_type,
+        _make_symbol_operands([6]),
+        _make_symbol_operands([4]),
+        _make_symbol_operands([1]),
+        out_of_bounds_type,
     )
-    with pytest.raises(VerifyException, match="byte length mismatch"):
+    with pytest.raises(VerifyException, match="byte bounds mismatch"):
         op.verify()
 
     bad_stride_type = _make_memory_type(
@@ -840,7 +882,7 @@ def test_dma_view_byte_pool_typed_view() -> None:
     )
     op = DmaViewOp(
         source,
-        _make_symbol_operands([2, 0]),
+        _make_symbol_operands([6, 0]),
         _make_symbol_operands([2, 2]),
         _make_symbol_operands([3, 1]),
         bad_stride_type,
@@ -1045,6 +1087,40 @@ def test_dma_alloc_dynamic_symbol_int_shape_operands_valid() -> None:
         stride=_dim_array([4, 1]),
     )
     op = DmaAllocOp(_make_symbol_operands(["M"]), mixed_result_type)
+    op.verify()
+
+
+# TC-DMA-020A
+# 功能说明: 验证 dma.alloc full-rank dynamic_shape 允许匿名 `?` 结果布局由具名运行时符号 operand 承接。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_alloc_unknown_placeholder_accepts_named_symbol_operands
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_alloc_unknown_placeholder_accepts_named_symbol_operands() -> None:
+    result_type = _make_memory_type(
+        shape=_dim_array(["?", "?"]),
+        stride=_dim_array(["?", 1]),
+    )
+    op = DmaAllocOp(_make_symbol_operands(["cur_n", "cur_c"]), result_type)
+    op.verify()
+
+
+# TC-DMA-020B
+# 功能说明: 验证 dma.alloc full-rank dynamic_shape 允许 `?` operand 承接具名运行时结果 shape。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_alloc_named_result_shape_accepts_unknown_symbol_operands
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_alloc_named_result_shape_accepts_unknown_symbol_operands() -> None:
+    result_type = _make_memory_type(
+        shape=_dim_array(["cur_n", "cur_c"]),
+        stride=_dim_array(["cur_c", 1]),
+    )
+    unknown_operands = [
+        _TestOp(result_types=[SymbolValueType.from_expr("?")]).results[0],
+        _TestOp(result_types=[SymbolValueType.from_expr("?")]).results[0],
+    ]
+    op = DmaAllocOp(unknown_operands, result_type)
     op.verify()
 
 
@@ -1410,6 +1486,27 @@ def test_dma_transpose_accepts_valid_perm() -> None:
     target = _TestOp(result_types=[target_type]).results[0]
 
     DmaTransposeOp(target, source, perm=[1, 0]).verify()
+
+
+# TC-DMA-031A
+# 测试目的: 验证 dma.transpose 对 `?` 后续高维的默认连续 stride 退化为公开未知表达。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_transpose_accepts_unknown_outer_stride
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_transpose_accepts_unknown_outer_stride() -> None:
+    source_type = _make_memory_type(
+        shape=_dim_array(["A", "?", "N"]),
+        stride=_dim_array(["?", "N", 1]),
+    )
+    target_type = _make_memory_type(
+        shape=_dim_array(["A", "?", "N"]),
+        stride=_dim_array(["?", "N", 1]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    target = _TestOp(result_types=[target_type]).results[0]
+
+    DmaTransposeOp(target, source, perm=[0, 1, 2]).verify()
 
 
 # TC-DMA-032

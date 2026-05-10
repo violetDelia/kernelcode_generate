@@ -66,9 +66,6 @@ from kernel_gen.core.contracts import (
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolIterType, SymbolValueType
 
-_RUNTIME_DIM_PREFIX = "runtime_dim_"
-
-
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """校验并返回 nn.memory type。
 
@@ -327,7 +324,7 @@ def _verify_operands_match_layout(
     功能说明:
     - 若布局维度为静态 `SymbolExprAttr`，对应 operand 必须是相同值的 `!symbol.int<#symbol.expr<n>>`。
     - 若布局维度为符号表达式，则 operand 的公开表达式必须一致。
-    - `runtime_dim_*` 是 DSL 类型级临时名，允许由 full-rank dynamic shape 中的 `?` SSA 承接真实运行期维度。
+    - `?` 类型值允许由 full-rank dynamic shape 中的运行期 SSA 承接真实维度。
 
     使用示例:
     - _verify_operands_match_layout(op.sizes, result_type.shape, "shape must match sizes")
@@ -348,11 +345,7 @@ def _verify_operands_match_layout(
         expected_expr = _dim_expr_text(expected)
         if expected_expr == "?":
             continue
-        if (
-            expected_expr.startswith(_RUNTIME_DIM_PREFIX)
-            and isinstance(value.type, SymbolValueType)
-            and value.type.get_value() == "?"
-        ):
+        if isinstance(value.type, SymbolValueType) and value.type.get_value() == "?":
             continue
         if not isinstance(value.type, SymbolValueType) or value.type.get_value() != expected_expr:
             raise VerifyException(mismatch_message)
@@ -375,7 +368,7 @@ def _parse_symbolic_expr_text(text: str) -> sp.Basic | None:
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    stripped = text.strip()
+    stripped = text.strip().replace(" floordiv ", " // ")
     if stripped == "?":
         return None
     names = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", stripped))
@@ -669,7 +662,7 @@ def _linear_max_index(
         stride_int = _operand_int_value(stride_value)
         if offset_int is None or size_int is None or stride_int is None:
             return None
-        total += (offset_int + size_int - 1) * stride_int
+        total += offset_int + (size_int - 1) * stride_int
     return total
 
 def _maybe_numel(shape: ArrayAttr[Attribute]) -> int | None:
@@ -742,6 +735,50 @@ def _verify_static_view_bounds(
         raise VerifyException("dma.view bounds mismatch")
 
 
+def _parenthesize_symbol_expr(expr: str) -> str:
+    """为乘法组合准备符号表达式文本。
+
+    功能说明:
+    - 简单标识符和整数保持原文。
+    - 复合表达式加括号，避免 `floordiv`、加减法参与 stride 乘积时改变语义。
+
+    使用示例:
+    - text = _parenthesize_symbol_expr("M + 1")
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if expr == "?" or expr.replace("_", "").isalnum() or expr.lstrip("-").isdigit():
+        return expr
+    return f"({expr})"
+
+
+def _symbol_expr_product(lhs: str, rhs: str) -> str:
+    """组合两个 symbol 表达式乘积。
+
+    功能说明:
+    - 消除乘以 1 的冗余文本。
+    - 对复合表达式加括号，保持默认连续 stride 的符号计算语义。
+
+    使用示例:
+    - expr = _symbol_expr_product("M + 1", "N")
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if lhs == "1":
+        return rhs
+    if rhs == "1":
+        return lhs
+    return f"{_parenthesize_symbol_expr(lhs)}*{_parenthesize_symbol_expr(rhs)}"
+
+
 def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
     """按默认连续布局生成行主序 stride。
 
@@ -777,7 +814,7 @@ def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
         elif running == "1":
             running = dim_expr
         else:
-            running = _dim_expr_text(_symbol_expr_attr_from_expr(f"{dim_expr}*{running}"))
+            running = _dim_expr_text(_symbol_expr_attr_from_expr(_symbol_expr_product(dim_expr, running)))
     stride.reverse()
     return stride
 
@@ -1630,7 +1667,7 @@ class DmaViewOp(IRDLOperation):
         - `offsets`/`shape`/`stride` 长度与结果 rank 一致。
         - 非 byte pool 场景下，结果 stride 必须等于 source physical stride 与 view logical stride 的逐维乘积。
         - 当边界可静态判定时，必须满足 `offset + (size - 1) * stride < dim`。
-        - 非 byte pool 场景下可判定 numel 不一致必须报错；byte pool 需满足字节数一致与字节边界可达。
+        - 非 byte pool 场景下可判定 numel 不一致必须报错；byte pool 需满足 typed 子区间字节边界可达。
 
         使用示例:
         - DmaViewOp(...).verify_()
@@ -1663,9 +1700,6 @@ class DmaViewOp(IRDLOperation):
             result_elem_size = _element_byte_size(result_type.element_type)
             if result_elem_size is None:
                 raise VerifyException("dma.view element_type unsupported for byte pool")
-            if source_numel is not None and result_numel is not None:
-                if source_numel != result_numel * result_elem_size:
-                    raise VerifyException("dma.view byte length mismatch")
             max_index = _linear_max_index(offsets, shape, stride)
             if max_index is not None and source_numel is not None:
                 byte_end = (max_index + 1) * result_elem_size

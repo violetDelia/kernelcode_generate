@@ -168,31 +168,19 @@ def test_nn_lowering_img2col2d_accepts_noncanonical_symbol_names() -> None:
     assert "(PAD_W0_DIM + PAD_W1_DIM + WIDTH_DIM - DIL_W_DIM*(KW_DIM - 1) - 1) floordiv STEP_W_DIM + 1" in module_text
 
 
-def test_nn_lowering_img2col2d_runtime_dim_result_uses_full_rank_alloc_shape() -> None:
-    """匿名 runtime 维度 img2col2d 结果通过 full-rank dma.alloc dynamic_shape 验证。"""
+def test_nn_lowering_img2col2d_anonymous_result_uses_full_rank_alloc_shape() -> None:
+    """匿名 `?` 维度 img2col2d 结果通过 full-rank dma.alloc dynamic_shape 验证。"""
 
     space = NnMemorySpaceAttr(StringAttr("global"))
     input_type = memory_type(
-        ["runtime_dim_0", "runtime_dim_1", "runtime_dim_2", "runtime_dim_3"],
-        [
-            "runtime_dim_1*runtime_dim_2*runtime_dim_3",
-            "runtime_dim_2*runtime_dim_3",
-            "runtime_dim_3",
-            1,
-        ],
+        ["?", "?", "?", "?"],
+        ["?", "?", "?", 1],
         f32,
         space,
     )
     result_type = memory_type(
-        ["runtime_dim_0", "runtime_dim_1", 3, 3, "runtime_dim_4", "runtime_dim_5"],
-        [
-            "9*runtime_dim_1*runtime_dim_4*runtime_dim_5",
-            "9*runtime_dim_4*runtime_dim_5",
-            "3*runtime_dim_4*runtime_dim_5",
-            "runtime_dim_4*runtime_dim_5",
-            "runtime_dim_5",
-            1,
-        ],
+        ["?", "?", "?", "?", "?", "?"],
+        ["?", "?", "?", "?", "?", 1],
         f32,
         space,
     )
@@ -230,7 +218,7 @@ def test_nn_lowering_img2col2d_runtime_dim_result_uses_full_rank_alloc_shape() -
     module = ModuleOp(
         [
             func.FuncOp(
-                "runtime_dim_img2col2d",
+                "anonymous_dim_img2col2d",
                 FunctionType.from_lists([input_type], [result_type]),
                 Region(block),
             )
@@ -238,10 +226,12 @@ def test_nn_lowering_img2col2d_runtime_dim_result_uses_full_rank_alloc_shape() -
     )
 
     NnLoweringPass().apply(Context(), module)
+    module_text = str(module)
 
     allocs = [op for op in module.walk() if isinstance(op, DmaAllocOp)]
     assert any(len(op.dynamic_shape) == 6 and len(op.results[0].type.shape.data) == 6 for op in allocs)
     assert len([op for op in module.walk() if isinstance(op, KernelImg2col2dOp)]) == 1
+    assert "runtime" + "_dim_" not in module_text
 
 
 # TC-PASS-NNL-022B

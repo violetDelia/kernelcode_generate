@@ -345,6 +345,7 @@ public:
     功能说明:
     - 返回成员式子视图，`offset/size/stride` 的 rank 必须与源 Memory rank 一致。
     - 结果 shape 等于 `size`，结果 stride 等于源 physical stride 与 view logical stride 的逐维乘积。
+    - 当 `ViewT` 与源元素类型不同时，typed view 覆盖的字节范围必须落在源 memory 字节容量内。
 
     使用示例:
     - Memory<GM, float> tile = source.view<float>(offset, size, stride);

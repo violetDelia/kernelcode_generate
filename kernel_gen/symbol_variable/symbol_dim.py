@@ -3,7 +3,7 @@
 
 功能说明:
 - 提供符号维度表达、基础算术运算与动态性判断。
-- 字符串表达支持 `min(lhs, rhs)`，用于 DSL tile 尾块表达。
+- 字符串表达支持 `min(lhs, rhs)` 与 `max(lhs, rhs)`，用于 DSL tile 尾块表达。
 - 匿名运行期未知维度 `?` 参与表达式时保守传播为 `?`，避免生成不可解析的派生文本。
 
 API 列表:
@@ -39,6 +39,8 @@ API 列表:
 from __future__ import annotations
 
 import ast
+import contextlib
+import io
 import re
 from typing import TypeAlias
 
@@ -154,11 +156,11 @@ class _SymbolDim:
 
 
         功能说明:
-        - 只允许整数常量、符号名、整数算术、一元正负号、`floor(arg)` 和 `min(lhs, rhs)`。
+        - 只允许整数常量、符号名、整数算术、一元正负号、`floor(arg)`、`min(lhs, rhs)` 和 `max(lhs, rhs)`。
         - 拒绝比较、布尔、条件、容器、属性、下标、幂运算和其它非公开表达式形态。
 
         使用示例:
-        - _SymbolDim._validate_expr_ast_node(ast.parse("min(N, 4)", mode="eval"))
+        - _SymbolDim._validate_expr_ast_node(ast.parse("max(N, 4)", mode="eval"))
 
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
@@ -189,7 +191,7 @@ class _SymbolDim:
         if isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name):
                 _SymbolDim._raise_invalid_expr()
-            expected_arity = {"floor": 1, "min": 2}.get(node.func.id)
+            expected_arity = {"floor": 1, "min": 2, "max": 2}.get(node.func.id)
             if expected_arity is None or node.keywords or len(node.args) != expected_arity:
                 _SymbolDim._raise_invalid_expr()
             for arg in node.args:
@@ -204,10 +206,10 @@ class _SymbolDim:
 
         功能说明:
         - 在交给 SymPy 前先拒绝语法不完整或超出公开整数算术范围的表达式。
-        - 仅允许整数算术、`floor(arg)` 与 `min(lhs, rhs)` 两个公开函数形态。
+        - 仅允许整数算术、`floor(arg)`、`min(lhs, rhs)` 与 `max(lhs, rhs)` 三个公开函数形态。
 
         使用示例:
-        - _SymbolDim._validate_expr_ast("min(N, 4)")
+        - _SymbolDim._validate_expr_ast("max(N, 4)")
 
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
@@ -231,7 +233,7 @@ class _SymbolDim:
         - 非法表达式稳定转换为 `ValueError("SymbolDim expression string is invalid")`。
 
         使用示例:
-        - expr = _SymbolDim._parse_expr_str("min(N, 4)")
+        - expr = _SymbolDim._parse_expr_str("max(N, 4)")
 
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
@@ -243,7 +245,7 @@ class _SymbolDim:
         symbol_names = {
             name
             for name in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", value)
-            if name not in {"floor", "min"}
+            if name not in {"floor", "min", "max"}
         }
         local_symbols = {
             name: sp.symbols(name, integer=True, real=True)
@@ -251,6 +253,7 @@ class _SymbolDim:
         }
         local_symbols["floor"] = sp.floor
         local_symbols["min"] = sp.Min
+        local_symbols["max"] = sp.Max
         try:
             parsed = parse_expr(value, local_dict=local_symbols, evaluate=True)
         except (sp.SympifyError, SyntaxError, TypeError, ValueError) as exc:
@@ -397,7 +400,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        formatted = str(sp.simplify(expr))
+        formatted = str(_SymbolDim._simplify_quiet(expr))
         if expr.is_Add:
             return f"({formatted})"
         return formatted
@@ -421,7 +424,7 @@ class _SymbolDim:
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
         if expr.is_number:
-            return str(sp.simplify(expr))
+            return str(_SymbolDim._simplify_quiet(expr))
         if _SymbolDim._is_unknown_expr(expr):
             return "?"
         if expr.is_Add:
@@ -461,7 +464,7 @@ class _SymbolDim:
                 denominator_parts = [
                     _SymbolDim._format_public_value_expr(factor)
                     for factor in denominator_factors
-                    if sp.simplify(factor) != 1
+                    if _SymbolDim._simplify_quiet(factor) != 1
                 ]
                 if not denominator_parts:
                     return numerator_text
@@ -479,7 +482,7 @@ class _SymbolDim:
                 denominator_parts = [
                     _SymbolDim._format_public_value_expr(factor)
                     for factor in denominator_factors
-                    if sp.simplify(factor) != 1
+                    if _SymbolDim._simplify_quiet(factor) != 1
                 ]
                 if not denominator_parts:
                     return numerator_text
@@ -490,6 +493,10 @@ class _SymbolDim:
             lhs_text = _SymbolDim._format_public_value_expr(expr.args[0])
             rhs_text = _SymbolDim._format_public_value_expr(expr.args[1])
             return f"min({lhs_text}, {rhs_text})"
+        if expr.func == sp.Max and len(expr.args) == 2:
+            lhs_text = _SymbolDim._format_public_value_expr(expr.args[0])
+            rhs_text = _SymbolDim._format_public_value_expr(expr.args[1])
+            return f"max({lhs_text}, {rhs_text})"
         return _SymbolDim._format_public_expr(expr)
 
     @staticmethod
@@ -513,7 +520,7 @@ class _SymbolDim:
         if _SymbolDim._is_unknown_expr(expr):
             return "?"
 
-        simplified = sp.simplify(expr)
+        simplified = _SymbolDim._simplify_quiet(expr)
         if simplified.is_number:
             if simplified.is_integer:
                 return int(simplified)
@@ -548,13 +555,37 @@ class _SymbolDim:
         return sp.count_ops(simplified) < sp.count_ops(expr)
 
     @staticmethod
+    def _simplify_quiet(expr: sp.Basic) -> sp.Basic:
+        """静默执行 SymPy 简化。
+
+
+        功能说明:
+        - 隔离 SymPy 在部分大写符号组合下导入 units 前缀时的 stdout 输出。
+        - SymPy 内部失败时回退原表达式，避免公开字符串化因外部简化器状态污染失败。
+
+        使用示例:
+        - simplified = _SymbolDim._simplify_quiet(SymbolDim("N").get_symbol())
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                return sp.simplify(expr)
+        except SystemError:
+            return expr
+
+    @staticmethod
     def _symbol_from_str(value: str) -> sp.Basic:
         """基于字符串创建带假设的符号。
 
 
         功能说明:
         - 统一使用 integer=True, real=True 的假设构造符号或符号表达式。
-        - 表达式字符串仅放行 `floor(...)` 与小写 `min(...)` 函数。
+        - 表达式字符串仅放行 `floor(...)`、小写 `min(...)` 与小写 `max(...)` 函数。
 
         使用示例:
         - _SymbolDim._symbol_from_str("N")
@@ -571,7 +602,10 @@ class _SymbolDim:
             return _SymbolDim._unknown_symbol()
         if re.search(r"//|[+\-*/()]", normalized):
             return _SymbolDim._parse_expr_str(normalized)
-        return sp.symbols(normalized, integer=True, real=True)
+        symbol = sp.symbols(normalized, integer=True, real=True)
+        if not isinstance(symbol, sp.Symbol):
+            _SymbolDim._raise_invalid_expr()
+        return symbol
 
     @staticmethod
     def _normalize_symbol(sym: sp.Basic) -> sp.Basic:
@@ -766,11 +800,11 @@ class _SymbolDim:
         if self._is_unknown_expr(lhs) or self._is_unknown_expr(rhs):
             return SymbolDim(self._unknown_symbol())
         if floordiv and not lhs.free_symbols and not rhs.free_symbols:
-            return SymbolDim(sp.Integer(int(sp.simplify(lhs)) // int(sp.simplify(rhs))))
+            return SymbolDim(sp.Integer(int(self._simplify_quiet(lhs)) // int(self._simplify_quiet(rhs))))
 
         expr = self._quotient_expr(lhs, rhs)
         expr = sp.floor(expr) if floordiv else expr
-        simplified = sp.simplify(expr)
+        simplified = self._simplify_quiet(expr)
         if self._should_use_simplified_quotient(expr, simplified):
             return SymbolDim(simplified)
         return SymbolDim(expr)

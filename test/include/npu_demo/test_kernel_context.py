@@ -371,7 +371,7 @@ int main() {
 
 
 # NPU-DEMO-KC-002
-# 测试目的: 验证 get_dynamic_memory<TSM>() 返回固定 shape/stride/space 的 Memory 视图。
+# 测试目的: 验证 get_dynamic_memory<TSM>() 返回固定 shape/stride/space 且带可写 backing 的 Memory 视图。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_returns_typed_tsm_memory
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -397,6 +397,13 @@ int main() {
     if (mem.space() != MemorySpace::TSM) {
         return fail(4);
     }
+    if (mem.data() == nullptr) {
+        return fail(5);
+    }
+    mem.data()[0] = 7.0f;
+    if (mem.data()[0] != 7.0f) {
+        return fail(6);
+    }
     return 0;
 }
 """
@@ -404,7 +411,7 @@ int main() {
 
 
 # NPU-DEMO-KC-003
-# 测试目的: 验证 get_dynamic_memory<TLM1/TLM2/TLM3>() 返回各自独立的 shape/stride/space Memory 视图。
+# 测试目的: 验证 get_dynamic_memory<TLM1/TLM2/TLM3>() 返回各自独立且带可写 backing 的 shape/stride/space Memory 视图。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_returns_typed_tlm123_memory
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -432,6 +439,9 @@ int main() {
     if (tlm1.space() != MemorySpace::TLM1) {
         return fail(4);
     }
+    if (tlm1.data() == nullptr) {
+        return fail(13);
+    }
     if (tlm2.rank() != 1) {
         return fail(5);
     }
@@ -444,6 +454,9 @@ int main() {
     if (tlm2.space() != MemorySpace::TLM2) {
         return fail(8);
     }
+    if (tlm2.data() == nullptr || tlm2.data() == tlm1.data()) {
+        return fail(14);
+    }
     if (tlm3.rank() != 1) {
         return fail(9);
     }
@@ -455,6 +468,60 @@ int main() {
     }
     if (tlm3.space() != MemorySpace::TLM3) {
         return fail(12);
+    }
+    if (tlm3.data() == nullptr || tlm3.data() == tlm1.data() || tlm3.data() == tlm2.data()) {
+        return fail(15);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# NPU-DEMO-KC-003B
+# 测试目的: 验证动态内存 backing 可通过成员式 view 切成 typed tile，并可作为公开 slice 写入目标。
+# 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_dynamic_memory_backing_supports_view_and_slice
+# 对应功能实现文件链接: [include/npu_demo/Arch.h](include/npu_demo/Arch.h)
+# 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+# 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+def test_npu_demo_dynamic_memory_backing_supports_view_and_slice() -> None:
+    source = r"""
+#include <cstdint>
+
+#include "include/npu_demo/npu_demo.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    Memory<TSM, int8_t> backing = get_dynamic_memory<TSM>();
+    if (backing.data() == nullptr) {
+        return fail(1);
+    }
+
+    long long offset_buf[1] = {0};
+    long long size_buf[1] = {4};
+    long long stride_buf[1] = {1};
+    Vector offset(offset_buf, 1);
+    Vector size(size_buf, 1);
+    Vector stride_vec(stride_buf, 1);
+    Memory<TSM, float> tile = backing.view<float>(offset, size, stride_vec);
+    if (tile.data() == nullptr || tile.rank() != 1 || tile.get_shape(0) != 4) {
+        return fail(2);
+    }
+    if (npu_demo::fill(tile, 0.0f) != StatusCode::kOk) {
+        return fail(3);
+    }
+
+    float source_data[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+    long long source_shape[1] = {4};
+    long long source_stride[1] = {1};
+    Memory<GM, float> source(source_data, source_shape, source_stride, 1, MemoryFormat::Norm);
+    if (npu_demo::slice(tile, source, offset, size, stride_vec) != StatusCode::kOk) {
+        return fail(4);
+    }
+    if (tile.data()[0] != 1.0f || tile.data()[1] != 2.0f ||
+        tile.data()[2] != 3.0f || tile.data()[3] != 4.0f) {
+        return fail(5);
     }
     return 0;
 }

@@ -403,6 +403,37 @@ def test_dma_slice_uses_full_rank_dynamic_shape_for_unknown_named_result() -> No
     emitted.owner.verify()
 
 
+def test_dma_reshape_uses_public_name_for_unknown_shape_operand() -> None:
+    """DmaReshapeAST 对公开赋值名的 `?` shape operand 生成稳定 runtime 维度别名。"""
+
+    source = MemoryAST.from_memory("source", Memory([SymbolDim("TOTAL")], NumericType.Float32))
+    ctx = Context()
+    block = Block(
+        arg_types=[
+            source.to_mlir_type(ctx),
+            SymbolValueType.from_expr("?"),
+            SymbolValueType.from_expr("?"),
+        ]
+    )
+    block.args[0].name_hint = "source"
+    block.args[1].name_hint = "k_tile"
+    block.args[2].name_hint = "out_tile"
+
+    emitted = DmaReshapeAST(
+        source,
+        [
+            SymbolDimAST("k_tile", runtime_symbol=SymbolDim("?")),
+            SymbolDimAST("out_tile", runtime_symbol=SymbolDim("?")),
+        ],
+    ).emit_mlir(ctx, block)
+
+    assert isinstance(emitted, Operation)
+    assert [dim.expr.data for dim in emitted.result.type.shape.data] == ["k_tile", "out_tile"]
+    assert [dim.expr.data for dim in emitted.result.type.stride.data] == ["out_tile", "1"]
+    assert [operand.type.get_value() for operand in emitted.shape] == ["?", "?"]
+    emitted.verify()
+
+
 def test_dma_alloc_lowers_public_symbol_binary_shape_to_symbol_expr_type() -> None:
     """DmaAllocAST 通过公开 symbol AST 生成结构化 shape/stride 类型。"""
 

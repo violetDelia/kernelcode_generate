@@ -3,7 +3,7 @@
 ## 功能简介
 
 - `kernel_gen.dsl.ast.nodes.symbol` 定义 `symbol` dialect 相关 DSL AST 节点。
-- 本文件承载符号维度、整数/浮点常量、符号列表、`symbol.to_float`、memory shape/stride 查询、符号二元运算、`symbol.min` 与符号比较。
+- 本文件承载符号维度、整数/浮点常量、符号列表、`symbol.to_float`、memory shape/stride 查询、符号二元运算、`symbol.min`、`symbol.max` 与符号比较。
 - `symbol.for` 控制流节点由 `spec/dsl/ast/nodes/control_flow.md` 与 `kernel_gen.dsl.ast.nodes.control_flow` 承载。
 - `basic.py` 不再定义 symbol dialect 节点；调用方应从 `kernel_gen.dsl.ast.nodes.symbol` 或包根 `kernel_gen.dsl.ast.nodes` 导入。
 
@@ -24,6 +24,7 @@
 - `class SymbolTrueDivAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `class SymbolFloorDivAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `class SymbolMinAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `class SymbolMaxAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `SymbolBinaryAST.result_symbol() -> int | SymbolDim | None`
 - `class SymbolEqAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `class SymbolNeAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
@@ -55,11 +56,12 @@
 - `SymbolListAST.result_symbols()` 只返回 `int | SymbolDim` 列表；任一元素没有公开 symbol 语义时返回 `None`。
 - `symbol.py` 不定义 `ForAST`；循环边界和 step 的 `!symbol.int` 合同由 `control_flow.py` 的 `ForAST` 承载。
 - `TensorAxisAccessAST` 只负责 memory shape/stride 到 `symbol.get_dim` / `symbol.get_stride` 的查询。
-- symbol 二元运算节点必须通过 `result_symbol()` 暴露解析期结果，并通过 `emit_mlir(...)` 生成对应 `symbol.add/sub/mul/div/floordiv/min`。
+- symbol 二元运算节点必须通过 `result_symbol()` 暴露解析期结果，并通过 `emit_mlir(...)` 生成对应 `symbol.add/sub/mul/div/floordiv/min/max`。
 - `emit_mlir(...)` 组合 result type 时，只允许从 `!symbol.int` 类型的公开表达读取值语义；`!symbol.iter<...>` operand 不得通过 SSA 名称、block argument 名称或 `name_hint` 拼出表达式，必须传播为 `!symbol.int<"?">`。
 - 任一二元 operand 的 MLIR 类型为 `!symbol.int<"?">` 时，发射结果类型必须继续为 `!symbol.int<"?">`。
 - `SymbolMinAST` 仅承接 DSL `min(lhs, rhs)` 的二元符号最小值；不支持多参数、关键字参数、张量级最小值或运行期 Python `min` 直接求值。
-- `SymbolMinAST` 处理复合 operand 时必须先物化两侧直接整数常量，再发射左右 operand 算术与最终 `symbol.min`，用于稳定 `min(lhs + 1, rhs - 2)` 这类合同文本的 SSA 顺序。
+- `SymbolMaxAST` 仅承接 DSL `max(lhs, rhs)` 的二元符号最大值；不支持多参数、关键字参数、张量级最大值或运行期 Python `max` 直接求值。
+- `SymbolMinAST` 与 `SymbolMaxAST` 处理复合 operand 时必须先物化两侧直接整数常量，再发射左右 operand 算术与最终 `symbol.min` / `symbol.max`，用于稳定 `min(lhs + 1, rhs - 2)`、`max(lhs + 1, rhs - 2)` 这类合同文本的 SSA 顺序。
 - `SymbolBinaryAST` 与 `SymbolCompareAST` 的左右操作数可为任意能发射 `!symbol.int<"...">` 或 `!symbol.iter<...>` 的 `ValueAST`；用于支持 `symbol.for` 迭代变量参与尾块表达式。
 
 ## API 详细说明
@@ -111,8 +113,8 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-DSL-AST-NODES-SYMBOL-001 | 公开入口 | symbol nodes live in symbol module | 可导入 `kernel_gen.dsl.ast.nodes.symbol`。 | 运行 `test_symbol_nodes_live_in_symbol_module`。 | symbol 节点在 symbol.py，basic.py 不再定义 symbol 节点。 | `test_symbol_nodes_live_in_symbol_module` |
 | TC-DSL-AST-NODES-SYMBOL-002 | 符号语义 | symbol binary and list expose result symbol semantics | 构造 `SymbolDimAST`、`ConstValueAST`、`SymbolAddAST`。 | 运行 `test_symbol_binary_and_list_expose_result_symbol_semantics`。 | `result_symbol()` 与 `result_symbols()` 返回稳定解析期符号语义。 | `test_symbol_binary_and_list_expose_result_symbol_semantics` |
-| TC-DSL-AST-NODES-SYMBOL-003 | 符号语义 | symbol min exposes result symbol semantics | 构造 `SymbolMinAST(SymbolDimAST("N"), ConstValueAST(2))`。 | 运行 `test_symbol_binary_and_list_expose_result_symbol_semantics`。 | `result_symbol()` 返回 `min(2, N)` 等价语义，且 `SymbolMinAST` 可从包根导入。 | `test_symbol_binary_and_list_expose_result_symbol_semantics` |
-| TC-DSL-AST-NODES-SYMBOL-004 | 符号语义 | symbol min emits composite operand constants first | 准备 `min(lhs + 1, rhs - 2)` 公开 DSL kernel。 | 运行 `test_mlir_gen_materializes_symbol_min_operand_consts_before_arithmetic`。 | `symbol.const 1`、`symbol.const 2` 先于 `symbol.add/sub/min` 发射。 | `test_mlir_gen_materializes_symbol_min_operand_consts_before_arithmetic` |
+| TC-DSL-AST-NODES-SYMBOL-003 | 符号语义 | symbol min/max expose result symbol semantics | 构造 `SymbolMinAST(SymbolDimAST("N"), ConstValueAST(2))` 与 `SymbolMaxAST(SymbolDimAST("N"), ConstValueAST(2))`。 | 运行 `test_symbol_binary_and_list_expose_result_symbol_semantics`。 | `result_symbol()` 返回 `min(2, N)` / `max(2, N)` 等价语义，且 `SymbolMinAST` / `SymbolMaxAST` 可从包根导入。 | `test_symbol_binary_and_list_expose_result_symbol_semantics` |
+| TC-DSL-AST-NODES-SYMBOL-004 | 符号语义 | symbol min/max emit composite operand constants first | 准备 `min(lhs + 1, rhs - 2)` 与 `max(lhs + 1, rhs - 2)` 公开 DSL kernel。 | 运行 `test_mlir_gen_materializes_symbol_min_operand_consts_before_arithmetic` 与 `test_mlir_gen_lowers_symbol_max_and_materializes_operand_consts`。 | `symbol.const 1`、`symbol.const 2` 先于 `symbol.add/sub/min/max` 发射。 | `test_mlir_gen_materializes_symbol_min_operand_consts_before_arithmetic`、`test_mlir_gen_lowers_symbol_max_and_materializes_operand_consts` |
 | TC-DSL-AST-NODES-SYMBOL-005 | 符号语义 | symbol binary nodes expose parameterized result symbols | 通过固定 seed 的参数化顺序覆盖 add/sub/mul/div/floordiv 节点。 | 运行 `test_symbol_binary_nodes_expose_parameterized_result_symbols`。 | 各二元节点的公开 `result_symbol()` 返回对应符号表达式。 | `test_symbol_binary_nodes_expose_parameterized_result_symbols` |
 | TC-DSL-AST-NODES-SYMBOL-006 | 符号语义 | symbol scalar and list boundaries use public result methods | 准备 bool/float/string 常量、SymbolList 与 memory axis 访问。 | 运行 `test_symbol_scalar_and_list_boundaries_use_public_result_methods`。 | 常量、列表和 shape/stride 公开 result 方法返回稳定语义或 `None`。 | `test_symbol_scalar_and_list_boundaries_use_public_result_methods` |
 | TC-DSL-AST-NODES-SYMBOL-007 | 解析/打印 | symbol compare nodes emit public mlir | 通过固定 seed 的参数化顺序覆盖六类比较节点。 | 运行 `test_symbol_compare_nodes_emit_public_mlir`。 | 各比较节点经公开 `emit_mlir(...)` 生成 SSA 结果。 | `test_symbol_compare_nodes_emit_public_mlir` |

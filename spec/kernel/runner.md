@@ -12,8 +12,8 @@
 
 - `KERNEL_DUMP_ROOT: Path`
 - `class KernelTorchDemoResult(case_name: str, dsl_result: DslRunResult, max_abs_diff: float, atol: float, rtol: float)`
-- `run_torch_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], real_args: tuple[torch.Tensor | np.ndarray | int | float, ...] | list[torch.Tensor | np.ndarray | int | float], output: torch.Tensor | np.ndarray, expected: torch.Tensor | np.ndarray, *, atol: float = 1e-4, rtol: float = 1e-4) -> KernelTorchDemoResult`
-- `run_lowering_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], *runtime_args: Memory | SymbolDim | int | float | bool | str) -> tuple[ModuleOp, str]`
+- `run_torch_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], real_args: tuple[torch.Tensor | np.ndarray | int, ...] | list[torch.Tensor | np.ndarray | int], output: torch.Tensor | np.ndarray, expected: torch.Tensor | np.ndarray, *, atol: float = 1e-4, rtol: float = 1e-4) -> KernelTorchDemoResult`
+- `run_lowering_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | str | None], *compile_args: Memory | SymbolDim | int | str) -> tuple[ModuleOp, str]`
 
 ## 文档信息
 
@@ -74,13 +74,13 @@
 - 功能说明：记录 torch/numpy demo 的真实执行结果摘要。
 - 注意事项：`dsl_result` 必须来自同一 case 的 `dsl_run(...)` 调用。
 
-### `run_torch_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], real_args: tuple[torch.Tensor | np.ndarray | int | float, ...] | list[torch.Tensor | np.ndarray | int | float], output: torch.Tensor | np.ndarray, expected: torch.Tensor | np.ndarray, *, atol: float = 1e-4, rtol: float = 1e-4) -> KernelTorchDemoResult`
+### `run_torch_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], real_args: tuple[torch.Tensor | np.ndarray | int, ...] | list[torch.Tensor | np.ndarray | int], output: torch.Tensor | np.ndarray, expected: torch.Tensor | np.ndarray, *, atol: float = 1e-4, rtol: float = 1e-4) -> KernelTorchDemoResult`
 
-- api：`run_torch_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], real_args: tuple[torch.Tensor | np.ndarray | int | float, ...] | list[torch.Tensor | np.ndarray | int | float], output: torch.Tensor | np.ndarray, expected: torch.Tensor | np.ndarray, *, atol: float = 1e-4, rtol: float = 1e-4) -> KernelTorchDemoResult`
+- api：`run_torch_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], real_args: tuple[torch.Tensor | np.ndarray | int, ...] | list[torch.Tensor | np.ndarray | int], output: torch.Tensor | np.ndarray, expected: torch.Tensor | np.ndarray, *, atol: float = 1e-4, rtol: float = 1e-4) -> KernelTorchDemoResult`
 - 参数：
   - `case_name`：demo case 名称；类型 `str`；必填；可包含 `/` 分层，最终会规整为相对 dump 路径。
-  - `kernel_fn`：DSL kernel callable；类型 `Callable[..., Memory | SymbolDim | int | float | bool | str | None]`；必填。
-  - `real_args`：运行期真实实参；类型 `tuple[torch.Tensor | np.ndarray | int | float, ...] | list[torch.Tensor | np.ndarray | int | float]`；必填；顺序必须与 `kernel_fn` 的运行期参数一致；`int | float` 标量用于 runtime tile、stride、padding 等 DSL 标量形参。
+  - `kernel_fn`：DSL kernel callable；类型 `Callable[..., Memory | SymbolDim | int | str | None]`；必填。
+  - `real_args`：运行期真实实参；类型 `tuple[torch.Tensor | np.ndarray | int, ...] | list[torch.Tensor | np.ndarray | int]`；必填；顺序必须与 `kernel_fn` 的运行期参数一致；整数标量用于 runtime tile、stride、padding 等 DSL 标量形参，`float` 与 `bool` 由 `dsl_run(...)` 公开校验拒绝。
   - `output`：执行后读取的输出张量；类型 `torch.Tensor | np.ndarray`；必填。
   - `expected`：参考结果张量；类型 `torch.Tensor | np.ndarray`；必填。
   - `atol`：绝对误差容忍阈值；类型 `float`；默认值 `1e-4`。
@@ -98,15 +98,15 @@
   )
   ```
 - 功能说明：执行 DSL kernel，并校验运行结果与 torch/numpy 参考输出一致。
-- 注意事项：`output` 与 `expected` 仅接受 torch tensor 或 numpy ndarray；`real_args` 额外允许 `int | float` 运行期标量并透传给 `dsl_run(...)`；`case_name` 不能为空。
+- 注意事项：`output` 与 `expected` 仅接受 torch tensor 或 numpy ndarray；`real_args` 额外允许整数运行期标量并透传给 `dsl_run(...)`；`case_name` 不能为空。
 
-### `run_lowering_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], *runtime_args: Memory | SymbolDim | int | float | bool | str) -> tuple[ModuleOp, str]`
+### `run_lowering_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | str | None], *compile_args: Memory | SymbolDim | int | str) -> tuple[ModuleOp, str]`
 
-- api：`run_lowering_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], *runtime_args: Memory | SymbolDim | int | float | bool | str) -> tuple[ModuleOp, str]`
+- api：`run_lowering_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | str | None], *compile_args: Memory | SymbolDim | int | str) -> tuple[ModuleOp, str]`
 - 参数：
   - `case_name`：demo case 名称；类型 `str`；必填；可包含 `/` 分层，最终会规整为相对 dump 路径。
   - `kernel_fn`：DSL kernel callable；类型 `Callable[..., Memory | SymbolDim | int | float | bool | str | None]`；必填。
-  - `runtime_args`：编译期符号、内存或标量实参；类型 `Memory | SymbolDim | int | float | bool | str`；可变参数；顺序必须与 `kernel_fn` 签名一致。
+  - `compile_args`：编译期符号、内存或标量实参；类型 `Memory | SymbolDim | int | str`；可变参数；顺序必须与 `kernel_fn` 签名一致；整数标量用于公开 compile-time 常量或 runtime symbol placeholder 对应值，不接受 `float` 或 `bool`。
 - 返回值：`tuple[ModuleOp, str]`，依次为 lowering 后 module 与生成的源码文本。
 - 使用示例：
 
@@ -120,7 +120,7 @@
   )
   ```
 - 功能说明：生成 IR、运行 `npu-demo-lowering`，再生成源码文本。
-- 注意事项：该入口不编译或执行源码；需要真实运行时使用 `run_torch_demo(...)`。
+- 注意事项：该入口不编译或执行源码；需要真实运行时使用 `run_torch_demo(...)`；若需要表达 runtime stride/dilation/padding/tile，应优先传入 `SymbolDim` 作为编译期形参，并由 `dsl_run(...)` / `run_torch_demo(...)` 用整数 `real_args` 绑定真实值。
 
 ## 测试
 

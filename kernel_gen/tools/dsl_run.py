@@ -32,6 +32,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 import inspect
+from numbers import Integral
 from pathlib import Path
 import re
 from typing import Protocol, TypeAlias
@@ -54,7 +55,7 @@ from kernel_gen.symbol_variable.type import NumericType
 RETURN_VALUE_ERROR = "DslRunReturnValueUnsupported: dsl_run only supports functions without DSL return values"
 PIPELINE_NAME_ERROR = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline'"
 PIPELINE_TYPE_ERROR = "DslRunInvalidPipeline: pipeline must be str or PassManager"
-REAL_ARG_TYPE_ERROR = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray, int and float"
+REAL_ARG_TYPE_ERROR = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray and integer scalar"
 TILE_VALUE_ERROR = "DslRunInvalidTileValue: tile runtime scalar must be positive int"
 ARITY_ERROR = "DslRunArityMismatch: real_args count does not match function signature"
 NPU_DEMO_WRAPPER_ERROR = "DslRunInternalError: lowered npu_demo module must contain exactly one wrapper func with arch.launch"
@@ -228,7 +229,7 @@ class TensorRuntimeArg(Protocol):
     dtype: _StringLike
 
 
-RuntimeRealArg: TypeAlias = "TensorRuntimeArg | int | float"
+RuntimeRealArg: TypeAlias = "TensorRuntimeArg | int"
 DslFunctionReturn: TypeAlias = "Memory | SymbolDim | int | float | bool | str | None"
 
 
@@ -386,13 +387,28 @@ def _is_runtime_scalar(value: RuntimeRealArg) -> bool:
     """判断是否为 `dsl_run(...)` 支持的真实标量参数。
 
     功能说明:
-    - `int` 和 `float` 是公开 runtime scalar；`bool` 不作为数值标量接受。
+    - Python `int` 与 numpy integer 是公开 runtime scalar；`bool` 不作为数值标量接受。
+    - `float` 不属于运行期 symbol 绑定标量，避免把非整数 shape/tile 值传入 IR。
 
     使用示例:
     - is_scalar = _is_runtime_scalar(4)
     """
 
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return isinstance(value, Integral) and not isinstance(value, bool)
+
+
+def _normalize_runtime_scalars(runtime_args: tuple[RuntimeRealArg, ...]) -> tuple[RuntimeRealArg, ...]:
+    """把 numpy integer 等 runtime scalar 规整为 Python `int`。
+
+    功能说明:
+    - 公开接口允许 numpy integer 作为真实运行期标量。
+    - 执行引擎只需要普通整数值，规整后同时供 `mlir_gen(...)` 与 `execute(...)` 使用。
+
+    使用示例:
+    - args = _normalize_runtime_scalars((np.int64(4),))
+    """
+
+    return tuple(int(arg) if _is_runtime_scalar(arg) else arg for arg in runtime_args)
 
 
 def _is_tensor_runtime_arg(value: RuntimeRealArg) -> bool:
@@ -419,11 +435,12 @@ def _validate_runtime_arg(parameter: inspect.Parameter, value: RuntimeRealArg) -
     - _validate_runtime_arg(parameter, value)
     """
 
-    if _is_tensor_runtime_arg(value):
-        return
     if _is_runtime_scalar(value):
-        if parameter.name.startswith("tile_") and (not isinstance(value, int) or value <= 0):
+        scalar_value = int(value)
+        if parameter.name.startswith("tile_") and scalar_value <= 0:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, TILE_VALUE_ERROR)
+        return
+    if _is_tensor_runtime_arg(value):
         return
     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, REAL_ARG_TYPE_ERROR)
 
@@ -507,7 +524,7 @@ def _runtime_arg_dtype(value: TensorRuntimeArg) -> NumericType:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, REAL_ARG_TYPE_ERROR) from exc
 
 
-def _build_dsl_runtime_args(runtime_args: tuple[RuntimeRealArg, ...]) -> tuple[Memory | int | float, ...]:
+def _build_dsl_runtime_args(runtime_args: tuple[RuntimeRealArg, ...]) -> tuple[Memory | int, ...]:
     """把真实运行时参数转换为 `mlir_gen(...)` 需要的 DSL `Memory`。
 
 
@@ -524,10 +541,10 @@ def _build_dsl_runtime_args(runtime_args: tuple[RuntimeRealArg, ...]) -> tuple[M
     - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
     """
 
-    dsl_args: list[Memory | int | float] = []
+    dsl_args: list[Memory | int] = []
     for arg in runtime_args:
         if _is_runtime_scalar(arg):
-            dsl_args.append(arg)
+            dsl_args.append(int(arg))
             continue
         dsl_args.append(
             Memory(
@@ -1080,6 +1097,7 @@ def dsl_run(
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, ARITY_ERROR)
     for parameter, arg in zip(positional_params, runtime_args, strict=True):
         _validate_runtime_arg(parameter, arg)
+    runtime_args = _normalize_runtime_scalars(runtime_args)
     dsl_args = _build_dsl_runtime_args(runtime_args)
 
     module = mlir_gen(func_obj, *dsl_args)
@@ -1158,6 +1176,7 @@ def dsl_cost_run(
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, ARITY_ERROR)
     for parameter, arg in zip(positional_params, runtime_args, strict=True):
         _validate_runtime_arg(parameter, arg)
+    runtime_args = _normalize_runtime_scalars(runtime_args)
     dsl_args = _build_dsl_runtime_args(runtime_args)
 
     module = mlir_gen(func_obj, *dsl_args)

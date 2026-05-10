@@ -41,6 +41,7 @@ from kernel_gen.dsl.ast.nodes.symbol import (
     SymbolLeAST,
     SymbolListAST,
     SymbolLtAST,
+    SymbolMaxAST,
     SymbolMinAST,
     SymbolMulAST,
     SymbolNeAST,
@@ -104,6 +105,7 @@ def test_symbol_nodes_live_in_symbol_module() -> None:
 
     assert symbol_module.SymbolAddAST is SymbolAddAST
     assert symbol_module.SymbolMinAST is SymbolMinAST
+    assert symbol_module.SymbolMaxAST is SymbolMaxAST
     assert symbol_module.SymbolDimAST is SymbolDimAST
     assert not hasattr(basic_module, "SymbolAddAST")
     assert not hasattr(basic_module, "SymbolDimAST")
@@ -118,13 +120,28 @@ def test_symbol_binary_and_list_expose_result_symbol_semantics() -> None:
     rhs = ConstValueAST(2)
     expr = SymbolAddAST(lhs, rhs)
     tail = SymbolMinAST(lhs, rhs)
-    shape = SymbolListAST([lhs, rhs, expr, tail])
+    head = SymbolMaxAST(lhs, rhs)
+    shape = SymbolListAST([lhs, rhs, expr, tail, head])
 
     assert lhs.result_symbol() == runtime_symbol
     assert rhs.result_symbol() == 2
     assert expr.result_symbol() == runtime_symbol + 2
     assert str(tail.result_symbol().get_value()) == "min(2, N)"
-    assert shape.result_symbols() == [runtime_symbol, 2, runtime_symbol + 2, tail.result_symbol()]
+    assert str(head.result_symbol().get_value()) == "max(2, N)"
+    assert shape.result_symbols() == [runtime_symbol, 2, runtime_symbol + 2, tail.result_symbol(), head.result_symbol()]
+
+
+def test_symbol_binary_result_symbol_static_min_max_and_unknown_runtime() -> None:
+    """公开 result_symbol 对静态 min/max 与 unknown runtime symbol 保持稳定语义。"""
+
+    assert SymbolMinAST(ConstValueAST(8), ConstValueAST(2)).result_symbol() == 2
+    assert SymbolMaxAST(ConstValueAST(8), ConstValueAST(2)).result_symbol() == 8
+
+    unknown = SymbolDimAST("unknown", runtime_symbol=SymbolDim("?"))
+    result = SymbolMulAST(unknown, ConstValueAST(4)).result_symbol()
+
+    assert isinstance(result, SymbolDim)
+    assert str(result.get_symbol()) == "?"
 
 
 @pytest.mark.parametrize(
@@ -292,6 +309,8 @@ def test_symbol_tensor_axis_emit_public_shape_stride_and_errors() -> None:
         (SymbolMulAST, "symbol.mul"),
         (SymbolTrueDivAST, "symbol.div"),
         (SymbolFloorDivAST, "symbol.floordiv"),
+        (SymbolMinAST, "symbol.min"),
+        (SymbolMaxAST, "symbol.max"),
     ],
 )
 def test_symbol_binary_public_emit_mlir_matrix_and_errors(node_type: type, expected_op: str) -> None:
@@ -324,6 +343,41 @@ def test_symbol_binary_public_emit_mlir_uses_symbol_expr_division_text() -> None
     assert isinstance(floor_result, SSAValue)
     assert div_result.type == SymbolValueType.from_expr("(M + 1) floordiv N")
     assert floor_result.type == SymbolValueType.from_expr("(M + 1) floordiv N")
+
+
+def test_symbol_min_max_public_emit_mlir_preemits_nested_integer_operands() -> None:
+    """公开 min/max emit 先物化嵌套整数常量并保持复合表达 result type。"""
+
+    ctx = Context()
+    block = Block(arg_types=[SymbolValueType.from_expr("N"), SymbolValueType.from_expr("M")])
+    block.args[0].name_hint = "N"
+    block.args[1].name_hint = "M"
+    min_expr = SymbolMinAST(
+        SymbolAddAST(SymbolDimAST("N"), ConstValueAST(1)),
+        SymbolSubAST(SymbolDimAST("M"), ConstValueAST(2)),
+    )
+    max_expr = SymbolMaxAST(
+        SymbolMulAST(SymbolDimAST("N"), ConstValueAST(3)),
+        SymbolFloorDivAST(SymbolDimAST("M"), ConstValueAST(4)),
+    )
+
+    min_result = min_expr.emit_mlir(ctx, block)
+    max_result = max_expr.emit_mlir(ctx, block)
+
+    assert isinstance(min_result, SSAValue)
+    assert isinstance(max_result, SSAValue)
+    assert min_result.type == SymbolValueType.from_expr("min(N + 1, M - 2)")
+    assert max_result.type == SymbolValueType.from_expr("max(N * 3, M floordiv 4)")
+    assert [op.name for op in block.ops].count("symbol.const") == 4
+    assert block.last_op is not None
+    assert block.last_op.name == "symbol.max"
+
+
+def test_symbol_min_max_public_emit_mlir_rejects_raw_operand_result() -> None:
+    """公开 min/max emit 对非 SSA operand 维持稳定错误语义。"""
+
+    with pytest.raises(KernelCodeError, match="symbol operand must lower to SSA value"):
+        SymbolMaxAST(RawEmitAST(None), ConstValueAST(1)).emit_mlir(Context(), Block())
 
 
 def test_symbol_binary_public_emit_mlir_propagates_unknown_for_unknown_and_iter_operands() -> None:

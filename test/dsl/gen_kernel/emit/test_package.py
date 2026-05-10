@@ -30,7 +30,7 @@ import sys
 import pytest
 from xdsl.context import Context
 from xdsl.dialects import arith, func, scf
-from xdsl.dialects.builtin import ArrayAttr, BFloat16Type, DenseIntOrFPElementsAttr, FloatAttr, Float16Type, FunctionType, IndexType, IntAttr, IntegerAttr, ModuleOp, StringAttr, TensorType, UnrealizedConversionCastOp, f16, f32, f64, i1, i32
+from xdsl.dialects.builtin import ArrayAttr, BFloat16Type, DenseIntOrFPElementsAttr, FloatAttr, Float16Type, FunctionType, IndexType, IntAttr, IntegerAttr, ModuleOp, StringAttr, TensorType, UnrealizedConversionCastOp, f16, f32, f64, i1, i8, i32
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.irdl import IRDLOperation, irdl_op_definition, result_def
 
@@ -53,7 +53,7 @@ from kernel_gen.dialect.kernel import (
     KernelSelectOp,
 )
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolExprAttr, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolMinOp, SymbolToFloatOp, SymbolToIntOp, SymbolValueType, SymbolYieldOp
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolExprAttr, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolMaxOp, SymbolMinOp, SymbolToFloatOp, SymbolToIntOp, SymbolValueType, SymbolYieldOp
 from kernel_gen.dialect.tuner import TunerCostOp
 from kernel_gen.dsl.ast import BlockAST
 from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c, emit_c_op, emit_c_value, gen_kernel
@@ -788,6 +788,23 @@ def test_emit_c_op_lowers_npu_demo_symbol_min_as_ternary() -> None:
     assert emit_c_op(min_op, ctx) == "S_INT v0 = ((lhs) < (rhs) ? (lhs) : (rhs));"
 
 
+def test_emit_c_op_lowers_npu_demo_symbol_max_as_ternary() -> None:
+    """EC-008B3: npu_demo 下 symbol.max 发射为 S_INT 三目表达式。"""
+
+    lhs_type = SymbolValueType.from_expr("L")
+    rhs_type = SymbolValueType.from_expr("R")
+    max_type = SymbolValueType.from_expr("max(L, R)")
+    block = Block(arg_types=[lhs_type, rhs_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "lhs")
+    ctx.bind_name(block.args[1], "rhs")
+
+    max_op = SymbolMaxOp(block.args[0], block.args[1], max_type)
+
+    assert emit_c_value(max_op.result, ctx) == "((lhs) > (rhs) ? (lhs) : (rhs))"
+    assert emit_c_op(max_op, ctx) == "S_INT v0 = ((lhs) > (rhs) ? (lhs) : (rhs));"
+
+
 # EC-008C
 # 测试目的: 验证 npu_demo 下 symbol.get_dim/get_stride 会生成 `S_INT` 成员查询局部变量语句。
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/__init__.py
@@ -1269,20 +1286,20 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
         "Memory<TSM, float> v0 = alloc<TSM, float>({m, n} /*shape*/, {n, 1} /*stride*/);"
     )
 
-    runtime_dim_ctx = _npu_ctx()
-    runtime_dim_ctx.bind_name(dyn_block.args[0], "m")
-    runtime_dim_ctx.bind_name(dyn_block.args[1], "n")
-    runtime_dim_alloc_type = NnMemoryType(
-        ArrayAttr([_memory_symbol_expr_attr("runtime_dim_0"), _memory_symbol_expr_attr("runtime_dim_1")]),
-        ArrayAttr([_memory_symbol_expr_attr("runtime_dim_1"), _memory_symbol_expr_attr(1)]),
+    unknown_dim_ctx = _npu_ctx()
+    unknown_dim_ctx.bind_name(dyn_block.args[0], "m")
+    unknown_dim_ctx.bind_name(dyn_block.args[1], "n")
+    unknown_dim_alloc_type = NnMemoryType(
+        ArrayAttr([_memory_symbol_expr_attr("?"), _memory_symbol_expr_attr("?")]),
+        ArrayAttr([_memory_symbol_expr_attr("?"), _memory_symbol_expr_attr(1)]),
         f32,
         NnMemorySpaceAttr.from_name("tsm"),
     )
-    runtime_dim_alloc = DmaAllocOp([dyn_block.args[0], dyn_block.args[1]], runtime_dim_alloc_type)
+    unknown_dim_alloc = DmaAllocOp([dyn_block.args[0], dyn_block.args[1]], unknown_dim_alloc_type)
 
-    runtime_dim_stmt = emit_c_op(runtime_dim_alloc, runtime_dim_ctx)
+    unknown_dim_stmt = emit_c_op(unknown_dim_alloc, unknown_dim_ctx)
 
-    assert runtime_dim_stmt == (
+    assert unknown_dim_stmt == (
         "Memory<TSM, float> v0 = alloc<TSM, float>({m, n} /*shape*/, {n, 1} /*stride*/);"
     )
 
@@ -1400,10 +1417,69 @@ def test_emit_c_lowers_npu_demo_dma_misc_helper_contracts() -> None:
     )
 
     assert cast_stmt == "cast<GM, float, int32_t>(dst /*dst*/, src /*source*/);"
-    assert copy_stmt == "copy<GM, GM, float, float>(dst /*dst*/, dst /*source*/);"
+    assert copy_stmt == (
+        "slice(dst /*dst*/, dst /*source*/, "
+        "Vector(static_cast<long long>(0), static_cast<long long>(0)) /*offset*/, "
+        "Vector(static_cast<long long>(dst.get_shape(0)), static_cast<long long>(dst.get_shape(1))) /*size*/, "
+        "Vector(static_cast<long long>(1), static_cast<long long>(1)) /*stride*/);"
+    )
     assert free_stmt == "free<GM, float>(dst /*source*/);"
     assert transpose_stmt == "transpose<GM, GM, float, float>(dst /*dst*/, dst /*source*/, {1, 0} /*perm*/);"
-    assert "Memory<GM, float> v0 = dst.reshape({3, 2} /*shape*/);" == reshape_stmt
+    assert "Memory<GM, float> v0 = dst.reshape(Vector{3, 2} /*shape*/);" == reshape_stmt
+
+
+def test_emit_c_rejects_npu_demo_dma_copy_invalid_target_and_rank() -> None:
+    """验证 npu_demo `dma.copy` 发射只接受 1..4 rank 的 nn.memory target。
+
+    功能说明:
+    - 通过公开 `emit_c_op(...)` 入口覆盖 `dma.copy` 的公开错误语义。
+    - 防止 `dma.copy` 生成 include/api 未公开 helper 或 rank>4 的非法 Vector 构造。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_rejects_npu_demo_dma_copy_invalid_target_and_rank
+    """
+
+    mem_type = _make_memory_type([2], [1], space="global", element_type=f32)
+    scalar_block = Block(arg_types=[i32, mem_type])
+    scalar_ctx = _npu_ctx()
+    scalar_ctx.bind_name(scalar_block.args[0], "scalar")
+    scalar_ctx.bind_name(scalar_block.args[1], "src")
+    with pytest.raises(KernelCodeError, match="dma.copy: target must be nn.memory"):
+        emit_c_op(DmaCopyOp(scalar_block.args[0], scalar_block.args[1]), scalar_ctx)
+
+    rank5_type = _make_memory_type([1, 1, 1, 1, 1], [1, 1, 1, 1, 1], space="global", element_type=f32)
+    rank5_block = Block(arg_types=[rank5_type, rank5_type])
+    rank5_ctx = _npu_ctx()
+    rank5_ctx.bind_name(rank5_block.args[0], "dst")
+    rank5_ctx.bind_name(rank5_block.args[1], "src")
+    with pytest.raises(KernelCodeError, match="dma.copy: npu_demo Vector supports 1..4 values"):
+        emit_c_op(DmaCopyOp(rank5_block.args[0], rank5_block.args[1]), rank5_ctx)
+
+
+def test_emit_c_lowers_npu_demo_dma_reshape_rank6_via_vector_buffer() -> None:
+    """验证 npu_demo `dma.reshape` rank>4 走公开 Vector(data, size) 形态。
+
+    功能说明:
+    - 通过公开 `emit_c_op(...)` 入口覆盖 rank 6 reshape 发射。
+    - 锁定源码不使用无法编译的 `Vector{a, b, c, d, e, f}` 构造。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_reshape_rank6_via_vector_buffer
+    """
+
+    src_type = _make_memory_type([720], [1], space="tsm", element_type=f32)
+    dst_type = _make_memory_type([2, 3, 4, 5, 6, 1], [360, 120, 30, 6, 1, 1], space="tsm", element_type=f32)
+    block = Block(arg_types=[src_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "src")
+    shape_ops = [arith.ConstantOp(IntegerAttr(value, i32)).result for value in (2, 3, 4, 5, 6, 1)]
+
+    stmt = emit_c_op(DmaReshapeOp(block.args[0], shape_ops, dst_type), ctx)
+
+    assert stmt == (
+        "long long reshape_shape_0[6] = {2, 3, 4, 5, 6, 1};\n"
+        "Memory<TSM, float> v0 = src.reshape(Vector(reshape_shape_0, 6) /*shape*/);"
+    )
 
 
 def test_emit_c_lowers_npu_demo_dma_slice_deslice_vector2_contracts() -> None:

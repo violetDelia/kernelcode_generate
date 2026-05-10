@@ -412,8 +412,8 @@ auto stride0 = memory.get_stride(0);
   ```cpp
 auto tile = memory.view<float>(offset, size, stride);
 ```
-- 功能说明：返回源 memory 的成员式子视图，不复制底层数据。
-- 注意事项：`offset/size/stride` 的 rank 必须与源 memory rank 一致；npu_demo 实现支持 rank `1..8`；`offset[i] >= 0`、`size[i] > 0`、`stride[i] > 0`、`source.shape[i] > 0`、`source.stride[i] > 0`；结果 shape 等于 `size`，结果 stride 等于源 physical stride 与 view logical stride 的逐维乘积，结果 data 指针等于源 data 加多维线性 offset。公开失败关键字固定为 `memory.view: invalid rank`、`memory.view: vector_rank_mismatch`、`memory.view: invalid offset/size/stride`、`memory.view: invalid source shape`、`memory.view: invalid source stride`、`memory.view: overflow`、`memory.view: out_of_bounds` 或 `memory.view: rank_too_large`。
+- 功能说明：返回源 memory 的成员式子视图，不复制底层数据；`ViewT` 可与源元素类型不同，用于将动态 byte backing memory 切分为 typed view。
+- 注意事项：`offset/size/stride` 的 rank 必须与源 memory rank 一致；npu_demo 实现支持 rank `1..8`；`offset[i] >= 0`、`size[i] > 0`、`stride[i] > 0`、`source.shape[i] > 0`、`source.stride[i] > 0`；结果 shape 等于 `size`，结果 stride 等于源 physical stride 与 view logical stride 的逐维乘积，结果 data 指针等于源 data 按 `ViewT` 线性元素单位偏移后的 typed view；当 `ViewT` 与源元素类型不同时，typed view 覆盖的字节范围必须落在源 memory 的字节容量内。公开失败关键字固定为 `memory.view: invalid rank`、`memory.view: vector_rank_mismatch`、`memory.view: invalid offset/size/stride`、`memory.view: invalid source shape`、`memory.view: invalid source stride`、`memory.view: overflow`、`memory.view: out_of_bounds` 或 `memory.view: rank_too_large`。
 
 ### `Memory::reshape(const Vector& shape) const -> Memory<Space, T>`
 

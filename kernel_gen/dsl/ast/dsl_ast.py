@@ -93,6 +93,7 @@ from kernel_gen.dsl.ast.nodes import (
     SymbolLeAST,
     SymbolListAST,
     SymbolLtAST,
+    SymbolMaxAST,
     SymbolMinAST,
     SymbolMulAST,
     SymbolNeAST,
@@ -1127,7 +1128,7 @@ class DslAstVisitor(py_ast.NodeVisitor):
                     callee_obj = self.import_states[node.func.id]
                 elif node.func.id not in self.scope:
                     callee_obj = self.globals_table.get(node.func.id)
-                if callee_obj is None and node.func.id not in {"float", "min"}:
+                if callee_obj is None and node.func.id not in {"float", "min", "max"}:
                     location = SourceLocation.from_py_ast(node)
                     if node.func.id in _DEFAULT_DSL_HELPERS:
                         diagnostic = Diagnostic("Unsupported call expression", location)
@@ -1173,18 +1174,23 @@ class DslAstVisitor(py_ast.NodeVisitor):
                 diagnostic = Diagnostic("Unsupported float arity", location)
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
             return SymbolToFloatAST(args[0], location=location)
-        if call_name == "min":
+        if call_name in {"min", "max"}:
             if len(args) != 2 or kwargs:
-                diagnostic = Diagnostic("Unsupported min arity", location)
+                diagnostic = Diagnostic(f"Unsupported {call_name} arity", location)
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
             lhs, rhs = args
             if not isinstance(lhs, ValueAST) or not isinstance(rhs, ValueAST):
-                diagnostic = Diagnostic("min arguments must be symbol values", location)
+                diagnostic = Diagnostic(f"{call_name} arguments must be symbol values", location)
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
-            if lhs.result_symbol() is None or rhs.result_symbol() is None:
-                diagnostic = Diagnostic("min arguments must be symbol values", location)
+            lhs_symbol = lhs.result_symbol()
+            rhs_symbol = rhs.result_symbol()
+            if lhs_symbol is None or rhs_symbol is None:
+                diagnostic = Diagnostic(f"{call_name} arguments must be symbol values", location)
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
-            return SymbolMinAST(lhs, rhs, location=location)
+            if isinstance(lhs_symbol, int) and isinstance(rhs_symbol, int):
+                value = min(lhs_symbol, rhs_symbol) if call_name == "min" else max(lhs_symbol, rhs_symbol)
+                return ConstValueAST(value, location=location)
+            return SymbolMinAST(lhs, rhs, location=location) if call_name == "min" else SymbolMaxAST(lhs, rhs, location=location)
         if entry is not None and entry.ast_node is not None:
             builtin_call = BuiltinCall(
                 source=node,

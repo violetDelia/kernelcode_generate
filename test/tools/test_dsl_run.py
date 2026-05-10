@@ -76,7 +76,7 @@ _EXPECTED_RETURN_VALUE_MESSAGE = "DslRunReturnValueUnsupported: dsl_run only sup
 _EXPECTED_TARGET_MESSAGE = "DslRunInvalidTarget: core config target must be non-empty str"
 _EXPECTED_PIPELINE_NAME_MESSAGE = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline'"
 _EXPECTED_PIPELINE_TYPE_MESSAGE = "DslRunInvalidPipeline: pipeline must be str or PassManager"
-_EXPECTED_REAL_ARG_TYPE_MESSAGE = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray, int and float"
+_EXPECTED_REAL_ARG_TYPE_MESSAGE = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray and integer scalar"
 _EXPECTED_TILE_VALUE_MESSAGE = "DslRunInvalidTileValue: tile runtime scalar must be positive int"
 _EXPECTED_ARITY_MESSAGE = "DslRunArityMismatch: real_args count does not match function signature"
 _EXPECTED_NPU_DEMO_WRAPPER_MESSAGE = (
@@ -294,14 +294,18 @@ def matmul_out_kernel(
     lhs: "Tensor[f32, 32, 16]",
     rhs: "Tensor[f32, 16, 32]",
 ) -> None:
-    """tiled matmul out-param 样例。"""
+    """tiled matmul out-param 样例。
 
-    for m0 in loop(0, 32, 16):
-        for n0 in loop(0, 32, 16):
-            lhs_tile = slice(lhs, [m0, 0], [16, 16], [1, 1], MemorySpace.TSM)
-            rhs_tile = slice(rhs, [0, n0], [16, 16], [1, 1], MemorySpace.TSM)
+    8x8 输出 tile 让 memory-pool 后的 TLM1/TLM2 dynamic byte backing 与
+    npu_demo 公开容量合同保持一致。
+    """
+
+    for m0 in loop(0, 32, 8):
+        for n0 in loop(0, 32, 8):
+            lhs_tile = slice(lhs, [m0, 0], [8, 16], [1, 1], MemorySpace.TSM)
+            rhs_tile = slice(rhs, [0, n0], [16, 8], [1, 1], MemorySpace.TSM)
             partial = matmul(lhs_tile, rhs_tile)
-            deslice(out, partial, [m0, n0], [16, 16], [1, 1])
+            deslice(out, partial, [m0, n0], [8, 8], [1, 1])
 
 
 def _assert_result_contract(
@@ -646,6 +650,26 @@ def test_dsl_run_add_dynamic_tile_scalar_matches_public_contract() -> None:
     assert torch.equal(out, expected)
 
 
+def test_dsl_run_accepts_numpy_integer_runtime_scalar() -> None:
+    """dsl_run 应接受 numpy integer runtime scalar 并传给执行入口。"""
+
+    out = torch.full((6,), -7, dtype=torch.int32)
+    lhs = torch.tensor([10, 11, 12, 13, 14, 15], dtype=torch.int32)
+    rhs = np.array([1, 2, 3, 4, 5, 6], dtype=np.int32)
+    expected = lhs + torch.from_numpy(rhs)
+
+    result = dsl_run(
+        add_dynamic_tile_kernel,
+        (out, lhs, rhs, np.int64(4)),
+        "npu-demo-lowering",
+    )
+
+    assert result.execute_result.ok is True
+    assert result.runtime_args[-1] == 4
+    assert isinstance(result.runtime_args[-1], int)
+    assert torch.equal(out, expected)
+
+
 # TC-DSL-RUN-003B
 # 最后更改: 朽木露琪亚
 # 测试目的: 锁定 execute_engine/npu_demo/sub.py 的 lowering 与 compile/execute 公开合同在当前 worktree 下可直接复现。
@@ -945,6 +969,17 @@ def test_dsl_run_rejects_non_positive_tile_runtime_scalar() -> None:
 
     with pytest.raises(KernelCodeError, match=_EXPECTED_TILE_VALUE_MESSAGE):
         dsl_run(add_dynamic_tile_kernel, (out, lhs, rhs, 0), "npu-demo-lowering")
+
+
+def test_dsl_run_rejects_float_runtime_scalar() -> None:
+    """float 不属于公开 runtime scalar 绑定类型。"""
+
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+
+    with pytest.raises(KernelCodeError, match=_EXPECTED_REAL_ARG_TYPE_MESSAGE):
+        dsl_run(add_dynamic_tile_kernel, (out, lhs, rhs, 4.0), "npu-demo-lowering")
 
 
 # TC-DSL-RUN-009B

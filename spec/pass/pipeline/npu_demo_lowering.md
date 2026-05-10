@@ -29,7 +29,9 @@
 - `nn` lowering：[`spec/pass/lowering/nn_lowering/spec.md`](../../../spec/pass/lowering/nn_lowering/spec.md)
 - `symbol-loop-hoist`：[`spec/pass/symbol_loop_hoist.md`](../../../spec/pass/symbol_loop_hoist.md)
 - `tile-analysis`：[`spec/pass/tile/analysis.md`](../../../spec/pass/tile/analysis.md)
+- `lower-dma-memory-hierarchy`：[`spec/pass/lowering/dma_memory_hierarchy/spec.md`](../../../spec/pass/lowering/dma_memory_hierarchy/spec.md)
 - `symbol-buffer-hoist`：[`spec/pass/symbol_buffer_hoist.md`](../../../spec/pass/symbol_buffer_hoist.md)
+- `memory-pool`：[`spec/pass/lowering/memory_pool.md`](../../../spec/pass/lowering/memory_pool.md)
 - `attach-arch-information` 公开入口：[`spec/pass/attach_arch_information.md`](../../../spec/pass/attach_arch_information.md)
 - `outline-device-kernel` 公开入口：[`spec/pass/outline_device_kernel.md`](../../../spec/pass/outline_device_kernel.md)
 - `launch-kernel-cost-func` 公开入口：[`spec/pass/tuning/launch_kernel_cost_func.md`](../../../spec/pass/tuning/launch_kernel_cost_func.md)
@@ -42,17 +44,21 @@
 - `lower-nn`：`NnLoweringPass` 的公开 pass 名称。
 - `symbol-loop-hoist`：`SymbolLoopHoistPass` 的公开 pass 名称。
 - `tile-analysis`：`TileAnalysisPass` 的公开 pass 名称；本 pipeline 中紧跟 `symbol-loop-hoist` 后置 `cse`，只补充 tile 分析属性。
+- `lower-dma-memory-hierarchy`：`LowerDmaMemoryHierarchyPass` 的公开 pass 名称；本 pipeline 中固定为 `fold=True` 且 `apply_op='matmul{["", "tlm1", "tlm2"]}'`。
 - `symbol-buffer-hoist`：`SymbolBufferHoistPass` 的公开 pass 名称。
+- `memory-pool`：`MemoryPoolPass` 的公开 pass 名称；本 pipeline 中固定为 `rewrite=True` 且 `alignment=0`，将片上 `dma.alloc` 改写为 `arch.get_dynamic_memory + dma.view + dma.reshape`，memory-pool 后 IR 不得残留可改写的片上 `dma.alloc` / `allalloc` 类分配操作。
 - `attach-arch-information`：在 outline 前为目标函数附加 launch / shared memory 等 arch 元信息的阶段。
 - `outline-device-kernel`：将带 arch 元信息的函数 outline 成 host wrapper + device body 的阶段。
 - `launch-kernel-cost-func`：在 pipeline 末尾为 outlined device body 生成 sibling cost function 的阶段，默认 `cost_kind` 为 `DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2`。
 
 ## 目标
 
-- 提供一条不依赖 `tile` 的最小公开 pipeline，供本轮 `pytest` 与 standalone 验收链直接复用。
+- 提供一条默认包含 tile 分析、DMA memory hierarchy 标准化和 memory pool 摘要的公开 pipeline，供本轮 `pytest` 与 standalone 验收链直接复用。
 - 明确 `symbol-loop-hoist` 在无 `symbol.for` 时可以 no-op，因此可安全加入该最小 pipeline。
-- 明确 `tile-analysis` 位于 `symbol-loop-hoist` 后置 `cse` 之后、`symbol-buffer-hoist` 之前，只记录 tile 分析结果，不生成 tile 循环。
-- 明确 `symbol-buffer-hoist` 位于 `tile-analysis` 之后，对 `symbol.for` 内安全 `dma.alloc` 做 buffer 外提；无可外提 buffer 时保持 no-op。
+- 明确 `tile-analysis` 位于 `symbol-loop-hoist` 后置 `cse` 之后、`lower-dma-memory-hierarchy` 之前，只记录 tile 分析结果，不生成 tile 循环。
+- 明确 `lower-dma-memory-hierarchy` 位于 `tile-analysis` 之后、`symbol-buffer-hoist` 之前，并固定 `fold=True` 与 `apply_op='matmul{["", "tlm1", "tlm2"]}'`，不新增 pipeline option。
+- 明确 `symbol-buffer-hoist` 位于 `lower-dma-memory-hierarchy` 之后，对 `symbol.for` 内安全 `dma.alloc` 做 buffer 外提；无可外提 buffer 时保持 no-op。
+- 明确 `memory-pool` 位于 `symbol-buffer-hoist` 之后、`attach-arch-information` 之前，并固定 `MemoryPoolPass(rewrite=True, alignment=0)`，默认生成 `arch.get_dynamic_memory + dma.view + dma.reshape` 改写。
 - 明确该 pipeline 的最终输出为 host wrapper + device body + `_cost_DMA1_*` / `_cost_DMA2_*` / `_cost_DMA3_*` / `_cost_DMA4_*` / `_cost_MAC_*` / `_cost_VECTOR1_*` / `_cost_VECTOR2_*` sibling cost function IR，供 `gen_kernel(...)` 直接消费。
 - 当输入 DSL callable 除 `lhs/rhs/out` 外还包含公开 `SymbolDim` tile / shape 参数时，pipeline 输出的 host wrapper、device body 与 sibling cost function 必须继续保留这些 trailing `!symbol.int` 参数，供 `gen_kernel(...)` 直接消费。
 - 保持 `default-lowering` 作为独立公开 builder，不与本 pipeline 混用。
@@ -74,11 +80,13 @@
   5. `SymbolLoopHoistPass`
   6. `CommonSubexpressionElimination`
   7. `TileAnalysisPass`
-  8. `SymbolBufferHoistPass`
-  9. `AttachArchInformationPass`
-  10. `OutlineDeviceKernelPass`
-  11. `LaunchKernelCostFuncPass`
-- 该 pipeline 不包含 `tile-elewise`、`tile-reduce`、`buffer-results-to-out-params` 或 `lower-dma-memory-hierarchy`。
+  8. `LowerDmaMemoryHierarchyPass(fold=True, apply_op='matmul{["", "tlm1", "tlm2"]}')`
+  9. `SymbolBufferHoistPass`
+  10. `MemoryPoolPass(rewrite=True, alignment=0)`
+  11. `AttachArchInformationPass`
+  12. `OutlineDeviceKernelPass`
+  13. `LaunchKernelCostFuncPass`
+- 该 pipeline 不包含 `tile-elewise`、`tile-reduce` 或 `buffer-results-to-out-params`。
 - 若输入 module 中不存在 `symbol.for`，`SymbolLoopHoistPass` 必须保持 no-op。
 - 若输入 module 中不存在可安全外提的 `dma.alloc`，`SymbolBufferHoistPass` 必须保持 no-op。
 - builder 会把默认 `target` 收口为 `npu_demo`。
@@ -99,7 +107,7 @@
   module = pm.run(module)
   ```
 - 功能说明：构造 `npu-demo-lowering` pipeline，并返回 `PassManager`。
-- 注意事项：pipeline 名称必须固定为 `npu-demo-lowering`；pass 顺序必须固定为 `inline -> cse -> decompass -> lower-nn -> symbol-loop-hoist -> cse -> tile-analysis -> symbol-buffer-hoist -> attach-arch-information -> outline-device-kernel -> launch-kernel-cost-func`；`cse` 必须紧跟 `inline`，第二个 `cse` 必须紧跟 `symbol-loop-hoist`；`tile-analysis` 只添加 `tile.analysis` / `tile.tile_exprs` 等分析属性，不生成 `symbol.for` 或 `dma.view`；pipeline 中的 `LaunchKernelCostFuncPass` 使用 pass 默认 `cost_kind="DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2"`，builder 不新增 cost kind 选项；`only-kernel`、`only_kernel` 或其他未知 options 输入必须显式失败。
+- 注意事项：pipeline 名称必须固定为 `npu-demo-lowering`；pass 顺序必须固定为 `inline -> cse -> decompass -> lower-nn -> symbol-loop-hoist -> cse -> tile-analysis -> lower-dma-memory-hierarchy -> symbol-buffer-hoist -> memory-pool -> attach-arch-information -> outline-device-kernel -> launch-kernel-cost-func`；`cse` 必须紧跟 `inline`，第二个 `cse` 必须紧跟 `symbol-loop-hoist`；`tile-analysis` 只添加 `tile.analysis` / `tile.tile_exprs` 等分析属性，不生成 `symbol.for` 或 `dma.view`；`lower-dma-memory-hierarchy` 固定 `fold=True` 与 `apply_op='matmul{["", "tlm1", "tlm2"]}'`；`memory-pool` 固定 `rewrite=True` 与 `alignment=0`，其后必须存在 `arch.get_dynamic_memory` 与 `dma.view`，且不得残留可改写的片上 `dma.alloc` / `allalloc`；pipeline 中的 `LaunchKernelCostFuncPass` 使用 pass 默认 `cost_kind="DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2"`，builder 不新增 cost kind 选项；`only-kernel`、`only_kernel` 或其他未知 options 输入必须显式失败。
 
 ## 测试
 

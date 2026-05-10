@@ -35,7 +35,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.arch import ArchLaunchOp
+from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchLaunchOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolForOp, SymbolIterType, SymbolValueType
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
@@ -74,6 +74,18 @@ class DmaReshapeOp(IRDLOperation):
     result = result_def(Attribute)
 
     def __init__(self: "DmaReshapeOp", source: SSAValue, result_type: Attribute) -> None:
+        super().__init__(operands=[source], result_types=[result_type])
+
+
+@irdl_op_definition
+class DmaSubviewOp(IRDLOperation):
+    """测试专用的 helper `dma.subview`。"""
+
+    name = "dma.subview"
+    source = operand_def(Attribute)
+    result = result_def(Attribute)
+
+    def __init__(self: "DmaSubviewOp", source: SSAValue, result_type: Attribute) -> None:
         super().__init__(operands=[source], result_types=[result_type])
 
 
@@ -195,7 +207,7 @@ def _build_launch_kernel_module(
 
     功能说明:
     - 生成一个 wrapper 与一个 device function。
-    - device body 内包含 `symbol.for`、`dma.view`、`dma.reshape`、`dma.copy` 与 `kernel.add`，用于覆盖 helper 保留与成本节点生成合同。
+    - device body 内包含 `symbol.for`、`arch.get_dynamic_memory`、`dma.view`、`dma.subview`、`dma.reshape`、`dma.copy` 与 `kernel.add`，用于覆盖 helper 保留与成本节点生成合同。
     - 可选生成共享 callee 的第二个 wrapper，或为目标 op 注入保留 metadata attr 冲突。
 
     使用示例:
@@ -266,9 +278,11 @@ def _build_launch_kernel_module(
 
     start = SymbolConstOp(0)
     step = SymbolConstOp(1)
+    dynamic_memory = ArchGetDynamicMemoryOp(NnMemorySpaceAttr(StringAttr("shared")))
     view = DmaViewOp(device_block.args[0], memory_type)
+    subview = DmaSubviewOp(view.result, memory_type)
     reshape = DmaReshapeOp(device_block.args[1], memory_type)
-    dma_copy = DmaCopyOp(device_block.args[2], view.result)
+    dma_copy = DmaCopyOp(device_block.args[2], subview.result)
     kernel_add = KernelAddOp(
         device_block.args[2],
         device_block.args[0],
@@ -284,7 +298,9 @@ def _build_launch_kernel_module(
     )
     if conflict_attr:
         kernel_add.attributes["cost_kind"] = StringAttr("VECTOR1")
+    loop_block.add_op(dynamic_memory)
     loop_block.add_op(view)
+    loop_block.add_op(subview)
     loop_block.add_op(reshape)
     loop_block.add_op(dma_copy)
     if unsupported_op:
@@ -383,9 +399,13 @@ def test_launch_kernel_cost_func_builds_cost_function_for_vector1_kind() -> None
     assert "iter_args(" in printed
     assert "symbol.yield" in printed
     assert "symbol.add" in printed
+    assert "arch.get_dynamic_memory" in printed
     assert '"dma.view"' in printed
+    assert '"dma.subview"' in printed
     assert '"dma.reshape"' in printed
+    assert 'op_name = "arch.get_dynamic_memory"' not in printed
     assert 'op_name = "dma.view"' not in printed
+    assert 'op_name = "dma.subview"' not in printed
     assert 'op_name = "dma.reshape"' not in printed
     assert ' kind = "VECTOR1"' not in printed
     assert printed.count("tuner.cost") == 2

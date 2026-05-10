@@ -915,9 +915,22 @@ class KernelEmitter:
         return f"{return_type} {func_name}({', '.join(params)})"
 
     def _bind_rewritten_out_result(self, func_op: func.FuncOp, op: Operation) -> None:
-        """把 rewrite 后仍保留 memory result 的 DMA op 绑定到首个 out 参数。"""
+        """把 rewrite 后仍保留 memory result 的 DMA op 绑定到首个 out 参数。
+
+
+        功能说明:
+        - 仅对无返回值且首参为 `nn.memory` 的 out-param 函数生效。
+        - sibling cost function 会返回 `!symbol.int`，首参不是 out-param，不能把局部 DMA 结果绑定成 `arg0`。
+
+        使用示例:
+        - self._bind_rewritten_out_result(func_op, op)
+        """
 
         if not func_op.args or not op.results or len(op.results) != 1:
+            return
+        if list(func_op.function_type.outputs.data):
+            return
+        if not isinstance(func_op.args[0].type, NnMemoryType):
             return
         if not isinstance(op, (DmaCastOp, DmaViewOp, DmaReshapeOp)):
             return

@@ -57,6 +57,7 @@ from kernel_gen.dialect.symbol import (
     SymbolIterAttr,
     SymbolLeOp,
     SymbolLtOp,
+    SymbolMaxOp,
     SymbolMulOp,
     SymbolMinOp,
     SymbolNeOp,
@@ -358,6 +359,7 @@ builtin.module {
         (SymbolDivOp, 6, 3, "2", 2),
         (SymbolFloorDivOp, 7, 3, "2", 2),
         (SymbolMinOp, 7, 3, "3", 3),
+        (SymbolMaxOp, 7, 3, "7", 7),
     ],
 )
 def test_symbol_binary_arith_fold_constant_operands(
@@ -717,6 +719,7 @@ def test_symbol_arith_ops_verify_success() -> None:
         SymbolValueType.from_expr("M floordiv N"),
     )
     min_op = SymbolMinOp(_make_symbol_value("T"), _make_symbol_value("N - i"), SymbolValueType.from_expr("min(T, N - i)"))
+    max_op = SymbolMaxOp(_make_symbol_value("T"), _make_symbol_value("N - i"), SymbolValueType.from_expr("max(T, N - i)"))
 
     add_op.verify()
     sub_op.verify()
@@ -724,6 +727,7 @@ def test_symbol_arith_ops_verify_success() -> None:
     div_op.verify()
     floordiv_op.verify()
     min_op.verify()
+    max_op.verify()
 
     assert _print_attr(add_op.result.type) == '!symbol.int<#symbol.expr<M + 1>>'
     assert _print_attr(sub_op.result.type) == '!symbol.int<#symbol.expr<N - 1>>'
@@ -731,6 +735,7 @@ def test_symbol_arith_ops_verify_success() -> None:
     assert _print_attr(div_op.result.type) == '!symbol.int<#symbol.expr<M floordiv N>>'
     assert _print_attr(floordiv_op.result.type) == '!symbol.int<#symbol.expr<M floordiv N>>'
     assert _print_attr(min_op.result.type) == '!symbol.int<#symbol.expr<min(N - i, T)>>'
+    assert _print_attr(max_op.result.type) == '!symbol.int<#symbol.expr<max(N - i, T)>>'
 
 
 # TC-SYM-015A
@@ -781,6 +786,7 @@ builtin.module {
   %quot = symbol.div %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<M floordiv N>>
   %floor = symbol.floordiv %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<M floordiv N>>
   %tail = symbol.min %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<min(M, N)>>
+  %head = symbol.max %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<max(M, N)>>
 }
 """,
     ).parse_module()
@@ -793,6 +799,7 @@ builtin.module {
     assert "symbol.div %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<M floordiv N>>" in printed
     assert "symbol.floordiv %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<M floordiv N>>" in printed
     assert "symbol.min %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<min(M, N)>>" in printed
+    assert "symbol.max %m, %n : !symbol.int<#symbol.expr<M>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<max(M, N)>>" in printed
 
 
 # TC-SYM-017

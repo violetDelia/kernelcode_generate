@@ -137,6 +137,8 @@ def test_api_memory_compile_and_basic_usage() -> None:
 #include "include/api/Memory.h"
 #include "include/npu_demo/Memory.h"
 
+#include <cstdint>
+
 static int fail(int code) {
     return code;
 }
@@ -268,11 +270,18 @@ int main() {
 # 对应测试文件路径: test/include/api/test_memory.py
 def test_memory_member_view_and_reshape_contract() -> None:
     source = r"""
+#include <stdexcept>
+#include <string>
+
 #include "include/api/Memory.h"
 #include "include/npu_demo/Memory.h"
 
 static int fail(int code) {
     return code;
+}
+
+static bool contains(const std::string& value, const char* needle) {
+    return value.find(needle) != std::string::npos;
 }
 
 int main() {
@@ -302,20 +311,49 @@ int main() {
         return fail(4);
     }
 
+    int8_t byte_data[64] = {};
+    long long byte_shape[1] = {64};
+    long long byte_stride[1] = {1};
+    Memory<GM, int8_t> byte_source(byte_data, byte_shape, byte_stride, 1, MemoryFormat::Norm);
+    long long typed_offset_buf[1] = {1};
+    long long typed_size_buf[1] = {2};
+    long long typed_stride_buf[1] = {1};
+    Vector typed_offset(typed_offset_buf, 1);
+    Vector typed_size(typed_size_buf, 1);
+    Vector typed_stride(typed_stride_buf, 1);
+    Memory<GM, float> typed = byte_source.view<float>(typed_offset, typed_size, typed_stride);
+    if (typed.rank() != 1 || typed.get_shape(0) != 2 || typed.get_stride(0) != 1) {
+        return fail(5);
+    }
+    if (typed.data() != reinterpret_cast<float*>(byte_source.data()) + 1) {
+        return fail(6);
+    }
+    long long typed_bad_size_buf[1] = {17};
+    Vector typed_bad_size(typed_bad_size_buf, 1);
+    try {
+        auto bad = byte_source.view<float>(typed_offset, typed_bad_size, typed_stride);
+        (void)bad;
+        return fail(20);
+    } catch (const std::runtime_error& err) {
+        if (!contains(err.what(), "out_of_bounds")) {
+            return fail(21);
+        }
+    }
+
     long long reshape_buf[2] = {2, 3};
     Vector reshape_shape(reshape_buf, 2);
     Memory<GM, float> reshaped = source.reshape(reshape_shape);
     if (reshaped.rank() != 2) {
-        return fail(5);
-    }
-    if (reshaped.get_shape(0) != 2 || reshaped.get_shape(1) != 3) {
-        return fail(6);
-    }
-    if (reshaped.get_stride(0) != 3 || reshaped.get_stride(1) != 1) {
         return fail(7);
     }
-    if (reshaped.data() != source.data()) {
+    if (reshaped.get_shape(0) != 2 || reshaped.get_shape(1) != 3) {
         return fail(8);
+    }
+    if (reshaped.get_stride(0) != 3 || reshaped.get_stride(1) != 1) {
+        return fail(9);
+    }
+    if (reshaped.data() != source.data()) {
+        return fail(10);
     }
     return 0;
 }

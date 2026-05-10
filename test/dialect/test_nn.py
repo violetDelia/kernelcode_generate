@@ -613,19 +613,19 @@ def test_memory_type_rejects_invalid_dim_entry(
 
 
 # TY-014
-# 功能说明: 验证 stride '?' 与 shape '?' 同位时会被拒绝。
-# 使用示例: pytest -q test/dialect/test_nn.py -k test_memory_type_rejects_stride_question_dim_pair
+# 功能说明: 验证 stride '?' 与 shape '?' 同位时作为匿名动态布局通过。
+# 使用示例: pytest -q test/dialect/test_nn.py -k test_memory_type_accepts_stride_question_dim_pair
 # 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn.py
-def test_memory_type_rejects_stride_question_dim_pair() -> None:
-    with pytest.raises(VerifyException, match=r"stride '\?'"):
-        NnMemoryType(
-            ArrayAttr([_expr_attr("?")]),
-            ArrayAttr([_expr_attr("?")]),
-            i32,
-            _make_space("global"),
-        )
+def test_memory_type_accepts_stride_question_dim_pair() -> None:
+    memory_type = NnMemoryType(
+        ArrayAttr([_expr_attr("?")]),
+        ArrayAttr([_expr_attr("?")]),
+        i32,
+        _make_space("global"),
+    )
+    memory_type.verify()
 
 
 # TY-015

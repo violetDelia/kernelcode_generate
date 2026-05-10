@@ -4,7 +4,8 @@
 功能说明:
 - 提供 `memory-pool` pass 的生命周期摘要分析接口。
 - 汇总 `dma.alloc/dma.free` 的生命周期区间与 peak 统计。
-- 显式 `rewrite=True` 时，将片上 `dma.alloc` 改写为 `arch.get_dynamic_memory + dma.subview + dma.reshape`。
+- 显式 `rewrite=True` 时，将可由 dynamic backing 承接的片上 `dma.alloc`
+  改写为 `arch.get_dynamic_memory + dma.view + dma.reshape`；`global` alloc 保留为 summary-only。
 
 API 列表:
 - `class MemoryPoolPass(rewrite: bool = False, fold: bool = True, alignment: int = 1024)`
@@ -44,13 +45,14 @@ from xdsl.dialects.builtin import (
     Float64Type,
     IntegerType,
     ModuleOp,
+    UnrealizedConversionCastOp,
     i8,
 )
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp
-from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaReshapeOp, DmaSubviewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaReshapeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
@@ -353,7 +355,8 @@ class MemoryPoolPass(Pass):
 
         功能说明:
         - 遍历 module 内每个 `func.func` 并生成 summary。
-        - `rewrite=True` 时将片上 alloc 改写为 dynamic memory subview + reshape。
+        - `rewrite=True` 时将可由 dynamic backing 承接的片上 alloc 改写为 dynamic memory view + reshape。
+        - `global` alloc 不属于 `arch.get_dynamic_memory` 输入域，仍参与 summary 但不改写。
 
         使用示例:
         - MemoryPoolPass(rewrite=True, fold=False, alignment=0).apply(Context(), module)
@@ -373,11 +376,27 @@ class MemoryPoolPass(Pass):
             if not isinstance(op, func.FuncOp):
                 continue
             block, ops, op_index, loop_bounds, op_loop = _collect_straight_line_ops(op)
-            alloc_infos = _alloc_infos_from_ops(ops, op_index, loop_bounds, op_loop)
-            summary = _summarize_func(op, alloc_infos, self.alignment)
+            alloc_infos = _alloc_infos_from_ops(
+                ops,
+                op_index,
+                loop_bounds,
+                op_loop,
+                allow_escaping_allocs=not self.rewrite,
+            )
+            summary = _summarize_func(
+                op,
+                alloc_infos,
+                self.alignment,
+                allow_dynamic_alignment=not self.rewrite,
+            )
             self._summaries[summary.func_name] = summary
             if self.rewrite:
-                _rewrite_func(block, alloc_infos, op_loop, self.alignment)
+                _rewrite_func(
+                    block,
+                    _rewrite_supported_alloc_infos(alloc_infos),
+                    op_loop,
+                    self.alignment,
+                )
 
 
 _SPACE_TOKENS = {
@@ -392,6 +411,31 @@ _SPACE_TOKENS = {
 }
 _DYNAMIC_MEMORY_SPACES = {"shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
 _SYMBOL_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _rewrite_supported_alloc_infos(alloc_infos: list[_AllocInfo]) -> list[_AllocInfo]:
+    """筛选可由 dynamic backing 承接的 alloc。
+
+
+    功能说明:
+    - `arch.get_dynamic_memory` 不覆盖 `global`，因此 rewrite 阶段只处理
+      `_DYNAMIC_MEMORY_SPACES` 内的 alloc；summary 仍保留所有 alloc。
+
+    使用示例:
+    - rewrite_infos = _rewrite_supported_alloc_infos(alloc_infos)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    supported: list[_AllocInfo] = []
+    for info in alloc_infos:
+        result_type = info.alloc_op.result.type
+        if result_type.space.space.data in _DYNAMIC_MEMORY_SPACES:
+            supported.append(info)
+    return supported
 
 
 def _parse_bool_option(value: str, name: str) -> bool:
@@ -675,7 +719,6 @@ def _parent_block(op: Operation) -> Block | None:
 def _visit_ops_with_loops(
     ops_list: list[Operation],
     current_loop: LoopOp | None,
-    reject_other_regions: bool,
     ops: list[Operation],
     loop_bounds: dict[LoopOp, tuple[int, int]],
     op_loop: dict[Operation, LoopOp | None],
@@ -686,10 +729,10 @@ def _visit_ops_with_loops(
 
     功能说明:
     - 作为 `_collect_ops_with_loops(...)` 的当前文件私有递归 helper。
-    - 接受 `symbol.for` 与 `scf.for`，其余 region 在 rewrite 路径拒绝。
+    - 接受 `symbol.for` 与 `scf.for`，其余 region 直接拒绝。
 
     使用示例:
-    - index = _visit_ops_with_loops(list(block.ops), None, True, ops, loop_bounds, op_loop, 0)
+    - index = _visit_ops_with_loops(list(block.ops), None, ops, loop_bounds, op_loop, 0)
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -715,7 +758,6 @@ def _visit_ops_with_loops(
             index = _visit_ops_with_loops(
                 list(blocks[0].ops),
                 op,
-                reject_other_regions,
                 ops,
                 loop_bounds,
                 op_loop,
@@ -724,31 +766,19 @@ def _visit_ops_with_loops(
             loop_end = index - 1
             loop_bounds[op] = (loop_start, loop_end)
             continue
-        if reject_other_regions:
-            raise KernelCodeError(
-                ErrorKind.CONTRACT,
-                ErrorModule.PASS,
-                "MemoryPoolUnsupportedRegionEscape: nested regions are not supported",
-            )
-        for region in op.regions:
-            for block in region.blocks:
-                index = _visit_ops_with_loops(
-                    list(block.ops),
-                    current_loop,
-                    reject_other_regions,
-                    ops,
-                    loop_bounds,
-                    op_loop,
-                    index,
-                )
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "MemoryPoolUnsupportedRegionEscape: nested regions are not supported",
+        )
     return index
 
 
-def _collect_ops_with_loops(
-    blocks: list[Block],
-    *,
-    reject_other_regions: bool,
-) -> tuple[list[Operation], dict[LoopOp, tuple[int, int]], dict[Operation, LoopOp | None]]:
+def _collect_ops_with_loops(blocks: list[Block]) -> tuple[
+    list[Operation],
+    dict[LoopOp, tuple[int, int]],
+    dict[Operation, LoopOp | None],
+]:
     """收集 op 列表并记录 loop 的词法范围。
 
 
@@ -772,7 +802,6 @@ def _collect_ops_with_loops(
         index = _visit_ops_with_loops(
             list(block.ops),
             None,
-            reject_other_regions,
             ops,
             loop_bounds,
             op_loop,
@@ -807,23 +836,26 @@ def _collect_straight_line_ops(
             "MemoryPoolUnsupportedControlFlow: function must have single block",
         )
     block = func_op.body.blocks[0]
-    ops, loop_bounds, op_loop = _collect_ops_with_loops([block], reject_other_regions=True)
+    ops, loop_bounds, op_loop = _collect_ops_with_loops([block])
     op_index = {op: idx for idx, op in enumerate(ops)}
     return block, ops, op_index, loop_bounds, op_loop
 
 
 def _has_escaping_use(
     alloc_op: DmaAllocOp,
+    op_index: dict[Operation, int],
+    loop_bounds: dict[LoopOp, tuple[int, int]],
     op_loop: dict[Operation, LoopOp | None],
 ) -> bool:
     """判断 alloc 是否存在 escaping use。
 
 
     功能说明:
-    - 返回 True 表示 alloc 结果逃逸到 loop 外或被直接 return。
+    - 返回 True 表示 alloc 结果逃逸到所在 loop 词法范围外或被直接 return。
+    - alloc 在外层 loop 内、被内层 loop 使用仍由外层 replacement 支配，不属于 escaping use。
 
     使用示例:
-    - if _has_escaping_use(alloc_op, op_loop): ...
+    - if _has_escaping_use(alloc_op, op_index, loop_bounds, op_loop): ...
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -836,7 +868,13 @@ def _has_escaping_use(
         user = use.operation
         if isinstance(user, func.ReturnOp):
             return True
-        if alloc_loop is not None and op_loop.get(user) is not alloc_loop:
+        if alloc_loop is None:
+            continue
+        user_index = op_index.get(user)
+        if user_index is None:
+            return True
+        loop_start, loop_end = loop_bounds[alloc_loop]
+        if user_index < loop_start or user_index > loop_end:
             return True
     return False
 
@@ -872,12 +910,15 @@ def _alloc_infos_from_ops(
     op_index: dict[Operation, int],
     loop_bounds: dict[LoopOp, tuple[int, int]],
     op_loop: dict[Operation, LoopOp | None],
+    *,
+    allow_escaping_allocs: bool = False,
 ) -> list[_AllocInfo]:
     """从词法 op 列表构造 alloc 生命周期信息。
 
 
     功能说明:
     - 统一 summary 与 rewrite 的 alloc/free 配对、dtype、shape 与 loop 生命周期校验。
+    - analysis-only 路径可保留 escaping alloc 摘要，rewrite 路径仍稳定拒绝。
     - 无 free alloc 的生命周期按所在 region 结束处理。
 
     使用示例:
@@ -902,7 +943,7 @@ def _alloc_infos_from_ops(
                 ErrorModule.PASS,
                 "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
             )
-        if _has_escaping_use(op, op_loop):
+        if _has_escaping_use(op, op_index, loop_bounds, op_loop) and not allow_escaping_allocs:
             raise KernelCodeError(
                 ErrorKind.CONTRACT,
                 ErrorModule.PASS,
@@ -981,14 +1022,14 @@ def _alloc_infos_from_ops(
     return alloc_infos
 
 
-def _align_expr(expr: sp.Basic, alignment: int) -> sp.Basic:
+def _align_expr(expr: sp.Basic, alignment: int, *, allow_dynamic: bool = False) -> sp.Basic:
     """对 byte offset 表达式执行公开 alignment 规则。
 
 
     功能说明:
     - `alignment=0` 直接返回原表达式。
     - 静态整数表达式使用 `align_up`。
-    - 动态表达式无法机械物化时按 unimplemented 失败。
+    - 动态表达式无法机械物化时默认按 unimplemented 失败；analysis-only summary 可显式允许保留原表达式。
 
     使用示例:
     - offset = _align_expr(sp.Integer(514), 1024)
@@ -1006,6 +1047,8 @@ def _align_expr(expr: sp.Basic, alignment: int) -> sp.Basic:
     if isinstance(expr, sp.Integer) or (expr.is_number and expr.is_integer):
         value = int(expr)
         return sp.Integer(((value + alignment - 1) // alignment) * alignment)
+    if allow_dynamic:
+        return sp.simplify(expr)
     raise KernelCodeError(
         ErrorKind.UNIMPLEMENTED,
         ErrorModule.PASS,
@@ -1072,12 +1115,15 @@ def _summarize_func(
     func_op: func.FuncOp,
     alloc_infos: list[_AllocInfo],
     alignment: int,
+    *,
+    allow_dynamic_alignment: bool = False,
 ) -> MemoryPoolSummary:
     """生成单个 func 的 summary。
 
 
     功能说明:
     - 解析 alloc/free 区间并计算线性 offset 与 peak 统计。
+    - analysis-only 路径可允许动态 aligned offset 保留原表达式，避免不改写时阻断 IR 继续 lowering。
 
     使用示例:
     - summary = _summarize_func(func_op, alloc_infos, 1024)
@@ -1092,7 +1138,7 @@ def _summarize_func(
     intervals: list[MemoryPoolInterval] = []
     for alloc_index, info in enumerate(alloc_infos, start=1):
         current = current_by_bucket.get(info.bucket_key, sp.Integer(0))
-        offset = _align_expr(current, alignment)
+        offset = _align_expr(current, alignment, allow_dynamic=allow_dynamic_alignment)
         intervals.append(
             MemoryPoolInterval(
                 _alloc_name(info.alloc_op.result, alloc_index),
@@ -1151,6 +1197,7 @@ def _material_from_existing(value: SSAValue) -> _SymbolMaterial:
 
     功能说明:
     - 不新增 IR op，仅记录表达文本与 sympy 表达式。
+    - 匿名 `?` 不能作为 material 语义使用，调用方需先把它绑定到 result layout 表达。
 
     使用示例:
     - material = _material_from_existing(arg)
@@ -1162,7 +1209,86 @@ def _material_from_existing(value: SSAValue) -> _SymbolMaterial:
     """
 
     expr_text = _symbol_expr_from_type(value)
+    if not expr_text or expr_text == "?":
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "MemoryPoolUnsupportedShape: anonymous shape is not supported",
+        )
     return _SymbolMaterial(value, expr_text, _sympy_expr_from_text(expr_text))
+
+
+def _material_from_existing_as(value: SSAValue, expr_text: str) -> tuple[list[Operation], _SymbolMaterial]:
+    """把已有 symbol SSA 转成指定公开表达文本。
+
+
+    功能说明:
+    - full-rank `dma.alloc.dynamic_shape` 允许 operand 类型为 `!symbol.int<"?">`。
+    - 通过 `builtin.unrealized_conversion_cast` 在 metadata 区域把 runtime value 绑定到 result layout 的 `SymbolExprAttr` 语义。
+
+    使用示例:
+    - ops, material = _material_from_existing_as(arg, "M")
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    cast = UnrealizedConversionCastOp.get([value], [SymbolValueType.from_expr(expr_text)])
+    return [cast], _SymbolMaterial(cast.results[0], expr_text, _sympy_expr_from_text(expr_text))
+
+
+def _find_visible_symbol_value_by_expr(
+    expr_text: str,
+    target_block: Block | None,
+    func_block: Block | None,
+    anchor: Operation,
+) -> SSAValue | None:
+    """查找可见的同语义 symbol SSA。
+
+
+    功能说明:
+    - memory-pool metadata 可能插到一组 alloc 的首个 alloc 前。
+    - 若后续 alloc 的 dynamic_shape operand 定义在插入点之后，则优先复用函数参数、目标 block 参数或目标 block 中已在插入点前出现的同表达 symbol SSA。
+
+    使用示例:
+    - value = _find_visible_symbol_value_by_expr("TILE_M", block, func_block, alloc)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    for block in (func_block, target_block):
+        if block is None:
+            continue
+        for arg in block.args:
+            if isinstance(arg.type, SymbolValueType) and arg.type.get_value() == expr_text:
+                return arg
+    if func_block is not None and target_block is func_block:
+        for op in func_block.ops:
+            if op is anchor:
+                break
+            for result in op.results:
+                if isinstance(result.type, SymbolValueType) and result.type.get_value() == expr_text:
+                    return result
+    if func_block is not None and target_block is not None and target_block is not func_block:
+        for op in func_block.ops:
+            if _op_contains_block(op, target_block):
+                break
+            for result in op.results:
+                if isinstance(result.type, SymbolValueType) and result.type.get_value() == expr_text:
+                    return result
+    if target_block is not None and target_block is not func_block:
+        for op in target_block.ops:
+            if op is anchor:
+                break
+            for result in op.results:
+                if isinstance(result.type, SymbolValueType) and result.type.get_value() == expr_text:
+                    return result
+    return None
 
 
 def _sympy_expr_from_text(expr_text: str) -> sp.Basic:
@@ -1181,13 +1307,14 @@ def _sympy_expr_from_text(expr_text: str) -> sp.Basic:
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    names = set(_SYMBOL_NAME_PATTERN.findall(expr_text))
+    normalized_text = expr_text.replace(" floordiv ", " // ")
+    names = set(_SYMBOL_NAME_PATTERN.findall(normalized_text))
     local_symbols = {
         name: sp.Symbol(name, integer=True, positive=True)
         for name in names
         if name != "min"
     }
-    return sp.sympify(expr_text, locals=local_symbols)
+    return sp.sympify(normalized_text, locals=local_symbols)
 
 
 def _const_material(value: int) -> tuple[SymbolConstOp, _SymbolMaterial]:
@@ -1364,15 +1491,21 @@ def _find_dynamic_shape_value(info: _AllocInfo, dim: SymbolExprAttr, index: int)
     )
 
 
-def _shape_materials(info: _AllocInfo) -> tuple[list[Operation], tuple[_SymbolMaterial, ...]]:
+def _shape_materials(
+    info: _AllocInfo,
+    target_block: Block | None = None,
+    func_block: Block | None = None,
+    anchor: Operation | None = None,
+) -> tuple[list[Operation], tuple[_SymbolMaterial, ...]]:
     """为 alloc result shape 生成 reshape 所需 symbol 值。
 
 
     功能说明:
-    - 静态维生成 `symbol.const`；动态维复用 `dma.alloc` 的公开 dynamic_shape operand。
+    - 静态维生成 `symbol.const`。
+    - 动态维优先复用可见的同语义 symbol SSA；full-rank `?` operand 会按 result layout 显式转换。
 
     使用示例:
-    - ops, dims = _shape_materials(info)
+    - ops, dims = _shape_materials(info, block, func_block, anchor=alloc)
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -1381,14 +1514,9 @@ def _shape_materials(info: _AllocInfo) -> tuple[list[Operation], tuple[_SymbolMa
     """
 
     result_type = info.alloc_op.result.type
-    if not isinstance(result_type, NnMemoryType):
-        raise KernelCodeError(
-            ErrorKind.CONTRACT,
-            ErrorModule.PASS,
-            "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
-        )
     ops: list[Operation] = []
     values: list[_SymbolMaterial] = []
+    search_anchor = anchor or info.alloc_op
     for index, dim in enumerate(result_type.shape.data):
         if isinstance(dim, SymbolExprAttr):
             dim_text = dim.expr.data
@@ -1403,7 +1531,43 @@ def _shape_materials(info: _AllocInfo) -> tuple[list[Operation], tuple[_SymbolMa
                 ops.append(op)
                 values.append(material)
                 continue
-            values.append(_material_from_existing(_find_dynamic_shape_value(info, dim, index)))
+            dynamic_value = _find_dynamic_shape_value(info, dim, index)
+            dynamic_text = _symbol_expr_from_type(dynamic_value)
+            visible_value = None
+            if target_block is not None and func_block is not None:
+                dynamic_value_visible = _symbol_value_visible_from_block(
+                    dynamic_value,
+                    target_block,
+                    func_block,
+                ) and _symbol_value_visible_at_anchor(dynamic_value, target_block, func_block, search_anchor)
+                if dynamic_text == dim_text and dynamic_value_visible:
+                    visible_value = dynamic_value
+                elif not isinstance(dynamic_value.owner, Block) or dynamic_value_visible:
+                    visible_value = _find_visible_symbol_value_by_expr(
+                        dim_text,
+                        target_block,
+                        func_block,
+                        search_anchor,
+                    )
+            if visible_value is not None:
+                values.append(_material_from_existing(visible_value))
+            elif dynamic_text == "?":
+                if (
+                    target_block is not None
+                    and func_block is not None
+                    and _symbol_value_visible_at_anchor(dynamic_value, target_block, func_block, search_anchor)
+                ):
+                    material_ops, material = _material_from_existing_as(dynamic_value, dim_text)
+                    ops.extend(material_ops)
+                    values.append(material)
+                else:
+                    raise KernelCodeError(
+                        ErrorKind.UNIMPLEMENTED,
+                        ErrorModule.PASS,
+                        "MemoryPoolUnsupportedControlFlow: dynamic loop alloc size does not dominate later offset",
+                    )
+            else:
+                values.append(_material_from_existing(dynamic_value))
             continue
         raise KernelCodeError(
             ErrorKind.CONTRACT,
@@ -1418,8 +1582,8 @@ def _symbol_value_visible_from_block(value: SSAValue, target_block: Block, func_
 
 
     功能说明:
-    - 函数体内定义的 symbol 值可以被函数体后续 op 与嵌套 loop body 使用。
-    - loop body 内定义的 symbol 值只允许在同一 loop body 内使用，不能泄漏到函数体后续 offset。
+    - 目标 block 及其词法祖先 block 中定义的 symbol 值可以被目标 block 使用。
+    - 子 block 或 sibling block 内定义的 symbol 值不能泄漏到目标 block。
 
     使用示例:
     - if not _symbol_value_visible_from_block(dim.value, block, func_block): ...
@@ -1433,9 +1597,149 @@ def _symbol_value_visible_from_block(value: SSAValue, target_block: Block, func_
     owner = value.owner
     if isinstance(owner, Operation):
         owner_block = _parent_block(owner)
-        return owner_block is target_block or owner_block is func_block
+        return owner_block is not None and _block_contains_block(owner_block, target_block)
     if isinstance(owner, Block):
-        return owner is target_block
+        return _block_contains_block(owner, target_block)
+    return False
+
+
+def _block_contains_block(block: Block, target_block: Block) -> bool:
+    """判断 block 是否是 target_block 的词法祖先或自身。
+
+
+    功能说明:
+    - 用于 memory-pool 判断父 loop / func block 中的 SSA 是否可被嵌套 block 使用。
+
+    使用示例:
+    - if _block_contains_block(func_block, loop_body): ...
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    if block is target_block:
+        return True
+    for op in block.ops:
+        if _op_contains_block(op, target_block):
+            return True
+    return False
+
+
+def _op_contains_block(op: Operation, target_block: Block) -> bool:
+    """判断 op 的 region 树是否包含目标 block。
+
+
+    功能说明:
+    - 用于判断函数体 op 是否是当前嵌套 block 的父级控制流。
+    - 父级控制流 op 本身及其后续结果不能作为该嵌套 block 内 metadata 的可见值。
+
+    使用示例:
+    - if _op_contains_block(loop_op, loop_body): ...
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    for region in op.regions:
+        for block in region.blocks:
+            if block is target_block:
+                return True
+            for child in block.ops:
+                if _op_contains_block(child, target_block):
+                    return True
+    return False
+
+
+def _op_precedes_target_block_parent(op: Operation, target_block: Block, block: Block) -> bool:
+    """判断 op 是否位于通往 target_block 的父控制流 op 之前。
+
+
+    功能说明:
+    - 当 metadata 插入到嵌套 block 时，祖先 block 中只有父控制流 op 之前的 SSA 能支配目标 block。
+
+    使用示例:
+    - if _op_precedes_target_block_parent(dim_op, loop_body, outer_block): ...
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    for candidate in block.ops:
+        if candidate is op:
+            return True
+        if _op_contains_block(candidate, target_block):
+            return False
+    return False
+
+
+def _op_precedes_anchor(op: Operation, anchor: Operation, block: Block) -> bool:
+    """判断 op 是否在同一 block 的 anchor 之前。
+
+
+    功能说明:
+    - memory-pool 会把一组 metadata 统一插入到 anchor 前。
+    - 只有 anchor 前已定义的 SSA 才能被这些 metadata 使用。
+
+    使用示例:
+    - if _op_precedes_anchor(dim_op, alloc_op, block): ...
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    for candidate in block.ops:
+        if candidate is op:
+            return True
+        if candidate is anchor:
+            return False
+    return False
+
+
+def _symbol_value_visible_at_anchor(
+    value: SSAValue,
+    target_block: Block,
+    func_block: Block,
+    anchor: Operation,
+) -> bool:
+    """判断 symbol SSA 在 metadata anchor 前是否可用。
+
+
+    功能说明:
+    - block 参数在对应 block 内始终可用，函数参数也可供嵌套 block 使用。
+    - op result 必须已经位于当前 metadata 插入 anchor 之前。
+    - 嵌套 block 可使用位于其父控制流 op 之前的函数体 SSA，不能使用父 op 之后的函数体 SSA。
+
+    使用示例:
+    - if _symbol_value_visible_at_anchor(value, block, func_block, anchor): ...
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    owner = value.owner
+    if isinstance(owner, Block):
+        return _block_contains_block(owner, target_block)
+    if not isinstance(owner, Operation):
+        return False
+    owner_block = _parent_block(owner)
+    if owner_block is None or not _block_contains_block(owner_block, target_block):
+        return False
+    if owner_block is target_block:
+        return _op_precedes_anchor(owner, anchor, target_block)
+    if owner_block is func_block and target_block is func_block:
+        return _op_precedes_anchor(owner, anchor, func_block)
+    if owner_block is not target_block:
+        return _op_precedes_target_block_parent(owner, target_block, owner_block)
     return False
 
 
@@ -1443,6 +1747,7 @@ def _shape_materials_for_block(
     info: _AllocInfo,
     target_block: Block,
     func_block: Block,
+    anchor: Operation | None = None,
 ) -> tuple[list[Operation], tuple[_SymbolMaterial, ...]]:
     """为指定 block 生成 shape material 并校验动态维支配关系。
 
@@ -1452,7 +1757,7 @@ def _shape_materials_for_block(
     - 动态维只能复用对目标 block 可见的已有 `!symbol.int` SSA；不可见时公开拒绝 rewrite。
 
     使用示例:
-    - ops, dims = _shape_materials_for_block(info, func_block, func_block)
+    - ops, dims = _shape_materials_for_block(info, func_block, func_block, anchor=alloc)
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -1460,7 +1765,7 @@ def _shape_materials_for_block(
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    shape_ops, shape_values = _shape_materials(info)
+    shape_ops, shape_values = _shape_materials(info, target_block, func_block, anchor=anchor)
     generated_ops = set(shape_ops)
     for material in shape_values:
         owner = material.value.owner
@@ -1476,21 +1781,16 @@ def _shape_materials_for_block(
     return shape_ops, shape_values
 
 
-def _numel_material(
-    dims: tuple[_SymbolMaterial, ...],
-    *,
-    prefer_mul: bool,
-) -> tuple[list[Operation], _SymbolMaterial]:
+def _numel_material(dims: tuple[_SymbolMaterial, ...]) -> tuple[list[Operation], _SymbolMaterial]:
     """生成 flat result 的元素数量 symbol 值。
 
 
     功能说明:
     - rank-1 直接复用该维度。
-    - 动态维或 `prefer_mul=True` 时使用 `symbol.mul` 链。
-    - 纯静态多 alloc 场景可直接生成 `symbol.const <numel>`。
+    - 多维场景统一使用 `symbol.mul` 链，避免在不同 metadata block 中出现两套物化策略。
 
     使用示例:
-    - ops, numel = _numel_material(dims, prefer_mul=True)
+    - ops, numel = _numel_material(dims)
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -1504,39 +1804,12 @@ def _numel_material(
     if len(dims) == 1:
         return [], dims[0]
 
-    has_dynamic = any(not isinstance(dim.expr, sp.Integer) for dim in dims)
-    if has_dynamic or prefer_mul:
-        ops: list[Operation] = []
-        current = dims[0]
-        for dim in dims[1:]:
-            op, current = _mul_material(current, dim)
-            ops.append(op)
-        return ops, current
-
-    numel = sp.Integer(1)
-    for dim in dims:
-        numel *= dim.expr
-    op, material = _const_material(int(numel))
-    return [op], material
-
-
-def _is_static_dims(dims: tuple[_SymbolMaterial, ...]) -> bool:
-    """判断 shape 维度是否全为静态整数。
-
-
-    功能说明:
-    - 为 rewrite 的稳定 IR 物化策略提供分支依据。
-
-    使用示例:
-    - if _is_static_dims(dims): ...
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    return all(isinstance(dim.expr, sp.Integer) for dim in dims)
+    ops: list[Operation] = []
+    current = dims[0]
+    for dim in dims[1:]:
+        op, current = _mul_material(current, dim)
+        ops.append(op)
+    return ops, current
 
 
 def _offset_material(
@@ -1545,12 +1818,11 @@ def _offset_material(
     alignment: int,
     *,
     zero: _SymbolMaterial,
-    prior_numels_same_dtype: list[_SymbolMaterial],
     prior_numels: list[tuple[_SymbolMaterial, int]],
     force_floordiv: bool,
     ratio_materials: dict[int, _SymbolMaterial] | None = None,
 ) -> tuple[list[Operation], _SymbolMaterial]:
-    """生成当前 alloc 的 subview offset。
+    """生成当前 alloc 的 view offset。
 
 
     功能说明:
@@ -1558,7 +1830,7 @@ def _offset_material(
     - 只有已证明整除时才物化 `symbol.floordiv`。
 
     使用示例:
-    - ops, offset = _offset_material(current_bytes, 4, 0, zero=zero, prior_numels_same_dtype=[a], prior_numels=[(a, 4)], force_floordiv=False)
+    - ops, offset = _offset_material(current_bytes, 4, 0, zero=zero, prior_numels=[(a, 4)], force_floordiv=False)
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -1569,14 +1841,6 @@ def _offset_material(
     aligned_bytes = _align_expr(current_bytes, alignment)
     if aligned_bytes == 0:
         return [], zero
-
-    if alignment == 0 and prior_numels_same_dtype and not force_floordiv:
-        ops: list[Operation] = []
-        current = zero
-        for prior in prior_numels_same_dtype:
-            op, current = _add_material(current, prior)
-            ops.append(op)
-        return ops, current
 
     if alignment == 0 and prior_numels and not force_floordiv:
         if any(not isinstance(numel.expr, sp.Integer) for numel, _ in prior_numels):
@@ -1659,75 +1923,8 @@ def _dynamic_offset_from_prior_numels(
     return ops, current
 
 
-def _element_key(info: _AllocInfo) -> str:
-    """返回 alloc element type 的稳定内部 key。
-
-
-    功能说明:
-    - 区分 `f32` 与 `i32` 这类 byte size 相同但公开 dtype 不同的 alloc。
-
-    使用示例:
-    - key = _element_key(info)
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    result_type = info.alloc_op.result.type
-    if not isinstance(result_type, NnMemoryType):
-        raise KernelCodeError(
-            ErrorKind.CONTRACT,
-            ErrorModule.PASS,
-            "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
-        )
-    return repr(result_type.element_type)
-
-
-def _all_numels_static(values: dict[_AllocInfo, _SymbolMaterial]) -> bool:
-    """判断一组 numel material 是否均为静态整数。
-
-
-    功能说明:
-    - 为静态 mixed dtype offset 选择 byte const + floordiv 物化路径。
-
-    使用示例:
-    - if _all_numels_static(numel_by_info): ...
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    return all(isinstance(material.expr, sp.Integer) for material in values.values())
-
-
-def _bucket_has_mixed_element(
-    group_infos: list[_AllocInfo],
-    bucket: tuple[str],
-) -> bool:
-    """判断同一 bucket 内是否存在多个公开 dtype。
-
-
-    功能说明:
-    - mixed dtype 需要按 byte offset 证明可整除，不能复用同 dtype 元素累计路径。
-
-    使用示例:
-    - mixed = _bucket_has_mixed_element(group_infos, ("#TSM",))
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    return len({_element_key(info) for info in group_infos if info.bucket_key == bucket}) > 1
-
-
 def _flat_result_type(info: _AllocInfo, numel: _SymbolMaterial) -> NnMemoryType:
-    """生成 dma.subview 的一维 typed result type。
+    """生成 dma.view 的一维 typed result type。
 
 
     功能说明:
@@ -1743,12 +1940,6 @@ def _flat_result_type(info: _AllocInfo, numel: _SymbolMaterial) -> NnMemoryType:
     """
 
     result_type = info.alloc_op.result.type
-    if not isinstance(result_type, NnMemoryType):
-        raise KernelCodeError(
-            ErrorKind.CONTRACT,
-            ErrorModule.PASS,
-            "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
-        )
     if isinstance(numel.expr, sp.Integer):
         shape_attr = SymbolExprAttr.from_expr(str(int(numel.expr)))
     else:
@@ -1791,10 +1982,53 @@ def _metadata_group_block(info: _AllocInfo, op_loop: dict[Operation, LoopOp | No
     return func_block
 
 
+def _metadata_group_anchor(
+    group_block: Block,
+    group_infos: list[_AllocInfo],
+    op_loop: dict[Operation, LoopOp | None],
+    func_block: Block,
+) -> Operation:
+    """选择一组 metadata op 的真实插入 anchor。
+
+
+    功能说明:
+    - 函数体 group 插到该 group 中最早的函数体 alloc 前。
+    - loop group 插到该 group 第一个 alloc 前。
+
+    使用示例:
+    - anchor = _metadata_group_anchor(block, infos, op_loop, func_block)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    anchor = group_infos[0].alloc_op
+    if group_block is not func_block:
+        return anchor
+    candidate_indices = [
+        list(func_block.ops).index(info.alloc_op)
+        for info in group_infos
+        if _parent_block(info.alloc_op) is func_block
+    ]
+    if candidate_indices:
+        return list(func_block.ops)[min(candidate_indices)]
+    loop_ops = [
+        op_loop[info.alloc_op]
+        for info in group_infos
+        if op_loop.get(info.alloc_op) is not None
+    ]
+    if loop_ops:
+        return loop_ops[0]
+    return anchor
+
+
 def _materialize_prior_numel_for_block(
     info: _AllocInfo,
     target_block: Block,
     func_block: Block,
+    anchor: Operation,
     cache: dict[_AllocInfo, _SymbolMaterial],
     metadata_ops: list[Operation],
 ) -> _SymbolMaterial:
@@ -1803,10 +2037,10 @@ def _materialize_prior_numel_for_block(
 
     功能说明:
     - 用于后续函数体 alloc 的 offset 依赖前面 loop 内动态 alloc 大小的场景。
-    - 重新物化可避免函数体 `dma.subview.offset` 引用 loop body 内 SSA。
+    - 重新物化可避免函数体 `dma.view.offset` 引用 loop body 内 SSA。
 
     使用示例:
-    - material = _materialize_prior_numel_for_block(info, func_block, func_block, cache, ops)
+    - material = _materialize_prior_numel_for_block(info, func_block, func_block, anchor, cache, ops)
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -1816,9 +2050,9 @@ def _materialize_prior_numel_for_block(
 
     if info in cache:
         return cache[info]
-    shape_ops, dims = _shape_materials_for_block(info, target_block, func_block)
+    shape_ops, dims = _shape_materials_for_block(info, target_block, func_block, anchor=anchor)
     metadata_ops.extend(shape_ops)
-    numel_ops, numel = _numel_material(dims, prefer_mul=not _is_static_dims(dims))
+    numel_ops, numel = _numel_material(dims)
     metadata_ops.extend(numel_ops)
     cache[info] = numel
     return numel
@@ -1828,6 +2062,7 @@ def _prior_numels_for_block(
     prior_entries: list[tuple[_AllocInfo, _SymbolMaterial, int]],
     target_block: Block,
     func_block: Block,
+    anchor: Operation,
     cache: dict[_AllocInfo, _SymbolMaterial],
     metadata_ops: list[Operation],
 ) -> list[tuple[_SymbolMaterial, int]]:
@@ -1839,7 +2074,7 @@ def _prior_numels_for_block(
     - 不支配目标 block 的 material 按 prior alloc 重新在目标 block 物化。
 
     使用示例:
-    - prior_numels = _prior_numels_for_block(processed, block, func_block, cache, metadata_ops)
+    - prior_numels = _prior_numels_for_block(processed, block, func_block, anchor, cache, metadata_ops)
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -1860,6 +2095,7 @@ def _prior_numels_for_block(
             info,
             target_block,
             func_block,
+            anchor,
             cache,
             metadata_ops,
         )
@@ -1878,6 +2114,7 @@ def _prepare_rewrite_infos(
 
     功能说明:
     - 按 `func + space` 线性切分，不做生命周期复用。
+    - 每个 alloc 独立选择自身可支配的 metadata anchor，避免后续 alloc 的 shape SSA 被提前引用。
     - 生成 metadata 时只使用公开 symbol dialect op。
 
     使用示例:
@@ -1889,225 +2126,65 @@ def _prepare_rewrite_infos(
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    grouped: list[tuple[Block, list[_AllocInfo]]] = []
-    for info in alloc_infos:
-        group_block = _metadata_group_block(info, op_loop, func_block)
-        if grouped and grouped[-1][0] is group_block:
-            grouped[-1][1].append(info)
-        else:
-            grouped.append((group_block, [info]))
-
     result: dict[_AllocInfo, _RewriteInfo] = {}
     current_by_bucket: dict[tuple[str], sp.Basic] = {}
     processed_numels_by_bucket: dict[tuple[str], list[tuple[_AllocInfo, _SymbolMaterial, int]]] = {}
-    for group_block, group_infos in grouped:
+    for info in alloc_infos:
+        group_block = _metadata_group_block(info, op_loop, func_block)
+        group_anchor = _metadata_group_anchor(group_block, [info], op_loop, func_block)
         zero_op, zero = _const_material(0)
         one_op, one = _const_material(1)
         metadata_ops: list[Operation] = [zero_op]
-        if len(group_infos) > 1:
-            metadata_ops.append(one_op)
 
-        shape_by_info: dict[_AllocInfo, tuple[_SymbolMaterial, ...]] = {}
-        numel_ops_by_info: dict[_AllocInfo, list[Operation]] = {}
-        numel_by_info: dict[_AllocInfo, _SymbolMaterial] = {}
-        ratio_materials: dict[int, _SymbolMaterial] = {}
-        rematerialized_prior_numel_by_info: dict[_AllocInfo, _SymbolMaterial] = {}
-
-        for index, info in enumerate(group_infos):
-            if all(isinstance(candidate.size_bytes_expr, sp.Integer) for candidate in group_infos):
-                continue
-            prior_infos = [
-                prior
-                for prior in group_infos[:index]
-                if prior.bucket_key == info.bucket_key
-            ]
-            if not prior_infos:
-                continue
-            if alignment != 0:
-                continue
-            if not _bucket_has_mixed_element(group_infos, info.bucket_key):
-                continue
-            for prior in prior_infos:
-                if prior.dtype_size % info.dtype_size != 0:
-                    continue
-                ratio = prior.dtype_size // info.dtype_size
-                if ratio > 1 and ratio not in ratio_materials:
-                    ratio_op, ratio_material = _const_material(ratio)
-                    metadata_ops.append(ratio_op)
-                    ratio_materials[ratio] = ratio_material
-
-        for info in group_infos:
-            shape_ops, shape_values = _shape_materials(info)
-            metadata_ops.extend(shape_ops)
-            shape_by_info[info] = shape_values
-
-        for info in group_infos:
-            dims = shape_by_info[info]
-            has_multiple_buckets = len({candidate.bucket_key for candidate in group_infos}) > 1
-            prefer_mul = (
-                len(group_infos) == 1
-                or has_multiple_buckets
-                or not _is_static_dims(dims)
-                or alignment != 0
-                or isinstance(op_loop.get(info.alloc_op), SymbolForOp)
-            )
-            numel_ops, numel = _numel_material(dims, prefer_mul=prefer_mul)
-            numel_ops_by_info[info] = numel_ops
-            numel_by_info[info] = numel
-
-        if len(group_infos) == 1:
-            metadata_ops.extend(numel_ops_by_info[group_infos[0]])
-            metadata_ops.append(one_op)
-        emit_numels_before_offsets = (
-            len(group_infos) > 1
-            and (
-                alignment != 0
-                or _all_numels_static(numel_by_info)
-                or not any(
-                    _bucket_has_mixed_element(group_infos, info.bucket_key)
-                    and not isinstance(numel_by_info[info].expr, sp.Integer)
-                    for info in group_infos
-                )
-            )
+        shape_ops, shape_values = _shape_materials(
+            info,
+            group_block,
+            func_block,
+            anchor=group_anchor,
         )
-        if emit_numels_before_offsets:
-            for info in group_infos:
-                metadata_ops.extend(numel_ops_by_info[info])
+        metadata_ops.extend(shape_ops)
+        numel_ops, numel = _numel_material(shape_values)
+        metadata_ops.extend(numel_ops)
+        metadata_ops.append(one_op)
 
-        static_mixed_byte_by_info: dict[_AllocInfo, _SymbolMaterial] = {}
-        static_mixed_dtype_by_info: dict[_AllocInfo, _SymbolMaterial] = {}
-        if alignment == 0 and _all_numels_static(numel_by_info):
-            for bucket in {info.bucket_key for info in group_infos}:
-                bucket_infos = [info for info in group_infos if info.bucket_key == bucket]
-                if len(bucket_infos) < 2 or not _bucket_has_mixed_element(group_infos, bucket):
-                    continue
-                for info in bucket_infos[:-1]:
-                    byte_count = int(numel_by_info[info].expr) * info.dtype_size
-                    byte_op, byte_material = _const_material(byte_count)
-                    metadata_ops.append(byte_op)
-                    static_mixed_byte_by_info[info] = byte_material
-                for info in bucket_infos[1:]:
-                    dtype_op, dtype_material = _const_material(info.dtype_size)
-                    metadata_ops.append(dtype_op)
-                    static_mixed_dtype_by_info[info] = dtype_material
+        current = current_by_bucket.get(info.bucket_key, sp.Integer(0))
+        if current == 0:
+            offset_ops: list[Operation] = []
+            offset = zero
+        else:
+            prior_numels: list[tuple[_SymbolMaterial, int]] = []
+            if alignment == 0 and not isinstance(current, sp.Integer):
+                rematerialized_prior_numel_by_info: dict[_AllocInfo, _SymbolMaterial] = {}
+                prior_numels = _prior_numels_for_block(
+                    processed_numels_by_bucket.get(info.bucket_key, []),
+                    group_block,
+                    func_block,
+                    group_anchor,
+                    rematerialized_prior_numel_by_info,
+                    metadata_ops,
+                )
+            offset_ops, offset = _offset_material(
+                current,
+                info.dtype_size,
+                alignment,
+                zero=zero,
+                prior_numels=prior_numels,
+                force_floordiv=alignment != 0,
+                ratio_materials=None,
+            )
+        metadata_ops.extend(offset_ops)
 
-        group_rewrites: dict[_AllocInfo, tuple[list[Operation], _SymbolMaterial]] = {}
-        prior_infos_by_bucket: dict[tuple[str], list[_AllocInfo]] = {}
-        same_element_next_offset: dict[tuple[tuple[str], str], _SymbolMaterial] = {}
-        emitted_numel_infos: set[_AllocInfo] = set(
-            group_infos if emit_numels_before_offsets or len(group_infos) == 1 else ()
+        group_block.insert_ops_before(metadata_ops, group_anchor)
+        result[info] = _RewriteInfo(
+            info,
+            shape_values,
+            numel,
+            offset,
+            one,
+            tuple(metadata_ops),
         )
-        for index, info in enumerate(group_infos):
-            if (
-                not emit_numels_before_offsets
-                and info not in emitted_numel_infos
-                and not prior_infos_by_bucket.get(info.bucket_key)
-            ):
-                metadata_ops.extend(numel_ops_by_info[info])
-                emitted_numel_infos.add(info)
-
-            current = current_by_bucket.get(info.bucket_key, sp.Integer(0))
-            prior_infos = prior_infos_by_bucket.get(info.bucket_key, [])
-            element_key = (info.bucket_key, _element_key(info))
-            all_prior_same_element = bool(prior_infos) and all(
-                _element_key(prior) == _element_key(info) for prior in prior_infos
-            )
-            if current == 0:
-                offset_ops, offset = [], zero
-            elif (
-                alignment == 0
-                and all_prior_same_element
-                and element_key in same_element_next_offset
-            ):
-                offset_ops, offset = [], same_element_next_offset[element_key]
-            elif (
-                alignment == 0
-                and _all_numels_static(numel_by_info)
-                and info in static_mixed_dtype_by_info
-            ):
-                offset_ops = []
-                prior_byte_values = [
-                    static_mixed_byte_by_info[prior]
-                    for prior in prior_infos
-                    if prior in static_mixed_byte_by_info
-                ]
-                byte_offset = prior_byte_values[0]
-                for prior_byte in prior_byte_values[1:]:
-                    add_op, byte_offset = _add_material(byte_offset, prior_byte)
-                    offset_ops.append(add_op)
-                div_op, offset = _floordiv_material(
-                    byte_offset,
-                    static_mixed_dtype_by_info[info],
-                )
-                offset_ops.append(div_op)
-            else:
-                prior_numels: list[tuple[_SymbolMaterial, int]] = []
-                if alignment == 0 and not isinstance(current, sp.Integer):
-                    prior_numels = _prior_numels_for_block(
-                        processed_numels_by_bucket.get(info.bucket_key, []),
-                        group_block,
-                        func_block,
-                        rematerialized_prior_numel_by_info,
-                        metadata_ops,
-                    )
-                offset_ops, offset = _offset_material(
-                    current,
-                    info.dtype_size,
-                    alignment,
-                    zero=zero,
-                    prior_numels_same_dtype=[],
-                    prior_numels=prior_numels,
-                    force_floordiv=alignment != 0,
-                    ratio_materials=ratio_materials,
-                )
-            group_rewrites[info] = (offset_ops, offset)
-            metadata_ops.extend(offset_ops)
-            if info not in emitted_numel_infos:
-                metadata_ops.extend(numel_ops_by_info[info])
-                emitted_numel_infos.add(info)
-
-            next_info = group_infos[index + 1] if index + 1 < len(group_infos) else None
-            if (
-                next_info is not None
-                and next_info.bucket_key == info.bucket_key
-                and _element_key(next_info) == _element_key(info)
-                and alignment == 0
-            ):
-                next_op, next_offset = _add_material(offset, numel_by_info[info])
-                metadata_ops.append(next_op)
-                same_element_next_offset[element_key] = next_offset
-
-            current_by_bucket[info.bucket_key] = sp.simplify(_align_expr(current, alignment) + info.size_bytes_expr)
-            processed_numels_by_bucket.setdefault(info.bucket_key, []).append(
-                (info, numel_by_info[info], info.dtype_size)
-            )
-            prior_infos_by_bucket.setdefault(info.bucket_key, []).append(info)
-
-        anchor = group_infos[0].alloc_op
-        if group_block is func_block:
-            candidate_indices = [
-                list(func_block.ops).index(info.alloc_op)
-                for info in group_infos
-                if _parent_block(info.alloc_op) is func_block
-            ]
-            if candidate_indices:
-                anchor = list(func_block.ops)[min(candidate_indices)]
-            else:
-                loop_ops = [op_loop[info.alloc_op] for info in group_infos if op_loop.get(info.alloc_op) is not None]
-                if loop_ops:
-                    anchor = loop_ops[0]
-        group_block.insert_ops_before(metadata_ops, anchor)
-
-        for info in group_infos:
-            offset_ops, offset = group_rewrites[info]
-            result[info] = _RewriteInfo(
-                info,
-                shape_by_info[info],
-                numel_by_info[info],
-                offset,
-                one,
-                tuple(metadata_ops),
-            )
+        current_by_bucket[info.bucket_key] = sp.simplify(_align_expr(current, alignment) + info.size_bytes_expr)
+        processed_numels_by_bucket.setdefault(info.bucket_key, []).append((info, numel, info.dtype_size))
 
     return result
 
@@ -2133,19 +2210,7 @@ def _dynamic_memory_backing_ops(
     backings: dict[tuple[str], ArchGetDynamicMemoryOp] = {}
     for info in alloc_infos:
         result_type = info.alloc_op.result.type
-        if not isinstance(result_type, NnMemoryType):
-            raise KernelCodeError(
-                ErrorKind.CONTRACT,
-                ErrorModule.PASS,
-                "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
-            )
         space_name = result_type.space.space.data
-        if space_name not in _DYNAMIC_MEMORY_SPACES:
-            raise KernelCodeError(
-                ErrorKind.CONTRACT,
-                ErrorModule.PASS,
-                f"MemoryPoolUnsupportedPoolBucket: dynamic memory space is not supported: {space_name}",
-            )
         key = (space_name,)
         if key not in backings:
             backings[key] = ArchGetDynamicMemoryOp(result_type.space)
@@ -2163,7 +2228,7 @@ def _rewrite_func(
 
     功能说明:
     - 每个 `func + memory space` 在入口生成唯一 `arch.get_dynamic_memory`。
-    - 原 alloc 就地替换为 `dma.subview + dma.reshape`；旧 free 被删除。
+    - 原 alloc 就地替换为 `dma.view + dma.reshape`；旧 free 被删除。
 
     使用示例:
     - _rewrite_func(block, alloc_infos, op_loop, alignment=0)
@@ -2189,22 +2254,16 @@ def _rewrite_func(
     for info in alloc_infos:
         rewrite_info = rewrite_infos[info]
         result_type = info.alloc_op.result.type
-        if not isinstance(result_type, NnMemoryType):
-            raise KernelCodeError(
-                ErrorKind.CONTRACT,
-                ErrorModule.PASS,
-                "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
-            )
         backing = backings[(result_type.space.space.data,)]
-        subview = DmaSubviewOp(
+        view = DmaViewOp(
             backing.result,
-            rewrite_info.offset.value,
-            rewrite_info.numel.value,
-            rewrite_info.one.value,
+            [rewrite_info.offset.value],
+            [rewrite_info.numel.value],
+            [rewrite_info.one.value],
             _flat_result_type(info, rewrite_info.numel),
         )
         reshape = DmaReshapeOp(
-            subview.result,
+            view.result,
             [shape.value for shape in rewrite_info.shape_values],
             result_type,
         )
@@ -2216,7 +2275,7 @@ def _rewrite_func(
                 ErrorModule.PASS,
                 "MemoryPoolLifetimeError: alloc parent block not found",
             )
-        alloc_block.insert_ops_before([subview, reshape], info.alloc_op)
+        alloc_block.insert_ops_before([view, reshape], info.alloc_op)
         info.alloc_op.result.replace_all_uses_with(reshape.result)
         alloc_block.erase_op(info.alloc_op)
 

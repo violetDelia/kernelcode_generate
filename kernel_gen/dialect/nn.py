@@ -410,13 +410,6 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
         for dim in self.stride.data:
             _verify_dim_entry(dim, "stride")
 
-        for shape_dim, stride_dim in zip(self.shape.data, self.stride.data, strict=True):
-            if (
-                _dim_expr_text(stride_dim) == "?"
-                and _dim_expr_text(shape_dim) == "?"
-            ):
-                _raise_verify_error("stride '?' requires corresponding shape dimension to be symbol or integer")
-
 
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """校验并返回 memory type。"""

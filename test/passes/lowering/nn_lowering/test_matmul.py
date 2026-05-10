@@ -169,16 +169,16 @@ def test_nn_lowering_matmul_dynamic_output_dims() -> None:
 
 
 # TC-PASS-NNL-020C
-# 测试目的: 验证 DSL runtime type-level 维度在 matmul contracting 轴同名时可通过公开 NnLoweringPass。
-# 使用示例: pytest -q test/passes/lowering/nn_lowering/test_matmul.py -k test_nn_lowering_matmul_accepts_runtime_contract_dims
+# 测试目的: 验证 DSL 命名符号维度在 matmul contracting 轴同名时可通过公开 NnLoweringPass。
+# 使用示例: pytest -q test/passes/lowering/nn_lowering/test_matmul.py -k test_nn_lowering_matmul_accepts_named_symbol_contract_dims
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_matmul.py
-def test_nn_lowering_matmul_accepts_runtime_contract_dims() -> None:
+def test_nn_lowering_matmul_accepts_named_symbol_contract_dims() -> None:
     space = NnMemorySpaceAttr(StringAttr("global"))
-    lhs_type = memory_type(["runtime_dim_0", "runtime_dim_1"], ["runtime_dim_1", 1], f32, space)
-    rhs_type = memory_type(["runtime_dim_1", "runtime_dim_2"], ["runtime_dim_2", 1], f32, space)
-    result_type = memory_type(["runtime_dim_0", "runtime_dim_2"], ["runtime_dim_2", 1], f32, space)
+    lhs_type = memory_type(["M", "K"], ["K", 1], f32, space)
+    rhs_type = memory_type(["K", "N"], ["N", 1], f32, space)
+    result_type = memory_type(["M", "N"], ["N", 1], f32, space)
     block = Block(arg_types=[lhs_type, rhs_type])
     matmul_op = NnMatmulOp(block.args[0], block.args[1], result_type, space)
     block.add_op(matmul_op)
@@ -186,7 +186,7 @@ def test_nn_lowering_matmul_accepts_runtime_contract_dims() -> None:
     module = ModuleOp(
         [
             func.FuncOp(
-                "matmul_runtime_contract_dims",
+                "matmul_named_symbol_contract_dims",
                 FunctionType.from_lists([lhs_type, rhs_type], [result_type]),
                 Region(block),
             )
@@ -200,16 +200,16 @@ def test_nn_lowering_matmul_accepts_runtime_contract_dims() -> None:
 
 
 # TC-PASS-NNL-020A2
-# 测试目的: 验证 nn.matmul lowering 不把不同 runtime_dim_* contracting 维度互相匹配。
-# 使用示例: pytest -q test/passes/lowering/nn_lowering/test_matmul.py -k test_nn_lowering_matmul_rejects_unrelated_runtime_contract_dims
+# 测试目的: 验证 nn.matmul lowering 不把不同命名符号 contracting 维度互相匹配。
+# 使用示例: pytest -q test/passes/lowering/nn_lowering/test_matmul.py -k test_nn_lowering_matmul_rejects_unrelated_symbol_contract_dims
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_matmul.py
-def test_nn_lowering_matmul_rejects_unrelated_runtime_contract_dims() -> None:
+def test_nn_lowering_matmul_rejects_unrelated_symbol_contract_dims() -> None:
     space = NnMemorySpaceAttr(StringAttr("global"))
-    lhs_type = memory_type(["runtime_dim_0", "runtime_dim_1"], ["runtime_dim_1", 1], f32, space)
-    rhs_type = memory_type(["runtime_dim_2", "runtime_dim_3"], ["runtime_dim_3", 1], f32, space)
-    result_type = memory_type(["runtime_dim_0", "runtime_dim_3"], ["runtime_dim_3", 1], f32, space)
+    lhs_type = memory_type(["M", "K0"], ["K0", 1], f32, space)
+    rhs_type = memory_type(["K1", "N"], ["N", 1], f32, space)
+    result_type = memory_type(["M", "N"], ["N", 1], f32, space)
     block = Block(arg_types=[lhs_type, rhs_type])
     matmul_op = NnMatmulOp(block.args[0], block.args[1], result_type, space)
     block.add_op(matmul_op)
@@ -217,7 +217,7 @@ def test_nn_lowering_matmul_rejects_unrelated_runtime_contract_dims() -> None:
     module = ModuleOp(
         [
             func.FuncOp(
-                "matmul_unrelated_runtime_contract_dims",
+                "matmul_unrelated_symbol_contract_dims",
                 FunctionType.from_lists([lhs_type, rhs_type], [result_type]),
                 Region(block),
             )

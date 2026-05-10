@@ -89,7 +89,7 @@
 - P0 launch 子集固定为：`block=1`、`subthread=1`、`shared_memory_size=0`、`2 <= thread <= registry.hardware.thread_num`；不支持的 extent 必须显式失败，禁止静默回退到单线程或忽略部分 extent。
 - `block_num()` / `thread_num()` / `subthread_num()` 的公开语义是“当前 launch 值”；`target.registry` 中的 `block_num/thread_num/subthread_num` 只作为能力上限与容量校验基线，不再直接等于 launched body 中可见的当前值。
 - `KernelContext::barrier(visibility, scope)` 在 `npu_demo` P0 仅支持 `visibility={BarrierVisibility::TSM, BarrierVisibility::TLM}` 且两者各出现一次，并要求 `scope=BarrierScope::BLOCK`；其他组合必须显式失败。
-- `get_dynamic_memory<Space>()` 只覆盖当前 `npu_demo` 片上空间入口：`TSM/TLM1/TLM2/TLM3` 返回运行时视图，`SM/LM` 因容量为 `0` 必须显式失败，`GM` 不属于该接口输入域。
+- `get_dynamic_memory<Space>()` 只覆盖当前 `npu_demo` 片上空间入口：`TSM/TLM1/TLM2/TLM3` 返回带可写 backing 的运行时视图，可继续通过 `Memory::view<T>(...)` 切成 typed tile 并被 `slice/fill` 等公开 helper 写入；`SM/LM` 因容量为 `0` 必须显式失败，`GM` 不属于该接口输入域。
 - 本文件不定义 DSL/front-end、MLIR lowering、codegen 细节，也不承诺超出 P0 launch 子集的多 block / 多 subthread runtime 行为。
 ## API详细说明
 
@@ -248,7 +248,7 @@ auto subthreads = ctx.subthread_num();
   Memory<TSM, float> tsm = ctx.get_dynamic_memory<TSM, float>();
   ```
 - 功能说明：返回指定片上空间的运行时动态内存视图。
-- 注意事项：`Space` 与元素类型 `T` 通过模板参数显式传入；P0 下 `TSM/TLM1/TLM2/TLM3` 返回固定容量视图，`SM/LM` 因容量为 `0` 必须显式失败，`GM` 不属于该接口输入域；返回对象的底层分配地址、所有权或跨 launch 复用策略不作为公开合同。
+- 注意事项：`Space` 与元素类型 `T` 通过模板参数显式传入；P0 下 `TSM/TLM1/TLM2/TLM3` 返回固定容量且 `data()!=nullptr` 的可写视图，视图可作为 `Memory::view<T>(...)`、`slice(...)`、`fill(...)` 的公开输入；`SM/LM` 因容量为 `0` 必须显式失败，`GM` 不属于该接口输入域；返回对象的底层分配所有权或跨 launch 复用策略不作为公开合同。
 
 ### `npu_demo::thread_id() -> S_INT`
 
@@ -302,7 +302,7 @@ auto subthreads = ctx.subthread_num();
   Memory<TSM, float> tsm = npu_demo::get_dynamic_memory<TSM>();
   ```
 - 功能说明：通过当前 launch 活动上下文返回指定片上空间的动态内存代理。
-- 注意事项：`Space` 通过模板参数显式传入；元素类型由赋值目标的 `Memory<Space, T>` 决定；可用空间与失败边界与 `KernelContext::get_dynamic_memory<Space, T>()` 一致。
+- 注意事项：`Space` 通过模板参数显式传入；元素类型由赋值目标的 `Memory<Space, T>` 决定；可用空间、可写 backing 与失败边界与 `KernelContext::get_dynamic_memory<Space, T>()` 一致。
 
 ### `void npu_demo::build_contiguous_stride(const long long* shape, unsigned long long rank, long long* out_stride)`
 

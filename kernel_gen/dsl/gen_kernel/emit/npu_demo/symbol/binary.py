@@ -1,8 +1,8 @@
 """npu_demo symbol binary/compare EmitC 注册实现。
 
 功能说明:
-- 注册 target=`npu_demo` 的 `symbol.add/sub/mul/div/floordiv/min` 与比较 op 发射实现。
-- `symbol.min` 发射为公开合同要求的 C++ 三目表达式。
+- 注册 target=`npu_demo` 的 `symbol.add/sub/mul/div/floordiv/min/max` 与比较 op 发射实现。
+- `symbol.min` / `symbol.max` 发射为公开合同要求的 C++ 三目表达式。
 - 本文件不提供跨文件公开 API；调用方必须通过 emit registry 与 `emit_c_op(...)` / `emit_c_value(...)` 公开入口调度。
 
 API 列表:
@@ -28,6 +28,7 @@ from kernel_gen.dialect.symbol import (
     SymbolGtOp,
     SymbolLeOp,
     SymbolLtOp,
+    SymbolMaxOp,
     SymbolMinOp,
     SymbolMulOp,
     SymbolNeOp,
@@ -61,6 +62,7 @@ _COMPARE_SIGILS = {
     SymbolDivOp,
     SymbolFloorDivOp,
     SymbolMinOp,
+    SymbolMaxOp,
     SymbolEqOp,
     SymbolNeOp,
     SymbolLtOp,
@@ -96,6 +98,7 @@ def _emit_npu_demo_symbol_binary_or_compare(op, ctx) -> str:
     SymbolDivOp,
     SymbolFloorDivOp,
     SymbolMinOp,
+    SymbolMaxOp,
     SymbolEqOp,
     SymbolNeOp,
     SymbolLtOp,
@@ -109,7 +112,7 @@ def _emit_npu_demo_symbol_binary_or_compare_value(value, ctx) -> str:
 
     功能说明:
     - 普通算术和比较使用固定中缀符号。
-    - `symbol.min` 使用 `((lhs) < (rhs) ? (lhs) : (rhs))`，和计划确认的 EmitC 合同一致。
+    - `symbol.min` 使用 `((lhs) < (rhs) ? (lhs) : (rhs))`，`symbol.max` 使用 `((lhs) > (rhs) ? (lhs) : (rhs))`，和计划确认的 EmitC 合同一致。
 
     使用示例:
     - expr = _emit_npu_demo_symbol_binary_or_compare_value(value, ctx)
@@ -122,6 +125,8 @@ def _emit_npu_demo_symbol_binary_or_compare_value(value, ctx) -> str:
     rhs = emit_c_value(owner.operands[1], ctx)
     if isinstance(owner, SymbolMinOp):
         return f"(({lhs}) < ({rhs}) ? ({lhs}) : ({rhs}))"
+    if isinstance(owner, SymbolMaxOp):
+        return f"(({lhs}) > ({rhs}) ? ({lhs}) : ({rhs}))"
     sigil = _BINARY_SIGILS.get(type(owner)) or _COMPARE_SIGILS.get(type(owner))
     if sigil is None:
         raise ctx.emit_error(owner.name, "unsupported target")

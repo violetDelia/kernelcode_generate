@@ -38,6 +38,8 @@
 - `SymbolMulAST: type[SymbolMulAST]`
 - `SymbolTrueDivAST: type[SymbolTrueDivAST]`
 - `SymbolFloorDivAST: type[SymbolFloorDivAST]`
+- `SymbolMinAST: type[SymbolMinAST]`
+- `SymbolMaxAST: type[SymbolMaxAST]`
 - `SymbolEqAST: type[SymbolEqAST]`
 - `SymbolNeAST: type[SymbolNeAST]`
 - `SymbolLtAST: type[SymbolLtAST]`
@@ -580,6 +582,36 @@
     exported = SymbolFloorDivAST
     ```
 - 功能说明：从 `kernel_gen.dsl.ast.nodes` 包根导出 `SymbolFloorDivAST`，作为对应 AST 节点或类型的稳定导入对象。
+- 注意事项：包根只承诺导出本条目声明的公开对象；行为语义以对应子 spec 的同名 API 详情为准，包根不得扩展额外 helper。
+
+### `SymbolMinAST: type[SymbolMinAST]`
+
+- api：`SymbolMinAST: type[SymbolMinAST]`
+- 参数：无。
+- 返回值：`type[SymbolMinAST]`；表示从 `kernel_gen.dsl.ast.nodes` 导入到的公开类型对象。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dsl.ast.nodes import SymbolMinAST
+
+    exported = SymbolMinAST
+    ```
+- 功能说明：从 `kernel_gen.dsl.ast.nodes` 包根导出 `SymbolMinAST`，作为对应 AST 节点或类型的稳定导入对象。
+- 注意事项：包根只承诺导出本条目声明的公开对象；行为语义以对应子 spec 的同名 API 详情为准，包根不得扩展额外 helper。
+
+### `SymbolMaxAST: type[SymbolMaxAST]`
+
+- api：`SymbolMaxAST: type[SymbolMaxAST]`
+- 参数：无。
+- 返回值：`type[SymbolMaxAST]`；表示从 `kernel_gen.dsl.ast.nodes` 导入到的公开类型对象。
+- 使用示例：
+
+  ```python
+    from kernel_gen.dsl.ast.nodes import SymbolMaxAST
+
+    exported = SymbolMaxAST
+    ```
+- 功能说明：从 `kernel_gen.dsl.ast.nodes` 包根导出 `SymbolMaxAST`，作为对应 AST 节点或类型的稳定导入对象。
 - 注意事项：包根只承诺导出本条目声明的公开对象；行为语义以对应子 spec 的同名 API 详情为准，包根不得扩展额外 helper。
 
 ### `SymbolEqAST: type[SymbolEqAST]`

@@ -18,9 +18,29 @@ API 列表:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from kernel_gen.dialect.dma import DmaReshapeOp
 
 from ...register import emit_c_impl
+
+
+def _shape_vector_expr(values: Sequence[str], ctx) -> tuple[str, str]:
+    """构造 `Vector` shape 表达式。
+
+    功能说明:
+    - rank 1..4 使用公开 `Vector{...}` 自有存储构造。
+    - rank >4 使用当前语句前的局部 `long long[]`，再走公开 `Vector(data, size)` 构造。
+
+    使用示例:
+    - prefix, expr = _shape_vector_expr(["m", "n"], ctx)
+    """
+
+    if len(values) <= 4:
+        return "", "Vector{" + ", ".join(values) + "}"
+    shape_buf_name = ctx.allocate_name("reshape_shape_")
+    prefix = f"{ctx.current_indent}long long {shape_buf_name}[{len(values)}] = {{{', '.join(values)}}};\n"
+    return prefix, f"Vector({shape_buf_name}, {len(values)})"
 
 
 @emit_c_impl(DmaReshapeOp, target="npu_demo")
@@ -28,7 +48,8 @@ def _emit_npu_demo_dma_reshape(op: DmaReshapeOp, ctx) -> str:
     """发射 npu_demo `dma.reshape` C++ 语句。
 
     功能说明:
-    - 根据 `DmaReshapeOp` 的 source 与 shape 生成 memory `reshape(...)` 语句。
+    - 根据 `DmaReshapeOp` 的 source 与 shape 生成成员式 `reshape(...)` 语句。
+    - rank 1..4 使用 `Vector{...}`，rank >4 使用 `long long[]` 加 `Vector(data, size)`。
     - 仅作为当前文件内注册实现使用，不作为跨文件公开 API。
 
     使用示例:
@@ -39,8 +60,10 @@ def _emit_npu_demo_dma_reshape(op: DmaReshapeOp, ctx) -> str:
 
     result_name = ctx.create_or_get_name(op.result)
     source_expr = emit_c_value(op.source, ctx)
-    shape_expr = "{" + ", ".join(emit_c_value(value, ctx) for value in op.shape) + "}"
+    shape_values = tuple(emit_c_value(value, ctx) for value in op.shape)
+    shape_prefix, shape_expr = _shape_vector_expr(shape_values, ctx)
     return (
+        f"{shape_prefix}"
         f"{ctx.current_indent}{ctx.dispatch_type(op.result.type)} {result_name} = "
         f"{source_expr}.reshape({shape_expr} /*shape*/);"
     )

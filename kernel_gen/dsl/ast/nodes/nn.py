@@ -3,9 +3,9 @@
 
 功能说明:
 - 定义 NN helper 对应的 AST 节点，节点只保存 DSL 语义数据，不执行 lowering。
-- Matmul 仅在 runtime contracting 维度可证明为同一类型级符号时保持动态兼容判断。
-- Matmul/transpose 结果类型继承已发射 operand 的匿名运行期维度语义名。
-- ConvAST 在 img2col/reshape/matmul 链路中为匿名运行期维度生成语义一致的类型级符号。
+- Matmul 仅在 contracting 维度可证明为同一结构化符号表达时保持动态兼容判断。
+- Matmul/transpose 结果类型继承已发射 operand 的公开符号表达。
+- ConvAST 在 img2col/reshape/matmul 链路中使用公开符号计算表达承接动态维度。
 
 API 列表:
 - `NnImg2Col1dAST(source: ValueAST, kw: SymbolDimAST | ConstValueAST, sw: SymbolDimAST | ConstValueAST = ..., dw: SymbolDimAST | ConstValueAST = ..., pl: SymbolDimAST | ConstValueAST = ..., pr: SymbolDimAST | ConstValueAST = ..., location: SourceLocation | None = None)`
@@ -93,9 +93,6 @@ from .symbol import ConstValueAST, SymbolListAST
 ReduceAxisElement: TypeAlias = "int | float | bool | str | SymbolDim | ValueAST"
 ReduceAxisValue: TypeAlias = "ReduceAxisElement | list[ReduceAxisElement] | tuple[ReduceAxisElement, ...] | None"
 ReduceKeepdimValue: TypeAlias = "bool | ValueAST | None"
-_RUNTIME_DIM_PREFIX = "runtime_dim_"
-
-
 def _symbol_expr_attr_from_value(value: int | str | SymbolDim) -> SymbolExprAttr:
     """把 NN 结果 type 维度值转换为 `SymbolExprAttr`。
 
@@ -243,8 +240,8 @@ def _shape_value_from_symbol_operand(value: SSAValue, axis: int) -> int | str:
 
     功能说明:
     - `!symbol.int<#symbol.expr<expr>>` 优先使用公开类型表达。
-    - 匿名 `?` 维度使用 SSA `name_hint` 承接 DSL 变量名，避免 transpose stride 退化为不可比较的匿名符号。
-    - 仍缺少名称时退回稳定 `runtime_dim_<axis>`。
+    - 匿名 `?` 维度使用 SSA `name_hint` 承接 DSL 变量名。
+    - 仍缺少名称时保持 `?`，等待上层显式符号表达收口。
 
     使用示例:
     - dim = _shape_value_from_symbol_operand(shape_operand, axis=0)
@@ -265,7 +262,109 @@ def _shape_value_from_symbol_operand(value: SSAValue, axis: int) -> int | str:
             return value_text
     if value.name_hint:
         return value.name_hint.replace(" ", "")
-    return f"{_RUNTIME_DIM_PREFIX}{axis}"
+    return "?"
+
+
+def _symbol_operand_public_value(value: SSAValue) -> int | str:
+    """读取 symbol operand 的公开表达。
+
+    功能说明:
+    - 优先使用 `!symbol.int<#symbol.expr<expr>>` 的结构化表达。
+    - 当表达为匿名 `?` 时使用 `name_hint` 承接 DSL 绑定名，避免结果 type 退化为匿名维度。
+
+    使用示例:
+    - value = _symbol_operand_public_value(symbol_ssa)
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/nn.md
+    - test: test/dsl/ast/nodes/test_nn.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
+    """
+
+    if not isinstance(value.type, SymbolValueType):
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "symbol operand must be symbol.int")
+    public_value = value.type.get_value()
+    if isinstance(public_value, int):
+        return public_value
+    text = str(public_value).replace(" ", "")
+    if text and text != "?":
+        return text
+    if value.name_hint:
+        return value.name_hint.replace(" ", "")
+    return "?"
+
+
+def _shape_value_from_type_dim(dim: Attribute) -> int | str:
+    """从 memory type 维度读取公开符号表达。
+
+    功能说明:
+    - 静态整数返回 `int`；命名符号或复合表达式返回规范化文本。
+    - 匿名动态维度保持 `?`，由上游显式符号计算表达继续收口。
+
+    使用示例:
+    - value = _shape_value_from_type_dim(SymbolExprAttr.from_expr("N"))
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/nn.md
+    - test: test/dsl/ast/nodes/test_nn.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
+    """
+
+    if not isinstance(dim, SymbolExprAttr):
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "memory shape dim must be SymbolExprAttr")
+    static_value = _static_int_from_symbol_expr(dim)
+    if static_value is not None:
+        return static_value
+    return _symbol_expr_text(dim)
+
+
+def _shape_values_from_memory_type(memory_type: NnMemoryType) -> list[int | str]:
+    """从 `NnMemoryType.shape` 读取公开 shape 表达列表。
+
+    功能说明:
+    - 仅消费当前公开 `SymbolExprAttr` layout，不读取旧 IntAttr/StringAttr。
+    - 用于 img2col/conv 结果类型把动态维度表达为可计算符号。
+
+    使用示例:
+    - values = _shape_values_from_memory_type(memory_type)
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/nn.md
+    - test: test/dsl/ast/nodes/test_nn.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
+    """
+
+    return [_shape_value_from_type_dim(dim) for dim in memory_type.shape.data]
+
+
+def _img2col_output_shape_value(
+    size: int | str | SymbolDim,
+    kernel: int | SymbolDim,
+    stride: int | SymbolDim,
+    dilation: int | SymbolDim,
+    pad_low: int | SymbolDim,
+    pad_high: int | SymbolDim,
+) -> int | SymbolDim:
+    """用公开符号计算表达构造 img2col 输出维度。
+
+    功能说明:
+    - 按 `(size + pad_low + pad_high - dilation * (kernel - 1) - 1) floordiv stride + 1` 计算。
+    - 动态结果保留完整符号表达，避免退化成匿名 `?`。
+
+    使用示例:
+    - dim = _img2col_output_shape_value("H", SymbolDim("KH"), SymbolDim("SH"), SymbolDim("DH"), 0, 0)
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/nn.md
+    - test: test/dsl/ast/nodes/test_nn.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
+    """
+
+    result = ((SymbolDim(size) + pad_low + pad_high - SymbolDim(dilation) * (SymbolDim(kernel) - 1) - 1) // stride) + 1
+    public_value = result.get_value()
+    if isinstance(public_value, int):
+        return public_value
+    return _symbol_dim_from_expr_text(public_value)
 
 
 def _source_shape_values_for_transpose(source: SSAValue) -> list[int | str]:
@@ -274,7 +373,7 @@ def _source_shape_values_for_transpose(source: SSAValue) -> list[int | str]:
     功能说明:
     - `dma.reshape` source 优先从公开 shape operands 读取调用点变量名。
     - 其它 source 使用 `NnMemoryType.shape` 的公开 `SymbolExprAttr` 文本。
-    - 匿名 `?` 维度退回稳定 `runtime_dim_<axis>`。
+    - 匿名 `?` 维度保持 `?`，不生成类型级占位符。
 
     使用示例:
     - dims = _source_shape_values_for_transpose(source)
@@ -294,9 +393,9 @@ def _source_shape_values_for_transpose(source: SSAValue) -> list[int | str]:
     if not isinstance(source.type, NnMemoryType):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "transpose value must lower to nn.memory")
     shape_values: list[int | str] = []
-    for axis, dim in enumerate(source.type.shape.data):
+    for dim in source.type.shape.data:
         dim_text = _symbol_expr_text(dim)
-        shape_values.append(f"{_RUNTIME_DIM_PREFIX}{axis}" if dim_text == "?" else dim_text)
+        shape_values.append(dim_text)
     return shape_values
 
 
@@ -316,31 +415,12 @@ def _is_singleton_dim(dim: Attribute) -> bool:
     return isinstance(dim, SymbolExprAttr) and _static_int_from_symbol_expr(dim) == 1
 
 
-def _is_runtime_dim_attr(dim: Attribute) -> bool:
-    """判断维度 attr 是否为匿名运行期维度的类型级符号。
-
-    功能说明:
-    - 识别 `MemoryAST.type_from_memory(...)` 为规避 `[?]/[?]` 组合生成的稳定符号。
-    - 仅服务当前文件内 matmul contract 维度兼容判断。
-
-    使用示例:
-    - is_runtime = _is_runtime_dim_attr(SymbolExprAttr.from_expr("runtime_dim_0"))
-
-    关联文件:
-    - spec: spec/dsl/ast/nodes/nn.md
-    - test: test/dsl/ast/nodes/test_nn.py
-    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
-    """
-
-    return isinstance(dim, SymbolExprAttr) and _symbol_expr_text(dim).startswith(_RUNTIME_DIM_PREFIX)
-
-
 def _matmul_contract_dims_match(lhs_dim: Attribute, rhs_dim: Attribute) -> bool:
     """判断 matmul contracting 维度是否可兼容。
 
     功能说明:
-    - 静态、命名符号与匿名运行期类型级符号都必须完全一致。
-    - 不把任意两个 `runtime_dim_*` 互相匹配；只有同一语义名才可证明相等。
+    - 静态、命名符号与结构化符号表达都必须完全一致。
+    - 匿名 `?` 不能证明相等，避免放行不确定 contracting 维度。
 
     使用示例:
     - ok = _matmul_contract_dims_match(lhs_dim, rhs_dim)
@@ -351,18 +431,18 @@ def _matmul_contract_dims_match(lhs_dim: Attribute, rhs_dim: Attribute) -> bool:
     - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
     """
 
-    if lhs_dim == rhs_dim:
-        return True
-    if _is_runtime_dim_attr(lhs_dim) or _is_runtime_dim_attr(rhs_dim):
+    lhs_unknown = isinstance(lhs_dim, SymbolExprAttr) and _symbol_expr_text(lhs_dim) == "?"
+    rhs_unknown = isinstance(rhs_dim, SymbolExprAttr) and _symbol_expr_text(rhs_dim) == "?"
+    if lhs_unknown or rhs_unknown:
         return False
-    return False
+    return lhs_dim == rhs_dim
 
 
 def _shape_attr_from_value(value: int | str | SymbolDim) -> SymbolExprAttr:
     """把公开 shape 值转换为 memory type 维度 attr。
 
     功能说明:
-    - 静态整数、符号、表达式与匿名运行期语义标签均转换为 `SymbolExprAttr`。
+    - 静态整数、符号与表达式均转换为 `SymbolExprAttr`。
 
     使用示例:
     - attr = _shape_attr_from_value("conv_kernel_flat")
@@ -376,15 +456,15 @@ def _shape_attr_from_value(value: int | str | SymbolDim) -> SymbolExprAttr:
     return _symbol_expr_attr_from_value(value)
 
 
-def _semantic_runtime_dim(label: str, fallback: int | SymbolDim) -> int | str:
-    """为匿名运行期维度选择稳定的语义类型名。
+def _semantic_dim_value(label: str, fallback: int | SymbolDim) -> int | str:
+    """为匿名维度选择稳定的语义类型名。
 
     功能说明:
     - 静态整数与已命名符号维度保持原值，避免改变可证明的 shape。
-    - 匿名 `?` 或通用 `runtime_dim_*` 维度改写为调用点提供的语义标签。
+    - 匿名 `?` 维度改写为调用点提供的语义标签。
 
     使用示例:
-    - dim = _semantic_runtime_dim("conv_kernel_flat", SymbolDim("?"))
+    - dim = _semantic_dim_value("conv_kernel_flat", SymbolDim("?"))
 
     关联文件:
     - spec: spec/dsl/ast/nodes/nn.md
@@ -398,7 +478,7 @@ def _semantic_runtime_dim(label: str, fallback: int | SymbolDim) -> int | str:
     if isinstance(public_value, int):
         return public_value
     text = str(public_value)
-    if text == "?" or text.startswith(_RUNTIME_DIM_PREFIX):
+    if text == "?":
         return label
     return text
 
@@ -476,7 +556,7 @@ def _memory_type_from_shape_attrs_and_stride_values(
 
     功能说明:
     - shape 继承已发射 operand 的公开 memory type，保持 `?` / 命名符号不被重新编号。
-    - stride 使用 operation 层公开 `Memory` 结果中的语义表达；匿名 `?` stride 改写为稳定 `runtime_dim_<axis>`，避免生成非法 `[?]/[?]` 布局。
+    - stride 使用 operation 层公开 `Memory` 结果中的语义表达。
 
     使用示例:
     - result_type = _memory_type_from_shape_attrs_and_stride_values(ctx, memory, shape_attrs, [\"N\", 1], location)
@@ -492,8 +572,8 @@ def _memory_type_from_shape_attrs_and_stride_values(
         ArrayAttr(shape_attrs),
         ArrayAttr(
             [
-                _symbol_expr_attr_from_value(f"{_RUNTIME_DIM_PREFIX}{axis}" if _symbol_expr_text_from_value(value) == "?" else value)
-                for axis, value in enumerate(stride_values)
+                _symbol_expr_attr_from_value(value)
+                for value in stride_values
             ]
         ),
         base_type.element_type,
@@ -509,7 +589,7 @@ def _contiguous_stride_attrs(shape_attrs: list[SymbolExprAttr]) -> ArrayAttr[Sym
 
     功能说明:
     - 服务当前文件内 NN 节点结果类型构造。
-    - shape 维度为 `?` 时，在参与更高维 stride 乘积前使用稳定 `runtime_dim_<axis>` 名称，避免生成非法 `[?]/[?]` 同轴布局。
+    - shape 维度为 `?` 时保留匿名表达。
 
     使用示例:
     - _contiguous_stride_attrs([SymbolExprAttr.from_expr("4"), SymbolExprAttr.from_expr("8")])
@@ -522,8 +602,6 @@ def _contiguous_stride_attrs(shape_attrs: list[SymbolExprAttr]) -> ArrayAttr[Sym
         dim_value = _static_int_from_symbol_expr(dim)
         if dim_value is None:
             dim_value = _symbol_expr_text(dim)
-        if dim_value == "?":
-            dim_value = f"{_RUNTIME_DIM_PREFIX}{axis}"
         if isinstance(dim_value, int) and isinstance(running, int):
             running = dim_value * running
         elif running == 1:
@@ -725,7 +803,7 @@ class Img2ColAST(ValueAST):
                 emitted_value = emitted
             if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, SymbolValueType):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "img2col parameter must lower to symbol.int")
-            value = emitted_value.type.get_value()
+            value = _symbol_operand_public_value(emitted_value)
             params.append(value if isinstance(value, int) else SymbolDim(value))
             param_operands.append(emitted_value)
 
@@ -748,7 +826,31 @@ class Img2ColAST(ValueAST):
         else:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported img2col AST")
 
-        result_type = MemoryAST.type_from_memory(ctx, result_memory, self.location)
+        source_shape_values = _shape_values_from_memory_type(source.type)
+        if isinstance(self, NnImg2Col1dAST):
+            if source_memory.format.name == "Norm":
+                n_dim, c_dim, w_dim = source_shape_values
+                out_w = _img2col_output_shape_value(w_dim, params[0], params[1], params[2], params[3], params[4])
+                result_shape_values: list[int | str | SymbolDim] = [n_dim, c_dim, params[0], out_w]
+            else:
+                n_dim, w_dim, c_dim = source_shape_values
+                out_w = _img2col_output_shape_value(w_dim, params[0], params[1], params[2], params[3], params[4])
+                result_shape_values = [n_dim, out_w, params[0], c_dim]
+        elif isinstance(self, NnImg2Col2dAST):
+            if source_memory.format.name == "Norm":
+                n_dim, c_dim, h_dim, w_dim = source_shape_values
+                out_h = _img2col_output_shape_value(h_dim, params[0], params[2], params[4], params[6], params[7])
+                out_w = _img2col_output_shape_value(w_dim, params[1], params[3], params[5], params[8], params[9])
+                result_shape_values = [n_dim, c_dim, params[0], params[1], out_h, out_w]
+            else:
+                n_dim, h_dim, w_dim, c_dim = source_shape_values
+                out_h = _img2col_output_shape_value(h_dim, params[0], params[2], params[4], params[6], params[7])
+                out_w = _img2col_output_shape_value(w_dim, params[1], params[3], params[5], params[8], params[9])
+                result_shape_values = [n_dim, out_h, out_w, params[0], params[1], c_dim]
+        else:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported img2col AST")
+
+        result_type = _memory_type_from_shape_values(ctx, result_memory, result_shape_values, self.location)
         space_attr = result_type.space
         if isinstance(self, NnImg2Col1dAST):
             return NnImg2col1dOp(source, result_type, param_operands[0], param_operands[1], param_operands[2], param_operands[3], param_operands[4], space_attr)
@@ -1661,7 +1763,7 @@ class ConvAST(ValueAST):
             if not isinstance(emitted, SSAValue) or not isinstance(emitted.type, SymbolValueType):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "conv parameter must lower to symbol.int")
             param_operands[name] = emitted
-            param_public = emitted.type.get_value()
+            param_public = _symbol_operand_public_value(emitted)
             param_values[name] = param_public if isinstance(param_public, int) else SymbolDim(param_public)
 
         conv_result_memory = nn_ops.conv(
@@ -1689,7 +1791,60 @@ class ConvAST(ValueAST):
             pl=param_values["pl"],
             pr=param_values["pr"],
         )
-        img2col_type = MemoryAST.type_from_memory(ctx, img2col_memory, self.location)
+        source_shape_values = _shape_values_from_memory_type(value.type)
+        if self.value.memory.format.name == "Norm":
+            n_dim, c_dim, h_dim, w_dim = source_shape_values
+            img_out_h = _img2col_output_shape_value(
+                h_dim,
+                param_values["kh"],
+                param_values["sh"],
+                param_values["dh"],
+                param_values["ph"],
+                param_values["pw"],
+            )
+            img_out_w = _img2col_output_shape_value(
+                w_dim,
+                param_values["kw"],
+                param_values["sw"],
+                param_values["dw"],
+                param_values["pl"],
+                param_values["pr"],
+            )
+            img2col_shape_values: list[int | str | SymbolDim] = [
+                n_dim,
+                c_dim,
+                param_values["kh"],
+                param_values["kw"],
+                img_out_h,
+                img_out_w,
+            ]
+        else:
+            n_dim, h_dim, w_dim, c_dim = source_shape_values
+            img_out_h = _img2col_output_shape_value(
+                h_dim,
+                param_values["kh"],
+                param_values["sh"],
+                param_values["dh"],
+                param_values["ph"],
+                param_values["pw"],
+            )
+            img_out_w = _img2col_output_shape_value(
+                w_dim,
+                param_values["kw"],
+                param_values["sw"],
+                param_values["dw"],
+                param_values["pl"],
+                param_values["pr"],
+            )
+            img2col_shape_values = [
+                n_dim,
+                img_out_h,
+                img_out_w,
+                param_values["kh"],
+                param_values["kw"],
+                c_dim,
+            ]
+        img2col_type = _memory_type_from_shape_values(ctx, img2col_memory, img2col_shape_values, self.location)
         img2col_op = NnImg2col2dOp(
             value,
             img2col_type,
@@ -1757,8 +1912,8 @@ class ConvAST(ValueAST):
             block.add_op(second_kernel_mul)
             kernel_flat_weight_value = second_kernel_mul.results[0]
         weight_reshape_memory = dma_ops.reshape(self.weight.memory, [c_out_shape_value, kernel_flat_shape_value])
-        c_out_type_dim = _semantic_runtime_dim("conv_c_out", c_out_shape_value)
-        kernel_flat_type_dim = _semantic_runtime_dim("conv_kernel_flat", kernel_flat_shape_value)
+        c_out_type_dim = _semantic_dim_value("conv_c_out", c_out_shape_value)
+        kernel_flat_type_dim = _semantic_dim_value("conv_kernel_flat", kernel_flat_shape_value)
         weight_reshape_type = _memory_type_from_shape_values(ctx, weight_reshape_memory, [c_out_type_dim, kernel_flat_type_dim], self.location)
         weight_reshape_op = DmaReshapeOp(weight, [c_out_weight_op.results[0], kernel_flat_weight_value], weight_reshape_type)
         block.add_op(weight_reshape_op)
@@ -1790,7 +1945,7 @@ class ConvAST(ValueAST):
         batch_h_w_public = batch_h_w_mul.results[0].type.get_value()
         batch_h_w_shape_value: int | SymbolDim = batch_h_w_public if isinstance(batch_h_w_public, int) else _symbol_dim_from_expr_text(batch_h_w_public)
         img_reshape_memory = dma_ops.reshape(img2col_memory, [kernel_flat_shape_value, batch_h_w_shape_value])
-        batch_h_w_type_dim = _semantic_runtime_dim("conv_batch_h_w", batch_h_w_shape_value)
+        batch_h_w_type_dim = _semantic_dim_value("conv_batch_h_w", batch_h_w_shape_value)
         img_reshape_type = _memory_type_from_shape_values(ctx, img_reshape_memory, [kernel_flat_type_dim, batch_h_w_type_dim], self.location)
         img_reshape_op = DmaReshapeOp(img2col_value, [kernel_flat_img_value, batch_h_w_mul.results[0]], img_reshape_type)
         block.add_op(img_reshape_op)

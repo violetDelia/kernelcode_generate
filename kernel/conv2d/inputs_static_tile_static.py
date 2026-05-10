@@ -34,8 +34,8 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from kernel.runner import run_torch_demo
-from kernel_gen.operation.dma import deslice, reshape, slice
-from kernel_gen.operation.nn import img2col2d, matmul, transpose
+from kernel_gen.operation.dma import deslice, fill, reshape, slice
+from kernel_gen.operation.nn import add, img2col2d, matmul, transpose
 from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import MemorySpace
 
@@ -64,7 +64,8 @@ def conv2d_inputs_static_tile_static_kernel(
     - 输入布局为 `input[N, C, H, W]`，权重布局为 `weight[F, C, KH, KW]`，输出布局为 `out[N, F, Ho, Wo]`。
     - 输入 shape 为固定 seed 生成并固化的具体数字。
     - 固定 stride=1、dilation=1、padding=0。
-    - 固定 tile 为 `TF=4, TC=32, TN=1, THO=127, TWO=127`。
+    - 固定 tile 为 `TF=2, TC=2, TN=1, THO=1, TWO=7`，确保 memory_pool 后的片上动态内存视图不越过 npu_demo 目标容量。
+    - 当 `TC < C` 时在 `c0` tile 循环内对同一个输出 tile 做 C 维累计和。
 
     使用示例:
     - `conv2d_inputs_static_tile_static_kernel(out, input_tensor, weight)`
@@ -74,11 +75,11 @@ def conv2d_inputs_static_tile_static_kernel(
     f_size = weight.shape.get_shape()[0]
     kh_size = weight.shape.get_shape()[2]
     kw_size = weight.shape.get_shape()[3]
-    tile_f = 4
-    tile_c = 32
+    tile_f = 2
+    tile_c = 2
     tile_n = 1
-    tile_ho = 127
-    tile_wo = 127
+    tile_ho = 1
+    tile_wo = 7
     stride_h = 1
     stride_w = 1
     dilation_h = 1
@@ -90,6 +91,7 @@ def conv2d_inputs_static_tile_static_kernel(
     ho_size = ((h_size + pad_top + pad_bottom - dilation_h * (kh_size - 1) - 1) // stride_h) + 1
     wo_size = ((w_size + pad_left + pad_right - dilation_w * (kw_size - 1) - 1) // stride_w) + 1
 
+    fill(out, 0)
     for f0 in loop(0, f_size, tile_f):
         for c0 in loop(0, c_size, tile_c):
             for n0 in loop(0, n_size, tile_n):
@@ -117,7 +119,10 @@ def conv2d_inputs_static_tile_static_kernel(
                         weight2 = reshape(weight_tile, [cur_f, k_tile])
                         out2 = matmul(weight2, col2)
                         out_fnhw = reshape(out2, [cur_f, cur_n, cur_ho, cur_wo])
-                        out_tile_mem = transpose(out_fnhw, [1, 0, 2, 3])
+                        out_tile_mem = add(
+                            slice(out, [n0, f0, ho0, wo0], [cur_n, cur_f, cur_ho, cur_wo], [1, 1, 1, 1], MemorySpace.TSM),
+                            transpose(out_fnhw, [1, 0, 2, 3]),
+                        )
                         deslice(out, out_tile_mem, [n0, f0, ho0, wo0], [cur_n, cur_f, cur_ho, cur_wo], [1, 1, 1, 1])
 
 

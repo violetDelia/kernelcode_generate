@@ -26,6 +26,19 @@ def _sym(name: str) -> sp.Symbol:
     return sp.symbols(name, integer=True, real=True)
 
 
+def _raise_simplify_system_error(expr: sp.Basic) -> sp.Basic:
+    """构造 SymPy 内部简化失败。
+
+    功能说明:
+    - 用于验证 `SymbolDim.get_value()` 的公开字符串化不会泄漏 SymPy `SystemError`。
+
+    使用示例:
+    - monkeypatch.setattr(sp, "simplify", _raise_simplify_system_error)
+    """
+
+    raise SystemError("synthetic simplify failure")
+
+
 def test_init_accepts_supported_inputs() -> None:
     int_dim = SymbolDim(8)
     str_dim = SymbolDim(" N ")
@@ -89,16 +102,36 @@ def test_blank_string_rejected_on_operands_and_compare() -> None:
         _ = dim == " "
 
 
-def test_expression_string_accepts_lowercase_min_only() -> None:
-    dim = SymbolDim("min(N, 4)")
+def test_expression_string_accepts_lowercase_min_and_max_only() -> None:
+    min_dim = SymbolDim("min(N, 4)")
+    max_dim = SymbolDim("max(N, 4)")
 
-    assert dim.get_symbol() == sp.Min(_sym("N"), sp.Integer(4))
-    assert dim.get_value() == "min(4, N)"
+    assert min_dim.get_symbol() == sp.Min(_sym("N"), sp.Integer(4))
+    assert min_dim.get_value() == "min(4, N)"
+    assert max_dim.get_symbol() == sp.Max(_sym("N"), sp.Integer(4))
+    assert max_dim.get_value() == "max(4, N)"
 
     with pytest.raises(ValueError, match="SymbolDim expression string is invalid"):
         SymbolDim("Min(N, 4)")
     with pytest.raises(ValueError, match="SymbolDim expression string is invalid"):
+        SymbolDim("Max(N, 4)")
+    with pytest.raises(ValueError, match="SymbolDim expression string is invalid"):
         _ = SymbolDim("N") + "Min(N, 4)"
+    with pytest.raises(ValueError, match="SymbolDim expression string is invalid"):
+        SymbolDim("(N + 1)(2)")
+    with pytest.raises(ValueError, match="SymbolDim expression string is invalid"):
+        SymbolDim("N, M")
+
+
+def test_get_value_falls_back_when_sympy_simplify_raises_system_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dim = SymbolDim("N")
+
+    monkeypatch.setattr(sp, "simplify", _raise_simplify_system_error)
+
+    assert dim.get_value() == "N"
+    assert str(dim) == "N"
 
 
 def test_invalid_type_and_float_constructor_rejected() -> None:

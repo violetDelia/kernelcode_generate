@@ -4,7 +4,7 @@
 功能说明:
 - 实现 `inputs 静 + tile 静` 的二维 matmul kernel demo。
 - 输入 shape 固定为 `lhs[32, 16]`、`rhs[16, 32]`、`out[32, 32]`。
-- tile 固定为 `TILE_M=16`、`TILE_N=16`。
+- tile 固定为 `TILE_M=8`、`TILE_N=8`，避免 memory-pool rewrite 后超过 npu_demo TSM backing 容量。
 - 通过 `dsl_run` 真实执行，并和 `torch.matmul` 参考结果对齐。
 
 API 列表:
@@ -47,7 +47,7 @@ def matmul_inputs_static_tile_static_kernel(
 
     功能说明:
     - 读取 `lhs/rhs/out` 的静态 shape。
-    - 以固定 `16x16` 输出 tile 做二维循环。
+    - 以固定 `8x8` 输出 tile 做二维循环。
     - K 维不切分，每个 tile 执行一次 `nn.matmul` 并写回输出。
 
     使用示例:
@@ -57,8 +57,8 @@ def matmul_inputs_static_tile_static_kernel(
     m_size = lhs.shape.get_shape()[0]
     k_size = lhs.shape.get_shape()[1]
     n_size = rhs.shape.get_shape()[1]
-    tile_m = 16
-    tile_n = 16
+    tile_m = 8
+    tile_n = 8
 
     for m0 in loop(0, m_size, tile_m):
         for n0 in loop(0, n_size, tile_n):

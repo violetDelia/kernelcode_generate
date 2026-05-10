@@ -225,7 +225,8 @@ def matmul_kernel(
 
 
     功能说明:
-    - 以 `16x16` tile 切分输出的 M/N 轴。
+    - 以 `8x8` tile 切分输出的 M/N 轴，使显式 `memory-pool` 重写后的 TLM1/TLM2
+      dynamic byte backing 可容纳每个 typed tile。
     - 每个 tile 内先把 `lhs/rhs` 切到 `TSM`，再调用 `nn.matmul`，最后写回 out。
     - 函数没有 DSL 返回值，输出只通过 `out` 参数写回。
 
@@ -238,12 +239,12 @@ def matmul_kernel(
     - 功能实现: [`main.py`](main.py)
     """
 
-    for m0 in loop(0, 32, 16):
-        for n0 in loop(0, 32, 16):
-            lhs_tile = slice(lhs, [m0, 0], [16, 16], [1, 1], MemorySpace.TSM)
-            rhs_tile = slice(rhs, [0, n0], [16, 16], [1, 1], MemorySpace.TSM)
+    for m0 in loop(0, 32, 8):
+        for n0 in loop(0, 32, 8):
+            lhs_tile = slice(lhs, [m0, 0], [8, 16], [1, 1], MemorySpace.TSM)
+            rhs_tile = slice(rhs, [0, n0], [16, 8], [1, 1], MemorySpace.TSM)
             partial = matmul(lhs_tile, rhs_tile)
-            deslice(out, partial, [m0, n0], [16, 16], [1, 1])
+            deslice(out, partial, [m0, n0], [8, 8], [1, 1])
 
 
 def main() -> None:

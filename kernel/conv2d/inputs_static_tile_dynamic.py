@@ -71,9 +71,10 @@ def conv2d_inputs_static_tile_dynamic_kernel(
     - 输入 shape 为固定 seed 生成并固化的具体数字，tile shape 由 runtime scalar 绑定。
     - 固定 stride=1、dilation=1、padding=0。
     - 使用 `img2col2d + matmul` 生成卷积主体，并按 `tile_c` 循环分块后累计所有 partial。
+    - 示例 tile 选择 npu_demo 容量安全的 `(2, 2, 1, 1, 7)`，确保 memory_pool 后的片上动态内存视图不越界。
 
     使用示例:
-    - `conv2d_inputs_static_tile_dynamic_kernel(out, input_tensor, weight, 2, 16, 1, 64, 64)`
+    - `conv2d_inputs_static_tile_dynamic_kernel(out, input_tensor, weight, 2, 2, 1, 1, 7)`
     """
 
     n_size, c_size, h_size, w_size = input_tensor.shape.get_shape()
@@ -191,7 +192,7 @@ def main() -> None:
     weight = torch.randn((_STATIC_OUT_CHANNELS, _STATIC_IN_CHANNELS, _STATIC_KERNEL_H, _STATIC_KERNEL_W), generator=generator, dtype=torch.float32)
     out = torch.zeros((_STATIC_BATCH, _STATIC_OUT_CHANNELS, _STATIC_OUTPUT_H, _STATIC_OUTPUT_W), dtype=torch.float32)
     expected = F.conv2d(input_tensor, weight)
-    tile_args = (2, 16, 1, 64, 64)
+    tile_args = (2, 2, 1, 1, 7)
     result = run_torch_demo(
         "conv2d/inputs_static_tile_dynamic",
         conv2d_inputs_static_tile_dynamic_kernel,

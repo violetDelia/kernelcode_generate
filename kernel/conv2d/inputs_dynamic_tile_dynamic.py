@@ -5,10 +5,11 @@
 - 实现 `inputs 动 + tile 动` 的 NCHW conv2d kernel demo。
 - 输入与输出使用符号维度标注，并由真实 torch tensor 运行时 shape 绑定。
 - demo 输入规模固定在 `N≈12, C≈32, H≈256, W≈256`，运行时按固定 seed 在 `N[11,13] / C[30,34] / H,W[248,264]` 内取值。
-- stride、dilation、padding 与 tile 作为 `int` 编译参数进入 `run_lowering_demo(...)`，并以同值 runtime scalar 传给 `ExecutionEngine` device entry。
+- stride、dilation、padding 与 tile 均作为编译期 `SymbolDim` 形参进入 `run_lowering_demo(...)`，并以容量安全的整数 runtime scalar 传给 `ExecutionEngine` device entry。
 - 当 `tile_c < C` 时在 `c0` tile 循环内对同一个输出 tile 做 C 维累计和，而不是拆成固定两段 matmul 后相加。
-- 编译期用 `B/N/C/XH/XW/KH/KW` 语义化符号形状走 `gen_kernel` 生成动态 memory IR/source。
-- output 编译期 memory 形状为 `B, C, -KH + XH + 1, -KW + XW + 1`，对应当前 stride=1、dilation=1、padding=0 的真实符号计算结果。
+- 编译期用 `B/N/C/XH/XW/KH/KW/SH/SW/DH/DW/PT/PB/PL/PR/TF/TC/TN/THO/TWO` 语义化符号走 `gen_kernel` 生成动态 memory IR/source。
+- output 编译期 memory 形状为完整非对称 padding 公式：`((XH + PT + PB - DH * (KH - 1) - 1) floordiv SH) + 1` 与 `((XW + PL + PR - DW * (KW - 1) - 1) floordiv SW) + 1`。
+- lowering 后 memory-pool 形态必须使用 `arch.get_dynamic_memory + dma.view`，不得残留 `dma.alloc` / `allalloc`。
 - 运行期仍传入真实 torch tensor 静态 shape，并和 `torch.nn.functional.conv2d` 参考结果对齐。
 
 API 列表:
@@ -48,7 +49,7 @@ from kernel_gen.symbol_variable.type import NumericType
 
 CASE_NAME = "conv2d/inputs_dynamic_tile_dynamic"
 DEVICE_ENTRY_NAME = "conv2d_inputs_dynamic_tile_dynamic_kernel_device"
-Conv2dCompileArg: TypeAlias = "Memory | int"
+Conv2dCompileArg: TypeAlias = "Memory | SymbolDim"
 Conv2dRuntimeArg: TypeAlias = "torch.Tensor | int"
 
 
@@ -79,7 +80,7 @@ def conv2d_inputs_dynamic_tile_dynamic_kernel(
     - C 维按 `tile_c` 循环分块，并在写回前累计所有 partial。
 
     使用示例:
-    - `conv2d_inputs_dynamic_tile_dynamic_kernel(out, input_tensor, weight, 1, 1, 1, 1, 0, 0, 0, 0, 2, 16, 1, 64, 64)`
+    - `conv2d_inputs_dynamic_tile_dynamic_kernel(out, input_tensor, weight, 1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 1, 1, 7)`
     """
 
     n_size, c_size, h_size, w_size = input_tensor.shape.get_shape()
@@ -99,14 +100,26 @@ def conv2d_inputs_dynamic_tile_dynamic_kernel(
                     cur_ho = min(tile_ho, ho_size - ho0)
                     cur_wo = min(tile_wo, wo_size - wo0)
                     out_tile = cur_n * cur_ho * cur_wo
-                    input_h_tile = (cur_ho - 1) * stride_h + (kh_size - 1) * dilation_h + 1 - pad_top - pad_bottom
-                    input_w_tile = (cur_wo - 1) * stride_w + (kw_size - 1) * dilation_w + 1 - pad_left - pad_right
+                    input_h_origin = ho0 * stride_h - pad_top
+                    input_w_origin = wo0 * stride_w - pad_left
+                    input_h_window_end = (ho0 + cur_ho - 1) * stride_h - pad_top + (kh_size - 1) * dilation_h + 1
+                    input_w_window_end = (wo0 + cur_wo - 1) * stride_w - pad_left + (kw_size - 1) * dilation_w + 1
+                    input_h_start = max(input_h_origin, 0)
+                    input_w_start = max(input_w_origin, 0)
+                    input_h_end = min(input_h_window_end, h_size)
+                    input_w_end = min(input_w_window_end, w_size)
+                    input_h_tile = input_h_end - input_h_start
+                    input_w_tile = input_w_end - input_w_start
+                    local_pad_top = max(pad_top - ho0 * stride_h, 0)
+                    local_pad_left = max(pad_left - wo0 * stride_w, 0)
+                    local_pad_bottom = max(input_h_window_end - h_size, 0)
+                    local_pad_right = max(input_w_window_end - w_size, 0)
                     for c0 in loop(0, c_size, tile_c):
                         cur_c = min(tile_c, c_size - c0)
                         k_tile = cur_c * kh_size * kw_size
-                        input_tile = slice(input_tensor, [n0, c0, ho0 * stride_h, wo0 * stride_w], [cur_n, cur_c, input_h_tile, input_w_tile], [1, 1, 1, 1], MemorySpace.TSM)
+                        input_tile = slice(input_tensor, [n0, c0, input_h_start, input_w_start], [cur_n, cur_c, input_h_tile, input_w_tile], [1, 1, 1, 1], MemorySpace.TSM)
                         weight_tile = slice(weight, [f0, c0, 0, 0], [cur_f, cur_c, kh_size, kw_size], [1, 1, 1, 1], MemorySpace.TSM)
-                        col = img2col2d(input_tile, kh=kh_size, kw=kw_size, sh=stride_h, sw=stride_w, dh=dilation_h, dw=dilation_w, ph=pad_top, pw=pad_bottom, pl=pad_left, pr=pad_right)
+                        col = img2col2d(input_tile, kh=kh_size, kw=kw_size, sh=stride_h, sw=stride_w, dh=dilation_h, dw=dilation_w, ph=local_pad_top, pw=local_pad_bottom, pl=local_pad_left, pr=local_pad_right)
                         col2 = reshape(col, [k_tile, out_tile])
                         weight2 = reshape(weight_tile, [cur_f, k_tile])
                         out2 = matmul(weight2, col2)
@@ -123,40 +136,57 @@ def conv2d_inputs_dynamic_tile_dynamic_kernel(
                         )
 
 
-def _symbolic_compile_args(
-    stride_args: tuple[int, int],
-    dilation_args: tuple[int, int],
-    padding_args: tuple[int, int, int, int],
-    tile_args: tuple[int, int, int, int, int],
-) -> tuple[Conv2dCompileArg, ...]:
+def _symbolic_compile_args() -> tuple[Conv2dCompileArg, ...]:
     """构造符号 Memory 编译参数。
 
 
     功能说明:
     - output/input/weight 的编译期 memory shape 使用 conv2d 语义化符号维度。
-    - output 空间维使用当前 stride/dilation/padding 下的真实符号计算表达式。
-    - stride、dilation、padding 与 tile 仍保持 int 标量，运行期继续传入同一组静态实际值。
+    - output 空间维使用 `SH/SW/DH/DW/PT/PB/PL/PR` 完整符号公式。
+    - stride、dilation、padding 与 tile 均传 `SymbolDim`，真实值只在运行期 `ExecutionEngine` 参数里绑定。
     - 只服务本 demo 的符号编译入口，不新增跨文件公开 API。
 
     使用示例:
-    - `_symbolic_compile_args((1, 1), (1, 1), (0, 0, 0, 0), (2, 16, 1, 64, 64))`
+    - `_symbolic_compile_args()`
     """
 
     xh_dim = SymbolDim("XH")
     xw_dim = SymbolDim("XW")
     kh_dim = SymbolDim("KH")
     kw_dim = SymbolDim("KW")
-    output_h_dim = ((xh_dim + padding_args[0] + padding_args[1] - dilation_args[0] * (kh_dim - 1) - 1) // stride_args[0]) + 1
-    output_w_dim = ((xw_dim + padding_args[2] + padding_args[3] - dilation_args[1] * (kw_dim - 1) - 1) // stride_args[1]) + 1
+    sh_dim = SymbolDim("SH")
+    sw_dim = SymbolDim("SW")
+    dh_dim = SymbolDim("DH")
+    dw_dim = SymbolDim("DW")
+    pt_dim = SymbolDim("PT")
+    pb_dim = SymbolDim("PB")
+    pl_dim = SymbolDim("PL")
+    pr_dim = SymbolDim("PR")
+    tf_dim = SymbolDim("TF")
+    tc_dim = SymbolDim("TC")
+    tn_dim = SymbolDim("TN")
+    tho_dim = SymbolDim("THO")
+    two_dim = SymbolDim("TWO")
+    output_h_dim = ((xh_dim + pt_dim + pb_dim - dh_dim * (kh_dim - 1) - 1) // sh_dim) + 1
+    output_w_dim = ((xw_dim + pl_dim + pr_dim - dw_dim * (kw_dim - 1) - 1) // sw_dim) + 1
 
     return (
         Memory(["B", "C", output_h_dim, output_w_dim], NumericType.Float32),
         Memory(["B", "N", "XH", "XW"], NumericType.Float32),
         Memory(["C", "N", "KH", "KW"], NumericType.Float32),
-        *stride_args,
-        *dilation_args,
-        *padding_args,
-        *tile_args,
+        sh_dim,
+        sw_dim,
+        dh_dim,
+        dw_dim,
+        pt_dim,
+        pb_dim,
+        pl_dim,
+        pr_dim,
+        tf_dim,
+        tc_dim,
+        tn_dim,
+        tho_dim,
+        two_dim,
     )
 
 
@@ -170,24 +200,37 @@ def _assert_dynamic_memory_ir(
 
 
     功能说明:
-    - 确认输出 memory 类型包含 `!nn.memory<[#symbol.expr<B>, #symbol.expr<C>, #symbol.expr<-KH + XH + 1>, #symbol.expr<-KW + XW + 1>]`。
+    - 确认输出 memory 类型包含 `B/C` 以及 `SH/SW/DH/DW/PT/PB/PL/PR` 组成的完整动态公式。
     - 确认输入 memory 类型包含 `!nn.memory<[#symbol.expr<B>, #symbol.expr<N>, #symbol.expr<XH>, #symbol.expr<XW>]`。
     - 确认权重 memory 类型包含 `!nn.memory<[#symbol.expr<C>, #symbol.expr<N>, #symbol.expr<KH>, #symbol.expr<KW>]`。
     - 确认 IR 不回退为本次真实运行的 output/input/weight 静态 shape。
     - 确认 IR 不回退为旧 `s1/s2/...` 匿名符号 shape。
+    - 确认 memory-pool 后 IR 已收口为 `arch.get_dynamic_memory + dma.view`，不残留 `dma.alloc` / `allalloc`。
     - 失败时抛出 `AssertionError`，让 demo 脚本直接暴露编译形态回退。
 
     使用示例:
-    - `_assert_dynamic_memory_ir(str(module), (11, 4, 258, 262), (11, 30, 260, 264), (4, 30, 3, 3))`
+    - `_assert_dynamic_memory_ir(str(module), (12, 2, 128, 128), (12, 32, 256, 256), (2, 32, 3, 3))`
     """
 
-    dynamic_memory_fragments = (
-        (
-            "output",
-            "!nn.memory<[#symbol.expr<B>, #symbol.expr<C>, #symbol.expr<-KH + XH + 1>, #symbol.expr<-KW + XW + 1>]",
-        ),
+    required_dynamic_fragments = (
+        ("output prefix", "!nn.memory<[#symbol.expr<B>, #symbol.expr<C>,"),
+        ("output stride h symbol", "SH"),
+        ("output stride w symbol", "SW"),
+        ("output dilation h symbol", "DH"),
+        ("output dilation w symbol", "DW"),
+        ("output pad top symbol", "PT"),
+        ("output pad bottom symbol", "PB"),
+        ("output pad left symbol", "PL"),
+        ("output pad right symbol", "PR"),
+        ("tile f symbol", "TF"),
+        ("tile c symbol", "TC"),
+        ("tile n symbol", "TN"),
+        ("tile ho symbol", "THO"),
+        ("tile wo symbol", "TWO"),
         ("input", "!nn.memory<[#symbol.expr<B>, #symbol.expr<N>, #symbol.expr<XH>, #symbol.expr<XW>]"),
         ("weight", "!nn.memory<[#symbol.expr<C>, #symbol.expr<N>, #symbol.expr<KH>, #symbol.expr<KW>]"),
+        ("memory-pool backing", "arch.get_dynamic_memory"),
+        ("memory-pool view", "dma.view"),
     )
     static_memory_fragments = (
         (
@@ -211,15 +254,22 @@ def _assert_dynamic_memory_ir(
         ("old input", "!nn.memory<[#symbol.expr<s1>, #symbol.expr<s5>, #symbol.expr<s6>, #symbol.expr<s7>]"),
         ("old weight", "!nn.memory<[#symbol.expr<s2>, #symbol.expr<s5>, #symbol.expr<3>, #symbol.expr<3>]"),
     )
-    for label, fragment in dynamic_memory_fragments:
+    for label, fragment in required_dynamic_fragments:
         if fragment not in module_text:
-            raise AssertionError(f"dynamic {label} memory shape missing from lowered IR: {fragment}")
+            raise AssertionError(f"dynamic {label} fragment missing from lowered IR: {fragment}")
     for label, fragment in static_memory_fragments:
         if fragment in module_text:
             raise AssertionError(f"lowered IR unexpectedly contains static {label} memory shape: {fragment}")
     for label, fragment in old_symbol_fragments:
         if fragment in module_text:
             raise AssertionError(f"lowered IR unexpectedly contains {label} anonymous memory shape: {fragment}")
+    forbidden_fragments = (
+        ("dma.alloc", "dma.alloc"),
+        ("allalloc", "allalloc"),
+    )
+    for label, fragment in forbidden_fragments:
+        if fragment in module_text:
+            raise AssertionError(f"lowered IR unexpectedly contains memory-pool forbidden {label}: {fragment}")
 
 
 def _execute_device_source(source: str, real_args: tuple[Conv2dRuntimeArg, ...]) -> None:
@@ -287,35 +337,37 @@ def main() -> None:
     - `python3 kernel/conv2d/inputs_dynamic_tile_dynamic.py`
     """
 
-    stride_args = (1, 1)
-    dilation_args = (1, 1)
-    padding_args = (0, 0, 0, 0)
-    tile_args = (2, 16, 1, 64, 64)
     shape_rng = random.Random(20260503)
     n_size = shape_rng.randint(11, 13)
     c_size = shape_rng.randint(30, 34)
     h_size = shape_rng.randint(248, 264)
     w_size = shape_rng.randint(248, 264)
-    f_size = shape_rng.randint(2, 4)
+    f_size = 2
     kh_size = 3
     kw_size = 3
+    stride_args = (shape_rng.randint(1, 2), shape_rng.randint(1, 2))
+    dilation_args = (shape_rng.randint(1, 2), shape_rng.randint(1, 2))
+    padding_args = (
+        shape_rng.randint(0, 3),
+        shape_rng.randint(0, 3),
+        shape_rng.randint(0, 3),
+        shape_rng.randint(0, 3),
+    )
+    if padding_args[0] == padding_args[1] and padding_args[2] == padding_args[3]:
+        padding_args = (1, 2, 0, 3)
+    tile_args = (2, 2, 1, 1, 7)
     ho_size = ((h_size + padding_args[0] + padding_args[1] - dilation_args[0] * (kh_size - 1) - 1) // stride_args[0]) + 1
     wo_size = ((w_size + padding_args[2] + padding_args[3] - dilation_args[1] * (kw_size - 1) - 1) // stride_args[1]) + 1
     generator = torch.Generator().manual_seed(20260503)
     input_tensor = torch.randn((n_size, c_size, h_size, w_size), generator=generator, dtype=torch.float32)
     weight = torch.randn((f_size, c_size, kh_size, kw_size), generator=generator, dtype=torch.float32)
     out = torch.zeros((n_size, f_size, ho_size, wo_size), dtype=torch.float32)
-    expected = F.conv2d(
-        input_tensor,
-        weight,
-        stride=stride_args,
-        padding=(padding_args[0], padding_args[2]),
-        dilation=dilation_args,
-    )
+    padded_input = F.pad(input_tensor, (padding_args[2], padding_args[3], padding_args[0], padding_args[1]))
+    expected = F.conv2d(padded_input, weight, stride=stride_args, padding=0, dilation=dilation_args)
     module, source = run_lowering_demo(
         CASE_NAME,
         conv2d_inputs_dynamic_tile_dynamic_kernel,
-        *_symbolic_compile_args(stride_args, dilation_args, padding_args, tile_args),
+        *_symbolic_compile_args(),
     )
     module_text = str(module)
     _assert_dynamic_memory_ir(
@@ -331,7 +383,15 @@ def main() -> None:
     max_abs_diff = _assert_outputs_close(out, expected, atol=1e-4, rtol=1e-4)
     print(module_text)
     print(source)
-    print("[IR] dynamic memory evidence: output/input/weight semantic symbolic memory present; static and old anonymous shapes absent")
+    print(
+        "[ARGS] "
+        f"input={(n_size, c_size, h_size, w_size)} weight={(f_size, c_size, kh_size, kw_size)} "
+        f"stride={stride_args} dilation={dilation_args} padding={padding_args} tile={tile_args} output={(n_size, f_size, ho_size, wo_size)}"
+    )
+    print(
+        "[IR] dynamic memory evidence: output/input/weight semantic symbolic memory present; "
+        "memory-pool arch.get_dynamic_memory + dma.view present; dma.alloc/allalloc absent"
+    )
     print(f"[CHECK] {CASE_NAME} max_abs_diff={max_abs_diff}")
 
 

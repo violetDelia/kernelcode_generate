@@ -3,7 +3,7 @@
 
 功能说明:
 - 定义仅表示整数符号值语义的 symbol dialect。
-- 提供 `SymbolExprAttr`、`SymbolValueType`、`SymbolIterAttr`、`SymbolIterType`、`symbol.add/sub/mul/div/floordiv/min`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_int/symbol.to_float`、`symbol.get_dim/get_stride`，以及带单个 loop-carried `!symbol.int<#symbol.expr<...>>` 的 `symbol.for` / `symbol.yield`。
+- 提供 `SymbolExprAttr`、`SymbolValueType`、`SymbolIterAttr`、`SymbolIterType`、`symbol.add/sub/mul/div/floordiv/min/max`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_int/symbol.to_float`、`symbol.get_dim/get_stride`，以及带单个 loop-carried `!symbol.int<#symbol.expr<...>>` 的 `symbol.for` / `symbol.yield`。
 - `symbol.for` 同时兼容无 carried-value 形式和新的 `iter_args(%acc = %zero) ... -> !symbol.int<#symbol.expr<...>>` 文本语法。
 - 在导入 sympy 前设置 `SYMPY_GMPY=0`，规避外部 gmpy 引发的 SystemError。
 
@@ -27,6 +27,7 @@ API 列表:
 - `class SymbolDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 - `class SymbolFloorDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 - `class SymbolMinOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
+- `class SymbolMaxOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 - `class SymbolEqOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 - `class SymbolNeOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 - `class SymbolLtOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
@@ -43,7 +44,7 @@ API 列表:
 - `Symbol`
 
 使用示例:
-- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolConstOp, SymbolDivOp, SymbolEqOp, SymbolFloorDivOp, SymbolForOp, SymbolYieldOp, SymbolSubOp, SymbolMulOp, SymbolMinOp, SymbolToIntOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
+- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolConstOp, SymbolDivOp, SymbolEqOp, SymbolFloorDivOp, SymbolForOp, SymbolYieldOp, SymbolSubOp, SymbolMulOp, SymbolMinOp, SymbolMaxOp, SymbolToIntOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
 
 关联文件:
 - spec: spec/dialect/symbol.md
@@ -1234,6 +1235,8 @@ def _infer_symbol_arith_result_expr(op_name: str, lhs_type: Attribute, rhs_type:
         return _format_symbol_expr_node(_make_symbol_expr_keyword_binary("floordiv", lhs, rhs))
     if op_name == "symbol.min":
         return _format_symbol_expr_node(_make_symbol_expr_min(lhs, rhs))
+    if op_name == "symbol.max":
+        return _format_symbol_expr_node(_make_symbol_expr_max(lhs, rhs))
     return None
 
 
@@ -1943,6 +1946,8 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
             result_value = lhs_value // rhs_value
         elif self.name == "symbol.min":
             result_value = min(lhs_value, rhs_value)
+        elif self.name == "symbol.max":
+            result_value = max(lhs_value, rhs_value)
         else:
             return None
 
@@ -2313,6 +2318,13 @@ class SymbolMinOp(_BaseSymbolBinaryArithOp):
     """两个 symbol.int 值的整数最小值。"""
 
     name = "symbol.min"
+
+
+@irdl_op_definition
+class SymbolMaxOp(_BaseSymbolBinaryArithOp):
+    """两个 symbol.int 值的整数最大值。"""
+
+    name = "symbol.max"
 
 
 @irdl_op_definition
@@ -3078,6 +3090,7 @@ Symbol = Dialect(
         SymbolDivOp,
         SymbolFloorDivOp,
         SymbolMinOp,
+        SymbolMaxOp,
         SymbolEqOp,
         SymbolNeOp,
         SymbolLtOp,
@@ -3116,6 +3129,7 @@ __all__ = [
     "SymbolGetDimOp",
     "SymbolMulOp",
     "SymbolMinOp",
+    "SymbolMaxOp",
     "SymbolGtOp",
     "SymbolLeOp",
     "SymbolLtOp",

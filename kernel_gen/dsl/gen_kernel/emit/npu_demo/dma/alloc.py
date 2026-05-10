@@ -100,7 +100,7 @@ def _format_full_rank_dynamic_shape_values(op: DmaAllocOp, dynamic_shape_values:
     """按 rank 等长 `dynamic_shape` 取得完整运行期 shape。
 
     功能说明:
-    - `runtime_dim_*` 这类 type 级语义标签不是 C++ 变量，不能直接写入 `alloc(...)`。
+    - type 级匿名维度标签不是 C++ 变量，不能直接写入 `alloc(...)`。
     - 当 `dynamic_shape` 与 result rank 等长时，它已经逐维承载真实运行期 shape，应优先用于源码发射。
 
     使用示例:

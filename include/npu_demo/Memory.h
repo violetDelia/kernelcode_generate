@@ -419,10 +419,13 @@ inline long long Memory<Space, T>::get_stride(unsigned long long axis) const {
 /*
 功能说明:
 - 返回成员式子视图，支持 rank `1..8` 的多维 view。
+- 允许 `ViewT` 与源元素类型不同，用于把动态 byte backing memory 切分为 typed view。
 - 结果 shape 等于 `size`，结果 stride 等于源 physical stride 与 view logical stride 的逐维乘积。
+- 当 `ViewT` 与源元素类型不同时，typed view 覆盖的字节范围必须落在源 memory 字节容量内。
 
 使用示例:
 - Memory<GM, float> tile = source.view<float>(offset, size, stride);
+- Memory<TSM, float> tile = byte_pool.view<float>(offset, size, stride);
 
 
 关联文件:
@@ -436,10 +439,6 @@ inline Memory<Space, ViewT> Memory<Space, T>::view(
     const Vector& offset,
     const Vector& size,
     const Vector& stride) const {
-    static_assert(
-        std::is_same<ViewT, T>::value,
-        "Memory::view currently requires the same element type as the source view");
-
     npu_demo::detail::memory_contract_or_throw(rank_ > 0, "memory.view: invalid rank");
     npu_demo::detail::memory_contract_or_throw(
         rank_ <= npu_demo::detail::kMaxMemoryHelperRank,
@@ -451,6 +450,7 @@ inline Memory<Space, ViewT> Memory<Space, T>::view(
     long long shape_buf[npu_demo::detail::kMaxMemoryHelperRank] = {0};
     long long stride_buf[npu_demo::detail::kMaxMemoryHelperRank] = {0};
     long long linear_offset = 0;
+    long long linear_extent = 0;
 
     for (unsigned long long i = 0; i < rank_; ++i) {
         npu_demo::detail::memory_contract_or_throw(offset[i] >= 0, "memory.view: invalid offset/size/stride");
@@ -475,6 +475,14 @@ inline Memory<Space, ViewT> Memory<Space, T>::view(
             npu_demo::detail::memory_checked_mul_non_negative(stride_[i], stride[i], &stride_buf[i]),
             "memory.view: overflow");
 
+        long long extent_delta = 0;
+        npu_demo::detail::memory_contract_or_throw(
+            npu_demo::detail::memory_checked_mul_non_negative(span, stride_[i], &extent_delta),
+            "memory.view: overflow");
+        npu_demo::detail::memory_contract_or_throw(
+            npu_demo::detail::memory_checked_add_non_negative(linear_extent, extent_delta, &linear_extent),
+            "memory.view: overflow");
+
         long long offset_delta = 0;
         npu_demo::detail::memory_contract_or_throw(
             npu_demo::detail::memory_checked_mul_non_negative(offset[i], stride_[i], &offset_delta),
@@ -482,6 +490,32 @@ inline Memory<Space, ViewT> Memory<Space, T>::view(
         npu_demo::detail::memory_contract_or_throw(
             npu_demo::detail::memory_checked_add_non_negative(linear_offset, offset_delta, &linear_offset),
             "memory.view: overflow");
+    }
+
+    if constexpr (!std::is_same<T, ViewT>::value) {
+        long long view_last_index = 0;
+        long long view_element_count = 0;
+        long long view_bytes = 0;
+        long long source_bytes = 0;
+        npu_demo::detail::memory_contract_or_throw(
+            npu_demo::detail::memory_checked_add_non_negative(linear_offset, linear_extent, &view_last_index),
+            "memory.view: overflow");
+        npu_demo::detail::memory_contract_or_throw(
+            npu_demo::detail::memory_checked_add_non_negative(view_last_index, 1, &view_element_count),
+            "memory.view: overflow");
+        npu_demo::detail::memory_contract_or_throw(
+            npu_demo::detail::memory_checked_mul_non_negative(
+                view_element_count,
+                static_cast<long long>(sizeof(ViewT)),
+                &view_bytes),
+            "memory.view: overflow");
+        npu_demo::detail::memory_contract_or_throw(
+            npu_demo::detail::memory_checked_mul_non_negative(
+                element_count(),
+                static_cast<long long>(sizeof(T)),
+                &source_bytes),
+            "memory.view: overflow");
+        npu_demo::detail::memory_contract_or_throw(view_bytes <= source_bytes, "memory.view: out_of_bounds");
     }
 
     ViewT* view_data = reinterpret_cast<ViewT*>(data_);

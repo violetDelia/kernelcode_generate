@@ -157,7 +157,7 @@
     result = NnTransposeAST(value=value, perm=perm, location=location)
     ```
 - 功能说明：执行 `NnTransposeAST`，把 DSL AST 节点转换为公开 MLIR/IR 结果或读取节点公开属性。
-- 注意事项：构造参数必须是公开 AST 节点、公开 symbol/memory 类型或签名声明的 Python 基础值；不得传入内部 visitor/helper 状态；当输入来自 `dma.reshape` 且 shape operand 携带匿名动态维度时，transpose 结果连续 stride 必须优先保留这些 operand 的公开语义名，缺少名称时才使用稳定 `runtime_dim_<axis>` 作为类型级动态维度名。
+- 注意事项：构造参数必须是公开 AST 节点、公开 symbol/memory 类型或签名声明的 Python 基础值；不得传入内部 visitor/helper 状态；当输入来自 `dma.reshape` 且 shape operand 携带匿名动态维度时，transpose 结果连续 stride 必须优先保留这些 operand 的公开语义名，缺少名称时保留匿名 `?`，不得生成类型级 runtime 维度占位。
 
 ### `class NnReluAST(value: ValueAST, location: SourceLocation | None = None)`
 
@@ -351,7 +351,7 @@
     result = MatmulAST(lhs=lhs, rhs=rhs, memoryspace=memoryspace, location=location)
     ```
 - 功能说明：执行 `MatmulAST`，把 DSL AST 节点转换为公开 MLIR/IR 结果或读取节点公开属性。
-- 注意事项：构造参数必须是公开 AST 节点、公开 symbol/memory 类型或签名声明的 Python 基础值；不得传入内部 visitor/helper 状态；matmul 两侧 contracting 维度必须可证明相等，静态、命名符号与 runtime type-level 符号均要求完全一致；不得把任意两个 `runtime_dim_*` 互相匹配。
+- 注意事项：构造参数必须是公开 AST 节点、公开 symbol/memory 类型或签名声明的 Python 基础值；不得传入内部 visitor/helper 状态；matmul 两侧 contracting 维度必须可证明相等，静态、命名符号与结构化符号表达式均要求完全一致；匿名 `?` contracting 维度不可证明相等，必须拒绝。
 
 ### `class FCAST(value: ValueAST, weight: ValueAST, location: SourceLocation | None = None)`
 

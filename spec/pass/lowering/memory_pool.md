@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-- `MemoryPoolPass` 提供 `dma.alloc/dma.free` 生命周期摘要分析，并在显式 `rewrite=True` 时把片上 `dma.alloc` 改写为 `arch.get_dynamic_memory + dma.subview + dma.reshape`。
+- `MemoryPoolPass` 提供 `dma.alloc/dma.free` 生命周期摘要分析，并在显式 `rewrite=True` 时把片上 `dma.alloc` 改写为 `arch.get_dynamic_memory + dma.view + dma.reshape`。
 - 默认 `MemoryPoolPass()` 是 analysis-only，不修改 IR；rewrite 只能通过公开构造参数或 registry/ircheck option 显式启用。
 - 本 pass 不做内存复用；同一 `func + memory space` 内的 alloc 按词法出现顺序线性切分 backing memory。
 
@@ -27,7 +27,7 @@
 ## 依赖
 
 - `kernel_gen/dialect/arch.py`：提供公开 `ArchGetDynamicMemoryOp`。
-- `kernel_gen/dialect/dma.py`：提供公开 `DmaAllocOp`、`DmaFreeOp`、`DmaSubviewOp`、`DmaReshapeOp`。
+- `kernel_gen/dialect/dma.py`：提供公开 `DmaAllocOp`、`DmaFreeOp`、`DmaViewOp`、`DmaReshapeOp`。
 - `kernel_gen/dialect/nn.py`：提供 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 - `kernel_gen/dialect/symbol.py`：提供 `!symbol.int<"expr">` 物化 op 与类型。
 - `kernel_gen/passes/registry.py`：通过 `memory-pool={rewrite=...,fold=...,alignment=...}` 公开 option 构造本 pass。
@@ -41,8 +41,8 @@
 ## 目标
 
 - summary 路径必须覆盖静态 shape、具名动态 shape、`symbol.for` / `scf.for` 中的 loop-invariant alloc，以及缺少 `dma.free` 的 alloc。
-- rewrite 路径只改写 `shared/local/tsm/tlm1/tlm2/tlm3` 片上 memory space；`global` 不属于 `arch.get_dynamic_memory` 支持范围。
-- rewrite 结果必须使用 `arch.get_dynamic_memory + dma.subview + dma.reshape`，不得生成旧 view/getmemory 路径或 byte-pool `dma.alloc/dma.free` 作为本 pass 的 rewrite 结果。
+- rewrite 路径只改写 `shared/local/tsm/tlm1/tlm2/tlm3` 片上 memory space；`global` 不属于 `arch.get_dynamic_memory` 支持范围，因此只进入 summary，不生成 dynamic backing rewrite。
+- rewrite 结果必须使用 `arch.get_dynamic_memory + dma.view + dma.reshape`，不得生成 byte-pool `dma.alloc/dma.free` 作为本 pass 的 rewrite 结果。
 - `offset` 按目标 dtype 的元素单位表达；若 `aligned_offset_bytes / sizeof(target_dtype)` 不能证明整除，必须以 `KernelCodeError(ErrorKind.UNIMPLEMENTED, ErrorModule.PASS, ...)` 失败。
 
 ## API详细说明
@@ -96,11 +96,15 @@
 - 功能说明：遍历 module 内 `func.func`，生成 `MemoryPoolSummary`；显式 rewrite 时重写符合输入域的 `dma.alloc/dma.free`。
 - 注意事项：
   - analysis-only 路径不修改 IR。
+  - analysis-only 路径在 `alignment>0` 且当前 offset 为动态表达式时，summary 保留未对齐的符号 offset，不因无法物化 aligned offset 阻断；该放宽不适用于 `rewrite=True`。
+  - analysis-only 路径允许 `dma.alloc` 结果被 `return` 或所在 loop 外部使用，并继续生成摘要；`rewrite=True` 必须拒绝该场景并报 `MemoryPoolEscapingAlloc: alloc escapes current region`，避免生成不可支配的 replacement。
+  - `rewrite=True` 允许外层 loop 内的 alloc 被其内层 loop 使用；该用法仍在 alloc 所在 loop 的词法范围内，不属于 escaping use。
   - 缺少 `dma.free` 的 alloc 生命周期按所在 block/region 结束记录。
-  - `rewrite=True` 时每个 `func + memory space` 在函数入口生成一份 `arch.get_dynamic_memory`。
+  - `rewrite=True` 时每个 `func + 可改写片上 memory space` 在函数入口生成一份 `arch.get_dynamic_memory`；`global` alloc 保留为 summary-only，不走 dynamic backing。
   - 多 alloc 线性切分，不因生命周期不重叠而复用 offset。
-  - `symbol.for` 内 alloc 的 `dma.subview + dma.reshape` 留在 loop body；`scf.for` 内 loop-invariant alloc 的 backing memory 仍在函数入口。
+  - `symbol.for` 内 alloc 的 `dma.view + dma.reshape` 留在 loop body；`scf.for` 内 loop-invariant alloc 的 backing memory 仍在函数入口。
   - `dma.alloc` result `nn.memory` 的 shape/stride 条目只接受已通过 `nn.memory` verifier 的 `SymbolExprAttr`；旧 bare `IntAttr` / `StringAttr` 维度不属于本 pass 输入合同，由 `nn.memory` verifier 在进入 pass 前拒绝。
+  - full-rank `dma.alloc.dynamic_shape` operand 可携带 `!symbol.int<"?">` 类型；rewrite 必须用 alloc result `nn.memory` shape 的 `SymbolExprAttr` 表达作为该维度语义，不得把 `?` 当作匿名 memory layout 维度继续传播。
   - 非 contiguous/custom stride 报 `MemoryPoolUnsupportedLayout: non-contiguous/custom stride is not supported`，错误类型为 `UNIMPLEMENTED`。
   - 多 block 或无法归属的 control-flow 报 `MemoryPoolUnsupportedControlFlow` 或 `MemoryPoolUnsupportedRegionEscape`，不得静默跳过非法 alloc。
 
@@ -178,7 +182,7 @@
   interval = MemoryPoolInterval("alloc1", ("#SM",), sympy.Integer(32), 0, 1, sympy.Integer(0))
   ```
 - 功能说明：记录单个 allocation 的 summary 区间。
-- 注意事项：`offset_bytes_expr` 是 byte 单位；rewrite 中的 `dma.subview.offset` 会再转换为目标 dtype 的元素单位。
+- 注意事项：`offset_bytes_expr` 是 byte 单位；rewrite 中的 `dma.view.offsets[0]` 会再转换为目标 dtype 的元素单位。
 
 ## 测试
 
@@ -189,7 +193,7 @@
 ### 测试目标
 
 - 验证 summary API、文本输出、缺 free 生命周期、dtype/shape/stride 错误、loop 生命周期错误。
-- 验证 `rewrite=True` 生成 `arch.get_dynamic_memory + dma.subview + dma.reshape`，且不生成旧 view rewrite。
+- 验证 `rewrite=True` 生成 `arch.get_dynamic_memory + dma.view + dma.reshape`，且不残留可改写的 `dma.alloc`。
 - 验证 `alignment=0`、默认 alignment、正 alignment、非法 alignment 和 registry/ircheck option 路径。
 - 验证测试只通过公开 `MemoryPoolPass`、registry、PassManager 与公开 dialect op 入口运行，不调用 `memory_pool.py` 内部 helper。
 
@@ -199,13 +203,14 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-MP-001 | summary | 单 alloc/free | 构造 `dma.alloc + dma.free` | 运行 `MemoryPoolPass(rewrite=False).apply(...)` | 生成一个 interval 与 bucket peak | `test_memory_pool_summary_basic` |
 | TC-MP-002 | summary API | 空函数、缺失查询、拷贝语义 | 构造空函数 module | 查询 `get_summary/all_summaries` | 空 summary 稳定，缺失函数报 `MemoryPoolSummaryNotFound` | `test_memory_pool_public_summary_access_edges` |
-| TC-MP-003 | rewrite | 单 space 多 alloc | `shared` alloc/free，`alignment=0` | 运行 `MemoryPoolPass(rewrite=True, alignment=0)` | 一个 dynamic memory、多个 subview/reshape、无 alloc/free 残留 | `test_memory_pool_rewrite_straight_line_pool_reuse` |
+| TC-MP-003 | rewrite | 单 space 多 alloc | `shared` alloc/free，`alignment=0` | 运行 `MemoryPoolPass(rewrite=True, alignment=0)` | 一个 dynamic memory、多个 view/reshape、无 alloc/free 残留 | `test_memory_pool_rewrite_straight_line_pool_reuse` |
 | TC-MP-004 | rewrite | 多 memory space | `shared` 与 `tlm1` alloc | 运行 rewrite | 每个 space 一份 dynamic memory | `test_memory_pool_rewrite_multiple_buckets` |
-| TC-MP-005 | rewrite | 不同 size 线性切分 | 同 space 不同 shape | 运行 rewrite | subview offset/size 按出现顺序相邻 | `test_memory_pool_rewrite_size_mismatch` |
+| TC-MP-005 | rewrite | 不同 size 线性切分 | 同 space 不同 shape | 运行 rewrite | view offset/shape 按出现顺序相邻 | `test_memory_pool_rewrite_size_mismatch` |
 | TC-MP-006 | rewrite | 生命周期重叠 | 同 space alloc 重叠 | 运行 rewrite | 不复用 offset，线性切分 | `test_memory_pool_rewrite_overlap` |
 | TC-MP-007 | dtype/shape | dtype 矩阵与符号 shape | 内置 dtype、非法 dtype、动态 shape | 运行 summary/rewrite | byte size 与符号表达稳定，非法 dtype 失败；动态 shape rewrite 保持结构化 `SymbolExprAttr` layout | `test_memory_pool_dtype_and_symbolic_shape_matrix` |
+| TC-MP-007A | dtype/shape | full-rank unknown dynamic_shape | alloc result shape 为 `SymbolExprAttr`，dynamic_shape operand 为 `!symbol.int<"?">` | 运行 `MemoryPoolPass(rewrite=True, alignment=0)` | rewrite 使用 result shape 语义生成 `dma.view + dma.reshape`，不传播匿名 `?` layout | `test_memory_pool_rewrite_binds_unknown_full_rank_dynamic_shape_to_result_layout` |
 | TC-MP-008 | 边界 | 非 contiguous/custom stride | 非连续 stride memory | 运行 `apply(...)` | `UNIMPLEMENTED` + `MemoryPoolUnsupportedLayout` | `test_memory_pool_public_invalid_shape_stride_and_free_edges` |
 | TC-MP-009 | 边界 | 缺 free | 单 alloc 无 free | 运行 analysis-only | interval end 为 block/region 结束 | `test_memory_pool_unpaired_alloc` |
-| TC-MP-010 | loop | `symbol.for` alloc | loop 内 alloc/free | 运行 rewrite | backing 在函数入口，subview/reshape 留在 loop body | `test_memory_pool_symbol_for_reuse` |
+| TC-MP-010 | loop | `symbol.for` alloc | loop 内 alloc/free | 运行 rewrite | backing 在函数入口，view/reshape 留在 loop body | `test_memory_pool_symbol_for_reuse` |
 | TC-MP-011 | registry | memory-pool options | `rewrite/fold/alignment` option | 运行 `build_registered_pass(...)` | 构造 `MemoryPoolPass`，非法 option 稳定失败 | `test_build_registered_memory_pool_alignment_options` |
 | TC-MP-012 | 合同验收 | expectation memory_pool | 只读 `expectation/pass/memory_pool` | 运行 `python3 -m expectation.pass.memory_pool` | 全部合同通过且不修改 expectation | `expectation.pass.memory_pool` |

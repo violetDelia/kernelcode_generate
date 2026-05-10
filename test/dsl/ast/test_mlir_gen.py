@@ -33,7 +33,7 @@ from kernel_gen.core.context import build_default_context
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaReshapeOp, DmaSliceOp
 from kernel_gen.dialect.nn import NnAddOp, NnMatmulOp, NnMemorySpaceAttr, NnMemoryType, NnSoftmaxOp
-from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolForOp, SymbolGetDimOp, SymbolMinOp, SymbolMulOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolForOp, SymbolGetDimOp, SymbolMaxOp, SymbolMinOp, SymbolMulOp, SymbolValueType
 from kernel_gen.dsl import parse_function
 from kernel_gen.dsl.ast import parse
 from kernel_gen.dsl.ast.mlir_gen import mlir_gen
@@ -177,6 +177,42 @@ def _symbol_min_dynamic_expr_kernel(lhs: SymbolDim, rhs: SymbolDim) -> int:
     """提供动态 symbol.min 复合 operand DSL kernel。"""
 
     return min(lhs + 1, rhs - 2)
+
+
+def _symbol_max_dynamic_expr_kernel(lhs: SymbolDim, rhs: SymbolDim) -> int:
+    """提供动态 symbol.max 复合 operand DSL kernel。"""
+
+    return max(lhs + 1, rhs - 2)
+
+
+def _symbol_max_static_fold_kernel() -> int:
+    """提供静态 max 折叠 DSL kernel。"""
+
+    return max(2, 5)
+
+
+def _symbol_max_bad_arity_kernel(lhs: SymbolDim) -> int:
+    """提供 max arity 错误 DSL kernel。"""
+
+    return max(lhs)
+
+
+def _symbol_max_non_value_arg_kernel(lhs: SymbolDim) -> int:
+    """提供 max 非 ValueAST 参数错误 DSL kernel。"""
+
+    return max([lhs], lhs)
+
+
+def _symbol_max_non_symbol_arg_kernel(lhs: SymbolDim) -> int:
+    """提供 max 非 symbol 参数错误 DSL kernel。"""
+
+    return max(1.5, lhs)
+
+
+def _unknown_symbol_name_kernel() -> int:
+    """提供未知名称错误 DSL kernel。"""
+
+    return UNKNOWN_SYMBOL_FOR_TEST
 
 
 def public_nn_activation_reduce_kernel(x: Memory) -> None:
@@ -419,6 +455,54 @@ def test_mlir_gen_materializes_symbol_min_operand_consts_before_arithmetic() -> 
     min_index = module_text.index("symbol.min")
 
     assert const_one_index < const_two_index < add_index < sub_index < min_index
+
+
+def test_mlir_gen_lowers_symbol_max_and_materializes_operand_consts() -> None:
+    """TC-MLIR-GEN-SYM-MAX-001: DSL max 生成 symbol.max 并稳定常量顺序。"""
+
+    module = mlir_gen(_symbol_max_dynamic_expr_kernel, SymbolDim("W"), SymbolDim("HBOGU"))
+    module_text = str(module)
+
+    const_one_index = module_text.index("symbol.const 1")
+    const_two_index = module_text.index("symbol.const 2")
+    add_index = module_text.index("symbol.add")
+    sub_index = module_text.index("symbol.sub")
+    max_index = module_text.index("symbol.max")
+
+    assert const_one_index < const_two_index < add_index < sub_index < max_index
+    root_op = list(module.body.block.ops)[0]
+    assert isinstance(root_op, func.FuncOp)
+    assert any(isinstance(op, SymbolMaxOp) for op in root_op.body.block.ops)
+
+
+def test_mlir_gen_folds_static_symbol_max() -> None:
+    """TC-MLIR-GEN-SYM-MAX-002: 静态 max 通过公开 DSL 入口折叠为常量。"""
+
+    module = mlir_gen(_symbol_max_static_fold_kernel)
+
+    assert "symbol.const 5" in str(module)
+
+
+@pytest.mark.parametrize(
+    ("kernel", "message"),
+    [
+        (_symbol_max_bad_arity_kernel, "Unsupported max arity"),
+        (_symbol_max_non_value_arg_kernel, "max arguments must be symbol values"),
+        (_symbol_max_non_symbol_arg_kernel, "max arguments must be symbol values"),
+    ],
+)
+def test_mlir_gen_rejects_invalid_symbol_max_calls(kernel, message: str) -> None:
+    """TC-MLIR-GEN-SYM-MAX-003: 非公开 max 输入域稳定失败。"""
+
+    with pytest.raises(KernelCodeError, match=message):
+        mlir_gen(kernel, SymbolDim("N"))
+
+
+def test_mlir_gen_rejects_unknown_name() -> None:
+    """TC-MLIR-GEN-NAME-001: 未知名称经公开 mlir_gen 入口稳定失败。"""
+
+    with pytest.raises(KernelCodeError, match="Unknown name"):
+        mlir_gen(_unknown_symbol_name_kernel)
 
 
 def test_mlir_gen_uses_runtime_args_for_symbol_signature() -> None:

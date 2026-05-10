@@ -23,6 +23,7 @@ API 列表:
 - `SymbolTrueDivAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `SymbolFloorDivAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `SymbolMinAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `SymbolMaxAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `SymbolBinaryAST.result_symbol() -> int | SymbolDim | None`
 - `SymbolEqAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `SymbolNeAST(lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
@@ -66,6 +67,7 @@ from kernel_gen.dialect.symbol import (
     SymbolIterType,
     SymbolLeOp,
     SymbolLtOp,
+    SymbolMaxOp,
     SymbolMinOp,
     SymbolMulOp,
     SymbolNeOp,
@@ -101,6 +103,7 @@ __all__ = [
     "SymbolTrueDivAST",
     "SymbolFloorDivAST",
     "SymbolMinAST",
+    "SymbolMaxAST",
     "SymbolCompareAST",
     "SymbolEqAST",
     "SymbolNeAST",
@@ -519,7 +522,7 @@ def _compose_symbol_binary_expr(op_name: str, lhs: int | str, rhs: int | str) ->
     功能说明:
     - 任一 operand 表达为 `?` 时，结果直接传播为 `?`。
     - 对可由 `SymbolDim` 解析的表达复用解析期算术语义。
-    - `min` 在双整数输入时直接折叠，否则生成 `min(lhs, rhs)` 文本。
+    - `min/max` 在双整数输入时直接折叠，否则生成 `min(lhs, rhs)` 或 `max(lhs, rhs)` 文本。
 
     使用示例:
     - expr = _compose_symbol_binary_expr("add", "N", 1)
@@ -534,6 +537,8 @@ def _compose_symbol_binary_expr(op_name: str, lhs: int | str, rhs: int | str) ->
     rhs_operand = _normalize_symbol_operand_expr(rhs_text)
     if op_name == "min":
         return str(min(lhs_operand, rhs_operand)) if isinstance(lhs_operand, int) and isinstance(rhs_operand, int) else f"min({lhs_operand}, {rhs_operand})"
+    if op_name == "max":
+        return str(max(lhs_operand, rhs_operand)) if isinstance(lhs_operand, int) and isinstance(rhs_operand, int) else f"max({lhs_operand}, {rhs_operand})"
     if isinstance(lhs_operand, int) and isinstance(rhs_operand, int):
         if op_name == "add":
             return str(lhs_operand + rhs_operand)
@@ -578,18 +583,42 @@ def _symbol_min_runtime_value(lhs: int | SymbolDim, rhs: int | SymbolDim) -> int
     return SymbolDim(sp.Min(lhs_symbol, rhs_symbol))
 
 
+def _symbol_max_runtime_value(lhs: int | SymbolDim, rhs: int | SymbolDim) -> int | SymbolDim:
+    """返回 `max(lhs, rhs)` 的解析期 symbol 语义。
+
+    功能说明:
+    - 双整数输入直接返回 Python `max(...)` 结果。
+    - 动态 symbol 输入通过 `sympy.Max` 构造 `SymbolDim`，保持解析期表达可继续组合。
+    - 缺少动态表达依赖时按 MLIR 生成合同公开失败。
+
+    使用示例:
+    - value = _symbol_max_runtime_value(4, SymbolDim("N"))
+    """
+
+    if isinstance(lhs, int) and isinstance(rhs, int):
+        return max(lhs, rhs)
+    try:
+        import sympy as sp
+    except Exception as exc:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "symbol.max requires sympy for dynamic operands") from exc
+    lhs_symbol = lhs if isinstance(lhs, int) else lhs.get_symbol()
+    rhs_symbol = rhs if isinstance(rhs, int) else rhs.get_symbol()
+    return SymbolDim(sp.Max(lhs_symbol, rhs_symbol))
+
+
 def _is_unknown_runtime_symbol(value: int | SymbolDim) -> bool:
     """判断解析期 symbol 值是否为 unknown。
 
     功能说明:
     - 仅在当前文件内服务 `SymbolBinaryAST.result_symbol()`。
     - 将来自 loop iterator 的 unknown runtime symbol 继续传播为 `SymbolDim("?")`。
+    - 只检查 `SymbolDim.get_symbol().free_symbols` 中是否含 `?`，避免为了 unknown 判断触发公开值简化。
 
     使用示例:
     - is_unknown = _is_unknown_runtime_symbol(SymbolDim("?"))
     """
 
-    return isinstance(value, SymbolDim) and str(value.get_value()) == "?"
+    return isinstance(value, SymbolDim) and any(symbol.name == "?" for symbol in value.get_symbol().free_symbols)
 
 
 @dataclass
@@ -637,6 +666,9 @@ class SymbolBinaryAST(ValueAST):
             elif isinstance(self, SymbolMinAST):
                 min_value = _symbol_min_runtime_value(lhs, rhs)
                 return SymbolDim("?") if _is_unknown_runtime_symbol(min_value) else min_value
+            elif isinstance(self, SymbolMaxAST):
+                max_value = _symbol_max_runtime_value(lhs, rhs)
+                return SymbolDim("?") if _is_unknown_runtime_symbol(max_value) else max_value
             else:
                 return None
         except (TypeError, ValueError):
@@ -649,8 +681,8 @@ class SymbolBinaryAST(ValueAST):
 
         功能说明:
         - 普通 symbol 二元算术按左右 operand 顺序发射对应 `symbol.*` op。
-        - `SymbolMinAST` 先预物化复合 operand 中的直接整数常量，再发射算术和最终 `symbol.min`。
-        - 该顺序锁定 `min(lhs + 1, rhs - 2)` 的 MLIR 文本合同，避免常量插入位置随递归路径漂移。
+        - `SymbolMinAST` / `SymbolMaxAST` 先预物化复合 operand 中的直接整数常量，再发射算术和最终最值 op。
+        - 该顺序锁定 `min/max(lhs + 1, rhs - 2)` 的 MLIR 文本合同，避免常量插入位置随递归路径漂移。
 
         使用示例:
         - value = SymbolMinAST(SymbolAddAST(SymbolDimAST("N"), ConstValueAST(1)), SymbolDimAST("M")).emit_mlir(ctx, block)
@@ -658,7 +690,7 @@ class SymbolBinaryAST(ValueAST):
 
         assert isinstance(ctx, Context)
         assert isinstance(block, Block)
-        if isinstance(self, SymbolMinAST):
+        if isinstance(self, (SymbolMinAST, SymbolMaxAST)):
             pre_emitted: dict[int, SSAValue] = {}
             _preemit_symbol_int_constants(self.lhs, ctx, block, pre_emitted)
             _preemit_symbol_int_constants(self.rhs, ctx, block, pre_emitted)
@@ -689,6 +721,8 @@ class SymbolBinaryAST(ValueAST):
             op = SymbolFloorDivOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("floordiv", lhs_value, rhs_value)))
         elif isinstance(self, SymbolMinAST):
             op = SymbolMinOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("min", lhs_value, rhs_value)))
+        elif isinstance(self, SymbolMaxAST):
+            op = SymbolMaxOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("max", lhs_value, rhs_value)))
         else:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbol binary AST")
         block.add_op(op)
@@ -719,16 +753,20 @@ class SymbolMinAST(SymbolBinaryAST):
     """符号最小值节点。"""
 
 
+class SymbolMaxAST(SymbolBinaryAST):
+    """符号最大值节点。"""
+
+
 def _preemit_symbol_int_constants(
     value: ValueAST,
     ctx: Context,
     block: Block,
     pre_emitted: dict[int, SSAValue],
 ) -> None:
-    """预先物化 `symbol.min` 两侧表达式中的整数常量。
+    """预先物化 `symbol.min/max` 两侧表达式中的整数常量。
 
     功能说明:
-    - 递归扫描 `symbol.min` 左右 operand 的 `SymbolBinaryAST` 子树。
+    - 递归扫描 `symbol.min/max` 左右 operand 的 `SymbolBinaryAST` 子树。
     - 只提前发射直接整数常量，动态 symbol 与其它 operand 保持原发射路径。
     - 通过 `pre_emitted` 缓存避免同一 AST 节点重复生成 `symbol.const`。
 
@@ -781,7 +819,7 @@ def _emit_symbol_value_ast(
     block: Block,
     pre_emitted: dict[int, SSAValue],
 ) -> SSAValue:
-    """发射 `symbol.min` operand，并复用已提前物化的整数常量。
+    """发射 `symbol.min/max` operand，并复用已提前物化的整数常量。
 
     功能说明:
     - 优先返回 `_preemit_symbol_int_constants(...)` 已缓存的 `symbol.const` SSA value。
@@ -812,9 +850,9 @@ def _emit_symbol_binary_op(value: SymbolBinaryAST, lhs: SSAValue, rhs: SSAValue,
     """根据 `SymbolBinaryAST` 子类发射对应 symbol 二元 op。
 
     功能说明:
-    - 根据具体 `SymbolBinaryAST` 子类选择 `symbol.add/sub/mul/div/floordiv/min` op。
+    - 根据具体 `SymbolBinaryAST` 子类选择 `symbol.add/sub/mul/div/floordiv/min/max` op。
     - 通过 `_compose_symbol_binary_expr(...)` 同步生成结果 `!symbol.int` 表达文本。
-    - 仅在当前文件内服务 `SymbolMinAST` 递归 operand 发射，不作为跨文件公开入口。
+    - 仅在当前文件内服务 `SymbolMinAST` / `SymbolMaxAST` 递归 operand 发射，不作为跨文件公开入口。
 
     使用示例:
     - result = _emit_symbol_binary_op(SymbolAddAST(lhs_ast, rhs_ast), lhs_value, rhs_value, block)
@@ -834,6 +872,8 @@ def _emit_symbol_binary_op(value: SymbolBinaryAST, lhs: SSAValue, rhs: SSAValue,
         op = SymbolFloorDivOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("floordiv", lhs_value, rhs_value)))
     elif isinstance(value, SymbolMinAST):
         op = SymbolMinOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("min", lhs_value, rhs_value)))
+    elif isinstance(value, SymbolMaxAST):
+        op = SymbolMaxOp(lhs, rhs, SymbolValueType.from_expr(_compose_symbol_binary_expr("max", lhs_value, rhs_value)))
     else:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported symbol binary AST")
     block.add_op(op)

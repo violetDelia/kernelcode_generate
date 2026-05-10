@@ -28,12 +28,14 @@ from pathlib import Path
 
 os.environ.setdefault("SYMPY_GMPY", "0")
 
-import sympy as sp
+import pytest
 from xdsl.context import Context
-from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntegerType, ModuleOp, StringAttr, bf16, f16, f32, f64, i1, i8, i16, i32, i64
+from xdsl.dialects import arith, func, scf
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, IndexType, IntAttr, IntegerAttr, IntegerType, ModuleOp, StringAttr, bf16, f16, f32, f64, i1, i8, i16, i32, i64
 from xdsl.dialects.test import TestOp as _TestOp
 from xdsl.ir import Block, Operation, Region, SSAValue
+from xdsl.utils.exceptions import VerifyException
+import sympy as sp
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -41,7 +43,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp
-from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaReshapeOp, DmaSubviewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaReshapeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolForOp, SymbolIterType, SymbolValueType, SymbolYieldOp
 from kernel_gen.passes.memory_pool import MemoryPoolInterval, MemoryPoolPass, MemoryPoolSummary
@@ -178,7 +180,7 @@ def _collect_defining_ops(value: SSAValue) -> list[Operation]:
     - 用于确认函数体 offset 不依赖 loop body 内定义的 SSA。
 
     使用示例:
-    - defining_ops = _collect_defining_ops(subview.offset[0])
+    - defining_ops = _collect_defining_ops(view.offsets[0])
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -403,7 +405,7 @@ def test_memory_pool_peak_overlap() -> None:
 
 
 # TC-MP-004
-# 功能说明: 验证直线路径改写生成 dynamic memory + subview + reshape。
+# 功能说明: 验证直线路径改写生成 dynamic memory + view + reshape。
 # 使用示例: pytest -q test/passes/test_memory_pool.py -k "rewrite and straight_line"
 # 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
@@ -425,21 +427,21 @@ def test_memory_pool_rewrite_straight_line_pool_reuse() -> None:
     alloc_ops = [op for op in block.ops if isinstance(op, DmaAllocOp)]
     free_ops = [op for op in block.ops if isinstance(op, DmaFreeOp)]
     backing_ops = [op for op in block.ops if isinstance(op, ArchGetDynamicMemoryOp)]
-    subview_ops = [op for op in block.ops if isinstance(op, DmaSubviewOp)]
+    view_ops = [op for op in block.ops if isinstance(op, DmaViewOp)]
     reshape_ops = [op for op in block.ops if isinstance(op, DmaReshapeOp)]
 
     assert len(alloc_ops) == 0
     assert len(free_ops) == 0
     assert len(backing_ops) == 1
-    assert len(subview_ops) == 2
+    assert len(view_ops) == 2
     assert len(reshape_ops) == 2
 
     backing_type = backing_ops[0].result.type
     assert isinstance(backing_type, NnMemoryType)
     assert len(backing_type.shape.data) == 1
     assert backing_type.element_type == i8
-    subview_offsets = [op.offset[0].type.get_value() for op in subview_ops]
-    assert subview_offsets == [0, 8]
+    view_offsets = [op.offsets[0].type.get_value() for op in view_ops]
+    assert view_offsets == [0, 8]
     for reshape_op in reshape_ops:
         assert reshape_op.result.type == mem_type
 
@@ -468,11 +470,11 @@ def test_memory_pool_rewrite_multiple_buckets() -> None:
         for op in ops
         if isinstance(op, ArchGetDynamicMemoryOp) and isinstance(op.result.type, NnMemoryType)
     ]
-    subview_ops = [op for op in ops if isinstance(op, DmaSubviewOp)]
+    view_ops = [op for op in ops if isinstance(op, DmaViewOp)]
 
     assert backing_spaces == ["shared", "tlm1"]
-    assert len(subview_ops) == 2
-    assert [op.result.type.space.space.data for op in subview_ops] == ["shared", "tlm1"]
+    assert len(view_ops) == 2
+    assert [op.result.type.space.space.data for op in view_ops] == ["shared", "tlm1"]
 
 
 # TC-MP-011
@@ -493,11 +495,11 @@ def test_memory_pool_rewrite_size_mismatch() -> None:
     pass_obj = MemoryPoolPass(rewrite=True, alignment=0)
     pass_obj.apply(Context(), module)
 
-    subview_ops = [
-        op for op in _collect_ops_recursive(module.body.block) if isinstance(op, DmaSubviewOp)
+    view_ops = [
+        op for op in _collect_ops_recursive(module.body.block) if isinstance(op, DmaViewOp)
     ]
-    assert [op.offset[0].type.get_value() for op in subview_ops] == [0, 8]
-    assert [op.size[0].type.get_value() for op in subview_ops] == [8, 10]
+    assert [op.offsets[0].type.get_value() for op in view_ops] == [0, 8]
+    assert [op.shape[0].type.get_value() for op in view_ops] == [8, 10]
 
 
 # TC-MP-012
@@ -518,11 +520,11 @@ def test_memory_pool_rewrite_overlap() -> None:
     pass_obj.apply(Context(), module)
     func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
     block = func_ops[0].body.blocks[0]
-    subview_ops = [op for op in _collect_ops_recursive(block) if isinstance(op, DmaSubviewOp)]
-    assert len(subview_ops) == 2
+    view_ops = [op for op in _collect_ops_recursive(block) if isinstance(op, DmaViewOp)]
+    assert len(view_ops) == 2
     offsets = []
-    for subview_op in subview_ops:
-        offset0 = subview_op.offset[0]
+    for view_op in view_ops:
+        offset0 = view_op.offsets[0]
         offset_type = offset0.type
         assert isinstance(offset_type, SymbolValueType)
         offsets.append(offset_type.get_value())
@@ -530,7 +532,7 @@ def test_memory_pool_rewrite_overlap() -> None:
 
 
 # TC-MP-023
-# 功能说明: 验证 rank-0/rank-1 allocation 经公开 rewrite 后的 flat subview 与 reshape 形态。
+# 功能说明: 验证 rank-0/rank-1 allocation 经公开 rewrite 后的 flat view 与 reshape 形态。
 # 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_rewrite_rank_zero_and_rank_one
 # 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
@@ -549,9 +551,9 @@ def test_memory_pool_rewrite_rank_zero_and_rank_one() -> None:
     MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), rank0_module)
 
     rank0_ops = _collect_ops_recursive(rank0_module.body.block)
-    rank0_subviews = [op for op in rank0_ops if isinstance(op, DmaSubviewOp)]
+    rank0_views = [op for op in rank0_ops if isinstance(op, DmaViewOp)]
     rank0_reshapes = [op for op in rank0_ops if isinstance(op, DmaReshapeOp)]
-    assert [op.size[0].type.get_value() for op in rank0_subviews] == [1]
+    assert [op.shape[0].type.get_value() for op in rank0_views] == [1]
     assert rank0_reshapes[0].result.type == rank0_type
 
     rank1_type = _make_memory_type(shape=(4,), stride=(1,), space="shared")
@@ -562,9 +564,9 @@ def test_memory_pool_rewrite_rank_zero_and_rank_one() -> None:
     MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), rank1_module)
 
     rank1_ops = _collect_ops_recursive(rank1_module.body.block)
-    rank1_subviews = [op for op in rank1_ops if isinstance(op, DmaSubviewOp)]
+    rank1_views = [op for op in rank1_ops if isinstance(op, DmaViewOp)]
     rank1_reshapes = [op for op in rank1_ops if isinstance(op, DmaReshapeOp)]
-    assert [op.size[0].type.get_value() for op in rank1_subviews] == [4]
+    assert [op.shape[0].type.get_value() for op in rank1_views] == [4]
     assert rank1_reshapes[0].result.type == rank1_type
 
 
@@ -637,10 +639,10 @@ def test_memory_pool_dtype_and_symbolic_shape_matrix() -> None:
 
     symbolic_pass.apply(Context(), symbolic_module)
     symbolic_summary = symbolic_pass.get_summary("symbolic")
-    subview_ops = [
+    view_ops = [
         op
         for op in _collect_ops_recursive(symbolic_module.body.block)
-        if isinstance(op, DmaSubviewOp)
+        if isinstance(op, DmaViewOp)
     ]
     reshape_ops = [
         op
@@ -650,9 +652,81 @@ def test_memory_pool_dtype_and_symbolic_shape_matrix() -> None:
 
     assert "size_bytes=16*N" in symbolic_summary.to_text()
     assert "(#SM) -> 16*N" in symbolic_summary.to_text()
-    assert len(subview_ops) == 1
+    assert len(view_ops) == 1
     assert len(reshape_ops) == 1
     assert reshape_ops[0].result.type == symbolic_type
+
+
+# TC-MP-007A
+# 功能说明: 验证 full-rank `?` dynamic_shape 按 result layout 的 SymbolExprAttr 语义参与 rewrite。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_rewrite_binds_unknown_full_rank_dynamic_shape_to_result_layout
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_rewrite_binds_unknown_full_rank_dynamic_shape_to_result_layout() -> None:
+    dynamic_type = NnMemoryType(
+        ArrayAttr([_symbol_expr_attr("M"), _symbol_expr_attr("N")]),
+        ArrayAttr([_symbol_expr_attr("N"), _symbol_expr_attr("1")]),
+        f32,
+        _make_space("shared"),
+    )
+    m_value = _TestOp(result_types=[SymbolValueType.from_expr("?")])
+    n_value = _TestOp(result_types=[SymbolValueType.from_expr("?")])
+    alloc = DmaAllocOp([m_value.results[0], n_value.results[0]], dynamic_type)
+    free = DmaFreeOp(alloc.result)
+    module = _build_module("unknown_full_rank_dynamic", [m_value, n_value, alloc, free])
+
+    MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), module)
+
+    ops = _collect_ops_recursive(module.body.block)
+    view_ops = [op for op in ops if isinstance(op, DmaViewOp)]
+    reshape_ops = [op for op in ops if isinstance(op, DmaReshapeOp)]
+
+    assert [op.shape[0].type.get_value() for op in view_ops] == ["M*N"]
+    assert [[value.type.get_value() for value in op.shape] for op in reshape_ops] == [["M", "N"]]
+    assert not any(isinstance(op, DmaAllocOp) for op in ops)
+
+
+# TC-MP-007B
+# 功能说明: 验证同一 block 内后续 full-rank `?` dynamic_shape 在自身 alloc 前定义时按自身 anchor 物化。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_rewrite_later_unknown_dynamic_shape_uses_own_anchor
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_rewrite_later_unknown_dynamic_shape_uses_own_anchor() -> None:
+    first_type = NnMemoryType(
+        ArrayAttr([_symbol_expr_attr("M")]),
+        ArrayAttr([_symbol_expr_attr("1")]),
+        f32,
+        _make_space("shared"),
+    )
+    second_type = NnMemoryType(
+        ArrayAttr([_symbol_expr_attr("N")]),
+        ArrayAttr([_symbol_expr_attr("1")]),
+        f32,
+        _make_space("shared"),
+    )
+    first_dim = _TestOp(result_types=[SymbolValueType.from_expr("?")])
+    first_alloc = DmaAllocOp([first_dim.results[0]], first_type)
+    first_free = DmaFreeOp(first_alloc.result)
+    second_dim = _TestOp(result_types=[SymbolValueType.from_expr("?")])
+    second_alloc = DmaAllocOp([second_dim.results[0]], second_type)
+    second_free = DmaFreeOp(second_alloc.result)
+    module = _build_module(
+        "unknown_later_dynamic",
+        [first_dim, first_alloc, first_free, second_dim, second_alloc, second_free],
+    )
+
+    MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), module)
+
+    ops = _collect_ops_recursive(module.body.block)
+    view_ops = [op for op in ops if isinstance(op, DmaViewOp)]
+    reshape_ops = [op for op in ops if isinstance(op, DmaReshapeOp)]
+
+    assert [op.offsets[0].type.get_value() for op in view_ops] == [0, "M"]
+    assert [op.shape[0].type.get_value() for op in view_ops] == ["M", "N"]
+    assert [[value.type.get_value() for value in op.shape] for op in reshape_ops] == [["M"], ["N"]]
+    assert not any(isinstance(op, DmaAllocOp) for op in ops)
 
 
 # TC-MP-020
@@ -697,6 +771,14 @@ def test_memory_pool_public_invalid_shape_stride_and_free_edges() -> None:
     else:
         raise AssertionError("expected KernelCodeError for duplicate dma.free")
 
+    with pytest.raises(VerifyException, match="shape dimensions must be SymbolExprAttr"):
+        NnMemoryType(
+            ArrayAttr([IntAttr(2)]),
+            ArrayAttr([IntAttr(1)]),
+            i32,
+            _make_space("shared"),
+        )
+
 
 # TC-MP-024
 # 功能说明: 验证公开 rewrite 对 dynamic shape、alignment 与生命周期顺序的拒绝边界。
@@ -734,6 +816,13 @@ def test_memory_pool_public_rewrite_error_edges() -> None:
         "dynamic_alignment",
         [n_value, dynamic_alloc, dynamic_free, static_alloc, static_free],
     )
+    analysis_pass = MemoryPoolPass(rewrite=False, alignment=1024)
+    analysis_pass.apply(Context(), dynamic_alignment_module)
+    offsets = {interval.name: interval.offset_bytes_expr for interval in analysis_pass.get_summary("dynamic_alignment").intervals}
+    symbol_n = sp.Symbol("N", integer=True, positive=True)
+    assert str(offsets["alloc1"]) == "0"
+    assert sp.simplify(offsets["alloc2"] - sp.Integer(16) * symbol_n) == 0
+
     try:
         MemoryPoolPass(rewrite=True, alignment=1024).apply(Context(), dynamic_alignment_module)
     except KernelCodeError as exc:
@@ -793,13 +882,15 @@ def test_memory_pool_public_rewrite_error_edges() -> None:
     global_alloc = DmaAllocOp(_make_symbol_operands([2, 4]), global_type)
     global_free = DmaFreeOp(global_alloc.result)
     global_module = _build_module("global_rewrite", [global_alloc, global_free])
-    try:
-        MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), global_module)
-    except KernelCodeError as exc:
-        assert "MemoryPoolUnsupportedPoolBucket" in str(exc)
-        assert "global" in str(exc)
-    else:
-        raise AssertionError("expected KernelCodeError for unsupported rewrite bucket")
+    global_pass = MemoryPoolPass(rewrite=True, alignment=0)
+    global_pass.apply(Context(), global_module)
+    global_summary = global_pass.get_summary("global_rewrite")
+    global_ops = _collect_ops_recursive(global_module.body.block)
+    assert global_summary.pool_count == 1
+    assert global_summary.intervals[0].bucket_key == ("#GM",)
+    assert any(isinstance(op, DmaAllocOp) for op in global_ops)
+    assert any(isinstance(op, DmaFreeOp) for op in global_ops)
+    assert not any(isinstance(op, (ArchGetDynamicMemoryOp, DmaViewOp, DmaReshapeOp)) for op in global_ops)
 
     loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "4", "1")])
     loop_alloc = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
@@ -846,6 +937,38 @@ def test_memory_pool_public_rewrite_error_edges() -> None:
     else:
         raise AssertionError("expected KernelCodeError for non-dominating dynamic loop size")
 
+    mismatch_alloc_block = Block(arg_types=[SymbolIterType.from_bounds("0", "2", "1")])
+    mismatch_alloc = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    mismatch_alloc_block.add_ops([mismatch_alloc])
+    mismatch_free_block = Block(arg_types=[SymbolIterType.from_bounds("0", "2", "1")])
+    mismatch_free_block.add_ops([DmaFreeOp(mismatch_alloc.result)])
+    mismatch_alloc_loop = SymbolForOp(_symbol_value(0), _symbol_value(2), _symbol_value(1), mismatch_alloc_block)
+    mismatch_free_loop = SymbolForOp(_symbol_value(0), _symbol_value(2), _symbol_value(1), mismatch_free_block)
+    mismatch_module = _build_module("loop_free_mismatch", [mismatch_alloc_loop, mismatch_free_loop])
+    try:
+        MemoryPoolPass(rewrite=False).apply(Context(), mismatch_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolLifetimeError: loop alloc/free mismatch" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for loop alloc/free mismatch")
+
+    multiblock_loop = SymbolForOp(
+        _symbol_value(0),
+        _symbol_value(2),
+        _symbol_value(1),
+        [
+            Block(arg_types=[SymbolIterType.from_bounds("0", "2", "1")]),
+            Block(arg_types=[SymbolIterType.from_bounds("0", "2", "1")]),
+        ],
+    )
+    multiblock_module = _build_module("multiblock_loop", [multiblock_loop])
+    try:
+        MemoryPoolPass(rewrite=False).apply(Context(), multiblock_module)
+    except KernelCodeError as exc:
+        assert "MemoryPoolUnsupportedRegionEscape: loop must have single block" in str(exc)
+    else:
+        raise AssertionError("expected KernelCodeError for multi-block symbol.for")
+
 
 # TC-MP-025
 # 功能说明: 验证 mixed dtype 的公开 rewrite 分支覆盖整除、不可整除与动态 ratio offset。
@@ -867,10 +990,10 @@ def test_memory_pool_mixed_dtype_rewrite_edges() -> None:
 
     MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), static_ok_module)
 
-    static_ok_subviews = [
-        op for op in _collect_ops_recursive(static_ok_module.body.block) if isinstance(op, DmaSubviewOp)
+    static_ok_views = [
+        op for op in _collect_ops_recursive(static_ok_module.body.block) if isinstance(op, DmaViewOp)
     ]
-    assert [op.offset[0].type.get_value() for op in static_ok_subviews] == [0, 1]
+    assert [op.offsets[0].type.get_value() for op in static_ok_views] == [0, 1]
 
     f16_second_type = _make_memory_type(shape=(4,), stride=(1,), element_type=f16, space="shared")
     f16_first_alloc = DmaAllocOp(_make_symbol_operands([2]), f16_ok_type)
@@ -893,10 +1016,10 @@ def test_memory_pool_mixed_dtype_rewrite_edges() -> None:
 
     MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), static_three_module)
 
-    static_three_subviews = [
-        op for op in _collect_ops_recursive(static_three_module.body.block) if isinstance(op, DmaSubviewOp)
+    static_three_views = [
+        op for op in _collect_ops_recursive(static_three_module.body.block) if isinstance(op, DmaViewOp)
     ]
-    assert [op.offset[0].type.get_value() for op in static_three_subviews] == [0, 2, 3]
+    assert [op.offsets[0].type.get_value() for op in static_three_views] == [0, 2, 3]
 
     f16_type = _make_memory_type(shape=(3,), stride=(1,), element_type=f16, space="shared")
     f16_alloc = DmaAllocOp(_make_symbol_operands([3]), f16_type)
@@ -958,10 +1081,46 @@ def test_memory_pool_mixed_dtype_rewrite_edges() -> None:
 
     MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), dynamic_ratio_module)
 
-    subview_ops = [
-        op for op in _collect_ops_recursive(dynamic_ratio_module.body.block) if isinstance(op, DmaSubviewOp)
+    view_ops = [
+        op for op in _collect_ops_recursive(dynamic_ratio_module.body.block) if isinstance(op, DmaViewOp)
     ]
-    assert [op.offset[0].type.get_value() for op in subview_ops] == [0, "2*N"]
+    assert [op.offsets[0].type.get_value() for op in view_ops] == [0, "2*N"]
+
+    n_ratio = _TestOp(result_types=[SymbolValueType.from_expr("N")])
+    m_ratio = _TestOp(result_types=[SymbolValueType.from_expr("M")])
+    i64_dynamic_type = _make_memory_type(shape=("N",), stride=(1,), element_type=i64, space="shared")
+    i32_dynamic_type = _make_memory_type(shape=("M",), stride=(1,), element_type=i32, space="shared")
+    i16_tail_type = _make_memory_type(shape=(2,), stride=(1,), element_type=i16, space="shared")
+    i64_dynamic_alloc = DmaAllocOp([n_ratio.results[0]], i64_dynamic_type)
+    i64_dynamic_free = DmaFreeOp(i64_dynamic_alloc.result)
+    i32_dynamic_alloc = DmaAllocOp([m_ratio.results[0]], i32_dynamic_type)
+    i32_dynamic_free = DmaFreeOp(i32_dynamic_alloc.result)
+    i16_tail_alloc = DmaAllocOp(_make_symbol_operands([2]), i16_tail_type)
+    i16_tail_free = DmaFreeOp(i16_tail_alloc.result)
+    multi_ratio_module = _build_module(
+        "dynamic_mixed_multi_ratio",
+        [
+            n_ratio,
+            i64_dynamic_alloc,
+            i64_dynamic_free,
+            m_ratio,
+            i32_dynamic_alloc,
+            i32_dynamic_free,
+            i16_tail_alloc,
+            i16_tail_free,
+        ],
+    )
+
+    MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), multi_ratio_module)
+
+    multi_ratio_views = [
+        op for op in _collect_ops_recursive(multi_ratio_module.body.block) if isinstance(op, DmaViewOp)
+    ]
+    assert [op.offsets[0].type.get_value() for op in multi_ratio_views] == [
+        0,
+        "2*N",
+        "2*M + 4*N",
+    ]
 
 
 # TC-MP-021
@@ -982,7 +1141,7 @@ def test_memory_pool_rewrite_non_alloc_noop() -> None:
     assert summary.pool_count == 0
     assert summary.intervals == ()
     assert not any(
-        isinstance(op, (DmaAllocOp, DmaFreeOp, DmaSubviewOp, DmaReshapeOp, ArchGetDynamicMemoryOp))
+        isinstance(op, (DmaAllocOp, DmaFreeOp, DmaViewOp, DmaReshapeOp, ArchGetDynamicMemoryOp))
         for op in block_ops
     )
 
@@ -1113,7 +1272,7 @@ def test_memory_pool_alloc_non_memory() -> None:
 
 
 # TC-MP-014
-# 功能说明: 验证 symbol.for 内 alloc 按线性切分规则生成 subview。
+# 功能说明: 验证 symbol.for 内 alloc 按线性切分规则生成 view。
 # 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_symbol_for_reuse
 # 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
@@ -1145,24 +1304,24 @@ def test_memory_pool_symbol_for_reuse() -> None:
 
     func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
     block = func_ops[0].body.blocks[0]
-    subview_ops = [op for op in _collect_ops_recursive(block) if isinstance(op, DmaSubviewOp)]
-    assert len(subview_ops) == 3
+    view_ops = [op for op in _collect_ops_recursive(block) if isinstance(op, DmaViewOp)]
+    assert len(view_ops) == 3
     view_offsets: list[int] = []
-    for subview_op in subview_ops:
-        offset0 = subview_op.offset[0]
+    for view_op in view_ops:
+        offset0 = view_op.offsets[0]
         offset_type = offset0.type
         assert isinstance(offset_type, SymbolValueType)
         view_offsets.append(offset_type.get_value())
     assert view_offsets == [0, 8, 16]
 
-    top_level_subviews = [op for op in block.ops if isinstance(op, DmaSubviewOp)]
-    assert [op.offset[0].type.get_value() for op in top_level_subviews] == [0, 16]
-    loop_subviews = [op for op in loop_op.body.blocks[0].ops if isinstance(op, DmaSubviewOp)]
-    assert [op.offset[0].type.get_value() for op in loop_subviews] == [8]
+    top_level_views = [op for op in block.ops if isinstance(op, DmaViewOp)]
+    assert [op.offsets[0].type.get_value() for op in top_level_views] == [0, 16]
+    loop_views = [op for op in loop_op.body.blocks[0].ops if isinstance(op, DmaViewOp)]
+    assert [op.offsets[0].type.get_value() for op in loop_views] == [8]
 
 
 # TC-MP-014B
-# 功能说明: 验证 symbol.for 内动态 alloc 不会让后续函数体 subview offset 依赖 loop body SSA。
+# 功能说明: 验证 symbol.for 内动态 alloc 不会让后续函数体 view offset 依赖 loop body SSA。
 # 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_symbol_for_dynamic_alloc_dominates_later_offset
 # 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
@@ -1202,19 +1361,143 @@ def test_memory_pool_symbol_for_dynamic_alloc_dominates_later_offset() -> None:
 
     func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
     block = func_ops[0].body.blocks[0]
-    top_level_subviews = [op for op in block.ops if isinstance(op, DmaSubviewOp)]
-    assert [op.offset[0].type.get_value() for op in top_level_subviews] == [0, "4*N + 8"]
+    top_level_views = [op for op in block.ops if isinstance(op, DmaViewOp)]
+    assert [op.offsets[0].type.get_value() for op in top_level_views] == [0, "4*N + 8"]
 
-    loop_subviews = [op for op in loop_op.body.blocks[0].ops if isinstance(op, DmaSubviewOp)]
-    assert [op.offset[0].type.get_value() for op in loop_subviews] == [8]
+    loop_views = [op for op in loop_op.body.blocks[0].ops if isinstance(op, DmaViewOp)]
+    assert [op.offsets[0].type.get_value() for op in loop_views] == [8]
 
     loop_body_ops = set(loop_op.body.blocks[0].ops)
-    func_offset_defs = _collect_defining_ops(top_level_subviews[1].offset[0])
+    func_offset_defs = _collect_defining_ops(top_level_views[1].offsets[0])
     assert all(op not in loop_body_ops for op in func_offset_defs)
 
 
+# TC-MP-014C
+# 功能说明: 验证外层 symbol.for 内 alloc 可被内层 symbol.for 使用，rewrite 后不误判为逃逸。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_symbol_for_outer_alloc_can_feed_inner_loop
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_symbol_for_outer_alloc_can_feed_inner_loop() -> None:
+    mem_type = _make_memory_type(space="shared")
+    outer_block = Block(arg_types=[SymbolIterType.from_bounds("0", "3", "1")])
+    outer_alloc = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+
+    inner_block = Block(arg_types=[SymbolIterType.from_bounds("0", "2", "1")])
+    dim0 = SymbolConstOp(2)
+    dim1 = SymbolConstOp(4)
+    inner_reshape = DmaReshapeOp(outer_alloc.result, [dim0.result, dim1.result], mem_type)
+    inner_block.add_ops([dim0, dim1, inner_reshape])
+    inner_loop = SymbolForOp(_symbol_value(0), _symbol_value(2), _symbol_value(1), inner_block)
+    outer_free = DmaFreeOp(outer_alloc.result)
+    outer_block.add_ops([outer_alloc, inner_loop, outer_free])
+    outer_loop = SymbolForOp(_symbol_value(0), _symbol_value(3), _symbol_value(1), outer_block)
+    module = _build_module("outer_alloc_inner_use", [outer_loop])
+
+    MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), module)
+
+    ops = _collect_ops_recursive(module.body.block)
+    outer_ops = list(outer_block.ops)
+    inner_ops = list(inner_block.ops)
+    replacement_reshape = next(op for op in outer_ops if isinstance(op, DmaReshapeOp))
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in ops)
+    assert any(isinstance(op, ArchGetDynamicMemoryOp) for op in ops)
+    assert any(isinstance(op, DmaViewOp) for op in outer_ops)
+    assert inner_reshape.source is replacement_reshape.result
+    assert inner_reshape in inner_ops
+
+
+# TC-MP-014D
+# 功能说明: 验证 scf.for 内 alloc 通过函数级 backing memory 与 loop body view 改写。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_scf_for_alloc_uses_function_backing
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_scf_for_alloc_uses_function_backing() -> None:
+    mem_type = _make_memory_type(space="shared")
+    start = arith.ConstantOp(IntegerAttr(0, IndexType()))
+    end = arith.ConstantOp(IntegerAttr(2, IndexType()))
+    step = arith.ConstantOp(IntegerAttr(1, IndexType()))
+    loop_block = Block(arg_types=[IndexType()])
+    loop_alloc = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    loop_free = DmaFreeOp(loop_alloc.result)
+    loop_block.add_ops([loop_alloc, loop_free, scf.YieldOp()])
+    loop = scf.ForOp(start.result, end.result, step.result, [], loop_block)
+    module = _build_module("scf_loop_alloc", [start, end, step, loop])
+
+    MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), module)
+
+    func_block = next(op for op in module.ops if isinstance(op, func.FuncOp)).body.blocks[0]
+    loop_body_ops = list(loop_block.ops)
+    assert any(isinstance(op, ArchGetDynamicMemoryOp) for op in func_block.ops)
+    assert any(isinstance(op, DmaViewOp) for op in loop_body_ops)
+    assert any(isinstance(op, DmaReshapeOp) for op in loop_body_ops)
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in _collect_ops_recursive(func_block))
+
+
+# TC-MP-014E
+# 功能说明: 验证函数参数 symbol 维度可支配 memory-pool metadata 与 reshape shape。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_function_arg_dynamic_shape_rewrite
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_function_arg_dynamic_shape_rewrite() -> None:
+    dynamic_type = NnMemoryType(
+        ArrayAttr([_symbol_expr_attr("N")]),
+        ArrayAttr([_symbol_expr_attr("1")]),
+        f32,
+        _make_space("shared"),
+    )
+    block = Block(arg_types=[SymbolValueType.from_expr("N")])
+    alloc = DmaAllocOp([block.args[0]], dynamic_type)
+    free = DmaFreeOp(alloc.result)
+    block.add_ops([alloc, free, func.ReturnOp()])
+    func_op = func.FuncOp(
+        "function_arg_dynamic",
+        FunctionType.from_lists([SymbolValueType.from_expr("N")], []),
+        Region(block),
+    )
+    module = ModuleOp([func_op])
+
+    MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), module)
+
+    reshape_ops = [op for op in _collect_ops_recursive(block) if isinstance(op, DmaReshapeOp)]
+    assert len(reshape_ops) == 1
+    assert list(reshape_ops[0].shape) == [block.args[0]]
+    assert not any(isinstance(op, DmaAllocOp) for op in _collect_ops_recursive(block))
+
+
+# TC-MP-014F
+# 功能说明: 验证 loop body 内 alloc 可使用同 block 中位于 alloc 前的动态维 SSA。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_loop_local_dynamic_shape_rewrite
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_loop_local_dynamic_shape_rewrite() -> None:
+    dynamic_type = NnMemoryType(
+        ArrayAttr([_symbol_expr_attr("N")]),
+        ArrayAttr([_symbol_expr_attr("1")]),
+        i32,
+        _make_space("shared"),
+    )
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "4", "1")])
+    n_value = _TestOp(result_types=[SymbolValueType.from_expr("N")])
+    alloc = DmaAllocOp([n_value.results[0]], dynamic_type)
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([n_value, alloc, free])
+    loop = SymbolForOp(_symbol_value(0), _symbol_value(4), _symbol_value(1), loop_block)
+    module = _build_module("loop_local_dynamic", [loop])
+
+    MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), module)
+
+    reshape_ops = [op for op in _collect_ops_recursive(loop_block) if isinstance(op, DmaReshapeOp)]
+    assert len(reshape_ops) == 1
+    assert list(reshape_ops[0].shape) == [n_value.results[0]]
+    assert not any(isinstance(op, DmaAllocOp) for op in _collect_ops_recursive(loop_block))
+
+
 # TC-MP-015
-# 功能说明: 验证 alloc 逃逸到 return 会被拒绝。
+# 功能说明: 验证 analysis-only 允许 escaping alloc 摘要，rewrite 仍拒绝 escaping alloc。
 # 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_escape_return
 # 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
@@ -1228,12 +1511,18 @@ def test_memory_pool_escape_return() -> None:
     module = ModuleOp([func_op])
 
     pass_obj = MemoryPoolPass(rewrite=False)
+    pass_obj.apply(Context(), module)
+    summary = pass_obj.get_summary("main")
+    assert len(summary.intervals) == 1
+    assert summary.intervals[0].begin_index == 0
+
+    rewrite_pass = MemoryPoolPass(rewrite=True)
     try:
-        pass_obj.apply(Context(), module)
+        rewrite_pass.apply(Context(), module)
     except KernelCodeError as exc:
         assert "MemoryPoolEscapingAlloc" in str(exc)
     else:
-        raise AssertionError("expected KernelCodeError for escaping alloc")
+        raise AssertionError("expected KernelCodeError for escaping alloc rewrite")
 
 
 # TC-MP-016

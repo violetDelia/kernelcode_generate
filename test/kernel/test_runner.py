@@ -3,7 +3,7 @@
 
 功能说明:
 - 覆盖 `kernel.runner` 对公开 `run_torch_demo(...)` 的真实执行链路。
-- 锁定 runner 能把 `int|float` runtime scalar 原样传给 `dsl_run(...)`，并保持输出校验合同。
+- 锁定 runner 能把整数 runtime scalar 传给 `dsl_run(...)`，并保持输出校验合同。
 
 API 列表:
 - 无（pytest 文件，不承载公开 API）
