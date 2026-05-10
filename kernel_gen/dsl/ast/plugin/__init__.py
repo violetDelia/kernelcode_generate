@@ -3,7 +3,7 @@
 
 功能说明:
 - 暴露 DSL AST builtin 注册 API。
-- 导入本包时加载 NN / DMA / Arch builtin 注册表。
+- 导入本包时加载 NN / DMA / Arch / Kernel builtin 注册表。
 
 API 列表:
 - `BuiltinCall(source: ast.Call, dsl_name: str, ast_node: type | None, args: list[BuiltinArgument], kwargs: dict[str, BuiltinArgument], location: SourceLocation, launch_extents: list[BuiltinArgument] | None = None)`
@@ -30,6 +30,7 @@ from .registry import BuiltinCall, BuiltinEntry, all_builtin_names, dsl_builtin,
 # Import registration modules for side effects.
 from . import arch as _arch
 from . import dma as _dma
+from . import kernel as _kernel
 from . import nn as _nn
 
 __all__ = [

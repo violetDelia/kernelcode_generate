@@ -57,8 +57,8 @@
 ## 额外补充
 
 - 会产生 memory 值的 NN 节点必须通过自身 `result_memory() -> Memory | None` 暴露解析期结果语义。
-- 当前必须覆盖赋值绑定需要的节点：`NnImg2Col1dAST`、`NnImg2Col2dAST`、`NnReduceAST` 及其具体 reduce 子类、`MatmulAST`、`NnAddAST`、`NnSubAST`、`NnMulAST`、`NnTrueDivAST`、`NnFloorDivAST`、`NnEqAST`、`NnNeAST`、`NnLtAST`、`NnLeAST`、`NnGtAST`、`NnGeAST`。
-- `result_memory()` 只能读取成员节点的公开 `result_memory()` / `result_symbol()`，并复用 `kernel_gen.operation.nn` 公开 operation 语义，不得在 visitor 内写 NN 专用推导。
+- 当前必须覆盖赋值绑定和组合表达式需要的节点：`NnImg2Col1dAST`、`NnImg2Col2dAST`、`NnTransposeAST`、`NnReduceAST` 及其具体 reduce 子类、`NnSoftmaxAST`、`MatmulAST`、`NnAddAST`、`NnSubAST`、`NnMulAST`、`NnTrueDivAST`、`NnFloorDivAST`、`NnEqAST`、`NnNeAST`、`NnLtAST`、`NnLeAST`、`NnGtAST`、`NnGeAST`。
+- `result_memory()` 只能读取成员节点的公开 `result_memory()` / `result_symbol()`，并复用 `kernel_gen.operation.nn` 公开 operation 语义，不得在 visitor 内写 NN 专用推导；`NnTransposeAST` 必须支持 `matmul(lhs, transpose(rhs, ...))`，`NnSoftmaxAST` 必须支持 `matmul(softmax(score, axis=...), value)` 这类组合表达式的结果 memory 推导。
 - emit 阶段构造 runtime `Memory` 对应 `NnMemoryType` 时复用 `MemoryAST.type_from_memory(...)`，不得复制 dtype/space 分支表。
 - `NnReduceAST` 承接 reduce 共同行为；具体 `NnReduceSumAST` / `NnReduceMinAST` / `NnReduceMaxAST` 只绑定对应 operation 语义与 dialect op，不重复实现 axis/keepdim/result type 推导。
 - 公开 AST 测试必须覆盖固定种子/矩阵化的符号 shape 广播、dtype cast、memory/symbol 二元路径、Operation operand、img2col 参数语义缺失、结构化 conv/matmul/fc 错误边界以及“可发射 memory 但不是 tensor argument”的错误边界；测试入口为 `test_nn_emit_mlir_handles_symbolic_compare_and_scalar_cast_matrix`、`test_nn_emit_mlir_rejects_memory_producing_non_argument_nodes`、`test_nn_reduce_base_and_img2col_public_unavailable_paths`、`test_nn_emit_mlir_handles_structured_public_nodes_and_dynamic_conv`、`test_nn_emit_mlir_reports_public_operation_value_errors` 与 `test_nn_emit_mlir_operation_operand_and_result_memory_matrix`。

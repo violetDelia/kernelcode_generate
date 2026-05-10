@@ -14,6 +14,7 @@ API 列表:
 - `MemoryAST` / `SymbolDimAST` / `ConstValueAST` / `BoolValueAST` / `SymbolListAST`
 - `Diagnostic` / `SourceLocation` / `AttrAST` / `PythonObjectAttrAST` / `ListAST` / `TupleAST`
 - `IntTypeAttrAST` / `FloatTypeAttrAST` / `BoolTypeAttrAST` / `MemorySpaceAttrAST`
+- `KernelBinaryElewiseAST` / `KernelAddAST` / `KernelMatmulAST` / `KernelImg2Col1dAST` / `KernelImg2Col2dAST`
 - 其余公开 AST 节点类由 `kernel_gen.dsl.ast.nodes` 定义并经本包根导出。
 
 使用示例:
@@ -67,6 +68,21 @@ from .nodes import (
     FunctionAST,
     IfAST,
     IntTypeAttrAST,
+    KernelAddAST,
+    KernelBinaryElewiseAST,
+    KernelDivAST,
+    KernelEqAST,
+    KernelGeAST,
+    KernelGtAST,
+    KernelImg2Col1dAST,
+    KernelImg2Col2dAST,
+    KernelLeAST,
+    KernelLtAST,
+    KernelMatmulAST,
+    KernelMulAST,
+    KernelNeAST,
+    KernelSubAST,
+    KernelTrueDivAST,
     ListAST,
     MatmulAST,
     MemoryAST,
@@ -168,6 +184,21 @@ __all__ = [
     "FunctionAST",
     "IfAST",
     "IntTypeAttrAST",
+    "KernelAddAST",
+    "KernelBinaryElewiseAST",
+    "KernelDivAST",
+    "KernelEqAST",
+    "KernelGeAST",
+    "KernelGtAST",
+    "KernelImg2Col1dAST",
+    "KernelImg2Col2dAST",
+    "KernelLeAST",
+    "KernelLtAST",
+    "KernelMatmulAST",
+    "KernelMulAST",
+    "KernelNeAST",
+    "KernelSubAST",
+    "KernelTrueDivAST",
     "ListAST",
     "MatmulAST",
     "MemoryAST",

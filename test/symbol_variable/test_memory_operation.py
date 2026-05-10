@@ -187,3 +187,21 @@ def test_memory_operation_preserves_tlm123_space() -> None:
 
     assert (lhs + rhs).space is MemorySpace.TLM2
     assert (lhs + 1).space is MemorySpace.TLM2
+
+
+# TC-MEMORY-GET-SHAPE-001
+# 功能说明: 验证 Memory.get_shape 返回 SymbolDim 列表并支持解包与索引。
+# 测试目的: 锁定 plan/ast_kernel_operation_demos_green_plan.md 的 `Memory.get_shape() -> list[SymbolDim]` 合同。
+# 使用示例: pytest -q test/symbol_variable/test_memory_operation.py -k get_shape
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory_operation.py
+def test_memory_get_shape_returns_symbol_dim_list_for_unpack_and_index() -> None:
+    mem = Memory(["M", 32], NumericType.Float32)
+
+    m_dim, n_dim = mem.get_shape()
+
+    assert isinstance(m_dim, SymbolDim)
+    assert isinstance(n_dim, SymbolDim)
+    assert mem.get_shape()[0] == SymbolDim("M")
+    assert mem.get_shape()[1] == SymbolDim(32)

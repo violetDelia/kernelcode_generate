@@ -328,8 +328,8 @@ def test_nn_emit_mlir_rejects_memory_producing_non_argument_nodes() -> None:
         NnImg2Col1dAST(img1d, target).emit_mlir(ctx, block)
     with pytest.raises(KernelCodeError, match="img2col source must lower to nn.memory"):
         NnImg2Col1dAST(1, 3).emit_mlir(ctx, block)
-    with pytest.raises(KernelCodeError, match="img2col source result memory is unavailable"):
-        NnImg2Col1dAST(NnSoftmaxAST(DmaAllocAST([1, 3, 8], NumericType.Float32, MemorySpace.GM)), 3).emit_mlir(ctx, block)
+    emitted_img2col = NnImg2Col1dAST(NnSoftmaxAST(DmaAllocAST([1, 3, 8], NumericType.Float32, MemorySpace.GM)), 3).emit_mlir(ctx, block)
+    assert isinstance(emitted_img2col, Operation)
 
 
 def test_nn_reduce_base_and_img2col_public_unavailable_paths() -> None:
@@ -478,8 +478,11 @@ def test_nn_emit_mlir_reports_public_operation_value_errors() -> None:
         MatmulAST(x, mat_rhs_tsm).emit_mlir(ctx, block)
     with pytest.raises(KernelCodeError, match="matmul operand/result element_type must match"):
         MatmulAST(x, mat_rhs_i32).emit_mlir(ctx, block)
-    with pytest.raises(KernelCodeError, match="matmul result memory is unavailable"):
-        MatmulAST(NnSoftmaxAST(DmaAllocAST([2, 3], NumericType.Float32, MemorySpace.GM)), DmaAllocAST([3, 4], NumericType.Float32, MemorySpace.GM)).emit_mlir(ctx, block)
+    emitted_matmul = MatmulAST(
+        NnSoftmaxAST(DmaAllocAST([2, 3], NumericType.Float32, MemorySpace.GM)),
+        DmaAllocAST([3, 4], NumericType.Float32, MemorySpace.GM),
+    ).emit_mlir(ctx, block)
+    assert isinstance(emitted_matmul, Operation)
     with pytest.raises(KernelCodeError, match="fc operands must be tensor arguments"):
         FCAST(1, 2).emit_mlir(ctx, block)
     with pytest.raises(KernelCodeError, match="fc operands must be tensor arguments"):
@@ -488,8 +491,8 @@ def test_nn_emit_mlir_reports_public_operation_value_errors() -> None:
     bad_ctx, bad_block = _block_for_memories(x, bad_fc_weight)
     with pytest.raises(KernelCodeError, match="matmul contracting dimension mismatch"):
         FCAST(x, bad_fc_weight).emit_mlir(bad_ctx, bad_block)
-    with pytest.raises(KernelCodeError, match="reduce_sum result memory is unavailable"):
-        NnReduceSumAST(NnSoftmaxAST(DmaAllocAST([2, 3], NumericType.Float32, MemorySpace.GM)), axis=0).emit_mlir(ctx, block)
+    emitted_reduce = NnReduceSumAST(NnSoftmaxAST(DmaAllocAST([2, 3], NumericType.Float32, MemorySpace.GM)), axis=0).emit_mlir(ctx, block)
+    assert isinstance(emitted_reduce, Operation)
 
 
 def test_nn_emit_mlir_operation_operand_and_result_memory_matrix() -> None:

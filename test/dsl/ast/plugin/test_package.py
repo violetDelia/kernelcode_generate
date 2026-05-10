@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib
 
+from kernel_gen.operation import kernel
 from kernel_gen.operation.nn import relu
 
 
@@ -38,4 +39,5 @@ def test_plugin_package_exports_registry_api_and_loads_builtin_modules() -> None
         "lookup_builtin",
     ]
     assert plugin.lookup_builtin(relu) is not None
+    assert plugin.lookup_builtin(kernel.add) is not None
     assert "_REGISTRY" not in public_names

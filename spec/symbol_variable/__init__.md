@@ -12,7 +12,7 @@
 - `class SymbolShape(shapes: list[int | str | SymbolDim])`
 - `class LocalSpaceMeta(name: str, max_size: int | None, align: int)`
 - `class Memory(shape: ShapeLike, dtype: NumericType | None = None, space: MemorySpace = MemorySpace.GM, stride: ShapeLike | None = None, format: Farmat = Farmat.Norm)`
-- `Memory.get_shape(self) -> list[int | str]`
+- `Memory.get_shape(self) -> list[SymbolDim]`
 - `Memory.get_stride(self) -> list[int | SymbolDim] | None`
 - `Memory.get_type(self) -> NumericType`
 - `Memory.get_space(self) -> MemorySpace`
@@ -135,19 +135,23 @@
 - 功能说明：定义 `Memory` 公开类型。
 - 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
 
-### `Memory.get_shape(self) -> list[int | str]`
+### `Memory.get_shape(self) -> list[SymbolDim]`
 
-- api：`Memory.get_shape(self) -> list[int | str]`
+- api：`Memory.get_shape(self) -> list[SymbolDim]`
 - 参数：无。
-- 返回值：`list[int | str]`。
+- 返回值：`list[SymbolDim]`。
 - 使用示例：
 
   ```python
-  memory = memory
-  result = memory.get_shape()
+  from kernel_gen.symbol_variable import Memory, SymbolDim
+
+  memory = Memory(["M", 32])
+  m_dim, n_dim = memory.get_shape()
+  assert m_dim == SymbolDim("M")
+  assert n_dim == SymbolDim(32)
   ```
-- 功能说明：读取 `shape`。
-- 注意事项：该接口只读取公开状态；返回对象的内部可变结构不作为额外公开合同。
+- 功能说明：从包根导出的 `Memory` 读取 `shape`，返回值可用于解包和索引。
+- 注意事项：包根不额外提供 `get_shape(dim)` 或 `getshape(dim)`；形状单轴读取通过 `memory.get_shape()[axis]` 完成。
 
 ### `Memory.get_stride(self) -> list[int | SymbolDim] | None`
 

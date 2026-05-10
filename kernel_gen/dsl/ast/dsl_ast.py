@@ -21,7 +21,7 @@ API 列表:
 - `DslAstVisitor.visit_AugAssign(node: ast.AugAssign) -> DSLNode | None`
 - `DslAstVisitor.visit_For(node: ast.For) -> ForAST | None`
 - `DslAstVisitor.visit_If(node: ast.If) -> IfAST`
-- `DslAstVisitor.visit_Return(node: ast.Return) -> ReturnAST`
+- `DslAstVisitor.visit_Return(node: ast.Return) -> ReturnAST | StatementAST`
 - `DslAstVisitor.visit_Expr(node: ast.Expr) -> DSLNode | None`
 - `DslAstVisitor.visit_BinOp(node: ast.BinOp) -> ValueAST`
 - `DslAstVisitor.visit_Compare(node: ast.Compare) -> ValueAST`
@@ -84,6 +84,7 @@ from kernel_gen.dsl.ast.nodes import (
     PythonObjectAttrAST,
     ReturnAST,
     SourceLocation,
+    StatementAST,
     SymbolAddAST,
     SymbolDimAST,
     SymbolEqAST,
@@ -107,8 +108,10 @@ from kernel_gen.dsl.ast.nodes import (
 from kernel_gen.dsl.ast.plugin import BuiltinCall, lookup_builtin
 from kernel_gen.operation import arch as _operation_arch
 from kernel_gen.operation import dma as _operation_dma
+from kernel_gen.operation import kernel as _operation_kernel
 from kernel_gen.operation import nn as _operation_nn
 from kernel_gen.operation.arch import BarrierScope, BarrierVisibility
+from kernel_gen.operation.kernel import KernelBinaryElewiseKind
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
@@ -228,6 +231,26 @@ _IMPORTABLE_DSL_HELPER_MODULES: dict[str, dict[str, DslCallable]] = {
             _operation_nn.img2col2d,
         }
     },
+    "kernel_gen.operation.kernel": {
+        name: value
+        for name, value in {
+            "binary_elewise": _operation_kernel.binary_elewise,
+            "add": _operation_kernel.add,
+            "sub": _operation_kernel.sub,
+            "mul": _operation_kernel.mul,
+            "div": _operation_kernel.div,
+            "truediv": _operation_kernel.truediv,
+            "eq": _operation_kernel.eq,
+            "ne": _operation_kernel.ne,
+            "lt": _operation_kernel.lt,
+            "le": _operation_kernel.le,
+            "gt": _operation_kernel.gt,
+            "ge": _operation_kernel.ge,
+            "matmul": _operation_kernel.matmul,
+            "img2col1d": _operation_kernel.img2col1d,
+            "img2col2d": _operation_kernel.img2col2d,
+        }.items()
+    },
     "kernel_gen.operation.arch": {
         name: value
         for name, value in _DEFAULT_DSL_HELPERS.items()
@@ -288,7 +311,7 @@ class DslAstVisitor(py_ast.NodeVisitor):
             self.globals_table.update(closure_vars.globals)
             self.globals_table.update(closure_vars.nonlocals)
         self.runtime_table: dict[str, DslVisitValue] = {}
-        if callable(fn):
+        if inspect.isfunction(fn):
             for parameter, value in zip(inspect.signature(fn).parameters.values(), self.runtime_args, strict=False):
                 self.runtime_table[parameter.name] = value
         self.scope: dict[str, DSLNode] = {}
@@ -310,7 +333,7 @@ class DslAstVisitor(py_ast.NodeVisitor):
 
         功能说明:
         - 用于判断同一个 Python callee 是否被不同签名重复调用。
-        - helper call 优先使用 DSLNode 字段生成签名，不再从 DSLNode 反推 runtime object。
+        - helper call 优先使用 DSLNode 字段生成签名，不再从 DSLNode 反推 runtime value。
         - key 只用于解析期去重，作为 Python callee 结构化解析的公开 visitor API。
 
         使用示例:
@@ -572,7 +595,7 @@ class DslAstVisitor(py_ast.NodeVisitor):
             value = self.visit(stmt)
             if isinstance(stmt, py_ast.Return):
                 has_explicit_return = True
-                returns_none = stmt.value is None
+                returns_none = stmt.value is None or (isinstance(value, StatementAST) and not isinstance(value, ReturnAST))
             if value is None:
                 continue
             statements.append(value)
@@ -835,12 +858,13 @@ class DslAstVisitor(py_ast.NodeVisitor):
             location=SourceLocation.from_py_ast(node),
         )
 
-    def visit_Return(self, node: py_ast.Return) -> ReturnAST:
+    def visit_Return(self, node: py_ast.Return) -> ReturnAST | StatementAST:
         """解析 return 语句。
 
 
         功能说明:
         - 返回 `ReturnAST`；无值 return 生成空返回。
+        - `return kernel.add(...)` 这类无结果 statement helper 作为发射该 statement 后返回 `None` 处理。
 
         使用示例:
         - value = visitor.visit_Return(return_node)
@@ -863,6 +887,8 @@ class DslAstVisitor(py_ast.NodeVisitor):
         if node.value is None:
             return ReturnAST((), location=SourceLocation.from_py_ast(node))
         value = self.visit(node.value)
+        if isinstance(value, StatementAST) and not isinstance(value, ReturnAST):
+            return value
         if isinstance(value, TupleAST):
             values: list[ValueAST] = []
             for item in value.items:
@@ -1119,6 +1145,8 @@ class DslAstVisitor(py_ast.NodeVisitor):
                 callee_obj = _IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.dma"][call_name]
             elif base is _operation_nn and call_name in _IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.nn"]:
                 callee_obj = _IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.nn"][call_name]
+            elif base is _operation_kernel and call_name in _IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.kernel"]:
+                callee_obj = _IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.kernel"][call_name]
             elif base is _operation_arch and call_name in _IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.arch"]:
                 callee_obj = _IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.arch"][call_name]
         else:
@@ -1412,6 +1440,8 @@ class DslAstVisitor(py_ast.NodeVisitor):
             ):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, "Unknown name")
             base = self.scope[node.value.id] if node.value.id in self.scope else self.globals_table.get(node.value.id)
+            if isinstance(base, PythonObjectAttrAST):
+                base = base.attr
             if isinstance(base, Memory) and node.attr == "dtype":
                 return PythonObjectAttrAST(base.dtype, location)
             if isinstance(base, dict) and node.attr in base:
@@ -1420,8 +1450,14 @@ class DslAstVisitor(py_ast.NodeVisitor):
                 return PythonObjectAttrAST(_IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.dma"][node.attr], location)
             if base is _operation_nn and node.attr in _IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.nn"]:
                 return PythonObjectAttrAST(_IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.nn"][node.attr], location)
+            if base is _operation_kernel and node.attr in _IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.kernel"]:
+                return PythonObjectAttrAST(_IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.kernel"][node.attr], location)
+            if base is _operation_kernel and node.attr == "KernelBinaryElewiseKind":
+                return PythonObjectAttrAST(KernelBinaryElewiseKind, location)
             if base is _operation_arch and node.attr in _IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.arch"]:
                 return PythonObjectAttrAST(_IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.arch"][node.attr], location)
+            if base is KernelBinaryElewiseKind and node.attr in KernelBinaryElewiseKind.__members__:
+                return PythonObjectAttrAST(KernelBinaryElewiseKind[node.attr], location)
             if base is MemorySpace and node.attr in MemorySpace.__members__:
                 return PythonObjectAttrAST(MemorySpace[node.attr], location)
             if base is NumericType and node.attr in NumericType.__members__:
@@ -1430,4 +1466,10 @@ class DslAstVisitor(py_ast.NodeVisitor):
                 return PythonObjectAttrAST(BarrierVisibility[node.attr], location)
             if base is BarrierScope and node.attr in BarrierScope.__members__:
                 return PythonObjectAttrAST(BarrierScope[node.attr], location)
+        if isinstance(node.value, py_ast.Attribute):
+            base_node = self.visit_Attribute(node.value)
+            if isinstance(base_node, PythonObjectAttrAST):
+                base = base_node.attr
+                if base is KernelBinaryElewiseKind and node.attr in KernelBinaryElewiseKind.__members__:
+                    return PythonObjectAttrAST(KernelBinaryElewiseKind[node.attr], location)
         raise KernelCodeError(ErrorKind.UNSUPPORTED, ErrorModule.AST, f"Unsupported attribute: {node.attr}")

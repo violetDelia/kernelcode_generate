@@ -9,7 +9,7 @@
 - `class LocalSpaceMeta(name: str, max_size: int | None, align: int)`
 - `class MemorySpace(Enum)`
 - `class Memory(shape: ShapeLike, dtype: NumericType | None = None, space: MemorySpace = MemorySpace.GM, stride: ShapeLike | None = None, format: Farmat = Farmat.Norm)`
-- `Memory.get_shape(self) -> list[int | str]`
+- `Memory.get_shape(self) -> list[SymbolDim]`
 - `Memory.get_stride(self) -> list[int | SymbolDim]`
 - `Memory.get_type(self) -> NumericType`
 - `Memory.get_space(self) -> MemorySpace`
@@ -96,19 +96,24 @@
 - 功能说明：定义 `Memory` 公开类型。
 - 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
 
-### `Memory.get_shape(self) -> list[int | str]`
+### `Memory.get_shape(self) -> list[SymbolDim]`
 
-- api：`Memory.get_shape(self) -> list[int | str]`
+- api：`Memory.get_shape(self) -> list[SymbolDim]`
 - 参数：无。
-- 返回值：`list[int | str]`。
+- 返回值：`list[SymbolDim]`；每个维度保持为公开 `SymbolDim` 对象，静态维度以 `SymbolDim(int)` 表达，动态维度以 `SymbolDim(str)` 或符号表达表达。
 - 使用示例：
 
   ```python
-  memory = memory
-  result = memory.get_shape()
+  from kernel_gen.symbol_variable.memory import Memory
+  from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+
+  memory = Memory(["M", 32])
+  m_dim, n_dim = memory.get_shape()
+  assert m_dim == SymbolDim("M")
+  assert n_dim == SymbolDim(32)
   ```
-- 功能说明：读取 `shape`。
-- 注意事项：该接口只读取公开状态；返回对象的内部可变结构不作为额外公开合同。
+- 功能说明：读取 `shape`，支持 Python 与 DSL 中的解包、索引和符号表达继续参与计算。
+- 注意事项：不提供 `get_shape(dim)` 或 `getshape(dim)` 带参公开入口；调用方需要 int/str 文本时应显式对维度调用 `get_value()` 或 `str(...)`。
 
 ### `Memory.get_stride(self) -> list[int | SymbolDim]`
 
@@ -494,7 +499,7 @@ from kernel_gen.symbol_variable.type import NumericType
 mem = Memory(["M", "N"], NumericType.Float32, space=MemorySpace.GM, stride=["N", 1])
 cloned = mem.clone(dtype=NumericType.Int32, space=MemorySpace.SM)
 
-assert cloned.get_shape() == ["M", "N"]
+assert [dim.get_value() for dim in cloned.get_shape()] == ["M", "N"]
 assert cloned.get_type() is NumericType.Int32
 assert cloned.get_space() is MemorySpace.SM
 assert cloned.get_format() is mem.get_format()
@@ -514,7 +519,7 @@ assert cloned.get_format() is mem.get_format()
 
 ### 元信息读取
 
-- `get_shape()`：返回序列化后的公开 `shape`，静态分量为 `int`，动态分量为 `str`。
+- `get_shape()`：返回公开 `SymbolDim` 列表，静态分量为 `SymbolDim(int)`，动态分量为 `SymbolDim(str)` 或符号表达。
 - `get_stride()`：返回 `stride` 列表，静态分量为 `int`，动态分量保留 `SymbolDim`。
 - `get_type()`、`get_space()`、`get_format()`：直接返回记录的元信息。
 
@@ -523,7 +528,7 @@ assert cloned.get_format() is mem.get_format()
 - 默认按语义等价比较，不按底层表达式节点顺序比较。
 - 静态分量按整数值比较。
 - 动态分量允许等价表达式视为同一公开语义，例如 `8*N` 与 `N*8`。
-- `get_shape()` 与 `get_stride()` 仍保留各自当前公开序列化文本，不强制把等价表达式改写成同一字符串。
+- `get_shape()` 与 `get_stride()` 仍保留各自当前公开表达，不强制把等价表达式改写成同一字符串。
 - 只有其他 spec 显式声明要做结构级比较时，调用方才可要求内部表达式完全一致。
 
 ### 文本表示

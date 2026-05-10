@@ -182,7 +182,7 @@ def test_dynamic_shape_public_values_use_symbol_dim_get_value() -> None:
     mem = Memory([reducible, 4], NumericType.Float32, stride=[reducible, 1])
 
     assert mem.shape.get_values() == ["A*B/B", 4]
-    assert mem.get_shape() == ["A*B/B", 4]
+    assert [dim.get_value() for dim in mem.get_shape()] == ["A*B/B", 4]
     assert mem.get_stride()[0].get_value() == "A*B/B"
 
 
@@ -371,9 +371,9 @@ def test_memory_shape_match_uses_symbol_dim_public_values() -> None:
     result = lhs + rhs
 
     assert lhs.shape.get_values() != rhs.shape.get_values()
-    assert lhs.get_shape() == ["8*N", 4]
-    assert rhs.get_shape() == ["N*8", 4]
-    assert result.get_shape() == ["8*N", 4]
+    assert [dim.get_value() for dim in lhs.get_shape()] == ["8*N", 4]
+    assert [dim.get_value() for dim in rhs.get_shape()] == ["N*8", 4]
+    assert [dim.get_value() for dim in result.get_shape()] == ["8*N", 4]
     assert result.dtype is NumericType.Float32
     assert result.space is lhs.space
     assert result.format is lhs.format

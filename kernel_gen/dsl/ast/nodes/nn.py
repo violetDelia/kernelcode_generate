@@ -1015,6 +1015,42 @@ class NnTransposeAST(ValueAST):
         if not isinstance(self.perm, SymbolListAST):
             self.perm = SymbolListAST(self.perm, self.location)
 
+    def _perm_values(self) -> list[int]:
+        """返回 transpose 的静态 perm 值。
+
+        功能说明:
+        - 只接受公开 static int perm 列表。
+        - 供 result memory 推导与 MLIR 发射复用，避免两处校验口径分叉。
+
+        使用示例:
+        - perm_values = self._perm_values()
+        """
+
+        perm_values: list[int] = []
+        for item in self.perm.items:
+            if isinstance(item, ConstValueAST):
+                item = item.raw_value
+            if not isinstance(item, int) or isinstance(item, bool):
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "transpose perm must be static int list")
+            perm_values.append(item)
+        return perm_values
+
+    def result_memory(self) -> Memory | None:
+        """返回 transpose 节点的解析期 memory 结果。
+
+        功能说明:
+        - 使用 `kernel_gen.operation.nn.transpose(...)` 公开语义推导输出 memory。
+        - 使 `matmul(lhs, transpose(rhs, ...))` 这类组合能继续推导后续结果 memory。
+
+        使用示例:
+        - memory = transpose_ast.result_memory()
+        """
+
+        source = self.value.result_memory()
+        if not isinstance(source, Memory):
+            return None
+        return nn_ops.transpose(source, self._perm_values())
+
     def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
         """将 transpose 节点发射为 `nn.transpose`。"""
 
@@ -1028,14 +1064,7 @@ class NnTransposeAST(ValueAST):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "transpose value must lower to nn.memory")
         if not isinstance(self.value, MemoryAST):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "transpose value must be tensor argument")
-        perm_items = list(self.perm.items)
-        perm_values: list[int] = []
-        for item in perm_items:
-            if isinstance(item, ConstValueAST):
-                item = item.raw_value
-            if not isinstance(item, int) or isinstance(item, bool):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "transpose perm must be static int list")
-            perm_values.append(item)
+        perm_values = self._perm_values()
         result_memory = nn_ops.transpose(self.value.memory, perm_values)
         result_shape = [value.type.shape.data[axis] for axis in perm_values]
         source_shape_values = _source_shape_values_for_transpose(value)
@@ -1497,6 +1526,27 @@ class NnSoftmaxAST(ValueAST):
             self.value = ConstValueAST(self.value, location=self.location)
         if self.axis is not None and not isinstance(self.axis, ValueAST):
             self.axis = ConstValueAST(self.axis, location=self.location)
+
+    def result_memory(self) -> Memory | None:
+        """返回 softmax 节点的解析期 memory 结果。
+
+        功能说明:
+        - 复用 `kernel_gen.operation.nn.softmax(...)` 的公开语义。
+        - 支持 `matmul(softmax(score, axis=...), value)` 这类组合表达式继续推导结果 memory。
+
+        使用示例:
+        - memory = softmax_ast.result_memory()
+        """
+
+        source = self.value.result_memory()
+        if not isinstance(source, Memory):
+            return None
+        axis_value = self.axis.raw_value if isinstance(self.axis, ConstValueAST) else self.axis
+        if axis_value is None:
+            axis_value = -1
+        if not isinstance(axis_value, int) or isinstance(axis_value, bool):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "softmax axis must be int")
+        return nn_ops.softmax(source, axis=axis_value)
 
     def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
         """将 softmax 节点发射为 `nn.softmax`。"""

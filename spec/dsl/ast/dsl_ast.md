@@ -24,7 +24,7 @@
 - `DslAstVisitor.visit_AugAssign(node: ast.AugAssign) -> DSLNode | None`
 - `DslAstVisitor.visit_For(node: ast.For) -> ForAST | None`
 - `DslAstVisitor.visit_If(node: ast.If) -> IfAST`
-- `DslAstVisitor.visit_Return(node: ast.Return) -> ReturnAST`
+- `DslAstVisitor.visit_Return(node: ast.Return) -> ReturnAST | StatementAST`
 - `DslAstVisitor.visit_Expr(node: ast.Expr) -> DSLNode | None`
 - `DslAstVisitor.visit_BinOp(node: ast.BinOp) -> ValueAST`
 - `DslAstVisitor.visit_Compare(node: ast.Compare) -> ValueAST`
@@ -52,7 +52,7 @@
 - `spec/dsl/ast/nodes/symbol.md`：symbol 表达式与 symbol 列表。
 - `spec/dsl/ast/nodes/control_flow.md`：`ForAST` / `IfAST` 控制流节点。
 - `spec/dsl/ast/plugin/registry.md`：DSL builtin 注册表。
-- `kernel_gen.operation.dma`、`kernel_gen.operation.nn`、`kernel_gen.operation.arch`：可注册 DSL helper 的 operation 函数对象。
+- `kernel_gen.operation.dma`、`kernel_gen.operation.nn`、`kernel_gen.operation.kernel`、`kernel_gen.operation.arch`：可注册 DSL helper 的 operation 函数对象。
 
 ## API详细说明
 
@@ -273,12 +273,12 @@
 - 功能说明：访问标准库 `If` AST 节点并返回对应 DSL AST 公开节点。
 - 注意事项：输入必须来自标准库 `ast` 与公开 DSL runtime 类型；不支持的语法必须通过公开 `KernelCodeError` 失败，不得静默生成内部占位节点。
 
-### `DslAstVisitor.visit_Return(node: ast.Return) -> ReturnAST`
+### `DslAstVisitor.visit_Return(node: ast.Return) -> ReturnAST | StatementAST`
 
-- api：`DslAstVisitor.visit_Return(node: ast.Return) -> ReturnAST`
+- api：`DslAstVisitor.visit_Return(node: ast.Return) -> ReturnAST | StatementAST`
 - 参数：
   - `node`：Python AST 节点；类型 `ast.Return`；无默认值；不允许 None；必须来自标准库 ast 解析结果。
-- 返回值：`ReturnAST`；失败路径按本 API 的 `注意事项` 处理。
+- 返回值：`ReturnAST | StatementAST`；无值或有值返回生成 `ReturnAST`，`return kernel.matmul(...)` 这类无结果 statement helper 返回对应 `StatementAST`。
 - 使用示例：
 
   ```python
@@ -287,8 +287,8 @@
     visitor = DslAstVisitor(kernel)
     result = visitor.visit_Return(node=node)
     ```
-- 功能说明：访问标准库 `Return` AST 节点并返回对应 DSL AST 公开节点。
-- 注意事项：输入必须来自标准库 `ast` 与公开 DSL runtime 类型；不支持的语法必须通过公开 `KernelCodeError` 失败，不得静默生成内部占位节点。
+- 功能说明：访问标准库 `Return` AST 节点并返回对应 DSL AST 公开节点；允许 out-first kernel helper 在 `return` 语句中表达“发射语句后返回 None”。
+- 注意事项：输入必须来自标准库 `ast` 与公开 DSL runtime 类型；只允许已注册且返回 `StatementAST` 的 out-first helper 走 statement-return；普通值返回仍必须是 `ValueAST` 或 `TupleAST[ValueAST]`。
 
 ### `DslAstVisitor.visit_Expr(node: ast.Expr) -> DSLNode | None`
 
@@ -531,4 +531,4 @@
 | TC-DSL-AST-DSL-AST-021 | 解析/打印 | visitor assign control and public attributes | 准备公开 DMA/NN/arch module helper、runtime shape、enum attribute、global memory dtype 与控制流输入。 | 运行 `test_dsl_ast_visitor_assign_control_and_public_attributes`。 | visitor 能解析赋值、aug assign、for、if、return tuple、公开 module helper、公开属性与下标访问。 | `test_dsl_ast_visitor_assign_control_and_public_attributes` |
 | TC-DSL-AST-DSL-AST-022 | 公开入口 | visitor import and call boundaries | 准备公开 import、`float(...)` 与 DSL helper 调用输入。 | 运行 `test_dsl_ast_visitor_import_and_call_boundaries`。 | import/docstring 允许返回 `None`，合法公开调用生成公开 AST 节点。 | `test_dsl_ast_visitor_import_and_call_boundaries` |
 | TC-DSL-AST-DSL-AST-023 | 边界/异常 | visitor public error boundaries | 准备 unsupported binary/compare/unary/subscript、非法 for、非法 return、非法 get_shape arity、未导入 helper、未知调用、非 callable global、未知/嵌套属性调用等公开失败输入。 | 运行 `test_dsl_ast_visitor_public_error_boundaries`。 | 不支持语法与非法公开输入按 `KernelCodeError` 稳定失败。 | `test_dsl_ast_visitor_public_error_boundaries` |
-| TC-DSL-AST-DSL-AST-024 | 公开入口 | visitor public module attributes and literals | 准备 `kernel_gen.operation.{dma,nn,arch}` 的公开 module helper 属性、runtime/global 名称与数字一元字面量。 | 运行 `test_dsl_ast_visitor_public_module_attributes_and_literals`。 | `DslAstVisitor.visit_Name(...)`、`visit_Attribute(...)` 与 `visit_UnaryOp(...)` 对公开输入生成稳定 AST 节点，未知属性按公开错误语义失败。 | `test_dsl_ast_visitor_public_module_attributes_and_literals` |
+| TC-DSL-AST-DSL-AST-024 | 公开入口 | visitor public module attributes and literals | 准备 `kernel_gen.operation.{dma,nn,kernel,arch}` 的公开 module helper 属性、runtime/global 名称与数字一元字面量。 | 运行 `test_dsl_ast_visitor_public_module_attributes_and_literals`。 | `DslAstVisitor.visit_Name(...)`、`visit_Attribute(...)` 与 `visit_UnaryOp(...)` 对公开输入生成稳定 AST 节点，未知属性按公开错误语义失败。 | `test_dsl_ast_visitor_public_module_attributes_and_literals` |

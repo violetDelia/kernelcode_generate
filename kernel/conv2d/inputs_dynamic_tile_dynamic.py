@@ -83,10 +83,10 @@ def conv2d_inputs_dynamic_tile_dynamic_kernel(
     - `conv2d_inputs_dynamic_tile_dynamic_kernel(out, input_tensor, weight, 1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 1, 1, 7)`
     """
 
-    n_size, c_size, h_size, w_size = input_tensor.shape.get_shape()
-    f_size = weight.shape.get_shape()[0]
-    kh_size = weight.shape.get_shape()[2]
-    kw_size = weight.shape.get_shape()[3]
+    n_size, c_size, h_size, w_size = input_tensor.get_shape()
+    f_size = weight.get_shape()[0]
+    kh_size = weight.get_shape()[2]
+    kw_size = weight.get_shape()[3]
     ho_size = ((h_size + pad_top + pad_bottom - dilation_h * (kh_size - 1) - 1) // stride_h) + 1
     wo_size = ((w_size + pad_left + pad_right - dilation_w * (kw_size - 1) - 1) // stride_w) + 1
 

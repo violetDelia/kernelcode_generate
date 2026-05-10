@@ -98,6 +98,21 @@
 - `ArchGetDynamicMemoryAST: type[ArchGetDynamicMemoryAST]`
 - `ArchBarrierAST: type[ArchBarrierAST]`
 - `ArchLaunchKernelAST: type[ArchLaunchKernelAST]`
+- `KernelBinaryElewiseAST: type[KernelBinaryElewiseAST]`
+- `KernelAddAST: type[KernelAddAST]`
+- `KernelSubAST: type[KernelSubAST]`
+- `KernelMulAST: type[KernelMulAST]`
+- `KernelDivAST: type[KernelDivAST]`
+- `KernelTrueDivAST: type[KernelTrueDivAST]`
+- `KernelEqAST: type[KernelEqAST]`
+- `KernelNeAST: type[KernelNeAST]`
+- `KernelLtAST: type[KernelLtAST]`
+- `KernelLeAST: type[KernelLeAST]`
+- `KernelGtAST: type[KernelGtAST]`
+- `KernelGeAST: type[KernelGeAST]`
+- `KernelMatmulAST: type[KernelMatmulAST]`
+- `KernelImg2Col1dAST: type[KernelImg2Col1dAST]`
+- `KernelImg2Col2dAST: type[KernelImg2Col2dAST]`
 
 ## 文档信息
 
@@ -116,6 +131,7 @@
 - `spec/dsl/ast/nodes/dma.md`：DMA 节点。
 - `spec/dsl/ast/nodes/nn.md`：NN 节点。
 - `spec/dsl/ast/nodes/arch.md`：Arch 节点。
+- `spec/dsl/ast/nodes/kernel.md`：Kernel out-first 节点。
 
 ## API详细说明
 

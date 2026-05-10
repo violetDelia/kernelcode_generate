@@ -3,7 +3,7 @@
 ## 功能简介
 
 - 定义 `kernel_gen.dsl.ast.plugin` 包导出合同。
-- 导入 `nn.py`、`dma.py`、`arch.py` 以触发默认 builtin 注册。
+- 导入 `nn.py`、`dma.py`、`kernel.py`、`arch.py` 以触发默认 builtin 注册。
 - emit lowering 已迁出 plugin 包；plugin 只负责 parser builtin 注册。
 
 ## API 列表
@@ -28,6 +28,7 @@
 - [`spec/dsl/ast/plugin/registry.md`](../../../../spec/dsl/ast/plugin/registry.md)
 - [`spec/dsl/ast/plugin/nn.md`](../../../../spec/dsl/ast/plugin/nn.md)
 - [`spec/dsl/ast/plugin/dma.md`](../../../../spec/dsl/ast/plugin/dma.md)
+- [`spec/dsl/ast/plugin/kernel.md`](../../../../spec/dsl/ast/plugin/kernel.md)
 - [`spec/dsl/ast/plugin/arch.md`](../../../../spec/dsl/ast/plugin/arch.md)
 
 ## 额外补充
@@ -36,7 +37,7 @@
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 包根只导出 registry 公开 API。
-- `nn` / `dma` / `arch` 子模块只允许提供注册副作用，不提供额外公开函数。
+- `nn` / `dma` / `kernel` / `arch` 子模块只允许提供注册副作用，不提供额外公开函数。
 - `emit_*.py` 不得在 plugin 包内恢复；AST emit 由 `DSLNode.emit_mlir(...)` 递归链路承接。
 - `@dsl_builtin(op, AstNode)` 必须建立 operation 到唯一 AST 类型的一一绑定；builder 只能返回声明的精确 `AstNode` 类型。
 - `dsl_builtin(...)` 不允许传入手写 `name`。

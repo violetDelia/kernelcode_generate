@@ -12,6 +12,7 @@
 - Spec 文档: spec/operation/dma.md
 - Spec 文档: spec/operation/scf.md
 - Spec 文档: spec/operation/arch.md
+- Spec 文档: spec/operation/kernel.md
 - 功能实现: kernel_gen/operation/__init__.py
 - 测试文件: test/operation/test_package.py
 """
@@ -27,6 +28,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import kernel_gen.operation as operation
 import kernel_gen.operation.dma as operation_dma
+import kernel_gen.operation.kernel as operation_kernel
 import kernel_gen.operation.nn as operation_nn
 import kernel_gen.operation.scf as operation_scf
 
@@ -60,10 +62,13 @@ DMA_TOP_LEVEL_EXPORTS = (
 
 SCF_TOP_LEVEL_EXPORTS = ("loop",)
 
+KERNEL_TOP_LEVEL_EXPORTS = ("kernel",)
+
 STABLE_TOP_LEVEL_EXPORTS = (
     NN_TOP_LEVEL_EXPORTS
     + DMA_TOP_LEVEL_EXPORTS
     + SCF_TOP_LEVEL_EXPORTS
+    + KERNEL_TOP_LEVEL_EXPORTS
 )
 
 
@@ -71,7 +76,7 @@ STABLE_TOP_LEVEL_EXPORTS = (
 # 测试目的: 验证 spec 已定义的 kernel_gen.operation 顶层公开对象可直接从 package-root 获取。
 # 使用示例: pytest -q test/operation/test_package.py -k test_operation_top_level_public_exports_match_spec
 # 对应功能实现文件路径: kernel_gen/operation/__init__.py
-# 对应 spec 文件路径: spec/operation/nn.md, spec/operation/dma.md, spec/operation/scf.md
+# 对应 spec 文件路径: spec/operation/nn.md, spec/operation/dma.md, spec/operation/scf.md, spec/operation/kernel.md
 # 对应测试文件路径: test/operation/test_package.py
 def test_operation_top_level_public_exports_match_spec() -> None:
     for name in STABLE_TOP_LEVEL_EXPORTS:
@@ -165,3 +170,4 @@ def test_operation_package_export_identity() -> None:
         assert getattr(operation, name) is getattr(operation_dma, name)
     for name in SCF_TOP_LEVEL_EXPORTS:
         assert getattr(operation, name) is getattr(operation_scf, name)
+    assert operation.kernel is operation_kernel

@@ -2,7 +2,7 @@
 
 
 功能说明:
-- 聚合 `attr`、`basic`、`symbol`、`control_flow`、`dma`、`nn`、`arch` 分层节点，保持 `kernel_gen.dsl.ast.nodes` 稳定导入路径。
+- 聚合 `attr`、`basic`、`symbol`、`control_flow`、`dma`、`nn`、`arch`、`kernel` 分层节点，保持 `kernel_gen.dsl.ast.nodes` 稳定导入路径。
 
 API 列表:
 - `DSLNode`
@@ -21,6 +21,8 @@ API 列表:
 - `NnReduceAST`, `NnReduceSumAST`, `NnReduceMinAST`, `NnReduceMaxAST`, `NnSoftmaxAST`, `MatmulAST`, `FCAST`, `ConvAST`
 - `NnAddAST`, `NnSubAST`, `NnMulAST`, `NnTrueDivAST`, `NnFloorDivAST`, `NnEqAST`, `NnNeAST`, `NnLtAST`, `NnLeAST`, `NnGtAST`, `NnGeAST`
 - `ArchQueryAST`, `ArchGetBlockIdAST`, `ArchGetBlockNumAST`, `ArchGetSubthreadIdAST`, `ArchGetSubthreadNumAST`, `ArchGetThreadIdAST`, `ArchGetThreadNumAST`, `ArchGetDynamicMemoryAST`, `ArchBarrierAST`, `ArchLaunchKernelAST`
+- `KernelBinaryElewiseAST`, `KernelAddAST`, `KernelSubAST`, `KernelMulAST`, `KernelDivAST`, `KernelTrueDivAST`, `KernelEqAST`, `KernelNeAST`, `KernelLtAST`, `KernelLeAST`, `KernelGtAST`, `KernelGeAST`
+- `KernelMatmulAST`, `KernelImg2Col1dAST`, `KernelImg2Col2dAST`
 
 使用示例:
 - from kernel_gen.dsl.ast.nodes import FunctionAST, DmaAllocAST
@@ -40,6 +42,7 @@ from .attr import *
 from .arch import *
 from .dma import *
 from .nn import *
+from .kernel import *
 
 __all__ = [
     "DSLNode",
@@ -137,4 +140,19 @@ __all__ = [
     "ArchGetDynamicMemoryAST",
     "ArchBarrierAST",
     "ArchLaunchKernelAST",
+    "KernelBinaryElewiseAST",
+    "KernelAddAST",
+    "KernelSubAST",
+    "KernelMulAST",
+    "KernelDivAST",
+    "KernelTrueDivAST",
+    "KernelEqAST",
+    "KernelNeAST",
+    "KernelLtAST",
+    "KernelLeAST",
+    "KernelGtAST",
+    "KernelGeAST",
+    "KernelMatmulAST",
+    "KernelImg2Col1dAST",
+    "KernelImg2Col2dAST",
 ]

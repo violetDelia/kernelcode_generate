@@ -2,11 +2,11 @@
 
 
 功能说明:
-- 覆盖 `kernel/matmul` 两条目标 demo 的公开 kernel 函数与脚本入口。
+- 覆盖 `kernel/matmul` 三条目标 demo 的公开 kernel 函数与脚本入口。
 - 锁定 dynamic demo 使用 `H/K/W` 符号 memory、`TILE_H/TILE_W/TILE_K` 符号 tile。
 - 锁定 static dynamic demo 保留 static memory shape，同时 K/reduce 维按 `TILE_K` 切分并累加 partial。
 - 锁定尾块通过有效区域 `dma.view` 写入零填充 full tile，避免 `?` shape 参与 memory 默认 stride。
-- 运行 static-static demo 作为只读 baseline，不要求其 K 维切分。
+- 锁定 static-static demo 同样具备 K/reduce accumulator，不允许 partial 直接覆盖 output。
 
 API 列表:
 - 无（pytest 文件，不承载公开 API）
@@ -17,7 +17,7 @@ API 列表:
 关联文件:
 - 功能实现: `kernel/matmul/inputs_dynamic_tile_dynamic.py`
 - 功能实现: `kernel/matmul/inputs_static_tile_dynamic.py`
-- 只读 baseline: `kernel/matmul/inputs_static_tile_static.py`
+- 功能实现: `kernel/matmul/inputs_static_tile_static.py`
 - 公共运行器: `kernel/runner.py`
 """
 
@@ -34,6 +34,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from kernel.matmul.inputs_dynamic_tile_dynamic import matmul_inputs_dynamic_tile_dynamic_kernel
 from kernel.matmul.inputs_static_tile_dynamic import matmul_inputs_static_tile_dynamic_kernel
+from kernel.matmul.inputs_static_tile_static import matmul_inputs_static_tile_static_kernel
 from kernel.runner import run_lowering_demo
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -150,8 +151,33 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
     _assert_source_uses_accumulator(source)
 
 
-def test_matmul_target_scripts_execute_and_static_static_baseline_still_passes() -> None:
-    """两条目标脚本与 static-static 只读 baseline 都应通过公开脚本入口。"""
+def test_static_static_matmul_demo_keeps_static_memory_and_static_tile_reduce() -> None:
+    """static-static demo 应保留 static memory，并使用静态 K loop accumulator。"""
+
+    module, source = run_lowering_demo(
+        "test/matmul/static_static_tile_reduce",
+        matmul_inputs_static_tile_static_kernel,
+        Memory([32, 32], NumericType.Float32),
+        Memory([32, 16], NumericType.Float32),
+        Memory([16, 32], NumericType.Float32),
+    )
+    module_text = str(module)
+
+    assert "!nn.memory<[#symbol.expr<32>, #symbol.expr<32>]" in module_text
+    assert "!nn.memory<[#symbol.expr<32>, #symbol.expr<16>]" in module_text
+    assert "!nn.memory<[#symbol.expr<16>, #symbol.expr<32>]" in module_text
+    assert "step = #symbol.expr<5>" in module_text
+    assert '"kernel.matmul"' in module_text
+    assert '"kernel.binary_elewise"' in module_text
+    assert '"dma.view"' in module_text
+    assert '"dma.deslice"' in module_text
+    assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" not in module_text
+    assert "!nn.memory<[#symbol.expr<s1>" not in module_text
+    _assert_source_uses_accumulator(source)
+
+
+def test_matmul_target_scripts_execute_and_tile_reduce_still_passes() -> None:
+    """三条目标脚本都应通过公开脚本入口。"""
 
     scripts = (
         "kernel/matmul/inputs_dynamic_tile_dynamic.py",

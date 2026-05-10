@@ -32,6 +32,7 @@ from kernel_gen.core.config import reset_config
 from kernel_gen.core.context import build_default_context
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaReshapeOp, DmaSliceOp
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelImg2col1dOp, KernelImg2col2dOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnAddOp, NnMatmulOp, NnMemorySpaceAttr, NnMemoryType, NnSoftmaxOp
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolForOp, SymbolGetDimOp, SymbolMaxOp, SymbolMinOp, SymbolMulOp, SymbolValueType
 from kernel_gen.dsl import parse_function
@@ -49,6 +50,7 @@ from kernel_gen.operation.arch import (
     get_thread_num,
     launch_kernel,
 )
+from kernel_gen.operation import kernel as kernel_ops
 from kernel_gen.operation.dma import alloc, cast as dma_cast, deslice, fill, flatten, load, reshape, slice, store, view
 from kernel_gen.operation.nn import (
     add,
@@ -294,6 +296,39 @@ def public_arch_helper_kernel(x: Memory) -> None:
     get_dynamic_memory(MemorySpace.SM)
     get_dynamic_memory(MemorySpace.LM)
     launch_kernel[1, 2, 3, 0](public_arch_launched_body, x)
+
+
+def public_kernel_out_first_helper_kernel(
+    ele_out: Memory,
+    ele_lhs: Memory,
+    ele_rhs: Memory,
+    mat_out: Memory,
+    mat_lhs: Memory,
+    mat_rhs: Memory,
+    img1_out: Memory,
+    img1_in: Memory,
+    img2_out: Memory,
+    img2_in: Memory,
+    k: SymbolDim,
+    kh: SymbolDim,
+    kw: SymbolDim,
+) -> None:
+    """提供 kernel out-first helper DSL kernel。"""
+
+    kernel_ops.add(ele_out, ele_lhs, ele_rhs)
+    kernel_ops.binary_elewise(ele_out, ele_lhs, ele_rhs, kind=kernel_ops.KernelBinaryElewiseKind.SUB)
+    kernel_ops.matmul(mat_out, mat_lhs, mat_rhs)
+    kernel_ops.img2col1d(img1_out, img1_in, k)
+    kernel_ops.img2col2d(img2_out, img2_in, kh=kh, kw=kw, ph=1, pw=1, pl=1, pr=1)
+
+
+def public_memory_get_shape_direct_kernel(out: Memory, src: Memory) -> None:
+    """提供 Memory.get_shape 解包和索引 DSL kernel。"""
+
+    rows, cols = src.get_shape()
+    row_again = src.get_shape()[0]
+    tile = slice(src, [0, 0], [row_again, cols], [1, 1], MemorySpace.TSM)
+    deslice(out, tile, [0, 0], [rows, cols], [1, 1])
 
 
 def test_mlir_gen_requires_runtime_args() -> None:
@@ -1077,6 +1112,55 @@ def test_mlir_gen_lowers_dma_and_arch_public_helper_chains() -> None:
         "arch.launch",
     ):
         assert op_name in module_text
+
+
+def test_mlir_gen_lowers_kernel_out_first_public_helpers() -> None:
+    """TC-DSL-AST-MLIR-GEN-047: kernel out-first helper 下沉为 kernel dialect op。"""
+
+    module = mlir_gen(
+        public_kernel_out_first_helper_kernel,
+        Memory([2, 4], NumericType.Float32),
+        Memory([2, 4], NumericType.Float32),
+        Memory([2, 4], NumericType.Float32),
+        Memory([2, 4], NumericType.Float32),
+        Memory([2, 3], NumericType.Float32, space=MemorySpace.TLM1),
+        Memory([3, 4], NumericType.Float32, space=MemorySpace.TLM2),
+        Memory([1, 2, "KERNEL_W", "9 - KERNEL_W"], NumericType.Float32),
+        Memory([1, 2, 8], NumericType.Float32),
+        Memory([1, 2, "KH", "KW", "11 - KH", "11 - KW"], NumericType.Float32),
+        Memory([1, 2, 8, 8], NumericType.Float32),
+        SymbolDim("KERNEL_W"),
+        SymbolDim("KH"),
+        SymbolDim("KW"),
+    )
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    ops = list(func_op.body.block.ops)
+    module_text = str(module)
+
+    assert sum(isinstance(op, KernelBinaryElewiseOp) for op in ops) == 2
+    assert any(isinstance(op, KernelMatmulOp) for op in ops)
+    assert any(isinstance(op, KernelImg2col1dOp) for op in ops)
+    assert any(isinstance(op, KernelImg2col2dOp) for op in ops)
+    assert '"kernel.binary_elewise"' in module_text
+    assert '"kernel.add"' not in module_text
+
+
+def test_mlir_gen_lowers_memory_get_shape_unpack_and_index() -> None:
+    """TC-DSL-AST-MLIR-GEN-048: Memory.get_shape 解包与索引 lower 为 shape 读取。"""
+
+    module = mlir_gen(
+        public_memory_get_shape_direct_kernel,
+        Memory(["M", "N"], NumericType.Float32),
+        Memory(["M", "N"], NumericType.Float32),
+    )
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    ops = list(func_op.body.block.ops)
+    module_text = str(module)
+
+    assert sum(isinstance(op, SymbolGetDimOp) for op in ops) >= 2
+    assert '"dma.slice"' in module_text
+    assert '"dma.deslice"' in module_text
+    assert "get_shape(" not in module_text
 
 
 def test_mlir_gen_reuses_bound_memory_expr_with_symbol_axis_arithmetic() -> None:

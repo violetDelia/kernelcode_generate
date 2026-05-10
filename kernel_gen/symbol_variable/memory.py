@@ -9,7 +9,7 @@ API 列表:
 - `class LocalSpaceMeta(name: str, max_size: int | None, align: int)`
 - `class MemorySpace(Enum)`
 - `class Memory(shape: ShapeLike, dtype: NumericType | None = None, space: MemorySpace = MemorySpace.GM, stride: ShapeLike | None = None, format: Farmat = Farmat.Norm)`
-- `Memory.get_shape(self) -> list[int | str]`
+- `Memory.get_shape(self) -> list[SymbolDim]`
 - `Memory.get_stride(self) -> list[int | SymbolDim] | None`
 - `Memory.get_type(self) -> NumericType`
 - `Memory.get_space(self) -> MemorySpace`
@@ -36,7 +36,6 @@ from enum import Enum
 import sympy as sp
 
 from kernel_gen.core.contracts import default_stride as _common_default_stride
-from kernel_gen.core.contracts import public_dim_values as _common_public_dim_values
 from .symbol_dim import SymbolDim
 from .symbol_shape import SymbolShape
 from .type import ARITHMETIC_DTYPE_RANK, Farmat, NumericType
@@ -242,22 +241,24 @@ class Memory:
         """
         return _common_default_stride(shape)
 
-    def get_shape(self: "Memory") -> list[int | str]:
-        """返回序列化后的 shape 列表。
+    def get_shape(self: "Memory") -> list[SymbolDim]:
+        """返回 shape 的 SymbolDim 列表。
 
 
         功能说明:
-        - 动态维度以字符串返回，静态维度以整数返回。
+        - 返回每个维度的 `SymbolDim` 对象，支持解包与索引。
+        - 调用方需要 int/str 公开文本时可对元素调用 `get_value()` 或 `str(...)`。
 
         使用示例:
-        - Memory(["N", 32]).get_shape()
+        - m_size, n_size = Memory(["M", "N"]).get_shape()
+        - first = Memory([32, 16]).get_shape()[0]
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/symbol_variable/test_memory.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
-        return _common_public_dim_values(self.shape)
+        return self.shape.get_shape()
 
     def get_stride(self: "Memory") -> list[int | SymbolDim]:
         """返回 stride 列表，动态分量保留 SymbolDim。

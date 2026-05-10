@@ -4,6 +4,8 @@
 
 - `kernel_gen.dsl.ast.parser` 提供 Python DSL 函数到 `ModuleAST` / `FunctionAST` 的公开解析入口。
 - parser 不读取 Python annotation 作为 DSL 类型来源，所有输入类型由 `runtime_args` 决定。
+- parser 支持 `memory.get_shape()` 的解包与索引访问；不支持 `memory.get_shape(dim)` 或 `memory.getshape(dim)`。
+- parser 支持 `kernel_gen.operation.kernel` out-first helper 语句，生成 kernel AST 节点。
 
 ## API 列表
 
@@ -38,7 +40,7 @@
   module_ast = parse(kernel, lhs, rhs)
   ```
 - 功能说明：读取 `fn` 源码，解析为 Python AST，再用 `DslAstVisitor` 生成 DSL AST。
-- 注意事项：不接受 `globals`、`builtins` 或 `config` 公开参数；缺少 runtime arg 必须报 `Missing runtime argument`。
+- 注意事项：不接受 `globals`、`builtins` 或 `config` 公开参数；缺少 runtime arg 必须报 `Missing runtime argument`；`memory.get_shape()` 只允许零参数调用，可写成 `m, n = memory.get_shape()` 或 `m = memory.get_shape()[0]`。
 
 ### `parse_function(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> FunctionAST`
 
@@ -82,3 +84,4 @@
 | TC-DSL-AST-PARSER-012 | 解析/打印 | parse function ignores direct tensor annotation expression element | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_parse_function_ignores_direct_tensor_annotation_expression_element`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_parse_function_ignores_direct_tensor_annotation_expression_element` |
 | TC-DSL-AST-PARSER-013 | 解析/打印 | parse function uses runtime symboldim over union annotation | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_parse_function_uses_runtime_symboldim_over_union_annotation`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_parse_function_uses_runtime_symboldim_over_union_annotation` |
 | TC-DSL-AST-PARSER-014 | 解析/打印 | parse function ignores unsupported union annotation | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_parse_function_ignores_unsupported_union_annotation`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_parse_function_ignores_unsupported_union_annotation` |
+| TC-DSL-AST-PARSER-015 | 解析/打印 | parse kernel out-first helper | 准备公开 `kernel_gen.operation.kernel` helper、`Memory` 与 `SymbolDim` runtime 参数。 | 运行 `test_kernel_plugin_parse_function_builds_statement_nodes`。 | `kernel.add`、`kernel.matmul` 与 `kernel.img2col*` 解析为对应 statement AST；非 API keyword 或字符串 kind 被拒绝。 | `test_kernel_plugin_parse_function_builds_statement_nodes` |

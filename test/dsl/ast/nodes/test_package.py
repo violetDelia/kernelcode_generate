@@ -38,6 +38,10 @@ def test_nodes_package_reexports_current_public_nodes() -> None:
     assert facade.NnAddAST is nodes.NnAddAST
     assert facade.NnReduceAST is nodes.NnReduceAST
     assert facade.ArchGetThreadNumAST is nodes.ArchGetThreadNumAST
+    assert facade.KernelBinaryElewiseAST is nodes.KernelBinaryElewiseAST
+    assert facade.KernelAddAST is nodes.KernelAddAST
+    assert facade.KernelMatmulAST is nodes.KernelMatmulAST
+    assert facade.KernelImg2Col2dAST is nodes.KernelImg2Col2dAST
     assert not hasattr(facade, "Assign" + "AST")
     assert not hasattr(facade, "PythonCalleeCall" + "AST")
     assert not hasattr(facade, "LoadAST")

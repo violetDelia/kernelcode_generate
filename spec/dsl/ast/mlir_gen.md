@@ -6,6 +6,8 @@
 - `mlir_gen(fn, *runtime_args)` 返回 xDSL `ModuleOp`，不是字符串，也不是 `ModuleAST`。
 - DSL 函数体中的二元 `min(lhs, rhs)` 在左右参数为符号值时必须 lowered 为 `symbol.min`，用于 runtime tile 尾块表达式。
 - 当 `min(lhs + const, rhs - const)` 这类复合 operand 进入 `symbol.min` 时，MLIR 文本必须先物化两侧整数常量，再按左 operand、右 operand、`symbol.min` 的顺序发射算术 op，保证只读合同文本稳定。
+- DSL 函数体中的 `memory.get_shape()` 支持解包和常量索引，lower 时按轴生成对应 `symbol.get_dim` 或静态 symbol 常量语义，不提供 `get_shape(dim)` 带参入口。
+- `kernel_gen.operation.kernel` out-first helper lower 到 `kernel.binary_elewise`、`kernel.matmul`、`kernel.img2col1d` 或 `kernel.img2col2d`，helper 本身返回 `None`。
 
 ## API 列表
 
@@ -40,7 +42,7 @@
   module_op = mlir_gen(kernel, lhs, rhs)
   ```
 - 功能说明：固定执行 `parse(fn, *runtime_args).emit_mlir(ctx, None)`，其中 `ctx` 由本入口创建。
-- 注意事项：不接受 `globals`、`builtins`、`config` 参数；缺少 runtime arg 必须报 `mlir_gen requires explicit runtime args for <fn>: expected <n>, got <m>`；DSL `min(lhs, rhs)` 仅支持两个位置参数且不得带关键字参数。
+- 注意事项：不接受 `globals`、`builtins`、`config` 参数；缺少 runtime arg 必须报 `mlir_gen requires explicit runtime args for <fn>: expected <n>, got <m>`；DSL `min(lhs, rhs)` 仅支持两个位置参数且不得带关键字参数；`kernel.add/sub/...` 不生成 `kernel.add` 等 dialect op，统一 lower 到 `kernel.binary_elewise`。
 
 ## 测试
 
@@ -101,3 +103,5 @@
 | TC-DSL-AST-MLIR-GEN-044 | pass 改写 | MLIR gen lowers NN arithmetic and compare public helpers | 准备公开 Memory 与 SymbolDim 输入并调用 `kernel_gen.operation.nn` arithmetic/compare helper。 | 运行 `test_mlir_gen_lowers_nn_arithmetic_compare_public_helpers`。 | 生成的 IR 包含对应 `nn.add/sub/mul/truediv/floordiv` 与 compare family op。 | `test_mlir_gen_lowers_nn_arithmetic_compare_public_helpers` |
 | TC-DSL-AST-MLIR-GEN-045 | pass 改写 | MLIR gen lowers NN broadcast and structured public helpers | 准备公开 Memory 输入并调用 broadcast、transpose、fc、matmul、img2col 与 conv helper。 | 运行 `test_mlir_gen_lowers_nn_broadcast_and_structured_public_helpers`。 | 生成的 IR 包含显式 `nn.broadcast`、`nn.transpose`、`nn.matmul`、`nn.img2col*` 与必要 reshape 链。 | `test_mlir_gen_lowers_nn_broadcast_and_structured_public_helpers` |
 | TC-DSL-AST-MLIR-GEN-046 | pass 改写 | MLIR gen lowers DMA and arch public helper chains | 准备公开 Memory 与 SymbolDim 输入并调用 DMA / arch helper 链。 | 运行 `test_mlir_gen_lowers_dma_and_arch_public_helper_chains`。 | 生成的 IR 包含对应 DMA op、`arch.get_*`、`arch.get_dynamic_memory` 与 `arch.launch`。 | `test_mlir_gen_lowers_dma_and_arch_public_helper_chains` |
+| TC-DSL-AST-MLIR-GEN-047 | pass 改写 | MLIR gen lowers kernel out-first helpers | 准备公开 `kernel_gen.operation.kernel` out-first helper、`Memory` 和 `SymbolDim` 参数。 | 运行 `test_mlir_gen_lowers_kernel_out_first_public_helpers`。 | IR 包含 `kernel.binary_elewise`、`kernel.matmul`、`kernel.img2col1d` 与 `kernel.img2col2d`；`kernel.add` helper 不生成同名 dialect op。 | `test_mlir_gen_lowers_kernel_out_first_public_helpers` |
+| TC-DSL-AST-MLIR-GEN-048 | 符号语义 | MLIR gen lowers direct get_shape unpack and index | 准备公开 `Memory` 参数并在 DSL 中调用 `memory.get_shape()`。 | 运行 `test_mlir_gen_lowers_memory_get_shape_unpack_and_index`。 | 解包和索引均生成按轴 shape 读取语义；不要求实现 `get_shape(dim)`。 | `test_mlir_gen_lowers_memory_get_shape_unpack_and_index` |
