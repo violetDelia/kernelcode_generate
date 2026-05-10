@@ -1820,3 +1820,22 @@ ignored expectation 合同资产同步 scope：
 - `git push origin main`：通过。
 - `git rev-parse HEAD` / `git rev-parse origin/main`：均为 `7c9c649c143452d26d34128c5811bad703aeafcd`。
 结论：业务合并和 push 已完成；下一步执行 `-done` 并清理已完成任务 worktree / branch。
+
+---
+
+时间：2026-05-10 16:45 +0800
+经办人：李白
+任务：T-20260508-bd2ec3b2 / ast_symbol_pipeline_conv2d_dynamic merge 收尾
+任务目标：记录 `-done`、worktree / branch 回收和最终主仓同步状态。
+改动：
+- 已执行任务脚本 `-done`，状态从 `TODO.md` 移入 `DONE.md`。
+- 已清理完成任务 worktree `/home/lfr/kernelcode_generate/wt-20260508-ast-symbol-pipeline-conv2d-dynamic`。
+- 已删除本地任务分支 `task/ast-symbol-pipeline-conv2d-dynamic`。
+验证：
+- `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260508-bd2ec3b2 -log agents/codex-multi-agents/log/task_records/2026/19/20260508-ast-symbol-pipeline-conv2d-dynamic.md -agents-list agents/codex-multi-agents/agents-lists.md` -> `OK: done T-20260508-bd2ec3b2`、`OK: replace 李白 状态`。
+- `rg -n "T-20260508-bd2ec3b2" TODO.md DONE.md` -> 仅 `DONE.md` 保留已完成记录。
+- `git worktree remove /home/lfr/kernelcode_generate/wt-20260508-ast-symbol-pipeline-conv2d-dynamic` -> 通过。
+- `git branch -d task/ast-symbol-pipeline-conv2d-dynamic` -> 通过。
+- `git worktree list` -> 仅主仓 `/home/lfr/kernelcode_generate`。
+- `git status --short --branch` -> `## main...origin/main`，无未提交改动。
+结论：T-20260508-bd2ec3b2 已完成 merge / push / `-done` / worktree 与 branch 回收；等待管理员后续计划归档或 `done-plan` 流转。
