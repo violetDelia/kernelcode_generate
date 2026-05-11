@@ -457,3 +457,24 @@ merge 前 gate：
 merge 结论：
 - 合并前 gate 通过；任务记录、授权来源、终验结论、diff scope 与禁止修改面已核对。
 - 可暂存本任务允许文件和记录文件，生成任务分支提交并推送到 `origin/main`。
+
+时间：2026-05-12 03:30 +0800
+经办人：李白
+任务：T-20260512-32961719 / third_party_generic_backend_green_plan
+任务目标：完成提交、推送、`-done` 与后续清理前状态记录。
+
+合并提交与推送：
+- 在任务 worktree 暂存本任务允许文件、授权 expectation 文件与任务记录；确认 `.skills`、AGENTS、标准文档、TODO/DONE、计划书和禁止目录未暂存。
+- 执行 `git diff --cached --check`：退出码 0。
+- 提交：`60fe58580b386c88e03c7149a2c9743f59f30a23`（`T-20260512-32961719 merge third party generic backend`）。
+- 因主仓根目录存在无关未提交改动，未在根目录执行会写工作区的本地 merge；改在任务 worktree 执行 `git push origin HEAD:main`，远端 `main` 已快进到 `60fe58580b386c88e03c7149a2c9743f59f30a23`。
+- 推送后任务 worktree `git rev-parse HEAD` 与 `git rev-parse origin/main` 均为 `60fe58580b386c88e03c7149a2c9743f59f30a23`。
+
+共享状态：
+- 执行 `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260512-32961719 -log agents/codex-multi-agents/log/task_records/2026/20/20260512-third-party-generic-backend.md -agents-list agents/codex-multi-agents/agents-lists.md`。
+- 脚本输出：`OK: done T-20260512-32961719`、`OK: replace 李白 状态`。
+- `rg -n "T-20260512-32961719|20260512-third-party-generic-backend" TODO.md DONE.md agents/codex-multi-agents/agents-lists.md`：DONE.md 中存在该任务 `已完成` 记录，完成时间 `2026-05-12 03:30:07 +0800`；TODO.md 中未再命中该任务。
+
+待清理状态：
+- 主仓根目录 `git status --short --branch` 显示 `main...origin/main [behind 1]`，并保留三处本任务外未提交改动：`.gitignore`、`kernel_gen/dialect/symbol.py`、`kernel_gen/dsl/ast/nodes/symbol.py`。
+- 后续尝试在不覆盖上述本地改动的前提下快进根目录 main 并回收任务 worktree / 分支；若快进会覆盖这些文件或删除分支不安全，则保留并回报。
