@@ -478,3 +478,22 @@ merge 结论：
 待清理状态：
 - 主仓根目录 `git status --short --branch` 显示 `main...origin/main [behind 1]`，并保留三处本任务外未提交改动：`.gitignore`、`kernel_gen/dialect/symbol.py`、`kernel_gen/dsl/ast/nodes/symbol.py`。
 - 后续尝试在不覆盖上述本地改动的前提下快进根目录 main 并回收任务 worktree / 分支；若快进会覆盖这些文件或删除分支不安全，则保留并回报。
+
+时间：2026-05-12 03:31 +0800
+经办人：李白
+任务：T-20260512-32961719 / third_party_generic_backend_green_plan
+任务目标：回收已完成 worktree / 本地任务分支并记录主仓最终状态。
+
+清理与主仓同步：
+- 在主仓根目录执行 `git merge --ff-only origin/main`：成功，从 `82dd3b69` 快进到 `0f0fa469`；本任务外未提交改动 `.gitignore`、`kernel_gen/dialect/symbol.py`、`kernel_gen/dsl/ast/nodes/symbol.py` 保留未覆盖。
+- 执行 `git merge-base --is-ancestor task/third-party-generic-backend origin/main`：退出码 0，确认任务分支已合入远端主线。
+- 执行 `git -C /home/lfr/kernelcode_generate/wt-20260512-third-party-generic-backend status --porcelain --branch`：仅输出 `## task/third-party-generic-backend`，任务 worktree 无未提交或未跟踪任务资产。
+- 执行 `git worktree remove /home/lfr/kernelcode_generate/wt-20260512-third-party-generic-backend`：成功。
+- 执行 `git branch -d task/third-party-generic-backend`：成功，删除本地任务分支 `0f0fa469`。
+- `git worktree list`：保留主仓 `/home/lfr/kernelcode_generate 0f0fa469 [main]` 与其它进行中 worktree `/home/lfr/kernelcode_generate/wt-20260512-symbol-iter-token-arith 82dd3b69 [task/symbol-iter-token-arith]`；本任务 worktree 已移除。
+- `git branch --list 'task/third-party-generic-backend' -vv`：无输出。
+- 主仓 `git status --short --branch`：`## main...origin/main`，仍仅有三处本任务外未提交改动 `.gitignore`、`kernel_gen/dialect/symbol.py`、`kernel_gen/dsl/ast/nodes/symbol.py`。
+
+最终结论：
+- T-20260512-32961719 已完成 merge、push、`-done` 与 worktree/branch 回收。
+- 本任务未覆盖或合入主仓根目录既有无关改动。
