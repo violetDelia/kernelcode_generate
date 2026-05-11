@@ -55,6 +55,7 @@
 - `DmaReshapeAST: type[DmaReshapeAST]`
 - `DmaFlattenAST: type[DmaFlattenAST]`
 - `DmaFreeAST: type[DmaFreeAST]`
+- `DmaBroadcastAST: type[DmaBroadcastAST]`
 - `DmaFillAST: type[DmaFillAST]`
 - `DmaLoadAST: type[DmaLoadAST]`
 - `DmaSliceAST: type[DmaSliceAST]`
@@ -112,6 +113,8 @@
 - `KernelLeAST: type[KernelLeAST]`
 - `KernelGtAST: type[KernelGtAST]`
 - `KernelGeAST: type[KernelGeAST]`
+- `KernelExpAST: type[KernelExpAST]`
+- `KernelReduceAST: type[KernelReduceAST]`
 - `KernelMatmulAST: type[KernelMatmulAST]`
 - `KernelImg2Col1dAST: type[KernelImg2Col1dAST]`
 - `KernelImg2Col2dAST: type[KernelImg2Col2dAST]`

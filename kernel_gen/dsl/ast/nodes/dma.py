@@ -4,8 +4,7 @@
 功能说明:
 - 定义 DMA helper 对应的 AST 节点，节点只保存 DSL 语义数据，不执行 lowering。
 - 读类 DMA 节点在匿名 `?` 维度类型化后使用 full-rank dynamic shape，保持 `dma.alloc` verifier 合同。
-- 读类 DMA 节点优先用公开 size 变量名构造结果 type，避免后续同形状 memory 误判为隐式 broadcast。
-- `DmaReshapeAST` 对匿名 shape 优先沿用公开 shape 变量名，保持后续 matmul contracting 维度可判定。
+- `DmaReshapeAST` 对 `!symbol.int<?>` shape operand 继续输出 `?`，不得通过 SSA 名称或公开变量名伪造稳定 shape。
 
 API 列表:
 - `DmaAllocAST(shape: SymbolListAST, dtype: IntTypeAttrAST | FloatTypeAttrAST | BoolTypeAttrAST, space: MemorySpaceAttrAST = ..., stride: SymbolListAST | None = None, location: SourceLocation | None = None)`
@@ -15,6 +14,7 @@ API 列表:
 - `DmaReshapeAST(source: ValueAST, shape: SymbolListAST, location: SourceLocation | None = None)`
 - `DmaFlattenAST(source: ValueAST, location: SourceLocation | None = None)`
 - `DmaFreeAST(value: ValueAST, location: SourceLocation | None = None)`
+- `DmaBroadcastAST(target: ValueAST, source: ValueAST, location: SourceLocation | None = None)`
 - `DmaFillAST(target: ValueAST, value: ConstValueAST | SymbolDimAST, location: SourceLocation | None = None)`
 - `DmaLoadAST(source: ValueAST, offset: SymbolListAST, size: SymbolListAST, stride: SymbolListAST | None = None, space: MemorySpaceAttrAST | None = None, location: SourceLocation | None = None)`
 - `DmaSliceAST(source: ValueAST, offset: SymbolListAST, size: SymbolListAST, stride: SymbolListAST | None = None, space: MemorySpaceAttrAST | None = None, location: SourceLocation | None = None)`
@@ -199,6 +199,8 @@ def _symbol_expr_product(lhs: int | str, rhs: int | str) -> int | str:
     - expr = _symbol_expr_product("M", "N")
     """
 
+    if lhs == "?" or rhs == "?":
+        return "?"
     if lhs == 1:
         return rhs
     if rhs == 1:
@@ -267,8 +269,7 @@ def _shape_attr_from_reshape_item(
     功能说明:
     - 静态整数保持 `#symbol.expr<int>`。
     - SSA 类型已携带公开 symbol 表达时优先继承该表达，满足 dialect verifier 的 operand/type 一致合同。
-    - SSA 类型仍为 `?` 时优先使用公开赋值名作为 runtime 维度别名；没有稳定名称时才保持
-      `#symbol.expr<?>`。
+    - SSA 类型仍为 `?` 时，保持 `#symbol.expr<?>`，确保 result shape 与输入 operand 一致。
     - 无 SSA 类型表达时退回 `SymbolDimAST` 的公开绑定名、解析期公开 symbol 值或轴向稳定名。
 
     使用示例:
@@ -285,13 +286,6 @@ def _shape_attr_from_reshape_item(
     if isinstance(operand_value, str):
         operand_text = operand_value.replace(" ", "")
         if operand_text == "?":
-            if isinstance(item, SymbolDimAST):
-                item_name = item.name.replace(" ", "")
-                if item_name and item_name != "?":
-                    return _symbol_expr_attr_from_value(item_name)
-            operand_name = value_name.replace(" ", "") if (value_name := operand.name_hint) else ""
-            if operand_name and operand_name != "?":
-                return _symbol_expr_attr_from_value(operand_name)
             return _symbol_expr_attr_from_value("?")
         if operand_text and operand_text != "?":
             return _symbol_expr_attr_from_value(operand_text)
@@ -323,7 +317,7 @@ def _stride_factor_from_reshape_item(
 
     功能说明:
     - 优先使用 SSA 已证明的公开表达式。
-    - SSA 类型为 `?` 时使用 DSL 公开变量名、解析期公开 symbol 值或轴向稳定名，避免 stride 也退化成 `#symbol.expr<?>`。
+    - SSA 类型为 `?` 时保持 `?`，避免 stride 用公开变量名掩盖 unknown shape。
 
     使用示例:
     - factor = _stride_factor_from_reshape_item(item, operand, fallback, 0)
@@ -338,6 +332,8 @@ def _stride_factor_from_reshape_item(
         return operand_value
     if isinstance(operand_value, str):
         operand_text = operand_value.replace(" ", "")
+        if operand_text == "?":
+            return "?"
         if operand_text and operand_text != "?":
             return operand_text
     if isinstance(item, SymbolDimAST):
@@ -370,7 +366,8 @@ def _memory_type_from_shape_items(
 
     功能说明:
     - dtype 与 space 复用 `MemoryAST.type_from_memory(...)` 的公开映射。
-    - shape attr 直接来自 shape 参数，匿名运行期值使用公开变量名承接。
+    - shape attr 直接来自 shape 参数。
+    - 读类 DMA 不为 `?` operand 生成公开变量别名，确保 result shape 与 operand 一致。
     - stride 在当前文件内用连续布局重建，不调用跨文件非公开 helper。
 
     使用示例:
@@ -403,13 +400,21 @@ def _reshape_result_type_from_shape_items(
     """按 reshape 的公开 shape 参数构造结果 memory type。
 
     功能说明:
-    - 保留 reshape 调用点语义名称，内部复用通用 shape type 构造。
+    - 保留已证明的 shape 表达式。
+    - 传入 operand 类型为 `?` 时，reshape result shape/stride 仍为 `?`。
 
     使用示例:
     - result_type = _reshape_result_type_from_shape_items(ctx, memory, items, operands, values, location)
     """
 
-    return _memory_type_from_shape_items(ctx, result_memory, shape_items, shape_operands, shape_values, location)
+    return _memory_type_from_shape_items(
+        ctx,
+        result_memory,
+        shape_items,
+        shape_operands,
+        shape_values,
+        location,
+    )
 
 
 def _contiguous_stride_attrs(shape_values: list[int | str]) -> ArrayAttr[SymbolExprAttr]:
@@ -1141,6 +1146,67 @@ class DmaFreeAST(StatementAST):
         if not isinstance(value, SSAValue) or not isinstance(value.type, NnMemoryType):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "value must be Memory")
         return DmaFreeOp(value)
+
+
+@dataclass
+class DmaBroadcastAST(StatementAST):
+    """dma.broadcast AST 节点。
+
+
+    功能说明:
+    - 表示 `dma.broadcast(target, source)` 调用。
+    - target/source 都是 memory operand，节点不产生 SSA result。
+
+    使用示例:
+    - DmaBroadcastAST(target, source).emit_mlir(ctx, block)
+
+    关联文件:
+    - spec: spec/dsl/ast/nodes/dma.md
+    - test: test/dsl/ast/nodes/test_dma.py
+    - 功能实现: kernel_gen/dsl/ast/nodes/dma.py
+    """
+
+    target: ValueAST
+    source: ValueAST
+    location: SourceLocation | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.target, ValueAST):
+            self.target = ConstValueAST(self.target, location=self.location)
+        if not isinstance(self.source, ValueAST):
+            self.source = ConstValueAST(self.source, location=self.location)
+
+    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
+        """将 DMA broadcast 节点发射为 `dma.broadcast`。
+
+        功能说明:
+        - target/source lower 为 memory operand。
+        - 复用 `kernel_gen.operation.dma.broadcast(...)` 公开合同校验。
+
+        使用示例:
+        - op = DmaBroadcastAST(target, source).emit_mlir(ctx, block)
+        """
+
+        assert isinstance(ctx, Context)
+        assert isinstance(block, Block)
+        target_memory = self.target.result_memory()
+        source_memory = self.source.result_memory()
+        if not isinstance(target_memory, Memory) or not isinstance(source_memory, Memory):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "broadcast target/source memory must be known from AST")
+        dma.broadcast(target_memory, source_memory)
+        target = self.target.emit_mlir(ctx, block)
+        if isinstance(target, Operation):
+            block.add_op(target)
+            target = target.results[0]
+        source = self.source.emit_mlir(ctx, block)
+        if isinstance(source, Operation):
+            block.add_op(source)
+            source = source.results[0]
+        if not isinstance(target, SSAValue) or not isinstance(target.type, NnMemoryType):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "broadcast target must lower to nn.memory")
+        if not isinstance(source, SSAValue) or not isinstance(source.type, NnMemoryType):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "broadcast source must lower to nn.memory")
+        return DmaBroadcastOp(target, source)
 
 
 @dataclass

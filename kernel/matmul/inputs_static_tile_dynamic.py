@@ -5,7 +5,7 @@
 - 实现 `inputs 静 + tile 动` 的二维 matmul kernel demo。
 - 输入 shape 固定为 `lhs[32, 16]`、`rhs[16, 32]`、`out[32, 32]`。
 - tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数，运行期以 int scalar 绑定。
-- K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 初始化局部 accumulator，K loop 内累加 partial，K loop 后最终写回 output。
+- K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 初始化局部 accumulator，K loop 内用 `kernel.matmul/kernel.add` out-first helper 累加 partial，K loop 后最终写回 output。
 - H/W/K 尾块都通过 `min(tile, dim - iv)` 覆盖，避免只覆盖可整除 case。
 
 API 列表:
@@ -35,8 +35,8 @@ if str(_REPO_ROOT) not in sys.path:
 
 from kernel.runner import run_lowering_demo
 from kernel_gen.execute_engine import ExecutionEngine
+from kernel_gen.operation import kernel
 from kernel_gen.operation.dma import alloc, deslice, fill, view
-from kernel_gen.operation.nn import add, matmul
 from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -63,7 +63,7 @@ def matmul_inputs_static_tile_dynamic_kernel(
     功能说明:
     - 输入和输出 shape 来自 `Tensor[...]` 静态标注。
     - `tile_h/tile_w/tile_k` 作为 `SymbolDim` 参数进入编译 IR，不在 Python 函数体内常量化。
-    - K 维通过内层 loop 切分，每个 partial 累加到同一个局部 accumulator，loop 后只写回一次 output tile。
+    - K 维通过内层 loop 切分，每个 partial 通过 `kernel.matmul/kernel.add` out-first helper 累加到同一个局部 accumulator，loop 后只写回一次 output tile。
 
     使用示例:
     - `matmul_inputs_static_tile_dynamic_kernel(out, lhs, rhs, 13, 11, 5)`
@@ -89,9 +89,9 @@ def matmul_inputs_static_tile_dynamic_kernel(
                 rhs_region = view(rhs, [k0, w0], [cur_k, cur_w], [1, 1])
                 deslice(lhs_tile, lhs_region, [0, 0], [cur_h, cur_k], [1, 1])
                 deslice(rhs_tile, rhs_region, [0, 0], [cur_k, cur_w], [1, 1])
-                partial = matmul(lhs_tile, rhs_tile)
-                updated_acc = add(acc, partial)
-                deslice(acc, updated_acc, [0, 0], [tile_h, tile_w], [1, 1])
+                partial = alloc([tile_h, tile_w], NumericType.Float32, MemorySpace.TSM)
+                kernel.matmul(partial, lhs_tile, rhs_tile)
+                kernel.add(acc, acc, partial)
             out_region = view(acc, [0, 0], [cur_h, cur_w], [1, 1])
             deslice(out, out_region, [h0, w0], [cur_h, cur_w], [1, 1])
 
@@ -162,7 +162,7 @@ def _assert_accumulator_source(source: str) -> None:
 
 
     功能说明:
-    - 只检查公开生成源码的关键顺序：`fill -> matmul -> add -> deslice`。
+    - 只检查公开生成源码的关键顺序：`fill -> matmul -> add -> output deslice`。
     - 防止 K loop partial 直接覆盖 output tile 的回退。
 
     使用示例:
@@ -172,10 +172,9 @@ def _assert_accumulator_source(source: str) -> None:
     fill_index = source.index("fill<")
     matmul_index = source.index("matmul<")
     add_index = source.index("add<")
-    accumulator_deslice_index = source.index("deslice(", add_index)
-    output_deslice_index = source.index("deslice(arg0", accumulator_deslice_index)
-    if not (fill_index < matmul_index < add_index < accumulator_deslice_index < output_deslice_index):
-        raise AssertionError("matmul accumulator source order must be fill -> matmul -> add -> accumulator deslice -> output deslice")
+    output_deslice_index = source.index("deslice(arg0", add_index)
+    if not (fill_index < matmul_index < add_index < output_deslice_index):
+        raise AssertionError("matmul accumulator source order must be fill -> matmul -> add -> output deslice")
 
 
 def _execute_device_source(source: str, real_args: tuple[MatmulRuntimeArg, ...]) -> None:

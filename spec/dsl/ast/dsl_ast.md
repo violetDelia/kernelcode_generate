@@ -52,7 +52,7 @@
 - `spec/dsl/ast/nodes/symbol.md`：symbol 表达式与 symbol 列表。
 - `spec/dsl/ast/nodes/control_flow.md`：`ForAST` / `IfAST` 控制流节点。
 - `spec/dsl/ast/plugin/registry.md`：DSL builtin 注册表。
-- `kernel_gen.operation.dma`、`kernel_gen.operation.nn`、`kernel_gen.operation.kernel`、`kernel_gen.operation.arch`：可注册 DSL helper 的 operation 函数对象。
+- `kernel_gen.operation.dma`、`kernel_gen.operation.nn`、`kernel_gen.operation.kernel`、`kernel_gen.operation.arch`：可注册 DSL helper 的 operation 函数对象；其中 `dma.broadcast`、`kernel.exp`、`kernel.reduce` 与 `kernel.KernelReduceKind.*` 属于公开可解析属性集合。
 
 ## API详细说明
 
@@ -71,7 +71,7 @@
     visitor = DslAstVisitor(kernel, runtime_args=(lhs, rhs))
     ```
 - 功能说明：构造 Python AST 到 DSL AST 的 visitor，绑定 DSL 函数与运行时参数。
-- 注意事项：输入必须来自标准库 `ast` 与公开 DSL runtime 类型；不支持的语法必须通过公开 `KernelCodeError` 失败，不得静默生成内部占位节点。
+- 注意事项：输入必须来自标准库 `ast` 与公开 DSL runtime 类型；支持公开 operation helper 属性与 `kernel.KernelReduceKind.SUM/MIN/MAX` 枚举成员；不支持的语法必须通过公开 `KernelCodeError` 失败，不得静默生成内部占位节点。
 
 ### `DslAstVisitor.runtime_arg_key(value: DslVisitValue) -> RuntimeArgKey`
 

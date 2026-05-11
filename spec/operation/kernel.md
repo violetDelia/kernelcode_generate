@@ -19,6 +19,9 @@
 - `le(out: Memory, lhs: Memory, rhs: Memory) -> None`
 - `gt(out: Memory, lhs: Memory, rhs: Memory) -> None`
 - `ge(out: Memory, lhs: Memory, rhs: Memory) -> None`
+- `exp(out: Memory, input_value: Memory) -> None`
+- `class KernelReduceKind(Enum)`
+- `reduce(out: Memory, input_value: Memory, *, kind: KernelReduceKind, axis: int, keepdim: bool = False) -> None`
 - `matmul(out: Memory, lhs: Memory, rhs: Memory) -> None`
 - `img2col1d(out: Memory, input_value: Memory, k: int | SymbolDim, s: int | SymbolDim = 1, d: int | SymbolDim = 1, p_left: int | SymbolDim = 0, p_right: int | SymbolDim = 0) -> None`
 - `img2col2d(out: Memory, input_value: Memory, kh: int | SymbolDim, kw: int | SymbolDim, sh: int | SymbolDim = 1, sw: int | SymbolDim = 1, dh: int | SymbolDim = 1, dw: int | SymbolDim = 1, ph: int | SymbolDim = 0, pw: int | SymbolDim = 0, pl: int | SymbolDim = 0, pr: int | SymbolDim = 0) -> None`
@@ -30,10 +33,14 @@
 - `功能实现`：
   - `kernel_gen/operation/kernel/__init__.py`：公开子模块导出。
   - `kernel_gen/operation/kernel/elementwise.py`：二元逐元素算术与比较 helper。
+  - `kernel_gen/operation/kernel/activation.py`：逐元素激活 helper。
+  - `kernel_gen/operation/kernel/reduction.py`：归约 helper。
   - `kernel_gen/operation/kernel/structured.py`：`matmul` 与 `img2col` helper。
   - `kernel_gen/operation/__init__.py`：只导出 `kernel` 子模块，不上提 out-first helper。
 - `test`：
   - `test/operation/kernel/test_elementwise.py`
+  - `test/operation/kernel/test_activation.py`
+  - `test/operation/kernel/test_reduction.py`
   - `test/operation/kernel/test_structured.py`
   - `test/operation/kernel/test_package.py`
   - `test/operation/test_package.py`
@@ -45,7 +52,7 @@
 - `spec/symbol_variable/memory.md`：定义 `Memory`、`MemorySpace`、`shape`、`stride`、`dtype`、`format` 公开语义。
 - `spec/symbol_variable/symbol_dim.md`：定义 `SymbolDim` 与符号整数表达。
 - `spec/symbol_variable/type.md`：定义 `NumericType`、`Farmat` 与 `NumericType.Bool`。
-- `spec/dialect/kernel.md`：定义 `kernel.binary_elewise`、`kernel.matmul`、`kernel.img2col1d` 与 `kernel.img2col2d` IR 写回语义。
+- `spec/dialect/kernel.md`：定义 `kernel.binary_elewise`、`kernel.exp`、`kernel.reduce`、`kernel.matmul`、`kernel.img2col1d` 与 `kernel.img2col2d` IR 写回语义。
 - `spec/dsl/ast/plugin/kernel.md`：定义 Python DSL 中 kernel helper 到 AST 的解析关系。
 - `spec/dsl/ast/nodes/kernel.md`：定义 kernel AST 节点到 MLIR 的发射关系。
 
@@ -54,6 +61,7 @@
 - out-first：第一个参数为写回目标 `out`，helper 成功时返回 `None`。
 - 算术 kind：`ADD`、`SUB`、`MUL`、`DIV`、`TRUEDIV`。
 - 比较 kind：`EQ`、`NE`、`LT`、`LE`、`GT`、`GE`。
+- 归约 kind：`SUM`、`MIN`、`MAX`。
 
 ## API详细说明
 
@@ -295,6 +303,58 @@
 - 功能说明：执行 `binary_elewise(out, lhs, rhs, kind=KernelBinaryElewiseKind.GE)`。
 - 注意事项：在 DSL 中 lower 到 `kernel.binary_elewise(kind="ge")`；`lhs/rhs` dtype 可不同。
 
+### `exp(out: Memory, input_value: Memory) -> None`
+
+- api：`exp(out: Memory, input_value: Memory) -> None`
+- 参数：
+  - `out`：写回目标；类型 `Memory`；无默认值；不允许 `None`；shape、stride、space、dtype 必须与 `input_value` 一致。
+  - `input_value`：输入 memory；类型 `Memory`；无默认值；不允许 `None`。
+- 返回值：`None`；非法输入抛出 `KernelCodeError`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.operation import kernel
+
+  kernel.exp(out, input_value)
+  ```
+- 功能说明：校验 out-first `kernel.exp` 写回合同。
+- 注意事项：`out/input_value` dtype 必须一致且为浮点类型；不做隐式 broadcast、cast 或空间转换。
+
+### `class KernelReduceKind(Enum)`
+
+- api：`class KernelReduceKind(Enum)`
+- 参数：无。
+- 返回值：枚举类型；成员固定为 `SUM`、`MIN`、`MAX`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.operation import kernel
+
+  kind = kernel.KernelReduceKind.SUM
+  ```
+- 功能说明：定义 `reduce(...)` 的合法 `kind` 输入集合。
+- 注意事项：字符串 `"sum"`、`"min"`、`"max"` 不是 operation helper 的公开输入；DSL emit 时才转换为 dialect 字符串 attr。
+
+### `reduce(out: Memory, input_value: Memory, *, kind: KernelReduceKind, axis: int, keepdim: bool = False) -> None`
+
+- api：`reduce(out: Memory, input_value: Memory, *, kind: KernelReduceKind, axis: int, keepdim: bool = False) -> None`
+- 参数：
+  - `out`：写回目标；类型 `Memory`；无默认值；不允许 `None`；shape 必须等于按 `axis/keepdim` 归约后的结果 shape。
+  - `input_value`：输入 memory；类型 `Memory`；无默认值；不允许 `None`；rank 必须大于 0。
+  - `kind`：归约类型；类型 `KernelReduceKind`；只能以 keyword 传入；不允许字符串。
+  - `axis`：归约轴；类型 `int`；只能以 keyword 传入；不允许 `bool`；必须满足 `0 <= axis < input.rank`。
+  - `keepdim`：是否保留归约轴；类型 `bool`；默认值 `False`；只能以 keyword 传入。
+- 返回值：`None`；非法输入抛出 `KernelCodeError`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.operation import kernel
+
+  kernel.reduce(out, input_value, kind=kernel.KernelReduceKind.SUM, axis=1, keepdim=False)
+  ```
+- 功能说明：校验 out-first `kernel.reduce` 写回合同。
+- 注意事项：`out/input_value` dtype、space 必须一致；`keepdim=False` 删除 `axis` 维，`keepdim=True` 将 `axis` 维替换为 `1`；不做隐式 broadcast 或 dtype 提升。
+
 ### `matmul(out: Memory, lhs: Memory, rhs: Memory) -> None`
 
 - api：`matmul(out: Memory, lhs: Memory, rhs: Memory) -> None`
@@ -387,6 +447,8 @@
 
 - 测试文件：
   - `test/operation/kernel/test_elementwise.py`
+  - `test/operation/kernel/test_activation.py`
+  - `test/operation/kernel/test_reduction.py`
   - `test/operation/kernel/test_structured.py`
   - `test/operation/kernel/test_package.py`
   - `test/operation/test_package.py`
@@ -399,6 +461,8 @@
 
 - 验证 kernel operation helper 的 out-first 返回 `None` 合同。
 - 验证 `binary_elewise` 算术与比较的 shape、stride、space、dtype 和 enum kind 边界。
+- 验证 `exp` 的浮点 dtype、shape、stride、space 写回边界。
+- 验证 `reduce` 的 kind、axis、keepdim、shape、dtype 和 space 写回边界。
 - 验证 `matmul` 的 mixed-space、rank、shape、dtype 和 `memoryspace` 非目标边界。
 - 验证 `img2col1d/2d` 的静态与符号窗口参数、输出元信息和错误边界。
 - 验证 `kernel_gen.operation` 只导出 `kernel` 子模块，不上提 out-first helper。
@@ -410,6 +474,8 @@
 | TC-OP-KERNEL-ELEWISE-001 | 算术 helper | `add/sub/mul/div/truediv` 成功写回 | `out/lhs/rhs` shape、stride、space、dtype 一致 | 运行 operation kernel pytest | helper 返回 `None` | `test_kernel_arithmetic_helpers_are_out_first_and_return_none` |
 | TC-OP-KERNEL-ELEWISE-002 | 比较 helper | `eq/ne/lt/le/gt/ge` 写入 Bool out | `out.dtype=Bool`，`lhs/rhs` dtype 可不同 | 运行 operation kernel pytest | helper 返回 `None` | `test_kernel_compare_helpers_require_bool_out_and_allow_input_dtype_mismatch` |
 | TC-OP-KERNEL-ELEWISE-003 | 错误边界 | 字符串 kind、shape mismatch、dtype mismatch | 构造非法公开输入 | 运行 operation kernel pytest | 抛出 `KernelCodeError` | `test_kernel_binary_elewise_rejects_non_api_kind_and_mismatched_metadata` |
+| TC-OP-KERNEL-ACTIVATION-001 | 激活 helper | `exp` 浮点写回 | `out/input` shape、stride、space、dtype 一致且 dtype 为浮点 | 运行 activation pytest | helper 返回 `None` | `test_kernel_exp_accepts_matching_float_memory` |
+| TC-OP-KERNEL-REDUCTION-001 | 归约 helper | `reduce` kind/axis/keepdim 矩阵 | `input` rank 大于 0，`out` shape 为归约结果 | 运行 reduction pytest | helper 返回 `None`，非法矩阵抛 `KernelCodeError` | `test_kernel_reduce_accepts_public_kind_axis_keepdim_matrix` |
 | TC-OP-KERNEL-STRUCTURED-001 | matmul | mixed-space rank-2 matmul | `lhs[M,K]`、`rhs[K,N]`、`out[M,N]` | 运行 structured pytest | 返回 `None`；`memoryspace` keyword 被拒绝 | `test_kernel_matmul_supports_mixed_space_and_rejects_non_api_memoryspace` |
 | TC-OP-KERNEL-STRUCTURED-002 | img2col1d | 静态与符号窗口参数 | Norm rank-3 input 与匹配 out | 运行 structured pytest | 返回 `None`；错误 shape 被拒绝 | `test_kernel_img2col1d_validates_expected_out_memory` |
 | TC-OP-KERNEL-STRUCTURED-003 | img2col2d | 静态与符号窗口参数 | Norm rank-4 input 与匹配 out | 运行 structured pytest | 返回 `None`；错误 format 被拒绝 | `test_kernel_img2col2d_validates_expected_out_memory` |

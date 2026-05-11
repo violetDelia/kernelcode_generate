@@ -275,8 +275,8 @@ def _build_full_window_operands(
     功能说明:
     - offsets: 全 0
     - strides: 全 1
-    - sizes: 通过 `symbol.get_dim(source, axis)` 从 source 的 shape 中读取，保证与静态 shape 对齐，
-      且当 source 存在匿名动态值 `?` 且没有可恢复的显式 symbol 来源时，pass 必须显式失败。
+    - sizes: 通过 `symbol.get_dim(source, axis)` 从 source 的 shape 中读取；匿名动态值 `?`
+      也作为运行时 shape 继续流转，不伪造稳定符号名。
 
     使用示例:
     - ops, offsets, sizes, strides = _build_full_window_operands(gm, rank=2, zero=zero, one=one)
@@ -301,10 +301,6 @@ def _build_full_window_operands(
                 ErrorModule.PASS,
                 "dynamic_shape source shape entries must be SymbolExprAttr",
             )
-        if _symbol_expr_text(shape_dim) == "?":
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
-                "dynamic_shape must come from explicit symbol source; anonymous '?' dimension is unsupported in lower-dma-memory-hierarchy"
-            )
         get_dim = SymbolGetDimOp(source, IntAttr(axis))
         ops.append(get_dim)
         sizes.append(get_dim.result)
@@ -322,8 +318,9 @@ def _build_dynamic_shape_operands(
 
     功能说明:
     - 静态 shape 返回空列表，让 `dma.alloc` 使用零 operand 形式。
-    - 非静态 `SymbolExprAttr` 符号维度通过 `symbol.get_dim(source, axis)` 读取。
-    - 匿名动态维度 `?` 没有稳定 symbol 来源，必须显式失败。
+    - 普通非静态 `SymbolExprAttr` 符号维度通过紧凑 dynamic_shape 读取。
+    - 只要 result shape 含匿名动态维度 `?`，就使用 full-rank dynamic_shape，
+      每个轴均通过 `symbol.get_dim(source, axis)` 读取，不伪造稳定符号名。
 
     使用示例:
     - ops, dynamic_shape = _build_dynamic_shape_operands(lhs, lhs_type)
@@ -337,6 +334,7 @@ def _build_dynamic_shape_operands(
     source_type.verify()
     ops: list[Operation] = []
     dynamic_shape: list[SSAValue] = []
+    has_unknown_shape = any(isinstance(dim, SymbolExprAttr) and _symbol_expr_text(dim) == "?" for dim in source_type.shape.data)
     for axis, shape_dim in enumerate(source_type.shape.data):
         if not isinstance(shape_dim, SymbolExprAttr):
             raise KernelCodeError(
@@ -344,14 +342,7 @@ def _build_dynamic_shape_operands(
                 ErrorModule.PASS,
                 "dynamic_shape result shape entries must be SymbolExprAttr",
             )
-        expr = _symbol_expr_text(shape_dim)
-        if expr == "?":
-            raise KernelCodeError(
-                ErrorKind.CONTRACT,
-                ErrorModule.PASS,
-                "dynamic_shape must come from explicit symbol source; anonymous '?' dimension is unsupported in lower-dma-memory-hierarchy",
-            )
-        if _static_int_from_symbol_expr(shape_dim) is not None:
+        if not has_unknown_shape and _static_int_from_symbol_expr(shape_dim) is not None:
             continue
         get_dim = SymbolGetDimOp(source, IntAttr(axis))
         ops.append(get_dim)

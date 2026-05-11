@@ -20,6 +20,7 @@ API 列表:
 
 from __future__ import annotations
 
+import inspect
 import os
 from pathlib import Path
 import subprocess
@@ -41,6 +42,28 @@ from kernel_gen.symbol_variable.type import NumericType
 FlashCompileArg: TypeAlias = "Memory | SymbolDim"
 STATIC_FLASH_MEMORY = "!nn.memory<[#symbol.expr<4>, #symbol.expr<4>, #symbol.expr<8>, #symbol.expr<4>]"
 DYNAMIC_FLASH_MEMORY = "!nn.memory<[#symbol.expr<B>, #symbol.expr<H>, #symbol.expr<8>, #symbol.expr<4>]"
+
+
+def _assert_flash_source_uses_kernel_softmax(fn) -> None:
+    """校验 flash attention demo 使用 kernel/dma out-first softmax 展开。
+
+    功能说明:
+    - 当前测试文件内 helper，只读取公开 demo 函数源码。
+    - 防止主计算入口回退到 `nn.softmax` 或返回式 `nn.matmul`。
+
+    使用示例:
+    - `_assert_flash_source_uses_kernel_softmax(flash_attention_inputs_static_tile_static_kernel)`
+    """
+
+    function_source = inspect.getsource(fn)
+    assert "kernel.matmul(" in function_source
+    assert "kernel.reduce(" in function_source
+    assert "broadcast(" in function_source
+    assert "kernel.exp(" in function_source
+    assert "kernel.truediv(" in function_source
+    assert "softmax(" not in function_source
+    assert "score = matmul(" not in function_source
+    assert "weighted = matmul(" not in function_source
 
 
 def _static_flash_args() -> tuple[Memory, Memory, Memory, Memory]:
@@ -113,12 +136,18 @@ def test_flash_static_static_demo_keeps_static_memory_and_tile() -> None:
     )
     module_text = str(module)
 
+    _assert_flash_source_uses_kernel_softmax(flash_attention_inputs_static_tile_static_kernel)
     assert STATIC_FLASH_MEMORY in module_text
     assert DYNAMIC_FLASH_MEMORY not in module_text
     assert "!symbol.int<#symbol.expr<BR>>" not in module_text
     assert "!symbol.int<#symbol.expr<BC>>" not in module_text
     assert "step = #symbol.expr<4>" in module_text
     assert "matmul<" in source
+    assert "reduce_max<" in source
+    assert "reduce_sum<" in source
+    assert "broadcast<" in source
+    assert "exp<" in source
+    assert "truediv<" in source
     assert "softmax" not in source
 
 
@@ -134,11 +163,15 @@ def test_flash_static_dynamic_demo_keeps_static_memory_and_symbolic_tile() -> No
     )
     module_text = str(module)
 
+    _assert_flash_source_uses_kernel_softmax(flash_attention_inputs_static_tile_dynamic_kernel)
     assert STATIC_FLASH_MEMORY in module_text
     assert DYNAMIC_FLASH_MEMORY not in module_text
     assert "!symbol.int<#symbol.expr<BR>>" in module_text
     assert "!symbol.int<#symbol.expr<BC>>" in module_text
     assert "step = #symbol.expr<BR>" in module_text
+    assert '"kernel.reduce"' in module_text
+    assert '"kernel.exp"' in module_text
+    assert '"dma.broadcast"' in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
 
 
@@ -154,11 +187,15 @@ def test_flash_dynamic_dynamic_demo_keeps_symbolic_memory_and_symbolic_tile() ->
     )
     module_text = str(module)
 
+    _assert_flash_source_uses_kernel_softmax(flash_attention_inputs_dynamic_tile_dynamic_kernel)
     assert DYNAMIC_FLASH_MEMORY in module_text
     assert STATIC_FLASH_MEMORY not in module_text
     assert "!symbol.int<#symbol.expr<BR>>" in module_text
     assert "!symbol.int<#symbol.expr<BC>>" in module_text
     assert "step = #symbol.expr<BR>" in module_text
+    assert '"kernel.reduce"' in module_text
+    assert '"kernel.exp"' in module_text
+    assert '"dma.broadcast"' in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
 
 

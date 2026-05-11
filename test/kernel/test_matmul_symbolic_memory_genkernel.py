@@ -23,6 +23,7 @@ API 列表:
 
 from __future__ import annotations
 
+import inspect
 import os
 from pathlib import Path
 import subprocess
@@ -47,7 +48,7 @@ def _assert_source_uses_accumulator(source: str) -> None:
 
     功能说明:
     - 当前测试文件内 helper，只服务公开 demo 输出的源码文本断言。
-    - 要求 `fill -> matmul -> add -> accumulator deslice -> output deslice`，避免 K loop partial 直接覆盖 output。
+    - 要求 `fill -> matmul -> add -> output deslice`，避免 K loop partial 直接覆盖 output。
 
     使用示例:
     - `_assert_source_uses_accumulator(source)`
@@ -56,9 +57,27 @@ def _assert_source_uses_accumulator(source: str) -> None:
     fill_index = source.index("fill<")
     matmul_index = source.index("matmul<")
     add_index = source.index("add<")
-    accumulator_deslice_index = source.index("deslice(", add_index)
-    output_deslice_index = source.index("deslice(arg0", accumulator_deslice_index)
-    assert fill_index < matmul_index < add_index < accumulator_deslice_index < output_deslice_index
+    output_deslice_index = source.index("deslice(arg0", add_index)
+    assert fill_index < matmul_index < add_index < output_deslice_index
+
+
+def _assert_python_source_uses_kernel_out_first(fn) -> None:
+    """校验 demo Python 源码使用 kernel out-first helper。
+
+
+    功能说明:
+    - 当前测试文件内 helper，只读取公开 demo 函数源码。
+    - 防止 demo 主计算入口回退到 `nn.matmul/nn.add` 返回式 helper。
+
+    使用示例:
+    - `_assert_python_source_uses_kernel_out_first(matmul_inputs_static_tile_static_kernel)`
+    """
+
+    function_source = inspect.getsource(fn)
+    assert "kernel.matmul(" in function_source
+    assert "kernel.add(" in function_source
+    assert "partial = matmul(" not in function_source
+    assert "updated_acc = add(" not in function_source
 
 
 def _run_kernel_script(script: str) -> subprocess.CompletedProcess[str]:
@@ -102,6 +121,7 @@ def test_dynamic_matmul_demo_uses_symbolic_memory_and_tile_reduce_accumulator() 
     )
     module_text = str(module)
 
+    _assert_python_source_uses_kernel_out_first(matmul_inputs_dynamic_tile_dynamic_kernel)
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" in module_text
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<K>]" in module_text
     assert "!nn.memory<[#symbol.expr<K>, #symbol.expr<W>]" in module_text
@@ -134,6 +154,7 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
     )
     module_text = str(module)
 
+    _assert_python_source_uses_kernel_out_first(matmul_inputs_static_tile_dynamic_kernel)
     assert "!nn.memory<[#symbol.expr<32>, #symbol.expr<32>]" in module_text
     assert "!nn.memory<[#symbol.expr<32>, #symbol.expr<16>]" in module_text
     assert "!nn.memory<[#symbol.expr<16>, #symbol.expr<32>]" in module_text
@@ -163,6 +184,7 @@ def test_static_static_matmul_demo_keeps_static_memory_and_static_tile_reduce() 
     )
     module_text = str(module)
 
+    _assert_python_source_uses_kernel_out_first(matmul_inputs_static_tile_static_kernel)
     assert "!nn.memory<[#symbol.expr<32>, #symbol.expr<32>]" in module_text
     assert "!nn.memory<[#symbol.expr<32>, #symbol.expr<16>]" in module_text
     assert "!nn.memory<[#symbol.expr<16>, #symbol.expr<32>]" in module_text

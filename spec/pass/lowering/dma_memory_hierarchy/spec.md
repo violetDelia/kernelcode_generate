@@ -49,7 +49,7 @@
 - `dma.alloc` 的 `dynamic_shape`：
   - 静态 shape 使用空 `dynamic_shape`。
   - 显式符号维度通过 `symbol.get_dim(source, axis)` 读取。
-  - 匿名动态维度 `?` 没有稳定 symbol 来源时必须以包含 `dynamic_shape` 的错误失败。
+  - 匿名动态维度 `?` 必须通过 `symbol.get_dim(source, axis)` 作为运行时 shape 继续流转，不得伪造稳定符号名。
 - `fold=False` legacy 路径是历史基础合同兼容入口；新 `apply_op` 规则不依赖 target registry 的 `SM/LM` 硬件容量。
 - 未配置 `apply_op` 且 `fold=True` 时 pass no-op，不要求 target 已选择，也不检查 `SM/LM`。
 
@@ -148,7 +148,7 @@
 
 - 验证默认无 `apply_op` 为 no-op。
 - 验证 `fold=False` legacy hierarchy 兼容路径不回退。
-- 验证 `apply_op` 合法规则、非法规则、空 target、out target、显式符号 shape 与匿名动态 shape 错误。
+- 验证 `apply_op` 合法规则、非法规则、空 target、out target、显式符号 shape 与匿名动态 shape 流转。
 - 验证 registry options 能构造并执行 `apply_op` pass。
 - 验证 `kernel.matmul` mixed-space verifier 允许规则输出 IR。
 
@@ -163,5 +163,5 @@
 | TC-DMH-005 | apply_op no-op | 空 target rule | 构造 `kernel.matmul`。 | 运行 `apply_op='matmul{["", "", ""]}'`。 | 不插入搬运，operand 保持不变。 | `test_dma_memory_hierarchy_apply_op_empty_rule_noop` |
 | TC-DMH-006 | registry | options 构造 | 调用 `load_builtin_passes()`。 | `build_registered_pass("lower-dma-memory-hierarchy", {"fold": "false", "apply_op": ...})`。 | 返回 pass 并执行 copy rewrite。 | `test_dma_memory_hierarchy_registry_apply_op` |
 | TC-DMH-007 | dynamic shape | 显式 symbol 维度 | 构造含 `M` 维度的 `kernel.matmul`。 | 运行 `apply_op` 改写 lhs。 | `dma.alloc.dynamic_shape` 使用 `symbol.get_dim` 结果。 | `test_dma_memory_hierarchy_apply_op_symbol_shape` |
-| TC-DMH-008 | 错误语义 | 匿名 `?` 维度 | 构造含 `?` 维度的 `kernel.matmul`。 | 运行 `apply_op` 改写该 operand。 | 以包含 `dynamic_shape` 的错误失败。 | `test_dma_memory_hierarchy_apply_op_rejects_anonymous_dynamic_shape` |
+| TC-DMH-008 | dynamic shape | 匿名 `?` 维度 | 构造含 `?` 维度的 `kernel.matmul`。 | 运行 `apply_op` 改写该 operand。 | `dma.alloc.dynamic_shape` 使用 `symbol.get_dim` 结果，result shape 保持 `?`。 | `test_dma_memory_hierarchy_apply_op_accepts_anonymous_dynamic_shape` |
 | TC-DMH-009 | 错误语义 | 非法 apply_op | 使用非法 op、非法 arity、非法 space、非字符串元素。 | 构造 `LowerDmaMemoryHierarchyPass(apply_op=...)`。 | 稳定抛出 `KernelCodeError`。 | `test_dma_memory_hierarchy_rejects_invalid_apply_op_rules` |

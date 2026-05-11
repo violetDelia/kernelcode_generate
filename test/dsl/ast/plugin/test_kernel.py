@@ -23,9 +23,11 @@ from kernel_gen.dsl.ast import FunctionAST, parse_function
 from kernel_gen.dsl.ast.nodes import (
     KernelAddAST,
     KernelBinaryElewiseAST,
+    KernelExpAST,
     KernelImg2Col1dAST,
     KernelImg2Col2dAST,
     KernelMatmulAST,
+    KernelReduceAST,
 )
 from kernel_gen.dsl.ast.plugin import lookup_builtin
 from kernel_gen.operation import kernel
@@ -44,6 +46,14 @@ def _kernel_binary_stmt(out: Memory, lhs: Memory, rhs: Memory) -> None:
 
 def _kernel_matmul_return_stmt(out: Memory, lhs: Memory, rhs: Memory) -> None:
     return kernel.matmul(out, lhs, rhs)
+
+
+def _kernel_exp_stmt(out: Memory, input_value: Memory) -> None:
+    kernel.exp(out, input_value)
+
+
+def _kernel_reduce_stmt(out: Memory, input_value: Memory) -> None:
+    kernel.reduce(out, input_value, kind=kernel.KernelReduceKind.SUM, axis=1, keepdim=True)
 
 
 def _kernel_img2col2d_stmt(out: Memory, input_value: Memory, kh: SymbolDim, kw: SymbolDim) -> None:
@@ -66,6 +76,10 @@ def _bad_kernel_binary_kind_string(out: Memory, lhs: Memory, rhs: Memory) -> Non
     kernel.binary_elewise(out, lhs, rhs, kind="add")
 
 
+def _bad_kernel_reduce_kind_string(out: Memory, input_value: Memory) -> None:
+    kernel.reduce(out, input_value, kind="sum", axis=1)
+
+
 def _matmul_memories() -> tuple[Memory, Memory, Memory]:
     """构造公开 matmul Memory 入参。"""
 
@@ -86,6 +100,8 @@ def _matmul_memories() -> tuple[Memory, Memory, Memory]:
 def test_kernel_plugin_registers_public_helpers() -> None:
     assert lookup_builtin(kernel.add).ast_node is KernelAddAST
     assert lookup_builtin(kernel.binary_elewise).ast_node is KernelBinaryElewiseAST
+    assert lookup_builtin(kernel.exp).ast_node is KernelExpAST
+    assert lookup_builtin(kernel.reduce).ast_node is KernelReduceAST
     assert lookup_builtin(kernel.matmul).ast_node is KernelMatmulAST
     assert lookup_builtin(kernel.img2col1d).ast_node is KernelImg2Col1dAST
     assert lookup_builtin(kernel.img2col2d).ast_node is KernelImg2Col2dAST
@@ -103,11 +119,15 @@ def test_kernel_plugin_parse_function_builds_statement_nodes() -> None:
 
     add_ast = parse_function(_kernel_add_stmt, out, out, out)
     binary_ast = parse_function(_kernel_binary_stmt, out, out, out)
+    exp_ast = parse_function(_kernel_exp_stmt, out, out)
+    reduce_ast = parse_function(_kernel_reduce_stmt, Memory([2, 1], NumericType.Float32), Memory([2, 4], NumericType.Float32))
     matmul_ast = parse_function(_kernel_matmul_return_stmt, out, lhs, rhs)
 
     assert isinstance(add_ast, FunctionAST)
     assert isinstance(add_ast.body.statements[0], KernelAddAST)
     assert isinstance(binary_ast.body.statements[0], KernelBinaryElewiseAST)
+    assert isinstance(exp_ast.body.statements[0], KernelExpAST)
+    assert isinstance(reduce_ast.body.statements[0], KernelReduceAST)
     assert isinstance(matmul_ast.body.statements[0], KernelMatmulAST)
     assert matmul_ast.returns_none.value is True
 
@@ -141,6 +161,12 @@ def test_kernel_plugin_rejects_non_api_call_shapes() -> None:
         parse_function(_bad_kernel_add_kwargs, out, lhs, rhs)
     with pytest.raises(KernelCodeError, match="KernelBinaryElewiseKind"):
         parse_function(_bad_kernel_binary_kind_string, out, lhs, rhs)
+    with pytest.raises(KernelCodeError, match="KernelReduceKind"):
+        parse_function(
+            _bad_kernel_reduce_kind_string,
+            Memory([2], NumericType.Float32),
+            Memory([2, 4], NumericType.Float32),
+        )
 
 
 # TC-AST-PLUGIN-KERNEL-005

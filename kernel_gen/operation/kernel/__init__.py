@@ -19,6 +19,9 @@ API 列表:
 - `le(out: Memory, lhs: Memory, rhs: Memory) -> None`
 - `gt(out: Memory, lhs: Memory, rhs: Memory) -> None`
 - `ge(out: Memory, lhs: Memory, rhs: Memory) -> None`
+- `exp(out: Memory, input_value: Memory) -> None`
+- `class KernelReduceKind(Enum)`
+- `reduce(out: Memory, input_value: Memory, *, kind: KernelReduceKind, axis: int, keepdim: bool = False) -> None`
 - `matmul(out: Memory, lhs: Memory, rhs: Memory) -> None`
 - `img2col1d(out: Memory, input_value: Memory, k: int | SymbolDim, s: int | SymbolDim = 1, d: int | SymbolDim = 1, p_left: int | SymbolDim = 0, p_right: int | SymbolDim = 0) -> None`
 - `img2col2d(out: Memory, input_value: Memory, kh: int | SymbolDim, kw: int | SymbolDim, sh: int | SymbolDim = 1, sw: int | SymbolDim = 1, dh: int | SymbolDim = 1, dw: int | SymbolDim = 1, ph: int | SymbolDim = 0, pw: int | SymbolDim = 0, pl: int | SymbolDim = 0, pr: int | SymbolDim = 0) -> None`
@@ -30,8 +33,12 @@ API 列表:
 关联文件:
 - spec: spec/operation/kernel.md
 - test: test/operation/kernel/test_elementwise.py
+- test: test/operation/kernel/test_activation.py
+- test: test/operation/kernel/test_reduction.py
 - test: test/operation/kernel/test_structured.py
 - 功能实现: kernel_gen/operation/kernel/elementwise.py
+- 功能实现: kernel_gen/operation/kernel/activation.py
+- 功能实现: kernel_gen/operation/kernel/reduction.py
 - 功能实现: kernel_gen/operation/kernel/structured.py
 """
 
@@ -52,6 +59,8 @@ from .elementwise import (
     sub,
     truediv,
 )
+from .activation import exp
+from .reduction import KernelReduceKind, reduce
 from .structured import img2col1d, img2col2d, matmul
 
 __all__ = [
@@ -68,6 +77,9 @@ __all__ = [
     "le",
     "gt",
     "ge",
+    "exp",
+    "KernelReduceKind",
+    "reduce",
     "matmul",
     "img2col1d",
     "img2col2d",

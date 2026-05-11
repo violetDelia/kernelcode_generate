@@ -15,14 +15,14 @@ API 列表:
 - `SymbolEqAST`, `SymbolNeAST`, `SymbolLtAST`, `SymbolLeAST`, `SymbolGtAST`, `SymbolGeAST`
 - `SymbolToFloatAST`, `TensorAxisAccessAST`
 - `DmaAllocAST`, `DmaCopyAST`, `DmaCastAST`, `DmaViewAST`, `DmaReshapeAST`, `DmaFlattenAST`, `DmaFreeAST`
-- `DmaFillAST`, `DmaLoadAST`, `DmaSliceAST`, `DmaStoreAST`, `DmaDesliceAST`
+- `DmaBroadcastAST`, `DmaFillAST`, `DmaLoadAST`, `DmaSliceAST`, `DmaStoreAST`, `DmaDesliceAST`
 - `NnImg2Col1dAST`, `NnImg2Col2dAST`
 - `NnBroadcastAST`, `NnBroadcastToAST`, `NnTransposeAST`, `NnReluAST`, `NnSigmoidAST`, `NnTanhAST`, `NnLeakyReluAST`, `NnHardSigmoidAST`, `NnExpAST`
 - `NnReduceAST`, `NnReduceSumAST`, `NnReduceMinAST`, `NnReduceMaxAST`, `NnSoftmaxAST`, `MatmulAST`, `FCAST`, `ConvAST`
 - `NnAddAST`, `NnSubAST`, `NnMulAST`, `NnTrueDivAST`, `NnFloorDivAST`, `NnEqAST`, `NnNeAST`, `NnLtAST`, `NnLeAST`, `NnGtAST`, `NnGeAST`
 - `ArchQueryAST`, `ArchGetBlockIdAST`, `ArchGetBlockNumAST`, `ArchGetSubthreadIdAST`, `ArchGetSubthreadNumAST`, `ArchGetThreadIdAST`, `ArchGetThreadNumAST`, `ArchGetDynamicMemoryAST`, `ArchBarrierAST`, `ArchLaunchKernelAST`
 - `KernelBinaryElewiseAST`, `KernelAddAST`, `KernelSubAST`, `KernelMulAST`, `KernelDivAST`, `KernelTrueDivAST`, `KernelEqAST`, `KernelNeAST`, `KernelLtAST`, `KernelLeAST`, `KernelGtAST`, `KernelGeAST`
-- `KernelMatmulAST`, `KernelImg2Col1dAST`, `KernelImg2Col2dAST`
+- `KernelExpAST`, `KernelReduceAST`, `KernelMatmulAST`, `KernelImg2Col1dAST`, `KernelImg2Col2dAST`
 
 使用示例:
 - from kernel_gen.dsl.ast.nodes import FunctionAST, DmaAllocAST
@@ -95,6 +95,7 @@ __all__ = [
     "DmaReshapeAST",
     "DmaFlattenAST",
     "DmaFreeAST",
+    "DmaBroadcastAST",
     "DmaFillAST",
     "DmaLoadAST",
     "DmaSliceAST",
@@ -152,6 +153,8 @@ __all__ = [
     "KernelLeAST",
     "KernelGtAST",
     "KernelGeAST",
+    "KernelExpAST",
+    "KernelReduceAST",
     "KernelMatmulAST",
     "KernelImg2Col1dAST",
     "KernelImg2Col2dAST",

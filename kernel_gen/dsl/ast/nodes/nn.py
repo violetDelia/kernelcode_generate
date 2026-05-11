@@ -3,8 +3,8 @@
 
 功能说明:
 - 定义 NN helper 对应的 AST 节点，节点只保存 DSL 语义数据，不执行 lowering。
-- Matmul 仅在 contracting 维度可证明为同一结构化符号表达时保持动态兼容判断。
-- Matmul/transpose 结果类型继承已发射 operand 的公开符号表达。
+- Matmul 在 contracting 维度可证明相等或双侧均为匿名 `?` 时保持动态兼容判断。
+- Matmul/transpose 结果类型继承已发射 operand 的公开符号表达，但不得把 `?` operand 重新命名。
 - ConvAST 在 img2col/reshape/matmul 链路中使用公开符号计算表达承接动态维度。
 
 API 列表:
@@ -240,8 +240,7 @@ def _shape_value_from_symbol_operand(value: SSAValue, axis: int) -> int | str:
 
     功能说明:
     - `!symbol.int<#symbol.expr<expr>>` 优先使用公开类型表达。
-    - 匿名 `?` 维度使用 SSA `name_hint` 承接 DSL 变量名。
-    - 仍缺少名称时保持 `?`，等待上层显式符号表达收口。
+    - 匿名 `?` 维度保持 `?`，不得使用 SSA `name_hint` 伪造稳定变量名。
 
     使用示例:
     - dim = _shape_value_from_symbol_operand(shape_operand, axis=0)
@@ -260,8 +259,6 @@ def _shape_value_from_symbol_operand(value: SSAValue, axis: int) -> int | str:
         value_text = str(public_value).replace(" ", "")
         if value_text and value_text != "?":
             return value_text
-    if value.name_hint:
-        return value.name_hint.replace(" ", "")
     return "?"
 
 
@@ -270,7 +267,7 @@ def _symbol_operand_public_value(value: SSAValue) -> int | str:
 
     功能说明:
     - 优先使用 `!symbol.int<#symbol.expr<expr>>` 的结构化表达。
-    - 当表达为匿名 `?` 时使用 `name_hint` 承接 DSL 绑定名，避免结果 type 退化为匿名维度。
+    - 当表达为匿名 `?` 时继续返回 `?`，不得使用 `name_hint` 伪造稳定维度。
 
     使用示例:
     - value = _symbol_operand_public_value(symbol_ssa)
@@ -289,8 +286,6 @@ def _symbol_operand_public_value(value: SSAValue) -> int | str:
     text = str(public_value).replace(" ", "")
     if text and text != "?":
         return text
-    if value.name_hint:
-        return value.name_hint.replace(" ", "")
     return "?"
 
 
@@ -371,7 +366,7 @@ def _source_shape_values_for_transpose(source: SSAValue) -> list[int | str]:
     """读取 transpose source 的类型级 shape 语义。
 
     功能说明:
-    - `dma.reshape` source 优先从公开 shape operands 读取调用点变量名。
+    - `dma.reshape` source 优先从 shape operands 的公开类型读取维度。
     - 其它 source 使用 `NnMemoryType.shape` 的公开 `SymbolExprAttr` 文本。
     - 匿名 `?` 维度保持 `?`，不生成类型级占位符。
 
@@ -420,7 +415,7 @@ def _matmul_contract_dims_match(lhs_dim: Attribute, rhs_dim: Attribute) -> bool:
 
     功能说明:
     - 静态、命名符号与结构化符号表达都必须完全一致。
-    - 匿名 `?` 不能证明相等，避免放行不确定 contracting 维度。
+    - 两侧都是匿名 `?` 时按 unknown contracting 维度承接，单侧 `?` 仍拒绝。
 
     使用示例:
     - ok = _matmul_contract_dims_match(lhs_dim, rhs_dim)
@@ -434,7 +429,7 @@ def _matmul_contract_dims_match(lhs_dim: Attribute, rhs_dim: Attribute) -> bool:
     lhs_unknown = isinstance(lhs_dim, SymbolExprAttr) and _symbol_expr_text(lhs_dim) == "?"
     rhs_unknown = isinstance(rhs_dim, SymbolExprAttr) and _symbol_expr_text(rhs_dim) == "?"
     if lhs_unknown or rhs_unknown:
-        return False
+        return lhs_unknown and rhs_unknown
     return lhs_dim == rhs_dim
 
 

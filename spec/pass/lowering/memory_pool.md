@@ -104,7 +104,8 @@
   - 多 alloc 线性切分，不因生命周期不重叠而复用 offset。
   - `symbol.for` 内 alloc 的 `dma.view + dma.reshape` 留在 loop body；`scf.for` 内 loop-invariant alloc 的 backing memory 仍在函数入口。
   - `dma.alloc` result `nn.memory` 的 shape/stride 条目只接受已通过 `nn.memory` verifier 的 `SymbolExprAttr`；旧 bare `IntAttr` / `StringAttr` 维度不属于本 pass 输入合同，由 `nn.memory` verifier 在进入 pass 前拒绝。
-  - full-rank `dma.alloc.dynamic_shape` operand 可携带 `!symbol.int<"?">` 类型；rewrite 必须用 alloc result `nn.memory` shape 的 `SymbolExprAttr` 表达作为该维度语义，不得把 `?` 当作匿名 memory layout 维度继续传播。
+  - full-rank `dma.alloc.dynamic_shape` operand 可携带 `!symbol.int<"?">` 类型；rewrite 必须在 `dma.view + dma.reshape` metadata 中继续保留 `?`，不得把 `?` 反推为局部变量名或后续 reshape 的公开名字。
+  - 若 `dma.alloc` result shape 合法保留匿名 `?`，且该 alloc 结果随后通过 `dma.reshape` 细化为同 dtype/space/rank 的公开 shape，memory-pool 只能替换 alloc source，不得用后续 reshape result type 回写或推导 alloc/view/内部 rewrite reshape 的 shape 名称。
   - 非 contiguous/custom stride 报 `MemoryPoolUnsupportedLayout: non-contiguous/custom stride is not supported`，错误类型为 `UNIMPLEMENTED`。
   - 多 block 或无法归属的 control-flow 报 `MemoryPoolUnsupportedControlFlow` 或 `MemoryPoolUnsupportedRegionEscape`，不得静默跳过非法 alloc。
 
@@ -208,7 +209,8 @@
 | TC-MP-005 | rewrite | 不同 size 线性切分 | 同 space 不同 shape | 运行 rewrite | view offset/shape 按出现顺序相邻 | `test_memory_pool_rewrite_size_mismatch` |
 | TC-MP-006 | rewrite | 生命周期重叠 | 同 space alloc 重叠 | 运行 rewrite | 不复用 offset，线性切分 | `test_memory_pool_rewrite_overlap` |
 | TC-MP-007 | dtype/shape | dtype 矩阵与符号 shape | 内置 dtype、非法 dtype、动态 shape | 运行 summary/rewrite | byte size 与符号表达稳定，非法 dtype 失败；动态 shape rewrite 保持结构化 `SymbolExprAttr` layout | `test_memory_pool_dtype_and_symbolic_shape_matrix` |
-| TC-MP-007A | dtype/shape | full-rank unknown dynamic_shape | alloc result shape 为 `SymbolExprAttr`，dynamic_shape operand 为 `!symbol.int<"?">` | 运行 `MemoryPoolPass(rewrite=True, alignment=0)` | rewrite 使用 result shape 语义生成 `dma.view + dma.reshape`，不传播匿名 `?` layout | `test_memory_pool_rewrite_binds_unknown_full_rank_dynamic_shape_to_result_layout` |
+| TC-MP-007A | dtype/shape | full-rank unknown dynamic_shape | alloc result shape 为 `[?, ?]`，dynamic_shape operand 为 `!symbol.int<"?">` | 运行 `MemoryPoolPass(rewrite=True, alignment=0)` | rewrite 生成 `dma.view + dma.reshape`，shape metadata 继续保留匿名 `?` | `test_memory_pool_rewrite_preserves_unknown_full_rank_dynamic_shape` |
+| TC-MP-007C | dtype/shape | anonymous alloc with public reshape layout | alloc result shape 为 `[?, ?]`，后续 reshape result shape 为 `[M, N]` | 运行 `MemoryPoolPass(rewrite=True, alignment=0)` | rewrite 不从后续 reshape 反推 alloc/view shape 名称；用户 reshape 保持自己的公开 shape | `test_memory_pool_rewrite_does_not_infer_following_reshape_layout` |
 | TC-MP-008 | 边界 | 非 contiguous/custom stride | 非连续 stride memory | 运行 `apply(...)` | `UNIMPLEMENTED` + `MemoryPoolUnsupportedLayout` | `test_memory_pool_public_invalid_shape_stride_and_free_edges` |
 | TC-MP-009 | 边界 | 缺 free | 单 alloc 无 free | 运行 analysis-only | interval end 为 block/region 结束 | `test_memory_pool_unpaired_alloc` |
 | TC-MP-010 | loop | `symbol.for` alloc | loop 内 alloc/free | 运行 rewrite | backing 在函数入口，view/reshape 留在 loop body | `test_memory_pool_symbol_for_reuse` |

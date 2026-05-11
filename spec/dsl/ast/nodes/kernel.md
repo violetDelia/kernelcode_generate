@@ -18,6 +18,8 @@
 - `class KernelLeAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `class KernelGtAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `class KernelGeAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `class KernelExpAST(out: ValueAST, input_value: ValueAST, location: SourceLocation | None = None)`
+- `class KernelReduceAST(out: ValueAST, input_value: ValueAST, kind: KernelReduceKind, axis: int, keepdim: bool = False, location: SourceLocation | None = None)`
 - `class KernelMatmulAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `class KernelImg2Col1dAST(out: ValueAST, input_value: ValueAST, k: ValueAST, s: ValueAST | None = None, d: ValueAST | None = None, p_left: ValueAST | None = None, p_right: ValueAST | None = None, location: SourceLocation | None = None)`
 - `class KernelImg2Col2dAST(out: ValueAST, input_value: ValueAST, kh: ValueAST, kw: ValueAST, sh: ValueAST | None = None, sw: ValueAST | None = None, dh: ValueAST | None = None, dw: ValueAST | None = None, ph: ValueAST | None = None, pw: ValueAST | None = None, pl: ValueAST | None = None, pr: ValueAST | None = None, location: SourceLocation | None = None)`
@@ -71,6 +73,39 @@
   ```
 - 功能说明：将便捷 helper lower 到 `kernel.binary_elewise`。
 - 注意事项：不得生成 `kernel.add`、`kernel.sub` 等不存在的 dialect op；比较节点仍要求输出 memory dtype 为 Bool。
+
+### `class KernelExpAST(out: ValueAST, input_value: ValueAST, location: SourceLocation | None = None)`
+
+- 参数：
+  - `out`：写回目标 memory 节点；必须 lower 为 `!nn.memory`。
+  - `input_value`：输入 memory 节点；必须 lower 为 `!nn.memory`。
+  - `location`：可选源码位置。
+- 返回值：`KernelExpAST`；`emit_mlir(...)` 返回无结果 `KernelExpOp`。
+- 使用示例：
+
+  ```python
+  node = KernelExpAST(out, input_value)
+  ```
+- 功能说明：发射 out-first `kernel.exp(input, out)` dialect op。
+- 注意事项：必须复用 `kernel_gen.operation.kernel.exp(...)` 的公开校验；不在 AST 层放宽 dtype、space、shape 或 stride 规则。
+
+### `class KernelReduceAST(out: ValueAST, input_value: ValueAST, kind: KernelReduceKind, axis: int, keepdim: bool = False, location: SourceLocation | None = None)`
+
+- 参数：
+  - `out`：写回目标 memory 节点；必须 lower 为 `!nn.memory`。
+  - `input_value`：输入 memory 节点；必须 lower 为 `!nn.memory`。
+  - `kind`：`KernelReduceKind` 枚举成员；不接受字符串。
+  - `axis`：归约轴；类型 `int`；不接受 `bool`。
+  - `keepdim`：是否保留归约轴；类型 `bool`。
+  - `location`：可选源码位置。
+- 返回值：`KernelReduceAST`；`emit_mlir(...)` 返回无结果 `KernelReduceOp`。
+- 使用示例：
+
+  ```python
+  node = KernelReduceAST(out, input_value, KernelReduceKind.SUM, axis=1, keepdim=False)
+  ```
+- 功能说明：发射 out-first `kernel.reduce(out, input)` dialect op，并写入 `kind/axis/keepdim/space` attrs。
+- 注意事项：必须复用 `kernel_gen.operation.kernel.reduce(...)` 的公开校验；`kind` 在 operation/AST 层是枚举，发射到 dialect 时才转换为稳定字符串。
 
 ### `class KernelMatmulAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 
@@ -130,6 +165,7 @@
 - 验证 out-first kernel AST 节点能发射当前公开 kernel dialect op。
 - 验证便捷 elementwise AST 节点统一 lower 为 `kernel.binary_elewise`，不产生不存在的 `kernel.add/sub/...` dialect op。
 - 验证 `KernelBinaryElewiseAST` 拒绝字符串 kind，只接受 `KernelBinaryElewiseKind`。
+- 验证 `KernelExpAST` 与 `KernelReduceAST` 复用 operation kernel 公开校验并发射对应 dialect op。
 - 验证 matmul 与 img2col AST 节点复用 operation kernel 公开校验，不绕开 shape、dtype、rank 和窗口参数边界。
 
 ### 功能与用例清单
@@ -138,5 +174,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-DSL-AST-NODES-KERNEL-001 | pass 改写 | add helper lower | 构造公开 `KernelAddAST`。 | 发射 MLIR。 | 返回 `KernelBinaryElewiseOp(kind="add")`。 | `test_kernel_add_node_emits_binary_elewise_op` |
 | TC-DSL-AST-NODES-KERNEL-002 | 边界/异常 | string kind rejected | 构造 `KernelBinaryElewiseAST(..., "add")`。 | 初始化节点。 | 抛 `KernelCodeError`。 | `test_kernel_binary_elewise_node_rejects_string_kind` |
+| TC-DSL-AST-NODES-KERNEL-005 | pass 改写 | exp lower | 构造公开 `KernelExpAST`。 | 发射 MLIR。 | 返回 `KernelExpOp`。 | `test_kernel_exp_node_emits_exp_op` |
+| TC-DSL-AST-NODES-KERNEL-006 | pass 改写 | reduce lower | 构造公开 `KernelReduceAST`。 | 发射 MLIR。 | 返回 `KernelReduceOp(kind=...)`。 | `test_kernel_reduce_node_emits_reduce_op` |
 | TC-DSL-AST-NODES-KERNEL-003 | pass 改写 | matmul lower | 构造 mixed-space rank-2 memory。 | 发射 MLIR。 | 返回无结果 `KernelMatmulOp`。 | `test_kernel_matmul_node_emits_matmul_op` |
 | TC-DSL-AST-NODES-KERNEL-004 | pass 改写 | img2col2d lower | 构造公开 img2col2d memory 与参数。 | 发射 MLIR。 | 返回 `KernelImg2col2dOp`。 | `test_kernel_img2col2d_node_emits_img2col2d_op` |

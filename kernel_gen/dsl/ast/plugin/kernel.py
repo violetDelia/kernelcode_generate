@@ -21,12 +21,15 @@ from __future__ import annotations
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dsl.ast.nodes import (
+    BoolValueAST,
+    ConstValueAST,
     DSLNode,
     Diagnostic,
     KernelAddAST,
     KernelBinaryElewiseAST,
     KernelDivAST,
     KernelEqAST,
+    KernelExpAST,
     KernelGeAST,
     KernelGtAST,
     KernelImg2Col1dAST,
@@ -36,13 +39,14 @@ from kernel_gen.dsl.ast.nodes import (
     KernelMatmulAST,
     KernelMulAST,
     KernelNeAST,
+    KernelReduceAST,
     PythonObjectAttrAST,
     KernelSubAST,
     KernelTrueDivAST,
 )
 from kernel_gen.dsl.ast.plugin.registry import BuiltinCall, dsl_builtin
 from kernel_gen.operation import kernel
-from kernel_gen.operation.kernel import KernelBinaryElewiseKind
+from kernel_gen.operation.kernel import KernelBinaryElewiseKind, KernelReduceKind
 
 
 def _unwrap_kind(value: PythonObjectAttrAST | KernelBinaryElewiseKind) -> KernelBinaryElewiseKind:
@@ -61,6 +65,68 @@ def _unwrap_kind(value: PythonObjectAttrAST | KernelBinaryElewiseKind) -> Kernel
     if isinstance(value, KernelBinaryElewiseKind):
         return value
     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, "kernel.binary_elewise kind must be KernelBinaryElewiseKind")
+
+
+def _unwrap_reduce_kind(value: PythonObjectAttrAST | KernelReduceKind) -> KernelReduceKind:
+    """读取公开 kernel reduce kind 枚举。
+
+    功能说明:
+    - 支持 parser 传入的 `PythonObjectAttrAST` 和直接 enum 值。
+    - 字符串 kind 不是公开 API，保持拒绝。
+
+    使用示例:
+    - kind = _unwrap_reduce_kind(PythonObjectAttrAST(KernelReduceKind.SUM))
+    """
+
+    if isinstance(value, PythonObjectAttrAST):
+        value = value.attr
+    if isinstance(value, KernelReduceKind):
+        return value
+    raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, "kernel.reduce kind must be KernelReduceKind")
+
+
+def _unwrap_int_attr(value: DSLNode, message: str) -> int:
+    """读取 int 常量参数。
+
+    功能说明:
+    - 支持 parser 传入的 `ConstValueAST` 或 `PythonObjectAttrAST`。
+    - bool 不属于合法 int 参数。
+
+    使用示例:
+    - axis = _unwrap_int_attr(node.kwargs["axis"], "kernel.reduce axis must be int")
+    """
+
+    if isinstance(value, PythonObjectAttrAST):
+        raw_value = value.attr
+    elif isinstance(value, (BoolValueAST, ConstValueAST)):
+        raw_value = value.raw_value
+    else:
+        raw_value = value
+    if isinstance(raw_value, bool) or not isinstance(raw_value, int):
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, message)
+    return raw_value
+
+
+def _unwrap_bool_attr(value: DSLNode, message: str) -> bool:
+    """读取 bool 常量参数。
+
+    功能说明:
+    - 支持 parser 传入的 `ConstValueAST` 或 `PythonObjectAttrAST`。
+    - int 不属于合法 bool 参数。
+
+    使用示例:
+    - keepdim = _unwrap_bool_attr(node.kwargs["keepdim"], "kernel.reduce keepdim must be bool")
+    """
+
+    if isinstance(value, PythonObjectAttrAST):
+        raw_value = value.attr
+    elif isinstance(value, (BoolValueAST, ConstValueAST)):
+        raw_value = value.raw_value
+    else:
+        raw_value = value
+    if not isinstance(raw_value, bool):
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, message)
+    return raw_value
 
 
 def _ensure_arg_count(node: BuiltinCall, expected: int, message: str) -> None:
@@ -248,6 +314,43 @@ def _build_ge(node: BuiltinCall) -> KernelGeAST:
 
     _ensure_binary_call(node, "Unsupported kernel.ge arity")
     return KernelGeAST(node.args[0], node.args[1], node.args[2], location=node.location)
+
+
+@dsl_builtin(kernel.exp, KernelExpAST)
+def _build_exp(node: BuiltinCall) -> KernelExpAST:
+    """功能说明: 构造 kernel.exp AST；使用示例: registry 调用该 builder。"""
+
+    _ensure_arg_count(node, 2, "Unsupported kernel.exp arity")
+    if node.kwargs:
+        diagnostic = Diagnostic("Unsupported kernel.exp kwargs", node.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
+    return KernelExpAST(node.args[0], node.args[1], location=node.location)
+
+
+@dsl_builtin(kernel.reduce, KernelReduceAST)
+def _build_reduce(node: BuiltinCall) -> KernelReduceAST:
+    """功能说明: 构造 kernel.reduce AST；使用示例: registry 调用该 builder。"""
+
+    _ensure_arg_count(node, 2, "Unsupported kernel.reduce arity")
+    allowed_kwargs = {"kind", "axis", "keepdim"}
+    unexpected_kwargs = set(node.kwargs) - allowed_kwargs
+    if unexpected_kwargs:
+        kwargs_text = ", ".join(sorted(unexpected_kwargs))
+        diagnostic = Diagnostic(f"Unsupported kernel.reduce kwargs: {kwargs_text}", node.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
+    if "kind" not in node.kwargs or "axis" not in node.kwargs:
+        diagnostic = Diagnostic("kernel.reduce kind and axis are required", node.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
+    keepdim_node = node.kwargs.get("keepdim")
+    keepdim = False if keepdim_node is None else _unwrap_bool_attr(keepdim_node, "kernel.reduce keepdim must be bool")
+    return KernelReduceAST(
+        node.args[0],
+        node.args[1],
+        _unwrap_reduce_kind(node.kwargs["kind"]),
+        axis=_unwrap_int_attr(node.kwargs["axis"], "kernel.reduce axis must be int"),
+        keepdim=keepdim,
+        location=node.location,
+    )
 
 
 @dsl_builtin(kernel.matmul, KernelMatmulAST)

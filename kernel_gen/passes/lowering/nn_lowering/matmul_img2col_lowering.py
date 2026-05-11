@@ -4,7 +4,7 @@
 功能说明:
 - 将 nn.matmul / nn.img2col1d / nn.img2col2d lower 为对应 kernel op。
 - 统一在 lowering 内部创建 dma.alloc 结果 memory。
-- 仅允许可证明相等的静态维度、命名符号或结构化符号表达式在 matmul contracting 轴上互相匹配。
+- 仅允许可证明相等的静态维度、命名符号、结构化符号表达式或双侧匿名 `?` 在 matmul contracting 轴上互相匹配。
 - img2col 结果使用 `SymbolExprAttr` 表达动态 shape，不生成类型级 runtime 维度占位。
 - surviving 模块级接口为 `matmul_img2col_patterns()`。
 
@@ -213,7 +213,7 @@ def _matmul_contract_dims_match(lhs_dim: int | str, rhs_dim: int | str) -> bool:
 
     功能说明:
     - 静态维度、命名符号与结构化符号表达式都要求精确相等。
-    - 匿名 `?` 不能证明相等，避免 lowering 放行 verifier 无法证明的 contracting 维度。
+    - 两侧都是匿名 `?` 时按 unknown contracting 维度承接；单侧 `?` 仍拒绝。
 
     使用示例:
     - if not _matmul_contract_dims_match(lhs_shape[1], rhs_shape[0]):
@@ -226,7 +226,7 @@ def _matmul_contract_dims_match(lhs_dim: int | str, rhs_dim: int | str) -> bool:
     """
 
     if lhs_dim == "?" or rhs_dim == "?":
-        return False
+        return lhs_dim == "?" and rhs_dim == "?"
     return lhs_dim == rhs_dim
 
 
@@ -266,7 +266,7 @@ def _ensure_matmul_shape(
     功能说明:
     - 确认 lhs/rhs/out 均为 rank-2。
     - 校验 `[M, K] x [K, N] -> [M, N]` 规则。
-    - contracting 轴仅允许双侧维度文本完全一致；匿名 `?` 不可证明相等。
+    - contracting 轴允许双侧维度文本完全一致，或双侧均为匿名 `?`。
 
     使用示例:
     - _ensure_matmul_shape(lhs_type, rhs_type, out_type)
@@ -395,7 +395,7 @@ def _symbol_expr(value: SSAValue) -> str:
 
     功能说明:
     - 将 `!symbol.int<"...">` 的表达式文本提取为字符串。
-    - 匿名 `?` 优先使用 SSA `name_hint` 承接 DSL 绑定名。
+    - 匿名 `?` 保持 unknown，不使用 SSA `name_hint` 伪造稳定维名。
     - 非 `symbol.int` 时抛出 `KernelCodeError`。
 
     使用示例:
@@ -410,10 +410,6 @@ def _symbol_expr(value: SSAValue) -> str:
     if not isinstance(value.type, SymbolValueType):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "symbol expression must be symbol.int")
     text = value.type.expr.expr.data
-    if text == "?":
-        name_hint = getattr(value, "name_hint", None)
-        if isinstance(name_hint, str) and name_hint:
-            return name_hint.replace(" ", "")
     return text
 
 

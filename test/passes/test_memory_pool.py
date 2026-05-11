@@ -658,15 +658,15 @@ def test_memory_pool_dtype_and_symbolic_shape_matrix() -> None:
 
 
 # TC-MP-007A
-# 功能说明: 验证 full-rank `?` dynamic_shape 按 result layout 的 SymbolExprAttr 语义参与 rewrite。
-# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_rewrite_binds_unknown_full_rank_dynamic_shape_to_result_layout
+# 功能说明: 验证 full-rank `?` dynamic_shape 在 rewrite 后仍保留匿名维度。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_rewrite_preserves_unknown_full_rank_dynamic_shape
 # 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/passes/test_memory_pool.py
-def test_memory_pool_rewrite_binds_unknown_full_rank_dynamic_shape_to_result_layout() -> None:
+def test_memory_pool_rewrite_preserves_unknown_full_rank_dynamic_shape() -> None:
     dynamic_type = NnMemoryType(
-        ArrayAttr([_symbol_expr_attr("M"), _symbol_expr_attr("N")]),
-        ArrayAttr([_symbol_expr_attr("N"), _symbol_expr_attr("1")]),
+        ArrayAttr([_symbol_expr_attr("?"), _symbol_expr_attr("?")]),
+        ArrayAttr([_symbol_expr_attr("?"), _symbol_expr_attr("1")]),
         f32,
         _make_space("shared"),
     )
@@ -682,18 +682,64 @@ def test_memory_pool_rewrite_binds_unknown_full_rank_dynamic_shape_to_result_lay
     view_ops = [op for op in ops if isinstance(op, DmaViewOp)]
     reshape_ops = [op for op in ops if isinstance(op, DmaReshapeOp)]
 
-    assert [op.shape[0].type.get_value() for op in view_ops] == ["M*N"]
-    assert [[value.type.get_value() for value in op.shape] for op in reshape_ops] == [["M", "N"]]
+    assert [op.shape[0].type.get_value() for op in view_ops] == ["?"]
+    assert [[value.type.get_value() for value in op.shape] for op in reshape_ops] == [["?", "?"]]
+    assert [[dim.expr.data for dim in op.result.type.shape.data] for op in reshape_ops] == [["?", "?"]]
+    assert not any(isinstance(op, DmaAllocOp) for op in ops)
+
+
+# TC-MP-007C
+# 功能说明: 验证 alloc result 为匿名 `?` 时不会从后续 reshape 反推公开 shape。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_rewrite_does_not_infer_following_reshape_layout
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_rewrite_does_not_infer_following_reshape_layout() -> None:
+    anonymous_type = NnMemoryType(
+        ArrayAttr([_symbol_expr_attr("?"), _symbol_expr_attr("?")]),
+        ArrayAttr([_symbol_expr_attr("?"), _symbol_expr_attr("1")]),
+        f32,
+        _make_space("shared"),
+    )
+    named_type = NnMemoryType(
+        ArrayAttr([_symbol_expr_attr("M"), _symbol_expr_attr("N")]),
+        ArrayAttr([_symbol_expr_attr("N"), _symbol_expr_attr("1")]),
+        f32,
+        _make_space("shared"),
+    )
+    m_value = _TestOp(result_types=[SymbolValueType.from_expr("?")])
+    n_value = _TestOp(result_types=[SymbolValueType.from_expr("?")])
+    named_m_value = _TestOp(result_types=[SymbolValueType.from_expr("M")])
+    named_n_value = _TestOp(result_types=[SymbolValueType.from_expr("N")])
+    alloc = DmaAllocOp([m_value.results[0], n_value.results[0]], anonymous_type)
+    user_reshape = DmaReshapeOp(alloc.result, [named_m_value.results[0], named_n_value.results[0]], named_type)
+    module = _build_module(
+        "anonymous_alloc_public_reshape",
+        [m_value, n_value, named_m_value, named_n_value, alloc, user_reshape],
+    )
+
+    MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), module)
+
+    ops = _collect_ops_recursive(module.body.block)
+    view_ops = [op for op in ops if isinstance(op, DmaViewOp)]
+    reshape_ops = [op for op in ops if isinstance(op, DmaReshapeOp)]
+
+    assert [op.shape[0].type.get_value() for op in view_ops] == ["?"]
+    assert any([value.type.get_value() for value in op.shape] == ["M", "N"] for op in reshape_ops)
+    assert any([value.type.get_value() for value in op.shape] == ["?", "?"] for op in reshape_ops)
+    assert isinstance(user_reshape.source.owner, DmaReshapeOp)
+    assert user_reshape.source.type == anonymous_type
+    assert user_reshape.result.type == named_type
     assert not any(isinstance(op, DmaAllocOp) for op in ops)
 
 
 # TC-MP-007B
-# 功能说明: 验证同一 block 内后续 full-rank `?` dynamic_shape 在自身 alloc 前定义时按自身 anchor 物化。
-# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_rewrite_later_unknown_dynamic_shape_uses_own_anchor
+# 功能说明: 验证同一 block 内后续 dynamic_shape 在自身 alloc 前定义时按自身 anchor 物化。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_rewrite_later_dynamic_shape_uses_own_anchor
 # 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/passes/test_memory_pool.py
-def test_memory_pool_rewrite_later_unknown_dynamic_shape_uses_own_anchor() -> None:
+def test_memory_pool_rewrite_later_dynamic_shape_uses_own_anchor() -> None:
     first_type = NnMemoryType(
         ArrayAttr([_symbol_expr_attr("M")]),
         ArrayAttr([_symbol_expr_attr("1")]),
@@ -706,10 +752,10 @@ def test_memory_pool_rewrite_later_unknown_dynamic_shape_uses_own_anchor() -> No
         f32,
         _make_space("shared"),
     )
-    first_dim = _TestOp(result_types=[SymbolValueType.from_expr("?")])
+    first_dim = _TestOp(result_types=[SymbolValueType.from_expr("M")])
     first_alloc = DmaAllocOp([first_dim.results[0]], first_type)
     first_free = DmaFreeOp(first_alloc.result)
-    second_dim = _TestOp(result_types=[SymbolValueType.from_expr("?")])
+    second_dim = _TestOp(result_types=[SymbolValueType.from_expr("N")])
     second_alloc = DmaAllocOp([second_dim.results[0]], second_type)
     second_free = DmaFreeOp(second_alloc.result)
     module = _build_module(
@@ -874,7 +920,7 @@ def test_memory_pool_public_rewrite_error_edges() -> None:
     try:
         MemoryPoolPass(rewrite=True, alignment=0).apply(Context(), anonymous_module)
     except KernelCodeError as exc:
-        assert "MemoryPoolUnsupportedShape: anonymous shape is not supported" in str(exc)
+        assert "MemoryPoolUnsupportedShape: anonymous result dim requires anonymous dynamic shape operand" in str(exc)
     else:
         raise AssertionError("expected KernelCodeError for anonymous rewrite shape")
 
@@ -1228,7 +1274,7 @@ def test_memory_pool_unpaired_alloc() -> None:
 
 
 # TC-MP-008
-# 功能说明: 验证匿名维度会报错。
+# 功能说明: 验证匿名维度会作为合法动态维度参与 summary。
 # 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_anonymous_dim
 # 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
@@ -1240,16 +1286,15 @@ def test_memory_pool_anonymous_dim() -> None:
         i32,
         _make_space("global"),
     )
-    alloc = DmaAllocOp(_make_symbol_operands(["M", 4]), mem_type)
+    alloc = DmaAllocOp(_make_symbol_operands(["?", 4]), mem_type)
     free = DmaFreeOp(alloc.result)
     module = _build_module("main", [alloc, free])
     pass_obj = MemoryPoolPass(rewrite=False)
-    try:
-        pass_obj.apply(Context(), module)
-    except KernelCodeError as exc:
-        assert "MemoryPoolUnsupportedShape" in str(exc)
-    else:
-        raise AssertionError("expected KernelCodeError for anonymous shape")
+    pass_obj.apply(Context(), module)
+
+    summary_text = pass_obj.get_summary("main").to_text()
+    assert "size_bytes=16*alloc0_d0" in summary_text
+    assert "(#GM) -> 16*alloc0_d0" in summary_text
 
 
 # TC-MP-009

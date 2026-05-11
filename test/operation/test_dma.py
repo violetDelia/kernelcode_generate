@@ -25,7 +25,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.operation.dma import alloc, copy, fill, view
+from kernel_gen.operation.dma import alloc, broadcast, copy, fill, view
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
@@ -80,3 +80,39 @@ def test_dma_facade_fill_rejects_invalid_string_literal() -> None:
         assert 'fill string literal must be "inf" or "-inf"' in str(exc)
     else:
         raise AssertionError("expected KernelCodeError for invalid fill string literal")
+
+
+# TC-OP-DMA-FACADE-005
+# 测试目的: 验证 `dma.broadcast(target, source)` 作为 target-first 公开 helper 返回 None。
+# 使用示例: pytest -q test/operation/test_dma.py -k test_dma_facade_broadcast_returns_none
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_dma.py
+def test_dma_facade_broadcast_returns_none() -> None:
+    target = Memory([4, 8], NumericType.Float32, space=MemorySpace.SM)
+    source = Memory([1, 8], NumericType.Float32, space=MemorySpace.SM)
+
+    assert broadcast(target, source) is None
+
+
+# TC-OP-DMA-FACADE-006
+# 测试目的: 验证 `dma.broadcast` 拒绝 rank、dtype、space 与静态 shape 不兼容。
+# 使用示例: pytest -q test/operation/test_dma.py -k test_dma_facade_broadcast_rejects_invalid_contract
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_dma.py
+def test_dma_facade_broadcast_rejects_invalid_contract() -> None:
+    target = Memory([4, 8], NumericType.Float32, space=MemorySpace.SM)
+
+    for source, expected in (
+        (Memory([2, 3, 4], NumericType.Float32, space=MemorySpace.SM), "rank"),
+        (Memory([1, 8], NumericType.Int32, space=MemorySpace.SM), "dtype"),
+        (Memory([1, 8], NumericType.Float32, space=MemorySpace.GM), "space"),
+        (Memory([2, 7], NumericType.Float32, space=MemorySpace.SM), "shape"),
+    ):
+        try:
+            broadcast(target, source)
+        except KernelCodeError as exc:
+            assert expected in str(exc)
+        else:
+            raise AssertionError(f"expected KernelCodeError for {expected}")

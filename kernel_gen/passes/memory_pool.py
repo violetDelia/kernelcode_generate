@@ -45,7 +45,6 @@ from xdsl.dialects.builtin import (
     Float64Type,
     IntegerType,
     ModuleOp,
-    UnrealizedConversionCastOp,
     i8,
 )
 from xdsl.ir import Attribute, Block, Operation, SSAValue
@@ -163,10 +162,10 @@ class _AllocInfo:
 
 
     功能说明:
-    - 记录 alloc/free、dtype、bucket、字节大小表达式与词法区间，供 summary 与 rewrite 共用。
+    - 记录 alloc、有效 result type、free、dtype、bucket、字节大小表达式与词法区间，供 summary 与 rewrite 共用。
 
     使用示例:
-    - info = _AllocInfo(alloc_op, free_op, sp.Integer(8), 4, ("#TSM",), 0, 1)
+    - info = _AllocInfo(alloc_op, result_type, free_op, sp.Integer(8), 4, ("#TSM",), 0, 1)
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -175,6 +174,7 @@ class _AllocInfo:
     """
 
     alloc_op: DmaAllocOp
+    result_type: NnMemoryType
     free_op: DmaFreeOp | None
     size_bytes_expr: sp.Basic
     dtype_size: int
@@ -432,7 +432,7 @@ def _rewrite_supported_alloc_infos(alloc_infos: list[_AllocInfo]) -> list[_Alloc
 
     supported: list[_AllocInfo] = []
     for info in alloc_infos:
-        result_type = info.alloc_op.result.type
+        result_type = info.result_type
         if result_type.space.space.data in _DYNAMIC_MEMORY_SPACES:
             supported.append(info)
     return supported
@@ -617,12 +617,13 @@ def _dim_expr(dim: Attribute) -> sp.Basic:
     )
 
 
-def _shape_product(mem_type: NnMemoryType) -> sp.Basic:
+def _shape_product(mem_type: NnMemoryType, *, unknown_prefix: str = "anonymous") -> sp.Basic:
     """将 memory shape 转为乘积表达式。
 
 
     功能说明:
     - 逐维累乘生成元素数量表达式。
+    - 匿名 `?` 使用当前函数内私有 sympy 占位符参与 offset 计算，不写回公开 IR。
 
     使用示例:
     - size_expr = _shape_product(mem_type)
@@ -634,9 +635,40 @@ def _shape_product(mem_type: NnMemoryType) -> sp.Basic:
     """
 
     result: sp.Basic = sp.Integer(1)
-    for dim in mem_type.shape.data:
-        result = sp.simplify(result * _dim_expr(dim))
+    for axis, dim in enumerate(mem_type.shape.data):
+        if isinstance(dim, SymbolExprAttr) and dim.expr.data == "?":
+            dim_expr = sp.Symbol(f"{unknown_prefix}_d{axis}", integer=True, positive=True)
+        else:
+            dim_expr = _dim_expr(dim)
+        result = sp.simplify(result * dim_expr)
     return result
+
+
+def _effective_alloc_result_type(alloc_op: DmaAllocOp) -> NnMemoryType:
+    """返回 memory-pool 计算大小时使用的 alloc 类型。
+
+
+    功能说明:
+    - `dma.alloc` result shape 可合法保留匿名 `?`。
+    - memory-pool 不从后续 reshape 反推公开名字，避免把 unknown runtime 维度伪装成稳定符号。
+
+    使用示例:
+    - result_type = _effective_alloc_result_type(alloc_op)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    result_type = alloc_op.result.type
+    if not isinstance(result_type, NnMemoryType):
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
+        )
+    return result_type
 
 
 def _is_contiguous_memory_type(mem_type: NnMemoryType) -> bool:
@@ -657,12 +689,22 @@ def _is_contiguous_memory_type(mem_type: NnMemoryType) -> bool:
 
     if len(mem_type.shape.data) != len(mem_type.stride.data):
         return False
-    expected: list[sp.Basic] = []
+    expected: list[sp.Basic | None] = []
     running: sp.Basic = sp.Integer(1)
+    running_unknown = False
     for shape_dim in reversed(mem_type.shape.data):
-        expected.insert(0, running)
+        expected.insert(0, None if running_unknown else running)
+        if isinstance(shape_dim, SymbolExprAttr) and shape_dim.expr.data == "?":
+            running_unknown = True
+            continue
+        if running_unknown:
+            continue
         running = sp.simplify(running * _dim_expr(shape_dim))
     for stride_dim, expected_expr in zip(mem_type.stride.data, expected, strict=True):
+        if expected_expr is None:
+            if not isinstance(stride_dim, SymbolExprAttr) or stride_dim.expr.data != "?":
+                return False
+            continue
         try:
             stride_expr = _dim_expr(stride_dim)
         except KernelCodeError:
@@ -936,13 +978,7 @@ def _alloc_infos_from_ops(
     for op in ops:
         if not isinstance(op, DmaAllocOp):
             continue
-        result_type = op.result.type
-        if not isinstance(result_type, NnMemoryType):
-            raise KernelCodeError(
-                ErrorKind.CONTRACT,
-                ErrorModule.PASS,
-                "MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory",
-            )
+        result_type = _effective_alloc_result_type(op)
         if _has_escaping_use(op, op_index, loop_bounds, op_loop) and not allow_escaping_allocs:
             raise KernelCodeError(
                 ErrorKind.CONTRACT,
@@ -1011,8 +1047,9 @@ def _alloc_infos_from_ops(
         alloc_infos.append(
             _AllocInfo(
                 op,
+                result_type,
                 free_op,
-                sp.simplify(_shape_product(result_type) * sp.Integer(dtype_size)),
+                sp.simplify(_shape_product(result_type, unknown_prefix=f"alloc{alloc_idx}") * sp.Integer(dtype_size)),
                 dtype_size,
                 _bucket_key(result_type),
                 begin_index,
@@ -1197,7 +1234,7 @@ def _material_from_existing(value: SSAValue) -> _SymbolMaterial:
 
     功能说明:
     - 不新增 IR op，仅记录表达文本与 sympy 表达式。
-    - 匿名 `?` 不能作为 material 语义使用，调用方需先把它绑定到 result layout 表达。
+    - 匿名 `?` 不能作为命名 material 语义使用，调用方需保留 `?` 或拒绝非法输入。
 
     使用示例:
     - material = _material_from_existing(arg)
@@ -1216,27 +1253,6 @@ def _material_from_existing(value: SSAValue) -> _SymbolMaterial:
             "MemoryPoolUnsupportedShape: anonymous shape is not supported",
         )
     return _SymbolMaterial(value, expr_text, _sympy_expr_from_text(expr_text))
-
-
-def _material_from_existing_as(value: SSAValue, expr_text: str) -> tuple[list[Operation], _SymbolMaterial]:
-    """把已有 symbol SSA 转成指定公开表达文本。
-
-
-    功能说明:
-    - full-rank `dma.alloc.dynamic_shape` 允许 operand 类型为 `!symbol.int<"?">`。
-    - 通过 `builtin.unrealized_conversion_cast` 在 metadata 区域把 runtime value 绑定到 result layout 的 `SymbolExprAttr` 语义。
-
-    使用示例:
-    - ops, material = _material_from_existing_as(arg, "M")
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    cast = UnrealizedConversionCastOp.get([value], [SymbolValueType.from_expr(expr_text)])
-    return [cast], _SymbolMaterial(cast.results[0], expr_text, _sympy_expr_from_text(expr_text))
 
 
 def _find_visible_symbol_value_by_expr(
@@ -1354,7 +1370,9 @@ def _add_material(lhs: _SymbolMaterial, rhs: _SymbolMaterial) -> tuple[SymbolAdd
     """
 
     expr = sp.simplify(lhs.expr + rhs.expr)
-    if expr == lhs.expr:
+    if lhs.expr_text == "?" or rhs.expr_text == "?":
+        expr_text = "?"
+    elif expr == lhs.expr:
         expr_text = lhs.expr_text
     elif expr == rhs.expr:
         expr_text = rhs.expr_text
@@ -1382,6 +1400,8 @@ def _mul_expr_text(lhs: _SymbolMaterial, rhs: _SymbolMaterial, expr: sp.Basic) -
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
+    if lhs.expr_text == "?" or rhs.expr_text == "?":
+        return "?"
     if isinstance(expr, sp.Integer) or (expr.is_number and expr.is_integer):
         return str(int(expr))
     lhs_text = f"({lhs.expr_text})" if "+" in lhs.expr_text or "-" in lhs.expr_text[1:] else lhs.expr_text
@@ -1479,7 +1499,7 @@ def _find_dynamic_shape_value(info: _AllocInfo, dim: SymbolExprAttr, index: int)
 
     dim_text = _dynamic_shape_dim_text(dim)
     dynamic_values = list(info.alloc_op.dynamic_shape)
-    if len(dynamic_values) == len(info.alloc_op.result.type.shape.data):
+    if len(dynamic_values) == len(info.result_type.shape.data):
         return dynamic_values[index]
     for value in dynamic_values:
         if _symbol_expr_from_type(value) == dim_text:
@@ -1502,7 +1522,7 @@ def _shape_materials(
 
     功能说明:
     - 静态维生成 `symbol.const`。
-    - 动态维优先复用可见的同语义 symbol SSA；full-rank `?` operand 会按 result layout 显式转换。
+    - 动态维优先复用可见的同语义 symbol SSA；full-rank `?` operand 只保留为匿名 `?`。
 
     使用示例:
     - ops, dims = _shape_materials(info, block, func_block, anchor=alloc)
@@ -1513,7 +1533,7 @@ def _shape_materials(
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    result_type = info.alloc_op.result.type
+    result_type = info.result_type
     ops: list[Operation] = []
     values: list[_SymbolMaterial] = []
     search_anchor = anchor or info.alloc_op
@@ -1521,11 +1541,20 @@ def _shape_materials(
         if isinstance(dim, SymbolExprAttr):
             dim_text = dim.expr.data
             if dim_text == "?":
-                raise KernelCodeError(
-                    ErrorKind.CONTRACT,
-                    ErrorModule.PASS,
-                    "MemoryPoolUnsupportedShape: anonymous shape is not supported",
+                dynamic_value = _find_dynamic_shape_value(info, dim, index)
+                if _symbol_expr_from_type(dynamic_value) != "?":
+                    raise KernelCodeError(
+                        ErrorKind.CONTRACT,
+                        ErrorModule.PASS,
+                        "MemoryPoolUnsupportedShape: anonymous result dim requires anonymous dynamic shape operand",
+                    )
+                unknown_expr = sp.Symbol(
+                    f"{_alloc_name(info.alloc_op.result, 0)}_d{index}",
+                    integer=True,
+                    positive=True,
                 )
+                values.append(_SymbolMaterial(dynamic_value, "?", unknown_expr))
+                continue
             if dim_text.lstrip("-").isdigit():
                 op, material = _const_material(int(dim_text))
                 ops.append(op)
@@ -1552,20 +1581,11 @@ def _shape_materials(
             if visible_value is not None:
                 values.append(_material_from_existing(visible_value))
             elif dynamic_text == "?":
-                if (
-                    target_block is not None
-                    and func_block is not None
-                    and _symbol_value_visible_at_anchor(dynamic_value, target_block, func_block, search_anchor)
-                ):
-                    material_ops, material = _material_from_existing_as(dynamic_value, dim_text)
-                    ops.extend(material_ops)
-                    values.append(material)
-                else:
-                    raise KernelCodeError(
-                        ErrorKind.UNIMPLEMENTED,
-                        ErrorModule.PASS,
-                        "MemoryPoolUnsupportedControlFlow: dynamic loop alloc size does not dominate later offset",
-                    )
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.PASS,
+                    "MemoryPoolUnsupportedShape: named result dim requires matching dynamic shape operand",
+                )
             else:
                 values.append(_material_from_existing(dynamic_value))
             continue
@@ -1939,7 +1959,7 @@ def _flat_result_type(info: _AllocInfo, numel: _SymbolMaterial) -> NnMemoryType:
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    result_type = info.alloc_op.result.type
+    result_type = info.result_type
     if isinstance(numel.expr, sp.Integer):
         shape_attr = SymbolExprAttr.from_expr(str(int(numel.expr)))
     else:
@@ -2209,7 +2229,7 @@ def _dynamic_memory_backing_ops(
 
     backings: dict[tuple[str], ArchGetDynamicMemoryOp] = {}
     for info in alloc_infos:
-        result_type = info.alloc_op.result.type
+        result_type = info.result_type
         space_name = result_type.space.space.data
         key = (space_name,)
         if key not in backings:
@@ -2253,7 +2273,7 @@ def _rewrite_func(
     rewrite_infos = _prepare_rewrite_infos(alloc_infos, op_loop, block, alignment)
     for info in alloc_infos:
         rewrite_info = rewrite_infos[info]
-        result_type = info.alloc_op.result.type
+        result_type = info.result_type
         backing = backings[(result_type.space.space.data,)]
         view = DmaViewOp(
             backing.result,

@@ -336,24 +336,28 @@ def test_dma_memory_hierarchy_apply_op_symbol_shape() -> None:
 
 
 # TC-DMH-008
-# 测试目的: 验证匿名动态维度无法作为 apply_op staging 目标 shape。
-# 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_apply_op_rejects_anonymous_dynamic_shape
+# 测试目的: 验证匿名动态维度作为 apply_op staging 目标 shape 时使用 full-rank dynamic_shape。
+# 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_apply_op_accepts_anonymous_dynamic_shape
 # 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
-def test_dma_memory_hierarchy_apply_op_rejects_anonymous_dynamic_shape() -> None:
+def test_dma_memory_hierarchy_apply_op_accepts_anonymous_dynamic_shape() -> None:
     lhs_type = _make_anonymous_dynamic_memory_type("global")
     rhs_type = _make_memory_type(shape=(4, 4), stride=(4, 1), space="global")
     out_type = _make_anonymous_dynamic_memory_type("global")
-    module, _, _ = _build_matmul_module(
+    module, block, _ = _build_matmul_module(
         out_type=out_type,
         lhs_type=lhs_type,
         rhs_type=rhs_type,
         space="global",
     )
 
-    with pytest.raises(KernelCodeError, match="dynamic_shape"):
-        LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", ""]}').apply(Context(), module)
+    LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", ""]}').apply(Context(), module)
+
+    allocs = [op for op in _collect_ops(block) if isinstance(op, DmaAllocOp)]
+    assert len(allocs) == 1
+    assert [operand.type.get_value() for operand in allocs[0].dynamic_shape] == ["?", 4]
+    module.verify()
 
 
 # TC-DMH-009

@@ -25,6 +25,8 @@
 
 - `kernel.binary_elewise(out, lhs, rhs, *, kind=KernelBinaryElewiseKind.X)` 注册到 `KernelBinaryElewiseAST`。
 - `kernel.add/sub/mul/div/truediv/eq/ne/lt/le/gt/ge(out, lhs, rhs)` 注册到对应固定 kind AST 节点。
+- `kernel.exp(out, input_value)` 注册到 `KernelExpAST`。
+- `kernel.reduce(out, input_value, *, kind=KernelReduceKind.X, axis=N, keepdim=False)` 注册到 `KernelReduceAST`。
 - `kernel.matmul(out, lhs, rhs)` 注册到 `KernelMatmulAST`。
 - `kernel.img2col1d(out, input_value, k, s=1, d=1, p_left=0, p_right=0)` 注册到 `KernelImg2Col1dAST`。
 - `kernel.img2col2d(out, input_value, kh, kw, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)` 注册到 `KernelImg2Col2dAST`。
@@ -34,6 +36,8 @@
 - 本模块不导出公开 helper；调用方只通过 `kernel_gen.operation.kernel` 与 `kernel_gen.dsl.ast.plugin.lookup_builtin(...)` 观察注册效果。
 - `binary_elewise` 的 `kind` 必须是 `KernelBinaryElewiseKind`，字符串不是公开输入。
 - `kernel.add/sub/...` 只接受 `out/lhs/rhs` 三个位置参数，不接受 keyword。
+- `kernel.exp` 只接受 `out/input_value` 两个位置参数，不接受 keyword。
+- `kernel.reduce` 只接受 `out/input_value` 两个位置参数，`kind/axis` 为必填 keyword，`keepdim` 为可选 keyword；`kind` 必须是 `KernelReduceKind`，字符串不是公开输入。
 - `kernel.matmul` 不接受 `memoryspace` 或其它 keyword。
 - `img2col1d/2d` 的窗口参数可用位置参数或本 spec 中列出的 keyword；未列出的 keyword 必须拒绝。
 - `img2col1d/2d` 的同一窗口参数不得同时以位置参数和 keyword 传入。
@@ -48,13 +52,14 @@
 - 验证导入 plugin 后，`kernel_gen.operation.kernel` 公开 helper 均可通过 builtin registry 查到。
 - 验证 parse_function 能把 out-first kernel helper 构造成对应 statement AST。
 - 验证 `binary_elewise` 只接受 `KernelBinaryElewiseKind`，不接受字符串 kind。
+- 验证 `kernel.exp` 与 `kernel.reduce` 公开 helper 能解析到对应 AST，且 reduce 拒绝字符串 kind。
 - 验证 `img2col1d/2d` 的窗口参数只接受合法位置/keyword 组合，重复传参和未知 keyword 必须失败。
 
 ### 功能与用例清单
 
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
-| TC-DSL-AST-PLUGIN-KERNEL-001 | 公开入口 | helper registered | 导入 plugin 包。 | 调用 `lookup_builtin(...)`。 | `kernel.add`、`binary_elewise`、`matmul`、`img2col2d` 均有注册项。 | `test_kernel_plugin_registers_public_helpers` |
+| TC-DSL-AST-PLUGIN-KERNEL-001 | 公开入口 | helper registered | 导入 plugin 包。 | 调用 `lookup_builtin(...)`。 | `kernel.add`、`binary_elewise`、`exp`、`reduce`、`matmul`、`img2col2d` 均有注册项。 | `test_kernel_plugin_registers_public_helpers` |
 | TC-DSL-AST-PLUGIN-KERNEL-002 | 解析/打印 | statement helper parse | 准备公开 `Memory` 入参。 | `parse_function(...)`。 | 生成对应 kernel statement AST；`return kernel.matmul(...)` 被视为 returns None。 | `test_kernel_plugin_parse_function_builds_statement_nodes` |
 | TC-DSL-AST-PLUGIN-KERNEL-003 | 解析/打印 | img2col2d kwargs | 准备 `kh/kw` 和 padding keyword。 | `parse_function(...)`。 | 生成 `KernelImg2Col2dAST`。 | `test_kernel_plugin_parses_img2col2d_keyword_parameters` |
 | TC-DSL-AST-PLUGIN-KERNEL-004 | 边界/异常 | non API shapes rejected | 准备 `kernel.add(..., kind=...)` 与字符串 kind。 | `parse_function(...)`。 | 按公开错误语义抛 `KernelCodeError`。 | `test_kernel_plugin_rejects_non_api_call_shapes` |

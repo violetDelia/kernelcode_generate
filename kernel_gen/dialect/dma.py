@@ -324,7 +324,7 @@ def _verify_operands_match_layout(
     功能说明:
     - 若布局维度为静态 `SymbolExprAttr`，对应 operand 必须是相同值的 `!symbol.int<#symbol.expr<n>>`。
     - 若布局维度为符号表达式，则 operand 的公开表达式必须一致。
-    - `?` 类型值允许由 full-rank dynamic shape 中的运行期 SSA 承接真实维度。
+    - `?` 类型值只能匹配 `#symbol.expr<?>` 布局，不能通过 SSA 名称伪造具名维度。
 
     使用示例:
     - _verify_operands_match_layout(op.sizes, result_type.shape, "shape must match sizes")
@@ -344,8 +344,8 @@ def _verify_operands_match_layout(
             continue
         expected_expr = _dim_expr_text(expected)
         if expected_expr == "?":
-            continue
-        if isinstance(value.type, SymbolValueType) and value.type.get_value() == "?":
+            if not isinstance(value.type, SymbolValueType) or value.type.get_value() != "?":
+                raise VerifyException(mismatch_message)
             continue
         if not isinstance(value.type, SymbolValueType) or value.type.get_value() != expected_expr:
             raise VerifyException(mismatch_message)
@@ -392,8 +392,8 @@ def _verify_dynamic_shape_matches_result(
     功能说明:
     - 支持两种形态：
       1) dynamic_shape 与结果 rank 等长，逐维对齐；
-      2) dynamic_shape 仅包含符号维度，按出现顺序对齐。
-    - 匿名维度 `?` 仍不允许出现在结果 shape。
+      2) dynamic_shape 仅包含非静态维度，按出现顺序对齐。
+    - 匿名维度 `?` 必须由 `!symbol.int<?>` 承接，不能与具名维互相伪装。
 
     使用示例:
     - _verify_dynamic_shape_matches_result(dynamic_shape, result_type.shape, "dynamic_shape")
@@ -410,23 +410,20 @@ def _verify_dynamic_shape_matches_result(
         _verify_operands_match_layout(dynamic_shape, result_shape, f"{field_name} must match result shape")
         return
 
-    symbol_dims: list[str] = []
+    dynamic_dims: list[Attribute] = []
     for dim in result_shape.data:
-        dim_expr = _dim_expr_text(dim)
         if _static_int_from_dim(dim) is not None:
             continue
-        if dim_expr == "?":
-            raise VerifyException(f"{field_name} must not contain '?'")
-        symbol_dims.append(dim_expr)
+        dynamic_dims.append(dim)
 
-    if len(dynamic_shape) != len(symbol_dims):
+    if len(dynamic_shape) != len(dynamic_dims):
         raise VerifyException(f"{field_name} length must match symbol rank")
 
-    for value, expected in zip(dynamic_shape, symbol_dims, strict=True):
-        if not isinstance(value.type, SymbolValueType):
-            raise VerifyException(f"{field_name} entries must be !symbol.int")
-        if value.type.get_value() != expected:
-            raise VerifyException(f"{field_name} symbol must match result shape")
+    _verify_operands_match_layout(
+        dynamic_shape,
+        ArrayAttr(dynamic_dims),
+        f"{field_name} symbol must match result shape",
+    )
 
 
 def _verify_broadcast_compat(

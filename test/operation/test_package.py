@@ -132,14 +132,16 @@ def test_operation_top_level_namespace_does_not_export_arch_or_extended_nn_helpe
 
 
 # TC-OP-PKG-006
-# 测试目的: 验证 `fill` 只在 `kernel_gen.operation.dma` 子模块公开，不上提到 package-root。
-# 使用示例: pytest -q test/operation/test_package.py -k test_operation_dma_fill_is_public_only_in_dma_submodule
+# 测试目的: 验证 `fill` 与 `broadcast` 只在 `kernel_gen.operation.dma` 子模块公开，不上提到 package-root。
+# 使用示例: pytest -q test/operation/test_package.py -k test_operation_dma_fill_and_broadcast_are_public_only_in_dma_submodule
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
 # 对应测试文件路径: test/operation/test_package.py
-def test_operation_dma_fill_is_public_only_in_dma_submodule() -> None:
+def test_operation_dma_fill_and_broadcast_are_public_only_in_dma_submodule() -> None:
     assert hasattr(operation_dma, "fill")
+    assert hasattr(operation_dma, "broadcast")
     assert not hasattr(operation, "fill")
+    assert not hasattr(operation, "broadcast")
 
 
 # TC-OP-PKG-004

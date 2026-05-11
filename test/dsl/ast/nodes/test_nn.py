@@ -393,15 +393,20 @@ def test_nn_emit_mlir_handles_structured_public_nodes_and_dynamic_conv() -> None
         ConvAST(DmaAllocAST([1, 3, 8, 8], NumericType.Float32, MemorySpace.GM), DmaAllocAST([4, 3, 3, 3], NumericType.Float32, MemorySpace.GM), [ConstValueAST(1), ConstValueAST(1)], [ConstValueAST(0), ConstValueAST(0), ConstValueAST(0), ConstValueAST(0)], [ConstValueAST(1), ConstValueAST(1)]).emit_mlir(ctx, block)
 
 
-def test_nn_matmul_rejects_unrelated_anonymous_runtime_contracting_dims() -> None:
-    """matmul 不把不可证明相同的匿名运行期 contracting 维度互相匹配。"""
+def test_nn_matmul_accepts_anonymous_runtime_contracting_dims() -> None:
+    """matmul 允许两侧 contracting 维度同为匿名 `?`，但不允许单侧 `?`。"""
 
     lhs = MemoryAST.from_memory("lhs", Memory(["?", "?"], NumericType.Float32))
     rhs = MemoryAST.from_memory("rhs", Memory(["?", "?"], NumericType.Float32))
-    ctx, block = _block_for_memories(lhs, rhs)
+    named_rhs = MemoryAST.from_memory("named_rhs", Memory(["K", "?"], NumericType.Float32))
+    ctx, block = _block_for_memories(lhs, rhs, named_rhs)
 
+    emitted = MatmulAST(lhs, rhs).emit_mlir(ctx, block)
+
+    assert isinstance(emitted, Operation)
+    emitted.verify()
     with pytest.raises(KernelCodeError, match="matmul contracting dimension mismatch"):
-        MatmulAST(lhs, rhs).emit_mlir(ctx, block)
+        MatmulAST(lhs, named_rhs).emit_mlir(ctx, block)
 
 
 def test_nn_conv_uses_shared_runtime_contracting_dim_for_matmul() -> None:

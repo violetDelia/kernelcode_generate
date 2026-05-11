@@ -22,6 +22,7 @@ API 列表:
 
 from __future__ import annotations
 
+import inspect
 import sys
 from pathlib import Path
 from typing import TypeAlias
@@ -49,6 +50,26 @@ SEMANTIC_OUTPUT_PREFIX = "!nn.memory<[#symbol.expr<B>, #symbol.expr<C>,"
 SEMANTIC_INPUT_MEMORY = "!nn.memory<[#symbol.expr<B>, #symbol.expr<N>, #symbol.expr<XH>, #symbol.expr<XW>]"
 SEMANTIC_WEIGHT_MEMORY = "!nn.memory<[#symbol.expr<C>, #symbol.expr<N>, #symbol.expr<KH>, #symbol.expr<KW>]"
 SEMANTIC_RUNTIME_SYMBOLS = ("SH", "SW", "DH", "DW", "PT", "PB", "PL", "PR", "TF", "TC", "TN", "THO", "TWO")
+
+
+def _assert_conv2d_source_uses_kernel_out_first(fn) -> None:
+    """校验 conv2d demo Python 源码使用 kernel out-first helper。
+
+
+    功能说明:
+    - 当前测试文件内 helper，只读取公开 demo 函数源码。
+    - 防止 demo 主计算入口回退到 `nn.img2col2d/nn.matmul/nn.add`。
+
+    使用示例:
+    - `_assert_conv2d_source_uses_kernel_out_first(conv2d_inputs_dynamic_tile_dynamic_kernel)`
+    """
+
+    function_source = inspect.getsource(fn)
+    assert "kernel.img2col2d(" in function_source
+    assert "kernel.matmul(" in function_source
+    assert "kernel.add(" in function_source
+    assert "col = img2col2d(" not in function_source
+    assert "out2 = matmul(" not in function_source
 
 
 def _symbolic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]:
@@ -138,6 +159,7 @@ def test_inputs_dynamic_tile_dynamic_gen_kernel_keeps_symbolic_memory_shapes() -
     )
     module_text = str(module)
 
+    _assert_conv2d_source_uses_kernel_out_first(conv2d_inputs_dynamic_tile_dynamic_kernel)
     assert SEMANTIC_OUTPUT_PREFIX in module_text
     assert SEMANTIC_INPUT_MEMORY in module_text
     assert SEMANTIC_WEIGHT_MEMORY in module_text
@@ -182,6 +204,7 @@ def test_inputs_static_tile_dynamic_gen_kernel_keeps_seeded_static_shapes() -> N
     )
     module_text = str(module)
 
+    _assert_conv2d_source_uses_kernel_out_first(conv2d_inputs_static_tile_dynamic_kernel)
     assert STATIC_OUTPUT_MEMORY in module_text
     assert STATIC_INPUT_MEMORY in module_text
     assert STATIC_WEIGHT_MEMORY in module_text
@@ -209,6 +232,7 @@ def test_inputs_static_tile_static_gen_kernel_keeps_seeded_static_shapes() -> No
     )
     module_text = str(module)
 
+    _assert_conv2d_source_uses_kernel_out_first(conv2d_inputs_static_tile_static_kernel)
     assert STATIC_OUTPUT_MEMORY in module_text
     assert STATIC_INPUT_MEMORY in module_text
     assert STATIC_WEIGHT_MEMORY in module_text

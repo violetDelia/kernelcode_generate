@@ -14,7 +14,8 @@ API 列表:
 - `MemoryAST` / `SymbolDimAST` / `ConstValueAST` / `BoolValueAST` / `SymbolListAST`
 - `Diagnostic` / `SourceLocation` / `AttrAST` / `PythonObjectAttrAST` / `ListAST` / `TupleAST`
 - `IntTypeAttrAST` / `FloatTypeAttrAST` / `BoolTypeAttrAST` / `MemorySpaceAttrAST`
-- `KernelBinaryElewiseAST` / `KernelAddAST` / `KernelMatmulAST` / `KernelImg2Col1dAST` / `KernelImg2Col2dAST`
+- `DmaBroadcastAST`
+- `KernelBinaryElewiseAST` / `KernelAddAST` / `KernelExpAST` / `KernelReduceAST` / `KernelMatmulAST` / `KernelImg2Col1dAST` / `KernelImg2Col2dAST`
 - 其余公开 AST 节点类由 `kernel_gen.dsl.ast.nodes` 定义并经本包根导出。
 
 使用示例:
@@ -50,6 +51,7 @@ from .nodes import (
     ConvAST,
     Diagnostic,
     DmaAllocAST,
+    DmaBroadcastAST,
     DmaCastAST,
     DmaCopyAST,
     DmaDesliceAST,
@@ -72,6 +74,7 @@ from .nodes import (
     KernelBinaryElewiseAST,
     KernelDivAST,
     KernelEqAST,
+    KernelExpAST,
     KernelGeAST,
     KernelGtAST,
     KernelImg2Col1dAST,
@@ -81,6 +84,7 @@ from .nodes import (
     KernelMatmulAST,
     KernelMulAST,
     KernelNeAST,
+    KernelReduceAST,
     KernelSubAST,
     KernelTrueDivAST,
     ListAST,
@@ -165,6 +169,7 @@ __all__ = [
     "ConvAST",
     "Diagnostic",
     "DmaAllocAST",
+    "DmaBroadcastAST",
     "DmaCastAST",
     "DmaCopyAST",
     "DmaDesliceAST",
@@ -188,6 +193,7 @@ __all__ = [
     "KernelBinaryElewiseAST",
     "KernelDivAST",
     "KernelEqAST",
+    "KernelExpAST",
     "KernelGeAST",
     "KernelGtAST",
     "KernelImg2Col1dAST",
@@ -197,6 +203,7 @@ __all__ = [
     "KernelMatmulAST",
     "KernelMulAST",
     "KernelNeAST",
+    "KernelReduceAST",
     "KernelSubAST",
     "KernelTrueDivAST",
     "ListAST",

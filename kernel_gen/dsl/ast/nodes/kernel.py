@@ -18,6 +18,8 @@ API 列表:
 - `KernelLeAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `KernelGtAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `KernelGeAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `KernelExpAST(out: ValueAST, input_value: ValueAST, location: SourceLocation | None = None)`
+- `KernelReduceAST(out: ValueAST, input_value: ValueAST, kind: KernelReduceKind, axis: int, keepdim: bool = False, location: SourceLocation | None = None)`
 - `KernelMatmulAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `KernelImg2Col1dAST(out: ValueAST, input_value: ValueAST, k: ValueAST, s: ValueAST | None = None, d: ValueAST | None = None, p_left: ValueAST | None = None, p_right: ValueAST | None = None, location: SourceLocation | None = None)`
 - `KernelImg2Col2dAST(out: ValueAST, input_value: ValueAST, kh: ValueAST, kw: ValueAST, sh: ValueAST | None = None, sw: ValueAST | None = None, dh: ValueAST | None = None, dw: ValueAST | None = None, ph: ValueAST | None = None, pw: ValueAST | None = None, pl: ValueAST | None = None, pr: ValueAST | None = None, location: SourceLocation | None = None)`
@@ -41,14 +43,16 @@ from xdsl.ir import Block, Operation, SSAValue
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dialect.kernel import (
     KernelBinaryElewiseOp,
+    KernelExpOp,
     KernelImg2col1dOp,
     KernelImg2col2dOp,
     KernelMatmulOp,
+    KernelReduceOp,
 )
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.operation import kernel as kernel_ops
-from kernel_gen.operation.kernel import KernelBinaryElewiseKind
+from kernel_gen.operation.kernel import KernelBinaryElewiseKind, KernelReduceKind
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from .attr import EmitMlirResult, SourceLocation
@@ -381,6 +385,108 @@ class KernelGeAST(_FixedKernelBinaryElewiseAST):
     """
 
     KIND = KernelBinaryElewiseKind.GE
+
+
+@dataclass
+class KernelExpAST(StatementAST):
+    """kernel.exp AST 节点。
+
+    功能说明:
+    - 承载 out-first `kernel.exp(out, input_value)` 调用。
+
+    使用示例:
+    - KernelExpAST(out, input_value)
+    """
+
+    out: ValueAST
+    input_value: ValueAST
+    location: SourceLocation | None = None
+
+    def __post_init__(self) -> None:
+        self.out = _as_value_ast(self.out, self.location)
+        self.input_value = _as_value_ast(self.input_value, self.location)
+
+    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
+        """发射 kernel.exp。
+
+        功能说明:
+        - out/input lower 为 memory operand。
+        - 生成 `kernel.exp` dialect op，返回无结果 Operation。
+
+        使用示例:
+        - op = node.emit_mlir(ctx, block)
+        """
+
+        assert isinstance(ctx, Context)
+        assert isinstance(block, Block)
+        kernel_ops.exp(_require_memory(self.out, "out"), _require_memory(self.input_value, "input"))
+        out_value = _emit_ssa_value(self.out, ctx, block)
+        input_value = _emit_ssa_value(self.input_value, ctx, block)
+        out_type = _ensure_memory_ssa(out_value, "out")
+        _ensure_memory_ssa(input_value, "input")
+        return KernelExpOp(input_value, out_value, out_type.space)
+
+
+@dataclass
+class KernelReduceAST(StatementAST):
+    """kernel.reduce AST 节点。
+
+    功能说明:
+    - 承载 out-first `kernel.reduce(out, input_value, kind=..., axis=..., keepdim=...)` 调用。
+
+    使用示例:
+    - KernelReduceAST(out, input_value, KernelReduceKind.SUM, axis=1, keepdim=True)
+    """
+
+    out: ValueAST
+    input_value: ValueAST
+    kind: KernelReduceKind
+    axis: int
+    keepdim: bool = False
+    location: SourceLocation | None = None
+
+    def __post_init__(self) -> None:
+        self.out = _as_value_ast(self.out, self.location)
+        self.input_value = _as_value_ast(self.input_value, self.location)
+        if not isinstance(self.kind, KernelReduceKind):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "kernel.reduce kind must be KernelReduceKind")
+        if isinstance(self.axis, bool) or not isinstance(self.axis, int):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "kernel.reduce axis must be int")
+        if not isinstance(self.keepdim, bool):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "kernel.reduce keepdim must be bool")
+
+    def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
+        """发射 kernel.reduce。
+
+        功能说明:
+        - out/input lower 为 memory operand。
+        - kind/axis/keepdim lower 为 kernel.reduce attrs。
+
+        使用示例:
+        - op = node.emit_mlir(ctx, block)
+        """
+
+        assert isinstance(ctx, Context)
+        assert isinstance(block, Block)
+        kernel_ops.reduce(
+            _require_memory(self.out, "out"),
+            _require_memory(self.input_value, "input"),
+            kind=self.kind,
+            axis=self.axis,
+            keepdim=self.keepdim,
+        )
+        out_value = _emit_ssa_value(self.out, ctx, block)
+        input_value = _emit_ssa_value(self.input_value, ctx, block)
+        out_type = _ensure_memory_ssa(out_value, "out")
+        _ensure_memory_ssa(input_value, "input")
+        return KernelReduceOp(
+            out_value,
+            input_value,
+            kind=self.kind.value,
+            axis=self.axis,
+            keepdim=self.keepdim,
+            space=out_type.space,
+        )
 
 
 @dataclass

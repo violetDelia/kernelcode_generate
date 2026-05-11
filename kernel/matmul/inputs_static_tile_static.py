@@ -5,7 +5,7 @@
 - 实现 `inputs 静 + tile 静` 的二维 matmul kernel demo。
 - 输入 shape 固定为 `lhs[32, 16]`、`rhs[16, 32]`、`out[32, 32]`。
 - tile 固定为 `TILE_M=8`、`TILE_N=8`、`TILE_K=5`，避免 memory-pool rewrite 后超过 npu_demo TSM backing 容量。
-- K/reduce 维按 `TILE_K` 分块，每个 H/W 输出 tile 初始化 accumulator，K loop 内累加 partial，loop 后写回 output。
+- K/reduce 维按 `TILE_K` 分块，每个 H/W 输出 tile 初始化 accumulator，K loop 内用 `kernel.matmul/kernel.add` 累加 partial，loop 后写回 output。
 - 通过 `dsl_run` 真实执行，并和 `torch.matmul` 参考结果对齐。
 
 API 列表:
@@ -32,8 +32,8 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from kernel.runner import run_torch_demo
+from kernel_gen.operation import kernel
 from kernel_gen.operation.dma import alloc, deslice, fill, view
-from kernel_gen.operation.nn import add, matmul
 from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
@@ -50,7 +50,7 @@ def matmul_inputs_static_tile_static_kernel(
     功能说明:
     - 读取 `lhs/rhs/out` 的静态 shape。
     - 以固定 `8x8x5` tile 做三维循环。
-    - K 维按 `tile_k` 切分并累加到局部 accumulator，避免 partial 直接覆盖 output。
+    - K 维按 `tile_k` 切分，并通过 `kernel.matmul/kernel.add` out-first helper 累加到局部 accumulator。
 
     使用示例:
     - `matmul_inputs_static_tile_static_kernel(out, lhs, rhs)`
@@ -79,9 +79,9 @@ def matmul_inputs_static_tile_static_kernel(
                 rhs_region = view(rhs, [k0, n0], [cur_k, cur_n], [1, 1])
                 deslice(lhs_tile, lhs_region, [0, 0], [cur_m, cur_k], [1, 1])
                 deslice(rhs_tile, rhs_region, [0, 0], [cur_k, cur_n], [1, 1])
-                partial = matmul(lhs_tile, rhs_tile)
-                updated_acc = add(acc, partial)
-                deslice(acc, updated_acc, [0, 0], [tile_m, tile_n], [1, 1])
+                partial = alloc([tile_m, tile_n], NumericType.Float32, MemorySpace.TSM)
+                kernel.matmul(partial, lhs_tile, rhs_tile)
+                kernel.add(acc, acc, partial)
             out_region = view(acc, [0, 0], [cur_m, cur_n], [1, 1])
             deslice(out, out_region, [m0, n0], [cur_m, cur_n], [1, 1])
 

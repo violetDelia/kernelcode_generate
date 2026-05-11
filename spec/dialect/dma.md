@@ -93,7 +93,7 @@
 - `dma.view` 的 `result_type.shape` 必须由 `shape` operand（DSL `view(..., size, ...)`）确定；非 byte pool 场景下，`result_type.stride` 必须等于 `source.stride * stride operand` 的逐维乘积，不得只因“生成了 `dma.view` op”就视为合同对齐成功。
 - 当 `dma.view` 结果直接参与 `func.return` 时，返回的 `!nn.memory<...>` 类型必须与同一份 `result_type` 完全一致；`test/dsl/ast/test_mlir_gen.py` 中的 `EXPECTED_MEMORY` 比对依赖这一边界。
 - 静态可判定时非 byte pool `dma.view` 的 `source/result` `numel` 必须一致；若 `source` 为一维 `i8` byte pool，则 `offset/size/stride` 按 `result.element_type` 元素单位解释，并要求 `(linear_max_index + 1) * sizeof(result.element_type) <= source_bytes`。
-- `dma.reshape` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<#symbol.expr<expr>>`；当 operand 表达为 `?` 但 SSA value 带有稳定公开赋值名时，`result.shape` 可使用该赋值名作为 runtime 维度别名；结果 `stride` 按 `shape` 的默认连续布局语义生成。
+- `dma.reshape` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<#symbol.expr<expr>>`；当 operand 表达为 `?` 时，`result.shape` 对应维度也必须是 `#symbol.expr<?>`，不得通过 SSA 名称或公开变量名伪造稳定维度；结果 `stride` 按 `shape` 的默认连续布局语义生成。
 - `dma.alloc` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<#symbol.expr<expr>>`；允许两种形态：与结果 rank 等长的全量列表，或仅包含结果 `shape` 中符号维度的列表（按出现顺序）；`stride` 不作为输入，而是按默认连续布局语义生成。
 - 对 mixed add 等需要 `scalar -> memory` 合法化的链路，当前唯一公开合法原语是 `dma.alloc + dma.fill(target, value)`：`dma.alloc` 负责生成 temporary memory，`dma.fill` 负责把 `const(i32)` / `!symbol.int<#symbol.expr<expr>>` 真实写入该 memory 的每个逻辑元素。仅生成空 `dma.alloc` 占位，或生成 `dma.fill` 后其 `target` 在下游 IR 中 `users=[]`，都不属于当前链路的通过口径。
 - `strides` 当前每一维仍限制为单位步长语义，但该约束应体现在 operand 校验阶段，而不是要求使用 `IntAttr(1)` attribute。
@@ -107,7 +107,7 @@
 - 当 `shape` 中包含动态 `SymbolExprAttr` 时，默认连续 stride 仍按从右到左的累计乘积推导；单个符号如 `#symbol.expr<N>` 直接参与乘积，多维组合可形成 `#symbol.expr<M*N>` 等结构化表达。
 - `SymbolExprAttr` 维度可包含 `min(lhs, rhs)` 形式的整数符号最小值；默认连续 stride 与 contiguous verifier 必须按符号表达式等价关系判断，而不是只比较原始文本。
 - 若维度为 `#symbol.expr<?>` 或包含 `?` 的表达式，视为未知：该维度及其左侧更高维的默认 stride 统一退化为 `#symbol.expr<?>`，右侧维度仍按既有规则生成（末维为 `#symbol.expr<1>`）。
-- 当默认连续 stride 的期望值因匿名动态维度退化为 `#symbol.expr<?>` 时，调用点必须通过 `shape` operand、SSA 赋值名或结构化 `SymbolExprAttr` 表达保留动态语义，例如 `cur_f * cur_ho * cur_wo`、`out_tile` 或 `(XH + PT + PB - ((KH - 1) * DH + 1)) floordiv SH + 1`；verifier 不因该类不可静态证明的动态语义表达拒绝，但静态可判定的不一致仍必须报错。
+- 当默认连续 stride 的期望值因匿名动态维度退化为 `#symbol.expr<?>` 时，结果 stride 必须继续保留 `#symbol.expr<?>`；不得通过 SSA 赋值名、Python 变量名或局部别名把 unknown 维度伪造成稳定符号。具名动态语义必须来自 operand 类型或结构化 `SymbolExprAttr` 本身。
 - 该规则仅用于 `dma.alloc` / `dma.reshape` 的默认连续 stride 推导与 verifier 校验，不替代显式 `!symbol.int<#symbol.expr<expr>>` SSA operand 建模；`offsets` 允许 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`，`sizes/strides` 仍必须通过 `!symbol.int<#symbol.expr<expr>>` SSA operand 传入。
 
 ### operation API 映射
@@ -203,10 +203,11 @@ op = DmaAllocOp(dynamic_shape, result_type)
 - 注意事项：
 
 - `result_type` 中的 `shape/stride/element_type/space` 必须完整且合法。
-- 若结果布局含运行期 shape 信息，则对应符号维必须由 `dynamic_shape` operand 提供，静态维可省略；每个 operand 都必须是 `!symbol.int<#symbol.expr<expr>>`。
-- `dynamic_shape` 支持两种形态：与结果 rank 等长的全量列表，或仅包含结果 `shape` 中符号维度的列表（按出现顺序）。
-- 全量 rank 列表中，结果 `shape` 的匿名 `?` 必须由对应 operand 的公开符号表达式承接实际运行时维度，例如结果 `?` 可由 `!symbol.int<#symbol.expr<cur_n>>` operand 提供；实现不得生成新的类型级 runtime 维度占位。
-- 全量 rank 列表中，若 operand 类型为 `!symbol.int<#symbol.expr<?>>`，表示该维度来自运行期不可静态证明的 symbol 计算；只要对应结果维度不是静态整数，verifier 不因文本无法证明相等而拒绝。
+- 若结果布局含运行期 shape 信息，则对应非静态维必须由 `dynamic_shape` operand 提供，静态维可省略；每个 operand 都必须是 `!symbol.int<#symbol.expr<expr>>`。
+- `dynamic_shape` 支持两种形态：与结果 rank 等长的全量列表，或仅包含结果 `shape` 中非静态维度的列表（按出现顺序）。
+- 全量 rank 列表中，结果 `shape` 必须逐维匹配对应 operand 的公开符号表达式；结果 `#symbol.expr<?>` 只能由 `!symbol.int<#symbol.expr<?>>` operand 承接。
+- 非静态维列表中，结果 `shape` 的具名维与 `?` 维都必须逐位匹配对应 operand 的公开符号表达式；例如 `[?, 4]` 可由单个 `!symbol.int<#symbol.expr<?>>` operand 承接，但不能由 `!symbol.int<#symbol.expr<N>>` 承接。
+- 全量 rank 列表中，若 operand 类型为 `!symbol.int<#symbol.expr<?>>`，表示该维度来自运行期不可静态证明的 symbol 计算；对应结果维度也必须保持 `#symbol.expr<?>`，不得改写为 SSA 名称、Python 变量名或其它稳定符号。
 - 结果 `stride` 不作为输入，由 `result_type.shape` 与默认连续布局规则共同确定。
 - 当前版本不额外定义 base offset；`dma.alloc` 只负责产生新的 memory 对象。
 
@@ -733,7 +734,7 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-015 | 边界/异常 | `dma.view` numel 一致性 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_view_numel_mismatch`。 | “`dma.view` numel 一致性”场景按公开错误语义失败或被拒绝。 | `test_dma_view_numel_mismatch` |
 | TC-DMA-016 | 边界/异常 | `dma.reshape` 连续约束 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_reshape_requires_contiguous`。 | “`dma.reshape` 连续约束”场景按公开错误语义失败或被拒绝。 | `test_dma_reshape_requires_contiguous` |
 | TC-DMA-017 | 内存/DMA | `dma.reshape` 动态形状连续 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_reshape_allows_dynamic_symbol_int_shape_operands`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.reshape` 动态形状连续”场景。 | `test_dma_reshape_allows_dynamic_symbol_int_shape_operands` |
-| TC-DMA-017D | 内存/DMA | `dma.reshape` 命名 unknown shape | 准备 `!symbol.int<#symbol.expr<?>>` shape operand 并设置 SSA name_hint。 | 运行 `test_dma_reshape_allows_named_unknown_shape_operands`。 | `result.shape` 可使用该公开赋值名，verifier 不把它当作匿名 `?` 拒绝。 | `test_dma_reshape_allows_named_unknown_shape_operands` |
+| TC-DMA-017D | 内存/DMA | `dma.reshape` 拒绝 unknown 命名伪装 | 准备 `!symbol.int<#symbol.expr<?>>` shape operand 并设置 SSA name_hint。 | 运行 `test_dma_reshape_rejects_named_result_from_unknown_shape_operands`。 | `result.shape` 若使用公开赋值名而非 `?`，verifier 必须拒绝。 | `test_dma_reshape_rejects_named_result_from_unknown_shape_operands` |
 | TC-DMA-018 | 边界/异常 | `dma.reshape` 元素总数不一致 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_reshape_numel_mismatch`。 | “`dma.reshape` 元素总数不一致”场景按公开错误语义失败或被拒绝。 | `test_dma_reshape_numel_mismatch` |
 | TC-DMA-018A | 内存/DMA | `dma.reshape` 接受 `min(...)` 符号连续 stride | 准备含 `min(tile, extent - iter)` shape/stride 的 `DmaReshapeOp`。 | 运行 `test_dma_reshape_accepts_min_symbolic_contiguous_source_stride`。 | verifier 接受等价连续 stride，不因 `min` 表达式文本形式失败。 | `test_dma_reshape_accepts_min_symbolic_contiguous_source_stride` |
 | TC-DMA-019 | 内存/DMA | `dma.view` 动态布局输入 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_view_dynamic_symbol_int_layout_operands_valid`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.view` 动态布局输入”场景。 | `test_dma_view_dynamic_symbol_int_layout_operands_valid` |
@@ -744,6 +745,8 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-019F | 边界/异常 | `dma.subview` 公开 verifier 边界 | 准备非 i8 source、二维 result、space mismatch、size mismatch 与 byte bounds 越界输入。 | 运行 `test_dma_subview_rejects_invalid_contract_edges`。 | `dma.subview` 按公开错误语义拒绝非法输入。 | `test_dma_subview_rejects_invalid_contract_edges` |
 | TC-DMA-019C | 执行结果 | `dma.view` 合同返回类型对齐 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 [`test/dsl/ast/test_mlir_gen.py`](../../test/dsl/ast/test_mlir_gen.py)。 | 命令返回码、输出、执行结果或状态变更体现“`dma.view` 合同返回类型对齐”场景。 | [`test/dsl/ast/test_mlir_gen.py`](../../test/dsl/ast/test_mlir_gen.py) |
 | TC-DMA-020 | 内存/DMA | `dma.alloc` 动态形状输入 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_alloc_dynamic_symbol_int_shape_operands_valid`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.alloc` 动态形状输入”场景。 | `test_dma_alloc_dynamic_symbol_int_shape_operands_valid` |
+| TC-DMA-020A | 边界/异常 | `dma.alloc` 拒绝具名 operand 降级 unknown result | 准备具名 `!symbol.int<#symbol.expr<cur_n>>` operand 与 `?` result shape。 | 运行 `test_dma_alloc_unknown_placeholder_rejects_named_symbol_operands`。 | verifier 必须拒绝，避免丢失已知 shape 信息。 | `test_dma_alloc_unknown_placeholder_rejects_named_symbol_operands` |
+| TC-DMA-020B | 边界/异常 | `dma.alloc` 拒绝 unknown operand 伪装具名 result | 准备 `!symbol.int<#symbol.expr<?>>` operand 与具名 result shape。 | 运行 `test_dma_alloc_named_result_shape_rejects_unknown_symbol_operands`。 | verifier 必须拒绝，避免 `?` 被 SSA 名称伪造为稳定维度。 | `test_dma_alloc_named_result_shape_rejects_unknown_symbol_operands` |
 | TC-DMA-021 | 解析/打印 | 动态 shape round-trip | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_dma_dynamic_symbol_int_parse_print_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_dma_dynamic_symbol_int_parse_print_round_trip` |
 | TC-DMA-022 | 边界/异常 | 非法标量类型拒绝 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_rejects_non_symbol_int_scalar_operands`。 | “非法标量类型拒绝”场景按公开错误语义失败或被拒绝。 | `test_dma_rejects_non_symbol_int_scalar_operands` |
 | TC-DMA-023 | 边界/异常 | `dma.free` 释放内存 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_free_requires_nn_memory_type`。 | “`dma.free` 释放内存”场景按公开错误语义失败或被拒绝。 | `test_dma_free_requires_nn_memory_type` |

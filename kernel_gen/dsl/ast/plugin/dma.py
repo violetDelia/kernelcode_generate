@@ -25,6 +25,7 @@ from kernel_gen.dsl.ast.nodes import (
     ConstValueAST,
     Diagnostic,
     DmaAllocAST,
+    DmaBroadcastAST,
     DmaCastAST,
     DmaCopyAST,
     DmaDesliceAST,
@@ -106,6 +107,17 @@ def _build_copy(node: BuiltinCall) -> DmaCopyAST:
         diagnostic = Diagnostic("copy space must be MemorySpace", location)
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
     return DmaCopyAST(args[0], space, location=location)
+
+
+@dsl_builtin(dma.broadcast, DmaBroadcastAST)
+def _build_broadcast(node: BuiltinCall) -> DmaBroadcastAST:
+    """功能说明: 构造 dma.broadcast AST；使用示例: registry 调用该 builder。"""
+
+    args = node.args
+    if len(args) != 2 or node.kwargs:
+        diagnostic = Diagnostic("Unsupported broadcast arity", node.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
+    return DmaBroadcastAST(args[0], args[1], location=node.location)
 
 
 @dsl_builtin(dma.cast, DmaCastAST)

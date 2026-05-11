@@ -59,6 +59,7 @@ def _emit_npu_demo_kernel_binary_elewise(op: KernelBinaryElewiseOp, ctx) -> str:
         "sub": "sub",
         "mul": "mul",
         "div": "truediv",
+        "truediv": "truediv",
         "eq": "eq",
         "ne": "ne",
         "lt": "lt",

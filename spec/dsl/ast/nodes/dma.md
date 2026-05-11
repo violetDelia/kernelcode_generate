@@ -15,6 +15,7 @@
 - `class DmaFlattenAST(source: ValueAST, location: SourceLocation | None = None)`
 - `class DmaFreeAST(value: ValueAST, location: SourceLocation | None = None)`
 - `class DmaFillAST(target: ValueAST, value: ConstValueAST | SymbolDimAST, location: SourceLocation | None = None)`
+- `class DmaBroadcastAST(target: ValueAST, source: ValueAST, location: SourceLocation | None = None)`
 - `class DmaLoadAST(source: ValueAST, offset: SymbolListAST, size: SymbolListAST, stride: SymbolListAST | None = None, space: MemorySpaceAttrAST | None = None, location: SourceLocation | None = None)`
 - `class DmaSliceAST(source: ValueAST, offset: SymbolListAST, size: SymbolListAST, stride: SymbolListAST | None = None, space: MemorySpaceAttrAST | None = None, location: SourceLocation | None = None)`
 - `class DmaStoreAST(target: ValueAST, source: ValueAST, offset: SymbolListAST, size: SymbolListAST, stride: SymbolListAST | None = None, space: MemorySpaceAttrAST | None = None, location: SourceLocation | None = None)`
@@ -40,11 +41,13 @@
 - 会产生 memory 值的 DMA 节点必须实现 `result_memory() -> Memory | None`：`DmaAllocAST`、`DmaCopyAST`、`DmaCastAST`、`DmaViewAST`、`DmaReshapeAST`、`DmaFlattenAST`、`DmaLoadAST`、`DmaSliceAST`。
 - `result_memory()` 只能读取自身成员节点的 `result_memory()` / `result_symbols()`，不得依赖 `DslAstVisitor` 私有状态。
 - emit 阶段构造 runtime `Memory` 对应 `NnMemoryType` 时复用 `MemoryAST.type_from_memory(...)`，不得复制 dtype/space 分支表。
-- `DmaCopyAST.emit_mlir(...)`、`DmaCastAST.emit_mlir(...)`、`DmaViewAST.emit_mlir(...)`、`DmaReshapeAST.emit_mlir(...)`、`DmaFlattenAST.emit_mlir(...)`、`DmaLoadAST.emit_mlir(...)` 与 `DmaSliceAST.emit_mlir(...)` 必须从自身 `result_memory()` 获取结果类型；若 AST 无法给出结果 memory，必须稳定失败，不得从已发射 SSA type 反推 dtype 或 space；`DmaLoadAST` / `DmaSliceAST` 可用公开 `size` 参数名构造结果 shape/stride type。
-- `DmaLoadAST.emit_mlir(...)` 与 `DmaSliceAST.emit_mlir(...)` 若结果类型包含匿名 `?` shape，或公开 size 名与 SSA operand 的 symbol 文本不一致，`dma.alloc` 必须使用 full-rank dynamic shape operands，避免符号子集形态把未知 operand 与结果 shape 误判为不一致。
-- `DmaReshapeAST.emit_mlir(...)` 遇到 `!symbol.int<#symbol.expr<?>>` 的 shape operand 时，若该 operand 来自公开赋值名或 `SymbolDimAST` 名称，结果 `NnMemoryType.shape` 必须使用该名称作为 runtime 维度别名；无稳定名称时才保留匿名 `?`。
+- `DmaCopyAST.emit_mlir(...)`、`DmaCastAST.emit_mlir(...)`、`DmaViewAST.emit_mlir(...)`、`DmaReshapeAST.emit_mlir(...)`、`DmaFlattenAST.emit_mlir(...)`、`DmaLoadAST.emit_mlir(...)` 与 `DmaSliceAST.emit_mlir(...)` 必须从自身 `result_memory()` 获取结果类型；若 AST 无法给出结果 memory，必须稳定失败，不得从已发射 SSA type 反推 dtype 或 space。
+- `DmaLoadAST.emit_mlir(...)` 与 `DmaSliceAST.emit_mlir(...)` 若 size operand 类型为 `!symbol.int<?>`，对应 `dma.alloc` result shape 也必须保留 `?`，不得用 `cur_n`、`input_h_tile` 这类 DSL 局部变量名伪装为稳定符号；此时 `dma.alloc` 必须使用 full-rank dynamic shape operands。
+- `DmaLoadAST.emit_mlir(...)` 与 `DmaSliceAST.emit_mlir(...)` 若 `size` operand 类型为 `!symbol.int<?>`，底层 `dma.alloc` result shape/stride 必须保持 `?`，不得追加 `dma.reshape` 伪造公开 `size` 名。
+- `DmaReshapeAST.emit_mlir(...)` 可保留本地 shape 计算结果名作为 result shape 别名；该命名规则不得反向套用到 `load/slice` 生成的 `dma.alloc`。
+- `DmaReshapeAST.emit_mlir(...)` 遇到 `!symbol.int<#symbol.expr<?>>` 的 shape operand 时，若该 operand 来自本地 symbol op 结果且存在公开赋值名，结果 `NnMemoryType.shape` 必须使用该名称作为 runtime 维度别名；若 operand 是函数形参或无稳定名称，则必须保留匿名 `?`。
 - 公开 AST 测试必须覆盖动态 `alloc` shape / stride、`IntTypeAttrAST` signed / unsigned dtype、`load` / `slice` 动态 `TensorAxisAccessAST` size、`fill` bool / int / float / symbol / string value matrix、Operation source/target 公开输入、动态 flatten shape 以及 `free` / `fill` / `view` / `reshape` / `flatten` / `load` / `slice` / `store` / `deslice` 的公开错误矩阵；对应测试入口为 `test_dma_alloc_emit_mlir_handles_parameterized_public_shape_expressions`、`test_dma_emit_mlir_handles_dynamic_public_memory_paths`、`test_dma_fill_emit_mlir_handles_public_value_and_dtype_matrix`、`test_dma_emit_mlir_reports_public_error_matrix` 与 `test_dma_flatten_public_dynamic_and_scalar_shape_matrix`。
-- 读类 DMA 对公开命名但 SSA 类型未知的 alloc 边界由 `test_dma_slice_uses_full_rank_dynamic_shape_for_unknown_named_result` 覆盖。
+- 读类 DMA 对公开命名但 SSA 类型未知的 alloc 边界由 `test_dma_slice_preserves_unknown_shape_operands_in_alloc_result_type` 覆盖。
 
 ## API详细说明
 
@@ -179,6 +182,22 @@
 - 功能说明：执行 `DmaFillAST`，把 DSL AST 节点转换为公开 MLIR/IR 结果或读取节点公开属性。
 - 注意事项：构造参数必须是公开 AST 节点、公开 symbol/memory 类型或签名声明的 Python 基础值；不得传入内部 visitor/helper 状态。
 
+### `class DmaBroadcastAST(target: ValueAST, source: ValueAST, location: SourceLocation | None = None)`
+
+- api：`class DmaBroadcastAST(target: ValueAST, source: ValueAST, location: SourceLocation | None = None)`
+- 参数：
+  - `target`：目标 memory 节点；类型 `ValueAST`；无默认值；必须能公开返回 `Memory`。
+  - `source`：源 memory 节点；类型 `ValueAST`；无默认值；必须能公开返回 `Memory`。
+  - `location`：源码位置；类型 `SourceLocation | None`；默认值 `None`。
+- 返回值：公开对象；`emit_mlir(...)` 返回 `DmaBroadcastOp`。
+- 使用示例：
+
+  ```python
+    result = DmaBroadcastAST(target=target, source=source, location=location)
+  ```
+- 功能说明：执行 `DmaBroadcastAST`，把 `dma.broadcast(target, source)` DSL 调用转换为无结果 `dma.broadcast` IR。
+- 注意事项：必须复用 `kernel_gen.operation.dma.broadcast(...)` 的公开校验；不得从 SSA type 私自反推未公开 memory 元信息。
+
 ### `class DmaLoadAST(source: ValueAST, offset: SymbolListAST, size: SymbolListAST, stride: SymbolListAST | None = None, space: MemorySpaceAttrAST | None = None, location: SourceLocation | None = None)`
 
 - api：`class DmaLoadAST(source: ValueAST, offset: SymbolListAST, size: SymbolListAST, stride: SymbolListAST | None = None, space: MemorySpaceAttrAST | None = None, location: SourceLocation | None = None)`
@@ -278,7 +297,8 @@
 | TC-DSL-AST-NODES-DMA-006 | 边界/异常 | DMA emit MLIR accepts public nodes and reports public errors | 准备公开 Context、Block 与 MemoryAST 输入。 | 运行 `test_dma_emit_mlir_accepts_public_nodes_and_reports_public_errors`。 | 公开 DMA AST 节点可发射为 MLIR op 或语句；非法公开参数按稳定 `KernelCodeError` 文本失败。 | `test_dma_emit_mlir_accepts_public_nodes_and_reports_public_errors` |
 | TC-DSL-AST-NODES-DMA-007 | 符号语义 | DMA alloc emit MLIR handles parameterized public shape expressions | 准备随机化公开 symbol 表达式、dtype、space 与 stride 输入。 | 运行 `test_dma_alloc_emit_mlir_handles_parameterized_public_shape_expressions`。 | `DmaAllocAST.emit_mlir(...)` 覆盖 add/sub/mul/truediv/floordiv shape 表达式、bool/int dtype 与 contiguous stride 合同。 | `test_dma_alloc_emit_mlir_handles_parameterized_public_shape_expressions` |
 | TC-DSL-AST-NODES-DMA-008 | 内存/DMA | DMA emit MLIR handles dynamic public memory paths | 准备含符号 shape 的公开 MemoryAST 与切片参数。 | 运行 `test_dma_emit_mlir_handles_dynamic_public_memory_paths`。 | copy/cast/view/reshape/flatten/load/slice/store/deslice 通过公开 AST 入口处理动态内存路径。 | `test_dma_emit_mlir_handles_dynamic_public_memory_paths` |
-| TC-DSL-AST-NODES-DMA-008A | 内存/DMA | DMA reshape unknown shape uses public name | 准备 `DmaReshapeAST(source, [SymbolDimAST("k_tile"), SymbolDimAST("out_tile")])`，shape SSA 类型为 `?` 且带同名 name_hint。 | 运行 `test_dma_reshape_uses_public_name_for_unknown_shape_operand`。 | 结果 shape 使用 `k_tile/out_tile`，shape operand 仍保持 `?`，dialect verifier 通过。 | `test_dma_reshape_uses_public_name_for_unknown_shape_operand` |
+| TC-DSL-AST-NODES-DMA-008A | 内存/DMA | DMA reshape unknown local shape stays question | 准备 `DmaReshapeAST(source, [SymbolDimAST("k_tile"), SymbolDimAST("out_tile")])`，shape SSA 来自本地 op、类型为 `?` 且带同名 name_hint。 | 运行 `test_dma_reshape_keeps_unknown_shape_operand_as_question`。 | 结果 shape/stride 保持 `?`，不得使用 `k_tile/out_tile` 伪造稳定维度，dialect verifier 通过。 | `test_dma_reshape_keeps_unknown_shape_operand_as_question` |
+| TC-DSL-AST-NODES-DMA-008B | 内存/DMA | DMA slice keeps unknown alloc shape without reshape aliases | 准备 `DmaSliceAST(source, size=[cur_n, cur_c, 3, 3])`，`cur_n/cur_c` 的 SSA 类型为 `?`。 | 运行 `test_dma_slice_preserves_unknown_shape_operands_in_alloc_result_type`。 | 底层 `dma.alloc` result shape 保持 `[?, ?, 3, 3]`，返回值仍为该 alloc result，不追加命名 `dma.reshape`。 | `test_dma_slice_preserves_unknown_shape_operands_in_alloc_result_type` |
 | TC-DSL-AST-NODES-DMA-009 | 边界/异常 | DMA fill emit MLIR handles public value and dtype matrix | 准备 bool/int/float dtype 的公开 MemoryAST 与标量/symbol/string 值。 | 运行 `test_dma_fill_emit_mlir_handles_public_value_and_dtype_matrix`。 | `DmaFillAST.emit_mlir(...)` 覆盖公开 value/dtype 矩阵，非法组合按稳定 `KernelCodeError` 文本失败。 | `test_dma_fill_emit_mlir_handles_public_value_and_dtype_matrix` |
 | TC-DSL-AST-NODES-DMA-010 | 边界/异常 | DMA emit MLIR reports public error matrix | 准备非法公开 ValueAST、MemoryAST、shape/stride 参数与 dtype 输入。 | 运行 `test_dma_emit_mlir_reports_public_error_matrix`。 | DMA AST 对非法 source/target/offset/size/stride/dtype 按稳定 `KernelCodeError` 文本失败。 | `test_dma_emit_mlir_reports_public_error_matrix` |
 | TC-DSL-AST-NODES-DMA-011 | 符号语义 | DMA flatten public dynamic and scalar shape matrix | 准备多维符号 shape 与 rank-0 公开 MemoryAST 输入。 | 运行 `test_dma_flatten_public_dynamic_and_scalar_shape_matrix`。 | `DmaFlattenAST.emit_mlir(...)` 覆盖动态 shape 乘积与标量输入公开路径。 | `test_dma_flatten_public_dynamic_and_scalar_shape_matrix` |

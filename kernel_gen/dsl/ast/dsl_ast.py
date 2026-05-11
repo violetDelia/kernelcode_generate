@@ -111,7 +111,7 @@ from kernel_gen.operation import dma as _operation_dma
 from kernel_gen.operation import kernel as _operation_kernel
 from kernel_gen.operation import nn as _operation_nn
 from kernel_gen.operation.arch import BarrierScope, BarrierVisibility
-from kernel_gen.operation.kernel import KernelBinaryElewiseKind
+from kernel_gen.operation.kernel import KernelBinaryElewiseKind, KernelReduceKind
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
@@ -179,22 +179,19 @@ _DEFAULT_DSL_HELPERS: dict[str, DslCallable] = {
 
 _IMPORTABLE_DSL_HELPER_MODULES: dict[str, dict[str, DslCallable]] = {
     "kernel_gen.operation.dma": {
-        name: value
-        for name, value in _DEFAULT_DSL_HELPERS.items()
-        if value in {
-            _operation_dma.alloc,
-            _operation_dma.copy,
-            _operation_dma.cast,
-            _operation_dma.view,
-            _operation_dma.reshape,
-            _operation_dma.flatten,
-            _operation_dma.free,
-            _operation_dma.fill,
-            _operation_dma.load,
-            _operation_dma.slice,
-            _operation_dma.store,
-            _operation_dma.deslice,
-        }
+        "alloc": _operation_dma.alloc,
+        "copy": _operation_dma.copy,
+        "broadcast": _operation_dma.broadcast,
+        "cast": _operation_dma.cast,
+        "view": _operation_dma.view,
+        "reshape": _operation_dma.reshape,
+        "flatten": _operation_dma.flatten,
+        "free": _operation_dma.free,
+        "fill": _operation_dma.fill,
+        "load": _operation_dma.load,
+        "slice": _operation_dma.slice,
+        "store": _operation_dma.store,
+        "deslice": _operation_dma.deslice,
     },
     "kernel_gen.operation.nn": {
         name: value
@@ -246,6 +243,8 @@ _IMPORTABLE_DSL_HELPER_MODULES: dict[str, dict[str, DslCallable]] = {
             "le": _operation_kernel.le,
             "gt": _operation_kernel.gt,
             "ge": _operation_kernel.ge,
+            "exp": _operation_kernel.exp,
+            "reduce": _operation_kernel.reduce,
             "matmul": _operation_kernel.matmul,
             "img2col1d": _operation_kernel.img2col1d,
             "img2col2d": _operation_kernel.img2col2d,
@@ -1454,10 +1453,14 @@ class DslAstVisitor(py_ast.NodeVisitor):
                 return PythonObjectAttrAST(_IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.kernel"][node.attr], location)
             if base is _operation_kernel and node.attr == "KernelBinaryElewiseKind":
                 return PythonObjectAttrAST(KernelBinaryElewiseKind, location)
+            if base is _operation_kernel and node.attr == "KernelReduceKind":
+                return PythonObjectAttrAST(KernelReduceKind, location)
             if base is _operation_arch and node.attr in _IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.arch"]:
                 return PythonObjectAttrAST(_IMPORTABLE_DSL_HELPER_MODULES["kernel_gen.operation.arch"][node.attr], location)
             if base is KernelBinaryElewiseKind and node.attr in KernelBinaryElewiseKind.__members__:
                 return PythonObjectAttrAST(KernelBinaryElewiseKind[node.attr], location)
+            if base is KernelReduceKind and node.attr in KernelReduceKind.__members__:
+                return PythonObjectAttrAST(KernelReduceKind[node.attr], location)
             if base is MemorySpace and node.attr in MemorySpace.__members__:
                 return PythonObjectAttrAST(MemorySpace[node.attr], location)
             if base is NumericType and node.attr in NumericType.__members__:
@@ -1472,4 +1475,6 @@ class DslAstVisitor(py_ast.NodeVisitor):
                 base = base_node.attr
                 if base is KernelBinaryElewiseKind and node.attr in KernelBinaryElewiseKind.__members__:
                     return PythonObjectAttrAST(KernelBinaryElewiseKind[node.attr], location)
+                if base is KernelReduceKind and node.attr in KernelReduceKind.__members__:
+                    return PythonObjectAttrAST(KernelReduceKind[node.attr], location)
         raise KernelCodeError(ErrorKind.UNSUPPORTED, ErrorModule.AST, f"Unsupported attribute: {node.attr}")

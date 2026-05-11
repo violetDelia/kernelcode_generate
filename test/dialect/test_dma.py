@@ -645,12 +645,12 @@ def test_dma_reshape_allows_dynamic_symbol_int_shape_operands() -> None:
 
 
 # TC-DMA-017D
-# 功能说明: 验证 dma.reshape 允许 `?` shape operand 通过 SSA name_hint 承接显式 runtime 维度别名。
-# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_reshape_allows_named_unknown_shape_operands
+# 功能说明: 验证 dma.reshape 拒绝 `?` shape operand 伪装成具名 result shape。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_reshape_rejects_named_result_from_unknown_shape_operands
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma.py
-def test_dma_reshape_allows_named_unknown_shape_operands() -> None:
+def test_dma_reshape_rejects_named_result_from_unknown_shape_operands() -> None:
     source_type = _make_memory_type(
         shape=_dim_array(["TOTAL"]),
         stride=_dim_array([1]),
@@ -668,7 +668,8 @@ def test_dma_reshape_allows_named_unknown_shape_operands() -> None:
     shape_operands[1].name_hint = "out_tile"
     op = DmaReshapeOp(source, shape_operands, result_type)
 
-    op.verify()
+    with pytest.raises(VerifyException, match="shape must match result shape"):
+        op.verify()
 
 
 # TC-DMA-017B
@@ -1089,29 +1090,37 @@ def test_dma_alloc_dynamic_symbol_int_shape_operands_valid() -> None:
     op = DmaAllocOp(_make_symbol_operands(["M"]), mixed_result_type)
     op.verify()
 
+    unknown_mixed_result_type = _make_memory_type(
+        shape=_dim_array(["?", 4]),
+        stride=_dim_array([4, 1]),
+    )
+    op = DmaAllocOp(_make_symbol_operands(["?"]), unknown_mixed_result_type)
+    op.verify()
+
 
 # TC-DMA-020A
-# 功能说明: 验证 dma.alloc full-rank dynamic_shape 允许匿名 `?` 结果布局由具名运行时符号 operand 承接。
-# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_alloc_unknown_placeholder_accepts_named_symbol_operands
+# 功能说明: 验证 dma.alloc full-rank dynamic_shape 拒绝具名 operand 降级成匿名 `?` result shape。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_alloc_unknown_placeholder_rejects_named_symbol_operands
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma.py
-def test_dma_alloc_unknown_placeholder_accepts_named_symbol_operands() -> None:
+def test_dma_alloc_unknown_placeholder_rejects_named_symbol_operands() -> None:
     result_type = _make_memory_type(
         shape=_dim_array(["?", "?"]),
         stride=_dim_array(["?", 1]),
     )
     op = DmaAllocOp(_make_symbol_operands(["cur_n", "cur_c"]), result_type)
-    op.verify()
+    with pytest.raises(VerifyException, match="dynamic_shape must match result shape"):
+        op.verify()
 
 
 # TC-DMA-020B
-# 功能说明: 验证 dma.alloc full-rank dynamic_shape 允许 `?` operand 承接具名运行时结果 shape。
-# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_alloc_named_result_shape_accepts_unknown_symbol_operands
+# 功能说明: 验证 dma.alloc full-rank dynamic_shape 拒绝 `?` operand 伪装成具名 result shape。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_alloc_named_result_shape_rejects_unknown_symbol_operands
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma.py
-def test_dma_alloc_named_result_shape_accepts_unknown_symbol_operands() -> None:
+def test_dma_alloc_named_result_shape_rejects_unknown_symbol_operands() -> None:
     result_type = _make_memory_type(
         shape=_dim_array(["cur_n", "cur_c"]),
         stride=_dim_array(["cur_c", 1]),
@@ -1121,7 +1130,8 @@ def test_dma_alloc_named_result_shape_accepts_unknown_symbol_operands() -> None:
         _TestOp(result_types=[SymbolValueType.from_expr("?")]).results[0],
     ]
     op = DmaAllocOp(unknown_operands, result_type)
-    op.verify()
+    with pytest.raises(VerifyException, match="dynamic_shape must match result shape"):
+        op.verify()
 
 
 # TC-DMA-021
@@ -1538,7 +1548,15 @@ def test_dma_transpose_rejects_invalid_perm() -> None:
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma.py
 def test_dma_public_verifier_boundary_matrix() -> None:
-    with pytest.raises(VerifyException, match="dynamic_shape must not contain"):
+    DmaAllocOp(
+        _make_symbol_operands(["?"]),
+        _make_memory_type(
+            shape=_dim_array(["?", 4]),
+            stride=_dim_array([4, 1]),
+        ),
+    ).verify()
+
+    with pytest.raises(VerifyException, match="dynamic_shape symbol must match result shape"):
         DmaAllocOp(
             _make_symbol_operands(["N"]),
             _make_memory_type(

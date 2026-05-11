@@ -20,10 +20,11 @@ import random
 
 import pytest
 from xdsl.context import Context
+from xdsl.dialects.test import TestOp
 from xdsl.ir import Block, Operation, SSAValue
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.dma import DmaAllocOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaReshapeOp
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
 from kernel_gen.dsl.ast.nodes.attr import BoolTypeAttrAST, FloatTypeAttrAST, IntTypeAttrAST, MemorySpaceAttrAST
 from kernel_gen.dsl.ast.nodes.basic import MemoryAST, ValueAST
@@ -31,6 +32,7 @@ from kernel_gen.dsl.ast.nodes.symbol import ConstValueAST, SymbolListAST
 from kernel_gen.dsl.ast.nodes.symbol import SymbolAddAST, SymbolDimAST, SymbolFloorDivAST, SymbolMulAST, SymbolSubAST, SymbolTrueDivAST, TensorAxisAccessAST
 from kernel_gen.dsl.ast.nodes.dma import (
     DmaAllocAST,
+    DmaBroadcastAST,
     DmaCastAST,
     DmaCopyAST,
     DmaDesliceAST,
@@ -127,6 +129,19 @@ def test_dma_write_nodes_keep_target_first_contract() -> None:
     assert deslice.target is target
     assert deslice.source is source
     assert isinstance(deslice.size, SymbolListAST)
+
+
+def test_dma_broadcast_node_emits_broadcast_op() -> None:
+    """DmaBroadcastAST 发射 target-first dma.broadcast。"""
+
+    target = _memory("target", [4, 8])
+    source = _memory("source", [1, 8])
+    ctx, block = _block_for_memories(target, source)
+
+    emitted = DmaBroadcastAST(target, source).emit_mlir(ctx, block)
+
+    assert isinstance(emitted, DmaBroadcastOp)
+    assert len(emitted.results) == 0
 
 
 class SsaOnlyMemoryAST(ValueAST):
@@ -403,21 +418,55 @@ def test_dma_slice_uses_full_rank_dynamic_shape_for_unknown_named_result() -> No
     emitted.owner.verify()
 
 
-def test_dma_reshape_uses_public_name_for_unknown_shape_operand() -> None:
-    """DmaReshapeAST 对公开赋值名的 `?` shape operand 生成稳定 runtime 维度别名。"""
+def test_dma_slice_preserves_unknown_shape_operands_in_alloc_result_type() -> None:
+    """DmaSliceAST 的 `dma.alloc` 保持 `?`，且不再用 reshape 伪造公开 size 名。"""
+
+    source = MemoryAST.from_memory("source", Memory([8, 8, 3, 3], NumericType.Float32))
+    ctx = Context()
+    block = Block(arg_types=[source.to_mlir_type(ctx)])
+    block.args[0].name_hint = "source"
+    cur_n = TestOp(result_types=[SymbolValueType.from_expr("?")])
+    cur_c = TestOp(result_types=[SymbolValueType.from_expr("?")])
+    cur_n.results[0].name_hint = "cur_n"
+    cur_c.results[0].name_hint = "cur_c"
+    block.add_ops([cur_n, cur_c])
+
+    emitted = DmaSliceAST(
+        source,
+        [0, 0, 0, 0],
+        [
+            SymbolDimAST("cur_n", runtime_symbol=SymbolDim("?")),
+            SymbolDimAST("cur_c", runtime_symbol=SymbolDim("?")),
+            3,
+            3,
+        ],
+        None,
+        MemorySpace.SM,
+    ).emit_mlir(ctx, block)
+
+    assert isinstance(emitted, SSAValue)
+    assert isinstance(emitted.owner, DmaAllocOp)
+    alloc_ops = [op for op in block.ops if isinstance(op, DmaAllocOp)]
+    assert len(alloc_ops) == 1
+    alloc_op = alloc_ops[0]
+    assert [dim.expr.data for dim in alloc_op.result.type.shape.data] == ["?", "?", "3", "3"]
+    assert [dim.expr.data for dim in alloc_op.result.type.stride.data] == ["?", "9", "3", "1"]
+    assert [operand.type.get_value() for operand in alloc_op.dynamic_shape] == ["?", "?", 3, 3]
+    alloc_op.verify()
+
+
+def test_dma_reshape_keeps_unknown_shape_operand_as_question() -> None:
+    """DmaReshapeAST 对公开赋值名的 `?` shape operand 仍生成匿名 `?` 结果类型。"""
 
     source = MemoryAST.from_memory("source", Memory([SymbolDim("TOTAL")], NumericType.Float32))
     ctx = Context()
-    block = Block(
-        arg_types=[
-            source.to_mlir_type(ctx),
-            SymbolValueType.from_expr("?"),
-            SymbolValueType.from_expr("?"),
-        ]
-    )
+    block = Block(arg_types=[source.to_mlir_type(ctx)])
     block.args[0].name_hint = "source"
-    block.args[1].name_hint = "k_tile"
-    block.args[2].name_hint = "out_tile"
+    k_tile = TestOp(result_types=[SymbolValueType.from_expr("?")])
+    out_tile = TestOp(result_types=[SymbolValueType.from_expr("?")])
+    k_tile.results[0].name_hint = "k_tile"
+    out_tile.results[0].name_hint = "out_tile"
+    block.add_ops([k_tile, out_tile])
 
     emitted = DmaReshapeAST(
         source,
@@ -428,8 +477,8 @@ def test_dma_reshape_uses_public_name_for_unknown_shape_operand() -> None:
     ).emit_mlir(ctx, block)
 
     assert isinstance(emitted, Operation)
-    assert [dim.expr.data for dim in emitted.result.type.shape.data] == ["k_tile", "out_tile"]
-    assert [dim.expr.data for dim in emitted.result.type.stride.data] == ["out_tile", "1"]
+    assert [dim.expr.data for dim in emitted.result.type.shape.data] == ["?", "?"]
+    assert [dim.expr.data for dim in emitted.result.type.stride.data] == ["?", "1"]
     assert [operand.type.get_value() for operand in emitted.shape] == ["?", "?"]
     emitted.verify()
 

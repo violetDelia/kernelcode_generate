@@ -6,7 +6,7 @@
 - 输入与输出使用符号维度标注，并由真实 torch tensor 运行时 shape 绑定。
 - demo 输入规模固定在 `N≈12, C≈32, H≈256, W≈256`，运行时按固定 seed 在 `N[11,13] / C[30,34] / H,W[248,264]` 内取值。
 - stride、dilation、padding 与 tile 均作为编译期 `SymbolDim` 形参进入 `run_lowering_demo(...)`，并以容量安全的整数 runtime scalar 传给 `ExecutionEngine` device entry。
-- 当 `tile_c < C` 时在 `c0` tile 循环内对同一个输出 tile 做 C 维累计和，而不是拆成固定两段 matmul 后相加。
+- 当 `tile_c < C` 时在 `c0` tile 循环内用 `kernel.img2col2d/kernel.matmul/kernel.add` 对同一个输出 tile 做 C 维累计和，而不是拆成固定两段 matmul 后相加。
 - 编译期用 `B/N/C/XH/XW/KH/KW/SH/SW/DH/DW/PT/PB/PL/PR/TF/TC/TN/THO/TWO` 语义化符号走 `gen_kernel` 生成动态 memory IR/source。
 - output 编译期 memory 形状为完整非对称 padding 公式：`((XH + PT + PB - DH * (KH - 1) - 1) floordiv SH) + 1` 与 `((XW + PL + PR - DW * (KW - 1) - 1) floordiv SW) + 1`。
 - lowering 后 memory-pool 形态必须使用 `arch.get_dynamic_memory + dma.view`，不得残留 `dma.alloc` / `allalloc`。
@@ -40,8 +40,9 @@ if str(_REPO_ROOT) not in sys.path:
 
 from kernel.runner import run_lowering_demo
 from kernel_gen.execute_engine import ExecutionEngine
-from kernel_gen.operation.dma import deslice, fill, reshape, slice
-from kernel_gen.operation.nn import add, img2col2d, matmul, transpose
+from kernel_gen.operation import kernel
+from kernel_gen.operation.dma import alloc, deslice, fill, reshape, slice
+from kernel_gen.operation.nn import transpose
 from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -77,7 +78,7 @@ def conv2d_inputs_dynamic_tile_dynamic_kernel(
     功能说明:
     - 输入、输出与权重维度来自 `Tensor[...]` 符号维度，布局为 input[B,N,XH,XW]、weight[C,N,KH,KW]、out[B,C,HO,WO]。
     - stride/dilation/padding/tile shape 使用 runtime scalar 绑定。
-    - C 维按 `tile_c` 循环分块，并在写回前累计所有 partial。
+    - C 维按 `tile_c` 循环分块，并通过 `kernel.img2col2d/kernel.matmul/kernel.add` out-first helper 在写回前累计所有 partial。
 
     使用示例:
     - `conv2d_inputs_dynamic_tile_dynamic_kernel(out, input_tensor, weight, 1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 1, 1, 7)`
@@ -119,17 +120,18 @@ def conv2d_inputs_dynamic_tile_dynamic_kernel(
                         k_tile = cur_c * kh_size * kw_size
                         input_tile = slice(input_tensor, [n0, c0, input_h_start, input_w_start], [cur_n, cur_c, input_h_tile, input_w_tile], [1, 1, 1, 1], MemorySpace.TSM)
                         weight_tile = slice(weight, [f0, c0, 0, 0], [cur_f, cur_c, kh_size, kw_size], [1, 1, 1, 1], MemorySpace.TSM)
-                        col = img2col2d(input_tile, kh=kh_size, kw=kw_size, sh=stride_h, sw=stride_w, dh=dilation_h, dw=dilation_w, ph=local_pad_top, pw=local_pad_bottom, pl=local_pad_left, pr=local_pad_right)
+                        col = alloc([cur_n, cur_c, kh_size, kw_size, cur_ho, cur_wo], NumericType.Float32, MemorySpace.TSM)
+                        kernel.img2col2d(col, input_tile, kh=kh_size, kw=kw_size, sh=stride_h, sw=stride_w, dh=dilation_h, dw=dilation_w, ph=local_pad_top, pw=local_pad_bottom, pl=local_pad_left, pr=local_pad_right)
                         col2 = reshape(col, [k_tile, out_tile])
                         weight2 = reshape(weight_tile, [cur_f, k_tile])
-                        out2 = matmul(weight2, col2)
+                        out2 = alloc([cur_f, out_tile], NumericType.Float32, MemorySpace.TSM)
+                        kernel.matmul(out2, weight2, col2)
                         out_fnhw = reshape(out2, [cur_f, cur_n, cur_ho, cur_wo])
+                        out_tile_mem = slice(out, [n0, f0, ho0, wo0], [cur_n, cur_f, cur_ho, cur_wo], [1, 1, 1, 1], MemorySpace.TSM)
+                        kernel.add(out_tile_mem, out_tile_mem, transpose(out_fnhw, [1, 0, 2, 3]))
                         deslice(
                             out,
-                            add(
-                                slice(out, [n0, f0, ho0, wo0], [cur_n, cur_f, cur_ho, cur_wo], [1, 1, 1, 1], MemorySpace.TSM),
-                                transpose(out_fnhw, [1, 0, 2, 3]),
-                            ),
+                            out_tile_mem,
                             [n0, f0, ho0, wo0],
                             [cur_n, cur_f, cur_ho, cur_wo],
                             [1, 1, 1, 1],

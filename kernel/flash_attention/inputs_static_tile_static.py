@@ -5,6 +5,7 @@
 - 实现 `inputs 静 + tile 静` 的 Flash Attention kernel demo。
 - 输入固定为 `Q/K/V/out[4, 4, 8, 4]`，避免过小 batch/head shape 且保持 npu_demo TSM 容量安全。
 - tile 固定为 `Br=4`、`Bc=8`，每个 query tile 一次覆盖完整 key/value 序列。
+- softmax 显式展开为 `kernel.reduce + dma.broadcast + kernel.exp + kernel.truediv`，不调用 `nn.softmax`。
 - 通过 `dsl_run` 真实执行，并和 `torch.softmax(q @ k^T) @ v` 参考结果对齐。
 
 API 列表:
@@ -31,10 +32,12 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from kernel.runner import run_torch_demo
-from kernel_gen.operation.dma import deslice, reshape, slice
-from kernel_gen.operation.nn import matmul, softmax, transpose
+from kernel_gen.operation import kernel
+from kernel_gen.operation.dma import alloc, broadcast, deslice, reshape, slice
+from kernel_gen.operation.nn import transpose
 from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import MemorySpace
+from kernel_gen.symbol_variable.type import NumericType
 
 
 def flash_attention_inputs_static_tile_static_kernel(
@@ -49,13 +52,15 @@ def flash_attention_inputs_static_tile_static_kernel(
     功能说明:
     - 输入布局为 `[B, H, SL, D]`。
     - 固定 `Br=4`、`Bc=8` 做 softmax 分块。
+    - 主计算入口使用 kernel out-first helper，softmax 展开为 reduce/broadcast/exp/truediv。
     - 输出写回 `out[B, H, SL, D]`。
 
     使用示例:
     - `flash_attention_inputs_static_tile_static_kernel(out, q, k, v)`
     """
 
-    batch_size, head_size, seq_len, dim_size = q.get_shape()
+    batch_size, head_size, seq_len, _dim_size = q.get_shape()
+    dim_size = 4
     br = 4
     bc = 8
     for b0 in loop(0, batch_size, 1):
@@ -67,9 +72,25 @@ def flash_attention_inputs_static_tile_static_kernel(
                 k_tile = reshape(k_4d, [bc, dim_size])
                 v_4d = slice(v, [b0, h0, 0, 0], [1, 1, bc, dim_size], [1, 1, 1, 1], MemorySpace.TSM)
                 v_tile = reshape(v_4d, [bc, dim_size])
-                score = matmul(q_tile, transpose(k_tile, [1, 0]))
-                prob = softmax(score, axis=1)
-                weighted = matmul(prob, v_tile)
+                k_transposed = transpose(k_tile, [1, 0])
+                score = alloc([br, bc], NumericType.Float32, MemorySpace.TSM)
+                kernel.matmul(score, q_tile, k_transposed)
+                row_max = alloc([br, 1], NumericType.Float32, MemorySpace.TSM)
+                kernel.reduce(row_max, score, kind=kernel.KernelReduceKind.MAX, axis=1, keepdim=True)
+                row_max_full = alloc([br, bc], NumericType.Float32, MemorySpace.TSM)
+                broadcast(row_max_full, row_max)
+                shifted_score = alloc([br, bc], NumericType.Float32, MemorySpace.TSM)
+                kernel.sub(shifted_score, score, row_max_full)
+                exp_score = alloc([br, bc], NumericType.Float32, MemorySpace.TSM)
+                kernel.exp(exp_score, shifted_score)
+                row_sum = alloc([br, 1], NumericType.Float32, MemorySpace.TSM)
+                kernel.reduce(row_sum, exp_score, kind=kernel.KernelReduceKind.SUM, axis=1, keepdim=True)
+                row_sum_full = alloc([br, bc], NumericType.Float32, MemorySpace.TSM)
+                broadcast(row_sum_full, row_sum)
+                prob = alloc([br, bc], NumericType.Float32, MemorySpace.TSM)
+                kernel.truediv(prob, exp_score, row_sum_full)
+                weighted = alloc([br, dim_size], NumericType.Float32, MemorySpace.TSM)
+                kernel.matmul(weighted, prob, v_tile)
                 o_4d = reshape(weighted, [1, 1, br, dim_size])
                 deslice(out, o_4d, [b0, h0, m0, 0], [1, 1, br, dim_size], [1, 1, 1, 1])
 

@@ -24,6 +24,7 @@ from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dsl.ast import (
     BoundExprAST,
     DmaAllocAST,
+    DmaBroadcastAST,
     DmaCastAST,
     DmaCopyAST,
     DmaDesliceAST,
@@ -39,7 +40,7 @@ from kernel_gen.dsl.ast import (
     SymbolListAST,
     parse_function,
 )
-from kernel_gen.operation.dma import alloc, cast, copy, deslice, fill, flatten, free, load, reshape, slice, store, view
+from kernel_gen.operation.dma import alloc, broadcast, cast, copy, deslice, fill, flatten, free, load, reshape, slice, store, view
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.memory import MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
@@ -71,6 +72,52 @@ def _dma_flatten_kernel(x):
 
 def _dma_free_kernel(dst, src):
     free(dst)
+
+
+def _dma_broadcast_kernel(dst, src):
+    broadcast(dst, src)
+
+
+def _dma_fill_kernel(x):
+    """构造 fill 语句测试 kernel。
+
+    功能说明:
+    - 通过公开 `fill` helper 生成 `DmaFillAST`。
+
+    使用示例:
+    - parse_function(_dma_fill_kernel, memory)
+    """
+
+    fill(x, "-inf")
+
+
+def _dma_load_slice_kernel(x):
+    """构造 load/slice 返回测试 kernel。
+
+    功能说明:
+    - 通过公开 `load` 与 `slice` helper 生成读取节点。
+
+    使用示例:
+    - parse_function(_dma_load_slice_kernel, memory)
+    """
+
+    a = load(x, [0], [4], [1])
+    b = slice(x, [4], [4], [1])
+    return b
+
+
+def _dma_store_deslice_kernel(dst, src):
+    """构造 store/deslice 语句测试 kernel。
+
+    功能说明:
+    - 通过公开 `store` 与 `deslice` helper 生成写回节点。
+
+    使用示例:
+    - parse_function(_dma_store_deslice_kernel, target, source)
+    """
+
+    store(dst, src, [0], [4], [1])
+    deslice(dst, src, [4], [4], [1])
 
 
 def _dma_load_with_space_kernel(x):
@@ -244,10 +291,7 @@ def test_dma_fill_parses_to_specific_node() -> None:
 
     memory = Memory([4], NumericType.Float32)
 
-    def kernel(x):
-        fill(x, "-inf")
-
-    func_ast = parse_function(kernel, memory)
+    func_ast = parse_function(_dma_fill_kernel, memory)
 
     fill_nodes = [node for node in func_ast.body.statements if isinstance(node, DmaFillAST)]
     assert len(fill_nodes) == 1
@@ -259,12 +303,7 @@ def test_dma_load_slice_parse_to_specific_nodes() -> None:
 
     memory = Memory([8], NumericType.Float32)
 
-    def kernel(x):
-        a = load(x, [0], [4], [1])
-        b = slice(x, [4], [4], [1])
-        return b
-
-    func_ast = parse_function(kernel, memory)
+    func_ast = parse_function(_dma_load_slice_kernel, memory)
     bound_values = [node.value for node in func_ast.body.statements if isinstance(node, BoundExprAST)]
 
     assert any(isinstance(node, DmaLoadAST) for node in bound_values)
@@ -278,11 +317,7 @@ def test_dma_store_deslice_parse_to_specific_nodes() -> None:
     target = Memory([8], NumericType.Float32)
     source = Memory([4], NumericType.Float32)
 
-    def kernel(dst, src):
-        store(dst, src, [0], [4], [1])
-        deslice(dst, src, [4], [4], [1])
-
-    func_ast = parse_function(kernel, target, source)
+    func_ast = parse_function(_dma_store_deslice_kernel, target, source)
 
     assert any(isinstance(node, DmaStoreAST) for node in func_ast.body.statements)
     assert any(isinstance(node, DmaDesliceAST) for node in func_ast.body.statements)
@@ -304,6 +339,7 @@ def test_dma_public_helpers_parse_parameterized_return_nodes(kernel, expected_ty
     ("kernel", "expected_type"),
     [
         (_dma_free_kernel, DmaFreeAST),
+        (_dma_broadcast_kernel, DmaBroadcastAST),
         (_dma_store_parameterized_kernel, DmaStoreAST),
         (_dma_deslice_parameterized_kernel, DmaDesliceAST),
     ],

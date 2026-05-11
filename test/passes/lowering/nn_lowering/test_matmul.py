@@ -42,6 +42,29 @@ from kernel_gen.symbol_variable.type import NumericType
 from test.passes.lowering.nn_lowering.memory_type_utils import memory_type
 
 
+def _tiled_matmul_for_lowering(
+    lhs: "Tensor[f32, 32, 16]", rhs: "Tensor[f32, 16, 32]"
+) -> "Tensor[f32, 32, 32]":
+    """构造 symbol.for 内 nn.matmul lowering 测试 kernel。
+
+    功能说明:
+    - 使用公开 DSL operation 生成两层 loop 与 `nn.matmul`。
+    - 服务 `NnLoweringPass` 公开行为测试，不直连 lowering 私有 helper。
+
+    使用示例:
+    - mlir_gen(_tiled_matmul_for_lowering, lhs_mem, rhs_mem)
+    """
+
+    out = alloc([32, 32], NumericType.Float32, MemorySpace.GM)
+    for m0 in loop(0, 32, 16):
+        for n0 in loop(0, 32, 16):
+            lhs_tile = slice(lhs, [m0, 0], [16, 16], [1, 1], MemorySpace.TSM)
+            rhs_tile = slice(rhs, [0, n0], [16, 16], [1, 1], MemorySpace.TSM)
+            partial = matmul(lhs_tile, rhs_tile)
+            deslice(out, partial, [m0, n0], [16, 16], [1, 1])
+    return out
+
+
 # TC-PASS-NNL-020
 # 测试目的: 验证 nn.matmul lowering 目标为 kernel.matmul 且结果类型一致。
 # 使用示例: pytest -q test/passes/lowering/nn_lowering/test_matmul.py -k test_nn_lowering_matmul_target
@@ -80,18 +103,8 @@ def test_nn_lowering_matmul_target() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering/spec.md
 # 对应测试文件路径: test/passes/lowering/nn_lowering/test_matmul.py
 def test_nn_lowering_matmul_inside_symbol_for() -> None:
-    def tiled_matmul(lhs: "Tensor[f32, 32, 16]", rhs: "Tensor[f32, 16, 32]") -> "Tensor[f32, 32, 32]":
-        out = alloc([32, 32], NumericType.Float32, MemorySpace.GM)
-        for m0 in loop(0, 32, 16):
-            for n0 in loop(0, 32, 16):
-                lhs_tile = slice(lhs, [m0, 0], [16, 16], [1, 1], MemorySpace.TSM)
-                rhs_tile = slice(rhs, [0, n0], [16, 16], [1, 1], MemorySpace.TSM)
-                partial = matmul(lhs_tile, rhs_tile)
-                deslice(out, partial, [m0, n0], [16, 16], [1, 1])
-        return out
-
     module = mlir_gen(
-        tiled_matmul,
+        _tiled_matmul_for_lowering,
         Memory([32, 16], NumericType.Float32),
         Memory([16, 32], NumericType.Float32),
     )
@@ -187,6 +200,37 @@ def test_nn_lowering_matmul_accepts_named_symbol_contract_dims() -> None:
         [
             func.FuncOp(
                 "matmul_named_symbol_contract_dims",
+                FunctionType.from_lists([lhs_type, rhs_type], [result_type]),
+                Region(block),
+            )
+        ]
+    )
+
+    NnLoweringPass().apply(Context(), module)
+
+    assert len([op for op in module.walk() if isinstance(op, KernelMatmulOp)]) == 1
+    assert not any(isinstance(op, NnMatmulOp) for op in module.walk())
+
+
+# TC-PASS-NNL-020C2
+# 测试目的: 验证 nn.matmul lowering 接受双侧匿名 `?` contracting 维度，但不伪造具名 K。
+# 使用示例: pytest -q test/passes/lowering/nn_lowering/test_matmul.py -k test_nn_lowering_matmul_accepts_unknown_contract_dims
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
+# 对应测试文件路径: test/passes/lowering/nn_lowering/test_matmul.py
+def test_nn_lowering_matmul_accepts_unknown_contract_dims() -> None:
+    space = NnMemorySpaceAttr(StringAttr("global"))
+    lhs_type = memory_type(["M", "?"], ["?", 1], f32, space)
+    rhs_type = memory_type(["?", "N"], ["N", 1], f32, space)
+    result_type = memory_type(["M", "N"], ["N", 1], f32, space)
+    block = Block(arg_types=[lhs_type, rhs_type])
+    matmul_op = NnMatmulOp(block.args[0], block.args[1], result_type, space)
+    block.add_op(matmul_op)
+    block.add_op(func.ReturnOp(matmul_op.result))
+    module = ModuleOp(
+        [
+            func.FuncOp(
+                "matmul_unknown_contract_dims",
                 FunctionType.from_lists([lhs_type, rhs_type], [result_type]),
                 Region(block),
             )

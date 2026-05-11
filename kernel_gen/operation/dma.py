@@ -2,13 +2,14 @@
 
 
 功能说明:
-- 提供 Memory 的数据搬运、视图变换、整块初始化与显式转换 API，包括 alloc/free/fill/copy/load/store/slice/deslice/view/reshape/flatten/cast。
+- 提供 Memory 的数据搬运、显式广播、视图变换、整块初始化与显式转换 API，包括 alloc/free/fill/copy/broadcast/load/store/slice/deslice/view/reshape/flatten/cast。
 
 API 列表:
 - `alloc(shape: ShapeInput, dtype: NumericType, space: MemorySpace = MemorySpace.GM, stride: ShapeInput | None = None, format: Farmat = Farmat.Norm) -> Memory`
 - `free(memory: Memory) -> None`
 - `fill(target: Memory, value: FillValue) -> None`
 - `copy(source: Memory, space: MemorySpace) -> Memory`
+- `broadcast(target: Memory, source: Memory) -> None`
 - `load(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
 - `store(target: Memory, source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None) -> None`
 - `slice(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
@@ -21,6 +22,7 @@ API 列表:
 使用示例:
 - from kernel_gen.operation.dma import copy, cast, fill, view, flatten
 - copy(src, dst)
+- broadcast(target, source)
 - fill(dst, 0)
 - cast(src, NumericType.Float16)
 
@@ -725,6 +727,120 @@ def copy(source: Memory, space: MemorySpace) -> Memory:
     src = _ensure_memory(source, "source")
     target_space = _resolve_memory_space(space, scene="dma.copy 参数校验")
     return src.clone(space=target_space)
+
+
+def _public_dim_value(dim: SymbolDim) -> int | str:
+    """读取公开维度值。
+
+    功能说明:
+    - 将 SymbolDim 的公开值规整为 int 或 str。
+    - 只在当前文件内服务 broadcast 合同校验。
+
+    使用示例:
+    - value = _public_dim_value(SymbolDim("N"))
+    """
+
+    value = dim.get_value()
+    return value if isinstance(value, int) else str(value)
+
+
+def _broadcast_dim_compatible(source_dim: SymbolDim, target_dim: SymbolDim) -> bool:
+    """判断单个维度是否满足 broadcast 兼容。
+
+    功能说明:
+    - 静态维度按 `same or one` 规则检查。
+    - 动态符号维度只在可机械判定冲突时失败，保持与 dma dialect verifier 一致。
+
+    使用示例:
+    - _broadcast_dim_compatible(SymbolDim(1), SymbolDim("N"))
+    """
+
+    if source_dim == target_dim:
+        return True
+    source_value = _public_dim_value(source_dim)
+    target_value = _public_dim_value(target_dim)
+    if source_value == 1 or target_value == 1:
+        return True
+    if isinstance(source_value, int) and isinstance(target_value, int):
+        return False
+    return True
+
+
+def _ensure_broadcast_compatible(target: Memory, source: Memory) -> None:
+    """校验 source 可广播写入 target。
+
+    功能说明:
+    - 按尾维对齐规则校验 rank、dtype、space 与静态 shape。
+    - 不创建新 Memory，成功只表示 `dma.broadcast(target, source)` 合同成立。
+
+    使用示例:
+    - _ensure_broadcast_compatible(target, source)
+    """
+
+    if source.get_type() is not target.get_type():
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
+                scene="dma.broadcast 参数校验",
+                expected="broadcast dtype must match target dtype",
+                actual=f"source={source.get_type()} target={target.get_type()}",
+                action=ERROR_ACTION,
+            )
+        )
+    if source.get_space() is not target.get_space():
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
+                scene="dma.broadcast 参数校验",
+                expected="broadcast source/target space must match",
+                actual=f"source={source.get_space()} target={target.get_space()}",
+                action=ERROR_ACTION,
+            )
+        )
+    source_shape = source.get_shape()
+    target_shape = target.get_shape()
+    if len(source_shape) > len(target_shape):
+        raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+            ERROR_TEMPLATE.format(
+                scene="dma.broadcast 参数校验",
+                expected="broadcast source rank must be <= target rank",
+                actual=f"source_rank={len(source_shape)} target_rank={len(target_shape)}",
+                action=ERROR_ACTION,
+            )
+        )
+    for offset in range(1, len(target_shape) + 1):
+        target_dim = target_shape[-offset]
+        source_dim = source_shape[-offset] if offset <= len(source_shape) else SymbolDim(1)
+        if not _broadcast_dim_compatible(source_dim, target_dim):
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
+                    scene="dma.broadcast 参数校验",
+                    expected="broadcast shape must be compatible",
+                    actual=f"source={source_shape} target={target_shape}",
+                    action=ERROR_ACTION,
+                )
+            )
+
+
+def broadcast(target: Memory, source: Memory) -> None:
+    """显式广播 source 到 target。
+
+    功能说明:
+    - target-first 写回语义，`target` 是被写入的 memory operand。
+    - `source` 必须是 memory，且按尾维对齐规则可广播到 `target`。
+    - 返回 `None`，不创建新 Memory。
+
+    使用示例:
+    - broadcast(target, source)
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+
+    dst = _ensure_memory(target, "target")
+    src = _ensure_memory(source, "source")
+    _ensure_broadcast_compatible(dst, src)
+    return None
 
 
 def load(

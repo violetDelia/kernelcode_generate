@@ -3,7 +3,7 @@
 
 功能说明:
 - 实现 `inputs 静 + tile 静` 的 NCHW conv2d kernel demo。
-- 使用 `img2col2d + matmul` 实现卷积，tile 尾块显式通过 DSL `min(...)` 收口。
+- 使用 `kernel.img2col2d + kernel.matmul + kernel.add` out-first helper 实现卷积，tile 尾块显式通过 DSL `min(...)` 收口。
 - 输入尺寸由固定 seed `20260503` 生成并固化为具体数字：`input[11, 28, 260, 264]`、`weight[2, 28, 3, 3]`、`out[11, 2, 258, 262]`。
 - lowering 后 IR 必须保持上述具体数字 static shape，不得变成动态符号 shape。
 - 通过 `dsl_run` 真实执行，并和 `torch.nn.functional.conv2d` 参考结果对齐。
@@ -34,10 +34,12 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from kernel.runner import run_torch_demo
-from kernel_gen.operation.dma import deslice, fill, reshape, slice
-from kernel_gen.operation.nn import add, img2col2d, matmul, transpose
+from kernel_gen.operation import kernel
+from kernel_gen.operation.dma import alloc, deslice, fill, reshape, slice
+from kernel_gen.operation.nn import transpose
 from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import MemorySpace
+from kernel_gen.symbol_variable.type import NumericType
 
 _STATIC_SHAPE_SEED = 20260503
 _STATIC_SHAPE_RNG = random.Random(_STATIC_SHAPE_SEED)
@@ -64,6 +66,7 @@ def conv2d_inputs_static_tile_static_kernel(
     - 输入布局为 `input[N, C, H, W]`，权重布局为 `weight[F, C, KH, KW]`，输出布局为 `out[N, F, Ho, Wo]`。
     - 输入 shape 为固定 seed 生成并固化的具体数字。
     - 固定 stride=1、dilation=1、padding=0。
+    - 主计算入口使用 `kernel.img2col2d/kernel.matmul/kernel.add` out-first helper。
     - 固定 tile 为 `TF=2, TC=2, TN=1, THO=1, TWO=7`，确保 memory_pool 后的片上动态内存视图不越过 npu_demo 目标容量。
     - 当 `TC < C` 时在 `c0` tile 循环内对同一个输出 tile 做 C 维累计和。
 
@@ -114,15 +117,15 @@ def conv2d_inputs_static_tile_static_kernel(
                             MemorySpace.TSM,
                         )
                         weight_tile = slice(weight, [f0, c0, 0, 0], [cur_f, cur_c, kh_size, kw_size], [1, 1, 1, 1], MemorySpace.TSM)
-                        col = img2col2d(input_tile, kh=kh_size, kw=kw_size, sh=stride_h, sw=stride_w, dh=dilation_h, dw=dilation_w, ph=pad_top, pw=pad_bottom, pl=pad_left, pr=pad_right)
+                        col = alloc([cur_n, cur_c, kh_size, kw_size, cur_ho, cur_wo], NumericType.Float32, MemorySpace.TSM)
+                        kernel.img2col2d(col, input_tile, kh=kh_size, kw=kw_size, sh=stride_h, sw=stride_w, dh=dilation_h, dw=dilation_w, ph=pad_top, pw=pad_bottom, pl=pad_left, pr=pad_right)
                         col2 = reshape(col, [k_tile, out_tile])
                         weight2 = reshape(weight_tile, [cur_f, k_tile])
-                        out2 = matmul(weight2, col2)
+                        out2 = alloc([cur_f, out_tile], NumericType.Float32, MemorySpace.TSM)
+                        kernel.matmul(out2, weight2, col2)
                         out_fnhw = reshape(out2, [cur_f, cur_n, cur_ho, cur_wo])
-                        out_tile_mem = add(
-                            slice(out, [n0, f0, ho0, wo0], [cur_n, cur_f, cur_ho, cur_wo], [1, 1, 1, 1], MemorySpace.TSM),
-                            transpose(out_fnhw, [1, 0, 2, 3]),
-                        )
+                        out_tile_mem = slice(out, [n0, f0, ho0, wo0], [cur_n, cur_f, cur_ho, cur_wo], [1, 1, 1, 1], MemorySpace.TSM)
+                        kernel.add(out_tile_mem, out_tile_mem, transpose(out_fnhw, [1, 0, 2, 3]))
                         deslice(out, out_tile_mem, [n0, f0, ho0, wo0], [cur_n, cur_f, cur_ho, cur_wo], [1, 1, 1, 1])
 
 

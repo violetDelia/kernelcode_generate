@@ -21,16 +21,18 @@ from xdsl.context import Context
 from xdsl.ir import Block
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelImg2col2dOp, KernelMatmulOp
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelExpOp, KernelImg2col2dOp, KernelMatmulOp, KernelReduceOp
 from kernel_gen.dsl.ast.nodes import (
     ConstValueAST,
     KernelAddAST,
     KernelBinaryElewiseAST,
+    KernelExpAST,
     KernelImg2Col2dAST,
     KernelMatmulAST,
+    KernelReduceAST,
     MemoryAST,
 )
-from kernel_gen.operation.kernel import KernelBinaryElewiseKind
+from kernel_gen.operation.kernel import KernelBinaryElewiseKind, KernelReduceKind
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
@@ -135,3 +137,40 @@ def test_kernel_img2col2d_node_emits_img2col2d_op() -> None:
     ).emit_mlir(ctx, block)
 
     assert isinstance(emitted, KernelImg2col2dOp)
+
+
+# TC-AST-NODE-KERNEL-005
+# 功能说明: 验证 KernelExpAST 发射 kernel.exp。
+# 测试目的: exp 使用 out-first operand 写回语义，不生成 SSA result。
+# 使用示例: pytest -q test/dsl/ast/nodes/test_kernel.py -k exp
+# 对应功能实现文件路径: kernel_gen/dsl/ast/nodes/kernel.py
+# 对应 spec 文件路径: spec/dsl/ast/nodes/kernel.md
+# 对应测试文件路径: test/dsl/ast/nodes/test_kernel.py
+def test_kernel_exp_node_emits_exp_op() -> None:
+    memory = Memory([2, 4], NumericType.Float32, space=MemorySpace.GM)
+    out = _memory_node("out", memory)
+    input_value = _memory_node("input_value", memory)
+    ctx, block = _block_for_memories(out, input_value)
+
+    emitted = KernelExpAST(out, input_value).emit_mlir(ctx, block)
+
+    assert isinstance(emitted, KernelExpOp)
+    assert len(emitted.results) == 0
+
+
+# TC-AST-NODE-KERNEL-006
+# 功能说明: 验证 KernelReduceAST 发射 kernel.reduce。
+# 测试目的: reduce 使用 enum kind 和 axis/keepdim attrs。
+# 使用示例: pytest -q test/dsl/ast/nodes/test_kernel.py -k reduce
+# 对应功能实现文件路径: kernel_gen/dsl/ast/nodes/kernel.py
+# 对应 spec 文件路径: spec/dsl/ast/nodes/kernel.md
+# 对应测试文件路径: test/dsl/ast/nodes/test_kernel.py
+def test_kernel_reduce_node_emits_reduce_op() -> None:
+    input_value = _memory_node("input_value", Memory([2, 4], NumericType.Float32, space=MemorySpace.GM))
+    out = _memory_node("out", Memory([2, 1], NumericType.Float32, space=MemorySpace.GM))
+    ctx, block = _block_for_memories(out, input_value)
+
+    emitted = KernelReduceAST(out, input_value, KernelReduceKind.SUM, axis=1, keepdim=True).emit_mlir(ctx, block)
+
+    assert isinstance(emitted, KernelReduceOp)
+    assert emitted.kind.data == "sum"
