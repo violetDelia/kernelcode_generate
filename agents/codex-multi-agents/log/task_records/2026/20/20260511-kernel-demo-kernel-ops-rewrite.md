@@ -430,3 +430,25 @@
 - merge 前必要 gate 已复跑通过。
 - 未发现 `.skills` 或未授权 `expectation/` diff。
 - 当前可暂存本任务 diff 与任务记录，提交并推送主仓，然后执行 `-done`。
+
+## merge 完成记录（2026-05-11 21:26 CST，李白）
+
+### 合并提交与推送
+
+- 暂存前确认 `git diff --cached --name-only -- expectation .skills TODO.md DONE.md agents/standard AGENTS.md ARCHITECTURE/plan` 无输出。
+- 执行 `git diff --cached --check`：退出码 0。
+- 提交：`32abe86f4139779cc84ff6c5b3e146cb3fe0eb51`（`T-20260511-c0a9af0b merge kernel demo kernel ops rewrite`）。
+- `git push origin main`：成功，`origin/main` 已更新到 `32abe86f4139779cc84ff6c5b3e146cb3fe0eb51`。
+- 推送后 `git rev-parse HEAD` 与 `git rev-parse origin/main` 均为 `32abe86f4139779cc84ff6c5b3e146cb3fe0eb51`。
+
+### 任务状态
+
+- 执行 `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260511-c0a9af0b -log agents/codex-multi-agents/log/task_records/2026/20/20260511-kernel-demo-kernel-ops-rewrite.md -agents-list agents/codex-multi-agents/agents-lists.md`。
+- 脚本输出：`OK: done T-20260511-c0a9af0b`、`OK: replace 李白 状态`。
+- `rg -n "T-20260511-c0a9af0b|20260511-kernel-demo-kernel-ops-rewrite" TODO.md DONE.md agents/codex-multi-agents/agents-lists.md`：DONE.md 中存在该任务 `已完成` 记录，完成时间 `2026-05-11 21:26:03 +0800`；TODO.md 中未再命中该任务。
+- 主仓 `git status --short --branch`：`## main...origin/main`，无未提交改动。
+
+### 最终结论
+
+- T-20260511-c0a9af0b 已合并、推送并执行 `-done`。
+- 本任务无独立 worktree 或本地任务分支需要回收。
