@@ -43,7 +43,7 @@
 ### 模块级补充
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
-- `P0` 仅支持 `target in {"cpu", "npu_demo"}`；不得扩展新 target。
+- `P0` 内置 include 注入与真实执行仅支持 `target in {"cpu", "npu_demo"}`；第三方 target 必须通过 [`spec/execute_engine/strategy.md`](strategy.md) 的 compile strategy 扩展，不得复用 CPU include 注入作为 fallback。
 - `target` 选择只由 `CompileRequest.target` 驱动；不得因为源码内容自动切换到另一 target。
 - `target=npu_demo` 不允许以注入 `cpu` include 或回退调用 `cpu::*` 的方式完成编译。
 - `entry shim` 只负责统一入口与参数绑定；不改变 `function` 本身的数学语义与参数顺序。

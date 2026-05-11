@@ -60,11 +60,14 @@ def test_execute_engine_contract_files_exist() -> None:
 # 对应测试文件路径: test/execute_engine/test_contract.py
 def test_execute_engine_public_api_exports_only_runtime_contract() -> None:
     assert execute_engine.__all__ == [
+        "CompileStrategy",
         "CompiledKernel",
         "CompileRequest",
         "ExecuteRequest",
         "ExecuteResult",
         "ExecutionEngine",
+        "get_compile_strategy",
+        "register_compile_strategy",
     ]
     for name in (
         "RuntimeArg",
@@ -171,5 +174,6 @@ def test_execute_engine_failure_phrases_frozen() -> None:
         "runtime_throw_or_abort",
         "stream_not_supported",
         "function_output_capture_not_supported",
+        "execution_unsupported",
     }
-    assert len(expected) == 7
+    assert len(expected) == 8

@@ -29,6 +29,7 @@
 - [`spec/dsl/gen_kernel/kernel_emitter.md`](../../../spec/dsl/gen_kernel/kernel_emitter.md)
 - [`spec/dsl/gen_kernel/emit_context.md`](../../../spec/dsl/gen_kernel/emit_context.md)
 - [`spec/dsl/gen_kernel/emit.md`](../../../spec/dsl/gen_kernel/emit.md)
+- [`spec/dsl/gen_kernel/source_bundle.md`](../../../spec/dsl/gen_kernel/source_bundle.md)
 
 ## 目标
 
@@ -38,6 +39,7 @@
 - 避免在本模块内再维护第二份 emit 逻辑或 target 特化逻辑。
 - 让 pass/pipeline 输出的 host wrapper + device body 双函数 IR 统一经由 `gen_kernel(...)` 消费，不要求调用方感知内部 emitter 拆分。
 - `kernel_gen.core.config.dump_dir` 非空时，`gen_kernel(...)` 必须把最终源码同步写入 `dump_dir/source.cpp`；调用方只负责设置 dump 目录，不再自行重复写源码。
+- 当 backend 返回 SourceBundle aggregate string 时，`gen_kernel(...)` 仍返回该 aggregate 文本，并在 `dump_dir` 非空时额外展开 bundle artifact。
 - `kernel_gen.core.config.trance_enabled` 只影响后续编译/运行链路；`gen_kernel(...)` 不读取该开关来改变源码内容，也不创建 runtime trace 文件。
 
 ## 额外补充
@@ -49,6 +51,7 @@
 - `dsl_gen_kernel(...)` 只接受 Python DSL callable + `runtime_args`；实现必须先调用公开 `mlir_gen(fn, *runtime_args)` 生成 `builtin.module`，再调用公开 `gen_kernel(module_or_func, ctx)` 生成源码。
 - `gen_kernel(...)` 继续只消费 op / `func.func` / 受控 `builtin.module` IR；`dsl_gen_kernel(...)` 不是 `gen_kernel(...)` 的别名模式，也不能接管 `dsl_run`、`ircheck` 这类已有 IR 路径消费者。
 - `dump_dir` 只控制诊断落盘，不改变 `gen_kernel(...)` 的返回值、target 选择或源码内容；为空时不得创建 `source.cpp`。
+- SourceBundle dump 只通过 `gen_kernel(...)` 的返回文本与 `dump_dir` 文件观察；SourceBundle 解析、校验和写出 helper 不公开。
 - `trance_enabled` 不属于源码生成语义；即使该开关为 `True`，`gen_kernel(...)` 仍只按 `dump_dir` 写 `source.cpp`，不得写 `<kernel>_trace.txt`。
 - 本文件当前允许实现的公开入口只有 `gen_kernel(...)` 与 `dsl_gen_kernel(...)`；除 sibling spec 已单独定义的包根 re-export 外，不得再新增平行 callable 别名或隐藏快捷入口。
 - 若输入为普通 op，只允许直接委托节点级 `emit_c_op(...)`。
@@ -69,7 +72,7 @@
   result = gen_kernel(obj=obj, ctx=ctx)
   ```
 - 功能说明：执行 `gen_kernel`。
-- 注意事项：只按注册表和公开上下文分发；未注册或不支持的输入必须返回空结果或抛出公开错误。
+- 注意事项：只按注册表和公开上下文分发；未注册或不支持的输入必须抛出公开错误；返回 SourceBundle aggregate string 时，`dump_dir` 写出规则以 [`spec/dsl/gen_kernel/source_bundle.md`](../../../spec/dsl/gen_kernel/source_bundle.md) 为准。
 
 ### `dsl_gen_kernel(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg, ctx: EmitCContext) -> str`
 

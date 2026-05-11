@@ -14,6 +14,10 @@ API 列表:
 - `class CompiledKernel(target: str, soname_path: str, function: str, entry_point: str, compile_stdout: str = "", compile_stderr: str = "")`
 - `CompiledKernel.close() -> None`
 - `CompiledKernel.execute(args: tuple[RuntimeInput, ...] | None = None, *, request: ExecuteRequest | None = None, entry_point: str | None = None, capture_function_output: bool = False, stream: None = None) -> ExecuteResult`
+- `class CompileStrategy(Protocol)`
+- `CompileStrategy.compile(self, request: CompileRequest) -> CompiledKernel`
+- `register_compile_strategy(target: str, strategy: CompileStrategy, *, override: bool = False) -> None`
+- `get_compile_strategy(target: str) -> CompileStrategy`
 - `class ExecutionEngine(target: str, compiler: str | None = None, compiler_flags: tuple[str, ...] = ("-std=c++17",), link_flags: tuple[str, ...] = ())`
 - `ExecutionEngine.compile(source: str | None = None, function: str | None = None, *, request: CompileRequest | None = None, entry_point: str = "kg_execute_entry") -> CompiledKernel`
 
@@ -47,10 +51,11 @@ import re
 import shutil
 import subprocess
 import tempfile
-from typing import Callable, Literal, Protocol, TypeAlias
+from typing import Callable, Literal, Protocol, TypeAlias, runtime_checkable
 
 from kernel_gen.core.config import get_dump_dir, get_trance_enabled
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
+from kernel_gen.target import registry as target_registry
 
 _COMPILER_ICE_MARKERS = (
     "internal compiler error",
@@ -822,6 +827,7 @@ _SYMBOL_RESOLVE_FAILED = "symbol_resolve_failed"
 _RUNTIME_THROW_OR_ABORT = "runtime_throw_or_abort"
 _STREAM_NOT_SUPPORTED = "stream_not_supported"
 _FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED = "function_output_capture_not_supported"
+_EXECUTION_UNSUPPORTED = "execution_unsupported"
 
 _KNOWN_ERROR_PHRASES: frozenset[str] = frozenset(
     {
@@ -832,6 +838,7 @@ _KNOWN_ERROR_PHRASES: frozenset[str] = frozenset(
         _RUNTIME_THROW_OR_ABORT,
         _STREAM_NOT_SUPPORTED,
         _FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED,
+        _EXECUTION_UNSUPPORTED,
     }
 )
 
@@ -1779,6 +1786,11 @@ class CompiledKernel:
                 _FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED,
                 "ExecuteRequest.capture_function_output is not supported in P0",
             )
+        if self.target not in ("cpu", "npu_demo"):
+            raise _execution_engine_error(
+                _EXECUTION_UNSUPPORTED,
+                "compiled target does not expose runtime execution",
+            )
 
         if args is None:
             raise _execution_engine_error(
@@ -1821,6 +1833,228 @@ class CompiledKernel:
         )
 
 
+@runtime_checkable
+class CompileStrategy(Protocol):
+    """编译策略公开协议。
+
+
+    功能说明:
+    - 第三方 backend 通过该协议接入 `ExecutionEngine.compile(...)`。
+    - 策略只接收已归一化的 `CompileRequest`，返回 `CompiledKernel`。
+
+    使用示例:
+    - class MyStrategy:
+    -     def compile(self, request: CompileRequest) -> CompiledKernel:
+    -         ...
+    """
+
+    def compile(self, request: CompileRequest) -> CompiledKernel:
+        """执行 target 专属编译。
+
+
+        功能说明:
+        - 使用 `CompileRequest` 中的 source、target、function、entry_point 和编译选项生成 `CompiledKernel`。
+        - 失败必须抛出带稳定 failure_phrase 的 `KernelCodeError`。
+
+        使用示例:
+        - kernel = strategy.compile(request)
+        """
+
+
+_COMPILE_STRATEGIES: dict[str, CompileStrategy] = {}
+_TARGET_NAME_PATTERN = re.compile(r"^[a-z0-9_]+$")
+
+
+def _validate_strategy_target(target: str) -> None:
+    """校验 compile strategy target。
+
+
+    功能说明:
+    - target 名必须满足 `[a-z0-9_]+`。
+    - target 必须已通过公开 target registry 注册。
+
+    使用示例:
+    - _validate_strategy_target("cpu")
+    """
+
+    if not isinstance(target, str) or not _TARGET_NAME_PATTERN.fullmatch(target):
+        raise _execution_engine_error(_TARGET_HEADER_MISMATCH, "invalid target name")
+    try:
+        target_registry.get_target_hardware(target, "__compile_strategy_probe__")
+    except ValueError as exc:
+        raise _execution_engine_error(_TARGET_HEADER_MISMATCH, f"target not registered: {target}") from exc
+
+
+def register_compile_strategy(target: str, strategy: CompileStrategy, *, override: bool = False) -> None:
+    """注册 target 对应的编译策略。
+
+
+    功能说明:
+    - `target` 必须是已注册 target。
+    - 默认拒绝重复注册；`override=True` 时显式覆盖。
+    - strategy 必须提供 `compile(request: CompileRequest) -> CompiledKernel` 方法。
+
+    使用示例:
+    - register_compile_strategy("cpu", strategy, override=True)
+    """
+
+    _validate_strategy_target(target)
+    if not isinstance(strategy, CompileStrategy):
+        raise _execution_engine_error(_COMPILE_FAILED, "compile strategy must define compile")
+    if target in _COMPILE_STRATEGIES and not override:
+        raise _execution_engine_error(_COMPILE_FAILED, f"duplicate compile strategy: {target}")
+    _COMPILE_STRATEGIES[target] = strategy
+
+
+def get_compile_strategy(target: str) -> CompileStrategy:
+    """读取 target 对应编译策略。
+
+
+    功能说明:
+    - target 必须是已注册 target。
+    - 未注册 strategy 不回退到 `cpu` 或 `npu_demo`，稳定失败为 `target_header_mismatch`。
+
+    使用示例:
+    - strategy = get_compile_strategy("cpu")
+    """
+
+    _validate_strategy_target(target)
+    strategy = _COMPILE_STRATEGIES.get(target)
+    if strategy is None:
+        raise _execution_engine_error(_TARGET_HEADER_MISMATCH, f"missing compile strategy: {target}")
+    return strategy
+
+
+def _compile_with_builtin_strategy(request: CompileRequest) -> CompiledKernel:
+    """执行内置 CPU/npu_demo 编译策略。
+
+
+    功能说明:
+    - 承接原有 `ExecutionEngine.compile(...)` 的 include、shim、编译命令与产物校验逻辑。
+    - 仅由内置 compile strategy 调用；`ExecutionEngine.compile(...)` 不再维护 target 白名单分支。
+
+    使用示例:
+    - kernel = _compile_with_builtin_strategy(request)
+    """
+
+    source = request.source
+    target = request.target
+    function = request.function
+    entry_point = request.entry_point
+    compiler = _resolve_compiler_name(request.compiler)
+    compiler_flags = _ensure_compiler_flags(request.compiler_flags)
+    link_flags = request.link_flags
+
+    if source is None or not isinstance(source, str) or not source.strip():
+        raise _execution_engine_error(
+            _SOURCE_EMPTY_OR_INVALID,
+            "source is empty",
+        )
+    include_family = _source_include_family(source)
+    if include_family == "mixed":
+        raise _execution_engine_error(
+            _TARGET_HEADER_MISMATCH,
+            "source includes mixed target include families",
+        )
+    if include_family is not None and include_family != target:
+        raise _execution_engine_error(
+            _TARGET_HEADER_MISMATCH,
+            f"source include family mismatch: source={include_family}, target={target}",
+        )
+    if "#error" in source:
+        raise _execution_engine_error(
+            _COMPILE_FAILED,
+            "source contains #error directive",
+        )
+    if function is None or not isinstance(function, str) or not function.strip():
+        raise _execution_engine_error(
+            _SYMBOL_RESOLVE_FAILED,
+            "function is empty",
+        )
+    if not isinstance(entry_point, str) or not entry_point.strip():
+        raise _execution_engine_error(
+            _SYMBOL_RESOLVE_FAILED,
+            "entry_point is empty",
+        )
+    compiler_flags = _trance_compiler_flags(
+        function=function,
+        compiler_flags=compiler_flags,
+    )
+
+    target_headers = _include_lines_for_target(target)
+    if not target_headers:
+        raise _execution_engine_error(
+            _TARGET_HEADER_MISMATCH,
+            f"unsupported target: {target}",
+        )
+    shim_source = ""
+    if _requires_entry_shim(source, entry_point):
+        shim_source = _compose_entry_shim_source(
+            function=function,
+            entry_point=entry_point,
+            source=source,
+        )
+    compile_unit = _compose_compile_unit(
+        source=source,
+        _include_lines_for_target=target_headers,
+        entry_shim_source=shim_source,
+    )
+    artifacts = _compile_unit_source(
+        source=compile_unit,
+        compiler=compiler,
+        compiler_flags=compiler_flags,
+        link_flags=link_flags,
+        include_dirs=(str(REPO_ROOT),),
+        dry_run=(target == "cpu"),
+    )
+    try:
+        if artifacts.return_code != 0:
+            raise _execution_engine_error(
+                _COMPILE_FAILED,
+                f"compiler returned non-zero ({artifacts.return_code})",
+            )
+        if not Path(artifacts.soname_path).exists():
+            raise _execution_engine_error(
+                _COMPILE_FAILED,
+                "compile output is missing",
+            )
+    except Exception:
+        if artifacts._cleanup is not None:
+            try:
+                artifacts._cleanup()
+            except Exception:
+                pass
+        raise
+
+    return CompiledKernel(
+        target=target,
+        soname_path=artifacts.soname_path,
+        function=function,
+        entry_point=entry_point,
+        compile_stdout=artifacts.stdout,
+        compile_stderr=artifacts.stderr,
+        _cleanup=artifacts._cleanup,
+    )
+
+
+class _BuiltinCompileStrategy:
+    """内置 CPU/npu_demo 编译策略。"""
+
+    def compile(self, request: CompileRequest) -> CompiledKernel:
+        """编译内置 target source。
+
+
+        功能说明:
+        - 委托 `_compile_with_builtin_strategy(...)` 保持原 CPU/npu_demo 行为。
+        - 本类只作为 registry 中的 strategy 实例使用。
+
+        使用示例:
+        - kernel = _BuiltinCompileStrategy().compile(request)
+        """
+
+        return _compile_with_builtin_strategy(request)
+
+
 @dataclass(frozen=True)
 class ExecutionEngine:
     """执行引擎入口（骨架版本，P0）。"""
@@ -1845,6 +2079,7 @@ class ExecutionEngine:
         - S2 阶段固定编译路径拼装：target include 选择 -> entry shim -> 编译命令生成 -> CompiledKernel。
         - `target=cpu` 保持 dry-run；`target=npu_demo` 走真实编译，支持下游合同验收的真实执行。
         - 编译失败时会先回收内部临时工作区，再抛出 `compile_failed`。
+        - 当 `request` 显式提供时，`source` 与 `function` 必须同时为 `None`；否则按公开输入冲突失败。
         - 保持公共失败短语：
           - `target_header_mismatch`
           - `source_empty_or_invalid`
@@ -1862,120 +2097,36 @@ class ExecutionEngine:
         """
 
         if request is not None:
-            source = request.source
-            function = request.function
-            entry_point = request.entry_point
+            if source is not None or function is not None:
+                raise _execution_engine_error(_SOURCE_EMPTY_OR_INVALID, "request cannot be combined with source or function")
             target = request.target
-            compiler = _resolve_compiler_name(request.compiler)
-            compiler_flags = _ensure_compiler_flags(request.compiler_flags)
-            link_flags = request.link_flags
+            compile_request = request
         else:
             target = self.target
-            compiler = _resolve_compiler_name(self.compiler)
-            compiler_flags = _ensure_compiler_flags(self.compiler_flags)
-            link_flags = self.link_flags
-
-        if target not in ("cpu", "npu_demo"):
-            raise _execution_engine_error(
-                _TARGET_HEADER_MISMATCH,
-                f"unsupported target: {target}",
-            )
-        if source is None or not isinstance(source, str) or not source.strip():
-            raise _execution_engine_error(
-                _SOURCE_EMPTY_OR_INVALID,
-                "source is empty",
-            )
-        include_family = _source_include_family(source)
-        if include_family == "mixed":
-            raise _execution_engine_error(
-                _TARGET_HEADER_MISMATCH,
-                "source includes mixed target include families",
-            )
-        if include_family is not None and include_family != target:
-            raise _execution_engine_error(
-                _TARGET_HEADER_MISMATCH,
-                f"source include family mismatch: source={include_family}, target={target}",
-            )
-        if "#error" in source:
-            raise _execution_engine_error(
-                _COMPILE_FAILED,
-                "source contains #error directive",
-            )
-        if function is None or not isinstance(function, str) or not function.strip():
-            raise _execution_engine_error(
-                _SYMBOL_RESOLVE_FAILED,
-                "function is empty",
-            )
-        if not isinstance(entry_point, str) or not entry_point.strip():
-            raise _execution_engine_error(
-                _SYMBOL_RESOLVE_FAILED,
-                "entry_point is empty",
-            )
-        compiler_flags = _trance_compiler_flags(
-            function=function,
-            compiler_flags=compiler_flags,
-        )
-
-        target_headers = _include_lines_for_target(target)
-        if not target_headers:
-            raise _execution_engine_error(
-                _TARGET_HEADER_MISMATCH,
-                f"unsupported target: {target}",
-            )
-        shim_source = ""
-        if _requires_entry_shim(source, entry_point):
-            shim_source = _compose_entry_shim_source(
+            compile_request = CompileRequest(
+                source=source,
+                target=target,
                 function=function,
                 entry_point=entry_point,
-                source=source,
+                compiler=self.compiler,
+                compiler_flags=self.compiler_flags,
+                link_flags=self.link_flags,
             )
-        compile_unit = _compose_compile_unit(
-            source=source,
-            _include_lines_for_target=target_headers,
-            entry_shim_source=shim_source,
-        )
-        artifacts = _compile_unit_source(
-            source=compile_unit,
-            compiler=compiler,
-            compiler_flags=compiler_flags,
-            link_flags=link_flags,
-            include_dirs=(str(REPO_ROOT),),
-            dry_run=(target == "cpu"),
-        )
-        try:
-            if artifacts.return_code != 0:
-                raise _execution_engine_error(
-                    _COMPILE_FAILED,
-                    f"compiler returned non-zero ({artifacts.return_code})",
-                )
-            if not Path(artifacts.soname_path).exists():
-                raise _execution_engine_error(
-                    _COMPILE_FAILED,
-                    "compile output is missing",
-                )
-        except Exception:
-            if artifacts._cleanup is not None:
-                try:
-                    artifacts._cleanup()
-                except Exception:
-                    pass
-            raise
-
-        return CompiledKernel(
-            target=target,
-            soname_path=artifacts.soname_path,
-            function=function,
-            entry_point=entry_point,
-            compile_stdout=artifacts.stdout,
-            compile_stderr=artifacts.stderr,
-            _cleanup=artifacts._cleanup,
-        )
+        strategy = get_compile_strategy(target)
+        return strategy.compile(compile_request)
 
 
 __all__ = [
+    "CompileStrategy",
     "CompiledKernel",
     "CompileRequest",
     "ExecuteRequest",
     "ExecuteResult",
     "ExecutionEngine",
+    "get_compile_strategy",
+    "register_compile_strategy",
 ]
+
+
+register_compile_strategy("cpu", _BuiltinCompileStrategy(), override=True)
+register_compile_strategy("npu_demo", _BuiltinCompileStrategy(), override=True)

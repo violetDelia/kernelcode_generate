@@ -5,6 +5,7 @@
 - 定义 target 注册中心的规范，负责提供目录 target 的统一注册/查询入口。
 - 支持 `json` 与 `txt` 两类来源；其中 `npu_demo` 的公开真源是 `kernel_gen/target/targets/npu_demo.txt`，不再以 Python 内置模板形式对外承诺。
 - target 信息用于驱动 `arch` 相关 operation/dialect/include-runtime 的“能力检查”和“硬件参数读取”，例如 `thread_num`、`sm_memory_size`、`arch.launch`、`arch.barrier`。
+- target 信息也作为第三方 generic backend 的启用前置；backend 自动加载前必须先能通过公开 registry 查询到 target。
 
 ## API 列表
 
@@ -37,6 +38,7 @@
 - 保持配置文件可读、可扩展、可校验。
 - 为约定 target 冻结目录文件语义、launch 能力上限与能力矩阵，避免下游 codegen/runtime 再次推断硬件值或误放开未支持能力。
 - 为 `operation/arch.py` 与 `dialect/arch.py` 提供合法的 current target 查询与设置公开入口，避免继续跨文件访问私有 helper。
+- 为 `gen_kernel.emit` backend loader 和 `ExecutionEngine` compile strategy 提供公开 target 存在性校验入口。
 
 ## API详细说明
 
@@ -97,7 +99,7 @@
   register_target(spec)
   ```
 - 功能说明：注册单个 target。
-- 注意事项：注册名必须满足 target 命名规则；重复注册非默认 target 必须失败；该接口可用于测试或运行时增量注入。
+- 注意事项：注册名必须满足 target 命名规则；重复注册非默认 target 必须失败；该接口可用于测试或运行时增量注入；第三方 backend 必须先注册 target，再依赖 emit auto-load 或 compile strategy registry。
 
 ### `set_current_target(target: str | None) -> None`
 

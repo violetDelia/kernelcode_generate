@@ -28,6 +28,8 @@
 
 - [`spec/dsl/gen_kernel/emit/register.md`](../../../spec/dsl/gen_kernel/emit/register.md)
 - [`spec/dsl/gen_kernel/emit_context.md`](../../../spec/dsl/gen_kernel/emit_context.md)
+- [`spec/dsl/gen_kernel/backend_loader.md`](../../../spec/dsl/gen_kernel/backend_loader.md)
+- [`spec/dsl/gen_kernel/source_product.md`](../../../spec/dsl/gen_kernel/source_product.md)
 - [`spec/dsl/gen_kernel/emit/cpu/__init__.md`](../../../spec/dsl/gen_kernel/emit/cpu/__init__.md)
 - [`spec/dsl/gen_kernel/emit/npu_demo.md`](../../../spec/dsl/gen_kernel/emit/npu_demo.md)
 
@@ -44,6 +46,8 @@
 - 不公开 target 目录中的私有实现 helper。
 - 不得把 type、space、include 再拆成平行公开工具模块。
 - 注册器与 dispatch 合同单独定义在 [`spec/dsl/gen_kernel/emit/register.md`](../../../spec/dsl/gen_kernel/emit/register.md)。
+- `builtin.module` 的 target-specific 发射通过 `emit_c_impl(ModuleOp, target=...)` 注册，不新增 `emit_c_module_impl`。
+- 第三方 backend target 不存在、导入失败或缺少 `ModuleOp` handler 时必须公开失败，不得回退 CPU。
 - `_dispatch_target`、target-specific helper、`KernelEmitter` 与 `kernel_emitter.py` 中的辅助步骤都不是当前 package 公开 API；实现、其他模块与测试不得跨文件直连。
 - `symbol.min` 在 `cpu` 与 `npu_demo` target 下必须通过注册体系发射为 C/C++ 三目表达式 `((lhs) < (rhs) ? (lhs) : (rhs))` 语义，不新增公开 helper 或 target-specific 公共入口。
 - `target="npu_demo"` 的 `dma.alloc` 发射必须以 `DmaAllocOp.dynamic_shape` 绑定运行期符号值，并从 result memory type 重建完整 shape 与默认连续 stride；只提供部分动态 shape operand 时，静态维度仍必须进入 helper 参数。
@@ -64,7 +68,7 @@
   result = emit_c(obj=obj, ctx=ctx)
   ```
 - 功能说明：生成 `c`。
-- 注意事项：只按注册表和公开上下文分发；未注册或不支持的输入必须返回空结果或抛出公开错误。
+- 注意事项：只按注册表和公开上下文分发；`ModuleOp` 的 target handler 可返回 `str | Mapping[str, str]`；未注册 target、缺失 backend 或缺失 handler 必须抛出公开错误，不得回退 CPU。
 
 ### `emit_c_op(op: Operation, ctx: EmitCContext) -> str`
 

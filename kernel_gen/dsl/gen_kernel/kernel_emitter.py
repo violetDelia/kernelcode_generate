@@ -13,7 +13,6 @@ API 列表:
 - `KernelEmitter.emit_value(self, value: SSAValue) -> str`
 - `KernelEmitter.emit_op(self, op: Operation) -> str`
 - `KernelEmitter.emit(self, op_or_func: Any) -> str`
-- `KernelEmitter.emit_module(self, module_op: ModuleOp) -> str`
 - `KernelEmitter.emit_func(self, func_op: func.FuncOp) -> str`
 
 使用示例:
@@ -234,8 +233,21 @@ class KernelEmitter:
         return [f"arg{index}" for index, _ in enumerate(func_op.args)]
 
     def emit(self, op_or_func: Any) -> str:
+        """按输入类型发射源码文本。
+
+
+        功能说明:
+        - `ModuleOp` 走当前文件内 module 组织逻辑。
+        - `func.FuncOp`、单 op、SSA value 和 attribute 继续走既有公开分发入口。
+
+        使用示例:
+        - source = self.emit(func_op)
+        """
+
         if isinstance(op_or_func, ModuleOp):
-            return self.emit_module(op_or_func)
+            if not self.ctx.is_target("npu_demo"):
+                raise self.ctx.emit_error("builtin.module is only supported for target=npu_demo", "")
+            return self._emit_module(op_or_func)
         if isinstance(op_or_func, func.FuncOp):
             return self.emit_func(op_or_func)
         if isinstance(op_or_func, SSAValue):
@@ -246,17 +258,18 @@ class KernelEmitter:
             return self.emit_op(op_or_func)
         return self.emit_attr(op_or_func)
 
-    def emit_module(self, module_op: ModuleOp) -> str:
+    def _emit_module(self, module_op: ModuleOp) -> str:
         """发射 `target=npu_demo` 的受控 `builtin.module` 双函数源码。
 
 
         功能说明:
+        - 对非 `npu_demo` target，仅支持按 module 顶层顺序发射 `func.func`。
         - 仅对 `target="npu_demo"` 放行受控 `builtin.module` 子集。
         - 允许 module 携带 helper `func.func`，并按 module 中的出现顺序输出源码。
         - wrapper 仍必须能被唯一 `arch.launch` 识别，body / wrapper 之外的 helper 继续走通用函数发射。
 
         使用示例:
-        - source = KernelEmitter(EmitCContext()).emit(module_op)
+        - source = self._emit_module(module_op)
 
         关联文件:
         - spec: spec/dsl/gen_kernel/gen_kernel.md
@@ -265,7 +278,10 @@ class KernelEmitter:
         """
 
         if not self.ctx.is_target("npu_demo"):
-            raise self._error("<module>", "builtin.module is only supported for target=npu_demo")
+            funcs = self._module_funcs(module_op)
+            if any(any(isinstance(inner, ArchLaunchOp) for inner in top_op.body.block.ops) for top_op in funcs):
+                raise self.ctx.emit_error("builtin.module is only supported for target=npu_demo", "")
+            return "\n\n".join(self.emit_func(top_op) for top_op in funcs)
 
         plain_func = self._get_npu_demo_plain_func(module_op)
         if plain_func is not None:

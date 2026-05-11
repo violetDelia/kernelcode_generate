@@ -13,6 +13,10 @@
 - `CompiledKernel.close() -> None`
 - `CompiledKernel.execute(args: tuple[RuntimeInput, ...] | None = None, *, request: ExecuteRequest | None = None, entry_point: str | None = None, capture_function_output: bool = False, stream: None = None) -> ExecuteResult`
 - `class ExecuteResult(ok: bool, status_code: int, failure_phrase: str | None, compile_stdout: str = "", compile_stderr: str = "", run_stdout: str = "", run_stderr: str = "", elapsed_ms: float = 0.0)`
+- `class CompileStrategy(Protocol)`
+- `CompileStrategy.compile(self, request: CompileRequest) -> CompiledKernel`
+- `register_compile_strategy(target: str, strategy: CompileStrategy, *, override: bool = False) -> None`
+- `get_compile_strategy(target: str) -> CompileStrategy`
 
 ## 文档信息
 
@@ -35,18 +39,18 @@
 
 - 统一 `CompileRequest/ExecuteRequest/ExecuteResult` 字段与默认值。
 - 明确 `args` 与函数形参顺序的一一对应规则。
-- 锁定 7 个失败短语与触发条件。
+- 锁定 8 个失败短语与触发条件。
 
 ## 额外补充
 
 ### 模块级补充
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
-- `P0` 仅支持 `target in {"cpu","npu_demo"}`；其他 target 必须失败并返回 `target_header_mismatch`。
+- `P0` 内置真实执行仅支持 `target in {"cpu","npu_demo"}`；第三方 target 可注册 compile strategy，但 execute-only 路径必须以 `execution_unsupported` 失败。
 - `P0` 不支持 `stream` 与输出回收；当 `ExecuteRequest.stream is not None` 或 `capture_function_output=True` 必须失败。
 - `args` 必须与 `function` 形参顺序严格一致；不做自动重排或参数推断。
 - 运行时参数仅允许 memory / int / float 三类输入；其他类型必须失败。
-- 失败短语只允许取 7 个固定值（见 `ExecuteResult`）；禁止同义词扩散与 silent fallback。
+- 失败短语只允许取 8 个固定值（见 `ExecuteResult`）；禁止同义词扩散与 silent fallback。
 ## API详细说明
 
 ### `class CompileRequest(source: str, target: str, function: str, entry_point: str = "kg_execute_entry", compiler: str | None = None, compiler_flags: tuple[str, ...] = ("-std=c++17",), link_flags: tuple[str, ...] = ())`

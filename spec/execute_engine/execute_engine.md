@@ -22,6 +22,10 @@
 - `CompiledKernel.execute(args: tuple[RuntimeInput, ...] | None = None, *, request: ExecuteRequest | None = None, entry_point: str | None = None, capture_function_output: bool = False, stream: None = None) -> ExecuteResult`
 - `CompiledKernel.close() -> None`
 - `class ExecuteResult(ok: bool, status_code: int, failure_phrase: str | None, compile_stdout: str = "", compile_stderr: str = "", run_stdout: str = "", run_stderr: str = "", elapsed_ms: float = 0.0)`
+- `class CompileStrategy(Protocol)`
+- `CompileStrategy.compile(self, request: CompileRequest) -> CompiledKernel`
+- `register_compile_strategy(target: str, strategy: CompileStrategy, *, override: bool = False) -> None`
+- `get_compile_strategy(target: str) -> CompileStrategy`
 
 ## 文档信息
 
@@ -35,6 +39,8 @@
 
 - `emit_c`：负责生成可编译的 C++ 源码片段（本执行引擎不改变 `emit_c` 语义）。
   - 关联 spec：[`spec/dsl/gen_kernel/emit.md`](spec/dsl/gen_kernel/emit.md)
+- `CompileStrategy`：负责第三方 target 编译扩展。
+  - 关联 spec：[`spec/execute_engine/strategy.md`](strategy.md)
 - `target` 相关 include 目录（由 target 映射决定）：
   - `npu_demo`：`include/npu_demo/*`
   - `cpu`：`include/cpu/*`
@@ -50,13 +56,15 @@
 - 冻结 `ExecutionEngine.compile(...).execute(...)` 的公开入口形态，使下游可在不理解内部编译细节的前提下稳定调用。
 - 冻结 `target` 与 include 的映射约束，保证 `target=npu_demo` 不会回退到 `cpu::*`。
 - 冻结 `P0` 的失败短语集合与触发条件入口，保证测试可机械比较。
+- 允许第三方 target 通过 compile strategy 扩展编译链路，且不得修改 `ExecutionEngine.compile(...)` 公开签名。
 
 ## 额外补充
 
 ### 模块级补充
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
-- `P0` 仅支持 `target in {"cpu","npu_demo"}`；其他 target 必须失败，且 `failure_phrase == "target_header_mismatch"`。
+- `P0` 内置真实编译/执行支持 `target in {"cpu","npu_demo"}`；其他 target 必须注册 compile strategy，缺失时 `failure_phrase == "target_header_mismatch"`。
+- 第三方 compile-only target 的 `CompiledKernel.execute(...)` 必须以 `failure_phrase == "execution_unsupported"` 公开失败，不得 fallback 到普通 kernel。
 - `P0` 不支持 `stream`；当 `ExecuteRequest.stream is not None` 必须失败，且 `failure_phrase == "stream_not_supported"`。
 - `P0` 不支持函数输出回收；当 `ExecuteRequest.capture_function_output=True` 必须失败，且 `failure_phrase == "function_output_capture_not_supported"`。
 - `P0` 不负责推导参数个数/顺序；调用方必须提供与 `function` 形参顺序一致的 `args`。
@@ -109,8 +117,8 @@ assert result.ok and result.failure_phrase is None
 
 - api：`ExecutionEngine.compile(source: str | None = None, function: str | None = None, *, request: CompileRequest | None = None, entry_point: str = "kg_execute_entry") -> CompiledKernel`
 - 参数：
-  - `source`：源对象、源缓冲区或源文本，提供当前操作读取的数据来源；类型 `str | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `function`：Python 函数、DSL 函数或函数级对象，作为构建或执行输入；类型 `str | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `source`：源对象、源缓冲区或源文本，提供当前操作读取的数据来源；类型 `str | None`；默认值 `None`；使用 `request` 时必须为 `None`；混用时必须以 `source_empty_or_invalid` 失败；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `function`：Python 函数、DSL 函数或函数级对象，作为构建或执行输入；类型 `str | None`；默认值 `None`；使用 `request` 时必须为 `None`；混用时必须以 `source_empty_or_invalid` 失败；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `request`：请求对象，承载工具、执行引擎或服务入口需要处理的输入信息；类型 `CompileRequest | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `entry_point`：`entry_point` 输入值，参与 `compile` 的公开处理流程；类型 `str`；默认值 `"kg_execute_entry"`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
 - 返回值：`CompiledKernel`。
@@ -121,7 +129,7 @@ assert result.ok and result.failure_phrase is None
   result = execution_engine.compile(source=None, function=None, request=None, entry_point="kg_execute_entry")
   ```
 - 功能说明：执行 `compile`。
-- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
+- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态；`request` 非 `None` 时不得同时提供 `source` 或 `function`。
 
 ### `class CompiledKernel(target: str, soname_path: str, function: str, entry_point: str, compile_stdout: str = "", compile_stderr: str = "")`
 

@@ -18,7 +18,6 @@
 - `KernelEmitter.emit_type(attr: Attribute | str) -> str`
 - `KernelEmitter.emit_attr(attr: Attribute | str) -> str`
 - `KernelEmitter.emit_value(value: SSAValue) -> str`
-- `KernelEmitter.emit_module(module_op: ModuleOp) -> str`
 - `KernelEmitter.emit_func(func_op: func.FuncOp) -> str`
 
 ## 文档信息
@@ -201,24 +200,6 @@
 - 功能说明：生成 SSA value 在源码中的稳定名称。
 - 注意事项：命名与缓存状态由 `EmitCContext` 承载；调用侧不得直接访问 emitter 内部缓存。
 
-### `KernelEmitter.emit_module(module_op: ModuleOp) -> str`
-
-- api：`KernelEmitter.emit_module(module_op: ModuleOp) -> str`
-- 参数：
-  - `module_op`：待生成完整源码的 `builtin.module`；类型 `ModuleOp`；调用方必须显式传入，不允许 `None`。
-- 返回值：`str`，完整 C/C++ 源码文本。
-- 使用示例：
-
-  ```python
-  from kernel_gen.dsl.gen_kernel.emit_context import EmitCContext
-  from kernel_gen.dsl.gen_kernel.kernel_emitter import KernelEmitter
-
-  emitter = KernelEmitter(EmitCContext())
-  source = emitter.emit_module(module_op)
-  ```
-- 功能说明：生成 `builtin.module` 对应的完整源码文本。
-- 注意事项：module 级生成负责 include、函数顺序和 wrapper 组织；调用侧不得拆分调用非公开 helper 拼接完整源码。
-
 ### `KernelEmitter.emit_func(func_op: func.FuncOp) -> str`
 
 - api：`KernelEmitter.emit_func(func_op: func.FuncOp) -> str`
@@ -235,7 +216,7 @@
   source = emitter.emit_func(func_op)
   ```
 - 功能说明：生成 `func.func` 对应的函数源码文本。
-- 注意事项：函数级生成只处理单个 `func.FuncOp`；module include、跨函数组织和 wrapper 选择由 `emit_module(...)` 承接。
+- 注意事项：函数级生成只处理单个 `func.FuncOp`；module include、跨函数组织和 wrapper 选择由 `emit(...)` 承接。
 
 ## 测试
 
