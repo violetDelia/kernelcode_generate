@@ -39,7 +39,7 @@ from itertools import permutations
 
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, ModuleOp, StringAttr, UnregisteredOp
+from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, ModuleOp, StringAttr, UnregisteredOp, i1
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 from xdsl.passes import ModulePass
 from xdsl.pattern_rewriter import (
@@ -76,6 +76,40 @@ def _symbol_expr_attr(expr: str | int) -> SymbolExprAttr:
     """
 
     return SymbolExprAttr.from_expr(str(expr))
+
+
+def _ordered_binary_elewise_memory_values(
+    memory_values: list[SSAValue],
+    *,
+    is_compare_kind: bool,
+) -> list[SSAValue]:
+    """按 kernel.binary_elewise 公开 out/lhs/rhs 顺序排列 memory operand。
+
+
+    功能说明:
+    - 普通算术 op 已按 out/lhs/rhs 输入，保持原顺序。
+    - compare 旧文本可能以 lhs/rhs/out 输入；通过唯一 i1 memory 识别 out，并保留其余两个输入顺序。
+
+    使用示例:
+    - ordered = _ordered_binary_elewise_memory_values(memory_values, is_compare_kind=True)
+
+    关联文件:
+    - spec: [spec/pass/tile/elewise.md](spec/pass/tile/elewise.md)
+    - test: [test/passes/tile/test_elewise.py](test/passes/tile/test_elewise.py)
+    - 功能实现: [kernel_gen/passes/tile/elewise.py](kernel_gen/passes/tile/elewise.py)
+    """
+
+    if not is_compare_kind:
+        return memory_values
+    out_values = [
+        value
+        for value in memory_values
+        if isinstance(value.type, NnMemoryType) and value.type.element_type == i1
+    ]
+    if len(out_values) != 1:
+        return memory_values
+    out_value = out_values[0]
+    return [out_value, *(value for value in memory_values if value is not out_value)]
 
 
 class TileElewiseBinaryPattern(RewritePattern):
@@ -234,7 +268,7 @@ class TileElewiseBinaryPattern(RewritePattern):
         )
         current_block.add_op(const_one)
 
-        ordered_memory_values = memory_values
+        ordered_memory_values = _ordered_binary_elewise_memory_values(memory_values, is_compare_kind=is_compare_kind)
         views: list[DmaViewOp] = []
         use_unit_stride_operands = use_legacy_int_attrs
         for value in ordered_memory_values:
@@ -272,11 +306,9 @@ class TileElewiseBinaryPattern(RewritePattern):
         anchor = op
         block.insert_ops_before(pre_ops + [outer_loop], anchor)
         op.detach()
-        memory_index = 0
-        for index, operand in enumerate(old_operands):
-            if isinstance(SSAValue.get(operand).type, NnMemoryType):
-                op.operands[index] = views[memory_index].result
-                memory_index += 1
+        memory_positions = [index for index, operand in enumerate(old_operands) if isinstance(SSAValue.get(operand).type, NnMemoryType)]
+        for index, view in zip(memory_positions, views, strict=True):
+            op.operands[index] = view.result
         current_block.add_op(op)
         rewriter.notify_op_modified(parent_op)
 

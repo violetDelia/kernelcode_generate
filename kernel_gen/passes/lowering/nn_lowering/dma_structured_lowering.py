@@ -379,7 +379,8 @@ def _lower_transpose(block: Block, op: Operation) -> None:
     result_shape_texts = [_shape_dim_expr_text(dim) for dim in result_type.shape.data]
     operand_shape_texts = [_shape_dim_expr_text(dim) for dim in operand.type.shape.data]
     has_unknown_result_dim = "?" in result_shape_texts
-    symbol_dims: list[SSAValue] = []
+    symbol_by_source_axis: dict[int, SSAValue] = {}
+    symbol_source_axes: list[int] = []
     for result_axis, perm_entry in enumerate(perm):
         source_axis = _perm_axis_value(perm_entry)
         if source_axis < 0 or source_axis >= len(operand_shape_texts):
@@ -390,9 +391,12 @@ def _lower_transpose(block: Block, op: Operation) -> None:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.transpose result dim not in source")
         if not has_unknown_result_dim and result_dim_text.lstrip("-").isdigit():
             continue
+        symbol_source_axes.append(source_axis)
+    for source_axis in sorted(symbol_source_axes):
         symbol_op = SymbolGetDimOp(operand, IntAttr(source_axis))
         block.insert_op_before(symbol_op, op)
-        symbol_dims.append(symbol_op.result)
+        symbol_by_source_axis[source_axis] = symbol_op.result
+    symbol_dims = [symbol_by_source_axis[_perm_axis_value(perm_entry)] for perm_entry in perm if _perm_axis_value(perm_entry) in symbol_by_source_axis]
     alloc = DmaAllocOp(symbol_dims, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]

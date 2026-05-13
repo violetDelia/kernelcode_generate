@@ -5,6 +5,7 @@
 - 定义 DMA helper 对应的 AST 节点，节点只保存 DSL 语义数据，不执行 lowering。
 - 读类 DMA 节点在匿名 `?` 维度类型化后使用 full-rank dynamic shape，保持 `dma.alloc` verifier 合同。
 - `DmaReshapeAST` 对 `!symbol.int<?>` shape operand 继续输出 `?`，不得通过 SSA 名称或公开变量名伪造稳定 shape。
+- 含 `iter<start,end,step>` 的 symbol operand 保留 canonical token，不通过 SSA/name_hint 构造运行时维度。
 
 API 列表:
 - `DmaAllocAST(shape: SymbolListAST, dtype: IntTypeAttrAST | FloatTypeAttrAST | BoolTypeAttrAST, space: MemorySpaceAttrAST = ..., stride: SymbolListAST | None = None, location: SourceLocation | None = None)`
@@ -128,6 +129,132 @@ def _symbol_dim_from_expr_text(text: int | str) -> SymbolDim:
     if isinstance(text, int):
         return SymbolDim(text)
     return SymbolDim(str(text).replace(" floordiv ", "//"))
+
+
+def _runtime_value_from_symbol_expr(value: int | str | SymbolDim) -> int | str | SymbolDim:
+    """把 symbol 值语义转换为当前文件内可继续传播的运行时值。
+
+    功能说明:
+    - 静态整数保持 `int`。
+    - 含 `iter<...>` 的 canonical 文本保持字符串，避免误降级为 SSA/name_hint。
+    - 其它字符串继续通过 `SymbolDim` 承载。
+
+    使用示例:
+    - runtime_value = _runtime_value_from_symbol_expr("N - iter<0,N,1>")
+    """
+
+    if isinstance(value, int):
+        return value
+    if isinstance(value, SymbolDim):
+        return value
+    if "iter<" in value:
+        return value.replace(" ", "")
+    return _symbol_dim_from_expr_text(value)
+
+
+def _contains_iter_token_value(values: list[int | str | SymbolDim]) -> bool:
+    """判断公开运行时值是否包含 iter token。
+
+    功能说明:
+    - 只用于决定是否把公开语义下沉到 `kernel_gen.operation.dma` 的旧校验。
+    - iter token 由当前 DSL AST 自己保留，不强行转换成 `SymbolDim`。
+
+    使用示例:
+    - if _contains_iter_token_value(offset_values):
+    """
+
+    return any(isinstance(value, str) and "iter<" in value for value in values)
+
+
+def _runtime_value_expr_text(value: int | str | SymbolDim) -> str:
+    """把运行时切片值规整为 `SymbolExprAttr` 文本。
+
+    功能说明:
+    - 静态整数返回十进制文本。
+    - `SymbolDim`、普通 symbol 和 `iter<...>` 文本均经 `SymbolExprAttr` canonicalize 后比较。
+
+    使用示例:
+    - text = _runtime_value_expr_text("N - iter<0,N,1>")
+    """
+
+    raw_value = value.get_value() if isinstance(value, SymbolDim) else value
+    if isinstance(raw_value, int):
+        return str(raw_value)
+    return SymbolExprAttr.from_expr(_symbol_expr_text_from_value(str(raw_value))).expr.data
+
+
+def _runtime_value_static_int(value: int | str | SymbolDim) -> int | None:
+    """读取运行时切片值的静态整数。
+
+    功能说明:
+    - 可静态证明为整数时返回 `int`。
+    - 动态 symbol、unknown 和 `iter<...>` 表达返回 `None`，由调用方跳过静态边界判断。
+
+    使用示例:
+    - static_offset = _runtime_value_static_int(0)
+    """
+
+    text = _runtime_value_expr_text(value)
+    signless = text[1:] if text.startswith("-") else text
+    return int(text) if signless.isdecimal() else None
+
+
+def _shape_expr_texts(memory_type: NnMemoryType) -> list[str]:
+    """读取 memory type shape 的 canonical 文本列表。
+
+    功能说明:
+    - 仅消费当前公开 `NnMemoryType.shape: ArrayAttr[SymbolExprAttr]`。
+    - 供写回类 DMA AST 在含 iter offset 时继续执行 rank/size/bounds 公开校验。
+
+    使用示例:
+    - shape = _shape_expr_texts(source_type)
+    """
+
+    return [_symbol_expr_text(dim) for dim in memory_type.shape.data]
+
+
+def _validate_write_slice_contract(
+    op_name: str,
+    target_type: NnMemoryType,
+    source_type: NnMemoryType,
+    offsets: list[int | str | SymbolDim],
+    sizes: list[int | str | SymbolDim],
+    strides: list[int | str | SymbolDim],
+) -> None:
+    """校验 store/deslice 写回窗口公开语义。
+
+    功能说明:
+    - 保留 rank、正长度、非负 offset、正 stride、`sizes == source.shape` 与可静态判断的 target bounds。
+    - 允许 offset 携带 `iter<...>` 动态 token，但不因此跳过其它可判定合同。
+
+    使用示例:
+    - _validate_write_slice_contract("store", target_type, source_type, offsets, sizes, strides)
+    """
+
+    target_shape = _shape_expr_texts(target_type)
+    source_shape = _shape_expr_texts(source_type)
+    rank = len(target_shape)
+    if len(offsets) != rank or len(sizes) != rank or len(strides) != rank:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{op_name} index rank mismatch")
+    size_texts = [_runtime_value_expr_text(value) for value in sizes]
+    if size_texts != source_shape:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{op_name} size mismatch")
+    target_static = [_static_int_from_symbol_expr(dim) for dim in target_type.shape.data]
+    for target_dim, offset, size, stride in zip(target_static, offsets, sizes, strides, strict=True):
+        offset_int = _runtime_value_static_int(offset)
+        size_int = _runtime_value_static_int(size)
+        stride_int = _runtime_value_static_int(stride)
+        if offset_int is not None and offset_int < 0:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{op_name} invalid offset")
+        if size_int is not None and size_int <= 0:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{op_name} invalid size")
+        if stride_int is not None and stride_int <= 0:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{op_name} invalid stride")
+        if target_dim is None or offset_int is None or size_int is None or stride_int is None:
+            continue
+        last_index = offset_int + (size_int - 1) * stride_int
+        if last_index >= target_dim:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{op_name} index out of bounds")
 
 
 def _symbol_expr_text(dim: SymbolExprAttr) -> str:
@@ -599,7 +726,7 @@ class DmaAllocAST(ValueAST):
                 block.add_op(shape_op)
                 emitted_value = shape_op.results[0]
                 value = emitted_value.type.get_value()
-                shape_values.append(value if isinstance(value, int) else _symbol_dim_from_expr_text(value))
+                shape_values.append(_runtime_value_from_symbol_expr(value))
                 shape_attr_values.append(value)
                 dynamic_shape.append(emitted_value)
             elif isinstance(item, ValueAST):
@@ -612,7 +739,7 @@ class DmaAllocAST(ValueAST):
                 if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, SymbolValueType):
                     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "alloc shape must lower to symbol.int")
                 value = emitted_value.type.get_value()
-                shape_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
+                shape_values.append(_runtime_value_from_symbol_expr(value))
                 shape_attr_values.append(value)
                 dynamic_shape.append(emitted_value)
         stride_values: list[SymbolRuntimeValue] | None = None
@@ -632,7 +759,7 @@ class DmaAllocAST(ValueAST):
                     if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, SymbolValueType):
                         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "alloc stride must lower to symbol.int")
                     value = emitted_value.type.get_value()
-                    stride_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
+                    stride_values.append(_runtime_value_from_symbol_expr(value))
             if len(stride_values) == len(shape_values) and all(isinstance(dim, int) for dim in shape_values) and all(isinstance(dim, int) for dim in stride_values):
                 contiguous_stride: list[int] = []
                 running_stride = 1
@@ -884,9 +1011,13 @@ class DmaViewAST(ValueAST):
                 emitted = emitted.results[0]
             if not isinstance(emitted, SSAValue) or not isinstance(emitted.type, (SymbolValueType, SymbolIterType)):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "view offset must lower to symbol.int")
-            value = SymbolDim(emitted.name_hint or "it") if isinstance(emitted.type, SymbolIterType) else emitted.type.get_value()
+            value = (
+                f"iter<{emitted.type.start.expr.data},{emitted.type.end.expr.data},{emitted.type.step.expr.data}>"
+                if isinstance(emitted.type, SymbolIterType)
+                else emitted.type.get_value()
+            )
             offsets.append(emitted)
-            offset_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
+            offset_values.append(_runtime_value_from_symbol_expr(value))
         sizes: list[SSAValue] = []
         size_values: list[SymbolRuntimeValue] = []
         static_size_cache: dict[int, SSAValue] = {}
@@ -906,7 +1037,7 @@ class DmaViewAST(ValueAST):
                     static_size_cache[static_value] = emitted
             value = emitted.type.get_value()
             sizes.append(emitted)
-            size_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
+            size_values.append(_runtime_value_from_symbol_expr(value))
         strides: list[SSAValue] = []
         stride_values: list[SymbolRuntimeValue] = []
         stride_items = list(self.stride.items)
@@ -919,7 +1050,7 @@ class DmaViewAST(ValueAST):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "view stride must lower to symbol.int")
             value = emitted.type.get_value()
             strides.append(emitted)
-            stride_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
+            stride_values.append(_runtime_value_from_symbol_expr(value))
         if not isinstance(source.type, NnMemoryType):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "view source must lower to nn.memory")
         result_memory = self.result_memory()
@@ -998,7 +1129,7 @@ class DmaReshapeAST(ValueAST):
             if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, SymbolValueType):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "reshape shape must lower to symbol.int")
             value = emitted_value.type.get_value()
-            shape_values.append(value if isinstance(value, int) else SymbolDim(value.replace(" ", "") if isinstance(value, str) else value))
+            shape_values.append(_runtime_value_from_symbol_expr(value))
             shape_operands.append(emitted_value)
         result_memory = self.result_memory()
         if not isinstance(source.type, NnMemoryType):
@@ -1387,10 +1518,10 @@ class _ReadSliceDmaAST(ValueAST):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, message)
             operands.append(emitted_value)
             if isinstance(emitted_value.type, SymbolIterType):
-                values.append(SymbolDim(emitted_value.name_hint or "it"))
+                values.append(_runtime_value_from_symbol_expr(f"iter<{emitted_value.type.start.expr.data},{emitted_value.type.end.expr.data},{emitted_value.type.step.expr.data}>"))
             else:
                 raw_value = emitted_value.type.get_value()
-                values.append(raw_value if isinstance(raw_value, int) else SymbolDim(raw_value.replace(" ", "") if isinstance(raw_value, str) else raw_value))
+                values.append(_runtime_value_from_symbol_expr(raw_value))
             if collect_dynamic:
                 value = emitted_value.type.get_value()
                 if not isinstance(value, int):
@@ -1539,10 +1670,10 @@ class _WriteSliceDmaAST(StatementAST):
             if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, valid_types):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, message)
             if isinstance(emitted_value.type, SymbolIterType):
-                value = SymbolDim(emitted_value.name_hint or "it")
+                value = _runtime_value_from_symbol_expr(f"iter<{emitted_value.type.start.expr.data},{emitted_value.type.end.expr.data},{emitted_value.type.step.expr.data}>")
             else:
                 raw_value = emitted_value.type.get_value()
-                value = raw_value if isinstance(raw_value, int) else SymbolDim(raw_value.replace(" ", "") if isinstance(raw_value, str) else raw_value)
+                value = _runtime_value_from_symbol_expr(raw_value)
             operands.append(emitted_value)
             values.append(value)
         return operands, values
@@ -1631,19 +1762,23 @@ class DmaStoreAST(_WriteSliceDmaAST):
         """校验 `dma.store` 的公开 memory 语义。
 
         功能说明:
-        - source 必须为 memory SSA。
-        - target 不是 `MemoryAST` 时保持既有公开错误。
+        - source/target 必须为 memory 语义，target 不是 `MemoryAST` 时保持既有公开错误。
+        - offset 含 iter token 时继续校验 rank、sizes 与静态边界，只跳过 operation helper 的旧 `SymbolDim` 转换。
 
         使用示例:
         - self._validate_public_semantics(target, source, offsets, sizes, strides)
         """
 
-        _ = target
+        if not isinstance(self.target, MemoryAST):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "store target must be MemoryAST")
+        if not isinstance(target.type, NnMemoryType):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "store target must lower to nn.memory")
         if not isinstance(source.type, NnMemoryType):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "store source must lower to nn.memory")
+        if _contains_iter_token_value(offsets) or _contains_iter_token_value(sizes) or _contains_iter_token_value(strides):
+            _validate_write_slice_contract("store", target.type, source.type, offsets, sizes, strides)
+            return
         try:
-            if not isinstance(self.target, MemoryAST):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "store target must be MemoryAST")
             if isinstance(self.source, MemoryAST):
                 dma.store(self.target.memory, self.source.memory, offsets, sizes, strides)
         except ValueError as exc:
@@ -1679,13 +1814,21 @@ class DmaDesliceAST(_WriteSliceDmaAST):
         """校验 `dma.deslice` 的公开 memory 语义。
 
         功能说明:
-        - target 必须为 memory SSA。
+        - target/source 必须为 memory SSA。
+        - offset 含 iter token 时继续校验 rank、sizes 与静态边界，只跳过 operation helper 的旧 `SymbolDim` 转换。
         - 当 target/source 均为 MemoryAST 时执行公开 operation 校验。
 
         使用示例:
         - self._validate_public_semantics(target, source, offsets, sizes, strides)
         """
 
+        if _contains_iter_token_value(offsets) or _contains_iter_token_value(sizes) or _contains_iter_token_value(strides):
+            if not isinstance(target.type, NnMemoryType):
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "deslice target must be nn.memory")
+            if not isinstance(source.type, NnMemoryType):
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "deslice source must lower to nn.memory")
+            _validate_write_slice_contract("deslice", target.type, source.type, offsets, sizes, strides)
+            return
         if isinstance(self.source, MemoryAST) and isinstance(self.target, MemoryAST):
             try:
                 dma.deslice(self.target.memory, self.source.memory, offsets, sizes, strides)

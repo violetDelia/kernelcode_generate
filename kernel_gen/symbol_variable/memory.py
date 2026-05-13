@@ -30,7 +30,6 @@ API 列表:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from enum import Enum
 
 import sympy as sp
@@ -44,13 +43,13 @@ ShapeLike = SymbolShape | Sequence[SymbolDim | int | str]
 ScalarInput = int | bool
 
 
-@dataclass(frozen=True)
 class LocalSpaceMeta:
     """空间元信息描述。
 
 
     功能说明:
     - 描述空间名称、最大容量与对齐要求。
+    - 采用手写冻结值对象，避免导入期依赖 dataclasses 的额外模块加载。
 
     使用示例:
     - LocalSpaceMeta(name="GM", max_size=None, align=1024)
@@ -62,9 +61,104 @@ class LocalSpaceMeta:
     - 功能实现: kernel_gen/symbol_variable/memory.py
     """
 
-    name: str
-    max_size: int | None
-    align: int
+    __slots__ = ("_frozen", "align", "max_size", "name")
+
+    def __init__(self: "LocalSpaceMeta", name: str, max_size: int | None, align: int) -> None:
+        """初始化并冻结空间元信息。
+
+
+        功能说明:
+        - 写入 name/max_size/align 三个公开只读字段。
+        - 初始化完成后禁止再次赋值，保持冻结值对象合同。
+
+        使用示例:
+        - LocalSpaceMeta(name="GM", max_size=None, align=1024)
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        object.__setattr__(self, "_frozen", False)
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "max_size", max_size)
+        object.__setattr__(self, "align", align)
+        object.__setattr__(self, "_frozen", True)
+
+    def __setattr__(self: "LocalSpaceMeta", name: str, value: int | str | None | bool) -> None:
+        """拒绝冻结后的字段写入。
+
+
+        功能说明:
+        - 初始化阶段允许内部赋值。
+        - 冻结后抛出 `dataclasses.FrozenInstanceError`，保持公开异常语义一致。
+
+        使用示例:
+        - `MemorySpace.GM.value.align = 256` 会触发冻结异常。
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        if getattr(self, "_frozen", False):
+            from dataclasses import FrozenInstanceError
+
+            raise FrozenInstanceError(f"cannot assign to field {name!r}")
+        object.__setattr__(self, name, value)
+
+    def __repr__(self: "LocalSpaceMeta") -> str:
+        """返回与冻结 dataclass 一致的调试文本。
+
+
+        功能说明:
+        - 保持 `LocalSpaceMeta(name='GM', max_size=None, align=1024)` 形式。
+
+        使用示例:
+        - repr(LocalSpaceMeta(name="GM", max_size=None, align=1024))
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        return f"LocalSpaceMeta(name={self.name!r}, max_size={self.max_size!r}, align={self.align!r})"
+
+    def __eq__(self: "LocalSpaceMeta", other: "LocalSpaceMeta") -> bool:
+        """按字段值比较空间元信息。
+
+
+        功能说明:
+        - 与 dataclass 值比较语义一致。
+
+        使用示例:
+        - LocalSpaceMeta("GM", None, 1024) == LocalSpaceMeta("GM", None, 1024)
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        if not isinstance(other, LocalSpaceMeta):
+            return NotImplemented
+        return (self.name, self.max_size, self.align) == (other.name, other.max_size, other.align)
+
+    def __hash__(self: "LocalSpaceMeta") -> int:
+        """返回字段值哈希。
+
+
+        功能说明:
+        - 与冻结 dataclass 可哈希语义一致，支持作为 Enum value 使用。
+
+        使用示例:
+        - hash(MemorySpace.GM.value)
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        return hash((self.name, self.max_size, self.align))
 
 
 class MemorySpace(Enum):

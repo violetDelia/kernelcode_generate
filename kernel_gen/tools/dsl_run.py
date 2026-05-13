@@ -56,6 +56,7 @@ RETURN_VALUE_ERROR = "DslRunReturnValueUnsupported: dsl_run only supports functi
 PIPELINE_NAME_ERROR = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline'"
 PIPELINE_TYPE_ERROR = "DslRunInvalidPipeline: pipeline must be str or PassManager"
 REAL_ARG_TYPE_ERROR = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray and integer scalar"
+TENSOR_ARG_TYPE_ERROR = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor and numpy.ndarray"
 TILE_VALUE_ERROR = "DslRunInvalidTileValue: tile runtime scalar must be positive int"
 ARITY_ERROR = "DslRunArityMismatch: real_args count does not match function signature"
 NPU_DEMO_WRAPPER_ERROR = "DslRunInternalError: lowered npu_demo module must contain exactly one wrapper func with arch.launch"
@@ -424,18 +425,58 @@ def _is_tensor_runtime_arg(value: RuntimeRealArg) -> bool:
     return _is_torch_tensor(value) or _is_numpy_array(value)
 
 
+def _parameter_annotation_text(parameter: inspect.Parameter) -> str:
+    """读取公开 DSL 函数形参注解文本。
+
+    功能说明:
+    - `dsl_run(...)` 需要区分 Tensor 形参与 runtime scalar 形参。
+    - 仅使用当前函数签名公开注解，不依赖 parser 内部 helper。
+
+    使用示例:
+    - text = _parameter_annotation_text(parameter)
+    """
+
+    annotation = parameter.annotation
+    if annotation is inspect.Parameter.empty:
+        return ""
+    if isinstance(annotation, str):
+        text = annotation.strip()
+    else:
+        text = getattr(annotation, "__name__", str(annotation)).strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
+        return text[1:-1].strip()
+    return text
+
+
+def _parameter_expects_tensor_arg(parameter: inspect.Parameter) -> bool:
+    """判断形参是否按 DSL Tensor 注解接收真实数组参数。
+
+    功能说明:
+    - `Tensor[...]` 形参必须绑定 torch.Tensor / numpy.ndarray。
+    - runtime scalar 只允许绑定到非 Tensor 形参，避免整数误入 Tensor 参数后才在 AST parser 中失败。
+
+    使用示例:
+    - expects_tensor = _parameter_expects_tensor_arg(parameter)
+    """
+
+    return _parameter_annotation_text(parameter).startswith("Tensor[")
+
+
 def _validate_runtime_arg(parameter: inspect.Parameter, value: RuntimeRealArg) -> None:
     """校验单个 `dsl_run(...)` 真实运行时参数。
 
     功能说明:
     - tensor/array 参数交给 memory 元数据构造链路处理。
     - runtime scalar 允许普通卷积参数与 tile 参数；`tile_*` 必须是正整数。
+    - `Tensor[...]` 形参只接受 tensor/array，避免把整数标量绑定成 tensor 后产生 parser 级间接错误。
 
     使用示例:
     - _validate_runtime_arg(parameter, value)
     """
 
     if _is_runtime_scalar(value):
+        if _parameter_expects_tensor_arg(parameter):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, TENSOR_ARG_TYPE_ERROR)
         scalar_value = int(value)
         if parameter.name.startswith("tile_") and scalar_value <= 0:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, TILE_VALUE_ERROR)
@@ -799,10 +840,16 @@ def _find_cost_func_by_sym_name(module: ModuleOp, sym_name: str) -> func.FuncOp:
     for op in module.ops:
         if isinstance(op, func.FuncOp) and op.sym_name.data == sym_name:
             return op
+    match = re.match(r"^_cost_([^_]+)_", sym_name)
+    kind_text = match.group(1) if match is not None else ""
+    if kind_text:
+        message = f"DslCostRunMissingCostFunction: lowered module does not contain _cost_{kind_text}_ sibling function"
+    else:
+        message = f"DslCostRunMissingCostFunction: cost function '{sym_name}' not found"
     raise KernelCodeError(
         ErrorKind.CONTRACT,
         ErrorModule.TOOLS,
-        f"DslCostRunMissingCostFunction: cost function '{sym_name}' not found",
+        message,
     )
 
 

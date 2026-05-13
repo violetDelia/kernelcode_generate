@@ -380,8 +380,8 @@ def test_symbol_min_max_public_emit_mlir_rejects_raw_operand_result() -> None:
         SymbolMaxAST(RawEmitAST(None), ConstValueAST(1)).emit_mlir(Context(), Block())
 
 
-def test_symbol_binary_public_emit_mlir_propagates_unknown_for_unknown_and_iter_operands() -> None:
-    """symbol 二元 AST 对 `?` 和 `symbol.iter` operand 发射 unknown result。"""
+def test_symbol_binary_public_emit_mlir_propagates_unknown_and_iter_token_operands() -> None:
+    """symbol 二元 AST 对 `?` operand 传播 unknown，对 `symbol.iter` operand 生成 iter token result。"""
 
     ctx = Context()
     block = Block()
@@ -398,8 +398,8 @@ def test_symbol_binary_public_emit_mlir_propagates_unknown_for_unknown_and_iter_
     assert isinstance(unknown_result, SSAValue)
     assert isinstance(iter_result, SSAValue)
     assert unknown_result.type == SymbolValueType.from_expr("?")
-    assert iter_result.type == SymbolValueType.from_expr("?")
-    assert "2 - " not in str(iter_result.type)
+    assert iter_result.type == SymbolValueType.from_expr("2 - iter<0,N,1>")
+    assert "f0" not in str(iter_result.type)
 
 
 def test_symbol_compare_public_emit_mlir_keeps_i1_for_iter_operand() -> None:

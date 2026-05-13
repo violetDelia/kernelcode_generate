@@ -1541,6 +1541,36 @@ def test_memory_pool_loop_local_dynamic_shape_rewrite() -> None:
     assert not any(isinstance(op, DmaAllocOp) for op in _collect_ops_recursive(loop_block))
 
 
+# TC-MP-014D
+# 功能说明: 验证 `iter<...>` symbol expression 作为公开 shape atom 时可进入 memory-pool rewrite。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_rewrite_accepts_iter_token_shape_expression
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_rewrite_accepts_iter_token_shape_expression() -> None:
+    iter_dim_text = "min(4, 6 - iter<0,6,4>)"
+    dynamic_value = _TestOp(result_types=[SymbolValueType.from_expr(iter_dim_text)])
+    iter_type = NnMemoryType(
+        ArrayAttr([_symbol_expr_attr(iter_dim_text)]),
+        ArrayAttr([_symbol_expr_attr("1")]),
+        i32,
+        _make_space("shared"),
+    )
+    alloc = DmaAllocOp([dynamic_value.results[0]], iter_type)
+    free = DmaFreeOp(alloc.result)
+    module = _build_module("iter_token_shape", [dynamic_value, alloc, free])
+
+    pass_obj = MemoryPoolPass(rewrite=True, alignment=0)
+    pass_obj.apply(Context(), module)
+
+    block = next(op for op in module.ops if isinstance(op, func.FuncOp)).body.blocks[0]
+    ops = _collect_ops_recursive(block)
+    assert not any(isinstance(op, DmaAllocOp) for op in ops)
+    reshape_ops = [op for op in ops if isinstance(op, DmaReshapeOp)]
+    assert len(reshape_ops) == 1
+    assert list(reshape_ops[0].shape) == [dynamic_value.results[0]]
+
+
 # TC-MP-015
 # 功能说明: 验证 analysis-only 允许 escaping alloc 摘要，rewrite 仍拒绝 escaping alloc。
 # 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_escape_return

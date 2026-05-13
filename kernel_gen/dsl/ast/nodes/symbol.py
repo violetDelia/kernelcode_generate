@@ -4,7 +4,7 @@
 功能说明:
 - 定义 `symbol` dialect 相关 DSL AST 节点。
 - 节点只保存 DSL 语义数据，`emit_mlir(ctx, block)` 递归发射对应 `symbol.*` op。
-- `!symbol.iter<...>` 或 `!symbol.int<"?">` 参与 symbol 二元算术时结果传播为 `!symbol.int<"?">`。
+- `!symbol.iter<...>` 参与 symbol 二元算术时按 `iter<start,end,step>` token 生成结果；`!symbol.int<"?">` 仍传播为 `!symbol.int<"?">`。
 - `basic.py` 不再承载 symbol dialect 节点实现，避免基础节点文件同时维护 symbol op 发射逻辑。
 
 API 列表:
@@ -490,11 +490,29 @@ def _parenthesize_symbol_expr_operand(value: int | str) -> str:
     """
 
     text = str(value)
-    if re.fullmatch(r"-?\d+|[A-Za-z_][A-Za-z0-9_]*|\?", text):
+    if re.fullmatch(r"-?\d+|[A-Za-z_][A-Za-z0-9_]*|\?|iter<[^%]*>", text):
         return text
     if text.startswith("(") and text.endswith(")"):
         return text
     return f"({text})"
+
+
+def _symbol_iter_token_text(iter_type: SymbolIterType) -> str:
+    """从 `SymbolIterType` 构造公开 `iter<start,end,step>` 文本。
+
+    功能说明:
+    - 只读取 type 上的 start/end/step 语义字段。
+    - 用 `SymbolValueType.from_expr(...)` 校验并 canonicalize token，不依赖 SSA/name_hint/runtime 名。
+
+    使用示例:
+    - token = _symbol_iter_token_text(SymbolIterType.from_bounds("0", "N", "TILE"))
+    """
+
+    token = f"iter<{iter_type.start.expr.data},{iter_type.end.expr.data},{iter_type.step.expr.data}>"
+    value = SymbolValueType.from_expr(token).get_value()
+    if not isinstance(value, str):
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "symbol.iter token must lower to symbol expression")
+    return value
 
 
 def _symbol_expr_from_ssa(value: SSAValue) -> int | str:
@@ -502,7 +520,7 @@ def _symbol_expr_from_ssa(value: SSAValue) -> int | str:
 
     功能说明:
     - 从 `!symbol.int` 类型读取已记录的表达文本。
-    - 对 `!symbol.iter` 返回 unknown `?`，避免从 SSA 名称或 `name_hint` 反推表达。
+    - 对 `!symbol.iter` 从公开 type 字段构造 `iter<start,end,step>` token。
     - 非 symbol SSA value 按公开 MLIR 生成合同报错。
 
     使用示例:
@@ -512,7 +530,7 @@ def _symbol_expr_from_ssa(value: SSAValue) -> int | str:
     if isinstance(value.type, SymbolValueType):
         return value.type.get_value()
     if isinstance(value.type, SymbolIterType):
-        return "?"
+        return _symbol_iter_token_text(value.type)
     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "symbol operands must have !symbol.int or !symbol.iter type")
 
 

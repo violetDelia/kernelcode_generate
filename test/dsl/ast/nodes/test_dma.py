@@ -25,7 +25,7 @@ from xdsl.ir import Block, Operation, SSAValue
 
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaReshapeOp
-from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolIterType, SymbolValueType
 from kernel_gen.dsl.ast.nodes.attr import BoolTypeAttrAST, FloatTypeAttrAST, IntTypeAttrAST, MemorySpaceAttrAST
 from kernel_gen.dsl.ast.nodes.basic import MemoryAST, ValueAST
 from kernel_gen.dsl.ast.nodes.symbol import ConstValueAST, SymbolListAST
@@ -388,6 +388,35 @@ def test_dma_emit_mlir_handles_dynamic_public_memory_paths() -> None:
     dynamic_size = [TensorAxisAccessAST(source, "shape", 0), 4]
     assert isinstance(DmaLoadAST(source, [0, 0], dynamic_size, None, MemorySpace.SM).emit_mlir(ctx, block), SSAValue)
     assert isinstance(DmaSliceAST(source, [0, 0], dynamic_size, None, MemorySpace.SM).emit_mlir(ctx, block), SSAValue)
+
+
+def test_dma_write_nodes_validate_iter_offset_public_contract() -> None:
+    """DmaStoreAST / DmaDesliceAST 含 iter offset 时仍执行公开写回校验。"""
+
+    target = MemoryAST.from_memory("target", Memory([4, 4], NumericType.Float32))
+    tile = MemoryAST.from_memory("tile", Memory([2, 4], NumericType.Float32, space=MemorySpace.SM))
+    ctx = Context()
+    block = Block(
+        arg_types=[
+            target.to_mlir_type(ctx),
+            tile.to_mlir_type(ctx),
+            SymbolIterType.from_bounds("0", "4", "1"),
+        ]
+    )
+    block.args[0].name_hint = "target"
+    block.args[1].name_hint = "tile"
+    iter_offset = BlockArgSymbolAST(2)
+
+    assert isinstance(DmaStoreAST(target, tile, [iter_offset, 0], [2, 4], [1, 1]).emit_mlir(ctx, block), Operation)
+    assert isinstance(DmaDesliceAST(target, tile, [iter_offset, 0], [2, 4], [1, 1]).emit_mlir(ctx, block), Operation)
+    with pytest.raises(KernelCodeError, match="store size mismatch"):
+        DmaStoreAST(target, tile, [iter_offset, 0], [3, 4], [1, 1]).emit_mlir(ctx, block)
+    with pytest.raises(KernelCodeError, match="deslice size mismatch"):
+        DmaDesliceAST(target, tile, [iter_offset, 0], [3, 4], [1, 1]).emit_mlir(ctx, block)
+    with pytest.raises(KernelCodeError, match="store index out of bounds"):
+        DmaStoreAST(target, tile, [iter_offset, 1], [2, 4], [1, 1]).emit_mlir(ctx, block)
+    with pytest.raises(KernelCodeError, match="deslice index out of bounds"):
+        DmaDesliceAST(target, tile, [iter_offset, 1], [2, 4], [1, 1]).emit_mlir(ctx, block)
 
 
 def test_dma_slice_uses_full_rank_dynamic_shape_for_unknown_named_result() -> None:

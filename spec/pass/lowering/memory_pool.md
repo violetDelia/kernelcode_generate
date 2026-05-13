@@ -105,6 +105,7 @@
   - `symbol.for` 内 alloc 的 `dma.view + dma.reshape` 留在 loop body；`scf.for` 内 loop-invariant alloc 的 backing memory 仍在函数入口。
   - `dma.alloc` result `nn.memory` 的 shape/stride 条目只接受已通过 `nn.memory` verifier 的 `SymbolExprAttr`；旧 bare `IntAttr` / `StringAttr` 维度不属于本 pass 输入合同，由 `nn.memory` verifier 在进入 pass 前拒绝。
   - full-rank `dma.alloc.dynamic_shape` operand 可携带 `!symbol.int<"?">` 类型；rewrite 必须在 `dma.view + dma.reshape` metadata 中继续保留 `?`，不得把 `?` 反推为局部变量名或后续 reshape 的公开名字。
+  - `SymbolExprAttr` 维度可包含 `iter<start,end,step>` atom；memory-pool 在内部 size/offset 计算中把这类表达作为不透明动态符号处理，rewrite 仍通过公开 `!symbol.int<"...">` operand 保留原 shape 文本，不把 iter token 退化为 `?`。
   - 若 `dma.alloc` result shape 合法保留匿名 `?`，且该 alloc 结果随后通过 `dma.reshape` 细化为同 dtype/space/rank 的公开 shape，memory-pool 只能替换 alloc source，不得用后续 reshape result type 回写或推导 alloc/view/内部 rewrite reshape 的 shape 名称。
   - 非 contiguous/custom stride 报 `MemoryPoolUnsupportedLayout: non-contiguous/custom stride is not supported`，错误类型为 `UNIMPLEMENTED`。
   - 多 block 或无法归属的 control-flow 报 `MemoryPoolUnsupportedControlFlow` 或 `MemoryPoolUnsupportedRegionEscape`，不得静默跳过非法 alloc。
@@ -214,5 +215,6 @@
 | TC-MP-008 | 边界 | 非 contiguous/custom stride | 非连续 stride memory | 运行 `apply(...)` | `UNIMPLEMENTED` + `MemoryPoolUnsupportedLayout` | `test_memory_pool_public_invalid_shape_stride_and_free_edges` |
 | TC-MP-009 | 边界 | 缺 free | 单 alloc 无 free | 运行 analysis-only | interval end 为 block/region 结束 | `test_memory_pool_unpaired_alloc` |
 | TC-MP-010 | loop | `symbol.for` alloc | loop 内 alloc/free | 运行 rewrite | backing 在函数入口，view/reshape 留在 loop body | `test_memory_pool_symbol_for_reuse` |
+| TC-MP-010D | loop/dynamic shape | `iter<...>` shape atom | alloc shape 为 `min(4, 6 - iter<0,6,4>)` 且 dynamic_shape 传入同语义 `!symbol.int` | 运行 `MemoryPoolPass(rewrite=True, alignment=0)` | rewrite 通过，移除原 alloc，并保留原 dynamic shape operand 供 reshape 使用 | `test_memory_pool_rewrite_accepts_iter_token_shape_expression` |
 | TC-MP-011 | registry | memory-pool options | `rewrite/fold/alignment` option | 运行 `build_registered_pass(...)` | 构造 `MemoryPoolPass`，非法 option 稳定失败 | `test_build_registered_memory_pool_alignment_options` |
 | TC-MP-012 | 合同验收 | expectation memory_pool | 只读 `expectation/pass/memory_pool` | 运行 `python3 -m expectation.pass.memory_pool` | 全部合同通过且不修改 expectation | `expectation.pass.memory_pool` |

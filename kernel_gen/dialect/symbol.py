@@ -89,7 +89,7 @@ from xdsl.utils.exceptions import VerifyException
 from kernel_gen.dialect.nn import NnMemoryType
 
 _SYMBOL_EXPR_TOKEN_PATTERN = re.compile(
-    r"\s*(?:(?P<int>[0-9]+)|(?P<ident>[A-Za-z_][A-Za-z0-9_]*)|(?P<punct>[()+\-*,?])|(?P<invalid>.))",
+    r"\s*(?:(?P<int>[0-9]+)|(?P<ident>[A-Za-z_][A-Za-z0-9_]*)|(?P<punct>[()+\-*,?<>])|(?P<invalid>.))",
     re.DOTALL,
 )
 _SYMBOL_EXPR_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -166,7 +166,7 @@ class _SymbolExprParserBase:
 
     功能说明:
     - 为字符串构造入口与 xDSL attribute parser 入口复用同一语法与 canonical 规则。
-    - 支持 `+`、`-`、`*`、`floordiv`、`ceildiv`、`mod`、`min(lhs, rhs)`、`max(lhs, rhs)`、括号与 `?`。
+    - 支持 `+`、`-`、`*`、`floordiv`、`ceildiv`、`mod`、`min(lhs, rhs)`、`max(lhs, rhs)`、`iter<start,end,step>`、括号与 `?`。
 
     使用示例:
     - _SymbolExprTextParser("N floordiv 2").parse_all()
@@ -219,7 +219,7 @@ class _SymbolExprParserBase:
         """解析 symbol 表达式 primary。
 
         功能说明:
-        - 支持整数、标识符、`?`、括号、一元正负号与二元 `min(lhs, rhs)`。
+        - 支持整数、标识符、`?`、括号、一元正负号、`iter<start,end,step>` 与二元 `min(lhs, rhs)`。
 
         使用示例:
         - parser.parse_primary()
@@ -248,6 +248,15 @@ class _SymbolExprParserBase:
             rhs = self.parse_expression()
             self.expect_punctuation(")")
             return _make_symbol_expr_max(lhs, rhs)
+        if self.consume_keyword("iter"):
+            self.expect_punctuation("<")
+            start = self.parse_expression()
+            self.expect_punctuation(",")
+            end = self.parse_expression()
+            self.expect_punctuation(",")
+            step = self.parse_expression()
+            self.expect_punctuation(">")
+            return _make_symbol_expr_iter(start, end, step)
         identifier = self.consume_identifier()
         if identifier is not None:
             return _make_symbol_expr_symbol(identifier)
@@ -255,7 +264,7 @@ class _SymbolExprParserBase:
             node = self.parse_expression()
             self.expect_punctuation(")")
             return node
-        self.raise_parse_error("symbol expr must contain identifiers, ?, integers, +, -, *, floordiv, ceildiv, mod, min(lhs, rhs) or max(lhs, rhs)")
+        self.raise_parse_error("symbol expr must contain identifiers, ?, integers, +, -, *, floordiv, ceildiv, mod, min(lhs, rhs), max(lhs, rhs) or iter<start,end,step>")
 
     def consume_punctuation(self: "_SymbolExprParserBase", punctuation: str) -> bool:
         """消费可选标点。
@@ -430,7 +439,7 @@ class _SymbolExprTextParser(_SymbolExprParserBase):
 
         if self.index < len(self.tokens):
             token = self.tokens[self.index]
-            if token.kind == "ident" and token.text not in {"floordiv", "ceildiv", "mod", "min", "max"}:
+            if token.kind == "ident" and token.text not in {"floordiv", "ceildiv", "mod", "min", "max", "iter"}:
                 self.index += 1
                 return token.text
         return None
@@ -652,6 +661,46 @@ def _is_symbol_expr_unknown(node: _SymbolExprNode) -> bool:
     return node.kind == "unknown"
 
 
+def _contains_symbol_expr_unknown(node: _SymbolExprNode) -> bool:
+    """判断表达树是否包含 unknown。
+
+    功能说明:
+    - 识别 `iter<start,end,step>` 子表达中的 `?`，供算术结果保守传播。
+
+    使用示例:
+    - _contains_symbol_expr_unknown(node)
+    """
+
+    return _is_symbol_expr_unknown(node) or any(_contains_symbol_expr_unknown(arg) for arg in node.args)
+
+
+def _contains_symbol_expr_iter(node: _SymbolExprNode) -> bool:
+    """判断表达树是否包含 iter token。
+
+    功能说明:
+    - 含 iter token 的 `min/max` 需要保留调用顺序，避免 tail 表达式被重排。
+
+    使用示例:
+    - has_iter = _contains_symbol_expr_iter(node)
+    """
+
+    return node.kind == "iter" or any(_contains_symbol_expr_iter(arg) for arg in node.args)
+
+
+def _make_symbol_expr_iter(start: _SymbolExprNode, end: _SymbolExprNode, step: _SymbolExprNode) -> _SymbolExprNode:
+    """构造 `iter<start,end,step>` token 表达节点。
+
+    功能说明:
+    - 该节点表示 `SymbolIterType` 的值语义 token，不从 SSA 名称或 dump 文本派生。
+    - start/end/step 已在子表达 parser 中完成 canonicalize。
+
+    使用示例:
+    - _make_symbol_expr_iter(start, end, step)
+    """
+
+    return _SymbolExprNode("iter", args=(start, end, step))
+
+
 def _get_symbol_expr_const(node: _SymbolExprNode) -> int | None:
     """提取常量节点的整数值。
 
@@ -675,7 +724,7 @@ def _make_symbol_expr_neg(node: _SymbolExprNode) -> _SymbolExprNode:
     - _make_symbol_expr_neg(_make_symbol_expr_symbol("N"))
     """
 
-    if _is_symbol_expr_unknown(node):
+    if _contains_symbol_expr_unknown(node):
         return _make_symbol_expr_unknown()
     const = _get_symbol_expr_const(node)
     if const is not None:
@@ -695,7 +744,7 @@ def _make_symbol_expr_add(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _Symbol
     - _make_symbol_expr_add(_make_symbol_expr_symbol("N"), _make_symbol_expr_const(1))
     """
 
-    if _is_symbol_expr_unknown(lhs) or _is_symbol_expr_unknown(rhs):
+    if _contains_symbol_expr_unknown(lhs) or _contains_symbol_expr_unknown(rhs):
         return _make_symbol_expr_unknown()
     lhs_const = _get_symbol_expr_const(lhs)
     rhs_const = _get_symbol_expr_const(rhs)
@@ -734,7 +783,7 @@ def _make_symbol_expr_sub(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _Symbol
     - _make_symbol_expr_sub(_make_symbol_expr_symbol("N"), _make_symbol_expr_const(1))
     """
 
-    if _is_symbol_expr_unknown(lhs) or _is_symbol_expr_unknown(rhs):
+    if _contains_symbol_expr_unknown(lhs) or _contains_symbol_expr_unknown(rhs):
         return _make_symbol_expr_unknown()
     lhs_const = _get_symbol_expr_const(lhs)
     rhs_const = _get_symbol_expr_const(rhs)
@@ -761,7 +810,7 @@ def _make_symbol_expr_mul(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _Symbol
     - _make_symbol_expr_mul(_make_symbol_expr_symbol("N"), _make_symbol_expr_const(2))
     """
 
-    if _is_symbol_expr_unknown(lhs) or _is_symbol_expr_unknown(rhs):
+    if _contains_symbol_expr_unknown(lhs) or _contains_symbol_expr_unknown(rhs):
         return _make_symbol_expr_unknown()
     lhs_const = _get_symbol_expr_const(lhs)
     rhs_const = _get_symbol_expr_const(rhs)
@@ -801,7 +850,7 @@ def _make_symbol_expr_keyword_binary(op: str, lhs: _SymbolExprNode, rhs: _Symbol
     - _make_symbol_expr_keyword_binary("floordiv", lhs, rhs)
     """
 
-    if _is_symbol_expr_unknown(lhs) or _is_symbol_expr_unknown(rhs):
+    if _contains_symbol_expr_unknown(lhs) or _contains_symbol_expr_unknown(rhs):
         return _make_symbol_expr_unknown()
     lhs_const = _get_symbol_expr_const(lhs)
     rhs_const = _get_symbol_expr_const(rhs)
@@ -826,13 +875,13 @@ def _make_symbol_expr_min(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _Symbol
     """构造 canonical `min(lhs, rhs)` 表达。
 
     功能说明:
-    - 支持二元 min、常量折叠、交换律排序与 `?` 传播。
+    - 支持二元 min、常量折叠、交换律排序、iter token 稳定排序与 `?` 传播。
 
     使用示例:
     - _make_symbol_expr_min(lhs, rhs)
     """
 
-    if _is_symbol_expr_unknown(lhs) or _is_symbol_expr_unknown(rhs):
+    if _contains_symbol_expr_unknown(lhs) or _contains_symbol_expr_unknown(rhs):
         return _make_symbol_expr_unknown()
     lhs_const = _get_symbol_expr_const(lhs)
     rhs_const = _get_symbol_expr_const(rhs)
@@ -840,6 +889,13 @@ def _make_symbol_expr_min(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _Symbol
         return _make_symbol_expr_const(min(lhs_const, rhs_const))
     if lhs == rhs:
         return lhs
+    lhs_has_iter = _contains_symbol_expr_iter(lhs)
+    rhs_has_iter = _contains_symbol_expr_iter(rhs)
+    if lhs_has_iter != rhs_has_iter:
+        ordered = (rhs, lhs) if lhs_has_iter else (lhs, rhs)
+        return _SymbolExprNode("min", args=ordered)
+    if lhs_has_iter and rhs_has_iter:
+        return _SymbolExprNode("min", args=(lhs, rhs))
     ordered = tuple(sorted((lhs, rhs), key=_format_symbol_expr_node))
     return _SymbolExprNode("min", args=ordered)
 
@@ -848,13 +904,13 @@ def _make_symbol_expr_max(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _Symbol
     """构造 canonical `max(lhs, rhs)` 表达。
 
     功能说明:
-    - 支持二元 max、常量折叠、交换律排序与 `?` 传播。
+    - 支持二元 max、常量折叠、交换律排序、iter token 稳定排序与 `?` 传播。
 
     使用示例:
     - _make_symbol_expr_max(lhs, rhs)
     """
 
-    if _is_symbol_expr_unknown(lhs) or _is_symbol_expr_unknown(rhs):
+    if _contains_symbol_expr_unknown(lhs) or _contains_symbol_expr_unknown(rhs):
         return _make_symbol_expr_unknown()
     lhs_const = _get_symbol_expr_const(lhs)
     rhs_const = _get_symbol_expr_const(rhs)
@@ -862,6 +918,13 @@ def _make_symbol_expr_max(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _Symbol
         return _make_symbol_expr_const(max(lhs_const, rhs_const))
     if lhs == rhs:
         return lhs
+    lhs_has_iter = _contains_symbol_expr_iter(lhs)
+    rhs_has_iter = _contains_symbol_expr_iter(rhs)
+    if lhs_has_iter != rhs_has_iter:
+        ordered = (rhs, lhs) if lhs_has_iter else (lhs, rhs)
+        return _SymbolExprNode("max", args=ordered)
+    if lhs_has_iter and rhs_has_iter:
+        return _SymbolExprNode("max", args=(lhs, rhs))
     ordered = tuple(sorted((lhs, rhs), key=_format_symbol_expr_node))
     return _SymbolExprNode("max", args=ordered)
 
@@ -876,7 +939,7 @@ def _symbol_expr_precedence(node: _SymbolExprNode) -> int:
     - _symbol_expr_precedence(node)
     """
 
-    if node.kind in {"const", "symbol", "unknown", "min", "max"}:
+    if node.kind in {"const", "symbol", "unknown", "iter", "min", "max"}:
         return _SYMBOL_EXPR_ATOM_PRECEDENCE
     if node.kind == "neg":
         return _SYMBOL_EXPR_UNARY_PRECEDENCE
@@ -902,6 +965,9 @@ def _format_symbol_expr_node(node: _SymbolExprNode, parent_precedence: int = 0) 
         text = str(node.value)
     elif node.kind == "unknown":
         text = _UNKNOWN_SYMBOL_EXPR
+    elif node.kind == "iter":
+        start, end, step = node.args
+        text = f"iter<{_format_symbol_expr_node(start)},{_format_symbol_expr_node(end)},{_format_symbol_expr_node(step)}>"
     elif node.kind == "neg":
         text = "-" + _format_symbol_expr_node(node.args[0], _SYMBOL_EXPR_UNARY_PRECEDENCE)
     elif node.kind == "add":
@@ -1192,39 +1258,74 @@ def _is_unknown_symbol_int_type(attr: Attribute) -> bool:
     return isinstance(attr, SymbolValueType) and attr.get_value() == _UNKNOWN_SYMBOL_EXPR
 
 
+def _symbol_iter_type_expr_node(attr: SymbolIterType) -> _SymbolExprNode:
+    """从 `SymbolIterType` 构造公开 `iter<start,end,step>` token。
+
+    功能说明:
+    - 只读取 `SymbolIterType` 的公开 start/end/step 参数。
+    - 不依赖 SSA 名称、`name_hint`、block argument 或运行时 dump 文本。
+
+    使用示例:
+    - node = _symbol_iter_type_expr_node(SymbolIterType.from_bounds("0", "N", "TILE"))
+    """
+
+    return _make_symbol_expr_iter(
+        _parse_symbol_expr_from_text(attr.start.expr.data),
+        _parse_symbol_expr_from_text(attr.end.expr.data),
+        _parse_symbol_expr_from_text(attr.step.expr.data),
+    )
+
+
+def _symbol_arith_operand_expr_node(attr: Attribute) -> _SymbolExprNode | None:
+    """提取 symbol 算术 operand 的值语义表达节点。
+
+    功能说明:
+    - `SymbolValueType` 直接读取其 `SymbolExprAttr`。
+    - `SymbolIterType` 转换为公开 `iter<start,end,step>` token。
+    - 非 symbol 算术 operand 返回 `None`，由 verifier 负责报错。
+
+    使用示例:
+    - node = _symbol_arith_operand_expr_node(value.type)
+    """
+
+    if isinstance(attr, SymbolValueType):
+        return _parse_symbol_expr_from_text(attr.expr.expr.data)
+    if isinstance(attr, SymbolIterType):
+        return _symbol_iter_type_expr_node(attr)
+    return None
+
+
 def _requires_unknown_arith_result(lhs_type: Attribute, rhs_type: Attribute) -> bool:
     """判断 symbol 算术结果是否必须为 unknown。
 
     功能说明:
-    - 任一 operand 为 `!symbol.iter<...>` 或 `!symbol.int<#symbol.expr<??>>` 时，算术结果必须保守为 `!symbol.int<#symbol.expr<??>>`。
+    - 任一 operand 值语义包含 `?` 时，算术结果必须保守为 `!symbol.int<#symbol.expr<??>>`。
+    - `!symbol.iter<...>` 自身不再强制 unknown，仅当 start/end/step 含 `?` 时传播 unknown。
 
     使用示例:
     - needs_unknown = _requires_unknown_arith_result(lhs.type, rhs.type)
     """
 
-    return (
-        isinstance(lhs_type, SymbolIterType)
-        or isinstance(rhs_type, SymbolIterType)
-        or _is_unknown_symbol_int_type(lhs_type)
-        or _is_unknown_symbol_int_type(rhs_type)
-    )
+    lhs = _symbol_arith_operand_expr_node(lhs_type)
+    rhs = _symbol_arith_operand_expr_node(rhs_type)
+    return lhs is not None and rhs is not None and (_contains_symbol_expr_unknown(lhs) or _contains_symbol_expr_unknown(rhs))
 
 
 def _infer_symbol_arith_result_expr(op_name: str, lhs_type: Attribute, rhs_type: Attribute) -> str | None:
     """推导 symbol 二元算术的 canonical 结果表达。
 
     功能说明:
-    - 对两个确定 `SymbolValueType` operand 复用 `SymbolExprAttr` canonical 逻辑。
-    - `iter` 或 `?` 场景由调用方使用 unknown 规则处理。
+    - 对 `SymbolValueType` 与 `SymbolIterType` operand 复用 `SymbolExprAttr` canonical 逻辑。
+    - `SymbolIterType` 会转换为 `iter<start,end,step>` token；`?` 场景由调用方使用 unknown 规则处理。
 
     使用示例:
     - _infer_symbol_arith_result_expr("symbol.add", lhs.type, rhs.type)
     """
 
-    if not isinstance(lhs_type, SymbolValueType) or not isinstance(rhs_type, SymbolValueType):
+    lhs = _symbol_arith_operand_expr_node(lhs_type)
+    rhs = _symbol_arith_operand_expr_node(rhs_type)
+    if lhs is None or rhs is None:
         return None
-    lhs = _parse_symbol_expr_from_text(lhs_type.expr.expr.data)
-    rhs = _parse_symbol_expr_from_text(rhs_type.expr.expr.data)
     if op_name == "symbol.add":
         return _format_symbol_expr_node(_make_symbol_expr_add(lhs, rhs))
     if op_name == "symbol.sub":
@@ -1898,9 +1999,18 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
         rhs_type = SSAValue.get(self.rhs).type
         result_type = SSAValue.get(self.result).type
         if _requires_unknown_arith_result(lhs_type, rhs_type) and not _is_unknown_symbol_int_type(result_type):
-            _raise_verify_error(f"{self.name} result type must be !symbol.int<#symbol.expr<?>> when operand is !symbol.iter<...> or !symbol.int<#symbol.expr<?>>")
+            _raise_verify_error(f"{self.name} result type must be !symbol.int<#symbol.expr<?>> when operand value contains ?")
         if not _requires_unknown_arith_result(lhs_type, rhs_type) and isinstance(result_type, SymbolValueType):
             inferred_expr = _infer_symbol_arith_result_expr(self.name, lhs_type, rhs_type)
+            if inferred_expr is not None and result_type.get_value() == _UNKNOWN_SYMBOL_EXPR:
+                lhs_expr = _symbol_arith_operand_expr_node(lhs_type)
+                rhs_expr = _symbol_arith_operand_expr_node(rhs_type)
+                if (
+                    lhs_expr is not None
+                    and rhs_expr is not None
+                    and (_contains_symbol_expr_iter(lhs_expr) or _contains_symbol_expr_iter(rhs_expr))
+                ):
+                    _raise_verify_error(f"{self.name} result type must match canonical symbol expression")
             if inferred_expr is not None and result_type.get_value() != _UNKNOWN_SYMBOL_EXPR:
                 expected_type = SymbolValueType.from_expr(inferred_expr)
                 if result_type != expected_type:

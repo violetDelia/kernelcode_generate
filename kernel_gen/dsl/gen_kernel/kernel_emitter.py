@@ -343,7 +343,7 @@ class KernelEmitter:
 
         功能说明:
         - 允许 `builtin.module` 只包含一个 `func.func`，且该函数不是 `arch.launch` 双函数 module。
-        - 单函数 body 必须至少包含一个非 `func.return` 的语义 op，避免把空 module 误当成成功输入。
+        - 单函数 body 允许 `func.return` 或 `symbol.const + func.return` 这类纯头部/常量 smoke case。
         - 该分支复用普通 `emit_func(...)` 路径，不影响既有 `launch body + wrapper` 约束。
 
         使用示例:
@@ -376,7 +376,8 @@ class KernelEmitter:
         ):
             return None
         if all(isinstance(op, func.ReturnOp) for op in filtered_ops):
-            if any(self._is_launch_helper_op(op) for op in raw_ops):
+            helper_ops = [op for op in raw_ops if self._is_launch_helper_op(op)]
+            if any(not isinstance(op, SymbolConstOp) for op in helper_ops):
                 return None
             return func_op
         return func_op

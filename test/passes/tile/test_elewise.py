@@ -135,6 +135,25 @@ def test_tile_elewise_binary_pattern_public_compare_and_boundary_matrix() -> Non
     assert len([op for op in collect_ops(module) if op.name == "dma.view"]) == 3
     assert [operand.type.element_type for operand in rewritten.operands] == [i1, i32, i32]
 
+    legacy_block = Block(arg_types=[mem_type, mem_type, bool_mem_type])
+    legacy_compare = KernelBinaryElewiseOp(legacy_block.args[0], legacy_block.args[1], legacy_block.args[2], kind="gt", space=space)
+    legacy_compare.attributes["tile.analysis"] = compare_op.attributes["tile.analysis"]
+    legacy_block.add_ops([legacy_compare, func.ReturnOp()])
+    legacy_module = ModuleOp(
+        [
+            func.FuncOp(
+                "tile_compare_legacy_order",
+                FunctionType.from_lists([mem_type, mem_type, bool_mem_type], []),
+                Region(legacy_block),
+            )
+        ]
+    )
+
+    TileElewiseBinaryPattern().match_and_rewrite(legacy_compare, PatternRewriter(legacy_compare))
+
+    legacy_rewritten = next(op for op in collect_ops(legacy_module) if op.name == "kernel.binary_elewise")
+    assert [operand.type.element_type for operand in legacy_rewritten.operands] == [i1, i32, i32]
+
     rank1_mem_type = make_memory_type(["M"])
     rank1_block = Block(arg_types=[rank1_mem_type, rank1_mem_type, rank1_mem_type])
     rank1_op = KernelBinaryElewiseOp(rank1_block.args[2], rank1_block.args[0], rank1_block.args[1], kind="add", space=space)

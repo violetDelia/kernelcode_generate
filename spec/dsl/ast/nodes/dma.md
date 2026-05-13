@@ -254,7 +254,7 @@
     result = DmaStoreAST(target=target, source=source, offset=offset, size=size, stride=stride, space=space, location=location)
     ```
 - 功能说明：执行 `DmaStoreAST`，把 DSL AST 节点转换为公开 MLIR/IR 结果或读取节点公开属性。
-- 注意事项：构造参数必须是公开 AST 节点、公开 symbol/memory 类型或签名声明的 Python 基础值；不得传入内部 visitor/helper 状态。
+- 注意事项：构造参数必须是公开 AST 节点、公开 symbol/memory 类型或签名声明的 Python 基础值；不得传入内部 visitor/helper 状态。`offset` 可携带 `symbol.for` index 的 `iter<start,end,step>` 语义，但 `emit_mlir(...)` 仍必须校验 target/source memory、rank、`size == source.shape` 与可静态判定的 target bounds。
 
 ### `class DmaDesliceAST(target: ValueAST, source: ValueAST, offset: SymbolListAST, size: SymbolListAST, stride: SymbolListAST | None = None, space: MemorySpaceAttrAST | None = None, location: SourceLocation | None = None)`
 
@@ -274,7 +274,7 @@
     result = DmaDesliceAST(target=target, source=source, offset=offset, size=size, stride=stride, space=space, location=location)
     ```
 - 功能说明：执行 `DmaDesliceAST`，把 DSL AST 节点转换为公开 MLIR/IR 结果或读取节点公开属性。
-- 注意事项：构造参数必须是公开 AST 节点、公开 symbol/memory 类型或签名声明的 Python 基础值；不得传入内部 visitor/helper 状态。
+- 注意事项：构造参数必须是公开 AST 节点、公开 symbol/memory 类型或签名声明的 Python 基础值；不得传入内部 visitor/helper 状态。`offset` 可携带 `symbol.for` index 的 `iter<start,end,step>` 语义，但 `emit_mlir(...)` 仍必须校验 target/source memory、rank、`size == source.shape` 与可静态判定的 target bounds。
 
 ## 测试
 
@@ -297,6 +297,7 @@
 | TC-DSL-AST-NODES-DMA-006 | 边界/异常 | DMA emit MLIR accepts public nodes and reports public errors | 准备公开 Context、Block 与 MemoryAST 输入。 | 运行 `test_dma_emit_mlir_accepts_public_nodes_and_reports_public_errors`。 | 公开 DMA AST 节点可发射为 MLIR op 或语句；非法公开参数按稳定 `KernelCodeError` 文本失败。 | `test_dma_emit_mlir_accepts_public_nodes_and_reports_public_errors` |
 | TC-DSL-AST-NODES-DMA-007 | 符号语义 | DMA alloc emit MLIR handles parameterized public shape expressions | 准备随机化公开 symbol 表达式、dtype、space 与 stride 输入。 | 运行 `test_dma_alloc_emit_mlir_handles_parameterized_public_shape_expressions`。 | `DmaAllocAST.emit_mlir(...)` 覆盖 add/sub/mul/truediv/floordiv shape 表达式、bool/int dtype 与 contiguous stride 合同。 | `test_dma_alloc_emit_mlir_handles_parameterized_public_shape_expressions` |
 | TC-DSL-AST-NODES-DMA-008 | 内存/DMA | DMA emit MLIR handles dynamic public memory paths | 准备含符号 shape 的公开 MemoryAST 与切片参数。 | 运行 `test_dma_emit_mlir_handles_dynamic_public_memory_paths`。 | copy/cast/view/reshape/flatten/load/slice/store/deslice 通过公开 AST 入口处理动态内存路径。 | `test_dma_emit_mlir_handles_dynamic_public_memory_paths` |
+| TC-DSL-AST-NODES-DMA-008C | 符号语义/边界 | DMA write nodes validate iter offset public contract | 准备 target/source memory 与 `SymbolIterType` offset。 | 运行 `test_dma_write_nodes_validate_iter_offset_public_contract`。 | `DmaStoreAST` / `DmaDesliceAST` 允许 iter offset，但仍拒绝 size mismatch 与静态越界。 | `test_dma_write_nodes_validate_iter_offset_public_contract` |
 | TC-DSL-AST-NODES-DMA-008A | 内存/DMA | DMA reshape unknown local shape stays question | 准备 `DmaReshapeAST(source, [SymbolDimAST("k_tile"), SymbolDimAST("out_tile")])`，shape SSA 来自本地 op、类型为 `?` 且带同名 name_hint。 | 运行 `test_dma_reshape_keeps_unknown_shape_operand_as_question`。 | 结果 shape/stride 保持 `?`，不得使用 `k_tile/out_tile` 伪造稳定维度，dialect verifier 通过。 | `test_dma_reshape_keeps_unknown_shape_operand_as_question` |
 | TC-DSL-AST-NODES-DMA-008B | 内存/DMA | DMA slice keeps unknown alloc shape without reshape aliases | 准备 `DmaSliceAST(source, size=[cur_n, cur_c, 3, 3])`，`cur_n/cur_c` 的 SSA 类型为 `?`。 | 运行 `test_dma_slice_preserves_unknown_shape_operands_in_alloc_result_type`。 | 底层 `dma.alloc` result shape 保持 `[?, ?, 3, 3]`，返回值仍为该 alloc result，不追加命名 `dma.reshape`。 | `test_dma_slice_preserves_unknown_shape_operands_in_alloc_result_type` |
 | TC-DSL-AST-NODES-DMA-009 | 边界/异常 | DMA fill emit MLIR handles public value and dtype matrix | 准备 bool/int/float dtype 的公开 MemoryAST 与标量/symbol/string 值。 | 运行 `test_dma_fill_emit_mlir_handles_public_value_and_dtype_matrix`。 | `DmaFillAST.emit_mlir(...)` 覆盖公开 value/dtype 矩阵，非法组合按稳定 `KernelCodeError` 文本失败。 | `test_dma_fill_emit_mlir_handles_public_value_and_dtype_matrix` |

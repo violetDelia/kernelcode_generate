@@ -364,7 +364,7 @@ def test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback() -> None:
 
     with pytest.raises(
         KernelCodeError,
-        match=r"^DslCostRunMissingCostFunction: cost function '_cost_VECTOR1_add_kernel_device' not found$",
+        match=r"^DslCostRunMissingCostFunction: lowered module does not contain _cost_VECTOR1_ sibling function$",
     ):
         dsl_cost_run(add_kernel, (out, lhs, rhs), _build_npu_demo_no_cost_pipeline(), "VECTOR1")
 

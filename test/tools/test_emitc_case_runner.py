@@ -160,6 +160,40 @@ builtin.module {
     assert "void npu_demo_header_case()" in source
 
 
+# TC-EMITC-CASE-RUNNER-003B
+# 功能说明: 验证 helper 可执行 `symbol.const + return` 的 npu_demo plain module，用于头部合同 smoke case。
+# 使用示例: pytest -q test/tools/test_emitc_case_runner.py -k test_run_emitc_case_lowers_symbol_const_return_plain_module_without_launch_wrapper
+# 对应功能实现文件路径: kernel_gen/tools/emitc_case_runner.py
+# 对应 spec 文件路径: spec/tools/emitc_case_runner.md
+# 对应测试文件路径: test/tools/test_emitc_case_runner.py
+def test_run_emitc_case_lowers_symbol_const_return_plain_module_without_launch_wrapper() -> None:
+    case_text = """// COMPILE_ARGS: --pass no-op
+// CHECK: void npu_demo_header_case() {
+
+#C0 = #symbol.expr<0>
+builtin.module {
+  func.func @npu_demo_header_case() {
+    %0 = symbol.const 0 : !symbol.int<#C0>
+    func.return
+  }
+}"""
+
+    source = run_emitc_case(
+        case_text,
+        source_path="inline#plain_symbol_const_return_module",
+        op_name="npu_demo.header",
+        expected_snippets=[
+            '#include "include/npu_demo/npu_demo.h"',
+            "using namespace npu_demo;",
+            "void npu_demo_header_case()",
+            "S_INT c_0 = 0;",
+        ],
+        forbidden_snippets=["launch<", "arch.launch"],
+    )
+
+    assert "void npu_demo_header_case()" in source
+
+
 # TC-EMITC-CASE-RUNNER-004
 # 功能说明: 验证 helper 支持 `--pass buffer-results-to-out-params` 预处理后再发射 `dma.cast`。
 # 使用示例: pytest -q test/tools/test_emitc_case_runner.py -k test_run_emitc_case_applies_buffer_results_to_out_params_before_emit_c

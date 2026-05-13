@@ -283,7 +283,7 @@ def test_symbol_value_type_round_trip_for_integer_only_semantics() -> None:
 
 
 # TC-SYM-006A
-# 测试目的: 验证 `!symbol.int<#symbol.expr<?>>` 的公开 unknown 语义与旧 iter<...> 表达文本拒绝路径。
+# 测试目的: 验证 `!symbol.int<#symbol.expr<?>>` 的公开 unknown 语义与 iter<...> token 公开表达语义。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_value_type_unknown_public_semantics() -> None:
@@ -293,10 +293,14 @@ def test_symbol_value_type_unknown_public_semantics() -> None:
     assert unknown_type.get_value() == "?"
     assert unknown_type.is_symbol() is False
 
-    with pytest.raises(VerifyException, match="symbol expr contains unsupported token"):
-        SymbolExprAttr.from_expr("iter<0, 8, 1>").verify()
-    with pytest.raises(VerifyException, match="symbol expr contains unsupported token"):
-        SymbolValueType.from_expr("2 - iter<0, 8, 1>").verify()
+    iter_expr = SymbolExprAttr.from_expr("iter<0, 8, 1>")
+    iter_expr.verify()
+    assert _print_attr(iter_expr) == "#symbol.expr<iter<0,8,1>>"
+
+    iter_type = SymbolValueType.from_expr("2 - iter<0, 8, 1>")
+    iter_type.verify()
+    assert iter_type.get_value() == "2 - iter<0,8,1>"
+    assert iter_type.is_symbol() is True
 
 
 # TC-SYM-052
@@ -455,7 +459,7 @@ def test_symbol_binary_arith_fold_rejects_unknown_and_iter_operands() -> None:
     folder = Folder(ctx)
     unknown_op = SymbolAddOp(_make_symbol_value("?"), SymbolConstOp(2).result, SymbolValueType.from_expr("?"))
     iter_value = _TestOp(result_types=[SymbolIterType.from_bounds("0", "N", "1")]).results[0]
-    iter_op = SymbolSubOp(SymbolConstOp(2).result, iter_value, SymbolValueType.from_expr("?"))
+    iter_op = SymbolSubOp(SymbolConstOp(2).result, iter_value, SymbolValueType.from_expr("2 - iter<0,N,1>"))
 
     assert folder.try_fold(unknown_op) is None
     assert folder.try_fold(iter_op) is None
@@ -739,7 +743,7 @@ def test_symbol_arith_ops_verify_success() -> None:
 
 
 # TC-SYM-015A
-# 测试目的: 验证 `?` 与 `symbol.iter` 参与 symbol 算术时 result 必须保守为 `!symbol.int<#symbol.expr<?>>`。
+# 测试目的: 验证 `?` 参与 symbol 算术时传播 unknown，`symbol.iter` 参与算术时生成 canonical iter token。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_arith_ops_require_unknown_result_for_unknown_or_iter_operands() -> None:
@@ -748,13 +752,38 @@ def test_symbol_arith_ops_require_unknown_result_for_unknown_or_iter_operands() 
     iter_value = _TestOp(result_types=[SymbolIterType.from_bounds("0", "N", "1")]).results[0]
 
     SymbolAddOp(unknown_value, concrete_value, SymbolValueType.from_expr("?")).verify()
-    SymbolSubOp(concrete_value, iter_value, SymbolValueType.from_expr("?")).verify()
+    SymbolSubOp(concrete_value, iter_value, SymbolValueType.from_expr("1 - iter<0,N,1>")).verify()
+    SymbolAddOp(iter_value, concrete_value, SymbolValueType.from_expr("iter<0,N,1> + 1")).verify()
     SymbolMulOp(concrete_value, concrete_value, SymbolValueType.from_expr("?")).verify()
+    SymbolAddOp(_make_symbol_value("ACC"), concrete_value, SymbolValueType.from_expr("?")).verify()
 
     with pytest.raises(VerifyException, match="result type must be"):
         SymbolAddOp(unknown_value, concrete_value, SymbolValueType.from_expr("N + 1")).verify()
-    with pytest.raises(VerifyException, match="result type must be"):
-        SymbolSubOp(concrete_value, iter_value, SymbolValueType.from_expr("2 - f0")).verify()
+    with pytest.raises(VerifyException, match="canonical symbol expression"):
+        SymbolSubOp(concrete_value, iter_value, SymbolValueType.from_expr("2 - " + "f0")).verify()
+    with pytest.raises(VerifyException, match="canonical symbol expression"):
+        SymbolDivOp(concrete_value, iter_value, SymbolValueType.from_expr("?")).verify()
+
+
+def test_symbol_arith_ops_accept_iter_token_result_matrix() -> None:
+    """symbol 算术 op 对 iter operand 生成 canonical iter token result。"""
+
+    iter_value = _TestOp(result_types=[SymbolIterType.from_bounds("0", "N", "TILE")]).results[0]
+    symbol_value = _make_symbol_value("N")
+    tile_value = _make_symbol_value("TILE")
+    two_value = SymbolConstOp(2).result
+    ops = [
+        SymbolAddOp(iter_value, symbol_value, SymbolValueType.from_expr("N + iter<0,N,TILE>")),
+        SymbolSubOp(symbol_value, iter_value, SymbolValueType.from_expr("N - iter<0,N,TILE>")),
+        SymbolMulOp(iter_value, two_value, SymbolValueType.from_expr("2*iter<0,N,TILE>")),
+        SymbolDivOp(symbol_value, iter_value, SymbolValueType.from_expr("N floordiv iter<0,N,TILE>")),
+        SymbolFloorDivOp(symbol_value, iter_value, SymbolValueType.from_expr("N floordiv iter<0,N,TILE>")),
+        SymbolMinOp(tile_value, SymbolSubOp(symbol_value, iter_value, SymbolValueType.from_expr("N - iter<0,N,TILE>")).result, SymbolValueType.from_expr("min(TILE, N - iter<0,N,TILE>)")),
+        SymbolMaxOp(two_value, iter_value, SymbolValueType.from_expr("max(2, iter<0,N,TILE>)")),
+    ]
+
+    for op in ops:
+        op.verify()
 
 
 # TC-SYM-015B

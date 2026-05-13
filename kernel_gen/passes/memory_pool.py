@@ -617,6 +617,29 @@ def _dim_expr(dim: Attribute) -> sp.Basic:
     )
 
 
+def _opaque_iter_expr_symbol(expr_text: str) -> sp.Symbol:
+    """把含 `iter<...>` 的公开 symbol 表达映射为内部不透明 sympy 符号。
+
+
+    功能说明:
+    - `iter<start,end,step>` 是 SymbolExprAttr 的公开 atom，不属于 Python/sympy 语法。
+    - memory-pool 只需要它参与大小与 offset 的动态表达式占位，不能把它退化为 `?` 或从 SSA 名字反推。
+
+    使用示例:
+    - expr = _opaque_iter_expr_symbol("min(4, 6 - iter<0,6,4>)")
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    symbol_name = re.sub(r"[^A-Za-z0-9_]+", "_", expr_text).strip("_")
+    if not symbol_name:
+        symbol_name = "iter_expr"
+    return sp.Symbol(f"iter_expr_{symbol_name}", integer=True, positive=True)
+
+
 def _shape_product(mem_type: NnMemoryType, *, unknown_prefix: str = "anonymous") -> sp.Basic:
     """将 memory shape 转为乘积表达式。
 
@@ -1323,6 +1346,8 @@ def _sympy_expr_from_text(expr_text: str) -> sp.Basic:
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
+    if "iter<" in expr_text:
+        return _opaque_iter_expr_symbol(expr_text)
     normalized_text = expr_text.replace(" floordiv ", " // ")
     names = set(_SYMBOL_NAME_PATTERN.findall(normalized_text))
     local_symbols = {

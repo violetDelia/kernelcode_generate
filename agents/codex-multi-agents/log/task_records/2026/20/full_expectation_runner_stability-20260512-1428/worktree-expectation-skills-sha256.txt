@@ -1,0 +1,4 @@
+# worktree expectation/.skills manifest 20260512-1428
+94adf2608dbb4fad3a9d8367e1fb900d1fe05989563c356ac9be7598148220a8  expectation/dsl/gen_kernel/third_party_backend/__main__.py
+86a0ced7a4e54de2f5c591ca3e60ef4ef0fb78f9bfff9e8b2af28deee4aed2f3  expectation/dsl/gen_kernel/third_party_backend/basic.py
+# missing .skills

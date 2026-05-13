@@ -120,6 +120,8 @@
 #symbol.expr<N>
 #symbol.expr<?>
 #symbol.expr<M + 1>
+#symbol.expr<iter<0,N,TILE>>
+#symbol.expr<N - iter<0,N,TILE>>
 !symbol.int<#symbol.expr<N>>
 !symbol.int<#symbol.expr<?>>
 !symbol.int<#symbol.expr<3>>
@@ -163,10 +165,10 @@ SymbolPtrType(f32)
 - 注意事项：
 
 - `expr` 不能为空。
-- `expr` 中若出现非法字符、空白后为空、或不可解析的表达式，必须报错；公开表达式允许 `min(lhs, rhs)` 与 `max(lhs, rhs)` 表示整数符号最值，允许 `floordiv`、`ceildiv`、`mod` 关键字中缀，拒绝裸 `/` 与 `//`。
+- `expr` 中若出现非法字符、空白后为空、或不可解析的表达式，必须报错；公开表达式允许 `min(lhs, rhs)` 与 `max(lhs, rhs)` 表示整数符号最值，允许 `floordiv`、`ceildiv`、`mod` 关键字中缀，允许 `iter<start,end,step>` 作为由 `SymbolIterType` 值语义派生的 atom，拒绝裸 `/` 与 `//`。
 - `expr` 允许纯整数字面量，`!symbol.int<#symbol.expr<1>>`、`!symbol.int<#symbol.expr<2>>`、`!symbol.int<#symbol.expr<3>>` 都必须视为合法类型表达。
 - `expr` 允许单独的 `?`，`SymbolValueType.from_expr("?").get_value()` 必须返回 `"?"`，`SymbolValueType.from_expr("?").is_symbol()` 必须返回 `False`。
-- `iter<begin,end,step>` 文本不是 `SymbolValueType` 或 `SymbolExprAttr` 的合法表达片段；`2 - iter<0, 8, 1>`、`2 - f0` 这类由 SSA 名称或迭代变量文本拼出的 result 表达不得作为迭代变量算术结果。
+- `iter<begin,end,step>` 文本是 `SymbolValueType` / `SymbolExprAttr` 的合法 atom，start/end/step 分别按 `SymbolExprAttr` 规则 canonicalize；`2 - iter<0,8,1>` 合法，由 SSA 名称、block argument 名称、`name_hint` 或运行时占位拼出的 result 表达仍非法。
 - `SymbolIterType` 的表达式规则与 `SymbolValueType` 一致，打印后再解析必须得到等价类型对象。
 - 旧文本 `!symbol.iter<"expr">` 不再是公开语法，必须被 parser 拒绝；调用方必须显式写出 `start/end/step` 三个 `SymbolExprAttr`。
 - 同一个 `SymbolValueType` 的相等性比较只比较整数语义下的 `expr`。
@@ -206,11 +208,11 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 
 - 注意事项：
 
-- `symbol.add/sub/mul/div/floordiv/min/max` 任一 operand 为 `!symbol.iter<...>` 时，result type 必须为 `!symbol.int<#symbol.expr<?>>`。
-- `symbol.add/sub/mul/div/floordiv/min/max` 任一 operand 为 `!symbol.int<#symbol.expr<?>>` 时，result type 必须为 `!symbol.int<#symbol.expr<?>>`。
-- 两个 operand 均为确定 `!symbol.int` 时，result type 可以是确定表达，也可以保守写成 `!symbol.int<#symbol.expr<?>>`。
+- `symbol.add/sub/mul/div/floordiv/min/max` 任一 operand 为 `!symbol.iter<...>` 时，必须从该 iter type 的 start/end/step 生成 `iter<start,end,step>` token 并参与 result type 推导；不得从 SSA 名称、block argument 名称、`name_hint`、`f0` 或 `runtime_dim_*` 拼表达。
+- `symbol.add/sub/mul/div/floordiv/min/max` 任一 operand 值语义包含 `?` 时，result type 必须为 `!symbol.int<#symbol.expr<?>>`。
+- operand 不含 `?` 时，非 iter 动态 symbol 算术可保守输出 `!symbol.int<#symbol.expr<?>>` 以承接 `symbol.for` loop-carried accumulator；operand 含 `iter<...>` 时 result type 必须匹配 canonical 表达，例如 `N - iter<0,N,TILE>`、`A + iter<0,N,TILE>`、`min(TILE, N - iter<0,N,TILE>)` 均合法。
 - fold 只在当前 operand 均为静态整数时发生；result type 为 `!symbol.int<#symbol.expr<?>>` 时仍应物化为确定 `symbol.const`。
-- 当前 operand 为 `!symbol.int<#symbol.expr<?>>`、动态符号表达或 `!symbol.iter<...>` 时不得 fold 为常量。
+- 当前 operand 为 `!symbol.int<#symbol.expr<?>>`、动态符号表达或含 `iter<...>` token 时不得 fold 为常量。
 - `symbol.eq/ne/lt/le/gt/ge` 结果固定为 `i1`；静态整数 operand 可 fold 为 `arith.constant` 的 `i1` bool，动态符号、`?` 或 `symbol.iter` operand 不 fold。
 
 - 返回值：
@@ -295,7 +297,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
   value = SymbolExprAttr(StringAttr("1 + N"))
   ```
 - 功能说明：构造或表示 `SymbolExprAttr` 对应的 symbol dialect attribute，构造期将表达式归一到 canonical 文本。
-- 注意事项：表达式允许整数、标识符、`?`、`+`、`-`、`*`、`floordiv`、`ceildiv`、`mod`、`min(lhs, rhs)`、`max(lhs, rhs)` 和括号；裸 `/`、`//`、quoted string、`iter<...>` 片段和 nested alias 不是公开语法。
+- 注意事项：表达式允许整数、标识符、`?`、`iter<start,end,step>`、`+`、`-`、`*`、`floordiv`、`ceildiv`、`mod`、`min(lhs, rhs)`、`max(lhs, rhs)` 和括号；裸 `/`、`//`、quoted string 和 nested alias 不是公开语法。
 
 ### `SymbolExprAttr.from_expr(expr: str) -> SymbolExprAttr`
 
@@ -343,7 +345,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
   value = SymbolValueType.from_expr("N + 1")
   ```
 - 功能说明：从公开字符串构造 `!symbol.int<#symbol.expr<...>>` 类型，并复用 `SymbolExprAttr` 的 canonical 规则。
-- 注意事项：该入口只承接单个整数值语义，不承接 `symbol.iter`、quoted string、裸 `/` 或 `//` 文本。
+- 注意事项：该入口只承接单个整数值语义；允许 `iter<start,end,step>` token 作为 `SymbolIterType` 值语义表达，不承接 `!symbol.iter<...>` 类型文本、quoted string、裸 `/` 或 `//` 文本。
 
 ### `SymbolValueType.get_value(self) -> int | str`
 
@@ -413,7 +415,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
   value = SymbolIterAttr.from_bounds("0", "N", "TILE")
   ```
 - 功能说明：从三个公开字符串表达构造 `SymbolIterAttr`。
-- 注意事项：三个参数分别 canonicalize；不得传入旧 `iter<...>` 片段。
+- 注意事项：三个参数分别 canonicalize；本入口构造 `SymbolIterAttr` 边界属性，不接受 `iter<...>` token 作为 start/end/step 的替代写法。
 
 ### `class SymbolIterType(start: SymbolExprAttr, end: SymbolExprAttr, step: SymbolExprAttr)`
 
@@ -508,7 +510,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 - 参数：
   - `lhs`：左操作数；类型 `SSAValue | Operation`；无默认值；必须为 `!symbol.int<#symbol.expr<...>>` 或 `!symbol.iter<...>`。
   - `rhs`：右操作数；类型 `SSAValue | Operation`；无默认值；必须为 `!symbol.int<#symbol.expr<...>>` 或 `!symbol.iter<...>`。
-  - `result_type`：结果类型；类型 `Attribute`；无默认值；必须为 `SymbolValueType`；若任一 operand 为 `!symbol.iter<...>` 或 `!symbol.int<#symbol.expr<?>>`，必须为 `SymbolValueType.from_expr("?")`。
+  - `result_type`：结果类型；类型 `Attribute`；无默认值；必须为 `SymbolValueType`；若任一 operand 值语义包含 `?`，必须为 `SymbolValueType.from_expr("?")`；若 operand 为 `!symbol.iter<...>` 且不含 `?`，必须匹配含 `iter<start,end,step>` token 的 canonical 表达。
 - 返回值：`SymbolAddOp` 实例。
 - 使用示例：
 
@@ -518,7 +520,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
   value = SymbolAddOp(lhs, rhs, SymbolValueType.from_expr("N + 1"))
   ```
 - 功能说明：构造或表示 `symbol.add`。
-- 注意事项：静态整数 operand 可 fold；动态、`?` 或 iter operand 不 fold，且 `?` / iter operand 的结果必须保守为 `!symbol.int<#symbol.expr<?>>`。
+- 注意事项：静态整数 operand 可 fold；动态、`?` 或 iter token operand 不 fold；`?` operand 的结果必须保守为 `!symbol.int<#symbol.expr<?>>`，iter operand 则必须保留 canonical `iter<start,end,step>` 表达。
 
 ### `class SymbolSubOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 
@@ -533,7 +535,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
   value = SymbolSubOp(lhs, rhs, SymbolValueType.from_expr("N - 1"))
   ```
 - 功能说明：构造或表示 `symbol.sub`。
-- 注意事项：不得用 SSA 名称或 `name_hint` 拼出 `2 - f0` 这类 result type；涉及 `symbol.iter` 时必须使用 `!symbol.int<#symbol.expr<?>>`。
+- 注意事项：不得用 SSA 名称或 `name_hint` 拼 result type；涉及 `symbol.iter` 时必须使用 canonical `iter<start,end,step>` token，不能退化为 `?`。
 
 ### `class SymbolMulOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 
@@ -548,7 +550,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
   value = SymbolMulOp(lhs, rhs, SymbolValueType.from_expr("M*N"))
   ```
 - 功能说明：构造或表示 `symbol.mul`。
-- 注意事项：`?` 与 `symbol.iter` 传播规则同 `SymbolAddOp`。
+- 注意事项：`?` 传播规则同 `SymbolAddOp`；`symbol.iter` 值语义按 `iter<start,end,step>` token canonicalize。
 
 ### `class SymbolDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 
@@ -563,7 +565,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
   value = SymbolDivOp(lhs, rhs, SymbolValueType.from_expr("M floordiv N"))
   ```
 - 功能说明：构造或表示 `symbol.div`。
-- 注意事项：`symbol.div` 的 symbolic result 公开文本使用 `floordiv` 表达；静态 fold 仅在整除且除数非零时发生；`?` 与 `symbol.iter` 传播规则同 `SymbolAddOp`。
+- 注意事项：`symbol.div` 的 symbolic result 公开文本使用 `floordiv` 表达；静态 fold 仅在整除且除数非零时发生；`?` 传播规则同 `SymbolAddOp`；`symbol.iter` 值语义按 token canonicalize。
 
 ### `class SymbolFloorDivOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 
@@ -578,7 +580,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
   value = SymbolFloorDivOp(lhs, rhs, SymbolValueType.from_expr("M floordiv N"))
   ```
 - 功能说明：构造或表示 `symbol.floordiv`。
-- 注意事项：静态 fold 仅在除数非零时发生；`?` 与 `symbol.iter` 传播规则同 `SymbolAddOp`。
+- 注意事项：静态 fold 仅在除数非零时发生；`?` 传播规则同 `SymbolAddOp`；`symbol.iter` 值语义按 token canonicalize。
 
 ### `class SymbolMinOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 
@@ -593,7 +595,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
   value = SymbolMinOp(lhs, rhs, SymbolValueType.from_expr("min(T, N)"))
   ```
 - 功能说明：构造或表示 `symbol.min`，结果为左右整数符号值的最小值。
-- 注意事项：只允许二元 `min`；不得扩展为多参数、张量级或浮点最小值；涉及 `symbol.iter` 或 `?` 时结果必须保守为 `!symbol.int<#symbol.expr<?>>`。
+- 注意事项：只允许二元 `min`；不得扩展为多参数、张量级或浮点最小值；涉及 `?` 时结果必须保守为 `!symbol.int<#symbol.expr<?>>`，涉及 `symbol.iter` 时必须保留 canonical `iter<...>` 参与表达式。
 
 ### `class SymbolMaxOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 
@@ -608,7 +610,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
   value = SymbolMaxOp(lhs, rhs, SymbolValueType.from_expr("max(T, N)"))
   ```
 - 功能说明：构造或表示 `symbol.max`，结果为左右整数符号值的最大值。
-- 注意事项：只允许二元 `max`；不得扩展为多参数、张量级或浮点最大值；涉及 `symbol.iter` 或 `?` 时结果必须保守为 `!symbol.int<#symbol.expr<?>>`。
+- 注意事项：只允许二元 `max`；不得扩展为多参数、张量级或浮点最大值；涉及 `?` 时结果必须保守为 `!symbol.int<#symbol.expr<?>>`，涉及 `symbol.iter` 时必须保留 canonical `iter<...>` 参与表达式。
 
 ### `class SymbolEqOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute = i1)`
 
@@ -880,7 +882,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 | TC-SYM-004 | 解析/打印 | `SymbolValueType` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_value_type_round_trip_for_integer_only_semantics`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_value_type_round_trip_for_integer_only_semantics` |
 | TC-SYM-005 | 解析/打印 | `SymbolValueType` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_value_type_round_trip_for_integer_only_semantics`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_value_type_round_trip_for_integer_only_semantics` |
 | TC-SYM-006 | 解析/打印 | `SymbolValueType` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_value_type_round_trip_for_integer_only_semantics`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_value_type_round_trip_for_integer_only_semantics` |
-| TC-SYM-006A | 符号语义 | `!symbol.int<#symbol.expr<?>>` unknown 公开语义 | 准备 `SymbolValueType.from_expr("?")` 与旧 `iter<...>` 文本。 | 运行 `test_symbol_value_type_unknown_public_semantics`。 | `get_value()` 返回 `"?"`，`is_symbol()` 返回 `False`，旧 `iter<...>` 表达片段被拒绝。 | `test_symbol_value_type_unknown_public_semantics` |
+| TC-SYM-006A | 符号语义 | `!symbol.int<#symbol.expr<?>>` unknown 与 `iter<...>` token 公开语义 | 准备 `SymbolValueType.from_expr("?")` 与 `SymbolValueType.from_expr("2 - iter<0,8,1>")`。 | 运行 `test_symbol_value_type_unknown_public_semantics`。 | `?` 的 `get_value()` 返回 `"?"` 且 `is_symbol()` 返回 `False`；`iter<...>` 表达合法并返回 canonical string。 | `test_symbol_value_type_unknown_public_semantics` |
 | TC-SYM-007 | 边界/异常 | `SymbolValueType` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_value_type_rejects_unsupported_legacy_text_forms`、`test_symbol_verifier_rejects_illegal_expression_characters`。 | “`SymbolValueType`”场景按公开错误语义失败或被拒绝。 | `test_symbol_value_type_rejects_unsupported_legacy_text_forms`、`test_symbol_verifier_rejects_illegal_expression_characters` |
 | TC-SYM-008 | 边界/异常 | `SymbolValueType` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_value_type_rejects_unsupported_legacy_text_forms`。 | “`SymbolValueType`”场景按公开错误语义失败或被拒绝。 | `test_symbol_value_type_rejects_unsupported_legacy_text_forms` |
 | TC-SYM-052 | 解析/打印 | `SymbolIterType` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_iter_type_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_iter_type_round_trip` |
@@ -891,7 +893,7 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 | TC-SYM-013 | 解析/打印 | memory 元信息标量 | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
 | TC-SYM-014 | 解析/打印 | memory 元信息标量 | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
 | TC-SYM-015 | 符号语义 | `symbol.add/sub/mul/div/floordiv/min/max` | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `test_symbol_arith_ops_verify_success`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.add/sub/mul/div/floordiv/min/max`”场景。 | `test_symbol_arith_ops_verify_success` |
-| TC-SYM-015A | 边界/异常 | `?` 与 `symbol.iter` 算术结果必须为 unknown | 准备 `!symbol.int<#symbol.expr<?>>` 与 `!symbol.iter<...>` operand。 | 运行 `test_symbol_arith_ops_require_unknown_result_for_unknown_or_iter_operands`。 | 合法 unknown result 通过 verifier，`N + 1`、`2 - f0` 这类 result type 被拒绝。 | `test_symbol_arith_ops_require_unknown_result_for_unknown_or_iter_operands` |
+| TC-SYM-015A | 边界/异常 | `?` 保持 unknown，`symbol.iter` 参与 canonical result | 准备 `!symbol.int<#symbol.expr<?>>` 与 `!symbol.iter<...>` operand。 | 运行 `test_symbol_arith_ops_require_unknown_result_for_unknown_or_iter_operands`。 | 合法 unknown result 通过 verifier，iter operand 结果匹配 `iter<start,end,step>` canonical 表达，SSA 名 result type 被拒绝。 | `test_symbol_arith_ops_require_unknown_result_for_unknown_or_iter_operands` |
 | TC-SYM-016 | 解析/打印 | `symbol.add/sub/mul/div/floordiv/min/max` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_symbol_arith_ops_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_symbol_arith_ops_round_trip` |
 | TC-SYM-017 | 边界/异常 | `symbol.add/sub/mul/div/floordiv/min/max` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_arith_ops_reject_non_symbol_int_types`。 | “`symbol.add/sub/mul/div/floordiv/min/max`”场景按公开错误语义失败或被拒绝。 | `test_symbol_arith_ops_reject_non_symbol_int_types` |
 | TC-SYM-018 | 边界/异常 | `symbol.add/sub/mul/div/floordiv/min/max` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_symbol_arith_ops_reject_malformed_signatures`。 | “`symbol.add/sub/mul/div/floordiv/min/max`”场景按公开错误语义失败或被拒绝。 | `test_symbol_arith_ops_reject_malformed_signatures` |
