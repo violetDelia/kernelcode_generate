@@ -2866,3 +2866,51 @@ timeout 1200s python3 -m expectation
 ### 结论
 
 结论：按用户最新口径继续 merge。
+
+## merge 完成记录（2026-05-14 03:16 +0800，李白）
+
+时间：2026-05-14 03:16 +0800
+经办人：李白
+任务：T-20260512-cd17da9c / symbol_iter_token_arith_green_plan
+任务目标：提交、推送、执行 `-done` 并按规范处理 worktree / branch。
+
+### 提交与推送
+
+- 提交：`445ee8f74490fc25422cedd05177e86e44e72b40`。
+- 提交说明：`T-20260512-cd17da9c merge symbol iter token arith`。
+- 推送：`git push origin HEAD:main` 成功，`origin/main` 已更新到 `445ee8f74490fc25422cedd05177e86e44e72b40`。
+- 主仓同步：`/home/lfr/kernelcode_generate` 已 fast-forward 到 `origin/main@445ee8f74490fc25422cedd05177e86e44e72b40`。
+
+### 状态流转
+
+```bash
+bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh \
+  -file TODO.md \
+  -done \
+  -task_id T-20260512-cd17da9c \
+  -log agents/codex-multi-agents/log/task_records/2026/20/20260512-symbol-iter-token-arith.md \
+  -agents-list agents/codex-multi-agents/agents-lists.md
+```
+
+- 结果：`OK: done T-20260512-cd17da9c`。
+- 角色状态：脚本返回 `OK: replace 李白 状态`。
+
+### 清理结果
+
+- 已清理 execute worktree：`/home/lfr/kernelcode_generate/wt-20260512-symbol-iter-token-arith`。
+- 已删除本地任务分支：`task/symbol-iter-token-arith`。
+- 保留 sync worktree：`/home/lfr/kernelcode_generate/wt-20260512-symbol-iter-token-arith-expectation-sync`。
+  - 原因：该 worktree 含 ignored 的 `expectation/` 合同同步资产；merge 角色未将 `expectation/` 文件作为普通任务 diff 提交，避免误删授权合同现场。
+  - 当前分支：`arch/symbol-iter-token-arith-expectation-sync`，`HEAD=83fa20746c1a0dfce716cc10b536b670093e8dbd`。
+  - sync 记录已作为主仓存活记录提交：`agents/codex-multi-agents/log/task_records/2026/20/20260512-symbol-iter-token-arith-expectation-sync.md`。
+
+### 验证与禁止修改面
+
+- `git diff --cached --name-only -- expectation .skills` 在提交前为空。
+- `git diff --cached --check` 在提交前通过；临时 `sync-protection-*` 原始 patch 备份未提交。
+- `git worktree list --porcelain` 当前仅剩主仓与 sync worktree。
+- `git branch --list 'task/symbol-iter-token-arith' 'arch/symbol-iter-token-arith-expectation-sync' -vv` 显示任务分支已删除，sync 分支保留。
+
+### 结论
+
+结论：已按用户最新口径完成合入、推送和 `-done`；execute worktree / task branch 已清理，sync worktree 因合同资产现场保留。
