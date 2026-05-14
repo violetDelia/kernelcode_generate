@@ -795,6 +795,46 @@ def get_current_target() -> str | None:
     return _CURRENT_TARGET
 
 
+def _set_current_target(target: str | None) -> None:
+    """兼容旧合同资产使用的 current target 设置入口。
+
+
+    功能说明:
+    - 只转发到公开 `set_current_target(...)`，不改变公开 API 列表。
+    - 保持历史只读 expectation 中的旧入口可执行。
+
+    使用示例:
+    - _set_current_target("npu_demo")
+
+    关联文件:
+    - spec: spec/target/registry.md
+    - test: test/target/test_registry.py
+    - 功能实现: kernel_gen/target/registry.py
+    """
+
+    set_current_target(target)
+
+
+def _get_current_target() -> str | None:
+    """兼容旧合同资产使用的 current target 查询入口。
+
+
+    功能说明:
+    - 只转发到公开 `get_current_target()`，不改变公开 API 列表。
+    - 保持历史只读 expectation 中的旧入口可执行。
+
+    使用示例:
+    - current = _get_current_target()
+
+    关联文件:
+    - spec: spec/target/registry.md
+    - test: test/target/test_registry.py
+    - 功能实现: kernel_gen/target/registry.py
+    """
+
+    return get_current_target()
+
+
 def get_current_target_hardware(key: str) -> int | None:
     """读取当前 target 的硬件参数。
 

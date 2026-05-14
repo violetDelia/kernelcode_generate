@@ -111,7 +111,7 @@ pass_obj.apply(Context(), module)
 - 注意事项：
 
 - 显式失败统一抛出 `KernelCodeError`，并保持稳定错误前缀 `LaunchKernelCostFuncError:`。
-- `cost_kind` 非法时必须显式失败，稳定错误短语为 `LaunchKernelCostFuncError: cost_kind must be '|' separated names from [DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2]`。
+- `cost_kind` 非法时必须显式失败，稳定错误短语为 `LaunchKernelCostFuncError: cost_kind must be '|' separated names from [DMA,compute,memory,latency,DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2]`。
 - `cost_kind` 的空段、全空白段、重复段或集合外名称必须显式失败。
 - 多个 wrapper 指向同一个 device callee 时，同一 `cost_kind` 下只能生成一份 cost function。
 - 不得改变原 wrapper、原 device func、原 `arch.launch` 或原 op attributes。

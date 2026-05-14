@@ -53,6 +53,9 @@
 - `dump_dir` 只控制诊断落盘，不改变 `gen_kernel(...)` 的返回值、target 选择或源码内容；为空时不得创建 `source.cpp`。
 - SourceBundle dump 只通过 `gen_kernel(...)` 的返回文本与 `dump_dir` 文件观察；SourceBundle 解析、校验和写出 helper 不公开。
 - `trance_enabled` 不属于源码生成语义；即使该开关为 `True`，`gen_kernel(...)` 仍只按 `dump_dir` 写 `source.cpp`，不得写 `<kernel>_trace.txt`。
+- 对 `target="npu_demo"`，`gen_kernel(...)` 输入的 `NnMemoryType.template_name` 必须透传为 C++ 函数模板参数；wrapper/device/helper 均可模板化。
+- `gen_kernel(...)` / EmitC 只生成模板化源码，不生成 `kg_execute_entry`、concrete template instance dispatcher 或 `TemplateBinding`。
+- runtime dtype 已知后的唯一 concrete template 实例调用由 `kernel_gen.execute_engine` compile shim 负责。
 - 本文件当前允许实现的公开入口只有 `gen_kernel(...)` 与 `dsl_gen_kernel(...)`；除 sibling spec 已单独定义的包根 re-export 外，不得再新增平行 callable 别名或隐藏快捷入口。
 - 若输入为普通 op，只允许直接委托节点级 `emit_c_op(...)`。
 - `KernelEmitter`、`kernel_emitter.py` 内的 `_` 前缀 helper、`mlir_gen` 子系统的 parse-env / module-builder 私有 helper，以及 `emit_include()` 都不是当前文件公开 API；实现、其他模块与测试不得把它们当成稳定跨文件入口。

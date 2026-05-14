@@ -504,16 +504,26 @@ def test_launch_kernel_cost_func_shared_callee_once() -> None:
         "   ",
         "DMA1||MAC",
         "DMA1| VECTOR1 |DMA1",
-        "compute",
-        "DMA|MAC",
     ],
 )
 def test_launch_kernel_cost_func_rejects_invalid_cost_kind(cost_kind: str) -> None:
     with pytest.raises(
         KernelCodeError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be '\|' separated names from \[DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2\]$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be '\|' separated names from \[DMA,compute,memory,latency,DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2\]$",
     ):
         LaunchKernelCostFuncPass(cost_kind=cost_kind)
+
+
+# TC-LKCF-005A
+# 功能说明: 验证 launch-kernel-cost-func 兼容历史 open-kind 合同文本。
+# 使用示例: pytest -q test/passes/tuning/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_accepts_legacy_text_kinds
+# 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
+# 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
+# 对应测试文件路径: test/passes/tuning/test_launch_kernel_cost_func.py
+def test_launch_kernel_cost_func_accepts_legacy_text_kinds() -> None:
+    pass_obj = LaunchKernelCostFuncPass(cost_kind="compute|memory|latency|DMA|MAC")
+
+    assert pass_obj.cost_kind == "compute|memory|latency|DMA|MAC"
 
 
 # TC-LKCF-005B
@@ -527,7 +537,7 @@ def test_launch_kernel_cost_func_rejects_invalid_cost_kind_via_registry() -> Non
 
     with pytest.raises(
         KernelCodeError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be '\|' separated names from \[DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2\]$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be '\|' separated names from \[DMA,compute,memory,latency,DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2\]$",
     ):
         build_registered_pass("launch-kernel-cost-func", {"cost_kind": "DMA1|VECTOR1|DMA1"})
 

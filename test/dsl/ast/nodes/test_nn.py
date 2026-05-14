@@ -424,10 +424,30 @@ def test_nn_conv_uses_shared_runtime_contracting_dim_for_matmul() -> None:
         [ConstValueAST(1), ConstValueAST(1)],
     ).emit_mlir(ctx, block)
 
-    matmul_ops = [op for op in block.ops if op.name == "nn.matmul"]
+    matmul_ops = [op for op in [*block.ops, result] if op.name == "nn.matmul"]
     assert isinstance(result, Operation)
     assert len(matmul_ops) == 1
     matmul_ops[0].verify()
+
+
+def test_nn_fc_unknown_batch_keeps_question_and_view_transpose_stride() -> None:
+    """fc 公开 AST 在匿名 batch 输入下保持 `?`，并为内部 transpose 使用保守 stride。"""
+
+    value = MemoryAST.from_memory("value", Memory([SymbolDim("?"), SymbolDim("K")], NumericType.Float32))
+    weight = MemoryAST.from_memory("weight", Memory([SymbolDim("N"), SymbolDim("K")], NumericType.Float32))
+    ctx, block = _block_for_memories(value, weight)
+
+    result = FCAST(value, weight).emit_mlir(ctx, block)
+
+    transpose_ops = [op for op in block.ops if op.name == "nn.transpose"]
+    matmul_ops = [op for op in [*block.ops, result] if op.name == "nn.matmul"]
+    assert isinstance(result, Operation)
+    assert len(transpose_ops) == 1
+    assert len(matmul_ops) == 1
+    transpose_type = transpose_ops[0].results[0].type
+    matmul_type = matmul_ops[0].results[0].type
+    assert [dim.expr.data for dim in transpose_type.stride.data] == ["1", "K"]
+    assert [dim.expr.data for dim in matmul_type.shape.data] == ["?", "N"]
 
 
 def test_nn_emit_mlir_reports_public_operation_value_errors() -> None:

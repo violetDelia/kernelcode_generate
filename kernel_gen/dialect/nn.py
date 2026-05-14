@@ -8,7 +8,11 @@
 
 API 列表:
 - `class NnMemorySpaceAttr(space: StringAttr)`
-- `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr)`
+- `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr, template_name: StringAttr | str | None = None)`
+- `memory_template_name(memory_type: NnMemoryType) -> str | None`
+- `has_memory_template_name(memory_type: NnMemoryType) -> bool`
+- `copy_memory_type(memory_type: NnMemoryType, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
+- `copy_memory_type_with_template_name(memory_type: NnMemoryType, template_name: str | StringAttr, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
 - `class NnAddOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
 - `class NnSubOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
 - `class NnMulOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
@@ -28,8 +32,8 @@ API 列表:
 - `class NnReluOp(input_value: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
 - `class NnSigmoidOp(input_value: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
 - `class NnTanhOp(input_value: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
-- `class NnLeakyReluOp(input_value: SSAValue, alpha: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
-- `class NnHardSigmoidOp(input_value: SSAValue, alpha: SSAValue, beta: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnLeakyReluOp(input_value: SSAValue, alpha: SSAValue | None, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
+- `class NnHardSigmoidOp(input_value: SSAValue, alpha: SSAValue | None, beta: SSAValue | None, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
 - `class NnSoftmaxOp(input_value: SSAValue, result_type: NnMemoryType, axis: int | IntegerAttr, space: NnMemorySpaceAttr)`
 - `class NnExpOp(input_value: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
 - `class NnReduceSumOp(input_value: SSAValue, result_type: NnMemoryType, axes: Sequence[int] | ArrayAttr[IntegerAttr], keepdim: bool | IntegerAttr, space: NnMemorySpaceAttr)`
@@ -52,6 +56,7 @@ API 列表:
 from __future__ import annotations
 
 from collections.abc import Sequence
+import re
 
 from kernel_gen.core.contracts import (
     build_contiguous_stride as _common_build_contiguous_stride,
@@ -76,10 +81,12 @@ from xdsl.dialects.builtin import (
 from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue, TypeAttribute
 from xdsl.irdl import (
     IRDLOperation,
+    SameVariadicOperandSize,
     attr_def,
     irdl_attr_definition,
     irdl_op_definition,
     operand_def,
+    opt_operand_def,
     param_def,
     result_def,
 )
@@ -89,6 +96,7 @@ from xdsl.utils.exceptions import VerifyException
 
 _VALID_SPACES = {"global", "shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
 _ERROR_SCENE = "dialect.nn verifier"
+_TEMPLATE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 def _raise_verify_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None:
     """统一抛出 nn dialect verifier 错误。"""
@@ -254,6 +262,53 @@ def _static_int_from_dim(dim: Attribute) -> int | None:
     return _static_int_from_expr_text(_dim_expr_text(dim))
 
 
+def _normalize_template_name_attr(template_name: StringAttr | str | None) -> StringAttr:
+    """规整 memory template name 参数。
+
+    功能说明:
+    - `None` 规整为空 `StringAttr`，表示 memory type 未携带 template name。
+    - `str` 与 `StringAttr` 是唯一公开输入形态。
+
+    使用示例:
+    - attr = _normalize_template_name_attr("T1")
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    if template_name is None:
+        return StringAttr("")
+    if isinstance(template_name, StringAttr):
+        return template_name
+    if isinstance(template_name, str):
+        return StringAttr(template_name)
+    raise TypeError("template_name must be str, StringAttr or None")
+
+
+def _verify_template_name_text(template_name: str) -> None:
+    """校验 memory template name 文本。
+
+    功能说明:
+    - 空字符串表示未携带 template name。
+    - 非空 template name 必须是 C identifier 风格名称，拒绝数字开头、空格与尖括号文本。
+
+    使用示例:
+    - _verify_template_name_text("T1")
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    if template_name == "":
+        return
+    if _TEMPLATE_NAME_PATTERN.fullmatch(template_name) is None:
+        _raise_verify_error("nn memory template_name must be an identifier")
+
+
 @irdl_attr_definition
 class NnMemorySpaceAttr(ParametrizedAttribute):
     """NN memory space attribute。
@@ -323,10 +378,10 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
 
 
     功能说明:
-    - 建模 `shape`、`stride`、`element_type` 与 `space` 四类信息。
+    - 建模 `shape`、`stride`、`element_type`、`space` 与可选 `template_name`。
 
     使用示例:
-    - NnMemoryType(ArrayAttr([SymbolExprAttr.from_expr(\"4\")]), ArrayAttr([SymbolExprAttr.from_expr(\"1\")]), IntegerType(32), NnMemorySpaceAttr.from_name(\"global\"))
+    - NnMemoryType(ArrayAttr([SymbolExprAttr.from_expr(\"4\")]), ArrayAttr([SymbolExprAttr.from_expr(\"1\")]), IntegerType(32), NnMemorySpaceAttr.from_name(\"global\"), template_name=\"T1\")
 
     关联文件:
     - spec: spec/dialect/nn.md
@@ -340,17 +395,39 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
     stride: ArrayAttr[Attribute] = param_def(ArrayAttr[Attribute])
     element_type: Attribute = param_def(Attribute)
     space: NnMemorySpaceAttr = param_def(NnMemorySpaceAttr)
+    template_name: StringAttr = param_def(StringAttr)
+
+    def __init__(
+        self,
+        shape: ArrayAttr[SymbolExprAttr],
+        stride: ArrayAttr[SymbolExprAttr],
+        element_type: Attribute,
+        space: NnMemorySpaceAttr,
+        template_name: StringAttr | str | None = None,
+    ) -> None:
+        """初始化 memory type。
+
+        功能说明:
+        - 保留四参数构造兼容，默认不携带 template name。
+        - 第五参数写入公开 `template_name` 字段，供后续 template-name infer 与 EmitC 使用。
+
+        使用示例:
+        - NnMemoryType(shape, stride, i32, NnMemorySpaceAttr.from_name("global"), template_name="T1")
+        """
+
+        super().__init__(shape, stride, element_type, space, _normalize_template_name_attr(template_name))
 
     @classmethod
     def parse_parameters(cls, parser: AttrParser) -> Sequence[Attribute]:
         """解析 memory type 参数。
 
         功能说明:
-        - 解析 `!nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], i32, #nn.space<global>>`。
+        - 解析 `!nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], i32, #nn.space<global>, template = T1>`。
         - shape/stride 必须是 `ArrayAttr[SymbolExprAttr]`，不兼容旧 bare string 或 IntAttr 写法。
+        - `template = T1` 可省略，省略时 memory type 不携带 template name。
 
         使用示例:
-        - Parser(ctx, "!nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], i32, #nn.space<global>>").parse_attribute()
+        - Parser(ctx, "!nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], i32, #nn.space<global>, template = T1>").parse_attribute()
         """
 
         parser.parse_punctuation("<", "Expected '<' for nn memory type.")
@@ -361,6 +438,13 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
         element_type = parser.parse_attribute()
         parser.parse_punctuation(",", "Expected ',' after nn memory element type.")
         space = parser.parse_attribute()
+        template_name = StringAttr("")
+        if parser.parse_optional_punctuation(",") is not None:
+            keyword = parser.parse_identifier("Expected 'template' memory option.")
+            if keyword != "template":
+                parser.raise_error("nn memory type only accepts template option")
+            parser.parse_punctuation("=", "Expected '=' after nn memory template option.")
+            template_name = StringAttr(parser.parse_identifier("Expected nn memory template name."))
         parser.parse_punctuation(">", "Expected '>' for nn memory type.")
         if not isinstance(shape, ArrayAttr):
             parser.raise_error("nn memory shape must be ArrayAttr[SymbolExprAttr]")
@@ -368,7 +452,7 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
             parser.raise_error("nn memory stride must be ArrayAttr[SymbolExprAttr]")
         if not isinstance(space, NnMemorySpaceAttr):
             parser.raise_error("nn memory type space must be #nn.space<...>")
-        return (shape, stride, element_type, space)
+        return (shape, stride, element_type, space, template_name)
 
     def print_parameters(self, printer: Printer) -> None:
         """打印 memory type 参数。
@@ -388,6 +472,10 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
         printer.print_attribute(self.element_type)
         printer.print_string(", ")
         printer.print_attribute(self.space)
+        template_name = memory_template_name(self)
+        if template_name is not None:
+            printer.print_string(", template = ")
+            printer.print_string(template_name)
         printer.print_string(">")
 
     def verify(self) -> None:
@@ -396,6 +484,7 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
         功能说明:
         - 要求 shape/stride rank 一致。
         - 要求 shape/stride 每个条目均为 `SymbolExprAttr`。
+        - 要求 template name 为空或合法 identifier。
 
         使用示例:
         - memory_type.verify()
@@ -409,6 +498,117 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
             _verify_dim_entry(dim, "shape")
         for dim in self.stride.data:
             _verify_dim_entry(dim, "stride")
+        _verify_template_name_text(self.template_name.data)
+
+
+def memory_template_name(memory_type: NnMemoryType) -> str | None:
+    """读取 memory type 的 template name。
+
+    功能说明:
+    - 返回 `NnMemoryType.template_name` 的非空文本。
+    - 未携带 template name 时返回 `None`，避免调用方依赖空字符串作为公开语义。
+
+    使用示例:
+    - assert memory_template_name(mem_type) in {None, "T1"}
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    memory_type.verify()
+    name = memory_type.template_name.data
+    return name if name else None
+
+
+def has_memory_template_name(memory_type: NnMemoryType) -> bool:
+    """判断 memory type 是否携带 template name。
+
+    功能说明:
+    - 通过公开 `memory_template_name(...)` 读取状态。
+    - 不暴露 `StringAttr("")` 这一内部无模板编码。
+
+    使用示例:
+    - assert has_memory_template_name(mem_type) is False
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    return memory_template_name(memory_type) is not None
+
+
+def copy_memory_type(
+    memory_type: NnMemoryType,
+    *,
+    shape: ArrayAttr[SymbolExprAttr] | None = None,
+    stride: ArrayAttr[SymbolExprAttr] | None = None,
+    element_type: Attribute | None = None,
+    space: NnMemorySpaceAttr | None = None,
+) -> NnMemoryType:
+    """复制 memory type 并清除 template name。
+
+    功能说明:
+    - 用于创建 layout/dtype/space 派生类型时明确退场 template name，避免跨新 buffer 泄漏。
+    - 未传入的字段沿用原 memory type。
+
+    使用示例:
+    - new_type = copy_memory_type(old_type, space=NnMemorySpaceAttr.from_name("shared"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    memory_type.verify()
+    result = NnMemoryType(
+        memory_type.shape if shape is None else shape,
+        memory_type.stride if stride is None else stride,
+        memory_type.element_type if element_type is None else element_type,
+        memory_type.space if space is None else space,
+    )
+    result.verify()
+    return result
+
+
+def copy_memory_type_with_template_name(
+    memory_type: NnMemoryType,
+    template_name: str | StringAttr,
+    *,
+    shape: ArrayAttr[SymbolExprAttr] | None = None,
+    stride: ArrayAttr[SymbolExprAttr] | None = None,
+    element_type: Attribute | None = None,
+    space: NnMemorySpaceAttr | None = None,
+) -> NnMemoryType:
+    """复制 memory type 并写入 template name。
+
+    功能说明:
+    - 用于 `TemplateNameInferPass` 把推导结果写回 `NnMemoryType`。
+    - 非法 template name 按 dialect verifier 合同失败。
+
+    使用示例:
+    - new_type = copy_memory_type_with_template_name(old_type, "T1")
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    memory_type.verify()
+    result = NnMemoryType(
+        memory_type.shape if shape is None else shape,
+        memory_type.stride if stride is None else stride,
+        memory_type.element_type if element_type is None else element_type,
+        memory_type.space if space is None else space,
+        template_name=template_name,
+    )
+    result.verify()
+    return result
 
 
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
@@ -2171,48 +2371,19 @@ class NnLeakyReluOp(IRDLOperation):
     name = "nn.leaky_relu"
 
     input = operand_def(NnMemoryType)
-    alpha = operand_def(Attribute)
+    alpha = opt_operand_def(Attribute)
     result = result_def(NnMemoryType)
     space = attr_def(NnMemorySpaceAttr)
 
     def __init__(
         self,
         input_value: SSAValue | Operation,
-        alpha: SSAValue | Operation,
-        result_type: NnMemoryType,
-        space: NnMemorySpaceAttr,
-    ) -> None:
-        super().__init__(operands=[input_value, alpha], result_types=[result_type], attributes={"space": space})
-
-    def verify_(self) -> None:
-        input_type = _verify_memory_type(self.input.type, "input")
-        result_type = _verify_memory_type(self.result.type, "result")
-        _verify_unary_float_op(input_type, result_type, self.space)
-        _verify_activation_scalar_operand(SSAValue.get(self.alpha), "alpha")
-
-
-@irdl_op_definition
-class NnHardSigmoidOp(IRDLOperation):
-    """nn.hard_sigmoid。"""
-
-    name = "nn.hard_sigmoid"
-
-    input = operand_def(NnMemoryType)
-    alpha = operand_def(Attribute)
-    beta = operand_def(Attribute)
-    result = result_def(NnMemoryType)
-    space = attr_def(NnMemorySpaceAttr)
-
-    def __init__(
-        self,
-        input_value: SSAValue | Operation,
-        alpha: SSAValue | Operation,
-        beta: SSAValue | Operation,
+        alpha: SSAValue | Operation | None,
         result_type: NnMemoryType,
         space: NnMemorySpaceAttr,
     ) -> None:
         super().__init__(
-            operands=[input_value, alpha, beta],
+            operands=[input_value, [] if alpha is None else [alpha]],
             result_types=[result_type],
             attributes={"space": space},
         )
@@ -2221,8 +2392,49 @@ class NnHardSigmoidOp(IRDLOperation):
         input_type = _verify_memory_type(self.input.type, "input")
         result_type = _verify_memory_type(self.result.type, "result")
         _verify_unary_float_op(input_type, result_type, self.space)
-        _verify_activation_scalar_operand(SSAValue.get(self.alpha), "alpha")
-        _verify_activation_scalar_operand(SSAValue.get(self.beta), "beta")
+        if self.alpha is not None:
+            _verify_activation_scalar_operand(SSAValue.get(self.alpha), "alpha")
+
+
+@irdl_op_definition
+class NnHardSigmoidOp(IRDLOperation):
+    """nn.hard_sigmoid。"""
+
+    name = "nn.hard_sigmoid"
+    irdl_options = (SameVariadicOperandSize(),)
+
+    input = operand_def(NnMemoryType)
+    alpha = opt_operand_def(Attribute)
+    beta = opt_operand_def(Attribute)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        alpha: SSAValue | Operation | None,
+        beta: SSAValue | Operation | None,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        super().__init__(
+            operands=[
+                input_value,
+                [] if alpha is None else [alpha],
+                [] if beta is None else [beta],
+            ],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+    def verify_(self) -> None:
+        input_type = _verify_memory_type(self.input.type, "input")
+        result_type = _verify_memory_type(self.result.type, "result")
+        _verify_unary_float_op(input_type, result_type, self.space)
+        if self.alpha is not None:
+            _verify_activation_scalar_operand(SSAValue.get(self.alpha), "alpha")
+        if self.beta is not None:
+            _verify_activation_scalar_operand(SSAValue.get(self.beta), "beta")
 
 
 @irdl_op_definition
@@ -2964,4 +3176,8 @@ __all__ = [
     "NnMatmulOp",
     "NnMemorySpaceAttr",
     "NnMemoryType",
+    "memory_template_name",
+    "has_memory_template_name",
+    "copy_memory_type",
+    "copy_memory_type_with_template_name",
 ]

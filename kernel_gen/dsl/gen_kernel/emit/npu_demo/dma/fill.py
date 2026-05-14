@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from kernel_gen.dialect.dma import DmaFillOp
 
+from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
 
 
@@ -41,7 +42,7 @@ def _emit_npu_demo_dma_fill(op: DmaFillOp, ctx) -> str:
 
     target_expr = emit_c_value(op.target, ctx)
     space_expr = ctx.dispatch_attr(op.target.type)
-    target_type = ctx.dispatch_type(op.target.type.element_type)
+    target_type = memory_element_cpp_type(op.target.type, ctx)
     value_expr = emit_c_value(op.value, ctx)
     if value_expr == "inf":
         value_expr = f"std::numeric_limits<{target_type}>::infinity()"

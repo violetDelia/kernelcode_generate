@@ -506,8 +506,11 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.tile.elewise import TileElewisePass
     from kernel_gen.passes.tile.reduce import TileReducePass
     from kernel_gen.passes.tuning import LaunchKernelCostFuncPass
+    from kernel_gen.passes.template_name_infer import TemplateNameInferPass
+    from xdsl.transforms.common_subexpression_elimination import CommonSubexpressionElimination
 
     for pass_cls in (
+        CommonSubexpressionElimination,
         InlinePass,
         DecompassPass,
         NnLoweringPass,
@@ -522,6 +525,7 @@ def load_builtin_passes() -> None:
         SymbolLoopHoistPass,
         MemoryPoolPass,
         LaunchKernelCostFuncPass,
+        TemplateNameInferPass,
     ):
         pass_name = getattr(pass_cls, "name", None)
         if isinstance(pass_name, str) and pass_name in _PASS_REGISTRY:

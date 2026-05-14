@@ -108,8 +108,16 @@ def _nn_leaky_relu_kernel(x, y):
     return leaky_relu(x, alpha=0.125)
 
 
+def _nn_leaky_relu_default_kernel(x, y):
+    return leaky_relu(x)
+
+
 def _nn_hard_sigmoid_kernel(x, y):
     return hard_sigmoid(x, 0.2, 0.5)
+
+
+def _nn_hard_sigmoid_default_kernel(x, y):
+    return hard_sigmoid(x)
 
 
 def _nn_add_kernel(x, y):
@@ -257,11 +265,11 @@ def _nn_bad_exp_kernel(x, y):
 
 
 def _nn_bad_leaky_relu_kernel(x, y):
-    return leaky_relu(x)
+    return leaky_relu(x, alpha=0.1, beta=0.2)
 
 
 def _nn_bad_hard_sigmoid_kernel(x, y):
-    return hard_sigmoid(x, alpha=0.2)
+    return hard_sigmoid(x, 0.2, 0.5, 0.7)
 
 
 def _nn_bad_reduce_sum_kernel(x, y):
@@ -362,7 +370,9 @@ _NN_RETURN_CASES = tuple(
             (_nn_tanh_kernel, NnTanhAST),
             (_nn_exp_kernel, NnExpAST),
             (_nn_leaky_relu_kernel, NnLeakyReluAST),
+            (_nn_leaky_relu_default_kernel, NnLeakyReluAST),
             (_nn_hard_sigmoid_kernel, NnHardSigmoidAST),
+            (_nn_hard_sigmoid_default_kernel, NnHardSigmoidAST),
             (_nn_add_kernel, NnAddAST),
             (_nn_sub_kernel, NnSubAST),
             (_nn_mul_kernel, NnMulAST),
@@ -421,6 +431,19 @@ def test_nn_public_helpers_parse_parameterized_return_nodes(kernel, expected_typ
     values = _nn_return_values(kernel)
 
     assert any(isinstance(value, expected_type) for value in values)
+
+
+def test_nn_activation_helpers_apply_public_default_scalars() -> None:
+    """验证 NN activation helper 使用 operation 公开默认参数。"""
+
+    leaky_values = _nn_return_values(_nn_leaky_relu_default_kernel)
+    hard_values = _nn_return_values(_nn_hard_sigmoid_default_kernel)
+
+    leaky = next(value for value in leaky_values if isinstance(value, NnLeakyReluAST))
+    hard = next(value for value in hard_values if isinstance(value, NnHardSigmoidAST))
+    assert leaky.alpha is None
+    assert hard.alpha is None
+    assert hard.beta is None
 
 
 @pytest.mark.parametrize(("kernel", "match"), _NN_INVALID_CASES)

@@ -260,6 +260,25 @@ def _make_memory_type(
     )
 
 
+def test_gen_kernel_emits_template_header_for_npu_demo_memory_template_name() -> None:
+    """验证 npu_demo 函数签名按 memory template_name 生成 C++ template。"""
+
+    mem_type = NnMemoryType(
+        ArrayAttr([SymbolExprAttr.from_expr("M")]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
+        i32,
+        NnMemorySpaceAttr.from_name("global"),
+        template_name="T1",
+    )
+    block = Block(arg_types=[mem_type, mem_type])
+    block.add_ops([DmaCopyOp(block.args[0], block.args[1]), func.ReturnOp()])
+    func_op = func.FuncOp("copy_kernel", FunctionType.from_lists([mem_type, mem_type], []), Region(block))
+    set_target("npu_demo")
+    source = gen_kernel(func_op, EmitCContext())
+    assert "template <typename T1>\nvoid copy_kernel(Memory<GM, T1>& arg0, Memory<GM, T1>& arg1)" in source
+    assert "slice(arg0 /*dst*/, arg1 /*source*/" in source
+
+
 def _memory_symbol_expr_attr(value: int | str) -> SymbolExprAttr:
     return SymbolExprAttr.from_expr(str(value))
 

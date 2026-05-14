@@ -600,7 +600,7 @@ def test_build_registered_launch_kernel_cost_func_rejects_invalid_kind() -> None
 
     with pytest.raises(
         KernelCodeError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be '\|' separated names from \[DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2\]$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be '\|' separated names from \[DMA,compute,memory,latency,DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2\]$",
     ):
         build_registered_pass("launch-kernel-cost-func", {"cost_kind": "DMA1|VECTOR1|DMA1"})
 

@@ -491,6 +491,7 @@ class _ParamSpec:
     kind: str
     ctype: str
     memory_space: str | None = None
+    template_name: str | None = None
 
 
 _INT_TYPE_PATTERN = re.compile(
@@ -506,6 +507,17 @@ _FLOAT_TYPE_PATTERN = re.compile(
 _KERNEL_CONTEXT_TYPE_PATTERN = re.compile(r"^(?:npu_demo::)?KernelContext\s*&\s+\w+$")
 _MEMORY_TYPE_PATTERN = re.compile(
     r"^(?:const\s+)?Memory<\s*(?P<space>[^,\s>]+)\s*,\s*(?P<dtype>[^>\s]+)\s*>\s*&\s+\w+$"
+)
+_TEMPLATE_PARAM_PATTERN = re.compile(r"\b(?:typename|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
+_TEMPLATE_DTYPE_OPTIONS: tuple[tuple[int, str], ...] = (
+    (1, "float"),
+    (2, "double"),
+    (3, "int32_t"),
+    (4, "int64_t"),
+)
+_CONCRETE_MEMORY_DTYPE_PATTERN = re.compile(
+    r"Memory<\s*(?:MemorySpace::)?(?:GM|SM|LM|TSM|TLM1|TLM2|TLM3)\s*,\s*"
+    r"(?P<dtype>float|double|int32_t|int64_t|int|long\s+long)\s*>"
 )
 
 
@@ -559,7 +571,43 @@ def _split_params(params_text: str) -> tuple[str, ...]:
     return tuple(parts)
 
 
-def _parse_param_spec(param_text: str) -> _ParamSpec | None:
+def _template_names_from_header(template_text: str | None) -> frozenset[str]:
+    """解析 C++ template header 中的类型参数名。
+
+    功能说明:
+    - 仅识别 `typename T` / `class T` 形式。
+    - 无 template header 时返回空集合。
+
+    使用示例:
+    - names = _template_names_from_header("typename T1, typename T2")
+    """
+
+    if template_text is None:
+        return frozenset()
+    return frozenset(_TEMPLATE_PARAM_PATTERN.findall(template_text))
+
+
+def _template_names_before_function(source: str, function_start: int) -> frozenset[str]:
+    """读取紧邻函数定义前的 C++ template header。
+
+    功能说明:
+    - 当正则从函数返回类型处开始匹配时，补充解析其前一段紧邻的 `template <...>`。
+    - 只接受被 `;` / `{` / `}` 分隔后的最后一段文本，避免误用更早的模板声明。
+
+    使用示例:
+    - names = _template_names_before_function(source, function_start)
+    """
+
+    prefix = source[:function_start]
+    boundary = max(prefix.rfind(";"), prefix.rfind("{"), prefix.rfind("}"))
+    tail = prefix[boundary + 1 :].strip()
+    match = re.search(r"template\s*<(?P<template>[^>]*)>\s*[^;{}]*$", tail, re.DOTALL)
+    if match is None:
+        return frozenset()
+    return _template_names_from_header(match.group("template"))
+
+
+def _parse_param_spec(param_text: str, template_names: frozenset[str] = frozenset()) -> _ParamSpec | None:
     """把单个形参文本解析为最小参数规格。
 
 
@@ -579,10 +627,12 @@ def _parse_param_spec(param_text: str) -> _ParamSpec | None:
     normalized = " ".join(param_text.strip().split())
     memory_match = _MEMORY_TYPE_PATTERN.match(normalized)
     if memory_match is not None:
+        dtype = memory_match.group("dtype")
         return _ParamSpec(
             kind="memory",
-            ctype=memory_match.group("dtype"),
+            ctype=dtype,
             memory_space=memory_match.group("space"),
+            template_name=dtype if dtype in template_names else None,
         )
     int_match = _INT_TYPE_PATTERN.match(normalized)
     if int_match is not None:
@@ -619,14 +669,21 @@ def _extract_param_specs(source: str, function: str) -> tuple[_ParamSpec, ...] |
 
     for function_name in candidates:
         pattern = re.compile(
-            rf"\b{re.escape(function_name)}\s*\((?P<params>.*?)\)\s*\{{",
+            rf"(?:template\s*<(?P<template>[^>]*)>\s*)?[^;{{}}]*\b{re.escape(function_name)}\s*\((?P<params>.*?)\)\s*\{{",
             re.DOTALL,
         )
         for match in pattern.finditer(source):
             params = _split_params(match.group("params"))
+            template_names = _template_names_from_header(match.groupdict().get("template"))
+            if not template_names:
+                function_start = source.rfind(function_name, match.start(), match.start("params"))
+                template_names = _template_names_before_function(
+                    source,
+                    function_start if function_start >= 0 else match.start(),
+                )
             specs: list[_ParamSpec] = []
             for param in params:
-                spec = _parse_param_spec(param)
+                spec = _parse_param_spec(param, template_names)
                 if spec is None:
                     specs = []
                     break
@@ -636,11 +693,183 @@ def _extract_param_specs(source: str, function: str) -> tuple[_ParamSpec, ...] |
     return None
 
 
+def _template_names_from_param_specs(params: tuple[_ParamSpec, ...]) -> tuple[str, ...]:
+    """按参数顺序收集 template dtype 名称。
+
+    功能说明:
+    - 仅收集 memory 参数中出现的 `template_name`。
+    - 保持首次出现顺序，供 shim 生成模板实参列表。
+
+    使用示例:
+    - names = _template_names_from_param_specs(params)
+    """
+
+    names: list[str] = []
+    for spec in params:
+        if spec.template_name is not None and spec.template_name not in names:
+            names.append(spec.template_name)
+    return tuple(names)
+
+
+def _dtype_code_from_name(dtype: str | None) -> int:
+    """把运行时 dtype 文本映射为 C ABI dtype code。
+
+    功能说明:
+    - 仅为 template shim 分支选择提供最小 dtype 编码。
+    - 未识别 dtype 返回 0，C shim 会拒绝需要 template 实例化的调用。
+
+    使用示例:
+    - code = _dtype_code_from_name("float32")
+    """
+
+    if dtype is None:
+        return 0
+    normalized = dtype.strip().lower().replace(" ", "")
+    if normalized in {"float", "float32", "f32"}:
+        return 1
+    if normalized in {"double", "float64", "f64"}:
+        return 2
+    if normalized in {"int", "int32", "int32_t", "i32"}:
+        return 3
+    if normalized in {"longlong", "longlongint", "int64", "int64_t", "i64"}:
+        return 4
+    return 0
+
+
+def _runtime_template_combinations_from_source(
+    template_names: tuple[str, ...],
+    source: str | None,
+) -> tuple[dict[str, tuple[int, str]], ...]:
+    """根据源码中的 concrete memory dtype 生成唯一模板实例。
+
+    功能说明:
+    - 优先使用函数体里 concrete `Memory<..., dtype>` 的 dtype，避免生成全组合 dispatcher。
+    - 找不到 concrete dtype 时稳定失败；手写 templated compile 缺少 runtime dtype 实例信息时不得默认 `float`。
+
+    使用示例:
+    - combos = _runtime_template_combinations_from_source(("T1",), source)
+    """
+
+    if not template_names:
+        return ()
+    if isinstance(source, str):
+        for match in _CONCRETE_MEMORY_DTYPE_PATTERN.finditer(source):
+            code = _dtype_code_from_name(match.group("dtype"))
+            if code == 0:
+                continue
+            ctype = next((candidate for candidate_code, candidate in _TEMPLATE_DTYPE_OPTIONS if candidate_code == code), None)
+            if ctype is not None:
+                return ({name: (code, ctype) for name in template_names},)
+    raise _execution_engine_error(
+        _TEMPLATE_INSTANCE_REQUIRED,
+        "templated memory function requires concrete memory dtype in source",
+    )
+
+
+def _runtime_param_declaration_lines(
+    params: tuple[_ParamSpec, ...],
+    template_types: dict[str, tuple[int, str]] | None = None,
+) -> tuple[list[str], list[str], list[str]]:
+    """生成 runtime shim 参数校验、声明与调用实参。
+
+    功能说明:
+    - 普通函数与 templated 函数共用同一套 memory/int/float 参数封送文本。
+    - `template_types` 非空时，template memory dtype 改用当前实例化 C++ 类型。
+
+    使用示例:
+    - lines, call_args, trance_lines = _runtime_param_declaration_lines(params, {"T1": (1, "float")})
+    """
+
+    lines: list[str] = []
+    call_args: list[str] = []
+    trance_arg_lines: list[str] = []
+    runtime_arg_index = 0
+    for spec in params:
+        if spec.kind == "kernel_context":
+            lines.append("  npu_demo::KernelContext ctx;")
+            call_args.append("ctx")
+            continue
+        runtime_idx = runtime_arg_index
+        runtime_arg_index += 1
+        if spec.kind == "memory":
+            ctype = spec.ctype
+            if spec.template_name is not None and template_types is not None:
+                ctype = template_types[spec.template_name][1]
+            lines.extend(
+                [
+                    f"  if (ordered_args[{runtime_idx}].kind != KG_ARG_MEMORY) {{",
+                    "    return -1;",
+                    "  }",
+                    f"  if (ordered_args[{runtime_idx}].data == nullptr || ordered_args[{runtime_idx}].shape == nullptr || ordered_args[{runtime_idx}].stride == nullptr) {{",
+                    "    return -1;",
+                    "  }",
+                    f"  Memory<{spec.memory_space}, {ctype}> arg{runtime_idx}(",
+                    f"      reinterpret_cast<{ctype}*>(ordered_args[{runtime_idx}].data),",
+                    f"      ordered_args[{runtime_idx}].shape,",
+                    f"      ordered_args[{runtime_idx}].stride,",
+                    f"      ordered_args[{runtime_idx}].rank);",
+                ]
+            )
+            call_args.append(f"arg{runtime_idx}")
+            trance_arg_lines.append(f'  arg{runtime_idx}.trance_print(__kg_trance_sink, "arg{runtime_idx}");')
+            continue
+        if spec.kind == "int":
+            lines.extend(
+                [
+                    f"  if (ordered_args[{runtime_idx}].kind != KG_ARG_INT) {{",
+                    "    return -1;",
+                    "  }",
+                    f"  {spec.ctype} arg{runtime_idx} = static_cast<{spec.ctype}>(ordered_args[{runtime_idx}].int_value);",
+                ]
+            )
+            call_args.append(f"arg{runtime_idx}")
+            trance_arg_lines.append(f'  kernelcode::trance::print_value_arg(__kg_trance_sink, "arg{runtime_idx}", arg{runtime_idx});')
+            continue
+        lines.extend(
+            [
+                f"  if (ordered_args[{runtime_idx}].kind != KG_ARG_FLOAT) {{",
+                "    return -1;",
+                "  }",
+                f"  {spec.ctype} arg{runtime_idx} = static_cast<{spec.ctype}>(ordered_args[{runtime_idx}].float_value);",
+            ]
+        )
+        call_args.append(f"arg{runtime_idx}")
+        trance_arg_lines.append(f'  kernelcode::trance::print_value_arg(__kg_trance_sink, "arg{runtime_idx}", arg{runtime_idx});')
+    return lines, call_args, trance_arg_lines
+
+
+def _template_condition_lines(
+    params: tuple[_ParamSpec, ...],
+    template_types: dict[str, tuple[int, str]],
+) -> list[str]:
+    """生成 template runtime dtype 分支条件。
+
+    功能说明:
+    - 每个携带 template name 的 memory 参数必须匹配当前实例化 dtype code。
+
+    使用示例:
+    - conditions = _template_condition_lines(params, {"T1": (1, "float")})
+    """
+
+    conditions: list[str] = []
+    runtime_arg_index = 0
+    for spec in params:
+        if spec.kind == "kernel_context":
+            continue
+        runtime_idx = runtime_arg_index
+        runtime_arg_index += 1
+        if spec.kind == "memory" and spec.template_name is not None:
+            code, _ctype = template_types[spec.template_name]
+            conditions.append(f"ordered_args[{runtime_idx}].dtype_code == {code}")
+    return conditions
+
+
 def _build_runtime_entry_shim_source(
     *,
     function: str,
     entry_point: str,
     params: tuple[_ParamSpec, ...],
+    source: str | None = None,
 ) -> str:
     """根据参数规格生成可运行 entry shim。
 
@@ -673,6 +902,7 @@ def _build_runtime_entry_shim_source(
         "  const long long* shape;",
         "  const long long* stride;",
         "  unsigned long long rank;",
+        "  int dtype_code;",
         "  long long int_value;",
         "  double float_value;",
         "};",
@@ -690,58 +920,32 @@ def _build_runtime_entry_shim_source(
         '  kernelcode::trance::write_line(__kg_trance_sink, "args =");',
         "#endif",
     ]
-    call_args: list[str] = []
-    trance_arg_lines: list[str] = []
-    runtime_arg_index = 0
-    for spec in params:
-        if spec.kind == "kernel_context":
-            lines.append("  npu_demo::KernelContext ctx;")
-            call_args.append("ctx")
-            continue
-        runtime_idx = runtime_arg_index
-        runtime_arg_index += 1
-        if spec.kind == "memory":
-            lines.extend(
-                [
-                    f"  if (ordered_args[{runtime_idx}].kind != KG_ARG_MEMORY) {{",
-                    "    return -1;",
-                    "  }",
-                    f"  if (ordered_args[{runtime_idx}].data == nullptr || ordered_args[{runtime_idx}].shape == nullptr || ordered_args[{runtime_idx}].stride == nullptr) {{",
-                    "    return -1;",
-                    "  }",
-                    f"  Memory<{spec.memory_space}, {spec.ctype}> arg{runtime_idx}(",
-                    f"      reinterpret_cast<{spec.ctype}*>(ordered_args[{runtime_idx}].data),",
-                    f"      ordered_args[{runtime_idx}].shape,",
-                    f"      ordered_args[{runtime_idx}].stride,",
-                    f"      ordered_args[{runtime_idx}].rank);",
-                ]
-            )
-            call_args.append(f"arg{runtime_idx}")
-            trance_arg_lines.append(f'  arg{runtime_idx}.trance_print(__kg_trance_sink, "arg{runtime_idx}");')
-            continue
-        if spec.kind == "int":
-            lines.extend(
-                [
-                    f"  if (ordered_args[{runtime_idx}].kind != KG_ARG_INT) {{",
-                    "    return -1;",
-                    "  }",
-                    f"  {spec.ctype} arg{runtime_idx} = static_cast<{spec.ctype}>(ordered_args[{runtime_idx}].int_value);",
-                ]
-            )
-            call_args.append(f"arg{runtime_idx}")
-            trance_arg_lines.append(f'  kernelcode::trance::print_value_arg(__kg_trance_sink, "arg{runtime_idx}", arg{runtime_idx});')
-            continue
-        lines.extend(
-            [
-                f"  if (ordered_args[{runtime_idx}].kind != KG_ARG_FLOAT) {{",
-                "    return -1;",
-                "  }",
-                f"  {spec.ctype} arg{runtime_idx} = static_cast<{spec.ctype}>(ordered_args[{runtime_idx}].float_value);",
-            ]
-        )
-        call_args.append(f"arg{runtime_idx}")
-        trance_arg_lines.append(f'  kernelcode::trance::print_value_arg(__kg_trance_sink, "arg{runtime_idx}", arg{runtime_idx});')
-    call_args_text = ", ".join(call_args)
+    template_names = _template_names_from_param_specs(params)
+    if template_names:
+        for template_types in _runtime_template_combinations_from_source(template_names, source):
+            conditions = _template_condition_lines(params, template_types)
+            if not conditions:
+                continue
+            lines.append(f"  if ({' && '.join(conditions)}) {{")
+            branch_lines, call_args, trance_arg_lines = _runtime_param_declaration_lines(params, template_types)
+            lines.extend(f"  {line}" if line else line for line in branch_lines)
+            if trance_arg_lines:
+                lines.extend(
+                    [
+                        "  #ifdef TRANCE",
+                        *(f"  {line}" for line in trance_arg_lines),
+                        "  #endif",
+                    ]
+                )
+            template_args = ", ".join(template_types[name][1] for name in template_names)
+            lines.append(f"  {function}<{template_args}>({', '.join(call_args)});")
+            lines.append("    return 0;")
+            lines.append("  }")
+        lines.extend(["  return -1;", "}", ""])
+        return _join_text_sections("\n".join(lines))
+
+    decl_lines, call_args, trance_arg_lines = _runtime_param_declaration_lines(params)
+    lines.extend(decl_lines)
     if trance_arg_lines:
         lines.extend(
             [
@@ -752,7 +956,7 @@ def _build_runtime_entry_shim_source(
         )
     lines.extend(
         [
-            f"  {function}({call_args_text});",
+            f"  {function}({', '.join(call_args)});",
             "  return 0;",
             "}",
             "",
@@ -809,6 +1013,7 @@ def _compose_entry_shim_source(*, function: str, entry_point: str, source: str |
                 function=function,
                 entry_point=entry_point,
                 params=params,
+                source=source,
             )
     return (
         f"// entry shim placeholder for {function} as {entry_point}\n"
@@ -823,6 +1028,7 @@ def _compose_entry_shim_source(*, function: str, entry_point: str, source: str |
 _TARGET_HEADER_MISMATCH = "target_header_mismatch"
 _SOURCE_EMPTY_OR_INVALID = "source_empty_or_invalid"
 _COMPILE_FAILED = "compile_failed"
+_TEMPLATE_INSTANCE_REQUIRED = "template_instance_required"
 _SYMBOL_RESOLVE_FAILED = "symbol_resolve_failed"
 _RUNTIME_THROW_OR_ABORT = "runtime_throw_or_abort"
 _STREAM_NOT_SUPPORTED = "stream_not_supported"
@@ -834,6 +1040,7 @@ _KNOWN_ERROR_PHRASES: frozenset[str] = frozenset(
         _TARGET_HEADER_MISMATCH,
         _SOURCE_EMPTY_OR_INVALID,
         _COMPILE_FAILED,
+        _TEMPLATE_INSTANCE_REQUIRED,
         _SYMBOL_RESOLVE_FAILED,
         _RUNTIME_THROW_OR_ABORT,
         _STREAM_NOT_SUPPORTED,
@@ -1064,6 +1271,7 @@ class _ArgSlot:
     position: int
     kind: Literal["memory", "int", "float"]
     dtype: str | None
+    dtype_code: int
     shape: tuple[int, ...] | None
     stride: tuple[int, ...] | None
     value: RuntimeInput
@@ -1352,6 +1560,7 @@ def _build_arg_slots(args: tuple[RuntimeInput, ...]) -> tuple[_ArgSlot, ...]:
                     position=idx,
                     kind="int",
                     dtype="int",
+                    dtype_code=0,
                     shape=None,
                     stride=None,
                     value=arg,
@@ -1364,6 +1573,7 @@ def _build_arg_slots(args: tuple[RuntimeInput, ...]) -> tuple[_ArgSlot, ...]:
                     position=idx,
                     kind="float",
                     dtype="float",
+                    dtype_code=0,
                     shape=None,
                     stride=None,
                     value=arg,
@@ -1388,6 +1598,7 @@ def _build_arg_slots(args: tuple[RuntimeInput, ...]) -> tuple[_ArgSlot, ...]:
                     position=idx,
                     kind="memory",
                     dtype=dtype,
+                    dtype_code=_dtype_code_from_name(dtype),
                     shape=shape,
                     stride=_normalize_stride(arg),
                     value=arg,
@@ -1480,6 +1691,7 @@ def _marshal_slots_for_abi(
             ("shape", ctypes.POINTER(ctypes.c_longlong)),
             ("stride", ctypes.POINTER(ctypes.c_longlong)),
             ("rank", ctypes.c_ulonglong),
+            ("dtype_code", ctypes.c_int),
             ("int_value", ctypes.c_longlong),
             ("float_value", ctypes.c_double),
         ]
@@ -1511,6 +1723,7 @@ def _marshal_slots_for_abi(
                     shape=ctypes.cast(shape_buffer, ctypes.POINTER(ctypes.c_longlong)),
                     stride=ctypes.cast(stride_buffer, ctypes.POINTER(ctypes.c_longlong)),
                     rank=ctypes.c_ulonglong(len(slot.shape)),
+                    dtype_code=ctypes.c_int(slot.dtype_code),
                     int_value=ctypes.c_longlong(0),
                     float_value=ctypes.c_double(0.0),
                 )
@@ -1524,6 +1737,7 @@ def _marshal_slots_for_abi(
                     shape=ctypes.POINTER(ctypes.c_longlong)(),
                     stride=ctypes.POINTER(ctypes.c_longlong)(),
                     rank=ctypes.c_ulonglong(0),
+                    dtype_code=ctypes.c_int(0),
                     int_value=ctypes.c_longlong(int(slot.value)),
                     float_value=ctypes.c_double(0.0),
                 )
@@ -1537,6 +1751,7 @@ def _marshal_slots_for_abi(
                     shape=ctypes.POINTER(ctypes.c_longlong)(),
                     stride=ctypes.POINTER(ctypes.c_longlong)(),
                     rank=ctypes.c_ulonglong(0),
+                    dtype_code=ctypes.c_int(0),
                     int_value=ctypes.c_longlong(0),
                     float_value=ctypes.c_double(float(slot.value)),
                 )

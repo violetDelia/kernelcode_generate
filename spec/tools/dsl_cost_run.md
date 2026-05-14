@@ -60,7 +60,7 @@
   - `DMA1/DMA2/DMA3/DMA4` 返回同一 cost function 内匹配 DMA helper 的有效字节总和取整结果，即 `ceil(total_matching_bytes / 64)`。
   - DMA 聚合只允许通过 `dsl_cost_run(...)` 生成源码中的本地 raw-bytes helper 完成；生成源码和 include 公开层不得跨文件调用 `npu_demo::cost::detail` 非公开聚合状态。
   - target 只能是 `npu_demo`；其他 target 必须失败，固定短语为 `DslCostRunInvalidTarget: dsl_cost_run only supports target 'npu_demo'`。
-  - 非法 `cost_kind` 必须失败，固定短语为 `DslCostRunInvalidCostKind: cost_kind must be one of [DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2]`。
+  - 非法 `cost_kind` 必须失败，固定短语为 `DslCostRunInvalidCostKind: cost_kind must be one of ['DMA', 'MAC']`；`DMA1/DMA2/DMA3/DMA4/MAC/VECTOR1/VECTOR2` 仍作为 npu_demo 七类 kind 兼容执行。
   - lowering 后缺少 `_cost_<cost_kind>_*` sibling 必须失败，固定短语前缀为 `DslCostRunMissingCostFunction:`。
   - 执行失败必须抛 `KernelCodeError(ErrorModule.TOOLS, ...)`，固定短语为 `DslCostRunExecutionFailed: cost wrapper execution failed`。
   - 捕获 C++ `S_INT` 返回值所需的 wrapper 只属于 `kernel_gen/tools/dsl_run.py` 当前文件内部实现，不是公开 include、执行引擎或测试 API。

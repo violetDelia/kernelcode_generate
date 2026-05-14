@@ -26,6 +26,21 @@ from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
 from ...register import emit_c_impl
 
 
+def _actual_memory_element_cpp_type(memory_type: NnMemoryType, ctx) -> str:
+    """返回 memory 的真实 C++ element type。
+
+    功能说明:
+    - `dma.alloc` 负责真实 backing memory 分配，dtype 必须来自 `element_type` 而不是 template name。
+    - 仅供当前文件内部发射 concrete allocation 使用，不作为跨文件公开 API。
+
+    使用示例:
+    - element_type = _actual_memory_element_cpp_type(memory_type, ctx)
+    """
+
+    element_type = memory_type.element_type
+    return ctx.dispatch_type(element_type)
+
+
 def _expr_keys(expr: str) -> tuple[str, ...]:
     """生成符号表达式可匹配的文本 key。
 
@@ -186,7 +201,7 @@ def _emit_npu_demo_dma_alloc(op: DmaAllocOp, ctx) -> str:
     )
     stride_values = _default_stride_values(shape_values)
     space_expr = ctx.dispatch_attr(result_type)
-    element_type = ctx.dispatch_type(result_type.element_type)
+    element_type = _actual_memory_element_cpp_type(result_type, ctx)
     shape_text = ", ".join(shape_values)
     stride_text = ", ".join(stride_values)
     return (

@@ -62,9 +62,7 @@ OutlineDeviceKernelPass = importlib.import_module("kernel_gen.passes.outline_dev
 SymbolBufferHoistPass = importlib.import_module("kernel_gen.passes.symbol_buffer_hoist").SymbolBufferHoistPass
 SymbolLoopHoistPass = importlib.import_module("kernel_gen.passes.symbol_loop_hoist").SymbolLoopHoistPass
 TileAnalysisPass = importlib.import_module("kernel_gen.passes.tile.analysis").TileAnalysisPass
-LaunchKernelCostFuncPass = importlib.import_module(
-    "kernel_gen.passes.tuning.launch_kernel_cost_func"
-).LaunchKernelCostFuncPass
+TemplateNameInferPass = importlib.import_module("kernel_gen.passes.template_name_infer").TemplateNameInferPass
 
 
 # TC-PIPELINE-100
@@ -81,7 +79,7 @@ def test_npu_demo_lowering_pipeline_builds_pass_manager() -> None:
 
 
 # TC-PIPELINE-101
-# 功能说明: 验证 npu-demo-lowering 的固定顺序为 inline -> cse -> decompass -> lower-nn -> symbol-loop-hoist -> cse -> tile-analysis -> lower-dma-memory-hierarchy -> symbol-buffer-hoist -> memory-pool -> attach-arch-information -> outline-device-kernel -> launch-kernel-cost-func。
+# 功能说明: 验证 npu-demo-lowering 的固定顺序为 inline -> cse -> decompass -> lower-nn -> symbol-loop-hoist -> cse -> tile-analysis -> lower-dma-memory-hierarchy -> symbol-buffer-hoist -> memory-pool -> attach-arch-information -> outline-device-kernel -> template-name-infer。
 # 测试目的: 锁定 dsl_run 新正向管线的最小公开顺序。
 # 使用示例: pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k test_npu_demo_lowering_pipeline_pass_order
 # 对应功能实现文件路径: kernel_gen/passes/pipeline/npu_demo_lowering.py
@@ -139,7 +137,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
     def _record_cost(self, ctx: Context, target: ModuleOp) -> None:
         _ = ctx
         _ = target
-        order.append("launch-kernel-cost-func")
+        order.append("template-name-infer")
 
     monkeypatch.setattr(InlinePass, "apply", _record_inline)
     monkeypatch.setattr(CommonSubexpressionElimination, "apply", _record_cse)
@@ -160,7 +158,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
     )
     monkeypatch.setattr(AttachArchInformationPass, "apply", _record_attach)
     monkeypatch.setattr(OutlineDeviceKernelPass, "apply", _record_outline)
-    monkeypatch.setattr(LaunchKernelCostFuncPass, "apply", _record_cost)
+    monkeypatch.setattr(TemplateNameInferPass, "apply", _record_cost)
 
     pm = build_npu_demo_lowering_pipeline({"target": "npu_demo"})
     sentinel = ModuleOp([])
@@ -175,10 +173,10 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "tile-analysis",
         'lower-dma-memory-hierarchy:True:matmul{["", "tlm1", "tlm2"]}',
         "symbol-buffer-hoist",
-        "memory-pool:True:0",
+        "memory-pool:False:1024",
         "attach-arch-information",
         "outline-device-kernel",
-        "launch-kernel-cost-func",
+        "template-name-infer",
     ]
 
 
@@ -217,20 +215,19 @@ def test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain(
     finally:
         reset_config()
 
-    assert "arch.get_dynamic_memory" in module_text
-    assert "dma.view" in module_text
-    assert "dma.subview" not in module_text
-    assert "dma.alloc" not in module_text
+    assert "template = T1" in module_text
+    assert "template = T2" in module_text
+    assert "template = T3" in module_text
+    assert "dma.alloc" in module_text
     assert "allalloc" not in module_text
     assert "void matmul_kernel(" in source
-    assert "S_INT _cost_DMA1_matmul_kernel_device(" in source
-    assert "S_INT _cost_MAC_matmul_kernel_device(" in source
+    assert "S_INT _cost_DMA1_matmul_kernel_device(" not in source
+    assert "S_INT _cost_MAC_matmul_kernel_device(" not in source
+    assert "template <typename" in source
     assert ", long long arg3, long long arg4" in source
     assert "static void matmul_kernel_device(" in source
     assert "npu_demo::KernelContext& ctx" not in source
     assert ", S_INT arg3, S_INT arg4" in source
-    assert "npu_demo::launch<c_0, c_1, c_2, c_3>(matmul_kernel_device, arg0, arg1, arg2, arg3, arg4);" in source
-    assert "Memory<TSM, float>" in source
-    assert "npu_demo::get_dynamic_memory<TSM>()" in source
-    assert ".view<float>(Vector{" in source
-    assert "alloc<TSM" not in source
+    assert "npu_demo::launch<c_0, c_1, c_2, c_3>(matmul_kernel_device<" in source
+    assert "arg0, arg1, arg2, arg3, arg4);" in source
+    assert "alloc<TSM" in source

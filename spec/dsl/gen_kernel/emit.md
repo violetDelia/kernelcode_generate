@@ -52,6 +52,8 @@
 - `symbol.min` 在 `cpu` 与 `npu_demo` target 下必须通过注册体系发射为 C/C++ 三目表达式 `((lhs) < (rhs) ? (lhs) : (rhs))` 语义，不新增公开 helper 或 target-specific 公共入口。
 - `target="npu_demo"` 的 `dma.alloc` 发射必须以 `DmaAllocOp.dynamic_shape` 绑定运行期符号值，并从 result memory type 重建完整 shape 与默认连续 stride；只提供部分动态 shape operand 时，静态维度仍必须进入 helper 参数。
 - 上述 target-specific 注册函数和布局辅助函数均不是公开 API；测试只能通过 `emit_c(...)`、`emit_c_op(...)` 或 `emit_c_value(...)` 观察。
+- `target="npu_demo"` 的 memory type 发射必须通过 `kernel_gen.dsl.gen_kernel.emit.npu_demo.type.memory_element_cpp_type(memory_type, ctx)` 统一选择 `Memory<space, Tn>` 或真实 dtype fallback。
+- `memory_element_cpp_type(...)` 只用于 C++ element type 文本；真实 dtype size、cast、alignment 和 verifier 不得读取 template name。
 
 ## API详细说明
 

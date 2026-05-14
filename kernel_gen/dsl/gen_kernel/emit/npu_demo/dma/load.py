@@ -24,6 +24,7 @@ from xdsl.ir import Operation
 from kernel_gen.dialect.dma import DmaLoadOp
 from kernel_gen.dialect.symbol import SymbolConstOp
 
+from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
 
 
@@ -65,7 +66,7 @@ def _emit_npu_demo_dma_load(op: DmaLoadOp, ctx) -> str:
     offset_expr, size_expr, stride_expr = layout_exprs
     return (
         f"{ctx.current_indent}load<{ctx.dispatch_attr(op.target.type)}, {ctx.dispatch_attr(op.source.type)}, "
-        f"{ctx.dispatch_type(op.target.type.element_type)}, {ctx.dispatch_type(op.source.type.element_type)}>"
+        f"{memory_element_cpp_type(op.target.type, ctx)}, {memory_element_cpp_type(op.source.type, ctx)}>"
         f"({target_expr} /*dst*/, {source_expr} /*source*/, {offset_expr} /*offset*/, "
         f"{size_expr} /*size*/, {stride_expr} /*stride*/);"
     )

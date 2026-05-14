@@ -9,7 +9,7 @@
 
 ## API 列表
 
-本文件不承载公开 API。
+- `memory_element_cpp_type(memory_type: NnMemoryType, ctx: EmitCContext) -> str`
 
 ## 文档信息
 
@@ -19,6 +19,7 @@
 - `功能实现`：
   - [`kernel_gen/dsl/gen_kernel/emit/npu_demo/type/space.py`](../../../../../../kernel_gen/dsl/gen_kernel/emit/npu_demo/type/space.py)
   - [`kernel_gen/dsl/gen_kernel/emit/npu_demo/type/type.py`](../../../../../../kernel_gen/dsl/gen_kernel/emit/npu_demo/type/type.py)
+  - [`kernel_gen/dsl/gen_kernel/emit/npu_demo/type/__init__.py`](../../../../../../kernel_gen/dsl/gen_kernel/emit/npu_demo/type/__init__.py)
 - `test`：[`test/dsl/gen_kernel/emit/test_package.py`](../../../../../../test/dsl/gen_kernel/emit/test_package.py)
 
 ## 依赖
@@ -36,11 +37,16 @@
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 本目录只通过 `EmitCContext` 与注册体系生效。
+- `memory_element_cpp_type(...)` 是本目录唯一公开 helper，由 `type.py` 实现并由 `__init__.py` 的 `__all__` 导出。
 - 目录内未列入公开 API 的注册函数与 helper 不得跨文件直接调用。
 
 ## API详细说明
 
-本文件没有公开 API 详细条目；内部注册、目录组织与非公开 helper 边界见“额外补充”。
+### `memory_element_cpp_type(memory_type: NnMemoryType, ctx: EmitCContext) -> str`
+
+- api：`memory_element_cpp_type(memory_type: NnMemoryType, ctx: EmitCContext) -> str`
+- 功能说明：返回 `npu_demo` memory element 的 C++ 类型文本；携带 `template_name` 时返回模板名，否则返回 `ctx.dispatch_type(memory_type.element_type)`。
+- 注意事项：该 helper 只用于 C++ dtype 文本输出；dtype size、cast、alignment 和 verifier 仍必须读取真实 `element_type`。
 
 ## 测试
 

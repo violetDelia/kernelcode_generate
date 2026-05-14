@@ -333,7 +333,7 @@ def test_dsl_cost_run_returns_zero_for_vector2_reserved_kind() -> None:
 
 
 # TC-DSL-COST-RUN-004
-# 功能说明: 验证旧 cost kind 不再是 `dsl_cost_run(...)` 公开合同。
+# 功能说明: 验证非工具公开 cost kind 仍被 `dsl_cost_run(...)` 拒绝。
 # 使用示例: pytest -q test/tools/test_dsl_cost_run.py -k test_dsl_cost_run_rejects_old_cost_kind
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
@@ -345,7 +345,7 @@ def test_dsl_cost_run_rejects_old_cost_kind() -> None:
 
     with pytest.raises(
         KernelCodeError,
-        match=r"^DslCostRunInvalidCostKind: cost_kind must be one of \[DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2\]$",
+        match=r"^DslCostRunInvalidCostKind: cost_kind must be one of \['DMA', 'MAC'\]$",
     ):
         dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "compute")
 

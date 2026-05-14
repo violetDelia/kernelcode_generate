@@ -14,8 +14,8 @@ API 列表:
 - `NnBroadcastToAST(source: ValueAST, target_shape: SymbolListAST, space: MemorySpaceAttrAST, location: SourceLocation | None = None)`
 - `NnTransposeAST(value: ValueAST, perm: SymbolListAST, location: SourceLocation | None = None)`
 - `NnReluAST(value: ValueAST, location: SourceLocation | None = None)` / `NnSigmoidAST(...)` / `NnTanhAST(...)` / `NnExpAST(...)`
-- `NnLeakyReluAST(value: ValueAST, alpha: ConstValueAST | SymbolDimAST, location: SourceLocation | None = None)`
-- `NnHardSigmoidAST(value: ValueAST, alpha: ConstValueAST | SymbolDimAST, beta: ConstValueAST | SymbolDimAST, location: SourceLocation | None = None)`
+- `NnLeakyReluAST(value: ValueAST, alpha: ConstValueAST | SymbolDimAST | None, location: SourceLocation | None = None)`
+- `NnHardSigmoidAST(value: ValueAST, alpha: ConstValueAST | SymbolDimAST | None, beta: ConstValueAST | SymbolDimAST | None, location: SourceLocation | None = None)`
 - `NnReduceAST(value: ValueAST, axis: SymbolDimAST | ConstValueAST | None = None, keepdim: BoolValueAST | None = None, location: SourceLocation | None = None)`
 - `NnReduceSumAST(value: ValueAST, axis: SymbolDimAST | ConstValueAST | None = None, keepdim: BoolValueAST | None = None, location: SourceLocation | None = None)` / `NnReduceMinAST(...)` / `NnReduceMaxAST(...)`
 - `NnSoftmaxAST(value: ValueAST, axis: SymbolDimAST | ConstValueAST | None = None, location: SourceLocation | None = None)`
@@ -171,6 +171,48 @@ def _static_int_from_symbol_expr(dim: SymbolExprAttr) -> int | None:
     expr = _symbol_expr_text(dim)
     signless = expr[1:] if expr.startswith("-") else expr
     return int(expr) if signless.isdecimal() else None
+
+
+def _static_int_from_dim_value(value: int | str | SymbolDim) -> int | None:
+    """读取 shape 维度值中的静态整数。
+
+    功能说明:
+    - 承接 `Memory.get_shape()` 返回 `SymbolDim(3)` 的公开形态。
+    - 对无法证明为静态整数的命名符号或 `?` 返回 None。
+
+    使用示例:
+    - value = _static_int_from_dim_value(SymbolDim(3))
+    """
+
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        signless = value[1:] if value.startswith("-") else value
+        return int(value) if signless.isdecimal() else None
+    public_value = value.get_value()
+    if isinstance(public_value, int):
+        return public_value
+    return None
+
+
+def _symbol_dim_public_value(value: int | str | SymbolDim) -> int | SymbolDim:
+    """把 shape 维度规整为 operation helper 可消费的公开值。
+
+    功能说明:
+    - 静态维度返回 `int`，动态维度返回 `SymbolDim`。
+    - 匿名 `?` 保持为 `SymbolDim("?")`，不得生成伪稳定符号。
+
+    使用示例:
+    - dim = _symbol_dim_public_value(SymbolDim("N"))
+    """
+
+    static_value = _static_int_from_dim_value(value)
+    if static_value is not None:
+        return static_value
+    if isinstance(value, SymbolDim):
+        public_value = value.get_value()
+        return SymbolDim(public_value)
+    return SymbolDim(value)
 
 
 def _parenthesize_symbol_expr(expr: str) -> str:
@@ -332,6 +374,20 @@ def _shape_values_from_memory_type(memory_type: NnMemoryType) -> list[int | str]
     return [_shape_value_from_type_dim(dim) for dim in memory_type.shape.data]
 
 
+def _memory_type_has_unknown_dim(memory_type: NnMemoryType) -> bool:
+    """判断 memory type shape 是否包含匿名 unknown 维度。
+
+    功能说明:
+    - 只读取公开 `NnMemoryType.shape` 中的 `SymbolExprAttr`。
+    - 用于组合 NN helper 在 unknown 输入下选择更保守的类型表达。
+
+    使用示例:
+    - has_unknown = _memory_type_has_unknown_dim(value.type)
+    """
+
+    return any(_symbol_expr_text(dim) == "?" for dim in memory_type.shape.data)
+
+
 def _img2col_output_shape_value(
     size: int | str | SymbolDim,
     kernel: int | SymbolDim,
@@ -360,38 +416,6 @@ def _img2col_output_shape_value(
     if isinstance(public_value, int):
         return public_value
     return _symbol_dim_from_expr_text(public_value)
-
-
-def _source_shape_values_for_transpose(source: SSAValue) -> list[int | str]:
-    """读取 transpose source 的类型级 shape 语义。
-
-    功能说明:
-    - `dma.reshape` source 优先从 shape operands 的公开类型读取维度。
-    - 其它 source 使用 `NnMemoryType.shape` 的公开 `SymbolExprAttr` 文本。
-    - 匿名 `?` 维度保持 `?`，不生成类型级占位符。
-
-    使用示例:
-    - dims = _source_shape_values_for_transpose(source)
-
-    关联文件:
-    - spec: spec/dsl/ast/nodes/nn.md
-    - test: test/dsl/ast/nodes/test_nn.py
-    - 功能实现: kernel_gen/dsl/ast/nodes/nn.py
-    """
-
-    owner = source.owner
-    if isinstance(owner, DmaReshapeOp) and owner.result is source:
-        return [
-            _shape_value_from_symbol_operand(SSAValue.get(operand), axis)
-            for axis, operand in enumerate(owner.shape)
-        ]
-    if not isinstance(source.type, NnMemoryType):
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "transpose value must lower to nn.memory")
-    shape_values: list[int | str] = []
-    for dim in source.type.shape.data:
-        dim_text = _symbol_expr_text(dim)
-        shape_values.append(dim_text)
-    return shape_values
 
 
 def _is_singleton_dim(dim: Attribute) -> bool:
@@ -452,11 +476,11 @@ def _shape_attr_from_value(value: int | str | SymbolDim) -> SymbolExprAttr:
 
 
 def _semantic_dim_value(label: str, fallback: int | SymbolDim) -> int | str:
-    """为匿名维度选择稳定的语义类型名。
+    """为 reshape 类型维度选择公开 shape 表达。
 
     功能说明:
     - 静态整数与已命名符号维度保持原值，避免改变可证明的 shape。
-    - 匿名 `?` 维度改写为调用点提供的语义标签。
+    - 匿名 `?` 维度保持 `?`，不得改写为伪语义标签。
 
     使用示例:
     - dim = _semantic_dim_value("conv_kernel_flat", SymbolDim("?"))
@@ -474,7 +498,7 @@ def _semantic_dim_value(label: str, fallback: int | SymbolDim) -> int | str:
         return public_value
     text = str(public_value)
     if text == "?":
-        return label
+        return "?"
     return text
 
 
@@ -1062,8 +1086,8 @@ class NnTransposeAST(ValueAST):
         perm_values = self._perm_values()
         result_memory = nn_ops.transpose(self.value.memory, perm_values)
         result_shape = [value.type.shape.data[axis] for axis in perm_values]
-        source_shape_values = _source_shape_values_for_transpose(value)
-        result_stride = _contiguous_stride_values([source_shape_values[axis] for axis in perm_values])
+        result_shape_values = [_shape_value_from_type_dim(dim) for dim in result_shape]
+        result_stride = _contiguous_stride_values(result_shape_values)
         result_type = _memory_type_from_shape_attrs_and_stride_values(
             ctx,
             result_memory,
@@ -1162,13 +1186,13 @@ class NnLeakyReluAST(ValueAST):
     """leaky_relu helper 专用注册节点。"""
 
     value: ValueAST
-    alpha: ValueAST
+    alpha: ValueAST | None
     location: SourceLocation | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.value, ValueAST):
             self.value = ConstValueAST(self.value, location=self.location)
-        if not isinstance(self.alpha, ValueAST):
+        if self.alpha is not None and not isinstance(self.alpha, ValueAST):
             self.alpha = ConstValueAST(self.alpha, location=self.location)
 
     def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
@@ -1184,6 +1208,9 @@ class NnLeakyReluAST(ValueAST):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "leaky_relu value must lower to nn.memory")
         if not isinstance(self.value, MemoryAST):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "leaky_relu value must be tensor argument")
+        if self.alpha is None:
+            nn_ops.leaky_relu(self.value.memory)
+            return NnLeakyReluOp(value, None, value.type, value.type.space)
         alpha_value = self.alpha.raw_value if isinstance(self.alpha, ConstValueAST) else self.alpha
         nn_ops.leaky_relu(self.value.memory, alpha=alpha_value)
         alpha_op = arith.ConstantOp(FloatAttr(float(alpha_value), f32))
@@ -1196,16 +1223,16 @@ class NnHardSigmoidAST(ValueAST):
     """hard_sigmoid helper 专用注册节点。"""
 
     value: ValueAST
-    alpha: ValueAST
-    beta: ValueAST
+    alpha: ValueAST | None
+    beta: ValueAST | None
     location: SourceLocation | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.value, ValueAST):
             self.value = ConstValueAST(self.value, location=self.location)
-        if not isinstance(self.alpha, ValueAST):
+        if self.alpha is not None and not isinstance(self.alpha, ValueAST):
             self.alpha = ConstValueAST(self.alpha, location=self.location)
-        if not isinstance(self.beta, ValueAST):
+        if self.beta is not None and not isinstance(self.beta, ValueAST):
             self.beta = ConstValueAST(self.beta, location=self.location)
 
     def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
@@ -1221,8 +1248,11 @@ class NnHardSigmoidAST(ValueAST):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "hard_sigmoid value must lower to nn.memory")
         if not isinstance(self.value, MemoryAST):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "hard_sigmoid value must be tensor argument")
-        alpha_value = self.alpha.raw_value if isinstance(self.alpha, ConstValueAST) else self.alpha
-        beta_value = self.beta.raw_value if isinstance(self.beta, ConstValueAST) else self.beta
+        if self.alpha is None and self.beta is None:
+            nn_ops.hard_sigmoid(self.value.memory)
+            return NnHardSigmoidOp(value, None, None, value.type, value.type.space)
+        alpha_value = 0.2 if self.alpha is None else self.alpha.raw_value if isinstance(self.alpha, ConstValueAST) else self.alpha
+        beta_value = 0.5 if self.beta is None else self.beta.raw_value if isinstance(self.beta, ConstValueAST) else self.beta
         nn_ops.hard_sigmoid(self.value.memory, alpha=alpha_value, beta=beta_value)
         alpha_op = arith.ConstantOp(FloatAttr(float(alpha_value), f32))
         beta_op = arith.ConstantOp(FloatAttr(float(beta_value), f32))
@@ -1698,12 +1728,26 @@ class FCAST(ValueAST):
         if not isinstance(self.value, MemoryAST) or not isinstance(self.weight, MemoryAST):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fc operands must be tensor arguments")
 
-        transpose_op = NnTransposeAST(self.weight, [ConstValueAST(1), ConstValueAST(0)], location=self.location).emit_mlir(ctx, block)
+        if not isinstance(value.type, NnMemoryType) or not isinstance(weight.type, NnMemoryType):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fc operands must be nn.memory")
+        transpose_memory = nn_ops.transpose(self.weight.memory, [1, 0])
+        if _memory_type_has_unknown_dim(value.type):
+            transpose_shape = [weight.type.shape.data[1], weight.type.shape.data[0]]
+            source_stride_values = [_shape_value_from_type_dim(stride) for stride in weight.type.stride.data]
+            transpose_type = _memory_type_from_shape_attrs_and_stride_values(
+                ctx,
+                transpose_memory,
+                transpose_shape,
+                [source_stride_values[1], source_stride_values[0]],
+                self.location,
+            )
+            transpose_op = NnTransposeOp(weight, transpose_type, [1, 0], transpose_type.space)
+        else:
+            transpose_op = NnTransposeAST(self.weight, [ConstValueAST(1), ConstValueAST(0)], location=self.location).emit_mlir(ctx, block)
         if not isinstance(transpose_op, Operation):
             raise KernelCodeError(ErrorKind.INTERNAL, ErrorModule.MLIR_GEN, "fc transpose must emit operation")
         block.add_op(transpose_op)
         transpose_value = transpose_op.results[0]
-        transpose_memory = nn_ops.transpose(self.weight.memory, [1, 0])
         try:
             result_memory = nn_ops.matmul(self.value.memory, transpose_memory)
         except KernelCodeError:
@@ -1778,8 +1822,9 @@ class ConvAST(ValueAST):
         param_values: dict[str, int | SymbolDim] = {}
         for name, axis in (("kh", 2), ("kw", 3)):
             dim = weight_dims[axis]
-            if isinstance(dim, int):
-                dim_op = SymbolConstOp(dim)
+            static_dim = _static_int_from_dim_value(dim)
+            if static_dim is not None:
+                dim_op = SymbolConstOp(static_dim)
             else:
                 dim_op = SymbolGetDimOp(weight, axis)
             block.add_op(dim_op)
@@ -1922,8 +1967,9 @@ class ConvAST(ValueAST):
         out_w_shape_value: int | SymbolDim = out_w_value if isinstance(out_w_value, int) else _symbol_dim_from_expr_text(out_w_value)
 
         c_out_dim = weight_dims[0]
-        if isinstance(c_out_dim, int):
-            c_out_weight_op = SymbolConstOp(c_out_dim)
+        c_out_static_dim = _static_int_from_dim_value(c_out_dim)
+        if c_out_static_dim is not None:
+            c_out_weight_op = SymbolConstOp(c_out_static_dim)
         else:
             c_out_weight_op = SymbolGetDimOp(weight, 0)
         block.add_op(c_out_weight_op)
@@ -1931,11 +1977,8 @@ class ConvAST(ValueAST):
         c_out_shape_value: int | SymbolDim = c_out_weight_value if isinstance(c_out_weight_value, int) else SymbolDim(c_out_weight_value)
 
         c_in_dim = weight_dims[1]
-        kernel_factor_values: list[int | SymbolDim] = [
-            c_in_dim if isinstance(c_in_dim, int) else SymbolDim(c_in_dim.get_value() if isinstance(c_in_dim, SymbolDim) else c_in_dim),
-            param_values["kh"],
-            param_values["kw"],
-        ]
+        c_in_shape_value = _symbol_dim_public_value(c_in_dim)
+        kernel_factor_values: list[int | SymbolDim] = [c_in_shape_value, param_values["kh"], param_values["kw"]]
         kernel_flat_symbol = SymbolDim(kernel_factor_values[0]) * kernel_factor_values[1] * kernel_factor_values[2]
         kernel_flat_public = kernel_flat_symbol.get_value()
         kernel_flat_shape_value: int | SymbolDim = kernel_flat_public if isinstance(kernel_flat_public, int) else SymbolDim(kernel_flat_public)
@@ -1944,8 +1987,9 @@ class ConvAST(ValueAST):
             block.add_op(kernel_flat_weight_op)
             kernel_flat_weight_value = kernel_flat_weight_op.results[0]
         else:
-            if isinstance(c_in_dim, int):
-                c_in_weight_op = SymbolConstOp(c_in_dim)
+            c_in_static_dim = _static_int_from_dim_value(c_in_dim)
+            if c_in_static_dim is not None:
+                c_in_weight_op = SymbolConstOp(c_in_static_dim)
             else:
                 c_in_weight_op = SymbolGetDimOp(weight, 1)
             block.add_op(c_in_weight_op)
@@ -1968,8 +2012,9 @@ class ConvAST(ValueAST):
             block.add_op(kernel_flat_img_op)
             kernel_flat_img_value = kernel_flat_img_op.results[0]
         else:
-            if isinstance(c_in_dim, int):
-                c_in_img_op = SymbolConstOp(c_in_dim)
+            c_in_static_dim = _static_int_from_dim_value(c_in_dim)
+            if c_in_static_dim is not None:
+                c_in_img_op = SymbolConstOp(c_in_static_dim)
             else:
                 c_in_img_op = SymbolGetDimOp(weight, 1)
             block.add_op(c_in_img_op)
@@ -2000,8 +2045,8 @@ class ConvAST(ValueAST):
         matmul_op = NnMatmulOp(weight_reshape_op.results[0], img_reshape_op.results[0], matmul_type, value.type.space)
         block.add_op(matmul_op)
 
-        if isinstance(c_out_dim, int):
-            c_out_final_op = SymbolConstOp(c_out_dim)
+        if c_out_static_dim is not None:
+            c_out_final_op = SymbolConstOp(c_out_static_dim)
         else:
             c_out_final_op = SymbolGetDimOp(weight, 0)
         block.add_op(c_out_final_op)

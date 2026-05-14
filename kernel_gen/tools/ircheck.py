@@ -72,6 +72,8 @@ from kernel_gen.passes.registry import (
     load_builtin_passes,
 )
 from kernel_gen.passes.pass_manager import PassManager
+from kernel_gen.dialect.symbol import SymbolExprAttr
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 CheckKind = Literal[
     "CHECK",
@@ -82,6 +84,7 @@ CASE_SEPARATOR = "// -----"
 _CHECK_TOKEN_PATTERN = re.compile(r"\[\[([A-Za-z_][A-Za-z0-9_]*)(?::(.*?))?\]\]")
 _REGEX_ALIAS_PATTERN = re.compile(r"\{(reg|val|dim|int)\}")
 _REGEX_UNPARSED_MARKERS = ("[[", "]]")
+_SYMBOL_EXPR_LITERAL_PATTERN = re.compile(r"#symbol\.expr<([^<>]*)>")
 _REGEX_ALIASES = {
     "reg": r"(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+)",
     "val": r"[A-Za-z_][A-Za-z0-9_]*",
@@ -421,7 +424,7 @@ def _compile_literal_fragment(literal: str) -> str:
     - 对未闭合或空 `{{...}}` 片段抛稳定解析错误。
     """
 
-    decoded = _decode_literal_check_fragment(literal)
+    decoded = _normalize_literal_symbol_exprs(_decode_literal_check_fragment(literal))
     pattern_parts: list[str] = []
     cursor = 0
     while True:
@@ -448,6 +451,60 @@ def _compile_literal_fragment(literal: str) -> str:
     return "".join(pattern_parts)
 
 
+def _normalize_literal_symbol_exprs(text: str) -> str:
+    """归一文本中的 `#symbol.expr<...>` 片段。
+
+    功能说明:
+    - CHECK 路径只处理普通 literal 片段，不触碰 `[[NAME:REGEX]]` 捕获或引用。
+    - actual IR 路径对打印后的 IR 做相同归一，使匹配两侧使用同一公开 symbol 语义。
+    - 将旧 expectation 中 `1 + N`、`1 * X` 这类等价表达规整为 `SymbolExprAttr` canonical 文本。
+    - 解析不了的表达保持原样，继续按普通字面量匹配失败。
+
+    使用示例:
+    - text = _normalize_literal_symbol_exprs("!symbol.int<#symbol.expr<1 + N>>")
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test: [test/tools/test_ircheck_matcher.py](test/tools/test_ircheck_matcher.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    return _SYMBOL_EXPR_LITERAL_PATTERN.sub(_normalize_symbol_expr_match, text)
+
+
+def _normalize_symbol_expr_match(match: re.Match[str]) -> str:
+    """归一单个 `#symbol.expr<...>` regex match。
+
+    功能说明:
+    - 优先使用 `SymbolDim` 公开语义处理 `//` 与代数项顺序。
+    - `SymbolDim` 无法解析的表达回退到 `SymbolExprAttr` canonical 文本。
+    - 两者都无法解析时保留原文本，继续由 ircheck 匹配失败报告差异。
+
+    使用示例:
+    - text = _normalize_symbol_expr_match(match)
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test: [test/tools/test_ircheck_matcher.py](test/tools/test_ircheck_matcher.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    expr = match.group(1).strip()
+    if not expr:
+        return match.group(0)
+    expr = expr.replace("//", " floordiv ")
+    expr = re.sub(r"(?<!/)/(?!/)", " floordiv ", expr)
+    try:
+        canonical_value = SymbolDim(expr.replace(" floordiv ", " // ")).get_value()
+        canonical = str(canonical_value).replace("//", " floordiv ")
+    except Exception:
+        try:
+            canonical = SymbolExprAttr.from_expr(expr).expr.data
+        except Exception:
+            return match.group(0)
+    return f"#symbol.expr<{canonical}>"
+
+
 def _expand_regex_aliases(regex_text: str) -> str:
     """展开 `[[NAME:REGEX]]` 中支持的内置 alias。
 
@@ -466,6 +523,31 @@ def _expand_regex_aliases(regex_text: str) -> str:
     """
 
     return _REGEX_ALIAS_PATTERN.sub(lambda match: _REGEX_ALIASES[match.group(1)], regex_text)
+
+
+def _normalize_capture_regex(regex_text: str) -> str:
+    """归一 `[[NAME:REGEX]]` 捕获片段中的兼容 regex 包裹。
+
+
+    功能说明:
+    - 允许捕获片段使用 FileCheck 风格的 `{{...}}` 包裹正则。
+    - 未使用 `{{...}}` 时保持原有 `REGEX` 语义不变。
+
+    使用示例:
+    - pattern = _normalize_capture_regex("{{[A-Za-z_][A-Za-z0-9_]*}}")
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test: [test/tools/test_ircheck_matcher.py](test/tools/test_ircheck_matcher.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    if regex_text.startswith("{{") and regex_text.endswith("}}"):
+        inner = regex_text[2:-2]
+        if not inner:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid regex check")
+        return inner
+    return regex_text
 
 
 def _validate_pattern_directive(text: str, kind: CheckKind, declared_variables: set[str]) -> list[str]:
@@ -511,7 +593,7 @@ def _validate_pattern_directive(text: str, kind: CheckKind, declared_variables: 
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: duplicate regex variable")
         visible_variables.add(name)
         new_definitions.append(name)
-        pattern_parts.append(f"(?P<{name}>{_expand_regex_aliases(payload)})")
+        pattern_parts.append(f"(?P<{name}>{_expand_regex_aliases(_normalize_capture_regex(payload))})")
 
     try:
         re.compile("".join(pattern_parts))
@@ -557,7 +639,7 @@ def _compile_pattern_directive(
 
         assert payload is not None
         local_definitions.append(name)
-        pattern_parts.append(f"(?P<{name}>{_expand_regex_aliases(payload)})")
+        pattern_parts.append(f"(?P<{name}>{_expand_regex_aliases(_normalize_capture_regex(payload))})")
 
     return re.compile("".join(pattern_parts)), local_definitions
 
@@ -1439,6 +1521,7 @@ def _normalize_ir(value: Operation) -> str:
                 continue
             lines[idx] = re.sub(r"#builtin\.int<(-?\d+)>", r"\1", line)
         text = "\n".join(lines)
+    text = _normalize_literal_symbol_exprs(text)
     return text
 
 

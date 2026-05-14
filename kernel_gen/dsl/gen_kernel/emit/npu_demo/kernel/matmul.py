@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from kernel_gen.dialect.kernel import KernelMatmulOp
 
+from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
 
 
@@ -57,9 +58,9 @@ def _emit_npu_demo_kernel_matmul(op: KernelMatmulOp, ctx) -> str:
     lhs_space = ctx.dispatch_attr(lhs_value.type)
     rhs_space = ctx.dispatch_attr(rhs_value.type)
     out_space = ctx.dispatch_attr(out_value.type)
-    lhs_type = ctx.dispatch_type(lhs_value.type.element_type)
-    rhs_type = ctx.dispatch_type(rhs_value.type.element_type)
-    out_type = ctx.dispatch_type(out_value.type.element_type)
+    lhs_type = memory_element_cpp_type(lhs_value.type, ctx)
+    rhs_type = memory_element_cpp_type(rhs_value.type, ctx)
+    out_type = memory_element_cpp_type(out_value.type, ctx)
     return (
         f"{ctx.current_indent}matmul<{lhs_space}, {rhs_space}, {out_space}, "
         f"{lhs_type}, {rhs_type}, {out_type}>({out_expr} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"

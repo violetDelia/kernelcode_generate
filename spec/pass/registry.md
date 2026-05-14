@@ -71,7 +71,8 @@
   - `attach-arch-information`：把 target registry 的 launch extent 写回入口 `func.func`。
   - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前。
   - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 pytest 与工具层统一解析。
-- tuning pass `launch-kernel-cost-func` 既可通过 pass registry 显式启用，也作为 `npu-demo-lowering` 的末尾 pass 运行；不自动进入 `default-lowering`。
+  - `template-name-infer`：npu-demo lowering 末尾的非语义 template name 注解 pass。
+- tuning pass `launch-kernel-cost-func` 可通过 pass registry 显式启用，但不自动进入 `default-lowering` 或 `npu-demo-lowering`。
 - `launch-kernel-cost-func` 默认 `cost_kind="DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2"`，并接受该七值集合的去重子集，例如 `options={"cost_kind": "DMA1|MAC|VECTOR1"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
 - `lower-dma-memory-hierarchy` 接受 pass 专属 `options={"apply_op": "matmul{[\\"\\", \\"tlm1\\", \\"tlm2\\"]}"}`；registry 只负责透传该 option，规则语法与错误语义由 `LowerDmaMemoryHierarchyPass.from_options(...)` 承载。
 - `memory-pool` 接受 pass 专属 `options={"rewrite": "true|false", "alignment": "<non-negative-int>"}`；`fold` 仍由 registry 通用 option 处理。`rewrite` 非 bool、`alignment` 负数或非整数、未知 option 必须由 `MemoryPoolPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'memory-pool' option error: <原因>`。
@@ -93,6 +94,7 @@
   - `kernel_gen.passes.outline_device_kernel`
   - `kernel_gen.passes.symbol_buffer_hoist`
   - `kernel_gen.passes.symbol_loop_hoist`
+  - `kernel_gen.passes.template_name_infer`
 - 对当前仍存活的 compat / family caller，当前基线仍允许继续导入，但不承诺永久保留：
   - `kernel_gen.passes.lowering`
   - `kernel_gen.passes.lowering.buffer_results_to_out_params`
@@ -117,6 +119,7 @@
   - `kernel_gen.passes.lowering.tile_elewise`
   - `kernel_gen.passes.lowering.tile_reduce`
 - 已退场的 analysis family 不再提供公开 pass 名或 registry 构造入口；`build_registered_pass("analyze-func-cost")` 必须显式失败。
+- 当前模板名推导专题的 canonical public path 固定为 `kernel_gen.passes.template_name_infer`；`kernel_gen.passes.TemplateNameInferPass` 作为包根 re-export 保持可用。
 - 机械验收口径：
   - `test/passes/test_registry.py` 负责锁定 canonical public path、`symbol-buffer-hoist` 的稳定注册名与包根 re-export、旧路径失败边界、`analyze-func-cost` 构造失败与 registry caller 的 `importlib` 消费者矩阵。
   - `test/passes/test_pass_manager.py` 负责锁定 pass manager / pipeline caller 的 `importlib` 消费者矩阵。

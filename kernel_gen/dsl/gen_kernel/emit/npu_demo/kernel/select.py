@@ -21,6 +21,7 @@ from __future__ import annotations
 from kernel_gen.dialect.kernel import KernelSelectOp
 from kernel_gen.dialect.nn import NnMemoryType
 
+from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
 
 
@@ -62,8 +63,8 @@ def _emit_npu_demo_kernel_select(op: KernelSelectOp, ctx) -> str:
     ):
         raise ctx.emit_error(op.name, "unsupported op")
     return (
-        f"{ctx.current_indent}select<{ctx.dispatch_attr(out_value.type)}, {ctx.dispatch_type(lhs_value.type.element_type)}, "
-        f"{ctx.dispatch_type(out_value.type.element_type)}>"
+        f"{ctx.current_indent}select<{ctx.dispatch_attr(out_value.type)}, {memory_element_cpp_type(lhs_value.type, ctx)}, "
+        f"{memory_element_cpp_type(out_value.type, ctx)}>"
         f"({emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(cond_value, ctx)} /*cond*/, "
         f"{emit_c_value(lhs_value, ctx)} /*lhs*/, {emit_c_value(rhs_value, ctx)} /*rhs*/);"
     )

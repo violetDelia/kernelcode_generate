@@ -51,7 +51,7 @@ from xdsl.ir import Operation, SSAValue
 
 from kernel_gen.dialect.arch import ArchBarrierOp, ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp, ArchLaunchOp
 from kernel_gen.dialect.dma import DmaCastOp, DmaReshapeOp, DmaViewOp
-from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType, copy_memory_type, memory_template_name
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolValueType
 from kernel_gen.core.config import restore_config, set_target, snapshot_config
 from kernel_gen.target import registry as target_registry
@@ -217,6 +217,74 @@ class KernelEmitter:
 
     def _error(self, func_name: str, reason: str) -> KernelCodeError:
         return self.ctx.emit_error(f"func {func_name}", reason)
+
+    def _template_names_from_types(self, types: list[Any]) -> list[str]:
+        """收集函数签名中的 memory template name。
+
+        功能说明:
+        - 按签名出现顺序去重，生成 C++ template 参数列表。
+        - 仅消费 `NnMemoryType.template_name`，未命名 memory 不参与模板头生成。
+
+        使用示例:
+        - names = self._template_names_from_types(input_types)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel/gen_kernel.md
+        - test: test/dsl/gen_kernel/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
+        """
+
+        names: list[str] = []
+        for attr in types:
+            if not isinstance(attr, NnMemoryType):
+                continue
+            template_name = memory_template_name(attr)
+            if template_name is not None and template_name not in names:
+                names.append(template_name)
+        return names
+
+    def _template_prefix_from_types(self, types: list[Any]) -> str:
+        """生成函数模板头文本。
+
+        功能说明:
+        - 对含 template-name memory 的函数生成 `template <typename ...>` 前缀。
+        - 无 template name 时返回空字符串。
+
+        使用示例:
+        - prefix = self._template_prefix_from_types(input_types)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel/gen_kernel.md
+        - test: test/dsl/gen_kernel/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
+        """
+
+        names = self._template_names_from_types(types)
+        if not names:
+            return ""
+        params = ", ".join(f"typename {name}" for name in names)
+        return f"template <{params}>\n"
+
+    def _template_call_name(self, func_name: str, types: list[Any]) -> str:
+        """生成带模板实参的函数名。
+
+        功能说明:
+        - wrapper 调用 templated device body 时显式传递同名 template 参数。
+        - 无 template name 时返回原函数名。
+
+        使用示例:
+        - callee = self._template_call_name("body", input_types)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel/gen_kernel.md
+        - test: test/dsl/gen_kernel/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
+        """
+
+        names = self._template_names_from_types(types)
+        if not names:
+            return func_name
+        return f"{func_name}<{', '.join(names)}>"
 
     def _arg_names(self, func_op: func.FuncOp) -> list[str]:
         names: list[str] = []
@@ -559,7 +627,7 @@ class KernelEmitter:
         launch_op = wrapper_ops[0]
         if len(input_types) != len(body_input_types) or result_types:
             raise self._error(func_name, "unsupported npu_demo launch wrapper signature")
-        if input_types != body_input_types:
+        if not self._same_launch_signature_without_template_names(input_types, body_input_types):
             raise self._error(func_name, "npu_demo launch wrapper signature must match body inputs")
 
         expected_block, expected_thread, expected_subthread, expected_shared_memory_size = self._expected_npu_demo_launch_extents()
@@ -587,6 +655,28 @@ class KernelEmitter:
             if wrapper_arg is not launch_arg:
                 raise self._error(func_name, "npu_demo launch wrapper args must forward wrapper signature")
         return body_input_types, body_arg_offset
+
+    def _same_launch_signature_without_template_names(self, lhs_types: list[Any], rhs_types: list[Any]) -> bool:
+        """比较 launch wrapper/body 的基础签名。
+
+        功能说明:
+        - `template_name` 是 EmitC annotation，不参与 wrapper 与 body 的基础 ABI 匹配。
+        - memory 参数比较前用公开 `copy_memory_type(...)` 清除 template name，其它参数按原类型比较。
+
+        使用示例:
+        - if self._same_launch_signature_without_template_names(wrapper_types, body_types): ...
+        """
+
+        if len(lhs_types) != len(rhs_types):
+            return False
+        for lhs_type, rhs_type in zip(lhs_types, rhs_types, strict=True):
+            if isinstance(lhs_type, NnMemoryType) and isinstance(rhs_type, NnMemoryType):
+                if copy_memory_type(lhs_type) != copy_memory_type(rhs_type):
+                    return False
+                continue
+            if lhs_type != rhs_type:
+                return False
+        return True
 
     def _emit_npu_demo_launch_body_function(self, func_op: func.FuncOp) -> str:
         """生成 npu_demo launch body 函数源码。
@@ -720,7 +810,8 @@ class KernelEmitter:
                 continue
         if len(params) != len(body_input_types):
             raise self._error(func_name, "unsupported npu_demo launch body signature")
-        return f"static void {func_name}({', '.join(params)})"
+        template_prefix = self._template_prefix_from_types(body_input_types)
+        return f"{template_prefix}static void {func_name}({', '.join(params)})"
 
     def _emit_npu_demo_launch_wrapper_function(self, wrapper_func: func.FuncOp, body_func: func.FuncOp) -> str:
         """生成 npu_demo wrapper 函数源码。
@@ -742,7 +833,7 @@ class KernelEmitter:
         - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
         """
 
-        self._validate_npu_demo_launch_wrapper_signature(wrapper_func, body_func)
+        body_input_types, _body_arg_offset = self._validate_npu_demo_launch_wrapper_signature(wrapper_func, body_func)
         arg_names = self._arg_names(wrapper_func)
         launch_op = self._filtered_launch_ops(wrapper_func)[0]
         block_extent, thread_extent, subthread_extent, shared_memory_size_extent = self._launch_extents_from_wrapper(
@@ -752,14 +843,15 @@ class KernelEmitter:
         params: list[str] = []
         for index, (arg_name, arg_type) in enumerate(zip(arg_names, wrapper_func.function_type.inputs.data, strict=True)):
             if isinstance(arg_type, NnMemoryType):
-                params.append(f"{self._signature_type_to_c(arg_type)}& {arg_name}")
+                params.append(self._normalize_memory_stmt(f"{self._type_to_c(arg_type)}& {arg_name}"))
                 continue
             if isinstance(arg_type, SymbolValueType):
                 params.append(f"{self._signature_type_to_c(arg_type)} {arg_name}")
                 continue
         if len(params) != len(wrapper_func.function_type.inputs.data):
             raise self._error(wrapper_func.sym_name.data, "unsupported npu_demo launch wrapper signature")
-        signature = f"void {wrapper_func.sym_name.data}({', '.join(params)})"
+        template_prefix = self._template_prefix_from_types(list(wrapper_func.function_type.inputs.data))
+        signature = f"{template_prefix}void {wrapper_func.sym_name.data}({', '.join(params)})"
         self.ctx.push_indent()
         extent_names: list[str] = []
         extent_lines: list[str] = []
@@ -769,10 +861,11 @@ class KernelEmitter:
             extent_lines.append(f"{self.ctx.current_indent}constexpr S_INT {extent_name} = {extent};")
         block_name, thread_name, subthread_name, shared_memory_size_name = extent_names
         call_args = ", ".join(arg_names)
+        body_callee = self._template_call_name(body_func.sym_name.data, body_input_types)
         launch_line = (
-            f"{self.ctx.current_indent}npu_demo::launch<{block_name}, {thread_name}, {subthread_name}, {shared_memory_size_name}>({body_func.sym_name.data}, {call_args});"
+            f"{self.ctx.current_indent}npu_demo::launch<{block_name}, {thread_name}, {subthread_name}, {shared_memory_size_name}>({body_callee}, {call_args});"
             if call_args
-            else f"{self.ctx.current_indent}npu_demo::launch<{block_name}, {thread_name}, {subthread_name}, {shared_memory_size_name}>({body_func.sym_name.data});"
+            else f"{self.ctx.current_indent}npu_demo::launch<{block_name}, {thread_name}, {subthread_name}, {shared_memory_size_name}>({body_callee});"
         )
         body = "\n".join([*extent_lines, launch_line])
         self.ctx.pop_indent()
@@ -813,9 +906,11 @@ class KernelEmitter:
         for arg_name, arg_value in zip(arg_names, func_op.args, strict=True):
             self.ctx.bind_name(arg_value, arg_name)
         source_name = self.ctx.lookup_name(func_op.args[1]) or arg_names[1]
+        source_type_text = self._normalize_memory_stmt(f"{self._type_to_c(source_type)}& {source_name}")
+        out_type_text = self._normalize_memory_stmt(f"{self._type_to_c(out_type)}& out")
         return (
-            f"void {func_op.sym_name.data}({self._signature_type_to_c(source_type)}& {source_name}, "
-            f"{self._signature_type_to_c(out_type)}& out)"
+            f"{self._template_prefix_from_types([source_type, out_type])}void {func_op.sym_name.data}({source_type_text}, "
+            f"{out_type_text})"
         )
 
     def _emit_npu_demo_body_level_kernel_body(self, func_op: func.FuncOp) -> str:
@@ -929,7 +1024,8 @@ class KernelEmitter:
         if result_types:
             return_type = self._type_to_c(result_types[0])
 
-        return f"{return_type} {func_name}({', '.join(params)})"
+        template_prefix = self._template_prefix_from_types([*input_types, *result_types])
+        return f"{template_prefix}{return_type} {func_name}({', '.join(params)})"
 
     def _bind_rewritten_out_result(self, func_op: func.FuncOp, op: Operation) -> None:
         """把 rewrite 后仍保留 memory result 的 DMA op 绑定到首个 out 参数。

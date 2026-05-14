@@ -59,6 +59,10 @@
 - entry shim 仅作为内部桥接逻辑：源码未提供同名 `extern "C"` 入口时，内部生成稳定 C ABI 入口；源码已提供同名入口时可省略。
 - `ordered_args` 是内部 ABI 槽位，不作为 Python 公开 API；执行侧只接收 `tuple[RuntimeInput, ...]` 运行时参数。
 - `target="npu_demo"` entry shim 的函数形参解析必须把 `S_INT` 视为整数标量参数槽位，与 `int` / `long` / `int64_t` 等整型形参按同一 `ordered_args` 顺序绑定。
+- `target="npu_demo"` entry shim 解析到 `template <typename Tn>` 与 `Memory<Space, Tn>&` 形参时，内部 `_ArgSlot` 必须携带 runtime dtype code，并根据源码中 concrete `Memory<..., dtype>` 的 dtype 生成唯一 concrete `Memory<Space, dtype>` 绑定后调用 `function<dtype...>(...)`。
+- 若手写 templated source 只有 `Memory<Space, Tn>&` 形参而缺少任何 concrete `Memory<..., dtype>` 实例线索，`ExecutionEngine.compile(...)` 必须以 `template_instance_required` 稳定失败；不得默认实例化为 `float`。
+- 该 template shim 不新增 `TemplateBinding`、`template_bindings` 或其它公开 compile 参数；runtime dtype 必须匹配该唯一 concrete 实例，非匹配 dtype 必须由 entry shim 返回失败码，不生成全组合 dispatcher。
+- 非 templated memory 参数继续按源码中的真实 dtype 绑定；template name 不得用于 memory size、shape、stride、cast 或 alignment 判定。
 - 编译器启动失败、返回非零或编译命令无法生成可执行产物时，必须失败并返回 `compile_failed`。
 - `entry_point` 或导出符号无法解析时，必须失败并返回 `symbol_resolve_failed`。
 - `ordered_args` 数量或顺序与目标函数形参不一致导致执行失败时，必须返回 `runtime_throw_or_abort`。

@@ -71,6 +71,10 @@ from kernel_gen.dialect import (
     NnTrueDivOp,
 )
 from kernel_gen.dialect.nn import (
+    copy_memory_type,
+    copy_memory_type_with_template_name,
+    has_memory_template_name,
+    memory_template_name,
     NnCastOp,
     NnDivOp,
     NnExpOp,
@@ -248,6 +252,52 @@ def test_memory_type_round_trip() -> None:
         assert isinstance(memory_type, NnMemoryType)
         memory_type.verify()
         assert _print_ir(memory_type) == text
+
+
+def test_memory_type_template_name_round_trip_and_helpers() -> None:
+    """验证 `NnMemoryType.template_name` 文本与 helper 公开合同。"""
+
+    ctx = _build_context()
+    text = "!nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<global>, template = T1>"
+    memory_type = Parser(ctx, text).parse_attribute()
+    assert isinstance(memory_type, NnMemoryType)
+    memory_type.verify()
+    assert _print_ir(memory_type) == text
+    assert memory_template_name(memory_type) == "T1"
+    assert has_memory_template_name(memory_type) is True
+
+    cleared = copy_memory_type(memory_type)
+    assert memory_template_name(cleared) is None
+    assert _print_ir(cleared) == "!nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<global>>"
+
+    restored = copy_memory_type_with_template_name(cleared, StringAttr("T2"))
+    assert memory_template_name(restored) == "T2"
+    assert _print_ir(restored).endswith(", template = T2>")
+
+
+@pytest.mark.parametrize("template_name", ["1T", "T 1", "<T1>", ""])
+def test_memory_type_rejects_invalid_template_name(template_name: str) -> None:
+    """验证 template_name 非法文本按 verifier 合同失败。"""
+
+    if template_name == "":
+        memory_type = NnMemoryType(
+            ArrayAttr([_expr_attr("M")]),
+            ArrayAttr([_expr_attr(1)]),
+            i32,
+            _make_space("global"),
+            template_name=template_name,
+        )
+        memory_type.verify()
+        assert memory_template_name(memory_type) is None
+        return
+    with pytest.raises(VerifyException, match="template_name must be an identifier"):
+        NnMemoryType(
+            ArrayAttr([_expr_attr("M")]),
+            ArrayAttr([_expr_attr(1)]),
+            i32,
+            _make_space("global"),
+            template_name=template_name,
+        )
 
 
 # TY-002

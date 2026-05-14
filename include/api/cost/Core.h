@@ -8,6 +8,7 @@
 API 列表:
 - `namespace npu_demo::cost`
 - `enum class npu_demo::cost::CostKind { DMA1, DMA2, DMA3, DMA4, MAC, VECTOR1, VECTOR2 }`
+- `inline constexpr npu_demo::cost::CostKind npu_demo::DMA`
 - `inline constexpr npu_demo::cost::CostKind npu_demo::DMA1`
 - `inline constexpr npu_demo::cost::CostKind npu_demo::DMA2`
 - `inline constexpr npu_demo::cost::CostKind npu_demo::DMA3`
@@ -42,7 +43,7 @@ namespace cost {
 /*
 功能说明:
 - 定义当前公开的成本统计视角。
-- `DMA1` 对应 GM -> TSM/TLM 方向；`DMA2` 对应 TSM/TLM -> GM 方向。
+- `DMA` 兼容旧合同，当前透传为 `DMA1` 语义；`DMA1` 对应 GM -> TSM/TLM 方向；`DMA2` 对应 TSM/TLM -> GM 方向。
 - `DMA3` 对应 TSM -> TLM、img2col 与 transpose；`DMA4` 对应 TSM -> TSM 与同类 transpose。
 - `MAC` 对应 matmul；`VECTOR1` 对应当前非 matmul kernel op；`VECTOR2` 当前保留为 0。
 
@@ -83,6 +84,7 @@ enum class CostKind {
 - test: test/include/api/cost.py
 - 功能实现: include/npu_demo/cost/Core.h
 */
+inline constexpr cost::CostKind DMA = cost::CostKind::DMA1;
 inline constexpr cost::CostKind DMA1 = cost::CostKind::DMA1;
 inline constexpr cost::CostKind DMA2 = cost::CostKind::DMA2;
 inline constexpr cost::CostKind DMA3 = cost::CostKind::DMA3;

@@ -37,6 +37,7 @@ from pathlib import Path
 import re
 from typing import Protocol, TypeAlias
 
+from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp
 
@@ -60,9 +61,9 @@ TENSOR_ARG_TYPE_ERROR = "DslRunUnsupportedRealArg: real_args only supports torch
 TILE_VALUE_ERROR = "DslRunInvalidTileValue: tile runtime scalar must be positive int"
 ARITY_ERROR = "DslRunArityMismatch: real_args count does not match function signature"
 NPU_DEMO_WRAPPER_ERROR = "DslRunInternalError: lowered npu_demo module must contain exactly one wrapper func with arch.launch"
-VALID_DSL_COST_KINDS = ("DMA1", "DMA2", "DMA3", "DMA4", "MAC", "VECTOR1", "VECTOR2")
-DMA_DSL_COST_KINDS = ("DMA1", "DMA2", "DMA3", "DMA4")
-DSL_COST_KIND_ERROR = "DslCostRunInvalidCostKind: cost_kind must be one of [DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2]"
+VALID_DSL_COST_KINDS = ("DMA", "MAC", "DMA1", "DMA2", "DMA3", "DMA4", "VECTOR1", "VECTOR2")
+DMA_DSL_COST_KINDS = ("DMA", "DMA1", "DMA2", "DMA3", "DMA4")
+DSL_COST_KIND_ERROR = "DslCostRunInvalidCostKind: cost_kind must be one of ['DMA', 'MAC']"
 DSL_COST_TARGET_ERROR = "DslCostRunInvalidTarget: dsl_cost_run only supports target 'npu_demo'"
 DSL_COST_OUTPUT_ERROR = "DslCostRunExecutionFailed: cost wrapper execution failed"
 DMA_COST_RAW_HELPER_SOURCE = r"""
@@ -804,8 +805,8 @@ def _validate_dsl_cost_kind(cost_kind: str) -> None:
 
 
     功能说明:
-    - 只接受计划确认的 `DMA1/DMA2/DMA3/DMA4/MAC/VECTOR1/VECTOR2` 七类 kind。
-    - 不把旧 `compute/memory/DMA` 或任意 open-kind 继续作为执行入口合同。
+    - 接受 npu_demo 七类 kind，并兼容历史 `DMA/MAC` 工具合同。
+    - 仍拒绝组合字符串，避免 `dsl_cost_run(...)` 一次请求多个 sibling。
 
     使用示例:
     - _validate_dsl_cost_kind("VECTOR1")
@@ -818,6 +819,36 @@ def _validate_dsl_cost_kind(cost_kind: str) -> None:
 
     if cost_kind not in VALID_DSL_COST_KINDS:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, DSL_COST_KIND_ERROR)
+
+
+def _append_cost_pass_for_named_npu_demo_pipeline(
+    pipeline: str | PassManager,
+    module: ModuleOp,
+    cost_kind: str,
+) -> ModuleOp:
+    """为命名 npu-demo pipeline 追加 cost sibling 生成 pass。
+
+
+    功能说明:
+    - `npu-demo-lowering` 正向 pipeline 不默认携带成本 sibling。
+    - `dsl_cost_run(...)` 使用该命名 pipeline 时，按公开 `LaunchKernelCostFuncPass` 补生成请求的 cost kind。
+    - 调用方显式传入 `PassManager` 时不追加，保留缺 sibling 必须失败的公开边界。
+
+    使用示例:
+    - lowered = _append_cost_pass_for_named_npu_demo_pipeline("npu-demo-lowering", lowered, "DMA1")
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_cost_run.py](test/tools/test_dsl_cost_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    if pipeline != "npu-demo-lowering":
+        return module
+    from kernel_gen.passes.tuning import LaunchKernelCostFuncPass
+
+    LaunchKernelCostFuncPass(cost_kind=cost_kind).apply(Context(), module)
+    return module
 
 
 def _find_cost_func_by_sym_name(module: ModuleOp, sym_name: str) -> func.FuncOp:
@@ -930,6 +961,29 @@ def _cpp_param_name(param_text: str) -> str:
     return match.group(1)
 
 
+def _nearest_template_header(source: str, function_start: int) -> str:
+    """读取函数声明前紧邻的 C++ template header。
+
+
+    功能说明:
+    - cost sibling 在 template-name-infer 后可能是 `template <typename Tn>` 函数。
+    - 捕获 wrapper 必须复用同一个 template header，才能由执行引擎按真实 runtime dtype 实例化。
+    - 非 templated cost function 返回空字符串。
+
+    使用示例:
+    - header = _nearest_template_header(source, match.start())
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_cost_run.py](test/tools/test_dsl_cost_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    prefix = source[:function_start].rstrip()
+    match = re.search(r"(template\s*<[^>]+>)\s*$", prefix)
+    return "" if match is None else f"{match.group(1)}\n"
+
+
 def _insert_dma_cost_raw_helpers(source: str) -> str:
     """向生成源码插入 `dsl_cost_run(...)` 专用 DMA raw-bytes helper。
 
@@ -1016,6 +1070,7 @@ def _append_cost_capture_wrapper(source: str, cost_entry_name: str, cost_kind: s
             f"DslCostRunMissingCostFunction: cost function '{cost_entry_name}' not found in generated source",
         )
     params = _split_cpp_params(match.group("params"))
+    template_header = _nearest_template_header(source, match.start())
     param_names = tuple(_cpp_param_name(param) for param in params)
     wrapper_name = f"_kg_capture_{_sanitize_dump_component(cost_entry_name)}"
     params_text = ", ".join((*params, "Memory<GM, S_INT>& __kg_cost_output"))
@@ -1033,6 +1088,7 @@ def _append_cost_capture_wrapper(source: str, cost_entry_name: str, cost_kind: s
         )
     suffix = (
         "\n"
+        f"{template_header}"
         f"void {wrapper_name}({params_text}) {{\n"
         f"{body}"
         "#ifdef TRANCE\n"
@@ -1067,11 +1123,20 @@ def _select_source_and_cost_entry(
 
     if _emitc_target_name(emit_context) != "npu_demo":
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, DSL_COST_TARGET_ERROR)
-    source, body_entry_name, body_func = _select_source_and_entry(module, emit_context)
+    func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
+    wrapper_candidates = [
+        func_op
+        for func_op in func_ops
+        if any(item.name == "arch.launch" for item in func_op.body.block.ops)
+    ]
+    if len(wrapper_candidates) != 1:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, NPU_DEMO_WRAPPER_ERROR)
+    wrapper_func = wrapper_candidates[0]
+    wrapper_launch = next(item for item in wrapper_func.body.block.ops if item.name == "arch.launch")
+    body_entry_name = wrapper_launch.callee.root_reference.data
     cost_entry_name = f"_cost_{cost_kind}_{body_entry_name}"
     cost_func = _find_cost_func_by_sym_name(module, cost_entry_name)
-    _ = body_func
-    return source, cost_entry_name, cost_func
+    return gen_kernel(module, emit_context), cost_entry_name, cost_func
 
 
 @dataclass(frozen=True)
@@ -1237,6 +1302,7 @@ def dsl_cost_run(
     lowered_module = _run_pipeline_with_optional_dump(resolved_pipeline, module, dump_kernel_dir)
     if not isinstance(lowered_module, ModuleOp):
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "DslRunInternalError: pipeline must return builtin.module")
+    lowered_module = _append_cost_pass_for_named_npu_demo_pipeline(pipeline, lowered_module, cost_kind)
 
     source_snapshot = snapshot_config()
     try:

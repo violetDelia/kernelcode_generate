@@ -185,3 +185,58 @@ def test_run_ircheck_text_supports_variable_capture_and_reuse() -> None:
     )
     assert result.ok is True
     assert result.message is None
+
+
+# TC-IRCHECK-MATCH-007
+# 测试目的: 验证公开入口支持 `[[NAME:{{REGEX}}]]` FileCheck 风格捕获正则。
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 示例: pytest -q test/tools/test_ircheck_matcher.py -k test_run_ircheck_text_supports_filecheck_wrapped_capture_regex
+def test_run_ircheck_text_supports_filecheck_wrapped_capture_regex() -> None:
+    result = run_ircheck_text(
+        _ircheck_case(
+            checks=[
+                '// CHECK: "test.first"() {name = "[[NAME:{{[A-Za-z_][A-Za-z0-9_]*}}]]"} : () -> ()',
+                '// CHECK-NEXT: "test.second"() {name = "[[NAME]]"} : () -> ()',
+            ],
+            input_ir=(
+                "builtin.module {\n"
+                '  "test.first"() {name = "TAlpha"} : () -> ()\n'
+                '  "test.second"() {name = "TAlpha"} : () -> ()\n'
+                "}"
+            ),
+        ),
+        source_path="inline.ircheck",
+    )
+    assert result.ok is True
+    assert result.message is None
+
+
+# TC-IRCHECK-MATCH-008
+# 测试目的: 验证公开入口按 SymbolExprAttr canonical 语义匹配 literal 中的旧符号表达文本。
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 示例: pytest -q test/tools/test_ircheck_matcher.py -k test_run_ircheck_text_matches_canonical_symbol_expr_literals
+def test_run_ircheck_text_matches_canonical_symbol_expr_literals() -> None:
+    result = run_ircheck_text(
+        _ircheck_case(
+            checks=[
+                "// CHECK: %[[VAL:{reg}]] = symbol.add %[[ONE:{reg}]], %[[ARG:{reg}]] : !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<1 + N>>",
+                "// CHECK-NEXT: %[[DIV:{reg}]] = symbol.floordiv %[[VAL]], %[[ARG]] : !symbol.int<#symbol.expr<1 + N>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<(1 + N) // N>>",
+                "// CHECK-NEXT: func.return %[[DIV]] : !symbol.int<#symbol.expr<(1 + N) // N>>",
+            ],
+            input_ir=(
+                "builtin.module {\n"
+                "  func.func @main(%arg0 : !symbol.int<#symbol.expr<N>>) -> !symbol.int<#symbol.expr<(N + 1) floordiv N>> {\n"
+                "    %0 = symbol.const 1 : !symbol.int<#symbol.expr<1>>\n"
+                "    %1 = symbol.add %0, %arg0 : !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<N + 1>>\n"
+                "    %2 = symbol.floordiv %1, %arg0 : !symbol.int<#symbol.expr<N + 1>>, !symbol.int<#symbol.expr<N>> -> !symbol.int<#symbol.expr<(N + 1) floordiv N>>\n"
+                "    func.return %2 : !symbol.int<#symbol.expr<(N + 1) floordiv N>>\n"
+                "  }\n"
+                "}"
+            ),
+        ),
+        source_path="inline.ircheck",
+    )
+    assert result.ok is True
+    assert result.message is None

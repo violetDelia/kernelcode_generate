@@ -21,6 +21,7 @@ from __future__ import annotations
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnMemoryType
 
+from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
 
 
@@ -74,8 +75,8 @@ def _emit_npu_demo_kernel_binary_elewise(op: KernelBinaryElewiseOp, ctx) -> str:
     lhs_expr = emit_c_value(lhs_value, ctx)
     rhs_expr = emit_c_value(rhs_value, ctx)
     space_expr = ctx.dispatch_attr(out_value.type)
-    input_type = ctx.dispatch_type(lhs_value.type.element_type)
-    output_type = ctx.dispatch_type(out_value.type.element_type)
+    input_type = memory_element_cpp_type(lhs_value.type, ctx)
+    output_type = memory_element_cpp_type(out_value.type, ctx)
     return (
         f"{ctx.current_indent}{helper_name}<{space_expr}, {input_type}, {output_type}>"
         f"({out_expr} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"

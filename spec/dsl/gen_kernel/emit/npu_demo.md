@@ -42,11 +42,12 @@
 ### 模块级补充
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
-- 本模块不额外公开 API。
+- 本模块不额外公开 package 级 API；`type/` 子目录单独公开 `memory_element_cpp_type(...)`。
 - 目录中的实现只通过上层 `emit` 注册体系生效。
 - 每个可发射 op 必须独占一个实现文件，路径形态固定为 `emit/npu_demo/<dialect>/<op>.py`。
 - 不得再新增 `ops.py`、`values.py`、`core.py`、`function.py`、`module.py` 这类聚合多个 op 行为的 target 大文件。
 - 非公开 helper 必须使用 `_` 前缀，且不得跨文件直接调用。
+- target-specific memory dtype 文本输出只能复用 `spec/dsl/gen_kernel/emit/npu_demo/type/__init__.md` 中的公开 helper，不得在 arch/dma/kernel/nn/tuner 子目录重复定义同名 helper。
 
 ## API详细说明
 

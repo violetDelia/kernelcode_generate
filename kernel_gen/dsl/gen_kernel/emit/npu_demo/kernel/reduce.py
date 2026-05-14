@@ -23,6 +23,7 @@ from __future__ import annotations
 from kernel_gen.dialect.kernel import KernelReduceMinOp, KernelReduceOp
 from kernel_gen.dialect.nn import NnMemoryType
 
+from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
 
 
@@ -62,8 +63,8 @@ def _emit_npu_demo_kernel_reduce(op: KernelReduceOp, ctx) -> str:
     if helper_name is None:
         raise ctx.emit_error(op.name, f"unsupported kind={op.kind.data}")
     return (
-        f"{ctx.current_indent}{helper_name}<{ctx.dispatch_attr(out_value.type)}, {ctx.dispatch_type(input_value.type.element_type)}, "
-        f"{ctx.dispatch_type(out_value.type.element_type)}>"
+        f"{ctx.current_indent}{helper_name}<{ctx.dispatch_attr(out_value.type)}, {memory_element_cpp_type(input_value.type, ctx)}, "
+        f"{memory_element_cpp_type(out_value.type, ctx)}>"
         f"({emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(input_value, ctx)} /*input*/, {op.axis.value.data} /*axis*/);"
     )
 
@@ -96,7 +97,7 @@ def _emit_npu_demo_kernel_reduce_min(op: KernelReduceMinOp, ctx) -> str:
     if not isinstance(input_value.type, NnMemoryType) or not isinstance(out_value.type, NnMemoryType):
         raise ctx.emit_error(op.name, "unsupported op")
     return (
-        f"{ctx.current_indent}reduce_min<{ctx.dispatch_attr(out_value.type)}, {ctx.dispatch_type(input_value.type.element_type)}, "
-        f"{ctx.dispatch_type(out_value.type.element_type)}>"
+        f"{ctx.current_indent}reduce_min<{ctx.dispatch_attr(out_value.type)}, {memory_element_cpp_type(input_value.type, ctx)}, "
+        f"{memory_element_cpp_type(out_value.type, ctx)}>"
         f"({emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(input_value, ctx)} /*input*/, {op.axis.value.data} /*axis*/);"
     )

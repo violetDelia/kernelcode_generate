@@ -1,10 +1,11 @@
 /*
 功能说明:
 - 提供 include/api/cost/Core.h 的 npu_demo 默认承接层。
-- 当前只复用公共 `CostKind` 与 `S_INT`，并承接 `DMA1/DMA2/DMA3/DMA4/MAC/VECTOR1/VECTOR2` 七个公开 kind 别名。
+- 当前只复用公共 `CostKind` 与 `S_INT`，并承接 `DMA/DMA1/DMA2/DMA3/DMA4/MAC/VECTOR1/VECTOR2` kind 别名。
 
 API 列表:
 - `enum class npu_demo::cost::CostKind { DMA1, DMA2, DMA3, DMA4, MAC, VECTOR1, VECTOR2 }`
+- `inline constexpr npu_demo::cost::CostKind npu_demo::DMA`
 - `inline constexpr npu_demo::cost::CostKind npu_demo::DMA1`
 - `inline constexpr npu_demo::cost::CostKind npu_demo::DMA2`
 - `inline constexpr npu_demo::cost::CostKind npu_demo::DMA3`

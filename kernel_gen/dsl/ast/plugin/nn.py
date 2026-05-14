@@ -60,7 +60,6 @@ from kernel_gen.dsl.ast.plugin.registry import BuiltinCall, dsl_builtin
 from kernel_gen.operation import nn
 from kernel_gen.symbol_variable.memory import MemorySpace
 
-
 @dsl_builtin(nn.add, NnAddAST)
 def _build_add(node: BuiltinCall) -> NnAddAST:
     """功能说明: 构造 nn.add AST；使用示例: registry 调用该 builder。"""
@@ -218,10 +217,11 @@ def _build_leaky_relu(node: BuiltinCall) -> NnLeakyReluAST:
     args = node.args
     kwargs = node.kwargs
     location = node.location
-    if "beta" in kwargs or len(args) > 2 or (len(args) == 2 and "alpha" in kwargs) or (len(args) == 1 and "alpha" not in kwargs):
+    if "beta" in kwargs or len(args) < 1 or len(args) > 2 or (len(args) == 2 and "alpha" in kwargs):
         diagnostic = Diagnostic("Unsupported leaky_relu arity", location)
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
-    return NnLeakyReluAST(args[0], kwargs.get("alpha", args[1] if len(args) > 1 else None), location=location)
+    alpha = kwargs.get("alpha", args[1] if len(args) > 1 else None)
+    return NnLeakyReluAST(args[0], alpha, location=location)
 
 
 @dsl_builtin(nn.hard_sigmoid, NnHardSigmoidAST)
@@ -232,15 +232,17 @@ def _build_hard_sigmoid(node: BuiltinCall) -> NnHardSigmoidAST:
     kwargs = node.kwargs
     location = node.location
     if (
-        len(args) > 3
-        or "alpha" not in kwargs and len(args) < 2
-        or "beta" not in kwargs and len(args) < 3
+        len(args) < 1
+        or set(kwargs) - {"alpha", "beta"}
+        or len(args) > 3
         or (len(args) >= 2 and "alpha" in kwargs)
         or (len(args) >= 3 and "beta" in kwargs)
     ):
         diagnostic = Diagnostic("Unsupported hard_sigmoid arity", location)
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
-    return NnHardSigmoidAST(args[0], kwargs.get("alpha", args[1] if len(args) > 1 else None), kwargs.get("beta", args[2] if len(args) > 2 else None), location=location)
+    alpha = kwargs.get("alpha", args[1] if len(args) > 1 else None)
+    beta = kwargs.get("beta", args[2] if len(args) > 2 else None)
+    return NnHardSigmoidAST(args[0], alpha, beta, location=location)
 
 
 @dsl_builtin(nn.reduce_sum, NnReduceSumAST)

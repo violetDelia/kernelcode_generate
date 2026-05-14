@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from kernel_gen.dialect.dma import DmaViewOp
 
+from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
 
 
@@ -40,7 +41,7 @@ def _emit_npu_demo_dma_view(op: DmaViewOp, ctx) -> str:
     source_expr = emit_c_value(op.source, ctx)
     result_name = ctx.create_or_get_name(op.result)
     result_type = ctx.dispatch_type(op.result.type)
-    element_type = ctx.dispatch_type(op.result.type.element_type)
+    element_type = memory_element_cpp_type(op.result.type, ctx)
     offset_expr = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in op.offsets) + "}"
     size_expr = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in op.shape) + "}"
     stride_expr = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in op.stride) + "}"

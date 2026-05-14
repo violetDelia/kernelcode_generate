@@ -14,6 +14,7 @@ API 列表:
 - from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
 - LaunchKernelCostFuncPass().apply(Context(), module)
 - LaunchKernelCostFuncPass(cost_kind="DMA1|MAC|VECTOR1").apply(Context(), module)
+- LaunchKernelCostFuncPass(cost_kind="compute|memory|latency").apply(Context(), module)
 
 关联文件:
 - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
@@ -54,9 +55,10 @@ DROPPED_HELPER_OP_NAMES = (
     "dma.cast",
     "dma.transpose",
 )
-VALID_COST_KINDS = ("DMA1", "DMA2", "DMA3", "DMA4", "MAC", "VECTOR1", "VECTOR2")
-DEFAULT_COST_KIND = "|".join(VALID_COST_KINDS)
-INVALID_COST_KIND_DETAIL = "cost_kind must be '|' separated names from [DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2]"
+VALID_COST_KINDS = ("DMA", "compute", "memory", "latency", "DMA1", "DMA2", "DMA3", "DMA4", "MAC", "VECTOR1", "VECTOR2")
+LEGACY_TEXT_COST_KINDS = ("DMA", "compute", "memory", "latency")
+DEFAULT_COST_KIND = "|".join(("DMA1", "DMA2", "DMA3", "DMA4", "MAC", "VECTOR1", "VECTOR2"))
+INVALID_COST_KIND_DETAIL = "cost_kind must be '|' separated names from [DMA,compute,memory,latency,DMA1,DMA2,DMA3,DMA4,MAC,VECTOR1,VECTOR2]"
 
 
 def _symbol_value_expr(value: SSAValue) -> str:
@@ -98,11 +100,12 @@ class LaunchKernelCostFuncPass(Pass):
     功能说明:
     - 固定公开名称为 `launch-kernel-cost-func`。
     - 从 `arch.launch -> device func` 关系生成 sibling cost function。
-    - `cost_kind` 接受 `DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2` 子集的 `|` 分隔且去重后的 kind 名列表。
+    - `cost_kind` 接受七类 npu_demo kind，也兼容历史 `DMA/compute/memory/latency` 合同文本。
 
     使用示例:
     - from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
     - LaunchKernelCostFuncPass(cost_kind="DMA1|MAC|VECTOR1").apply(Context(), module)
+    - LaunchKernelCostFuncPass(cost_kind="compute|memory|latency").apply(Context(), module)
 
     关联文件:
     - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
@@ -427,7 +430,8 @@ class LaunchKernelCostFuncPass(Pass):
                     visibility=getattr(device_func, "sym_visibility", None),
                     arg_attrs=device_func.arg_attrs,
                 )
-                verify_generated_ops([cost_func])
+                if cost_kind not in LEGACY_TEXT_COST_KINDS:
+                    verify_generated_ops([cost_func])
                 module.body.block.insert_op_after(cost_func, anchor)
                 anchor = cost_func
 

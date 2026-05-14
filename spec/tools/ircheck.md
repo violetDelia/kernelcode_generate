@@ -73,6 +73,8 @@
   - `--help` 或 `-h` 单独出现时必须输出帮助文本并返回 `0`；帮助输出不得以 `true` / `false` 开头。
   - 只支持 `CHECK:`、`CHECK-NEXT:`、`CHECK-NOT:` 三条检查指令。
   - 普通文本按字面量匹配；regex 能力只允许出现在局部变量片段 `[[NAME:REGEX]]` 和引用片段 `[[NAME]]`。
+  - `[[NAME:REGEX]]` 允许使用 FileCheck 风格 `[[NAME:{{REGEX}}]]` 包裹写法，语义等价于 `[[NAME:REGEX]]`。
+  - 普通文本中的 `#symbol.expr<...>` 会按 `SymbolExprAttr` canonical 语义归一后匹配，兼容 `1 + N` 与 `N + 1`、`1 * X` 与 `X`、`//` 与 `floordiv` 这类等价文本差异。
   - `CHECK-NEXT:` 不能作为第一条正向检查。
   - `CHECK-NOT:` 不能定义新变量，只能引用前面已绑定的变量。
   - 多 case 只支持 `// -----` 分隔，按顺序执行并在首个失败处停止。

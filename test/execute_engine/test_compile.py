@@ -423,6 +423,47 @@ def test_execute_engine_compile_target_include_and_entry_shim_matrix(
         kernel.close()
 
 
+def test_execute_engine_compile_rejects_template_memory_without_concrete_dtype() -> None:
+    """验证手写 templated Memory 函数缺实例信息时稳定失败。"""
+
+    source = "template <typename T1>\nvoid templated_kernel(Memory<GM, T1>& arg0) {}\n"
+    with pytest.raises(KernelCodeError) as exc:
+        ExecutionEngine(target="npu_demo").compile(source=source, function="templated_kernel")
+
+    assert exc.value.failure_phrase == "template_instance_required"
+
+
+def test_execute_engine_compile_template_shim_uses_nearest_wrapper_template_header() -> None:
+    """验证前置 templated helper 声明不会遮蔽目标 wrapper 的模板参数。"""
+
+    source = """
+template <typename T1>
+static void templated_kernel_device(Memory<GM, T1>& arg0);
+
+static void template_instance_seed(Memory<GM, int32_t>& value) {
+    (void)value;
+}
+
+template <typename T1>
+void templated_kernel(Memory<MemorySpace::GM, T1>& arg0) {
+    templated_kernel_device<T1>(arg0);
+}
+
+template <typename T1>
+static void templated_kernel_device(Memory<GM, T1>& arg0) {
+    (void)arg0;
+}
+"""
+    kernel = ExecutionEngine(target="npu_demo").compile(source=source, function="templated_kernel")
+    try:
+        unit = (Path(kernel.soname_path).parent / "kernel.cpp").read_text(encoding="utf-8")
+        assert "Memory<MemorySpace::GM, int32_t> arg0(" in unit
+        assert "templated_kernel<int32_t>(arg0);" in unit
+        assert "Memory<MemorySpace::GM, T1> arg0(" not in unit
+    finally:
+        kernel.close()
+
+
 # EE-TGT-006/007
 # 功能说明: 覆盖 compile 公开失败短语矩阵。
 # 使用示例: pytest -q test/execute_engine/test_compile.py -k "failure_phrase_matrix"

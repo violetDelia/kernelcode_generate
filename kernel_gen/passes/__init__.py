@@ -10,6 +10,7 @@
 - 暴露 `outline-device-kernel` 的公开入口。
 - 暴露 `symbol-buffer-hoist` 的公开入口与 pattern API。
 - 暴露 `symbol-loop-hoist` 专题 pass 的根路径入口。
+- 暴露 `template-name-infer` 的公开入口。
 - 暴露 `tile-analysis` 的公开入口与 pattern API。
 - 暴露 `tile-elewise` 的公开入口与 pattern API。
 - 暴露 `tile-reduce` 的公开入口与 pattern API。
@@ -47,6 +48,7 @@ API 列表:
 - `class TileReducePass()`
 - `get_tile_reduce_pass_patterns() -> list[RewritePattern]`
 - `class SymbolLoopHoistPass()`
+- `class TemplateNameInferPass(fold: bool = True)`
 
 使用示例:
 - import importlib
@@ -71,6 +73,8 @@ API 列表:
 - tile_reduce_pass = TileReducePass()
 - from kernel_gen.passes import SymbolLoopHoistPass
 - hoist_pass = SymbolLoopHoistPass()
+- from kernel_gen.passes import TemplateNameInferPass
+- infer_pass = TemplateNameInferPass()
 
 关联文件:
 - spec:
@@ -101,6 +105,7 @@ API 列表:
   - kernel_gen/passes/decompass.py
 - kernel_gen/passes/outline_device_kernel.py
 - kernel_gen/passes/symbol_buffer_hoist.py
+- kernel_gen/passes/template_name_infer.py
   - kernel_gen/passes/tile/analysis.py
   - kernel_gen/passes/tile/elewise.py
   - kernel_gen/passes/tile/reduce.py
@@ -144,6 +149,7 @@ from .tile.reduce import TileReducePass
 from .tile.reduce import TileReduceMatmulPattern, get_tile_reduce_pass_patterns
 from .pass_manager import Pass, PassManager
 from .symbol_loop_hoist import SymbolLoopHoistPass
+from .template_name_infer import TemplateNameInferPass
 
 __all__ = [
     "Pass",
@@ -175,4 +181,5 @@ __all__ = [
     "TileReducePass",
     "get_tile_reduce_pass_patterns",
     "SymbolLoopHoistPass",
+    "TemplateNameInferPass",
 ]
