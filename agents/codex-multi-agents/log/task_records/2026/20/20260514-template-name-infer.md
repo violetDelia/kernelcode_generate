@@ -520,3 +520,20 @@ Diff 反推审查：
 - review 与双架构终验记录齐全，merge 前 latest main 同步与指定 gate 均通过。
 - 最小阻断项：无。
 - 下一步：提交任务 diff 与本记录，推送 `origin/main` 后执行 `-done`，并按合并职责清理完成 worktree / branch。
+
+### Merge 完成回写
+
+时间：2026-05-14 15:00 +0800
+
+- 业务合并提交：`eb651b667c998f7178d49173b89314f5e9d80b70`。
+- 推送结果：`git push origin HEAD:main` 成功，`origin/main` 从 `8903aa829416e778be1de9516c1c5bd9453c0686` 更新到 `eb651b667c998f7178d49173b89314f5e9d80b70`。
+- 主仓同步：主仓已 `git merge --ff-only origin/main`，当前 `HEAD=eb651b667c998f7178d49173b89314f5e9d80b70`。
+- `-done`：
+  - 命令：`bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260514-7733a1c8 -log agents/codex-multi-agents/log/task_records/2026/20/20260514-template-name-infer.md -agents-list agents/codex-multi-agents/agents-lists.md`
+  - 结果：`OK: done T-20260514-7733a1c8`，`OK: replace 李白 状态`。
+- worktree / branch 清理：
+  - `git -C /home/lfr/kernelcode_generate/wt-20260514-template-name-infer status --short --untracked-files=all`：空。
+  - `git worktree remove /home/lfr/kernelcode_generate/wt-20260514-template-name-infer`：成功。
+  - `git branch -d task/template-name-infer`：成功，删除分支 `task/template-name-infer`，原提交 `eb651b66`。
+  - 当前 `git worktree list --porcelain` 仍显示历史无关 prunable 项 `/home/lfr/kernelcode_generate/wt-20260512-symbol-iter-token-arith-expectation-sync`，本任务未触碰该非当前任务残留。
+- 最终结论：T-20260514-7733a1c8 已完成 merge / push / `-done`；未合入未授权 `expectation/` 或 `.skills` 改动。
