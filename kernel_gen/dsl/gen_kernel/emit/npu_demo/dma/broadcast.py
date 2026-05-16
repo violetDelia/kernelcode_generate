@@ -23,8 +23,25 @@ from __future__ import annotations
 from kernel_gen.dialect.dma import DmaBroadcastOp
 from kernel_gen.dialect.nn import NnMemoryType
 
-from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
+
+
+def _memory_element_cpp_type(memory_type: NnMemoryType, ctx) -> str:
+    """返回当前文件发射 dma.broadcast 所需的 C++ element type。
+
+    功能说明:
+    - 优先使用 `NnMemoryType.template_name` 作为模板 dtype。
+    - 未携带 template name 时通过 `ctx.dispatch_type(...)` 发射真实 element type。
+
+    使用示例:
+    - element_type = _memory_element_cpp_type(memory_type, ctx)
+    """
+
+    memory_type.verify()
+    template_name = memory_type.template_name.data
+    if template_name:
+        return template_name
+    return ctx.dispatch_type(memory_type.element_type)
 
 
 @emit_c_impl(DmaBroadcastOp, target="npu_demo")
@@ -50,7 +67,7 @@ def _emit_npu_demo_dma_broadcast(op: DmaBroadcastOp, ctx) -> str:
     if not isinstance(op.target.type, NnMemoryType):
         raise ctx.emit_error(op.name, "unsupported op")
     dst_expr = emit_c_value(op.target, ctx)
-    target_type = memory_element_cpp_type(op.target.type, ctx)
+    target_type = _memory_element_cpp_type(op.target.type, ctx)
     if not isinstance(op.source.type, NnMemoryType):
         value_expr = emit_c_value(op.source, ctx)
         if value_expr == "inf":
@@ -65,6 +82,6 @@ def _emit_npu_demo_dma_broadcast(op: DmaBroadcastOp, ctx) -> str:
     src_expr = emit_c_value(op.source, ctx)
     return (
         f"{ctx.current_indent}broadcast<{ctx.dispatch_attr(op.target.type)}, {ctx.dispatch_attr(op.source.type)}, "
-        f"{target_type}, {memory_element_cpp_type(op.source.type, ctx)}>"
+        f"{target_type}, {_memory_element_cpp_type(op.source.type, ctx)}>"
         f"({dst_expr} /*dst*/, {src_expr} /*source*/);"
     )

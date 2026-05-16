@@ -9,8 +9,6 @@
 API 列表:
 - `class NnMemorySpaceAttr(space: StringAttr)`
 - `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr, template_name: StringAttr | str | None = None)`
-- `memory_template_name(memory_type: NnMemoryType) -> str | None`
-- `has_memory_template_name(memory_type: NnMemoryType) -> bool`
 - `copy_memory_type(memory_type: NnMemoryType, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
 - `copy_memory_type_with_template_name(memory_type: NnMemoryType, template_name: str | StringAttr, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
 - `class NnAddOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
@@ -472,8 +470,8 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
         printer.print_attribute(self.element_type)
         printer.print_string(", ")
         printer.print_attribute(self.space)
-        template_name = memory_template_name(self)
-        if template_name is not None:
+        template_name = self.template_name.data
+        if template_name:
             printer.print_string(", template = ")
             printer.print_string(template_name)
         printer.print_string(">")
@@ -499,46 +497,6 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
         for dim in self.stride.data:
             _verify_dim_entry(dim, "stride")
         _verify_template_name_text(self.template_name.data)
-
-
-def memory_template_name(memory_type: NnMemoryType) -> str | None:
-    """读取 memory type 的 template name。
-
-    功能说明:
-    - 返回 `NnMemoryType.template_name` 的非空文本。
-    - 未携带 template name 时返回 `None`，避免调用方依赖空字符串作为公开语义。
-
-    使用示例:
-    - assert memory_template_name(mem_type) in {None, "T1"}
-
-    关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn.py
-    - 功能实现: kernel_gen/dialect/nn.py
-    """
-
-    memory_type.verify()
-    name = memory_type.template_name.data
-    return name if name else None
-
-
-def has_memory_template_name(memory_type: NnMemoryType) -> bool:
-    """判断 memory type 是否携带 template name。
-
-    功能说明:
-    - 通过公开 `memory_template_name(...)` 读取状态。
-    - 不暴露 `StringAttr("")` 这一内部无模板编码。
-
-    使用示例:
-    - assert has_memory_template_name(mem_type) is False
-
-    关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn.py
-    - 功能实现: kernel_gen/dialect/nn.py
-    """
-
-    return memory_template_name(memory_type) is not None
 
 
 def copy_memory_type(
@@ -3176,8 +3134,6 @@ __all__ = [
     "NnMatmulOp",
     "NnMemorySpaceAttr",
     "NnMemoryType",
-    "memory_template_name",
-    "has_memory_template_name",
     "copy_memory_type",
     "copy_memory_type_with_template_name",
 ]

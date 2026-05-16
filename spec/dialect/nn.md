@@ -8,8 +8,6 @@
 
 - `class NnMemorySpaceAttr(space: StringAttr)`
 - `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr, template_name: StringAttr | str | None = None)`
-- `memory_template_name(memory_type: NnMemoryType) -> str | None`
-- `has_memory_template_name(memory_type: NnMemoryType) -> bool`
 - `copy_memory_type(memory_type: NnMemoryType, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
 - `copy_memory_type_with_template_name(memory_type: NnMemoryType, template_name: str | StringAttr, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
 - `class NnAddOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
@@ -85,8 +83,7 @@
 - `NnMemoryType.space` 与各 op 的 `space` attribute 必须使用同一语义口径。
 - `NnMemoryType` 中 `shape` 与 `stride` 的 rank 必须一致；每一维必须由 `SymbolExprAttr` 承载，表达式可表示静态整数、符号或 `?`。
 - `NnMemoryType.template_name` 是可选字段；文本 IR 使用 `, template = T1` 形式，省略表示无 template name。合法 template name 必须匹配 `[A-Za-z_][A-Za-z0-9_]*`，`<T1>`、空白、数字开头或带空格文本必须拒绝。
-- `memory_template_name(...)` 返回非空 template name；未携带 template name 时返回 `None`。
-- `has_memory_template_name(...)` 仅是 `memory_template_name(...) is not None` 的公开谓词。
+- `memory_template_name(...)` 与 `has_memory_template_name(...)` 已删除，不再作为公开 API、包根导出或测试合同。迁移方式：调用方读取公开 `NnMemoryType.template_name.data`；空字符串表示未携带 template name，非空字符串表示 template name。
 - `copy_memory_type(...)` 复制 `shape/stride/element_type/space` 并清除 template name，避免新 buffer 派生时泄漏旧 template family。
 - `copy_memory_type_with_template_name(...)` 复制 memory type 并写入合法 template name；非法 template name 必须按 `NnMemoryType.verify()` 失败。
 - `shape` 中的 `?` 表示动态维度；`stride` 中的 `?` 不允许与同位置 `shape` 中的 `?` 直接成对出现。
@@ -132,19 +129,7 @@
   nn_memory_type = NnMemoryType(shape=shape, stride=stride, element_type=element_type, space=space, template_name="T1")
   ```
 - 功能说明：构造 `NnMemoryType` 实例。
-- 注意事项：构造参数必须符合本条目参数说明；`shape/stride` 只公开 `ArrayAttr[SymbolExprAttr]`，raw `IntAttr/StringAttr` 或其它 `Attribute` 容器不是公开兼容入口；`template_name` 只接受裸 identifier，不接受尖括号模板实参文本；实例内部缓存、状态字典和派生字段不作为外部可变入口。
-
-### `memory_template_name(memory_type: NnMemoryType) -> str | None`
-
-- api：`memory_template_name(memory_type: NnMemoryType) -> str | None`
-- 功能说明：读取 memory type 的非空 template name；未携带时返回 `None`。
-- 注意事项：输入必须是合法 `NnMemoryType`；非法 template name 不得被吞掉。
-
-### `has_memory_template_name(memory_type: NnMemoryType) -> bool`
-
-- api：`has_memory_template_name(memory_type: NnMemoryType) -> bool`
-- 功能说明：判断 memory type 是否携带非空 template name。
-- 注意事项：该接口等价于 `memory_template_name(memory_type) is not None`，不暴露内部空字符串编码。
+- 注意事项：构造参数必须符合本条目参数说明；`shape/stride` 只公开 `ArrayAttr[SymbolExprAttr]`，raw `IntAttr/StringAttr` 或其它 `Attribute` 容器不是公开兼容入口；`template_name` 只接受裸 identifier，不接受尖括号模板实参文本；实例内部缓存、状态字典和派生字段不作为外部可变入口；`memory_template_name(...)` / `has_memory_template_name(...)` 已删除，读取 template name 时使用 `memory_type.template_name.data`。
 
 ### `copy_memory_type(memory_type: NnMemoryType, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
 

@@ -5,7 +5,7 @@
 - 提供 `npu-demo-lowering` pipeline 的 builder。
 - 固定 `dsl_run` 的 npu_demo 正向链路为
   `InlinePass -> CommonSubexpressionElimination -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> CommonSubexpressionElimination -> TileAnalysisPass -> LowerDmaMemoryHierarchyPass -> SymbolBufferHoistPass -> MemoryPoolPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
-- 默认 `MemoryPoolPass` 仅执行 summary 模式，template-name infer 在 outline 后写回 wrapper/body memory type 的 template name。
+- 默认 `MemoryPoolPass` 执行 dynamic backing 改写，template-name infer 在 outline 后写回 wrapper/body memory type 的 template name。
 - 通过 registry 装饰器完成 pipeline 注册。
 
 API 列表:
@@ -58,7 +58,8 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
       dsl_run 的最小 npu_demo 正向合同。
     - `SymbolBufferHoistPass` 位于 `TileAnalysisPass` 之后，用于把 loop 内安全 `dma.alloc`
       外提到 loop 之前。
-    - `MemoryPoolPass` 固定以 `rewrite=False, alignment=1024` 运行，只记录 summary，不默认改写片上 `dma.alloc`。
+    - `MemoryPoolPass` 固定以 `rewrite=True, alignment=0` 运行，将片上 `dma.alloc` 改写为
+      `arch.get_dynamic_memory + dma.view + dma.reshape`。
     - `TemplateNameInferPass` 位于 pipeline 最后，为 host wrapper 与 device body 的 `nn.memory`
       签名写入 template name。
     - 仅允许 `target` 选项；当前默认 target 为 `npu_demo`，`only-kernel` 等历史选项必须显式失败。
@@ -92,7 +93,7 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     pm.add_pass(TileAnalysisPass())
     pm.add_pass(LowerDmaMemoryHierarchyPass(fold=True, apply_op='matmul{["", "tlm1", "tlm2"]}'))
     pm.add_pass(SymbolBufferHoistPass())
-    pm.add_pass(MemoryPoolPass(rewrite=False, alignment=1024))
+    pm.add_pass(MemoryPoolPass(rewrite=True, alignment=0))
     pm.add_pass(AttachArchInformationPass(target=target))
     pm.add_pass(OutlineDeviceKernelPass())
     pm.add_pass(TemplateNameInferPass())

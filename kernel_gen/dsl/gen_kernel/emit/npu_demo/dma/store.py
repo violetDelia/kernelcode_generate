@@ -27,19 +27,22 @@ from kernel_gen.dialect.symbol import SymbolConstOp
 from ...register import emit_c_impl
 
 
-def _actual_memory_element_cpp_type(memory_type, ctx) -> str:
-    """返回 memory 的真实 C++ element type。
+def _memory_element_cpp_type(memory_type, ctx) -> str:
+    """返回 memory 的 C++ element type。
 
     功能说明:
-    - `dma.store` 写回真实 runtime memory，dtype 校验与 concrete shim 线索必须来自 `element_type`。
-    - 仅供当前文件内部发射 concrete store helper 使用，不作为跨文件公开 API。
+    - 优先使用 `NnMemoryType.template_name` 发射模板 dtype。
+    - 未携带 template name 时回退到 `element_type` 的 concrete C++ 类型。
 
     使用示例:
-    - dtype = _actual_memory_element_cpp_type(op.target.type, ctx)
+    - dtype = _memory_element_cpp_type(op.target.type, ctx)
     """
 
-    element_type = memory_type.element_type
-    return ctx.dispatch_type(element_type)
+    memory_type.verify()
+    template_name = memory_type.template_name.data
+    if template_name:
+        return template_name
+    return ctx.dispatch_type(memory_type.element_type)
 
 
 @emit_c_impl(DmaStoreOp, target="npu_demo")
@@ -84,7 +87,7 @@ def _emit_npu_demo_dma_store(op: DmaStoreOp, ctx) -> str:
     offset_expr, size_expr, stride_expr = layout_exprs
     return (
         f"{ctx.current_indent}store<{ctx.dispatch_attr(op.target.type)}, {ctx.dispatch_attr(op.source.type)}, "
-        f"{_actual_memory_element_cpp_type(op.target.type, ctx)}, {_actual_memory_element_cpp_type(op.source.type, ctx)}>"
+        f"{_memory_element_cpp_type(op.target.type, ctx)}, {_memory_element_cpp_type(op.source.type, ctx)}>"
         f"({target_expr} /*dst*/, {source_expr} /*source*/, {offset_expr} /*offset*/, "
         f"{size_expr} /*size*/, {stride_expr} /*stride*/);"
     )

@@ -39,7 +39,7 @@ from typing import Literal, TypeAlias
 from xdsl.ir import Operation, SSAValue
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
-from kernel_gen.dialect.nn import NnMemoryType, memory_template_name
+from kernel_gen.dialect.nn import NnMemoryType
 
 
 @dataclass(frozen=True)
@@ -258,8 +258,9 @@ class TemplateNameGraph:
         explicit_names: dict[SSAValue, set[str]] = {}
         for value in self._order:
             root = self._find(parent, value)
-            explicit_name = memory_template_name(value.type)
-            if explicit_name is None:
+            value.type.verify()
+            explicit_name = value.type.template_name.data
+            if not explicit_name:
                 continue
             explicit_names.setdefault(root, set()).add(explicit_name)
 

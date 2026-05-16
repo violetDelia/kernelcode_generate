@@ -260,7 +260,7 @@ def _make_memory_type(
     )
 
 
-def test_gen_kernel_emits_template_header_for_npu_demo_memory_template_name() -> None:
+def test_gen_kernel_emits_template_header_for_npu_demo_memory_template_field() -> None:
     """验证 npu_demo 函数签名按 memory template_name 生成 C++ template。"""
 
     mem_type = NnMemoryType(
@@ -275,6 +275,7 @@ def test_gen_kernel_emits_template_header_for_npu_demo_memory_template_name() ->
     func_op = func.FuncOp("copy_kernel", FunctionType.from_lists([mem_type, mem_type], []), Region(block))
     set_target("npu_demo")
     source = gen_kernel(func_op, EmitCContext())
+    assert "using __kernel_gen_template_instance_seed_copy_kernel__T1 = Memory<MemorySpace::GM, int32_t>;" in source
     assert "template <typename T1>\nvoid copy_kernel(Memory<GM, T1>& arg0, Memory<GM, T1>& arg1)" in source
     assert "slice(arg0 /*dst*/, arg1 /*source*/" in source
 

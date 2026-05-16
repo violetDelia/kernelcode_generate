@@ -42,10 +42,10 @@ from typing import ClassVar, TypeAlias
 from xdsl.context import Context
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import ArrayAttr, BFloat16Type, Float16Type, Float32Type, Float64Type, FloatAttr, IntegerType, i1
-from xdsl.ir import Block, Operation, SSAValue
+from xdsl.ir import Attribute, Block, Operation, SSAValue
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaViewOp
-from kernel_gen.dialect.nn import NnMemoryType
+from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolDivOp, SymbolExprAttr, SymbolFloorDivOp, SymbolGetDimOp, SymbolIterType, SymbolMulOp, SymbolSubOp, SymbolValueType
 from kernel_gen.operation import dma
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
@@ -148,7 +148,7 @@ def _runtime_value_from_symbol_expr(value: int | str | SymbolDim) -> int | str |
     if isinstance(value, SymbolDim):
         return value
     if "iter<" in value:
-        return value.replace(" ", "")
+        return value.strip()
     return _symbol_dim_from_expr_text(value)
 
 
@@ -255,6 +255,43 @@ def _validate_write_slice_contract(
         last_index = offset_int + (size_int - 1) * stride_int
         if last_index >= target_dim:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, f"{op_name} index out of bounds")
+
+
+def _validate_view_contract(
+    source_type: NnMemoryType,
+    offsets: list[int | str | SymbolDim],
+    sizes: list[int | str | SymbolDim],
+    strides: list[int | str | SymbolDim],
+) -> None:
+    """校验 `dma.view` DSL 构造期公开合同。
+
+    功能说明:
+    - 校验 rank、非负 offset、正 size、正 stride。
+    - 在 source shape 与 view 参数均为静态整数时提前拒绝越界 region。
+
+    使用示例:
+    - _validate_view_contract(source_type, [0], [4], [1])
+    """
+
+    rank = len(source_type.shape.data)
+    if len(offsets) != rank or len(sizes) != rank or len(strides) != rank:
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "view index rank mismatch")
+    source_static = [_static_int_from_symbol_expr(dim) for dim in source_type.shape.data]
+    for source_dim, offset, size, stride in zip(source_static, offsets, sizes, strides, strict=True):
+        offset_int = _runtime_value_static_int(offset)
+        size_int = _runtime_value_static_int(size)
+        stride_int = _runtime_value_static_int(stride)
+        if offset_int is not None and offset_int < 0:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Invalid offset")
+        if size_int is not None and size_int <= 0:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Invalid size")
+        if stride_int is not None and stride_int <= 0:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Invalid stride")
+        if source_dim is None or offset_int is None or size_int is None or stride_int is None:
+            continue
+        last_index = offset_int + (size_int - 1) * stride_int
+        if last_index >= source_dim:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Index out of bounds")
 
 
 def _symbol_expr_text(dim: SymbolExprAttr) -> str:
@@ -411,24 +448,24 @@ def _shape_attr_from_reshape_item(
     if isinstance(operand_value, int):
         return _symbol_expr_attr_from_value(operand_value)
     if isinstance(operand_value, str):
-        operand_text = operand_value.replace(" ", "")
+        operand_text = operand_value.strip()
         if operand_text == "?":
             return _symbol_expr_attr_from_value("?")
         if operand_text and operand_text != "?":
             return _symbol_expr_attr_from_value(operand_text)
     if isinstance(item, SymbolDimAST):
-        item_name = item.name.replace(" ", "")
+        item_name = item.name.strip()
         if item_name and item_name != "?":
             return _symbol_expr_attr_from_value(item_name)
     if isinstance(fallback, SymbolDim):
         public_value = fallback.get_value()
         if isinstance(public_value, int):
             return _symbol_expr_attr_from_value(public_value)
-        fallback_text = str(public_value).replace(" ", "")
+        fallback_text = str(public_value).strip()
         if fallback_text and fallback_text != "?":
             return _symbol_expr_attr_from_value(fallback_text)
     if isinstance(fallback, str):
-        fallback_text = fallback.replace(" ", "")
+        fallback_text = fallback.strip()
         if fallback_text and fallback_text != "?":
             return _symbol_expr_attr_from_value(fallback_text)
     return _symbol_expr_attr_from_value(f"reshape_dim_{axis}")
@@ -458,24 +495,24 @@ def _stride_factor_from_reshape_item(
     if isinstance(operand_value, int):
         return operand_value
     if isinstance(operand_value, str):
-        operand_text = operand_value.replace(" ", "")
+        operand_text = operand_value.strip()
         if operand_text == "?":
             return "?"
         if operand_text and operand_text != "?":
             return operand_text
     if isinstance(item, SymbolDimAST):
-        item_name = item.name.replace(" ", "")
+        item_name = item.name.strip()
         if item_name and item_name != "?":
             return item_name
     if isinstance(fallback, SymbolDim):
         public_value = fallback.get_value()
         if isinstance(public_value, int):
             return public_value
-        fallback_text = str(public_value).replace(" ", "")
+        fallback_text = str(public_value).strip()
         if fallback_text and fallback_text != "?":
             return fallback_text
     if isinstance(fallback, str):
-        fallback_text = fallback.replace(" ", "")
+        fallback_text = fallback.strip()
         if fallback_text and fallback_text != "?":
             return fallback_text
     return f"reshape_dim_{axis}"
@@ -514,6 +551,43 @@ def _memory_type_from_shape_items(
     ]
     stride_attrs = _contiguous_stride_attrs(stride_factors)
     return NnMemoryType(ArrayAttr(shape_attrs), stride_attrs, base_type.element_type, base_type.space)
+
+
+def _view_memory_type_from_shape_items(
+    source_type: NnMemoryType,
+    shape_items: list[ValueAST],
+    shape_operands: list[SSAValue],
+    shape_values: list[SymbolRuntimeValue],
+    stride_values: list[SymbolRuntimeValue],
+) -> NnMemoryType:
+    """按 view 的 size/stride operand 构造结果 memory type。
+
+    功能说明:
+    - shape 直接来自 `dma.view` 的 size operand，避免 loop tile 尾块退化为 `?`。
+    - stride 按 source physical stride 与 view logical stride 逐维相乘，满足 dialect verifier。
+
+    使用示例:
+    - result_type = _view_memory_type_from_shape_items(source_type, items, operands, values, strides)
+    """
+
+    if len(shape_items) != len(shape_operands) or len(shape_items) != len(shape_values):
+        raise KernelCodeError(ErrorKind.INTERNAL, ErrorModule.MLIR_GEN, "view shape metadata length mismatch")
+    if len(stride_values) != len(source_type.stride.data):
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "view stride rank mismatch")
+    shape_attrs = [
+        _shape_attr_from_reshape_item(item, operand, fallback, axis)
+        for axis, (item, operand, fallback) in enumerate(zip(shape_items, shape_operands, shape_values, strict=True))
+    ]
+    stride_attrs: list[SymbolExprAttr] = []
+    for source_stride_attr, view_stride_value in zip(source_type.stride.data, stride_values, strict=True):
+        if not isinstance(source_stride_attr, SymbolExprAttr):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "view source stride must be SymbolExprAttr")
+        source_stride = _static_int_from_symbol_expr(source_stride_attr)
+        source_factor: int | str = source_stride if source_stride is not None else _symbol_expr_text(source_stride_attr)
+        view_stride = _runtime_value_static_int(view_stride_value)
+        view_factor: int | str = view_stride if view_stride is not None else _runtime_value_expr_text(view_stride_value)
+        stride_attrs.append(_symbol_expr_attr_from_value(_symbol_expr_product(source_factor, view_factor)))
+    return NnMemoryType(ArrayAttr(shape_attrs), ArrayAttr(stride_attrs), source_type.element_type, source_type.space)
 
 
 def _reshape_result_type_from_shape_items(
@@ -564,6 +638,66 @@ def _contiguous_stride_attrs(shape_values: list[int | str]) -> ArrayAttr[SymbolE
         else:
             running = _symbol_expr_product(dim_value, running)
     return ArrayAttr(stride_attrs)
+
+
+def _alloc_memory_type_from_runtime_values(
+    ctx: Context,
+    dtype: IntTypeAttrAST | FloatTypeAttrAST | BoolTypeAttrAST,
+    space: MemorySpaceAttrAST,
+    shape_values: list[SymbolRuntimeValue],
+    stride_values: list[SymbolRuntimeValue] | None,
+    location: SourceLocation | None,
+) -> NnMemoryType:
+    """按 alloc 发射期 shape 值构造结果 memory type。
+
+    功能说明:
+    - 避免把含 `iter<...>` 的 tile shape 回退到 operation 层 `SymbolDim` 解析。
+    - shape/stride 直接使用 `SymbolExprAttr` canonical 语法，保持 `dma.alloc` operand/type 一致。
+
+    使用示例:
+    - result_type = _alloc_memory_type_from_runtime_values(ctx, dtype, space, ["min(T, N - iter<0,N,T>)"], None, loc)
+    """
+
+    normalized_shape = [_runtime_shape_factor(value) for value in shape_values]
+    normalized_stride = (
+        [_runtime_shape_factor(value) for value in stride_values]
+        if stride_values is not None
+        else None
+    )
+    shape_attr = ArrayAttr([_symbol_expr_attr_from_value(value) for value in normalized_shape])
+    stride_attr = (
+        ArrayAttr([_symbol_expr_attr_from_value(value) for value in normalized_stride])
+        if normalized_stride is not None
+        else _contiguous_stride_attrs(normalized_shape)
+    )
+    element_type = dtype.emit_mlir(ctx, None)
+    space_attr = space.emit_mlir(ctx, None)
+    if not isinstance(element_type, Attribute):
+        raise KernelCodeError(ErrorKind.INTERNAL, ErrorModule.MLIR_GEN, "dtype attr emit must return Attribute")
+    if not isinstance(space_attr, NnMemorySpaceAttr):
+        raise KernelCodeError(ErrorKind.INTERNAL, ErrorModule.MLIR_GEN, "space attr emit must return NnMemorySpaceAttr")
+    return NnMemoryType(shape_attr, stride_attr, element_type, space_attr)
+
+
+def _runtime_shape_factor(value: SymbolRuntimeValue) -> int | str:
+    """把 runtime shape 值转换为 `SymbolExprAttr` 可解析的 shape 因子。
+
+    功能说明:
+    - 支持静态整数、`SymbolDim`、普通 symbol 表达与 `iter<...>` 表达。
+    - bool/float 不属于 memory shape 合同，直接按 MLIR 生成错误失败。
+
+    使用示例:
+    - factor = _runtime_shape_factor(SymbolDim("N") + 1)
+    """
+
+    if isinstance(value, bool) or isinstance(value, float):
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "memory shape must be int or symbol expression")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, SymbolDim):
+        public_value = value.get_value()
+        return public_value if isinstance(public_value, int) else str(public_value)
+    return str(value)
 
 
 @dataclass
@@ -768,8 +902,17 @@ class DmaAllocAST(ValueAST):
                     running_stride *= dim
                 if stride_values != contiguous_stride:
                     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "dma.alloc only supports contiguous stride")
-        result_memory = dma.alloc(shape_values, dtype_value, space_value, stride=stride_values)
-        return DmaAllocOp(dynamic_shape, MemoryAST.type_from_memory(ctx, result_memory, self.location))
+        if stride_values is not None and len(stride_values) != len(shape_values):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "dma.alloc stride rank mismatch")
+        result_type = _alloc_memory_type_from_runtime_values(
+            ctx,
+            self.dtype,
+            self.space,
+            shape_attr_values,
+            stride_values,
+            self.location,
+        )
+        return DmaAllocOp(_alloc_dynamic_shape_for_result(dynamic_shape, dynamic_shape, result_type), result_type)
 
 @dataclass
 class DmaCopyAST(ValueAST):
@@ -1053,10 +1196,14 @@ class DmaViewAST(ValueAST):
             stride_values.append(_runtime_value_from_symbol_expr(value))
         if not isinstance(source.type, NnMemoryType):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "view source must lower to nn.memory")
-        result_memory = self.result_memory()
-        if not isinstance(result_memory, Memory):
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "view result memory must be known from AST")
-        result_type = MemoryAST.type_from_memory(ctx, result_memory, self.location)
+        _validate_view_contract(source.type, offset_values, size_values, stride_values)
+        result_type = _view_memory_type_from_shape_items(
+            source.type,
+            size_items,
+            sizes,
+            size_values,
+            stride_values,
+        )
         return DmaViewOp(source, offsets, sizes, strides, result_type)
 
 @dataclass
@@ -1229,11 +1376,11 @@ class DmaFlattenAST(ValueAST):
                 else:
                     result_shape = result_memory.get_shape()
                     if axis == len(source_type.shape.data) - 1 and result_shape and not isinstance(result_shape[0], int):
-                        result_expr = str(result_shape[0].get_value() if isinstance(result_shape[0], SymbolDim) else result_shape[0]).replace(" ", "")
+                        result_expr = str(result_shape[0].get_value() if isinstance(result_shape[0], SymbolDim) else result_shape[0]).strip()
                     else:
-                        lhs_expr = str(shape_operand.type.get_value()).replace(" ", "")
-                        rhs_expr = str(dim_value.type.get_value()).replace(" ", "")
-                        result_expr = f"{lhs_expr}*{rhs_expr}"
+                        lhs_expr = str(shape_operand.type.get_value()).strip()
+                        rhs_expr = str(dim_value.type.get_value()).strip()
+                        result_expr = f"{_parenthesize_symbol_expr(lhs_expr)} * {_parenthesize_symbol_expr(rhs_expr)}"
                     mul_op = SymbolMulOp(shape_operand, dim_value, SymbolValueType.from_expr(result_expr))
                     block.add_op(mul_op)
                     shape_operand = mul_op.results[0]

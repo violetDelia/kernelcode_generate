@@ -49,6 +49,7 @@
 - launch wrapper 识别、tile contract fail-fast、默认 return 收尾等逻辑不得作为公开 API 暴露。
 - 生成源码签名中所有 `Memory` 参数统一使用非 `const` 引用；不得再按读写语义扫描 IR 并拆分 `const Memory&` / `Memory&` 两套形态。
 - `NnMemoryType` 参数携带 `template_name` 时，`KernelEmitter` 必须按函数签名首次出现顺序生成 `template <typename T1, ...>`，并在 wrapper、device body 与 body-level kernel 签名中输出 `Memory<space, Tn>&`。
+- 带 template-name memory 的 generated source 必须在对应函数声明 / 定义前输出内部 `__kernel_gen_template_instance_seed_*` alias，用于记录该 template name 对应的 concrete element dtype；该 alias 不属于公开 API，不生成 `kg_execute_entry`、concrete template 实例化集合或 dtype dispatcher。
 - 无 template name 的函数不得输出模板头，继续使用真实 element dtype fallback。
 - EmitC / KernelEmitter 不生成 `kg_execute_entry`、concrete template 实例化集合或 dtype dispatcher；这些只属于 execute_engine compile shim。
 - `npu_demo` launch wrapper 中的 launch extent 来自 wrapper IR 内独立 `symbol.const`；源码发射必须生成独立 `constexpr S_INT` 名称并把这些名称传入 `npu_demo::launch<...>`，不得直接把 extent 折成模板字面量。

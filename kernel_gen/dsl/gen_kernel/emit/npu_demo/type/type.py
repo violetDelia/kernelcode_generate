@@ -5,7 +5,7 @@
 - 注册 `npu_demo` target 的 xDSL / 仓库类型到 C/C++ 类型文本映射。
 
 API 列表:
-- `memory_element_cpp_type(memory_type: NnMemoryType, ctx: EmitCContext) -> str`
+- 无公开 API。
 
 使用示例:
 - from kernel_gen.dsl.gen_kernel import EmitCContext
@@ -31,7 +31,7 @@ from xdsl.dialects.builtin import (
     Signedness,
 )
 
-from kernel_gen.dialect.nn import NnMemoryType, memory_template_name
+from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 
 from ...register import emit_c_type_impl
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from kernel_gen.dsl.gen_kernel.emit_context import EmitCContext
 
 
-def memory_element_cpp_type(memory_type: NnMemoryType, ctx: EmitCContext) -> str:
+def _memory_element_cpp_type(memory_type: NnMemoryType, ctx: EmitCContext) -> str:
     """返回 npu_demo memory 的 C++ element 类型文本。
 
     功能说明:
@@ -48,7 +48,7 @@ def memory_element_cpp_type(memory_type: NnMemoryType, ctx: EmitCContext) -> str
     - 未携带 template name 时回退 `ctx.dispatch_type(memory_type.element_type)`。
 
     使用示例:
-    - element_type = memory_element_cpp_type(memory_type, ctx)
+    - element_type = _memory_element_cpp_type(memory_type, ctx)
 
     关联文件:
     - spec: spec/dsl/gen_kernel/emit.md
@@ -56,8 +56,9 @@ def memory_element_cpp_type(memory_type: NnMemoryType, ctx: EmitCContext) -> str
     - 功能实现: kernel_gen/dsl/gen_kernel/emit/npu_demo/type/type.py
     """
 
-    template_name = memory_template_name(memory_type)
-    if template_name is not None:
+    memory_type.verify()
+    template_name = memory_type.template_name.data
+    if template_name:
         return template_name
     return ctx.dispatch_type(memory_type.element_type)
 
@@ -110,7 +111,7 @@ def _emit_npu_demo_memory_type(attr: NnMemoryType, ctx) -> str:
     space_param = ctx.dispatch_attr(attr)
     if space_param is None:
         raise ValueError(f"unsupported npu_demo memory type space: {attr.space.space.data}")
-    return f"Memory<{space_param}, {memory_element_cpp_type(attr, ctx)}>"
+    return f"Memory<{space_param}, {_memory_element_cpp_type(attr, ctx)}>"
 
 
 @emit_c_type_impl(SymbolValueType, target="npu_demo")

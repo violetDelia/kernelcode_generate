@@ -21,8 +21,25 @@ from __future__ import annotations
 from kernel_gen.dialect.kernel import KernelSelectOp
 from kernel_gen.dialect.nn import NnMemoryType
 
-from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
+
+
+def _memory_element_cpp_type(memory_type: NnMemoryType, ctx) -> str:
+    """返回当前文件发射 kernel.select 所需的 C++ element type。
+
+    功能说明:
+    - 优先使用 `NnMemoryType.template_name` 作为模板 dtype。
+    - 未携带 template name 时通过 `ctx.dispatch_type(...)` 发射真实 element type。
+
+    使用示例:
+    - element_type = _memory_element_cpp_type(memory_type, ctx)
+    """
+
+    memory_type.verify()
+    template_name = memory_type.template_name.data
+    if template_name:
+        return template_name
+    return ctx.dispatch_type(memory_type.element_type)
 
 
 @emit_c_impl(KernelSelectOp, target="npu_demo")
@@ -63,8 +80,8 @@ def _emit_npu_demo_kernel_select(op: KernelSelectOp, ctx) -> str:
     ):
         raise ctx.emit_error(op.name, "unsupported op")
     return (
-        f"{ctx.current_indent}select<{ctx.dispatch_attr(out_value.type)}, {memory_element_cpp_type(lhs_value.type, ctx)}, "
-        f"{memory_element_cpp_type(out_value.type, ctx)}>"
+        f"{ctx.current_indent}select<{ctx.dispatch_attr(out_value.type)}, {_memory_element_cpp_type(lhs_value.type, ctx)}, "
+        f"{_memory_element_cpp_type(out_value.type, ctx)}>"
         f"({emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(cond_value, ctx)} /*cond*/, "
         f"{emit_c_value(lhs_value, ctx)} /*lhs*/, {emit_c_value(rhs_value, ctx)} /*rhs*/);"
     )

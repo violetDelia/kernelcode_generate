@@ -519,6 +519,11 @@ _CONCRETE_MEMORY_DTYPE_PATTERN = re.compile(
     r"Memory<\s*(?:MemorySpace::)?(?:GM|SM|LM|TSM|TLM1|TLM2|TLM3)\s*,\s*"
     r"(?P<dtype>float|double|int32_t|int64_t|int|long\s+long)\s*>"
 )
+_TEMPLATE_INSTANCE_SEED_PATTERN = re.compile(
+    r"using\s+__kernel_gen_template_instance_seed_[A-Za-z0-9_]+__(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
+    r"Memory<\s*(?:MemorySpace::)?(?:GM|SM|LM|TSM|TLM1|TLM2|TLM3)\s*,\s*"
+    r"(?P<dtype>float|double|int32_t|int64_t|int|long\s+long)\s*>\s*;"
+)
 
 
 def _split_params(params_text: str) -> tuple[str, ...]:
@@ -743,7 +748,8 @@ def _runtime_template_combinations_from_source(
     """根据源码中的 concrete memory dtype 生成唯一模板实例。
 
     功能说明:
-    - 优先使用函数体里 concrete `Memory<..., dtype>` 的 dtype，避免生成全组合 dispatcher。
+    - 优先使用 `gen_kernel` 生成源码中的 template dtype seed alias，按 template name 精确绑定 dtype。
+    - 其次使用函数体里 concrete `Memory<..., dtype>` 的 dtype，避免生成全组合 dispatcher。
     - 找不到 concrete dtype 时稳定失败；手写 templated compile 缺少 runtime dtype 实例信息时不得默认 `float`。
 
     使用示例:
@@ -753,6 +759,24 @@ def _runtime_template_combinations_from_source(
     if not template_names:
         return ()
     if isinstance(source, str):
+        seed_types: dict[str, tuple[int, str]] = {}
+        for match in _TEMPLATE_INSTANCE_SEED_PATTERN.finditer(source):
+            name = match.group("name")
+            if name not in template_names or name in seed_types:
+                continue
+            code = _dtype_code_from_name(match.group("dtype"))
+            if code == 0:
+                continue
+            ctype = next((candidate for candidate_code, candidate in _TEMPLATE_DTYPE_OPTIONS if candidate_code == code), None)
+            if ctype is not None:
+                seed_types[name] = (code, ctype)
+        if seed_types:
+            if all(name in seed_types for name in template_names):
+                return ({name: seed_types[name] for name in template_names},)
+            raise _execution_engine_error(
+                _TEMPLATE_INSTANCE_REQUIRED,
+                "templated memory function requires concrete memory dtype in source",
+            )
         for match in _CONCRETE_MEMORY_DTYPE_PATTERN.finditer(source):
             code = _dtype_code_from_name(match.group("dtype"))
             if code == 0:

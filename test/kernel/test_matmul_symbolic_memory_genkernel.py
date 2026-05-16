@@ -133,7 +133,7 @@ def test_dynamic_matmul_demo_uses_symbolic_memory_and_tile_reduce_accumulator() 
     assert '"kernel.binary_elewise"' in module_text
     assert '"dma.view"' in module_text
     assert '"dma.deslice"' in module_text
-    assert ".view<" in source
+    assert ".template view<T1>" in source
     assert "!nn.memory<[#symbol.expr<17>, #symbol.expr<19>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
     _assert_source_uses_accumulator(source)
@@ -166,7 +166,7 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
     assert '"kernel.binary_elewise"' in module_text
     assert '"dma.view"' in module_text
     assert '"dma.deslice"' in module_text
-    assert ".view<" in source
+    assert ".template view<T1>" in source
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
     _assert_source_uses_accumulator(source)

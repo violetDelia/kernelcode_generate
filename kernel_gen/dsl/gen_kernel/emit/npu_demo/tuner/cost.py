@@ -28,8 +28,25 @@ from xdsl.dialects.builtin import IntegerAttr, StringAttr
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.tuner import TunerCostOp
 
-from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
+
+
+def _memory_element_cpp_type(memory_type: NnMemoryType, ctx) -> str:
+    """返回当前文件发射 tuner.cost 所需的 C++ element type。
+
+    功能说明:
+    - 优先使用 `NnMemoryType.template_name` 作为模板 dtype。
+    - 未携带 template name 时通过 `ctx.dispatch_type(...)` 发射真实 element type。
+
+    使用示例:
+    - element_type = _memory_element_cpp_type(memory_type, ctx)
+    """
+
+    memory_type.verify()
+    template_name = memory_type.template_name.data
+    if template_name:
+        return template_name
+    return ctx.dispatch_type(memory_type.element_type)
 
 
 def _memory_actual_cpp_type(memory_type: NnMemoryType, ctx) -> str:
@@ -91,8 +108,8 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
         rhs_dtype = _memory_actual_cpp_type(rhs_type, ctx)
         if lhs_dtype != rhs_dtype:
             raise ctx.emit_error("tuner.cost", "kernel.add lhs/rhs element type must match")
-        out_dtype = memory_element_cpp_type(out_type, ctx)
-        lhs_template = memory_element_cpp_type(lhs_type, ctx)
+        out_dtype = _memory_element_cpp_type(out_type, ctx)
+        lhs_template = _memory_element_cpp_type(lhs_type, ctx)
         out_expr = emit_c_value(out_value, ctx)
         lhs_expr = emit_c_value(lhs_value, ctx)
         rhs_expr = emit_c_value(rhs_value, ctx)
@@ -140,8 +157,8 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
         rhs_dtype = _memory_actual_cpp_type(rhs_type, ctx)
         if lhs_dtype != rhs_dtype:
             raise ctx.emit_error("tuner.cost", "kernel.binary_elewise lhs/rhs element type must match")
-        lhs_template = memory_element_cpp_type(lhs_type, ctx)
-        out_dtype = memory_element_cpp_type(out_type, ctx)
+        lhs_template = _memory_element_cpp_type(lhs_type, ctx)
+        out_dtype = _memory_element_cpp_type(out_type, ctx)
         out_expr = emit_c_value(out_value, ctx)
         lhs_expr = emit_c_value(lhs_value, ctx)
         rhs_expr = emit_c_value(rhs_value, ctx)
@@ -167,8 +184,8 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
         input_expr = emit_c_value(input_value, ctx)
         return (
             f"{ctx.current_indent}S_INT {result_name} = "
-            f"cost::exp<{out_space}, {memory_element_cpp_type(input_type, ctx)}, "
-            f"{memory_element_cpp_type(out_type, ctx)}, {helper_kind}>"
+            f"cost::exp<{out_space}, {_memory_element_cpp_type(input_type, ctx)}, "
+            f"{_memory_element_cpp_type(out_type, ctx)}, {helper_kind}>"
             f"({out_expr} /*out*/, {input_expr} /*input*/);"
         )
     if helper_name == "kernel.select":
@@ -196,8 +213,8 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
         rhs_dtype = _memory_actual_cpp_type(rhs_type, ctx)
         if lhs_dtype != rhs_dtype:
             raise ctx.emit_error("tuner.cost", "kernel.select lhs/rhs element type must match")
-        lhs_template = memory_element_cpp_type(lhs_type, ctx)
-        out_template = memory_element_cpp_type(out_type, ctx)
+        lhs_template = _memory_element_cpp_type(lhs_type, ctx)
+        out_template = _memory_element_cpp_type(out_type, ctx)
         out_expr = emit_c_value(out_value, ctx)
         cond_expr = emit_c_value(cond_value, ctx)
         lhs_expr = emit_c_value(lhs_value, ctx)
@@ -240,8 +257,8 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
         input_expr = emit_c_value(input_value, ctx)
         return (
             f"{ctx.current_indent}S_INT {result_name} = "
-            f"cost::{helper}<{out_space}, {memory_element_cpp_type(input_type, ctx)}, "
-            f"{memory_element_cpp_type(out_type, ctx)}, {helper_kind}>"
+            f"cost::{helper}<{out_space}, {_memory_element_cpp_type(input_type, ctx)}, "
+            f"{_memory_element_cpp_type(out_type, ctx)}, {helper_kind}>"
             f"({out_expr} /*out*/, {input_expr} /*input*/, {axis.value.data} /*axis*/);"
         )
     if helper_name == "dma.copy":
@@ -258,7 +275,7 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
         source_dtype = _memory_actual_cpp_type(source_type, ctx)
         if target_dtype != source_dtype:
             raise ctx.emit_error("tuner.cost", "dma.copy source/target element type must match")
-        target_template = memory_element_cpp_type(target_type, ctx)
+        target_template = _memory_element_cpp_type(target_type, ctx)
         target_expr = emit_c_value(target_value, ctx)
         source_expr = emit_c_value(source_value, ctx)
         return (
@@ -288,7 +305,7 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
         source_dtype = _memory_actual_cpp_type(source_type, ctx)
         if target_dtype != source_dtype:
             raise ctx.emit_error("tuner.cost", f"{helper_name} source/target element type must match")
-        target_template = memory_element_cpp_type(target_type, ctx)
+        target_template = _memory_element_cpp_type(target_type, ctx)
         helper = "slice" if helper_name == "dma.slice" else "deslice"
         target_expr = emit_c_value(target_value, ctx)
         source_expr = emit_c_value(source_value, ctx)
@@ -322,7 +339,7 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
         return (
             f"{ctx.current_indent}S_INT {result_name} = "
             f"cost::matmul<{ctx.dispatch_attr(lhs_type)}, {ctx.dispatch_attr(rhs_type)}, {ctx.dispatch_attr(out_type)}, "
-            f"{memory_element_cpp_type(lhs_type, ctx)}, {memory_element_cpp_type(rhs_type, ctx)}, {memory_element_cpp_type(out_type, ctx)}, "
+            f"{_memory_element_cpp_type(lhs_type, ctx)}, {_memory_element_cpp_type(rhs_type, ctx)}, {_memory_element_cpp_type(out_type, ctx)}, "
             f"{helper_kind}>({out_expr} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
         )
     if helper_name == "kernel.img2col1d":
@@ -341,7 +358,7 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
         return (
             f"{ctx.current_indent}S_INT {result_name} = "
             f"cost::img2col1d<{ctx.dispatch_attr(input_type)}, {ctx.dispatch_attr(out_type)}, "
-            f"{memory_element_cpp_type(input_type, ctx)}, {memory_element_cpp_type(out_type, ctx)}, {helper_kind}>"
+            f"{_memory_element_cpp_type(input_type, ctx)}, {_memory_element_cpp_type(out_type, ctx)}, {helper_kind}>"
             f"({out_expr} /*out*/, {input_expr} /*input*/, {k_expr} /*k*/, {s_expr} /*s*/, {d_expr} /*d*/, "
             f"{p_left_expr} /*p_left*/, {p_right_expr} /*p_right*/);"
         )
@@ -375,7 +392,7 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
         return (
             f"{ctx.current_indent}S_INT {result_name} = "
             f"cost::img2col2d<{ctx.dispatch_attr(input_type)}, {ctx.dispatch_attr(out_type)}, "
-            f"{memory_element_cpp_type(input_type, ctx)}, {memory_element_cpp_type(out_type, ctx)}, {helper_kind}>"
+            f"{_memory_element_cpp_type(input_type, ctx)}, {_memory_element_cpp_type(out_type, ctx)}, {helper_kind}>"
             f"({out_expr} /*out*/, {input_expr} /*input*/, {kh_expr} /*kh*/, {kw_expr} /*kw*/, "
             f"{sh_expr} /*sh*/, {sw_expr} /*sw*/, {dh_expr} /*dh*/, {dw_expr} /*dw*/, "
             f"{ph_expr} /*ph*/, {pw_expr} /*pw*/, {pl_expr} /*pl*/, {pr_expr} /*pr*/);"

@@ -19,9 +19,27 @@ API 列表:
 from __future__ import annotations
 
 from kernel_gen.dialect.dma import DmaViewOp
+from kernel_gen.dialect.nn import NnMemoryType
 
-from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
+
+
+def _memory_element_cpp_type(memory_type: NnMemoryType, ctx) -> str:
+    """返回当前文件发射 dma.view 所需的 C++ element type。
+
+    功能说明:
+    - 优先使用 `NnMemoryType.template_name` 作为模板 dtype。
+    - 未携带 template name 时通过 `ctx.dispatch_type(...)` 发射真实 element type。
+
+    使用示例:
+    - element_type = _memory_element_cpp_type(memory_type, ctx)
+    """
+
+    memory_type.verify()
+    template_name = memory_type.template_name.data
+    if template_name:
+        return template_name
+    return ctx.dispatch_type(memory_type.element_type)
 
 
 @emit_c_impl(DmaViewOp, target="npu_demo")
@@ -41,11 +59,14 @@ def _emit_npu_demo_dma_view(op: DmaViewOp, ctx) -> str:
     source_expr = emit_c_value(op.source, ctx)
     result_name = ctx.create_or_get_name(op.result)
     result_type = ctx.dispatch_type(op.result.type)
-    element_type = memory_element_cpp_type(op.result.type, ctx)
+    element_type = _memory_element_cpp_type(op.result.type, ctx)
+    view_accessor = "view"
+    if isinstance(op.source.type, NnMemoryType) and op.source.type.template_name.data:
+        view_accessor = "template view"
     offset_expr = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in op.offsets) + "}"
     size_expr = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in op.shape) + "}"
     stride_expr = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in op.stride) + "}"
     return (
         f"{ctx.current_indent}{result_type} {result_name} = "
-        f"{source_expr}.view<{element_type}>({offset_expr} /*offset*/, {size_expr} /*size*/, {stride_expr} /*stride*/);"
+        f"{source_expr}.{view_accessor}<{element_type}>({offset_expr} /*offset*/, {size_expr} /*size*/, {stride_expr} /*stride*/);"
     )

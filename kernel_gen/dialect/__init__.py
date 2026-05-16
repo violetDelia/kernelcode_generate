@@ -33,8 +33,6 @@ API 列表:
 - `class NnImg2col2dOp(input_value: SSAValue, result_type: NnMemoryType, kh: SSAValue, kw: SSAValue, sh: SSAValue, sw: SSAValue, dh: SSAValue, dw: SSAValue, ph: SSAValue, pw: SSAValue, pl: SSAValue, pr: SSAValue, space: NnMemorySpaceAttr)`
 - `class NnMemorySpaceAttr(space: StringAttr)`
 - `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr, template_name: StringAttr | str | None = None)`
-- `memory_template_name(memory_type: NnMemoryType) -> str | None`
-- `has_memory_template_name(memory_type: NnMemoryType) -> bool`
 - `copy_memory_type(memory_type: NnMemoryType, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
 - `copy_memory_type_with_template_name(memory_type: NnMemoryType, template_name: str | StringAttr, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
 
@@ -79,8 +77,6 @@ __all__ = [
     "NnImg2col2dOp",
     "NnMemorySpaceAttr",
     "NnMemoryType",
-    "memory_template_name",
-    "has_memory_template_name",
     "copy_memory_type",
     "copy_memory_type_with_template_name",
 ]
@@ -112,8 +108,6 @@ if TYPE_CHECKING:  # pragma: no cover
         NnMatmulOp,
         NnMemorySpaceAttr,
         NnMemoryType,
-        memory_template_name,
-        has_memory_template_name,
         copy_memory_type,
         copy_memory_type_with_template_name,
         NnMulOp,
@@ -150,8 +144,6 @@ _LAZY_EXPORT_MODULE: dict[str, str] = {
     "NnImg2col2dOp": ".nn",
     "NnMemorySpaceAttr": ".nn",
     "NnMemoryType": ".nn",
-    "memory_template_name": ".nn",
-    "has_memory_template_name": ".nn",
     "copy_memory_type": ".nn",
     "copy_memory_type_with_template_name": ".nn",
 }

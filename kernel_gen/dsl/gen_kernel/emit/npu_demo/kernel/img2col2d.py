@@ -21,8 +21,25 @@ from __future__ import annotations
 from kernel_gen.dialect.kernel import KernelImg2col2dOp
 from kernel_gen.dialect.nn import NnMemoryType
 
-from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
+
+
+def _memory_element_cpp_type(memory_type: NnMemoryType, ctx) -> str:
+    """返回当前文件发射 kernel.img2col2d 所需的 C++ element type。
+
+    功能说明:
+    - 优先使用 `NnMemoryType.template_name` 作为模板 dtype。
+    - 未携带 template name 时通过 `ctx.dispatch_type(...)` 发射真实 element type。
+
+    使用示例:
+    - element_type = _memory_element_cpp_type(memory_type, ctx)
+    """
+
+    memory_type.verify()
+    template_name = memory_type.template_name.data
+    if template_name:
+        return template_name
+    return ctx.dispatch_type(memory_type.element_type)
 
 
 @emit_c_impl(KernelImg2col2dOp, target="npu_demo")
@@ -50,7 +67,7 @@ def _emit_npu_demo_kernel_img2col2d(op: KernelImg2col2dOp, ctx) -> str:
     params = [emit_c_value(value, ctx) for value in (op.kh, op.kw, op.sh, op.sw, op.dh, op.dw, op.ph, op.pw, op.pl, op.pr)]
     return (
         f"{ctx.current_indent}img2col2d<{ctx.dispatch_attr(input_value.type)}, {ctx.dispatch_attr(out_value.type)}, "
-        f"{memory_element_cpp_type(input_value.type, ctx)}, {memory_element_cpp_type(out_value.type, ctx)}>"
+        f"{_memory_element_cpp_type(input_value.type, ctx)}, {_memory_element_cpp_type(out_value.type, ctx)}>"
         f"({emit_c_value(out_value, ctx)} /*out*/, {emit_c_value(input_value, ctx)} /*input*/, "
         f"{params[0]} /*kh*/, {params[1]} /*kw*/, {params[2]} /*sh*/, {params[3]} /*sw*/, {params[4]} /*dh*/, {params[5]} /*dw*/, "
         f"{params[6]} /*ph*/, {params[7]} /*pw*/, {params[8]} /*pl*/, {params[9]} /*pr*/);"

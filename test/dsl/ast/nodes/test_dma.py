@@ -24,7 +24,7 @@ from xdsl.dialects.test import TestOp
 from xdsl.ir import Block, Operation, SSAValue
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaReshapeOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaReshapeOp, DmaViewOp
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolIterType, SymbolValueType
 from kernel_gen.dsl.ast.nodes.attr import BoolTypeAttrAST, FloatTypeAttrAST, IntTypeAttrAST, MemorySpaceAttrAST
 from kernel_gen.dsl.ast.nodes.basic import MemoryAST, ValueAST
@@ -213,7 +213,7 @@ class BlockArgSymbolAST(ValueAST):
 
 
 def test_dma_result_nodes_require_ast_result_memory_for_result_type() -> None:
-    """DMA result op 不再从 SSA type 反推结果 memory。"""
+    """DMA result op 只在无法由 SSA type 推导时要求解析期 memory。"""
 
     source = SsaOnlyMemoryAST()
 
@@ -229,8 +229,12 @@ def test_dma_result_nodes_require_ast_result_memory_for_result_type() -> None:
     with pytest.raises(KernelCodeError, match="cast result memory must be known from AST"):
         DmaCastAST(source, FloatTypeAttrAST(NumericType.Float16)).emit_mlir(Context(), Block())
 
-    with pytest.raises(KernelCodeError, match="view result memory must be known from AST"):
-        DmaViewAST(source, SymbolListAST([0]), SymbolListAST([4]), SymbolListAST([1])).emit_mlir(Context(), Block())
+    view_block = Block()
+    view_op = DmaViewAST(source, SymbolListAST([0]), SymbolListAST([4]), SymbolListAST([1])).emit_mlir(
+        Context(),
+        view_block,
+    )
+    assert isinstance(view_op, DmaViewOp)
 
     with pytest.raises(KernelCodeError, match="reshape result memory must be known from AST"):
         DmaReshapeAST(source, SymbolListAST([8])).emit_mlir(Context(), Block())

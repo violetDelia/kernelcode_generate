@@ -20,9 +20,27 @@ API 列表:
 from __future__ import annotations
 
 from kernel_gen.dialect.dma import DmaFillOp
+from kernel_gen.dialect.nn import NnMemoryType
 
-from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
+
+
+def _memory_element_cpp_type(memory_type: NnMemoryType, ctx) -> str:
+    """返回当前文件发射 dma.fill 所需的 C++ element type。
+
+    功能说明:
+    - 优先使用 `NnMemoryType.template_name` 作为模板 dtype。
+    - 未携带 template name 时通过 `ctx.dispatch_type(...)` 发射真实 element type。
+
+    使用示例:
+    - element_type = _memory_element_cpp_type(memory_type, ctx)
+    """
+
+    memory_type.verify()
+    template_name = memory_type.template_name.data
+    if template_name:
+        return template_name
+    return ctx.dispatch_type(memory_type.element_type)
 
 
 @emit_c_impl(DmaFillOp, target="npu_demo")
@@ -42,7 +60,7 @@ def _emit_npu_demo_dma_fill(op: DmaFillOp, ctx) -> str:
 
     target_expr = emit_c_value(op.target, ctx)
     space_expr = ctx.dispatch_attr(op.target.type)
-    target_type = memory_element_cpp_type(op.target.type, ctx)
+    target_type = _memory_element_cpp_type(op.target.type, ctx)
     value_expr = emit_c_value(op.value, ctx)
     if value_expr == "inf":
         value_expr = f"std::numeric_limits<{target_type}>::infinity()"

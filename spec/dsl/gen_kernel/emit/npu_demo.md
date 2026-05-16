@@ -42,7 +42,7 @@
 ### 模块级补充
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
-- 本模块不额外公开 package 级 API；`type/` 子目录单独公开 `memory_element_cpp_type(...)`。
+- 本模块不额外公开 package 级 API；`type/` 子目录只负责 side-effect 注册，不导出 dtype helper。
 - 目录中的实现只通过上层 `emit` 注册体系生效。
 - 每个可发射 op 必须独占一个实现文件，路径形态固定为 `emit/npu_demo/<dialect>/<op>.py`。
 - 不得再新增 `ops.py`、`values.py`、`core.py`、`function.py`、`module.py` 这类聚合多个 op 行为的 target 大文件。

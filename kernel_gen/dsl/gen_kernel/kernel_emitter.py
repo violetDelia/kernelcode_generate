@@ -51,7 +51,7 @@ from xdsl.ir import Operation, SSAValue
 
 from kernel_gen.dialect.arch import ArchBarrierOp, ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp, ArchLaunchOp
 from kernel_gen.dialect.dma import DmaCastOp, DmaReshapeOp, DmaViewOp
-from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType, copy_memory_type, memory_template_name
+from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType, copy_memory_type
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolValueType
 from kernel_gen.core.config import restore_config, set_target, snapshot_config
 from kernel_gen.target import registry as target_registry
@@ -238,8 +238,9 @@ class KernelEmitter:
         for attr in types:
             if not isinstance(attr, NnMemoryType):
                 continue
-            template_name = memory_template_name(attr)
-            if template_name is not None and template_name not in names:
+            attr.verify()
+            template_name = attr.template_name.data
+            if template_name and template_name not in names:
                 names.append(template_name)
         return names
 
@@ -285,6 +286,74 @@ class KernelEmitter:
         if not names:
             return func_name
         return f"{func_name}<{', '.join(names)}>"
+
+    def _template_instance_seed_fragment(self, text: str) -> str:
+        """把函数名或 template name 转成 C++ alias 片段。
+
+        功能说明:
+        - 仅供当前文件生成内部 template dtype seed alias 使用。
+        - 将非标识符字符替换为 `_`，避免 IR symbol 名称直接进入 C++ alias 时破坏源码。
+
+        使用示例:
+        - fragment = self._template_instance_seed_fragment("kernel.device")
+        """
+
+        fragment = re.sub(r"[^0-9A-Za-z_]", "_", text)
+        if not fragment:
+            return "_"
+        if fragment[0].isdigit():
+            return f"_{fragment}"
+        return fragment
+
+    def _template_instance_seed_lines_from_types(self, func_name: str, types: list[Any]) -> list[str]:
+        """生成 generated source 的 template dtype seed alias。
+
+        功能说明:
+        - 对带 `NnMemoryType.template_name` 的 memory 参数输出内部 `using` alias。
+        - alias 只记录生成源码已知的 concrete element dtype，供 execute_engine compile shim 做唯一模板实例化。
+        - 不生成 `kg_execute_entry`、dispatcher 或运行时 dtype 组合。
+
+        使用示例:
+        - seed_lines = self._template_instance_seed_lines_from_types("kernel", input_types)
+        """
+
+        lines: list[str] = []
+        seen: set[str] = set()
+        func_fragment = self._template_instance_seed_fragment(func_name)
+        for attr in types:
+            if not isinstance(attr, NnMemoryType):
+                continue
+            attr.verify()
+            template_name = attr.template_name.data
+            if not template_name or template_name in seen:
+                continue
+            seen.add(template_name)
+            template_fragment = self._template_instance_seed_fragment(template_name)
+            space_text = self.emit_attr(attr.space)
+            element_type_text = self._type_to_c(attr.element_type)
+            memory_type_text = self._normalize_memory_stmt(f"Memory<{space_text}, {element_type_text}>")
+            lines.append(
+                f"using __kernel_gen_template_instance_seed_{func_fragment}__{template_fragment} = {memory_type_text};"
+            )
+        return lines
+
+    def _prepend_template_instance_seed_lines(self, func_op: func.FuncOp, source: str) -> str:
+        """在函数源码前补 generated template dtype seed alias。
+
+        功能说明:
+        - 仅当函数签名携带 template-name memory 时生成内部 alias。
+        - seed alias 位于函数声明 / 定义前，不改变函数公开签名和调用 ABI。
+
+        使用示例:
+        - source = self._prepend_template_instance_seed_lines(func_op, source)
+        """
+
+        input_types = list(func_op.function_type.inputs.data)
+        result_types = list(func_op.function_type.outputs.data)
+        seed_lines = self._template_instance_seed_lines_from_types(func_op.sym_name.data, [*input_types, *result_types])
+        if not seed_lines:
+            return source
+        return "\n".join([*seed_lines, source])
 
     def _arg_names(self, func_op: func.FuncOp) -> list[str]:
         names: list[str] = []
@@ -462,8 +531,8 @@ class KernelEmitter:
             body = self._emit_default_function_body(func_op)
             self.ctx.pop_indent()
         if body:
-            return f"{signature} {{\n{body}\n}}"
-        return f"{signature} {{\n}}"
+            return self._prepend_template_instance_seed_lines(func_op, f"{signature} {{\n{body}\n}}")
+        return self._prepend_template_instance_seed_lines(func_op, f"{signature} {{\n}}")
 
     def _is_npu_demo_body_level_kernel(self, func_op: func.FuncOp) -> bool:
         if not self.ctx.is_target("npu_demo"):
@@ -772,7 +841,8 @@ class KernelEmitter:
         """
 
         body_input_types, body_arg_offset = self._validate_npu_demo_launch_body_signature(func_op)
-        return f"{self._emit_npu_demo_launch_body_signature(func_op, body_input_types, body_arg_offset)};"
+        declaration = f"{self._emit_npu_demo_launch_body_signature(func_op, body_input_types, body_arg_offset)};"
+        return self._prepend_template_instance_seed_lines(func_op, declaration)
 
     def _emit_npu_demo_launch_body_signature(
         self,
@@ -869,7 +939,7 @@ class KernelEmitter:
         )
         body = "\n".join([*extent_lines, launch_line])
         self.ctx.pop_indent()
-        return f"{signature} {{\n{body}\n}}"
+        return self._prepend_template_instance_seed_lines(wrapper_func, f"{signature} {{\n{body}\n}}")
 
     def _get_npu_demo_body_level_kernel_types(self, func_op: func.FuncOp) -> tuple[NnMemoryType, NnMemoryType]:
         func_name = func_op.sym_name.data

@@ -5,7 +5,7 @@
 - 通过 side effect import 注册 `npu_demo` 的 type / space 到 C 文本映射。
 
 API 列表:
-- `memory_element_cpp_type(memory_type: NnMemoryType, ctx: EmitCContext) -> str`
+- 无公开 API。
 
 使用示例:
 - `from kernel_gen.dsl.gen_kernel.emit.npu_demo import type as _type`
@@ -18,6 +18,5 @@ API 列表:
 
 from . import space as _space  # noqa: F401
 from . import type as _type  # noqa: F401
-from .type import memory_element_cpp_type
 
-__all__ = ["memory_element_cpp_type"]
+__all__: list[str] = []

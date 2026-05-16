@@ -62,7 +62,6 @@ from kernel_gen.operation.dma import alloc, deslice, slice
 from kernel_gen.operation.nn import img2col2d, matmul
 from kernel_gen.operation.scf import loop
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
-from kernel_gen.dsl.gen_kernel.emit.npu_demo.type import memory_element_cpp_type
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace, NumericType
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
@@ -291,8 +290,8 @@ def _make_memory_type(
     )
 
 
-def test_npu_demo_memory_element_cpp_type_prefers_template_name() -> None:
-    """验证 npu_demo memory element helper 优先使用 template name。"""
+def test_npu_demo_memory_type_dispatch_prefers_template_name() -> None:
+    """验证 npu_demo memory type 发射优先使用 template name。"""
 
     set_target("npu_demo")
     ctx = EmitCContext()
@@ -303,7 +302,6 @@ def test_npu_demo_memory_element_cpp_type_prefers_template_name() -> None:
         NnMemorySpaceAttr.from_name("global"),
         template_name="T1",
     )
-    assert memory_element_cpp_type(memory_type, ctx) == "T1"
     assert ctx.dispatch_type(memory_type) == "Memory<GM, T1>"
 
 

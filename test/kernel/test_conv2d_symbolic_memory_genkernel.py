@@ -179,7 +179,7 @@ def test_inputs_dynamic_tile_dynamic_gen_kernel_keeps_symbolic_memory_shapes() -
     assert "arg1.get_shape(2)" in source
     assert "arg1.get_shape(3)" in source
     assert "npu_demo::get_dynamic_memory<TSM>()" in source
-    assert ".view<float>(Vector{" in source
+    assert "view<T1>(Vector{" in source
     assert "alloc<TSM" not in source
     assert "S_INT c_6 = 258" not in source
 

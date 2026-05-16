@@ -411,6 +411,7 @@ _SPACE_TOKENS = {
 }
 _DYNAMIC_MEMORY_SPACES = {"shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
 _SYMBOL_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_ITER_TOKEN_PATTERN = re.compile(r"iter<[^<>]+>")
 
 
 def _rewrite_supported_alloc_infos(alloc_infos: list[_AllocInfo]) -> list[_AllocInfo]:
@@ -663,7 +664,7 @@ def _shape_product(mem_type: NnMemoryType, *, unknown_prefix: str = "anonymous")
             dim_expr = sp.Symbol(f"{unknown_prefix}_d{axis}", integer=True, positive=True)
         else:
             dim_expr = _dim_expr(dim)
-        result = sp.simplify(result * dim_expr)
+        result = _safe_simplify_expr(result * dim_expr)
     return result
 
 
@@ -722,7 +723,7 @@ def _is_contiguous_memory_type(mem_type: NnMemoryType) -> bool:
             continue
         if running_unknown:
             continue
-        running = sp.simplify(running * _dim_expr(shape_dim))
+        running = _safe_simplify_expr(running * _dim_expr(shape_dim))
     for stride_dim, expected_expr in zip(mem_type.stride.data, expected, strict=True):
         if expected_expr is None:
             if not isinstance(stride_dim, SymbolExprAttr) or stride_dim.expr.data != "?":
@@ -732,7 +733,7 @@ def _is_contiguous_memory_type(mem_type: NnMemoryType) -> bool:
             stride_expr = _dim_expr(stride_dim)
         except KernelCodeError:
             return False
-        if sp.simplify(stride_expr - expected_expr) != 0:
+        if _safe_simplify_expr(stride_expr - expected_expr) != 0:
             return False
     return True
 
@@ -1101,19 +1102,43 @@ def _align_expr(expr: sp.Basic, alignment: int, *, allow_dynamic: bool = False) 
     """
 
     if alignment == 0:
-        return sp.simplify(expr)
+        return _safe_simplify_expr(expr)
     if expr == 0:
         return sp.Integer(0)
     if isinstance(expr, sp.Integer) or (expr.is_number and expr.is_integer):
         value = int(expr)
         return sp.Integer(((value + alignment - 1) // alignment) * alignment)
     if allow_dynamic:
-        return sp.simplify(expr)
+        return _safe_simplify_expr(expr)
     raise KernelCodeError(
         ErrorKind.UNIMPLEMENTED,
         ErrorModule.PASS,
         "MemoryPoolUnsupportedAlignment: dynamic aligned offset is not supported",
     )
+
+
+def _safe_simplify_expr(expr: sp.Basic) -> sp.Basic:
+    """对 sympy 表达式执行保守 simplify。
+
+    功能说明:
+    - 对复杂 `Min/Max/iter` 符号组合，外部 sympy 可能触发底层异常；此时保留原表达式，
+      让 memory-pool 继续按公开 symbol 语义物化 offset。
+
+    使用示例:
+    - simplified = _safe_simplify_expr(current + size)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/kernel/test_conv2d_dynamic_symbol_params.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    if expr.has(sp.Min, sp.Max) or any(str(symbol).startswith("iter_expr_") for symbol in expr.free_symbols):
+        return expr
+    try:
+        return sp.simplify(expr)
+    except Exception:
+        return expr
 
 
 def _peak_bytes(intervals: list[MemoryPoolInterval]) -> sp.Basic:
@@ -1346,15 +1371,17 @@ def _sympy_expr_from_text(expr_text: str) -> sp.Basic:
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    if "iter<" in expr_text:
-        return _opaque_iter_expr_symbol(expr_text)
     normalized_text = expr_text.replace(" floordiv ", " // ")
+    for iter_token in _ITER_TOKEN_PATTERN.findall(normalized_text):
+        normalized_text = normalized_text.replace(iter_token, str(_opaque_iter_expr_symbol(iter_token)))
     names = set(_SYMBOL_NAME_PATTERN.findall(normalized_text))
     local_symbols = {
         name: sp.Symbol(name, integer=True, positive=True)
         for name in names
-        if name != "min"
+        if name not in {"min", "max"}
     }
+    local_symbols["min"] = sp.Min
+    local_symbols["max"] = sp.Max
     return sp.sympify(normalized_text, locals=local_symbols)
 
 
@@ -2228,7 +2255,9 @@ def _prepare_rewrite_infos(
             one,
             tuple(metadata_ops),
         )
-        current_by_bucket[info.bucket_key] = sp.simplify(_align_expr(current, alignment) + info.size_bytes_expr)
+        current_by_bucket[info.bucket_key] = _safe_simplify_expr(
+            _align_expr(current, alignment) + info.size_bytes_expr
+        )
         processed_numels_by_bucket.setdefault(info.bucket_key, []).append((info, numel, info.dtype_size))
 
     return result

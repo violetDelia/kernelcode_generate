@@ -9,7 +9,7 @@
 
 ## API 列表
 
-- `memory_element_cpp_type(memory_type: NnMemoryType, ctx: EmitCContext) -> str`
+- 无公开 API。
 
 ## 文档信息
 
@@ -37,16 +37,12 @@
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 本目录只通过 `EmitCContext` 与注册体系生效。
-- `memory_element_cpp_type(...)` 是本目录唯一公开 helper，由 `type.py` 实现并由 `__init__.py` 的 `__all__` 导出。
+- 本目录只通过 import side effect 注册 type/space 发射实现，不导出公开 helper。
 - 目录内未列入公开 API 的注册函数与 helper 不得跨文件直接调用。
 
 ## API详细说明
 
-### `memory_element_cpp_type(memory_type: NnMemoryType, ctx: EmitCContext) -> str`
-
-- api：`memory_element_cpp_type(memory_type: NnMemoryType, ctx: EmitCContext) -> str`
-- 功能说明：返回 `npu_demo` memory element 的 C++ 类型文本；携带 `template_name` 时返回模板名，否则返回 `ctx.dispatch_type(memory_type.element_type)`。
-- 注意事项：该 helper 只用于 C++ dtype 文本输出；dtype size、cast、alignment 和 verifier 仍必须读取真实 `element_type`。
+- 无公开 API 详细说明。
 
 ## 测试
 

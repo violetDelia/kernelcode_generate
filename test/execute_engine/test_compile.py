@@ -433,6 +433,29 @@ def test_execute_engine_compile_rejects_template_memory_without_concrete_dtype()
     assert exc.value.failure_phrase == "template_instance_required"
 
 
+def test_execute_engine_compile_template_shim_uses_generated_dtype_seed_aliases() -> None:
+    """验证 generated source 的 dtype seed alias 能精确绑定模板实参。"""
+
+    source = """
+using __kernel_gen_template_instance_seed_templated_kernel__T1 = Memory<MemorySpace::GM, float>;
+using __kernel_gen_template_instance_seed_templated_kernel__T2 = Memory<MemorySpace::GM, int32_t>;
+
+template <typename T1, typename T2>
+void templated_kernel(Memory<MemorySpace::GM, T1>& out, Memory<MemorySpace::GM, T2>& lhs) {
+    (void)out;
+    (void)lhs;
+}
+"""
+    kernel = ExecutionEngine(target="npu_demo").compile(source=source, function="templated_kernel")
+    try:
+        unit = (Path(kernel.soname_path).parent / "kernel.cpp").read_text(encoding="utf-8")
+        assert "Memory<MemorySpace::GM, float> arg0(" in unit
+        assert "Memory<MemorySpace::GM, int32_t> arg1(" in unit
+        assert "templated_kernel<float, int32_t>(arg0, arg1);" in unit
+    finally:
+        kernel.close()
+
+
 def test_execute_engine_compile_template_shim_uses_nearest_wrapper_template_header() -> None:
     """验证前置 templated helper 声明不会遮蔽目标 wrapper 的模板参数。"""
 

@@ -173,7 +173,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "tile-analysis",
         'lower-dma-memory-hierarchy:True:matmul{["", "tlm1", "tlm2"]}',
         "symbol-buffer-hoist",
-        "memory-pool:False:1024",
+        "memory-pool:True:0",
         "attach-arch-information",
         "outline-device-kernel",
         "template-name-infer",
@@ -218,7 +218,10 @@ def test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain(
     assert "template = T1" in module_text
     assert "template = T2" in module_text
     assert "template = T3" in module_text
-    assert "dma.alloc" in module_text
+    assert "arch.get_dynamic_memory" in module_text
+    assert "dma.view" in module_text
+    assert "dma.reshape" in module_text
+    assert "dma.alloc" not in module_text
     assert "allalloc" not in module_text
     assert "void matmul_kernel(" in source
     assert "S_INT _cost_DMA1_matmul_kernel_device(" not in source
@@ -230,4 +233,5 @@ def test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain(
     assert ", S_INT arg3, S_INT arg4" in source
     assert "npu_demo::launch<c_0, c_1, c_2, c_3>(matmul_kernel_device<" in source
     assert "arg0, arg1, arg2, arg3, arg4);" in source
-    assert "alloc<TSM" in source
+    assert "get_dynamic_memory" in source
+    assert ".view<" in source or ".template view<" in source

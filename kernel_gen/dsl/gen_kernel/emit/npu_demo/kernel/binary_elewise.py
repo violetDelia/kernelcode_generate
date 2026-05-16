@@ -21,8 +21,25 @@ from __future__ import annotations
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnMemoryType
 
-from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
+
+
+def _memory_element_cpp_type(memory_type: NnMemoryType, ctx) -> str:
+    """返回当前文件发射 kernel.binary_elewise 所需的 C++ element type。
+
+    功能说明:
+    - 优先使用 `NnMemoryType.template_name` 作为模板 dtype。
+    - 未携带 template name 时通过 `ctx.dispatch_type(...)` 发射真实 element type。
+
+    使用示例:
+    - element_type = _memory_element_cpp_type(memory_type, ctx)
+    """
+
+    memory_type.verify()
+    template_name = memory_type.template_name.data
+    if template_name:
+        return template_name
+    return ctx.dispatch_type(memory_type.element_type)
 
 
 @emit_c_impl(KernelBinaryElewiseOp, target="npu_demo")
@@ -75,8 +92,8 @@ def _emit_npu_demo_kernel_binary_elewise(op: KernelBinaryElewiseOp, ctx) -> str:
     lhs_expr = emit_c_value(lhs_value, ctx)
     rhs_expr = emit_c_value(rhs_value, ctx)
     space_expr = ctx.dispatch_attr(out_value.type)
-    input_type = memory_element_cpp_type(lhs_value.type, ctx)
-    output_type = memory_element_cpp_type(out_value.type, ctx)
+    input_type = _memory_element_cpp_type(lhs_value.type, ctx)
+    output_type = _memory_element_cpp_type(out_value.type, ctx)
     return (
         f"{ctx.current_indent}{helper_name}<{space_expr}, {input_type}, {output_type}>"
         f"({out_expr} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"

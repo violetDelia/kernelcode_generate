@@ -118,6 +118,6 @@ def test_conv2d_dynamic_symbol_params_survive_lowering_and_codegen() -> None:
     assert "arg1.get_shape(2)" in source
     assert "arg1.get_shape(3)" in source
     assert "npu_demo::get_dynamic_memory<TSM>()" in source
-    assert ".view<float>(Vector{" in source
+    assert "view<T1>(Vector{" in source
     assert "alloc<TSM" not in source
     assert "S_INT c_6 = 258" not in source

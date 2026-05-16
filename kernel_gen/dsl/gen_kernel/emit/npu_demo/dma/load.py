@@ -22,10 +22,28 @@ from xdsl.dialects.builtin import StringAttr
 from xdsl.ir import Operation
 
 from kernel_gen.dialect.dma import DmaLoadOp
+from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp
 
-from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
+
+
+def _memory_element_cpp_type(memory_type: NnMemoryType, ctx) -> str:
+    """返回当前文件发射 dma.load 所需的 C++ element type。
+
+    功能说明:
+    - 优先使用 `NnMemoryType.template_name` 作为模板 dtype。
+    - 未携带 template name 时通过 `ctx.dispatch_type(...)` 发射真实 element type。
+
+    使用示例:
+    - element_type = _memory_element_cpp_type(memory_type, ctx)
+    """
+
+    memory_type.verify()
+    template_name = memory_type.template_name.data
+    if template_name:
+        return template_name
+    return ctx.dispatch_type(memory_type.element_type)
 
 
 @emit_c_impl(DmaLoadOp, target="npu_demo")
@@ -66,7 +84,7 @@ def _emit_npu_demo_dma_load(op: DmaLoadOp, ctx) -> str:
     offset_expr, size_expr, stride_expr = layout_exprs
     return (
         f"{ctx.current_indent}load<{ctx.dispatch_attr(op.target.type)}, {ctx.dispatch_attr(op.source.type)}, "
-        f"{memory_element_cpp_type(op.target.type, ctx)}, {memory_element_cpp_type(op.source.type, ctx)}>"
+        f"{_memory_element_cpp_type(op.target.type, ctx)}, {_memory_element_cpp_type(op.source.type, ctx)}>"
         f"({target_expr} /*dst*/, {source_expr} /*source*/, {offset_expr} /*offset*/, "
         f"{size_expr} /*size*/, {stride_expr} /*stride*/);"
     )

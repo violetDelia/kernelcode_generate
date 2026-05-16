@@ -21,8 +21,25 @@ from __future__ import annotations
 from kernel_gen.dialect.dma import DmaCastOp
 from kernel_gen.dialect.nn import NnMemoryType
 
-from ..type import memory_element_cpp_type
 from ...register import emit_c_impl
+
+
+def _memory_element_cpp_type(memory_type: NnMemoryType, ctx) -> str:
+    """返回当前文件发射 dma.cast 所需的 C++ element type。
+
+    功能说明:
+    - 优先使用 `NnMemoryType.template_name` 作为模板 dtype。
+    - 未携带 template name 时通过 `ctx.dispatch_type(...)` 发射真实 element type。
+
+    使用示例:
+    - element_type = _memory_element_cpp_type(memory_type, ctx)
+    """
+
+    memory_type.verify()
+    template_name = memory_type.template_name.data
+    if template_name:
+        return template_name
+    return ctx.dispatch_type(memory_type.element_type)
 
 
 @emit_c_impl(DmaCastOp, target="npu_demo")
@@ -31,7 +48,7 @@ def _emit_npu_demo_dma_cast(op: DmaCastOp, ctx) -> str:
 
     功能说明:
     - 根据 `DmaCastOp` 的 target/source memory 生成 `cast<...>(...)` 语句。
-    - memory dtype 模板参数通过 `memory_element_cpp_type(...)` 读取 template name 或真实 dtype。
+    - memory dtype 模板参数由当前文件内 helper 读取 template name 或真实 dtype。
 
     使用示例:
     - stmt = _emit_npu_demo_dma_cast(op, ctx)
@@ -54,7 +71,7 @@ def _emit_npu_demo_dma_cast(op: DmaCastOp, ctx) -> str:
     target_expr = emit_c_value(target_value, ctx)
     source_expr = emit_c_value(source_value, ctx)
     return (
-        f"{ctx.current_indent}cast<{ctx.dispatch_attr(target_type_attr)}, {memory_element_cpp_type(target_type_attr, ctx)}, "
-        f"{memory_element_cpp_type(source_value.type, ctx)}>"
+        f"{ctx.current_indent}cast<{ctx.dispatch_attr(target_type_attr)}, {_memory_element_cpp_type(target_type_attr, ctx)}, "
+        f"{_memory_element_cpp_type(source_value.type, ctx)}>"
         f"({target_expr} /*dst*/, {source_expr} /*source*/);"
     )
