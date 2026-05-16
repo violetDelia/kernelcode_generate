@@ -795,6 +795,50 @@ def test_build_registered_memory_pool_alignment_rejects_invalid_options() -> Non
             build_registered_pass("memory-pool", options)
 
 
+# TC-REGISTRY-007H5
+# 功能说明: 验证 memory-plan 公开 options 可经 registry 构造，并能与通用 fold 组合。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_memory_plan_insert_free_options
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_memory_plan_insert_free_options() -> None:
+    load_builtin_passes()
+    memory_plan_module = importlib.import_module("kernel_gen.passes.memory_plan")
+
+    pass_obj = build_registered_pass("memory-plan", {"insert-free": "true", "fold": "false"})
+
+    assert isinstance(pass_obj, memory_plan_module.MemoryPlanPass)
+    assert pass_obj.name == "memory-plan"
+    assert pass_obj.insert_free is True
+    assert pass_obj.fold is False
+
+
+# TC-REGISTRY-007H6
+# 功能说明: 验证 memory-plan direct from_options 与 registry option 包装错误稳定。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_memory_plan_rejects_invalid_options
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_memory_plan_rejects_invalid_options() -> None:
+    load_builtin_passes()
+    memory_plan_module = importlib.import_module("kernel_gen.passes.memory_plan")
+
+    with pytest.raises(KernelCodeError, match=r"^MemoryPlanOptionError: unknown option 'unknown'$"):
+        memory_plan_module.MemoryPlanPass.from_options({"unknown": "true"})
+    with pytest.raises(KernelCodeError, match=r"^MemoryPlanOptionError: insert-free expects bool$"):
+        memory_plan_module.MemoryPlanPass.from_options({"insert-free": "maybe"})
+    with pytest.raises(
+        KernelCodeError,
+        match=r"^PassRegistryError: pass 'memory-plan' option error: MemoryPlanOptionError: unknown option 'unknown'$",
+    ):
+        build_registered_pass("memory-plan", {"unknown": "true"})
+    with pytest.raises(
+        KernelCodeError,
+        match=r"^PassRegistryError: pass 'memory-plan' option error: MemoryPlanOptionError: insert-free expects bool$",
+    ):
+        build_registered_pass("memory-plan", {"insert-free": "maybe"})
+
+
 # TC-REGISTRY-007I
 # 功能说明: 验证内置加载后 attach-arch-information 通过 registry 返回 ModulePass。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_attach_arch_information_pass
@@ -901,6 +945,7 @@ def test_load_builtin_passes_is_idempotent() -> None:
     assert "no-op" in list_registered_passes()
     assert "inline" in list_registered_passes()
     assert "attach-arch-information" in list_registered_passes()
+    assert "memory-plan" in list_registered_passes()
     assert "no-op-pipeline" in list_registered_pipelines()
     assert "default-lowering" in list_registered_pipelines()
     assert "npu-demo-lowering" in list_registered_pipelines()

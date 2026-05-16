@@ -4,6 +4,8 @@
 功能说明:
 - 提供 pass / pipeline 的进程内注册表，统一“名字 -> 构造器”的解析入口。
 - 为工具层（如 ircheck）提供稳定名称解析能力，避免依赖具体 Python import path。
+- 内置 pass 包含 `memory-plan`，其 `insert-free` 专属 option 由 pass 自身解析，
+  registry 只解析通用 `fold`。
 - 文件内 helper 收口为 `_register_registry_entry`、`_build_registered_pass_instance`、
   `_build_registered_pipeline_manager`、`_pipeline_accepts_options`、`_normalize_options`、
   `_split_fold_option` 与 `_reset_registry_for_test`；这些 helper 仅供本文件内部复用，不属于公开接口。
@@ -498,6 +500,7 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.inline import InlinePass
     from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
     from kernel_gen.passes.memory_pool import MemoryPoolPass
+    from kernel_gen.passes.memory_plan import MemoryPlanPass
     from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
     from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
     from kernel_gen.passes.symbol_buffer_hoist import SymbolBufferHoistPass
@@ -524,6 +527,7 @@ def load_builtin_passes() -> None:
         TileReducePass,
         SymbolLoopHoistPass,
         MemoryPoolPass,
+        MemoryPlanPass,
         LaunchKernelCostFuncPass,
         TemplateNameInferPass,
     ):

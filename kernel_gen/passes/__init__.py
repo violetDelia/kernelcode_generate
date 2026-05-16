@@ -7,6 +7,7 @@
 - 暴露 `attach-arch-information` 的公开入口。
 - 暴露 `buffer-results-to-out-params` 的公开入口。
 - 暴露 `decompass` 专题 pass 的根路径入口。
+- 暴露 `memory-plan` 的公开入口。
 - 暴露 `outline-device-kernel` 的公开入口。
 - 暴露 `symbol-buffer-hoist` 的公开入口与 pattern API。
 - 暴露 `symbol-loop-hoist` 专题 pass 的根路径入口。
@@ -30,6 +31,7 @@ API 列表:
 - `class DecompassPass()`
 - `class NnSoftmaxDecompPattern()`
 - `get_decompass_pass_patterns() -> list[RewritePattern]`
+- `class MemoryPlanPass(insert_free: bool = False, fold: bool = True)`
 - `class OutlineDeviceKernelPass()`
 - `class DmaAllocInSymbolForHoistPattern()`
 - `get_symbol_buffer_hoist_patterns() -> list[RewritePattern]`
@@ -61,6 +63,8 @@ API 列表:
 - inline_pass = InlinePass()
 - from kernel_gen.passes import AttachArchInformationPass
 - attach_pass = AttachArchInformationPass(target="npu_demo")
+- from kernel_gen.passes import MemoryPlanPass
+- memory_plan_pass = MemoryPlanPass(insert_free=True)
 - from kernel_gen.passes import OutlineDeviceKernelPass
 - outline_pass = OutlineDeviceKernelPass()
 - from kernel_gen.passes import DmaAllocInSymbolForHoistPattern, SymbolBufferHoistPass
@@ -80,6 +84,7 @@ API 列表:
 - spec:
   - spec/pass/pass_manager.md
   - spec/pass/decompass.md
+  - spec/pass/memory_plan.md
   - spec/pass/buffer_results_to_out_params.md
   - spec/pass/inline.md
   - spec/pass/attach_arch_information.md
@@ -96,6 +101,7 @@ API 列表:
 - test/passes/tile/test_elewise.py
 - test/passes/tile/test_reduce.py
 - test/passes/test_symbol_loop_hoist.py
+- test/passes/test_memory_plan.py
 - 功能实现:
   - kernel_gen/passes/pass_manager.py
   - kernel_gen/passes/common.py
@@ -103,6 +109,7 @@ API 列表:
   - kernel_gen/passes/attach_arch_information.py
   - kernel_gen/passes/buffer_results_to_out_params.py
   - kernel_gen/passes/decompass.py
+  - kernel_gen/passes/memory_plan.py
 - kernel_gen/passes/outline_device_kernel.py
 - kernel_gen/passes/symbol_buffer_hoist.py
 - kernel_gen/passes/template_name_infer.py
@@ -125,6 +132,7 @@ from .decompass import (
     get_decompass_pass_patterns,
 )
 from .inline import InlinePass
+from .memory_plan import MemoryPlanPass
 from .outline_device_kernel import OutlineDeviceKernelPass
 from .symbol_buffer_hoist import (
     DmaAllocInSymbolForHoistPattern,
@@ -163,6 +171,7 @@ __all__ = [
     "DecompassPass",
     "NnSoftmaxDecompPattern",
     "get_decompass_pass_patterns",
+    "MemoryPlanPass",
     "OutlineDeviceKernelPass",
     "DmaAllocInSymbolForHoistPattern",
     "get_symbol_buffer_hoist_patterns",
