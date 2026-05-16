@@ -131,7 +131,7 @@ store/deslice -> 把 source 写回 target 指定窗口
 - api：`fill(target: Memory, value: int | float | str | SymbolDim) -> None`
 - 参数：
   - `target`：目标内存或目标节点；类型 `Memory`；无默认值；不允许 None；作为写入、填充或回写位置。
-  - `value`：输入值；类型 `int | float | str | SymbolDim`；无默认值；不允许 None，除非签名显式允许；用于当前节点、op 或转换的主输入。
+  - `value`：填充值；类型 `int | float | str | SymbolDim`；无默认值；不允许 None；`int` 不含 `bool`，`float` 必须有限，`str` 只允许 `"inf"` 与 `"-inf"`。
 - 返回值：无返回值；调用成功表示对应 AST、IR 或 runtime 动作已完成。
 - 使用示例：
 
@@ -140,8 +140,8 @@ store/deslice -> 把 source 写回 target 指定窗口
 
     result = dma.fill(target=target, value=value)
     ```
-- 功能说明：执行 DMA operation `fill` 的公开 Python 入口，返回或修改 `Memory` 对象。
-- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+- 功能说明：执行 DMA operation `fill` 的公开 Python 入口，表达对现有 `Memory` 的整块标量初始化意图。
+- 注意事项：`target` 必须是公开 `Memory`；`value=True/False`、非有限 float（含 `inf/-inf/nan` float 对象）与任意非 `"inf"` / `"-inf"` 字符串必须在 helper 层拒绝；规范字符串 `"inf"` / `"-inf"` 只表达后续 MLIR 层面可物化的浮点无穷字面量。
 
 ### `free(value: Memory) -> None`
 
@@ -368,7 +368,7 @@ store/deslice -> 把 source 写回 target 指定窗口
 - api：`kernel_gen.operation.dma.fill(target: Memory, value: int | float | str | SymbolDim) -> None`
 - 参数：
   - `target`：目标内存或目标节点；类型 `Memory`；无默认值；不允许 None；作为写入、填充或回写位置。
-  - `value`：输入值；类型 `int | float | str | SymbolDim`；无默认值；不允许 None，除非签名显式允许；用于当前节点、op 或转换的主输入。
+  - `value`：填充值；类型 `int | float | str | SymbolDim`；无默认值；不允许 None；`int` 不含 `bool`，`float` 必须有限，`str` 只允许 `"inf"` 与 `"-inf"`。
 - 返回值：无返回值；调用成功表示对应 AST、IR 或 runtime 动作已完成。
 - 使用示例：
 
@@ -377,8 +377,8 @@ store/deslice -> 把 source 写回 target 指定窗口
 
     operation.dma.fill(target=target, value=value)
     ```
-- 功能说明：执行 DMA operation `kernel_gen.operation.dma.fill` 的公开 Python 入口，返回或修改 `Memory` 对象。
-- 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
+- 功能说明：执行 DMA operation `kernel_gen.operation.dma.fill` 的公开 Python 入口，表达对现有 `Memory` 的整块标量初始化意图。
+- 注意事项：`target` 必须是公开 `Memory`；`value=True/False`、非有限 float（含 `inf/-inf/nan` float 对象）与任意非 `"inf"` / `"-inf"` 字符串必须在 helper 层拒绝；规范字符串 `"inf"` / `"-inf"` 只表达后续 MLIR 层面可物化的浮点无穷字面量。
 
 ### `kernel_gen.operation.dma.broadcast(target: Memory, source: Memory) -> None`
 

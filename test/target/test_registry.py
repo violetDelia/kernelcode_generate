@@ -413,10 +413,10 @@ def test_target_registry_npu_demo_template() -> None:
     assert target_registry.get_target_hardware("npu_demo", "subthread_num") == 1
     assert target_registry.get_target_hardware("npu_demo", "sm_memory_size") == 0
     assert target_registry.get_target_hardware("npu_demo", "lm_memory_size") == 0
-    assert target_registry.get_target_hardware("npu_demo", "tsm_memory_size") == 24576
-    assert target_registry.get_target_hardware("npu_demo", "tlm1_memory_size") == 1024
-    assert target_registry.get_target_hardware("npu_demo", "tlm2_memory_size") == 512
-    assert target_registry.get_target_hardware("npu_demo", "tlm3_memory_size") == 512
+    assert target_registry.get_target_hardware("npu_demo", "tsm_memory_size") == 2097152
+    assert target_registry.get_target_hardware("npu_demo", "tlm1_memory_size") == 524288
+    assert target_registry.get_target_hardware("npu_demo", "tlm2_memory_size") == 1048576
+    assert target_registry.get_target_hardware("npu_demo", "tlm3_memory_size") == 1048576
 
 
 # TC-TGT-012
@@ -446,7 +446,7 @@ def test_target_registry_npu_demo_supports_launch_and_barrier_caps() -> None:
     assert target_registry.get_target_hardware("npu_demo", "subthread_num") == 1
     assert target_registry.get_target_hardware("npu_demo", "sm_memory_size") == 0
     assert target_registry.get_target_hardware("npu_demo", "lm_memory_size") == 0
-    assert target_registry.get_target_hardware("npu_demo", "tsm_memory_size") == 24576
-    assert target_registry.get_target_hardware("npu_demo", "tlm1_memory_size") == 1024
-    assert target_registry.get_target_hardware("npu_demo", "tlm2_memory_size") == 512
-    assert target_registry.get_target_hardware("npu_demo", "tlm3_memory_size") == 512
+    assert target_registry.get_target_hardware("npu_demo", "tsm_memory_size") == 2097152
+    assert target_registry.get_target_hardware("npu_demo", "tlm1_memory_size") == 524288
+    assert target_registry.get_target_hardware("npu_demo", "tlm2_memory_size") == 1048576
+    assert target_registry.get_target_hardware("npu_demo", "tlm3_memory_size") == 1048576

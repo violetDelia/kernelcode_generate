@@ -58,7 +58,6 @@ def test_ast_package_exports_only_current_public_nodes() -> None:
         "KernelReduceAST",
         "KernelMatmulAST",
         "KernelImg2Col2dAST",
-        "parse",
         "parse_function",
         "DslAstVisitor",
     )
@@ -72,6 +71,7 @@ def test_ast_package_exports_only_current_public_nodes() -> None:
         "build_func_op",
         "build_func_op_from_ast",
         "parse_function_with_env",
+        "parse",
         "TensorAST",
         "ScalarArgAST",
         "ConstAST",

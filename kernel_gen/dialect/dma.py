@@ -105,11 +105,12 @@ def _verify_memory_operand(value: SSAValue, field_name: str) -> NnMemoryType:
 
 
 def _verify_fill_value_operand(value: SSAValue, field_name: str) -> SSAValue:
-    """校验 `dma.fill` 的整数标量 operand。
+    """校验 `dma.fill` 的数值标量 operand。
 
 
     功能说明:
-    - 当前仅接受 builtin `i32` 或 `!symbol.int<#symbol.expr<expr>>`。
+    - 当前接受 builtin 整型、builtin 浮点或 `!symbol.int<#symbol.expr<expr>>`。
+    - builtin `i1` 视为 bool，不属于 `dma.fill` 数值标量。
     - 若为 `!symbol.int<#symbol.expr<expr>>`，同步触发其类型校验。
 
     使用示例:
@@ -121,12 +122,68 @@ def _verify_fill_value_operand(value: SSAValue, field_name: str) -> SSAValue:
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    if value.type == i32:
+    if isinstance(value.type, IntegerType) and int(value.type.width.data) != 1:
+        return value
+    if isinstance(value.type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
         return value
     if isinstance(value.type, SymbolValueType):
         value.type.verify()
         return value
-    raise VerifyException(f"{field_name} must be builtin i32 or !symbol.int")
+    raise VerifyException(f"{field_name} must be builtin integer, builtin float or !symbol.int")
+
+
+def _verify_fill_target_element_type(element_type: Attribute) -> None:
+    """校验 `dma.fill` 目标 memory element type。
+
+
+    功能说明:
+    - 允许公开数值 memory dtype，拒绝 bool 与非数值类型。
+
+    使用示例:
+    - _verify_fill_target_element_type(target_type.element_type)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if isinstance(element_type, IntegerType):
+        if int(element_type.width.data) == 1:
+            raise VerifyException("dma.fill target element_type must be numeric and not bool")
+        return
+    if isinstance(element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
+        return
+    raise VerifyException("dma.fill target element_type must be numeric and not bool")
+
+
+def _verify_fill_value_matches_target(value_type: Attribute, target_element_type: Attribute) -> None:
+    """校验 `dma.fill` value 与 target dtype 的公开兼容性。
+
+
+    功能说明:
+    - `!symbol.int` 可填充非 bool 数值 memory。
+    - builtin 整数只能填充整数 memory，builtin 浮点只能填充浮点 memory。
+
+    使用示例:
+    - _verify_fill_value_matches_target(op.value.type, target_type.element_type)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if isinstance(value_type, SymbolValueType):
+        return
+    if isinstance(value_type, IntegerType) and isinstance(target_element_type, IntegerType):
+        return
+    if isinstance(value_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)) and isinstance(
+        target_element_type,
+        (Float16Type, BFloat16Type, Float32Type, Float64Type),
+    ):
+        return
+    raise VerifyException("dma.fill value type must match target element_type")
 
 
 def _operand_int_value(value: SSAValue) -> int | None:
@@ -1056,8 +1113,8 @@ class DmaFillOp(IRDLOperation):
 
 
         功能说明:
-        - `target` 必须为 `!nn.memory<..., i32, ...>`。
-        - `value` 当前仅允许 builtin `i32` 或 `!symbol.int<#symbol.expr<expr>>`。
+        - `target` 必须为非 bool 数值 `!nn.memory<...>`。
+        - `value` 允许 builtin 整数、builtin 浮点或 `!symbol.int<#symbol.expr<expr>>`。
 
         使用示例:
         - DmaFillOp(...).verify_()
@@ -1069,9 +1126,9 @@ class DmaFillOp(IRDLOperation):
         """
 
         target_type = _verify_memory_operand(self.target, "target")
-        if target_type.element_type != i32:
-            raise VerifyException("dma.fill target element_type must be i32")
-        _verify_fill_value_operand(self.value, "value")
+        _verify_fill_target_element_type(target_type.element_type)
+        value = _verify_fill_value_operand(self.value, "value")
+        _verify_fill_value_matches_target(value.type, target_type.element_type)
 
 
 @irdl_op_definition

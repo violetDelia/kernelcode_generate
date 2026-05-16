@@ -62,6 +62,7 @@ from typing import ClassVar
 
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
 os.environ.setdefault("SYMPY_GMPY", "0")
+import sympy as sp
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerAttr, IntegerType, StringAttr, f32, f64, i1, i32
 from xdsl.dialect_interfaces.constant_materialization import ConstantMaterializationInterface
@@ -1295,6 +1296,166 @@ def _symbol_arith_operand_expr_node(attr: Attribute) -> _SymbolExprNode | None:
     return None
 
 
+def _symbol_expr_node_to_sympy(node: _SymbolExprNode) -> sp.Basic | None:
+    """把可证明的 symbol 表达节点转换为 SymPy 表达式。
+
+    功能说明:
+    - 只覆盖 full-tile `min(step, end - iter<start,end,step>)` 证明所需的整数、symbol、加减乘与一元负号。
+    - 不支持 `?`、iter token 或整除类表达，调用方遇到 `None` 时保守不 fold。
+
+    使用示例:
+    - expr = _symbol_expr_node_to_sympy(_parse_symbol_expr_from_text("M + 4"))
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    if node.kind == "const":
+        if isinstance(node.value, int):
+            return sp.Integer(node.value)
+        return None
+    if node.kind == "symbol":
+        return sp.Symbol(str(node.value), integer=True)
+    if node.kind == "neg":
+        operand = _symbol_expr_node_to_sympy(node.args[0])
+        return -operand if operand is not None else None
+    if node.kind == "add":
+        terms = [_symbol_expr_node_to_sympy(term) for term in node.args]
+        if any(term is None for term in terms):
+            return None
+        return sum(terms, sp.Integer(0))
+    if node.kind == "sub":
+        lhs = _symbol_expr_node_to_sympy(node.args[0])
+        rhs = _symbol_expr_node_to_sympy(node.args[1])
+        if lhs is None or rhs is None:
+            return None
+        return lhs - rhs
+    if node.kind == "mul":
+        factors = [_symbol_expr_node_to_sympy(factor) for factor in node.args]
+        if any(factor is None for factor in factors):
+            return None
+        product: sp.Basic = sp.Integer(1)
+        for factor in factors:
+            assert factor is not None
+            product *= factor
+        return product
+    return None
+
+
+def _symbol_expr_bounds_are_full_tiles(start: _SymbolExprNode, end: _SymbolExprNode, step: _SymbolExprNode) -> bool:
+    """判断 `start -> end step step` 是否静态可证为 full-tile。
+
+    功能说明:
+    - 证明 `(end - start) / step` 是正整数。
+    - 只用于 tail `symbol.min` 的安全 fold，不做通用不等式求解。
+
+    使用示例:
+    - if _symbol_expr_bounds_are_full_tiles(start, end, step): ...
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    if _get_symbol_expr_const(step) == 0:
+        return False
+    start_expr = _symbol_expr_node_to_sympy(start)
+    end_expr = _symbol_expr_node_to_sympy(end)
+    step_expr = _symbol_expr_node_to_sympy(step)
+    if start_expr is None or end_expr is None or step_expr is None:
+        return False
+    quotient = sp.simplify((end_expr - start_expr) / step_expr)
+    if quotient.is_Integer:
+        return int(quotient) > 0
+    return quotient.is_integer is True and quotient.is_positive is True
+
+
+def _symbol_expr_full_tile_residual_step(residual: _SymbolExprNode) -> _SymbolExprNode | None:
+    """匹配 full-tile tail residual 的 step 表达。
+
+    功能说明:
+    - 匹配 `end - iter<start,end,step>`。
+    - 只有 `(end-start)` 可证为 `step` 的正整数倍时返回 `step`。
+
+    使用示例:
+    - step = _symbol_expr_full_tile_residual_step(residual)
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    if residual.kind != "sub":
+        return None
+    end_node, iter_node = residual.args
+    if iter_node.kind != "iter":
+        return None
+    start, end, step = iter_node.args
+    if end_node != end:
+        return None
+    if not _symbol_expr_bounds_are_full_tiles(start, end, step):
+        return None
+    return step
+
+
+def _symbol_expr_full_tile_min_step(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _SymbolExprNode | None:
+    """匹配 full-tile `symbol.min` 可折叠的 step 表达。
+
+    功能说明:
+    - 仅接受 `min(step, end - iter<start,end,step>)` 或交换 operand 的等价形式。
+    - 非 full-tile、无法证明整除或 step 不一致时返回 `None`。
+
+    使用示例:
+    - step = _symbol_expr_full_tile_min_step(lhs, rhs)
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    rhs_step = _symbol_expr_full_tile_residual_step(rhs)
+    if rhs_step is not None and lhs == rhs_step:
+        return lhs
+    lhs_step = _symbol_expr_full_tile_residual_step(lhs)
+    if lhs_step is not None and rhs == lhs_step:
+        return rhs
+    return None
+
+
+def _symbol_min_full_tile_step_value(lhs: SSAValue, rhs: SSAValue) -> SSAValue | None:
+    """匹配 full-tile `symbol.min` 并返回应保留的 step SSA。
+
+    功能说明:
+    - 根据 operand type 的公开表达判断，不依赖 SSA 名称。
+    - 仅供 `symbol.min` verifier / fold 共享 full-tile 识别。
+
+    使用示例:
+    - step_value = _symbol_min_full_tile_step_value(op.lhs, op.rhs)
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    lhs_node = _symbol_arith_operand_expr_node(lhs.type)
+    rhs_node = _symbol_arith_operand_expr_node(rhs.type)
+    if lhs_node is None or rhs_node is None:
+        return None
+    rhs_step = _symbol_expr_full_tile_residual_step(rhs_node)
+    if rhs_step is not None and lhs_node == rhs_step:
+        return lhs
+    lhs_step = _symbol_expr_full_tile_residual_step(lhs_node)
+    if lhs_step is not None and rhs_node == lhs_step:
+        return rhs
+    return None
+
+
 def _requires_unknown_arith_result(lhs_type: Attribute, rhs_type: Attribute) -> bool:
     """判断 symbol 算术结果是否必须为 unknown。
 
@@ -1317,6 +1478,7 @@ def _infer_symbol_arith_result_expr(op_name: str, lhs_type: Attribute, rhs_type:
     功能说明:
     - 对 `SymbolValueType` 与 `SymbolIterType` operand 复用 `SymbolExprAttr` canonical 逻辑。
     - `SymbolIterType` 会转换为 `iter<start,end,step>` token；`?` 场景由调用方使用 unknown 规则处理。
+    - `symbol.min` 始终返回未折叠的 `min(lhs, rhs)` 表达；full-tile tail 的 `step` 是 fold 结果，不是 AST 发射必须提前写入的结果类型。
 
     使用示例:
     - _infer_symbol_arith_result_expr("symbol.add", lhs.type, rhs.type)
@@ -1339,6 +1501,29 @@ def _infer_symbol_arith_result_expr(op_name: str, lhs_type: Attribute, rhs_type:
     if op_name == "symbol.max":
         return _format_symbol_expr_node(_make_symbol_expr_max(lhs, rhs))
     return None
+
+
+def _alternate_symbol_arith_result_exprs(op_name: str, lhs_type: Attribute, rhs_type: Attribute) -> tuple[str, ...]:
+    """返回 verifier 可接受但不要求 AST 提前生成的等价结果表达。
+
+    功能说明:
+    - 当前只为 `symbol.min` full-tile tail 提供已折叠 `step` 表达。
+    - 允许 AST 先发射 `min(step, end - iter<...>)`，也允许后续 fold/pass 将其规约为 `step`。
+
+    使用示例:
+    - alternatives = _alternate_symbol_arith_result_exprs("symbol.min", lhs.type, rhs.type)
+    """
+
+    if op_name != "symbol.min":
+        return ()
+    lhs = _symbol_arith_operand_expr_node(lhs_type)
+    rhs = _symbol_arith_operand_expr_node(rhs_type)
+    if lhs is None or rhs is None:
+        return ()
+    full_tile_step = _symbol_expr_full_tile_min_step(lhs, rhs)
+    if full_tile_step is None:
+        return ()
+    return (_format_symbol_expr_node(full_tile_step),)
 
 
 def _get_concrete_symbol_int_value(attr: Attribute) -> int | None:
@@ -2012,8 +2197,9 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
                 ):
                     _raise_verify_error(f"{self.name} result type must match canonical symbol expression")
             if inferred_expr is not None and result_type.get_value() != _UNKNOWN_SYMBOL_EXPR:
-                expected_type = SymbolValueType.from_expr(inferred_expr)
-                if result_type != expected_type:
+                accepted_exprs = (inferred_expr, *_alternate_symbol_arith_result_exprs(self.name, lhs_type, rhs_type))
+                expected_types = tuple(SymbolValueType.from_expr(expr) for expr in accepted_exprs)
+                if result_type not in expected_types:
                     _raise_verify_error(f"{self.name} result type must match canonical symbol expression")
 
     def fold(self: "_BaseSymbolBinaryArithOp") -> Sequence[SSAValue | Attribute] | None:
@@ -2034,9 +2220,32 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
-        lhs_value = _get_concrete_symbol_int_value(SSAValue.get(self.lhs).type)
-        rhs_value = _get_concrete_symbol_int_value(SSAValue.get(self.rhs).type)
+        lhs_ssa = SSAValue.get(self.lhs)
+        rhs_ssa = SSAValue.get(self.rhs)
         result_type = SSAValue.get(self.result).type
+        if self.name == "symbol.min" and isinstance(result_type, SymbolValueType):
+            step_value = _symbol_min_full_tile_step_value(lhs_ssa, rhs_ssa)
+            if step_value is not None:
+                step_static = _get_concrete_symbol_int_value(step_value.type)
+                result_expr = result_type.get_value()
+                if step_static is not None:
+                    inferred_expr = _infer_symbol_arith_result_expr(self.name, lhs_ssa.type, rhs_ssa.type)
+                    accepted_exprs: tuple[int | str, ...] = (
+                        _UNKNOWN_SYMBOL_EXPR,
+                        step_static,
+                        *((inferred_expr,) if inferred_expr is not None else ()),
+                    )
+                    if result_expr in accepted_exprs:
+                        if step_value.type != result_type:
+                            return (step_value,)
+                        return (IntAttr(step_static),)
+                    return None
+                if step_value.type == result_type:
+                    return (step_value,)
+                return None
+
+        lhs_value = _get_concrete_symbol_int_value(lhs_ssa.type)
+        rhs_value = _get_concrete_symbol_int_value(rhs_ssa.type)
         if lhs_value is None or rhs_value is None or not isinstance(result_type, SymbolValueType):
             return None
 

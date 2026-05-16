@@ -83,6 +83,27 @@ def test_dma_facade_fill_rejects_invalid_string_literal() -> None:
 
 
 # TC-OP-DMA-FACADE-005
+# 测试目的: 验证 `fill` 拒绝 bool 与非有限 float，保留有限 float 与规范 inf 字符串。
+# 使用示例: pytest -q test/operation/test_dma.py -k test_dma_facade_fill_rejects_bool_and_nonfinite_float
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_dma.py
+def test_dma_facade_fill_rejects_bool_and_nonfinite_float() -> None:
+    target = alloc([2, 2], NumericType.Float32)
+    assert fill(target, 1.5) is None
+    assert fill(target, "inf") is None
+    assert fill(target, "-inf") is None
+
+    for value, expected in ((True, "fill value must"), (float("inf"), "finite float"), (float("nan"), "finite float")):
+        try:
+            fill(target, value)
+        except KernelCodeError as exc:
+            assert expected in str(exc)
+        else:
+            raise AssertionError(f"expected KernelCodeError for {value!r}")
+
+
+# TC-OP-DMA-FACADE-006
 # 测试目的: 验证 `dma.broadcast(target, source)` 作为 target-first 公开 helper 返回 None。
 # 使用示例: pytest -q test/operation/test_dma.py -k test_dma_facade_broadcast_returns_none
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -95,7 +116,7 @@ def test_dma_facade_broadcast_returns_none() -> None:
     assert broadcast(target, source) is None
 
 
-# TC-OP-DMA-FACADE-006
+# TC-OP-DMA-FACADE-007
 # 测试目的: 验证 `dma.broadcast` 拒绝 rank、dtype、space 与静态 shape 不兼容。
 # 使用示例: pytest -q test/operation/test_dma.py -k test_dma_facade_broadcast_rejects_invalid_contract
 # 对应功能实现文件路径: kernel_gen/operation/dma.py

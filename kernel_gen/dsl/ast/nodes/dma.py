@@ -34,6 +34,7 @@ API 列表:
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -41,10 +42,10 @@ from typing import ClassVar, TypeAlias
 
 from xdsl.context import Context
 from xdsl.dialects import arith
-from xdsl.dialects.builtin import ArrayAttr, BFloat16Type, Float16Type, Float32Type, Float64Type, FloatAttr, IntegerType, i1
+from xdsl.dialects.builtin import ArrayAttr, BFloat16Type, Float16Type, Float32Type, Float64Type, FloatAttr, IntegerType
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaFreeOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolDivOp, SymbolExprAttr, SymbolFloorDivOp, SymbolGetDimOp, SymbolIterType, SymbolMulOp, SymbolSubOp, SymbolValueType
 from kernel_gen.operation import dma
@@ -147,9 +148,33 @@ def _runtime_value_from_symbol_expr(value: int | str | SymbolDim) -> int | str |
         return value
     if isinstance(value, SymbolDim):
         return value
+    stripped = value.strip()
+    signless = stripped[1:] if stripped.startswith("-") else stripped
+    if signless.isdecimal():
+        return int(stripped)
     if "iter<" in value:
-        return value.strip()
+        return stripped
     return _symbol_dim_from_expr_text(value)
+
+
+def _is_static_symbol_runtime_value(value: int | str | SymbolDim) -> bool:
+    """判断 symbol runtime value 是否是静态整数字面量。
+
+    功能说明:
+    - `dma.alloc` 的 `dynamic_shape` 只能携带非静态维度。
+    - 从 `get_shape()` 读取到的静态数字可能表现为 `!symbol.int<98>`，这里把它视为静态维。
+
+    使用示例:
+    - `_is_static_symbol_runtime_value("98")`
+    """
+
+    runtime_value = _runtime_value_from_symbol_expr(value)
+    if isinstance(runtime_value, int) and not isinstance(runtime_value, bool):
+        return True
+    if isinstance(runtime_value, SymbolDim):
+        public_value = runtime_value.get_value()
+        return isinstance(public_value, int) and not isinstance(public_value, bool)
+    return False
 
 
 def _contains_iter_token_value(values: list[int | str | SymbolDim]) -> bool:
@@ -860,9 +885,11 @@ class DmaAllocAST(ValueAST):
                 block.add_op(shape_op)
                 emitted_value = shape_op.results[0]
                 value = emitted_value.type.get_value()
-                shape_values.append(_runtime_value_from_symbol_expr(value))
-                shape_attr_values.append(value)
-                dynamic_shape.append(emitted_value)
+                runtime_value = _runtime_value_from_symbol_expr(value)
+                shape_values.append(runtime_value)
+                shape_attr_values.append(runtime_value if isinstance(runtime_value, int) else value)
+                if not _is_static_symbol_runtime_value(value):
+                    dynamic_shape.append(emitted_value)
             elif isinstance(item, ValueAST):
                 emitted = item.emit_mlir(ctx, block)
                 if isinstance(emitted, Operation):
@@ -873,9 +900,11 @@ class DmaAllocAST(ValueAST):
                 if not isinstance(emitted_value, SSAValue) or not isinstance(emitted_value.type, SymbolValueType):
                     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "alloc shape must lower to symbol.int")
                 value = emitted_value.type.get_value()
-                shape_values.append(_runtime_value_from_symbol_expr(value))
-                shape_attr_values.append(value)
-                dynamic_shape.append(emitted_value)
+                runtime_value = _runtime_value_from_symbol_expr(value)
+                shape_values.append(runtime_value)
+                shape_attr_values.append(runtime_value if isinstance(runtime_value, int) else value)
+                if not _is_static_symbol_runtime_value(value):
+                    dynamic_shape.append(emitted_value)
         stride_values: list[SymbolRuntimeValue] | None = None
         if self.stride is not None:
             stride_values = []
@@ -1516,7 +1545,15 @@ class DmaFillAST(StatementAST):
             self.value = ConstValueAST(self.value, location=self.location)
 
     def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """将 DMA fill 节点发射为标量 broadcast。"""
+        """将 DMA fill 节点发射为 `dma.fill`。
+
+        功能说明:
+        - 根据 target memory dtype 物化标量 SSA operand。
+        - 返回 `DmaFillOp`，不再复用 `dma.broadcast` 表达整块标量初始化。
+
+        使用示例:
+        - op = DmaFillAST(target, 0).emit_mlir(ctx, block)
+        """
 
         assert isinstance(ctx, Context)
         assert isinstance(block, Block)
@@ -1528,6 +1565,8 @@ class DmaFillAST(StatementAST):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fill target must lower to nn.memory")
         value = self.value.raw_value if isinstance(self.value, ConstValueAST) else self.value
         element_type = target.type.element_type
+        if isinstance(element_type, IntegerType) and int(element_type.width.data) == 1:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fill bool target is not supported")
         if isinstance(value, str):
             if value not in {"inf", "-inf"}:
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, 'fill string literal must be "inf" or "-inf"')
@@ -1535,11 +1574,9 @@ class DmaFillAST(StatementAST):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fill string literal requires float memory")
             value_op = arith.ConstantOp(FloatAttr(float(value), element_type))
             block.add_op(value_op)
-            return DmaBroadcastOp(target, value_op.results[0])
+            return DmaFillOp(target, value_op.results[0])
         if isinstance(value, bool):
-            value_op = arith.ConstantOp.from_int_and_width(1 if value else 0, i1)
-            block.add_op(value_op)
-            return DmaBroadcastOp(target, value_op.results[0])
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fill bool value is not supported")
         if isinstance(value, int):
             if isinstance(element_type, IntegerType):
                 value_op = ConstValueAST(value, location=self.location).emit_mlir(ctx, block)
@@ -1551,20 +1588,22 @@ class DmaFillAST(StatementAST):
                 block.add_op(value_op)
                 value_op = value_op.results[0]
             assert isinstance(value_op, SSAValue)
-            return DmaBroadcastOp(target, value_op)
+            return DmaFillOp(target, value_op)
         if isinstance(value, float):
+            if not math.isfinite(value):
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fill float value must be finite float")
             if not isinstance(element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "fill float value requires float memory")
             value_op = arith.ConstantOp(FloatAttr(value, element_type))
             block.add_op(value_op)
-            return DmaBroadcastOp(target, value_op.results[0])
+            return DmaFillOp(target, value_op.results[0])
         if isinstance(value, ValueAST):
             value = value.emit_mlir(ctx, block)
             if isinstance(value, Operation):
                 block.add_op(value)
                 value = value.results[0]
             if isinstance(value, SSAValue):
-                return DmaBroadcastOp(target, value)
+                return DmaFillOp(target, value)
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "Unsupported fill value")
 
 

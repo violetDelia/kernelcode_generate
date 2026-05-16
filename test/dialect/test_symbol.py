@@ -29,7 +29,7 @@ from xdsl.context import Context
 from xdsl.dialects.arith import Arith, ConstantOp
 from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, IntegerAttr, IntegerType, StringAttr, bf16, f16, f32, f64, i1, i8, i16, i32, i64
 from xdsl.dialects.test import Test, TestOp as _TestOp
-from xdsl.ir import Attribute, Block, Operation, Region
+from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.folder import Folder
 from xdsl.parser import Parser
 from xdsl.printer import Printer
@@ -463,6 +463,126 @@ def test_symbol_binary_arith_fold_rejects_unknown_and_iter_operands() -> None:
 
     assert folder.try_fold(unknown_op) is None
     assert folder.try_fold(iter_op) is None
+
+
+def _assert_symbol_min_folds_to_const(op: Operation, expected: int) -> None:
+    """断言公开 Folder 将 symbol.min fold 为 symbol.const。
+
+    功能说明:
+    - 复用 full-tile tail min 与静态二元 min 的 fold 结果检查。
+
+    使用示例:
+    - _assert_symbol_min_folds_to_const(op, 16)
+    """
+
+    folded = Folder(_build_context()).try_fold(op)
+    assert folded is not None
+    values, new_ops = folded
+    assert len(values) == 1
+    assert len(new_ops) == 1
+    assert isinstance(new_op := new_ops[0], SymbolConstOp)
+    assert new_op.value.data == expected
+    assert new_op.result.type == SymbolValueType.from_expr(str(expected))
+
+
+def _assert_symbol_min_folds_to_existing_value(op: Operation, expected: Operation | SSAValue) -> None:
+    """断言公开 Folder 将 symbol.min fold 为已有 step SSA。
+
+    功能说明:
+    - 覆盖动态 step full-tile 场景，要求不新建 symbol.const。
+
+    使用示例:
+    - _assert_symbol_min_folds_to_existing_value(op, step)
+    """
+
+    expected_value = SSAValue.get(expected)
+    folded = Folder(_build_context()).try_fold(op)
+    assert folded is not None
+    values, new_ops = folded
+    assert values == [expected_value]
+    assert new_ops == []
+
+
+def test_symbol_min_fold_full_tile_static_tail_to_step_const() -> None:
+    """symbol.min 对静态 full-tile tail 直接 fold 为 step 常量。"""
+
+    start, end, step = 2, 14, 4
+    iter_expr = f"iter<{start},{end},{step}>"
+    iter_value = _TestOp(result_types=[SymbolIterType.from_bounds(str(start), str(end), str(step))]).results[0]
+    residual = SymbolSubOp(SymbolConstOp(end).result, iter_value, SymbolValueType.from_expr(f"{end} - {iter_expr}"))
+    min_op = SymbolMinOp(SymbolConstOp(step).result, residual.result, SymbolValueType.from_expr(str(step)))
+
+    residual.verify()
+    min_op.verify()
+    _assert_symbol_min_folds_to_const(min_op, step)
+
+
+def test_symbol_min_full_tile_static_tail_accepts_unfolded_result_type() -> None:
+    """symbol.min full-tile tail 允许 AST 先发射未折叠 min result type。"""
+
+    start, end, step = 0, 32, 8
+    iter_expr = f"iter<{start},{end},{step}>"
+    iter_value = _TestOp(result_types=[SymbolIterType.from_bounds(str(start), str(end), str(step))]).results[0]
+    residual = SymbolSubOp(SymbolConstOp(end).result, iter_value, SymbolValueType.from_expr(f"{end} - {iter_expr}"))
+    min_op = SymbolMinOp(
+        SymbolConstOp(step).result,
+        residual.result,
+        SymbolValueType.from_expr(f"min({step}, {end} - {iter_expr})"),
+    )
+
+    residual.verify()
+    min_op.verify()
+    _assert_symbol_min_folds_to_existing_value(min_op, min_op.lhs)
+
+
+def test_symbol_min_fold_full_tile_dynamic_bounds_to_step_const() -> None:
+    """symbol.min 对动态起止但静态 step 的 full-tile tail fold 为 step 常量。"""
+
+    start_expr = "B"
+    end_expr = "B + 24"
+    step = 8
+    iter_expr = f"iter<{start_expr},{end_expr},{step}>"
+    iter_value = _TestOp(result_types=[SymbolIterType.from_bounds(start_expr, end_expr, str(step))]).results[0]
+    residual = SymbolSubOp(_make_symbol_value(end_expr), iter_value, SymbolValueType.from_expr(f"{end_expr} - {iter_expr}"))
+    min_op = SymbolMinOp(SymbolConstOp(step).result, residual.result, SymbolValueType.from_expr(str(step)))
+
+    residual.verify()
+    min_op.verify()
+    _assert_symbol_min_folds_to_const(min_op, step)
+
+
+def test_symbol_min_fold_full_tile_dynamic_step_to_existing_step() -> None:
+    """symbol.min 对动态 step 的 full-tile tail fold 为原 step SSA。"""
+
+    start_expr = "B"
+    step_expr = "S"
+    end_expr = "B + 3*S"
+    iter_expr = f"iter<{start_expr},{end_expr},{step_expr}>"
+    step_value = _make_symbol_value(step_expr)
+    iter_value = _TestOp(result_types=[SymbolIterType.from_bounds(start_expr, end_expr, step_expr)]).results[0]
+    residual = SymbolSubOp(_make_symbol_value(end_expr), iter_value, SymbolValueType.from_expr(f"{end_expr} - {iter_expr}"))
+    min_op = SymbolMinOp(step_value, residual.result, SymbolValueType.from_expr(step_expr))
+
+    residual.verify()
+    min_op.verify()
+    _assert_symbol_min_folds_to_existing_value(min_op, step_value)
+
+
+def test_symbol_min_fold_full_tile_zero_to_symbol_multiple() -> None:
+    """symbol.min 对 `0 -> count*N step N` 的 full-tile tail fold 为原 step SSA。"""
+
+    start_expr = "0"
+    step_expr = "N"
+    end_expr = "5*N"
+    iter_expr = f"iter<{start_expr},{end_expr},{step_expr}>"
+    step_value = _make_symbol_value(step_expr)
+    iter_value = _TestOp(result_types=[SymbolIterType.from_bounds(start_expr, end_expr, step_expr)]).results[0]
+    residual = SymbolSubOp(_make_symbol_value(end_expr), iter_value, SymbolValueType.from_expr(f"{end_expr} - {iter_expr}"))
+    min_op = SymbolMinOp(step_value, residual.result, SymbolValueType.from_expr(step_expr))
+
+    residual.verify()
+    min_op.verify()
+    _assert_symbol_min_folds_to_existing_value(min_op, step_value)
 
 
 # TC-SYM-051

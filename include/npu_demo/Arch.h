@@ -66,10 +66,10 @@ static constexpr long long kThreadCapability = 8;
 static constexpr long long kSubthreadCapability = 1;
 static constexpr long long kSmMemorySize = 0;
 static constexpr long long kLmMemorySize = 0;
-static constexpr long long kTsmMemorySize = 24576;
-static constexpr long long kTlm1MemorySize = 1024;
-static constexpr long long kTlm2MemorySize = 512;
-static constexpr long long kTlm3MemorySize = 512;
+static constexpr long long kTsmMemorySize = 2097152;
+static constexpr long long kTlm1MemorySize = 524288;
+static constexpr long long kTlm2MemorySize = 1048576;
+static constexpr long long kTlm3MemorySize = 1048576;
 
 /*
 功能说明:
@@ -148,7 +148,7 @@ private:
 - 构造固定一维连续布局的 Memory 视图，并为运行期动态片上内存提供当前线程可写 backing storage。
 
 使用示例:
-- auto tsm = npu_demo::detail::make_linear_memory<TSM, float>(24576);
+- auto tsm = npu_demo::detail::make_linear_memory<TSM, float>(2097152);
 
 
 关联文件:

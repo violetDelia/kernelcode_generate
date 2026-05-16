@@ -4,7 +4,7 @@
 功能说明:
 - 覆盖 dma dialect 的 op verifier 与类型复用约束。
 - 覆盖 SSA `!symbol.int<#symbol.expr<expr>>` operand 动态布局、parse/print round-trip 与默认连续 stride 约束。
-- 覆盖 `dma.fill` 的 `i32 | !symbol.int<#symbol.expr<expr>> -> i32 memory` 最小 verifier 闭环。
+- 覆盖 `dma.fill` 的非 bool 数值 memory 与数值 scalar verifier 闭环。
 
 使用示例:
 - pytest -q test/dialect/test_dma.py
@@ -1256,7 +1256,7 @@ def test_dma_rejects_non_symbol_int_scalar_operands() -> None:
             source_type,
         ).verify()
 
-    with pytest.raises(VerifyException, match="value must be builtin i32 or !symbol.int"):
+    with pytest.raises(VerifyException, match="value must be builtin integer, builtin float or !symbol.int"):
         DmaFillOp(target, index_operand).verify()
 
 
@@ -1274,6 +1274,20 @@ def test_dma_fill_accepts_builtin_i32_scalar_operand() -> None:
 
 
 # TC-DMA-025
+# 功能说明: 验证 dma.fill 接受 builtin float SSA value 并通过 verifier。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_fill_accepts_builtin_float_scalar_operand
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_fill_accepts_builtin_float_scalar_operand() -> None:
+    target_type = _make_memory_type(element_type=f32)
+    target = _TestOp(result_types=[target_type]).results[0]
+    value = _TestOp(result_types=[f32]).results[0]
+
+    DmaFillOp(target, value).verify()
+
+
+# TC-DMA-026
 # 功能说明: 验证 dma.fill 接受 !symbol.int SSA value 并通过 verifier。
 # 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_fill_accepts_symbol_int_scalar_operand
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
@@ -1286,13 +1300,13 @@ def test_dma_fill_accepts_symbol_int_scalar_operand() -> None:
     DmaFillOp(target, value).verify()
 
 
-# TC-DMA-026
-# 功能说明: 验证 dma.fill 会拒绝非 i32 target memory 与未允许的 scalar family。
-# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_fill_rejects_non_i32_target_or_unsupported_scalar
+# TC-DMA-027
+# 功能说明: 验证 dma.fill 会拒绝 bool target/value 与不兼容 scalar family。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_fill_rejects_bool_or_unsupported_scalar
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma.py
-def test_dma_fill_rejects_non_i32_target_or_unsupported_scalar() -> None:
+def test_dma_fill_rejects_bool_or_unsupported_scalar() -> None:
     bad_target_type = _make_memory_type(
         shape=_dim_array([2, 4]),
         stride=_dim_array([4, 1]),
@@ -1302,8 +1316,17 @@ def test_dma_fill_rejects_non_i32_target_or_unsupported_scalar() -> None:
     bad_target = _TestOp(result_types=[bad_target_type]).results[0]
     value = _TestOp(result_types=[i32]).results[0]
 
-    with pytest.raises(VerifyException, match="dma.fill target element_type must be i32"):
+    with pytest.raises(VerifyException, match="dma.fill target element_type must be numeric and not bool"):
         DmaFillOp(bad_target, value).verify()
+
+    target = _TestOp(result_types=[_make_memory_type()]).results[0]
+    bool_value = _TestOp(result_types=[i1]).results[0]
+    float_value = _TestOp(result_types=[f32]).results[0]
+
+    with pytest.raises(VerifyException, match="value must be builtin integer, builtin float or !symbol.int"):
+        DmaFillOp(target, bool_value).verify()
+    with pytest.raises(VerifyException, match="dma.fill value type must match target element_type"):
+        DmaFillOp(target, float_value).verify()
 
 
 # 测试目的: 补充覆盖 dma.copy 的 stride / element_type mismatch verifier 语义。

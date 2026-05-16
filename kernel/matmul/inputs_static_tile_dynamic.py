@@ -3,13 +3,13 @@
 
 功能说明:
 - 实现 `inputs 静 + tile 动` 的二维 matmul kernel demo。
-- 输入 shape 固定为 `lhs[32, 16]`、`rhs[16, 32]`、`out[32, 32]`。
+- 输入 shape 由固定 seed `2026051602` 随机生成并固化为具体数字：`lhs[197, 178]`、`rhs[178, 184]`、`out[197, 184]`。
 - tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数，运行期以 int scalar 绑定。
+- H/W/K 均大于对应 runtime tile，且至少触发两次 tile loop；H/W/K 尾块都通过 `min(tile, dim - iv)` 覆盖。
 - K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 初始化局部 accumulator，K loop 内用 `kernel.matmul/kernel.add` out-first helper 累加 partial，K loop 后最终写回 output。
-- H/W/K 尾块都通过 `min(tile, dim - iv)` 覆盖，避免只覆盖可整除 case。
 
 API 列表:
-- `matmul_inputs_static_tile_dynamic_kernel(out: Tensor[f32, 32, 32], lhs: Tensor[f32, 32, 16], rhs: Tensor[f32, 16, 32], tile_h: SymbolDim, tile_w: SymbolDim, tile_k: SymbolDim) -> None`
+- `matmul_inputs_static_tile_dynamic_kernel(out: Tensor[f32, 197, 184], lhs: Tensor[f32, 197, 178], rhs: Tensor[f32, 178, 184], tile_h: SymbolDim, tile_w: SymbolDim, tile_k: SymbolDim) -> None`
 - `main() -> None`
 
 使用示例:
@@ -23,11 +23,12 @@ API 列表:
 
 from __future__ import annotations
 
+import random
 import sys
 from pathlib import Path
 from typing import TypeAlias
 
-import torch
+import numpy as np
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -44,15 +45,20 @@ from kernel_gen.symbol_variable.type import NumericType
 
 CASE_NAME = "matmul/inputs_static_tile_dynamic"
 DEVICE_ENTRY_NAME = "matmul_inputs_static_tile_dynamic_kernel_device"
-TILE_ARGS = (13, 11, 5)
+TILE_ARGS = (64, 80, 64)
+_STATIC_SHAPE_SEED = 2026051602
+_STATIC_SHAPE_RNG = random.Random(_STATIC_SHAPE_SEED)
+_STATIC_M = _STATIC_SHAPE_RNG.randint(160, 256)
+_STATIC_K = _STATIC_SHAPE_RNG.randint(160, 256)
+_STATIC_N = _STATIC_SHAPE_RNG.randint(160, 256)
 MatmulCompileArg: TypeAlias = "Memory | SymbolDim"
-MatmulRuntimeArg: TypeAlias = "torch.Tensor | int"
+MatmulRuntimeArg: TypeAlias = "np.ndarray | int"
 
 
 def matmul_inputs_static_tile_dynamic_kernel(
-    out: "Tensor[f32, 32, 32]",
-    lhs: "Tensor[f32, 32, 16]",
-    rhs: "Tensor[f32, 16, 32]",
+    out: "Tensor[f32, 197, 184]",
+    lhs: "Tensor[f32, 197, 178]",
+    rhs: "Tensor[f32, 178, 184]",
     tile_h: SymbolDim,
     tile_w: SymbolDim,
     tile_k: SymbolDim,
@@ -101,7 +107,7 @@ def _symbolic_compile_args() -> tuple[MatmulCompileArg, ...]:
 
 
     功能说明:
-    - output/lhs/rhs memory 固定为 `32x32`、`32x16`、`16x32`。
+    - output/lhs/rhs memory 固定为 `197x184`、`197x178`、`178x184`。
     - tile 参数固定使用 `TILE_H/TILE_W/TILE_K`，用于锁定编译期符号 tile。
 
     使用示例:
@@ -109,9 +115,9 @@ def _symbolic_compile_args() -> tuple[MatmulCompileArg, ...]:
     """
 
     return (
-        Memory([32, 32], NumericType.Float32),
-        Memory([32, 16], NumericType.Float32),
-        Memory([16, 32], NumericType.Float32),
+        Memory([_STATIC_M, _STATIC_N], NumericType.Float32),
+        Memory([_STATIC_M, _STATIC_K], NumericType.Float32),
+        Memory([_STATIC_K, _STATIC_N], NumericType.Float32),
         SymbolDim("TILE_H"),
         SymbolDim("TILE_W"),
         SymbolDim("TILE_K"),
@@ -131,9 +137,9 @@ def _assert_static_symbolic_tile_ir(module_text: str) -> None:
     """
 
     required_fragments = (
-        "!nn.memory<[#symbol.expr<32>, #symbol.expr<32>]",
-        "!nn.memory<[#symbol.expr<32>, #symbol.expr<16>]",
-        "!nn.memory<[#symbol.expr<16>, #symbol.expr<32>]",
+        f"!nn.memory<[#symbol.expr<{_STATIC_M}>, #symbol.expr<{_STATIC_N}>]",
+        f"!nn.memory<[#symbol.expr<{_STATIC_M}>, #symbol.expr<{_STATIC_K}>]",
+        f"!nn.memory<[#symbol.expr<{_STATIC_K}>, #symbol.expr<{_STATIC_N}>]",
         "!symbol.int<#symbol.expr<TILE_H>>",
         "!symbol.int<#symbol.expr<TILE_W>>",
         "!symbol.int<#symbol.expr<TILE_K>>",
@@ -199,13 +205,13 @@ def _execute_device_source(source: str, real_args: tuple[MatmulRuntimeArg, ...])
 
 
 def _assert_outputs_close(
-    output: torch.Tensor,
-    expected: torch.Tensor,
+    output: np.ndarray,
+    expected: np.ndarray,
     *,
     atol: float,
     rtol: float,
 ) -> float:
-    """校验真实输出与 PyTorch matmul 参考一致。
+    """校验真实输出与 NumPy matmul 参考一致。
 
 
     功能说明:
@@ -213,14 +219,13 @@ def _assert_outputs_close(
     - 超出容差时抛 `AssertionError`。
 
     使用示例:
-    - `_assert_outputs_close(out, torch.matmul(lhs, rhs), atol=1e-3, rtol=1e-3)`
+    - `_assert_outputs_close(out, np.matmul(lhs, rhs), atol=1e-3, rtol=1e-3)`
     """
 
-    diff = torch.max(torch.abs(output.detach().cpu() - expected.detach().cpu()))
-    max_abs_diff = float(diff.item())
-    if not torch.allclose(output, expected, atol=atol, rtol=rtol):
+    max_abs_diff = float(np.max(np.abs(output - expected)))
+    if not np.allclose(output, expected, atol=atol, rtol=rtol):
         raise AssertionError(
-            f"{CASE_NAME}: output does not match torch reference "
+            f"{CASE_NAME}: output does not match NumPy reference "
             f"(max_abs_diff={max_abs_diff}, atol={atol}, rtol={rtol})"
         )
     return max_abs_diff
@@ -231,19 +236,19 @@ def main() -> None:
 
 
     功能说明:
-    - 使用固定 `32x16x32` matmul shape 与不整除 H/W/K 的 tile。
+    - 使用固定 seed 生成并固化的 `197x178x184` matmul shape 与不整除 H/W/K 的 tile。
     - 编译期以 static memory / symbolic tile 生成 lowering IR 与 npu_demo source。
-    - 运行期执行 device entry，并用 `torch.matmul(lhs, rhs)` 校验输出。
+    - 运行期执行 device entry，并用 `np.matmul(lhs, rhs)` 校验输出。
 
     使用示例:
     - `python3 kernel/matmul/inputs_static_tile_dynamic.py`
     """
 
-    generator = torch.Generator().manual_seed(20260504)
-    lhs = torch.randn((32, 16), generator=generator, dtype=torch.float32)
-    rhs = torch.randn((16, 32), generator=generator, dtype=torch.float32)
-    out = torch.empty((32, 32), dtype=torch.float32)
-    expected = torch.matmul(lhs, rhs)
+    rng = np.random.default_rng(_STATIC_SHAPE_SEED)
+    lhs = rng.standard_normal((_STATIC_M, _STATIC_K), dtype=np.float32)
+    rhs = rng.standard_normal((_STATIC_K, _STATIC_N), dtype=np.float32)
+    out = np.empty((_STATIC_M, _STATIC_N), dtype=np.float32)
+    expected = np.matmul(lhs, rhs)
 
     module, source = run_lowering_demo(CASE_NAME, matmul_inputs_static_tile_dynamic_kernel, *_symbolic_compile_args())
     module_text = str(module)
@@ -253,7 +258,15 @@ def main() -> None:
     max_abs_diff = _assert_outputs_close(out, expected, atol=1e-3, rtol=1e-3)
     print(module_text)
     print(source)
-    print("[IR] static memory evidence: 32x16x32 memory and TILE_H/TILE_W/TILE_K tile present")
+    print(
+        "[ARGS] "
+        f"seed={_STATIC_SHAPE_SEED} shape=(M={_STATIC_M},K={_STATIC_K},N={_STATIC_N}) "
+        f"tile={TILE_ARGS} multi_tile=True tail=True"
+    )
+    print(
+        "[IR] static memory evidence: "
+        f"{_STATIC_M}x{_STATIC_K}x{_STATIC_N} memory and TILE_H/TILE_W/TILE_K tile present"
+    )
     print(f"[CHECK] {CASE_NAME} max_abs_diff={max_abs_diff}")
 
 

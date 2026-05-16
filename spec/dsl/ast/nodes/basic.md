@@ -5,7 +5,7 @@
 - `kernel_gen.dsl.ast.nodes.basic` 定义 DSL AST 基类、值节点、语句节点、模块、函数、绑定、调用与 memory 节点。
 - `symbol` dialect 相关节点由 `spec/dsl/ast/nodes/symbol.md` 与 `kernel_gen.dsl.ast.nodes.symbol` 承载。
 - 控制流节点由 `spec/dsl/ast/nodes/control_flow.md` 与 `kernel_gen.dsl.ast.nodes.control_flow` 承载。
-- AST 发射固定通过节点成员递归调用 `emit_mlir(ctx, block)` 完成；`mlir_gen(...)` 的闭环是 `parse(fn, *runtime_args).emit_mlir(ctx, None)`。
+- AST 发射固定通过节点成员递归调用 `emit_mlir(ctx, block)` 完成；`mlir_gen(...)` 的闭环是解析 `ModuleAST` 后执行 `ModuleAST.emit_mlir(ctx, None)`。
 - 旧 `TensorAST`、`ConstAST`、`VarAST`、`BinaryExprAST`、`CompareExprAST` 不属于公开 API。
 
 ## API 列表

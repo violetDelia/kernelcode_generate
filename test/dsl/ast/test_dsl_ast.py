@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import ast as py_ast
+import inspect
+import textwrap
 
 import pytest
 from xdsl.context import Context
@@ -32,7 +34,6 @@ from kernel_gen.dsl.ast import (
     SymbolDimAST,
     SymbolListAST,
     TupleAST,
-    parse,
     parse_function,
 )
 from kernel_gen.operation import arch as arch_ops
@@ -385,6 +386,25 @@ def _visitor(fn=visitor_public_key_kernel) -> DslAstVisitor:
     return DslAstVisitor(fn, (Memory([2, 3], NumericType.Float32), SymbolDim("N"), True))
 
 
+def _visit_module(fn, *runtime_args) -> ModuleAST:
+    """通过公开 DslAstVisitor 访问函数源码并返回 ModuleAST。
+
+    功能说明:
+    - 当前测试文件内 helper，替代已删除的包根 `parse(...)` 公开入口。
+    - 只使用公开 `DslAstVisitor` 验证 visitor 生成多函数 ModuleAST 的行为。
+
+    使用示例:
+    - `_visit_module(caller_uses_public_callee, Memory([2, 3], NumericType.Float32))`
+    """
+
+    source = textwrap.dedent(inspect.getsource(fn))
+    visitor = DslAstVisitor(fn, tuple(runtime_args))
+    visitor.source = source
+    module = visitor.visit(py_ast.parse(source))
+    assert isinstance(module, ModuleAST)
+    return module
+
+
 def test_dsl_ast_visitor_exposes_standard_node_visitor_methods() -> None:
     """call 参数相关解析入口必须是标准 NodeVisitor 方法。"""
 
@@ -454,9 +474,9 @@ def test_dsl_ast_visitor_runtime_arg_key_public_variants() -> None:
 
 
 def test_dsl_ast_visitor_python_callee_public_paths() -> None:
-    """合法 Python callee 语句调用通过 parse 生成 caller/callee 双函数 AST。"""
+    """合法 Python callee 语句调用通过公开 visitor 生成 caller/callee 双函数 AST。"""
 
-    module = parse(caller_uses_public_callee, Memory([2, 3], NumericType.Float32))
+    module = _visit_module(caller_uses_public_callee, Memory([2, 3], NumericType.Float32))
 
     assert isinstance(module, ModuleAST)
     assert [function.name for function in module.functions] == [
@@ -464,7 +484,7 @@ def test_dsl_ast_visitor_python_callee_public_paths() -> None:
         "callee_return_none",
     ]
 
-    reused_module = parse(caller_reuses_public_callee, Memory([2, 3], NumericType.Float32))
+    reused_module = _visit_module(caller_reuses_public_callee, Memory([2, 3], NumericType.Float32))
     assert [function.name for function in reused_module.functions] == [
         "caller_reuses_public_callee",
         "callee_return_none",
@@ -490,7 +510,7 @@ def test_dsl_ast_visitor_python_callee_public_errors(fn, message: str) -> None:
         runtime_args = (Memory([2, 3], NumericType.Float32), SymbolDim("N"))
 
     with pytest.raises(KernelCodeError, match=message):
-        parse(fn, *runtime_args)
+        _visit_module(fn, *runtime_args)
 
 
 def test_dsl_ast_visitor_assign_control_and_public_attributes() -> None:

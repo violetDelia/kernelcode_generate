@@ -145,9 +145,9 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
     module, source = run_lowering_demo(
         "test/matmul/static_symbolic_tile_reduce",
         matmul_inputs_static_tile_dynamic_kernel,
-        Memory([32, 32], NumericType.Float32),
-        Memory([32, 16], NumericType.Float32),
-        Memory([16, 32], NumericType.Float32),
+        Memory([197, 184], NumericType.Float32),
+        Memory([197, 178], NumericType.Float32),
+        Memory([178, 184], NumericType.Float32),
         SymbolDim("TILE_H"),
         SymbolDim("TILE_W"),
         SymbolDim("TILE_K"),
@@ -155,9 +155,9 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
     module_text = str(module)
 
     _assert_python_source_uses_kernel_out_first(matmul_inputs_static_tile_dynamic_kernel)
-    assert "!nn.memory<[#symbol.expr<32>, #symbol.expr<32>]" in module_text
-    assert "!nn.memory<[#symbol.expr<32>, #symbol.expr<16>]" in module_text
-    assert "!nn.memory<[#symbol.expr<16>, #symbol.expr<32>]" in module_text
+    assert "!nn.memory<[#symbol.expr<197>, #symbol.expr<184>]" in module_text
+    assert "!nn.memory<[#symbol.expr<197>, #symbol.expr<178>]" in module_text
+    assert "!nn.memory<[#symbol.expr<178>, #symbol.expr<184>]" in module_text
     assert "!symbol.int<#symbol.expr<TILE_H>>" in module_text
     assert "!symbol.int<#symbol.expr<TILE_W>>" in module_text
     assert "!symbol.int<#symbol.expr<TILE_K>>" in module_text
@@ -178,17 +178,17 @@ def test_static_static_matmul_demo_keeps_static_memory_and_static_tile_reduce() 
     module, source = run_lowering_demo(
         "test/matmul/static_static_tile_reduce",
         matmul_inputs_static_tile_static_kernel,
-        Memory([32, 32], NumericType.Float32),
-        Memory([32, 16], NumericType.Float32),
-        Memory([16, 32], NumericType.Float32),
+        Memory([166, 172], NumericType.Float32),
+        Memory([166, 217], NumericType.Float32),
+        Memory([217, 172], NumericType.Float32),
     )
     module_text = str(module)
 
     _assert_python_source_uses_kernel_out_first(matmul_inputs_static_tile_static_kernel)
-    assert "!nn.memory<[#symbol.expr<32>, #symbol.expr<32>]" in module_text
-    assert "!nn.memory<[#symbol.expr<32>, #symbol.expr<16>]" in module_text
-    assert "!nn.memory<[#symbol.expr<16>, #symbol.expr<32>]" in module_text
-    assert "step = #symbol.expr<5>" in module_text
+    assert "!nn.memory<[#symbol.expr<166>, #symbol.expr<172>]" in module_text
+    assert "!nn.memory<[#symbol.expr<166>, #symbol.expr<217>]" in module_text
+    assert "!nn.memory<[#symbol.expr<217>, #symbol.expr<172>]" in module_text
+    assert "step = #symbol.expr<64>" in module_text
     assert '"kernel.matmul"' in module_text
     assert '"kernel.binary_elewise"' in module_text
     assert '"dma.view"' in module_text

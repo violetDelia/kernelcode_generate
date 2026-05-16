@@ -7,7 +7,6 @@
 
 ## API 列表
 
-- `parse(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> ModuleAST`
 - `parse_function(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> FunctionAST`
 - `mlir_gen(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> ModuleOp`
 - `class DslAstVisitor(fn: DslCallable, runtime_args: tuple[DslRuntimeArg, ...] = ())`
@@ -129,30 +128,13 @@
 
 ## 依赖
 
-- `spec/dsl/ast/parser.md`：`parse(...)` 与 `parse_function(...)`。
+- `spec/dsl/ast/parser.md`：`parse_function(...)`。
 - `spec/dsl/ast/mlir_gen.md`：`mlir_gen(...)`。
 - `spec/dsl/ast/nodes/__init__.md`：公开节点聚合。
 - `spec/dsl/ast/dsl_ast.md`：`DslAstVisitor`。
 - `spec/dsl/ast/nodes/kernel.md`：kernel out-first AST 节点。
 
 ## API详细说明
-
-### `parse(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> ModuleAST`
-
-- api：`parse(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> ModuleAST`
-- 参数：
-  - `fn`：DSL Python 函数；类型 `Callable[..., DslFunctionReturn]`；无默认值；不允许 None；函数源码必须可被公开 parser 读取。
-  - `runtime_args`：运行时参数序列；类型 `tuple[DslRuntimeArg, ...]`；无默认值；默认值为空 tuple；每个参数必须是公开 DSL runtime 支持的类型。
-- 返回值：`ModuleAST`；失败路径按本 API 的 `注意事项` 处理。
-- 使用示例：
-
-  ```python
-    from kernel_gen.dsl.ast import parse
-
-    module_ast = parse(kernel, lhs, rhs)
-    ```
-- 功能说明：从 `kernel_gen.dsl.ast` 包根导出 `parse`，提供 DSL AST 解析、visitor 或 MLIR 生成公开入口。
-- 注意事项：包根只承诺导出本条目声明的公开对象；行为语义以对应子 spec 的同名 API 详情为准，包根不得扩展额外 helper。
 
 ### `parse_function(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> FunctionAST`
 

@@ -43,7 +43,7 @@
 
 - 为项目提供统一的数据搬运、布局转换与显式数据转换方言层表示。
 - 让整块拷贝、切片读取、切片回写、跨空间搬运与显式数据转换在 IR 中有明确 op 语义。
-- 为 `const(i32)` / `!symbol.int<#symbol.expr<expr>>` 到临时 memory 的真实物化提供稳定方言层原语，避免只生成空 `dma.alloc` 占位。
+- 为 builtin 数值标量 / `!symbol.int<#symbol.expr<expr>>` 到临时 memory 的真实物化提供稳定方言层原语，避免只生成空 `dma.alloc` 占位。
 - 为 `nn.broadcast/transpose` 与 mixed compare 桥接提供稳定 lowering 目标面：`dma.broadcast` / `dma.transpose`。
 - 保留 `shape/stride/offsets/sizes/strides` 等搬运元信息，覆盖静态与动态场景，并统一将这些运行期标量输入建模为 `!symbol.int<#symbol.expr<expr>>` SSA value；其中 `offsets` 允许使用 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>` 表达迭代变量来源。
 - 为后续 lowering 到 `tensor.extract_slice`、`tensor.insert_slice`、`memref.copy`、后端 DMA 指令或 runtime API 提供稳定中间层。
@@ -73,7 +73,7 @@
 
 - 所有参与搬运或转换的 `source`、`target`、`result` 必须是 `!nn.memory<...>`。
 - `dma.alloc` 仅产生结果内存，结果类型必须为 `!nn.memory<...>`。
-- `dma.fill` 仅把单个整数标量真实写入目标内存，不分配新内存，也不返回新的 memory result。
+- `dma.fill` 仅把单个数值标量真实写入目标内存，不分配新内存，也不返回新的 memory result。
 - `dma.free` 仅接受待释放的内存 operand，不产生结果。
 - `dma.view/reshape` 必须保证 `result.space` 与 `source.space` 一致；`result.element_type` 必须与 `source.element_type` 一致（仅当 `source` 是一维 `i8` byte pool 时允许不同 element_type，且允许 `source` 与 `result` 的 rank 不一致）。
 - 对 `dma.copy/load/store/slice/deslice`，相关 `element_type` 必须一致，不允许隐式类型转换。
@@ -81,7 +81,7 @@
 - `shape/stride` 的 rank 必须与相关 `offsets/sizes/strides` 列表长度一致。
 - `offsets` 允许使用 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`；`sizes`、`strides`、动态 `shape`、动态 `stride` 必须建模为显式 `!symbol.int<#symbol.expr<expr>>` SSA 操作数列表；不得只靠 `StringAttr("?")`、`ArrayAttr` 或其他 attribute 独立表达运行期值。
 - index-like 标量 operand 中，`offsets` 允许 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`；其余仍仅接受 `!symbol.int<#symbol.expr<expr>>` SSA value。禁止直接使用 Python `int/float` 或 builtin 数值类型替代，静态常量必须先 materialize 为 `!symbol.int<#symbol.expr<expr>>`。
-- `dma.fill.value` 不属于 index-like 布局 operand。当前公开口径仅接受 builtin `i32` 或 `!symbol.int<#symbol.expr<expr>>` 两类整数标量，并要求 `target.element_type == i32`；`f16/f32` 或更宽整数的 scalar materialize 不在本轮范围内。
+- `dma.fill.value` 不属于 index-like 布局 operand。当前公开口径接受 builtin 非 bool 整数、builtin 浮点或 `!symbol.int<#symbol.expr<expr>>`；`target.element_type` 必须是非 bool 数值 dtype，builtin 整数只匹配整数 memory，builtin 浮点只匹配浮点 memory，`!symbol.int` 可填充非 bool 数值 memory。
 - `!nn.memory<...>` 类型仍负责承载 rank、元素类型、内存空间以及可静态判定的布局信息；凡是运行期才确定的布局值，必须由 op operand 传入。
 - 若实现保留静态维度或静态 stride 在类型中，assembly 中的静态值也应允许通过 `!symbol.int<#symbol.expr<1>>` 这类 symbol 常量值、或等价 materialize 后的 `!symbol.int<#symbol.expr<expr>>` SSA value 显式传入 operand，保证“布局参数来源统一为 operand”。
 - `dma.load/store/slice/deslice` 的 `offsets` 必须为 variadic `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>` operand；`sizes/strides` 仍为 variadic `!symbol.int<#symbol.expr<expr>>` operand。
@@ -95,7 +95,7 @@
 - 静态可判定时非 byte pool `dma.view` 的 `source/result` `numel` 必须一致；若 `source` 为一维 `i8` byte pool，则 `offset/size/stride` 按 `result.element_type` 元素单位解释，并要求 `(linear_max_index + 1) * sizeof(result.element_type) <= source_bytes`。
 - `dma.reshape` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<#symbol.expr<expr>>`；当 operand 表达为 `?` 时，`result.shape` 对应维度也必须是 `#symbol.expr<?>`，不得通过 SSA 名称或公开变量名伪造稳定维度；结果 `stride` 按 `shape` 的默认连续布局语义生成。
 - `dma.alloc` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<#symbol.expr<expr>>`；允许两种形态：与结果 rank 等长的全量列表，或仅包含结果 `shape` 中符号维度的列表（按出现顺序）；`stride` 不作为输入，而是按默认连续布局语义生成。
-- 对 mixed add 等需要 `scalar -> memory` 合法化的链路，当前唯一公开合法原语是 `dma.alloc + dma.fill(target, value)`：`dma.alloc` 负责生成 temporary memory，`dma.fill` 负责把 `const(i32)` / `!symbol.int<#symbol.expr<expr>>` 真实写入该 memory 的每个逻辑元素。仅生成空 `dma.alloc` 占位，或生成 `dma.fill` 后其 `target` 在下游 IR 中 `users=[]`，都不属于当前链路的通过口径。
+- 对 mixed add 等需要 `scalar -> memory` 合法化的链路，当前唯一公开合法原语是 `dma.alloc + dma.fill(target, value)`：`dma.alloc` 负责生成 temporary memory，`dma.fill` 负责把 builtin 数值标量 / `!symbol.int<#symbol.expr<expr>>` 真实写入该 memory 的每个逻辑元素。仅生成空 `dma.alloc` 占位，或生成 `dma.fill` 后其 `target` 在下游 IR 中 `users=[]`，都不属于当前链路的通过口径。
 - `strides` 当前每一维仍限制为单位步长语义，但该约束应体现在 operand 校验阶段，而不是要求使用 `IntAttr(1)` attribute。
 - operation 层允许非单位 `strides` 作为切片步进，但本方言仅实现单位步长语义；因此含非单位 `strides` 的 `dma.load/store/slice/deslice` 必须在 lowering/verifier 阶段拒绝。原因：现有 lowering 目标与 verifier 规则仅覆盖单位步长切片。
 - 若上层 pass 需要把窗口化 hierarchy 搬运收口到 `dma.slice/dma.deslice`，只能复用原窗口的 `offsets/sizes`；新插入的 hierarchy 路径 `strides` 必须继续物化为全 `1`，不得借此扩展本方言到非单位或符号 stride 语义。
@@ -117,7 +117,7 @@
 | operation API | dialect op | 说明 |
 | --- | --- | --- |
 | `alloc(shape, dtype, space=MemorySpace.GM, stride=None)` | `dma.alloc` | 创建内存对象。 |
-| `（无直接 DSL helper；pass 侧合法化原语）` | `dma.fill` | 将 `const(i32)` / `!symbol.int<#symbol.expr<expr>>` 真实写入 `target` 的每个逻辑元素；当前用于 mixed add 的 `scalar -> memory` 合法化。 |
+| `fill(target, value)` / pass 侧合法化原语 | `dma.fill` | 将 builtin 数值标量 / `!symbol.int<#symbol.expr<expr>>` 真实写入 `target` 的每个逻辑元素；用于公开 fill helper 与 mixed add 的 `scalar -> memory` 合法化。 |
 | `free(value)` | `dma.free` | 释放内存对象。 |
 | `copy(source, space)` | `dma.copy` | 跨空间搬运。 |
 | `cast(source, dtype, memoryspace=None)` | `dma.cast` | 显式元素类型转换。 |
@@ -135,7 +135,7 @@
 - `view` 的 `offset/size/stride` 在方言层分别对应 `dma.view` 的 `offsets/shape/stride` operand；`shape` operand 与 `result_type.shape` 必须一致。
 - 对当前验收子集，`dma.view` 的 `result_type.shape` 必须来自 DSL `size`；非 byte pool 场景下，`result_type.stride` 必须来自 `source` 物理 stride 与 DSL `stride` 的逐维乘积；不得只复用上层 `Memory` 既有元信息或仅以“成功生成 `dma.view` op”为通过条件。
 - 若 `mlir_gen(...)` / `emit_mlir` 让 `dma.view` 结果直接流向 `func.return`，则 `func.return` 携带的 `!nn.memory<...>` 类型必须与 `dma.view.result_type` 完全一致；`EXPECTED_MEMORY` 比对即基于这份返回类型。
-- `dma.fill` 当前没有直接 DSL helper；它是 dialect / pass 层公开原语。对 `nn.add(memory, const(i32) / symbol.int)` 这类 mixed add 路径，当前最小合法 lower 片段必须显式包含 `dma.alloc + dma.fill`，且被填充的 temporary memory 必须在后续 IR 中被实际消费。
+- `dma.fill` 是 dialect / pass 层公开原语，也是公开 DSL `fill(target, value)` helper 的下沉目标。对 `nn.add(memory, const(i32) / symbol.int)` 这类 mixed add 路径，当前最小合法 lower 片段必须显式包含 `dma.alloc + dma.fill`，且被填充的 temporary memory 必须在后续 IR 中被实际消费。
 - operation 层允许“静态可判定的缩小 subview”（`size` 的 `numel` 小于 `source.shape`），但当前非 byte pool `dma.view` 在静态可判定时要求 `source/result` `numel` 一致；该场景不属于当前非 byte pool `dma.view` 的可验证映射子集。byte pool `dma.view` 允许 typed 子区间小于 source byte pool。
 - `operation.slice(...)-> dma.alloc + dma.slice(target, source, offsets, sizes, strides)`：`dma.slice` 只负责把切片内容写入 `target`，不返回新的 memory result；operation 表达式返回值来自前置 `dma.alloc` 的 result。
 
@@ -147,7 +147,7 @@
 - `NnMemorySpaceAttr` 非法值、`NnMemoryType.shape` 与 `stride` rank 不一致等类型错误，必须按 `nn dialect` 规则报错。
 - `dma.copy` 中 `source/target` 的 `shape/stride/element_type` 不一致必须报错。
 - `dma.alloc` 的动态 `shape` operand 必须与结果 rank 等长，或仅覆盖结果 `shape` 中符号维度（按出现顺序）；任一 `shape` operand 不是 `!symbol.int<#symbol.expr<expr>>` 时必须报错；结果类型非法必须报错。
-- `dma.fill` 中 `target` 不是 `!nn.memory<...>`、`target.element_type != i32`、或 `value` 既不是 builtin `i32` 也不是 `!symbol.int<#symbol.expr<expr>>` 时必须报错。
+- `dma.fill` 中 `target` 不是 `!nn.memory<...>`、`target.element_type` 不是非 bool 数值 dtype、`value` 不是 builtin 非 bool 整数 / builtin 浮点 / `!symbol.int<#symbol.expr<expr>>`，或 builtin value dtype 与 target dtype family 不匹配时必须报错。
 - `dma.free` 的 operand 不是 `!nn.memory<...>` 时必须报错。
 - `dma.load/slice` 中 `offsets/sizes/strides` 长度与输入 rank 不一致必须报错；`sizes/strides` 不是 `!symbol.int<#symbol.expr<expr>>` 时必须报错；`offsets` 仅允许 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`。
 - `dma.store/deslice` 中 `source.shape` 与切片目标大小不一致必须报错。
@@ -161,7 +161,7 @@
 - `dma.transpose` 的目标 stride 必须是目标 shape 的默认连续布局；若目标 shape 包含匿名动态维度并导致高维期望 stride 不可静态证明，目标 stride 可以保留调用点动态语义表达，静态可判定的不一致仍必须报错。
 - `dma.cast` 中 `source/result` 的 `shape/stride/space` 不一致必须报错。
 - `strides` 当前仅允许单位步长语义；若当前实现限制 stride 为 1，则 `stride != 1` 的切片搬运必须显式报错，不得 silently 接受。
-- `dma` 的布局/索引类标量输入以 `!symbol.int<#symbol.expr<expr>>` 为主，`offsets` 额外允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`；parse/print 不得再使用 builtin `index` 作为这些 operand 的公开文本语义。`dma.fill.value` 是当前唯一例外，公开口径允许 builtin `i32` 与 `!symbol.int<#symbol.expr<expr>>`。
+- `dma` 的布局/索引类标量输入以 `!symbol.int<#symbol.expr<expr>>` 为主，`offsets` 额外允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`；parse/print 不得再使用 builtin `index` 作为这些 operand 的公开文本语义。`dma.fill.value` 是当前唯一例外，公开口径允许 builtin 非 bool 整数、builtin 浮点与 `!symbol.int<#symbol.expr<expr>>`。
 ## API详细说明
 
 ### `class Dma(Dialect)`
@@ -222,13 +222,13 @@ op = DmaAllocOp(dynamic_shape, result_type)
 
 - 功能说明：
 
-- 表示将单个整数标量真实写入 `target` 的每个逻辑元素，完成 `scalar -> memory` 物化。
-- 当前用于 mixed add 等链路把 `const(i32)` / `!symbol.int<#symbol.expr<expr>>` 合法化为可被下游 IR 消费的 temporary memory。
+- 表示将单个数值标量真实写入 `target` 的每个逻辑元素，完成 `scalar -> memory` 物化。
+- 当前用于公开 DSL `fill` helper 与 mixed add 等链路，把 builtin 数值标量 / `!symbol.int<#symbol.expr<expr>>` 合法化为可被下游 IR 消费的 temporary memory。
 
 - 参数：
 
 - `target`：被写入的目标内存，类型为 `!nn.memory<...>`。
-- `value`：待物化的整数标量，当前仅接受 builtin `i32` 或 `!symbol.int<#symbol.expr<expr>>`。
+- `value`：待物化的数值标量，接受 builtin 非 bool 整数、builtin 浮点或 `!symbol.int<#symbol.expr<expr>>`。
 
 - 使用示例：
 
@@ -238,9 +238,9 @@ op = DmaFillOp(target, value)
 
 - 注意事项：
 
-- `target.element_type` 当前固定为 `i32`；更宽整数、`f16`、`f32` 等其他 scalar family 不在本轮公开范围内。
-- 当 `value` 为 builtin `i32` 时，对应 `const(i32)` 物化路径；当 `value` 为 `!symbol.int<#symbol.expr<expr>>` 时，对应 `symbol.int` 物化路径；两者都必须以真实 SSA operand 进入 `dma.fill`，不得退化为 attribute 占位。
-- 若上层 DSL `fill(...)` helper 接受字符串字面量并继续 lower 到当前链路，公开字符串只允许表示正无穷 / 负无穷的两种规范语义；当前文面固定为 `"inf"` 与 `"-inf"`，不得放宽到其他大小写、别名或任意字符串。该规则属于更高层 helper 边界，不能扩展 `dma.fill.value` 在本层仍只接受 builtin `i32` / `!symbol.int<#symbol.expr<expr>>` 的事实。
+- `target.element_type` 必须是非 bool 数值 dtype；bool memory 不属于 `dma.fill` 目标。
+- 当 `value` 为 builtin 整数时，target 必须是整数 memory；当 `value` 为 builtin 浮点时，target 必须是浮点 memory；当 `value` 为 `!symbol.int<#symbol.expr<expr>>` 时，target 可以是任意非 bool 数值 memory。
+- 上层 DSL `fill(...)` helper 的字符串字面量只允许表示正无穷 / 负无穷两种规范语义；文面固定为 `"inf"` 与 `"-inf"`，并在 MLIR 层下沉为对应浮点 constant + `dma.fill`，不得放宽到其他大小写、别名或任意字符串。
 - `dma.fill` 必须把同一个标量值写入 `target` 的每个逻辑元素；它不是 `dma.alloc` 的语法糖，也不等价于“只创建 memory 但不写值”。
 - `dma.fill` 只负责标量写入，不承担 memory-memory 广播、逐元素算术或 dtype promotion。
 - verifier 只检查 `dma.fill` 的局部类型与接口合法性；“该 `target` 是否在下游 IR 中被实际消费”属于链路级验收边界。对 mixed add 当前最低通过口径，必须出现 `dma.alloc + dma.fill + downstream use(target)` 的完整片段，`users=[]` 的 dead temporary memory 不能计为通过。
@@ -248,7 +248,7 @@ op = DmaFillOp(target, value)
 - 返回值：
 
 - 返回类型为无返回值；当前 op result 数量固定为 `0`。
-- 当前只收为 `i32 | !symbol.int<#symbol.expr<expr>> -> !nn.memory<..., i32, ...>` 的最小公开子集；若后续需要浮点或更宽整数 materialize，必须新增独立 spec 收口。
+- 当前公开子集覆盖非 bool 整数、浮点与 `!symbol.int<#symbol.expr<expr>>` 的标量物化；若后续需要 bool memory fill 或隐式 dtype promotion，必须新增独立 spec 收口。
 
 ### `class DmaFreeOp(source: SSAValue | Operation)`
 
@@ -701,7 +701,7 @@ op = DmaCastOp(source, result_type)
 - 验证 `dma.load/slice` 的结果形状、目标空间与标量输入长度约束，并覆盖动态 `!symbol.int<#symbol.expr<expr>>` operand 表达；`offsets` 允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`。
 - 验证 `dma.store/deslice` 的源块与目标切片大小匹配约束。
 - 验证 `dma.alloc` 结果类型约束与结果数量。
-- 验证 `dma.fill` 能将 `const(i32)` / `!symbol.int<#symbol.expr<expr>>` 真实写入 `i32 memory`，并锁定它不是“空 `dma.alloc` 占位”的替代说法。
+- 验证 `dma.fill` 能将 builtin 数值标量 / `!symbol.int<#symbol.expr<expr>>` 真实写入非 bool 数值 memory，并锁定它不是“空 `dma.alloc` 占位”的替代说法。
 - 验证 `dma.free` 的内存类型约束与无返回值语义。
 - 验证 `dma.view/reshape` 的元素类型/空间一致性与形状约束，其中 `dma.view` 覆盖动态 `offsets`（允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`）、`shape/stride`（`!symbol.int<#symbol.expr<expr>>`）operand 与边界校验，`dma.reshape` 覆盖动态 `shape` 的 `!symbol.int<#symbol.expr<expr>>` operand。
 - 验证 `dma.subview` 的一维 `i8` backing memory、一维 typed result、元素单位 `offset/size/stride`、space 一致性、size 对齐与静态 byte bounds 边界。
@@ -709,7 +709,7 @@ op = DmaCastOp(source, result_type)
 - 验证默认连续 stride 在符号维度（如 `N` / `M*N` / `min(tile, extent - iter)` / `?`）下的推导、等价判断与退化规则已覆盖。
 - 验证 `dma.cast` 只允许改变元素类型，且保持 `shape/stride/space` 不变。
 - 验证当前阶段对 stride 的限制会在 verifier 阶段明确报错。
-- 验证 `dma` 的布局/索引类标量输入以 `!symbol.int<#symbol.expr<expr>>` 为主，`offsets` 允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`，并拒绝 builtin `index`、浮点或其他非 symbol 标量类型；同时验证 `dma.fill.value` 只允许 builtin `i32` 与 `!symbol.int<#symbol.expr<expr>>` 这两个当前公开例外（包含拒绝未定义的其他 scalar family）。
+- 验证 `dma` 的布局/索引类标量输入以 `!symbol.int<#symbol.expr<expr>>` 为主，`offsets` 允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`，并拒绝 builtin `index`、浮点或其他非 symbol 标量类型；同时验证 `dma.fill.value` 只允许 builtin 非 bool 整数、builtin 浮点与 `!symbol.int<#symbol.expr<expr>>` 这几个当前公开例外（包含拒绝 bool 与 dtype family 不匹配）。
 - 验证 mixed add 使用 `scalar -> memory` 原语时，被填充的 temporary memory 必须在下游 IR 中有真实 use；`dma.alloc` alone 或 `dma.alloc + dma.fill` 但无消费都不构成通过口径。
 
 ### 功能与用例清单
@@ -751,7 +751,8 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-022 | 边界/异常 | 非法标量类型拒绝 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_rejects_non_symbol_int_scalar_operands`。 | “非法标量类型拒绝”场景按公开错误语义失败或被拒绝。 | `test_dma_rejects_non_symbol_int_scalar_operands` |
 | TC-DMA-023 | 边界/异常 | `dma.free` 释放内存 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_free_requires_nn_memory_type`。 | “`dma.free` 释放内存”场景按公开错误语义失败或被拒绝。 | `test_dma_free_requires_nn_memory_type` |
 | TC-DMA-024 | 内存/DMA | `dma.fill` 物化 `const(i32)` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 构造并校验 `dma.fill` | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.fill` 物化 `const(i32)`”场景。 | test/dialect/test_dma.py::test_dma_fill_accepts_builtin_i32_scalar_operand |
-| TC-DMA-025 | 内存/DMA | `dma.fill` 物化 `symbol.int` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 构造并校验 `dma.fill` | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.fill` 物化 `symbol.int`”场景。 | test/dialect/test_dma.py::test_dma_fill_accepts_symbol_int_scalar_operand |
-| TC-DMA-026 | 内存/DMA | `dma.fill` 类型边界 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 构造并校验 `dma.fill` | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.fill` 类型边界”场景。 | test/dialect/test_dma.py::test_dma_fill_rejects_non_i32_target_or_unsupported_scalar |
-| TC-DMA-027 | 内存/DMA | mixed add 临时 memory 真实消费 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 检查 lower 后 IR | 内存类型、布局、搬运结果或 verifier 行为体现“mixed add 临时 memory 真实消费”场景。 | test/passes/lowering/nn_lowering/test_element_binary_add.py::test_lower_add_mixed_scalar_uses_dma_fill |
+| TC-DMA-025 | 内存/DMA | `dma.fill` 物化 `const(f32)` | 准备 float memory 与 builtin float scalar operand。 | 构造并校验 `dma.fill` | verifier 接受浮点 target/value 同族物化。 | test/dialect/test_dma.py::test_dma_fill_accepts_builtin_float_scalar_operand |
+| TC-DMA-026 | 内存/DMA | `dma.fill` 物化 `symbol.int` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 构造并校验 `dma.fill` | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.fill` 物化 `symbol.int`”场景。 | test/dialect/test_dma.py::test_dma_fill_accepts_symbol_int_scalar_operand |
+| TC-DMA-027 | 内存/DMA | `dma.fill` 类型边界 | 准备 bool target/value 与 dtype family 不匹配 scalar。 | 构造并校验 `dma.fill` | bool target/value 与不兼容 scalar family 按公开错误语义拒绝。 | test/dialect/test_dma.py::test_dma_fill_rejects_bool_or_unsupported_scalar |
+| TC-DMA-028 | 内存/DMA | mixed add 临时 memory 真实消费 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 检查 lower 后 IR | 内存类型、布局、搬运结果或 verifier 行为体现“mixed add 临时 memory 真实消费”场景。 | test/passes/lowering/nn_lowering/test_element_binary_add.py::test_lower_add_mixed_scalar_uses_dma_fill |
 | TC-DMA-059 | 边界/异常 | `dma.alloc/broadcast/transpose/view` 公开 verifier 边界矩阵 | 准备公开 op 构造入口、动态 shape、broadcast 源/目标类型、transpose perm/target 与 byte-pool view 类型组合。 | 运行 `test_dma_public_verifier_boundary_matrix`。 | 动态 shape、broadcast rank/type/space、transpose perm/layout/type/space、transfer rank、byte-pool view element size 与动态边界按公开错误语义通过或稳定拒绝。 | `test_dma_public_verifier_boundary_matrix` |

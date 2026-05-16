@@ -24,7 +24,7 @@ from xdsl.dialects.test import TestOp
 from xdsl.ir import Block, Operation, SSAValue
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaReshapeOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp, DmaReshapeOp, DmaViewOp
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolIterType, SymbolValueType
 from kernel_gen.dsl.ast.nodes.attr import BoolTypeAttrAST, FloatTypeAttrAST, IntTypeAttrAST, MemorySpaceAttrAST
 from kernel_gen.dsl.ast.nodes.basic import MemoryAST, ValueAST
@@ -331,7 +331,7 @@ def test_dma_alloc_emit_mlir_handles_parameterized_public_shape_expressions() ->
     block = Block()
     emitted = DmaAllocAST(shape_exprs, NumericType.Int32, MemorySpace.SM).emit_mlir(ctx, block)
     assert isinstance(emitted, DmaAllocOp)
-    assert len(emitted.dynamic_shape) == len(shape_exprs)
+    assert len(emitted.dynamic_shape) == 0
 
     symbol_block = Block(arg_types=[SymbolValueType.from_expr("M")])
     symbol_alloc = DmaAllocAST([SymbolFloorDivAST(BlockArgSymbolAST(0, "M"), ConstValueAST(2))], NumericType.Float32, MemorySpace.SM).emit_mlir(
@@ -539,6 +539,25 @@ def test_dma_alloc_lowers_public_symbol_binary_shape_to_symbol_expr_type() -> No
     emitted.verify()
 
 
+def test_dma_alloc_omits_static_symbol_operands_from_dynamic_shape() -> None:
+    """DmaAllocAST 不把静态数字 symbol operand 写入 dynamic_shape。"""
+
+    ctx = Context()
+    block = Block(arg_types=[SymbolValueType.from_expr("BR"), SymbolValueType.from_expr("98")])
+    node = DmaAllocAST(
+        [1, 1, BlockArgSymbolAST(0, "BR"), BlockArgSymbolAST(1, 98)],
+        NumericType.Float32,
+        MemorySpace.TSM,
+    )
+
+    emitted = node.emit_mlir(ctx, block)
+
+    assert isinstance(emitted, DmaAllocOp)
+    assert [dim.expr.data for dim in emitted.result.type.shape.data] == ["1", "1", "BR", "98"]
+    assert [operand.type.get_value() for operand in emitted.dynamic_shape] == ["BR"]
+    emitted.verify()
+
+
 def test_dma_alloc_emit_mlir_covers_public_dtype_and_symbol_sub_matrix() -> None:
     """DmaAllocAST 覆盖公开 bool/int dtype 与 symbol sub shape。"""
 
@@ -611,29 +630,32 @@ def test_dma_emit_mlir_accepts_public_operation_returning_symbol_nodes() -> None
 
 
 def test_dma_fill_emit_mlir_handles_public_value_and_dtype_matrix() -> None:
-    """dma.fill 覆盖 bool/int/float/symbol/string 公开值矩阵与稳定错误语义。"""
+    """dma.fill 覆盖 int/float/symbol/string 公开值矩阵与稳定错误语义。"""
 
-    bool_mem = MemoryAST.from_memory("bool_mem", Memory([2], NumericType.Bool))
     int_mem = MemoryAST.from_memory("int_mem", Memory([2], NumericType.Int32))
     float_mem = MemoryAST.from_memory("float_mem", Memory([2], NumericType.Float32))
+    bool_mem = MemoryAST.from_memory("bool_mem", Memory([2], NumericType.Bool))
     ctx, block = _block_for_memories(bool_mem, int_mem, float_mem)
 
     for node in (
-        DmaFillAST(bool_mem, True),
         DmaFillAST(int_mem, 7),
         DmaFillAST(float_mem, 3),
         DmaFillAST(float_mem, 1.5),
         DmaFillAST(float_mem, "-inf"),
         DmaFillAST(float_mem, SymbolDimAST(5)),
-        DmaFillAST(bool_mem, False),
-        DmaFillAST(bool_mem, 1),
     ):
-        assert isinstance(node.emit_mlir(ctx, block), Operation)
+        assert isinstance(node.emit_mlir(ctx, block), DmaFillOp)
 
     with pytest.raises(KernelCodeError, match="fill string literal requires float memory"):
         DmaFillAST(int_mem, "inf").emit_mlir(ctx, block)
     with pytest.raises(KernelCodeError, match="fill float value requires float memory"):
         DmaFillAST(int_mem, 1.5).emit_mlir(ctx, block)
+    with pytest.raises(KernelCodeError, match="fill bool value is not supported"):
+        DmaFillAST(float_mem, True).emit_mlir(ctx, block)
+    with pytest.raises(KernelCodeError, match="fill bool target is not supported"):
+        DmaFillAST(bool_mem, 1).emit_mlir(ctx, block)
+    with pytest.raises(KernelCodeError, match="finite float"):
+        DmaFillAST(float_mem, float("inf")).emit_mlir(ctx, block)
     with pytest.raises(KernelCodeError, match="Unsupported fill value"):
         DmaFillAST(float_mem, None).emit_mlir(ctx, block)
 

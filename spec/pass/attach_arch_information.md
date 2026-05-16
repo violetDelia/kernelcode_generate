@@ -2,14 +2,14 @@
 
 ## 功能简介
 
-- 定义 `attach-arch-information` pass 的公开合同：从 target registry 读取 launch extent 与 `shared_memory_size`，并把 `launch_block / launch_thread / launch_subthread / shared_memory_size` 写回入口 `func.func`。
+- 定义 `attach-arch-information` pass 的公开合同：从 target registry 读取 launch extent、`shared_memory_size` 与 `tsm/tlm1/tlm2/tlm3` 动态内存容量，并把 launch 属性写回入口 `func.func`、把目标动态内存查询特化为静态容量。
 - 该 pass 不承担 outline 逻辑，只负责把 IR 级 launch 信息补齐到后续 `outline-device-kernel` 可消费的状态。
 - 当前文件只公开 `AttachArchInformationPass` 的构造、registry 构造与 `apply(ctx, module)` 入口；当前文件内校验、属性规整和错误前缀拼接 helper 若存在，均不属于公开 API。
 - 不再提供单 pass `run(module)` 兼容入口；实现与测试都必须走 xdsl `ModulePass.apply(ctx, module)`。
 
 ## API 列表
 
-- `class AttachArchInformationPass(target: str = "npu_demo")`
+- `class AttachArchInformationPass(target: str = "npu_demo", fold: bool = True)`
 - `AttachArchInformationPass.from_options(options: dict[str, str]) -> AttachArchInformationPass`
 - `AttachArchInformationPass.apply(ctx: Context, module: ModuleOp) -> None`
 
@@ -38,6 +38,7 @@
 
 - 为入口函数补齐 `launch_block / launch_thread / launch_subthread / shared_memory_size`。
 - 让 `npu_demo` 的 launch extent 统一从 `kernel_gen/target/targets/npu_demo.txt` 读取。
+- 让 `npu_demo` 的 `arch.get_dynamic_memory` 中 `TSM/TLM1/TLM2/TLM3` backing capacity 统一从 `kernel_gen/target/targets/npu_demo.txt` 特化为静态字节数。
 - 若入口已存在 launch 属性，则必须与 target registry 的 extent 完全一致。
 
 ## 额外补充
@@ -49,17 +50,19 @@
 - 只对 module 中唯一的 non-declaration `func.func` 生效；缺失或多个时必须显式失败，不得静默选择首个函数。
 - 四项 launch 属性必须同时存在；部分存在时必须显式失败。
 - `launch_block / launch_thread / launch_subthread / shared_memory_size` 仅写回 `func.func attributes`，不扩展 `arch.launch` 形状。
+- `arch.get_dynamic_memory` 容量特化只处理 `tsm/tlm1/tlm2/tlm3`；`shared/local` 继续保持 named-capacity 结果类型，缺失或非正容量必须显式失败。
 - 当前文件的公开 API 只有 `AttachArchInformationPass`；不得跨文件调用当前文件模块级 helper、常量或错误文本规整步骤。
 - `AttachArchInformationPass.apply(ctx, module)` 是面向业务调用方、pytest、registry 与 `PassManager` 的唯一稳定执行入口。
 - `apply(ctx, module)` 即使暂时不消费 `ctx` 里的业务信息，也不得通过 `del ctx` 或其他显式丢弃语句把该协议形参写成“已废弃入口”。
 - 所有预期失败统一抛出 [`KernelCodeError`](../../../kernel_gen/passes/common.py)，错误消息仍以 `AttachArchInformationError:` 前缀开头，供测试做稳定匹配。
 ## API详细说明
 
-### `class AttachArchInformationPass(target: str = "npu_demo")`
+### `class AttachArchInformationPass(target: str = "npu_demo", fold: bool = True)`
 
-- api：`class AttachArchInformationPass(target: str = "npu_demo")`
+- api：`class AttachArchInformationPass(target: str = "npu_demo", fold: bool = True)`
 - 参数：
   - `target`：目标对象、目标名称或目标缓冲区，指定当前操作写入或作用的位置；类型 `str`；默认值 `"npu_demo"`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `fold`：是否允许 `PassManager` 在 pass 后执行通用 fold sweep；类型 `bool`；默认值 `True`；调用方不得依赖本 pass 内部重复执行额外 fold。
 - 返回值：`AttachArchInformationPass` 实例。
 - 使用示例：
 
@@ -69,7 +72,7 @@
   pass_obj = AttachArchInformationPass(target="npu_demo")
   ```
 - 功能说明：按目标名构造 attach-arch-information pass 实例。
-- 注意事项：`target` 必须是已注册 target；不得恢复 `run(module)` 或其他返回式兼容入口；实例内部校验、属性规整和错误前缀拼接 helper 不属于公开 API。
+- 注意事项：`target` 必须是已注册 target；不得恢复 `run(module)` 或其他返回式兼容入口；实例内部校验、属性规整、动态内存类型特化和错误前缀拼接 helper 不属于公开 API。
 
 ### `AttachArchInformationPass.from_options(options: dict[str, str]) -> AttachArchInformationPass`
 
@@ -104,7 +107,7 @@
   AttachArchInformationPass(target="npu_demo").apply(Context(), module)
   ```
 - 功能说明：对模块执行 `AttachArchInformationPass` pass。
-- 注意事项：对业务调用方、pytest、registry 与 `PassManager` 暴露稳定执行入口；原地写回入口 `func.func` 的 launch 属性并返回 `None`；只接受 `builtin.module` 输入；即使暂时不消费 `ctx` 里的业务信息，也不得通过 `del ctx` 或其他显式丢弃语句把该协议形参写成“已废弃入口”。
+- 注意事项：对业务调用方、pytest、registry 与 `PassManager` 暴露稳定执行入口；原地写回入口 `func.func` 的 launch 属性，并把 `tsm/tlm1/tlm2/tlm3` 的 `arch.get_dynamic_memory` 结果类型特化为 target registry 中的静态容量；只接受 `builtin.module` 输入；即使暂时不消费 `ctx` 里的业务信息，也不得通过 `del ctx` 或其他显式丢弃语句把该协议形参写成“已废弃入口”。
 
 ## 测试
 
@@ -132,6 +135,7 @@
 | TC-PASS-ATTACH-ARCH-INFORMATION-004 | 公开入口 | npu demo lowering pipeline supports kernel contract style public chain | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain`。 | 公开入口在“npu demo lowering pipeline supports kernel contract style public chain”场景下可导入、构造、注册或按名称发现。 | `test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain` |
 | TC-PASS-ATTACH-ARCH-INFORMATION-005 | 公开入口 | public import path exposes attach arch information pass only | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_public_import_path_exposes_attach_arch_information_pass_only`。 | 公开入口在“public import path exposes attach arch information pass only”场景下可导入、构造、注册或按名称发现。 | `test_public_import_path_exposes_attach_arch_information_pass_only` |
 | TC-PASS-ATTACH-ARCH-INFORMATION-006 | 公开入口 | attach arch information writes registry launch extents | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_attach_arch_information_writes_registry_launch_extents`。 | 公开入口在“attach arch information writes registry launch extents”场景下可导入、构造、注册或按名称发现。 | `test_attach_arch_information_writes_registry_launch_extents` |
+| TC-PASS-ATTACH-ARCH-INFORMATION-006A | pass 改写 | attach arch information specializes npu_demo dynamic memory capacity | 准备包含 `arch.get_dynamic_memory` 的公开 IR 输入。 | 运行 `test_attach_arch_information_specializes_npu_demo_dynamic_memory_capacity`。 | `tsm/tlm1/tlm2/tlm3` 的 result type shape 分别特化为 `2097152/524288/1048576/1048576`，`shared` 保持 `SM_SIZE`。 | `test_attach_arch_information_specializes_npu_demo_dynamic_memory_capacity` |
 | TC-PASS-ATTACH-ARCH-INFORMATION-007 | 边界/异常 | attach arch information rejects partial launch attrs | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_attach_arch_information_rejects_partial_launch_attrs`。 | “attach arch information rejects partial launch attrs”场景按公开错误语义失败或被拒绝。 | `test_attach_arch_information_rejects_partial_launch_attrs` |
 | TC-PASS-ATTACH-ARCH-INFORMATION-008 | 边界/异常 | attach arch information rejects multiple entry funcs | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_attach_arch_information_rejects_multiple_entry_funcs`。 | “attach arch information rejects multiple entry funcs”场景按公开错误语义失败或被拒绝。 | `test_attach_arch_information_rejects_multiple_entry_funcs` |
 | TC-PASS-ATTACH-ARCH-INFORMATION-009 | 边界/异常 | register pass duplicate fails | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_register_pass_duplicate_fails`。 | “register pass duplicate fails”场景按公开错误语义失败或被拒绝。 | `test_register_pass_duplicate_fails` |

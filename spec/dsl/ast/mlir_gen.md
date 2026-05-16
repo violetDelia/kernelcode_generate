@@ -23,7 +23,7 @@
 
 ## 依赖
 
-- `spec/dsl/ast/parser.md`：生成 `ModuleAST`。
+- `spec/dsl/ast/dsl_ast.md`：`mlir_gen(...)` 使用 `DslAstVisitor` 生成 `ModuleAST`。
 - `spec/dsl/ast/nodes/basic.md`：`ModuleAST.emit_mlir(ctx, None)`。
 - xDSL `ModuleOp`：公开返回值类型。
 
@@ -41,7 +41,7 @@
   ```python
   module_op = mlir_gen(kernel, lhs, rhs)
   ```
-- 功能说明：固定执行 `parse(fn, *runtime_args).emit_mlir(ctx, None)`，其中 `ctx` 由本入口创建。
+- 功能说明：固定在当前入口内解析 `fn` 为 `ModuleAST`，再执行 `ModuleAST.emit_mlir(ctx, None)`，其中 `ctx` 由本入口创建。
 - 注意事项：不接受 `globals`、`builtins`、`config` 参数；缺少 runtime arg 必须报 `mlir_gen requires explicit runtime args for <fn>: expected <n>, got <m>`；DSL `min(lhs, rhs)` 仅支持两个位置参数且不得带关键字参数；`kernel.add/sub/...` 不生成 `kernel.add` 等 dialect op，统一 lower 到 `kernel.binary_elewise`。
 
 ## 测试

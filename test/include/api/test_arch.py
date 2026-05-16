@@ -296,13 +296,13 @@ int main() {
     Memory<TLM2, float> tlm2 = get_dynamic_memory<TLM2>();
     Memory<TLM3, float> tlm3 = get_dynamic_memory<TLM3>();
 
-    if (tlm1.rank() != 1 || tlm1.shape()[0] != 1024 || tlm1.stride()[0] != 1 || tlm1.space() != MemorySpace::TLM1) {
+    if (tlm1.rank() != 1 || tlm1.shape()[0] != 524288 || tlm1.stride()[0] != 1 || tlm1.space() != MemorySpace::TLM1) {
         return fail(1);
     }
-    if (tlm2.rank() != 1 || tlm2.shape()[0] != 512 || tlm2.stride()[0] != 1 || tlm2.space() != MemorySpace::TLM2) {
+    if (tlm2.rank() != 1 || tlm2.shape()[0] != 1048576 || tlm2.stride()[0] != 1 || tlm2.space() != MemorySpace::TLM2) {
         return fail(2);
     }
-    if (tlm3.rank() != 1 || tlm3.shape()[0] != 512 || tlm3.stride()[0] != 1 || tlm3.space() != MemorySpace::TLM3) {
+    if (tlm3.rank() != 1 || tlm3.shape()[0] != 1048576 || tlm3.stride()[0] != 1 || tlm3.space() != MemorySpace::TLM3) {
         return fail(3);
     }
     return 0;

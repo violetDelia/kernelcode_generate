@@ -2,7 +2,7 @@
 
 
 功能说明:
-- 覆盖 `parse(...)` / `parse_function(...)` 的基础解析与诊断路径。
+- 覆盖 `parse_function(...)` 的基础解析与诊断路径，并锁定旧 `parse(...)` 删除后的公开边界。
 - 测试结构对应 `spec/dsl/ast/parser.md` 与 `kernel_gen/dsl/ast/parser.py`。
 
 当前覆盖率信息:
@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import importlib
 
 import pytest
 
@@ -36,7 +37,6 @@ from kernel_gen.dsl.ast import (
     MemoryAST,
     SymbolDimAST,
     SymbolLtAST,
-    parse,
     parse_function,
 )
 from kernel_gen.operation.dma import store
@@ -66,11 +66,11 @@ def test_parse_function_basic_assignment() -> None:
     assert func_ast.has_explicit_return.raw_value is True
 
 
-def test_parse_rejects_non_callable_public_input() -> None:
-    """parse 公开入口拒绝非 callable 输入并返回稳定错误。"""
+def test_parse_function_rejects_non_callable_public_input() -> None:
+    """parse_function 公开入口拒绝非 callable 输入并返回稳定错误。"""
 
-    with pytest.raises(KernelCodeError, match="parse expects a callable"):
-        parse(1)
+    with pytest.raises(KernelCodeError, match="parse_function expects a callable"):
+        parse_function(1)
 
 
 def test_parse_function_for_loop() -> None:
@@ -115,14 +115,14 @@ def test_parse_function_if_else() -> None:
 
 
 def test_parse_infers_runtime_annotation() -> None:
-    """公开 parse 入口允许通过 runtime args 推断缺失注解。"""
+    """公开 parse_function 入口允许通过 runtime args 推断缺失注解。"""
 
     memory = Memory([SymbolDim("M")], NumericType.Float32)
 
     def env_kernel(x):
         return x
 
-    func_ast = parse(env_kernel, memory).functions[0]
+    func_ast = parse_function(env_kernel, memory)
 
     assert isinstance(func_ast.inputs[0], MemoryAST)
     assert func_ast.inputs[0].memory == memory
@@ -179,18 +179,15 @@ def test_ast_parse_requires_runtime_args_for_parameters() -> None:
         parse_function(kernel)
 
 
-def test_ast_parse_module_entry_returns_module_ast() -> None:
-    """包根 parse 入口返回包含 FunctionAST 的 ModuleAST。"""
+def test_ast_parse_public_entry_removed() -> None:
+    """旧 parse 公开入口已从 parser 模块与包根删除。"""
 
-    memory = Memory([4], NumericType.Float32)
+    parser_module = importlib.import_module("kernel_gen.dsl.ast.parser")
+    ast_package = importlib.import_module("kernel_gen.dsl.ast")
 
-    def kernel(x):
-        return x
-
-    module_ast = parse(kernel, memory)
-
-    assert len(module_ast.functions) == 1
-    assert isinstance(module_ast.functions[0], FunctionAST)
+    assert not hasattr(parser_module, "parse")
+    assert not hasattr(ast_package, "parse")
+    assert "parse" not in ast_package.__all__
 
 
 def test_parse_function_ignores_formatted_tensor_annotation_arithmetic_variants() -> None:

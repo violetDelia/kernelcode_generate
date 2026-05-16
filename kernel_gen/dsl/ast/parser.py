@@ -2,15 +2,13 @@
 
 
 功能说明:
-- 提供 `parse(...)` 与 `parse_function(...)` 两个公开入口。
-- 解析实现由 `DslAstVisitor` 承接；本文件不保留额外 helper。
+- 提供 `parse_function(...)` 公开入口。
+- 解析实现由 `DslAstVisitor` 承接；本文件仅保留 `parse_function(...)` 需要的当前文件内 helper。
 
 API 列表:
-- `parse(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> ModuleAST`
 - `parse_function(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> FunctionAST`
 
 使用示例:
-- module_ast = parse(kernel, lhs, rhs)
 - func_ast = parse_function(kernel, lhs)
 
 关联文件:
@@ -38,16 +36,16 @@ DslRuntimeArg: TypeAlias = "Memory | SymbolDim | int | float | bool | str"
 DslFunctionReturn: TypeAlias = "DslRuntimeArg | None"
 
 
-def parse(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> ModuleAST:
+def _parse_module(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> ModuleAST:
     """解析 Python DSL 函数为 `ModuleAST`。
 
 
     功能说明:
-    - 使用 `inspect.getsource(...)` 读取函数源码。
-    - 使用公开 `DslAstVisitor.visit(...)` 生成 `ModuleAST`。
+    - 当前文件内 helper，为 `parse_function(...)` 复用完整 module 解析流程。
+    - 使用 `inspect.getsource(...)` 读取函数源码，再用 `DslAstVisitor.visit(...)` 生成 `ModuleAST`。
 
     使用示例:
-    - module_ast = parse(kernel, lhs, rhs)
+    - module_ast = _parse_module(kernel, lhs, rhs)
 
     关联文件:
     - spec: spec/dsl/ast/parser.md
@@ -56,7 +54,7 @@ def parse(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) ->
     """
 
     if not callable(fn):
-        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, "parse expects a callable")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, "parse_function expects a callable")
     source = textwrap.dedent(inspect.getsource(fn))
     tree = py_ast.parse(source)
     visitor = DslAstVisitor(fn, tuple(runtime_args))
@@ -72,7 +70,7 @@ def parse_function(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRunti
 
 
     功能说明:
-    - 调用 `parse(fn, *runtime_args)` 并返回 module 中唯一函数。
+    - 调用当前文件内 module 解析 helper 并返回 module 中唯一函数。
 
     使用示例:
     - func_ast = parse_function(kernel, lhs)
@@ -83,7 +81,7 @@ def parse_function(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRunti
     - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
-    module_ast = parse(fn, *runtime_args)
+    module_ast = _parse_module(fn, *runtime_args)
     if len(module_ast.functions) != 1:
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, "parse_function expects exactly one function")
     return module_ast.functions[0]

@@ -368,6 +368,23 @@ def test_arch_get_dynamic_memory_supports_tlm123() -> None:
         )
 
 
+def test_arch_get_dynamic_memory_accepts_specialized_static_capacity() -> None:
+    capacities = {
+        "tsm": "2097152",
+        "tlm1": "524288",
+        "tlm2": "1048576",
+        "tlm3": "1048576",
+    }
+    for space, capacity in capacities.items():
+        op = ArchGetDynamicMemoryOp(
+            _make_space(space),
+            _make_dynamic_memory_type(space=space, shape=ArrayAttr([_expr_attr(capacity)])),
+        )
+
+        op.verify()
+        assert op.result.type == _make_dynamic_memory_type(space=space, shape=ArrayAttr([_expr_attr(capacity)]))
+
+
 # TC-ARCH-008
 # 测试目的: 验证 arch.get_dynamic_memory 会拒绝非法 memory_space 或不符合规范的结果类型。
 # 对应功能实现文件路径: kernel_gen/dialect/arch.py

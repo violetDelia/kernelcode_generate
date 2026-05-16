@@ -7,7 +7,7 @@
 API 列表:
 - `alloc(shape: ShapeInput, dtype: NumericType, space: MemorySpace = MemorySpace.GM, stride: ShapeInput | None = None, format: Farmat = Farmat.Norm) -> Memory`
 - `free(memory: Memory) -> None`
-- `fill(target: Memory, value: FillValue) -> None`
+- `fill(target: Memory, value: int | float | str | SymbolDim) -> None`
 - `copy(source: Memory, space: MemorySpace) -> Memory`
 - `broadcast(target: Memory, source: Memory) -> None`
 - `load(source: Memory, offsets: ShapeInput, sizes: ShapeInput, strides: ShapeInput | None = None, space: MemorySpace | None = None) -> Memory`
@@ -34,6 +34,7 @@ API 列表:
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 
 from kernel_gen.core.contracts import default_stride as _common_default_stride
@@ -55,7 +56,7 @@ _ALLOWED_FILL_STRING_LITERALS = frozenset({"inf", "-inf"})
 
 DimInput = int | str | SymbolDim
 ShapeInput = Sequence[DimInput] | SymbolShape
-FillValue = int | float | str | SymbolDim
+_FillValue = int | float | str | SymbolDim
 
 
 class _RequiredSpaceSentinel:
@@ -213,7 +214,7 @@ def free(value: Memory) -> None:
     return None
 
 
-def _validate_fill_value(value: FillValue) -> FillValue:
+def _validate_fill_value(value: _FillValue) -> _FillValue:
     """校验 `dma.fill` 的公开 value 合同。
 
 
@@ -251,6 +252,15 @@ def _validate_fill_value(value: FillValue) -> FillValue:
             )
         return value
     if isinstance(value, (int, float, SymbolDim)):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
+                ERROR_TEMPLATE.format(
+                    scene="dma.fill 参数校验",
+                    expected="fill float value must be finite float",
+                    actual=str(value),
+                    action=ERROR_ACTION,
+                )
+            )
         return value
     raise kernel_code_error(ErrorKind.CONTRACT, ErrorModule.OPERATION,
         ERROR_TEMPLATE.format(
@@ -262,7 +272,7 @@ def _validate_fill_value(value: FillValue) -> FillValue:
     )
 
 
-def fill(target: Memory, value: FillValue) -> None:
+def fill(target: Memory, value: int | float | str | SymbolDim) -> None:
     """表达对整块 memory 的公开填充语义。
 
 

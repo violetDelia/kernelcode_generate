@@ -31,12 +31,12 @@ from xdsl.dialects.builtin import ArrayAttr, ModuleOp, i8
 from kernel_gen.core.config import reset_config
 from kernel_gen.core.context import build_default_context
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaReshapeOp, DmaSliceOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaFreeOp, DmaReshapeOp, DmaSliceOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelImg2col1dOp, KernelImg2col2dOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnAddOp, NnMatmulOp, NnMemorySpaceAttr, NnMemoryType, NnSoftmaxOp
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolForOp, SymbolGetDimOp, SymbolMaxOp, SymbolMinOp, SymbolMulOp, SymbolValueType
 from kernel_gen.dsl import parse_function
-from kernel_gen.dsl.ast import parse
+from kernel_gen.dsl.ast import ModuleAST
 from kernel_gen.dsl.ast.mlir_gen import mlir_gen
 from kernel_gen.operation import copy as dma_copy
 from kernel_gen.operation import free as dma_free
@@ -717,7 +717,7 @@ def test_mlir_gen_reports_public_broadcast_mismatch() -> None:
 
 
 def test_mlir_gen_lowers_public_dma_fill_helper() -> None:
-    """TC-MLIR-GEN-INT-005: public dma alloc/fill helper 下沉为 DMA broadcast。"""
+    """TC-MLIR-GEN-INT-005: public dma alloc/fill helper 下沉为 DMA fill。"""
 
     def init_kernel() -> None:
         scratch = alloc([2, 2], NumericType.Float32)
@@ -727,7 +727,8 @@ def test_mlir_gen_lowers_public_dma_fill_helper() -> None:
     func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
 
     body_ops = list(func_op.body.block.ops)
-    assert any(isinstance(op, DmaBroadcastOp) for op in body_ops)
+    assert any(isinstance(op, DmaFillOp) for op in body_ops)
+    assert not any(isinstance(op, DmaBroadcastOp) for op in body_ops)
     assert isinstance(body_ops[-1], func.ReturnOp)
 
 
@@ -738,7 +739,7 @@ def test_module_ast_emit_mlir_matches_mlir_gen_entry() -> None:
         return x
 
     memory = _tensor_arg([2, 2])
-    from_module_ast = parse(identity, memory).emit_mlir(build_default_context(), None)
+    from_module_ast = ModuleAST([parse_function(identity, memory)]).emit_mlir(build_default_context(), None)
     from_public_entry = mlir_gen(identity, memory)
 
     assert str(from_module_ast) == str(from_public_entry)
@@ -969,7 +970,7 @@ def test_module_ast_emit_mlir_requires_context() -> None:
     def add_kernel(x: "Tensor[f32, 2, 2]", y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
         return x + y
 
-    module_ast = parse(add_kernel, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
+    module_ast = ModuleAST([parse_function(add_kernel, _tensor_arg([2, 2]), _tensor_arg([2, 2]))])
 
     with pytest.raises(TypeError):
         module_ast.emit_mlir()
@@ -982,7 +983,7 @@ def test_module_ast_emit_mlir_returns_module_op() -> None:
         return x + y
 
     ctx = build_default_context()
-    module_ast = parse(add_kernel, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
+    module_ast = ModuleAST([parse_function(add_kernel, _tensor_arg([2, 2]), _tensor_arg([2, 2]))])
     module = module_ast.emit_mlir(ctx, None)
 
     assert isinstance(module, ModuleOp)
@@ -1095,7 +1096,7 @@ def test_mlir_gen_lowers_dma_and_arch_public_helper_chains() -> None:
 
     for op_name in (
         "dma.alloc",
-        "dma.broadcast",
+        "dma.fill",
         "dma.copy",
         "dma.slice",
         "dma.view",

@@ -6,7 +6,6 @@
 - 只做导出，不在本文件内实现节点定义或解析逻辑。
 
 API 列表:
-- `parse(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> ModuleAST`
 - `parse_function(fn: Callable[..., DslFunctionReturn], *runtime_args: DslRuntimeArg) -> FunctionAST`
 - `DslAstVisitor(fn: DslCallable, runtime_args: tuple[DslRuntimeArg, ...] = ())`
 - `DSLNode` / `ValueAST` / `StatementAST`
@@ -146,7 +145,7 @@ from .nodes import (
     ValueAST,
 )
 from .dsl_ast import DslAstVisitor
-from .parser import parse, parse_function
+from .parser import parse_function
 
 __all__ = [
     "ArchBarrierAST",
@@ -263,6 +262,5 @@ __all__ = [
     "TensorAxisAccessAST",
     "TupleAST",
     "ValueAST",
-    "parse",
     "parse_function",
 ]

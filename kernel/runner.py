@@ -10,12 +10,12 @@
 
 API 列表:
 - `KERNEL_DUMP_ROOT: Path`
-- `KernelTorchDemoResult(case_name: str, dsl_result: DslRunResult, max_abs_diff: float, atol: float, rtol: float)`
-- `run_torch_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], real_args: tuple[torch.Tensor | np.ndarray | int, ...] | list[torch.Tensor | np.ndarray | int], output: torch.Tensor | np.ndarray, expected: torch.Tensor | np.ndarray, *, atol: float = 1e-4, rtol: float = 1e-4) -> KernelTorchDemoResult`
+- `KernelNumpyDemoResult(case_name: str, dsl_result: DslRunResult, max_abs_diff: float, atol: float, rtol: float)`
+- `run_numpy_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], real_args: tuple[np.ndarray | int, ...] | list[np.ndarray | int], output: np.ndarray, expected: np.ndarray, *, atol: float = 1e-4, rtol: float = 1e-4) -> KernelNumpyDemoResult`
 - `run_lowering_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | str | None], *compile_args: Memory | SymbolDim | int | str) -> tuple[ModuleOp, str]`
 
 使用示例:
-- `result = run_torch_demo("matmul/static_shape", matmul_kernel, (out, lhs, rhs), out, lhs @ rhs)`
+- `result = run_numpy_demo("matmul/static_shape", matmul_kernel, (out, lhs, rhs), out, lhs @ rhs)`
 - `module, source = run_lowering_demo("matmul/static_shape", matmul_kernel, lhs, rhs, out)`
 
 关联文件:
@@ -43,9 +43,8 @@ from kernel_gen.tools.dsl_run import DslRunResult, dsl_run
 
 if TYPE_CHECKING:
     import numpy as np
-    import torch
 
-TorchDemoRuntimeArg: TypeAlias = "torch.Tensor | np.ndarray | int"
+NumpyDemoRuntimeArg: TypeAlias = "np.ndarray | int"
 
 KERNEL_DUMP_ROOT = Path(__file__).resolve().parent / "dump"
 
@@ -75,84 +74,72 @@ def _sanitize_case_name(case_name: str) -> Path:
     return Path(*parts)
 
 
-def _runtime_module_name(value: torch.Tensor | np.ndarray) -> str:
-    """提取运行时对象模块名。
-
-
-    功能说明:
-    - 用于轻量识别 torch tensor 与 numpy ndarray。
-    - 避免 runner 导入阶段强制加载 torch/numpy。
-
-    使用示例:
-    - `_runtime_module_name(tensor)`
-    """
-
-    return getattr(value.__class__, "__module__", "") or ""
-
-
-def _is_torch_tensor(value: torch.Tensor | np.ndarray) -> bool:
-    """判断对象是否为 torch tensor。
-
-
-    功能说明:
-    - 按公开运行时对象模块名前缀判断。
-    - 只服务 `run_torch_demo(...)` 的结果校验。
-
-    使用示例:
-    - `_is_torch_tensor(torch.empty(1))`
-    """
-
-    return _runtime_module_name(value).startswith("torch")
-
-
-def _is_numpy_array(value: torch.Tensor | np.ndarray) -> bool:
+def _is_numpy_array(value: np.ndarray | int) -> bool:
     """判断对象是否为 numpy ndarray。
 
 
     功能说明:
     - 按公开运行时对象模块名前缀判断。
-    - 只服务 `run_torch_demo(...)` 的结果校验。
+    - 只服务 `run_numpy_demo(...)` 的结果校验。
 
     使用示例:
     - `_is_numpy_array(np.empty(1))`
     """
 
-    return _runtime_module_name(value).startswith("numpy")
+    import numpy as np
+
+    return isinstance(value, np.ndarray)
+
+
+def _validate_numpy_demo_real_args(real_args: tuple[NumpyDemoRuntimeArg, ...] | list[NumpyDemoRuntimeArg]) -> tuple[NumpyDemoRuntimeArg, ...]:
+    """校验并冻结 NumPy demo 的运行时参数。
+
+
+    功能说明:
+    - `real_args` 只允许 `np.ndarray` 与 Python `int`。
+    - `bool`、`np.integer`、`float`、`str` 等其它类型必须按公开错误语义拒绝。
+
+    使用示例:
+    - `args = _validate_numpy_demo_real_args((out, lhs, rhs, 8))`
+    """
+
+    import numpy as np
+
+    if not isinstance(real_args, (tuple, list)):
+        raise TypeError("real_args must be tuple or list of np.ndarray or int")
+    validated: list[NumpyDemoRuntimeArg] = []
+    for index, arg in enumerate(real_args):
+        if _is_numpy_array(arg):
+            validated.append(arg)
+            continue
+        if isinstance(arg, int) and not isinstance(arg, bool):
+            validated.append(arg)
+            continue
+        if isinstance(arg, np.integer):
+            raise TypeError(f"real_args[{index}] only supports np.ndarray or int; convert numpy integer scalar with int(...)")
+        raise TypeError(f"real_args[{index}] only supports np.ndarray or int")
+    return tuple(validated)
 
 
 def _assert_outputs_close(
     case_name: str,
-    output: torch.Tensor | np.ndarray,
-    expected: torch.Tensor | np.ndarray,
+    output: np.ndarray,
+    expected: np.ndarray,
     *,
     atol: float,
     rtol: float,
 ) -> float:
-    """校验真实执行结果与 PyTorch/NumPy 参考结果一致。
+    """校验真实执行结果与 NumPy 参考结果一致。
 
 
     功能说明:
-    - 支持 torch tensor 与 numpy ndarray 两类 `dsl_run` 运行时输出。
+    - 只支持 numpy ndarray，避免 kernel demo 运行期依赖外部 tensor 框架。
     - 返回最大绝对误差，便于 demo 输出摘要。
     - 校验失败时抛出带 case 名与误差的 `AssertionError`。
 
     使用示例:
     - `max_diff = _assert_outputs_close("matmul", out, expected, atol=1e-4, rtol=1e-4)`
     """
-
-    if _is_torch_tensor(output):
-        import torch
-
-        if not _is_torch_tensor(expected):
-            raise TypeError("expected must be torch.Tensor when output is torch.Tensor")
-        diff = torch.max(torch.abs(output.detach().cpu() - expected.detach().cpu()))
-        max_abs_diff = float(diff.item())
-        if not torch.allclose(output, expected, atol=atol, rtol=rtol):
-            raise AssertionError(
-                f"{case_name}: dsl_run output does not match torch reference "
-                f"(max_abs_diff={max_abs_diff}, atol={atol}, rtol={rtol})"
-            )
-        return max_abs_diff
 
     if _is_numpy_array(output):
         import numpy as np
@@ -167,7 +154,7 @@ def _assert_outputs_close(
             )
         return max_abs_diff
 
-    raise TypeError("output must be torch.Tensor or numpy.ndarray")
+    raise TypeError("output must be numpy.ndarray")
 
 
 def _write_current_source_dump(path: Path, source: str) -> None:
@@ -189,16 +176,16 @@ def _write_current_source_dump(path: Path, source: str) -> None:
 
 
 @dataclass(frozen=True)
-class KernelTorchDemoResult:
-    """`run_torch_demo(...)` 的执行与校验结果。
+class KernelNumpyDemoResult:
+    """`run_numpy_demo(...)` 的执行与校验结果。
 
 
     功能说明:
     - 保存 `dsl_run(...)` 的完整结果对象。
-    - 保存输出相对 PyTorch/NumPy 参考结果的最大绝对误差与校验容差。
+    - 保存输出相对 NumPy 参考结果的最大绝对误差与校验容差。
 
     使用示例:
-    - `result = run_torch_demo("matmul", kernel, (out, lhs, rhs), out, lhs @ rhs)`
+    - `result = run_numpy_demo("matmul", kernel, (out, lhs, rhs), out, lhs @ rhs)`
     """
 
     case_name: str
@@ -208,16 +195,16 @@ class KernelTorchDemoResult:
     rtol: float
 
 
-def run_torch_demo(
+def run_numpy_demo(
     case_name: str,
     kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None],
-    real_args: tuple[TorchDemoRuntimeArg, ...] | list[TorchDemoRuntimeArg],
-    output: torch.Tensor | np.ndarray,
-    expected: torch.Tensor | np.ndarray,
+    real_args: tuple[NumpyDemoRuntimeArg, ...] | list[NumpyDemoRuntimeArg],
+    output: np.ndarray,
+    expected: np.ndarray,
     *,
     atol: float = 1e-4,
     rtol: float = 1e-4,
-) -> KernelTorchDemoResult:
+) -> KernelNumpyDemoResult:
     """通过 `dsl_run` 执行 kernel demo，并和参考结果对齐。
 
 
@@ -225,24 +212,25 @@ def run_torch_demo(
     - 设置公开 core config target 为 `npu_demo`。
     - 设置 dump 根目录为 `kernel/dump/<case_name>`，由 `dsl_run` 按函数名写出 IR/source。
     - 调用 `dsl_run(kernel_fn, real_args, "npu-demo-lowering")` 完成编译和执行。
-    - 校验 `output` 与调用方给出的 PyTorch/NumPy 参考结果一致。
+    - 校验 `output` 与调用方给出的 NumPy 参考结果一致。
     - 函数结束后恢复调用前 core config，避免 demo 脚本污染后续测试或交互状态。
 
     使用示例:
-    - `run_torch_demo("matmul/static", matmul_kernel, (out, lhs, rhs), out, lhs @ rhs)`
+    - `run_numpy_demo("matmul/static", matmul_kernel, (out, lhs, rhs), out, lhs @ rhs)`
     """
 
     dump_dir = KERNEL_DUMP_ROOT / _sanitize_case_name(case_name)
+    validated_args = _validate_numpy_demo_real_args(real_args)
     snapshot = snapshot_config()
     try:
         set_target("npu_demo")
         set_dump_dir(dump_dir)
-        dsl_result = dsl_run(kernel_fn, real_args, "npu-demo-lowering")
+        dsl_result = dsl_run(kernel_fn, validated_args, "npu-demo-lowering")
         _write_current_source_dump(dump_dir / "source.cpp", dsl_result.source)
         if not dsl_result.execute_result.ok:
             raise RuntimeError(f"{case_name}: dsl_run execute failed: {dsl_result.execute_result.failure_phrase}")
         max_abs_diff = _assert_outputs_close(case_name, output, expected, atol=atol, rtol=rtol)
-        return KernelTorchDemoResult(
+        return KernelNumpyDemoResult(
             case_name=case_name,
             dsl_result=dsl_result,
             max_abs_diff=max_abs_diff,

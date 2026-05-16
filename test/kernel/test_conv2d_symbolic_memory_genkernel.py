@@ -5,6 +5,7 @@
 - 覆盖 `kernel/conv2d/inputs_dynamic_tile_dynamic.py` 的符号 memory 编译形态。
 - 覆盖两条 static conv2d demo 的固定 seed 具体 static shape 编译形态。
 - 验证 `run_lowering_demo(...)` 通过公开 `mlir_gen -> lowering -> gen_kernel` 链路生成动态 memory IR/source。
+- 验证 C/K reduce 维和 matmul 一样使用本地 accumulator，不允许通过反复读写 out 累计 partial。
 
 API 列表:
 - 无（pytest 文件，不承载公开 API）
@@ -40,9 +41,9 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 Conv2dCompileArg: TypeAlias = "Memory | SymbolDim"
-STATIC_OUTPUT_MEMORY = "!nn.memory<[#symbol.expr<11>, #symbol.expr<2>, #symbol.expr<258>, #symbol.expr<262>]"
-STATIC_INPUT_MEMORY = "!nn.memory<[#symbol.expr<11>, #symbol.expr<28>, #symbol.expr<260>, #symbol.expr<264>]"
-STATIC_WEIGHT_MEMORY = "!nn.memory<[#symbol.expr<2>, #symbol.expr<28>, #symbol.expr<3>, #symbol.expr<3>]"
+STATIC_OUTPUT_MEMORY = "!nn.memory<[#symbol.expr<5>, #symbol.expr<20>, #symbol.expr<35>, #symbol.expr<33>]"
+STATIC_INPUT_MEMORY = "!nn.memory<[#symbol.expr<5>, #symbol.expr<65>, #symbol.expr<281>, #symbol.expr<262>]"
+STATIC_WEIGHT_MEMORY = "!nn.memory<[#symbol.expr<20>, #symbol.expr<65>, #symbol.expr<3>, #symbol.expr<3>]"
 SEMANTIC_OUTPUT_MEMORY = (
     "!nn.memory<[#symbol.expr<B>, #symbol.expr<C>, #symbol.expr<-KH + XH + 1>, #symbol.expr<-KW + XW + 1>]"
 )
@@ -68,6 +69,18 @@ def _assert_conv2d_source_uses_kernel_out_first(fn) -> None:
     assert "kernel.img2col2d(" in function_source
     assert "kernel.matmul(" in function_source
     assert "kernel.add(" in function_source
+    assert "for c0 in loop(0, c_size, tile_c)" in function_source
+    assert "for ni in loop(0, cur_n, 1)" in function_source
+    assert "batch_tile = min(n_size, 1)" in function_source
+    assert "k_tile = cur_c * kh_size * kw_size" in function_source
+    assert "col = alloc([batch_tile, cur_c, kh_size, kw_size, cur_ho, cur_wo]" in function_source
+    assert "col2 = reshape(col, [k_tile, out_tile])" in function_source
+    assert "acc = alloc([batch_tile, cur_f, cur_ho, cur_wo]" in function_source
+    assert "partial = transpose(out_fnhw, [1, 0, 2, 3])" in function_source
+    assert "kernel.add(acc, acc, partial)" in function_source
+    assert "[batch_index, f0, ho0, wo0]" in function_source
+    assert "partial_tile = alloc" not in function_source
+    assert "out_tile_mem = slice(out" not in function_source
     assert "col = img2col2d(" not in function_source
     assert "out2 = matmul(" not in function_source
 
@@ -138,9 +151,9 @@ def _seeded_static_conv2d_compile_args() -> tuple[Memory, Memory, Memory]:
     """
 
     return (
-        Memory([11, 2, 258, 262], NumericType.Float32),
-        Memory([11, 28, 260, 264], NumericType.Float32),
-        Memory([2, 28, 3, 3], NumericType.Float32),
+        Memory([5, 20, 35, 33], NumericType.Float32),
+        Memory([5, 65, 281, 262], NumericType.Float32),
+        Memory([20, 65, 3, 3], NumericType.Float32),
     )
 
 
@@ -196,11 +209,11 @@ def test_inputs_static_tile_dynamic_gen_kernel_keeps_seeded_static_shapes() -> N
         "test_conv2d/inputs_static_tile_dynamic_seeded_static_memory",
         conv2d_inputs_static_tile_dynamic_kernel,
         *_seeded_static_conv2d_compile_args(),
-        2,
-        2,
-        1,
-        1,
-        7,
+        8,
+        16,
+        4,
+        8,
+        8,
     )
     module_text = str(module)
 

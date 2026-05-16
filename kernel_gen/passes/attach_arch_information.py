@@ -7,8 +7,9 @@
 - 不承担 outline 逻辑，仅负责把 IR 级 launch 信息补齐到后续 `outline-device-kernel` 可消费的状态。
 
 API 列表:
-- `class AttachArchInformationPass(target: str = "npu_demo")`
+- `class AttachArchInformationPass(target: str = "npu_demo", fold: bool = True)`
 - `AttachArchInformationPass.from_options(options: dict[str, str]) -> AttachArchInformationPass`
+- `AttachArchInformationPass.apply(ctx: Context, module: ModuleOp) -> None`
 
 使用示例:
 - from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
@@ -25,10 +26,21 @@ from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import IntAttr, IntegerAttr, ModuleOp, StringAttr
+from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, ModuleOp, StringAttr
+from xdsl.ir import Block
 
+from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp
+from kernel_gen.dialect.nn import NnMemoryType
+from kernel_gen.dialect.symbol import SymbolExprAttr
 from kernel_gen.passes.pass_manager import Pass
 from kernel_gen.target import registry as target_registry
+
+_DYNAMIC_MEMORY_CAPACITY_KEYS = {
+    "tsm": "tsm_memory_size",
+    "tlm1": "tlm1_memory_size",
+    "tlm2": "tlm2_memory_size",
+    "tlm3": "tlm3_memory_size",
+}
 
 
 class AttachArchInformationPass(Pass):
@@ -105,6 +117,80 @@ class AttachArchInformationPass(Pass):
         if not isinstance(target, str) or not target.strip():
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "AttachArchInformationError: target must be non-empty string")
         return cls(target=target)
+
+    def _specialized_dynamic_memory_type(
+        self: "AttachArchInformationPass",
+        op: ArchGetDynamicMemoryOp,
+    ) -> NnMemoryType | None:
+        """构造 target 容量特化后的 dynamic memory result type。
+
+        功能说明:
+        - 仅对 `tsm/tlm1/tlm2/tlm3` 查询 target registry 容量并生成静态字节数 shape。
+        - `shared/local` 保持 named-capacity 形态，不在本轮特化。
+
+        使用示例:
+        - result_type = self._specialized_dynamic_memory_type(op)
+
+        关联文件:
+        - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
+        - test: [test/passes/test_attach_arch_information.py](../../test/passes/test_attach_arch_information.py)
+        - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
+        """
+
+        space_name = op.memory_space.space.data
+        hardware_key = _DYNAMIC_MEMORY_CAPACITY_KEYS.get(space_name)
+        if hardware_key is None:
+            return None
+        capacity = target_registry.get_target_hardware(self.target, hardware_key)
+        if capacity is None:
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                f"AttachArchInformationError: target {self.target} is missing {hardware_key}",
+            )
+        if capacity <= 0:
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                f"AttachArchInformationError: target {self.target} {hardware_key} must be > 0",
+            )
+        current_type = op.result.type
+        if not isinstance(current_type, NnMemoryType):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "AttachArchInformationError: arch.get_dynamic_memory result must be nn.memory")
+        return NnMemoryType(
+            ArrayAttr([SymbolExprAttr.from_expr(str(capacity))]),
+            current_type.stride,
+            current_type.element_type,
+            current_type.space,
+        )
+
+    def _specialize_dynamic_memory_ops(self: "AttachArchInformationPass", module: ModuleOp) -> None:
+        """特化 module 中 dynamic memory 查询的 target 容量。
+
+        功能说明:
+        - 替换 `arch.get_dynamic_memory` op 的 result type，不修改其它 op 语义。
+        - 使用公开 block 插入、SSA use 替换与 erase 操作保持用户链路不丢失。
+
+        使用示例:
+        - self._specialize_dynamic_memory_ops(module)
+
+        关联文件:
+        - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
+        - test: [test/passes/test_attach_arch_information.py](../../test/passes/test_attach_arch_information.py)
+        - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
+        """
+
+        for op in [candidate for candidate in module.walk() if isinstance(candidate, ArchGetDynamicMemoryOp)]:
+            result_type = self._specialized_dynamic_memory_type(op)
+            if result_type is None or result_type == op.result.type:
+                continue
+            parent_block = op.parent_block()
+            if not isinstance(parent_block, Block):
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "AttachArchInformationError: arch.get_dynamic_memory must be attached to a block")
+            replacement = ArchGetDynamicMemoryOp(op.memory_space, result_type)
+            parent_block.insert_op_before(replacement, op)
+            op.result.replace_all_uses_with(replacement.result)
+            parent_block.erase_op(op)
 
     def _apply_to_module(self: "AttachArchInformationPass", module: ModuleOp) -> None:
         """执行当前文件内的 attach 主逻辑。
@@ -208,12 +294,14 @@ class AttachArchInformationPass(Pass):
                     "AttachArchInformationError: function "
                     f"{entry_func.sym_name.data} launch extents must match target {self.target}"
                 )
+            self._specialize_dynamic_memory_ops(module)
             return
 
         entry_func.attributes["launch_block"] = IntAttr(expected_values["launch_block"])
         entry_func.attributes["launch_thread"] = IntAttr(expected_values["launch_thread"])
         entry_func.attributes["launch_subthread"] = IntAttr(expected_values["launch_subthread"])
         entry_func.attributes["shared_memory_size"] = IntAttr(expected_values["shared_memory_size"])
+        self._specialize_dynamic_memory_ops(module)
 
     def apply(self: "AttachArchInformationPass", ctx: Context, module: ModuleOp) -> None:
         """满足 xdsl `ModulePass` 协议的 hook。

@@ -96,7 +96,7 @@
 - `symbol.ptr` 只定义 `!symbol.ptr<dtype>` 这一类最小 pointer type；它只承载 pointee dtype，不承载名字、地址值、shape、stride、offset 或 memory space。
 - `!symbol.ptr<dtype>` 中的 `dtype` 必须是合法 `TypeAttribute`，且不得为 `!symbol.int<#symbol.expr<...>>`；当前不定义 `!symbol.ptr<!symbol.int<#symbol.expr<...>>>` 这类“指向 symbol.int”的 pointer carrier。
 - 当前最小算术/比较 op 范围仅包含 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`、`symbol.min`、`symbol.max`、`symbol.eq`、`symbol.ne`、`symbol.lt`、`symbol.le`、`symbol.gt`、`symbol.ge`；不定义取模 op、按位运算、布尔逻辑组合、广播或张量级算术。`SymbolExprAttr` 文本表达允许 `mod`，但该能力不等于新增 `symbol.mod` operation。
-- `symbol.min(lhs, rhs)` 是二元整数符号最小值 op，结果类型必须为 `!symbol.int<#symbol.expr<min(lhs, rhs)>>` 或等价常量表达；它不定义多参数 `min`、张量级最小值或比较谓词结果。
+- `symbol.min(lhs, rhs)` 是二元整数符号最小值 op，结果类型必须为 `!symbol.int<#symbol.expr<min(lhs, rhs)>>`、等价常量表达，或 full-tile tail 模式 `min(step, end - iter<start,end,step>)` 可证明 `(end-start)` 是 `step` 正整数倍时的 `step` 表达；AST / MLIR 生成侧不提前 fold 时仍可保留 `min(step, end - iter<...>)`，后续 Folder / pass 再规约为 `step`；它不定义多参数 `min`、张量级最小值或比较谓词结果。
 - `symbol.max(lhs, rhs)` 是二元整数符号最大值 op，结果类型必须为 `!symbol.int<#symbol.expr<max(lhs, rhs)>>` 或等价常量表达；它不定义多参数 `max`、张量级最大值或比较谓词结果。
 - 当前仅定义 `symbol.to_int` 与 `symbol.to_float` 两类转换：`symbol.to_int` 将 `!symbol.int<#symbol.expr<...>>` 转为普通整型（覆盖各整型变体），`symbol.to_float` 将 `!symbol.int<#symbol.expr<...>>` 转为 `f32`；不定义反向转换或其他跨类型规则。
 - `symbol.ne` / `symbol.lt` / `symbol.le` / `symbol.gt` 属于同一 compare family：统一采用二元 `!symbol.int<#symbol.expr<...>>, !symbol.int<#symbol.expr<...>> -> i1` 签名、统一 verifier 约束与统一 parse/print 规则，不能拆成互不一致的四套合同。
@@ -210,9 +210,10 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 
 - `symbol.add/sub/mul/div/floordiv/min/max` 任一 operand 为 `!symbol.iter<...>` 时，必须从该 iter type 的 start/end/step 生成 `iter<start,end,step>` token 并参与 result type 推导；不得从 SSA 名称、block argument 名称、`name_hint`、`f0` 或 `runtime_dim_*` 拼表达。
 - `symbol.add/sub/mul/div/floordiv/min/max` 任一 operand 值语义包含 `?` 时，result type 必须为 `!symbol.int<#symbol.expr<?>>`。
-- operand 不含 `?` 时，非 iter 动态 symbol 算术可保守输出 `!symbol.int<#symbol.expr<?>>` 以承接 `symbol.for` loop-carried accumulator；operand 含 `iter<...>` 时 result type 必须匹配 canonical 表达，例如 `N - iter<0,N,TILE>`、`A + iter<0,N,TILE>`、`min(TILE, N - iter<0,N,TILE>)` 均合法。
-- fold 只在当前 operand 均为静态整数时发生；result type 为 `!symbol.int<#symbol.expr<?>>` 时仍应物化为确定 `symbol.const`。
-- 当前 operand 为 `!symbol.int<#symbol.expr<?>>`、动态符号表达或含 `iter<...>` token 时不得 fold 为常量。
+- operand 不含 `?` 时，非 iter 动态 symbol 算术可保守输出 `!symbol.int<#symbol.expr<?>>` 以承接 `symbol.for` loop-carried accumulator；operand 含 `iter<...>` 时 result type 必须匹配 canonical 表达，例如 `N - iter<0,N,TILE>`、`A + iter<0,N,TILE>`、`min(TILE, N - iter<0,N,TILE>)` 均合法。full-tile tail 模式 `min(step, end - iter<start,end,step>)` 若可证明 `(end-start)` 是 `step` 的正整数倍，verifier 同时接受未折叠 `min(...)` result type 与已折叠 `step` result type。
+- fold 通常只在当前 operand 均为静态整数时发生；result type 为 `!symbol.int<#symbol.expr<?>>` 时仍应物化为确定 `symbol.const`。
+- full-tile tail 模式是 `symbol.min` 的唯一动态 fold 例外：`min(step, end - iter<start,end,step>)` 在 `(end-start)` 可证为 `step` 的正整数倍时 fold 为 `step`，静态 step 物化为 `symbol.const step`，动态 step 直接复用原 step SSA value。
+- 当前 operand 为 `!symbol.int<#symbol.expr<?>>`、其它动态符号表达或无法证明 full-tile 的 `iter<...>` token 时不得 fold 为常量。
 - `symbol.eq/ne/lt/le/gt/ge` 结果固定为 `i1`；静态整数 operand 可 fold 为 `arith.constant` 的 `i1` bool，动态符号、`?` 或 `symbol.iter` operand 不 fold。
 
 - 返回值：
@@ -594,8 +595,8 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 
   value = SymbolMinOp(lhs, rhs, SymbolValueType.from_expr("min(T, N)"))
   ```
-- 功能说明：构造或表示 `symbol.min`，结果为左右整数符号值的最小值。
-- 注意事项：只允许二元 `min`；不得扩展为多参数、张量级或浮点最小值；涉及 `?` 时结果必须保守为 `!symbol.int<#symbol.expr<?>>`，涉及 `symbol.iter` 时必须保留 canonical `iter<...>` 参与表达式。
+- 功能说明：构造或表示 `symbol.min`，结果为左右整数符号值的最小值；full-tile tail 模式可安全归约为 `step`。
+- 注意事项：只允许二元 `min`；不得扩展为多参数、张量级或浮点最小值；涉及 `?` 时结果必须保守为 `!symbol.int<#symbol.expr<?>>`。涉及 `symbol.iter` 时通常必须保留 canonical `iter<...>` 参与表达式；唯一例外是 `min(step, end - iter<start,end,step>)` 且 `(end-start)` 可证明为 `step` 正整数倍时，结果类型可直接为 `step`，fold 可返回 `step`。
 
 ### `class SymbolMaxOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 
@@ -943,6 +944,8 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 | TC-SYM-058 | 符号语义 | `SymbolValueType.get_value()/is_symbol()` 对常量、负数、`floordiv`、`ceildiv` 与 `mod` 的公开值语义 | 准备公开 `!symbol.int<#symbol.expr<...>>` 文本与构造入口。 | 运行 `test_symbol_value_type_public_expression_matrix`。 | 常量表达归一为整数，符号表达返回 canonical 文本，`is_symbol()` 与公开值语义一致。 | `test_symbol_value_type_public_expression_matrix` |
 | TC-SYM-059 | 解析/打印 | `SymbolIterType` 公开构造、字符串化和 legacy iter parser，且 legacy `symbol.dim` 文本不再注册 | 准备 iter bounds、legacy iter 文本与 legacy `!symbol.dim<...>` 文本。 | 运行 `test_symbol_iter_public_constructor_matrix_and_removed_dim_type`。 | iter 文本稳定，malformed iter 文本按公开错误语义失败，legacy `symbol.dim` 文本被 parser 拒绝。 | `test_symbol_iter_public_constructor_matrix_and_removed_dim_type` |
 | TC-SYM-060 | 边界/异常 | `symbol.add/div/floordiv` 公开 folding 拒绝除零、非整除与 result type 不匹配 | 准备公开 `Folder.try_fold(...)` 入口和 `symbol.const` 操作数。 | 运行 `test_symbol_binary_arith_fold_public_rejection_matrix`。 | 除零、非整除和 result type 不匹配均不发生错误折叠。 | `test_symbol_binary_arith_fold_public_rejection_matrix` |
+| TC-SYM-060A | 符号语义 | `symbol.min` full-tile 静态 tail fold | 准备 `min(step, end - iter<start,end,step>)` 且 `(end-start)` 是静态 step 正整数倍。 | 运行 `test_symbol_min_fold_full_tile_static_tail_to_step_const`、`test_symbol_min_full_tile_static_tail_accepts_unfolded_result_type` 与 `test_symbol_min_fold_full_tile_dynamic_bounds_to_step_const`。 | verifier 接受 result type 为未折叠 `min(...)` 或已折叠 `step`，公开 Folder fold 为 `symbol.const step`。 | `test_symbol_min_fold_full_tile_static_tail_to_step_const`、`test_symbol_min_full_tile_static_tail_accepts_unfolded_result_type`、`test_symbol_min_fold_full_tile_dynamic_bounds_to_step_const` |
+| TC-SYM-060B | 符号语义 | `symbol.min` full-tile 动态 step fold | 准备动态 step SSA 与 `0 -> count*N step N` 等可证明 full-tile 的 tail min。 | 运行 `test_symbol_min_fold_full_tile_dynamic_step_to_existing_step` 与 `test_symbol_min_fold_full_tile_zero_to_symbol_multiple`。 | verifier 接受 result type 为 step 表达，公开 Folder fold 直接复用原 step SSA value，不新建 op。 | `test_symbol_min_fold_full_tile_dynamic_step_to_existing_step`、`test_symbol_min_fold_full_tile_zero_to_symbol_multiple` |
 | TC-SYM-061 | 边界/异常 | `SymbolValueType.is_symbol()` 对除零和 raw division 的公开边界 | 准备公开 `!symbol.int<#symbol.expr<7 floordiv 0>>`、`#symbol.expr<N / 2>` 与 `#symbol.expr<N // 2>` 文本。 | 运行 `test_symbol_value_type_public_non_concrete_division_edges`、`test_symbol_expr_attr_rejects_raw_division_tokens`。 | 除零和 raw `/` / `//` 均被拒绝，不被误归一为符号表达。 | `test_symbol_value_type_public_non_concrete_division_edges`、`test_symbol_expr_attr_rejects_raw_division_tokens` |
 | TC-SYM-062 | 边界/异常 | `symbol.get_dim/get_stride` 公开 folding 拒绝非 memory、非静态轴号、越界轴号与匿名动态条目 | 准备公开 memory SSA value、非 memory value、`?` shape/stride 与非法 axis。 | 运行 `test_symbol_memory_query_fold_public_rejection_matrix`。 | 非可折叠输入均返回 `None`，不产生错误常量折叠；`?` 条目只产生 unknown result type。 | `test_symbol_memory_query_fold_public_rejection_matrix` |
 | TC-SYM-063 | 边界/异常 | `symbol.yield` 父 op 与 loop-carried 约束 | 准备独立 `symbol.yield` 与无 carried-value 的 `symbol.for` 循环体。 | 运行 `test_symbol_yield_public_parent_and_carried_edges`。 | `symbol.yield` 不在 `symbol.for` 内或缺 loop-carried 上下文时按公开错误语义失败。 | `test_symbol_yield_public_parent_and_carried_edges` |

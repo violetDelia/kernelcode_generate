@@ -4,7 +4,7 @@
 功能说明:
 - 实现 `inputs 动 + tile 动` 的二维 matmul kernel demo。
 - 编译期 memory 使用 `H/K/W` 语义符号，tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数。
-- 运行期仍传入真实 torch tensor 与 int tile，执行 device entry 后和 `torch.matmul` 对齐。
+- 运行期仍传入真实 NumPy ndarray 与 int tile，执行 device entry 后和 `np.matmul` 对齐。
 - K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 初始化局部 accumulator，K loop 内用 `kernel.matmul/kernel.add` out-first helper 累加 partial，K loop 后最终写回 output。
 - H/W/K 尾块都通过 `min(tile, dim - iv)` 覆盖，避免只覆盖可整除 case。
 
@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 from typing import TypeAlias
 
-import torch
+import numpy as np
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -45,9 +45,9 @@ from kernel_gen.symbol_variable.type import NumericType
 
 CASE_NAME = "matmul/inputs_dynamic_tile_dynamic"
 DEVICE_ENTRY_NAME = "matmul_inputs_dynamic_tile_dynamic_kernel_device"
-TILE_ARGS = (6, 7, 5)
+TILE_ARGS = (80, 96, 72)
 MatmulCompileArg: TypeAlias = "Memory | SymbolDim"
-MatmulRuntimeArg: TypeAlias = "torch.Tensor | int"
+MatmulRuntimeArg: TypeAlias = "np.ndarray | int"
 
 
 def matmul_inputs_dynamic_tile_dynamic_kernel(
@@ -133,7 +133,7 @@ def _assert_dynamic_memory_ir(
     - 确认 IR 不回退为本次真实运行 shape 或旧匿名 `s1/s2/...`。
 
     使用示例:
-    - `_assert_dynamic_memory_ir(str(module), (17, 19), (17, 11), (11, 19))`
+    - `_assert_dynamic_memory_ir(str(module), (250, 228), (250, 192), (192, 228))`
     """
 
     required_fragments = (
@@ -205,13 +205,13 @@ def _execute_device_source(source: str, real_args: tuple[MatmulRuntimeArg, ...])
 
 
 def _assert_outputs_close(
-    output: torch.Tensor,
-    expected: torch.Tensor,
+    output: np.ndarray,
+    expected: np.ndarray,
     *,
     atol: float,
     rtol: float,
 ) -> float:
-    """校验真实输出与 PyTorch matmul 参考一致。
+    """校验真实输出与 NumPy matmul 参考一致。
 
 
     功能说明:
@@ -219,14 +219,13 @@ def _assert_outputs_close(
     - 超出容差时抛 `AssertionError`。
 
     使用示例:
-    - `_assert_outputs_close(out, torch.matmul(lhs, rhs), atol=1e-3, rtol=1e-3)`
+    - `_assert_outputs_close(out, np.matmul(lhs, rhs), atol=1e-3, rtol=1e-3)`
     """
 
-    diff = torch.max(torch.abs(output.detach().cpu() - expected.detach().cpu()))
-    max_abs_diff = float(diff.item())
-    if not torch.allclose(output, expected, atol=atol, rtol=rtol):
+    max_abs_diff = float(np.max(np.abs(output - expected)))
+    if not np.allclose(output, expected, atol=atol, rtol=rtol):
         raise AssertionError(
-            f"{CASE_NAME}: output does not match torch reference "
+            f"{CASE_NAME}: output does not match NumPy reference "
             f"(max_abs_diff={max_abs_diff}, atol={atol}, rtol={rtol})"
         )
     return max_abs_diff
@@ -239,21 +238,21 @@ def main() -> None:
     功能说明:
     - 使用固定 seed 选择不整除 H/W/K tile 的真实 shape。
     - 编译期以符号 memory/tile 生成 lowering IR 与 npu_demo source。
-    - 运行期执行 device entry，并用 `torch.matmul(lhs, rhs)` 校验输出。
+    - 运行期执行 device entry，并用 `np.matmul(lhs, rhs)` 校验输出。
 
     使用示例:
     - `python3 kernel/matmul/inputs_dynamic_tile_dynamic.py`
     """
 
-    shape_rng = random.Random(20260504)
-    h_size = shape_rng.randint(17, 19)
-    k_size = shape_rng.randint(11, 13)
-    w_size = shape_rng.randint(19, 21)
-    generator = torch.Generator().manual_seed(20260504)
-    lhs = torch.randn((h_size, k_size), generator=generator, dtype=torch.float32)
-    rhs = torch.randn((k_size, w_size), generator=generator, dtype=torch.float32)
-    out = torch.empty((h_size, w_size), dtype=torch.float32)
-    expected = torch.matmul(lhs, rhs)
+    shape_rng = random.Random(2026051603)
+    h_size = shape_rng.randint(160, 256)
+    k_size = shape_rng.randint(160, 256)
+    w_size = shape_rng.randint(160, 256)
+    rng = np.random.default_rng(2026051603)
+    lhs = rng.standard_normal((h_size, k_size), dtype=np.float32)
+    rhs = rng.standard_normal((k_size, w_size), dtype=np.float32)
+    out = np.empty((h_size, w_size), dtype=np.float32)
+    expected = np.matmul(lhs, rhs)
 
     module, source = run_lowering_demo(CASE_NAME, matmul_inputs_dynamic_tile_dynamic_kernel, *_symbolic_compile_args())
     module_text = str(module)
@@ -263,6 +262,7 @@ def main() -> None:
     max_abs_diff = _assert_outputs_close(out, expected, atol=1e-3, rtol=1e-3)
     print(module_text)
     print(source)
+    print(f"[ARGS] seed=2026051603 shape=(M={h_size},K={k_size},N={w_size}) tile={TILE_ARGS} multi_tile=True tail=True")
     print("[IR] dynamic memory evidence: H/K/W memory and TILE_H/TILE_W/TILE_K tile present; static and anonymous shapes absent")
     print(f"[CHECK] {CASE_NAME} max_abs_diff={max_abs_diff}")
 

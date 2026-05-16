@@ -67,6 +67,7 @@ _DYNAMIC_MEMORY_CAPACITY_SYMBOLS = {
     "tlm2": "TLM2_SIZE",
     "tlm3": "TLM3_SIZE",
 }
+_DYNAMIC_MEMORY_STATIC_CAPACITY_SPACES = {"tsm", "tlm1", "tlm2", "tlm3"}
 _ERROR_SCENE = "dialect.arch verifier"
 _BARRIER_SCOPE_VALUES = {"block", "thread", "subthread", "global"}
 _BARRIER_VISIBLE_SPACES = {"tsm", "tlm"}
@@ -396,6 +397,26 @@ def _dynamic_memory_result_type(space: NnMemorySpaceAttr) -> NnMemoryType:
     )
 
 
+def _is_positive_static_capacity(attr: SymbolExprAttr) -> bool:
+    """判断 dynamic memory shape 是否为正静态容量。
+
+    功能说明:
+    - 允许 attach-arch-information pass 将 named capacity 特化为静态字节数。
+    - 仅接受正整数，避免把任意符号 shape 误当作 target 特化结果。
+
+    使用示例:
+    - if _is_positive_static_capacity(shape_attr): ...
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch.py
+    """
+
+    value = SymbolValueType(attr).get_value()
+    return isinstance(value, int) and value > 0
+
+
 def _verify_target_registry_support(op_name: str) -> None:
     """按当前 target registry 配置校验 arch op 支持性。
 
@@ -649,13 +670,16 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
                 )
             )
         expected_capacity = _DYNAMIC_MEMORY_CAPACITY_SYMBOLS[space_name]
-        if result_type.shape.data[0] != SymbolExprAttr.from_expr(expected_capacity):
+        result_shape = result_type.shape.data[0]
+        is_named_capacity = result_shape == SymbolExprAttr.from_expr(expected_capacity)
+        is_static_capacity = space_name in _DYNAMIC_MEMORY_STATIC_CAPACITY_SPACES and _is_positive_static_capacity(result_shape)
+        if not is_named_capacity and not is_static_capacity:
             raise VerifyException(
                 ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected=(
                         "arch.get_dynamic_memory result shape must be "
-                        f"[#symbol.expr<{expected_capacity}>]"
+                        f"[#symbol.expr<{expected_capacity}>] or positive static capacity"
                     ),
                     actual=ERROR_ACTUAL,
                     action=ERROR_ACTION,

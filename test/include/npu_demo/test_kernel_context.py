@@ -388,7 +388,7 @@ int main() {
     if (mem.rank() != 1) {
         return fail(1);
     }
-    if (mem.shape()[0] != 24576) {
+    if (mem.shape()[0] != 2097152) {
         return fail(2);
     }
     if (mem.stride()[0] != 1) {
@@ -430,7 +430,7 @@ int main() {
     if (tlm1.rank() != 1) {
         return fail(1);
     }
-    if (tlm1.shape()[0] != 1024) {
+    if (tlm1.shape()[0] != 524288) {
         return fail(2);
     }
     if (tlm1.stride()[0] != 1) {
@@ -445,7 +445,7 @@ int main() {
     if (tlm2.rank() != 1) {
         return fail(5);
     }
-    if (tlm2.shape()[0] != 512) {
+    if (tlm2.shape()[0] != 1048576) {
         return fail(6);
     }
     if (tlm2.stride()[0] != 1) {
@@ -460,7 +460,7 @@ int main() {
     if (tlm3.rank() != 1) {
         return fail(9);
     }
-    if (tlm3.shape()[0] != 512) {
+    if (tlm3.shape()[0] != 1048576) {
         return fail(10);
     }
     if (tlm3.stride()[0] != 1) {
@@ -621,20 +621,20 @@ static bool contains(const std::string& value, const char* needle) {
 int main() {
     npu_demo::KernelContext ctx;
     auto tsm = ctx.get_dynamic_memory<TSM, float>();
-    if (tsm.rank() != 1 || tsm.shape()[0] != 24576 || tsm.stride()[0] != 1 || tsm.space() != MemorySpace::TSM) {
+    if (tsm.rank() != 1 || tsm.shape()[0] != 2097152 || tsm.stride()[0] != 1 || tsm.space() != MemorySpace::TSM) {
         return fail(1);
     }
 
     auto tlm1 = ctx.get_dynamic_memory<TLM1, float>();
-    if (tlm1.rank() != 1 || tlm1.shape()[0] != 1024 || tlm1.stride()[0] != 1 || tlm1.space() != MemorySpace::TLM1) {
+    if (tlm1.rank() != 1 || tlm1.shape()[0] != 524288 || tlm1.stride()[0] != 1 || tlm1.space() != MemorySpace::TLM1) {
         return fail(2);
     }
     auto tlm2 = ctx.get_dynamic_memory<TLM2, float>();
-    if (tlm2.rank() != 1 || tlm2.shape()[0] != 512 || tlm2.stride()[0] != 1 || tlm2.space() != MemorySpace::TLM2) {
+    if (tlm2.rank() != 1 || tlm2.shape()[0] != 1048576 || tlm2.stride()[0] != 1 || tlm2.space() != MemorySpace::TLM2) {
         return fail(3);
     }
     auto tlm3 = ctx.get_dynamic_memory<TLM3, float>();
-    if (tlm3.rank() != 1 || tlm3.shape()[0] != 512 || tlm3.stride()[0] != 1 || tlm3.space() != MemorySpace::TLM3) {
+    if (tlm3.rank() != 1 || tlm3.shape()[0] != 1048576 || tlm3.stride()[0] != 1 || tlm3.space() != MemorySpace::TLM3) {
         return fail(4);
     }
 
