@@ -5,6 +5,7 @@
 - 暴露 Pass 管理相关实现。
 - 暴露 `inline` 的公开入口。
 - 暴露 `attach-arch-information` 的公开入口。
+- 暴露 `arch-parallelize` 的公开入口。
 - 暴露 `buffer-results-to-out-params` 的公开入口。
 - 暴露 `decompass` 专题 pass 的根路径入口。
 - 暴露 `memory-plan` 的公开入口。
@@ -24,6 +25,7 @@ API 列表:
 - `PassManager.run(self: PassManager, target: ModuleOp) -> ModuleOp`
 - `class InlinePass()`
 - `class AttachArchInformationPass(target: str = "npu_demo")`
+- `class ArchParallelizePass(target: str = "npu_demo", parallel_level: str = "block")`
 - `class BufferResultsToOutParamsPass()`
 - `class BufferResultsToOutParamsCallPattern(targets: dict[str, RewriteTarget])`
 - `class BufferResultsToOutParamsFuncPattern(targets: dict[str, RewriteTarget])`
@@ -65,6 +67,8 @@ API 列表:
 - attach_pass = AttachArchInformationPass(target="npu_demo")
 - from kernel_gen.passes import MemoryPlanPass
 - memory_plan_pass = MemoryPlanPass(insert_free=True)
+- from kernel_gen.passes import ArchParallelizePass
+- arch_parallelize_pass = ArchParallelizePass(target="npu_demo", parallel_level="block")
 - from kernel_gen.passes import OutlineDeviceKernelPass
 - outline_pass = OutlineDeviceKernelPass()
 - from kernel_gen.passes import DmaAllocInSymbolForHoistPattern, SymbolBufferHoistPass
@@ -88,12 +92,14 @@ API 列表:
   - spec/pass/buffer_results_to_out_params.md
   - spec/pass/inline.md
   - spec/pass/attach_arch_information.md
+  - spec/pass/arch_parallelize.md
   - spec/pass/outline_device_kernel.md
   - spec/pass/symbol_loop_hoist.md
 - test:
   - test/passes/test_pass_manager.py
   - test/passes/test_inline.py
   - test/passes/test_attach_arch_information.py
+  - test/passes/test_arch_parallelize.py
   - test/passes/test_buffer_results_to_out_params.py
   - test/passes/decompass/test_softmax.py
   - test/passes/test_outline_device_kernel.py
@@ -107,6 +113,7 @@ API 列表:
   - kernel_gen/passes/common.py
   - kernel_gen/passes/inline.py
   - kernel_gen/passes/attach_arch_information.py
+  - kernel_gen/passes/arch_parallelize.py
   - kernel_gen/passes/buffer_results_to_out_params.py
   - kernel_gen/passes/decompass.py
   - kernel_gen/passes/memory_plan.py
@@ -125,6 +132,7 @@ from .buffer_results_to_out_params import (
     BufferResultsToOutParamsFuncPattern,
     get_buffer_results_to_out_params_pass_patterns,
 )
+from .arch_parallelize import ArchParallelizePass
 from .attach_arch_information import AttachArchInformationPass
 from .decompass import (
     DecompassPass,
@@ -164,6 +172,7 @@ __all__ = [
     "PassManager",
     "InlinePass",
     "AttachArchInformationPass",
+    "ArchParallelizePass",
     "BufferResultsToOutParamsPass",
     "BufferResultsToOutParamsCallPattern",
     "BufferResultsToOutParamsFuncPattern",

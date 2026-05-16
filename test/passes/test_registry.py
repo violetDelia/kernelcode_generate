@@ -918,6 +918,27 @@ def test_build_registered_symbol_buffer_hoist_pass() -> None:
     assert pass_obj.__class__.__module__ == "kernel_gen.passes.symbol_buffer_hoist"
 
 
+# TC-REGISTRY-007J-3
+# 功能说明: 验证内置加载后 arch-parallelize 可通过稳定名称和 options 构造。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_arch_parallelize_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_arch_parallelize_pass() -> None:
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass(
+        "arch-parallelize",
+        {"target": "npu_demo", "parallel_level": "block"},
+    )
+
+    assert isinstance(pass_obj, ModulePass)
+    assert pass_obj.name == "arch-parallelize"
+    assert type(pass_obj).__name__ == "ArchParallelizePass"
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.arch_parallelize"
+    assert "arch-parallelize" in list_registered_passes()
+
+
 # TC-REGISTRY-007K
 # 功能说明: 验证内置 pipeline 加载后可通过稳定名称构造 npu-demo-lowering。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_npu_demo_lowering_pipeline
@@ -946,6 +967,7 @@ def test_load_builtin_passes_is_idempotent() -> None:
     assert "inline" in list_registered_passes()
     assert "attach-arch-information" in list_registered_passes()
     assert "memory-plan" in list_registered_passes()
+    assert "arch-parallelize" in list_registered_passes()
     assert "no-op-pipeline" in list_registered_pipelines()
     assert "default-lowering" in list_registered_pipelines()
     assert "npu-demo-lowering" in list_registered_pipelines()

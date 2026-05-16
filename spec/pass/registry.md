@@ -36,6 +36,8 @@
   - [`spec/pass/pipeline/npu_demo_lowering.md`](../../spec/pass/pipeline/npu_demo_lowering.md)
 - standalone tuning pass：
   - [`spec/pass/tuning/launch_kernel_cost_func.md`](../../spec/pass/tuning/launch_kernel_cost_func.md)
+- standalone arch pass：
+  - [`spec/pass/arch_parallelize.md`](../../spec/pass/arch_parallelize.md)
 
 ## 术语
 
@@ -69,6 +71,7 @@
   - `no-op`：恒等 pass（对输入 module 不做任何改写），且必须满足“可构造”要求（`pass_cls()` 可成功执行）。
   - `inline`：module 内 helper 展平 pass，供 `npu-demo-lowering` 前置收口。
   - `attach-arch-information`：把 target registry 的 launch extent 写回入口 `func.func`。
+  - `arch-parallelize`：standalone IR pass，按 target registry 静态 `block_num` 把可分发顶层 `symbol.for` 改写为 block-strided loop，或对无 loop body 加 block0 guard。
   - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前。
   - `memory-plan`：显式 `insert-free=true` 时为受控 `dma.alloc` 生命周期补插 `dma.free`。
   - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 pytest 与工具层统一解析。
@@ -90,6 +93,7 @@
   - `kernel_gen.passes.buffer_results_to_out_params`
   - `kernel_gen.passes.inline`
   - `kernel_gen.passes.attach_arch_information`
+  - `kernel_gen.passes.arch_parallelize`
   - `kernel_gen.passes.decompass`
   - `kernel_gen.passes.dma_memory_hierarchy`
   - `kernel_gen.passes.memory_pool`
@@ -123,6 +127,7 @@
   - `kernel_gen.passes.lowering.tile_reduce`
 - 已退场的 analysis family 不再提供公开 pass 名或 registry 构造入口；`build_registered_pass("analyze-func-cost")` 必须显式失败。
 - 当前模板名推导专题的 canonical public path 固定为 `kernel_gen.passes.template_name_infer`；`kernel_gen.passes.TemplateNameInferPass` 作为包根 re-export 保持可用。
+- 当前 arch parallelize 专题的 canonical public path 固定为 `kernel_gen.passes.arch_parallelize`；`kernel_gen.passes.ArchParallelizePass` 作为包根 re-export 保持可用；registry 名称固定为 `arch-parallelize`。
 - 机械验收口径：
   - `test/passes/test_registry.py` 负责锁定 canonical public path、`symbol-buffer-hoist` 的稳定注册名与包根 re-export、旧路径失败边界、`analyze-func-cost` 构造失败与 registry caller 的 `importlib` 消费者矩阵。
   - `test/passes/test_pass_manager.py` 负责锁定 pass manager / pipeline caller 的 `importlib` 消费者矩阵。
@@ -536,6 +541,7 @@ names = list_registered_passes()
 | TC-PASS-REGISTRY-023 | 边界/异常 | build registered pass rejects invalid fold option | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_build_registered_pass_rejects_invalid_fold_option`。 | “build registered pass rejects invalid fold option”场景按公开错误语义失败或被拒绝。 | `test_build_registered_pass_rejects_invalid_fold_option` |
 | TC-PASS-REGISTRY-023A | 公开入口 | memory-pool rewrite/alignment options | 加载内置 pass 并提供 `rewrite/fold/alignment` option。 | 运行 `test_build_registered_memory_pool_alignment_options`。 | registry 构造 `MemoryPoolPass`，`rewrite=True`、`fold=False`、`alignment=0`。 | `test_build_registered_memory_pool_alignment_options` |
 | TC-PASS-REGISTRY-023B | 边界/异常 | memory-pool alignment/options 非法值 | 准备非法 `rewrite`、非法 `alignment` 或未知 option。 | 运行 `test_build_registered_memory_pool_alignment_rejects_invalid_options`。 | registry 报 `PassRegistryError: pass 'memory-pool' option error: <原因>`。 | `test_build_registered_memory_pool_alignment_rejects_invalid_options` |
+| TC-PASS-REGISTRY-023C | 公开入口 | arch-parallelize pass registry 名称 | 加载内置 pass 并提供 `target=npu_demo`、`parallel_level=block` option。 | 运行 `test_build_registered_arch_parallelize_pass`。 | registry 构造 `ArchParallelizePass`，且 `list_registered_passes()` 包含 `arch-parallelize`。 | `test_build_registered_arch_parallelize_pass` |
 | TC-PASS-REGISTRY-024 | 公开入口 | build registered attach arch information pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_attach_arch_information_pass`。 | 公开入口在“build registered attach arch information pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_attach_arch_information_pass` |
 | TC-PASS-REGISTRY-025 | 边界/异常 | registry old lowering paths fail fast | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_registry_old_lowering_paths_fail_fast`。 | “registry old lowering paths fail fast”场景按公开错误语义失败或被拒绝。 | `test_registry_old_lowering_paths_fail_fast` |
 | TC-PASS-REGISTRY-026 | 边界/异常 | registry retired analysis pass name fails fast | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_registry_retired_analysis_pass_name_fails_fast`。 | “registry retired analysis pass name fails fast”场景按公开错误语义失败或被拒绝。 | `test_registry_retired_analysis_pass_name_fails_fast` |

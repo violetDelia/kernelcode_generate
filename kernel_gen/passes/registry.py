@@ -281,7 +281,7 @@ def _build_registered_pipeline_manager(
         try:
             pm = builder()
         except Exception as exc:  # pragma: no cover - builder error path not deterministic
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS,
                 f"PassRegistryError: pipeline '{name}' did not return PassManager"
             ) from exc
     if not isinstance(pm, PassManager):
@@ -495,6 +495,7 @@ def load_builtin_passes() -> None:
         register_pipeline("no-op-pipeline")(_build_no_op_pipeline)
 
     from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
+    from kernel_gen.passes.arch_parallelize import ArchParallelizePass
     from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
     from kernel_gen.passes.decompass import DecompassPass
     from kernel_gen.passes.inline import InlinePass
@@ -517,6 +518,7 @@ def load_builtin_passes() -> None:
         InlinePass,
         DecompassPass,
         NnLoweringPass,
+        ArchParallelizePass,
         BufferResultsToOutParamsPass,
         LowerDmaMemoryHierarchyPass,
         OutlineDeviceKernelPass,
