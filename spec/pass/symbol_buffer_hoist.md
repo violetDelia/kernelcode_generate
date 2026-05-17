@@ -3,8 +3,8 @@
 ## 功能简介
 
 - 定义 `symbol-buffer-hoist` pass 的公开合同。
-- 该 pass 只在 `symbol.for` 的单 block 循环体内识别 `dma.alloc`，并在能够机械证明 shape 与使用方式安全时，把该 alloc 外提到所属 `symbol.for` 之前。
-- 当前公开语义覆盖输入 staging buffer 与 output scratch buffer 两类 `dma.alloc` 外提；若同一 owner `symbol.for` 直接 body 内存在唯一匹配 `dma.free` 且位于所有数据 use 之后，必须把 alloc/free 成对移动到 owner `symbol.for` 两侧。
+- 该 pass 只在 `symbol.for` 的单 block 循环体内识别 `dma.alloc`，并在能够机械证明 shape 与使用方式安全且存在唯一匹配 `dma.free` 时，把该 alloc 外提到所属 `symbol.for` 之前。
+- 当前公开语义覆盖输入 staging buffer 与 output scratch buffer 两类 `dma.alloc` 外提；没有唯一匹配 `dma.free` 时必须保持 loop 内 no-op。
 - 本 pass 不做通用 LICM；在 `npu-demo-lowering` 中由 pipeline builder 固定接入，其它默认 pipeline 不隐式接入。
 
 ## API 列表
@@ -148,12 +148,13 @@ symbol.for value {
   - 若存在 `dma.free`，必须是同一 owner `symbol.for` 直接 body 内唯一释放当前 alloc result 的 op，并且顺序位于所有数据 use 之后。
   - output scratch 不经 `symbol.yield`、`func.return` 或未知外部别名链逃逸。
 - 当前公开正例固定为：
-  - 输入 staging buffer：shape loop-invariant 时允许外提。
-  - output scratch buffer：shape loop-invariant，且只作为 `dma.deslice(target, source, ...)` 的 `source` 使用时允许外提；`dma.deslice(target, source, ...)` 本身不构成 buffer escape。
-  - 输入 staging 或 output scratch 后接唯一合法 `dma.free` 时，alloc 必须移动到 owner `symbol.for` 前，free 必须移动到同一 `symbol.for` 后。
+  - 输入 staging buffer：shape loop-invariant 且后接唯一合法 `dma.free` 时允许外提。
+  - output scratch buffer：shape loop-invariant，且只作为 `dma.deslice(target, source, ...)` 的 `source` 使用并后接唯一合法 `dma.free` 时允许外提；`dma.deslice(target, source, ...)` 本身不构成 buffer escape。
+  - 输入 staging 或 output scratch 没有唯一合法 `dma.free` 时必须保持 loop 内。
 - 当前公开反例固定为：
   - `dma.alloc` 的 shape 依赖 loop-carried 值时，alloc 必须保留在 loop 内。
   - 无法证明安全外提的 output scratch 必须保留在 loop 内，不得把行为做宽。
+  - 没有唯一合法 `dma.free` 的输入 staging / output scratch 必须保持 loop 内。
   - `dma.free` 位于数据 use 前、存在多个 `dma.free`、`dma.free` 位于 nested region 或非 owner body、alloc result 有未知直接 use/alias escape 时，alloc/free 都必须保留原位。
 - 本 pass 不是通用 LICM，不负责：
   - 推断未写入本文件的副作用规则。

@@ -2,9 +2,9 @@
 
 ## 功能简介
 
-- `ArchParallelizePass` 提供 standalone IR-level module pass，遍历 `builtin.module` 中所有非声明 `func.func`，为未带 block 并行语义的函数生成 block 级分发 IR。
-- 当前只支持 `parallel_level="block"`；可分发的唯一顶层 `symbol.for` 被改写为 block-strided loop；无顶层 loop 的函数用 block0 guard 包裹原 body。
-- 本 pass 不接入默认 `npu-demo-lowering`，不承诺 emit/run，不修改 include/runtime。
+- `ArchParallelizePass` 提供 standalone IR-level module pass，遍历 `builtin.module` 中所有非声明 `func.func`，为未带 block 并行语义且含可分发顶层 loop 的函数生成 block 级分发 IR。
+- 当前只支持 `parallel_level="block"`；可分发的唯一顶层 `symbol.for` 被改写为 block-strided loop；无顶层 loop 的函数用 block0 guard 包裹原 body，防止多 block 重复执行直线 body。
+- 本 pass 只承诺 IR-level 改写与失败合同；默认 `npu-demo-lowering` 直接接入本 pass，不设置额外 safe wrapper。
 
 ## API 列表
 
@@ -25,7 +25,7 @@
 ## 依赖
 
 - `kernel_gen.dialect.arch`：公开 `ArchGetBlockIdOp` 与 `ArchGetBlockNumOp` 类型，用于检测和生成 block 相关 IR。
-- `kernel_gen.dialect.symbol`：公开 `SymbolForOp`、`SymbolConstOp`、`SymbolAddOp`、`SymbolMulOp`、`SymbolNeOp` 与 `SymbolValueType`，用于 loop 边界和 block0 guard。
+- `kernel_gen.dialect.symbol`：公开 `SymbolForOp`、`SymbolConstOp`、`SymbolAddOp`、`SymbolMulOp` 与 `SymbolValueType`，用于 loop 边界。
 - `kernel_gen.target.registry`：公开 `is_arch_op_supported(target, op_name)` 与 `get_target_hardware(target, key)`，用于校验 target 与读取静态 `block_num`。
 - `kernel_gen.passes.registry`：公开 pass registry 名称 `arch-parallelize`。
 
@@ -40,8 +40,9 @@
 
 - 顶层 loop 指函数 entry block 的直接子 op；嵌套 region 内的 `symbol.for` 不参与顶层计数。
 - 支持结构为 `func { symbol-setup*; symbol.for { body-op*; nested-symbol.for* }; func.return }`，其中同级 `symbol-setup` 只能位于唯一顶层 loop 之前，并且必须是公开 symbol dialect 的纯 setup op。
-- 无顶层 loop 时，原 body 放入 `scf.if` 的 block0 分支；`func.return` 必须保持在 `scf.if` 外。
+- 无顶层 loop 时必须生成 `arch.get_block_id` + `scf.if` block0 guard，只允许 block0 执行原 body。
 - 本 pass 的失败通过 `KernelCodeError` 暴露，稳定错误短语以 `ArchParallelizePassError:` 或 `ArchParallelizePassVerifierError:` 开头。
+- 默认 `npu-demo-lowering` 直接接入本 pass；多个顶层 loop、loop-carried 和 unsupported loop structure 等结构不支持错误继续按本 pass 公开失败合同暴露。
 - `expectation/pass/arch_parallelize/**` 只作为主仓合同验收资产；任务 worktree 不得复制、修改、新建、移动、删除或同步该目录。
 
 ## API详细说明
@@ -138,7 +139,7 @@
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-PASS-ARCH-PARALLELIZE-001 | pass 改写 | 单顶层 `symbol.for` | 函数中只有一个顶层 `symbol.for`，loop 前为纯 symbol setup。 | 运行 `ArchParallelizePass().apply(...)`。 | IR 含 `arch.get_block_id`、静态 `symbol.const block_num`、`symbol.mul`、`symbol.add` 和新 block-strided `symbol.for`。 | `test_arch_parallelize_rewrites_single_top_level_loop` |
-| TC-PASS-ARCH-PARALLELIZE-002 | pass 改写 | 无顶层 loop | 函数体只有普通 op 和 `func.return`。 | 运行 `ArchParallelizePass().apply(...)`。 | 原 body 位于 `scf.if` 的 block0 分支，`func.return` 仍在 `scf.if` 外。 | `test_arch_parallelize_wraps_no_loop_body_in_block0_guard` |
+| TC-PASS-ARCH-PARALLELIZE-002 | block0 guard | 无顶层 loop | 函数体只有普通 op 和 `func.return`。 | 运行 `ArchParallelizePass().apply(...)`。 | IR 含 `arch.get_block_id`、`symbol.ne` 与 `scf.if`，原 body 位于 block0 分支。 | `test_arch_parallelize_wraps_no_loop_body_with_block0_guard` |
 | TC-PASS-ARCH-PARALLELIZE-003 | pass 改写 | 动态嵌套 loop | 外层顶层 loop 包含内层 loop。 | 运行 `ArchParallelizePass().apply(...)`。 | 只改写外层 loop，内层 loop 保持嵌套。 | `test_arch_parallelize_rewrites_only_outer_dynamic_loop` |
 | TC-PASS-ARCH-PARALLELIZE-004 | pass 改写 | 多函数 module | module 含两个非声明函数。 | 运行 `ArchParallelizePass().apply(...)`。 | 两个函数独立处理。 | `test_arch_parallelize_processes_each_non_declaration_func` |
 | TC-PASS-ARCH-PARALLELIZE-005 | 跳过边界 | 函数已有 block op | 函数体已有 `arch.get_block_id`。 | 运行 `ArchParallelizePass().apply(...)`。 | 函数保持不重复插入 block 相关 op。 | `test_arch_parallelize_skips_existing_block_parallel_func` |

@@ -14,10 +14,15 @@ API 列表:
 - `KernelContext::subthread_num() const -> long long`
 - `KernelContext::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const -> void`
 - `template <MemorySpace Space, typename T> KernelContext::get_dynamic_memory() const -> Memory<Space, T>`
+- `npu_demo::block_id() -> S_INT`
 - `npu_demo::thread_id() -> S_INT`
 - `npu_demo::thread_num() -> S_INT`
 - `npu_demo::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) -> void`
 - `template <MemorySpace Space> npu_demo::get_dynamic_memory() -> DynamicMemoryRef<Space>`
+- `block_id() -> S_INT`
+- `thread_id() -> S_INT`
+- `thread_num() -> S_INT`
+- `template <MemorySpace Space> get_dynamic_memory() -> DynamicMemoryRef<Space>`
 
 helper 清单:
 - `class ScopedActiveKernelContext`
@@ -26,7 +31,7 @@ helper 清单:
 
 使用示例:
 - #include "include/npu_demo/Arch.h"
-- Status status = npu_demo::launch<1, 4, 1, 0>(kernel_body, output);
+- Status status = npu_demo::launch<2, 1, 1, 0>(kernel_body, output);
 
 
 关联文件:
@@ -61,8 +66,8 @@ class KernelContext;
 
 namespace detail {
 
-static constexpr long long kBlockCapability = 1;
-static constexpr long long kThreadCapability = 8;
+static constexpr long long kBlockCapability = 2;
+static constexpr long long kThreadCapability = 1;
 static constexpr long long kSubthreadCapability = 1;
 static constexpr long long kSmMemorySize = 0;
 static constexpr long long kLmMemorySize = 0;
@@ -552,6 +557,23 @@ inline const KernelContext& current_kernel_context() {
 
 /*
 功能说明:
+- 返回当前 launch 运行时视图中的 block 索引，供生成代码以 free helper 形式直接调用。
+
+使用示例:
+- S_INT bid = npu_demo::block_id();
+
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/include/npu_demo/kernel_context.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+inline S_INT block_id() {
+    return static_cast<S_INT>(current_kernel_context().block_id());
+}
+
+/*
+功能说明:
 - 返回当前 launch 运行时视图中的线程索引，供生成代码以 free helper 形式直接调用。
 
 使用示例:
@@ -661,6 +683,23 @@ inline DynamicMemoryRef<Space>::operator Memory<Space, T>() const {
 
 /*
 功能说明:
+- 返回当前 launch 运行时视图中的 block 索引，作为公开全局 free helper 供生成代码直接调用。
+
+使用示例:
+- S_INT bid = block_id();
+
+
+关联文件:
+- spec: spec/include/api/Arch.md
+- test: test/include/api/arch.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+inline S_INT block_id() {
+    return npu_demo::block_id();
+}
+
+/*
+功能说明:
 - 返回当前 launch 运行时视图中的线程索引，作为公开全局 free helper 供生成代码直接调用。
 
 使用示例:
@@ -718,7 +757,7 @@ inline DynamicMemoryRef<Space> get_dynamic_memory() {
 - callee 可显式接收 `npu_demo::KernelContext&` 首参，也可只接收业务参数并通过 free helper 读取活动上下文。
 
 使用示例:
-- Status status = launch<1, 4, 1, 0>(kernel_body, output);
+- Status status = launch<2, 1, 1, 0>(kernel_body, output);
 
 
 关联文件:
@@ -736,13 +775,12 @@ inline Status launch(Callable&& callee, Args&&... args) {
             || std::is_invocable<typename std::decay<Callable>::type, Args...>::value,
         "launch callee must accept args or npu_demo::KernelContext& plus args");
 
-    if constexpr (block <= 0 || thread <= 0 || subthread <= 0 || shared_memory_size < 0) {
+    if constexpr (block <= 0 || thread <= 0 || subthread <= 0 || shared_memory_size != 0) {
         return StatusCode::kError;
     }
     if constexpr (
-        block != npu_demo::detail::kBlockCapability
+        block > npu_demo::detail::kBlockCapability
         || subthread != npu_demo::detail::kSubthreadCapability
-        || thread < 2
         || thread > npu_demo::detail::kThreadCapability) {
         return StatusCode::kError;
     }
@@ -769,33 +807,39 @@ inline Status launch(Callable&& callee, Args&&... args) {
          args)), ...);
 #endif
 
-    auto barrier_state = std::make_shared<npu_demo::detail::LaunchBarrierState>(thread);
+    std::vector<std::shared_ptr<npu_demo::detail::LaunchBarrierState>> barrier_states;
+    barrier_states.reserve(static_cast<unsigned long long>(block));
+    for (long long block_index = 0; block_index < block; ++block_index) {
+        barrier_states.emplace_back(std::make_shared<npu_demo::detail::LaunchBarrierState>(thread));
+    }
     typename std::decay<Callable>::type callable(std::forward<Callable>(callee));
     std::tuple<Args...> forwarded_args(std::forward<Args>(args)...);
     std::vector<std::thread> workers;
-    workers.reserve(static_cast<unsigned long long>(thread));
+    workers.reserve(static_cast<unsigned long long>(block * thread));
 
-    for (long long thread_id = 0; thread_id < thread; ++thread_id) {
-        workers.emplace_back([&, thread_id]() {
-            npu_demo::KernelContext ctx(
-                0,
-                block,
-                thread_id,
-                thread,
-                0,
-                subthread,
-                barrier_state);
-            npu_demo::detail::ScopedActiveKernelContext scoped_active_ctx(&ctx);
-            std::apply(
-                [&](auto&... unpacked_args) {
-                    if constexpr (std::is_invocable<decltype(callable)&, npu_demo::KernelContext&, decltype(unpacked_args)...>::value) {
-                        callable(ctx, unpacked_args...);
-                    } else {
-                        callable(unpacked_args...);
-                    }
-                },
-                forwarded_args);
-        });
+    for (long long block_index = 0; block_index < block; ++block_index) {
+        for (long long thread_index = 0; thread_index < thread; ++thread_index) {
+            workers.emplace_back([&, block_index, thread_index]() {
+                npu_demo::KernelContext ctx(
+                    block_index,
+                    block,
+                    thread_index,
+                    thread,
+                    0,
+                    subthread,
+                    barrier_states[static_cast<unsigned long long>(block_index)]);
+                npu_demo::detail::ScopedActiveKernelContext scoped_active_ctx(&ctx);
+                std::apply(
+                    [&](auto&... unpacked_args) {
+                        if constexpr (std::is_invocable<decltype(callable)&, npu_demo::KernelContext&, decltype(unpacked_args)...>::value) {
+                            callable(ctx, unpacked_args...);
+                        } else {
+                            callable(unpacked_args...);
+                        }
+                    },
+                    forwarded_args);
+            });
+        }
     }
 
     for (std::thread& worker : workers) {

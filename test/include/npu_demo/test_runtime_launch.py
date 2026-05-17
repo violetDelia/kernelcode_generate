@@ -2,10 +2,10 @@
 
 
 功能说明:
-- 通过编译并运行 C++ 片段验证 `npu_demo::launch<1, 4, 1, 0>` 的运行时行为：
-  - 必须真实启动 `4` 个线程（禁止 for-loop 串行模拟）。
-  - 同一次 launch 的 `KernelContext::barrier(...)` 必须共享同一 barrier 状态并能真实汇合。
-  - `thread_id()` / `thread_num()` 返回值必须与 launch extent 一致。
+- 通过编译并运行 C++ 片段验证 `npu_demo::launch<2, 1, 1, 0>` 的运行时行为：
+  - 必须真实启动 `2` 个 block body。
+  - 每个 body 看到正确的 `block_id/block_num/thread_id/thread_num`。
+  - `get_dynamic_memory` backing 按当前 thread-local 公开边界在两个 block worker 间隔离。
 
 使用示例:
 - pytest -q test/include/npu_demo/test_runtime_launch.py
@@ -118,7 +118,7 @@ def _compile_and_run(source: str, *, timeout_s: float = 5.0) -> None:
 
 
 # NPU-DEMO-RT-001
-# 测试目的: 验证 `launch<1, 4, 1, 0>` 必须真实启动 4 线程，并共享同一 barrier 状态（禁止串行模拟/私有 barrier）。
+# 测试目的: 验证 `launch<2, 1, 1, 0>` 必须真实启动两个 block body，并保持 block/thread 视图与动态内存隔离。
 # 使用示例: pytest -q test/include/npu_demo/test_runtime_launch.py -k test_npu_demo_launch_spawns_threads_and_barrier_waits_for_all_participants
 # 对应功能实现文件链接: [include/npu_demo/Arch.h](include/npu_demo/Arch.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -126,8 +126,7 @@ def _compile_and_run(source: str, *, timeout_s: float = 5.0) -> None:
 def test_npu_demo_launch_spawns_threads_and_barrier_waits_for_all_participants() -> None:
     source = r"""
 #include <atomic>
-#include <chrono>
-#include <thread>
+#include <cstdint>
 
 #include "include/npu_demo/npu_demo.h"
 
@@ -135,53 +134,72 @@ static int fail(int code) { return code; }
 
 static void kernel_body(
     npu_demo::KernelContext& ctx,
-    std::atomic<long long>* entered,
-    long long* after_values,
+    std::atomic<long long>* body_count,
+    long long* block_ids,
+    long long* block_nums,
     long long* thread_ids,
-    long long* thread_nums) {
+    long long* thread_nums,
+    long long* after_values,
+    std::uintptr_t* tsm_ptrs) {
+    const long long bid = ctx.block_id();
     const long long tid = ctx.thread_id();
-    thread_ids[tid] = tid;
-    thread_nums[tid] = ctx.thread_num();
-
-    // Delay thread 0 before incrementing `entered` so that a missing/shared barrier
-    // cannot "accidentally pass" due to scheduling.
-    if (tid == 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-    entered->fetch_add(1);
+    block_ids[bid] = npu_demo::block_id();
+    block_nums[bid] = ctx.block_num();
+    thread_ids[bid] = tid;
+    thread_nums[bid] = ctx.thread_num();
 
     ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
-    after_values[tid] = entered->load();
+    Memory<TSM, long long> tsm = npu_demo::get_dynamic_memory<TSM>();
+    tsm.data()[0] = bid + 10;
+    tsm_ptrs[bid] = reinterpret_cast<std::uintptr_t>(tsm.data());
+    after_values[bid] = tsm.data()[0];
+    body_count->fetch_add(1);
 }
 
 int main() {
-    std::atomic<long long> entered(0);
-    long long after_values[4] = {-1, -1, -1, -1};
-    long long thread_ids[4] = {-1, -1, -1, -1};
-    long long thread_nums[4] = {0, 0, 0, 0};
+    std::atomic<long long> body_count(0);
+    long long block_ids[2] = {-1, -1};
+    long long block_nums[2] = {0, 0};
+    long long thread_ids[2] = {-1, -1};
+    long long thread_nums[2] = {0, 0};
+    long long after_values[2] = {-1, -1};
+    std::uintptr_t tsm_ptrs[2] = {0, 0};
 
-    if (npu_demo::launch<1, 4, 1, 0>(
+    if (npu_demo::launch<2, 1, 1, 0>(
             kernel_body,
-            &entered,
-            after_values,
+            &body_count,
+            block_ids,
+            block_nums,
             thread_ids,
-            thread_nums)
+            thread_nums,
+            after_values,
+            tsm_ptrs)
         != StatusCode::kOk) {
         return fail(1);
     }
 
-    for (long long i = 0; i < 4; ++i) {
-        if (thread_ids[i] != i) {
+    if (body_count.load() != 2) {
+        return fail(2);
+    }
+    for (long long i = 0; i < 2; ++i) {
+        if (block_ids[i] != i) {
             return fail(2);
         }
-        if (thread_nums[i] != 4) {
+        if (block_nums[i] != 2) {
             return fail(3);
         }
-        // If barrier is missing / not shared / serially simulated, at least one
-        // participant will observe entered < 4 after the barrier call.
-        if (after_values[i] != 4) {
+        if (thread_ids[i] != 0) {
             return fail(4);
         }
+        if (thread_nums[i] != 1) {
+            return fail(5);
+        }
+        if (after_values[i] != i + 10) {
+            return fail(6);
+        }
+    }
+    if (tsm_ptrs[0] == 0 || tsm_ptrs[1] == 0 || tsm_ptrs[0] == tsm_ptrs[1]) {
+        return fail(7);
     }
     return 0;
 }

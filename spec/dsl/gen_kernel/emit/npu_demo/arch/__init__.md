@@ -4,6 +4,7 @@
 
 - 本目录承载 `npu_demo` target 下 `arch.*` 节点的 emit 实现。
 - 当前覆盖：
+  - `get_block_id`
   - `get_dynamic_memory`
   - `get_thread_id`
   - `get_thread_num`
@@ -18,6 +19,7 @@
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dsl/gen_kernel/emit/npu_demo/arch/__init__.md`](../../../../../../spec/dsl/gen_kernel/emit/npu_demo/arch/__init__.md)
 - `功能实现`：
+  - [`kernel_gen/dsl/gen_kernel/emit/npu_demo/arch/get_block_id.py`](../../../../../../kernel_gen/dsl/gen_kernel/emit/npu_demo/arch/get_block_id.py)
   - [`kernel_gen/dsl/gen_kernel/emit/npu_demo/arch/get_dynamic_memory.py`](../../../../../../kernel_gen/dsl/gen_kernel/emit/npu_demo/arch/get_dynamic_memory.py)
   - [`kernel_gen/dsl/gen_kernel/emit/npu_demo/arch/get_thread_id.py`](../../../../../../kernel_gen/dsl/gen_kernel/emit/npu_demo/arch/get_thread_id.py)
   - [`kernel_gen/dsl/gen_kernel/emit/npu_demo/arch/get_thread_num.py`](../../../../../../kernel_gen/dsl/gen_kernel/emit/npu_demo/arch/get_thread_num.py)
@@ -107,7 +109,7 @@
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-ARCH-049 | pass 改写 | emit c lowers npu demo symbol add with tuner cost value | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_symbol_add_with_tuner_cost_value`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo symbol add with tuner cost value”场景。 | `test_emit_c_lowers_npu_demo_symbol_add_with_tuner_cost_value` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-ARCH-050 | 边界/异常 | emit c rejects unknown npu demo tuner cost op name | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_emit_c_rejects_unknown_npu_demo_tuner_cost_op_name`。 | “emit c rejects unknown npu demo tuner cost op name”场景按公开错误语义失败或被拒绝。 | `test_emit_c_rejects_unknown_npu_demo_tuner_cost_op_name` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-ARCH-051 | 边界/异常 | emit c preserves raw npu demo tuner cost kind and rejects invalid memory type | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_emit_c_preserves_raw_npu_demo_tuner_cost_kind_and_rejects_invalid_memory_type`。 | “emit c preserves raw npu demo tuner cost kind and rejects invalid memory type”场景按公开错误语义失败或被拒绝。 | `test_emit_c_preserves_raw_npu_demo_tuner_cost_kind_and_rejects_invalid_memory_type` |
-| TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-ARCH-052 | pass 改写 | emit c lowers npu demo kernel context queries | 准备 npu_demo arch thread query op 与 value 发射入口。 | 运行 `test_emit_c_lowers_npu_demo_kernel_context_queries`。 | `emit_c_op(...)` 生成 `S_INT` 声明；`emit_c_value(...)` 生成 free helper 右值，已绑定 value 返回绑定名。 | `test_emit_c_lowers_npu_demo_kernel_context_queries` |
+| TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-ARCH-052 | pass 改写 | emit c lowers npu demo kernel context queries | 准备 npu_demo arch block/thread query op 与 value 发射入口。 | 运行 `test_emit_c_lowers_npu_demo_kernel_context_queries`。 | `emit_c_op(...)` 生成 `S_INT` 声明；`arch.get_block_id` value 生成 `npu_demo::block_id()`，thread query value 生成对应 free helper 右值，已绑定 value 返回绑定名。 | `test_emit_c_lowers_npu_demo_kernel_context_queries` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-ARCH-053 | 生成/编译 | emit c maps NN space to template param | 准备 npu_demo dynamic memory op/value 与合法/非法 memory space。 | 运行 `test_emit_c_maps_nn_space_to_template_param`。 | 片上空间生成 `get_dynamic_memory<T>()`；GM 等非片上空间按公开错误语义拒绝。 | `test_emit_c_maps_nn_space_to_template_param` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-ARCH-054 | pass 改写 | emit c lowers npu demo slice deslice add pipeline | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo slice deslice add pipeline”场景。 | `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-ARCH-055 | pass 改写 | emit c lowers npu demo tiled matmul pipeline | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tiled_matmul_pipeline`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo tiled matmul pipeline”场景。 | `test_emit_c_lowers_npu_demo_tiled_matmul_pipeline` |

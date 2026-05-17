@@ -156,8 +156,9 @@ static int fail(int code) {
     return code;
 }
 
-static void kernel_body(npu_demo::KernelContext& ctx, long long* thread_nums) {
-    thread_nums[ctx.thread_id()] = ctx.thread_num();
+static void kernel_body(npu_demo::KernelContext& ctx, long long* block_ids, long long* thread_nums) {
+    block_ids[ctx.block_id()] = ctx.block_id();
+    thread_nums[ctx.block_id()] = ctx.thread_num();
 }
 
 int main() {
@@ -180,13 +181,17 @@ int main() {
         return fail(2);
     }
 
+    long long block_ids[2] = {-1, -1};
     long long thread_nums[2] = {0, 0};
-    Status launch_status = npu_demo::launch<1, 2, 1, 0>(kernel_body, &thread_nums[0]);
+    Status launch_status = npu_demo::launch<2, 1, 1, 0>(kernel_body, &block_ids[0], &thread_nums[0]);
     if (launch_status != StatusCode::kOk) {
         return fail(3);
     }
-    if (thread_nums[0] != 2 || thread_nums[1] != 2) {
+    if (block_ids[0] != 0 || block_ids[1] != 1) {
         return fail(4);
+    }
+    if (thread_nums[0] != 1 || thread_nums[1] != 1) {
+        return fail(5);
     }
 
     return 0;

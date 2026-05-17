@@ -8,7 +8,7 @@
 - `KernelContext` 是由 `launch` 创建并绑定到当前线程的运行时上下文视图，不再是生成源码 body 签名中的显式参数。
 - `thread_num()` / `block_num()` / `subthread_num()` 返回本次 launch 的 extent，而不是 target registry 的固定模板值；`shared_memory_size` 作为 launch metadata 以编译期模板参数承接。
 - `include/npu_demo/npu_demo.h` 作为单入口头文件，需透传 `include/api/Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `Trance.h` / `cost/*.h` 的统一声明，并汇聚 `include/npu_demo/Core.h` / `Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `Trance.h` / `cost/*.h` 的后端实现。
-- `npu_demo::add/sub/mul/...`、`npu_demo::launch(...)`、`npu_demo::build_contiguous_stride(...)`、`npu_demo::view(...)`、`npu_demo::alloc(...)`、`npu_demo::fill(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)`、`npu_demo::transpose(...)`、`npu_demo::broadcast(...)` 以及 `npu_demo::cost::add/copy/...` 是 public function 的唯一成功消费方向；`detail` 只服务实现内部。
+- `npu_demo::add/sub/mul/...`、`npu_demo::launch(...)`、`npu_demo::block_id()`、`npu_demo::build_contiguous_stride(...)`、`npu_demo::view(...)`、`npu_demo::alloc(...)`、`npu_demo::fill(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)`、`npu_demo::transpose(...)`、`npu_demo::broadcast(...)` 以及 `npu_demo::cost::add/copy/...` 是 public function 的唯一成功消费方向；`detail` 只服务实现内部。
 
 ## API 列表
 
@@ -23,6 +23,7 @@
 - `KernelContext::subthread_num() const -> long long`
 - `KernelContext::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const -> void`
 - `template <MemorySpace Space, typename T> KernelContext::get_dynamic_memory() const -> Memory<Space, T>`
+- `npu_demo::block_id() -> S_INT`
 - `npu_demo::thread_id() -> S_INT`
 - `npu_demo::thread_num() -> S_INT`
 - `npu_demo::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) -> void`
@@ -66,7 +67,7 @@
 - 明确后端 public function 的消费方向：调用方经 `npu_demo::` 访问函数入口，不能把 `npu_demo::detail` 或旧 `*_detail` 名称当作公开合同。
 - 明确基础类型边界：`Status`、`StatusCode`、`Vector`、`Memory`、`MemorySpace` 等类型暂不整体迁入 `namespace npu_demo`。
 - 冻结 `KernelContext` 的运行时视图合同，确保 launched body 读取到的是当前 launch 的 `block/thread/subthread` 维度与索引。
-- 冻结 `npu_demo` P0 路径对 `launch + barrier + dynamic memory` 的最小成功子集，为后续实现/补测提供唯一稳定口径。
+- 冻结 `npu_demo` block-only 路径对 `launch + barrier + dynamic memory` 的最小成功子集，为后续实现/补测提供唯一稳定口径。
 - 明确 `include/npu_demo/npu_demo.h` 也是 `gen_kernel(target="npu_demo")` 的唯一 compile-only 头文件：同一翻译单元里的 wrapper/body kernel 与 sibling cost function 只需 `#include "include/npu_demo/npu_demo.h"` 和 `using namespace npu_demo;` 即可消费 `launch`、活动上下文 free helper、`Memory` 与 `cost::*`。
 
 ## 额外补充
@@ -86,11 +87,11 @@
 - `cost` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/cost/Core.md`](../../../spec/include/api/cost/Core.md)、[`spec/include/api/cost/Dma.md`](../../../spec/include/api/cost/Dma.md)、[`spec/include/api/cost/Kernel.md`](../../../spec/include/api/cost/Kernel.md) 冻结；`npu_demo` 只负责承接默认实现，不得额外引入 `kind2/kind3` 或 target 私有成本命名。
 - `gen_kernel(target="npu_demo")` 生成的完整源码若同时包含普通 kernel function 与 `_cost_DMA1_*` / `_cost_DMA2_*` / `_cost_DMA3_*` / `_cost_DMA4_*` / `_cost_MAC_*` / `_cost_VECTOR1_*` / `_cost_VECTOR2_*` sibling cost function，仍只允许依赖本头文件；不得额外要求包含 `include/npu_demo/cost/*.h`、`include/api/cost/*.h` 或额外 `using namespace npu_demo::cost;`。
 - `KernelContext` 只表示当前 launched body 的运行时视图；生成源码不得再显式声明 `npu_demo::KernelContext& ctx` 参数，不要求公开默认构造、复制持久化或脱离 launch 生命周期独立使用。
-- P0 launch 子集固定为：`block=1`、`subthread=1`、`shared_memory_size=0`、`2 <= thread <= registry.hardware.thread_num`；不支持的 extent 必须显式失败，禁止静默回退到单线程或忽略部分 extent。
+- block-only launch 子集固定为：`1 <= block <= registry.hardware.block_num`、`thread=1`、`subthread=1`、`shared_memory_size=0`；不支持的 extent 必须显式失败，禁止静默回退到单线程或忽略部分 extent。
 - `block_num()` / `thread_num()` / `subthread_num()` 的公开语义是“当前 launch 值”；`target.registry` 中的 `block_num/thread_num/subthread_num` 只作为能力上限与容量校验基线，不再直接等于 launched body 中可见的当前值。
-- `KernelContext::barrier(visibility, scope)` 在 `npu_demo` P0 仅支持 `visibility={BarrierVisibility::TSM, BarrierVisibility::TLM}` 且两者各出现一次，并要求 `scope=BarrierScope::BLOCK`；其他组合必须显式失败。
+- `KernelContext::barrier(visibility, scope)` 在当前 block-only 子集仅支持 `visibility={BarrierVisibility::TSM, BarrierVisibility::TLM}` 且两者各出现一次，并要求 `scope=BarrierScope::BLOCK`；其他组合必须显式失败。
 - `get_dynamic_memory<Space>()` 只覆盖当前 `npu_demo` 片上空间入口：`TSM/TLM1/TLM2/TLM3` 返回带可写 backing 的运行时视图，可继续通过 `Memory::view<T>(...)` 切成 typed tile 并被 `slice/fill` 等公开 helper 写入；`SM/LM` 因容量为 `0` 必须显式失败，`GM` 不属于该接口输入域。
-- 本文件不定义 DSL/front-end、MLIR lowering、codegen 细节，也不承诺超出 P0 launch 子集的多 block / 多 subthread runtime 行为。
+- 本文件不定义 DSL/front-end、MLIR lowering 或 codegen 细节；多 thread / 多 subthread runtime 行为不属于本轮稳定成功子集。
 ## API详细说明
 
 ### `namespace npu_demo`
@@ -116,15 +117,15 @@
 - 使用示例：
 
   ```cpp
-  static void kernel_body(long long* thread_nums) {
-      thread_nums[npu_demo::thread_id()] = npu_demo::thread_num();
+  static void kernel_body(long long* block_ids) {
+      block_ids[npu_demo::block_id()] = npu_demo::block_id();
   }
 
-  long long thread_nums[4] = {0, 0, 0, 0};
-  Status status = npu_demo::launch<1, 4, 1, 0>(kernel_body, thread_nums);
+  long long block_ids[2] = {-1, -1};
+  Status status = npu_demo::launch<2, 1, 1, 0>(kernel_body, block_ids);
   ```
 - 功能说明：启动一次 `npu_demo` kernel 执行，并把当前 launch 上下文绑定为线程可见的活动上下文。
-- 注意事项：公开源码形态固定为 `launch<block, thread, subthread, shared_memory_size>(callee, args...)`；`callee` 必须是函数对象或等价可调用对象，字符串 callee 不属于合法公开合同；生成源码中的 `callee` 对应 kernel body 不再显式声明 `npu_demo::KernelContext& ctx` 参数，运行时仍兼容手写 callee 显式接收 `npu_demo::KernelContext&` 首参；P0 下 `block` 与 `subthread` 固定为 `1`，`thread` 必须落在 `[2, registry.hardware.thread_num]`；失败时不得静默降级为单线程或无 barrier 的串行执行。
+- 注意事项：公开源码形态固定为 `launch<block, thread, subthread, shared_memory_size>(callee, args...)`；`callee` 必须是函数对象或等价可调用对象，字符串 callee 不属于合法公开合同；生成源码中的 `callee` 对应 kernel body 不再显式声明 `npu_demo::KernelContext& ctx` 参数，运行时仍兼容手写 callee 显式接收 `npu_demo::KernelContext&` 首参；block-only 子集下 `block` 必须落在 `[1, registry.hardware.block_num]`，`thread` 固定为 `1`，`subthread` 固定为 `1`；失败时不得静默降级为单线程或无 barrier 的串行执行。
 
 ### `class npu_demo::KernelContext`
 
@@ -155,7 +156,7 @@
 auto bid = ctx.block_id();
 ```
 - 功能说明：返回当前 launch 的 block 索引。
-- 注意事项：返回值以 `0` 为起点，并满足 `0 <= block_id() < block_num()`；P0 路径固定为 `block_num()==1`。
+- 注意事项：返回值以 `0` 为起点，并满足 `0 <= block_id() < block_num()`；block-only 子集允许 `block_num()` 大于 `1`。
 
 ### `KernelContext::block_num() const -> long long`
 
@@ -168,7 +169,7 @@ auto bid = ctx.block_id();
 auto blocks = ctx.block_num();
 ```
 - 功能说明：返回当前 launch 的 block extent。
-- 注意事项：返回当前 launch 的 `block` 模板值，而不是 registry 固定模板值；P0 路径固定为 `1`。
+- 注意事项：返回当前 launch 的 `block` 模板值，而不是 registry 固定模板值；当前 `npu_demo` target 上限为 `2`。
 
 ### `KernelContext::thread_id() const -> long long`
 
@@ -194,7 +195,7 @@ auto tid = ctx.thread_id();
 auto threads = ctx.thread_num();
 ```
 - 功能说明：返回当前 launch 的 thread extent。
-- 注意事项：返回本次 `launch<1, thread, 1, 0>` 中的 `thread` 模板值，而不是 registry 的固定上限值。
+- 注意事项：返回本次 `launch<block, thread, 1, 0>` 中的 `thread` 模板值，而不是 registry 的固定上限值；当前 block-only 子集固定为 `1`。
 
 ### `KernelContext::subthread_id() const -> long long`
 
@@ -207,7 +208,7 @@ auto threads = ctx.thread_num();
 auto sid = ctx.subthread_id();
 ```
 - 功能说明：返回当前 launch 的 subthread 索引。
-- 注意事项：返回值以 `0` 为起点，并满足 `0 <= subthread_id() < subthread_num()`；P0 路径固定为 `subthread_id()==0`。
+- 注意事项：返回值以 `0` 为起点，并满足 `0 <= subthread_id() < subthread_num()`；当前 block-only 子集固定为 `subthread_id()==0`。
 
 ### `KernelContext::subthread_num() const -> long long`
 
@@ -220,7 +221,7 @@ auto sid = ctx.subthread_id();
 auto subthreads = ctx.subthread_num();
 ```
 - 功能说明：返回当前 launch 的 subthread extent。
-- 注意事项：返回当前 launch 的 `subthread` 模板值，而不是 registry 固定模板值；P0 路径固定为 `1`。
+- 注意事项：返回当前 launch 的 `subthread` 模板值，而不是 registry 固定模板值；当前 block-only 子集固定为 `1`。
 
 ### `KernelContext::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const -> void`
 
@@ -235,7 +236,7 @@ auto subthreads = ctx.subthread_num();
   ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
   ```
 - 功能说明：在当前 launch block 内执行一次带 `visibility / scope` 的同步。
-- 注意事项：`visibility` 与 `scope` 都是必填；`npu_demo` P0 仅支持 `visibility={BarrierVisibility::TSM, BarrierVisibility::TLM}` 且两者各出现一次，并要求 `scope=BarrierScope::BLOCK`；空 `visibility`、重复项、缺失 `TSM/TLM`、混入非法 `BarrierVisibility` 枚举值，或 `scope=BarrierScope::THREAD` 都必须显式失败。
+- 注意事项：`visibility` 与 `scope` 都是必填；当前 block-only 子集仅支持 `visibility={BarrierVisibility::TSM, BarrierVisibility::TLM}` 且两者各出现一次，并要求 `scope=BarrierScope::BLOCK`；空 `visibility`、重复项、缺失 `TSM/TLM`、混入非法 `BarrierVisibility` 枚举值，或 `scope=BarrierScope::THREAD` 都必须显式失败。
 
 ### `template <MemorySpace Space, typename T> KernelContext::get_dynamic_memory() const -> Memory<Space, T>`
 
@@ -248,7 +249,20 @@ auto subthreads = ctx.subthread_num();
   Memory<TSM, float> tsm = ctx.get_dynamic_memory<TSM, float>();
   ```
 - 功能说明：返回指定片上空间的运行时动态内存视图。
-- 注意事项：`Space` 与元素类型 `T` 通过模板参数显式传入；P0 下 `TSM/TLM1/TLM2/TLM3` 返回固定容量且 `data()!=nullptr` 的可写视图，视图可作为 `Memory::view<T>(...)`、`slice(...)`、`fill(...)` 的公开输入；`SM/LM` 因容量为 `0` 必须显式失败，`GM` 不属于该接口输入域；返回对象的底层分配所有权或跨 launch 复用策略不作为公开合同。
+- 注意事项：`Space` 与元素类型 `T` 通过模板参数显式传入；当前 block-only 子集下 `TSM/TLM1/TLM2/TLM3` 返回固定容量且 `data()!=nullptr` 的可写视图，视图可作为 `Memory::view<T>(...)`、`slice(...)`、`fill(...)` 的公开输入；`SM/LM` 因容量为 `0` 必须显式失败，`GM` 不属于该接口输入域；返回对象的底层分配所有权或跨 launch 复用策略不作为公开合同。
+
+### `npu_demo::block_id() -> S_INT`
+
+- api：`npu_demo::block_id() -> S_INT`
+- 参数：无。
+- 返回值：`S_INT`。
+- 使用示例：
+
+  ```cpp
+  S_INT bid = npu_demo::block_id();
+  ```
+- 功能说明：通过当前 launch 活动上下文返回 block 索引。
+- 注意事项：语义与 `KernelContext::block_id()` 一致；该 free helper 供生成代码直接调用，不要求生成源码显式持有 `KernelContext&`。
 
 ### `npu_demo::thread_id() -> S_INT`
 
@@ -490,10 +504,10 @@ auto subthreads = ctx.subthread_num();
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-001 | 公开入口 | 锁定 `include/api/Arch.h` 的公开 launch/barrier 接口面。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_include_api_arch_exports_public_launch_and_scope_contract`。 | 公开入口在“锁定 `include/api/Arch.h` 的公开 launch/barrier 接口面。”场景下可导入、构造、注册或按名称发现。 | `test_include_api_arch_exports_public_launch_and_scope_contract` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-002 | 执行结果 | 锁定 `KernelContext` 的 `block/thread/subthread` 查询返回当前 launch 值。 | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_npu_demo_kernel_context_runtime_view_tracks_launch_extent`。 | 命令返回码、输出、执行结果或状态变更体现“锁定 `KernelContext` 的 `block/thread/subthread` 查询返回当前 launch 值。”场景。 | `test_npu_demo_kernel_context_runtime_view_tracks_launch_extent` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-003 | 边界/异常 | 锁定 barrier 的 `visibility / scope` 参数合同。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_npu_demo_kernel_context_barrier_requires_visibility_and_block_scope`。 | “锁定 barrier 的 `visibility / scope` 参数合同。”场景按公开错误语义失败或被拒绝。 | `test_npu_demo_kernel_context_barrier_requires_visibility_and_block_scope` |
-| TC-INCLUDE-NPU-DEMO-NPU-DEMO-004 | 边界/异常 | 锁定 `block!=1`、`subthread!=1`、`thread<2` 或 `thread>8` 的显式失败边界。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_npu_demo_launch_rejects_unsupported_extent_without_fallback`。 | “锁定 `block!=1`、`subthread!=1`、`thread<2` 或 `thread>8` 的显式失败边界。”场景按公开错误语义失败或被拒绝。 | `test_npu_demo_launch_rejects_unsupported_extent_without_fallback` |
+| TC-INCLUDE-NPU-DEMO-NPU-DEMO-004 | 边界/异常 | 锁定 `block > 2`、`thread != 1` 或 `subthread != 1` 的显式失败边界。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_npu_demo_launch_rejects_unsupported_extent_without_fallback`。 | “锁定 `block > 2`、`thread != 1` 或 `subthread != 1` 的显式失败边界。”场景按公开错误语义失败或被拒绝。 | `test_npu_demo_launch_rejects_unsupported_extent_without_fallback` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-005 | 公开入口 | 锁定 `npu_demo::` public function 最小正向消费。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_npu_demo_public_namespace_smoke_compiles_vector_kernel_and_launch`。 | 公开入口在“锁定 `npu_demo::` public function 最小正向消费。”场景下可导入、构造、注册或按名称发现。 | `test_npu_demo_public_namespace_smoke_compiles_vector_kernel_and_launch` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-006 | 公开入口 | 锁定 `Memory/Dma` public function 只通过 `npu_demo::` 正向消费，未限定的全局 helper 不作为成功路径。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_npu_demo_public_namespace_memory_dma_helpers`。 | 公开入口在“锁定 `Memory/Dma` public function 只通过 `npu_demo::` 正向消费，未限定的全局 helper 不作为成功路径。”场景下可导入、构造、注册或按名称发现。 | `test_npu_demo_public_namespace_memory_dma_helpers` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-007 | 生成/编译 | 锁定 `include/npu_demo/npu_demo.h` 对 `gen_kernel` 输出的 wrapper/body kernel + sibling cost function 模块仍是单入口 compile-only 头文件。 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_gen_kernel_compiles_npu_demo_cost_function_module`。 | 生成源码、IR 文本或编译结果体现“锁定 `include/npu_demo/npu_demo.h` 对 `gen_kernel` 输出的 wrapper/body kernel + sibling cost function 模块仍是单入口 compile-only 头文件。”场景。 | `test_gen_kernel_compiles_npu_demo_cost_function_module` |
-| TC-INCLUDE-NPU-DEMO-NPU-DEMO-008 | 公开入口 | 锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `thread_num=8` 上限语义。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_npu_demo_supports_launch_and_barrier_caps`。 | 公开入口在“锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `thread_num=8` 上限语义。”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_npu_demo_supports_launch_and_barrier_caps` |
+| TC-INCLUDE-NPU-DEMO-NPU-DEMO-008 | 公开入口 | 锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `block_num=2/thread_num=1` 上限语义。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_npu_demo_supports_launch_and_barrier_caps`。 | 公开入口在“锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `block_num=2/thread_num=1` 上限语义。”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_npu_demo_supports_launch_and_barrier_caps` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-009 | 边界/异常 | 锁定 cost DMA include 不依赖跨文件非公开 detail 聚合状态。 | 读取公开 include 文本。 | 运行 `test_npu_demo_cost_dma_has_no_cross_file_detail_accumulator`。 | `include/npu_demo/cost/Core.h` 不承载 DMA 聚合状态，`include/npu_demo/cost/Dma.h` 不包含或调用该非公开状态。 | `test_npu_demo_cost_dma_has_no_cross_file_detail_accumulator` |
-| TC-INCLUDE-NPU-DEMO-NPU-DEMO-010 | 执行结果 | 单入口头文件聚合 runtime trance，`TRANCE` 开启时输出 Memory 与 launch 参数。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE`，构造 `Memory<GM, float>` 并作为 forwarded arg 执行 `npu_demo::launch<1, 2, 1, 0>(...)`。 | 运行 `test_npu_demo_trance_stdout_memory_and_launch_format`。 | stdout 包含 launch `template=<...>`、`arg0 = callable[kernel_body]`、`arg1 = mem[...] [2, 3] [3, 1] f32 GM` 与 `arg2 = 7`。 | `test_npu_demo_trance_stdout_memory_and_launch_format` |
+| TC-INCLUDE-NPU-DEMO-NPU-DEMO-010 | 执行结果 | 单入口头文件聚合 runtime trance，`TRANCE` 开启时输出 Memory 与 launch 参数。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE`，构造 `Memory<GM, float>` 并作为 forwarded arg 执行 `npu_demo::launch<2, 1, 1, 0>(...)`。 | 运行 `test_npu_demo_trance_stdout_memory_and_launch_format`。 | stdout 包含 launch `template=<block=2, thread=1, subthread=1, shared_memory_size=0>`、`arg0 = callable[kernel_body]`、`arg1 = mem[...] [2, 3] [3, 1] f32 GM` 与 `arg2 = 7`。 | `test_npu_demo_trance_stdout_memory_and_launch_format` |

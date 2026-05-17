@@ -43,6 +43,7 @@
 - summary 路径必须覆盖静态 shape、具名动态 shape、`symbol.for` / `scf.for` 中的 loop-invariant alloc，以及缺少 `dma.free` 的 alloc。
 - rewrite 路径只改写 `shared/local/tsm/tlm1/tlm2/tlm3` 片上 memory space；`global` 不属于 `arch.get_dynamic_memory` 支持范围，因此只进入 summary，不生成 dynamic backing rewrite。
 - rewrite 结果必须使用 `arch.get_dynamic_memory + dma.view + dma.reshape`，不得生成 byte-pool `dma.alloc/dma.free` 作为本 pass 的 rewrite 结果。
+- rewrite 路径必须支持 `ArchParallelizePass` block0 guard 产生的单块 `scf.if` then/else region，并继续在 branch 内把 `dma.alloc/dma.free` 改写为 `dma.view + dma.reshape`。
 - `offset` 按目标 dtype 的元素单位表达；若 `aligned_offset_bytes / sizeof(target_dtype)` 不能证明整除，必须以 `KernelCodeError(ErrorKind.UNIMPLEMENTED, ErrorModule.PASS, ...)` 失败。
 
 ## API详细说明
@@ -103,6 +104,7 @@
   - `rewrite=True` 时每个 `func + 可改写片上 memory space` 在函数入口生成一份 `arch.get_dynamic_memory`；`global` alloc 保留为 summary-only，不走 dynamic backing。
   - 多 alloc 线性切分，不因生命周期不重叠而复用 offset。
   - `symbol.for` 内 alloc 的 `dma.view + dma.reshape` 留在 loop body；`scf.for` 内 loop-invariant alloc 的 backing memory 仍在函数入口。
+  - `scf.if` then/else branch 内 alloc 的 `dma.view + dma.reshape` 留在原 branch block；backing memory 仍在函数入口，且未知 region 继续按 `MemoryPoolUnsupportedRegionEscape` 失败。
   - `dma.alloc` result `nn.memory` 的 shape/stride 条目只接受已通过 `nn.memory` verifier 的 `SymbolExprAttr`；旧 bare `IntAttr` / `StringAttr` 维度不属于本 pass 输入合同，由 `nn.memory` verifier 在进入 pass 前拒绝。
   - full-rank `dma.alloc.dynamic_shape` operand 可携带 `!symbol.int<"?">` 类型；rewrite 必须在 `dma.view + dma.reshape` metadata 中继续保留 `?`，不得把 `?` 反推为局部变量名或后续 reshape 的公开名字。
   - `SymbolExprAttr` 维度可包含 `iter<start,end,step>` atom；memory-pool 在内部 size/offset 计算中把这类表达作为不透明动态符号处理，rewrite 仍通过公开 `!symbol.int<"...">` operand 保留原 shape 文本，不把 iter token 退化为 `?`。
@@ -216,5 +218,6 @@
 | TC-MP-009 | 边界 | 缺 free | 单 alloc 无 free | 运行 analysis-only | interval end 为 block/region 结束 | `test_memory_pool_unpaired_alloc` |
 | TC-MP-010 | loop | `symbol.for` alloc | loop 内 alloc/free | 运行 rewrite | backing 在函数入口，view/reshape 留在 loop body | `test_memory_pool_symbol_for_reuse` |
 | TC-MP-010D | loop/dynamic shape | `iter<...>` shape atom | alloc shape 为 `min(4, 6 - iter<0,6,4>)` 且 dynamic_shape 传入同语义 `!symbol.int` | 运行 `MemoryPoolPass(rewrite=True, alignment=0)` | rewrite 通过，移除原 alloc，并保留原 dynamic shape operand 供 reshape 使用 | `test_memory_pool_rewrite_accepts_iter_token_shape_expression` |
+| TC-MP-010E | control-flow | block0 guard `scf.if` branch alloc | `scf.if` else branch 内有片上 `dma.alloc + dma.free`，模拟 arch-parallelize 无 loop guard 形态。 | 运行 `memory-pool={rewrite=true,alignment=0,fold=false}`。 | 函数入口生成 `arch.get_dynamic_memory`，branch 内生成 `dma.view + dma.reshape`，不残留 `dma.alloc/dma.free`。 | `test_memory_pool_rewrite_scif_branch_alloc_for_block0_guard` |
 | TC-MP-011 | registry | memory-pool options | `rewrite/fold/alignment` option | 运行 `build_registered_pass(...)` | 构造 `MemoryPoolPass`，非法 option 稳定失败 | `test_build_registered_memory_pool_alignment_options` |
 | TC-MP-012 | 合同验收 | expectation memory_pool | 只读 `expectation/pass/memory_pool` | 运行 `python3 -m expectation.pass.memory_pool` | 全部合同通过且不修改 expectation | `expectation.pass.memory_pool` |

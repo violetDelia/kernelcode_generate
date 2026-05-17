@@ -186,11 +186,19 @@ def test_include_api_arch_exports_public_launch_and_scope_contract() -> None:
 
 static int fail(int code) { return code; }
 
-static void kernel_body(npu_demo::KernelContext& ctx, long long* seen_ids, long long* seen_thread_nums) {
+static void kernel_body(
+    npu_demo::KernelContext& ctx,
+    long long* seen_block_ids,
+    long long* seen_block_nums,
+    long long* seen_thread_ids,
+    long long* seen_thread_nums) {
     ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
+    const long long bid = block_id();
     const long long tid = thread_id();
-    seen_ids[tid] = tid;
-    seen_thread_nums[tid] = thread_num();
+    seen_block_ids[bid] = bid;
+    seen_block_nums[bid] = ctx.block_num();
+    seen_thread_ids[bid] = tid;
+    seen_thread_nums[bid] = thread_num();
 }
 
 int main() {
@@ -207,18 +215,31 @@ int main() {
         return fail(4);
     }
 
-    long long seen_ids[4] = {-1, -1, -1, -1};
-    long long seen_thread_nums[4] = {0, 0, 0, 0};
-    Status status = launch<1, 4, 1, 0>(kernel_body, seen_ids, seen_thread_nums);
+    long long seen_block_ids[2] = {-1, -1};
+    long long seen_block_nums[2] = {0, 0};
+    long long seen_thread_ids[2] = {-1, -1};
+    long long seen_thread_nums[2] = {0, 0};
+    Status status = launch<2, 1, 1, 0>(
+        kernel_body,
+        seen_block_ids,
+        seen_block_nums,
+        seen_thread_ids,
+        seen_thread_nums);
     if (status != StatusCode::kOk) {
         return fail(5);
     }
-    for (long long i = 0; i < 4; ++i) {
-        if (seen_ids[i] != i) {
+    for (long long i = 0; i < 2; ++i) {
+        if (seen_block_ids[i] != i) {
             return fail(6);
         }
-        if (seen_thread_nums[i] != 4) {
+        if (seen_block_nums[i] != 2) {
             return fail(7);
+        }
+        if (seen_thread_ids[i] != 0) {
+            return fail(8);
+        }
+        if (seen_thread_nums[i] != 1) {
+            return fail(9);
         }
     }
     return 0;
@@ -240,7 +261,7 @@ def test_include_api_arch_rejects_string_callee_contract() -> None:
 #include "include/npu_demo/Arch.h"
 
 int main() {
-    return launch<1, 4, 1, 0>("kernel_name");
+    return launch<2, 1, 1, 0>("kernel_name");
 }
 """
     )
@@ -260,8 +281,11 @@ def test_include_api_arch_keeps_backend_impl_out_of_api_header() -> None:
     assert "enum class BarrierVisibility" in header
     assert "enum class BarrierScope" in header
     assert "class KernelContext" in header
+    assert "virtual long long block_id() const = 0;" in header
+    assert "virtual long long block_num() const = 0;" in header
     assert "virtual long long thread_id() const = 0;" in header
     assert "virtual long long thread_num() const = 0;" in header
+    assert "S_INT block_id();" in header
     assert "S_INT thread_id();" in header
     assert "S_INT thread_num();" in header
     assert "std::initializer_list<BarrierVisibility> visibility" in header
@@ -326,9 +350,12 @@ def test_include_api_arch_declares_public_kernel_context_surface() -> None:
 static_assert(std::is_abstract<KernelContext>::value, "KernelContext must stay abstract in include/api");
 
 void inspect(KernelContext& ctx) {
+    (void)ctx.block_id();
+    (void)ctx.block_num();
     (void)ctx.thread_id();
     (void)ctx.thread_num();
     ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
+    (void)block_id();
     (void)thread_id();
     (void)thread_num();
     (void)get_dynamic_memory<TSM>();

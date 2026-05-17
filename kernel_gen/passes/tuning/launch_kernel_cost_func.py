@@ -27,7 +27,7 @@ from __future__ import annotations
 from typing import TypedDict
 
 from xdsl.context import Context
-from xdsl.dialects import func
+from xdsl.dialects import func, scf
 from xdsl.dialects.builtin import ModuleOp, StringAttr
 from xdsl.ir import Block, Operation, Region, SSAValue
 
@@ -40,6 +40,12 @@ from kernel_gen.passes.pass_manager import Pass
 RESERVED_METADATA_ATTRS = ("kind", "cost_kind", "op_name", "device_func")
 SUPPORTED_COST_PREFIXES = ("dma.", "kernel.", "arch.")
 HELPER_OP_NAMES = (
+    "arch.get_block_id",
+    "arch.get_block_num",
+    "arch.get_thread_id",
+    "arch.get_thread_num",
+    "arch.get_subthread_id",
+    "arch.get_subthread_num",
     "arch.get_dynamic_memory",
     "builtin.unrealized_conversion_cast",
     "dma.view",
@@ -81,6 +87,41 @@ def _symbol_value_expr(value: SSAValue) -> str:
     if not isinstance(value.type, SymbolValueType):
         raise_pass_contract_error("LaunchKernelCostFuncError", "cost accumulator must be symbol.int")
     return str(value.type.get_value())
+
+
+def _scf_if_inline_ops(op: scf.IfOp) -> list[Operation] | None:
+    """提取可内联的 `scf.if` 分支 ops。
+
+    功能说明:
+    - 仅接受单块 `scf.if`。
+    - 仅当存在唯一非空分支时返回该分支的可执行 ops。
+    - 分支末尾的 `scf.yield` 视为结构 terminator 并丢弃。
+
+    使用示例:
+    - ops = _scf_if_inline_ops(if_op)
+
+    关联文件:
+    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](../../../spec/pass/tuning/launch_kernel_cost_func.md)
+    - test: [test/passes/tuning/test_launch_kernel_cost_func.py](../../../test/passes/tuning/test_launch_kernel_cost_func.py)
+    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)
+    """
+
+    if op.results:
+        return None
+    if len(op.regions) != 2:
+        return None
+    regions = []
+    for region in op.regions:
+        blocks = list(region.blocks)
+        if len(blocks) != 1:
+            return None
+        block = blocks[0]
+        ops = [inner_op for inner_op in block.ops if not isinstance(inner_op, scf.YieldOp)]
+        regions.append(ops)
+    true_ops, false_ops = regions
+    if bool(true_ops) == bool(false_ops):
+        return None
+    return false_ops if false_ops else true_ops
 
 
 class _CostTraversalFrame(TypedDict):
@@ -309,6 +350,18 @@ class LaunchKernelCostFuncPass(Pass):
                     assert isinstance(target_block, Block)
                     assert isinstance(value_mapper, dict)
                     assert isinstance(acc_value, SSAValue)
+
+                    if isinstance(op, scf.IfOp):
+                        inline_ops = _scf_if_inline_ops(op)
+                        if inline_ops is None:
+                            raise_pass_contract_error(
+                                "LaunchKernelCostFuncError",
+                                "unsupported op 'scf.if' in device function "
+                                f"'{device_func.sym_name.data}'",
+                            )
+                        ops[index:index + 1] = inline_ops
+                        frame["index"] = index
+                        continue
 
                     if isinstance(op, SymbolForOp):
                         if op.init is not None or op.result is not None:

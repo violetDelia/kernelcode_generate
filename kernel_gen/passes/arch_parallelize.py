@@ -28,16 +28,19 @@ from dataclasses import dataclass
 
 from xdsl.context import Context
 from xdsl.dialects import func, scf
-from xdsl.dialects.builtin import ModuleOp
-from xdsl.ir import Attribute, Block, Operation, SSAValue
+from xdsl.dialects.builtin import ArrayAttr, ModuleOp
+from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetBlockNumOp
+from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolConstOp,
     SymbolDivOp,
     SymbolFloorDivOp,
+    SymbolExprAttr,
+    SymbolIterAttr,
     SymbolForOp,
     SymbolGetDimOp,
     SymbolGetStrideOp,
@@ -312,6 +315,139 @@ def _loop_iter_type(start: SSAValue | Operation, end: SSAValue | Operation, step
     return SymbolIterType.from_bounds(_symbol_expr(start), _symbol_expr(end), _symbol_expr(step))
 
 
+def _iter_token(iter_type: SymbolIterType) -> str:
+    """把 `SymbolIterType` 转成公开 `iter<...>` 文本 token。
+
+    功能说明:
+    - 用于在克隆后同步替换旧 loop 体里残留的 induction variable 表达式。
+
+    使用示例:
+    - token = _iter_token(SymbolIterType.from_bounds("0", "6", "4"))
+    """
+
+    return f"iter<{iter_type.start.expr.data},{iter_type.end.expr.data},{iter_type.step.expr.data}>"
+
+
+def _replace_symbol_expr_text(expr: str, replacements: dict[str, str]) -> str:
+    """按公开 token 表达式替换 symbol 文本。
+
+    功能说明:
+    - 仅替换已知旧 token，不做额外规范化。
+
+    使用示例:
+    - text = _replace_symbol_expr_text("6 - iter<0,6,4>", {"iter<0,6,4>": "iter<4*block_id,6,8>"})
+    """
+
+    for old, new in replacements.items():
+        expr = expr.replace(old, new)
+    return expr
+
+
+def _rewrite_attribute_type(attr: Attribute, replacements: dict[str, str]) -> Attribute:
+    """把克隆后属性中的旧 symbol token 重写为新 token。
+
+    功能说明:
+    - 只处理本文件当前会生成的公开类型：`SymbolValueType`、`SymbolIterType`、`NnMemoryType` 和其包装的 `ArrayAttr`。
+    - 其它属性保持原样，避免扩大改写面。
+
+    使用示例:
+    - new_attr = _rewrite_attribute_type(old_attr, {"iter<0,6,4>": "iter<4*block_id,6,8>"})
+    """
+
+    if isinstance(attr, SymbolValueType):
+        return SymbolValueType.from_expr(_replace_symbol_expr_text(attr.expr.expr.data, replacements))
+    if isinstance(attr, SymbolIterType):
+        return SymbolIterType.from_bounds(
+            _replace_symbol_expr_text(attr.start.expr.data, replacements),
+            _replace_symbol_expr_text(attr.end.expr.data, replacements),
+            _replace_symbol_expr_text(attr.step.expr.data, replacements),
+        )
+    if isinstance(attr, NnMemoryType):
+        shape = ArrayAttr(
+            [SymbolExprAttr.from_expr(_replace_symbol_expr_text(dim.expr.data, replacements)) for dim in attr.shape.data]
+        )
+        stride = ArrayAttr(
+            [SymbolExprAttr.from_expr(_replace_symbol_expr_text(dim.expr.data, replacements)) for dim in attr.stride.data]
+        )
+        template_name = attr.template_name.data or None
+        return NnMemoryType(shape, stride, attr.element_type, attr.space, template_name=template_name)
+    if isinstance(attr, SymbolIterAttr):
+        return SymbolIterAttr.from_bounds(
+            _replace_symbol_expr_text(attr.start.expr.data, replacements),
+            _replace_symbol_expr_text(attr.end.expr.data, replacements),
+            _replace_symbol_expr_text(attr.step.expr.data, replacements),
+        )
+    if isinstance(attr, ArrayAttr):
+        return ArrayAttr([_rewrite_attribute_type(entry, replacements) for entry in attr.data])
+    return attr
+
+
+def _clone_region_with_rewritten_types(
+    region: Region,
+    value_mapper: dict[SSAValue, SSAValue],
+    block_mapper: dict[Block, Block],
+    replacements: dict[str, str],
+) -> Region:
+    """克隆 region 并同步替换 block argument 类型。
+
+    功能说明:
+    - 先按公开 `Block(arg_types=...)` 建立 block skeleton，再逐个克隆 op。
+    - 避免直接写 xDSL `BlockArgument` 私有字段。
+
+    使用示例:
+    - region = _clone_region_with_rewritten_types(old_region, value_mapper, block_mapper, replacements)
+    """
+
+    old_blocks = tuple(region.blocks)
+    new_blocks: list[Block] = []
+    for old_block in old_blocks:
+        new_block = Block(arg_types=[_rewrite_attribute_type(arg.type, replacements) for arg in old_block.args])
+        for old_arg, new_arg in zip(old_block.args, new_block.args, strict=True):
+            value_mapper[old_arg] = new_arg
+            new_arg.name_hint = old_arg.name_hint
+        block_mapper[old_block] = new_block
+        new_blocks.append(new_block)
+    new_region = Region(new_blocks)
+    for old_block, new_block in zip(old_blocks, new_blocks, strict=True):
+        for old_op in old_block.ops:
+            new_block.add_op(_clone_operation_with_rewritten_types(old_op, value_mapper, block_mapper, replacements))
+    return new_region
+
+
+def _clone_operation_with_rewritten_types(
+    op: Operation,
+    value_mapper: dict[SSAValue, SSAValue],
+    block_mapper: dict[Block, Block],
+    replacements: dict[str, str],
+) -> Operation:
+    """克隆 op 并用公开构造入口替换结果类型文本。
+
+    功能说明:
+    - 通过 `op.__class__.create(...)` 传入重写后的 result_types / attributes / properties / regions。
+    - 不直接写 `OpResult` 或 `BlockArgument` 的私有 `_type` 字段。
+
+    使用示例:
+    - cloned = _clone_operation_with_rewritten_types(old_op, value_mapper, block_mapper, replacements)
+    """
+
+    cloned_regions = [
+        _clone_region_with_rewritten_types(region, value_mapper, block_mapper, replacements) for region in op.regions
+    ]
+    cloned_op = op.__class__.create(
+        operands=tuple(value_mapper.get(operand, operand) for operand in op.operands),
+        result_types=[_rewrite_attribute_type(result_type, replacements) for result_type in op.result_types],
+        attributes={name: _rewrite_attribute_type(attr, replacements) for name, attr in op.attributes.items()},
+        properties={name: _rewrite_attribute_type(prop, replacements) for name, prop in op.properties.items()},
+        location=op.location,
+        successors=[block_mapper.get(successor, successor) for successor in op.successors],
+        regions=cloned_regions,
+    )
+    for old_result, new_result in zip(op.results, cloned_op.results, strict=True):
+        value_mapper[old_result] = new_result
+        new_result.name_hint = old_result.name_hint
+    return cloned_op
+
+
 def _clone_loop_body_with_iter_type(old_loop: SymbolForOp, iter_type: SymbolIterType) -> Block:
     """克隆 loop body 并替换 induction variable 类型。
 
@@ -324,12 +460,15 @@ def _clone_loop_body_with_iter_type(old_loop: SymbolForOp, iter_type: SymbolIter
 
     old_block = tuple(old_loop.body.blocks)[0]
     new_block = Block(arg_types=[iter_type])
+    old_iter_type = old_block.args[0].type
+    if not isinstance(old_iter_type, SymbolIterType):
+        _fail("loop body it must have type !symbol.iter<...>")
+    replacements = {_iter_token(old_iter_type): _iter_token(iter_type)}
     value_mapper: dict[SSAValue, SSAValue] = {old_block.args[0]: new_block.args[0]}
+    block_mapper: dict[Block, Block] = {old_block: new_block}
     for old_op in old_block.ops:
-        cloned = old_op.clone(value_mapper=value_mapper)
+        cloned = _clone_operation_with_rewritten_types(old_op, value_mapper, block_mapper, replacements)
         new_block.add_op(cloned)
-        for old_result, new_result in zip(old_op.results, cloned.results, strict=True):
-            value_mapper[old_result] = new_result
     return new_block
 
 
@@ -439,7 +578,7 @@ class ArchParallelizePass(Pass):
     功能说明:
     - 公开 pass 名称为 `arch-parallelize`。
     - 按 target registry 静态 `block_num` 物化 block 分片 IR。
-    - 本轮只实现 block 级 standalone IR pass，不接入默认 pipeline。
+    - 本轮只实现 block 级 IR pass；无顶层 `symbol.for` 的函数改写为 block0 guard。
 
     使用示例:
     - ArchParallelizePass(target="npu_demo", parallel_level="block").apply(Context(), module)

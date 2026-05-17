@@ -147,13 +147,13 @@ int main() {
     long long stride[2] = {3, 1};
     Memory<GM, float> mem(data, shape, stride, 2, MemoryFormat::Norm);
 
-    Status status = npu_demo::launch<1, 2, 1, 0>(kernel_body, mem, 7LL);
+    Status status = npu_demo::launch<2, 1, 1, 0>(kernel_body, mem, 7LL);
     return status == StatusCode::kOk ? 0 : 1;
 }
 """
     stdout = _compile_and_run_capture_stdout(source, ("-DTRANCE",))
 
-    assert "in func: npu_demo::launch template=<block=1, thread=2, subthread=1, shared_memory_size=0>" in stdout
+    assert "in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>" in stdout
     assert "arg0 = callable[kernel_body]" in stdout
     assert "arg1 = mem[" in stdout
     assert "[2, 3] [3, 1] f32 GM" in stdout

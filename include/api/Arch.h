@@ -7,10 +7,13 @@ API 列表:
 - `enum class BarrierScope { BLOCK, THREAD, SUBTHREAD, GLOBAL }`
 - `template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args> Status launch(Callable&& callee, Args&&... args)`
 - `class KernelContext`
+- `KernelContext::block_id() const -> long long`
+- `KernelContext::block_num() const -> long long`
 - `KernelContext::thread_id() const -> long long`
 - `KernelContext::thread_num() const -> long long`
 - `KernelContext::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const -> void`
 - `template <MemorySpace Space, typename T> KernelContext::get_dynamic_memory() const -> Memory<Space, T>`
+- `block_id() -> S_INT`
 - `thread_id() -> S_INT`
 - `thread_num() -> S_INT`
 - `template <MemorySpace Space> get_dynamic_memory() -> DynamicMemoryRef<Space>`
@@ -86,9 +89,13 @@ enum class BarrierScope {
 
 使用示例:
 - void inspect(KernelContext& ctx) {
+-     long long bid = ctx.block_id();
+-     long long bnum = ctx.block_num();
 -     long long tid = ctx.thread_id();
 -     long long tnum = ctx.thread_num();
 -     ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
+-     (void)bid;
+-     (void)bnum;
 -     (void)tid;
 -     (void)tnum;
 - }
@@ -101,6 +108,36 @@ enum class BarrierScope {
 */
 class KernelContext {
 public:
+    /*
+    功能说明:
+    - 返回当前 launch 运行时视图中的 block 索引。
+
+    使用示例:
+    - long long bid = ctx.block_id();
+
+
+    关联文件:
+    - spec: spec/include/api/Arch.md
+    - test: test/include/api/arch.py
+    - 功能实现: include/npu_demo/Arch.h
+    */
+    virtual long long block_id() const = 0;
+
+    /*
+    功能说明:
+    - 返回当前 launch 运行时视图中的 block 总数。
+
+    使用示例:
+    - long long bnum = ctx.block_num();
+
+
+    关联文件:
+    - spec: spec/include/api/Arch.md
+    - test: test/include/api/arch.py
+    - 功能实现: include/npu_demo/Arch.h
+    */
+    virtual long long block_num() const = 0;
+
     /*
     功能说明:
     - 返回当前 launch 运行时视图中的线程索引。
@@ -195,6 +232,21 @@ protected:
     */
     ~KernelContext() = default;
 };
+
+/*
+功能说明:
+- 返回当前 launch 运行时视图中的 block 索引，作为公开 free helper 供代码生成直接调用。
+
+使用示例:
+- S_INT bid = block_id();
+
+
+关联文件:
+- spec: spec/include/api/Arch.md
+- test: test/include/api/arch.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+S_INT block_id();
 
 /*
 功能说明:
@@ -299,7 +351,7 @@ private:
 - 声明公开 kernel launch 入口，具体后端实现由私有 include 提供。
 
 使用示例:
-- Status status = launch<1, 4, 1, 0>(kernel_body, input, output);
+- Status status = launch<2, 1, 1, 0>(kernel_body, input, output);
 
 
 关联文件:

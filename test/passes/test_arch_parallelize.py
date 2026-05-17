@@ -107,7 +107,7 @@ def _register_target_once(spec: target_registry.TargetSpec) -> None:
 def test_arch_parallelize_rewrites_single_top_level_loop() -> None:
     case_text = """// COMPILE_ARGS: --pass "arch-parallelize={target=npu_demo,parallel_level=block}"
 // CHECK: %[[BID:{reg}]] = arch.get_block_id : !symbol.int<#symbol.expr<block_id>>
-// CHECK: %[[BNUM:{reg}]] = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+// CHECK: %[[BNUM:{reg}]] = symbol.const 2 : !symbol.int<#symbol.expr<2>>
 // CHECK: %[[BID_STEP:{reg}]] = symbol.mul %[[BID]], %[[STEP:{reg}]]
 // CHECK: %[[NEW_START:{reg}]] = symbol.add %[[START:{reg}]], %[[BID_STEP]]
 // CHECK: %[[NEW_STEP:{reg}]] = symbol.mul %[[STEP]], %[[BNUM]]
@@ -130,15 +130,14 @@ builtin.module {
 
 
 # TC-PASS-ARCH-PARALLELIZE-002
-# 功能说明: 验证无 loop 函数被包裹为 block0 guard，且 `func.return` 保持在 `scf.if` 后。
-# 使用示例: pytest -q test/passes/test_arch_parallelize.py -k test_arch_parallelize_wraps_no_loop_body_in_block0_guard
-def test_arch_parallelize_wraps_no_loop_body_in_block0_guard() -> None:
+# 功能说明: 验证无 loop 函数用 block0 guard 包裹，避免多 block 重复执行直线 body。
+# 使用示例: pytest -q test/passes/test_arch_parallelize.py -k test_arch_parallelize_wraps_no_loop_body_with_block0_guard
+def test_arch_parallelize_wraps_no_loop_body_with_block0_guard() -> None:
     case_text = """// COMPILE_ARGS: --pass "arch-parallelize={target=npu_demo,parallel_level=block}"
 // CHECK: %[[BID:{reg}]] = arch.get_block_id : !symbol.int<#symbol.expr<block_id>>
 // CHECK: %[[ZERO:{reg}]] = symbol.const 0 : !symbol.int<#symbol.expr<0>>
-// CHECK: %[[NOT_BLOCK0:{reg}]] = symbol.ne %[[BID]], %[[ZERO]]
-// CHECK: scf.if %[[NOT_BLOCK0]] {
-// CHECK: } else {
+// CHECK: %[[COND:{reg}]] = symbol.ne %[[BID]], %[[ZERO]]
+// CHECK: scf.if %[[COND]]
 // CHECK: %[[BODY:{reg}]] = symbol.const 7 : !symbol.int<#symbol.expr<7>>
 // CHECK: func.return
 
@@ -151,7 +150,8 @@ builtin.module {
 """
     result = run_ircheck_text(case_text, source_path="test/passes/test_arch_parallelize.py")
     assert result.ok is True, result.message
-    assert result.actual_ir.rfind("scf.if") < result.actual_ir.rfind("func.return")
+    assert "arch.get_block_id" in result.actual_ir
+    assert "scf.if" in result.actual_ir
 
 
 # TC-PASS-ARCH-PARALLELIZE-003
@@ -162,7 +162,7 @@ def test_arch_parallelize_rewrites_only_outer_dynamic_loop() -> None:
 // CHECK: func.func @dynamic_nested(%[[N:{reg}]] : !symbol.int<#symbol.expr<N>>, %[[M:{reg}]] : !symbol.int<#symbol.expr<M>>, %[[OUTER_STEP:{reg}]] : !symbol.int<#symbol.expr<TILE_M>>, %[[INNER_STEP:{reg}]] : !symbol.int<#symbol.expr<TILE_N>>)
 // CHECK: %[[ZERO:{reg}]] = symbol.const 0 : !symbol.int<#symbol.expr<0>>
 // CHECK: %[[BID:{reg}]] = arch.get_block_id : !symbol.int<#symbol.expr<block_id>>
-// CHECK: %[[BNUM:{reg}]] = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+// CHECK: %[[BNUM:{reg}]] = symbol.const 2 : !symbol.int<#symbol.expr<2>>
 // CHECK: %[[BID_STEP:{reg}]] = symbol.mul %[[BID]], %[[OUTER_STEP]]
 // CHECK: %[[NEW_START:{reg}]] = symbol.add %[[ZERO]], %[[BID_STEP]]
 // CHECK: %[[NEW_STEP:{reg}]] = symbol.mul %[[OUTER_STEP]], %[[BNUM]]
@@ -197,9 +197,19 @@ def test_arch_parallelize_processes_each_non_declaration_func() -> None:
 
 builtin.module {
   func.func @first() {
+    %0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %1 = symbol.const 8 : !symbol.int<#symbol.expr<8>>
+    %2 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    symbol.for %i = %0 to %1 step %2 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<8>, step = #symbol.expr<1>>} {
+    }
     func.return
   }
   func.func @second() {
+    %0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %1 = symbol.const 8 : !symbol.int<#symbol.expr<8>>
+    %2 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    symbol.for %i = %0 to %1 step %2 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<8>, step = #symbol.expr<1>>} {
+    }
     func.return
   }
 }

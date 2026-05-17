@@ -2,7 +2,7 @@
 name=npu_demo
 arch.supported_ops=arch.get_block_id,arch.get_block_num,arch.get_thread_id,arch.get_thread_num,arch.get_subthread_id,arch.get_subthread_num,arch.get_dynamic_memory,arch.barrier,arch.launch
 arch.unsupported_ops=arch.launch_kernel
-hw.block_num=1
+hw.block_num=2
 hw.thread_num=1
 hw.subthread_num=1
 hw.sm_memory_size=0

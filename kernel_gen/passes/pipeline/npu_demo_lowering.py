@@ -4,7 +4,7 @@
 功能说明:
 - 提供 `npu-demo-lowering` pipeline 的 builder。
 - 固定 `dsl_run` 的 npu_demo 正向链路为
-  `InlinePass -> CommonSubexpressionElimination -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> CommonSubexpressionElimination -> MemoryPlanPass -> SymbolBufferHoistPass -> TileAnalysisPass -> LowerDmaMemoryHierarchyPass -> MemoryPoolPass -> SymbolLoopHoistPass -> SymbolBufferHoistPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
+  `InlinePass -> CommonSubexpressionElimination -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> CommonSubexpressionElimination -> MemoryPlanPass -> ArchParallelizePass -> SymbolBufferHoistPass -> TileAnalysisPass -> LowerDmaMemoryHierarchyPass -> MemoryPoolPass -> SymbolLoopHoistPass -> SymbolBufferHoistPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
 - 默认 `MemoryPlanPass` 补齐 insert-free 生命周期，`MemoryPoolPass` 执行 dynamic backing 改写，template-name infer 在 outline 后写回 wrapper/body memory type 的 template name。
 - 通过 registry 装饰器完成 pipeline 注册。
 
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from xdsl.transforms.common_subexpression_elimination import CommonSubexpressionElimination
 
+from kernel_gen.passes.arch_parallelize import ArchParallelizePass
 from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
 from kernel_gen.passes.decompass import DecompassPass
 from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
@@ -50,11 +51,13 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     功能说明:
     - 返回 `PassManager(name="npu-demo-lowering")`。
     - 固定 pass 顺序为
-      `InlinePass -> CommonSubexpressionElimination -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> CommonSubexpressionElimination -> MemoryPlanPass -> SymbolBufferHoistPass -> TileAnalysisPass -> LowerDmaMemoryHierarchyPass -> MemoryPoolPass -> SymbolLoopHoistPass -> SymbolBufferHoistPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
+      `InlinePass -> CommonSubexpressionElimination -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> CommonSubexpressionElimination -> MemoryPlanPass -> ArchParallelizePass -> SymbolBufferHoistPass -> TileAnalysisPass -> LowerDmaMemoryHierarchyPass -> MemoryPoolPass -> SymbolLoopHoistPass -> SymbolBufferHoistPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
     - `CommonSubexpressionElimination` 紧跟 `InlinePass`，用于消除 inline 展平后产生的重复纯常量与等价表达式。
     - 第二个 `CommonSubexpressionElimination` 紧跟 `SymbolLoopHoistPass`，用于消除 loop 外提后产生的重复纯常量与等价表达式。
     - `MemoryPlanPass` 固定以 `insert_free=True, fold=False` 运行，在 memory-pool 之前补齐
       `dma.free` 生命周期且避免 pass 后通用 DCE 提前清掉生命周期边界。
+    - `ArchParallelizePass(target=target, parallel_level="block")` 阶段位于 memory-plan 后、
+      第一段 symbol-buffer-hoist 前；无顶层 `symbol.for` 时由公开 pass 生成 block0 guard，配置和 unsupported structure 错误继续失败。
     - 第一个 `SymbolBufferHoistPass` 位于 memory-plan 之后，用于把 loop 内安全 `dma.alloc + dma.free`
       成对外提到 owner `symbol.for` 两侧。
     - `TileAnalysisPass` 紧跟 `SymbolLoopHoistPass` 后置 CSE，只补充 tile 分析属性，不生成 tile 循环。
@@ -96,6 +99,7 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     pm.add_pass(SymbolLoopHoistPass())
     pm.add_pass(CommonSubexpressionElimination())
     pm.add_pass(MemoryPlanPass(insert_free=True, fold=False))
+    pm.add_pass(ArchParallelizePass(target=target, parallel_level="block"))
     pm.add_pass(SymbolBufferHoistPass())
     pm.add_pass(TileAnalysisPass())
     pm.add_pass(LowerDmaMemoryHierarchyPass(fold=True, apply_op='matmul{["", "tlm1", "tlm2"]}'))

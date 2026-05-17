@@ -40,7 +40,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.core.config import reset_config, set_target
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
+from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaFreeOp, DmaLoadOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaTransposeOp, DmaViewOp
 from kernel_gen.dialect.kernel import (
     KernelBinaryElewiseOp,
@@ -53,7 +53,7 @@ from kernel_gen.dialect.kernel import (
     KernelSelectOp,
 )
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolExprAttr, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolMaxOp, SymbolMinOp, SymbolToFloatOp, SymbolToIntOp, SymbolValueType, SymbolYieldOp
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolExprAttr, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolMaxOp, SymbolMinOp, SymbolNeOp, SymbolToFloatOp, SymbolToIntOp, SymbolValueType, SymbolYieldOp
 from kernel_gen.dialect.tuner import TunerCostOp
 from kernel_gen.dsl.ast import BlockAST
 from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c, emit_c_op, emit_c_value, gen_kernel
@@ -1394,6 +1394,32 @@ def test_emit_c_lowers_npu_demo_dma_scalar_broadcast_as_fill_contract() -> None:
     stmt = emit_c_op(DmaBroadcastOp(block.args[0], scalar.result), ctx)
 
     assert stmt == "fill<TSM, float>(dst /*dst*/, 1.0 /*value*/);"
+
+
+# TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-056
+# 功能说明: 验证 npu_demo emitter 支持 arch-parallelize block0 guard 的 `scf.if`。
+# 测试目的: 锁定 `scf.if` 不再落入 unsupported op，then/else region 通过公开 emit registry 递归发射。
+# 使用示例: pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_block0_guard_scf_if
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/npu_demo/control_flow.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/emit/npu_demo.md
+# 对应测试文件路径: test/dsl/gen_kernel/emit/test_package.py
+def test_emit_c_lowers_npu_demo_block0_guard_scf_if() -> None:
+    block_id = ArchGetBlockIdOp()
+    zero = SymbolConstOp(0)
+    condition = SymbolNeOp(block_id.result, zero.result)
+    then_block = Block()
+    then_block.add_op(scf.YieldOp())
+    else_block = Block()
+    else_block.add_op(SymbolConstOp(7))
+    else_block.add_op(scf.YieldOp())
+    if_op = scf.IfOp(condition.result, [], [then_block], [else_block])
+
+    stmt = emit_c_op(if_op, _npu_ctx())
+
+    assert "if ((npu_demo::block_id() != 0)) {" in stmt
+    assert "} else {" in stmt
+    assert "S_INT c_0 = 7;" in stmt
+    assert "scf.if" not in stmt
 
 
 def test_emit_c_lowers_cpu_dma_broadcast_helper_contract() -> None:
@@ -3038,7 +3064,7 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
 
 
 # EC-024
-# 功能说明: 验证 npu_demo 下 thread 查询节点发射为 free helper `thread_id/thread_num`。
+# 功能说明: 验证 npu_demo 下 block/thread 查询节点发射为 free helper。
 # 测试目的: 锁定 target=npu_demo 的查询文本不再带 `ctx.`，避免回退到成员调用或 launch 语义。
 # 使用示例: pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_kernel_context_queries
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/__init__.py
@@ -3046,26 +3072,35 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
 # 对应测试文件路径: test/dsl/gen_kernel/emit/test_package.py
 def test_emit_c_lowers_npu_demo_kernel_context_queries() -> None:
     value_ctx = _npu_ctx()
+    bid_value = ArchGetBlockIdOp()
     tid_value = ArchGetThreadIdOp()
     tnum_value = ArchGetThreadNumOp()
+    assert emit_c_value(bid_value.result, value_ctx) == "npu_demo::block_id()"
     assert emit_c_value(tid_value.result, value_ctx) == "npu_demo::thread_id()"
     assert emit_c_value(tnum_value.result, value_ctx) == "npu_demo::thread_num()"
+    value_ctx.bind_name(bid_value.result, "bid_expr")
     value_ctx.bind_name(tid_value.result, "tid_expr")
     value_ctx.bind_name(tnum_value.result, "tnum_expr")
+    assert emit_c_value(bid_value.result, value_ctx) == "bid_expr"
     assert emit_c_value(tid_value.result, value_ctx) == "tid_expr"
     assert emit_c_value(tnum_value.result, value_ctx) == "tnum_expr"
 
     ctx = _npu_ctx()
+    bid = ArchGetBlockIdOp()
     tid = ArchGetThreadIdOp()
     tnum = ArchGetThreadNumOp()
+    ctx.bind_name(bid.result, "bid")
     ctx.bind_name(tid.result, "tid")
     ctx.bind_name(tnum.result, "tnum")
 
+    bid_stmt = emit_c_op(bid, ctx)
     tid_stmt = emit_c_op(tid, ctx)
     tnum_stmt = emit_c_op(tnum, ctx)
 
+    assert bid_stmt == "S_INT bid = npu_demo::block_id();"
     assert tid_stmt == "S_INT tid = npu_demo::thread_id();"
     assert tnum_stmt == "S_INT tnum = npu_demo::thread_num();"
+    assert "launch" not in bid_stmt
     assert "launch" not in tid_stmt
     assert "barrier" not in tnum_stmt
 

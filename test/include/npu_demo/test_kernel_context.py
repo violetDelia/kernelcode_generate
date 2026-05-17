@@ -137,24 +137,24 @@ static void kernel_body(
     long long* thread_nums,
     long long* subthread_ids,
     long long* subthread_nums) {
-    const long long tid = thread_id();
-    block_ids[tid] = ctx.block_id();
-    block_nums[tid] = ctx.block_num();
-    thread_ids[tid] = thread_id();
-    thread_nums[tid] = thread_num();
-    subthread_ids[tid] = ctx.subthread_id();
-    subthread_nums[tid] = ctx.subthread_num();
+    const long long bid = block_id();
+    block_ids[bid] = ctx.block_id();
+    block_nums[bid] = ctx.block_num();
+    thread_ids[bid] = thread_id();
+    thread_nums[bid] = thread_num();
+    subthread_ids[bid] = ctx.subthread_id();
+    subthread_nums[bid] = ctx.subthread_num();
 }
 
 int main() {
-    long long block_ids[4] = {-1, -1, -1, -1};
-    long long block_nums[4] = {0, 0, 0, 0};
-    long long thread_ids[4] = {-1, -1, -1, -1};
-    long long thread_nums[4] = {0, 0, 0, 0};
-    long long subthread_ids[4] = {-1, -1, -1, -1};
-    long long subthread_nums[4] = {0, 0, 0, 0};
+    long long block_ids[2] = {-1, -1};
+    long long block_nums[2] = {0, 0};
+    long long thread_ids[2] = {-1, -1};
+    long long thread_nums[2] = {0, 0};
+    long long subthread_ids[2] = {-1, -1};
+    long long subthread_nums[2] = {0, 0};
 
-    if (npu_demo::launch<1, 4, 1, 0>(
+    if (npu_demo::launch<2, 1, 1, 0>(
             kernel_body,
             block_ids,
             block_nums,
@@ -166,17 +166,17 @@ int main() {
         return fail(1);
     }
 
-    for (long long i = 0; i < 4; ++i) {
-        if (block_ids[i] != 0) {
+    for (long long i = 0; i < 2; ++i) {
+        if (block_ids[i] != i) {
             return fail(2);
         }
-        if (block_nums[i] != 1) {
+        if (block_nums[i] != 2) {
             return fail(3);
         }
-        if (thread_ids[i] != i) {
+        if (thread_ids[i] != 0) {
             return fail(4);
         }
-        if (thread_nums[i] != 4) {
+        if (thread_nums[i] != 1) {
             return fail(5);
         }
         if (subthread_ids[i] != 0) {
@@ -204,28 +204,33 @@ def test_npu_demo_launch_accepts_context_free_callee_with_free_helpers() -> None
 
 static int fail(int code) { return code; }
 
-static void kernel_body(long long* thread_ids, long long* thread_nums, long long* after_barrier) {
-    const long long tid = npu_demo::thread_id();
-    thread_ids[tid] = tid;
-    thread_nums[tid] = npu_demo::thread_num();
+static void kernel_body(long long* block_ids, long long* thread_ids, long long* thread_nums, long long* after_barrier) {
+    const long long bid = npu_demo::block_id();
+    block_ids[bid] = bid;
+    thread_ids[bid] = npu_demo::thread_id();
+    thread_nums[bid] = npu_demo::thread_num();
     npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
-    after_barrier[tid] = npu_demo::thread_num();
+    after_barrier[bid] = npu_demo::thread_num();
 }
 
 int main() {
-    long long thread_ids[4] = {-1, -1, -1, -1};
-    long long thread_nums[4] = {0, 0, 0, 0};
-    long long after_barrier[4] = {0, 0, 0, 0};
+    long long block_ids[2] = {-1, -1};
+    long long thread_ids[2] = {-1, -1};
+    long long thread_nums[2] = {0, 0};
+    long long after_barrier[2] = {0, 0};
 
-    if (npu_demo::launch<1, 4, 1, 0>(kernel_body, thread_ids, thread_nums, after_barrier) != StatusCode::kOk) {
+    if (npu_demo::launch<2, 1, 1, 0>(kernel_body, block_ids, thread_ids, thread_nums, after_barrier) != StatusCode::kOk) {
         return fail(1);
     }
 
-    for (long long i = 0; i < 4; ++i) {
-        if (thread_ids[i] != i) {
+    for (long long i = 0; i < 2; ++i) {
+        if (block_ids[i] != i) {
             return fail(10 + static_cast<int>(i));
         }
-        if (thread_nums[i] != 4 || after_barrier[i] != 4) {
+        if (thread_ids[i] != 0) {
+            return fail(20 + static_cast<int>(i));
+        }
+        if (thread_nums[i] != 1 || after_barrier[i] != 1) {
             return fail(20 + static_cast<int>(i));
         }
     }
@@ -320,7 +325,7 @@ static void kernel_body(npu_demo::KernelContext& ctx, int* result_code) {
 
 int main() {
     int result_code = 99;
-    if (npu_demo::launch<1, 2, 1, 0>(kernel_body, &result_code) != StatusCode::kOk) {
+    if (npu_demo::launch<2, 1, 1, 0>(kernel_body, &result_code) != StatusCode::kOk) {
         return fail(11);
     }
     if (result_code != 0) {
@@ -349,20 +354,26 @@ static void noop(npu_demo::KernelContext& ctx) {
 }
 
 int main() {
-    if (npu_demo::launch<1, 2, 1, 0>(noop) != StatusCode::kOk) {
+    if (npu_demo::launch<2, 1, 1, 0>(noop) != StatusCode::kOk) {
         return fail(1);
+    }
+    if (npu_demo::launch<1, 1, 1, 0>(noop) != StatusCode::kOk) {
+        return fail(6);
+    }
+    if (npu_demo::launch<3, 1, 1, 0>(noop) != StatusCode::kError) {
+        return fail(7);
     }
     if (npu_demo::launch<2, 2, 1, 0>(noop) != StatusCode::kError) {
         return fail(2);
     }
-    if (npu_demo::launch<1, 1, 1, 0>(noop) != StatusCode::kError) {
-        return fail(3);
-    }
     if (npu_demo::launch<1, 9, 1, 0>(noop) != StatusCode::kError) {
         return fail(4);
     }
-    if (npu_demo::launch<1, 2, 2, 0>(noop) != StatusCode::kError) {
+    if (npu_demo::launch<2, 1, 2, 0>(noop) != StatusCode::kError) {
         return fail(5);
+    }
+    if (npu_demo::launch<2, 1, 1, 1>(noop) != StatusCode::kError) {
+        return fail(8);
     }
     return 0;
 }

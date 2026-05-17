@@ -258,6 +258,7 @@ def test_target_registry_loads_default_cpu_directory() -> None:
     assert target_registry.is_arch_op_supported("cpu", "arch.get_block_num") is True
     assert target_registry.get_target_hardware("cpu", "thread_num") == 1
     assert target_registry.is_arch_op_supported("npu_demo", "arch.launch") is True
+    assert target_registry.get_target_hardware("npu_demo", "block_num") == 2
     assert target_registry.get_target_hardware("npu_demo", "thread_num") == 1
 
 
@@ -408,7 +409,7 @@ def test_target_registry_npu_demo_template() -> None:
     assert target_registry.is_arch_op_supported("npu_demo", "arch.get_thread_num") is True
     assert target_registry.is_arch_op_supported("npu_demo", "arch.get_dynamic_memory") is True
 
-    assert target_registry.get_target_hardware("npu_demo", "block_num") == 1
+    assert target_registry.get_target_hardware("npu_demo", "block_num") == 2
     assert target_registry.get_target_hardware("npu_demo", "thread_num") == 1
     assert target_registry.get_target_hardware("npu_demo", "subthread_num") == 1
     assert target_registry.get_target_hardware("npu_demo", "sm_memory_size") == 0
@@ -441,7 +442,7 @@ def test_target_registry_npu_demo_supports_launch_and_barrier_caps() -> None:
     assert target_registry.is_arch_op_supported("npu_demo", "launch") is False
     assert target_registry.is_arch_op_supported("npu_demo", "barrier") is False
 
-    assert target_registry.get_target_hardware("npu_demo", "block_num") == 1
+    assert target_registry.get_target_hardware("npu_demo", "block_num") == 2
     assert target_registry.get_target_hardware("npu_demo", "thread_num") == 1
     assert target_registry.get_target_hardware("npu_demo", "subthread_num") == 1
     assert target_registry.get_target_hardware("npu_demo", "sm_memory_size") == 0

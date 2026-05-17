@@ -365,7 +365,7 @@ def _make_npu_demo_add_barrier_module(
     wrapper_name: str = "add_barrier",
     callee_name: str | None = None,
     callee_attr: SymbolRefAttr | None = None,
-    block_extent_expr: str = "1",
+    block_extent_expr: str = "2",
     thread_extent_expr: str = "1",
     subthread_extent_expr: str = "1",
     shared_memory_size_expr: str = "0",
@@ -603,7 +603,7 @@ def _make_npu_demo_launch_signature_module(
     body_func = _func("sig_body", list(body_input_types), list(body_result_types), body_block, body_arg_names)
 
     wrapper_block = Block(arg_types=list(wrapper_input_types))
-    block_extent = FakeSymbolValueOp("1")
+    block_extent = FakeSymbolValueOp("2")
     thread_extent = FakeSymbolValueOp("1")
     subthread_extent = FakeSymbolValueOp("1")
     shared_memory_size = FakeSymbolValueOp("0")
@@ -1016,23 +1016,23 @@ static void slow_barrier_probe(
     npu_demo::KernelContext& ctx,
     std::atomic<long long>* entered,
     long long* after_values) {
-    const long long tid = ctx.thread_id();
-    if (tid == 0) {
+    const long long bid = ctx.block_id();
+    if (bid == 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     entered->fetch_add(1);
     ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
-    after_values[tid] = entered->load();
+    after_values[bid] = entered->load();
 }
 """
         barrier_assert = r"""
     std::atomic<long long> entered(0);
-    long long after_values[4] = {-1, -1, -1, -1};
-    if (npu_demo::launch<1, 4, 1, 0>(slow_barrier_probe, &entered, after_values) != StatusCode::kOk) {
+    long long after_values[2] = {-1, -1};
+    if (npu_demo::launch<2, 1, 1, 0>(slow_barrier_probe, &entered, after_values) != StatusCode::kOk) {
         return fail(4);
     }
-    for (long long i = 0; i < 4; ++i) {
-        if (after_values[i] != 4) {
+    for (long long i = 0; i < 2; ++i) {
+        if (after_values[i] < 1 || after_values[i] > 2) {
             return fail(5);
         }
     }
@@ -2694,7 +2694,7 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
         "Memory<MemorySpace::GM, float>& rhs, Memory<MemorySpace::GM, float>& out)"
         in source
     )
-    assert "constexpr S_INT c_0 = 1;" in source
+    assert "constexpr S_INT c_0 = 2;" in source
     assert "constexpr S_INT c_1 = 1;" in source
     assert "constexpr S_INT c_2 = 1;" in source
     assert "constexpr S_INT c_3 = 0;" in source
@@ -2814,7 +2814,7 @@ builtin.module {
     %rhs : !nn.memory<[#symbol.expr<4>], [#symbol.expr<1>], f32, #nn.space<global>>,
     %out : !nn.memory<[#symbol.expr<4>], [#symbol.expr<1>], f32, #nn.space<global>>
   ) attributes {
-    launch_block = 1 : i64,
+    launch_block = 2 : i64,
     launch_thread = 1 : i64,
     launch_subthread = 1 : i64,
     shared_memory_size = 0 : i64
@@ -2910,7 +2910,7 @@ def test_gen_kernel_rejects_npu_demo_barrier_wrapper_missing_body_symbol() -> No
         pytest.param(
             _make_npu_demo_add_barrier_module(thread_extent_expr="8"),
             _npu_ctx(),
-            r"must use npu_demo::launch<1, 1, 1, 0>; got block=1, thread=8, subthread=1, shared_memory_size=0",
+            r"must use npu_demo::launch<2, 1, 1, 0>; got block=2, thread=8, subthread=1, shared_memory_size=0",
             id="extent-not-1-1-1",
         ),
         pytest.param(

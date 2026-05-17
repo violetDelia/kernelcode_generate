@@ -300,23 +300,23 @@ static void slow_barrier_probe(
     npu_demo::KernelContext& ctx,
     std::atomic<long long>* entered,
     long long* after_values) {
-    const long long tid = ctx.thread_id();
-    if (tid == 0) {
+    const long long bid = ctx.block_id();
+    if (bid == 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     entered->fetch_add(1);
     ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
-    after_values[tid] = entered->load();
+    after_values[bid] = entered->load();
 }
 """
         barrier_assert = r"""
     std::atomic<long long> entered(0);
-    long long after_values[4] = {-1, -1, -1, -1};
-    if (npu_demo::launch<1, 4, 1, 0>(slow_barrier_probe, &entered, after_values) != StatusCode::kOk) {
+    long long after_values[2] = {-1, -1};
+    if (npu_demo::launch<2, 1, 1, 0>(slow_barrier_probe, &entered, after_values) != StatusCode::kOk) {
         return fail(4);
     }
-    for (long long i = 0; i < 4; ++i) {
-        if (after_values[i] != 4) {
+    for (long long i = 0; i < 2; ++i) {
+        if (after_values[i] < 1 || after_values[i] > 2) {
             return fail(5);
         }
     }

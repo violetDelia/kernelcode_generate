@@ -18,6 +18,7 @@
 - `功能实现`：
   - [`kernel_gen/dsl/gen_kernel/emit/npu_demo/__init__.py`](../../../../kernel_gen/dsl/gen_kernel/emit/npu_demo/__init__.py)
   - [`kernel_gen/dsl/gen_kernel/emit/npu_demo/include.py`](../../../../kernel_gen/dsl/gen_kernel/emit/npu_demo/include.py)
+  - [`kernel_gen/dsl/gen_kernel/emit/npu_demo/control_flow.py`](../../../../kernel_gen/dsl/gen_kernel/emit/npu_demo/control_flow.py)
 - `test`：[`test/dsl/gen_kernel/emit/test_package.py`](../../../../test/dsl/gen_kernel/emit/test_package.py)
 
 ## 依赖
@@ -48,6 +49,7 @@
 - 不得再新增 `ops.py`、`values.py`、`core.py`、`function.py`、`module.py` 这类聚合多个 op 行为的 target 大文件。
 - 非公开 helper 必须使用 `_` 前缀，且不得跨文件直接调用。
 - target-specific memory dtype 文本输出只能复用 `spec/dsl/gen_kernel/emit/npu_demo/type/__init__.md` 中的公开 helper，不得在 arch/dma/kernel/nn/tuner 子目录重复定义同名 helper。
+- `scf.if` 仅作为 `arch-parallelize` 生成的 block0 guard 及同类单块控制流辅助进入 npu_demo emit；分支体必须通过公开 `emit_c_op(...)` 递归发射，不得再回到私有 wrapper 或第二套控制流拼接器。
 
 ## API详细说明
 
@@ -121,3 +123,4 @@
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-053 | 生成/编译 | emit c maps NN space to template param | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_emit_c_maps_nn_space_to_template_param`。 | 生成源码、IR 文本或编译结果体现“emit c maps NN space to template param”场景。 | `test_emit_c_maps_nn_space_to_template_param` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-054 | pass 改写 | emit c lowers npu demo slice deslice add pipeline | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo slice deslice add pipeline”场景。 | `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-055 | pass 改写 | emit c lowers npu demo tiled matmul pipeline | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tiled_matmul_pipeline`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo tiled matmul pipeline”场景。 | `test_emit_c_lowers_npu_demo_tiled_matmul_pipeline` |
+| TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-056 | pass 改写 | emit c lowers npu demo block0 guard scf if | 准备包含 `arch-parallelize` 生成的 block0 guard `scf.if` 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_block0_guard_scf_if`。 | `scf.if` 通过公开 emit registry 直译为 `if (...) { ... } else { ... }`，then/else 分支逐项递归发射。 | `test_emit_c_lowers_npu_demo_block0_guard_scf_if` |

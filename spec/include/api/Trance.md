@@ -265,7 +265,7 @@
   kernelcode::trance::print_func_begin(
       kernelcode::trance::current_sink(),
       "npu_demo::launch",
-      "template=<block=1, thread=2, subthread=1, shared_memory_size=0>");
+      "template=<block=2, thread=1, subthread=1, shared_memory_size=0>");
   ```
 - 功能说明：输出函数入口行。
 - 注意事项：输出格式固定为 `in func: <func_name> <template_desc>`；`template_desc` 必须与 `in func:` 在同一行。
@@ -339,7 +339,7 @@
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-INCLUDE-API-TRANCE-001 | 公开入口 | `TRANCE` 关闭时 no-op 公开函数可编译运行。 | 只 include `include/api/Trance.h`，不传 `-DTRANCE`。 | 运行 `test_api_trance_header_noop_without_macro`。 | 程序成功运行且 stdout 为空。 | `test_api_trance_header_noop_without_macro` |
-| TC-INCLUDE-API-TRANCE-002 | 执行结果 | `TRANCE` 开启时 stdout 输出 Memory forwarded 参数和 launch 模板信息。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE`，通过 `launch` 传入 `Memory<GM, float>` 与标量参数。 | 运行 `test_npu_demo_trance_stdout_memory_and_launch_format`。 | stdout 包含 `in func: npu_demo::launch template=<block=1, thread=2, subthread=1, shared_memory_size=0>`、`arg0 = callable[kernel_body]`、`arg1 = mem[...] [2, 3] [3, 1] f32 GM` 与 `arg2 = 7`。 | `test_npu_demo_trance_stdout_memory_and_launch_format` |
+| TC-INCLUDE-API-TRANCE-002 | 执行结果 | `TRANCE` 开启时 stdout 输出 Memory forwarded 参数和 launch 模板信息。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE`，通过 `launch` 传入 `Memory<GM, float>` 与标量参数。 | 运行 `test_npu_demo_trance_stdout_memory_and_launch_format`。 | stdout 包含 `in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>`、`arg0 = callable[kernel_body]`、`arg1 = mem[...] [2, 3] [3, 1] f32 GM` 与 `arg2 = 7`。 | `test_npu_demo_trance_stdout_memory_and_launch_format` |
 | TC-INCLUDE-API-TRANCE-003 | 边界/异常 | 文件 sink 打开失败后回退 stdout。 | 传 `-DTRANCE` 与不存在父目录的 `KG_TRANCE_FILE_PATH`。 | 运行 `test_npu_demo_trance_file_open_failure_falls_back_to_stdout`。 | stdout 包含 `log failed: <path>` 和后续输出行，目标文件不存在。 | `test_npu_demo_trance_file_open_failure_falls_back_to_stdout` |
 | TC-INCLUDE-API-TRANCE-004 | 公开入口 | include/api 公开头文件组合可直接 compile-only 消费。 | include `Core.h`、`Arch.h`、`Trance.h`、`Memory.h`、`Dma.h` 与 `Kernel.h`。 | 运行 `test_include_api_public_headers_compile_together`。 | C++ compile-only 成功，调用方可读取公开类型与 no-op sink。 | `test_include_api_public_headers_compile_together` |
 | TC-INCLUDE-API-TRANCE-005 | 公开入口 | `include/api/Trance.h` no-op runtime 边界可直接运行。 | 只 include `include/api/Trance.h`，不传 `-DTRANCE`。 | 运行 `test_include_api_trance_noop_public_runtime_boundary`。 | 程序成功运行且 stdout 为空。 | `test_include_api_trance_noop_public_runtime_boundary` |

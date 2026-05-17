@@ -422,7 +422,7 @@ def test_dsl_run_trance_stdout_logs_entry_and_runtime_args(capfd: pytest.Capture
     set_trance_enabled(True)
     result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
     captured = capfd.readouterr()
-    entry_name = result.func_op.sym_name.data
+    entry_name = result.compiled_kernel.function
 
     assert result.execute_result.ok is True
     assert f"in func: {entry_name} template=<none>" in captured.out
@@ -444,7 +444,7 @@ def test_dsl_run_trance_dump_dir_writes_and_overwrites_trace_file(tmp_path: Path
     set_dump_dir(tmp_path)
     set_trance_enabled(True)
     result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
-    trace_path = tmp_path / "add_kernel" / f"{result.func_op.sym_name.data}_trace.txt"
+    trace_path = tmp_path / "add_kernel" / f"{result.compiled_kernel.function}_trace.txt"
     trace_text = trace_path.read_text(encoding="utf-8")
 
     trace_path.write_text("stale\n", encoding="utf-8")
@@ -747,6 +747,8 @@ def test_dsl_run_supports_tiled_matmul_kernel_on_npu_demo() -> None:
     assert "kernel.matmul" in lowered_text
     assert "nn.matmul" not in lowered_text
     assert result.source.startswith('#include "include/npu_demo/npu_demo.h"\n')
+    assert result.compiled_kernel.function == "matmul_out_kernel"
+    assert result.func_op.sym_name.data == "matmul_out_kernel_device"
     assert "matmul<" in result.source
     assert "cpu::matmul(" not in result.source
     assert result.source.count("for (") >= 2

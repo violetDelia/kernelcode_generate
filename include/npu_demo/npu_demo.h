@@ -8,6 +8,7 @@ API 列表:
 - `namespace npu_demo`
 - `template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args> Status npu_demo::launch(Callable&& callee, Args&&... args)`
 - `class npu_demo::KernelContext`
+- `npu_demo::block_id() -> S_INT`
 - `npu_demo::thread_id() -> S_INT`
 - `npu_demo::thread_num() -> S_INT`
 - `npu_demo::barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) -> void`
@@ -27,7 +28,7 @@ helper 清单:
 
 使用示例:
 - #include "include/npu_demo/npu_demo.h"
-- Status status = npu_demo::launch<1, 4, 1, 0>(kernel_body, output);
+- Status status = npu_demo::launch<2, 1, 1, 0>(kernel_body, output);
 
 
 关联文件:

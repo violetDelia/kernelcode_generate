@@ -22,9 +22,9 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects import func
+from xdsl.dialects import func, scf
 from xdsl.dialects.builtin import ArrayAttr, Float32Type, IntAttr, IntegerAttr, ModuleOp, StringAttr, i32
-from xdsl.ir import Attribute, Region, SSAValue
+from xdsl.ir import Attribute, Block, Region, SSAValue
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, result_def
 from xdsl.dialects.builtin import SymbolRefAttr
 from xdsl.printer import Printer
@@ -35,9 +35,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchLaunchOp
+from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetDynamicMemoryOp, ArchLaunchOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolForOp, SymbolIterType, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolForOp, SymbolIterType, SymbolNeOp, SymbolValueType
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
 from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
 
@@ -334,6 +334,66 @@ def _build_launch_kernel_module(
     return module
 
 
+def _build_block0_guard_launch_kernel_module() -> ModuleOp:
+    """构造含 block0 guard `scf.if` 的 cost pass 输入。
+
+    功能说明:
+    - 生成一个 wrapper 与一个 device function。
+    - device body 使用 `arch.get_block_id + symbol.ne + scf.if` 保护 `kernel.add`，模拟 `ArchParallelizePass` 对无 loop 函数生成的 block0 guard。
+
+    使用示例:
+    - module = _build_block0_guard_launch_kernel_module()
+
+    关联文件:
+    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
+    - test: [test/passes/tuning/test_launch_kernel_cost_func.py](test/passes/tuning/test_launch_kernel_cost_func.py)
+    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
+    """
+
+    memory_type = _make_memory_type()
+    arg_types = [memory_type, memory_type, memory_type]
+    wrapper_block = Block(arg_types=arg_types)
+    device_block = Block(arg_types=arg_types)
+
+    launch_block = SymbolConstOp(1)
+    launch_thread = SymbolConstOp(1)
+    launch_subthread = SymbolConstOp(1)
+    launch_shared_memory = SymbolConstOp(0)
+    launch_op = ArchLaunchOp(
+        "_device_kernel",
+        launch_block.result,
+        launch_thread.result,
+        launch_subthread.result,
+        launch_shared_memory.result,
+        tuple(wrapper_block.args),
+    )
+    wrapper_block.add_ops(
+        [launch_block, launch_thread, launch_subthread, launch_shared_memory, launch_op, func.ReturnOp()]
+    )
+
+    block_id = ArchGetBlockIdOp()
+    zero = SymbolConstOp(0)
+    is_not_block0 = SymbolNeOp(block_id.result, zero.result)
+    true_block = Block()
+    true_block.add_op(scf.YieldOp())
+    false_block = Block()
+    false_block.add_op(
+        KernelAddOp(
+            device_block.args[2],
+            device_block.args[0],
+            device_block.args[1],
+            space=NnMemorySpaceAttr(StringAttr("global")),
+        )
+    )
+    false_block.add_op(scf.YieldOp())
+    if_op = scf.IfOp(is_not_block0.result, [], [true_block], [false_block])
+    device_block.add_ops([block_id, zero, is_not_block0, if_op, func.ReturnOp()])
+
+    wrapper = func.FuncOp("wrapper", (arg_types, []), Region(wrapper_block))
+    device = func.FuncOp("_device_kernel", (arg_types, []), Region(device_block))
+    return ModuleOp([wrapper, device])
+
+
 # TC-LKCF-001
 # 功能说明: 锁定公开 pass 名称。
 # 使用示例: pytest -q test/passes/tuning/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_pass_registry_name
@@ -409,6 +469,27 @@ def test_launch_kernel_cost_func_builds_cost_function_for_vector1_kind() -> None
     assert 'op_name = "dma.reshape"' not in printed
     assert ' kind = "VECTOR1"' not in printed
     assert printed.count("tuner.cost") == 2
+
+
+# TC-LKCF-002C
+# 功能说明: 验证 block0 guard `scf.if` 内的有效分支能进入 cost 累计链。
+# 使用示例: pytest -q test/passes/tuning/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_inlines_single_branch_scf_if
+# 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
+# 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
+# 对应测试文件路径: test/passes/tuning/test_launch_kernel_cost_func.py
+def test_launch_kernel_cost_func_inlines_single_branch_scf_if() -> None:
+    module = _build_block0_guard_launch_kernel_module()
+
+    LaunchKernelCostFuncPass(cost_kind="VECTOR1").apply(Context(), module)
+    module.verify()
+
+    printed = _print_ir(module)
+    assert "@_cost_VECTOR1__device_kernel" in printed
+    assert 'op_name = "kernel.add"' in printed
+    cost_text = printed.split("@_cost_VECTOR1__device_kernel", maxsplit=1)[1]
+    assert "scf.if" not in cost_text
+    assert cost_text.count("tuner.cost") == 1
+    assert cost_text.count("symbol.add") == 1
 
 
 # TC-LKCF-002A

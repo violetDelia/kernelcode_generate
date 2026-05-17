@@ -280,7 +280,7 @@ hw.tlm3_memory_size=0
 name=npu_demo
 arch.supported_ops=arch.get_block_id,arch.get_block_num,arch.get_thread_id,arch.get_thread_num,arch.get_subthread_id,arch.get_subthread_num,arch.get_dynamic_memory,arch.barrier,arch.launch
 arch.unsupported_ops=arch.launch_kernel
-hw.block_num=1
+hw.block_num=2
 hw.thread_num=1
 hw.subthread_num=1
 hw.sm_memory_size=0
@@ -294,9 +294,9 @@ hw.tlm3_memory_size=1048576
 语义说明：
 
 - `npu_demo` 使用显式白名单；除上述 `arch.get_*` 查询、`arch.get_dynamic_memory`、`arch.barrier` 与 `arch.launch` 外，其他能力查询固定判定为未启用。
-- `arch.launch` / `arch.barrier` 是 `npu_demo` P0 真实并行 + 同步路径的正式能力键；旧名 `arch.launch_kernel` 不再进入 `npu_demo` 已启用能力矩阵。
+- `arch.launch` / `arch.barrier` 是 `npu_demo` block-only 真实并行 + 同步路径的正式能力键；旧名 `arch.launch_kernel` 不再进入 `npu_demo` 已启用能力矩阵。
 - `launch` 与 `barrier` 这类未带 `arch.` 前缀的字符串不属于 registry 的稳定输入域；若上层错误传入此类字符串，结果必须仍然收敛为未启用。
-- `block_num=1`、`thread_num=1`、`subthread_num=1` 表示 `npu_demo` P0 launch 能力上限：`block` 固定为 `1`、`subthread` 固定为 `1`、`thread` 固定为 `1`；这些字段不再直接表示 launched body 中当前可见的运行时 extent。
+- `block_num=2`、`thread_num=1`、`subthread_num=1` 表示 `npu_demo` block-only launch 能力上限：`block` 可取 `1..2`，`thread` 固定为 `1`，`subthread` 固定为 `1`；这些字段不再直接表示 launched body 中当前可见的运行时 extent。
 - `sm_memory_size=0` 与 `lm_memory_size=0` 表示 `npu_demo` 不提供 `SM/LM` 动态内存容量；`tsm_memory_size=2097152`、`tlm1_memory_size=524288`、`tlm2_memory_size=1048576`、`tlm3_memory_size=1048576` 为固定片上容量。
 - `npu_demo` 的标准注册入口是 `kernel_gen/target/targets/npu_demo.txt`；标准查询入口是 `is_arch_op_supported(...)`、`get_target_hardware(...)` 与 `get_current_target_hardware(...)`。
 
@@ -311,7 +311,7 @@ hw.tlm3_memory_size=1048576
 - 在无 launch 上下文时，`operation/arch` 查询数量类 helper（如 `get_thread_num`）可读取 `hardware` 作为能力上限或静态回退值；一旦进入 launched body，当前值必须由 runtime 上下文提供。
 - `operation/arch.get_dynamic_memory(space)` 可读取 `*_memory_size` 作为静态 shape；无值时回退动态 shape。
 - `dialect/arch` 在 verifier 阶段可根据“当前 target”校验 op 支持性。
-- 当 `target="npu_demo"` 时，`block_num=1`、`thread_num=1`、`subthread_num=1` 必须作为 P0 能力上限读取；`SM/LM` 动态内存容量固定为 `0`，`TSM/TLM1/TLM2/TLM3` 动态内存容量固定为 `2097152/524288/1048576/1048576`。
+- 当 `target="npu_demo"` 时，`block_num=2`、`thread_num=1`、`subthread_num=1` 必须作为 block-only 能力上限读取；`SM/LM` 动态内存容量固定为 `0`，`TSM/TLM1/TLM2/TLM3` 动态内存容量固定为 `2097152/524288/1048576/1048576`。
 - 当 `target="npu_demo"` 时，`arch.launch` 与 `arch.barrier` 通过 `is_arch_op_supported(...)` 查询必须返回已启用；旧名 `arch.launch_kernel` 必须保持未启用。
 
 ### CPU TXT 示例

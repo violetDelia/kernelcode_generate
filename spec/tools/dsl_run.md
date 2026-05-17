@@ -105,6 +105,7 @@
   - `core.config.target` 决定源码生成与执行目标，不做跨 target 自动猜测。
   - `target == "npu_demo"` 时，lowered module 必须包含且仅包含一个带 `arch.launch` 的 wrapper func；否则必须显式失败。
   - `target == "npu_demo"` 且存在唯一 wrapper 时，该 wrapper 指向的 body func 必须在 lowered module 内可达；缺失时必须显式失败。
+  - `target == "npu_demo"` 且存在唯一 wrapper 时，执行引擎必须编译执行该 wrapper，确保 `npu_demo::launch` 建立 block/thread runtime context；`DslRunResult.func_op` 仍指向 wrapper callee body func，供调用方检查真实 lowered kernel body IR。
   - pipeline lowering 的返回值必须是 `builtin.module`。
   - lowering 后若入口函数不满足当前 target 的公开 `gen_kernel(...)` 合同，`dsl_run(...)` 直接透传对应公开错误，不额外包装。
   - lowering 后残留的透明 `builtin.unrealized_conversion_cast` 允许由工具层源码生成自动吞掉。

@@ -6,6 +6,7 @@
 - 汇总 `dma.alloc/dma.free` 的生命周期区间与 peak 统计。
 - 显式 `rewrite=True` 时，将可由 dynamic backing 承接的片上 `dma.alloc`
   改写为 `arch.get_dynamic_memory + dma.view + dma.reshape`；`global` alloc 保留为 summary-only。
+- 支持 `ArchParallelizePass` 生成的 block0 guard 形态，在单块 `scf.if` then/else region 内继续收集并改写 alloc/free。
 
 API 列表:
 - `class MemoryPoolPass(rewrite: bool = False, fold: bool = True, alignment: int = 1024)`
@@ -795,7 +796,7 @@ def _visit_ops_with_loops(
 
     功能说明:
     - 作为 `_collect_ops_with_loops(...)` 的当前文件私有递归 helper。
-    - 接受 `symbol.for` 与 `scf.for`，其余 region 直接拒绝。
+    - 接受 `symbol.for`、`scf.for` 与单块 `scf.if` then/else region，其余 region 直接拒绝。
 
     使用示例:
     - index = _visit_ops_with_loops(list(block.ops), None, ops, loop_bounds, op_loop, 0)
@@ -831,6 +832,24 @@ def _visit_ops_with_loops(
             )
             loop_end = index - 1
             loop_bounds[op] = (loop_start, loop_end)
+            continue
+        if isinstance(op, scf.IfOp):
+            for region in op.regions:
+                blocks = list(region.blocks)
+                if len(blocks) != 1:
+                    raise KernelCodeError(
+                        ErrorKind.CONTRACT,
+                        ErrorModule.PASS,
+                        "MemoryPoolUnsupportedRegionEscape: scf.if region must have single block",
+                    )
+                index = _visit_ops_with_loops(
+                    list(blocks[0].ops),
+                    current_loop,
+                    ops,
+                    loop_bounds,
+                    op_loop,
+                    index,
+                )
             continue
         raise KernelCodeError(
             ErrorKind.CONTRACT,
@@ -2029,7 +2048,7 @@ def _metadata_group_block(info: _AllocInfo, op_loop: dict[Operation, LoopOp | No
 
 
     功能说明:
-    - `symbol.for` 内 alloc 的 shape/offset metadata 留在 loop 内。
+    - `symbol.for` 或 `scf.if` branch 内 alloc 的 shape/offset metadata 留在 alloc 所在 block。
     - `scf.for` 内 alloc 的 loop-invariant metadata 留在函数入口 block。
 
     使用示例:
@@ -2051,6 +2070,9 @@ def _metadata_group_block(info: _AllocInfo, op_loop: dict[Operation, LoopOp | No
                 "MemoryPoolLifetimeError: alloc parent block not found",
             )
         return block
+    parent_block = _parent_block(info.alloc_op)
+    if parent_block is not None and parent_block is not func_block and loop is None:
+        return parent_block
     return func_block
 
 

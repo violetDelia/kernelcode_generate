@@ -29,12 +29,15 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
+from xdsl.parser import Parser
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.context import build_default_context
 from kernel_gen.core.config import reset_config, set_dump_dir, set_target
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
 from kernel_gen.dsl.ast.mlir_gen import mlir_gen
 from kernel_gen.operation.dma import deslice, slice
@@ -54,6 +57,7 @@ CommonSubexpressionElimination = importlib.import_module(
     "xdsl.transforms.common_subexpression_elimination"
 ).CommonSubexpressionElimination
 AttachArchInformationPass = importlib.import_module("kernel_gen.passes.attach_arch_information").AttachArchInformationPass
+ArchParallelizePass = importlib.import_module("kernel_gen.passes.arch_parallelize").ArchParallelizePass
 DecompassPass = importlib.import_module("kernel_gen.passes.decompass").DecompassPass
 LowerDmaMemoryHierarchyPass = importlib.import_module("kernel_gen.passes.dma_memory_hierarchy").LowerDmaMemoryHierarchyPass
 MemoryPlanPass = importlib.import_module("kernel_gen.passes.memory_plan").MemoryPlanPass
@@ -219,6 +223,21 @@ def _record_memory_plan(self, ctx: Context, target: ModuleOp) -> None:
     _PIPELINE_PASS_ORDER.append(f"memory-plan:{self.insert_free}:{self.fold}")
 
 
+def _record_arch_parallelize(self, ctx: Context, target: ModuleOp) -> None:
+    """记录 arch-parallelize pass 执行。
+
+    功能说明:
+    - 为 pipeline 顺序测试记录默认 npu-demo-lowering 直接接入的公开 `ArchParallelizePass` 参数。
+
+    使用示例:
+    - monkeypatch.setattr(ArchParallelizePass, "apply", _record_arch_parallelize)
+    """
+
+    _ = ctx
+    _ = target
+    _PIPELINE_PASS_ORDER.append(f"arch-parallelize:{self.target}:{self.parallel_level}")
+
+
 def _record_memory_pool(self, ctx: Context, target: ModuleOp) -> None:
     """记录 memory-pool pass 执行。
 
@@ -286,6 +305,21 @@ def _record_template_name(self, ctx: Context, target: ModuleOp) -> None:
     _PIPELINE_PASS_ORDER.append("template-name-infer")
 
 
+def _noop_pass_apply(self, ctx: Context, target: ModuleOp) -> None:
+    """跳过非目标 pass，隔离验证默认 pipeline 的 arch 安全阶段。
+
+    功能说明:
+    - 为 pipeline 行为测试保留公开 `Pass.apply(...)` 调用形态，同时避免无关 pass 改写测试输入。
+
+    使用示例:
+    - monkeypatch.setattr(InlinePass, "apply", _noop_pass_apply)
+    """
+
+    _ = self
+    _ = ctx
+    _ = target
+
+
 def matmul_kernel(lhs: Memory, rhs: Memory, out: Memory, TILE_M: SymbolDim, TILE_N: SymbolDim) -> None:
     """构造 npu_demo lowering 集成测试用 matmul kernel。
 
@@ -339,6 +373,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(NnLoweringPass, "apply", _record_lower)
     monkeypatch.setattr(SymbolLoopHoistPass, "apply", _record_symbol_loop_hoist)
     monkeypatch.setattr(MemoryPlanPass, "apply", _record_memory_plan)
+    monkeypatch.setattr(ArchParallelizePass, "apply", _record_arch_parallelize)
     monkeypatch.setattr(TileAnalysisPass, "apply", _record_tile_analysis)
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "apply", _record_lower_dma_memory_hierarchy)
     monkeypatch.setattr(SymbolBufferHoistPass, "apply", _record_symbol_buffer_hoist)
@@ -358,6 +393,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "symbol-loop-hoist",
         "cse",
         "memory-plan:True:False",
+        "arch-parallelize:npu_demo:block",
         "symbol-buffer-hoist",
         "tile-analysis",
         'lower-dma-memory-hierarchy:True:matmul{["", "tlm1", "tlm2"]}',
@@ -375,13 +411,107 @@ def test_npu_demo_lowering_pipeline_rejects_unknown_option() -> None:
         build_npu_demo_lowering_pipeline({"only-kernel": "true"})
 
 
+def test_npu_demo_lowering_pipeline_arch_parallelize_propagates_unsupported_structure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证默认 pipeline 直接使用公开 arch-parallelize 失败合同。
+
+    功能说明:
+    - 通过公开 pipeline builder 运行含多个顶层 `symbol.for` 的 module。
+    - 其它 pass 用公开 `apply(...)` 调用形态替换为空操作，只隔离观察默认 pipeline 中的公开 arch 阶段。
+
+    使用示例:
+    - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k propagates_unsupported_structure
+    """
+
+    module_text = """builtin.module {
+  func.func @unsupported_loops() {
+    %0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %1 = symbol.const 8 : !symbol.int<#symbol.expr<8>>
+    %2 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    symbol.for %i = %0 to %1 step %2 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<8>, step = #symbol.expr<1>>} {
+    }
+    symbol.for %j = %0 to %1 step %2 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<8>, step = #symbol.expr<1>>} {
+    }
+    func.return
+  }
+}
+"""
+    module = Parser(build_default_context(), module_text).parse_module()
+    monkeypatch.setattr(InlinePass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(CommonSubexpressionElimination, "apply", _noop_pass_apply)
+    monkeypatch.setattr(DecompassPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(NnLoweringPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(SymbolLoopHoistPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(MemoryPlanPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(TileAnalysisPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(SymbolBufferHoistPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(MemoryPoolPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(AttachArchInformationPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(OutlineDeviceKernelPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(TemplateNameInferPass, "apply", _noop_pass_apply)
+
+    pipeline = build_npu_demo_lowering_pipeline({"target": "npu_demo"})
+    with pytest.raises(KernelCodeError, match=r"multiple top-level symbol\.for loops are not supported"):
+        pipeline.run(module)
+
+
+def test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_block0_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证默认 pipeline 的公开 arch-parallelize 对无 `symbol.for` 直线函数生成 block0 guard。
+
+    功能说明:
+    - 通过公开 pipeline builder 运行只含直线 `func.return` 的 module。
+    - 其它 pass 用公开 `apply(...)` 调用形态替换为空操作，确保只观察公开 arch 阶段。
+
+    使用示例:
+    - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k wraps_no_loop_body_with_block0_guard
+    """
+
+    _PIPELINE_PASS_ORDER.clear()
+    module_text = """builtin.module {
+  func.func private @callee()
+  func.func @linear_kernel() {
+    func.call @callee() : () -> ()
+    func.return
+  }
+}
+"""
+    module = Parser(build_default_context(), module_text).parse_module()
+    monkeypatch.setattr(InlinePass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(CommonSubexpressionElimination, "apply", _noop_pass_apply)
+    monkeypatch.setattr(DecompassPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(NnLoweringPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(SymbolLoopHoistPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(MemoryPlanPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(TileAnalysisPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(SymbolBufferHoistPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(MemoryPoolPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(AttachArchInformationPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(OutlineDeviceKernelPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(TemplateNameInferPass, "apply", _noop_pass_apply)
+
+    pipeline = build_npu_demo_lowering_pipeline({"target": "npu_demo"})
+    assert pipeline.run(module) is module
+
+    lowered_text = str(module)
+    assert "func.func @linear_kernel" in lowered_text
+    assert "arch.get_block_id" in lowered_text
+    assert "scf.if" in lowered_text
+    assert "func.call @callee" in lowered_text
+
+
 def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tmp_path: Path) -> None:
     """验证 npu-demo-lowering 真实中间态包含 memory-plan 生命周期与 memory-pool 改写。
 
 
     功能说明:
     - 通过公开 `set_dump_dir(...)` 与公开 pipeline builder 观察 pass dump。
-    - 锁定 `08-memory-plan` 插入 `dma.free`、`09-symbol-buffer-hoist` 执行、`12-memory-pool`
+    - 锁定 `08-memory-plan` 插入 `dma.free`、`09-arch-parallelize` 插入 block 分片、
+      `10-symbol-buffer-hoist` 执行、`13-memory-pool`
       消除 `dma.alloc/dma.free` 并生成 dynamic backing memory 的真实顺序。
 
     使用示例:
@@ -403,10 +533,14 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
         reset_config()
 
     memory_plan_text = (tmp_path / "08-memory-plan.mlir").read_text(encoding="utf-8")
-    buffer_hoist_text = (tmp_path / "09-symbol-buffer-hoist.mlir").read_text(encoding="utf-8")
-    memory_pool_text = (tmp_path / "12-memory-pool.mlir").read_text(encoding="utf-8")
+    arch_parallelize_text = (tmp_path / "09-arch-parallelize.mlir").read_text(encoding="utf-8")
+    buffer_hoist_text = (tmp_path / "10-symbol-buffer-hoist.mlir").read_text(encoding="utf-8")
+    memory_pool_text = (tmp_path / "13-memory-pool.mlir").read_text(encoding="utf-8")
     assert memory_plan_text.startswith("memory-plan\n")
     assert "dma.free" in memory_plan_text
+    assert arch_parallelize_text.startswith("arch-parallelize\n")
+    assert "arch.get_block_id" in arch_parallelize_text
+    assert "symbol.const 2" in arch_parallelize_text
     assert buffer_hoist_text.startswith("symbol-buffer-hoist\n")
     assert "symbol.for" in buffer_hoist_text
     assert memory_pool_text.startswith("memory-pool\n")

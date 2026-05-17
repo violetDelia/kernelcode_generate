@@ -144,7 +144,7 @@ def test_attach_arch_information_writes_registry_launch_extents() -> None:
     result = module
 
     assert result is module
-    assert func_op.attributes["launch_block"] == IntAttr(1)
+    assert func_op.attributes["launch_block"] == IntAttr(2)
     assert func_op.attributes["launch_thread"] == IntAttr(1)
     assert func_op.attributes["launch_subthread"] == IntAttr(1)
     assert func_op.attributes["shared_memory_size"] == IntAttr(0)
@@ -252,14 +252,14 @@ def test_attach_arch_information_rejects_target_registry_boundaries() -> None:
 def test_attach_arch_information_accepts_existing_int_like_attrs() -> None:
     module = _make_empty_func_module()
     func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
-    func_op.attributes["launch_block"] = StringAttr("1")
+    func_op.attributes["launch_block"] = StringAttr("2")
     func_op.attributes["launch_thread"] = StringAttr("1")
     func_op.attributes["launch_subthread"] = StringAttr("1")
     func_op.attributes["shared_memory_size"] = StringAttr("0")
 
     AttachArchInformationPass(target="npu_demo").apply(Context(), module)
 
-    assert func_op.attributes["launch_block"] == StringAttr("1")
+    assert func_op.attributes["launch_block"] == StringAttr("2")
     assert func_op.attributes["launch_thread"] == StringAttr("1")
     assert func_op.attributes["launch_subthread"] == StringAttr("1")
     assert func_op.attributes["shared_memory_size"] == StringAttr("0")

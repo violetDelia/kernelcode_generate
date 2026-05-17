@@ -767,7 +767,8 @@ def _select_source_and_entry(module: ModuleOp, emit_context: EmitCContext) -> tu
     功能说明:
     - 单函数 module 时，直接按该函数生成源码并以该函数名作为执行入口。
     - `npu_demo` 的 wrapper module 若存在唯一带 `arch.launch` 的 wrapper，则按 module 级别生成源码，
-      但返回 wrapper 所指向的 body func 作为 `DslRunResult.func_op` 与执行入口，确保结果对象和真实 lowering IR 对齐。
+      使用 wrapper 作为真实执行入口，并返回 wrapper 所指向的 body func 作为 `DslRunResult.func_op`
+      供调用方观察真实 lowered kernel body。
     - `npu_demo` 若 wrapper 候选不存在或不唯一，则显式失败，不退回到首个普通 `func.func`。
     - 其余 target 退回到首个 `func.func` 的源码生成入口，保证常见单函数和 expectation 场景稳定可执行。
 
@@ -793,7 +794,7 @@ def _select_source_and_entry(module: ModuleOp, emit_context: EmitCContext) -> tu
         wrapper_func = wrapper_candidates[0]
         wrapper_launch = next(item for item in wrapper_func.body.block.ops if item.name == "arch.launch")
         body_func = _find_func_by_sym_name(module, wrapper_launch.callee.root_reference.data)
-        return gen_kernel(module, emit_context), body_func.sym_name.data, body_func
+        return gen_kernel(module, emit_context), wrapper_func.sym_name.data, body_func
     try:
         return gen_kernel(root_func, emit_context), root_func.sym_name.data, root_func
     except Exception:

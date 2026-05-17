@@ -4,8 +4,8 @@
 功能说明:
 - 定义 `symbol-buffer-hoist` 的公开 pass、公开 pattern 与公开 pattern getter。
 - 只在 `symbol.for` 单 block 循环体内识别 `dma.alloc`，并在 shape 明确不依赖 loop 内 SSA、
-  且直接 use 仅属于输入 staging / output scratch 两类安全形态时，将其外提到所属
-  `symbol.for` 之前。
+  直接 use 仅属于输入 staging / output scratch 两类安全形态，且存在唯一匹配 `dma.free`
+  时，将其外提到所属 `symbol.for` 之前。
 - 当同一 `symbol.for` 直接 body 内存在唯一匹配 `dma.free` 且该 free 晚于所有 data use 时，
   外提 `dma.alloc` 的同时把对应 `dma.free` 移到同一 `symbol.for` 之后。
 - 失败边界统一复用 `KernelCodeError(module="pass")`；不新增专题专属错误类型，也不承诺额外 compat path。
@@ -63,7 +63,7 @@ class _HoistUsePlan:
 
     功能说明:
     - `data_uses` 保存同一 loop body 内的 `dma.slice target` / `dma.deslice source` use。
-    - `free_op` 为空表示无生命周期 free；非空时表示可随 alloc 成对外提的唯一 `dma.free`。
+    - `free_op` 表示可随 alloc 成对外提的唯一 `dma.free`。
 
     使用示例:
     - plan = _HoistUsePlan(data_uses=(slice_use,), free_op=free_op)
@@ -242,7 +242,7 @@ def _build_hoist_use_plan(uses: Iterable[Use], loop_block: Block) -> _HoistUsePl
     功能说明:
     - 当前公开语义要求 alloc 至少存在一个 data use。
     - data use 必须是同一 loop body 内的 `dma.slice target` 或 `dma.deslice source`。
-    - lifecycle use 只允许同一 loop body 内唯一 `dma.free`，且必须晚于所有 data use。
+    - lifecycle use 必须存在同一 loop body 内唯一 `dma.free`，且必须晚于所有 data use。
     - 多个 free、nested free、跨 loop free 或未知 direct use 均保持 no-op。
 
     使用示例:
@@ -272,11 +272,11 @@ def _build_hoist_use_plan(uses: Iterable[Use], loop_block: Block) -> _HoistUsePl
             continue
         return None
 
-    if not data_uses or len(free_ops) > 1:
+    if not data_uses or len(free_ops) != 1:
         return None
-    free_op = free_ops[0] if free_ops else None
+    free_op = free_ops[0]
     data_use_tuple = tuple(data_uses)
-    if free_op is not None and not _free_follows_data_uses(free_op, data_use_tuple, loop_block):
+    if not _free_follows_data_uses(free_op, data_use_tuple, loop_block):
         return None
     return _HoistUsePlan(data_uses=data_use_tuple, free_op=free_op)
 
@@ -287,7 +287,7 @@ class DmaAllocInSymbolForHoistPattern(RewritePattern):
 
     功能说明:
     - 只匹配当前 `symbol.for` body block 顶层的 `dma.alloc`。
-    - 满足 shape invariant 与 direct use 白名单时，把 alloc 外提到所属 `symbol.for` 之前。
+    - 满足 shape invariant、direct use 白名单与唯一匹配 free 时，把 alloc 外提到所属 `symbol.for` 之前。
     - 若存在合法匹配 free，同步把 free 移到所属 `symbol.for` 之后，保持生命周期成对外提。
 
     使用示例:
