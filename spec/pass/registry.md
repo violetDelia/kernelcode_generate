@@ -64,7 +64,7 @@
 - 除 pass 通用 `fold` 选项外，注册表不解析其它 `options` 语义；其它 pass options 继续交给 pass / pipeline 构造入口。
 - 内置 pipeline 模块放在 `kernel_gen/passes/pipeline`；`load_builtin_passes()` 负责导入这些模块以触发注册。
 - 当前内置 pipeline 至少包含 `default-lowering` 与 `npu-demo-lowering` 两个公开 builder。
-- `npu-demo-lowering` 公开 builder 支持 `options={"target": "npu_demo"}`；`only-kernel` / `only_kernel` 之类选项必须显式失败，不能把 host wrapper 与 device body 的 outline 流程裁成仅 kernel 形态。
+- `npu-demo-lowering` 公开 builder 支持 `options={"target": "npu_demo"}`；其固定顺序由 `spec/pass/pipeline/npu_demo_lowering.md` 约束，并包含 `MemoryPlanPass(insert_free=True, fold=False)` 与两次 `SymbolBufferHoistPass`；`only-kernel` / `only_kernel` 之类选项必须显式失败，不能把 host wrapper 与 device body 的 outline 流程裁成仅 kernel 形态。
 - registry 只负责注册与查询，不承载具体 pipeline builder 实现。
 - 重复注册同名 pass 或 pipeline 必须立即失败，不得覆盖旧项。
 - 为便于工具与测试编写最小用例，仓库内置 pass 至少应包含：
@@ -72,7 +72,7 @@
   - `inline`：module 内 helper 展平 pass，供 `npu-demo-lowering` 前置收口。
   - `attach-arch-information`：把 target registry 的 launch extent 写回入口 `func.func`。
   - `arch-parallelize`：standalone IR pass，按 target registry 静态 `block_num` 把可分发顶层 `symbol.for` 改写为 block-strided loop，或对无 loop body 加 block0 guard。
-  - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前。
+  - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前；若存在唯一合法 `dma.free`，把 alloc/free 成对移动到 owner loop 两侧。
   - `memory-plan`：显式 `insert-free=true` 时为受控 `dma.alloc` 生命周期补插 `dma.free`。
   - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 pytest 与工具层统一解析。
   - `template-name-infer`：npu-demo lowering 末尾的非语义 template name 注解 pass。

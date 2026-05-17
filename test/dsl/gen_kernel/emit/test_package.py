@@ -1443,6 +1443,39 @@ def test_emit_c_lowers_npu_demo_dma_misc_helper_contracts() -> None:
     assert "Memory<GM, float> v0 = dst.reshape(Vector{3, 2} /*shape*/);" == reshape_stmt
 
 
+def test_emit_c_lowers_npu_demo_dma_free_alloc_result_with_concrete_dtype() -> None:
+    """验证 `dma.free` 对 `dma.alloc` 结果使用现有 Memory 数据指针释放。
+
+
+    功能说明:
+    - `dma.alloc` 本地变量按真实 element type 发射，即使 result type 携带 template name。
+    - `dma.free` 对 alloc result 直接生成 `delete[] value.data()`，避免新增 include 公开 helper。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k dma_free_alloc_result
+    """
+
+    alloc_type = NnMemoryType(
+        ArrayAttr([SymbolExprAttr.from_expr("6")]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
+        i32,
+        NnMemorySpaceAttr.from_name("global"),
+        template_name="T1",
+    )
+    shape = arith.ConstantOp(IntegerAttr(6, i32))
+    alloc = DmaAllocOp([shape.result], alloc_type)
+    ctx = _npu_ctx()
+
+    alloc_stmt = emit_c_op(alloc, ctx)
+    free_stmt = emit_c_op(DmaFreeOp(alloc.result), ctx)
+
+    assert alloc_stmt == (
+        "Memory<GM, int32_t> v0 = alloc<GM, int32_t>"
+        "({6} /*shape*/, {1} /*stride*/);"
+    )
+    assert free_stmt == "delete[] v0.data();"
+
+
 def test_emit_c_rejects_npu_demo_dma_copy_invalid_target_and_rank() -> None:
     """验证 npu_demo `dma.copy` 发射只接受 1..4 rank 的 nn.memory target。
 

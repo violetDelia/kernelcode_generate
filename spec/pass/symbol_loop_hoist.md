@@ -75,11 +75,10 @@
   - 外提后的 op 必须插入到所属 `symbol.for` 之前，且保持原 loop 体内能观察到的依赖顺序；未外提 op 在 loop 体内的相对顺序不得被该 pass 重新排序。
   - 当 module 不含 `symbol.for`，或某个 `symbol.for` 中不存在可外提候选时，pass 必须表现为 no-op。
 - 顺序边界：
-  - 当 pipeline 中存在 tile family 时，`symbol-loop-hoist` 必须位于 `tile-analysis` / `tile-elewise` / `tile-reduce` 之后，且位于 `lower-dma-memory-hierarchy` 之前。
-  - 违反上述顺序时，失败由 `PassManager` 以 `SymbolLoopHoistRequiresSymbolFor` 报告；`symbol_loop_hoist.py` 本身不承担调度诊断。
-  - 当 pipeline 中不存在 tile family 时，允许显式注册该 pass；此时它可以直接 no-op，不额外要求前置 tile pass。
+  - `symbol-loop-hoist` 本身只承担单 pass 公开语义，不根据上下游 pass 名称判断业务顺序。
+  - `PassManager` 只按调用方添加顺序执行，不为 tile、DMA hierarchy 或 backend pipeline 额外注入顺序失败。
+  - 具体 pipeline 的业务顺序由对应 builder 与 spec 固定；`npu-demo-lowering` 允许在 tile-analysis 前运行一次，并在 memory-pool 后再次运行一次以收敛新增 symbol 表达式。
 - 固定失败短语前缀仅允许使用：
-  - `SymbolLoopHoistRequiresSymbolFor`
   - `SymbolLoopHoistVerifierError`
 
 ### 失败类型
@@ -523,11 +522,6 @@ assert isinstance(patterns[0], SymbolConstHoistPattern)
 | TC-PASS-SYMBOL-LOOP-HOIST-008 | 边界/异常 | 校验失败包装为 `SymbolLoopHoistVerifierError`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `TC-SLH-007`。 | “校验失败包装为 `SymbolLoopHoistVerifierError`。”场景按公开错误语义失败或被拒绝。 | `TC-SLH-007` |
 | TC-PASS-SYMBOL-LOOP-HOIST-009 | pass 改写 | 依赖 loop-local 生产者的 get_dim/get_stride 与 symbol 算术保持原位。 | 准备循环体内本地生成的 memory/symbol 结果，并让白名单 op 依赖这些结果。 | 运行 `TC-SLH-002A`。 | 依赖 loop-local 生产者的候选不被外提，仍保留在所属 `symbol.for` body 内。 | `TC-SLH-002A` |
 | TC-PASS-SYMBOL-LOOP-HOIST-010 | pass 改写 | 依赖 loop-carried 值的 symbol 算术白名单保持原位。 | 准备带 loop-carried symbol 参数的 `symbol.for`，并让 add/sub/mul/div/floordiv 依赖该参数。 | 运行 `TC-SLH-002B`。 | 依赖 loop-carried 值的 symbol 算术 op 不被外提，仍保留在所属 `symbol.for` body 内。 | `TC-SLH-002B` |
-| TC-PASS-SYMBOL-LOOP-HOIST-012 | pass 改写 | 验证 `symbol-loop-hoist` 在缺少 tile family 时允许加入 pipeline 并可作为 no-op 执行。 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `pytest -q test/passes/test_pass_manager.py -k "symbol_loop_hoist or symbol-loop-hoist"`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“验证 `symbol-loop-hoist` 在缺少 tile family 时允许加入 pipeline 并可作为 no-op 执行。”场景。 | pytest -q test/passes/test_pass_manager.py -k "symbol_loop_hoist or symbol-loop-hoist" |
-| TC-PASS-SYMBOL-LOOP-HOIST-013 | 边界/异常 | 验证 `symbol-loop-hoist` 位于 tile family 之前、位于 `lower-dma-memory-hierarchy` 之后时会触发 `SymbolLoopHoistRequiresSymbolFor`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `pytest -q test/passes/test_pass_manager.py -k "symbol_loop_hoist or symbol-loop-hoist"`。 | “验证 `symbol-loop-hoist` 位于 tile family 之前、位于 `lower-dma-memory-hierarchy` 之后时会触发 `SymbolLoopHoistRequiresSymbolFor`。”场景按公开错误语义失败或被拒绝。 | pytest -q test/passes/test_pass_manager.py -k "symbol_loop_hoist or symbol-loop-hoist" |
-| TC-PASS-SYMBOL-LOOP-HOIST-014 | pass 改写 | 验证 `symbol-loop-hoist` 位于 `tile-reduce` 之后、`lower-dma-memory-hierarchy` 之前时顺序合法。 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `pytest -q test/passes/test_pass_manager.py -k "symbol_loop_hoist or symbol-loop-hoist"`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“验证 `symbol-loop-hoist` 位于 `tile-reduce` 之后、`lower-dma-memory-hierarchy` 之前时顺序合法。”场景。 | pytest -q test/passes/test_pass_manager.py -k "symbol_loop_hoist or symbol-loop-hoist" |
-| TC-PASS-SYMBOL-LOOP-HOIST-015 | 边界/异常 | 插在 `tile-analysis` 与 `tile-reduce` 之间时报错。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `TC-PASS-013B`。 | “插在 `tile-analysis` 与 `tile-reduce` 之间时报错。”场景按公开错误语义失败或被拒绝。 | `TC-PASS-013B` |
-| TC-PASS-SYMBOL-LOOP-HOIST-016 | pass 改写 | 缺少 tile family 时允许 no-op。 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `TC-PASS-015`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“缺少 tile family 时允许 no-op。”场景。 | `TC-PASS-015` |
-| TC-PASS-SYMBOL-LOOP-HOIST-017 | 边界/异常 | `TC-PASS-016` / `TC-PASS-016A`：位于 tile family 之前时报错。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `pytest -q test/passes/test_pass_manager.py -k "symbol_loop_hoist or symbol-loop-hoist"`。 | “`TC-PASS-016` / `TC-PASS-016A`：位于 tile family 之前时报错。”场景按公开错误语义失败或被拒绝。 | pytest -q test/passes/test_pass_manager.py -k "symbol_loop_hoist or symbol-loop-hoist" |
-| TC-PASS-SYMBOL-LOOP-HOIST-018 | 边界/异常 | 位于 `lower-dma-memory-hierarchy` 之后时报错。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `TC-PASS-017`。 | “位于 `lower-dma-memory-hierarchy` 之后时报错。”场景按公开错误语义失败或被拒绝。 | `TC-PASS-017` |
-| TC-PASS-SYMBOL-LOOP-HOIST-019 | pass 改写 | 位于 `tile-reduce` 之后且位于 `lower-dma-memory-hierarchy` 之前时顺序合法。 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `TC-PASS-017A`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“位于 `tile-reduce` 之后且位于 `lower-dma-memory-hierarchy` 之前时顺序合法。”场景。 | `TC-PASS-017A` |
+| TC-PASS-SYMBOL-LOOP-HOIST-012 | pass 改写 | 验证 `symbol-loop-hoist` 在缺少 tile pass 族时允许加入 pipeline 并可作为 no-op 执行。 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `pytest -q test/passes/test_pass_manager.py -k "business_order"`。 | `PassManager` 按调用方顺序执行，不因缺少 tile pass 族或业务顺序报错。 | pytest -q test/passes/test_pass_manager.py -k "business_order" |
+| TC-PASS-SYMBOL-LOOP-HOIST-013 | pass 改写 | 验证 `PassManager` 不执行 symbol-loop-hoist 业务顺序校验。 | 准备包含任意公开 `ModulePass` 顺序的 pass manager。 | 运行 `pytest -q test/passes/test_pass_manager.py -k "business_order"`。 | 管理器只保证添加顺序，不生成 symbol-loop-hoist 业务顺序失败。 | pytest -q test/passes/test_pass_manager.py -k "business_order" |
+| TC-PASS-SYMBOL-LOOP-HOIST-014 | pass 改写 | `npu-demo-lowering` 可在 tile-analysis 前运行一次并在 memory-pool 后再次运行一次。 | 使用公开 `build_npu_demo_lowering_pipeline(...)`。 | 运行 `pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k "pass_order"`。 | pipeline 顺序体现两次 `symbol-loop-hoist`，具体业务顺序由 pipeline builder 固定。 | pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k "pass_order" |

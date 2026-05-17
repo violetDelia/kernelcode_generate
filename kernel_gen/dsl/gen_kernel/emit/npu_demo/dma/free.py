@@ -18,23 +18,26 @@ API 列表:
 
 from __future__ import annotations
 
-from kernel_gen.dialect.dma import DmaFreeOp
+from xdsl.ir import SSAValue
+
+from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp
 from kernel_gen.dialect.nn import NnMemoryType
 
 from ...register import emit_c_impl
 
 
-def _memory_element_cpp_type(memory_type: NnMemoryType, ctx) -> str:
+def _memory_element_cpp_type(source: SSAValue, ctx) -> str:
     """返回当前文件发射 dma.free 所需的 C++ element type。
 
     功能说明:
-    - 优先使用 `NnMemoryType.template_name` 作为模板 dtype。
-    - 未携带 template name 时通过 `ctx.dispatch_type(...)` 发射真实 element type。
+    - 非 alloc memory 值优先使用 `NnMemoryType.template_name`，保持函数参数等模板 memory 的 C++ 类型一致。
+    - alloc memory 的释放在 `_emit_npu_demo_dma_free(...)` 中直接生成 `delete[] value.data()`，不经本 helper。
 
     使用示例:
-    - element_type = _memory_element_cpp_type(memory_type, ctx)
+    - element_type = _memory_element_cpp_type(op.source, ctx)
     """
 
+    memory_type = source.type
     memory_type.verify()
     template_name = memory_type.template_name.data
     if template_name:
@@ -57,6 +60,8 @@ def _emit_npu_demo_dma_free(op: DmaFreeOp, ctx) -> str:
     from ... import emit_c_value
 
     source_expr = emit_c_value(op.source, ctx)
+    if isinstance(op.source.owner, DmaAllocOp):
+        return f"{ctx.current_indent}delete[] {source_expr}.data();"
     space_expr = ctx.dispatch_attr(op.source.type)
-    source_type = _memory_element_cpp_type(op.source.type, ctx)
+    source_type = _memory_element_cpp_type(op.source, ctx)
     return f"{ctx.current_indent}free<{space_expr}, {source_type}>({source_expr} /*source*/);"

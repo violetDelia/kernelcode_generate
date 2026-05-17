@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects import func
+from xdsl.dialects import func, scf
 from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, i32
 from xdsl.ir import Block, Region, SSAValue
 from xdsl.passes import ModulePass
@@ -34,9 +34,17 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaSliceOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaDesliceOp, DmaFreeOp, DmaSliceOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolForOp, SymbolIterType, SymbolValueType, SymbolYieldOp
+from kernel_gen.dialect.symbol import (
+    SymbolConstOp,
+    SymbolEqOp,
+    SymbolExprAttr,
+    SymbolForOp,
+    SymbolIterType,
+    SymbolValueType,
+    SymbolYieldOp,
+)
 
 pass_module = importlib.import_module("kernel_gen.passes.symbol_buffer_hoist")
 package_module = importlib.import_module("kernel_gen.passes")
@@ -185,6 +193,275 @@ def _build_deslice_module() -> ModuleOp:
     return ModuleOp([func_op])
 
 
+def _build_slice_with_free_module() -> ModuleOp:
+    """构造输入 staging buffer 与匹配 free 的正例 module。
+
+
+    功能说明:
+    - loop 内 `dma.alloc` 先被 `dma.slice` 使用，再由同一 body 内唯一 `dma.free` 释放。
+    - 该形态应把 alloc 移到 loop 前，把 free 移到 loop 后。
+
+    使用示例:
+    - module = _build_slice_with_free_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    source_type = _memory_type((32, 64))
+    tile_type = _memory_type((8, 16))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    tm = _const_symbol(8)
+    tk = _const_symbol(16)
+    top_block = Block(arg_types=[source_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([tm.result, tk.result], tile_type)
+    slice_op = DmaSliceOp(
+        alloc.result,
+        top_block.args[0],
+        [zero.result, zero.result],
+        [tm.result, tk.result],
+        [one.result, one.result],
+    )
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([alloc, slice_op, free])
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, tm, tk, loop, func.ReturnOp()])
+    func_op = func.FuncOp("slice_free_case", FunctionType.from_lists([source_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_deslice_with_free_module() -> ModuleOp:
+    """构造 output scratch buffer 与匹配 free 的正例 module。
+
+
+    功能说明:
+    - loop 内 `dma.alloc` 作为 `dma.deslice` source 使用后再被 `dma.free` 释放。
+    - 该形态应把 alloc/free 成对移出 loop，保留 deslice 在 loop 内。
+
+    使用示例:
+    - module = _build_deslice_with_free_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    target_type = _memory_type((32, 64))
+    scratch_type = _memory_type((8, 16))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    tm = _const_symbol(8)
+    tn = _const_symbol(16)
+    top_block = Block(arg_types=[target_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([tm.result, tn.result], scratch_type)
+    deslice = DmaDesliceOp(
+        top_block.args[0],
+        alloc.result,
+        [zero.result, zero.result],
+        [tm.result, tn.result],
+        [one.result, one.result],
+        target_type,
+    )
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([alloc, deslice, free])
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, tm, tn, loop, func.ReturnOp()])
+    func_op = func.FuncOp("deslice_free_case", FunctionType.from_lists([target_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_slice_with_free_before_use_module() -> ModuleOp:
+    """构造 free 早于 data use 的反例 module。
+
+
+    功能说明:
+    - loop 内 `dma.free` 早于 `dma.slice`，`symbol-buffer-hoist` 必须保持 no-op。
+
+    使用示例:
+    - module = _build_slice_with_free_before_use_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    source_type = _memory_type((32, 64))
+    tile_type = _memory_type((8, 16))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    tm = _const_symbol(8)
+    tk = _const_symbol(16)
+    top_block = Block(arg_types=[source_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([tm.result, tk.result], tile_type)
+    free = DmaFreeOp(alloc.result)
+    slice_op = DmaSliceOp(
+        alloc.result,
+        top_block.args[0],
+        [zero.result, zero.result],
+        [tm.result, tk.result],
+        [one.result, one.result],
+    )
+    loop_block.add_ops([alloc, free, slice_op])
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, tm, tk, loop, func.ReturnOp()])
+    func_op = func.FuncOp("free_before_use_case", FunctionType.from_lists([source_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_slice_with_multiple_free_module() -> ModuleOp:
+    """构造多个 matching free 的反例 module。
+
+
+    功能说明:
+    - 同一 loop body 内出现两个 `dma.free` 时，pass 必须保持 no-op。
+
+    使用示例:
+    - module = _build_slice_with_multiple_free_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    module = _build_slice_with_free_module()
+    _top_block, _loop_op, loop_block = _get_blocks(module)
+    alloc = next(op for op in loop_block.ops if isinstance(op, DmaAllocOp))
+    loop_block.add_op(DmaFreeOp(alloc.result))
+    return module
+
+
+def _build_slice_with_nested_free_module() -> ModuleOp:
+    """构造 free 位于 nested `symbol.for` 内的反例 module。
+
+
+    功能说明:
+    - alloc 与 data use 在 owner loop body 内，但 matching free 位于 nested loop body。
+    - 该形态不是安全成对外提，pass 必须保持 no-op。
+
+    使用示例:
+    - module = _build_slice_with_nested_free_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    source_type = _memory_type((32, 64))
+    tile_type = _memory_type((8, 16))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    tm = _const_symbol(8)
+    tk = _const_symbol(16)
+    top_block = Block(arg_types=[source_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([tm.result, tk.result], tile_type)
+    slice_op = DmaSliceOp(
+        alloc.result,
+        top_block.args[0],
+        [zero.result, zero.result],
+        [tm.result, tk.result],
+        [one.result, one.result],
+    )
+    nested_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    nested_free = DmaFreeOp(alloc.result)
+    nested_block.add_op(nested_free)
+    nested_loop = SymbolForOp(zero.result, one.result, one.result, nested_block)
+    loop_block.add_ops([alloc, slice_op, nested_loop])
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, tm, tk, loop, func.ReturnOp()])
+    func_op = func.FuncOp("nested_free_case", FunctionType.from_lists([source_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_slice_with_free_not_in_owner_loop_body_module() -> ModuleOp:
+    """构造 matching free 不在 owner loop 直接 body 的反例 module。
+
+
+    功能说明:
+    - alloc 与 `dma.slice` data use 位于 owner loop 直接 body。
+    - matching `dma.free` 位于同一 owner loop 内的 `scf.if` sibling region block，pass 必须保持 no-op。
+
+    使用示例:
+    - module = _build_slice_with_free_not_in_owner_loop_body_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    source_type = _memory_type((32, 64))
+    tile_type = _memory_type((8, 16))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    tm = _const_symbol(8)
+    tk = _const_symbol(16)
+    top_block = Block(arg_types=[source_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([tm.result, tk.result], tile_type)
+    slice_op = DmaSliceOp(
+        alloc.result,
+        top_block.args[0],
+        [zero.result, zero.result],
+        [tm.result, tk.result],
+        [one.result, one.result],
+    )
+    condition = SymbolEqOp(zero.result, one.result)
+    free_block = Block()
+    free = DmaFreeOp(alloc.result)
+    free_block.add_ops([free, scf.YieldOp()])
+    sibling_free_branch = scf.IfOp(condition.result, [], Region(free_block), None)
+    loop_block.add_ops([alloc, slice_op, condition, sibling_free_branch])
+    owner_loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, tm, tk, owner_loop, func.ReturnOp()])
+    func_op = func.FuncOp("free_not_in_owner_loop_body_case", FunctionType.from_lists([source_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_unknown_direct_use_module() -> ModuleOp:
+    """构造未知 direct use 的反例 module。
+
+
+    功能说明:
+    - loop 内 alloc 被 `dma.broadcast` 直接使用，不属于 `dma.slice target` 或 `dma.deslice source`。
+    - pass 必须保持 no-op，避免把未承接副作用规则做宽。
+
+    使用示例:
+    - module = _build_unknown_direct_use_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    target_type = _memory_type((8, 16))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    tm = _const_symbol(8)
+    tk = _const_symbol(16)
+    scalar = _const_symbol(3)
+    top_block = Block()
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([tm.result, tk.result], target_type)
+    broadcast = DmaBroadcastOp(alloc.result, scalar.result)
+    loop_block.add_ops([alloc, broadcast])
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, tm, tk, scalar, loop, func.ReturnOp()])
+    func_op = func.FuncOp("unknown_direct_use_case", FunctionType.from_lists([], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
 def _build_loop_carried_shape_module() -> ModuleOp:
     """构造 shape 依赖 loop-carried 的反例 module。
 
@@ -311,6 +588,25 @@ def _get_blocks(module: ModuleOp) -> tuple[Block, SymbolForOp, Block]:
     return top_block, loop_op, loop_op.body.blocks[0]
 
 
+def _free_source_is(free: DmaFreeOp, value: SSAValue) -> bool:
+    """判断 `dma.free` 是否释放指定 SSA value。
+
+
+    功能说明:
+    - 使用公开 operand 读取与 SSA identity 比较辅助断言生命周期位置。
+
+    使用示例:
+    - assert _free_source_is(free, alloc.result)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    return SSAValue.get(free.source) is value
+
+
 # TC-SYMBOL-BUFFER-HOIST-001
 # 功能说明: 验证公开 pattern 类、公开 getter 与包根 SymbolBufferHoistPass 可达。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_public_patterns_are_reachable
@@ -387,6 +683,148 @@ def test_symbol_buffer_hoist_pass_hoists_output_scratch_alloc() -> None:
     assert not any(isinstance(op, DmaAllocOp) for op in loop_block.ops)
 
 
+# TC-SYMBOL-BUFFER-HOIST-004A
+# 功能说明: 验证 input staging buffer 与同 body 内 matching free 会成对外提。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_input_staging_alloc_and_matching_free
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_input_staging_alloc_and_matching_free() -> None:
+    module = _build_slice_with_free_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    slice_op = next(op for op in loop_block.ops if isinstance(op, DmaSliceOp))
+    loop_index = top_ops.index(loop_op)
+
+    assert top_ops.index(top_alloc) < loop_index
+    assert top_ops.index(top_free) > loop_index
+    assert _free_source_is(top_free, top_alloc.result)
+    assert slice_op.target is top_alloc.result
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in loop_block.ops)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004B
+# 功能说明: 验证 output scratch buffer 与同 body 内 matching free 会成对外提。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_output_scratch_alloc_and_matching_free
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_output_scratch_alloc_and_matching_free() -> None:
+    module = _build_deslice_with_free_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    deslice_op = next(op for op in loop_block.ops if isinstance(op, DmaDesliceOp))
+    loop_index = top_ops.index(loop_op)
+
+    assert top_ops.index(top_alloc) < loop_index
+    assert top_ops.index(top_free) > loop_index
+    assert _free_source_is(top_free, top_alloc.result)
+    assert deslice_op.source is top_alloc.result
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in loop_block.ops)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004C
+# 功能说明: 验证 matching free 早于 data use 时 alloc/free 保持在 loop 内。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_free_precedes_data_use
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_alloc_when_free_precedes_data_use() -> None:
+    module = _build_slice_with_free_before_use_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, _loop_op, loop_block = _get_blocks(module)
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in top_block.ops)
+    assert len([op for op in loop_block.ops if isinstance(op, DmaAllocOp)]) == 1
+    assert len([op for op in loop_block.ops if isinstance(op, DmaFreeOp)]) == 1
+
+
+# TC-SYMBOL-BUFFER-HOIST-004D
+# 功能说明: 验证多个 matching free 时 alloc/free 保持在 loop 内。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_multiple_free
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_alloc_when_multiple_free() -> None:
+    module = _build_slice_with_multiple_free_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, _loop_op, loop_block = _get_blocks(module)
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in top_block.ops)
+    assert len([op for op in loop_block.ops if isinstance(op, DmaAllocOp)]) == 1
+    assert len([op for op in loop_block.ops if isinstance(op, DmaFreeOp)]) == 2
+
+
+# TC-SYMBOL-BUFFER-HOIST-004E
+# 功能说明: 验证 matching free 位于 nested loop 时 alloc/free 不外提。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_free_is_nested
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_alloc_when_free_is_nested() -> None:
+    module = _build_slice_with_nested_free_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, _loop_op, loop_block = _get_blocks(module)
+    nested_loop = next(op for op in loop_block.ops if isinstance(op, SymbolForOp))
+    nested_block = nested_loop.body.blocks[0]
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in top_block.ops)
+    assert len([op for op in loop_block.ops if isinstance(op, DmaAllocOp)]) == 1
+    assert len([op for op in nested_block.ops if isinstance(op, DmaFreeOp)]) == 1
+
+
+# TC-SYMBOL-BUFFER-HOIST-004F
+# 功能说明: 验证 matching free 不在 owner loop 直接 body 时 alloc/free 不外提。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_free_not_in_owner_loop_body
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_alloc_when_free_not_in_owner_loop_body() -> None:
+    module = _build_slice_with_free_not_in_owner_loop_body_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, _loop_op, loop_block = _get_blocks(module)
+    free_branch = next(op for op in loop_block.ops if isinstance(op, scf.IfOp))
+    free_block = free_branch.true_region.block
+    alloc = next(op for op in loop_block.ops if isinstance(op, DmaAllocOp))
+    slice_op = next(op for op in loop_block.ops if isinstance(op, DmaSliceOp))
+    free = next(op for op in free_block.ops if isinstance(op, DmaFreeOp))
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in top_block.ops)
+    assert slice_op.target is alloc.result
+    assert not any(isinstance(op, DmaFreeOp) for op in loop_block.ops)
+    assert _free_source_is(free, alloc.result)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004G
+# 功能说明: 验证未知 direct use / alias escape 形态不被做宽外提。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_for_unknown_direct_use_or_alias_escape
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_alloc_for_unknown_direct_use_or_alias_escape() -> None:
+    module = _build_unknown_direct_use_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, _loop_op, loop_block = _get_blocks(module)
+    assert not any(isinstance(op, DmaAllocOp) for op in top_block.ops)
+    assert len([op for op in loop_block.ops if isinstance(op, DmaAllocOp)]) == 1
+
+
 # TC-SYMBOL-BUFFER-HOIST-005
 # 功能说明: 验证 shape 依赖 loop-carried 时 alloc 保持在 loop 内。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_loop_carried_shape_inside_loop
@@ -413,7 +851,7 @@ def test_symbol_buffer_hoist_keeps_loop_carried_shape_inside_loop() -> None:
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_rejects_non_module_input() -> None:
     with pytest.raises(KernelCodeError, match=r"^module must be builtin.module$"):
-        SymbolBufferHoistPass().apply(Context(), object())  # type: ignore[arg-type]
+        SymbolBufferHoistPass().apply(Context(), "not-module")  # type: ignore[arg-type]
 
 
 # TC-SYMBOL-BUFFER-HOIST-007

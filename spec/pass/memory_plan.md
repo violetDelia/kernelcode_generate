@@ -4,7 +4,7 @@
 
 - 定义 `memory-plan` pass 的公开合同。
 - 第一阶段只在显式 `insert-free=true` 时为受控 `dma.alloc` 结果补插 `dma.free`。
-- 本 pass 与 `memory-pool` 无关，不做 pool rewrite、alignment、backing memory 合并或默认 pipeline 接入。
+- 本 pass 与 `memory-pool` 的 rewrite 语义分离，不做 pool rewrite、alignment 或 backing memory 合并；`npu-demo-lowering` 仅以 `MemoryPlanPass(insert_free=True, fold=False)` 固定调用本 pass 补齐生命周期。
 
 ## API 列表
 
@@ -35,7 +35,7 @@
 
 ## 非目标
 
-- 不进入 `default-lowering` 或 `npu-demo-lowering`。
+- `default-lowering` 不接入本 pass；`npu-demo-lowering` 固定以 `insert_free=True, fold=False` 调用，不新增 memory-plan 专属 pipeline option。
 - 不处理完整 ownership indicator、retain、branch、region-branch、跨函数所有权或多块 CFG。
 - 不复用、调用或改变 `memory-pool` 的 summary / rewrite 语义。
 - 不管理函数参数、block 参数、`func.call` 返回 memory 或未知 memory-producing op 的 ownership。
