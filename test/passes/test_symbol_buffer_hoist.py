@@ -24,17 +24,27 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects import func, scf
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, i32
-from xdsl.ir import Block, Region, SSAValue
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, i8, i32
+from xdsl.ir import Attribute, Block, Region, SSAValue
 from xdsl.passes import ModulePass
-from xdsl.pattern_rewriter import GreedyRewritePatternApplier, PatternRewriteWalker
+from xdsl.pattern_rewriter import GreedyRewritePatternApplier, PatternRewriteWalker, RewritePattern
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaDesliceOp, DmaFreeOp, DmaSliceOp
+from kernel_gen.dialect.dma import (
+    DmaAllocOp,
+    DmaBroadcastOp,
+    DmaDesliceOp,
+    DmaFreeOp,
+    DmaReshapeOp,
+    DmaSliceOp,
+    DmaSubviewOp,
+    DmaViewOp,
+)
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolConstOp,
@@ -57,13 +67,13 @@ build_registered_pass = registry_module.build_registered_pass
 load_builtin_passes = registry_module.load_builtin_passes
 
 
-def _memory_type(shape: tuple[int | str, ...]) -> NnMemoryType:
+def _memory_type(shape: tuple[int | str, ...], *, element_type: Attribute = i32, space: str = "global") -> NnMemoryType:
     """构造测试用 `nn.memory` 类型。
 
 
     功能说明:
-    - 使用 `i32` 与 `global` space 构造紧致 stride memory 类型。
-    - shape 支持 `int` 与符号名字符串。
+    - 默认使用 `i32` 与 `global` space 构造紧致 stride memory 类型。
+    - shape 支持 `int` 与符号名字符串；alias op 用例可指定 element type 与 memory space。
 
     使用示例:
     - tile_type = _memory_type(("TM", "TN"))
@@ -88,8 +98,8 @@ def _memory_type(shape: tuple[int | str, ...]) -> NnMemoryType:
     return NnMemoryType(
         ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in shape]),
         ArrayAttr([SymbolExprAttr.from_expr(str(stride)) for stride in strides]),
-        i32,
-        NnMemorySpaceAttr.from_name("global"),
+        element_type,
+        NnMemorySpaceAttr.from_name(space),
     )
 
 
@@ -273,6 +283,184 @@ def _build_deslice_with_free_module() -> ModuleOp:
     loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
     top_block.add_ops([zero, one, tm, tn, loop, func.ReturnOp()])
     func_op = func.FuncOp("deslice_free_case", FunctionType.from_lists([target_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_view_with_free_module(*, loop_dependent_offset: bool = False) -> ModuleOp:
+    """构造 `dma.view` alias op 外提正反例 module。
+
+
+    功能说明:
+    - 默认形态中 alloc/free 成对外提后，loop-invariant `dma.view` 也应单独外提一层。
+    - `loop_dependent_offset=True` 时 view 的 offset 来自当前 loop iterator，view 必须保留在 loop 内。
+
+    使用示例:
+    - module = _build_view_with_free_module(loop_dependent_offset=True)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    target_type = _memory_type((16, 16))
+    tile_type = _memory_type((8, 8), space="shared")
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    tile = _const_symbol(8)
+    end = _const_symbol(16)
+    top_block = Block(arg_types=[target_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "16", "8")])
+    alloc = DmaAllocOp([], tile_type)
+    first_offset = loop_block.args[0] if loop_dependent_offset else zero.result
+    view = DmaViewOp(
+        alloc.result,
+        [first_offset, zero.result],
+        [tile.result, tile.result],
+        [one.result, one.result],
+        tile_type,
+    )
+    deslice = DmaDesliceOp(
+        top_block.args[0],
+        view.result,
+        [loop_block.args[0], zero.result],
+        [tile.result, tile.result],
+        [one.result, one.result],
+        target_type,
+    )
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([alloc, view, deslice, free])
+    loop = SymbolForOp(zero.result, end.result, tile.result, loop_block)
+    top_block.add_ops([zero, one, tile, end, loop, func.ReturnOp()])
+    func_op = func.FuncOp("view_free_case", FunctionType.from_lists([target_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_reshape_with_free_module(*, loop_dependent_shape: bool = False) -> ModuleOp:
+    """构造 `dma.reshape` alias op 外提正反例 module。
+
+
+    功能说明:
+    - 默认形态中 alloc/free 成对外提后，loop-invariant `dma.reshape` 也应单独外提一层。
+    - `loop_dependent_shape=True` 时 shape 来自当前 loop-carried 值，reshape 必须保留在 loop 内。
+
+    使用示例:
+    - module = _build_reshape_with_free_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    target_type = _memory_type((16,))
+    tile_type = _memory_type((4, 4), space="shared")
+    flat_type = _memory_type((16,), space="shared")
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    four = _const_symbol(4)
+    sixteen = _const_symbol(16)
+    top_block = Block(arg_types=[target_type])
+    if loop_dependent_shape:
+        loop_block = Block(
+            arg_types=[
+                SymbolIterType.from_bounds("0", "16", "16"),
+                SymbolValueType.from_expr("16"),
+            ]
+        )
+        shape_operand = loop_block.args[1]
+        loop = SymbolForOp(
+            zero.result,
+            sixteen.result,
+            sixteen.result,
+            loop_block,
+            init=sixteen.result,
+            result_type=SymbolValueType.from_expr("16"),
+        )
+    else:
+        loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "16", "16")])
+        shape_operand = sixteen.result
+        loop = SymbolForOp(zero.result, sixteen.result, sixteen.result, loop_block)
+    alloc = DmaAllocOp([], tile_type)
+    reshape = DmaReshapeOp(alloc.result, [shape_operand], flat_type)
+    deslice = DmaDesliceOp(
+        top_block.args[0],
+        reshape.result,
+        [loop_block.args[0]],
+        [sixteen.result],
+        [one.result],
+        target_type,
+    )
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([alloc, reshape, deslice, free])
+    if loop_dependent_shape:
+        loop_block.add_op(SymbolYieldOp(loop_block.args[1]))
+    top_block.add_ops([zero, one, four, sixteen, loop, func.ReturnOp()])
+    func_op = func.FuncOp("reshape_free_case", FunctionType.from_lists([target_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_subview_with_free_module(*, loop_dependent_size: bool = False) -> ModuleOp:
+    """构造 `dma.subview` alias op 外提正反例 module。
+
+
+    功能说明:
+    - 默认形态中 alloc/free 成对外提后，loop-invariant `dma.subview` 也应单独外提一层。
+    - `loop_dependent_size=True` 时 size 来自当前 loop-carried 值，subview 必须保留在 loop 内。
+
+    使用示例:
+    - module = _build_subview_with_free_module(loop_dependent_size=True)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    target_type = _memory_type((16,))
+    pool_type = _memory_type((1024,), element_type=i8, space="shared")
+    tile_type = _memory_type((16,), space="shared")
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    sixteen = _const_symbol(16)
+    pool_size = _const_symbol(1024)
+    top_block = Block(arg_types=[target_type])
+    if loop_dependent_size:
+        loop_block = Block(
+            arg_types=[
+                SymbolIterType.from_bounds("0", "16", "16"),
+                SymbolValueType.from_expr("16"),
+            ]
+        )
+        size_operand = loop_block.args[1]
+        loop = SymbolForOp(
+            zero.result,
+            sixteen.result,
+            sixteen.result,
+            loop_block,
+            init=sixteen.result,
+            result_type=SymbolValueType.from_expr("16"),
+        )
+    else:
+        loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "16", "16")])
+        size_operand = sixteen.result
+        loop = SymbolForOp(zero.result, sixteen.result, sixteen.result, loop_block)
+    alloc = DmaAllocOp([], pool_type)
+    subview = DmaSubviewOp(alloc.result, zero.result, size_operand, one.result, tile_type)
+    deslice = DmaDesliceOp(
+        top_block.args[0],
+        subview.result,
+        [loop_block.args[0]],
+        [sixteen.result],
+        [one.result],
+        target_type,
+    )
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([alloc, subview, deslice, free])
+    if loop_dependent_size:
+        loop_block.add_op(SymbolYieldOp(loop_block.args[1]))
+    top_block.add_ops([zero, one, sixteen, pool_size, loop, func.ReturnOp()])
+    func_op = func.FuncOp("subview_free_case", FunctionType.from_lists([target_type], []), Region(top_block))
     return ModuleOp([func_op])
 
 
@@ -462,6 +650,47 @@ def _build_unknown_direct_use_module() -> ModuleOp:
     return ModuleOp([func_op])
 
 
+def _build_alias_result_kernel_use_module() -> ModuleOp:
+    """构造 alias result 流向 kernel op 的 no-op 反例 module。
+
+
+    功能说明:
+    - loop 内 `dma.alloc` 先经 `dma.reshape` 生成 alias result，再由 `kernel.binary_elewise` 直接使用。
+    - `kernel.*` 不属于 alias result 白名单，pass 必须保持 alloc、alias op 与 free 原位。
+
+    使用示例:
+    - module = _build_alias_result_kernel_use_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    tile_type = _memory_type((4, 4))
+    flat_type = _memory_type((16,))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    sixteen = _const_symbol(16)
+    top_block = Block()
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([], tile_type)
+    reshape = DmaReshapeOp(alloc.result, [sixteen.result], flat_type)
+    kernel_use = KernelBinaryElewiseOp(
+        reshape.result,
+        reshape.result,
+        reshape.result,
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("global"),
+    )
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([alloc, reshape, kernel_use, free])
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, sixteen, loop, func.ReturnOp()])
+    func_op = func.FuncOp("alias_result_kernel_use_case", FunctionType.from_lists([], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
 def _build_loop_carried_shape_module() -> ModuleOp:
     """构造 shape 依赖 loop-carried 的反例 module。
 
@@ -617,17 +846,18 @@ def test_symbol_buffer_hoist_public_patterns_are_reachable() -> None:
     patterns = get_symbol_buffer_hoist_patterns()
 
     assert package_module.SymbolBufferHoistPass is SymbolBufferHoistPass
-    assert len(patterns) == 1
+    assert len(patterns) == 4
     assert isinstance(patterns[0], DmaAllocInSymbolForHoistPattern)
+    assert all(isinstance(pattern, RewritePattern) for pattern in patterns)
 
 
 # TC-SYMBOL-BUFFER-HOIST-002
-# 功能说明: 验证公开 pattern 直接运行时可外提 input staging buffer。
-# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_pattern_hoists_input_staging_alloc
+# 功能说明: 验证公开 pattern 直接运行时不外提无 matching free 的 input staging buffer。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_pattern_keeps_input_staging_alloc_without_free
 # 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
-def test_symbol_buffer_hoist_pattern_hoists_input_staging_alloc() -> None:
+def test_symbol_buffer_hoist_pattern_keeps_input_staging_alloc_without_free() -> None:
     module = _build_slice_module()
 
     PatternRewriteWalker(
@@ -639,18 +869,18 @@ def test_symbol_buffer_hoist_pattern_hoists_input_staging_alloc() -> None:
     loop_allocs = [op for op in loop_block.ops if isinstance(op, DmaAllocOp)]
     slice_op = next(op for op in loop_block.ops if isinstance(op, DmaSliceOp))
 
-    assert len(top_level_allocs) == 1
-    assert not loop_allocs
-    assert slice_op.target is top_level_allocs[0].result
+    assert not top_level_allocs
+    assert len(loop_allocs) == 1
+    assert slice_op.target is loop_allocs[0].result
 
 
 # TC-SYMBOL-BUFFER-HOIST-003
-# 功能说明: 验证 SymbolBufferHoistPass 可外提 input staging buffer。
-# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_pass_hoists_input_staging_alloc
+# 功能说明: 验证 SymbolBufferHoistPass 不外提无 matching free 的 input staging buffer。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_pass_keeps_input_staging_alloc_without_free
 # 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
-def test_symbol_buffer_hoist_pass_hoists_input_staging_alloc() -> None:
+def test_symbol_buffer_hoist_pass_keeps_input_staging_alloc_without_free() -> None:
     module = _build_slice_module()
 
     SymbolBufferHoistPass().apply(Context(), module)
@@ -658,17 +888,17 @@ def test_symbol_buffer_hoist_pass_hoists_input_staging_alloc() -> None:
     result = module
 
     top_block, _loop_op, loop_block = _get_blocks(result)
-    assert len([op for op in top_block.ops if isinstance(op, DmaAllocOp)]) == 1
-    assert not any(isinstance(op, DmaAllocOp) for op in loop_block.ops)
+    assert not any(isinstance(op, DmaAllocOp) for op in top_block.ops)
+    assert len([op for op in loop_block.ops if isinstance(op, DmaAllocOp)]) == 1
 
 
 # TC-SYMBOL-BUFFER-HOIST-004
-# 功能说明: 验证 SymbolBufferHoistPass 可外提 output scratch buffer。
-# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_pass_hoists_output_scratch_alloc
+# 功能说明: 验证 SymbolBufferHoistPass 不外提无 matching free 的 output scratch buffer。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_pass_keeps_output_scratch_alloc_without_free
 # 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
-def test_symbol_buffer_hoist_pass_hoists_output_scratch_alloc() -> None:
+def test_symbol_buffer_hoist_pass_keeps_output_scratch_alloc_without_free() -> None:
     module = _build_deslice_module()
 
     SymbolBufferHoistPass().apply(Context(), module)
@@ -676,11 +906,11 @@ def test_symbol_buffer_hoist_pass_hoists_output_scratch_alloc() -> None:
     result = module
 
     top_block, _loop_op, loop_block = _get_blocks(result)
-    top_level_alloc = next(op for op in top_block.ops if isinstance(op, DmaAllocOp))
+    loop_alloc = next(op for op in loop_block.ops if isinstance(op, DmaAllocOp))
     deslice_op = next(op for op in loop_block.ops if isinstance(op, DmaDesliceOp))
 
-    assert deslice_op.source is top_level_alloc.result
-    assert not any(isinstance(op, DmaAllocOp) for op in loop_block.ops)
+    assert not any(isinstance(op, DmaAllocOp) for op in top_block.ops)
+    assert deslice_op.source is loop_alloc.result
 
 
 # TC-SYMBOL-BUFFER-HOIST-004A
@@ -731,6 +961,152 @@ def test_symbol_buffer_hoist_hoists_output_scratch_alloc_and_matching_free() -> 
     assert _free_source_is(top_free, top_alloc.result)
     assert deslice_op.source is top_alloc.result
     assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in loop_block.ops)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004B1
+# 功能说明: 验证 loop-invariant dma.view 在 alloc/free 成对外提后继续单 op 外提一层。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_loop_invariant_dma_view_one_layer
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_loop_invariant_dma_view_one_layer() -> None:
+    module = _build_view_with_free_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_view = next(op for op in top_ops if isinstance(op, DmaViewOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    deslice_op = next(op for op in loop_block.ops if isinstance(op, DmaDesliceOp))
+    loop_index = top_ops.index(loop_op)
+
+    assert top_ops.index(top_alloc) < top_ops.index(top_view) < loop_index < top_ops.index(top_free)
+    assert top_view.source is top_alloc.result
+    assert deslice_op.source is top_view.result
+    assert not any(isinstance(op, (DmaAllocOp, DmaViewOp, DmaFreeOp)) for op in loop_block.ops)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004B2
+# 功能说明: 验证 loop-invariant dma.reshape 在 alloc/free 成对外提后继续单 op 外提一层。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_loop_invariant_dma_reshape_one_layer
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_loop_invariant_dma_reshape_one_layer() -> None:
+    module = _build_reshape_with_free_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_reshape = next(op for op in top_ops if isinstance(op, DmaReshapeOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    deslice_op = next(op for op in loop_block.ops if isinstance(op, DmaDesliceOp))
+    loop_index = top_ops.index(loop_op)
+
+    assert top_ops.index(top_alloc) < top_ops.index(top_reshape) < loop_index < top_ops.index(top_free)
+    assert top_reshape.source is top_alloc.result
+    assert deslice_op.source is top_reshape.result
+    assert not any(isinstance(op, (DmaAllocOp, DmaReshapeOp, DmaFreeOp)) for op in loop_block.ops)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004B3
+# 功能说明: 验证 loop-invariant dma.subview 在 alloc/free 成对外提后继续单 op 外提一层。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_loop_invariant_dma_subview_one_layer
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_loop_invariant_dma_subview_one_layer() -> None:
+    module = _build_subview_with_free_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_subview = next(op for op in top_ops if isinstance(op, DmaSubviewOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    deslice_op = next(op for op in loop_block.ops if isinstance(op, DmaDesliceOp))
+    loop_index = top_ops.index(loop_op)
+
+    assert top_ops.index(top_alloc) < top_ops.index(top_subview) < loop_index < top_ops.index(top_free)
+    assert top_subview.source[0] is top_alloc.result
+    assert deslice_op.source is top_subview.result
+    assert not any(isinstance(op, (DmaAllocOp, DmaSubviewOp, DmaFreeOp)) for op in loop_block.ops)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004B4
+# 功能说明: 验证 dma.view 的 offset 依赖当前 iterator 时 view 保留在 loop 内，alloc/free 仍可成对外提。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_dma_view_when_offset_depends_on_loop_iterator
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_dma_view_when_offset_depends_on_loop_iterator() -> None:
+    module = _build_view_with_free_module(loop_dependent_offset=True)
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    loop_view = next(op for op in loop_block.ops if isinstance(op, DmaViewOp))
+    deslice_op = next(op for op in loop_block.ops if isinstance(op, DmaDesliceOp))
+    loop_index = top_ops.index(loop_op)
+
+    assert top_ops.index(top_alloc) < loop_index < top_ops.index(top_free)
+    assert loop_view.source is top_alloc.result
+    assert loop_view.offsets[0] is loop_block.args[0]
+    assert deslice_op.source is loop_view.result
+
+
+# TC-SYMBOL-BUFFER-HOIST-004B5
+# 功能说明: 验证 dma.reshape 的 shape 依赖 loop-carried 值时 reshape 保留在 loop 内。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_dma_reshape_when_shape_is_loop_carried
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_dma_reshape_when_shape_is_loop_carried() -> None:
+    module = _build_reshape_with_free_module(loop_dependent_shape=True)
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    loop_reshape = next(op for op in loop_block.ops if isinstance(op, DmaReshapeOp))
+    loop_index = top_ops.index(loop_op)
+
+    assert top_ops.index(top_alloc) < loop_index < top_ops.index(top_free)
+    assert loop_reshape.source is top_alloc.result
+    assert loop_reshape.shape[0] is loop_block.args[1]
+
+
+# TC-SYMBOL-BUFFER-HOIST-004B6
+# 功能说明: 验证 dma.subview 的 size 依赖 loop-carried 值时 subview 保留在 loop 内。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_dma_subview_when_size_is_loop_carried
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_dma_subview_when_size_is_loop_carried() -> None:
+    module = _build_subview_with_free_module(loop_dependent_size=True)
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    loop_subview = next(op for op in loop_block.ops if isinstance(op, DmaSubviewOp))
+    loop_index = top_ops.index(loop_op)
+
+    assert top_ops.index(top_alloc) < loop_index < top_ops.index(top_free)
+    assert loop_subview.source[0] is top_alloc.result
+    assert loop_subview.size[0] is loop_block.args[1]
 
 
 # TC-SYMBOL-BUFFER-HOIST-004C
@@ -823,6 +1199,33 @@ def test_symbol_buffer_hoist_keeps_alloc_for_unknown_direct_use_or_alias_escape(
     top_block, _loop_op, loop_block = _get_blocks(module)
     assert not any(isinstance(op, DmaAllocOp) for op in top_block.ops)
     assert len([op for op in loop_block.ops if isinstance(op, DmaAllocOp)]) == 1
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H
+# 功能说明: 验证 alias result 流向 kernel.* 时按逃逸/no-op 处理。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alias_result_when_used_by_kernel_op
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_alias_result_when_used_by_kernel_op() -> None:
+    module = _build_alias_result_kernel_use_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, _loop_op, loop_block = _get_blocks(module)
+    loop_ops = list(loop_block.ops)
+    alloc = next(op for op in loop_ops if isinstance(op, DmaAllocOp))
+    reshape = next(op for op in loop_ops if isinstance(op, DmaReshapeOp))
+    kernel_use = next(op for op in loop_ops if isinstance(op, KernelBinaryElewiseOp))
+    free = next(op for op in loop_ops if isinstance(op, DmaFreeOp))
+
+    assert not any(isinstance(op, (DmaAllocOp, DmaReshapeOp, DmaFreeOp)) for op in top_block.ops)
+    assert loop_ops.index(alloc) < loop_ops.index(reshape) < loop_ops.index(kernel_use) < loop_ops.index(free)
+    assert reshape.source is alloc.result
+    assert kernel_use.out is reshape.result
+    assert kernel_use.lhs is reshape.result
+    assert kernel_use.rhs is reshape.result
+    assert _free_source_is(free, alloc.result)
 
 
 # TC-SYMBOL-BUFFER-HOIST-005

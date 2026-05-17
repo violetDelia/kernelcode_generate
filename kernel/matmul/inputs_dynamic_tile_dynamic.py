@@ -4,7 +4,7 @@
 功能说明:
 - 实现 `inputs 动 + tile 动` 的二维 matmul kernel demo。
 - 编译期 memory 使用 `H/K/W` 语义符号，tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数。
-- 运行期仍传入真实 NumPy ndarray 与 int tile，执行 device entry 后和 `np.matmul` 对齐。
+- 运行期仍传入真实 NumPy ndarray 与 int tile，执行 lowering 生成的 launch wrapper 后和 `np.matmul` 对齐。
 - K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 初始化局部 accumulator，K loop 内用 `kernel.matmul/kernel.add` out-first helper 累加 partial，K loop 后最终写回 output。
 - H/W/K 尾块都通过 `min(tile, dim - iv)` 覆盖，避免只覆盖可整除 case。
 
@@ -44,7 +44,7 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 CASE_NAME = "matmul/inputs_dynamic_tile_dynamic"
-DEVICE_ENTRY_NAME = "matmul_inputs_dynamic_tile_dynamic_kernel_device"
+WRAPPER_ENTRY_NAME = "matmul_inputs_dynamic_tile_dynamic_kernel"
 TILE_ARGS = (80, 96, 72)
 MatmulCompileArg: TypeAlias = "Memory | SymbolDim"
 MatmulRuntimeArg: TypeAlias = "np.ndarray | int"
@@ -183,19 +183,19 @@ def _assert_accumulator_source(source: str) -> None:
         raise AssertionError("matmul accumulator source order must be fill -> matmul -> add -> output deslice")
 
 
-def _execute_device_source(source: str, real_args: tuple[MatmulRuntimeArg, ...]) -> None:
-    """编译并执行 lowering 生成的 device entry。
+def _execute_lowering_source(source: str, real_args: tuple[MatmulRuntimeArg, ...]) -> None:
+    """编译并执行 lowering 生成的 launch wrapper。
 
 
     功能说明:
     - 使用公开 `ExecutionEngine` 编译 `run_lowering_demo(...)` 生成的源码。
-    - 直接执行 lowering 生成的 device 函数，运行期传入真实 tensor 与 int tile。
+    - 通过 wrapper 触发 `npu_demo::launch<...>`，确保 multi-block 执行现场绑定真实 `block_id()`。
 
     使用示例:
-    - `_execute_device_source(source, (out, lhs, rhs, 6, 7, 5))`
+    - `_execute_lowering_source(source, (out, lhs, rhs, 6, 7, 5))`
     """
 
-    compiled_kernel = ExecutionEngine(target="npu_demo").compile(source=source, function=DEVICE_ENTRY_NAME)
+    compiled_kernel = ExecutionEngine(target="npu_demo").compile(source=source, function=WRAPPER_ENTRY_NAME)
     try:
         execute_result = compiled_kernel.execute(args=real_args)
         if not execute_result.ok:
@@ -238,7 +238,7 @@ def main() -> None:
     功能说明:
     - 使用固定 seed 选择不整除 H/W/K tile 的真实 shape。
     - 编译期以符号 memory/tile 生成 lowering IR 与 npu_demo source。
-    - 运行期执行 device entry，并用 `np.matmul(lhs, rhs)` 校验输出。
+    - 运行期执行 launch wrapper，并用 `np.matmul(lhs, rhs)` 校验输出。
 
     使用示例:
     - `python3 kernel/matmul/inputs_dynamic_tile_dynamic.py`
@@ -258,7 +258,7 @@ def main() -> None:
     module_text = str(module)
     _assert_dynamic_memory_ir(module_text, tuple(out.shape), tuple(lhs.shape), tuple(rhs.shape))
     _assert_accumulator_source(source)
-    _execute_device_source(source, (out, lhs, rhs, *TILE_ARGS))
+    _execute_lowering_source(source, (out, lhs, rhs, *TILE_ARGS))
     max_abs_diff = _assert_outputs_close(out, expected, atol=1e-3, rtol=1e-3)
     print(module_text)
     print(source)

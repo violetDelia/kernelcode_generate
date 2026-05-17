@@ -4,10 +4,12 @@
 功能说明:
 - 定义 `symbol-buffer-hoist` 的公开 pass、公开 pattern 与公开 pattern getter。
 - 只在 `symbol.for` 单 block 循环体内识别 `dma.alloc`，并在 shape 明确不依赖 loop 内 SSA、
-  直接 use 仅属于输入 staging / output scratch 两类安全形态，且存在唯一匹配 `dma.free`
-  时，将其外提到所属 `symbol.for` 之前。
+  直接 use 仅属于输入 staging / output scratch 或受支持 alias producer，且存在唯一匹配 `dma.free`
+  时，将其与 `dma.free` 成对外提一层。
 - 当同一 `symbol.for` 直接 body 内存在唯一匹配 `dma.free` 且该 free 晚于所有 data use 时，
   外提 `dma.alloc` 的同时把对应 `dma.free` 移到同一 `symbol.for` 之后。
+- 对 source、offset/shape/stride 等 operand 均支配当前 `symbol.for` 的 `dma.view`、`dma.reshape`
+  和 `dma.subview`，作为独立 alias op 单次外提一层。
 - 失败边界统一复用 `KernelCodeError(module="pass")`；不新增专题专属错误类型，也不承诺额外 compat path。
 
 API 列表:
@@ -50,7 +52,17 @@ from xdsl.rewriter import InsertPoint
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
-from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFreeOp, DmaSliceOp
+from kernel_gen.dialect.dma import (
+    DmaAllocOp,
+    DmaCopyOp,
+    DmaDesliceOp,
+    DmaFillOp,
+    DmaFreeOp,
+    DmaReshapeOp,
+    DmaSliceOp,
+    DmaSubviewOp,
+    DmaViewOp,
+)
 from kernel_gen.dialect.symbol import Symbol, SymbolForOp
 from kernel_gen.passes.common import ensure_builtin_module
 from kernel_gen.passes.pass_manager import Pass
@@ -78,16 +90,17 @@ class _HoistUsePlan:
     free_op: DmaFreeOp | None
 
 
-def _is_loop_invariant_value(value: SSAValue, loop_block: Block) -> bool:
-    """判断 SSA 值是否定义在当前 loop body 之外。
+def _value_dominates_symbol_for(value: SSAValue, symbol_for: SymbolForOp) -> bool:
+    """判断 SSA 值是否在当前 `symbol.for` 前可见。
 
 
     功能说明:
-    - 当前专题只接受 shape operand 直接来自 loop 外 SSA。
-    - 当前 loop body 的块参数和当前 loop body 内定义的 op 结果都视为非 invariant。
+    - 只接受定义在当前 loop body 外、且支配当前 `symbol.for` 的 SSA 值。
+    - 当前 loop body、nested region 或 sibling block 内定义的值都保守视为不可外提。
+    - 外层 loop body 中位于当前 `symbol.for` 前的值允许作为“当前层” invariant。
 
     使用示例:
-    - _is_loop_invariant_value(symbol_dim, loop_block)
+    - _value_dominates_symbol_for(symbol_dim, symbol_for)
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
@@ -95,15 +108,26 @@ def _is_loop_invariant_value(value: SSAValue, loop_block: Block) -> bool:
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
+    loop_block = symbol_for.body.blocks[0]
     if isinstance(value, BlockArgument):
-        return value.owner is not loop_block
+        return value.owner is not loop_block and value.owner.is_ancestor(symbol_for)
     owner = value.owner
     if not isinstance(owner, Operation):
         return True
-    return owner.parent_block() is not loop_block
+    owner_block = owner.parent_block()
+    if owner_block is None:
+        return True
+    if owner_block is loop_block or loop_block.is_ancestor(owner):
+        return False
+    if owner_block is symbol_for.parent_block():
+        return owner.is_before_in_block(symbol_for)
+    ancestor = owner_block.find_ancestor_op_in_block(symbol_for)
+    if ancestor is None or owner is ancestor:
+        return False
+    return owner.is_before_in_block(ancestor)
 
 
-def _shape_is_loop_invariant(op: DmaAllocOp, loop_block: Block) -> bool:
+def _shape_is_loop_invariant(op: DmaAllocOp, symbol_for: SymbolForOp) -> bool:
     """判断 `dma.alloc` 的 dynamic_shape 是否全部来自 loop 外。
 
 
@@ -112,7 +136,7 @@ def _shape_is_loop_invariant(op: DmaAllocOp, loop_block: Block) -> bool:
     - 只要任一 shape operand 来自当前 loop body 或 loop-carried block argument，就保持 no-op。
 
     使用示例:
-    - _shape_is_loop_invariant(alloc_op, loop_block)
+    - _shape_is_loop_invariant(alloc_op, symbol_for)
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
@@ -120,7 +144,7 @@ def _shape_is_loop_invariant(op: DmaAllocOp, loop_block: Block) -> bool:
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
-    return all(_is_loop_invariant_value(SSAValue.get(value), loop_block) for value in op.dynamic_shape)
+    return all(_value_dominates_symbol_for(SSAValue.get(value), symbol_for) for value in op.dynamic_shape)
 
 
 def _is_supported_data_use(use: Use) -> bool:
@@ -146,6 +170,58 @@ def _is_supported_data_use(use: Use) -> bool:
     return (isinstance(user, DmaSliceOp) and use.index == 0) or (
         isinstance(user, DmaDesliceOp) and use.index == 1
     )
+
+
+def _is_supported_alias_result_use(use: Use) -> bool:
+    """判断 alias result 的 direct use 是否属于可捕获白名单。
+
+
+    功能说明:
+    - 允许 `dma.slice target`、`dma.deslice source`、`dma.fill target`、`dma.copy target/source`。
+    - 允许 `symbol.get_dim` 读取 alias memory 的 shape 信息；它不移动 memory 生命周期。
+    - `kernel.*` 属于当前计划的 alias escape/no-op 边界，不纳入 alias result 白名单。
+    - 其它 direct use 保持 no-op，避免把未知副作用或逃逸形态做宽。
+
+    使用示例:
+    - if _is_supported_alias_result_use(use): ...
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    user = use.operation
+    if _is_supported_data_use(use):
+        return True
+    if isinstance(user, DmaFillOp) and use.index == 0:
+        return True
+    if isinstance(user, DmaCopyOp) and use.index in (0, 1):
+        return True
+    if user.name == "symbol.get_dim":
+        return True
+    return False
+
+
+def _is_supported_alias_source_use(use: Use) -> bool:
+    """判断 direct use 是否为受支持 alias op 的 source operand。
+
+
+    功能说明:
+    - 只允许 `dma.view`、`dma.reshape`、`dma.subview` 的 source use。
+    - 该 helper 仅服务当前文件内 alloc/free 与 alias op 外提判定，不构成公开 API。
+
+    使用示例:
+    - if _is_supported_alias_source_use(use): ...
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    user = use.operation
+    return use.index == 0 and isinstance(user, (DmaViewOp, DmaReshapeOp, DmaSubviewOp))
 
 
 def _collect_direct_uses(result: SSAValue) -> tuple[Use, ...]:
@@ -235,13 +311,61 @@ def _free_follows_data_uses(free_op: DmaFreeOp, data_uses: tuple[Use, ...], loop
     return indexes[free_op] > max(data_indexes)
 
 
+def _collect_alias_data_uses(alias_op: Operation, loop_block: Block, visited: frozenset[Operation]) -> tuple[Use, ...] | None:
+    """收集 alias result 最终承接的可捕获 use。
+
+
+    功能说明:
+    - `dma.view`、`dma.reshape`、`dma.subview` result 只能被同一 owner loop 直接 body 内的
+      可捕获 memory use 或下一层受支持 alias op 使用。
+    - nested/sibling region、`symbol.yield`、`func.return` 或未知 direct use 一律让外提 no-op。
+    - 返回的 use 用于证明 matching free 晚于 alias 链真实消费。
+
+    使用示例:
+    - data_uses = _collect_alias_data_uses(view_op, loop_block, frozenset())
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    if alias_op in visited:
+        return None
+    if _operation_parent_block(alias_op) is not loop_block:
+        return None
+    if len(alias_op.results) != 1:
+        return None
+    result_uses = _collect_direct_uses(alias_op.results[0])
+    if not result_uses:
+        return None
+
+    next_visited = visited | frozenset((alias_op,))
+    data_uses: list[Use] = []
+    for use in result_uses:
+        if _operation_parent_block(use.operation) is not loop_block:
+            return None
+        if _is_supported_alias_result_use(use):
+            data_uses.append(use)
+            continue
+        if _is_supported_alias_source_use(use):
+            nested_data_uses = _collect_alias_data_uses(use.operation, loop_block, next_visited)
+            if nested_data_uses is None:
+                return None
+            data_uses.extend(nested_data_uses)
+            continue
+        return None
+    return tuple(data_uses)
+
+
 def _build_hoist_use_plan(uses: Iterable[Use], loop_block: Block) -> _HoistUsePlan | None:
     """判断 alloc 结果的 direct use 集合是否满足当前公开外提条件。
 
 
     功能说明:
     - 当前公开语义要求 alloc 至少存在一个 data use。
-    - data use 必须是同一 loop body 内的 `dma.slice target` 或 `dma.deslice source`。
+    - data use 必须是同一 loop body 内的 `dma.slice target`、`dma.deslice source`
+      或受支持 alias 链最终导向的同类 data use。
     - lifecycle use 必须存在同一 loop body 内唯一 `dma.free`，且必须晚于所有 data use。
     - 多个 free、nested free、跨 loop free 或未知 direct use 均保持 no-op。
 
@@ -266,6 +390,12 @@ def _build_hoist_use_plan(uses: Iterable[Use], loop_block: Block) -> _HoistUsePl
             return None
         if _is_supported_data_use(use):
             data_uses.append(use)
+            continue
+        if _is_supported_alias_source_use(use):
+            alias_data_uses = _collect_alias_data_uses(user, loop_block, frozenset())
+            if alias_data_uses is None:
+                return None
+            data_uses.extend(alias_data_uses)
             continue
         if isinstance(user, DmaFreeOp) and use.index == 0:
             free_ops.append(user)
@@ -324,7 +454,7 @@ class DmaAllocInSymbolForHoistPattern(RewritePattern):
         symbol_for = loop_block.parent_op()
         if not isinstance(symbol_for, SymbolForOp):
             return
-        if not _shape_is_loop_invariant(op, loop_block):
+        if not _shape_is_loop_invariant(op, symbol_for):
             return
         use_plan = _build_hoist_use_plan(_collect_direct_uses(op.result), loop_block)
         if use_plan is None:
@@ -337,13 +467,222 @@ class DmaAllocInSymbolForHoistPattern(RewritePattern):
         rewriter.notify_op_modified(symbol_for)
 
 
+def _alias_operands(op: Operation) -> tuple[SSAValue, ...]:
+    """返回 alias op 外提所需检查的全部 operand。
+
+
+    功能说明:
+    - `dma.view` 检查 source、offsets、shape、stride。
+    - `dma.reshape` 检查 source 与 shape。
+    - `dma.subview` 检查 source、offset、size、stride。
+
+    使用示例:
+    - operands = _alias_operands(view_op)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    if isinstance(op, DmaViewOp):
+        return (SSAValue.get(op.source), *tuple(op.offsets), *tuple(op.shape), *tuple(op.stride))
+    if isinstance(op, DmaReshapeOp):
+        return (SSAValue.get(op.source), *tuple(op.shape))
+    if isinstance(op, DmaSubviewOp):
+        return (*tuple(op.source), *tuple(op.offset), *tuple(op.size), *tuple(op.stride))
+    return ()
+
+
+def _alias_result_uses_are_supported(op: Operation, loop_block: Block) -> bool:
+    """判断 alias op result 是否只流向当前 loop 直接 body 内的白名单 use。
+
+
+    功能说明:
+    - 至少需要一个 direct use，避免外提无用或逃逸 alias。
+    - 支持 alias result 继续喂给 `dma.view`、`dma.reshape`、`dma.subview`，后续 pattern 会继续单 op 外提。
+    - 支持 alias result 被同一 loop 直接 body 内的 `dma.fill`、`dma.copy` 或 `symbol.get_dim` 捕获。
+    - `kernel.*` 不是当前 alias op 白名单；遇到时保守 no-op，避免把 kernel 副作用规则做宽。
+
+    使用示例:
+    - if _alias_result_uses_are_supported(view_op, loop_block): ...
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    if len(op.results) != 1:
+        return False
+    result_uses = _collect_direct_uses(op.results[0])
+    if not result_uses:
+        return False
+    for use in result_uses:
+        if _operation_parent_block(use.operation) is not loop_block:
+            return False
+        if _is_supported_alias_result_use(use):
+            continue
+        if _is_supported_alias_source_use(use):
+            continue
+        return False
+    return True
+
+
+def _hoist_alias_op_if_safe(op: Operation, rewriter: PatternRewriter) -> None:
+    """在满足公开边界时把单个 alias op 外提一层。
+
+
+    功能说明:
+    - 仅处理当前 `symbol.for` 直接 body 内的 alias op。
+    - source 与布局 operand 必须全部支配当前 `symbol.for`。
+    - result use 必须留在当前 loop 直接 body 的公开白名单内。
+
+    使用示例:
+    - _hoist_alias_op_if_safe(view_op, rewriter)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    loop_block = op.parent_block()
+    if loop_block is None:
+        return
+    symbol_for = loop_block.parent_op()
+    if not isinstance(symbol_for, SymbolForOp):
+        return
+    if not all(_value_dominates_symbol_for(operand, symbol_for) for operand in _alias_operands(op)):
+        return
+    if not _alias_result_uses_are_supported(op, loop_block):
+        return
+    op.detach()
+    rewriter.insert_op(op, InsertPoint.before(symbol_for))
+    rewriter.notify_op_modified(symbol_for)
+
+
+class _DmaViewInSymbolForHoistPattern(RewritePattern):
+    """`symbol.for` 内 `dma.view` 单 op 外提 pattern。
+
+
+    功能说明:
+    - 私有 pattern；不作为公开 API 导出。
+    - 只在 source 与 offset/shape/stride 均对当前 loop invariant 时外提一层。
+
+    使用示例:
+    - pattern = _DmaViewInSymbolForHoistPattern()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: DmaViewOp, rewriter: PatternRewriter, /) -> None:
+        """对满足条件的 `dma.view` 执行单层外提。
+
+
+        功能说明:
+        - 不新增 loop argument；loop body 直接捕获外提后的 SSA result。
+        - 任一 operand 不支配当前 loop 或 result use 不在白名单时保持 no-op。
+
+        使用示例:
+        - _DmaViewInSymbolForHoistPattern().match_and_rewrite(op, rewriter)
+
+        关联文件:
+        - spec: spec/pass/symbol_buffer_hoist.md
+        - test: test/passes/test_symbol_buffer_hoist.py
+        - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+        """
+
+        _hoist_alias_op_if_safe(op, rewriter)
+
+
+class _DmaReshapeInSymbolForHoistPattern(RewritePattern):
+    """`symbol.for` 内 `dma.reshape` 单 op 外提 pattern。
+
+
+    功能说明:
+    - 私有 pattern；不作为公开 API 导出。
+    - 只在 source 与 shape 均对当前 loop invariant 时外提一层。
+
+    使用示例:
+    - pattern = _DmaReshapeInSymbolForHoistPattern()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: DmaReshapeOp, rewriter: PatternRewriter, /) -> None:
+        """对满足条件的 `dma.reshape` 执行单层外提。
+
+
+        功能说明:
+        - 不新增 loop argument；loop body 直接捕获外提后的 SSA result。
+        - shape 来自当前 loop body、loop iterator 或 loop-carried 值时保持 no-op。
+
+        使用示例:
+        - _DmaReshapeInSymbolForHoistPattern().match_and_rewrite(op, rewriter)
+
+        关联文件:
+        - spec: spec/pass/symbol_buffer_hoist.md
+        - test: test/passes/test_symbol_buffer_hoist.py
+        - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+        """
+
+        _hoist_alias_op_if_safe(op, rewriter)
+
+
+class _DmaSubviewInSymbolForHoistPattern(RewritePattern):
+    """`symbol.for` 内 `dma.subview` 单 op 外提 pattern。
+
+
+    功能说明:
+    - 私有 pattern；不作为公开 API 导出。
+    - 只在 source、offset、size、stride 均对当前 loop invariant 时外提一层。
+
+    使用示例:
+    - pattern = _DmaSubviewInSymbolForHoistPattern()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: DmaSubviewOp, rewriter: PatternRewriter, /) -> None:
+        """对满足条件的 `dma.subview` 执行单层外提。
+
+
+        功能说明:
+        - 不新增 loop argument；loop body 直接捕获外提后的 SSA result。
+        - offset/size/stride 来自当前 loop body 时保持 no-op。
+
+        使用示例:
+        - _DmaSubviewInSymbolForHoistPattern().match_and_rewrite(op, rewriter)
+
+        关联文件:
+        - spec: spec/pass/symbol_buffer_hoist.md
+        - test: test/passes/test_symbol_buffer_hoist.py
+        - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+        """
+
+        _hoist_alias_op_if_safe(op, rewriter)
+
+
 def get_symbol_buffer_hoist_patterns() -> list[RewritePattern]:
     """返回 `symbol-buffer-hoist` 公开 pattern 列表。
 
 
     功能说明:
-    - 当前专题只公开一个 `dma.alloc` 外提 pattern。
-    - 返回值顺序固定，便于公开测试做机械匹配。
+    - 公开返回 `dma.alloc/free` pattern 与私有 alias op pattern 实例。
+    - 返回值顺序固定为 alloc/free、view、reshape、subview，便于 greedy walker 逐层收敛。
 
     使用示例:
     - patterns = get_symbol_buffer_hoist_patterns()
@@ -354,7 +693,64 @@ def get_symbol_buffer_hoist_patterns() -> list[RewritePattern]:
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
-    return [DmaAllocInSymbolForHoistPattern()]
+    return [
+        DmaAllocInSymbolForHoistPattern(),
+        _DmaViewInSymbolForHoistPattern(),
+        _DmaReshapeInSymbolForHoistPattern(),
+        _DmaSubviewInSymbolForHoistPattern(),
+    ]
+
+
+def _rewrite_module_once(ctx: Context, module: ModuleOp, *, fold: bool) -> None:
+    """对 module 执行一轮 `symbol-buffer-hoist` pattern walker。
+
+
+    功能说明:
+    - 当前文件内部 helper；保持公开 pass API 不变。
+    - 单轮 walker 仍遵守每个 pattern 只移动一个 op、一层 loop 的边界。
+
+    使用示例:
+    - _rewrite_module_once(ctx, module, fold=True)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    PatternRewriteWalker(
+        GreedyRewritePatternApplier(
+            get_symbol_buffer_hoist_patterns(),
+            ctx=ctx,
+            folding_enabled=fold,
+            dce_enabled=False,
+        )
+    ).rewrite_module(module)
+
+
+def _rewrite_module_to_fixed_point(ctx: Context, module: ModuleOp, *, fold: bool) -> None:
+    """重复执行 walker，直到 alias op 外提达到稳定态。
+
+
+    功能说明:
+    - `dma.view` 外提后，依赖该 view 的 `dma.reshape` 可能才满足支配条件。
+    - 通过模块文本稳定性检测追加有限轮收敛，避免单轮遍历漏掉后继 alias op。
+    - 每轮仍复用公开 pattern 列表，不引入跨文件私有 API 或新公开入口。
+
+    使用示例:
+    - _rewrite_module_to_fixed_point(ctx, module, fold=True)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    for _iteration in range(8):
+        before = str(module)
+        _rewrite_module_once(ctx, module, fold=fold)
+        if str(module) == before:
+            return
 
 
 class SymbolBufferHoistPass(Pass):
@@ -362,7 +758,7 @@ class SymbolBufferHoistPass(Pass):
 
 
     功能说明:
-    - 通过 pattern walker 处理 module 中满足公开条件的 `dma.alloc` 外提。
+    - 通过 pattern walker fixed point 处理 module 中满足公开条件的 `dma.alloc/free` 与 alias op 外提。
     - 非 `builtin.module` 输入直接复用共享 `KernelCodeError("module must be builtin.module")`。
     - 最终 verifier 失败统一转成 `KernelCodeError("SymbolBufferHoistVerifierError: ...")`。
 
@@ -387,7 +783,7 @@ class SymbolBufferHoistPass(Pass):
 
         功能说明:
         - 只处理 `builtin.module`。
-        - 用 greedy pattern walker 把 `symbol.for` 内可安全外提的 alloc 推进到稳定态。
+        - 用 greedy pattern walker 把 `symbol.for` 内可安全外提的 alloc/alias op 推进到稳定态。
         - 最终统一做一次 `module.verify()`，保持公开失败前缀稳定。
 
         使用示例:
@@ -403,14 +799,7 @@ class SymbolBufferHoistPass(Pass):
         module = ensure_builtin_module(module)
         if ctx.get_optional_dialect(Symbol.name) is None:
             ctx.load_dialect(Symbol)
-        PatternRewriteWalker(
-            GreedyRewritePatternApplier(
-                get_symbol_buffer_hoist_patterns(),
-                ctx=ctx,
-                folding_enabled=self.fold,
-                dce_enabled=False,
-            )
-        ).rewrite_module(module)
+        _rewrite_module_to_fixed_point(ctx, module, fold=self.fold)
         try:
             module.verify()
         except VerifyException as exc:

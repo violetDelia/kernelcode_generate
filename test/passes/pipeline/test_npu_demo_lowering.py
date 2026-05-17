@@ -320,6 +320,35 @@ def _noop_pass_apply(self, ctx: Context, target: ModuleOp) -> None:
     _ = target
 
 
+def _dump_stage_text_by_marker(dump_dir: Path, marker: str, *, occurrence: int = 1) -> str:
+    """按 dump 文件首行 marker 读取指定 stage 文本。
+
+    功能说明:
+    - 通过公开 dump 文件内容定位 pass stage，避免把 pipeline 验收绑定到不稳定序号。
+    - `occurrence` 用于区分同名 pass 的第几次出现，例如第二段 `symbol-buffer-hoist`。
+
+    使用示例:
+    - text = _dump_stage_text_by_marker(tmp_path, "symbol-buffer-hoist", occurrence=2)
+    """
+
+    if occurrence < 1:
+        raise AssertionError(f"dump stage occurrence must be positive; got {occurrence}")
+    seen = 0
+    available_markers: list[str] = []
+    for path in sorted(dump_dir.glob("*.mlir")):
+        text = path.read_text(encoding="utf-8")
+        stage_marker = text.splitlines()[0] if text.splitlines() else ""
+        available_markers.append(stage_marker)
+        if stage_marker != marker:
+            continue
+        seen += 1
+        if seen == occurrence:
+            return text
+    raise AssertionError(
+        f"dump stage marker {marker!r} occurrence {occurrence} not found; available={available_markers!r}"
+    )
+
+
 def matmul_kernel(lhs: Memory, rhs: Memory, out: Memory, TILE_M: SymbolDim, TILE_N: SymbolDim) -> None:
     """构造 npu_demo lowering 集成测试用 matmul kernel。
 
@@ -510,9 +539,9 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
 
     功能说明:
     - 通过公开 `set_dump_dir(...)` 与公开 pipeline builder 观察 pass dump。
-    - 锁定 `08-memory-plan` 插入 `dma.free`、`09-arch-parallelize` 插入 block 分片、
-      `10-symbol-buffer-hoist` 执行、`13-memory-pool`
-      消除 `dma.alloc/dma.free` 并生成 dynamic backing memory 的真实顺序。
+    - 按 pass marker 查找 `memory-plan`、两段 `symbol-buffer-hoist` 与 `memory-pool`，
+      不依赖 dump 文件序号。
+    - 断言第二段 `symbol-buffer-hoist` 把 memory-pool 后 loop-invariant alias op 推到内层 loop 前。
 
     使用示例:
     - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k memory_plan_dump
@@ -532,23 +561,33 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     finally:
         reset_config()
 
-    memory_plan_text = (tmp_path / "08-memory-plan.mlir").read_text(encoding="utf-8")
-    arch_parallelize_text = (tmp_path / "09-arch-parallelize.mlir").read_text(encoding="utf-8")
-    buffer_hoist_text = (tmp_path / "10-symbol-buffer-hoist.mlir").read_text(encoding="utf-8")
-    memory_pool_text = (tmp_path / "13-memory-pool.mlir").read_text(encoding="utf-8")
+    memory_plan_text = _dump_stage_text_by_marker(tmp_path, "memory-plan")
+    arch_parallelize_text = _dump_stage_text_by_marker(tmp_path, "arch-parallelize")
+    first_buffer_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-buffer-hoist")
+    memory_pool_text = _dump_stage_text_by_marker(tmp_path, "memory-pool")
+    second_buffer_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-buffer-hoist", occurrence=2)
     assert memory_plan_text.startswith("memory-plan\n")
     assert "dma.free" in memory_plan_text
     assert arch_parallelize_text.startswith("arch-parallelize\n")
     assert "arch.get_block_id" in arch_parallelize_text
     assert "symbol.const 2" in arch_parallelize_text
-    assert buffer_hoist_text.startswith("symbol-buffer-hoist\n")
-    assert "symbol.for" in buffer_hoist_text
+    assert first_buffer_hoist_text.startswith("symbol-buffer-hoist\n")
+    assert "symbol.for" in first_buffer_hoist_text
     assert memory_pool_text.startswith("memory-pool\n")
     assert "arch.get_dynamic_memory" in memory_pool_text
     assert "dma.view" in memory_pool_text
     assert "dma.reshape" in memory_pool_text
     assert "dma.alloc" not in memory_pool_text
     assert "dma.free" not in memory_pool_text
+    assert second_buffer_hoist_text.startswith("symbol-buffer-hoist\n")
+    assert "arch.get_dynamic_memory" in second_buffer_hoist_text
+    assert "dma.alloc" not in second_buffer_hoist_text
+    assert "dma.free" not in second_buffer_hoist_text
+    first_view_index = second_buffer_hoist_text.index('"dma.view"')
+    outer_for_index = second_buffer_hoist_text.index("symbol.for", first_view_index)
+    first_reshape_index = second_buffer_hoist_text.index('"dma.reshape"', first_view_index)
+    inner_for_index = second_buffer_hoist_text.index("symbol.for", outer_for_index + len("symbol.for"))
+    assert first_view_index < outer_for_index < first_reshape_index < inner_for_index
 
 
 def test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain() -> None:

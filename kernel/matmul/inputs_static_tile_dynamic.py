@@ -4,7 +4,7 @@
 功能说明:
 - 实现 `inputs 静 + tile 动` 的二维 matmul kernel demo。
 - 输入 shape 由固定 seed `2026051602` 随机生成并固化为具体数字：`lhs[197, 178]`、`rhs[178, 184]`、`out[197, 184]`。
-- tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数，运行期以 int scalar 绑定。
+- tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数，运行期以 int scalar 绑定，并通过 lowering 生成的 launch wrapper 触发真实 multi-block 执行。
 - H/W/K 均大于对应 runtime tile，且至少触发两次 tile loop；H/W/K 尾块都通过 `min(tile, dim - iv)` 覆盖。
 - K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 初始化局部 accumulator，K loop 内用 `kernel.matmul/kernel.add` out-first helper 累加 partial，K loop 后最终写回 output。
 
@@ -44,7 +44,7 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 CASE_NAME = "matmul/inputs_static_tile_dynamic"
-DEVICE_ENTRY_NAME = "matmul_inputs_static_tile_dynamic_kernel_device"
+WRAPPER_ENTRY_NAME = "matmul_inputs_static_tile_dynamic_kernel"
 TILE_ARGS = (64, 80, 64)
 _STATIC_SHAPE_SEED = 2026051602
 _STATIC_SHAPE_RNG = random.Random(_STATIC_SHAPE_SEED)
@@ -183,19 +183,19 @@ def _assert_accumulator_source(source: str) -> None:
         raise AssertionError("matmul accumulator source order must be fill -> matmul -> add -> output deslice")
 
 
-def _execute_device_source(source: str, real_args: tuple[MatmulRuntimeArg, ...]) -> None:
-    """编译并执行 lowering 生成的 device entry。
+def _execute_lowering_source(source: str, real_args: tuple[MatmulRuntimeArg, ...]) -> None:
+    """编译并执行 lowering 生成的 launch wrapper。
 
 
     功能说明:
     - 使用公开 `ExecutionEngine` 编译 `run_lowering_demo(...)` 生成的源码。
-    - 直接执行 lowering 生成的 device 函数，运行期传入真实 tensor 与 int tile。
+    - 通过 wrapper 触发 `npu_demo::launch<...>`，确保 multi-block 执行现场绑定真实 `block_id()`。
 
     使用示例:
-    - `_execute_device_source(source, (out, lhs, rhs, 13, 11, 5))`
+    - `_execute_lowering_source(source, (out, lhs, rhs, 13, 11, 5))`
     """
 
-    compiled_kernel = ExecutionEngine(target="npu_demo").compile(source=source, function=DEVICE_ENTRY_NAME)
+    compiled_kernel = ExecutionEngine(target="npu_demo").compile(source=source, function=WRAPPER_ENTRY_NAME)
     try:
         execute_result = compiled_kernel.execute(args=real_args)
         if not execute_result.ok:
@@ -238,7 +238,7 @@ def main() -> None:
     功能说明:
     - 使用固定 seed 生成并固化的 `197x178x184` matmul shape 与不整除 H/W/K 的 tile。
     - 编译期以 static memory / symbolic tile 生成 lowering IR 与 npu_demo source。
-    - 运行期执行 device entry，并用 `np.matmul(lhs, rhs)` 校验输出。
+    - 运行期执行 launch wrapper，并用 `np.matmul(lhs, rhs)` 校验输出。
 
     使用示例:
     - `python3 kernel/matmul/inputs_static_tile_dynamic.py`
@@ -254,7 +254,7 @@ def main() -> None:
     module_text = str(module)
     _assert_static_symbolic_tile_ir(module_text)
     _assert_accumulator_source(source)
-    _execute_device_source(source, (out, lhs, rhs, *TILE_ARGS))
+    _execute_lowering_source(source, (out, lhs, rhs, *TILE_ARGS))
     max_abs_diff = _assert_outputs_close(out, expected, atol=1e-3, rtol=1e-3)
     print(module_text)
     print(source)
