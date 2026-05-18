@@ -24,6 +24,7 @@ API 列表:
 from __future__ import annotations
 
 import inspect
+import random
 import sys
 from pathlib import Path
 from typing import TypeAlias
@@ -44,12 +45,14 @@ Conv2dCompileArg: TypeAlias = "Memory | SymbolDim"
 STATIC_OUTPUT_MEMORY = "!nn.memory<[#symbol.expr<5>, #symbol.expr<20>, #symbol.expr<35>, #symbol.expr<33>]"
 STATIC_INPUT_MEMORY = "!nn.memory<[#symbol.expr<5>, #symbol.expr<65>, #symbol.expr<281>, #symbol.expr<262>]"
 STATIC_WEIGHT_MEMORY = "!nn.memory<[#symbol.expr<20>, #symbol.expr<65>, #symbol.expr<3>, #symbol.expr<3>]"
+STATIC_BIAS_MEMORY = "!nn.memory<[#symbol.expr<20>]"
 SEMANTIC_OUTPUT_MEMORY = (
     "!nn.memory<[#symbol.expr<B>, #symbol.expr<C>, #symbol.expr<-KH + XH + 1>, #symbol.expr<-KW + XW + 1>]"
 )
 SEMANTIC_OUTPUT_PREFIX = "!nn.memory<[#symbol.expr<B>, #symbol.expr<C>,"
 SEMANTIC_INPUT_MEMORY = "!nn.memory<[#symbol.expr<B>, #symbol.expr<N>, #symbol.expr<XH>, #symbol.expr<XW>]"
 SEMANTIC_WEIGHT_MEMORY = "!nn.memory<[#symbol.expr<C>, #symbol.expr<N>, #symbol.expr<KH>, #symbol.expr<KW>]"
+SEMANTIC_BIAS_MEMORY = "!nn.memory<[#symbol.expr<C>]"
 SEMANTIC_RUNTIME_SYMBOLS = ("SH", "SW", "DH", "DW", "PT", "PB", "PL", "PR", "TF", "TC", "TN", "THO", "TWO")
 
 
@@ -78,6 +81,8 @@ def _assert_conv2d_source_uses_kernel_out_first(fn) -> None:
     assert "acc = alloc([batch_tile, cur_f, cur_ho, cur_wo]" in function_source
     assert "partial = transpose(out_fnhw, [1, 0, 2, 3])" in function_source
     assert "kernel.add(acc, acc, partial)" in function_source
+    assert "if bias is not None:" in function_source
+    assert "broadcast(bias_full, bias_nchw)" in function_source
     assert "[batch_index, f0, ho0, wo0]" in function_source
     assert "partial_tile = alloc" not in function_source
     assert "out_tile_mem = slice(out" not in function_source
@@ -122,6 +127,7 @@ def _symbolic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]:
         Memory(["B", "C", output_h_dim, output_w_dim], NumericType.Float32),
         Memory(["B", "N", "XH", "XW"], NumericType.Float32),
         Memory(["C", "N", "KH", "KW"], NumericType.Float32),
+        Memory(["C"], NumericType.Float32),
         sh_dim,
         sw_dim,
         dh_dim,
@@ -138,7 +144,7 @@ def _symbolic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]:
     )
 
 
-def _seeded_static_conv2d_compile_args() -> tuple[Memory, Memory, Memory]:
+def _seeded_static_conv2d_compile_args() -> tuple[Memory, Memory, Memory, Memory]:
     """构造测试用固定 seed static memory 编译参数。
 
 
@@ -154,6 +160,7 @@ def _seeded_static_conv2d_compile_args() -> tuple[Memory, Memory, Memory]:
         Memory([5, 20, 35, 33], NumericType.Float32),
         Memory([5, 65, 281, 262], NumericType.Float32),
         Memory([20, 65, 3, 3], NumericType.Float32),
+        Memory([20], NumericType.Float32),
     )
 
 
@@ -176,6 +183,7 @@ def test_inputs_dynamic_tile_dynamic_gen_kernel_keeps_symbolic_memory_shapes() -
     assert SEMANTIC_OUTPUT_PREFIX in module_text
     assert SEMANTIC_INPUT_MEMORY in module_text
     assert SEMANTIC_WEIGHT_MEMORY in module_text
+    assert SEMANTIC_BIAS_MEMORY in module_text
     for symbol_name in SEMANTIC_RUNTIME_SYMBOLS:
         assert symbol_name in module_text
     assert "arch.get_dynamic_memory" in module_text
@@ -183,6 +191,8 @@ def test_inputs_dynamic_tile_dynamic_gen_kernel_keeps_symbolic_memory_shapes() -
     assert "dma.subview" not in module_text
     assert "dma.alloc" not in module_text
     assert "allalloc" not in module_text
+    assert "memory.get_data" in module_text
+    assert "symbol.ne" in module_text
     assert "!nn.memory<[#symbol.expr<s1>, #symbol.expr<s2>, #symbol.expr<s3>, #symbol.expr<s4>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>, #symbol.expr<s5>, #symbol.expr<s6>, #symbol.expr<s7>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s2>, #symbol.expr<s5>, #symbol.expr<3>, #symbol.expr<3>]" not in module_text
@@ -205,15 +215,12 @@ def test_inputs_dynamic_tile_dynamic_gen_kernel_keeps_symbolic_memory_shapes() -
 # 对应 spec 文件路径: spec/kernel/runner.md
 # 对应测试文件路径: test/kernel/test_conv2d_symbolic_memory_genkernel.py
 def test_inputs_static_tile_dynamic_gen_kernel_keeps_seeded_static_shapes() -> None:
+    tile_args = random.Random(2026051724).choice(((8, 16, 4, 8, 8), (7, 18, 3, 8, 8), (6, 20, 2, 8, 8)))
     module, _source = run_lowering_demo(
         "test_conv2d/inputs_static_tile_dynamic_seeded_static_memory",
         conv2d_inputs_static_tile_dynamic_kernel,
         *_seeded_static_conv2d_compile_args(),
-        8,
-        16,
-        4,
-        8,
-        8,
+        *tile_args,
     )
     module_text = str(module)
 
@@ -221,6 +228,7 @@ def test_inputs_static_tile_dynamic_gen_kernel_keeps_seeded_static_shapes() -> N
     assert STATIC_OUTPUT_MEMORY in module_text
     assert STATIC_INPUT_MEMORY in module_text
     assert STATIC_WEIGHT_MEMORY in module_text
+    assert STATIC_BIAS_MEMORY in module_text
     assert "!nn.memory<[#symbol.expr<12>, #symbol.expr<4>, #symbol.expr<254>, #symbol.expr<254>]" not in module_text
     assert "!nn.memory<[#symbol.expr<12>, #symbol.expr<32>, #symbol.expr<256>, #symbol.expr<256>]" not in module_text
     assert "!nn.memory<[#symbol.expr<4>, #symbol.expr<32>, #symbol.expr<3>, #symbol.expr<3>]" not in module_text
@@ -228,6 +236,29 @@ def test_inputs_static_tile_dynamic_gen_kernel_keeps_seeded_static_shapes() -> N
     assert SEMANTIC_INPUT_MEMORY not in module_text
     assert SEMANTIC_WEIGHT_MEMORY not in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
+    assert "memory.get_data" in module_text
+    assert "symbol.ne" in module_text
+
+
+def test_inputs_static_tile_static_uses_seeded_tile_constants() -> None:
+    """static-static demo 应使用 seed 选择的静态 tile 常量。
+
+    功能说明:
+    - 读取公开 demo 函数源码，确认 tile 来自模块级 seed 选择常量。
+    - 防止 static-static demo 回退到旧硬编码 tile 组合。
+
+    使用示例:
+    - `pytest -q test/kernel/test_conv2d_symbolic_memory_genkernel.py -k seeded_tile_constants`
+    """
+
+    function_source = inspect.getsource(conv2d_inputs_static_tile_static_kernel)
+    assert "tile_f = _STATIC_TILE_F" in function_source
+    assert "tile_c = _STATIC_TILE_C" in function_source
+    assert "tile_n = _STATIC_TILE_N" in function_source
+    assert "tile_ho = _STATIC_TILE_HO" in function_source
+    assert "tile_wo = _STATIC_TILE_WO" in function_source
+    assert "tile_f = 8" not in function_source
+    assert "tile_c = 16" not in function_source
 
 
 # TC-KERNEL-CONV2D-SYMBOLIC-MEMORY-003
@@ -249,6 +280,7 @@ def test_inputs_static_tile_static_gen_kernel_keeps_seeded_static_shapes() -> No
     assert STATIC_OUTPUT_MEMORY in module_text
     assert STATIC_INPUT_MEMORY in module_text
     assert STATIC_WEIGHT_MEMORY in module_text
+    assert STATIC_BIAS_MEMORY in module_text
     assert "!nn.memory<[#symbol.expr<12>, #symbol.expr<4>, #symbol.expr<254>, #symbol.expr<254>]" not in module_text
     assert "!nn.memory<[#symbol.expr<12>, #symbol.expr<32>, #symbol.expr<256>, #symbol.expr<256>]" not in module_text
     assert "!nn.memory<[#symbol.expr<4>, #symbol.expr<32>, #symbol.expr<3>, #symbol.expr<3>]" not in module_text
@@ -256,5 +288,7 @@ def test_inputs_static_tile_static_gen_kernel_keeps_seeded_static_shapes() -> No
     assert SEMANTIC_INPUT_MEMORY not in module_text
     assert SEMANTIC_WEIGHT_MEMORY not in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
+    assert "memory.get_data" in module_text
+    assert "symbol.ne" in module_text
     assert "? -" not in module_text
     assert "? -" not in source

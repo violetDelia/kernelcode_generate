@@ -10,7 +10,7 @@
 - runtime trance kernel log 开关统一来自 `kernel_gen.core.config.set_trance_enabled(...)`，不作为 `dsl_run(...)` 或 `dsl_cost_run(...)` 入参。
 - 失败统一抛出 `KernelCodeError(ErrorModule.TOOLS, message)`；不再定义或导出工具专属错误类。
 - `dsl_run(...)` 不向 kernel 函数隐式注入 operation helper、`MemorySpace`、`NumericType` 或 `SymbolDim`；kernel 体引用的名称必须来自显式 import、闭包或函数全局绑定，缺失时必须报错。
-- `real_args` 支持真实 tensor/array 参数和运行期整数标量参数；Python `int` 与 numpy integer 标量会规整为 Python `int` 后绑定到 DSL 函数形参，供 runtime tile、stride、padding 等 `SymbolDim` 形参使用；`bool` 与 `float` 必须拒绝。
+- `real_args` 支持真实 tensor/array 参数、运行期整数标量参数，以及仅在对应 DSL 形参是 memory 且函数体包含 allow-absent presence guard 时的 `None` memory 参数；Python `int` 与 numpy integer 标量会规整为 Python `int` 后绑定到 DSL 函数形参，供 runtime tile、stride、padding 等 `SymbolDim` 形参使用；`bool` 与 `float` 必须拒绝。
 
 ## API 列表
 
@@ -45,7 +45,7 @@
 
 - 当前文件内 `_runtime_module_name(...)`、`_normalize_real_args(...)`、`_resolve_pipeline(...)`、`_run_pipeline_with_optional_dump(...)`、`_select_source_and_entry(...)`、`_append_cost_capture_wrapper(...)` 等下划线 helper 只服务当前文件内部实现。
 - 实现、测试和外部调用方不得跨文件导入或断言这些 helper；公开行为只能通过 `DslRunResult(...)`、`dsl_run(...)` 与 `dsl_cost_run(...)` 观察。
-- `RuntimeRealArg` 是文档类型别名，表示 `torch.Tensor | numpy.ndarray | int`；Python `int` 与 numpy integer 属于合法整数 scalar，`bool` 与 `float` 不属于合法 runtime scalar。该别名不新增独立可调用公开入口。
+- `RuntimeRealArg` 是文档类型别名，表示 `torch.Tensor | numpy.ndarray | int | None`；Python `int` 与 numpy integer 属于合法整数 scalar，`bool` 与 `float` 不属于合法 runtime scalar；`None` 只允许作为 memory 形参的运行期 absent 值。该别名不新增独立可调用公开入口。
 
 ## API详细说明
 
@@ -58,7 +58,7 @@
   - `source`：源对象、源缓冲区或源文本，提供当前操作读取的数据来源；类型 `str`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `compiled_kernel`：编译后的 kernel 句柄，用于执行阶段调用；类型 `CompiledKernel`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `execute_result`：执行结果对象，记录运行状态和输出信息；类型 `ExecuteResult`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `runtime_args`：运行期实参序列，与 DSL 函数形参按顺序对应；类型 `tuple[RuntimeRealArg, ...]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `runtime_args`：运行期实参序列，与 DSL 函数形参按顺序对应；类型 `tuple[RuntimeRealArg, ...]`；无默认值，调用方必须显式提供；容器本身不允许 `None`，元素 `None` 仅表示 allow-absent memory 形参；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
 - 返回值：`DslRunResult` 实例。
 - 使用示例：
 
@@ -73,7 +73,7 @@
 - api：`dsl_run(func_obj: Callable[..., DslFunctionReturn], real_args: tuple[RuntimeRealArg, ...] | list[RuntimeRealArg], pipeline: str | PassManager) -> DslRunResult`
 - 参数：
   - `func_obj`：函数对象或函数级 IR；类型 `Callable[..., DslFunctionReturn]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
-  - `real_args`：运行期真实实参序列；类型 `tuple[RuntimeRealArg, ...] | list[RuntimeRealArg]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按可变容器传入时，是否修改输入必须以本接口功能说明和注意事项为准；非法值按该 API 的公开错误语义处理。
+  - `real_args`：运行期真实实参序列；类型 `tuple[RuntimeRealArg, ...] | list[RuntimeRealArg]`；无默认值，调用方必须显式提供；容器本身不允许 `None`，元素 `None` 仅表示 allow-absent memory 形参；按可变容器传入时，是否修改输入必须以本接口功能说明和注意事项为准；非法值按该 API 的公开错误语义处理。
   - `pipeline`：pass pipeline 名称或 PassManager 对象；类型 `str | PassManager`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
 - 返回值：`DslRunResult`。
 - 使用示例：
@@ -95,11 +95,13 @@
 - 注意事项：
   - target 只能来自 `kernel_gen.core.config.get_target()`；未设置或不是非空 `str` 时必须失败，固定短语为 `DslRunInvalidTarget: core config target must be non-empty str`。
   - `pipeline` 仅接受 `str | PassManager`。
-  - `real_args` 容器仅接受 `tuple | list`，元素仅允许 `torch.Tensor`、`numpy.ndarray`、Python `int` 或 numpy integer 标量。
+  - `real_args` 容器仅接受 `tuple | list`，元素仅允许 `torch.Tensor`、`numpy.ndarray`、Python `int`、numpy integer 标量或 memory 形参位置的 `None`。
   - `bool` 不属于运行期标量参数；不允许借 `bool` 是 `int` 子类的 Python 行为进入 DSL runtime。
   - 运行期整数标量不构造成 `Memory`，必须规整为 Python `int` 后传入 `mlir_gen(...)` 并继续作为执行阶段真实参数。
   - 名称以 `tile_` 开头的运行期标量必须是正整数；`0`、负数、`float` 或 `bool` 必须失败，固定短语为 `DslRunInvalidTileValue: tile runtime scalar must be positive int`。
-  - 非 tensor/array 且非合法整数标量的元素必须失败，固定短语为 `DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray and integer scalar`。
+  - 非 tensor/array、非合法整数标量且非合法 memory absent `None` 的元素必须失败，固定短语为 `DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray, integer scalar and None for memory`。
+  - `None` 只能用于带 `Tensor[...]` 注解的 memory 形参；工具层必须从该注解构造 nominal compile-time `Memory`，不能从 `None` 推断 dtype、rank、shape 或 ABI slot。
+  - `None` memory 只有在生成源码包含对应 `// kg.allow_absent_memory_args: <index>:<dtype>:<rank>;...` 元数据、且所有真实 data-use 均被 non-null pointer 分支保护时才允许执行；否则必须按公开错误失败，错误说明包含 `None` 与 `allow-absent memory metadata` 或 `absent memory data-use must be guarded by non-null pointer branch`。
   - DSL 函数只要存在值返回，就必须失败。
   - DSL 函数体引用未显式导入或绑定的 helper / enum 名称时，必须由 DSL parser 显式失败；`dsl_run(...)` 不得补写 `func.__globals__`。
   - `core.config.target` 决定源码生成与执行目标，不做跨 target 自动猜测。
@@ -219,6 +221,8 @@
 | TC-TOOLS-DSL-RUN-044 | 边界/异常 | DSL cost run rejects missing cost sibling without fallback | 准备不包含 `LaunchKernelCostFuncPass` 的公开 `PassManager` 链路。 | 运行 `test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback`。 | 按 `DslCostRunMissingCostFunction` 公开错误失败，输出参数保持原值，不 fallback 到普通 kernel。 | `test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback` |
 | TC-TOOLS-DSL-RUN-045 | 边界/异常 | DSL cost run rejects non npu demo target | 通过公开 target 配置设置 `target="cpu"`。 | 运行 `test_dsl_cost_run_rejects_non_npu_demo_target`。 | 按 `DslCostRunInvalidTarget` 公开错误失败。 | `test_dsl_cost_run_rejects_non_npu_demo_target` |
 | TC-TOOLS-DSL-RUN-046 | 执行结果 | DSL cost run accepts numpy torch mixed real args | 准备 `torch.Tensor` 输出、`numpy.ndarray` 输入和 `torch.Tensor` 输入。 | 运行 `test_dsl_cost_run_accepts_numpy_torch_mixed_real_args`。 | `dsl_cost_run(...)` 返回 `int` 且为当前 vector cost 公式的非零结果。 | `test_dsl_cost_run_accepts_numpy_torch_mixed_real_args` |
-| TC-TOOLS-DSL-RUN-047 | 执行结果 | DSL run runtime trance stdout logs entry and args | 设置 `set_trance_enabled(True)` 且不设置 `dump_dir`，准备公开 add kernel 与真实运行参数。 | 运行 `test_dsl_run_trance_stdout_logs_entry_and_runtime_args`。 | stdout 包含 `in func:`、`template=<none>`、`args =` 和 `Memory` 参数摘要。 | `test_dsl_run_trance_stdout_logs_entry_and_runtime_args` |
-| TC-TOOLS-DSL-RUN-048 | 执行结果 | DSL run runtime trance dump file writes and overwrites | 设置 `set_dump_dir(tmp_path)` 与 `set_trance_enabled(True)`，重复执行同一公开 kernel。 | 运行 `test_dsl_run_trance_dump_dir_writes_and_overwrites_trace_file`。 | `dump/<kernel>/<entry>_trace.txt` 存在并包含参数摘要；第二次执行覆盖旧文件内容。 | `test_dsl_run_trance_dump_dir_writes_and_overwrites_trace_file` |
-| TC-TOOLS-DSL-RUN-049 | 执行结果 | DSL cost run runtime trance logs return value | 设置 `set_trance_enabled(True)`，执行 `dsl_cost_run(...)` 正向 VECTOR1 成本链路。 | 运行 `test_dsl_cost_run_trance_logs_return_value`。 | stdout 包含 `return = <cost>`，Python 返回值仍是同一 `int` 成本。 | `test_dsl_cost_run_trance_logs_return_value` |
+| TC-TOOLS-DSL-RUN-047 | 执行结果 | DSL run accepts allow-absent memory None real arg | 准备带 `Tensor[...]` memory bias 形参且函数体使用 `bias is not None` guard 的公开 DSL kernel。 | 运行 `test_dsl_run_optional_bias_none_and_present_paths`。 | `None` 运行期实参通过注解构造 nominal memory，并由源码元数据放行 absent memory；真实 bias 与 absent 两路都执行。 | `test_dsl_run_optional_bias_none_and_present_paths` |
+| TC-TOOLS-DSL-RUN-048 | 边界/异常 | DSL run rejects unguarded None memory data use | 准备 memory 形参为 `None` 但函数体未用 non-null pointer guard 支配 data-use 的公开 DSL kernel。 | 运行 `test_dsl_run_rejects_none_without_allow_absent_metadata`。 | 按 allow-absent metadata 或 guarded data-use 错误稳定失败。 | `test_dsl_run_rejects_none_without_allow_absent_metadata` |
+| TC-TOOLS-DSL-RUN-049 | 执行结果 | DSL run runtime trance stdout logs entry and args | 设置 `set_trance_enabled(True)` 且不设置 `dump_dir`，准备公开 add kernel 与真实运行参数。 | 运行 `test_dsl_run_trance_stdout_logs_entry_and_runtime_args`。 | stdout 包含 `in func:`、`template=<none>`、`args =` 和 `Memory` 参数摘要。 | `test_dsl_run_trance_stdout_logs_entry_and_runtime_args` |
+| TC-TOOLS-DSL-RUN-050 | 执行结果 | DSL run runtime trance dump file writes and overwrites | 设置 `set_dump_dir(tmp_path)` 与 `set_trance_enabled(True)`，重复执行同一公开 kernel。 | 运行 `test_dsl_run_trance_dump_dir_writes_and_overwrites_trace_file`。 | `dump/<kernel>/<entry>_trace.txt` 存在并包含参数摘要；第二次执行覆盖旧文件内容。 | `test_dsl_run_trance_dump_dir_writes_and_overwrites_trace_file` |
+| TC-TOOLS-DSL-RUN-051 | 执行结果 | DSL cost run runtime trance logs return value | 设置 `set_trance_enabled(True)`，执行 `dsl_cost_run(...)` 正向 VECTOR1 成本链路。 | 运行 `test_dsl_cost_run_trance_logs_return_value`。 | stdout 包含 `return = <cost>`，Python 返回值仍是同一 `int` 成本。 | `test_dsl_cost_run_trance_logs_return_value` |

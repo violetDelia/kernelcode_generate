@@ -3,6 +3,8 @@
 
 功能说明:
 - 为函数内 `NnMemoryType` block argument、operand 与 result 推导并写回 `template_name`。
+- 同步 `memory.get_data` 的 `!symbol.ptr<..., template = T>` result template，使 pointer
+  presence 判断与 memory template family 保持一致。
 - 基于 `TemplateNameGraph` 与已注册 operation 约束求解稳定 `T1/T2/...` 名称。
 - 当前文件内 helper 仅服务本 pass 的 IR 遍历和 SSA type 写回，不属于公开 API。
 
@@ -31,11 +33,13 @@ from xdsl.rewriter import Rewriter
 
 from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
+from kernel_gen.dialect.memory import MemoryGetDataOp
 from kernel_gen.dialect.nn import NnMemoryType, copy_memory_type_with_template_name
+from kernel_gen.dialect.symbol import SymbolPtrType
 from kernel_gen.passes.pass_manager import Pass
 from kernel_gen.passes.template_name_constraints import build_template_constraints
 from kernel_gen.passes.template_name_default_constraints import register_default_template_constraints
-from kernel_gen.passes.template_name_graph import Same, TemplateNameGraph, TemplateNameValue
+from kernel_gen.passes.template_name_graph import Same, TemplateNameGraph, TemplateNameSolution, TemplateNameValue
 
 
 def _template_infer_error(message: str) -> KernelCodeError:
@@ -157,6 +161,34 @@ def _write_value_template_name(value: SSAValue, template_name: str) -> None:
     Rewriter.replace_value_with_new_type(
         value,
         copy_memory_type_with_template_name(value.type, template_name),
+    )
+
+
+def _write_memory_get_data_result_template_name(op: Operation, solution: TemplateNameSolution) -> None:
+    """把 `memory.get_data` result pointer template 同步为 source memory template。
+
+    功能说明:
+    - `TemplateNameGraph` 只求解 `!nn.memory` value；`memory.get_data` 的 pointer result
+      需要在同一个 pass 内按 source memory 的求解结果补写。
+    - 非 `memory.get_data`、source 未进入求解域或 result 不是 `SymbolPtrType` 时保持 no-op。
+
+    使用示例:
+    - _write_memory_get_data_result_template_name(op, solution)
+    """
+
+    if not isinstance(op, MemoryGetDataOp):
+        return
+    template_name = solution.name_of(op.source)
+    if not template_name and isinstance(op.source.type, NnMemoryType):
+        template_name = op.source.type.template_name.data
+    if not template_name:
+        return
+    result_type = op.result.type
+    if not isinstance(result_type, SymbolPtrType):
+        return
+    Rewriter.replace_value_with_new_type(
+        op.result,
+        SymbolPtrType(result_type.dtype, template_name),
     )
 
 
@@ -297,6 +329,11 @@ class TemplateNameInferPass(Pass):
         for value, template_name in solution.names.items():
             _write_value_template_name(value, template_name)
         for func_op in funcs.values():
+            if func_op.is_declaration:
+                continue
+            for op in func_op.walk():
+                _write_memory_get_data_result_template_name(op, solution)
+        for func_op in funcs.values():
             if not func_op.is_declaration:
                 func_op.update_function_type()
 
@@ -326,6 +363,8 @@ class TemplateNameInferPass(Pass):
         solution = graph.solve()
         for value, template_name in solution.names.items():
             _write_value_template_name(value, template_name)
+        for op in func_op.walk():
+            _write_memory_get_data_result_template_name(op, solution)
         func_op.update_function_type()
 
 

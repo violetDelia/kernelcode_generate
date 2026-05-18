@@ -17,7 +17,7 @@
 - `class SymbolIterType(start: SymbolExprAttr, end: SymbolExprAttr, step: SymbolExprAttr)`
 - `SymbolIterType.from_bounds(start: str, end: str, step: str) -> SymbolIterType`
 - `SymbolIterType.from_attr(attr: SymbolIterAttr) -> SymbolIterType`
-- `class SymbolPtrType(dtype: Attribute)`
+- `class SymbolPtrType(dtype: Attribute, template_name: StringAttr | str | None = None)`
 - `class SymbolConstOp(value: int | IntAttr, result_type: SymbolValueType | None = None)`
 - `class SymbolAddOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 - `class SymbolSubOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
@@ -64,7 +64,7 @@
 - 为后续 `nn`、`dma`、`kernel`、`dsl` 等方言提供统一的符号值口径，避免每个方言各自维护一套符号标量表达。
 - 提供最小整数符号算术与比较接口，使 `!symbol.int<#symbol.expr<expr>>` 标量可在方言内完成基础加、减、乘、除、整除、最小值、最大值组合与相等/大小关系判断，而无需回退到其他算术方言。
 - 明确 `symbol.gt` / `symbol.le` / `symbol.lt` / `symbol.ne` 与 `symbol.to_float` 的 dialect 合同，使上游 `a > b`、`a <= b`、`a < b`、`a != b` 与 `float(n)` 在进入 `symbol dialect` 后拥有稳定目标 op。
-- 提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 的最小 IR pointer type 载体，使函数签名 lowering 可以稳定表达“指向某个 pointee dtype 的指针输入”。
+- 提供 `!symbol.ptr<dtype>` 与 `!symbol.ptr<dtype, template = T>` 作为 DSL pointer 和 memory data pointer 的最小 IR pointer type 载体，使函数签名 lowering 与 `memory.get_data` 结果可以稳定表达“指向某个 pointee dtype 的指针输入”，并在需要时携带与 `!nn.memory` 一致的 template name。
 - 提供 `SymbolIterType`，用于表达循环迭代变量语义，并支持 `!symbol.iter<start = #symbol.expr<...>, end = #symbol.expr<...>, step = #symbol.expr<...>>` 文本形式。
 - 提供 `symbol.yield` 与带单个 carried `!symbol.int<#symbol.expr<...>>` 的 `symbol.for`，用于表达循环体终止与最小归约语义。
 - 保持类型表达尽量简单，优先服务开发者理解和方言间协同，而不是追求复杂的符号推导系统。
@@ -113,6 +113,7 @@
 
 - `expr`：符号表达。
 - `dtype`：pointer pointee dtype。
+- `template_name`：可选 template 名称；省略或空字符串表示无 template。
 
 - 使用示例：
 
@@ -127,6 +128,7 @@
 !symbol.int<#symbol.expr<3>>
 !symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<index>, step = #symbol.expr<1>>
 !symbol.ptr<f32>
+!symbol.ptr<f32, template = T_bias>
 !symbol.ptr<i32>
 ```
 
@@ -135,7 +137,7 @@
 - `SymbolExprAttr` 使用 `#symbol.expr<expr>`。
 - `SymbolValueType` 使用 `!symbol.int<#symbol.expr<expr>>`。
 - `SymbolIterType` 使用 `!symbol.iter<start = #symbol.expr<...>, end = #symbol.expr<...>, step = #symbol.expr<...>>`。
-- `SymbolPtrType` 使用 `!symbol.ptr<dtype>`。
+- `SymbolPtrType` 使用 `!symbol.ptr<dtype>` 或 `!symbol.ptr<dtype, template = T>`。
 - 当前不接受按位宽区分的 legacy 整型文本，或任何非整型文本变体；`symbol.ptr` 也不定义别名文本。
 
 - 返回值：
@@ -175,8 +177,9 @@ SymbolPtrType(f32)
 - 打印后再解析必须能得到等价类型对象。
 - `!symbol.int<#symbol.expr<N>>` 表示“该 SSA value 的整数值由符号 `N` 表示”，不是变量声明；`!symbol.int<#symbol.expr<1>>`、`!symbol.int<#symbol.expr<2>>`、`!symbol.int<#symbol.expr<3>>` 表示该值已知为对应常量整数。
 - `SymbolPtrType` 的 `dtype` 必须为 `TypeAttribute`；若不是类型 attribute，必须报错。
+- `SymbolPtrType` 的 `template_name` 与 `NnMemoryType.template_name` 使用同一 identifier 规则：`None` 或空字符串表示无 template，非空必须匹配 `[A-Za-z_][A-Za-z0-9_]*`；非法值必须以 `symbol.ptr template_name must be an identifier` 失败。
 - `SymbolPtrType` 的 `dtype` 不得为 `SymbolValueType`；`!symbol.ptr<!symbol.int<#symbol.expr<N>>>` 必须视为非法。
-- `!symbol.ptr<dtype>` 打印后再解析必须能得到等价类型对象。
+- `!symbol.ptr<dtype>` 与 `!symbol.ptr<dtype, template = T>` 打印后再解析必须能得到等价类型对象。
 
 - 返回值：
 

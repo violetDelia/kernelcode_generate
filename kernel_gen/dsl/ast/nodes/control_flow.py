@@ -154,6 +154,8 @@ class IfAST(StatementAST):
         if_op = scf.IfOp(condition, [], Region(true_block), false_region)
         block.add_op(if_op)
         self.true_body.emit_mlir(ctx, true_block)
+        true_block.add_op(scf.YieldOp())
         if self.false_body is not None and false_block is not None:
             self.false_body.emit_mlir(ctx, false_block)
+            false_block.add_op(scf.YieldOp())
         return None

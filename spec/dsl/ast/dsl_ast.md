@@ -8,6 +8,7 @@
 - 赋值绑定只读取右侧 `ValueAST.binding_value()` / `bind_target(...)`，不得在 visitor 内维护跨 DMA/NN/symbol 节点的中央推导逻辑。
 - 函数输入构造必须委托 `FunctionAST.input_from_runtime_arg(...)` / `FunctionAST.input_from_bound_value(...)`，不得在 `visit_FunctionDef(...)` 中复制 runtime 类型工厂。
 - Python callee 解析通过公开 visitor API `runtime_arg_key(...)`、`parse_python_callee(...)`、`build_python_callee_call(...)` 承接；不再把 callee 解析藏在 `_xxx` 私有方法中。
+- memory 与 `None` 的比较只支持 `is None`、`is not None`、`== None`、`!= None` 四种单个比较，结果作为 `i1` 条件值 lowered；`if memory:`、链式 None compare、非 memory 与 None compare、memory 与非 None 常量 compare 都必须稳定失败。
 
 ## API 列表
 
@@ -53,6 +54,7 @@
 - `spec/dsl/ast/nodes/control_flow.md`：`ForAST` / `IfAST` 控制流节点。
 - `spec/dsl/ast/plugin/registry.md`：DSL builtin 注册表。
 - `kernel_gen.operation.dma`、`kernel_gen.operation.nn`、`kernel_gen.operation.kernel`、`kernel_gen.operation.arch`：可注册 DSL helper 的 operation 函数对象；其中 `dma.broadcast`、`kernel.exp`、`kernel.reduce` 与 `kernel.KernelReduceKind.*` 属于公开可解析属性集合。
+- [`spec/dialect/memory.md`](../../dialect/memory.md)：定义 memory data pointer query，用于 None memory condition lowering。
 
 ## API详细说明
 

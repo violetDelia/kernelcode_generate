@@ -6,7 +6,8 @@
 - 汇总 `dma.alloc/dma.free` 的生命周期区间与 peak 统计。
 - 显式 `rewrite=True` 时，将可由 dynamic backing 承接的片上 `dma.alloc`
   改写为 `arch.get_dynamic_memory + dma.view + dma.reshape`；`global` alloc 保留为 summary-only。
-- 支持 `ArchParallelizePass` 生成的 block0 guard 形态，在单块 `scf.if` then/else region 内继续收集并改写 alloc/free。
+- 支持 `ArchParallelizePass` 生成的 block0 guard 形态，以及无 else 的单块
+  `scf.if`，在存在的 branch region 内继续收集并改写 alloc/free。
 
 API 列表:
 - `class MemoryPoolPass(rewrite: bool = False, fold: bool = True, alignment: int = 1024)`
@@ -31,11 +32,16 @@ API 列表:
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
+import io
+import os
+import re
 from typing import TypeAlias
 
-import re
+os.environ.setdefault("SYMPY_GMPY", "0")
 import sympy as sp
+from sympy.core.cache import clear_cache
 from xdsl.context import Context
 from xdsl.dialects import func, scf
 from xdsl.dialects.builtin import (
@@ -796,7 +802,8 @@ def _visit_ops_with_loops(
 
     功能说明:
     - 作为 `_collect_ops_with_loops(...)` 的当前文件私有递归 helper。
-    - 接受 `symbol.for`、`scf.for` 与单块 `scf.if` then/else region，其余 region 直接拒绝。
+    - 接受 `symbol.for`、`scf.for`、单块 `scf.if` then/else region 与无 else
+      的空 false region，其余 region 直接拒绝。
 
     使用示例:
     - index = _visit_ops_with_loops(list(block.ops), None, ops, loop_bounds, op_loop, 0)
@@ -836,6 +843,8 @@ def _visit_ops_with_loops(
         if isinstance(op, scf.IfOp):
             for region in op.regions:
                 blocks = list(region.blocks)
+                if len(blocks) == 0:
+                    continue
                 if len(blocks) != 1:
                     raise KernelCodeError(
                         ErrorKind.CONTRACT,
@@ -1092,7 +1101,7 @@ def _alloc_infos_from_ops(
                 op,
                 result_type,
                 free_op,
-                sp.simplify(_shape_product(result_type, unknown_prefix=f"alloc{alloc_idx}") * sp.Integer(dtype_size)),
+                _safe_simplify_expr(_shape_product(result_type, unknown_prefix=f"alloc{alloc_idx}") * sp.Integer(dtype_size)),
                 dtype_size,
                 _bucket_key(result_type),
                 begin_index,
@@ -1155,9 +1164,38 @@ def _safe_simplify_expr(expr: sp.Basic) -> sp.Basic:
     if expr.has(sp.Min, sp.Max) or any(str(symbol).startswith("iter_expr_") for symbol in expr.free_symbols):
         return expr
     try:
-        return sp.simplify(expr)
+        with contextlib.redirect_stdout(io.StringIO()):
+            return sp.simplify(expr)
     except Exception:
         return expr
+    finally:
+        clear_cache()
+
+
+def _safe_peak_expr(intervals: list[MemoryPoolInterval], candidates: list[sp.Basic]) -> sp.Basic:
+    """安全构造 bucket peak 字节表达式。
+
+    功能说明:
+    - 静态整数候选保持精确 `max`。
+    - 动态 `Min/Max/iter` 候选使用所有 allocation size 之和作为保守上界，
+      避免 SymPy 为 `Max` 比较复杂符号表达式时进入不稳定的关系推导。
+
+    使用示例:
+    - peak = _safe_peak_expr(intervals, candidates)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/kernel/test_conv2d_symbolic_memory_genkernel.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    if not candidates:
+        return sp.Integer(0)
+    if len(candidates) == 1:
+        return candidates[0]
+    if all(isinstance(candidate, sp.Integer) for candidate in candidates):
+        return sp.Integer(max(int(candidate) for candidate in candidates))
+    return sp.Add(*(interval.size_bytes_expr for interval in intervals), evaluate=False)
 
 
 def _peak_bytes(intervals: list[MemoryPoolInterval]) -> sp.Basic:
@@ -1187,10 +1225,10 @@ def _peak_bytes(intervals: list[MemoryPoolInterval]) -> sp.Basic:
     candidates: list[sp.Basic] = []
     for index in sorted(events):
         for delta in events[index]:
-            current = sp.simplify(current + delta)
+            current = _safe_simplify_expr(current + delta)
         candidates.append(current)
 
-    return sp.Max(*candidates)
+    return _safe_peak_expr(intervals, candidates)
 
 
 def _alloc_name(value: SSAValue, index: int) -> str:
@@ -1253,7 +1291,7 @@ def _summarize_func(
                 offset,
             )
         )
-        current_by_bucket[info.bucket_key] = sp.simplify(offset + info.size_bytes_expr)
+        current_by_bucket[info.bucket_key] = _safe_simplify_expr(offset + info.size_bytes_expr)
 
     intervals_tuple = tuple(intervals)
     peak_bytes_by_bucket: dict[tuple[str], sp.Basic] = {}
@@ -1440,7 +1478,7 @@ def _add_material(lhs: _SymbolMaterial, rhs: _SymbolMaterial) -> tuple[SymbolAdd
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    expr = sp.simplify(lhs.expr + rhs.expr)
+    expr = _safe_simplify_expr(lhs.expr + rhs.expr)
     if lhs.expr_text == "?" or rhs.expr_text == "?":
         expr_text = "?"
     elif expr == lhs.expr:
@@ -1496,7 +1534,7 @@ def _mul_material(lhs: _SymbolMaterial, rhs: _SymbolMaterial) -> tuple[SymbolMul
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    expr = sp.simplify(lhs.expr * rhs.expr)
+    expr = _safe_simplify_expr(lhs.expr * rhs.expr)
     expr_text = _mul_expr_text(lhs, rhs, expr)
     op = SymbolMulOp(lhs.value, rhs.value, SymbolValueType.from_expr(expr_text))
     return op, _SymbolMaterial(op.result, expr_text, expr)
@@ -1521,13 +1559,13 @@ def _floordiv_material(
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    if rhs.expr == 0 or sp.simplify(lhs.expr % rhs.expr) != 0:
+    if rhs.expr == 0 or _safe_simplify_expr(lhs.expr % rhs.expr) != 0:
         raise KernelCodeError(
             ErrorKind.UNIMPLEMENTED,
             ErrorModule.PASS,
             "MemoryPoolTypedViewOutOfBounds: byte offset is not divisible by dtype size",
         )
-    expr = sp.simplify(lhs.expr / rhs.expr)
+    expr = _safe_simplify_expr(lhs.expr / rhs.expr)
     expr_text = _expr_text(expr)
     op = SymbolFloorDivOp(lhs.value, rhs.value, SymbolValueType.from_expr(expr_text))
     return op, _SymbolMaterial(op.result, expr_text, expr)
@@ -1937,7 +1975,7 @@ def _offset_material(
         if any(not isinstance(numel.expr, sp.Integer) for numel, _ in prior_numels):
             return _dynamic_offset_from_prior_numels(prior_numels, dtype_size, zero, ratio_materials)
 
-    if sp.simplify(aligned_bytes % dtype_size) != 0:
+    if _safe_simplify_expr(aligned_bytes % dtype_size) != 0:
         raise KernelCodeError(
             ErrorKind.UNIMPLEMENTED,
             ErrorModule.PASS,

@@ -32,7 +32,7 @@ from xdsl.dialects.builtin import (
 )
 
 from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dialect.symbol import SymbolPtrType, SymbolValueType
 
 from ...register import emit_c_type_impl
 
@@ -117,3 +117,20 @@ def _emit_npu_demo_memory_type(attr: NnMemoryType, ctx) -> str:
 @emit_c_type_impl(SymbolValueType, target="npu_demo")
 def _emit_npu_demo_symbol_value_type(_attr: SymbolValueType, _ctx) -> str:
     return "S_INT"
+
+
+@emit_c_type_impl(SymbolPtrType, target="npu_demo")
+def _emit_npu_demo_symbol_ptr_type(attr: SymbolPtrType, ctx) -> str:
+    """发射 npu_demo symbol.ptr 类型文本。
+
+    功能说明:
+    - 有 template name 时发射 `T*`。
+    - 无 template name 时发射 element dtype 对应的 C++ pointer 类型。
+
+    使用示例:
+    - c_type = _emit_npu_demo_symbol_ptr_type(SymbolPtrType(f32), ctx)
+    """
+
+    template_name = attr.template_name.data
+    element_type = template_name if template_name else ctx.dispatch_type(attr.dtype)
+    return f"{element_type}*"

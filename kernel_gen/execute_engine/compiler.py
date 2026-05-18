@@ -494,6 +494,23 @@ class _ParamSpec:
     template_name: str | None = None
 
 
+@dataclass(frozen=True)
+class _AllowAbsentMemoryArg:
+    """allow-absent memory runtime 参数元数据。
+
+    功能说明:
+    - 承载生成源码注释中的 runtime 参数索引、nominal dtype 与 nominal rank。
+    - 只服务当前执行引擎文件内的 entry shim 和 ABI 封送逻辑。
+
+    使用示例:
+    - metadata = _AllowAbsentMemoryArg(index=3, dtype="float", rank=1)
+    """
+
+    index: int
+    dtype: str
+    rank: int
+
+
 _INT_TYPE_PATTERN = re.compile(
     r"^(?:const\s+)?(?P<type>"
     r"S_INT|int|short|long|long\s+long|"
@@ -524,6 +541,58 @@ _TEMPLATE_INSTANCE_SEED_PATTERN = re.compile(
     r"Memory<\s*(?:MemorySpace::)?(?:GM|SM|LM|TSM|TLM1|TLM2|TLM3)\s*,\s*"
     r"(?P<dtype>float|double|int32_t|int64_t|int|long\s+long)\s*>\s*;"
 )
+_ALLOW_ABSENT_MEMORY_ARGS_PATTERN = re.compile(r"//\s*kg\.allow_absent_memory_args:\s*(?P<body>[^\n]*)")
+
+
+def _extract_allow_absent_memory_args(source: str | None) -> tuple[_AllowAbsentMemoryArg, ...]:
+    """从源码注释提取 allow-absent memory 参数元数据。
+
+    功能说明:
+    - 解析 `// kg.allow_absent_memory_args: <index>:<dtype>:<rank>;...`。
+    - 无注释时返回空元组；格式非法时按执行引擎稳定错误失败。
+
+    使用示例:
+    - args = _extract_allow_absent_memory_args("// kg.allow_absent_memory_args: 2:float:1")
+    """
+
+    if not isinstance(source, str) or not source.strip():
+        return ()
+    items: dict[int, _AllowAbsentMemoryArg] = {}
+    for match in _ALLOW_ABSENT_MEMORY_ARGS_PATTERN.finditer(source):
+        body = match.group("body").strip()
+        if not body:
+            continue
+        for item in body.split(";"):
+            text = item.strip()
+            if not text:
+                continue
+            parts = text.split(":")
+            if len(parts) != 3:
+                raise _execution_engine_error(_RUNTIME_THROW_OR_ABORT, "invalid allow-absent memory metadata")
+            index_text, dtype_text, rank_text = parts
+            try:
+                index = int(index_text)
+                rank = int(rank_text)
+            except ValueError as exc:
+                raise _execution_engine_error(_RUNTIME_THROW_OR_ABORT, "invalid allow-absent memory metadata") from exc
+            dtype = dtype_text.strip()
+            if index < 0 or rank <= 0 or not dtype or _dtype_code_from_name(dtype) == 0:
+                raise _execution_engine_error(_RUNTIME_THROW_OR_ABORT, "invalid allow-absent memory metadata")
+            items[index] = _AllowAbsentMemoryArg(index=index, dtype=dtype, rank=rank)
+    return tuple(items[index] for index in sorted(items))
+
+
+def _allow_absent_memory_arg_map(metadata: tuple[_AllowAbsentMemoryArg, ...]) -> dict[int, _AllowAbsentMemoryArg]:
+    """把 allow-absent metadata 转成按 runtime index 查询的字典。
+
+    功能说明:
+    - 统一 entry shim 与 Python ABI 封送路径的查询口径。
+
+    使用示例:
+    - metadata_map = _allow_absent_memory_arg_map(metadata)
+    """
+
+    return {item.index: item for item in metadata}
 
 
 def _split_params(params_text: str) -> tuple[str, ...]:
@@ -793,12 +862,14 @@ def _runtime_template_combinations_from_source(
 def _runtime_param_declaration_lines(
     params: tuple[_ParamSpec, ...],
     template_types: dict[str, tuple[int, str]] | None = None,
+    allow_absent_memory_args: tuple[_AllowAbsentMemoryArg, ...] = (),
 ) -> tuple[list[str], list[str], list[str]]:
     """生成 runtime shim 参数校验、声明与调用实参。
 
     功能说明:
     - 普通函数与 templated 函数共用同一套 memory/int/float 参数封送文本。
     - `template_types` 非空时，template memory dtype 改用当前实例化 C++ 类型。
+    - 带 allow-absent metadata 的 memory 参数允许 `data == nullptr`，但 shape/stride 仍必须有效。
 
     使用示例:
     - lines, call_args, trance_lines = _runtime_param_declaration_lines(params, {"T1": (1, "float")})
@@ -808,6 +879,7 @@ def _runtime_param_declaration_lines(
     call_args: list[str] = []
     trance_arg_lines: list[str] = []
     runtime_arg_index = 0
+    allow_absent_map = _allow_absent_memory_arg_map(allow_absent_memory_args)
     for spec in params:
         if spec.kind == "kernel_context":
             lines.append("  npu_demo::KernelContext ctx;")
@@ -819,12 +891,13 @@ def _runtime_param_declaration_lines(
             ctype = spec.ctype
             if spec.template_name is not None and template_types is not None:
                 ctype = template_types[spec.template_name][1]
+            null_data_check = "ordered_args[{idx}].data == nullptr || " if runtime_idx not in allow_absent_map else ""
             lines.extend(
                 [
                     f"  if (ordered_args[{runtime_idx}].kind != KG_ARG_MEMORY) {{",
                     "    return -1;",
                     "  }",
-                    f"  if (ordered_args[{runtime_idx}].data == nullptr || ordered_args[{runtime_idx}].shape == nullptr || ordered_args[{runtime_idx}].stride == nullptr) {{",
+                    f"  if ({null_data_check.format(idx=runtime_idx)}ordered_args[{runtime_idx}].shape == nullptr || ordered_args[{runtime_idx}].stride == nullptr) {{",
                     "    return -1;",
                     "  }",
                     f"  Memory<{spec.memory_space}, {ctype}> arg{runtime_idx}(",
@@ -913,6 +986,7 @@ def _build_runtime_entry_shim_source(
     """
 
     runtime_params = [spec for spec in params if spec.kind != "kernel_context"]
+    allow_absent_memory_args = _extract_allow_absent_memory_args(source)
     lines: list[str] = [
         f"// runtime entry shim for {function} as {entry_point}",
         "enum KgArgKind : int {",
@@ -951,7 +1025,11 @@ def _build_runtime_entry_shim_source(
             if not conditions:
                 continue
             lines.append(f"  if ({' && '.join(conditions)}) {{")
-            branch_lines, call_args, trance_arg_lines = _runtime_param_declaration_lines(params, template_types)
+            branch_lines, call_args, trance_arg_lines = _runtime_param_declaration_lines(
+                params,
+                template_types,
+                allow_absent_memory_args,
+            )
             lines.extend(f"  {line}" if line else line for line in branch_lines)
             if trance_arg_lines:
                 lines.extend(
@@ -968,7 +1046,10 @@ def _build_runtime_entry_shim_source(
         lines.extend(["  return -1;", "}", ""])
         return _join_text_sections("\n".join(lines))
 
-    decl_lines, call_args, trance_arg_lines = _runtime_param_declaration_lines(params)
+    decl_lines, call_args, trance_arg_lines = _runtime_param_declaration_lines(
+        params,
+        allow_absent_memory_args=allow_absent_memory_args,
+    )
     lines.extend(decl_lines)
     if trance_arg_lines:
         lines.extend(
@@ -1089,7 +1170,7 @@ class _MemoryRuntimeInput(Protocol):
     dtype: _StringValue
 
 
-RuntimeInput: TypeAlias = "_MemoryRuntimeInput | int | float"
+RuntimeInput: TypeAlias = "_MemoryRuntimeInput | int | float | None"
 _RuntimeInputValue: TypeAlias = "RuntimeInput | _StringValue | None"
 
 
@@ -1559,12 +1640,16 @@ def _is_contiguous_memory(value: _MemoryRuntimeInput) -> bool:
     return True
 
 
-def _build_arg_slots(args: tuple[RuntimeInput, ...]) -> tuple[_ArgSlot, ...]:
+def _build_arg_slots(
+    args: tuple[RuntimeInput, ...],
+    allow_absent_memory_args: tuple[_AllowAbsentMemoryArg, ...] = (),
+) -> tuple[_ArgSlot, ...]:
     """按顺序构建 entry shim 参数槽位。
 
 
     功能说明:
     - 校验 _RuntimeInput 的类型与最小 memory 约束（shape/dtype/连续性）。
+    - 仅当源码 metadata 声明对应索引为 allow-absent memory 时接受 `None`。
     - 失败时抛出 runtime_throw_or_abort，保证失败短语稳定。
 
     使用示例:
@@ -1577,7 +1662,27 @@ def _build_arg_slots(args: tuple[RuntimeInput, ...]) -> tuple[_ArgSlot, ...]:
     """
 
     slots: list[_ArgSlot] = []
+    allow_absent_map = _allow_absent_memory_arg_map(allow_absent_memory_args)
     for idx, arg in enumerate(args):
+        if arg is None:
+            metadata = allow_absent_map.get(idx)
+            if metadata is None:
+                raise _execution_engine_error(
+                    _RUNTIME_THROW_OR_ABORT,
+                    f"None runtime arg requires allow-absent memory metadata at position {idx}",
+                )
+            slots.append(
+                _ArgSlot(
+                    position=idx,
+                    kind="memory",
+                    dtype=metadata.dtype,
+                    dtype_code=_dtype_code_from_name(metadata.dtype),
+                    shape=(0,),
+                    stride=(1,),
+                    value=None,
+                )
+            )
+            continue
         if _is_runtime_int(arg):
             slots.append(
                 _ArgSlot(
@@ -1740,10 +1845,11 @@ def _marshal_slots_for_abi(
             shape_buffer = shape_buffer_type(*slot.shape)
             stride_buffer = stride_buffer_type(*stride)
             keepalive.extend([shape_buffer, stride_buffer])
+            data_pointer = 0 if slot.value is None else _runtime_data_pointer(slot.value)
             c_slots.append(
                 _C_ArgSlot(
                     kind=1,
-                    data=ctypes.c_void_p(_runtime_data_pointer(slot.value)),
+                    data=ctypes.c_void_p(data_pointer),
                     shape=ctypes.cast(shape_buffer, ctypes.POINTER(ctypes.c_longlong)),
                     stride=ctypes.cast(stride_buffer, ctypes.POINTER(ctypes.c_longlong)),
                     rank=ctypes.c_ulonglong(len(slot.shape)),
@@ -1930,6 +2036,7 @@ class CompiledKernel:
     entry_point: str
     compile_stdout: str = ""
     compile_stderr: str = ""
+    allow_absent_memory_args: tuple[_AllowAbsentMemoryArg, ...] = field(default_factory=tuple, repr=False, compare=False)
     _cleanup: Callable[[], None] | None = field(default=None, repr=False, compare=False)
     _cleanup_state: list[Callable[[], None] | None] = field(default_factory=list, init=False, repr=False, compare=False)
 
@@ -2041,7 +2148,7 @@ class CompiledKernel:
                 _RUNTIME_THROW_OR_ABORT,
                 "args must be a tuple",
             )
-        ordered_slots = _build_arg_slots(args)
+        ordered_slots = _build_arg_slots(args, self.allow_absent_memory_args)
 
         resolved_entry = self.entry_point if entry_point is None else entry_point
         if not isinstance(resolved_entry, str) or not resolved_entry.strip():
@@ -2233,6 +2340,7 @@ def _compile_with_builtin_strategy(request: CompileRequest) -> CompiledKernel:
             entry_point=entry_point,
             source=source,
         )
+    allow_absent_memory_args = _extract_allow_absent_memory_args(source)
     compile_unit = _compose_compile_unit(
         source=source,
         _include_lines_for_target=target_headers,
@@ -2272,6 +2380,7 @@ def _compile_with_builtin_strategy(request: CompileRequest) -> CompiledKernel:
         entry_point=entry_point,
         compile_stdout=artifacts.stdout,
         compile_stderr=artifacts.stderr,
+        allow_absent_memory_args=allow_absent_memory_args,
         _cleanup=artifacts._cleanup,
     )
 

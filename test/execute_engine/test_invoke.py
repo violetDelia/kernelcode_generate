@@ -67,6 +67,27 @@ def _compile_minimal_kernel() -> CompiledKernel:
     return engine.compile(source="int main(){}", function="cpu::add")
 
 
+def _compile_allow_absent_memory_kernel(*, with_metadata: bool) -> CompiledKernel:
+    """编译最小 npu_demo memory kernel。
+
+    功能说明:
+    - 通过公开 `ExecutionEngine.compile(...)` 验证 source metadata 控制 runtime `None`。
+
+    使用示例:
+    - kernel = _compile_allow_absent_memory_kernel(with_metadata=True)
+    """
+
+    metadata = "// kg.allow_absent_memory_args: 0:float:1\n" if with_metadata else ""
+    source = f"""
+#include "include/npu_demo/npu_demo.h"
+using namespace npu_demo;
+{metadata}void allow_absent_memory_noop(Memory<MemorySpace::GM, float>& arg0) {{
+    (void)arg0;
+}}
+"""
+    return ExecutionEngine(target="npu_demo").compile(source=source, function="allow_absent_memory_noop")
+
+
 class _DTypeToken:
     """最小 dtype 字符串化占位（S6）。
 
@@ -370,6 +391,28 @@ def test_execute_engine_invoke_runtime_throw_or_abort_on_unsupported_runtime_arg
     kernel = _compile_minimal_kernel()
     with pytest.raises(KernelCodeError) as exc:
         kernel.execute(args=(True,))  # type: ignore[arg-type]
+    assert exc.value.failure_phrase == "runtime_throw_or_abort"
+
+
+def test_execute_engine_invoke_allows_none_with_absent_memory_metadata() -> None:
+    """source metadata 标记的 memory 参数允许 runtime `None` data pointer。"""
+
+    kernel = _compile_allow_absent_memory_kernel(with_metadata=True)
+
+    result = kernel.execute(args=(None,))
+
+    assert result.ok is True
+    assert result.failure_phrase is None
+
+
+def test_execute_engine_invoke_rejects_none_without_absent_memory_metadata() -> None:
+    """未携带 allow-absent metadata 的 compiled kernel 必须拒绝 runtime `None`。"""
+
+    kernel = _compile_allow_absent_memory_kernel(with_metadata=False)
+
+    with pytest.raises(KernelCodeError, match="None runtime arg requires allow-absent memory metadata") as exc:
+        kernel.execute(args=(None,))
+
     assert exc.value.failure_phrase == "runtime_throw_or_abort"
 
 

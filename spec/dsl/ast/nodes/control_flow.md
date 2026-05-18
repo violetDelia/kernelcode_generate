@@ -34,6 +34,7 @@
 - `ForAST` 的 body block 必须使用 loop iter argument 绑定 `var.name`，body 发射完成后不得保留临时 `name_hint`。
 - `IfAST` 的 condition 必须发射为 `i1` SSA value；非 `i1` 条件必须稳定失败。
 - `IfAST.false_body` 为 `None` 时不生成 else region；当前 DSL 不要求 Python `else` 必须存在。
+- memory-vs-None 条件由 visitor 先 lowering 成 `i1` compare value；`IfAST` 只消费该公开 `i1` 条件，不直接探测 memory 类型或 `None` 常量。
 
 ## API详细说明
 

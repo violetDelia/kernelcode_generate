@@ -26,6 +26,7 @@
 - `kernel_gen.dialect.nn.Nn`
 - `kernel_gen.dialect.kernel.Kernel`
 - `kernel_gen.dialect.symbol.Symbol`
+- `kernel_gen.dialect.memory.Memory`
 - `kernel_gen.dialect.tuner.Tuner`
 - `kernel_gen.dialect.dma.Dma`
 - `kernel_gen.dialect.arch.Arch`
@@ -47,14 +48,16 @@
   module = Parser(ctx, "builtin.module { func.func @main() { func.return } }").parse_module()
   ```
 - 功能说明：构建 `default_context`。
-- 注意事项：默认加载基础 dialect `builtin/func/arith/scf` 和仓库常用 dialect `nn/kernel/symbol/tuner/dma/arch`；本接口只负责 dialect 注册，不运行 pass、不做 lowering、不修复非法 IR；需要解析 `scf.if`、`symbol.for`、`dma.*`、`arch.*` 等项目内常见 IR 的工具应复用本接口，不得维护第二套默认 dialect 注册列表；`kernel_gen.core.context` 是公开导入路径，旧 `kernel_gen.context` 不作为当前公开入口；`Context` 类型来自 `xdsl.context.Context`，本模块不重新导出 `Context`。
+- 注意事项：默认加载基础 dialect `builtin/func/arith/scf` 和仓库常用 dialect `nn/kernel/symbol/memory/tuner/dma/arch`；本接口只负责 dialect 注册，不运行 pass、不做 lowering、不修复非法 IR；需要解析 `scf.if`、`symbol.for`、`memory.get_data`、`dma.*`、`arch.*` 等项目内常见 IR 的工具应复用本接口，不得维护第二套默认 dialect 注册列表；`kernel_gen.core.context` 是公开导入路径，旧 `kernel_gen.context` 不作为当前公开入口；`Context` 类型来自 `xdsl.context.Context`，本模块不重新导出 `Context`。
 
 ## 测试
 
 - 测试文件：
+  - `test/core/test_context.py`
   - `test/tools/test_ircheck_runner.py`
   - `test/tools/test_mlir_gen_compare.py`
 - 执行命令：
+  - `pytest -q test/core/test_context.py`
   - `pytest -q test/tools/test_mlir_gen_compare.py`
   - `pytest -q test/tools/test_ircheck_runner.py`
 

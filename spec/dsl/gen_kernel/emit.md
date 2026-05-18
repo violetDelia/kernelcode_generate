@@ -54,6 +54,9 @@
 - 上述 target-specific 注册函数和布局辅助函数均不是公开 API；测试只能通过 `emit_c(...)`、`emit_c_op(...)` 或 `emit_c_value(...)` 观察。
 - `target="npu_demo"` 的 memory type 发射必须在各发射文件内部按 `NnMemoryType.template_name` 选择 `Memory<space, Tn>` 或真实 dtype fallback，不提供额外公开 helper。
 - template name 只用于 C++ element type 文本；真实 dtype size、cast、alignment 和 verifier 不得读取 template name。
+- `target="npu_demo"` 的 `memory.get_data` 必须通过注册体系发射为 memory 对象的 data pointer 读取；`!symbol.ptr<dtype, template = T>` 的 C++ 类型发射为 `T*`，无 template 时回退到真实 dtype pointer。
+- `target="npu_demo"` 的 ptr `symbol.cast` 必须发射为 pointer-to-integer reinterpret cast，用于 optional memory presence guard。
+- `gen_kernel` 可在源码中写入 `// kg.allow_absent_memory_args: <index>:<dtype>:<rank>;...` 元数据，供执行引擎按公开 runtime `None` 合同识别 allow-absent memory 参数；该注释不新增 `emit` package 公开 API。
 
 ## API详细说明
 

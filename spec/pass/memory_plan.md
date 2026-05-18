@@ -53,6 +53,8 @@
 - 只管理当前 module 内由 `dma.alloc` 产生的 owned memory。
 - 支持 alloc 所在 owner block 为单块 `func.func` body 或单块 `symbol.for` body。
 - alloc 的最后一次有效 use 若位于嵌套 `symbol.for` 内，free 插入到 owner block 中承载该 nested use 的 ancestor `symbol.for` 之后。
+- alloc 的最后一次有效 use 若位于 owner block 中单块 `scf.if` 分支内，free 插入到 owner block 中承载该 nested use 的 `scf.if` 之后。
+- `scf.if` 分支内新建 `dma.alloc` 仍不建模，按 unsupported control flow 失败。
 
 ### alias closure
 
@@ -122,7 +124,9 @@ pass_obj = build_registered_pass("memory-plan", {"insert-free": "true", "fold": 
 | TC-MPLAN-009 | call operand | call 后插入 free |
 | TC-MPLAN-010 | memory-return call | 报 `MemoryPlanUnsupportedCall: func.call returning nn.memory requires ownership modelling` |
 | TC-MPLAN-011 | return/yield escape | 报 `MemoryPlanUnsupportedEscape: dma.alloc escapes current supported region` |
-| TC-MPLAN-012 | scf.if/scf.for | 报 `MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region` |
+| TC-MPLAN-012 | scf.for 内 alloc | 报 `MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region` |
+| TC-MPLAN-012A | scf.if 内 alloc | 报 `MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region` |
+| TC-MPLAN-012B | owner block alloc 在 scf.if 分支内 use | `dma.free` 插入到 `scf.if` 后 |
 
 ## 验收命令
 

@@ -280,6 +280,39 @@ def public_dma_helper_chain_kernel(x: Memory, y: Memory, n: int) -> None:
     deslice(y, local, [0, 0], [n, 4], [1, 1])
 
 
+def public_optional_bias_is_not_none_kernel(out: Memory, lhs: Memory, bias: Memory) -> None:
+    """提供 memory `is not None` DSL lowering 测试 kernel。"""
+
+    if bias is not None:
+        kernel_ops.add(out, lhs, bias)
+    else:
+        kernel_ops.add(out, lhs, lhs)
+
+
+def public_optional_bias_is_none_kernel(out: Memory, lhs: Memory, bias: Memory) -> None:
+    """提供 memory `is None` DSL lowering 测试 kernel。"""
+
+    if bias is None:
+        kernel_ops.add(out, lhs, lhs)
+    else:
+        kernel_ops.add(out, lhs, bias)
+
+
+def public_invalid_memory_truthiness_kernel(out: Memory, lhs: Memory, bias: Memory) -> None:
+    """提供非法 memory truthiness 测试 kernel。"""
+
+    if bias:
+        kernel_ops.add(out, lhs, bias)
+
+
+def public_invalid_non_memory_none_compare_kernel(value: SymbolDim) -> int:
+    """提供非法非 memory None compare 测试 kernel。"""
+
+    if value is None:
+        return 1
+    return 0
+
+
 def public_arch_launched_body(x: Memory) -> None:
     get_block_num()
     get_thread_num()
@@ -1051,6 +1084,46 @@ def test_mlir_gen_lowers_nn_arithmetic_compare_public_helpers() -> None:
         "nn.ge",
     ):
         assert op_name in module_text
+
+
+def test_mlir_gen_lowers_memory_none_compare_to_pointer_guard() -> None:
+    """DSL `bias is not None` 通过公开 mlir_gen 入口降为 pointer non-null guard。"""
+
+    memory = Memory([4], NumericType.Float32)
+
+    module = mlir_gen(public_optional_bias_is_not_none_kernel, memory, memory, memory)
+    module_text = str(module)
+
+    assert "memory.get_data" in module_text
+    assert "symbol.cast" in module_text
+    assert "symbol.ne" in module_text
+    assert "scf.if" in module_text
+    assert "!symbol.ptr<f32>" in module_text
+
+
+def test_mlir_gen_lowers_memory_none_compare_to_pointer_null_guard() -> None:
+    """DSL `bias is None` 通过公开 mlir_gen 入口降为 pointer null guard。"""
+
+    memory = Memory([4], NumericType.Float32)
+
+    module = mlir_gen(public_optional_bias_is_none_kernel, memory, memory, memory)
+    module_text = str(module)
+
+    assert "memory.get_data" in module_text
+    assert "symbol.cast" in module_text
+    assert "symbol.eq" in module_text
+    assert "scf.if" in module_text
+
+
+def test_mlir_gen_rejects_memory_truthiness_and_non_memory_none_compare() -> None:
+    """DSL None 支持仅限 memory-vs-None compare，不支持 truthiness 或 scalar None compare。"""
+
+    memory = Memory([4], NumericType.Float32)
+
+    with pytest.raises(KernelCodeError, match="if condition must be i1"):
+        mlir_gen(public_invalid_memory_truthiness_kernel, memory, memory, memory)
+    with pytest.raises(KernelCodeError, match="None comparison only supports memory values"):
+        mlir_gen(public_invalid_non_memory_none_compare_kernel, SymbolDim("N"))
 
 
 def test_mlir_gen_lowers_nn_broadcast_and_structured_public_helpers() -> None:

@@ -8,6 +8,7 @@
 - 当 `min(lhs + const, rhs - const)` 这类复合 operand 进入 `symbol.min` 时，MLIR 文本必须先物化两侧整数常量，再按左 operand、右 operand、`symbol.min` 的顺序发射算术 op，保证只读合同文本稳定。
 - DSL 函数体中的 `memory.get_shape()` 支持解包和常量索引，lower 时按轴生成对应 `symbol.get_dim` 或静态 symbol 常量语义，不提供 `get_shape(dim)` 带参入口。
 - `kernel_gen.operation.kernel` out-first helper lower 到 `kernel.binary_elewise`、`kernel.matmul`、`kernel.img2col1d` 或 `kernel.img2col2d`，helper 本身返回 `None`。
+- DSL 函数体中的 memory-vs-None 条件 lower 为 `memory.get_data -> symbol.cast -> symbol.eq/ne -> scf.if`；不得新增 DSL `memory.data` 或 has-data presence 表面 API。
 
 ## API 列表
 
@@ -42,7 +43,7 @@
   module_op = mlir_gen(kernel, lhs, rhs)
   ```
 - 功能说明：固定在当前入口内解析 `fn` 为 `ModuleAST`，再执行 `ModuleAST.emit_mlir(ctx, None)`，其中 `ctx` 由本入口创建。
-- 注意事项：不接受 `globals`、`builtins`、`config` 参数；缺少 runtime arg 必须报 `mlir_gen requires explicit runtime args for <fn>: expected <n>, got <m>`；DSL `min(lhs, rhs)` 仅支持两个位置参数且不得带关键字参数；`kernel.add/sub/...` 不生成 `kernel.add` 等 dialect op，统一 lower 到 `kernel.binary_elewise`。
+- 注意事项：不接受 `globals`、`builtins`、`config` 参数；缺少 runtime arg 必须报 `mlir_gen requires explicit runtime args for <fn>: expected <n>, got <m>`；DSL `min(lhs, rhs)` 仅支持两个位置参数且不得带关键字参数；`kernel.add/sub/...` 不生成 `kernel.add` 等 dialect op，统一 lower 到 `kernel.binary_elewise`；memory-vs-None 条件只支持 `is None`、`is not None`、`== None`、`!= None`，其余 memory truthiness 或 None 比较必须通过公开解析/生成错误失败。
 
 ## 测试
 

@@ -49,7 +49,7 @@
 - `P0` 内置真实执行仅支持 `target in {"cpu","npu_demo"}`；第三方 target 可注册 compile strategy，但 execute-only 路径必须以 `execution_unsupported` 失败。
 - `P0` 不支持 `stream` 与输出回收；当 `ExecuteRequest.stream is not None` 或 `capture_function_output=True` 必须失败。
 - `args` 必须与 `function` 形参顺序严格一致；不做自动重排或参数推断。
-- 运行时参数仅允许 memory / int / float 三类输入；其他类型必须失败。
+- 运行时参数仅允许 memory / int / float 三类输入；`None` 只允许作为源码元数据声明的 allow-absent memory runtime input；其他类型必须失败。
 - 失败短语只允许取 8 个固定值（见 `ExecuteResult`）；禁止同义词扩散与 silent fallback。
 ## API详细说明
 
@@ -77,7 +77,7 @@
 
 - api：`class ExecuteRequest(args: tuple[RuntimeInput, ...], entry_point: str | None = None, capture_function_output: bool = False, stream: None = None)`
 - 参数：
-  - `args`：位置参数序列，按公开调用约定传递给目标函数或工具入口；类型 `tuple[RuntimeInput, ...]`；无默认值，调用方必须显式提供；`RuntimeInput` 的 memory 参数公开形态包含 `torch.Tensor` 与 `numpy.ndarray`，并允许 `int` / `float` 标量；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `args`：位置参数序列，按公开调用约定传递给目标函数或工具入口；类型 `tuple[RuntimeInput, ...]`；无默认值，调用方必须显式提供；`RuntimeInput` 的 memory 参数公开形态包含 `torch.Tensor` 与 `numpy.ndarray`，并允许 `int` / `float` 标量；元素 `None` 仅允许在编译产物源码元数据声明对应 index 为 allow-absent memory 时使用；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `entry_point`：`entry_point` 输入值，参与 `ExecuteRequest` 的公开处理流程；类型 `str | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `capture_function_output`：函数对象或函数级 IR；类型 `bool`；默认值 `False`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `stream`：输入或输出流对象，用于读取源码、写入文本或传递诊断；类型 `None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -95,7 +95,7 @@
   execute_request = ExecuteRequest(args=args, entry_point=None, capture_function_output=False, stream=None)
   ```
 - 功能说明：定义 `ExecuteRequest` 公开类型。
-- 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
+- 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口；`None` runtime input 不改变 `ExecuteRequest` 公开参数列表，执行引擎只能从生成源码注释 `// kg.allow_absent_memory_args: <index>:<dtype>:<rank>;...` 解析 allow-absent metadata。
 
 ### `class CompiledKernel(target: str, soname_path: str, function: str, entry_point: str, compile_stdout: str = "", compile_stderr: str = "")`
 
@@ -134,7 +134,7 @@
 
 - api：`CompiledKernel.execute(args: tuple[RuntimeInput, ...] | None = None, *, request: ExecuteRequest | None = None, entry_point: str | None = None, capture_function_output: bool = False, stream: None = None) -> ExecuteResult`
 - 参数：
-  - `args`：位置参数序列，按公开调用约定传递给目标函数或工具入口；类型 `tuple[RuntimeInput, ...] | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
+  - `args`：位置参数序列，按公开调用约定传递给目标函数或工具入口；类型 `tuple[RuntimeInput, ...] | None`；默认值 `None`；外层 `None` 表示使用 `request.args` 或空参数，元素 `None` 仅用于 allow-absent memory runtime input；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `request`：请求对象，承载工具、执行引擎或服务入口需要处理的输入信息；类型 `ExecuteRequest | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `entry_point`：`entry_point` 输入值，参与 `execute` 的公开处理流程；类型 `str | None`；默认值 `None`；允许 `None`/空值仅用于签名或默认值显式声明的可选场景；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `capture_function_output`：函数对象或函数级 IR；类型 `bool`；默认值 `False`；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
@@ -147,7 +147,7 @@
   result = compiled_kernel.execute(args=None, request=None, entry_point=None, capture_function_output=False, stream=None)
   ```
 - 功能说明：执行 `execute`。
-- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态。
+- 注意事项：非法输入必须按本条目参数说明和公开错误语义处理；调用方不得依赖实现内部状态；当某个 runtime arg 是 `None` 时，仅源码 metadata 中列出的 allow-absent memory index 可被封送为 data=null、shape=`[0]`、stride=`[1]`、rank=1 的 memory slot，缺少 metadata 或 nominal dtype/rank 时必须以 `runtime_throw_or_abort` 失败，错误说明包含 `None` 与 `allow-absent memory metadata` 或 `nominal memory metadata`。
 
 ### `class ExecuteResult(ok: bool, status_code: int, failure_phrase: str | None, compile_stdout: str = "", compile_stderr: str = "", run_stdout: str = "", run_stderr: str = "", elapsed_ms: float = 0.0)`
 
@@ -201,3 +201,5 @@
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-API-012 | 边界/异常 | memory runtime 参数的 dtype、shape、stride 与 flags 边界只经公开 execute 入口校验。 | 使用 torch/numpy 风格公开 runtime 参数占位对象。 | 运行 `test_execute_engine_invoke_public_memory_metadata_matrix`。 | 可字符串化 dtype 与可确认连续布局成功；dtype/shape 缺失或连续性不可确认返回 `runtime_throw_or_abort`。 | `test_execute_engine_invoke_public_memory_metadata_matrix` |
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-API-013 | 边界/异常 | 真实 shared object 调用前 memory 数据指针缺失时返回固定失败短语。 | 使用公开 `ExecutionEngine.compile(...)` 生成真实 entry，并传入缺失 ctypes 数据指针的 numpy 风格参数。 | 运行 `test_execute_engine_invoke_real_entry_rejects_missing_memory_data_pointer`。 | ABI 封送阶段抛出 `KernelCodeError`，且 `failure_phrase == "runtime_throw_or_abort"`。 | `test_execute_engine_invoke_real_entry_rejects_missing_memory_data_pointer` |
 | TC-EXECUTE-ENGINE-EXECUTE-ENGINE-API-014 | 边界/异常 | 真实 shared object 存在但入口符号缺失时返回 `symbol_resolve_failed`。 | 使用公开 `CompiledKernel(...)` 指向已有 shared object 的缺失入口名。 | 运行 `test_execute_engine_invoke_real_entry_missing_exported_symbol`。 | 动态符号解析失败抛出 `KernelCodeError`，且 `failure_phrase == "symbol_resolve_failed"`。 | `test_execute_engine_invoke_real_entry_missing_exported_symbol` |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-API-015 | 执行结果 | allow-absent memory `None` runtime input 使用源码 metadata 封送。 | 使用公开 `ExecutionEngine.compile(...)` 生成带 `kg.allow_absent_memory_args` 注释的源码并执行。 | 运行 `test_execute_engine_invoke_allows_none_with_absent_memory_metadata`。 | `None` memory 被封送为 null data 与 rank=1 shape/stride 元数据，真实 entry 可执行。 | `test_execute_engine_invoke_allows_none_with_absent_memory_metadata` |
+| TC-EXECUTE-ENGINE-EXECUTE-ENGINE-API-016 | 边界/异常 | 缺少 allow-absent metadata 时拒绝 `None` runtime input。 | 使用不含 allow-absent 注释的公开源码执行 `None` memory。 | 运行 `test_execute_engine_invoke_rejects_none_without_absent_memory_metadata`。 | 以 `runtime_throw_or_abort` 失败，错误说明包含 `None` 与 `allow-absent memory metadata`。 | `test_execute_engine_invoke_rejects_none_without_absent_memory_metadata` |

@@ -11,7 +11,7 @@
 API 列表:
 - `KERNEL_DUMP_ROOT: Path`
 - `KernelNumpyDemoResult(case_name: str, dsl_result: DslRunResult, max_abs_diff: float, atol: float, rtol: float)`
-- `run_numpy_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], real_args: tuple[np.ndarray | int, ...] | list[np.ndarray | int], output: np.ndarray, expected: np.ndarray, *, atol: float = 1e-4, rtol: float = 1e-4) -> KernelNumpyDemoResult`
+- `run_numpy_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | float | bool | str | None], real_args: tuple[np.ndarray | int | None, ...] | list[np.ndarray | int | None], output: np.ndarray, expected: np.ndarray, *, atol: float = 1e-4, rtol: float = 1e-4) -> KernelNumpyDemoResult`
 - `run_lowering_demo(case_name: str, kernel_fn: Callable[..., Memory | SymbolDim | int | str | None], *compile_args: Memory | SymbolDim | int | str) -> tuple[ModuleOp, str]`
 
 使用示例:
@@ -44,7 +44,7 @@ from kernel_gen.tools.dsl_run import DslRunResult, dsl_run
 if TYPE_CHECKING:
     import numpy as np
 
-NumpyDemoRuntimeArg: TypeAlias = "np.ndarray | int"
+NumpyDemoRuntimeArg: TypeAlias = "np.ndarray | int | None"
 
 KERNEL_DUMP_ROOT = Path(__file__).resolve().parent / "dump"
 
@@ -96,11 +96,11 @@ def _validate_numpy_demo_real_args(real_args: tuple[NumpyDemoRuntimeArg, ...] | 
 
 
     功能说明:
-    - `real_args` 只允许 `np.ndarray` 与 Python `int`。
+    - `real_args` 只允许 `np.ndarray`、Python `int` 与 allow-absent memory `None`。
     - `bool`、`np.integer`、`float`、`str` 等其它类型必须按公开错误语义拒绝。
 
     使用示例:
-    - `args = _validate_numpy_demo_real_args((out, lhs, rhs, 8))`
+    - `args = _validate_numpy_demo_real_args((out, lhs, rhs, None, 8))`
     """
 
     import numpy as np
@@ -112,12 +112,15 @@ def _validate_numpy_demo_real_args(real_args: tuple[NumpyDemoRuntimeArg, ...] | 
         if _is_numpy_array(arg):
             validated.append(arg)
             continue
+        if arg is None:
+            validated.append(arg)
+            continue
         if isinstance(arg, int) and not isinstance(arg, bool):
             validated.append(arg)
             continue
         if isinstance(arg, np.integer):
-            raise TypeError(f"real_args[{index}] only supports np.ndarray or int; convert numpy integer scalar with int(...)")
-        raise TypeError(f"real_args[{index}] only supports np.ndarray or int")
+            raise TypeError(f"real_args[{index}] only supports np.ndarray, int or None; convert numpy integer scalar with int(...)")
+        raise TypeError(f"real_args[{index}] only supports np.ndarray, int or None")
     return tuple(validated)
 
 

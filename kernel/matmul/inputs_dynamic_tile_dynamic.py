@@ -3,13 +3,13 @@
 
 功能说明:
 - 实现 `inputs 动 + tile 动` 的二维 matmul kernel demo。
-- 编译期 memory 使用 `H/K/W` 语义符号，tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数。
+- 编译期 memory 使用 `H/K/W` 语义符号，tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数，运行期从轻量候选集合按固定 seed 选择 tile 组合。
 - 运行期仍传入真实 NumPy ndarray 与 int tile，执行 lowering 生成的 launch wrapper 后和 `np.matmul` 对齐。
-- K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 初始化局部 accumulator，K loop 内用 `kernel.matmul/kernel.add` out-first helper 累加 partial，K loop 后最终写回 output。
+- K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 初始化局部 accumulator，K loop 内用 `kernel.matmul/kernel.add` out-first helper 累加 partial，K loop 后按 optional rank-1 bias 分支累加并最终写回 output。
 - H/W/K 尾块都通过 `min(tile, dim - iv)` 覆盖，避免只覆盖可整除 case。
 
 API 列表:
-- `matmul_inputs_dynamic_tile_dynamic_kernel(out: Tensor[f32, H, W], lhs: Tensor[f32, H, K], rhs: Tensor[f32, K, W], tile_h: SymbolDim, tile_w: SymbolDim, tile_k: SymbolDim) -> None`
+- `matmul_inputs_dynamic_tile_dynamic_kernel(out: Tensor[f32, H, W], lhs: Tensor[f32, H, K], rhs: Tensor[f32, K, W], bias: Tensor[f32, W], tile_h: SymbolDim, tile_w: SymbolDim, tile_k: SymbolDim) -> None`
 - `main() -> None`
 
 使用示例:
@@ -37,7 +37,7 @@ if str(_REPO_ROOT) not in sys.path:
 from kernel.runner import run_lowering_demo
 from kernel_gen.execute_engine import ExecutionEngine
 from kernel_gen.operation import kernel
-from kernel_gen.operation.dma import alloc, deslice, fill, view
+from kernel_gen.operation.dma import alloc, broadcast, deslice, fill, reshape, view
 from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -45,15 +45,20 @@ from kernel_gen.symbol_variable.type import NumericType
 
 CASE_NAME = "matmul/inputs_dynamic_tile_dynamic"
 WRAPPER_ENTRY_NAME = "matmul_inputs_dynamic_tile_dynamic_kernel"
-TILE_ARGS = (80, 96, 72)
+TILE_SELECTION_SEED = 2026051711
+TILE_ARG_CANDIDATES = ((80, 96, 72), (72, 88, 56), (48, 96, 64))
+TILE_ARGS = random.Random(TILE_SELECTION_SEED).choice(TILE_ARG_CANDIDATES)
+BIAS_CASE_ORDER_SEED = 2026051752
+BIAS_CASE_ORDER = tuple(random.Random(BIAS_CASE_ORDER_SEED).sample(("absent", "present"), 2))
 MatmulCompileArg: TypeAlias = "Memory | SymbolDim"
-MatmulRuntimeArg: TypeAlias = "np.ndarray | int"
+MatmulRuntimeArg: TypeAlias = "np.ndarray | int | None"
 
 
 def matmul_inputs_dynamic_tile_dynamic_kernel(
     out: "Tensor[f32, H, W]",
     lhs: "Tensor[f32, H, K]",
     rhs: "Tensor[f32, K, W]",
+    bias: "Tensor[f32, W]",
     tile_h: SymbolDim,
     tile_w: SymbolDim,
     tile_k: SymbolDim,
@@ -64,10 +69,11 @@ def matmul_inputs_dynamic_tile_dynamic_kernel(
     功能说明:
     - 输入和输出 shape 全部来自 `Tensor[...]` 的 `H/K/W` 符号维度。
     - `tile_h/tile_w/tile_k` 作为 `SymbolDim` 参数进入编译 IR，不在 Python 函数体内常量化。
-    - K 维通过内层 loop 切分，每个 partial 通过 `kernel.matmul/kernel.add` out-first helper 累加到同一个局部 accumulator，loop 后只写回一次 output tile。
+    - K 维通过内层 loop 切分，每个 partial 通过 `kernel.matmul/kernel.add` out-first helper 累加到同一个局部 accumulator。
+    - runtime bias 非空时，在 K reduce 后、写回 output 前广播 rank-1 bias 并累加。
 
     使用示例:
-    - `matmul_inputs_dynamic_tile_dynamic_kernel(out, lhs, rhs, 6, 7, 5)`
+    - `matmul_inputs_dynamic_tile_dynamic_kernel(out, lhs, rhs, bias, 6, 7, 5)`
     """
 
     h_size = lhs.get_shape()[0]
@@ -80,6 +86,10 @@ def matmul_inputs_dynamic_tile_dynamic_kernel(
             cur_w = min(tile_w, w_size - w0)
             acc = alloc([tile_h, tile_w], NumericType.Float32, MemorySpace.TSM)
             fill(acc, 0)
+            bias_tile = alloc([tile_w], NumericType.Float32, MemorySpace.TSM)
+            fill(bias_tile, 0)
+            bias_row = reshape(bias_tile, [1, tile_w])
+            bias_full = alloc([tile_h, tile_w], NumericType.Float32, MemorySpace.TSM)
             for k0 in loop(0, k_size, tile_k):
                 cur_k = min(tile_k, k_size - k0)
                 lhs_tile = alloc([tile_h, tile_k], NumericType.Float32, MemorySpace.TSM)
@@ -93,6 +103,11 @@ def matmul_inputs_dynamic_tile_dynamic_kernel(
                 partial = alloc([tile_h, tile_w], NumericType.Float32, MemorySpace.TSM)
                 kernel.matmul(partial, lhs_tile, rhs_tile)
                 kernel.add(acc, acc, partial)
+            if bias is not None:
+                bias_region = view(bias, [w0], [cur_w], [1])
+                deslice(bias_tile, bias_region, [0], [cur_w], [1])
+                broadcast(bias_full, bias_row)
+                kernel.add(acc, acc, bias_full)
             out_region = view(acc, [0, 0], [cur_h, cur_w], [1, 1])
             deslice(out, out_region, [h0, w0], [cur_h, cur_w], [1, 1])
 
@@ -113,6 +128,7 @@ def _symbolic_compile_args() -> tuple[MatmulCompileArg, ...]:
         Memory(["H", "W"], NumericType.Float32),
         Memory(["H", "K"], NumericType.Float32),
         Memory(["K", "W"], NumericType.Float32),
+        Memory(["W"], NumericType.Float32),
         SymbolDim("TILE_H"),
         SymbolDim("TILE_W"),
         SymbolDim("TILE_K"),
@@ -140,6 +156,7 @@ def _assert_dynamic_memory_ir(
         "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]",
         "!nn.memory<[#symbol.expr<H>, #symbol.expr<K>]",
         "!nn.memory<[#symbol.expr<K>, #symbol.expr<W>]",
+        "!nn.memory<[#symbol.expr<W>]",
         "!symbol.int<#symbol.expr<TILE_H>>",
         "!symbol.int<#symbol.expr<TILE_W>>",
         "!symbol.int<#symbol.expr<TILE_K>>",
@@ -148,6 +165,8 @@ def _assert_dynamic_memory_ir(
         '"kernel.binary_elewise"',
         '"dma.view"',
         '"dma.deslice"',
+        "memory.get_data",
+        "symbol.ne",
     )
     forbidden_fragments = (
         f"!nn.memory<[#symbol.expr<{actual_output_shape[0]}>, #symbol.expr<{actual_output_shape[1]}>]",
@@ -236,9 +255,9 @@ def main() -> None:
 
 
     功能说明:
-    - 使用固定 seed 选择不整除 H/W/K tile 的真实 shape。
+    - 使用固定 seed 选择真实 shape，并用固定 seed 从轻量候选中选择不整除 H/W/K 的 runtime tile。
     - 编译期以符号 memory/tile 生成 lowering IR 与 npu_demo source。
-    - 运行期执行 launch wrapper，并用 `np.matmul(lhs, rhs)` 校验输出。
+    - 运行期分别执行 bias absent / present launch wrapper，并用 NumPy 参考校验输出。
 
     使用示例:
     - `python3 kernel/matmul/inputs_dynamic_tile_dynamic.py`
@@ -251,20 +270,35 @@ def main() -> None:
     rng = np.random.default_rng(2026051603)
     lhs = rng.standard_normal((h_size, k_size), dtype=np.float32)
     rhs = rng.standard_normal((k_size, w_size), dtype=np.float32)
-    out = np.empty((h_size, w_size), dtype=np.float32)
-    expected = np.matmul(lhs, rhs)
+    bias = rng.standard_normal((w_size,), dtype=np.float32)
+    absent_out = np.empty((h_size, w_size), dtype=np.float32)
+    present_out = np.empty((h_size, w_size), dtype=np.float32)
+    absent_expected = np.matmul(lhs, rhs)
+    present_expected = absent_expected + bias[None, :]
 
     module, source = run_lowering_demo(CASE_NAME, matmul_inputs_dynamic_tile_dynamic_kernel, *_symbolic_compile_args())
     module_text = str(module)
-    _assert_dynamic_memory_ir(module_text, tuple(out.shape), tuple(lhs.shape), tuple(rhs.shape))
     _assert_accumulator_source(source)
-    _execute_lowering_source(source, (out, lhs, rhs, *TILE_ARGS))
-    max_abs_diff = _assert_outputs_close(out, expected, atol=1e-3, rtol=1e-3)
-    print(module_text)
-    print(source)
-    print(f"[ARGS] seed=2026051603 shape=(M={h_size},K={k_size},N={w_size}) tile={TILE_ARGS} multi_tile=True tail=True")
+    _assert_dynamic_memory_ir(module_text, tuple(absent_out.shape), tuple(lhs.shape), tuple(rhs.shape))
+    max_abs_diff_by_case = {}
+    for bias_case in BIAS_CASE_ORDER:
+        if bias_case == "absent":
+            _execute_lowering_source(source, (absent_out, lhs, rhs, None, *TILE_ARGS))
+            max_abs_diff_by_case[bias_case] = _assert_outputs_close(absent_out, absent_expected, atol=1e-3, rtol=1e-3)
+            continue
+        _execute_lowering_source(source, (present_out, lhs, rhs, bias, *TILE_ARGS))
+        max_abs_diff_by_case[bias_case] = _assert_outputs_close(present_out, present_expected, atol=1e-3, rtol=1e-3)
+    absent_max_abs_diff = max_abs_diff_by_case["absent"]
+    present_max_abs_diff = max_abs_diff_by_case["present"]
+    print(
+        "[ARGS] "
+        f"seed=2026051603 shape=(M={h_size},K={k_size},N={w_size}) "
+        f"tile_seed={TILE_SELECTION_SEED} tile_candidates={TILE_ARG_CANDIDATES} selected_tile={TILE_ARGS} "
+        f"bias_case_order={BIAS_CASE_ORDER} multi_tile=True tail=True bias_rank=1"
+    )
     print("[IR] dynamic memory evidence: H/K/W memory and TILE_H/TILE_W/TILE_K tile present; static and anonymous shapes absent")
-    print(f"[CHECK] {CASE_NAME} max_abs_diff={max_abs_diff}")
+    print(f"[CHECK] {CASE_NAME}/absent_bias max_abs_diff={absent_max_abs_diff}")
+    print(f"[CHECK] {CASE_NAME}/present_bias max_abs_diff={present_max_abs_diff}")
 
 
 if __name__ == "__main__":

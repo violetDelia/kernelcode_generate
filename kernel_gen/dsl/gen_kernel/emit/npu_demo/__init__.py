@@ -2,7 +2,7 @@
 
 
 功能说明:
-- 聚合 `arch/control_flow/dma/kernel/nn/symbol/tuner/type` 各子目录注册的 emitter。
+- 聚合 `arch/control_flow/dma/kernel/memory/nn/symbol/tuner/type` 各子目录注册的 emitter。
 - 只通过注册体系为根级 `emit` 分发层提供 `npu_demo` target 的 op/value 发射实现。
 
 API 列表:
@@ -24,6 +24,7 @@ from . import dma as _dma  # noqa: F401
 from . import include as _include  # noqa: F401
 from . import control_flow as _control_flow  # noqa: F401
 from . import kernel as _kernel  # noqa: F401
+from . import memory as _memory  # noqa: F401
 from . import name as _name  # noqa: F401
 from . import nn as _nn  # noqa: F401
 from . import symbol as _symbol  # noqa: F401

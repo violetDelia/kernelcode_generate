@@ -31,7 +31,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from enum import Enum
+import os
 
+os.environ.setdefault("SYMPY_GMPY", "0")
 import sympy as sp
 
 from kernel_gen.core.contracts import default_stride as _common_default_stride

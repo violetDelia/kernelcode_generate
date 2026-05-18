@@ -51,10 +51,16 @@ import ast as py_ast
 import inspect
 import textwrap
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TypeAlias
 
+from xdsl.context import Context
+from xdsl.ir import Block, SSAValue
+
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
+from kernel_gen.dialect.memory import MemoryGetDataOp
 from kernel_gen.dialect.nn import NnMemoryType
+from kernel_gen.dialect.symbol import SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolNeOp, SymbolValueType
 from kernel_gen.dsl.ast.nodes import (
     BlockAST,
     BoolValueAST,
@@ -266,6 +272,93 @@ _IMPORTABLE_DSL_HELPER_MODULES: dict[str, dict[str, DslCallable]] = {
         }
     },
 }
+
+
+def _is_none_const_ast(value: ValueAST) -> bool:
+    """判断 AST value 是否为 Python None literal。
+
+    功能说明:
+    - 仅识别 `ConstValueAST(None)`，供公开 DSL None memory compare 入口使用。
+
+    使用示例:
+    - _is_none_const_ast(node)
+    """
+
+    return isinstance(value, ConstValueAST) and value.raw_value is None
+
+
+def _memory_none_compare_node(
+    lhs: ValueAST,
+    rhs: ValueAST,
+    op: str,
+    location: SourceLocation | None,
+) -> "_MemoryNoneCompareAST | None":
+    """构造 memory 与 None 的 compare AST。
+
+    功能说明:
+    - 支持 `memory is None`、`memory is not None`、`memory == None` 与 `memory != None`。
+    - 非 memory/None compare 返回 `None`，由普通 compare 逻辑继续处理。
+
+    使用示例:
+    - node = _memory_none_compare_node(lhs, rhs, "is_not", location)
+    """
+
+    if op not in {"is", "is_not", "eq", "ne"}:
+        return None
+    lhs_is_none = _is_none_const_ast(lhs)
+    rhs_is_none = _is_none_const_ast(rhs)
+    if not lhs_is_none and not rhs_is_none:
+        return None
+    memory_node = rhs if lhs_is_none else lhs
+    if memory_node.result_memory() is None:
+        raise KernelCodeError(ErrorKind.UNSUPPORTED, ErrorModule.AST, "None comparison only supports memory values")
+    is_none = op in {"is", "eq"}
+    return _MemoryNoneCompareAST(memory_node, is_none, location=location)
+
+
+@dataclass
+class _MemoryNoneCompareAST(ValueAST):
+    """当前文件内的 memory None compare 节点。
+
+    功能说明:
+    - 将 `bias is None` / `bias is not None` 降为 `memory.get_data -> symbol.cast -> symbol.eq/ne`。
+    - 只服务 DSL AST visitor，不作为跨文件公开 API。
+
+    使用示例:
+    - _MemoryNoneCompareAST(memory_ast, is_none=False)
+    """
+
+    memory: ValueAST
+    is_none: bool
+    location: SourceLocation | None = None
+
+    def emit_mlir(self: "_MemoryNoneCompareAST", ctx: Context, block: Block | None = None) -> SSAValue:
+        """发射 memory None compare 到 MLIR。
+
+        功能说明:
+        - 从 memory SSA 取 data pointer。
+        - 将 pointer cast 为 unknown symbol integer，再与零值做 `symbol.eq/ne`。
+
+        使用示例:
+        - condition = node.emit_mlir(ctx, block)
+        """
+
+        assert isinstance(ctx, Context)
+        assert isinstance(block, Block)
+        memory_value = self.memory.emit_mlir(ctx, block)
+        if not isinstance(memory_value, SSAValue):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "None comparison memory must lower to SSA value")
+        if not isinstance(memory_value.type, NnMemoryType):
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "None comparison only supports memory values")
+        get_data = MemoryGetDataOp(memory_value)
+        block.add_op(get_data)
+        cast = SymbolCastOp(get_data.result, SymbolValueType.from_expr("?"))
+        block.add_op(cast)
+        zero = SymbolConstOp(0)
+        block.add_op(zero)
+        compare = SymbolEqOp(cast.result, zero.result) if self.is_none else SymbolNeOp(cast.result, zero.result)
+        block.add_op(compare)
+        return compare.result
 
 
 class DslAstVisitor(py_ast.NodeVisitor):
@@ -999,6 +1092,8 @@ class DslAstVisitor(py_ast.NodeVisitor):
         op_map = {
             py_ast.Eq: "eq",
             py_ast.NotEq: "ne",
+            py_ast.Is: "is",
+            py_ast.IsNot: "is_not",
             py_ast.Lt: "lt",
             py_ast.LtE: "le",
             py_ast.Gt: "gt",
@@ -1030,6 +1125,11 @@ class DslAstVisitor(py_ast.NodeVisitor):
                 is_equal = lhs.attr == rhs.attr
                 return BoolValueAST(is_equal if op == "eq" else not is_equal, location=SourceLocation.from_py_ast(node))
             raise KernelCodeError(ErrorKind.UNSUPPORTED, ErrorModule.AST, f"Unsupported compare op: {op}")
+        none_compare = _memory_none_compare_node(lhs, rhs, op, SourceLocation.from_py_ast(node))
+        if none_compare is not None:
+            return none_compare
+        if op in {"is", "is_not"}:
+            raise KernelCodeError(ErrorKind.UNSUPPORTED, ErrorModule.AST, "Unsupported compare operator")
         lhs_is_symbol = lhs.result_symbol() is not None
         rhs_is_symbol = rhs.result_symbol() is not None
         lhs_is_float = isinstance(lhs.result_scalar(), float)

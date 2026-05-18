@@ -41,10 +41,13 @@ from __future__ import annotations
 import ast
 import contextlib
 import io
+import os
 import re
 from typing import TypeAlias
 
+os.environ.setdefault("SYMPY_GMPY", "0")
 import sympy as sp
+from sympy.core.cache import clear_cache
 from sympy.parsing.sympy_parser import parse_expr
 
 SymbolDimOperand: TypeAlias = "int | str | sp.Basic | _SymbolDim"
@@ -561,7 +564,8 @@ class _SymbolDim:
 
         功能说明:
         - 隔离 SymPy 在部分大写符号组合下导入 units 前缀时的 stdout 输出。
-        - SymPy 内部失败时回退原表达式，避免公开字符串化因外部简化器状态污染失败。
+        - SymPy 内部失败时回退原表达式，避免公开字符串化或 DSL lowering
+          因外部化简器状态污染失败。
 
         使用示例:
         - simplified = _SymbolDim._simplify_quiet(SymbolDim("N").get_symbol())
@@ -575,8 +579,10 @@ class _SymbolDim:
         try:
             with contextlib.redirect_stdout(io.StringIO()):
                 return sp.simplify(expr)
-        except SystemError:
+        except Exception:
             return expr
+        finally:
+            clear_cache()
 
     @staticmethod
     def _symbol_from_str(value: str) -> sp.Basic:

@@ -3,7 +3,7 @@
 
 功能说明:
 - 提供仓库内统一的 xdsl Context 构造函数，用于“解析 + 打印”类工具的默认上下文。
-- 默认加载基础 dialect（builtin/func/arith/scf）以及仓库内常用 dialect（nn/kernel/symbol/dma/arch）。
+- 默认加载基础 dialect（builtin/func/arith/scf）以及仓库内常用 dialect（nn/kernel/symbol/memory/dma/arch）。
 - 该模块只负责“dialect 注册/加载”，不负责 pass 执行，也不负责对 IR 做任何变换。
 
 API 列表:
@@ -39,7 +39,7 @@ def build_default_context() -> XdslContext:
 
     功能说明:
     - 加载基础 dialect：builtin/func/arith/scf。
-    - 加载仓库常用 dialect：nn/kernel/symbol/dma/arch。
+    - 加载仓库常用 dialect：nn/kernel/symbol/memory/dma/arch。
     - 目标是让工具在默认环境下可解析常见的 module 文本，避免“未注册 dialect”导致的解析失败。
 
     使用示例:
@@ -65,6 +65,7 @@ def build_default_context() -> XdslContext:
     from kernel_gen.dialect.arch import Arch
     from kernel_gen.dialect.dma import Dma
     from kernel_gen.dialect.kernel import Kernel
+    from kernel_gen.dialect.memory import Memory
     from kernel_gen.dialect.nn import Nn
     from kernel_gen.dialect.symbol import Symbol
     from kernel_gen.dialect.tuner import Tuner
@@ -77,6 +78,7 @@ def build_default_context() -> XdslContext:
     ctx.load_dialect(Nn)
     ctx.load_dialect(Kernel)
     ctx.load_dialect(Symbol)
+    ctx.load_dialect(Memory)
     ctx.load_dialect(Tuner)
     ctx.load_dialect(Dma)
     ctx.load_dialect(Arch)

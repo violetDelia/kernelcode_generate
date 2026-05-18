@@ -52,6 +52,7 @@ from kernel_gen.dialect.kernel import (
     KernelReduceOp,
     KernelSelectOp,
 )
+from kernel_gen.dialect.memory import MemoryGetDataOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolExprAttr, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolMaxOp, SymbolMinOp, SymbolNeOp, SymbolToFloatOp, SymbolToIntOp, SymbolValueType, SymbolYieldOp
 from kernel_gen.dialect.tuner import TunerCostOp
@@ -303,6 +304,31 @@ def test_npu_demo_memory_type_dispatch_prefers_template_name() -> None:
         template_name="T1",
     )
     assert ctx.dispatch_type(memory_type) == "Memory<GM, T1>"
+
+
+def test_emit_c_op_lowers_npu_demo_memory_get_data_and_ptr_cast() -> None:
+    """验证 npu_demo 下 `memory.get_data` 与 ptr `symbol.cast` 发射为 data pointer guard。"""
+
+    memory_type = NnMemoryType(
+        ArrayAttr([SymbolExprAttr.from_expr("W")]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
+        f32,
+        NnMemorySpaceAttr.from_name("global"),
+        template_name="T_bias",
+    )
+    block = Block(arg_types=[memory_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "bias")
+    get_data = MemoryGetDataOp(block.args[0])
+    cast = SymbolCastOp(get_data.result, SymbolValueType.from_expr("?"))
+
+    get_data_stmt = emit_c_op(get_data, ctx)
+    cast_stmt = emit_c_op(cast, ctx)
+
+    assert "T_bias*" in get_data_stmt
+    assert "bias.data()" in get_data_stmt
+    assert "S_INT" in cast_stmt
+    assert "reinterpret_cast<S_INT>" in cast_stmt
 
 
 def _memory_symbol_expr_attr(value: int | str) -> SymbolExprAttr:
@@ -1419,6 +1445,30 @@ def test_emit_c_lowers_npu_demo_block0_guard_scf_if() -> None:
     assert "if ((npu_demo::block_id() != 0)) {" in stmt
     assert "} else {" in stmt
     assert "S_INT c_0 = 7;" in stmt
+    assert "scf.if" not in stmt
+
+
+# TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-056A
+# 功能说明: 验证 npu_demo emitter 支持无 else 的单块 `scf.if`。
+# 测试目的: 锁定 optional bias `if bias is not None` 生成的空 false region 不被误判为非法 region。
+# 使用示例: pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_scf_if_without_else
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/npu_demo/control_flow.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel/emit/npu_demo.md
+# 对应测试文件路径: test/dsl/gen_kernel/emit/test_package.py
+def test_emit_c_lowers_npu_demo_scf_if_without_else() -> None:
+    block_id = ArchGetBlockIdOp()
+    zero = SymbolConstOp(0)
+    condition = SymbolNeOp(block_id.result, zero.result)
+    then_block = Block()
+    then_block.add_op(SymbolConstOp(9))
+    then_block.add_op(scf.YieldOp())
+    if_op = scf.IfOp(condition.result, [], [then_block], None)
+
+    stmt = emit_c_op(if_op, _npu_ctx())
+
+    assert "if ((npu_demo::block_id() != 0)) {" in stmt
+    assert "S_INT c_0 = 9;" in stmt
+    assert "} else {" not in stmt
     assert "scf.if" not in stmt
 
 

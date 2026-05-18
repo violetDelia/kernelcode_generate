@@ -1329,6 +1329,32 @@ def test_symbol_cast_rejects_invalid_types() -> None:
         SymbolCastOp(symbol_value, f32).verify()
 
 
+# TC-SYM-041C
+# 测试目的: 验证 symbol.cast 支持 symbol.ptr 到 unknown symbol.int 的 pointer presence 路径。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_cast_accepts_ptr_to_unknown_symbol_int() -> None:
+    ptr_value = _TestOp(result_types=[SymbolPtrType(f32, "T_bias")]).results[0]
+
+    op = SymbolCastOp(ptr_value, SymbolValueType.from_expr("?"))
+
+    op.verify()
+    assert _print_attr(op.result.type) == "!symbol.int<#symbol.expr<?>>"
+
+
+# TC-SYM-041D
+# 测试目的: 验证 symbol.cast 拒绝 pointer 到 builtin integer 或已知 symbol.int。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_cast_rejects_ptr_to_non_unknown_symbol_int() -> None:
+    ptr_value = _TestOp(result_types=[SymbolPtrType(f32)]).results[0]
+
+    with pytest.raises(VerifyException, match=r"symbol\.cast ptr result type must be !symbol\.int"):
+        SymbolCastOp(ptr_value, i32).verify()
+    with pytest.raises(VerifyException, match=r"symbol\.cast ptr result type must be !symbol\.int"):
+        SymbolCastOp(ptr_value, SymbolValueType.from_expr("N")).verify()
+
+
 # TC-SYM-042
 # 测试目的: 验证 symbol.to_int 支持常见整型变体（i8/i16/i32/i64）并通过 verifier。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
@@ -1408,7 +1434,7 @@ def test_symbol_ptr_type_verify_success() -> None:
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_ptr_type_round_trip() -> None:
     ctx = _build_context()
-    for text in ["!symbol.ptr<f32>", "!symbol.ptr<i32>"]:
+    for text in ["!symbol.ptr<f32>", "!symbol.ptr<i32>", "!symbol.ptr<f32, template = T_bias>"]:
         ty = Parser(ctx, text).parse_attribute()
         assert isinstance(ty, SymbolPtrType)
         ty.verify()
@@ -1431,6 +1457,29 @@ def test_symbol_ptr_type_rejects_symbol_value_dtype() -> None:
 def test_symbol_ptr_type_rejects_non_type_dtype() -> None:
     with pytest.raises(VerifyException, match="symbol\\.ptr dtype must be type"):
         SymbolPtrType(StringAttr("not_type")).verify()
+
+
+# TC-SYM-048A
+# 测试目的: 验证 symbol.ptr template 名称必须是合法 identifier。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_ptr_type_rejects_invalid_template_name() -> None:
+    with pytest.raises(VerifyException, match="symbol\\.ptr template_name must be an identifier"):
+        SymbolPtrType(f32, "1bad").verify()
+    with pytest.raises(VerifyException, match="symbol\\.ptr template_name must be an identifier"):
+        SymbolPtrType(f32, "bad-name").verify()
+
+
+# TC-SYM-048B
+# 测试目的: 验证 symbol compare 不能直接消费 symbol.ptr，必须先经 symbol.cast。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_compare_rejects_direct_ptr_operand() -> None:
+    ptr_value = _TestOp(result_types=[SymbolPtrType(f32)]).results[0]
+    zero = SymbolConstOp(0).result
+
+    with pytest.raises(VerifyException, match="symbol.ne lhs must have type !symbol.int"):
+        SymbolNeOp(ptr_value, zero, i1).verify()
 
 
 # TC-SYM-026

@@ -1512,6 +1512,37 @@ builtin.module {{
     assert "dma.free" not in result.actual_ir
 
 
+# TC-MP-010F
+# 功能说明: 验证无 else 的 scf.if branch alloc 可被 memory-pool 改写。
+# 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_rewrite_scf_if_without_else_branch_alloc
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/passes/test_memory_pool.py
+def test_memory_pool_rewrite_scf_if_without_else_branch_alloc() -> None:
+    shared_mem = "!nn.memory<[#symbol.expr<2>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>], i32, #nn.space<shared>>"
+    case_text = f"""// COMPILE_ARGS: --pass "memory-pool={{rewrite=true,alignment=0,fold=false}}"
+builtin.module {{
+  func.func @guarded(%cond : i1) {{
+    scf.if %cond {{
+      %0 = "dma.alloc"() <{{operandSegmentSizes = array<i32: 0>}}> : () -> {shared_mem}
+      "dma.free"(%0) : ({shared_mem}) -> ()
+    }}
+    func.return
+  }}
+}}
+"""
+    result = run_ircheck_text(case_text, source_path="test/passes/test_memory_pool.py")
+
+    assert result.ok is True, result.message
+    assert result.exit_code == 0
+    assert "arch.get_dynamic_memory" in result.actual_ir
+    assert "scf.if" in result.actual_ir
+    assert "dma.view" in result.actual_ir
+    assert "dma.reshape" in result.actual_ir
+    assert "dma.alloc" not in result.actual_ir
+    assert "dma.free" not in result.actual_ir
+
+
 # TC-MP-014E
 # 功能说明: 验证函数参数 symbol 维度可支配 memory-pool metadata 与 reshape shape。
 # 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_function_arg_dynamic_shape_rewrite

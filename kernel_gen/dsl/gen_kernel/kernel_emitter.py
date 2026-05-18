@@ -47,12 +47,13 @@ from xdsl.dialects.builtin import (
     StringAttr,
     SymbolRefAttr,
 )
-from xdsl.ir import Operation, SSAValue
+from xdsl.ir import Operation, Region, SSAValue
 
 from kernel_gen.dialect.arch import ArchBarrierOp, ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp, ArchLaunchOp
 from kernel_gen.dialect.dma import DmaCastOp, DmaReshapeOp, DmaViewOp
+from kernel_gen.dialect.memory import MemoryGetDataOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType, copy_memory_type
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolNeOp, SymbolValueType
 from kernel_gen.core.config import restore_config, set_target, snapshot_config
 from kernel_gen.target import registry as target_registry
 
@@ -337,6 +338,187 @@ class KernelEmitter:
             )
         return lines
 
+    def _allow_absent_memory_metadata_comment(self, func_op: func.FuncOp, *, body_arg_offset: int = 0) -> str:
+        """生成 allow-absent memory 参数 metadata 注释。
+
+        功能说明:
+        - 扫描函数体中直接查询 `memory.get_data` 的 block argument。
+        - 将对应 runtime 参数索引、element dtype 与 rank 写成执行引擎可解析的源码注释。
+
+        使用示例:
+        - comment = self._allow_absent_memory_metadata_comment(func_op)
+        """
+
+        input_types = list(func_op.function_type.inputs.data)
+        metadata: dict[int, tuple[str, int]] = {}
+        allow_absent_args: set[SSAValue] = set()
+        for op in self._walk_ops(func_op):
+            if not isinstance(op, MemoryGetDataOp):
+                continue
+            for arg_index, arg_value in enumerate(func_op.args):
+                if op.source is not arg_value:
+                    continue
+                runtime_index = arg_index - body_arg_offset
+                if runtime_index < 0:
+                    continue
+                arg_type = input_types[arg_index]
+                if not isinstance(arg_type, NnMemoryType):
+                    continue
+                arg_type.verify()
+                dtype = self._type_to_c(arg_type.element_type)
+                metadata[runtime_index] = (dtype, len(arg_type.shape.data))
+                allow_absent_args.add(arg_value)
+        if not metadata:
+            return ""
+        self._validate_allow_absent_memory_data_uses(func_op, allow_absent_args)
+        items = ";".join(f"{index}:{dtype}:{rank}" for index, (dtype, rank) in sorted(metadata.items()))
+        return f"// kg.allow_absent_memory_args: {items}"
+
+    def _is_zero_symbol_const_value(self, value: SSAValue) -> bool:
+        """判断 SSA value 是否来自 `symbol.const 0`。
+
+        功能说明:
+        - allow-absent guard 只承认 `cast(memory.get_data(mem)) == 0` 或 `!= 0`。
+        - 仅检查公开 op/result 关系，不依赖跨文件私有 helper。
+
+        使用示例:
+        - if self._is_zero_symbol_const_value(compare.rhs): ...
+        """
+
+        owner = SSAValue.get(value).owner
+        if not isinstance(owner, SymbolConstOp):
+            return False
+        return owner.value.data == 0
+
+    def _memory_arg_from_casted_get_data_value(self, value: SSAValue) -> SSAValue | None:
+        """从 `symbol.cast(memory.get_data(arg))` 取回 memory arg。
+
+        功能说明:
+        - 返回值只用于识别 allow-absent present guard。
+        - 形态不匹配时返回 `None`，调用方继续按普通未保护 data-use 处理。
+
+        使用示例:
+        - memory_arg = self._memory_arg_from_casted_get_data_value(compare.lhs)
+        """
+
+        cast_owner = SSAValue.get(value).owner
+        if not isinstance(cast_owner, SymbolCastOp):
+            return None
+        get_data_owner = SSAValue.get(cast_owner.source).owner
+        if not isinstance(get_data_owner, MemoryGetDataOp):
+            return None
+        return SSAValue.get(get_data_owner.source)
+
+    def _present_guard_from_condition(self, condition: SSAValue) -> tuple[SSAValue, bool] | None:
+        """识别 memory None compare 对应的 present 分支。
+
+        功能说明:
+        - `symbol.ne(cast(get_data(mem)), 0)` 表示 true region 是 present。
+        - `symbol.eq(cast(get_data(mem)), 0)` 表示 false region 是 present。
+
+        使用示例:
+        - guard = self._present_guard_from_condition(if_op.cond)
+        """
+
+        owner = SSAValue.get(condition).owner
+        if not isinstance(owner, (SymbolEqOp, SymbolNeOp)):
+            return None
+        lhs_memory = self._memory_arg_from_casted_get_data_value(owner.lhs)
+        rhs_memory = self._memory_arg_from_casted_get_data_value(owner.rhs)
+        if lhs_memory is not None and self._is_zero_symbol_const_value(owner.rhs):
+            return (lhs_memory, isinstance(owner, SymbolNeOp))
+        if rhs_memory is not None and self._is_zero_symbol_const_value(owner.lhs):
+            return (rhs_memory, isinstance(owner, SymbolNeOp))
+        return None
+
+    def _present_regions_by_memory_arg(self, func_op: func.FuncOp) -> dict[SSAValue, tuple[Region, ...]]:
+        """收集每个 allow-absent memory arg 的 present region。
+
+        功能说明:
+        - 仅承认 DSL lowering 生成的 pointer compare guard。
+        - nested region 自动通过 region ancestor 检查继承 present guard。
+
+        使用示例:
+        - regions = self._present_regions_by_memory_arg(func_op)
+        """
+
+        func_args = set(func_op.args)
+        regions: dict[SSAValue, list[Region]] = {}
+        for op in self._walk_ops(func_op):
+            if not isinstance(op, scf.IfOp):
+                continue
+            guard = self._present_guard_from_condition(op.cond)
+            if guard is None:
+                continue
+            memory_arg, true_region_is_present = guard
+            if memory_arg not in func_args:
+                continue
+            present_region = op.true_region if true_region_is_present else op.false_region
+            regions.setdefault(memory_arg, []).append(present_region)
+        return {memory_arg: tuple(items) for memory_arg, items in regions.items()}
+
+    def _op_is_nested_in_region(self, op: Operation, region: Region) -> bool:
+        """判断 op 是否位于指定 region 内部。
+
+        功能说明:
+        - 沿 parent_region 链向外查找，覆盖 present region 内的嵌套 loop / if。
+        - 用于 allow-absent memory data-use 支配检查。
+
+        使用示例:
+        - assert self._op_is_nested_in_region(inner_op, if_op.true_region)
+        """
+
+        current_region = op.parent_region()
+        while current_region is not None:
+            if current_region is region:
+                return True
+            parent_op = current_region.parent_op()
+            if parent_op is None:
+                return False
+            current_region = parent_op.parent_region()
+        return False
+
+    def _memory_arg_operand_uses(self, func_op: func.FuncOp, memory_arg: SSAValue) -> tuple[Operation, ...]:
+        """列出指定 memory arg 的真实 data-use op。
+
+        功能说明:
+        - `memory.get_data` 是 presence query，不算 data-use。
+        - 其它直接消费该 memory arg 的 op 均必须位于 present guard 内。
+
+        使用示例:
+        - uses = self._memory_arg_operand_uses(func_op, arg)
+        """
+
+        uses: list[Operation] = []
+        for op in self._walk_ops(func_op):
+            if isinstance(op, MemoryGetDataOp):
+                continue
+            if any(SSAValue.get(operand) is memory_arg for operand in op.operands):
+                uses.append(op)
+        return tuple(uses)
+
+    def _validate_allow_absent_memory_data_uses(self, func_op: func.FuncOp, allow_absent_args: set[SSAValue]) -> None:
+        """校验 allow-absent memory 的 data-use 均受 non-null 分支保护。
+
+        功能说明:
+        - guard 外、absent 分支、sibling block 或 guard 之后继续使用 absent memory 时稳定失败。
+        - 错误关键词固定包含 `absent memory data-use must be guarded by non-null pointer branch`。
+
+        使用示例:
+        - self._validate_allow_absent_memory_data_uses(func_op, allow_absent_args)
+        """
+
+        present_regions = self._present_regions_by_memory_arg(func_op)
+        for memory_arg in allow_absent_args:
+            regions = present_regions.get(memory_arg, ())
+            for use_op in self._memory_arg_operand_uses(func_op, memory_arg):
+                if any(self._op_is_nested_in_region(use_op, region) for region in regions):
+                    continue
+                raise self._error(
+                    func_op.sym_name.data,
+                    "absent memory data-use must be guarded by non-null pointer branch",
+                )
+
     def _prepend_template_instance_seed_lines(self, func_op: func.FuncOp, source: str) -> str:
         """在函数源码前补 generated template dtype seed alias。
 
@@ -531,8 +713,13 @@ class KernelEmitter:
             body = self._emit_default_function_body(func_op)
             self.ctx.pop_indent()
         if body:
-            return self._prepend_template_instance_seed_lines(func_op, f"{signature} {{\n{body}\n}}")
-        return self._prepend_template_instance_seed_lines(func_op, f"{signature} {{\n}}")
+            source = self._prepend_template_instance_seed_lines(func_op, f"{signature} {{\n{body}\n}}")
+        else:
+            source = self._prepend_template_instance_seed_lines(func_op, f"{signature} {{\n}}")
+        metadata_comment = self._allow_absent_memory_metadata_comment(func_op)
+        if metadata_comment:
+            return f"{metadata_comment}\n{source}"
+        return source
 
     def _is_npu_demo_body_level_kernel(self, func_op: func.FuncOp) -> bool:
         if not self.ctx.is_target("npu_demo"):
@@ -939,7 +1126,11 @@ class KernelEmitter:
         )
         body = "\n".join([*extent_lines, launch_line])
         self.ctx.pop_indent()
-        return self._prepend_template_instance_seed_lines(wrapper_func, f"{signature} {{\n{body}\n}}")
+        source = self._prepend_template_instance_seed_lines(wrapper_func, f"{signature} {{\n{body}\n}}")
+        metadata_comment = self._allow_absent_memory_metadata_comment(body_func, body_arg_offset=_body_arg_offset)
+        if metadata_comment:
+            return f"{metadata_comment}\n{source}"
+        return source
 
     def _get_npu_demo_body_level_kernel_types(self, func_op: func.FuncOp) -> tuple[NnMemoryType, NnMemoryType]:
         func_name = func_op.sym_name.data

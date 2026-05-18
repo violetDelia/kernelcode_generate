@@ -5,7 +5,7 @@
 - 定义仅表示整数符号值语义的 symbol dialect。
 - 提供 `SymbolExprAttr`、`SymbolValueType`、`SymbolIterAttr`、`SymbolIterType`、`symbol.add/sub/mul/div/floordiv/min/max`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_int/symbol.to_float`、`symbol.get_dim/get_stride`，以及带单个 loop-carried `!symbol.int<#symbol.expr<...>>` 的 `symbol.for` / `symbol.yield`。
 - `symbol.for` 同时兼容无 carried-value 形式和新的 `iter_args(%acc = %zero) ... -> !symbol.int<#symbol.expr<...>>` 文本语法。
-- 在导入 sympy 前设置 `SYMPY_GMPY=0`，规避外部 gmpy 引发的 SystemError。
+- `symbol.min` 的 full-tile 证明仅做当前文件内结构化整数判断，不依赖外部符号化简器状态。
 
 API 列表:
 - `class SymbolExprAttr(expr: StringAttr)`
@@ -19,7 +19,7 @@ API 列表:
 - `class SymbolIterType(start: SymbolExprAttr, end: SymbolExprAttr, step: SymbolExprAttr)`
 - `SymbolIterType.from_bounds(start: str, end: str, step: str) -> SymbolIterType`
 - `SymbolIterType.from_attr(attr: SymbolIterAttr) -> SymbolIterType`
-- `class SymbolPtrType(dtype: Attribute)`
+- `class SymbolPtrType(dtype: Attribute, template_name: StringAttr | str | None = None)`
 - `class SymbolConstOp(value: int | IntAttr, result_type: SymbolValueType | None = None)`
 - `class SymbolAddOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
 - `class SymbolSubOp(lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: Attribute)`
@@ -54,15 +54,12 @@ API 列表:
 
 from __future__ import annotations
 
-import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import ClassVar
 
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
-os.environ.setdefault("SYMPY_GMPY", "0")
-import sympy as sp
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerAttr, IntegerType, StringAttr, f32, f64, i1, i32
 from xdsl.dialect_interfaces.constant_materialization import ConstantMaterializationInterface
@@ -94,6 +91,7 @@ _SYMBOL_EXPR_TOKEN_PATTERN = re.compile(
     re.DOTALL,
 )
 _SYMBOL_EXPR_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SYMBOL_PTR_TEMPLATE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ERROR_SCENE = "dialect.symbol"
 _UNKNOWN_SYMBOL_EXPR = "?"
 _SYMBOL_EXPR_EXPR_PRECEDENCE = 10
@@ -127,6 +125,42 @@ def _raise_type_error(expected: str, *, actual: str = ERROR_ACTUAL) -> None:
     """统一抛出 symbol dialect type error。"""
 
     raise TypeError(_format_error(expected, actual))
+
+
+def _normalize_symbol_ptr_template_name(template_name: StringAttr | str | None) -> StringAttr:
+    """规整 symbol.ptr template name 参数。
+
+    功能说明:
+    - 把公开构造参数 `str | StringAttr | None` 统一为 `StringAttr`。
+
+    使用示例:
+    - attr = _normalize_symbol_ptr_template_name("T")
+    """
+
+    if template_name is None:
+        return StringAttr("")
+    if isinstance(template_name, StringAttr):
+        return template_name
+    if isinstance(template_name, str):
+        return StringAttr(template_name)
+    _raise_type_error("symbol.ptr template_name must be str, StringAttr or None")
+
+
+def _verify_symbol_ptr_template_name(template_name: str) -> None:
+    """校验 symbol.ptr template name 文本。
+
+    功能说明:
+    - 空字符串表示未携带 template name。
+    - 非空时必须是公开 identifier 文本。
+
+    使用示例:
+    - _verify_symbol_ptr_template_name("T")
+    """
+
+    if template_name == "":
+        return
+    if _SYMBOL_PTR_TEMPLATE_PATTERN.fullmatch(template_name) is None:
+        _raise_verify_error("symbol.ptr template_name must be an identifier")
 
 
 @dataclass(frozen=True)
@@ -715,6 +749,119 @@ def _get_symbol_expr_const(node: _SymbolExprNode) -> int | None:
     return int(node.value) if node.kind == "const" and isinstance(node.value, int) else None
 
 
+def _get_concrete_symbol_expr_node_value(node: _SymbolExprNode) -> int | None:
+    """计算纯静态整数表达节点。
+
+    功能说明:
+    - 只处理由常量和整数算术构成的表达节点。
+    - 遇到具名 symbol、`?`、`iter<...>`、`min/max` 或除零时返回 `None`，由调用方保守拒绝。
+
+    使用示例:
+    - value = _get_concrete_symbol_expr_node_value(_parse_symbol_expr_from_text("8 + 4"))
+    """
+
+    const = _get_symbol_expr_const(node)
+    if const is not None:
+        return const
+    if node.kind == "neg":
+        value = _get_concrete_symbol_expr_node_value(node.args[0])
+        return -value if value is not None else None
+    if node.kind == "add":
+        values = [_get_concrete_symbol_expr_node_value(arg) for arg in node.args]
+        if any(value is None for value in values):
+            return None
+        return sum(value for value in values if value is not None)
+    if node.kind == "sub":
+        lhs = _get_concrete_symbol_expr_node_value(node.args[0])
+        rhs = _get_concrete_symbol_expr_node_value(node.args[1])
+        return lhs - rhs if lhs is not None and rhs is not None else None
+    if node.kind == "mul":
+        values = [_get_concrete_symbol_expr_node_value(arg) for arg in node.args]
+        if any(value is None for value in values):
+            return None
+        product = 1
+        for value in values:
+            if value is not None:
+                product *= value
+        return product
+    if node.kind in {"floordiv", "ceildiv", "mod"}:
+        lhs = _get_concrete_symbol_expr_node_value(node.args[0])
+        rhs = _get_concrete_symbol_expr_node_value(node.args[1])
+        if lhs is None or rhs is None or rhs == 0:
+            return None
+        if node.kind == "floordiv":
+            return lhs // rhs
+        if node.kind == "ceildiv":
+            return -(-lhs // rhs)
+        return lhs % rhs
+    return None
+
+
+def _linear_symbol_expr_terms(node: _SymbolExprNode) -> tuple[dict[str, int], int] | None:
+    """提取一阶 symbol 表达式的系数表。
+
+    功能说明:
+    - 仅处理常量、具名 symbol、加减和常量乘一阶表达式。
+    - 遇到 `?`、`iter<...>`、`min/max` 或非线性乘法时返回 `None`，调用方保守拒绝。
+
+    使用示例:
+    - linear = _linear_symbol_expr_terms(_parse_symbol_expr_from_text("B + 24"))
+    """
+
+    const = _get_symbol_expr_const(node)
+    if const is not None:
+        return ({}, const)
+    if node.kind == "symbol":
+        return ({str(node.value): 1}, 0)
+    if node.kind == "neg":
+        operand = _linear_symbol_expr_terms(node.args[0])
+        if operand is None:
+            return None
+        terms, offset = operand
+        return ({name: -coeff for name, coeff in terms.items()}, -offset)
+    if node.kind == "add":
+        combined: dict[str, int] = {}
+        offset = 0
+        for arg in node.args:
+            parsed = _linear_symbol_expr_terms(arg)
+            if parsed is None:
+                return None
+            terms, arg_offset = parsed
+            offset += arg_offset
+            for name, coeff in terms.items():
+                combined[name] = combined.get(name, 0) + coeff
+        return ({name: coeff for name, coeff in combined.items() if coeff != 0}, offset)
+    if node.kind == "sub":
+        lhs = _linear_symbol_expr_terms(node.args[0])
+        rhs = _linear_symbol_expr_terms(node.args[1])
+        if lhs is None or rhs is None:
+            return None
+        lhs_terms, lhs_offset = lhs
+        rhs_terms, rhs_offset = rhs
+        combined = dict(lhs_terms)
+        for name, coeff in rhs_terms.items():
+            combined[name] = combined.get(name, 0) - coeff
+        return ({name: coeff for name, coeff in combined.items() if coeff != 0}, lhs_offset - rhs_offset)
+    if node.kind == "mul":
+        linear: tuple[dict[str, int], int] | None = None
+        const_product = 1
+        for arg in node.args:
+            arg_const = _get_symbol_expr_const(arg)
+            if arg_const is not None:
+                const_product *= arg_const
+                continue
+            if linear is not None:
+                return None
+            linear = _linear_symbol_expr_terms(arg)
+            if linear is None:
+                return None
+        if linear is None:
+            return ({}, const_product)
+        terms, offset = linear
+        return ({name: coeff * const_product for name, coeff in terms.items()}, offset * const_product)
+    return None
+
+
 def _make_symbol_expr_neg(node: _SymbolExprNode) -> _SymbolExprNode:
     """构造一元负号表达。
 
@@ -1259,6 +1406,29 @@ def _is_unknown_symbol_int_type(attr: Attribute) -> bool:
     return isinstance(attr, SymbolValueType) and attr.get_value() == _UNKNOWN_SYMBOL_EXPR
 
 
+def _parse_symbol_binary_operand_types(parser: AttrParser, op_name: str) -> tuple[Attribute, Attribute]:
+    """解析 symbol 二元 op 的 operand type 列表。
+
+    功能说明:
+    - 支持当前 printer 输出的 `lhs_type, rhs_type`。
+    - 兼容 MLIR 常见的 parenthesized 形式 `(lhs_type, rhs_type)`。
+
+    使用示例:
+    - lhs_type, rhs_type = _parse_symbol_binary_operand_types(parser, "symbol.eq")
+    """
+
+    if parser.parse_optional_punctuation("(") is not None:
+        lhs_type = parser.parse_type()
+        parser.parse_characters(",", f" in {op_name} type list")
+        rhs_type = parser.parse_type()
+        parser.parse_punctuation(")", f" in {op_name} type list")
+        return lhs_type, rhs_type
+    lhs_type = parser.parse_type()
+    parser.parse_characters(",", f" in {op_name} type list")
+    rhs_type = parser.parse_type()
+    return lhs_type, rhs_type
+
+
 def _symbol_iter_type_expr_node(attr: SymbolIterType) -> _SymbolExprNode:
     """从 `SymbolIterType` 构造公开 `iter<start,end,step>` token。
 
@@ -1296,15 +1466,15 @@ def _symbol_arith_operand_expr_node(attr: Attribute) -> _SymbolExprNode | None:
     return None
 
 
-def _symbol_expr_node_to_sympy(node: _SymbolExprNode) -> sp.Basic | None:
-    """把可证明的 symbol 表达节点转换为 SymPy 表达式。
+def _symbol_arith_operand_contains_unknown(attr: Attribute) -> bool | None:
+    """从公开类型文本快速判断 symbol 算术 operand 是否含 unknown。
 
     功能说明:
-    - 只覆盖 full-tile `min(step, end - iter<start,end,step>)` 证明所需的整数、symbol、加减乘与一元负号。
-    - 不支持 `?`、iter token 或整除类表达，调用方遇到 `None` 时保守不 fold。
+    - `verify_` 的 unknown 传播只需要判断 `?` 是否存在，不需要重建完整表达式 AST。
+    - 避免大尺寸动态 kernel IR 在验证阶段重复解析同一 canonical 表达式。
 
     使用示例:
-    - expr = _symbol_expr_node_to_sympy(_parse_symbol_expr_from_text("M + 4"))
+    - has_unknown = _symbol_arith_operand_contains_unknown(value.type)
 
     关联文件:
     - spec: spec/dialect/symbol.md
@@ -1312,35 +1482,13 @@ def _symbol_expr_node_to_sympy(node: _SymbolExprNode) -> sp.Basic | None:
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
-    if node.kind == "const":
-        if isinstance(node.value, int):
-            return sp.Integer(node.value)
-        return None
-    if node.kind == "symbol":
-        return sp.Symbol(str(node.value), integer=True)
-    if node.kind == "neg":
-        operand = _symbol_expr_node_to_sympy(node.args[0])
-        return -operand if operand is not None else None
-    if node.kind == "add":
-        terms = [_symbol_expr_node_to_sympy(term) for term in node.args]
-        if any(term is None for term in terms):
-            return None
-        return sum(terms, sp.Integer(0))
-    if node.kind == "sub":
-        lhs = _symbol_expr_node_to_sympy(node.args[0])
-        rhs = _symbol_expr_node_to_sympy(node.args[1])
-        if lhs is None or rhs is None:
-            return None
-        return lhs - rhs
-    if node.kind == "mul":
-        factors = [_symbol_expr_node_to_sympy(factor) for factor in node.args]
-        if any(factor is None for factor in factors):
-            return None
-        product: sp.Basic = sp.Integer(1)
-        for factor in factors:
-            assert factor is not None
-            product *= factor
-        return product
+    if isinstance(attr, SymbolValueType):
+        return _UNKNOWN_SYMBOL_EXPR in attr.expr.expr.data
+    if isinstance(attr, SymbolIterType):
+        return any(
+            _UNKNOWN_SYMBOL_EXPR in expr.expr.data
+            for expr in (attr.start, attr.end, attr.step)
+        )
     return None
 
 
@@ -1348,8 +1496,8 @@ def _symbol_expr_bounds_are_full_tiles(start: _SymbolExprNode, end: _SymbolExprN
     """判断 `start -> end step step` 是否静态可证为 full-tile。
 
     功能说明:
-    - 证明 `(end - start) / step` 是正整数。
-    - 只用于 tail `symbol.min` 的安全 fold，不做通用不等式求解。
+    - 对 `B -> B + 24 step 8` 与 `B -> B + 3*S step S` 这类一阶表达做当前文件内结构化证明。
+    - `iter<...>`、`?`、`min/max` 或非线性表达一律保守返回 `False`，避免 full-tile fold 依赖外部化简器状态。
 
     使用示例:
     - if _symbol_expr_bounds_are_full_tiles(start, end, step): ...
@@ -1360,17 +1508,79 @@ def _symbol_expr_bounds_are_full_tiles(start: _SymbolExprNode, end: _SymbolExprN
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
-    if _get_symbol_expr_const(step) == 0:
+    start_linear = _linear_symbol_expr_terms(start)
+    end_linear = _linear_symbol_expr_terms(end)
+    if start_linear is None or end_linear is None:
         return False
-    start_expr = _symbol_expr_node_to_sympy(start)
-    end_expr = _symbol_expr_node_to_sympy(end)
-    step_expr = _symbol_expr_node_to_sympy(step)
-    if start_expr is None or end_expr is None or step_expr is None:
+    start_terms, start_offset = start_linear
+    end_terms, end_offset = end_linear
+    diff_terms = dict(end_terms)
+    for name, coeff in start_terms.items():
+        diff_terms[name] = diff_terms.get(name, 0) - coeff
+    distance = end_offset - start_offset
+    step_value = _get_concrete_symbol_expr_node_value(step)
+    if step_value is not None:
+        if step_value == 0 or any(coeff != 0 for coeff in diff_terms.values()):
+            return False
+        return distance > 0 and distance % step_value == 0
+
+    step_linear = _linear_symbol_expr_terms(step)
+    if step_linear is None:
         return False
-    quotient = sp.simplify((end_expr - start_expr) / step_expr)
-    if quotient.is_Integer:
-        return int(quotient) > 0
-    return quotient.is_integer is True and quotient.is_positive is True
+    step_terms, step_offset = step_linear
+    return _linear_distance_is_positive_multiple(diff_terms, distance, step_terms, step_offset)
+
+
+def _linear_distance_is_positive_multiple(
+    diff_terms: dict[str, int],
+    diff_offset: int,
+    step_terms: dict[str, int],
+    step_offset: int,
+) -> bool:
+    """判断线性距离是否为 step 线性表达的正整数倍。
+
+    功能说明:
+    - 为 full-tile `symbol.min` 提供 `B -> B + 3*S step S` 与 `0 -> 5*N step N`
+      这类动态 step 的当前文件内结构化证明。
+    - 只接受同一组 symbol coefficient 的正整数倍，不调用外部符号化简器。
+
+    使用示例:
+    - _linear_distance_is_positive_multiple({"S": 3}, 0, {"S": 1}, 0)
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    if not step_terms and step_offset == 0:
+        return False
+
+    ratios: list[int] = []
+    for name in set(diff_terms) | set(step_terms):
+        step_coeff = step_terms.get(name, 0)
+        diff_coeff = diff_terms.get(name, 0)
+        if step_coeff == 0:
+            if diff_coeff != 0:
+                return False
+            continue
+        quotient, remainder = divmod(diff_coeff, step_coeff)
+        if remainder != 0:
+            return False
+        ratios.append(quotient)
+
+    if step_offset != 0:
+        quotient, remainder = divmod(diff_offset, step_offset)
+        if remainder != 0:
+            return False
+        ratios.append(quotient)
+    elif diff_offset != 0:
+        return False
+
+    if not ratios:
+        return False
+    first = ratios[0]
+    return first > 0 and all(ratio == first for ratio in ratios)
 
 
 def _symbol_expr_full_tile_residual_step(residual: _SymbolExprNode) -> _SymbolExprNode | None:
@@ -1467,9 +1677,13 @@ def _requires_unknown_arith_result(lhs_type: Attribute, rhs_type: Attribute) -> 
     - needs_unknown = _requires_unknown_arith_result(lhs.type, rhs.type)
     """
 
-    lhs = _symbol_arith_operand_expr_node(lhs_type)
-    rhs = _symbol_arith_operand_expr_node(rhs_type)
-    return lhs is not None and rhs is not None and (_contains_symbol_expr_unknown(lhs) or _contains_symbol_expr_unknown(rhs))
+    lhs_contains_unknown = _symbol_arith_operand_contains_unknown(lhs_type)
+    rhs_contains_unknown = _symbol_arith_operand_contains_unknown(rhs_type)
+    return (
+        lhs_contains_unknown is not None
+        and rhs_contains_unknown is not None
+        and (lhs_contains_unknown or rhs_contains_unknown)
+    )
 
 
 def _infer_symbol_arith_result_expr(op_name: str, lhs_type: Attribute, rhs_type: Attribute) -> str | None:
@@ -1592,29 +1806,33 @@ class SymbolExprAttr(ParametrizedAttribute):
 
         功能说明:
         - 输出 `#symbol.expr<...>` 非 quoted 公开语法。
+        - 表达式在构造与 parse 阶段已经完成 canonicalize，打印阶段直接使用存储文本，
+          避免复杂动态表达式在 dump 时重复重解析。
 
         使用示例:
         - SymbolExprAttr.from_expr("N").print_parameters(printer)
         """
 
         printer.print_string("<")
-        printer.print_string(_normalize_expr(self.expr.data))
+        printer.print_string(self.expr.data)
         printer.print_string(">")
 
     def verify(self: "SymbolExprAttr") -> None:
         """校验符号表达。
 
         功能说明:
-        - 确认内部表达属于公开 symbol 表达式语法。
+        - 确认内部表达不为空且不含构造入口会拒绝的 legacy 除法 / quoted 文本。
+        - 公开语法的完整解析校验已经在构造与 parse 阶段完成；verify 阶段不重复
+          解析复杂表达式，避免大规模 dump / memory verifier 反复触发 parser。
 
         使用示例:
         - SymbolExprAttr.from_expr("N floordiv 2").verify()
         """
 
-        expr = _normalize_expr(self.expr.data)
+        expr = self.expr.data
         if not expr:
             _raise_verify_error("symbol expr must not be empty")
-        if not _is_supported_symbol_expr(expr):
+        if '"' in expr or "'" in expr or "/" in expr:
             _raise_verify_error("symbol expr must contain identifiers, ?, integers, +, -, *, floordiv, ceildiv, mod, min(lhs, rhs) or max(lhs, rhs)")
 
     @classmethod
@@ -1699,15 +1917,15 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         - str(SymbolValueType.from_expr("N"))
         """
 
-        return f"symbol.int<#{self.expr.name}<{_normalize_expr(self.expr.expr.data)}>>"
+        return f"symbol.int<#{self.expr.name}<{self.expr.expr.data}>>"
 
     def get_value(self: "SymbolValueType") -> int | str:
         """返回 symbol.int 的公开值。
 
 
         功能说明:
-        - 对常量表达返回 `int`。
-        - 对符号表达返回标准化后的字符串。
+        - 对已 canonical 的整数字面量返回 `int`。
+        - 对符号表达返回存储的标准化字符串，不在读取时重复解析复杂表达式。
 
         使用示例:
         - SymbolValueType.from_expr("N").get_value()
@@ -1718,11 +1936,10 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
-        expr = _normalize_expr(self.expr.expr.data)
+        expr = self.expr.expr.data
         if expr == _UNKNOWN_SYMBOL_EXPR:
             return _UNKNOWN_SYMBOL_EXPR
-        concrete_value = _evaluate_concrete_expr(expr)
-        return concrete_value if concrete_value is not None else _canonicalize_symbolic_expr(expr)
+        return int(expr) if expr.lstrip("-").isdigit() else expr
 
     def is_symbol(self: "SymbolValueType") -> bool:
         """判断当前值是否为非字面量符号表达。
@@ -1741,8 +1958,8 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
-        expr = _normalize_expr(self.expr.expr.data)
-        return expr != _UNKNOWN_SYMBOL_EXPR and _evaluate_concrete_expr(expr) is None
+        expr = self.expr.expr.data
+        return expr != _UNKNOWN_SYMBOL_EXPR and not expr.lstrip("-").isdigit()
 
     @classmethod
     def from_expr(cls: type["SymbolValueType"], expr: str) -> "SymbolValueType":
@@ -2045,11 +2262,11 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
 
 
     功能说明:
-    - 表示 `!symbol.ptr<dtype>` 的指针类型承载。
+    - 表示 `!symbol.ptr<dtype>` 或 `!symbol.ptr<dtype, template = T>` 的指针类型承载。
     - 作为 DSL `Ptr(dtype)` 与 IR 类型的唯一桥接入口。
 
     使用示例:
-    - SymbolPtrType(f32)
+    - SymbolPtrType(f32, template_name="T")
 
     关联文件:
     - spec: spec/dialect/symbol.md
@@ -2060,6 +2277,20 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
     name = "symbol.ptr"
 
     dtype: Attribute = param_def(Attribute)
+    template_name: StringAttr = param_def(StringAttr)
+
+    def __init__(self: "SymbolPtrType", dtype: Attribute, template_name: StringAttr | str | None = None) -> None:
+        """初始化 symbol.ptr 类型。
+
+        功能说明:
+        - 保存指针 element dtype 与可选 template name。
+        - 默认不携带 template name，兼容 `SymbolPtrType(dtype)` 旧构造。
+
+        使用示例:
+        - SymbolPtrType(f32, "T")
+        """
+
+        super().__init__(dtype, _normalize_symbol_ptr_template_name(template_name))
 
     @classmethod
     def parse_parameters(cls: type["SymbolPtrType"], parser: AttrParser) -> Sequence[Attribute]:
@@ -2067,7 +2298,7 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
 
 
         功能说明:
-        - 解析 `!symbol.ptr<dtype>` 中的 dtype。
+        - 解析 `!symbol.ptr<dtype>` 或 `!symbol.ptr<dtype, template = T>` 中的 dtype 与 template。
 
         使用示例:
         - SymbolPtrType.parse_parameters(parser)
@@ -2080,15 +2311,22 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
 
         parser.parse_punctuation("<", "Expected '<' for symbol ptr type.")
         dtype = parser.parse_type()
+        template_name = StringAttr("")
+        if parser.parse_optional_punctuation(",") is not None:
+            keyword = parser.parse_identifier("Expected 'template' symbol.ptr option.")
+            if keyword != "template":
+                parser.raise_error("symbol.ptr only accepts template option")
+            parser.parse_punctuation("=", "Expected '=' after symbol.ptr template option.")
+            template_name = StringAttr(parser.parse_identifier("Expected symbol.ptr template name."))
         parser.parse_punctuation(">", "Expected '>' for symbol ptr type.")
-        return (dtype,)
+        return (dtype, template_name)
 
     def print_parameters(self: "SymbolPtrType", printer: Printer) -> None:
         """打印 symbol.ptr 类型参数。
 
 
         功能说明:
-        - 输出 `!symbol.ptr<dtype>` 的 dtype 部分。
+        - 输出 `!symbol.ptr<dtype>` 的 dtype 和可选 template 部分。
 
         使用示例:
         - SymbolPtrType(f32).print_parameters(printer)
@@ -2101,6 +2339,10 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
 
         printer.print_string("<")
         printer.print_attribute(self.dtype)
+        template_name = self.template_name.data
+        if template_name:
+            printer.print_string(", template = ")
+            printer.print_string(template_name)
         printer.print_string(">")
 
     def verify(self: "SymbolPtrType") -> None:
@@ -2124,6 +2366,7 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
             _raise_verify_error("symbol.ptr dtype must be type")
         if isinstance(self.dtype, SymbolValueType):
             _raise_verify_error("symbol.ptr dtype must not be symbol.int")
+        _verify_symbol_ptr_template_name(self.template_name.data)
 
 
 class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
@@ -2297,9 +2540,7 @@ class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
         parser.parse_characters(",", f" in {cls.name}")
         unresolved_rhs = parser.parse_unresolved_operand()
         parser.parse_characters(":", f" in {cls.name}")
-        lhs_type = parser.parse_type()
-        parser.parse_characters(",", f" in {cls.name} type list")
-        rhs_type = parser.parse_type()
+        lhs_type, rhs_type = _parse_symbol_binary_operand_types(parser, cls.name)
         parser.parse_characters("->", f" in {cls.name}")
         result_type = parser.parse_type()
 
@@ -2422,9 +2663,7 @@ class _BaseSymbolCompareOp(IRDLOperation, HasFolderInterface):
         parser.parse_characters(",", f" in {cls.name}")
         unresolved_rhs = parser.parse_unresolved_operand()
         parser.parse_characters(":", f" in {cls.name}")
-        lhs_type = parser.parse_type()
-        parser.parse_characters(",", f" in {cls.name} type list")
-        rhs_type = parser.parse_type()
+        lhs_type, rhs_type = _parse_symbol_binary_operand_types(parser, cls.name)
         parser.parse_characters("->", f" in {cls.name}")
         result_type = parser.parse_type()
 
@@ -2499,8 +2738,9 @@ class SymbolConstOp(IRDLOperation):
             _raise_verify_error(f"{self.name} value must be integer attribute")
         if not isinstance(self.result.type, SymbolValueType):
             _raise_verify_error(f"{self.name} result type must be !symbol.int<#symbol.expr<expr>>")
-        expected_type = SymbolValueType.from_expr(str(self.value.data))
-        if self.result.type != expected_type:
+        expected_expr = _normalize_expr(str(self.value.data))
+        actual_expr = _normalize_expr(self.result.type.expr.expr.data)
+        if actual_expr != expected_expr:
             _raise_verify_error(f"{self.name} result type must match value")
 
     def print(self: "SymbolConstOp", printer: Printer) -> None:
@@ -2846,7 +3086,7 @@ class SymbolToIntOp(IRDLOperation):
 
 @irdl_op_definition
 class SymbolCastOp(IRDLOperation):
-    """将 symbol.int 标量转换为普通整型。"""
+    """转换 symbol.int 标量或 symbol.ptr 指针。"""
 
     name = "symbol.cast"
     traits = traits_def(Pure())
@@ -2864,6 +3104,7 @@ class SymbolCastOp(IRDLOperation):
 
         功能说明:
         - 设置单个 `!symbol.int<#symbol.expr<expr>>` 操作数与普通整型结果类型。
+        - 或设置单个 `!symbol.ptr<dtype>` 操作数与 `!symbol.int<#symbol.expr<??>>` 结果类型。
         - 供 `emit_c/npu_demo` 读取 `symbol.cast` 文本输入。
 
         使用示例:
@@ -2882,8 +3123,9 @@ class SymbolCastOp(IRDLOperation):
 
 
         功能说明:
-        - 校验 source 必须为 `!symbol.int<#symbol.expr<expr>>`。
-        - 校验 result 必须为 builtin 整型。
+        - 校验 source 必须为 `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.ptr<dtype>`。
+        - `!symbol.int` source 的 result 必须为 builtin 整型。
+        - `!symbol.ptr` source 的 result 必须为 `!symbol.int<#symbol.expr<??>>`。
 
         使用示例:
         - SymbolCastOp(source, i32).verify_()
@@ -2894,8 +3136,12 @@ class SymbolCastOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/symbol.py
         """
         source_value = SSAValue.get(self.source)
+        if isinstance(source_value.type, SymbolPtrType):
+            if not _is_unknown_symbol_int_type(self.result.type):
+                _raise_verify_error(f"{self.name} ptr result type must be !symbol.int<#symbol.expr<?>>")
+            return
         if not _is_symbol_int_type(source_value.type):
-            _raise_verify_error(f"{self.name} source must have type !symbol.int<#symbol.expr<expr>>")
+            _raise_verify_error(f"{self.name} source must have type !symbol.int<#symbol.expr<expr>> or !symbol.ptr<dtype>")
         if not isinstance(self.result.type, IntegerType):
             _raise_verify_error(f"{self.name} result type must be integer")
 

@@ -59,6 +59,7 @@ from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dialect.symbol import SymbolConstOp
 from kernel_gen.operation import deslice, loop, matmul, slice, store
+from kernel_gen.operation import kernel as kernel_ops
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import build_registered_pipeline, load_builtin_passes
 from kernel_gen.tools.dsl_run import DslRunResult, dsl_run
@@ -76,7 +77,9 @@ _EXPECTED_RETURN_VALUE_MESSAGE = "DslRunReturnValueUnsupported: dsl_run only sup
 _EXPECTED_TARGET_MESSAGE = "DslRunInvalidTarget: core config target must be non-empty str"
 _EXPECTED_PIPELINE_NAME_MESSAGE = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline'"
 _EXPECTED_PIPELINE_TYPE_MESSAGE = "DslRunInvalidPipeline: pipeline must be str or PassManager"
-_EXPECTED_REAL_ARG_TYPE_MESSAGE = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray and integer scalar"
+_EXPECTED_REAL_ARG_TYPE_MESSAGE = (
+    "DslRunUnsupportedRealArg: real_args only supports torch.Tensor, numpy.ndarray, integer scalar and None for memory"
+)
 _EXPECTED_TILE_VALUE_MESSAGE = "DslRunInvalidTileValue: tile runtime scalar must be positive int"
 _EXPECTED_ARITY_MESSAGE = "DslRunArityMismatch: real_args count does not match function signature"
 _EXPECTED_NPU_DEMO_WRAPPER_MESSAGE = (
@@ -218,6 +221,29 @@ def add_kernel(
     """
 
     store(out, lhs + rhs, [0], [6], [1])
+
+
+def optional_bias_add_kernel(
+    out: "Tensor[f32, 4]",
+    lhs: "Tensor[f32, 4]",
+    bias: "Tensor[f32, 4]",
+) -> None:
+    """optional bias 样例：`None` 分支不读取 bias data。"""
+
+    if bias is None:
+        kernel_ops.add(out, lhs, lhs)
+    else:
+        kernel_ops.add(out, lhs, bias)
+
+
+def unguarded_optional_bias_add_kernel(
+    out: "Tensor[f32, 4]",
+    lhs: "Tensor[f32, 4]",
+    bias: "Tensor[f32, 4]",
+) -> None:
+    """非法样例：runtime `None` 未被 pointer guard 保护。"""
+
+    kernel_ops.add(out, lhs, bias)
 
 
 def return_add_kernel(
@@ -564,6 +590,35 @@ def test_dsl_run_numpy_output() -> None:
     )
 
     _assert_result_contract(result, out, expected)
+
+
+def test_dsl_run_optional_bias_none_and_present_paths() -> None:
+    """dsl_run 允许 Tensor 形参 runtime `None` 进入 allow-absent guarded 分支。"""
+
+    lhs = np.arange(4, dtype=np.float32)
+    bias = np.ones((4,), dtype=np.float32)
+
+    absent_out = np.empty((4,), dtype=np.float32)
+    absent_result = dsl_run(optional_bias_add_kernel, (absent_out, lhs, None), "npu-demo-lowering")
+    assert absent_result.execute_result.ok is True
+    assert "// kg.allow_absent_memory_args: 2:float:1" in absent_result.source
+    np.testing.assert_allclose(absent_out, lhs + lhs)
+
+    present_out = np.empty((4,), dtype=np.float32)
+    present_result = dsl_run(optional_bias_add_kernel, (present_out, lhs, bias), "npu-demo-lowering")
+    assert present_result.execute_result.ok is True
+    assert "// kg.allow_absent_memory_args: 2:float:1" in present_result.source
+    np.testing.assert_allclose(present_out, lhs + bias)
+
+
+def test_dsl_run_rejects_none_without_allow_absent_metadata() -> None:
+    """runtime `None` 只有 source metadata 标记为 allow-absent memory 时才能执行。"""
+
+    out = np.empty((4,), dtype=np.float32)
+    lhs = np.arange(4, dtype=np.float32)
+
+    with pytest.raises(KernelCodeError, match="None runtime arg requires allow-absent memory metadata"):
+        dsl_run(unguarded_optional_bias_add_kernel, (out, lhs, None), "npu-demo-lowering")
 
 
 # TC-DSL-RUN-003A

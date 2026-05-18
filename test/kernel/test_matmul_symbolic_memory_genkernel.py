@@ -115,6 +115,7 @@ def test_dynamic_matmul_demo_uses_symbolic_memory_and_tile_reduce_accumulator() 
         Memory(["H", "W"], NumericType.Float32),
         Memory(["H", "K"], NumericType.Float32),
         Memory(["K", "W"], NumericType.Float32),
+        Memory(["W"], NumericType.Float32),
         SymbolDim("TILE_H"),
         SymbolDim("TILE_W"),
         SymbolDim("TILE_K"),
@@ -125,6 +126,7 @@ def test_dynamic_matmul_demo_uses_symbolic_memory_and_tile_reduce_accumulator() 
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" in module_text
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<K>]" in module_text
     assert "!nn.memory<[#symbol.expr<K>, #symbol.expr<W>]" in module_text
+    assert "!nn.memory<[#symbol.expr<W>]" in module_text
     assert "!symbol.int<#symbol.expr<TILE_H>>" in module_text
     assert "!symbol.int<#symbol.expr<TILE_W>>" in module_text
     assert "!symbol.int<#symbol.expr<TILE_K>>" in module_text
@@ -133,6 +135,8 @@ def test_dynamic_matmul_demo_uses_symbolic_memory_and_tile_reduce_accumulator() 
     assert '"kernel.binary_elewise"' in module_text
     assert '"dma.view"' in module_text
     assert '"dma.deslice"' in module_text
+    assert "memory.get_data" in module_text
+    assert "symbol.ne" in module_text
     assert ".template view<T1>" in source
     assert "!nn.memory<[#symbol.expr<17>, #symbol.expr<19>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
@@ -148,6 +152,7 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
         Memory([197, 184], NumericType.Float32),
         Memory([197, 178], NumericType.Float32),
         Memory([178, 184], NumericType.Float32),
+        Memory([184], NumericType.Float32),
         SymbolDim("TILE_H"),
         SymbolDim("TILE_W"),
         SymbolDim("TILE_K"),
@@ -158,6 +163,7 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
     assert "!nn.memory<[#symbol.expr<197>, #symbol.expr<184>]" in module_text
     assert "!nn.memory<[#symbol.expr<197>, #symbol.expr<178>]" in module_text
     assert "!nn.memory<[#symbol.expr<178>, #symbol.expr<184>]" in module_text
+    assert "!nn.memory<[#symbol.expr<184>]" in module_text
     assert "!symbol.int<#symbol.expr<TILE_H>>" in module_text
     assert "!symbol.int<#symbol.expr<TILE_W>>" in module_text
     assert "!symbol.int<#symbol.expr<TILE_K>>" in module_text
@@ -166,6 +172,8 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
     assert '"kernel.binary_elewise"' in module_text
     assert '"dma.view"' in module_text
     assert '"dma.deslice"' in module_text
+    assert "memory.get_data" in module_text
+    assert "symbol.ne" in module_text
     assert ".template view<T1>" in source
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
@@ -181,6 +189,7 @@ def test_static_static_matmul_demo_keeps_static_memory_and_static_tile_reduce() 
         Memory([166, 172], NumericType.Float32),
         Memory([166, 217], NumericType.Float32),
         Memory([217, 172], NumericType.Float32),
+        Memory([172], NumericType.Float32),
     )
     module_text = str(module)
 
@@ -188,11 +197,14 @@ def test_static_static_matmul_demo_keeps_static_memory_and_static_tile_reduce() 
     assert "!nn.memory<[#symbol.expr<166>, #symbol.expr<172>]" in module_text
     assert "!nn.memory<[#symbol.expr<166>, #symbol.expr<217>]" in module_text
     assert "!nn.memory<[#symbol.expr<217>, #symbol.expr<172>]" in module_text
-    assert "step = #symbol.expr<64>" in module_text
+    assert "!nn.memory<[#symbol.expr<172>]" in module_text
+    assert "step = #symbol.expr<48>" in module_text
     assert '"kernel.matmul"' in module_text
     assert '"kernel.binary_elewise"' in module_text
     assert '"dma.view"' in module_text
     assert '"dma.deslice"' in module_text
+    assert "memory.get_data" in module_text
+    assert "symbol.ne" in module_text
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
     _assert_source_uses_accumulator(source)
@@ -209,4 +221,9 @@ def test_matmul_target_scripts_execute_and_tile_reduce_still_passes() -> None:
     for script in scripts:
         completed = _run_kernel_script(script)
         assert "[CHECK] matmul/" in completed.stdout
+        assert "absent_bias max_abs_diff=" in completed.stdout
+        assert "present_bias max_abs_diff=" in completed.stdout
+        assert "tile_seed=" in completed.stdout
+        assert "tile_candidates=" in completed.stdout
+        assert "bias_case_order=" in completed.stdout
         assert "max_abs_diff=" in completed.stdout

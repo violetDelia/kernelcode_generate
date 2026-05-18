@@ -3,7 +3,9 @@
 功能说明:
 - 提供 `memory-plan` pass，用于在显式 `insert-free=True` 时为受控
   `dma.alloc` 结果补插 `dma.free`。
-- 当前阶段只分析 `func.func` body 与 `symbol.for` body 内的单块生命周期。
+- 当前阶段只分析 `func.func` body 与 `symbol.for` body 内的单块生命周期；
+  owner block 中单块 `scf.if` 分支内的 use 会映射到 `scf.if` 后统一释放。
+- `scf.if` 分支内新建 `dma.alloc` 仍按 unsupported control flow 拒绝。
 - 通过当前文件内 helper 计算 alias closure，不依赖 `memory_pool` 或其它 pass 私有实现。
 
 API 列表:
@@ -325,6 +327,7 @@ def _verify_supported_owner_block(block: Block) -> None:
 
     功能说明:
     - 支持 `func.func` body 与 `symbol.for` body。
+    - `scf.if` 分支内 alloc 暂不建模，仍显式报 unsupported control flow。
     - 其它控制流或多块 region 显式报 unsupported control flow。
 
     使用示例:
@@ -340,6 +343,28 @@ def _verify_supported_owner_block(block: Block) -> None:
         if len(list(parent.body.blocks)) != 1:
             _raise_memory_plan_error("MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region")
         return
+    _raise_memory_plan_error("MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region")
+
+
+def _scf_if_branch_index(if_op: scf.IfOp, block: Block) -> int:
+    """返回 `scf.if` 单块分支索引。
+
+    功能说明:
+    - true 分支返回 `0`，false 分支返回 `1`。
+    - 非单块或未知分支按当前 memory-plan 控制流边界稳定失败。
+
+    使用示例:
+    - branch = _scf_if_branch_index(if_op, use_block)
+    """
+
+    true_blocks = list(if_op.true_region.blocks)
+    false_blocks = list(if_op.false_region.blocks)
+    if len(true_blocks) != 1 or len(false_blocks) > 1:
+        _raise_memory_plan_error("MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region")
+    if true_blocks and block is true_blocks[0]:
+        return 0
+    if false_blocks and block is false_blocks[0]:
+        return 1
     _raise_memory_plan_error("MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region")
 
 
@@ -363,6 +388,8 @@ def _map_use_to_owner_block(op: Operation, owner_block: Block) -> tuple[Operatio
     - 同 block use 返回自身和单段位置。
     - 位于嵌套 `symbol.for` body 内的 use 返回 owner block 中对应的 ancestor
       `symbol.for`，并保留 nested block 内部位置。
+    - 位于 owner block 单块 `scf.if` 分支内的 use 返回对应 `scf.if`，并用
+      true/false 分支索引区分同 anchor 内部顺序。
     - 其它控制流或跨 region use 显式失败。
 
     使用示例:
@@ -384,8 +411,13 @@ def _map_use_to_owner_block(op: Operation, owner_block: Block) -> tuple[Operatio
         parent = block.parent_op()
         if isinstance(parent, func.FuncOp):
             _raise_memory_plan_error("MemoryPlanUnsupportedEscape: dma.alloc escapes current supported region")
-        if isinstance(parent, (scf.ForOp, scf.IfOp)):
+        if isinstance(parent, scf.ForOp):
             _raise_memory_plan_error("MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region")
+        if isinstance(parent, scf.IfOp):
+            reversed_position.append(_scf_if_branch_index(parent, block))
+            current_op = parent
+            block = parent.parent_block()
+            continue
         if not isinstance(parent, SymbolForOp):
             _raise_memory_plan_error("MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region")
         current_op = parent

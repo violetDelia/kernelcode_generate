@@ -5,15 +5,16 @@
 - 实现 `inputs 动 + tile 动` 的 NCHW conv2d kernel demo。
 - 输入与输出使用符号维度标注，并由真实 NumPy ndarray 运行时 shape 绑定。
 - demo 输入规模固定在大模型输入可执行子集：运行时按固定 seed 生成 `N=5 / C=65 / H=281 / W=262 / F=20`。
-- stride、dilation、padding 与 tile 均作为编译期 `SymbolDim` 形参进入 `run_lowering_demo(...)`，并以容量安全的整数 runtime scalar 传给 `ExecutionEngine` device entry。
+- stride、dilation、padding 与 tile 均作为编译期 `SymbolDim` 形参进入 `run_lowering_demo(...)`，tile 从轻量候选集合按固定 seed 选择后以容量安全的整数 runtime scalar 传给 `ExecutionEngine` root wrapper。
 - 当 `tile_c < input channel` 时在每个输出 tile 内先初始化本地 accumulator，再在 `c0` tile 循环内用 `kernel.img2col2d/kernel.matmul/kernel.add` 累计 partial，最后一次写回输出。
 - 编译期用 `B/N/C/XH/XW/KH/KW/SH/SW/DH/DW/PT/PB/PL/PR/TF/TC/TN/THO/TWO` 语义化符号走 `gen_kernel` 生成动态 memory IR/source。
 - output 编译期 memory 形状为完整非对称 padding 公式：`((XH + PT + PB - DH * (KH - 1) - 1) floordiv SH) + 1` 与 `((XW + PL + PR - DW * (KW - 1) - 1) floordiv SW) + 1`。
 - lowering 后 memory-pool 形态必须使用 `arch.get_dynamic_memory + dma.view`，不得残留 `dma.alloc` / `allalloc`。
 - 运行期仍传入真实 NumPy ndarray 静态 shape，并和 NumPy conv2d 参考结果对齐。
+- C/K reduce 完成后按 optional rank-1 bias 分支广播 `bias[None, :, None, None]`，再写回输出。
 
 API 列表:
-- `conv2d_inputs_dynamic_tile_dynamic_kernel(out: Tensor[f32, B, C, HO, WO], input_tensor: Tensor[f32, B, N, XH, XW], weight: Tensor[f32, C, N, KH, KW], stride_h: SymbolDim, stride_w: SymbolDim, dilation_h: SymbolDim, dilation_w: SymbolDim, pad_top: SymbolDim, pad_bottom: SymbolDim, pad_left: SymbolDim, pad_right: SymbolDim, tile_f: SymbolDim, tile_c: SymbolDim, tile_n: SymbolDim, tile_ho: SymbolDim, tile_wo: SymbolDim) -> None`
+- `conv2d_inputs_dynamic_tile_dynamic_kernel(out: Tensor[f32, B, C, HO, WO], input_tensor: Tensor[f32, B, N, XH, XW], weight: Tensor[f32, C, N, KH, KW], bias: Tensor[f32, C], stride_h: SymbolDim, stride_w: SymbolDim, dilation_h: SymbolDim, dilation_w: SymbolDim, pad_top: SymbolDim, pad_bottom: SymbolDim, pad_left: SymbolDim, pad_right: SymbolDim, tile_f: SymbolDim, tile_c: SymbolDim, tile_n: SymbolDim, tile_ho: SymbolDim, tile_wo: SymbolDim) -> None`
 - `main() -> None`
 
 使用示例:
@@ -40,7 +41,7 @@ if str(_REPO_ROOT) not in sys.path:
 from kernel.runner import run_lowering_demo
 from kernel_gen.execute_engine import ExecutionEngine
 from kernel_gen.operation import kernel
-from kernel_gen.operation.dma import alloc, deslice, fill, reshape, slice
+from kernel_gen.operation.dma import alloc, broadcast, deslice, fill, reshape, slice, view
 from kernel_gen.operation.nn import transpose
 from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
@@ -48,11 +49,15 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 CASE_NAME = "conv2d/inputs_dynamic_tile_dynamic"
-DEVICE_ENTRY_NAME = "conv2d_inputs_dynamic_tile_dynamic_kernel_device"
+ROOT_ENTRY_NAME = "conv2d_inputs_dynamic_tile_dynamic_kernel"
 _DYNAMIC_SHAPE_SEED = 20260503
-_DYNAMIC_TILE_ARGS = (8, 16, 4, 8, 8)
+_DYNAMIC_TILE_SELECTION_SEED = 2026051726
+_DYNAMIC_TILE_CANDIDATES = ((8, 16, 4, 8, 8), (7, 18, 3, 8, 8), (6, 20, 2, 8, 8))
+_DYNAMIC_TILE_ARGS = random.Random(_DYNAMIC_TILE_SELECTION_SEED).choice(_DYNAMIC_TILE_CANDIDATES)
+_BIAS_CASE_ORDER_SEED = 2026051755
+_BIAS_CASE_ORDER = tuple(random.Random(_BIAS_CASE_ORDER_SEED).sample(("absent", "present"), 2))
 Conv2dCompileArg: TypeAlias = "Memory | SymbolDim"
-Conv2dRuntimeArg: TypeAlias = "np.ndarray | int"
+Conv2dRuntimeArg: TypeAlias = "np.ndarray | int | None"
 
 
 def _conv2d_nchw_reference(
@@ -96,6 +101,7 @@ def conv2d_inputs_dynamic_tile_dynamic_kernel(
     out: "Tensor[f32, B, C, HO, WO]",
     input_tensor: "Tensor[f32, B, N, XH, XW]",
     weight: "Tensor[f32, C, N, KH, KW]",
+    bias: "Tensor[f32, C]",
     stride_h: SymbolDim,
     stride_w: SymbolDim,
     dilation_h: SymbolDim,
@@ -117,9 +123,10 @@ def conv2d_inputs_dynamic_tile_dynamic_kernel(
     - 输入、输出与权重维度来自 `Tensor[...]` 符号维度，布局为 input[B,N,XH,XW]、weight[C,N,KH,KW]、out[B,C,HO,WO]。
     - stride/dilation/padding/tile shape 使用 runtime scalar 绑定。
     - K/reduce 维按输入通道 tile 切分，`kernel.matmul` 覆盖 `cur_c * KH * KW`，并通过本地 accumulator 累计所有 partial。
+    - runtime bias 非空时，在 reduce 后、写回前广播 rank-1 bias 并累加。
 
     使用示例:
-    - `conv2d_inputs_dynamic_tile_dynamic_kernel(out, input_tensor, weight, 1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 1, 1, 7)`
+    - `conv2d_inputs_dynamic_tile_dynamic_kernel(out, input_tensor, weight, bias, 1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 1, 1, 7)`
     """
 
     n_size, c_size, h_size, w_size = input_tensor.get_shape()
@@ -158,6 +165,10 @@ def conv2d_inputs_dynamic_tile_dynamic_kernel(
                         out_tile = batch_tile * spatial_tile
                         acc = alloc([batch_tile, cur_f, cur_ho, cur_wo], NumericType.Float32, MemorySpace.TSM)
                         fill(acc, 0)
+                        bias_tile = alloc([cur_f], NumericType.Float32, MemorySpace.TSM)
+                        fill(bias_tile, 0)
+                        bias_nchw = reshape(bias_tile, [1, cur_f, 1, 1])
+                        bias_full = alloc([batch_tile, cur_f, cur_ho, cur_wo], NumericType.Float32, MemorySpace.TSM)
                         for c0 in loop(0, c_size, tile_c):
                             cur_c = min(tile_c, c_size - c0)
                             k_tile = cur_c * kh_size * kw_size
@@ -172,6 +183,11 @@ def conv2d_inputs_dynamic_tile_dynamic_kernel(
                             out_fnhw = reshape(out2, [cur_f, batch_tile, cur_ho, cur_wo])
                             partial = transpose(out_fnhw, [1, 0, 2, 3])
                             kernel.add(acc, acc, partial)
+                        if bias is not None:
+                            bias_region = view(bias, [f0], [cur_f], [1])
+                            deslice(bias_tile, bias_region, [0], [cur_f], [1])
+                            broadcast(bias_full, bias_nchw)
+                            kernel.add(acc, acc, bias_full)
                         deslice(
                             out,
                             acc,
@@ -219,6 +235,7 @@ def _symbolic_compile_args() -> tuple[Conv2dCompileArg, ...]:
         Memory(["B", "C", output_h_dim, output_w_dim], NumericType.Float32),
         Memory(["B", "N", "XH", "XW"], NumericType.Float32),
         Memory(["C", "N", "KH", "KW"], NumericType.Float32),
+        Memory(["C"], NumericType.Float32),
         sh_dim,
         sw_dim,
         dh_dim,
@@ -248,6 +265,7 @@ def _assert_dynamic_memory_ir(
     - 确认输出 memory 类型包含 `B/C` 以及 `SH/SW/DH/DW/PT/PB/PL/PR` 组成的完整动态公式。
     - 确认输入 memory 类型包含 `!nn.memory<[#symbol.expr<B>, #symbol.expr<N>, #symbol.expr<XH>, #symbol.expr<XW>]`。
     - 确认权重 memory 类型包含 `!nn.memory<[#symbol.expr<C>, #symbol.expr<N>, #symbol.expr<KH>, #symbol.expr<KW>]`。
+    - 确认 bias memory 类型包含 `!nn.memory<[#symbol.expr<C>]`，并通过 `memory.get_data/symbol.ne` 生成可空 presence guard。
     - 确认 IR 不回退为本次真实运行的 output/input/weight 静态 shape。
     - 确认 IR 不回退为旧 `s1/s2/...` 匿名符号 shape。
     - 确认 memory-pool 后 IR 已收口为 `arch.get_dynamic_memory + dma.view`，不残留 `dma.alloc` / `allalloc`。
@@ -274,6 +292,9 @@ def _assert_dynamic_memory_ir(
         ("tile wo symbol", "TWO"),
         ("input", "!nn.memory<[#symbol.expr<B>, #symbol.expr<N>, #symbol.expr<XH>, #symbol.expr<XW>]"),
         ("weight", "!nn.memory<[#symbol.expr<C>, #symbol.expr<N>, #symbol.expr<KH>, #symbol.expr<KW>]"),
+        ("bias", "!nn.memory<[#symbol.expr<C>]"),
+        ("optional bias data ptr", "memory.get_data"),
+        ("optional bias present guard", "symbol.ne"),
         ("memory-pool backing", "arch.get_dynamic_memory"),
         ("memory-pool view", "dma.view"),
     )
@@ -318,19 +339,19 @@ def _assert_dynamic_memory_ir(
 
 
 def _execute_device_source(source: str, real_args: tuple[Conv2dRuntimeArg, ...]) -> None:
-    """编译并执行 lowering 生成的 device entry。
+    """编译并执行 lowering 生成的 root entry。
 
 
     功能说明:
     - 使用公开 `ExecutionEngine` 编译 `gen_kernel` 生成的完整源码。
-    - 执行入口固定为 lowering 生成的 device 函数，避免 root wrapper 的静态 launch 形态吞掉本地执行。
+    - 执行入口固定为 lowering 生成的 root wrapper，保留 `npu_demo::launch` block 分发语义。
     - `CompiledKernel` 使用完立即关闭，释放临时编译目录。
 
     使用示例:
-    - `_execute_device_source(source, (out, input_tensor, weight, 8, 8, 1, 1, 1, 2, 3, 4, 8, 16, 4, 8, 8))`
+    - `_execute_device_source(source, (out, input_tensor, weight, 8, 8, 1, 1, 1, 2, 3, 4, 7, 18, 3, 8, 8))`
     """
 
-    compiled_kernel = ExecutionEngine(target="npu_demo").compile(source=source, function=DEVICE_ENTRY_NAME)
+    compiled_kernel = ExecutionEngine(target="npu_demo").compile(source=source, function=ROOT_ENTRY_NAME)
     try:
         execute_result = compiled_kernel.execute(args=real_args)
         if not execute_result.ok:
@@ -374,8 +395,8 @@ def main() -> None:
     功能说明:
     - 构造固定 seed 的随机 shape 与随机 NumPy ndarray 输入，输入 shape 为 `N=5 / C=65 / H=281 / W=262 / F=20`。
     - 写入 `kernel/dump/conv2d/inputs_dynamic_tile_dynamic/`。
-    - 编译期以符号 memory shape 生成 IR/source，运行期以真实静态 tensor 执行 device entry。
-    - 用 NumPy conv2d 参考结果校验输出。
+    - 编译期以符号 memory shape 生成 IR/source，运行期以真实静态 tensor 执行 root wrapper。
+    - 分别用 NumPy conv2d 与 `conv2d + bias[None, :, None, None]` 参考结果校验输出。
 
     使用示例:
     - `python3 kernel/conv2d/inputs_dynamic_tile_dynamic.py`
@@ -398,8 +419,11 @@ def main() -> None:
     rng = np.random.default_rng(2026051613)
     input_tensor = rng.standard_normal((n_size, c_size, h_size, w_size), dtype=np.float32)
     weight = rng.standard_normal((f_size, c_size, kh_size, kw_size), dtype=np.float32)
-    out = np.zeros((n_size, f_size, ho_size, wo_size), dtype=np.float32)
-    expected = _conv2d_nchw_reference(input_tensor, weight, stride=stride_args, dilation=dilation_args, padding=padding_args)
+    bias = rng.standard_normal((f_size,), dtype=np.float32)
+    absent_out = np.zeros((n_size, f_size, ho_size, wo_size), dtype=np.float32)
+    present_out = np.zeros((n_size, f_size, ho_size, wo_size), dtype=np.float32)
+    absent_expected = _conv2d_nchw_reference(input_tensor, weight, stride=stride_args, dilation=dilation_args, padding=padding_args)
+    present_expected = absent_expected + bias[None, :, None, None]
     module, source = run_lowering_demo(
         CASE_NAME,
         conv2d_inputs_dynamic_tile_dynamic_kernel,
@@ -412,23 +436,35 @@ def main() -> None:
         (n_size, c_size, h_size, w_size),
         (f_size, c_size, kh_size, kw_size),
     )
-    _execute_device_source(
-        source,
-        (out, input_tensor, weight, *stride_args, *dilation_args, *padding_args, *tile_args),
-    )
-    max_abs_diff = _assert_outputs_close(out, expected, atol=1e-4, rtol=1e-4)
-    print(module_text)
-    print(source)
+    max_abs_diff_by_case = {}
+    for bias_case in _BIAS_CASE_ORDER:
+        if bias_case == "absent":
+            _execute_device_source(
+                source,
+                (absent_out, input_tensor, weight, None, *stride_args, *dilation_args, *padding_args, *tile_args),
+            )
+            max_abs_diff_by_case[bias_case] = _assert_outputs_close(absent_out, absent_expected, atol=1e-4, rtol=1e-4)
+            continue
+        _execute_device_source(
+            source,
+            (present_out, input_tensor, weight, bias, *stride_args, *dilation_args, *padding_args, *tile_args),
+        )
+        max_abs_diff_by_case[bias_case] = _assert_outputs_close(present_out, present_expected, atol=1e-4, rtol=1e-4)
+    absent_max_abs_diff = max_abs_diff_by_case["absent"]
+    present_max_abs_diff = max_abs_diff_by_case["present"]
     print(
         "[ARGS] "
         f"input={(n_size, c_size, h_size, w_size)} weight={(f_size, c_size, kh_size, kw_size)} "
-        f"stride={stride_args} dilation={dilation_args} padding={padding_args} tile={tile_args} output={(n_size, f_size, ho_size, wo_size)}"
+        f"stride={stride_args} dilation={dilation_args} padding={padding_args} "
+        f"tile_seed={_DYNAMIC_TILE_SELECTION_SEED} tile_candidates={_DYNAMIC_TILE_CANDIDATES} selected_tile={tile_args} "
+        f"output={(n_size, f_size, ho_size, wo_size)} bias_case_order={_BIAS_CASE_ORDER} bias_rank=1"
     )
     print(
         "[IR] dynamic memory evidence: output/input/weight semantic symbolic memory present; "
         "memory-pool arch.get_dynamic_memory + dma.view present; dma.alloc/allalloc absent"
     )
-    print(f"[CHECK] {CASE_NAME} max_abs_diff={max_abs_diff}")
+    print(f"[CHECK] {CASE_NAME}/absent_bias max_abs_diff={absent_max_abs_diff}")
+    print(f"[CHECK] {CASE_NAME}/present_bias max_abs_diff={present_max_abs_diff}")
 
 
 if __name__ == "__main__":

@@ -660,6 +660,32 @@ def test_memory_plan_rejects_scf_if_region() -> None:
     _assert_memory_plan_error(module, "MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region")
 
 
+# TC-MPLAN-012B
+# 功能说明: 验证 owner block alloc 可在单块 scf.if 分支内使用，并在 if 后插入 free。
+# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_inserts_free_after_scf_if_branch_use
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应测试文件路径: test/passes/test_memory_plan.py
+def test_memory_plan_inserts_free_after_scf_if_branch_use() -> None:
+    mem_type = _memory_type()
+    scalar = _scalar_i32()
+    condition = arith.ConstantOp(IntegerAttr(1, i1))
+    alloc = DmaAllocOp([], mem_type)
+    true_block = Block()
+    broadcast = DmaBroadcastOp(alloc.result, scalar.result)
+    true_block.add_ops([broadcast, scf.YieldOp()])
+    false_block = Block()
+    false_block.add_ops([scf.YieldOp()])
+    if_op = scf.IfOp(condition.result, [], Region(true_block), Region(false_block))
+    module = _module_with_ops("scf_if_branch_use", [scalar, condition, alloc, if_op])
+
+    _apply_memory_plan(module)
+
+    body_ops = list(_function_body(module).ops)
+    free = next(op for op in body_ops if isinstance(op, DmaFreeOp))
+    assert body_ops.index(free) == body_ops.index(if_op) + 1
+
+
 # TC-MPLAN-013
 # 功能说明: 验证 insert_free=False 是显式 no-op，不做生命周期检查。
 # 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_disabled_is_noop

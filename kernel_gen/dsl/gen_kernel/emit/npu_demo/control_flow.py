@@ -29,7 +29,7 @@ def _emit_npu_demo_if_region(region: Region, ctx) -> list[str]:
     """发射单个 `scf.if` 分支 region 的源码行。
 
     功能说明:
-    - 仅接受单 block 分支。
+    - 接受单 block 分支；无 else 时 xDSL 会保留空 false region，此时发射空行列表。
     - 跳过 `scf.yield`，其余 op 通过公开 `emit_c_op(...)` 递归发射。
 
     使用示例:
@@ -38,6 +38,8 @@ def _emit_npu_demo_if_region(region: Region, ctx) -> list[str]:
 
     from .. import emit_c_op
 
+    if len(region.blocks) == 0:
+        return []
     if len(region.blocks) != 1:
         raise ctx.emit_error("scf.if", "npu_demo scf.if region must have single block")
     block = region.blocks[0]
@@ -74,7 +76,7 @@ def _emit_npu_demo_if(op: scf.IfOp, ctx) -> str:
     if then_lines:
         lines.extend(then_lines)
     ctx.pop_indent()
-    if op.false_region is not None:
+    if op.false_region is not None and len(op.false_region.blocks) > 0:
         lines.append(f"{ctx.current_indent}}} else {{")
         ctx.push_indent()
         else_lines = _emit_npu_demo_if_region(op.false_region, ctx)

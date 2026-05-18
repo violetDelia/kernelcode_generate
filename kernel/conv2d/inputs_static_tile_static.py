@@ -5,13 +5,14 @@
 - 实现 `inputs 静 + tile 静` 的 NCHW conv2d kernel demo。
 - 使用 `kernel.img2col2d + kernel.matmul + kernel.add` out-first helper 实现卷积，tile 尾块显式通过 DSL `min(...)` 收口。
 - 输入尺寸由固定 seed `20260503` 生成并固化为具体数字：`input[5, 65, 281, 262]`、`weight[20, 65, 3, 3]`、`out[5, 20, 35, 33]`。
-- 固定 stride=8，将大输入映射到可真实执行的输出规模；N/C/F/Ho/Wo 均大于 tile 并至少触发两轮 tile。
+- 固定 stride=8，将大输入映射到可真实执行的输出规模；tile 从轻量候选集合按固定 seed 选择，N/C/F/Ho/Wo 均大于 tile 并至少触发两轮 tile。
 - C/K reduce 维按 `tile_c` 分块，`kernel.matmul` 的 K 维为 `cur_c * KH * KW`。
+- C/K reduce 完成后按 optional rank-1 bias 分支广播 `bias[None, :, None, None]`，再写回输出。
 - lowering 后 IR 必须保持上述具体数字 static shape，不得变成动态符号 shape。
-- 通过 `dsl_run` 真实执行，并和 NumPy conv2d 参考结果对齐。
+- 通过 `dsl_run` 真实执行，并分别校验 absent bias 与 present bias 的 NumPy conv2d 参考结果。
 
 API 列表:
-- `conv2d_inputs_static_tile_static_kernel(out: Tensor[f32, 5, 20, 35, 33], input_tensor: Tensor[f32, 5, 65, 281, 262], weight: Tensor[f32, 20, 65, 3, 3]) -> None`
+- `conv2d_inputs_static_tile_static_kernel(out: Tensor[f32, 5, 20, 35, 33], input_tensor: Tensor[f32, 5, 65, 281, 262], weight: Tensor[f32, 20, 65, 3, 3], bias: Tensor[f32, 20]) -> None`
 - `main() -> None`
 
 使用示例:
@@ -36,7 +37,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from kernel.runner import run_numpy_demo
 from kernel_gen.operation import kernel
-from kernel_gen.operation.dma import alloc, deslice, fill, reshape, slice
+from kernel_gen.operation.dma import alloc, broadcast, deslice, fill, reshape, slice, view
 from kernel_gen.operation.nn import transpose
 from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import MemorySpace
@@ -53,11 +54,13 @@ _STATIC_KERNEL_H = 3
 _STATIC_KERNEL_W = 3
 _STATIC_STRIDE_H = 8
 _STATIC_STRIDE_W = 8
-_STATIC_TILE_F = 8
-_STATIC_TILE_C = 16
-_STATIC_TILE_N = 4
-_STATIC_TILE_HO = 8
-_STATIC_TILE_WO = 8
+_STATIC_TILE_SELECTION_SEED = 2026051721
+_STATIC_TILE_CANDIDATES = ((8, 16, 4, 8, 8), (7, 18, 3, 8, 8), (6, 20, 2, 8, 8))
+_STATIC_TILE_F, _STATIC_TILE_C, _STATIC_TILE_N, _STATIC_TILE_HO, _STATIC_TILE_WO = random.Random(_STATIC_TILE_SELECTION_SEED).choice(
+    _STATIC_TILE_CANDIDATES
+)
+_BIAS_CASE_ORDER_SEED = 2026051753
+_BIAS_CASE_ORDER = tuple(random.Random(_BIAS_CASE_ORDER_SEED).sample(("absent", "present"), 2))
 _STATIC_OUTPUT_H = ((_STATIC_INPUT_H - _STATIC_KERNEL_H) // _STATIC_STRIDE_H) + 1
 _STATIC_OUTPUT_W = ((_STATIC_INPUT_W - _STATIC_KERNEL_W) // _STATIC_STRIDE_W) + 1
 
@@ -94,6 +97,7 @@ def conv2d_inputs_static_tile_static_kernel(
     out: "Tensor[f32, 5, 20, 35, 33]",
     input_tensor: "Tensor[f32, 5, 65, 281, 262]",
     weight: "Tensor[f32, 20, 65, 3, 3]",
+    bias: "Tensor[f32, 20]",
 ) -> None:
     """执行静态输入、静态 tile 的 conv2d。
 
@@ -103,22 +107,23 @@ def conv2d_inputs_static_tile_static_kernel(
     - 输入 shape 为固定 seed 生成并固化的具体数字。
     - 固定 stride=8、dilation=1、padding=0。
     - 主计算入口使用 `kernel.img2col2d/kernel.matmul/kernel.add` out-first helper。
-    - 固定 tile 为 `TF=8, TC=16, TN=4, THO=8, TWO=8`，确保 memory_pool 后的片上动态内存视图不越过 npu_demo 目标容量。
+    - 固定 seed 从轻量候选中选择 `TF/TC/TN/THO/TWO`，确保 memory_pool 后的片上动态内存视图不越过 npu_demo 目标容量。
     - K/reduce 维按输入通道 tile 切分，`kernel.matmul` 覆盖 `cur_c * KH * KW`，并用本地 accumulator 累计所有 partial 后一次写回。
+    - runtime bias 非空时，在 reduce 后、写回前广播 rank-1 bias 并累加。
 
     使用示例:
-    - `conv2d_inputs_static_tile_static_kernel(out, input_tensor, weight)`
+    - `conv2d_inputs_static_tile_static_kernel(out, input_tensor, weight, bias)`
     """
 
     n_size, c_size, h_size, w_size = input_tensor.get_shape()
     f_size = weight.get_shape()[0]
     kh_size = weight.get_shape()[2]
     kw_size = weight.get_shape()[3]
-    tile_f = 8
-    tile_c = 16
-    tile_n = 4
-    tile_ho = 8
-    tile_wo = 8
+    tile_f = _STATIC_TILE_F
+    tile_c = _STATIC_TILE_C
+    tile_n = _STATIC_TILE_N
+    tile_ho = _STATIC_TILE_HO
+    tile_wo = _STATIC_TILE_WO
     stride_h = 8
     stride_w = 8
     dilation_h = 1
@@ -147,6 +152,10 @@ def conv2d_inputs_static_tile_static_kernel(
                         out_tile = batch_tile * spatial_tile
                         acc = alloc([batch_tile, cur_f, cur_ho, cur_wo], NumericType.Float32, MemorySpace.TSM)
                         fill(acc, 0)
+                        bias_tile = alloc([cur_f], NumericType.Float32, MemorySpace.TSM)
+                        fill(bias_tile, 0)
+                        bias_nchw = reshape(bias_tile, [1, cur_f, 1, 1])
+                        bias_full = alloc([batch_tile, cur_f, cur_ho, cur_wo], NumericType.Float32, MemorySpace.TSM)
                         for c0 in loop(0, c_size, tile_c):
                             cur_c = min(tile_c, c_size - c0)
                             k_tile = cur_c * kh_size * kw_size
@@ -167,6 +176,11 @@ def conv2d_inputs_static_tile_static_kernel(
                             out_fnhw = reshape(out2, [cur_f, batch_tile, cur_ho, cur_wo])
                             partial = transpose(out_fnhw, [1, 0, 2, 3])
                             kernel.add(acc, acc, partial)
+                        if bias is not None:
+                            bias_region = view(bias, [f0], [cur_f], [1])
+                            deslice(bias_tile, bias_region, [0], [cur_f], [1])
+                            broadcast(bias_full, bias_nchw)
+                            kernel.add(acc, acc, bias_full)
                         deslice(out, acc, [batch_index, f0, ho0, wo0], [batch_tile, cur_f, cur_ho, cur_wo], [1, 1, 1, 1])
 
 
@@ -199,6 +213,7 @@ def _assert_static_memory_ir(module_text: str) -> None:
             f"!nn.memory<[#symbol.expr<{_STATIC_OUT_CHANNELS}>, #symbol.expr<{_STATIC_IN_CHANNELS}>, "
             f"#symbol.expr<{_STATIC_KERNEL_H}>, #symbol.expr<{_STATIC_KERNEL_W}>]",
         ),
+        ("bias", f"!nn.memory<[#symbol.expr<{_STATIC_OUT_CHANNELS}>]"),
     )
     dynamic_fragments = (
         (
@@ -212,6 +227,9 @@ def _assert_static_memory_ir(module_text: str) -> None:
     for label, fragment in static_fragments:
         if fragment not in module_text:
             raise AssertionError(f"static {label} memory shape missing from lowered IR: {fragment}")
+    for fragment in ("memory.get_data", "symbol.ne"):
+        if fragment not in module_text:
+            raise AssertionError(f"optional bias presence fragment missing from lowered IR: {fragment}")
     for label, fragment in dynamic_fragments:
         if fragment in module_text:
             raise AssertionError(f"lowered IR unexpectedly contains {label} memory shape: {fragment}")
@@ -225,7 +243,7 @@ def main() -> None:
     - 使用固定 seed 生成并固化的具体 shape 构造真实 NumPy ndarray 输入。
     - 写入 `kernel/dump/conv2d/inputs_static_tile_static/`。
     - 校验 lowered IR 保持具体数字 static shape。
-    - 用 NumPy conv2d 参考结果校验输出。
+    - 分别用 NumPy conv2d 与 `conv2d + bias[None, :, None, None]` 参考结果校验输出。
 
     使用示例:
     - `python3 kernel/conv2d/inputs_static_tile_static.py`
@@ -234,26 +252,43 @@ def main() -> None:
     rng = np.random.default_rng(2026051611)
     input_tensor = rng.standard_normal((_STATIC_BATCH, _STATIC_IN_CHANNELS, _STATIC_INPUT_H, _STATIC_INPUT_W), dtype=np.float32)
     weight = rng.standard_normal((_STATIC_OUT_CHANNELS, _STATIC_IN_CHANNELS, _STATIC_KERNEL_H, _STATIC_KERNEL_W), dtype=np.float32)
-    out = np.empty((_STATIC_BATCH, _STATIC_OUT_CHANNELS, _STATIC_OUTPUT_H, _STATIC_OUTPUT_W), dtype=np.float32)
-    expected = _conv2d_nchw_reference(input_tensor, weight)
-    result = run_numpy_demo(
-        "conv2d/inputs_static_tile_static",
-        conv2d_inputs_static_tile_static_kernel,
-        (out, input_tensor, weight),
-        out,
-        expected,
-    )
-    _assert_static_memory_ir(str(result.dsl_result.module))
-    print(result.dsl_result.module)
-    print(result.dsl_result.source)
+    bias = rng.standard_normal((_STATIC_OUT_CHANNELS,), dtype=np.float32)
+    absent_out = np.empty((_STATIC_BATCH, _STATIC_OUT_CHANNELS, _STATIC_OUTPUT_H, _STATIC_OUTPUT_W), dtype=np.float32)
+    present_out = np.empty((_STATIC_BATCH, _STATIC_OUT_CHANNELS, _STATIC_OUTPUT_H, _STATIC_OUTPUT_W), dtype=np.float32)
+    absent_expected = _conv2d_nchw_reference(input_tensor, weight)
+    present_expected = absent_expected + bias[None, :, None, None]
+    results = {}
+    for bias_case in _BIAS_CASE_ORDER:
+        if bias_case == "absent":
+            results[bias_case] = run_numpy_demo(
+                "conv2d/inputs_static_tile_static_absent_bias",
+                conv2d_inputs_static_tile_static_kernel,
+                (absent_out, input_tensor, weight, None),
+                absent_out,
+                absent_expected,
+            )
+            continue
+        results[bias_case] = run_numpy_demo(
+            "conv2d/inputs_static_tile_static_present_bias",
+            conv2d_inputs_static_tile_static_kernel,
+            (present_out, input_tensor, weight, bias),
+            present_out,
+            present_expected,
+        )
+    absent_result = results["absent"]
+    present_result = results["present"]
+    _assert_static_memory_ir(str(present_result.dsl_result.module))
     print(
         "[ARGS] "
         f"seed={_STATIC_SHAPE_SEED} input={input_tensor.shape} weight={weight.shape} "
         f"stride=({_STATIC_STRIDE_H},{_STATIC_STRIDE_W}) "
-        f"tile=({_STATIC_TILE_F},{_STATIC_TILE_C},{_STATIC_TILE_N},{_STATIC_TILE_HO},{_STATIC_TILE_WO}) output={out.shape}"
+        f"tile_seed={_STATIC_TILE_SELECTION_SEED} tile_candidates={_STATIC_TILE_CANDIDATES} "
+        f"selected_tile=({_STATIC_TILE_F},{_STATIC_TILE_C},{_STATIC_TILE_N},{_STATIC_TILE_HO},{_STATIC_TILE_WO}) "
+        f"output={present_out.shape} bias_case_order={_BIAS_CASE_ORDER} bias_rank=1"
     )
     print("[IR] static memory evidence: output/input/weight concrete shapes present; dynamic symbol shapes absent")
-    print(f"[CHECK] {result.case_name} max_abs_diff={result.max_abs_diff}")
+    print(f"[CHECK] {absent_result.case_name} max_abs_diff={absent_result.max_abs_diff}")
+    print(f"[CHECK] {present_result.case_name} max_abs_diff={present_result.max_abs_diff}")
 
 
 if __name__ == "__main__":
