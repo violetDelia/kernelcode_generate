@@ -53,6 +53,8 @@ from kernel_gen.dialect.symbol import (
     SymbolExprAttr,
     SymbolForOp,
     SymbolIterType,
+    SymbolGetDimOp,
+    SymbolGetStrideOp,
     SymbolValueType,
     SymbolYieldOp,
 )
@@ -617,16 +619,16 @@ def _build_slice_with_free_not_in_owner_loop_body_module() -> ModuleOp:
     return ModuleOp([func_op])
 
 
-def _build_unknown_direct_use_module() -> ModuleOp:
-    """构造未知 direct use 的反例 module。
+def _build_same_value_broadcast_module() -> ModuleOp:
+    """构造 same-value broadcast 反例 module。
 
 
     功能说明:
-    - loop 内 alloc 被 `dma.broadcast` 直接使用，不属于 `dma.slice target` 或 `dma.deslice source`。
-    - pass 必须保持 no-op，避免把未承接副作用规则做宽。
+    - loop 内 alloc result 同时作为 `dma.broadcast` 的 target 与 source。
+    - pass 必须保持 no-op，避免把同值 `READ+WRITE` 做成自证 reset/write。
 
     使用示例:
-    - module = _build_unknown_direct_use_module()
+    - module = _build_same_value_broadcast_module()
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
@@ -639,15 +641,168 @@ def _build_unknown_direct_use_module() -> ModuleOp:
     one = _const_symbol(1)
     tm = _const_symbol(8)
     tk = _const_symbol(16)
-    scalar = _const_symbol(3)
     top_block = Block()
     loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
     alloc = DmaAllocOp([tm.result, tk.result], target_type)
-    broadcast = DmaBroadcastOp(alloc.result, scalar.result)
+    broadcast = DmaBroadcastOp(alloc.result, alloc.result)
     loop_block.add_ops([alloc, broadcast])
     loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
-    top_block.add_ops([zero, one, tm, tk, scalar, loop, func.ReturnOp()])
-    func_op = func.FuncOp("unknown_direct_use_case", FunctionType.from_lists([], []), Region(top_block))
+    top_block.add_ops([zero, one, tm, tk, loop, func.ReturnOp()])
+    func_op = func.FuncOp("same_value_broadcast_case", FunctionType.from_lists([], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_broadcast_lifecycle_module(*, same_value: bool = False, with_kernel_read: bool = False) -> ModuleOp:
+    """构造 broadcast 生命周期证明 module。
+
+
+    功能说明:
+    - broadcast target 绑定 loop 内 alloc result。
+    - `same_value=True` 时，source 与 target 取同一 alloc result，覆盖 `READ+WRITE` 自证 no-op 反例。
+    - `with_kernel_read=True` 时，后续再挂一个公开 `kernel.*` read，覆盖 broadcast reset 正例。
+
+    使用示例:
+    - module = _build_broadcast_lifecycle_module(with_kernel_read=True)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    tile_type = _memory_type((4, 4))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    scalar = _const_symbol(3)
+    top_block = Block(arg_types=[tile_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([], tile_type)
+    broadcast_source = alloc.result if same_value else scalar.result
+    broadcast = DmaBroadcastOp(alloc.result, broadcast_source)
+    loop_ops: list = [alloc, broadcast]
+    if with_kernel_read:
+        kernel_use = KernelBinaryElewiseOp(
+            top_block.args[0],
+            alloc.result,
+            top_block.args[0],
+            kind="add",
+            space=NnMemorySpaceAttr.from_name("global"),
+        )
+        loop_ops.append(kernel_use)
+    loop_ops.append(DmaFreeOp(alloc.result))
+    loop_block.add_ops(loop_ops)
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, scalar, loop, func.ReturnOp()])
+    func_op = func.FuncOp("broadcast_lifecycle_case", FunctionType.from_lists([tile_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_metadata_query_module(*, include_data_use: bool) -> ModuleOp:
+    """构造 Pure metadata query 的阻断/非阻断 module。
+
+
+    功能说明:
+    - alloc result 先被 `symbol.get_dim` / `symbol.get_stride` 读取 shape / stride 元信息。
+    - `include_data_use=True` 时再追加一个可证明的 `dma.slice` data use，验证 metadata query 不阻断 hoist。
+    - `include_data_use=False` 时只保留 metadata query 与 `dma.free`，验证 metadata query 不能单独证明 reset/write。
+
+    使用示例:
+    - module = _build_metadata_query_module(include_data_use=True)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    source_type = _memory_type((32, 64))
+    tile_type = _memory_type(("TM", "TK"))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    top_block = Block(arg_types=[source_type, SymbolValueType.from_expr("TM"), SymbolValueType.from_expr("TK")])
+    tm = top_block.args[1]
+    tk = top_block.args[2]
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([tm, tk], tile_type)
+    get_dim = SymbolGetDimOp(alloc.result, 0)
+    get_stride = SymbolGetStrideOp(alloc.result, 0)
+    loop_ops: list = [alloc, get_dim, get_stride]
+    if include_data_use:
+        loop_ops.append(
+            DmaSliceOp(
+                alloc.result,
+                top_block.args[0],
+                [zero.result, zero.result],
+                [tm, tk],
+                [one.result, one.result],
+            )
+        )
+    loop_ops.append(DmaFreeOp(alloc.result))
+    loop_block.add_ops(loop_ops)
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, loop, func.ReturnOp()])
+    func_op = func.FuncOp(
+        "metadata_query_case",
+        FunctionType.from_lists([source_type, SymbolValueType.from_expr("TM"), SymbolValueType.from_expr("TK")], []),
+        Region(top_block),
+    )
+    return ModuleOp([func_op])
+
+
+def _build_conditional_write_module(*, read_in_branch: bool) -> ModuleOp:
+    """构造 `scf.if` conditional write / merge read 的 effect-first module。
+
+
+    功能说明:
+    - `read_in_branch=True` 时，write 与 read 位于同一个 `scf.if` 分支 block，证明可继续外提。
+    - `read_in_branch=False` 时，write 在分支内而 read 在 merge 点，验证 merge read 不能被分支写证明。
+
+    使用示例:
+    - module = _build_conditional_write_module(read_in_branch=True)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    tile_type = _memory_type((4, 4))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    top_block = Block(arg_types=[tile_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([], tile_type)
+    condition = SymbolEqOp(zero.result, zero.result)
+    true_block = Block()
+    fill = DmaFillOp(alloc.result, zero.result)
+    true_block.add_op(fill)
+    if read_in_branch:
+        branch_read = KernelBinaryElewiseOp(
+            top_block.args[0],
+            alloc.result,
+            top_block.args[0],
+            kind="add",
+            space=NnMemorySpaceAttr.from_name("global"),
+        )
+        true_block.add_op(branch_read)
+    true_block.add_op(scf.YieldOp())
+    conditional = scf.IfOp(condition.result, [], Region(true_block), None)
+    loop_ops = [alloc, condition, conditional]
+    if not read_in_branch:
+        loop_ops.append(
+            KernelBinaryElewiseOp(
+                top_block.args[0],
+                alloc.result,
+                top_block.args[0],
+                kind="add",
+                space=NnMemorySpaceAttr.from_name("global"),
+            )
+        )
+    loop_ops.append(DmaFreeOp(alloc.result))
+    loop_block.add_ops(loop_ops)
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, loop, func.ReturnOp()])
+    func_op = func.FuncOp("conditional_write_case", FunctionType.from_lists([tile_type], []), Region(top_block))
     return ModuleOp([func_op])
 
 
@@ -1314,19 +1469,138 @@ def test_symbol_buffer_hoist_keeps_alloc_when_free_not_in_owner_loop_body() -> N
 
 
 # TC-SYMBOL-BUFFER-HOIST-004G
-# 功能说明: 验证未知 direct use / alias escape 形态不被做宽外提。
-# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_for_unknown_direct_use_or_alias_escape
+# 功能说明: 验证同一 alloc 同时作为 dma.broadcast target/source 时不得自证 reset/write。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_for_same_value_broadcast_read_write
 # 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
-def test_symbol_buffer_hoist_keeps_alloc_for_unknown_direct_use_or_alias_escape() -> None:
-    module = _build_unknown_direct_use_module()
+def test_symbol_buffer_hoist_keeps_alloc_for_same_value_broadcast_read_write() -> None:
+    module = _build_same_value_broadcast_module()
 
     SymbolBufferHoistPass().apply(Context(), module)
 
     top_block, _loop_op, loop_block = _get_blocks(module)
     assert not any(isinstance(op, DmaAllocOp) for op in top_block.ops)
     assert len([op for op in loop_block.ops if isinstance(op, DmaAllocOp)]) == 1
+
+
+# TC-SYMBOL-BUFFER-HOIST-004G1
+# 功能说明: 验证 dma.broadcast target WRITE 能作为后续 kernel READ 的 reset/write proof。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_alloc_when_broadcast_resets_kernel_read
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_alloc_when_broadcast_resets_kernel_read() -> None:
+    module = _build_broadcast_lifecycle_module(with_kernel_read=True)
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    loop_index = top_ops.index(loop_op)
+    broadcast = next(op for op in loop_block.ops if isinstance(op, DmaBroadcastOp))
+    kernel_use = next(op for op in loop_block.ops if isinstance(op, KernelBinaryElewiseOp))
+
+    assert top_ops.index(top_alloc) < loop_index < top_ops.index(top_free)
+    assert broadcast.target is top_alloc.result
+    assert kernel_use.lhs is top_alloc.result
+    assert _free_source_is(top_free, top_alloc.result)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004G2
+# 功能说明: 验证 symbol.get_dim/get_stride metadata query 不阻断合法 data use 外提。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_alloc_with_metadata_queries_and_slice_use
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_alloc_with_metadata_queries_and_slice_use() -> None:
+    module = _build_metadata_query_module(include_data_use=True)
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    get_dim = next(op for op in loop_block.ops if isinstance(op, SymbolGetDimOp))
+    get_stride = next(op for op in loop_block.ops if isinstance(op, SymbolGetStrideOp))
+    slice_op = next(op for op in loop_block.ops if isinstance(op, DmaSliceOp))
+    loop_index = top_ops.index(loop_op)
+
+    assert top_ops.index(top_alloc) < loop_index < top_ops.index(top_free)
+    assert get_dim.source is top_alloc.result
+    assert get_stride.source is top_alloc.result
+    assert slice_op.target is top_alloc.result
+    assert _free_source_is(top_free, top_alloc.result)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004G3
+# 功能说明: 验证 symbol.get_dim/get_stride 不能单独作为生命周期 data use。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_only_metadata_queries_exist
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_alloc_when_only_metadata_queries_exist() -> None:
+    module = _build_metadata_query_module(include_data_use=False)
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, _loop_op, loop_block = _get_blocks(module)
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in top_block.ops)
+    assert len([op for op in loop_block.ops if isinstance(op, DmaAllocOp)]) == 1
+    assert len([op for op in loop_block.ops if isinstance(op, DmaFreeOp)]) == 1
+    assert any(isinstance(op, SymbolGetDimOp) for op in loop_block.ops)
+    assert any(isinstance(op, SymbolGetStrideOp) for op in loop_block.ops)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004G4
+# 功能说明: 验证同一 scf.if region block 内 write-before-read 可证明生命周期安全。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_alloc_when_conditional_write_and_read_are_same_branch
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_alloc_when_conditional_write_and_read_are_same_branch() -> None:
+    module = _build_conditional_write_module(read_in_branch=True)
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    branch = next(op for op in loop_block.ops if isinstance(op, scf.IfOp))
+    branch_block = branch.true_region.block
+    fill = next(op for op in branch_block.ops if isinstance(op, DmaFillOp))
+    kernel_use = next(op for op in branch_block.ops if isinstance(op, KernelBinaryElewiseOp))
+    loop_index = top_ops.index(loop_op)
+
+    assert top_ops.index(top_alloc) < loop_index < top_ops.index(top_free)
+    assert fill.target is top_alloc.result
+    assert kernel_use.lhs is top_alloc.result
+    assert _free_source_is(top_free, top_alloc.result)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004G5
+# 功能说明: 验证 scf.if 分支内 write 不能证明 merge 点 read。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_conditional_write_feeds_merge_read
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_alloc_when_conditional_write_feeds_merge_read() -> None:
+    module = _build_conditional_write_module(read_in_branch=False)
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, _loop_op, loop_block = _get_blocks(module)
+    branch = next(op for op in loop_block.ops if isinstance(op, scf.IfOp))
+    branch_block = branch.true_region.block
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in top_block.ops)
+    assert len([op for op in loop_block.ops if isinstance(op, DmaAllocOp)]) == 1
+    assert len([op for op in loop_block.ops if isinstance(op, DmaFreeOp)]) == 1
+    assert any(isinstance(op, DmaFillOp) for op in branch_block.ops)
+    assert any(isinstance(op, KernelBinaryElewiseOp) for op in loop_block.ops)
 
 
 # TC-SYMBOL-BUFFER-HOIST-004H

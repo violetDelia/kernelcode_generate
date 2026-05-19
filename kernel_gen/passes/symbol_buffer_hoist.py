@@ -4,15 +4,18 @@
 功能说明:
 - 定义 `symbol-buffer-hoist` 的公开 pass、公开 pattern 与公开 pattern getter。
 - 只在 `symbol.for` 单 block 循环体内识别 `dma.alloc`，并在 shape 明确不依赖 loop 内 SSA、
-  直接 use 仅属于输入 staging / output scratch 或受支持 alias producer，且存在唯一匹配 `dma.free`
-  时，将其与 `dma.free` 成对外提一层。
+  直接 use 仅属于输入 staging / output scratch、公开 `MemoryEffect` 读写、`dma.broadcast`
+  或受支持 alias producer，且存在唯一匹配 `dma.free` 时，将其与 `dma.free` 成对外提一层。
 - 当同一 `symbol.for` 直接 body 内存在唯一匹配 `dma.free` 且该 free 晚于所有 data use 时，
   外提 `dma.alloc` 的同时把对应 `dma.free` 移到同一 `symbol.for` 之后。
 - 对 source、offset/shape/stride 等 operand 均支配当前 `symbol.for` 的 `dma.view`、`dma.reshape`
   和 `dma.subview`，作为独立 alias op 单次外提一层；fixed-point 驱动允许同一 alias op 跨 nested loop
   逐层外提到最近安全位置。
-- `dma.alloc/free` 外提通过 `MemoryEffect` 证明生命周期：首次 read 前必须已有同一 loop 内的 reset/write，
-  unknown effect、读先于写、多 free 或 nested free 均保持 no-op。
+- `symbol.get_dim` / `symbol.get_stride` 是 Pure metadata query，只读取 alias 或 memory 的 shape / stride
+  信息，不参与生命周期数据 use，也不能单独证明 reset/write。
+- `dma.alloc/free` 外提通过 `MemoryEffect` 证明生命周期：首次 read 前必须已有同一 region block 内的
+  reset/write；`READ+WRITE` 的同值 use 不能自证 reset/write，unknown effect、读先于写、多 free 或 nested free
+  均保持 no-op。
 - 失败边界统一复用 `KernelCodeError(module="pass")`；不新增专题专属错误类型，也不承诺额外 compat path。
 
 API 列表:
@@ -62,10 +65,8 @@ from kernel_gen.dialect.dma import (
     DmaDesliceOp,
     DmaFillOp,
     DmaFreeOp,
-    DmaLoadOp,
     DmaReshapeOp,
     DmaSliceOp,
-    DmaStoreOp,
     DmaSubviewOp,
     DmaViewOp,
 )
@@ -178,13 +179,33 @@ def _is_supported_data_use(use: Use) -> bool:
     )
 
 
+def _is_metadata_query_use(use: Use) -> bool:
+    """判断 use 是否为 Pure memory metadata query。
+
+
+    功能说明:
+    - `symbol.get_dim` / `symbol.get_stride` 只读取 memory type 元信息，不参与 data lifecycle。
+    - 该 helper 仅用于当前文件内 pass 判定，不作为公开 API。
+
+    使用示例:
+    - if _is_metadata_query_use(use): ...
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    return use.index == 0 and use.operation.name in {"symbol.get_dim", "symbol.get_stride"}
+
+
 def _is_supported_alias_result_use(use: Use) -> bool:
     """判断 alias result 的 direct use 是否属于可捕获白名单。
 
 
     功能说明:
     - 允许 `dma.slice target`、`dma.deslice source`、`dma.fill target`、`dma.copy target/source`。
-    - 允许 `symbol.get_dim` 读取 alias memory 的 shape 信息；它不移动 memory 生命周期。
+    - 允许 `symbol.get_dim` / `symbol.get_stride` 读取 alias memory 的 shape / stride 信息；它们不移动 memory 生命周期。
     - 允许带公开 MemoryEffect 的 `kernel.*` memory operand 捕获 alias result。
     - 其它 direct use 保持 no-op，避免把未知副作用或逃逸形态做宽。
 
@@ -204,7 +225,7 @@ def _is_supported_alias_result_use(use: Use) -> bool:
         return True
     if isinstance(user, DmaCopyOp) and use.index in (0, 1):
         return True
-    if user.name == "symbol.get_dim":
+    if _is_metadata_query_use(use):
         return True
     if _is_kernel_memory_use(use):
         return True
@@ -426,9 +447,11 @@ def _is_supported_lifecycle_data_use(use: Use) -> bool:
 
 
     功能说明:
-    - 保留旧白名单 `dma.slice target` 与 `dma.deslice source`。
-    - 额外接受公开 MemoryEffect 可判定的 `dma.fill/copy/load/store/slice/deslice` 与 `kernel.*` read/write use。
-    - 不接受 unknown effect、alloc/free effect 或未列入当前计划的 DMA op。
+    - 以公开 `MemoryEffect` 的 `READ/WRITE` 语义为主轴，不再依赖 op 名称白名单作为主判定。
+    - `dma.slice target` 与 `dma.deslice source` 仍作为旧兼容边界存在，但也通过公开 effect 参与证明。
+    - 接受公开 `MemoryEffect` 可判定的 `dma.fill/copy/load/store/slice/deslice/broadcast` 与 `kernel.*`
+      read/write use。
+    - 不接受 unknown effect、alloc/free effect、Pure metadata query 或未列入当前计划的 DMA op。
 
     使用示例:
     - if _is_supported_lifecycle_data_use(use): ...
@@ -439,12 +462,6 @@ def _is_supported_lifecycle_data_use(use: Use) -> bool:
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
-    if _is_supported_data_use(use):
-        return True
-    user = use.operation
-    if not isinstance(user, (DmaFillOp, DmaCopyOp, DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp)):
-        if not _is_kernel_memory_use(use):
-            return False
     kinds = _effect_kinds_for_use(use)
     return kinds is not None and bool(kinds) and kinds <= {MemoryEffectKind.READ, MemoryEffectKind.WRITE}
 
@@ -454,9 +471,13 @@ def _data_uses_are_reset_before_read(data_uses: tuple[Use, ...], loop_block: Blo
 
 
     功能说明:
-    - 只对公开 MemoryEffect 可判定的 use 强制顺序证明。
-    - 纯旧白名单 write-only use 保持兼容。
-    - 任一 read 出现在 reset/write 前时拒绝外提。
+    - 只对公开 `MemoryEffect` 可判定的 use 强制顺序证明。
+    - `dma.slice target` / `dma.deslice source` 作为历史已定义 staging/scratch 边界，仍按 write-only reset
+      处理。
+    - proof 只在同一个 parent block 内生效；`scf.if` 的 sibling region、merge 点或跨 block
+      reset/write 不得互相证明。
+    - `READ+WRITE` 的同值 use 不得自证 reset/write；只有同一 block 中此前已有独立 `WRITE` 时才允许继续。
+    - 任一 read 出现在对应 block 的 reset/write 前时拒绝外提。
 
     使用示例:
     - _data_uses_are_reset_before_read(data_uses, loop_block)
@@ -467,25 +488,31 @@ def _data_uses_are_reset_before_read(data_uses: tuple[Use, ...], loop_block: Blo
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
-    indexes = _block_index_map(loop_block)
-    ordered_uses = sorted(
-        data_uses,
-        key=lambda use: indexes.get(_direct_operation_in_block(use.operation, loop_block), len(indexes)),
-    )
-    saw_reset = False
-    for use in ordered_uses:
-        if _is_supported_data_use(use):
-            saw_reset = True
-            continue
-        kinds = _effect_kinds_for_use(use)
-        if kinds is None:
+    uses_by_block: dict[Block, list[Use]] = {}
+    for use in data_uses:
+        user = use.operation
+        if not _operation_is_in_block_or_descendant(user, loop_block):
             return False
-        if not kinds:
+        block = _operation_parent_block(user)
+        if block is None:
             return False
-        if MemoryEffectKind.READ in kinds and not saw_reset:
-            return False
-        if MemoryEffectKind.WRITE in kinds and MemoryEffectKind.READ not in kinds:
-            saw_reset = True
+        uses_by_block.setdefault(block, []).append(use)
+
+    for block, block_uses in uses_by_block.items():
+        indexes = _block_index_map(block)
+        ordered_uses = sorted(block_uses, key=lambda use: indexes.get(use.operation, len(indexes)))
+        saw_reset = False
+        for use in ordered_uses:
+            if _is_supported_data_use(use):
+                saw_reset = True
+                continue
+            kinds = _effect_kinds_for_use(use)
+            if kinds is None or not kinds:
+                return False
+            if MemoryEffectKind.READ in kinds and not saw_reset:
+                return False
+            if MemoryEffectKind.WRITE in kinds and MemoryEffectKind.READ not in kinds:
+                saw_reset = True
     return True
 
 
@@ -523,6 +550,8 @@ def _collect_alias_data_uses(alias_op: Operation, loop_block: Block, visited: fr
     for use in result_uses:
         if not _operation_is_in_block_or_descendant(use.operation, loop_block):
             return None
+        if _is_metadata_query_use(use):
+            continue
         if _is_supported_alias_result_use(use):
             data_uses.append(use)
             continue
@@ -542,8 +571,8 @@ def _build_hoist_use_plan(uses: Iterable[Use], loop_block: Block) -> _HoistUsePl
 
     功能说明:
     - 当前公开语义要求 alloc 至少存在一个 data use。
-    - data use 必须是同一 loop body 内的 legacy staging/scratch use、公开 MemoryEffect 可判定的 read/write use，
-      或受支持 alias 链最终导向的可捕获 use。
+    - data use 必须位于同一 loop body 或其非 `symbol.for` descendant region 内，且属于公开 MemoryEffect
+      可判定的 read/write use，或受支持 alias 链最终导向的可捕获 use。
     - lifecycle use 必须存在同一 loop body 内唯一 `dma.free`，且必须晚于所有 data use。
     - 多个 free、nested free、跨 loop free 或未知 direct use 均保持 no-op。
 
@@ -564,9 +593,14 @@ def _build_hoist_use_plan(uses: Iterable[Use], loop_block: Block) -> _HoistUsePl
     free_ops: list[DmaFreeOp] = []
     for use in collected_uses:
         user = use.operation
-        if _operation_parent_block(user) is not loop_block:
+        if not _operation_is_in_block_or_descendant(user, loop_block):
             return None
+        if _is_metadata_query_use(use):
+            continue
         if _is_supported_lifecycle_data_use(use):
+            parent_block = _operation_parent_block(user)
+            if parent_block is not loop_block and isinstance(parent_block.parent_op(), SymbolForOp):
+                return None
             data_uses.append(use)
             continue
         if _is_supported_alias_source_use(use):
@@ -575,7 +609,7 @@ def _build_hoist_use_plan(uses: Iterable[Use], loop_block: Block) -> _HoistUsePl
                 return None
             data_uses.extend(alias_data_uses)
             continue
-        if isinstance(user, DmaFreeOp) and use.index == 0:
+        if isinstance(user, DmaFreeOp) and use.index == 0 and _operation_parent_block(user) is loop_block:
             free_ops.append(user)
             continue
         return None
