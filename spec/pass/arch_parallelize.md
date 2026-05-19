@@ -24,7 +24,8 @@
 
 ## 依赖
 
-- `kernel_gen.dialect.arch`：公开 `ArchGetBlockIdOp` 与 `ArchGetBlockNumOp` 类型，用于检测和生成 block 相关 IR。
+- `kernel_gen.dialect.arch`：公开 `ArchGetBlockIdOp`、`ArchGetBlockNumOp` 与 `ArchGetDynamicMemoryOp` 类型，用于检测和生成 block 相关 IR，并识别 memory-pool 生成的 setup 前缀。
+- `kernel_gen.dialect.dma`：公开 `DmaViewOp` 与 `DmaReshapeOp` 类型，用于识别 memory-pool 生成的 loop 前 setup 前缀。
 - `kernel_gen.dialect.symbol`：公开 `SymbolForOp`、`SymbolConstOp`、`SymbolAddOp`、`SymbolMulOp` 与 `SymbolValueType`，用于 loop 边界。
 - `kernel_gen.target.registry`：公开 `is_arch_op_supported(target, op_name)` 与 `get_target_hardware(target, key)`，用于校验 target 与读取静态 `block_num`。
 - `kernel_gen.passes.registry`：公开 pass registry 名称 `arch-parallelize`。
@@ -39,7 +40,7 @@
 ## 额外补充
 
 - 顶层 loop 指函数 entry block 的直接子 op；嵌套 region 内的 `symbol.for` 不参与顶层计数。
-- 支持结构为 `func { symbol-setup*; symbol.for { body-op*; nested-symbol.for* }; func.return }`，其中同级 `symbol-setup` 只能位于唯一顶层 loop 之前，并且必须是公开 symbol dialect 的纯 setup op。
+- 支持结构为 `func { setup-prefix*; symbol.for { body-op*; nested-symbol.for* }; func.return }`，其中同级 `setup-prefix` 只能位于唯一顶层 loop 之前，并且只能是公开 symbol dialect 的纯 setup op，或 memory-pool 生成的 `arch.get_dynamic_memory` / `dma.view` / `dma.reshape`。
 - 无顶层 loop 时必须生成 `arch.get_block_id` + `scf.if` block0 guard，只允许 block0 执行原 body。
 - 本 pass 的失败通过 `KernelCodeError` 暴露，稳定错误短语以 `ArchParallelizePassError:` 或 `ArchParallelizePassVerifierError:` 开头。
 - 默认 `npu-demo-lowering` 直接接入本 pass；多个顶层 loop、loop-carried 和 unsupported loop structure 等结构不支持错误继续按本 pass 公开失败合同暴露。
@@ -103,7 +104,7 @@
   - 函数体为 multi-block 必须失败为 `ArchParallelizePassError: multi-block func body is not supported`。
   - 多个顶层 `symbol.for` 必须失败为 `ArchParallelizePassError: multiple top-level symbol.for loops are not supported`。
   - loop-carried `symbol.for` 必须失败为 `ArchParallelizePassError: loop-carried symbol.for is not supported`。
-  - 顶层 loop 同级出现非纯 symbol setup op 时必须失败为 `ArchParallelizePassError: unsupported loop structure`。
+  - 顶层 loop 同级出现非允许 setup 前缀 op，或允许 setup 位于 loop 之后时，必须失败为 `ArchParallelizePassError: unsupported loop structure`。
 
 ### `build_registered_pass("arch-parallelize", options: dict[str, str] | None = None) -> ModulePass`
 
@@ -152,3 +153,5 @@
 | TC-PASS-ARCH-PARALLELIZE-012 | 失败边界 | multi-block 函数体 | `func.func` body 含多个 block。 | 运行 `ArchParallelizePass().apply(...)`。 | 失败短语含 `multi-block func body is not supported`。 | `test_arch_parallelize_rejects_multi_block_func_body` |
 | TC-PASS-ARCH-PARALLELIZE-013 | 失败边界 | unsupported loop structure | 唯一顶层 `symbol.for` 后仍有同级 op。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | 失败短语含 `unsupported loop structure`。 | `test_arch_parallelize_rejects_unsupported_loop_structure` |
 | TC-PASS-ARCH-PARALLELIZE-014 | registry | 内置 pass 注册 | 已调用 `load_builtin_passes()`。 | 运行 `build_registered_pass("arch-parallelize", options)`。 | 返回 `ArchParallelizePass` 实例。 | `test_build_registered_arch_parallelize_pass` |
+| TC-PASS-ARCH-PARALLELIZE-015 | pass 改写 | memory-pool setup 前缀 | 唯一顶层 `symbol.for` 前包含 `arch.get_dynamic_memory`、`dma.view`、`dma.reshape` 和 symbol setup。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | IR 含 block-strided `symbol.for`，loop 前 memory-pool setup 保持在前缀位置。 | `test_arch_parallelize_allows_memory_pool_setup_before_single_loop` |
+| TC-PASS-ARCH-PARALLELIZE-016 | 失败边界 | memory-pool setup 位于 loop 后 | 唯一顶层 `symbol.for` 后包含 `arch.get_dynamic_memory` 或 alias setup。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | 失败短语含 `unsupported loop structure`。 | `test_arch_parallelize_rejects_memory_pool_setup_after_loop` |

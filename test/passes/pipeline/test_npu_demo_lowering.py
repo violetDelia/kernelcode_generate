@@ -56,6 +56,7 @@ InlinePass = importlib.import_module("kernel_gen.passes.inline").InlinePass
 CommonSubexpressionElimination = importlib.import_module(
     "xdsl.transforms.common_subexpression_elimination"
 ).CommonSubexpressionElimination
+CanonicalizePass = importlib.import_module("xdsl.transforms.canonicalize").CanonicalizePass
 AttachArchInformationPass = importlib.import_module("kernel_gen.passes.attach_arch_information").AttachArchInformationPass
 ArchParallelizePass = importlib.import_module("kernel_gen.passes.arch_parallelize").ArchParallelizePass
 DecompassPass = importlib.import_module("kernel_gen.passes.decompass").DecompassPass
@@ -104,6 +105,23 @@ def _record_cse(self, ctx: Context, target: ModuleOp) -> None:
     _ = ctx
     _ = target
     _PIPELINE_PASS_ORDER.append("cse")
+
+
+def _record_canonicalize(self, ctx: Context, target: ModuleOp) -> None:
+    """记录 canonicalize pass 执行。
+
+
+    功能说明:
+    - 为 pipeline 顺序测试记录 xDSL `CanonicalizePass.apply(...)` 被调用。
+
+    使用示例:
+    - monkeypatch.setattr(CanonicalizePass, "apply", _record_canonicalize)
+    """
+
+    _ = self
+    _ = ctx
+    _ = target
+    _PIPELINE_PASS_ORDER.append("canonicalize")
 
 
 def _record_decompose(self, ctx: Context, target: ModuleOp) -> None:
@@ -427,7 +445,7 @@ def test_npu_demo_lowering_pipeline_builds_pass_manager() -> None:
 
 
 # TC-PIPELINE-101
-# 功能说明: 验证 npu-demo-lowering 的固定顺序包含 memory-plan insert-free、early/late attach、三次 CSE 与两次 symbol-buffer-hoist。
+# 功能说明: 验证 npu-demo-lowering 的固定顺序包含两次 memory-plan、四次 CSE/canonicalize 和 late attach。
 # 测试目的: 锁定 dsl_run 新正向管线的最小公开顺序。
 # 使用示例: pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k test_npu_demo_lowering_pipeline_pass_order
 # 对应功能实现文件路径: kernel_gen/passes/pipeline/npu_demo_lowering.py
@@ -438,6 +456,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
     _PIPELINE_PASS_ORDER.clear()
     monkeypatch.setattr(InlinePass, "apply", _record_inline)
     monkeypatch.setattr(CommonSubexpressionElimination, "apply", _record_cse)
+    monkeypatch.setattr(CanonicalizePass, "apply", _record_canonicalize)
     monkeypatch.setattr(DecompassPass, "apply", _record_decompose)
     monkeypatch.setattr(NnLoweringPass, "apply", _record_lower)
     monkeypatch.setattr(SymbolLoopHoistPass, "apply", _record_symbol_loop_hoist)
@@ -457,20 +476,25 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
     assert _PIPELINE_PASS_ORDER == [
         "inline",
         "cse",
+        "canonicalize",
         "decompass",
         "lower-nn",
         "symbol-loop-hoist",
         "cse",
-        "memory-plan:True:False",
-        "attach-arch-information",
-        "arch-parallelize:npu_demo:block",
+        "canonicalize",
         "symbol-buffer-hoist",
+        "memory-plan:True:False",
         "tile-analysis",
         'lower-dma-memory-hierarchy:True:matmul{["", "tlm1", "tlm2"]}',
-        "memory-pool:True:0",
         "symbol-loop-hoist",
-        "symbol-buffer-hoist",
         "cse",
+        "canonicalize",
+        "symbol-buffer-hoist",
+        "memory-plan:True:False",
+        "memory-pool:True:0",
+        "cse",
+        "canonicalize",
+        "arch-parallelize:npu_demo:block",
         "attach-arch-information",
         "outline-device-kernel",
         "template-name-infer",
@@ -511,6 +535,7 @@ def test_npu_demo_lowering_pipeline_arch_parallelize_propagates_unsupported_stru
     module = Parser(build_default_context(), module_text).parse_module()
     monkeypatch.setattr(InlinePass, "apply", _noop_pass_apply)
     monkeypatch.setattr(CommonSubexpressionElimination, "apply", _noop_pass_apply)
+    monkeypatch.setattr(CanonicalizePass, "apply", _noop_pass_apply)
     monkeypatch.setattr(DecompassPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(NnLoweringPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(SymbolLoopHoistPass, "apply", _noop_pass_apply)
@@ -553,6 +578,7 @@ def test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_blo
     module = Parser(build_default_context(), module_text).parse_module()
     monkeypatch.setattr(InlinePass, "apply", _noop_pass_apply)
     monkeypatch.setattr(CommonSubexpressionElimination, "apply", _noop_pass_apply)
+    monkeypatch.setattr(CanonicalizePass, "apply", _noop_pass_apply)
     monkeypatch.setattr(DecompassPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(NnLoweringPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(SymbolLoopHoistPass, "apply", _noop_pass_apply)
@@ -581,9 +607,9 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
 
     功能说明:
     - 通过公开 `set_dump_dir(...)` 与公开 pipeline builder 观察 pass dump。
-    - 按 pass marker 查找 `memory-plan`、两段 `symbol-buffer-hoist` 与 `memory-pool`，
+    - 按 pass marker 查找两段 `memory-plan`、两段 `symbol-buffer-hoist` 与 `memory-pool`，
       不依赖 dump 文件序号。
-    - 断言第二段 `symbol-buffer-hoist` 把 memory-pool 后 loop-invariant alias op 推到内层 loop 前。
+    - 断言 `arch-parallelize` 位于 memory-pool 后的 `cse -> canonicalize` 之后。
 
     使用示例:
     - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k memory_plan_dump
@@ -604,19 +630,22 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
         reset_config()
 
     memory_plan_text = _dump_stage_text_by_marker(tmp_path, "memory-plan")
+    second_memory_plan_text = _dump_stage_text_by_marker(tmp_path, "memory-plan", occurrence=2)
     first_buffer_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-buffer-hoist")
     memory_pool_text = _dump_stage_text_by_marker(tmp_path, "memory-pool")
     second_buffer_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-buffer-hoist", occurrence=2)
-    third_cse_text = _dump_stage_text_by_marker(tmp_path, "cse", occurrence=3)
-    early_attach_text = _dump_stage_text_by_marker(tmp_path, "attach-arch-information")
+    post_pool_cse_text = _dump_stage_text_by_marker(tmp_path, "cse", occurrence=4)
+    post_pool_canonicalize_text = _dump_stage_text_by_marker(tmp_path, "canonicalize", occurrence=4)
     arch_parallelize_text = _dump_stage_text_by_marker(tmp_path, "arch-parallelize")
-    late_attach_text = _dump_stage_text_by_marker(tmp_path, "attach-arch-information", occurrence=2)
+    attach_text = _dump_stage_text_by_marker(tmp_path, "attach-arch-information")
     outline_text = _dump_stage_text_by_marker(tmp_path, "outline-device-kernel")
     markers = _dump_stage_markers(tmp_path)
     assert memory_plan_text.startswith("memory-plan\n")
     assert "dma.free" in memory_plan_text
     assert first_buffer_hoist_text.startswith("symbol-buffer-hoist\n")
     assert "symbol.for" in first_buffer_hoist_text
+    assert second_memory_plan_text.startswith("memory-plan\n")
+    assert "dma.free" in second_memory_plan_text
     assert memory_pool_text.startswith("memory-pool\n")
     assert "arch.get_dynamic_memory" in memory_pool_text
     assert "dma.view" in memory_pool_text
@@ -624,40 +653,53 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     assert "dma.alloc" not in memory_pool_text
     assert "dma.free" not in memory_pool_text
     assert second_buffer_hoist_text.startswith("symbol-buffer-hoist\n")
-    assert "arch.get_dynamic_memory" in second_buffer_hoist_text
-    assert "dma.alloc" not in second_buffer_hoist_text
-    assert "dma.free" not in second_buffer_hoist_text
-    assert third_cse_text.startswith("cse\n")
-    assert early_attach_text.startswith("attach-arch-information\n")
+    assert post_pool_cse_text.startswith("cse\n")
+    assert post_pool_canonicalize_text.startswith("canonicalize\n")
     assert arch_parallelize_text.startswith("arch-parallelize\n")
     assert "arch.get_block_id" in arch_parallelize_text
     assert "symbol.const 2" in arch_parallelize_text
-    assert late_attach_text.startswith("attach-arch-information\n")
-    assert "arch.get_dynamic_memory" in late_attach_text
-    assert "!nn.memory<[#C2097152]" in late_attach_text
+    assert attach_text.startswith("attach-arch-information\n")
+    assert "arch.get_dynamic_memory" in attach_text
+    assert "!nn.memory<[#C2097152]" in attach_text
     assert outline_text.startswith("outline-device-kernel\n")
-    assert _dump_stage_index(tmp_path, "memory-plan") == 8
-    assert _dump_stage_index(tmp_path, "attach-arch-information", occurrence=1) == 9
-    assert _dump_stage_index(tmp_path, "arch-parallelize") == 10
-    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=1) == 11
+    assert _dump_stage_index(tmp_path, "cse", occurrence=1) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=1)
+    assert _dump_stage_index(tmp_path, "cse", occurrence=2) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=2)
+    assert _dump_stage_index(tmp_path, "cse", occurrence=3) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=3)
+    assert _dump_stage_index(tmp_path, "cse", occurrence=4) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=4)
+    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=1) == 10
+    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=1) == 11
     assert _dump_stage_index(tmp_path, "tile-analysis") == 12
     assert _dump_stage_index(tmp_path, "lower-dma-memory-hierarchy") == 13
-    assert _dump_stage_index(tmp_path, "memory-pool") == 14
-    assert _dump_stage_index(tmp_path, "symbol-loop-hoist", occurrence=2) == 15
-    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=2) == 16
-    assert _dump_stage_index(tmp_path, "cse", occurrence=3) == 17
-    assert _dump_stage_index(tmp_path, "attach-arch-information", occurrence=2) == 18
-    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 19
-    assert _dump_stage_index(tmp_path, "template-name-infer") == 20
-    assert markers[7:10] == ["memory-plan", "attach-arch-information", "arch-parallelize"]
-    assert markers[12:14] == ["lower-dma-memory-hierarchy", "memory-pool"]
+    assert _dump_stage_index(tmp_path, "symbol-loop-hoist", occurrence=2) == 14
+    assert _dump_stage_index(tmp_path, "cse", occurrence=3) == 15
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=3) == 16
+    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=2) == 17
+    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=2) == 18
+    assert _dump_stage_index(tmp_path, "memory-pool") == 19
+    assert _dump_stage_index(tmp_path, "cse", occurrence=4) == 20
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) == 21
+    assert _dump_stage_index(tmp_path, "arch-parallelize") == 22
+    assert _dump_stage_index(tmp_path, "attach-arch-information") == 23
+    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 24
+    assert _dump_stage_index(tmp_path, "template-name-infer") == 25
+    assert markers.count("attach-arch-information") == 1
     assert "multi-buffer" not in markers
-    assert markers[15:19] == ["symbol-buffer-hoist", "cse", "attach-arch-information", "outline-device-kernel"]
-    first_view_index = second_buffer_hoist_text.index('"dma.view"')
-    first_reshape_index = second_buffer_hoist_text.index('"dma.reshape"', first_view_index)
-    outer_for_index = second_buffer_hoist_text.index("symbol.for", first_reshape_index)
-    inner_for_index = second_buffer_hoist_text.index("symbol.for", outer_for_index + len("symbol.for"))
-    assert first_view_index < first_reshape_index < outer_for_index < inner_for_index
+    assert markers[12:18] == [
+        "lower-dma-memory-hierarchy",
+        "symbol-loop-hoist",
+        "cse",
+        "canonicalize",
+        "symbol-buffer-hoist",
+        "memory-plan",
+    ]
+    assert markers[18:24] == [
+        "memory-pool",
+        "cse",
+        "canonicalize",
+        "arch-parallelize",
+        "attach-arch-information",
+        "outline-device-kernel",
+    ]
 
 
 def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(tmp_path: Path) -> None:
@@ -686,9 +728,8 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
 
     lower_dma_text = _dump_stage_text_by_marker(tmp_path, "lower-dma-memory-hierarchy")
     memory_pool_text = _dump_stage_text_by_marker(tmp_path, "memory-pool")
-    early_attach_text = _dump_stage_text_by_marker(tmp_path, "attach-arch-information")
     arch_parallelize_text = _dump_stage_text_by_marker(tmp_path, "arch-parallelize")
-    late_attach_text = _dump_stage_text_by_marker(tmp_path, "attach-arch-information", occurrence=2)
+    attach_text = _dump_stage_text_by_marker(tmp_path, "attach-arch-information")
     markers = _dump_stage_markers(tmp_path)
     assert lower_dma_text.startswith("lower-dma-memory-hierarchy\n")
     assert "dma.make_ring" not in lower_dma_text
@@ -704,14 +745,23 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
     assert "dma.alloc" not in memory_pool_text
     assert "dma.free" not in memory_pool_text
     assert "multi-buffer" not in markers
-    assert _dump_stage_index(tmp_path, "lower-dma-memory-hierarchy") + 1 == _dump_stage_index(tmp_path, "memory-pool")
-    assert early_attach_text.startswith("attach-arch-information\n")
+    assert _dump_stage_index(tmp_path, "lower-dma-memory-hierarchy") + 1 == _dump_stage_index(
+        tmp_path, "symbol-loop-hoist", occurrence=2
+    )
+    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=2) + 1 == _dump_stage_index(tmp_path, "memory-pool")
+    assert _dump_stage_index(tmp_path, "memory-pool") + 1 == _dump_stage_index(tmp_path, "cse", occurrence=4)
+    assert _dump_stage_index(tmp_path, "cse", occurrence=4) + 1 == _dump_stage_index(
+        tmp_path, "canonicalize", occurrence=4
+    )
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) + 1 == _dump_stage_index(
+        tmp_path, "arch-parallelize"
+    )
     assert arch_parallelize_text.startswith("arch-parallelize\n")
     assert "arch.get_block_id" in arch_parallelize_text
-    assert "launch_block = #builtin.int<2>" in arch_parallelize_text
-    assert late_attach_text.startswith("attach-arch-information\n")
-    assert "arch.get_dynamic_memory" in late_attach_text
-    assert "!nn.memory<[#C2097152]" in late_attach_text
+    assert attach_text.startswith("attach-arch-information\n")
+    assert "launch_block = #builtin.int<2>" in attach_text
+    assert "arch.get_dynamic_memory" in attach_text
+    assert "!nn.memory<[#C2097152]" in attach_text
     assert "dma.make_ring" not in str(module)
     assert "dma.alloc" not in str(module)
     assert "dma.free" not in str(module)

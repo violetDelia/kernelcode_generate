@@ -5,6 +5,7 @@
 - 提供 standalone IR-level `arch-parallelize` pass。
 - 遍历 `builtin.module` 中所有非声明 `func.func`，对未带 block 并行语义的函数执行 block 级分发。
 - 当前只支持 `parallel_level="block"`：单顶层 `symbol.for` 改写为 block-strided loop；无顶层 loop 时用 block0 guard 包裹原 body。
+- 唯一顶层 loop 前允许公开 symbol setup 以及 memory-pool 产生的 `arch.get_dynamic_memory` / `dma.view` / `dma.reshape` setup 前缀。
 
 API 列表:
 - `class ArchParallelizePass(target: str = "npu_demo", parallel_level: str = "block")`
@@ -32,7 +33,8 @@ from xdsl.dialects.builtin import ArrayAttr, ModuleOp
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetBlockNumOp
+from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetBlockNumOp, ArchGetDynamicMemoryOp
+from kernel_gen.dialect.dma import DmaReshapeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
@@ -68,6 +70,11 @@ _SYMBOL_SETUP_OPS = (
     SymbolMaxOp,
     SymbolGetDimOp,
     SymbolGetStrideOp,
+)
+_MEMORY_POOL_SETUP_OPS = (
+    ArchGetDynamicMemoryOp,
+    DmaViewOp,
+    DmaReshapeOp,
 )
 _UNKNOWN_SYMBOL_EXPR = "?"
 
@@ -210,7 +217,7 @@ def _analyze_loop_shape(body_ops: list[Operation]) -> _LoopShape:
 
     功能说明:
     - 无顶层 loop 时返回 `no_loop`。
-    - 一个顶层 `symbol.for` 且同级仅包含 loop 前纯 symbol setup 时返回可改写结果。
+    - 一个顶层 `symbol.for` 且同级仅包含 loop 前公开 setup 前缀时返回可改写结果。
     - 多个顶层 `symbol.for` 或 loop 同级出现不可判 op 时返回 unsupported。
 
     使用示例:
@@ -224,27 +231,47 @@ def _analyze_loop_shape(body_ops: list[Operation]) -> _LoopShape:
         return _LoopShape("multiple_top_level_loops")
     outer_loop = top_level_loops[0]
     outer_index = body_ops.index(outer_loop)
+    parent_block = outer_loop.parent_block()
+    allowed_values: set[SSAValue] = set(parent_block.args) if parent_block is not None else set()
     for index, op in enumerate(body_ops):
         if op is outer_loop:
             continue
-        if index > outer_index or not _is_allowed_symbol_setup_op(op):
+        if index > outer_index or not _is_allowed_loop_prefix_setup_op(op):
             return _LoopShape("unsupported")
+        if not _setup_operands_are_allowed(op, allowed_values):
+            return _LoopShape("unsupported")
+        allowed_values.update(op.results)
     if not _can_transform_loop_nest(outer_loop):
         return _LoopShape("loop_carried")
     return _LoopShape("transformable_loop_nest", outer_loop)
 
 
-def _is_allowed_symbol_setup_op(op: Operation) -> bool:
-    """判断顶层 op 是否为唯一 loop 前的纯 symbol setup。
+def _is_allowed_loop_prefix_setup_op(op: Operation) -> bool:
+    """判断顶层 op 是否为唯一 loop 前允许的 setup 前缀。
 
     功能说明:
-    - 只放行公开 symbol dialect 的无副作用边界构造 op。
+    - 放行公开 symbol dialect 的无副作用边界构造 op。
+    - 放行 memory-pool 生成的 `arch.get_dynamic_memory`、`dma.view` 与 `dma.reshape`。
 
     使用示例:
-    - if _is_allowed_symbol_setup_op(op): ...
+    - if _is_allowed_loop_prefix_setup_op(op): ...
     """
 
-    return isinstance(op, _SYMBOL_SETUP_OPS)
+    return isinstance(op, _SYMBOL_SETUP_OPS + _MEMORY_POOL_SETUP_OPS)
+
+
+def _setup_operands_are_allowed(op: Operation, allowed_values: set[SSAValue]) -> bool:
+    """校验 setup 前缀只依赖函数参数或更早的合法 setup。
+
+    功能说明:
+    - 保证放行 `arch.get_dynamic_memory` / `dma.view` / `dma.reshape` 不会扩大到任意顶层 op 结果。
+    - operand 若不是函数参数或更早合法 setup result，则保持 `unsupported loop structure`。
+
+    使用示例:
+    - if not _setup_operands_are_allowed(op, allowed_values): ...
+    """
+
+    return all(operand in allowed_values for operand in op.operands)
 
 
 def _can_transform_loop_nest(outer_loop: SymbolForOp) -> bool:

@@ -48,7 +48,7 @@
   module = Parser(ctx, "builtin.module { func.func @main() { func.return } }").parse_module()
   ```
 - 功能说明：构建 `default_context`。
-- 注意事项：默认加载基础 dialect `builtin/func/arith/scf` 和仓库常用 dialect `nn/kernel/symbol/memory/tuner/dma/arch`；本接口只负责 dialect 注册，不运行 pass、不做 lowering、不修复非法 IR；需要解析 `scf.if`、`symbol.for`、`memory.get_data`、`dma.*`、`arch.*` 等项目内常见 IR 的工具应复用本接口，不得维护第二套默认 dialect 注册列表；`kernel_gen.core.context` 是公开导入路径，旧 `kernel_gen.context` 不作为当前公开入口；`Context` 类型来自 `xdsl.context.Context`，本模块不重新导出 `Context`。
+- 注意事项：默认加载基础 dialect `builtin/func/arith/scf` 和仓库常用 dialect `nn/kernel/symbol/memory/tuner/dma/arch`；本接口只负责 dialect 注册，不运行 pass、不做 lowering、不修复非法 IR；需要解析 `scf.if`、`symbol.for`、`memory.get_data`、`dma.*`、`arch.*` 等项目内常见 IR 的工具应复用本接口，不得维护第二套默认 dialect 注册列表；`kernel_gen.core.context` 是唯一公开导入路径，旧 `kernel_gen.context` 已删除且不得继续作为兼容入口；`Context` 类型来自 `xdsl.context.Context`，本模块不重新导出 `Context`。
 
 ## 测试
 
@@ -125,3 +125,4 @@
 | TC-CORE-CONTEXT-054 | 解析/打印 | MLIR gen compare text true | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_mlir_gen_compare_text_true`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_mlir_gen_compare_text_true` |
 | TC-CORE-CONTEXT-055 | 内存/DMA | MLIR gen compare text ignores line comment slashes for memory types | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_mlir_gen_compare_text_ignores_line_comment_slashes_for_memory_types`。 | 内存类型、布局、搬运结果或 verifier 行为体现“MLIR gen compare text ignores line comment slashes for memory types”场景。 | `test_mlir_gen_compare_text_ignores_line_comment_slashes_for_memory_types` |
 | TC-CORE-CONTEXT-056 | 边界/异常 | MLIR gen compare text returns false on invalid text | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_mlir_gen_compare_text_returns_false_on_invalid_text`。 | “MLIR gen compare text returns false on invalid text”场景按公开错误语义失败或被拒绝。 | `test_mlir_gen_compare_text_returns_false_on_invalid_text` |
+| TC-CORE-CONTEXT-057 | 公开入口 | legacy kernel_gen.context import path removed | 按 spec 声明的公开入口访问 `kernel_gen.core.context`，并尝试导入旧桥接路径。 | 运行 `test_legacy_kernel_gen_context_import_path_is_removed`。 | `kernel_gen.core.context` 正向可用，旧 `kernel_gen.context` 导入失败。 | `test_legacy_kernel_gen_context_import_path_is_removed` |

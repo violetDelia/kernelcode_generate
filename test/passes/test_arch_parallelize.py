@@ -380,3 +380,65 @@ builtin.module {
     assert result.ok is False
     assert result.message is not None
     assert "unsupported loop structure" in result.message
+
+
+# TC-PASS-ARCH-PARALLELIZE-015
+# 功能说明: 验证 memory-pool 生成的 loop 前 setup 前缀不阻塞 block 分发。
+# 使用示例: pytest -q test/passes/test_arch_parallelize.py -k test_arch_parallelize_allows_memory_pool_setup_before_single_loop
+def test_arch_parallelize_allows_memory_pool_setup_before_single_loop() -> None:
+    case_text = """// COMPILE_ARGS: --pass "arch-parallelize={target=npu_demo,parallel_level=block}"
+// CHECK: arch.get_dynamic_memory
+// CHECK: "dma.view"
+// CHECK: "dma.reshape"
+// CHECK: arch.get_block_id
+// CHECK: symbol.for
+
+builtin.module {
+  func.func @pool_prefix_loop() {
+    %zero = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %one = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %four = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %sixteen = symbol.const 16 : !symbol.int<#symbol.expr<16>>
+    %pool = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[#symbol.expr<SM_SIZE>], [#symbol.expr<1>], i8, #nn.space<shared>>
+    %flat = "dma.view"(%pool, %zero, %sixteen, %one) <{operandSegmentSizes = array<i32: 1, 1, 1, 1>}> : (!nn.memory<[#symbol.expr<SM_SIZE>], [#symbol.expr<1>], i8, #nn.space<shared>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<16>>, !symbol.int<#symbol.expr<1>>) -> !nn.memory<[#symbol.expr<16>], [#symbol.expr<1>], f32, #nn.space<shared>>
+    %tile = "dma.reshape"(%flat, %four, %four) <{operandSegmentSizes = array<i32: 1, 2>}> : (!nn.memory<[#symbol.expr<16>], [#symbol.expr<1>], f32, #nn.space<shared>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>) -> !nn.memory<[#symbol.expr<4>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<shared>>
+    symbol.for %i = %zero to %sixteen step %four {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<16>, step = #symbol.expr<4>>} {
+      %body = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    }
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(case_text, source_path="test/passes/test_arch_parallelize.py")
+    assert result.ok is True, result.message
+    assert result.actual_ir.index("arch.get_dynamic_memory") < result.actual_ir.index("arch.get_block_id")
+    assert '"dma.view"' in result.actual_ir
+    assert '"dma.reshape"' in result.actual_ir
+
+
+# TC-PASS-ARCH-PARALLELIZE-016
+# 功能说明: 验证 memory-pool setup 位于唯一 loop 后仍按 unsupported loop structure 失败。
+# 使用示例: pytest -q test/passes/test_arch_parallelize.py -k test_arch_parallelize_rejects_memory_pool_setup_after_loop
+def test_arch_parallelize_rejects_memory_pool_setup_after_loop() -> None:
+    case_text = """// COMPILE_ARGS: --pass "arch-parallelize={target=npu_demo,parallel_level=block}"
+// CHECK: builtin.module {
+
+builtin.module {
+  func.func @pool_suffix_loop() {
+    %zero = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %one = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %four = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %sixteen = symbol.const 16 : !symbol.int<#symbol.expr<16>>
+    symbol.for %i = %zero to %sixteen step %four {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<16>, step = #symbol.expr<4>>} {
+      %body = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    }
+    %pool = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[#symbol.expr<SM_SIZE>], [#symbol.expr<1>], i8, #nn.space<shared>>
+    %flat = "dma.view"(%pool, %zero, %sixteen, %one) <{operandSegmentSizes = array<i32: 1, 1, 1, 1>}> : (!nn.memory<[#symbol.expr<SM_SIZE>], [#symbol.expr<1>], i8, #nn.space<shared>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<16>>, !symbol.int<#symbol.expr<1>>) -> !nn.memory<[#symbol.expr<16>], [#symbol.expr<1>], f32, #nn.space<shared>>
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(case_text, source_path="test/passes/test_arch_parallelize.py")
+    assert result.ok is False
+    assert result.message is not None
+    assert "unsupported loop structure" in result.message

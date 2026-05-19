@@ -15,9 +15,16 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+import subprocess
+import sys
+
 from xdsl.parser import Parser
 
 from kernel_gen.core.context import build_default_context
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_default_context_loads_memory_dialect() -> None:
@@ -38,3 +45,24 @@ builtin.module {
 """,
     ).parse_module()
     module.verify()
+
+
+def test_legacy_kernel_gen_context_import_path_is_removed() -> None:
+    """旧 context 子模块不再作为公开导入路径。"""
+
+    legacy_module = ".".join(("kernel_gen", "context"))
+    script = f"import importlib; importlib.import_module({legacy_module!r})"
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "ModuleNotFoundError" in result.stderr
