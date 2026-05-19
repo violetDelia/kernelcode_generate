@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-用于定义 `dma dialect` 的稳定方言语义，描述 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.subview`、`dma.view`、`dma.reshape`、`dma.cast` 以及作为 lowering 目标面的 `dma.broadcast`、`dma.transpose`，用于表示内存对象之间的数据搬运、标量物化与布局转换，包括整块搬运、切片读取、切片回写、跨空间迁移、标量写入临时 memory、显式广播物化、显式转置物化、一维 byte backing 切分、视图变换与显式数据转换，并支持动态 shape 的表达。该方言不单独定义 memory type / memory space，而是统一复用 `nn dialect` 中的 `NnMemoryType` 与 `NnMemorySpaceAttr`。
+用于定义 `dma dialect` 的稳定方言语义，描述 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.make_ring`、`dma.current_ring`、`dma.advance_ring`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.subview`、`dma.view`、`dma.reshape`、`dma.cast` 以及作为 lowering 目标面的 `dma.broadcast`、`dma.transpose`，用于表示内存对象之间的数据搬运、标量物化、ring stage 轮转与布局转换，包括整块搬运、切片读取、切片回写、跨空间迁移、标量写入临时 memory、显式广播物化、显式转置物化、一维 byte backing 切分、视图变换与显式数据转换，并支持动态 shape 的表达。该方言不单独定义 memory type / memory space，而是统一复用 `nn dialect` 中的 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 
 ## API 列表
 
@@ -11,6 +11,10 @@
 - `class DmaFillOp(target: SSAValue | Operation, value: SSAValue | Operation)`
 - `class DmaFreeOp(source: SSAValue | Operation)`
 - `class DmaCopyOp(target: SSAValue | Operation, source: SSAValue | Operation)`
+- `class DmaRingType(offset: SymbolExprAttr, memory_type: NnMemoryType)`
+- `class DmaMakeRingOp(memory: SSAValue | Operation, count: SSAValue | Operation, offset: SSAValue | Operation, shape_bytes: SSAValue | Operation, result_type: DmaRingType)`
+- `class DmaCurrentRingOp(ring: SSAValue | Operation, result_type: NnMemoryType | None = None)`
+- `class DmaAdvanceRingOp(ring: SSAValue | Operation, result_type: NnMemoryType | None = None)`
 - `class DmaBroadcastOp(target: SSAValue | Operation, source: SSAValue | Operation)`
 - `class DmaTransposeOp(target: SSAValue | Operation, source: SSAValue | Operation, perm: Sequence[int] | ArrayAttr)`
 - `class DmaLoadOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
@@ -59,7 +63,7 @@
 - 本文件不负责逐元素算术、比较、归约、matmul 等张量计算语义，也不负责自动求解 `offsets/sizes/strides` 或自动推导最优搬运策略；但它提供与“数据物化/布局变换”一致的两类稳定原语：
   - `dma.broadcast`：把 scalar 或较低 rank memory 按广播规则物化写入目标 memory（用于显式广播与 mixed compare 桥接）
   - `dma.transpose`：把 source 按 perm 置换物化写入目标 memory（作为 `nn.transpose` 的 lowering 目标）
-- 当前方言范围包含 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.broadcast`、`dma.transpose`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.subview`、`dma.view`、`dma.reshape`、`dma.cast`。
+- 当前方言范围包含 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.make_ring`、`dma.current_ring`、`dma.advance_ring`、`dma.broadcast`、`dma.transpose`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.subview`、`dma.view`、`dma.reshape`、`dma.cast`。
 - 除 `dma.cast` 与 `dma.fill` 外，其他搬运 op 不改变元素值语义，只改变数据所在的逻辑位置、切片范围、布局表达或空间；同一个 op 不应同时承担计算和搬运语义。
 - 本文件中的“转换”包含三类：布局、切片视图或空间层面的转换，通过 `dma.cast` 表达的显式元素类型转换，以及通过 `dma.fill` 表达的标量到 memory 物化；不包括 memory-memory 广播、归约或通用数值计算。
 
@@ -75,6 +79,9 @@
 - `dma.alloc` 仅产生结果内存，结果类型必须为 `!nn.memory<...>`。
 - `dma.fill` 仅把单个数值标量真实写入目标内存，不分配新内存，也不返回新的 memory result。
 - `dma.free` 仅接受待释放的内存 operand，不产生结果。
+- `dma.ring` 只描述固定 stage ring 的 slot 类型与 byte offset；slot 类型必须为 `!nn.memory<...>`，offset 必须是静态正整数。
+- `dma.make_ring` 的 backing memory 必须是一维 `i8` memory；`count/offset/shape_bytes` 必须为静态正整数 `!symbol.int<#symbol.expr<expr>>`，且 `shape_bytes < offset`、`backing_bytes >= count * offset`、ring offset 与 offset operand 一致、slot space 与 backing memory space 一致。
+- `dma.current_ring` 与 `dma.advance_ring` 的 result type 必须等于 ring slot memory type；`dma.advance_ring` 表示有副作用的 ring stage 推进，不得被当作 Pure op 删除。
 - `dma.view/reshape` 必须保证 `result.space` 与 `source.space` 一致；`result.element_type` 必须与 `source.element_type` 一致（仅当 `source` 是一维 `i8` byte pool 时允许不同 element_type，且允许 `source` 与 `result` 的 rank 不一致）。
 - 对 `dma.copy/load/store/slice/deslice`，相关 `element_type` 必须一致，不允许隐式类型转换。
 - 对 `dma.cast`，只允许 `element_type` 发生显式变化；`shape/stride/space` 必须保持一致。
@@ -311,6 +318,49 @@ op = DmaCopyOp(target, source)
 
 - 返回类型为无返回值；当前 op result 数量固定为 `0`。
 - 语义上通过 side effect 表达对 `target` 的整块写入，不返回新的 `!nn.memory<...>`。
+
+### `class DmaRingType(offset: SymbolExprAttr, memory_type: NnMemoryType)`
+
+- api：`class DmaRingType(offset: SymbolExprAttr, memory_type: NnMemoryType)`
+- 功能说明：描述固定 byte offset 的 DMA ring slot 类型。
+- 参数：
+  - `offset`：相邻 stage 的 byte 间隔，必须是静态正整数 `SymbolExprAttr`。
+  - `memory_type`：单个 ring slot 的 `!nn.memory<...>` 类型。
+- 返回值：`DmaRingType` 实例。
+- 注意事项：`offset` 不表达当前 stage 索引，stage 状态由 `dma.current_ring` / `dma.advance_ring` 的副作用语义承接。
+
+### `class DmaMakeRingOp(memory: SSAValue | Operation, count: SSAValue | Operation, offset: SSAValue | Operation, shape_bytes: SSAValue | Operation, result_type: DmaRingType)`
+
+- api：`class DmaMakeRingOp(memory: SSAValue | Operation, count: SSAValue | Operation, offset: SSAValue | Operation, shape_bytes: SSAValue | Operation, result_type: DmaRingType)`
+- 功能说明：把一维 `i8` backing memory 初始化为固定 stage 数的 DMA ring。
+- 参数：
+  - `memory`：一维 `i8` backing memory。
+  - `count`：stage 数，静态正整数 `!symbol.int<#symbol.expr<expr>>`。
+  - `offset`：相邻 stage byte 间隔，静态正整数 `!symbol.int<#symbol.expr<expr>>`。
+  - `shape_bytes`：单个 slot 的有效 byte 数，静态正整数 `!symbol.int<#symbol.expr<expr>>`。
+  - `result_type`：`DmaRingType`。
+- 返回值：单个 `!dma.ring<...>` result。
+- 注意事项：verifier 必须检查 `shape_bytes < offset`、`backing_bytes >= count * offset`、`result_type.offset == offset`、`result_type.memory_type.space == memory.space`。
+
+### `class DmaCurrentRingOp(ring: SSAValue | Operation, result_type: NnMemoryType | None = None)`
+
+- api：`class DmaCurrentRingOp(ring: SSAValue | Operation, result_type: NnMemoryType | None = None)`
+- 功能说明：读取当前 DMA ring stage 对应的 memory slot。
+- 参数：
+  - `ring`：`DmaRingType` 结果。
+  - `result_type`：可选；省略时使用 ring slot memory type。
+- 返回值：当前 stage 的 `!nn.memory<...>`。
+- 注意事项：显式 `result_type` 必须与 ring slot memory type 完全一致。
+
+### `class DmaAdvanceRingOp(ring: SSAValue | Operation, result_type: NnMemoryType | None = None)`
+
+- api：`class DmaAdvanceRingOp(ring: SSAValue | Operation, result_type: NnMemoryType | None = None)`
+- 功能说明：推进 DMA ring 到下一 stage，并返回推进后的 slot 类型占位。
+- 参数：
+  - `ring`：`DmaRingType` 结果。
+  - `result_type`：可选；省略时使用 ring slot memory type。
+- 返回值：推进后 stage 的 `!nn.memory<...>`。
+- 注意事项：该 op 具有副作用，不属于 Pure；显式 `result_type` 必须与 ring slot memory type 完全一致。
 
 ### `class DmaBroadcastOp(target: SSAValue | Operation, source: SSAValue | Operation)`
 
@@ -703,6 +753,7 @@ op = DmaCastOp(source, result_type)
 - 验证 `dma.alloc` 结果类型约束与结果数量。
 - 验证 `dma.fill` 能将 builtin 数值标量 / `!symbol.int<#symbol.expr<expr>>` 真实写入非 bool 数值 memory，并锁定它不是“空 `dma.alloc` 占位”的替代说法。
 - 验证 `dma.free` 的内存类型约束与无返回值语义。
+- 验证 `dma.ring` / `dma.make_ring` / `dma.current_ring` / `dma.advance_ring` 的 parse、verifier、side-effect 保留与 result type 边界。
 - 验证 `dma.view/reshape` 的元素类型/空间一致性与形状约束，其中 `dma.view` 覆盖动态 `offsets`（允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`）、`shape/stride`（`!symbol.int<#symbol.expr<expr>>`）operand 与边界校验，`dma.reshape` 覆盖动态 `shape` 的 `!symbol.int<#symbol.expr<expr>>` operand。
 - 验证 `dma.subview` 的一维 `i8` backing memory、一维 typed result、元素单位 `offset/size/stride`、space 一致性、size 对齐与静态 byte bounds 边界。
 - 验证 `dma.view` 在 DSL helper / 合同链路中不仅要生成 op，还要求返回 `Memory` 类型与 `dma.view.result_type` 一致；当直接 `func.return` 时，`EXPECTED_MEMORY` 比对必须成功。
@@ -750,6 +801,10 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-021 | 解析/打印 | 动态 shape round-trip | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_dma_dynamic_symbol_int_parse_print_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_dma_dynamic_symbol_int_parse_print_round_trip` |
 | TC-DMA-022 | 边界/异常 | 非法标量类型拒绝 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_rejects_non_symbol_int_scalar_operands`。 | “非法标量类型拒绝”场景按公开错误语义失败或被拒绝。 | `test_dma_rejects_non_symbol_int_scalar_operands` |
 | TC-DMA-023 | 边界/异常 | `dma.free` 释放内存 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_free_requires_nn_memory_type`。 | “`dma.free` 释放内存”场景按公开错误语义失败或被拒绝。 | `test_dma_free_requires_nn_memory_type` |
+| TC-DMA-023A | 解析/打印 | `dma.ring` 类型 parse | 准备 `!dma.ring<#symbol.expr<offset>, !nn.memory<...>>` 文本。 | 运行 `test_dma_ring_type_and_ops_verify_success`。 | ring type parse/verify 成功，current/advance result type 对齐 slot memory。 | `test_dma_ring_type_and_ops_verify_success` |
+| TC-DMA-023B | 边界/异常 | `dma.make_ring` verifier | 准备非法 count/offset/shape_bytes、backing bytes 与 space mismatch 输入。 | 运行 `test_dma_make_ring_verifier_edges`。 | verifier 按公开错误语义拒绝非法 ring 构造。 | `test_dma_make_ring_verifier_edges` |
+| TC-DMA-023C | 边界/异常 | `dma.current_ring/advance_ring` result type | 准备显式错误 result type。 | 运行 `test_dma_ring_slot_result_type_must_match`。 | verifier 拒绝 result type 与 ring slot memory type 不一致。 | `test_dma_ring_slot_result_type_must_match` |
+| TC-DMA-023D | pass 改写 | `dma.advance_ring` side effect | 准备只含 ring current/advance 的 module。 | 运行 `test_dma_advance_ring_survives_public_dce`。 | 通用 pass manager 后 `dma.advance_ring` 不被 Pure DCE 删除。 | `test_dma_advance_ring_survives_public_dce` |
 | TC-DMA-024 | 内存/DMA | `dma.fill` 物化 `const(i32)` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 构造并校验 `dma.fill` | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.fill` 物化 `const(i32)`”场景。 | test/dialect/test_dma.py::test_dma_fill_accepts_builtin_i32_scalar_operand |
 | TC-DMA-025 | 内存/DMA | `dma.fill` 物化 `const(f32)` | 准备 float memory 与 builtin float scalar operand。 | 构造并校验 `dma.fill` | verifier 接受浮点 target/value 同族物化。 | test/dialect/test_dma.py::test_dma_fill_accepts_builtin_float_scalar_operand |
 | TC-DMA-026 | 内存/DMA | `dma.fill` 物化 `symbol.int` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 构造并校验 `dma.fill` | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.fill` 物化 `symbol.int`”场景。 | test/dialect/test_dma.py::test_dma_fill_accepts_symbol_int_scalar_operand |

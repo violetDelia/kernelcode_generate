@@ -507,6 +507,16 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
             importlib.import_module("kernel_gen.passes.memory_pool").MemoryPoolPass,
         ),
         (
+            "kernel_gen.passes.multi_buffer",
+            "MultiBufferPass",
+            importlib.import_module("kernel_gen.passes.multi_buffer").MultiBufferPass,
+        ),
+        (
+            "kernel_gen.passes",
+            "MultiBufferPass",
+            importlib.import_module("kernel_gen.passes.multi_buffer").MultiBufferPass,
+        ),
+        (
             "kernel_gen.passes.tile.analysis",
             "TileAnalysisPass",
             importlib.import_module("kernel_gen.passes.tile.analysis").TileAnalysisPass,
@@ -839,6 +849,55 @@ def test_build_registered_memory_plan_rejects_invalid_options() -> None:
         build_registered_pass("memory-plan", {"insert-free": "maybe"})
 
 
+# TC-REGISTRY-007H7
+# 功能说明: 验证 multi-buffer 公开 options 可经 registry 构造，并能与通用 fold 组合。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_multi_buffer_options
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_multi_buffer_options() -> None:
+    load_builtin_passes()
+    multi_buffer_module = importlib.import_module("kernel_gen.passes.multi_buffer")
+
+    pass_obj = build_registered_pass("multi-buffer", {"memory-stage": "3", "fold": "false"})
+    single_stage_pass = build_registered_pass("multi-buffer", {"memory-stage": "1"})
+
+    assert isinstance(pass_obj, multi_buffer_module.MultiBufferPass)
+    assert pass_obj.name == "multi-buffer"
+    assert pass_obj.memory_stage == 3
+    assert pass_obj.fold is False
+    assert isinstance(single_stage_pass, multi_buffer_module.MultiBufferPass)
+    assert single_stage_pass.memory_stage == 1
+
+
+# TC-REGISTRY-007H8
+# 功能说明: 验证 multi-buffer direct from_options 与 registry option 包装错误稳定。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_multi_buffer_rejects_invalid_options
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_multi_buffer_rejects_invalid_options() -> None:
+    load_builtin_passes()
+    multi_buffer_module = importlib.import_module("kernel_gen.passes.multi_buffer")
+
+    with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: unknown option: unknown$"):
+        multi_buffer_module.MultiBufferPass.from_options({"unknown": "1"})
+    with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: memory-stage must be integer$"):
+        multi_buffer_module.MultiBufferPass.from_options({"memory-stage": "x"})
+    with pytest.raises(KernelCodeError, match=r"^MultiBufferOptionError: memory-stage must be positive$"):
+        multi_buffer_module.MultiBufferPass.from_options({"memory-stage": "0"})
+    with pytest.raises(
+        KernelCodeError,
+        match=r"^PassRegistryError: pass 'multi-buffer' option error: MultiBufferOptionError: unknown option: unknown$",
+    ):
+        build_registered_pass("multi-buffer", {"unknown": "1"})
+    with pytest.raises(
+        KernelCodeError,
+        match=r"^PassRegistryError: pass 'multi-buffer' option error: MultiBufferOptionError: memory-stage must be positive$",
+    ):
+        build_registered_pass("multi-buffer", {"memory-stage": "-1"})
+
+
 # TC-REGISTRY-007I
 # 功能说明: 验证内置加载后 attach-arch-information 通过 registry 返回 ModulePass。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_attach_arch_information_pass
@@ -967,6 +1026,7 @@ def test_load_builtin_passes_is_idempotent() -> None:
     assert "inline" in list_registered_passes()
     assert "attach-arch-information" in list_registered_passes()
     assert "memory-plan" in list_registered_passes()
+    assert "multi-buffer" in list_registered_passes()
     assert "arch-parallelize" in list_registered_passes()
     assert "no-op-pipeline" in list_registered_pipelines()
     assert "default-lowering" in list_registered_pipelines()

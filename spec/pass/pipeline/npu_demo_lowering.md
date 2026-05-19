@@ -31,6 +31,7 @@
 - `memory-plan`：[`spec/pass/memory_plan.md`](../../../spec/pass/memory_plan.md)
 - `tile-analysis`：[`spec/pass/tile/analysis.md`](../../../spec/pass/tile/analysis.md)
 - `lower-dma-memory-hierarchy`：[`spec/pass/lowering/dma_memory_hierarchy/spec.md`](../../../spec/pass/lowering/dma_memory_hierarchy/spec.md)
+- `multi-buffer`：[`spec/pass/multi_buffer.md`](../../../spec/pass/multi_buffer.md)
 - `symbol-buffer-hoist`：[`spec/pass/symbol_buffer_hoist.md`](../../../spec/pass/symbol_buffer_hoist.md)
 - `memory-pool`：[`spec/pass/lowering/memory_pool.md`](../../../spec/pass/lowering/memory_pool.md)
 - `attach-arch-information` 公开入口：[`spec/pass/attach_arch_information.md`](../../../spec/pass/attach_arch_information.md)
@@ -48,6 +49,7 @@
 - `arch-parallelize`：`ArchParallelizePass` 的公开 pass 名称；本 pipeline 中直接接入公开 pass，固定 `target=<pipeline target>` 与 `parallel_level="block"`。
 - `tile-analysis`：`TileAnalysisPass` 的公开 pass 名称；本 pipeline 中紧跟第一个 `symbol-buffer-hoist`，只补充 tile 分析属性。
 - `lower-dma-memory-hierarchy`：`LowerDmaMemoryHierarchyPass` 的公开 pass 名称；本 pipeline 中固定为 `fold=True` 且 `apply_op='matmul{["", "tlm1", "tlm2"]}'`。
+- `multi-buffer`：`MultiBufferPass` 的公开 pass 名称；本 pipeline 中固定为 `memory_stage=3`，将可证明的 matmul lhs/rhs staging 生命周期 ring 化。
 - `symbol-buffer-hoist`：`SymbolBufferHoistPass` 的公开 pass 名称。
 - `memory-pool`：`MemoryPoolPass` 的公开 pass 名称；本 pipeline 中固定为 `rewrite=True` 且 `alignment=0`，将片上 `dma.alloc` 改写为 `arch.get_dynamic_memory + dma.view + dma.reshape`。
 - `attach-arch-information`：在 outline 前为目标函数附加 launch / shared memory 等 arch 元信息的阶段。
@@ -62,8 +64,9 @@
 - 明确公开 `arch-parallelize` 阶段位于 `MemoryPlanPass(insert_free=True, fold=False)` 之后、第一段 `SymbolBufferHoistPass` 之前；支持结构委托 `ArchParallelizePass(target=<pipeline target>, parallel_level="block")` 改写，无 `symbol.for` 的直线 kernel 生成 block0 guard，配置 / target / unsupported structure 错误仍失败。
 - 明确第一个 `symbol-buffer-hoist` 位于公开 `arch-parallelize` 阶段之后、`tile-analysis` 之前，对 `symbol.for` 内安全 `dma.alloc + dma.free` 做成对外提；无可外提 buffer 时保持 no-op。
 - 明确 `tile-analysis` 位于第一个 `symbol-buffer-hoist` 之后、`lower-dma-memory-hierarchy` 之前，只记录 tile 分析结果，不生成 tile 循环。
-- 明确 `lower-dma-memory-hierarchy` 位于 `tile-analysis` 之后、`memory-pool` 之前，并固定 `fold=True` 与 `apply_op='matmul{["", "tlm1", "tlm2"]}'`，不新增 pipeline option。
-- 明确 `memory-pool` 位于 `symbol-buffer-hoist` 之后、`attach-arch-information` 之前，并固定 `MemoryPoolPass(rewrite=True, alignment=0)`，本 pipeline 默认执行 dynamic backing 改写。
+- 明确 `lower-dma-memory-hierarchy` 位于 `tile-analysis` 之后、`multi-buffer` 之前，并固定 `fold=True` 与 `apply_op='matmul{["", "tlm1", "tlm2"]}'`，不新增 pipeline option。
+- 明确 `multi-buffer` 位于 `lower-dma-memory-hierarchy` 之后、`memory-pool` 之前，并固定 `MultiBufferPass(memory_stage=3)`，不新增 pipeline option。
+- 明确 `memory-pool` 位于 `multi-buffer` 之后、`attach-arch-information` 之前，并固定 `MemoryPoolPass(rewrite=True, alignment=0)`，本 pipeline 默认执行 dynamic backing 改写。
 - 明确 memory-pool 后再次运行 `symbol-loop-hoist` 与 `symbol-buffer-hoist`，收敛 memory-pool 改写产生的 symbol 表达式与 buffer 视图中间态。
 - 明确该 pipeline 的最终输出为 host wrapper + device body + template-name 注解 IR，供 `gen_kernel(...)` 直接消费。
 - 当输入 DSL callable 除 `lhs/rhs/out` 外还包含公开 `SymbolDim` tile / shape 参数时，pipeline 输出的 host wrapper 与 device body 必须继续保留这些 trailing `!symbol.int` 参数，供 `gen_kernel(...)` 直接消费。
@@ -90,12 +93,13 @@
   9. `SymbolBufferHoistPass`
   10. `TileAnalysisPass`
   11. `LowerDmaMemoryHierarchyPass(fold=True, apply_op='matmul{["", "tlm1", "tlm2"]}')`
-  12. `MemoryPoolPass(rewrite=True, alignment=0)`
-  13. `SymbolLoopHoistPass`
-  14. `SymbolBufferHoistPass`
-  15. `AttachArchInformationPass`
-  16. `OutlineDeviceKernelPass`
-  17. `TemplateNameInferPass`
+  12. `MultiBufferPass(memory_stage=3)`
+  13. `MemoryPoolPass(rewrite=True, alignment=0)`
+  14. `SymbolLoopHoistPass`
+  15. `SymbolBufferHoistPass`
+  16. `AttachArchInformationPass`
+  17. `OutlineDeviceKernelPass`
+  18. `TemplateNameInferPass`
 - 该 pipeline 不包含 `tile-elewise`、`tile-reduce` 或 `buffer-results-to-out-params`。
 - 若输入 module 中不存在 `symbol.for`，`SymbolLoopHoistPass` 必须保持 no-op。
 - 若输入 module 中不存在可安全外提的 `dma.alloc`，`SymbolBufferHoistPass` 必须保持 no-op。
@@ -126,6 +130,7 @@
   - 第一个 `symbol-buffer-hoist` 必须在公开 `arch-parallelize` 阶段后把安全 `dma.alloc + dma.free` 成对外提。
   - `tile-analysis` 只添加 `tile.analysis` / `tile.tile_exprs` 等分析属性，不生成 `symbol.for` 或 `dma.view`。
   - `lower-dma-memory-hierarchy` 固定 `fold=True` 与 `apply_op='matmul{["", "tlm1", "tlm2"]}'`。
+  - `multi-buffer` 固定 `memory_stage=3`，只 ring 化可证明的 lhs/rhs 成对 staging 生命周期；不新增 pipeline option。
   - `memory-pool` 固定 `rewrite=True` 与 `alignment=0`，将片上 `dma.alloc` 改写为 `arch.get_dynamic_memory + dma.view + dma.reshape`。
   - memory-pool 后必须再次运行 `symbol-loop-hoist` 与 `symbol-buffer-hoist`。
   - `TemplateNameInferPass` 是最后一关注解 pass，之后不得再新增 memory value。
@@ -150,8 +155,9 @@
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-001 | pass 改写 | npu demo lowering pipeline builds pass manager | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_npu_demo_lowering_pipeline_builds_pass_manager`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“npu demo lowering pipeline builds pass manager”场景。 | `test_npu_demo_lowering_pipeline_builds_pass_manager` |
-| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-002 | pass 改写 | npu demo lowering pipeline pass order | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_npu_demo_lowering_pipeline_pass_order`。 | 固定顺序包含 `memory-plan:True:False` 后的 `arch-parallelize:npu_demo:block`，且该阶段位于第一段 `symbol-buffer-hoist` 前。 | `test_npu_demo_lowering_pipeline_pass_order` |
+| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-002 | pass 改写 | npu demo lowering pipeline pass order | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_npu_demo_lowering_pipeline_pass_order`。 | 固定顺序包含 `lower-dma-memory-hierarchy -> multi-buffer:3:True -> memory-pool` 相邻关系，且 `memory-plan:True:False` 后接 `arch-parallelize:npu_demo:block`。 | `test_npu_demo_lowering_pipeline_pass_order` |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-003 | 边界/异常 | npu demo lowering pipeline rejects unknown option | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_npu_demo_lowering_pipeline_rejects_unknown_option`。 | “npu demo lowering pipeline rejects unknown option”场景按公开错误语义失败或被拒绝。 | `test_npu_demo_lowering_pipeline_rejects_unknown_option` |
-| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-004 | pass 改写 | npu demo lowering pipeline memory plan dump shows lifecycle and pool | 通过公开 dump 配置运行 npu-demo-lowering。 | 运行 `test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool`。 | `08-memory-plan` 含 `dma.free`，`09-arch-parallelize` 含 `arch.get_block_id` 与 `symbol.const 2`，`10-symbol-buffer-hoist` 执行，`13-memory-pool` 已移除 `dma.alloc/dma.free` 并生成 dynamic backing memory。 | `test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool` |
+| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-004 | pass 改写 | npu demo lowering pipeline memory plan dump shows lifecycle and pool | 通过公开 dump 配置运行 npu-demo-lowering。 | 运行 `test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool`。 | 按 dump marker 定位 `memory-plan`、`arch-parallelize`、`symbol-buffer-hoist` 与 `memory-pool`；memory-plan 含 `dma.free`，arch 阶段含 `arch.get_block_id` 与 `symbol.const 2`，memory-pool 已移除 `dma.alloc/dma.free` 并生成 dynamic backing memory。 | `test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool` |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-005 | 公开入口 | npu demo lowering pipeline supports kernel contract style public chain | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain`。 | 公开入口在“npu demo lowering pipeline supports kernel contract style public chain”场景下可导入、构造、注册或按名称发现。 | `test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain` |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-006 | block0 guard / 失败边界 | npu demo lowering arch parallelize direct public behavior | 准备无 `symbol.for` 直线函数与多个顶层 `symbol.for` 两类公开 IR，并在 pipeline 中保留真实 arch-parallelize 阶段。 | 运行 `test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_block0_guard` 与 `test_npu_demo_lowering_pipeline_arch_parallelize_propagates_unsupported_structure`。 | 默认 pipeline 直接使用公开 `ArchParallelizePass`；无 loop 结构写入 block0 guard，不支持结构按公开错误失败。 | `test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_block0_guard`, `test_npu_demo_lowering_pipeline_arch_parallelize_propagates_unsupported_structure` |
+| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-007 | pass 改写 | npu demo lowering multi-buffer static dump uses ring and pool | 通过公开 dump 配置运行静态 tile matmul。 | 运行 `test_npu_demo_lowering_pipeline_multi_buffer_static_dump_uses_ring_and_pool`。 | `multi-buffer` stage 含 `dma.make_ring/current_ring/advance_ring`，后续 `memory-pool` stage ring backing 已由 `arch.get_dynamic_memory + dma.view + dma.reshape` 承接，且不残留 `dma.alloc/dma.free`。 | `test_npu_demo_lowering_pipeline_multi_buffer_static_dump_uses_ring_and_pool` |

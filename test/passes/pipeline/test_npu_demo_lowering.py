@@ -61,6 +61,7 @@ ArchParallelizePass = importlib.import_module("kernel_gen.passes.arch_paralleliz
 DecompassPass = importlib.import_module("kernel_gen.passes.decompass").DecompassPass
 LowerDmaMemoryHierarchyPass = importlib.import_module("kernel_gen.passes.dma_memory_hierarchy").LowerDmaMemoryHierarchyPass
 MemoryPlanPass = importlib.import_module("kernel_gen.passes.memory_plan").MemoryPlanPass
+MultiBufferPass = importlib.import_module("kernel_gen.passes.multi_buffer").MultiBufferPass
 MemoryPoolPass = importlib.import_module("kernel_gen.passes.memory_pool").MemoryPoolPass
 NnLoweringPass = importlib.import_module("kernel_gen.passes.lowering").NnLoweringPass
 OutlineDeviceKernelPass = importlib.import_module("kernel_gen.passes.outline_device_kernel").OutlineDeviceKernelPass
@@ -254,6 +255,21 @@ def _record_memory_pool(self, ctx: Context, target: ModuleOp) -> None:
     _PIPELINE_PASS_ORDER.append(f"memory-pool:{self.rewrite}:{self.alignment}")
 
 
+def _record_multi_buffer(self, ctx: Context, target: ModuleOp) -> None:
+    """记录 multi-buffer pass 执行。
+
+    功能说明:
+    - 为 pipeline 顺序测试记录 `MultiBufferPass` 的固定 stage 数。
+
+    使用示例:
+    - monkeypatch.setattr(MultiBufferPass, "apply", _record_multi_buffer)
+    """
+
+    _ = ctx
+    _ = target
+    _PIPELINE_PASS_ORDER.append(f"multi-buffer:{self.memory_stage}:{self.fold}")
+
+
 def _record_attach(self, ctx: Context, target: ModuleOp) -> None:
     """记录 attach-arch-information pass 执行。
 
@@ -405,6 +421,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(ArchParallelizePass, "apply", _record_arch_parallelize)
     monkeypatch.setattr(TileAnalysisPass, "apply", _record_tile_analysis)
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "apply", _record_lower_dma_memory_hierarchy)
+    monkeypatch.setattr(MultiBufferPass, "apply", _record_multi_buffer)
     monkeypatch.setattr(SymbolBufferHoistPass, "apply", _record_symbol_buffer_hoist)
     monkeypatch.setattr(MemoryPoolPass, "apply", _record_memory_pool)
     monkeypatch.setattr(AttachArchInformationPass, "apply", _record_attach)
@@ -426,6 +443,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "symbol-buffer-hoist",
         "tile-analysis",
         'lower-dma-memory-hierarchy:True:matmul{["", "tlm1", "tlm2"]}',
+        "multi-buffer:3:True",
         "memory-pool:True:0",
         "symbol-loop-hoist",
         "symbol-buffer-hoist",
@@ -475,6 +493,7 @@ def test_npu_demo_lowering_pipeline_arch_parallelize_propagates_unsupported_stru
     monkeypatch.setattr(MemoryPlanPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(TileAnalysisPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(MultiBufferPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(SymbolBufferHoistPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(MemoryPoolPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(AttachArchInformationPass, "apply", _noop_pass_apply)
@@ -517,6 +536,7 @@ def test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_blo
     monkeypatch.setattr(MemoryPlanPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(TileAnalysisPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(MultiBufferPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(SymbolBufferHoistPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(MemoryPoolPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(AttachArchInformationPass, "apply", _noop_pass_apply)
@@ -588,6 +608,50 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     first_reshape_index = second_buffer_hoist_text.index('"dma.reshape"', first_view_index)
     inner_for_index = second_buffer_hoist_text.index("symbol.for", outer_for_index + len("symbol.for"))
     assert first_view_index < outer_for_index < first_reshape_index < inner_for_index
+
+
+def test_npu_demo_lowering_pipeline_multi_buffer_static_dump_uses_ring_and_pool(tmp_path: Path) -> None:
+    """验证静态 tile matmul dump 经过 multi-buffer 后生成 DMA ring。
+
+    功能说明:
+    - 使用公开 `set_dump_dir(...)` 与公开 pipeline builder 观察 `multi-buffer` 与 `memory-pool` stage。
+    - 静态 tile 让 `LowerDmaMemoryHierarchyPass` 产生可计算 byte size 的 staging buffer。
+    - 断言 memory-pool 后 ring backing 已由 dynamic memory/view/reshape 承接，且不残留 alloc/free。
+
+    使用示例:
+    - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k multi_buffer_static_dump
+    """
+
+    lhs = Memory([8, 8], NumericType.Float32)
+    rhs = Memory([8, 8], NumericType.Float32)
+    out = Memory([8, 8], NumericType.Float32)
+    module = mlir_gen(matmul_kernel, lhs, rhs, out, SymbolDim(4), SymbolDim(4))
+    pipeline = build_npu_demo_lowering_pipeline()
+
+    set_dump_dir(tmp_path)
+    try:
+        pipeline.run(module)
+    finally:
+        reset_config()
+
+    multi_buffer_text = _dump_stage_text_by_marker(tmp_path, "multi-buffer")
+    memory_pool_text = _dump_stage_text_by_marker(tmp_path, "memory-pool")
+    assert multi_buffer_text.startswith("multi-buffer\n")
+    assert "dma.make_ring" in multi_buffer_text
+    assert "dma.current_ring" in multi_buffer_text
+    assert "dma.advance_ring" in multi_buffer_text
+    assert memory_pool_text.startswith("memory-pool\n")
+    assert "arch.get_dynamic_memory" in memory_pool_text
+    assert "dma.view" in memory_pool_text
+    assert "dma.reshape" in memory_pool_text
+    assert "dma.make_ring" in memory_pool_text
+    assert "dma.current_ring" in memory_pool_text
+    assert "dma.advance_ring" in memory_pool_text
+    assert "dma.alloc" not in memory_pool_text
+    assert "dma.free" not in memory_pool_text
+    assert "dma.make_ring" in str(module)
+    assert "dma.alloc" not in str(module)
+    assert "dma.free" not in str(module)
 
 
 def test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain() -> None:

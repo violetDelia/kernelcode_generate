@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from xdsl.dialects.builtin import ArrayAttr, i32
+from xdsl.dialects.builtin import ArrayAttr, i32, i8
 from xdsl.ir import SSAValue
 from xdsl.irdl import IRDLOperation, irdl_op_definition, operand_def
 from xdsl.utils.test_value import create_ssa_value
@@ -30,9 +30,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.dma import DmaCopyOp
+from kernel_gen.dialect.dma import DmaAdvanceRingOp, DmaCopyOp, DmaCurrentRingOp, DmaMakeRingOp, DmaRingType
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolExprAttr
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
 from kernel_gen.passes.template_name_constraints import (
     SameSpec,
     TemplateValueRef,
@@ -85,6 +85,17 @@ def _memory_type() -> NnMemoryType:
     )
 
 
+def _byte_pool_type() -> NnMemoryType:
+    """构造 DMA ring backing byte pool memory type。"""
+
+    return NnMemoryType(
+        _symbol_array(("64",)),
+        _symbol_array(("1",)),
+        i8,
+        NnMemorySpaceAttr.from_name("tlm1"),
+    )
+
+
 def test_template_name_constraints_register_get_and_build_static_specs() -> None:
     """验证静态 constraint spec 可注册、读取并构造为 graph constraint。"""
 
@@ -131,3 +142,24 @@ def test_template_name_default_constraints_register_dma_copy_same_family() -> No
     op = DmaCopyOp(create_ssa_value(_memory_type()), create_ssa_value(_memory_type()))
     constraints = build_template_constraints(op)
     assert any(isinstance(item, Same) for item in constraints)
+
+
+def test_template_name_default_constraints_register_dma_ring_ops_verify_only() -> None:
+    """验证默认约束覆盖 DMA ring ops，避免 template-name-infer 漏项。"""
+
+    register_default_template_constraints()
+    slot_type = _memory_type()
+    ring_type = DmaRingType(SymbolExprAttr.from_expr("16"), slot_type)
+    make_ring = DmaMakeRingOp(
+        create_ssa_value(_byte_pool_type()),
+        create_ssa_value(SymbolValueType.from_expr("3")),
+        create_ssa_value(SymbolValueType.from_expr("16")),
+        create_ssa_value(SymbolValueType.from_expr("12")),
+        ring_type,
+    )
+    current = DmaCurrentRingOp(make_ring.result)
+    advance = DmaAdvanceRingOp(make_ring.result)
+
+    assert all(isinstance(item, VerifyOnly) for item in build_template_constraints(make_ring))
+    assert all(isinstance(item, VerifyOnly) for item in build_template_constraints(current))
+    assert all(isinstance(item, VerifyOnly) for item in build_template_constraints(advance))

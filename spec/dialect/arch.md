@@ -2,8 +2,8 @@
 
 ## 功能简介
 
-- 定义 `arch` dialect 的硬件执行维度查询、barrier 与内核启动描述接口。
-- 该方言只覆盖 block/thread/subthread/shared_memory_size 四层执行索引、执行规模查询、动态内存入口、barrier 与启动描述，不负责实际调度、循环或 memory 读写语义。
+- 定义 `arch` dialect 的硬件执行维度查询、barrier、event token 与内核启动描述接口。
+- 该方言只覆盖 block/thread/subthread/shared_memory_size 四层执行索引、执行规模查询、动态内存入口、barrier、event token 与启动描述，不负责实际调度、循环或 memory 读写语义。
 - 执行维度标量统一使用 `!symbol.int<#symbol.expr<expr>>` 表达，以便与现有 `symbol`、`dma`、`dsl` 链路保持一致。
 
 ## API 列表
@@ -22,6 +22,10 @@
 - `class ArchBarrierOp(scope: ArchScopeAttr, visibility: ArrayAttr[Attribute])`
 - `class ArchLaunchOp(callee: str | Attribute, block: SSAValue | Operation, thread: SSAValue | Operation, subthread: SSAValue | Operation, shared_memory_size: SSAValue | Operation, args: Sequence[SSAValue | Operation] = ())`
 - `ArchLaunchKernelOp: type[ArchLaunchOp] = ArchLaunchOp`
+- `class ArchTokenType(token_id: StringAttr)`
+- `class ArchTokenOp(token_id: str | StringAttr, count: SSAValue | Operation)`
+- `class ArchSignOp(event: SSAValue | Operation, count: SSAValue | Operation)`
+- `class ArchWaitOp(event: SSAValue | Operation)`
 - `class Arch(Dialect)`
 
 ## 文档信息
@@ -51,7 +55,7 @@
 ### 模块级补充
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
-- `arch` dialect 只定义执行维度查询、动态内存入口、barrier 与启动描述；不定义网格调度策略、kernel body、memory copy 或张量算术。
+- `arch` dialect 只定义执行维度查询、动态内存入口、barrier、event token 与启动描述；不定义网格调度策略、kernel body、memory copy 或张量算术。
 - `arch.get_block_id`、`arch.get_block_num`、`arch.get_thread_id`、`arch.get_thread_num`、`arch.get_subthread_id`、`arch.get_subthread_num` 都是无 operand、单结果 op。
 - 上述查询 op 的结果类型必须分别固定为 `!symbol.int<#symbol.expr<block_id>>`、`!symbol.int<#symbol.expr<block_num>>`、`!symbol.int<#symbol.expr<thread_id>>`、`!symbol.int<#symbol.expr<thread_num>>`、`!symbol.int<#symbol.expr<subthread_id>>`、`!symbol.int<#symbol.expr<subthread_num>>`，不得改写为 builtin `index`、普通整数或其他符号表达。
 - `arch.get_dynamic_memory` 只描述“获取某个 memory space 对应的动态 memory 入口”；不负责容量求值、分配策略或布局推导。
@@ -60,6 +64,10 @@
 - `arch.get_dynamic_memory` 的 `memory_space` 只允许 `shared`、`local`、`tsm`、`tlm1`、`tlm2`、`tlm3`；`global` 与旧 `tlm` 不属于动态片上内存入口范围，必须报错。
 - `arch.barrier` 只描述同步请求；不负责数据搬运、事件管理或 target 私有副作用。
 - `arch.barrier` 的 `scope` 只允许 `block/thread/subthread/global`，`visibility` 必须且只能包含 `#arch.visibility<tsm>` 与 `#arch.visibility<tlm>` 各一次。
+- `arch.token` / `arch.sign` / `arch.wait` 只描述后续 pipeline 可消费的 event token 原语；本 spec 不定义 core split、调度策略或具体 runtime event 实现。
+- `!arch.token<id>` 的 `id` 必须是非空 Python identifier 文本；`arch.token` 的 `id` attr 必须与 result type 的 token id 一致。
+- `arch.token.count` 必须是 `!symbol.int<#symbol.expr<expr>>`，静态可判定时允许 `0` 或正整数；`arch.sign.count` 必须是 `!symbol.int<#symbol.expr<expr>>`，静态可判定时必须为正整数。
+- `arch.token`、`arch.sign` 与 `arch.wait` 都具有同步副作用，不属于纯 op；通用 pass 不得把它们当作可删除的普通计算。
 - `arch.launch` 只描述一次 kernel 启动请求，不定义返回值、region、异步句柄或启动完成语义。
 - `arch.launch` 的 `block`、`thread`、`subthread`、`shared_memory_size` operand 必须为 `!symbol.int<#symbol.expr<expr>>`，其中前三者表达正整数启动规模，`shared_memory_size` 表达非负共享内存规模；负值、零值与非整型 symbol 标量不属于合法公开语义。
 - 本文件只约束公开 IR 形式与 verifier 边界；不承诺 host/runtime 如何消费这些 op。
@@ -295,6 +303,73 @@
 - 功能说明：提供 `ArchLaunchOp` 的兼容公开别名。
 - 注意事项：该别名只保持导入兼容，不定义独立 op、独立 verifier 或独立文本语法。
 
+### `class ArchTokenType(token_id: StringAttr)`
+
+- api：`class ArchTokenType(token_id: StringAttr)`
+- 参数：
+  - `token_id`：event token 标识；类型 `StringAttr`；必须非空且为 identifier 文本。
+- 返回值：`ArchTokenType` 实例。
+- 使用示例：
+
+  ```python
+  from xdsl.dialects.builtin import StringAttr
+  from kernel_gen.dialect.arch import ArchTokenType
+
+  token_type = ArchTokenType(StringAttr("copy_ready"))
+  ```
+- 功能说明：定义 `!arch.token<id>` event token 类型。
+- 注意事项：类型只承载公开 token id，不承诺 runtime event 对象布局。
+
+### `class ArchTokenOp(token_id: str | StringAttr, count: SSAValue | Operation)`
+
+- api：`class ArchTokenOp(token_id: str | StringAttr, count: SSAValue | Operation)`
+- 参数：
+  - `token_id`：event token 标识；类型 `str | StringAttr`；必须非空且为 identifier 文本。
+  - `count`：token 初始计数；类型 `SSAValue | Operation`；必须为 `!symbol.int<#symbol.expr<expr>>`，静态可判定时必须 `>= 0`。
+- 返回值：`ArchTokenOp` 实例，结果类型为 `!arch.token<token_id>`。
+- 使用示例：
+
+  ```python
+  from kernel_gen.dialect.arch import ArchTokenOp
+
+  token = ArchTokenOp("copy_ready", count.result)
+  ```
+- 功能说明：创建一个 event token。
+- 注意事项：`id` attr 必须与 result type 的 token id 一致；该 op 有同步副作用，不可按纯 op 删除。
+
+### `class ArchSignOp(event: SSAValue | Operation, count: SSAValue | Operation)`
+
+- api：`class ArchSignOp(event: SSAValue | Operation, count: SSAValue | Operation)`
+- 参数：
+  - `event`：`!arch.token<id>` operand。
+  - `count`：发送计数；类型 `SSAValue | Operation`；必须为 `!symbol.int<#symbol.expr<expr>>`，静态可判定时必须 `> 0`。
+- 返回值：无结果。
+- 使用示例：
+
+  ```python
+  from kernel_gen.dialect.arch import ArchSignOp
+
+  sign = ArchSignOp(token.result, count.result)
+  ```
+- 功能说明：向 event token 发送同步信号。
+- 注意事项：该 op 有同步副作用，不可按纯 op 删除。
+
+### `class ArchWaitOp(event: SSAValue | Operation)`
+
+- api：`class ArchWaitOp(event: SSAValue | Operation)`
+- 参数：
+  - `event`：`!arch.token<id>` operand。
+- 返回值：无结果。
+- 使用示例：
+
+  ```python
+  from kernel_gen.dialect.arch import ArchWaitOp
+
+  wait = ArchWaitOp(token.result)
+  ```
+- 功能说明：等待 event token 达到可继续条件。
+- 注意事项：该 op 有同步副作用，不可按纯 op 删除。
+
 ### `class Arch(Dialect)`
 
 - api：`class Arch(Dialect)`
@@ -318,6 +393,7 @@
 - 验证六个执行维度查询 op 的固定结果类型与无 operand 文本形式。
 - 验证 `arch.get_dynamic_memory` 的 `space`、named-capacity 结果类型、parse/print 与 verifier 边界。
 - 验证 `arch.launch` 的名称、operand 类型、静态非法规模与无结果约束。
+- 验证 `!arch.token`、`arch.token`、`arch.sign` 与 `arch.wait` 的 verifier、parse/print 与副作用保留边界。
 - 验证 `arch` dialect 文本能够完成 parse/print round-trip。
 - 验证 `kernel_gen.dialect` 包级入口已导出 `arch` 公共符号。
 
@@ -337,3 +413,6 @@
 | TC-ARCH-010 | 边界/异常 | `arch.launch` 拒绝空名称、非 `symbol.int` operand 与静态非法规模 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_arch_launch_kernel_verify_errors`。 | “`arch.launch` 拒绝空名称、非 `symbol.int` operand 与静态非法规模”场景按公开错误语义失败或被拒绝。 | `test_arch_launch_kernel_verify_errors` |
 | TC-ARCH-011 | 解析/打印 | `arch` 方言 parse/print round-trip | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_arch_parse_print_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_arch_parse_print_round_trip` |
 | TC-ARCH-012 | 公开入口 | `kernel_gen.dialect` 包级入口导出 `arch` 公共符号 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_arch_package_exports`。 | 公开入口在“`kernel_gen.dialect` 包级入口导出 `arch` 公共符号”场景下可导入、构造、注册或按名称发现。 | `test_arch_package_exports` |
+| TC-ARCH-013 | 解析/打印 | `!arch.token` 与 token/sign/wait 合法路径 | 准备 `!symbol.int` count 与合法 token id。 | 运行 `test_arch_token_sign_wait_success`。 | token type、token op、sign/wait op verifier 通过。 | `test_arch_token_sign_wait_success` |
+| TC-ARCH-014 | 边界/异常 | token/sign/wait verifier 边界 | 准备空 id、id mismatch、非 `!symbol.int` count、负 count、sign 非正 count 与非 token event。 | 运行 `test_arch_token_sign_wait_verify_errors`。 | verifier 按公开错误语义拒绝非法 token/sign/wait 输入。 | `test_arch_token_sign_wait_verify_errors` |
+| TC-ARCH-015 | pass 改写 | token/sign/wait 副作用保留 | 准备只含 token/sign/wait 的 module。 | 运行 `test_arch_token_ops_survive_public_dce`。 | 通用 pass manager 后 token/sign/wait 不被当作纯冗余 op 删除。 | `test_arch_token_ops_survive_public_dce` |

@@ -74,6 +74,7 @@
   - `arch-parallelize`：standalone IR pass，按 target registry 静态 `block_num` 把可分发顶层 `symbol.for` 改写为 block-strided loop；无顶层 `symbol.for` 的函数生成 block0 guard。
   - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前；若存在唯一合法 `dma.free`，把 alloc/free 成对移动到 owner loop 两侧。
   - `memory-plan`：显式 `insert-free=true` 时为受控 `dma.alloc` 生命周期补插 `dma.free`。
+  - `multi-buffer`：把可证明的 matmul lhs/rhs staging alloc/copy/use/free 成对生命周期改写为 DMA ring。
   - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 pytest 与工具层统一解析。
   - `template-name-infer`：npu-demo lowering 末尾的非语义 template name 注解 pass。
 - tuning pass `launch-kernel-cost-func` 可通过 pass registry 显式启用，但不自动进入 `default-lowering` 或 `npu-demo-lowering`。
@@ -81,6 +82,7 @@
 - `lower-dma-memory-hierarchy` 接受 pass 专属 `options={"apply_op": "matmul{[\\"\\", \\"tlm1\\", \\"tlm2\\"]}"}`；registry 只负责透传该 option，规则语法与错误语义由 `LowerDmaMemoryHierarchyPass.from_options(...)` 承载。
 - `memory-pool` 接受 pass 专属 `options={"rewrite": "true|false", "alignment": "<non-negative-int>"}`；`fold` 仍由 registry 通用 option 处理。`rewrite` 非 bool、`alignment` 负数或非整数、未知 option 必须由 `MemoryPoolPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'memory-pool' option error: <原因>`。
 - `memory-plan` 接受 pass 专属 `options={"insert-free": "true|false"}`；`fold` 仍由 registry 通用 option 处理。`insert-free` 非 bool 或未知 option 必须由 `MemoryPlanPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'memory-plan' option error: <原因>`。
+- `multi-buffer` 接受 pass 专属 `options={"memory-stage": "<positive-int>"}`；`fold` 仍由 registry 通用 option 处理。`memory-stage` 非整数、`<= 0` 或未知 option 必须由 `MultiBufferPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'multi-buffer' option error: <原因>`；直接调用 `MultiBufferPass.from_options({"fold": "false"})` 必须失败，不能把通用 `fold` 兼容进 pass 专属 options。
 - registry 只解析 pass 通用 `fold` 选项；剩余 `options` 仅按字典透传给 pass 或 pipeline 构造入口。
 
 ### 当前公开路径与迁移矩阵
@@ -98,6 +100,7 @@
   - `kernel_gen.passes.dma_memory_hierarchy`
   - `kernel_gen.passes.memory_pool`
   - `kernel_gen.passes.memory_plan`
+  - `kernel_gen.passes.multi_buffer`
   - `kernel_gen.passes.outline_device_kernel`
   - `kernel_gen.passes.symbol_buffer_hoist`
   - `kernel_gen.passes.symbol_loop_hoist`
@@ -542,6 +545,8 @@ names = list_registered_passes()
 | TC-PASS-REGISTRY-023A | 公开入口 | memory-pool rewrite/alignment options | 加载内置 pass 并提供 `rewrite/fold/alignment` option。 | 运行 `test_build_registered_memory_pool_alignment_options`。 | registry 构造 `MemoryPoolPass`，`rewrite=True`、`fold=False`、`alignment=0`。 | `test_build_registered_memory_pool_alignment_options` |
 | TC-PASS-REGISTRY-023B | 边界/异常 | memory-pool alignment/options 非法值 | 准备非法 `rewrite`、非法 `alignment` 或未知 option。 | 运行 `test_build_registered_memory_pool_alignment_rejects_invalid_options`。 | registry 报 `PassRegistryError: pass 'memory-pool' option error: <原因>`。 | `test_build_registered_memory_pool_alignment_rejects_invalid_options` |
 | TC-PASS-REGISTRY-023C | 公开入口 | arch-parallelize pass registry 名称 | 加载内置 pass 并提供 `target=npu_demo`、`parallel_level=block` option。 | 运行 `test_build_registered_arch_parallelize_pass`。 | registry 构造 `ArchParallelizePass`，且 `list_registered_passes()` 包含 `arch-parallelize`。 | `test_build_registered_arch_parallelize_pass` |
+| TC-PASS-REGISTRY-023D | 公开入口 | multi-buffer memory-stage/fold options | 加载内置 pass 并提供 `memory-stage=3` 和 registry 通用 `fold=false` option。 | 运行 `test_build_registered_multi_buffer_options`。 | registry 构造 `MultiBufferPass`，`memory_stage=3`、`fold=False`。 | `test_build_registered_multi_buffer_options` |
+| TC-PASS-REGISTRY-023E | 边界/异常 | multi-buffer options 非法值 | 准备未知 option、非整数/非正 `memory-stage` 或 direct `from_options({"fold": "false"})`。 | 运行 `test_build_registered_multi_buffer_rejects_invalid_options`。 | direct from_options 与 registry 包装错误均按公开错误语义失败。 | `test_build_registered_multi_buffer_rejects_invalid_options` |
 | TC-PASS-REGISTRY-024 | 公开入口 | build registered attach arch information pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_attach_arch_information_pass`。 | 公开入口在“build registered attach arch information pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_attach_arch_information_pass` |
 | TC-PASS-REGISTRY-025 | 边界/异常 | registry old lowering paths fail fast | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_registry_old_lowering_paths_fail_fast`。 | “registry old lowering paths fail fast”场景按公开错误语义失败或被拒绝。 | `test_registry_old_lowering_paths_fail_fast` |
 | TC-PASS-REGISTRY-026 | 边界/异常 | registry retired analysis pass name fails fast | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_registry_retired_analysis_pass_name_fails_fast`。 | “registry retired analysis pass name fails fast”场景按公开错误语义失败或被拒绝。 | `test_registry_retired_analysis_pass_name_fails_fast` |

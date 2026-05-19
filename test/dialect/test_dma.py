@@ -63,10 +63,14 @@ from kernel_gen.dialect.dma import (
     DmaTransposeOp,
     DmaFillOp,
     DmaFreeOp,
+    DmaAdvanceRingOp,
     DmaCastOp,
     DmaCopyOp,
+    DmaCurrentRingOp,
     DmaDesliceOp,
     DmaLoadOp,
+    DmaMakeRingOp,
+    DmaRingType,
     DmaReshapeOp,
     DmaSliceOp,
     DmaStoreOp,
@@ -75,6 +79,26 @@ from kernel_gen.dialect.dma import (
 )
 from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolIterType, SymbolValueType
+from kernel_gen.passes.pass_manager import Pass, PassManager
+
+
+class _NoopPass(Pass):
+    """测试用公开 Pass 子类。"""
+
+    name = "test-noop"
+
+    def apply(self, ctx: Context, module: ModuleOp) -> None:
+        """不修改 module。
+
+        功能说明:
+        - 通过 `PassManager` 公共入口触发 pass 后 DCE sweep。
+
+        使用示例:
+        - PassManager().add_pass(_NoopPass())
+        """
+
+        _ = ctx
+        _ = module
 
 
 def _build_context() -> Context:
@@ -1803,3 +1827,117 @@ def test_dma_public_verifier_boundary_matrix() -> None:
         _make_symbol_operands([1]),
         _make_memory_type(shape=_dim_array([16]), stride=_dim_array([1]), element_type=i8),
     ).verify()
+
+
+# TC-DMA-070
+# 功能说明: 验证 `!dma.ring` 与 ring op 正向构造和 parse/print。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_ring_type_and_ops_verify_success
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_ring_type_and_ops_verify_success() -> None:
+    backing_type = _make_memory_type(shape=_dim_array([768]), stride=_dim_array([1]), space="tsm", element_type=i8)
+    slot_type = _make_memory_type(shape=_dim_array([4, 8]), stride=_dim_array([8, 1]), space="tsm")
+    ring_type = DmaRingType(_expr_attr(256), slot_type)
+    storage = _TestOp(result_types=[backing_type]).results[0]
+    count, offset, shape_bytes = _make_symbol_operands([3, 256, 128])
+
+    DmaMakeRingOp(storage, count, offset, shape_bytes, ring_type).verify()
+    DmaCurrentRingOp(_TestOp(result_types=[ring_type]).results[0]).verify()
+    DmaAdvanceRingOp(_TestOp(result_types=[ring_type]).results[0]).verify()
+
+    ctx = _build_context()
+    parsed = Parser(ctx, "!dma.ring<#symbol.expr<256>, !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>>").parse_attribute()
+    assert isinstance(parsed, DmaRingType)
+    parsed.verify()
+    assert _print_ir(parsed) == "!dma.ring<#symbol.expr<256>, !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>>"
+
+
+# TC-DMA-071
+# 功能说明: 验证 dma.make_ring 的静态 verifier 失败边界。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_make_ring_verifier_edges
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_make_ring_verifier_edges() -> None:
+    backing_type = _make_memory_type(shape=_dim_array([16]), stride=_dim_array([1]), space="tsm", element_type=i8)
+    slot_type = _make_memory_type(shape=_dim_array([2, 2]), stride=_dim_array([2, 1]), space="tsm")
+    ring_type = DmaRingType(_expr_attr(8), slot_type)
+    storage = _TestOp(result_types=[backing_type]).results[0]
+    count, offset, shape_bytes = _make_symbol_operands([2, 8, 4])
+    DmaMakeRingOp(storage, count, offset, shape_bytes, ring_type).verify()
+
+    with pytest.raises(VerifyException, match="count must be > 0"):
+        DmaMakeRingOp(storage, _make_symbol_operands([0])[0], offset, shape_bytes, ring_type).verify()
+    with pytest.raises(VerifyException, match="offset must be > 0"):
+        DmaMakeRingOp(storage, count, _make_symbol_operands([0])[0], shape_bytes, ring_type).verify()
+    with pytest.raises(VerifyException, match="shape_bytes must be > 0"):
+        DmaMakeRingOp(storage, count, offset, _make_symbol_operands([0])[0], ring_type).verify()
+    with pytest.raises(VerifyException, match="shape_bytes.*offset"):
+        DmaMakeRingOp(storage, count, offset, _make_symbol_operands([8])[0], ring_type).verify()
+    with pytest.raises(VerifyException, match="backing memory bytes"):
+        DmaMakeRingOp(
+            _TestOp(result_types=[_make_memory_type(shape=_dim_array([15]), stride=_dim_array([1]), space="tsm", element_type=i8)]).results[0],
+            count,
+            offset,
+            shape_bytes,
+            ring_type,
+        ).verify()
+    with pytest.raises(VerifyException, match="offset.*match"):
+        DmaMakeRingOp(storage, count, offset, shape_bytes, DmaRingType(_expr_attr(16), slot_type)).verify()
+    with pytest.raises(VerifyException, match="space"):
+        DmaMakeRingOp(
+            storage,
+            count,
+            offset,
+            shape_bytes,
+            DmaRingType(_expr_attr(8), _make_memory_type(shape=_dim_array([2, 2]), stride=_dim_array([2, 1]), space="tlm1")),
+        ).verify()
+    with pytest.raises(VerifyException, match="one-dimensional i8"):
+        DmaMakeRingOp(
+            _TestOp(result_types=[_make_memory_type(shape=_dim_array([16]), stride=_dim_array([1]), space="tsm")]).results[0],
+            count,
+            offset,
+            shape_bytes,
+            ring_type,
+        ).verify()
+
+
+# TC-DMA-072
+# 功能说明: 验证 current/advance result type 必须等于 ring slot type。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_ring_slot_result_type_must_match
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_ring_slot_result_type_must_match() -> None:
+    slot_type = _make_memory_type(shape=_dim_array([4, 8]), stride=_dim_array([8, 1]), space="tsm")
+    ring = _TestOp(result_types=[DmaRingType(_expr_attr(256), slot_type)]).results[0]
+    wrong_slot_type = _make_memory_type(shape=_dim_array([4, 4]), stride=_dim_array([4, 1]), space="tsm")
+
+    with pytest.raises(VerifyException, match="result.*ring"):
+        DmaCurrentRingOp(ring, wrong_slot_type).verify()
+    with pytest.raises(VerifyException, match="result.*ring"):
+        DmaAdvanceRingOp(ring, wrong_slot_type).verify()
+    with pytest.raises(TypeError, match="dma.ring"):
+        DmaCurrentRingOp(_TestOp(result_types=[i32]).results[0])
+    with pytest.raises(TypeError, match="dma.ring"):
+        DmaAdvanceRingOp(_TestOp(result_types=[i32]).results[0])
+
+
+# TC-DMA-073
+# 功能说明: 验证 dma.advance_ring 未使用结果也不会被公共 PassManager 的 DCE 清理。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_advance_ring_survives_public_dce
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_advance_ring_survives_public_dce() -> None:
+    slot_type = _make_memory_type(shape=_dim_array([4, 8]), stride=_dim_array([8, 1]), space="tsm")
+    ring_producer = _TestOp(result_types=[DmaRingType(_expr_attr(256), slot_type)])
+    advance = DmaAdvanceRingOp(ring_producer.results[0])
+    module = ModuleOp([ring_producer, advance])
+    pm = PassManager(name="dma-ring-dce")
+    pm.add_pass(_NoopPass())
+
+    pm.run(module)
+
+    assert any(isinstance(op, DmaAdvanceRingOp) for op in module.walk())

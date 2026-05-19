@@ -2,7 +2,7 @@
 
 
 功能说明:
-- 定义 dma dialect 的 alloc/fill/copy/load/store/slice/deslice/subview/view/reshape/cast/broadcast op 与 verifier 规则。
+- 定义 dma dialect 的 alloc/fill/copy/load/store/slice/deslice/subview/view/reshape/cast/broadcast/ring op 与 verifier 规则。
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
 
 API 列表:
@@ -20,6 +20,10 @@ API 列表:
 - `class DmaViewOp(source: SSAValue | Operation, offsets: Sequence[SSAValue], shape: Sequence[SSAValue], stride: Sequence[SSAValue], result_type: NnMemoryType)`
 - `class DmaReshapeOp(source: SSAValue | Operation, shape: Sequence[SSAValue], result_type: NnMemoryType)`
 - `class DmaCastOp(target: SSAValue | Operation, source: SSAValue | Operation)`
+- `class DmaRingType(offset: SymbolExprAttr, memory_type: NnMemoryType)`
+- `class DmaMakeRingOp(memory: SSAValue | Operation, count: SSAValue | Operation, offset: SSAValue | Operation, shape_bytes: SSAValue | Operation, result_type: DmaRingType)`
+- `class DmaCurrentRingOp(ring: SSAValue | Operation, result_type: NnMemoryType | None = None)`
+- `class DmaAdvanceRingOp(ring: SSAValue | Operation, result_type: NnMemoryType | None = None)`
 - `Dma`
 
 使用示例:
@@ -46,18 +50,23 @@ from xdsl.dialects.builtin import (
     IntAttr,
     IntegerAttr,
     IntegerType,
+    i8,
     i32,
 )
-from xdsl.ir import Attribute, Dialect, Operation, SSAValue
+from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue, TypeAttribute
 from xdsl.irdl import (
     AttrSizedOperandSegments,
     IRDLOperation,
     attr_def,
+    irdl_attr_definition,
     irdl_op_definition,
     operand_def,
+    param_def,
     result_def,
     var_operand_def,
 )
+from xdsl.parser import AttrParser
+from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.core.contracts import (
@@ -65,6 +74,27 @@ from kernel_gen.core.contracts import (
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolIterType, SymbolValueType
+
+
+def _verify_symbol_expr_attr(value: Attribute, field_name: str) -> SymbolExprAttr:
+    """校验属性为公开 SymbolExprAttr。
+
+    功能说明:
+    - 用于 dma ring type 的 offset 参数校验。
+
+    使用示例:
+    - offset = _verify_symbol_expr_attr(attr, "offset")
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if not isinstance(value, SymbolExprAttr):
+        raise VerifyException(f"{field_name} must be SymbolExprAttr")
+    value.verify()
+    return value
 
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """校验并返回 nn.memory type。
@@ -1023,6 +1053,310 @@ def _verify_default_contiguous_stride(memory_type: NnMemoryType, message: str) -
 
     if not _is_contiguous(memory_type):
         raise VerifyException(message)
+
+
+def _symbol_int_expr_text(value: SSAValue, field_name: str) -> str:
+    """读取 `!symbol.int` operand 的公开表达文本。
+
+    功能说明:
+    - 校验 operand 类型为 `SymbolValueType` 并返回其 `SymbolExprAttr` 文本。
+
+    使用示例:
+    - offset_expr = _symbol_int_expr_text(op.offset, "offset")
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if not isinstance(value.type, SymbolValueType):
+        raise VerifyException(f"{field_name} must be !symbol.int")
+    value.type.verify()
+    return value.type.expr.expr.data
+
+
+def _verify_positive_static_operand(value: SSAValue, field_name: str) -> int | None:
+    """校验可静态判定的 `!symbol.int` operand 为正数。
+
+    功能说明:
+    - 动态符号表达式仅校验类型，不做数值求解。
+
+    使用示例:
+    - count = _verify_positive_static_operand(op.count, "count")
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    _symbol_int_expr_text(value, field_name)
+    static_value = _operand_int_value(value)
+    if static_value is not None and static_value <= 0:
+        raise VerifyException(f"{field_name} must be > 0")
+    return static_value
+
+
+@irdl_attr_definition
+class DmaRingType(ParametrizedAttribute, TypeAttribute):
+    """DMA ring buffer type。"""
+
+    name = "dma.ring"
+
+    offset: SymbolExprAttr = param_def(SymbolExprAttr)
+    memory_type: NnMemoryType = param_def(NnMemoryType)
+
+    @classmethod
+    def parse_parameters(cls, parser: AttrParser) -> Sequence[Attribute]:
+        """解析 dma.ring type 参数。
+
+        功能说明:
+        - 支持 `!dma.ring<#symbol.expr<offset>, !nn.memory<...>>`。
+
+        使用示例:
+        - Parser(ctx, "!dma.ring<#symbol.expr<64>, !nn.memory<...>>").parse_attribute()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        parser.parse_punctuation("<", "Expected '<' for dma.ring.")
+        offset = parser.parse_attribute()
+        parser.parse_punctuation(",", "Expected ',' after dma.ring offset.")
+        memory_type = parser.parse_attribute()
+        parser.parse_punctuation(">", "Expected '>' for dma.ring.")
+        if not isinstance(offset, SymbolExprAttr):
+            parser.raise_error("dma.ring offset must be SymbolExprAttr")
+        if not isinstance(memory_type, NnMemoryType):
+            parser.raise_error("dma.ring memory type must be nn.memory")
+        return (offset, memory_type)
+
+    def print_parameters(self, printer: Printer) -> None:
+        """打印 dma.ring type 参数。"""
+
+        printer.print_string("<")
+        printer.print_attribute(self.offset)
+        printer.print_string(", ")
+        printer.print_attribute(self.memory_type)
+        printer.print_string(">")
+
+    def verify(self) -> None:
+        """校验 dma.ring type。
+
+        功能说明:
+        - offset 必须是合法 SymbolExprAttr，静态可判定时必须大于 0。
+        - memory_type 必须是合法 nn.memory。
+
+        使用示例:
+        - DmaRingType(SymbolExprAttr.from_expr("64"), mem_type).verify()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        offset = _verify_symbol_expr_attr(self.offset, "dma.ring offset")
+        static_offset = _static_int_from_dim(offset)
+        if static_offset is not None and static_offset <= 0:
+            raise VerifyException("dma.ring offset must be > 0")
+        self.memory_type.verify()
+
+
+@irdl_op_definition
+class DmaMakeRingOp(IRDLOperation):
+    """dma.make_ring。"""
+
+    name = "dma.make_ring"
+
+    memory = operand_def(NnMemoryType)
+    count = operand_def(SymbolValueType)
+    offset = operand_def(SymbolValueType)
+    shape_bytes = operand_def(SymbolValueType)
+    result = result_def(DmaRingType)
+
+    def __init__(
+        self,
+        memory: SSAValue | Operation,
+        count: SSAValue | Operation,
+        offset: SSAValue | Operation,
+        shape_bytes: SSAValue | Operation,
+        result_type: DmaRingType,
+    ) -> None:
+        """初始化 dma.make_ring。
+
+        功能说明:
+        - 创建 ring buffer 描述，result type 记录 stage offset 与 slot memory type。
+
+        使用示例:
+        - DmaMakeRingOp(storage, count, offset, shape_bytes, ring_type)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        super().__init__(operands=[memory, count, offset, shape_bytes], result_types=[result_type])
+
+    def verify_(self) -> None:
+        """校验 dma.make_ring。
+
+        功能说明:
+        - backing memory 必须是一维 i8 memory。
+        - count/offset/shape_bytes 必须为 `!symbol.int`，静态可判定时满足正数与容量关系。
+        - result ring 的 offset 和 slot space 必须与 operands/backing memory 一致。
+
+        使用示例:
+        - DmaMakeRingOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        memory_type = _verify_memory_operand(self.memory, "memory")
+        if not _is_i8_byte_pool(memory_type):
+            raise VerifyException("dma.make_ring memory must be one-dimensional i8 memory")
+        ring_type = self.result.type
+        if not isinstance(ring_type, DmaRingType):
+            raise VerifyException("dma.make_ring result must be dma.ring")
+        ring_type.verify()
+        count_int = _verify_positive_static_operand(self.count, "count")
+        offset_int = _verify_positive_static_operand(self.offset, "offset")
+        shape_bytes_int = _verify_positive_static_operand(self.shape_bytes, "shape_bytes")
+        if offset_int is not None and shape_bytes_int is not None and shape_bytes_int >= offset_int:
+            raise VerifyException("shape_bytes must be < offset")
+        backing_bytes = _maybe_numel(memory_type.shape)
+        if backing_bytes is not None and count_int is not None and offset_int is not None:
+            if backing_bytes < count_int * offset_int:
+                raise VerifyException("dma.make_ring backing memory bytes must be >= count * offset")
+        offset_expr = _symbol_int_expr_text(self.offset, "offset")
+        if ring_type.offset.expr.data != offset_expr:
+            raise VerifyException("dma.make_ring result ring offset must match offset operand")
+        if ring_type.memory_type.space.space.data != memory_type.space.space.data:
+            raise VerifyException("dma.make_ring result ring slot space must match backing memory space")
+
+
+@irdl_op_definition
+class DmaCurrentRingOp(IRDLOperation):
+    """dma.current_ring。"""
+
+    name = "dma.current_ring"
+
+    ring = operand_def(DmaRingType)
+    result = result_def(NnMemoryType)
+
+    def __init__(
+        self,
+        ring: SSAValue | Operation,
+        result_type: NnMemoryType | None = None,
+    ) -> None:
+        """初始化 dma.current_ring。
+
+        功能说明:
+        - 返回 ring 当前 cursor 对应的 slot memory。
+
+        使用示例:
+        - DmaCurrentRingOp(ring_value)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        ring_type = SSAValue.get(ring).type
+        if result_type is None:
+            if not isinstance(ring_type, DmaRingType):
+                raise TypeError("ring must have dma.ring type when result_type is omitted")
+            result_type = ring_type.memory_type
+        super().__init__(operands=[ring], result_types=[result_type])
+
+    def verify_(self) -> None:
+        """校验 dma.current_ring。
+
+        功能说明:
+        - operand 必须是 dma.ring，result type 必须等于 ring slot memory type。
+
+        使用示例:
+        - DmaCurrentRingOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        ring_type = self.ring.type
+        if not isinstance(ring_type, DmaRingType):
+            raise VerifyException("dma.current_ring ring operand must be dma.ring")
+        ring_type.verify()
+        if self.result.type != ring_type.memory_type:
+            raise VerifyException("dma.current_ring result must match ring slot memory type")
+
+
+@irdl_op_definition
+class DmaAdvanceRingOp(IRDLOperation):
+    """dma.advance_ring。"""
+
+    name = "dma.advance_ring"
+
+    ring = operand_def(DmaRingType)
+    result = result_def(NnMemoryType)
+
+    def __init__(
+        self,
+        ring: SSAValue | Operation,
+        result_type: NnMemoryType | None = None,
+    ) -> None:
+        """初始化 dma.advance_ring。
+
+        功能说明:
+        - 推进 ring cursor 并返回推进后的 current slot memory。
+
+        使用示例:
+        - DmaAdvanceRingOp(ring_value)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        ring_type = SSAValue.get(ring).type
+        if result_type is None:
+            if not isinstance(ring_type, DmaRingType):
+                raise TypeError("ring must have dma.ring type when result_type is omitted")
+            result_type = ring_type.memory_type
+        super().__init__(operands=[ring], result_types=[result_type])
+
+    def verify_(self) -> None:
+        """校验 dma.advance_ring。
+
+        功能说明:
+        - operand 必须是 dma.ring，result type 必须等于 ring slot memory type。
+        - op 不声明 Pure trait，未使用 result 时仍应保留 cursor 推进副作用。
+
+        使用示例:
+        - DmaAdvanceRingOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        ring_type = self.ring.type
+        if not isinstance(ring_type, DmaRingType):
+            raise VerifyException("dma.advance_ring ring operand must be dma.ring")
+        ring_type.verify()
+        if self.result.type != ring_type.memory_type:
+            raise VerifyException("dma.advance_ring result must match ring slot memory type")
 
 
 @irdl_op_definition
@@ -2032,8 +2366,11 @@ class Dma(Dialect):
         DmaViewOp,
         DmaReshapeOp,
         DmaCastOp,
+        DmaMakeRingOp,
+        DmaCurrentRingOp,
+        DmaAdvanceRingOp,
     ]
-    attributes = []
+    attributes = [DmaRingType]
 
 
 __all__ = [
@@ -2052,4 +2389,8 @@ __all__ = [
     "DmaViewOp",
     "DmaReshapeOp",
     "DmaCastOp",
+    "DmaRingType",
+    "DmaMakeRingOp",
+    "DmaCurrentRingOp",
+    "DmaAdvanceRingOp",
 ]

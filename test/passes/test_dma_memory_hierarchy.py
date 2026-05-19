@@ -5,7 +5,7 @@
 - 覆盖 `lower-dma-memory-hierarchy` 的公开构造、registry option 与 IR 改写行为。
 - 默认不配置 `apply_op` 时 pass no-op。
 - `fold=False` 且不配置 `apply_op` 时保留 legacy hierarchy 兼容路径。
-- `apply_op="matmul{[...]}"` 时只通过公开 pass API 验证 `kernel.matmul` copy-based staging。
+- `apply_op="matmul{[...]}"` 时只通过公开 pass API 验证 `kernel.matmul` copy-based staging 生命周期。
 
 使用示例:
 - pytest -q test/passes/test_dma_memory_hierarchy.py
@@ -35,7 +35,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaSliceOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaSliceOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr
@@ -189,7 +189,7 @@ def test_dma_memory_hierarchy_default_no_apply_op_is_noop() -> None:
 
     ops = _collect_ops(block)
     assert list(matmul.operands) == original_operands
-    assert not any(isinstance(op, (DmaAllocOp, DmaCopyOp, DmaSliceOp, DmaDesliceOp)) for op in ops)
+    assert not any(isinstance(op, (DmaAllocOp, DmaCopyOp, DmaFreeOp, DmaSliceOp, DmaDesliceOp)) for op in ops)
     module.verify()
 
 
@@ -218,7 +218,7 @@ def test_dma_memory_hierarchy_fold_false_legacy_hierarchy(monkeypatch: pytest.Mo
 
 
 # TC-DMH-003
-# 测试目的: 验证 apply_op 对 matmul lhs/rhs 生成 `dma.alloc + dma.copy` 并替换 operand。
+# 测试目的: 验证 apply_op 对 matmul lhs/rhs 生成 `dma.alloc + dma.copy + dma.free` 并替换 operand。
 # 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_apply_op_matmul_copies_lhs_rhs
 # 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
@@ -234,14 +234,20 @@ def test_dma_memory_hierarchy_apply_op_matmul_copies_lhs_rhs() -> None:
     ops = _collect_ops(block)
     allocs = [op for op in ops if isinstance(op, DmaAllocOp)]
     copies = [op for op in ops if isinstance(op, DmaCopyOp)]
+    frees = [op for op in ops if isinstance(op, DmaFreeOp)]
     assert len(allocs) == 2
     assert len(copies) == 2
+    assert len(frees) == 2
     assert _memory_space(matmul.operands[1].type) == "tlm1"
     assert _memory_space(matmul.operands[2].type) == "tlm2"
     assert copies[0].source is original_lhs
     assert copies[0].target is allocs[0].result
     assert copies[1].source is original_rhs
     assert copies[1].target is allocs[1].result
+    assert frees[0].source is allocs[0].result
+    assert frees[1].source is allocs[1].result
+    assert ops.index(matmul) < ops.index(frees[0])
+    assert ops.index(matmul) < ops.index(frees[1])
     assert not any(isinstance(op, (DmaSliceOp, DmaDesliceOp)) for op in ops)
     module.verify()
 
@@ -260,10 +266,13 @@ def test_dma_memory_hierarchy_apply_op_can_copy_out() -> None:
 
     allocs = [op for op in _collect_ops(block) if isinstance(op, DmaAllocOp)]
     copies = [op for op in _collect_ops(block) if isinstance(op, DmaCopyOp)]
+    frees = [op for op in _collect_ops(block) if isinstance(op, DmaFreeOp)]
     assert len(allocs) == 1
     assert len(copies) == 1
+    assert len(frees) == 1
     assert copies[0].source is original_out
     assert copies[0].target is allocs[0].result
+    assert frees[0].source is allocs[0].result
     assert matmul.operands[0] is allocs[0].result
     assert _memory_space(matmul.operands[0].type) == "tlm1"
     module.verify()
@@ -282,7 +291,9 @@ def test_dma_memory_hierarchy_apply_op_empty_rule_noop() -> None:
     LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "", ""]}').apply(Context(), module)
 
     assert list(matmul.operands) == original_operands
-    assert not any(isinstance(op, (DmaAllocOp, DmaCopyOp, DmaSliceOp, DmaDesliceOp)) for op in _collect_ops(block))
+    assert not any(
+        isinstance(op, (DmaAllocOp, DmaCopyOp, DmaFreeOp, DmaSliceOp, DmaDesliceOp)) for op in _collect_ops(block)
+    )
     module.verify()
 
 
@@ -304,6 +315,7 @@ def test_dma_memory_hierarchy_registry_apply_op() -> None:
 
     assert isinstance(pass_obj, LowerDmaMemoryHierarchyPass)
     assert len([op for op in _collect_ops(block) if isinstance(op, DmaCopyOp)]) == 2
+    assert len([op for op in _collect_ops(block) if isinstance(op, DmaFreeOp)]) == 2
     assert _memory_space(matmul.operands[1].type) == "tlm1"
     assert _memory_space(matmul.operands[2].type) == "tlm2"
     module.verify()

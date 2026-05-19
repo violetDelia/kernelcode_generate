@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.builtin import ArrayAttr, Builtin, IntAttr, StringAttr, SymbolRefAttr, i8, i32
+from xdsl.dialects.builtin import ArrayAttr, Builtin, IntAttr, ModuleOp, StringAttr, SymbolRefAttr, i8, i32
 from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Operation, SSAValue
 from xdsl.parser import Parser
@@ -51,7 +51,11 @@ from kernel_gen.dialect.arch import (
     ArchLaunchOp,
     ArchLaunchKernelOp,
     ArchScopeAttr,
+    ArchSignOp,
+    ArchTokenOp,
+    ArchTokenType,
     ArchVisibilityAttr,
+    ArchWaitOp,
 )
 from kernel_gen.dialect import (
     Arch as ArchFromPackage,
@@ -67,7 +71,27 @@ from kernel_gen.dialect import (
 import kernel_gen.dialect as dialect_pkg
 from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolValueType
+from kernel_gen.passes.pass_manager import Pass, PassManager
 from kernel_gen.target import registry as target_registry
+
+
+class _NoopPass(Pass):
+    """测试用公开 Pass 子类。"""
+
+    name = "test-noop"
+
+    def apply(self, ctx: Context, module) -> None:
+        """不修改 module。
+
+        功能说明:
+        - 通过 `PassManager` 公共入口触发 pass 后 DCE sweep。
+
+        使用示例:
+        - PassManager().add_pass(_NoopPass())
+        """
+
+        _ = ctx
+        _ = module
 
 
 def _build_context() -> Context:
@@ -737,3 +761,99 @@ def test_target_registry_cpu_rejects_thread_id() -> None:
             ArchGetThreadIdOp().verify()
     finally:
         target_registry.set_current_target(None)
+
+
+# TC-ARCH-014
+# 测试目的: 验证 `!arch.token` 与 token/sign/wait op 正向构造、parse 和 verifier。
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch.py -k test_arch_token_sign_wait_success
+# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应 spec 文件路径: spec/dialect/arch.md
+# 对应测试文件路径: test/dialect/test_arch.py
+def test_arch_token_sign_wait_success() -> None:
+    ctx = _build_context()
+    token_type = Parser(ctx, "!arch.token<dma_stage>").parse_attribute()
+    assert isinstance(token_type, ArchTokenType)
+    token_type.verify()
+    assert _print_ir(token_type) == "!arch.token<dma_stage>"
+
+    count = _make_symbol_value("3")
+    token = ArchTokenOp("dma_stage", count)
+    sign = ArchSignOp(token.result, count)
+    wait = ArchWaitOp(token.result)
+
+    token.verify()
+    sign.verify()
+    wait.verify()
+    assert token.result.type == ArchTokenType(StringAttr("dma_stage"))
+
+    parsed = Parser(
+        ctx,
+        """
+builtin.module {
+  %count = "test.op"() : () -> !symbol.int<#symbol.expr<3>>
+  %event = "arch.token"(%count) {"id" = "dma_stage"} : (!symbol.int<#symbol.expr<3>>) -> !arch.token<dma_stage>
+  "arch.sign"(%event, %count) : (!arch.token<dma_stage>, !symbol.int<#symbol.expr<3>>) -> ()
+  "arch.wait"(%event) : (!arch.token<dma_stage>) -> ()
+}
+""",
+    ).parse_module()
+    parsed.verify()
+
+
+# TC-ARCH-015
+# 测试目的: 验证 arch token/sign/wait 的公开 verifier 失败边界。
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch.py -k test_arch_token_sign_wait_verify_errors
+# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应 spec 文件路径: spec/dialect/arch.md
+# 对应测试文件路径: test/dialect/test_arch.py
+def test_arch_token_sign_wait_verify_errors() -> None:
+    valid_count = _make_symbol_value("1")
+    valid_token = ArchTokenOp("dma_stage", valid_count)
+    non_token = _TestOp(result_types=[i32]).results[0]
+    ctx = _build_context()
+
+    with pytest.raises(VerifyException, match="id must not be empty"):
+        ArchTokenType(StringAttr("")).verify()
+    with pytest.raises(VerifyException, match="id must be an identifier"):
+        ArchTokenType(StringAttr("1bad")).verify()
+    with pytest.raises(VerifyException, match="count must be >= 0"):
+        ArchTokenOp("dma_stage", _make_symbol_value("-1")).verify()
+    with pytest.raises(VerifyException, match="result token id must match id attr"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %count = "test.op"() : () -> !symbol.int<#symbol.expr<1>>
+  %event = "arch.token"(%count) {"id" = "dma_stage"} : (!symbol.int<#symbol.expr<1>>) -> !arch.token<other>
+}
+""",
+        ).parse_module().verify()
+
+    with pytest.raises(VerifyException, match="count must be > 0"):
+        ArchSignOp(valid_token.result, _make_symbol_value("0")).verify()
+    with pytest.raises(VerifyException, match="base attribute arch.token"):
+        ArchSignOp(non_token, valid_count).verify()
+    with pytest.raises(VerifyException, match="base attribute arch.token"):
+        ArchWaitOp(non_token).verify()
+
+
+# TC-ARCH-016
+# 测试目的: 验证 arch token/sign/wait 未使用时仍不会被公共 PassManager 的 DCE 清理。
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch.py -k test_arch_token_ops_survive_public_dce
+# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应 spec 文件路径: spec/dialect/arch.md
+# 对应测试文件路径: test/dialect/test_arch.py
+def test_arch_token_ops_survive_public_dce() -> None:
+    count = _TestOp(result_types=[SymbolValueType.from_expr("1")])
+    token = ArchTokenOp("dma_stage", count.results[0])
+    sign = ArchSignOp(token.result, count.results[0])
+    wait = ArchWaitOp(token.result)
+    parsed_module = ModuleOp([count, token, sign, wait])
+    pm = PassManager(name="arch-token-dce")
+    pm.add_pass(_NoopPass())
+
+    pm.run(parsed_module)
+
+    assert any(isinstance(op, ArchTokenOp) for op in parsed_module.walk())
+    assert any(isinstance(op, ArchSignOp) for op in parsed_module.walk())
+    assert any(isinstance(op, ArchWaitOp) for op in parsed_module.walk())

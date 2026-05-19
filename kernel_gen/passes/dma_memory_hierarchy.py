@@ -7,7 +7,7 @@
 - `fold=False` 且不配置 `apply_op` 时保留 legacy `GM -> SM -> LM` / `LM -> SM -> GM`
   hierarchy 兼容路径。
 - 配置 `apply_op="matmul{[...]}"` 时，对 `kernel.matmul` 的非空 target operand
-  生成 `dma.alloc + dma.copy` 并替换 operand。
+  生成 `dma.alloc + dma.copy + dma.free` 生命周期并替换 operand。
 
 API 列表:
 - `class LowerDmaMemoryHierarchyPass(fold: bool = True, apply_op: str | None = None)`
@@ -42,7 +42,7 @@ from xdsl.dialects.builtin import (
 )
 from xdsl.ir import Block, Operation, SSAValue
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaSliceOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaSliceOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolGetDimOp, SymbolValueType
 from kernel_gen.passes.pass_manager import Pass
@@ -548,7 +548,7 @@ class LowerDmaMemoryHierarchyPass(Pass):
     功能说明:
     - 默认无 `apply_op` 时保持 no-op。
     - `fold=False` 且无 `apply_op` 时保留 legacy hierarchy 兼容路径。
-    - 有 `apply_op` 时按 `matmul{[...]}` 规则插入 `dma.alloc + dma.copy`。
+    - 有 `apply_op` 时按 `matmul{[...]}` 规则插入 `dma.alloc + dma.copy + dma.free`。
 
     使用示例:
     - LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", "tlm2"]}').apply(Context(), module)
@@ -647,6 +647,7 @@ class LowerDmaMemoryHierarchyPass(Pass):
         功能说明:
         - 遍历 module 内 `kernel.matmul` op。
         - 对规则中非空 target operand 插入 `dma.alloc + dma.copy` 并替换 operand。
+        - 在 kernel op 后插入对应 `dma.free`，为后续 lifecycle pass 提供公开边界。
 
         使用示例:
         - self._apply_matmul_rule(module, rule)
@@ -667,6 +668,7 @@ class LowerDmaMemoryHierarchyPass(Pass):
             block = op.parent
             if not isinstance(block, Block):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "kernel.matmul must live in a block")
+            post_ops: list[Operation] = []
             for index, target_space in enumerate(rule.targets):
                 if target_space == "":
                     continue
@@ -684,6 +686,9 @@ class LowerDmaMemoryHierarchyPass(Pass):
                 copy = DmaCopyOp(alloc.result, source)
                 block.insert_ops_before([*shape_ops, alloc, copy], op)
                 op.operands[index] = alloc.result
+                post_ops.append(DmaFreeOp(alloc.result))
+            if post_ops:
+                block.insert_ops_after(post_ops, op)
 
     def _apply_legacy_hierarchy(self, module: ModuleOp) -> None:
         """执行 legacy GM/SM/LM hierarchy 兼容路径。

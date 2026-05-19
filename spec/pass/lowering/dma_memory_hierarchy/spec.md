@@ -6,7 +6,7 @@
 - 默认 `LowerDmaMemoryHierarchyPass()` 不配置 `apply_op` 时保持 no-op，不再隐式执行固定 `GM -> SM -> LM` / `LM -> SM -> GM` 改写。
 - `fold=False` 且不配置 `apply_op` 时保留 legacy hierarchy 兼容路径，用于历史基础合同：global `kernel.*` operand/out 经 `dma.slice / dma.deslice` 搬运到 local 计算。
 - 配置 `apply_op="matmul{[...]}"` 时启用当前公开规则：列表按 `kernel.matmul` IR operand 下标对应 `out/lhs/rhs`，非空 target 表示分配目标 space buffer、执行 `dma.copy(target, source)` 并替换该 operand。
-- `apply_op` 规则搬运只使用 `dma.alloc + dma.copy`，不得使用 legacy `dma.slice / dma.deslice` 表示规则搬运。
+- `apply_op` 规则搬运只使用 `dma.alloc + dma.copy + dma.free`，不得使用 legacy `dma.slice / dma.deslice` 表示规则搬运。
 
 ## API 列表
 
@@ -124,6 +124,8 @@
     %rhs_buf = "dma.alloc"() : () -> !nn.memory<..., #nn.space<tlm2>>
     "dma.copy"(%rhs_buf, %rhs) : (...) -> ()
     "kernel.matmul"(%out, %lhs_buf, %rhs_buf) ...
+    "dma.free"(%lhs_buf) : (!nn.memory<..., #nn.space<tlm1>>) -> ()
+    "dma.free"(%rhs_buf) : (!nn.memory<..., #nn.space<tlm2>>) -> ()
     ```
   - 规则中空字符串 operand 不得插入 `dma.alloc`、`dma.copy` 或替换 operand。
   - 规则命中 out operand 时，out 与 input 使用同一 copy 替换规则；本轮不追加 out writeback。
@@ -158,8 +160,8 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-DMH-001 | pass 默认行为 | 默认无 `apply_op` no-op | 构造 `kernel.matmul` module。 | 运行 `LowerDmaMemoryHierarchyPass().apply(...)`。 | 不插入 `dma.alloc/copy/slice/deslice`，operand 保持不变。 | `test_dma_memory_hierarchy_default_no_apply_op_is_noop` |
 | TC-DMH-002 | legacy 兼容 | `fold=False` hierarchy | 构造 global `kernel.binary_elewise`，提供 SM/LM target。 | 运行 `LowerDmaMemoryHierarchyPass(fold=False)`。 | 生成 legacy `dma.slice/deslice`，kernel operand 转 local，不生成 `dma.copy`。 | `test_dma_memory_hierarchy_fold_false_legacy_hierarchy` |
-| TC-DMH-003 | apply_op rewrite | matmul lhs/rhs copy | 构造 `kernel.matmul`。 | 运行 `apply_op='matmul{["", "tlm1", "tlm2"]}'`。 | lhs/rhs 被 `dma.alloc + dma.copy` 替换到 `tlm1/tlm2`。 | `test_dma_memory_hierarchy_apply_op_matmul_copies_lhs_rhs` |
-| TC-DMH-004 | apply_op rewrite | matmul out copy | 构造 `kernel.matmul`。 | 运行 `apply_op='matmul{["tlm1", "", ""]}'`。 | out 也按同一 copy 规则替换到 `tlm1`，不追加写回。 | `test_dma_memory_hierarchy_apply_op_can_copy_out` |
+| TC-DMH-003 | apply_op rewrite | matmul lhs/rhs copy/free | 构造 `kernel.matmul`。 | 运行 `apply_op='matmul{["", "tlm1", "tlm2"]}'`。 | lhs/rhs 被 `dma.alloc + dma.copy + dma.free` 生命周期替换到 `tlm1/tlm2`。 | `test_dma_memory_hierarchy_apply_op_matmul_copies_lhs_rhs` |
+| TC-DMH-004 | apply_op rewrite | matmul out copy/free | 构造 `kernel.matmul`。 | 运行 `apply_op='matmul{["tlm1", "", ""]}'`。 | out 也按同一 copy/free 生命周期规则替换到 `tlm1`，不追加写回。 | `test_dma_memory_hierarchy_apply_op_can_copy_out` |
 | TC-DMH-005 | apply_op no-op | 空 target rule | 构造 `kernel.matmul`。 | 运行 `apply_op='matmul{["", "", ""]}'`。 | 不插入搬运，operand 保持不变。 | `test_dma_memory_hierarchy_apply_op_empty_rule_noop` |
 | TC-DMH-006 | registry | options 构造 | 调用 `load_builtin_passes()`。 | `build_registered_pass("lower-dma-memory-hierarchy", {"fold": "false", "apply_op": ...})`。 | 返回 pass 并执行 copy rewrite。 | `test_dma_memory_hierarchy_registry_apply_op` |
 | TC-DMH-007 | dynamic shape | 显式 symbol 维度 | 构造含 `M` 维度的 `kernel.matmul`。 | 运行 `apply_op` 改写 lhs。 | `dma.alloc.dynamic_shape` 使用 `symbol.get_dim` 结果。 | `test_dma_memory_hierarchy_apply_op_symbol_shape` |

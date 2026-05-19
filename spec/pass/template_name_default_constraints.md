@@ -21,7 +21,7 @@
 - `dma.copy`、`dma.reshape`、`dma.slice`、`dma.deslice`、`dma.load`、`dma.store`、`dma.broadcast`、`dma.transpose` 等同 dtype/layout 流转 op 使用 Same 语义。
 - `dma.view` 普通 source/result 使用 Same 语义；当 source 是一维 `i8` byte backing pool 且 result 是 typed memory 时，仅校验 source/result，不把 byte pool 与 typed view 合并为同一 template family。
 - `kernel.binary_elewise`、`kernel.exp`、`kernel.reduce`、`kernel.reduce_min`、`kernel.img2col1d`、`kernel.img2col2d`、`kernel.select` 使用 Same 语义。
-- `arch.get_dynamic_memory`、`arch.launch`、`dma.alloc`、`dma.fill`、`dma.free`、`dma.cast`、`dma.subview`、`kernel.matmul`、`symbol.get_dim`、`symbol.get_stride` 使用 VerifyOnly 语义。
+- `arch.get_dynamic_memory`、`arch.launch`、`dma.alloc`、`dma.make_ring`、`dma.current_ring`、`dma.advance_ring`、`dma.fill`、`dma.free`、`dma.cast`、`dma.subview`、`kernel.matmul`、`symbol.get_dim`、`symbol.get_stride` 使用 VerifyOnly 语义。
 - `kernel.matmul` 的 out/lhs/rhs 不由 matmul 本身合并为同一 family。
 - `nn.*` op 约束不属于本计划完成态。
 
@@ -35,3 +35,4 @@
 ## 测试
 
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/passes/test_template_name_constraints.py test/passes/test_template_name_infer.py`
+- `test_template_name_default_constraints_register_dma_ring_ops_verify_only` 锁定 `dma.make_ring/current_ring/advance_ring` 均存在默认 VerifyOnly 约束，避免 npu-demo-lowering 在 template-name-infer 阶段因 ring op 漏项失败。

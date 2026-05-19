@@ -9,6 +9,7 @@
 - 暴露 `buffer-results-to-out-params` 的公开入口。
 - 暴露 `decompass` 专题 pass 的根路径入口。
 - 暴露 `memory-plan` 的公开入口。
+- 暴露 `multi-buffer` 的公开入口。
 - 暴露 `outline-device-kernel` 的公开入口。
 - 暴露 `symbol-buffer-hoist` 的公开入口与 pattern API。
 - 暴露 `symbol-loop-hoist` 专题 pass 的根路径入口。
@@ -34,6 +35,7 @@ API 列表:
 - `class NnSoftmaxDecompPattern()`
 - `get_decompass_pass_patterns() -> list[RewritePattern]`
 - `class MemoryPlanPass(insert_free: bool = False, fold: bool = True)`
+- `class MultiBufferPass(memory_stage: int = 3, fold: bool = True)`
 - `class OutlineDeviceKernelPass()`
 - `class DmaAllocInSymbolForHoistPattern()`
 - `get_symbol_buffer_hoist_patterns() -> list[RewritePattern]`
@@ -67,6 +69,8 @@ API 列表:
 - attach_pass = AttachArchInformationPass(target="npu_demo")
 - from kernel_gen.passes import MemoryPlanPass
 - memory_plan_pass = MemoryPlanPass(insert_free=True)
+- from kernel_gen.passes import MultiBufferPass
+- multi_buffer_pass = MultiBufferPass(memory_stage=3)
 - from kernel_gen.passes import ArchParallelizePass
 - arch_parallelize_pass = ArchParallelizePass(target="npu_demo", parallel_level="block")
 - from kernel_gen.passes import OutlineDeviceKernelPass
@@ -141,6 +145,7 @@ from .decompass import (
 )
 from .inline import InlinePass
 from .memory_plan import MemoryPlanPass
+from .multi_buffer import MultiBufferPass
 from .outline_device_kernel import OutlineDeviceKernelPass
 from .symbol_buffer_hoist import (
     DmaAllocInSymbolForHoistPattern,
@@ -181,6 +186,7 @@ __all__ = [
     "NnSoftmaxDecompPattern",
     "get_decompass_pass_patterns",
     "MemoryPlanPass",
+    "MultiBufferPass",
     "OutlineDeviceKernelPass",
     "DmaAllocInSymbolForHoistPattern",
     "get_symbol_buffer_hoist_patterns",

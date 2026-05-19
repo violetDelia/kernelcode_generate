@@ -2,7 +2,7 @@
 
 
 功能说明:
-- 定义 arch dialect 的执行维度查询、动态片上内存入口、barrier 与 launch op。
+- 定义 arch dialect 的执行维度查询、动态片上内存入口、barrier、launch 与 token/sign/wait op。
 - 复用 symbol dialect 的 `!symbol.int<#symbol.expr<...>>` 与 nn dialect 的 `nn.memory/#nn.space`。
 
 API 列表:
@@ -20,6 +20,10 @@ API 列表:
 - `class ArchBarrierOp(scope: ArchScopeAttr, visibility: ArrayAttr[Attribute])`
 - `class ArchLaunchOp(callee: str | Attribute, block: SSAValue | Operation, thread: SSAValue | Operation, subthread: SSAValue | Operation, shared_memory_size: SSAValue | Operation, args: Sequence[SSAValue | Operation] = ())`
 - `ArchLaunchKernelOp = ArchLaunchOp`
+- `class ArchTokenType(token_id: StringAttr)`
+- `class ArchTokenOp(token_id: str | StringAttr, count: SSAValue | Operation)`
+- `class ArchSignOp(event: SSAValue | Operation, count: SSAValue | Operation)`
+- `class ArchWaitOp(event: SSAValue | Operation)`
 - `Arch`
 
 使用示例:
@@ -38,7 +42,7 @@ from typing import ClassVar
 
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, SymbolRefAttr, i8
-from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue
+from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue, TypeAttribute
 from xdsl.irdl import (
     AttrSizedOperandSegments,
     IRDLOperation,
@@ -371,6 +375,271 @@ class ArchScopeAttr(ParametrizedAttribute):
         """
 
         return cls(StringAttr(name))
+
+
+def _normalize_token_id(token_id: str | StringAttr) -> StringAttr:
+    """规整 arch token id 参数。
+
+    功能说明:
+    - 将公开构造参数 `str | StringAttr` 统一为 `StringAttr`。
+
+    使用示例:
+    - attr = _normalize_token_id("event0")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch.py
+    """
+
+    if isinstance(token_id, StringAttr):
+        return token_id
+    if isinstance(token_id, str):
+        return StringAttr(token_id)
+    raise TypeError("arch token id must be str or StringAttr")
+
+
+def _verify_token_id_text(token_id: str) -> None:
+    """校验 arch token id 文本。
+
+    功能说明:
+    - token id 必须是非空标识符，作为 `!arch.token<id>` 的稳定文本。
+
+    使用示例:
+    - _verify_token_id_text("event0")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch.py
+    """
+
+    if not token_id:
+        _raise_verify_error("arch token id must not be empty")
+    if not token_id.replace("_", "").isalnum() or token_id[0].isdigit():
+        _raise_verify_error("arch token id must be an identifier")
+
+
+@irdl_attr_definition
+class ArchTokenType(ParametrizedAttribute, TypeAttribute):
+    """Arch event token type。"""
+
+    name = "arch.token"
+
+    token_id: StringAttr = param_def(StringAttr)
+
+    @classmethod
+    def parse_parameters(cls: type["ArchTokenType"], parser: AttrParser) -> Sequence[Attribute]:
+        """解析 arch.token type 参数。
+
+        功能说明:
+        - 支持 `!arch.token<event_id>` 文本。
+
+        使用示例:
+        - Parser(ctx, "!arch.token<event0>").parse_attribute()
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        parser.parse_punctuation("<", "Expected '<' for arch.token.")
+        token_id = parser.parse_identifier("Expected arch token id.")
+        parser.parse_punctuation(">", "Expected '>' for arch.token.")
+        return (StringAttr(token_id),)
+
+    def print_parameters(self: "ArchTokenType", printer: Printer) -> None:
+        """打印 arch.token type 参数。"""
+
+        printer.print_string("<")
+        printer.print_string(self.token_id.data)
+        printer.print_string(">")
+
+    def verify(self: "ArchTokenType") -> None:
+        """校验 arch.token type。
+
+        功能说明:
+        - token id 必须非空且为公开 identifier。
+
+        使用示例:
+        - ArchTokenType(StringAttr("event0")).verify()
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        _verify_token_id_text(self.token_id.data)
+
+
+def _verify_token_operand(value: SSAValue, field_name: str) -> ArchTokenType:
+    """校验 operand 为 `!arch.token<id>`。
+
+    功能说明:
+    - 返回已校验的 ArchTokenType。
+
+    使用示例:
+    - token_type = _verify_token_operand(op.event, "event")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch.py
+    """
+
+    if not isinstance(value.type, ArchTokenType):
+        _raise_verify_error(f"arch token {field_name} must be !arch.token<id>")
+    value.type.verify()
+    return value.type
+
+
+@irdl_op_definition
+class ArchTokenOp(IRDLOperation):
+    """创建 arch event token。"""
+
+    name = "arch.token"
+
+    count = operand_def(SymbolValueType)
+    token_id = attr_def(StringAttr, attr_name="id")
+    result = result_def(ArchTokenType)
+
+    def __init__(self: "ArchTokenOp", token_id: str | StringAttr, count: SSAValue | Operation) -> None:
+        """初始化 arch.token。
+
+        功能说明:
+        - 根据公开 token id 与初始 count 创建 event token。
+
+        使用示例:
+        - ArchTokenOp("event0", count)
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        id_attr = _normalize_token_id(token_id)
+        super().__init__(
+            operands=[count],
+            result_types=[ArchTokenType(id_attr)],
+            attributes={"id": id_attr},
+        )
+
+    def verify_(self: "ArchTokenOp") -> None:
+        """校验 arch.token。
+
+        功能说明:
+        - id attr 必须非空且与 result token id 一致。
+        - count 必须是 `!symbol.int`，静态可判定时必须非负。
+
+        使用示例:
+        - ArchTokenOp("event0", count).verify_()
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        _verify_token_id_text(self.token_id.data)
+        count_type = _verify_symbol_int_operand(self.count, "count", self.name)
+        _verify_non_negative_static_symbol(count_type, "count", self.name)
+        if not isinstance(self.result.type, ArchTokenType):
+            _raise_verify_error("arch.token result must be !arch.token<id>")
+        self.result.type.verify()
+        if self.result.type.token_id.data != self.token_id.data:
+            _raise_verify_error("arch.token result token id must match id attr")
+
+
+@irdl_op_definition
+class ArchSignOp(IRDLOperation):
+    """发送 arch event token 信号。"""
+
+    name = "arch.sign"
+
+    event = operand_def(ArchTokenType)
+    count = operand_def(SymbolValueType)
+
+    def __init__(self: "ArchSignOp", event: SSAValue | Operation, count: SSAValue | Operation) -> None:
+        """初始化 arch.sign。
+
+        功能说明:
+        - 对 event token 发送指定 count 的信号。
+
+        使用示例:
+        - ArchSignOp(event, count)
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        super().__init__(operands=[event, count])
+
+    def verify_(self: "ArchSignOp") -> None:
+        """校验 arch.sign。
+
+        功能说明:
+        - event 必须为 arch token；count 必须是 `!symbol.int`，静态可判定时必须为正。
+
+        使用示例:
+        - ArchSignOp(event, count).verify_()
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        _verify_token_operand(self.event, "event")
+        count_type = _verify_symbol_int_operand(self.count, "count", self.name)
+        _verify_positive_static_symbol(count_type, "count", self.name)
+
+
+@irdl_op_definition
+class ArchWaitOp(IRDLOperation):
+    """等待 arch event token。"""
+
+    name = "arch.wait"
+
+    event = operand_def(ArchTokenType)
+
+    def __init__(self: "ArchWaitOp", event: SSAValue | Operation) -> None:
+        """初始化 arch.wait。
+
+        功能说明:
+        - 等待 event token 达到可继续条件。
+
+        使用示例:
+        - ArchWaitOp(event)
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        super().__init__(operands=[event])
+
+    def verify_(self: "ArchWaitOp") -> None:
+        """校验 arch.wait。
+
+        功能说明:
+        - event 必须为 arch token。
+
+        使用示例:
+        - ArchWaitOp(event).verify_()
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        _verify_token_operand(self.event, "event")
 
 
 def _dynamic_memory_result_type(space: NnMemorySpaceAttr) -> NnMemoryType:
@@ -969,8 +1238,11 @@ Arch = Dialect(
         ArchGetDynamicMemoryOp,
         ArchBarrierOp,
         ArchLaunchOp,
+        ArchTokenOp,
+        ArchSignOp,
+        ArchWaitOp,
     ],
-    [ArchScopeAttr, ArchVisibilityAttr],
+    [ArchScopeAttr, ArchVisibilityAttr, ArchTokenType],
 )
 
 __all__ = [
@@ -987,4 +1259,8 @@ __all__ = [
     "ArchBarrierOp",
     "ArchLaunchOp",
     "ArchLaunchKernelOp",
+    "ArchTokenType",
+    "ArchTokenOp",
+    "ArchSignOp",
+    "ArchWaitOp",
 ]
