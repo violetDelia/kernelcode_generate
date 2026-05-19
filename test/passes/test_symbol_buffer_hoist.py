@@ -38,13 +38,14 @@ from kernel_gen.dialect.dma import (
     DmaAllocOp,
     DmaBroadcastOp,
     DmaDesliceOp,
+    DmaFillOp,
     DmaFreeOp,
     DmaReshapeOp,
     DmaSliceOp,
     DmaSubviewOp,
     DmaViewOp,
 )
-from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolConstOp,
@@ -691,6 +692,133 @@ def _build_alias_result_kernel_use_module() -> ModuleOp:
     return ModuleOp([func_op])
 
 
+def _build_kernel_lifecycle_reset_module() -> ModuleOp:
+    """构造 kernel read/write 由 fill reset 支配的正例 module。
+
+
+    功能说明:
+    - loop 内 alloc 先被 `dma.fill` 写入，再被 `kernel.binary_elewise` 同时读写。
+    - `MemoryEffect` 证明首次 read 前已有 reset/write，因此 alloc/free 可成对外提。
+
+    使用示例:
+    - module = _build_kernel_lifecycle_reset_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    tile_type = _memory_type((4, 4))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    top_block = Block(arg_types=[tile_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([], tile_type)
+    fill = DmaFillOp(alloc.result, zero.result)
+    kernel_use = KernelBinaryElewiseOp(
+        alloc.result,
+        alloc.result,
+        top_block.args[0],
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("global"),
+    )
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([alloc, fill, kernel_use, free])
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, loop, func.ReturnOp()])
+    func_op = func.FuncOp("kernel_lifecycle_reset_case", FunctionType.from_lists([tile_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_kernel_lifecycle_read_before_write_module() -> ModuleOp:
+    """构造 kernel read 早于 reset/write 的反例 module。
+
+
+    功能说明:
+    - loop 内 alloc 首次 use 是 `kernel.binary_elewise` 的 input read，后续才被 `dma.fill` 写入。
+    - `symbol-buffer-hoist` 必须保持 alloc/free 原位。
+
+    使用示例:
+    - module = _build_kernel_lifecycle_read_before_write_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    tile_type = _memory_type((4, 4))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    top_block = Block(arg_types=[tile_type, tile_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([], tile_type)
+    kernel_use = KernelBinaryElewiseOp(
+        top_block.args[1],
+        alloc.result,
+        top_block.args[0],
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("global"),
+    )
+    fill = DmaFillOp(alloc.result, zero.result)
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([alloc, kernel_use, fill, free])
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, loop, func.ReturnOp()])
+    func_op = func.FuncOp(
+        "kernel_lifecycle_read_before_write_case",
+        FunctionType.from_lists([tile_type, tile_type], []),
+        Region(top_block),
+    )
+    return ModuleOp([func_op])
+
+
+def _build_nested_alias_kernel_use_module() -> ModuleOp:
+    """构造 nested loop 内 alias result 流向 kernel op 的正例 module。
+
+
+    功能说明:
+    - `dma.reshape` 的 source 与 shape 都支配 outer loop。
+    - result 只在 nested loop 内被带公开 MemoryEffect 的 `kernel.matmul` 使用。
+    - fixed-point rewrite 应把 reshape 逐层外提到 outer loop 前。
+
+    使用示例:
+    - module = _build_nested_alias_kernel_use_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    matrix_type = _memory_type((4, 4))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    four = _const_symbol(4)
+    top_block = Block(arg_types=[matrix_type, matrix_type, matrix_type])
+    outer_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    inner_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    reshape = DmaReshapeOp(top_block.args[0], [four.result, four.result], matrix_type)
+    matmul = KernelMatmulOp(
+        top_block.args[2],
+        reshape.result,
+        top_block.args[1],
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    inner_block.add_ops([reshape, matmul])
+    inner_loop = SymbolForOp(zero.result, one.result, one.result, inner_block)
+    outer_block.add_op(inner_loop)
+    outer_loop = SymbolForOp(zero.result, one.result, one.result, outer_block)
+    top_block.add_ops([zero, one, four, outer_loop, func.ReturnOp()])
+    func_op = func.FuncOp(
+        "nested_alias_kernel_use_case",
+        FunctionType.from_lists([matrix_type, matrix_type, matrix_type], []),
+        Region(top_block),
+    )
+    return ModuleOp([func_op])
+
+
 def _build_loop_carried_shape_module() -> ModuleOp:
     """构造 shape 依赖 loop-carried 的反例 module。
 
@@ -1226,6 +1354,81 @@ def test_symbol_buffer_hoist_keeps_alias_result_when_used_by_kernel_op() -> None
     assert kernel_use.lhs is reshape.result
     assert kernel_use.rhs is reshape.result
     assert _free_source_is(free, alloc.result)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H1
+# 功能说明: 验证 kernel read/write 被 fill reset 支配时 alloc/free 可由 MemoryEffect 证明后成对外提。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_alloc_when_kernel_read_is_reset_by_fill
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_alloc_when_kernel_read_is_reset_by_fill() -> None:
+    module = _build_kernel_lifecycle_reset_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    loop_index = top_ops.index(loop_op)
+    fill = next(op for op in loop_block.ops if isinstance(op, DmaFillOp))
+    kernel_use = next(op for op in loop_block.ops if isinstance(op, KernelBinaryElewiseOp))
+
+    assert top_ops.index(top_alloc) < loop_index < top_ops.index(top_free)
+    assert fill.target is top_alloc.result
+    assert kernel_use.out is top_alloc.result
+    assert kernel_use.lhs is top_alloc.result
+    assert _free_source_is(top_free, top_alloc.result)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H2
+# 功能说明: 验证 kernel read 早于 reset/write 时 alloc/free 保持在 loop 内。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_kernel_reads_before_reset
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_alloc_when_kernel_reads_before_reset() -> None:
+    module = _build_kernel_lifecycle_read_before_write_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, _loop_op, loop_block = _get_blocks(module)
+    loop_ops = list(loop_block.ops)
+    alloc = next(op for op in loop_ops if isinstance(op, DmaAllocOp))
+    kernel_use = next(op for op in loop_ops if isinstance(op, KernelBinaryElewiseOp))
+    fill = next(op for op in loop_ops if isinstance(op, DmaFillOp))
+    free = next(op for op in loop_ops if isinstance(op, DmaFreeOp))
+
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in top_block.ops)
+    assert loop_ops.index(alloc) < loop_ops.index(kernel_use) < loop_ops.index(fill) < loop_ops.index(free)
+    assert kernel_use.lhs is alloc.result
+    assert fill.target is alloc.result
+    assert _free_source_is(free, alloc.result)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H3
+# 功能说明: 验证 nested loop 内 alias result 流向 kernel op 时 alias op 逐层 fixed-point 外提。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_nested_alias_result_used_by_kernel_op
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_nested_alias_result_used_by_kernel_op() -> None:
+    module = _build_nested_alias_kernel_use_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, outer_loop, outer_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_reshape = next(op for op in top_ops if isinstance(op, DmaReshapeOp))
+    inner_loop = next(op for op in outer_block.ops if isinstance(op, SymbolForOp))
+    inner_block = inner_loop.body.blocks[0]
+    matmul = next(op for op in inner_block.ops if isinstance(op, KernelMatmulOp))
+
+    assert top_ops.index(top_reshape) < top_ops.index(outer_loop)
+    assert not any(isinstance(op, DmaReshapeOp) for op in outer_block.ops)
+    assert not any(isinstance(op, DmaReshapeOp) for op in inner_block.ops)
+    assert matmul.lhs is top_reshape.result
 
 
 # TC-SYMBOL-BUFFER-HOIST-005

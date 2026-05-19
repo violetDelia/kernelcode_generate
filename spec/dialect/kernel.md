@@ -45,6 +45,10 @@
 - 本文件只定义 `kernel dialect` 的 op 合同，不负责函数输出 ABI、module 组织、调度策略或 pass 内部重写细节。
 - 不允许使用“万能 kernel op”兜底 `exp / reduce_* / matmul / img2col*`；上述能力必须以各自具名 `kernel.*` op 公开。
 - 所有 op 不产生 SSA result，结果必须写入 `outs(...)`；不得把 `out` 写回链路写成“实现自定”或“可选消费”。
+- 所有 op 必须通过 xDSL `MemoryEffect` trait 暴露对 memory operand 的读写语义，供 pass 通过 `xdsl.traits.get_effects(op)` 机械判定生命周期：
+  - `kernel.binary_elewise` 与 `kernel.matmul` 对 `out` 暴露 `WRITE`，对 `lhs/rhs` 暴露 `READ`。
+  - `kernel.select` 对 `out` 暴露 `WRITE`，对 `cond/lhs/rhs` 暴露 `READ`。
+  - `kernel.exp`、`kernel.reduce`、`kernel.reduce_min`、`kernel.img2col1d`、`kernel.img2col2d` 对 `out` 暴露 `WRITE`，对 `input` 暴露 `READ`。
 - 本版仅支持 memory operand，不支持标量 operand；标量扩展留待后续版本。
 - 对逐元素算术、比较与选择，输入 operand 默认要求 `shape/stride/space/element_type` 一致；`kernel` 层不提供 broadcast/transpose 形状变换入口（它们必须在 `dma` 层显式物化）。
 - `kernel.reduce` 是当前通用 reduction 入口；`kernel.reduce_min` 是现存保留具名 op，二者必须保持 op 名字与 verifier 语义区分。
@@ -176,6 +180,7 @@ func.return %out : !nn.memory<f32, [N, C], GM>
 
 - `input/out` 的 `shape/stride/space` 必须一致。
 - `input.element_type` 与 `out.element_type` 必须一致，且必须为浮点类型。
+- `MemoryEffect` 必须绑定 IRDL 命名字段：`out` 为 `WRITE`，`input` 为 `READ`；不得因构造函数参数顺序而把 `input_value` 误标为写目标。
 
 - 返回值：
 
@@ -392,6 +397,7 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 - 验证 `kernel.img2col1d/img2col2d` 的输入 rank/layout 合同与结构化输出合同已被机械锁定。
 - 验证 `kernel.img2col1d` 的 `input.shape + attrs -> W_out`、`kernel.img2col2d` 的 `input.shape + attrs -> OH/OW` 公式与拒绝路径已被机械锁定。
 - 验证“无 SSA result、显式输出 operand”约束。
+- 验证 `kernel.*` op 的公开 `MemoryEffect`：所有 op 对显式 `out` 暴露 `WRITE`，对显式输入 memory operand 暴露 `READ`。
 
 ### 功能与用例清单
 
@@ -420,3 +426,5 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 | TC-KRN-027 | 边界/异常 | `kernel.img2col2d` 拒绝 space/dtype/window 失配并支持动态参数和动态 shape | 准备 2D img2col 的 space、dtype、窗口轴、动态 symbol 与动态 shape 组合。 | 运行 `test_kernel_img2col2d_public_contract_matrix`。 | 非法 space/dtype/window 失配被拒绝；动态参数或动态 shape 不误报静态合同失败。 | `test_kernel_img2col2d_public_contract_matrix` |
 | TC-KRN-028 | 边界/异常 | `kernel.reduce` 通用入口覆盖 `kind/axis/keepdim/shape` 公开矩阵 | 准备 `sum/min/max`、不同 axis/keepdim 形态与非法输出。 | 运行 `test_kernel_reduce_public_kind_axis_keepdim_matrix`。 | 合法通用 reduce 通过；非法 kind、dtype、space、shape 按公开错误语义失败。 | `test_kernel_reduce_public_kind_axis_keepdim_matrix` |
 | TC-KRN-029 | 边界/异常 | `kernel.reduce_min` 拒绝 dtype 与 space 不一致 | 准备 dtype、输出 space 与属性 space 失配场景。 | 运行 `test_kernel_reduce_min_dtype_space_matrix`。 | `kernel.reduce_min` 对 dtype 和 space 失配按公开错误语义失败。 | `test_kernel_reduce_min_dtype_space_matrix` |
+| TC-KRN-030 | 内存/DMA | `kernel.binary_elewise`、`kernel.matmul` 与 `kernel.select` 暴露 out write / input read effect | 准备合法二元、matmul 与 select op。 | 运行 `test_kernel_binary_elewise_memory_effects`、`test_kernel_matmul_memory_effects`、`test_kernel_select_memory_effects`。 | `get_effects(op)` 返回 out 的 `WRITE`，并返回所有输入 memory operand 的 `READ`。 | `test_kernel_binary_elewise_memory_effects` / `test_kernel_matmul_memory_effects` / `test_kernel_select_memory_effects` |
+| TC-KRN-031 | 内存/DMA | `kernel.exp`、`kernel.img2col*` 与 `kernel.reduce*` 暴露 out write / input read effect | 准备合法 unary、img2col 与 reduce op。 | 运行 `test_kernel_exp_memory_effects`、`test_kernel_img2col_memory_effects`、`test_kernel_reduce_memory_effects`。 | `get_effects(op)` 返回 out 的 `WRITE` 与 input 的 `READ`。 | `test_kernel_exp_memory_effects` / `test_kernel_img2col_memory_effects` / `test_kernel_reduce_memory_effects` |

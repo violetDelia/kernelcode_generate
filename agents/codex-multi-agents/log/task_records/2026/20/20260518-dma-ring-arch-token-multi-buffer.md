@@ -732,3 +732,85 @@ Diff 反推与计划 hard gate：
 - review 返工点已由公开 pytest 覆盖；主仓只读合同验收和敏感目录门禁均通过；未发现新的可执行返工项。
 
 结论：通过；最小阻断项：无。T-20260518-e79bde42 已具备第二架构计划级终验通过结论，可进入后续双架构/merge 流转；merge 前仍需合并角色按合并规范核对任务记录同批合入、候选 diff、敏感目录空 diff、full expectation 外部红点裁定和 latest main 状态。
+
+### 2026-05-19 22:31 李白 merge 收口记录
+
+时间：2026-05-19 22:31 CST
+经办人：李白
+任务：T-20260518-e79bde42；merge 收口
+任务目标：按合并规范将已通过双架构终验的 `dma-ring-arch-token-multi-buffer` 候选同步到 latest `origin/main`，核对冲突/重叠、任务记录同批、直接合同验收、敏感目录空 diff、full expectation 外部红点口径，并完成 merge / push / `-done`。
+
+合并前规则与来源：
+- 已重新读取 `agents/codex-multi-agents/agents/李白/李白.prompt.md`、根 `AGENTS.md`、`agents/standard/合并规范.md`、`agents/standard/任务记录约定.md`、`agents/standard/expectation任务规则.md`。
+- 李白只做合并与同步确认；不补实现、不补审查、不改计划书、不修改 `expectation/`。
+- 任务来源 worktree：`/home/lfr/kernelcode_generate/wt-20260518-dma-ring-arch-token-multi-buffer`。
+- 来源分支：`task/dma-ring-arch-token-multi-buffer`。
+- 计划书只读核对使用主仓共享计划 `/home/lfr/kernelcode_generate/ARCHITECTURE/plan/dma_ring_arch_token_multi_buffer_green_plan.md`。
+
+latest main 同步与冲突处理：
+- `git fetch --prune origin`：成功。
+- 同步前基线：`HEAD=8cded6bd3240b5e9a9a07e2f3f1510ed1d22abe0`；`origin/main=95b2cfc1ef904bd03fe9ded3a9c9861c54c8b96e`；`merge-base=8cded6bd3240b5e9a9a07e2f3f1510ed1d22abe0`；`HEAD...origin/main=0 1`。
+- 先将本任务候选代码 / spec / test / 任务记录固化为分支提交 `aedb256b`，随后执行 `git merge --no-ff --no-edit origin/main` 对齐 latest main。
+- 同步冲突：
+  - `kernel_gen/dialect/dma.py`
+  - `spec/dialect/dma.md`
+- 冲突原因：本任务在同一文件中新增 `dma.ring` / `dma.make_ring` / `dma.current_ring` / `dma.advance_ring`，而 latest main `95b2cfc1` 已合入 `MemoryEffect` 公开读写语义与相关 spec/test。
+- 处理方式：仅做机械并集合并，保留本任务 ring type/op/API/spec/test，同时保留 latest main 的 `MemoryEffect` trait helper、`NoMemoryEffect` / read-write 语义和 spec 文本；未新增计划外公开 API，未改 `expectation/`。
+- `rg -n "<<<<<<<|=======|>>>>>>>" kernel_gen/dialect/dma.py spec/dialect/dma.md`：无输出。
+
+候选范围核对：
+- 本任务候选文件：
+  - `agents/codex-multi-agents/log/task_records/2026/20/20260518-dma-ring-arch-token-multi-buffer.md`
+  - `kernel_gen/dialect/arch.py`
+  - `kernel_gen/dialect/dma.py`
+  - `kernel_gen/dsl/gen_kernel/emit/npu_demo/dma/__init__.py`
+  - `kernel_gen/dsl/gen_kernel/emit/npu_demo/dma/ring.py`
+  - `kernel_gen/passes/__init__.py`
+  - `kernel_gen/passes/dma_memory_hierarchy.py`
+  - `kernel_gen/passes/multi_buffer.py`
+  - `kernel_gen/passes/pipeline/npu_demo_lowering.py`
+  - `kernel_gen/passes/registry.py`
+  - `kernel_gen/passes/template_name_default_constraints.py`
+  - `spec/dialect/arch.md`
+  - `spec/dialect/dma.md`
+  - `spec/pass/lowering/dma_memory_hierarchy/spec.md`
+  - `spec/pass/multi_buffer.md`
+  - `spec/pass/pipeline/npu_demo_lowering.md`
+  - `spec/pass/registry.md`
+  - `spec/pass/template_name_default_constraints.md`
+  - `test/dialect/test_arch.py`
+  - `test/dialect/test_dma.py`
+  - `test/passes/pipeline/test_npu_demo_lowering.py`
+  - `test/passes/test_dma_memory_hierarchy.py`
+  - `test/passes/test_multi_buffer.py`
+  - `test/passes/test_registry.py`
+  - `test/passes/test_template_name_constraints.py`
+- latest main 同步带入 `95b2cfc1` 已合并存活记录与 symbol-buffer-hoist 相关文件；这些来自 `origin/main`，不是本任务新候选范围。最终 main commit 将包含完整 ancestry，任务记录与本任务代码/spec/test 均在同一合并链路中。
+- 本任务不带入 `expectation/`、`.skills/`、`agents/standard/**`、`TODO.md` 或 `DONE.md`。
+
+同步后合同验收与共享 gate：
+- `PYTHONDONTWRITEBYTECODE=1 EXPECTATION_WORKTREE_ROOT=/home/lfr/kernelcode_generate/wt-20260518-dma-ring-arch-token-multi-buffer PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260518-dma-ring-arch-token-multi-buffer:/home/lfr/kernelcode_generate python3 -m expectation.dialect.dma`：exit 0。
+- `PYTHONDONTWRITEBYTECODE=1 EXPECTATION_WORKTREE_ROOT=/home/lfr/kernelcode_generate/wt-20260518-dma-ring-arch-token-multi-buffer PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260518-dma-ring-arch-token-multi-buffer:/home/lfr/kernelcode_generate python3 -m expectation.dialect.arch`：exit 0。
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile $( { git diff --name-only -- '*.py'; git diff --cached --name-only -- '*.py'; git ls-files --others --exclude-standard -- '*.py'; } | sort -u )`：exit 0。
+- `PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 PYTHONPATH=. pytest -q test/passes/test_multi_buffer.py -k 'nested_region_use or sibling_region_use'`：`2 passed, 13 deselected, 1 warning`。
+- `PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 PYTHONPATH=. pytest -q test/dialect/test_dma.py test/dialect/test_arch.py test/passes/test_multi_buffer.py test/passes/test_registry.py test/passes/pipeline/test_npu_demo_lowering.py test/passes/test_dma_memory_hierarchy.py test/passes/test_template_name_constraints.py`：`169 passed, 1 warning`。
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONFAULTHANDLER=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 PYTHONPATH=. pytest -q test/kernel/test_matmul_symbolic_memory_genkernel.py test/kernel/test_conv2d_symbolic_memory_genkernel.py -vv`：`8 passed, 1 warning`。
+- `git diff --check`：exit 0。
+- `git diff --cached --check`：exit 0。
+- `git diff --cached --name-only -- expectation .skills agents/standard`：无输出。
+- `git status --short --untracked-files=all -- expectation .skills agents/standard`：无输出。
+- `git status --short --ignored -- expectation .skills agents/standard`：无输出。
+
+生成物与禁止修改面：
+- 本轮复核生成的 `.pytest_cache`、`kernel/dump` 与 `__pycache__` 已在任务 worktree 内清理。
+- 未修改、复制、移动、新建或删除 `expectation/`；`.skills/` 与 `agents/standard/**` 保持空 diff。
+- 主仓 `/home/lfr/kernelcode_generate` 当前仍有与本任务无关的本地文档改动 `ARCHITECTURE/project_architecture.md` 与 `docs/**`；本次 merge 不 staging、不覆盖这些路径。
+
+full expectation / `expectation.pass` 口径：
+- 本次 merge 不运行也不写 `python3 -m expectation` / `python3 -m expectation.pass` 通过。
+- 继续保留 2026-05-18 22:14 架构裁定：full expectation / `expectation.pass` 的 clean main 外部红点不作为本轮直接阻断，也不作为本任务通过依据；若后续失败家族扩大到本候选直接范围，必须回 execute 或请求架构裁定。
+
+结论：
+- T-20260518-e79bde42 在 latest `origin/main@95b2cfc1` 同步后已完成冲突机械合并、直接合同验收、共享 pytest gate、diff check 与敏感目录核对。
+- 最小阻断项：无。
+- 可提交 merge commit，fast-forward 合入主仓 `main`，push 后执行 `-done` 并清理完成 worktree / branch。最终提交号按合并规范在合并后回报，不再追加记录提交。
