@@ -5,6 +5,7 @@
 - 定义 kernel dialect 的逐元素算术、比较、选择、指数、归约与结构化 kernel op。
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
 - 所有结果通过 outs(...) 写回，不产生 SSA result。
+- 通过 xDSL `MemoryEffect` trait 标注 kernel op 对 memory operand 的读写语义。
 
 API 列表:
 - `class KernelBinaryElewiseOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, *, kind: str | StringAttr, space: NnMemorySpaceAttr)`
@@ -49,7 +50,8 @@ from xdsl.dialects.builtin import (
     i1,
 )
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
-from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def
+from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, traits_def
+from xdsl.traits import EffectInstance, MemoryEffect, MemoryEffectKind
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
@@ -60,6 +62,111 @@ _BINARY_ELEWISE_ARITH_KINDS = {"add", "sub", "mul", "div", "truediv"}
 _BINARY_ELEWISE_COMPARE_KINDS = {"eq", "ne", "lt", "le", "gt", "ge"}
 _BINARY_ELEWISE_KINDS = _BINARY_ELEWISE_ARITH_KINDS | _BINARY_ELEWISE_COMPARE_KINDS
 _REDUCE_KINDS = {"sum", "min", "max"}
+
+
+def _effect(kind: MemoryEffectKind, value: SSAValue) -> EffectInstance:
+    """构造作用到具体 SSA memory value 的 MemoryEffect。
+
+
+    功能说明:
+    - 将 kernel 方言 outs/ins 读写语义绑定到具体 SSA value。
+    - 仅供当前文件私有 trait 类复用，不作为跨文件公开 API。
+
+    使用示例:
+    - _effect(MemoryEffectKind.WRITE, out)
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    return EffectInstance(kind, SSAValue.get(value))
+
+
+class _KernelBinaryMemoryEffect(MemoryEffect):
+    """二元 kernel op 的 out 写与 lhs/rhs 读 effect trait。"""
+
+    @classmethod
+    def get_effects(cls, op: Operation) -> set[EffectInstance]:
+        """返回二元 kernel op 的 MemoryEffect 集合。
+
+
+        功能说明:
+        - 使用 IRDL 命名字段绑定 effect value，避免构造函数参数顺序变化导致读写误绑。
+        - `out` 产生 WRITE effect，`lhs/rhs` 产生 READ effect。
+
+        使用示例:
+        - effects = _KernelBinaryMemoryEffect.get_effects(op)
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        return {
+            _effect(MemoryEffectKind.WRITE, op.out),  # type: ignore[attr-defined]
+            _effect(MemoryEffectKind.READ, op.lhs),  # type: ignore[attr-defined]
+            _effect(MemoryEffectKind.READ, op.rhs),  # type: ignore[attr-defined]
+        }
+
+
+class _KernelUnaryMemoryEffect(MemoryEffect):
+    """一输入一输出 kernel op 的 out 写与 input 读 effect trait。"""
+
+    @classmethod
+    def get_effects(cls, op: Operation) -> set[EffectInstance]:
+        """返回一输入一输出 kernel op 的 MemoryEffect 集合。
+
+
+        功能说明:
+        - 使用 IRDL 命名字段绑定 effect value，避免 `KernelExpOp(input_value, out, ...)`
+          等构造函数参数顺序与 op 字段顺序不一致时读写误绑。
+        - `out` 产生 WRITE effect，`input` 产生 READ effect。
+
+        使用示例:
+        - effects = _KernelUnaryMemoryEffect.get_effects(op)
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        return {
+            _effect(MemoryEffectKind.WRITE, op.out),  # type: ignore[attr-defined]
+            _effect(MemoryEffectKind.READ, op.input),  # type: ignore[attr-defined]
+        }
+
+
+class _KernelSelectMemoryEffect(MemoryEffect):
+    """`kernel.select` 的 out 写与 cond/lhs/rhs 读 effect trait。"""
+
+    @classmethod
+    def get_effects(cls, op: Operation) -> set[EffectInstance]:
+        """返回 `kernel.select` 的 MemoryEffect 集合。
+
+
+        功能说明:
+        - 使用 IRDL 命名字段绑定 effect value。
+        - `out` 被写入；`cond/lhs/rhs` 被读取。
+
+        使用示例:
+        - effects = _KernelSelectMemoryEffect.get_effects(op)
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        return {
+            _effect(MemoryEffectKind.WRITE, op.out),  # type: ignore[attr-defined]
+            _effect(MemoryEffectKind.READ, op.cond),  # type: ignore[attr-defined]
+            _effect(MemoryEffectKind.READ, op.lhs),  # type: ignore[attr-defined]
+            _effect(MemoryEffectKind.READ, op.rhs),  # type: ignore[attr-defined]
+        }
 
 
 def _is_compare_output_element_type(value: Attribute) -> bool:
@@ -788,6 +895,7 @@ class KernelBinaryElewiseOp(IRDLOperation):
     """
 
     name = "kernel.binary_elewise"
+    traits = traits_def(_KernelBinaryMemoryEffect())
 
     out = operand_def(NnMemoryType)
     lhs = operand_def(NnMemoryType)
@@ -887,6 +995,7 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
     """
 
     name = "kernel.matmul"
+    traits = traits_def(_KernelBinaryMemoryEffect())
 
     def verify_(self) -> None:
         lhs_type = _verify_memory_type(self.lhs.type, "lhs")
@@ -919,6 +1028,7 @@ class KernelImg2col1dOp(IRDLOperation):
     """
 
     name = "kernel.img2col1d"
+    traits = traits_def(_KernelUnaryMemoryEffect())
 
     out = operand_def(NnMemoryType)
     input = operand_def(NnMemoryType)
@@ -1106,6 +1216,7 @@ class KernelImg2col2dOp(IRDLOperation):
     """
 
     name = "kernel.img2col2d"
+    traits = traits_def(_KernelUnaryMemoryEffect())
 
     out = operand_def(NnMemoryType)
     input = operand_def(NnMemoryType)
@@ -1314,6 +1425,7 @@ class KernelSelectOp(IRDLOperation):
     """kernel.select。"""
 
     name = "kernel.select"
+    traits = traits_def(_KernelSelectMemoryEffect())
 
     out = operand_def(NnMemoryType)
     cond = operand_def(NnMemoryType)
@@ -1359,6 +1471,7 @@ class KernelExpOp(IRDLOperation):
     """kernel.exp。"""
 
     name = "kernel.exp"
+    traits = traits_def(_KernelUnaryMemoryEffect())
 
     out = operand_def(NnMemoryType)
     input = operand_def(NnMemoryType)
@@ -1372,7 +1485,7 @@ class KernelExpOp(IRDLOperation):
     ) -> None:
         """初始化 exp op。"""
 
-        super().__init__(operands=[input_value, out], attributes={"space": space})
+        super().__init__(operands=[out, input_value], attributes={"space": space})
 
     def verify_(self) -> None:
         input_type = _verify_memory_type(self.input.type, "input")
@@ -1411,6 +1524,7 @@ class KernelReduceOp(IRDLOperation):
     """
 
     name = "kernel.reduce"
+    traits = traits_def(_KernelUnaryMemoryEffect())
 
     out = operand_def(NnMemoryType)
     input = operand_def(NnMemoryType)
@@ -1538,6 +1652,7 @@ class KernelReduceMinOp(IRDLOperation):
     """
 
     name = "kernel.reduce_min"
+    traits = traits_def(_KernelUnaryMemoryEffect())
 
     out = operand_def(NnMemoryType)
     input = operand_def(NnMemoryType)

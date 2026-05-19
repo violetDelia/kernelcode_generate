@@ -60,6 +60,13 @@
   - `dma.broadcast`：把 scalar 或较低 rank memory 按广播规则物化写入目标 memory（用于显式广播与 mixed compare 桥接）
   - `dma.transpose`：把 source 按 perm 置换物化写入目标 memory（作为 `nn.transpose` 的 lowering 目标）
 - 当前方言范围包含 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.broadcast`、`dma.transpose`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.subview`、`dma.view`、`dma.reshape`、`dma.cast`。
+- 当前方言公开 xDSL `MemoryEffect` 语义，供 pass 通过 `xdsl.traits.get_effects(op)` 机械判定 memory 生命周期：
+  - `dma.alloc` 对 result 暴露 `ALLOC`。
+  - `dma.free` 对 source 暴露 `FREE`。
+  - `dma.fill` 对 target 暴露 `WRITE`，不读取 target 旧值。
+  - `dma.copy/load/store/slice/deslice/transpose/cast` 对 target 暴露 `WRITE`，对 source 暴露 `READ`。
+  - `dma.broadcast` 对 target 暴露 `WRITE`；当 source 是 `!nn.memory<...>` 时额外对 source 暴露 `READ`，标量 source 不产生 memory read effect。
+  - `dma.view/subview/reshape` 仅生成 memory view/result，不读写数据，必须通过 `NoMemoryEffect` 暴露无副作用语义。
 - 除 `dma.cast` 与 `dma.fill` 外，其他搬运 op 不改变元素值语义，只改变数据所在的逻辑位置、切片范围、布局表达或空间；同一个 op 不应同时承担计算和搬运语义。
 - 本文件中的“转换”包含三类：布局、切片视图或空间层面的转换，通过 `dma.cast` 表达的显式元素类型转换，以及通过 `dma.fill` 表达的标量到 memory 物化；不包括 memory-memory 广播、归约或通用数值计算。
 
@@ -711,6 +718,7 @@ op = DmaCastOp(source, result_type)
 - 验证当前阶段对 stride 的限制会在 verifier 阶段明确报错。
 - 验证 `dma` 的布局/索引类标量输入以 `!symbol.int<#symbol.expr<expr>>` 为主，`offsets` 允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`，并拒绝 builtin `index`、浮点或其他非 symbol 标量类型；同时验证 `dma.fill.value` 只允许 builtin 非 bool 整数、builtin 浮点与 `!symbol.int<#symbol.expr<expr>>` 这几个当前公开例外（包含拒绝 bool 与 dtype family 不匹配）。
 - 验证 mixed add 使用 `scalar -> memory` 原语时，被填充的 temporary memory 必须在下游 IR 中有真实 use；`dma.alloc` alone 或 `dma.alloc + dma.fill` 但无消费都不构成通过口径。
+- 验证 `dma` op 的公开 `MemoryEffect`：alloc/free 暴露生命周期 effect，copy/load/store/slice/deslice/transpose/cast 暴露 target write + source read，view/subview/reshape 暴露无副作用。
 
 ### 功能与用例清单
 
@@ -756,3 +764,6 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-027 | 内存/DMA | `dma.fill` 类型边界 | 准备 bool target/value 与 dtype family 不匹配 scalar。 | 构造并校验 `dma.fill` | bool target/value 与不兼容 scalar family 按公开错误语义拒绝。 | test/dialect/test_dma.py::test_dma_fill_rejects_bool_or_unsupported_scalar |
 | TC-DMA-028 | 内存/DMA | mixed add 临时 memory 真实消费 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 检查 lower 后 IR | 内存类型、布局、搬运结果或 verifier 行为体现“mixed add 临时 memory 真实消费”场景。 | test/passes/lowering/nn_lowering/test_element_binary_add.py::test_lower_add_mixed_scalar_uses_dma_fill |
 | TC-DMA-059 | 边界/异常 | `dma.alloc/broadcast/transpose/view` 公开 verifier 边界矩阵 | 准备公开 op 构造入口、动态 shape、broadcast 源/目标类型、transpose perm/target 与 byte-pool view 类型组合。 | 运行 `test_dma_public_verifier_boundary_matrix`。 | 动态 shape、broadcast rank/type/space、transpose perm/layout/type/space、transfer rank、byte-pool view element size 与动态边界按公开错误语义通过或稳定拒绝。 | `test_dma_public_verifier_boundary_matrix` |
+| TC-DMA-060 | 内存/DMA | `dma.copy` 暴露 target write 与 source read effect | 准备合法 `DmaCopyOp(target, source)`。 | 运行 `test_dma_copy_memory_effects_target_write_source_read`。 | `get_effects(op)` 返回 target 的 `WRITE` 与 source 的 `READ`。 | `test_dma_copy_memory_effects_target_write_source_read` |
+| TC-DMA-061 | 内存/DMA | `dma.alloc/free` 暴露 lifecycle effect | 准备合法 `DmaAllocOp` 与 `DmaFreeOp`。 | 运行 `test_dma_alloc_verify_success` 与 `test_dma_free_requires_nn_memory_type`。 | `get_effects(alloc)` 返回 result 的 `ALLOC`；`get_effects(free)` 返回 source 的 `FREE`。 | `test_dma_alloc_verify_success` / `test_dma_free_requires_nn_memory_type` |
+| TC-DMA-062 | 内存/DMA | `dma.view/subview/reshape` 暴露 no-memory-effect | 准备合法 alias op。 | 运行 `test_dma_alias_ops_have_no_memory_effect`。 | `get_effects(op)` 返回空 effect 集合，确认 alias op 不读写数据。 | `test_dma_alias_ops_have_no_memory_effect` |

@@ -584,10 +584,10 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     assert "dma.alloc" not in second_buffer_hoist_text
     assert "dma.free" not in second_buffer_hoist_text
     first_view_index = second_buffer_hoist_text.index('"dma.view"')
-    outer_for_index = second_buffer_hoist_text.index("symbol.for", first_view_index)
     first_reshape_index = second_buffer_hoist_text.index('"dma.reshape"', first_view_index)
+    outer_for_index = second_buffer_hoist_text.index("symbol.for", first_reshape_index)
     inner_for_index = second_buffer_hoist_text.index("symbol.for", outer_for_index + len("symbol.for"))
-    assert first_view_index < outer_for_index < first_reshape_index < inner_for_index
+    assert first_view_index < first_reshape_index < outer_for_index < inner_for_index
 
 
 def test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain() -> None:

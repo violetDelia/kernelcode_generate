@@ -56,8 +56,8 @@ def _emit_npu_demo_kernel_exp(op: KernelExpOp, ctx) -> str:
 
     from ... import emit_c_value
 
-    input_value = op.out
-    out_value = op.input
+    input_value = op.input
+    out_value = op.out
     if not isinstance(input_value.type, NnMemoryType) or not isinstance(out_value.type, NnMemoryType):
         raise ctx.emit_error(op.name, "unsupported op")
     return (

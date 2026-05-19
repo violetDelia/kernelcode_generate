@@ -50,6 +50,7 @@ from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Operation, SSAValue
 from xdsl.parser import Parser
 from xdsl.printer import Printer
+from xdsl.traits import MemoryEffectKind, get_effects
 from xdsl.utils.exceptions import VerifyException
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -260,6 +261,27 @@ def _make_symbol_operands(values: list[int | str | None]) -> list[SSAValue]:
     return operands
 
 
+def _effect_kinds_by_value(op: Operation) -> set[tuple[MemoryEffectKind, SSAValue | None]]:
+    """读取 op 公开 MemoryEffect 的 kind/value 集合。
+
+
+    功能说明:
+    - 使用 xDSL 公开 `get_effects(op)` 验证 dma op 的读写/alloc/free 标注。
+
+    使用示例:
+    - effects = _effect_kinds_by_value(op)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    effects = get_effects(op)
+    assert effects is not None
+    return {(effect.kind, effect.value) for effect in effects}
+
+
 # TC-DMA-001
 # 功能说明: 验证 dma op 仅接受 nn.memory 作为 memory 类型。
 # 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_requires_nn_memory_type
@@ -286,6 +308,24 @@ def test_dma_copy_verify_success() -> None:
     target = _TestOp(result_types=[memory_type]).results[0]
     op = DmaCopyOp(target, source)
     op.verify()
+
+
+# TC-DMA-002A
+# 功能说明: 验证 dma.copy 暴露 target WRITE 与 source READ MemoryEffect。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_copy_memory_effects_target_write_source_read
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_copy_memory_effects_target_write_source_read() -> None:
+    memory_type = _make_memory_type()
+    target = _TestOp(result_types=[memory_type]).results[0]
+    source = _TestOp(result_types=[memory_type]).results[0]
+    op = DmaCopyOp(target, source)
+
+    assert _effect_kinds_by_value(op) == {
+        (MemoryEffectKind.WRITE, target),
+        (MemoryEffectKind.READ, source),
+    }
 
 
 # TC-DMA-003
@@ -528,6 +568,8 @@ def test_dma_alloc_verify_success() -> None:
     op = DmaAllocOp(_make_symbol_operands([2, 4]), result_type)
     op.verify()
 
+    assert _effect_kinds_by_value(op) == {(MemoryEffectKind.ALLOC, op.result)}
+
 
 # TC-DMA-023
 # 功能说明: 验证 dma.free 仅接受 nn.memory 类型，非内存类型报错。
@@ -540,6 +582,7 @@ def test_dma_free_requires_nn_memory_type() -> None:
     source = _TestOp(result_types=[memory_type]).results[0]
     op = DmaFreeOp(source)
     op.verify()
+    assert _effect_kinds_by_value(op) == {(MemoryEffectKind.FREE, source)}
 
     bad_source = _TestOp(result_types=[i32]).results[0]
     op = DmaFreeOp(bad_source)
@@ -569,6 +612,28 @@ def test_dma_view_type_or_space_mismatch() -> None:
     op = DmaViewOp(source, offsets, shape, stride, result_type)
     with pytest.raises(VerifyException, match="space mismatch"):
         op.verify()
+
+
+# TC-DMA-014A
+# 功能说明: 验证 dma.view/reshape/subview 作为 alias op 暴露 NoMemoryEffect。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_alias_ops_have_no_memory_effect
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_alias_ops_have_no_memory_effect() -> None:
+    memory_type = _make_memory_type()
+    byte_pool_type = _make_memory_type(shape=_dim_array([64]), stride=_dim_array([1]), element_type=i8)
+    source = _TestOp(result_types=[memory_type]).results[0]
+    pool = _TestOp(result_types=[byte_pool_type]).results[0]
+    zero, one, two, four = _make_symbol_operands([0, 1, 2, 4])
+
+    view = DmaViewOp(source, [zero, zero], [two, four], [one, one], memory_type)
+    reshape = DmaReshapeOp(source, [two, four], memory_type)
+    subview = DmaSubviewOp(pool, zero, four, one, _make_memory_type(shape=_dim_array([4]), stride=_dim_array([1])))
+
+    assert get_effects(view) == set()
+    assert get_effects(reshape) == set()
+    assert get_effects(subview) == set()
 
 
 # TC-DMA-015

@@ -10,6 +10,17 @@
 
 API 列表:
 - `class SymbolLoopHoistPass(fold: bool = True)`
+- `class SymbolConstHoistPattern()`
+- `class TunerParamHoistPattern()`
+- `class SymbolGetDimHoistPattern()`
+- `class SymbolGetStrideHoistPattern()`
+- `class SymbolAddHoistPattern()`
+- `class SymbolSubHoistPattern()`
+- `class SymbolMulHoistPattern()`
+- `class SymbolDivHoistPattern()`
+- `class SymbolFloorDivHoistPattern()`
+- `class SymbolMinHoistPattern()`
+- `class SymbolMaxHoistPattern()`
 - `get_symbol_loop_hoist_patterns() -> list[RewritePattern]`
 
 使用示例:
@@ -49,6 +60,8 @@ from kernel_gen.dialect.symbol import (
     SymbolForOp,
     SymbolGetDimOp,
     SymbolGetStrideOp,
+    SymbolMaxOp,
+    SymbolMinOp,
     SymbolMulOp,
     SymbolSubOp,
     SymbolDivOp,
@@ -169,6 +182,50 @@ class SymbolFloorDivHoistPattern(RewritePattern):
         _hoist_loop_invariant_op(op, rewriter)
 
 
+class SymbolMinHoistPattern(RewritePattern):
+    """`symbol.min` 外提 pattern。
+
+
+    功能说明:
+    - 对 loop-invariant 的 `symbol.min` 应用与其它 symbol 算术 op 相同的一层外提规则。
+    - 任一 operand 来自当前 loop body、loop iterator 或 loop-carried 值时保持 no-op。
+
+    使用示例:
+    - pattern = SymbolMinHoistPattern()
+
+    关联文件:
+    - spec: spec/pass/symbol_loop_hoist.md
+    - test: test/passes/test_symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: SymbolMinOp, rewriter: PatternRewriter, /) -> None:
+        _hoist_loop_invariant_op(op, rewriter)
+
+
+class SymbolMaxHoistPattern(RewritePattern):
+    """`symbol.max` 外提 pattern。
+
+
+    功能说明:
+    - 对 loop-invariant 的 `symbol.max` 应用与其它 symbol 算术 op 相同的一层外提规则。
+    - 任一 operand 来自当前 loop body、loop iterator 或 loop-carried 值时保持 no-op。
+
+    使用示例:
+    - pattern = SymbolMaxHoistPattern()
+
+    关联文件:
+    - spec: spec/pass/symbol_loop_hoist.md
+    - test: test/passes/test_symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: SymbolMaxOp, rewriter: PatternRewriter, /) -> None:
+        _hoist_loop_invariant_op(op, rewriter)
+
+
 def get_symbol_loop_hoist_patterns() -> list[RewritePattern]:
     """返回 `symbol-loop-hoist` pass 使用的公开 pattern 列表。
 
@@ -176,7 +233,7 @@ def get_symbol_loop_hoist_patterns() -> list[RewritePattern]:
     功能说明:
     - 以“每种受支持 op 一个 pattern”的形式公开当前 pass 的 pattern 列表。
     - 当前只覆盖 `symbol.const`、`tuner.param`、`symbol.get_dim/get_stride` 与
-      `symbol.add/sub/mul/div/floordiv`。
+      `symbol.add/sub/mul/div/floordiv/min/max`。
 
     使用示例:
     - `patterns = get_symbol_loop_hoist_patterns()`
@@ -197,6 +254,8 @@ def get_symbol_loop_hoist_patterns() -> list[RewritePattern]:
         SymbolMulHoistPattern(),
         SymbolDivHoistPattern(),
         SymbolFloorDivHoistPattern(),
+        SymbolMinHoistPattern(),
+        SymbolMaxHoistPattern(),
     ]
 
 
@@ -269,5 +328,7 @@ __all__ = [
     "SymbolMulHoistPattern",
     "SymbolDivHoistPattern",
     "SymbolFloorDivHoistPattern",
+    "SymbolMinHoistPattern",
+    "SymbolMaxHoistPattern",
     "get_symbol_loop_hoist_patterns",
 ]

@@ -258,7 +258,7 @@ def _lower_exp_op(op: Operation, block: Block) -> None:
 
     shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(operand, result_type)
     alloc = DmaAllocOp(dynamic_shape, result_type)
-    lowered = KernelExpOp(alloc.result, operand, ensure_space_attr(op))
+    lowered = KernelExpOp(operand, alloc.result, ensure_space_attr(op))
 
     try:
         alloc.verify()

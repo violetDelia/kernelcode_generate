@@ -50,6 +50,8 @@ from kernel_gen.dialect.symbol import (
     SymbolGetDimOp,
     SymbolGetStrideOp,
     SymbolIterType,
+    SymbolMaxOp,
+    SymbolMinOp,
     SymbolMulOp,
     SymbolSubOp,
     SymbolValueType,
@@ -65,6 +67,8 @@ SymbolFloorDivHoistPattern = pass_module.SymbolFloorDivHoistPattern
 SymbolGetDimHoistPattern = pass_module.SymbolGetDimHoistPattern
 SymbolGetStrideHoistPattern = pass_module.SymbolGetStrideHoistPattern
 SymbolLoopHoistPass = pass_module.SymbolLoopHoistPass
+SymbolMaxHoistPattern = pass_module.SymbolMaxHoistPattern
+SymbolMinHoistPattern = pass_module.SymbolMinHoistPattern
 SymbolMulHoistPattern = pass_module.SymbolMulHoistPattern
 SymbolSubHoistPattern = pass_module.SymbolSubHoistPattern
 TunerParamHoistPattern = pass_module.TunerParamHoistPattern
@@ -214,6 +218,48 @@ def _make_module_for_symbol_elewise_hoist() -> ModuleOp:
     block.add_ops(ops)
     func_op = func.FuncOp(
         "hoist_symbol_elewise",
+        FunctionType.from_lists([], []),
+        Region(block),
+    )
+    return ModuleOp([func_op])
+
+
+def _make_module_for_symbol_min_max_hoist() -> ModuleOp:
+    """构造 `symbol.min/max` loop-invariant 外提正例。
+
+
+    功能说明:
+    - min/max 的两个 operand 都来自 loop 外。
+    - 运行 `SymbolLoopHoistPass` 后，min/max 必须位于 loop 前。
+
+    使用示例:
+    - module = _make_module_for_symbol_min_max_hoist()
+
+    关联文件:
+    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    - Spec 文档: spec/pass/symbol_loop_hoist.md
+    - 测试文件: test/passes/test_symbol_loop_hoist.py
+    """
+
+    block = Block(arg_types=[])
+    ops: list[Operation] = []
+    c0 = SymbolConstOp(0)
+    c1 = SymbolConstOp(1)
+    c2 = SymbolConstOp(1)
+    c4 = SymbolConstOp(4)
+    c8 = SymbolConstOp(8)
+    ops.extend([c0, c1, c2, c4, c8])
+
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    min_op = SymbolMinOp(c4.result, c8.result, SymbolValueType.from_expr("min(4, 8)"))
+    max_op = SymbolMaxOp(c4.result, c8.result, SymbolValueType.from_expr("max(4, 8)"))
+    loop_block.add_ops([min_op, max_op])
+    loop = SymbolForOp(c0.result, c1.result, c2.result, loop_block)
+    ops.append(loop)
+    ops.append(func.ReturnOp())
+    block.add_ops(ops)
+    func_op = func.FuncOp(
+        "hoist_symbol_min_max",
         FunctionType.from_lists([], []),
         Region(block),
     )
@@ -440,6 +486,8 @@ def test_symbol_loop_hoist_patterns_are_public_and_stable() -> None:
         SymbolMulHoistPattern,
         SymbolDivHoistPattern,
         SymbolFloorDivHoistPattern,
+        SymbolMinHoistPattern,
+        SymbolMaxHoistPattern,
     ]
 
 
@@ -490,6 +538,26 @@ def test_symbol_loop_hoist_hoists_symbol_elewise_ops() -> None:
         SymbolDivOp,
         SymbolFloorDivOp,
     ]
+
+
+# TC-SLH-001D1
+# 测试目的: 验证 loop 内 invariant `symbol.min/max` 会被向上提一层到 `symbol.for` 之前。
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
+def test_symbol_loop_hoist_hoists_symbol_min_max_ops() -> None:
+    module = _make_module_for_symbol_min_max_hoist()
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    block = func_op.body.blocks.first
+    loop = next(op for op in block.ops if isinstance(op, SymbolForOp))
+
+    SymbolLoopHoistPass(fold=False).apply(Context(), module)
+
+    ops = list(block.ops)
+    loop_index = ops.index(loop)
+    hoisted_ops = [op for op in ops[:loop_index] if isinstance(op, (SymbolMinOp, SymbolMaxOp))]
+    assert [type(op) for op in hoisted_ops] == [SymbolMinOp, SymbolMaxOp]
+    assert not any(isinstance(op, (SymbolMinOp, SymbolMaxOp)) for op in loop.body.blocks.first.ops)
 
 
 # TC-SLH-001E

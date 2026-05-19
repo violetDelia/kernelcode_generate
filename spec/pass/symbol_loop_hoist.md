@@ -20,6 +20,8 @@
 - `class SymbolMulHoistPattern()`
 - `class SymbolDivHoistPattern()`
 - `class SymbolFloorDivHoistPattern()`
+- `class SymbolMinHoistPattern()`
+- `class SymbolMaxHoistPattern()`
 - `get_symbol_loop_hoist_patterns() -> list[RewritePattern]`
 
 ## 文档信息
@@ -64,7 +66,7 @@
   - `symbol.const`
   - `symbol.get_dim`
   - `symbol.get_stride`
-  - `symbol.add/sub/mul/div/floordiv`
+  - `symbol.add/sub/mul/div/floordiv/min/max`
 - 未列入白名单的 op 一律不由本 pass 主动处理：
   - 不承诺外提
   - 不承诺显式错误
@@ -478,6 +480,32 @@ assert isinstance(patterns[0], SymbolConstHoistPattern)
 - 功能说明：定义 `SymbolFloorDivHoistPattern` rewrite pattern 对象。
 - 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
 
+### `class SymbolMinHoistPattern()`
+
+- api：`class SymbolMinHoistPattern()`
+- 参数：无。
+- 返回值：`SymbolMinHoistPattern` 实例。
+- 使用示例：
+
+  ```python
+  symbol_min_hoist_pattern = SymbolMinHoistPattern()
+  ```
+- 功能说明：定义 `symbol.min` 的 loop-invariant rewrite pattern 对象。
+- 注意事项：仅当 `symbol.min` 的全部 operand 定义在当前 loop body 外部时才允许外提；依赖 loop iterator 或 loop-carried 值时保持 no-op。
+
+### `class SymbolMaxHoistPattern()`
+
+- api：`class SymbolMaxHoistPattern()`
+- 参数：无。
+- 返回值：`SymbolMaxHoistPattern` 实例。
+- 使用示例：
+
+  ```python
+  symbol_max_hoist_pattern = SymbolMaxHoistPattern()
+  ```
+- 功能说明：定义 `symbol.max` 的 loop-invariant rewrite pattern 对象。
+- 注意事项：仅当 `symbol.max` 的全部 operand 定义在当前 loop body 外部时才允许外提；依赖 loop iterator 或 loop-carried 值时保持 no-op。
+
 ### `get_symbol_loop_hoist_patterns() -> list[RewritePattern]`
 
 - api：`get_symbol_loop_hoist_patterns() -> list[RewritePattern]`
@@ -517,6 +545,7 @@ assert isinstance(patterns[0], SymbolConstHoistPattern)
 | TC-PASS-SYMBOL-LOOP-HOIST-003 | 公开入口 | 公开 pattern 与 getter 可导入且顺序稳定。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `TC-SLH-001B`。 | 公开入口在“公开 pattern 与 getter 可导入且顺序稳定。”场景下可导入、构造、注册或按名称发现。 | `TC-SLH-001B` |
 | TC-PASS-SYMBOL-LOOP-HOIST-004 | 成本/调优 | `tuner.param` 外提。 | 准备公开 cost kind、kernel/DMA 参数或 tuning IR 输入。 | 运行 `TC-SLH-001C`。 | 成本函数、tuning 属性或 cost IR 输出体现“`tuner.param` 外提。”场景。 | `TC-SLH-001C` |
 | TC-PASS-SYMBOL-LOOP-HOIST-005 | 符号语义 | `symbol.add/sub/mul/div/floordiv` 外提。 | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `TC-SLH-001D`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.add/sub/mul/div/floordiv` 外提。”场景。 | `TC-SLH-001D` |
+| TC-PASS-SYMBOL-LOOP-HOIST-005A | 符号语义 | `symbol.min/max` 外提。 | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `pytest -q test/passes/test_symbol_loop_hoist.py -k "min_max"`。 | loop-invariant 的 `symbol.min/max` 被外提；依赖 loop-carried 值的 `symbol.min/max` 保持原位。 | `pytest -q test/passes/test_symbol_loop_hoist.py -k "min_max"` |
 | TC-PASS-SYMBOL-LOOP-HOIST-006 | pass 改写 | `apply(ctx, module)` 保持 `ModulePass` 入口。 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `TC-SLH-001E`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`apply(ctx, module)` 保持 `ModulePass` 入口。”场景。 | `TC-SLH-001E` |
 | TC-PASS-SYMBOL-LOOP-HOIST-007 | 公开入口 | loop-carried 依赖的符号 op 保持原位。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `TC-SLH-002`。 | 公开入口在“loop-carried 依赖的符号 op 保持原位。”场景下可导入、构造、注册或按名称发现。 | `TC-SLH-002` |
 | TC-PASS-SYMBOL-LOOP-HOIST-008 | 边界/异常 | 校验失败包装为 `SymbolLoopHoistVerifierError`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `TC-SLH-007`。 | “校验失败包装为 `SymbolLoopHoistVerifierError`。”场景按公开错误语义失败或被拒绝。 | `TC-SLH-007` |

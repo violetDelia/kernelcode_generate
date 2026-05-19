@@ -4,7 +4,7 @@
 
 - 定义 `symbol-buffer-hoist` pass 的公开合同。
 - 该 pass 只在 `symbol.for` 的单 block 循环体内识别 `dma.alloc`、`dma.view`、`dma.reshape` 与 `dma.subview`，并在能够机械证明 operand 支配关系、使用方式和生命周期安全时，把单个 op 外提到所属 `symbol.for` 前一层。
-- 当前公开语义覆盖输入 staging buffer 与 output scratch buffer 两类 `dma.alloc/free` 成对外提，以及 loop-invariant alias op 的一层外提；没有唯一匹配 `dma.free` 时 `dma.alloc` 必须保持 loop 内 no-op。
+- 当前公开语义覆盖输入 staging buffer 与 output scratch buffer 两类 `dma.alloc/free` 成对外提、`MemoryEffect` 可判定的 kernel 读写生命周期证明，以及 loop-invariant alias op 的 fixed-point 单 op 外提；没有唯一匹配 `dma.free` 时 `dma.alloc` 必须保持 loop 内 no-op。
 - 本 pass 不做通用 LICM；在 `npu-demo-lowering` 中由 pipeline builder 固定接入，其它默认 pipeline 不隐式接入。
 
 ## API 列表
@@ -46,10 +46,11 @@
 
 - `input staging buffer`：loop 内临时 `dma.alloc`，后续作为 `dma.slice` 的目标 buffer 使用。
 - `output scratch buffer`：loop 内临时 `dma.alloc`，后续作为 `dma.deslice(target, source, ...)` 的 `source` buffer 使用。
-- `alias op`：`dma.view`、`dma.reshape` 或 `dma.subview` 这类只生成 memory view/result 的 op；本 pass 只承接这三种 alias op 的单层外提。
+- `alias op`：`dma.view`、`dma.reshape` 或 `dma.subview` 这类只生成 memory view/result 的 op；本 pass 只承接这三种 alias op 的单 op fixed-point 外提。
 - `loop-carried`：来自当前 `symbol.for` 的 `iter_args`、loop iterator 或任何定义在当前 loop body 内的 SSA 值。
 - `buffer escape`：`dma.alloc` 结果经 `symbol.yield`、`func.return` 或未知外部别名链暴露到当前 loop body 之外。
 - `lifecycle free`：同一 owner `symbol.for` 直接 body 内唯一释放当前 alloc result 的 `dma.free`；只有位于所有支持的数据 use 之后时才允许随 alloc 成对外提。
+- `lifecycle reset/write`：由公开 xDSL `MemoryEffect` 标注为 `WRITE` 且不同时读取当前 alloc result 的 use；当后续 `kernel.*` 或 `dma.*` 对同一 buffer 有 `READ` effect 时，首次 read 前必须已出现 reset/write。
 
 ## 目标
 
@@ -140,29 +141,32 @@ symbol.for value {
 ### 模块级补充
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
-- 本 pass 只处理当前 `symbol.for` 单 block 循环体内的 `dma.alloc`、`dma.view`、`dma.reshape` 与 `dma.subview`；loop 外 op、其他方言 op、其他 hoist 主题都不属于本轮公开语义。
+- 本 pass 以当前 `symbol.for` 的直接 body 为生命周期证明起点，`dma.alloc/free` 仍只在直接 body 里判定外提；`dma.view`、`dma.reshape` 与 `dma.subview` 允许在该 owner 的 descendant region 内做 fixed-point 逐层外提到最近安全位置。loop 外 op、其他方言 op、其他 hoist 主题都不属于本轮公开语义。
 - 当 `module` 中不存在 `symbol.for`，或某个 `symbol.for` 中不存在可安全外提的目标 op 时，pass 必须保持 no-op。
 - 允许外提的最小前提固定为：
   - `dma.alloc` 的 shape operand 全部定义在当前 loop body 之外。
   - shape 不依赖当前 `symbol.for` 的 loop iterator、`iter_args` 或任何 loop 内中间 SSA 值。
-  - 数据 use 只能是 `dma.slice` target 或 `dma.deslice` source，且 use op 必须位于同一 owner `symbol.for` 的直接 body 内。
-  - `dma.alloc` result 可以作为同一 owner `symbol.for` 直接 body 内 `dma.view`、`dma.reshape` 或 `dma.subview` 的 source；alias result 的最终 direct use 必须仍落在同一 owner body 内，并且属于 `dma.slice` target、`dma.deslice` source、`dma.fill` target、`dma.copy` target/source 或 `symbol.get_dim` 读取维度。
+  - 数据 use 可以是 legacy staging/scratch use（`dma.slice` target、`dma.deslice` source），也可以是公开 `MemoryEffect` 可判定且只包含 `READ/WRITE` 的 `dma.fill/copy/load/store/slice/deslice` 或 `kernel.*` memory use。
+  - 公开 `MemoryEffect` 可判定的 use 中，若当前 buffer 的首次 effect 包含 `READ` 且之前没有 reset/write，则必须保持 no-op；unknown effect、`ALLOC/FREE` data use 或未列入本文件的 effect 组合不得外提。
+  - `dma.alloc` result 可以作为同一 owner `symbol.for` 直接 body 内 `dma.view`、`dma.reshape` 或 `dma.subview` 的 source；alias result 的最终 direct use 必须落在同一 owner body 或其 descendant region 内，并且属于 `dma.slice` target、`dma.deslice` source、`dma.fill` target、`dma.copy` target/source、公开 `MemoryEffect` 可判定的 `kernel.*` memory operand、`symbol.get_dim` 读取维度或可继续处理的 alias op。
   - 若存在 `dma.free`，必须是同一 owner `symbol.for` 直接 body 内唯一释放当前 alloc result 的 op，并且顺序位于所有数据 use 之后。
   - output scratch 不经 `symbol.yield`、`func.return` 或未知外部别名链逃逸。
 - 当前公开正例固定为：
   - 输入 staging buffer：shape loop-invariant 且后接唯一合法 `dma.free` 时允许外提。
   - output scratch buffer：shape loop-invariant，且只作为 `dma.deslice(target, source, ...)` 的 `source` 使用并后接唯一合法 `dma.free` 时允许外提；`dma.deslice(target, source, ...)` 本身不构成 buffer escape。
   - 输入 staging 或 output scratch 没有唯一合法 `dma.free` 时必须保持 loop 内。
-  - `dma.view`：source、offset、shape、stride 全部支配当前 owner `symbol.for`，且 result use 只在同一 owner body 内流向 `dma.slice` target、`dma.deslice` source、`dma.fill` target、`dma.copy` target/source、`symbol.get_dim` 读取维度或可继续处理的 alias op 时，单 op 外提一层。
-  - `dma.reshape`：source 与 shape 全部支配当前 owner `symbol.for`，且 result use 满足同一白名单时，单 op 外提一层。
-  - `dma.subview`：source、offset、size、stride 全部支配当前 owner `symbol.for`，且 result use 满足同一白名单时，单 op 外提一层。
+  - `dma.view`：source、offset、shape、stride 全部支配当前 owner `symbol.for`，且 result use 只在同一 owner body 或 descendant region 内流向 `dma.slice` target、`dma.deslice` source、`dma.fill` target、`dma.copy` target/source、公开 `MemoryEffect` 可判定的 `kernel.*` memory operand、`symbol.get_dim` 读取维度或可继续处理的 alias op 时，单 op 外提一层；fixed-point 驱动可在 nested loop 中逐层外提到最近安全位置。
+  - `dma.reshape`：source 与 shape 全部支配当前 owner `symbol.for`，且 result use 满足同一白名单时，单 op 外提一层；fixed-point 驱动可在 nested loop 中逐层外提到最近安全位置。
+  - `dma.subview`：source、offset、size、stride 全部支配当前 owner `symbol.for`，且 result use 满足同一白名单时，单 op 外提一层；fixed-point 驱动可在 nested loop 中逐层外提到最近安全位置。
+  - `dma.fill` reset 后的 `kernel.*` read/write use 可作为 alloc/free 生命周期证明的一部分；例如 `dma.fill(buf, value)` 后 `kernel.matmul(out=..., lhs=buf, rhs=...)` 读取 `buf` 时，alloc/free 可以成对外提。
 - 当前公开反例固定为：
   - `dma.alloc` 的 shape 依赖 loop-carried 值时，alloc 必须保留在 loop 内。
   - 无法证明安全外提的 output scratch 必须保留在 loop 内，不得把行为做宽。
   - 没有唯一合法 `dma.free` 的输入 staging / output scratch 必须保持 loop 内。
   - `dma.free` 位于数据 use 前、存在多个 `dma.free`、`dma.free` 位于 nested region 或非 owner body、alloc result 有未知直接 use/alias escape 时，alloc/free 都必须保留原位。
   - alias op 任一 source、offset、shape、size 或 stride operand 来自当前 loop iterator、loop-carried block argument 或当前 loop body 内 op result 时，该 alias op 必须保留在 loop 内。
-  - alias result 经 `symbol.yield`、`func.return`、`kernel.*` memory operand、nested/sibling region、未知 direct use 或无法机械判定顺序的 alias 链逃逸时，该 alias op 必须保留原位。
+  - alias result 经 `symbol.yield`、`func.return`、sibling region、owner loop 外 region、未知 direct use、没有公开 `READ/WRITE` `MemoryEffect` 的 `kernel.*` memory operand，或无法机械判定顺序的 alias 链逃逸时，该 alias op 必须保留原位。
+  - `kernel.*` 或 `dma.*` 对 alloc result 的首次可判定 effect 包含 `READ` 且之前没有 reset/write 时，alloc/free 必须保留原位，不得把未初始化 read 外提成跨迭代共享状态。
 - 本 pass 不是通用 LICM，不负责：
   - 推断未写入本文件的副作用规则。
   - 改写 `func.func` 签名、生成 helper function 或新增 control-flow 结构。
@@ -286,8 +290,11 @@ symbol.for value {
 | TC-PASS-SYMBOL-BUFFER-HOIST-005 | 边界/异常 | `SymbolBufferHoistVerifierError:` 失败前缀 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_wraps_verify_failure_prefix`。 | “`SymbolBufferHoistVerifierError:` 失败前缀”场景按公开错误语义失败或被拒绝。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_wraps_verify_failure_prefix |
 | TC-PASS-SYMBOL-BUFFER-HOIST-006 | pass 改写 | 输入 staging alloc/free 成对外提 | 准备同一 owner `symbol.for` 直接 body 内 `dma.slice` 后唯一 `dma.free`。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_input_staging_alloc_and_matching_free`。 | alloc 位于 loop 前，free 位于 loop 后，slice 留在 loop 内。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_input_staging_alloc_and_matching_free |
 | TC-PASS-SYMBOL-BUFFER-HOIST-007 | pass 改写 | output scratch alloc/free 成对外提 | 准备同一 owner `symbol.for` 直接 body 内 `dma.deslice` 后唯一 `dma.free`。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_output_scratch_alloc_and_matching_free`。 | alloc 位于 loop 前，free 位于 loop 后，deslice 留在 loop 内。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_output_scratch_alloc_and_matching_free |
-| TC-PASS-SYMBOL-BUFFER-HOIST-008 | no-op 边界 | free 早于数据 use、多 free、nested free、free 位于 owner loop 内 `scf.if` sibling region block、未知直接 use 或 alias result 流向 `kernel.*` | 准备对应公开 IR 输入。 | 运行 `test_symbol_buffer_hoist_keeps_alloc_when_free_precedes_data_use`、`test_symbol_buffer_hoist_keeps_alloc_when_multiple_free`、`test_symbol_buffer_hoist_keeps_alloc_when_free_is_nested`、`test_symbol_buffer_hoist_keeps_alloc_when_free_not_in_owner_loop_body`、`test_symbol_buffer_hoist_keeps_alloc_for_unknown_direct_use_or_alias_escape`、`test_symbol_buffer_hoist_keeps_alias_result_when_used_by_kernel_op`。 | alloc/free 与 alias op 保持原位，不做不安全外提。 | `pytest -q test/passes/test_symbol_buffer_hoist.py -k "free_not_in_owner_loop_body or free_is_nested or multiple_free or free_precedes or unknown_direct_use or kernel_op"` |
+| TC-PASS-SYMBOL-BUFFER-HOIST-008 | no-op 边界 | free 早于数据 use、多 free、nested free、free 位于 owner loop 内 `scf.if` sibling region block、未知直接 use 或 alias escape | 准备对应公开 IR 输入。 | 运行 `test_symbol_buffer_hoist_keeps_alloc_when_free_precedes_data_use`、`test_symbol_buffer_hoist_keeps_alloc_when_multiple_free`、`test_symbol_buffer_hoist_keeps_alloc_when_free_is_nested`、`test_symbol_buffer_hoist_keeps_alloc_when_free_not_in_owner_loop_body`、`test_symbol_buffer_hoist_keeps_alloc_for_unknown_direct_use_or_alias_escape`。 | alloc/free 与 alias op 保持原位，不做不安全外提。 | `pytest -q test/passes/test_symbol_buffer_hoist.py -k "free_not_in_owner_loop_body or free_is_nested or multiple_free or free_precedes or unknown_direct_use"` |
 | TC-PASS-SYMBOL-BUFFER-HOIST-009 | pass 改写 | loop-invariant alias op 单层外提 | 准备 alloc/free 成对安全，且 `dma.view` / `dma.reshape` / `dma.subview` 的 source 与布局 operand 全部支配当前 loop。 | 运行 `test_symbol_buffer_hoist_hoists_loop_invariant_dma_view_one_layer`、`test_symbol_buffer_hoist_hoists_loop_invariant_dma_reshape_one_layer`、`test_symbol_buffer_hoist_hoists_loop_invariant_dma_subview_one_layer`。 | alloc/free 成对外提；alias op 位于 loop 前；data use 留在 loop 内捕获 alias result。 | `pytest -q test/passes/test_symbol_buffer_hoist.py -k "loop_invariant_dma_view or loop_invariant_dma_reshape or loop_invariant_dma_subview"` |
 | TC-PASS-SYMBOL-BUFFER-HOIST-010 | no-op 边界 | alias operand 依赖当前 loop | 准备 `dma.view` offset、`dma.reshape` shape 或 `dma.subview` size 依赖当前 iterator / loop-carried 值。 | 运行 `test_symbol_buffer_hoist_keeps_dma_view_when_offset_depends_on_loop_iterator`、`test_symbol_buffer_hoist_keeps_dma_reshape_when_shape_is_loop_carried`、`test_symbol_buffer_hoist_keeps_dma_subview_when_size_is_loop_carried`。 | alloc/free 可按自身规则成对外提；alias op 保持在 loop 内。 | `pytest -q test/passes/test_symbol_buffer_hoist.py -k "keeps_dma_view or keeps_dma_reshape or keeps_dma_subview"` |
 | TC-PASS-SYMBOL-BUFFER-HOIST-011 | 公开入口 | `build_registered_pass("symbol-buffer-hoist")` 返回 `ModulePass` | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_build_registered_symbol_buffer_hoist_pass`。 | 公开入口在“`build_registered_pass("symbol-buffer-hoist")` 返回 `ModulePass`”场景下可导入、构造、注册或按名称发现。 | test/passes/test_symbol_buffer_hoist.py::test_build_registered_symbol_buffer_hoist_pass |
 | TC-PASS-SYMBOL-BUFFER-HOIST-012 | 公开入口 | `kernel_gen.passes.symbol_buffer_hoist.SymbolBufferHoistPass` 与包根 re-export 导入成功 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_public_patterns_are_reachable`。 | 公开入口可导入；公开 getter 返回 `RewritePattern` 实例集合且不要求测试直连私有 pattern 类。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_public_patterns_are_reachable |
+| TC-PASS-SYMBOL-BUFFER-HOIST-013 | pass 改写 | `kernel.*` read 在 reset/write 之后可纳入 alloc/free 生命周期证明 | 准备 loop 内 `dma.alloc`，先 `dma.fill` 写入该 buffer，再由 `kernel.*` 读取，最后唯一 `dma.free`。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_alloc_when_kernel_read_is_reset_by_fill`。 | alloc 位于 loop 前，free 位于 loop 后，`dma.fill` 与 `kernel.*` use 留在 loop 内并捕获外提后的 buffer。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_alloc_when_kernel_read_is_reset_by_fill |
+| TC-PASS-SYMBOL-BUFFER-HOIST-014 | no-op 边界 | `kernel.*` read 早于 reset/write | 准备 loop 内 `dma.alloc` 直接被 `kernel.*` 作为输入读取，之后唯一 `dma.free`。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_keeps_alloc_when_kernel_reads_before_reset`。 | alloc/free 保持 loop 内，避免把未初始化 read 变成跨迭代共享状态。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_keeps_alloc_when_kernel_reads_before_reset |
+| TC-PASS-SYMBOL-BUFFER-HOIST-015 | pass 改写 | nested loop 中 alias result 流向公开 `MemoryEffect` 可判定的 `kernel.*` operand | 准备 source/layout operand 全部支配当前 loop 的 `dma.reshape` / `dma.view` / `dma.subview`，其 result 在 nested loop 中被 `kernel.*` 捕获。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_nested_alias_result_used_by_kernel_op`。 | alias op 通过 fixed-point 外提到最近安全位置；nested `kernel.*` use 保持原位并捕获外提 alias result。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_nested_alias_result_used_by_kernel_op |

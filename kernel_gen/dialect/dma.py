@@ -4,6 +4,7 @@
 功能说明:
 - 定义 dma dialect 的 alloc/fill/copy/load/store/slice/deslice/subview/view/reshape/cast/broadcast op 与 verifier 规则。
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
+- 通过 xDSL `MemoryEffect` trait 标注 alloc/free 与搬运 op 的公开读写语义，供 pass 机械判定生命周期。
 
 API 列表:
 - `class DmaAllocOp(dynamic_shape: Sequence[SSAValue], result_type: NnMemoryType)`
@@ -56,8 +57,10 @@ from xdsl.irdl import (
     irdl_op_definition,
     operand_def,
     result_def,
+    traits_def,
     var_operand_def,
 )
+from xdsl.traits import EffectInstance, MemoryEffect, MemoryEffectKind, NoMemoryEffect
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.core.contracts import (
@@ -65,6 +68,149 @@ from kernel_gen.core.contracts import (
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolIterType, SymbolValueType
+
+
+def _effect(kind: MemoryEffectKind, value: SSAValue) -> EffectInstance:
+    """构造作用到具体 SSA memory value 的 MemoryEffect。
+
+
+    功能说明:
+    - 将 dma 方言内的 alloc/free/read/write 语义统一绑定到具体 SSA value。
+    - 仅供当前文件私有 trait 类复用，不作为跨文件公开 API。
+
+    使用示例:
+    - _effect(MemoryEffectKind.WRITE, target)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    return EffectInstance(kind, SSAValue.get(value))
+
+
+class _DmaAllocMemoryEffect(MemoryEffect):
+    """`dma.alloc` 的 alloc effect trait。"""
+
+    @classmethod
+    def get_effects(cls, op: Operation) -> set[EffectInstance]:
+        """返回 `dma.alloc` 对 result 的 ALLOC effect。
+
+
+        功能说明:
+        - 将新建 memory result 作为 alloc lifecycle 的 effect value。
+
+        使用示例:
+        - effects = _DmaAllocMemoryEffect.get_effects(op)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        return {_effect(MemoryEffectKind.ALLOC, op.results[0])}
+
+
+class _DmaTargetWriteEffect(MemoryEffect):
+    """只写 target memory 的 DMA effect trait。"""
+
+    @classmethod
+    def get_effects(cls, op: Operation) -> set[EffectInstance]:
+        """返回 target WRITE effect。
+
+
+        功能说明:
+        - 用于 `dma.fill` 这类只写目标 memory、不读取目标旧值的 op。
+
+        使用示例:
+        - effects = _DmaTargetWriteEffect.get_effects(op)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        return {_effect(MemoryEffectKind.WRITE, op.operands[0])}
+
+
+class _DmaFreeMemoryEffect(MemoryEffect):
+    """`dma.free` 的 free effect trait。"""
+
+    @classmethod
+    def get_effects(cls, op: Operation) -> set[EffectInstance]:
+        """返回 source FREE effect。
+
+
+        功能说明:
+        - 将被释放 memory operand 作为生命周期释放点。
+
+        使用示例:
+        - effects = _DmaFreeMemoryEffect.get_effects(op)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        return {_effect(MemoryEffectKind.FREE, op.operands[0])}
+
+
+class _DmaTargetSourceEffect(MemoryEffect):
+    """读 source 并写 target 的 DMA effect trait。"""
+
+    @classmethod
+    def get_effects(cls, op: Operation) -> set[EffectInstance]:
+        """返回 target WRITE 与 source READ effect。
+
+
+        功能说明:
+        - 用于 `dma.copy/load/store/slice/deslice/transpose/cast` 等目标式搬运或转换 op。
+
+        使用示例:
+        - effects = _DmaTargetSourceEffect.get_effects(op)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        return {
+            _effect(MemoryEffectKind.WRITE, op.operands[0]),
+            _effect(MemoryEffectKind.READ, op.operands[1]),
+        }
+
+
+class _DmaBroadcastMemoryEffect(MemoryEffect):
+    """`dma.broadcast` 的目标写与可选 source 读 effect trait。"""
+
+    @classmethod
+    def get_effects(cls, op: Operation) -> set[EffectInstance]:
+        """返回 broadcast 的 MemoryEffect 集合。
+
+
+        功能说明:
+        - 永远写 target memory。
+        - 当 source 是 memory 时额外读 source；scalar source 不产生 memory read effect。
+
+        使用示例:
+        - effects = _DmaBroadcastMemoryEffect.get_effects(op)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        effects = {_effect(MemoryEffectKind.WRITE, op.operands[0])}
+        if isinstance(op.operands[1].type, NnMemoryType):
+            effects.add(_effect(MemoryEffectKind.READ, op.operands[1]))
+        return effects
+
 
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """校验并返回 nn.memory type。
@@ -1030,6 +1176,7 @@ class DmaAllocOp(IRDLOperation):
     """dma.alloc。"""
 
     name = "dma.alloc"
+    traits = traits_def(_DmaAllocMemoryEffect())
 
     dynamic_shape = var_operand_def(SymbolValueType)
     result = result_def(NnMemoryType)
@@ -1086,6 +1233,7 @@ class DmaFillOp(IRDLOperation):
     """dma.fill。"""
 
     name = "dma.fill"
+    traits = traits_def(_DmaTargetWriteEffect())
 
     target = operand_def(NnMemoryType)
     value = operand_def(Attribute)
@@ -1136,6 +1284,7 @@ class DmaFreeOp(IRDLOperation):
     """dma.free。"""
 
     name = "dma.free"
+    traits = traits_def(_DmaFreeMemoryEffect())
 
     source = operand_def(NnMemoryType)
 
@@ -1181,6 +1330,7 @@ class DmaCopyOp(IRDLOperation):
     """dma.copy。"""
 
     name = "dma.copy"
+    traits = traits_def(_DmaTargetSourceEffect())
 
     target = operand_def(NnMemoryType)
     source = operand_def(NnMemoryType)
@@ -1234,6 +1384,7 @@ class DmaBroadcastOp(IRDLOperation):
     """dma.broadcast。"""
 
     name = "dma.broadcast"
+    traits = traits_def(_DmaBroadcastMemoryEffect())
 
     target = operand_def(NnMemoryType)
     source = operand_def(Attribute)
@@ -1301,6 +1452,7 @@ class DmaTransposeOp(IRDLOperation):
     """dma.transpose。"""
 
     name = "dma.transpose"
+    traits = traits_def(_DmaTargetSourceEffect())
 
     target = operand_def(NnMemoryType)
     source = operand_def(NnMemoryType)
@@ -1364,6 +1516,7 @@ class DmaLoadOp(IRDLOperation):
     """dma.load。"""
 
     name = "dma.load"
+    traits = traits_def(_DmaTargetSourceEffect())
 
     target = operand_def(NnMemoryType)
     source = operand_def(NnMemoryType)
@@ -1441,6 +1594,7 @@ class DmaStoreOp(IRDLOperation):
     """dma.store。"""
 
     name = "dma.store"
+    traits = traits_def(_DmaTargetSourceEffect())
 
     target = operand_def(NnMemoryType)
     source = operand_def(NnMemoryType)
@@ -1514,6 +1668,7 @@ class DmaSliceOp(IRDLOperation):
     """dma.slice。"""
 
     name = "dma.slice"
+    traits = traits_def(_DmaTargetSourceEffect())
 
     target = operand_def(NnMemoryType)
     source = operand_def(NnMemoryType)
@@ -1590,6 +1745,7 @@ class DmaDesliceOp(IRDLOperation):
     """dma.deslice。"""
 
     name = "dma.deslice"
+    traits = traits_def(_DmaTargetSourceEffect())
 
     target = operand_def(NnMemoryType)
     source = operand_def(NnMemoryType)
@@ -1672,6 +1828,7 @@ class DmaViewOp(IRDLOperation):
     """dma.view。"""
 
     name = "dma.view"
+    traits = traits_def(NoMemoryEffect())
 
     source = operand_def(NnMemoryType)
     offsets = var_operand_def(Attribute)
@@ -1773,6 +1930,7 @@ class DmaSubviewOp(IRDLOperation):
     """dma.subview。"""
 
     name = "dma.subview"
+    traits = traits_def(NoMemoryEffect())
 
     source = var_operand_def(NnMemoryType)
     offset = var_operand_def(SymbolValueType)
@@ -1878,6 +2036,7 @@ class DmaReshapeOp(IRDLOperation):
     """dma.reshape。"""
 
     name = "dma.reshape"
+    traits = traits_def(NoMemoryEffect())
 
     source = operand_def(NnMemoryType)
     shape = var_operand_def(SymbolValueType)
@@ -1952,6 +2111,7 @@ class DmaCastOp(IRDLOperation):
     """dma.cast。"""
 
     name = "dma.cast"
+    traits = traits_def(_DmaTargetSourceEffect())
 
     target = operand_def(NnMemoryType)
     source = operand_def(NnMemoryType)

@@ -52,6 +52,8 @@ API 列表:
 - `class TileReducePass()`
 - `get_tile_reduce_pass_patterns() -> list[RewritePattern]`
 - `class SymbolLoopHoistPass()`
+- `class SymbolMinHoistPattern()`
+- `class SymbolMaxHoistPattern()`
 - `class TemplateNameInferPass(fold: bool = True)`
 
 使用示例:
@@ -164,7 +166,11 @@ from .tile.elewise import (
 from .tile.reduce import TileReducePass
 from .tile.reduce import TileReduceMatmulPattern, get_tile_reduce_pass_patterns
 from .pass_manager import Pass, PassManager
-from .symbol_loop_hoist import SymbolLoopHoistPass
+from .symbol_loop_hoist import (
+    SymbolLoopHoistPass,
+    SymbolMaxHoistPattern,
+    SymbolMinHoistPattern,
+)
 from .template_name_infer import TemplateNameInferPass
 
 __all__ = [
@@ -199,5 +205,7 @@ __all__ = [
     "TileReducePass",
     "get_tile_reduce_pass_patterns",
     "SymbolLoopHoistPass",
+    "SymbolMinHoistPattern",
+    "SymbolMaxHoistPattern",
     "TemplateNameInferPass",
 ]

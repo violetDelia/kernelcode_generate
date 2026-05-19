@@ -37,7 +37,8 @@ from xdsl.dialects.builtin import (
     i32,
 )
 from xdsl.dialects.test import TestOp as _TestOp
-from xdsl.ir import Attribute, SSAValue
+from xdsl.ir import Attribute, Operation, SSAValue
+from xdsl.traits import MemoryEffectKind, get_effects
 from xdsl.utils.exceptions import VerifyException
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -211,6 +212,27 @@ def _cast_i32_to_symbol(value: int) -> SSAValue:
     return cast.results[0]
 
 
+def _effect_kinds_by_value(op: Operation) -> set[tuple[MemoryEffectKind, SSAValue | None]]:
+    """读取 op 公开 MemoryEffect 的 kind/value 集合。
+
+
+    功能说明:
+    - 使用 xDSL 公开 `get_effects(op)` 验证 kernel op 的读写标注。
+
+    使用示例:
+    - effects = _effect_kinds_by_value(op)
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    effects = get_effects(op)
+    assert effects is not None
+    return {(effect.kind, effect.value) for effect in effects}
+
+
 # TC-KRN-001
 # 功能说明: 验证合法 space 可通过校验。
 # 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_space_attr_valid
@@ -257,6 +279,26 @@ def test_kernel_binary_elewise_add_success() -> None:
     out = _make_value(memory_type)
     op = KernelBinaryElewiseOp(out, lhs, rhs, kind="add", space=_make_space("global"))
     op.verify()
+
+
+# TC-KRN-004A
+# 功能说明: 验证 kernel.binary_elewise 暴露 out WRITE 与 lhs/rhs READ MemoryEffect。
+# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_binary_elewise_memory_effects
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel.py
+def test_kernel_binary_elewise_memory_effects() -> None:
+    memory_type = _make_memory_type()
+    out = _make_value(memory_type)
+    lhs = _make_value(memory_type)
+    rhs = _make_value(memory_type)
+    op = KernelBinaryElewiseOp(out, lhs, rhs, kind="add", space=_make_space("global"))
+
+    assert _effect_kinds_by_value(op) == {
+        (MemoryEffectKind.WRITE, out),
+        (MemoryEffectKind.READ, lhs),
+        (MemoryEffectKind.READ, rhs),
+    }
 
 
 # TC-KRN-005
@@ -523,7 +565,7 @@ def test_kernel_ops_no_result() -> None:
     )
     exp_input = _make_value(_make_memory_type(element_type=Float32Type()))
     exp_output = _make_value(_make_memory_type(element_type=Float32Type()))
-    exp_op = KernelExpOp(exp_output, exp_input, _make_space("global"))
+    exp_op = KernelExpOp(exp_input, exp_output, _make_space("global"))
     img2col_input_type = _make_memory_type(
         shape=_dim_array([1, 3, 5, 5]),
         stride=_dim_array([75, 25, 5, 1]),
@@ -590,8 +632,25 @@ def test_kernel_ops_no_result() -> None:
 def test_kernel_exp_success() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     out_type = _make_memory_type(element_type=Float32Type())
-    op = KernelExpOp(_make_value(out_type), _make_value(input_type), _make_space("global"))
+    op = KernelExpOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
     op.verify()
+
+
+# TC-KRN-011A
+# 功能说明: 验证 kernel.exp 暴露 out WRITE 与 input READ MemoryEffect。
+# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_exp_memory_effects
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel.py
+def test_kernel_exp_memory_effects() -> None:
+    input_value = _make_value(_make_memory_type(element_type=Float32Type()))
+    out = _make_value(_make_memory_type(element_type=Float32Type()))
+    op = KernelExpOp(input_value, out, _make_space("global"))
+
+    assert _effect_kinds_by_value(op) == {
+        (MemoryEffectKind.WRITE, out),
+        (MemoryEffectKind.READ, input_value),
+    }
 
 
 # TC-KRN-013
@@ -603,7 +662,7 @@ def test_kernel_exp_success() -> None:
 def test_kernel_exp_supports_bf16() -> None:
     input_type = _make_memory_type(element_type=BFloat16Type())
     out_type = _make_memory_type(element_type=BFloat16Type())
-    op = KernelExpOp(_make_value(out_type), _make_value(input_type), _make_space("global"))
+    op = KernelExpOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
     op.verify()
 
 
@@ -616,7 +675,7 @@ def test_kernel_exp_supports_bf16() -> None:
 def test_kernel_exp_requires_float() -> None:
     input_type = _make_memory_type(element_type=i32)
     out_type = _make_memory_type(element_type=i32)
-    op = KernelExpOp(_make_value(out_type), _make_value(input_type), _make_space("global"))
+    op = KernelExpOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
     with pytest.raises(VerifyException, match="kernel.exp element_type must be float"):
         op.verify()
 
@@ -650,6 +709,49 @@ def test_kernel_matmul_allows_mixed_spaces() -> None:
         _make_space("global"),
     )
     op.verify()
+
+
+# TC-KRN-014A
+# 功能说明: 验证 kernel.matmul 暴露 out WRITE 与 lhs/rhs READ MemoryEffect。
+# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_matmul_memory_effects
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel.py
+def test_kernel_matmul_memory_effects() -> None:
+    lhs_type = _make_memory_type(shape=_dim_array([2, 3]))
+    rhs_type = _make_memory_type(shape=_dim_array([3, 4]))
+    out_type = _make_memory_type(shape=_dim_array([2, 4]))
+    out = _make_value(out_type)
+    lhs = _make_value(lhs_type)
+    rhs = _make_value(rhs_type)
+    op = KernelMatmulOp(out, lhs, rhs, _make_space("global"))
+
+    assert _effect_kinds_by_value(op) == {
+        (MemoryEffectKind.WRITE, out),
+        (MemoryEffectKind.READ, lhs),
+        (MemoryEffectKind.READ, rhs),
+    }
+
+
+# TC-KRN-016A
+# 功能说明: 验证 kernel.select 暴露 out WRITE 与 cond/lhs/rhs READ MemoryEffect。
+# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_select_memory_effects
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel.py
+def test_kernel_select_memory_effects() -> None:
+    cond = _make_value(_make_memory_type(element_type=i1))
+    lhs = _make_value(_make_memory_type())
+    rhs = _make_value(_make_memory_type())
+    out = _make_value(_make_memory_type())
+    op = KernelSelectOp(out, cond, lhs, rhs, _make_space("global"))
+
+    assert _effect_kinds_by_value(op) == {
+        (MemoryEffectKind.WRITE, out),
+        (MemoryEffectKind.READ, cond),
+        (MemoryEffectKind.READ, lhs),
+        (MemoryEffectKind.READ, rhs),
+    }
 
 
 # TC-KRN-014
@@ -835,6 +937,102 @@ def test_kernel_img2col_structured_contract() -> None:
         pr=_const_i32(0),
         space=_make_space("global"),
     ).verify()
+
+
+# TC-KRN-017A
+# 功能说明: 验证 kernel.img2col1d/img2col2d 暴露 out WRITE 与 input READ MemoryEffect。
+# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_img2col_memory_effects
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel.py
+def test_kernel_img2col_memory_effects() -> None:
+    input1d = _make_value(
+        _make_memory_type(
+            shape=_dim_array([1, 3, 5]),
+            stride=_dim_array([15, 5, 1]),
+            element_type=Float32Type(),
+        )
+    )
+    out1d = _make_value(
+        _make_memory_type(
+            shape=_dim_array([1, 3, 3, 3]),
+            stride=_dim_array([27, 9, 3, 1]),
+            element_type=Float32Type(),
+        )
+    )
+    op1d = KernelImg2col1dOp(
+        out1d,
+        input1d,
+        k=_const_i32(3),
+        s=_const_i32(1),
+        d=_const_i32(1),
+        p_left=_const_i32(0),
+        p_right=_const_i32(0),
+        space=_make_space("global"),
+    )
+
+    input2d = _make_value(
+        _make_memory_type(
+            shape=_dim_array([1, 3, 5, 5]),
+            stride=_dim_array([75, 25, 5, 1]),
+            element_type=Float32Type(),
+        )
+    )
+    out2d = _make_value(
+        _make_memory_type(
+            shape=_dim_array([1, 3, 3, 3, 3, 3]),
+            stride=_dim_array([243, 81, 27, 9, 3, 1]),
+            element_type=Float32Type(),
+        )
+    )
+    op2d = KernelImg2col2dOp(
+        out2d,
+        input2d,
+        kh=_const_i32(3),
+        kw=_const_i32(3),
+        sh=_const_i32(1),
+        sw=_const_i32(1),
+        dh=_const_i32(1),
+        dw=_const_i32(1),
+        ph=_const_i32(0),
+        pw=_const_i32(0),
+        pl=_const_i32(0),
+        pr=_const_i32(0),
+        space=_make_space("global"),
+    )
+
+    assert _effect_kinds_by_value(op1d) == {
+        (MemoryEffectKind.WRITE, out1d),
+        (MemoryEffectKind.READ, input1d),
+    }
+    assert _effect_kinds_by_value(op2d) == {
+        (MemoryEffectKind.WRITE, out2d),
+        (MemoryEffectKind.READ, input2d),
+    }
+
+
+# TC-KRN-017B
+# 功能说明: 验证 kernel.reduce 与 kernel.reduce_min 暴露 out WRITE 与 input READ MemoryEffect。
+# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_reduce_memory_effects
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel.py
+def test_kernel_reduce_memory_effects() -> None:
+    input_type = _make_memory_type(shape=_dim_array([2, 4]), element_type=Float32Type())
+    out_type = _make_memory_type(shape=_dim_array([2]), stride=_dim_array([1]), element_type=Float32Type())
+    input_value = _make_value(input_type)
+    out = _make_value(out_type)
+    reduce_op = KernelReduceOp(out, input_value, kind="sum", axis=1, keepdim=False, space=_make_space("global"))
+    reduce_min_op = KernelReduceMinOp(out, input_value, axis=1, keepdim=False, space=_make_space("global"))
+
+    assert _effect_kinds_by_value(reduce_op) == {
+        (MemoryEffectKind.WRITE, out),
+        (MemoryEffectKind.READ, input_value),
+    }
+    assert _effect_kinds_by_value(reduce_min_op) == {
+        (MemoryEffectKind.WRITE, out),
+        (MemoryEffectKind.READ, input_value),
+    }
 
 
 # TC-KRN-018
