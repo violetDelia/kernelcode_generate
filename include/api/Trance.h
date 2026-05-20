@@ -4,6 +4,7 @@
 - `TRANCE` 未开启时只提供无副作用占位实现，不引入标准库打印或文件管理依赖。
 - `TRANCE` 开启时由 include/npu_demo/Trance.h 提供 stdout/file sink 与格式化打印实现。
 - `ScopedTranceSink/current_sink()` 的活动 sink 仅作用于当前线程，未建 scope 的线程回退 stdout sink。
+- `KG_TRANCE_DIR_PATH` 非空时由 block trace sink 负责 `block_XXXX.log` 级落盘。
 
 API 列表:
 - `struct kernelcode::trance::TranceSink`
@@ -15,6 +16,10 @@ API 列表:
 - `class kernelcode::trance::ScopedTranceSink`
 - `ScopedTranceSink::ScopedTranceSink()`
 - `ScopedTranceSink::~ScopedTranceSink()`
+- `kernelcode::trance::prepare_block_trace_dir(const char* dir_path) -> void`
+- `class kernelcode::trance::ScopedBlockTranceSink`
+- `ScopedBlockTranceSink::ScopedBlockTranceSink(const char* dir_path, long long block_id, long long block_num, long long thread_id, long long thread_num)`
+- `ScopedBlockTranceSink::~ScopedBlockTranceSink()`
 - `kernelcode::trance::write_line(const TranceSink& sink, const char* text) -> void`
 - `kernelcode::trance::write_log_failed_and_fallback(const char* file_path) -> void`
 - `kernelcode::trance::print_func_begin(const TranceSink& sink, const char* func_name, const char* template_desc) -> void`
@@ -38,6 +43,10 @@ helper 清单:
 
 #ifndef KERNELCODE_GENERATE_INCLUDE_API_TRANCE_H_
 #define KERNELCODE_GENERATE_INCLUDE_API_TRANCE_H_
+
+#ifdef TRANCE
+#include <string>
+#endif
 
 namespace kernelcode {
 namespace trance {
@@ -68,6 +77,24 @@ public:
     ~ScopedTranceSink();
 
 private:
+    TranceSink sink_;
+    TranceSink* previous_;
+};
+
+void prepare_block_trace_dir(const char* dir_path);
+
+class ScopedBlockTranceSink {
+public:
+    ScopedBlockTranceSink(
+        const char* dir_path,
+        long long block_id,
+        long long block_num,
+        long long thread_id,
+        long long thread_num);
+    ~ScopedBlockTranceSink();
+
+private:
+    std::string file_path_;
     TranceSink sink_;
     TranceSink* previous_;
 };
@@ -106,6 +133,27 @@ class ScopedTranceSink {
 public:
     ScopedTranceSink() = default;
     ~ScopedTranceSink() = default;
+};
+
+inline void prepare_block_trace_dir(const char* dir_path) {
+    (void)dir_path;
+}
+
+class ScopedBlockTranceSink {
+public:
+    ScopedBlockTranceSink(
+        const char* dir_path,
+        long long block_id,
+        long long block_num,
+        long long thread_id,
+        long long thread_num) {
+        (void)dir_path;
+        (void)block_id;
+        (void)block_num;
+        (void)thread_id;
+        (void)thread_num;
+    }
+    ~ScopedBlockTranceSink() = default;
 };
 
 inline void write_line(const TranceSink& sink, const char* text) {

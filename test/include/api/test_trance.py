@@ -33,7 +33,7 @@ def _compile_and_run_capture_stdout(source: str, compiler_flags: tuple[str, ...]
 
     功能说明:
     - 使用 `g++ -std=c++17 -pthread` 编译临时源码。
-    - `compiler_flags` 只用于测试公开宏开关，例如 `-DTRANCE` 与 `KG_TRANCE_FILE_PATH`。
+    - `compiler_flags` 只用于测试公开宏开关，例如 `-DTRANCE`、`KG_TRANCE_FILE_PATH` 与 `KG_TRANCE_DIR_PATH`。
 
     使用示例:
     - stdout = _compile_and_run_capture_stdout("int main() { return 0; }")
@@ -221,3 +221,66 @@ int main() {
     assert "owner line" not in stdout
     assert "owner line" in trace_text
     assert "observer line" not in trace_text
+
+
+# API-TRANCE-007
+# 测试目的: 验证 block trace 公开入口由 launch 创建每 block 文件，并在下次运行前清理旧 block 文件。
+# 对应功能实现文件路径: include/api/Trance.h
+# 对应功能实现文件路径: include/npu_demo/Trance.h
+# 对应功能实现文件路径: include/npu_demo/Arch.h
+# 对应 spec 文件路径: spec/include/api/Trance.md
+# 对应测试文件路径: test/include/api/test_trance.py
+def test_npu_demo_trance_block_sink_writes_per_block_files(tmp_path: Path) -> None:
+    trace_dir = tmp_path / "kernel" / "trance"
+    launch_two_blocks = r"""
+#include "include/npu_demo/npu_demo.h"
+
+static void kernel_body() {}
+
+int main() {
+    Status status = npu_demo::launch<2, 1, 1, 0>(kernel_body);
+    return status == StatusCode::kOk ? 0 : 1;
+}
+"""
+    stdout = _compile_and_run_capture_stdout(
+        launch_two_blocks,
+        ("-DTRANCE", f'-DKG_TRANCE_DIR_PATH="{trace_dir}"'),
+    )
+
+    block0_path = trace_dir / "block_0000.log"
+    block1_path = trace_dir / "block_0001.log"
+    block0_text = block0_path.read_text(encoding="utf-8")
+    block1_text = block1_path.read_text(encoding="utf-8")
+
+    assert stdout == ""
+    assert "block_id = 0" in block0_text
+    assert "block_num = 2" in block0_text
+    assert "thread_id = 0" in block0_text
+    assert "thread_num = 1" in block0_text
+    assert "in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>" in block0_text
+    assert "arg0 = callable[kernel_body]" in block0_text
+    assert "block_id = 1" in block1_text
+    assert "block_num = 2" in block1_text
+    assert "in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>" in block1_text
+
+    block1_path.write_text("stale\n", encoding="utf-8")
+    launch_one_block = r"""
+#include "include/npu_demo/npu_demo.h"
+
+static void kernel_body() {}
+
+int main() {
+    Status status = npu_demo::launch<1, 1, 1, 0>(kernel_body);
+    return status == StatusCode::kOk ? 0 : 1;
+}
+"""
+    stdout = _compile_and_run_capture_stdout(
+        launch_one_block,
+        ("-DTRANCE", f'-DKG_TRANCE_DIR_PATH="{trace_dir}"'),
+    )
+    overwritten_text = block0_path.read_text(encoding="utf-8")
+
+    assert stdout == ""
+    assert "stale" not in overwritten_text
+    assert "block_num = 1" in overwritten_text
+    assert not block1_path.exists()

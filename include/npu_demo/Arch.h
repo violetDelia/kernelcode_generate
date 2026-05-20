@@ -2,6 +2,7 @@
 功能说明:
 - 提供 npu_demo 后端的 launch / barrier 运行时实现与 KernelContext 运行时视图。
 - `TRANCE` 开启时在 launch 边界打印函数名、模板参数、callable 与 forwarded args 参数摘要。
+- `KG_TRANCE_DIR_PATH` 非空时，launch 在每个 block worker 内写入独立的 `block_XXXX.log`。
 
 API 列表:
 - `template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args> Status npu_demo::launch(Callable&& callee, Args&&... args)`
@@ -786,6 +787,10 @@ inline Status launch(Callable&& callee, Args&&... args) {
     }
 
 #ifdef TRANCE
+    const bool __kg_trance_block_trace_enabled = KG_TRANCE_DIR_PATH[0] != '\0';
+    if (__kg_trance_block_trace_enabled) {
+        kernelcode::trance::prepare_block_trace_dir(KG_TRANCE_DIR_PATH);
+    }
     const kernelcode::trance::TranceSink& __kg_trance_sink = kernelcode::trance::current_sink();
     std::ostringstream __kg_trance_template;
     __kg_trance_template
@@ -794,17 +799,19 @@ inline Status launch(Callable&& callee, Args&&... args) {
         << ", subthread=" << subthread
         << ", shared_memory_size=" << shared_memory_size
         << ">";
-    kernelcode::trance::print_func_begin(
-        __kg_trance_sink,
-        "npu_demo::launch",
-        __kg_trance_template.str().c_str());
-    kernelcode::trance::write_line(__kg_trance_sink, "args =");
-    kernelcode::trance::print_callable_arg(__kg_trance_sink, "arg0", callee);
-    long long __kg_trance_arg_index = 1;
-    ((kernelcode::trance::print_value_arg(
-         __kg_trance_sink,
-         (std::string("arg") + std::to_string(__kg_trance_arg_index++)).c_str(),
-         args)), ...);
+    if (!__kg_trance_block_trace_enabled) {
+        kernelcode::trance::print_func_begin(
+            __kg_trance_sink,
+            "npu_demo::launch",
+            __kg_trance_template.str().c_str());
+        kernelcode::trance::write_line(__kg_trance_sink, "args =");
+        kernelcode::trance::print_callable_arg(__kg_trance_sink, "arg0", callee);
+        long long __kg_trance_arg_index = 1;
+        ((kernelcode::trance::print_value_arg(
+             __kg_trance_sink,
+             (std::string("arg") + std::to_string(__kg_trance_arg_index++)).c_str(),
+             args)), ...);
+    }
 #endif
 
     std::vector<std::shared_ptr<npu_demo::detail::LaunchBarrierState>> barrier_states;
@@ -829,15 +836,54 @@ inline Status launch(Callable&& callee, Args&&... args) {
                     subthread,
                     barrier_states[static_cast<unsigned long long>(block_index)]);
                 npu_demo::detail::ScopedActiveKernelContext scoped_active_ctx(&ctx);
-                std::apply(
-                    [&](auto&... unpacked_args) {
-                        if constexpr (std::is_invocable<decltype(callable)&, npu_demo::KernelContext&, decltype(unpacked_args)...>::value) {
-                            callable(ctx, unpacked_args...);
-                        } else {
-                            callable(unpacked_args...);
-                        }
-                    },
-                    forwarded_args);
+                auto __kg_call_callee = [&]() {
+                    std::apply(
+                        [&](auto&... unpacked_args) {
+                            if constexpr (std::is_invocable<decltype(callable)&, npu_demo::KernelContext&, decltype(unpacked_args)...>::value) {
+                                callable(ctx, unpacked_args...);
+                            } else {
+                                callable(unpacked_args...);
+                            }
+                        },
+                        forwarded_args);
+                };
+#ifdef TRANCE
+                if (__kg_trance_block_trace_enabled) {
+                    kernelcode::trance::ScopedBlockTranceSink __kg_block_trance_scope(
+                        KG_TRANCE_DIR_PATH,
+                        block_index,
+                        block,
+                        thread_index,
+                        thread);
+                    const kernelcode::trance::TranceSink& __kg_block_trance_sink =
+                        kernelcode::trance::current_sink();
+                    std::ostringstream __kg_block_trance_template;
+                    __kg_block_trance_template
+                        << "template=<block=" << block
+                        << ", thread=" << thread
+                        << ", subthread=" << subthread
+                        << ", shared_memory_size=" << shared_memory_size
+                        << ">";
+                    kernelcode::trance::print_func_begin(
+                        __kg_block_trance_sink,
+                        "npu_demo::launch",
+                        __kg_block_trance_template.str().c_str());
+                    kernelcode::trance::write_line(__kg_block_trance_sink, "args =");
+                    kernelcode::trance::print_callable_arg(__kg_block_trance_sink, "arg0", callable);
+                    long long __kg_block_trance_arg_index = 1;
+                    std::apply(
+                        [&](auto&... unpacked_args) {
+                            ((kernelcode::trance::print_value_arg(
+                                 __kg_block_trance_sink,
+                                 (std::string("arg") + std::to_string(__kg_block_trance_arg_index++)).c_str(),
+                                 unpacked_args)), ...);
+                        },
+                        forwarded_args);
+                    __kg_call_callee();
+                    return;
+                }
+#endif
+                __kg_call_callee();
             });
         }
     }

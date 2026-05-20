@@ -6,14 +6,17 @@
 
 - `TRANCE` 是唯一编译期启用宏；关闭时 `include/api/Trance.h` 必须保持无副作用 no-op。
 - `KG_TRANCE_KERNEL_NAME` 是编译链注入的 kernel 名称宏；未注入时后端实现默认使用 `"kernel"`。
-- `KG_TRANCE_FILE_PATH` 是编译链注入的 trace 文件路径宏；空字符串表示输出到 stdout。
+- `KG_TRANCE_DIR_PATH` 是编译链注入的 block trace 目录宏；非空时 `npu_demo::launch` 必须写入 `block_XXXX.log`。
+- `KG_TRANCE_FILE_PATH` 是基础 file sink 兼容宏；空字符串表示输出到 stdout，`dsl_run(...)` 不再把它作为落盘合同。
 - `kernelcode::trance::ScopedTranceSink` 负责在一次运行期入口内建立当前 sink，并在析构时关闭文件 sink。
+- `kernelcode::trance::ScopedBlockTranceSink` 负责在单个 block worker 内建立 block 文件 sink。
 - `Memory::trance_print(...)` 的参数摘要格式由 [`spec/include/api/Memory.md`](Memory.md) 定义。
 
 ## API 列表
 
 - `TRANCE -> macro`
 - `KG_TRANCE_KERNEL_NAME -> const char* macro`
+- `KG_TRANCE_DIR_PATH -> const char* macro`
 - `KG_TRANCE_FILE_PATH -> const char* macro`
 - `struct kernelcode::trance::TranceSink`
 - `kernelcode::trance::make_stdout_sink() -> TranceSink`
@@ -24,6 +27,10 @@
 - `class kernelcode::trance::ScopedTranceSink`
 - `kernelcode::trance::ScopedTranceSink::ScopedTranceSink()`
 - `kernelcode::trance::ScopedTranceSink::~ScopedTranceSink() -> void`
+- `kernelcode::trance::prepare_block_trace_dir(const char* dir_path) -> void`
+- `class kernelcode::trance::ScopedBlockTranceSink`
+- `kernelcode::trance::ScopedBlockTranceSink::ScopedBlockTranceSink(const char* dir_path, long long block_id, long long block_num, long long thread_id, long long thread_num)`
+- `kernelcode::trance::ScopedBlockTranceSink::~ScopedBlockTranceSink() -> void`
 - `kernelcode::trance::write_line(const TranceSink& sink, const char* text) -> void`
 - `kernelcode::trance::write_log_failed_and_fallback(const char* file_path) -> void`
 - `kernelcode::trance::print_func_begin(const TranceSink& sink, const char* func_name, const char* template_desc) -> void`
@@ -49,6 +56,7 @@
 
 - 为 runtime kernel log 提供单一 include 入口，避免在 `dsl_run(...)`、runner 或执行引擎上新增平行参数。
 - 明确 stdout、文件输出、文件失败回退和关闭语义，使生成源码与手写 include 消费者可复现同一行为。
+- 明确 `dump_dir/<kernel name>/trance/block_XXXX.log` 的目录准备、旧 block 文件清理和每 block sink 作用域。
 - 保证 `TRANCE` 未开启时不扩散标准库打印、文件管理或额外运行期副作用。
 
 ## API详细说明
@@ -94,8 +102,21 @@
   ```cpp
   kernelcode::trance::TranceSink sink = kernelcode::trance::make_file_sink(KG_TRANCE_FILE_PATH);
   ```
-- 功能说明：表示 runtime trance 输出文件路径。
-- 注意事项：空字符串表示输出到 stdout；非空路径打开失败时必须输出 `log failed: <path>` 并回退 stdout；文件 sink 使用覆盖写入语义。
+- 功能说明：表示基础 runtime trance 输出文件路径。
+- 注意事项：空字符串表示输出到 stdout；非空路径打开失败时必须输出 `log failed: <path>` 并回退 stdout；文件 sink 使用覆盖写入语义；`KG_TRANCE_DIR_PATH` 非空时，`npu_demo::launch` block 模式优先使用目录，`KG_TRANCE_FILE_PATH` 不得重新触发 `dsl_run(...)` 旧 `<entry>_trace.txt` 落盘。
+
+### `KG_TRANCE_DIR_PATH -> const char* macro`
+
+- api：`KG_TRANCE_DIR_PATH -> const char* macro`
+- 参数：无。
+- 返回值：编译期字符串宏。
+- 使用示例：
+
+  ```cpp
+  kernelcode::trance::prepare_block_trace_dir(KG_TRANCE_DIR_PATH);
+  ```
+- 功能说明：表示 block trace 目录。
+- 注意事项：空字符串表示不启用 block 文件模式；非空时 `npu_demo::launch` 必须在每次运行前清理目录内旧 `block_*.log`，并让每个实际 block worker 写入 `block_0000.log`、`block_0001.log` 等文件；编号宽度固定至少 4 位，超过 9999 不截断。
 
 ### `struct kernelcode::trance::TranceSink`
 
@@ -222,6 +243,64 @@
 - 功能说明：结束当前 sink 作用域。
 - 注意事项：析构必须关闭文件 sink；析构不得抛出异常或改变 kernel 返回码。
 
+### `kernelcode::trance::prepare_block_trace_dir(const char* dir_path) -> void`
+
+- api：`kernelcode::trance::prepare_block_trace_dir(const char* dir_path) -> void`
+- 参数：
+  - `dir_path`：block trace 目录；类型 `const char*`；必填；允许空指针或空字符串，空值 no-op。
+- 返回值：无返回值。
+- 使用示例：
+
+  ```cpp
+  kernelcode::trance::prepare_block_trace_dir(KG_TRANCE_DIR_PATH);
+  ```
+- 功能说明：准备 block trace 目录并清理旧 `block_*.log`。
+- 注意事项：目录创建或清理失败时必须走 `log failed: <path>` stdout 诊断，不得改变 kernel 数学结果；该函数是 `Arch.h` 可调用的公开 trace 入口，路径拼接、目录遍历和清理逻辑不得散入 `Arch.h`。
+
+### `class kernelcode::trance::ScopedBlockTranceSink`
+
+- api：`class kernelcode::trance::ScopedBlockTranceSink`
+- 参数：无。
+- 返回值：`ScopedBlockTranceSink` 实例。
+- 使用示例：
+
+  ```cpp
+  kernelcode::trance::ScopedBlockTranceSink scope(dir, bid, blocks, tid, threads);
+  ```
+- 功能说明：在当前 block worker 线程内建立 block 文件 sink。
+- 注意事项：活动 sink 仍按线程隔离；空目录回退 stdout；非空目录使用覆盖写入的 `block_XXXX.log`。
+
+### `kernelcode::trance::ScopedBlockTranceSink::ScopedBlockTranceSink(const char* dir_path, long long block_id, long long block_num, long long thread_id, long long thread_num)`
+
+- api：`kernelcode::trance::ScopedBlockTranceSink::ScopedBlockTranceSink(const char* dir_path, long long block_id, long long block_num, long long thread_id, long long thread_num)`
+- 参数：
+  - `dir_path`：block trace 目录；类型 `const char*`；必填；空值回退 stdout。
+  - `block_id`：当前 block 索引；类型 `long long`；必填。
+  - `block_num`：当前 launch block extent；类型 `long long`；必填。
+  - `thread_id`：当前 thread 索引；类型 `long long`；必填。
+  - `thread_num`：当前 launch thread extent；类型 `long long`；必填。
+- 返回值：无返回值。
+- 使用示例：
+
+  ```cpp
+  kernelcode::trance::ScopedBlockTranceSink scope(KG_TRANCE_DIR_PATH, 0, 2, 0, 1);
+  ```
+- 功能说明：打开当前 block 对应的 `block_XXXX.log`，写入 `block_id/block_num/thread_id/thread_num` header，并安装当前线程 sink。
+- 注意事项：文件打开失败时必须输出 `log failed: <path>` 并回退 stdout。
+
+### `kernelcode::trance::ScopedBlockTranceSink::~ScopedBlockTranceSink() -> void`
+
+- api：`kernelcode::trance::ScopedBlockTranceSink::~ScopedBlockTranceSink() -> void`
+- 参数：无。
+- 返回值：无返回值。
+- 使用示例：
+
+  ```cpp
+  { kernelcode::trance::ScopedBlockTranceSink scope(dir, 0, 1, 0, 1); }
+  ```
+- 功能说明：结束当前 block sink 作用域。
+- 注意事项：析构必须关闭文件 sink并恢复当前线程前一个 sink；不得抛出异常或改变 kernel 返回码。
+
 ### `kernelcode::trance::write_line(const TranceSink& sink, const char* text) -> void`
 
 - api：`kernelcode::trance::write_line(const TranceSink& sink, const char* text) -> void`
@@ -341,6 +420,7 @@
 | TC-INCLUDE-API-TRANCE-001 | 公开入口 | `TRANCE` 关闭时 no-op 公开函数可编译运行。 | 只 include `include/api/Trance.h`，不传 `-DTRANCE`。 | 运行 `test_api_trance_header_noop_without_macro`。 | 程序成功运行且 stdout 为空。 | `test_api_trance_header_noop_without_macro` |
 | TC-INCLUDE-API-TRANCE-002 | 执行结果 | `TRANCE` 开启时 stdout 输出 Memory forwarded 参数和 launch 模板信息。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE`，通过 `launch` 传入 `Memory<GM, float>` 与标量参数。 | 运行 `test_npu_demo_trance_stdout_memory_and_launch_format`。 | stdout 包含 `in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>`、`arg0 = callable[kernel_body]`、`arg1 = mem[...] [2, 3] [3, 1] f32 GM` 与 `arg2 = 7`。 | `test_npu_demo_trance_stdout_memory_and_launch_format` |
 | TC-INCLUDE-API-TRANCE-003 | 边界/异常 | 文件 sink 打开失败后回退 stdout。 | 传 `-DTRANCE` 与不存在父目录的 `KG_TRANCE_FILE_PATH`。 | 运行 `test_npu_demo_trance_file_open_failure_falls_back_to_stdout`。 | stdout 包含 `log failed: <path>` 和后续输出行，目标文件不存在。 | `test_npu_demo_trance_file_open_failure_falls_back_to_stdout` |
-| TC-INCLUDE-API-TRANCE-004 | 公开入口 | include/api 公开头文件组合可直接 compile-only 消费。 | include `Core.h`、`Arch.h`、`Trance.h`、`Memory.h`、`Dma.h` 与 `Kernel.h`。 | 运行 `test_include_api_public_headers_compile_together`。 | C++ compile-only 成功，调用方可读取公开类型与 no-op sink。 | `test_include_api_public_headers_compile_together` |
-| TC-INCLUDE-API-TRANCE-005 | 公开入口 | `include/api/Trance.h` no-op runtime 边界可直接运行。 | 只 include `include/api/Trance.h`，不传 `-DTRANCE`。 | 运行 `test_include_api_trance_noop_public_runtime_boundary`。 | 程序成功运行且 stdout 为空。 | `test_include_api_trance_noop_public_runtime_boundary` |
-| TC-INCLUDE-API-TRANCE-006 | 并发边界 | 当前线程建立文件 sink 后，未建 scope 的其它线程调用 `current_sink()`。 | include `include/npu_demo/Trance.h`，传 `-DTRANCE` 与有效 `KG_TRANCE_FILE_PATH`，用 `std::thread` 在其它线程写入。 | 运行 `test_npu_demo_scoped_sink_does_not_cross_thread`。 | owner 线程输出写入 trace 文件；observer 线程输出写入 stdout，trace 文件不包含 observer 行。 | `test_npu_demo_scoped_sink_does_not_cross_thread` |
+| TC-INCLUDE-API-TRANCE-004 | 执行结果 | block trace sink 创建目录、清理旧文件并写入 header。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE` 与 `KG_TRANCE_DIR_PATH`，执行 `launch<2, 1, 1, 0>`. | 运行 `test_npu_demo_trance_block_sink_writes_per_block_files`。 | `block_0000.log` 与 `block_0001.log` 存在，header block id 正确，旧 `block_0001.log` 可被清理。 | `test_npu_demo_trance_block_sink_writes_per_block_files` |
+| TC-INCLUDE-API-TRANCE-005 | 公开入口 | include/api 公开头文件组合可直接 compile-only 消费。 | include `Core.h`、`Arch.h`、`Trance.h`、`Memory.h`、`Dma.h` 与 `Kernel.h`。 | 运行 `test_include_api_public_headers_compile_together`。 | C++ compile-only 成功，调用方可读取公开类型与 no-op sink。 | `test_include_api_public_headers_compile_together` |
+| TC-INCLUDE-API-TRANCE-006 | 公开入口 | `include/api/Trance.h` no-op runtime 边界可直接运行。 | 只 include `include/api/Trance.h`，不传 `-DTRANCE`。 | 运行 `test_include_api_trance_noop_public_runtime_boundary`。 | 程序成功运行且 stdout 为空。 | `test_include_api_trance_noop_public_runtime_boundary` |
+| TC-INCLUDE-API-TRANCE-007 | 并发边界 | 当前线程建立文件 sink 后，未建 scope 的其它线程调用 `current_sink()`。 | include `include/npu_demo/Trance.h`，传 `-DTRANCE` 与有效 `KG_TRANCE_FILE_PATH`，用 `std::thread` 在其它线程写入。 | 运行 `test_npu_demo_scoped_sink_does_not_cross_thread`。 | owner 线程输出写入 trace 文件；observer 线程输出写入 stdout，trace 文件不包含 observer 行。 | `test_npu_demo_scoped_sink_does_not_cross_thread` |

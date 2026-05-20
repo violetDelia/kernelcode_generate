@@ -27,13 +27,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def _compile_and_run(source: str, *, timeout_s: float = 5.0) -> None:
+def _compile_and_run(source: str, *, timeout_s: float = 5.0, compiler_flags: tuple[str, ...] = ()) -> str:
     """编译并运行 C++ 测试片段（带超时保护）。
 
 
     功能说明:
     - 使用 `g++ -std=c++17 -pthread` 编译临时源码并执行生成程序。
     - 通过 `timeout` 防止 barrier/launch 实现错误导致测试死锁。
+    - 返回 stdout，供 runtime trace 场景断言 dump_dir 模式没有主线程杂音。
 
     使用示例:
     - _compile_and_run("int main() { return 0; }")
@@ -64,6 +65,7 @@ def _compile_and_run(source: str, *, timeout_s: float = 5.0) -> None:
                         "-fno-tree-vrp",
                         "-fno-tree-ter",
                         "-Wl,--no-keep-memory",
+                        *compiler_flags,
                         "-I",
                         str(REPO_ROOT),
                         str(source_path),
@@ -115,6 +117,7 @@ def _compile_and_run(source: str, *, timeout_s: float = 5.0) -> None:
                 f"stdout:\n{run_result.stdout}\n"
                 f"stderr:\n{run_result.stderr}"
             )
+        return run_result.stdout
 
 
 # NPU-DEMO-RT-001
@@ -205,3 +208,50 @@ int main() {
 }
 """
     _compile_and_run(source, timeout_s=5.0)
+
+
+# NPU-DEMO-RT-002
+# 测试目的: 验证 `launch<2, 1, 1, 0>` 在 TRANCE block 目录模式下为每个 block 写独立日志文件。
+# 使用示例: pytest -q test/include/npu_demo/test_runtime_launch.py -k test_npu_demo_launch_trance_block_logs_are_per_block_files
+# 对应功能实现文件链接: [include/npu_demo/Arch.h](include/npu_demo/Arch.h)
+# 对应功能实现文件链接: [include/npu_demo/Trance.h](include/npu_demo/Trance.h)
+# 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+# 对应测试文件链接: [test/include/npu_demo/test_runtime_launch.py](test/include/npu_demo/test_runtime_launch.py)
+def test_npu_demo_launch_trance_block_logs_are_per_block_files(tmp_path: Path) -> None:
+    trace_dir = tmp_path / "kernel" / "trance"
+    source = r"""
+#include "include/npu_demo/npu_demo.h"
+
+static void kernel_body(long long* seen_blocks) {
+    seen_blocks[npu_demo::block_id()] = npu_demo::block_id();
+}
+
+int main() {
+    long long seen_blocks[2] = {-1, -1};
+    Status status = npu_demo::launch<2, 1, 1, 0>(kernel_body, seen_blocks);
+    if (status != StatusCode::kOk) {
+        return 1;
+    }
+    if (seen_blocks[0] != 0 || seen_blocks[1] != 1) {
+        return 2;
+    }
+    return 0;
+}
+"""
+    stdout = _compile_and_run(
+        source,
+        timeout_s=5.0,
+        compiler_flags=("-DTRANCE", f'-DKG_TRANCE_DIR_PATH="{trace_dir}"'),
+    )
+    block0_text = (trace_dir / "block_0000.log").read_text(encoding="utf-8")
+    block1_text = (trace_dir / "block_0001.log").read_text(encoding="utf-8")
+
+    assert stdout == ""
+    assert "block_id = 0" in block0_text
+    assert "block_id = 1" in block1_text
+    assert "in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>" in block0_text
+    assert "in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>" in block1_text
+    assert "arg0 = callable[kernel_body]" in block0_text
+    assert "arg1 = " in block0_text
+    assert "arg0 = callable[kernel_body]" in block1_text
+    assert "arg1 = " in block1_text

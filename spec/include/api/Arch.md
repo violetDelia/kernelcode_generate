@@ -66,7 +66,9 @@
 - include/api 层不定义具体 `KernelContext` 的存储布局、生命周期、默认构造、线程绑定或注入方式；这些职责由后端私有 include 承接。
 - `KernelContext::block_id()` / `KernelContext::block_num()` / `KernelContext::thread_id()` / `KernelContext::thread_num()` / `KernelContext::barrier(...)` / `KernelContext::get_dynamic_memory<Space, T>()` 是 include/api 层公开承诺的最小运行时接口面；后端可以补实现细节，但不得改名、改参数面或改成 target 私有别名。
 - `block_id()` / `thread_id()` / `thread_num()` / `get_dynamic_memory<Space>()` 是公开代码生成口径；后端必须保证它们可在已绑定 launch 上下文时直接调用。
-- `TRANCE` 开启时，后端 launch 实现必须输出 `in func: npu_demo::launch template=<block=..., thread=..., subthread=..., shared_memory_size=...>`、`args =`、`arg0` callable 参数摘要，以及按 forwarded args 原始顺序输出的 `arg1`、`arg2`、... 参数摘要；关闭时不得产生诊断输出。
+- `TRANCE` 开启且 `KG_TRANCE_DIR_PATH` 为空时，后端 launch 实现必须输出 `in func: npu_demo::launch template=<block=..., thread=..., subthread=..., shared_memory_size=...>`、`args =`、`arg0` callable 参数摘要，以及按 forwarded args 原始顺序输出的 `arg1`、`arg2`、... 参数摘要到 stdout 或当前 sink；关闭时不得产生诊断输出。
+- `TRANCE` 开启且 `KG_TRANCE_DIR_PATH` 非空时，后端 launch 实现必须只调用 `kernelcode::trance::prepare_block_trace_dir(...)` 与 `kernelcode::trance::ScopedBlockTranceSink(...)` 公开入口完成 block 文件落盘；`include/npu_demo/Arch.h` 不得拼接文件名、遍历目录、清理文件或调用 `kernelcode::trance::detail::*`。
+- block 文件模式下，launch template/args 日志必须写入每个实际 block 的 `block_XXXX.log`，不得只写 stdout、旧单文件或 `block_0000.log`。
 
 ## API详细说明
 
@@ -290,3 +292,4 @@ Memory<TSM, float> memory = get_dynamic_memory<TSM>();
 | TC-INCLUDE-API-ARCH-002 | 边界/异常 | 锁定字符串 callee 不属于长期公开合同。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_include_api_arch_rejects_string_callee_contract`。 | “锁定字符串 callee 不属于长期公开合同。”场景按公开错误语义失败或被拒绝。 | `test_include_api_arch_rejects_string_callee_contract` |
 | TC-INCLUDE-API-ARCH-003 | 公开入口 | 锁定 `include/api/Arch.h` 不混入 `npu_demo` 私有实现。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_include_api_arch_keeps_backend_impl_out_of_api_header`。 | 公开入口在“锁定 `include/api/Arch.h` 不混入 `npu_demo` 私有实现。”场景下可导入、构造、注册或按名称发现。 | `test_include_api_arch_keeps_backend_impl_out_of_api_header` |
 | TC-INCLUDE-API-ARCH-004 | 执行结果 | `TRANCE` 开启时 launch 输出模板参数、callable 与 forwarded args 参数摘要。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE`，执行公开 `npu_demo::launch<2, 1, 1, 0>(...)` 并传入两个运行期参数。 | 运行 `test_npu_demo_trance_stdout_memory_and_launch_format`。 | stdout 包含 `in func: npu_demo::launch template=<block=2, thread=1, subthread=1, shared_memory_size=0>`、`arg0 = callable[kernel_body]`、`arg1 = mem[...]` 与 `arg2 = 7`，且 `arg1` 先于 `arg2` 输出。 | `test_npu_demo_trance_stdout_memory_and_launch_format` |
+| TC-INCLUDE-API-ARCH-005 | 执行结果 | `TRANCE` block 目录模式下 launch 每个 block 写独立文件。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE` 与 `KG_TRANCE_DIR_PATH`，执行 `launch<2, 1, 1, 0>(...)`。 | 运行 `test_npu_demo_launch_trance_block_logs_are_per_block_files`。 | `block_0000.log` 与 `block_0001.log` 均包含对应 block header、launch template 和 forwarded args，stdout 无 launch 杂音。 | `test_npu_demo_launch_trance_block_logs_are_per_block_files` |

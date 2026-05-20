@@ -9,6 +9,7 @@
 - `thread_num()` / `block_num()` / `subthread_num()` 返回本次 launch 的 extent，而不是 target registry 的固定模板值；`shared_memory_size` 作为 launch metadata 以编译期模板参数承接。
 - `include/npu_demo/npu_demo.h` 作为单入口头文件，需透传 `include/api/Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `Trance.h` / `cost/*.h` 的统一声明，并汇聚 `include/npu_demo/Core.h` / `Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `Trance.h` / `cost/*.h` 的后端实现。
 - `npu_demo::add/sub/mul/...`、`npu_demo::launch(...)`、`npu_demo::block_id()`、`npu_demo::build_contiguous_stride(...)`、`npu_demo::view(...)`、`npu_demo::alloc(...)`、`npu_demo::fill(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)`、`npu_demo::transpose(...)`、`npu_demo::broadcast(...)` 以及 `npu_demo::cost::add/copy/...` 是 public function 的唯一成功消费方向；`detail` 只服务实现内部。
+- `TRANCE` block 目录模式下，`npu_demo::launch(...)` 每个 block worker 必须写入独立 `block_XXXX.log`，文件实现由 trace 模块公开入口承接。
 
 ## API 列表
 
@@ -91,6 +92,8 @@
 - `block_num()` / `thread_num()` / `subthread_num()` 的公开语义是“当前 launch 值”；`target.registry` 中的 `block_num/thread_num/subthread_num` 只作为能力上限与容量校验基线，不再直接等于 launched body 中可见的当前值。
 - `KernelContext::barrier(visibility, scope)` 在当前 block-only 子集仅支持 `visibility={BarrierVisibility::TSM, BarrierVisibility::TLM}` 且两者各出现一次，并要求 `scope=BarrierScope::BLOCK`；其他组合必须显式失败。
 - `get_dynamic_memory<Space>()` 只覆盖当前 `npu_demo` 片上空间入口：`TSM/TLM1/TLM2/TLM3` 返回带可写 backing 的运行时视图，可继续通过 `Memory::view<T>(...)` 切成 typed tile 并被 `slice/fill` 等公开 helper 写入；`SM/LM` 因容量为 `0` 必须显式失败，`GM` 不属于该接口输入域。
+- `TRANCE` 开启且 `KG_TRANCE_DIR_PATH` 非空时，`npu_demo::launch(...)` 必须先通过 `kernelcode::trance::prepare_block_trace_dir(KG_TRANCE_DIR_PATH)` 创建目录并清理旧 `block_*.log`，再在每个 block worker 内通过 `kernelcode::trance::ScopedBlockTranceSink(...)` 写入 header、launch template 和 forwarded args；`Arch.h` 不得直接拼路径、遍历目录或调用 trace detail helper。
+- `TRANCE` block 文件模式必须生成 `dump_dir/<kernel name>/trance/block_0000.log`、`block_0001.log` 等实际 block 文件，不生成 `<entry>_trace.txt`、`<kernel name>_trace.txt` 或 `summary.log`。
 - 本文件不定义 DSL/front-end、MLIR lowering 或 codegen 细节；多 thread / 多 subthread runtime 行为不属于本轮稳定成功子集。
 ## API详细说明
 
@@ -125,7 +128,7 @@
   Status status = npu_demo::launch<2, 1, 1, 0>(kernel_body, block_ids);
   ```
 - 功能说明：启动一次 `npu_demo` kernel 执行，并把当前 launch 上下文绑定为线程可见的活动上下文。
-- 注意事项：公开源码形态固定为 `launch<block, thread, subthread, shared_memory_size>(callee, args...)`；`callee` 必须是函数对象或等价可调用对象，字符串 callee 不属于合法公开合同；生成源码中的 `callee` 对应 kernel body 不再显式声明 `npu_demo::KernelContext& ctx` 参数，运行时仍兼容手写 callee 显式接收 `npu_demo::KernelContext&` 首参；block-only 子集下 `block` 必须落在 `[1, registry.hardware.block_num]`，`thread` 固定为 `1`，`subthread` 固定为 `1`；失败时不得静默降级为单线程或无 barrier 的串行执行。
+- 注意事项：公开源码形态固定为 `launch<block, thread, subthread, shared_memory_size>(callee, args...)`；`callee` 必须是函数对象或等价可调用对象，字符串 callee 不属于合法公开合同；生成源码中的 `callee` 对应 kernel body 不再显式声明 `npu_demo::KernelContext& ctx` 参数，运行时仍兼容手写 callee 显式接收 `npu_demo::KernelContext&` 首参；block-only 子集下 `block` 必须落在 `[1, registry.hardware.block_num]`，`thread` 固定为 `1`，`subthread` 固定为 `1`；失败时不得静默降级为单线程或无 barrier 的串行执行；`TRANCE` block 目录模式下，launch template/args 日志必须写入每个 block 文件。
 
 ### `class npu_demo::KernelContext`
 
@@ -511,3 +514,4 @@ auto subthreads = ctx.subthread_num();
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-008 | 公开入口 | 锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `block_num=2/thread_num=1` 上限语义。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_npu_demo_supports_launch_and_barrier_caps`。 | 公开入口在“锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `block_num=2/thread_num=1` 上限语义。”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_npu_demo_supports_launch_and_barrier_caps` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-009 | 边界/异常 | 锁定 cost DMA include 不依赖跨文件非公开 detail 聚合状态。 | 读取公开 include 文本。 | 运行 `test_npu_demo_cost_dma_has_no_cross_file_detail_accumulator`。 | `include/npu_demo/cost/Core.h` 不承载 DMA 聚合状态，`include/npu_demo/cost/Dma.h` 不包含或调用该非公开状态。 | `test_npu_demo_cost_dma_has_no_cross_file_detail_accumulator` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-010 | 执行结果 | 单入口头文件聚合 runtime trance，`TRANCE` 开启时输出 Memory 与 launch 参数。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE`，构造 `Memory<GM, float>` 并作为 forwarded arg 执行 `npu_demo::launch<2, 1, 1, 0>(...)`。 | 运行 `test_npu_demo_trance_stdout_memory_and_launch_format`。 | stdout 包含 launch `template=<block=2, thread=1, subthread=1, shared_memory_size=0>`、`arg0 = callable[kernel_body]`、`arg1 = mem[...] [2, 3] [3, 1] f32 GM` 与 `arg2 = 7`。 | `test_npu_demo_trance_stdout_memory_and_launch_format` |
+| TC-INCLUDE-NPU-DEMO-NPU-DEMO-011 | 执行结果 | 单入口头文件聚合 runtime trance block 文件模式。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE` 与 `KG_TRANCE_DIR_PATH`，执行 `npu_demo::launch<2, 1, 1, 0>(...)`。 | 运行 `test_npu_demo_launch_trance_block_logs_are_per_block_files`。 | `block_0000.log` 与 `block_0001.log` 存在并包含对应 header 与 launch 参数，旧额外 `block_*.log` 会被清理。 | `test_npu_demo_launch_trance_block_logs_are_per_block_files` |

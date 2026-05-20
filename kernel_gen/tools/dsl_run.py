@@ -8,6 +8,7 @@
 - 不向 DSL 函数隐式注入 operation helper；kernel 体使用的 helper 必须由调用方显式 import 或闭包绑定。
 - `dump_dir` 与 runtime `trance` 诊断开关统一从 `kernel_gen.core.config` 读取，不作为 `dsl_run(...)` 入参。
 - IR dump 文件默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias 文本。
+- `dsl_run(...)` 的 runtime trance 落盘只生成 block trace 文件；`dsl_cost_run(...)` 始终保留 stdout-only trance 诊断。
 
 API 列表:
 - `DslRunResult(func_op: func.FuncOp, module: ModuleOp, source: str, compiled_kernel: CompiledKernel, execute_result: ExecuteResult, runtime_args: tuple[RuntimeRealArg, ...])`
@@ -1283,6 +1284,8 @@ def dsl_run(
         if dump_kernel_dir is not None:
             set_dump_dir(dump_kernel_dir)
         source, entry_name, func_op = _select_source_and_entry(lowered_module, emit_context)
+        if dump_kernel_dir is not None:
+            set_dump_dir(dump_kernel_dir.parent)
         engine = ExecutionEngine(target=_emitc_target_name(emit_context))
         compiled_kernel = engine.compile(source=source, function=entry_name)
     finally:
@@ -1366,6 +1369,7 @@ def dsl_cost_run(
         cost_source, wrapper_name = _append_cost_capture_wrapper(source, cost_entry_name, cost_kind)
         if dump_kernel_dir is not None:
             _write_dump_file(dump_kernel_dir / "99-cost-source.cpp", cost_source)
+            set_dump_dir(None)
         engine = ExecutionEngine(target=_emitc_target_name(emit_context))
         compiled_kernel = engine.compile(source=cost_source, function=wrapper_name)
     finally:

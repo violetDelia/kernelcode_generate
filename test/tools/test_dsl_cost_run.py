@@ -247,6 +247,28 @@ def test_dsl_cost_run_trance_logs_return_value(capfd: pytest.CaptureFixture[str]
     assert f"return = {cost}" in captured.out
 
 
+# 功能说明: 验证 `dsl_cost_run(...)` 即使配置 dump_dir 也只输出 stdout runtime trance 诊断，不创建 block trace 文件。
+# 使用示例: pytest -q test/tools/test_dsl_cost_run.py -k test_dsl_cost_run_trance_dump_dir_stays_stdout_only
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_cost_run.py
+def test_dsl_cost_run_trance_dump_dir_stays_stdout_only(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    out = np.zeros((128,), dtype=np.int32)
+    lhs = np.arange(128, dtype=np.int32)
+    rhs = np.arange(128, dtype=np.int32)
+
+    set_dump_dir(tmp_path)
+    set_trance_enabled(True)
+    cost = dsl_cost_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", "VECTOR1")
+    captured = capfd.readouterr()
+
+    assert isinstance(cost, int)
+    assert f"return = {cost}" in captured.out
+    assert not tuple(tmp_path.rglob("trance"))
+    assert not tuple(tmp_path.rglob("block_*.log"))
+    assert not tuple(tmp_path.rglob("*_trace.txt"))
+
+
 # TC-DSL-COST-RUN-002
 # 功能说明: 验证 DMA1/DMA2 在公开入口按匹配 DMA 总字节数统一取整。
 # 使用示例: pytest -q test/tools/test_dsl_cost_run.py -k test_dsl_cost_run_returns_dma1_aggregate_cost

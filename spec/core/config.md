@@ -186,8 +186,8 @@
 - target 配置对外只能通过 `set_target/get_target` 接口读写，不提供 `dict` 式任意 key 入口。
 - `EmitCContext` 的 SSA 名字表、缩进层级、runtime args、解析环境、callee registry/compiler 与 loop vars 都不是公共配置，不得迁入本文件。
 - `hardware` 不属于公共 `config` 底座职责；这类硬件结构化信息应放在 `target` 侧收口。
-- `dump_dir` 只承载诊断产物根目录；pass IR、`gen_kernel(...)` 最终源码和 runtime trance 文件可按该目录派生落盘，但源码文本本身和执行结果不属于 config 状态。
-- `trance_enabled` 只控制 runtime kernel log 宏注入和运行期输出，不改变 IR、源码生成结果、数学语义或执行成功条件。
+- `dump_dir` 只承载诊断产物根目录；pass IR、`gen_kernel(...)` 最终源码和 runtime trance block 文件可按该目录派生落盘，但源码文本本身和执行结果不属于 config 状态。
+- `trance_enabled` 只控制 runtime kernel log 宏注入和运行期输出，不改变 IR、源码生成结果、数学语义或执行成功条件；`dump_dir is None` 时输出到 stdout，`dump_dir` 非空且由 `dsl_run(...)` 执行 npu_demo launch 时输出到 `dump_dir/<kernel name>/trance/block_XXXX.log`。
 - 非公开 helper 仅允许存在于本文件内部，禁止跨文件调用。
 
 ## 测试

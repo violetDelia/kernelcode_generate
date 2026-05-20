@@ -458,11 +458,11 @@ def test_dsl_run_trance_stdout_logs_entry_and_runtime_args(capfd: pytest.Capture
 
 
 # TC-DSL-RUN-001A2
-# 测试目的: 锁定 runtime trance 有 dump_dir 时写入 kernel 子目录下的 trace 文件并覆盖旧内容。
+# 测试目的: 锁定 runtime trance 有 dump_dir 时写入 kernel 子目录下的 block trace 文件并覆盖旧内容。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
-def test_dsl_run_trance_dump_dir_writes_and_overwrites_trace_file(tmp_path: Path) -> None:
+def test_dsl_run_trance_dump_dir_writes_and_overwrites_block_file(tmp_path: Path) -> None:
     out = torch.empty((6,), dtype=torch.int32)
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
@@ -470,20 +470,26 @@ def test_dsl_run_trance_dump_dir_writes_and_overwrites_trace_file(tmp_path: Path
     set_dump_dir(tmp_path)
     set_trance_enabled(True)
     result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
-    trace_path = tmp_path / "add_kernel" / f"{result.compiled_kernel.function}_trace.txt"
-    trace_text = trace_path.read_text(encoding="utf-8")
+    trace_dir = tmp_path / "add_kernel" / "trance"
+    block0_path = trace_dir / "block_0000.log"
+    trace_text = block0_path.read_text(encoding="utf-8")
 
-    trace_path.write_text("stale\n", encoding="utf-8")
+    block0_path.write_text("stale\n", encoding="utf-8")
     out.fill_(0)
     result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering")
-    overwritten_text = trace_path.read_text(encoding="utf-8")
+    overwritten_text = block0_path.read_text(encoding="utf-8")
 
     assert result.execute_result.ok is True
-    assert "in func:" in trace_text
-    assert "arg0 = mem[" in trace_text
+    assert "block_id = 0" in trace_text
+    assert "block_num =" in trace_text
+    assert "in func: npu_demo::launch" in trace_text
+    assert "arg1 = mem[" in trace_text
     assert "stale" not in overwritten_text
-    assert "in func:" in overwritten_text
-    assert "arg0 = mem[" in overwritten_text
+    assert "block_id = 0" in overwritten_text
+    assert "in func: npu_demo::launch" in overwritten_text
+    assert "arg1 = mem[" in overwritten_text
+    assert not (tmp_path / "add_kernel" / f"{result.compiled_kernel.function}_trace.txt").exists()
+    assert not (tmp_path / "add_kernel_trace.txt").exists()
 
 
 # TC-DSL-RUN-001B

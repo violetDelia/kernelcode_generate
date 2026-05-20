@@ -8,6 +8,7 @@
 - `kernel_gen.tools` 包根稳定暴露 `DslRunResult`、`kernel_gen.tools.dsl_run(...)` 与 `kernel_gen.tools.dsl_cost_run(...)`，不把 `dsl_run` 子模块对象当作公开合同。
 - 诊断落盘根目录统一来自 `kernel_gen.core.config.set_dump_dir(...)`，不作为 `dsl_run(...)` 入参；IR dump 文件默认使用 `kernel_gen.core.print.print_operation_with_aliases(...)` 的 alias IR。
 - runtime trance kernel log 开关统一来自 `kernel_gen.core.config.set_trance_enabled(...)`，不作为 `dsl_run(...)` 或 `dsl_cost_run(...)` 入参。
+- `dsl_run(...)` 在 `dump_dir` 非空且 runtime trance 开启时只生成 `dump_dir/<kernel name>/trance/block_XXXX.log` block 文件；`dsl_cost_run(...)` 即使配置 `dump_dir` 也只 stdout，不生成 block trace 或旧单文件 trace。
 - 失败统一抛出 `KernelCodeError(ErrorModule.TOOLS, message)`；不再定义或导出工具专属错误类。
 - `dsl_run(...)` 不向 kernel 函数隐式注入 operation helper、`MemorySpace`、`NumericType` 或 `SymbolDim`；kernel 体引用的名称必须来自显式 import、闭包或函数全局绑定，缺失时必须报错。
 - `real_args` 支持真实 tensor/array 参数、运行期整数标量参数，以及仅在对应 DSL 形参是 memory 且函数体包含 allow-absent presence guard 时的 `None` memory 参数；Python `int` 与 numpy integer 标量会规整为 Python `int` 后绑定到 DSL 函数形参，供 runtime tile、stride、padding 等 `SymbolDim` 形参使用；`bool` 与 `float` 必须拒绝。
@@ -114,7 +115,8 @@
   - `dump_dir` 由 `kernel_gen.core.config.set_dump_dir(...)` 配置；配置为 `None` 或空字符串时不写诊断文件，非空时按 `dump_dir/<kernel name>/` 写入诊断文件。
   - `kernel_gen.core.config.dump_dir` 非空时，`dsl_run(...)` 必须按 DSL 函数名创建 kernel 子目录，例如 `dump/add_kernel/`。
   - `kernel_gen.core.config.trance_enabled` 为 `True` 且 `dump_dir is None` 时，runtime trance 必须把日志输出到 stdout；日志至少包含 `in func: <entry> template=<none>`、`args =` 与真实运行参数摘要。
-  - `kernel_gen.core.config.trance_enabled` 为 `True` 且 `dump_dir` 非空时，runtime trance 文件必须写入 `dump_dir/<kernel name>/<entry>_trace.txt`，其中 `<kernel name>` 是 DSL 函数名目录，`<entry>` 是执行引擎实际编译入口名；同名文件再次执行时必须覆盖旧内容。
+  - `kernel_gen.core.config.trance_enabled` 为 `True` 且 `dump_dir` 非空时，runtime trance 文件必须写入 `dump_dir/<kernel name>/trance/block_0000.log`、`block_0001.log` 等 block 文件；每个文件必须包含对应 block header 与 `npu_demo::launch` template/args 日志。
+  - `dsl_run(...)` 不得继续生成 `dump_dir/<kernel name>/<entry>_trace.txt` 或 `dump_dir/<kernel name>_trace.txt`；同名 block 文件再次执行时必须覆盖旧内容，且本次 block 数变小时旧额外 `block_*.log` 不得残留。
   - runtime trance 只作为诊断输出，不改变 `DslRunResult` 字段、执行结果、源码文本或数学语义。
   - kernel 子目录内必须写入 `01-first-ir.mlir`，内容为 `mlir_gen(...)` 之后、pipeline 执行前的初始 alias IR。
   - 标准 `PassManager` pipeline 必须写入每个 pass 后的 `NN-<pass-name>.mlir`；文件第一行为 pass 名称文本，后续为 pass 后 IR。
@@ -156,7 +158,8 @@
   - 非法 `cost_kind` 必须失败，固定短语为 `DslCostRunInvalidCostKind: cost_kind must be one of ['DMA', 'MAC']`；`DMA1/DMA2/DMA3/DMA4/MAC/VECTOR1/VECTOR2` 仍作为 npu_demo 七类 kind 兼容执行。
   - lowering 后缺少目标 cost sibling 必须失败，固定短语前缀为 `DslCostRunMissingCostFunction:`。
   - cost 函数返回值通过工具层当前文件内部追加的捕获 wrapper 写入临时 `S_INT` 输出参数；该 wrapper 不作为执行引擎或 include 的公开 API。
-  - `kernel_gen.core.config.trance_enabled` 为 `True` 时，cost 捕获 wrapper 必须在执行期间输出 `return = <cost>`；该输出只作为 runtime trance 诊断，不改变返回值或缺 sibling 失败语义。
+  - `kernel_gen.core.config.trance_enabled` 为 `True` 时，cost 捕获 wrapper 必须在执行期间输出 `return = <cost>`；该输出只作为 runtime trance stdout 诊断，不改变返回值或缺 sibling 失败语义。
+  - `dsl_cost_run(...)` 在 `dump_dir` 有无时都不得创建 `trance/`、`block_*.log`、`<entry>_trace.txt` 或 `<kernel name>_trace.txt`；`dump_dir` 仍可用于既有 `99-cost-source.cpp` 诊断源码。
 
 ## 测试
 
@@ -224,5 +227,5 @@
 | TC-TOOLS-DSL-RUN-047 | 执行结果 | DSL run accepts allow-absent memory None real arg | 准备带 `Tensor[...]` memory bias 形参且函数体使用 `bias is not None` guard 的公开 DSL kernel。 | 运行 `test_dsl_run_optional_bias_none_and_present_paths`。 | `None` 运行期实参通过注解构造 nominal memory，并由源码元数据放行 absent memory；真实 bias 与 absent 两路都执行。 | `test_dsl_run_optional_bias_none_and_present_paths` |
 | TC-TOOLS-DSL-RUN-048 | 边界/异常 | DSL run rejects unguarded None memory data use | 准备 memory 形参为 `None` 但函数体未用 non-null pointer guard 支配 data-use 的公开 DSL kernel。 | 运行 `test_dsl_run_rejects_none_without_allow_absent_metadata`。 | 按 allow-absent metadata 或 guarded data-use 错误稳定失败。 | `test_dsl_run_rejects_none_without_allow_absent_metadata` |
 | TC-TOOLS-DSL-RUN-049 | 执行结果 | DSL run runtime trance stdout logs entry and args | 设置 `set_trance_enabled(True)` 且不设置 `dump_dir`，准备公开 add kernel 与真实运行参数。 | 运行 `test_dsl_run_trance_stdout_logs_entry_and_runtime_args`。 | stdout 包含 `in func:`、`template=<none>`、`args =` 和 `Memory` 参数摘要。 | `test_dsl_run_trance_stdout_logs_entry_and_runtime_args` |
-| TC-TOOLS-DSL-RUN-050 | 执行结果 | DSL run runtime trance dump file writes and overwrites | 设置 `set_dump_dir(tmp_path)` 与 `set_trance_enabled(True)`，重复执行同一公开 kernel。 | 运行 `test_dsl_run_trance_dump_dir_writes_and_overwrites_trace_file`。 | `dump/<kernel>/<entry>_trace.txt` 存在并包含参数摘要；第二次执行覆盖旧文件内容。 | `test_dsl_run_trance_dump_dir_writes_and_overwrites_trace_file` |
-| TC-TOOLS-DSL-RUN-051 | 执行结果 | DSL cost run runtime trance logs return value | 设置 `set_trance_enabled(True)`，执行 `dsl_cost_run(...)` 正向 VECTOR1 成本链路。 | 运行 `test_dsl_cost_run_trance_logs_return_value`。 | stdout 包含 `return = <cost>`，Python 返回值仍是同一 `int` 成本。 | `test_dsl_cost_run_trance_logs_return_value` |
+| TC-TOOLS-DSL-RUN-050 | 执行结果 | DSL run runtime trance dump block files write and overwrite | 设置 `set_dump_dir(tmp_path)` 与 `set_trance_enabled(True)`，重复执行同一公开 kernel。 | 运行 `test_dsl_run_trance_dump_dir_writes_and_overwrites_block_file`。 | `dump/<kernel>/trance/block_0000.log` 存在并包含 block header 与 launch 参数摘要；第二次执行覆盖旧文件内容，旧 `<entry>_trace.txt` 不存在。 | `test_dsl_run_trance_dump_dir_writes_and_overwrites_block_file` |
+| TC-TOOLS-DSL-RUN-051 | 执行结果 | DSL cost run runtime trance logs return value stdout-only | 设置 `set_trance_enabled(True)`，执行 `dsl_cost_run(...)` 正向 VECTOR1 成本链路。 | 运行 `test_dsl_cost_run_trance_logs_return_value` 与 `test_dsl_cost_run_trance_dump_dir_stays_stdout_only`。 | stdout 包含 `return = <cost>`，Python 返回值仍是同一 `int` 成本；`dump_dir` 模式不生成 `trance/`、`block_*.log` 或旧 trace 文件。 | `test_dsl_cost_run_trance_logs_return_value`, `test_dsl_cost_run_trance_dump_dir_stays_stdout_only` |
