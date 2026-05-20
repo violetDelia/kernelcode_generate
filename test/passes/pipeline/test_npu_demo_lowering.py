@@ -464,7 +464,7 @@ def test_npu_demo_lowering_pipeline_builds_pass_manager() -> None:
 
 
 # TC-PIPELINE-101
-# 功能说明: 验证 npu-demo-lowering 的固定顺序包含两次 memory-plan、四次 CSE/canonicalize 和 late attach。
+# 功能说明: 验证 npu-demo-lowering 的固定顺序包含两次 memory-plan、三次 CSE、四次 canonicalize 和 late attach。
 # 测试目的: 锁定 dsl_run 新正向管线的最小公开顺序。
 # 使用示例: pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k test_npu_demo_lowering_pipeline_pass_order
 # 对应功能实现文件路径: kernel_gen/passes/pipeline/npu_demo_lowering.py
@@ -502,17 +502,16 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "symbol-loop-hoist",
         "cse",
         "canonicalize",
-        "symbol-buffer-hoist",
         "memory-plan:True:False",
+        "symbol-buffer-hoist",
         "tile-analysis",
         'lower-dma-memory-hierarchy:True:matmul{["", "tlm1", "tlm2"]}',
         "symbol-loop-hoist",
         "cse",
         "canonicalize",
-        "symbol-buffer-hoist",
         "memory-plan:True:False",
+        "symbol-buffer-hoist",
         "memory-pool:True:0",
-        "cse",
         "canonicalize",
         "arch-parallelize:npu_demo:block",
         "producer-consumer-analysis",
@@ -632,7 +631,7 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     - 通过公开 `set_dump_dir(...)` 与公开 pipeline builder 观察 pass dump。
     - 按 pass marker 查找两段 `memory-plan`、两段 `symbol-buffer-hoist` 与 `memory-pool`，
       不依赖 dump 文件序号。
-    - 断言 `arch-parallelize` 位于 memory-pool 后的 `cse -> canonicalize` 之后。
+    - 断言 `arch-parallelize` 位于 memory-pool 后的 `canonicalize` 之后，且 memory-pool 后没有第 4 个 CSE。
 
     使用示例:
     - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k memory_plan_dump
@@ -657,7 +656,6 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     first_buffer_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-buffer-hoist")
     memory_pool_text = _dump_stage_text_by_marker(tmp_path, "memory-pool")
     second_buffer_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-buffer-hoist", occurrence=2)
-    post_pool_cse_text = _dump_stage_text_by_marker(tmp_path, "cse", occurrence=4)
     post_pool_canonicalize_text = _dump_stage_text_by_marker(tmp_path, "canonicalize", occurrence=4)
     arch_parallelize_text = _dump_stage_text_by_marker(tmp_path, "arch-parallelize")
     producer_consumer_text = _dump_stage_text_by_marker(tmp_path, "producer-consumer-analysis")
@@ -677,7 +675,6 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     assert "dma.alloc" not in memory_pool_text
     assert "dma.free" not in memory_pool_text
     assert second_buffer_hoist_text.startswith("symbol-buffer-hoist\n")
-    assert post_pool_cse_text.startswith("cse\n")
     assert post_pool_canonicalize_text.startswith("canonicalize\n")
     assert arch_parallelize_text.startswith("arch-parallelize\n")
     assert "arch.get_block_id" in arch_parallelize_text
@@ -690,24 +687,23 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     assert _dump_stage_index(tmp_path, "cse", occurrence=1) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=1)
     assert _dump_stage_index(tmp_path, "cse", occurrence=2) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=2)
     assert _dump_stage_index(tmp_path, "cse", occurrence=3) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=3)
-    assert _dump_stage_index(tmp_path, "cse", occurrence=4) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=4)
-    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=1) == 10
-    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=1) == 11
+    assert markers.count("cse") == 3
+    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=1) == 10
+    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=1) == 11
     assert _dump_stage_index(tmp_path, "tile-analysis") == 12
     assert _dump_stage_index(tmp_path, "lower-dma-memory-hierarchy") == 13
     assert _dump_stage_index(tmp_path, "symbol-loop-hoist", occurrence=2) == 14
     assert _dump_stage_index(tmp_path, "cse", occurrence=3) == 15
     assert _dump_stage_index(tmp_path, "canonicalize", occurrence=3) == 16
-    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=2) == 17
-    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=2) == 18
+    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=2) == 17
+    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=2) == 18
     assert _dump_stage_index(tmp_path, "memory-pool") == 19
-    assert _dump_stage_index(tmp_path, "cse", occurrence=4) == 20
-    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) == 21
-    assert _dump_stage_index(tmp_path, "arch-parallelize") == 22
-    assert _dump_stage_index(tmp_path, "producer-consumer-analysis") == 23
-    assert _dump_stage_index(tmp_path, "attach-arch-information") == 24
-    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 25
-    assert _dump_stage_index(tmp_path, "template-name-infer") == 26
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) == 20
+    assert _dump_stage_index(tmp_path, "arch-parallelize") == 21
+    assert _dump_stage_index(tmp_path, "producer-consumer-analysis") == 22
+    assert _dump_stage_index(tmp_path, "attach-arch-information") == 23
+    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 24
+    assert _dump_stage_index(tmp_path, "template-name-infer") == 25
     assert markers.count("attach-arch-information") == 1
     assert "multi-buffer" not in markers
     assert markers[12:18] == [
@@ -715,12 +711,11 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
         "symbol-loop-hoist",
         "cse",
         "canonicalize",
-        "symbol-buffer-hoist",
         "memory-plan",
+        "symbol-buffer-hoist",
     ]
-    assert markers[18:24] == [
+    assert markers[18:23] == [
         "memory-pool",
-        "cse",
         "canonicalize",
         "arch-parallelize",
         "producer-consumer-analysis",
@@ -774,9 +769,14 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
     assert _dump_stage_index(tmp_path, "lower-dma-memory-hierarchy") + 1 == _dump_stage_index(
         tmp_path, "symbol-loop-hoist", occurrence=2
     )
-    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=2) + 1 == _dump_stage_index(tmp_path, "memory-pool")
-    assert _dump_stage_index(tmp_path, "memory-pool") + 1 == _dump_stage_index(tmp_path, "cse", occurrence=4)
-    assert _dump_stage_index(tmp_path, "cse", occurrence=4) + 1 == _dump_stage_index(
+    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=2) + 1 == _dump_stage_index(
+        tmp_path, "symbol-buffer-hoist", occurrence=2
+    )
+    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=2) + 1 == _dump_stage_index(
+        tmp_path, "memory-pool"
+    )
+    assert markers.count("cse") == 3
+    assert _dump_stage_index(tmp_path, "memory-pool") + 1 == _dump_stage_index(
         tmp_path, "canonicalize", occurrence=4
     )
     assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) + 1 == _dump_stage_index(

@@ -42,17 +42,17 @@
 
 - `npu-demo-lowering`：`npu_demo` 目标的公开 pipeline 名称。
 - `inline`：该 pipeline 的首个内联/展开阶段。
-- `cse`：公共子表达式消除阶段；本 pipeline 中每次均紧跟 `canonicalize`，分别服务 inline 展平、symbol-loop-hoist 外提、lower-dma 后整理和 memory-pool 后整理。
+- `cse`：公共子表达式消除阶段；本 pipeline 中前三次均紧跟 `canonicalize`，分别服务 inline 展平、symbol-loop-hoist 外提和 lower-dma 后整理；memory-pool 后不再接入 CSE，只保留 `canonicalize`。
 - `canonicalize`：xDSL 内置 canonicalization 阶段；只在本 pipeline 内直接实例化 `CanonicalizePass`，不得新增仓库 registry pass 名称。
 - `lower-nn`：`NnLoweringPass` 的公开 pass 名称。
 - `symbol-loop-hoist`：`SymbolLoopHoistPass` 的公开 pass 名称。
-- `memory-plan`：`MemoryPlanPass` 的公开 pass 名称；本 pipeline 中固定为 `insert_free=True, fold=False`，执行两次，在 memory-pool 前补齐 `dma.free` 生命周期。
-- `arch-parallelize`：`ArchParallelizePass` 的公开 pass 名称；本 pipeline 中位于 memory-pool 后的 `cse -> canonicalize` 之后、`producer-consumer-analysis` 之前，固定 `target=<pipeline target>` 与 `parallel_level="block"`。
+- `memory-plan`：`MemoryPlanPass` 的公开 pass 名称；本 pipeline 中固定为 `insert_free=True, fold=False`，执行两次，分别位于两段 `symbol-buffer-hoist` 之前，用于补齐 `dma.free` 生命周期。
+- `arch-parallelize`：`ArchParallelizePass` 的公开 pass 名称；本 pipeline 中位于 memory-pool 后的 `canonicalize` 之后、`producer-consumer-analysis` 之前，固定 `target=<pipeline target>` 与 `parallel_level="block"`。
 - `producer-consumer-analysis`：`ProducerConsumerAnalysisPass` 的公开 pass 名称；本 pipeline 中位于 `arch-parallelize` 之后、late `attach-arch-information` 之前，只写 `productor` / `consumer` 分析 attr，不生成同步 op。
 - `tile-analysis`：`TileAnalysisPass` 的公开 pass 名称；本 pipeline 中紧跟第一个 `symbol-buffer-hoist`，只补充 tile 分析属性。
 - `lower-dma-memory-hierarchy`：`LowerDmaMemoryHierarchyPass` 的公开 pass 名称；本 pipeline 中固定为 `fold=True` 且 `apply_op='matmul{["", "tlm1", "tlm2"]}'`。
-- `symbol-buffer-hoist`：`SymbolBufferHoistPass` 的公开 pass 名称。
-- `memory-pool`：`MemoryPoolPass` 的公开 pass 名称；本 pipeline 中固定为 `rewrite=True` 且 `alignment=0`，将片上 `dma.alloc` 改写为 `arch.get_dynamic_memory + dma.view + dma.reshape`。
+- `symbol-buffer-hoist`：`SymbolBufferHoistPass` 的公开 pass 名称；本 pipeline 中两次分别位于两段 `memory-plan` 之后，用于把安全 `dma.alloc + dma.free` 成对外提到 owner `symbol.for` 两侧。
+- `memory-pool`：`MemoryPoolPass` 的公开 pass 名称；本 pipeline 中固定为 `rewrite=True` 且 `alignment=0`，将片上 `dma.alloc` 改写为 `arch.get_dynamic_memory + dma.view + dma.reshape`，后续不再接入额外 `cse`。
 - `attach-arch-information`：为目标函数附加 launch / shared memory 等 arch 元信息并特化动态内存容量的阶段；本 pipeline 中仅在 `producer-consumer-analysis` 后、`outline-device-kernel` 前执行，用于特化 memory-pool 新生成的 `arch.get_dynamic_memory`。
 - `outline-device-kernel`：将带 arch 元信息的函数 outline 成 host wrapper + device body 的阶段。
 - `template-name-infer`：在 pipeline 末尾为 host wrapper 与 device body 的 `nn.memory` 签名写回稳定 C++ template name。
@@ -62,14 +62,14 @@
 - 提供一条默认包含 tile 分析、DMA memory hierarchy 标准化和 memory pool 摘要的公开 pipeline，供本轮 `pytest` 与 standalone 验收链直接复用。
 - 明确 `symbol-loop-hoist` 在无 `symbol.for` 时可以 no-op，因此可安全加入该最小 pipeline。
 - 明确 `CommonSubexpressionElimination` 后必须紧跟 `CanonicalizePass`，且 `CanonicalizePass` 只作为本 pipeline 内部 xDSL pass 直接使用，不进入仓库 pass registry。
-- 明确第一个 `symbol-buffer-hoist` 位于第二段 `canonicalize` 之后、第一段 `memory-plan` 之前，对 `symbol.for` 内安全 `dma.alloc + dma.free` 做成对外提；无可外提 buffer 时保持 no-op。
-- 明确第一段 `memory-plan` 位于第一个 `symbol-buffer-hoist` 之后、`tile-analysis` 之前，并固定 `MemoryPlanPass(insert_free=True, fold=False)`。
+- 明确第一段 `memory-plan` 位于第二段 `canonicalize` 之后、第一段 `symbol-buffer-hoist` 之前，并固定 `MemoryPlanPass(insert_free=True, fold=False)`。
+- 明确第一个 `symbol-buffer-hoist` 位于第一段 `memory-plan` 之后、`tile-analysis` 之前，对 `symbol.for` 内安全 `dma.alloc + dma.free` 做成对外提；无可外提 buffer 时保持 no-op。
 - 明确 `tile-analysis` 位于第一个 `symbol-buffer-hoist` 之后、`lower-dma-memory-hierarchy` 之前，只记录 tile 分析结果，不生成 tile 循环。
 - 明确 `lower-dma-memory-hierarchy` 位于 `tile-analysis` 之后、`memory-pool` 之前，并固定 `fold=True` 与 `apply_op='matmul{["", "tlm1", "tlm2"]}'`，不新增 pipeline option。
 - 明确当前 pipeline 不接入 `MultiBufferPass(memory_stage=3)`；multi-buffer 专项能力保留为独立 pass 能力，不作为本 pipeline 阶段。
-- 明确 `lower-dma-memory-hierarchy` 后再次运行 `symbol-loop-hoist -> cse -> canonicalize -> symbol-buffer-hoist -> memory-plan`，再进入 `MemoryPoolPass(rewrite=True, alignment=0)`。
-- 明确 `memory-pool` 位于第二段 `memory-plan` 之后，并固定 `MemoryPoolPass(rewrite=True, alignment=0)`，本 pipeline 默认执行 dynamic backing 改写。
-- 明确 memory-pool 后运行 `cse -> canonicalize -> arch-parallelize -> producer-consumer-analysis -> attach-arch-information`，其中 late `attach-arch-information` 位于 `producer-consumer-analysis` 后、`outline-device-kernel` 前，用于特化 memory-pool 后新生成的 `arch.get_dynamic_memory`。
+- 明确 `lower-dma-memory-hierarchy` 后再次运行 `symbol-loop-hoist -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist`，再进入 `MemoryPoolPass(rewrite=True, alignment=0)`。
+- 明确 `memory-pool` 位于第二段 `symbol-buffer-hoist` 之后，并固定 `MemoryPoolPass(rewrite=True, alignment=0)`，本 pipeline 默认执行 dynamic backing 改写。
+- 明确 memory-pool 后只运行 `canonicalize -> arch-parallelize -> producer-consumer-analysis -> attach-arch-information`，其中 late `attach-arch-information` 位于 `producer-consumer-analysis` 后、`outline-device-kernel` 前，用于特化 memory-pool 后新生成的 `arch.get_dynamic_memory`。
 - 明确公开 `arch-parallelize` 阶段仍委托 `ArchParallelizePass(target=<pipeline target>, parallel_level="block")` 改写；无 `symbol.for` 的直线 kernel 生成 block0 guard，memory-pool 生成的 loop 前 setup 前缀可通过，配置 / target / unsupported structure 错误仍失败。
 - 明确该 pipeline 的最终输出为 host wrapper + device body + template-name 注解 IR，供 `gen_kernel(...)` 直接消费。
 - 当输入 DSL callable 除 `lhs/rhs/out` 外还包含公开 `SymbolDim` tile / shape 参数时，pipeline 输出的 host wrapper 与 device body 必须继续保留这些 trailing `!symbol.int` 参数，供 `gen_kernel(...)` 直接消费。
@@ -93,23 +93,22 @@
   6. `SymbolLoopHoistPass`
   7. `CommonSubexpressionElimination`
   8. `CanonicalizePass`
-  9. `SymbolBufferHoistPass`
-  10. `MemoryPlanPass(insert_free=True, fold=False)`
+  9. `MemoryPlanPass(insert_free=True, fold=False)`
+  10. `SymbolBufferHoistPass`
   11. `TileAnalysisPass`
   12. `LowerDmaMemoryHierarchyPass(fold=True, apply_op='matmul{["", "tlm1", "tlm2"]}')`
   13. `SymbolLoopHoistPass`
   14. `CommonSubexpressionElimination`
   15. `CanonicalizePass`
-  16. `SymbolBufferHoistPass`
-  17. `MemoryPlanPass(insert_free=True, fold=False)`
+  16. `MemoryPlanPass(insert_free=True, fold=False)`
+  17. `SymbolBufferHoistPass`
   18. `MemoryPoolPass(rewrite=True, alignment=0)`
-  19. `CommonSubexpressionElimination`
-  20. `CanonicalizePass`
-  21. `ArchParallelizePass(target=<pipeline target>, parallel_level="block")`
-  22. `ProducerConsumerAnalysisPass`
-  23. `AttachArchInformationPass`
-  24. `OutlineDeviceKernelPass`
-  25. `TemplateNameInferPass`
+  19. `CanonicalizePass`
+  20. `ArchParallelizePass(target=<pipeline target>, parallel_level="block")`
+  21. `ProducerConsumerAnalysisPass`
+  22. `AttachArchInformationPass`
+  23. `OutlineDeviceKernelPass`
+  24. `TemplateNameInferPass`
 - 该 pipeline 不包含 `tile-elewise`、`tile-reduce`、`multi-buffer` 或 `buffer-results-to-out-params`。
 - 若输入 module 中不存在 `symbol.for`，`SymbolLoopHoistPass` 必须保持 no-op。
 - 若输入 module 中不存在可安全外提的 `dma.alloc`，`SymbolBufferHoistPass` 必须保持 no-op。
@@ -134,16 +133,16 @@
 - 注意事项：
   - pipeline 名称必须固定为 `npu-demo-lowering`。
   - pass 顺序必须固定为本文件“公开顺序”列表，不允许由 options 改写。
-  - 每个 `cse` 后必须紧跟 xDSL `CanonicalizePass`。
+  - memory-pool 前的每个 `cse` 后必须紧跟 xDSL `CanonicalizePass`；memory-pool 后不得再插入 `cse`。
   - 每个 `symbol-loop-hoist` 后必须紧跟 `cse -> canonicalize`。
-  - `memory-plan` 固定 `insert_free=True, fold=False`，并在本 pipeline 中执行两次。
-  - 第一个 `symbol-buffer-hoist` 必须在第一段 `memory-plan` 前把安全 `dma.alloc + dma.free` 成对外提。
+  - `memory-plan` 固定 `insert_free=True, fold=False`，并在本 pipeline 中执行两次，均位于对应 `symbol-buffer-hoist` 前。
+  - 第一个 `symbol-buffer-hoist` 必须在第一段 `memory-plan` 后把安全 `dma.alloc + dma.free` 成对外提。
   - `tile-analysis` 只添加 `tile.analysis` / `tile.tile_exprs` 等分析属性，不生成 `symbol.for` 或 `dma.view`。
   - `lower-dma-memory-hierarchy` 固定 `fold=True` 与 `apply_op='matmul{["", "tlm1", "tlm2"]}'`。
   - 当前 pipeline 不接入 `multi-buffer`；不得为此新增 pipeline option。
-  - `lower-dma-memory-hierarchy` 后必须依次运行 `symbol-loop-hoist -> cse -> canonicalize -> symbol-buffer-hoist -> memory-plan -> memory-pool`。
+  - `lower-dma-memory-hierarchy` 后必须依次运行 `symbol-loop-hoist -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist -> memory-pool`。
   - `memory-pool` 固定 `rewrite=True` 与 `alignment=0`，将片上 `dma.alloc` 改写为 `arch.get_dynamic_memory + dma.view + dma.reshape`。
-  - memory-pool 后必须依次运行 `cse -> canonicalize -> arch-parallelize -> producer-consumer-analysis -> attach-arch-information -> outline-device-kernel -> template-name-infer`。
+  - memory-pool 后必须依次运行 `canonicalize -> arch-parallelize -> producer-consumer-analysis -> attach-arch-information -> outline-device-kernel -> template-name-infer`。
   - `producer-consumer-analysis` 位于 `attach-arch-information` 之前，只写分析 attr，不生成 `arch.wait` / `arch.sign`。
   - `attach-arch-information` 在本 pipeline 中只保留一次，位于 `producer-consumer-analysis` 后、`outline-device-kernel` 前，并特化 memory-pool 后新生成的 `arch.get_dynamic_memory`。
   - 公开 `arch-parallelize` 阶段必须支持结构改写为 block-strided IR，无 `symbol.for` 的直线 kernel 生成 block0 guard，memory-pool 生成的 loop 前 setup 前缀可通过，不支持结构按 `ArchParallelizePass` 公开错误失败。
@@ -169,9 +168,9 @@
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-001 | pass 改写 | npu demo lowering pipeline builds pass manager | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_npu_demo_lowering_pipeline_builds_pass_manager`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“npu demo lowering pipeline builds pass manager”场景。 | `test_npu_demo_lowering_pipeline_builds_pass_manager` |
-| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-002 | pass 改写 | npu demo lowering pipeline pass order | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_npu_demo_lowering_pipeline_pass_order`。 | 固定顺序包含每个 `cse -> canonicalize`、第一个 `symbol-buffer-hoist -> memory-plan`、`lower-dma-memory-hierarchy -> symbol-loop-hoist -> cse -> canonicalize -> symbol-buffer-hoist -> memory-plan -> memory-pool`、`memory-pool -> cse -> canonicalize -> arch-parallelize -> producer-consumer-analysis -> attach-arch-information -> outline-device-kernel -> template-name-infer`，且不包含 `multi-buffer`。 | `test_npu_demo_lowering_pipeline_pass_order` |
+| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-002 | pass 改写 | npu demo lowering pipeline pass order | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_npu_demo_lowering_pipeline_pass_order`。 | 固定顺序包含 memory-pool 前每个 `cse -> canonicalize`、第一段 `memory-plan -> symbol-buffer-hoist`、`lower-dma-memory-hierarchy -> symbol-loop-hoist -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist -> memory-pool`、`memory-pool -> canonicalize -> arch-parallelize -> producer-consumer-analysis -> attach-arch-information -> outline-device-kernel -> template-name-infer`，且不包含 `multi-buffer`。 | `test_npu_demo_lowering_pipeline_pass_order` |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-003 | 边界/异常 | npu demo lowering pipeline rejects unknown option | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_npu_demo_lowering_pipeline_rejects_unknown_option`。 | “npu demo lowering pipeline rejects unknown option”场景按公开错误语义失败或被拒绝。 | `test_npu_demo_lowering_pipeline_rejects_unknown_option` |
-| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-004 | pass 改写 | npu demo lowering pipeline memory plan dump shows lifecycle and pool | 通过公开 dump 配置运行 npu-demo-lowering。 | 运行 `test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool`。 | 按 dump marker 定位两段 `memory-plan`、两段 `symbol-buffer-hoist`、`memory-pool`、memory-pool 后 `cse/canonicalize`、`arch-parallelize`、`producer-consumer-analysis`、唯一 `attach-arch-information` 与 `outline-device-kernel`；memory-plan 含 `dma.free`，late attach 位于 producer-consumer-analysis 后且 outline 前，并特化 memory-pool 后 `arch.get_dynamic_memory`。 | `test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool` |
+| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-004 | pass 改写 | npu demo lowering pipeline memory plan dump shows lifecycle and pool | 通过公开 dump 配置运行 npu-demo-lowering。 | 运行 `test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool`。 | 按 dump marker 定位两段 `memory-plan`、两段 `symbol-buffer-hoist`、`memory-pool`、memory-pool 后 `canonicalize`、`arch-parallelize`、`producer-consumer-analysis`、唯一 `attach-arch-information` 与 `outline-device-kernel`；memory-plan 含 `dma.free`，late attach 位于 producer-consumer-analysis 后且 outline 前，并特化 memory-pool 后 `arch.get_dynamic_memory`。 | `test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool` |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-005 | 公开入口 | npu demo lowering pipeline supports kernel contract style public chain | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain`。 | 公开入口在“npu demo lowering pipeline supports kernel contract style public chain”场景下可导入、构造、注册或按名称发现。 | `test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain` |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-006 | block0 guard / 失败边界 | npu demo lowering arch parallelize direct public behavior | 准备无 `symbol.for` 直线函数与多个顶层 `symbol.for` 两类公开 IR，并在 pipeline 中保留真实 arch-parallelize 阶段。 | 运行 `test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_block0_guard` 与 `test_npu_demo_lowering_pipeline_arch_parallelize_propagates_unsupported_structure`。 | 默认 pipeline 直接使用公开 `ArchParallelizePass`；无 loop 结构写入 block0 guard，不支持结构按公开错误失败。 | `test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_block0_guard`, `test_npu_demo_lowering_pipeline_arch_parallelize_propagates_unsupported_structure` |
-| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-007 | pass 改写 | npu demo lowering static dump uses memory pool | 通过公开 dump 配置运行静态 tile matmul。 | 运行 `test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer`。 | 静态 tile matmul 在 `lower-dma-memory-hierarchy -> symbol-loop-hoist -> cse -> canonicalize -> symbol-buffer-hoist -> memory-plan -> memory-pool` 后由 `arch.get_dynamic_memory + dma.view + dma.reshape` 承接，且不接入 `multi-buffer`、不残留 `dma.alloc/dma.free`。 | `test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer` |
+| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-007 | pass 改写 | npu demo lowering static dump uses memory pool | 通过公开 dump 配置运行静态 tile matmul。 | 运行 `test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer`。 | 静态 tile matmul 在 `lower-dma-memory-hierarchy -> symbol-loop-hoist -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist -> memory-pool` 后由 `arch.get_dynamic_memory + dma.view + dma.reshape` 承接，且不接入 `multi-buffer`、不残留 `dma.alloc/dma.free`。 | `test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer` |
