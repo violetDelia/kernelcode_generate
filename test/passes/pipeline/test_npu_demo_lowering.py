@@ -65,6 +65,9 @@ MemoryPlanPass = importlib.import_module("kernel_gen.passes.memory_plan").Memory
 MemoryPoolPass = importlib.import_module("kernel_gen.passes.memory_pool").MemoryPoolPass
 NnLoweringPass = importlib.import_module("kernel_gen.passes.lowering").NnLoweringPass
 OutlineDeviceKernelPass = importlib.import_module("kernel_gen.passes.outline_device_kernel").OutlineDeviceKernelPass
+ProducerConsumerAnalysisPass = importlib.import_module(
+    "kernel_gen.passes.producer_consumer_analysis"
+).ProducerConsumerAnalysisPass
 SymbolBufferHoistPass = importlib.import_module("kernel_gen.passes.symbol_buffer_hoist").SymbolBufferHoistPass
 SymbolLoopHoistPass = importlib.import_module("kernel_gen.passes.symbol_loop_hoist").SymbolLoopHoistPass
 TileAnalysisPass = importlib.import_module("kernel_gen.passes.tile.analysis").TileAnalysisPass
@@ -289,6 +292,22 @@ def _record_attach(self, ctx: Context, target: ModuleOp) -> None:
     _PIPELINE_PASS_ORDER.append("attach-arch-information")
 
 
+def _record_producer_consumer_analysis(self, ctx: Context, target: ModuleOp) -> None:
+    """记录 producer-consumer-analysis pass 执行。
+
+    功能说明:
+    - 为 pipeline 顺序测试记录 `ProducerConsumerAnalysisPass.apply(...)` 被调用。
+
+    使用示例:
+    - monkeypatch.setattr(ProducerConsumerAnalysisPass, "apply", _record_producer_consumer_analysis)
+    """
+
+    _ = self
+    _ = ctx
+    _ = target
+    _PIPELINE_PASS_ORDER.append("producer-consumer-analysis")
+
+
 def _record_outline(self, ctx: Context, target: ModuleOp) -> None:
     """记录 outline-device-kernel pass 执行。
 
@@ -466,6 +485,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "apply", _record_lower_dma_memory_hierarchy)
     monkeypatch.setattr(SymbolBufferHoistPass, "apply", _record_symbol_buffer_hoist)
     monkeypatch.setattr(MemoryPoolPass, "apply", _record_memory_pool)
+    monkeypatch.setattr(ProducerConsumerAnalysisPass, "apply", _record_producer_consumer_analysis)
     monkeypatch.setattr(AttachArchInformationPass, "apply", _record_attach)
     monkeypatch.setattr(OutlineDeviceKernelPass, "apply", _record_outline)
     monkeypatch.setattr(TemplateNameInferPass, "apply", _record_template_name)
@@ -495,6 +515,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "cse",
         "canonicalize",
         "arch-parallelize:npu_demo:block",
+        "producer-consumer-analysis",
         "attach-arch-information",
         "outline-device-kernel",
         "template-name-infer",
@@ -544,6 +565,7 @@ def test_npu_demo_lowering_pipeline_arch_parallelize_propagates_unsupported_stru
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(SymbolBufferHoistPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(MemoryPoolPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(ProducerConsumerAnalysisPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(AttachArchInformationPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(OutlineDeviceKernelPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(TemplateNameInferPass, "apply", _noop_pass_apply)
@@ -587,6 +609,7 @@ def test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_blo
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(SymbolBufferHoistPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(MemoryPoolPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(ProducerConsumerAnalysisPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(AttachArchInformationPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(OutlineDeviceKernelPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(TemplateNameInferPass, "apply", _noop_pass_apply)
@@ -637,6 +660,7 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     post_pool_cse_text = _dump_stage_text_by_marker(tmp_path, "cse", occurrence=4)
     post_pool_canonicalize_text = _dump_stage_text_by_marker(tmp_path, "canonicalize", occurrence=4)
     arch_parallelize_text = _dump_stage_text_by_marker(tmp_path, "arch-parallelize")
+    producer_consumer_text = _dump_stage_text_by_marker(tmp_path, "producer-consumer-analysis")
     attach_text = _dump_stage_text_by_marker(tmp_path, "attach-arch-information")
     outline_text = _dump_stage_text_by_marker(tmp_path, "outline-device-kernel")
     markers = _dump_stage_markers(tmp_path)
@@ -657,6 +681,7 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     assert post_pool_canonicalize_text.startswith("canonicalize\n")
     assert arch_parallelize_text.startswith("arch-parallelize\n")
     assert "arch.get_block_id" in arch_parallelize_text
+    assert producer_consumer_text.startswith("producer-consumer-analysis\n")
     assert "symbol.const 2" in arch_parallelize_text
     assert attach_text.startswith("attach-arch-information\n")
     assert "arch.get_dynamic_memory" in attach_text
@@ -679,9 +704,10 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     assert _dump_stage_index(tmp_path, "cse", occurrence=4) == 20
     assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) == 21
     assert _dump_stage_index(tmp_path, "arch-parallelize") == 22
-    assert _dump_stage_index(tmp_path, "attach-arch-information") == 23
-    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 24
-    assert _dump_stage_index(tmp_path, "template-name-infer") == 25
+    assert _dump_stage_index(tmp_path, "producer-consumer-analysis") == 23
+    assert _dump_stage_index(tmp_path, "attach-arch-information") == 24
+    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 25
+    assert _dump_stage_index(tmp_path, "template-name-infer") == 26
     assert markers.count("attach-arch-information") == 1
     assert "multi-buffer" not in markers
     assert markers[12:18] == [
@@ -697,8 +723,8 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
         "cse",
         "canonicalize",
         "arch-parallelize",
+        "producer-consumer-analysis",
         "attach-arch-information",
-        "outline-device-kernel",
     ]
 
 
@@ -755,6 +781,12 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
     )
     assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) + 1 == _dump_stage_index(
         tmp_path, "arch-parallelize"
+    )
+    assert _dump_stage_index(tmp_path, "arch-parallelize") + 1 == _dump_stage_index(
+        tmp_path, "producer-consumer-analysis"
+    )
+    assert _dump_stage_index(tmp_path, "producer-consumer-analysis") + 1 == _dump_stage_index(
+        tmp_path, "attach-arch-information"
     )
     assert arch_parallelize_text.startswith("arch-parallelize\n")
     assert "arch.get_block_id" in arch_parallelize_text

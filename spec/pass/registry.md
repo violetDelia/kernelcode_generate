@@ -75,6 +75,7 @@
   - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前；若存在唯一合法 `dma.free`，把 alloc/free 成对移动到 owner loop 两侧。
   - `memory-plan`：显式 `insert-free=true` 时为受控 `dma.alloc` 生命周期补插 `dma.free`。
   - `multi-buffer`：把可证明的 matmul lhs/rhs staging alloc/copy/use/free 成对生命周期改写为 DMA ring。
+  - `producer-consumer-analysis`：基于公开 `MemoryEffect` 与 pass 内置 alias 规则标注 `productor` / `consumer` 简单整数列表 event attrs。
   - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 pytest 与工具层统一解析。
   - `template-name-infer`：npu-demo lowering 末尾的非语义 template name 注解 pass。
 - tuning pass `launch-kernel-cost-func` 可通过 pass registry 显式启用，但不自动进入 `default-lowering` 或 `npu-demo-lowering`。
@@ -83,6 +84,7 @@
 - `memory-pool` 接受 pass 专属 `options={"rewrite": "true|false", "alignment": "<non-negative-int>"}`；`fold` 仍由 registry 通用 option 处理。`rewrite` 非 bool、`alignment` 负数或非整数、未知 option 必须由 `MemoryPoolPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'memory-pool' option error: <原因>`。
 - `memory-plan` 接受 pass 专属 `options={"insert-free": "true|false"}`；`fold` 仍由 registry 通用 option 处理。`insert-free` 非 bool 或未知 option 必须由 `MemoryPlanPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'memory-plan' option error: <原因>`。
 - `multi-buffer` 接受 pass 专属 `options={"memory-stage": "<positive-int>"}`；`fold` 仍由 registry 通用 option 处理。`memory-stage` 非整数、`<= 0` 或未知 option 必须由 `MultiBufferPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'multi-buffer' option error: <原因>`；直接调用 `MultiBufferPass.from_options({"fold": "false"})` 必须失败，不能把通用 `fold` 兼容进 pass 专属 options。
+- `producer-consumer-analysis` 第一阶段不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `ProducerConsumerAnalysisPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'producer-consumer-analysis' option error: <原因>`。
 - registry 只解析 pass 通用 `fold` 选项；剩余 `options` 仅按字典透传给 pass 或 pipeline 构造入口。
 
 ### 当前公开路径与迁移矩阵
@@ -105,6 +107,7 @@
   - `kernel_gen.passes.symbol_buffer_hoist`
   - `kernel_gen.passes.symbol_loop_hoist`
   - `kernel_gen.passes.template_name_infer`
+  - `kernel_gen.passes.producer_consumer_analysis`
 - 对当前仍存活的 compat / family caller，当前基线仍允许继续导入，但不承诺永久保留：
   - `kernel_gen.passes.lowering`
   - `kernel_gen.passes.lowering.buffer_results_to_out_params`

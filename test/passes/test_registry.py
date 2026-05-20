@@ -422,6 +422,24 @@ def test_build_registered_tile_elewise_pass() -> None:
     assert pass_obj.__class__.__module__ == "kernel_gen.passes.tile.elewise"
 
 
+# TC-REGISTRY-007A-1B
+# 功能说明: 验证内置 pass 加载后可通过稳定名称构造 producer-consumer-analysis ModulePass。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_producer_consumer_analysis_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_producer_consumer_analysis_pass() -> None:
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass("producer-consumer-analysis", {"fold": "false"})
+
+    assert pass_obj.name == "producer-consumer-analysis"
+    assert type(pass_obj).__name__ == "ProducerConsumerAnalysisPass"
+    assert isinstance(pass_obj, ModulePass)
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.producer_consumer_analysis"
+    assert pass_obj.fold is False
+
+
 # TC-REGISTRY-007A-2
 # 功能说明: 验证 registry caller 当前冻结的 surviving public path 与 compat consumer matrix。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_registry_surviving_public_paths_match_consumer_matrix
@@ -1028,6 +1046,7 @@ def test_load_builtin_passes_is_idempotent() -> None:
     assert "memory-plan" in list_registered_passes()
     assert "multi-buffer" in list_registered_passes()
     assert "arch-parallelize" in list_registered_passes()
+    assert "producer-consumer-analysis" in list_registered_passes()
     assert "no-op-pipeline" in list_registered_pipelines()
     assert "default-lowering" in list_registered_pipelines()
     assert "npu-demo-lowering" in list_registered_pipelines()
