@@ -608,6 +608,75 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
     assert not hasattr(lowering_module, "BufferResultsToOutParamsPass")
 
 
+# TC-REGISTRY-007A-2T
+# 功能说明: 验证 template-name 旧公开根模块和 package root 兼容入口保持可用。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_template_name_public_compatibility_modules
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_template_name_public_compatibility_modules() -> None:
+    graph_module = importlib.import_module("kernel_gen.passes.template_name_graph")
+    constraints_module = importlib.import_module("kernel_gen.passes.template_name_constraints")
+    default_constraints_module = importlib.import_module("kernel_gen.passes.template_name_default_constraints")
+    infer_module = importlib.import_module("kernel_gen.passes.template_name_infer")
+    package_module = importlib.import_module("kernel_gen.passes")
+
+    assert graph_module.__all__ == [
+        "TemplateNameValue",
+        "Same",
+        "VerifyOnly",
+        "TemplateNameConstraint",
+        "TemplateNameSolution",
+        "TemplateNameGraph",
+    ]
+    assert constraints_module.__all__ == [
+        "TemplateValueRef",
+        "SameSpec",
+        "VerifyOnlySpec",
+        "TemplateConstraintSpec",
+        "TemplateConstraintBuilder",
+        "register_template_constraints",
+        "get_template_constraints",
+        "build_template_constraints",
+    ]
+    assert default_constraints_module.__all__ == ["register_default_template_constraints"]
+    assert infer_module.__all__ == ["TemplateNameInferPass"]
+    assert package_module.TemplateNameInferPass is infer_module.TemplateNameInferPass
+
+    for module in (graph_module, constraints_module, default_constraints_module, infer_module):
+        for name in module.__all__:
+            assert hasattr(module, name)
+
+
+# TC-REGISTRY-007A-2U
+# 功能说明: 验证 registry 构造仍通过公开 pass 名返回 template-name-infer 兼容类。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_template_name_registry_constructs_public_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_template_name_registry_constructs_public_pass() -> None:
+    infer_module = importlib.import_module("kernel_gen.passes.template_name_infer")
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass("template-name-infer")
+
+    assert isinstance(pass_obj, infer_module.TemplateNameInferPass)
+    assert pass_obj.name == "template-name-infer"
+
+
+# TC-REGISTRY-007A-2V
+# 功能说明: 验证 template-name 内部 package root 不导出公开对象。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_template_name_internal_package_root_has_empty_exports
+# 对应功能实现文件路径: kernel_gen/passes/template_name/__init__.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_template_name_internal_package_root_has_empty_exports() -> None:
+    init_text = (REPO_ROOT / "kernel_gen/passes/template_name/__init__.py").read_text()
+
+    assert "__all__: list[str] = []" in init_text
+    assert "from ." not in init_text
+
+
 # TC-REGISTRY-007A-3
 # 功能说明: 验证内置 nn lowering pass 加载后返回 ModulePass。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_nn_lowering_pass_is_module_pass

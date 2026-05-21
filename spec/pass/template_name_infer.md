@@ -15,7 +15,8 @@
 ## 文档信息
 
 - `spec`：[`spec/pass/template_name_infer.md`](../../spec/pass/template_name_infer.md)
-- `功能实现`：[`kernel_gen/passes/template_name_infer.py`](../../kernel_gen/passes/template_name_infer.py)
+- `功能实现`：[`kernel_gen/passes/template_name/infer.py`](../../kernel_gen/passes/template_name/infer.py)
+- `兼容入口`：[`kernel_gen/passes/template_name_infer.py`](../../kernel_gen/passes/template_name_infer.py)
 - `test`：[`test/passes/test_template_name_infer.py`](../../test/passes/test_template_name_infer.py)
 
 ## 依赖
@@ -30,6 +31,7 @@
 
 - registry key 固定为 `template-name-infer`。
 - 函数签名 memory block argument 是默认命名 seed；普通中间 memory result 没有显式 name 且不与 seed family 相连时保持无 template name。
+- 带 `entry_point` 属性的 host 函数是其 `<host>_pattern*` 函数的 template-name 真源；pattern 函数必须携带 `kernel.transform_pipeline` 属性，且同位置 memory 参数与 host 参数共享 template family。
 - pass 只写回 `template_name`，不得改变 shape、stride、element_type 或 space。
 - 写回函数参数后必须同步 `func.func` function type。
 - 未注册 memory op 必须稳定失败，暴露默认约束漏项。
@@ -50,7 +52,7 @@
 ### `TemplateNameInferPass.apply(ctx: Context, module: ModuleOp) -> None`
 
 - 功能：注册默认约束，遍历每个 `func.func`，求解并写回 template name。
-- 错误：未知 memory op、同 family 冲突 name、非法 template name 均必须稳定失败。
+- 错误：未知 memory op、同 family 冲突 name、非法 template name、entry_point pattern 参数数量不一致或同位置 memory / non-memory 不一致均必须稳定失败。
 
 ## 测试
 

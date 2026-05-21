@@ -518,7 +518,7 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.tile.elewise import TileElewisePass
     from kernel_gen.passes.tile.reduce import TileReducePass
     from kernel_gen.passes.tuning import LaunchKernelCostFuncPass
-    from kernel_gen.passes.template_name_infer import TemplateNameInferPass
+    from kernel_gen.passes.template_name.infer import TemplateNameInferPass
     from kernel_gen.passes.producer_consumer_analysis import ProducerConsumerAnalysisPass
     from xdsl.transforms.common_subexpression_elimination import CommonSubexpressionElimination
 

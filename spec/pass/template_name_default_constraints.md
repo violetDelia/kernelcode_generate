@@ -13,7 +13,8 @@
 ## 文档信息
 
 - `spec`：[`spec/pass/template_name_default_constraints.md`](../../spec/pass/template_name_default_constraints.md)
-- `功能实现`：[`kernel_gen/passes/template_name_default_constraints.py`](../../kernel_gen/passes/template_name_default_constraints.py)
+- `功能实现`：[`kernel_gen/passes/template_name/default_constraints.py`](../../kernel_gen/passes/template_name/default_constraints.py)
+- `兼容入口`：[`kernel_gen/passes/template_name_default_constraints.py`](../../kernel_gen/passes/template_name_default_constraints.py)
 - `test`：[`test/passes/test_template_name_constraints.py`](../../test/passes/test_template_name_constraints.py)、[`test/passes/test_template_name_infer.py`](../../test/passes/test_template_name_infer.py)
 
 ## 目标

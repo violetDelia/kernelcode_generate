@@ -8,8 +8,10 @@
 - pytest -q test/passes/test_template_name_constraints.py
 
 关联文件:
-- 功能实现: kernel_gen/passes/template_name_constraints.py
-- 功能实现: kernel_gen/passes/template_name_default_constraints.py
+- 功能实现: kernel_gen/passes/template_name/constraints.py
+- 功能实现: kernel_gen/passes/template_name/default_constraints.py
+- 兼容入口: kernel_gen/passes/template_name_constraints.py
+- 兼容入口: kernel_gen/passes/template_name_default_constraints.py
 - Spec 文档: spec/pass/template_name_constraints.md
 - 测试文件: test/passes/test_template_name_constraints.py
 """

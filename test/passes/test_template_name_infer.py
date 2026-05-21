@@ -8,9 +8,12 @@
 - pytest -q test/passes/test_template_name_infer.py
 
 关联文件:
-- 功能实现: kernel_gen/passes/template_name_graph.py
-- 功能实现: kernel_gen/passes/template_name_constraints.py
-- 功能实现: kernel_gen/passes/template_name_infer.py
+- 功能实现: kernel_gen/passes/template_name/graph.py
+- 功能实现: kernel_gen/passes/template_name/constraints.py
+- 功能实现: kernel_gen/passes/template_name/infer.py
+- 兼容入口: kernel_gen/passes/template_name_graph.py
+- 兼容入口: kernel_gen/passes/template_name_constraints.py
+- 兼容入口: kernel_gen/passes/template_name_infer.py
 - Spec 文档: spec/pass/template_name_infer.md
 - 测试文件: test/passes/test_template_name_infer.py
 """
@@ -23,7 +26,7 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, i32, i8
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, StringAttr, UnitAttr, i32, i8
 from xdsl.ir import Block, Region
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -88,6 +91,32 @@ def _copy_module(lhs_type: NnMemoryType, rhs_type: NnMemoryType) -> tuple[Module
     block.add_ops([copy_op, func.ReturnOp()])
     func_op = func.FuncOp("copy_kernel", FunctionType.from_lists([lhs_type, rhs_type], []), Region(block))
     return ModuleOp([func_op]), func_op
+
+
+def _empty_func_op(
+    name: str,
+    arg_types: tuple[NnMemoryType, ...],
+    *,
+    entry_point: bool = False,
+    transform_pipeline: str | None = None,
+) -> func.FuncOp:
+    """构造 template-name-infer 测试用空函数。
+
+    功能说明:
+    - 通过公开 `func.FuncOp` 和 attributes 构造 host / pattern 函数。
+
+    使用示例:
+    - func_op = _empty_func_op("kernel", (_memory_type(),), entry_point=True)
+    """
+
+    block = Block(arg_types=arg_types)
+    block.add_ops([func.ReturnOp()])
+    func_op = func.FuncOp(name, FunctionType.from_lists(arg_types, []), Region(block))
+    if entry_point:
+        func_op.attributes["entry_point"] = UnitAttr()
+    if transform_pipeline is not None:
+        func_op.attributes["kernel.transform_pipeline"] = StringAttr(transform_pipeline)
+    return func_op
 
 
 def test_template_name_graph_solves_same_constraint() -> None:
@@ -176,6 +205,44 @@ def test_template_name_infer_links_arch_launch_wrapper_and_device_args() -> None
 
     assert [arg.type.template_name.data for arg in wrapper.args] == ["T1", "T1", "T1"]
     assert [arg.type.template_name.data for arg in device.args] == ["T1", "T1", "T1"]
+
+
+def test_template_name_infer_links_entry_point_host_pattern_args() -> None:
+    """验证 entry_point host 同位置参数模板名传播到 pattern 函数。"""
+
+    host = _empty_func_op("entry_point_template_host", (_memory_type(), _memory_type()), entry_point=True)
+    pattern0 = _empty_func_op(
+        "entry_point_template_host_pattern0",
+        (_memory_type(), _memory_type()),
+        transform_pipeline="COMPILE_ARGS: --pass lower-dma-memory-hierarchy",
+    )
+    pattern1 = _empty_func_op(
+        "entry_point_template_host_pattern1",
+        (_memory_type(), _memory_type()),
+        transform_pipeline="COMPILE_ARGS: --pass lower-dma-memory-hierarchy",
+    )
+    module = ModuleOp([host, pattern0, pattern1])
+
+    TemplateNameInferPass().apply(Context(), module)
+
+    assert [arg.type.template_name.data for arg in host.args] == ["T1", "T2"]
+    assert [arg.type.template_name.data for arg in pattern0.args] == ["T1", "T2"]
+    assert [arg.type.template_name.data for arg in pattern1.args] == ["T1", "T2"]
+
+
+def test_template_name_infer_rejects_entry_point_pattern_arg_mismatch() -> None:
+    """验证 entry_point pattern 参数数量不一致时稳定失败。"""
+
+    host = _empty_func_op("entry_point_template_host", (_memory_type(), _memory_type()), entry_point=True)
+    pattern = _empty_func_op(
+        "entry_point_template_host_pattern0",
+        (_memory_type(),),
+        transform_pipeline="COMPILE_ARGS: --pass lower-dma-memory-hierarchy",
+    )
+    module = ModuleOp([host, pattern])
+
+    with pytest.raises(KernelCodeError, match="entry_point pattern arg count must match host args"):
+        TemplateNameInferPass().apply(Context(), module)
 
 
 def test_template_name_infer_keeps_byte_pool_view_family_independent() -> None:

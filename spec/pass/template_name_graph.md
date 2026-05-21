@@ -23,7 +23,8 @@
 ## 文档信息
 
 - `spec`：[`spec/pass/template_name_graph.md`](../../spec/pass/template_name_graph.md)
-- `功能实现`：[`kernel_gen/passes/template_name_graph.py`](../../kernel_gen/passes/template_name_graph.py)
+- `功能实现`：[`kernel_gen/passes/template_name/graph.py`](../../kernel_gen/passes/template_name/graph.py)
+- `兼容入口`：[`kernel_gen/passes/template_name_graph.py`](../../kernel_gen/passes/template_name_graph.py)
 - `test`：[`test/passes/test_template_name_graph.py`](../../test/passes/test_template_name_graph.py)
 
 ## 目标

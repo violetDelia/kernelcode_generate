@@ -8,7 +8,8 @@
 - pytest -q test/passes/test_template_name_graph.py
 
 关联文件:
-- 功能实现: kernel_gen/passes/template_name_graph.py
+- 功能实现: kernel_gen/passes/template_name/graph.py
+- 兼容入口: kernel_gen/passes/template_name_graph.py
 - Spec 文档: spec/pass/template_name_graph.md
 - 测试文件: test/passes/test_template_name_graph.py
 """

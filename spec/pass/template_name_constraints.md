@@ -19,7 +19,8 @@
 ## 文档信息
 
 - `spec`：[`spec/pass/template_name_constraints.md`](../../spec/pass/template_name_constraints.md)
-- `功能实现`：[`kernel_gen/passes/template_name_constraints.py`](../../kernel_gen/passes/template_name_constraints.py)
+- `功能实现`：[`kernel_gen/passes/template_name/constraints.py`](../../kernel_gen/passes/template_name/constraints.py)
+- `兼容入口`：[`kernel_gen/passes/template_name_constraints.py`](../../kernel_gen/passes/template_name_constraints.py)
 - `test`：[`test/passes/test_template_name_constraints.py`](../../test/passes/test_template_name_constraints.py)
 
 ## 目标

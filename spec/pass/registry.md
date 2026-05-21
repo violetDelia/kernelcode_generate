@@ -136,6 +136,7 @@
   - `kernel_gen.passes.lowering.tile_reduce`
 - 已退场的 analysis family 不再提供公开 pass 名或 registry 构造入口；`build_registered_pass("analyze-func-cost")` 必须显式失败。
 - 当前模板名推导专题的 canonical public path 固定为 `kernel_gen.passes.template_name_infer`；`kernel_gen.passes.TemplateNameInferPass` 作为包根 re-export 保持可用。
+- `kernel_gen/passes/template_name/` 是内部实现目录，不进入 public path matrix；registry / pipeline 只可把它当作实现层导入路径说明，不可把它改写成新的外部 caller 合同。
 - 当前 arch parallelize 专题的 canonical public path 固定为 `kernel_gen.passes.arch_parallelize`；`kernel_gen.passes.ArchParallelizePass` 作为包根 re-export 保持可用；registry 名称固定为 `arch-parallelize`。
 - 机械验收口径：
   - `test/passes/test_registry.py` 负责锁定 canonical public path、`symbol-buffer-hoist` 的稳定注册名与包根 re-export、旧路径失败边界、`analyze-func-cost` 构造失败与 registry caller 的 `importlib` 消费者矩阵。

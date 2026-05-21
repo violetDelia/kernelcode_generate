@@ -42,7 +42,7 @@ from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
 from kernel_gen.passes.producer_consumer_analysis import ProducerConsumerAnalysisPass
 from kernel_gen.passes.symbol_buffer_hoist import SymbolBufferHoistPass
 from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
-from kernel_gen.passes.template_name_infer import TemplateNameInferPass
+from kernel_gen.passes.template_name.infer import TemplateNameInferPass
 from kernel_gen.passes.tile.analysis import TileAnalysisPass
 
 
