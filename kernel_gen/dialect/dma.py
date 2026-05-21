@@ -5,6 +5,7 @@
 - 定义 dma dialect 的 alloc/fill/copy/load/store/slice/deslice/subview/view/reshape/cast/broadcast/ring op 与 verifier 规则。
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
 - 通过 xDSL `MemoryEffect` trait 标注 alloc/free 与搬运 op 的公开读写语义，供 pass 机械判定生命周期。
+- 通过 xDSL canonicalization trait 为 `dma.fill`、`dma.view` 与 `dma.reshape` 提供局部安全化简。
 
 API 列表:
 - `class DmaAllocOp(dynamic_shape: Sequence[SSAValue], result_type: NnMemoryType)`
@@ -54,7 +55,7 @@ from xdsl.dialects.builtin import (
     i8,
     i32,
 )
-from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue, TypeAttribute
+from xdsl.ir import Attribute, Dialect, Operation, OpResult, ParametrizedAttribute, SSAValue, TypeAttribute
 from xdsl.irdl import (
     AttrSizedOperandSegments,
     IRDLOperation,
@@ -68,8 +69,16 @@ from xdsl.irdl import (
     var_operand_def,
 )
 from xdsl.parser import AttrParser
+from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewrite_pattern
 from xdsl.printer import Printer
-from xdsl.traits import EffectInstance, MemoryEffect, MemoryEffectKind, NoMemoryEffect
+from xdsl.traits import (
+    EffectInstance,
+    HasCanonicalizationPatternsTrait,
+    MemoryEffect,
+    MemoryEffectKind,
+    NoMemoryEffect,
+    get_effects,
+)
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.core.contracts import (
@@ -240,6 +249,73 @@ class _DmaBroadcastMemoryEffect(MemoryEffect):
         if isinstance(op.operands[1].type, NnMemoryType):
             effects.add(_effect(MemoryEffectKind.READ, op.operands[1]))
         return effects
+
+
+class _DmaFillCanonicalizationTrait(HasCanonicalizationPatternsTrait):
+    """`dma.fill` 的 canonicalization pattern trait。"""
+
+    @classmethod
+    def get_canonicalization_patterns(cls) -> tuple[RewritePattern, ...]:
+        """返回 `dma.fill` canonicalization pattern。
+
+        功能说明:
+        - 暴露 xDSL `CanonicalizePass` 可调用的 `dma.fill` dead-fill pattern。
+
+        使用示例:
+        - patterns = _DmaFillCanonicalizationTrait.get_canonicalization_patterns()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        return (_DmaDeadFillCanonicalizationPattern(),)
+
+
+class _DmaViewCanonicalizationTrait(HasCanonicalizationPatternsTrait):
+    """`dma.view` 的 canonicalization pattern trait。"""
+
+    @classmethod
+    def get_canonicalization_patterns(cls) -> tuple[RewritePattern, ...]:
+        """返回 `dma.view` canonicalization pattern。
+
+        功能说明:
+        - 暴露 xDSL `CanonicalizePass` 可调用的 identity-view pattern。
+
+        使用示例:
+        - patterns = _DmaViewCanonicalizationTrait.get_canonicalization_patterns()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        return (_DmaIdentityViewCanonicalizationPattern(),)
+
+
+class _DmaReshapeCanonicalizationTrait(HasCanonicalizationPatternsTrait):
+    """`dma.reshape` 的 canonicalization pattern trait。"""
+
+    @classmethod
+    def get_canonicalization_patterns(cls) -> tuple[RewritePattern, ...]:
+        """返回 `dma.reshape` canonicalization pattern。
+
+        功能说明:
+        - 暴露 xDSL `CanonicalizePass` 可调用的 identity-reshape 与一跳 reshape composition pattern。
+
+        使用示例:
+        - patterns = _DmaReshapeCanonicalizationTrait.get_canonicalization_patterns()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        return (_DmaIdentityReshapeCanonicalizationPattern(), _DmaComposeReshapeCanonicalizationPattern())
+
 
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """校验并返回 nn.memory type。
@@ -1566,7 +1642,7 @@ class DmaFillOp(IRDLOperation):
     """dma.fill。"""
 
     name = "dma.fill"
-    traits = traits_def(_DmaTargetWriteEffect())
+    traits = traits_def(_DmaTargetWriteEffect(), _DmaFillCanonicalizationTrait())
 
     target = operand_def(NnMemoryType)
     value = operand_def(Attribute)
@@ -2161,7 +2237,7 @@ class DmaViewOp(IRDLOperation):
     """dma.view。"""
 
     name = "dma.view"
-    traits = traits_def(NoMemoryEffect())
+    traits = traits_def(NoMemoryEffect(), _DmaViewCanonicalizationTrait())
 
     source = operand_def(NnMemoryType)
     offsets = var_operand_def(Attribute)
@@ -2369,7 +2445,7 @@ class DmaReshapeOp(IRDLOperation):
     """dma.reshape。"""
 
     name = "dma.reshape"
-    traits = traits_def(NoMemoryEffect())
+    traits = traits_def(NoMemoryEffect(), _DmaReshapeCanonicalizationTrait())
 
     source = operand_def(NnMemoryType)
     shape = var_operand_def(SymbolValueType)
@@ -2491,6 +2567,442 @@ class DmaCastOp(IRDLOperation):
             raise VerifyException("dma.cast stride mismatch")
         if source_type.space.space.data != target_type.space.space.data:
             raise VerifyException("dma.cast space mismatch")
+
+
+def _is_direct_target_alias(value: SSAValue, target: SSAValue) -> bool:
+    """判断 value 是否为 target 的一跳 DMA alias。
+
+    功能说明:
+    - 只识别当前合同允许的 `dma.view`、`dma.subview`、`dma.reshape` 一跳 alias。
+    - 不做跨 block、跨 region 或多级 alias 推理。
+
+    使用示例:
+    - is_alias = _is_direct_target_alias(source, target)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    owner = value.owner
+    if isinstance(owner, DmaViewOp):
+        return owner.source is target
+    if isinstance(owner, DmaSubviewOp):
+        return len(owner.source) == 1 and owner.source[0] is target
+    if isinstance(owner, DmaReshapeOp):
+        return owner.source is target
+    return False
+
+
+def _is_target_or_direct_alias(value: SSAValue, target: SSAValue) -> bool:
+    """判断 value 是否为 target 或 target 的一跳 DMA alias。
+
+    功能说明:
+    - 为 `dma.fill` dead-fill pattern 判定 target 是否在覆盖前被读回。
+
+    使用示例:
+    - if _is_target_or_direct_alias(value, target): ...
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    return value is target or _is_direct_target_alias(value, target)
+
+
+def _is_direct_alias_definition(op: Operation, target: SSAValue) -> bool:
+    """判断 op 是否仅定义 target 的一跳 alias。
+
+    功能说明:
+    - `dma.view`、`dma.subview`、`dma.reshape` 是无副作用 alias op，本身不读取数据。
+    - alias 的后续 use 会在对应 consumer 上重新判定，alias 定义本身不阻断扫描。
+
+    使用示例:
+    - if _is_direct_alias_definition(op, target): ...
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if isinstance(op, DmaViewOp):
+        return op.source is target
+    if isinstance(op, DmaSubviewOp):
+        return len(op.source) == 1 and op.source[0] is target
+    if isinstance(op, DmaReshapeOp):
+        return op.source is target
+    return False
+
+
+def _operation_operands_reference_target(op: Operation, target: SSAValue) -> bool:
+    """检查 op operand 是否直接引用 target 或其一跳 alias。
+
+    功能说明:
+    - 用于识别无 effect trait 的未知 consumer 或 target-derived alias consumer。
+
+    使用示例:
+    - if _operation_operands_reference_target(op, target): ...
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    return any(_is_target_or_direct_alias(operand, target) for operand in op.operands)
+
+
+def _effect_references_target(effect: EffectInstance, target: SSAValue) -> bool:
+    """检查 MemoryEffect 是否作用于 target 或其一跳 alias。
+
+    功能说明:
+    - 对无具体 SSA value 的 effect 保守视为可能命中 target。
+
+    使用示例:
+    - if _effect_references_target(effect, target): ...
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    value = effect.value
+    if value is None:
+        return True
+    if isinstance(value, SSAValue):
+        return _is_target_or_direct_alias(value, target)
+    return True
+
+
+def _full_overwrites_fill_target(op: Operation, target: SSAValue) -> bool:
+    """判断 op 是否完整覆盖 `dma.fill` 的 target。
+
+    功能说明:
+    - 仅承认后续 `dma.fill`、安全 `dma.copy`、标量 `dma.broadcast` 三类 full-overwrite。
+    - `dma.copy` 的 source 不得是 target 或 target 的一跳 view/subview/reshape alias。
+    - `dma.broadcast` 只有非 memory 标量 source 可覆盖 target。
+
+    使用示例:
+    - if _full_overwrites_fill_target(candidate, fill.target): ...
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if isinstance(op, DmaFillOp):
+        return op.target is target
+    if isinstance(op, DmaCopyOp):
+        return op.target is target and not _is_target_or_direct_alias(op.source, target)
+    if isinstance(op, DmaBroadcastOp):
+        return op.target is target and not isinstance(op.source.type, NnMemoryType)
+    return False
+
+
+def _blocks_dead_fill_scan(op: Operation, target: SSAValue) -> bool:
+    """判断 op 是否阻断 `dma.fill` dead-fill 扫描。
+
+    功能说明:
+    - region op、未知 side effect、target read/free/partial write、target alias consumer 均阻断。
+    - target 的一跳 alias 定义本身无副作用，不阻断；alias 的 consumer 会阻断。
+
+    使用示例:
+    - if _blocks_dead_fill_scan(candidate, fill.target): ...
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if len(op.regions) != 0:
+        return True
+    if _is_direct_alias_definition(op, target):
+        return False
+    if _operation_operands_reference_target(op, target):
+        return True
+
+    effects = get_effects(op)
+    if effects is None:
+        return True
+    return any(_effect_references_target(effect, target) for effect in effects)
+
+
+def _has_later_full_overwrite(op: DmaFillOp) -> bool:
+    """查找同 block 后续完整覆盖 writer。
+
+    功能说明:
+    - 从当前 `dma.fill` 的 next sibling 开始线性扫描。
+    - 遇到安全 full-overwrite writer 时返回 True；遇到阻断 op 或 block 结束返回 False。
+
+    使用示例:
+    - if _has_later_full_overwrite(fill): ...
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    target = op.target
+    candidate = op.next_op
+    while candidate is not None:
+        if _full_overwrites_fill_target(candidate, target):
+            return True
+        if _blocks_dead_fill_scan(candidate, target):
+            return False
+        candidate = candidate.next_op
+    return False
+
+
+def _symbol_operands_match_layout(values: Sequence[SSAValue], layout: ArrayAttr[Attribute]) -> bool:
+    """判断 symbol operand 列表是否与 layout 逐维一致。
+
+    功能说明:
+    - 只做公开表达文本的机械一致性判断，不做代数化简。
+    - 任一 operand 不是 `!symbol.int` 时返回 False。
+
+    使用示例:
+    - if _symbol_operands_match_layout(op.shape, result_type.shape): ...
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if len(values) != len(layout.data):
+        return False
+    for value, dim in zip(values, layout.data, strict=True):
+        if not isinstance(value.type, SymbolValueType):
+            return False
+        if _symbol_int_expr_text(value, "layout") != _dim_expr_text(dim):
+            return False
+    return True
+
+
+def _all_symbol_operands_static_value(values: Sequence[SSAValue], expected: int) -> bool:
+    """判断所有 symbol operand 是否为同一静态整数。
+
+    功能说明:
+    - 用于 identity view 的 offset=0 与 stride=1 机械条件。
+
+    使用示例:
+    - if _all_symbol_operands_static_value(op.offsets, 0): ...
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    return all(_operand_int_value(value) == expected for value in values)
+
+
+def _identity_alias_replacement_keeps_consumer_inputs_distinct(result: SSAValue, source: SSAValue) -> bool:
+    """判断 identity alias 替换是否会合并同一 consumer 的输入。
+
+    功能说明:
+    - `dma.view` / `dma.reshape` result 若被某个 op 使用，且该 op 同时直接使用原 source，
+      替换 result 会把 target-derived alias read 变成同一 SSA value 的自读写形态。
+    - 这类形态需要保留 alias op，供 dead-fill canonicalization 与后续 pass 继续观察原始读关系。
+
+    使用示例:
+    - if _identity_alias_replacement_keeps_consumer_inputs_distinct(op.result, op.source): ...
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    for use in tuple(result.uses):
+        if any(operand is source for operand in use.operation.operands):
+            return False
+    return True
+
+
+def _is_identity_view(op: DmaViewOp) -> bool:
+    """判断 `dma.view` 是否为机械 identity view。
+
+    功能说明:
+    - 只在 source/result type 完全一致、offset 全 0、shape 完全一致、stride 全 1 时返回 True。
+    - byte-pool typed view、shape/stride 改变或动态不可证明场景均返回 False。
+
+    使用示例:
+    - if _is_identity_view(view): ...
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    source_type = _verify_memory_type(op.source.type, "source")
+    result_type = _verify_memory_type(op.result.type, "result")
+    if source_type != result_type:
+        return False
+    return (
+        _all_symbol_operands_static_value(op.offsets, 0)
+        and _symbol_operands_match_layout(op.shape, result_type.shape)
+        and _all_symbol_operands_static_value(op.stride, 1)
+        and _identity_alias_replacement_keeps_consumer_inputs_distinct(op.result, op.source)
+    )
+
+
+def _is_identity_reshape(op: DmaReshapeOp) -> bool:
+    """判断 `dma.reshape` 是否为机械 identity reshape。
+
+    功能说明:
+    - 只在 source/result type 完全一致且 shape operand 完全等于 source/result shape 时返回 True。
+    - rank 改变、same-rank shape 改变或动态不可证明场景均返回 False。
+
+    使用示例:
+    - if _is_identity_reshape(reshape): ...
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    source_type = _verify_memory_type(op.source.type, "source")
+    result_type = _verify_memory_type(op.result.type, "result")
+    return (
+        source_type == result_type
+        and _symbol_operands_match_layout(op.shape, result_type.shape)
+        and _identity_alias_replacement_keeps_consumer_inputs_distinct(op.result, op.source)
+    )
+
+
+def _one_hop_source_reshape(op: DmaReshapeOp) -> DmaReshapeOp | None:
+    """返回可与当前 reshape 合并的一跳 source reshape。
+
+    功能说明:
+    - 只识别 `current.source` 直接来自另一个 `dma.reshape` result 的一跳结构。
+    - 前序 reshape result 必须只有当前 reshape 这一个 use，避免删除仍被其它 consumer 使用的 view。
+
+    使用示例:
+    - previous = _one_hop_source_reshape(current)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if not isinstance(op.source, OpResult):
+        return None
+    previous_op = op.source.op
+    if not isinstance(previous_op, DmaReshapeOp):
+        return None
+    uses = tuple(previous_op.result.uses)
+    if len(uses) != 1 or uses[0].operation is not op:
+        return None
+    return previous_op
+
+
+class _DmaDeadFillCanonicalizationPattern(RewritePattern):
+    """删除被后续完整覆盖的 `dma.fill`。"""
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: DmaFillOp, rewriter: PatternRewriter, /) -> None:
+        """匹配并删除 dead fill。
+
+        功能说明:
+        - 仅当同 block 后续 sibling 对同一 target 做安全完整覆盖时删除当前 `dma.fill`。
+
+        使用示例:
+        - _DmaDeadFillCanonicalizationPattern().match_and_rewrite(op, rewriter)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        if _has_later_full_overwrite(op):
+            rewriter.erase_op(op)
+
+
+class _DmaIdentityViewCanonicalizationPattern(RewritePattern):
+    """删除 identity `dma.view`。"""
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: DmaViewOp, rewriter: PatternRewriter, /) -> None:
+        """匹配并删除 identity view。
+
+        功能说明:
+        - 将 identity `dma.view` 的 result uses 替换为 source。
+
+        使用示例:
+        - _DmaIdentityViewCanonicalizationPattern().match_and_rewrite(op, rewriter)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        if _is_identity_view(op):
+            rewriter.replace_matched_op([], [op.source])
+
+
+class _DmaIdentityReshapeCanonicalizationPattern(RewritePattern):
+    """删除 identity `dma.reshape`。"""
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: DmaReshapeOp, rewriter: PatternRewriter, /) -> None:
+        """匹配并删除 identity reshape。
+
+        功能说明:
+        - 将 identity `dma.reshape` 的 result uses 替换为 source。
+
+        使用示例:
+        - _DmaIdentityReshapeCanonicalizationPattern().match_and_rewrite(op, rewriter)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        if _is_identity_reshape(op):
+            rewriter.replace_matched_op([], [op.source])
+
+
+class _DmaComposeReshapeCanonicalizationPattern(RewritePattern):
+    """把一跳连续 `dma.reshape` 合并为一个 `dma.reshape`。"""
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: DmaReshapeOp, rewriter: PatternRewriter, /) -> None:
+        """匹配并合并一跳连续 reshape。
+
+        功能说明:
+        - 将 `reshape(reshape(source))` 改写为从原始 source 到最终 result type 的单个 `dma.reshape`。
+        - 仅当前序 reshape result 只有当前 reshape 一个 use 时改写。
+
+        使用示例:
+        - _DmaComposeReshapeCanonicalizationPattern().match_and_rewrite(op, rewriter)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        previous = _one_hop_source_reshape(op)
+        if previous is None:
+            return
+        merged = DmaReshapeOp(previous.source, list(op.shape), op.result.type)
+        rewriter.replace_matched_op(merged)
+        rewriter.erase_op(previous)
 
 
 class Dma(Dialect):

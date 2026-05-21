@@ -258,6 +258,8 @@ op = DmaFillOp(target, value)
 - `dma.fill` 必须把同一个标量值写入 `target` 的每个逻辑元素；它不是 `dma.alloc` 的语法糖，也不等价于“只创建 memory 但不写值”。
 - `dma.fill` 只负责标量写入，不承担 memory-memory 广播、逐元素算术或 dtype promotion。
 - verifier 只检查 `dma.fill` 的局部类型与接口合法性；“该 `target` 是否在下游 IR 中被实际消费”属于链路级验收边界。对 mixed add 当前最低通过口径，必须出现 `dma.alloc + dma.fill + downstream use(target)` 的完整片段，`users=[]` 的 dead temporary memory 不能计为通过。
+- `CanonicalizePass` 可以删除被后续同 block sibling 完整覆盖的前序 `dma.fill`。第一版 full-overwrite 集合只包含后续 `dma.fill`、source 不是同一 target 或其一跳 `dma.view` / `dma.subview` / `dma.reshape` alias 的 `dma.copy`、source 是非 memory 标量的 `dma.broadcast`。
+- `dma.fill` canonicalization 遇到 target 在覆盖前被读取、partial writer、region op、unknown side effect、self-copy、target-derived alias read、memory-source broadcast 或无法证明完整覆盖的 op 时必须保留前序 `dma.fill`。
 
 - 返回值：
 
@@ -670,6 +672,8 @@ op = DmaViewOp(source, offsets, shape, stride, result_type)
 - 若 `source.shape`、`offsets`、`shape`、`stride` 都可静态判定，则必须执行边界校验：非 byte pool 场景下 `offset + (size - 1) * stride` 不得超出对应维度的 `source.shape`；byte pool 场景下按 target dtype 元素单位计算 `linear_max_index`，并要求 `(linear_max_index + 1) * sizeof(result.element_type) <= source_bytes`。
 - 动态视图信息通过 operand 传入；结果类型中的动态维度只用于描述结果布局的动态性，不替代运行期值来源。
 - 合同验收场景下不能只检查“生成了 `dma.view`”；若该结果直接作为函数返回值，则 `func.return` 与函数输出类型必须与 `dma.view.result_type` 完全一致，才能与 `EXPECTED_MEMORY` 比对对齐。
+- `CanonicalizePass` 只在机械 identity view 场景删除 `dma.view`：source/result type 必须完全一致，所有 offset operand 必须是静态 `0`，shape operand 必须与 source/result shape 逐维一致，stride operand 必须全为静态 `1`，且替换 result 不会让同一个 consumer 同时引用原 source 和 alias result。
+- byte-pool typed view、byte-pool nonzero-offset view、同类型同 numel 但 shape/stride 改变的 view、offset/shape/stride 改变或动态不可机械证明的 view 都必须保留。
 
 - 返回值：
 
@@ -707,6 +711,9 @@ op = DmaReshapeOp(source, shape, result_type)
 - 含 `min(lhs, rhs)` 的动态尾块维度必须按符号等价关系参与连续布局判断；`min` 表达式的无关空白和乘法因子顺序不得改变 verifier 结论。
 - 当 `result.shape` 包含匿名动态维度时，`result.stride` 中保留来自 `shape` operand 的动态语义表达属于合法连续布局；该例外只适用于不可静态证明的动态维度，不放宽静态 stride mismatch。
 - 若 `source.shape` 与 `result.shape` 的元素总数可判定不一致，必须报错。
+- `CanonicalizePass` 可以在机械 identity reshape 场景删除 `dma.reshape`：source/result type 必须完全一致，shape operand 必须与 source/result shape 逐维一致，且替换 result 不会让同一个 consumer 同时引用原 source 和 alias result。
+- `CanonicalizePass` 可以把一跳连续 `reshape(reshape(source))` 合并为一个从原始 source 到最终 result type / shape operand 的 `dma.reshape`；前序 reshape result 必须只有后序 reshape 一个 use，若前序 result 还有其它 consumer 必须保留两级 reshape。
+- rank 改变、same-rank 同 numel 但 shape 改变、动态不可机械证明或任意 result type 不完全一致的单个 reshape 都必须保留。
 
 - 返回值：
 
@@ -764,6 +771,8 @@ op = DmaCastOp(source, result_type)
 - 验证 `dma.view/reshape` 的元素类型/空间一致性与形状约束，其中 `dma.view` 覆盖动态 `offsets`（允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`）、`shape/stride`（`!symbol.int<#symbol.expr<expr>>`）operand 与边界校验，`dma.reshape` 覆盖动态 `shape` 的 `!symbol.int<#symbol.expr<expr>>` operand。
 - 验证 `dma.subview` 的一维 `i8` backing memory、一维 typed result、元素单位 `offset/size/stride`、space 一致性、size 对齐与静态 byte bounds 边界。
 - 验证 `dma.view` 在 DSL helper / 合同链路中不仅要生成 op，还要求返回 `Memory` 类型与 `dma.view.result_type` 一致；当直接 `func.return` 时，`EXPECTED_MEMORY` 比对必须成功。
+- 验证 `dma.fill` dead-fill canonicalization 只删除安全 full-overwrite 前的前序 fill，并保留 target read、partial writer、self-copy、自读写 store、region/unknown side effect、target-derived alias read 与 memory-source broadcast 场景。
+- 验证 `dma.view` / `dma.reshape` canonicalization 只删除机械 identity alias op，且仅在前序 reshape result 唯一用于后序 reshape 时合并一跳连续 reshape，并保留 byte-pool typed view、byte-pool nonzero-offset view、shape/stride 改变 view、rank 改变 reshape、shape 改变 reshape与动态不可机械证明 reshape。
 - 验证默认连续 stride 在符号维度（如 `N` / `M*N` / `min(tile, extent - iter)` / `?`）下的推导、等价判断与退化规则已覆盖。
 - 验证 `dma.cast` 只允许改变元素类型，且保持 `shape/stride/space` 不变。
 - 验证当前阶段对 stride 的限制会在 verifier 阶段明确报错。
@@ -790,6 +799,13 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-012 | 边界/异常 | `dma.cast` 结果约束 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_cast_layout_or_space_mismatch`。 | “`dma.cast` 结果约束”场景按公开错误语义失败或被拒绝。 | `test_dma_cast_layout_or_space_mismatch` |
 | TC-DMA-013 | 内存/DMA | `dma.alloc` 合法路径 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_alloc_verify_success`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.alloc` 合法路径”场景。 | `test_dma_alloc_verify_success` |
 | TC-DMA-014 | 边界/异常 | `dma.view` 约束 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_view_type_or_space_mismatch`。 | “`dma.view` 约束”场景按公开错误语义失败或被拒绝。 | `test_dma_view_type_or_space_mismatch` |
+| TC-DMA-014B | pass 改写 | `dma.fill` dead-fill canonicalization 正例 | 准备同 block 中 `fill -> fill`、`fill -> copy`、`fill -> scalar broadcast` 的公开 IR。 | 运行 `test_dma_fill_canonicalization_removes_safe_full_overwrites`。 | 前序 `dma.fill` 仅在安全完整覆盖场景被 `CanonicalizePass` 删除。 | `test_dma_fill_canonicalization_removes_safe_full_overwrites` |
+| TC-DMA-014C | pass 改写 | `dma.fill` dead-fill canonicalization 读/partial/alias 反例 | 准备覆盖前 target read、`dma.deslice` partial writer、target-derived view/reshape alias read 的公开 IR。 | 运行 `test_dma_fill_canonicalization_keeps_reads_partial_and_aliases`。 | 前序 `dma.fill` 保留，避免误删仍被读取或无法证明完整覆盖的初始化。 | `test_dma_fill_canonicalization_keeps_reads_partial_and_aliases` |
+| TC-DMA-014C1 | pass 改写 | `dma.fill` dead-fill canonicalization side-effect 反例 | 准备 self-copy、`dma.store` 自读写、`dma.store` partial writer、region op 与 unknown side effect 的公开 IR。 | 运行 `test_dma_fill_canonicalization_keeps_self_read_write_and_side_effect_boundaries`。 | 前序 `dma.fill` 在不可证明安全的自读写、partial、region 或 unknown side effect 前保留。 | `test_dma_fill_canonicalization_keeps_self_read_write_and_side_effect_boundaries` |
+| TC-DMA-014C2 | pass 改写 | `dma.fill` dead-fill canonicalization memory-source alias 反例 | 准备 target 一跳 `dma.subview` alias read、memory-source broadcast 读 target/view/subview alias 的公开 IR。 | 运行 `test_dma_fill_canonicalization_keeps_subview_and_memory_broadcast_aliases`。 | 前序 `dma.fill` 在 memory-source broadcast 或 subview alias read 场景保留。 | `test_dma_fill_canonicalization_keeps_subview_and_memory_broadcast_aliases` |
+| TC-DMA-014D | pass 改写 | `dma.view/reshape` identity canonicalization | 准备 identity view/reshape、target-derived alias consumer、byte-pool typed view 与 shape-change reshape 的公开 IR。 | 运行 `test_dma_view_reshape_canonicalization_only_removes_identity_aliases`。 | `CanonicalizePass` 删除安全 identity alias op，并保留非 identity 或替换后会合并 consumer 输入的 view/reshape。 | `test_dma_view_reshape_canonicalization_only_removes_identity_aliases` |
+| TC-DMA-014D1 | pass 改写 | `dma.reshape` 一跳 composition canonicalization | 准备静态/动态连续 `reshape -> reshape` 与前序 reshape result 仍有额外 use 的公开 IR。 | 运行 `test_dma_reshape_canonicalization_composes_one_hop_reshape`。 | 唯一使用的一跳连续 reshape 合并为单个 `dma.reshape`，前序 result 有额外 consumer 时保留两级 reshape。 | `test_dma_reshape_canonicalization_composes_one_hop_reshape` |
+| TC-DMA-014E | pass 改写 | `dma.view/reshape` 非 identity 保留边界 | 准备 byte-pool nonzero-offset view、shape/stride-change view、rank-change reshape 与动态不可证明 reshape 的公开 IR。 | 运行 `test_dma_view_reshape_canonicalization_keeps_non_identity_boundaries`。 | `CanonicalizePass` 不删除无法机械证明为 identity 的 view/reshape。 | `test_dma_view_reshape_canonicalization_keeps_non_identity_boundaries` |
 | TC-DMA-015 | 边界/异常 | `dma.view` numel 一致性 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_view_numel_mismatch`。 | “`dma.view` numel 一致性”场景按公开错误语义失败或被拒绝。 | `test_dma_view_numel_mismatch` |
 | TC-DMA-016 | 边界/异常 | `dma.reshape` 连续约束 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_reshape_requires_contiguous`。 | “`dma.reshape` 连续约束”场景按公开错误语义失败或被拒绝。 | `test_dma_reshape_requires_contiguous` |
 | TC-DMA-017 | 内存/DMA | `dma.reshape` 动态形状连续 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_reshape_allows_dynamic_symbol_int_shape_operands`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.reshape` 动态形状连续”场景。 | `test_dma_reshape_allows_dynamic_symbol_int_shape_operands` |

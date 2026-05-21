@@ -5,6 +5,7 @@
 - 覆盖 dma dialect 的 op verifier 与类型复用约束。
 - 覆盖 SSA `!symbol.int<#symbol.expr<expr>>` operand 动态布局、parse/print round-trip 与默认连续 stride 约束。
 - 覆盖 `dma.fill` 的非 bool 数值 memory 与数值 scalar verifier 闭环。
+- 覆盖 `dma.fill` / `dma.view` / `dma.reshape` 的公开 canonicalization 边界。
 
 使用示例:
 - pytest -q test/dialect/test_dma.py
@@ -24,6 +25,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from io import StringIO
 from pathlib import Path
 
@@ -46,11 +48,12 @@ from xdsl.dialects.builtin import (
     i32,
 )
 from xdsl.dialects.builtin import ModuleOp
-from xdsl.dialects.test import Test, TestOp as _TestOp
-from xdsl.ir import Attribute, Operation, SSAValue
+from xdsl.dialects.test import Test, TestOp as _TestOp, TestTermOp as _TestTermOp
+from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.parser import Parser
 from xdsl.printer import Printer
 from xdsl.traits import MemoryEffectKind, get_effects
+from xdsl.transforms.canonicalize import CanonicalizePass
 from xdsl.utils.exceptions import VerifyException
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -283,6 +286,103 @@ def _make_symbol_operands(values: list[int | str | None]) -> list[SSAValue]:
         expr = f"dyn_{index}" if value is None else str(value)
         operands.append(_TestOp(result_types=[SymbolValueType.from_expr(expr)]).results[0])
     return operands
+
+
+def _make_symbol_value_op(value: int | str) -> _TestOp:
+    """构造单个 `!symbol.int<#symbol.expr<expr>>` 测试 op。
+
+    功能说明:
+    - 为 canonicalization module 测试提供可插入 module 的常量来源。
+
+    使用示例:
+    - c0 = _make_symbol_value_op(0)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    return _TestOp(result_types=[SymbolValueType.from_expr(str(value))])
+
+
+def _make_unknown_side_effect_op() -> _TestOp:
+    """构造无 MemoryEffect trait 的测试 op。
+
+    功能说明:
+    - 为 dead-fill canonicalization 覆盖 unknown side effect 扫描边界。
+    - `get_effects(op)` 返回 `None`，表示当前公开 effect 系统无法证明该 op 与 target 无关。
+
+    使用示例:
+    - unknown = _make_unknown_side_effect_op()
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    return _TestOp()
+
+
+def _make_region_side_effect_op() -> _TestOp:
+    """构造带 region 的测试 op。
+
+    功能说明:
+    - 为 dead-fill canonicalization 覆盖 region op 扫描边界。
+    - region 内放置公开 test dialect terminator，保证 module verifier 可通过。
+
+    使用示例:
+    - region_op = _make_region_side_effect_op()
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    return _TestOp(regions=[Region(Block([_TestTermOp()]))])
+
+
+def _canonicalized_module(ops: Sequence[Operation]) -> ModuleOp:
+    """运行 xDSL CanonicalizePass 并返回 module。
+
+    功能说明:
+    - 使用公开 `CanonicalizePass` 验证 dma op canonicalization 行为。
+
+    使用示例:
+    - module = _canonicalized_module([producer, dma_op])
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    ctx = _build_context()
+    module = ModuleOp(list(ops))
+    module.verify()
+    CanonicalizePass().apply(ctx, module)
+    module.verify()
+    return module
+
+
+def _count_ops(module: ModuleOp, op_type: type[Operation]) -> int:
+    """统计 module 中指定 operation 类型数量。
+
+    功能说明:
+    - 通过公开 operation walk 黑盒观察 canonicalization 结果。
+
+    使用示例:
+    - fill_count = _count_ops(module, DmaFillOp)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    return sum(1 for op in module.walk() if isinstance(op, op_type))
 
 
 def _effect_kinds_by_value(op: Operation) -> set[tuple[MemoryEffectKind, SSAValue | None]]:
@@ -658,6 +758,670 @@ def test_dma_alias_ops_have_no_memory_effect() -> None:
     assert get_effects(view) == set()
     assert get_effects(reshape) == set()
     assert get_effects(subview) == set()
+
+
+# TC-DMA-014B
+# 功能说明: 验证 dma.fill canonicalization 删除后续完整覆盖前的 dead fill。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_fill_canonicalization_removes_safe_full_overwrites
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_fill_canonicalization_removes_safe_full_overwrites() -> None:
+    memory_type = _make_memory_type()
+
+    target_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    fill_module = _canonicalized_module(
+        [
+            target_op,
+            c0_op,
+            c1_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            DmaFillOp(target_op.results[0], c1_op.results[0]),
+        ]
+    )
+    assert _count_ops(fill_module, DmaFillOp) == 1
+
+    target_op = _TestOp(result_types=[memory_type])
+    source_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    copy_module = _canonicalized_module(
+        [
+            target_op,
+            source_op,
+            c0_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            DmaCopyOp(target_op.results[0], source_op.results[0]),
+        ]
+    )
+    assert _count_ops(copy_module, DmaFillOp) == 0
+
+    target_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    c7_op = _make_symbol_value_op(7)
+    broadcast_module = _canonicalized_module(
+        [
+            target_op,
+            c0_op,
+            c7_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            DmaBroadcastOp(target_op.results[0], c7_op.results[0]),
+        ]
+    )
+    assert _count_ops(broadcast_module, DmaFillOp) == 0
+
+
+# TC-DMA-014C
+# 功能说明: 验证 dma.fill canonicalization 保留读 target、partial writer 与 target-derived alias 场景。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_fill_canonicalization_keeps_reads_partial_and_aliases
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_fill_canonicalization_keeps_reads_partial_and_aliases() -> None:
+    memory_type = _make_memory_type()
+
+    target_op = _TestOp(result_types=[memory_type])
+    source_op = _TestOp(result_types=[memory_type])
+    other_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    read_before_copy = _canonicalized_module(
+        [
+            target_op,
+            source_op,
+            other_op,
+            c0_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            DmaCopyOp(other_op.results[0], target_op.results[0]),
+            DmaCopyOp(target_op.results[0], source_op.results[0]),
+        ]
+    )
+    assert _count_ops(read_before_copy, DmaFillOp) == 1
+
+    part_type = _make_memory_type(shape=_dim_array([1, 4]), stride=_dim_array([4, 1]))
+    target_op = _TestOp(result_types=[memory_type])
+    part_op = _TestOp(result_types=[part_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c4_op = _make_symbol_value_op(4)
+    partial_writer = _canonicalized_module(
+        [
+            target_op,
+            part_op,
+            c0_op,
+            c1_op,
+            c4_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            DmaDesliceOp(
+                target_op.results[0],
+                part_op.results[0],
+                [c0_op.results[0], c0_op.results[0]],
+                [c1_op.results[0], c4_op.results[0]],
+                [c1_op.results[0], c1_op.results[0]],
+                memory_type,
+            ),
+        ]
+    )
+    assert _count_ops(partial_writer, DmaFillOp) == 1
+
+    target_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    view = DmaViewOp(
+        target_op.results[0],
+        [c0_op.results[0], c0_op.results[0]],
+        [c2_op.results[0], c4_op.results[0]],
+        [c1_op.results[0], c1_op.results[0]],
+        memory_type,
+    )
+    alias_reader = _canonicalized_module(
+        [
+            target_op,
+            c0_op,
+            c1_op,
+            c2_op,
+            c4_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            view,
+            DmaCopyOp(target_op.results[0], view.result),
+        ]
+    )
+    assert _count_ops(alias_reader, DmaFillOp) == 1
+    assert _count_ops(alias_reader, DmaViewOp) == 1
+
+    target_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    reshape = DmaReshapeOp(target_op.results[0], [c2_op.results[0], c4_op.results[0]], memory_type)
+    reshape_alias_reader = _canonicalized_module(
+        [
+            target_op,
+            c0_op,
+            c2_op,
+            c4_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            reshape,
+            DmaCopyOp(target_op.results[0], reshape.result),
+        ]
+    )
+    assert _count_ops(reshape_alias_reader, DmaFillOp) == 1
+    assert _count_ops(reshape_alias_reader, DmaReshapeOp) == 1
+
+
+# TC-DMA-014C1
+# 功能说明: 验证 dma.fill canonicalization 保留 self-copy、store 自读写、region 与 unknown side effect 边界。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_fill_canonicalization_keeps_self_read_write_and_side_effect_boundaries
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_fill_canonicalization_keeps_self_read_write_and_side_effect_boundaries() -> None:
+    memory_type = _make_memory_type()
+
+    target_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    self_copy = _canonicalized_module(
+        [
+            target_op,
+            c0_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            DmaCopyOp(target_op.results[0], target_op.results[0]),
+        ]
+    )
+    assert _count_ops(self_copy, DmaFillOp) == 1
+
+    target_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    self_store = _canonicalized_module(
+        [
+            target_op,
+            c0_op,
+            c1_op,
+            c2_op,
+            c4_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            DmaStoreOp(
+                target_op.results[0],
+                target_op.results[0],
+                [c0_op.results[0], c0_op.results[0]],
+                [c2_op.results[0], c4_op.results[0]],
+                [c1_op.results[0], c1_op.results[0]],
+            ),
+        ]
+    )
+    assert _count_ops(self_store, DmaFillOp) == 1
+
+    part_type = _make_memory_type(shape=_dim_array([1, 4]), stride=_dim_array([4, 1]))
+    target_op = _TestOp(result_types=[memory_type])
+    part_op = _TestOp(result_types=[part_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c4_op = _make_symbol_value_op(4)
+    partial_store = _canonicalized_module(
+        [
+            target_op,
+            part_op,
+            c0_op,
+            c1_op,
+            c4_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            DmaStoreOp(
+                target_op.results[0],
+                part_op.results[0],
+                [c0_op.results[0], c0_op.results[0]],
+                [c1_op.results[0], c4_op.results[0]],
+                [c1_op.results[0], c1_op.results[0]],
+            ),
+        ]
+    )
+    assert _count_ops(partial_store, DmaFillOp) == 1
+
+    target_op = _TestOp(result_types=[memory_type])
+    source_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    region_boundary = _canonicalized_module(
+        [
+            target_op,
+            source_op,
+            c0_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            _make_region_side_effect_op(),
+            DmaCopyOp(target_op.results[0], source_op.results[0]),
+        ]
+    )
+    assert _count_ops(region_boundary, DmaFillOp) == 1
+
+    target_op = _TestOp(result_types=[memory_type])
+    source_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    unknown_boundary = _canonicalized_module(
+        [
+            target_op,
+            source_op,
+            c0_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            _make_unknown_side_effect_op(),
+            DmaCopyOp(target_op.results[0], source_op.results[0]),
+        ]
+    )
+    assert _count_ops(unknown_boundary, DmaFillOp) == 1
+
+
+# TC-DMA-014C2
+# 功能说明: 验证 dma.fill canonicalization 保留 subview alias 与 memory-source broadcast 场景。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_fill_canonicalization_keeps_subview_and_memory_broadcast_aliases
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_fill_canonicalization_keeps_subview_and_memory_broadcast_aliases() -> None:
+    memory_type = _make_memory_type()
+    byte_pool_type = _make_memory_type(shape=_dim_array([4]), stride=_dim_array([1]), element_type=i8)
+
+    target_op = _TestOp(result_types=[byte_pool_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c4_op = _make_symbol_value_op(4)
+    subview = DmaSubviewOp(target_op.results[0], c0_op.results[0], c4_op.results[0], c1_op.results[0], byte_pool_type)
+    subview_copy_alias = _canonicalized_module(
+        [
+            target_op,
+            c0_op,
+            c1_op,
+            c4_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            subview,
+            DmaCopyOp(target_op.results[0], subview.result),
+        ]
+    )
+    assert _count_ops(subview_copy_alias, DmaFillOp) == 1
+    assert _count_ops(subview_copy_alias, DmaSubviewOp) == 1
+
+    target_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    broadcast_target = _canonicalized_module(
+        [
+            target_op,
+            c0_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            DmaBroadcastOp(target_op.results[0], target_op.results[0]),
+        ]
+    )
+    assert _count_ops(broadcast_target, DmaFillOp) == 1
+
+    target_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    view = DmaViewOp(
+        target_op.results[0],
+        [c0_op.results[0], c0_op.results[0]],
+        [c2_op.results[0], c4_op.results[0]],
+        [c1_op.results[0], c1_op.results[0]],
+        memory_type,
+    )
+    broadcast_view_alias = _canonicalized_module(
+        [
+            target_op,
+            c0_op,
+            c1_op,
+            c2_op,
+            c4_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            view,
+            DmaBroadcastOp(target_op.results[0], view.result),
+        ]
+    )
+    assert _count_ops(broadcast_view_alias, DmaFillOp) == 1
+    assert _count_ops(broadcast_view_alias, DmaViewOp) == 1
+
+    target_op = _TestOp(result_types=[byte_pool_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c4_op = _make_symbol_value_op(4)
+    subview = DmaSubviewOp(target_op.results[0], c0_op.results[0], c4_op.results[0], c1_op.results[0], byte_pool_type)
+    broadcast_subview_alias = _canonicalized_module(
+        [
+            target_op,
+            c0_op,
+            c1_op,
+            c4_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            subview,
+            DmaBroadcastOp(target_op.results[0], subview.result),
+        ]
+    )
+    assert _count_ops(broadcast_subview_alias, DmaFillOp) == 1
+    assert _count_ops(broadcast_subview_alias, DmaSubviewOp) == 1
+
+
+# TC-DMA-014D
+# 功能说明: 验证 dma.view/dma.reshape canonicalization 仅删除 identity alias op。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_view_reshape_canonicalization_only_removes_identity_aliases
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_view_reshape_canonicalization_only_removes_identity_aliases() -> None:
+    memory_type = _make_memory_type()
+
+    source_op = _TestOp(result_types=[memory_type])
+    target_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    identity_view = DmaViewOp(
+        source_op.results[0],
+        [c0_op.results[0], c0_op.results[0]],
+        [c2_op.results[0], c4_op.results[0]],
+        [c1_op.results[0], c1_op.results[0]],
+        memory_type,
+    )
+    view_module = _canonicalized_module(
+        [
+            source_op,
+            target_op,
+            c0_op,
+            c1_op,
+            c2_op,
+            c4_op,
+            identity_view,
+            DmaCopyOp(target_op.results[0], identity_view.result),
+        ]
+    )
+    assert _count_ops(view_module, DmaViewOp) == 0
+
+    source_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    target_derived_view = DmaViewOp(
+        source_op.results[0],
+        [c0_op.results[0], c0_op.results[0]],
+        [c2_op.results[0], c4_op.results[0]],
+        [c1_op.results[0], c1_op.results[0]],
+        memory_type,
+    )
+    target_derived_view_module = _canonicalized_module(
+        [
+            source_op,
+            c0_op,
+            c1_op,
+            c2_op,
+            c4_op,
+            target_derived_view,
+            DmaCopyOp(source_op.results[0], target_derived_view.result),
+        ]
+    )
+    assert _count_ops(target_derived_view_module, DmaViewOp) == 1
+
+    source_op = _TestOp(result_types=[memory_type])
+    target_op = _TestOp(result_types=[memory_type])
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    identity_reshape = DmaReshapeOp(source_op.results[0], [c2_op.results[0], c4_op.results[0]], memory_type)
+    reshape_module = _canonicalized_module(
+        [
+            source_op,
+            target_op,
+            c2_op,
+            c4_op,
+            identity_reshape,
+            DmaCopyOp(target_op.results[0], identity_reshape.result),
+        ]
+    )
+    assert _count_ops(reshape_module, DmaReshapeOp) == 0
+
+    source_op = _TestOp(result_types=[memory_type])
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    target_derived_reshape = DmaReshapeOp(source_op.results[0], [c2_op.results[0], c4_op.results[0]], memory_type)
+    target_derived_reshape_module = _canonicalized_module(
+        [
+            source_op,
+            c2_op,
+            c4_op,
+            target_derived_reshape,
+            DmaCopyOp(source_op.results[0], target_derived_reshape.result),
+        ]
+    )
+    assert _count_ops(target_derived_reshape_module, DmaReshapeOp) == 1
+
+    byte_pool_type = _make_memory_type(shape=_dim_array([16]), stride=_dim_array([1]), element_type=i8)
+    typed_result_type = _make_memory_type(shape=_dim_array([4]), stride=_dim_array([1]))
+    pool_op = _TestOp(result_types=[byte_pool_type])
+    target_op = _TestOp(result_types=[typed_result_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c4_op = _make_symbol_value_op(4)
+    typed_view = DmaViewOp(
+        pool_op.results[0],
+        [c0_op.results[0]],
+        [c4_op.results[0]],
+        [c1_op.results[0]],
+        typed_result_type,
+    )
+    typed_view_module = _canonicalized_module(
+        [
+            pool_op,
+            target_op,
+            c0_op,
+            c1_op,
+            c4_op,
+            typed_view,
+            DmaCopyOp(target_op.results[0], typed_view.result),
+        ]
+    )
+    assert _count_ops(typed_view_module, DmaViewOp) == 1
+
+    source_type = _make_memory_type(shape=_dim_array([2, 2]), stride=_dim_array([2, 1]))
+    changed_type = _make_memory_type(shape=_dim_array([1, 4]), stride=_dim_array([4, 1]))
+    source_op = _TestOp(result_types=[source_type])
+    target_op = _TestOp(result_types=[changed_type])
+    c1_op = _make_symbol_value_op(1)
+    c4_op = _make_symbol_value_op(4)
+    changed_reshape = DmaReshapeOp(source_op.results[0], [c1_op.results[0], c4_op.results[0]], changed_type)
+    changed_reshape_module = _canonicalized_module(
+        [
+            source_op,
+            target_op,
+            c1_op,
+            c4_op,
+            changed_reshape,
+            DmaCopyOp(target_op.results[0], changed_reshape.result),
+        ]
+    )
+    assert _count_ops(changed_reshape_module, DmaReshapeOp) == 1
+
+
+# TC-DMA-014D1
+# 功能说明: 验证 dma.reshape canonicalization 将一跳连续 reshape 合并为单个 reshape。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_reshape_canonicalization_composes_one_hop_reshape
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_reshape_canonicalization_composes_one_hop_reshape() -> None:
+    flat_type = _make_memory_type(shape=_dim_array([4]), stride=_dim_array([1]))
+    mid_type = _make_memory_type(shape=_dim_array([2, 2]), stride=_dim_array([2, 1]))
+    final_type = _make_memory_type(shape=_dim_array([1, 4]), stride=_dim_array([4, 1]))
+    source_op = _TestOp(result_types=[flat_type])
+    target_op = _TestOp(result_types=[final_type])
+    c1_op = _make_symbol_value_op(1)
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    mid_reshape = DmaReshapeOp(source_op.results[0], [c2_op.results[0], c2_op.results[0]], mid_type)
+    final_reshape = DmaReshapeOp(mid_reshape.result, [c1_op.results[0], c4_op.results[0]], final_type)
+    composed_module = _canonicalized_module(
+        [
+            source_op,
+            target_op,
+            c1_op,
+            c2_op,
+            c4_op,
+            mid_reshape,
+            final_reshape,
+            DmaCopyOp(target_op.results[0], final_reshape.result),
+        ]
+    )
+    assert _count_ops(composed_module, DmaReshapeOp) == 1
+
+    dynamic_source_type = _make_memory_type(shape=_dim_array(["M", "N"]), stride=_dim_array(["N", 1]))
+    dynamic_mid_type = _make_memory_type(shape=_dim_array(["N", "M"]), stride=_dim_array(["M", 1]))
+    dynamic_final_type = _make_memory_type(shape=_dim_array(["P", "Q"]), stride=_dim_array(["Q", 1]))
+    source_op = _TestOp(result_types=[dynamic_source_type])
+    target_op = _TestOp(result_types=[dynamic_final_type])
+    n_op = _make_symbol_value_op("N")
+    m_op = _make_symbol_value_op("M")
+    p_op = _make_symbol_value_op("P")
+    q_op = _make_symbol_value_op("Q")
+    mid_reshape = DmaReshapeOp(source_op.results[0], [n_op.results[0], m_op.results[0]], dynamic_mid_type)
+    final_reshape = DmaReshapeOp(mid_reshape.result, [p_op.results[0], q_op.results[0]], dynamic_final_type)
+    dynamic_composed_module = _canonicalized_module(
+        [
+            source_op,
+            target_op,
+            n_op,
+            m_op,
+            p_op,
+            q_op,
+            mid_reshape,
+            final_reshape,
+            DmaCopyOp(target_op.results[0], final_reshape.result),
+        ]
+    )
+    assert _count_ops(dynamic_composed_module, DmaReshapeOp) == 1
+
+    source_op = _TestOp(result_types=[flat_type])
+    mid_target_op = _TestOp(result_types=[mid_type])
+    final_target_op = _TestOp(result_types=[final_type])
+    c1_op = _make_symbol_value_op(1)
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    mid_reshape = DmaReshapeOp(source_op.results[0], [c2_op.results[0], c2_op.results[0]], mid_type)
+    final_reshape = DmaReshapeOp(mid_reshape.result, [c1_op.results[0], c4_op.results[0]], final_type)
+    extra_use_module = _canonicalized_module(
+        [
+            source_op,
+            mid_target_op,
+            final_target_op,
+            c1_op,
+            c2_op,
+            c4_op,
+            mid_reshape,
+            DmaCopyOp(mid_target_op.results[0], mid_reshape.result),
+            final_reshape,
+            DmaCopyOp(final_target_op.results[0], final_reshape.result),
+        ]
+    )
+    assert _count_ops(extra_use_module, DmaReshapeOp) == 2
+
+
+# TC-DMA-014E
+# 功能说明: 验证 dma.view/reshape canonicalization 保留非 identity view/reshape 边界。
+# 使用示例: pytest -q test/dialect/test_dma.py -k test_dma_view_reshape_canonicalization_keeps_non_identity_boundaries
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma.py
+def test_dma_view_reshape_canonicalization_keeps_non_identity_boundaries() -> None:
+    byte_pool_type = _make_memory_type(shape=_dim_array([32]), stride=_dim_array([1]), element_type=i8)
+    typed_result_type = _make_memory_type(shape=_dim_array([4]), stride=_dim_array([1]))
+    pool_op = _TestOp(result_types=[byte_pool_type])
+    target_op = _TestOp(result_types=[typed_result_type])
+    c1_op = _make_symbol_value_op(1)
+    c4_op = _make_symbol_value_op(4)
+    nonzero_offset_view = DmaViewOp(
+        pool_op.results[0],
+        [c1_op.results[0]],
+        [c4_op.results[0]],
+        [c1_op.results[0]],
+        typed_result_type,
+    )
+    nonzero_offset_module = _canonicalized_module(
+        [
+            pool_op,
+            target_op,
+            c1_op,
+            c4_op,
+            nonzero_offset_view,
+            DmaCopyOp(target_op.results[0], nonzero_offset_view.result),
+        ]
+    )
+    assert _count_ops(nonzero_offset_module, DmaViewOp) == 1
+
+    source_type = _make_memory_type(shape=_dim_array([2, 2]), stride=_dim_array([2, 1]))
+    changed_type = _make_memory_type(shape=_dim_array([1, 4]), stride=_dim_array([4, 1]))
+    source_op = _TestOp(result_types=[source_type])
+    target_op = _TestOp(result_types=[changed_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    shape_stride_change_view = DmaViewOp(
+        source_op.results[0],
+        [c0_op.results[0], c0_op.results[0]],
+        [c1_op.results[0], c4_op.results[0]],
+        [c2_op.results[0], c1_op.results[0]],
+        changed_type,
+    )
+    shape_stride_change_module = _canonicalized_module(
+        [
+            source_op,
+            target_op,
+            c0_op,
+            c1_op,
+            c2_op,
+            c4_op,
+            shape_stride_change_view,
+            DmaCopyOp(target_op.results[0], shape_stride_change_view.result),
+        ]
+    )
+    assert _count_ops(shape_stride_change_module, DmaViewOp) == 1
+
+    flat_type = _make_memory_type(shape=_dim_array([4]), stride=_dim_array([1]))
+    rank_changed_type = _make_memory_type(shape=_dim_array([2, 2]), stride=_dim_array([2, 1]))
+    source_op = _TestOp(result_types=[flat_type])
+    target_op = _TestOp(result_types=[rank_changed_type])
+    c2_op = _make_symbol_value_op(2)
+    rank_change_reshape = DmaReshapeOp(source_op.results[0], [c2_op.results[0], c2_op.results[0]], rank_changed_type)
+    rank_change_module = _canonicalized_module(
+        [
+            source_op,
+            target_op,
+            c2_op,
+            rank_change_reshape,
+            DmaCopyOp(target_op.results[0], rank_change_reshape.result),
+        ]
+    )
+    assert _count_ops(rank_change_module, DmaReshapeOp) == 1
+
+    dynamic_source_type = _make_memory_type(shape=_dim_array(["M", "N"]), stride=_dim_array(["N", 1]))
+    dynamic_changed_type = _make_memory_type(shape=_dim_array(["N", "M"]), stride=_dim_array(["M", 1]))
+    source_op = _TestOp(result_types=[dynamic_source_type])
+    target_op = _TestOp(result_types=[dynamic_changed_type])
+    n_op = _make_symbol_value_op("N")
+    m_op = _make_symbol_value_op("M")
+    dynamic_unproven_reshape = DmaReshapeOp(
+        source_op.results[0],
+        [n_op.results[0], m_op.results[0]],
+        dynamic_changed_type,
+    )
+    dynamic_unproven_module = _canonicalized_module(
+        [
+            source_op,
+            target_op,
+            n_op,
+            m_op,
+            dynamic_unproven_reshape,
+            DmaCopyOp(target_op.results[0], dynamic_unproven_reshape.result),
+        ]
+    )
+    assert _count_ops(dynamic_unproven_module, DmaReshapeOp) == 1
 
 
 # TC-DMA-015
