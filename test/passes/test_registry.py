@@ -440,6 +440,40 @@ def test_build_registered_producer_consumer_analysis_pass() -> None:
     assert pass_obj.fold is False
 
 
+# TC-REGISTRY-007A-1C
+# 功能说明: 验证内置加载后 hoist-dma-alias-ops 通过 registry 返回 canonical ModulePass。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_hoist_dma_alias_ops_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_hoist_dma_alias_ops_pass() -> None:
+    load_builtin_passes()
+    hoist_module = importlib.import_module("kernel_gen.passes.hoist_dma_alias_ops")
+
+    pass_obj = build_registered_pass("hoist-dma-alias-ops", {"fold": "false"})
+
+    assert isinstance(pass_obj, hoist_module.HoistDmaAliasOpsPass)
+    assert pass_obj.name == "hoist-dma-alias-ops"
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.hoist_dma_alias_ops"
+    assert pass_obj.fold is False
+
+
+# TC-REGISTRY-007A-1D
+# 功能说明: 验证 hoist-dma-alias-ops 第一阶段不接受 pass 专属 option。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_hoist_dma_alias_ops_rejects_private_options
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_hoist_dma_alias_ops_rejects_private_options() -> None:
+    load_builtin_passes()
+
+    with pytest.raises(
+        KernelCodeError,
+        match=r"^PassRegistryError: pass 'hoist-dma-alias-ops' does not accept options$",
+    ):
+        build_registered_pass("hoist-dma-alias-ops", {"hoist-ops": "dma.fill"})
+
+
 # TC-REGISTRY-007A-2
 # 功能说明: 验证 registry caller 当前冻结的 surviving public path 与 compat consumer matrix。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_registry_surviving_public_paths_match_consumer_matrix
@@ -483,6 +517,11 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
             "kernel_gen.passes.symbol_buffer_hoist",
             "SymbolBufferHoistPass",
             importlib.import_module("kernel_gen.passes.symbol_buffer_hoist").SymbolBufferHoistPass,
+        ),
+        (
+            "kernel_gen.passes.hoist_dma_alias_ops",
+            "HoistDmaAliasOpsPass",
+            importlib.import_module("kernel_gen.passes.hoist_dma_alias_ops").HoistDmaAliasOpsPass,
         ),
         (
             "kernel_gen.passes",
@@ -1047,6 +1086,7 @@ def test_load_builtin_passes_is_idempotent() -> None:
     assert "multi-buffer" in list_registered_passes()
     assert "arch-parallelize" in list_registered_passes()
     assert "producer-consumer-analysis" in list_registered_passes()
+    assert "hoist-dma-alias-ops" in list_registered_passes()
     assert "no-op-pipeline" in list_registered_pipelines()
     assert "default-lowering" in list_registered_pipelines()
     assert "npu-demo-lowering" in list_registered_pipelines()

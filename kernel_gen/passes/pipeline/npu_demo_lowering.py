@@ -4,7 +4,7 @@
 功能说明:
 - 提供 `npu-demo-lowering` pipeline 的 builder。
 - 固定 `dsl_run` 的 npu_demo 正向链路为
-  `InlinePass -> CommonSubexpressionElimination -> CanonicalizePass -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> TileAnalysisPass -> LowerDmaMemoryHierarchyPass -> SymbolLoopHoistPass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> MemoryPoolPass -> CanonicalizePass -> ArchParallelizePass -> ProducerConsumerAnalysisPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
+  `InlinePass -> CommonSubexpressionElimination -> CanonicalizePass -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> HoistDmaAliasOpsPass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> TileAnalysisPass -> LowerDmaMemoryHierarchyPass -> SymbolLoopHoistPass -> HoistDmaAliasOpsPass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> MemoryPoolPass -> CanonicalizePass -> ArchParallelizePass -> ProducerConsumerAnalysisPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
 - 默认 `MemoryPlanPass` 补齐 insert-free 生命周期，`MemoryPoolPass` 执行 dynamic backing 改写，template-name infer 在 outline 后写回 wrapper/body memory type 的 template name。
 - 通过 registry 装饰器完成 pipeline 注册。
 
@@ -31,6 +31,7 @@ from kernel_gen.passes.arch_parallelize import ArchParallelizePass
 from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
 from kernel_gen.passes.decompass import DecompassPass
 from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
+from kernel_gen.passes.hoist_dma_alias_ops import HoistDmaAliasOpsPass
 from kernel_gen.passes.inline import InlinePass
 from kernel_gen.passes.lowering import NnLoweringPass
 from kernel_gen.passes.memory_plan import MemoryPlanPass
@@ -53,7 +54,7 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     功能说明:
     - 返回 `PassManager(name="npu-demo-lowering")`。
     - 固定 pass 顺序为
-      `InlinePass -> CommonSubexpressionElimination -> CanonicalizePass -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> TileAnalysisPass -> LowerDmaMemoryHierarchyPass -> SymbolLoopHoistPass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> MemoryPoolPass -> CanonicalizePass -> ArchParallelizePass -> ProducerConsumerAnalysisPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
+      `InlinePass -> CommonSubexpressionElimination -> CanonicalizePass -> DecompassPass -> NnLoweringPass -> SymbolLoopHoistPass -> HoistDmaAliasOpsPass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> TileAnalysisPass -> LowerDmaMemoryHierarchyPass -> SymbolLoopHoistPass -> HoistDmaAliasOpsPass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> MemoryPoolPass -> CanonicalizePass -> ArchParallelizePass -> ProducerConsumerAnalysisPass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
     - `CommonSubexpressionElimination` 后均紧跟 xDSL `CanonicalizePass`，仅在本 pipeline 内清理 IR，
       不把 canonicalize 注册为仓库公开 pass。
     - `MemoryPlanPass` 固定以 `insert_free=True, fold=False` 运行两次，并位于对应
@@ -61,6 +62,8 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     - 第一段 `SymbolBufferHoistPass` 位于第一段 `MemoryPlanPass` 后、`TileAnalysisPass` 前，用于把
       loop 内安全 `dma.alloc + dma.free` 成对外提到 owner `symbol.for` 两侧。
     - `TileAnalysisPass` 紧跟 `SymbolLoopHoistPass` 后置 CSE，只补充 tile 分析属性，不生成 tile 循环。
+    - 两处 `SymbolLoopHoistPass` 后均紧跟 `HoistDmaAliasOpsPass`，用于把紧邻 `dma.fill`
+      后的 `dma.reshape` 上移并改写 fill target。
     - `LowerDmaMemoryHierarchyPass` 固定以 `fold=True` 和 `apply_op='matmul{["", "tlm1", "tlm2"]}'` 插入 matmul lhs/rhs staging。
     - `SymbolLoopHoistPass` 在没有 `symbol.for` 的模块上应保持 no-op，因此可直接用于
       dsl_run 的最小 npu_demo 正向合同。
@@ -102,6 +105,7 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     pm.add_pass(DecompassPass())
     pm.add_pass(NnLoweringPass())
     pm.add_pass(SymbolLoopHoistPass())
+    pm.add_pass(HoistDmaAliasOpsPass())
     pm.add_pass(CommonSubexpressionElimination())
     pm.add_pass(CanonicalizePass())
     pm.add_pass(MemoryPlanPass(insert_free=True, fold=False))
@@ -109,6 +113,7 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     pm.add_pass(TileAnalysisPass())
     pm.add_pass(LowerDmaMemoryHierarchyPass(fold=True, apply_op='matmul{["", "tlm1", "tlm2"]}'))
     pm.add_pass(SymbolLoopHoistPass())
+    pm.add_pass(HoistDmaAliasOpsPass())
     pm.add_pass(CommonSubexpressionElimination())
     pm.add_pass(CanonicalizePass())
     pm.add_pass(MemoryPlanPass(insert_free=True, fold=False))

@@ -64,6 +64,7 @@
 - 除 pass 通用 `fold` 选项外，注册表不解析其它 `options` 语义；其它 pass options 继续交给 pass / pipeline 构造入口。
 - 内置 pipeline 模块放在 `kernel_gen/passes/pipeline`；`load_builtin_passes()` 负责导入这些模块以触发注册。
 - 当前内置 pipeline 至少包含 `default-lowering` 与 `npu-demo-lowering` 两个公开 builder。
+- `hoist-dma-alias-ops` 作为公开 pass name 进入内置注册表；其第一阶段只接受通用 `fold`，不接受专属 option。
 - `npu-demo-lowering` 公开 builder 支持 `options={"target": "npu_demo"}`；其固定顺序由 `spec/pass/pipeline/npu_demo_lowering.md` 约束，并包含 `MemoryPlanPass(insert_free=True, fold=False)`、公开 `arch-parallelize` 阶段与两次 `SymbolBufferHoistPass`；`only-kernel` / `only_kernel` 之类选项必须显式失败，不能把 host wrapper 与 device body 的 outline 流程裁成仅 kernel 形态。
 - registry 只负责注册与查询，不承载具体 pipeline builder 实现。
 - 重复注册同名 pass 或 pipeline 必须立即失败，不得覆盖旧项。
@@ -73,6 +74,7 @@
   - `attach-arch-information`：把 target registry 的 launch extent 写回入口 `func.func`。
   - `arch-parallelize`：standalone IR pass，按 target registry 静态 `block_num` 把可分发顶层 `symbol.for` 改写为 block-strided loop；无顶层 `symbol.for` 的函数生成 block0 guard。
   - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前；若存在唯一合法 `dma.free`，把 alloc/free 成对移动到 owner loop 两侧。
+  - `hoist-dma-alias-ops`：把同 block 内紧邻的 `dma.reshape` 上移穿过 `dma.fill`，作为第一阶段 alias hoist pass。
   - `memory-plan`：显式 `insert-free=true` 时为受控 `dma.alloc` 生命周期补插 `dma.free`。
   - `multi-buffer`：把可证明的 matmul lhs/rhs staging alloc/copy/use/free 成对生命周期改写为 DMA ring。
   - `producer-consumer-analysis`：基于公开 `MemoryEffect` 与 pass 内置 alias 规则标注 `productor` / `consumer` 简单整数列表 event attrs。
@@ -102,6 +104,7 @@
   - `kernel_gen.passes.dma_memory_hierarchy`
   - `kernel_gen.passes.memory_pool`
   - `kernel_gen.passes.memory_plan`
+  - `kernel_gen.passes.hoist_dma_alias_ops`
   - `kernel_gen.passes.multi_buffer`
   - `kernel_gen.passes.outline_device_kernel`
   - `kernel_gen.passes.symbol_buffer_hoist`
