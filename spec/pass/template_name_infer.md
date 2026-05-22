@@ -16,7 +16,6 @@
 
 - `spec`：[`spec/pass/template_name_infer.md`](../../spec/pass/template_name_infer.md)
 - `功能实现`：[`kernel_gen/passes/template_name/infer.py`](../../kernel_gen/passes/template_name/infer.py)
-- `兼容入口`：[`kernel_gen/passes/template_name_infer.py`](../../kernel_gen/passes/template_name_infer.py)
 - `test`：[`test/passes/test_template_name_infer.py`](../../test/passes/test_template_name_infer.py)
 
 ## 依赖

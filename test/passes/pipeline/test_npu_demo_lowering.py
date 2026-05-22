@@ -2,20 +2,20 @@
 
 
 功能说明:
-- 覆盖 kernel_gen/passes/pipeline/npu_demo_lowering.py 的公开 builder 与顺序。
+- 覆盖 kernel_gen/pipeline/npu_demo_lowering.py 的公开 builder 与顺序。
 
 当前覆盖率信息:
 - 当前覆盖率: 未统计（本任务验证未启用 coverage 统计）。
 - 达标判定: 待后续补充统计结果。
 
 覆盖率命令:
-- `pytest -q --cov=kernel_gen.passes.pipeline.npu_demo_lowering --cov-branch --cov-report=term-missing test/passes/pipeline/test_npu_demo_lowering.py`
+- `pytest -q --cov=kernel_gen.pipeline.npu_demo_lowering --cov-branch --cov-report=term-missing test/passes/pipeline/test_npu_demo_lowering.py`
 
 使用示例:
 - pytest -q test/passes/pipeline/test_npu_demo_lowering.py
 
 关联文件:
-- 功能实现: kernel_gen/passes/pipeline/npu_demo_lowering.py
+- 功能实现: kernel_gen/pipeline/npu_demo_lowering.py
 - Spec 文档: spec/pass/pipeline/npu_demo_lowering.md
 - 测试文件: test/passes/pipeline/test_npu_demo_lowering.py
 """
@@ -47,7 +47,7 @@ from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
-pipeline_module = importlib.import_module("kernel_gen.passes.pipeline")
+pipeline_module = importlib.import_module("kernel_gen.pipeline")
 build_npu_demo_lowering_pipeline = pipeline_module.build_npu_demo_lowering_pipeline
 
 pass_manager_module = importlib.import_module("kernel_gen.passes.pass_manager")
@@ -72,7 +72,7 @@ ProducerConsumerAnalysisPass = importlib.import_module(
 SymbolBufferHoistPass = importlib.import_module("kernel_gen.passes.symbol_buffer_hoist").SymbolBufferHoistPass
 SymbolLoopHoistPass = importlib.import_module("kernel_gen.passes.symbol_loop_hoist").SymbolLoopHoistPass
 TileAnalysisPass = importlib.import_module("kernel_gen.passes.tile.analysis").TileAnalysisPass
-TemplateNameInferPass = importlib.import_module("kernel_gen.passes.template_name_infer").TemplateNameInferPass
+TemplateNameInferPass = importlib.import_module("kernel_gen.passes").TemplateNameInferPass
 
 _PIPELINE_PASS_ORDER: list[str] = []
 
@@ -471,7 +471,7 @@ def matmul_kernel(lhs: Memory, rhs: Memory, out: Memory, TILE_M: SymbolDim, TILE
 # 功能说明: 验证 npu-demo-lowering builder 返回 PassManager 且名称固定。
 # 测试目的: 锁定 npu-demo-lowering pipeline 的公开名称与类型。
 # 使用示例: pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k test_npu_demo_lowering_pipeline_builds_pass_manager
-# 对应功能实现文件路径: kernel_gen/passes/pipeline/npu_demo_lowering.py
+# 对应功能实现文件路径: kernel_gen/pipeline/npu_demo_lowering.py
 # 对应 spec 文件路径: spec/pass/pipeline/npu_demo_lowering.md
 # 对应测试文件路径: test/passes/pipeline/test_npu_demo_lowering.py
 def test_npu_demo_lowering_pipeline_builds_pass_manager() -> None:
@@ -484,7 +484,7 @@ def test_npu_demo_lowering_pipeline_builds_pass_manager() -> None:
 # 功能说明: 验证 npu-demo-lowering 的固定顺序包含两次 memory-plan、三次 CSE、四次 canonicalize 和 late attach。
 # 测试目的: 锁定 dsl_run 新正向管线的最小公开顺序。
 # 使用示例: pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k test_npu_demo_lowering_pipeline_pass_order
-# 对应功能实现文件路径: kernel_gen/passes/pipeline/npu_demo_lowering.py
+# 对应功能实现文件路径: kernel_gen/pipeline/npu_demo_lowering.py
 # 对应 spec 文件路径: spec/pass/pipeline/npu_demo_lowering.md
 # 对应测试文件路径: test/passes/pipeline/test_npu_demo_lowering.py
 @pytest.mark.nn_lowering

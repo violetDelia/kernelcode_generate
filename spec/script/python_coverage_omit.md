@@ -47,7 +47,7 @@
 | `kernel_gen/operation/__init__.py` | 仅汇总 operation 公开入口 | 不计入 line / branch 阈值 |
 | `kernel_gen/passes/__init__.py` | 仅转发 pass 公共入口，无独立算法实现 | 不计入 line / branch 阈值 |
 | `kernel_gen/passes/analysis/__init__.py` | 仅转发 analysis pass 公开入口 | 不计入 line / branch 阈值 |
-| `kernel_gen/passes/pipeline/__init__.py` | 仅汇总 pipeline builder 入口 | 不计入 line / branch 阈值 |
+| `kernel_gen/pipeline/__init__.py` | 仅汇总 pipeline builder 入口 | 不计入 line / branch 阈值 |
 | `kernel_gen/passes/tuning/__init__.py` | 仅转发 tuning pass 入口 | 不计入 line / branch 阈值 |
 | `kernel_gen/passes/lowering/nn_lowering/__init__.py` | 仅转发 `NnLoweringPass` 入口 | 不计入 line / branch 阈值 |
 | `kernel_gen/symbol_variable/__init__.py` | 仅汇总 symbol_variable 公开入口 | 不计入 line / branch 阈值 |

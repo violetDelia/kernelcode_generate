@@ -125,7 +125,7 @@ API 列表:
   - kernel_gen/passes/memory_plan.py
 - kernel_gen/passes/outline_device_kernel.py
 - kernel_gen/passes/symbol_buffer_hoist.py
-- kernel_gen/passes/template_name_infer.py
+- kernel_gen/passes/template_name/infer.py
   - kernel_gen/passes/tile/analysis.py
   - kernel_gen/passes/tile/elewise.py
   - kernel_gen/passes/tile/reduce.py
@@ -176,7 +176,7 @@ from .symbol_loop_hoist import (
     SymbolMaxHoistPattern,
     SymbolMinHoistPattern,
 )
-from .template_name_infer import TemplateNameInferPass
+from .template_name.infer import TemplateNameInferPass
 
 __all__ = [
     "Pass",

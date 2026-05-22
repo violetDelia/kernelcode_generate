@@ -48,7 +48,7 @@ WORKTREE_FALLBACK_REPO = REPO_ROOT.parent if REPO_ROOT.name.startswith("wt-") el
 pass_module = importlib.import_module("kernel_gen.passes.pass_manager")
 Pass = pass_module.Pass
 PassManager = pass_module.PassManager
-pipeline_module = importlib.import_module("kernel_gen.passes.pipeline")
+pipeline_module = importlib.import_module("kernel_gen.pipeline")
 build_default_lowering_pipeline = pipeline_module.build_default_lowering_pipeline
 buffer_results_module = importlib.import_module("kernel_gen.passes.buffer_results_to_out_params")
 BufferResultsToOutParamsPass = buffer_results_module.BufferResultsToOutParamsPass
@@ -452,10 +452,8 @@ def test_pass_manager_runs_registered_lower_nn(monkeypatch: pytest.MonkeyPatch) 
 def test_pass_manager_surviving_import_matrix() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     buffer_results_module = importlib.import_module("kernel_gen.passes.buffer_results_to_out_params")
-    default_lowering_pipeline_module = importlib.import_module(
-        "kernel_gen.passes.pipeline.default_lowering"
-    )
-    npu_demo_pipeline_module = importlib.import_module("kernel_gen.passes.pipeline.npu_demo_lowering")
+    default_lowering_pipeline_module = importlib.import_module("kernel_gen.pipeline.default_lowering")
+    npu_demo_pipeline_module = importlib.import_module("kernel_gen.pipeline.npu_demo_lowering")
     dma_hierarchy_module = importlib.import_module("kernel_gen.passes.dma_memory_hierarchy")
     tile_analysis_module = importlib.import_module("kernel_gen.passes.tile.analysis")
     tile_elewise_module = importlib.import_module("kernel_gen.passes.tile.elewise")
@@ -504,6 +502,9 @@ def test_pass_manager_old_lowering_paths_fail_fast() -> None:
         "kernel_gen.passes.lowering.tile_analysis",
         "kernel_gen.passes.lowering.tile_elewise",
         "kernel_gen.passes.lowering.tile_reduce",
+        "kernel_gen.passes.pipeline",
+        "kernel_gen.passes.pipeline.default_lowering",
+        "kernel_gen.passes.pipeline.npu_demo_lowering",
     )
     with _worktree_only_imports(*old_module_paths):
         for module_name in old_module_paths:

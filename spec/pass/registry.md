@@ -62,7 +62,7 @@
 - 注册发生在 Python import 时；因此对“内置 pass/pipeline”必须提供一个显式加载入口（见 `load_builtin_passes`）。
 - `build_registered_pass/build_registered_pipeline` 不得隐式调用 `load_builtin_passes()`；加载时机由调用方控制，以保持工具入口行为可预测。
 - 除 pass 通用 `fold` 选项外，注册表不解析其它 `options` 语义；其它 pass options 继续交给 pass / pipeline 构造入口。
-- 内置 pipeline 模块放在 `kernel_gen/passes/pipeline`；`load_builtin_passes()` 负责导入这些模块以触发注册。
+- 内置 pipeline 模块放在 `kernel_gen/pipeline`；`load_builtin_passes()` 负责导入这些模块以触发注册。
 - 当前内置 pipeline 至少包含 `default-lowering` 与 `npu-demo-lowering` 两个公开 builder。
 - `hoist-dma-alias-ops` 作为公开 pass name 进入内置注册表；其第一阶段只接受通用 `fold`，不接受专属 option。
 - `npu-demo-lowering` 公开 builder 支持 `options={"target": "npu_demo"}`；其固定顺序由 `spec/pass/pipeline/npu_demo_lowering.md` 约束，并包含 `MemoryPlanPass(insert_free=True, fold=False)`、公开 `arch-parallelize` 阶段与两次 `SymbolBufferHoistPass`；`only-kernel` / `only_kernel` 之类选项必须显式失败，不能把 host wrapper 与 device body 的 outline 流程裁成仅 kernel 形态。
@@ -109,7 +109,7 @@
   - `kernel_gen.passes.outline_device_kernel`
   - `kernel_gen.passes.symbol_buffer_hoist`
   - `kernel_gen.passes.symbol_loop_hoist`
-  - `kernel_gen.passes.template_name_infer`
+  - `kernel_gen.passes.template_name.infer`
   - `kernel_gen.passes.producer_consumer_analysis`
 - 对当前仍存活的 compat / family caller，当前基线仍允许继续导入，但不承诺永久保留：
   - `kernel_gen.passes.lowering`
@@ -135,8 +135,10 @@
   - `kernel_gen.passes.lowering.tile_elewise`
   - `kernel_gen.passes.lowering.tile_reduce`
 - 已退场的 analysis family 不再提供公开 pass 名或 registry 构造入口；`build_registered_pass("analyze-func-cost")` 必须显式失败。
-- 当前模板名推导专题的 canonical public path 固定为 `kernel_gen.passes.template_name_infer`；`kernel_gen.passes.TemplateNameInferPass` 作为包根 re-export 保持可用。
-- `kernel_gen/passes/template_name/` 是内部实现目录，不进入 public path matrix；registry / pipeline 只可把它当作实现层导入路径说明，不可把它改写成新的外部 caller 合同。
+- 当前模板名推导专题的 canonical public path 固定为 `kernel_gen.passes.template_name.infer`；`kernel_gen.passes.TemplateNameInferPass` 作为包根 re-export 保持可用。
+- 旧 `kernel_gen.passes.template_name_constraints`、`kernel_gen.passes.template_name_default_constraints`、`kernel_gen.passes.template_name_graph` 与 `kernel_gen.passes.template_name_infer` 根模块必须稳定失败。
+- `kernel_gen/passes/template_name/` 是当前真实实现目录；外部 caller 只能使用该目录下的公开模块或 `kernel_gen.passes.TemplateNameInferPass` 包根 re-export。
+- pipeline builder 的 canonical public path 固定为 `kernel_gen.pipeline`；旧 `kernel_gen.passes.pipeline` 及其子模块必须稳定失败。
 - 当前 arch parallelize 专题的 canonical public path 固定为 `kernel_gen.passes.arch_parallelize`；`kernel_gen.passes.ArchParallelizePass` 作为包根 re-export 保持可用；registry 名称固定为 `arch-parallelize`。
 - 机械验收口径：
   - `test/passes/test_registry.py` 负责锁定 canonical public path、`symbol-buffer-hoist` 的稳定注册名与包根 re-export、旧路径失败边界、`analyze-func-cost` 构造失败与 registry caller 的 `importlib` 消费者矩阵。

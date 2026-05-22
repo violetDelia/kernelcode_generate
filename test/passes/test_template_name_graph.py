@@ -2,14 +2,13 @@
 
 
 功能说明:
-- 覆盖 `kernel_gen.passes.template_name_graph` 的公开 graph API。
+- 覆盖 `kernel_gen.passes.template_name.graph` 的公开 graph API。
 
 使用示例:
 - pytest -q test/passes/test_template_name_graph.py
 
 关联文件:
 - 功能实现: kernel_gen/passes/template_name/graph.py
-- 兼容入口: kernel_gen/passes/template_name_graph.py
 - Spec 文档: spec/pass/template_name_graph.md
 - 测试文件: test/passes/test_template_name_graph.py
 """
@@ -31,7 +30,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr
-from kernel_gen.passes.template_name_graph import Same, TemplateNameGraph, TemplateNameValue
+from kernel_gen.passes.template_name.graph import Same, TemplateNameGraph, TemplateNameValue
 
 
 def _symbol_array(values: tuple[str, ...]) -> ArrayAttr:

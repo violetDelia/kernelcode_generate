@@ -2,7 +2,7 @@
 
 
 功能说明:
-- 覆盖 `kernel_gen.passes.template_name_constraints` 与默认约束注册入口。
+- 覆盖 `kernel_gen.passes.template_name.constraints` 与默认约束注册入口。
 
 使用示例:
 - pytest -q test/passes/test_template_name_constraints.py
@@ -10,8 +10,6 @@
 关联文件:
 - 功能实现: kernel_gen/passes/template_name/constraints.py
 - 功能实现: kernel_gen/passes/template_name/default_constraints.py
-- 兼容入口: kernel_gen/passes/template_name_constraints.py
-- 兼容入口: kernel_gen/passes/template_name_default_constraints.py
 - Spec 文档: spec/pass/template_name_constraints.md
 - 测试文件: test/passes/test_template_name_constraints.py
 """
@@ -35,7 +33,7 @@ from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAdvanceRingOp, DmaCopyOp, DmaCurrentRingOp, DmaMakeRingOp, DmaRingType
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
-from kernel_gen.passes.template_name_constraints import (
+from kernel_gen.passes.template_name.constraints import (
     SameSpec,
     TemplateValueRef,
     VerifyOnlySpec,
@@ -43,8 +41,8 @@ from kernel_gen.passes.template_name_constraints import (
     get_template_constraints,
     register_template_constraints,
 )
-from kernel_gen.passes.template_name_default_constraints import register_default_template_constraints
-from kernel_gen.passes.template_name_graph import Same, VerifyOnly
+from kernel_gen.passes.template_name.default_constraints import register_default_template_constraints
+from kernel_gen.passes.template_name.graph import Same, VerifyOnly
 
 
 @irdl_op_definition

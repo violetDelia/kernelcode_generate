@@ -550,7 +550,7 @@ def load_builtin_passes() -> None:
             continue
         register_pass(pass_cls)
 
-    from kernel_gen.passes.pipeline import (
+    from kernel_gen.pipeline import (
         build_default_lowering_pipeline,
         build_npu_demo_lowering_pipeline,
     )

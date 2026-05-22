@@ -12,14 +12,14 @@ API 列表:
 - `build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> PassManager`
 
 使用示例:
-- from kernel_gen.passes.pipeline import build_npu_demo_lowering_pipeline
+- from kernel_gen.pipeline import build_npu_demo_lowering_pipeline
 - pm = build_npu_demo_lowering_pipeline({"target": "npu_demo"})
 - lowered = pm.run(module)
 
 关联文件:
 - spec: [spec/pass/pipeline/npu_demo_lowering.md](spec/pass/pipeline/npu_demo_lowering.md)
 - test: [test/passes/pipeline/test_npu_demo_lowering.py](test/passes/pipeline/test_npu_demo_lowering.py)
-- 功能实现: [kernel_gen/passes/pipeline/npu_demo_lowering.py](kernel_gen/passes/pipeline/npu_demo_lowering.py)
+- 功能实现: [kernel_gen/pipeline/npu_demo_lowering.py](kernel_gen/pipeline/npu_demo_lowering.py)
 """
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     关联文件:
     - spec: [spec/pass/pipeline/npu_demo_lowering.md](spec/pass/pipeline/npu_demo_lowering.md)
     - test: [test/passes/pipeline/test_npu_demo_lowering.py](test/passes/pipeline/test_npu_demo_lowering.py)
-    - 功能实现: [kernel_gen/passes/pipeline/npu_demo_lowering.py](kernel_gen/passes/pipeline/npu_demo_lowering.py)
+    - 功能实现: [kernel_gen/pipeline/npu_demo_lowering.py](kernel_gen/pipeline/npu_demo_lowering.py)
     """
 
     normalized_options = {} if options is None else dict(options)

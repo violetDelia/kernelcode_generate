@@ -11,9 +11,6 @@
 - 功能实现: kernel_gen/passes/template_name/graph.py
 - 功能实现: kernel_gen/passes/template_name/constraints.py
 - 功能实现: kernel_gen/passes/template_name/infer.py
-- 兼容入口: kernel_gen/passes/template_name_graph.py
-- 兼容入口: kernel_gen/passes/template_name_constraints.py
-- 兼容入口: kernel_gen/passes/template_name_infer.py
 - Spec 文档: spec/pass/template_name_infer.md
 - 测试文件: test/passes/test_template_name_infer.py
 """
@@ -39,8 +36,8 @@ from kernel_gen.dialect.dma import DmaCopyOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
-from kernel_gen.passes.template_name_graph import Same, TemplateNameGraph, TemplateNameValue
-from kernel_gen.passes.template_name_infer import TemplateNameInferPass
+from kernel_gen.passes.template_name.graph import Same, TemplateNameGraph, TemplateNameValue
+from kernel_gen.passes.template_name.infer import TemplateNameInferPass
 
 
 def _symbol_array(values: tuple[str, ...]) -> ArrayAttr:

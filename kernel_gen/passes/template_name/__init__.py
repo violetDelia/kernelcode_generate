@@ -10,7 +10,8 @@ API 列表:
 
 使用示例:
 - # 内部消费者按具体实现模块导入，例如本目录下的 infer.py。
-- # 外部 caller 继续使用 kernel_gen/passes/template_name_infer.py 兼容入口。
+- # 外部 caller 使用 kernel_gen.passes.TemplateNameInferPass 包根 re-export，
+- # 或直接导入 kernel_gen.passes.template_name.infer。
 
 关联文件:
 - spec: spec/pass/template_name_graph.md

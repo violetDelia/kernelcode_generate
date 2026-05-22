@@ -165,6 +165,28 @@ def _worktree_only_imports(*module_names: str):
         sys.path[:] = original_path
 
 
+def _assert_import_path_removed(module_name: str) -> None:
+    """断言旧公开模块路径已从当前 worktree 删除。"""
+
+    importlib.invalidate_caches()
+    for loaded in list(sys.modules):
+        if loaded == module_name or loaded.startswith(module_name + "."):
+            del sys.modules[loaded]
+    try:
+        spec = importlib.util.find_spec(module_name)
+    except ModuleNotFoundError as exc:
+        missing = exc.name or ""
+        if missing == module_name or module_name.startswith(missing + "."):
+            spec = None
+        else:
+            raise
+    assert spec is None
+    with pytest.raises(ModuleNotFoundError) as exc_info:
+        importlib.import_module(module_name)
+    missing = exc_info.value.name or ""
+    assert missing == module_name or module_name.startswith(missing + ".")
+
+
 # TC-REGISTRY-001
 # 功能说明: 验证重复注册同名 pass 立即失败，且错误短语可机械匹配。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_register_pass_duplicate_fails
@@ -609,16 +631,16 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
 
 
 # TC-REGISTRY-007A-2T
-# 功能说明: 验证 template-name 旧公开根模块和 package root 兼容入口保持可用。
+# 功能说明: 验证 template-name 新公开模块和 package root re-export 保持可用。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_template_name_public_compatibility_modules
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
 # 对应测试文件路径: test/passes/test_registry.py
 def test_template_name_public_compatibility_modules() -> None:
-    graph_module = importlib.import_module("kernel_gen.passes.template_name_graph")
-    constraints_module = importlib.import_module("kernel_gen.passes.template_name_constraints")
-    default_constraints_module = importlib.import_module("kernel_gen.passes.template_name_default_constraints")
-    infer_module = importlib.import_module("kernel_gen.passes.template_name_infer")
+    graph_module = importlib.import_module("kernel_gen.passes.template_name.graph")
+    constraints_module = importlib.import_module("kernel_gen.passes.template_name.constraints")
+    default_constraints_module = importlib.import_module("kernel_gen.passes.template_name.default_constraints")
+    infer_module = importlib.import_module("kernel_gen.passes.template_name.infer")
     package_module = importlib.import_module("kernel_gen.passes")
 
     assert graph_module.__all__ == [
@@ -648,6 +670,24 @@ def test_template_name_public_compatibility_modules() -> None:
             assert hasattr(module, name)
 
 
+# TC-REGISTRY-007A-2T1
+# 功能说明: 验证 template-name 旧根模块按用户确认稳定删除。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_template_name_removed_compat_modules_fail_fast
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_template_name_removed_compat_modules_fail_fast() -> None:
+    removed = (
+        "kernel_gen.passes.template_name_graph",
+        "kernel_gen.passes.template_name_constraints",
+        "kernel_gen.passes.template_name_default_constraints",
+        "kernel_gen.passes.template_name_infer",
+    )
+    with _worktree_only_imports(*removed):
+        for module_name in removed:
+            _assert_import_path_removed(module_name)
+
+
 # TC-REGISTRY-007A-2U
 # 功能说明: 验证 registry 构造仍通过公开 pass 名返回 template-name-infer 兼容类。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_template_name_registry_constructs_public_pass
@@ -655,7 +695,7 @@ def test_template_name_public_compatibility_modules() -> None:
 # 对应 spec 文件路径: spec/pass/registry.md
 # 对应测试文件路径: test/passes/test_registry.py
 def test_template_name_registry_constructs_public_pass() -> None:
-    infer_module = importlib.import_module("kernel_gen.passes.template_name_infer")
+    infer_module = importlib.import_module("kernel_gen.passes")
     load_builtin_passes()
 
     pass_obj = build_registered_pass("template-name-infer")

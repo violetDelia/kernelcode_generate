@@ -327,3 +327,13 @@ class TemplateNameGraph:
         if lhs_root is rhs_root:
             return
         parent[rhs_root] = lhs_root
+
+
+__all__ = [
+    "TemplateNameValue",
+    "Same",
+    "VerifyOnly",
+    "TemplateNameConstraint",
+    "TemplateNameSolution",
+    "TemplateNameGraph",
+]

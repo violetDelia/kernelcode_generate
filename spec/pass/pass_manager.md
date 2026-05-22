@@ -55,7 +55,7 @@
 ### 当前调用说明
 
 - `PassManager` 与 `Pass` 的 canonical public path 固定为 `kernel_gen.passes.pass_manager`。
-- default / npu-demo pipeline builder 的 canonical public path 固定为 `kernel_gen.passes.pipeline`。
+- default / npu-demo pipeline builder 的 canonical public path 固定为 `kernel_gen.pipeline`。
 - `LowerDmaMemoryHierarchyPass`、`MemoryPoolPass` 与 `MemoryPlanPass` 的 canonical public path 固定为 `kernel_gen.passes.dma_memory_hierarchy`、`kernel_gen.passes.memory_pool` 与 `kernel_gen.passes.memory_plan`。
 - tile family 的 canonical public path 固定为：
   - `kernel_gen.passes.tile.analysis`
@@ -83,6 +83,9 @@
 - `npu-demo-lowering` 中 `MemoryPlanPass(insert_free=True, fold=False)`、两次 `SymbolLoopHoistPass` 与两次 `SymbolBufferHoistPass` 的相对顺序由 [`spec/pass/pipeline/npu_demo_lowering.md`](../../spec/pass/pipeline/npu_demo_lowering.md) 固定；`PassManager` 不额外检查或推导这些业务顺序。
 - 以下旧兼容入口在当前基线中必须稳定失败：
   - `kernel_gen.passes.pass_manager.build_default_lowering_pass_manager`
+  - `kernel_gen.passes.pipeline`
+  - `kernel_gen.passes.pipeline.default_lowering`
+  - `kernel_gen.passes.pipeline.npu_demo_lowering`
 - 当前文件级公开 API 只包含 `Pass` 与 `PassManager`；pipeline / registry / test 不得跨文件调用额外 helper。
 
 

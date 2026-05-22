@@ -12,14 +12,14 @@ API 列表:
 - `build_default_lowering_pipeline() -> PassManager`
 
 使用示例:
-- from kernel_gen.passes.pipeline import build_default_lowering_pipeline
+- from kernel_gen.pipeline import build_default_lowering_pipeline
 - pm = build_default_lowering_pipeline()
 - lowered = pm.run(module)
 
 关联文件:
 - spec: [spec/pass/pipeline/default_lowering.md](spec/pass/pipeline/default_lowering.md)
 - test: [test/passes/pipeline/test_default_lowering.py](test/passes/pipeline/test_default_lowering.py)
-- 功能实现: [kernel_gen/passes/pipeline/default_lowering.py](kernel_gen/passes/pipeline/default_lowering.py)
+- 功能实现: [kernel_gen/pipeline/default_lowering.py](kernel_gen/pipeline/default_lowering.py)
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def build_default_lowering_pipeline() -> PassManager:
     关联文件:
     - spec: [spec/pass/pipeline/default_lowering.md](spec/pass/pipeline/default_lowering.md)
     - test: [test/passes/pipeline/test_default_lowering.py](test/passes/pipeline/test_default_lowering.py)
-    - 功能实现: [kernel_gen/passes/pipeline/default_lowering.py](kernel_gen/passes/pipeline/default_lowering.py)
+    - 功能实现: [kernel_gen/pipeline/default_lowering.py](kernel_gen/pipeline/default_lowering.py)
     """
 
     pm = PassManager(name="default-lowering")

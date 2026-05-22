@@ -2,20 +2,20 @@
 
 
 功能说明:
-- 覆盖 kernel_gen/passes/pipeline/default_lowering.py 的默认 pipeline 构造与顺序。
+- 覆盖 kernel_gen/pipeline/default_lowering.py 的默认 pipeline 构造与顺序。
 
 当前覆盖率信息:
 - 当前覆盖率: 未统计（本任务验证未启用 coverage 统计）。
 - 达标判定: 待后续补充统计结果。
 
 覆盖率命令:
-- `pytest -q --cov=kernel_gen.passes.pipeline.default_lowering --cov-branch --cov-report=term-missing test/passes/pipeline/test_default_lowering.py`
+- `pytest -q --cov=kernel_gen.pipeline.default_lowering --cov-branch --cov-report=term-missing test/passes/pipeline/test_default_lowering.py`
 
 使用示例:
 - pytest -q test/passes/pipeline/test_default_lowering.py
 
 关联文件:
-- 功能实现: kernel_gen/passes/pipeline/default_lowering.py
+- 功能实现: kernel_gen/pipeline/default_lowering.py
 - Spec 文档: spec/pass/pipeline/default_lowering.md
 - 测试文件: test/passes/pipeline/test_default_lowering.py
 """
@@ -37,7 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-pipeline_module = importlib.import_module("kernel_gen.passes.pipeline")
+pipeline_module = importlib.import_module("kernel_gen.pipeline")
 build_default_lowering_pipeline = pipeline_module.build_default_lowering_pipeline
 buffer_results_module = importlib.import_module("kernel_gen.passes.buffer_results_to_out_params")
 BufferResultsToOutParamsPass = buffer_results_module.BufferResultsToOutParamsPass
@@ -113,7 +113,7 @@ def _ensure_default_lowering_target() -> str:
 # 功能说明: 验证默认 pipeline 构造返回 PassManager 且名称为 default-lowering。
 # 测试目的: 固定 default-lowering pipeline 的公开名称与类型。
 # 使用示例: pytest -q test/passes/pipeline/test_default_lowering.py -k test_default_lowering_pipeline_builds_pass_manager
-# 对应功能实现文件路径: kernel_gen/passes/pipeline/default_lowering.py
+# 对应功能实现文件路径: kernel_gen/pipeline/default_lowering.py
 # 对应 spec 文件路径: spec/pass/pipeline/default_lowering.md
 # 对应测试文件路径: test/passes/pipeline/test_default_lowering.py
 def test_default_lowering_pipeline_builds_pass_manager() -> None:
@@ -126,7 +126,7 @@ def test_default_lowering_pipeline_builds_pass_manager() -> None:
 # 功能说明: 验证默认 pipeline pass 顺序固定为 decompass -> lower-nn -> buffer-results-to-out-params -> lower-dma-memory-hierarchy。
 # 测试目的: 锁定 default-lowering 顺序一致性，避免各处手工拼接不一致。
 # 使用示例: pytest -q test/passes/pipeline/test_default_lowering.py -k test_default_lowering_pipeline_pass_order
-# 对应功能实现文件路径: kernel_gen/passes/pipeline/default_lowering.py
+# 对应功能实现文件路径: kernel_gen/pipeline/default_lowering.py
 # 对应 spec 文件路径: spec/pass/pipeline/default_lowering.md
 # 对应测试文件路径: test/passes/pipeline/test_default_lowering.py
 def test_default_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,7 +173,7 @@ def test_default_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) -
 # 功能说明: 验证默认 pipeline 对 `nn.add` memory-return 产出前置 out 参数、kernel.binary_elewise 与 dma.slice/deslice 链。
 # 测试目的: 锁定 default-lowering 的公开黑盒合同，避免 lower-dma-memory-hierarchy 默认 no-op 破坏 spec。
 # 使用示例: pytest -q test/passes/pipeline/test_default_lowering.py -k test_default_lowering_pipeline_add_uses_legacy_dma_hierarchy
-# 对应功能实现文件路径: kernel_gen/passes/pipeline/default_lowering.py
+# 对应功能实现文件路径: kernel_gen/pipeline/default_lowering.py
 # 对应 spec 文件路径: spec/pass/pipeline/default_lowering.md
 # 对应测试文件路径: test/passes/pipeline/test_default_lowering.py
 def test_default_lowering_pipeline_add_uses_legacy_dma_hierarchy() -> None:

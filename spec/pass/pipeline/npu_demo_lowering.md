@@ -16,7 +16,7 @@
 - 创建者：`未记录`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/pass/pipeline/npu_demo_lowering.md`](../../../spec/pass/pipeline/npu_demo_lowering.md)
-- `功能实现`：[`kernel_gen/passes/pipeline/npu_demo_lowering.py`](../../../kernel_gen/passes/pipeline/npu_demo_lowering.py)
+- `功能实现`：[`kernel_gen/pipeline/npu_demo_lowering.py`](../../../kernel_gen/pipeline/npu_demo_lowering.py)
 - `test`：[`test/passes/pipeline/test_npu_demo_lowering.py`](../../../test/passes/pipeline/test_npu_demo_lowering.py)
 
 ## 依赖
@@ -129,7 +129,7 @@
 - 使用示例：
 
   ```python
-  from kernel_gen.passes.pipeline import build_npu_demo_lowering_pipeline
+  from kernel_gen.pipeline import build_npu_demo_lowering_pipeline
 
   pm = build_npu_demo_lowering_pipeline({"target": "npu_demo"})
   module = pm.run(module)
