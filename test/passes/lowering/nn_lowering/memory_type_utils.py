@@ -11,7 +11,7 @@
 关联文件:
 - spec: spec/dialect/nn.md
 - test: test/passes/lowering/nn_lowering/test_asset_cases.py
-- 功能实现: kernel_gen/dialect/nn.py
+- 功能实现: kernel_gen/dialect/nn/
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def symbol_array(values: Sequence[int | str | SymbolExprAttr]) -> ArrayAttr[Attr
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/passes/lowering/nn_lowering/test_asset_cases.py
-    - 功能实现: kernel_gen/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn/
     """
 
     return ArrayAttr([symbol_expr(value) for value in values])
@@ -84,7 +84,7 @@ def memory_type(
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/passes/lowering/nn_lowering/test_asset_cases.py
-    - 功能实现: kernel_gen/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn/
     """
 
     return NnMemoryType(symbol_array(shape), symbol_array(stride), element_type, space)

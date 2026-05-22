@@ -97,7 +97,7 @@ def _memory_text(shape: Sequence[int | str], stride: Sequence[int | str]) -> str
     关联文件:
     - spec: [spec/dialect/nn.md](spec/dialect/nn.md)
     - test: [test/passes/lowering/nn_lowering/test_reduce_lowering.py](test/passes/lowering/nn_lowering/test_reduce_lowering.py)
-    - 功能实现: [kernel_gen/dialect/nn.py](kernel_gen/dialect/nn.py)
+    - 功能实现: [kernel_gen/dialect/nn/](kernel_gen/dialect/nn/)
     """
 
     shape_text = ", ".join(_symbol_expr_text(value) for value in shape)
@@ -328,7 +328,7 @@ def _make_memory_type(
     关联文件:
     - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
     - test: [test/passes/lowering/nn_lowering/test_reduce_lowering.py](test/passes/lowering/nn_lowering/test_reduce_lowering.py)
-    - 功能实现: [kernel_gen/dialect/nn.py](kernel_gen/dialect/nn.py)
+    - 功能实现: [kernel_gen/dialect/nn/](kernel_gen/dialect/nn/)
     """
 
     stride_values: list[int] = []
@@ -359,7 +359,7 @@ def _build_reduce_module(
     关联文件:
     - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
     - test: [test/passes/lowering/nn_lowering/test_reduce_lowering.py](test/passes/lowering/nn_lowering/test_reduce_lowering.py)
-    - 功能实现: [kernel_gen/dialect/nn.py](kernel_gen/dialect/nn.py)
+    - 功能实现: [kernel_gen/dialect/nn/](kernel_gen/dialect/nn/)
     """
 
     block = Block(arg_types=[input_type])

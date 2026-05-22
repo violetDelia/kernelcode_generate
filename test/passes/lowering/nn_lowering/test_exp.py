@@ -119,7 +119,7 @@ def _make_memory_type(
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
     - test: test/passes/lowering/nn_lowering/test_exp.py
-    - 功能实现: kernel_gen/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn/
     """
 
     stride_values: list[int] = []
@@ -145,7 +145,7 @@ def _build_module(input_type: NnMemoryType, result_type: NnMemoryType) -> Module
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
     - test: test/passes/lowering/nn_lowering/test_exp.py
-    - 功能实现: kernel_gen/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn/
     """
 
     block = Block(arg_types=[input_type])

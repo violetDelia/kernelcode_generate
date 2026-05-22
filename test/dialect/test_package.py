@@ -53,6 +53,8 @@ EXPECTED_PUBLIC_EXPORTS = [
     "NnNeOp",
     "NnSubOp",
     "NnTrueDivOp",
+    "copy_memory_type",
+    "copy_memory_type_with_template_name",
 ]
 
 

@@ -37,7 +37,7 @@
 ## 依赖
 
 - [`kernel_gen/dialect/dma.py`](../../kernel_gen/dialect/dma.py)：`dma dialect` 的方言实现入口。
-- [`kernel_gen/dialect/nn.py`](../../kernel_gen/dialect/nn.py)：提供 `NnMemoryType` 与 `NnMemorySpaceAttr`。
+- [`kernel_gen/dialect/nn/`](../../kernel_gen/dialect/nn/)：提供 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 - [`spec/dialect/nn.md`](../../spec/dialect/nn.md)：定义被 `dma dialect` 复用的 memory type / memory space 语义。
 - [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)：定义 `!symbol.int<#symbol.expr<expr>>` 标量值语义，供 `dma` 标量输入统一复用。
 - [`spec/operation/dma.md`](../../spec/operation/dma.md)：定义高层 `alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast` API 的分层语义。

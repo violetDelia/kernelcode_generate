@@ -49,10 +49,10 @@ API 列表:
 - spec: spec/dialect/nn.md
 - spec: spec/execute_engine/execute_engine.md
 - test: test/operation/nn/test_package.py
-- test: test/dialect/test_nn.py
+- test: test/dialect/nn/
 - test: test/execute_engine/test_contract.py
 - 功能实现: kernel_gen/operation/nn/__init__.py
-- 功能实现: kernel_gen/dialect/nn.py
+- 功能实现: kernel_gen/dialect/nn/
 - 功能实现: kernel_gen/execute_engine/compiler.py
 """
 

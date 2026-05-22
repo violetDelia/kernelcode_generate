@@ -43,18 +43,16 @@
 
 ## 文档信息
 
-- 创建者：`未记录`
-- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dialect/nn.md`](../../spec/dialect/nn.md)
-- `功能实现`：[`kernel_gen/dialect/nn.py`](../../kernel_gen/dialect/nn.py)
-- `test`：[`test/dialect/test_nn.py`](../../test/dialect/test_nn.py)
+- `功能实现`：[`kernel_gen/dialect/nn/`](../../kernel_gen/dialect/nn/)
+- `test`：[`test/dialect/nn/`](../../test/dialect/nn/)
 
 ## 依赖
 
 - [`spec/operation/nn.md`](../../spec/operation/nn.md)：上游算子语义。
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：`Memory` 的 `shape/stride/dtype/space` 基础语义。
-- [`kernel_gen/dialect/nn.py`](../../kernel_gen/dialect/nn.py)：方言实现。
-- [`test/dialect/test_nn.py`](../../test/dialect/test_nn.py)：方言测试。
+- [`kernel_gen/dialect/nn/`](../../kernel_gen/dialect/nn/)：方言实现。
+- [`test/dialect/nn/`](../../test/dialect/nn/)：方言测试。
 
 ## 目标
 
@@ -71,7 +69,14 @@
 ### 模块级补充
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
-- 本文件只定义 `kernel_gen/dialect/nn.py` 的方言层接口，不重复上游 `operation/nn` 的高层 API 语义。
+- 本文件只定义 `kernel_gen/dialect/nn/` 的方言层接口，不重复上游 `operation/nn` 的高层 API 语义。
+- `kernel_gen.dialect.nn` 是唯一稳定公开包根入口；`kernel_gen/dialect/nn/` 内部按 `attr`、`type`、`operation` family 拆分实现，不要求外部调用方直接导入子模块。
+- `kernel_gen/dialect/nn/attr/space_attr.py` 承载 `NnMemorySpaceAttr`；`kernel_gen/dialect/nn/type/memory_type.py` 承载 `NnMemoryType`、`copy_memory_type(...)`、`copy_memory_type_with_template_name(...)`。
+- `kernel_gen/dialect/nn/operation/binary.py` 承载 binary / compare op family；`operation/elewise.py` 承载 `select/cast/broadcast/transpose`；`operation/active.py` 承载 activation / unary family；`operation/reduce.py` 承载 `reduce_sum/reduce_min/reduce_max`；`operation/structured.py` 承载 `img2col1d/img2col2d/matmul`。
+- 旧单文件实现已退场且不保留 shim、wrapper、redirect 或兼容文件；`import kernel_gen.dialect.nn` 必须解析到 package root。
+- `kernel_gen.dialect.nn.__all__` 只导出 `API 列表` 中的公开对象，不导出 `common.py` helper 或内部子模块对象。
+- `kernel_gen.dialect` 包根只保留既有 nn exact subset：`Nn`、`NnAddOp`、`NnBroadcastOp`、`NnSubOp`、`NnMulOp`、`NnTrueDivOp`、`NnEqOp`、`NnNeOp`、`NnLtOp`、`NnLeOp`、`NnGtOp`、`NnGeOp`、`NnMatmulOp`、`NnImg2col1dOp`、`NnImg2col2dOp`、`NnMemorySpaceAttr`、`NnMemoryType`、`copy_memory_type(...)`、`copy_memory_type_with_template_name(...)`。
+- `kernel_gen/dialect/nn/common.py` 是 package 内部实现 helper 文件，不是公开 API。允许 helper 仅限 `raise_verify_error(...)`、`verify_memory_type(...)`、`is_symbol_int_type(...)`、`is_int_or_symbol_type(...)`、`static_int_from_operand(...)`、`verify_i64_attr(...)`、`normalize_i64_attr(...)`、`normalize_axes_attr(...)`、`normalize_bool_attr(...)`、`is_float_element_type(...)`、`dims_equal(...)`、`build_contiguous_stride(...)`；这些 helper 只能被 `kernel_gen/dialect/nn/**` 内部子模块按名称导入，不得由测试或其它 `kernel_gen` 目录直连。
 - 上游若允许逐元素隐式 broadcast，进入 `nn dialect` 前必须显式展开为 `nn.broadcast`。
 - 上游 `broadcast_to(source, target_shape, space)` 进入方言时必须归一化为 `nn.broadcast`：目标 `target_shape` 仅通过 `result_type.shape` 体现，`nn dialect` 不承诺提供独立的 `nn.broadcast_to` op。
 - `img2col` 在方言层只允许公开 `nn.img2col1d` 与 `nn.img2col2d` 两个稳定 op，禁止新增笼统公开名 `nn.img2col`。
@@ -92,7 +97,7 @@
 - `nn.exp` 仅接受浮点 `!nn.memory`，结果必须与输入保持同 `shape/stride/element_type/space`。
 - `nn.reduce_sum/reduce_min/reduce_max` 使用规范化后的 `axes` 与显式 `keepdim` 建模归约语义；`result.shape/stride` 必须与归约合同一致。
 - `nn.matmul` 仅建模二维矩阵乘，`lhs.shape[1]` 与 `rhs.shape[0]` 必须语义一致。
-- `nn.softmax` 已在 `kernel_gen/dialect/nn.py` 与 `test/dialect/test_nn.py` 落地；本节作为公开契约与映射编号基线，后续改动必须保持与本合同闭环一致。
+- `nn.softmax` 已在 `kernel_gen/dialect/nn/` 与 `test/dialect/nn/` 落地；本节作为公开契约与映射编号基线，后续改动必须保持与本合同闭环一致。
 - `space` 指 `nn dialect` 中 memory 所在的物理或逻辑空间，由 `NnMemorySpaceAttr` 表示。
 - `memory type` 指 `NnMemoryType`，由 `shape/stride/element_type/space` 组成。
 - `round-trip` 指文本 IR 在 parse 后再 print，得到稳定且等价的文本表示。
@@ -696,8 +701,8 @@
 
 ## 测试
 
-- 测试文件：`test/dialect/test_nn.py`
-- 执行命令：`pytest -q test/dialect/test_nn.py`
+- 测试文件：`test/dialect/nn/test_type.py`、`test/dialect/nn/test_attr.py`、`test/dialect/nn/test_operation_binary.py`、`test/dialect/nn/test_operation_elewise.py`、`test/dialect/nn/test_operation_active.py`、`test/dialect/nn/test_operation_reduce.py`、`test/dialect/nn/test_operation_structured.py`、`test/dialect/nn/test_package.py`
+- 执行命令：`pytest -q test/dialect/nn/`
 
 ### 测试目标
 

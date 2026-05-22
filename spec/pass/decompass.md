@@ -26,7 +26,7 @@
 
 - [`spec/dialect/nn.md`](../../../spec/dialect/nn.md)
 - [`spec/pass/pass_manager.md`](../../../spec/pass/pass_manager.md)
-- [`kernel_gen/dialect/nn.py`](../../../kernel_gen/dialect/nn.py)
+- [`kernel_gen/dialect/nn/`](../../../kernel_gen/dialect/nn/)
 
 ## 目标
 
