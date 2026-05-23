@@ -27,7 +27,7 @@
 ## 依赖
 
 - `kernel_gen/dialect/arch.py`：提供公开 `ArchGetDynamicMemoryOp`。
-- `kernel_gen/dialect/dma.py`：提供公开 `DmaAllocOp`、`DmaFreeOp`、`DmaViewOp`、`DmaReshapeOp`。
+- `kernel_gen/dialect/dma/`：提供公开 `DmaAllocOp`、`DmaFreeOp`、`DmaViewOp`、`DmaReshapeOp`。
 - `kernel_gen/dialect/nn/`：提供 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 - `kernel_gen/dialect/symbol.py`：提供 `!symbol.int<"expr">` 物化 op 与类型。
 - `kernel_gen/passes/registry.py`：通过 `memory-pool={rewrite=...,fold=...,alignment=...}` 公开 option 构造本 pass。

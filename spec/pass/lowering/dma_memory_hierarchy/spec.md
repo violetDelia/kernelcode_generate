@@ -138,12 +138,13 @@
   - `test/passes/test_dma_memory_hierarchy.py`
   - `test/passes/test_registry.py`
   - `test/dialect/test_kernel.py`
+  - `test/dialect/dma/`
 - 执行命令：
 
   ```bash
   PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/passes/test_dma_memory_hierarchy.py
   PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/passes/test_registry.py test/passes/test_pass_manager.py test/passes/pipeline/test_default_lowering.py
-  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/dialect/test_kernel.py test/dialect/test_dma.py test/dialect/nn/
+  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/dialect/test_kernel.py test/dialect/dma test/dialect/nn/
   ```
 
 ### 测试目标

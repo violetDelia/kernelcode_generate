@@ -31,12 +31,12 @@
 - 创建者：`未记录`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dialect/dma.md`](../../spec/dialect/dma.md)
-- `test`：[`test/dialect/test_dma.py`](../../test/dialect/test_dma.py)
-- `功能实现`：[`kernel_gen/dialect/dma.py`](../../kernel_gen/dialect/dma.py)
+- `test`：[`test/dialect/dma/`](../../test/dialect/dma/)
+- `功能实现`：[`kernel_gen/dialect/dma/`](../../kernel_gen/dialect/dma/)
 
 ## 依赖
 
-- [`kernel_gen/dialect/dma.py`](../../kernel_gen/dialect/dma.py)：`dma dialect` 的方言实现入口。
+- [`kernel_gen/dialect/dma/`](../../kernel_gen/dialect/dma/)：`dma dialect` 的方言实现入口。
 - [`kernel_gen/dialect/nn/`](../../kernel_gen/dialect/nn/)：提供 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 - [`spec/dialect/nn.md`](../../spec/dialect/nn.md)：定义被 `dma dialect` 复用的 memory type / memory space 语义。
 - [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)：定义 `!symbol.int<#symbol.expr<expr>>` 标量值语义，供 `dma` 标量输入统一复用。
@@ -54,6 +54,19 @@
 - 参考 `memref.subview` / `memref.reinterpret_cast` 的设计习惯，将动态布局信息建模为显式 SSA 标量操作数，而不是仅放在 attribute 中；当前项目统一使用 `!symbol.int<#symbol.expr<expr>>` 承载这些整数标量输入。
 
 ## 额外补充
+
+### 实现结构
+
+- `kernel_gen.dialect.dma` 是唯一稳定公开入口，公开对象以本文件 `API 列表` 与 package root `__all__` 为准。
+- 旧单文件 `kernel_gen/dialect/dma.py` 不再存在，也不保留 shim；外部代码不得依赖旧文件路径。
+- package-internal 模块用于拆分实现职责，不作为外部公开 API：
+  - `kernel_gen/dialect/dma/type/`：承载 `DmaRingType`。
+  - `kernel_gen/dialect/dma/operation/`：承载 lifecycle、transfer、slice、alias、ring op。
+  - `kernel_gen/dialect/dma/common.py`：承载本 package 内可 named import 的 verifier / layout helper。
+  - `kernel_gen/dialect/dma/effect.py`：承载本 package 内 MemoryEffect trait。
+  - `kernel_gen/dialect/dma/canonicalization.py`：承载本 package 内 canonicalization trait 与 pattern。
+- `common/effect/canonicalization` 只允许 `kernel_gen/dialect/dma/**` 内部按 named import 使用；不得从 `kernel_gen.dialect.dma` root re-export，也不得被 `test/**`、`expectation/**` 或其它 `kernel_gen/**` 模块直接调用。
+- 测试拆分到 `test/dialect/dma/**`，旧大测试文件 `test/dialect/test_dma.py` 不再存在。
 
 ### 模块级补充
 
@@ -755,8 +768,8 @@ op = DmaCastOp(source, result_type)
 
 ## 测试
 
-- 测试文件：[`test/dialect/test_dma.py`](../../test/dialect/test_dma.py)
-- 执行命令：`pytest -q test/dialect/test_dma.py`
+- 测试文件：[`test/dialect/dma/`](../../test/dialect/dma/)
+- 执行命令：`pytest -q test/dialect/dma`
 
 ### 测试目标
 
@@ -814,7 +827,7 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-018A | 内存/DMA | `dma.reshape` 接受 `min(...)` 符号连续 stride | 准备含 `min(tile, extent - iter)` shape/stride 的 `DmaReshapeOp`。 | 运行 `test_dma_reshape_accepts_min_symbolic_contiguous_source_stride`。 | verifier 接受等价连续 stride，不因 `min` 表达式文本形式失败。 | `test_dma_reshape_accepts_min_symbolic_contiguous_source_stride` |
 | TC-DMA-019 | 内存/DMA | `dma.view` 动态布局输入 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_view_dynamic_symbol_int_layout_operands_valid`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.view` 动态布局输入”场景。 | `test_dma_view_dynamic_symbol_int_layout_operands_valid` |
 | TC-DMA-019A | 边界/异常 | `dma.view` offsets 边界 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_view_rejects_invalid_offsets_or_bounds`。 | “`dma.view` offsets 边界”场景按公开错误语义失败或被拒绝。 | `test_dma_view_rejects_invalid_offsets_or_bounds` |
-| TC-DMA-019B | 内存/DMA | `dma.view` 显式 stride 布局 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_view_accepts_matching_numel_subset_with_explicit_stride`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.view` 显式 stride 布局”场景。 | `test_dma_view_accepts_matching_numel_subset_with_explicit_stride` |
+| TC-DMA-019B | 内存/DMA | `dma.view` 显式 stride 布局 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_view_result_stride_uses_source_physical_stride`。 | 非 byte pool `dma.view` 的 result stride 按 source physical stride 与 view logical stride 逐维相乘。 | `test_dma_view_result_stride_uses_source_physical_stride` |
 | TC-DMA-019D | 内存/DMA | `dma.view` byte pool typed view | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_view_byte_pool_typed_view`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.view` byte pool typed view”场景。 | `test_dma_view_byte_pool_typed_view` |
 | TC-DMA-019E | 内存/DMA | `dma.subview` byte backing typed result | 准备一维 `i8` backing memory、`!symbol.int` offset/size/stride 与一维 typed result。 | 运行 `test_dma_subview_byte_pool_typed_result_valid`。 | `dma.subview` verifier 接受合法 typed subview。 | `test_dma_subview_byte_pool_typed_result_valid` |
 | TC-DMA-019F | 边界/异常 | `dma.subview` 公开 verifier 边界 | 准备非 i8 source、二维 result、space mismatch、size mismatch 与 byte bounds 越界输入。 | 运行 `test_dma_subview_rejects_invalid_contract_edges`。 | `dma.subview` 按公开错误语义拒绝非法输入。 | `test_dma_subview_rejects_invalid_contract_edges` |
@@ -829,10 +842,10 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-023B | 边界/异常 | `dma.make_ring` verifier | 准备非法 count/offset/shape_bytes、backing bytes 与 space mismatch 输入。 | 运行 `test_dma_make_ring_verifier_edges`。 | verifier 按公开错误语义拒绝非法 ring 构造。 | `test_dma_make_ring_verifier_edges` |
 | TC-DMA-023C | 边界/异常 | `dma.current_ring/advance_ring` result type | 准备显式错误 result type。 | 运行 `test_dma_ring_slot_result_type_must_match`。 | verifier 拒绝 result type 与 ring slot memory type 不一致。 | `test_dma_ring_slot_result_type_must_match` |
 | TC-DMA-023D | pass 改写 | `dma.advance_ring` side effect | 准备只含 ring current/advance 的 module。 | 运行 `test_dma_advance_ring_survives_public_dce`。 | 通用 pass manager 后 `dma.advance_ring` 不被 Pure DCE 删除。 | `test_dma_advance_ring_survives_public_dce` |
-| TC-DMA-024 | 内存/DMA | `dma.fill` 物化 `const(i32)` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 构造并校验 `dma.fill` | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.fill` 物化 `const(i32)`”场景。 | test/dialect/test_dma.py::test_dma_fill_accepts_builtin_i32_scalar_operand |
-| TC-DMA-025 | 内存/DMA | `dma.fill` 物化 `const(f32)` | 准备 float memory 与 builtin float scalar operand。 | 构造并校验 `dma.fill` | verifier 接受浮点 target/value 同族物化。 | test/dialect/test_dma.py::test_dma_fill_accepts_builtin_float_scalar_operand |
-| TC-DMA-026 | 内存/DMA | `dma.fill` 物化 `symbol.int` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 构造并校验 `dma.fill` | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.fill` 物化 `symbol.int`”场景。 | test/dialect/test_dma.py::test_dma_fill_accepts_symbol_int_scalar_operand |
-| TC-DMA-027 | 内存/DMA | `dma.fill` 类型边界 | 准备 bool target/value 与 dtype family 不匹配 scalar。 | 构造并校验 `dma.fill` | bool target/value 与不兼容 scalar family 按公开错误语义拒绝。 | test/dialect/test_dma.py::test_dma_fill_rejects_bool_or_unsupported_scalar |
+| TC-DMA-024 | 内存/DMA | `dma.fill` 物化 `const(i32)` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 构造并校验 `dma.fill` | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.fill` 物化 `const(i32)`”场景。 | test/dialect/dma/test_operation_lifecycle.py::test_dma_fill_accepts_builtin_i32_scalar_operand |
+| TC-DMA-025 | 内存/DMA | `dma.fill` 物化 `const(f32)` | 准备 float memory 与 builtin float scalar operand。 | 构造并校验 `dma.fill` | verifier 接受浮点 target/value 同族物化。 | test/dialect/dma/test_operation_lifecycle.py::test_dma_fill_accepts_builtin_float_scalar_operand |
+| TC-DMA-026 | 内存/DMA | `dma.fill` 物化 `symbol.int` | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 构造并校验 `dma.fill` | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.fill` 物化 `symbol.int`”场景。 | test/dialect/dma/test_operation_lifecycle.py::test_dma_fill_accepts_symbol_int_scalar_operand |
+| TC-DMA-027 | 内存/DMA | `dma.fill` 类型边界 | 准备 bool target/value 与 dtype family 不匹配 scalar。 | 构造并校验 `dma.fill` | bool target/value 与不兼容 scalar family 按公开错误语义拒绝。 | test/dialect/dma/test_operation_lifecycle.py::test_dma_fill_rejects_bool_or_unsupported_scalar |
 | TC-DMA-028 | 内存/DMA | mixed add 临时 memory 真实消费 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 检查 lower 后 IR | 内存类型、布局、搬运结果或 verifier 行为体现“mixed add 临时 memory 真实消费”场景。 | test/passes/lowering/nn_lowering/test_element_binary_add.py::test_lower_add_mixed_scalar_uses_dma_fill |
 | TC-DMA-059 | 边界/异常 | `dma.alloc/broadcast/transpose/view` 公开 verifier 边界矩阵 | 准备公开 op 构造入口、动态 shape、broadcast 源/目标类型、transpose perm/target 与 byte-pool view 类型组合。 | 运行 `test_dma_public_verifier_boundary_matrix`。 | 动态 shape、broadcast rank/type/space、transpose perm/layout/type/space、transfer rank、byte-pool view element size 与动态边界按公开错误语义通过或稳定拒绝。 | `test_dma_public_verifier_boundary_matrix` |
 | TC-DMA-060 | 内存/DMA | `dma.copy` 暴露 target write 与 source read effect | 准备合法 `DmaCopyOp(target, source)`。 | 运行 `test_dma_copy_memory_effects_target_write_source_read`。 | `get_effects(op)` 返回 target 的 `WRITE` 与 source 的 `READ`。 | `test_dma_copy_memory_effects_target_write_source_read` |
