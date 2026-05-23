@@ -5,7 +5,8 @@
 - 定义 `hoist-dma-alias-ops` pass 的公开合同。
 - 第一阶段只处理同一 block 内紧邻的 `dma.fill(%src, value)` 与 `%alias = dma.reshape(%src, ...)`。
 - 合法改写为 `%alias = dma.reshape(%src, ...)` 位于 `dma.fill` 前，且 `dma.fill` target 改为 `%alias`。
-- 实现必须用 xDSL pattern rewrite 基础设施组织第一阶段 rewrite；不得把本 pass 写成手工整段 ad hoc 遍历搬 op。
+- 扩展阶段处理同一 block 内紧邻且唯一消费的 `dma.view + dma.deslice`，在连续后缀维度可结构化证明时降维分组。
+- 实现必须用 xDSL pattern rewrite 基础设施组织 rewrite；不得把本 pass 写成手工整段 ad hoc 遍历搬 op。
 - 本 pass 不做 fold、combine、canonicalize，不跨 block、region 或控制流移动。
 
 ## API 列表
@@ -41,9 +42,9 @@
 - 不公开 pattern getter。
 - 不把 `HoistDmaAliasOpsPass` re-export 到 `kernel_gen.passes` package root。
 - 不实现 `kernel.abs` / `kernel.relu`。
-- 不实现 `dma.view` / `dma.subview` / `dma.deslice`。
+- 不实现 `dma.subview`。
 - 不做 `dma.alloc -> dma.reshape` fold。
-- 不做 `dma.view -> dma.reshape` combine。
+- 不做任意 `dma.view -> dma.reshape` combine；只做本计划定义的连续 suffix `view + single deslice` 分组 rewrite。
 - 不做 `dma.reshape -> dma.reshape` chain collapse。
 - 不跨控制流移动。
 
@@ -80,6 +81,24 @@
 - `dma.alloc -> dma.reshape` 不 fold。
 - `dma.reshape -> dma.reshape` 不 combine。
 - 改写后 verifier 不通过时撤销本次改写并保持 module 原状。
+
+### `dma.view + dma.deslice` 连续维度分组
+
+- 只匹配同一 block 内紧邻的 `%view = dma.view(%src, ...)` 与 `dma.deslice(%dst, %view, ...)`。
+- `%view` result 必须只有该 `dma.deslice` 一个直接消费者，`dma.deslice` result 不得继续被非终结 op 使用。
+- source 与 target memory type 必须都是行主序 contiguous。
+- 只折叠连续后缀维度 `[g:R)`，rank 必须至少为 3，且至少保留第 0 维外层维度。
+- 证明规则只接受结构化精确匹配：
+  - 对 `i in [g+1, R)`，`view.offset[i] == 0`、`view.size[i] == source.shape[i]`、`view.stride[i] == 1`。
+  - `view.stride[g] == 1`，`view.offset[g]` 与 `view.size[g]` 可为动态 symbol operand。
+  - `deslice.offset[i] == 0`、`deslice.size[i] == target.shape[i]`、`deslice.stride[i] == 1` 需满足同一后缀证明。
+  - 精确匹配只使用同 SSA、`SymbolValueType` 与 `SymbolExprAttr` 结构化表达式，不使用 SSA name、`name_hint`、IR dump 文本或代数化简 fallback。
+- 正例会构造：
+  - `%src_low = dma.reshape(%src, source_shape[0:g], product(source_shape[g:R]))`
+  - `%dst_low = dma.reshape(%dst, target_shape[0:g], product(target_shape[g:R]))`
+  - `%view_low = dma.view(%src_low, offsets[0:g], offset[g] * product(source_shape[g+1:R]), sizes[0:g], product(size[g:R]), strides[0:g], 1)`
+  - `dma.deslice(%dst_low, %view_low, dst_offsets[0:g], 0, dst_sizes[0:g], product(size[g:R]), dst_strides[0:g], 1)`
+- 非紧邻、多消费者、后缀非完整覆盖、inner offset 非零、非 unit stride、source/target 非 contiguous 或缺少支配 shape operand 时保持 no-op。
 
 ## 公开导入
 
@@ -120,8 +139,22 @@ same_pass = build_registered_pass("hoist-dma-alias-ops")
 | TC-HOIST-DMA-ALIAS-008 | verifier 拒绝候选改写 | 撤销本次改写，module 文本保持原状，且不反复重试失败候选 |
 | TC-HOIST-DMA-ALIAS-009 | `alloc -> reshape` | 不 fold |
 | TC-HOIST-DMA-ALIAS-010 | `reshape -> reshape` | 不 combine |
-| TC-HOIST-DMA-ALIAS-011 | registry | 默认构造、`fold=false`、未知专属 option 失败 |
-| TC-HOIST-DMA-ALIAS-012 | pipeline | 两处 `symbol-loop-hoist -> hoist-dma-alias-ops -> cse -> canonicalize` |
+| TC-HOIST-DMA-ALIAS-011 | 静态 view/deslice 分组 | 连续内层维度降维为低维 reshape + view + deslice |
+| TC-HOIST-DMA-ALIAS-012 | 动态 view/deslice 分组 | `[TN, K]` 生成 `TN*K`，外层保留 |
+| TC-HOIST-DMA-ALIAS-013 | 非连续内层维度 | 保持 no-op |
+| TC-HOIST-DMA-ALIAS-014 | 非 unit stride | 保持 no-op |
+| TC-HOIST-DMA-ALIAS-015 | source 非 contiguous | 保持 no-op |
+| TC-HOIST-DMA-ALIAS-016 | target 非 contiguous | 保持 no-op |
+| TC-HOIST-DMA-ALIAS-017 | view result 多消费者 | 保持 no-op |
+| TC-HOIST-DMA-ALIAS-018 | 跨 region | 保持 no-op |
+| TC-HOIST-DMA-ALIAS-019 | view/deslice 非紧邻 | 保持 no-op |
+| TC-HOIST-DMA-ALIAS-020 | deslice result 后续非终结 use | 保持 no-op |
+| TC-HOIST-DMA-ALIAS-021 | exact equality 负例 | 保持 no-op |
+| TC-HOIST-DMA-ALIAS-022 | inner offset 非 0 | 保持 no-op |
+| TC-HOIST-DMA-ALIAS-023 | verifier rollback | 候选拒绝后 module 保持原状 |
+| TC-HOIST-DMA-ALIAS-024 | byte-pool typed view | 保持 no-op |
+| TC-HOIST-DMA-ALIAS-025 | registry | 默认构造、`fold=false`、未知专属 option 失败 |
+| TC-HOIST-DMA-ALIAS-026 | pipeline | 两处 `symbol-loop-hoist -> hoist-dma-alias-ops -> cse -> canonicalize` |
 
 ## 验收命令
 

@@ -187,6 +187,36 @@ def test_run_ircheck_text_supports_variable_capture_and_reuse() -> None:
     assert result.message is None
 
 
+# TC-IRCHECK-MATCH-006A
+# 测试目的: 验证裸 `.*` 捕获不会贪婪吞掉 generic op operand list 后的类型文本。
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 示例: pytest -q test/tools/test_ircheck_matcher.py -k test_run_ircheck_text_uses_non_greedy_star_capture_for_generic_ops
+def test_run_ircheck_text_uses_non_greedy_star_capture_for_generic_ops() -> None:
+    result = run_ircheck_text(
+        _ircheck_case(
+            checks=[
+                '// CHECK: %[[A:.*]] = "test.reshape"(%[[SRC:.*]], %[[C2:.*]], %[[C12:.*]])',
+                '// CHECK: %[[B:.*]] = "test.reshape"(%[[DST:.*]], %[[C2]], %[[C12]])',
+            ],
+            input_ir=(
+                "builtin.module {\n"
+                "  func.func @main(%src : i32, %dst : i32) {\n"
+                "    %c2 = arith.constant 2 : i32\n"
+                "    %c12 = arith.constant 12 : i32\n"
+                '    %0 = "test.reshape"(%src, %c2, %c12) : (i32, i32, i32) -> i32\n'
+                '    %1 = "test.reshape"(%dst, %c2, %c12) : (i32, i32, i32) -> i32\n'
+                "    func.return\n"
+                "  }\n"
+                "}"
+            ),
+        ),
+        source_path="inline.ircheck",
+    )
+    assert result.ok is True
+    assert result.message is None
+
+
 # TC-IRCHECK-MATCH-007
 # 测试目的: 验证公开入口支持 `[[NAME:{{REGEX}}]]` FileCheck 风格捕获正则。
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py

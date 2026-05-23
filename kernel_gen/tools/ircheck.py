@@ -543,6 +543,7 @@ def _normalize_capture_regex(regex_text: str) -> str:
 
     功能说明:
     - 允许捕获片段使用 FileCheck 风格的 `{{...}}` 包裹正则。
+    - 裸 `.*` 作为捕获 shorthand 时使用非贪婪匹配，避免 generic op 后续 type 文本被误吞。
     - 未使用 `{{...}}` 时保持原有 `REGEX` 语义不变。
 
     使用示例:
@@ -559,6 +560,8 @@ def _normalize_capture_regex(regex_text: str) -> str:
         if not inner:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "IrcheckParseError: invalid regex check")
         return inner
+    if regex_text == ".*":
+        return ".*?"
     return regex_text
 
 
