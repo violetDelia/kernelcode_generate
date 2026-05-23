@@ -5,8 +5,17 @@
 - 提供 nn.reduce_* 的单 op pattern lowering 入口。
 - `nn.softmax` 不在本层直接 lowering，需先由上游完成分解。
 - surviving 模块级接口为 `reduce_softmax_patterns()`。
+- reduce 公开 pattern 将 `nn.reduce_*` before IR 改写为 `dma.alloc + kernel.reduce` after IR；softmax reject pattern 只抛公开错误。
 
 API 列表:
+- `class LowerNnReduceSumPattern()`
+- `LowerNnReduceSumPattern.match_and_rewrite(op: NnReduceSumOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnReduceMinPattern()`
+- `LowerNnReduceMinPattern.match_and_rewrite(op: NnReduceMinOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnReduceMaxPattern()`
+- `LowerNnReduceMaxPattern.match_and_rewrite(op: NnReduceMaxOp, rewriter: PatternRewriter) -> None`
+- `class RejectNnSoftmaxPattern()`
+- `RejectNnSoftmaxPattern.match_and_rewrite(op: NnSoftmaxOp, rewriter: PatternRewriter) -> None`
 - `reduce_softmax_patterns() -> list[RewritePattern]`
 
 使用示例:
@@ -342,16 +351,25 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
     block.insert_op_before(lowered, op)
     op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
-class _LowerNnReduceSumPattern(RewritePattern):
+class LowerNnReduceSumPattern(RewritePattern):
     """将单个 nn.reduce_sum lowering 为 kernel.reduce(kind=sum)。
 
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnReduceSumOp`。
     - 复用 `_lower_reduce(..., kind="sum")`，保持既有 IR 输出不变。
+    - IR before:
+      ```mlir
+      %out = "nn.reduce_sum"(%src) {axes = [1 : i64], keepdim = true, space = #nn.space<global>} : (value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.reduce"(%alloc, %src) {axis = 1 : i64, keepdim = true, kind="sum"} : (value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnReduceSumPattern()
+    - pattern = LowerNnReduceSumPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
@@ -369,16 +387,25 @@ class _LowerNnReduceSumPattern(RewritePattern):
         rewriter.has_done_action = True
 
 
-class _LowerNnReduceMinPattern(RewritePattern):
+class LowerNnReduceMinPattern(RewritePattern):
     """将单个 nn.reduce_min lowering 为 kernel.reduce(kind=min)。
 
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnReduceMinOp`。
     - 复用 `_lower_reduce(..., kind="min")`，保持既有 IR 输出不变。
+    - IR before:
+      ```mlir
+      %out = "nn.reduce_min"(%src) {axes = [1 : i64], keepdim = true, space = #nn.space<global>} : (value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.reduce"(%alloc, %src) {axis = 1 : i64, keepdim = true, kind="min"} : (value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnReduceMinPattern()
+    - pattern = LowerNnReduceMinPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
@@ -396,16 +423,25 @@ class _LowerNnReduceMinPattern(RewritePattern):
         rewriter.has_done_action = True
 
 
-class _LowerNnReduceMaxPattern(RewritePattern):
+class LowerNnReduceMaxPattern(RewritePattern):
     """将单个 nn.reduce_max lowering 为 kernel.reduce(kind=max)。
 
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnReduceMaxOp`。
     - 复用 `_lower_reduce(..., kind="max")`，保持既有 IR 输出不变。
+    - IR before:
+      ```mlir
+      %out = "nn.reduce_max"(%src) {axes = [1 : i64], keepdim = true, space = #nn.space<global>} : (value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.reduce"(%alloc, %src) {axis = 1 : i64, keepdim = true, kind="max"} : (value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnReduceMaxPattern()
+    - pattern = LowerNnReduceMaxPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
@@ -423,16 +459,22 @@ class _LowerNnReduceMaxPattern(RewritePattern):
         rewriter.has_done_action = True
 
 
-class _RejectNnSoftmaxPattern(RewritePattern):
+class RejectNnSoftmaxPattern(RewritePattern):
     """拒绝 direct nn.softmax lowering。
 
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnSoftmaxOp`。
     - 维持当前公开错误短语：nn.softmax 必须先由上游分解。
+    - reject：`nn.softmax` before IR 不产生 after IR，直接抛出公开 `KernelCodeError`。
+    - IR before:
+      ```mlir
+      %out = "nn.softmax"(%src) {axis = 1 : i64, space = #nn.space<global>} : (value) -> !nn.memory<value>
+      ```
+    - 公开错误文本：`nn.softmax must be decomposed before lower-nn`，不生成 after IR。
 
     使用示例:
-    - pattern = _RejectNnSoftmaxPattern()
+    - pattern = RejectNnSoftmaxPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
@@ -465,11 +507,17 @@ def reduce_softmax_patterns() -> list[RewritePattern]:
     """
 
     return [
-        _LowerNnReduceSumPattern(),
-        _LowerNnReduceMinPattern(),
-        _LowerNnReduceMaxPattern(),
-        _RejectNnSoftmaxPattern(),
+        LowerNnReduceSumPattern(),
+        LowerNnReduceMinPattern(),
+        LowerNnReduceMaxPattern(),
+        RejectNnSoftmaxPattern(),
     ]
 
 
-__all__ = ["reduce_softmax_patterns"]
+__all__ = [
+    "LowerNnReduceSumPattern",
+    "LowerNnReduceMinPattern",
+    "LowerNnReduceMaxPattern",
+    "RejectNnSoftmaxPattern",
+    "reduce_softmax_patterns",
+]

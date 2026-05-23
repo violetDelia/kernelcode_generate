@@ -125,6 +125,29 @@
 - 功能说明：返回 `decompass` pass 当前使用的公开 pattern 列表。
 - 注意事项：当前返回值固定为只含一个 `NnSoftmaxDecompPattern` 的列表；`DecompassPass.apply()` 必须通过该函数组装 pattern，不在 `apply()` 内手写重复列表。
 
+## Pattern MLIR before / after 合同
+
+### `NnSoftmaxDecompPattern`
+
+- pattern 作用：把单个 `nn.softmax` 分解为固定 `nn.reduce_max -> nn.broadcast -> nn.sub -> nn.exp -> nn.reduce_sum -> nn.broadcast -> nn.truediv` 链；非 `nn.softmax` no-op，非法 axis 或 result type 按公开错误文本失败。
+- before:
+
+```mlir
+%out = "nn.softmax"(%src) {axis = 1 : i64, space = #nn.space<global>} : (value) -> !nn.memory<[B, C], [C, 1], f32, #nn.space<global>>
+```
+
+- after:
+
+```mlir
+%max = "nn.reduce_max"(%src) {axes = [1 : i64], keepdim = true, space = #nn.space<global>} : value
+%max_full = "nn.broadcast"(%max) {space = #nn.space<global>} : value
+%shift = "nn.sub"(%src, %max_full) {space = #nn.space<global>} : value
+%exp = "nn.exp"(%shift) {space = #nn.space<global>} : value
+%sum = "nn.reduce_sum"(%exp) {axes = [1 : i64], keepdim = true, space = #nn.space<global>} : value
+%sum_full = "nn.broadcast"(%sum) {space = #nn.space<global>} : value
+%out = "nn.truediv"(%exp, %sum_full) {space = #nn.space<global>} : value
+```
+
 ## 额外补充
 
 ### 模块级补充

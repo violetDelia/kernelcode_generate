@@ -12,16 +12,27 @@
   - `name: str`
   - `apply(ctx: Context, module: ModuleOp) -> None`
 - `class SymbolConstHoistPattern()`
+- `SymbolConstHoistPattern.match_and_rewrite(op: SymbolConstOp, rewriter: PatternRewriter) -> None`
 - `class TunerParamHoistPattern()`
+- `TunerParamHoistPattern.match_and_rewrite(op: TunerParamOp, rewriter: PatternRewriter) -> None`
 - `class SymbolGetDimHoistPattern()`
+- `SymbolGetDimHoistPattern.match_and_rewrite(op: SymbolGetDimOp, rewriter: PatternRewriter) -> None`
 - `class SymbolGetStrideHoistPattern()`
+- `SymbolGetStrideHoistPattern.match_and_rewrite(op: SymbolGetStrideOp, rewriter: PatternRewriter) -> None`
 - `class SymbolAddHoistPattern()`
+- `SymbolAddHoistPattern.match_and_rewrite(op: SymbolAddOp, rewriter: PatternRewriter) -> None`
 - `class SymbolSubHoistPattern()`
+- `SymbolSubHoistPattern.match_and_rewrite(op: SymbolSubOp, rewriter: PatternRewriter) -> None`
 - `class SymbolMulHoistPattern()`
+- `SymbolMulHoistPattern.match_and_rewrite(op: SymbolMulOp, rewriter: PatternRewriter) -> None`
 - `class SymbolDivHoistPattern()`
+- `SymbolDivHoistPattern.match_and_rewrite(op: SymbolDivOp, rewriter: PatternRewriter) -> None`
 - `class SymbolFloorDivHoistPattern()`
+- `SymbolFloorDivHoistPattern.match_and_rewrite(op: SymbolFloorDivOp, rewriter: PatternRewriter) -> None`
 - `class SymbolMinHoistPattern()`
+- `SymbolMinHoistPattern.match_and_rewrite(op: SymbolMinOp, rewriter: PatternRewriter) -> None`
 - `class SymbolMaxHoistPattern()`
+- `SymbolMaxHoistPattern.match_and_rewrite(op: SymbolMaxOp, rewriter: PatternRewriter) -> None`
 - `get_symbol_loop_hoist_patterns() -> list[RewritePattern]`
 
 ## 文档信息
@@ -518,6 +529,239 @@ assert isinstance(patterns[0], SymbolConstHoistPattern)
   ```
 - 功能说明：读取 `symbol_loop_hoist_patterns`。
 - 注意事项：该接口只读取公开状态；返回对象的内部可变结构不作为额外公开合同。
+
+## Pattern MLIR before / after 合同
+
+### `SymbolConstHoistPattern`
+
+- pattern 作用：把 loop body 内 operand 均来自 loop 外的 `symbol.const` 外提到所属 `symbol.for` 之前；不满足条件时 no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %v = "symbol.const"() {value = 1 : i64} : () -> !symbol.int<"1">
+  "symbol.yield"() : () -> ()
+}
+```
+
+- after:
+
+```mlir
+%v = "symbol.const"() {value = 1 : i64} : () -> !symbol.int<"1">
+symbol.for %i = %c0 to %n step %c1 {
+  "symbol.yield"() : () -> ()
+}
+```
+
+### `TunerParamHoistPattern`
+
+- pattern 作用：把 loop-invariant `tuner.param` 外提到所属 `symbol.for` 之前；依赖 loop-local 值时 no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %tile = "tuner.param"() {name = "tile_m"} : () -> !symbol.int<"tile_m">
+  "symbol.yield"() : () -> ()
+}
+```
+
+- after:
+
+```mlir
+%tile = "tuner.param"() {name = "tile_m"} : () -> !symbol.int<"tile_m">
+symbol.for %i = %c0 to %n step %c1 {
+  "symbol.yield"() : () -> ()
+}
+```
+
+### `SymbolGetDimHoistPattern`
+
+- pattern 作用：把 operand 来自 loop 外 memory 的 `symbol.get_dim` 外提；读取 loop body 内 memory 时 no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %d = "symbol.get_dim"(%mem) {axis = 0 : i64} : (value) -> !symbol.int<"N">
+  "symbol.yield"() : () -> ()
+}
+```
+
+- after:
+
+```mlir
+%d = "symbol.get_dim"(%mem) {axis = 0 : i64} : (value) -> !symbol.int<"N">
+symbol.for %i = %c0 to %n step %c1 {
+  "symbol.yield"() : () -> ()
+}
+```
+
+### `SymbolGetStrideHoistPattern`
+
+- pattern 作用：把 operand 来自 loop 外 memory 的 `symbol.get_stride` 外提；读取 loop body 内 memory 时 no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %s = "symbol.get_stride"(%mem) {axis = 1 : i64} : (value) -> !symbol.int<"S">
+  "symbol.yield"() : () -> ()
+}
+```
+
+- after:
+
+```mlir
+%s = "symbol.get_stride"(%mem) {axis = 1 : i64} : (value) -> !symbol.int<"S">
+symbol.for %i = %c0 to %n step %c1 {
+  "symbol.yield"() : () -> ()
+}
+```
+
+### `SymbolAddHoistPattern`
+
+- pattern 作用：把 operand 均来自 loop 外的 `symbol.add` 外提；依赖 loop iv 或 loop-carried 值时 no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %v = "symbol.add"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A+B">
+  "symbol.yield"() : () -> ()
+}
+```
+
+- after:
+
+```mlir
+%v = "symbol.add"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A+B">
+symbol.for %i = %c0 to %n step %c1 {
+  "symbol.yield"() : () -> ()
+}
+```
+
+### `SymbolSubHoistPattern`
+
+- pattern 作用：把 operand 均来自 loop 外的 `symbol.sub` 外提；依赖 loop iv 或 loop-carried 值时 no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %v = "symbol.sub"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A-B">
+  "symbol.yield"() : () -> ()
+}
+```
+
+- after:
+
+```mlir
+%v = "symbol.sub"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A-B">
+symbol.for %i = %c0 to %n step %c1 {
+  "symbol.yield"() : () -> ()
+}
+```
+
+### `SymbolMulHoistPattern`
+
+- pattern 作用：把 operand 均来自 loop 外的 `symbol.mul` 外提；依赖 loop iv 或 loop-carried 值时 no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %v = "symbol.mul"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A*B">
+  "symbol.yield"() : () -> ()
+}
+```
+
+- after:
+
+```mlir
+%v = "symbol.mul"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A*B">
+symbol.for %i = %c0 to %n step %c1 {
+  "symbol.yield"() : () -> ()
+}
+```
+
+### `SymbolDivHoistPattern`
+
+- pattern 作用：把 operand 均来自 loop 外的 `symbol.div` 外提；依赖 loop iv 或 loop-carried 值时 no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %v = "symbol.div"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A/B">
+  "symbol.yield"() : () -> ()
+}
+```
+
+- after:
+
+```mlir
+%v = "symbol.div"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A/B">
+symbol.for %i = %c0 to %n step %c1 {
+  "symbol.yield"() : () -> ()
+}
+```
+
+### `SymbolFloorDivHoistPattern`
+
+- pattern 作用：把 operand 均来自 loop 外的 `symbol.floordiv` 外提；依赖 loop iv 或 loop-carried 值时 no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %v = "symbol.floordiv"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A//B">
+  "symbol.yield"() : () -> ()
+}
+```
+
+- after:
+
+```mlir
+%v = "symbol.floordiv"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A//B">
+symbol.for %i = %c0 to %n step %c1 {
+  "symbol.yield"() : () -> ()
+}
+```
+
+### `SymbolMinHoistPattern`
+
+- pattern 作用：把 operand 均来自 loop 外的 `symbol.min` 外提；依赖 loop iv 或 loop-carried 值时 no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %v = "symbol.min"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"min(A,B)">
+  "symbol.yield"() : () -> ()
+}
+```
+
+- after:
+
+```mlir
+%v = "symbol.min"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"min(A,B)">
+symbol.for %i = %c0 to %n step %c1 {
+  "symbol.yield"() : () -> ()
+}
+```
+
+### `SymbolMaxHoistPattern`
+
+- pattern 作用：把 operand 均来自 loop 外的 `symbol.max` 外提；依赖 loop iv 或 loop-carried 值时 no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %v = "symbol.max"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"max(A,B)">
+  "symbol.yield"() : () -> ()
+}
+```
+
+- after:
+
+```mlir
+%v = "symbol.max"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"max(A,B)">
+symbol.for %i = %c0 to %n step %c1 {
+  "symbol.yield"() : () -> ()
+}
+```
 
 ## 测试
 

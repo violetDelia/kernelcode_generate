@@ -11,6 +11,11 @@
 
 ## API 列表
 
+- `class DmaViewDesliceGroupingPattern(module: ModuleOp)`
+- `DmaViewDesliceGroupingPattern.match_and_rewrite(op: DmaViewOp, rewriter: PatternRewriter) -> None`
+- `class DmaReshapeThroughFillPattern(module: ModuleOp)`
+- `DmaReshapeThroughFillPattern.match_and_rewrite(op: DmaReshapeOp, rewriter: PatternRewriter) -> None`
+- `get_hoist_dma_alias_ops_pass_patterns(module: ModuleOp) -> list[RewritePattern]`
 - `class HoistDmaAliasOpsPass(fold: bool = True)`
 - `HoistDmaAliasOpsPass.apply(ctx: Context, module: ModuleOp) -> None`
 
@@ -39,7 +44,7 @@
 ## 非目标
 
 - 不新增 `hoist-ops` / `hoist_ops` pass 专属 option。
-- 不公开 pattern getter。
+- 不把 pattern 或 getter re-export 到 `kernel_gen.passes` package root。
 - 不把 `HoistDmaAliasOpsPass` re-export 到 `kernel_gen.passes` package root。
 - 不实现 `kernel.abs` / `kernel.relu`。
 - 不实现 `dma.subview`。
@@ -169,4 +174,44 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q \
 PYTHONDONTWRITEBYTECODE=1 \
 PYTHONPATH=<任务worktree>:/home/lfr/kernelcode_generate \
 python3 -m expectation.pass.hoist_dma_alias_ops
+```
+
+## Pattern MLIR before / after 合同
+
+### `DmaViewDesliceGroupingPattern`
+
+- 功能说明：匹配紧邻且唯一消费的 `dma.view -> dma.deslice`，在连续后缀维度可证明时降维分组。
+- no-op：非紧邻、非唯一消费、连续维度证明失败或 verify 回滚时保持原 IR。
+- before:
+
+```mlir
+%view = "dma.view"(%src, %o0, %o1, %s0, %s1, %t0, %t1) : (...) -> !nn.memory<...>
+"dma.deslice"(%dst, %view, %o0, %o1, %s0, %s1, %t0, %t1) : (...) -> !nn.memory<...>
+```
+
+- after:
+
+```mlir
+%src_low = "dma.reshape"(%src, %flat) : (...) -> !nn.memory<...>
+%dst_low = "dma.reshape"(%dst, %flat) : (...) -> !nn.memory<...>
+%view_low = "dma.view"(%src_low, %o, %s, %t) : (...) -> !nn.memory<...>
+"dma.deslice"(%dst_low, %view_low, %o, %s, %t) : (...) -> !nn.memory<...>
+```
+
+### `DmaReshapeThroughFillPattern`
+
+- 功能说明：匹配同 block 紧邻同源的 `dma.fill` 与 `dma.reshape`，把 reshape 上移并让 fill 写 alias result。
+- no-op：非紧邻、source 不同、shape operand 不支配 fill 或 verify 回滚时保持原 IR。
+- before:
+
+```mlir
+"dma.fill"(%src, %zero) : (!nn.memory<...>, f32) -> ()
+%alias = "dma.reshape"(%src, %m, %n) : (...) -> !nn.memory<...>
+```
+
+- after:
+
+```mlir
+%alias = "dma.reshape"(%src, %m, %n) : (...) -> !nn.memory<...>
+"dma.fill"(%alias, %zero) : (!nn.memory<...>, f32) -> ()
 ```

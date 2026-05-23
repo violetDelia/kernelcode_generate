@@ -261,6 +261,69 @@ assert type(patterns[0]) is TileElewiseBinaryPattern
   - `eq/ne/lt/le/gt/ge`
 - pattern 命中后直接改写当前顶层 tile op，不再公开共享 rewrite helper。
 
+## Pattern MLIR before / after 合同
+
+### `TileElewiseBinaryPattern`
+
+- pattern 作用：消费 `kernel.binary_elewise` 的 elewise tile attrs，生成输出轴 `symbol.for` 与切片 `dma.view`，并把原 op 放入 loop body；缺失 analysis 时 no-op。
+- before:
+
+```mlir
+"kernel.binary_elewise"(%out, %lhs, %rhs) {kind = "add", tile.analysis = [["elewise"], ["elewise"], ["elewise"]], tile.tile_exprs = [["T"], ["T"], ["T"]]} : (value, value, value) -> ()
+```
+
+- after:
+
+```mlir
+symbol.for %i = %c0 to %n step %T {
+  %out_tile = "dma.view"(%out, %i) : (value, !symbol.int<"T">) -> value
+  %lhs_tile = "dma.view"(%lhs, %i) : (value, !symbol.int<"T">) -> value
+  %rhs_tile = "dma.view"(%rhs, %i) : (value, !symbol.int<"T">) -> value
+  "kernel.binary_elewise"(%out_tile, %lhs_tile, %rhs_tile) {kind = "add"} : (value, value, value) -> ()
+}
+```
+
+### `TileElewiseBroadcastPattern`
+
+- pattern 作用：消费 `dma.broadcast` 的 elewise tile attrs，生成非 expand 维的 loop/view 结构；缺失 analysis 时 no-op。
+- before:
+
+```mlir
+"dma.broadcast"(%out, %src) {expand = [0 : i64], tile.analysis = [["expand", "elewise"], ["expand", "elewise"]], tile.tile_exprs = [["", "T"], ["", "T"]]} : (value, value) -> ()
+```
+
+- after:
+
+```mlir
+symbol.for %i = %c0 to %n step %T {
+  %out_tile = "dma.view"(%out, %i) : (value, !symbol.int<"T">) -> value
+  %src_tile = "dma.view"(%src, %i) : (value, !symbol.int<"T">) -> value
+  "dma.broadcast"(%out_tile, %src_tile) {expand = [0 : i64]} : (value, value) -> ()
+}
+```
+
+### `TileElewiseMatmulPattern`
+
+- pattern 作用：消费 `kernel.matmul` 的输出 elewise tile attrs，生成 M/N 轴 loop/view 结构，reduce 轴保留给 `tile-reduce`；缺失 analysis 时 no-op。
+- before:
+
+```mlir
+"kernel.matmul"(%out, %lhs, %rhs) {tile.analysis = [["elewise", "reduce"], ["reduce", "elewise"], ["elewise", "elewise"]], tile.tile_exprs = [["TM", ""], ["", "TN"], ["TM", "TN"]]} : (value, value, value) -> ()
+```
+
+- after:
+
+```mlir
+symbol.for %m = %c0 to %M step %TM {
+  symbol.for %n = %c0 to %N step %TN {
+    %out_tile = "dma.view"(%out, %m, %n) : (value, !symbol.int<"TM">, !symbol.int<"TN">) -> value
+    %lhs_tile = "dma.view"(%lhs, %m) : (value, !symbol.int<"TM">) -> value
+    %rhs_tile = "dma.view"(%rhs, %n) : (value, !symbol.int<"TN">) -> value
+    "kernel.matmul"(%out_tile, %lhs_tile, %rhs_tile) : (value, value, value) -> ()
+  }
+}
+```
+
 ### helper 说明
 
 - 当前文件内除上述 5 个公开对象外，不再承诺任何其他稳定 helper。

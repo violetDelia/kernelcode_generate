@@ -17,6 +17,7 @@
 - 暴露 `tile-analysis` 的公开入口与 pattern API。
 - 暴露 `tile-elewise` 的公开入口与 pattern API。
 - 暴露 `tile-reduce` 的公开入口与 pattern API。
+- 不全量重导出所有 pass pattern；新增公开 pattern 以所属 canonical module path 的 `__all__` 为准。
 
 API 列表:
 - `class Pass()`

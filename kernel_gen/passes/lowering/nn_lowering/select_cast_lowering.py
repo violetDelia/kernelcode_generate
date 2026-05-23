@@ -6,8 +6,15 @@
 - nn.cast -> dma.alloc + dma.cast
 - nn.exp -> dma.alloc + kernel.exp
 - surviving 模块级接口为 `select_cast_patterns()`。
+- 每个公开 pattern 将对应 `nn.*` before IR 改写为 `dma.alloc + kernel/dma` after IR。
 
 API 列表:
+- `class LowerSelectPattern()`
+- `LowerSelectPattern.match_and_rewrite(op: NnSelectOp, rewriter: PatternRewriter) -> None`
+- `class LowerCastPattern()`
+- `LowerCastPattern.match_and_rewrite(op: NnCastOp, rewriter: PatternRewriter) -> None`
+- `class LowerExpPattern()`
+- `LowerExpPattern.match_and_rewrite(op: NnExpOp, rewriter: PatternRewriter) -> None`
 - `select_cast_patterns() -> list[RewritePattern]`
 
 使用示例:
@@ -295,16 +302,25 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "nn.cast optional operand must be int or symbol")
 
 
-class _LowerSelectPattern(RewritePattern):
+class LowerSelectPattern(RewritePattern):
     """将单个 nn.select lowering 为 kernel.select。
 
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnSelectOp`。
     - 复用 `_lower_select_op(...)`，保持现有 IR 输出不变。
+    - IR before:
+      ```mlir
+      %out = "nn.select"(%cond, %lhs, %rhs) {space = #nn.space<global>} : (value, value, value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.select"(%alloc, %cond, %lhs, %rhs) : (value, value, value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerSelectPattern()
+    - pattern = LowerSelectPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/select_cast_lowering.md
@@ -322,16 +338,25 @@ class _LowerSelectPattern(RewritePattern):
         rewriter.has_done_action = True
 
 
-class _LowerCastPattern(RewritePattern):
+class LowerCastPattern(RewritePattern):
     """将单个 nn.cast lowering 为 dma.cast。
 
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnCastOp`。
     - 复用 `_lower_cast_op(...)`，保持现有 IR 输出与错误短语不变。
+    - IR before:
+      ```mlir
+      %out = "nn.cast"(%src) {space = #nn.space<global>} : (value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "dma.cast"(%alloc, %src) : (value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerCastPattern()
+    - pattern = LowerCastPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/select_cast_lowering.md
@@ -349,16 +374,25 @@ class _LowerCastPattern(RewritePattern):
         rewriter.has_done_action = True
 
 
-class _LowerExpPattern(RewritePattern):
+class LowerExpPattern(RewritePattern):
     """将单个 nn.exp lowering 为 kernel.exp。
 
 
     功能说明:
     - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnExpOp`。
     - 保持既有注册位置与 lowering 输出不变；reduce/softmax family 后续阶段可继续收口边界。
+    - IR before:
+      ```mlir
+      %out = "nn.exp"(%src) {space = #nn.space<global>} : (value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.exp"(%src, %alloc) : (value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerExpPattern()
+    - pattern = LowerExpPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/select_cast_lowering.md
@@ -393,5 +427,10 @@ def select_cast_patterns() -> list[RewritePattern]:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 
-    return [_LowerSelectPattern(), _LowerCastPattern(), _LowerExpPattern()]
-__all__ = ["select_cast_patterns"]
+    return [LowerSelectPattern(), LowerCastPattern(), LowerExpPattern()]
+__all__ = [
+    "LowerSelectPattern",
+    "LowerCastPattern",
+    "LowerExpPattern",
+    "select_cast_patterns",
+]

@@ -115,6 +115,10 @@
   - `kernel_gen.passes.symbol_loop_hoist`
   - `kernel_gen.passes.template_name.infer`
   - `kernel_gen.passes.producer_consumer_analysis`
+- 对公开 `RewritePattern` caller，canonical public path 固定为各 pattern 所属实现模块：
+  - pattern class 必须列入所属模块 `__all__` 与对应 spec `API 列表`。
+  - pass package 根 `kernel_gen.passes` 与 `kernel_gen.passes.lowering.nn_lowering` package root 只维护既有稳定 re-export，不全量重导出 pattern。
+  - getter 继续保留既有 family 名称；缺失时才补 `get_<pass>_patterns(...)`，不新增无收益同义别名。
 - 对当前仍存活的 compat / family caller，当前基线仍允许继续导入，但不承诺永久保留：
   - `kernel_gen.passes.lowering`
   - `kernel_gen.passes.lowering.buffer_results_to_out_params`

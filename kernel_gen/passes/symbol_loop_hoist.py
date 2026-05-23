@@ -11,16 +11,27 @@
 API 列表:
 - `class SymbolLoopHoistPass(fold: bool = True)`
 - `class SymbolConstHoistPattern()`
+- `SymbolConstHoistPattern.match_and_rewrite(op: SymbolConstOp, rewriter: PatternRewriter) -> None`
 - `class TunerParamHoistPattern()`
+- `TunerParamHoistPattern.match_and_rewrite(op: TunerParamOp, rewriter: PatternRewriter) -> None`
 - `class SymbolGetDimHoistPattern()`
+- `SymbolGetDimHoistPattern.match_and_rewrite(op: SymbolGetDimOp, rewriter: PatternRewriter) -> None`
 - `class SymbolGetStrideHoistPattern()`
+- `SymbolGetStrideHoistPattern.match_and_rewrite(op: SymbolGetStrideOp, rewriter: PatternRewriter) -> None`
 - `class SymbolAddHoistPattern()`
+- `SymbolAddHoistPattern.match_and_rewrite(op: SymbolAddOp, rewriter: PatternRewriter) -> None`
 - `class SymbolSubHoistPattern()`
+- `SymbolSubHoistPattern.match_and_rewrite(op: SymbolSubOp, rewriter: PatternRewriter) -> None`
 - `class SymbolMulHoistPattern()`
+- `SymbolMulHoistPattern.match_and_rewrite(op: SymbolMulOp, rewriter: PatternRewriter) -> None`
 - `class SymbolDivHoistPattern()`
+- `SymbolDivHoistPattern.match_and_rewrite(op: SymbolDivOp, rewriter: PatternRewriter) -> None`
 - `class SymbolFloorDivHoistPattern()`
+- `SymbolFloorDivHoistPattern.match_and_rewrite(op: SymbolFloorDivOp, rewriter: PatternRewriter) -> None`
 - `class SymbolMinHoistPattern()`
+- `SymbolMinHoistPattern.match_and_rewrite(op: SymbolMinOp, rewriter: PatternRewriter) -> None`
 - `class SymbolMaxHoistPattern()`
+- `SymbolMaxHoistPattern.match_and_rewrite(op: SymbolMaxOp, rewriter: PatternRewriter) -> None`
 - `get_symbol_loop_hoist_patterns() -> list[RewritePattern]`
 
 使用示例:
@@ -111,7 +122,23 @@ def _hoist_loop_invariant_op(op: Operation, rewriter: PatternRewriter) -> None:
 
 
 class SymbolConstHoistPattern(RewritePattern):
-    """`symbol.const` 外提 pattern。"""
+    """`symbol.const` 外提 pattern。
+
+    功能说明:
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %v = "symbol.const"() {value = 1 : i64} : () -> !symbol.int<"1">
+      }
+      ```
+    - IR after:
+      ```mlir
+      %v = "symbol.const"() {value = 1 : i64} : () -> !symbol.int<"1">
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+    - no-op unchanged after：不在 `symbol.for` 直接 body 内时 before IR 保持不变。
+    """
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolConstOp, rewriter: PatternRewriter, /) -> None:
@@ -119,7 +146,23 @@ class SymbolConstHoistPattern(RewritePattern):
 
 
 class TunerParamHoistPattern(RewritePattern):
-    """`tuner.param` 外提 pattern。"""
+    """`tuner.param` 外提 pattern。
+
+    功能说明:
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %tile = "tuner.param"() {name = "tile_m"} : () -> !symbol.int<"tile_m">
+      }
+      ```
+    - IR after:
+      ```mlir
+      %tile = "tuner.param"() {name = "tile_m"} : () -> !symbol.int<"tile_m">
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+    - no-op unchanged after：依赖 loop-local 值时 before IR 保持不变。
+    """
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: TunerParamOp, rewriter: PatternRewriter, /) -> None:
@@ -127,7 +170,23 @@ class TunerParamHoistPattern(RewritePattern):
 
 
 class SymbolGetDimHoistPattern(RewritePattern):
-    """`symbol.get_dim` 外提 pattern。"""
+    """`symbol.get_dim` 外提 pattern。
+
+    功能说明:
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %d = "symbol.get_dim"(%mem) {axis = 0 : i64} : (value) -> !symbol.int<"N">
+      }
+      ```
+    - IR after:
+      ```mlir
+      %d = "symbol.get_dim"(%mem) {axis = 0 : i64} : (value) -> !symbol.int<"N">
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+    - no-op unchanged after：`%mem` 由当前 loop body 生产时 before IR 保持不变。
+    """
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolGetDimOp, rewriter: PatternRewriter, /) -> None:
@@ -135,7 +194,23 @@ class SymbolGetDimHoistPattern(RewritePattern):
 
 
 class SymbolGetStrideHoistPattern(RewritePattern):
-    """`symbol.get_stride` 外提 pattern。"""
+    """`symbol.get_stride` 外提 pattern。
+
+    功能说明:
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %s = "symbol.get_stride"(%mem) {axis = 1 : i64} : (value) -> !symbol.int<"S">
+      }
+      ```
+    - IR after:
+      ```mlir
+      %s = "symbol.get_stride"(%mem) {axis = 1 : i64} : (value) -> !symbol.int<"S">
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+    - no-op unchanged after：`%mem` 由当前 loop body 生产时 before IR 保持不变。
+    """
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolGetStrideOp, rewriter: PatternRewriter, /) -> None:
@@ -143,7 +218,23 @@ class SymbolGetStrideHoistPattern(RewritePattern):
 
 
 class SymbolAddHoistPattern(RewritePattern):
-    """`symbol.add` 外提 pattern。"""
+    """`symbol.add` 外提 pattern。
+
+    功能说明:
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %v = "symbol.add"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A+B">
+      }
+      ```
+    - IR after:
+      ```mlir
+      %v = "symbol.add"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A+B">
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+    - no-op unchanged after：任一 operand 来自当前 loop body 时 before IR 保持不变。
+    """
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolAddOp, rewriter: PatternRewriter, /) -> None:
@@ -151,7 +242,23 @@ class SymbolAddHoistPattern(RewritePattern):
 
 
 class SymbolSubHoistPattern(RewritePattern):
-    """`symbol.sub` 外提 pattern。"""
+    """`symbol.sub` 外提 pattern。
+
+    功能说明:
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %v = "symbol.sub"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A-B">
+      }
+      ```
+    - IR after:
+      ```mlir
+      %v = "symbol.sub"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A-B">
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+    - no-op unchanged after：任一 operand 来自当前 loop body 时 before IR 保持不变。
+    """
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolSubOp, rewriter: PatternRewriter, /) -> None:
@@ -159,7 +266,23 @@ class SymbolSubHoistPattern(RewritePattern):
 
 
 class SymbolMulHoistPattern(RewritePattern):
-    """`symbol.mul` 外提 pattern。"""
+    """`symbol.mul` 外提 pattern。
+
+    功能说明:
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %v = "symbol.mul"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A*B">
+      }
+      ```
+    - IR after:
+      ```mlir
+      %v = "symbol.mul"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A*B">
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+    - no-op unchanged after：任一 operand 来自当前 loop body 时 before IR 保持不变。
+    """
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolMulOp, rewriter: PatternRewriter, /) -> None:
@@ -167,7 +290,23 @@ class SymbolMulHoistPattern(RewritePattern):
 
 
 class SymbolDivHoistPattern(RewritePattern):
-    """`symbol.div` 外提 pattern。"""
+    """`symbol.div` 外提 pattern。
+
+    功能说明:
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %v = "symbol.div"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A/B">
+      }
+      ```
+    - IR after:
+      ```mlir
+      %v = "symbol.div"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A/B">
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+    - no-op unchanged after：任一 operand 来自当前 loop body 时 before IR 保持不变。
+    """
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolDivOp, rewriter: PatternRewriter, /) -> None:
@@ -175,7 +314,23 @@ class SymbolDivHoistPattern(RewritePattern):
 
 
 class SymbolFloorDivHoistPattern(RewritePattern):
-    """`symbol.floordiv` 外提 pattern。"""
+    """`symbol.floordiv` 外提 pattern。
+
+    功能说明:
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %v = "symbol.floordiv"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A//B">
+      }
+      ```
+    - IR after:
+      ```mlir
+      %v = "symbol.floordiv"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"A//B">
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+    - no-op unchanged after：任一 operand 来自当前 loop body 时 before IR 保持不变。
+    """
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolFloorDivOp, rewriter: PatternRewriter, /) -> None:
@@ -189,6 +344,19 @@ class SymbolMinHoistPattern(RewritePattern):
     功能说明:
     - 对 loop-invariant 的 `symbol.min` 应用与其它 symbol 算术 op 相同的一层外提规则。
     - 任一 operand 来自当前 loop body、loop iterator 或 loop-carried 值时保持 no-op。
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %v = "symbol.min"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"min(A,B)">
+      }
+      ```
+    - IR after:
+      ```mlir
+      %v = "symbol.min"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"min(A,B)">
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+    - no-op unchanged after：任一 operand 来自当前 loop body 时 before IR 保持不变。
 
     使用示例:
     - pattern = SymbolMinHoistPattern()
@@ -211,6 +379,19 @@ class SymbolMaxHoistPattern(RewritePattern):
     功能说明:
     - 对 loop-invariant 的 `symbol.max` 应用与其它 symbol 算术 op 相同的一层外提规则。
     - 任一 operand 来自当前 loop body、loop iterator 或 loop-carried 值时保持 no-op。
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %v = "symbol.max"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"max(A,B)">
+      }
+      ```
+    - IR after:
+      ```mlir
+      %v = "symbol.max"(%a, %b) : (!symbol.int<"A">, !symbol.int<"B">) -> !symbol.int<"max(A,B)">
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+    - no-op unchanged after：任一 operand 来自当前 loop body 时 before IR 保持不变。
 
     使用示例:
     - pattern = SymbolMaxHoistPattern()

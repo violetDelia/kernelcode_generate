@@ -5,8 +5,13 @@
 - 负责 nn.broadcast / nn.transpose 的 lowering。
 - 输出 memory 通过 dma.alloc 创建，并由 dma.* op 写入。
 - surviving 模块级接口为 `dma_structured_patterns()`。
+- 每个公开 pattern 将对应 `nn.*` before IR 改写为 `dma.alloc + dma.*` after IR。
 
 API 列表:
+- `class LowerNnBroadcastPattern()`
+- `LowerNnBroadcastPattern.match_and_rewrite(op: NnBroadcastOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnTransposePattern()`
+- `LowerNnTransposePattern.match_and_rewrite(op: NnTransposeOp, rewriter: PatternRewriter) -> None`
 - `dma_structured_patterns() -> list[RewritePattern]`
 
 使用示例:
@@ -404,16 +409,25 @@ def _lower_transpose(block: Block, op: Operation) -> None:
     block.insert_op_before(lowered, op)
     op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
-class _LowerNnBroadcastPattern(RewritePattern):
+class LowerNnBroadcastPattern(RewritePattern):
     """将单个 nn.broadcast lowering 为 dma.broadcast。
 
 
     功能说明:
     - 只匹配 NnBroadcastOp，避免 family 级 op.name 分派。
     - 复用现有 broadcast helper，保持 IR 输出与校验语义不变。
+    - IR before:
+      ```mlir
+      %out = "nn.broadcast"(%src) {space = #nn.space<global>} : (value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "dma.broadcast"(%alloc, %src) : (value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnBroadcastPattern()
+    - pattern = LowerNnBroadcastPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
@@ -430,16 +444,25 @@ class _LowerNnBroadcastPattern(RewritePattern):
         rewriter.has_done_action = True
 
 
-class _LowerNnTransposePattern(RewritePattern):
+class LowerNnTransposePattern(RewritePattern):
     """将单个 nn.transpose lowering 为 dma.transpose。
 
 
     功能说明:
     - 只匹配 NnTransposeOp，避免 family 级 op.name 分派。
     - 复用现有 transpose helper，保持 IR 输出与校验语义不变。
+    - IR before:
+      ```mlir
+      %out = "nn.transpose"(%src) {perm = [1 : i64, 0 : i64], space = #nn.space<global>} : (value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "dma.transpose"(%alloc, %src) {perm = [1 : i64, 0 : i64]} : (value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnTransposePattern()
+    - pattern = LowerNnTransposePattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
@@ -473,7 +496,11 @@ def dma_structured_patterns() -> list[RewritePattern]:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
     """
 
-    return [_LowerNnBroadcastPattern(), _LowerNnTransposePattern()]
+    return [LowerNnBroadcastPattern(), LowerNnTransposePattern()]
 
 
-__all__ = ["dma_structured_patterns"]
+__all__ = [
+    "LowerNnBroadcastPattern",
+    "LowerNnTransposePattern",
+    "dma_structured_patterns",
+]

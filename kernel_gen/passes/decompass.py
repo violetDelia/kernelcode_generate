@@ -10,6 +10,7 @@
 API 列表:
 - `class DecompassPass(fold: bool = True)`
 - `class NnSoftmaxDecompPattern()`
+- `NnSoftmaxDecompPattern.match_and_rewrite(op: NnSoftmaxOp, rewriter: PatternRewriter) -> None`
 - `get_decompass_pass_patterns() -> list[RewritePattern]`
 
 使用示例:
@@ -143,6 +144,21 @@ class NnSoftmaxDecompPattern(RewritePattern):
     - 把单个 `nn.softmax` 固定展开为
       `nn.reduce_max -> nn.broadcast -> nn.sub -> nn.exp -> nn.reduce_sum -> nn.broadcast -> nn.truediv`。
     - 不承接其它 `nn.*` op 的通用注册或动态分发。
+    - IR before:
+      ```mlir
+      %out = "nn.softmax"(%src) {axis = 1 : i64, space = #nn.space<global>} : (value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %max = "nn.reduce_max"(%src) {axes = [1 : i64], keepdim = true, space = #nn.space<global>} : value
+      %max_full = "nn.broadcast"(%max) {space = #nn.space<global>} : value
+      %shift = "nn.sub"(%src, %max_full) {space = #nn.space<global>} : value
+      %exp = "nn.exp"(%shift) {space = #nn.space<global>} : value
+      %sum = "nn.reduce_sum"(%exp) {axes = [1 : i64], keepdim = true, space = #nn.space<global>} : value
+      %sum_full = "nn.broadcast"(%sum) {space = #nn.space<global>} : value
+      %out = "nn.truediv"(%exp, %sum_full) {space = #nn.space<global>} : value
+      ```
+    - no-op unchanged after：非 `nn.softmax` op 不会命中该 typed pattern。
 
     使用示例:
     - `pattern = NnSoftmaxDecompPattern()`

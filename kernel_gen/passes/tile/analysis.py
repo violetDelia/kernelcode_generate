@@ -8,8 +8,11 @@
 
 API 列表:
 - `class TileAnalysisBinaryPattern(RewritePattern)`
+- `TileAnalysisBinaryPattern.match_and_rewrite(op: KernelBinaryElewiseOp, rewriter: PatternRewriter) -> None`
 - `class TileAnalysisBroadcastPattern(RewritePattern)`
+- `TileAnalysisBroadcastPattern.match_and_rewrite(op: DmaBroadcastOp, rewriter: PatternRewriter) -> None`
 - `class TileAnalysisMatmulPattern(RewritePattern)`
+- `TileAnalysisMatmulPattern.match_and_rewrite(op: KernelMatmulOp, rewriter: PatternRewriter) -> None`
 - `get_tile_analysis_pass_patterns() -> list[RewritePattern]`
 - `class TileAnalysisPass(ModulePass)`
 - `TileAnalysisPass.__init__(fold: bool = True) -> None`
@@ -162,6 +165,15 @@ class TileAnalysisBinaryPattern(RewritePattern):
     功能说明:
     - 命中 `kernel.binary_elewise` 后，只为当前 op 补 `tile.analysis` 与 `tile.tile_exprs`。
     - 若当前 op 已有这两个 attr，则直接跳过。
+    - IR before:
+      ```mlir
+      "kernel.binary_elewise"(%out, %lhs, %rhs) {kind = "add"} : (value, value, value) -> ()
+      ```
+    - IR after:
+      ```mlir
+      "kernel.binary_elewise"(%out, %lhs, %rhs) {kind = "add", tile.analysis = [["elewise"]], tile.tile_exprs = [[""]]} : (value, value, value) -> ()
+      ```
+    - no-op unchanged after：已有 `tile.analysis` 与 `tile.tile_exprs` 时 before IR 保持不变。
 
     使用示例:
     - pattern = TileAnalysisBinaryPattern()
@@ -214,6 +226,15 @@ class TileAnalysisBroadcastPattern(RewritePattern):
     功能说明:
     - 命中 `dma.broadcast` 后，只为当前 op 补 `tile.analysis` 与 `tile.tile_exprs`。
     - 若当前 op 已有这两个 attr，则直接跳过。
+    - IR before:
+      ```mlir
+      "dma.broadcast"(%out, %src) {expand = [0 : i64]} : (value, value) -> ()
+      ```
+    - IR after:
+      ```mlir
+      "dma.broadcast"(%out, %src) {expand = [0 : i64], tile.analysis = [["expand", "elewise"], ["expand", "elewise"]], tile.tile_exprs = [["", ""], ["", ""]]} : (value, value) -> ()
+      ```
+    - no-op unchanged after：已有 `tile.analysis` 与 `tile.tile_exprs` 时 before IR 保持不变。
 
     使用示例:
     - pattern = TileAnalysisBroadcastPattern()
@@ -284,6 +305,15 @@ class TileAnalysisMatmulPattern(RewritePattern):
     功能说明:
     - 命中 `kernel.matmul` 后，只为当前 op 补 `tile.analysis` 与 `tile.tile_exprs`。
     - 若当前 op 已有这两个 attr，则直接跳过。
+    - IR before:
+      ```mlir
+      "kernel.matmul"(%out, %lhs, %rhs) : (value, value, value) -> ()
+      ```
+    - IR after:
+      ```mlir
+      "kernel.matmul"(%out, %lhs, %rhs) {tile.analysis = [["elewise", "reduce"], ["reduce", "elewise"], ["elewise", "elewise"]], tile.tile_exprs = [["", ""], ["", ""], ["", ""]]} : (value, value, value) -> ()
+      ```
+    - no-op unchanged after：已有 `tile.analysis` 与 `tile.tile_exprs` 时 before IR 保持不变。
 
     使用示例:
     - pattern = TileAnalysisMatmulPattern()

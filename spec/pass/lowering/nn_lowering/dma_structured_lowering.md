@@ -4,10 +4,14 @@
 
 - 定义 `nn_lowering` 中 dma structured family 的拆分规范。
 - 负责 `nn.broadcast` / `nn.transpose` 的 lowering 语义。
-- 模块级公开入口只保留 `dma_structured_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
+- 模块级公开入口公开 pattern class 与既有 `dma_structured_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
 
 ## API 列表
 
+- `class LowerNnBroadcastPattern()`
+- `LowerNnBroadcastPattern.match_and_rewrite(op: NnBroadcastOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnTransposePattern()`
+- `LowerNnTransposePattern.match_and_rewrite(op: NnTransposeOp, rewriter: PatternRewriter) -> None`
 - `dma_structured_patterns() -> list[RewritePattern]`
 
 ## 文档信息
@@ -62,6 +66,40 @@
   ```
 - 功能说明：返回 dma structured family 的有序 pattern 列表，供 `nn_lowering_patterns()` 直接拼接到主 driver 中。
 - 注意事项：返回顺序固定为 `nn.broadcast` pattern 在前、`nn.transpose` pattern 在后；内部 helper 可复用 `symbol.get_dim` / `dma.alloc` 构造逻辑，但这些 helper 不属于公开接口；返回列表中不得保留 `lower_dma_structured_family` 兼容入口；返回值可直接传入 `GreedyRewritePatternApplier`。
+
+## Pattern MLIR before / after 合同
+
+### `LowerNnBroadcastPattern`
+
+- pattern 作用：把单个 `nn.broadcast` lowering 为 `dma.alloc + dma.broadcast`，动态维度只允许来自 source memory。
+- before:
+
+```mlir
+%out = "nn.broadcast"(%src) {space = #nn.space<global>} : (value) -> !nn.memory<[N, C], [C, 1], f32, #nn.space<global>>
+```
+
+- after:
+
+```mlir
+%alloc = "dma.alloc"() {space = #nn.space<global>} : () -> !nn.memory<[N, C], [C, 1], f32, #nn.space<global>>
+"dma.broadcast"(%alloc, %src) {space = #nn.space<global>} : (value, value) -> ()
+```
+
+### `LowerNnTransposePattern`
+
+- pattern 作用：把单个 `nn.transpose` lowering 为 `dma.alloc + dma.transpose`，perm 必须是合法 rank 排列。
+- before:
+
+```mlir
+%out = "nn.transpose"(%src) {perm = [1 : i64, 0 : i64], space = #nn.space<global>} : (value) -> !nn.memory<[C, N], [N, 1], f32, #nn.space<global>>
+```
+
+- after:
+
+```mlir
+%alloc = "dma.alloc"() {space = #nn.space<global>} : () -> !nn.memory<[C, N], [N, 1], f32, #nn.space<global>>
+"dma.transpose"(%alloc, %src) {perm = [1 : i64, 0 : i64]} : (value, value) -> ()
+```
 
 ## 测试
 

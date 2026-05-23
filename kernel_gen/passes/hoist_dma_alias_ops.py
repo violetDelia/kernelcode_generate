@@ -7,10 +7,15 @@
   `dma.reshape` 上移到 `dma.fill` 前，同时把 `dma.fill` target 改为 alias result。
 - 扩展识别紧邻的 `dma.view` + `dma.deslice` 连续后缀维度分组，把可证明安全的高维
   view/deslice 降维为 reshape 后的一组低维 view/deslice。
-- 变换通过当前文件内私有 `RewritePattern` 与 `PatternRewriteWalker` 驱动，不暴露 pattern getter。
+- 变换通过当前文件公开 `RewritePattern` 与 `PatternRewriteWalker` 驱动。
 - 不做 fold/combine/canonicalize，不跨 block、region 或控制流移动。
 
 API 列表:
+- `class DmaViewDesliceGroupingPattern(module: ModuleOp)`
+- `DmaViewDesliceGroupingPattern.match_and_rewrite(op: DmaViewOp, rewriter: PatternRewriter) -> None`
+- `class DmaReshapeThroughFillPattern(module: ModuleOp)`
+- `DmaReshapeThroughFillPattern.match_and_rewrite(op: DmaReshapeOp, rewriter: PatternRewriter) -> None`
+- `get_hoist_dma_alias_ops_pass_patterns(module: ModuleOp) -> list[RewritePattern]`
 - `class HoistDmaAliasOpsPass(fold: bool = True)`
 - `HoistDmaAliasOpsPass.apply(ctx: Context, module: ModuleOp) -> None`
 
@@ -878,18 +883,32 @@ def _rewrite_view_deslice_grouping(
     return True
 
 
-class _DmaViewDesliceGroupingPattern(RewritePattern):
-    """`dma.view + dma.deslice` 连续维度分组私有 pattern。
+class DmaViewDesliceGroupingPattern(RewritePattern):
+    """`dma.view + dma.deslice` 连续维度分组 pattern。
 
     功能说明:
     - 只匹配 `DmaViewOp`，候选证明与 rewrite 都限制在当前文件内。
-    - 该 pattern 不作为公开 API 导出，也不提供 getter。
+    - IR 变换：`dma.view -> dma.deslice` 降维为 `dma.reshape -> dma.view -> dma.deslice`。
+    - no-op：连续维度证明或事务式 module verify 失败时保持原 IR。
+    - IR before:
+      ```mlir
+      %view = "dma.view"(%src, %o0, %o1, %n, %k, %s0, %s1) : (...) -> !nn.memory<[N, K], [K, 1], f32, #nn.space<tsm>>
+      "dma.deslice"(%dst, %view, %o0, %o1, %n, %k, %s0, %s1) : (...) -> ()
+      ```
+    - IR after:
+      ```mlir
+      %src_low = "dma.reshape"(%src, %nk) : (...) -> !nn.memory<[N*K], [1], f32, #nn.space<tsm>>
+      %dst_low = "dma.reshape"(%dst, %nk) : (...) -> !nn.memory<[N*K], [1], f32, #nn.space<tsm>>
+      %view_low = "dma.view"(%src_low, %o, %nk, %s) : (...) -> !nn.memory<[N*K], [1], f32, #nn.space<tsm>>
+      "dma.deslice"(%dst_low, %view_low, %o, %nk, %s) : (...) -> ()
+      ```
+    - no-op unchanged after：连续维度无法证明或 verify 失败时，上述 before IR 保持不变。
 
     使用示例:
-    - pattern = _DmaViewDesliceGroupingPattern(module)
+    - pattern = DmaViewDesliceGroupingPattern(module)
     """
 
-    def __init__(self: "_DmaViewDesliceGroupingPattern", module: ModuleOp) -> None:
+    def __init__(self: "DmaViewDesliceGroupingPattern", module: ModuleOp) -> None:
         """初始化 pattern 持有的 module verifier 上下文。
 
         功能说明:
@@ -897,14 +916,14 @@ class _DmaViewDesliceGroupingPattern(RewritePattern):
         - 记录 verifier 拒绝的 view op，避免 greedy walker 反复重试。
 
         使用示例:
-        - pattern = _DmaViewDesliceGroupingPattern(module)
+        - pattern = DmaViewDesliceGroupingPattern(module)
         """
 
         self.module = module
         self.rejected_view_ops: set[int] = set()
 
     @op_type_rewrite_pattern
-    def match_and_rewrite(self: "_DmaViewDesliceGroupingPattern", op: DmaViewOp, rewriter: PatternRewriter, /) -> None:
+    def match_and_rewrite(self: "DmaViewDesliceGroupingPattern", op: DmaViewOp, rewriter: PatternRewriter, /) -> None:
         """执行单个 `view -> deslice` 候选改写。
 
         功能说明:
@@ -912,7 +931,7 @@ class _DmaViewDesliceGroupingPattern(RewritePattern):
         - 满足条件时把高维 view/deslice 降维为 reshape 后的低维 view/deslice。
 
         使用示例:
-        - _DmaViewDesliceGroupingPattern(module).match_and_rewrite(view, rewriter)
+        - DmaViewDesliceGroupingPattern(module).match_and_rewrite(view, rewriter)
         """
 
         if id(op) in self.rejected_view_ops:
@@ -924,18 +943,30 @@ class _DmaViewDesliceGroupingPattern(RewritePattern):
             self.rejected_view_ops.add(id(op))
 
 
-class _DmaReshapeThroughFillPattern(RewritePattern):
-    """`dma.reshape` 穿过紧邻 `dma.fill` 的私有 pattern。
+class DmaReshapeThroughFillPattern(RewritePattern):
+    """`dma.reshape` 穿过紧邻 `dma.fill` 的 pattern。
 
     功能说明:
     - 只匹配 `DmaReshapeOp`，并复用 `_candidate_fill(...)` 收口同 block、紧邻、同源与支配边界。
-    - 该 pattern 不作为公开 API 导出，也不提供 getter。
+    - IR 变换：`dma.fill(%src); dma.reshape(%src)` 改为 `dma.reshape(%src); dma.fill(%alias)`。
+    - no-op：候选条件或事务式 module verify 失败时保持原 IR。
+    - IR before:
+      ```mlir
+      "dma.fill"(%src, %value) : (value, f32) -> ()
+      %alias = "dma.reshape"(%src, %n, %k) : (...) -> !nn.memory<[N, K], [K, 1], f32, #nn.space<tsm>>
+      ```
+    - IR after:
+      ```mlir
+      %alias = "dma.reshape"(%src, %n, %k) : (...) -> !nn.memory<[N, K], [K, 1], f32, #nn.space<tsm>>
+      "dma.fill"(%alias, %value) : (value, f32) -> ()
+      ```
+    - no-op unchanged after：reshape 与 fill 非紧邻、不同源或 verify 失败时，上述 before IR 保持不变。
 
     使用示例:
-    - pattern = _DmaReshapeThroughFillPattern(module)
+    - pattern = DmaReshapeThroughFillPattern(module)
     """
 
-    def __init__(self: "_DmaReshapeThroughFillPattern", module: ModuleOp) -> None:
+    def __init__(self: "DmaReshapeThroughFillPattern", module: ModuleOp) -> None:
         """初始化 pattern 持有的 module verifier 上下文。
 
         功能说明:
@@ -943,14 +974,14 @@ class _DmaReshapeThroughFillPattern(RewritePattern):
         - 记录已被 verifier 拒绝的 reshape op，避免 greedy walker 反复重试同一失败候选。
 
         使用示例:
-        - pattern = _DmaReshapeThroughFillPattern(module)
+        - pattern = DmaReshapeThroughFillPattern(module)
         """
 
         self.module = module
         self.rejected_reshape_ops: set[int] = set()
 
     @op_type_rewrite_pattern
-    def match_and_rewrite(self: "_DmaReshapeThroughFillPattern", op: DmaReshapeOp, rewriter: PatternRewriter, /) -> None:
+    def match_and_rewrite(self: "DmaReshapeThroughFillPattern", op: DmaReshapeOp, rewriter: PatternRewriter, /) -> None:
         """执行单个 `fill -> reshape` 候选改写。
 
         功能说明:
@@ -958,7 +989,7 @@ class _DmaReshapeThroughFillPattern(RewritePattern):
         - 满足条件时用 pattern rewriter 把 reshape 移到 fill 前，并将 fill target 改为 alias result。
 
         使用示例:
-        - _DmaReshapeThroughFillPattern(module).match_and_rewrite(reshape, rewriter)
+        - DmaReshapeThroughFillPattern(module).match_and_rewrite(reshape, rewriter)
         """
 
         if id(op) in self.rejected_reshape_ops:
@@ -970,11 +1001,25 @@ class _DmaReshapeThroughFillPattern(RewritePattern):
             self.rejected_reshape_ops.add(id(op))
 
 
+def get_hoist_dma_alias_ops_pass_patterns(module: ModuleOp) -> list[RewritePattern]:
+    """返回 `hoist-dma-alias-ops` pass 的公开 pattern 列表。
+
+    功能说明:
+    - 每次调用返回新的 `DmaViewDesliceGroupingPattern` 与 `DmaReshapeThroughFillPattern` 实例。
+    - 返回顺序固定为 view/deslice 分组 pattern 在前、reshape/fill 上移 pattern 在后。
+
+    使用示例:
+    - patterns = get_hoist_dma_alias_ops_pass_patterns(module)
+    """
+
+    return [DmaViewDesliceGroupingPattern(module), DmaReshapeThroughFillPattern(module)]
+
+
 def _rewrite_module_to_fixed_point(ctx: Context, module: ModuleOp, *, fold: bool) -> None:
     """用 pattern walker 执行 alias op 上移直到稳定。
 
     功能说明:
-    - 注册当前文件内私有 `DmaViewOp` 与 `DmaReshapeOp` pattern。
+    - 注册当前文件公开 `DmaViewOp` 与 `DmaReshapeOp` pattern。
     - Greedy walker 负责对 module 内多个独立候选收敛，不做手工整段遍历搬 op。
 
     使用示例:
@@ -983,7 +1028,7 @@ def _rewrite_module_to_fixed_point(ctx: Context, module: ModuleOp, *, fold: bool
 
     PatternRewriteWalker(
         GreedyRewritePatternApplier(
-            [_DmaViewDesliceGroupingPattern(module), _DmaReshapeThroughFillPattern(module)],
+            get_hoist_dma_alias_ops_pass_patterns(module),
             ctx=ctx,
             folding_enabled=fold,
             dce_enabled=False,
@@ -997,7 +1042,7 @@ class HoistDmaAliasOpsPass(Pass):
     功能说明:
     - 第一阶段只让 `dma.reshape` 穿过紧邻且同源的 `dma.fill`。
     - 扩展阶段让满足连续后缀维度证明的 `dma.view + dma.deslice` 降维分组。
-    - 内部通过 xDSL pattern rewrite 基础设施驱动，不提供公开 pattern getter。
+    - 内部通过 xDSL pattern rewrite 基础设施和公开 pattern getter 驱动。
     - 不提供 pass 专属 option；registry 只支持通用 `fold` option。
 
     使用示例:
@@ -1022,4 +1067,9 @@ class HoistDmaAliasOpsPass(Pass):
         _rewrite_module_to_fixed_point(ctx, module, fold=self.fold)
 
 
-__all__ = ["HoistDmaAliasOpsPass"]
+__all__ = [
+    "DmaViewDesliceGroupingPattern",
+    "DmaReshapeThroughFillPattern",
+    "get_hoist_dma_alias_ops_pass_patterns",
+    "HoistDmaAliasOpsPass",
+]

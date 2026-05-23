@@ -7,8 +7,15 @@
 - 仅允许可证明相等的静态维度、命名符号、结构化符号表达式或双侧匿名 `?` 在 matmul contracting 轴上互相匹配。
 - img2col 结果使用 `SymbolExprAttr` 表达动态 shape，不生成类型级 runtime 维度占位。
 - surviving 模块级接口为 `matmul_img2col_patterns()`。
+- 每个公开 pattern 将对应 `nn.*` before IR 改写为 `dma.alloc + kernel.*` after IR。
 
 API 列表:
+- `class LowerNnMatmulPattern()`
+- `LowerNnMatmulPattern.match_and_rewrite(op: NnMatmulOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnImg2col1dPattern()`
+- `LowerNnImg2col1dPattern.match_and_rewrite(op: NnImg2col1dOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnImg2col2dPattern()`
+- `LowerNnImg2col2dPattern.match_and_rewrite(op: NnImg2col2dOp, rewriter: PatternRewriter) -> None`
 - `matmul_img2col_patterns() -> list[RewritePattern]`
 
 使用示例:
@@ -837,16 +844,25 @@ def _lower_img2col2d(block: Block, op: Operation) -> None:
     for cleanup_op in cleanup_ops:
         if all(result.uses.get_length() == 0 for result in cleanup_op.results):
             block.erase_op(cleanup_op)
-class _LowerNnMatmulPattern(RewritePattern):
+class LowerNnMatmulPattern(RewritePattern):
     """将单个 nn.matmul lowering 为 kernel.matmul。
 
 
     功能说明:
     - 只匹配 NnMatmulOp，避免 family 级 op.name 分派。
     - 复用现有 matmul helper，保持 IR 输出与校验语义不变。
+    - IR before:
+      ```mlir
+      %out = "nn.matmul"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.matmul"(%alloc, %lhs, %rhs) : (value, value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnMatmulPattern()
+    - pattern = LowerNnMatmulPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
@@ -863,16 +879,25 @@ class _LowerNnMatmulPattern(RewritePattern):
         rewriter.has_done_action = True
 
 
-class _LowerNnImg2col1dPattern(RewritePattern):
+class LowerNnImg2col1dPattern(RewritePattern):
     """将单个 nn.img2col1d lowering 为 kernel.img2col1d。
 
 
     功能说明:
     - 只匹配 NnImg2col1dOp，避免 family 级 op.name 分派。
     - 复用现有 img2col1d helper，保持 IR 输出与校验语义不变。
+    - IR before:
+      ```mlir
+      %out = "nn.img2col1d"(%src, %kw, %sw, %dw, %pl, %pr) {space = #nn.space<global>} : (...) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"(%out_w) : (!symbol.int<"OW">) -> !nn.memory<value>
+      "kernel.img2col1d"(%alloc, %src, %kw, %sw, %dw, %pl, %pr) : (...) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnImg2col1dPattern()
+    - pattern = LowerNnImg2col1dPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
@@ -889,16 +914,25 @@ class _LowerNnImg2col1dPattern(RewritePattern):
         rewriter.has_done_action = True
 
 
-class _LowerNnImg2col2dPattern(RewritePattern):
+class LowerNnImg2col2dPattern(RewritePattern):
     """将单个 nn.img2col2d lowering 为 kernel.img2col2d。
 
 
     功能说明:
     - 只匹配 NnImg2col2dOp，避免 family 级 op.name 分派。
     - 复用现有 img2col2d helper，保持 IR 输出与校验语义不变。
+    - IR before:
+      ```mlir
+      %out = "nn.img2col2d"(%src, %kw, %kh, %sw, %sh, %dw, %dh, %pl, %pr, %ph, %pw) {space = #nn.space<global>} : (...) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"(%out_h, %out_w) : (!symbol.int<"OH">, !symbol.int<"OW">) -> !nn.memory<value>
+      "kernel.img2col2d"(%alloc, %src, %kw, %kh, %sw, %sh, %dw, %dh, %pl, %pr, %ph, %pw) : (...) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnImg2col2dPattern()
+    - pattern = LowerNnImg2col2dPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
@@ -932,7 +966,12 @@ def matmul_img2col_patterns() -> list[RewritePattern]:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
-    return [_LowerNnMatmulPattern(), _LowerNnImg2col1dPattern(), _LowerNnImg2col2dPattern()]
+    return [LowerNnMatmulPattern(), LowerNnImg2col1dPattern(), LowerNnImg2col2dPattern()]
 
 
-__all__ = ["matmul_img2col_patterns"]
+__all__ = [
+    "LowerNnMatmulPattern",
+    "LowerNnImg2col1dPattern",
+    "LowerNnImg2col2dPattern",
+    "matmul_img2col_patterns",
+]

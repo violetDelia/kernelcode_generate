@@ -30,6 +30,7 @@ from xdsl.dialects.test import Test
 from xdsl.parser import Parser
 from xdsl.printer import Printer
 from xdsl.passes import ModulePass
+from xdsl.pattern_rewriter import RewritePattern
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -113,7 +114,7 @@ def test_outline_device_kernel_pass_registry_name() -> None:
 
 
 # TC-ODK-001A
-# 功能说明: 锁定当前文件只公开 `OutlineDeviceKernelPass`，不再暴露内部 pattern helper。
+# 功能说明: 锁定当前文件公开 pass、pattern 与 getter，并拒绝旧私有 pattern 名。
 # 使用示例: pytest -q test/passes/test_outline_device_kernel.py -k test_outline_device_kernel_public_entry_hides_internal_pattern_helpers
 # 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
 # 对应 spec 文件路径: spec/pass/outline_device_kernel.md
@@ -122,10 +123,15 @@ def test_outline_device_kernel_public_entry_hides_internal_pattern_helpers() -> 
     direct_module = importlib.import_module("kernel_gen.passes.outline_device_kernel")
 
     assert direct_module.OutlineDeviceKernelPass is OutlineDeviceKernelPass
+    assert issubclass(direct_module.OutlineDeviceKernelFuncPattern, RewritePattern)
+    assert "OutlineDeviceKernelFuncPattern" in direct_module.__all__
+    assert "get_outline_device_kernel_pass_patterns" in direct_module.__all__
+    patterns = direct_module.get_outline_device_kernel_pass_patterns({})
+    assert [type(pattern).__name__ for pattern in patterns] == ["OutlineDeviceKernelFuncPattern"]
     with pytest.raises(AttributeError):
-        getattr(direct_module, "OutlineDeviceKernelFuncPattern")
+        getattr(direct_module, "_OutlineDeviceKernelFuncPattern")
     with pytest.raises(AttributeError):
-        getattr(direct_module, "get_outline_device_kernel_pass_patterns")
+        getattr(direct_module, "_get_outline_device_kernel_pass_patterns")
 
 
 # TC-ODK-002
@@ -141,10 +147,15 @@ def test_outline_device_kernel_lowering_compat_import_matches_rehome_entry() -> 
 
     assert compat_module is direct_module
     assert compat_module.OutlineDeviceKernelPass is OutlineDeviceKernelPass
+    assert compat_module.OutlineDeviceKernelFuncPattern is direct_module.OutlineDeviceKernelFuncPattern
+    assert (
+        compat_module.get_outline_device_kernel_pass_patterns
+        is direct_module.get_outline_device_kernel_pass_patterns
+    )
     with pytest.raises(AttributeError):
-        getattr(compat_module, "OutlineDeviceKernelFuncPattern")
+        getattr(compat_module, "_OutlineDeviceKernelFuncPattern")
     with pytest.raises(AttributeError):
-        getattr(compat_module, "get_outline_device_kernel_pass_patterns")
+        getattr(compat_module, "_get_outline_device_kernel_pass_patterns")
     assert package_module.OutlineDeviceKernelPass is OutlineDeviceKernelPass
 
 

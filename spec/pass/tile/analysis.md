@@ -272,6 +272,53 @@ assert type(patterns[0]) is TileAnalysisBinaryPattern
   - 顶层未切分 matmul 的 `tile.tile_exprs` 保持空字符串矩阵
   - 已位于 `symbol.for` 内、且当前 shape 已是 tile 形状的 matmul，`tile.tile_exprs` 必须写成 `lhs=[M_tile, ""] / rhs=["", N_tile] / out=[M_tile, N_tile]`
 
+## Pattern MLIR before / after 合同
+
+### `TileAnalysisBinaryPattern`
+
+- pattern 作用：为当前 `kernel.binary_elewise` 补 `tile.analysis` 与 `tile.tile_exprs` attr；已存在等价 attr 时保持 no-op，不生成 loop/view。
+- before:
+
+```mlir
+"kernel.binary_elewise"(%out, %lhs, %rhs) {kind = "add"} : (value, value, value) -> ()
+```
+
+- after:
+
+```mlir
+"kernel.binary_elewise"(%out, %lhs, %rhs) {kind = "add", tile.analysis = [["elewise"], ["elewise"], ["elewise"]], tile.tile_exprs = [[""], [""], [""]]} : (value, value, value) -> ()
+```
+
+### `TileAnalysisBroadcastPattern`
+
+- pattern 作用：为当前 `dma.broadcast` 补 broadcast 角色的 `tile.analysis` 与 `tile.tile_exprs` attr；expand 维 tile expr 保持空。
+- before:
+
+```mlir
+"dma.broadcast"(%out, %src) {expand = [0 : i64]} : (value, value) -> ()
+```
+
+- after:
+
+```mlir
+"dma.broadcast"(%out, %src) {expand = [0 : i64], tile.analysis = [["expand", "elewise"], ["expand", "elewise"]], tile.tile_exprs = [["", ""], ["", ""]]} : (value, value) -> ()
+```
+
+### `TileAnalysisMatmulPattern`
+
+- pattern 作用：为当前 `kernel.matmul` 补 lhs/rhs/out 的 reduce/elewise 角色 attr；不生成切分结构。
+- before:
+
+```mlir
+"kernel.matmul"(%out, %lhs, %rhs) : (value, value, value) -> ()
+```
+
+- after:
+
+```mlir
+"kernel.matmul"(%out, %lhs, %rhs) {tile.analysis = [["elewise", "reduce"], ["reduce", "elewise"], ["elewise", "elewise"]], tile.tile_exprs = [["", ""], ["", ""], ["", ""]]} : (value, value, value) -> ()
+```
+
 ### helper 说明
 
 - 当前文件内除上述 5 个公开对象外，不再承诺任何其他稳定 helper。

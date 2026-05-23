@@ -9,8 +9,31 @@
 - 来源 memory 为全 rank dynamic_shape alloc 时，允许匿名 `?` 结果维复用来源动态维度 operand。
 - 主 lowering driver 按单个 nn op 注册独立 RewritePattern，不再通过 family pattern 做名称分发。
 - surviving 模块级接口为 `element_binary_patterns()`。
+- 每个公开 pattern 将对应 `nn.*` before IR 改写为 `dma.alloc + kernel.binary_elewise(kind=...)` after IR。
 
 API 列表:
+- `class LowerNnAddPattern()`
+- `LowerNnAddPattern.match_and_rewrite(op: NnAddOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnSubPattern()`
+- `LowerNnSubPattern.match_and_rewrite(op: NnSubOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnMulPattern()`
+- `LowerNnMulPattern.match_and_rewrite(op: NnMulOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnDivPattern()`
+- `LowerNnDivPattern.match_and_rewrite(op: NnDivOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnTrueDivPattern()`
+- `LowerNnTrueDivPattern.match_and_rewrite(op: NnTrueDivOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnEqPattern()`
+- `LowerNnEqPattern.match_and_rewrite(op: NnEqOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnNePattern()`
+- `LowerNnNePattern.match_and_rewrite(op: NnNeOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnLtPattern()`
+- `LowerNnLtPattern.match_and_rewrite(op: NnLtOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnLePattern()`
+- `LowerNnLePattern.match_and_rewrite(op: NnLeOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnGtPattern()`
+- `LowerNnGtPattern.match_and_rewrite(op: NnGtOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnGePattern()`
+- `LowerNnGePattern.match_and_rewrite(op: NnGeOp, rewriter: PatternRewriter) -> None`
 - `element_binary_patterns() -> list[RewritePattern]`
 
 使用示例:
@@ -475,16 +498,25 @@ def _lower_typed_element_binary_pattern(
     rewriter.has_done_action = True
 
 
-class _LowerNnAddPattern(RewritePattern):
+class LowerNnAddPattern(RewritePattern):
     """将单个 nn.add lowering 为 kernel.binary_elewise(kind="add")。
 
 
     功能说明:
     - 直接匹配 NnAddOp，并调用共享 helper 生成 kind="add" 的 kernel.binary_elewise。
     - 仅覆盖 nn.add，不承担其他 elementwise/compare op 分支选择。
+    - IR before:
+      ```mlir
+      %out = "nn.add"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.binary_elewise"(%alloc, %lhs, %rhs) {kind="add"} : (value, value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnAddPattern()
+    - pattern = LowerNnAddPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
@@ -499,16 +531,25 @@ class _LowerNnAddPattern(RewritePattern):
         )
 
 
-class _LowerNnSubPattern(RewritePattern):
+class LowerNnSubPattern(RewritePattern):
     """将单个 nn.sub lowering 为 kernel.binary_elewise(kind="sub")。
 
 
     功能说明:
     - 直接匹配 NnSubOp，并调用共享 helper 生成 kind="sub" 的 kernel.binary_elewise。
     - 仅覆盖 nn.sub，不承担其他 elementwise/compare op 分支选择。
+    - IR before:
+      ```mlir
+      %out = "nn.sub"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.binary_elewise"(%alloc, %lhs, %rhs) {kind="sub"} : (value, value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnSubPattern()
+    - pattern = LowerNnSubPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
@@ -523,16 +564,25 @@ class _LowerNnSubPattern(RewritePattern):
         )
 
 
-class _LowerNnMulPattern(RewritePattern):
+class LowerNnMulPattern(RewritePattern):
     """将单个 nn.mul lowering 为 kernel.binary_elewise(kind="mul")。
 
 
     功能说明:
     - 直接匹配 NnMulOp，并调用共享 helper 生成 kind="mul" 的 kernel.binary_elewise。
     - 仅覆盖 nn.mul，不承担其他 elementwise/compare op 分支选择。
+    - IR before:
+      ```mlir
+      %out = "nn.mul"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.binary_elewise"(%alloc, %lhs, %rhs) {kind="mul"} : (value, value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnMulPattern()
+    - pattern = LowerNnMulPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
@@ -547,16 +597,25 @@ class _LowerNnMulPattern(RewritePattern):
         )
 
 
-class _LowerNnDivPattern(RewritePattern):
+class LowerNnDivPattern(RewritePattern):
     """将单个 nn.div lowering 为 kernel.binary_elewise(kind="div")。
 
 
     功能说明:
     - 直接匹配 NnDivOp，并调用共享 helper 生成 kind="div" 的 kernel.binary_elewise。
     - 仅覆盖 nn.div，不承担其他 elementwise/compare op 分支选择。
+    - IR before:
+      ```mlir
+      %out = "nn.div"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.binary_elewise"(%alloc, %lhs, %rhs) {kind="div"} : (value, value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnDivPattern()
+    - pattern = LowerNnDivPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
@@ -571,16 +630,25 @@ class _LowerNnDivPattern(RewritePattern):
         )
 
 
-class _LowerNnTrueDivPattern(RewritePattern):
+class LowerNnTrueDivPattern(RewritePattern):
     """将单个 nn.truediv lowering 为 kernel.binary_elewise(kind="div")。
 
 
     功能说明:
     - 直接匹配 NnTrueDivOp，并调用共享 helper 生成 kind="div" 的 kernel.binary_elewise。
     - 仅覆盖 nn.truediv，不承担其他 elementwise/compare op 分支选择。
+    - IR before:
+      ```mlir
+      %out = "nn.truediv"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.binary_elewise"(%alloc, %lhs, %rhs) {kind="div"} : (value, value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnTrueDivPattern()
+    - pattern = LowerNnTrueDivPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
@@ -595,16 +663,25 @@ class _LowerNnTrueDivPattern(RewritePattern):
         )
 
 
-class _LowerNnEqPattern(RewritePattern):
+class LowerNnEqPattern(RewritePattern):
     """将单个 nn.eq lowering 为 kernel.binary_elewise(kind="eq")。
 
 
     功能说明:
     - 直接匹配 NnEqOp，并调用共享 helper 生成 kind="eq" 的 kernel.binary_elewise。
     - 标记 compare 路径，保留 mixed compare 的 dma.broadcast 物化规则。
+    - IR before:
+      ```mlir
+      %out = "nn.eq"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.binary_elewise"(%alloc, %lhs, %rhs) {kind="eq"} : (value, value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnEqPattern()
+    - pattern = LowerNnEqPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
@@ -619,16 +696,25 @@ class _LowerNnEqPattern(RewritePattern):
         )
 
 
-class _LowerNnNePattern(RewritePattern):
+class LowerNnNePattern(RewritePattern):
     """将单个 nn.ne lowering 为 kernel.binary_elewise(kind="ne")。
 
 
     功能说明:
     - 直接匹配 NnNeOp，并调用共享 helper 生成 kind="ne" 的 kernel.binary_elewise。
     - 标记 compare 路径，保留 mixed compare 的 dma.broadcast 物化规则。
+    - IR before:
+      ```mlir
+      %out = "nn.ne"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.binary_elewise"(%alloc, %lhs, %rhs) {kind="ne"} : (value, value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnNePattern()
+    - pattern = LowerNnNePattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
@@ -643,16 +729,25 @@ class _LowerNnNePattern(RewritePattern):
         )
 
 
-class _LowerNnLtPattern(RewritePattern):
+class LowerNnLtPattern(RewritePattern):
     """将单个 nn.lt lowering 为 kernel.binary_elewise(kind="lt")。
 
 
     功能说明:
     - 直接匹配 NnLtOp，并调用共享 helper 生成 kind="lt" 的 kernel.binary_elewise。
     - 标记 compare 路径，保留 mixed compare 的 dma.broadcast 物化规则。
+    - IR before:
+      ```mlir
+      %out = "nn.lt"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.binary_elewise"(%alloc, %lhs, %rhs) {kind="lt"} : (value, value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnLtPattern()
+    - pattern = LowerNnLtPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
@@ -667,16 +762,25 @@ class _LowerNnLtPattern(RewritePattern):
         )
 
 
-class _LowerNnLePattern(RewritePattern):
+class LowerNnLePattern(RewritePattern):
     """将单个 nn.le lowering 为 kernel.binary_elewise(kind="le")。
 
 
     功能说明:
     - 直接匹配 NnLeOp，并调用共享 helper 生成 kind="le" 的 kernel.binary_elewise。
     - 标记 compare 路径，保留 mixed compare 的 dma.broadcast 物化规则。
+    - IR before:
+      ```mlir
+      %out = "nn.le"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.binary_elewise"(%alloc, %lhs, %rhs) {kind="le"} : (value, value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnLePattern()
+    - pattern = LowerNnLePattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
@@ -691,16 +795,25 @@ class _LowerNnLePattern(RewritePattern):
         )
 
 
-class _LowerNnGtPattern(RewritePattern):
+class LowerNnGtPattern(RewritePattern):
     """将单个 nn.gt lowering 为 kernel.binary_elewise(kind="gt")。
 
 
     功能说明:
     - 直接匹配 NnGtOp，并调用共享 helper 生成 kind="gt" 的 kernel.binary_elewise。
     - 标记 compare 路径，保留 mixed compare 的 dma.broadcast 物化规则。
+    - IR before:
+      ```mlir
+      %out = "nn.gt"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.binary_elewise"(%alloc, %lhs, %rhs) {kind="gt"} : (value, value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnGtPattern()
+    - pattern = LowerNnGtPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
@@ -715,16 +828,25 @@ class _LowerNnGtPattern(RewritePattern):
         )
 
 
-class _LowerNnGePattern(RewritePattern):
+class LowerNnGePattern(RewritePattern):
     """将单个 nn.ge lowering 为 kernel.binary_elewise(kind="ge")。
 
 
     功能说明:
     - 直接匹配 NnGeOp，并调用共享 helper 生成 kind="ge" 的 kernel.binary_elewise。
     - 标记 compare 路径，保留 mixed compare 的 dma.broadcast 物化规则。
+    - IR before:
+      ```mlir
+      %out = "nn.ge"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<value>
+      ```
+    - IR after:
+      ```mlir
+      %alloc = "dma.alloc"() : () -> !nn.memory<value>
+      "kernel.binary_elewise"(%alloc, %lhs, %rhs) {kind="ge"} : (value, value, value) -> ()
+      ```
 
     使用示例:
-    - pattern = _LowerNnGePattern()
+    - pattern = LowerNnGePattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/spec.md
@@ -757,18 +879,31 @@ def element_binary_patterns() -> list[RewritePattern]:
     """
 
     return [
-        _LowerNnAddPattern(),
-        _LowerNnSubPattern(),
-        _LowerNnMulPattern(),
-        _LowerNnDivPattern(),
-        _LowerNnTrueDivPattern(),
-        _LowerNnEqPattern(),
-        _LowerNnNePattern(),
-        _LowerNnLtPattern(),
-        _LowerNnLePattern(),
-        _LowerNnGtPattern(),
-        _LowerNnGePattern(),
+        LowerNnAddPattern(),
+        LowerNnSubPattern(),
+        LowerNnMulPattern(),
+        LowerNnDivPattern(),
+        LowerNnTrueDivPattern(),
+        LowerNnEqPattern(),
+        LowerNnNePattern(),
+        LowerNnLtPattern(),
+        LowerNnLePattern(),
+        LowerNnGtPattern(),
+        LowerNnGePattern(),
     ]
 
 
-__all__ = ["element_binary_patterns"]
+__all__ = [
+    "LowerNnAddPattern",
+    "LowerNnSubPattern",
+    "LowerNnMulPattern",
+    "LowerNnDivPattern",
+    "LowerNnTrueDivPattern",
+    "LowerNnEqPattern",
+    "LowerNnNePattern",
+    "LowerNnLtPattern",
+    "LowerNnLePattern",
+    "LowerNnGtPattern",
+    "LowerNnGePattern",
+    "element_binary_patterns",
+]

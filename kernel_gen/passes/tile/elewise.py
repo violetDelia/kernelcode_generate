@@ -8,8 +8,11 @@
 
 API 列表:
 - `class TileElewiseBinaryPattern(RewritePattern)`
+- `TileElewiseBinaryPattern.match_and_rewrite(op: KernelBinaryElewiseOp, rewriter: PatternRewriter) -> None`
 - `class TileElewiseBroadcastPattern(RewritePattern)`
+- `TileElewiseBroadcastPattern.match_and_rewrite(op: DmaBroadcastOp, rewriter: PatternRewriter) -> None`
 - `class TileElewiseMatmulPattern(RewritePattern)`
+- `TileElewiseMatmulPattern.match_and_rewrite(op: KernelMatmulOp, rewriter: PatternRewriter) -> None`
 - `get_tile_elewise_pass_patterns() -> list[RewritePattern]`
 - `class TileElewisePass(ModulePass)`
 - `TileElewisePass.__init__(fold: bool = True) -> None`
@@ -119,6 +122,20 @@ class TileElewiseBinaryPattern(RewritePattern):
     功能说明:
     - 命中受支持的 `kernel.binary_elewise` 后，就地把当前 op 改写为显式 `symbol.for + dma.view` 结构。
     - 只改写当前顶层 tile op；已经落在 `symbol.for` 内的 rewritten op 不再重复处理。
+    - IR before:
+      ```mlir
+      "kernel.binary_elewise"(%out, %lhs, %rhs) {kind = "add", tile.analysis = [["elewise"]], tile.tile_exprs = [["T"]]} : (value, value, value) -> ()
+      ```
+    - IR after:
+      ```mlir
+      symbol.for %i = %c0 to %n step %T {
+        %out_tile = "dma.view"(%out, %i) : (value, !symbol.int<"T">) -> value
+        %lhs_tile = "dma.view"(%lhs, %i) : (value, !symbol.int<"T">) -> value
+        %rhs_tile = "dma.view"(%rhs, %i) : (value, !symbol.int<"T">) -> value
+        "kernel.binary_elewise"(%out_tile, %lhs_tile, %rhs_tile) {kind = "add"} : (value, value, value) -> ()
+      }
+      ```
+    - no-op unchanged after：缺少 `tile.analysis` 或已位于 `symbol.for` 内时 before IR 保持不变。
 
     使用示例:
     - TileElewiseBinaryPattern().match_and_rewrite(op, rewriter)
@@ -314,7 +331,24 @@ class TileElewiseBinaryPattern(RewritePattern):
 
 
 class TileElewiseBroadcastPattern(RewritePattern):
-    """匹配 `dma.broadcast` 的公开 elewise tile pattern。"""
+    """匹配 `dma.broadcast` 的公开 elewise tile pattern。
+
+    功能说明:
+    - 命中带 `tile.analysis` 的 `dma.broadcast` 后生成 `symbol.for + dma.view` 结构。
+    - IR before:
+      ```mlir
+      "dma.broadcast"(%out, %src) {tile.analysis = [["expand", "elewise"], ["expand", "elewise"]], tile.tile_exprs = [["", "T"], ["", "T"]]} : (value, value) -> ()
+      ```
+    - IR after:
+      ```mlir
+      symbol.for %i = %c0 to %n step %T {
+        %out_tile = "dma.view"(%out, %i) : (value, !symbol.int<"T">) -> value
+        %src_tile = "dma.view"(%src, %i) : (value, !symbol.int<"T">) -> value
+        "dma.broadcast"(%out_tile, %src_tile) : (value, value) -> ()
+      }
+      ```
+    - no-op unchanged after：缺少 `tile.analysis` 或 rank 为 0 时 before IR 保持不变。
+    """
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: DmaBroadcastOp, rewriter: PatternRewriter, /) -> None:
@@ -556,7 +590,27 @@ def _matches_tile_matmul_roles(
 
 
 class TileElewiseMatmulPattern(RewritePattern):
-    """匹配 `kernel.matmul` 的公开 elewise tile pattern。"""
+    """匹配 `kernel.matmul` 的公开 elewise tile pattern。
+
+    功能说明:
+    - 命中带输出轴 tile metadata 的 `kernel.matmul` 后生成 M/N 轴 `symbol.for + dma.view` 结构。
+    - IR before:
+      ```mlir
+      "kernel.matmul"(%out, %lhs, %rhs) {tile.analysis = [["elewise", "reduce"], ["reduce", "elewise"], ["elewise", "elewise"]], tile.tile_exprs = [["TM", ""], ["", "TN"], ["TM", "TN"]]} : (value, value, value) -> ()
+      ```
+    - IR after:
+      ```mlir
+      symbol.for %m = %c0 to %M step %TM {
+        symbol.for %n = %c0 to %N step %TN {
+          %out_tile = "dma.view"(%out, %m, %n) : (value, !symbol.int<"TM">, !symbol.int<"TN">) -> value
+          %lhs_tile = "dma.view"(%lhs, %m) : (value, !symbol.int<"TM">) -> value
+          %rhs_tile = "dma.view"(%rhs, %n) : (value, !symbol.int<"TN">) -> value
+          "kernel.matmul"(%out_tile, %lhs_tile, %rhs_tile) : (value, value, value) -> ()
+        }
+      }
+      ```
+    - no-op unchanged after：缺少 `tile.analysis` 或 shape 不满足 matmul role 时 before IR 保持不变。
+    """
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: KernelMatmulOp, rewriter: PatternRewriter, /) -> None:

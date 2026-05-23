@@ -4,10 +4,16 @@
 
 - 统一处理 `nn.matmul`、`nn.img2col1d`、`nn.img2col2d` 的 lowering 逻辑。
 - 输出固定为 `kernel.matmul`、`kernel.img2col1d`、`kernel.img2col2d`，并通过 `dma.alloc` 创建结果 memory。
-- 模块级公开入口只保留 `matmul_img2col_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
+- 模块级公开入口公开 pattern class 与既有 `matmul_img2col_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
 
 ## API 列表
 
+- `class LowerNnMatmulPattern()`
+- `LowerNnMatmulPattern.match_and_rewrite(op: NnMatmulOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnImg2col1dPattern()`
+- `LowerNnImg2col1dPattern.match_and_rewrite(op: NnImg2col1dOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnImg2col2dPattern()`
+- `LowerNnImg2col2dPattern.match_and_rewrite(op: NnImg2col2dOp, rewriter: PatternRewriter) -> None`
 - `matmul_img2col_patterns() -> list[RewritePattern]`
 
 ## 文档信息
@@ -49,7 +55,7 @@
 - `nn.matmul` 的 contracting 维度在静态维度、命名符号和结构化符号表达式场景下都必须精确相等；双侧均为匿名 `?` 时按 unknown contracting 维度承接，单侧匿名 `?` 必须拒绝。
 - `nn.img2col1d/2d` 的结果类型若包含匿名 `?` shape，结果 `dma.alloc` 使用 full-rank dynamic shape operands；普通命名符号结果继续使用符号子集形态。
 - `nn.img2col1d/2d` 的动态参数必须是 `!symbol.int<"...">`，不接受 `i32/index` 或整数 attribute 直接作为 operand。
-- 模块级 surviving 接口只允许 `matmul_img2col_patterns()`；`lower_matmul_img2col_family` 不属于公开入口。
+- 模块级 surviving 接口只允许本文件 `API 列表` 中的公开 pattern class 与 `matmul_img2col_patterns()`；`lower_matmul_img2col_family` 不属于公开入口。
 - 每个 op 都必须由独立的 `@op_type_rewrite_pattern` 处理，不再通过 family dispatcher 做名称分发。
 ## API详细说明
 
@@ -69,6 +75,56 @@
   ```
 - 功能说明：返回 `nn.matmul`、`nn.img2col1d`、`nn.img2col2d` 的有序 pattern 列表，供 `nn_lowering_patterns()` 直接拼接到主 driver 中。
 - 注意事项：返回顺序固定为 `matmul -> img2col1d -> img2col2d`；输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；`build_*` 或 `_lower_*` 共享 helper 只属于内部实现，不属于公开合同；返回列表中不得保留 `lower_matmul_img2col_family` 兼容入口；返回值可直接传入 `GreedyRewritePatternApplier`。
+
+## Pattern MLIR before / after 合同
+
+### `LowerNnMatmulPattern`
+
+- pattern 作用：把单个 `nn.matmul` lowering 为 `dma.alloc + kernel.matmul`，动态输出维度通过公开 symbol 规则接入 alloc。
+- before:
+
+```mlir
+%out = "nn.matmul"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>
+```
+
+- after:
+
+```mlir
+%alloc = "dma.alloc"() {space = #nn.space<global>} : () -> !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>
+"kernel.matmul"(%alloc, %lhs, %rhs) {space = #kernel.space<global>} : (value, value, value) -> ()
+```
+
+### `LowerNnImg2col1dPattern`
+
+- pattern 作用：把单个 `nn.img2col1d` lowering 为 `dma.alloc + kernel.img2col1d`，卷积参数必须来自 `symbol.int`。
+- before:
+
+```mlir
+%out = "nn.img2col1d"(%src, %kw, %sw, %dw, %pl, %pr) {space = #nn.space<global>} : (value, !symbol.int<"KW">, !symbol.int<"SW">, !symbol.int<"DW">, !symbol.int<"PL">, !symbol.int<"PR">) -> !nn.memory<value>
+```
+
+- after:
+
+```mlir
+%alloc = "dma.alloc"(%out_w) {space = #nn.space<global>} : (!symbol.int<"OW">) -> !nn.memory<value>
+"kernel.img2col1d"(%alloc, %src, %kw, %sw, %dw, %pl, %pr) {space = #kernel.space<global>} : (value, value, !symbol.int<"KW">, !symbol.int<"SW">, !symbol.int<"DW">, !symbol.int<"PL">, !symbol.int<"PR">) -> ()
+```
+
+### `LowerNnImg2col2dPattern`
+
+- pattern 作用：把单个 `nn.img2col2d` lowering 为 `dma.alloc + kernel.img2col2d`，动态输出 extent 使用结构化 symbol 表达式。
+- before:
+
+```mlir
+%out = "nn.img2col2d"(%src, %kw, %kh, %sw, %sh, %dw, %dh, %pl, %pr, %ph, %pw) {space = #nn.space<global>} : (value, !symbol.int<"KW">, !symbol.int<"KH">, !symbol.int<"SW">, !symbol.int<"SH">, !symbol.int<"DW">, !symbol.int<"DH">, !symbol.int<"PL">, !symbol.int<"PR">, !symbol.int<"PH">, !symbol.int<"PW">) -> !nn.memory<value>
+```
+
+- after:
+
+```mlir
+%alloc = "dma.alloc"(%out_h, %out_w) {space = #nn.space<global>} : (!symbol.int<"OH">, !symbol.int<"OW">) -> !nn.memory<value>
+"kernel.img2col2d"(%alloc, %src, %kw, %kh, %sw, %sh, %dw, %dh, %pl, %pr, %ph, %pw) {space = #kernel.space<global>} : (value, value, !symbol.int<"KW">, !symbol.int<"KH">, !symbol.int<"SW">, !symbol.int<"SH">, !symbol.int<"DW">, !symbol.int<"DH">, !symbol.int<"PL">, !symbol.int<"PR">, !symbol.int<"PH">, !symbol.int<"PW">) -> ()
+```
 
 ## 测试
 

@@ -4,10 +4,16 @@
 
 - 规范 `nn.select`、`nn.cast` 与 `nn.exp` 的 lowering 行为与边界。
 - 结果 memory 由 `dma.alloc` 创建，并写入 `kernel.select`、`dma.cast` 或 `kernel.exp`。
-- 模块级公开入口只保留 `select_cast_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
+- 模块级公开入口公开 pattern class 与既有 `select_cast_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
 
 ## API 列表
 
+- `class LowerSelectPattern()`
+- `LowerSelectPattern.match_and_rewrite(op: NnSelectOp, rewriter: PatternRewriter) -> None`
+- `class LowerCastPattern()`
+- `LowerCastPattern.match_and_rewrite(op: NnCastOp, rewriter: PatternRewriter) -> None`
+- `class LowerExpPattern()`
+- `LowerExpPattern.match_and_rewrite(op: NnExpOp, rewriter: PatternRewriter) -> None`
 - `select_cast_patterns() -> list[RewritePattern]`
 
 ## 文档信息
@@ -86,6 +92,56 @@
   ```
 - 功能说明：返回 `nn.select`、`nn.cast`、`nn.exp` 的有序 pattern 列表，供 `nn_lowering_patterns()` 直接拼接到主 driver 中。
 - 注意事项：返回顺序固定为 `select -> cast -> exp`；`_lower_select_op(...)`、`_lower_cast_op(...)`、`_lower_exp_op(...)` 只属于内部共享 helper，不属于公开合同；返回列表中不得保留 `lower_select_cast_family` 兼容入口；返回值可直接传入 `GreedyRewritePatternApplier`。
+
+## Pattern MLIR before / after 合同
+
+### `LowerSelectPattern`
+
+- pattern 作用：把单个 `nn.select` lowering 为 `dma.alloc + kernel.select`；非法 shape/space/type 按公开错误语义失败。
+- before:
+
+```mlir
+%out = "nn.select"(%cond, %lhs, %rhs) {space = #nn.space<global>} : (value, value, value) -> !nn.memory<[N], [1], f32, #nn.space<global>>
+```
+
+- after:
+
+```mlir
+%alloc = "dma.alloc"() {space = #nn.space<global>} : () -> !nn.memory<[N], [1], f32, #nn.space<global>>
+"kernel.select"(%alloc, %cond, %lhs, %rhs) {space = #kernel.space<global>} : (value, value, value, value) -> ()
+```
+
+### `LowerCastPattern`
+
+- pattern 作用：把单个 `nn.cast` lowering 为 `dma.cast`，并保持 optional operand 的 symbol/int 合同。
+- before:
+
+```mlir
+%out = "nn.cast"(%src) {space = #nn.space<global>} : (value) -> !nn.memory<[N], [1], f32, #nn.space<global>>
+```
+
+- after:
+
+```mlir
+%alloc = "dma.alloc"() {space = #nn.space<global>} : () -> !nn.memory<[N], [1], f32, #nn.space<global>>
+"dma.cast"(%alloc, %src) {space = #nn.space<global>} : (value, value) -> ()
+```
+
+### `LowerExpPattern`
+
+- pattern 作用：把单个 `nn.exp` lowering 为 `dma.alloc + kernel.exp`；输入输出 shape/stride 必须一致。
+- before:
+
+```mlir
+%out = "nn.exp"(%src) {space = #nn.space<global>} : (value) -> !nn.memory<[N], [1], f32, #nn.space<global>>
+```
+
+- after:
+
+```mlir
+%alloc = "dma.alloc"() {space = #nn.space<global>} : () -> !nn.memory<[N], [1], f32, #nn.space<global>>
+"kernel.exp"(%src, %alloc) {space = #kernel.space<global>} : (value, value) -> ()
+```
 
 ## 测试
 

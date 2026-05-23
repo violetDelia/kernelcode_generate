@@ -22,6 +22,12 @@
 API 列表:
 - `class DmaAllocInSymbolForHoistPattern()`
 - `DmaAllocInSymbolForHoistPattern.match_and_rewrite(op: DmaAllocOp, rewriter: PatternRewriter) -> None`
+- `class DmaViewInSymbolForHoistPattern()`
+- `DmaViewInSymbolForHoistPattern.match_and_rewrite(op: DmaViewOp, rewriter: PatternRewriter) -> None`
+- `class DmaReshapeInSymbolForHoistPattern()`
+- `DmaReshapeInSymbolForHoistPattern.match_and_rewrite(op: DmaReshapeOp, rewriter: PatternRewriter) -> None`
+- `class DmaSubviewInSymbolForHoistPattern()`
+- `DmaSubviewInSymbolForHoistPattern.match_and_rewrite(op: DmaSubviewOp, rewriter: PatternRewriter) -> None`
 - `get_symbol_buffer_hoist_patterns() -> list[RewritePattern]`
 - `class SymbolBufferHoistPass(fold: bool = True)`
 - `SymbolBufferHoistPass.name: str`
@@ -974,6 +980,23 @@ class DmaAllocInSymbolForHoistPattern(RewritePattern):
     - 只匹配当前 `symbol.for` body block 顶层的 `dma.alloc`。
     - 满足 shape invariant、direct use 白名单与唯一匹配 free 时，把 alloc 外提到所属 `symbol.for` 之前。
     - 若存在合法匹配 free，同步把 free 移到所属 `symbol.for` 之后，保持生命周期成对外提。
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %buf = "dma.alloc"() : () -> !nn.memory<value>
+        "dma.fill"(%buf, %zero) : (value, f32) -> ()
+        "dma.free"(%buf) : (value) -> ()
+      }
+      ```
+    - IR after:
+      ```mlir
+      %buf = "dma.alloc"() : () -> !nn.memory<value>
+      symbol.for %i = %c0 to %n step %c1 {
+        "dma.fill"(%buf, %zero) : (value, f32) -> ()
+      }
+      "dma.free"(%buf) : (value) -> ()
+      ```
+    - no-op unchanged after：shape 依赖 loop-carried 值、缺少唯一 `dma.free` 或首次 data use 不安全时，上述 before IR 保持不变。
 
     使用示例:
     - pattern = DmaAllocInSymbolForHoistPattern()
@@ -1118,16 +1141,32 @@ def _hoist_alias_op_if_safe(op: Operation, rewriter: PatternRewriter) -> None:
     rewriter.notify_op_modified(symbol_for)
 
 
-class _DmaViewInSymbolForHoistPattern(RewritePattern):
+class DmaViewInSymbolForHoistPattern(RewritePattern):
     """`symbol.for` 内 `dma.view` 单 op 外提 pattern。
 
 
     功能说明:
-    - 私有 pattern；不作为公开 API 导出。
     - 只在 source 与 offset/shape/stride 均对当前 loop invariant 时外提一层。
+    - IR 变换：`symbol.for { %v = dma.view(...); use(%v) }` 变为 `%v = dma.view(...); symbol.for { use(%v) }`。
+    - no-op：operand 不支配当前 loop 或 result use 不在白名单时保持原 IR。
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %v = "dma.view"(%src, %off, %size, %stride) : (...) -> !nn.memory<value>
+        "kernel.use"(%v) : (value) -> ()
+      }
+      ```
+    - IR after:
+      ```mlir
+      %v = "dma.view"(%src, %off, %size, %stride) : (...) -> !nn.memory<value>
+      symbol.for %i = %c0 to %n step %c1 {
+        "kernel.use"(%v) : (value) -> ()
+      }
+      ```
+    - no-op unchanged after：offset/shape/stride 依赖当前 loop 或 result use 逃逸时，上述 before IR 保持不变。
 
     使用示例:
-    - pattern = _DmaViewInSymbolForHoistPattern()
+    - pattern = DmaViewInSymbolForHoistPattern()
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
@@ -1145,7 +1184,7 @@ class _DmaViewInSymbolForHoistPattern(RewritePattern):
         - 任一 operand 不支配当前 loop 或 result use 不在白名单时保持 no-op。
 
         使用示例:
-        - _DmaViewInSymbolForHoistPattern().match_and_rewrite(op, rewriter)
+        - DmaViewInSymbolForHoistPattern().match_and_rewrite(op, rewriter)
 
         关联文件:
         - spec: spec/pass/symbol_buffer_hoist.md
@@ -1156,16 +1195,32 @@ class _DmaViewInSymbolForHoistPattern(RewritePattern):
         _hoist_alias_op_if_safe(op, rewriter)
 
 
-class _DmaReshapeInSymbolForHoistPattern(RewritePattern):
+class DmaReshapeInSymbolForHoistPattern(RewritePattern):
     """`symbol.for` 内 `dma.reshape` 单 op 外提 pattern。
 
 
     功能说明:
-    - 私有 pattern；不作为公开 API 导出。
     - 只在 source 与 shape 均对当前 loop invariant 时外提一层。
+    - IR 变换：`symbol.for { %r = dma.reshape(...); use(%r) }` 变为 `%r = dma.reshape(...); symbol.for { use(%r) }`。
+    - no-op：shape 来自当前 loop body、loop iterator 或 loop-carried 值时保持原 IR。
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %r = "dma.reshape"(%src, %m, %k) : (...) -> !nn.memory<value>
+        "kernel.use"(%r) : (value) -> ()
+      }
+      ```
+    - IR after:
+      ```mlir
+      %r = "dma.reshape"(%src, %m, %k) : (...) -> !nn.memory<value>
+      symbol.for %i = %c0 to %n step %c1 {
+        "kernel.use"(%r) : (value) -> ()
+      }
+      ```
+    - no-op unchanged after：shape 依赖当前 loop 时，上述 before IR 保持不变。
 
     使用示例:
-    - pattern = _DmaReshapeInSymbolForHoistPattern()
+    - pattern = DmaReshapeInSymbolForHoistPattern()
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
@@ -1183,7 +1238,7 @@ class _DmaReshapeInSymbolForHoistPattern(RewritePattern):
         - shape 来自当前 loop body、loop iterator 或 loop-carried 值时保持 no-op。
 
         使用示例:
-        - _DmaReshapeInSymbolForHoistPattern().match_and_rewrite(op, rewriter)
+        - DmaReshapeInSymbolForHoistPattern().match_and_rewrite(op, rewriter)
 
         关联文件:
         - spec: spec/pass/symbol_buffer_hoist.md
@@ -1194,16 +1249,32 @@ class _DmaReshapeInSymbolForHoistPattern(RewritePattern):
         _hoist_alias_op_if_safe(op, rewriter)
 
 
-class _DmaSubviewInSymbolForHoistPattern(RewritePattern):
+class DmaSubviewInSymbolForHoistPattern(RewritePattern):
     """`symbol.for` 内 `dma.subview` 单 op 外提 pattern。
 
 
     功能说明:
-    - 私有 pattern；不作为公开 API 导出。
     - 只在 source、offset、size、stride 均对当前 loop invariant 时外提一层。
+    - IR 变换：`symbol.for { %s = dma.subview(...); use(%s) }` 变为 `%s = dma.subview(...); symbol.for { use(%s) }`。
+    - no-op：offset/size/stride 来自当前 loop body 时保持原 IR。
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %s = "dma.subview"(%src, %off, %size, %stride) : (...) -> !nn.memory<value>
+        "kernel.use"(%s) : (value) -> ()
+      }
+      ```
+    - IR after:
+      ```mlir
+      %s = "dma.subview"(%src, %off, %size, %stride) : (...) -> !nn.memory<value>
+      symbol.for %i = %c0 to %n step %c1 {
+        "kernel.use"(%s) : (value) -> ()
+      }
+      ```
+    - no-op unchanged after：offset/size/stride 依赖当前 loop 时，上述 before IR 保持不变。
 
     使用示例:
-    - pattern = _DmaSubviewInSymbolForHoistPattern()
+    - pattern = DmaSubviewInSymbolForHoistPattern()
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
@@ -1221,7 +1292,7 @@ class _DmaSubviewInSymbolForHoistPattern(RewritePattern):
         - offset/size/stride 来自当前 loop body 时保持 no-op。
 
         使用示例:
-        - _DmaSubviewInSymbolForHoistPattern().match_and_rewrite(op, rewriter)
+        - DmaSubviewInSymbolForHoistPattern().match_and_rewrite(op, rewriter)
 
         关联文件:
         - spec: spec/pass/symbol_buffer_hoist.md
@@ -1237,7 +1308,7 @@ def get_symbol_buffer_hoist_patterns() -> list[RewritePattern]:
 
 
     功能说明:
-    - 公开返回 `dma.alloc/free` pattern 与私有 alias op pattern 实例。
+    - 公开返回 `dma.alloc/free` pattern 与 alias op pattern 实例。
     - 返回值顺序固定为 alloc/free、view、reshape、subview，便于 greedy walker 逐层收敛。
 
     使用示例:
@@ -1251,9 +1322,9 @@ def get_symbol_buffer_hoist_patterns() -> list[RewritePattern]:
 
     return [
         DmaAllocInSymbolForHoistPattern(),
-        _DmaViewInSymbolForHoistPattern(),
-        _DmaReshapeInSymbolForHoistPattern(),
-        _DmaSubviewInSymbolForHoistPattern(),
+        DmaViewInSymbolForHoistPattern(),
+        DmaReshapeInSymbolForHoistPattern(),
+        DmaSubviewInSymbolForHoistPattern(),
     ]
 
 
@@ -1363,6 +1434,9 @@ class SymbolBufferHoistPass(Pass):
 
 __all__ = [
     "DmaAllocInSymbolForHoistPattern",
+    "DmaViewInSymbolForHoistPattern",
+    "DmaReshapeInSymbolForHoistPattern",
+    "DmaSubviewInSymbolForHoistPattern",
     "get_symbol_buffer_hoist_patterns",
     "SymbolBufferHoistPass",
 ]

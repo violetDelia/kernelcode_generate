@@ -11,6 +11,8 @@
 - `class NnLoweringPass()`
 - `NnLoweringPass.apply(ctx: Context, module: ModuleOp) -> None`
 - `nn_lowering_patterns() -> list[RewritePattern]`
+- `class RejectUnsupportedNnOpPattern()`
+- `RejectUnsupportedNnOpPattern.match_and_rewrite(op: Operation, rewriter: PatternRewriter) -> None`
 
 ## 文档信息
 
@@ -96,7 +98,7 @@
   patterns = nn_lowering_patterns()
   ```
 - 功能说明：返回 `lower-nn` 主 driver 使用的有序 pattern 列表。
-- 注意事项：将 element binary、select/cast/exp、dma structured、matmul/img2col、reduce/softmax reject 组合为同一条 rewrite 主链；返回顺序必须稳定，且 `_RejectUnsupportedNnOpPattern` 必须位于最后；列表中不得再出现 family dispatcher 占位 pattern 名称，例如 `_LowerElementBinaryFamilyPattern`、`_LowerDmaStructuredFamilyPattern`、`_LowerMatmulImg2colFamilyPattern`、`_LowerReduceSoftmaxFamilyPattern`；返回值可直接传入 `GreedyRewritePatternApplier`。
+- 注意事项：将 element binary、select/cast/exp、dma structured、matmul/img2col、reduce/softmax reject 组合为同一条 rewrite 主链；返回顺序必须稳定，且 `RejectUnsupportedNnOpPattern` 必须位于最后；列表中不得再出现 family dispatcher 占位 pattern 名称，例如 `_LowerElementBinaryFamilyPattern`、`_LowerDmaStructuredFamilyPattern`、`_LowerMatmulImg2colFamilyPattern`、`_LowerReduceSoftmaxFamilyPattern`；返回值可直接传入 `GreedyRewritePatternApplier`。
 
 ## 额外补充
 
@@ -112,7 +114,8 @@
   - `NnLoweringPass`
   - `KernelCodeError`
   - `nn_lowering_patterns()`
-  - 各 child 模块的 `*_patterns()`
+  - `RejectUnsupportedNnOpPattern`
+  - 各 child 模块的公开 pattern class 与既有 `*_patterns()`
 - `lower_*_family` 只属于待清理的旧 helper 名称，不能作为 build/review 的通过证据。
 
 ### 模块级补充
@@ -126,7 +129,7 @@
   - `dma_structured_patterns()`
   - `matmul_img2col_patterns()`
   - `reduce_softmax_patterns()`
-  - `_RejectUnsupportedNnOpPattern`
+  - `RejectUnsupportedNnOpPattern`
 - caller 的 canonical public path 固定为：
 
 ```python
@@ -136,7 +139,7 @@ from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 
 - `kernel_gen.passes.lowering.nn_to_kernel` 属于旧 compat 模块；导入必须以 `ModuleNotFoundError` 失败。
 - `LowerNnToKernelPass` / `LowerNnToKernelError` 不再属于 surviving public contract；package 级 re-export 不能作为验收入口。
-- family 子模块的 surviving 模块级接口只允许 `*_patterns()`；`lower_*_family`、`_Lower*FamilyPattern` 占位名与 `parent_block + has_done_action` dispatcher 路径都不属于公开合同或验收证据。
+- family 子模块的 surviving 模块级接口包含公开 pattern class 与既有 `*_patterns()` getter；`lower_*_family`、`_Lower*FamilyPattern` 占位名与 `parent_block + has_done_action` dispatcher 路径都不属于公开合同或验收证据。
 - 仅支持以下 `nn` op 的 lowering：
   - 逐元素：`nn.add`/`nn.sub`/`nn.mul`/`nn.div`/`nn.truediv`、`nn.eq`/`nn.ne`/`nn.lt`/`nn.le`/`nn.gt`/`nn.ge`、`nn.select`、`nn.cast`
   - 结构化：`nn.broadcast`、`nn.transpose`、`nn.exp`、`nn.reduce_sum`/`nn.reduce_min`/`nn.reduce_max`、`nn.matmul`、`nn.img2col1d`/`nn.img2col2d`
@@ -177,6 +180,19 @@ from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
   - `memory + symbol/const` 的 element binary（如 add/sub/mul/div/truediv）必须先物化 `dma.alloc + dma.fill` temporary memory，再执行 `kernel.binary_elewise`；不允许回退为 `dma.broadcast`。
   - 结果含符号维度时，允许在 `dma.alloc` 前按 rank 顺序生成 `symbol.get_dim` 以构造 dynamic shape operand，但 mixed scalar binary 的物化路径仍固定为 `dma.fill`。
 - 遇到不支持的 op、结果类型非法、缺失 `nn.space`、operand 数量不匹配或 kernel 校验失败时，必须抛出 `KernelCodeError` 并终止。
+
+## Pattern MLIR before / after 合同
+
+### `RejectUnsupportedNnOpPattern`
+
+- pattern 作用：作为 `nn_lowering_patterns()` 的最后兜底 pattern，拒绝仍残留且未被前序 pattern 支持的 `nn.*` op。
+- before:
+
+```mlir
+%out = "nn.unknown"(%src) {space = #nn.space<global>} : (value) -> !nn.memory<value>
+```
+
+- reject 合同：该 pattern 不生成 after IR，必须抛出公开错误文本 `unknown op: nn.unknown` 或同前缀且包含不支持 op 名称的 `KernelCodeError`；调用方只能依赖公开错误前缀与 op 名称，不得依赖内部 helper 栈。
 
 ## 测试
 

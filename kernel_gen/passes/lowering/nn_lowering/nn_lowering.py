@@ -5,11 +5,13 @@
 - 提供 `lower-nn` 的公开 pass 与 parent pattern driver。
 - parent driver 只组合 family child 模块公开的 `*_patterns()`，不再保留旧
   `lower_*_family` 或 op 级 lowering helper。
-- `_RejectUnsupportedNnOpPattern` 固定放在最后，用于拒绝未被 child pattern
+- `RejectUnsupportedNnOpPattern` 固定放在最后，用于拒绝未被 child pattern
   消费的 `nn.*` op。
 
 API 列表:
 - `nn_lowering_patterns() -> list[RewritePattern]`
+- `class RejectUnsupportedNnOpPattern()`
+- `RejectUnsupportedNnOpPattern.match_and_rewrite(op: Operation, rewriter: PatternRewriter) -> None`
 - `class NnLoweringPass()`
 - `NnLoweringPass.apply(self: NnLoweringPass, ctx: Context, op: ModuleOp) -> None`
 
@@ -49,7 +51,7 @@ def nn_lowering_patterns() -> list[RewritePattern]:
 
     功能说明:
     - 汇总 nn_lowering 各 family pattern，作为 NnLoweringPass.apply(...) 的唯一 driver 输入。
-    - `_RejectUnsupportedNnOpPattern` 必须保持在最后，保证已支持 pattern 先尝试改写。
+    - `RejectUnsupportedNnOpPattern` 必须保持在最后，保证已支持 pattern 先尝试改写。
 
     使用示例:
     - patterns = nn_lowering_patterns()
@@ -72,20 +74,26 @@ def nn_lowering_patterns() -> list[RewritePattern]:
         *dma_structured_patterns(),
         *matmul_img2col_patterns(),
         *reduce_softmax_patterns(),
-        _RejectUnsupportedNnOpPattern(),
+        RejectUnsupportedNnOpPattern(),
     ]
 
 
-class _RejectUnsupportedNnOpPattern(RewritePattern):
+class RejectUnsupportedNnOpPattern(RewritePattern):
     """拒绝未纳入 nn_lowering family 的 nn op。
 
 
     功能说明:
     - 放在所有已支持 family pattern 之后。
     - 若仍有 nn.* op 未被处理，则按 unknown op 合同抛出 KernelCodeError。
+    - reject：残留 `nn.*` op 不产生 after IR，直接抛出公开 `KernelCodeError`。
+    - IR before:
+      ```mlir
+      %out = "nn.unknown"(%src) {space = #nn.space<global>} : (value) -> !nn.memory<value>
+      ```
+    - 公开错误文本：`unknown op: nn.unknown`，不生成 after IR。
 
     使用示例:
-    - pattern = _RejectUnsupportedNnOpPattern()
+    - pattern = RejectUnsupportedNnOpPattern()
 
     关联文件:
     - spec: [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
@@ -154,4 +162,4 @@ class NnLoweringPass(Pass):
         ).rewrite_module(op)
 
 
-__all__ = ["NnLoweringPass", "nn_lowering_patterns"]
+__all__ = ["NnLoweringPass", "nn_lowering_patterns", "RejectUnsupportedNnOpPattern"]

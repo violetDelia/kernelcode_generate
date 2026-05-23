@@ -4,10 +4,18 @@
 
 - 为 `nn.reduce_*` 提供单 op pattern lowering 入口，输出 `kernel.reduce` 形态，并补齐 `dma.alloc`。
 - 对 direct `nn.softmax` 提供稳定拒绝路径，要求先由上游完成分解。
-- 模块级公开入口只保留 `reduce_softmax_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
+- 模块级公开入口公开 pattern class 与既有 `reduce_softmax_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
 
 ## API 列表
 
+- `class LowerNnReduceSumPattern()`
+- `LowerNnReduceSumPattern.match_and_rewrite(op: NnReduceSumOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnReduceMinPattern()`
+- `LowerNnReduceMinPattern.match_and_rewrite(op: NnReduceMinOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnReduceMaxPattern()`
+- `LowerNnReduceMaxPattern.match_and_rewrite(op: NnReduceMaxOp, rewriter: PatternRewriter) -> None`
+- `class RejectNnSoftmaxPattern()`
+- `RejectNnSoftmaxPattern.match_and_rewrite(op: NnSoftmaxOp, rewriter: PatternRewriter) -> None`
 - `reduce_softmax_patterns() -> list[RewritePattern]`
 
 ## 文档信息
@@ -42,7 +50,7 @@
 - 主注册入口仅覆盖 `nn.reduce_sum`、`nn.reduce_min`、`nn.reduce_max` 与 direct `nn.softmax` 拒绝。
 - `nn.reduce_*` 仅支持单轴 `axes`，且 `keepdim` 需为 0/1。
 - `nn.softmax` 需在进入本层前先完成分解；本文件不承诺 softmax 的 direct lowering。
-- 模块级 surviving 接口只允许 `reduce_softmax_patterns()`；`lower_reduce_softmax_family` 不属于公开入口。
+- 模块级 surviving 接口只允许本文件 `API 列表` 中的公开 pattern class 与 `reduce_softmax_patterns()`；`lower_reduce_softmax_family` 不属于公开入口。
 - 每个 reduce op 与 softmax reject 都必须由独立的 `@op_type_rewrite_pattern` 处理，不再通过 family dispatcher 做名称分发。
 ## API详细说明
 
@@ -62,6 +70,39 @@
   ```
 - 功能说明：返回 `nn.reduce_sum`、`nn.reduce_min`、`nn.reduce_max` 与 direct `nn.softmax` 拒绝 pattern 的有序列表，供 `nn_lowering_patterns()` 直接拼接到主 driver 中。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；`nn.softmax` pattern 只负责抛出 `KernelCodeError("nn.softmax must be decomposed before lower-nn")`；返回列表中不得保留 `lower_reduce_softmax_family` 兼容入口；`nn.exp` 不属于本模块的 pattern 列表；返回值可直接传入 `GreedyRewritePatternApplier`。
+
+## Pattern MLIR before / after 合同
+
+### reduce rewrite patterns
+
+- pattern 名称与 kind 映射：
+  - `LowerNnReduceSumPattern`：`nn.reduce_sum` -> `kernel.reduce(kind="sum")`
+  - `LowerNnReduceMinPattern`：`nn.reduce_min` -> `kernel.reduce(kind="min")`
+  - `LowerNnReduceMaxPattern`：`nn.reduce_max` -> `kernel.reduce(kind="max")`
+- pattern 作用：为当前 `nn.reduce_*` 结果创建 `dma.alloc`，再用 `kernel.reduce` 写入 out；axis/keepdim 直接继承并按公开规则校验。
+- before:
+
+```mlir
+%out = "nn.reduce_sum"(%src) {axes = [1 : i64], keepdim = true, space = #nn.space<global>} : (value) -> !nn.memory<[M, 1], [1, 1], f32, #nn.space<global>>
+```
+
+- after:
+
+```mlir
+%alloc = "dma.alloc"() {space = #nn.space<global>} : () -> !nn.memory<[M, 1], [1, 1], f32, #nn.space<global>>
+"kernel.reduce"(%alloc, %src) {axis = 1 : i64, keepdim = true, kind = "sum", space = #kernel.space<global>} : (value, value) -> ()
+```
+
+### `RejectNnSoftmaxPattern`
+
+- pattern 作用：拒绝 direct `nn.softmax`，要求先由上游 `decompass` 分解；reject pattern 不生成 after IR。
+- before:
+
+```mlir
+%out = "nn.softmax"(%src) {axis = 1 : i64, space = #nn.space<global>} : (value) -> !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>
+```
+
+- reject 合同：不提供 after MLIR，必须抛出公开错误文本 `nn.softmax must be decomposed before lower-nn`。
 
 ## 测试
 

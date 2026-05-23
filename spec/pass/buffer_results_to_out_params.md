@@ -156,6 +156,43 @@
   - `BufferResultsToOutParamsPass.apply()` 与外部组合逻辑都应复用该入口。
 - 返回与限制：返回当前 pass 使用的 pattern 实例列表。
 
+## Pattern MLIR before / after 合同
+
+### `BufferResultsToOutParamsCallPattern`
+
+- pattern 作用：把命中 target 的旧 `func.call -> memory result` 改写为显式 out 实参，scalar result 保留；未命中 target 或已改写 callsite 时 no-op。
+- before:
+
+```mlir
+%out, %flag = func.call @mixed(%src, %cond) : (!nn.memory<value>, i1) -> (!nn.memory<value>, i1)
+```
+
+- after:
+
+```mlir
+%arg0 = "dma.alloc"() : () -> !nn.memory<value>
+%flag = func.call @mixed(%arg0, %src, %cond) : (!nn.memory<value>, !nn.memory<value>, i1) -> i1
+```
+
+### `BufferResultsToOutParamsFuncPattern`
+
+- pattern 作用：把 target `func.func` 的 memory returns 前置为 out 参数，并同步清空或保留 scalar returns；已改写函数 no-op。
+- before:
+
+```mlir
+func.func @mixed(%src: !nn.memory<value>, %cond: i1) -> (!nn.memory<value>, i1) {
+  func.return %out, %flag : !nn.memory<value>, i1
+}
+```
+
+- after:
+
+```mlir
+func.func @mixed(%arg0: !nn.memory<value>, %src: !nn.memory<value>, %cond: i1) -> i1 {
+  func.return %flag : i1
+}
+```
+
 ### 导入与兼容说明
 
 - caller 的 canonical public path 固定为：

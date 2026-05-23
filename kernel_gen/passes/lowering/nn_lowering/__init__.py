@@ -3,6 +3,7 @@
 
 功能说明:
 - 对外暴露 `NnLoweringPass` 与公开 pattern 集合入口。
+- 不全量重导出 child module pattern；child pattern 以所属模块 canonical path 的 `__all__` 为准。
 
 API 列表:
 - `class NnLoweringPass()`

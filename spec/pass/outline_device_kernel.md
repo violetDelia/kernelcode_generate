@@ -6,10 +6,13 @@
 - 首轮能力固定为纯 IR host launch outline：触发仍只消费 `launch_block / launch_thread / launch_subthread` 三项显式属性，不从 target registry、函数名或 IR 结构做隐式推断；`shared_memory_size` 作为 device metadata 与 wrapper 的第 4 个 `arch.launch` extent 一并承接。
 - 当 host dispatcher 中存在 `tuner.launch` 时，本 pass 负责把其降为指向 `<pattern>_device` 的 `arch.launch`，并把被 launch 的 pattern wrapper 替换成 device 函数。
 - 首轮 ABI 边界固定为“只接受零返回 / 已完成 out-param ABI 的 `func.func`”；命中非空返回值时显式报错，不在本轮同步承担返回值改写。
-- 当前文件本轮只公开 `OutlineDeviceKernelPass` 及其执行入口；pattern、候选收集与 wrapper/device 改写步骤若存在，仅允许作为当前文件内部协作 helper 存在。
+- 当前文件公开 `OutlineDeviceKernelPass`、`OutlineDeviceKernelFuncPattern` 与 pattern getter；候选收集与 wrapper/device 细节 helper 仍仅允许作为当前文件内部协作 helper 存在。
 
 ## API 列表
 
+- `class OutlineDeviceKernelFuncPattern(candidates: dict[str, tuple[int, int, int, int]])`
+- `OutlineDeviceKernelFuncPattern.match_and_rewrite(op: func.FuncOp, rewriter: PatternRewriter) -> None`
+- `get_outline_device_kernel_pass_patterns(candidates: dict[str, tuple[int, int, int, int]]) -> list[RewritePattern]`
 - `class OutlineDeviceKernelPass()`
 - `OutlineDeviceKernelPass.apply(ctx: Context, module: ModuleOp) -> None`
 
@@ -264,3 +267,35 @@ builtin.module {
 | TC-PASS-OUTLINE-DEVICE-KERNEL-005 | 内存/DMA | `shared_memory_size` 非 int-like 或负值时显式失败。 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `HL-ODK-005`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`shared_memory_size` 非 int-like 或负值时显式失败。”场景。 | `HL-ODK-005` |
 | TC-PASS-OUTLINE-DEVICE-KERNEL-006 | pass 改写 | `npu-demo-lowering` 复用本 pass 时仍保持上述双函数输出合同，不要求测试直连 pattern / getter / 当前文件内部 helper。 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `HL-ODK-006`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`npu-demo-lowering` 复用本 pass 时仍保持上述双函数输出合同，不要求测试直连 pattern / getter / 当前文件内部 helper。”场景。 | `HL-ODK-006` |
 | TC-PASS-OUTLINE-DEVICE-KERNEL-007 | pass 改写 | tuner launch dispatcher 降成 arch launch | 准备含 `entry_point` host、`tuner.launch` 和两个带 launch attrs pattern 函数的 module。 | 运行 `test_outline_device_kernel_rewrites_tuner_launch_dispatcher`。 | `tuner.launch` 被替换为 `arch.launch(@pattern_device, ...)`；原 pattern wrapper 删除，仅保留 device 函数。 | `test_outline_device_kernel_rewrites_tuner_launch_dispatcher` |
+
+## Pattern MLIR before / after 合同
+
+### `OutlineDeviceKernelFuncPattern`
+
+- 功能说明：匹配候选集合中带 launch attrs 的 `func.func`，生成 host wrapper 与 device body。
+- no-op：函数不在候选集合或缺少 launch attrs 时保持原 IR。
+- before:
+
+```mlir
+func.func @k(%arg0: !nn.memory<...>) attributes {launch_block = 1, launch_thread = 32, launch_subthread = 1, shared_memory_size = 1024} {
+  "kernel.matmul"(%arg0, %arg0, %arg0) : (...) -> ()
+  func.return
+}
+```
+
+- after:
+
+```mlir
+func.func @k(%arg0: !nn.memory<...>) {
+  %b = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+  %t = symbol.const 32 : !symbol.int<#symbol.expr<32>>
+  %s = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+  %smem = symbol.const 1024 : !symbol.int<#symbol.expr<1024>>
+  "arch.launch"(%b, %t, %s, %smem, %arg0) {callee = @k_device} : (...) -> ()
+  func.return
+}
+func.func @k_device(%arg0: !nn.memory<...>) attributes {shared_memory_size = 1024} {
+  "kernel.matmul"(%arg0, %arg0, %arg0) : (...) -> ()
+  func.return
+}
+```

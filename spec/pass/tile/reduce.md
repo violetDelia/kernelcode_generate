@@ -191,6 +191,30 @@ assert type(patterns[0]) is TileReduceMatmulPattern
 - getter 当前只返回 `TileReduceMatmulPattern`。
 - pattern 命中后直接改写当前顶层 `kernel.matmul`，并写出“一层 reduce `symbol.for`、两个 reduce `dma.view`、两个 `dma.fill`、一个临时 `dma.alloc`”结构。
 
+## Pattern MLIR before / after 合同
+
+### `TileReduceMatmulPattern`
+
+- pattern 作用：消费 `kernel.matmul` 的 reduce tile attrs，生成 reduce 轴 `symbol.for`、reduce views、临时累加 buffer 与 fill；缺失 analysis 时按公开错误语义失败。
+- before:
+
+```mlir
+"kernel.matmul"(%out, %lhs, %rhs) {tile.analysis = [["elewise", "reduce"], ["reduce", "elewise"], ["elewise", "elewise"]], tile.tile_exprs = [["", "TK"], ["TK", ""], ["", ""]]} : (value, value, value) -> ()
+```
+
+- after:
+
+```mlir
+%tmp = "dma.alloc"() : () -> !nn.memory<value>
+"dma.fill"(%tmp, %zero) : (value, f32) -> ()
+symbol.for %k = %c0 to %K step %TK {
+  %lhs_tile = "dma.view"(%lhs, %k) : (value, !symbol.int<"TK">) -> value
+  %rhs_tile = "dma.view"(%rhs, %k) : (value, !symbol.int<"TK">) -> value
+  "kernel.matmul"(%tmp, %lhs_tile, %rhs_tile) : (value, value, value) -> ()
+}
+"dma.fill"(%out, %tmp) : (value, value) -> ()
+```
+
 ### helper 说明
 
 - 当前文件内除上述 3 个公开对象外，不再承诺任何其他稳定 helper。

@@ -9,7 +9,9 @@
 API 列表:
 - `class BufferResultsToOutParamsPass(fold: bool = True)`
 - `class BufferResultsToOutParamsCallPattern(targets: dict[str, RewriteTarget])`
+- `BufferResultsToOutParamsCallPattern.match_and_rewrite(op: func.CallOp, rewriter: PatternRewriter) -> None`
 - `class BufferResultsToOutParamsFuncPattern(targets: dict[str, RewriteTarget])`
+- `BufferResultsToOutParamsFuncPattern.match_and_rewrite(op: func.FuncOp, rewriter: PatternRewriter) -> None`
 - `get_buffer_results_to_out_params_pass_patterns(targets: dict[str, RewriteTarget]) -> list[RewritePattern]`
 
 使用示例:
@@ -102,6 +104,16 @@ class BufferResultsToOutParamsCallPattern(RewritePattern):
     功能说明:
     - 仅处理模块内命中的旧 `memory result` callsite。
     - 通过 pattern rewrite 将 caller 侧显式 out buffer 与新 `func.call` 一并插入。
+    - IR before:
+      ```mlir
+      %out, %flag = func.call @mixed(%src, %cond) : (!nn.memory<value>, i1) -> (!nn.memory<value>, i1)
+      ```
+    - IR after:
+      ```mlir
+      %arg0 = "dma.alloc"() : () -> !nn.memory<value>
+      %flag = func.call @mixed(%arg0, %src, %cond) : (!nn.memory<value>, !nn.memory<value>, i1) -> i1
+      ```
+    - no-op unchanged after：callee 未命中 target 或 callsite 已无 memory result 时 before IR 保持不变。
 
     使用示例:
     - pattern = BufferResultsToOutParamsCallPattern(targets)
@@ -162,6 +174,19 @@ class BufferResultsToOutParamsFuncPattern(RewritePattern):
     功能说明:
     - 将命中的 memory 返回函数改写为前置 out 参数。
     - 只处理候选集合中仍保留 memory 输出的函数。
+    - IR before:
+      ```mlir
+      func.func @mixed(%src: !nn.memory<value>, %cond: i1) -> (!nn.memory<value>, i1) {
+        func.return %out, %flag : !nn.memory<value>, i1
+      }
+      ```
+    - IR after:
+      ```mlir
+      func.func @mixed(%arg0: !nn.memory<value>, %src: !nn.memory<value>, %cond: i1) -> i1 {
+        func.return %flag : i1
+      }
+      ```
+    - no-op unchanged after：函数不在 target 集合或已是 out-param ABI 时 before IR 保持不变。
 
     使用示例:
     - pattern = BufferResultsToOutParamsFuncPattern(targets)

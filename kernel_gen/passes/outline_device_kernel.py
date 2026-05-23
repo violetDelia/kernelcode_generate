@@ -9,6 +9,9 @@
   `arch.launch`，并移除原 pattern wrapper。
 
 API 列表:
+- `class OutlineDeviceKernelFuncPattern(candidates: dict[str, tuple[int, int, int, int]])`
+- `OutlineDeviceKernelFuncPattern.match_and_rewrite(op: func.FuncOp, rewriter: PatternRewriter) -> None`
+- `get_outline_device_kernel_pass_patterns(candidates: dict[str, tuple[int, int, int, int]]) -> list[RewritePattern]`
 - `class OutlineDeviceKernelPass()`
 - `OutlineDeviceKernelPass.apply(ctx: Context, module: ModuleOp) -> None`
 
@@ -51,16 +54,41 @@ from kernel_gen.passes.common import (
 )
 
 
-class _OutlineDeviceKernelFuncPattern(RewritePattern):
+class OutlineDeviceKernelFuncPattern(RewritePattern):
     """按单个 `func.func` 执行 outline-device-kernel 改写。
 
 
     功能说明:
     - 一个 `func.func` 对应一个 pattern。
     - 仅处理候选集合中带显式 launch attrs 的函数。
+    - IR 变换：带 launch attr 的 `func.func @k` 变为 host wrapper `@k` 与 device func `@k_device`。
+    - no-op：函数不在候选集合或缺少 launch attr 时保持原 IR。
+    - IR before:
+      ```mlir
+      func.func @k(%arg0: value) attributes {launch_block = 1 : i64, launch_thread = 2 : i64, launch_subthread = 1 : i64} {
+        "test.op"() : () -> ()
+        func.return
+      }
+      ```
+    - IR after:
+      ```mlir
+      func.func @k(%arg0: value) {
+        %b = "symbol.const"() {value = 1 : i64} : () -> !symbol.int<"1">
+        %t = "symbol.const"() {value = 2 : i64} : () -> !symbol.int<"2">
+        %s = "symbol.const"() {value = 1 : i64} : () -> !symbol.int<"1">
+        %m = "symbol.const"() {value = 0 : i64} : () -> !symbol.int<"0">
+        "arch.launch"(%b, %t, %s, %m, %arg0) {callee = @k_device} : (...) -> ()
+        func.return
+      }
+      func.func @k_device(%arg0: value) {
+        "test.op"() : () -> ()
+        func.return
+      }
+      ```
+    - no-op unchanged after：函数不在 candidates 或缺少完整 launch attrs 时，上述 before IR 保持不变。
 
     使用示例:
-    - pattern = _OutlineDeviceKernelFuncPattern(candidates)
+    - pattern = OutlineDeviceKernelFuncPattern(candidates)
 
     关联文件:
     - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
@@ -141,18 +169,18 @@ class _OutlineDeviceKernelFuncPattern(RewritePattern):
         rewriter.notify_op_modified(op)
 
 
-def _get_outline_device_kernel_pass_patterns(
+def get_outline_device_kernel_pass_patterns(
     candidates: dict[str, tuple[int, int, int, int]],
 ) -> list[RewritePattern]:
-    """返回 `outline-device-kernel` pass 的内部 pattern 列表。
+    """返回 `outline-device-kernel` pass 的公开 pattern 列表。
 
 
     功能说明:
-    - 供当前文件内部构造 rewrite walker。
-    - 当前固定只返回 `_OutlineDeviceKernelFuncPattern`，顺序即为 pass 执行顺序。
+    - 每次调用返回新的 `OutlineDeviceKernelFuncPattern` 实例。
+    - 当前固定只返回 `OutlineDeviceKernelFuncPattern`，顺序即为 pass 执行顺序。
 
     使用示例:
-    - patterns = _get_outline_device_kernel_pass_patterns(candidates)
+    - patterns = get_outline_device_kernel_pass_patterns(candidates)
 
     关联文件:
     - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
@@ -160,7 +188,7 @@ def _get_outline_device_kernel_pass_patterns(
     - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
-    return [_OutlineDeviceKernelFuncPattern(candidates)]
+    return [OutlineDeviceKernelFuncPattern(candidates)]
 
 
 class OutlineDeviceKernelPass(ModulePass):
@@ -238,7 +266,7 @@ class OutlineDeviceKernelPass(ModulePass):
             {
                 name: attr
                 for name, attr in original_attrs.items()
-                if name not in _OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS
+                if name not in OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS
             }
         )
         return device_func
@@ -352,13 +380,13 @@ class OutlineDeviceKernelPass(ModulePass):
                 continue
             present_attrs = [
                 name
-                for name in _OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS
+                for name in OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS
                 if name in op.attributes
             ]
             if not present_attrs:
                 continue
             func_name = op.sym_name.data
-            if len(present_attrs) != len(_OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS):
+            if len(present_attrs) != len(OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
                     "function "
                     f"{func_name} must define launch_block, launch_thread, and launch_subthread together"
@@ -369,7 +397,7 @@ class OutlineDeviceKernelPass(ModulePass):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"function {func_name} must contain a body")
 
             values: list[int] = []
-            for attr_name in _OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS + ("shared_memory_size",):
+            for attr_name in OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS + ("shared_memory_size",):
                 attr = op.attributes.get(attr_name)
                 if attr is None:
                     if attr_name == "shared_memory_size":
@@ -416,11 +444,15 @@ class OutlineDeviceKernelPass(ModulePass):
             return
         PatternRewriteWalker(
             GreedyRewritePatternApplier(
-                [*_get_outline_device_kernel_pass_patterns(candidates)],
+                [*get_outline_device_kernel_pass_patterns(candidates)],
                 ctx=ctx,
                 folding_enabled=self.fold,
                 dce_enabled=False,
             )
         ).rewrite_module(module)
 
-__all__ = ["OutlineDeviceKernelPass"]
+__all__ = [
+    "OutlineDeviceKernelFuncPattern",
+    "get_outline_device_kernel_pass_patterns",
+    "OutlineDeviceKernelPass",
+]

@@ -4,10 +4,32 @@
 
 - 定义 element binary / compare family 的 lowering 责任边界。
 - 覆盖 `nn.add/sub/mul/div/truediv` 与 `nn.eq/ne/lt/le/gt/ge`，并输出 `kernel.binary_elewise`。
-- 模块级公开入口只保留 `element_binary_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
+- 模块级公开入口公开 pattern class 与既有 `element_binary_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
 
 ## API 列表
 
+- `class LowerNnAddPattern()`
+- `LowerNnAddPattern.match_and_rewrite(op: NnAddOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnSubPattern()`
+- `LowerNnSubPattern.match_and_rewrite(op: NnSubOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnMulPattern()`
+- `LowerNnMulPattern.match_and_rewrite(op: NnMulOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnDivPattern()`
+- `LowerNnDivPattern.match_and_rewrite(op: NnDivOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnTrueDivPattern()`
+- `LowerNnTrueDivPattern.match_and_rewrite(op: NnTrueDivOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnEqPattern()`
+- `LowerNnEqPattern.match_and_rewrite(op: NnEqOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnNePattern()`
+- `LowerNnNePattern.match_and_rewrite(op: NnNeOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnLtPattern()`
+- `LowerNnLtPattern.match_and_rewrite(op: NnLtOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnLePattern()`
+- `LowerNnLePattern.match_and_rewrite(op: NnLeOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnGtPattern()`
+- `LowerNnGtPattern.match_and_rewrite(op: NnGtOp, rewriter: PatternRewriter) -> None`
+- `class LowerNnGePattern()`
+- `LowerNnGePattern.match_and_rewrite(op: NnGeOp, rewriter: PatternRewriter) -> None`
 - `element_binary_patterns() -> list[RewritePattern]`
 
 ## 文档信息
@@ -53,7 +75,7 @@
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 仅覆盖 `nn.add`、`nn.sub`、`nn.mul`、`nn.div`、`nn.truediv`、`nn.eq`、`nn.ne`、`nn.lt`、`nn.le`、`nn.gt`、`nn.ge`。
 - 本模块不得定义额外 `*Pass` 作为公开入口，执行由 `NnLoweringPass` 统一调度。
-- 模块级 surviving 接口只允许 `element_binary_patterns()`；`lower_element_binary_family` 不属于公开入口，外部 caller 不得继续依赖 `block/op -> bool` family 分发。
+- 模块级 surviving 接口只允许本文件 `API 列表` 中的公开 pattern class 与 `element_binary_patterns()`；`lower_element_binary_family` 不属于公开入口，外部 caller 不得继续依赖 `block/op -> bool` family 分发。
 - 每个 op 都必须由对应的 `@op_type_rewrite_pattern` 独立匹配；不得回退为按字符串名分发的 family placeholder pattern。
 - 需要 `dma.broadcast` 桥接的 mixed compare 行为必须遵循总 spec 中的规则。
 - `memory + memory` 的静态 add/sub 输出只要求收口到 `dma.alloc + kernel.binary_elewise + func.return`；不把 `symbol.get_dim` 视为必现前置行。
@@ -79,6 +101,53 @@
   ```
 - 功能说明：返回 element binary / compare family 的有序 pattern 列表，供 `nn_lowering_patterns()` 直接拼接到主 driver 中。
 - 注意事项：返回顺序固定为 `add -> sub -> mul -> div -> truediv -> eq -> ne -> lt -> le -> gt -> ge`；`_lower_typed_element_binary_pattern(...)` 与 `_lower_element_binary_op(...)` 只属于内部共享 helper，不属于公开合同；返回列表中不得出现 family dispatcher pattern 或 `lower_element_binary_family` 兼容入口；返回值可直接传入 `GreedyRewritePatternApplier`。
+
+## Pattern MLIR before / after 合同
+
+### element binary rewrite patterns
+
+- pattern 名称与 op/kind 映射：
+  - `LowerNnAddPattern`：`nn.add` -> `kernel.binary_elewise(kind="add")`
+  - `LowerNnSubPattern`：`nn.sub` -> `kernel.binary_elewise(kind="sub")`
+  - `LowerNnMulPattern`：`nn.mul` -> `kernel.binary_elewise(kind="mul")`
+  - `LowerNnDivPattern`：`nn.div` -> `kernel.binary_elewise(kind="div")`
+  - `LowerNnTrueDivPattern`：`nn.truediv` -> `kernel.binary_elewise(kind="div")`
+- pattern 作用：为当前 element binary `nn.*` 结果创建 `dma.alloc`，再用 `kernel.binary_elewise` 写入 out；mixed scalar 路径先用 `dma.fill` 物化 temporary memory。
+- before:
+
+```mlir
+%out = "nn.add"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<[N], [1], f32, #nn.space<global>>
+```
+
+- after:
+
+```mlir
+%alloc = "dma.alloc"() {space = #nn.space<global>} : () -> !nn.memory<[N], [1], f32, #nn.space<global>>
+"kernel.binary_elewise"(%alloc, %lhs, %rhs) {kind = "add", space = #kernel.space<global>} : (value, value, value) -> ()
+```
+
+### element compare rewrite patterns
+
+- pattern 名称与 op/kind 映射：
+  - `LowerNnEqPattern`：`nn.eq` -> `kernel.binary_elewise(kind="eq")`
+  - `LowerNnNePattern`：`nn.ne` -> `kernel.binary_elewise(kind="ne")`
+  - `LowerNnLtPattern`：`nn.lt` -> `kernel.binary_elewise(kind="lt")`
+  - `LowerNnLePattern`：`nn.le` -> `kernel.binary_elewise(kind="le")`
+  - `LowerNnGtPattern`：`nn.gt` -> `kernel.binary_elewise(kind="gt")`
+  - `LowerNnGePattern`：`nn.ge` -> `kernel.binary_elewise(kind="ge")`
+- pattern 作用：为当前 compare `nn.*` 结果创建 i1 memory，再用 `kernel.binary_elewise` 写入 out；mixed compare scalar 路径先用 `dma.broadcast` 物化 temporary memory。
+- before:
+
+```mlir
+%out = "nn.eq"(%lhs, %rhs) {space = #nn.space<global>} : (value, value) -> !nn.memory<[N], [1], i1, #nn.space<global>>
+```
+
+- after:
+
+```mlir
+%alloc = "dma.alloc"() {space = #nn.space<global>} : () -> !nn.memory<[N], [1], i1, #nn.space<global>>
+"kernel.binary_elewise"(%alloc, %lhs, %rhs) {kind = "eq", space = #kernel.space<global>} : (value, value, value) -> ()
+```
 
 ## 测试
 

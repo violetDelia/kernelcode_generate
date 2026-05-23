@@ -8,6 +8,7 @@
 
 API 列表:
 - `class TileReduceMatmulPattern(RewritePattern)`
+- `TileReduceMatmulPattern.match_and_rewrite(op: KernelMatmulOp, rewriter: PatternRewriter) -> None`
 - `get_tile_reduce_pass_patterns() -> list[RewritePattern]`
 - `class TileReducePass(ModulePass)`
 - `TileReducePass.__init__(fold: bool = True) -> None`
@@ -60,6 +61,21 @@ class TileReduceMatmulPattern(RewritePattern):
     - 命中顶层 `kernel.matmul` 后，就地把当前 op 改写为“只切 reduce 轴”的结构。
     - 顶层输出 memory 直接作为 reduce 累加目标，不再生成输出轴 loop 与输出轴 `tuner.param`。
     - 只改写当前顶层 tile op；已经落在 `symbol.for` 内的 rewritten op 不再重复处理。
+    - IR before:
+      ```mlir
+      "kernel.matmul"(%out, %lhs, %rhs) {tile.analysis = [["elewise", "reduce"], ["reduce", "elewise"], ["elewise", "elewise"]], tile.tile_exprs = [["", "TK"], ["TK", ""], ["", ""]]} : (value, value, value) -> ()
+      ```
+    - IR after:
+      ```mlir
+      %tmp = "dma.alloc"() : () -> !nn.memory<value>
+      "dma.fill"(%tmp, %zero) : (value, f32) -> ()
+      symbol.for %k = %c0 to %K step %TK {
+        %lhs_tile = "dma.view"(%lhs, %k) : (value, !symbol.int<"TK">) -> value
+        %rhs_tile = "dma.view"(%rhs, %k) : (value, !symbol.int<"TK">) -> value
+        "kernel.matmul"(%tmp, %lhs_tile, %rhs_tile) : (value, value, value) -> ()
+      }
+      ```
+    - no-op unchanged after：缺少 `tile.analysis`、已位于 `symbol.for` 内或 rank 不匹配时 before IR 保持不变。
 
     使用示例:
     - TileReduceMatmulPattern().match_and_rewrite(op, rewriter)
