@@ -1,0 +1,2082 @@
+{
+  "arch": {
+    "_BaseArchIndexQueryOp": {
+      "bases": [
+        "IRDLOperation"
+      ],
+      "kind": "class"
+    },
+    "_dynamic_memory_result_type": {
+      "args": {
+        "args": [
+          [
+            "space",
+            "NnMemorySpaceAttr"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "NnMemoryType"
+    },
+    "_is_positive_static_capacity": {
+      "args": {
+        "args": [
+          [
+            "attr",
+            "SymbolExprAttr"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_normalize_token_id": {
+      "args": {
+        "args": [
+          [
+            "token_id",
+            "str | StringAttr"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "StringAttr"
+    },
+    "_raise_verify_error": {
+      "args": {
+        "args": [
+          [
+            "expected",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [
+          "ERROR_ACTUAL"
+        ],
+        "kwarg": null,
+        "kwonlyargs": [
+          [
+            "actual",
+            "str"
+          ]
+        ],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "None"
+    },
+    "_verify_barrier_visibility_attr": {
+      "args": {
+        "args": [
+          [
+            "visibility",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "ArrayAttr[Attribute]"
+    },
+    "_verify_launch_callee_attr": {
+      "args": {
+        "args": [
+          [
+            "callee",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "SymbolRefAttr"
+    },
+    "_verify_non_negative_static_symbol": {
+      "args": {
+        "args": [
+          [
+            "operand_type",
+            "SymbolValueType"
+          ],
+          [
+            "field_name",
+            "str"
+          ],
+          [
+            "op_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "None"
+    },
+    "_verify_positive_static_symbol": {
+      "args": {
+        "args": [
+          [
+            "operand_type",
+            "SymbolValueType"
+          ],
+          [
+            "field_name",
+            "str"
+          ],
+          [
+            "op_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "None"
+    },
+    "_verify_symbol_int_operand": {
+      "args": {
+        "args": [
+          [
+            "value",
+            "SSAValue"
+          ],
+          [
+            "field_name",
+            "str"
+          ],
+          [
+            "op_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "SymbolValueType"
+    },
+    "_verify_target_registry_support": {
+      "args": {
+        "args": [
+          [
+            "op_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "None"
+    },
+    "_verify_token_id_text": {
+      "args": {
+        "args": [
+          [
+            "token_id",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "None"
+    },
+    "_verify_token_operand": {
+      "args": {
+        "args": [
+          [
+            "value",
+            "SSAValue"
+          ],
+          [
+            "field_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "ArchTokenType"
+    }
+  },
+  "kernel": {
+    "_BaseKernelBinaryOp": {
+      "bases": [
+        "IRDLOperation"
+      ],
+      "kind": "class"
+    },
+    "_KernelBinaryMemoryEffect": {
+      "bases": [
+        "MemoryEffect"
+      ],
+      "kind": "class"
+    },
+    "_KernelSelectMemoryEffect": {
+      "bases": [
+        "MemoryEffect"
+      ],
+      "kind": "class"
+    },
+    "_KernelUnaryMemoryEffect": {
+      "bases": [
+        "MemoryEffect"
+      ],
+      "kind": "class"
+    },
+    "_build_contiguous_stride": {
+      "args": {
+        "args": [
+          [
+            "shape",
+            "Sequence[int]"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "list[int]"
+    },
+    "_build_reduce_result_shape": {
+      "args": {
+        "args": [
+          [
+            "input_dims",
+            "Sequence[Attribute]"
+          ],
+          [
+            "axis",
+            "int"
+          ],
+          [
+            "keepdim",
+            "bool"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "list[Attribute]"
+    },
+    "_collect_int_dims": {
+      "args": {
+        "args": [
+          [
+            "dims",
+            "Sequence[Attribute]"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "list[int] | None"
+    },
+    "_dims_equal": {
+      "args": {
+        "args": [
+          [
+            "lhs",
+            "Attribute"
+          ],
+          [
+            "rhs",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_effect": {
+      "args": {
+        "args": [
+          [
+            "kind",
+            "MemoryEffectKind"
+          ],
+          [
+            "value",
+            "SSAValue"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "EffectInstance"
+    },
+    "_img2col_output_dim": {
+      "args": {
+        "args": [
+          [
+            "size",
+            "int"
+          ],
+          [
+            "kernel",
+            "int"
+          ],
+          [
+            "stride",
+            "int"
+          ],
+          [
+            "dilation",
+            "int"
+          ],
+          [
+            "pad_before",
+            "int"
+          ],
+          [
+            "pad_after",
+            "int"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "int"
+    },
+    "_is_compare_output_element_type": {
+      "args": {
+        "args": [
+          [
+            "value",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_is_int_or_symbol_type": {
+      "args": {
+        "args": [
+          [
+            "attr",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_is_symbol_int_type": {
+      "args": {
+        "args": [
+          [
+            "attr",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_normalize_bool_attr": {
+      "args": {
+        "args": [
+          [
+            "value",
+            "bool | int | IntegerAttr | IntAttr"
+          ],
+          [
+            "field_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "IntegerAttr"
+    },
+    "_normalize_i64_attr": {
+      "args": {
+        "args": [
+          [
+            "value",
+            "int | IntegerAttr | IntAttr"
+          ],
+          [
+            "field_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "IntegerAttr"
+    },
+    "_normalize_kind_attr": {
+      "args": {
+        "args": [
+          [
+            "kind",
+            "str | StringAttr"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [
+          null,
+          null,
+          null
+        ],
+        "kwarg": null,
+        "kwonlyargs": [
+          [
+            "op_name",
+            "str"
+          ],
+          [
+            "field_name",
+            "str"
+          ],
+          [
+            "allowed",
+            "set[str]"
+          ]
+        ],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "StringAttr"
+    },
+    "_static_int_from_dim": {
+      "args": {
+        "args": [
+          [
+            "dim",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "int | None"
+    },
+    "_static_int_from_operand": {
+      "args": {
+        "args": [
+          [
+            "operand",
+            "SSAValue"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "int | None"
+    },
+    "_verify_bool_attr": {
+      "args": {
+        "args": [
+          [
+            "attr",
+            "IntegerAttr"
+          ],
+          [
+            "field_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_verify_element_type_match": {
+      "args": {
+        "args": [
+          [
+            "types",
+            "Iterable[NnMemoryType]"
+          ],
+          [
+            "message",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "None"
+    },
+    "_verify_i64_attr_range": {
+      "args": {
+        "args": [
+          [
+            "attr",
+            "IntegerAttr"
+          ],
+          [
+            "field_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [
+          null,
+          null
+        ],
+        "kwarg": null,
+        "kwonlyargs": [
+          [
+            "min_value",
+            "int"
+          ],
+          [
+            "max_value",
+            "int"
+          ]
+        ],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "int"
+    },
+    "_verify_img2col_param_operands": {
+      "args": {
+        "args": [
+          [
+            "operands",
+            "Sequence[SSAValue]"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [
+          null,
+          null,
+          null
+        ],
+        "kwarg": null,
+        "kwonlyargs": [
+          [
+            "allow_zero",
+            "bool"
+          ],
+          [
+            "type_error_phrase",
+            "str"
+          ],
+          [
+            "value_error_phrase",
+            "str"
+          ]
+        ],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "list[int | None]"
+    },
+    "_verify_matmul_shape": {
+      "args": {
+        "args": [
+          [
+            "lhs_shape",
+            "Sequence[Attribute]"
+          ],
+          [
+            "rhs_shape",
+            "Sequence[Attribute]"
+          ],
+          [
+            "out_shape",
+            "Sequence[Attribute]"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "None"
+    },
+    "_verify_memory_type": {
+      "args": {
+        "args": [
+          [
+            "value",
+            "Attribute"
+          ],
+          [
+            "field_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "NnMemoryType"
+    },
+    "_verify_reduce_result_shape": {
+      "args": {
+        "args": [
+          [
+            "result_type",
+            "NnMemoryType"
+          ],
+          [
+            "expected_shape",
+            "Sequence[Attribute]"
+          ],
+          [
+            "op_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "None"
+    },
+    "_verify_same_layout": {
+      "args": {
+        "args": [
+          [
+            "types",
+            "Iterable[NnMemoryType]"
+          ],
+          [
+            "op_space",
+            "NnMemorySpaceAttr"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "None"
+    }
+  },
+  "memory": {
+    "_infer_memory_get_data_result_type": {
+      "args": {
+        "args": [
+          [
+            "source",
+            "SSAValue | Operation"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "SymbolPtrType"
+    }
+  },
+  "symbol": {
+    "_BaseSymbolBinaryArithOp": {
+      "bases": [
+        "IRDLOperation",
+        "HasFolderInterface"
+      ],
+      "kind": "class"
+    },
+    "_BaseSymbolCompareOp": {
+      "bases": [
+        "IRDLOperation",
+        "HasFolderInterface"
+      ],
+      "kind": "class"
+    },
+    "_BaseSymbolMemoryQueryOp": {
+      "bases": [
+        "IRDLOperation",
+        "HasFolderInterface"
+      ],
+      "kind": "class"
+    },
+    "_SymbolExprAttrParser": {
+      "bases": [
+        "_SymbolExprParserBase"
+      ],
+      "kind": "class"
+    },
+    "_SymbolExprNode": {
+      "bases": [],
+      "kind": "class"
+    },
+    "_SymbolExprParserBase": {
+      "bases": [],
+      "kind": "class"
+    },
+    "_SymbolExprTextParser": {
+      "bases": [
+        "_SymbolExprParserBase"
+      ],
+      "kind": "class"
+    },
+    "_SymbolExprToken": {
+      "bases": [],
+      "kind": "class"
+    },
+    "_alternate_symbol_arith_result_exprs": {
+      "args": {
+        "args": [
+          [
+            "op_name",
+            "str"
+          ],
+          [
+            "lhs_type",
+            "Attribute"
+          ],
+          [
+            "rhs_type",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "tuple[str, ...]"
+    },
+    "_canonicalize_symbolic_expr": {
+      "args": {
+        "args": [
+          [
+            "expr",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "str"
+    },
+    "_contains_symbol_expr_iter": {
+      "args": {
+        "args": [
+          [
+            "node",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_contains_symbol_expr_unknown": {
+      "args": {
+        "args": [
+          [
+            "node",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_entry_to_expr": {
+      "args": {
+        "args": [
+          [
+            "entry",
+            "Attribute"
+          ],
+          [
+            "op_name",
+            "str"
+          ],
+          [
+            "field_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "str"
+    },
+    "_evaluate_concrete_expr": {
+      "args": {
+        "args": [
+          [
+            "expr",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "int | None"
+    },
+    "_format_error": {
+      "args": {
+        "args": [
+          [
+            "expected",
+            "str"
+          ],
+          [
+            "actual",
+            "str"
+          ]
+        ],
+        "defaults": [
+          "ERROR_ACTUAL"
+        ],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "str"
+    },
+    "_format_symbol_expr_add": {
+      "args": {
+        "args": [
+          [
+            "node",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "str"
+    },
+    "_format_symbol_expr_node": {
+      "args": {
+        "args": [
+          [
+            "node",
+            "_SymbolExprNode"
+          ],
+          [
+            "parent_precedence",
+            "int"
+          ]
+        ],
+        "defaults": [
+          "0"
+        ],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "str"
+    },
+    "_get_concrete_symbol_expr_node_value": {
+      "args": {
+        "args": [
+          [
+            "node",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "int | None"
+    },
+    "_get_concrete_symbol_int_value": {
+      "args": {
+        "args": [
+          [
+            "attr",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "int | None"
+    },
+    "_get_symbol_expr_const": {
+      "args": {
+        "args": [
+          [
+            "node",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "int | None"
+    },
+    "_infer_result_type": {
+      "args": {
+        "args": [
+          [
+            "source",
+            "SSAValue | Operation"
+          ],
+          [
+            "axis",
+            "Attribute"
+          ],
+          [
+            "op_name",
+            "str"
+          ],
+          [
+            "field_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "SymbolValueType"
+    },
+    "_infer_symbol_arith_result_expr": {
+      "args": {
+        "args": [
+          [
+            "op_name",
+            "str"
+          ],
+          [
+            "lhs_type",
+            "Attribute"
+          ],
+          [
+            "rhs_type",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "str | None"
+    },
+    "_is_supported_symbol_expr": {
+      "args": {
+        "args": [
+          [
+            "expr",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_is_symbol_arith_operand_type": {
+      "args": {
+        "args": [
+          [
+            "attr",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_is_symbol_expr_unknown": {
+      "args": {
+        "args": [
+          [
+            "node",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_is_symbol_int_type": {
+      "args": {
+        "args": [
+          [
+            "attr",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_is_unknown_symbol_int_type": {
+      "args": {
+        "args": [
+          [
+            "attr",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_linear_distance_is_positive_multiple": {
+      "args": {
+        "args": [
+          [
+            "diff_terms",
+            "dict[str, int]"
+          ],
+          [
+            "diff_offset",
+            "int"
+          ],
+          [
+            "step_terms",
+            "dict[str, int]"
+          ],
+          [
+            "step_offset",
+            "int"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_linear_symbol_expr_terms": {
+      "args": {
+        "args": [
+          [
+            "node",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "tuple[dict[str, int], int] | None"
+    },
+    "_make_symbol_expr_add": {
+      "args": {
+        "args": [
+          [
+            "lhs",
+            "_SymbolExprNode"
+          ],
+          [
+            "rhs",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode"
+    },
+    "_make_symbol_expr_const": {
+      "args": {
+        "args": [
+          [
+            "value",
+            "int"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode"
+    },
+    "_make_symbol_expr_iter": {
+      "args": {
+        "args": [
+          [
+            "start",
+            "_SymbolExprNode"
+          ],
+          [
+            "end",
+            "_SymbolExprNode"
+          ],
+          [
+            "step",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode"
+    },
+    "_make_symbol_expr_keyword_binary": {
+      "args": {
+        "args": [
+          [
+            "op",
+            "str"
+          ],
+          [
+            "lhs",
+            "_SymbolExprNode"
+          ],
+          [
+            "rhs",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode"
+    },
+    "_make_symbol_expr_max": {
+      "args": {
+        "args": [
+          [
+            "lhs",
+            "_SymbolExprNode"
+          ],
+          [
+            "rhs",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode"
+    },
+    "_make_symbol_expr_min": {
+      "args": {
+        "args": [
+          [
+            "lhs",
+            "_SymbolExprNode"
+          ],
+          [
+            "rhs",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode"
+    },
+    "_make_symbol_expr_mul": {
+      "args": {
+        "args": [
+          [
+            "lhs",
+            "_SymbolExprNode"
+          ],
+          [
+            "rhs",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode"
+    },
+    "_make_symbol_expr_neg": {
+      "args": {
+        "args": [
+          [
+            "node",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode"
+    },
+    "_make_symbol_expr_sub": {
+      "args": {
+        "args": [
+          [
+            "lhs",
+            "_SymbolExprNode"
+          ],
+          [
+            "rhs",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode"
+    },
+    "_make_symbol_expr_symbol": {
+      "args": {
+        "args": [
+          [
+            "value",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode"
+    },
+    "_make_symbol_expr_unknown": {
+      "args": {
+        "args": [],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode"
+    },
+    "_normalize_expr": {
+      "args": {
+        "args": [
+          [
+            "expr",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "str"
+    },
+    "_normalize_symbol_ptr_template_name": {
+      "args": {
+        "args": [
+          [
+            "template_name",
+            "StringAttr | str | None"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "StringAttr"
+    },
+    "_parse_symbol_binary_operand_types": {
+      "args": {
+        "args": [
+          [
+            "parser",
+            "AttrParser"
+          ],
+          [
+            "op_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "tuple[Attribute, Attribute]"
+    },
+    "_parse_symbol_expr_from_attr_parser": {
+      "args": {
+        "args": [
+          [
+            "parser",
+            "AttrParser"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode"
+    },
+    "_parse_symbol_expr_from_text": {
+      "args": {
+        "args": [
+          [
+            "expr",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode"
+    },
+    "_raise_type_error": {
+      "args": {
+        "args": [
+          [
+            "expected",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [
+          "ERROR_ACTUAL"
+        ],
+        "kwarg": null,
+        "kwonlyargs": [
+          [
+            "actual",
+            "str"
+          ]
+        ],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "None"
+    },
+    "_raise_value_error": {
+      "args": {
+        "args": [
+          [
+            "expected",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [
+          "ERROR_ACTUAL"
+        ],
+        "kwarg": null,
+        "kwonlyargs": [
+          [
+            "actual",
+            "str"
+          ]
+        ],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "None"
+    },
+    "_raise_verify_error": {
+      "args": {
+        "args": [
+          [
+            "expected",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [
+          "ERROR_ACTUAL"
+        ],
+        "kwarg": null,
+        "kwonlyargs": [
+          [
+            "actual",
+            "str"
+          ]
+        ],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "None"
+    },
+    "_requires_unknown_arith_result": {
+      "args": {
+        "args": [
+          [
+            "lhs_type",
+            "Attribute"
+          ],
+          [
+            "rhs_type",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_symbol_arith_operand_contains_unknown": {
+      "args": {
+        "args": [
+          [
+            "attr",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool | None"
+    },
+    "_symbol_arith_operand_expr_node": {
+      "args": {
+        "args": [
+          [
+            "attr",
+            "Attribute"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode | None"
+    },
+    "_symbol_expr_bounds_are_full_tiles": {
+      "args": {
+        "args": [
+          [
+            "start",
+            "_SymbolExprNode"
+          ],
+          [
+            "end",
+            "_SymbolExprNode"
+          ],
+          [
+            "step",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "bool"
+    },
+    "_symbol_expr_full_tile_min_step": {
+      "args": {
+        "args": [
+          [
+            "lhs",
+            "_SymbolExprNode"
+          ],
+          [
+            "rhs",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode | None"
+    },
+    "_symbol_expr_full_tile_residual_step": {
+      "args": {
+        "args": [
+          [
+            "residual",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode | None"
+    },
+    "_symbol_expr_precedence": {
+      "args": {
+        "args": [
+          [
+            "node",
+            "_SymbolExprNode"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "int"
+    },
+    "_symbol_iter_type_expr_node": {
+      "args": {
+        "args": [
+          [
+            "attr",
+            "SymbolIterType"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "_SymbolExprNode"
+    },
+    "_symbol_min_full_tile_step_value": {
+      "args": {
+        "args": [
+          [
+            "lhs",
+            "SSAValue"
+          ],
+          [
+            "rhs",
+            "SSAValue"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "SSAValue | None"
+    },
+    "_tokenize_symbol_expr": {
+      "args": {
+        "args": [
+          [
+            "expr",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "list[_SymbolExprToken]"
+    },
+    "_unwrap_symbol_expr_attr_text": {
+      "args": {
+        "args": [
+          [
+            "expr",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "str"
+    },
+    "_verify_axis": {
+      "args": {
+        "args": [
+          [
+            "axis",
+            "Attribute"
+          ],
+          [
+            "rank",
+            "int"
+          ],
+          [
+            "op_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "int"
+    },
+    "_verify_symbol_ptr_template_name": {
+      "args": {
+        "args": [
+          [
+            "template_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "None"
+    }
+  },
+  "tuner": {
+    "_pattern_symbol_attr": {
+      "args": {
+        "args": [
+          [
+            "value",
+            "str | SymbolRefAttr"
+          ],
+          [
+            "op_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "SymbolRefAttr"
+    },
+    "_raise_verify_error": {
+      "args": {
+        "args": [
+          [
+            "expected",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "None"
+    },
+    "_verify_pattern_id_result_type": {
+      "args": {
+        "args": [
+          [
+            "result_type",
+            "Attribute"
+          ],
+          [
+            "op_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "SymbolValueType"
+    },
+    "_verify_symbol_ref_attr": {
+      "args": {
+        "args": [
+          [
+            "attr",
+            "Attribute"
+          ],
+          [
+            "op_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "SymbolRefAttr"
+    },
+    "_verify_symbol_value_result_type": {
+      "args": {
+        "args": [
+          [
+            "result_type",
+            "Attribute"
+          ],
+          [
+            "op_name",
+            "str"
+          ]
+        ],
+        "defaults": [],
+        "kw_defaults": [],
+        "kwarg": null,
+        "kwonlyargs": [],
+        "posonlyargs": [],
+        "vararg": null
+      },
+      "kind": "function",
+      "returns": "SymbolValueType"
+    }
+  }
+}

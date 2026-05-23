@@ -33,9 +33,9 @@
 - 创建者：`未记录`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dialect/arch.md`](../../spec/dialect/arch.md)
-- `功能实现`：[`kernel_gen/dialect/arch.py`](../../kernel_gen/dialect/arch.py)
+- `功能实现`：[`kernel_gen/dialect/arch/`](../../kernel_gen/dialect/arch/)
 - 包级导出例外：[`kernel_gen/dialect/__init__.py`](../../kernel_gen/dialect/__init__.py)
-- `test`：[`test/dialect/test_arch.py`](../../test/dialect/test_arch.py)
+- `test`：[`test/dialect/arch/`](../../test/dialect/arch/)
 
 ## 依赖
 
@@ -385,8 +385,8 @@
 
 ## 测试
 
-- 测试文件：`test/dialect/test_arch.py`
-- 执行命令：`pytest -q test/dialect/test_arch.py`
+- 测试文件：`test/dialect/arch/`
+- 执行命令：`pytest -q test/dialect/arch/`
 
 ### 测试目标
 
@@ -416,3 +416,10 @@
 | TC-ARCH-013 | 解析/打印 | `!arch.token` 与 token/sign/wait 合法路径 | 准备 `!symbol.int` count 与合法 token id。 | 运行 `test_arch_token_sign_wait_success`。 | token type、token op、sign/wait op verifier 通过。 | `test_arch_token_sign_wait_success` |
 | TC-ARCH-014 | 边界/异常 | token/sign/wait verifier 边界 | 准备空 id、id mismatch、非 `!symbol.int` count、负 count、sign 非正 count 与非 token event。 | 运行 `test_arch_token_sign_wait_verify_errors`。 | verifier 按公开错误语义拒绝非法 token/sign/wait 输入。 | `test_arch_token_sign_wait_verify_errors` |
 | TC-ARCH-015 | pass 改写 | token/sign/wait 副作用保留 | 准备只含 token/sign/wait 的 module。 | 运行 `test_arch_token_ops_survive_public_dce`。 | 通用 pass manager 后 token/sign/wait 不被当作纯冗余 op 删除。 | `test_arch_token_ops_survive_public_dce` |
+
+
+## Package Split 边界
+
+- 当前实现入口为 `kernel_gen/dialect/arch/` package root；旧单文件 `kernel_gen/dialect/arch/` 不保留 shim。
+- 当前测试入口为 `test/dialect/arch/`；旧大测试文件 `test/dialect/arch/test_arch.py` 不保留 shim。
+- `kernel_gen.dialect.arch` root import 是稳定公开入口，内部 `attr/type/operation/expr/common` 子模块只服务 package 实现，不作为外部公开 API。

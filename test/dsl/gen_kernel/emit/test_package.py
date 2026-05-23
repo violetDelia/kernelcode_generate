@@ -1162,7 +1162,7 @@ def test_emit_c_memory_space_template_alloc() -> None:
 # 功能说明: 验证 kernel-family 节点在 emit_c 中会生成稳定 helper 文本，并对未实现的 reduce kind 显式失败。
 # 测试目的: 覆盖 exp/select/reduce/reduce_min/img2col1d/img2col2d 的节点级源码出口，避免这些路径在 coverage 里长期空白。
 # 使用示例: pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_op_lowers_kernel_family_and_rejects_unsupported_reduce_kind
-# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/__init__.py, kernel_gen/dialect/kernel.py
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/__init__.py, kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dsl/gen_kernel/emit.md, spec/dialect/kernel.md
 # 对应测试文件路径: test/dsl/gen_kernel/emit/test_package.py
 def test_emit_c_op_lowers_kernel_family_and_rejects_unsupported_reduce_kind() -> None:

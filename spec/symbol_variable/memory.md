@@ -36,7 +36,7 @@
 - 创建者：`未记录`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
-- `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)、[`test/dialect/test_symbol.py`](../../test/dialect/test_symbol.py)
+- `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)、[`test/dialect/symbol/test_symbol.py`](../../test/dialect/symbol/test_symbol.py)
 - `功能实现`：[`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)
 
 ## 依赖
@@ -576,7 +576,7 @@ assert cloned.get_format() is mem.get_format()
 ## 测试
 
 - 测试文件：
-  - `test/dialect/test_symbol.py`
+  - `test/dialect/symbol/test_symbol.py`
   - `test/symbol_variable/test_memory.py`
   - `test/symbol_variable/test_memory_operation.py`
 - 执行命令：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/symbol_variable/test_memory.py`

@@ -7,7 +7,7 @@
 - `tuner.select` 与 `tuner.launch` 只通过公开 constructor 或公开文本 IR parse/verify 入口验证。
 
 使用示例:
-- pytest -q test/dialect/test_tuner.py
+- pytest -q test/dialect/tuner/test_tuner.py
 
 当前覆盖率信息:
 - 不再要求覆盖率；本文件以功能测试闭环为准。
@@ -16,9 +16,9 @@
 - 不再要求覆盖率命令；本文件以功能测试闭环为准。
 
 关联文件:
-- 功能实现: kernel_gen/dialect/tuner.py
+- 功能实现: kernel_gen/dialect/tuner/
 - Spec 文档: spec/dialect/tuner.md
-- 测试文件: test/dialect/test_tuner.py
+- 测试文件: test/dialect/tuner/test_tuner.py
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from xdsl.parser import Parser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -58,8 +58,8 @@ def _build_context() -> Context:
 
     关联文件:
     - spec: spec/dialect/tuner.md
-    - test: test/dialect/test_tuner.py
-    - 功能实现: kernel_gen/dialect/tuner.py
+    - test: test/dialect/tuner/test_tuner.py
+    - 功能实现: kernel_gen/dialect/tuner/
     """
 
     ctx = Context()
@@ -83,8 +83,8 @@ def _print_ir(value: Attribute | Operation) -> str:
 
     关联文件:
     - spec: spec/dialect/tuner.md
-    - test: test/dialect/test_tuner.py
-    - 功能实现: kernel_gen/dialect/tuner.py
+    - test: test/dialect/tuner/test_tuner.py
+    - 功能实现: kernel_gen/dialect/tuner/
     """
 
     stream = StringIO()
@@ -100,7 +100,7 @@ def _print_ir(value: Attribute | Operation) -> str:
 
 # TC-TUNER-001
 # 测试目的: 验证 tuner.param 的 parse/print round-trip 与结果类型稳定。
-# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应功能实现文件路径: kernel_gen/dialect/tuner/
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_param_round_trip() -> None:
     ctx = _build_context()
@@ -121,7 +121,7 @@ builtin.module {
 
 # TC-TUNER-002
 # 测试目的: 验证 tuner.param 拒绝非 !symbol.int<#symbol.expr<name>> 的结果类型。
-# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应功能实现文件路径: kernel_gen/dialect/tuner/
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_param_rejects_invalid_result_type() -> None:
     invalid_types = [
@@ -136,7 +136,7 @@ def test_tuner_param_rejects_invalid_result_type() -> None:
 
 # TC-TUNER-003
 # 测试目的: 验证 tuner.param 对非名称 symbol.int 的错误路径。
-# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应功能实现文件路径: kernel_gen/dialect/tuner/
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_param_rejects_invalid_name() -> None:
     for result_type in [
@@ -162,7 +162,7 @@ builtin.module {
 
 # TC-TUNER-004
 # 测试目的: 验证 tuner.cost 的 parse/print round-trip、operand 透传与固定 symbol.int 结果。
-# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应功能实现文件路径: kernel_gen/dialect/tuner/
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_cost_round_trip() -> None:
     ctx = _build_context()
@@ -191,7 +191,7 @@ builtin.module {
 
 # TC-TUNER-004B
 # 测试目的: 验证 tuner.cost 对任意非空 cost_kind 字符串都可 parse/print 与 verify。
-# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应功能实现文件路径: kernel_gen/dialect/tuner/
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_cost_accepts_arbitrary_non_empty_cost_kinds() -> None:
     ctx = _build_context()
@@ -217,7 +217,7 @@ builtin.module {
 
 # TC-TUNER-005
 # 测试目的: 验证 tuner.cost 拒绝空白 cost_kind，并继续拒绝旧公开 attrs。
-# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应功能实现文件路径: kernel_gen/dialect/tuner/
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_cost_rejects_invalid_kind_attrs() -> None:
     value = TunerParamOp(SymbolValueType.from_expr("BLOCK_M")).result
@@ -251,7 +251,7 @@ def test_tuner_cost_rejects_invalid_kind_attrs() -> None:
 
 # TC-TUNER-006
 # 测试目的: 验证 tuner.cost 缺少必填 attrs 或结果类型不是 symbol.int 时会报错。
-# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应功能实现文件路径: kernel_gen/dialect/tuner/
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_cost_rejects_missing_attrs_or_invalid_result_type() -> None:
     ctx = _build_context()
@@ -279,7 +279,7 @@ builtin.module {
 
 # TC-TUNER-007
 # 测试目的: 验证 tuner.select 的 parse/print、patterns attrs 与固定 pattern_id 结果类型。
-# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应功能实现文件路径: kernel_gen/dialect/tuner/
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_select_round_trip() -> None:
     ctx = _build_context()
@@ -304,7 +304,7 @@ builtin.module {
 
 # TC-TUNER-008
 # 测试目的: 验证 tuner.select 拒绝空 patterns、非 flat SymbolRefAttr 与非 pattern_id 结果类型。
-# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应功能实现文件路径: kernel_gen/dialect/tuner/
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_select_rejects_invalid_contract() -> None:
     with pytest.raises(VerifyException, match="tuner.select patterns must be non-empty"):
@@ -338,7 +338,7 @@ builtin.module {
 
 # TC-TUNER-009
 # 测试目的: 验证 tuner.launch 的 parse/print、callee 与 operand type list 合同。
-# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应功能实现文件路径: kernel_gen/dialect/tuner/
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_launch_round_trip() -> None:
     ctx = _build_context()
@@ -364,7 +364,7 @@ builtin.module {
 
 # TC-TUNER-010
 # 测试目的: 验证 tuner.launch 拒绝嵌套 callee、错误参数类型列表与非空 result。
-# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应功能实现文件路径: kernel_gen/dialect/tuner/
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_launch_rejects_invalid_contract() -> None:
     ctx = _build_context()
@@ -421,7 +421,7 @@ builtin.module {
 
 # TC-TUNER-011
 # 测试目的: 验证 TunerLaunchOp constructor 签名只暴露 spec/API 定义的 callee 与 args。
-# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应功能实现文件路径: kernel_gen/dialect/tuner/
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_launch_public_signature_matches_spec() -> None:
     signature = inspect.signature(TunerLaunchOp)
@@ -432,7 +432,7 @@ def test_tuner_launch_public_signature_matches_spec() -> None:
 
 # TC-TUNER-012
 # 测试目的: 验证导入 tuner dialect 不会全局替换 xDSL Context.load_dialect。
-# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应功能实现文件路径: kernel_gen/dialect/tuner/
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_import_does_not_patch_context_load_dialect() -> None:
     assert Context.load_dialect.__module__ == "xdsl.context"

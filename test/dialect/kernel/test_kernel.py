@@ -5,15 +5,15 @@
 - 覆盖 kernel dialect 的 verifier 约束与 memory type 复用规则。
 
 使用示例:
-- pytest -q test/dialect/test_kernel.py
+- pytest -q test/dialect/kernel/test_kernel.py
 
 当前覆盖率信息: 100%（2026-03-22 13:05:49 +0800）
-覆盖率命令: pytest -q --cov=kernel_gen.dialect.kernel --cov-report=term-missing test/dialect/test_kernel.py
+覆盖率命令: pytest -q --cov=kernel_gen.dialect.kernel --cov-report=term-missing test/dialect/kernel/test_kernel.py
 
 关联文件:
-- 功能实现: kernel_gen/dialect/kernel.py
+- 功能实现: kernel_gen/dialect/kernel/
 - Spec 文档: spec/dialect/kernel.md
-- 测试文件: test/dialect/test_kernel.py
+- 测试文件: test/dialect/kernel/test_kernel.py
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ from xdsl.ir import Attribute, Operation, SSAValue
 from xdsl.traits import MemoryEffectKind, get_effects
 from xdsl.utils.exceptions import VerifyException
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -71,8 +71,8 @@ def _make_space(name: str) -> NnMemorySpaceAttr:
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel.py
-    - 功能实现: kernel_gen/dialect/kernel.py
+    - test: test/dialect/kernel/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel/
     """
 
     return NnMemorySpaceAttr(StringAttr(name))
@@ -121,8 +121,8 @@ def _make_memory_type(
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel.py
-    - 功能实现: kernel_gen/dialect/kernel.py
+    - test: test/dialect/kernel/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel/
     """
 
     if shape is None:
@@ -144,8 +144,8 @@ def _make_value(memory_type: NnMemoryType):
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel.py
-    - 功能实现: kernel_gen/dialect/kernel.py
+    - test: test/dialect/kernel/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel/
     """
 
     return _TestOp(result_types=[memory_type]).results[0]
@@ -163,8 +163,8 @@ def _const_i32(value: int) -> SSAValue:
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel.py
-    - 功能实现: kernel_gen/dialect/kernel.py
+    - test: test/dialect/kernel/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel/
     """
 
     return arith.ConstantOp(IntegerAttr(value, i32)).result
@@ -182,8 +182,8 @@ def _symbol_const_i32(value: int) -> SSAValue:
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel.py
-    - 功能实现: kernel_gen/dialect/kernel.py
+    - test: test/dialect/kernel/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel/
     """
 
     return SymbolConstOp(value).result
@@ -201,8 +201,8 @@ def _cast_i32_to_symbol(value: int) -> SSAValue:
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel.py
-    - 功能实现: kernel_gen/dialect/kernel.py
+    - test: test/dialect/kernel/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel/
     """
 
     cast = UnrealizedConversionCastOp.get(
@@ -224,8 +224,8 @@ def _effect_kinds_by_value(op: Operation) -> set[tuple[MemoryEffectKind, SSAValu
 
     关联文件:
     - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel.py
-    - 功能实现: kernel_gen/dialect/kernel.py
+    - test: test/dialect/kernel/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel/
     """
 
     effects = get_effects(op)
@@ -235,10 +235,10 @@ def _effect_kinds_by_value(op: Operation) -> set[tuple[MemoryEffectKind, SSAValu
 
 # TC-KRN-001
 # 功能说明: 验证合法 space 可通过校验。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_space_attr_valid
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_space_attr_valid
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_space_attr_valid() -> None:
     space = _make_space("global")
     space.verify()
@@ -246,10 +246,10 @@ def test_kernel_space_attr_valid() -> None:
 
 # TC-KRN-002
 # 功能说明: 验证非法 space 被拒绝。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_space_attr_invalid
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_space_attr_invalid
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_space_attr_invalid() -> None:
     with pytest.raises(VerifyException, match="nn space"):
         NnMemorySpaceAttr(StringAttr("invalid"))
@@ -257,10 +257,10 @@ def test_kernel_space_attr_invalid() -> None:
 
 # TC-KRN-003
 # 功能说明: 验证 shape/stride rank 不一致被拒绝。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_memory_type_rank_mismatch
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_memory_type_rank_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_memory_type_rank_mismatch() -> None:
     with pytest.raises(VerifyException, match="shape and stride rank"):
         _make_memory_type(shape=_dim_array([2, 4]), stride=_dim_array([1]))
@@ -268,10 +268,10 @@ def test_kernel_memory_type_rank_mismatch() -> None:
 
 # TC-KRN-004
 # 功能说明: 验证 kernel.binary_elewise(kind="add") 正常路径可通过。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_binary_elewise_add_success
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_binary_elewise_add_success
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_binary_elewise_add_success() -> None:
     memory_type = _make_memory_type()
     lhs = _make_value(memory_type)
@@ -283,10 +283,10 @@ def test_kernel_binary_elewise_add_success() -> None:
 
 # TC-KRN-004A
 # 功能说明: 验证 kernel.binary_elewise 暴露 out WRITE 与 lhs/rhs READ MemoryEffect。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_binary_elewise_memory_effects
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_binary_elewise_memory_effects
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_binary_elewise_memory_effects() -> None:
     memory_type = _make_memory_type()
     out = _make_value(memory_type)
@@ -303,10 +303,10 @@ def test_kernel_binary_elewise_memory_effects() -> None:
 
 # TC-KRN-005
 # 功能说明: 验证 kernel.binary_elewise(kind="add") 的 layout 或 element_type 不一致时报错。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_binary_elewise_add_layout_mismatch
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_binary_elewise_add_layout_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_binary_elewise_add_layout_mismatch() -> None:
     lhs_type = _make_memory_type(shape=_dim_array([2, 4]))
     rhs_type = _make_memory_type(shape=_dim_array([2, 5]))
@@ -387,10 +387,10 @@ def test_kernel_binary_elewise_add_layout_mismatch() -> None:
 
 # TC-KRN-006
 # 功能说明: 验证 kernel.binary_elewise(kind="eq") 的输出类型为 i1。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_binary_elewise_compare_output_type
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_binary_elewise_compare_output_type
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_binary_elewise_compare_output_type() -> None:
     lhs_type = _make_memory_type(element_type=i32)
     rhs_type = _make_memory_type(element_type=i32)
@@ -407,10 +407,10 @@ def test_kernel_binary_elewise_compare_output_type() -> None:
 
 # TC-KRN-007
 # 功能说明: 验证 kernel.binary_elewise 比较类输出类型非法或 kind 非法时报错。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_binary_elewise_compare_output_type_error
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_binary_elewise_compare_output_type_error
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_binary_elewise_compare_output_type_error() -> None:
     lhs_type = _make_memory_type(element_type=i32)
     rhs_type = _make_memory_type(element_type=i32)
@@ -467,10 +467,10 @@ def test_kernel_binary_elewise_compare_output_type_error() -> None:
 
 # TC-KRN-024
 # 功能说明: 验证 kernel.binary_elewise 公开 kind 输入矩阵与非字符串拒绝边界。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_binary_elewise_public_kind_matrix
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_binary_elewise_public_kind_matrix
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_binary_elewise_public_kind_matrix() -> None:
     memory_type = _make_memory_type()
     bool_memory_type = _make_memory_type(element_type=i1)
@@ -507,10 +507,10 @@ def test_kernel_binary_elewise_public_kind_matrix() -> None:
 
 # TC-KRN-008
 # 功能说明: 验证 kernel.select 条件类型非法报错。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_select_cond_type_error
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_select_cond_type_error
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_select_cond_type_error() -> None:
     cond_type = _make_memory_type(element_type=i32)
     lhs_type = _make_memory_type(element_type=i32)
@@ -539,10 +539,10 @@ def test_kernel_select_cond_type_error() -> None:
 
 # TC-KRN-010
 # 功能说明: 验证 kernel op 不产生 SSA result。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_ops_no_result
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_ops_no_result
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_ops_no_result() -> None:
     memory_type = _make_memory_type()
     lhs = _make_value(memory_type)
@@ -625,10 +625,10 @@ def test_kernel_ops_no_result() -> None:
 
 # TC-KRN-011
 # 功能说明: 验证 kernel.exp 正常路径可通过。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_exp_success
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_exp_success
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_exp_success() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     out_type = _make_memory_type(element_type=Float32Type())
@@ -638,10 +638,10 @@ def test_kernel_exp_success() -> None:
 
 # TC-KRN-011A
 # 功能说明: 验证 kernel.exp 暴露 out WRITE 与 input READ MemoryEffect。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_exp_memory_effects
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_exp_memory_effects
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_exp_memory_effects() -> None:
     input_value = _make_value(_make_memory_type(element_type=Float32Type()))
     out = _make_value(_make_memory_type(element_type=Float32Type()))
@@ -655,10 +655,10 @@ def test_kernel_exp_memory_effects() -> None:
 
 # TC-KRN-013
 # 功能说明: 验证 kernel.exp 支持 bf16 element_type。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_exp_supports_bf16
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_exp_supports_bf16
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_exp_supports_bf16() -> None:
     input_type = _make_memory_type(element_type=BFloat16Type())
     out_type = _make_memory_type(element_type=BFloat16Type())
@@ -668,10 +668,10 @@ def test_kernel_exp_supports_bf16() -> None:
 
 # TC-KRN-012
 # 功能说明: 验证 kernel.exp 拒绝非浮点 element_type。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_exp_requires_float
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_exp_requires_float
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_exp_requires_float() -> None:
     input_type = _make_memory_type(element_type=i32)
     out_type = _make_memory_type(element_type=i32)
@@ -682,10 +682,10 @@ def test_kernel_exp_requires_float() -> None:
 
 # TC-KRN-014
 # 功能说明: 验证 kernel.matmul 允许 out/lhs/rhs 使用不同合法 memory space。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_matmul_allows_mixed_spaces
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_matmul_allows_mixed_spaces
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_matmul_allows_mixed_spaces() -> None:
     lhs_type = _make_memory_type(
         shape=_dim_array([2, 3]),
@@ -713,10 +713,10 @@ def test_kernel_matmul_allows_mixed_spaces() -> None:
 
 # TC-KRN-014A
 # 功能说明: 验证 kernel.matmul 暴露 out WRITE 与 lhs/rhs READ MemoryEffect。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_matmul_memory_effects
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_matmul_memory_effects
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_matmul_memory_effects() -> None:
     lhs_type = _make_memory_type(shape=_dim_array([2, 3]))
     rhs_type = _make_memory_type(shape=_dim_array([3, 4]))
@@ -735,10 +735,10 @@ def test_kernel_matmul_memory_effects() -> None:
 
 # TC-KRN-016A
 # 功能说明: 验证 kernel.select 暴露 out WRITE 与 cond/lhs/rhs READ MemoryEffect。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_select_memory_effects
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_select_memory_effects
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_select_memory_effects() -> None:
     cond = _make_value(_make_memory_type(element_type=i1))
     lhs = _make_value(_make_memory_type())
@@ -756,10 +756,10 @@ def test_kernel_select_memory_effects() -> None:
 
 # TC-KRN-014
 # 功能说明: 验证 kernel.matmul dtype mismatch 被拒绝。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_matmul_dtype_mismatch
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_matmul_dtype_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_matmul_dtype_mismatch() -> None:
     lhs_type = _make_memory_type(
         shape=_dim_array([2, 3]),
@@ -785,10 +785,10 @@ def test_kernel_matmul_dtype_mismatch() -> None:
 
 # TC-KRN-015
 # 功能说明: 验证 kernel.matmul 拒绝非二维 operand 与形状不匹配。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_matmul_rank_shape_contract
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_matmul_rank_shape_contract
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_matmul_rank_shape_contract() -> None:
     lhs_type = _make_memory_type(shape=_dim_array([2, 3]))
     rhs_rank3_type = _make_memory_type(
@@ -828,10 +828,10 @@ def test_kernel_matmul_rank_shape_contract() -> None:
 
 # TC-KRN-025
 # 功能说明: 验证 kernel.matmul mixed-space 公开矩阵与非法 space 拒绝边界。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_matmul_space_contract_matrix
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_matmul_space_contract_matrix
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_matmul_space_contract_matrix() -> None:
     for out_space, lhs_space, rhs_space, attr_space in [
         ("global", "global", "local", "global"),
@@ -886,10 +886,10 @@ def test_kernel_matmul_space_contract_matrix() -> None:
 
 # TC-KRN-017
 # 功能说明: 验证 kernel.img2col1d/img2col2d 保持结构化输出与显式窗口属性。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_img2col_structured_contract
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_img2col_structured_contract
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_img2col_structured_contract() -> None:
     img2col1d_input_type = _make_memory_type(
         shape=_dim_array([1, 3, 5]),
@@ -941,10 +941,10 @@ def test_kernel_img2col_structured_contract() -> None:
 
 # TC-KRN-017A
 # 功能说明: 验证 kernel.img2col1d/img2col2d 暴露 out WRITE 与 input READ MemoryEffect。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_img2col_memory_effects
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_img2col_memory_effects
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_img2col_memory_effects() -> None:
     input1d = _make_value(
         _make_memory_type(
@@ -1013,10 +1013,10 @@ def test_kernel_img2col_memory_effects() -> None:
 
 # TC-KRN-017B
 # 功能说明: 验证 kernel.reduce 与 kernel.reduce_min 暴露 out WRITE 与 input READ MemoryEffect。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_reduce_memory_effects
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_reduce_memory_effects
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_reduce_memory_effects() -> None:
     input_type = _make_memory_type(shape=_dim_array([2, 4]), element_type=Float32Type())
     out_type = _make_memory_type(shape=_dim_array([2]), stride=_dim_array([1]), element_type=Float32Type())
@@ -1037,10 +1037,10 @@ def test_kernel_reduce_memory_effects() -> None:
 
 # TC-KRN-018
 # 功能说明: 验证 kernel.img2col1d/img2col2d 拒绝非法输入 rank 或 layout。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_img2col_input_rank_layout_contract
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_img2col_input_rank_layout_contract
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_img2col_input_rank_layout_contract() -> None:
     img2col1d_output_type = _make_memory_type(
         shape=_dim_array([1, 3, 3, 3]),
@@ -1182,10 +1182,10 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
 
 # TC-KRN-019
 # 功能说明: 验证 kernel.img2col1d/img2col2d 拒绝结构化输出形状与推导关系不一致（含公式结果 < 1）。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_img2col_output_extent_contract
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_img2col_output_extent_contract
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_img2col_output_extent_contract() -> None:
     img2col1d_input_type = _make_memory_type(
         shape=_dim_array([1, 3, 5]),
@@ -1366,10 +1366,10 @@ def test_kernel_img2col_output_extent_contract() -> None:
 
 # TC-KRN-026
 # 功能说明: 验证 kernel.img2col1d 参数 operand 的公开 symbol/cast/动态与非法值矩阵。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_img2col1d_public_param_operand_matrix
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_img2col1d_public_param_operand_matrix
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_img2col1d_public_param_operand_matrix() -> None:
     input_type = _make_memory_type(
         shape=_dim_array([1, 3, 5]),
@@ -1471,10 +1471,10 @@ def test_kernel_img2col1d_public_param_operand_matrix() -> None:
 
 # TC-KRN-027
 # 功能说明: 验证 kernel.img2col2d 的 space/dtype、动态参数和窗口轴公开矩阵。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_img2col2d_public_contract_matrix
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_img2col2d_public_contract_matrix
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_img2col2d_public_contract_matrix() -> None:
     input_type = _make_memory_type(
         shape=_dim_array([1, 3, 5, 5]),
@@ -1617,10 +1617,10 @@ def test_kernel_img2col2d_public_contract_matrix() -> None:
 
 # TC-KRN-023
 # 功能说明: 验证 kernel.reduce_min 正常路径可通过。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_reduce_min_success
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_reduce_min_success
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_reduce_min_success() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     out_type = _make_memory_type(
@@ -1640,10 +1640,10 @@ def test_kernel_reduce_min_success() -> None:
 
 # TC-KRN-020
 # 功能说明: 验证 kernel.reduce_min axis 越界会报错。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_reduce_min_axis_error
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_reduce_min_axis_error
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_reduce_min_axis_error() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     out_type = _make_memory_type(
@@ -1664,10 +1664,10 @@ def test_kernel_reduce_min_axis_error() -> None:
 
 # TC-KRN-022
 # 功能说明: 验证 kernel.reduce_min 拒绝 out.shape 不一致。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_reduce_min_out_shape_mismatch
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_reduce_min_out_shape_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_reduce_min_out_shape_mismatch() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     out_type = _make_memory_type(
@@ -1688,10 +1688,10 @@ def test_kernel_reduce_min_out_shape_mismatch() -> None:
 
 # TC-KRN-021
 # 功能说明: 验证 kernel.reduce_min 拒绝 keepdim 非 i1。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_reduce_min_keepdim_error
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_reduce_min_keepdim_error
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_reduce_min_keepdim_error() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     out_type = _make_memory_type(
@@ -1712,10 +1712,10 @@ def test_kernel_reduce_min_keepdim_error() -> None:
 
 # TC-KRN-028
 # 功能说明: 验证 kernel.reduce 通用公开入口的 kind/axis/keepdim 与 shape 矩阵。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_reduce_public_kind_axis_keepdim_matrix
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_reduce_public_kind_axis_keepdim_matrix
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_reduce_public_kind_axis_keepdim_matrix() -> None:
     input_type = _make_memory_type(
         shape=_dim_array([2, 3]),
@@ -1835,10 +1835,10 @@ def test_kernel_reduce_public_kind_axis_keepdim_matrix() -> None:
 
 # TC-KRN-029
 # 功能说明: 验证 kernel.reduce_min 的 dtype 和 space 公开拒绝矩阵。
-# 使用示例: pytest -q test/dialect/test_kernel.py -k test_kernel_reduce_min_dtype_space_matrix
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_reduce_min_dtype_space_matrix
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel.py
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_reduce_min_dtype_space_matrix() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     keepdim_out_type = _make_memory_type(

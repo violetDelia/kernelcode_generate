@@ -1,22 +1,18 @@
-"""Memory dialect definitions.
-
+"""memory get_data operation.
 
 功能说明:
-- 定义 memory dialect 的公开数据指针查询 op。
-- `memory.get_data` 从 `!nn.memory<...>` 获取数据指针值，并保留 memory element dtype 与 template name。
+- 定义 memory.get_data op。
 
 API 列表:
-- `Memory = Dialect("memory", [MemoryGetDataOp], [])`
 - `class MemoryGetDataOp(source: SSAValue | Operation, result_type: Attribute | None = None)`
 
 使用示例:
-- from kernel_gen.dialect.memory import MemoryGetDataOp
-- op = MemoryGetDataOp(memory_value)
+- `from kernel_gen.dialect.memory.operation import ...`
 
 关联文件:
 - spec: spec/dialect/memory.md
-- test: test/dialect/test_memory.py
-- 功能实现: kernel_gen/dialect/memory.py
+- test: test/dialect/memory/
+- 功能实现: kernel_gen/dialect/memory/operation/get_data.py
 """
 
 from __future__ import annotations
@@ -48,7 +44,6 @@ def _infer_memory_get_data_result_type(source: SSAValue | Operation) -> SymbolPt
         raise VerifyException("memory.get_data source must be !nn.memory")
     source_type.verify()
     return SymbolPtrType(source_type.element_type, source_type.template_name)
-
 
 @irdl_op_definition
 class MemoryGetDataOp(IRDLOperation):
@@ -138,16 +133,4 @@ class MemoryGetDataOp(IRDLOperation):
         source = parser.resolve_operand(unresolved_source, source_type)
         return cls(source, result_type)
 
-
-Memory = Dialect(
-    "memory",
-    [
-        MemoryGetDataOp,
-    ],
-    [],
-)
-
-__all__ = [
-    "Memory",
-    "MemoryGetDataOp",
-]
+__all__ = ["MemoryGetDataOp", "_infer_memory_get_data_result_type"]

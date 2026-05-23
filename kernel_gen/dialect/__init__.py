@@ -41,13 +41,12 @@ API 列表:
 
 关联文件:
 - spec: spec/dialect/arch.md
-- test: test/dialect/test_arch.py
+- test: test/dialect/arch/test_arch.py
 - 功能实现: kernel_gen/dialect/__init__.py
 """
 
 from __future__ import annotations
 
-from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 __all__ = [
@@ -154,7 +153,7 @@ def __getattr__(name: str) -> Any:
 
 
     功能说明:
-    - 避免包初始化时导入 `arch/nn`，仅在实际访问导出符号时再加载对应模块。
+    - 避免包初始化时导入 `arch/nn`，仅在实际访问导出符号时再按固定分支加载对应模块。
 
     使用示例:
     - from kernel_gen.dialect import NnMemoryType
@@ -169,7 +168,12 @@ def __getattr__(name: str) -> Any:
     module_name = _LAZY_EXPORT_MODULE.get(name)
     if module_name is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    module = import_module(module_name, __name__)
+    if module_name == ".arch":
+        from . import arch as module
+    elif module_name == ".nn":
+        from . import nn as module
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     value = getattr(module, name)
     globals()[name] = value
     return value

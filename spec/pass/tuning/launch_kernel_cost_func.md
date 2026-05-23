@@ -27,7 +27,7 @@
 - `test`：
   - [`test/passes/tuning/test_launch_kernel_cost_func.py`](../../../test/passes/tuning/test_launch_kernel_cost_func.py)
   - [`test/passes/test_registry.py`](../../../test/passes/test_registry.py)
-  - [`test/dialect/test_tuner.py`](../../../test/dialect/test_tuner.py)
+  - [`test/dialect/tuner/test_tuner.py`](../../../test/dialect/tuner/test_tuner.py)
 
 ## 依赖
 
@@ -330,13 +330,13 @@ kernel.add -> tuner.cost(op_name="kernel.add")
 ## 测试
 
 - 测试文件：
-  - `test/dialect/test_tuner.py`
+  - `test/dialect/tuner/test_tuner.py`
   - `test/passes/test_registry.py`
   - `test/passes/tuning/test_launch_kernel_cost_func.py`
 - 执行命令：
   - `pytest -q test/passes/tuning/test_launch_kernel_cost_func.py -k "launch_kernel_cost_func"`
   - `pytest -q test/passes/test_registry.py -k "launch_kernel_cost_func"`
-  - `pytest -q test/dialect/test_tuner.py -k "tuner_cost"`
+  - `pytest -q test/dialect/tuner/test_tuner.py -k "tuner_cost"`
 
 ### 测试目标
 

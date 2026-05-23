@@ -5,12 +5,12 @@
 - 覆盖 `memory.get_data` 的公开构造、parse/print、verifier 与错误边界。
 
 使用示例:
-- pytest -q test/dialect/test_memory.py
+- pytest -q test/dialect/memory/test_memory.py
 
 关联文件:
-- 功能实现: kernel_gen/dialect/memory.py
+- 功能实现: kernel_gen/dialect/memory/
 - Spec 文档: spec/dialect/memory.md
-- 测试文件: test/dialect/test_memory.py
+- 测试文件: test/dialect/memory/test_memory.py
 """
 
 from __future__ import annotations

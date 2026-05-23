@@ -19,9 +19,9 @@
 - 创建者：`未记录`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dialect/tuner.md`](../../spec/dialect/tuner.md)
-- `功能实现`：[`kernel_gen/dialect/tuner.py`](../../kernel_gen/dialect/tuner.py)
+- `功能实现`：[`kernel_gen/dialect/tuner/`](../../kernel_gen/dialect/tuner/)
 - `test`：
-  - [`test/dialect/test_tuner.py`](../../test/dialect/test_tuner.py)
+  - [`test/dialect/tuner/`](../../test/dialect/tuner/)
   - [`test/passes/tuning/test_launch_kernel_cost_func.py`](../../test/passes/tuning/test_launch_kernel_cost_func.py)
 
 ## 依赖
@@ -159,10 +159,10 @@
 ## 测试
 
 - 测试文件：
-  - `test/dialect/test_tuner.py`
+  - `test/dialect/tuner/`
   - `test/passes/tuning/test_launch_kernel_cost_func.py`
 - 执行命令：
-  - `pytest -q test/dialect/test_tuner.py -k "tuner_cost"`
+  - `pytest -q test/dialect/tuner/ -k "tuner_cost"`
   - `pytest -q test/passes/tuning/test_launch_kernel_cost_func.py -k "launch_kernel_cost_func"`
 
 ### 测试目标
@@ -181,3 +181,10 @@
 | TC-TUNER-004 | 解析/打印 | `tuner.cost` parse/print 与 operand 透传稳定，结果类型固定为 `!symbol.int<#symbol.expr<...>>` | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_tuner_cost_round_trip`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_tuner_cost_round_trip` |
 | TC-TUNER-005 | 边界/异常 | `tuner.cost.cost_kind` 必须是非空字符串，并拒绝旧 `kind / device_func` attrs | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_tuner_cost_rejects_invalid_kind_attrs`。 | “`tuner.cost.cost_kind` 必须是非空字符串，并拒绝旧 `kind / device_func` attrs”场景按公开错误语义失败或被拒绝。 | `test_tuner_cost_rejects_invalid_kind_attrs` |
 | TC-TUNER-006 | 边界/异常 | `tuner.cost` 必须包含 `cost_kind / op_name`，且结果类型必须为 `!symbol.int<#symbol.expr<...>>` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_tuner_cost_rejects_missing_attrs_or_invalid_result_type`。 | “`tuner.cost` 必须包含 `cost_kind / op_name`，且结果类型必须为 `!symbol.int<#symbol.expr<...>>`”场景按公开错误语义失败或被拒绝。 | `test_tuner_cost_rejects_missing_attrs_or_invalid_result_type` |
+
+
+## Package Split 边界
+
+- 当前实现入口为 `kernel_gen/dialect/tuner/` package root；旧单文件 `kernel_gen/dialect/tuner/` 不保留 shim。
+- 当前测试入口为 `test/dialect/tuner/`；旧大测试文件 `test/dialect/tuner/test_tuner.py` 不保留 shim。
+- `kernel_gen.dialect.tuner` root import 是稳定公开入口，内部 `attr/type/operation/expr/common` 子模块只服务 package 实现，不作为外部公开 API。

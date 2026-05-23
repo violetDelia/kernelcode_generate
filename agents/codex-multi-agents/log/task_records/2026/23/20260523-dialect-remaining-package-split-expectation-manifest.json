@@ -1,0 +1,253 @@
+{
+  "files": [
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/__main__.py",
+      "sha256": "de7ca36bea5e53139a72231e2f6d7bbbdccf81da633353bfb8ccee55d2a513ca"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/__main__.py",
+      "sha256": "decfcb0780bc69ca81f0580e969a783bcab7885201797b4922e59f0523dcc657"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/attr/scope_attr.py",
+      "sha256": "2cbbbe20bc681d9bd0b5713bddc3d334fe65e1f13ba94d450464c8d126cb42fc"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/attr/visibility_attr.py",
+      "sha256": "61fa62badf3db643f372ab3e2b9b7b7d9f07b8e1150a43d83a8458db5a827d81"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/operation/barrier.py",
+      "sha256": "0d016902f0c31eb8962136b437349db732a9d575caf05cf439a6fdfe12f8cb25"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/operation/dynamic_memory.py",
+      "sha256": "43427bd711f80007c6b077718af744d89c262fedb2df2e0f6bbd22c5edecfcbe"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/operation/get_block_id.py",
+      "sha256": "e20e9d1d6c9ccafeec5cac709d5c066b98ec0ce0ffee7de2a8e0ed161b85068b"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/operation/get_block_num.py",
+      "sha256": "53f55d9598f274d906669fc2049eb33401264b42d71c5b419ee33bfe380f4ec6"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/operation/get_subthread_id.py",
+      "sha256": "c8098d99974bcd4038a84039679d6d6e12bded635edeb99b480e0f045c1537e5"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/operation/get_subthread_num.py",
+      "sha256": "7f057005536b5fa7d0404bed30c0fa26fb8232be80b3b21cf592cb6481c10eed"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/operation/get_thread_id.py",
+      "sha256": "daf0536a7b7b5988afd9a0a20a1c3a25fb37a3b7024199af4aeb2f5e6a87d889"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/operation/get_thread_num.py",
+      "sha256": "1b6c57f9aa219962c433c8226b1b150c6fd2cfa0353bc4f6e89271250c33998e"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/operation/launch.py",
+      "sha256": "016cfc8064aa662cae420e80a9b1a211d1fa010c1ad8c1179a4229a04daedba0"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/operation/launch_kernel.py",
+      "sha256": "bc7d1159b9aa4f7aee83361533cf0997756a81f71ae31a2a709f0bd2584c5501"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/operation/sign.py",
+      "sha256": "43ad234547040a77faf8ee9cb7de73d31931bc24d8782fcf48a0b5cf3620c750"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/operation/token.py",
+      "sha256": "e58211997c0693695261b5970b86a5b36c275beaffc67d2f28c09fc3e9d64aa2"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/operation/wait.py",
+      "sha256": "ae3bc77ea04e79f5974713be70c827eefd9ab4fc8557abe57573116c69491fc0"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/arch/type/token_type.py",
+      "sha256": "fab3469f9e03b75f47bfcc1c3c25b550910830b7bbb9d854615305f2df1858d2"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/kernel/__main__.py",
+      "sha256": "b0cd0fee39a0e9a11b2cb0c686699f02a269eb9876c7335a183fa8b1f95a8ef6"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/kernel/operation/binary_elewise.py",
+      "sha256": "cc61a630fcbdc8bbdfb045af5d9884bc7fe18783fac84ac44695078e4f30e2b0"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/kernel/operation/exp.py",
+      "sha256": "5ed764b5408921d879e10fb495a53ab6c5b78cc48fc524719d44d753553364a1"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/kernel/operation/img2col1d.py",
+      "sha256": "48e9a76b1d3fc6f41022ccdefd5f9739a0c4ca44ba824bbe7511d2f3d26d4481"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/kernel/operation/img2col2d.py",
+      "sha256": "e384dafe8ebd6516ce2fc3c592b216944e7147c9ae65306e826d229353b0e985"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/kernel/operation/matmul.py",
+      "sha256": "fab9727518d1536dd787ed7d4dc1808b3c18742dea400045cce256c894990c5e"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/kernel/operation/reduce.py",
+      "sha256": "52003f0ed9ad643959a020c23ee0fcc0a8be92e2f43d1a5d8554cf929aecd139"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/kernel/operation/reduce_min.py",
+      "sha256": "81138bcccdb99ea920f78b0e30e25ee62784c317955091a97ad11fe04636c317"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/kernel/operation/select.py",
+      "sha256": "ff633dd49a423c4995bf54697ceb02964c107063b49bafa10c3fbcd41502ea24"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/__main__.py",
+      "sha256": "4fc1c5aca1de05a55aa24df530e94014002169ab9645ac05233d5be76e4b38d4"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/attr/expr_attr/__main__.py",
+      "sha256": "4a0ae10556999f1d6ada5ff9d0aeea163fdc4db96b06759a049fbe0d3ae6510e"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/attr/expr_attr/add.py",
+      "sha256": "c5b2e04e0dd0795545e57738e5424550a68738771e8f186ad2d63d7a600b2c4f"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/attr/expr_attr/basic.py",
+      "sha256": "94d93ed20b4edb9a2a1c7a2b829ac10a1a4aa469b06975546cf0fbb86fa42117"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/attr/expr_attr/ceildiv.py",
+      "sha256": "2cd6b034bfcfb4267f1a0973ee560438803726ff16ded03452d485484fc5a193"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/attr/expr_attr/eq.py",
+      "sha256": "bdc196a8bc5f1f33becfc6a5ab615a6058781c2af09a51c79e1c5b929de6590d"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/attr/expr_attr/floordiv.py",
+      "sha256": "17c48edc13bf7dd889e6e85c571a6caf053bc5a232eea4e58f0bc3194041f37a"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/attr/expr_attr/invalid.py",
+      "sha256": "67ee0c64f6d7c4058be08d2baab5c99d851282b5aceb4f8eb1be7da2787f52ce"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/attr/expr_attr/max.py",
+      "sha256": "8ff6291332535171e274e10c74f9a03e017d8de849fb8f732d95f45ce41becba"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/attr/expr_attr/min.py",
+      "sha256": "fcc4e149a9fbae1c3c569beb95e2ae8c9390fbcefdd42fe00ba391b5063017f3"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/attr/expr_attr/mod.py",
+      "sha256": "ee621b41327dbaaca32f1586c25a557086ff4544081be9b78c965ae0cd5bf406"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/attr/expr_attr/mul.py",
+      "sha256": "fafba198a1c42320e748e8f2b5e24faacd62a45b9f60b3cf59adffe53fa9482f"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/attr/expr_attr/sub.py",
+      "sha256": "a27dad21bda0a0ce3a81beeb01900e5b6d978569f71b0ac094d3f08922fc8fdd"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/operation/cast.py",
+      "sha256": "1aad3dcd7d3ddeb1d8f2a21ebda9aea5a9c8c58122e596d6eab799af2620ca3b"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/operation/compare.py",
+      "sha256": "55aea773ff07a1e5fb661657660517fae1657179662310a6b0f697aca16bd863"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/operation/const.py",
+      "sha256": "7487d3d215696af52ed3866bf2bb2f3712435e3670f8054e25c4f511cba54e99"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/operation/elewise.py",
+      "sha256": "9f7d654e6b516bd0b4a6b61deea65a4af0be4cefc0cd43250e81e0f4c2aeba90"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/operation/fold/__main__.py",
+      "sha256": "46563687d6dd1c739989e6063f4dff4364b1f55464a807af5b0c45de6460b395"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/operation/fold/binary_arith.py",
+      "sha256": "0921b933aeef874b3759800a19aa408ac161d379bc2c62eb64d41a30b59edeb0"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/operation/fold/compare.py",
+      "sha256": "78aeb009db101fdefb3f7b7477c0fd41f1d4b97ad7b5ac31056f2eff8e5776b6"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/operation/fold/min.py",
+      "sha256": "74a8e7b7be444e2ae92887585678bf44464230efa7007e1f670923728fa0a07d"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/operation/for.py",
+      "sha256": "2313f44f97d948255b356dda129cd132dae8454eaa0c1962d4cacf36653ac472"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/operation/get_dim.py",
+      "sha256": "b92474d87b792cf3708c94c0efd557dafe5e74915979a2a3241d152772c3e0e3"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/operation/get_stride.py",
+      "sha256": "b74190abdf90d3a268dda1b935c7606c4e41bebc8c01e6911ddfa646a596ab14"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/operation/min.py",
+      "sha256": "dafd7621b0a2a467f2d946b52e125f48f69bac8a00f3700511f13e83505be57a"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/operation/to_float.py",
+      "sha256": "831ef57d8a6df938b2fe2d01349aa900aa4d9d9098b76c25a13d8b12a60ec887"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/operation/to_int.py",
+      "sha256": "83c1d35d34874b6415c3ed64f96d76d9536544f496b3a724e2089f651eb9bb03"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/type/iter_type.py",
+      "sha256": "b8d7d3bafe67a34b2c100fba6fb5c07f4ec9244ff9b40526a36bd3f1e9570046"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/type/ptr_type.py",
+      "sha256": "ce5c50196b6378699952b8b9c2df41a5be3eff15f2e0171fbe778e5fc7f47b9b"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/symbol/type/value_type.py",
+      "sha256": "d9eb0c6d8613b13c3679b3a98a7f50cd0c24c95f08ba00196774726d9ddc47c5"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/tuner/__main__.py",
+      "sha256": "0c304dc07e8974dc715583fe0f0836a7c8e1bca803d68fef0890052aaeebd1a3"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/tuner/operation/cost.py",
+      "sha256": "6000f2707803a75b7ec89229b1732e266f085a5369526cf968922b51f4441c1c"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/tuner/operation/launch.py",
+      "sha256": "c083c13368c6d3d03a33beba1ea491af457ee2495aa120d04badae2a49b35659"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/tuner/operation/param.py",
+      "sha256": "2ca0d568770305dde97336cfb4edc6baa5eea881826eca2713dfe3f51c23d8a9"
+    },
+    {
+      "path": "/home/lfr/kernelcode_generate/expectation/dialect/tuner/operation/select.py",
+      "sha256": "8828bb7ab8aa0f381783e8b7dbb87504d6a1062d042583194866b03c0d46597c"
+    }
+  ],
+  "memory_exists": false
+}

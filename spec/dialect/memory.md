@@ -12,8 +12,8 @@
 ## 文档信息
 
 - `spec`：[`spec/dialect/memory.md`](../../spec/dialect/memory.md)
-- `功能实现`：[`kernel_gen/dialect/memory.py`](../../kernel_gen/dialect/memory.py)
-- `test`：[`test/dialect/test_memory.py`](../../test/dialect/test_memory.py)
+- `功能实现`：[`kernel_gen/dialect/memory/`](../../kernel_gen/dialect/memory/)
+- `test`：[`test/dialect/memory/`](../../test/dialect/memory/)
 
 ## 依赖
 
@@ -64,8 +64,8 @@
 
 ## 测试
 
-- 测试文件：`test/dialect/test_memory.py`
-- 执行命令：`pytest -q test/dialect/test_memory.py`
+- 测试文件：`test/dialect/memory/`
+- 执行命令：`pytest -q test/dialect/memory/`
 
 | 用例 ID | 功能 | 场景 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- |
@@ -73,3 +73,10 @@
 | TC-DIALECT-MEMORY-002 | 解析/打印 | `memory.get_data` 文本 round-trip | parse/print 保持 memory 与 ptr 类型 | `test_memory_get_data_parse_print_round_trip` |
 | TC-DIALECT-MEMORY-003 | 边界/异常 | 非 memory source | 按 source 错误关键短语失败 | `test_memory_get_data_rejects_non_memory_source` |
 | TC-DIALECT-MEMORY-004 | 边界/异常 | result 不是 ptr 或 dtype/template 不匹配 | 按 result/dtype/template 错误关键短语失败 | `test_memory_get_data_rejects_invalid_result_type` |
+
+
+## Package Split 边界
+
+- 当前实现入口为 `kernel_gen/dialect/memory/` package root；旧单文件 `kernel_gen/dialect/memory/` 不保留 shim。
+- 当前测试入口为 `test/dialect/memory/`；旧大测试文件 `test/dialect/memory/test_memory.py` 不保留 shim。
+- `kernel_gen.dialect.memory` root import 是稳定公开入口，内部 `attr/type/operation/expr/common` 子模块只服务 package 实现，不作为外部公开 API。

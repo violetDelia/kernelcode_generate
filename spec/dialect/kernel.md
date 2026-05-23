@@ -23,8 +23,8 @@
 - 创建者：`未记录`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dialect/kernel.md`](../../spec/dialect/kernel.md)
-- `功能实现`：[`kernel_gen/dialect/kernel.py`](../../kernel_gen/dialect/kernel.py)
-- `test`：[`test/dialect/test_kernel.py`](../../test/dialect/test_kernel.py)
+- `功能实现`：[`kernel_gen/dialect/kernel/`](../../kernel_gen/dialect/kernel/)
+- `test`：[`test/dialect/kernel/`](../../test/dialect/kernel/)
 
 ## 依赖
 
@@ -381,10 +381,10 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 ## 测试
 
 - 测试文件：
-  - `test/dialect/test_kernel.py`
+  - `test/dialect/kernel/`
   - `test/passes/lowering/nn_lowering/test_nn_lowering.py`
 - 执行命令：
-  - `pytest -q test/dialect/test_kernel.py`
+  - `pytest -q test/dialect/kernel/`
   - `pytest -q test/passes/lowering/nn_lowering/test_nn_lowering.py`
 
 ### 测试目标
@@ -428,3 +428,10 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 | TC-KRN-029 | 边界/异常 | `kernel.reduce_min` 拒绝 dtype 与 space 不一致 | 准备 dtype、输出 space 与属性 space 失配场景。 | 运行 `test_kernel_reduce_min_dtype_space_matrix`。 | `kernel.reduce_min` 对 dtype 和 space 失配按公开错误语义失败。 | `test_kernel_reduce_min_dtype_space_matrix` |
 | TC-KRN-030 | 内存/DMA | `kernel.binary_elewise`、`kernel.matmul` 与 `kernel.select` 暴露 out write / input read effect | 准备合法二元、matmul 与 select op。 | 运行 `test_kernel_binary_elewise_memory_effects`、`test_kernel_matmul_memory_effects`、`test_kernel_select_memory_effects`。 | `get_effects(op)` 返回 out 的 `WRITE`，并返回所有输入 memory operand 的 `READ`。 | `test_kernel_binary_elewise_memory_effects` / `test_kernel_matmul_memory_effects` / `test_kernel_select_memory_effects` |
 | TC-KRN-031 | 内存/DMA | `kernel.exp`、`kernel.img2col*` 与 `kernel.reduce*` 暴露 out write / input read effect | 准备合法 unary、img2col 与 reduce op。 | 运行 `test_kernel_exp_memory_effects`、`test_kernel_img2col_memory_effects`、`test_kernel_reduce_memory_effects`。 | `get_effects(op)` 返回 out 的 `WRITE` 与 input 的 `READ`。 | `test_kernel_exp_memory_effects` / `test_kernel_img2col_memory_effects` / `test_kernel_reduce_memory_effects` |
+
+
+## Package Split 边界
+
+- 当前实现入口为 `kernel_gen/dialect/kernel/` package root；旧单文件 `kernel_gen/dialect/kernel/` 不保留 shim。
+- 当前测试入口为 `test/dialect/kernel/`；旧大测试文件 `test/dialect/kernel/test_kernel.py` 不保留 shim。
+- `kernel_gen.dialect.kernel` root import 是稳定公开入口，内部 `attr/type/operation/expr/common` 子模块只服务 package 实现，不作为外部公开 API。

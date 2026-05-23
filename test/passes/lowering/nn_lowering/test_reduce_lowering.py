@@ -59,7 +59,7 @@ def _symbol_expr_text(value: int | str) -> str:
     关联文件:
     - spec: [spec/dialect/nn.md](spec/dialect/nn.md)
     - test: [test/passes/lowering/nn_lowering/test_reduce_lowering.py](test/passes/lowering/nn_lowering/test_reduce_lowering.py)
-    - 功能实现: [kernel_gen/dialect/symbol.py](kernel_gen/dialect/symbol.py)
+    - 功能实现: [kernel_gen/dialect/symbol/](kernel_gen/dialect/symbol/)
     """
 
     return f"#symbol.expr<{value}>"
@@ -78,7 +78,7 @@ def _symbol_int_text(value: int | str) -> str:
     关联文件:
     - spec: [spec/dialect/symbol.md](spec/dialect/symbol.md)
     - test: [test/passes/lowering/nn_lowering/test_reduce_lowering.py](test/passes/lowering/nn_lowering/test_reduce_lowering.py)
-    - 功能实现: [kernel_gen/dialect/symbol.py](kernel_gen/dialect/symbol.py)
+    - 功能实现: [kernel_gen/dialect/symbol/](kernel_gen/dialect/symbol/)
     """
 
     return f"!symbol.int<{_symbol_expr_text(value)}>"

@@ -38,7 +38,7 @@ def symbol_expr(value: int | str | SymbolExprAttr) -> SymbolExprAttr:
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/passes/lowering/nn_lowering/test_asset_cases.py
-    - 功能实现: kernel_gen/dialect/symbol.py
+    - 功能实现: kernel_gen/dialect/symbol/
     """
 
     if isinstance(value, SymbolExprAttr):

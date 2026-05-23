@@ -35,7 +35,7 @@
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：定义 `Memory` / `MemorySpace` 的高层语义，供动态内存 helper 返回与空间映射复用。
 - [`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)：定义 `NumericType` / `Farmat`，供动态内存结果 dtype 与格式语义复用。
 - [`spec/target/registry.md`](../../spec/target/registry.md)：定义 current target 支持性校验与硬件字段读取规则。
-- [`kernel_gen/dialect/arch.py`](../../kernel_gen/dialect/arch.py)：operation helper 的唯一 dialect 映射目标。
+- [`kernel_gen/dialect/arch/`](../../kernel_gen/dialect/arch/)：operation helper 的唯一 dialect 映射目标。
 - [`kernel_gen/symbol_variable/symbol_dim.py`](../../kernel_gen/symbol_variable/symbol_dim.py)：`SymbolDim` 运行时容器实现。
 - [`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)：`Memory` / `MemorySpace` 运行时容器实现。
 - [`kernel_gen/target/registry.py`](../../kernel_gen/target/registry.py)：operation helper 所依赖的 target registry 查询实现。

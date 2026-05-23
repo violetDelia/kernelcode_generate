@@ -5,7 +5,7 @@
 - 覆盖 arch dialect 的固定结果类型查询、动态 memory 入口与 kernel 启动描述的 parse/print 与 verifier。
 
 使用示例:
-- pytest -q test/dialect/test_arch.py
+- pytest -q test/dialect/arch/test_arch.py
 
 当前覆盖率信息:
 - 不再要求覆盖率；本文件以功能测试闭环为准。
@@ -14,9 +14,9 @@
 - 不再要求覆盖率命令；本文件以功能测试闭环为准。
 
 关联文件:
-- 功能实现: kernel_gen/dialect/arch.py
+- 功能实现: kernel_gen/dialect/arch/
 - Spec 文档: spec/dialect/arch.md
-- 测试文件: test/dialect/test_arch.py
+- 测试文件: test/dialect/arch/test_arch.py
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from xdsl.parser import Parser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -106,8 +106,8 @@ def _build_context() -> Context:
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch.py
-    - 功能实现: kernel_gen/dialect/arch.py
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
     """
 
     ctx = Context()
@@ -131,8 +131,8 @@ def _print_ir(value: Attribute | Operation) -> str:
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch.py
-    - 功能实现: kernel_gen/dialect/arch.py
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
     """
 
     stream = StringIO()
@@ -158,8 +158,8 @@ def _make_space(name: str) -> NnMemorySpaceAttr:
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch.py
-    - 功能实现: kernel_gen/dialect/arch.py
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
     """
 
     return NnMemorySpaceAttr(StringAttr(name))
@@ -176,8 +176,8 @@ def _expr_attr(expr: str | int) -> SymbolExprAttr:
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch.py
-    - 功能实现: kernel_gen/dialect/arch.py
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
     """
 
     return SymbolExprAttr.from_expr(str(expr))
@@ -195,8 +195,8 @@ def _make_visibility(name: str) -> ArchVisibilityAttr:
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch.py
-    - 功能实现: kernel_gen/dialect/arch.py
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
     """
 
     return ArchVisibilityAttr.from_name(name)
@@ -214,8 +214,8 @@ def _make_barrier_visibility() -> ArrayAttr[Attribute]:
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch.py
-    - 功能实现: kernel_gen/dialect/arch.py
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
     """
 
     return ArrayAttr([_make_visibility("tsm"), _make_visibility("tlm")])
@@ -239,8 +239,8 @@ def _make_dynamic_memory_type(
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch.py
-    - 功能实现: kernel_gen/dialect/arch.py
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
     """
 
     capacity_by_space = {
@@ -271,8 +271,8 @@ def _make_symbol_value(expr: str) -> SSAValue:
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch.py
-    - 功能实现: kernel_gen/dialect/arch.py
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
     """
 
     return _TestOp(result_types=[SymbolValueType.from_expr(expr)]).results[0]
@@ -290,8 +290,8 @@ def _assert_fixed_result_type(op: Operation, expected: str) -> None:
 
     关联文件:
     - spec: spec/dialect/arch.md
-    - test: test/dialect/test_arch.py
-    - 功能实现: kernel_gen/dialect/arch.py
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
     """
 
     op.verify()
@@ -302,7 +302,7 @@ def _assert_fixed_result_type(op: Operation, expected: str) -> None:
 
 # TC-ARCH-001
 # 测试目的: 验证 arch.get_block_id 固定返回 !symbol.int<#symbol.expr<block_id>>。
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_block_id_result_type() -> None:
     _assert_fixed_result_type(ArchGetBlockIdOp(), "block_id")
@@ -310,7 +310,7 @@ def test_arch_get_block_id_result_type() -> None:
 
 # TC-ARCH-002
 # 测试目的: 验证 arch.get_block_num 固定返回 !symbol.int<#symbol.expr<block_num>>。
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_block_num_result_type() -> None:
     _assert_fixed_result_type(ArchGetBlockNumOp(), "block_num")
@@ -318,7 +318,7 @@ def test_arch_get_block_num_result_type() -> None:
 
 # TC-ARCH-003
 # 测试目的: 验证 arch.get_thread_id 固定返回 !symbol.int<#symbol.expr<thread_id>>。
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_thread_id_result_type() -> None:
     _assert_fixed_result_type(ArchGetThreadIdOp(), "thread_id")
@@ -326,7 +326,7 @@ def test_arch_get_thread_id_result_type() -> None:
 
 # TC-ARCH-004
 # 测试目的: 验证 arch.get_thread_num 固定返回 !symbol.int<#symbol.expr<thread_num>>。
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_thread_num_result_type() -> None:
     _assert_fixed_result_type(ArchGetThreadNumOp(), "thread_num")
@@ -334,7 +334,7 @@ def test_arch_get_thread_num_result_type() -> None:
 
 # TC-ARCH-005
 # 测试目的: 验证 arch.get_subthread_id 固定返回 !symbol.int<#symbol.expr<subthread_id>>。
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_subthread_id_result_type() -> None:
     _assert_fixed_result_type(ArchGetSubthreadIdOp(), "subthread_id")
@@ -342,7 +342,7 @@ def test_arch_get_subthread_id_result_type() -> None:
 
 # TC-ARCH-006
 # 测试目的: 验证 arch.get_subthread_num 固定返回 !symbol.int<#symbol.expr<subthread_num>>。
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_subthread_num_result_type() -> None:
     _assert_fixed_result_type(ArchGetSubthreadNumOp(), "subthread_num")
@@ -350,7 +350,7 @@ def test_arch_get_subthread_num_result_type() -> None:
 
 # TC-ARCH-006A
 # 测试目的: 验证 `#arch.scope<global>` 与 `#arch.visibility<tsm|tlm>` 可 parse/print/verifier。
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_scope_and_visibility_attr_round_trip() -> None:
     ctx = _build_context()
@@ -369,7 +369,7 @@ def test_arch_scope_and_visibility_attr_round_trip() -> None:
 
 # TC-ARCH-007
 # 测试目的: 验证 arch.get_dynamic_memory 在合法 memory_space 与结果类型下可通过 verifier。
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_dynamic_memory_success() -> None:
     op = ArchGetDynamicMemoryOp(_make_space("shared"))
@@ -380,7 +380,7 @@ def test_arch_get_dynamic_memory_success() -> None:
 
 # TC-ARCH-007A
 # 测试目的: 验证 arch.get_dynamic_memory 支持 `tlm1/tlm2/tlm3` 三块动态内存文本。
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_dynamic_memory_supports_tlm123() -> None:
     for space in ("tlm1", "tlm2", "tlm3"):
@@ -411,7 +411,7 @@ def test_arch_get_dynamic_memory_accepts_specialized_static_capacity() -> None:
 
 # TC-ARCH-008
 # 测试目的: 验证 arch.get_dynamic_memory 会拒绝非法 memory_space 或不符合规范的结果类型。
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_dynamic_memory_verify_errors() -> None:
     with pytest.raises(VerifyException, match="shared/local/tsm/tlm1/tlm2/tlm3"):
@@ -476,10 +476,10 @@ builtin.module {
 
 # TC-ARCH-009
 # 测试目的: 验证 arch.barrier 在合法 scope + [tsm, tlm] visibility 下通过 verifier 与 print。
-# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch.py -k test_arch_barrier_success
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/arch/test_arch.py -k test_arch_barrier_success
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
-# 对应测试文件路径: test/dialect/test_arch.py
+# 对应测试文件路径: test/dialect/arch/test_arch.py
 def test_arch_barrier_success() -> None:
     op = ArchBarrierOp(ArchScopeAttr.from_name("block"), _make_barrier_visibility())
 
@@ -495,10 +495,10 @@ def test_arch_barrier_success() -> None:
 
 # TC-ARCH-010
 # 测试目的: 验证 arch.barrier 会拒绝非法 scope、空 visibility、重复 visibility 与旧 nn.space visibility。
-# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch.py -k test_arch_barrier_verify_errors
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/arch/test_arch.py -k test_arch_barrier_verify_errors
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
-# 对应测试文件路径: test/dialect/test_arch.py
+# 对应测试文件路径: test/dialect/arch/test_arch.py
 def test_arch_barrier_verify_errors() -> None:
     with pytest.raises(VerifyException, match="arch.scope must be block/thread/subthread/global"):
         ArchBarrierOp(ArchScopeAttr.from_name("warp"), _make_barrier_visibility()).verify()
@@ -530,10 +530,10 @@ def test_arch_barrier_verify_errors() -> None:
 
 # TC-ARCH-011
 # 测试目的: 验证 arch.launch 使用 `arch.launch<...>(@callee, args...)` 文本与合法 verifier 边界。
-# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch.py -k test_arch_launch_success
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/arch/test_arch.py -k test_arch_launch_success
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
-# 对应测试文件路径: test/dialect/test_arch.py
+# 对应测试文件路径: test/dialect/arch/test_arch.py
 def test_arch_launch_success() -> None:
     block = _make_symbol_value("grid_x")
     thread = _make_symbol_value("8")
@@ -550,10 +550,10 @@ def test_arch_launch_success() -> None:
 
 # TC-ARCH-012
 # 测试目的: 验证 arch.launch 会拒绝非法 callee 形态、非 symbol.int operand 与静态非法规模。
-# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch.py -k test_arch_launch_verify_errors
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/arch/test_arch.py -k test_arch_launch_verify_errors
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
-# 对应测试文件路径: test/dialect/test_arch.py
+# 对应测试文件路径: test/dialect/arch/test_arch.py
 def test_arch_launch_verify_errors() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     with pytest.raises(VerifyException, match="callee must be flat @symbol"):
@@ -622,7 +622,7 @@ def test_arch_launch_verify_errors() -> None:
 
 # TC-ARCH-012A
 # 测试目的: 验证 arch 固定查询与 launch parser 对公开结果/参数类型段的失败边界。
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_result_and_launch_parser_rejection_edges() -> None:
     with pytest.raises(VerifyException, match="base attribute symbol.int"):
@@ -670,10 +670,10 @@ builtin.module {
 
 # TC-ARCH-013
 # 测试目的: 验证 arch dialect 文本可完成包含 barrier/launch 的 parse/print round-trip，并拒绝字符串 callee。
-# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch.py -k test_arch_parse_print_round_trip
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/arch/test_arch.py -k test_arch_parse_print_round_trip
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
-# 对应测试文件路径: test/dialect/test_arch.py
+# 对应测试文件路径: test/dialect/arch/test_arch.py
 def test_arch_parse_print_round_trip() -> None:
     ctx = _build_context()
     module = Parser(
@@ -752,7 +752,7 @@ def test_arch_package_exports() -> None:
 
 # TC-ARCH-013
 # 测试目的: 验证 cpu target 下拒绝 arch.get_thread_id。
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_target_registry_cpu_rejects_thread_id() -> None:
     target_registry.set_current_target("cpu")
@@ -765,10 +765,10 @@ def test_target_registry_cpu_rejects_thread_id() -> None:
 
 # TC-ARCH-014
 # 测试目的: 验证 `!arch.token` 与 token/sign/wait op 正向构造、parse 和 verifier。
-# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch.py -k test_arch_token_sign_wait_success
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/arch/test_arch.py -k test_arch_token_sign_wait_success
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
-# 对应测试文件路径: test/dialect/test_arch.py
+# 对应测试文件路径: test/dialect/arch/test_arch.py
 def test_arch_token_sign_wait_success() -> None:
     ctx = _build_context()
     token_type = Parser(ctx, "!arch.token<dma_stage>").parse_attribute()
@@ -802,10 +802,10 @@ builtin.module {
 
 # TC-ARCH-015
 # 测试目的: 验证 arch token/sign/wait 的公开 verifier 失败边界。
-# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch.py -k test_arch_token_sign_wait_verify_errors
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/arch/test_arch.py -k test_arch_token_sign_wait_verify_errors
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
-# 对应测试文件路径: test/dialect/test_arch.py
+# 对应测试文件路径: test/dialect/arch/test_arch.py
 def test_arch_token_sign_wait_verify_errors() -> None:
     valid_count = _make_symbol_value("1")
     valid_token = ArchTokenOp("dma_stage", valid_count)
@@ -839,10 +839,10 @@ builtin.module {
 
 # TC-ARCH-016
 # 测试目的: 验证 arch token/sign/wait 未使用时仍不会被公共 PassManager 的 DCE 清理。
-# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch.py -k test_arch_token_ops_survive_public_dce
-# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/arch/test_arch.py -k test_arch_token_ops_survive_public_dce
+# 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
-# 对应测试文件路径: test/dialect/test_arch.py
+# 对应测试文件路径: test/dialect/arch/test_arch.py
 def test_arch_token_ops_survive_public_dce() -> None:
     count = _TestOp(result_types=[SymbolValueType.from_expr("1")])
     token = ArchTokenOp("dma_stage", count.results[0])

@@ -44,8 +44,8 @@
 ## 文档信息
 
 - `spec`：[`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)
-- `test`：[`test/dialect/test_symbol.py`](../../test/dialect/test_symbol.py)
-- `功能实现`：[`kernel_gen/dialect/symbol.py`](../../kernel_gen/dialect/symbol.py)
+- `test`：[`test/dialect/symbol/`](../../test/dialect/symbol/)
+- `功能实现`：[`kernel_gen/dialect/symbol/`](../../kernel_gen/dialect/symbol/)
 
 ## 依赖
 
@@ -53,7 +53,7 @@
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：高层 `Memory` 容器复用本方言的 memory 相关符号标量语义。
 - [`spec/symbol_variable/ptr.md`](../../spec/symbol_variable/ptr.md)：定义 Python 上层 `Ptr(dtype)` 的公开语义；本文件负责其 IR 层 `!symbol.ptr<dtype>` 类型归属。
 - [`spec/dialect/nn.md`](../../spec/dialect/nn.md)：提供当前 IR 层唯一合法的 `MemoryType`（当前文本载体仍为 `!nn.memory<...>`）。
-- [`kernel_gen/dialect/symbol.py`](../../kernel_gen/dialect/symbol.py)：`symbol dialect` 的实现入口。
+- [`kernel_gen/dialect/symbol/`](../../kernel_gen/dialect/symbol/)：`symbol dialect` 的实现入口。
 
 ## 目标
 
@@ -851,8 +851,8 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 
 ## 测试
 
-- 测试文件：`test/dialect/test_symbol.py`
-- 执行命令：`pytest -q test/dialect/test_symbol.py`
+- 测试文件：`test/dialect/symbol/`
+- 执行命令：`pytest -q test/dialect/symbol/`
 
 ### 测试目标
 
@@ -954,3 +954,10 @@ eq_op = SymbolEqOp(lhs, rhs, i1)
 | TC-SYM-063 | 边界/异常 | `symbol.yield` 父 op 与 loop-carried 约束 | 准备独立 `symbol.yield` 与无 carried-value 的 `symbol.for` 循环体。 | 运行 `test_symbol_yield_public_parent_and_carried_edges`。 | `symbol.yield` 不在 `symbol.for` 内或缺 loop-carried 上下文时按公开错误语义失败。 | `test_symbol_yield_public_parent_and_carried_edges` |
 | TC-SYM-064 | 边界/异常 | `symbol.for` iter attribute、block argument 与 loop-carried block 形状一致性 | 准备 start/end/step 不匹配、iter block type 不匹配和 carried block arg 数错误的公开构造。 | 运行 `test_symbol_for_rejects_iter_attr_mismatch_matrix`。 | 每类不一致输入均由 verifier 给出稳定公开错误。 | `test_symbol_for_rejects_iter_attr_mismatch_matrix` |
 | TC-SYM-065 | 解析/打印 | `symbol.for` 对结构不完整 body 的打印回退 | 准备公开 `SymbolForOp` 构造但 body block 参数不完整。 | 运行 `test_symbol_for_prints_default_format_for_invalid_body_shape`。 | printer 不误用自定义文本，回退到稳定 default format。 | `test_symbol_for_prints_default_format_for_invalid_body_shape` |
+
+
+## Package Split 边界
+
+- 当前实现入口为 `kernel_gen/dialect/symbol/` package root；旧单文件 `kernel_gen/dialect/symbol/` 不保留 shim。
+- 当前测试入口为 `test/dialect/symbol/`；旧大测试文件 `test/dialect/symbol/test_symbol.py` 不保留 shim。
+- `kernel_gen.dialect.symbol` root import 是稳定公开入口，内部 `attr/type/operation/expr/common` 子模块只服务 package 实现，不作为外部公开 API。
