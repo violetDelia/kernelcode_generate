@@ -39,6 +39,7 @@ from xdsl.passes import ModulePass
 
 from kernel_gen.core.config import reset_config, set_dump_dir
 from kernel_gen.core.context import build_default_context
+from kernel_gen.core.error import KernelCodeError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -343,10 +344,10 @@ def test_pass_manager_fold_can_be_disabled_per_pass() -> None:
 # 对应测试文件路径: test/passes/test_pass_manager.py
 def test_pass_manager_invalid_pass_type() -> None:
     pm = PassManager()
-    with pytest.raises(TypeError):
+    with pytest.raises(KernelCodeError, match=r"^pass_obj must be ModulePass with stable name\(str\)$"):
         pm.add_pass("not-a-pass")  # type: ignore[arg-type]
 
-    with pytest.raises(TypeError):
+    with pytest.raises(KernelCodeError, match=r"^passes must contain ModulePass items with stable name\(str\)$"):
         pm.extend([object()])  # type: ignore[arg-type]
 
     class MissingNamePass:
@@ -354,7 +355,7 @@ def test_pass_manager_invalid_pass_type() -> None:
             _ = ctx
             _ = target
 
-    with pytest.raises(TypeError):
+    with pytest.raises(KernelCodeError, match=r"^pass_obj must be ModulePass with stable name\(str\)$"):
         pm.add_pass(MissingNamePass())  # type: ignore[arg-type]
 
     class BadNamePass(Pass):
@@ -364,7 +365,7 @@ def test_pass_manager_invalid_pass_type() -> None:
             _ = ctx
             _ = target
 
-    with pytest.raises(TypeError):
+    with pytest.raises(KernelCodeError, match=r"^pass_obj must be ModulePass with stable name\(str\)$"):
         pm.add_pass(BadNamePass())
 
 
@@ -385,7 +386,7 @@ def test_pass_manager_exception_propagation() -> None:
 
     pm = PassManager()
     pm.add_pass(FailPass())
-    with pytest.raises(ValueError):
+    with pytest.raises(KernelCodeError, match=r"^PassManager\.run pass 'fail-pass' failed: boom$"):
         _ = pm.run(ModuleOp([]))
 
 

@@ -43,6 +43,7 @@ from xdsl.passes import ModulePass as XdslModulePass
 from xdsl.pattern_rewriter import GreedyRewritePatternApplier, PatternRewriteWalker
 
 from kernel_gen.core.config import get_dump_dir
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.core.print import print_operation_with_aliases
 
 
@@ -276,7 +277,7 @@ class PassManager:
         - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
         """
         if not isinstance(pass_obj, XdslModulePass) or not isinstance(getattr(pass_obj, "name", None), str):
-            raise TypeError("pass_obj must be ModulePass with stable name(str)")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "pass_obj must be ModulePass with stable name(str)")
         self._passes.append(pass_obj)
 
     def extend(self: "PassManager", passes: Sequence[XdslModulePass]) -> None:
@@ -296,7 +297,11 @@ class PassManager:
         """
         for item in passes:
             if not isinstance(item, XdslModulePass) or not isinstance(getattr(item, "name", None), str):
-                raise TypeError("passes must contain ModulePass items with stable name(str)")
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.PASS,
+                    "passes must contain ModulePass items with stable name(str)",
+                )
             self._passes.append(item)
 
     def run(self: "PassManager", target: ModuleOp) -> ModuleOp:
@@ -317,14 +322,24 @@ class PassManager:
         - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
         """
         if not isinstance(target, ModuleOp):
-            raise TypeError("PassManager.run target must be builtin.module")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "PassManager.run target must be builtin.module")
         result = target
         ctx = Context()
         dump_path = get_dump_dir()
         if dump_path is not None:
             _write_dump_file(dump_path / "01-first-ir.mlir", _format_dump_ir(result))
         for index, item in enumerate(self._passes, start=2):
-            item.apply(ctx, result)
+            try:
+                item.apply(ctx, result)
+            except KernelCodeError:
+                raise
+            except Exception as exc:
+                pass_name = getattr(item, "name", "pass")
+                raise KernelCodeError(
+                    ErrorKind.INTERNAL,
+                    ErrorModule.PASS,
+                    f"PassManager.run pass '{pass_name}' failed: {exc}",
+                ) from exc
             if _pass_fold_enabled(item):
                 _fold_module(ctx, result)
             if dump_path is not None:

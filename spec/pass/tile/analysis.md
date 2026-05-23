@@ -51,6 +51,7 @@
 - 对 `dma.broadcast`，`expand` 维不参与 `tile.tile_exprs` 写回：该维在 target/source 两行都必须保持空字符串；其余非 `expand` 维需要在 target/source 两行都写入当前 tile 形状。
 - 若外层 loop 只切了部分维度，则 `tile.tile_exprs` 只能写入与祖先 `symbol.for step` 对应的那些维；未被 loop `step` 覆盖的维必须继续保持空字符串。
 - 对 `kernel.matmul`，reduce(K) 轴的 loop step 不能写入 `tile.tile_exprs`；只有命中 `M/N` 的祖先 loop step 才能分别写回到 `lhs/out` 的 `M` 位与 `rhs/out` 的 `N` 位。若只切 K，3 行都必须保持空；若切 `K+N`，也只能写回 `N`。
+- memory layout 条目不是 `SymbolExprAttr` 时必须抛出 `KernelCodeError("tile-analysis memory layout entries must be SymbolExprAttr")`。
 
 ## API详细说明
 

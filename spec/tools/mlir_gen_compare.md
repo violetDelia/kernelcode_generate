@@ -58,6 +58,7 @@
 - 功能说明：用 `mlir_gen(...)` 生成实际 module，读取并解析 `mlir_file`，对两边执行同一套归一化比较。
 - 注意事项：
   - `mlir_gen(...)` 返回值不是 `builtin.module` 时返回 `False`。
+  - `runtime_args` 不是 `list`、`tuple` 或 `None` 时必须抛出 `KernelCodeError("runtime_args must be list, tuple, or None")`。
   - expected 文件读取失败或非 UTF-8 时返回 `False`。
   - expected 文本解析失败或解析结果不是 `builtin.module` 时返回 `False`。
   - expected 文本含 `!nn.memory<...>` 尖括号正文内的 `//` 表达式时，不要求 parser 成功，改按字符串外空白归一化文本比较；普通注释中的 `//` 仍走 parser + printer 归一化。
@@ -81,6 +82,7 @@
 - 功能说明：执行 `mlir_gen_compare_text`。
 - 注意事项：
   - 语义与 `mlir_gen_compare(...)` 一致，区别只在 expected 来源是内存字符串，不是磁盘文件。
+  - `runtime_args` 不是 `list`、`tuple` 或 `None` 时必须抛出 `KernelCodeError("runtime_args must be list, tuple, or None")`。
   - expected 文本解析失败、归一化失败或文本不一致时返回 `False`。
   - expected 文本含 `!nn.memory<...>` 尖括号正文内的 `//` 表达式时，按字符串外空白归一化文本比较。
   - `mlir_gen(...)` 自身抛错时不重新包裹，直接向上传播。
@@ -102,6 +104,7 @@
 - 功能说明：执行 `compare_mlir_file`。
 - 注意事项：
   - 这是旧兼容入口，行为等价于 `mlir_gen_compare(...)`。
+  - `runtime_args` 不是 `list`、`tuple` 或 `None` 时必须抛出 `KernelCodeError("runtime_args must be list, tuple, or None")`。
   - 文件读取、解析、归一化、文本比较和 `mlir_gen(...)` 抛错语义必须与 `mlir_gen_compare(...)` 保持一致。
   - 调用方不得依赖实现内部状态。
 

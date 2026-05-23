@@ -867,10 +867,7 @@ def _select_source_and_entry(module: ModuleOp, emit_context: EmitCContext) -> tu
         wrapper_launch = launches[0]
         body_func = _find_func_by_sym_name(module, wrapper_launch.callee.root_reference.data)
         return gen_kernel(module, emit_context), wrapper_func.sym_name.data, body_func
-    try:
-        return gen_kernel(root_func, emit_context), root_func.sym_name.data, root_func
-    except Exception:
-        raise
+    return gen_kernel(root_func, emit_context), root_func.sym_name.data, root_func
 
 
 def _validate_dsl_cost_kind(cost_kind: str) -> None:

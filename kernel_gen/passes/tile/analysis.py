@@ -44,6 +44,7 @@ from kernel_gen.dialect.dma import DmaBroadcastOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolForOp, SymbolValueType
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.passes.common import ensure_builtin_module
 
 
@@ -147,7 +148,11 @@ def _dim_expr_text(dim_attr: Attribute) -> str:
 
     if isinstance(dim_attr, SymbolExprAttr):
         return dim_attr.expr.data
-    raise ValueError("tile-analysis memory layout entries must be SymbolExprAttr")
+    raise KernelCodeError(
+        ErrorKind.CONTRACT,
+        ErrorModule.PASS,
+        "tile-analysis memory layout entries must be SymbolExprAttr",
+    )
 
 
 class TileAnalysisBinaryPattern(RewritePattern):

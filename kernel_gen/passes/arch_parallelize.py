@@ -54,6 +54,7 @@ from kernel_gen.dialect.symbol import (
     SymbolSubOp,
     SymbolValueType,
 )
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.passes.common import ensure_builtin_module, raise_pass_contract_error
 from kernel_gen.passes.pass_manager import Pass
 from kernel_gen.target import registry as target_registry
@@ -140,8 +141,12 @@ def _validate_target_and_get_block_num(target: str) -> int:
     try:
         has_block_id = target_registry.is_arch_op_supported(target, "arch.get_block_id")
         block_num = target_registry.get_target_hardware(target, "block_num")
-    except ValueError:
-        _fail("target not registered")
+    except ValueError as exc:
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "ArchParallelizePassError: target not registered",
+        ) from exc
     if not has_block_id:
         _fail("target does not support arch.get_block_id")
     if not isinstance(block_num, int) or isinstance(block_num, bool) or block_num <= 0:
@@ -666,7 +671,11 @@ class ArchParallelizePass(Pass):
         try:
             module.verify()
         except VerifyException as exc:
-            raise_pass_contract_error("ArchParallelizePassVerifierError", str(exc))
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                f"ArchParallelizePassVerifierError: {exc}",
+            ) from exc
 
 
 __all__ = ["ArchParallelizePass"]

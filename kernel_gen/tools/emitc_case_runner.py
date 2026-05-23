@@ -24,6 +24,7 @@ from xdsl.parser import Parser
 
 from kernel_gen.core.context import build_default_context
 from kernel_gen.core.config import restore_config, set_target, snapshot_config
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c
 from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
 
@@ -76,7 +77,7 @@ def _extract_input_ir(case_text: str) -> str:
     lines = [line for line in case_text.splitlines() if not line.lstrip().startswith("//")]
     input_ir = "\n".join(lines).strip()
     if not input_ir:
-        raise ValueError("emit_c expectation case must contain input IR")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "emit_c expectation case must contain input IR")
     return input_ir
 
 
@@ -103,9 +104,11 @@ def _apply_compile_args(module, *, compile_args: str | None, ctx) -> None:
     if compile_args == "--pass buffer-results-to-out-params":
         BufferResultsToOutParamsPass().apply(ctx, module)
         return
-    raise ValueError(
+    raise KernelCodeError(
+        ErrorKind.CONTRACT,
+        ErrorModule.TOOLS,
         "emit_c expectation only supports '// COMPILE_ARGS: --pass no-op' or "
-        f"'// COMPILE_ARGS: --pass buffer-results-to-out-params', got {compile_args!r}"
+        f"'// COMPILE_ARGS: --pass buffer-results-to-out-params', got {compile_args!r}",
     )
 
 
@@ -136,11 +139,15 @@ def run_emitc_case(
     """
 
     if not source_path:
-        raise ValueError("source_path must be non-empty")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "source_path must be non-empty")
     if op_name is not None and not op_name:
-        raise ValueError("op_name must be non-empty when provided")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "op_name must be non-empty when provided")
     if not expected_snippets and not (forbidden_snippets or []):
-        raise ValueError("expected_snippets and forbidden_snippets cannot both be empty")
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.TOOLS,
+            "expected_snippets and forbidden_snippets cannot both be empty",
+        )
 
     compile_args = _extract_compile_args(case_text)
     input_ir = _extract_input_ir(case_text)

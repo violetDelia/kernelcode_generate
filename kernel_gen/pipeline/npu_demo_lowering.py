@@ -29,6 +29,7 @@ from xdsl.transforms.common_subexpression_elimination import CommonSubexpression
 
 from kernel_gen.passes.arch_parallelize import ArchParallelizePass
 from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.passes.decompass import DecompassPass
 from kernel_gen.passes.hoist_dma_alias_ops import HoistDmaAliasOpsPass
 from kernel_gen.passes.inline import InlinePass
@@ -95,10 +96,18 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     normalized_options = {} if options is None else dict(options)
     unknown = sorted(set(normalized_options) - {"target"})
     if unknown:
-        raise ValueError(f"npu-demo-lowering only accepts target option; got {', '.join(unknown)}")
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PIPELINE,
+            f"npu-demo-lowering only accepts target option; got {', '.join(unknown)}",
+        )
     target = normalized_options.get("target", "npu_demo")
     if not isinstance(target, str) or not target.strip():
-        raise ValueError("npu-demo-lowering target must be non-empty string")
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PIPELINE,
+            "npu-demo-lowering target must be non-empty string",
+        )
 
     pm = PassManager(name="npu-demo-lowering")
     pm.add_pass(InlinePass())

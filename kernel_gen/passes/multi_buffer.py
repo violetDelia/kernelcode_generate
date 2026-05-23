@@ -47,6 +47,7 @@ from kernel_gen.dialect.dma import (
     DmaMakeRingOp,
     DmaRingType,
 )
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dialect.kernel import KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolForOp
@@ -85,8 +86,12 @@ def _parse_memory_stage_option(value: str) -> int:
 
     try:
         stage = int(value.strip())
-    except ValueError:
-        raise_pass_contract_error("MultiBufferOptionError", "memory-stage must be integer")
+    except ValueError as exc:
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "MultiBufferOptionError: memory-stage must be integer",
+        ) from exc
     if stage <= 0:
         raise_pass_contract_error("MultiBufferOptionError", "memory-stage must be positive")
     return stage

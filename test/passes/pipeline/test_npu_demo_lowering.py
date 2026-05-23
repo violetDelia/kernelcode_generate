@@ -562,7 +562,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_npu_demo_lowering_pipeline_rejects_unknown_option() -> None:
-    with pytest.raises(ValueError, match=r"^npu-demo-lowering only accepts target option; got only-kernel$"):
+    with pytest.raises(KernelCodeError, match=r"^npu-demo-lowering only accepts target option; got only-kernel$"):
         build_npu_demo_lowering_pipeline({"only-kernel": "true"})
 
 

@@ -236,8 +236,6 @@ def _build_registered_pass_instance(
                 f"PassRegistryError: pass '{name}' option error: {exc}",
             ) from exc
         except Exception as exc:  # pragma: no cover - exception detail not stable
-            if passthrough_errors and isinstance(exc, passthrough_errors):
-                raise
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: pass '{name}' option error") from exc
         if not isinstance(pass_obj, XdslModulePass):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: pass '{name}' option error")
@@ -254,8 +252,6 @@ def _build_registered_pass_instance(
             _set_pass_fold_option(pass_obj, fold)
         return pass_obj
     except Exception as exc:  # pragma: no cover - exception detail not stable
-        if passthrough_errors and isinstance(exc, passthrough_errors):
-            raise
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"PassRegistryError: pass '{name}' is not constructible") from exc
 
 

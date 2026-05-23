@@ -29,6 +29,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.core.context import build_default_context
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr
 import kernel_gen.dsl.ast.mlir_gen as public_mlir_gen
@@ -541,16 +542,12 @@ builtin.module {
 # 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
 # 对应测试文件路径: test/tools/test_mlir_gen_compare.py
 def test_mlir_gen_compare_rejects_invalid_runtime_args_type() -> None:
-    try:
+    with pytest.raises(KernelCodeError, match=r"^runtime_args must be list, tuple, or None$"):
         compare_module.mlir_gen_compare_text(
             fn=_dummy_kernel,
             runtime_args=42,
             mlir_text=_SIMPLE_MODULE_TEXT,
         )
-    except TypeError as exc:
-        assert "runtime_args must be list, tuple, or None" in str(exc)
-    else:
-        raise AssertionError("expected TypeError for invalid runtime_args type")
 
 
 # TC-MLIR-GEN-COMPARE-009

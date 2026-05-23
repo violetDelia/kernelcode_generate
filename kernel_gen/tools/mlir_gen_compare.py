@@ -40,6 +40,7 @@ from xdsl.printer import Printer
 
 import kernel_gen.dsl.ast.mlir_gen as mlir_gen_module
 from kernel_gen.core.context import build_default_context
+from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
@@ -95,7 +96,7 @@ def _normalize_module_text(module: ModuleOp, ctx: Context) -> str:
     功能说明:
     - 先把 module 打印成文本，再用当前文件内 Context 解析回 builtin.module。
     - 重新打印解析结果，去除 printer 差异与尾部空白。
-    - 若解析结果不是 builtin.module，则抛出稳定 ValueError。
+    - 若解析结果不是 builtin.module，则抛出稳定 KernelCodeError。
 
     使用示例:
     - text = _normalize_module_text(module, ctx)
@@ -109,7 +110,7 @@ def _normalize_module_text(module: ModuleOp, ctx: Context) -> str:
     text = _render_operation_text(module)
     parsed = Parser(ctx, text).parse_module()
     if not isinstance(parsed, ModuleOp):
-        raise ValueError("mlir_gen_compare expects builtin.module")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "mlir_gen_compare expects builtin.module")
     return _render_operation_text(parsed)
 
 
@@ -245,7 +246,7 @@ def _mlir_gen_compare_expected_text(
     elif isinstance(runtime_args, (list, tuple)):
         args = tuple(runtime_args)
     else:
-        raise TypeError("runtime_args must be list, tuple, or None")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "runtime_args must be list, tuple, or None")
 
     actual_module = mlir_gen_module.mlir_gen(fn, *args)
     if not isinstance(actual_module, ModuleOp):

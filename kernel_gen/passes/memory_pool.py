@@ -488,8 +488,12 @@ def _parse_alignment_option(value: str) -> int:
 
     try:
         alignment = int(value.strip())
-    except ValueError:
-        raise_pass_contract_error("MemoryPoolOptionError", "alignment must be non-negative integer")
+    except ValueError as exc:
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "MemoryPoolOptionError: alignment must be non-negative integer",
+        ) from exc
     if alignment < 0:
         raise_pass_contract_error("MemoryPoolOptionError", "alignment must be non-negative integer")
     return alignment

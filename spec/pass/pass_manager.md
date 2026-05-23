@@ -207,7 +207,7 @@ pm.add_pass(MyPass())
 
 - 返回值：
 
-- 返回 `None`；非法类型应抛出 `TypeError`。
+- 返回 `None`；非法类型应抛出 `KernelCodeError`。
 
 ### `PassManager.extend(passes)`
 
@@ -227,7 +227,7 @@ pm.extend([PassA(), PassB()])
 
 - 注意事项：
 
-- 任一元素不是 `Pass` 或 xdsl `ModulePass`，或 `name` 不是字符串时必须抛出 `TypeError`。
+- 任一元素不是 `Pass` 或 xdsl `ModulePass`，或 `name` 不是字符串时必须抛出 `KernelCodeError`。
 
 - 返回值：
 
@@ -255,7 +255,7 @@ result = pm.run(module)
 - 注意事项：
 
 - 每个 pass 必须原地改写同一 `ModuleOp`。
-- 任何 Pass 抛出的异常应原样传播。
+- Pass 抛出的 `KernelCodeError` 应原样传播；其它异常必须包装为 `KernelCodeError`，错误文本包含失败 pass 名称。
 - 所有 pass 固定走 `apply(ctx, module)`；不再按“是否额外提供 run/apply”做兼容优先级分支。
 - `kernel_gen.core.config.dump_dir` 非空时，目录内必须包含 `01-first-ir.mlir`；每个 pass 完成后写入 `NN-<pass-name>.mlir`；这些 `.mlir` 文件的 IR 正文必须使用 alias IR，普通 `str(op)` 与比较工具默认文本不因本接口改变。
 - 每个 pass 后 dump 文件第一行必须是当前 pass 的可解析名称文本，后续内容为该 pass 后的 IR 文本。
@@ -384,8 +384,8 @@ result = pm.run(module)
 - 验证 Pass 注册与执行顺序一致。
 - 验证空管理器执行返回原输入。
 - 验证 `dump_dir` 写入初始 alias IR 与逐 pass 后 alias IR。
-- 验证显式注册非法 Pass 时触发 `TypeError`。
-- 验证 Pass 异常可向上抛出。
+- 验证显式注册非法 Pass 时触发 `KernelCodeError`。
+- 验证 Pass 的 `KernelCodeError` 原样向上抛出，其它异常包装为 `KernelCodeError`。
 - 验证 PassManager 不承载旧默认 builder 兼容入口。
 
 ### 功能与用例清单

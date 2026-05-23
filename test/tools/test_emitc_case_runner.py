@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.tools.emitc_case_runner import run_emitc_case
 
 
@@ -86,7 +87,7 @@ builtin.module {
 }"""
 
     with pytest.raises(
-        ValueError,
+        KernelCodeError,
         match=r"only supports '// COMPILE_ARGS: --pass no-op' or '// COMPILE_ARGS: --pass buffer-results-to-out-params'",
     ):
         run_emitc_case(

@@ -35,7 +35,7 @@
 
 - api：`run_emitc_case(case_text: str, *, source_path: str, op_name: str | None = None, expected_snippets: list[str], forbidden_snippets: list[str] | None = None) -> str`
 - 参数：
-  - `case_text`：含 `COMPILE_ARGS` / `CHECK` 注释头与输入 IR 正文的完整 case 文本；类型 `str`；无默认值，调用方必须显式提供；不允许 `None`；空文本或不含有效输入 IR 时必须抛出稳定 `ValueError`。
+  - `case_text`：含 `COMPILE_ARGS` / `CHECK` 注释头与输入 IR 正文的完整 case 文本；类型 `str`；无默认值，调用方必须显式提供；不允许 `None`；空文本或不含有效输入 IR 时必须抛出稳定 `KernelCodeError`。
   - `source_path`：当前 case 的稳定来源标识；类型 `str`；无默认值，调用方必须显式提供；不允许 `None` 或空字符串；错误消息必须包含该值。
   - `op_name`：可选语义标签；类型 `str | None`；默认值 `None`；允许 `None`，但不允许空字符串。
   - `expected_snippets`：生成源码中必须出现的片段集合；类型 `list[str]`；无默认值，调用方必须显式提供；不允许 `None`，且不能与 `forbidden_snippets` 同时为空。
@@ -58,11 +58,11 @@
 - 功能说明：提取 `case_text` 中的输入 `builtin.module`，按允许集合执行最小预处理，临时设置 `core.config.target="npu_demo"`，调用 `emit_c(module, EmitCContext())`，再校验源码片段。
 - 注意事项：
   - 当前只接受未声明 `COMPILE_ARGS`、`// COMPILE_ARGS: --pass no-op`、`// COMPILE_ARGS: --pass buffer-results-to-out-params`。
-  - `source_path == ""` 必须抛出 `ValueError("source_path must be non-empty")`。
-  - `op_name == ""` 必须抛出 `ValueError("op_name must be non-empty when provided")`。
-  - `expected_snippets` 与 `forbidden_snippets` 同时为空时必须抛出 `ValueError("expected_snippets and forbidden_snippets cannot both be empty")`。
-  - `case_text` 中没有有效输入 IR 时必须抛出 `ValueError("emit_c expectation case must contain input IR")`。
-  - `COMPILE_ARGS` 超出允许集合时必须抛出稳定 `ValueError`。
+  - `source_path == ""` 必须抛出 `KernelCodeError("source_path must be non-empty")`。
+  - `op_name == ""` 必须抛出 `KernelCodeError("op_name must be non-empty when provided")`。
+  - `expected_snippets` 与 `forbidden_snippets` 同时为空时必须抛出 `KernelCodeError("expected_snippets and forbidden_snippets cannot both be empty")`。
+  - `case_text` 中没有有效输入 IR 时必须抛出 `KernelCodeError("emit_c expectation case must contain input IR")`。
+  - `COMPILE_ARGS` 超出允许集合时必须抛出稳定 `KernelCodeError`。
   - `emit_c(...)` 执行失败时沿用底层异常，不在本接口内重新包装。
   - 片段断言失败时抛出 `AssertionError`，错误消息必须包含 `source_path`。
   - `test/tools/test_emitc_case_runner.py` 与 `expectation/dsl/emit_c/npu_demo/**` 只能通过 `run_emitc_case(...)` 观察公开行为。

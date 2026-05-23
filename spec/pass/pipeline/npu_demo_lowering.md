@@ -160,6 +160,7 @@
   - `TemplateNameInferPass` 是最后一关注解 pass，之后不得再新增 memory value。
   - `LaunchKernelCostFuncPass` 不属于本 pipeline。
   - `only-kernel`、`only_kernel` 或其他未知 options 输入必须显式失败。
+  - options 解析失败必须抛出 `KernelCodeError(ErrorModule.PIPELINE, ...)`，不暴露裸 Python 内置异常。
 
 ## 测试
 

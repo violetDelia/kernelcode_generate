@@ -1184,19 +1184,27 @@ def _render_emitc_text(operation: Operation, emitc_target: str) -> str:
     """
 
     if emitc_target not in {"cpu", "npu_demo"}:
-        raise ValueError(f"unsupported emitc target {emitc_target!r}")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, f"unsupported emitc target {emitc_target!r}")
 
     emit_input: Operation | func.FuncOp
     if isinstance(operation, ModuleOp):
         top_ops = list(operation.ops)
         if emitc_target == "cpu":
             if len(top_ops) != 1 or not isinstance(top_ops[0], func.FuncOp):
-                raise ValueError("target=cpu requires a module with exactly one top-level func.func")
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.TOOLS,
+                    "target=cpu requires a module with exactly one top-level func.func",
+                )
             emit_input = top_ops[0]
         elif emitc_target == "npu_demo" and len(top_ops) == 1 and isinstance(top_ops[0], func.FuncOp):
             func_op = top_ops[0]
             if _is_empty_npu_demo_func(func_op):
-                raise ValueError("target=npu_demo requires a non-empty npu_demo-compatible func.func")
+                raise KernelCodeError(
+                    ErrorKind.CONTRACT,
+                    ErrorModule.TOOLS,
+                    "target=npu_demo requires a non-empty npu_demo-compatible func.func",
+                )
             emit_input = func_op
         else:
             emit_input = operation
@@ -1204,7 +1212,7 @@ def _render_emitc_text(operation: Operation, emitc_target: str) -> str:
         emit_input = operation
 
     if emitc_target == "cpu" and not isinstance(emit_input, func.FuncOp):
-        raise ValueError("target=cpu requires func.func input")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "target=cpu requires func.func input")
 
     from kernel_gen.core.config import restore_config, set_target, snapshot_config
     from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
@@ -1227,7 +1235,7 @@ def _is_empty_npu_demo_func(func_op: func.FuncOp) -> bool:
       `IrcheckEmitCError`，而不是生成一个空 helper 后进入 CHECK 匹配。
 
     使用示例:
-    - `if _is_empty_npu_demo_func(func_op): raise ValueError(...)`
+    - `if _is_empty_npu_demo_func(func_op): raise KernelCodeError(...)`
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
@@ -1489,21 +1497,21 @@ def _run_compile_step(ctx: Context, module: Operation, step: IrcheckCompileStep)
     if kind == "pass":
         pass_obj = build_registered_pass(name, options)
         if not isinstance(pass_obj, ModulePass):
-            raise TypeError("built pass is not supported pass instance")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "built pass is not supported pass instance")
         if not isinstance(module, ModuleOp):
-            raise TypeError("built pass requires builtin.module target")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "built pass requires builtin.module target")
         pass_obj.apply(ctx, module)
         out = module
     elif kind == "pipeline":
         pm = build_registered_pipeline(name, options)
         if not isinstance(pm, PassManager):
-            raise TypeError("built pipeline is not PassManager instance")
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "built pipeline is not PassManager instance")
         out = pm.run(module)
     else:  # pragma: no cover - internal invariant
-        raise ValueError(f"unexpected compile mode: {kind}")
+        raise KernelCodeError(ErrorKind.INTERNAL, ErrorModule.TOOLS, f"unexpected compile mode: {kind}")
 
     if not isinstance(out, Operation):
-        raise TypeError("pass/pipeline did not return xdsl Operation")
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, "pass/pipeline did not return xdsl Operation")
     return out
 
 
