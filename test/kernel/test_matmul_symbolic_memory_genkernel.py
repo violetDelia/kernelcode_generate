@@ -26,6 +26,7 @@ from __future__ import annotations
 import inspect
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -59,6 +60,43 @@ def _assert_source_uses_accumulator(source: str) -> None:
     add_index = source.index("add<")
     output_deslice_index = source.index("deslice(arg0", add_index)
     assert fill_index < matmul_index < add_index < output_deslice_index
+
+
+def _read_first_ir(case_name: str) -> str:
+    """读取公开 dump 目录中的生成侧 first-ir。
+
+    功能说明:
+    - 只读取 `run_lowering_demo(...)` 公开写出的 `kernel/dump/<case>/01-first-ir.mlir`。
+    - 用于验证 DSL/kernel 生成侧已产生 fixed upper-bound scratch，而不是依赖后续 pass 掩盖。
+
+    使用示例:
+    - `_read_first_ir("test/matmul/dynamic_symbolic_tile_reduce")`
+    """
+
+    return (_REPO_ROOT / "kernel" / "dump" / Path(case_name) / "01-first-ir.mlir").read_text(encoding="utf-8")
+
+
+def _assert_matmul_first_ir_uses_fixed_upper_bound_scratch(case_name: str) -> None:
+    """校验 matmul 生成侧 first-ir 中可改写 scratch 已用上界形态。
+
+    功能说明:
+    - 锁定 accumulator、bias tile、lhs/rhs staging scratch 使用 tile 上界分配。
+    - 锁定当前 tail 只通过 `dma.view/deslice` 表达，不能回退成 current tile scratch alloc。
+
+    使用示例:
+    - `_assert_matmul_first_ir_uses_fixed_upper_bound_scratch("test/matmul/dynamic_symbolic_tile_reduce")`
+    """
+
+    first_ir = _read_first_ir(case_name)
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_H|#C72), (#S_TILE_W|#C56)\]', first_ir)
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_H|#C72), (#S_TILE_K|#C48)\]', first_ir)
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_K|#C48), (#S_TILE_W|#C56)\]', first_ir)
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_W|#C56)\], \[#C1\]', first_ir)
+    assert re.search(r'"dma\.view".*-> !nn\.memory<\[#S2, #S4\]', first_ir)
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S2, #S4\]', first_ir) is None
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S2, #S6\]', first_ir) is None
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S6, #S4\]', first_ir) is None
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S4\], \[#C1\]', first_ir) is None
 
 
 def _assert_python_source_uses_kernel_out_first(fn) -> None:
@@ -123,6 +161,7 @@ def test_dynamic_matmul_demo_uses_symbolic_memory_and_tile_reduce_accumulator() 
     module_text = str(module)
 
     _assert_python_source_uses_kernel_out_first(matmul_inputs_dynamic_tile_dynamic_kernel)
+    _assert_matmul_first_ir_uses_fixed_upper_bound_scratch("test/matmul/dynamic_symbolic_tile_reduce")
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" in module_text
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<K>]" in module_text
     assert "!nn.memory<[#symbol.expr<K>, #symbol.expr<W>]" in module_text
@@ -160,6 +199,7 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
     module_text = str(module)
 
     _assert_python_source_uses_kernel_out_first(matmul_inputs_static_tile_dynamic_kernel)
+    _assert_matmul_first_ir_uses_fixed_upper_bound_scratch("test/matmul/static_symbolic_tile_reduce")
     assert "!nn.memory<[#symbol.expr<197>, #symbol.expr<184>]" in module_text
     assert "!nn.memory<[#symbol.expr<197>, #symbol.expr<178>]" in module_text
     assert "!nn.memory<[#symbol.expr<178>, #symbol.expr<184>]" in module_text
@@ -194,6 +234,7 @@ def test_static_static_matmul_demo_keeps_static_memory_and_static_tile_reduce() 
     module_text = str(module)
 
     _assert_python_source_uses_kernel_out_first(matmul_inputs_static_tile_static_kernel)
+    _assert_matmul_first_ir_uses_fixed_upper_bound_scratch("test/matmul/static_static_tile_reduce")
     assert "!nn.memory<[#symbol.expr<166>, #symbol.expr<172>]" in module_text
     assert "!nn.memory<[#symbol.expr<166>, #symbol.expr<217>]" in module_text
     assert "!nn.memory<[#symbol.expr<217>, #symbol.expr<172>]" in module_text

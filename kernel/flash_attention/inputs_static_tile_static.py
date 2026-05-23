@@ -7,6 +7,7 @@
 - tile 固定为 `Br=64`、`Bc=64`，序列长度大于两类 tile 并触发 query/key 尾块。
 - 使用四层循环 `batch -> head -> query block -> key/value block` 实现 online softmax。
 - softmax 显式展开为 running max、running sum、`kernel.exp` 与归一化，不调用 `nn.softmax`。
+- 可改写 score/state/output scratch 使用固定 `Br/Bc/dim` 上界分配，真实 query/key tail 通过现有 `dma.view/deslice` 写入 fixed tile storage。
 - 通过 `dsl_run` 真实执行，并和 NumPy softmax attention 参考结果对齐。
 
 API 列表:
@@ -98,6 +99,7 @@ def flash_attention_inputs_static_tile_static_kernel(
     - 输入布局为 `[B, H, SL, D]`。
     - 固定 `Br=64`、`Bc=64` 做 query block 与 key/value block 两层分块。
     - 主计算入口使用 kernel out-first helper，softmax 以 running max/running sum online 形式展开。
+    - score/state/output scratch 使用固定 tile 上界分配，`cur_br/cur_bc` tail 只通过 `view/deslice` 表达。
     - 输出写回 `out[B, H, SL, D]`。
 
     使用示例:
@@ -107,6 +109,8 @@ def flash_attention_inputs_static_tile_static_kernel(
     batch_size, head_size, seq_len, dim_size = q.get_shape()
     br = 64
     bc = 64
+    unit_tile = br - br + 1
+    pair_tile = unit_tile + unit_tile
     for b0 in loop(0, batch_size, 1):
         for h0 in loop(0, head_size, 1):
             for m0 in loop(0, seq_len, br):
@@ -116,10 +120,9 @@ def flash_attention_inputs_static_tile_static_kernel(
                 q_4d = view(q, [b0, h0, m0, 0], [1, 1, cur_br, dim_size], [1, 1, 1, 1])
                 deslice(q_full_4d, q_4d, [0, 0, 0, 0], [1, 1, cur_br, dim_size], [1, 1, 1, 1])
                 q_full = reshape(q_full_4d, [br, dim_size])
-                q_region = view(q_full, [0, 0], [cur_br, dim_size], [1, 1])
-                m_state = alloc([cur_br, 1], NumericType.Float32, MemorySpace.TSM)
-                sum_state = alloc([cur_br, 1], NumericType.Float32, MemorySpace.TSM)
-                weighted = alloc([cur_br, dim_size], NumericType.Float32, MemorySpace.TSM)
+                m_state = alloc([br, unit_tile], NumericType.Float32, MemorySpace.TSM)
+                sum_state = alloc([br, unit_tile], NumericType.Float32, MemorySpace.TSM)
+                weighted = alloc([br, dim_size], NumericType.Float32, MemorySpace.TSM)
                 fill(m_state, "-inf")
                 fill(sum_state, 0)
                 fill(weighted, 0)
@@ -130,53 +133,55 @@ def flash_attention_inputs_static_tile_static_kernel(
                     k_4d = view(k, [b0, h0, n0, 0], [1, 1, cur_bc, dim_size], [1, 1, 1, 1])
                     deslice(k_full_4d, k_4d, [0, 0, 0, 0], [1, 1, cur_bc, dim_size], [1, 1, 1, 1])
                     k_full = reshape(k_full_4d, [bc, dim_size])
-                    k_region = view(k_full, [0, 0], [cur_bc, dim_size], [1, 1])
-                    k_transposed = transpose(k_region, [1, 0])
-                    score_tile = alloc([cur_br, cur_bc], NumericType.Float32, MemorySpace.TSM)
-                    kernel.matmul(score_tile, q_region, k_transposed)
-                    tile_max = alloc([cur_br, 1], NumericType.Float32, MemorySpace.TSM)
+                    k_transposed = transpose(k_full, [1, 0])
+                    matmul_score = alloc([br, bc], NumericType.Float32, MemorySpace.TSM)
+                    kernel.matmul(matmul_score, q_full, k_transposed)
+                    score_tile = alloc([br, bc], NumericType.Float32, MemorySpace.TSM)
+                    fill(score_tile, "-inf")
+                    score_region = view(matmul_score, [0, 0], [cur_br, cur_bc], [1, 1])
+                    deslice(score_tile, score_region, [0, 0], [cur_br, cur_bc], [1, 1])
+                    tile_max = alloc([br, unit_tile], NumericType.Float32, MemorySpace.TSM)
                     kernel.reduce(tile_max, score_tile, kind=kernel.KernelReduceKind.MAX, axis=1, keepdim=True)
-                    max_pair = alloc([cur_br, 2], NumericType.Float32, MemorySpace.TSM)
-                    deslice(max_pair, m_state, [0, 0], [cur_br, 1], [1, 1])
-                    deslice(max_pair, tile_max, [0, 1], [cur_br, 1], [1, 1])
-                    m_next = alloc([cur_br, 1], NumericType.Float32, MemorySpace.TSM)
+                    max_pair = alloc([br, pair_tile], NumericType.Float32, MemorySpace.TSM)
+                    deslice(max_pair, m_state, [0, 0], [br, unit_tile], [1, 1])
+                    deslice(max_pair, tile_max, [0, unit_tile], [br, unit_tile], [1, 1])
+                    m_next = alloc([br, unit_tile], NumericType.Float32, MemorySpace.TSM)
                     kernel.reduce(m_next, max_pair, kind=kernel.KernelReduceKind.MAX, axis=1, keepdim=True)
-                    m_next_full = alloc([cur_br, cur_bc], NumericType.Float32, MemorySpace.TSM)
+                    m_next_full = alloc([br, bc], NumericType.Float32, MemorySpace.TSM)
                     broadcast(m_next_full, m_next)
-                    shifted_score = alloc([cur_br, cur_bc], NumericType.Float32, MemorySpace.TSM)
+                    shifted_score = alloc([br, bc], NumericType.Float32, MemorySpace.TSM)
                     kernel.sub(shifted_score, score_tile, m_next_full)
-                    exp_score = alloc([cur_br, cur_bc], NumericType.Float32, MemorySpace.TSM)
+                    exp_score = alloc([br, bc], NumericType.Float32, MemorySpace.TSM)
                     kernel.exp(exp_score, shifted_score)
-                    tile_sum = alloc([cur_br, 1], NumericType.Float32, MemorySpace.TSM)
+                    tile_sum = alloc([br, unit_tile], NumericType.Float32, MemorySpace.TSM)
                     kernel.reduce(tile_sum, exp_score, kind=kernel.KernelReduceKind.SUM, axis=1, keepdim=True)
-                    old_shift = alloc([cur_br, 1], NumericType.Float32, MemorySpace.TSM)
+                    old_shift = alloc([br, unit_tile], NumericType.Float32, MemorySpace.TSM)
                     kernel.sub(old_shift, m_state, m_next)
-                    old_scale = alloc([cur_br, 1], NumericType.Float32, MemorySpace.TSM)
+                    old_scale = alloc([br, unit_tile], NumericType.Float32, MemorySpace.TSM)
                     kernel.exp(old_scale, old_shift)
-                    scaled_sum = alloc([cur_br, 1], NumericType.Float32, MemorySpace.TSM)
+                    scaled_sum = alloc([br, unit_tile], NumericType.Float32, MemorySpace.TSM)
                     kernel.mul(scaled_sum, sum_state, old_scale)
-                    sum_next = alloc([cur_br, 1], NumericType.Float32, MemorySpace.TSM)
+                    sum_next = alloc([br, unit_tile], NumericType.Float32, MemorySpace.TSM)
                     kernel.add(sum_next, scaled_sum, tile_sum)
                     v_full_4d = alloc([1, 1, bc, dim_size], NumericType.Float32, MemorySpace.TSM)
                     fill(v_full_4d, 0)
                     v_4d = view(v, [b0, h0, n0, 0], [1, 1, cur_bc, dim_size], [1, 1, 1, 1])
                     deslice(v_full_4d, v_4d, [0, 0, 0, 0], [1, 1, cur_bc, dim_size], [1, 1, 1, 1])
                     v_full = reshape(v_full_4d, [bc, dim_size])
-                    v_region = view(v_full, [0, 0], [cur_bc, dim_size], [1, 1])
-                    partial = alloc([cur_br, dim_size], NumericType.Float32, MemorySpace.TSM)
-                    kernel.matmul(partial, exp_score, v_region)
-                    old_scale_full = alloc([cur_br, dim_size], NumericType.Float32, MemorySpace.TSM)
+                    partial = alloc([br, dim_size], NumericType.Float32, MemorySpace.TSM)
+                    kernel.matmul(partial, exp_score, v_full)
+                    old_scale_full = alloc([br, dim_size], NumericType.Float32, MemorySpace.TSM)
                     broadcast(old_scale_full, old_scale)
-                    scaled_weighted = alloc([cur_br, dim_size], NumericType.Float32, MemorySpace.TSM)
+                    scaled_weighted = alloc([br, dim_size], NumericType.Float32, MemorySpace.TSM)
                     kernel.mul(scaled_weighted, weighted, old_scale_full)
-                    weighted_next = alloc([cur_br, dim_size], NumericType.Float32, MemorySpace.TSM)
+                    weighted_next = alloc([br, dim_size], NumericType.Float32, MemorySpace.TSM)
                     kernel.add(weighted_next, scaled_weighted, partial)
-                    deslice(m_state, m_next, [0, 0], [cur_br, 1], [1, 1])
-                    deslice(sum_state, sum_next, [0, 0], [cur_br, 1], [1, 1])
-                    deslice(weighted, weighted_next, [0, 0], [cur_br, dim_size], [1, 1])
-                sum_full = alloc([cur_br, dim_size], NumericType.Float32, MemorySpace.TSM)
+                    deslice(m_state, m_next, [0, 0], [br, unit_tile], [1, 1])
+                    deslice(sum_state, sum_next, [0, 0], [br, unit_tile], [1, 1])
+                    deslice(weighted, weighted_next, [0, 0], [br, dim_size], [1, 1])
+                sum_full = alloc([br, dim_size], NumericType.Float32, MemorySpace.TSM)
                 broadcast(sum_full, sum_state)
-                output_tile = alloc([cur_br, dim_size], NumericType.Float32, MemorySpace.TSM)
+                output_tile = alloc([br, dim_size], NumericType.Float32, MemorySpace.TSM)
                 kernel.truediv(output_tile, weighted, sum_full)
                 output_region = view(output_tile, [0, 0], [cur_br, dim_size], [1, 1])
                 o_4d = reshape(output_region, [1, 1, cur_br, dim_size])

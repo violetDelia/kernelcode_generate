@@ -24,6 +24,7 @@ from __future__ import annotations
 import inspect
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import TypeAlias
@@ -91,6 +92,105 @@ def _assert_flash_source_uses_query_and_key_tile_loops(fn) -> None:
     assert "cur_br = min(br, seq_len - m0)" in function_source
     assert "cur_bc = min(bc, seq_len - n0)" in function_source
     assert "[b0, h0, n0, 0]" in function_source
+
+
+def _assert_flash_static_static_source_uses_fixed_upper_bound_scratch() -> None:
+    """校验 static-static flash attention scratch 使用固定 tile 上界。
+
+    功能说明:
+    - 只读取公开 demo 函数源码，确认可改写 score/state/output scratch 不再用 `cur_br/cur_bc` 直接分配。
+    - 锁定 tail 通过 `view/deslice` 写入 fixed upper-bound storage。
+
+    使用示例:
+    - `_assert_flash_static_static_source_uses_fixed_upper_bound_scratch()`
+    """
+
+    function_source = inspect.getsource(flash_attention_inputs_static_tile_static_kernel)
+    assert "unit_tile = br - br + 1" in function_source
+    assert "pair_tile = unit_tile + unit_tile" in function_source
+    assert "m_state = alloc([br, unit_tile]" in function_source
+    assert "sum_state = alloc([br, unit_tile]" in function_source
+    assert "weighted = alloc([br, dim_size]" in function_source
+    assert "matmul_score = alloc([br, bc]" in function_source
+    assert "score_tile = alloc([br, bc]" in function_source
+    assert "score_region = view(matmul_score, [0, 0], [cur_br, cur_bc]" in function_source
+    assert "deslice(score_tile, score_region, [0, 0], [cur_br, cur_bc]" in function_source
+    assert "output_region = view(output_tile, [0, 0], [cur_br, dim_size]" in function_source
+    assert "m_state = alloc([cur_br" not in function_source
+    assert "sum_state = alloc([cur_br" not in function_source
+    assert "matmul_score = alloc([cur_br, cur_bc]" not in function_source
+    assert "score_tile = alloc([cur_br, cur_bc]" not in function_source
+
+
+def _read_first_ir(case_name: str) -> str:
+    """读取公开 dump 目录中的生成侧 first-ir。
+
+    功能说明:
+    - 只读取 `run_lowering_demo(...)` 公开写出的 `kernel/dump/<case>/01-first-ir.mlir`。
+    - 用于验证 DSL/kernel 生成侧已产生 fixed upper-bound scratch，而不是依赖后续 pass 掩盖。
+
+    使用示例:
+    - `_read_first_ir("test/flash_attention/static_static")`
+    """
+
+    return (_REPO_ROOT / "kernel" / "dump" / Path(case_name) / "01-first-ir.mlir").read_text(encoding="utf-8")
+
+
+def _assert_flash_static_static_first_ir_uses_fixed_upper_bound_scratch() -> None:
+    """校验 static-static flash attention 生成侧 first-ir 的 fixed upper-bound scratch。
+
+    功能说明:
+    - 锁定可改写 scratch alloc 均使用 `br/bc/dim` 固定上界。
+    - 锁定 current query/key tile 由 `dma.view/deslice` 表达，first-ir 中不再以 tail `#S2` 直接分配 scratch。
+
+    使用示例:
+    - `_assert_flash_static_static_first_ir_uses_fixed_upper_bound_scratch()`
+    """
+
+    first_ir = _read_first_ir("test/flash_attention/static_static")
+    assert '!nn.memory<[#C64, #C64], [#C64, #C1], f32, #nn.space<tsm>>' in first_ir
+    assert '!nn.memory<[#C64, #C1], [#C1, #C1], f32, #nn.space<tsm>>' in first_ir
+    assert '!nn.memory<[#C64, #C91], [#C91, #C1], f32, #nn.space<tsm>>' in first_ir
+    assert re.search(r'"dma\.view".*-> !nn\.memory<\[#S2, #S2\]', first_ir) is not None
+    assert re.search(r'"dma\.view".*-> !nn\.memory<\[#S2, #C91\]', first_ir) is not None
+    assert re.search(r'"dma\.alloc".*#S2', first_ir) is None
+
+
+def _assert_no_flash_tail_shape_alloc(first_ir: str, tail_symbols: tuple[str, ...]) -> None:
+    """校验 flash attention first-ir 的 alloc result shape 不直接使用 tail 维。
+
+    功能说明:
+    - 只解析公开 dump 文本中的 `dma.alloc` result shape。
+    - 防止 dynamic/static-dynamic case 回退为 `cur_br/cur_bc` scratch alloc。
+
+    使用示例:
+    - `_assert_no_flash_tail_shape_alloc(first_ir, ("#S2", "#S5"))`
+    """
+
+    for line in first_ir.splitlines():
+        if '"dma.alloc"' not in line or "-> !nn.memory<[" not in line:
+            continue
+        result_shape = line.split("-> !nn.memory<[", 1)[1].split("]", 1)[0]
+        assert not any(tail_symbol in result_shape for tail_symbol in tail_symbols), line
+
+
+def _assert_flash_symbolic_tile_first_ir_uses_fixed_upper_bound_scratch(case_name: str, tail_symbols: tuple[str, ...]) -> None:
+    """校验 symbolic tile flash attention first-ir 使用 BR/BC 上界 scratch。
+
+    功能说明:
+    - 锁定 static-dynamic 与 dynamic-dynamic demo 的 scratch alloc 使用 `BR/BC` 上界。
+    - 锁定当前 query/key tile 通过 `dma.view/deslice` 表达。
+
+    使用示例:
+    - `_assert_flash_symbolic_tile_first_ir_uses_fixed_upper_bound_scratch("test/flash_attention/static_dynamic", ("#S2", "#S5"))`
+    """
+
+    first_ir = _read_first_ir(case_name)
+    assert '!nn.memory<[#S_BR, #S_BC], [#S_BC, #C1], f32, #nn.space<tsm>>' in first_ir
+    assert '!nn.memory<[#S_BR, #C1], [#C1, #C1], f32, #nn.space<tsm>>' in first_ir
+    assert re.search(r'"dma\.view".*-> !nn\.memory<\[' + re.escape(tail_symbols[0]) + r",", first_ir) is not None
+    assert re.search(r'"dma\.view".*-> !nn\.memory<\[' + re.escape(tail_symbols[0]) + r", " + re.escape(tail_symbols[1]) + r"\]", first_ir) is not None
+    _assert_no_flash_tail_shape_alloc(first_ir, tail_symbols)
 
 
 def _assert_flash_script_reports_tail(stdout: str) -> None:
@@ -202,6 +302,8 @@ def test_flash_static_static_demo_keeps_static_memory_and_tile() -> None:
 
     _assert_flash_source_uses_kernel_softmax(flash_attention_inputs_static_tile_static_kernel)
     _assert_flash_source_uses_query_and_key_tile_loops(flash_attention_inputs_static_tile_static_kernel)
+    _assert_flash_static_static_source_uses_fixed_upper_bound_scratch()
+    _assert_flash_static_static_first_ir_uses_fixed_upper_bound_scratch()
     assert STATIC_STATIC_FLASH_MEMORY in module_text
     assert STATIC_DYNAMIC_FLASH_MEMORY not in module_text
     assert DYNAMIC_FLASH_MEMORY not in module_text
@@ -231,6 +333,7 @@ def test_flash_static_dynamic_demo_keeps_static_memory_and_symbolic_tile() -> No
 
     _assert_flash_source_uses_kernel_softmax(flash_attention_inputs_static_tile_dynamic_kernel)
     _assert_flash_source_uses_query_and_key_tile_loops(flash_attention_inputs_static_tile_dynamic_kernel)
+    _assert_flash_symbolic_tile_first_ir_uses_fixed_upper_bound_scratch("test/flash_attention/static_dynamic", ("#S2", "#S5"))
     assert STATIC_DYNAMIC_FLASH_MEMORY in module_text
     assert STATIC_STATIC_FLASH_MEMORY not in module_text
     assert DYNAMIC_FLASH_MEMORY not in module_text
@@ -258,6 +361,7 @@ def test_flash_dynamic_dynamic_demo_keeps_symbolic_memory_and_symbolic_tile() ->
 
     _assert_flash_source_uses_kernel_softmax(flash_attention_inputs_dynamic_tile_dynamic_kernel)
     _assert_flash_source_uses_query_and_key_tile_loops(flash_attention_inputs_dynamic_tile_dynamic_kernel)
+    _assert_flash_symbolic_tile_first_ir_uses_fixed_upper_bound_scratch("test/flash_attention/dynamic_dynamic", ("#S4", "#S7"))
     assert DYNAMIC_FLASH_MEMORY in module_text
     assert STATIC_STATIC_FLASH_MEMORY not in module_text
     assert STATIC_DYNAMIC_FLASH_MEMORY not in module_text

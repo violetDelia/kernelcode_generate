@@ -24,6 +24,7 @@ API 列表:
 from __future__ import annotations
 
 import inspect
+import re
 import random
 import sys
 from pathlib import Path
@@ -78,16 +79,66 @@ def _assert_conv2d_source_uses_kernel_out_first(fn) -> None:
     assert "k_tile = cur_c * kh_size * kw_size" in function_source
     assert "col = alloc([batch_tile, cur_c, kh_size, kw_size, cur_ho, cur_wo]" in function_source
     assert "col2 = reshape(col, [k_tile, out_tile])" in function_source
-    assert "acc = alloc([batch_tile, cur_f, cur_ho, cur_wo]" in function_source
+    assert "acc = alloc([batch_tile, tile_f, tile_ho, tile_wo]" in function_source
+    assert "bias_tile = alloc([tile_f]" in function_source
+    assert "bias_nchw = reshape(bias_tile, [1, tile_f, 1, 1])" in function_source
     assert "partial = transpose(out_fnhw, [1, 0, 2, 3])" in function_source
-    assert "kernel.add(acc, acc, partial)" in function_source
+    assert "partial_full = alloc([batch_tile, tile_f, tile_ho, tile_wo]" in function_source
+    assert "deslice(partial_full, partial, [0, 0, 0, 0], [batch_tile, cur_f, cur_ho, cur_wo]" in function_source
+    assert "kernel.add(acc, acc, partial_full)" in function_source
     assert "if bias is not None:" in function_source
+    assert "bias_current = view(bias_tile, [0], [cur_f], [1])" in function_source
     assert "broadcast(bias_full, bias_nchw)" in function_source
+    assert "acc_current = view(acc, [0, 0, 0, 0], [batch_tile, cur_f, cur_ho, cur_wo]" in function_source
     assert "[batch_index, f0, ho0, wo0]" in function_source
     assert "partial_tile = alloc" not in function_source
     assert "out_tile_mem = slice(out" not in function_source
     assert "col = img2col2d(" not in function_source
     assert "out2 = matmul(" not in function_source
+    assert "acc = alloc([batch_tile, cur_f, cur_ho, cur_wo]" not in function_source
+    assert "bias_tile = alloc([cur_f]" not in function_source
+    assert "kernel.add(acc, acc, partial)" not in function_source
+
+
+def _read_first_ir(case_name: str) -> str:
+    """读取公开 dump 目录中的生成侧 first-ir。
+
+    功能说明:
+    - 只读取 `run_lowering_demo(...)` 公开写出的 `kernel/dump/<case>/01-first-ir.mlir`。
+    - 用于验证 DSL/kernel 生成侧已产生 fixed upper-bound scratch，而不是依赖后续 pass 掩盖。
+
+    使用示例:
+    - `_read_first_ir("test_conv2d/inputs_dynamic_tile_dynamic_symbolic_memory")`
+    """
+
+    return (_REPO_ROOT / "kernel" / "dump" / Path(case_name) / "01-first-ir.mlir").read_text(encoding="utf-8")
+
+
+def _assert_conv2d_first_ir_uses_fixed_upper_bound_scratch(case_name: str) -> None:
+    """校验 conv2d 生成侧 first-ir 中可改写 scratch 已用上界形态。
+
+    功能说明:
+    - 锁定 accumulator、bias tile、partial staging 三类 scratch 使用 tile 上界分配。
+    - 同时锁定 current tile 通过 `dma.view/deslice` 表达，旧 iterator-derived accumulator/bias alloc 不得回归。
+
+    使用示例:
+    - `_assert_conv2d_first_ir_uses_fixed_upper_bound_scratch("test_conv2d/inputs_dynamic_tile_dynamic_symbolic_memory")`
+    """
+
+    first_ir = _read_first_ir(case_name)
+    if "#S_TF" in first_ir:
+        assert '!nn.memory<[#S65, #S_TF, #S_THO, #S_TWO]' in first_ir
+        assert '!nn.memory<[#S_TF], [#C1], f32, #nn.space<tsm>>' in first_ir
+        assert '!nn.memory<[#S65, #S26, #S30, #S32], [#S66, #S67, #S_TWO, #C1]' in first_ir
+        assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S65, #S26, #S30, #S32\]', first_ir) is None
+        assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S26\], \[#C1\]', first_ir) is None
+        return
+
+    assert '!nn.memory<[#C1, #C7, #C8, #C8]' in first_ir
+    assert '!nn.memory<[#C7], [#C1], f32, #nn.space<tsm>>' in first_ir
+    assert '!nn.memory<[#C1, #S2, #S6, #S8], [#C448, #C64, #C8, #C1]' in first_ir
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#C1, #S2, #S6, #S8\]', first_ir) is None
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S2\], \[#C1\]', first_ir) is None
 
 
 def _symbolic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]:
@@ -180,6 +231,7 @@ def test_inputs_dynamic_tile_dynamic_gen_kernel_keeps_symbolic_memory_shapes() -
     module_text = str(module)
 
     _assert_conv2d_source_uses_kernel_out_first(conv2d_inputs_dynamic_tile_dynamic_kernel)
+    _assert_conv2d_first_ir_uses_fixed_upper_bound_scratch("test_conv2d/inputs_dynamic_tile_dynamic_symbolic_memory")
     assert SEMANTIC_OUTPUT_PREFIX in module_text
     assert SEMANTIC_INPUT_MEMORY in module_text
     assert SEMANTIC_WEIGHT_MEMORY in module_text
@@ -225,6 +277,7 @@ def test_inputs_static_tile_dynamic_gen_kernel_keeps_seeded_static_shapes() -> N
     module_text = str(module)
 
     _assert_conv2d_source_uses_kernel_out_first(conv2d_inputs_static_tile_dynamic_kernel)
+    _assert_conv2d_first_ir_uses_fixed_upper_bound_scratch("test_conv2d/inputs_static_tile_dynamic_seeded_static_memory")
     assert STATIC_OUTPUT_MEMORY in module_text
     assert STATIC_INPUT_MEMORY in module_text
     assert STATIC_WEIGHT_MEMORY in module_text
@@ -277,6 +330,7 @@ def test_inputs_static_tile_static_gen_kernel_keeps_seeded_static_shapes() -> No
     module_text = str(module)
 
     _assert_conv2d_source_uses_kernel_out_first(conv2d_inputs_static_tile_static_kernel)
+    _assert_conv2d_first_ir_uses_fixed_upper_bound_scratch("test_conv2d/inputs_static_tile_static_seeded_static_memory")
     assert STATIC_OUTPUT_MEMORY in module_text
     assert STATIC_INPUT_MEMORY in module_text
     assert STATIC_WEIGHT_MEMORY in module_text

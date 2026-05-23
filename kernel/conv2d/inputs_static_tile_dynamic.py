@@ -8,6 +8,7 @@
 - lowering 后 IR 必须保持上述具体数字 static shape，不得变成动态符号 shape。
 - tile 由 `run_numpy_demo(...)` 以 `int` runtime scalar 传入，runtime tile 从轻量候选集合按固定 seed 选择，尾块通过 DSL `min(...)` 生成 `symbol.min`。
 - 当 `tile_c < input channel` 时在每个输出 tile 内先初始化本地 accumulator，再在 `c0` tile 循环内用 `kernel.img2col2d/kernel.matmul/kernel.add` 累计 partial，最后一次写回输出。
+- accumulator、bias 与 partial staging scratch 使用 iterator-independent tile 上界分配，真实 tail 通过 `dma.view/deslice` 表达；img2col 与 matmul reshape 链路因现有 layout 合同保持 current tile 分配。
 - C/K reduce 完成后按 optional rank-1 bias 分支广播 `bias[None, :, None, None]`，再写回输出。
 - 通过 `dsl_run` 真实执行，并分别校验 absent bias 与 present bias 的 NumPy conv2d 参考结果。
 
@@ -111,6 +112,7 @@ def conv2d_inputs_static_tile_dynamic_kernel(
     - 固定 stride=8、dilation=1、padding=0。
     - 使用 `kernel.img2col2d + kernel.matmul + kernel.add` 生成卷积主体，并按 `tile_c` 循环分块后累计所有 partial 到本地 accumulator。
     - runtime tile 从轻量候选集合按固定 seed 选择，确保 memory_pool 后的片上动态内存视图不越界。
+    - accumulator、bias 与 partial staging scratch 使用 tile 上界分配，真实 `cur_f/cur_ho/cur_wo` tail 通过 `view/deslice` 写入与读出。
     - runtime bias 非空时，在 reduce 后、写回前广播 rank-1 bias 并累加。
 
     使用示例:
@@ -146,16 +148,16 @@ def conv2d_inputs_static_tile_dynamic_kernel(
                     for ni in loop(0, cur_n, 1):
                         batch_index = n0 + ni
                         batch_tile = min(n_size, 1)
-                        out_tile = batch_tile * spatial_tile
-                        acc = alloc([batch_tile, cur_f, cur_ho, cur_wo], NumericType.Float32, MemorySpace.TSM)
+                        acc = alloc([batch_tile, tile_f, tile_ho, tile_wo], NumericType.Float32, MemorySpace.TSM)
                         fill(acc, 0)
-                        bias_tile = alloc([cur_f], NumericType.Float32, MemorySpace.TSM)
+                        bias_tile = alloc([tile_f], NumericType.Float32, MemorySpace.TSM)
                         fill(bias_tile, 0)
-                        bias_nchw = reshape(bias_tile, [1, cur_f, 1, 1])
-                        bias_full = alloc([batch_tile, cur_f, cur_ho, cur_wo], NumericType.Float32, MemorySpace.TSM)
+                        bias_nchw = reshape(bias_tile, [1, tile_f, 1, 1])
+                        bias_full = alloc([batch_tile, tile_f, tile_ho, tile_wo], NumericType.Float32, MemorySpace.TSM)
                         for c0 in loop(0, c_size, tile_c):
                             cur_c = min(tile_c, c_size - c0)
                             k_tile = cur_c * kh_size * kw_size
+                            out_tile = batch_tile * spatial_tile
                             input_tile = slice(input_tensor, [batch_index, c0, ho0 * stride_h, wo0 * stride_w], [batch_tile, cur_c, input_h_tile, input_w_tile], [1, 1, 1, 1], MemorySpace.TSM)
                             weight_tile = slice(weight, [f0, c0, 0, 0], [cur_f, cur_c, kh_size, kw_size], [1, 1, 1, 1], MemorySpace.TSM)
                             col = alloc([batch_tile, cur_c, kh_size, kw_size, cur_ho, cur_wo], NumericType.Float32, MemorySpace.TSM)
@@ -166,15 +168,20 @@ def conv2d_inputs_static_tile_dynamic_kernel(
                             kernel.matmul(out2, weight2, col2)
                             out_fnhw = reshape(out2, [cur_f, batch_tile, cur_ho, cur_wo])
                             partial = transpose(out_fnhw, [1, 0, 2, 3])
-                            kernel.add(acc, acc, partial)
+                            partial_full = alloc([batch_tile, tile_f, tile_ho, tile_wo], NumericType.Float32, MemorySpace.TSM)
+                            fill(partial_full, 0)
+                            deslice(partial_full, partial, [0, 0, 0, 0], [batch_tile, cur_f, cur_ho, cur_wo], [1, 1, 1, 1])
+                            kernel.add(acc, acc, partial_full)
                         if bias is not None:
                             bias_region = view(bias, [f0], [cur_f], [1])
-                            deslice(bias_tile, bias_region, [0], [cur_f], [1])
+                            bias_current = view(bias_tile, [0], [cur_f], [1])
+                            deslice(bias_current, bias_region, [0], [cur_f], [1])
                             broadcast(bias_full, bias_nchw)
                             kernel.add(acc, acc, bias_full)
+                        acc_current = view(acc, [0, 0, 0, 0], [batch_tile, cur_f, cur_ho, cur_wo], [1, 1, 1, 1])
                         deslice(
                             out,
-                            acc,
+                            acc_current,
                             [batch_index, f0, ho0, wo0],
                             [batch_tile, cur_f, cur_ho, cur_wo],
                             [1, 1, 1, 1],

@@ -58,6 +58,8 @@
 - 对 `target="npu_demo"`，`tuner.select` 发射为 `S_INT <name> = 0;`，表示第一版固定选择 pattern0。
 - 对 `target="npu_demo"`，裸 `tuner.launch` 进入 gen_kernel 必须失败，错误文本包含 `tuner.launch` 与 `outline-device-kernel`；成功链路必须先由 `outline-device-kernel` 降为 `arch.launch`。
 - 对 `target="npu_demo"`，`arch.launch` 的四个 extent 必须来自 `symbol.const`，源码中发射为 `npu_demo::launch<2, 1, 1, 0>(...)` 这类 C++ template 整数字面量；不得把 `S_INT` 局部变量名作为 template 参数。
+- `kernel/` 下 matmul、conv2d、flash_attention 这类 npu-demo DSL kernel demo 的可改写 scratch storage 应在 DSL 生成侧使用 iterator-independent fixed upper-bound `dma.alloc`，并用现有 `dma.view` / `dma.deslice` 表达当前 tail tile；不得为该形态新增 pass、registry 名称、manifest 公开 API 或扩展 typed/ranked `dma.subview` 合同。
+- 若某个 scratch candidate 因缺少确定上界、下游 op 不接受 view type/layout 或别名用途无法证明而保持 current tile alloc，相关公开 pytest / dump checker 必须给出固定 no-op reason，不能依赖后续 pipeline pass 掩盖生成侧形态。
 - `gen_kernel(...)` / EmitC 只生成模板化源码，不生成 `kg_execute_entry`、concrete template instance dispatcher 或 `TemplateBinding`。
 - runtime dtype 已知后的唯一 concrete template 实例调用由 `kernel_gen.execute_engine` compile shim 负责。
 - 本文件当前允许实现的公开入口只有 `gen_kernel(...)` 与 `dsl_gen_kernel(...)`；除 sibling spec 已单独定义的包根 re-export 外，不得再新增平行 callable 别名或隐藏快捷入口。
