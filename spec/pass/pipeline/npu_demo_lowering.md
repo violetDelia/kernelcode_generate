@@ -51,7 +51,7 @@
 - `symbol-loop-hoist`：`SymbolLoopHoistPass` 的公开 pass 名称。
 - `hoist-dma-alias-ops`：`HoistDmaAliasOpsPass` 的公开 pass 名称；本 pipeline 中两次分别位于两段 `symbol-loop-hoist` 之后，用于把同 block 紧邻 `dma.fill` 的 `dma.reshape` 上移并改写 fill target。
 - `memory-plan`：`MemoryPlanPass` 的公开 pass 名称；本 pipeline 中固定为 `insert_free=True, fold=False`，执行两次，分别位于两段 `symbol-buffer-hoist` 之前，用于补齐 `dma.free` 生命周期。
-- `arch-parallelize`：`ArchParallelizePass` 的公开 pass 名称；本 pipeline 中位于 memory-pool 后的 `canonicalize` 之后、`producer-consumer-analysis` 之前，固定 `target=<pipeline target>` 与 `parallel_level="block"`。
+- `arch-parallelize`：`ArchParallelizePass` 的公开 pass 名称；本 pipeline 中位于 memory-pool 后的 `canonicalize` 之后、`producer-consumer-analysis` 之前，固定 `target=<pipeline target>` 与 `parallel_level="block"`；该阶段跳过带 `entry_point` 属性的 host dispatcher，pattern/device 函数继续按 block 级规则分发。
 - `producer-consumer-analysis`：`ProducerConsumerAnalysisPass` 的公开 pass 名称；本 pipeline 中位于 `arch-parallelize` 之后、late `attach-arch-information` 之前，只写普通或控制流分类分析 attr，不生成同步 op。
 - `tile-analysis`：`TileAnalysisPass` 的公开 pass 名称；本 pipeline 中紧跟第一个 `symbol-buffer-hoist`，只补充 tile 分析属性。
 - `kernel-pattern-attach`：`KernelPatternAttachPass` 的公开 pass 名称；本 pipeline 中位于 `tile-analysis` 后，负责生成 host dispatcher 与 pattern 函数。
@@ -78,7 +78,9 @@
 - 明确 `transform-apply` 后再次运行 `symbol-loop-hoist -> hoist-dma-alias-ops -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist`，再进入 `MemoryPoolPass(rewrite=True, alignment=0)`。
 - 明确 `memory-pool` 位于第二段 `symbol-buffer-hoist` 之后，并固定 `MemoryPoolPass(rewrite=True, alignment=0)`，本 pipeline 默认执行 dynamic backing 改写。
 - 明确 memory-pool 后只运行 `canonicalize -> arch-parallelize -> producer-consumer-analysis -> attach-arch-information`，其中 late `attach-arch-information` 位于 `producer-consumer-analysis` 后、`outline-device-kernel` 前，用于特化 memory-pool 后新生成的 `arch.get_dynamic_memory`。
-- 明确公开 `arch-parallelize` 阶段仍委托 `ArchParallelizePass(target=<pipeline target>, parallel_level="block")` 改写；无 `symbol.for` 的直线 kernel 生成 block0 guard，memory-pool 生成的 loop 前 setup 前缀可通过，配置 / target / unsupported structure 错误仍失败。
+- 明确公开 `arch-parallelize` 阶段仍委托 `ArchParallelizePass(target=<pipeline target>, parallel_level="block")` 改写。
+- 带 `entry_point` 属性的 host dispatcher 保持 no-op。
+- 无 `symbol.for` 的非入口直线 kernel 生成 block0 guard，memory-pool 生成的 loop 前 setup 前缀可通过，配置 / target / unsupported structure 错误仍失败。
 - 明确该 pipeline 的最终输出为 host wrapper + device body + template-name 注解 IR，供 `gen_kernel(...)` 直接消费。
 - 当输入 DSL callable 除 `lhs/rhs/out` 外还包含公开 `SymbolDim` tile / shape 参数时，pipeline 输出的 host wrapper 与 device body 必须继续保留这些 trailing `!symbol.int` 参数，供 `gen_kernel(...)` 直接消费。
 - 保持 `default-lowering` 作为独立公开 builder，不与本 pipeline 混用。
@@ -156,7 +158,8 @@
   - memory-pool 后必须依次运行 `canonicalize -> arch-parallelize -> producer-consumer-analysis -> attach-arch-information -> outline-device-kernel -> template-name-infer`。
   - `producer-consumer-analysis` 位于 `attach-arch-information` 之前，只写普通或控制流分类分析 attr，不生成 `arch.wait` / `arch.sign`。
   - `attach-arch-information` 在本 pipeline 中只保留一次，位于 `producer-consumer-analysis` 后、`outline-device-kernel` 前，并特化 memory-pool 后新生成的 `arch.get_dynamic_memory`。
-  - 公开 `arch-parallelize` 阶段必须支持结构改写为 block-strided IR，无 `symbol.for` 的直线 kernel 生成 block0 guard，memory-pool 生成的 loop 前 setup 前缀可通过，不支持结构按 `ArchParallelizePass` 公开错误失败。
+  - 公开 `arch-parallelize` 阶段必须支持结构改写为 block-strided IR，带 `entry_point` 属性的 host dispatcher 保持 no-op。
+  - 无 `symbol.for` 的非入口直线 kernel 生成 block0 guard，memory-pool 生成的 loop 前 setup 前缀可通过，不支持结构按 `ArchParallelizePass` 公开错误失败。
   - `TemplateNameInferPass` 是最后一关注解 pass，之后不得再新增 memory value。
   - `LaunchKernelCostFuncPass` 不属于本 pipeline。
   - `only-kernel`、`only_kernel` 或其他未知 options 输入必须显式失败。
@@ -184,5 +187,5 @@
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-003 | 边界/异常 | npu demo lowering pipeline rejects unknown option | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_npu_demo_lowering_pipeline_rejects_unknown_option`。 | “npu demo lowering pipeline rejects unknown option”场景按公开错误语义失败或被拒绝。 | `test_npu_demo_lowering_pipeline_rejects_unknown_option` |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-004 | pass 改写 | npu demo lowering pipeline memory plan dump shows lifecycle and pool | 通过公开 dump 配置运行 npu-demo-lowering。 | 运行 `test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool`。 | 按 dump marker 定位两段 `memory-plan`、两段 `symbol-buffer-hoist`、`memory-pool`、memory-pool 后 `canonicalize`、`arch-parallelize`、`producer-consumer-analysis`、唯一 `attach-arch-information` 与 `outline-device-kernel`；memory-plan 含 `dma.free`，late attach 位于 producer-consumer-analysis 后且 outline 前，并特化 memory-pool 后 `arch.get_dynamic_memory`。 | `test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool` |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-005 | 公开入口 | npu demo lowering pipeline supports kernel contract style public chain | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain`。 | 公开入口在“npu demo lowering pipeline supports kernel contract style public chain”场景下可导入、构造、注册或按名称发现。 | `test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain` |
-| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-006 | block0 guard / 失败边界 | npu demo lowering arch parallelize direct public behavior | 准备无 `symbol.for` 直线函数与多个顶层 `symbol.for` 两类公开 IR，并在 pipeline 中保留真实 arch-parallelize 阶段。 | 运行 `test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_block0_guard` 与 `test_npu_demo_lowering_pipeline_arch_parallelize_propagates_unsupported_structure`。 | 默认 pipeline 直接使用公开 `ArchParallelizePass`；无 loop 结构写入 block0 guard，不支持结构按公开错误失败。 | `test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_block0_guard`, `test_npu_demo_lowering_pipeline_arch_parallelize_propagates_unsupported_structure` |
+| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-006 | block0 guard / 失败边界 / entry skip | npu demo lowering arch parallelize direct public behavior | 准备无 `symbol.for` 直线函数、多个顶层 `symbol.for`、入口 host + pattern 函数组合三类公开 IR，并在 pipeline 中保留真实 arch-parallelize 阶段。 | 运行 pipeline 中的 no-loop guard、unsupported structure 与入口 skip 三类测试。 | 默认 pipeline 直接使用公开 `ArchParallelizePass`；非入口无 loop 结构写入 block0 guard，不支持结构按公开错误失败，入口 host 不被 block-only guard 或 block-strided rewrite 改写且 pattern 函数仍 rewrite。 | `test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_block0_guard`, `test_npu_demo_lowering_pipeline_arch_parallelize_propagates_unsupported_structure`, 入口 skip 测试 |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-007 | pass 改写 | npu demo lowering static dump uses memory pool | 通过公开 dump 配置运行静态 tile matmul。 | 运行 `test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer`。 | 静态 tile matmul 在 `transform-apply -> symbol-loop-hoist -> hoist-dma-alias-ops -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist -> memory-pool` 后由 `arch.get_dynamic_memory + dma.view + dma.reshape` 承接，且顶层不接入 `lower-dma-memory-hierarchy` / `multi-buffer`、不残留 `dma.alloc/dma.free`。 | `test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer` |

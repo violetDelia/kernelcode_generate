@@ -2,8 +2,8 @@
 
 ## 功能简介
 
-- `ArchParallelizePass` 提供 standalone IR-level module pass，遍历 `builtin.module` 中所有非声明 `func.func`，为未带 block 并行语义且含可分发顶层 loop 的函数生成 block 级分发 IR。
-- 当前只支持 `parallel_level="block"`；可分发的唯一顶层 `symbol.for` 被改写为 block-strided loop；无顶层 loop 的函数用 block0 guard 包裹原 body，防止多 block 重复执行直线 body。
+- `ArchParallelizePass` 提供 standalone IR-level module pass，遍历 `builtin.module` 中非声明 `func.func`，跳过带 `entry_point` 属性的 host dispatcher，为未带 block 并行语义且含可分发顶层 loop 的其余函数生成 block 级分发 IR。
+- 当前只支持 `parallel_level="block"`；可分发的唯一顶层 `symbol.for` 被改写为 block-strided loop；非入口的无顶层 loop 函数用 block0 guard 包裹原 body，防止多 block 重复执行直线 body。
 - 本 pass 只承诺 IR-level 改写与失败合同；默认 `npu-demo-lowering` 直接接入本 pass，不设置额外 safe wrapper。
 
 ## API 列表
@@ -32,7 +32,10 @@
 
 ## 目标
 
-- pass 必须遍历 module 中所有非声明 `func.func`，每个函数独立判断、独立改写或跳过。
+- pass 必须遍历 module 中非声明 `func.func`，每个函数独立判断、独立改写或跳过。
+- 带 `entry_point` 属性的 host dispatcher 必须保持 no-op。
+- no-op 指不插入 `arch.get_block_id`、不生成 `symbol.ne` + `scf.if` block-only guard，也不把 host 内的 `tuner.select` / `tuner.launch` 移入 block-only 分支。
+- 本轮只把 `entry_point` 作为强 no-op 边界；无 `entry_point` 的普通函数和 pattern/device 函数继续按既有规则处理，不扩大为所有无 kernel 标记函数 no-op。
 - 已包含 `arch.get_block_id` 或 `arch.get_block_num` 的函数必须跳过，不重复插入 block 并行语义。
 - `block_num` 必须来自 target registry 的静态硬件字段，并在 IR 中物化为 `symbol.const <target.block_num>`；不得生成 `arch.get_block_num`。
 - 多个顶层 `symbol.for`、loop-carried `symbol.for`、非 void return、多 block 函数体和不可判 loop 同级结构必须显式失败。
@@ -41,7 +44,7 @@
 
 - 顶层 loop 指函数 entry block 的直接子 op；嵌套 region 内的 `symbol.for` 不参与顶层计数。
 - 支持结构为 `func { setup-prefix*; symbol.for { body-op*; nested-symbol.for* }; func.return }`，其中同级 `setup-prefix` 只能位于唯一顶层 loop 之前，并且只能是公开 symbol dialect 的纯 setup op，或 memory-pool 生成的 `arch.get_dynamic_memory` / `dma.view` / `dma.reshape`。
-- 无顶层 loop 时必须生成 `arch.get_block_id` + `scf.if` block0 guard，只允许 block0 执行原 body。
+- 非入口函数无顶层 loop 时必须生成 `arch.get_block_id` + `scf.if` block0 guard，只允许 block0 执行原 body。
 - 本 pass 的失败通过 `KernelCodeError` 暴露，稳定错误短语以 `ArchParallelizePassError:` 或 `ArchParallelizePassVerifierError:` 开头。
 - 默认 `npu-demo-lowering` 直接接入本 pass；多个顶层 loop、loop-carried 和 unsupported loop structure 等结构不支持错误继续按本 pass 公开失败合同暴露。
 - `expectation/pass/arch_parallelize/**` 只作为主仓合同验收资产；任务 worktree 不得复制、修改、新建、移动、删除或同步该目录。
@@ -97,9 +100,10 @@
   ArchParallelizePass().apply(Context(), module)
   ```
 
-- 功能说明：校验参数与 target，遍历每个非声明 `func.func`，对可分发 loop 改写 block-strided 边界，对无 loop 函数生成 block0 guard，对不支持结构给出稳定失败。
+- 功能说明：校验参数与 target，遍历每个非声明 `func.func`；带入口属性的 host dispatcher 直接跳过，对其余函数中的可分发 loop 改写 block-strided 边界，对其余无 loop 函数生成 block0 guard，对不支持结构给出稳定失败。
 - 注意事项：
   - 已有 `arch.get_block_id` 或 `arch.get_block_num` 的函数必须跳过。
+  - 带 `entry_point` 属性的 host dispatcher 必须跳过，并且同一 module 内的 pattern/device 函数仍继续执行 block 级分发。
   - 函数有返回值必须失败为 `ArchParallelizePassError: function return values are not supported`。
   - 函数体为 multi-block 必须失败为 `ArchParallelizePassError: multi-block func body is not supported`。
   - 多个顶层 `symbol.for` 必须失败为 `ArchParallelizePassError: multiple top-level symbol.for loops are not supported`。
@@ -155,3 +159,4 @@
 | TC-PASS-ARCH-PARALLELIZE-014 | registry | 内置 pass 注册 | 已调用 `load_builtin_passes()`。 | 运行 `build_registered_pass("arch-parallelize", options)`。 | 返回 `ArchParallelizePass` 实例。 | `test_build_registered_arch_parallelize_pass` |
 | TC-PASS-ARCH-PARALLELIZE-015 | pass 改写 | memory-pool setup 前缀 | 唯一顶层 `symbol.for` 前包含 `arch.get_dynamic_memory`、`dma.view`、`dma.reshape` 和 symbol setup。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | IR 含 block-strided `symbol.for`，loop 前 memory-pool setup 保持在前缀位置。 | `test_arch_parallelize_allows_memory_pool_setup_before_single_loop` |
 | TC-PASS-ARCH-PARALLELIZE-016 | 失败边界 | memory-pool setup 位于 loop 后 | 唯一顶层 `symbol.for` 后包含 `arch.get_dynamic_memory` 或 alias setup。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | 失败短语含 `unsupported loop structure`。 | `test_arch_parallelize_rejects_memory_pool_setup_after_loop` |
+| TC-PASS-ARCH-PARALLELIZE-017 | 跳过边界 | 入口 host dispatcher + pattern 函数 | module 同时包含带入口属性的 host dispatcher 和带 `kernel.pattern_id` 的 pattern 函数。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | host 保持原调度 body，不新增 block 级 arch 语义；pattern 函数仍含 `arch.get_block_id` 和 block-strided `symbol.for`。 | `test_arch_parallelize_skips_entry_point_host_dispatcher` |

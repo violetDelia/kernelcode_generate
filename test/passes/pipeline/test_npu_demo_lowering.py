@@ -667,6 +667,72 @@ def test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_blo
     assert "func.call @callee" in lowered_text
 
 
+def test_npu_demo_lowering_pipeline_arch_parallelize_skips_entry_point_dispatcher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证默认 pipeline 的 arch-parallelize 阶段跳过 `entry_point` host。
+
+    功能说明:
+    - 通过公开 pipeline builder 运行 host dispatcher + pattern 函数组合 IR。
+    - 其它 pass 用公开 `apply(...)` 调用形态替换为空操作，隔离观察 arch 阶段的 host no-op 与 pattern rewrite。
+
+    使用示例:
+    - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k skips_entry_point_dispatcher
+    """
+
+    module_text = """builtin.module {
+  func.func @entry_dispatch() attributes {entry_point} {
+    %0 = tuner.select {patterns = [@entry_dispatch_pattern0]} : !symbol.int<#symbol.expr<pattern_id>>
+    tuner.launch(@entry_dispatch_pattern0) : () -> ()
+    func.return
+  }
+  func.func @entry_dispatch_pattern0() attributes {kernel.pattern_id = #builtin.int<0>} {
+    %0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %1 = symbol.const 64 : !symbol.int<#symbol.expr<64>>
+    %2 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    symbol.for %3 = %0 to %1 step %2 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<64>, step = #symbol.expr<4>>} {
+      %4 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    }
+    func.return
+  }
+}
+"""
+    module = Parser(build_default_context(), module_text).parse_module()
+    monkeypatch.setattr(InlinePass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(CommonSubexpressionElimination, "apply", _noop_pass_apply)
+    monkeypatch.setattr(CanonicalizePass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(DecompassPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(NnLoweringPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(SymbolLoopHoistPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(HoistDmaAliasOpsPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(MemoryPlanPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(TileAnalysisPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(KernelPatternAttachPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(TransformApplyPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(SymbolBufferHoistPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(MemoryPoolPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(ProducerConsumerAnalysisPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(AttachArchInformationPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(OutlineDeviceKernelPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(TemplateNameInferPass, "apply", _noop_pass_apply)
+
+    pipeline = build_npu_demo_lowering_pipeline({"target": "npu_demo"})
+    assert pipeline.run(module) is module
+
+    lowered_text = str(module)
+    host = lowered_text.split("func.func @entry_dispatch()", 1)[1].split(
+        "func.func @entry_dispatch_pattern0()",
+        1,
+    )[0]
+    pattern = lowered_text.split("func.func @entry_dispatch_pattern0()", 1)[1]
+    assert "attributes {entry_point}" in host
+    assert "tuner.launch(@entry_dispatch_pattern0" in host
+    assert "arch.get_block_id" not in host
+    assert "symbol.ne" not in host
+    assert "scf.if" not in host
+    assert "arch.get_block_id" in pattern
+
+
 def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tmp_path: Path) -> None:
     """验证 npu-demo-lowering 真实中间态包含 memory-plan 生命周期与 memory-pool 改写。
 

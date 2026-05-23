@@ -3,7 +3,7 @@
 
 功能说明:
 - 提供 standalone IR-level `arch-parallelize` pass。
-- 遍历 `builtin.module` 中所有非声明 `func.func`，对未带 block 并行语义的函数执行 block 级分发。
+- 遍历 `builtin.module` 中非声明 `func.func`，跳过 `entry_point` host dispatcher，对未带 block 并行语义的其余函数执行 block 级分发。
 - 当前只支持 `parallel_level="block"`：单顶层 `symbol.for` 改写为 block-strided loop；无顶层 loop 时用 block0 guard 包裹原 body。
 - 唯一顶层 loop 前允许公开 symbol setup 以及 memory-pool 产生的 `arch.get_dynamic_memory` / `dma.view` / `dma.reshape` setup 前缀。
 
@@ -178,6 +178,21 @@ def _has_existing_block_parallel_ops(func_op: func.FuncOp) -> bool:
     """
 
     return any(isinstance(op, (ArchGetBlockIdOp, ArchGetBlockNumOp)) for op in func_op.walk())
+
+
+def _is_entry_point_func(func_op: func.FuncOp) -> bool:
+    """判断函数是否为 host dispatcher 入口。
+
+    功能说明:
+    - 带 `entry_point` 属性的函数承载 host 调度职责，必须保持 no-op。
+    - 该跳过边界避免 host launch 被 block-only guard 限制。
+    - 该边界只识别当前公开 IR 属性，不扩大为所有无 kernel 标记函数跳过。
+
+    使用示例:
+    - if _is_entry_point_func(func_op): return
+    """
+
+    return "entry_point" in func_op.attributes
 
 
 def _get_single_entry_block(func_op: func.FuncOp) -> Block:
@@ -610,7 +625,8 @@ class ArchParallelizePass(Pass):
     功能说明:
     - 公开 pass 名称为 `arch-parallelize`。
     - 按 target registry 静态 `block_num` 物化 block 分片 IR。
-    - 本轮只实现 block 级 IR pass；无顶层 `symbol.for` 的函数改写为 block0 guard。
+    - 带 `entry_point` 属性的 host dispatcher 保持 no-op。
+    - 无顶层 `symbol.for` 的其余函数改写为 block0 guard。
 
     使用示例:
     - ArchParallelizePass(target="npu_demo", parallel_level="block").apply(Context(), module)
@@ -655,7 +671,7 @@ class ArchParallelizePass(Pass):
         """执行 arch-parallelize pass。
 
         功能说明:
-        - 校验参数与 target 后，遍历所有非声明函数并独立处理。
+        - 校验参数与 target 后，遍历非声明函数；`entry_point` host dispatcher 跳过，其余函数独立处理。
         - 最终运行 `module.verify()`，失败时转成稳定 pass 错误。
 
         使用示例:
@@ -667,6 +683,8 @@ class ArchParallelizePass(Pass):
         _validate_options(self.target, self.parallel_level)
         block_num = _validate_target_and_get_block_num(self.target)
         for func_op in _iter_non_declaration_funcs(module):
+            if _is_entry_point_func(func_op):
+                continue
             _rewrite_func(func_op, block_num)
         try:
             module.verify()

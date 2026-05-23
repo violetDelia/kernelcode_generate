@@ -72,7 +72,7 @@
   - `no-op`：恒等 pass（对输入 module 不做任何改写），且必须满足“可构造”要求（`pass_cls()` 可成功执行）。
   - `inline`：module 内 helper 展平 pass，供 `npu-demo-lowering` 前置收口。
   - `attach-arch-information`：把 target registry 的 launch extent 写回入口 `func.func`。
-  - `arch-parallelize`：standalone IR pass，按 target registry 静态 `block_num` 把可分发顶层 `symbol.for` 改写为 block-strided loop；无顶层 `symbol.for` 的函数生成 block0 guard。
+  - `arch-parallelize`：standalone IR pass，按 target registry 静态 `block_num` 把可分发顶层 `symbol.for` 改写为 block-strided loop；带 `entry_point` 属性的 host dispatcher 跳过，无顶层 `symbol.for` 的非 `entry_point` 函数生成 block0 guard。
   - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前；若存在唯一合法 `dma.free`，把 alloc/free 成对移动到 owner loop 两侧。
   - `hoist-dma-alias-ops`：把同 block 内紧邻的 `dma.reshape` 上移穿过 `dma.fill`，作为第一阶段 alias hoist pass。
   - `memory-plan`：显式 `insert-free=true` 时为受控 `dma.alloc` 生命周期补插 `dma.free`。

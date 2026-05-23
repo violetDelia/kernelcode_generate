@@ -43,6 +43,7 @@ from xdsl.dialects.builtin import (
     ModuleOp,
     StringAttr,
     SymbolRefAttr,
+    UnregisteredOp,
     UnrealizedConversionCastOp,
     f16,
     f32,
@@ -2827,6 +2828,83 @@ def test_gen_kernel_emits_npu_demo_entry_dispatcher_after_device_functions() -> 
     assert source.index("void entry_pattern1_device()") < source.index("void entry()")
     assert "npu_demo::launch<2, 1, 1, 0>(entry_pattern0_device);" in source
     assert "npu_demo::launch<2, 1, 1, 0>(entry_pattern1_device);" in source
+
+
+def test_gen_kernel_emits_npu_demo_entry_dispatcher_generic_symbol_guard() -> None:
+    """验证 npu_demo final host 支持 generic `symbol.const` / `symbol.eq` guard。
+
+    功能说明:
+    - 通过公开 `gen_kernel(...)` 输入覆盖 xDSL `builtin.unregistered` + `op_name__`
+      形态的 `"symbol.const"` / `"symbol.eq"`。
+    - 断言 entry dispatcher 能继续发射 `scf.if` 和 `arch.launch`，不落入 generic unsupported。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k generic_symbol_guard
+    """
+
+    module_text = """builtin.module {
+  func.func @entry() attributes {entry_point} {
+    %select = tuner.select {patterns = [@entry_pattern0, @entry_pattern1]} : !symbol.int<#symbol.expr<pattern_id>>
+    %zero = "symbol.const"() {value = #builtin.int<0>} : () -> !symbol.int<#symbol.expr<0>>
+    %is_pattern0 = "symbol.eq"(%select, %zero) : (!symbol.int<#symbol.expr<pattern_id>>, !symbol.int<#symbol.expr<0>>) -> i1
+    scf.if %is_pattern0 {
+      %b0 = symbol.const 2 : !symbol.int<#symbol.expr<2>>
+      %t0 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+      %s0 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+      %m0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+      arch.launch<%b0, %t0, %s0, %m0>(@entry_pattern0_device) : () -> ()
+    } else {
+      %b1 = symbol.const 2 : !symbol.int<#symbol.expr<2>>
+      %t1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+      %s1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+      %m1 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+      arch.launch<%b1, %t1, %s1, %m1>(@entry_pattern1_device) : () -> ()
+    }
+    func.return
+  }
+  func.func @entry_pattern0_device() {
+    func.return
+  }
+  func.func @entry_pattern1_device() {
+    func.return
+  }
+}
+"""
+    module = Parser(build_default_context(), module_text).parse_module()
+
+    source = gen_kernel(module, _npu_ctx())
+
+    assert source.index("void entry_pattern0_device()") < source.index("void entry()")
+    assert source.index("void entry_pattern1_device()") < source.index("void entry()")
+    assert "S_INT" in source
+    assert " = 0;" in source
+    assert "bool" in source
+    assert " == " in source
+    assert "if (" in source
+    assert "npu_demo::launch<2, 1, 1, 0>(entry_pattern0_device);" in source
+    assert "npu_demo::launch<2, 1, 1, 0>(entry_pattern1_device);" in source
+    assert "builtin.unregistered" not in source
+
+
+def test_gen_kernel_rejects_other_builtin_unregistered_symbol_ops() -> None:
+    """验证 generic 支持没有扩大到其它 `builtin.unregistered` symbol op。
+
+    功能说明:
+    - 通过公开 `gen_kernel(...)` 输入构造未注册的 generic `"symbol.fake"`。
+    - 断言非授权 generic op 仍走既有 unsupported 路径。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k rejects_other_builtin_unregistered
+    """
+
+    block = Block()
+    lhs = SymbolConstOp(0)
+    bad = UnregisteredOp.with_name("symbol.fake").create(operands=[lhs.result], result_types=[i1])
+    block.add_ops([lhs, bad, func.ReturnOp()])
+    module = ModuleOp([func.FuncOp("plain", FunctionType.from_lists([], []), Region(block))])
+
+    with pytest.raises(KernelCodeError, match=r"builtin\.unregistered: unsupported op"):
+        gen_kernel(module, _npu_ctx())
 
 
 # GK-S4-002

@@ -20,9 +20,9 @@ API 列表:
 - source = gen_kernel(func_op, EmitCContext())
 
 关联文件:
-- spec: spec/dsl/gen_kernel/gen_kernel.md
+- spec: spec/dsl/gen_kernel/kernel_emitter.md
 - test: test/dsl/gen_kernel/test_gen_kernel.py
-- 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
+- 功能实现: kernel_gen/dsl/gen_kernel/kernel_emitter.py
 """
 
 from __future__ import annotations
@@ -1423,13 +1423,14 @@ class KernelEmitter:
 
         功能说明:
         - `kernel-pattern-attach` 为匹配公开 IR 合同会生成 generic `"symbol.const"()`。
+        - `npu_demo` final host 允许 xDSL `builtin.unregistered` + `op_name__="symbol.const"` 形态。
         - 这里按公开 attr/result 形态绑定为 `S_INT` 局部变量，避免后续 `symbol.eq` 取值失败。
 
         使用示例:
         - stmt = self._emit_generic_symbol_const(op)
         """
 
-        if op.name != "symbol.const" or isinstance(op, SymbolConstOp):
+        if isinstance(op, SymbolConstOp) or self._generic_symbol_op_name(op) != "symbol.const":
             return None
         if len(op.results) != 1:
             raise self._error(op.name, "generic symbol.const must have one result")
@@ -1443,18 +1444,41 @@ class KernelEmitter:
         name = self.ctx.create_or_get_name(op.results[0])
         return f"{self.ctx.current_indent}S_INT {name} = {value};"
 
+    def _generic_symbol_op_name(self, op: Operation) -> str | None:
+        """识别当前允许的 generic symbol op 名称。
+
+        功能说明:
+        - 保留既有未注册 `symbol.const` / `symbol.eq` 形态支持。
+        - 仅在 `target="npu_demo"` 时额外承接 `builtin.unregistered` + `op_name__` 为
+          `"symbol.const"` / `"symbol.eq"` 的 final host 形态。
+        - 其它 `builtin.unregistered` op 返回 `None`，继续按公开 unsupported 路径失败。
+
+        使用示例:
+        - if self._generic_symbol_op_name(op) == "symbol.eq": ...
+        """
+
+        if op.name in {"symbol.const", "symbol.eq"}:
+            return op.name
+        if not self.ctx.is_target("npu_demo") or op.name != "builtin.unregistered":
+            return None
+        op_name_attr = op.attributes.get("op_name__")
+        if isinstance(op_name_attr, StringAttr) and op_name_attr.data in {"symbol.const", "symbol.eq"}:
+            return op_name_attr.data
+        return None
+
     def _emit_generic_symbol_eq(self, op: Operation) -> str | None:
         """发射 generic 形式的 `symbol.eq`。
 
         功能说明:
         - `kernel-pattern-attach` 输出 generic `"symbol.eq"` 以保持 IR 合同文本。
+        - `npu_demo` final host 允许 xDSL `builtin.unregistered` + `op_name__="symbol.eq"` 形态。
         - 源码生成阶段仍按公开 operands/result type 生成布尔局部变量。
 
         使用示例:
         - stmt = self._emit_generic_symbol_eq(op)
         """
 
-        if op.name != "symbol.eq" or isinstance(op, SymbolEqOp):
+        if isinstance(op, SymbolEqOp) or self._generic_symbol_op_name(op) != "symbol.eq":
             return None
         if len(op.operands) != 2 or len(op.results) != 1:
             raise self._error(op.name, "generic symbol.eq must have two operands and one result")

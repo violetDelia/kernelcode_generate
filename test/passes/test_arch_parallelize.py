@@ -240,6 +240,52 @@ builtin.module {
     assert result.actual_ir.count("arch.get_block_id") == 1
 
 
+# TC-PASS-ARCH-PARALLELIZE-017
+# 功能说明: 验证 `entry_point` host dispatcher 跳过，pattern 函数仍执行 block 级分片。
+# 使用示例: pytest -q test/passes/test_arch_parallelize.py -k test_arch_parallelize_skips_entry_point_host_dispatcher
+def test_arch_parallelize_skips_entry_point_host_dispatcher() -> None:
+    case_text = """// COMPILE_ARGS: --pass "arch-parallelize={target=npu_demo,parallel_level=block}"
+// CHECK: func.func @entry_dispatch() attributes {entry_point}
+// CHECK-NOT: arch.get_block_id
+// CHECK-NOT: scf.if
+// CHECK: tuner.launch(@entry_dispatch_pattern0)
+// CHECK: func.return
+// CHECK: func.func @entry_dispatch_pattern0()
+// CHECK: arch.get_block_id
+// CHECK: symbol.for
+
+builtin.module {
+  func.func @entry_dispatch() attributes {entry_point} {
+    %0 = tuner.select {patterns = [@entry_dispatch_pattern0]} : !symbol.int<#symbol.expr<pattern_id>>
+    tuner.launch(@entry_dispatch_pattern0) : () -> ()
+    func.return
+  }
+  func.func @entry_dispatch_pattern0() attributes {kernel.pattern_id = #builtin.int<0>} {
+    %0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %1 = symbol.const 64 : !symbol.int<#symbol.expr<64>>
+    %2 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    symbol.for %3 = %0 to %1 step %2 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<64>, step = #symbol.expr<4>>} {
+      %4 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    }
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(case_text, source_path="test/passes/test_arch_parallelize.py")
+    assert result.ok is True, result.message
+    host = result.actual_ir.split("func.func @entry_dispatch()", 1)[1].split(
+        "func.func @entry_dispatch_pattern0()",
+        1,
+    )[0]
+    pattern = result.actual_ir.split("func.func @entry_dispatch_pattern0()", 1)[1]
+    assert "attributes {entry_point}" in host
+    assert "tuner.launch(@entry_dispatch_pattern0" in host
+    assert "arch.get_block_id" not in host
+    assert "symbol.ne" not in host
+    assert "scf.if" not in host
+    assert "arch.get_block_id" in pattern
+
+
 # TC-PASS-ARCH-PARALLELIZE-006
 # 功能说明: 验证多个顶层 `symbol.for` 稳定失败。
 # 使用示例: pytest -q test/passes/test_arch_parallelize.py -k test_arch_parallelize_rejects_multiple_top_level_loops
