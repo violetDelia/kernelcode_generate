@@ -195,9 +195,24 @@ def test_producer_consumer_analysis_if_branch_and_after_if_edges() -> None:
 }}
 """
     )
-    _assert_line_matches(incoming, "dma.copy", r"productor = \[0\].*if_branch_productor = \[0\]", occurrence=1)
-    _assert_line_matches(incoming, "kernel.matmul", r"consumer = \[0\].*if_branch_consumer = \[0\]", occurrence=1)
-    _assert_line_matches(incoming, "dma.copy", r"consumer = \[0\].*if_branch_consumer = \[0\]", occurrence=2)
+    _assert_line_matches(
+        incoming,
+        "dma.copy",
+        r"^(?!.*\bproductor\s*=)(?=.*if_branch_productor = \[0\]).*$",
+        occurrence=1,
+    )
+    _assert_line_matches(
+        incoming,
+        "kernel.matmul",
+        r"^(?!.*\bconsumer\s*=)(?=.*if_branch_consumer = \[0\]).*$",
+        occurrence=1,
+    )
+    _assert_line_matches(
+        incoming,
+        "dma.copy",
+        r"^(?!.*\bconsumer\s*=)(?=.*if_branch_consumer = \[0\]).*$",
+        occurrence=2,
+    )
 
     after_if = _run_producer_consumer_analysis(
         f"""builtin.module {{
@@ -213,17 +228,32 @@ def test_producer_consumer_analysis_if_branch_and_after_if_edges() -> None:
 }}
 """
     )
-    _assert_line_matches(after_if, "dma.copy", r"productor = \[0\].*after_if_productor = \[0\]", occurrence=1)
-    _assert_line_matches(after_if, "dma.copy", r"productor = \[1\].*after_if_productor = \[1\]", occurrence=2)
-    _assert_line_matches(after_if, "kernel.matmul", r"consumer = \[0, 1\].*after_if_consumer = \[0, 1\]", occurrence=1)
+    _assert_line_matches(
+        after_if,
+        "dma.copy",
+        r"^(?!.*\bproductor\s*=)(?=.*after_if_productor = \[0\]).*$",
+        occurrence=1,
+    )
+    _assert_line_matches(
+        after_if,
+        "dma.copy",
+        r"^(?!.*\bproductor\s*=)(?=.*after_if_productor = \[1\]).*$",
+        occurrence=2,
+    )
+    _assert_line_matches(
+        after_if,
+        "kernel.matmul",
+        r"^(?!.*\bconsumer\s*=)(?=.*after_if_consumer = \[0, 1\]).*$",
+        occurrence=1,
+    )
 
 
 def test_producer_consumer_analysis_if_branch_internal_fanout_uses_distinct_events() -> None:
-    """验证同一 `scf.if` 分支内部 fanout 不共享 event。
+    """验证同一 `scf.if` 分支内部普通 fanout 使用主 event。
 
     功能说明:
-    - if 外 producer 进入 then/else 互斥分支时共享 event。
-    - 同一分支内部 producer 有多个 downstream consumer 时仍按同一路径 fanout 分配不同 event。
+    - 同一分支同一 block 内的普通顺序 edge 不写 `if_branch_*`。
+    - 同一分支内部 producer 有多个 downstream consumer 时按同一路径 fanout 分配不同 event。
 
     使用示例:
     - pytest -q test/passes/test_producer_consumer_analysis.py -k if_branch_internal_fanout
@@ -243,9 +273,24 @@ def test_producer_consumer_analysis_if_branch_internal_fanout_uses_distinct_even
 }}
 """
     )
-    _assert_line_matches(actual, "dma.copy", r"productor = \[0, 1\].*if_branch_productor = \[0, 1\]", occurrence=1)
-    _assert_line_matches(actual, "dma.copy", r"consumer = \[0\].*if_branch_consumer = \[0\]", occurrence=2)
-    _assert_line_matches(actual, "dma.copy", r"consumer = \[1\].*if_branch_consumer = \[1\]", occurrence=3)
+    _assert_line_matches(
+        actual,
+        "dma.copy",
+        r"^(?!.*if_branch_productor)(?=.*\bproductor\s*= \[0, 1\]).*$",
+        occurrence=1,
+    )
+    _assert_line_matches(
+        actual,
+        "dma.copy",
+        r"^(?!.*if_branch_consumer)(?=.*\bconsumer\s*= \[0\]).*$",
+        occurrence=2,
+    )
+    _assert_line_matches(
+        actual,
+        "dma.copy",
+        r"^(?!.*if_branch_consumer)(?=.*\bconsumer\s*= \[1\]).*$",
+        occurrence=3,
+    )
 
 
 def test_producer_consumer_analysis_if_incoming_same_branch_fanout_uses_distinct_events() -> None:
@@ -273,9 +318,24 @@ def test_producer_consumer_analysis_if_incoming_same_branch_fanout_uses_distinct
 }}
 """
     )
-    _assert_line_matches(actual, "dma.copy", r"productor = \[0, 1\].*if_branch_productor = \[0, 1\]", occurrence=1)
-    _assert_line_matches(actual, "dma.copy", r"consumer = \[0\].*if_branch_consumer = \[0\]", occurrence=2)
-    _assert_line_matches(actual, "dma.copy", r"consumer = \[1\].*if_branch_consumer = \[1\]", occurrence=3)
+    _assert_line_matches(
+        actual,
+        "dma.copy",
+        r"^(?!.*\bproductor\s*=)(?=.*if_branch_productor = \[0, 1\]).*$",
+        occurrence=1,
+    )
+    _assert_line_matches(
+        actual,
+        "dma.copy",
+        r"^(?!.*\bconsumer\s*=)(?=.*if_branch_consumer = \[0\]).*$",
+        occurrence=2,
+    )
+    _assert_line_matches(
+        actual,
+        "dma.copy",
+        r"^(?!.*\bconsumer\s*=)(?=.*if_branch_consumer = \[1\]).*$",
+        occurrence=3,
+    )
 
 
 def test_producer_consumer_analysis_symbol_for_body_and_after_loop_edges() -> None:
@@ -305,14 +365,64 @@ def test_producer_consumer_analysis_symbol_for_body_and_after_loop_edges() -> No
 }}
 """
     )
-    _assert_line_matches(actual, "dma.copy", r"productor = \[0\].*loop_body_productor = \[0\]", occurrence=1)
+    _assert_line_matches(
+        actual,
+        "dma.copy",
+        r"^(?!.*\bproductor\s*=)(?=.*loop_body_productor = \[0\]).*$",
+        occurrence=1,
+    )
     _assert_line_matches(
         actual,
         "kernel.matmul",
-        r"consumer = \[0\].*loop_body_consumer = \[0\].*productor = \[1\].*after_loop_productor = \[1\]",
+        r"^(?!.*\bconsumer\s*=)(?!.*\bproductor\s*=)(?=.*loop_body_consumer = \[0\])(?=.*after_loop_productor = \[1\]).*$",
         occurrence=1,
     )
-    _assert_line_matches(actual, "dma.copy", r"consumer = \[1\].*after_loop_consumer = \[1\]", occurrence=2)
+    _assert_line_matches(
+        actual,
+        "dma.copy",
+        r"^(?!.*\bconsumer\s*=)(?=.*after_loop_consumer = \[1\]).*$",
+        occurrence=2,
+    )
+
+
+def test_producer_consumer_analysis_loop_body_plain_edge_uses_main_attrs() -> None:
+    """验证同一 loop body block 内普通顺序 edge 使用主 event。
+
+    功能说明:
+    - loop body 内 producer 与 consumer 位于同一 block。
+    - 该普通顺序 edge 只写 `productor` / `consumer`，不得误写 `loop_body_*`。
+
+    使用示例:
+    - pytest -q test/passes/test_producer_consumer_analysis.py -k loop_body_plain_edge
+    """
+
+    actual = _run_producer_consumer_analysis(
+        f"""builtin.module {{
+  func.func @loop_body_plain_edge(%a : {_LOCAL_TYPE}, %gm : {_GLOBAL_TYPE}, %b : {_LOCAL_TYPE}, %out : {_LOCAL_TYPE}) {{
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %n = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    symbol.for %i = %c0 to %n step %c1 {{iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<4>, step = #symbol.expr<1>>}} {{
+      "dma.copy"(%a, %gm) : ({_LOCAL_TYPE}, {_GLOBAL_TYPE}) -> ()
+      "kernel.matmul"(%out, %a, %b) {{space = #nn.space<tsm>}} : ({_LOCAL_TYPE}, {_LOCAL_TYPE}, {_LOCAL_TYPE}) -> ()
+    }}
+    func.return
+  }}
+}}
+"""
+    )
+    _assert_line_matches(
+        actual,
+        "dma.copy",
+        r"^(?!.*loop_body_productor)(?=.*\bproductor\s*= \[0\]).*$",
+        occurrence=1,
+    )
+    _assert_line_matches(
+        actual,
+        "kernel.matmul",
+        r"^(?!.*loop_body_consumer)(?!.*\bproductor\s*=)(?=.*\bconsumer\s*= \[0\]).*$",
+        occurrence=1,
+    )
 
 
 def test_producer_consumer_analysis_rejects_invalid_event_attr_and_unknown_option() -> None:

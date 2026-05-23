@@ -74,7 +74,7 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     - memory-pool 后只运行 `CanonicalizePass`，随后执行
       `ArchParallelizePass(target=target, parallel_level="block")`，不得再插入额外 CSE。
     - `ProducerConsumerAnalysisPass` 位于 `AttachArchInformationPass(target=target)` 之前，只写
-      `productor` / `consumer` 分析 attr，不生成同步 op。
+      普通或控制流分类分析 attr，不生成同步 op。
     - late `AttachArchInformationPass(target=target)` 位于 arch-parallelize 后、outline 前，用于特化
       `MemoryPoolPass(rewrite=True)` 生成的 `arch.get_dynamic_memory`。
     - `TemplateNameInferPass` 位于 pipeline 最后，为 host wrapper 与 device body 的 `nn.memory`

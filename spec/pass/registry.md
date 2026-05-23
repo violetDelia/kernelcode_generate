@@ -77,7 +77,7 @@
   - `hoist-dma-alias-ops`：把同 block 内紧邻的 `dma.reshape` 上移穿过 `dma.fill`，作为第一阶段 alias hoist pass。
   - `memory-plan`：显式 `insert-free=true` 时为受控 `dma.alloc` 生命周期补插 `dma.free`。
   - `multi-buffer`：把可证明的 matmul lhs/rhs staging alloc/copy/use/free 成对生命周期改写为 DMA ring。
-  - `producer-consumer-analysis`：基于公开 `MemoryEffect` 与 pass 内置 alias 规则标注 `productor` / `consumer` 简单整数列表 event attrs。
+  - `producer-consumer-analysis`：基于公开 `MemoryEffect` 与 pass 内置 alias 规则标注普通或控制流分类简单整数列表 event attrs。
   - `kernel-pattern-attach`：在唯一 `entry_point` host 中生成 `tuner.select` / `tuner.launch` pattern dispatcher 与两个 pattern 函数。
   - `transform-apply`：消费 pattern 函数上的 `kernel.transform_pipeline`，在函数级 clone 上执行 pass / pipeline 字符串并移除该 attr。
   - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 pytest 与工具层统一解析。

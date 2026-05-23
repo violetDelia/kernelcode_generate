@@ -4,7 +4,7 @@
 功能说明:
 - 提供 `producer-consumer-analysis` pass，基于公开 `MemoryEffect` 标注生产 / 消费 event。
 - 使用当前文件内 alias 规则处理 `dma.view`、`dma.reshape`、`dma.subview` 与 `dma.deslice`。
-- 只写 `productor` / `consumer` 与控制流分类 event attr，不生成 wait/sign 或 runtime 同步 op。
+- 同一 producer -> consumer edge 只写普通 event 对或一个控制流 event 对，不生成 wait/sign 或 runtime 同步 op。
 
 API 列表:
 - `class ProducerConsumerAnalysisPass(fold: bool = True)`
@@ -382,31 +382,6 @@ def _build_alias_groups(
     return groups
 
 
-def _common_enclosing_control_op(producer_op: Operation, consumer_op: Operation) -> _ControlOp | None:
-    """返回 producer/consumer 最近共同控制流父 op。
-
-    功能说明:
-    - 同一 `symbol.for` body 内的普通 edge 应标为 `loop_body_*`。
-    - 同一 `scf.if` branch 内的普通 edge 应标为 `if_branch_*`。
-
-    使用示例:
-    - control = _common_enclosing_control_op(producer_op, consumer_op)
-    """
-
-    producer_controls: list[_ControlOp] = []
-    parent = producer_op.parent_op()
-    while parent is not None:
-        if isinstance(parent, (SymbolForOp, scf.IfOp)):
-            producer_controls.append(parent)
-        parent = parent.parent_op()
-    parent = consumer_op.parent_op()
-    while parent is not None:
-        if isinstance(parent, (SymbolForOp, scf.IfOp)) and parent in producer_controls:
-            return parent
-        parent = parent.parent_op()
-    return None
-
-
 def _if_branch_index(control_op: scf.IfOp, op: Operation) -> int | None:
     """返回 op 所属 `scf.if` region 序号。
 
@@ -432,6 +407,7 @@ def _classify_edge(producer_op: Operation, consumer_op: Operation) -> _EdgeRelat
     - 支持同 block 词法后继。
     - 支持 if/loop 前 producer 进入分支或 loop body。
     - 支持 if/loop 内 producer 到控制流后 consumer。
+    - 同一 block 内普通顺序 edge 保持主 `productor` / `consumer` 关系。
 
     使用示例:
     - relation = _classify_edge(producer_op, consumer_op)
@@ -446,11 +422,6 @@ def _classify_edge(producer_op: Operation, consumer_op: Operation) -> _EdgeRelat
     if producer_block is consumer_block:
         if not producer_op.is_before_in_block(consumer_op):
             return None
-        common_control = _common_enclosing_control_op(producer_op, consumer_op)
-        if isinstance(common_control, SymbolForOp):
-            return _EdgeRelation("loop_body", common_control, False)
-        if isinstance(common_control, scf.IfOp):
-            return _EdgeRelation("if_branch", common_control, False)
         return _EdgeRelation(None, None, False)
 
     consumer_ancestor = producer_block.find_ancestor_op_in_block(consumer_op)
@@ -554,18 +525,19 @@ def _group_consumer_edges(edges: tuple[_ConsumerEdge, ...]) -> tuple[tuple[_Cons
     return tuple(tuple(group) for group in grouped_edges.values())
 
 
-def _relation_attr_names(relation: _EdgeRelation) -> tuple[str | None, str | None]:
-    """返回 relation 对应的 productor/consumer 分类 attr 名。
+def _relation_attr_names(relation: _EdgeRelation) -> tuple[str, str]:
+    """返回当前 edge 唯一写入的 productor/consumer attr 名。
 
     功能说明:
-    - 分类 attr 只补充 event 分类，不替代主 `productor` / `consumer`。
+    - 普通 edge 写主 `productor` / `consumer`。
+    - 控制流 edge 写对应分类 attr，不再叠写主 `productor` / `consumer`。
 
     使用示例:
     - producer_attr, consumer_attr = _relation_attr_names(edge.relation)
     """
 
     if relation.kind is None:
-        return None, None
+        return "productor", "consumer"
     return f"{relation.kind}_productor", f"{relation.kind}_consumer"
 
 
@@ -721,13 +693,10 @@ class ProducerConsumerAnalysisPass(Pass):
             for group in ordered_groups:
                 event_id = next_event_id
                 next_event_id += 1
-                _append_event(event_attrs, candidate.op, "productor", event_id)
+                producer_attr, consumer_attr = _relation_attr_names(group[0].relation)
+                _append_event(event_attrs, candidate.op, producer_attr, event_id)
                 for edge in group:
-                    _append_event(event_attrs, edge.consumer_op, "consumer", event_id)
-                    producer_attr, consumer_attr = _relation_attr_names(edge.relation)
-                    if producer_attr is not None and consumer_attr is not None:
-                        _append_event(event_attrs, candidate.op, producer_attr, event_id)
-                        _append_event(event_attrs, edge.consumer_op, consumer_attr, event_id)
+                    _append_event(event_attrs, edge.consumer_op, consumer_attr, event_id)
         _apply_event_attrs(ops, event_attrs)
 
     def apply(self: "ProducerConsumerAnalysisPass", ctx: Context, module: ModuleOp) -> None:

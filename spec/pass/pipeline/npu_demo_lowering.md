@@ -52,7 +52,7 @@
 - `hoist-dma-alias-ops`：`HoistDmaAliasOpsPass` 的公开 pass 名称；本 pipeline 中两次分别位于两段 `symbol-loop-hoist` 之后，用于把同 block 紧邻 `dma.fill` 的 `dma.reshape` 上移并改写 fill target。
 - `memory-plan`：`MemoryPlanPass` 的公开 pass 名称；本 pipeline 中固定为 `insert_free=True, fold=False`，执行两次，分别位于两段 `symbol-buffer-hoist` 之前，用于补齐 `dma.free` 生命周期。
 - `arch-parallelize`：`ArchParallelizePass` 的公开 pass 名称；本 pipeline 中位于 memory-pool 后的 `canonicalize` 之后、`producer-consumer-analysis` 之前，固定 `target=<pipeline target>` 与 `parallel_level="block"`。
-- `producer-consumer-analysis`：`ProducerConsumerAnalysisPass` 的公开 pass 名称；本 pipeline 中位于 `arch-parallelize` 之后、late `attach-arch-information` 之前，只写 `productor` / `consumer` 分析 attr，不生成同步 op。
+- `producer-consumer-analysis`：`ProducerConsumerAnalysisPass` 的公开 pass 名称；本 pipeline 中位于 `arch-parallelize` 之后、late `attach-arch-information` 之前，只写普通或控制流分类分析 attr，不生成同步 op。
 - `tile-analysis`：`TileAnalysisPass` 的公开 pass 名称；本 pipeline 中紧跟第一个 `symbol-buffer-hoist`，只补充 tile 分析属性。
 - `kernel-pattern-attach`：`KernelPatternAttachPass` 的公开 pass 名称；本 pipeline 中位于 `tile-analysis` 后，负责生成 host dispatcher 与 pattern 函数。
 - `transform-apply`：`TransformApplyPass` 的公开 pass 名称；本 pipeline 中位于 `kernel-pattern-attach` 后，负责消费 pattern 函数上的 `kernel.transform_pipeline` 并在 pattern 内执行 lower-dma-memory-hierarchy / canonicalize。
@@ -154,7 +154,7 @@
   - `transform-apply` 后必须依次运行 `symbol-loop-hoist -> hoist-dma-alias-ops -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist -> memory-pool`。
   - `memory-pool` 固定 `rewrite=True` 与 `alignment=0`，将片上 `dma.alloc` 改写为 `arch.get_dynamic_memory + dma.view + dma.reshape`。
   - memory-pool 后必须依次运行 `canonicalize -> arch-parallelize -> producer-consumer-analysis -> attach-arch-information -> outline-device-kernel -> template-name-infer`。
-  - `producer-consumer-analysis` 位于 `attach-arch-information` 之前，只写分析 attr，不生成 `arch.wait` / `arch.sign`。
+  - `producer-consumer-analysis` 位于 `attach-arch-information` 之前，只写普通或控制流分类分析 attr，不生成 `arch.wait` / `arch.sign`。
   - `attach-arch-information` 在本 pipeline 中只保留一次，位于 `producer-consumer-analysis` 后、`outline-device-kernel` 前，并特化 memory-pool 后新生成的 `arch.get_dynamic_memory`。
   - 公开 `arch-parallelize` 阶段必须支持结构改写为 block-strided IR，无 `symbol.for` 的直线 kernel 生成 block0 guard，memory-pool 生成的 loop 前 setup 前缀可通过，不支持结构按 `ArchParallelizePass` 公开错误失败。
   - `TemplateNameInferPass` 是最后一关注解 pass，之后不得再新增 memory value。

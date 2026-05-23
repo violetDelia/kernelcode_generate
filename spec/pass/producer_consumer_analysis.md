@@ -3,7 +3,7 @@
 ## 功能简介
 
 - `ProducerConsumerAnalysisPass` 是独立公开 `ModulePass`，registry 名称固定为 `producer-consumer-analysis`。
-- pass 基于 xDSL 公开 `MemoryEffect` 读取 memory `ALLOC/WRITE/READ/FREE` 语义，并用当前 pass 内置 alias 规则标注 `productor = [event_id...]` 与 `consumer = [event_id...]` 简单整数列表属性。
+- pass 基于 xDSL 公开 `MemoryEffect` 读取 memory `ALLOC/WRITE/READ/FREE` 语义，并用当前 pass 内置 alias 规则标注普通或控制流分类 event 简单整数列表属性。
 - pass 只做 IR 分析标注，不生成 `arch.wait`、`arch.sign`、runtime event、double buffer overlap、ring buffer 或 core 分配逻辑。
 
 ## API 列表
@@ -56,7 +56,7 @@
   - `after_if_productor` / `after_if_consumer`
   - `loop_body_productor` / `loop_body_consumer`
   - `after_loop_productor` / `after_loop_consumer`
-- 分类 attr 只表达 event 所属控制流关系，不替代主 `productor` / `consumer`。
+- 同一 producer -> consumer edge 只能写一种 event 对：普通 edge 写 `productor` / `consumer`，控制流 edge 写对应分类 attr，且不得同时叠写主 `productor` / `consumer`。
 - event id 在每个 `func.func` 内从 `0` 开始，按 pass 遍历顺序递增。
 - 文本必须为简单整数列表，例如 `productor = [0]`、`consumer = [0, 1]`。
 - 不得输出 `#builtin.int<...>`、`[0 : i64]` 或 `array<i64: ...>` 作为本 pass 公开 event attr 文本。
@@ -133,6 +133,8 @@ ProducerConsumerAnalysisPass().apply(ctx, module)
   - `scf.if` 中 if 前 producer 被 then / else 互斥分支消费时共享同一个 event。
   - `scf.if` 同一分支内部的 producer 到多个 downstream consumer 仍按同一路径 fanout 处理，每个 consumer 分配独立 event。
   - `scf.if` 前 producer 进入同一分支内多个 downstream consumer 时也按同一路径 fanout 处理；只允许 then / else 互斥分支的同序 consumer 共享 event。
+  - 写入 `if_branch_*`、`after_if_*`、`loop_body_*` 或 `after_loop_*` 的 edge 不得同时写主 `productor` / `consumer`。
+  - 同一 `scf.if` branch 或同一 `symbol.for` body block 内的普通顺序 edge 仍写主 `productor` / `consumer`，不得误写 `if_branch_*` 或 `loop_body_*`。
   - then / else 都生产同一个 memory value 且 if 后 consumer 使用该 value 时，两个 branch producer 分别获得 event，if 后 consumer 记录两个 event。
   - `symbol.for` 第一阶段只支持 loop 前 producer 到 body consumer、body 内 producer 到 body consumer、body producer 到 loop 后 static consumer 的静态分类；不承诺 loop-carried、zero-trip 或跨迭代 runtime 精确语义。
 
@@ -157,10 +159,10 @@ ProducerConsumerAnalysisPass().apply(ctx, module)
 | TC-PRODUCER-CONSUMER-001 | MemoryEffect | `dma.copy -> dma.copy` | 准备合法 `!nn.memory` IR。 | 运行 pass。 | producer 写 `productor=[0]`，consumer 写 `consumer=[0]`。 | `test_producer_consumer_analysis_basic_memory_effect_chain` |
 | TC-PRODUCER-CONSUMER-002 | alias | `copy -> view -> matmul -> deslice -> copy` | 准备 `dma.view` 与 `dma.deslice` 链。 | 运行 pass。 | view 不标注，deslice 同时 consumer/productor，result alias target。 | `test_producer_consumer_analysis_alias_and_deslice_chain` |
 | TC-PRODUCER-CONSUMER-003 | fanout | 同一 producer 有两个 user | 准备同一路径 fanout IR。 | 运行 pass。 | producer 标多个 event，consumer 分别消费。 | `test_producer_consumer_analysis_fanout_alloc_and_duplicate_read` |
-| TC-PRODUCER-CONSUMER-004 | control-flow | `scf.if` incoming 与 after-if edge | 准备 then/else 与 if 后 consumer IR。 | 运行 pass。 | 写入主 attr 与 `if_branch_*` / `after_if_*` 分类 attr。 | `test_producer_consumer_analysis_if_branch_and_after_if_edges` |
-| TC-PRODUCER-CONSUMER-005 | control-flow | `scf.if` 同分支内部 fanout | 准备分支内 producer 后接两个 downstream consumer 的 IR。 | 运行 pass。 | producer 标两个 event，两个同分支 consumer 分别消费不同 event。 | `test_producer_consumer_analysis_if_branch_internal_fanout_uses_distinct_events` |
-| TC-PRODUCER-CONSUMER-006 | control-flow | if 前 producer 进入同一 `scf.if` 分支 fanout | 准备 if 前 producer 被同一 then 分支两个 downstream consumer 读取的 IR。 | 运行 pass。 | producer 标两个 `if_branch` event，两个同分支 consumer 分别消费不同 event。 | `test_producer_consumer_analysis_if_incoming_same_branch_fanout_uses_distinct_events` |
-| TC-PRODUCER-CONSUMER-007 | control-flow | `symbol.for` loop body / after-loop edge | 准备 loop 前、loop body、loop 后 consumer IR。 | 运行 pass。 | 写入 `loop_body_*` / `after_loop_*` 分类 attr。 | `test_producer_consumer_analysis_symbol_for_body_and_after_loop_edges` |
+| TC-PRODUCER-CONSUMER-004 | control-flow | `scf.if` incoming 与 after-if edge | 准备 then/else 与 if 后 consumer IR。 | 运行 pass。 | 控制流 edge 只写 `if_branch_*` / `after_if_*` 分类 attr，不叠写主 attr。 | `test_producer_consumer_analysis_if_branch_and_after_if_edges` |
+| TC-PRODUCER-CONSUMER-005 | control-flow | `scf.if` 同分支内部 fanout | 准备分支内 producer 后接两个 downstream consumer 的 IR。 | 运行 pass。 | 同分支内部普通顺序 edge 写主 attr，producer 标两个 event，两个 consumer 分别消费不同 event，不写 `if_branch_*`。 | `test_producer_consumer_analysis_if_branch_internal_fanout_uses_distinct_events` |
+| TC-PRODUCER-CONSUMER-006 | control-flow | if 前 producer 进入同一 `scf.if` 分支 fanout | 准备 if 前 producer 被同一 then 分支两个 downstream consumer 读取的 IR。 | 运行 pass。 | producer 标两个 `if_branch` event，两个同分支 consumer 分别消费不同 event，不叠写主 attr。 | `test_producer_consumer_analysis_if_incoming_same_branch_fanout_uses_distinct_events` |
+| TC-PRODUCER-CONSUMER-007 | control-flow | `symbol.for` loop body / after-loop edge | 准备 loop 前、loop body、loop 后 consumer IR。 | 运行 pass。 | 跨入/跨出 loop 的 edge 只写 `loop_body_*` / `after_loop_*`，同一 loop body block 内普通顺序 edge 只写主 attr。 | `test_producer_consumer_analysis_symbol_for_body_and_after_loop_edges` |
 | TC-PRODUCER-CONSUMER-008 | 异常 | 非法旧 event attr / 未知 option | 准备负数 attr 或未知 option。 | 运行 pass / from_options。 | `KernelCodeError` 失败。 | `test_producer_consumer_analysis_rejects_invalid_event_attr_and_unknown_option` |
 | TC-PRODUCER-CONSUMER-009 | registry | 公开 pass name | 调用 `load_builtin_passes()`。 | `build_registered_pass("producer-consumer-analysis", {"fold": "false"})`。 | 返回 `ProducerConsumerAnalysisPass(fold=False)`。 | `test_producer_consumer_analysis_registry_entry_and_fold_option` |
 
@@ -172,7 +174,7 @@ ProducerConsumerAnalysisPass().apply(ctx, module)
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 \
-PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260520-producer-consumer-analysis:/home/lfr/kernelcode_generate \
+PYTHONPATH=<任务worktree>:/home/lfr/kernelcode_generate \
 python3 -m expectation.pass.producer_consumer_analysis
 ```
 
