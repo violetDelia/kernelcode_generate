@@ -3,16 +3,16 @@
 
 功能说明:
 - 验证 `ExecutionEngine.compile(...)` 公开入口下的 target include、entry shim、template shim 与 runtime trance 编译宏。
-- 测试只调用执行引擎公开 API，不直连 `target_support.py` 的非公开 helper。
+- 测试只调用执行引擎公开 API，不直连 `compiler.py` 的非公开 helper。
 
 使用示例:
-- pytest -q test/execute_engine/test_target_support.py
+- pytest -q test/execute_engine/test_builtin_strategy.py
 
 关联文件:
 - 功能实现: kernel_gen/execute_engine/compiler.py
-- 功能实现: kernel_gen/execute_engine/target_support.py
+- 功能实现: kernel_gen/execute_engine/builtin_strategy.py
 - Spec 文档: spec/execute_engine/execute_engine_target.md
-- 测试文件: test/execute_engine/test_target_support.py
+- 测试文件: test/execute_engine/test_builtin_strategy.py
 """
 
 from __future__ import annotations
@@ -88,11 +88,11 @@ _COMPILE_TARGET_SOURCE_CASES = tuple(
 
 # EE-S2-C-001
 # 功能说明: 覆盖编译单元拼装的 include 与 entry shim 注入规则。
-# 使用示例: pytest -q test/execute_engine/test_target_support.py -k "S2-C-001"
+# 使用示例: pytest -q test/execute_engine/test_builtin_strategy.py -k "S2-C-001"
 # 测试目的: 验证编译单元拼装包含 target include 与 entry shim。
-# 对应功能实现文件路径: kernel_gen/execute_engine/target_support.py
+# 对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
 # 对应 spec 文件路径: spec/execute_engine/execute_engine_target.md
-# 对应测试文件路径: test/execute_engine/test_target_support.py
+# 对应测试文件路径: test/execute_engine/test_builtin_strategy.py
 def test_execute_engine_compile_unit_injects_includes_and_shim() -> None:
     source = "int add(int a, int b) { return a + b; }\n"
     engine = ExecutionEngine(target="cpu")
@@ -130,11 +130,11 @@ void scalar_kernel(S_INT tile_n) {
 
 # EE-TRANCE-001
 # 功能说明: 覆盖 `trance_enabled=True` 时 compile 公开入口追加 runtime trance 编译宏。
-# 使用示例: pytest -q test/execute_engine/test_target_support.py -k "EE-TRANCE-001"
+# 使用示例: pytest -q test/execute_engine/test_builtin_strategy.py -k "EE-TRANCE-001"
 # 测试目的: 验证 `ExecutionEngine.compile(...)` 从 core config 注入 TRANCE、kernel name 与 block trace 目录宏。
-# 对应功能实现文件路径: kernel_gen/execute_engine/target_support.py
+# 对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
 # 对应 spec 文件路径: spec/execute_engine/execute_engine_target.md
-# 对应测试文件路径: test/execute_engine/test_target_support.py
+# 对应测试文件路径: test/execute_engine/test_builtin_strategy.py
 def test_execute_engine_compile_injects_trance_macros_from_core_config(tmp_path: Path) -> None:
     reset_config()
     set_trance_enabled(True)
@@ -156,11 +156,11 @@ def test_execute_engine_compile_injects_trance_macros_from_core_config(tmp_path:
 
 # EE-TRANCE-002
 # 功能说明: 覆盖 runtime trance block 目录宏在真实 npu_demo 编译执行路径可用。
-# 使用示例: pytest -q test/execute_engine/test_target_support.py -k "EE-TRANCE-002"
+# 使用示例: pytest -q test/execute_engine/test_builtin_strategy.py -k "EE-TRANCE-002"
 # 测试目的: 验证 g++ 直收 `KG_TRANCE_*` 字符串宏后可打开 block trace 文件并写入 launch 日志。
-# 对应功能实现文件路径: kernel_gen/execute_engine/target_support.py
+# 对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
 # 对应 spec 文件路径: spec/execute_engine/execute_engine_target.md
-# 对应测试文件路径: test/execute_engine/test_target_support.py
+# 对应测试文件路径: test/execute_engine/test_builtin_strategy.py
 def test_execute_engine_compile_trance_block_sink_runs_on_npu_demo(tmp_path: Path) -> None:
     reset_config()
     set_trance_enabled(True)
@@ -193,11 +193,11 @@ void run_kernel() {
 
 # EE-TGT-001/002/004/005
 # 功能说明: 覆盖 target include、entry shim 注入/省略与 CPU/npu target 矩阵。
-# 使用示例: pytest -q test/execute_engine/test_target_support.py -k "target_include_and_entry_shim_matrix"
+# 使用示例: pytest -q test/execute_engine/test_builtin_strategy.py -k "target_include_and_entry_shim_matrix"
 # 测试目的: 验证公开 ExecutionEngine.compile 入口对 target/header/shim 合同的组合行为。
-# 对应功能实现文件路径: kernel_gen/execute_engine/target_support.py
+# 对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
 # 对应 spec 文件路径: spec/execute_engine/execute_engine_target.md
-# 对应测试文件路径: test/execute_engine/test_target_support.py
+# 对应测试文件路径: test/execute_engine/test_builtin_strategy.py
 @pytest.mark.parametrize(
     ("case_id", "target", "source", "function", "expects_shim", "required_lines", "forbidden_lines"),
     _COMPILE_TARGET_SOURCE_CASES,
@@ -295,11 +295,11 @@ static void templated_kernel_device(Memory<GM, T1>& arg0) {
 
 # EE-TGT-008
 # 功能说明: 覆盖 entry shim 对 memory/int/float/KernelContext 形参的公开源码拼装。
-# 使用示例: pytest -q test/execute_engine/test_target_support.py -k "entry_shim_public_param_matrix"
+# 使用示例: pytest -q test/execute_engine/test_builtin_strategy.py -k "entry_shim_public_param_matrix"
 # 测试目的: 验证公开 compile 入口按目标函数形参顺序生成 runtime entry shim。
-# 对应功能实现文件路径: kernel_gen/execute_engine/target_support.py
+# 对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
 # 对应 spec 文件路径: spec/execute_engine/execute_engine_target.md
-# 对应测试文件路径: test/execute_engine/test_target_support.py
+# 对应测试文件路径: test/execute_engine/test_builtin_strategy.py
 def test_execute_engine_compile_entry_shim_public_param_matrix() -> None:
     source = (
         "void add(npu_demo::KernelContext& ctx, Memory<GM, float>& out, "
@@ -322,11 +322,11 @@ def test_execute_engine_compile_entry_shim_public_param_matrix() -> None:
 
 # EE-TGT-009
 # 功能说明: 覆盖不能解析的目标形参回退到占位 entry shim 的公开行为。
-# 使用示例: pytest -q test/execute_engine/test_target_support.py -k "entry_shim_placeholder"
+# 使用示例: pytest -q test/execute_engine/test_builtin_strategy.py -k "entry_shim_placeholder"
 # 测试目的: 验证公开 compile 入口遇到未支持形参时仍生成稳定 C ABI 占位入口。
-# 对应功能实现文件路径: kernel_gen/execute_engine/target_support.py
+# 对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
 # 对应 spec 文件路径: spec/execute_engine/execute_engine_target.md
-# 对应测试文件路径: test/execute_engine/test_target_support.py
+# 对应测试文件路径: test/execute_engine/test_builtin_strategy.py
 def test_execute_engine_compile_entry_shim_placeholder_for_unsupported_params() -> None:
     kernel = ExecutionEngine(target="cpu").compile(source="void add(Custom value) {}\n", function="add")
     try:

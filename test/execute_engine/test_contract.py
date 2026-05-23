@@ -16,16 +16,22 @@
 
 关联文件:
 - 功能实现: kernel_gen/execute_engine/compiler.py
-- 功能实现: kernel_gen/execute_engine/target_support.py
+- 功能实现: kernel_gen/execute_engine/strategy.py
+- 功能实现: kernel_gen/execute_engine/builtin_strategy.py
 - Spec 文档: spec/execute_engine/execute_engine.md
 - Spec 文档: spec/execute_engine/execute_engine_api.md
 - Spec 文档: spec/execute_engine/execute_engine_target.md
 - 测试文件: test/execute_engine/test_contract.py
-- 测试文件: test/execute_engine/test_target_support.py
+- 测试文件: test/execute_engine/test_builtin_strategy.py
 """
 
 from __future__ import annotations
 
+import ast
+import importlib
+import itertools
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -49,13 +55,19 @@ from kernel_gen.execute_engine import (
 # 对应 spec 文件路径: spec/execute_engine/execute_engine.md
 # 对应测试文件路径: test/execute_engine/test_contract.py
 def test_execute_engine_contract_files_exist() -> None:
+    execute_engine_dir = REPO_ROOT / "kernel_gen/execute_engine"
+    old_target_module = execute_engine_dir / ("target" + "_support.py")
+    old_target_test = REPO_ROOT / "test/execute_engine" / ("test_" + "target" + "_support.py")
     assert (REPO_ROOT / "spec/execute_engine/execute_engine.md").is_file()
     assert (REPO_ROOT / "spec/execute_engine/execute_engine_api.md").is_file()
     assert (REPO_ROOT / "spec/execute_engine/execute_engine_target.md").is_file()
     assert (REPO_ROOT / "spec/execute_engine/strategy.md").is_file()
-    assert (REPO_ROOT / "kernel_gen/execute_engine/target_support.py").is_file()
+    assert (execute_engine_dir / "strategy.py").is_file()
+    assert (execute_engine_dir / "builtin_strategy.py").is_file()
+    assert not old_target_module.exists()
     assert (REPO_ROOT / "test/execute_engine/test_contract.py").is_file()
-    assert (REPO_ROOT / "test/execute_engine/test_target_support.py").is_file()
+    assert (REPO_ROOT / "test/execute_engine/test_builtin_strategy.py").is_file()
+    assert not old_target_test.exists()
 
 
 # EE-S1-000A
@@ -89,12 +101,90 @@ def test_execute_engine_public_api_exports_only_runtime_contract() -> None:
         "KgArgSlot",
         "CompileArtifacts",
         "FAILURE_PHRASES",
-        "BuiltinTargetSupportArtifacts",
-        "build_builtin_target_support_artifacts",
+        "Builtin" + "TargetSupportArtifacts",
+        "build" + "_builtin_" + "target" + "_support_artifacts",
+        "install_builtin_compile" + "_strategies",
         *hidden_helper_names,
     ):
         assert not hasattr(execute_engine, name)
     assert not any(name.startswith("FAILURE_") for name in dir(execute_engine))
+
+
+# EE-S1-000B
+# 测试目的: 锁定 strategy registry 的新真源与旧公开导入路径保持同一对象。
+# 对应功能实现文件路径: kernel_gen/execute_engine/strategy.py
+# 对应 spec 文件路径: spec/execute_engine/strategy.md
+# 对应测试文件路径: test/execute_engine/test_contract.py
+def test_execute_engine_strategy_registry_reexport_identity() -> None:
+    compiler_module = importlib.import_module("kernel_gen.execute_engine.compiler")
+    strategy_module = importlib.import_module("kernel_gen.execute_engine.strategy")
+    assert execute_engine.CompileStrategy is strategy_module.CompileStrategy
+    assert execute_engine.register_compile_strategy is strategy_module.register_compile_strategy
+    assert execute_engine.get_compile_strategy is strategy_module.get_compile_strategy
+    assert compiler_module.CompileStrategy is strategy_module.CompileStrategy
+    assert compiler_module.register_compile_strategy is strategy_module.register_compile_strategy
+    assert compiler_module.get_compile_strategy is strategy_module.get_compile_strategy
+
+
+# EE-S1-000C
+# 测试目的: 验证内置 strategy 安装模块不进入包根公开 API，且安装调用只存在于 compiler.py。
+# 对应功能实现文件路径: kernel_gen/execute_engine/builtin_strategy.py
+# 对应 spec 文件路径: spec/execute_engine/strategy.md
+# 对应测试文件路径: test/execute_engine/test_contract.py
+def test_execute_engine_builtin_strategy_static_install_boundary() -> None:
+    install_name = "install_builtin_compile" + "_strategies"
+    builtin_path = REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy.py"
+    compiler_path = REPO_ROOT / "kernel_gen/execute_engine/compiler.py"
+    builtin_source = builtin_path.read_text(encoding="utf-8")
+    builtin_tree = ast.parse(builtin_source)
+    assert "CompileRequest" not in builtin_source
+    assert "CompiledKernel" not in builtin_source
+    assert "kernel_gen.execute_engine.compiler" not in builtin_source
+    assert install_name not in execute_engine.__all__
+    assert not hasattr(execute_engine, install_name)
+
+    for node in builtin_tree.body:
+        if isinstance(node, ast.ImportFrom):
+            assert node.module != "kernel_gen.execute_engine.compiler"
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            assert getattr(node.value.func, "id", None) not in {install_name, "register_compile_strategy"}
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            assert getattr(node.value.func, "id", None) not in {install_name, "register_compile_strategy"}
+
+    compiler_tree = ast.parse(compiler_path.read_text(encoding="utf-8"))
+    install_calls = [
+        node
+        for node in ast.walk(compiler_tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == install_name
+    ]
+    assert len(install_calls) == 1
+
+
+# EE-S1-000D
+# 测试目的: 验证 strategy/compiler/builtin_strategy/package root 任意导入顺序不产生循环导入。
+# 对应功能实现文件路径: kernel_gen/execute_engine/strategy.py
+# 对应 spec 文件路径: spec/execute_engine/strategy.md
+# 对应测试文件路径: test/execute_engine/test_contract.py
+def test_execute_engine_strategy_import_order_matrix() -> None:
+    modules = (
+        "kernel_gen.execute_engine.strategy",
+        "kernel_gen.execute_engine.builtin_strategy",
+        "kernel_gen.execute_engine.compiler",
+        "kernel_gen.execute_engine",
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    for order in itertools.permutations(modules):
+        script = "import importlib\n" + "\n".join(f'importlib.import_module("{module}")' for module in order)
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
 
 
 # EE-S1-001

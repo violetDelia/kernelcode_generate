@@ -33,7 +33,11 @@
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/execute_engine/execute_engine.md`](spec/execute_engine/execute_engine.md)
 - `功能实现`：[`kernel_gen/execute_engine/compiler.py`](kernel_gen/execute_engine/compiler.py)
+- `功能实现`：[`kernel_gen/execute_engine/strategy.py`](kernel_gen/execute_engine/strategy.py)
+- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy.py`](kernel_gen/execute_engine/builtin_strategy.py)
 - `test`：[`test/execute_engine/test_contract.py`](test/execute_engine/test_contract.py)
+- `test`：[`test/execute_engine/test_builtin_strategy.py`](test/execute_engine/test_builtin_strategy.py)
+- `test`：[`test/execute_engine/test_compile_strategy.py`](test/execute_engine/test_compile_strategy.py)
 
 ## 依赖
 

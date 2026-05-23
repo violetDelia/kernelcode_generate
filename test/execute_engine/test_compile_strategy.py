@@ -10,6 +10,7 @@
 
 关联文件:
 - 功能实现: kernel_gen/execute_engine/compiler.py
+- 功能实现: kernel_gen/execute_engine/strategy.py
 - 功能实现: kernel_gen/dsl/gen_kernel/emit/dummy_generic/__init__.py
 - Spec 文档: spec/execute_engine/strategy.md
 - 测试文件: test/execute_engine/test_compile_strategy.py

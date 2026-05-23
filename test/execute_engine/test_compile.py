@@ -3,7 +3,7 @@
 
 功能说明:
 - 验证 `ExecutionEngine.compile(...)` 的输入校验与失败短语合同（P0）。
-- 保留通用编译成功、编译命令、失败短语与资源释放测试；target include、entry shim 与 trance 测试迁入 `test_target_support.py`。
+- 保留通用编译成功、编译命令、失败短语与资源释放测试；target include、entry shim 与 trance 测试迁入 `test_builtin_strategy.py`。
 
 使用示例:
 - pytest -q test/execute_engine/test_compile.py
@@ -16,11 +16,11 @@
 
 关联文件:
 - 功能实现: kernel_gen/execute_engine/compiler.py
-- 功能实现: kernel_gen/execute_engine/target_support.py
+- 功能实现: kernel_gen/execute_engine/strategy.py
 - Spec 文档: spec/execute_engine/execute_engine.md
 - Spec 文档: spec/execute_engine/execute_engine_target.md
 - 测试文件: test/execute_engine/test_compile.py
-- 测试文件: test/execute_engine/test_target_support.py
+- 测试文件: test/execute_engine/test_builtin_strategy.py
 """
 
 from __future__ import annotations
