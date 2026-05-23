@@ -17,6 +17,7 @@ API 列表:
 - `class DmaSubviewOp(source: SSAValue | Operation, offset: SSAValue | Operation, size: SSAValue | Operation, stride: SSAValue | Operation, result_type: NnMemoryType)`
 - `class DmaViewOp(source: SSAValue | Operation, offsets: Sequence[SSAValue], shape: Sequence[SSAValue], stride: Sequence[SSAValue], result_type: NnMemoryType)`
 - `class DmaReshapeOp(source: SSAValue | Operation, shape: Sequence[SSAValue], result_type: NnMemoryType)`
+- `class DmaReinterpretOp(source: SSAValue | Operation, offset: SSAValue | Operation, shape: Sequence[SSAValue], stride: Sequence[SSAValue], result_type: NnMemoryType)`
 - `class DmaCastOp(target: SSAValue | Operation, source: SSAValue | Operation)`
 - `class DmaMakeRingOp(memory: SSAValue | Operation, count: SSAValue | Operation, offset: SSAValue | Operation, shape_bytes: SSAValue | Operation, result_type: DmaRingType)`
 - `class DmaCurrentRingOp(ring: SSAValue | Operation, result_type: NnMemoryType | None = None)`
@@ -33,7 +34,7 @@ API 列表:
 
 from __future__ import annotations
 
-from .alias import DmaReshapeOp, DmaSubviewOp, DmaViewOp
+from .alias import DmaReinterpretOp, DmaReshapeOp, DmaSubviewOp, DmaViewOp
 from .lifecycle import DmaAllocOp, DmaFillOp, DmaFreeOp
 from .ring import DmaAdvanceRingOp, DmaCurrentRingOp, DmaMakeRingOp
 from .slice import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
@@ -53,6 +54,7 @@ __all__ = [
     "DmaSubviewOp",
     "DmaViewOp",
     "DmaReshapeOp",
+    "DmaReinterpretOp",
     "DmaCastOp",
     "DmaMakeRingOp",
     "DmaCurrentRingOp",

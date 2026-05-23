@@ -8,8 +8,9 @@
   或受支持 alias producer，且存在唯一匹配 `dma.free` 时，将其与 `dma.free` 成对外提一层。
 - 当同一 `symbol.for` 直接 body 内存在唯一匹配 `dma.free` 且该 free 晚于所有 data use 时，
   外提 `dma.alloc` 的同时把对应 `dma.free` 移到同一 `symbol.for` 之后。
-- 对 source、offset/shape/stride 等 operand 均支配当前 `symbol.for` 的 `dma.view`、`dma.reshape`
-  和 `dma.subview`，作为独立 alias op 单次外提一层；fixed-point 驱动允许同一 alias op 跨 nested loop
+- 对 source、offset/shape/stride 等 operand 均支配当前 `symbol.for` 的 `dma.view`、`dma.reshape`、
+  `dma.subview` 和 `dma.reinterpret`，作为独立 alias op 单次外提一层；`dma.reinterpret`
+  也参与 alias use chain 与 full-cover 生命周期证明；fixed-point 驱动允许同一 alias op 跨 nested loop
   逐层外提到最近安全位置。
 - `symbol.get_dim` / `symbol.get_stride` 是 Pure metadata query，只读取 alias 或 memory 的 shape / stride
   信息，不参与生命周期数据 use，也不能单独证明 reset/write。
@@ -74,6 +75,7 @@ from kernel_gen.dialect.dma import (
     DmaDesliceOp,
     DmaFillOp,
     DmaFreeOp,
+    DmaReinterpretOp,
     DmaReshapeOp,
     DmaSliceOp,
     DmaSubviewOp,
@@ -271,7 +273,7 @@ def _is_supported_alias_source_use(use: Use) -> bool:
 
 
     功能说明:
-    - 只允许 `dma.view`、`dma.reshape`、`dma.subview` 的 source use。
+    - 只允许 `dma.view`、`dma.reshape`、`dma.subview`、`dma.reinterpret` 的 source use。
     - 该 helper 仅服务当前文件内 alloc/free 与 alias op 外提判定，不构成公开 API。
 
     使用示例:
@@ -284,7 +286,7 @@ def _is_supported_alias_source_use(use: Use) -> bool:
     """
 
     user = use.operation
-    return use.index == 0 and isinstance(user, (DmaViewOp, DmaReshapeOp, DmaSubviewOp))
+    return use.index == 0 and isinstance(user, (DmaViewOp, DmaReshapeOp, DmaSubviewOp, DmaReinterpretOp))
 
 
 def _collect_direct_uses(result: SSAValue) -> tuple[Use, ...]:
@@ -661,6 +663,115 @@ def _values_are_symbol_constants(values: Iterable[SSAValue], expected: str) -> b
     return all(_symbol_value_text(SSAValue.get(value)) == expected for value in values)
 
 
+def _shape_product_text(memory_type: NnMemoryType) -> str | None:
+    """返回 memory shape 的简单乘积文本。
+
+    功能说明:
+    - 仅用于当前文件内 full-cover 判断。
+    - 跳过常量 1，保留维度顺序；任一维为 `?` 时保守返回 None。
+
+    使用示例:
+    - text = _shape_product_text(memory_type)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    factors: list[str] = []
+    for dim in memory_type.shape.data:
+        text = _symbol_expr_text(dim)
+        if text == "?":
+            return None
+        if text != "1":
+            factors.append(text)
+    return "*".join(factors) if factors else "1"
+
+
+def _expected_contiguous_stride_texts(memory_type: NnMemoryType) -> tuple[str, ...] | None:
+    """返回 memory type 的默认连续 stride 文本。
+
+    功能说明:
+    - 动态匿名维度 `?` 无法证明连续 stride 时返回 None。
+    - 只按当前文件内公开文本比较，不调用 dma package 内部 helper。
+
+    使用示例:
+    - strides = _expected_contiguous_stride_texts(memory_type)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    result: list[str] = []
+    running = "1"
+    for dim in reversed(memory_type.shape.data):
+        result.append(running)
+        dim_text = _symbol_expr_text(dim)
+        if dim_text == "?":
+            return None
+        if dim_text != "1":
+            running = dim_text if running == "1" else f"{dim_text}*{running}"
+    result.reverse()
+    return tuple(result)
+
+
+def _memory_type_is_contiguous(memory_type: NnMemoryType) -> bool:
+    """判断 memory type 是否为默认连续布局。
+
+    功能说明:
+    - 用于 `dma.reinterpret` full-cover 判断，避免 partial alias write 被升级为 root full write。
+
+    使用示例:
+    - if _memory_type_is_contiguous(result_type): ...
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    expected = _expected_contiguous_stride_texts(memory_type)
+    if expected is None or len(expected) != len(memory_type.stride.data):
+        return False
+    actual = tuple(_symbol_expr_text(stride) for stride in memory_type.stride.data)
+    return actual == expected
+
+
+def _reinterpret_covers_source(op: DmaReinterpretOp) -> bool:
+    """判断 `dma.reinterpret` result 是否完整覆盖 source root。
+
+    功能说明:
+    - offset 必须为 0。
+    - source/result element type 与 space 必须一致。
+    - source/result numel 文本必须一致，且 result stride 必须是默认连续布局。
+
+    使用示例:
+    - if _reinterpret_covers_source(op): ...
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    source_type = _memory_type_of(SSAValue.get(op.source))
+    result_type = _memory_type_of(op.result)
+    if source_type is None or result_type is None:
+        return False
+    if source_type.element_type != result_type.element_type:
+        return False
+    if source_type.space.space.data != result_type.space.space.data:
+        return False
+    return (
+        _symbol_value_text(SSAValue.get(op.offset)) == "0"
+        and _shape_product_text(source_type) == _shape_product_text(result_type)
+        and _memory_type_is_contiguous(result_type)
+    )
+
+
 def _deslice_writes_full_target(op: DmaDesliceOp) -> bool:
     """判断 `dma.deslice` 是否完整覆盖 target root。
 
@@ -696,6 +807,7 @@ def _alias_op_covers_source(op: Operation) -> bool:
     - `dma.reshape` 视为整块重解释，写入 result 可覆盖 source root。
     - `dma.view` 只有在 result/source 类型一致、offset 全 0 且 stride 全 1 时视为整块覆盖。
     - `dma.subview` 默认是 byte pool 的局部 typed view；只有 source/result 类型一致且范围完整时才视为整块覆盖。
+    - `dma.reinterpret` 只有 offset 为 0、source/result numel 相等且 result 连续时视为整块覆盖。
 
     使用示例:
     - covers_root = _alias_op_covers_source(view_op)
@@ -724,6 +836,8 @@ def _alias_op_covers_source(op: Operation) -> bool:
             and _values_are_symbol_constants(tuple(SSAValue.get(value) for value in op.stride), "1")
             and _sizes_cover_memory_shape(tuple(SSAValue.get(value) for value in op.size), source_type)
         )
+    if isinstance(op, DmaReinterpretOp):
+        return _reinterpret_covers_source(op)
     return False
 
 
@@ -854,7 +968,7 @@ def _collect_alias_data_events(
 
 
     功能说明:
-    - `dma.view`、`dma.reshape`、`dma.subview` result 只能被同一 owner loop body 或其 descendant
+    - `dma.view`、`dma.reshape`、`dma.subview`、`dma.reinterpret` result 只能被同一 owner loop body 或其 descendant
       region 内的可捕获 memory use 或下一层受支持 alias op 使用。
     - owner loop 外、sibling region、`symbol.yield`、`func.return` 或未知 direct use 一律让外提 no-op。
     - 返回的 event 用于证明 matching free 晚于 alias 链真实消费，且 partial alias write 不被当作 root reset。
@@ -1069,6 +1183,8 @@ def _alias_operands(op: Operation) -> tuple[SSAValue, ...]:
         return (SSAValue.get(op.source), *tuple(op.shape))
     if isinstance(op, DmaSubviewOp):
         return (*tuple(op.source), *tuple(op.offset), *tuple(op.size), *tuple(op.stride))
+    if isinstance(op, DmaReinterpretOp):
+        return (SSAValue.get(op.source), SSAValue.get(op.offset), *tuple(op.shape), *tuple(op.stride))
     return ()
 
 
@@ -1303,13 +1419,52 @@ class DmaSubviewInSymbolForHoistPattern(RewritePattern):
         _hoist_alias_op_if_safe(op, rewriter)
 
 
+class _DmaReinterpretInSymbolForHoistPattern(RewritePattern):
+    """`symbol.for` 内 `dma.reinterpret` 单 op 外提私有 pattern。
+
+
+    功能说明:
+    - 只在 source、offset、shape、stride 均对当前 loop invariant 时外提一层。
+    - IR 变换：`symbol.for { %r = dma.reinterpret(...); use(%r) }` 变为 `%r = dma.reinterpret(...); symbol.for { use(%r) }`。
+    - no-op：offset/shape/stride 来自当前 loop body 时保持原 IR。
+
+    使用示例:
+    - pattern = _DmaReinterpretInSymbolForHoistPattern()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: DmaReinterpretOp, rewriter: PatternRewriter, /) -> None:
+        """对满足条件的 `dma.reinterpret` 执行单层外提。
+
+
+        功能说明:
+        - 不新增 loop argument；loop body 直接捕获外提后的 SSA result。
+        - 任一 operand 不支配当前 loop 或 result use 不在白名单时保持 no-op。
+
+        使用示例:
+        - _DmaReinterpretInSymbolForHoistPattern().match_and_rewrite(op, rewriter)
+
+        关联文件:
+        - spec: spec/pass/symbol_buffer_hoist.md
+        - test: test/passes/test_symbol_buffer_hoist.py
+        - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+        """
+
+        _hoist_alias_op_if_safe(op, rewriter)
+
+
 def get_symbol_buffer_hoist_patterns() -> list[RewritePattern]:
     """返回 `symbol-buffer-hoist` 公开 pattern 列表。
 
 
     功能说明:
     - 公开返回 `dma.alloc/free` pattern 与 alias op pattern 实例。
-    - 返回值顺序固定为 alloc/free、view、reshape、subview，便于 greedy walker 逐层收敛。
+    - 返回值顺序固定为 alloc/free、view、reshape、subview、reinterpret，便于 greedy walker 逐层收敛。
 
     使用示例:
     - patterns = get_symbol_buffer_hoist_patterns()
@@ -1325,6 +1480,7 @@ def get_symbol_buffer_hoist_patterns() -> list[RewritePattern]:
         DmaViewInSymbolForHoistPattern(),
         DmaReshapeInSymbolForHoistPattern(),
         DmaSubviewInSymbolForHoistPattern(),
+        _DmaReinterpretInSymbolForHoistPattern(),
     ]
 
 

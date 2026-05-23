@@ -3,7 +3,7 @@
 
 功能说明:
 - 提供 `producer-consumer-analysis` pass，基于公开 `MemoryEffect` 标注生产 / 消费 event。
-- 使用当前文件内 alias 规则处理 `dma.view`、`dma.reshape`、`dma.subview` 与 `dma.deslice`。
+- 使用当前文件内 alias 规则处理 `dma.view`、`dma.reshape`、`dma.subview`、`dma.reinterpret` 与 `dma.deslice`。
 - 同一 producer -> consumer edge 只写普通 event 对或一个控制流 event 对，不生成 wait/sign 或 runtime 同步 op。
 
 API 列表:
@@ -38,7 +38,7 @@ from xdsl.printer import Printer
 from xdsl.traits import MemoryEffectKind, get_effects
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
-from kernel_gen.dialect.dma import DmaDesliceOp, DmaReshapeOp, DmaSubviewOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaDesliceOp, DmaReinterpretOp, DmaReshapeOp, DmaSubviewOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp
 from kernel_gen.passes.common import ensure_builtin_module
@@ -342,7 +342,7 @@ def _build_alias_roots(ops: tuple[Operation, ...]) -> dict[SSAValue, SSAValue]:
     """构建当前函数内 alias root 表。
 
     功能说明:
-    - `dma.view/reshape/subview` 的 result alias source。
+    - `dma.view/reshape/subview/reinterpret` 的 result alias source。
     - `dma.deslice` 的 result alias target。
 
     使用示例:
@@ -352,7 +352,7 @@ def _build_alias_roots(ops: tuple[Operation, ...]) -> dict[SSAValue, SSAValue]:
     alias_roots: dict[SSAValue, SSAValue] = {}
 
     for op in ops:
-        if isinstance(op, (DmaViewOp, DmaReshapeOp, DmaSubviewOp)):
+        if isinstance(op, (DmaViewOp, DmaReshapeOp, DmaSubviewOp, DmaReinterpretOp)):
             alias_roots[SSAValue.get(op.result)] = _alias_root(SSAValue.get(op.source), alias_roots)
         elif isinstance(op, DmaDesliceOp):
             alias_roots[SSAValue.get(op.result)] = _alias_root(SSAValue.get(op.target), alias_roots)

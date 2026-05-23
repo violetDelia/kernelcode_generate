@@ -36,6 +36,7 @@ from xdsl.dialects.builtin import (
     IntegerType,
     Signedness,
     StringAttr,
+    i8,
 )
 from xdsl.ir import BlockArgument, Operation, SSAValue
 
@@ -45,6 +46,7 @@ from kernel_gen.dialect.dma import (
     DmaDesliceOp,
     DmaFillOp,
     DmaLoadOp,
+    DmaReinterpretOp,
     DmaSliceOp,
     DmaStoreOp,
     DmaViewOp,
@@ -326,6 +328,19 @@ def _maybe_static_numel(shape: Any) -> int | None:
     return numel
 
 
+def _is_i8_byte_pool(memory_type: NnMemoryType) -> bool:
+    """判断 memory type 是否为一维 i8 byte pool。
+
+    功能说明:
+    - `dma.reinterpret` 从 byte pool 切 typed memory 时 offset 按 byte 解释。
+
+    使用示例:
+    - if _is_i8_byte_pool(memory_type): ...
+    """
+
+    return len(memory_type.shape.data) == 1 and memory_type.element_type == i8
+
+
 def _shape_product_expr(shape_values: list[str]) -> str:
     if not shape_values:
         return "1"
@@ -534,6 +549,69 @@ def _emit_dma_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
     return f"{ctx.current_indent}long long {base_offset_name} = {base_offset_expr};\n{decl}"
 
 
+def _reinterpret_data_expr(
+    source_expr: str,
+    source_type: NnMemoryType,
+    result_type: NnMemoryType,
+    offset_expr: str,
+    ctx: EmitCContext,
+) -> str:
+    """生成 `dma.reinterpret` 的底层 data 指针表达式。
+
+    功能说明:
+    - byte pool source 先做 byte offset，再 cast 到 result element pointer。
+    - typed source 保持 source element 单位 offset，与 dialect verifier 合同一致。
+
+    使用示例:
+    - data_expr = _reinterpret_data_expr("src", source_type, result_type, "off", ctx)
+    """
+
+    result_element_type = ctx.dispatch_type(result_type.element_type)
+    if _is_i8_byte_pool(source_type):
+        source_element_type = ctx.dispatch_type(source_type.element_type)
+        return (
+            f"reinterpret_cast<{result_element_type}*>"
+            f"(const_cast<{source_element_type}*>({source_expr}.data()) + {offset_expr})"
+        )
+    return f"const_cast<{result_element_type}*>({source_expr}.data()) + {offset_expr}"
+
+
+def _emit_dma_reinterpret_stmt(op: DmaReinterpretOp, ctx: EmitCContext) -> str:
+    """发射 CPU `dma.reinterpret` C++ 语句。
+
+    功能说明:
+    - 构造共享 source backing data 的 `Memory<...>`，不复制内存。
+    - shape/stride 来自 op operand，format 继承 source。
+
+    使用示例:
+    - stmt = _emit_dma_reinterpret_stmt(op, ctx)
+    """
+
+    if not ctx.is_target("cpu"):
+        raise ctx.emit_error(op.name, "dma ops are cpu-only")
+    source_expr = _emit_c_value(op.source, ctx)
+    source_type = op.source.type
+    result_name = ctx.create_or_get_name(op.result)
+    result_type = op.result.type
+    if not isinstance(source_type, NnMemoryType):
+        raise ctx.emit_error(op.name, "source must be nn.memory")
+    if not isinstance(result_type, NnMemoryType):
+        raise ctx.emit_error(op.name, "result must be nn.memory")
+    shape_values = [_emit_c_value(value, ctx) for value in op.shape]
+    stride_values = [_emit_c_value(value, ctx) for value in op.stride]
+    offset_expr = _emit_c_value(op.offset, ctx)
+    data_expr = _reinterpret_data_expr(source_expr, source_type, result_type, offset_expr, ctx)
+    return _emit_memory_decl(
+        result_name,
+        result_type,
+        ctx,
+        shape_values=shape_values,
+        stride_values=stride_values,
+        data_expr=data_expr,
+        format_expr=f"{source_expr}.format()",
+    )
+
+
 def _emit_dma_slice_stmt(op: DmaSliceOp, ctx: EmitCContext) -> str:
     if not ctx.is_target("cpu"):
         raise ctx.emit_error(op.name, "dma ops are cpu-only")
@@ -715,7 +793,10 @@ def _emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     if isinstance(value, BlockArgument):
         return ctx.create_or_get_name(value)
     owner = value.owner
-    if isinstance(value.type, NnMemoryType) and isinstance(owner, (DmaAllocOp, DmaViewOp, DmaLoadOp, DmaSliceOp, NnImg2col2dOp)):
+    if isinstance(value.type, NnMemoryType) and isinstance(
+        owner,
+        (DmaAllocOp, DmaViewOp, DmaReinterpretOp, DmaLoadOp, DmaSliceOp, NnImg2col2dOp),
+    ):
         return ctx.create_or_get_name(value)
     if isinstance(value.type, NnMemoryType):
         raise ctx.emit_error(owner.name, f"invalid dependency for value {value}")
@@ -799,6 +880,8 @@ def _emit_c_op(op: Operation, ctx: EmitCContext) -> str:
         return _emit_dma_deslice_stmt(op, ctx)
     if isinstance(op, DmaViewOp):
         return _emit_dma_view_stmt(op, ctx)
+    if isinstance(op, DmaReinterpretOp):
+        return _emit_dma_reinterpret_stmt(op, ctx)
     if isinstance(op, DmaBroadcastOp):
         return _emit_dma_broadcast_stmt(op, ctx)
     if isinstance(op, KernelBinaryElewiseOp):

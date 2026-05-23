@@ -100,16 +100,16 @@ def _is_byte_pool_memory(memory_type: NnMemoryType) -> bool:
     return len(memory_type.shape.data) == 1 and memory_type.element_type == i8
 
 
-def _view_memory_builder(op: Operation) -> tuple[TemplateNameConstraint, ...]:
-    """生成 `dma.view` 的 template-name 约束。
+def _alias_memory_builder(op: Operation) -> tuple[TemplateNameConstraint, ...]:
+    """生成 alias memory op 的 template-name 约束。
 
     功能说明:
-    - 普通 view 仍保持 source/result 同 template family。
-    - i8 byte pool typed view 只校验 source/result，各自保持独立 family，避免 shared backing
-      把多个 typed view 合并成同一个模板参数。
+    - 普通 `dma.view/dma.reinterpret` 仍保持 source/result 同 template family。
+    - i8 byte pool typed alias 只校验 source/result，各自保持独立 family，避免 shared backing
+      把多个 typed alias 合并成同一个模板参数。
 
     使用示例:
-    - constraints = _view_memory_builder(op)
+    - constraints = _alias_memory_builder(op)
     """
 
     values = _memory_values(op)
@@ -179,7 +179,8 @@ def register_default_template_constraints() -> None:
     ):
         _register_default(op_name, _same_all_memory_builder)
 
-    _register_default("dma.view", _view_memory_builder)
+    _register_default("dma.view", _alias_memory_builder)
+    _register_default("dma.reinterpret", _alias_memory_builder)
 
     for op_name in (
         "arch.get_dynamic_memory",

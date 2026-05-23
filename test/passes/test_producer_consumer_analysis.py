@@ -108,7 +108,7 @@ def test_producer_consumer_analysis_alias_and_deslice_chain() -> None:
     """验证 alias op 与 `dma.deslice` 复合 read/write 模型。
 
     功能说明:
-    - `dma.view` 不生产、不消费，只让 result alias source。
+    - `dma.view` / `dma.reinterpret` 不生产、不消费，只让 result alias source。
     - `dma.deslice` 消费 source producer，同时生产 target，并让 result alias target。
 
     使用示例:
@@ -123,7 +123,8 @@ def test_producer_consumer_analysis_alias_and_deslice_chain() -> None:
     %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
     "dma.copy"(%lhs, %gm) : ({_LOCAL_TYPE}, {_GLOBAL_TYPE}) -> ()
     %lhs_view = "dma.view"(%lhs, %c0, %c0, %c4, %c4, %c1, %c1) <{{operandSegmentSizes = array<i32: 1, 2, 2, 2>}}> : ({_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> {_LOCAL_TYPE}
-    "kernel.matmul"(%out, %lhs_view, %rhs) {{space = #nn.space<tsm>}} : ({_LOCAL_TYPE}, {_LOCAL_TYPE}, {_LOCAL_TYPE}) -> ()
+    %lhs_reinterpret = "dma.reinterpret"(%lhs_view, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_LOCAL_TYPE}
+    "kernel.matmul"(%out, %lhs_reinterpret, %rhs) {{space = #nn.space<tsm>}} : ({_LOCAL_TYPE}, {_LOCAL_TYPE}, {_LOCAL_TYPE}) -> ()
     %dst_after = "dma.deslice"(%dst, %out, %c0, %c0, %c4, %c4, %c1, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2, 2>}}> : ({_GLOBAL_TYPE}, {_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> {_GLOBAL_TYPE}
     "dma.copy"(%z, %dst_after) : ({_GLOBAL_TYPE}, {_GLOBAL_TYPE}) -> ()
     func.return
@@ -133,6 +134,7 @@ def test_producer_consumer_analysis_alias_and_deslice_chain() -> None:
     )
     _assert_line_matches(actual, "dma.copy", r"productor = \[0\]", occurrence=1)
     _assert_line_matches(actual, "dma.view", r'^(?!.*productor)(?!.*consumer).*"dma.view"', occurrence=1)
+    _assert_line_matches(actual, "dma.reinterpret", r'^(?!.*productor)(?!.*consumer).*"dma.reinterpret"', occurrence=1)
     _assert_line_matches(actual, "kernel.matmul", r"consumer = \[0\].*productor = \[1\]", occurrence=1)
     _assert_line_matches(actual, "dma.deslice", r"consumer = \[1\].*productor = \[2\]", occurrence=1)
     _assert_line_matches(actual, "dma.copy", r"consumer = \[2\](?!.*productor)", occurrence=2)

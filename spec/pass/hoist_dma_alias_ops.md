@@ -51,6 +51,7 @@
 - 不做 `dma.alloc -> dma.reshape` fold。
 - 不做任意 `dma.view -> dma.reshape` combine；只做本计划定义的连续 suffix `view + single deslice` 分组 rewrite。
 - 不做 `dma.reshape -> dma.reshape` chain collapse。
+- 本 pass 仍保留旧 `dma.view` / `dma.reshape` 专项逻辑，服务手动调用或尚未经过 `dma-alias-to-reinterpret` 的 IR；`npu-demo-lowering` 中 `lower-nn` 后的旧 alias 会先由 `dma-alias-to-reinterpret` 归一为 `dma.reinterpret`。
 - 不跨控制流移动。
 
 ## 行为

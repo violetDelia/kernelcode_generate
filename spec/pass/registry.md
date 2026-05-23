@@ -74,6 +74,7 @@
   - `attach-arch-information`：把 target registry 的 launch extent 写回入口 `func.func`。
   - `arch-parallelize`：standalone IR pass，按 target registry 静态 `block_num` 把可分发顶层 `symbol.for` 改写为 block-strided loop；带 `entry_point` 属性的 host dispatcher 跳过，无顶层 `symbol.for` 的非 `entry_point` 函数生成 block0 guard。
   - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前；若存在唯一合法 `dma.free`，把 alloc/free 成对移动到 owner loop 两侧。
+  - `dma-alias-to-reinterpret`：把 `dma.view` / `dma.reshape` / `dma.subview` 归一为 root source 上的 `dma.reinterpret`。
   - `hoist-dma-alias-ops`：把同 block 内紧邻的 `dma.reshape` 上移穿过 `dma.fill`，作为第一阶段 alias hoist pass。
   - `memory-plan`：显式 `insert-free=true` 时为受控 `dma.alloc` 生命周期补插 `dma.free`。
   - `multi-buffer`：把可证明的 matmul lhs/rhs staging alloc/copy/use/free 成对生命周期改写为 DMA ring。
@@ -108,6 +109,7 @@
   - `kernel_gen.passes.dma_memory_hierarchy`
   - `kernel_gen.passes.memory_pool`
   - `kernel_gen.passes.memory_plan`
+  - `kernel_gen.passes.dma_alias_to_reinterpret`
   - `kernel_gen.passes.hoist_dma_alias_ops`
   - `kernel_gen.passes.multi_buffer`
   - `kernel_gen.passes.outline_device_kernel`

@@ -1,7 +1,7 @@
 """DMA dialect package root.
 
 功能说明:
-- 暴露 dma dialect 的稳定 root API，聚合 alloc/fill/free/copy/load/store/slice/deslice/subview/view/reshape/cast/broadcast/ring op 与 `Dma` dialect。
+- 暴露 dma dialect 的稳定 root API，聚合 alloc/fill/free/copy/load/store/slice/deslice/subview/view/reshape/reinterpret/cast/broadcast/ring op 与 `Dma` dialect。
 - 内部 type/operation/common/effect/canonicalization 子模块只服务 package 实现，不作为外部稳定 API。
 
 API 列表:
@@ -18,6 +18,7 @@ API 列表:
 - `class DmaSubviewOp(source: SSAValue | Operation, offset: SSAValue | Operation, size: SSAValue | Operation, stride: SSAValue | Operation, result_type: NnMemoryType)`
 - `class DmaViewOp(source: SSAValue | Operation, offsets: Sequence[SSAValue], shape: Sequence[SSAValue], stride: Sequence[SSAValue], result_type: NnMemoryType)`
 - `class DmaReshapeOp(source: SSAValue | Operation, shape: Sequence[SSAValue], result_type: NnMemoryType)`
+- `class DmaReinterpretOp(source: SSAValue | Operation, offset: SSAValue | Operation, shape: Sequence[SSAValue], stride: Sequence[SSAValue], result_type: NnMemoryType)`
 - `class DmaCastOp(target: SSAValue | Operation, source: SSAValue | Operation)`
 - `class DmaRingType(offset: SymbolExprAttr, memory_type: NnMemoryType)`
 - `class DmaMakeRingOp(memory: SSAValue | Operation, count: SSAValue | Operation, offset: SSAValue | Operation, shape_bytes: SSAValue | Operation, result_type: DmaRingType)`
@@ -50,6 +51,7 @@ from .operation import (
     DmaFreeOp,
     DmaLoadOp,
     DmaMakeRingOp,
+    DmaReinterpretOp,
     DmaReshapeOp,
     DmaSliceOp,
     DmaStoreOp,
@@ -85,6 +87,7 @@ class Dma(Dialect):
         DmaSubviewOp,
         DmaViewOp,
         DmaReshapeOp,
+        DmaReinterpretOp,
         DmaCastOp,
         DmaMakeRingOp,
         DmaCurrentRingOp,
@@ -108,6 +111,7 @@ __all__ = [
     "DmaSubviewOp",
     "DmaViewOp",
     "DmaReshapeOp",
+    "DmaReinterpretOp",
     "DmaCastOp",
     "DmaRingType",
     "DmaMakeRingOp",

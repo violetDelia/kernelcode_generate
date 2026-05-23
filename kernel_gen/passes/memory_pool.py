@@ -5,7 +5,7 @@
 - 提供 `memory-pool` pass 的生命周期摘要分析接口。
 - 汇总 `dma.alloc/dma.free` 的生命周期区间与 peak 统计。
 - 显式 `rewrite=True` 时，将可由 dynamic backing 承接的片上 `dma.alloc`
-  改写为 `arch.get_dynamic_memory + dma.view + dma.reshape`；`global` alloc 保留为 summary-only。
+  改写为 `arch.get_dynamic_memory + dma.reinterpret`；`global` alloc 保留为 summary-only。
 - 支持 `ArchParallelizePass` 生成的 block0 guard 形态，以及无 else 的单块
   `scf.if`，在存在的 branch region 内继续收集并改写 alloc/free。
 
@@ -58,13 +58,12 @@ from xdsl.ir import Attribute, Block, Operation, SSAValue
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp
-from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaReshapeOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaReinterpretOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolConstOp,
     SymbolExprAttr,
-    SymbolFloorDivOp,
     SymbolForOp,
     SymbolMulOp,
     SymbolValueType,
@@ -218,7 +217,7 @@ class _RewriteInfo:
 
 
     功能说明:
-    - 保存 shape/numel/offset symbol 值与待插入 metadata op。
+    - 保存 shape/numel/byte offset symbol 值与待插入 metadata op。
 
     使用示例:
     - rewrite_info = _RewriteInfo(info, shape_values, numel, offset, metadata_ops)
@@ -362,7 +361,7 @@ class MemoryPoolPass(Pass):
 
         功能说明:
         - 遍历 module 内每个 `func.func` 并生成 summary。
-        - `rewrite=True` 时将可由 dynamic backing 承接的片上 alloc 改写为 dynamic memory view + reshape。
+        - `rewrite=True` 时将可由 dynamic backing 承接的片上 alloc 改写为 dynamic memory reinterpret。
         - `global` alloc 不属于 `arch.get_dynamic_memory` 输入域，仍参与 summary 但不改写。
 
         使用示例:
@@ -1544,37 +1543,6 @@ def _mul_material(lhs: _SymbolMaterial, rhs: _SymbolMaterial) -> tuple[SymbolMul
     return op, _SymbolMaterial(op.result, expr_text, expr)
 
 
-def _floordiv_material(
-    lhs: _SymbolMaterial,
-    rhs: _SymbolMaterial,
-) -> tuple[SymbolFloorDivOp, _SymbolMaterial]:
-    """构造 symbol.floordiv material。
-
-
-    功能说明:
-    - 仅在调用方已证明 byte offset 可被 dtype size 整除后使用。
-
-    使用示例:
-    - op, material = _floordiv_material(offset_bytes, dtype_size)
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    if rhs.expr == 0 or _safe_simplify_expr(lhs.expr % rhs.expr) != 0:
-        raise KernelCodeError(
-            ErrorKind.UNIMPLEMENTED,
-            ErrorModule.PASS,
-            "MemoryPoolTypedViewOutOfBounds: byte offset is not divisible by dtype size",
-        )
-    expr = _safe_simplify_expr(lhs.expr / rhs.expr)
-    expr_text = _expr_text(expr)
-    op = SymbolFloorDivOp(lhs.value, rhs.value, SymbolValueType.from_expr(expr_text))
-    return op, _SymbolMaterial(op.result, expr_text, expr)
-
-
 def _dynamic_shape_dim_text(dim: SymbolExprAttr) -> str:
     """读取 dynamic shape 维度的公开表达文本。
 
@@ -1945,25 +1913,58 @@ def _numel_material(dims: tuple[_SymbolMaterial, ...]) -> tuple[list[Operation],
     return ops, current
 
 
-def _offset_material(
+def _contiguous_stride_materials(
+    shape_values: tuple[_SymbolMaterial, ...],
+    one: _SymbolMaterial,
+) -> tuple[list[Operation], tuple[_SymbolMaterial, ...]]:
+    """生成 row-major contiguous stride symbol 值。
+
+
+    功能说明:
+    - `dma.reinterpret` 直接承载最终 result type，rewrite 需要按原 shape 生成物理 stride operand。
+    - 从最内层维度向外累乘 shape，rank-0 返回空 stride。
+
+    使用示例:
+    - ops, strides = _contiguous_stride_materials(shape_values, one)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/passes/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
+    """
+
+    ops: list[Operation] = []
+    strides: list[_SymbolMaterial] = []
+    running = one
+    for dim in reversed(shape_values):
+        strides.insert(0, running)
+        if dim.expr_text == "1":
+            continue
+        if running.expr_text == "1":
+            running = dim
+            continue
+        op, running = _mul_material(dim, running)
+        ops.append(op)
+    return ops, tuple(strides)
+
+
+def _offset_bytes_material(
     current_bytes: sp.Basic,
-    dtype_size: int,
     alignment: int,
     *,
     zero: _SymbolMaterial,
     prior_numels: list[tuple[_SymbolMaterial, int]],
-    force_floordiv: bool,
     ratio_materials: dict[int, _SymbolMaterial] | None = None,
 ) -> tuple[list[Operation], _SymbolMaterial]:
-    """生成当前 alloc 的 view offset。
+    """生成当前 alloc 的 reinterpret byte offset。
 
 
     功能说明:
-    - offset 以当前 target dtype 的元素为单位。
-    - 只有已证明整除时才物化 `symbol.floordiv`。
+    - offset 以 `arch.get_dynamic_memory` 的 byte pool 为单位，不再按 target dtype 转换。
+    - 动态 offset 以 prior numel 乘 dtype byte size 精确物化，避免 floor 截断。
 
     使用示例:
-    - ops, offset = _offset_material(current_bytes, 4, 0, zero=zero, prior_numels=[(a, 4)], force_floordiv=False)
+    - ops, offset = _offset_bytes_material(current_bytes, 0, zero=zero, prior_numels=[(a, 4)])
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -1975,21 +1976,19 @@ def _offset_material(
     if aligned_bytes == 0:
         return [], zero
 
-    if alignment == 0 and prior_numels and not force_floordiv:
+    if alignment == 0 and prior_numels:
         if any(not isinstance(numel.expr, sp.Integer) for numel, _ in prior_numels):
-            return _dynamic_offset_from_prior_numels(prior_numels, dtype_size, zero, ratio_materials)
+            return _dynamic_offset_from_prior_numels(prior_numels, 1, zero, ratio_materials)
 
-    if _safe_simplify_expr(aligned_bytes % dtype_size) != 0:
+    if not (isinstance(aligned_bytes, sp.Integer) or (aligned_bytes.is_number and aligned_bytes.is_integer)):
         raise KernelCodeError(
             ErrorKind.UNIMPLEMENTED,
             ErrorModule.PASS,
-            "MemoryPoolTypedViewOutOfBounds: byte offset is not divisible by dtype size",
+            "MemoryPoolUnsupportedAlignment: dynamic byte offset is not supported",
         )
 
-    byte_op, byte_material = _const_material(int(aligned_bytes))
-    dtype_op, dtype_material = _const_material(dtype_size)
-    div_op, offset = _floordiv_material(byte_material, dtype_material)
-    return [byte_op, dtype_op, div_op], offset
+    op, offset = _const_material(int(aligned_bytes))
+    return [op], offset
 
 
 def _dynamic_offset_from_prior_numels(
@@ -2020,7 +2019,7 @@ def _dynamic_offset_from_prior_numels(
             raise KernelCodeError(
                 ErrorKind.UNIMPLEMENTED,
                 ErrorModule.PASS,
-                "MemoryPoolTypedViewOutOfBounds: byte offset is not divisible by dtype size",
+                "MemoryPoolUnsupportedByteOffset: byte offset is not divisible by target unit",
             )
         ratio_groups.setdefault(prior_dtype_size // dtype_size, []).append(numel)
 
@@ -2054,35 +2053,6 @@ def _dynamic_offset_from_prior_numels(
     if current is None:
         return [], zero
     return ops, current
-
-
-def _flat_result_type(info: _AllocInfo, numel: _SymbolMaterial) -> NnMemoryType:
-    """生成 dma.view 的一维 typed result type。
-
-
-    功能说明:
-    - 保留原 dtype/space，将 shape 收敛为 `[numel]`、stride 固定 `[1]`。
-
-    使用示例:
-    - flat_type = _flat_result_type(info, numel)
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    result_type = info.result_type
-    if isinstance(numel.expr, sp.Integer):
-        shape_attr = SymbolExprAttr.from_expr(str(int(numel.expr)))
-    else:
-        shape_attr = SymbolExprAttr.from_expr(numel.expr_text)
-    return NnMemoryType(
-        ArrayAttr([shape_attr]),
-        ArrayAttr([SymbolExprAttr.from_expr("1")]),
-        result_type.element_type,
-        result_type.space,
-    )
 
 
 def _metadata_group_block(info: _AllocInfo, op_loop: dict[Operation, LoopOp | None], func_block: Block) -> Block:
@@ -2173,7 +2143,7 @@ def _materialize_prior_numel_for_block(
 
     功能说明:
     - 用于后续函数体 alloc 的 offset 依赖前面 loop 内动态 alloc 大小的场景。
-    - 重新物化可避免函数体 `dma.view.offset` 引用 loop body 内 SSA。
+    - 重新物化可避免函数体 rewrite offset 引用 loop body 内 SSA。
 
     使用示例:
     - material = _materialize_prior_numel_for_block(info, func_block, func_block, anchor, cache, ops)
@@ -2299,13 +2269,11 @@ def _prepare_rewrite_infos(
                     rematerialized_prior_numel_by_info,
                     metadata_ops,
                 )
-            offset_ops, offset = _offset_material(
+            offset_ops, offset = _offset_bytes_material(
                 current,
-                info.dtype_size,
                 alignment,
                 zero=zero,
                 prior_numels=prior_numels,
-                force_floordiv=alignment != 0,
                 ratio_materials=None,
             )
         metadata_ops.extend(offset_ops)
@@ -2366,7 +2334,7 @@ def _rewrite_func(
 
     功能说明:
     - 每个 `func + memory space` 在入口生成唯一 `arch.get_dynamic_memory`。
-    - 原 alloc 就地替换为 `dma.view + dma.reshape`；旧 free 被删除。
+    - 原 alloc 就地替换为 `dma.reinterpret`；旧 free 被删除。
 
     使用示例:
     - _rewrite_func(block, alloc_infos, op_loop, alignment=0)
@@ -2393,16 +2361,15 @@ def _rewrite_func(
         rewrite_info = rewrite_infos[info]
         result_type = info.result_type
         backing = backings[(result_type.space.space.data,)]
-        view = DmaViewOp(
-            backing.result,
-            [rewrite_info.offset.value],
-            [rewrite_info.numel.value],
-            [rewrite_info.one.value],
-            _flat_result_type(info, rewrite_info.numel),
+        stride_ops, stride_values = _contiguous_stride_materials(
+            rewrite_info.shape_values,
+            rewrite_info.one,
         )
-        reshape = DmaReshapeOp(
-            view.result,
+        reinterpret = DmaReinterpretOp(
+            backing.result,
+            rewrite_info.offset.value,
             [shape.value for shape in rewrite_info.shape_values],
+            [stride.value for stride in stride_values],
             result_type,
         )
 
@@ -2413,8 +2380,8 @@ def _rewrite_func(
                 ErrorModule.PASS,
                 "MemoryPoolLifetimeError: alloc parent block not found",
             )
-        alloc_block.insert_ops_before([view, reshape], info.alloc_op)
-        info.alloc_op.result.replace_all_uses_with(reshape.result)
+        alloc_block.insert_ops_before([*stride_ops, reinterpret], info.alloc_op)
+        info.alloc_op.result.replace_all_uses_with(reinterpret.result)
         alloc_block.erase_op(info.alloc_op)
 
         if info.free_op is not None:

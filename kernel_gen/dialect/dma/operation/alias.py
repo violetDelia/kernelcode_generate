@@ -1,12 +1,13 @@
 """DMA alias operation definitions.
 
 功能说明:
-- 定义 `dma.view`、`dma.subview` 与 `dma.reshape`。
+- 定义 `dma.view`、`dma.subview`、`dma.reshape` 与 `dma.reinterpret`。
 
 API 列表:
 - `class DmaSubviewOp(source: SSAValue | Operation, offset: SSAValue | Operation, size: SSAValue | Operation, stride: SSAValue | Operation, result_type: NnMemoryType)`
 - `class DmaViewOp(source: SSAValue | Operation, offsets: Sequence[SSAValue], shape: Sequence[SSAValue], stride: Sequence[SSAValue], result_type: NnMemoryType)`
 - `class DmaReshapeOp(source: SSAValue | Operation, shape: Sequence[SSAValue], result_type: NnMemoryType)`
+- `class DmaReinterpretOp(source: SSAValue | Operation, offset: SSAValue | Operation, shape: Sequence[SSAValue], stride: Sequence[SSAValue], result_type: NnMemoryType)`
 
 使用示例:
 - `DmaViewOp(source, offsets, shape, stride, result_type)`
@@ -56,6 +57,33 @@ from ..common import (
     verify_symbol_int_operands,
     verify_view_result_stride,
 )
+
+
+def _linear_extent_index(shape: Sequence[SSAValue], stride: Sequence[SSAValue]) -> int | None:
+    """计算 shape/stride 的静态最大线性相对索引。
+
+    功能说明:
+    - `dma.reinterpret` 的 offset 是独立 operand，本 helper 只计算从 result 起点到最后一个元素的线性距离。
+    - 任一 shape/stride 无法静态恢复时返回 None，让 verifier 跳过静态 bounds 判断。
+
+    使用示例:
+    - extent = _linear_extent_index(op.shape, op.stride)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/dma/
+    - 功能实现: kernel_gen/dialect/dma/
+    """
+
+    total = 0
+    for size_value, stride_value in zip(shape, stride, strict=True):
+        size_int = operand_int_value(size_value)
+        stride_int = operand_int_value(stride_value)
+        if size_int is None or stride_int is None:
+            return None
+        total += (size_int - 1) * stride_int
+    return total
+
 
 @irdl_op_definition
 class DmaViewOp(IRDLOperation):
@@ -340,9 +368,106 @@ class DmaReshapeOp(IRDLOperation):
         verify_default_contiguous_stride(result_type, "dma.reshape requires contiguous result stride")
 
 
+@irdl_op_definition
+class DmaReinterpretOp(IRDLOperation):
+    """dma.reinterpret。"""
+
+    name = "dma.reinterpret"
+    traits = traits_def(NoMemoryEffect())
+
+    source = operand_def(NnMemoryType)
+    offset = operand_def(Attribute)
+    shape = var_operand_def(SymbolValueType)
+    stride = var_operand_def(SymbolValueType)
+    result = result_def(NnMemoryType)
+
+    irdl_options = [AttrSizedOperandSegments(as_property=True)]
+
+    def __init__(
+        self,
+        source: SSAValue | Operation,
+        offset: SSAValue | Operation,
+        shape: Sequence[SSAValue],
+        stride: Sequence[SSAValue],
+        result_type: NnMemoryType,
+    ) -> None:
+        """初始化 dma.reinterpret。
+
+
+        功能说明:
+        - 设置 source、线性 offset、result shape/stride operand 与结果类型。
+        - source 是一维 i8 byte pool 时，offset 单位为 byte；其它 source 使用 source element 单位。
+
+        使用示例:
+        - DmaReinterpretOp(source, offset, shape, stride, result_type)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/dma/
+        - 功能实现: kernel_gen/dialect/dma/
+        """
+
+        if not isinstance(result_type, NnMemoryType):
+            raise TypeError("result_type must be nn.memory")
+
+        super().__init__(operands=[source, offset, shape, stride], result_types=[result_type])
+
+    def verify_(self) -> None:
+        """校验 dma.reinterpret。
+
+
+        功能说明:
+        - source/result 均为 `!nn.memory` 且 memory space 必须一致。
+        - 非 byte pool source 要求 source/result element_type 一致；byte pool source 允许 result 使用 typed element。
+        - offset 必须是 `!symbol.int` 或 `!symbol.iter`；shape/stride 必须是 `!symbol.int`。
+        - shape/stride operand 必须与 result type 的 shape/stride exact 匹配。
+        - 静态可判定时按 offset 单位执行 bounds 检查。
+
+        使用示例:
+        - DmaReinterpretOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/dma/
+        - 功能实现: kernel_gen/dialect/dma/
+        """
+
+        source_type = verify_memory_type(self.source.type, "source")
+        result_type = verify_memory_type(self.result.type, "result")
+        offset = verify_symbol_index_operands([self.offset], "offset", min_value=0)[0]
+        shape = verify_symbol_int_operands(self.shape, "shape", min_value=1)
+        stride = verify_symbol_int_operands(self.stride, "stride", min_value=1)
+        rank = len(result_type.shape.data)
+        verify_rank_match(shape, rank, "shape")
+        verify_rank_match(stride, rank, "stride")
+        verify_operands_match_layout(shape, result_type.shape, "dma.reinterpret shape must match result shape")
+        verify_operands_match_layout(stride, result_type.stride, "dma.reinterpret stride must match result stride")
+        if source_type.space.space.data != result_type.space.space.data:
+            raise VerifyException("dma.reinterpret space mismatch")
+
+        source_numel = maybe_numel(source_type.shape)
+        extent = _linear_extent_index(shape, stride)
+        offset_int = operand_int_value(offset)
+        if is_i8_byte_pool(source_type):
+            result_elem_size = element_byte_size(result_type.element_type)
+            if result_elem_size is None:
+                raise VerifyException("dma.reinterpret result element_type unsupported for byte pool")
+            if source_numel is not None and offset_int is not None and extent is not None:
+                byte_end = offset_int + (extent + 1) * result_elem_size
+                if byte_end > source_numel:
+                    raise VerifyException("dma.reinterpret byte bounds mismatch")
+            return
+
+        if source_type.element_type != result_type.element_type:
+            raise VerifyException("dma.reinterpret element_type mismatch")
+        if source_numel is not None and offset_int is not None and extent is not None:
+            if offset_int + extent >= source_numel:
+                raise VerifyException("dma.reinterpret bounds mismatch")
+
 
 __all__ = [
     "DmaViewOp",
     "DmaSubviewOp",
     "DmaReshapeOp",
+    "DmaReinterpretOp",
 ]

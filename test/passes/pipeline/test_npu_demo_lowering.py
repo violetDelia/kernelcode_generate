@@ -64,6 +64,9 @@ KernelPatternAttachPass = importlib.import_module("kernel_gen.passes.kernel_patt
 MemoryPlanPass = importlib.import_module("kernel_gen.passes.memory_plan").MemoryPlanPass
 MemoryPoolPass = importlib.import_module("kernel_gen.passes.memory_pool").MemoryPoolPass
 HoistDmaAliasOpsPass = importlib.import_module("kernel_gen.passes.hoist_dma_alias_ops").HoistDmaAliasOpsPass
+DmaAliasToReinterpretPass = importlib.import_module(
+    "kernel_gen.passes.dma_alias_to_reinterpret"
+).DmaAliasToReinterpretPass
 NnLoweringPass = importlib.import_module("kernel_gen.passes.lowering").NnLoweringPass
 OutlineDeviceKernelPass = importlib.import_module("kernel_gen.passes.outline_device_kernel").OutlineDeviceKernelPass
 ProducerConsumerAnalysisPass = importlib.import_module(
@@ -161,6 +164,22 @@ def _record_lower(self, ctx: Context, target: ModuleOp) -> None:
     _ = ctx
     _ = target
     _PIPELINE_PASS_ORDER.append("lower-nn")
+
+
+def _record_dma_alias_to_reinterpret(self, ctx: Context, target: ModuleOp) -> None:
+    """记录 dma-alias-to-reinterpret pass 执行。
+
+    功能说明:
+    - 为 pipeline 顺序测试记录 `DmaAliasToReinterpretPass.apply(...)` 被调用。
+
+    使用示例:
+    - monkeypatch.setattr(DmaAliasToReinterpretPass, "apply", _record_dma_alias_to_reinterpret)
+    """
+
+    _ = self
+    _ = ctx
+    _ = target
+    _PIPELINE_PASS_ORDER.append("dma-alias-to-reinterpret")
 
 
 def _record_symbol_loop_hoist(self, ctx: Context, target: ModuleOp) -> None:
@@ -513,6 +532,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(CanonicalizePass, "apply", _record_canonicalize)
     monkeypatch.setattr(DecompassPass, "apply", _record_decompose)
     monkeypatch.setattr(NnLoweringPass, "apply", _record_lower)
+    monkeypatch.setattr(DmaAliasToReinterpretPass, "apply", _record_dma_alias_to_reinterpret)
     monkeypatch.setattr(SymbolLoopHoistPass, "apply", _record_symbol_loop_hoist)
     monkeypatch.setattr(HoistDmaAliasOpsPass, "apply", _record_hoist_dma_alias_ops)
     monkeypatch.setattr(MemoryPlanPass, "apply", _record_memory_plan)
@@ -536,6 +556,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "canonicalize",
         "decompass",
         "lower-nn",
+        "dma-alias-to-reinterpret",
         "symbol-loop-hoist",
         "hoist-dma-alias-ops",
         "cse",
@@ -598,6 +619,7 @@ def test_npu_demo_lowering_pipeline_arch_parallelize_propagates_unsupported_stru
     monkeypatch.setattr(CanonicalizePass, "apply", _noop_pass_apply)
     monkeypatch.setattr(DecompassPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(NnLoweringPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(DmaAliasToReinterpretPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(SymbolLoopHoistPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(HoistDmaAliasOpsPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(MemoryPlanPass, "apply", _noop_pass_apply)
@@ -644,6 +666,7 @@ def test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_blo
     monkeypatch.setattr(CanonicalizePass, "apply", _noop_pass_apply)
     monkeypatch.setattr(DecompassPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(NnLoweringPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(DmaAliasToReinterpretPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(SymbolLoopHoistPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(HoistDmaAliasOpsPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(MemoryPlanPass, "apply", _noop_pass_apply)
@@ -703,6 +726,7 @@ def test_npu_demo_lowering_pipeline_arch_parallelize_skips_entry_point_dispatche
     monkeypatch.setattr(CanonicalizePass, "apply", _noop_pass_apply)
     monkeypatch.setattr(DecompassPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(NnLoweringPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(DmaAliasToReinterpretPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(SymbolLoopHoistPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(HoistDmaAliasOpsPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(MemoryPlanPass, "apply", _noop_pass_apply)
@@ -780,8 +804,7 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     assert "dma.free" in second_memory_plan_text
     assert memory_pool_text.startswith("memory-pool\n")
     assert "arch.get_dynamic_memory" in memory_pool_text
-    assert "dma.view" in memory_pool_text
-    assert "dma.reshape" in memory_pool_text
+    assert "dma.reinterpret" in memory_pool_text
     assert "dma.alloc" not in memory_pool_text
     assert "dma.free" not in memory_pool_text
     assert second_buffer_hoist_text.startswith("symbol-buffer-hoist\n")
@@ -798,29 +821,30 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     assert _dump_stage_index(tmp_path, "cse", occurrence=2) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=2)
     assert _dump_stage_index(tmp_path, "cse", occurrence=3) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=3)
     assert markers.count("cse") == 3
-    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=1) == 11
-    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=1) == 12
-    assert _dump_stage_index(tmp_path, "tile-analysis") == 13
-    assert _dump_stage_index(tmp_path, "kernel-pattern-attach") == 14
-    assert _dump_stage_index(tmp_path, "transform-apply") == 15
-    assert _dump_stage_index(tmp_path, "symbol-loop-hoist", occurrence=2) == 16
-    assert _dump_stage_index(tmp_path, "hoist-dma-alias-ops", occurrence=2) == 17
-    assert _dump_stage_index(tmp_path, "cse", occurrence=3) == 18
-    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=3) == 19
-    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=2) == 20
-    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=2) == 21
-    assert _dump_stage_index(tmp_path, "memory-pool") == 22
-    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) == 23
-    assert _dump_stage_index(tmp_path, "arch-parallelize") == 24
-    assert _dump_stage_index(tmp_path, "producer-consumer-analysis") == 25
-    assert _dump_stage_index(tmp_path, "attach-arch-information") == 26
-    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 27
-    assert _dump_stage_index(tmp_path, "template-name-infer") == 28
+    assert _dump_stage_index(tmp_path, "dma-alias-to-reinterpret") == 7
+    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=1) == 12
+    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=1) == 13
+    assert _dump_stage_index(tmp_path, "tile-analysis") == 14
+    assert _dump_stage_index(tmp_path, "kernel-pattern-attach") == 15
+    assert _dump_stage_index(tmp_path, "transform-apply") == 16
+    assert _dump_stage_index(tmp_path, "symbol-loop-hoist", occurrence=2) == 17
+    assert _dump_stage_index(tmp_path, "hoist-dma-alias-ops", occurrence=2) == 18
+    assert _dump_stage_index(tmp_path, "cse", occurrence=3) == 19
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=3) == 20
+    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=2) == 21
+    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=2) == 22
+    assert _dump_stage_index(tmp_path, "memory-pool") == 23
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) == 24
+    assert _dump_stage_index(tmp_path, "arch-parallelize") == 25
+    assert _dump_stage_index(tmp_path, "producer-consumer-analysis") == 26
+    assert _dump_stage_index(tmp_path, "attach-arch-information") == 27
+    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 28
+    assert _dump_stage_index(tmp_path, "template-name-infer") == 29
     assert markers.count("attach-arch-information") == 1
     assert markers.count("hoist-dma-alias-ops") == 2
     assert "lower-dma-memory-hierarchy" not in markers
     assert "multi-buffer" not in markers
-    assert markers[13:21] == [
+    assert markers[14:22] == [
         "kernel-pattern-attach",
         "transform-apply",
         "symbol-loop-hoist",
@@ -830,7 +854,7 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
         "memory-plan",
         "symbol-buffer-hoist",
     ]
-    assert markers[21:26] == [
+    assert markers[22:27] == [
         "memory-pool",
         "canonicalize",
         "arch-parallelize",
@@ -874,8 +898,7 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
     assert "dma.advance_ring" not in transform_apply_text
     assert memory_pool_text.startswith("memory-pool\n")
     assert "arch.get_dynamic_memory" in memory_pool_text
-    assert "dma.view" in memory_pool_text
-    assert "dma.reshape" in memory_pool_text
+    assert "dma.reinterpret" in memory_pool_text
     assert "dma.make_ring" not in memory_pool_text
     assert "dma.current_ring" not in memory_pool_text
     assert "dma.advance_ring" not in memory_pool_text
@@ -945,8 +968,7 @@ def test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain(
     assert "template = T2" in module_text
     assert "template = T3" in module_text
     assert "arch.get_dynamic_memory" in module_text
-    assert "dma.view" in module_text
-    assert "dma.reshape" in module_text
+    assert "dma.reinterpret" in module_text
     assert "dma.alloc" not in module_text
     assert "allalloc" not in module_text
     assert "void matmul_kernel(" in source
@@ -963,4 +985,4 @@ def test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain(
     assert "(matmul_kernel_pattern1_device<" in source
     assert "arg0, arg1, arg2, arg3, arg4);" in source
     assert "get_dynamic_memory" in source
-    assert ".view<" in source or ".template view<" in source
+    assert "reinterpret_cast" in source

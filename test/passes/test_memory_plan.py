@@ -34,6 +34,7 @@ from kernel_gen.dialect.dma import (
     DmaBroadcastOp,
     DmaDesliceOp,
     DmaFreeOp,
+    DmaReinterpretOp,
     DmaReshapeOp,
     DmaSubviewOp,
     DmaViewOp,
@@ -413,6 +414,35 @@ def test_memory_plan_tracks_subview_alias() -> None:
     subview = DmaSubviewOp(alloc.result, zero.result, eight.result, one.result, result_type)
     broadcast = DmaBroadcastOp(subview.result, scalar.result)
     module = _module_with_ops("subview_alias", [zero, eight, one, scalar, alloc, subview, broadcast])
+
+    _apply_memory_plan(module)
+
+    body_ops = list(_function_body(module).ops)
+    free = next(op for op in body_ops if isinstance(op, DmaFreeOp))
+    assert _free_source_is(free, alloc.result)
+    assert body_ops.index(free) == body_ops.index(broadcast) + 1
+
+
+# TC-MPLAN-006C
+# 功能说明: 验证 reinterpret alias 的最后 use 决定 free 插入位置。
+# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_tracks_reinterpret_alias
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应测试文件路径: test/passes/test_memory_plan.py
+def test_memory_plan_tracks_reinterpret_alias() -> None:
+    mem_type = _memory_type(element_type=i32)
+    zero0, two, four, one = [_const(value) for value in (0, 2, 4, 1)]
+    scalar = _scalar_i32()
+    alloc = DmaAllocOp([], mem_type)
+    reinterpret = DmaReinterpretOp(
+        alloc.result,
+        zero0.result,
+        [two.result, four.result],
+        [four.result, one.result],
+        mem_type,
+    )
+    broadcast = DmaBroadcastOp(reinterpret.result, scalar.result)
+    module = _module_with_ops("reinterpret_alias", [zero0, two, four, one, scalar, alloc, reinterpret, broadcast])
 
     _apply_memory_plan(module)
 

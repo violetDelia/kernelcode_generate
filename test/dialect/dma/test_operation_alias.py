@@ -40,10 +40,12 @@ def test_dma_alias_ops_have_no_memory_effect() -> None:
     view = DmaViewOp(source, [zero, zero], [two, four], [one, one], memory_type)
     reshape = DmaReshapeOp(source, [two, four], memory_type)
     subview = DmaSubviewOp(pool, zero, four, one, _make_memory_type(shape=_dim_array([4]), stride=_dim_array([1])))
+    reinterpret = DmaReinterpretOp(source, zero, [two, four], [four, one], memory_type)
 
     assert get_effects(view) == set()
     assert get_effects(reshape) == set()
     assert get_effects(subview) == set()
+    assert get_effects(reinterpret) == set()
 
 def test_dma_view_numel_mismatch() -> None:
     source_type = _make_memory_type(shape=_dim_array([2, 4]))
@@ -479,6 +481,15 @@ def test_dma_rejects_non_symbol_int_scalar_operands() -> None:
         DmaReshapeOp(
             target,
             [index_operand, index_operand],
+            source_type,
+        ).verify()
+
+    with pytest.raises(VerifyException, match="offset entries must be !symbol.int or !symbol.iter"):
+        DmaReinterpretOp(
+            source,
+            index_operand,
+            _make_symbol_operands([2, 4]),
+            _make_symbol_operands([4, 1]),
             source_type,
         ).verify()
 

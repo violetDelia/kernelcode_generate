@@ -1244,6 +1244,7 @@ def test_load_builtin_passes_is_idempotent() -> None:
     assert "arch-parallelize" in list_registered_passes()
     assert "producer-consumer-analysis" in list_registered_passes()
     assert "hoist-dma-alias-ops" in list_registered_passes()
+    assert "dma-alias-to-reinterpret" in list_registered_passes()
     assert "kernel-pattern-attach" in list_registered_passes()
     assert "transform-apply" in list_registered_passes()
     assert "no-op-pipeline" in list_registered_pipelines()

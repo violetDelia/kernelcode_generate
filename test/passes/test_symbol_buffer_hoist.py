@@ -41,6 +41,7 @@ from kernel_gen.dialect.dma import (
     DmaDesliceOp,
     DmaFillOp,
     DmaFreeOp,
+    DmaReinterpretOp,
     DmaReshapeOp,
     DmaSliceOp,
     DmaSubviewOp,
@@ -337,6 +338,55 @@ def _build_view_with_free_module(*, loop_dependent_offset: bool = False) -> Modu
     loop = SymbolForOp(zero.result, end.result, tile.result, loop_block)
     top_block.add_ops([zero, one, tile, end, loop, func.ReturnOp()])
     func_op = func.FuncOp("view_free_case", FunctionType.from_lists([target_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_reinterpret_with_free_module() -> ModuleOp:
+    """构造 `dma.reinterpret` alias op 外提正例 module。
+
+
+    功能说明:
+    - alloc/free 成对外提后，loop-invariant `dma.reinterpret` 也应单独外提一层。
+    - 该用例锁定 reinterpret 被视为无副作用 alias source use。
+
+    使用示例:
+    - module = _build_reinterpret_with_free_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    target_type = _memory_type((16, 16))
+    tile_type = _memory_type((8, 8), space="shared")
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    tile = _const_symbol(8)
+    end = _const_symbol(16)
+    top_block = Block(arg_types=[target_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "16", "8")])
+    alloc = DmaAllocOp([], tile_type)
+    reinterpret = DmaReinterpretOp(
+        alloc.result,
+        zero.result,
+        [tile.result, tile.result],
+        [tile.result, one.result],
+        tile_type,
+    )
+    deslice = DmaDesliceOp(
+        top_block.args[0],
+        reinterpret.result,
+        [loop_block.args[0], zero.result],
+        [tile.result, tile.result],
+        [one.result, one.result],
+        target_type,
+    )
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([alloc, reinterpret, deslice, free])
+    loop = SymbolForOp(zero.result, end.result, tile.result, loop_block)
+    top_block.add_ops([zero, one, tile, end, loop, func.ReturnOp()])
+    func_op = func.FuncOp("reinterpret_free_case", FunctionType.from_lists([target_type], []), Region(top_block))
     return ModuleOp([func_op])
 
 
@@ -1381,7 +1431,7 @@ def test_symbol_buffer_hoist_public_patterns_are_reachable() -> None:
     patterns = get_symbol_buffer_hoist_patterns()
 
     assert package_module.SymbolBufferHoistPass is SymbolBufferHoistPass
-    assert len(patterns) == 4
+    assert len(patterns) == 5
     assert isinstance(patterns[0], DmaAllocInSymbolForHoistPattern)
     assert all(isinstance(pattern, RewritePattern) for pattern in patterns)
 
@@ -1521,6 +1571,31 @@ def test_symbol_buffer_hoist_hoists_loop_invariant_dma_view_one_layer() -> None:
     assert top_view.source is top_alloc.result
     assert deslice_op.source is top_view.result
     assert not any(isinstance(op, (DmaAllocOp, DmaViewOp, DmaFreeOp)) for op in loop_block.ops)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004B1A
+# 功能说明: 验证 loop-invariant dma.reinterpret 在 alloc/free 成对外提后继续单 op 外提一层。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_loop_invariant_dma_reinterpret_one_layer
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_loop_invariant_dma_reinterpret_one_layer() -> None:
+    module = _build_reinterpret_with_free_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_reinterpret = next(op for op in top_ops if isinstance(op, DmaReinterpretOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    deslice_op = next(op for op in loop_block.ops if isinstance(op, DmaDesliceOp))
+    loop_index = top_ops.index(loop_op)
+
+    assert top_ops.index(top_alloc) < top_ops.index(top_reinterpret) < loop_index < top_ops.index(top_free)
+    assert top_reinterpret.source is top_alloc.result
+    assert deslice_op.source is top_reinterpret.result
+    assert not any(isinstance(op, (DmaAllocOp, DmaReinterpretOp, DmaFreeOp)) for op in loop_block.ops)
 
 
 # TC-SYMBOL-BUFFER-HOIST-004B2

@@ -80,6 +80,7 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
         "dma.slice",
         "dma.deslice",
         "dma.view",
+        "dma.reinterpret",
         "nn.img2col2d",
     }:
         raise ctx.emit_error(op.name, "dma ops are cpu-only")

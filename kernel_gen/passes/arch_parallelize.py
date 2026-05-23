@@ -4,8 +4,8 @@
 功能说明:
 - 提供 standalone IR-level `arch-parallelize` pass。
 - 遍历 `builtin.module` 中非声明 `func.func`，跳过 `entry_point` host dispatcher，对未带 block 并行语义的其余函数执行 block 级分发。
-- 当前只支持 `parallel_level="block"`：单顶层 `symbol.for` 改写为 block-strided loop；无顶层 loop 时用 block0 guard 包裹原 body。
-- 唯一顶层 loop 前允许公开 symbol setup 以及 memory-pool 产生的 `arch.get_dynamic_memory` / `dma.view` / `dma.reshape` setup 前缀。
+- 当前只支持 `parallel_level="block"`：单顶层 `symbol.for` 改写为 block-strided loop；非入口函数无顶层 loop 时用 block0 guard 包裹原 body。
+- 唯一顶层 loop 前允许公开 symbol setup 以及 memory-pool 产生的 `arch.get_dynamic_memory` / `dma.reinterpret` setup 前缀，并保留旧 alias 前缀兼容。
 
 API 列表:
 - `class ArchParallelizePass(target: str = "npu_demo", parallel_level: str = "block")`
@@ -34,7 +34,7 @@ from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetBlockNumOp, ArchGetDynamicMemoryOp
-from kernel_gen.dialect.dma import DmaReshapeOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaReinterpretOp, DmaReshapeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
@@ -76,6 +76,7 @@ _MEMORY_POOL_SETUP_OPS = (
     ArchGetDynamicMemoryOp,
     DmaViewOp,
     DmaReshapeOp,
+    DmaReinterpretOp,
 )
 _UNKNOWN_SYMBOL_EXPR = "?"
 
@@ -271,7 +272,7 @@ def _is_allowed_loop_prefix_setup_op(op: Operation) -> bool:
 
     功能说明:
     - 放行公开 symbol dialect 的无副作用边界构造 op。
-    - 放行 memory-pool 生成的 `arch.get_dynamic_memory`、`dma.view` 与 `dma.reshape`。
+    - 放行 memory-pool 生成的 `arch.get_dynamic_memory`、`dma.view`、`dma.reshape` 与 `dma.reinterpret`。
 
     使用示例:
     - if _is_allowed_loop_prefix_setup_op(op): ...

@@ -7,6 +7,7 @@
   owner block 中单块 `scf.if` 分支内的 use 会映射到 `scf.if` 后统一释放。
 - `scf.if` 分支内新建 `dma.alloc` 仍按 unsupported control flow 拒绝。
 - 通过当前文件内 helper 计算 alias closure，不依赖 `memory_pool` 或其它 pass 私有实现。
+- `dma.reinterpret` 与 `dma.view` / `dma.reshape` / `dma.subview` 一样只产生 source alias。
 
 API 列表:
 - `class MemoryPlanPass(insert_free: bool = False, fold: bool = True)`
@@ -40,6 +41,7 @@ from kernel_gen.dialect.dma import (
     DmaAllocOp,
     DmaDesliceOp,
     DmaFreeOp,
+    DmaReinterpretOp,
     DmaReshapeOp,
     DmaSubviewOp,
     DmaViewOp,
@@ -232,7 +234,7 @@ def _alias_result_from_source(op: Operation, source: SSAValue) -> SSAValue | Non
     """识别单个 source value 产生的新 alias result。
 
     功能说明:
-    - `dma.view`、`dma.reshape`、`dma.subview` 的 result alias source。
+    - `dma.view`、`dma.reshape`、`dma.subview`、`dma.reinterpret` 的 result alias source。
     - `dma.deslice` 的 result alias target，不 alias source。
 
     使用示例:
@@ -244,6 +246,8 @@ def _alias_result_from_source(op: Operation, source: SSAValue) -> SSAValue | Non
     if isinstance(op, DmaReshapeOp) and _same_value(op.source, source):
         return op.result
     if isinstance(op, DmaSubviewOp) and any(_same_value(operand, source) for operand in op.source):
+        return op.result
+    if isinstance(op, DmaReinterpretOp) and _same_value(op.source, source):
         return op.result
     if isinstance(op, DmaDesliceOp) and _same_value(op.target, source):
         return op.result

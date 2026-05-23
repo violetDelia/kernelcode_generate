@@ -74,6 +74,7 @@ from kernel_gen.dialect.dma import (
     DmaDesliceOp,
     DmaLoadOp,
     DmaMakeRingOp,
+    DmaReinterpretOp,
     DmaRingType,
     DmaReshapeOp,
     DmaSliceOp,

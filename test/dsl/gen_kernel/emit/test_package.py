@@ -41,7 +41,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.core.config import reset_config, set_target
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaFreeOp, DmaLoadOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaTransposeOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaFreeOp, DmaLoadOp, DmaReinterpretOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaTransposeOp, DmaViewOp
 from kernel_gen.dialect.kernel import (
     KernelBinaryElewiseOp,
     KernelExpOp,
@@ -2259,6 +2259,47 @@ def test_emit_c_op_lowers_dma_alloc_and_view() -> None:
         "Memory<GM, float> source_1 = "
         "source.view<float>(Vector{1, 0} /*offset*/, Vector{2, 3} /*size*/, Vector{1, 1} /*stride*/);"
     )
+
+    pool_type = _make_memory_type([128], [1], space="shared", element_type=i8)
+    reinterpret_type = _make_memory_type([2, 3], [3, 1], space="shared", element_type=f32)
+    reinterpret_block = Block(arg_types=[pool_type])
+    reinterpret_ctx = _ctx()
+    reinterpret_ctx.bind_name(reinterpret_block.args[0], "pool")
+    offset = arith.ConstantOp(IntegerAttr(8, i32))
+    cpu_reinterpret = DmaReinterpretOp(
+        reinterpret_block.args[0],
+        offset.result,
+        [c2.result, npu_c3.result],
+        [npu_c3.result, c1.result],
+        reinterpret_type,
+    )
+
+    cpu_reinterpret_stmt = emit_c_op(cpu_reinterpret, reinterpret_ctx)
+
+    assert "long long v0_shape[2] = {2, 3};" in cpu_reinterpret_stmt
+    assert "long long v0_stride[2] = {3, 1};" in cpu_reinterpret_stmt
+    assert "Memory<SM, float> v0(reinterpret_cast<float*>(const_cast<int8_t*>(pool.data()) + 8)" in cpu_reinterpret_stmt
+    assert "pool.format()" in cpu_reinterpret_stmt
+
+    npu_pool_type = _make_memory_type([128], [1], space="tsm", element_type=i8)
+    npu_reinterpret_type = _make_memory_type([2, 3], [3, 1], space="tsm", element_type=f32)
+    npu_reinterpret_block = Block(arg_types=[npu_pool_type])
+    npu_reinterpret_ctx = _npu_ctx()
+    npu_reinterpret_ctx.bind_name(npu_reinterpret_block.args[0], "pool")
+    npu_reinterpret = DmaReinterpretOp(
+        npu_reinterpret_block.args[0],
+        offset.result,
+        [c2.result, npu_c3.result],
+        [npu_c3.result, c1.result],
+        npu_reinterpret_type,
+    )
+
+    npu_reinterpret_stmt = emit_c_op(npu_reinterpret, npu_reinterpret_ctx)
+
+    assert "long long v0_shape[2] = {2, 3};" in npu_reinterpret_stmt
+    assert "long long v0_stride[2] = {3, 1};" in npu_reinterpret_stmt
+    assert "Memory<TSM, float> v0(reinterpret_cast<float*>(const_cast<int8_t*>(pool.data()) + 8)" in npu_reinterpret_stmt
+    assert "pool.format()" in npu_reinterpret_stmt
 
 
 # EC-010

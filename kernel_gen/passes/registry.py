@@ -12,6 +12,8 @@
   registry 只解析通用 `fold`。
 - 内置 pass 包含 `hoist-dma-alias-ops`，其第一阶段不接受 pass 专属 option，
   registry 只解析通用 `fold`。
+- 内置 pass 包含 `dma-alias-to-reinterpret`，用于把旧 DMA alias op 归一为 `dma.reinterpret`，
+  registry 只解析通用 `fold`。
 - 内置 pass 包含 `kernel-pattern-attach` 与 `transform-apply`，用于 npu-demo lowering
   生成 pattern dispatcher 并消费 pattern transform pipeline。
 - 文件内 helper 收口为 `_register_registry_entry`、`_build_registered_pass_instance`、
@@ -502,6 +504,7 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.arch_parallelize import ArchParallelizePass
     from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
     from kernel_gen.passes.decompass import DecompassPass
+    from kernel_gen.passes.dma_alias_to_reinterpret import DmaAliasToReinterpretPass
     from kernel_gen.passes.inline import InlinePass
     from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
     from kernel_gen.passes.hoist_dma_alias_ops import HoistDmaAliasOpsPass
@@ -526,6 +529,7 @@ def load_builtin_passes() -> None:
         CommonSubexpressionElimination,
         InlinePass,
         DecompassPass,
+        DmaAliasToReinterpretPass,
         NnLoweringPass,
         ArchParallelizePass,
         BufferResultsToOutParamsPass,

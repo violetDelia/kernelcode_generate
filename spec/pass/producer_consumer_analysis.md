@@ -23,7 +23,7 @@
 ## 依赖
 
 - `xdsl.traits.get_effects(op)`：读取公开 `MemoryEffect`。
-- `spec/dialect/dma.md`：定义 `dma.alloc/free/copy/load/store/slice/deslice/view/reshape/subview` 等 op 的公开 effect 与 alias 语义。
+- `spec/dialect/dma.md`：定义 `dma.alloc/free/copy/load/store/slice/deslice/view/reshape/subview/reinterpret` 等 op 的公开 effect 与 alias 语义。
 - `spec/dialect/kernel.md`：定义 kernel op 对 out/input memory 的公开 read/write effect。
 - `spec/pass/registry.md`：承载 registry 名称和 `fold` 通用 option。
 - `spec/pass/pipeline/npu_demo_lowering.md`：承载默认 pipeline 接入位置。
@@ -72,6 +72,7 @@
 | `dma.view(source) -> result` | `result` alias `source`；不生产、不消费。 |
 | `dma.reshape(source) -> result` | `result` alias `source`；不生产、不消费。 |
 | `dma.subview(source) -> result` | `result` alias `source`；不生产、不消费。 |
+| `dma.reinterpret(source) -> result` | `result` alias `source`；不生产、不消费。 |
 | `dma.deslice(target, source, ...) -> result` | 通过 effect 消费 `source`、生产 `target`，且 `result` alias `target`。 |
 
 ## API详细说明
@@ -157,7 +158,7 @@ ProducerConsumerAnalysisPass().apply(ctx, module)
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-PRODUCER-CONSUMER-001 | MemoryEffect | `dma.copy -> dma.copy` | 准备合法 `!nn.memory` IR。 | 运行 pass。 | producer 写 `productor=[0]`，consumer 写 `consumer=[0]`。 | `test_producer_consumer_analysis_basic_memory_effect_chain` |
-| TC-PRODUCER-CONSUMER-002 | alias | `copy -> view -> matmul -> deslice -> copy` | 准备 `dma.view` 与 `dma.deslice` 链。 | 运行 pass。 | view 不标注，deslice 同时 consumer/productor，result alias target。 | `test_producer_consumer_analysis_alias_and_deslice_chain` |
+| TC-PRODUCER-CONSUMER-002 | alias | `copy -> view/reinterpret -> matmul -> deslice -> copy` | 准备 `dma.view`、`dma.reinterpret` 与 `dma.deslice` 链。 | 运行 pass。 | view/reinterpret 不标注，deslice 同时 consumer/productor，result alias target。 | `test_producer_consumer_analysis_alias_and_deslice_chain` |
 | TC-PRODUCER-CONSUMER-003 | fanout | 同一 producer 有两个 user | 准备同一路径 fanout IR。 | 运行 pass。 | producer 标多个 event，consumer 分别消费。 | `test_producer_consumer_analysis_fanout_alloc_and_duplicate_read` |
 | TC-PRODUCER-CONSUMER-004 | control-flow | `scf.if` incoming 与 after-if edge | 准备 then/else 与 if 后 consumer IR。 | 运行 pass。 | 控制流 edge 只写 `if_branch_*` / `after_if_*` 分类 attr，不叠写主 attr。 | `test_producer_consumer_analysis_if_branch_and_after_if_edges` |
 | TC-PRODUCER-CONSUMER-005 | control-flow | `scf.if` 同分支内部 fanout | 准备分支内 producer 后接两个 downstream consumer 的 IR。 | 运行 pass。 | 同分支内部普通顺序 edge 写主 attr，producer 标两个 event，两个 consumer 分别消费不同 event，不写 `if_branch_*`。 | `test_producer_consumer_analysis_if_branch_internal_fanout_uses_distinct_events` |

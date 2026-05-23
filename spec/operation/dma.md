@@ -76,6 +76,8 @@ reshape/flatten -> 仅改 shape/stride 元信息，不做搬运
 store/deslice -> 把 source 写回 target 指定窗口
 ```
 
+补充：operation 层不新增 `reinterpret(...)` 高层 helper；统一 alias op `dma.reinterpret` 是方言 / pass 层合法化目标，由 `dma-alias-to-reinterpret` pass 将 `view/reshape/subview` 归一化生成，或由 `memory-pool` rewrite 直接生成。高层公开 API 与本文件 `API 列表` 保持不变。
+
 ### 越界规则索引
 
 | helper | 核对对象 | 统一规则 |
@@ -94,6 +96,7 @@ store/deslice -> 把 source 写回 target 指定窗口
 - 本文件只定义 operation 层高层 API，不负责真实 DMA 硬件调度、带宽估算、异步执行、同步原语或 tile 策略选择。
 - 本文件不负责逐元素算术、比较、归约、隐式 broadcast 或隐式 dtype 转换；显式广播必须通过 `broadcast(target, source)` 描述，元素表示变化必须通过显式 `cast` 描述。
 - operation 到 dialect 的具体映射由 [`spec/dialect/dma.md`](../../spec/dialect/dma.md) 定义。
+- `dma.reinterpret` 属于 dialect / pass 层统一 alias 目标，不新增 operation 层公开函数、参数或顶层 re-export。
 - `kernel_gen.operation.dma` 是 dma family 的完整稳定入口；`kernel_gen.operation` 顶层稳定重导出除 `fill` 与 `broadcast` 外的 dma helper。
 - `fill` 与 `broadcast` 当前只属于 `kernel_gen.operation.dma` 子模块公开 API，不属于 `kernel_gen.operation` 顶层稳定导出集合。
 

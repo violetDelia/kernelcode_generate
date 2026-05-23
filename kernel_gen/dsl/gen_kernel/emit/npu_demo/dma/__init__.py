@@ -17,4 +17,4 @@ API 列表:
 - 功能实现: kernel_gen/dsl/gen_kernel/emit/npu_demo/dma/__init__.py
 """
 
-from . import alloc, broadcast, cast, copy, deslice, fill, free, load, reshape, ring, slice, store, transpose, view  # noqa: F401
+from . import alloc, broadcast, cast, copy, deslice, fill, free, load, reinterpret, reshape, ring, slice, store, transpose, view  # noqa: F401
