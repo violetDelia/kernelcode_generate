@@ -36,7 +36,7 @@ from xdsl.dialects.builtin import ModuleOp
 from kernel_gen.core.config import restore_config, set_dump_dir, set_target, snapshot_config
 from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
 from kernel_gen.dsl.ast.mlir_gen import mlir_gen
-from kernel_gen.passes.pipeline import build_npu_demo_lowering_pipeline
+from kernel_gen.pipeline import build_npu_demo_lowering_pipeline
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.tools.dsl_run import DslRunResult, dsl_run

@@ -37,6 +37,7 @@ from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
     DmaBroadcastOp,
+    DmaCopyOp,
     DmaDesliceOp,
     DmaFillOp,
     DmaFreeOp,
@@ -929,6 +930,42 @@ def _build_kernel_lifecycle_read_before_write_module() -> ModuleOp:
     return ModuleOp([func_op])
 
 
+def _build_unknown_call_use_module() -> ModuleOp:
+    """构造 alloc result 逃逸到未知 call 的反例 module。
+
+
+    功能说明:
+    - loop 内 alloc 先被 `dma.fill` reset，再作为 `func.call` operand 传出。
+    - `func.call` 没有本 pass 可判定的公开 MemoryEffect，必须阻止 alloc/free 外提。
+
+    使用示例:
+    - module = _build_unknown_call_use_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    tile_type = _memory_type((4, 4))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    top_block = Block(arg_types=[])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([], tile_type)
+    fill = DmaFillOp(alloc.result, zero.result)
+    call = func.CallOp("consume", [alloc.result], [])
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([alloc, fill, call, free])
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, loop, func.ReturnOp()])
+    func_op = func.FuncOp("unknown_call_use_case", FunctionType.from_lists([], []), Region(top_block))
+    consume_block = Block(arg_types=[tile_type])
+    consume_block.add_op(func.ReturnOp())
+    consume_op = func.FuncOp("consume", FunctionType.from_lists([tile_type], []), Region(consume_block))
+    return ModuleOp([func_op, consume_op])
+
+
 def _build_nested_alias_kernel_use_module() -> ModuleOp:
     """构造 nested loop 内 alias result 流向 kernel op 的正例 module。
 
@@ -1075,6 +1112,221 @@ def _build_invalid_verify_module() -> ModuleOp:
     )
     top_block.add_ops([zero, one, init, tk, loop, func.ReturnOp()])
     func_op = func.FuncOp("invalid_verify_case", FunctionType.from_lists([source_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_fixed_point_alloc_free_fill_module(*, dynamic_shape: bool) -> ModuleOp:
+    """构造 nested alloc/free fixed-point 外提正例 module。
+
+
+    功能说明:
+    - alloc/free 位于三层 `symbol.for` 最内层，`dma.fill` 对完整 alloc root 写入。
+    - `dynamic_shape=True` 时 alloc shape 来自函数参数，验证动态 shape 也能逐层外提。
+
+    使用示例:
+    - module = _build_fixed_point_alloc_free_fill_module(dynamic_shape=True)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    four = _const_symbol(4)
+    if dynamic_shape:
+        tile_type = _memory_type(("M", "N"))
+        input_types = [SymbolValueType.from_expr("M"), SymbolValueType.from_expr("N")]
+        top_block = Block(arg_types=input_types)
+        dynamic_shape_operands = [top_block.args[0], top_block.args[1]]
+    else:
+        tile_type = _memory_type((4, 4))
+        input_types = []
+        top_block = Block()
+        dynamic_shape_operands = []
+
+    outer_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    middle_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    inner_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp(dynamic_shape_operands, tile_type)
+    fill = DmaFillOp(alloc.result, zero.result)
+    free = DmaFreeOp(alloc.result)
+    inner_block.add_ops([alloc, fill, free])
+    inner_loop = SymbolForOp(zero.result, one.result, one.result, inner_block)
+    middle_block.add_op(inner_loop)
+    middle_loop = SymbolForOp(zero.result, one.result, one.result, middle_block)
+    outer_block.add_op(middle_loop)
+    outer_loop = SymbolForOp(zero.result, one.result, one.result, outer_block)
+    top_block.add_ops([zero, one, four, outer_loop, func.ReturnOp()])
+    func_op = func.FuncOp("fixed_point_alloc_free_fill_case", FunctionType.from_lists(input_types, []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_nested_acc_fill_before_read_module() -> ModuleOp:
+    """构造 owner block fill 支配 nested kernel read 的 acc buffer 正例。
+
+
+    功能说明:
+    - owner loop 内 alloc 先被 `dma.fill` 完整 reset，再进入 nested loop 被 kernel read/write。
+    - matching free 位于 owner loop body 末尾，应允许 alloc/free 外提到 owner loop 外。
+
+    使用示例:
+    - module = _build_nested_acc_fill_before_read_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    tile_type = _memory_type((4, 4))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    top_block = Block(arg_types=[tile_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    inner_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([], tile_type)
+    fill = DmaFillOp(alloc.result, zero.result)
+    kernel_use = KernelBinaryElewiseOp(
+        alloc.result,
+        alloc.result,
+        top_block.args[0],
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("global"),
+    )
+    inner_block.add_op(kernel_use)
+    inner_loop = SymbolForOp(zero.result, one.result, one.result, inner_block)
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([alloc, fill, inner_loop, free])
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, loop, func.ReturnOp()])
+    func_op = func.FuncOp("nested_acc_fill_before_read_case", FunctionType.from_lists([tile_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_nested_deslice_source_module(*, with_reset: bool) -> ModuleOp:
+    """构造 nested `dma.deslice source` 生命周期正反例。
+
+
+    功能说明:
+    - `with_reset=False` 时 nested `dma.deslice` 直接读取 alloc，缺少 full reset/write，必须 no-op。
+    - `with_reset=True` 时 owner block 内 `dma.fill` 支配 nested deslice READ，alloc/free 可外提。
+
+    使用示例:
+    - module = _build_nested_deslice_source_module(with_reset=True)
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    tile_type = _memory_type((4, 4))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    four = _const_symbol(4)
+    top_block = Block(arg_types=[tile_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    inner_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([], tile_type)
+    fill = DmaFillOp(alloc.result, zero.result)
+    deslice = DmaDesliceOp(
+        top_block.args[0],
+        alloc.result,
+        [zero.result, zero.result],
+        [four.result, four.result],
+        [one.result, one.result],
+        tile_type,
+    )
+    inner_block.add_op(deslice)
+    inner_loop = SymbolForOp(zero.result, one.result, one.result, inner_block)
+    free = DmaFreeOp(alloc.result)
+    if with_reset:
+        loop_block.add_ops([alloc, fill, inner_loop, free])
+    else:
+        loop_block.add_ops([alloc, inner_loop, free])
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, four, loop, func.ReturnOp()])
+    func_op = func.FuncOp("nested_deslice_source_case", FunctionType.from_lists([tile_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_nested_write_may_not_run_module() -> ModuleOp:
+    """构造 nested loop write 可能不执行但后续 read 的反例 module。
+
+
+    功能说明:
+    - nested loop end 为 0，`dma.fill` 不支配 owner loop body 内后续 kernel read。
+    - `symbol-buffer-hoist` 必须保持 alloc/free 原位，避免跨迭代共享未初始化 scratch。
+
+    使用示例:
+    - module = _build_nested_write_may_not_run_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    tile_type = _memory_type((4, 4))
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    top_block = Block(arg_types=[tile_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    inner_block = Block(arg_types=[SymbolIterType.from_bounds("0", "0", "1")])
+    alloc = DmaAllocOp([], tile_type)
+    fill = DmaFillOp(alloc.result, zero.result)
+    inner_block.add_op(fill)
+    inner_loop = SymbolForOp(zero.result, zero.result, one.result, inner_block)
+    kernel_use = KernelBinaryElewiseOp(
+        top_block.args[0],
+        alloc.result,
+        top_block.args[0],
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("global"),
+    )
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([alloc, inner_loop, kernel_use, free])
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, loop, func.ReturnOp()])
+    func_op = func.FuncOp("nested_write_may_not_run_case", FunctionType.from_lists([tile_type], []), Region(top_block))
+    return ModuleOp([func_op])
+
+
+def _build_partial_subview_write_before_root_read_module() -> ModuleOp:
+    """构造 partial alias write 后 root read 的反例 module。
+
+
+    功能说明:
+    - `dma.subview` 只覆盖 byte pool 的局部 typed view。
+    - 后续 `dma.copy` 读取完整 root pool，partial write 不能证明 root 已完整 reset。
+
+    使用示例:
+    - module = _build_partial_subview_write_before_root_read_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    pool_type = _memory_type((1024,), element_type=i8, space="shared")
+    tile_type = _memory_type((16,), space="shared")
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    sixteen = _const_symbol(16)
+    top_block = Block(arg_types=[pool_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([], pool_type)
+    subview = DmaSubviewOp(alloc.result, zero.result, sixteen.result, one.result, tile_type)
+    fill = DmaFillOp(subview.result, zero.result)
+    copy = DmaCopyOp(top_block.args[0], alloc.result)
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([alloc, subview, fill, copy, free])
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, sixteen, loop, func.ReturnOp()])
+    func_op = func.FuncOp("partial_subview_write_before_root_read_case", FunctionType.from_lists([pool_type], []), Region(top_block))
     return ModuleOp([func_op])
 
 
@@ -1703,6 +1955,218 @@ def test_symbol_buffer_hoist_hoists_nested_alias_result_used_by_kernel_op() -> N
     assert not any(isinstance(op, DmaReshapeOp) for op in outer_block.ops)
     assert not any(isinstance(op, DmaReshapeOp) for op in inner_block.ops)
     assert matmul.lhs is top_reshape.result
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H4
+# 功能说明: 验证静态 nested alloc/free 经 fixed-point 逐层外提到最外层 loop 外。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_alloc_free_fixed_point_nested_loop_static
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_alloc_free_fixed_point_nested_loop_static() -> None:
+    module = _build_fixed_point_alloc_free_fill_module(dynamic_shape=False)
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, outer_loop, outer_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    middle_loop = next(op for op in outer_block.ops if isinstance(op, SymbolForOp))
+    middle_block = middle_loop.body.blocks[0]
+    inner_loop = next(op for op in middle_block.ops if isinstance(op, SymbolForOp))
+    inner_block = inner_loop.body.blocks[0]
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    fill = next(op for op in inner_block.ops if isinstance(op, DmaFillOp))
+
+    assert top_ops.index(top_alloc) < top_ops.index(outer_loop) < top_ops.index(top_free)
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in outer_block.ops)
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in middle_block.ops)
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in inner_block.ops)
+    assert fill.target is top_alloc.result
+    assert _free_source_is(top_free, top_alloc.result)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H5
+# 功能说明: 验证动态 shape nested alloc/free 也能经 fixed-point 逐层外提。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_alloc_free_fixed_point_nested_loop_dynamic
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_alloc_free_fixed_point_nested_loop_dynamic() -> None:
+    module = _build_fixed_point_alloc_free_fill_module(dynamic_shape=True)
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, outer_loop, outer_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    middle_loop = next(op for op in outer_block.ops if isinstance(op, SymbolForOp))
+    inner_loop = next(op for op in middle_loop.body.blocks[0].ops if isinstance(op, SymbolForOp))
+    inner_block = inner_loop.body.blocks[0]
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    fill = next(op for op in inner_block.ops if isinstance(op, DmaFillOp))
+
+    assert top_ops.index(top_alloc) < top_ops.index(outer_loop) < top_ops.index(top_free)
+    assert list(top_alloc.dynamic_shape) == [top_block.args[0], top_block.args[1]]
+    assert fill.target is top_alloc.result
+    assert _free_source_is(top_free, top_alloc.result)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H6
+# 功能说明: 验证 owner block fill 支配 nested kernel read 时 acc buffer 可外提。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_acc_buffer_hoists_when_fill_dominates_reads
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_acc_buffer_hoists_when_fill_dominates_reads() -> None:
+    module = _build_nested_acc_fill_before_read_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    inner_loop = next(op for op in loop_block.ops if isinstance(op, SymbolForOp))
+    inner_block = inner_loop.body.blocks[0]
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    fill = next(op for op in loop_block.ops if isinstance(op, DmaFillOp))
+    kernel_use = next(op for op in inner_block.ops if isinstance(op, KernelBinaryElewiseOp))
+
+    assert top_ops.index(top_alloc) < top_ops.index(loop_op) < top_ops.index(top_free)
+    assert fill.target is top_alloc.result
+    assert kernel_use.out is top_alloc.result
+    assert kernel_use.lhs is top_alloc.result
+    assert _free_source_is(top_free, top_alloc.result)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H6A
+# 功能说明: 验证 nested dma.deslice source 无 reset/write 时不能绕过 lifecycle proof。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_nested_deslice_source_without_reset
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_nested_deslice_source_without_reset() -> None:
+    module = _build_nested_deslice_source_module(with_reset=False)
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, _loop_op, loop_block = _get_blocks(module)
+    inner_loop = next(op for op in loop_block.ops if isinstance(op, SymbolForOp))
+    inner_block = inner_loop.body.blocks[0]
+    alloc = next(op for op in loop_block.ops if isinstance(op, DmaAllocOp))
+    deslice = next(op for op in inner_block.ops if isinstance(op, DmaDesliceOp))
+
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in top_block.ops)
+    assert deslice.source is alloc.result
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H6B
+# 功能说明: 验证 owner block reset 支配 nested dma.deslice source READ 时允许外提。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_nested_deslice_source_after_reset
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_nested_deslice_source_after_reset() -> None:
+    module = _build_nested_deslice_source_module(with_reset=True)
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    inner_loop = next(op for op in loop_block.ops if isinstance(op, SymbolForOp))
+    inner_block = inner_loop.body.blocks[0]
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    fill = next(op for op in loop_block.ops if isinstance(op, DmaFillOp))
+    deslice = next(op for op in inner_block.ops if isinstance(op, DmaDesliceOp))
+
+    assert top_ops.index(top_alloc) < top_ops.index(loop_op) < top_ops.index(top_free)
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in loop_block.ops)
+    assert fill.target is top_alloc.result
+    assert deslice.source is top_alloc.result
+    assert _free_source_is(top_free, top_alloc.result)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H6C
+# 功能说明: 验证 alloc result 传给未知 call 时 alloc/free 保持在 loop 内。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_unknown_call_uses_buffer
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_alloc_when_unknown_call_uses_buffer() -> None:
+    module = _build_unknown_call_use_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, _loop_op, loop_block = _get_blocks(module)
+    alloc = next(op for op in loop_block.ops if isinstance(op, DmaAllocOp))
+    call = next(op for op in loop_block.ops if isinstance(op, func.CallOp))
+    free = next(op for op in loop_block.ops if isinstance(op, DmaFreeOp))
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in top_block.ops)
+    assert call.operands[0] is alloc.result
+    assert _free_source_is(free, alloc.result)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H7
+# 功能说明: 验证分支内 write 不支配 merge read，alloc/free 保持原位。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_branch_write_misses_merge_path
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_alloc_when_branch_write_misses_merge_path() -> None:
+    module = _build_conditional_write_module(read_in_branch=False)
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, _loop_op, loop_block = _get_blocks(module)
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in top_block.ops)
+    assert any(isinstance(op, DmaAllocOp) for op in loop_block.ops)
+    assert any(isinstance(op, DmaFreeOp) for op in loop_block.ops)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H8
+# 功能说明: 验证 nested loop write 可能不执行时不能证明后续 owner-block read。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_nested_loop_write_may_not_run
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_alloc_when_nested_loop_write_may_not_run() -> None:
+    module = _build_nested_write_may_not_run_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, _loop_op, loop_block = _get_blocks(module)
+    nested_loop = next(op for op in loop_block.ops if isinstance(op, SymbolForOp))
+    nested_block = nested_loop.body.blocks[0]
+    kernel_use = next(op for op in loop_block.ops if isinstance(op, KernelBinaryElewiseOp))
+    alloc = next(op for op in loop_block.ops if isinstance(op, DmaAllocOp))
+
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in top_block.ops)
+    assert any(isinstance(op, DmaFillOp) for op in nested_block.ops)
+    assert kernel_use.lhs is alloc.result
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H9
+# 功能说明: 验证 partial subview write 不能证明完整 root read 已 reset。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_partial_write_precedes_full_read
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_keeps_alloc_when_partial_write_precedes_full_read() -> None:
+    module = _build_partial_subview_write_before_root_read_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, _loop_op, loop_block = _get_blocks(module)
+    alloc = next(op for op in loop_block.ops if isinstance(op, DmaAllocOp))
+    subview = next(op for op in loop_block.ops if isinstance(op, DmaSubviewOp))
+    fill = next(op for op in loop_block.ops if isinstance(op, DmaFillOp))
+    copy = next(op for op in loop_block.ops if isinstance(op, DmaCopyOp))
+
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in top_block.ops)
+    assert subview.source[0] is alloc.result
+    assert fill.target is subview.result
+    assert copy.source is alloc.result
 
 
 # TC-SYMBOL-BUFFER-HOIST-005
