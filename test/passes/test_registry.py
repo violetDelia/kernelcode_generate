@@ -1179,6 +1179,54 @@ def test_build_registered_npu_demo_lowering_pipeline() -> None:
     assert pm.name == "npu-demo-lowering"
 
 
+# TC-REGISTRY-007L
+# 功能说明: 验证 kernel-pattern-attach 与 transform-apply 内置 pass 可通过 registry 稳定构造。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_kernel_pattern_passes
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_kernel_pattern_passes() -> None:
+    load_builtin_passes()
+
+    kernel_pattern_pass = build_registered_pass("kernel-pattern-attach", {"fold": "false"})
+    transform_apply_pass = build_registered_pass("transform-apply", {"fold": "false"})
+
+    assert kernel_pattern_pass.name == "kernel-pattern-attach"
+    assert kernel_pattern_pass.__class__.__module__ == "kernel_gen.passes.kernel_pattern_attach"
+    assert transform_apply_pass.name == "transform-apply"
+    assert transform_apply_pass.__class__.__module__ == "kernel_gen.passes.transform_apply"
+    assert "kernel-pattern-attach" in list_registered_passes()
+    assert "transform-apply" in list_registered_passes()
+
+
+# TC-REGISTRY-007M
+# 功能说明: 验证 kernel-pattern-attach 与 transform-apply 通过 registry 构造时拒绝未知专属 option。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_kernel_pattern_passes_reject_unknown_options
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_kernel_pattern_passes_reject_unknown_options() -> None:
+    load_builtin_passes()
+
+    with pytest.raises(
+        KernelCodeError,
+        match=(
+            r"^PassRegistryError: pass 'kernel-pattern-attach' option error: "
+            r".*kernel-pattern-attach options unknown: extra"
+        ),
+    ):
+        build_registered_pass("kernel-pattern-attach", {"extra": "1"})
+
+    with pytest.raises(
+        KernelCodeError,
+        match=(
+            r"^PassRegistryError: pass 'transform-apply' option error: "
+            r".*transform-apply options unknown: extra"
+        ),
+    ):
+        build_registered_pass("transform-apply", {"extra": "1"})
+
+
 # TC-REGISTRY-008
 # 功能说明: 验证 load_builtin_passes 满足幂等性，并提供基础内置 pass/pipeline、default-lowering 与 npu-demo-lowering。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_load_builtin_passes_is_idempotent
@@ -1196,6 +1244,8 @@ def test_load_builtin_passes_is_idempotent() -> None:
     assert "arch-parallelize" in list_registered_passes()
     assert "producer-consumer-analysis" in list_registered_passes()
     assert "hoist-dma-alias-ops" in list_registered_passes()
+    assert "kernel-pattern-attach" in list_registered_passes()
+    assert "transform-apply" in list_registered_passes()
     assert "no-op-pipeline" in list_registered_pipelines()
     assert "default-lowering" in list_registered_pipelines()
     assert "npu-demo-lowering" in list_registered_pipelines()

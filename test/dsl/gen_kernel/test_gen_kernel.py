@@ -84,7 +84,7 @@ from kernel_gen.dialect.symbol import (
     SymbolIterType,
     SymbolValueType,
 )
-from kernel_gen.dialect.tuner import TunerCostOp, TunerParamOp
+from kernel_gen.dialect.tuner import TunerCostOp, TunerLaunchOp, TunerParamOp, TunerSelectOp
 from kernel_gen.dsl.gen_kernel import EmitCContext, KernelEmitter, dsl_gen_kernel, emit_c, emit_c_op, emit_c_value, gen_kernel
 from kernel_gen.dsl.ast.mlir_gen import mlir_gen
 from kernel_gen.operation.dma import alloc, deslice, slice
@@ -278,6 +278,34 @@ def test_gen_kernel_emits_template_header_for_npu_demo_memory_template_field() -
     assert "using __kernel_gen_template_instance_seed_copy_kernel__T1 = Memory<MemorySpace::GM, int32_t>;" in source
     assert "template <typename T1>\nvoid copy_kernel(Memory<GM, T1>& arg0, Memory<GM, T1>& arg1)" in source
     assert "slice(arg0 /*dst*/, arg1 /*source*/" in source
+
+
+def test_gen_kernel_npu_demo_dma_view_result_does_not_alias_out_param() -> None:
+    """验证 npu_demo 局部 view 结果不会复用 out 参数名。
+
+    功能说明:
+    - `target=npu_demo` 下，device body 的 `dma.view` / `dma.reshape` 结果是局部 tile 视图。
+    - 结果名不得被 legacy out-param 绑定逻辑改成 `arg0`，否则生成 C++ 会重定义函数参数。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k npu_demo_dma_view_result_does_not_alias_out_param
+    """
+
+    mem_type = _make_memory_type([16], [1], element_type=f32)
+    tile_type = _make_memory_type([8], [1], element_type=f32)
+    block = Block(arg_types=[mem_type, mem_type])
+    zero = SymbolConstOp(0)
+    size = SymbolConstOp(8)
+    stride = SymbolConstOp(1)
+    view_op = DmaViewOp(block.args[1], [zero.result], [size.result], [stride.result], tile_type)
+    block.add_ops([zero, size, stride, view_op, func.ReturnOp()])
+    func_op = _func("view_kernel", [mem_type, mem_type], [], block, ("arg0", "arg1"))
+
+    source = gen_kernel(func_op, _npu_ctx())
+
+    assert "Memory<GM, float>& arg0" in source
+    assert "Memory<MemorySpace::GM, float> arg0 =" not in source
+    assert " arg1_1 = arg1.view<float>" in source
 
 
 def _memory_symbol_expr_attr(value: int | str) -> SymbolExprAttr:
@@ -2698,7 +2726,7 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
     assert "constexpr S_INT c_1 = 1;" in source
     assert "constexpr S_INT c_2 = 1;" in source
     assert "constexpr S_INT c_3 = 0;" in source
-    assert "npu_demo::launch<c_0, c_1, c_2, c_3>(add_barrier_body, lhs, rhs, out);" in source
+    assert "npu_demo::launch<2, 1, 1, 0>(add_barrier_body, lhs, rhs, out);" in source
     assert source.count("npu_demo::barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);") == 2
     assert "npu_demo::KernelContext& ctx" not in source
     assert source.index("S_INT v0 = npu_demo::thread_id();") < source.index(
@@ -2734,7 +2762,71 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_with_symbol_args() -> None:
 
     assert "static void sig_body(Memory<GM, float>& lhs, Memory<GM, float>& rhs, Memory<GM, float>& out, S_INT tile);" in source
     assert "void sig_wrapper(Memory<MemorySpace::GM, float>& lhs, Memory<MemorySpace::GM, float>& rhs, Memory<MemorySpace::GM, float>& out, long long tile)" in source
-    assert "npu_demo::launch<c_0, c_1, c_2, c_3>(sig_body, lhs, rhs, out, tile);" in source
+    assert "npu_demo::launch<2, 1, 1, 0>(sig_body, lhs, rhs, out, tile);" in source
+
+
+def test_gen_kernel_emits_npu_demo_tuner_select_default_value() -> None:
+    block = Block()
+    select = TunerSelectOp(["select_kernel_pattern0", "select_kernel_pattern1"])
+    block.add_ops([select, func.ReturnOp()])
+    func_op = func.FuncOp("select_kernel", FunctionType.from_lists([], []), Region(block))
+
+    source = gen_kernel(func_op, _npu_ctx())
+
+    assert "void select_kernel()" in source
+    assert "S_INT" in source
+    assert "= 0;" in source
+
+
+def test_gen_kernel_rejects_npu_demo_bare_tuner_launch() -> None:
+    block = Block()
+    block.add_ops([TunerLaunchOp("select_kernel_pattern0"), func.ReturnOp()])
+    func_op = func.FuncOp("select_kernel", FunctionType.from_lists([], []), Region(block))
+
+    with pytest.raises(KernelCodeError, match="tuner\\.launch.*outline-device-kernel"):
+        gen_kernel(func_op, _npu_ctx())
+
+
+def test_gen_kernel_emits_npu_demo_entry_dispatcher_after_device_functions() -> None:
+    device0_block = Block()
+    device0_block.add_op(func.ReturnOp())
+    device0 = func.FuncOp("entry_pattern0_device", FunctionType.from_lists([], []), Region(device0_block))
+    device1_block = Block()
+    device1_block.add_op(func.ReturnOp())
+    device1 = func.FuncOp("entry_pattern1_device", FunctionType.from_lists([], []), Region(device1_block))
+
+    entry_block = Block()
+    block_extent = SymbolConstOp(2)
+    thread_extent = SymbolConstOp(1)
+    subthread_extent = SymbolConstOp(1)
+    shared_memory_size = SymbolConstOp(0)
+    launch0 = ArchLaunchOp(
+        "entry_pattern0_device",
+        block_extent.result,
+        thread_extent.result,
+        subthread_extent.result,
+        shared_memory_size.result,
+        (),
+    )
+    launch1 = ArchLaunchOp(
+        "entry_pattern1_device",
+        block_extent.result,
+        thread_extent.result,
+        subthread_extent.result,
+        shared_memory_size.result,
+        (),
+    )
+    entry_block.add_ops([block_extent, thread_extent, subthread_extent, shared_memory_size, launch0, launch1, func.ReturnOp()])
+    entry = func.FuncOp("entry", FunctionType.from_lists([], []), Region(entry_block))
+    entry.attributes["entry_point"] = StringAttr("")
+    module = ModuleOp([entry, device0, device1])
+
+    source = gen_kernel(module, _npu_ctx())
+
+    assert source.index("void entry_pattern0_device()") < source.index("void entry()")
+    assert source.index("void entry_pattern1_device()") < source.index("void entry()")
+    assert "npu_demo::launch<2, 1, 1, 0>(entry_pattern0_device);" in source
+    assert "npu_demo::launch<2, 1, 1, 0>(entry_pattern1_device);" in source
 
 
 # GK-S4-002
@@ -2832,7 +2924,7 @@ builtin.module {
 
     assert source.index("static void kernel_device(") < source.index("void kernel(")
     assert source.count("static void kernel_device(") == 2
-    assert "npu_demo::launch<c_0, c_1, c_2, c_3>(kernel_device" in source
+    assert "npu_demo::launch<2, 1, 1, 0>(kernel_device" in source
     _compile_only(source)
 
 

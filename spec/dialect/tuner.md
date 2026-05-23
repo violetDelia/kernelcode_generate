@@ -2,8 +2,8 @@
 
 ## 功能简介
 
-- 定义 `tuner` dialect 的超参数声明与成本节点接口。
-- 本方言提供“声明超参数并生成符号标量”的 IR 表达，也提供 `tuner.cost` 作为 cost function 内的单 op 局部成本节点；不负责运行期求值、调度策略、搜索空间算法或真实 cost table。
+- 定义 `tuner` dialect 的超参数声明、成本节点、pattern 选择与 host pattern launch 接口。
+- 本方言提供“声明超参数并生成符号标量”的 IR 表达，也提供 `tuner.cost` 作为 cost function 内的单 op 局部成本节点；`tuner.select` / `tuner.launch` 只表达 kernel pattern dispatcher 的 IR 中间合同，不负责运行期求值、调度策略、搜索空间算法或真实 cost table。
 - 超参数标量统一返回 `!symbol.int<#symbol.expr<name>>`，复用既有 `SymbolValueType` 表达单个超参数名称；`tuner.cost` 固定返回 `!symbol.int<#symbol.expr<expr>>`。
 
 ## API 列表
@@ -11,6 +11,8 @@
 - `class Tuner(Dialect)`
 - `class TunerParamOp(result_type: Attribute)`
 - `class TunerCostOp(operands: list[SSAValue | Operation], *, cost_kind: Attribute, op_name: Attribute, extra_attrs: dict[str, Attribute] | None = None, result_type: Attribute = SymbolValueType.from_expr("COST"))`
+- `class TunerSelectOp(patterns: Sequence[str | SymbolRefAttr], result_type: Attribute = SymbolValueType.from_expr("pattern_id"))`
+- `class TunerLaunchOp(callee: str | SymbolRefAttr, args: Sequence[SSAValue | Operation] = ())`
 
 ## 文档信息
 
@@ -43,6 +45,8 @@
 - `tuner` dialect 当前公开 op 包含：
   - `tuner.param`
   - `tuner.cost`
+  - `tuner.select`
+  - `tuner.launch`
 - `tuner.param` 无 operand、无 region、单结果。
 - `tuner.param` 结果类型必须为 `!symbol.int<#symbol.expr<name>>`；不得使用 builtin `index`、普通整数或其他类型替代。
 - `name` 必须为非空标识符，且只能包含字母、数字与下划线，并以字母或下划线开头；常量、`?` 和复合表达式不是合法 tuner 参数名称。
@@ -50,6 +54,10 @@
 - `tuner.cost` 的 `cost_kind` 必须为非空字符串 attr，`op_name` 必须为非空字符串。
 - `tuner.cost` 不再公开 `kind`、`device_func` 两个 attrs；若实现仍生成这两个字段，verifier 必须显式拒绝。
 - `tuner.cost` 不求值、不查表、不裁剪节点；“不同 `cost_kind` 下某类 op 是否为 0”属于后续 evaluator 语义。
+- `tuner.select` 只接受非空 `ArrayAttr[SymbolRefAttr] patterns`，每个 pattern 必须是 flat `@symbol`，结果类型固定为 `!symbol.int<#symbol.expr<pattern_id>>`。
+- `tuner.select` 第一版源码发射固定选择 pattern0，即 npu_demo EmitC 生成 `S_INT <name> = 0;`。
+- `tuner.launch` 只接受 flat `@callee` 与按原顺序透传的 operands，无 result；文本中的 arg type list 必须与 operands 数量和类型完全一致。
+- 裸 `tuner.launch` 不允许进入源码生成；必须先由 `outline-device-kernel` 降为 `arch.launch`。
 - 本方言不定义任何超参数值求解、范围约束、搜索策略、默认值逻辑或真实 cost evaluator。
 
 ## API详细说明
@@ -114,6 +122,40 @@
 - 功能说明：表示 cost function 内某个原 op 的局部成本，记录原 op operands、原 attrs 与 pass-owned metadata，并返回 `!symbol.int<#symbol.expr<expr>>` 局部成本值。
 - 注意事项：`operands` 按原 op operands 原顺序透传，原 op 无 operands 时传空列表；`cost_kind` 表示当前 cost function 的统计视角，允许任意非空字符串 attr；`op_name` 必须为非空字符串 attr；`extra_attrs` 用于平铺保留原 op attributes；若原 op 存在业务字段 `kind`，生成方必须先改名为领域字段，例如 `kernel_kind`；`tuner.cost` 自身不公开旧 metadata attr `kind` 或 `device_func`，verifier 必须拒绝这两个字段；结果类型固定为单结果 `!symbol.int<#symbol.expr<expr>>`；本 op 无 region、不支持多结果、不负责把局部成本汇总成函数返回值。
 
+### `class TunerSelectOp(patterns: Sequence[str | SymbolRefAttr], result_type: Attribute = SymbolValueType.from_expr("pattern_id"))`
+
+- api：`class TunerSelectOp(patterns: Sequence[str | SymbolRefAttr], result_type: Attribute = SymbolValueType.from_expr("pattern_id"))`
+- 参数：
+  - `patterns`：候选 pattern 函数符号列表；类型 `Sequence[str | SymbolRefAttr]`；必须非空；字符串按 flat symbol 名称规整为 `SymbolRefAttr`；嵌套 symbol ref、空 symbol 和非 symbol attr 必须拒绝。
+  - `result_type`：选择结果类型；类型 `Attribute`；默认值 `SymbolValueType.from_expr("pattern_id")`；必须等于 `!symbol.int<#symbol.expr<pattern_id>>`。
+- 返回值：`TunerSelectOp` 实例。
+- 使用示例：
+
+  ```python
+  from kernel_gen.dialect.tuner import TunerSelectOp
+
+  select = TunerSelectOp(["matmul_entry_pattern0", "matmul_entry_pattern1"])
+  ```
+- 功能说明：在 host dispatcher 中声明从候选 pattern 中选择一个 pattern id。
+- 注意事项：本 op 不定义真实调度策略；npu_demo 源码发射当前固定选择 `0`；不得使用普通整数、index 或其它 symbol 表达替代 `pattern_id` 结果类型。
+
+### `class TunerLaunchOp(callee: str | SymbolRefAttr, args: Sequence[SSAValue | Operation] = ())`
+
+- api：`class TunerLaunchOp(callee: str | SymbolRefAttr, args: Sequence[SSAValue | Operation] = ())`
+- 参数：
+  - `callee`：目标 pattern 函数符号；类型 `str | SymbolRefAttr`；必须是 flat `@symbol`。
+  - `args`：透传给 pattern 函数的 runtime operands；类型 `Sequence[SSAValue | Operation]`；默认空序列。
+- 返回值：`TunerLaunchOp` 实例。
+- 使用示例：
+
+  ```python
+  from kernel_gen.dialect.tuner import TunerLaunchOp
+
+  launch = TunerLaunchOp("matmul_entry_pattern0", (out, lhs, rhs))
+  ```
+- 功能说明：在 host dispatcher 中表达对某个 pattern 函数的启动请求。
+- 注意事项：本 op 无 result；文本语法中的 arg type list 必须与 operands 数量和类型完全一致；源码生成前必须由 `outline-device-kernel` 降为 `arch.launch`，裸 `tuner.launch` 进入 gen_kernel 必须稳定失败。
+
 ## 测试
 
 - 测试文件：
@@ -126,6 +168,7 @@
 ### 测试目标
 
 - 验证 `tuner.cost` 的 parse/print、operand 透传、`!symbol.int<#symbol.expr<...>>` 结果类型、open-kind verifier 与错误路径。
+- 验证 `tuner.select` 的 `patterns`、`pattern_id` 结果类型与 `tuner.launch` 的 flat callee、arg type list、空 result 边界。
 - 验证 `launch-kernel-cost-func` 消费 `tuner.cost` 时的 kind 口径与错误路径一致。
 
 ### 功能与用例清单

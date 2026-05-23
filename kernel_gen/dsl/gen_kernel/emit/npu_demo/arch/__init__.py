@@ -16,4 +16,4 @@ API 列表:
 - 功能实现: kernel_gen/dsl/gen_kernel/emit/npu_demo/arch/__init__.py
 """
 
-from . import get_block_id, get_dynamic_memory, get_thread_id, get_thread_num  # noqa: F401
+from . import get_block_id, get_dynamic_memory, get_thread_id, get_thread_num, launch  # noqa: F401

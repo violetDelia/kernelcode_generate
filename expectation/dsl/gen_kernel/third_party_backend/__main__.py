@@ -5,4 +5,11 @@ from __future__ import annotations
 from .basic import run
 
 
-run()
+def main() -> None:
+    """Run third-party generic backend expectation cases."""
+
+    run()
+
+
+if __name__ == "__main__":
+    main()

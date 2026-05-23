@@ -2,8 +2,9 @@
 
 
 功能说明:
-- 为 `builtin.module` 中的入口 `func.func` 补齐 `launch_block / launch_thread / launch_subthread / shared_memory_size`。
-- extent 统一从 target registry 读取，当前 `npu_demo` 口径为 `1/1/1/0`。
+- 为 `builtin.module` 中可执行 device/pattern `func.func` 补齐 `launch_block / launch_thread / launch_subthread / shared_memory_size`。
+- 带 `entry_point` 的 host dispatcher 必须跳过，避免 host 被误当作 device kernel。
+- extent 统一从 target registry 读取，当前 `npu_demo` 口径为 `2/1/1/0`。
 - 不承担 outline 逻辑，仅负责把 IR 级 launch 信息补齐到后续 `outline-device-kernel` 可消费的状态。
 
 API 列表:
@@ -192,6 +193,110 @@ class AttachArchInformationPass(Pass):
             op.result.replace_all_uses_with(replacement.result)
             parent_block.erase_op(op)
 
+    def _attach_launch_attrs(
+        self: "AttachArchInformationPass",
+        func_op: func.FuncOp,
+        expected_values: dict[str, int],
+        all_launch_attr_names: tuple[str, ...],
+    ) -> None:
+        """为单个目标函数补齐或校验 launch attrs。
+
+        功能说明:
+        - 已携带 launch attrs 的函数必须四个字段齐全并与 target 一致。
+        - 未携带时写入 target registry 提供的静态 extent。
+
+        使用示例:
+        - self._attach_launch_attrs(func_op, expected_values, all_launch_attr_names)
+
+        关联文件:
+        - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
+        - test: [test/passes/test_attach_arch_information.py](../../test/passes/test_attach_arch_information.py)
+        - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
+        """
+
+        present = [name for name in all_launch_attr_names if name in func_op.attributes]
+        if present:
+            if len(present) != len(all_launch_attr_names):
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS,
+                    "AttachArchInformationError: function "
+                    f"{func_op.sym_name.data} must define launch_block, launch_thread, "
+                    "launch_subthread, and shared_memory_size together"
+                )
+            current_values: dict[str, int] = {}
+            for attr_name in all_launch_attr_names:
+                attr = func_op.attributes[attr_name]
+                if isinstance(attr, IntAttr):
+                    current_values[attr_name] = attr.data
+                    continue
+                if isinstance(attr, IntegerAttr):
+                    current_values[attr_name] = attr.value.data
+                    continue
+                if isinstance(attr, StringAttr):
+                    try:
+                        current_values[attr_name] = int(attr.data)
+                    except ValueError as exc:  # pragma: no cover - defensive branch
+                        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS,
+                            "AttachArchInformationError: function "
+                            f"{func_op.sym_name.data} {attr_name} must be int-like attribute"
+                        ) from exc
+                    continue
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS,
+                    "AttachArchInformationError: function "
+                    f"{func_op.sym_name.data} {attr_name} must be int-like attribute"
+                )
+            if tuple(current_values[name] for name in all_launch_attr_names) != tuple(
+                expected_values[name] for name in all_launch_attr_names
+            ):
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS,
+                    "AttachArchInformationError: function "
+                    f"{func_op.sym_name.data} launch extents must match target {self.target}"
+                )
+            return
+
+        for attr_name in all_launch_attr_names:
+            func_op.attributes[attr_name] = IntAttr(expected_values[attr_name])
+
+    def _target_funcs(self: "AttachArchInformationPass", funcs: list[func.FuncOp]) -> list[func.FuncOp]:
+        """选择本轮需要写入 launch attrs 的函数。
+
+        功能说明:
+        - 含 pattern/device 函数时，只选择 pattern/device 函数并跳过 `entry_point` host dispatcher。
+        - 无 pattern/device 函数时，单个 `entry_point` 函数仍作为普通 kernel 入口 attach。
+        - 没有 `entry_point` 时保留旧合同：唯一非 declaration 函数即为目标函数。
+
+        使用示例:
+        - candidates = self._target_funcs(funcs)
+
+        关联文件:
+        - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
+        - test: [test/passes/test_attach_arch_information.py](../../test/passes/test_attach_arch_information.py)
+        - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
+        """
+
+        entry_funcs = [func_op for func_op in funcs if "entry_point" in func_op.attributes]
+        if entry_funcs:
+            pattern_funcs = [
+                func_op
+                for func_op in funcs
+                if "entry_point" not in func_op.attributes
+                and (
+                    "kernel.transform_pipeline" in func_op.attributes
+                    or "kernel.pattern_id" in func_op.attributes
+                )
+            ]
+            if pattern_funcs:
+                return pattern_funcs
+            if len(entry_funcs) != 1 or len(funcs) != 1:
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS,
+                    "AttachArchInformationError: module must contain exactly one entry_point func.func without pattern funcs"
+                )
+            return entry_funcs
+        if len(funcs) != 1:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS,
+                "AttachArchInformationError: module must contain exactly one non-declaration func.func"
+            )
+        return funcs
+
     def _apply_to_module(self: "AttachArchInformationPass", module: ModuleOp) -> None:
         """执行当前文件内的 attach 主逻辑。
 
@@ -212,16 +317,12 @@ class AttachArchInformationPass(Pass):
         if not isinstance(module, ModuleOp):
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "AttachArchInformationError: module must be builtin.module")
 
-        entry_funcs = [
+        funcs = [
             op
             for op in module.ops
-            if isinstance(op, func.FuncOp) and not getattr(op, "is_declaration", False)
+            if isinstance(op, func.FuncOp) and not op.is_declaration
         ]
-        if len(entry_funcs) != 1:
-            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
-                "AttachArchInformationError: module must contain exactly one non-declaration func.func"
-            )
-        entry_func = entry_funcs[0]
+        target_funcs = self._target_funcs(funcs)
         launch_attr_names = ("launch_block", "launch_thread", "launch_subthread")
         all_launch_attr_names = launch_attr_names + ("shared_memory_size",)
 
@@ -257,50 +358,8 @@ class AttachArchInformationPass(Pass):
             )
         expected_values["shared_memory_size"] = shared_memory_size
 
-        present = [name for name in all_launch_attr_names if name in entry_func.attributes]
-        if present:
-            if len(present) != len(all_launch_attr_names):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
-                    "AttachArchInformationError: function "
-                    f"{entry_func.sym_name.data} must define launch_block, launch_thread, "
-                    "launch_subthread, and shared_memory_size together"
-                )
-            current_values: dict[str, int] = {}
-            for attr_name in all_launch_attr_names:
-                attr = entry_func.attributes[attr_name]
-                if isinstance(attr, IntAttr):
-                    current_values[attr_name] = attr.data
-                    continue
-                if isinstance(attr, IntegerAttr):
-                    current_values[attr_name] = attr.value.data
-                    continue
-                if isinstance(attr, StringAttr):
-                    try:
-                        current_values[attr_name] = int(attr.data)
-                    except ValueError as exc:  # pragma: no cover - defensive branch
-                        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
-                            "AttachArchInformationError: function "
-                            f"{entry_func.sym_name.data} {attr_name} must be int-like attribute"
-                        ) from exc
-                    continue
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
-                    "AttachArchInformationError: function "
-                    f"{entry_func.sym_name.data} {attr_name} must be int-like attribute"
-                )
-            if tuple(current_values[name] for name in all_launch_attr_names) != tuple(
-                expected_values[name] for name in all_launch_attr_names
-            ):
-                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, 
-                    "AttachArchInformationError: function "
-                    f"{entry_func.sym_name.data} launch extents must match target {self.target}"
-                )
-            self._specialize_dynamic_memory_ops(module)
-            return
-
-        entry_func.attributes["launch_block"] = IntAttr(expected_values["launch_block"])
-        entry_func.attributes["launch_thread"] = IntAttr(expected_values["launch_thread"])
-        entry_func.attributes["launch_subthread"] = IntAttr(expected_values["launch_subthread"])
-        entry_func.attributes["shared_memory_size"] = IntAttr(expected_values["shared_memory_size"])
+        for func_op in target_funcs:
+            self._attach_launch_attrs(func_op, expected_values, all_launch_attr_names)
         self._specialize_dynamic_memory_ops(module)
 
     def apply(self: "AttachArchInformationPass", ctx: Context, module: ModuleOp) -> None:

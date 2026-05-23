@@ -31,6 +31,7 @@
 - registry key 固定为 `template-name-infer`。
 - 函数签名 memory block argument 是默认命名 seed；普通中间 memory result 没有显式 name 且不与 seed family 相连时保持无 template name。
 - 带 `entry_point` 属性的 host 函数是其 `<host>_pattern*` 函数的 template-name 真源；pattern 函数必须携带 `kernel.transform_pipeline` 属性，且同位置 memory 参数与 host 参数共享 template family。
+- 带 `entry_point` 属性的 host 函数若直接 `func.call @helper`，同位置 memory call operands 与 helper block args 必须共享 template family；helper 同位置显式 template name 与 entry arg 冲突时必须稳定失败。
 - pass 只写回 `template_name`，不得改变 shape、stride、element_type 或 space。
 - 写回函数参数后必须同步 `func.func` function type。
 - 未注册 memory op 必须稳定失败，暴露默认约束漏项。
@@ -51,7 +52,7 @@
 ### `TemplateNameInferPass.apply(ctx: Context, module: ModuleOp) -> None`
 
 - 功能：注册默认约束，遍历每个 `func.func`，求解并写回 template name。
-- 错误：未知 memory op、同 family 冲突 name、非法 template name、entry_point pattern 参数数量不一致或同位置 memory / non-memory 不一致均必须稳定失败。
+- 错误：未知 memory op、同 family 冲突 name、非法 template name、entry_point pattern 参数数量不一致或同位置 memory / non-memory 不一致、entry_point direct `func.call` 参数数量不一致或同位置 memory 模板冲突均必须稳定失败。
 
 ## 测试
 

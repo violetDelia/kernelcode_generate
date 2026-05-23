@@ -54,6 +54,10 @@
 - SourceBundle dump 只通过 `gen_kernel(...)` 的返回文本与 `dump_dir` 文件观察；SourceBundle 解析、校验和写出 helper 不公开。
 - `trance_enabled` 不属于源码生成语义；即使该开关为 `True`，`gen_kernel(...)` 仍只按 `dump_dir` 写 `source.cpp`，不得写 `<kernel>_trace.txt`。
 - 对 `target="npu_demo"`，`gen_kernel(...)` 输入的 `NnMemoryType.template_name` 必须透传为 C++ 函数模板参数；wrapper/device/helper 均可模板化。
+- 对 `target="npu_demo"`，若 module 含唯一 `entry_point` host dispatcher 且存在多个 pattern device 函数，`gen_kernel(...)` 必须先输出 device/helper 函数，再输出 entry dispatcher，保证 C++ 调用点已声明。
+- 对 `target="npu_demo"`，`tuner.select` 发射为 `S_INT <name> = 0;`，表示第一版固定选择 pattern0。
+- 对 `target="npu_demo"`，裸 `tuner.launch` 进入 gen_kernel 必须失败，错误文本包含 `tuner.launch` 与 `outline-device-kernel`；成功链路必须先由 `outline-device-kernel` 降为 `arch.launch`。
+- 对 `target="npu_demo"`，`arch.launch` 的四个 extent 必须来自 `symbol.const`，源码中发射为 `npu_demo::launch<2, 1, 1, 0>(...)` 这类 C++ template 整数字面量；不得把 `S_INT` 局部变量名作为 template 参数。
 - `gen_kernel(...)` / EmitC 只生成模板化源码，不生成 `kg_execute_entry`、concrete template instance dispatcher 或 `TemplateBinding`。
 - runtime dtype 已知后的唯一 concrete template 实例调用由 `kernel_gen.execute_engine` compile shim 负责。
 - 本文件当前允许实现的公开入口只有 `gen_kernel(...)` 与 `dsl_gen_kernel(...)`；除 sibling spec 已单独定义的包根 re-export 外，不得再新增平行 callable 别名或隐藏快捷入口。
@@ -180,3 +184,6 @@
 | TC-DSL-GEN-KERNEL-GEN-KERNEL-065 | 生成/编译 | gen kernel emits npu demo launch wrapper with symbol args | 准备带 trailing `!symbol.int` 参数的 `npu_demo` body/wrapper module。 | 运行 `test_gen_kernel_emits_npu_demo_launch_wrapper_with_symbol_args`。 | body 使用 `S_INT` 参数，wrapper 使用公开签名类型，并把符号参数透传到 `npu_demo::launch`。 | `test_gen_kernel_emits_npu_demo_launch_wrapper_with_symbol_args` |
 | TC-DSL-GEN-KERNEL-GEN-KERNEL-066 | 边界/异常 | gen kernel rejects npu demo body level signature boundaries | 准备不满足 `ctx + Memory -> Memory` 的 `npu_demo` 单函数输入。 | 运行 `test_gen_kernel_rejects_npu_demo_body_level_signature_boundaries`。 | 非 ctx 首参、非 Memory 源参数或 element type 不匹配均不会进入 body-level kernel 特化，并按公开 memory-return 拒绝语义失败。 | `test_gen_kernel_rejects_npu_demo_body_level_signature_boundaries` |
 | TC-DSL-GEN-KERNEL-GEN-KERNEL-067 | 边界/异常 | gen kernel handles npu demo plain module public boundaries | 准备 `npu_demo` 单函数 plain module、helper-only module、缺 return module 与缺 body launch module。 | 运行 `test_gen_kernel_handles_npu_demo_plain_module_public_boundaries`。 | 普通可发射函数成功；helper-only、缺 return 与缺 body launch 均按公开错误语义 fail-fast。 | `test_gen_kernel_handles_npu_demo_plain_module_public_boundaries` |
+| TC-DSL-GEN-KERNEL-GEN-KERNEL-068 | 生成/编译 | gen kernel emits npu demo tuner select default value | 准备含 `tuner.select` 的 npu_demo 函数。 | 运行 `test_gen_kernel_emits_npu_demo_tuner_select_default_value`。 | 源码生成 `S_INT <name> = 0;`，表示默认选择 pattern0。 | `test_gen_kernel_emits_npu_demo_tuner_select_default_value` |
+| TC-DSL-GEN-KERNEL-GEN-KERNEL-069 | 边界/异常 | gen kernel rejects npu demo bare tuner launch | 准备未运行 `outline-device-kernel` 的裸 `tuner.launch` IR。 | 运行 `test_gen_kernel_rejects_npu_demo_bare_tuner_launch`。 | 按公开错误语义拒绝，并提示先运行 `outline-device-kernel`。 | `test_gen_kernel_rejects_npu_demo_bare_tuner_launch` |
+| TC-DSL-GEN-KERNEL-GEN-KERNEL-070 | 生成/编译 | gen kernel emits npu demo entry dispatcher after device functions | 准备含 `entry_point` host 与多个 device 函数的 module。 | 运行 `test_gen_kernel_emits_npu_demo_entry_dispatcher_after_device_functions`。 | 源码先输出 device/helper 函数，再输出 entry dispatcher，dispatcher 中保留 `npu_demo::launch` 调用。 | `test_gen_kernel_emits_npu_demo_entry_dispatcher_after_device_functions` |

@@ -260,6 +260,52 @@ def test_outline_device_kernel_outlines_single_function() -> None:
     assert "shared_memory_size = 0 : i64" in printed
 
 
+def test_outline_device_kernel_rewrites_tuner_launch_dispatcher() -> None:
+    module = _parse_module(
+        """
+builtin.module {
+  func.func @entry() attributes {entry_point} {
+    tuner.launch(@entry_pattern0) : () -> ()
+    tuner.launch(@entry_pattern1) : () -> ()
+    func.return
+  }
+  func.func @entry_pattern0() attributes {
+    launch_block = 2 : i64,
+    launch_thread = 1 : i64,
+    launch_subthread = 1 : i64,
+    shared_memory_size = 0 : i64,
+    kernel.pattern_id = 0 : i64
+  } {
+    "test.op"() : () -> ()
+    func.return
+  }
+  func.func @entry_pattern1() attributes {
+    launch_block = 2 : i64,
+    launch_thread = 1 : i64,
+    launch_subthread = 1 : i64,
+    shared_memory_size = 0 : i64,
+    kernel.pattern_id = 1 : i64
+  } {
+    "test.op"() : () -> ()
+    func.return
+  }
+}
+"""
+    )
+
+    OutlineDeviceKernelPass().apply(_build_context(), module)
+    text = _print_ir(module)
+
+    assert "tuner.launch" not in text
+    assert "arch.launch<" in text
+    assert "(@entry_pattern0_device)" in text
+    assert "(@entry_pattern1_device)" in text
+    assert "func.func @entry_pattern0(" not in text
+    assert "func.func @entry_pattern1(" not in text
+    assert "func.func @entry_pattern0_device" in text
+    assert "func.func @entry_pattern1_device" in text
+
+
 # TC-ODK-006
 # 功能说明: 验证未标记函数保持原样，标记函数在模块内就地扩成 wrapper + device。
 # 使用示例: pytest -q test/passes/test_outline_device_kernel.py -k test_outline_device_kernel_leaves_unmarked_function_unchanged

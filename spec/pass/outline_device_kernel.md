@@ -4,6 +4,7 @@
 
 - 定义 `outline-device-kernel` pass 的公开合同：把显式标记的 device 风格 `func.func` outline 成 `host wrapper + device body` 双函数 IR。
 - 首轮能力固定为纯 IR host launch outline：触发仍只消费 `launch_block / launch_thread / launch_subthread` 三项显式属性，不从 target registry、函数名或 IR 结构做隐式推断；`shared_memory_size` 作为 device metadata 与 wrapper 的第 4 个 `arch.launch` extent 一并承接。
+- 当 host dispatcher 中存在 `tuner.launch` 时，本 pass 负责把其降为指向 `<pattern>_device` 的 `arch.launch`，并把被 launch 的 pattern wrapper 替换成 device 函数。
 - 首轮 ABI 边界固定为“只接受零返回 / 已完成 out-param ABI 的 `func.func`”；命中非空返回值时显式报错，不在本轮同步承担返回值改写。
 - 当前文件本轮只公开 `OutlineDeviceKernelPass` 及其执行入口；pattern、候选收集与 wrapper/device 改写步骤若存在，仅允许作为当前文件内部协作 helper 存在。
 
@@ -162,6 +163,9 @@ func.func @matmul_kernel(%lhs: !nn.memory<value>, %rhs: !nn.memory<value>, %out:
 - 返回值：
 
 - 满足合同的函数可被 outline；未标记函数保持原样。
+- `tuner.launch(@pattern, args...)` 只能引用同 module 内带完整 launch attrs 的 pattern 函数；未知 callee 或缺 launch attrs 必须失败。
+- pattern dispatcher 路径中，host `entry_point` 函数保持原名和属性；原 pattern wrapper 被删除，替换为 `<pattern>_device` 函数。
+- 降成 `arch.launch` 时，四个 extent 必须在 launch 所在 block 内以 `symbol.const` 物化，保证 SSA 支配关系。
 
 ### 输出 IR 合同：`host wrapper + device body`
 
@@ -259,3 +263,4 @@ builtin.module {
 | TC-PASS-OUTLINE-DEVICE-KERNEL-004 | 内存/DMA | `shared_memory_size` 只保留在 device function attributes，但 wrapper 必须把它透传为 `arch.launch` 的第 4 个 extent operand。 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `HL-ODK-004`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`shared_memory_size` 只保留在 device function attributes，但 wrapper 必须把它透传为 `arch.launch` 的第 4 个 extent operand。”场景。 | `HL-ODK-004` |
 | TC-PASS-OUTLINE-DEVICE-KERNEL-005 | 内存/DMA | `shared_memory_size` 非 int-like 或负值时显式失败。 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `HL-ODK-005`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`shared_memory_size` 非 int-like 或负值时显式失败。”场景。 | `HL-ODK-005` |
 | TC-PASS-OUTLINE-DEVICE-KERNEL-006 | pass 改写 | `npu-demo-lowering` 复用本 pass 时仍保持上述双函数输出合同，不要求测试直连 pattern / getter / 当前文件内部 helper。 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `HL-ODK-006`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`npu-demo-lowering` 复用本 pass 时仍保持上述双函数输出合同，不要求测试直连 pattern / getter / 当前文件内部 helper。”场景。 | `HL-ODK-006` |
+| TC-PASS-OUTLINE-DEVICE-KERNEL-007 | pass 改写 | tuner launch dispatcher 降成 arch launch | 准备含 `entry_point` host、`tuner.launch` 和两个带 launch attrs pattern 函数的 module。 | 运行 `test_outline_device_kernel_rewrites_tuner_launch_dispatcher`。 | `tuner.launch` 被替换为 `arch.launch(@pattern_device, ...)`；原 pattern wrapper 删除，仅保留 device 函数。 | `test_outline_device_kernel_rewrites_tuner_launch_dispatcher` |

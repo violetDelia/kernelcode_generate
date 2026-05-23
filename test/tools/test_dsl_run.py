@@ -809,7 +809,7 @@ def test_dsl_run_supports_tiled_matmul_kernel_on_npu_demo() -> None:
     assert "nn.matmul" not in lowered_text
     assert result.source.startswith('#include "include/npu_demo/npu_demo.h"\n')
     assert result.compiled_kernel.function == "matmul_out_kernel"
-    assert result.func_op.sym_name.data == "matmul_out_kernel_device"
+    assert result.func_op.sym_name.data == "matmul_out_kernel_pattern0_device"
     assert "matmul<" in result.source
     assert "cpu::matmul(" not in result.source
     assert result.source.count("for (") >= 2

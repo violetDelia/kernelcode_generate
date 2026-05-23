@@ -58,6 +58,7 @@ from xdsl.dialects.builtin import (
     ArrayAttr,
     FunctionType,
     ModuleOp,
+    UnitAttr,
     i1,
 )
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
@@ -305,15 +306,26 @@ class ModuleAST(DSLNode):
             self.source_fn = PythonObjectAttrAST(self.source_fn)
 
     def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
-        """发射模块为 `builtin.module`。"""
+        """发射模块为 `builtin.module`。
+
+        功能说明:
+        - 将 `mlir_gen(...)` 根 Python callable 对应的 `func.func` 标记为 `entry_point`。
+        - Python helper callee 不继承入口属性。
+
+        使用示例:
+        - module = ModuleAST([root, helper], source_fn=kernel).emit_mlir(ctx, None)
+        """
 
         assert isinstance(ctx, Context)
         assert block is None or isinstance(block, Block)
         ops: list[Operation] = []
+        source_fn_name = getattr(self.source_fn.attr, "__name__", None)
         for function in self.functions:
             function_op = function.emit_mlir(ctx, None)
             if not isinstance(function_op, func.FuncOp):
                 raise KernelCodeError(ErrorKind.INTERNAL, ErrorModule.MLIR_GEN, "function emit must return func.func")
+            if isinstance(source_fn_name, str) and function.name == source_fn_name:
+                function_op.attributes["entry_point"] = UnitAttr()
             ops.append(function_op)
         return ModuleOp(ops)
 

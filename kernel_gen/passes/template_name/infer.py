@@ -7,6 +7,8 @@
   presence 判断与 memory template family 保持一致。
 - 对带 `entry_point` 属性的 host 函数，把同位置 memory 参数 template family 传播到
   该 host 的 `_pattern*` 函数。
+- 对带 `entry_point` 属性的 host 函数，把直接 `func.call` 的同位置 memory 参数
+  传播到 callee 函数。
 - 基于 `TemplateNameGraph` 与已注册 operation 约束求解稳定 `T1/T2/...` 名称。
 - 当前文件内 helper 仅服务本 pass 的 IR 遍历和 SSA type 写回，不属于公开 API。
 
@@ -354,6 +356,51 @@ def _launch_template_constraints(
     return tuple(constraints)
 
 
+def _entry_point_call_template_constraints(
+    host: func.FuncOp,
+    call_op: Operation,
+    funcs: dict[str, func.FuncOp],
+) -> tuple[Same, ...]:
+    """构造 entry_point 直接 func.call 的模板等价约束。
+
+    功能说明:
+    - 只处理 `entry_point` host 中直接出现的 `func.call`。
+    - call operand 与 callee block arg 必须按位置共享 memory template family。
+    - callee 同位置参数若已有不同显式 template name，稳定失败并点名 `entry_point func.call conflict`。
+
+    使用示例:
+    - constraints = _entry_point_call_template_constraints(host, call_op, funcs)
+    """
+
+    if not _is_entry_point_func(host) or not isinstance(call_op, func.CallOp):
+        return ()
+    callee_name = call_op.callee.root_reference.data
+    callee = funcs.get(callee_name)
+    if callee is None:
+        return ()
+    call_args = tuple(call_op.arguments)
+    callee_args = tuple(callee.args)
+    if len(call_args) != len(callee_args):
+        raise _template_infer_error("entry_point func.call arg count must match callee args")
+    constraints: list[Same] = []
+    for index, (call_arg, callee_arg) in enumerate(zip(call_args, callee_args, strict=True)):
+        if not isinstance(call_arg.type, NnMemoryType) and not isinstance(callee_arg.type, NnMemoryType):
+            continue
+        if not isinstance(call_arg.type, NnMemoryType) or not isinstance(callee_arg.type, NnMemoryType):
+            raise _template_infer_error("entry_point func.call memory arg type must match callee arg type")
+        source_name = call_arg.type.template_name.data
+        callee_name_attr = callee_arg.type.template_name.data
+        if callee_name_attr and callee_name_attr != source_name:
+            raise _template_infer_error("entry_point func.call conflict: callee memory template_name must match entry arg")
+        constraints.append(
+            Same(
+                TemplateNameValue(call_arg, call_op, "operand", index),
+                TemplateNameValue(callee_arg, callee, "block_arg", index),
+            )
+        )
+    return tuple(constraints)
+
+
 class TemplateNameInferPass(Pass):
     """推导 `NnMemoryType.template_name` 的 ModulePass。
 
@@ -413,6 +460,9 @@ class TemplateNameInferPass(Pass):
             for op in func_op.walk():
                 for item in _memory_result_items(op):
                     graph.add_value(item)
+                if isinstance(op, func.CallOp):
+                    graph.add_constraints(_entry_point_call_template_constraints(func_op, op, funcs))
+                    continue
                 if _should_skip_op_constraints(op):
                     continue
                 graph.add_constraints(build_template_constraints(op))

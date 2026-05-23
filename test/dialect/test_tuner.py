@@ -2,8 +2,9 @@
 
 
 功能说明:
-- 覆盖 tuner dialect 的 `tuner.param` 与 `tuner.cost` parse/print、verifier 与错误路径。
+- 覆盖 tuner dialect 的 `tuner.param`、`tuner.cost`、`tuner.select` 与 `tuner.launch` parse/print、verifier 与错误路径。
 - `tuner.param` 负责返回 `!symbol.int<#symbol.expr<name>>` 的超参数标量；`tuner.cost` 负责透传原 op operands 并固定返回 `!symbol.int<#symbol.expr<expr>>` 局部成本。
+- `tuner.select` 与 `tuner.launch` 只通过公开 constructor 或公开文本 IR parse/verify 入口验证。
 
 使用示例:
 - pytest -q test/dialect/test_tuner.py
@@ -22,6 +23,7 @@
 
 from __future__ import annotations
 
+import inspect
 from io import StringIO
 import sys
 from pathlib import Path
@@ -29,6 +31,7 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects.builtin import Builtin, IndexType, IntegerType, StringAttr, f32
+from xdsl.dialects.func import Func
 from xdsl.dialects.test import Test
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import Parser
@@ -40,7 +43,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.symbol import Symbol, SymbolValueType
-from kernel_gen.dialect.tuner import Tuner, TunerCostOp, TunerParamOp
+from kernel_gen.dialect.tuner import Tuner, TunerCostOp, TunerLaunchOp, TunerParamOp, TunerSelectOp
 
 
 def _build_context() -> Context:
@@ -61,6 +64,7 @@ def _build_context() -> Context:
 
     ctx = Context()
     ctx.load_dialect(Builtin)
+    ctx.load_dialect(Func)
     ctx.load_dialect(Test)
     ctx.load_dialect(Symbol)
     ctx.load_dialect(Tuner)
@@ -271,3 +275,164 @@ builtin.module {
 }
 """,
         ).parse_module()
+
+
+# TC-TUNER-007
+# 测试目的: 验证 tuner.select 的 parse/print、patterns attrs 与固定 pattern_id 结果类型。
+# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应 spec 文件路径: spec/dialect/tuner.md
+def test_tuner_select_round_trip() -> None:
+    ctx = _build_context()
+    module = Parser(
+        ctx,
+        """
+builtin.module {
+  %pattern_id = tuner.select {patterns = [@entry_pattern0, @entry_pattern1]} : !symbol.int<#symbol.expr<pattern_id>>
+}
+""",
+    ).parse_module()
+
+    module.verify()
+    printed = _print_ir(module).rstrip()
+    reparsed = Parser(ctx, printed).parse_module()
+    reparsed.verify()
+    assert "@entry_pattern0" in printed
+    assert "@entry_pattern1" in printed
+    assert "!symbol.int<#symbol.expr<pattern_id>>" in printed
+    assert printed == _print_ir(reparsed).rstrip()
+
+
+# TC-TUNER-008
+# 测试目的: 验证 tuner.select 拒绝空 patterns、非 flat SymbolRefAttr 与非 pattern_id 结果类型。
+# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应 spec 文件路径: spec/dialect/tuner.md
+def test_tuner_select_rejects_invalid_contract() -> None:
+    with pytest.raises(VerifyException, match="tuner.select patterns must be non-empty"):
+        TunerSelectOp([]).verify()
+
+    with pytest.raises(VerifyException, match="tuner.select result type must be !symbol.int"):
+        TunerSelectOp(["entry"], result_type=SymbolValueType.from_expr("OTHER")).verify()
+
+    ctx = _build_context()
+    with pytest.raises(VerifyException, match="tuner.select patterns must be non-empty"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %pattern_id = tuner.select {patterns = ["entry"]} : !symbol.int<#symbol.expr<pattern_id>>
+}
+""",
+        ).parse_module().verify()
+
+    module_bad = Parser(
+        ctx,
+        """
+builtin.module {
+  %pattern_id = tuner.select {patterns = [@entry::@nested]} : !symbol.int<#symbol.expr<pattern_id>>
+}
+""",
+    ).parse_module()
+    with pytest.raises(VerifyException, match="tuner.select patterns must be non-empty"):
+        module_bad.verify()
+
+
+# TC-TUNER-009
+# 测试目的: 验证 tuner.launch 的 parse/print、callee 与 operand type list 合同。
+# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应 spec 文件路径: spec/dialect/tuner.md
+def test_tuner_launch_round_trip() -> None:
+    ctx = _build_context()
+    module = Parser(
+        ctx,
+        """
+builtin.module {
+  func.func @entry(%arg0 : !symbol.int<#symbol.expr<N>>) {
+    tuner.launch(@entry_pattern0, %arg0) : (!symbol.int<#symbol.expr<N>>) -> ()
+    func.return
+  }
+}
+""",
+    ).parse_module()
+
+    module.verify()
+    printed = _print_ir(module).rstrip()
+    reparsed = Parser(ctx, printed).parse_module()
+    reparsed.verify()
+    assert "tuner.launch(@entry_pattern0" in printed
+    assert printed == _print_ir(reparsed).rstrip()
+
+
+# TC-TUNER-010
+# 测试目的: 验证 tuner.launch 拒绝嵌套 callee、错误参数类型列表与非空 result。
+# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应 spec 文件路径: spec/dialect/tuner.md
+def test_tuner_launch_rejects_invalid_contract() -> None:
+    ctx = _build_context()
+    invalid_cases = [
+        (
+            """
+builtin.module {
+  func.func @entry() {
+    tuner.launch("entry_pattern0") : () -> ()
+    func.return
+  }
+}
+""",
+            "tuner.launch callee must be SymbolRefAttr",
+        ),
+        (
+            """
+builtin.module {
+  func.func @entry(%arg0 : !symbol.int<#symbol.expr<N>>) {
+    tuner.launch(@entry::@nested, %arg0) : (!symbol.int<#symbol.expr<N>>) -> ()
+    func.return
+  }
+}
+""",
+            "tuner.launch callee must be SymbolRefAttr",
+        ),
+        (
+            """
+builtin.module {
+  func.func @entry(%arg0 : !symbol.int<#symbol.expr<N>>) {
+    tuner.launch(@entry_pattern0, %arg0) : (!symbol.int<#symbol.expr<M>>) -> ()
+    func.return
+  }
+}
+""",
+            "tuner.launch arg types must match operand types",
+        ),
+        (
+            """
+builtin.module {
+  func.func @entry(%arg0 : !symbol.int<#symbol.expr<N>>) {
+    tuner.launch(@entry_pattern0, %arg0) : (!symbol.int<#symbol.expr<N>>) -> (!symbol.int<#symbol.expr<N>>)
+    func.return
+  }
+}
+""",
+            "tuner.launch result types must be",
+        ),
+    ]
+    for text, message in invalid_cases:
+        with pytest.raises(VerifyException, match=message):
+            Parser(ctx, text).parse_module().verify()
+
+
+# TC-TUNER-011
+# 测试目的: 验证 TunerLaunchOp constructor 签名只暴露 spec/API 定义的 callee 与 args。
+# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应 spec 文件路径: spec/dialect/tuner.md
+def test_tuner_launch_public_signature_matches_spec() -> None:
+    signature = inspect.signature(TunerLaunchOp)
+
+    assert "parse_error" not in signature.parameters
+    assert str(signature) == "(callee: 'str | SymbolRefAttr', args: 'Sequence[SSAValue | Operation]' = ()) -> 'None'"
+
+
+# TC-TUNER-012
+# 测试目的: 验证导入 tuner dialect 不会全局替换 xDSL Context.load_dialect。
+# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应 spec 文件路径: spec/dialect/tuner.md
+def test_tuner_import_does_not_patch_context_load_dialect() -> None:
+    assert Context.load_dialect.__module__ == "xdsl.context"

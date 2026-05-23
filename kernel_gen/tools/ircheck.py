@@ -3,7 +3,7 @@
 
 功能说明:
 - 提供轻量的 IR 变换验证工具：读取单文件 case，按 `COMPILE_ARGS` 顺序运行 pass / pipeline，
-  对规范化后的 IR 执行 FileCheck 风格的逐行匹配：
+  对规范化后的 IR 执行 FileCheck 风格的顺序匹配：
   - `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 按“普通文本字面量 + `[[NAME:REGEX]]` / `[[NAME]]` 变量”匹配；
   - 不再支持 `CHECK-REGEX*` 变体，整行 regex 需求统一收口到 `[[NAME:REGEX]]` 的局部片段内。
   最终输出 `true/false`。
@@ -340,6 +340,7 @@ def _decode_literal_check_fragment(literal: str) -> str:
     - `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 的普通文本默认按字面量匹配。
     - 为兼容旧 expectation 中的过度转义写法，允许把 `\.`、`\(`、`\[`、`\]` 等“反斜杠 + 标点”
       还原成对应字面量字符。
+    - `\"` 与 `\\` 保持原样，用于匹配 MLIR string attr 内部被打印器转义的引号与反斜杠。
     - 若反斜杠后跟的是字母、数字或下划线，则保留反斜杠本身，避免吞掉真实路径或标识符文本。
 
     使用示例:
@@ -359,6 +360,11 @@ def _decode_literal_check_fragment(literal: str) -> str:
         current = literal[index]
         if current == "\\" and index + 1 < len(literal):
             nxt = literal[index + 1]
+            if nxt in {'"', "\\"}:
+                chars.append(current)
+                chars.append(nxt)
+                index += 2
+                continue
             if not (nxt.isalnum() or nxt == "_"):
                 chars.append(nxt)
                 index += 2
@@ -421,6 +427,7 @@ def _compile_literal_fragment(literal: str) -> str:
     功能说明:
     - 默认仍按字面量匹配（`re.escape`）。
     - 兼容 FileCheck 风格的 `{{...}}` 行内 regex 片段。
+    - 兼容 f-string 生成后残留的 `{ *}` 空白 regex 片段。
     - 对未闭合或空 `{{...}}` 片段抛稳定解析错误。
     """
 
@@ -430,7 +437,8 @@ def _compile_literal_fragment(literal: str) -> str:
     while True:
         open_double_idx = decoded.find("{{", cursor)
         open_single_idx = decoded.find("{.*}", cursor)
-        candidates = [idx for idx in (open_double_idx, open_single_idx) if idx != -1]
+        open_space_idx = decoded.find("{ *}", cursor)
+        candidates = [idx for idx in (open_double_idx, open_single_idx, open_space_idx) if idx != -1]
         if not candidates:
             pattern_parts.append(re.escape(decoded[cursor:]))
             break
@@ -446,8 +454,12 @@ def _compile_literal_fragment(literal: str) -> str:
             pattern_parts.append(_expand_regex_aliases(regex_text))
             cursor = close_idx + 2
             continue
-        pattern_parts.append(".*")
-        cursor = open_idx + len("{.*}")
+        if open_idx == open_single_idx:
+            pattern_parts.append(".*")
+            cursor = open_idx + len("{.*}")
+            continue
+        pattern_parts.append(" *")
+        cursor = open_idx + len("{ *}")
     return "".join(pattern_parts)
 
 
@@ -1560,16 +1572,19 @@ def _check_not_range(
     bound_variables: dict[str, str],
     source_path: str | None,
     start_line: int,
-    end_line_exclusive: int,
+    start_col: int,
+    end_line: int,
+    end_col: int,
 ) -> tuple[bool, CheckDirective | None, str | None]:
-    """检查 pending `CHECK-NOT` 是否在指定范围内命中。
+    """检查 pending `CHECK-NOT` 是否在指定文本区间内命中。
 
 
     功能说明:
+    - 区间由上一条正向 CHECK 的 match end 到下一条正向 CHECK 的 match start。
     - 命中禁止文本时返回标准失败三元组。
 
     使用示例:
-    - _check_not_range(lines, pending_not, {}, "case.ir", 0, 3)
+    - _check_not_range(lines, pending_not, {}, "case.ir", 0, 0, 3, 0)
 
     关联文件:
     - spec: spec/tools/ircheck.md
@@ -1577,9 +1592,20 @@ def _check_not_range(
     - 功能实现: kernel_gen/tools/ircheck.py
     """
 
+    if not pending_not:
+        return (True, None, None)
+    checked_lines: list[str] = []
+    if start_line == end_line:
+        checked_lines.append(lines[start_line][start_col:end_col])
+    else:
+        checked_lines.append(lines[start_line][start_col:])
+        for line in lines[start_line + 1 : end_line]:
+            checked_lines.append(line)
+        if end_line < len(lines):
+            checked_lines.append(lines[end_line][:end_col])
     for directive in pending_not:
         pattern, _ = _compile_pattern_directive(directive, bound_variables)
-        for line in lines[start_line:end_line_exclusive]:
+        for line in checked_lines:
             if pattern.search(line):
                 prefix = "IrcheckMatchError: CHECK-NOT matched forbidden text"
                 return _match_fail(
@@ -1591,20 +1617,21 @@ def _check_not_range(
     return (True, None, None)
 
 
-def _find_check_line(
+def _find_check_position(
     lines: list[str],
     bound_variables: dict[str, str],
     start_line: int,
+    start_col: int,
     directive: CheckDirective,
-) -> tuple[int | None, dict[str, str] | None]:
-    """从指定行开始查找一个正向 CHECK。
+) -> tuple[int | None, int | None, int | None, dict[str, str] | None]:
+    """从指定文本位置开始查找一个正向 CHECK。
 
 
     功能说明:
-    - 返回匹配行号与本次新增捕获变量。
+    - 返回匹配行号、起始列、结束列与本次新增捕获变量。
 
     使用示例:
-    - line_no, captured = _find_check_line(lines, {}, 0, directive)
+    - line_no, start, end, captured = _find_check_position(lines, {}, 0, 0, directive)
 
     关联文件:
     - spec: spec/tools/ircheck.md
@@ -1614,15 +1641,16 @@ def _find_check_line(
 
     pattern, definition_names = _compile_pattern_directive(directive, bound_variables)
     for idx in range(start_line, len(lines)):
-        match = pattern.search(lines[idx])
+        line_start_col = start_col if idx == start_line else 0
+        match = pattern.search(lines[idx], line_start_col)
         if match is None:
             continue
         captured = {
             name: match.group(name)
             for name in definition_names
         }
-        return idx, captured
-    return None, None
+        return idx, match.start(), match.end(), captured
+    return None, None, None, None
 
 
 def _match_checks(
@@ -1632,11 +1660,11 @@ def _match_checks(
 
 
     功能说明:
-    - 按 `spec/tools/ircheck.md` 定义的 FileCheck 风格逐行语义实现：
+    - 按 `spec/tools/ircheck.md` 定义的 FileCheck 风格顺序语义实现：
       - `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:`：普通文本按字面量匹配，`[[...]]` 变量片段按模式匹配。
-      - `CHECK:`：从上一次正向检查命中行之后继续查找。
+      - `CHECK:`：从上一次正向检查命中的结束位置之后继续查找，同一行后续片段也可命中。
       - `CHECK-NEXT:`：必须出现在上一条正向检查命中行的下一行。
-      - `CHECK-NOT:`：禁止出现在相邻两条正向检查命中行之间（或起始/末尾区间）。
+      - `CHECK-NOT:`：禁止出现在相邻两条正向检查命中区间之间（或起始/末尾区间）。
 
     使用示例:
     - ok, failed, message = _match_checks(actual_ir, case.checks, source_path=case.source_path)
@@ -1652,6 +1680,7 @@ def _match_checks(
 
     lines = actual_ir.splitlines()
     last_positive_line: int | None = None
+    last_positive_end_col = 0
     pending_not: list[CheckDirective] = []
     bound_variables: dict[str, str] = {}
 
@@ -1661,8 +1690,11 @@ def _match_checks(
             continue
 
         if directive.kind == "CHECK":
-            start_line = 0 if last_positive_line is None else last_positive_line + 1
-            match_line, captured = _find_check_line(lines, bound_variables, start_line, directive)
+            start_line = 0 if last_positive_line is None else last_positive_line
+            start_col = 0 if last_positive_line is None else last_positive_end_col
+            match_line, match_col, match_end_col, captured = _find_check_position(
+                lines, bound_variables, start_line, start_col, directive
+            )
             if match_line is None:
                 return _match_fail(
                     source_path,
@@ -1670,13 +1702,30 @@ def _match_checks(
                     directive,
                     f"pattern '{directive.text}' not found",
                 )
-            ok, failed, message = _check_not_range(lines, pending_not, bound_variables, source_path, start_line, match_line)
+            if match_col is None or match_end_col is None:
+                return _match_fail(  # pragma: no cover - internal invariant
+                    source_path,
+                    "IrcheckMatchError: CHECK not found",
+                    directive,
+                    f"pattern '{directive.text}' not found",
+                )
+            ok, failed, message = _check_not_range(
+                lines,
+                pending_not,
+                bound_variables,
+                source_path,
+                start_line,
+                start_col,
+                match_line,
+                match_col,
+            )
             if not ok:
                 return (ok, failed, message)
             pending_not.clear()
             if captured is not None:
                 bound_variables.update(captured)
             last_positive_line = match_line
+            last_positive_end_col = match_end_col
             continue
 
         if directive.kind == "CHECK-NEXT":
@@ -1689,7 +1738,16 @@ def _match_checks(
                 )
             start_line = last_positive_line + 1
             match_line = start_line
-            ok, failed, message = _check_not_range(lines, pending_not, bound_variables, source_path, start_line, match_line)
+            ok, failed, message = _check_not_range(
+                lines,
+                pending_not,
+                bound_variables,
+                source_path,
+                last_positive_line,
+                last_positive_end_col,
+                match_line,
+                0,
+            )
             if not ok:
                 return (ok, failed, message)
             if match_line >= len(lines):
@@ -1712,6 +1770,7 @@ def _match_checks(
             for name in definition_names:
                 bound_variables[name] = match.group(name)
             last_positive_line = match_line
+            last_positive_end_col = match.end()
             continue
 
         return _match_fail(  # pragma: no cover - internal invariant
@@ -1723,7 +1782,19 @@ def _match_checks(
 
     if pending_not:
         start_line = 0 if last_positive_line is None else last_positive_line + 1
-        ok, failed, message = _check_not_range(lines, pending_not, bound_variables, source_path, start_line, len(lines))
+        start_col = 0 if last_positive_line is None else last_positive_end_col
+        if last_positive_line is not None:
+            start_line = last_positive_line
+        ok, failed, message = _check_not_range(
+            lines,
+            pending_not,
+            bound_variables,
+            source_path,
+            start_line,
+            start_col,
+            len(lines),
+            0,
+        )
         if not ok:
             return (ok, failed, message)
 

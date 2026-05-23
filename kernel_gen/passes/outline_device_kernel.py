@@ -5,6 +5,8 @@
 - 作为 `ModulePass` 为带显式 launch 属性的 `func.func` 执行 host-launch outline。
 - 把原函数改写为只包含 `symbol.const + arch.launch + func.return` 的 host wrapper。
 - 把原函数体搬移到新的 `@<name>_device`，并只在 device 侧保留 `shared_memory_size`。
+- 对 host dispatcher 内的 `tuner.launch`，直接改写为指向 pattern device 函数的
+  `arch.launch`，并移除原 pattern wrapper。
 
 API 列表:
 - `class OutlineDeviceKernelPass()`
@@ -29,7 +31,7 @@ from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import IntAttr, IntegerAttr, ModuleOp, StringAttr
-from xdsl.ir import Block, Region
+from xdsl.ir import Block, Region, SSAValue
 from xdsl.passes import ModulePass
 from xdsl.pattern_rewriter import (
     GreedyRewritePatternApplier,
@@ -42,6 +44,7 @@ from xdsl.rewriter import InsertPoint
 
 from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dialect.symbol import Symbol, SymbolConstOp
+from kernel_gen.dialect.tuner import TunerLaunchOp
 from kernel_gen.passes.common import (
     ensure_builtin_module,
     verify_generated_ops,
@@ -89,7 +92,7 @@ class _OutlineDeviceKernelFuncPattern(RewritePattern):
             device_name,
             (input_types, output_types),
             device_region,
-            visibility=getattr(op, "sym_visibility", None),
+            visibility=op.sym_visibility,
             arg_attrs=op.arg_attrs,
             res_attrs=op.res_attrs,
         )
@@ -202,6 +205,123 @@ class OutlineDeviceKernelPass(ModulePass):
 
         self.fold = bool(fold)
 
+    def _make_device_func(self, func_op: func.FuncOp) -> func.FuncOp:
+        """把候选函数体移动到 `<name>_device` 函数。
+
+        功能说明:
+        - 复用原函数签名、参数属性、结果属性与非 launch attrs。
+        - 供普通 wrapper outline 与 tuner dispatcher outline 两条路径共享。
+
+        使用示例:
+        - device_func = self._make_device_func(pattern_func)
+
+        关联文件:
+        - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+        - test: [test/passes/test_outline_device_kernel.py](test/passes/test_outline_device_kernel.py)
+        - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
+        """
+
+        input_types = list(func_op.function_type.inputs.data)
+        output_types = list(func_op.function_type.outputs.data)
+        original_attrs = dict(func_op.attributes)
+        device_region = Region()
+        func_op.body.move_blocks(device_region)
+        device_func = func.FuncOp(
+            f"{func_op.sym_name.data}_device",
+            (input_types, output_types),
+            device_region,
+            visibility=func_op.sym_visibility,
+            arg_attrs=func_op.arg_attrs,
+            res_attrs=func_op.res_attrs,
+        )
+        device_func.attributes.update(
+            {
+                name: attr
+                for name, attr in original_attrs.items()
+                if name not in _OutlineDeviceKernelFuncPattern.LAUNCH_ATTRS
+            }
+        )
+        return device_func
+
+    def _rewrite_tuner_launches(
+        self,
+        module: ModuleOp,
+        candidates: dict[str, tuple[int, int, int, int]],
+    ) -> None:
+        """把 host dispatcher 内的 tuner.launch 改写为 arch.launch。
+
+        功能说明:
+        - 每个 `tuner.launch(@pattern, args...)` 使用对应 `@pattern_device` 作为 callee。
+        - 四个 extent 在 launch 所在 block 内就地物化为 `symbol.const`，保证 SSA 支配关系。
+
+        使用示例:
+        - self._rewrite_tuner_launches(module, candidates)
+
+        关联文件:
+        - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+        - test: [test/passes/test_outline_device_kernel.py](test/passes/test_outline_device_kernel.py)
+        - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
+        """
+
+        for launch_op in [op for op in module.walk() if isinstance(op, TunerLaunchOp)]:
+            callee_name = launch_op.callee.root_reference.data
+            candidate = candidates.get(callee_name)
+            if candidate is None:
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"tuner.launch callee '{callee_name}' is not outline candidate")
+            parent_block = launch_op.parent_block()
+            if not isinstance(parent_block, Block):
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "tuner.launch must be attached to a block")
+            block_extent, thread_extent, subthread_extent, shared_memory_size_extent = candidate
+            block_const = SymbolConstOp(block_extent)
+            thread_const = SymbolConstOp(thread_extent)
+            subthread_const = SymbolConstOp(subthread_extent)
+            shared_memory_size_const = SymbolConstOp(shared_memory_size_extent)
+            for const_op in (block_const, thread_const, subthread_const, shared_memory_size_const):
+                parent_block.insert_op_before(const_op, launch_op)
+            arch_launch = ArchLaunchOp(
+                f"{callee_name}_device",
+                block_const.result,
+                thread_const.result,
+                subthread_const.result,
+                shared_memory_size_const.result,
+                tuple(SSAValue.get(arg) for arg in launch_op.args),
+            )
+            parent_block.insert_op_before(arch_launch, launch_op)
+            parent_block.erase_op(launch_op)
+            verify_generated_ops([block_const, thread_const, subthread_const, shared_memory_size_const, arch_launch])
+
+    def _outline_tuner_launch_patterns(
+        self,
+        module: ModuleOp,
+        candidates: dict[str, tuple[int, int, int, int]],
+    ) -> None:
+        """执行 pattern dispatcher outline。
+
+        功能说明:
+        - 先把所有 `tuner.launch` 改写为 `arch.launch @pattern_device`。
+        - 再把被 launch 的 pattern 函数替换为对应 device 函数，避免保留裸 pattern wrapper。
+
+        使用示例:
+        - self._outline_tuner_launch_patterns(module, candidates)
+
+        关联文件:
+        - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+        - test: [test/passes/test_outline_device_kernel.py](test/passes/test_outline_device_kernel.py)
+        - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
+        """
+
+        self._rewrite_tuner_launches(module, candidates)
+        launched = {op.callee.root_reference.data for op in module.walk() if isinstance(op, ArchLaunchOp)}
+        pattern_names = {name for name in candidates if f"{name}_device" in launched}
+        for func_op in [op for op in module.ops if isinstance(op, func.FuncOp) and op.sym_name.data in pattern_names]:
+            parent_block = func_op.parent_block()
+            if not isinstance(parent_block, Block):
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "outline candidate must be attached to a block")
+            device_func = self._make_device_func(func_op)
+            parent_block.insert_op_after(device_func, func_op)
+            parent_block.erase_op(func_op)
+            verify_generated_ops([device_func])
+
     def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行 outline-device-kernel ModulePass。
 
@@ -291,6 +411,9 @@ class OutlineDeviceKernelPass(ModulePass):
             return
         if ctx.get_optional_dialect(Symbol.name) is None:
             ctx.load_dialect(Symbol)
+        if any(isinstance(op, TunerLaunchOp) for op in module.walk()):
+            self._outline_tuner_launch_patterns(module, candidates)
+            return
         PatternRewriteWalker(
             GreedyRewritePatternApplier(
                 [*_get_outline_device_kernel_pass_patterns(candidates)],

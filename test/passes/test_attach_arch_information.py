@@ -150,6 +150,56 @@ def test_attach_arch_information_writes_registry_launch_extents() -> None:
     assert func_op.attributes["shared_memory_size"] == IntAttr(0)
 
 
+def test_attach_arch_information_skips_entry_point_and_attaches_pattern_funcs() -> None:
+    entry_block = Block()
+    entry_block.add_op(func.ReturnOp())
+    entry_func = func.FuncOp("entry", FunctionType.from_lists([], []), Region(entry_block))
+    entry_func.attributes["entry_point"] = StringAttr("")
+    pattern0_block = Block()
+    pattern0_block.add_op(func.ReturnOp())
+    pattern0 = func.FuncOp("entry_pattern0", FunctionType.from_lists([], []), Region(pattern0_block))
+    pattern0.attributes["kernel.pattern_id"] = IntAttr(0)
+    pattern1_block = Block()
+    pattern1_block.add_op(func.ReturnOp())
+    pattern1 = func.FuncOp("entry_pattern1", FunctionType.from_lists([], []), Region(pattern1_block))
+    pattern1.attributes["kernel.transform_pipeline"] = StringAttr("--pass canonicalize")
+    module = ModuleOp([entry_func, pattern0, pattern1])
+
+    AttachArchInformationPass(target="npu_demo").apply(Context(), module)
+
+    assert "launch_block" not in entry_func.attributes
+    for pattern_func in (pattern0, pattern1):
+        assert pattern_func.attributes["launch_block"] == IntAttr(2)
+        assert pattern_func.attributes["launch_thread"] == IntAttr(1)
+        assert pattern_func.attributes["launch_subthread"] == IntAttr(1)
+        assert pattern_func.attributes["shared_memory_size"] == IntAttr(0)
+
+
+def test_attach_arch_information_attaches_single_entry_without_patterns() -> None:
+    """验证无 pattern 函数时单个 entry_point 仍作为 device kernel attach。
+
+    功能说明:
+    - `kernel-pattern-attach` no-op 的 add/sub/mul 链路仍需要 `outline-device-kernel` wrapper。
+    - 因此只有 entry 函数且没有 pattern/device 函数时，entry 必须获得 launch attrs。
+
+    使用示例:
+    - pytest -q test/passes/test_attach_arch_information.py -k single_entry_without_patterns
+    """
+
+    entry_block = Block()
+    entry_block.add_op(func.ReturnOp())
+    entry_func = func.FuncOp("entry", FunctionType.from_lists([], []), Region(entry_block))
+    entry_func.attributes["entry_point"] = StringAttr("")
+    module = ModuleOp([entry_func])
+
+    AttachArchInformationPass(target="npu_demo").apply(Context(), module)
+
+    assert entry_func.attributes["launch_block"] == IntAttr(2)
+    assert entry_func.attributes["launch_thread"] == IntAttr(1)
+    assert entry_func.attributes["launch_subthread"] == IntAttr(1)
+    assert entry_func.attributes["shared_memory_size"] == IntAttr(0)
+
+
 def test_attach_arch_information_specializes_npu_demo_dynamic_memory_capacity() -> None:
     module = _make_dynamic_memory_module(("shared", "tsm", "tlm1", "tlm2", "tlm3"))
 

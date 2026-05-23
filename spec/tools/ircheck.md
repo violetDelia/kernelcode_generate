@@ -74,6 +74,9 @@
   - 只支持 `CHECK:`、`CHECK-NEXT:`、`CHECK-NOT:` 三条检查指令。
   - 普通文本按字面量匹配；regex 能力只允许出现在局部变量片段 `[[NAME:REGEX]]` 和引用片段 `[[NAME]]`。
   - `[[NAME:REGEX]]` 允许使用 FileCheck 风格 `[[NAME:{{REGEX}}]]` 包裹写法，语义等价于 `[[NAME:REGEX]]`。
+  - 多条普通 `CHECK:` 按文本位置顺序匹配；后一条可在上一条命中的同一行、上一条命中结束位置之后继续匹配，不要求从下一行开始。
+  - 普通 literal 中的 `\"` 与 `\\` 必须按实际 IR 文本保留匹配，不能被解码成普通引号导致 StringAttr 文本不稳定。
+  - 历史 f-string 产生的 `{ *}` literal 片段按空白正则匹配，语义等价于“零个或多个空白字符”。
   - 普通文本中的 `#symbol.expr<...>` 会按 `SymbolExprAttr` canonical 语义归一后匹配，兼容 `1 + N` 与 `N + 1`、`1 * X` 与 `X`、`//` 与 `floordiv` 这类等价文本差异。
   - `CHECK-NEXT:` 不能作为第一条正向检查。
   - `CHECK-NOT:` 不能定义新变量，只能引用前面已绑定的变量。

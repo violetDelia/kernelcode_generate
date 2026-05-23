@@ -227,6 +227,52 @@ def test_template_name_infer_links_entry_point_host_pattern_args() -> None:
     assert [arg.type.template_name.data for arg in pattern1.args] == ["T1", "T2"]
 
 
+def test_template_name_infer_links_entry_point_direct_func_call_args() -> None:
+    """验证 entry_point host 直接调用 helper 时同位置 memory 参数共享模板名。"""
+
+    memory0 = _memory_type()
+    memory1 = _memory_type()
+    host_block = Block(arg_types=[memory0, memory1])
+    call = func.CallOp("entry_helper", tuple(host_block.args), [])
+    host_block.add_ops([call, func.ReturnOp()])
+    host = func.FuncOp(
+        "entry",
+        FunctionType.from_lists([memory0, memory1], []),
+        Region(host_block),
+    )
+    host.attributes["entry_point"] = UnitAttr()
+    helper_block = Block(arg_types=[_memory_type(), _memory_type()])
+    helper_block.add_op(func.ReturnOp())
+    helper = func.FuncOp(
+        "entry_helper",
+        FunctionType.from_lists([_memory_type(), _memory_type()], []),
+        Region(helper_block),
+    )
+    module = ModuleOp([host, helper])
+
+    TemplateNameInferPass().apply(Context(), module)
+
+    assert [arg.type.template_name.data for arg in host.args] == ["T1", "T2"]
+    assert [arg.type.template_name.data for arg in helper.args] == ["T1", "T2"]
+
+
+def test_template_name_infer_rejects_entry_point_direct_func_call_conflict() -> None:
+    """验证 entry_point direct call 的 callee 显式模板冲突稳定失败。"""
+
+    host_block = Block(arg_types=[_memory_type("T1")])
+    call = func.CallOp("entry_helper", tuple(host_block.args), [])
+    host_block.add_ops([call, func.ReturnOp()])
+    host = func.FuncOp("entry", FunctionType.from_lists([_memory_type("T1")], []), Region(host_block))
+    host.attributes["entry_point"] = UnitAttr()
+    helper_block = Block(arg_types=[_memory_type("T2")])
+    helper_block.add_op(func.ReturnOp())
+    helper = func.FuncOp("entry_helper", FunctionType.from_lists([_memory_type("T2")], []), Region(helper_block))
+    module = ModuleOp([host, helper])
+
+    with pytest.raises(KernelCodeError, match="entry_point func.call conflict"):
+        TemplateNameInferPass().apply(Context(), module)
+
+
 def test_template_name_infer_rejects_entry_point_pattern_arg_mismatch() -> None:
     """验证 entry_point pattern 参数数量不一致时稳定失败。"""
 

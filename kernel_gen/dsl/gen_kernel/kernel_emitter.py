@@ -42,6 +42,8 @@ from xdsl.dialects.builtin import (
     Float64Type,
     IntegerType,
     IndexType,
+    IntAttr,
+    IntegerAttr,
     Signedness,
     ModuleOp,
     StringAttr,
@@ -606,6 +608,13 @@ class KernelEmitter:
         if plain_func is not None:
             return self.emit_func(plain_func)
 
+        dispatcher_func = self._get_npu_demo_entry_dispatcher_func(module_op)
+        if dispatcher_func is not None:
+            funcs = self._module_funcs(module_op)
+            emitted_funcs = [func_op for func_op in funcs if func_op is not dispatcher_func]
+            emitted_funcs.append(dispatcher_func)
+            return "\n\n".join(self.emit_func(func_op) for func_op in emitted_funcs)
+
         body_func, wrapper_func = self._classify_npu_demo_launch_module(module_op)
         emitted: list[str] = [self._emit_npu_demo_launch_body_declaration(body_func)]
         for top_op in module_op.ops:
@@ -700,6 +709,33 @@ class KernelEmitter:
                 return None
             return func_op
         return func_op
+
+    def _get_npu_demo_entry_dispatcher_func(self, module_op: ModuleOp) -> func.FuncOp | None:
+        """识别 npu_demo entry_point dispatcher module。
+
+        功能说明:
+        - 多函数 module 中恰好一个 `entry_point` host 时，按 dispatcher + device funcs 发射。
+        - device/helper 函数先输出，entry dispatcher 最后输出，避免 C++ 调用缺少声明。
+
+        使用示例:
+        - dispatcher = self._get_npu_demo_entry_dispatcher_func(module_op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel/gen_kernel.md
+        - test: test/dsl/gen_kernel/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel/gen_kernel.py
+        """
+
+        funcs = self._module_funcs(module_op)
+        if len(funcs) < 2:
+            return None
+        dispatcher_funcs = [func_op for func_op in funcs if "entry_point" in func_op.attributes]
+        if len(dispatcher_funcs) != 1:
+            return None
+        dispatcher = dispatcher_funcs[0]
+        if not any(isinstance(op, ArchLaunchOp) for op in self._walk_ops(dispatcher)):
+            return None
+        return dispatcher
 
     def emit_func(self, func_op: func.FuncOp) -> str:
         if self._is_npu_demo_body_level_kernel(func_op):
@@ -1077,8 +1113,8 @@ class KernelEmitter:
         功能说明:
         - wrapper 负责把 `lhs/rhs/out` 与 trailing `!symbol.int` 参数原样透传给
           `npu_demo::launch<block, thread, subthread, shared_memory_size>(body, ...)`。
-        - launch extent 对应 wrapper IR 中的独立 `symbol.const`，源码中用独立
-          `constexpr S_INT` 名称承接，避免 wrapper 发射阶段把常量折成模板字面量。
+        - launch extent 对应 wrapper IR 中的独立 `symbol.const`；源码保留
+          `constexpr S_INT` 诊断变量，同时 `npu_demo::launch<...>` 使用整数字面量满足 C++ 模板参数约束。
         - wrapper 与 body 均不显式暴露 `KernelContext` 参数，body 通过 npu_demo free helper 读取活动上下文。
 
         使用示例:
@@ -1116,13 +1152,16 @@ class KernelEmitter:
             extent_name = self.ctx.allocate_name("c_")
             extent_names.append(extent_name)
             extent_lines.append(f"{self.ctx.current_indent}constexpr S_INT {extent_name} = {extent};")
-        block_name, thread_name, subthread_name, shared_memory_size_name = extent_names
         call_args = ", ".join(arg_names)
         body_callee = self._template_call_name(body_func.sym_name.data, body_input_types)
+        block_text = str(block_extent)
+        thread_text = str(thread_extent)
+        subthread_text = str(subthread_extent)
+        shared_memory_size_text = str(shared_memory_size_extent)
         launch_line = (
-            f"{self.ctx.current_indent}npu_demo::launch<{block_name}, {thread_name}, {subthread_name}, {shared_memory_size_name}>({body_callee}, {call_args});"
+            f"{self.ctx.current_indent}npu_demo::launch<{block_text}, {thread_text}, {subthread_text}, {shared_memory_size_text}>({body_callee}, {call_args});"
             if call_args
-            else f"{self.ctx.current_indent}npu_demo::launch<{block_name}, {thread_name}, {subthread_name}, {shared_memory_size_name}>({body_callee});"
+            else f"{self.ctx.current_indent}npu_demo::launch<{block_text}, {thread_text}, {subthread_text}, {shared_memory_size_text}>({body_callee});"
         )
         body = "\n".join([*extent_lines, launch_line])
         self.ctx.pop_indent()
@@ -1294,12 +1333,15 @@ class KernelEmitter:
 
         功能说明:
         - 仅对无返回值且首参为 `nn.memory` 的 out-param 函数生效。
+        - `npu_demo` device body 中的 `dma.view` / `dma.reshape` 是局部 tile 视图，不能别名到 out 参数名。
         - sibling cost function 会返回 `!symbol.int`，首参不是 out-param，不能把局部 DMA 结果绑定成 `arg0`。
 
         使用示例:
         - self._bind_rewritten_out_result(func_op, op)
         """
 
+        if self.ctx.is_target("npu_demo"):
+            return
         if not func_op.args or not op.results or len(op.results) != 1:
             return
         if list(func_op.function_type.outputs.data):
@@ -1375,6 +1417,52 @@ class KernelEmitter:
         rhs_expr = emit_c_value(op.operands[1], self.ctx)
         self.ctx.bind_name(result, "total")
         return f"{self.ctx.current_indent}S_INT total = ({lhs_expr} + {rhs_expr});"
+
+    def _emit_generic_symbol_const(self, op: Operation) -> str | None:
+        """发射 generic 形式的 `symbol.const`。
+
+        功能说明:
+        - `kernel-pattern-attach` 为匹配公开 IR 合同会生成 generic `"symbol.const"()`。
+        - 这里按公开 attr/result 形态绑定为 `S_INT` 局部变量，避免后续 `symbol.eq` 取值失败。
+
+        使用示例:
+        - stmt = self._emit_generic_symbol_const(op)
+        """
+
+        if op.name != "symbol.const" or isinstance(op, SymbolConstOp):
+            return None
+        if len(op.results) != 1:
+            raise self._error(op.name, "generic symbol.const must have one result")
+        value_attr = op.attributes.get("value")
+        if isinstance(value_attr, IntAttr):
+            value = value_attr.data
+        elif isinstance(value_attr, IntegerAttr):
+            value = value_attr.value.data
+        else:
+            raise self._error(op.name, "generic symbol.const value must be int attr")
+        name = self.ctx.create_or_get_name(op.results[0])
+        return f"{self.ctx.current_indent}S_INT {name} = {value};"
+
+    def _emit_generic_symbol_eq(self, op: Operation) -> str | None:
+        """发射 generic 形式的 `symbol.eq`。
+
+        功能说明:
+        - `kernel-pattern-attach` 输出 generic `"symbol.eq"` 以保持 IR 合同文本。
+        - 源码生成阶段仍按公开 operands/result type 生成布尔局部变量。
+
+        使用示例:
+        - stmt = self._emit_generic_symbol_eq(op)
+        """
+
+        if op.name != "symbol.eq" or isinstance(op, SymbolEqOp):
+            return None
+        if len(op.operands) != 2 or len(op.results) != 1:
+            raise self._error(op.name, "generic symbol.eq must have two operands and one result")
+        lhs_expr = emit_c_value(op.operands[0], self.ctx)
+        rhs_expr = emit_c_value(op.operands[1], self.ctx)
+        result_type = self._type_to_c(op.results[0].type)
+        result_name = self.ctx.create_or_get_name(op.results[0])
+        return f"{self.ctx.current_indent}{result_type} {result_name} = ({lhs_expr} == {rhs_expr});"
 
     def _emit_return_statement(
         self,
@@ -1468,6 +1556,14 @@ class KernelEmitter:
             total_stmt = self._emit_npu_demo_return_symbol_assignment(op)
             if total_stmt is not None:
                 lines.append(total_stmt)
+                continue
+            generic_symbol_const_stmt = self._emit_generic_symbol_const(op)
+            if generic_symbol_const_stmt is not None:
+                lines.append(generic_symbol_const_stmt)
+                continue
+            generic_symbol_eq_stmt = self._emit_generic_symbol_eq(op)
+            if generic_symbol_eq_stmt is not None:
+                lines.append(generic_symbol_eq_stmt)
                 continue
             self._bind_rewritten_out_result(func_op, op)
             stmt = self.emit_op(op)

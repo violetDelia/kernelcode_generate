@@ -240,3 +240,62 @@ def test_run_ircheck_text_matches_canonical_symbol_expr_literals() -> None:
     )
     assert result.ok is True
     assert result.message is None
+
+
+# TC-IRCHECK-MATCH-009
+# 测试目的: 验证连续 CHECK 可在同一行上一条命中位置之后继续匹配。
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 示例: pytest -q test/tools/test_ircheck_matcher.py -k test_run_ircheck_text_supports_same_line_ordered_checks
+def test_run_ircheck_text_supports_same_line_ordered_checks() -> None:
+    result = run_ircheck_text(
+        _ircheck_case(
+            checks=[
+                '// CHECK: "test.first"()',
+                '// CHECK: name = "Alpha"',
+                "// CHECK: () -> ()",
+            ],
+            input_ir='builtin.module {\n  "test.first"() {name = "Alpha"} : () -> ()\n}',
+        ),
+        source_path="inline.ircheck",
+    )
+    assert result.ok is True
+    assert result.message is None
+
+
+# TC-IRCHECK-MATCH-010
+# 测试目的: 验证普通 literal 中的转义引号按实际 IR 文本保留匹配。
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 示例: pytest -q test/tools/test_ircheck_matcher.py -k test_run_ircheck_text_preserves_escaped_quote_literals
+def test_run_ircheck_text_preserves_escaped_quote_literals() -> None:
+    result = run_ircheck_text(
+        _ircheck_case(
+            checks=[
+                '// CHECK: pipeline = "--pass \\"canonicalize\\""',
+            ],
+            input_ir='builtin.module {\n  "test.first"() {pipeline = "--pass \\"canonicalize\\""} : () -> ()\n}',
+        ),
+        source_path="inline.ircheck",
+    )
+    assert result.ok is True
+    assert result.message is None
+
+
+# TC-IRCHECK-MATCH-011
+# 测试目的: 验证历史 f-string 产生的 `{ *}` 片段按空白匹配，而不是按字面量大括号匹配。
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 示例: pytest -q test/tools/test_ircheck_matcher.py -k test_run_ircheck_text_supports_brace_space_fragment
+def test_run_ircheck_text_supports_brace_space_fragment() -> None:
+    result = run_ircheck_text(
+        _ircheck_case(
+            checks=[
+                '// CHECK: "test.first"(){ *}: () -> ()',
+            ],
+            input_ir='builtin.module {\n  "test.first"() : () -> ()\n}',
+        ),
+        source_path="inline.ircheck",
+    )
+    assert result.ok is True
+    assert result.message is None

@@ -12,6 +12,8 @@
   registry 只解析通用 `fold`。
 - 内置 pass 包含 `hoist-dma-alias-ops`，其第一阶段不接受 pass 专属 option，
   registry 只解析通用 `fold`。
+- 内置 pass 包含 `kernel-pattern-attach` 与 `transform-apply`，用于 npu-demo lowering
+  生成 pattern dispatcher 并消费 pattern transform pipeline。
 - 文件内 helper 收口为 `_register_registry_entry`、`_build_registered_pass_instance`、
   `_build_registered_pipeline_manager`、`_pipeline_accepts_options`、`_normalize_options`、
   `_split_fold_option` 与 `_reset_registry_for_test`；这些 helper 仅供本文件内部复用，不属于公开接口。
@@ -507,6 +509,7 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.inline import InlinePass
     from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
     from kernel_gen.passes.hoist_dma_alias_ops import HoistDmaAliasOpsPass
+    from kernel_gen.passes.kernel_pattern_attach import KernelPatternAttachPass
     from kernel_gen.passes.multi_buffer import MultiBufferPass
     from kernel_gen.passes.memory_pool import MemoryPoolPass
     from kernel_gen.passes.memory_plan import MemoryPlanPass
@@ -519,6 +522,7 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.tile.reduce import TileReducePass
     from kernel_gen.passes.tuning import LaunchKernelCostFuncPass
     from kernel_gen.passes.template_name.infer import TemplateNameInferPass
+    from kernel_gen.passes.transform_apply import TransformApplyPass
     from kernel_gen.passes.producer_consumer_analysis import ProducerConsumerAnalysisPass
     from xdsl.transforms.common_subexpression_elimination import CommonSubexpressionElimination
 
@@ -531,6 +535,7 @@ def load_builtin_passes() -> None:
         BufferResultsToOutParamsPass,
         LowerDmaMemoryHierarchyPass,
         HoistDmaAliasOpsPass,
+        KernelPatternAttachPass,
         MultiBufferPass,
         OutlineDeviceKernelPass,
         SymbolBufferHoistPass,
@@ -543,6 +548,7 @@ def load_builtin_passes() -> None:
         MemoryPlanPass,
         LaunchKernelCostFuncPass,
         TemplateNameInferPass,
+        TransformApplyPass,
         ProducerConsumerAnalysisPass,
     ):
         pass_name = getattr(pass_cls, "name", None)

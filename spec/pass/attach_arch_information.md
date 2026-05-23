@@ -37,6 +37,8 @@
 ## 目标
 
 - 为入口函数补齐 `launch_block / launch_thread / launch_subthread / shared_memory_size`。
+- 当 module 中存在 `entry_point` 且同时存在携带 `kernel.transform_pipeline` 或 `kernel.pattern_id` 的 pattern / device 函数时，host dispatcher 必须跳过，只对 pattern / device 函数补齐 launch 属性。
+- 当 module 中只有一个 `entry_point` 函数且没有 pattern / device 函数时，该 `entry_point` 仍是普通 kernel 入口，必须补齐 launch 属性以供 `outline-device-kernel` 生成 wrapper。
 - 让 `npu_demo` 的 launch extent 统一从 `kernel_gen/target/targets/npu_demo.txt` 读取。
 - 当前 `npu_demo` 目标必须写入 `launch_block=2`、`launch_thread=1`、`launch_subthread=1` 与 `shared_memory_size=0`。
 - 让 `npu_demo` 的 `arch.get_dynamic_memory` 中 `TSM/TLM1/TLM2/TLM3` backing capacity 统一从 `kernel_gen/target/targets/npu_demo.txt` 特化为静态字节数。
@@ -48,9 +50,9 @@
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 只接受 `builtin.module` 输入。
-- 只对 module 中唯一的 non-declaration `func.func` 生效；缺失或多个时必须显式失败，不得静默选择首个函数。
+- 只对 module 中唯一的 non-declaration `func.func` 或唯一无 pattern 的 `entry_point` 函数生效；缺失、多个普通函数或多个无 pattern entry 时必须显式失败，不得静默选择首个函数。
 - 四项 launch 属性必须同时存在；部分存在时必须显式失败。
-- `launch_block / launch_thread / launch_subthread / shared_memory_size` 仅写回 `func.func attributes`，不扩展 `arch.launch` 形状。
+- `launch_block / launch_thread / launch_subthread / shared_memory_size` 仅写回目标 `func.func attributes`，不扩展 `arch.launch` 形状；带 pattern / device 函数的 `entry_point` host dispatcher 不写入这些属性。
 - `arch.get_dynamic_memory` 容量特化只处理 `tsm/tlm1/tlm2/tlm3`；`shared/local` 继续保持 named-capacity 结果类型，缺失或非正容量必须显式失败。
 - 当前文件的公开 API 只有 `AttachArchInformationPass`；不得跨文件调用当前文件模块级 helper、常量或错误文本规整步骤。
 - `AttachArchInformationPass.apply(ctx, module)` 是面向业务调用方、pytest、registry 与 `PassManager` 的唯一稳定执行入口。
@@ -108,7 +110,7 @@
   AttachArchInformationPass(target="npu_demo").apply(Context(), module)
   ```
 - 功能说明：对模块执行 `AttachArchInformationPass` pass。
-- 注意事项：对业务调用方、pytest、registry 与 `PassManager` 暴露稳定执行入口；原地写回入口 `func.func` 的 launch 属性，并把 `tsm/tlm1/tlm2/tlm3` 的 `arch.get_dynamic_memory` 结果类型特化为 target registry 中的静态容量；只接受 `builtin.module` 输入；即使暂时不消费 `ctx` 里的业务信息，也不得通过 `del ctx` 或其他显式丢弃语句把该协议形参写成“已废弃入口”。
+- 注意事项：对业务调用方、pytest、registry 与 `PassManager` 暴露稳定执行入口；无 pattern / device 函数时原地写回唯一非 declaration `func.func` 或唯一 `entry_point` 的 launch 属性；存在 pattern / device 函数时跳过 `entry_point` host 并写回 pattern / device 函数；同时把 `tsm/tlm1/tlm2/tlm3` 的 `arch.get_dynamic_memory` 结果类型特化为 target registry 中的静态容量；只接受 `builtin.module` 输入；即使暂时不消费 `ctx` 里的业务信息，也不得通过 `del ctx` 或其他显式丢弃语句把该协议形参写成“已废弃入口”。
 
 ## 测试
 
@@ -136,6 +138,7 @@
 | TC-PASS-ATTACH-ARCH-INFORMATION-004 | 公开入口 | npu demo lowering pipeline supports kernel contract style public chain | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain`。 | 公开入口在“npu demo lowering pipeline supports kernel contract style public chain”场景下可导入、构造、注册或按名称发现。 | `test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain` |
 | TC-PASS-ATTACH-ARCH-INFORMATION-005 | 公开入口 | public import path exposes attach arch information pass only | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_public_import_path_exposes_attach_arch_information_pass_only`。 | 公开入口在“public import path exposes attach arch information pass only”场景下可导入、构造、注册或按名称发现。 | `test_public_import_path_exposes_attach_arch_information_pass_only` |
 | TC-PASS-ATTACH-ARCH-INFORMATION-006 | 公开入口 | attach arch information writes registry launch extents | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_attach_arch_information_writes_registry_launch_extents`。 | `npu_demo` 入口函数获得 `launch_block=2`、`launch_thread=1`、`launch_subthread=1` 与 `shared_memory_size=0`。 | `test_attach_arch_information_writes_registry_launch_extents` |
+| TC-PASS-ATTACH-ARCH-INFORMATION-006A | pass 改写 | attach arch information skips entry point and attaches pattern funcs | 准备含 `entry_point` host 与 pattern 函数的 module。 | 运行 `test_attach_arch_information_skips_entry_point_and_attaches_pattern_funcs`。 | host dispatcher 不写 launch attrs；pattern 函数获得 target registry 中的四项 launch attrs。 | `test_attach_arch_information_skips_entry_point_and_attaches_pattern_funcs` |
 | TC-PASS-ATTACH-ARCH-INFORMATION-006A | pass 改写 | attach arch information specializes npu_demo dynamic memory capacity | 准备包含 `arch.get_dynamic_memory` 的公开 IR 输入。 | 运行 `test_attach_arch_information_specializes_npu_demo_dynamic_memory_capacity`。 | `tsm/tlm1/tlm2/tlm3` 的 result type shape 分别特化为 `2097152/524288/1048576/1048576`，`shared` 保持 `SM_SIZE`。 | `test_attach_arch_information_specializes_npu_demo_dynamic_memory_capacity` |
 | TC-PASS-ATTACH-ARCH-INFORMATION-007 | 边界/异常 | attach arch information rejects partial launch attrs | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_attach_arch_information_rejects_partial_launch_attrs`。 | “attach arch information rejects partial launch attrs”场景按公开错误语义失败或被拒绝。 | `test_attach_arch_information_rejects_partial_launch_attrs` |
 | TC-PASS-ATTACH-ARCH-INFORMATION-008 | 边界/异常 | attach arch information rejects multiple entry funcs | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_attach_arch_information_rejects_multiple_entry_funcs`。 | “attach arch information rejects multiple entry funcs”场景按公开错误语义失败或被拒绝。 | `test_attach_arch_information_rejects_multiple_entry_funcs` |

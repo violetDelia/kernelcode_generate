@@ -45,6 +45,7 @@ from xdsl.dialects.builtin import ModuleOp
 from kernel_gen.core.config import get_dump_dir, get_target, restore_config, set_dump_dir, snapshot_config
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.core.print import print_operation_with_aliases
+from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
 from kernel_gen.dsl.ast.mlir_gen import mlir_gen
 from kernel_gen.execute_engine import CompiledKernel, ExecuteResult, ExecutionEngine
@@ -814,6 +815,25 @@ def _find_func_by_sym_name(module: ModuleOp, sym_name: str) -> func.FuncOp:
     raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, f"DslRunInternalError: lowered module does not contain func.func @{sym_name}")
 
 
+def _arch_launch_ops_in_func(func_op: func.FuncOp) -> tuple[ArchLaunchOp, ...]:
+    """收集函数体内的 `arch.launch`。
+
+    功能说明:
+    - 支持 `entry_point` dispatcher 中 `scf.if` 分支嵌套 launch 的形态。
+    - 只使用公开 `ArchLaunchOp` 类型和 xDSL walk 入口，不读取 pass 内部 helper。
+
+    使用示例:
+    - launches = _arch_launch_ops_in_func(wrapper_func)
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    return tuple(op for op in func_op.walk() if isinstance(op, ArchLaunchOp))
+
+
 def _select_source_and_entry(module: ModuleOp, emit_context: EmitCContext) -> tuple[str, str, func.FuncOp]:
     """根据 lowered module 选择源码生成入口与执行入口名。
 
@@ -823,6 +843,7 @@ def _select_source_and_entry(module: ModuleOp, emit_context: EmitCContext) -> tu
     - `npu_demo` 的 wrapper module 若存在唯一带 `arch.launch` 的 wrapper，则按 module 级别生成源码，
       使用 wrapper 作为真实执行入口，并返回 wrapper 所指向的 body func 作为 `DslRunResult.func_op`
       供调用方观察真实 lowered kernel body。
+    - `arch.launch` 可以位于 wrapper 顶层，也可以位于 `entry_point` dispatcher 的控制流分支内。
     - `npu_demo` 若 wrapper 候选不存在或不唯一，则显式失败，不退回到首个普通 `func.func`。
     - 其余 target 退回到首个 `func.func` 的源码生成入口，保证常见单函数和 expectation 场景稳定可执行。
 
@@ -838,15 +859,12 @@ def _select_source_and_entry(module: ModuleOp, emit_context: EmitCContext) -> tu
     func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
     root_func = _find_first_func(module)
     if _emitc_target_name(emit_context) == "npu_demo":
-        wrapper_candidates = [
-            func_op
-            for func_op in func_ops
-            if any(item.name == "arch.launch" for item in func_op.body.block.ops)
-        ]
+        wrapper_launches = [(func_op, _arch_launch_ops_in_func(func_op)) for func_op in func_ops]
+        wrapper_candidates = [(func_op, launches) for func_op, launches in wrapper_launches if launches]
         if len(wrapper_candidates) != 1:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.TOOLS, NPU_DEMO_WRAPPER_ERROR)
-        wrapper_func = wrapper_candidates[0]
-        wrapper_launch = next(item for item in wrapper_func.body.block.ops if item.name == "arch.launch")
+        wrapper_func, launches = wrapper_candidates[0]
+        wrapper_launch = launches[0]
         body_func = _find_func_by_sym_name(module, wrapper_launch.callee.root_reference.data)
         return gen_kernel(module, emit_context), wrapper_func.sym_name.data, body_func
     try:
