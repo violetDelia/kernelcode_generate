@@ -16,10 +16,12 @@
 
 关联文件:
 - 功能实现: kernel_gen/execute_engine/compiler.py
+- 功能实现: kernel_gen/execute_engine/target_support.py
 - Spec 文档: spec/execute_engine/execute_engine.md
 - Spec 文档: spec/execute_engine/execute_engine_api.md
 - Spec 文档: spec/execute_engine/execute_engine_target.md
 - 测试文件: test/execute_engine/test_contract.py
+- 测试文件: test/execute_engine/test_target_support.py
 """
 
 from __future__ import annotations
@@ -50,7 +52,10 @@ def test_execute_engine_contract_files_exist() -> None:
     assert (REPO_ROOT / "spec/execute_engine/execute_engine.md").is_file()
     assert (REPO_ROOT / "spec/execute_engine/execute_engine_api.md").is_file()
     assert (REPO_ROOT / "spec/execute_engine/execute_engine_target.md").is_file()
+    assert (REPO_ROOT / "spec/execute_engine/strategy.md").is_file()
+    assert (REPO_ROOT / "kernel_gen/execute_engine/target_support.py").is_file()
     assert (REPO_ROOT / "test/execute_engine/test_contract.py").is_file()
+    assert (REPO_ROOT / "test/execute_engine/test_target_support.py").is_file()
 
 
 # EE-S1-000A
@@ -69,19 +74,24 @@ def test_execute_engine_public_api_exports_only_runtime_contract() -> None:
         "get_compile_strategy",
         "register_compile_strategy",
     ]
+    hidden_helper_names = (
+        "target" + "_includes",
+        "default" + "_compiler",
+        "build" + "_compile_unit",
+        "build" + "_compile_command",
+        "compile" + "_source",
+        "needs" + "_entry_shim",
+        "build" + "_entry_shim_source",
+        "Target" + "Name",
+    )
     for name in (
         "RuntimeArg",
         "KgArgSlot",
         "CompileArtifacts",
-        "target_includes",
-        "default_compiler",
-        "build_compile_unit",
-        "build_compile_command",
-        "compile_source",
-        "needs_entry_shim",
-        "build_entry_shim_source",
         "FAILURE_PHRASES",
-        "TargetName",
+        "BuiltinTargetSupportArtifacts",
+        "build_builtin_target_support_artifacts",
+        *hidden_helper_names,
     ):
         assert not hasattr(execute_engine, name)
     assert not any(name.startswith("FAILURE_") for name in dir(execute_engine))

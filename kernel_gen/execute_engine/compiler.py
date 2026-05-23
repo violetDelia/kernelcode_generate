@@ -2,10 +2,10 @@
 
 
 功能说明:
-- 承接执行引擎的编译命令生成、target include 注入、entry shim 构造与 `ExecutionEngine` 编译/执行入口实现。
-- 统一 target include、entry shim 与执行引擎编译/执行内部职责，避免 execute_engine 下多个无独立公开边界的实现文件。
-- `kernel_gen.execute_engine` 包入口继续重导出执行引擎公开 API；target/compile/shim 细节仅作为本文件内部实现。
-- 当公开 core config 的 `trance_enabled` 开启时，编译链注入 `TRANCE` 宏、kernel 名称与 block trace 目录。
+- 承接执行引擎公开请求、结果、kernel、engine、strategy registry 与运行期 ABI。
+- 内置 target include、entry shim、编译单元与真实编译支持委托 `target_support.py`，本文件只负责把 target support artifact 装配为 `CompiledKernel`。
+- `kernel_gen.execute_engine` 包入口继续重导出执行引擎公开 API，不新增 `target_support` 包根导出。
+- 当公开 core config 的 `trance_enabled` 开启时，编译期宏由 target support 模块注入，执行期仍按本文件 ABI 加载入口。
 
 API 列表:
 - `class CompileRequest(source: str, target: str, function: str, entry_point: str = "kg_execute_entry", compiler: str | None = None, compiler_flags: tuple[str, ...] = ("-std=c++17",), link_flags: tuple[str, ...] = ())`
@@ -36,8 +36,10 @@ helper 清单:
 - spec: spec/execute_engine/execute_engine_target.md
 - test: test/execute_engine/test_contract.py
 - test: test/execute_engine/test_compile.py
+- test: test/execute_engine/test_target_support.py
 - test: test/execute_engine/test_invoke.py
 - 功能实现: kernel_gen/execute_engine/compiler.py
+- 功能实现: kernel_gen/execute_engine/target_support.py
 """
 
 from __future__ import annotations
@@ -48,452 +50,10 @@ from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 import re
-import shutil
-import subprocess
-import tempfile
 from typing import Callable, Literal, Protocol, TypeAlias, runtime_checkable
 
-from kernel_gen.core.config import get_dump_dir, get_trance_enabled
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.target import registry as target_registry
-
-_COMPILER_ICE_MARKERS = (
-    "internal compiler error",
-    "Please submit a full bug report",
-)
-
-
-def _join_text_sections(*sections: str) -> str:
-    """把多段源码文本按空行拼接。
-
-
-    功能说明:
-    - 过滤空字符串段，并统一去掉每段尾部空白。
-    - 以空行分隔段落，保持编译单元源码的稳定换行口径。
-    - 结果始终以单个换行结束。
-
-    使用示例:
-    - source = _join_text_sections("#include <a>", "int main() {}")
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    normalized_sections = tuple(section.rstrip() for section in sections if section)
-    if not normalized_sections:
-        return "\n"
-    return "\n\n".join(normalized_sections).rstrip() + "\n"
-
-
-def _looks_like_internal_compiler_error(stderr: str) -> bool:
-    """判断编译 stderr 是否命中编译器内部错误特征。
-
-
-    功能说明:
-    - 统一识别 GCC/Clang 常见的 internal compiler error 文本。
-    - 供真实编译路径决定是否追加一次同命令重试，减少编译器偶发异常对回归结果的干扰。
-
-    使用示例:
-    - assert _looks_like_internal_compiler_error("internal compiler error: ...") is True
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    if not isinstance(stderr, str):
-        return False
-    return any(marker in stderr for marker in _COMPILER_ICE_MARKERS)
-
-
-def _run_compiler_command(command: Iterable[str]) -> subprocess.CompletedProcess[str]:
-    """运行编译命令，并在编译器内部异常时追加一次重试。
-
-
-    功能说明:
-    - 统一真实编译路径的命令执行与 stderr 判定逻辑。
-    - 当 stderr 命中编译器内部异常文本时，仅对同一命令追加一次重试。
-    - 让执行引擎与本地编译回归测试复用同一控制流，避免两处维护不同分支。
-
-    使用示例:
-    - result = _run_compiler_command(["g++", "-std=c++17", "demo.cpp", "-o", "demo"])
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - test: test/dsl/gen_kernel/test_gen_kernel.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    argv = list(command)
-    result = subprocess.run(
-        argv,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0 and _looks_like_internal_compiler_error(result.stderr):
-        result = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    return result
-
-
-def _compiler_default() -> str:
-    """返回 P0 默认编译器名。
-
-
-    功能说明:
-    - 以固定值返回执行引擎 P0 的默认编译器名，用于生成可复现的编译命令骨架。
-
-    使用示例:
-    - assert _compiler_default() == "g++"
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_contract.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    return "g++"
-
-
-@dataclass(frozen=True)
-class _CompileResult:
-    """编译产物描述（P0/S2）。
-
-
-    功能说明:
-    - 统一承载编译命令、产物路径与 stdout/stderr，便于测试与记录。
-    - 当编译器内部创建临时工作目录时，会附带私有 cleanup 句柄，用于由上层在合适时机释放。
-
-    使用示例:
-    - artifacts = _CompileResult(
-        soname_path="libkernel.so",
-        source_path="kernel.cpp",
-        command=("g++",),
-        stdout="",
-        stderr="",
-        return_code=0,
-      )
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    soname_path: str
-    source_path: str
-    command: tuple[str, ...]
-    stdout: str
-    stderr: str
-    return_code: int
-    _cleanup: Callable[[], None] | None = field(default=None, repr=False, compare=False)
-
-
-def _compose_compile_unit(
-    *,
-    source: str,
-    _include_lines_for_target: tuple[str, ...],
-    entry_shim_source: str,
-) -> str:
-    """拼接最终编译单元源码。
-
-
-    功能说明:
-    - 以 target include set + 原始 source + entry shim 的顺序拼接编译单元。
-    - 若 source 已含部分 target include，则仅补齐缺失项。
-
-    使用示例:
-    - unit = _compose_compile_unit(
-        source="int main(){}",
-        _include_lines_for_target=('#include \"include/cpu/Memory.h\"',),
-        entry_shim_source="// shim",
-      )
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    missing_includes = tuple(line for line in _include_lines_for_target if line not in source)
-    sections: list[str] = []
-    if missing_includes:
-        sections.append("\n".join(missing_includes))
-    sections.append(source.rstrip())
-    if entry_shim_source:
-        sections.append(entry_shim_source.rstrip())
-    return _join_text_sections(*sections)
-
-
-def _compose_compile_command(
-    *,
-    compiler: str,
-    source_path: str,
-    output_path: str,
-    compiler_flags: Iterable[str],
-    link_flags: Iterable[str],
-    include_dirs: Iterable[str],
-) -> tuple[str, ...]:
-    """生成编译命令（P0/S2）。
-
-
-    功能说明:
-    - 按固定顺序拼装编译命令：compiler + flags + include dirs + source + -o output + link_flags。
-    - 默认生成可共享库产物（-shared -fPIC），便于后续执行阶段载入。
-
-    使用示例:
-    - cmd = _compose_compile_command(
-        compiler="g++",
-        source_path="kernel.cpp",
-        output_path="libkernel.so",
-        compiler_flags=("-std=c++17",),
-        link_flags=(),
-        include_dirs=(".",),
-      )
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    include_args = [f"-I{path}" for path in include_dirs]
-    command = (
-        compiler,
-        "-shared",
-        "-fPIC",
-        *tuple(compiler_flags),
-        *tuple(include_args),
-        source_path,
-        "-o",
-        output_path,
-        *tuple(link_flags),
-    )
-    return tuple(command)
-
-
-def _sanitize_trance_kernel_name(value: str) -> str:
-    """规整 runtime trance 使用的 kernel 名称。
-
-
-    功能说明:
-    - 以公开编译入口 `function` 名为来源，去掉命名空间并替换路径不安全字符。
-    - 只在本文件内部用于 `KG_TRANCE_KERNEL_NAME` 与 `KG_TRANCE_DIR_PATH`。
-
-    使用示例:
-    - _sanitize_trance_kernel_name("npu_demo::add_kernel") == "add_kernel"
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    short_name = value.rsplit("::", 1)[-1].strip()
-    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", short_name)
-    return safe_name or "kernel"
-
-
-def _cpp_string_define_arg(name: str, value: str) -> str:
-    """生成 C++ 字符串宏的编译参数。
-
-
-    功能说明:
-    - 将 Python 字符串转成 `-DNAME="value"` 形式，供 `subprocess` 无 shell 调用直接传给编译器。
-    - 仅转义反斜杠和双引号，避免路径中的普通字符改变宏语义。
-
-    使用示例:
-    - arg = _cpp_string_define_arg("KG_TRANCE_KERNEL_NAME", "add_kernel")
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'-D{name}="{escaped}"'
-
-
-def _trance_compiler_flags(
-    *,
-    function: str,
-    compiler_flags: tuple[str, ...],
-) -> tuple[str, ...]:
-    """按公开 core config 追加 runtime trance 编译宏。
-
-
-    功能说明:
-    - `trance_enabled=False` 时保持原 flags 不变。
-    - `trance_enabled=True` 时追加 `TRANCE`、`KG_TRANCE_KERNEL_NAME`、`KG_TRANCE_DIR_PATH` 与 `KG_TRANCE_FILE_PATH`。
-    - `dump_dir=None` 时把目录和文件路径宏置为空字符串，运行时按 stdout sink 输出。
-    - `dump_dir!=None` 时只注入 `dump_dir/<kernel>/trance` 目录宏；旧单文件宏保持空字符串。
-
-    使用示例:
-    - flags = _trance_compiler_flags(function="add", compiler_flags=("-std=c++17",))
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    if not get_trance_enabled():
-        return compiler_flags
-    kernel_name = _sanitize_trance_kernel_name(function)
-    dump_dir = get_dump_dir()
-    trace_dir = "" if dump_dir is None else str(dump_dir / kernel_name / "trance")
-    return (
-        *compiler_flags,
-        "-DTRANCE",
-        _cpp_string_define_arg("KG_TRANCE_KERNEL_NAME", kernel_name),
-        _cpp_string_define_arg("KG_TRANCE_DIR_PATH", trace_dir),
-        _cpp_string_define_arg("KG_TRANCE_FILE_PATH", ""),
-    )
-
-
-def _compile_unit_source(
-    *,
-    source: str,
-    compiler: str,
-    compiler_flags: tuple[str, ...],
-    link_flags: tuple[str, ...],
-    include_dirs: tuple[str, ...],
-    work_dir: Path | None = None,
-    dry_run: bool = True,
-) -> _CompileResult:
-    """执行或模拟编译流程。
-
-
-    功能说明:
-    - 将编译单元写入工作目录，生成编译命令并执行或 dry-run。
-    - dry_run 模式下仅创建产物占位文件并返回命令，避免依赖真实编译器环境。
-    - 若内部自动创建临时工作目录，则通过返回值携带 cleanup 句柄，由上层在 close / 失败分支释放。
-
-    使用示例:
-    - artifacts = _compile_unit_source(
-        source="int main(){}",
-        compiler="g++",
-        compiler_flags=("-std=c++17",),
-        link_flags=(),
-        include_dirs=(".",),
-        dry_run=True,
-      )
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    cleanup: Callable[[], None] | None = None
-    try:
-        if work_dir is None:
-            work_dir = Path(tempfile.mkdtemp(prefix="kg_execute_engine_"))
-            cleanup = lambda work_dir=work_dir: shutil.rmtree(work_dir, ignore_errors=True)
-        work_dir.mkdir(parents=True, exist_ok=True)
-        source_path = work_dir / "kernel.cpp"
-        soname_path = work_dir / "libkernel.so"
-        source_path.write_text(source, encoding="utf-8")
-        command = _compose_compile_command(
-            compiler=compiler,
-            source_path=str(source_path),
-            output_path=str(soname_path),
-            compiler_flags=compiler_flags,
-            link_flags=link_flags,
-            include_dirs=include_dirs,
-        )
-        if dry_run:
-            soname_path.write_text("", encoding="utf-8")
-            stdout = f"dry-run: {' '.join(command)}"
-            return _CompileResult(
-                soname_path=str(soname_path),
-                source_path=str(source_path),
-                command=command,
-                stdout=stdout,
-                stderr="",
-                return_code=0,
-                _cleanup=cleanup,
-            )
-
-        result = _run_compiler_command(command)
-        return _CompileResult(
-            soname_path=str(soname_path),
-            source_path=str(source_path),
-            command=command,
-            stdout=result.stdout,
-            stderr=result.stderr,
-            return_code=result.returncode,
-            _cleanup=cleanup,
-        )
-    except Exception:
-        if cleanup is not None:
-            try:
-                cleanup()
-            except Exception:
-                pass
-        raise
-
-
-def _include_lines_for_target(target: str) -> tuple[str, ...]:
-    """返回 target 对应的 include set（P0 合同）。
-
-
-    功能说明:
-    - 返回执行引擎 P0 的 target->include family 映射，用于后续阶段把 include 注入到编译单元中。
-    - S1 阶段只保证映射规则存在且可被测试机械检查，不负责解析源码中的 include。
-
-    使用示例:
-    - assert _include_lines_for_target("npu_demo") == ('#include "include/npu_demo/npu_demo.h"',)
-    - assert '#include "include/cpu/Memory.h"' in _include_lines_for_target("cpu")
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_contract.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    if target == "npu_demo":
-        return ('#include "include/npu_demo/npu_demo.h"',)
-    if target == "cpu":
-        return (
-            '#include "include/cpu/Memory.h"',
-            '#include "include/cpu/Nn.h"',
-        )
-    return ()
-
-
-@dataclass(frozen=True)
-class _ParamSpec:
-    """函数形参的最小描述。
-
-
-    功能说明:
-    - 描述 entry shim 绑定所需的参数类别与类型信息。
-    - 仅在本模块内部使用，不对外暴露。
-
-    使用示例:
-    - spec = _ParamSpec(kind="memory", ctype="int32_t", memory_space="GM")
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    kind: str
-    ctype: str
-    memory_space: str | None = None
-    template_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -513,77 +73,6 @@ class _AllowAbsentMemoryArg:
     rank: int
 
 
-_INT_TYPE_PATTERN = re.compile(
-    r"^(?:const\s+)?(?P<type>"
-    r"S_INT|int|short|long|long\s+long|"
-    r"unsigned\s+int|unsigned\s+long|unsigned\s+long\s+long|"
-    r"int32_t|int64_t|uint32_t|uint64_t|size_t"
-    r")(?:\s*&)?\s+\w+$"
-)
-_FLOAT_TYPE_PATTERN = re.compile(
-    r"^(?:const\s+)?(?P<type>float|double)(?:\s*&)?\s+\w+$"
-)
-_KERNEL_CONTEXT_TYPE_PATTERN = re.compile(r"^(?:npu_demo::)?KernelContext\s*&\s+\w+$")
-_MEMORY_TYPE_PATTERN = re.compile(
-    r"^(?:const\s+)?Memory<\s*(?P<space>[^,\s>]+)\s*,\s*(?P<dtype>[^>\s]+)\s*>\s*&\s+\w+$"
-)
-_TEMPLATE_PARAM_PATTERN = re.compile(r"\b(?:typename|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
-_TEMPLATE_DTYPE_OPTIONS: tuple[tuple[int, str], ...] = (
-    (1, "float"),
-    (2, "double"),
-    (3, "int32_t"),
-    (4, "int64_t"),
-)
-_CONCRETE_MEMORY_DTYPE_PATTERN = re.compile(
-    r"Memory<\s*(?:MemorySpace::)?(?:GM|SM|LM|TSM|TLM1|TLM2|TLM3)\s*,\s*"
-    r"(?P<dtype>float|double|int32_t|int64_t|int|long\s+long)\s*>"
-)
-_TEMPLATE_INSTANCE_SEED_PATTERN = re.compile(
-    r"using\s+__kernel_gen_template_instance_seed_[A-Za-z0-9_]+__(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
-    r"Memory<\s*(?:MemorySpace::)?(?:GM|SM|LM|TSM|TLM1|TLM2|TLM3)\s*,\s*"
-    r"(?P<dtype>float|double|int32_t|int64_t|int|long\s+long)\s*>\s*;"
-)
-_ALLOW_ABSENT_MEMORY_ARGS_PATTERN = re.compile(r"//\s*kg\.allow_absent_memory_args:\s*(?P<body>[^\n]*)")
-
-
-def _extract_allow_absent_memory_args(source: str | None) -> tuple[_AllowAbsentMemoryArg, ...]:
-    """从源码注释提取 allow-absent memory 参数元数据。
-
-    功能说明:
-    - 解析 `// kg.allow_absent_memory_args: <index>:<dtype>:<rank>;...`。
-    - 无注释时返回空元组；格式非法时按执行引擎稳定错误失败。
-
-    使用示例:
-    - args = _extract_allow_absent_memory_args("// kg.allow_absent_memory_args: 2:float:1")
-    """
-
-    if not isinstance(source, str) or not source.strip():
-        return ()
-    items: dict[int, _AllowAbsentMemoryArg] = {}
-    for match in _ALLOW_ABSENT_MEMORY_ARGS_PATTERN.finditer(source):
-        body = match.group("body").strip()
-        if not body:
-            continue
-        for item in body.split(";"):
-            text = item.strip()
-            if not text:
-                continue
-            parts = text.split(":")
-            if len(parts) != 3:
-                raise _execution_engine_error(_RUNTIME_THROW_OR_ABORT, "invalid allow-absent memory metadata")
-            index_text, dtype_text, rank_text = parts
-            try:
-                index = int(index_text)
-                rank = int(rank_text)
-            except ValueError as exc:
-                raise _execution_engine_error(_RUNTIME_THROW_OR_ABORT, "invalid allow-absent memory metadata") from exc
-            dtype = dtype_text.strip()
-            if index < 0 or rank <= 0 or not dtype or _dtype_code_from_name(dtype) == 0:
-                raise _execution_engine_error(_RUNTIME_THROW_OR_ABORT, "invalid allow-absent memory metadata")
-            items[index] = _AllowAbsentMemoryArg(index=index, dtype=dtype, rank=rank)
-    return tuple(items[index] for index in sorted(items))
-
-
 def _allow_absent_memory_arg_map(metadata: tuple[_AllowAbsentMemoryArg, ...]) -> dict[int, _AllowAbsentMemoryArg]:
     """把 allow-absent metadata 转成按 runtime index 查询的字典。
 
@@ -595,196 +84,6 @@ def _allow_absent_memory_arg_map(metadata: tuple[_AllowAbsentMemoryArg, ...]) ->
     """
 
     return {item.index: item for item in metadata}
-
-
-def _split_params(params_text: str) -> tuple[str, ...]:
-    """按顶层逗号切分函数形参。
-
-
-    功能说明:
-    - 对带模板参数的函数形参进行稳定切分。
-    - 忽略 `<...>`、`(...)`、`[...]` 内部逗号，避免误拆。
-
-    使用示例:
-    - _split_params("Memory<GM, int32_t>& out, const Memory<GM, int32_t>& lhs")
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    if not params_text.strip():
-        return ()
-    parts: list[str] = []
-    current: list[str] = []
-    angle_depth = 0
-    paren_depth = 0
-    bracket_depth = 0
-    for ch in params_text:
-        if ch == "<":
-            angle_depth += 1
-        elif ch == ">":
-            angle_depth = max(0, angle_depth - 1)
-        elif ch == "(":
-            paren_depth += 1
-        elif ch == ")":
-            paren_depth = max(0, paren_depth - 1)
-        elif ch == "[":
-            bracket_depth += 1
-        elif ch == "]":
-            bracket_depth = max(0, bracket_depth - 1)
-        if ch == "," and angle_depth == 0 and paren_depth == 0 and bracket_depth == 0:
-            item = "".join(current).strip()
-            if item:
-                parts.append(item)
-            current = []
-            continue
-        current.append(ch)
-    tail = "".join(current).strip()
-    if tail:
-        parts.append(tail)
-    return tuple(parts)
-
-
-def _template_names_from_header(template_text: str | None) -> frozenset[str]:
-    """解析 C++ template header 中的类型参数名。
-
-    功能说明:
-    - 仅识别 `typename T` / `class T` 形式。
-    - 无 template header 时返回空集合。
-
-    使用示例:
-    - names = _template_names_from_header("typename T1, typename T2")
-    """
-
-    if template_text is None:
-        return frozenset()
-    return frozenset(_TEMPLATE_PARAM_PATTERN.findall(template_text))
-
-
-def _template_names_before_function(source: str, function_start: int) -> frozenset[str]:
-    """读取紧邻函数定义前的 C++ template header。
-
-    功能说明:
-    - 当正则从函数返回类型处开始匹配时，补充解析其前一段紧邻的 `template <...>`。
-    - 只接受被 `;` / `{` / `}` 分隔后的最后一段文本，避免误用更早的模板声明。
-
-    使用示例:
-    - names = _template_names_before_function(source, function_start)
-    """
-
-    prefix = source[:function_start]
-    boundary = max(prefix.rfind(";"), prefix.rfind("{"), prefix.rfind("}"))
-    tail = prefix[boundary + 1 :].strip()
-    match = re.search(r"template\s*<(?P<template>[^>]*)>\s*[^;{}]*$", tail, re.DOTALL)
-    if match is None:
-        return frozenset()
-    return _template_names_from_header(match.group("template"))
-
-
-def _parse_param_spec(param_text: str, template_names: frozenset[str] = frozenset()) -> _ParamSpec | None:
-    """把单个形参文本解析为最小参数规格。
-
-
-    功能说明:
-    - 支持 `Memory<Space, T>&`、整型标量、浮点标量三类参数。
-    - 不支持的参数形态返回 `None`，由上层回退占位 shim。
-
-    使用示例:
-    - _parse_param_spec("const Memory<GM, int32_t>& lhs")
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    normalized = " ".join(param_text.strip().split())
-    memory_match = _MEMORY_TYPE_PATTERN.match(normalized)
-    if memory_match is not None:
-        dtype = memory_match.group("dtype")
-        return _ParamSpec(
-            kind="memory",
-            ctype=dtype,
-            memory_space=memory_match.group("space"),
-            template_name=dtype if dtype in template_names else None,
-        )
-    int_match = _INT_TYPE_PATTERN.match(normalized)
-    if int_match is not None:
-        return _ParamSpec(kind="int", ctype=int_match.group("type"))
-    float_match = _FLOAT_TYPE_PATTERN.match(normalized)
-    if float_match is not None:
-        return _ParamSpec(kind="float", ctype=float_match.group("type"))
-    if _KERNEL_CONTEXT_TYPE_PATTERN.match(normalized):
-        return _ParamSpec(kind="kernel_context", ctype="npu_demo::KernelContext")
-    return None
-
-
-def _extract_param_specs(source: str, function: str) -> tuple[_ParamSpec, ...] | None:
-    """从源码中提取 function 定义对应的参数规格。
-
-
-    功能说明:
-    - 在源码中查找目标函数定义并解析参数。
-    - 同时尝试完整名称与短名（去命名空间）匹配。
-
-    使用示例:
-    - _extract_param_specs("void add_kernel(...)", "add_kernel")
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    candidates = [function]
-    short_name = function.split("::")[-1]
-    if short_name not in candidates:
-        candidates.append(short_name)
-
-    for function_name in candidates:
-        pattern = re.compile(
-            rf"(?:template\s*<(?P<template>[^>]*)>\s*)?[^;{{}}]*\b{re.escape(function_name)}\s*\((?P<params>.*?)\)\s*\{{",
-            re.DOTALL,
-        )
-        for match in pattern.finditer(source):
-            params = _split_params(match.group("params"))
-            template_names = _template_names_from_header(match.groupdict().get("template"))
-            if not template_names:
-                function_start = source.rfind(function_name, match.start(), match.start("params"))
-                template_names = _template_names_before_function(
-                    source,
-                    function_start if function_start >= 0 else match.start(),
-                )
-            specs: list[_ParamSpec] = []
-            for param in params:
-                spec = _parse_param_spec(param, template_names)
-                if spec is None:
-                    specs = []
-                    break
-                specs.append(spec)
-            if specs or not params:
-                return tuple(specs)
-    return None
-
-
-def _template_names_from_param_specs(params: tuple[_ParamSpec, ...]) -> tuple[str, ...]:
-    """按参数顺序收集 template dtype 名称。
-
-    功能说明:
-    - 仅收集 memory 参数中出现的 `template_name`。
-    - 保持首次出现顺序，供 shim 生成模板实参列表。
-
-    使用示例:
-    - names = _template_names_from_param_specs(params)
-    """
-
-    names: list[str] = []
-    for spec in params:
-        if spec.template_name is not None and spec.template_name not in names:
-            names.append(spec.template_name)
-    return tuple(names)
 
 
 def _dtype_code_from_name(dtype: str | None) -> int:
@@ -812,333 +111,6 @@ def _dtype_code_from_name(dtype: str | None) -> int:
     return 0
 
 
-def _runtime_template_combinations_from_source(
-    template_names: tuple[str, ...],
-    source: str | None,
-) -> tuple[dict[str, tuple[int, str]], ...]:
-    """根据源码中的 concrete memory dtype 生成唯一模板实例。
-
-    功能说明:
-    - 优先使用 `gen_kernel` 生成源码中的 template dtype seed alias，按 template name 精确绑定 dtype。
-    - 其次使用函数体里 concrete `Memory<..., dtype>` 的 dtype，避免生成全组合 dispatcher。
-    - 找不到 concrete dtype 时稳定失败；手写 templated compile 缺少 runtime dtype 实例信息时不得默认 `float`。
-
-    使用示例:
-    - combos = _runtime_template_combinations_from_source(("T1",), source)
-    """
-
-    if not template_names:
-        return ()
-    if isinstance(source, str):
-        seed_types: dict[str, tuple[int, str]] = {}
-        for match in _TEMPLATE_INSTANCE_SEED_PATTERN.finditer(source):
-            name = match.group("name")
-            if name not in template_names or name in seed_types:
-                continue
-            code = _dtype_code_from_name(match.group("dtype"))
-            if code == 0:
-                continue
-            ctype = next((candidate for candidate_code, candidate in _TEMPLATE_DTYPE_OPTIONS if candidate_code == code), None)
-            if ctype is not None:
-                seed_types[name] = (code, ctype)
-        if seed_types:
-            if all(name in seed_types for name in template_names):
-                return ({name: seed_types[name] for name in template_names},)
-            raise _execution_engine_error(
-                _TEMPLATE_INSTANCE_REQUIRED,
-                "templated memory function requires concrete memory dtype in source",
-            )
-        for match in _CONCRETE_MEMORY_DTYPE_PATTERN.finditer(source):
-            code = _dtype_code_from_name(match.group("dtype"))
-            if code == 0:
-                continue
-            ctype = next((candidate for candidate_code, candidate in _TEMPLATE_DTYPE_OPTIONS if candidate_code == code), None)
-            if ctype is not None:
-                return ({name: (code, ctype) for name in template_names},)
-    raise _execution_engine_error(
-        _TEMPLATE_INSTANCE_REQUIRED,
-        "templated memory function requires concrete memory dtype in source",
-    )
-
-
-def _runtime_param_declaration_lines(
-    params: tuple[_ParamSpec, ...],
-    template_types: dict[str, tuple[int, str]] | None = None,
-    allow_absent_memory_args: tuple[_AllowAbsentMemoryArg, ...] = (),
-) -> tuple[list[str], list[str], list[str]]:
-    """生成 runtime shim 参数校验、声明与调用实参。
-
-    功能说明:
-    - 普通函数与 templated 函数共用同一套 memory/int/float 参数封送文本。
-    - `template_types` 非空时，template memory dtype 改用当前实例化 C++ 类型。
-    - 带 allow-absent metadata 的 memory 参数允许 `data == nullptr`，但 shape/stride 仍必须有效。
-
-    使用示例:
-    - lines, call_args, trance_lines = _runtime_param_declaration_lines(params, {"T1": (1, "float")})
-    """
-
-    lines: list[str] = []
-    call_args: list[str] = []
-    trance_arg_lines: list[str] = []
-    runtime_arg_index = 0
-    allow_absent_map = _allow_absent_memory_arg_map(allow_absent_memory_args)
-    for spec in params:
-        if spec.kind == "kernel_context":
-            lines.append("  npu_demo::KernelContext ctx;")
-            call_args.append("ctx")
-            continue
-        runtime_idx = runtime_arg_index
-        runtime_arg_index += 1
-        if spec.kind == "memory":
-            ctype = spec.ctype
-            if spec.template_name is not None and template_types is not None:
-                ctype = template_types[spec.template_name][1]
-            null_data_check = "ordered_args[{idx}].data == nullptr || " if runtime_idx not in allow_absent_map else ""
-            lines.extend(
-                [
-                    f"  if (ordered_args[{runtime_idx}].kind != KG_ARG_MEMORY) {{",
-                    "    return -1;",
-                    "  }",
-                    f"  if ({null_data_check.format(idx=runtime_idx)}ordered_args[{runtime_idx}].shape == nullptr || ordered_args[{runtime_idx}].stride == nullptr) {{",
-                    "    return -1;",
-                    "  }",
-                    f"  Memory<{spec.memory_space}, {ctype}> arg{runtime_idx}(",
-                    f"      reinterpret_cast<{ctype}*>(ordered_args[{runtime_idx}].data),",
-                    f"      ordered_args[{runtime_idx}].shape,",
-                    f"      ordered_args[{runtime_idx}].stride,",
-                    f"      ordered_args[{runtime_idx}].rank);",
-                ]
-            )
-            call_args.append(f"arg{runtime_idx}")
-            trance_arg_lines.append(f'  arg{runtime_idx}.trance_print(__kg_trance_sink, "arg{runtime_idx}");')
-            continue
-        if spec.kind == "int":
-            lines.extend(
-                [
-                    f"  if (ordered_args[{runtime_idx}].kind != KG_ARG_INT) {{",
-                    "    return -1;",
-                    "  }",
-                    f"  {spec.ctype} arg{runtime_idx} = static_cast<{spec.ctype}>(ordered_args[{runtime_idx}].int_value);",
-                ]
-            )
-            call_args.append(f"arg{runtime_idx}")
-            trance_arg_lines.append(f'  kernelcode::trance::print_value_arg(__kg_trance_sink, "arg{runtime_idx}", arg{runtime_idx});')
-            continue
-        lines.extend(
-            [
-                f"  if (ordered_args[{runtime_idx}].kind != KG_ARG_FLOAT) {{",
-                "    return -1;",
-                "  }",
-                f"  {spec.ctype} arg{runtime_idx} = static_cast<{spec.ctype}>(ordered_args[{runtime_idx}].float_value);",
-            ]
-        )
-        call_args.append(f"arg{runtime_idx}")
-        trance_arg_lines.append(f'  kernelcode::trance::print_value_arg(__kg_trance_sink, "arg{runtime_idx}", arg{runtime_idx});')
-    return lines, call_args, trance_arg_lines
-
-
-def _template_condition_lines(
-    params: tuple[_ParamSpec, ...],
-    template_types: dict[str, tuple[int, str]],
-) -> list[str]:
-    """生成 template runtime dtype 分支条件。
-
-    功能说明:
-    - 每个携带 template name 的 memory 参数必须匹配当前实例化 dtype code。
-
-    使用示例:
-    - conditions = _template_condition_lines(params, {"T1": (1, "float")})
-    """
-
-    conditions: list[str] = []
-    runtime_arg_index = 0
-    for spec in params:
-        if spec.kind == "kernel_context":
-            continue
-        runtime_idx = runtime_arg_index
-        runtime_arg_index += 1
-        if spec.kind == "memory" and spec.template_name is not None:
-            code, _ctype = template_types[spec.template_name]
-            conditions.append(f"ordered_args[{runtime_idx}].dtype_code == {code}")
-    return conditions
-
-
-def _build_runtime_entry_shim_source(
-    *,
-    function: str,
-    entry_point: str,
-    params: tuple[_ParamSpec, ...],
-    source: str | None = None,
-) -> str:
-    """根据参数规格生成可运行 entry shim。
-
-
-    功能说明:
-    - 生成稳定的 C ABI 入口：`extern "C" int <entry_point>(...)`。
-    - 把 `ordered_args` 映射为函数形参并执行真实调用；若首参是 `npu_demo::KernelContext&`，
-      则自动构造默认上下文并把它作为第一个实参传入 body。
-
-    使用示例:
-    - _build_runtime_entry_shim_source(function="add_kernel", entry_point="kg_execute_entry", params=(...))
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    runtime_params = [spec for spec in params if spec.kind != "kernel_context"]
-    allow_absent_memory_args = _extract_allow_absent_memory_args(source)
-    lines: list[str] = [
-        f"// runtime entry shim for {function} as {entry_point}",
-        "enum KgArgKind : int {",
-        "  KG_ARG_MEMORY = 1,",
-        "  KG_ARG_INT = 2,",
-        "  KG_ARG_FLOAT = 3,",
-        "};",
-        "struct _ArgSlot {",
-        "  int kind;",
-        "  void* data;",
-        "  const long long* shape;",
-        "  const long long* stride;",
-        "  unsigned long long rank;",
-        "  int dtype_code;",
-        "  long long int_value;",
-        "  double float_value;",
-        "};",
-        f'extern "C" int {entry_point}(const _ArgSlot* ordered_args, unsigned long long arg_count) {{',
-        "  if (ordered_args == nullptr) {",
-        "    return -1;",
-        "  }",
-        f"  if (arg_count != {len(runtime_params)}ULL) {{",
-        "    return -1;",
-        "  }",
-        "#ifdef TRANCE",
-        "  const bool __kg_trance_entry_log_enabled = KG_TRANCE_DIR_PATH[0] == '\\0';",
-        "  kernelcode::trance::ScopedTranceSink __kg_trance_scope;",
-        "  const kernelcode::trance::TranceSink& __kg_trance_sink = kernelcode::trance::current_sink();",
-        "  if (__kg_trance_entry_log_enabled) {",
-        '    kernelcode::trance::print_func_begin(__kg_trance_sink, KG_TRANCE_KERNEL_NAME, "template=<none>");',
-        '    kernelcode::trance::write_line(__kg_trance_sink, "args =");',
-        "  }",
-        "#endif",
-    ]
-    template_names = _template_names_from_param_specs(params)
-    if template_names:
-        for template_types in _runtime_template_combinations_from_source(template_names, source):
-            conditions = _template_condition_lines(params, template_types)
-            if not conditions:
-                continue
-            lines.append(f"  if ({' && '.join(conditions)}) {{")
-            branch_lines, call_args, trance_arg_lines = _runtime_param_declaration_lines(
-                params,
-                template_types,
-                allow_absent_memory_args,
-            )
-            lines.extend(f"  {line}" if line else line for line in branch_lines)
-            if trance_arg_lines:
-                lines.extend(
-                    [
-                        "  #ifdef TRANCE",
-                        "    if (__kg_trance_entry_log_enabled) {",
-                        *(f"    {line}" for line in trance_arg_lines),
-                        "    }",
-                        "  #endif",
-                    ]
-                )
-            template_args = ", ".join(template_types[name][1] for name in template_names)
-            lines.append(f"  {function}<{template_args}>({', '.join(call_args)});")
-            lines.append("    return 0;")
-            lines.append("  }")
-        lines.extend(["  return -1;", "}", ""])
-        return _join_text_sections("\n".join(lines))
-
-    decl_lines, call_args, trance_arg_lines = _runtime_param_declaration_lines(
-        params,
-        allow_absent_memory_args=allow_absent_memory_args,
-    )
-    lines.extend(decl_lines)
-    if trance_arg_lines:
-        lines.extend(
-            [
-                "#ifdef TRANCE",
-                "  if (__kg_trance_entry_log_enabled) {",
-                *trance_arg_lines,
-                "  }",
-                "#endif",
-            ]
-        )
-    lines.extend(
-        [
-            f"  {function}({', '.join(call_args)});",
-            "  return 0;",
-            "}",
-            "",
-        ]
-    )
-    return _join_text_sections("\n".join(lines))
-
-
-def _requires_entry_shim(source: str, entry_point: str) -> bool:
-    """判断是否需要生成 entry shim。
-
-
-    功能说明:
-    - 当源码未显式提供 `extern "C"` 且同名入口时，返回 True。
-    - 用于避免重复生成已存在的稳定入口。
-
-    使用示例:
-    - assert _requires_entry_shim('extern "C" int kg_execute_entry(...) { return 0; }', "kg_execute_entry") is False
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    if not isinstance(source, str) or not isinstance(entry_point, str):
-        return True
-    pattern = rf'extern\s+"C"\s+[^;{{]*\b{re.escape(entry_point)}\b'
-    return re.search(pattern, source) is None
-
-
-def _compose_entry_shim_source(*, function: str, entry_point: str, source: str | None = None) -> str:
-    """构造 entry shim 源码片段。
-
-
-    功能说明:
-    - 可解析参数时生成真实参数绑定 shim，用于 `ExecutionEngine.execute` 的真实调用。
-    - body 函数若以 `npu_demo::KernelContext&` 作为首参，会被桥接为默认构造上下文 + 真实 runtime 参数。
-    - 参数不可解析时回退最小占位 shim，保持历史编译路径兼容。
-
-    使用示例:
-    - src = _compose_entry_shim_source(function="cpu::add", entry_point="kg_execute_entry", source="void add(){}")
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    if isinstance(source, str) and source.strip():
-        params = _extract_param_specs(source, function)
-        if params is not None:
-            return _build_runtime_entry_shim_source(
-                function=function,
-                entry_point=entry_point,
-                params=params,
-                source=source,
-            )
-    return (
-        f"// entry shim placeholder for {function} as {entry_point}\n"
-        "struct _ArgSlot;\n"
-        f'extern "C" int {entry_point}(const _ArgSlot* ordered_args, unsigned long long arg_count) {{\n'
-        "  (void)ordered_args;\n"
-        "  (void)arg_count;\n"
-        "  return 0;\n"
-        "}\n"
-    )
-
 _TARGET_HEADER_MISMATCH = "target_header_mismatch"
 _SOURCE_EMPTY_OR_INVALID = "source_empty_or_invalid"
 _COMPILE_FAILED = "compile_failed"
@@ -1162,7 +134,6 @@ _KNOWN_ERROR_PHRASES: frozenset[str] = frozenset(
         _EXECUTION_UNSUPPORTED,
     }
 )
-
 
 
 class _StringValue(Protocol):
@@ -1229,118 +200,6 @@ def _execution_engine_error(failure_phrase: str, detail: str = "") -> KernelCode
     return error
 
 
-def _source_include_family(source: str) -> str | None:
-    """从 source 粗略推断 include family。
-
-
-    功能说明:
-    - 用于在不执行真实编译的前提下，对 `target` 与源码 include family 的一致性进行最小校验。
-    - 只识别仓库内约定路径片段：`include/cpu/` 与 `include/npu_demo/`。
-
-    使用示例:
-    - assert _source_include_family('#include \"include/cpu/Memory.h\"') == \"cpu\"
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    has_cpu = "include/cpu/" in source
-    has_npu = "include/npu_demo/" in source
-    if has_cpu and has_npu:
-        return "mixed"
-    if has_cpu:
-        return "cpu"
-    if has_npu:
-        return "npu_demo"
-    return None
-
-
-def _inject_npu_demo_namespace_aliases(source: str) -> str:
-    """为 `npu_demo::foo` 生成最小命名空间别名，兼容全局实现。
-
-
-    功能说明:
-    - 识别源码中的 `npu_demo::` 调用，并注入 `namespace npu_demo { using ::foo; }` 别名。
-    - 解决 `emit_c` 使用命名空间调用、但头文件只提供全局符号时的真实编译失败。
-
-    使用示例:
-    - _inject_npu_demo_namespace_aliases('#include "include/npu_demo/npu_demo.h"\\nvoid f(){ npu_demo::add(a,b,c); }')
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    symbols = sorted(set(re.findall(r"npu_demo::([A-Za-z_]\w*)\s*\(", source)))
-    if not symbols:
-        return source
-    alias_lines = ["namespace npu_demo {"]
-    alias_lines.extend(f"using ::{symbol};" for symbol in symbols)
-    alias_lines.append("}")
-    alias_block = "\n".join(alias_lines) + "\n"
-    include_match = re.match(r"((?:\s*#include[^\n]*\n)+)", source)
-    if include_match is not None:
-        return f"{source[:include_match.end()]}\n{alias_block}{source[include_match.end():]}"
-    return f"{alias_block}\n{source}"
-
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-def _ensure_compiler_flags(flags: tuple[str, ...]) -> tuple[str, ...]:
-    """确保编译 flags 包含 -std=c++17 基线。
-
-
-    功能说明:
-    - 若调用方未提供 `-std=c++17`，则按基线规则补齐。
-    - 其余 flags 保持原有顺序。
-
-    使用示例:
-    - assert _ensure_compiler_flags(("-O2",)) == ("-std=c++17", "-O2")
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    if "-std=c++17" in flags:
-        return flags
-    return ("-std=c++17", *flags)
-
-
-def _resolve_compiler_name(compiler: str | None) -> str:
-    """解析编译器名称（P0/S2）。
-
-
-    功能说明:
-    - 当 compiler 为空时回退到默认编译器。
-    - 若 compiler 为空字符串或非字符串，则视为无效输入。
-
-    使用示例:
-    - assert _resolve_compiler_name(None) == "g++"
-
-    关联文件:
-    - spec: spec/execute_engine/execute_engine_target.md
-    - test: test/execute_engine/test_compile.py
-    - 功能实现: kernel_gen/execute_engine/compiler.py
-    """
-
-    if compiler is None:
-        return _compiler_default()
-    if not isinstance(compiler, str) or not compiler.strip():
-        raise _execution_engine_error(
-            _COMPILE_FAILED,
-            "compiler is empty",
-        )
-    return compiler
-
-
-
-
 @dataclass(frozen=True)
 class CompileRequest:
     """编译请求模型（P0）。"""
@@ -1389,6 +248,29 @@ class _ArgSlot:
     shape: tuple[int, ...] | None
     stride: tuple[int, ...] | None
     value: RuntimeInput
+
+
+class _CArgSlot(ctypes.Structure):
+    """entry shim C ABI 槽位结构。
+
+    功能说明:
+    - 固定 Python 侧与 C++ entry shim 共用的参数槽位内存布局。
+    - 顶层定义避免运行时封送逻辑在函数内部创建嵌套类。
+
+    使用示例:
+    - slot = _CArgSlot(kind=2, data=None, shape=None, stride=None, rank=0, dtype_code=0, int_value=1, float_value=0.0)
+    """
+
+    _fields_ = [
+        ("kind", ctypes.c_int),
+        ("data", ctypes.c_void_p),
+        ("shape", ctypes.POINTER(ctypes.c_longlong)),
+        ("stride", ctypes.POINTER(ctypes.c_longlong)),
+        ("rank", ctypes.c_ulonglong),
+        ("dtype_code", ctypes.c_int),
+        ("int_value", ctypes.c_longlong),
+        ("float_value", ctypes.c_double),
+    ]
 
 
 def _normalize_dtype(value: _StringValue | None) -> str | None:
@@ -1822,19 +704,7 @@ def _marshal_slots_for_abi(
     - 功能实现: kernel_gen/execute_engine/compiler.py
     """
 
-    class _C_ArgSlot(ctypes.Structure):
-        _fields_ = [
-            ("kind", ctypes.c_int),
-            ("data", ctypes.c_void_p),
-            ("shape", ctypes.POINTER(ctypes.c_longlong)),
-            ("stride", ctypes.POINTER(ctypes.c_longlong)),
-            ("rank", ctypes.c_ulonglong),
-            ("dtype_code", ctypes.c_int),
-            ("int_value", ctypes.c_longlong),
-            ("float_value", ctypes.c_double),
-        ]
-
-    c_slots: list[_C_ArgSlot] = []
+    c_slots: list[_CArgSlot] = []
     keepalive: list[ctypes.Array] = []
     for slot in ordered_slots:
         if slot.kind == "memory":
@@ -1856,7 +726,7 @@ def _marshal_slots_for_abi(
             keepalive.extend([shape_buffer, stride_buffer])
             data_pointer = 0 if slot.value is None else _runtime_data_pointer(slot.value)
             c_slots.append(
-                _C_ArgSlot(
+                _CArgSlot(
                     kind=1,
                     data=ctypes.c_void_p(data_pointer),
                     shape=ctypes.cast(shape_buffer, ctypes.POINTER(ctypes.c_longlong)),
@@ -1870,7 +740,7 @@ def _marshal_slots_for_abi(
             continue
         if slot.kind == "int":
             c_slots.append(
-                _C_ArgSlot(
+                _CArgSlot(
                     kind=2,
                     data=ctypes.c_void_p(0),
                     shape=ctypes.POINTER(ctypes.c_longlong)(),
@@ -1884,7 +754,7 @@ def _marshal_slots_for_abi(
             continue
         if slot.kind == "float":
             c_slots.append(
-                _C_ArgSlot(
+                _CArgSlot(
                     kind=3,
                     data=ctypes.c_void_p(0),
                     shape=ctypes.POINTER(ctypes.c_longlong)(),
@@ -1900,10 +770,10 @@ def _marshal_slots_for_abi(
             _RUNTIME_THROW_OR_ABORT,
             f"unsupported slot kind at position {slot.position}",
         )
-    slot_array_type = _C_ArgSlot * len(c_slots)
+    slot_array_type = _CArgSlot * len(c_slots)
     slot_array = slot_array_type(*c_slots)
     keepalive.append(slot_array)
-    return (slot_array, _C_ArgSlot, tuple(keepalive))
+    return (slot_array, _CArgSlot, tuple(keepalive))
 
 
 def _invoke_placeholder_entry(_slots: tuple[_ArgSlot, ...]) -> int:
@@ -2280,118 +1150,68 @@ def get_compile_strategy(target: str) -> CompileStrategy:
     return strategy
 
 
+from kernel_gen.execute_engine.target_support import (
+    BuiltinTargetSupportArtifacts,
+    build_builtin_target_support_artifacts,
+)
+
+
+def _allow_absent_memory_args_from_specs(
+    specs: tuple[tuple[int, str, int], ...],
+) -> tuple[_AllowAbsentMemoryArg, ...]:
+    """把 target support 的纯元数据转成执行期 allow-absent memory 描述。
+
+    功能说明:
+    - 保持 `target_support.py` 不依赖本文件私有运行期结构。
+    - 仅在内置 strategy 装配 `CompiledKernel` 前做字段转换。
+
+    使用示例:
+    - metadata = _allow_absent_memory_args_from_specs(((1, "float", 2),))
+    """
+
+    return tuple(_AllowAbsentMemoryArg(index=index, dtype=dtype, rank=rank) for index, dtype, rank in specs)
+
+
+def _compiled_kernel_from_builtin_artifacts(
+    request: CompileRequest,
+    artifacts: BuiltinTargetSupportArtifacts,
+) -> CompiledKernel:
+    """把内置 target 编译 artifact 装配为公开 kernel 描述。
+
+    功能说明:
+    - 统一 `BuiltinTargetSupportArtifacts` 到 `CompiledKernel` 的字段映射。
+    - 保持 target support 模块只暴露标准库字段，不承接执行期对象构造。
+
+    使用示例:
+    - kernel = _compiled_kernel_from_builtin_artifacts(request, artifacts)
+    """
+
+    return CompiledKernel(
+        target=request.target,
+        soname_path=artifacts.soname_path,
+        function=request.function,
+        entry_point=request.entry_point,
+        compile_stdout=artifacts.stdout,
+        compile_stderr=artifacts.stderr,
+        allow_absent_memory_args=_allow_absent_memory_args_from_specs(artifacts.allow_absent_memory_arg_specs),
+        _cleanup=artifacts.cleanup,
+    )
+
+
 def _compile_with_builtin_strategy(request: CompileRequest) -> CompiledKernel:
     """执行内置 CPU/npu_demo 编译策略。
 
 
     功能说明:
-    - 承接原有 `ExecutionEngine.compile(...)` 的 include、shim、编译命令与产物校验逻辑。
-    - 仅由内置 compile strategy 调用；`ExecutionEngine.compile(...)` 不再维护 target 白名单分支。
+    - 委托 `target_support.py` 生成 include、shim、编译命令与产物。
+    - 在本文件内把 artifact 转换为 `CompiledKernel`，保持公开入口和运行期私有结构不外泄。
 
     使用示例:
     - kernel = _compile_with_builtin_strategy(request)
     """
 
-    source = request.source
-    target = request.target
-    function = request.function
-    entry_point = request.entry_point
-    compiler = _resolve_compiler_name(request.compiler)
-    compiler_flags = _ensure_compiler_flags(request.compiler_flags)
-    link_flags = request.link_flags
-
-    if source is None or not isinstance(source, str) or not source.strip():
-        raise _execution_engine_error(
-            _SOURCE_EMPTY_OR_INVALID,
-            "source is empty",
-        )
-    include_family = _source_include_family(source)
-    if include_family == "mixed":
-        raise _execution_engine_error(
-            _TARGET_HEADER_MISMATCH,
-            "source includes mixed target include families",
-        )
-    if include_family is not None and include_family != target:
-        raise _execution_engine_error(
-            _TARGET_HEADER_MISMATCH,
-            f"source include family mismatch: source={include_family}, target={target}",
-        )
-    if "#error" in source:
-        raise _execution_engine_error(
-            _COMPILE_FAILED,
-            "source contains #error directive",
-        )
-    if function is None or not isinstance(function, str) or not function.strip():
-        raise _execution_engine_error(
-            _SYMBOL_RESOLVE_FAILED,
-            "function is empty",
-        )
-    if not isinstance(entry_point, str) or not entry_point.strip():
-        raise _execution_engine_error(
-            _SYMBOL_RESOLVE_FAILED,
-            "entry_point is empty",
-        )
-    compiler_flags = _trance_compiler_flags(
-        function=function,
-        compiler_flags=compiler_flags,
-    )
-
-    target_headers = _include_lines_for_target(target)
-    if not target_headers:
-        raise _execution_engine_error(
-            _TARGET_HEADER_MISMATCH,
-            f"unsupported target: {target}",
-        )
-    shim_source = ""
-    if _requires_entry_shim(source, entry_point):
-        shim_source = _compose_entry_shim_source(
-            function=function,
-            entry_point=entry_point,
-            source=source,
-        )
-    allow_absent_memory_args = _extract_allow_absent_memory_args(source)
-    compile_unit = _compose_compile_unit(
-        source=source,
-        _include_lines_for_target=target_headers,
-        entry_shim_source=shim_source,
-    )
-    artifacts = _compile_unit_source(
-        source=compile_unit,
-        compiler=compiler,
-        compiler_flags=compiler_flags,
-        link_flags=link_flags,
-        include_dirs=(str(REPO_ROOT),),
-        dry_run=(target == "cpu"),
-    )
-    try:
-        if artifacts.return_code != 0:
-            raise _execution_engine_error(
-                _COMPILE_FAILED,
-                f"compiler returned non-zero ({artifacts.return_code})",
-            )
-        if not Path(artifacts.soname_path).exists():
-            raise _execution_engine_error(
-                _COMPILE_FAILED,
-                "compile output is missing",
-            )
-    except Exception:
-        if artifacts._cleanup is not None:
-            try:
-                artifacts._cleanup()
-            except Exception:
-                pass
-        raise
-
-    return CompiledKernel(
-        target=target,
-        soname_path=artifacts.soname_path,
-        function=function,
-        entry_point=entry_point,
-        compile_stdout=artifacts.stdout,
-        compile_stderr=artifacts.stderr,
-        allow_absent_memory_args=allow_absent_memory_args,
-        _cleanup=artifacts._cleanup,
-    )
+    artifacts = build_builtin_target_support_artifacts(request)
+    return _compiled_kernel_from_builtin_artifacts(request, artifacts)
 
 
 class _BuiltinCompileStrategy:

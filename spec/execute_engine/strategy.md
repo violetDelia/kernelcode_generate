@@ -4,6 +4,7 @@
 
 - 定义 `ExecutionEngine.compile(...)` 的 compile strategy 扩展合同。
 - 内置 `cpu` / `npu_demo` strategy 保持既有真实编译行为。
+- 内置 strategy 的 registry 与 `CompiledKernel` 装配由 `compiler.py` 承接，target include、entry shim 与编译产物生成由 `target_support.py` 承接。
 - 第三方 target 可通过公开 registry 注册 compile strategy；缺失时公开失败，不得 fallback 到 CPU。
 
 ## API 列表
@@ -19,9 +20,11 @@
 
 - `spec`：`spec/execute_engine/strategy.md`
 - `功能实现`：`kernel_gen/execute_engine/compiler.py`
+- `功能实现`：`kernel_gen/execute_engine/target_support.py`
 - `功能实现`：`kernel_gen/execute_engine/__init__.py`
 - `test`：`test/execute_engine/test_compile_strategy.py`
 - `test`：`test/execute_engine/test_contract.py`
+- `test`：`test/execute_engine/test_target_support.py`
 
 ## 依赖
 
@@ -44,6 +47,7 @@
 - `ExecutionEngine.compile(request=...)` 与 `source` 或 `function` 混用时必须以 `source_empty_or_invalid` 失败，错误文本包含 `request cannot be combined with source or function`。
 - `CompiledKernel.execute(...)` 对 `target` 不在 `cpu` / `npu_demo` 的 compile-only kernel 必须以 `execution_unsupported` 失败。
 - SourceBundle decode/write helper 不公开；strategy 可自行消费 aggregate string，但不得新增公开 helper。
+- `kernel_gen.execute_engine.target_support.BuiltinTargetSupportArtifacts` 与 `build_builtin_target_support_artifacts(...)` 只作为内置 target strategy 的文件级实现边界；不写入包根 `__all__`，第三方 strategy 不依赖该 helper 作为公开扩展点。
 
 ## API详细说明
 
