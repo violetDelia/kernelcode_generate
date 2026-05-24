@@ -1151,16 +1151,19 @@ def test_build_registered_symbol_buffer_hoist_pass() -> None:
 # 对应测试文件路径: test/passes/test_registry.py
 def test_build_registered_arch_parallelize_pass() -> None:
     load_builtin_passes()
+    arch_module = importlib.import_module("kernel_gen.passes.arch_parallelize")
 
     pass_obj = build_registered_pass(
         "arch-parallelize",
         {"target": "npu_demo", "parallel_level": "block"},
     )
 
+    assert isinstance(pass_obj, arch_module.ArchParallelizePass)
     assert isinstance(pass_obj, ModulePass)
     assert pass_obj.name == "arch-parallelize"
     assert type(pass_obj).__name__ == "ArchParallelizePass"
     assert pass_obj.__class__.__module__ == "kernel_gen.passes.arch_parallelize"
+    assert arch_module.__all__ == ["ArchParallelizePass", "_ArchParallelizeFuncPattern"]
     assert "arch-parallelize" in list_registered_passes()
 
 

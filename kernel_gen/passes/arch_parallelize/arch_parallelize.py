@@ -1,4 +1,4 @@
-"""arch-parallelize pass.
+"""arch-parallelize pass implementation.
 
 
 功能说明:
@@ -6,21 +6,25 @@
 - 遍历 `builtin.module` 中非声明 `func.func`，跳过 `entry_point` host dispatcher，对未带 block 并行语义的其余函数执行 block 级分发。
 - 当前只支持 `parallel_level="block"`：单顶层 `symbol.for` 改写为 block-strided loop；非入口函数无顶层 loop 时用 block0 guard 包裹原 body。
 - 唯一顶层 loop 前允许公开 symbol setup 以及 memory-pool 产生的 `arch.get_dynamic_memory` / `dma.reinterpret` setup 前缀，并保留旧 alias 前缀兼容。
+- 公开 `FuncOp` root pattern `_ArchParallelizeFuncPattern` 承接单函数改写，`ArchParallelizePass` 只负责校验和 pattern walker 驱动。
 
 API 列表:
 - `class ArchParallelizePass(target: str = "npu_demo", parallel_level: str = "block")`
 - `ArchParallelizePass.from_options(options: dict[str, str]) -> ArchParallelizePass`
 - `ArchParallelizePass.apply(ctx: Context, module: ModuleOp) -> None`
+- `class _ArchParallelizeFuncPattern(block_num: int)`
+- `_ArchParallelizeFuncPattern.match_and_rewrite(op: func.FuncOp, rewriter: PatternRewriter) -> None`
 
 使用示例:
 - from xdsl.context import Context
 - from kernel_gen.passes.arch_parallelize import ArchParallelizePass
 - ArchParallelizePass(target="npu_demo").apply(Context(), module)
+- from kernel_gen.passes.arch_parallelize import _ArchParallelizeFuncPattern
 
 关联文件:
 - spec: spec/pass/arch_parallelize.md
 - test: test/passes/test_arch_parallelize.py
-- 功能实现: kernel_gen/passes/arch_parallelize.py
+- 功能实现: kernel_gen/passes/arch_parallelize/arch_parallelize.py
 """
 
 from __future__ import annotations
@@ -31,6 +35,13 @@ from xdsl.context import Context
 from xdsl.dialects import func, scf
 from xdsl.dialects.builtin import ArrayAttr, ModuleOp
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
+from xdsl.pattern_rewriter import (
+    GreedyRewritePatternApplier,
+    PatternRewriter,
+    PatternRewriteWalker,
+    RewritePattern,
+    op_type_rewrite_pattern,
+)
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetBlockNumOp, ArchGetDynamicMemoryOp
@@ -153,19 +164,6 @@ def _validate_target_and_get_block_num(target: str) -> int:
     if not isinstance(block_num, int) or isinstance(block_num, bool) or block_num <= 0:
         _fail("target block_num must be positive integer")
     return block_num
-
-
-def _iter_non_declaration_funcs(module: ModuleOp) -> list[func.FuncOp]:
-    """列出 module 中所有非声明 `func.func`。
-
-    功能说明:
-    - 只遍历 module 顶层 op，声明函数跳过。
-
-    使用示例:
-    - funcs = _iter_non_declaration_funcs(module)
-    """
-
-    return [op for op in module.ops if isinstance(op, func.FuncOp) and not op.is_declaration]
 
 
 def _has_existing_block_parallel_ops(func_op: func.FuncOp) -> bool:
@@ -520,15 +518,15 @@ def _clone_loop_body_with_iter_type(old_loop: SymbolForOp, iter_type: SymbolIter
     return new_block
 
 
-def _rewrite_outer_loop_for_blocks(outer_loop: SymbolForOp, block_num: int) -> None:
+def _rewrite_outer_loop_for_blocks(outer_loop: SymbolForOp, block_num: int, rewriter: PatternRewriter) -> None:
     """把唯一顶层 `symbol.for` 改写为 block-strided loop。
 
     功能说明:
     - 在旧 loop 前插入 `arch.get_block_id`、静态 `symbol.const block_num` 与新边界计算。
-    - 用克隆出的新 loop 替换旧 loop，内层 loop 和普通 body op 保持在新 loop body 内。
+    - 通过 `PatternRewriter.replace_op(...)` 用克隆出的新 loop 替换旧 loop，保持 walker worklist 一致。
 
     使用示例:
-    - _rewrite_outer_loop_for_blocks(loop, 1)
+    - _rewrite_outer_loop_for_blocks(loop, 1, rewriter)
     """
 
     parent_block = outer_loop.parent_block()
@@ -559,11 +557,11 @@ def _rewrite_outer_loop_for_blocks(outer_loop: SymbolForOp, block_num: int) -> N
         _loop_iter_type(new_start.result, old_end, new_step.result),
     )
     new_loop = SymbolForOp(new_start.result, old_end, new_step.result, new_block)
-    parent_block.insert_ops_before(
-        [block_id, block_count, block_offset, new_start, new_step, new_loop],
+    rewriter.replace_op(
         outer_loop,
+        [block_id, block_count, block_offset, new_start, new_step, new_loop],
+        [],
     )
-    outer_loop.detach()
 
 
 def _rewrite_no_loop_as_block0_only(entry_block: Block, body_ops: list[Operation], return_op: func.ReturnOp) -> None:
@@ -591,7 +589,7 @@ def _rewrite_no_loop_as_block0_only(entry_block: Block, body_ops: list[Operation
     entry_block.insert_ops_before([block_id, zero, is_not_block0, if_op], return_op)
 
 
-def _rewrite_func(func_op: func.FuncOp, block_num: int) -> None:
+def _rewrite_func(func_op: func.FuncOp, block_num: int, rewriter: PatternRewriter) -> None:
     """处理单个非声明函数。
 
     功能说明:
@@ -599,7 +597,7 @@ def _rewrite_func(func_op: func.FuncOp, block_num: int) -> None:
     - 否则按 loop 结构选择 block-strided rewrite、block0 guard 或稳定失败。
 
     使用示例:
-    - _rewrite_func(func_op, block_num)
+    - _rewrite_func(func_op, block_num, rewriter)
     """
 
     if _has_existing_block_parallel_ops(func_op):
@@ -611,13 +609,77 @@ def _rewrite_func(func_op: func.FuncOp, block_num: int) -> None:
         _rewrite_no_loop_as_block0_only(entry_block, body_ops, return_op)
         return
     if loop_shape.kind == "transformable_loop_nest" and loop_shape.outer_loop is not None:
-        _rewrite_outer_loop_for_blocks(loop_shape.outer_loop, block_num)
+        _rewrite_outer_loop_for_blocks(loop_shape.outer_loop, block_num, rewriter)
         return
     if loop_shape.kind == "multiple_top_level_loops":
         _fail("multiple top-level symbol.for loops are not supported")
     if loop_shape.kind == "loop_carried":
         _fail("loop-carried symbol.for is not supported")
     _fail("unsupported loop structure")
+
+
+class _ArchParallelizeFuncPattern(RewritePattern):
+    """公开的 `func.FuncOp` root arch-parallelize rewrite pattern。
+
+    功能说明:
+    - 以 `func.FuncOp` 为 root，处理单个函数内的 `entry_point`、已有 block 并行 op 和 `symbol.for` 结构。
+    - `block_num` 由 `ArchParallelizePass.apply(...)` 预先校验为正整数，本 pattern 不新增独立稳定错误文本。
+
+    IR before:
+    ```mlir
+    func.func @kernel() {
+      %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+      %c8 = symbol.const 8 : !symbol.int<#symbol.expr<8>>
+      %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+      symbol.for %i = %c0 to %c8 step %c1 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<8>, step = #symbol.expr<1>>} {
+      }
+      func.return
+    }
+    ```
+
+    IR after:
+    ```mlir
+    func.func @kernel() {
+      %block = arch.get_block_id : !symbol.int<#symbol.expr<block_id>>
+      %two = symbol.const 2 : !symbol.int<#symbol.expr<2>>
+      symbol.for %i = %new_start to %c8 step %new_step {iter = #symbol.iter<start = #symbol.expr<block_id * 1>, end = #symbol.expr<8>, step = #symbol.expr<1 * 2>>} {
+      }
+      func.return
+    }
+    ```
+    - 同一 pattern 对无 `symbol.for` 的非入口函数使用 `scf.if` block0 guard。
+
+    使用示例:
+    - _ArchParallelizeFuncPattern(block_num=2).match_and_rewrite(func_op, rewriter)
+    """
+
+    def __init__(self, block_num: int) -> None:
+        """初始化函数级 arch-parallelize pattern。
+
+        功能说明:
+        - 保存已由 `ArchParallelizePass.apply(...)` 校验过的正整数 `block_num`。
+
+        使用示例:
+        - pattern = _ArchParallelizeFuncPattern(block_num=2)
+        """
+
+        self.block_num = block_num
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: func.FuncOp, rewriter: PatternRewriter) -> None:
+        """匹配并改写单个 `func.FuncOp`。
+
+        功能说明:
+        - 声明函数和 `entry_point` host dispatcher 保持 no-op。
+        - 其余函数复用当前文件内函数级 helper，保持既有 block-strided loop 与 block0 guard 行为。
+
+        使用示例:
+        - pattern.match_and_rewrite(func_op, rewriter)
+        """
+
+        if op.is_declaration or _is_entry_point_func(op):
+            return
+        _rewrite_func(op, self.block_num, rewriter)
 
 
 class ArchParallelizePass(Pass):
@@ -672,21 +734,24 @@ class ArchParallelizePass(Pass):
         """执行 arch-parallelize pass。
 
         功能说明:
-        - 校验参数与 target 后，遍历非声明函数；`entry_point` host dispatcher 跳过，其余函数独立处理。
+        - 校验参数与 target 后，通过 `PatternRewriteWalker` 驱动 `_ArchParallelizeFuncPattern` 改写非入口函数。
         - 最终运行 `module.verify()`，失败时转成稳定 pass 错误。
 
         使用示例:
         - ArchParallelizePass().apply(Context(), module)
         """
 
-        _ = ctx
         ensure_builtin_module(module)
         _validate_options(self.target, self.parallel_level)
         block_num = _validate_target_and_get_block_num(self.target)
-        for func_op in _iter_non_declaration_funcs(module):
-            if _is_entry_point_func(func_op):
-                continue
-            _rewrite_func(func_op, block_num)
+        PatternRewriteWalker(
+            GreedyRewritePatternApplier(
+                [_ArchParallelizeFuncPattern(block_num)],
+                ctx=ctx,
+                dce_enabled=False,
+            ),
+            apply_recursively=False,
+        ).rewrite_module(module)
         try:
             module.verify()
         except VerifyException as exc:
@@ -697,4 +762,4 @@ class ArchParallelizePass(Pass):
             ) from exc
 
 
-__all__ = ["ArchParallelizePass"]
+__all__ = ["ArchParallelizePass", "_ArchParallelizeFuncPattern"]

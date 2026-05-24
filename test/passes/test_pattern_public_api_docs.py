@@ -42,9 +42,16 @@ class _PatternModuleCase:
     getter_args_kind: str = "none"
     old_private_names: tuple[str, ...] = ()
     reject_patterns: tuple[str, ...] = ()
+    implementation_module_name: str | None = None
 
 
 _PATTERN_MODULE_CASES = (
+    _PatternModuleCase(
+        "kernel_gen.passes.arch_parallelize",
+        "spec/pass/arch_parallelize.md",
+        ("_ArchParallelizeFuncPattern",),
+        implementation_module_name="kernel_gen.passes.arch_parallelize.arch_parallelize",
+    ),
     _PatternModuleCase(
         "kernel_gen.passes.hoist_dma_alias_ops",
         "spec/pass/hoist_dma_alias_ops.md",
@@ -219,6 +226,7 @@ _PATTERN_MODULE_CASES = (
 )
 
 _IMPLEMENTATION_DOC_TOKENS = {
+    "_ArchParallelizeFuncPattern": ("func.func", "symbol.for", "arch.get_block_id", "scf.if"),
     "DmaAliasThroughWriteNoReadPattern": (
         "MemoryEffectKind.WRITE",
         "dma.broadcast",
@@ -355,6 +363,7 @@ def test_pass_pattern_public_api_imports_and_getter_order() -> None:
             pattern_cls = getattr(module, pattern_name)
             assert issubclass(pattern_cls, RewritePattern)
             assert pattern_name in exported
+            assert pattern_cls.__module__ == case.module_name
         for old_name in case.old_private_names:
             assert not hasattr(module, old_name), f"{case.module_name}.{old_name} must stay private-name-free"
         if case.getter_name is None:
@@ -402,7 +411,8 @@ def test_pass_pattern_api_lists_include_public_methods() -> None:
 
     repo_root = Path(__file__).resolve().parents[2]
     for case in _PATTERN_MODULE_CASES:
-        source_text, module_doc = _module_source_and_doc(case.module_name)
+        implementation_module_name = case.implementation_module_name or case.module_name
+        source_text, module_doc = _module_source_and_doc(implementation_module_name)
         spec_text = (repo_root / case.spec_path).read_text(encoding="utf-8")
         spec_api_list = _section_text(spec_text, "## API 列表", "## 文档信息")
         module_api_list = _section_text(module_doc, "API 列表:", "使用示例:")
@@ -412,23 +422,24 @@ def test_pass_pattern_api_lists_include_public_methods() -> None:
             assert class_api in spec_api_list, f"{case.spec_path}: missing {class_api}"
             assert signature in spec_api_list, f"{case.spec_path}: missing {signature}"
             assert class_api in module_api_list, f"{case.module_name}: missing {class_api}"
-            assert signature in module_api_list, f"{case.module_name}: missing {signature}"
+            assert signature in module_api_list, f"{implementation_module_name}: missing {signature}"
 
 
 def test_pass_pattern_implementation_docstrings_have_ir_contracts() -> None:
     """验证实现侧 pattern class docstring 也写出 IR before/after 或 reject 合同。"""
 
     for case in _PATTERN_MODULE_CASES:
-        module = importlib.import_module(case.module_name)
+        implementation_module_name = case.implementation_module_name or case.module_name
+        module = importlib.import_module(implementation_module_name)
         for pattern_name in case.pattern_names:
             pattern_cls = getattr(module, pattern_name)
             doc = inspect.getdoc(pattern_cls) or ""
-            assert "IR before:" in doc, f"{case.module_name}.{pattern_name}: missing IR before"
+            assert "IR before:" in doc, f"{implementation_module_name}.{pattern_name}: missing IR before"
             for token in _IMPLEMENTATION_DOC_TOKENS[pattern_name]:
-                assert token in doc, f"{case.module_name}.{pattern_name}: missing doc token {token!r}"
+                assert token in doc, f"{implementation_module_name}.{pattern_name}: missing doc token {token!r}"
             if pattern_name in case.reject_patterns:
-                assert "公开错误文本" in doc, f"{case.module_name}.{pattern_name}: missing public error text"
-                assert doc.count("```mlir") >= 1, f"{case.module_name}.{pattern_name}: missing reject mlir block"
+                assert "公开错误文本" in doc, f"{implementation_module_name}.{pattern_name}: missing public error text"
+                assert doc.count("```mlir") >= 1, f"{implementation_module_name}.{pattern_name}: missing reject mlir block"
                 continue
-            assert "IR after:" in doc, f"{case.module_name}.{pattern_name}: missing IR after"
-            assert doc.count("```mlir") >= 2, f"{case.module_name}.{pattern_name}: missing before/after mlir blocks"
+            assert "IR after:" in doc, f"{implementation_module_name}.{pattern_name}: missing IR after"
+            assert doc.count("```mlir") >= 2, f"{implementation_module_name}.{pattern_name}: missing before/after mlir blocks"

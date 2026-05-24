@@ -120,7 +120,8 @@ API 列表:
   - kernel_gen/passes/common.py
   - kernel_gen/passes/inline.py
   - kernel_gen/passes/attach_arch_information.py
-  - kernel_gen/passes/arch_parallelize.py
+  - kernel_gen/passes/arch_parallelize/__init__.py
+  - kernel_gen/passes/arch_parallelize/arch_parallelize.py
   - kernel_gen/passes/buffer_results_to_out_params.py
   - kernel_gen/passes/decompass.py
   - kernel_gen/passes/memory_plan.py

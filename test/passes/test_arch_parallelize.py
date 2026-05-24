@@ -9,12 +9,17 @@
 - pytest -q test/passes/test_arch_parallelize.py
 
 关联文件:
-- 功能实现: kernel_gen/passes/arch_parallelize.py
+- 功能实现: kernel_gen/passes/arch_parallelize/__init__.py
+- 功能实现: kernel_gen/passes/arch_parallelize/arch_parallelize.py
 - Spec 文档: spec/pass/arch_parallelize.md
 - 测试文件: test/passes/test_arch_parallelize.py
 """
 
 from __future__ import annotations
+
+import ast
+import importlib
+from pathlib import Path
 
 import pytest
 
@@ -22,9 +27,10 @@ from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import FunctionType, ModuleOp, i32
 from xdsl.ir import Block, Region
+from xdsl.pattern_rewriter import RewritePattern
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.passes.arch_parallelize import ArchParallelizePass
+from kernel_gen.passes.arch_parallelize import ArchParallelizePass, _ArchParallelizeFuncPattern
 from kernel_gen.target import registry as target_registry
 from kernel_gen.tools.ircheck import run_ircheck_text
 
@@ -99,6 +105,97 @@ def _register_target_once(spec: target_registry.TargetSpec) -> None:
     except ValueError as exc:
         if "target already registered" not in str(exc):
             raise
+
+
+def _arch_parallelize_impl_source_path() -> Path:
+    """返回当前 worktree 的 arch_parallelize 实现文件路径。
+
+    功能说明:
+    - 供 AST gate 读取源码，不通过内部实现模块 import 访问公开 pattern。
+
+    使用示例:
+    - path = _arch_parallelize_impl_source_path()
+    """
+
+    return Path(__file__).resolve().parents[2] / "kernel_gen/passes/arch_parallelize/arch_parallelize.py"
+
+
+def _annotation_text(annotation: ast.expr | None) -> str:
+    """把 AST 注解还原为测试断言需要的签名文本。
+
+    功能说明:
+    - 公开 pattern 签名必须有显式类型注解。
+
+    使用示例:
+    - text = _annotation_text(arg.annotation)
+    """
+
+    assert annotation is not None
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        return annotation.value
+    return ast.unparse(annotation)
+
+
+# TC-PASS-ARCH-PARALLELIZE-018
+# 功能说明: 验证 arch-parallelize package root 的公开 API、旧单文件退场和顶层不重导出 pattern。
+# 使用示例: pytest -q test/passes/test_arch_parallelize.py -k test_arch_parallelize_package_public_api_shape
+def test_arch_parallelize_package_public_api_shape() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    package_module = importlib.import_module("kernel_gen.passes.arch_parallelize")
+    passes_module = importlib.import_module("kernel_gen.passes")
+
+    assert package_module.__file__ is not None
+    assert Path(package_module.__file__).resolve() == repo_root / "kernel_gen/passes/arch_parallelize/__init__.py"
+    assert _arch_parallelize_impl_source_path().is_file()
+    assert not (repo_root / "kernel_gen/passes/arch_parallelize.py").exists()
+    assert package_module.__all__ == ["ArchParallelizePass", "_ArchParallelizeFuncPattern"]
+    assert package_module.ArchParallelizePass is ArchParallelizePass
+    assert package_module._ArchParallelizeFuncPattern is _ArchParallelizeFuncPattern
+    assert ArchParallelizePass.__module__ == "kernel_gen.passes.arch_parallelize"
+    assert _ArchParallelizeFuncPattern.__module__ == "kernel_gen.passes.arch_parallelize"
+    assert issubclass(_ArchParallelizeFuncPattern, RewritePattern)
+    assert passes_module.ArchParallelizePass is ArchParallelizePass
+    assert not hasattr(passes_module, "_ArchParallelizeFuncPattern")
+    assert "_ArchParallelizeFuncPattern" not in passes_module.__all__
+
+
+# TC-PASS-ARCH-PARALLELIZE-019
+# 功能说明: 验证公开 FuncOp pattern 与 pass apply 的 xDSL pattern driver 结构。
+# 使用示例: pytest -q test/passes/test_arch_parallelize.py -k test_arch_parallelize_func_pattern_ast_gate
+def test_arch_parallelize_func_pattern_ast_gate() -> None:
+    source_path = _arch_parallelize_impl_source_path()
+    module_ast = ast.parse(source_path.read_text(encoding="utf-8"))
+    pattern_classes = [
+        node for node in module_ast.body if isinstance(node, ast.ClassDef) and node.name == "_ArchParallelizeFuncPattern"
+    ]
+    assert len(pattern_classes) == 1
+    pattern_class = pattern_classes[0]
+    match_methods = [
+        node
+        for node in pattern_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == "match_and_rewrite"
+    ]
+    assert len(match_methods) == 1
+    match_method = match_methods[0]
+    decorators = {ast.unparse(decorator) for decorator in match_method.decorator_list}
+    assert "op_type_rewrite_pattern" in decorators
+    args = {arg.arg: _annotation_text(arg.annotation) for arg in match_method.args.args if arg.arg != "self"}
+    assert args["op"] == "func.FuncOp"
+    assert args["rewriter"] == "PatternRewriter"
+    assert _annotation_text(match_method.returns) == "None"
+
+    apply_methods = [
+        node
+        for class_node in module_ast.body
+        if isinstance(class_node, ast.ClassDef) and class_node.name == "ArchParallelizePass"
+        for node in class_node.body
+        if isinstance(node, ast.FunctionDef) and node.name == "apply"
+    ]
+    assert len(apply_methods) == 1
+    apply_source = ast.unparse(apply_methods[0])
+    assert "PatternRewriteWalker" in apply_source
+    assert "GreedyRewritePatternApplier" in apply_source
+    assert "_ArchParallelizeFuncPattern" in apply_source
 
 
 # TC-PASS-ARCH-PARALLELIZE-001
