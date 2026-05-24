@@ -50,7 +50,7 @@
 - 顶层未切分 op 保持空 `tile.tile_exprs`；已落在 `symbol.for` 内、且当前 memory shape 已收口为 tile 形状的目标 op，必须把当前 tile 形状写入其非 `expand` 维对应的 `tile.tile_exprs`。
 - 对 `dma.broadcast`，`expand` 维不参与 `tile.tile_exprs` 写回：该维在 target/source 两行都必须保持空字符串；其余非 `expand` 维需要在 target/source 两行都写入当前 tile 形状。
 - 若外层 loop 只切了部分维度，则 `tile.tile_exprs` 只能写入与祖先 `symbol.for step` 对应的那些维；未被 loop `step` 覆盖的维必须继续保持空字符串。
-- 对 `kernel.matmul`，reduce(K) 轴的 loop step 不能写入 `tile.tile_exprs`；只有命中 `M/N` 的祖先 loop step 才能分别写回到 `lhs/out` 的 `M` 位与 `rhs/out` 的 `N` 位。若只切 K，3 行都必须保持空；若切 `K+N`，也只能写回 `N`。
+- 对 `kernel.matmul`，`M/K/N` 任一已切分轴的 loop step 都必须写入 `tile.tile_exprs`：`lhs=[M_tile, K_tile]`，`rhs=[K_tile, N_tile]`，`out=[M_tile, N_tile]`；未被 loop `step` 精确覆盖的维保持空字符串。若只切 `K`，必须写成 `lhs=["", K_tile] / rhs=[K_tile, ""] / out=["", ""]`；若切 `K+N`，必须同时写回 `K` 与 `N`。
 - memory layout 条目不是 `SymbolExprAttr` 时必须抛出 `KernelCodeError("tile-analysis memory layout entries must be SymbolExprAttr")`。
 
 ## API详细说明
@@ -270,7 +270,7 @@ assert type(patterns[0]) is TileAnalysisBinaryPattern
 - `TileAnalysisMatmulPattern` 固定使用逻辑角色顺序 `lhs/rhs/out` 写入 matmul 三行属性：
   - `tile.analysis` 固定为 `["elewise", "reduce"] / ["reduce", "elewise"] / ["elewise", "elewise"]`
   - 顶层未切分 matmul 的 `tile.tile_exprs` 保持空字符串矩阵
-  - 已位于 `symbol.for` 内、且当前 shape 已是 tile 形状的 matmul，`tile.tile_exprs` 必须写成 `lhs=[M_tile, ""] / rhs=["", N_tile] / out=[M_tile, N_tile]`
+  - 已位于 `symbol.for` 内、且当前 shape 已是 tile 形状的 matmul，`tile.tile_exprs` 必须写成 `lhs=[M_tile, K_tile] / rhs=[K_tile, N_tile] / out=[M_tile, N_tile]`
 
 ## Pattern MLIR before / after 合同
 

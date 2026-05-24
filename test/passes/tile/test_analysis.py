@@ -261,13 +261,16 @@ builtin.module {
       %rhs : !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<global>>) {
     %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
     %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %c8 = symbol.const 8 : !symbol.int<#symbol.expr<8>>
     %c32 = symbol.const 32 : !symbol.int<#symbol.expr<32>>
     symbol.for %it0 = %c0 to %c4 step %c4 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<4>, step = #symbol.expr<4>>} {
-      symbol.for %it1 = %c0 to %c32 step %c32 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<32>, step = #symbol.expr<32>>} {
-        %tile_out = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>
-        %tile_lhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>
-        %tile_rhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>
-        "kernel.matmul"(%tile_out, %tile_lhs, %tile_rhs) {space = #nn.space<tsm>} : (!nn.memory<[#symbol.expr<4>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>) -> ()
+      symbol.for %itk = %c0 to %c8 step %c8 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<8>, step = #symbol.expr<8>>} {
+        symbol.for %it1 = %c0 to %c32 step %c32 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<32>, step = #symbol.expr<32>>} {
+          %tile_out = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>
+          %tile_lhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>
+          %tile_rhs = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>
+          "kernel.matmul"(%tile_out, %tile_lhs, %tile_rhs) {space = #nn.space<tsm>} : (!nn.memory<[#symbol.expr<4>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<4>, #symbol.expr<8>], [#symbol.expr<8>, #symbol.expr<1>], i32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], i32, #nn.space<tsm>>) -> ()
+        }
       }
     }
     func.return
@@ -288,8 +291,8 @@ builtin.module {
     )
     assert nested_matmul.attributes["tile.tile_exprs"] == ArrayAttr(
         [
-            ArrayAttr([StringAttr("4"), StringAttr("")]),
-            ArrayAttr([StringAttr(""), StringAttr("32")]),
+            ArrayAttr([StringAttr("4"), StringAttr("8")]),
+            ArrayAttr([StringAttr("8"), StringAttr("32")]),
             ArrayAttr([StringAttr("4"), StringAttr("32")]),
         ]
     )
@@ -333,8 +336,8 @@ builtin.module {
     )
 
 
-def test_tile_analysis_matmul_pattern_ignores_reduce_only_loop_inside_symbol_for() -> None:
-    """锁定 matmul 若只切 reduce(K) 轴，则 `tile.tile_exprs` 继续保持空。"""
+def test_tile_analysis_matmul_pattern_marks_reduce_only_loop_inside_symbol_for() -> None:
+    """锁定 matmul 若只切 reduce(K) 轴，则写回 lhs/rhs 的 K 位。"""
 
     module = Parser(
         build_default_context(),
@@ -364,15 +367,15 @@ builtin.module {
 
     assert nested_matmul.attributes["tile.tile_exprs"] == ArrayAttr(
         [
-            ArrayAttr([StringAttr(""), StringAttr("")]),
-            ArrayAttr([StringAttr(""), StringAttr("")]),
+            ArrayAttr([StringAttr(""), StringAttr("8")]),
+            ArrayAttr([StringAttr("8"), StringAttr("")]),
             ArrayAttr([StringAttr(""), StringAttr("")]),
         ]
     )
 
 
-def test_tile_analysis_matmul_pattern_ignores_reduce_loop_and_keeps_n_loop_inside_symbol_for() -> None:
-    """锁定 matmul 若同时切 reduce(K)+N，则只把 N 写回 `tile.tile_exprs`。"""
+def test_tile_analysis_matmul_pattern_marks_reduce_loop_and_n_loop_inside_symbol_for() -> None:
+    """锁定 matmul 若同时切 reduce(K)+N，则同时写回 K 和 N。"""
 
     module = Parser(
         build_default_context(),
@@ -406,8 +409,8 @@ builtin.module {
 
     assert nested_matmul.attributes["tile.tile_exprs"] == ArrayAttr(
         [
-            ArrayAttr([StringAttr(""), StringAttr("")]),
-            ArrayAttr([StringAttr(""), StringAttr("32")]),
+            ArrayAttr([StringAttr(""), StringAttr("8")]),
+            ArrayAttr([StringAttr("8"), StringAttr("32")]),
             ArrayAttr([StringAttr(""), StringAttr("32")]),
         ]
     )

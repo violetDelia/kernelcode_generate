@@ -311,7 +311,7 @@ class TileAnalysisMatmulPattern(RewritePattern):
       ```
     - IR after:
       ```mlir
-      "kernel.matmul"(%out, %lhs, %rhs) {tile.analysis = [["elewise", "reduce"], ["reduce", "elewise"], ["elewise", "elewise"]], tile.tile_exprs = [["", ""], ["", ""], ["", ""]]} : (value, value, value) -> ()
+      "kernel.matmul"(%out, %lhs, %rhs) {tile.analysis = [["elewise", "reduce"], ["reduce", "elewise"], ["elewise", "elewise"]], tile.tile_exprs = [["M", "K"], ["K", "N"], ["M", "N"]]} : (value, value, value) -> ()
       ```
     - no-op unchanged after：已有 `tile.analysis` 与 `tile.tile_exprs` 时 before IR 保持不变。
 
@@ -326,6 +326,19 @@ class TileAnalysisMatmulPattern(RewritePattern):
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: KernelMatmulOp, rewriter: PatternRewriter, /) -> None:
+        """为 `kernel.matmul` 写入 tile analysis 属性。
+
+
+        功能说明:
+        - 只处理当前 `kernel.matmul` op，不改写 operand、result 或控制流。
+        - `tile.analysis` 固定写入 lhs/rhs/out 的 `[elewise, reduce]`、`[reduce, elewise]`、`[elewise, elewise]` 角色矩阵。
+        - `tile.tile_exprs` 按祖先 `symbol.for` step 精确匹配 `M/K/N` 维度；已切分 reduce(K) 轴写入 lhs 第 2 位与 rhs 第 1 位。
+        - 已存在 `tile.analysis` 与 `tile.tile_exprs` 时保持 no-op，避免覆盖上游显式分析结果。
+
+        使用示例:
+        - TileAnalysisMatmulPattern().match_and_rewrite(kernel_matmul_op, rewriter)
+        """
+
         if "tile.analysis" in op.attributes and "tile.tile_exprs" in op.attributes:
             return
         operands = [SSAValue.get(operand) for operand in op.operands]
@@ -385,18 +398,20 @@ class TileAnalysisMatmulPattern(RewritePattern):
             n_expr = _dim_expr_text(out_shape[1])
             k_expr = _dim_expr_text(rhs_shape[0])
             tile_m = ""
+            tile_k = ""
             tile_n = ""
             for step_expr in loop_step_exprs:
                 if step_expr == n_expr:
                     tile_n = step_expr
                     continue
                 if step_expr == k_expr:
+                    tile_k = step_expr
                     continue
                 if step_expr == m_expr:
                     tile_m = step_expr
             tile_expr_rows = [
-                [tile_m, ""],
-                ["", tile_n],
+                [tile_m, tile_k],
+                [tile_k, tile_n],
                 [tile_m, tile_n],
             ]
         op.attributes["tile.analysis"] = ArrayAttr(
