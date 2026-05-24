@@ -76,7 +76,7 @@
   - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前；若存在唯一合法 `dma.free`，把 alloc/free 成对移动到 owner loop 两侧。
   - `dma-alias-to-reinterpret`：把 `dma.view` / `dma.reshape` / `dma.subview` 归一为 root source 上的 `dma.reinterpret`。
   - `hoist-dma-alias-ops`：把同 block 内紧邻的 `dma.reshape` 上移穿过 `dma.fill`，作为第一阶段 alias hoist pass。
-  - `memory-plan`：显式 `insert-free=true` 时为受控 `dma.alloc` 生命周期补插 `dma.free`。
+  - `memory-plan`：显式 `insert-free=true` 时为受控 `dma.alloc` 生命周期补插 `dma.free`；显式 `reuse=true` 且 `insert-free=true` 时启用保守 alloc 复用。
   - `multi-buffer`：把可证明的 matmul lhs/rhs staging alloc/copy/use/free 成对生命周期改写为 DMA ring。
   - `producer-consumer-analysis`：基于公开 `MemoryEffect` 与 pass 内置 alias 规则标注普通或控制流分类简单整数列表 event attrs。
   - `kernel-pattern-attach`：在唯一 `entry_point` host 中生成 `tuner.select` / `tuner.launch` pattern dispatcher 与两个 pattern 函数。
@@ -87,7 +87,7 @@
 - `launch-kernel-cost-func` 默认 `cost_kind="DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2"`，并接受该七值集合的去重子集，例如 `options={"cost_kind": "DMA1|MAC|VECTOR1"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
 - `lower-dma-memory-hierarchy` 接受 pass 专属 `options={"apply_op": "matmul{[\\"\\", \\"tlm1\\", \\"tlm2\\"]}"}`；registry 只负责透传该 option，规则语法与错误语义由 `LowerDmaMemoryHierarchyPass.from_options(...)` 承载。
 - `memory-pool` 接受 pass 专属 `options={"rewrite": "true|false", "alignment": "<non-negative-int>"}`；`fold` 仍由 registry 通用 option 处理。`rewrite` 非 bool、`alignment` 负数或非整数、未知 option 必须由 `MemoryPoolPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'memory-pool' option error: <原因>`。
-- `memory-plan` 接受 pass 专属 `options={"insert-free": "true|false"}`；`fold` 仍由 registry 通用 option 处理。`insert-free` 非 bool 或未知 option 必须由 `MemoryPlanPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'memory-plan' option error: <原因>`。
+- `memory-plan` 接受 pass 专属 `options={"insert-free": "true|false|1|0|yes|no|on|off", "reuse": "true|false|1|0|yes|no|on|off"}`；`fold` 仍由 registry 通用 option 处理。`insert-free` / `reuse` 非 bool 或未知 option 必须由 `MemoryPlanPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'memory-plan' option error: <原因>`。
 - `multi-buffer` 接受 pass 专属 `options={"memory-stage": "<positive-int>"}`；`fold` 仍由 registry 通用 option 处理。`memory-stage` 非整数、`<= 0` 或未知 option 必须由 `MultiBufferPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'multi-buffer' option error: <原因>`；直接调用 `MultiBufferPass.from_options({"fold": "false"})` 必须失败，不能把通用 `fold` 兼容进 pass 专属 options。
 - `producer-consumer-analysis` 第一阶段不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `ProducerConsumerAnalysisPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'producer-consumer-analysis' option error: <原因>`。
 - `kernel-pattern-attach` 第一阶段不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `KernelPatternAttachPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'kernel-pattern-attach' option error: <原因>`。

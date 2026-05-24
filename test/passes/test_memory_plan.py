@@ -1,7 +1,7 @@
 """memory-plan pass tests.
 
 功能说明:
-- 覆盖 `MemoryPlanPass` 的公开构造、registry/ircheck 路径、free 插入、alias closure 与失败边界。
+- 覆盖 `MemoryPlanPass` 的公开构造、registry/ircheck 路径、free 插入、reuse、alias closure 与失败边界。
 - 测试只使用公开 API，不直连 `kernel_gen.passes.memory_plan` 内部 helper。
 
 使用示例:
@@ -283,6 +283,67 @@ def test_memory_plan_keeps_existing_free_noop() -> None:
 
     free_ops = [op for op in _function_body(module).ops if isinstance(op, DmaFreeOp)]
     assert free_ops == [free]
+
+
+# TC-MPLAN-003A
+# 功能说明: 验证 reuse 开启时同 block 内生命周期不重叠且类型一致的 alloc 会复用。
+# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_reuse_rewrites_non_overlapping_allocs
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应测试文件路径: test/passes/test_memory_plan.py
+def test_memory_plan_reuse_rewrites_non_overlapping_allocs() -> None:
+    mem_type = _memory_type(element_type=i32)
+    first_scalar = _scalar_i32()
+    second_scalar = _scalar_i32()
+    first_alloc = DmaAllocOp([], mem_type)
+    first_broadcast = DmaBroadcastOp(first_alloc.result, first_scalar.result)
+    second_alloc = DmaAllocOp([], mem_type)
+    second_broadcast = DmaBroadcastOp(second_alloc.result, second_scalar.result)
+    module = _module_with_ops(
+        "reuse_non_overlapping",
+        [first_scalar, first_alloc, first_broadcast, second_scalar, second_alloc, second_broadcast],
+    )
+
+    MemoryPlanPass(insert_free=True, fold=False, reuse=True).apply(Context(), module)
+
+    body_ops = list(_function_body(module).ops)
+    alloc_ops = [op for op in body_ops if isinstance(op, DmaAllocOp)]
+    free_ops = [op for op in body_ops if isinstance(op, DmaFreeOp)]
+    assert alloc_ops == [first_alloc]
+    assert len(free_ops) == 1
+    assert _free_source_is(free_ops[0], first_alloc.result)
+    assert SSAValue.get(second_broadcast.target) is first_alloc.result
+    assert body_ops.index(free_ops[0]) == body_ops.index(second_broadcast) + 1
+
+
+# TC-MPLAN-003B
+# 功能说明: 验证 reuse 对 shape/stride 不一致的 alloc 保守 no-op。
+# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_reuse_keeps_mismatched_memory_type
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应测试文件路径: test/passes/test_memory_plan.py
+def test_memory_plan_reuse_keeps_mismatched_memory_type() -> None:
+    first_type = _memory_type(shape=(2, 4), stride=(4, 1), element_type=i32)
+    second_type = _memory_type(shape=(4, 4), stride=(4, 1), element_type=i32)
+    first_scalar = _scalar_i32()
+    second_scalar = _scalar_i32()
+    first_alloc = DmaAllocOp([], first_type)
+    first_broadcast = DmaBroadcastOp(first_alloc.result, first_scalar.result)
+    second_alloc = DmaAllocOp([], second_type)
+    second_broadcast = DmaBroadcastOp(second_alloc.result, second_scalar.result)
+    module = _module_with_ops(
+        "reuse_mismatched_type",
+        [first_scalar, first_alloc, first_broadcast, second_scalar, second_alloc, second_broadcast],
+    )
+
+    MemoryPlanPass(insert_free=True, fold=False, reuse=True).apply(Context(), module)
+
+    body_ops = list(_function_body(module).ops)
+    assert [op for op in body_ops if isinstance(op, DmaAllocOp)] == [first_alloc, second_alloc]
+    free_ops = [op for op in body_ops if isinstance(op, DmaFreeOp)]
+    assert len(free_ops) == 2
+    assert _free_source_is(free_ops[0], first_alloc.result)
+    assert _free_source_is(free_ops[1], second_alloc.result)
 
 
 # TC-MPLAN-004

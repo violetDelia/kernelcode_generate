@@ -4,7 +4,7 @@
 功能说明:
 - 提供 pass / pipeline 的进程内注册表，统一“名字 -> 构造器”的解析入口。
 - 为工具层（如 ircheck）提供稳定名称解析能力，避免依赖具体 Python import path。
-- 内置 pass 包含 `memory-plan`，其 `insert-free` 专属 option 由 pass 自身解析，
+- 内置 pass 包含 `memory-plan`，其 `insert-free` / `reuse` 专属 option 由 pass 自身解析，
   registry 只解析通用 `fold`。
 - 内置 pass 包含 `multi-buffer`，其 `memory-stage` 专属 option 由 pass 自身解析，
   registry 只解析通用 `fold`。
