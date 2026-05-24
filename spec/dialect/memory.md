@@ -52,7 +52,7 @@
   ptr_op = MemoryGetDataOp(memory_value)
   ```
 - 功能说明：生成 `memory.get_data` pointer query；它是 presence guard 构造链路的一部分，不算 memory data-use。
-- 注意事项：source 必须是 `NnMemoryType`；result 必须是 `SymbolPtrType`；ptr dtype 必须等于 memory element type；ptr template 必须等于 memory template。错误关键短语分别包含 `memory.get_data source must be !nn.memory`、`memory.get_data result type must be !symbol.ptr`、`memory.get_data ptr dtype must match memory element_type`、`memory.get_data ptr template_name must match memory template_name`。
+- 注意事项：source 必须是 `NnMemoryType`；result 必须是 `SymbolPtrType`；ptr dtype 必须等于 memory element type；ptr template 必须等于 memory template。失败统一抛出 `KernelCodeError`，错误关键短语分别包含 `memory.get_data source must be !nn.memory`、`memory.get_data result type must be !symbol.ptr`、`memory.get_data ptr dtype must match memory element_type`、`memory.get_data ptr template_name must match memory template_name`。
 
 ## 文本语法
 
@@ -79,4 +79,4 @@
 
 - 当前实现入口为 `kernel_gen/dialect/memory/` package root；旧单文件 `kernel_gen/dialect/memory/` 不保留 shim。
 - 当前测试入口为 `test/dialect/memory/`；旧大测试文件 `test/dialect/memory/test_memory.py` 不保留 shim。
-- `kernel_gen.dialect.memory` root import 是稳定公开入口，内部 `attr/type/operation/expr/common` 子模块只服务 package 实现，不作为外部公开 API。
+- `kernel_gen.dialect.memory` root import 是稳定公开入口，内部 `operation` 子模块只服务 package 实现，不作为外部公开 API。

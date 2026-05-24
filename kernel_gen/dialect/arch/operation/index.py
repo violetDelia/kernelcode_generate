@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import ClassVar
 
-from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE, ErrorKind, ErrorModule, kernel_code_error
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, SymbolRefAttr, i8
 from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue, TypeAttribute
 from xdsl.irdl import (
@@ -41,13 +41,57 @@ from xdsl.irdl import (
 )
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
 from kernel_gen.target import registry
 
-from ..common import _verify_target_registry_support
+from kernel_gen.target import registry as target_registry
+
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE = "dialect.arch verifier"
+
+def _verify_target_registry_support(op_name: str) -> None:
+    """按当前 target registry 配置校验 arch op 支持性。
+
+
+    功能说明:
+    - 在启用 target registry 校验时，检查 arch op 是否被当前 target 支持。
+
+    使用示例:
+    - _verify_target_registry_support("arch.get_thread_id")
+
+    关联文件:
+    - spec: spec/target/registry.md
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
+    """
+
+    current_target = target_registry.get_current_target()
+    if current_target is None:
+        return
+    try:
+        if not target_registry.is_arch_op_supported(current_target, op_name):
+            raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+                ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected=f"{op_name} is not supported by target {current_target}",
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
+                )
+            )
+    except ValueError as exc:
+        raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+            ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=str(exc),
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
+            )
+        ) from exc
+
+
 
 _ERROR_SCENE = "dialect.arch verifier"
 
@@ -97,7 +141,7 @@ class _BaseArchIndexQueryOp(IRDLOperation):
 
         expected = SymbolValueType.from_expr(self.RESULT_EXPR)
         if self.result.type != expected:
-            raise VerifyException(
+            raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
                 ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
                     expected=f"{self.name} result type must be !symbol.int<#symbol.expr<{self.RESULT_EXPR}>>",

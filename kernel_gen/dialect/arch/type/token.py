@@ -21,6 +21,7 @@ from collections.abc import Sequence
 from typing import ClassVar
 
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from kernel_gen.core.contracts import raise_verify_error
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, SymbolRefAttr, i8
 from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue, TypeAttribute
 from xdsl.irdl import (
@@ -36,13 +37,40 @@ from xdsl.irdl import (
 )
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
 from kernel_gen.target import registry
 
-from ..common import _verify_token_id_text
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE = "dialect.arch verifier"
+
+def _verify_token_id_text(token_id: str) -> None:
+    """校验 arch token id 文本。
+
+    功能说明:
+    - token id 必须是非空标识符，作为 `!arch.token<id>` 的稳定文本。
+    - 作为 arch 包内 API 统一 token type/op 的错误语义。
+
+    使用示例:
+    - _verify_token_id_text("event0")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/type/token.py
+    """
+
+    has_text = bool(token_id)
+    if not has_text:
+        raise_verify_error(_ERROR_SCENE, "arch token id must not be empty")
+    identifier_body = token_id.replace("_", "")
+    starts_with_digit = token_id[0].isdigit()
+    if not identifier_body.isalnum() or starts_with_digit:
+        raise_verify_error(_ERROR_SCENE, "arch token id must be an identifier")
+
+
 
 
 @irdl_attr_definition

@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from kernel_gen.core.contracts import raise_verify_error
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerAttr, IntegerType, StringAttr, f32, f64, i1, i32
 from xdsl.dialect_interfaces.constant_materialization import ConstantMaterializationInterface
@@ -50,15 +51,97 @@ from xdsl.interfaces import HasFolderInterface
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
 from xdsl.traits import IsTerminator, NoTerminator, Pure
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemoryType
 
-from ..common import _format_error, _raise_verify_error
-from ..expr.parser import (_SymbolExprNode, _SymbolExprToken, _SymbolExprParserBase, _SymbolExprTextParser, _SymbolExprAttrParser, _tokenize_symbol_expr, _make_symbol_expr_const, _make_symbol_expr_symbol, _make_symbol_expr_unknown, _is_symbol_expr_unknown, _contains_symbol_expr_unknown, _contains_symbol_expr_iter, _make_symbol_expr_iter, _get_symbol_expr_const, _get_concrete_symbol_expr_node_value, _linear_symbol_expr_terms, _make_symbol_expr_neg, _make_symbol_expr_add, _make_symbol_expr_sub, _make_symbol_expr_mul, _make_symbol_expr_keyword_binary, _make_symbol_expr_min, _make_symbol_expr_max, _symbol_expr_precedence, _format_symbol_expr_node, _format_symbol_expr_add, _parse_symbol_expr_from_text, _parse_symbol_expr_from_attr_parser, _normalize_expr, _evaluate_concrete_expr, _canonicalize_symbolic_expr, _is_supported_symbol_expr, _unwrap_symbol_expr_attr_text)
 from ..attr import SymbolExprAttr, SymbolIterAttr
 from ..type import SymbolIterType, SymbolPtrType, SymbolValueType
-from .common import (_verify_axis, _entry_to_expr, _infer_result_type, _is_symbol_int_type, _is_symbol_arith_operand_type, _is_unknown_symbol_int_type, _parse_symbol_binary_operand_types, _symbol_iter_type_expr_node, _symbol_arith_operand_expr_node, _symbol_arith_operand_contains_unknown, _symbol_expr_bounds_are_full_tiles, _linear_distance_is_positive_multiple, _symbol_expr_full_tile_residual_step, _symbol_expr_full_tile_min_step, _symbol_min_full_tile_step_value, _requires_unknown_arith_result, _infer_symbol_arith_result_expr, _alternate_symbol_arith_result_exprs, _get_concrete_symbol_int_value)
+
+from ..type import SymbolIterType, SymbolValueType
+
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE = "dialect.symbol"
+
+def _format_error(expected: str, actual: str = ERROR_ACTUAL) -> str:
+    """格式化 symbol dialect 统一错误文本。
+
+    功能说明:
+    - 复用核心错误模板生成 verifier、value error 与 type error 的稳定文本。
+
+    使用示例:
+    - message = _format_error("symbol value type expected")
+    """
+
+    return ERROR_TEMPLATE.format(
+        scene=_ERROR_SCENE,
+        expected=expected,
+        actual=actual,
+        action=ERROR_ACTION,
+    )
+
+def _is_symbol_arith_operand_type(attr: Attribute) -> bool:
+    """判断 attribute 是否可作为 symbol 算术/比较 operand。
+
+    功能说明:
+    - symbol 算术允许 `!symbol.int` 与 loop-carried `!symbol.iter`，供 tail `min(tile, dim - idx)` 使用。
+
+    使用示例:
+    - ok = _is_symbol_arith_operand_type(SymbolValueType.from_expr("N"))
+    """
+
+    if isinstance(attr, SymbolValueType):
+        return True
+    if isinstance(attr, SymbolIterType):
+        return True
+    return False
+
+def _parse_symbol_binary_operand_types(parser: AttrParser, op_name: str) -> tuple[Attribute, Attribute]:
+    """解析 symbol 二元 op 的 operand type 列表。
+
+    功能说明:
+    - 支持当前 printer 输出的 `lhs_type, rhs_type`。
+    - 兼容 MLIR 常见的 parenthesized 形式 `(lhs_type, rhs_type)`。
+
+    使用示例:
+    - lhs_type, rhs_type = _parse_symbol_binary_operand_types(parser, "symbol.eq")
+    """
+
+    if parser.parse_optional_punctuation("(") is not None:
+        lhs_type = parser.parse_type()
+        parser.parse_characters(",", f" in {op_name} type list")
+        rhs_type = parser.parse_type()
+        parser.parse_punctuation(")", f" in {op_name} type list")
+        return lhs_type, rhs_type
+    lhs_type = parser.parse_type()
+    parser.parse_characters(",", f" in {op_name} type list")
+    rhs_type = parser.parse_type()
+    return lhs_type, rhs_type
+
+def _get_concrete_symbol_int_value(attr: Attribute) -> int | None:
+    """提取静态可求值的 `!symbol.int` 整数值。
+
+
+    功能说明:
+    - 仅当 `attr` 是静态整数 `SymbolValueType` 时返回具体整数。
+    - 动态 symbol 表达返回 `None`，供 fold 逻辑保守拒绝。
+
+    使用示例:
+    - _get_concrete_symbol_int_value(SymbolValueType.from_expr("3"))
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/symbol/test_symbol.py
+    - 功能实现: kernel_gen/dialect/symbol/
+    """
+
+    if not isinstance(attr, SymbolValueType):
+        return None
+    value = attr.get_value()
+    if not isinstance(value, int):
+        return None
+    return value
+
 
 class _BaseSymbolCompareOp(IRDLOperation, HasFolderInterface):
     """symbol 二元整数比较 op 基类。"""
@@ -111,9 +194,9 @@ class _BaseSymbolCompareOp(IRDLOperation, HasFolderInterface):
         for field_name, field_operand in (("lhs", self.lhs), ("rhs", self.rhs)):
             operand = SSAValue.get(field_operand)
             if not _is_symbol_arith_operand_type(operand.type):
-                _raise_verify_error(f"{self.name} {field_name} must have type !symbol.int<#symbol.expr<expr>> or !symbol.iter<...>")
+                raise_verify_error(_ERROR_SCENE, f"{self.name} {field_name} must have type !symbol.int<#symbol.expr<expr>> or !symbol.iter<...>")
         if self.result.type != i1:
-            _raise_verify_error(f"{self.name} result type must be i1")
+            raise_verify_error(_ERROR_SCENE, f"{self.name} result type must be i1")
 
     def fold(self: "_BaseSymbolCompareOp") -> Sequence[SSAValue | Attribute] | None:
         """折叠静态整数 symbol 比较 op。

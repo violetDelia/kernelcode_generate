@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 
 from kernel_gen.core.contracts import build_contiguous_stride, verify_i64_attr_range, verify_memory_type
-from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE, ErrorKind, ErrorModule, kernel_code_error
 from xdsl.dialects.arith import ConstantOp
 from xdsl.dialects.builtin import (
     BFloat16Type,
@@ -36,17 +36,134 @@ from xdsl.dialects.builtin import (
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, traits_def
 from xdsl.traits import EffectInstance, MemoryEffect, MemoryEffectKind
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
 
-from ..common import (
-    _KernelSelectMemoryEffect,
-    _verify_element_type_match,
-    _verify_memory_type,
-    _verify_same_layout,
-)
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE = "dialect.kernel verifier"
+
+class _KernelSelectMemoryEffect(MemoryEffect):
+    """`kernel.select` 的 out 写与 cond/lhs/rhs 读 effect trait。"""
+
+    @classmethod
+    def get_effects(cls, op: Operation) -> set[EffectInstance]:
+        """返回 `kernel.select` 的 MemoryEffect 集合。
+
+
+        功能说明:
+        - 使用 IRDL 命名字段绑定 effect value。
+        - `out` 被写入；`cond/lhs/rhs` 被读取。
+
+        使用示例:
+        - effects = _KernelSelectMemoryEffect.get_effects(op)
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/kernel/test_kernel.py
+        - 功能实现: kernel_gen/dialect/kernel/
+        """
+
+        return {
+            EffectInstance(MemoryEffectKind.WRITE, SSAValue.get(op.out)),  # type: ignore[attr-defined]
+            EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.cond)),  # type: ignore[attr-defined]
+            EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.lhs)),  # type: ignore[attr-defined]
+            EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.rhs)),  # type: ignore[attr-defined]
+        }
+
+def _verify_same_layout(types: Iterable[NnMemoryType], op_space: NnMemorySpaceAttr) -> None:
+    """校验多 operand 的 shape/stride/space 一致性。
+
+
+    功能说明:
+    - 要求 shape/stride/space 全部一致。
+    - op space 属性必须匹配 operand space。
+
+    使用示例:
+    - _verify_same_layout([lhs_type, rhs_type, out_type], space)
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/kernel/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel/
+    """
+
+    types = list(types)
+    if not types:
+        return
+    op_space.verify()
+    base = types[0]
+    for other in types[1:]:
+        if other.space.space.data != base.space.space.data:
+            raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+                ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel op operands must use the same space",
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
+                )
+            )
+        if other.shape != base.shape:
+            raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+                ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel op shape must match across operands",
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
+                )
+            )
+        if other.stride != base.stride:
+            raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+                ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel op stride must match across operands",
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
+                )
+            )
+    if base.space.space.data != op_space.space.data:
+        raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+            ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="kernel op attribute space must match operand space",
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
+            )
+        )
+
+def _verify_element_type_match(types: Iterable[NnMemoryType], message: str) -> None:
+    """校验 element_type 一致性。
+
+
+    功能说明:
+    - 要求所有类型的 element_type 相同。
+
+    使用示例:
+    - _verify_element_type_match([lhs_type, rhs_type, out_type], "...")
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/kernel/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel/
+    """
+
+    types = list(types)
+    if not types:
+        return
+    base_type = types[0].element_type
+    for other in types[1:]:
+        if other.element_type != base_type:
+            raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+                ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected=message,
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
+                )
+            )
+
+
 
 _KERNEL_ERROR_SCENE = "dialect.kernel verifier"
 
@@ -92,12 +209,12 @@ class KernelSelectOp(IRDLOperation):
         - KernelSelectOp(out, cond, lhs, rhs, space).verify()
         """
 
-        cond_type = _verify_memory_type(self.cond.type, "cond")
-        lhs_type = _verify_memory_type(self.lhs.type, "lhs")
-        rhs_type = _verify_memory_type(self.rhs.type, "rhs")
-        out_type = _verify_memory_type(self.out.type, "out")
+        cond_type = verify_memory_type(self.cond.type, "cond", scene=_ERROR_SCENE)
+        lhs_type = verify_memory_type(self.lhs.type, "lhs", scene=_ERROR_SCENE)
+        rhs_type = verify_memory_type(self.rhs.type, "rhs", scene=_ERROR_SCENE)
+        out_type = verify_memory_type(self.out.type, "out", scene=_ERROR_SCENE)
         if cond_type.element_type != i1:
-            raise VerifyException(
+            raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
                 ERROR_TEMPLATE.format(
                     scene=_KERNEL_ERROR_SCENE,
                     expected="kernel.select cond element_type must be i1",

@@ -41,7 +41,8 @@ from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import Parser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import ParseError, VerifyException
+from kernel_gen.core.error import KernelCodeError
+from xdsl.utils.exceptions import ParseError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -239,7 +240,7 @@ def test_select_op_rejects_cond_element_type() -> None:
     lhs = _TestOp(result_types=[data_type]).results[0]
     rhs = _TestOp(result_types=[data_type]).results[0]
     op = NnSelectOp(cond, lhs, rhs, result_type, space)
-    with pytest.raises(VerifyException, match="nn.select cond element_type must be i1"):
+    with pytest.raises(KernelCodeError, match="nn.select cond element_type must be i1"):
         op.verify_()
 
 def test_cast_op_verify_success() -> None:
@@ -255,7 +256,7 @@ def test_cast_op_rejects_shape_mismatch() -> None:
     result_type = _make_matrix_type([4, 7], [7, 1], element_type=IntegerType(16))
     input_value = _TestOp(result_types=[input_type]).results[0]
     op = NnCastOp(input_value, result_type, space)
-    with pytest.raises(VerifyException, match="nn.cast shape must match input"):
+    with pytest.raises(KernelCodeError, match="nn.cast shape must match input"):
         op.verify_()
 
 def test_broadcast_op_verify_success() -> None:
@@ -276,7 +277,7 @@ def test_broadcast_op_space_mismatch() -> None:
     result_type = _make_memory_type("shared", i32)
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnBroadcastOp(inp, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="result-space-must-match-input-and-attr"):
+    with pytest.raises(KernelCodeError, match="result-space-must-match-input-and-attr"):
         op.verify()
 
 def test_broadcast_op_element_type_mismatch() -> None:
@@ -284,7 +285,7 @@ def test_broadcast_op_element_type_mismatch() -> None:
     result_type = _make_memory_type("global", IntegerType(1))
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnBroadcastOp(inp, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="result-element-type-must-match-input"):
+    with pytest.raises(KernelCodeError, match="result-element-type-must-match-input"):
         op.verify()
 
 @pytest.mark.parametrize(
@@ -318,7 +319,7 @@ def test_broadcast_op_rejects_invalid_inputs(
 ) -> None:
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnBroadcastOp(inp, result_type, _make_space(space))
-    with pytest.raises(VerifyException, match=message):
+    with pytest.raises(KernelCodeError, match=message):
         op.verify()
 
 def test_broadcast_module_round_trip() -> None:
@@ -360,7 +361,7 @@ def test_transpose_op_rejects_invalid_perm(perm: Sequence[int], message: str) ->
     result_type = _make_simple_memory_type(["N", "M"], [1, 2])
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnTransposeOp(inp, result_type, perm=perm, space=_make_space("global"))
-    with pytest.raises(VerifyException, match=message):
+    with pytest.raises(KernelCodeError, match=message):
         op.verify()
 
 @pytest.mark.parametrize(
@@ -405,7 +406,7 @@ def test_transpose_op_result_mismatch(
     input_type = _make_simple_memory_type(["M", "N"], [2, 1])
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnTransposeOp(inp, result_type, perm=[1, 0], space=_make_space(space))
-    with pytest.raises(VerifyException, match=message):
+    with pytest.raises(KernelCodeError, match=message):
         op.verify()
 
 def test_transpose_module_round_trip() -> None:

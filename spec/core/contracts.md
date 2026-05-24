@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-提供 `kernel_gen` 内部可复用的类型、shape、dtype 与 verifier 辅助逻辑，供 `dialect`、`operation`、`symbol_variable` 等模块薄包装复用。错误模板文字统一归属 [`kernel_gen.core.error`](error.md)。
+提供 `kernel_gen` 内部可复用的类型、shape、dtype 与 verifier 辅助逻辑，供 `dialect`、`operation`、`symbol_variable` 等模块薄包装复用。错误模板文字和公开失败类型统一归属 [`kernel_gen.core.error`](error.md)，失败必须抛出 `KernelCodeError`。
 
 ## API 列表
 
@@ -49,7 +49,7 @@
   raise_verify_error(scene=scene, expected=expected, actual=actual, action=action)
   ```
 - 功能说明：执行 `raise_verify_error`。
-- 注意事项：按统一错误模板抛出 `VerifyException`；默认 `actual` 与 `action` 文本来自 [`kernel_gen.core.error`](error.md)；调用方必须从 `kernel_gen.core.contracts` 导入，不得回退旧 `common` 包或跨文件调用私有 helper。
+- 注意事项：按统一错误模板抛出 `KernelCodeError(ErrorKind.VERIFY, ErrorModule.DIALECT, ...)`；默认 `actual` 与 `action` 文本来自 [`kernel_gen.core.error`](error.md)；调用方必须从 `kernel_gen.core.contracts` 导入，不得回退旧 `common` 包或跨文件调用私有 helper。
 
 ### `verify_memory_type(value: Attribute, field_name: str, *, scene: str) -> NnMemoryType`
 

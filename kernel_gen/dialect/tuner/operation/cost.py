@@ -21,16 +21,18 @@ from collections.abc import Sequence
 import re
 
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from kernel_gen.core.contracts import raise_verify_error
 from xdsl.dialects.builtin import ArrayAttr, StringAttr, SymbolRefAttr
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, opt_attr_def, result_def, var_operand_def
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.symbol import SymbolValueType
 
-from ..common import _raise_verify_error
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE = "dialect.tuner verifier"
 
 @irdl_op_definition
 class TunerCostOp(IRDLOperation):
@@ -96,21 +98,21 @@ class TunerCostOp(IRDLOperation):
         """
 
         if not isinstance(self.result.type, SymbolValueType):
-            _raise_verify_error("tuner.cost result type must be !symbol.int<#symbol.expr<expr>>")
+            raise_verify_error(_ERROR_SCENE, "tuner.cost result type must be !symbol.int<#symbol.expr<expr>>")
         self.result.type.verify()
 
         for attr_name, attr_value in (("cost_kind", self.cost_kind), ("op_name", self.op_name)):
             if not isinstance(attr_value, StringAttr):
-                _raise_verify_error(f"tuner.cost {attr_name} must be string attr")
+                raise_verify_error(_ERROR_SCENE, f"tuner.cost {attr_name} must be string attr")
         if "kind" in self.attributes:
-            _raise_verify_error("tuner.cost kind attr is not part of public contract")
+            raise_verify_error(_ERROR_SCENE, "tuner.cost kind attr is not part of public contract")
         if "device_func" in self.attributes:
-            _raise_verify_error("tuner.cost device_func attr is not part of public contract")
+            raise_verify_error(_ERROR_SCENE, "tuner.cost device_func attr is not part of public contract")
 
         if not self.cost_kind.data.strip():
-            _raise_verify_error("tuner.cost cost_kind must be non-empty string attr")
+            raise_verify_error(_ERROR_SCENE, "tuner.cost cost_kind must be non-empty string attr")
         if not self.op_name.data.strip():
-            _raise_verify_error("tuner.cost op_name must not be empty")
+            raise_verify_error(_ERROR_SCENE, "tuner.cost op_name must not be empty")
 
     def print(self: "TunerCostOp", printer: Printer) -> None:
         """打印 tuner.cost 自定义文本语法。
@@ -170,14 +172,14 @@ class TunerCostOp(IRDLOperation):
         result_type = parser.parse_type()
 
         if len(operands) != len(operand_types):
-            _raise_verify_error("tuner.cost operands and operand types must have same length")
+            raise_verify_error(_ERROR_SCENE, "tuner.cost operands and operand types must have same length")
         resolved_operands = [parser.resolve_operand(operand, operand_type) for operand, operand_type in zip(operands, operand_types, strict=True)]
 
         try:
             cost_kind = attrs.pop("cost_kind")
             op_name = attrs.pop("op_name")
         except KeyError as exc:
-            _raise_verify_error(f"tuner.cost requires attribute {exc.args[0]}")
+            raise_verify_error(_ERROR_SCENE, f"tuner.cost requires attribute {exc.args[0]}")
 
         return cls(
             resolved_operands,

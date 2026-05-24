@@ -21,6 +21,7 @@ from collections.abc import Sequence
 from typing import ClassVar
 
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from kernel_gen.core.contracts import raise_verify_error
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, SymbolRefAttr, i8
 from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue, TypeAttribute
 from xdsl.irdl import (
@@ -36,13 +37,14 @@ from xdsl.irdl import (
 )
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
 from kernel_gen.target import registry
 
-from ..common import _raise_verify_error
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE = "dialect.arch verifier"
 
 _BARRIER_SCOPE_VALUES = {"block", "thread", "subthread", "global"}
 
@@ -101,7 +103,7 @@ class ArchScopeAttr(ParametrizedAttribute):
         """
 
         if self.scope.data not in _BARRIER_SCOPE_VALUES:
-            _raise_verify_error("arch.scope must be block/thread/subthread/global")
+            raise_verify_error(_ERROR_SCENE, "arch.scope must be block/thread/subthread/global")
 
     @classmethod
     def from_name(cls: type["ArchScopeAttr"], name: str) -> "ArchScopeAttr":

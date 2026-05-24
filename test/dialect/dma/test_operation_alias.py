@@ -22,12 +22,12 @@ def test_dma_view_type_or_space_mismatch() -> None:
 
     result_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
     op = DmaViewOp(source, offsets, shape, stride, result_type)
-    with pytest.raises(VerifyException, match="element_type mismatch"):
+    with pytest.raises(KernelCodeError, match="element_type mismatch"):
         op.verify()
 
     result_type = _make_memory_type(space="shared")
     op = DmaViewOp(source, offsets, shape, stride, result_type)
-    with pytest.raises(VerifyException, match="space mismatch"):
+    with pytest.raises(KernelCodeError, match="space mismatch"):
         op.verify()
 
 def test_dma_alias_ops_have_no_memory_effect() -> None:
@@ -61,7 +61,7 @@ def test_dma_view_numel_mismatch() -> None:
         _make_symbol_operands([1, 1]),
         result_type,
     )
-    with pytest.raises(VerifyException, match="numel mismatch"):
+    with pytest.raises(KernelCodeError, match="numel mismatch"):
         op.verify()
 
 def test_dma_reshape_requires_contiguous() -> None:
@@ -75,7 +75,7 @@ def test_dma_reshape_requires_contiguous() -> None:
     )
     source = _TestOp(result_types=[source_type]).results[0]
     op = DmaReshapeOp(source, _make_symbol_operands([4, 2]), result_type)
-    with pytest.raises(VerifyException, match="contiguous source"):
+    with pytest.raises(KernelCodeError, match="contiguous source"):
         op.verify()
 
 def test_dma_reshape_allows_dynamic_symbol_int_shape_operands() -> None:
@@ -96,7 +96,7 @@ def test_dma_reshape_allows_dynamic_symbol_int_shape_operands() -> None:
         stride=_dim_array(["M", 1]),
     )
     op = DmaReshapeOp(source, _make_symbol_operands(["M", "N"]), bad_result_type)
-    with pytest.raises(VerifyException, match="dma.reshape requires contiguous result stride"):
+    with pytest.raises(KernelCodeError, match="dma.reshape requires contiguous result stride"):
         op.verify()
 
 def test_dma_reshape_rejects_named_result_from_unknown_shape_operands() -> None:
@@ -117,7 +117,7 @@ def test_dma_reshape_rejects_named_result_from_unknown_shape_operands() -> None:
     shape_operands[1].name_hint = "out_tile"
     op = DmaReshapeOp(source, shape_operands, result_type)
 
-    with pytest.raises(VerifyException, match="shape must match result shape"):
+    with pytest.raises(KernelCodeError, match="shape must match result shape"):
         op.verify()
 
 def test_dma_reshape_accepts_equivalent_symbolic_contiguous_source_stride() -> None:
@@ -172,7 +172,7 @@ def test_dma_reshape_numel_mismatch() -> None:
     )
     source = _TestOp(result_types=[source_type]).results[0]
     op = DmaReshapeOp(source, _make_symbol_operands([3, 3]), result_type)
-    with pytest.raises(VerifyException, match="numel mismatch"):
+    with pytest.raises(KernelCodeError, match="numel mismatch"):
         op.verify()
 
 def test_dma_view_dynamic_symbol_int_layout_operands_valid() -> None:
@@ -224,7 +224,7 @@ def test_dma_view_result_stride_uses_source_physical_stride() -> None:
         _make_symbol_operands([1, 1]),
         bad_stride_type,
     )
-    with pytest.raises(VerifyException, match="source physical stride"):
+    with pytest.raises(KernelCodeError, match="source physical stride"):
         bad_stride_op.verify()
 
 def test_dma_view_byte_pool_typed_view() -> None:
@@ -279,7 +279,7 @@ def test_dma_view_byte_pool_typed_view() -> None:
         _make_symbol_operands([1]),
         out_of_bounds_type,
     )
-    with pytest.raises(VerifyException, match="byte bounds mismatch"):
+    with pytest.raises(KernelCodeError, match="byte bounds mismatch"):
         op.verify()
 
     bad_stride_type = _make_memory_type(
@@ -295,7 +295,7 @@ def test_dma_view_byte_pool_typed_view() -> None:
         _make_symbol_operands([3, 1]),
         bad_stride_type,
     )
-    with pytest.raises(VerifyException, match="byte bounds mismatch"):
+    with pytest.raises(KernelCodeError, match="byte bounds mismatch"):
         op.verify()
 
 def test_dma_subview_byte_pool_typed_result_valid() -> None:
@@ -349,7 +349,7 @@ def test_dma_subview_rejects_invalid_contract_edges() -> None:
             )
         ]
     ).results[0]
-    with pytest.raises(VerifyException, match="source must be one-dimensional i8 memory"):
+    with pytest.raises(KernelCodeError, match="source must be one-dimensional i8 memory"):
         DmaSubviewOp(
             non_i8_source,
             _make_symbol_operands([0])[0],
@@ -364,7 +364,7 @@ def test_dma_subview_rejects_invalid_contract_edges() -> None:
         element_type=i32,
         space="shared",
     )
-    with pytest.raises(VerifyException, match="result must be one-dimensional"):
+    with pytest.raises(KernelCodeError, match="result must be one-dimensional"):
         DmaSubviewOp(
             source,
             _make_symbol_operands([0])[0],
@@ -373,7 +373,7 @@ def test_dma_subview_rejects_invalid_contract_edges() -> None:
             two_dim_result,
         ).verify()
 
-    with pytest.raises(VerifyException, match="space mismatch"):
+    with pytest.raises(KernelCodeError, match="space mismatch"):
         DmaSubviewOp(
             source,
             _make_symbol_operands([0])[0],
@@ -387,7 +387,7 @@ def test_dma_subview_rejects_invalid_contract_edges() -> None:
             ),
         ).verify()
 
-    with pytest.raises(VerifyException, match="size must match result shape"):
+    with pytest.raises(KernelCodeError, match="size must match result shape"):
         DmaSubviewOp(
             source,
             _make_symbol_operands([0])[0],
@@ -396,7 +396,7 @@ def test_dma_subview_rejects_invalid_contract_edges() -> None:
             result_type,
         ).verify()
 
-    with pytest.raises(VerifyException, match="byte bounds mismatch"):
+    with pytest.raises(KernelCodeError, match="byte bounds mismatch"):
         DmaSubviewOp(
             source,
             _make_symbol_operands([1])[0],
@@ -413,7 +413,7 @@ def test_dma_view_rejects_invalid_offsets_or_bounds() -> None:
         stride=_dim_array([4, 1]),
     )
 
-    with pytest.raises(VerifyException, match="offsets length must match rank"):
+    with pytest.raises(KernelCodeError, match="offsets length must match rank"):
         DmaViewOp(
             source,
             [],
@@ -430,7 +430,7 @@ def test_dma_view_rejects_invalid_offsets_or_bounds() -> None:
             _make_symbol_operands([1, 1]),
         )
 
-    with pytest.raises(VerifyException, match="offsets entries must be >= 0"):
+    with pytest.raises(KernelCodeError, match="offsets entries must be >= 0"):
         DmaViewOp(
             source,
             _make_symbol_operands([-1, 0]),
@@ -439,7 +439,7 @@ def test_dma_view_rejects_invalid_offsets_or_bounds() -> None:
             result_type,
         ).verify()
 
-    with pytest.raises(VerifyException, match="dma.view bounds mismatch"):
+    with pytest.raises(KernelCodeError, match="dma.view bounds mismatch"):
         DmaViewOp(
             source,
             _make_symbol_operands([1, 0]),
@@ -456,7 +456,7 @@ def test_dma_rejects_non_symbol_int_scalar_operands() -> None:
     symbol_sizes = _make_symbol_operands([2, 4])
     symbol_strides = _make_symbol_operands([1, 1])
 
-    with pytest.raises(VerifyException, match="offsets entries must be !symbol.int or !symbol.iter"):
+    with pytest.raises(KernelCodeError, match="offsets entries must be !symbol.int or !symbol.iter"):
         DmaLoadOp(
             target,
             source,
@@ -468,7 +468,7 @@ def test_dma_rejects_non_symbol_int_scalar_operands() -> None:
     with pytest.raises(VerifyException, match="base attribute symbol.int"):
         DmaAllocOp([index_operand, index_operand], source_type).verify()
 
-    with pytest.raises(VerifyException, match="offsets entries must be !symbol.int or !symbol.iter"):
+    with pytest.raises(KernelCodeError, match="offsets entries must be !symbol.int or !symbol.iter"):
         DmaViewOp(
             source,
             [index_operand, index_operand],
@@ -484,7 +484,7 @@ def test_dma_rejects_non_symbol_int_scalar_operands() -> None:
             source_type,
         ).verify()
 
-    with pytest.raises(VerifyException, match="offset entries must be !symbol.int or !symbol.iter"):
+    with pytest.raises(KernelCodeError, match="offset entries must be !symbol.int or !symbol.iter"):
         DmaReinterpretOp(
             source,
             index_operand,
@@ -493,7 +493,7 @@ def test_dma_rejects_non_symbol_int_scalar_operands() -> None:
             source_type,
         ).verify()
 
-    with pytest.raises(VerifyException, match="value must be builtin integer, builtin float or !symbol.int"):
+    with pytest.raises(KernelCodeError, match="value must be builtin integer, builtin float or !symbol.int"):
         DmaFillOp(target, index_operand).verify()
 
 def test_dma_reshape_rejects_element_or_space_mismatch() -> None:
@@ -508,7 +508,7 @@ def test_dma_reshape_rejects_element_or_space_mismatch() -> None:
         space="global",
     )
     op = DmaReshapeOp(source, shape, bad_element_type)
-    with pytest.raises(VerifyException, match="dma.reshape element_type mismatch"):
+    with pytest.raises(KernelCodeError, match="dma.reshape element_type mismatch"):
         op.verify()
 
     bad_space_type = _make_memory_type(
@@ -517,5 +517,5 @@ def test_dma_reshape_rejects_element_or_space_mismatch() -> None:
         space="shared",
     )
     op = DmaReshapeOp(source, shape, bad_space_type)
-    with pytest.raises(VerifyException, match="dma.reshape space mismatch"):
+    with pytest.raises(KernelCodeError, match="dma.reshape space mismatch"):
         op.verify()

@@ -22,7 +22,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import ClassVar
 
-from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE, KernelCodeError
+from kernel_gen.core.contracts import raise_verify_error
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerAttr, IntegerType, StringAttr, f32, f64, i1, i32
 from xdsl.dialect_interfaces.constant_materialization import ConstantMaterializationInterface
@@ -45,11 +46,29 @@ from xdsl.interfaces import HasFolderInterface
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
 from xdsl.traits import IsTerminator, NoTerminator, Pure
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemoryType
 
-from ..common import _format_error, _raise_type_error, _raise_value_error, _raise_verify_error
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE = "dialect.symbol"
+
+def _format_error(expected: str, actual: str = ERROR_ACTUAL) -> str:
+    """格式化 symbol dialect 统一错误文本。
+
+    功能说明:
+    - 复用核心错误模板生成 verifier、value error 与 type error 的稳定文本。
+
+    使用示例:
+    - message = _format_error("symbol value type expected")
+    """
+
+    return ERROR_TEMPLATE.format(
+        scene=_ERROR_SCENE,
+        expected=expected,
+        actual=actual,
+        action=ERROR_ACTION,
+    )
 
 _SYMBOL_EXPR_TOKEN_PATTERN = re.compile(
     r"\s*(?:(?P<int>[0-9]+)|(?P<ident>[A-Za-z_][A-Za-z0-9_]*)|(?P<punct>[()+\-*,?<>])|(?P<invalid>.))",
@@ -121,9 +140,9 @@ class _SymbolExprParserBase:
         node = self.parse_term()
         while True:
             if self.consume_punctuation("+"):
-                node = _make_symbol_expr_add(node, self.parse_term())
+                node = _SYMBOL_EXPR.make_add(node, self.parse_term())
             elif self.consume_punctuation("-"):
-                node = _make_symbol_expr_sub(node, self.parse_term())
+                node = _SYMBOL_EXPR.make_sub(node, self.parse_term())
             else:
                 return node
 
@@ -141,13 +160,13 @@ class _SymbolExprParserBase:
         node = self.parse_primary()
         while True:
             if self.consume_punctuation("*"):
-                node = _make_symbol_expr_mul(node, self.parse_primary())
+                node = _SYMBOL_EXPR.make_mul(node, self.parse_primary())
             elif self.consume_keyword("floordiv"):
-                node = _make_symbol_expr_keyword_binary("floordiv", node, self.parse_primary())
+                node = _SYMBOL_EXPR.make_keyword_binary("floordiv", node, self.parse_primary())
             elif self.consume_keyword("ceildiv"):
-                node = _make_symbol_expr_keyword_binary("ceildiv", node, self.parse_primary())
+                node = _SYMBOL_EXPR.make_keyword_binary("ceildiv", node, self.parse_primary())
             elif self.consume_keyword("mod"):
-                node = _make_symbol_expr_keyword_binary("mod", node, self.parse_primary())
+                node = _SYMBOL_EXPR.make_keyword_binary("mod", node, self.parse_primary())
             else:
                 return node
 
@@ -164,26 +183,26 @@ class _SymbolExprParserBase:
         if self.consume_punctuation("+"):
             return self.parse_primary()
         if self.consume_punctuation("-"):
-            return _make_symbol_expr_neg(self.parse_primary())
+            return _SYMBOL_EXPR.make_neg(self.parse_primary())
         if self.consume_punctuation("?"):
-            return _make_symbol_expr_unknown()
+            return _SYMBOL_EXPR.make_unknown()
         integer = self.consume_integer()
         if integer is not None:
-            return _make_symbol_expr_const(integer)
+            return _SYMBOL_EXPR.make_const(integer)
         if self.consume_keyword("min"):
             self.expect_punctuation("(")
             lhs = self.parse_expression()
             self.expect_punctuation(",")
             rhs = self.parse_expression()
             self.expect_punctuation(")")
-            return _make_symbol_expr_min(lhs, rhs)
+            return _SYMBOL_EXPR.make_min(lhs, rhs)
         if self.consume_keyword("max"):
             self.expect_punctuation("(")
             lhs = self.parse_expression()
             self.expect_punctuation(",")
             rhs = self.parse_expression()
             self.expect_punctuation(")")
-            return _make_symbol_expr_max(lhs, rhs)
+            return _SYMBOL_EXPR.make_max(lhs, rhs)
         if self.consume_keyword("iter"):
             self.expect_punctuation("<")
             start = self.parse_expression()
@@ -192,10 +211,10 @@ class _SymbolExprParserBase:
             self.expect_punctuation(",")
             step = self.parse_expression()
             self.expect_punctuation(">")
-            return _make_symbol_expr_iter(start, end, step)
+            return _SYMBOL_EXPR.make_iter(start, end, step)
         identifier = self.consume_identifier()
         if identifier is not None:
-            return _make_symbol_expr_symbol(identifier)
+            return _SYMBOL_EXPR.make_symbol(identifier)
         if self.consume_punctuation("("):
             node = self.parse_expression()
             self.expect_punctuation(")")
@@ -266,7 +285,7 @@ class _SymbolExprParserBase:
         """抛出 parser 错误。
 
         功能说明:
-        - 字符串 parser 转为 `VerifyException`，xDSL parser 转为 `ParseError`。
+        - 字符串 parser 转为 `KernelCodeError`，xDSL parser 转为 `ParseError`。
 
         使用示例:
         - parser.raise_parse_error("message")
@@ -296,7 +315,7 @@ class _SymbolExprTextParser(_SymbolExprParserBase):
         - _SymbolExprTextParser("N").parse_all()
         """
 
-        self.tokens = _tokenize_symbol_expr(expr)
+        self.tokens = _SYMBOL_EXPR.tokenize(expr)
         self.index = 0
 
     def parse_all(self: "_SymbolExprTextParser") -> _SymbolExprNode:
@@ -310,7 +329,7 @@ class _SymbolExprTextParser(_SymbolExprParserBase):
         """
 
         if not self.tokens:
-            _raise_verify_error("symbol expr must not be empty")
+            raise_verify_error(_ERROR_SCENE, "symbol expr must not be empty")
         node = self.parse_expression()
         if self.index != len(self.tokens):
             self.raise_parse_error("symbol expr contains trailing tokens")
@@ -337,7 +356,7 @@ class _SymbolExprTextParser(_SymbolExprParserBase):
         """消费字符串 token 中的必需标点。
 
         功能说明:
-        - 缺失时抛出 `VerifyException`。
+        - 缺失时抛出 `KernelCodeError`。
 
         使用示例:
         - parser.expect_punctuation(")")
@@ -407,7 +426,7 @@ class _SymbolExprTextParser(_SymbolExprParserBase):
         - parser.raise_parse_error("bad")
         """
 
-        _raise_verify_error(message)
+        raise_verify_error(_ERROR_SCENE, message)
 
 
 class _SymbolExprAttrParser(_SymbolExprParserBase):
@@ -509,673 +528,714 @@ class _SymbolExprAttrParser(_SymbolExprParserBase):
         self.parser.raise_error(message)
 
 
-def _tokenize_symbol_expr(expr: str) -> list[_SymbolExprToken]:
-    """把公开 symbol 表达式字符串转换为 token。
+class _SymbolExprOps:
+    """当前文件内 symbol expression 操作集合。
 
     功能说明:
-    - 接受标识符、整数与受支持标点。
-    - 裸 `/`、`//`、引号和其它字符直接报错。
+    - 将本文件需要的表达式 builder、parser glue 与格式化逻辑合并到一个私有实现容器。
+    - 该容器只服务当前文件公开 API，避免跨文件私有 helper 复用和私有函数链。
 
     使用示例:
-    - _tokenize_symbol_expr("N floordiv 2")
+    - _SYMBOL_EXPR.normalize("N + 1")
     """
 
-    tokens: list[_SymbolExprToken] = []
-    position = 0
-    while position < len(expr):
-        if expr[position:].strip() == "":
-            break
-        match = _SYMBOL_EXPR_TOKEN_PATTERN.match(expr, position)
-        if match is None:
-            _raise_verify_error("symbol expr contains unsupported token")
-        position = match.end()
-        if text := match.group("int"):
-            tokens.append(_SymbolExprToken("int", text))
-        elif text := match.group("ident"):
-            tokens.append(_SymbolExprToken("ident", text))
-        elif text := match.group("punct"):
-            tokens.append(_SymbolExprToken("punct", text))
-        else:
-            invalid = match.group("invalid") or ""
-            if invalid in {"/", '"'}:
-                _raise_verify_error("symbol expr does not support quoted string, bare / or //; use floordiv, ceildiv or mod")
-            _raise_verify_error("symbol expr contains unsupported token")
-    return tokens
+    @staticmethod
+    def tokenize(expr: str) -> list[_SymbolExprToken]:
+        """把公开 symbol 表达式字符串转换为 token。
+
+        功能说明:
+        - 接受标识符、整数与受支持标点。
+        - 裸 `/`、`//`、引号和其它字符直接报错。
+
+        使用示例:
+        - _SYMBOL_EXPR.tokenize("N floordiv 2")
+        """
+
+        tokens: list[_SymbolExprToken] = []
+        position = 0
+        while position < len(expr):
+            if expr[position:].strip() == "":
+                break
+            match = _SYMBOL_EXPR_TOKEN_PATTERN.match(expr, position)
+            if match is None:
+                raise_verify_error(_ERROR_SCENE, "symbol expr contains unsupported token")
+            position = match.end()
+            if text := match.group("int"):
+                tokens.append(_SymbolExprToken("int", text))
+            elif text := match.group("ident"):
+                tokens.append(_SymbolExprToken("ident", text))
+            elif text := match.group("punct"):
+                tokens.append(_SymbolExprToken("punct", text))
+            else:
+                invalid = match.group("invalid") or ""
+                if invalid in {"/", '"'}:
+                    raise_verify_error(_ERROR_SCENE, "symbol expr does not support quoted string, bare / or //; use floordiv, ceildiv or mod")
+                raise_verify_error(_ERROR_SCENE, "symbol expr contains unsupported token")
+        return tokens
 
 
-def _make_symbol_expr_const(value: int) -> _SymbolExprNode:
-    """构造常量表达节点。
+    @staticmethod
+    def make_const(value: int) -> _SymbolExprNode:
+        """构造常量表达节点。
 
-    功能说明:
-    - 统一保存整数常量。
+        功能说明:
+        - 统一保存整数常量。
 
-    使用示例:
-    - _make_symbol_expr_const(4)
-    """
+        使用示例:
+        - _SYMBOL_EXPR.make_const(4)
+        """
 
-    return _SymbolExprNode("const", value=value)
-
-
-def _make_symbol_expr_symbol(value: str) -> _SymbolExprNode:
-    """构造具名 symbol 表达节点。
-
-    功能说明:
-    - 校验名称满足公开标识符规则。
-
-    使用示例:
-    - _make_symbol_expr_symbol("N")
-    """
-
-    if _SYMBOL_EXPR_NAME_PATTERN.fullmatch(value) is None:
-        _raise_verify_error("symbol expr name must match [A-Za-z_][A-Za-z0-9_]*")
-    return _SymbolExprNode("symbol", value=value)
+        return _SymbolExprNode("const", value=value)
 
 
-def _make_symbol_expr_unknown() -> _SymbolExprNode:
-    """构造 unknown 表达节点。
+    @staticmethod
+    def make_symbol(value: str) -> _SymbolExprNode:
+        """构造具名 symbol 表达节点。
 
-    功能说明:
-    - unknown 公开文本固定为 `?`。
+        功能说明:
+        - 校验名称满足公开标识符规则。
 
-    使用示例:
-    - _make_symbol_expr_unknown()
-    """
+        使用示例:
+        - _SYMBOL_EXPR.make_symbol("N")
+        """
 
-    return _SymbolExprNode("unknown")
-
-
-def _is_symbol_expr_unknown(node: _SymbolExprNode) -> bool:
-    """判断表达节点是否为 unknown。
-
-    功能说明:
-    - 服务 `?` 传播规则。
-
-    使用示例:
-    - _is_symbol_expr_unknown(node)
-    """
-
-    return node.kind == "unknown"
+        if _SYMBOL_EXPR_NAME_PATTERN.fullmatch(value) is None:
+            raise_verify_error(_ERROR_SCENE, "symbol expr name must match [A-Za-z_][A-Za-z0-9_]*")
+        return _SymbolExprNode("symbol", value=value)
 
 
-def _contains_symbol_expr_unknown(node: _SymbolExprNode) -> bool:
-    """判断表达树是否包含 unknown。
+    @staticmethod
+    def make_unknown() -> _SymbolExprNode:
+        """构造 unknown 表达节点。
 
-    功能说明:
-    - 识别 `iter<start,end,step>` 子表达中的 `?`，供算术结果保守传播。
+        功能说明:
+        - unknown 公开文本固定为 `?`。
 
-    使用示例:
-    - _contains_symbol_expr_unknown(node)
-    """
+        使用示例:
+        - _SYMBOL_EXPR.make_unknown()
+        """
 
-    return _is_symbol_expr_unknown(node) or any(_contains_symbol_expr_unknown(arg) for arg in node.args)
-
-
-def _contains_symbol_expr_iter(node: _SymbolExprNode) -> bool:
-    """判断表达树是否包含 iter token。
-
-    功能说明:
-    - 含 iter token 的 `min/max` 需要保留调用顺序，避免 tail 表达式被重排。
-
-    使用示例:
-    - has_iter = _contains_symbol_expr_iter(node)
-    """
-
-    return node.kind == "iter" or any(_contains_symbol_expr_iter(arg) for arg in node.args)
+        return _SymbolExprNode("unknown")
 
 
-def _make_symbol_expr_iter(start: _SymbolExprNode, end: _SymbolExprNode, step: _SymbolExprNode) -> _SymbolExprNode:
-    """构造 `iter<start,end,step>` token 表达节点。
+    @staticmethod
+    def is_unknown(node: _SymbolExprNode) -> bool:
+        """判断表达节点是否为 unknown。
 
-    功能说明:
-    - 该节点表示 `SymbolIterType` 的值语义 token，不从 SSA 名称或 dump 文本派生。
-    - start/end/step 已在子表达 parser 中完成 canonicalize。
+        功能说明:
+        - 服务 `?` 传播规则。
 
-    使用示例:
-    - _make_symbol_expr_iter(start, end, step)
-    """
+        使用示例:
+        - _SYMBOL_EXPR.is_unknown(node)
+        """
 
-    return _SymbolExprNode("iter", args=(start, end, step))
-
-
-def _get_symbol_expr_const(node: _SymbolExprNode) -> int | None:
-    """提取常量节点的整数值。
-
-    功能说明:
-    - 非常量返回 `None`。
-
-    使用示例:
-    - _get_symbol_expr_const(node)
-    """
-
-    return int(node.value) if node.kind == "const" and isinstance(node.value, int) else None
+        return node.kind == "unknown"
 
 
-def _get_concrete_symbol_expr_node_value(node: _SymbolExprNode) -> int | None:
-    """计算纯静态整数表达节点。
+    @staticmethod
+    def contains_unknown(node: _SymbolExprNode) -> bool:
+        """判断表达树是否包含 unknown。
 
-    功能说明:
-    - 只处理由常量和整数算术构成的表达节点。
-    - 遇到具名 symbol、`?`、`iter<...>`、`min/max` 或除零时返回 `None`，由调用方保守拒绝。
+        功能说明:
+        - 识别 `iter<start,end,step>` 子表达中的 `?`，供算术结果保守传播。
 
-    使用示例:
-    - value = _get_concrete_symbol_expr_node_value(_parse_symbol_expr_from_text("8 + 4"))
-    """
+        使用示例:
+        - _SYMBOL_EXPR.contains_unknown(node)
+        """
 
-    const = _get_symbol_expr_const(node)
-    if const is not None:
-        return const
-    if node.kind == "neg":
-        value = _get_concrete_symbol_expr_node_value(node.args[0])
-        return -value if value is not None else None
-    if node.kind == "add":
-        values = [_get_concrete_symbol_expr_node_value(arg) for arg in node.args]
-        if any(value is None for value in values):
-            return None
-        return sum(value for value in values if value is not None)
-    if node.kind == "sub":
-        lhs = _get_concrete_symbol_expr_node_value(node.args[0])
-        rhs = _get_concrete_symbol_expr_node_value(node.args[1])
-        return lhs - rhs if lhs is not None and rhs is not None else None
-    if node.kind == "mul":
-        values = [_get_concrete_symbol_expr_node_value(arg) for arg in node.args]
-        if any(value is None for value in values):
-            return None
-        product = 1
-        for value in values:
-            if value is not None:
-                product *= value
-        return product
-    if node.kind in {"floordiv", "ceildiv", "mod"}:
-        lhs = _get_concrete_symbol_expr_node_value(node.args[0])
-        rhs = _get_concrete_symbol_expr_node_value(node.args[1])
-        if lhs is None or rhs is None or rhs == 0:
-            return None
-        if node.kind == "floordiv":
-            return lhs // rhs
-        if node.kind == "ceildiv":
-            return -(-lhs // rhs)
-        return lhs % rhs
-    return None
+        return _SYMBOL_EXPR.is_unknown(node) or any(_SYMBOL_EXPR.contains_unknown(arg) for arg in node.args)
 
 
-def _linear_symbol_expr_terms(node: _SymbolExprNode) -> tuple[dict[str, int], int] | None:
-    """提取一阶 symbol 表达式的系数表。
+    @staticmethod
+    def contains_iter(node: _SymbolExprNode) -> bool:
+        """判断表达树是否包含 iter token。
 
-    功能说明:
-    - 仅处理常量、具名 symbol、加减和常量乘一阶表达式。
-    - 遇到 `?`、`iter<...>`、`min/max` 或非线性乘法时返回 `None`，调用方保守拒绝。
+        功能说明:
+        - 含 iter token 的 `min/max` 需要保留调用顺序，避免 tail 表达式被重排。
 
-    使用示例:
-    - linear = _linear_symbol_expr_terms(_parse_symbol_expr_from_text("B + 24"))
-    """
+        使用示例:
+        - has_iter = _SYMBOL_EXPR.contains_iter(node)
+        """
 
-    const = _get_symbol_expr_const(node)
-    if const is not None:
-        return ({}, const)
-    if node.kind == "symbol":
-        return ({str(node.value): 1}, 0)
-    if node.kind == "neg":
-        operand = _linear_symbol_expr_terms(node.args[0])
-        if operand is None:
-            return None
-        terms, offset = operand
-        return ({name: -coeff for name, coeff in terms.items()}, -offset)
-    if node.kind == "add":
-        combined: dict[str, int] = {}
-        offset = 0
-        for arg in node.args:
-            parsed = _linear_symbol_expr_terms(arg)
-            if parsed is None:
-                return None
-            terms, arg_offset = parsed
-            offset += arg_offset
-            for name, coeff in terms.items():
-                combined[name] = combined.get(name, 0) + coeff
-        return ({name: coeff for name, coeff in combined.items() if coeff != 0}, offset)
-    if node.kind == "sub":
-        lhs = _linear_symbol_expr_terms(node.args[0])
-        rhs = _linear_symbol_expr_terms(node.args[1])
-        if lhs is None or rhs is None:
-            return None
-        lhs_terms, lhs_offset = lhs
-        rhs_terms, rhs_offset = rhs
-        combined = dict(lhs_terms)
-        for name, coeff in rhs_terms.items():
-            combined[name] = combined.get(name, 0) - coeff
-        return ({name: coeff for name, coeff in combined.items() if coeff != 0}, lhs_offset - rhs_offset)
-    if node.kind == "mul":
-        linear: tuple[dict[str, int], int] | None = None
-        const_product = 1
-        for arg in node.args:
-            arg_const = _get_symbol_expr_const(arg)
-            if arg_const is not None:
-                const_product *= arg_const
-                continue
-            if linear is not None:
-                return None
-            linear = _linear_symbol_expr_terms(arg)
-            if linear is None:
-                return None
-        if linear is None:
-            return ({}, const_product)
-        terms, offset = linear
-        return ({name: coeff * const_product for name, coeff in terms.items()}, offset * const_product)
-    return None
+        return node.kind == "iter" or any(_SYMBOL_EXPR.contains_iter(arg) for arg in node.args)
 
 
-def _make_symbol_expr_neg(node: _SymbolExprNode) -> _SymbolExprNode:
-    """构造一元负号表达。
+    @staticmethod
+    def make_iter(start: _SymbolExprNode, end: _SymbolExprNode, step: _SymbolExprNode) -> _SymbolExprNode:
+        """构造 `iter<start,end,step>` token 表达节点。
 
-    功能说明:
-    - 常量直接折叠；unknown 继续传播。
+        功能说明:
+        - 该节点表示 `SymbolIterType` 的值语义 token，不从 SSA 名称或 dump 文本派生。
+        - start/end/step 已在子表达 parser 中完成 canonicalize。
 
-    使用示例:
-    - _make_symbol_expr_neg(_make_symbol_expr_symbol("N"))
-    """
+        使用示例:
+        - _SYMBOL_EXPR.make_iter(start, end, step)
+        """
 
-    if _contains_symbol_expr_unknown(node):
-        return _make_symbol_expr_unknown()
-    const = _get_symbol_expr_const(node)
-    if const is not None:
-        return _make_symbol_expr_const(-const)
-    if node.kind == "neg":
-        return node.args[0]
-    return _SymbolExprNode("neg", args=(node,))
+        return _SymbolExprNode("iter", args=(start, end, step))
 
 
-def _make_symbol_expr_add(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _SymbolExprNode:
-    """构造 canonical 加法表达。
+    @staticmethod
+    def const_value(node: _SymbolExprNode) -> int | None:
+        """提取常量节点的整数值。
 
-    功能说明:
-    - 常量折叠、零 identity、交换律排序与 `?` 传播。
+        功能说明:
+        - 非常量返回 `None`。
 
-    使用示例:
-    - _make_symbol_expr_add(_make_symbol_expr_symbol("N"), _make_symbol_expr_const(1))
-    """
+        使用示例:
+        - _SYMBOL_EXPR.const_value(node)
+        """
 
-    if _contains_symbol_expr_unknown(lhs) or _contains_symbol_expr_unknown(rhs):
-        return _make_symbol_expr_unknown()
-    lhs_const = _get_symbol_expr_const(lhs)
-    rhs_const = _get_symbol_expr_const(rhs)
-    if lhs_const is not None and rhs_const is not None:
-        return _make_symbol_expr_const(lhs_const + rhs_const)
-    terms: list[_SymbolExprNode] = []
-    const_sum = 0
-    for node in (lhs, rhs):
+        return int(node.value) if node.kind == "const" and isinstance(node.value, int) else None
+
+
+    @staticmethod
+    def concrete_value(node: _SymbolExprNode) -> int | None:
+        """计算纯静态整数表达节点。
+
+        功能说明:
+        - 只处理由常量和整数算术构成的表达节点。
+        - 遇到具名 symbol、`?`、`iter<...>`、`min/max` 或除零时返回 `None`，由调用方保守拒绝。
+
+        使用示例:
+        - value = _SYMBOL_EXPR.concrete_value(_SYMBOL_EXPR.parse_text("8 + 4"))
+        """
+
+        const = _SYMBOL_EXPR.const_value(node)
+        if const is not None:
+            return const
+        if node.kind == "neg":
+            value = _SYMBOL_EXPR.concrete_value(node.args[0])
+            return -value if value is not None else None
         if node.kind == "add":
-            source = node.args
-        else:
-            source = (node,)
-        for term in source:
-            term_const = _get_symbol_expr_const(term)
-            if term_const is None:
-                terms.append(term)
-            else:
-                const_sum += term_const
-    terms.sort(key=_format_symbol_expr_node)
-    if const_sum != 0:
-        terms.append(_make_symbol_expr_const(const_sum))
-    if not terms:
-        return _make_symbol_expr_const(0)
-    if len(terms) == 1:
-        return terms[0]
-    return _SymbolExprNode("add", args=tuple(terms))
-
-
-def _make_symbol_expr_sub(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _SymbolExprNode:
-    """构造 canonical 减法表达。
-
-    功能说明:
-    - 常量折叠、减零 identity 与 `?` 传播。
-
-    使用示例:
-    - _make_symbol_expr_sub(_make_symbol_expr_symbol("N"), _make_symbol_expr_const(1))
-    """
-
-    if _contains_symbol_expr_unknown(lhs) or _contains_symbol_expr_unknown(rhs):
-        return _make_symbol_expr_unknown()
-    lhs_const = _get_symbol_expr_const(lhs)
-    rhs_const = _get_symbol_expr_const(rhs)
-    if lhs_const is not None and rhs_const is not None:
-        return _make_symbol_expr_const(lhs_const - rhs_const)
-    if rhs_const == 0:
-        return lhs
-    if rhs_const is not None:
-        return _make_symbol_expr_add(lhs, _make_symbol_expr_const(-rhs_const))
-    if lhs_const == 0:
-        return _make_symbol_expr_neg(rhs)
-    if lhs == rhs:
-        return _make_symbol_expr_const(0)
-    return _SymbolExprNode("sub", args=(lhs, rhs))
-
-
-def _make_symbol_expr_mul(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _SymbolExprNode:
-    """构造 canonical 乘法表达。
-
-    功能说明:
-    - 常量折叠、零/一规则、交换律排序与 `?` 传播。
-
-    使用示例:
-    - _make_symbol_expr_mul(_make_symbol_expr_symbol("N"), _make_symbol_expr_const(2))
-    """
-
-    if _contains_symbol_expr_unknown(lhs) or _contains_symbol_expr_unknown(rhs):
-        return _make_symbol_expr_unknown()
-    lhs_const = _get_symbol_expr_const(lhs)
-    rhs_const = _get_symbol_expr_const(rhs)
-    if lhs_const is not None and rhs_const is not None:
-        return _make_symbol_expr_const(lhs_const * rhs_const)
-    terms: list[_SymbolExprNode] = []
-    const_product = 1
-    for node in (lhs, rhs):
+            values = [_SYMBOL_EXPR.concrete_value(arg) for arg in node.args]
+            if any(value is None for value in values):
+                return None
+            return sum(value for value in values if value is not None)
+        if node.kind == "sub":
+            lhs = _SYMBOL_EXPR.concrete_value(node.args[0])
+            rhs = _SYMBOL_EXPR.concrete_value(node.args[1])
+            return lhs - rhs if lhs is not None and rhs is not None else None
         if node.kind == "mul":
-            source = node.args
-        else:
-            source = (node,)
-        for term in source:
-            term_const = _get_symbol_expr_const(term)
-            if term_const is None:
-                terms.append(term)
-            else:
-                const_product *= term_const
-    if const_product == 0:
-        return _make_symbol_expr_const(0)
-    terms.sort(key=_format_symbol_expr_node)
-    if const_product != 1 or not terms:
-        terms.insert(0, _make_symbol_expr_const(const_product))
-    if len(terms) == 1:
-        return terms[0]
-    return _SymbolExprNode("mul", args=tuple(terms))
-
-
-def _make_symbol_expr_keyword_binary(op: str, lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _SymbolExprNode:
-    """构造 affine 风格关键字二元表达。
-
-    功能说明:
-    - 支持 `floordiv`、`ceildiv` 与 `mod`。
-    - 常量场景直接折叠，除零稳定报错。
-
-    使用示例:
-    - _make_symbol_expr_keyword_binary("floordiv", lhs, rhs)
-    """
-
-    if _contains_symbol_expr_unknown(lhs) or _contains_symbol_expr_unknown(rhs):
-        return _make_symbol_expr_unknown()
-    lhs_const = _get_symbol_expr_const(lhs)
-    rhs_const = _get_symbol_expr_const(rhs)
-    if rhs_const == 0:
-        _raise_verify_error("symbol expr division by zero is not supported")
-    if lhs_const is not None and rhs_const is not None:
-        if op == "floordiv":
-            return _make_symbol_expr_const(lhs_const // rhs_const)
-        if op == "ceildiv":
-            return _make_symbol_expr_const(-(-lhs_const // rhs_const))
-        if op == "mod":
-            return _make_symbol_expr_const(lhs_const % rhs_const)
-    if rhs_const == 1:
-        if op in {"floordiv", "ceildiv"}:
-            return lhs
-        if op == "mod":
-            return _make_symbol_expr_const(0)
-    return _SymbolExprNode(op, args=(lhs, rhs))
-
-
-def _make_symbol_expr_min(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _SymbolExprNode:
-    """构造 canonical `min(lhs, rhs)` 表达。
-
-    功能说明:
-    - 支持二元 min、常量折叠、交换律排序、iter token 稳定排序与 `?` 传播。
-
-    使用示例:
-    - _make_symbol_expr_min(lhs, rhs)
-    """
-
-    if _contains_symbol_expr_unknown(lhs) or _contains_symbol_expr_unknown(rhs):
-        return _make_symbol_expr_unknown()
-    lhs_const = _get_symbol_expr_const(lhs)
-    rhs_const = _get_symbol_expr_const(rhs)
-    if lhs_const is not None and rhs_const is not None:
-        return _make_symbol_expr_const(min(lhs_const, rhs_const))
-    if lhs == rhs:
-        return lhs
-    lhs_has_iter = _contains_symbol_expr_iter(lhs)
-    rhs_has_iter = _contains_symbol_expr_iter(rhs)
-    if lhs_has_iter != rhs_has_iter:
-        ordered = (rhs, lhs) if lhs_has_iter else (lhs, rhs)
-        return _SymbolExprNode("min", args=ordered)
-    if lhs_has_iter and rhs_has_iter:
-        return _SymbolExprNode("min", args=(lhs, rhs))
-    ordered = tuple(sorted((lhs, rhs), key=_format_symbol_expr_node))
-    return _SymbolExprNode("min", args=ordered)
-
-
-def _make_symbol_expr_max(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _SymbolExprNode:
-    """构造 canonical `max(lhs, rhs)` 表达。
-
-    功能说明:
-    - 支持二元 max、常量折叠、交换律排序、iter token 稳定排序与 `?` 传播。
-
-    使用示例:
-    - _make_symbol_expr_max(lhs, rhs)
-    """
-
-    if _contains_symbol_expr_unknown(lhs) or _contains_symbol_expr_unknown(rhs):
-        return _make_symbol_expr_unknown()
-    lhs_const = _get_symbol_expr_const(lhs)
-    rhs_const = _get_symbol_expr_const(rhs)
-    if lhs_const is not None and rhs_const is not None:
-        return _make_symbol_expr_const(max(lhs_const, rhs_const))
-    if lhs == rhs:
-        return lhs
-    lhs_has_iter = _contains_symbol_expr_iter(lhs)
-    rhs_has_iter = _contains_symbol_expr_iter(rhs)
-    if lhs_has_iter != rhs_has_iter:
-        ordered = (rhs, lhs) if lhs_has_iter else (lhs, rhs)
-        return _SymbolExprNode("max", args=ordered)
-    if lhs_has_iter and rhs_has_iter:
-        return _SymbolExprNode("max", args=(lhs, rhs))
-    ordered = tuple(sorted((lhs, rhs), key=_format_symbol_expr_node))
-    return _SymbolExprNode("max", args=ordered)
-
-
-def _symbol_expr_precedence(node: _SymbolExprNode) -> int:
-    """返回表达节点打印优先级。
-
-    功能说明:
-    - 用于生成可稳定重新解析的 canonical 文本。
-
-    使用示例:
-    - _symbol_expr_precedence(node)
-    """
-
-    if node.kind in {"const", "symbol", "unknown", "iter", "min", "max"}:
-        return _SYMBOL_EXPR_ATOM_PRECEDENCE
-    if node.kind == "neg":
-        return _SYMBOL_EXPR_UNARY_PRECEDENCE
-    if node.kind in {"mul", "floordiv", "ceildiv", "mod"}:
-        return _SYMBOL_EXPR_TERM_PRECEDENCE
-    return _SYMBOL_EXPR_EXPR_PRECEDENCE
-
-
-def _format_symbol_expr_node(node: _SymbolExprNode, parent_precedence: int = 0) -> str:
-    """打印 canonical symbol 表达式节点。
-
-    功能说明:
-    - 生成 `SymbolExprAttr.expr.data` 的稳定文本。
-    - 只在必要时添加括号。
-
-    使用示例:
-    - _format_symbol_expr_node(node)
-    """
-
-    if node.kind == "const":
-        text = str(node.value)
-    elif node.kind == "symbol":
-        text = str(node.value)
-    elif node.kind == "unknown":
-        text = _UNKNOWN_SYMBOL_EXPR
-    elif node.kind == "iter":
-        start, end, step = node.args
-        text = f"iter<{_format_symbol_expr_node(start)},{_format_symbol_expr_node(end)},{_format_symbol_expr_node(step)}>"
-    elif node.kind == "neg":
-        text = "-" + _format_symbol_expr_node(node.args[0], _SYMBOL_EXPR_UNARY_PRECEDENCE)
-    elif node.kind == "add":
-        text = _format_symbol_expr_add(node)
-    elif node.kind == "sub":
-        lhs, rhs = node.args
-        text = (
-            f"{_format_symbol_expr_node(lhs, _SYMBOL_EXPR_EXPR_PRECEDENCE)} - "
-            f"{_format_symbol_expr_node(rhs, _SYMBOL_EXPR_EXPR_PRECEDENCE + 1)}"
-        )
-    elif node.kind == "mul":
-        text = "*".join(_format_symbol_expr_node(arg, _SYMBOL_EXPR_TERM_PRECEDENCE) for arg in node.args)
-    elif node.kind in {"floordiv", "ceildiv", "mod"}:
-        lhs, rhs = node.args
-        text = (
-            f"{_format_symbol_expr_node(lhs, _SYMBOL_EXPR_TERM_PRECEDENCE)} {node.kind} "
-            f"{_format_symbol_expr_node(rhs, _SYMBOL_EXPR_TERM_PRECEDENCE + 1)}"
-        )
-    elif node.kind == "min":
-        text = f"min({_format_symbol_expr_node(node.args[0])}, {_format_symbol_expr_node(node.args[1])})"
-    elif node.kind == "max":
-        text = f"max({_format_symbol_expr_node(node.args[0])}, {_format_symbol_expr_node(node.args[1])})"
-    else:
-        _raise_verify_error("symbol expr contains unsupported token")
-    if _symbol_expr_precedence(node) < parent_precedence:
-        return f"({text})"
-    return text
-
-
-def _format_symbol_expr_add(node: _SymbolExprNode) -> str:
-    """打印 canonical 加法表达式。
-
-    功能说明:
-    - 把负常量和一元负号打印为 `lhs - rhs` 形式。
-
-    使用示例:
-    - _format_symbol_expr_add(node)
-    """
-
-    pieces: list[str] = []
-    for term in node.args:
-        const = _get_symbol_expr_const(term)
-        if const is not None and const < 0:
-            if not pieces:
-                pieces.append(str(const))
-            else:
-                pieces.append(f"- {abs(const)}")
-            continue
-        if term.kind == "neg":
-            text = _format_symbol_expr_node(term.args[0], _SYMBOL_EXPR_EXPR_PRECEDENCE + 1)
-            pieces.append(f"- {text}" if pieces else f"-{text}")
-            continue
-        text = _format_symbol_expr_node(term, _SYMBOL_EXPR_EXPR_PRECEDENCE)
-        pieces.append(text if not pieces else f"+ {text}")
-    return " ".join(pieces)
-
-
-def _parse_symbol_expr_from_text(expr: str) -> _SymbolExprNode:
-    """解析字符串为 canonical symbol 表达节点。
-
-    功能说明:
-    - 统一 `from_expr`、verifier 与内部 result 推导路径。
-
-    使用示例:
-    - _parse_symbol_expr_from_text("N + 1")
-    """
-
-    return _SymbolExprTextParser(expr).parse_all()
-
-
-def _parse_symbol_expr_from_attr_parser(parser: AttrParser) -> _SymbolExprNode:
-    """从 xDSL attribute parser 解析 symbol 表达。
-
-    功能说明:
-    - 只消费 `#symbol.expr<...>` 内部表达 token。
-
-    使用示例:
-    - _parse_symbol_expr_from_attr_parser(parser)
-    """
-
-    return _SymbolExprAttrParser(parser).parse_expression()
-
-
-def _normalize_expr(expr: str) -> str:
-    """标准化符号表达字符串。
-
-    功能说明:
-    - 解析公开 symbol 表达并输出 canonical 文本。
-    - 裸 `/`、`//`、quoted string 和非法字符均被拒绝。
-
-    使用示例:
-    - _normalize_expr("1 + N")
-    """
-
-    return _format_symbol_expr_node(_parse_symbol_expr_from_text(expr.strip()))
-
-
-def _evaluate_concrete_expr(expr: str) -> int | None:
-    """尝试计算不含符号名的整数表达式。
-
-    功能说明:
-    - 对 canonical 语法下的纯整数表达返回具体整数值。
-    - 对动态 symbol 或 unknown 返回 `None`。
-
-    使用示例:
-    - _evaluate_concrete_expr("8 floordiv 2")
-    """
-
-    try:
-        node = _parse_symbol_expr_from_text(expr)
-    except VerifyException:
+            values = [_SYMBOL_EXPR.concrete_value(arg) for arg in node.args]
+            if any(value is None for value in values):
+                return None
+            product = 1
+            for value in values:
+                if value is not None:
+                    product *= value
+            return product
+        if node.kind in {"floordiv", "ceildiv", "mod"}:
+            lhs = _SYMBOL_EXPR.concrete_value(node.args[0])
+            rhs = _SYMBOL_EXPR.concrete_value(node.args[1])
+            if lhs is None or rhs is None or rhs == 0:
+                return None
+            if node.kind == "floordiv":
+                return lhs // rhs
+            if node.kind == "ceildiv":
+                return -(-lhs // rhs)
+            return lhs % rhs
         return None
-    return _get_symbol_expr_const(node)
 
 
-def _canonicalize_symbolic_expr(expr: str) -> str:
-    """生成对外比较用的稳定符号表达文本。
+    @staticmethod
+    def linear_terms(node: _SymbolExprNode) -> tuple[dict[str, int], int] | None:
+        """提取一阶 symbol 表达式的系数表。
 
-    功能说明:
-    - 复用 `SymbolExprAttr` canonical parser。
+        功能说明:
+        - 仅处理常量、具名 symbol、加减和常量乘一阶表达式。
+        - 遇到 `?`、`iter<...>`、`min/max` 或非线性乘法时返回 `None`，调用方保守拒绝。
 
-    使用示例:
-    - _canonicalize_symbolic_expr("1 + N")
-    """
+        使用示例:
+        - linear = _SYMBOL_EXPR.linear_terms(_SYMBOL_EXPR.parse_text("B + 24"))
+        """
 
-    return _normalize_expr(expr)
+        const = _SYMBOL_EXPR.const_value(node)
+        if const is not None:
+            return ({}, const)
+        if node.kind == "symbol":
+            return ({str(node.value): 1}, 0)
+        if node.kind == "neg":
+            operand = _SYMBOL_EXPR.linear_terms(node.args[0])
+            if operand is None:
+                return None
+            terms, offset = operand
+            return ({name: -coeff for name, coeff in terms.items()}, -offset)
+        if node.kind == "add":
+            combined: dict[str, int] = {}
+            offset = 0
+            for arg in node.args:
+                parsed = _SYMBOL_EXPR.linear_terms(arg)
+                if parsed is None:
+                    return None
+                terms, arg_offset = parsed
+                offset += arg_offset
+                for name, coeff in terms.items():
+                    combined[name] = combined.get(name, 0) + coeff
+            return ({name: coeff for name, coeff in combined.items() if coeff != 0}, offset)
+        if node.kind == "sub":
+            lhs = _SYMBOL_EXPR.linear_terms(node.args[0])
+            rhs = _SYMBOL_EXPR.linear_terms(node.args[1])
+            if lhs is None or rhs is None:
+                return None
+            lhs_terms, lhs_offset = lhs
+            rhs_terms, rhs_offset = rhs
+            combined = dict(lhs_terms)
+            for name, coeff in rhs_terms.items():
+                combined[name] = combined.get(name, 0) - coeff
+            return ({name: coeff for name, coeff in combined.items() if coeff != 0}, lhs_offset - rhs_offset)
+        if node.kind == "mul":
+            linear: tuple[dict[str, int], int] | None = None
+            const_product = 1
+            for arg in node.args:
+                arg_const = _SYMBOL_EXPR.const_value(arg)
+                if arg_const is not None:
+                    const_product *= arg_const
+                    continue
+                if linear is not None:
+                    return None
+                linear = _SYMBOL_EXPR.linear_terms(arg)
+                if linear is None:
+                    return None
+            if linear is None:
+                return ({}, const_product)
+            terms, offset = linear
+            return ({name: coeff * const_product for name, coeff in terms.items()}, offset * const_product)
+        return None
 
 
-def _is_supported_symbol_expr(expr: str) -> bool:
-    """判断符号表达是否属于当前 dialect 支持的最小语法。
+    @staticmethod
+    def make_neg(node: _SymbolExprNode) -> _SymbolExprNode:
+        """构造一元负号表达。
 
-    功能说明:
-    - 支持整数、标识符、`?`、`+`、`-`、`*`、`floordiv`、`ceildiv`、`mod`、二元 `min/max` 与括号。
-    - 不支持裸 `/`、`//`、quoted string 或 `floor(...)`。
+        功能说明:
+        - 常量直接折叠；unknown 继续传播。
 
-    使用示例:
-    - _is_supported_symbol_expr("N floordiv 2")
-    """
+        使用示例:
+        - _SYMBOL_EXPR.make_neg(_SYMBOL_EXPR.make_symbol("N"))
+        """
 
-    try:
-        _parse_symbol_expr_from_text(expr)
-    except VerifyException:
-        return False
-    return True
+        if _SYMBOL_EXPR.contains_unknown(node):
+            return _SYMBOL_EXPR.make_unknown()
+        const = _SYMBOL_EXPR.const_value(node)
+        if const is not None:
+            return _SYMBOL_EXPR.make_const(-const)
+        if node.kind == "neg":
+            return node.args[0]
+        return _SymbolExprNode("neg", args=(node,))
 
 
-def _unwrap_symbol_expr_attr_text(expr: str) -> str:
-    """提取 memory 条目中内联 `#symbol.expr<...>` 的表达式正文。
+    @staticmethod
+    def make_add(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _SymbolExprNode:
+        """构造 canonical 加法表达。
 
-    功能说明:
-    - 仅服务解析器内部对 `#symbol.expr<...>` 文本片段的规范化。
-    - 不把裸 `StringAttr("N")` 或 `IntAttr(1)` 解释为公开 memory shape/stride 输入。
+        功能说明:
+        - 常量折叠、零 identity、交换律排序与 `?` 传播。
 
-    使用示例:
-    - _unwrap_symbol_expr_attr_text("#symbol.expr<N>")
-    """
+        使用示例:
+        - _SYMBOL_EXPR.make_add(_SYMBOL_EXPR.make_symbol("N"), _SYMBOL_EXPR.make_const(1))
+        """
 
-    stripped = expr.strip()
-    prefix = "#symbol.expr<"
-    if stripped.startswith(prefix) and stripped.endswith(">"):
-        return stripped[len(prefix) : -1].strip()
-    return stripped
+        if _SYMBOL_EXPR.contains_unknown(lhs) or _SYMBOL_EXPR.contains_unknown(rhs):
+            return _SYMBOL_EXPR.make_unknown()
+        lhs_const = _SYMBOL_EXPR.const_value(lhs)
+        rhs_const = _SYMBOL_EXPR.const_value(rhs)
+        if lhs_const is not None and rhs_const is not None:
+            return _SYMBOL_EXPR.make_const(lhs_const + rhs_const)
+        terms: list[_SymbolExprNode] = []
+        const_sum = 0
+        for node in (lhs, rhs):
+            if node.kind == "add":
+                source = node.args
+            else:
+                source = (node,)
+            for term in source:
+                term_const = _SYMBOL_EXPR.const_value(term)
+                if term_const is None:
+                    terms.append(term)
+                else:
+                    const_sum += term_const
+        terms.sort(key=_SYMBOL_EXPR.format_node)
+        if const_sum != 0:
+            terms.append(_SYMBOL_EXPR.make_const(const_sum))
+        if not terms:
+            return _SYMBOL_EXPR.make_const(0)
+        if len(terms) == 1:
+            return terms[0]
+        return _SymbolExprNode("add", args=tuple(terms))
+
+
+    @staticmethod
+    def make_sub(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _SymbolExprNode:
+        """构造 canonical 减法表达。
+
+        功能说明:
+        - 常量折叠、减零 identity 与 `?` 传播。
+
+        使用示例:
+        - _SYMBOL_EXPR.make_sub(_SYMBOL_EXPR.make_symbol("N"), _SYMBOL_EXPR.make_const(1))
+        """
+
+        if _SYMBOL_EXPR.contains_unknown(lhs) or _SYMBOL_EXPR.contains_unknown(rhs):
+            return _SYMBOL_EXPR.make_unknown()
+        lhs_const = _SYMBOL_EXPR.const_value(lhs)
+        rhs_const = _SYMBOL_EXPR.const_value(rhs)
+        if lhs_const is not None and rhs_const is not None:
+            return _SYMBOL_EXPR.make_const(lhs_const - rhs_const)
+        if rhs_const == 0:
+            return lhs
+        if rhs_const is not None:
+            return _SYMBOL_EXPR.make_add(lhs, _SYMBOL_EXPR.make_const(-rhs_const))
+        if lhs_const == 0:
+            return _SYMBOL_EXPR.make_neg(rhs)
+        if lhs == rhs:
+            return _SYMBOL_EXPR.make_const(0)
+        return _SymbolExprNode("sub", args=(lhs, rhs))
+
+
+    @staticmethod
+    def make_mul(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _SymbolExprNode:
+        """构造 canonical 乘法表达。
+
+        功能说明:
+        - 常量折叠、零/一规则、交换律排序与 `?` 传播。
+
+        使用示例:
+        - _SYMBOL_EXPR.make_mul(_SYMBOL_EXPR.make_symbol("N"), _SYMBOL_EXPR.make_const(2))
+        """
+
+        if _SYMBOL_EXPR.contains_unknown(lhs) or _SYMBOL_EXPR.contains_unknown(rhs):
+            return _SYMBOL_EXPR.make_unknown()
+        lhs_const = _SYMBOL_EXPR.const_value(lhs)
+        rhs_const = _SYMBOL_EXPR.const_value(rhs)
+        if lhs_const is not None and rhs_const is not None:
+            return _SYMBOL_EXPR.make_const(lhs_const * rhs_const)
+        terms: list[_SymbolExprNode] = []
+        const_product = 1
+        for node in (lhs, rhs):
+            if node.kind == "mul":
+                source = node.args
+            else:
+                source = (node,)
+            for term in source:
+                term_const = _SYMBOL_EXPR.const_value(term)
+                if term_const is None:
+                    terms.append(term)
+                else:
+                    const_product *= term_const
+        if const_product == 0:
+            return _SYMBOL_EXPR.make_const(0)
+        terms.sort(key=_SYMBOL_EXPR.format_node)
+        if const_product != 1 or not terms:
+            terms.insert(0, _SYMBOL_EXPR.make_const(const_product))
+        if len(terms) == 1:
+            return terms[0]
+        return _SymbolExprNode("mul", args=tuple(terms))
+
+
+    @staticmethod
+    def make_keyword_binary(op: str, lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _SymbolExprNode:
+        """构造 affine 风格关键字二元表达。
+
+        功能说明:
+        - 支持 `floordiv`、`ceildiv` 与 `mod`。
+        - 常量场景直接折叠，除零稳定报错。
+
+        使用示例:
+        - _SYMBOL_EXPR.make_keyword_binary("floordiv", lhs, rhs)
+        """
+
+        if _SYMBOL_EXPR.contains_unknown(lhs) or _SYMBOL_EXPR.contains_unknown(rhs):
+            return _SYMBOL_EXPR.make_unknown()
+        lhs_const = _SYMBOL_EXPR.const_value(lhs)
+        rhs_const = _SYMBOL_EXPR.const_value(rhs)
+        if rhs_const == 0:
+            raise_verify_error(_ERROR_SCENE, "symbol expr division by zero is not supported")
+        if lhs_const is not None and rhs_const is not None:
+            if op == "floordiv":
+                return _SYMBOL_EXPR.make_const(lhs_const // rhs_const)
+            if op == "ceildiv":
+                return _SYMBOL_EXPR.make_const(-(-lhs_const // rhs_const))
+            if op == "mod":
+                return _SYMBOL_EXPR.make_const(lhs_const % rhs_const)
+        if rhs_const == 1:
+            if op in {"floordiv", "ceildiv"}:
+                return lhs
+            if op == "mod":
+                return _SYMBOL_EXPR.make_const(0)
+        return _SymbolExprNode(op, args=(lhs, rhs))
+
+
+    @staticmethod
+    def make_min(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _SymbolExprNode:
+        """构造 canonical `min(lhs, rhs)` 表达。
+
+        功能说明:
+        - 支持二元 min、常量折叠、交换律排序、iter token 稳定排序与 `?` 传播。
+
+        使用示例:
+        - _SYMBOL_EXPR.make_min(lhs, rhs)
+        """
+
+        if _SYMBOL_EXPR.contains_unknown(lhs) or _SYMBOL_EXPR.contains_unknown(rhs):
+            return _SYMBOL_EXPR.make_unknown()
+        lhs_const = _SYMBOL_EXPR.const_value(lhs)
+        rhs_const = _SYMBOL_EXPR.const_value(rhs)
+        if lhs_const is not None and rhs_const is not None:
+            return _SYMBOL_EXPR.make_const(min(lhs_const, rhs_const))
+        if lhs == rhs:
+            return lhs
+        lhs_has_iter = _SYMBOL_EXPR.contains_iter(lhs)
+        rhs_has_iter = _SYMBOL_EXPR.contains_iter(rhs)
+        if lhs_has_iter != rhs_has_iter:
+            ordered = (rhs, lhs) if lhs_has_iter else (lhs, rhs)
+            return _SymbolExprNode("min", args=ordered)
+        if lhs_has_iter and rhs_has_iter:
+            return _SymbolExprNode("min", args=(lhs, rhs))
+        ordered = tuple(sorted((lhs, rhs), key=_SYMBOL_EXPR.format_node))
+        return _SymbolExprNode("min", args=ordered)
+
+
+    @staticmethod
+    def make_max(lhs: _SymbolExprNode, rhs: _SymbolExprNode) -> _SymbolExprNode:
+        """构造 canonical `max(lhs, rhs)` 表达。
+
+        功能说明:
+        - 支持二元 max、常量折叠、交换律排序、iter token 稳定排序与 `?` 传播。
+
+        使用示例:
+        - _SYMBOL_EXPR.make_max(lhs, rhs)
+        """
+
+        if _SYMBOL_EXPR.contains_unknown(lhs) or _SYMBOL_EXPR.contains_unknown(rhs):
+            return _SYMBOL_EXPR.make_unknown()
+        lhs_const = _SYMBOL_EXPR.const_value(lhs)
+        rhs_const = _SYMBOL_EXPR.const_value(rhs)
+        if lhs_const is not None and rhs_const is not None:
+            return _SYMBOL_EXPR.make_const(max(lhs_const, rhs_const))
+        if lhs == rhs:
+            return lhs
+        lhs_has_iter = _SYMBOL_EXPR.contains_iter(lhs)
+        rhs_has_iter = _SYMBOL_EXPR.contains_iter(rhs)
+        if lhs_has_iter != rhs_has_iter:
+            ordered = (rhs, lhs) if lhs_has_iter else (lhs, rhs)
+            return _SymbolExprNode("max", args=ordered)
+        if lhs_has_iter and rhs_has_iter:
+            return _SymbolExprNode("max", args=(lhs, rhs))
+        ordered = tuple(sorted((lhs, rhs), key=_SYMBOL_EXPR.format_node))
+        return _SymbolExprNode("max", args=ordered)
+
+
+    @staticmethod
+    def precedence(node: _SymbolExprNode) -> int:
+        """返回表达节点打印优先级。
+
+        功能说明:
+        - 用于生成可稳定重新解析的 canonical 文本。
+
+        使用示例:
+        - _SYMBOL_EXPR.precedence(node)
+        """
+
+        if node.kind in {"const", "symbol", "unknown", "iter", "min", "max"}:
+            return _SYMBOL_EXPR_ATOM_PRECEDENCE
+        if node.kind == "neg":
+            return _SYMBOL_EXPR_UNARY_PRECEDENCE
+        if node.kind in {"mul", "floordiv", "ceildiv", "mod"}:
+            return _SYMBOL_EXPR_TERM_PRECEDENCE
+        return _SYMBOL_EXPR_EXPR_PRECEDENCE
+
+
+    @staticmethod
+    def format_node(node: _SymbolExprNode, parent_precedence: int = 0) -> str:
+        """打印 canonical symbol 表达式节点。
+
+        功能说明:
+        - 生成 `SymbolExprAttr.expr.data` 的稳定文本。
+        - 只在必要时添加括号。
+
+        使用示例:
+        - _SYMBOL_EXPR.format_node(node)
+        """
+
+        if node.kind == "const":
+            text = str(node.value)
+        elif node.kind == "symbol":
+            text = str(node.value)
+        elif node.kind == "unknown":
+            text = _UNKNOWN_SYMBOL_EXPR
+        elif node.kind == "iter":
+            start, end, step = node.args
+            text = f"iter<{_SYMBOL_EXPR.format_node(start)},{_SYMBOL_EXPR.format_node(end)},{_SYMBOL_EXPR.format_node(step)}>"
+        elif node.kind == "neg":
+            text = "-" + _SYMBOL_EXPR.format_node(node.args[0], _SYMBOL_EXPR_UNARY_PRECEDENCE)
+        elif node.kind == "add":
+            text = _SYMBOL_EXPR.format_add(node)
+        elif node.kind == "sub":
+            lhs, rhs = node.args
+            text = (
+                f"{_SYMBOL_EXPR.format_node(lhs, _SYMBOL_EXPR_EXPR_PRECEDENCE)} - "
+                f"{_SYMBOL_EXPR.format_node(rhs, _SYMBOL_EXPR_EXPR_PRECEDENCE + 1)}"
+            )
+        elif node.kind == "mul":
+            text = "*".join(_SYMBOL_EXPR.format_node(arg, _SYMBOL_EXPR_TERM_PRECEDENCE) for arg in node.args)
+        elif node.kind in {"floordiv", "ceildiv", "mod"}:
+            lhs, rhs = node.args
+            text = (
+                f"{_SYMBOL_EXPR.format_node(lhs, _SYMBOL_EXPR_TERM_PRECEDENCE)} {node.kind} "
+                f"{_SYMBOL_EXPR.format_node(rhs, _SYMBOL_EXPR_TERM_PRECEDENCE + 1)}"
+            )
+        elif node.kind == "min":
+            text = f"min({_SYMBOL_EXPR.format_node(node.args[0])}, {_SYMBOL_EXPR.format_node(node.args[1])})"
+        elif node.kind == "max":
+            text = f"max({_SYMBOL_EXPR.format_node(node.args[0])}, {_SYMBOL_EXPR.format_node(node.args[1])})"
+        else:
+            raise_verify_error(_ERROR_SCENE, "symbol expr contains unsupported token")
+        if _SYMBOL_EXPR.precedence(node) < parent_precedence:
+            return f"({text})"
+        return text
+
+
+    @staticmethod
+    def format_add(node: _SymbolExprNode) -> str:
+        """打印 canonical 加法表达式。
+
+        功能说明:
+        - 把负常量和一元负号打印为 `lhs - rhs` 形式。
+
+        使用示例:
+        - _SYMBOL_EXPR.format_add(node)
+        """
+
+        pieces: list[str] = []
+        for term in node.args:
+            const = _SYMBOL_EXPR.const_value(term)
+            if const is not None and const < 0:
+                if not pieces:
+                    pieces.append(str(const))
+                else:
+                    pieces.append(f"- {abs(const)}")
+                continue
+            if term.kind == "neg":
+                text = _SYMBOL_EXPR.format_node(term.args[0], _SYMBOL_EXPR_EXPR_PRECEDENCE + 1)
+                pieces.append(f"- {text}" if pieces else f"-{text}")
+                continue
+            text = _SYMBOL_EXPR.format_node(term, _SYMBOL_EXPR_EXPR_PRECEDENCE)
+            pieces.append(text if not pieces else f"+ {text}")
+        return " ".join(pieces)
+
+
+    @staticmethod
+    def parse_text(expr: str) -> _SymbolExprNode:
+        """解析字符串为 canonical symbol 表达节点。
+
+        功能说明:
+        - 统一 `from_expr`、verifier 与内部 result 推导路径。
+
+        使用示例:
+        - _SYMBOL_EXPR.parse_text("N + 1")
+        """
+
+        return _SymbolExprTextParser(expr).parse_all()
+
+
+    @staticmethod
+    def parse_attr(parser: AttrParser) -> _SymbolExprNode:
+        """从 xDSL attribute parser 解析 symbol 表达。
+
+        功能说明:
+        - 只消费 `#symbol.expr<...>` 内部表达 token。
+
+        使用示例:
+        - _SYMBOL_EXPR.parse_attr(parser)
+        """
+
+        return _SymbolExprAttrParser(parser).parse_expression()
+
+
+    @staticmethod
+    def normalize(expr: str) -> str:
+        """标准化符号表达字符串。
+
+        功能说明:
+        - 解析公开 symbol 表达并输出 canonical 文本。
+        - 裸 `/`、`//`、quoted string 和非法字符均被拒绝。
+
+        使用示例:
+        - _SYMBOL_EXPR.normalize("1 + N")
+        """
+
+        return _SYMBOL_EXPR.format_node(_SYMBOL_EXPR.parse_text(expr.strip()))
+
+
+    @staticmethod
+    def evaluate_concrete(expr: str) -> int | None:
+        """尝试计算不含符号名的整数表达式。
+
+        功能说明:
+        - 对 canonical 语法下的纯整数表达返回具体整数值。
+        - 对动态 symbol 或 unknown 返回 `None`。
+
+        使用示例:
+        - _SYMBOL_EXPR.evaluate_concrete("8 floordiv 2")
+        """
+
+        try:
+            node = _SYMBOL_EXPR.parse_text(expr)
+        except KernelCodeError:
+            return None
+        return _SYMBOL_EXPR.const_value(node)
+
+
+    @staticmethod
+    def canonicalize(expr: str) -> str:
+        """生成对外比较用的稳定符号表达文本。
+
+        功能说明:
+        - 复用 `SymbolExprAttr` canonical parser。
+
+        使用示例:
+        - _SYMBOL_EXPR.canonicalize("1 + N")
+        """
+
+        return _SYMBOL_EXPR.normalize(expr)
+
+
+    @staticmethod
+    def is_supported(expr: str) -> bool:
+        """判断符号表达是否属于当前 dialect 支持的最小语法。
+
+        功能说明:
+        - 支持整数、标识符、`?`、`+`、`-`、`*`、`floordiv`、`ceildiv`、`mod`、二元 `min/max` 与括号。
+        - 不支持裸 `/`、`//`、quoted string 或 `floor(...)`。
+
+        使用示例:
+        - _SYMBOL_EXPR.is_supported("N floordiv 2")
+        """
+
+        try:
+            _SYMBOL_EXPR.parse_text(expr)
+        except KernelCodeError:
+            return False
+        return True
+
+
+    @staticmethod
+    def unwrap_attr_text(expr: str) -> str:
+        """提取 memory 条目中内联 `#symbol.expr<...>` 的表达式正文。
+
+        功能说明:
+        - 仅服务解析器内部对 `#symbol.expr<...>` 文本片段的规范化。
+        - 不把裸 `StringAttr("N")` 或 `IntAttr(1)` 解释为公开 memory shape/stride 输入。
+
+        使用示例:
+        - _SYMBOL_EXPR.unwrap_attr_text("#symbol.expr<N>")
+        """
+
+        stripped = expr.strip()
+        prefix = "#symbol.expr<"
+        if stripped.startswith(prefix) and stripped.endswith(">"):
+            return stripped[len(prefix) : -1].strip()
+        return stripped
+
+_SYMBOL_EXPR = _SymbolExprOps()

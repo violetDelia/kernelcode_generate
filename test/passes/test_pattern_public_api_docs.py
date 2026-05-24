@@ -47,12 +47,6 @@ class _PatternModuleCase:
 
 _PATTERN_MODULE_CASES = (
     _PatternModuleCase(
-        "kernel_gen.passes.arch_parallelize",
-        "spec/pass/arch_parallelize.md",
-        ("_ArchParallelizeFuncPattern",),
-        implementation_module_name="kernel_gen.passes.arch_parallelize.arch_parallelize",
-    ),
-    _PatternModuleCase(
         "kernel_gen.passes.hoist_dma_alias_ops",
         "spec/pass/hoist_dma_alias_ops.md",
         ("DmaAliasThroughWriteNoReadPattern", "DmaAliasHoistPattern"),
@@ -230,7 +224,6 @@ _PATTERN_MODULE_CASES = (
 )
 
 _IMPLEMENTATION_DOC_TOKENS = {
-    "_ArchParallelizeFuncPattern": ("func.func", "symbol.for", "arch.get_block_id", "scf.if"),
     "DmaAliasThroughWriteNoReadPattern": (
         "MemoryEffectKind.WRITE",
         "dma.broadcast",

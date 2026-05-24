@@ -27,7 +27,7 @@ def test_dma_load_result_space_mismatch() -> None:
     bad_target_type = _make_memory_type(shape=_dim_array([2, 3]), space="shared")
     bad_target = _TestOp(result_types=[bad_target_type]).results[0]
     op = DmaLoadOp(bad_target, source, offsets, sizes, strides)
-    with pytest.raises(VerifyException, match="target shape must match sizes"):
+    with pytest.raises(KernelCodeError, match="target shape must match sizes"):
         op.verify()
 
 def test_dma_load_accepts_symbol_iter_offset() -> None:
@@ -51,7 +51,7 @@ def test_dma_slice_rank_mismatch() -> None:
     sizes = _make_symbol_operands([2])
     strides = _make_symbol_operands([1])
     op = DmaSliceOp(target, source, offsets, sizes, strides)
-    with pytest.raises(VerifyException, match="length must match rank"):
+    with pytest.raises(KernelCodeError, match="length must match rank"):
         op.verify()
 
     offsets = _make_symbol_operands([0, 0])
@@ -60,7 +60,7 @@ def test_dma_slice_rank_mismatch() -> None:
     target_type = _make_memory_type(shape=_dim_array([2, 3]))
     target = _TestOp(result_types=[target_type]).results[0]
     op = DmaSliceOp(target, source, offsets, sizes, strides)
-    with pytest.raises(VerifyException, match="shape must match sizes"):
+    with pytest.raises(KernelCodeError, match="shape must match sizes"):
         op.verify()
 
 def test_dma_slice_non_unit_stride_rejected() -> None:
@@ -71,7 +71,7 @@ def test_dma_slice_non_unit_stride_rejected() -> None:
     sizes = _make_symbol_operands([2, 4])
     strides = _make_symbol_operands([1, 2])
     op = DmaSliceOp(target, source, offsets, sizes, strides)
-    with pytest.raises(VerifyException, match="dma stride must be 1 in current implementation"):
+    with pytest.raises(KernelCodeError, match="dma stride must be 1 in current implementation"):
         op.verify()
 
 def test_dma_store_size_mismatch() -> None:
@@ -83,7 +83,7 @@ def test_dma_store_size_mismatch() -> None:
     sizes = _make_symbol_operands([2, 2])
     strides = _make_symbol_operands([1, 1])
     op = DmaStoreOp(target, source, offsets, sizes, strides)
-    with pytest.raises(VerifyException, match="source shape must match sizes"):
+    with pytest.raises(KernelCodeError, match="source shape must match sizes"):
         op.verify()
 
 def test_dma_deslice_verify_success() -> None:

@@ -21,16 +21,66 @@ from collections.abc import Sequence
 import re
 
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from kernel_gen.core.contracts import raise_verify_error
 from xdsl.dialects.builtin import ArrayAttr, StringAttr, SymbolRefAttr
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, opt_attr_def, result_def, var_operand_def
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.symbol import SymbolValueType
 
-from ..common import _pattern_symbol_attr, _raise_verify_error, _verify_symbol_ref_attr
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE = "dialect.tuner verifier"
+
+def _verify_symbol_ref_attr(attr: Attribute, op_name: str) -> SymbolRefAttr:
+    """校验 callee / pattern 属性为 flat SymbolRefAttr。
+
+    功能说明:
+    - `tuner.select` 与 `tuner.launch` 都只接受直接 `@symbol`。
+    - 嵌套引用或空 symbol 稳定失败，避免 dispatcher 指向不明确目标。
+
+    使用示例:
+    - callee = _verify_symbol_ref_attr(SymbolRefAttr("pattern0"), "tuner.launch")
+
+    关联文件:
+    - spec: spec/dialect/tuner.md
+    - test: test/dialect/tuner/test_tuner.py
+    - 功能实现: kernel_gen/dialect/tuner/
+    """
+
+    if not isinstance(attr, SymbolRefAttr):
+        raise_verify_error(_ERROR_SCENE, f"{op_name} callee must be SymbolRefAttr")
+    if not attr.root_reference.data or len(attr.nested_references.data) != 0:
+        raise_verify_error(_ERROR_SCENE, f"{op_name} callee must be SymbolRefAttr")
+    return attr
+
+def _pattern_symbol_attr(value: str | SymbolRefAttr, op_name: str) -> SymbolRefAttr:
+    """把 pattern 名称规整为 SymbolRefAttr。
+
+    功能说明:
+    - 构造器接受字符串或已构造的 `SymbolRefAttr`，统一写入 `patterns` attr。
+    - 非公开输入类型立即按对应 op 的公开 verifier 文本失败，不扩大 constructor 合同。
+
+    使用示例:
+    - attr = _pattern_symbol_attr("matmul_entry_pattern0", "tuner.select")
+
+    关联文件:
+    - spec: spec/dialect/tuner.md
+    - test: test/dialect/tuner/test_tuner.py
+    - 功能实现: kernel_gen/dialect/tuner/
+    """
+
+    if isinstance(value, str):
+        return SymbolRefAttr(value)
+    if isinstance(value, SymbolRefAttr):
+        return value
+    if op_name == "tuner.select":
+        raise_verify_error(_ERROR_SCENE, "tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]")
+    raise_verify_error(_ERROR_SCENE, f"{op_name} callee must be SymbolRefAttr")
+
+
 
 @irdl_op_definition
 class TunerLaunchOp(IRDLOperation):
@@ -113,7 +163,7 @@ class TunerLaunchOp(IRDLOperation):
         """
 
         if self._parse_diagnostic is not None:
-            _raise_verify_error(self._parse_diagnostic.data)
+            raise_verify_error(_ERROR_SCENE, self._parse_diagnostic.data)
         _verify_symbol_ref_attr(self.callee, self.name)
 
     def print(self: "TunerLaunchOp", printer: Printer) -> None:

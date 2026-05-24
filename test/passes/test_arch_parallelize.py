@@ -27,10 +27,8 @@ from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import FunctionType, ModuleOp, i32
 from xdsl.ir import Block, Region
-from xdsl.pattern_rewriter import RewritePattern
-
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.passes.arch_parallelize import ArchParallelizePass, _ArchParallelizeFuncPattern
+from kernel_gen.passes.arch_parallelize import ArchParallelizePass
 from kernel_gen.target import registry as target_registry
 from kernel_gen.tools.ircheck import run_ircheck_text
 
@@ -148,12 +146,10 @@ def test_arch_parallelize_package_public_api_shape() -> None:
     assert Path(package_module.__file__).resolve() == repo_root / "kernel_gen/passes/arch_parallelize/__init__.py"
     assert _arch_parallelize_impl_source_path().is_file()
     assert not (repo_root / "kernel_gen/passes/arch_parallelize.py").exists()
-    assert package_module.__all__ == ["ArchParallelizePass", "_ArchParallelizeFuncPattern"]
+    assert package_module.__all__ == ["ArchParallelizePass"]
     assert package_module.ArchParallelizePass is ArchParallelizePass
-    assert package_module._ArchParallelizeFuncPattern is _ArchParallelizeFuncPattern
     assert ArchParallelizePass.__module__ == "kernel_gen.passes.arch_parallelize"
-    assert _ArchParallelizeFuncPattern.__module__ == "kernel_gen.passes.arch_parallelize"
-    assert issubclass(_ArchParallelizeFuncPattern, RewritePattern)
+    assert not hasattr(package_module, "_ArchParallelizeFuncPattern")
     assert passes_module.ArchParallelizePass is ArchParallelizePass
     assert not hasattr(passes_module, "_ArchParallelizeFuncPattern")
     assert "_ArchParallelizeFuncPattern" not in passes_module.__all__

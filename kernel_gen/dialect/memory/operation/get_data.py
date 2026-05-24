@@ -17,12 +17,12 @@ API 列表:
 
 from __future__ import annotations
 
+from kernel_gen.core.error import ErrorKind, ErrorModule, kernel_code_error
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
 from xdsl.irdl import IRDLOperation, irdl_op_definition, operand_def, result_def, traits_def
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
 from xdsl.traits import Pure
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolPtrType
@@ -41,7 +41,7 @@ def _infer_memory_get_data_result_type(source: SSAValue | Operation) -> SymbolPt
 
     source_type = SSAValue.get(source).type
     if not isinstance(source_type, NnMemoryType):
-        raise VerifyException("memory.get_data source must be !nn.memory")
+        raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT, "memory.get_data source must be !nn.memory")
     source_type.verify()
     return SymbolPtrType(source_type.element_type, source_type.template_name)
 
@@ -85,15 +85,15 @@ class MemoryGetDataOp(IRDLOperation):
 
         source_type = SSAValue.get(self.source).type
         if not isinstance(source_type, NnMemoryType):
-            raise VerifyException("memory.get_data source must be !nn.memory")
+            raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT, "memory.get_data source must be !nn.memory")
         source_type.verify()
         result_type = self.result.type
         if not isinstance(result_type, SymbolPtrType):
-            raise VerifyException("memory.get_data result type must be !symbol.ptr")
+            raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT, "memory.get_data result type must be !symbol.ptr")
         if result_type.dtype != source_type.element_type:
-            raise VerifyException("memory.get_data ptr dtype must match memory element_type")
+            raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT, "memory.get_data ptr dtype must match memory element_type")
         if result_type.template_name.data != source_type.template_name.data:
-            raise VerifyException("memory.get_data ptr template_name must match memory template_name")
+            raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT, "memory.get_data ptr template_name must match memory template_name")
 
     def print(self: "MemoryGetDataOp", printer: Printer) -> None:
         """打印 memory.get_data 自定义文本语法。

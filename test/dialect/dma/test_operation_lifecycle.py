@@ -29,7 +29,7 @@ def test_dma_free_requires_nn_memory_type() -> None:
 
     bad_source = _TestOp(result_types=[i32]).results[0]
     op = DmaFreeOp(bad_source)
-    with pytest.raises(VerifyException, match="nn.memory"):
+    with pytest.raises((KernelCodeError, VerifyException), match="nn.memory"):
         op.verify()
 
 def test_dma_alloc_dynamic_symbol_int_shape_operands_valid() -> None:
@@ -67,7 +67,7 @@ def test_dma_alloc_unknown_placeholder_rejects_named_symbol_operands() -> None:
         stride=_dim_array(["?", 1]),
     )
     op = DmaAllocOp(_make_symbol_operands(["cur_n", "cur_c"]), result_type)
-    with pytest.raises(VerifyException, match="dynamic_shape must match result shape"):
+    with pytest.raises(KernelCodeError, match="dynamic_shape must match result shape"):
         op.verify()
 
 def test_dma_alloc_named_result_shape_rejects_unknown_symbol_operands() -> None:
@@ -80,7 +80,7 @@ def test_dma_alloc_named_result_shape_rejects_unknown_symbol_operands() -> None:
         _TestOp(result_types=[SymbolValueType.from_expr("?")]).results[0],
     ]
     op = DmaAllocOp(unknown_operands, result_type)
-    with pytest.raises(VerifyException, match="dynamic_shape must match result shape"):
+    with pytest.raises(KernelCodeError, match="dynamic_shape must match result shape"):
         op.verify()
 
 def test_dma_fill_accepts_builtin_i32_scalar_operand() -> None:
@@ -112,14 +112,14 @@ def test_dma_fill_rejects_bool_or_unsupported_scalar() -> None:
     bad_target = _TestOp(result_types=[bad_target_type]).results[0]
     value = _TestOp(result_types=[i32]).results[0]
 
-    with pytest.raises(VerifyException, match="dma.fill target element_type must be numeric and not bool"):
+    with pytest.raises(KernelCodeError, match="dma.fill target element_type must be numeric and not bool"):
         DmaFillOp(bad_target, value).verify()
 
     target = _TestOp(result_types=[_make_memory_type()]).results[0]
     bool_value = _TestOp(result_types=[i1]).results[0]
     float_value = _TestOp(result_types=[f32]).results[0]
 
-    with pytest.raises(VerifyException, match="value must be builtin integer, builtin float or !symbol.int"):
+    with pytest.raises(KernelCodeError, match="value must be builtin integer, builtin float or !symbol.int"):
         DmaFillOp(target, bool_value).verify()
-    with pytest.raises(VerifyException, match="dma.fill value type must match target element_type"):
+    with pytest.raises(KernelCodeError, match="dma.fill value type must match target element_type"):
         DmaFillOp(target, float_value).verify()

@@ -20,7 +20,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import ClassVar
 
-from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE, ErrorKind, ErrorModule, kernel_code_error
+from kernel_gen.core.contracts import raise_verify_error
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, SymbolRefAttr, i8
 from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue, TypeAttribute
 from xdsl.irdl import (
@@ -36,20 +37,165 @@ from xdsl.irdl import (
 )
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
 from kernel_gen.target import registry
 
-from ..common import (
-    _raise_verify_error,
-    _verify_launch_callee_attr,
-    _verify_non_negative_static_symbol,
-    _verify_positive_static_symbol,
-    _verify_symbol_int_operand,
-    _verify_target_registry_support,
-)
+from kernel_gen.target import registry as target_registry
+
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE = "dialect.arch verifier"
+
+def _verify_symbol_int_operand(value: SSAValue, field_name: str, op_name: str) -> SymbolValueType:
+    """校验单个启动维度 operand 为 `!symbol.int<#symbol.expr<expr>>`。
+
+
+    功能说明:
+    - 统一校验 `arch.launch` 的维度输入类型。
+
+    使用示例:
+    - _verify_symbol_int_operand(op.block, "block", "arch.launch")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
+    """
+
+    if not isinstance(value.type, SymbolValueType):
+        raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+            ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{op_name} {field_name} must have type !symbol.int<#symbol.expr<expr>>",
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
+            )
+        )
+    value.type.verify()
+    return value.type
+
+def _verify_positive_static_symbol(operand_type: SymbolValueType, field_name: str, op_name: str) -> None:
+    """校验可静态求值的 symbol.int 启动维度为正整数。
+
+
+    功能说明:
+    - 对字面量整数表达式执行 `> 0` 约束。
+    - 对无法静态求值的符号表达式保持放行。
+
+    使用示例:
+    - _verify_positive_static_symbol(SymbolValueType.from_expr("8"), "block", "arch.launch")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
+    """
+
+    static_value = operand_type.get_value()
+    if isinstance(static_value, int) and static_value <= 0:
+        raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+            ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{op_name} {field_name} must be > 0 when statically known",
+                actual=str(static_value),
+                action=ERROR_ACTION,
+            )
+        )
+
+def _verify_non_negative_static_symbol(operand_type: SymbolValueType, field_name: str, op_name: str) -> None:
+    """校验可静态求值的 symbol.int 启动规模为非负整数。
+
+
+    功能说明:
+    - 对字面量整数表达式执行 `>= 0` 约束。
+    - 对无法静态求值的符号表达式保持放行。
+
+    使用示例:
+    - _verify_non_negative_static_symbol(SymbolValueType.from_expr("0"), "shared_memory_size", "arch.launch")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
+    """
+
+    static_value = operand_type.get_value()
+    if isinstance(static_value, int) and static_value < 0:
+        raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+            ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{op_name} {field_name} must be >= 0 when statically known",
+                actual=str(static_value),
+                action=ERROR_ACTION,
+            )
+        )
+
+def _verify_launch_callee_attr(callee: Attribute) -> SymbolRefAttr:
+    """校验 launch 的 `@callee` symbol ref 属性。
+
+
+    功能说明:
+    - 仅接受无嵌套的 `@callee` 形式 `SymbolRefAttr`。
+
+    使用示例:
+    - _verify_launch_callee_attr(SymbolRefAttr("kernel_body"))
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
+    """
+
+    if not isinstance(callee, SymbolRefAttr):
+        raise_verify_error(_ERROR_SCENE, "arch.launch callee must be @symbol")
+    if not callee.root_reference.data:
+        raise_verify_error(_ERROR_SCENE, "arch.launch callee must not be empty")
+    if len(callee.nested_references.data) != 0:
+        raise_verify_error(_ERROR_SCENE, "arch.launch callee must be flat @symbol")
+    return callee
+
+def _verify_target_registry_support(op_name: str) -> None:
+    """按当前 target registry 配置校验 arch op 支持性。
+
+
+    功能说明:
+    - 在启用 target registry 校验时，检查 arch op 是否被当前 target 支持。
+
+    使用示例:
+    - _verify_target_registry_support("arch.get_thread_id")
+
+    关联文件:
+    - spec: spec/target/registry.md
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
+    """
+
+    current_target = target_registry.get_current_target()
+    if current_target is None:
+        return
+    try:
+        if not target_registry.is_arch_op_supported(current_target, op_name):
+            raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+                ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected=f"{op_name} is not supported by target {current_target}",
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
+                )
+            )
+    except ValueError as exc:
+        raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+            ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=str(exc),
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
+            )
+        ) from exc
+
+
 
 @irdl_op_definition
 class ArchLaunchOp(IRDLOperation):
@@ -192,12 +338,12 @@ class ArchLaunchOp(IRDLOperation):
         parser.parse_punctuation("->", f"Expected '-> ()' in {cls.name}.")
         result_types = parser.parse_comma_separated_list(parser.Delimiter.PAREN, parser.parse_type)
         if result_types:
-            _raise_verify_error("arch.launch result types must be ()")
+            raise_verify_error(_ERROR_SCENE, "arch.launch result types must be ()")
         if len(arg_types) != len(args):
-            _raise_verify_error("arch.launch arg type list must match operand count")
+            raise_verify_error(_ERROR_SCENE, "arch.launch arg type list must match operand count")
         for operand, operand_type in zip(args, arg_types, strict=True):
             if SSAValue.get(operand).type != operand_type:
-                _raise_verify_error("arch.launch arg types must match operand types")
+                raise_verify_error(_ERROR_SCENE, "arch.launch arg types must match operand types")
         return cls(callee, block, thread, subthread, shared_memory_size, args)
 
 

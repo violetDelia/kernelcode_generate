@@ -41,7 +41,8 @@ from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import Parser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import ParseError, VerifyException
+from kernel_gen.core.error import KernelCodeError
+from xdsl.utils.exceptions import ParseError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -241,8 +242,8 @@ def test_space_attr_round_trip() -> None:
     assert _print_ir(from_name) == "#nn.space<global>"
 
 def test_invalid_space_attr_rejected() -> None:
-    with pytest.raises(VerifyException, match="global/shared/local/tsm/tlm1/tlm2/tlm3"):
+    with pytest.raises(KernelCodeError, match="global/shared/local/tsm/tlm1/tlm2/tlm3"):
         _make_space("register").verify()
 
-    with pytest.raises(VerifyException, match="global/shared/local/tsm/tlm1/tlm2/tlm3"):
+    with pytest.raises(KernelCodeError, match="global/shared/local/tsm/tlm1/tlm2/tlm3"):
         _make_space("tlm").verify()

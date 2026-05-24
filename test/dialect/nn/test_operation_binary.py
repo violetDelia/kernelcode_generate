@@ -41,7 +41,8 @@ from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import Parser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import ParseError, VerifyException
+from kernel_gen.core.error import KernelCodeError
+from xdsl.utils.exceptions import ParseError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -244,7 +245,7 @@ def test_div_op_rejects_shape_mismatch() -> None:
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnDivOp(lhs, rhs, result_type, space)
-    with pytest.raises(VerifyException, match="nn op shape must match across operands and result"):
+    with pytest.raises(KernelCodeError, match="nn op shape must match across operands and result"):
         op.verify_()
 
 def test_add_op_accepts_memory_const_rhs() -> None:
@@ -275,7 +276,7 @@ def test_add_op_rejects_operand_space_mismatch() -> None:
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnAddOp(lhs, rhs, lhs_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="same space"):
+    with pytest.raises(KernelCodeError, match="same space"):
         op.verify()
 
 def test_add_op_rejects_attr_space_mismatch() -> None:
@@ -283,7 +284,7 @@ def test_add_op_rejects_attr_space_mismatch() -> None:
     lhs = _TestOp(result_types=[memory_type]).results[0]
     rhs = _TestOp(result_types=[memory_type]).results[0]
     op = NnAddOp(lhs, rhs, memory_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="attribute space"):
+    with pytest.raises(KernelCodeError, match="attribute space"):
         op.verify()
 
 def test_compare_op_requires_i1_result() -> None:
@@ -292,7 +293,7 @@ def test_compare_op_requires_i1_result() -> None:
     lhs = _TestOp(result_types=[operand_type]).results[0]
     rhs = _TestOp(result_types=[operand_type]).results[0]
     op = NnEqOp(lhs, rhs, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="must be i1"):
+    with pytest.raises(KernelCodeError, match="must be i1"):
         op.verify()
 
 def test_module_round_trip() -> None:
@@ -316,7 +317,7 @@ def test_space_mismatch_from_text_rejected() -> None:
 }
 """
     module = Parser(ctx, text).parse_module()
-    with pytest.raises(VerifyException, match="same space"):
+    with pytest.raises(KernelCodeError, match="same space"):
         module.verify()
 
 def test_attr_space_mismatch_from_text_rejected() -> None:
@@ -328,7 +329,7 @@ def test_attr_space_mismatch_from_text_rejected() -> None:
 }
 """
     module = Parser(ctx, text).parse_module()
-    with pytest.raises(VerifyException, match="attribute space"):
+    with pytest.raises(KernelCodeError, match="attribute space"):
         module.verify()
 
 @pytest.mark.parametrize("op_cls", [NnSubOp, NnMulOp, NnTrueDivOp])
@@ -353,7 +354,7 @@ def test_add_op_rejects_pure_scalar_operands() -> None:
     lhs = _TestOp(result_types=[i32]).results[0]
     rhs = _TestOp(result_types=[Float32Type()]).results[0]
     op = NnAddOp(lhs, rhs, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="at least one nn.memory operand"):
+    with pytest.raises(KernelCodeError, match="at least one nn.memory operand"):
         op.verify()
 
 def test_add_op_rejects_mixed_result_shape_mismatch() -> None:
@@ -370,7 +371,7 @@ def test_add_op_rejects_mixed_result_shape_mismatch() -> None:
     lhs = _TestOp(result_types=[memory_type]).results[0]
     rhs = _TestOp(result_types=[i32]).results[0]
     op = NnAddOp(lhs, rhs, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="result shape must match memory operand"):
+    with pytest.raises(KernelCodeError, match="result shape must match memory operand"):
         op.verify()
 
 @pytest.mark.parametrize(
@@ -411,7 +412,7 @@ def test_add_op_rejects_type_mismatch(
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnAddOp(lhs, rhs, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match=message):
+    with pytest.raises(KernelCodeError, match=message):
         op.verify()
 
 def test_add_op_rejects_implicit_broadcast_shape_mismatch() -> None:
@@ -421,7 +422,7 @@ def test_add_op_rejects_implicit_broadcast_shape_mismatch() -> None:
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnAddOp(lhs, rhs, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="shape"):
+    with pytest.raises(KernelCodeError, match="shape"):
         op.verify()
 
 def test_compare_op_rejects_implicit_broadcast_shape_mismatch() -> None:
@@ -431,7 +432,7 @@ def test_compare_op_rejects_implicit_broadcast_shape_mismatch() -> None:
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnEqOp(lhs, rhs, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="shape"):
+    with pytest.raises(KernelCodeError, match="shape"):
         op.verify()
 
 def test_explicit_broadcast_then_add_verify_success() -> None:
@@ -450,15 +451,15 @@ def test_nn_public_validation_branches() -> None:
     bad_input = _make_simple_memory_type([2], [1], space="global", element_type=i32)
     good_result = _make_simple_memory_type([2], [1], space="global", element_type=Float32Type())
     good_input_value = _TestOp(result_types=[good_input]).results[0]
-    with pytest.raises(VerifyException, match="operand-element-type-must-be-float"):
+    with pytest.raises(KernelCodeError, match="operand-element-type-must-be-float"):
         NnExpOp(_TestOp(result_types=[bad_input]).results[0], good_result, _make_space("global")).verify()
-    with pytest.raises(VerifyException, match="result-shape-stride-must-match-input"):
+    with pytest.raises(KernelCodeError, match="result-shape-stride-must-match-input"):
         NnExpOp(
             good_input_value,
             _make_simple_memory_type([2], [2], space="global"),
             _make_space("global"),
         ).verify()
-    with pytest.raises(VerifyException, match="alpha must be int or float scalar"):
+    with pytest.raises(KernelCodeError, match="alpha must be int or float scalar"):
         NnLeakyReluOp(
             good_input_value,
             _TestOp(result_types=[_make_memory_type()]).results[0],
@@ -479,7 +480,7 @@ def test_nn_public_validation_branches() -> None:
         element_type=Float32Type(),
     )
     img2col_input_value = _TestOp(result_types=[img2col_input]).results[0]
-    with pytest.raises(VerifyException, match="kw-sw-dw-must-be-int-or-symbol"):
+    with pytest.raises(KernelCodeError, match="kw-sw-dw-must-be-int-or-symbol"):
         NnImg2col1dOp(
             img2col_input_value,
             img2col_result,
@@ -490,7 +491,7 @@ def test_nn_public_validation_branches() -> None:
             pr=arith.ConstantOp(IntegerAttr(0, i32)).result,
             space=_make_space("global"),
         ).verify()
-    with pytest.raises(VerifyException, match="kw-sw-dw-must-be-positive"):
+    with pytest.raises(KernelCodeError, match="kw-sw-dw-must-be-positive"):
         NnImg2col1dOp(
             img2col_input_value,
             img2col_result,
@@ -524,7 +525,7 @@ def test_mixed_scalar_binary_family_public_contracts() -> None:
         op_cls(memory_value, scalar_f16, result_f16, _make_space("global")).verify()
         op_cls(scalar_f16, memory_value, result_f16, _make_space("global")).verify()
 
-        with pytest.raises(VerifyException, match="requires at least one nn.memory operand"):
+        with pytest.raises(KernelCodeError, match="requires at least one nn.memory operand"):
             op_cls(
                 _TestOp(result_types=[i32]).results[0],
                 _TestOp(result_types=[Float32Type()]).results[0],
@@ -532,7 +533,7 @@ def test_mixed_scalar_binary_family_public_contracts() -> None:
                 _make_space("global"),
             ).verify()
 
-        with pytest.raises(VerifyException, match="attribute space must match memory operand space"):
+        with pytest.raises(KernelCodeError, match="attribute space must match memory operand space"):
             op_cls(memory_value, scalar_f16, result_f16, _make_space("shared")).verify()
 
         wrong_space_result = _make_simple_memory_type(
@@ -541,7 +542,7 @@ def test_mixed_scalar_binary_family_public_contracts() -> None:
             space="shared",
             element_type=Float16Type(),
         )
-        with pytest.raises(VerifyException, match="result space must match memory operand"):
+        with pytest.raises(KernelCodeError, match="result space must match memory operand"):
             op_cls(memory_value, scalar_f16, wrong_space_result, _make_space("global")).verify()
 
         wrong_shape = _make_simple_memory_type(
@@ -550,7 +551,7 @@ def test_mixed_scalar_binary_family_public_contracts() -> None:
             space="global",
             element_type=Float16Type(),
         )
-        with pytest.raises(VerifyException, match="result shape must match memory operand"):
+        with pytest.raises(KernelCodeError, match="result shape must match memory operand"):
             op_cls(memory_value, scalar_f16, wrong_shape, _make_space("global")).verify()
 
         wrong_stride = _make_simple_memory_type(
@@ -559,10 +560,10 @@ def test_mixed_scalar_binary_family_public_contracts() -> None:
             space="global",
             element_type=Float16Type(),
         )
-        with pytest.raises(VerifyException, match="result stride must match memory operand"):
+        with pytest.raises(KernelCodeError, match="result stride must match memory operand"):
             op_cls(memory_value, scalar_f16, wrong_stride, _make_space("global")).verify()
 
-        with pytest.raises(VerifyException, match="scalar element_type must be i32/f16/f32 or symbol.int"):
+        with pytest.raises(KernelCodeError, match="scalar element_type must be i32/f16/f32 or symbol.int"):
             op_cls(
                 memory_value,
                 _TestOp(result_types=[IntegerType(16)]).results[0],
@@ -576,5 +577,5 @@ def test_mixed_scalar_binary_family_public_contracts() -> None:
             space="global",
             element_type=i32,
         )
-        with pytest.raises(VerifyException, match="result element_type must match promoted element_type"):
+        with pytest.raises(KernelCodeError, match="result element_type must match promoted element_type"):
             op_cls(memory_value, scalar_f16, wrong_dtype, _make_space("global")).verify()

@@ -38,15 +38,15 @@ def test_dma_make_ring_verifier_edges() -> None:
     count, offset, shape_bytes = _make_symbol_operands([2, 8, 4])
     DmaMakeRingOp(storage, count, offset, shape_bytes, ring_type).verify()
 
-    with pytest.raises(VerifyException, match="count must be > 0"):
+    with pytest.raises(KernelCodeError, match="count must be > 0"):
         DmaMakeRingOp(storage, _make_symbol_operands([0])[0], offset, shape_bytes, ring_type).verify()
-    with pytest.raises(VerifyException, match="offset must be > 0"):
+    with pytest.raises(KernelCodeError, match="offset must be > 0"):
         DmaMakeRingOp(storage, count, _make_symbol_operands([0])[0], shape_bytes, ring_type).verify()
-    with pytest.raises(VerifyException, match="shape_bytes must be > 0"):
+    with pytest.raises(KernelCodeError, match="shape_bytes must be > 0"):
         DmaMakeRingOp(storage, count, offset, _make_symbol_operands([0])[0], ring_type).verify()
-    with pytest.raises(VerifyException, match="shape_bytes.*offset"):
+    with pytest.raises(KernelCodeError, match="shape_bytes.*offset"):
         DmaMakeRingOp(storage, count, offset, _make_symbol_operands([8])[0], ring_type).verify()
-    with pytest.raises(VerifyException, match="backing memory bytes"):
+    with pytest.raises(KernelCodeError, match="backing memory bytes"):
         DmaMakeRingOp(
             _TestOp(result_types=[_make_memory_type(shape=_dim_array([15]), stride=_dim_array([1]), space="tsm", element_type=i8)]).results[0],
             count,
@@ -54,9 +54,9 @@ def test_dma_make_ring_verifier_edges() -> None:
             shape_bytes,
             ring_type,
         ).verify()
-    with pytest.raises(VerifyException, match="offset.*match"):
+    with pytest.raises(KernelCodeError, match="offset.*match"):
         DmaMakeRingOp(storage, count, offset, shape_bytes, DmaRingType(_expr_attr(16), slot_type)).verify()
-    with pytest.raises(VerifyException, match="space"):
+    with pytest.raises(KernelCodeError, match="space"):
         DmaMakeRingOp(
             storage,
             count,
@@ -64,7 +64,7 @@ def test_dma_make_ring_verifier_edges() -> None:
             shape_bytes,
             DmaRingType(_expr_attr(8), _make_memory_type(shape=_dim_array([2, 2]), stride=_dim_array([2, 1]), space="tlm1")),
         ).verify()
-    with pytest.raises(VerifyException, match="one-dimensional i8"):
+    with pytest.raises(KernelCodeError, match="one-dimensional i8"):
         DmaMakeRingOp(
             _TestOp(result_types=[_make_memory_type(shape=_dim_array([16]), stride=_dim_array([1]), space="tsm")]).results[0],
             count,
@@ -78,9 +78,9 @@ def test_dma_ring_slot_result_type_must_match() -> None:
     ring = _TestOp(result_types=[DmaRingType(_expr_attr(256), slot_type)]).results[0]
     wrong_slot_type = _make_memory_type(shape=_dim_array([4, 4]), stride=_dim_array([4, 1]), space="tsm")
 
-    with pytest.raises(VerifyException, match="result.*ring"):
+    with pytest.raises(KernelCodeError, match="result.*ring"):
         DmaCurrentRingOp(ring, wrong_slot_type).verify()
-    with pytest.raises(VerifyException, match="result.*ring"):
+    with pytest.raises(KernelCodeError, match="result.*ring"):
         DmaAdvanceRingOp(ring, wrong_slot_type).verify()
     with pytest.raises(TypeError, match="dma.ring"):
         DmaCurrentRingOp(_TestOp(result_types=[i32]).results[0])

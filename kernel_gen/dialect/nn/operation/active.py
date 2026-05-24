@@ -23,21 +23,146 @@ API 列表:
 
 from __future__ import annotations
 
-from kernel_gen.dialect.nn.attr.space_attr import NnMemorySpaceAttr
-from kernel_gen.dialect.nn.common import (
-    is_float_element_type,
-    is_symbol_int_type,
-    normalize_i64_attr,
-    raise_verify_error,
-    verify_i64_attr,
-    verify_memory_type,
-)
-from kernel_gen.dialect.nn.type.memory_type import NnMemoryType
-from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerAttr, IntegerType
-from xdsl.ir import Attribute, Operation, SSAValue
-from xdsl.irdl import IRDLOperation, SameVariadicOperandSize, attr_def, irdl_op_definition, operand_def, opt_operand_def, result_def
+from kernel_gen .dialect .nn .attr .space_attr import NnMemorySpaceAttr
+from kernel_gen .dialect .nn .type .memory_type import NnMemoryType
+from xdsl .dialects .builtin import BFloat16Type ,Float16Type ,Float32Type ,Float64Type ,IntAttr ,IntegerAttr ,IntegerType
+from xdsl .ir import Attribute ,Operation ,SSAValue
+from xdsl .irdl import IRDLOperation ,SameVariadicOperandSize ,attr_def ,irdl_op_definition ,operand_def ,opt_operand_def ,result_def
 
-def _verify_exp_op(op: "NnExpOp") -> None:
+from kernel_gen .core .error import ERROR_ACTION ,ERROR_ACTUAL ,ERROR_TEMPLATE ,ErrorKind ,ErrorModule ,kernel_code_error
+from kernel_gen .core .contracts import raise_verify_error as core_raise_verify_error ,build_contiguous_stride as core_build_contiguous_stride ,verify_i64_attr as core_verify_i64_attr ,verify_memory_type as core_verify_memory_type
+
+from xdsl .dialects .builtin import (
+ArrayAttr ,
+BFloat16Type ,
+Float16Type ,
+Float32Type ,
+Float64Type ,
+IntAttr ,
+IntegerAttr ,
+IntegerType ,
+)
+
+from xdsl .ir import Attribute ,ParametrizedAttribute ,SSAValue
+
+
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE ="dialect.nn verifier"
+
+class _NnActiveHelpers :
+    """当前文件内本地 helper 容器。
+
+    功能说明:
+    - 承接退场 common.py 后的文件内 helper，避免形成模块级事实公开函数。
+
+    使用示例:
+    - _NnActiveHelpers.helper(...)
+    """
+
+    @staticmethod
+    def verify_memory_type (value :Attribute ,field_name :str )->"NnMemoryType":
+        """校验并返回 memory type。
+
+        功能说明:
+        - 确认 `value` 是公开 `NnMemoryType`，并执行通用 memory type 校验。
+        - `field_name` 用于在稳定错误文本中定位被校验字段。
+
+        使用示例:
+        - input_type = verify_memory_type(op.input.type, "input")
+        """
+
+        return core_verify_memory_type (value ,field_name ,scene =_ERROR_SCENE )
+
+    @staticmethod
+    def is_symbol_int_type (attr :Attribute )->bool :
+        """判断 attribute 是否为 symbol.int。
+
+
+        功能说明:
+        - 仅通过 `name` 字段判断是否为 `symbol.int` 类型，避免 nn/symbol 循环依赖。
+
+        使用示例:
+        - is_symbol_int_type(SymbolValueType.from_expr("K"))
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/nn/
+        - 功能实现: kernel_gen/dialect/nn/
+        """
+
+        return isinstance (attr ,ParametrizedAttribute )and attr .name =="symbol.int"
+
+    @staticmethod
+    def verify_i64_attr (attr :IntegerAttr ,field_name :str )->int :
+        """校验 i64 属性并返回整数值。
+
+
+        功能说明:
+        - 校验属性类型为 i64，但不限制符号正负。
+        - 用于需要允许负值的 axis 等字段。
+
+        使用示例:
+        - axis_value = verify_i64_attr(axis_attr, "axis")
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/nn/
+        - 功能实现: kernel_gen/dialect/nn/
+        """
+
+        return core_verify_i64_attr (attr ,field_name ,scene =_ERROR_SCENE )
+
+    @staticmethod
+    def normalize_i64_attr (value :int |IntegerAttr |IntAttr ,field_name :str )->IntegerAttr :
+        """将数值规范化为 i64 IntegerAttr。
+
+
+        功能说明:
+        - 支持传入 int/IntAttr/IntegerAttr，统一为 i64 IntegerAttr。
+        - 用于 nn.img2col1d/nn.img2col2d 属性构造入口。
+
+        使用示例:
+        - normalize_i64_attr(3, "kw")
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/nn/
+        - 功能实现: kernel_gen/dialect/nn/
+        """
+
+        if isinstance (value ,IntegerAttr ):
+            return value
+        if isinstance (value ,IntAttr ):
+            value =value .data
+        return IntegerAttr (value ,IntegerType (64 ))
+
+    @staticmethod
+    def is_float_element_type (attr :Attribute )->bool :
+        """判断 element_type 是否为浮点类型。
+
+
+        功能说明:
+        - 允许 f16/bf16/f32/f64 四类浮点类型。
+
+        使用示例:
+        - is_float_element_type(Float32Type())
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/nn/
+        - 功能实现: kernel_gen/dialect/nn/
+        """
+
+        return isinstance (attr ,(Float16Type ,BFloat16Type ,Float32Type ,Float64Type ))
+
+
+
+
+
+
+
+def _verify_exp_op (op :"NnExpOp")->None :
     """校验 nn.exp 的结构化合同。
 
 
@@ -54,33 +179,33 @@ def _verify_exp_op(op: "NnExpOp") -> None:
     - 功能实现: kernel_gen/dialect/nn/
     """
 
-    input_type = op.input.type
-    result_type = op.result.type
-    if not isinstance(input_type, NnMemoryType) or not isinstance(result_type, NnMemoryType):
-        raise_verify_error("operand-must-be-nn-memory")
-    input_type.verify()
-    result_type.verify()
+    input_type =op .input .type
+    result_type =op .result .type
+    if not isinstance (input_type ,NnMemoryType )or not isinstance (result_type ,NnMemoryType ):
+        core_raise_verify_error (_ERROR_SCENE ,"operand-must-be-nn-memory")
+    input_type .verify ()
+    result_type .verify ()
 
-    if not is_float_element_type(input_type.element_type):
-        raise_verify_error("operand-element-type-must-be-float")
+    if not _NnActiveHelpers .is_float_element_type (input_type .element_type ):
+        core_raise_verify_error (_ERROR_SCENE ,"operand-element-type-must-be-float")
 
-    if input_type.shape != result_type.shape or input_type.stride != result_type.stride:
-        raise_verify_error("result-shape-stride-must-match-input")
+    if input_type .shape !=result_type .shape or input_type .stride !=result_type .stride :
+        core_raise_verify_error (_ERROR_SCENE ,"result-shape-stride-must-match-input")
 
-    if input_type.element_type != result_type.element_type:
-        raise_verify_error("result-element-type-must-match-input")
+    if input_type .element_type !=result_type .element_type :
+        core_raise_verify_error (_ERROR_SCENE ,"result-element-type-must-match-input")
 
-    op.space.verify()
-    if input_type.space.space.data != result_type.space.space.data:
-        raise_verify_error("result-space-must-match-input-and-attr")
-    if input_type.space.space.data != op.space.space.data:
-        raise_verify_error("result-space-must-match-input-and-attr")
+    op .space .verify ()
+    if input_type .space .space .data !=result_type .space .space .data :
+        core_raise_verify_error (_ERROR_SCENE ,"result-space-must-match-input-and-attr")
+    if input_type .space .space .data !=op .space .space .data :
+        core_raise_verify_error (_ERROR_SCENE ,"result-space-must-match-input-and-attr")
 
-def _verify_unary_float_op(
-    input_type: NnMemoryType,
-    result_type: NnMemoryType,
-    space: NnMemorySpaceAttr,
-) -> None:
+def _verify_unary_float_op (
+input_type :NnMemoryType ,
+result_type :NnMemoryType ,
+space :NnMemorySpaceAttr ,
+)->None :
     """校验逐元素浮点 unary op 的公共合同。
 
 
@@ -97,25 +222,25 @@ def _verify_unary_float_op(
     - 功能实现: kernel_gen/dialect/nn/
     """
 
-    input_type.verify()
-    result_type.verify()
+    input_type .verify ()
+    result_type .verify ()
 
-    if not is_float_element_type(input_type.element_type):
-        raise_verify_error("operand-element-type-must-be-float")
+    if not _NnActiveHelpers .is_float_element_type (input_type .element_type ):
+        core_raise_verify_error (_ERROR_SCENE ,"operand-element-type-must-be-float")
 
-    if input_type.shape != result_type.shape or input_type.stride != result_type.stride:
-        raise_verify_error("result-shape-stride-must-match-input")
+    if input_type .shape !=result_type .shape or input_type .stride !=result_type .stride :
+        core_raise_verify_error (_ERROR_SCENE ,"result-shape-stride-must-match-input")
 
-    if input_type.element_type != result_type.element_type:
-        raise_verify_error("result-element-type-must-match-input")
+    if input_type .element_type !=result_type .element_type :
+        core_raise_verify_error (_ERROR_SCENE ,"result-element-type-must-match-input")
 
-    space.verify()
-    if input_type.space.space.data != result_type.space.space.data:
-        raise_verify_error("result-space-must-match-input-and-attr")
-    if input_type.space.space.data != space.space.data:
-        raise_verify_error("result-space-must-match-input-and-attr")
+    space .verify ()
+    if input_type .space .space .data !=result_type .space .space .data :
+        core_raise_verify_error (_ERROR_SCENE ,"result-space-must-match-input-and-attr")
+    if input_type .space .space .data !=space .space .data :
+        core_raise_verify_error (_ERROR_SCENE ,"result-space-must-match-input-and-attr")
 
-def _verify_activation_scalar_operand(value: SSAValue, field_name: str) -> None:
+def _verify_activation_scalar_operand (value :SSAValue ,field_name :str )->None :
     """校验激活函数额外标量参数类型。
 
 
@@ -132,13 +257,13 @@ def _verify_activation_scalar_operand(value: SSAValue, field_name: str) -> None:
     - 功能实现: kernel_gen/dialect/nn/
     """
 
-    attr = value.type
-    if isinstance(attr, NnMemoryType) or is_symbol_int_type(attr):
-        raise_verify_error(f"{field_name} must be int or float scalar")
-    if not isinstance(attr, (IntegerType, Float16Type, BFloat16Type, Float32Type, Float64Type)):
-        raise_verify_error(f"{field_name} must be int or float scalar")
+    attr =value .type
+    if isinstance (attr ,NnMemoryType )or _NnActiveHelpers .is_symbol_int_type (attr ):
+        core_raise_verify_error (_ERROR_SCENE ,f"{field_name } must be int or float scalar")
+    if not isinstance (attr ,(IntegerType ,Float16Type ,BFloat16Type ,Float32Type ,Float64Type )):
+        core_raise_verify_error (_ERROR_SCENE ,f"{field_name } must be int or float scalar")
 
-def _verify_softmax_op(op: "NnSoftmaxOp") -> None:
+def _verify_softmax_op (op :"NnSoftmaxOp")->None :
     """校验 nn.softmax 的结构化合同。
 
 
@@ -155,36 +280,36 @@ def _verify_softmax_op(op: "NnSoftmaxOp") -> None:
     - 功能实现: kernel_gen/dialect/nn/
     """
 
-    input_type = op.input.type
-    result_type = op.result.type
-    if not isinstance(input_type, NnMemoryType) or not isinstance(result_type, NnMemoryType):
-        raise_verify_error("operand-and-result-must-be-nn-memory")
-    input_type.verify()
-    result_type.verify()
+    input_type =op .input .type
+    result_type =op .result .type
+    if not isinstance (input_type ,NnMemoryType )or not isinstance (result_type ,NnMemoryType ):
+        core_raise_verify_error (_ERROR_SCENE ,"operand-and-result-must-be-nn-memory")
+    input_type .verify ()
+    result_type .verify ()
 
-    rank = len(input_type.shape.data)
-    if rank <= 0:
-        raise_verify_error("input-rank-must-be-positive")
-    axis_value = verify_i64_attr(op.axis, "axis")
-    if axis_value < -rank or axis_value >= rank:
-        raise_verify_error("axis-must-be-in-range")
+    rank =len (input_type .shape .data )
+    if rank <=0 :
+        core_raise_verify_error (_ERROR_SCENE ,"input-rank-must-be-positive")
+    axis_value =_NnActiveHelpers .verify_i64_attr (op .axis ,"axis")
+    if axis_value <-rank or axis_value >=rank :
+        core_raise_verify_error (_ERROR_SCENE ,"axis-must-be-in-range")
 
-    op.space.verify()
-    if input_type.space.space.data != result_type.space.space.data:
-        raise_verify_error("result-space-must-match-input-and-attr")
-    if input_type.space.space.data != op.space.space.data:
-        raise_verify_error("result-space-must-match-input-and-attr")
+    op .space .verify ()
+    if input_type .space .space .data !=result_type .space .space .data :
+        core_raise_verify_error (_ERROR_SCENE ,"result-space-must-match-input-and-attr")
+    if input_type .space .space .data !=op .space .space .data :
+        core_raise_verify_error (_ERROR_SCENE ,"result-space-must-match-input-and-attr")
 
-    if input_type.shape != result_type.shape:
-        raise_verify_error("result-shape-must-match-input")
-    if input_type.stride != result_type.stride:
-        raise_verify_error("result-stride-must-match-input")
+    if input_type .shape !=result_type .shape :
+        core_raise_verify_error (_ERROR_SCENE ,"result-shape-must-match-input")
+    if input_type .stride !=result_type .stride :
+        core_raise_verify_error (_ERROR_SCENE ,"result-stride-must-match-input")
 
-    if input_type.element_type != result_type.element_type or not is_float_element_type(input_type.element_type):
-        raise_verify_error("result-element-type-must-match-input-and-be-float")
+    if input_type .element_type !=result_type .element_type or not _NnActiveHelpers .is_float_element_type (input_type .element_type ):
+        core_raise_verify_error (_ERROR_SCENE ,"result-element-type-must-match-input-and-be-float")
 
 @irdl_op_definition
-class NnSoftmaxOp(IRDLOperation):
+class NnSoftmaxOp (IRDLOperation ):
     """nn.softmax。
 
 
@@ -200,20 +325,20 @@ class NnSoftmaxOp(IRDLOperation):
     - 功能实现: kernel_gen/dialect/nn/
     """
 
-    name = "nn.softmax"
+    name ="nn.softmax"
 
-    input = operand_def(NnMemoryType)
-    result = result_def(NnMemoryType)
-    axis = attr_def(IntegerAttr)
-    space = attr_def(NnMemorySpaceAttr)
+    input =operand_def (NnMemoryType )
+    result =result_def (NnMemoryType )
+    axis =attr_def (IntegerAttr )
+    space =attr_def (NnMemorySpaceAttr )
 
-    def __init__(
-        self,
-        input_value: SSAValue | Operation,
-        result_type: NnMemoryType,
-        axis: int | IntegerAttr | IntAttr,
-        space: NnMemorySpaceAttr,
-    ) -> None:
+    def __init__ (
+    self ,
+    input_value :SSAValue |Operation ,
+    result_type :NnMemoryType ,
+    axis :int |IntegerAttr |IntAttr ,
+    space :NnMemorySpaceAttr ,
+    )->None :
         """初始化 softmax op。
 
 
@@ -229,14 +354,14 @@ class NnSoftmaxOp(IRDLOperation):
         - test: test/dialect/nn/
         - 功能实现: kernel_gen/dialect/nn/
         """
-        axis_attr = normalize_i64_attr(axis, "axis")
-        super().__init__(
-            operands=[input_value],
-            result_types=[result_type],
-            attributes={"axis": axis_attr, "space": space},
+        axis_attr =_NnActiveHelpers .normalize_i64_attr (axis ,"axis")
+        super ().__init__ (
+        operands =[input_value ],
+        result_types =[result_type ],
+        attributes ={"axis":axis_attr ,"space":space },
         )
 
-    def verify_(self) -> None:
+    def verify_ (self )->None :
         """校验 nn.softmax 的 verifier 合同。
 
 
@@ -251,19 +376,19 @@ class NnSoftmaxOp(IRDLOperation):
         - test: test/dialect/nn/
         - 功能实现: kernel_gen/dialect/nn/
         """
-        _verify_softmax_op(self)
+        _verify_softmax_op (self )
 
 @irdl_op_definition
-class NnReluOp(IRDLOperation):
+class NnReluOp (IRDLOperation ):
     """nn.relu。"""
 
-    name = "nn.relu"
+    name ="nn.relu"
 
-    input = operand_def(NnMemoryType)
-    result = result_def(NnMemoryType)
-    space = attr_def(NnMemorySpaceAttr)
+    input =operand_def (NnMemoryType )
+    result =result_def (NnMemoryType )
+    space =attr_def (NnMemorySpaceAttr )
 
-    def __init__(self, input_value: SSAValue | Operation, result_type: NnMemoryType, space: NnMemorySpaceAttr) -> None:
+    def __init__ (self ,input_value :SSAValue |Operation ,result_type :NnMemoryType ,space :NnMemorySpaceAttr )->None :
         """初始化 nn.relu op。
 
         功能说明:
@@ -273,9 +398,9 @@ class NnReluOp(IRDLOperation):
         使用示例:
         - NnReluOp(inp, result_type, NnMemorySpaceAttr.from_name("global"))
         """
-        super().__init__(operands=[input_value], result_types=[result_type], attributes={"space": space})
+        super ().__init__ (operands =[input_value ],result_types =[result_type ],attributes ={"space":space })
 
-    def verify_(self) -> None:
+    def verify_ (self )->None :
         """校验 nn.relu 的 memory 与 dtype 合同。
 
         功能说明:
@@ -285,21 +410,21 @@ class NnReluOp(IRDLOperation):
         使用示例:
         - NnReluOp(inp, result_type, space).verify_()
         """
-        input_type = verify_memory_type(self.input.type, "input")
-        result_type = verify_memory_type(self.result.type, "result")
-        _verify_unary_float_op(input_type, result_type, self.space)
+        input_type =_NnActiveHelpers .verify_memory_type (self .input .type ,"input")
+        result_type =_NnActiveHelpers .verify_memory_type (self .result .type ,"result")
+        _verify_unary_float_op (input_type ,result_type ,self .space )
 
 @irdl_op_definition
-class NnSigmoidOp(IRDLOperation):
+class NnSigmoidOp (IRDLOperation ):
     """nn.sigmoid。"""
 
-    name = "nn.sigmoid"
+    name ="nn.sigmoid"
 
-    input = operand_def(NnMemoryType)
-    result = result_def(NnMemoryType)
-    space = attr_def(NnMemorySpaceAttr)
+    input =operand_def (NnMemoryType )
+    result =result_def (NnMemoryType )
+    space =attr_def (NnMemorySpaceAttr )
 
-    def __init__(self, input_value: SSAValue | Operation, result_type: NnMemoryType, space: NnMemorySpaceAttr) -> None:
+    def __init__ (self ,input_value :SSAValue |Operation ,result_type :NnMemoryType ,space :NnMemorySpaceAttr )->None :
         """初始化 nn.sigmoid op。
 
         功能说明:
@@ -309,9 +434,9 @@ class NnSigmoidOp(IRDLOperation):
         使用示例:
         - NnSigmoidOp(inp, result_type, NnMemorySpaceAttr.from_name("global"))
         """
-        super().__init__(operands=[input_value], result_types=[result_type], attributes={"space": space})
+        super ().__init__ (operands =[input_value ],result_types =[result_type ],attributes ={"space":space })
 
-    def verify_(self) -> None:
+    def verify_ (self )->None :
         """校验 nn.sigmoid 的 memory 与 dtype 合同。
 
         功能说明:
@@ -321,21 +446,21 @@ class NnSigmoidOp(IRDLOperation):
         使用示例:
         - NnSigmoidOp(inp, result_type, space).verify_()
         """
-        input_type = verify_memory_type(self.input.type, "input")
-        result_type = verify_memory_type(self.result.type, "result")
-        _verify_unary_float_op(input_type, result_type, self.space)
+        input_type =_NnActiveHelpers .verify_memory_type (self .input .type ,"input")
+        result_type =_NnActiveHelpers .verify_memory_type (self .result .type ,"result")
+        _verify_unary_float_op (input_type ,result_type ,self .space )
 
 @irdl_op_definition
-class NnTanhOp(IRDLOperation):
+class NnTanhOp (IRDLOperation ):
     """nn.tanh。"""
 
-    name = "nn.tanh"
+    name ="nn.tanh"
 
-    input = operand_def(NnMemoryType)
-    result = result_def(NnMemoryType)
-    space = attr_def(NnMemorySpaceAttr)
+    input =operand_def (NnMemoryType )
+    result =result_def (NnMemoryType )
+    space =attr_def (NnMemorySpaceAttr )
 
-    def __init__(self, input_value: SSAValue | Operation, result_type: NnMemoryType, space: NnMemorySpaceAttr) -> None:
+    def __init__ (self ,input_value :SSAValue |Operation ,result_type :NnMemoryType ,space :NnMemorySpaceAttr )->None :
         """初始化 nn.tanh op。
 
         功能说明:
@@ -345,9 +470,9 @@ class NnTanhOp(IRDLOperation):
         使用示例:
         - NnTanhOp(inp, result_type, NnMemorySpaceAttr.from_name("global"))
         """
-        super().__init__(operands=[input_value], result_types=[result_type], attributes={"space": space})
+        super ().__init__ (operands =[input_value ],result_types =[result_type ],attributes ={"space":space })
 
-    def verify_(self) -> None:
+    def verify_ (self )->None :
         """校验 nn.tanh 的 memory 与 dtype 合同。
 
         功能说明:
@@ -357,28 +482,28 @@ class NnTanhOp(IRDLOperation):
         使用示例:
         - NnTanhOp(inp, result_type, space).verify_()
         """
-        input_type = verify_memory_type(self.input.type, "input")
-        result_type = verify_memory_type(self.result.type, "result")
-        _verify_unary_float_op(input_type, result_type, self.space)
+        input_type =_NnActiveHelpers .verify_memory_type (self .input .type ,"input")
+        result_type =_NnActiveHelpers .verify_memory_type (self .result .type ,"result")
+        _verify_unary_float_op (input_type ,result_type ,self .space )
 
 @irdl_op_definition
-class NnLeakyReluOp(IRDLOperation):
+class NnLeakyReluOp (IRDLOperation ):
     """nn.leaky_relu。"""
 
-    name = "nn.leaky_relu"
+    name ="nn.leaky_relu"
 
-    input = operand_def(NnMemoryType)
-    alpha = opt_operand_def(Attribute)
-    result = result_def(NnMemoryType)
-    space = attr_def(NnMemorySpaceAttr)
+    input =operand_def (NnMemoryType )
+    alpha =opt_operand_def (Attribute )
+    result =result_def (NnMemoryType )
+    space =attr_def (NnMemorySpaceAttr )
 
-    def __init__(
-        self,
-        input_value: SSAValue | Operation,
-        alpha: SSAValue | Operation | None,
-        result_type: NnMemoryType,
-        space: NnMemorySpaceAttr,
-    ) -> None:
+    def __init__ (
+    self ,
+    input_value :SSAValue |Operation ,
+    alpha :SSAValue |Operation |None ,
+    result_type :NnMemoryType ,
+    space :NnMemorySpaceAttr ,
+    )->None :
         """初始化 nn.leaky_relu op。
 
         功能说明:
@@ -388,13 +513,13 @@ class NnLeakyReluOp(IRDLOperation):
         使用示例:
         - NnLeakyReluOp(inp, alpha, result_type, NnMemorySpaceAttr.from_name("global"))
         """
-        super().__init__(
-            operands=[input_value, [] if alpha is None else [alpha]],
-            result_types=[result_type],
-            attributes={"space": space},
+        super ().__init__ (
+        operands =[input_value ,[]if alpha is None else [alpha ]],
+        result_types =[result_type ],
+        attributes ={"space":space },
         )
 
-    def verify_(self) -> None:
+    def verify_ (self )->None :
         """校验 nn.leaky_relu 的 memory、dtype 与 alpha 合同。
 
         功能说明:
@@ -404,33 +529,33 @@ class NnLeakyReluOp(IRDLOperation):
         使用示例:
         - NnLeakyReluOp(inp, alpha, result_type, space).verify_()
         """
-        input_type = verify_memory_type(self.input.type, "input")
-        result_type = verify_memory_type(self.result.type, "result")
-        _verify_unary_float_op(input_type, result_type, self.space)
-        if self.alpha is not None:
-            _verify_activation_scalar_operand(SSAValue.get(self.alpha), "alpha")
+        input_type =_NnActiveHelpers .verify_memory_type (self .input .type ,"input")
+        result_type =_NnActiveHelpers .verify_memory_type (self .result .type ,"result")
+        _verify_unary_float_op (input_type ,result_type ,self .space )
+        if self .alpha is not None :
+            _verify_activation_scalar_operand (SSAValue .get (self .alpha ),"alpha")
 
 @irdl_op_definition
-class NnHardSigmoidOp(IRDLOperation):
+class NnHardSigmoidOp (IRDLOperation ):
     """nn.hard_sigmoid。"""
 
-    name = "nn.hard_sigmoid"
-    irdl_options = (SameVariadicOperandSize(),)
+    name ="nn.hard_sigmoid"
+    irdl_options =(SameVariadicOperandSize (),)
 
-    input = operand_def(NnMemoryType)
-    alpha = opt_operand_def(Attribute)
-    beta = opt_operand_def(Attribute)
-    result = result_def(NnMemoryType)
-    space = attr_def(NnMemorySpaceAttr)
+    input =operand_def (NnMemoryType )
+    alpha =opt_operand_def (Attribute )
+    beta =opt_operand_def (Attribute )
+    result =result_def (NnMemoryType )
+    space =attr_def (NnMemorySpaceAttr )
 
-    def __init__(
-        self,
-        input_value: SSAValue | Operation,
-        alpha: SSAValue | Operation | None,
-        beta: SSAValue | Operation | None,
-        result_type: NnMemoryType,
-        space: NnMemorySpaceAttr,
-    ) -> None:
+    def __init__ (
+    self ,
+    input_value :SSAValue |Operation ,
+    alpha :SSAValue |Operation |None ,
+    beta :SSAValue |Operation |None ,
+    result_type :NnMemoryType ,
+    space :NnMemorySpaceAttr ,
+    )->None :
         """初始化 nn.hard_sigmoid op。
 
         功能说明:
@@ -440,17 +565,17 @@ class NnHardSigmoidOp(IRDLOperation):
         使用示例:
         - NnHardSigmoidOp(inp, alpha, beta, result_type, NnMemorySpaceAttr.from_name("global"))
         """
-        super().__init__(
-            operands=[
-                input_value,
-                [] if alpha is None else [alpha],
-                [] if beta is None else [beta],
-            ],
-            result_types=[result_type],
-            attributes={"space": space},
+        super ().__init__ (
+        operands =[
+        input_value ,
+        []if alpha is None else [alpha ],
+        []if beta is None else [beta ],
+        ],
+        result_types =[result_type ],
+        attributes ={"space":space },
         )
 
-    def verify_(self) -> None:
+    def verify_ (self )->None :
         """校验 nn.hard_sigmoid 的 memory、dtype 与 scalar 合同。
 
         功能说明:
@@ -460,16 +585,16 @@ class NnHardSigmoidOp(IRDLOperation):
         使用示例:
         - NnHardSigmoidOp(inp, alpha, beta, result_type, space).verify_()
         """
-        input_type = verify_memory_type(self.input.type, "input")
-        result_type = verify_memory_type(self.result.type, "result")
-        _verify_unary_float_op(input_type, result_type, self.space)
-        if self.alpha is not None:
-            _verify_activation_scalar_operand(SSAValue.get(self.alpha), "alpha")
-        if self.beta is not None:
-            _verify_activation_scalar_operand(SSAValue.get(self.beta), "beta")
+        input_type =_NnActiveHelpers .verify_memory_type (self .input .type ,"input")
+        result_type =_NnActiveHelpers .verify_memory_type (self .result .type ,"result")
+        _verify_unary_float_op (input_type ,result_type ,self .space )
+        if self .alpha is not None :
+            _verify_activation_scalar_operand (SSAValue .get (self .alpha ),"alpha")
+        if self .beta is not None :
+            _verify_activation_scalar_operand (SSAValue .get (self .beta ),"beta")
 
 @irdl_op_definition
-class NnExpOp(IRDLOperation):
+class NnExpOp (IRDLOperation ):
     """nn.exp。
 
 
@@ -485,18 +610,18 @@ class NnExpOp(IRDLOperation):
     - 功能实现: kernel_gen/dialect/nn/
     """
 
-    name = "nn.exp"
+    name ="nn.exp"
 
-    input = operand_def(NnMemoryType)
-    result = result_def(NnMemoryType)
-    space = attr_def(NnMemorySpaceAttr)
+    input =operand_def (NnMemoryType )
+    result =result_def (NnMemoryType )
+    space =attr_def (NnMemorySpaceAttr )
 
-    def __init__(
-        self,
-        input_value: SSAValue | Operation,
-        result_type: NnMemoryType,
-        space: NnMemorySpaceAttr,
-    ) -> None:
+    def __init__ (
+    self ,
+    input_value :SSAValue |Operation ,
+    result_type :NnMemoryType ,
+    space :NnMemorySpaceAttr ,
+    )->None :
         """初始化 exp op。
 
 
@@ -512,13 +637,13 @@ class NnExpOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/nn/
         """
 
-        super().__init__(
-            operands=[input_value],
-            result_types=[result_type],
-            attributes={"space": space},
+        super ().__init__ (
+        operands =[input_value ],
+        result_types =[result_type ],
+        attributes ={"space":space },
         )
 
-    def verify_(self) -> None:
+    def verify_ (self )->None :
         """校验 nn.exp verifier 合同。
 
 
@@ -533,6 +658,6 @@ class NnExpOp(IRDLOperation):
         - test: test/dialect/nn/
         - 功能实现: kernel_gen/dialect/nn/
         """
-        _verify_exp_op(self)
+        _verify_exp_op (self )
 
-__all__ = ["NnReluOp", "NnSigmoidOp", "NnTanhOp", "NnLeakyReluOp", "NnHardSigmoidOp", "NnSoftmaxOp", "NnExpOp"]
+__all__ =["NnReluOp","NnSigmoidOp","NnTanhOp","NnLeakyReluOp","NnHardSigmoidOp","NnSoftmaxOp","NnExpOp"]

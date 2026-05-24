@@ -36,7 +36,7 @@ from xdsl.dialects.test import Test
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import Parser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import VerifyException
+from kernel_gen.core.error import KernelCodeError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -130,7 +130,7 @@ def test_tuner_param_rejects_invalid_result_type() -> None:
     ]
     for invalid_type in invalid_types:
         op = TunerParamOp(invalid_type)
-        with pytest.raises(VerifyException, match="tuner.param result type must be !symbol.int"):
+        with pytest.raises(KernelCodeError, match="tuner.param result type must be !symbol.int"):
             op.verify()
 
 
@@ -144,7 +144,7 @@ def test_tuner_param_rejects_invalid_name() -> None:
         SymbolValueType.from_expr("?"),
         SymbolValueType.from_expr("BLOCK_M + 1"),
     ]:
-        with pytest.raises(VerifyException, match="tuner.param result symbol name must match"):
+        with pytest.raises(KernelCodeError, match="tuner.param result symbol name must match"):
             TunerParamOp(result_type).verify()
 
     ctx = _build_context()
@@ -156,7 +156,7 @@ builtin.module {
 }
 """,
     ).parse_module()
-    with pytest.raises(VerifyException, match="tuner.param result symbol name must match"):
+    with pytest.raises(KernelCodeError, match="tuner.param result symbol name must match"):
         module_bad.verify()
 
 
@@ -223,7 +223,7 @@ def test_tuner_cost_rejects_invalid_kind_attrs() -> None:
     value = TunerParamOp(SymbolValueType.from_expr("BLOCK_M")).result
 
     with pytest.raises(
-        VerifyException,
+        KernelCodeError,
         match="tuner.cost cost_kind must be non-empty string attr",
     ):
         TunerCostOp(
@@ -232,7 +232,7 @@ def test_tuner_cost_rejects_invalid_kind_attrs() -> None:
             op_name=StringAttr("dma.copy"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="tuner.cost kind attr is not part of public contract"):
+    with pytest.raises(KernelCodeError, match="tuner.cost kind attr is not part of public contract"):
         TunerCostOp(
             [value],
             cost_kind=StringAttr("compute"),
@@ -240,7 +240,7 @@ def test_tuner_cost_rejects_invalid_kind_attrs() -> None:
             extra_attrs={"kind": StringAttr("move")},
         ).verify()
 
-    with pytest.raises(VerifyException, match="tuner.cost device_func attr is not part of public contract"):
+    with pytest.raises(KernelCodeError, match="tuner.cost device_func attr is not part of public contract"):
         TunerCostOp(
             [value],
             cost_kind=StringAttr("compute"),
@@ -257,7 +257,7 @@ def test_tuner_cost_rejects_missing_attrs_or_invalid_result_type() -> None:
     ctx = _build_context()
     value = TunerParamOp(SymbolValueType.from_expr("BLOCK_M")).result
 
-    with pytest.raises(VerifyException, match="tuner.cost result type must be !symbol.int<#symbol.expr<expr>>"):
+    with pytest.raises(KernelCodeError, match="tuner.cost result type must be !symbol.int<#symbol.expr<expr>>"):
         TunerCostOp(
             [value],
             cost_kind=StringAttr("compute"),
@@ -265,7 +265,7 @@ def test_tuner_cost_rejects_missing_attrs_or_invalid_result_type() -> None:
             result_type=f32,
         ).verify()
 
-    with pytest.raises(VerifyException, match="tuner.cost requires attribute op_name"):
+    with pytest.raises(KernelCodeError, match="tuner.cost requires attribute op_name"):
         Parser(
             ctx,
             """
@@ -307,14 +307,14 @@ builtin.module {
 # 对应功能实现文件路径: kernel_gen/dialect/tuner/
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_select_rejects_invalid_contract() -> None:
-    with pytest.raises(VerifyException, match="tuner.select patterns must be non-empty"):
+    with pytest.raises(KernelCodeError, match="tuner.select patterns must be non-empty"):
         TunerSelectOp([]).verify()
 
-    with pytest.raises(VerifyException, match="tuner.select result type must be !symbol.int"):
+    with pytest.raises(KernelCodeError, match="tuner.select result type must be !symbol.int"):
         TunerSelectOp(["entry"], result_type=SymbolValueType.from_expr("OTHER")).verify()
 
     ctx = _build_context()
-    with pytest.raises(VerifyException, match="tuner.select patterns must be non-empty"):
+    with pytest.raises(KernelCodeError, match="tuner.select patterns must be non-empty"):
         Parser(
             ctx,
             """
@@ -332,7 +332,7 @@ builtin.module {
 }
 """,
     ).parse_module()
-    with pytest.raises(VerifyException, match="tuner.select patterns must be non-empty"):
+    with pytest.raises(KernelCodeError, match="tuner.select patterns must be non-empty"):
         module_bad.verify()
 
 
@@ -415,7 +415,7 @@ builtin.module {
         ),
     ]
     for text, message in invalid_cases:
-        with pytest.raises(VerifyException, match=message):
+        with pytest.raises(KernelCodeError, match=message):
             Parser(ctx, text).parse_module().verify()
 
 

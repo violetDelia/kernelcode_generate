@@ -41,7 +41,8 @@ from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import Parser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import ParseError, VerifyException
+from kernel_gen.core.error import KernelCodeError
+from xdsl.utils.exceptions import ParseError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -268,7 +269,7 @@ def test_memory_type_rejects_invalid_template_name(template_name: str) -> None:
         memory_type.verify()
         assert memory_type.template_name.data == ""
         return
-    with pytest.raises(VerifyException, match="template_name must be an identifier"):
+    with pytest.raises(KernelCodeError, match="template_name must be an identifier"):
         NnMemoryType(
             ArrayAttr([_expr_attr("M")]),
             ArrayAttr([_expr_attr(1)]),
@@ -278,7 +279,7 @@ def test_memory_type_rejects_invalid_template_name(template_name: str) -> None:
         )
 
 def test_memory_type_rank_mismatch_rejected() -> None:
-    with pytest.raises(VerifyException, match="rank must match"):
+    with pytest.raises(KernelCodeError, match="rank must match"):
         NnMemoryType(
             ArrayAttr([_expr_attr(4), _expr_attr(8)]),
             ArrayAttr([_expr_attr(1)]),
@@ -308,7 +309,7 @@ def test_memory_type_rejects_invalid_dim_entry(
     stride: list[Attribute],
     message: str,
 ) -> None:
-    with pytest.raises(VerifyException, match=message):
+    with pytest.raises(KernelCodeError, match=message):
         NnMemoryType(
             ArrayAttr(shape),
             ArrayAttr(stride),
@@ -350,7 +351,7 @@ def test_memory_dim_parser_and_mixed_add_public_parser_contracts() -> None:
         with pytest.raises(ParseError):
             Parser(ctx, malformed_text).parse_attribute()
 
-    with pytest.raises(VerifyException, match="SymbolExprAttr"):
+    with pytest.raises(KernelCodeError, match="SymbolExprAttr"):
         _print_ir(NnMemoryType(ArrayAttr([Float32Type()]), ArrayAttr([_expr_attr(1)]), i32, _make_space("global")))
 
     parsed = Parser(
@@ -389,7 +390,7 @@ def test_memory_dim_parser_and_mixed_add_public_parser_contracts() -> None:
         space="global",
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="attribute space must match memory operand space"):
+    with pytest.raises(KernelCodeError, match="attribute space must match memory operand space"):
         NnAddOp(lhs, scalar, wrong_space_result, _make_space("shared")).verify()
 
     wrong_stride = _make_simple_memory_type(
@@ -398,7 +399,7 @@ def test_memory_dim_parser_and_mixed_add_public_parser_contracts() -> None:
         space="global",
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="result stride must match memory operand"):
+    with pytest.raises(KernelCodeError, match="result stride must match memory operand"):
         NnAddOp(lhs, scalar, wrong_stride, _make_space("global")).verify()
 
     wrong_dtype = _make_simple_memory_type(
@@ -407,5 +408,5 @@ def test_memory_dim_parser_and_mixed_add_public_parser_contracts() -> None:
         space="global",
         element_type=Float16Type(),
     )
-    with pytest.raises(VerifyException, match="result element_type must match promoted element_type"):
+    with pytest.raises(KernelCodeError, match="result element_type must match promoted element_type"):
         NnAddOp(lhs, scalar, wrong_dtype, _make_space("global")).verify()

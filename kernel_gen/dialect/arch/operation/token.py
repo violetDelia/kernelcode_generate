@@ -22,7 +22,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import ClassVar
 
-from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE, ErrorKind, ErrorModule, kernel_code_error
+from kernel_gen.core.contracts import raise_verify_error
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, SymbolRefAttr, i8
 from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue, TypeAttribute
 from xdsl.irdl import (
@@ -38,21 +39,147 @@ from xdsl.irdl import (
 )
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
 from kernel_gen.target import registry
 
-from ..common import (
-    _normalize_token_id,
-    _raise_verify_error,
-    _verify_non_negative_static_symbol,
-    _verify_positive_static_symbol,
-    _verify_symbol_int_operand,
-    _verify_token_id_text,
-)
 from ..type import ArchTokenType
+
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE = "dialect.arch verifier"
+
+def _verify_symbol_int_operand(value: SSAValue, field_name: str, op_name: str) -> SymbolValueType:
+    """校验单个启动维度 operand 为 `!symbol.int<#symbol.expr<expr>>`。
+
+
+    功能说明:
+    - 统一校验 `arch.launch` 的维度输入类型。
+
+    使用示例:
+    - _verify_symbol_int_operand(op.block, "block", "arch.launch")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
+    """
+
+    if not isinstance(value.type, SymbolValueType):
+        raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+            ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{op_name} {field_name} must have type !symbol.int<#symbol.expr<expr>>",
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
+            )
+        )
+    value.type.verify()
+    return value.type
+
+def _verify_positive_static_symbol(operand_type: SymbolValueType, field_name: str, op_name: str) -> None:
+    """校验可静态求值的 symbol.int 启动维度为正整数。
+
+
+    功能说明:
+    - 对字面量整数表达式执行 `> 0` 约束。
+    - 对无法静态求值的符号表达式保持放行。
+
+    使用示例:
+    - _verify_positive_static_symbol(SymbolValueType.from_expr("8"), "block", "arch.launch")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
+    """
+
+    static_value = operand_type.get_value()
+    if isinstance(static_value, int) and static_value <= 0:
+        raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+            ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{op_name} {field_name} must be > 0 when statically known",
+                actual=str(static_value),
+                action=ERROR_ACTION,
+            )
+        )
+
+def _verify_non_negative_static_symbol(operand_type: SymbolValueType, field_name: str, op_name: str) -> None:
+    """校验可静态求值的 symbol.int 启动规模为非负整数。
+
+
+    功能说明:
+    - 对字面量整数表达式执行 `>= 0` 约束。
+    - 对无法静态求值的符号表达式保持放行。
+
+    使用示例:
+    - _verify_non_negative_static_symbol(SymbolValueType.from_expr("0"), "shared_memory_size", "arch.launch")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/
+    """
+
+    static_value = operand_type.get_value()
+    if isinstance(static_value, int) and static_value < 0:
+        raise kernel_code_error(ErrorKind.VERIFY, ErrorModule.DIALECT,
+            ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{op_name} {field_name} must be >= 0 when statically known",
+                actual=str(static_value),
+                action=ERROR_ACTION,
+            )
+        )
+
+def _normalize_token_id(token_id: str | StringAttr) -> StringAttr:
+    """规整 arch token id 参数。
+
+    功能说明:
+    - 将公开构造参数 `str | StringAttr` 统一为 `StringAttr`。
+    - 作为 arch 包内 API 供 token type/op 共享，不从 `arch.type.token` 跨文件导入私有对象。
+
+    使用示例:
+    - attr = _normalize_token_id("event0")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/operation/token.py
+    """
+
+    if isinstance(token_id, StringAttr):
+        return token_id
+    if isinstance(token_id, str):
+        return StringAttr(token_id)
+    raise TypeError("arch token id must be str or StringAttr")
+
+def _verify_token_id_text(token_id: str) -> None:
+    """校验 arch token id 文本。
+
+    功能说明:
+    - token id 必须是非空标识符，作为 `!arch.token<id>` 的稳定文本。
+    - 作为 arch 包内 API 统一 token type/op 的错误语义。
+
+    使用示例:
+    - _verify_token_id_text("event0")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/arch/test_arch.py
+    - 功能实现: kernel_gen/dialect/arch/operation/token.py
+    """
+
+    has_text = bool(token_id)
+    if not has_text:
+        raise_verify_error(_ERROR_SCENE, "arch token id must not be empty")
+    identifier_body = token_id.replace("_", "")
+    starts_with_digit = token_id[0].isdigit()
+    if not identifier_body.isalnum() or starts_with_digit:
+        raise_verify_error(_ERROR_SCENE, "arch token id must be an identifier")
+
 
 
 def _verify_token_operand(value: SSAValue, field_name: str) -> ArchTokenType:
@@ -71,10 +198,11 @@ def _verify_token_operand(value: SSAValue, field_name: str) -> ArchTokenType:
     - 功能实现: kernel_gen/dialect/arch/operation/token.py
     """
 
-    if not isinstance(value.type, ArchTokenType):
-        _raise_verify_error(f"arch token {field_name} must be !arch.token<id>")
-    value.type.verify()
-    return value.type
+    token_type = value.type
+    if not isinstance(token_type, ArchTokenType):
+        raise_verify_error(_ERROR_SCENE, f"arch token {field_name} must be !arch.token<id>")
+    token_type.verify()
+    return token_type
 
 @irdl_op_definition
 class ArchTokenOp(IRDLOperation):
@@ -128,10 +256,10 @@ class ArchTokenOp(IRDLOperation):
         count_type = _verify_symbol_int_operand(self.count, "count", self.name)
         _verify_non_negative_static_symbol(count_type, "count", self.name)
         if not isinstance(self.result.type, ArchTokenType):
-            _raise_verify_error("arch.token result must be !arch.token<id>")
+            raise_verify_error(_ERROR_SCENE, "arch.token result must be !arch.token<id>")
         self.result.type.verify()
         if self.result.type.token_id.data != self.token_id.data:
-            _raise_verify_error("arch.token result token id must match id attr")
+            raise_verify_error(_ERROR_SCENE, "arch.token result token id must match id attr")
 
 
 @irdl_op_definition

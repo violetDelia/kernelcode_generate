@@ -24,8 +24,8 @@ from xdsl.dialects.test import Test, TestOp
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import Parser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import VerifyException
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.memory import Memory, MemoryGetDataOp
 from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolPtrType
@@ -150,7 +150,7 @@ def test_memory_get_data_rejects_non_memory_source() -> None:
 
     source = TestOp(result_types=[i32]).results[0]
 
-    with pytest.raises(VerifyException, match="memory.get_data source must be !nn.memory"):
+    with pytest.raises(KernelCodeError, match="memory.get_data source must be !nn.memory"):
         MemoryGetDataOp(source, SymbolPtrType(i32)).verify()
 
 
@@ -159,7 +159,7 @@ def test_memory_get_data_rejects_non_ptr_result() -> None:
 
     source = _memory_value(_memory_type())
 
-    with pytest.raises(VerifyException, match="memory.get_data result type must be !symbol.ptr"):
+    with pytest.raises(KernelCodeError, match="memory.get_data result type must be !symbol.ptr"):
         MemoryGetDataOp(source, i32).verify()
 
 
@@ -168,7 +168,7 @@ def test_memory_get_data_rejects_dtype_or_template_mismatch() -> None:
 
     source = _memory_value(_memory_type(template_name="T_bias"))
 
-    with pytest.raises(VerifyException, match="memory.get_data ptr dtype must match memory element_type"):
+    with pytest.raises(KernelCodeError, match="memory.get_data ptr dtype must match memory element_type"):
         MemoryGetDataOp(source, SymbolPtrType(i32, "T_bias")).verify()
-    with pytest.raises(VerifyException, match="memory.get_data ptr template_name must match memory template_name"):
+    with pytest.raises(KernelCodeError, match="memory.get_data ptr template_name must match memory template_name"):
         MemoryGetDataOp(source, SymbolPtrType(f32, "Other")).verify()

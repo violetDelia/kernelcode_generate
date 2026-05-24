@@ -40,6 +40,7 @@ from xdsl.dialects.test import TestOp as _TestOp
 from xdsl.ir import Attribute, Operation, SSAValue
 from xdsl.traits import MemoryEffectKind, get_effects
 from xdsl.utils.exceptions import VerifyException
+from kernel_gen.core.error import KernelCodeError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -251,7 +252,7 @@ def test_kernel_space_attr_valid() -> None:
 # 对应 spec 文件路径: spec/dialect/kernel.md
 # 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_space_attr_invalid() -> None:
-    with pytest.raises(VerifyException, match="nn space"):
+    with pytest.raises(KernelCodeError, match="nn space"):
         NnMemorySpaceAttr(StringAttr("invalid"))
 
 
@@ -262,7 +263,7 @@ def test_kernel_space_attr_invalid() -> None:
 # 对应 spec 文件路径: spec/dialect/kernel.md
 # 对应测试文件路径: test/dialect/kernel/test_kernel.py
 def test_kernel_memory_type_rank_mismatch() -> None:
-    with pytest.raises(VerifyException, match="shape and stride rank"):
+    with pytest.raises(KernelCodeError, match="shape and stride rank"):
         _make_memory_type(shape=_dim_array([2, 4]), stride=_dim_array([1]))
 
 
@@ -318,7 +319,7 @@ def test_kernel_binary_elewise_add_layout_mismatch() -> None:
         kind="add",
         space=_make_space("global"),
     )
-    with pytest.raises(VerifyException, match="shape must match"):
+    with pytest.raises(KernelCodeError, match="shape must match"):
         op.verify()
 
     lhs_type = _make_memory_type(stride=_dim_array([4, 1]))
@@ -331,7 +332,7 @@ def test_kernel_binary_elewise_add_layout_mismatch() -> None:
         kind="add",
         space=_make_space("global"),
     )
-    with pytest.raises(VerifyException, match="stride must match"):
+    with pytest.raises(KernelCodeError, match="stride must match"):
         op.verify()
 
     lhs_type = _make_memory_type(space="global")
@@ -344,7 +345,7 @@ def test_kernel_binary_elewise_add_layout_mismatch() -> None:
         kind="add",
         space=_make_space("global"),
     )
-    with pytest.raises(VerifyException, match="same space"):
+    with pytest.raises(KernelCodeError, match="same space"):
         op.verify()
 
     lhs_type = _make_memory_type(space="global")
@@ -357,7 +358,7 @@ def test_kernel_binary_elewise_add_layout_mismatch() -> None:
         kind="add",
         space=_make_space("local"),
     )
-    with pytest.raises(VerifyException, match="attribute space"):
+    with pytest.raises(KernelCodeError, match="attribute space"):
         op.verify()
 
     lhs_type = _make_memory_type(element_type=i32)
@@ -370,7 +371,7 @@ def test_kernel_binary_elewise_add_layout_mismatch() -> None:
         kind="add",
         space=_make_space("global"),
     )
-    with pytest.raises(VerifyException, match="kernel.binary_elewise element_type must match"):
+    with pytest.raises(KernelCodeError, match="kernel.binary_elewise element_type must match"):
         op.verify()
 
     invalid_lhs = _TestOp(result_types=[i32]).results[0]
@@ -422,7 +423,7 @@ def test_kernel_binary_elewise_compare_output_type_error() -> None:
         kind="eq",
         space=_make_space("global"),
     )
-    with pytest.raises(VerifyException, match="compare output element_type must be i1"):
+    with pytest.raises(KernelCodeError, match="compare output element_type must be i1"):
         op.verify()
 
     lt_op = KernelBinaryElewiseOp(
@@ -432,7 +433,7 @@ def test_kernel_binary_elewise_compare_output_type_error() -> None:
         kind="lt",
         space=_make_space("global"),
     )
-    with pytest.raises(VerifyException, match="compare output element_type must be i1"):
+    with pytest.raises(KernelCodeError, match="compare output element_type must be i1"):
         lt_op.verify()
 
     gt_op = KernelBinaryElewiseOp(
@@ -442,7 +443,7 @@ def test_kernel_binary_elewise_compare_output_type_error() -> None:
         kind="gt",
         space=_make_space("global"),
     )
-    with pytest.raises(VerifyException, match="compare output element_type must be i1"):
+    with pytest.raises(KernelCodeError, match="compare output element_type must be i1"):
         gt_op.verify()
 
     bool_rhs_op = KernelBinaryElewiseOp(
@@ -452,10 +453,10 @@ def test_kernel_binary_elewise_compare_output_type_error() -> None:
         kind="eq",
         space=_make_space("global"),
     )
-    with pytest.raises(VerifyException, match="compare output element_type must be i1"):
+    with pytest.raises(KernelCodeError, match="compare output element_type must be i1"):
         bool_rhs_op.verify()
 
-    with pytest.raises(VerifyException, match="kind must be one of"):
+    with pytest.raises(KernelCodeError, match="kind must be one of"):
         KernelBinaryElewiseOp(
             _make_value(_make_memory_type()),
             _make_value(_make_memory_type()),
@@ -495,7 +496,7 @@ def test_kernel_binary_elewise_public_kind_matrix() -> None:
             space=_make_space("global"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="kernel.binary_elewise kind must be string"):
+    with pytest.raises(KernelCodeError, match="kernel.binary_elewise kind must be string"):
         KernelBinaryElewiseOp(
             _make_value(memory_type),
             lhs,
@@ -523,7 +524,7 @@ def test_kernel_select_cond_type_error() -> None:
         _make_value(rhs_type),
         _make_space("global"),
     )
-    with pytest.raises(VerifyException, match="cond element_type must be i1"):
+    with pytest.raises(KernelCodeError, match="cond element_type must be i1"):
         op.verify()
 
     cond_type = _make_memory_type(element_type=i1)
@@ -676,7 +677,7 @@ def test_kernel_exp_requires_float() -> None:
     input_type = _make_memory_type(element_type=i32)
     out_type = _make_memory_type(element_type=i32)
     op = KernelExpOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
-    with pytest.raises(VerifyException, match="kernel.exp element_type must be float"):
+    with pytest.raises(KernelCodeError, match="kernel.exp element_type must be float"):
         op.verify()
 
 
@@ -779,7 +780,7 @@ def test_kernel_matmul_dtype_mismatch() -> None:
         _make_value(rhs_type),
         _make_space("global"),
     )
-    with pytest.raises(VerifyException, match="kernel.matmul element_type"):
+    with pytest.raises(KernelCodeError, match="kernel.matmul element_type"):
         op.verify()
 
 
@@ -802,7 +803,7 @@ def test_kernel_matmul_rank_shape_contract() -> None:
         _make_value(rhs_rank3_type),
         _make_space("global"),
     )
-    with pytest.raises(VerifyException, match="kernel.matmul requires rank-2"):
+    with pytest.raises(KernelCodeError, match="kernel.matmul requires rank-2"):
         op.verify()
 
     rhs_mismatch_type = _make_memory_type(shape=_dim_array([5, 4]))
@@ -812,7 +813,7 @@ def test_kernel_matmul_rank_shape_contract() -> None:
         _make_value(rhs_mismatch_type),
         _make_space("global"),
     )
-    with pytest.raises(VerifyException, match="kernel.matmul contracting dimensions"):
+    with pytest.raises(KernelCodeError, match="kernel.matmul contracting dimensions"):
         op.verify()
 
     out_shape_mismatch_type = _make_memory_type(shape=_dim_array([3, 4]))
@@ -822,7 +823,7 @@ def test_kernel_matmul_rank_shape_contract() -> None:
         _make_value(_make_memory_type(shape=_dim_array([3, 4]))),
         _make_space("global"),
     )
-    with pytest.raises(VerifyException, match="kernel.matmul result shape"):
+    with pytest.raises(KernelCodeError, match="kernel.matmul result shape"):
         op.verify()
 
 
@@ -875,7 +876,7 @@ def test_kernel_matmul_space_contract_matrix() -> None:
         element_type=Float32Type(),
         space="global",
     )
-    with pytest.raises(VerifyException, match="nn space must be one of"):
+    with pytest.raises(KernelCodeError, match="nn space must be one of"):
         KernelMatmulOp(
             _make_value(out_type),
             _make_value(lhs_type),
@@ -1052,7 +1053,7 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         stride=_dim_array([5, 1]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col1d requires rank-3 input"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col1d requires rank-3 input"):
         KernelImg2col1dOp(
             _make_value(img2col1d_output_type),
             _make_value(rank2_input),
@@ -1069,7 +1070,7 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         stride=_dim_array([15, 1, 3]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col1d input layout must be contiguous"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col1d input layout must be contiguous"):
         KernelImg2col1dOp(
             _make_value(img2col1d_output_type),
             _make_value(non_contiguous_1d_input),
@@ -1091,7 +1092,7 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         stride=_dim_array([9, 3, 1]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col1d requires rank-4 result"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col1d requires rank-4 result"):
         KernelImg2col1dOp(
             _make_value(rank3_output),
             _make_value(img2col1d_input_type),
@@ -1113,7 +1114,7 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         stride=_dim_array([25, 5, 1]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col2d requires rank-4 input"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col2d requires rank-4 input"):
         KernelImg2col2dOp(
             _make_value(img2col2d_output_type),
             _make_value(rank3_2d_input),
@@ -1135,7 +1136,7 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         stride=_dim_array([75, 1, 15, 3]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col2d input layout must be contiguous"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col2d input layout must be contiguous"):
         KernelImg2col2dOp(
             _make_value(img2col2d_output_type),
             _make_value(non_contiguous_2d_input),
@@ -1162,7 +1163,7 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         stride=_dim_array([81, 27, 9, 3, 1]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col2d requires rank-6 result"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col2d requires rank-6 result"):
         KernelImg2col2dOp(
             _make_value(rank5_output),
             _make_value(img2col2d_input_type),
@@ -1197,7 +1198,7 @@ def test_kernel_img2col_output_extent_contract() -> None:
         stride=_dim_array([18, 6, 3, 1]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
         KernelImg2col1dOp(
             _make_value(bad_window_axis_1d_output),
             _make_value(img2col1d_input_type),
@@ -1214,7 +1215,7 @@ def test_kernel_img2col_output_extent_contract() -> None:
         stride=_dim_array([18, 6, 2, 1]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
         KernelImg2col1dOp(
             _make_value(bad_extent_1d_output),
             _make_value(img2col1d_input_type),
@@ -1231,7 +1232,7 @@ def test_kernel_img2col_output_extent_contract() -> None:
         stride=_dim_array([30, 10, 3, 1]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
         KernelImg2col1dOp(
             _make_value(bad_stride_1d_output),
             _make_value(img2col1d_input_type),
@@ -1253,7 +1254,7 @@ def test_kernel_img2col_output_extent_contract() -> None:
         stride=_dim_array([9, 3, 1, 1]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
         KernelImg2col1dOp(
             _make_value(short_1d_output),
             _make_value(short_1d_input),
@@ -1275,7 +1276,7 @@ def test_kernel_img2col_output_extent_contract() -> None:
         stride=_dim_array([162, 54, 27, 9, 3, 1]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
         KernelImg2col2dOp(
             _make_value(bad_window_axis_2d_output),
             _make_value(img2col2d_input_type),
@@ -1297,7 +1298,7 @@ def test_kernel_img2col_output_extent_contract() -> None:
         stride=_dim_array([162, 54, 18, 6, 3, 1]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
         KernelImg2col2dOp(
             _make_value(bad_extent_2d_output),
             _make_value(img2col2d_input_type),
@@ -1319,7 +1320,7 @@ def test_kernel_img2col_output_extent_contract() -> None:
         stride=_dim_array([200, 80, 27, 9, 3, 1]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
         KernelImg2col2dOp(
             _make_value(bad_stride_2d_output),
             _make_value(img2col2d_input_type),
@@ -1346,7 +1347,7 @@ def test_kernel_img2col_output_extent_contract() -> None:
         stride=_dim_array([27, 9, 3, 1, 1, 1]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
         KernelImg2col2dOp(
             _make_value(short_2d_output),
             _make_value(short_2d_input),
@@ -1432,7 +1433,7 @@ def test_kernel_img2col1d_public_param_operand_matrix() -> None:
     ).verify()
 
     bad_param = _TestOp(result_types=[Float32Type()]).results[0]
-    with pytest.raises(VerifyException, match="kernel.img2col1d k/s/d must be integer or symbol"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col1d k/s/d must be integer or symbol"):
         KernelImg2col1dOp(
             _make_value(output_type),
             _make_value(input_type),
@@ -1444,7 +1445,7 @@ def test_kernel_img2col1d_public_param_operand_matrix() -> None:
             space=_make_space("global"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="kernel.img2col1d k/s/d must be positive"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col1d k/s/d must be positive"):
         KernelImg2col1dOp(
             _make_value(output_type),
             _make_value(input_type),
@@ -1456,7 +1457,7 @@ def test_kernel_img2col1d_public_param_operand_matrix() -> None:
             space=_make_space("global"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="kernel.img2col1d p_left/p_right must be non-negative"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col1d p_left/p_right must be non-negative"):
         KernelImg2col1dOp(
             _make_value(output_type),
             _make_value(input_type),
@@ -1489,7 +1490,7 @@ def test_kernel_img2col2d_public_contract_matrix() -> None:
         space="global",
     )
 
-    with pytest.raises(VerifyException, match="kernel.img2col2d attribute space must match input space"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col2d attribute space must match input space"):
         KernelImg2col2dOp(
             _make_value(output_type),
             _make_value(_make_memory_type(
@@ -1511,7 +1512,7 @@ def test_kernel_img2col2d_public_contract_matrix() -> None:
             space=_make_space("global"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="kernel.img2col2d attribute space must match result space"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col2d attribute space must match result space"):
         KernelImg2col2dOp(
             _make_value(_make_memory_type(
                 shape=_dim_array([1, 3, 3, 3, 3, 3]),
@@ -1533,7 +1534,7 @@ def test_kernel_img2col2d_public_contract_matrix() -> None:
             space=_make_space("global"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="kernel.img2col2d result element_type must match input"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col2d result element_type must match input"):
         KernelImg2col2dOp(
             _make_value(_make_memory_type(
                 shape=_dim_array([1, 3, 3, 3, 3, 3]),
@@ -1559,7 +1560,7 @@ def test_kernel_img2col2d_public_contract_matrix() -> None:
         stride=_dim_array([162, 54, 18, 9, 3, 1]),
         element_type=Float32Type(),
     )
-    with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
+    with pytest.raises(KernelCodeError, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
         KernelImg2col2dOp(
             _make_value(bad_kw_output_type),
             _make_value(input_type),
@@ -1658,7 +1659,7 @@ def test_kernel_reduce_min_axis_error() -> None:
         keepdim=True,
         space=_make_space("global"),
     )
-    with pytest.raises(VerifyException, match="axis must be within"):
+    with pytest.raises(KernelCodeError, match="axis must be within"):
         op.verify()
 
 
@@ -1682,7 +1683,7 @@ def test_kernel_reduce_min_out_shape_mismatch() -> None:
         keepdim=True,
         space=_make_space("global"),
     )
-    with pytest.raises(VerifyException, match="kernel.reduce_min out shape must match reduce contract"):
+    with pytest.raises(KernelCodeError, match="kernel.reduce_min out shape must match reduce contract"):
         op.verify()
 
 
@@ -1706,7 +1707,7 @@ def test_kernel_reduce_min_keepdim_error() -> None:
         keepdim=IntegerAttr(2, IntegerType(8)),
         space=_make_space("global"),
     )
-    with pytest.raises(VerifyException, match="keepdim must be i1"):
+    with pytest.raises(KernelCodeError, match="keepdim must be i1"):
         op.verify()
 
 
@@ -1769,7 +1770,7 @@ def test_kernel_reduce_public_kind_axis_keepdim_matrix() -> None:
         space=_make_space("global"),
     ).verify()
 
-    with pytest.raises(VerifyException, match="kernel.reduce kind must be one of"):
+    with pytest.raises(KernelCodeError, match="kernel.reduce kind must be one of"):
         KernelReduceOp(
             _make_value(keepdim_out_type),
             _make_value(input_type),
@@ -1779,7 +1780,7 @@ def test_kernel_reduce_public_kind_axis_keepdim_matrix() -> None:
             space=_make_space("global"),
         )
 
-    with pytest.raises(VerifyException, match="kernel.reduce element_type must match"):
+    with pytest.raises(KernelCodeError, match="kernel.reduce element_type must match"):
         KernelReduceOp(
             _make_value(_make_memory_type(
                 shape=_dim_array([2, 1]),
@@ -1793,7 +1794,7 @@ def test_kernel_reduce_public_kind_axis_keepdim_matrix() -> None:
             space=_make_space("global"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="kernel.reduce out space must match input"):
+    with pytest.raises(KernelCodeError, match="kernel.reduce out space must match input"):
         KernelReduceOp(
             _make_value(_make_memory_type(
                 shape=_dim_array([2, 1]),
@@ -1808,7 +1809,7 @@ def test_kernel_reduce_public_kind_axis_keepdim_matrix() -> None:
             space=_make_space("global"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="kernel.reduce attribute space must match input"):
+    with pytest.raises(KernelCodeError, match="kernel.reduce attribute space must match input"):
         KernelReduceOp(
             _make_value(keepdim_out_type),
             _make_value(input_type),
@@ -1818,7 +1819,7 @@ def test_kernel_reduce_public_kind_axis_keepdim_matrix() -> None:
             space=_make_space("local"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="kernel.reduce out shape must match reduce contract"):
+    with pytest.raises(KernelCodeError, match="kernel.reduce out shape must match reduce contract"):
         KernelReduceOp(
             _make_value(_make_memory_type(
                 shape=_dim_array([3]),
@@ -1847,7 +1848,7 @@ def test_kernel_reduce_min_dtype_space_matrix() -> None:
         element_type=Float32Type(),
     )
 
-    with pytest.raises(VerifyException, match="kernel.reduce_min element_type must match"):
+    with pytest.raises(KernelCodeError, match="kernel.reduce_min element_type must match"):
         KernelReduceMinOp(
             _make_value(_make_memory_type(
                 shape=_dim_array([2, 1]),
@@ -1860,7 +1861,7 @@ def test_kernel_reduce_min_dtype_space_matrix() -> None:
             space=_make_space("global"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="kernel.reduce_min out space must match input"):
+    with pytest.raises(KernelCodeError, match="kernel.reduce_min out space must match input"):
         KernelReduceMinOp(
             _make_value(_make_memory_type(
                 shape=_dim_array([2, 1]),
@@ -1874,7 +1875,7 @@ def test_kernel_reduce_min_dtype_space_matrix() -> None:
             space=_make_space("global"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="kernel.reduce_min attribute space must match input"):
+    with pytest.raises(KernelCodeError, match="kernel.reduce_min attribute space must match input"):
         KernelReduceMinOp(
             _make_value(keepdim_out_type),
             _make_value(input_type),

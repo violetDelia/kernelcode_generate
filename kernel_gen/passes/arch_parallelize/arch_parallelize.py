@@ -6,20 +6,17 @@
 - 遍历 `builtin.module` 中非声明 `func.func`，跳过 `entry_point` host dispatcher，对未带 block 并行语义的其余函数执行 block 级分发。
 - 当前只支持 `parallel_level="block"`：单顶层 `symbol.for` 改写为 block-strided loop；非入口函数无顶层 loop 时用 block0 guard 包裹原 body。
 - 唯一顶层 loop 前允许公开 symbol setup 以及 memory-pool 产生的 `arch.get_dynamic_memory` / `dma.reinterpret` setup 前缀，并保留旧 alias 前缀兼容。
-- 公开 `FuncOp` root pattern `_ArchParallelizeFuncPattern` 承接单函数改写，`ArchParallelizePass` 只负责校验和 pattern walker 驱动。
+- 内部 `FuncOp` root pattern 承接单函数改写，`ArchParallelizePass` 只负责校验和 pattern walker 驱动。
 
 API 列表:
 - `class ArchParallelizePass(target: str = "npu_demo", parallel_level: str = "block")`
 - `ArchParallelizePass.from_options(options: dict[str, str]) -> ArchParallelizePass`
 - `ArchParallelizePass.apply(ctx: Context, module: ModuleOp) -> None`
-- `class _ArchParallelizeFuncPattern(block_num: int)`
-- `_ArchParallelizeFuncPattern.match_and_rewrite(op: func.FuncOp, rewriter: PatternRewriter) -> None`
 
 使用示例:
 - from xdsl.context import Context
 - from kernel_gen.passes.arch_parallelize import ArchParallelizePass
 - ArchParallelizePass(target="npu_demo").apply(Context(), module)
-- from kernel_gen.passes.arch_parallelize import _ArchParallelizeFuncPattern
 
 关联文件:
 - spec: spec/pass/arch_parallelize.md
@@ -770,4 +767,4 @@ class ArchParallelizePass(Pass):
             ) from exc
 
 
-__all__ = ["ArchParallelizePass", "_ArchParallelizeFuncPattern"]
+__all__ = ["ArchParallelizePass"]

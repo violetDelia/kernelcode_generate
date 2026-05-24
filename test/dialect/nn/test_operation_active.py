@@ -41,7 +41,8 @@ from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import Parser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import ParseError, VerifyException
+from kernel_gen.core.error import KernelCodeError
+from xdsl.utils.exceptions import ParseError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -265,7 +266,7 @@ def test_softmax_op_rejects_invalid_axis_or_rank(
 ) -> None:
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnSoftmaxOp(inp, input_type, axis=axis, space=_make_space("global"))
-    with pytest.raises(VerifyException, match=message):
+    with pytest.raises(KernelCodeError, match=message):
         op.verify()
 
 @pytest.mark.parametrize(
@@ -331,7 +332,7 @@ def test_softmax_op_rejects_result_mismatch(
     )
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnSoftmaxOp(inp, result_type, axis=1, space=_make_space(space))
-    with pytest.raises(VerifyException, match=message):
+    with pytest.raises(KernelCodeError, match=message):
         op.verify()
 
 def test_exp_op_verify_success() -> None:
@@ -435,7 +436,7 @@ def test_exp_op_rejects_invalid_inputs() -> None:
     for input_type, result_type, space, message in cases:
         inp = _TestOp(result_types=[input_type]).results[0]
         op = NnExpOp(inp, result_type, _make_space(space))
-        with pytest.raises(VerifyException, match=message):
+        with pytest.raises(KernelCodeError, match=message):
             op.verify()
 
 def test_select_cast_activation_public_error_matrix() -> None:
@@ -505,18 +506,18 @@ def test_select_cast_activation_public_error_matrix() -> None:
         ),
     ]
     for lhs, rhs, result_type, space, message in select_cases:
-        with pytest.raises(VerifyException, match=message):
+        with pytest.raises(KernelCodeError, match=message):
             NnSelectOp(cond, lhs, rhs, result_type, _make_space(space)).verify()
 
-    with pytest.raises(VerifyException, match="nn.cast attribute space must match operand space"):
+    with pytest.raises(KernelCodeError, match="nn.cast attribute space must match operand space"):
         NnCastOp(data, data_type, _make_space("shared")).verify()
-    with pytest.raises(VerifyException, match="nn.cast attribute space must match result space"):
+    with pytest.raises(KernelCodeError, match="nn.cast attribute space must match result space"):
         NnCastOp(
             data,
             _make_simple_memory_type([2], [1], space="shared", element_type=Float16Type()),
             _make_space("global"),
         ).verify()
-    with pytest.raises(VerifyException, match="nn.cast stride must match input"):
+    with pytest.raises(KernelCodeError, match="nn.cast stride must match input"):
         NnCastOp(
             data,
             _make_simple_memory_type([2], [2], element_type=Float16Type()),
@@ -524,15 +525,15 @@ def test_select_cast_activation_public_error_matrix() -> None:
         ).verify()
 
     wrong_shape = _make_simple_memory_type([3], [1], element_type=Float32Type())
-    with pytest.raises(VerifyException, match="result-shape-stride-must-match-input"):
+    with pytest.raises(KernelCodeError, match="result-shape-stride-must-match-input"):
         NnReluOp(data, wrong_shape, _make_space("global")).verify()
     wrong_dtype = _make_simple_memory_type([2], [1], element_type=Float16Type())
-    with pytest.raises(VerifyException, match="result-element-type-must-match-input"):
+    with pytest.raises(KernelCodeError, match="result-element-type-must-match-input"):
         NnSigmoidOp(data, wrong_dtype, _make_space("global")).verify()
     wrong_space = _make_simple_memory_type([2], [1], space="shared", element_type=Float32Type())
-    with pytest.raises(VerifyException, match="result-space-must-match-input-and-attr"):
+    with pytest.raises(KernelCodeError, match="result-space-must-match-input-and-attr"):
         NnTanhOp(data, wrong_space, _make_space("global")).verify()
-    with pytest.raises(VerifyException, match="result-space-must-match-input-and-attr"):
+    with pytest.raises(KernelCodeError, match="result-space-must-match-input-and-attr"):
         NnReluOp(data, data_type, _make_space("shared")).verify()
-    with pytest.raises(VerifyException, match="alpha must be int or float scalar"):
+    with pytest.raises(KernelCodeError, match="alpha must be int or float scalar"):
         NnLeakyReluOp(data, _TestOp(result_types=[StringAttr("bad")]).results[0], data_type, _make_space("global")).verify()

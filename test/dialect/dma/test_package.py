@@ -185,54 +185,22 @@ EXPECTED_CANONICALIZATION_SIGNATURES = {
 
 DMA_ROOT_MODULE = "kernel_gen.dialect.dma"
 INTERNAL_MODULES = {
-    f"{DMA_ROOT_MODULE}.common",
     f"{DMA_ROOT_MODULE}.effect",
     f"{DMA_ROOT_MODULE}.canonicalization",
 }
-INTERNAL_SHORT_MODULES = {"common", "effect", "canonicalization"}
+INTERNAL_SHORT_MODULES = {"effect", "canonicalization"}
 IMPORTLIB_INTERNAL_TARGETS = tuple(sorted(INTERNAL_MODULES))
 
 ALLOWED_INTERNAL_IMPORTS = {
     "kernel_gen/dialect/dma/canonicalization.py": {
-        f"{DMA_ROOT_MODULE}.common": {
-            "dim_expr_text",
-            "operand_int_value",
-            "symbol_int_expr_text",
-            "verify_memory_type",
-        }
     },
     "kernel_gen/dialect/dma/operation/alias.py": {
-        f"{DMA_ROOT_MODULE}.common": {
-            "element_byte_size",
-            "is_contiguous",
-            "is_i8_byte_pool",
-            "linear_max_index",
-            "maybe_numel",
-            "operand_int_value",
-            "verify_default_contiguous_stride",
-            "verify_memory_type",
-            "verify_operands_match_layout",
-            "verify_rank_match",
-            "verify_static_view_bounds",
-            "verify_symbol_index_operands",
-            "verify_symbol_int_operands",
-            "verify_view_result_stride",
-        },
         f"{DMA_ROOT_MODULE}.canonicalization": {
             "DmaReshapeCanonicalizationTrait",
             "DmaViewCanonicalizationTrait",
         },
     },
     "kernel_gen/dialect/dma/operation/lifecycle.py": {
-        f"{DMA_ROOT_MODULE}.common": {
-            "verify_dynamic_shape_matches_result",
-            "verify_fill_target_element_type",
-            "verify_fill_value_matches_target",
-            "verify_fill_value_operand",
-            "verify_memory_operand",
-            "verify_memory_type",
-            "verify_symbol_int_operands",
-        },
         f"{DMA_ROOT_MODULE}.effect": {
             "DmaAllocMemoryEffect",
             "DmaFreeMemoryEffect",
@@ -241,39 +209,17 @@ ALLOWED_INTERNAL_IMPORTS = {
         f"{DMA_ROOT_MODULE}.canonicalization": {"DmaFillCanonicalizationTrait"},
     },
     "kernel_gen/dialect/dma/operation/ring.py": {
-        f"{DMA_ROOT_MODULE}.common": {
-            "is_i8_byte_pool",
-            "maybe_numel",
-            "symbol_int_expr_text",
-            "verify_memory_operand",
-            "verify_positive_static_operand",
-        }
     },
     "kernel_gen/dialect/dma/operation/slice.py": {
-        f"{DMA_ROOT_MODULE}.common": {
-            "verify_memory_type",
-            "verify_operands_match_layout",
-            "verify_rank_match",
-            "verify_symbol_index_operands",
-            "verify_symbol_int_operands",
-            "verify_unit_stride_operands",
-        },
         f"{DMA_ROOT_MODULE}.effect": {"DmaTargetSourceEffect"},
     },
     "kernel_gen/dialect/dma/operation/transfer.py": {
-        f"{DMA_ROOT_MODULE}.common": {
-            "verify_broadcast_compat",
-            "verify_memory_type",
-            "verify_transpose_layout",
-            "verify_transpose_perm",
-        },
         f"{DMA_ROOT_MODULE}.effect": {
             "DmaBroadcastMemoryEffect",
             "DmaTargetSourceEffect",
         },
     },
     "kernel_gen/dialect/dma/type/ring_type.py": {
-        f"{DMA_ROOT_MODULE}.common": {"static_int_from_dim", "verify_symbol_expr_attr"}
     },
 }
 
@@ -318,7 +264,6 @@ def _parse_python_file(path: Path) -> ast.Module:
 def _load_dma_internal_modules() -> dict[str, ModuleType]:
     return {
         "canonicalization": importlib.import_module("kernel_gen.dialect.dma.canonicalization"),
-        "common": importlib.import_module("kernel_gen.dialect.dma.common"),
         "effect": importlib.import_module("kernel_gen.dialect.dma.effect"),
     }
 
@@ -429,14 +374,12 @@ def test_dma_package_internal_modules_are_not_root_exports() -> None:
     """验证 package-internal helper 模块不经 root API 外泄。"""
 
     modules = _load_dma_internal_modules()
-    common = modules["common"]
     effect = modules["effect"]
     canonicalization = modules["canonicalization"]
 
-    assert common.__all__ == EXPECTED_COMMON_EXPORTS
     assert effect.__all__ == EXPECTED_EFFECT_EXPORTS
     assert canonicalization.__all__ == EXPECTED_CANONICALIZATION_EXPORTS
-    for name in EXPECTED_COMMON_EXPORTS + EXPECTED_EFFECT_EXPORTS + EXPECTED_CANONICALIZATION_EXPORTS:
+    for name in EXPECTED_EFFECT_EXPORTS + EXPECTED_CANONICALIZATION_EXPORTS:
         assert name not in dma.__all__
 
 
@@ -444,12 +387,8 @@ def test_dma_package_internal_helper_signatures_are_stable() -> None:
     """验证 package-internal helper 结构签名，防止拆分后边界漂移。"""
 
     modules = _load_dma_internal_modules()
-    common = modules["common"]
     effect = modules["effect"]
     canonicalization = modules["canonicalization"]
-
-    common_signatures = {name: str(inspect.signature(getattr(common, name))) for name in common.__all__}
-    assert common_signatures == EXPECTED_COMMON_SIGNATURES
 
     effect_signatures = {"memory_effect": str(inspect.signature(effect.memory_effect))}
     for class_name in EXPECTED_EFFECT_EXPORTS[1:]:

@@ -55,6 +55,7 @@ from xdsl.printer import Printer
 from xdsl.traits import MemoryEffectKind, get_effects
 from xdsl.transforms.canonicalize import CanonicalizePass
 from xdsl.utils.exceptions import VerifyException
+from kernel_gen.core.error import KernelCodeError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -261,7 +262,11 @@ def _raise_memory_verify_rank_mismatch(_: NnMemoryType) -> None:
     - 功能实现: kernel_gen/dialect/dma/
     """
 
-    raise VerifyException("nn memory shape and stride rank must match")
+    kind = "verify"
+    module = "dialect"
+    message = "nn memory shape and stride rank must match"
+    error = KernelCodeError(kind, module, message)
+    raise error
 
 
 def _make_symbol_operands(values: list[int | str | None]) -> list[SSAValue]:

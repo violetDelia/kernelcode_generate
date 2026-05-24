@@ -74,9 +74,9 @@
 - `kernel_gen/dialect/nn/attr/space_attr.py` 承载 `NnMemorySpaceAttr`；`kernel_gen/dialect/nn/type/memory_type.py` 承载 `NnMemoryType`、`copy_memory_type(...)`、`copy_memory_type_with_template_name(...)`。
 - `kernel_gen/dialect/nn/operation/binary.py` 承载 binary / compare op family；`operation/elewise.py` 承载 `select/cast/broadcast/transpose`；`operation/active.py` 承载 activation / unary family；`operation/reduce.py` 承载 `reduce_sum/reduce_min/reduce_max`；`operation/structured.py` 承载 `img2col1d/img2col2d/matmul`。
 - 旧单文件实现已退场且不保留 shim、wrapper、redirect 或兼容文件；`import kernel_gen.dialect.nn` 必须解析到 package root。
-- `kernel_gen.dialect.nn.__all__` 只导出 `API 列表` 中的公开对象，不导出 `common.py` helper 或内部子模块对象。
+- `kernel_gen.dialect.nn.__all__` 只导出 `API 列表` 中的公开对象，不导出内部子模块对象。
 - `kernel_gen.dialect` 包根只保留既有 nn exact subset：`Nn`、`NnAddOp`、`NnBroadcastOp`、`NnSubOp`、`NnMulOp`、`NnTrueDivOp`、`NnEqOp`、`NnNeOp`、`NnLtOp`、`NnLeOp`、`NnGtOp`、`NnGeOp`、`NnMatmulOp`、`NnImg2col1dOp`、`NnImg2col2dOp`、`NnMemorySpaceAttr`、`NnMemoryType`、`copy_memory_type(...)`、`copy_memory_type_with_template_name(...)`。
-- `kernel_gen/dialect/nn/common.py` 是 package 内部实现 helper 文件，不是公开 API。允许 helper 仅限 `raise_verify_error(...)`、`verify_memory_type(...)`、`is_symbol_int_type(...)`、`is_int_or_symbol_type(...)`、`static_int_from_operand(...)`、`verify_i64_attr(...)`、`normalize_i64_attr(...)`、`normalize_axes_attr(...)`、`normalize_bool_attr(...)`、`is_float_element_type(...)`、`dims_equal(...)`、`build_contiguous_stride(...)`；这些 helper 只能被 `kernel_gen/dialect/nn/**` 内部子模块按名称导入，不得由测试或其它 `kernel_gen` 目录直连。
+- 已删除旧 `kernel_gen/dialect/nn/common.py` helper hub；各 attr/type/operation 文件只能使用当前文件内 helper 或已公开 core API，不得恢复 package-internal common 模块。
 - 上游若允许逐元素隐式 broadcast，进入 `nn dialect` 前必须显式展开为 `nn.broadcast`。
 - 上游 `broadcast_to(source, target_shape, space)` 进入方言时必须归一化为 `nn.broadcast`：目标 `target_shape` 仅通过 `result_type.shape` 体现，`nn dialect` 不承诺提供独立的 `nn.broadcast_to` op。
 - `img2col` 在方言层只允许公开 `nn.img2col1d` 与 `nn.img2col2d` 两个稳定 op，禁止新增笼统公开名 `nn.img2col`。

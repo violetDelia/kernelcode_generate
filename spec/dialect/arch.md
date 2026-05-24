@@ -422,4 +422,4 @@
 
 - 当前实现入口为 `kernel_gen/dialect/arch/` package root；旧单文件 `kernel_gen/dialect/arch/` 不保留 shim。
 - 当前测试入口为 `test/dialect/arch/`；旧大测试文件 `test/dialect/arch/test_arch.py` 不保留 shim。
-- `kernel_gen.dialect.arch` root import 是稳定公开入口，内部 `attr/type/operation/expr/common` 子模块只服务 package 实现，不作为外部公开 API。
+- `kernel_gen.dialect.arch` root import 是稳定公开入口，内部 `attr/type/operation` 子模块只服务 package 实现，不作为外部公开 API；旧 `common.py` helper hub 已删除，不得恢复为跨文件非公开 API 中转层。

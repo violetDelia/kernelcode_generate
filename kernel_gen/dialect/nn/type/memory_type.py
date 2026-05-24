@@ -22,12 +22,20 @@ from __future__ import annotations
 import re
 
 from kernel_gen.dialect.nn.attr.space_attr import NnMemorySpaceAttr
-from kernel_gen.dialect.nn.common import raise_verify_error
 from xdsl.dialects.builtin import ArrayAttr, StringAttr
 from xdsl.ir import Attribute, ParametrizedAttribute, TypeAttribute
 from xdsl.irdl import irdl_attr_definition, param_def
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
+
+from kernel_gen.core.contracts import raise_verify_error as core_raise_verify_error
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE, ErrorKind, ErrorModule, kernel_code_error
+
+
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE = "dialect.nn verifier"
+
 
 _TEMPLATE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -51,8 +59,8 @@ def _print_dim_list(printer: Printer, dims: ArrayAttr[Attribute]) -> None:
     for index, dim in enumerate(dims.data):
         if index:
             printer.print_string(", ")
-        if not _is_symbol_expr_attr(dim):
-            raise_verify_error("dimension list only supports SymbolExprAttr")
+        if not _NN_MEMORY_TYPE.is_symbol_expr_attr(dim):
+            core_raise_verify_error(_ERROR_SCENE, "dimension list only supports SymbolExprAttr")
         printer.print_attribute(dim)
     printer.print_string("]")
 
@@ -73,107 +81,171 @@ def _verify_dim_entry(dim: Attribute, field_name: str) -> None:
     - 功能实现: kernel_gen/dialect/nn/
     """
 
-    if not _is_symbol_expr_attr(dim):
-        raise_verify_error(f"{field_name} dimensions must be SymbolExprAttr")
+    if not _NN_MEMORY_TYPE.is_symbol_expr_attr(dim):
+        core_raise_verify_error(_ERROR_SCENE, f"{field_name} dimensions must be SymbolExprAttr")
     dim.verify()
-    value = _static_int_from_dim(dim)
+    value = _NN_MEMORY_TYPE.static_int_from_dim(dim)
     if value is not None and value < 0:
-        raise_verify_error(f"{field_name} dimensions must be non-negative")
+        core_raise_verify_error(_ERROR_SCENE, f"{field_name} dimensions must be non-negative")
 
-def _symbol_expr_attr_from_expr(expr: str) -> Attribute:
-    """构造公开 SymbolExprAttr。
-
-    功能说明:
-    - 延迟导入 `SymbolExprAttr`，避免 nn/symbol 模块初始化互相依赖。
-
-    使用示例:
-    - _symbol_expr_attr_from_expr("N")
-
-    关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/nn/
-    - 功能实现: kernel_gen/dialect/nn/
-    """
-
-    from kernel_gen.dialect.symbol import SymbolExprAttr
-
-    return SymbolExprAttr.from_expr(expr)
-
-def _is_symbol_expr_attr(attr: Attribute) -> bool:
-    """判断属性是否是公开 SymbolExprAttr。
+class _NnMemoryTypeRules:
+    """当前文件内的局部 verifier 规则容器。
 
     功能说明:
-    - 通过延迟导入的公开 class 判断 memory shape/stride 条目。
+    - 合并本文件重复使用的局部规则，避免多个 private helper 互相调用。
+    - 该容器不导出，不作为跨文件公开 API。
 
     使用示例:
-    - _is_symbol_expr_attr(SymbolExprAttr.from_expr("N"))
-
-    关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/nn/
-    - 功能实现: kernel_gen/dialect/nn/
+    - _NN_MEMORY_TYPE.symbol_expr_attr_from_expr(...)
     """
 
-    from kernel_gen.dialect.symbol import SymbolExprAttr
+    @staticmethod
+    def symbol_expr_attr_from_expr(expr: str) -> Attribute:
+        """构造公开 SymbolExprAttr。
 
-    return isinstance(attr, SymbolExprAttr)
+        功能说明:
+        - 延迟导入 `SymbolExprAttr`，避免 nn/symbol 模块初始化互相依赖。
 
-def _dim_expr_text(dim: Attribute) -> str:
-    """读取 SymbolExprAttr 的规范表达式文本。
+        使用示例:
+        - _NN_MEMORY_TYPE.symbol_expr_attr_from_expr("N")
 
-    功能说明:
-    - 统一 shape/stride 的比较、静态求值和 stride 推导入口。
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/nn/
+        - 功能实现: kernel_gen/dialect/nn/
+        """
 
-    使用示例:
-    - _dim_expr_text(SymbolExprAttr.from_expr("N + 1"))
+        from kernel_gen.dialect.symbol import SymbolExprAttr
 
-    关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/nn/
-    - 功能实现: kernel_gen/dialect/nn/
-    """
+        return SymbolExprAttr.from_expr(expr)
 
-    if not _is_symbol_expr_attr(dim):
-        raise_verify_error("dimension entries must be SymbolExprAttr")
-    dim.verify()
-    return dim.expr.data
+    @staticmethod
+    def is_symbol_expr_attr(attr: Attribute) -> bool:
+        """判断属性是否是公开 SymbolExprAttr。
 
-def _static_int_from_expr_text(expr: str) -> int | None:
-    """尝试从规范表达式文本提取静态整数。
+        功能说明:
+        - 通过延迟导入的公开 class 判断 memory shape/stride 条目。
 
-    功能说明:
-    - 仅识别十进制整数字面量，动态表达式返回 None。
+        使用示例:
+        - _NN_MEMORY_TYPE.is_symbol_expr_attr(SymbolExprAttr.from_expr("N"))
 
-    使用示例:
-    - _static_int_from_expr_text("4")
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/nn/
+        - 功能实现: kernel_gen/dialect/nn/
+        """
 
-    关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/nn/
-    - 功能实现: kernel_gen/dialect/nn/
-    """
+        from kernel_gen.dialect.symbol import SymbolExprAttr
 
-    signless = expr[1:] if expr.startswith("-") else expr
-    if signless.isdecimal():
-        return int(expr)
-    return None
+        return isinstance(attr, SymbolExprAttr)
 
-def _static_int_from_dim(dim: Attribute) -> int | None:
-    """尝试从 SymbolExprAttr 维度提取静态整数。
+    @staticmethod
+    def dim_expr_text(dim: Attribute) -> str:
+        """读取 SymbolExprAttr 的规范表达式文本。
 
-    功能说明:
-    - 对 `#symbol.expr<4>` 返回 4；动态维度返回 None。
+        功能说明:
+        - 统一 shape/stride 的比较、静态求值和 stride 推导入口。
 
-    使用示例:
-    - _static_int_from_dim(SymbolExprAttr.from_expr("4"))
+        使用示例:
+        - _NN_MEMORY_TYPE.dim_expr_text(SymbolExprAttr.from_expr("N + 1"))
 
-    关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/nn/
-    - 功能实现: kernel_gen/dialect/nn/
-    """
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/nn/
+        - 功能实现: kernel_gen/dialect/nn/
+        """
 
-    return _static_int_from_expr_text(_dim_expr_text(dim))
+        if not _NN_MEMORY_TYPE.is_symbol_expr_attr(dim):
+            core_raise_verify_error(_ERROR_SCENE, "dimension entries must be SymbolExprAttr")
+        dim.verify()
+        return dim.expr.data
+
+    @staticmethod
+    def static_int_from_expr_text(expr: str) -> int | None:
+        """尝试从规范表达式文本提取静态整数。
+
+        功能说明:
+        - 仅识别十进制整数字面量，动态表达式返回 None。
+
+        使用示例:
+        - _NN_MEMORY_TYPE.static_int_from_expr_text("4")
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/nn/
+        - 功能实现: kernel_gen/dialect/nn/
+        """
+
+        signless = expr[1:] if expr.startswith("-") else expr
+        if signless.isdecimal():
+            return int(expr)
+        return None
+
+    @staticmethod
+    def static_int_from_dim(dim: Attribute) -> int | None:
+        """尝试从 SymbolExprAttr 维度提取静态整数。
+
+        功能说明:
+        - 对 `#symbol.expr<4>` 返回 4；动态维度返回 None。
+
+        使用示例:
+        - _NN_MEMORY_TYPE.static_int_from_dim(SymbolExprAttr.from_expr("4"))
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/nn/
+        - 功能实现: kernel_gen/dialect/nn/
+        """
+
+        return _NN_MEMORY_TYPE.static_int_from_expr_text(_NN_MEMORY_TYPE.dim_expr_text(dim))
+
+    def _normalize_template_name_attr(template_name: StringAttr | str | None) -> StringAttr:
+        """规整 memory template name 参数。
+
+        功能说明:
+        - `None` 规整为空 `StringAttr`，表示 memory type 未携带 template name。
+        - `str` 与 `StringAttr` 是唯一公开输入形态。
+
+        使用示例:
+        - attr = _normalize_template_name_attr("T1")
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/nn/
+        - 功能实现: kernel_gen/dialect/nn/
+        """
+
+        if template_name is None:
+            return StringAttr("")
+        if isinstance(template_name, StringAttr):
+            return template_name
+        if isinstance(template_name, str):
+            return StringAttr(template_name)
+        raise TypeError("template_name must be str, StringAttr or None")
+
+    @staticmethod
+    def verify_template_name_text(template_name: str) -> None:
+        """校验 memory template name 文本。
+
+        功能说明:
+        - 空字符串表示未携带 template name。
+        - 非空 template name 必须是 C identifier 风格名称，拒绝数字开头、空格与尖括号文本。
+
+        使用示例:
+        - _NN_MEMORY_TYPE.verify_template_name_text("T1")
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/nn/
+        - 功能实现: kernel_gen/dialect/nn/
+        """
+
+        if template_name == "":
+            return
+        if _TEMPLATE_NAME_PATTERN.fullmatch(template_name) is None:
+            core_raise_verify_error(_ERROR_SCENE, "nn memory template_name must be an identifier")
+
+_NN_MEMORY_TYPE = _NnMemoryTypeRules()
 
 def _normalize_template_name_attr(template_name: StringAttr | str | None) -> StringAttr:
     """规整 memory template name 参数。
@@ -184,41 +256,18 @@ def _normalize_template_name_attr(template_name: StringAttr | str | None) -> Str
 
     使用示例:
     - attr = _normalize_template_name_attr("T1")
-
-    关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/nn/
-    - 功能实现: kernel_gen/dialect/nn/
     """
 
     if template_name is None:
-        return StringAttr("")
-    if isinstance(template_name, StringAttr):
-        return template_name
-    if isinstance(template_name, str):
-        return StringAttr(template_name)
-    raise TypeError("template_name must be str, StringAttr or None")
-
-def _verify_template_name_text(template_name: str) -> None:
-    """校验 memory template name 文本。
-
-    功能说明:
-    - 空字符串表示未携带 template name。
-    - 非空 template name 必须是 C identifier 风格名称，拒绝数字开头、空格与尖括号文本。
-
-    使用示例:
-    - _verify_template_name_text("T1")
-
-    关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/nn/
-    - 功能实现: kernel_gen/dialect/nn/
-    """
-
-    if template_name == "":
-        return
-    if _TEMPLATE_NAME_PATTERN.fullmatch(template_name) is None:
-        raise_verify_error("nn memory template_name must be an identifier")
+        normalized = StringAttr("")
+    elif isinstance(template_name, StringAttr):
+        normalized = template_name
+    elif isinstance(template_name, str):
+        normalized = StringAttr(template_name)
+    else:
+        raise TypeError("template_name must be str, StringAttr or None")
+    _NN_MEMORY_TYPE.verify_template_name_text(normalized.data)
+    return normalized
 
 @irdl_attr_definition
 class NnMemoryType(ParametrizedAttribute, TypeAttribute):
@@ -340,13 +389,13 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
 
         self.space.verify()
         if len(self.shape.data) != len(self.stride.data):
-            raise_verify_error("nn memory shape and stride rank must match")
+            core_raise_verify_error(_ERROR_SCENE, "nn memory shape and stride rank must match")
 
         for dim in self.shape.data:
             _verify_dim_entry(dim, "shape")
         for dim in self.stride.data:
             _verify_dim_entry(dim, "stride")
-        _verify_template_name_text(self.template_name.data)
+        _NN_MEMORY_TYPE.verify_template_name_text(self.template_name.data)
 
 def copy_memory_type(
     memory_type: NnMemoryType,

@@ -21,16 +21,66 @@ from collections.abc import Sequence
 import re
 
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from kernel_gen.core.contracts import raise_verify_error
 from xdsl.dialects.builtin import ArrayAttr, StringAttr, SymbolRefAttr
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, opt_attr_def, result_def, var_operand_def
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.symbol import SymbolValueType
 
-from ..common import _pattern_symbol_attr, _raise_verify_error, _verify_pattern_id_result_type
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE = "dialect.tuner verifier"
+
+def _verify_pattern_id_result_type(result_type: Attribute, op_name: str) -> SymbolValueType:
+    """校验 pattern 选择结果类型。
+
+    功能说明:
+    - 只接受 `!symbol.int<#symbol.expr<pattern_id>>`，避免 dispatcher 选择值被其它 symbol 语义替代。
+
+    使用示例:
+    - _verify_pattern_id_result_type(SymbolValueType.from_expr("pattern_id"), "tuner.select")
+
+    关联文件:
+    - spec: spec/dialect/tuner.md
+    - test: test/dialect/tuner/test_tuner.py
+    - 功能实现: kernel_gen/dialect/tuner/
+    """
+
+    if not isinstance(result_type, SymbolValueType):
+        raise_verify_error(_ERROR_SCENE, f"{op_name} result type must be !symbol.int<#symbol.expr<pattern_id>>")
+    result_type.verify()
+    if result_type.get_value() != "pattern_id":
+        raise_verify_error(_ERROR_SCENE, f"{op_name} result type must be !symbol.int<#symbol.expr<pattern_id>>")
+    return result_type
+
+def _pattern_symbol_attr(value: str | SymbolRefAttr, op_name: str) -> SymbolRefAttr:
+    """把 pattern 名称规整为 SymbolRefAttr。
+
+    功能说明:
+    - 构造器接受字符串或已构造的 `SymbolRefAttr`，统一写入 `patterns` attr。
+    - 非公开输入类型立即按对应 op 的公开 verifier 文本失败，不扩大 constructor 合同。
+
+    使用示例:
+    - attr = _pattern_symbol_attr("matmul_entry_pattern0", "tuner.select")
+
+    关联文件:
+    - spec: spec/dialect/tuner.md
+    - test: test/dialect/tuner/test_tuner.py
+    - 功能实现: kernel_gen/dialect/tuner/
+    """
+
+    if isinstance(value, str):
+        return SymbolRefAttr(value)
+    if isinstance(value, SymbolRefAttr):
+        return value
+    if op_name == "tuner.select":
+        raise_verify_error(_ERROR_SCENE, "tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]")
+    raise_verify_error(_ERROR_SCENE, f"{op_name} callee must be SymbolRefAttr")
+
+
 
 @irdl_op_definition
 class TunerSelectOp(IRDLOperation):
@@ -113,14 +163,14 @@ class TunerSelectOp(IRDLOperation):
         """
 
         if self._parse_diagnostic is not None:
-            _raise_verify_error(self._parse_diagnostic.data)
+            raise_verify_error(_ERROR_SCENE, self._parse_diagnostic.data)
         if not isinstance(self.patterns, ArrayAttr) or not self.patterns.data:
-            _raise_verify_error("tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]")
+            raise_verify_error(_ERROR_SCENE, "tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]")
         for pattern in self.patterns.data:
             if not isinstance(pattern, SymbolRefAttr):
-                _raise_verify_error("tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]")
+                raise_verify_error(_ERROR_SCENE, "tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]")
             if not pattern.root_reference.data or len(pattern.nested_references.data) != 0:
-                _raise_verify_error("tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]")
+                raise_verify_error(_ERROR_SCENE, "tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]")
         _verify_pattern_id_result_type(self.result.type, self.name)
 
     def print(self: "TunerSelectOp", printer: Printer) -> None:
@@ -164,11 +214,11 @@ class TunerSelectOp(IRDLOperation):
         result_type = parser.parse_type()
         patterns = attrs.pop("patterns", None)
         if patterns is None:
-            _raise_verify_error("tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]")
+            raise_verify_error(_ERROR_SCENE, "tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]")
         if attrs:
-            _raise_verify_error("tuner.select only accepts patterns attr")
+            raise_verify_error(_ERROR_SCENE, "tuner.select only accepts patterns attr")
         if not isinstance(patterns, ArrayAttr):
-            _raise_verify_error("tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]")
+            raise_verify_error(_ERROR_SCENE, "tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]")
         parse_diagnostic = None
         if not patterns.data or any(not isinstance(pattern, SymbolRefAttr) for pattern in patterns.data):
             parse_diagnostic = "tuner.select patterns must be non-empty ArrayAttr[SymbolRefAttr]"

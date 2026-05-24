@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from kernel_gen.core.contracts import raise_verify_error
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerAttr, IntegerType, StringAttr, f32, f64, i1, i32
 from xdsl.dialect_interfaces.constant_materialization import ConstantMaterializationInterface
@@ -47,15 +48,37 @@ from xdsl.interfaces import HasFolderInterface
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
 from xdsl.traits import IsTerminator, NoTerminator, Pure
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemoryType
 
-from ..common import _format_error, _raise_verify_error
-from ..expr.parser import (_SymbolExprNode, _SymbolExprToken, _SymbolExprParserBase, _SymbolExprTextParser, _SymbolExprAttrParser, _tokenize_symbol_expr, _make_symbol_expr_const, _make_symbol_expr_symbol, _make_symbol_expr_unknown, _is_symbol_expr_unknown, _contains_symbol_expr_unknown, _contains_symbol_expr_iter, _make_symbol_expr_iter, _get_symbol_expr_const, _get_concrete_symbol_expr_node_value, _linear_symbol_expr_terms, _make_symbol_expr_neg, _make_symbol_expr_add, _make_symbol_expr_sub, _make_symbol_expr_mul, _make_symbol_expr_keyword_binary, _make_symbol_expr_min, _make_symbol_expr_max, _symbol_expr_precedence, _format_symbol_expr_node, _format_symbol_expr_add, _parse_symbol_expr_from_text, _parse_symbol_expr_from_attr_parser, _normalize_expr, _evaluate_concrete_expr, _canonicalize_symbolic_expr, _is_supported_symbol_expr, _unwrap_symbol_expr_attr_text)
 from ..attr import SymbolExprAttr, SymbolIterAttr
 from ..type import SymbolIterType, SymbolPtrType, SymbolValueType
-from .common import (_verify_axis, _entry_to_expr, _infer_result_type, _is_symbol_int_type, _is_symbol_arith_operand_type, _is_unknown_symbol_int_type, _parse_symbol_binary_operand_types, _symbol_iter_type_expr_node, _symbol_arith_operand_expr_node, _symbol_arith_operand_contains_unknown, _symbol_expr_bounds_are_full_tiles, _linear_distance_is_positive_multiple, _symbol_expr_full_tile_residual_step, _symbol_expr_full_tile_min_step, _symbol_min_full_tile_step_value, _requires_unknown_arith_result, _infer_symbol_arith_result_expr, _alternate_symbol_arith_result_exprs, _get_concrete_symbol_int_value)
+
+from ..type import SymbolIterType, SymbolValueType
+
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE = "dialect.symbol"
+
+def _format_error(expected: str, actual: str = ERROR_ACTUAL) -> str:
+    """格式化 symbol dialect 统一错误文本。
+
+    功能说明:
+    - 复用核心错误模板生成 verifier、value error 与 type error 的稳定文本。
+
+    使用示例:
+    - message = _format_error("symbol value type expected")
+    """
+
+    return ERROR_TEMPLATE.format(
+        scene=_ERROR_SCENE,
+        expected=expected,
+        actual=actual,
+        action=ERROR_ACTION,
+    )
+
+_UNKNOWN_SYMBOL_EXPR = "?"
+
 
 @irdl_op_definition
 class SymbolToFloatOp(IRDLOperation):
@@ -107,10 +130,10 @@ class SymbolToFloatOp(IRDLOperation):
         """
 
         source_value = SSAValue.get(self.source)
-        if not _is_symbol_int_type(source_value.type):
-            _raise_verify_error(f"{self.name} source must have type !symbol.int<#symbol.expr<expr>>")
+        if not isinstance(source_value.type, SymbolValueType):
+            raise_verify_error(_ERROR_SCENE, f"{self.name} source must have type !symbol.int<#symbol.expr<expr>>")
         if not isinstance(self.result.type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
-            _raise_verify_error(f"{self.name} result type must be float")
+            raise_verify_error(_ERROR_SCENE, f"{self.name} result type must be float")
 
     def print(self: "SymbolToFloatOp", printer: Printer) -> None:
         """打印 symbol.to_float 自定义文本语法。
@@ -199,10 +222,10 @@ class SymbolToIntOp(IRDLOperation):
         """
 
         source_value = SSAValue.get(self.source)
-        if not _is_symbol_int_type(source_value.type):
-            _raise_verify_error(f"{self.name} source must have type !symbol.int<#symbol.expr<expr>>")
+        if not isinstance(source_value.type, SymbolValueType):
+            raise_verify_error(_ERROR_SCENE, f"{self.name} source must have type !symbol.int<#symbol.expr<expr>>")
         if not isinstance(self.result.type, IntegerType):
-            _raise_verify_error(f"{self.name} result type must be integer")
+            raise_verify_error(_ERROR_SCENE, f"{self.name} result type must be integer")
 
     def print(self: "SymbolToIntOp", printer: Printer) -> None:
         """打印 symbol.to_int 自定义文本语法。
@@ -294,13 +317,13 @@ class SymbolCastOp(IRDLOperation):
         """
         source_value = SSAValue.get(self.source)
         if isinstance(source_value.type, SymbolPtrType):
-            if not _is_unknown_symbol_int_type(self.result.type):
-                _raise_verify_error(f"{self.name} ptr result type must be !symbol.int<#symbol.expr<?>>")
+            if not isinstance(self.result.type, SymbolValueType) or self.result.type.get_value() != _UNKNOWN_SYMBOL_EXPR:
+                raise_verify_error(_ERROR_SCENE, f"{self.name} ptr result type must be !symbol.int<#symbol.expr<?>>")
             return
-        if not _is_symbol_int_type(source_value.type):
-            _raise_verify_error(f"{self.name} source must have type !symbol.int<#symbol.expr<expr>> or !symbol.ptr<dtype>")
+        if not isinstance(source_value.type, SymbolValueType):
+            raise_verify_error(_ERROR_SCENE, f"{self.name} source must have type !symbol.int<#symbol.expr<expr>> or !symbol.ptr<dtype>")
         if not isinstance(self.result.type, IntegerType):
-            _raise_verify_error(f"{self.name} result type must be integer")
+            raise_verify_error(_ERROR_SCENE, f"{self.name} result type must be integer")
 
     def print(self: "SymbolCastOp", printer: Printer) -> None:
         """打印 symbol.cast 自定义文本语法。

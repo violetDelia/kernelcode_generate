@@ -41,7 +41,8 @@ from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import Parser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import ParseError, VerifyException
+from kernel_gen.core.error import KernelCodeError
+from xdsl.utils.exceptions import ParseError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -236,7 +237,7 @@ def test_matmul_op_shape_mismatch() -> None:
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="contracting"):
+    with pytest.raises(KernelCodeError, match="contracting"):
         op.verify()
 
 def test_matmul_op_result_shape_mismatch() -> None:
@@ -246,7 +247,7 @@ def test_matmul_op_result_shape_mismatch() -> None:
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="result shape"):
+    with pytest.raises(KernelCodeError, match="result shape"):
         op.verify()
 
 def test_matmul_module_round_trip() -> None:
@@ -268,7 +269,7 @@ def test_matmul_op_space_mismatch() -> None:
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="same space"):
+    with pytest.raises(KernelCodeError, match="same space"):
         op.verify()
 
 def test_matmul_op_attr_space_mismatch() -> None:
@@ -278,7 +279,7 @@ def test_matmul_op_attr_space_mismatch() -> None:
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="attribute space"):
+    with pytest.raises(KernelCodeError, match="attribute space"):
         op.verify()
 
 def test_matmul_op_result_space_mismatch() -> None:
@@ -288,7 +289,7 @@ def test_matmul_op_result_space_mismatch() -> None:
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="result space"):
+    with pytest.raises(KernelCodeError, match="result space"):
         op.verify()
 
 def test_matmul_op_rank_mismatch() -> None:
@@ -298,7 +299,7 @@ def test_matmul_op_rank_mismatch() -> None:
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="rank-2"):
+    with pytest.raises(KernelCodeError, match="rank-2"):
         op.verify()
 
 def test_matmul_op_element_type_mismatch() -> None:
@@ -308,7 +309,7 @@ def test_matmul_op_element_type_mismatch() -> None:
     lhs = _TestOp(result_types=[lhs_type]).results[0]
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="element_type"):
+    with pytest.raises(KernelCodeError, match="element_type"):
         op.verify()
 
 def test_nn_dialect_img2col1d_contract_v1() -> None:
@@ -442,7 +443,7 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
             pr=pr,
             space=_make_space(space),
         )
-        with pytest.raises(VerifyException, match=message):
+        with pytest.raises(KernelCodeError, match=message):
             case_op.verify()
 
 def test_nn_dialect_img2col2d_contract_v1() -> None:
@@ -624,7 +625,7 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
             pr=pr,
             space=_make_space(space),
         )
-        with pytest.raises(VerifyException, match=message):
+        with pytest.raises(KernelCodeError, match=message):
             case_op.verify()
 
 def test_img2col_public_symbol_dynamic_error_matrix() -> None:
@@ -643,9 +644,9 @@ def test_img2col_public_symbol_dynamic_error_matrix() -> None:
     one = SymbolConstOp(1).result
     zero = SymbolConstOp(0).result
     NnImg2col1dOp(input_1d_value, result_1d, three, one, one, one, one, _make_space("global")).verify()
-    with pytest.raises(VerifyException, match="kw-sw-dw-must-be-positive"):
+    with pytest.raises(KernelCodeError, match="kw-sw-dw-must-be-positive"):
         NnImg2col1dOp(input_1d_value, result_1d, zero, one, one, one, one, _make_space("global")).verify()
-    with pytest.raises(VerifyException, match="pl-pr-must-be-non-negative"):
+    with pytest.raises(KernelCodeError, match="pl-pr-must-be-non-negative"):
         NnImg2col1dOp(
             input_1d_value,
             result_1d,
@@ -683,7 +684,7 @@ def test_img2col_public_symbol_dynamic_error_matrix() -> None:
         one,
         _make_space("global"),
     ).verify()
-    with pytest.raises(VerifyException, match="result-shape-stride-must-match-img2col1d-contract"):
+    with pytest.raises(KernelCodeError, match="result-shape-stride-must-match-img2col1d-contract"):
         NnImg2col1dOp(
             input_1d_value,
             _make_simple_memory_type(
@@ -746,7 +747,7 @@ def test_img2col_public_symbol_dynamic_error_matrix() -> None:
         one,
         _make_space("global"),
     ).verify()
-    with pytest.raises(VerifyException, match="ph-pw-pl-pr-must-be-non-negative"):
+    with pytest.raises(KernelCodeError, match="ph-pw-pl-pr-must-be-non-negative"):
         NnImg2col2dOp(
             input_2d_value,
             result_2d,
@@ -762,7 +763,7 @@ def test_img2col_public_symbol_dynamic_error_matrix() -> None:
             one,
             _make_space("global"),
         ).verify()
-    with pytest.raises(VerifyException, match="result-shape-stride-must-match-img2col2d-contract"):
+    with pytest.raises(KernelCodeError, match="result-shape-stride-must-match-img2col2d-contract"):
         NnImg2col2dOp(
             input_2d_value,
             _make_simple_memory_type(

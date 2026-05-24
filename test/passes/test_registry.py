@@ -1163,7 +1163,7 @@ def test_build_registered_arch_parallelize_pass() -> None:
     assert pass_obj.name == "arch-parallelize"
     assert type(pass_obj).__name__ == "ArchParallelizePass"
     assert pass_obj.__class__.__module__ == "kernel_gen.passes.arch_parallelize"
-    assert arch_module.__all__ == ["ArchParallelizePass", "_ArchParallelizeFuncPattern"]
+    assert arch_module.__all__ == ["ArchParallelizePass"]
     assert "arch-parallelize" in list_registered_passes()
 
 

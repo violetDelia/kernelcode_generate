@@ -39,10 +39,6 @@ PROTOCOL_RAISES: dict[tuple[str, str, str], str] = {
 }
 
 PRODUCTION_ALLOWLIST: dict[tuple[str, str, str], str] = {
-    ("kernel_gen/passes/hoist_dma_alias_ops.py", "_move_reshape_before_fill", "VerifyException"):
-        "transactional rewrite rollback restores original IR and returns False",
-    ("kernel_gen/passes/hoist_dma_alias_ops.py", "_rewrite_view_deslice_grouping", "VerifyException"):
-        "transactional rewrite rollback restores original IR and returns False",
     ("kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py", "_coerce_symbol_expr_operand", "ValueError"):
         "numeric parse fallback to SymbolDim; no public exception crosses boundary",
     ("kernel_gen/passes/memory_pool.py", "_safe_simplify_expr", "Exception"):

@@ -41,7 +41,8 @@ from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import Parser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import ParseError, VerifyException
+from kernel_gen.core.error import KernelCodeError
+from xdsl.utils.exceptions import ParseError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -273,7 +274,7 @@ def test_reduce_sum_op_rejects_invalid_axes() -> None:
     for axes_attr in cases:
         op = NnReduceSumOp(inp, result_type, axes=[0], keepdim=True, space=_make_space("global"))
         op.attributes["axes"] = axes_attr
-        with pytest.raises(VerifyException, match="axes-must-be-non-empty-unique-and-in-range"):
+        with pytest.raises(KernelCodeError, match="axes-must-be-non-empty-unique-and-in-range"):
             op.verify()
 
 def test_reduce_min_op_contract_and_empty_extent_rejection() -> None:
@@ -303,7 +304,7 @@ def test_reduce_min_op_contract_and_empty_extent_rejection() -> None:
     )
     empty_inp = _TestOp(result_types=[empty_input_type]).results[0]
     empty_op = NnReduceMinOp(empty_inp, empty_result_type, axes=[0], keepdim=True, space=_make_space("global"))
-    with pytest.raises(VerifyException, match="empty-reduction-extent-must-be-rejected-when-static"):
+    with pytest.raises(KernelCodeError, match="empty-reduction-extent-must-be-rejected-when-static"):
         empty_op.verify()
 
 def test_reduce_max_op_contract_and_empty_extent_rejection() -> None:
@@ -333,7 +334,7 @@ def test_reduce_max_op_contract_and_empty_extent_rejection() -> None:
     )
     empty_inp = _TestOp(result_types=[empty_input_type]).results[0]
     empty_op = NnReduceMaxOp(empty_inp, empty_result_type, axes=[1], keepdim=False, space=_make_space("global"))
-    with pytest.raises(VerifyException, match="empty-reduction-extent-must-be-rejected-when-static"):
+    with pytest.raises(KernelCodeError, match="empty-reduction-extent-must-be-rejected-when-static"):
         empty_op.verify()
 
 def test_reduce_ops_reject_type_or_space_mismatch() -> None:
@@ -378,7 +379,7 @@ def test_reduce_ops_reject_type_or_space_mismatch() -> None:
     ]
     for result_type, space, message in cases:
         op = NnReduceSumOp(inp, result_type, axes=[1], keepdim=False, space=_make_space(space))
-        with pytest.raises(VerifyException, match=message):
+        with pytest.raises(KernelCodeError, match=message):
             op.verify()
 
 def test_exp_reduce_module_round_trip() -> None:
@@ -410,7 +411,7 @@ def test_reduce_ops_reject_non_i1_keepdim_attr() -> None:
         inp = _TestOp(result_types=[input_type]).results[0]
         op = op_type(inp, result_type, axes=[1], keepdim=False, space=_make_space("global"))
         op.attributes["keepdim"] = IntegerAttr(1, IntegerType(32))
-        with pytest.raises(VerifyException, match="keepdim-must-be-i1-bool-attr"):
+        with pytest.raises(KernelCodeError, match="keepdim-must-be-i1-bool-attr"):
             op.verify()
 
 def test_reduce_ops_reject_non_contiguous_result_stride() -> None:
@@ -428,7 +429,7 @@ def test_reduce_ops_reject_non_contiguous_result_stride() -> None:
     for op_type in op_types:
         inp = _TestOp(result_types=[input_type]).results[0]
         op = op_type(inp, bad_result_type, axes=[1], keepdim=False, space=_make_space("global"))
-        with pytest.raises(VerifyException, match="result-stride-must-be-contiguous-for-result-shape"):
+        with pytest.raises(KernelCodeError, match="result-stride-must-be-contiguous-for-result-shape"):
             op.verify()
 
 def test_unary_float_family_and_reduce_helper_edges() -> None:
@@ -454,9 +455,9 @@ def test_unary_float_family_and_reduce_helper_edges() -> None:
     NnHardSigmoidOp(inp, alpha, beta, result_type, _make_space("global")).verify()
 
     symbol_value = _TestOp(result_types=[SymbolValueType.from_expr("K")]).results[0]
-    with pytest.raises(VerifyException, match="alpha must be int or float scalar"):
+    with pytest.raises(KernelCodeError, match="alpha must be int or float scalar"):
         NnLeakyReluOp(inp, symbol_value, result_type, _make_space("global")).verify()
-    with pytest.raises(VerifyException, match="beta must be int or float scalar"):
+    with pytest.raises(KernelCodeError, match="beta must be int or float scalar"):
         NnHardSigmoidOp(inp, alpha, symbol_value, result_type, _make_space("global")).verify()
 
     reduce_input_type = _make_simple_memory_type(
@@ -471,7 +472,7 @@ def test_unary_float_family_and_reduce_helper_edges() -> None:
         element_type=Float32Type(),
     )
     NnReduceSumOp(reduce_input, reduce_result, axes=[1], keepdim=False, space=_make_space("global")).verify()
-    with pytest.raises(VerifyException, match="axes-must-be-non-empty-unique-and-in-range"):
+    with pytest.raises(KernelCodeError, match="axes-must-be-non-empty-unique-and-in-range"):
         NnReduceSumOp(
             reduce_input,
             reduce_result,
@@ -479,7 +480,7 @@ def test_unary_float_family_and_reduce_helper_edges() -> None:
             keepdim=False,
             space=_make_space("global"),
         ).verify()
-    with pytest.raises(VerifyException, match="axes-must-be-non-empty-unique-and-in-range"):
+    with pytest.raises(KernelCodeError, match="axes-must-be-non-empty-unique-and-in-range"):
         NnReduceSumOp(
             reduce_input,
             reduce_result,
@@ -487,7 +488,7 @@ def test_unary_float_family_and_reduce_helper_edges() -> None:
             keepdim=False,
             space=_make_space("global"),
         ).verify()
-    with pytest.raises(VerifyException, match="keepdim-must-be-i1-bool-attr"):
+    with pytest.raises(KernelCodeError, match="keepdim-must-be-i1-bool-attr"):
         NnReduceSumOp(
             reduce_input,
             reduce_result,

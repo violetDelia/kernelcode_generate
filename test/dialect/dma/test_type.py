@@ -17,7 +17,7 @@ def test_dma_requires_nn_memory_type() -> None:
     source = _TestOp(result_types=[i32]).results[0]
     target = _TestOp(result_types=[_make_memory_type()]).results[0]
     op = DmaCopyOp(target, source)
-    with pytest.raises(VerifyException, match="nn.memory"):
+    with pytest.raises((KernelCodeError, VerifyException), match="nn.memory"):
         op.verify()
 
 def test_dma_nn_memory_type_verifier_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -27,7 +27,7 @@ def test_dma_nn_memory_type_verifier_passthrough(monkeypatch: pytest.MonkeyPatch
     op = DmaCopyOp(target, source)
 
     monkeypatch.setattr(NnMemoryType, "verify", _raise_memory_verify_rank_mismatch)
-    with pytest.raises(VerifyException, match="nn memory shape and stride rank must match"):
+    with pytest.raises(KernelCodeError, match="nn memory shape and stride rank must match"):
         op.verify()
 
 def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
@@ -112,7 +112,7 @@ def test_dma_public_verifier_boundary_matrix() -> None:
         ),
     ).verify()
 
-    with pytest.raises(VerifyException, match="dynamic_shape symbol must match result shape"):
+    with pytest.raises(KernelCodeError, match="dynamic_shape symbol must match result shape"):
         DmaAllocOp(
             _make_symbol_operands(["N"]),
             _make_memory_type(
@@ -121,7 +121,7 @@ def test_dma_public_verifier_boundary_matrix() -> None:
             ),
         ).verify()
 
-    with pytest.raises(VerifyException, match="dynamic_shape length must match symbol rank"):
+    with pytest.raises(KernelCodeError, match="dynamic_shape length must match symbol rank"):
         DmaAllocOp(
             _make_symbol_operands(["N"]),
             _make_memory_type(
@@ -130,7 +130,7 @@ def test_dma_public_verifier_boundary_matrix() -> None:
             ),
         ).verify()
 
-    with pytest.raises(VerifyException, match="dynamic_shape symbol must match result shape"):
+    with pytest.raises(KernelCodeError, match="dynamic_shape symbol must match result shape"):
         DmaAllocOp(
             _make_symbol_operands(["M"]),
             _make_memory_type(
@@ -147,28 +147,28 @@ def test_dma_public_verifier_boundary_matrix() -> None:
         shape=_dim_array([3, 4]),
         stride=_dim_array([4, 1]),
     )
-    with pytest.raises(VerifyException, match="dma.broadcast source rank must be <= target rank"):
+    with pytest.raises(KernelCodeError, match="dma.broadcast source rank must be <= target rank"):
         DmaBroadcastOp(
             _TestOp(result_types=[target_type]).results[0],
             _TestOp(result_types=[source_type]).results[0],
         ).verify()
 
     target = _TestOp(result_types=[_make_memory_type()]).results[0]
-    with pytest.raises(VerifyException, match="dma.broadcast element_type mismatch"):
+    with pytest.raises(KernelCodeError, match="dma.broadcast element_type mismatch"):
         DmaBroadcastOp(
             target,
             _TestOp(
                 result_types=[_make_memory_type(shape=_dim_array([2, 4]), element_type=i1)]
             ).results[0],
         ).verify()
-    with pytest.raises(VerifyException, match="dma.broadcast space mismatch"):
+    with pytest.raises(KernelCodeError, match="dma.broadcast space mismatch"):
         DmaBroadcastOp(
             target,
             _TestOp(
                 result_types=[_make_memory_type(shape=_dim_array([2, 4]), space="shared")]
             ).results[0],
         ).verify()
-    with pytest.raises(VerifyException, match="dma.broadcast symbol.int target must be integer element_type"):
+    with pytest.raises(KernelCodeError, match="dma.broadcast symbol.int target must be integer element_type"):
         DmaBroadcastOp(
             _TestOp(result_types=[_make_memory_type(element_type=f32)]).results[0],
             _make_symbol_operands(["N"])[0],
@@ -232,13 +232,13 @@ def test_dma_public_verifier_boundary_matrix() -> None:
             "dma.transpose space mismatch",
         ),
     ]:
-        with pytest.raises(VerifyException, match=message):
+        with pytest.raises(KernelCodeError, match=message):
             DmaTransposeOp(
                 _TestOp(result_types=[target_type_case]).results[0],
                 transpose_source,
                 perm=perm,
             ).verify()
-    with pytest.raises(VerifyException, match="dma.transpose perm must be a permutation"):
+    with pytest.raises(KernelCodeError, match="dma.transpose perm must be a permutation"):
         DmaTransposeOp(
             transpose_target,
             transpose_source,
@@ -246,7 +246,7 @@ def test_dma_public_verifier_boundary_matrix() -> None:
         ).verify()
 
     load_source = _TestOp(result_types=[_make_memory_type()]).results[0]
-    with pytest.raises(VerifyException, match="dma.load target rank must match source rank"):
+    with pytest.raises(KernelCodeError, match="dma.load target rank must match source rank"):
         DmaLoadOp(
             _TestOp(result_types=[_make_memory_type(shape=_dim_array([8]), stride=_dim_array([1]))]).results[0],
             load_source,
@@ -254,7 +254,7 @@ def test_dma_public_verifier_boundary_matrix() -> None:
             _make_symbol_operands([2, 4]),
             _make_symbol_operands([1, 1]),
         ).verify()
-    with pytest.raises(VerifyException, match="sizes entries must be >= 1"):
+    with pytest.raises(KernelCodeError, match="sizes entries must be >= 1"):
         DmaLoadOp(
             _TestOp(result_types=[_make_memory_type()]).results[0],
             load_source,
@@ -262,7 +262,7 @@ def test_dma_public_verifier_boundary_matrix() -> None:
             _make_symbol_operands([0, 4]),
             _make_symbol_operands([1, 1]),
         ).verify()
-    with pytest.raises(VerifyException, match="dma.slice target rank must match source rank"):
+    with pytest.raises(KernelCodeError, match="dma.slice target rank must match source rank"):
         DmaSliceOp(
             _TestOp(result_types=[_make_memory_type(shape=_dim_array([8]), stride=_dim_array([1]))]).results[0],
             load_source,
@@ -279,7 +279,7 @@ def test_dma_public_verifier_boundary_matrix() -> None:
             _make_symbol_operands([4, 1]),
             i32,
         )
-    with pytest.raises(VerifyException, match="dma.view source/result rank mismatch"):
+    with pytest.raises(KernelCodeError, match="dma.view source/result rank mismatch"):
         DmaViewOp(
             load_source,
             _make_symbol_operands([0]),
@@ -321,7 +321,7 @@ def test_dma_public_verifier_boundary_matrix() -> None:
         stride=_dim_array([1]),
         element_type=i8,
     )
-    with pytest.raises(VerifyException, match="dma.view element_type unsupported for byte pool"):
+    with pytest.raises(KernelCodeError, match="dma.view element_type unsupported for byte pool"):
         DmaViewOp(
             _TestOp(result_types=[byte_source_type]).results[0],
             _make_symbol_operands([0]),

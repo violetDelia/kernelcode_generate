@@ -33,6 +33,7 @@ from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.folder import Folder
 from xdsl.parser import Parser
 from xdsl.printer import Printer
+from kernel_gen.core.error import KernelCodeError
 from xdsl.utils.exceptions import ParseError, VerifyException
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -247,9 +248,9 @@ def test_symbol_expr_attr_round_trip() -> None:
 # 对应功能实现文件路径: kernel_gen/dialect/symbol/
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_expr_attr_rejects_uppercase_min_alias() -> None:
-    with pytest.raises(VerifyException, match="trailing tokens"):
+    with pytest.raises(KernelCodeError, match="trailing tokens"):
         SymbolExprAttr.from_expr("Min(T, N - i)").verify()
-    with pytest.raises(VerifyException, match="trailing tokens"):
+    with pytest.raises(KernelCodeError, match="trailing tokens"):
         SymbolValueType.from_expr("Min(T, N - i)").verify()
 
 
@@ -258,7 +259,7 @@ def test_symbol_expr_attr_rejects_uppercase_min_alias() -> None:
 # 对应功能实现文件路径: kernel_gen/dialect/symbol/
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_expr_attr_rejects_empty_expr() -> None:
-    with pytest.raises(VerifyException, match="must not be empty"):
+    with pytest.raises(KernelCodeError, match="must not be empty"):
         SymbolExprAttr.from_expr("   ").verify()
 
 
@@ -590,7 +591,7 @@ def test_symbol_min_fold_full_tile_zero_to_symbol_multiple() -> None:
 # 对应功能实现文件路径: kernel_gen/dialect/symbol/
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_const_op_rejects_mismatched_type() -> None:
-    with pytest.raises(VerifyException, match="result type must match value"):
+    with pytest.raises(KernelCodeError, match="result type must match value"):
         SymbolConstOp(3, SymbolValueType.from_expr("4")).verify()
     with pytest.raises(VerifyException, match="base attribute symbol.int"):
         SymbolConstOp(3, i32).verify()
@@ -749,7 +750,7 @@ def test_symbol_expr_attr_public_rejection_edge_matrix() -> None:
         ("N / 2", "bare /"),
         ('"N"', "quoted string"),
     ]:
-        with pytest.raises(VerifyException, match=match):
+        with pytest.raises(KernelCodeError, match=match):
             SymbolExprAttr.from_expr(expr).verify()
 
     ctx = _build_context()
@@ -818,13 +819,13 @@ def test_symbol_binary_arith_fold_public_rejection_matrix() -> None:
 # 对应功能实现文件路径: kernel_gen/dialect/symbol/
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_verifier_rejects_illegal_expression_characters() -> None:
-    with pytest.raises(VerifyException):
+    with pytest.raises(KernelCodeError):
         SymbolExprAttr.from_expr("N@2").verify()
-    with pytest.raises(VerifyException):
+    with pytest.raises(KernelCodeError):
         SymbolValueType.from_expr("N@1").verify()
-    with pytest.raises(VerifyException):
+    with pytest.raises(KernelCodeError):
         SymbolExprAttr.from_expr("N +").verify()
-    with pytest.raises(VerifyException):
+    with pytest.raises(KernelCodeError):
         SymbolExprAttr.from_expr("[]").verify()
 
 
@@ -877,11 +878,11 @@ def test_symbol_arith_ops_require_unknown_result_for_unknown_or_iter_operands() 
     SymbolMulOp(concrete_value, concrete_value, SymbolValueType.from_expr("?")).verify()
     SymbolAddOp(_make_symbol_value("ACC"), concrete_value, SymbolValueType.from_expr("?")).verify()
 
-    with pytest.raises(VerifyException, match="result type must be"):
+    with pytest.raises(KernelCodeError, match="result type must be"):
         SymbolAddOp(unknown_value, concrete_value, SymbolValueType.from_expr("N + 1")).verify()
-    with pytest.raises(VerifyException, match="canonical symbol expression"):
+    with pytest.raises(KernelCodeError, match="canonical symbol expression"):
         SymbolSubOp(concrete_value, iter_value, SymbolValueType.from_expr("2 - " + "f0")).verify()
-    with pytest.raises(VerifyException, match="canonical symbol expression"):
+    with pytest.raises(KernelCodeError, match="canonical symbol expression"):
         SymbolDivOp(concrete_value, iter_value, SymbolValueType.from_expr("?")).verify()
 
 
@@ -959,15 +960,15 @@ def test_symbol_arith_ops_reject_non_symbol_int_types() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     symbol_value = _make_symbol_value("N")
 
-    with pytest.raises(VerifyException, match='symbol.add lhs must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.add lhs must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolAddOp(non_symbol_value, symbol_value, SymbolValueType.from_expr("N")).verify()
-    with pytest.raises(VerifyException, match='symbol.sub rhs must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.sub rhs must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolSubOp(symbol_value, non_symbol_value, SymbolValueType.from_expr("N")).verify()
-    with pytest.raises(VerifyException, match='symbol.mul result type must be !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.mul result type must be !symbol.int<#symbol.expr<expr>>'):
         SymbolMulOp(symbol_value, symbol_value, i32).verify()
-    with pytest.raises(VerifyException, match='symbol.div lhs must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.div lhs must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolDivOp(non_symbol_value, symbol_value, SymbolValueType.from_expr("N floordiv 2")).verify()
-    with pytest.raises(VerifyException, match='symbol.floordiv result type must be !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.floordiv result type must be !symbol.int<#symbol.expr<expr>>'):
         SymbolFloorDivOp(symbol_value, symbol_value, i32).verify()
 
 
@@ -1022,7 +1023,7 @@ def test_symbol_arith_ops_error_messages_include_context() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     ctx = _build_context()
 
-    with pytest.raises(VerifyException, match='symbol.add lhs must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.add lhs must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolAddOp(non_symbol_value, symbol_value, SymbolValueType.from_expr("N + 1")).verify()
     with pytest.raises(ParseError, match="symbol.sub"):
         Parser(
@@ -1171,9 +1172,9 @@ def test_symbol_compare_ops_reject_non_symbol_int_operands() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     symbol_value = _make_symbol_value("N")
 
-    with pytest.raises(VerifyException, match='symbol.eq lhs must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.eq lhs must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolEqOp(non_symbol_value, symbol_value, i1).verify()
-    with pytest.raises(VerifyException, match='symbol.ge rhs must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.ge rhs must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolGeOp(symbol_value, non_symbol_value, i1).verify()
 
 
@@ -1184,9 +1185,9 @@ def test_symbol_compare_ops_reject_non_symbol_int_operands() -> None:
 def test_symbol_compare_ops_reject_non_i1_result() -> None:
     symbol_value = _make_symbol_value("N")
 
-    with pytest.raises(VerifyException, match="symbol.lt result type must be i1"):
+    with pytest.raises(KernelCodeError, match="symbol.lt result type must be i1"):
         SymbolLtOp(symbol_value, symbol_value, i32).verify()
-    with pytest.raises(VerifyException, match="symbol.ne result type must be i1"):
+    with pytest.raises(KernelCodeError, match="symbol.ne result type must be i1"):
         SymbolNeOp(symbol_value, symbol_value, IndexType()).verify()
 
 
@@ -1229,7 +1230,7 @@ def test_symbol_compare_ops_error_messages_include_context() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     ctx = _build_context()
 
-    with pytest.raises(VerifyException, match='symbol.le rhs must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.le rhs must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolLeOp(symbol_value, non_symbol_value, i1).verify()
     with pytest.raises(ParseError, match="symbol.ge"):
         Parser(
@@ -1284,11 +1285,11 @@ def test_symbol_to_float_rejects_invalid_types() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     symbol_value = _make_symbol_value("N")
 
-    with pytest.raises(VerifyException, match='symbol.to_float source must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.to_float source must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolToFloatOp(non_symbol_value, f32).verify()
     for result_type in (f16, bf16, f32, f64):
         SymbolToFloatOp(symbol_value, result_type).verify()
-    with pytest.raises(VerifyException, match="symbol.to_float result type must be float"):
+    with pytest.raises(KernelCodeError, match="symbol.to_float result type must be float"):
         SymbolToFloatOp(symbol_value, i32).verify()
 
 
@@ -1323,9 +1324,9 @@ def test_symbol_cast_rejects_invalid_types() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     symbol_value = _make_symbol_value("N")
 
-    with pytest.raises(VerifyException, match='symbol.cast source must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.cast source must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolCastOp(non_symbol_value, i32).verify()
-    with pytest.raises(VerifyException, match="symbol.cast result type must be integer"):
+    with pytest.raises(KernelCodeError, match="symbol.cast result type must be integer"):
         SymbolCastOp(symbol_value, f32).verify()
 
 
@@ -1349,9 +1350,9 @@ def test_symbol_cast_accepts_ptr_to_unknown_symbol_int() -> None:
 def test_symbol_cast_rejects_ptr_to_non_unknown_symbol_int() -> None:
     ptr_value = _TestOp(result_types=[SymbolPtrType(f32)]).results[0]
 
-    with pytest.raises(VerifyException, match=r"symbol\.cast ptr result type must be !symbol\.int"):
+    with pytest.raises(KernelCodeError, match=r"symbol\.cast ptr result type must be !symbol\.int"):
         SymbolCastOp(ptr_value, i32).verify()
-    with pytest.raises(VerifyException, match=r"symbol\.cast ptr result type must be !symbol\.int"):
+    with pytest.raises(KernelCodeError, match=r"symbol\.cast ptr result type must be !symbol\.int"):
         SymbolCastOp(ptr_value, SymbolValueType.from_expr("N")).verify()
 
 
@@ -1403,11 +1404,11 @@ def test_symbol_to_int_rejects_invalid_types() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
     symbol_value = _make_symbol_value("N")
 
-    with pytest.raises(VerifyException, match='symbol.to_int source must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.to_int source must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolToIntOp(non_symbol_value, i32).verify()
-    with pytest.raises(VerifyException, match="symbol.to_int result type must be integer"):
+    with pytest.raises(KernelCodeError, match="symbol.to_int result type must be integer"):
         SymbolToIntOp(symbol_value, f32).verify()
-    with pytest.raises(VerifyException, match="symbol.to_int result type must be integer"):
+    with pytest.raises(KernelCodeError, match="symbol.to_int result type must be integer"):
         SymbolToIntOp(symbol_value, IndexType()).verify()
 
 
@@ -1446,7 +1447,7 @@ def test_symbol_ptr_type_round_trip() -> None:
 # 对应功能实现文件路径: kernel_gen/dialect/symbol/
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_ptr_type_rejects_symbol_value_dtype() -> None:
-    with pytest.raises(VerifyException, match="symbol\\.ptr dtype must not be symbol\\.int"):
+    with pytest.raises(KernelCodeError, match="symbol\\.ptr dtype must not be symbol\\.int"):
         SymbolPtrType(SymbolValueType.from_expr("N")).verify()
 
 
@@ -1455,7 +1456,7 @@ def test_symbol_ptr_type_rejects_symbol_value_dtype() -> None:
 # 对应功能实现文件路径: kernel_gen/dialect/symbol/
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_ptr_type_rejects_non_type_dtype() -> None:
-    with pytest.raises(VerifyException, match="symbol\\.ptr dtype must be type"):
+    with pytest.raises(KernelCodeError, match="symbol\\.ptr dtype must be type"):
         SymbolPtrType(StringAttr("not_type")).verify()
 
 
@@ -1464,9 +1465,9 @@ def test_symbol_ptr_type_rejects_non_type_dtype() -> None:
 # 对应功能实现文件路径: kernel_gen/dialect/symbol/
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_ptr_type_rejects_invalid_template_name() -> None:
-    with pytest.raises(VerifyException, match="symbol\\.ptr template_name must be an identifier"):
+    with pytest.raises(KernelCodeError, match="symbol\\.ptr template_name must be an identifier"):
         SymbolPtrType(f32, "1bad").verify()
-    with pytest.raises(VerifyException, match="symbol\\.ptr template_name must be an identifier"):
+    with pytest.raises(KernelCodeError, match="symbol\\.ptr template_name must be an identifier"):
         SymbolPtrType(f32, "bad-name").verify()
 
 
@@ -1478,7 +1479,7 @@ def test_symbol_compare_rejects_direct_ptr_operand() -> None:
     ptr_value = _TestOp(result_types=[SymbolPtrType(f32)]).results[0]
     zero = SymbolConstOp(0).result
 
-    with pytest.raises(VerifyException, match="symbol.ne lhs must have type !symbol.int"):
+    with pytest.raises(KernelCodeError, match="symbol.ne lhs must have type !symbol.int"):
         SymbolNeOp(ptr_value, zero, i1).verify()
 
 
@@ -1652,11 +1653,11 @@ def test_symbol_get_dim_rejects_invalid_axis() -> None:
         _make_memory_type([4, 8], [8, 1])
     )
 
-    with pytest.raises(VerifyException, match="axis out of range"):
+    with pytest.raises(KernelCodeError, match="axis out of range"):
         SymbolGetDimOp(source, -1).verify()
-    with pytest.raises(VerifyException, match="axis out of range"):
+    with pytest.raises(KernelCodeError, match="axis out of range"):
         SymbolGetDimOp(source, 2).verify()
-    with pytest.raises(VerifyException, match="axis must be a static integer"):
+    with pytest.raises(KernelCodeError, match="axis must be a static integer"):
         SymbolGetDimOp(source, StringAttr("axis")).verify()
 
 
@@ -1669,11 +1670,11 @@ def test_symbol_get_stride_rejects_invalid_axis() -> None:
         _make_memory_type([4, 8], [8, 1])
     )
 
-    with pytest.raises(VerifyException, match="axis out of range"):
+    with pytest.raises(KernelCodeError, match="axis out of range"):
         SymbolGetStrideOp(source, -1).verify()
-    with pytest.raises(VerifyException, match="axis out of range"):
+    with pytest.raises(KernelCodeError, match="axis out of range"):
         SymbolGetStrideOp(source, 2).verify()
-    with pytest.raises(VerifyException, match="axis must be a static integer"):
+    with pytest.raises(KernelCodeError, match="axis must be a static integer"):
         SymbolGetStrideOp(source, StringAttr("axis")).verify()
 
 
@@ -1687,7 +1688,7 @@ def test_symbol_get_dim_rejects_non_memory_type() -> None:
         _make_memory_type(["?", 8], [8, 1])
     )
 
-    with pytest.raises(VerifyException, match="source must be nn.memory"):
+    with pytest.raises(KernelCodeError, match="source must be nn.memory"):
         SymbolGetDimOp(non_memory_source, 0).verify()
     unknown_op = SymbolGetDimOp(unknown_dim_source, 0)
     unknown_op.verify()
@@ -1769,10 +1770,10 @@ def test_symbol_for_rejects_non_symbol_int_operands() -> None:
         _TestOp(result_types=[IndexType()]).results[0],
     ]
 
-    with pytest.raises(VerifyException, match='symbol.for start must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.for start must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolForOp(non_symbol_value, symbol_value, symbol_value, Block(arg_types=[SymbolIterType.from_bounds("N", "N", "N")])).verify()
     for non_symbol_it in non_symbol_it_values:
-        with pytest.raises(VerifyException, match="symbol.for it must have type !symbol.iter<...>"):
+        with pytest.raises(KernelCodeError, match="symbol.for it must have type !symbol.iter<...>"):
             SymbolForOp(symbol_value, symbol_value, symbol_value, Block(arg_types=[non_symbol_it.type])).verify()
 
 
@@ -1785,7 +1786,7 @@ def test_symbol_for_rejects_zero_step() -> None:
     end = _make_symbol_value("N")
     step = _make_symbol_value("0")
 
-    with pytest.raises(VerifyException, match="symbol.for step must not be zero"):
+    with pytest.raises(KernelCodeError, match="symbol.for step must not be zero"):
         SymbolForOp(start, end, step, Block(arg_types=[SymbolIterType.from_bounds("M", "N", "0")])).verify()
 
 
@@ -1798,11 +1799,11 @@ def test_symbol_for_rejects_invalid_region_shape() -> None:
     end = _make_symbol_value("N")
     step = _make_symbol_value("1")
 
-    with pytest.raises(VerifyException, match="symbol.for.*single-block regions"):
+    with pytest.raises((KernelCodeError, VerifyException), match="symbol.for.*single-block regions|single-block regions"):
         SymbolForOp(start, end, step, Region()).verify()
-    with pytest.raises(VerifyException, match="symbol.for body must have exactly one block argument"):
+    with pytest.raises(KernelCodeError, match="symbol.for body must have exactly one block argument"):
         SymbolForOp(start, end, step, Block()).verify()
-    with pytest.raises(VerifyException, match="symbol.for.*single-block regions"):
+    with pytest.raises((KernelCodeError, VerifyException), match="symbol.for.*single-block regions|single-block regions"):
         SymbolForOp(
             start,
             end,
@@ -1836,7 +1837,7 @@ builtin.module {
 }
 """,
         ).parse_module()
-    with pytest.raises(VerifyException, match="iter attribute must be"):
+    with pytest.raises(KernelCodeError, match="iter attribute must be"):
         Parser(
             ctx,
             """
@@ -1849,7 +1850,7 @@ builtin.module {
 }
 """,
         ).parse_module()
-    with pytest.raises(VerifyException, match="result type requires loop-carried"):
+    with pytest.raises(KernelCodeError, match="result type requires loop-carried"):
         Parser(
             ctx,
             """
@@ -1862,7 +1863,7 @@ builtin.module {
 }
 """,
         ).parse_module()
-    with pytest.raises(VerifyException, match="loop-carried result must be"):
+    with pytest.raises(KernelCodeError, match="loop-carried result must be"):
         Parser(
             ctx,
             """
@@ -1900,7 +1901,7 @@ def test_symbol_for_error_messages_include_context() -> None:
     end = _make_symbol_value("N")
     step = _make_symbol_value("0")
 
-    with pytest.raises(VerifyException, match="symbol.for step must not be zero"):
+    with pytest.raises(KernelCodeError, match="symbol.for step must not be zero"):
         SymbolForOp(start, end, step, Block(arg_types=[SymbolIterType.from_bounds("M", "N", "0")])).verify()
 
     ctx = _build_context()
@@ -1928,14 +1929,14 @@ def test_symbol_yield_public_parent_and_carried_edges() -> None:
     end = _make_symbol_value("N")
     step = _make_symbol_value("1")
 
-    with pytest.raises(VerifyException, match="symbol.yield must appear inside symbol.for"):
+    with pytest.raises(KernelCodeError, match="symbol.yield must appear inside symbol.for"):
         SymbolYieldOp(SymbolConstOp(1).result).verify()
 
     block = Block(arg_types=[SymbolIterType.from_bounds("0", "N", "1")])
     yield_op = SymbolYieldOp(SymbolConstOp(1).result)
     block.add_op(yield_op)
     SymbolForOp(start, end, step, block)
-    with pytest.raises(VerifyException, match="symbol.yield requires symbol.for loop-carried"):
+    with pytest.raises(KernelCodeError, match="symbol.yield requires symbol.for loop-carried"):
         yield_op.verify()
 
 
@@ -2003,7 +2004,7 @@ def test_symbol_for_rejects_iter_attr_mismatch_matrix() -> None:
     ]
 
     for op, message in cases:
-        with pytest.raises(VerifyException, match=message):
+        with pytest.raises(KernelCodeError, match=message):
             op.verify()
 
 
@@ -2080,7 +2081,7 @@ def test_symbol_for_rejects_invalid_loop_carried_symbol_int() -> None:
     step = _make_symbol_value("TILE_M")
     valid_init = SymbolConstOp(0).result
 
-    with pytest.raises(VerifyException, match='symbol.for loop-carried init must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.for loop-carried init must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolForOp(
             start,
             end,
@@ -2090,7 +2091,7 @@ def test_symbol_for_rejects_invalid_loop_carried_symbol_int() -> None:
             result_type=SymbolValueType.from_expr("TOTAL"),
         ).verify()
 
-    with pytest.raises(VerifyException, match='symbol.for loop-carried acc must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.for loop-carried acc must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolForOp(
             start,
             end,
@@ -2100,7 +2101,7 @@ def test_symbol_for_rejects_invalid_loop_carried_symbol_int() -> None:
             result_type=SymbolValueType.from_expr("TOTAL"),
         ).verify()
 
-    with pytest.raises(VerifyException, match='symbol.for loop-carried result must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.for loop-carried result must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolForOp(
             start,
             end,
@@ -2111,7 +2112,7 @@ def test_symbol_for_rejects_invalid_loop_carried_symbol_int() -> None:
         ).verify()
 
     block_missing_yield = Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TILE_M"), SymbolValueType.from_expr("ACC")])
-    with pytest.raises(VerifyException, match="symbol.for loop-carried body must terminate with symbol.yield"):
+    with pytest.raises(KernelCodeError, match="symbol.for loop-carried body must terminate with symbol.yield"):
         SymbolForOp(
             start,
             end,
@@ -2123,7 +2124,7 @@ def test_symbol_for_rejects_invalid_loop_carried_symbol_int() -> None:
 
     block_bad_yield = Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TILE_M"), SymbolValueType.from_expr("ACC")])
     block_bad_yield.add_op(SymbolYieldOp(_TestOp(result_types=[f32]).results[0]))
-    with pytest.raises(VerifyException, match='symbol.yield value must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='symbol.yield value must have type !symbol.int<#symbol.expr<expr>>'):
         SymbolForOp(
             start,
             end,

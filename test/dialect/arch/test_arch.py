@@ -33,6 +33,7 @@ from xdsl.ir import Attribute, Operation, SSAValue
 from xdsl.parser import Parser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
+from kernel_gen.core.error import KernelCodeError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -414,13 +415,13 @@ def test_arch_get_dynamic_memory_accepts_specialized_static_capacity() -> None:
 # 对应功能实现文件路径: kernel_gen/dialect/arch/
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_dynamic_memory_verify_errors() -> None:
-    with pytest.raises(VerifyException, match="shared/local/tsm/tlm1/tlm2/tlm3"):
+    with pytest.raises(KernelCodeError, match="shared/local/tsm/tlm1/tlm2/tlm3"):
         ArchGetDynamicMemoryOp(_make_space("global")).verify()
 
-    with pytest.raises(VerifyException, match="shared/local/tsm/tlm1/tlm2/tlm3"):
+    with pytest.raises(KernelCodeError, match="shared/local/tsm/tlm1/tlm2/tlm3"):
         ArchGetDynamicMemoryOp(_make_space("tlm")).verify()
 
-    with pytest.raises(VerifyException, match="result must be 1-D"):
+    with pytest.raises(KernelCodeError, match="result must be 1-D"):
         ArchGetDynamicMemoryOp(
             _make_space("shared"),
             _make_dynamic_memory_type(
@@ -429,19 +430,19 @@ def test_arch_get_dynamic_memory_verify_errors() -> None:
             ),
         ).verify()
 
-    with pytest.raises(VerifyException, match=r"result stride must be \[#symbol\.expr<1>\]"):
+    with pytest.raises(KernelCodeError, match=r"result stride must be \[#symbol\.expr<1>\]"):
         ArchGetDynamicMemoryOp(
             _make_space("shared"),
             _make_dynamic_memory_type(stride=ArrayAttr([_expr_attr(2)])),
         ).verify()
 
-    with pytest.raises(VerifyException, match="result element type must be i8"):
+    with pytest.raises(KernelCodeError, match="result element type must be i8"):
         ArchGetDynamicMemoryOp(
             _make_space("shared"),
             _make_dynamic_memory_type(element_type=i32),
         ).verify()
 
-    with pytest.raises(VerifyException, match="result space must match memory_space"):
+    with pytest.raises(KernelCodeError, match="result space must match memory_space"):
         ArchGetDynamicMemoryOp(
             _make_space("shared"),
             _make_dynamic_memory_type(space="local", shape=ArrayAttr([_expr_attr("SM_SIZE")])),
@@ -450,20 +451,20 @@ def test_arch_get_dynamic_memory_verify_errors() -> None:
     with pytest.raises(VerifyException, match="base attribute nn.memory"):
         ArchGetDynamicMemoryOp(_make_space("shared"), i32).verify()
 
-    with pytest.raises(VerifyException, match="shape and stride rank must match"):
+    with pytest.raises(KernelCodeError, match="shape and stride rank must match"):
         ArchGetDynamicMemoryOp(
             _make_space("shared"),
             _make_dynamic_memory_type(stride=ArrayAttr([_expr_attr(1), _expr_attr(1)])),
         ).verify()
 
-    with pytest.raises(VerifyException, match=r"result shape must be \[#symbol\.expr<SM_SIZE>\]"):
+    with pytest.raises(KernelCodeError, match=r"result shape must be \[#symbol\.expr<SM_SIZE>\]"):
         ArchGetDynamicMemoryOp(
             _make_space("shared"),
             _make_dynamic_memory_type(shape=ArrayAttr([_expr_attr("LM_SIZE")])),
         ).verify()
 
     ctx = _build_context()
-    with pytest.raises(VerifyException, match="memory_space must be #nn.space"):
+    with pytest.raises(KernelCodeError, match="memory_space must be #nn.space"):
         Parser(
             ctx,
             """
@@ -500,19 +501,19 @@ def test_arch_barrier_success() -> None:
 # 对应 spec 文件路径: spec/dialect/arch.md
 # 对应测试文件路径: test/dialect/arch/test_arch.py
 def test_arch_barrier_verify_errors() -> None:
-    with pytest.raises(VerifyException, match="arch.scope must be block/thread/subthread/global"):
+    with pytest.raises(KernelCodeError, match="arch.scope must be block/thread/subthread/global"):
         ArchBarrierOp(ArchScopeAttr.from_name("warp"), _make_barrier_visibility()).verify()
 
-    with pytest.raises(VerifyException, match="visibility must not be empty"):
+    with pytest.raises(KernelCodeError, match="visibility must not be empty"):
         ArchBarrierOp(ArchScopeAttr.from_name("block"), ArrayAttr([])).verify()
 
-    with pytest.raises(VerifyException, match="visibility must not contain duplicates"):
+    with pytest.raises(KernelCodeError, match="visibility must not contain duplicates"):
         ArchBarrierOp(
             ArchScopeAttr.from_name("block"),
             ArrayAttr([_make_visibility("tsm"), _make_visibility("tsm")]),
         ).verify()
 
-    with pytest.raises(VerifyException, match="visibility items must be #arch.visibility<...>"):
+    with pytest.raises(KernelCodeError, match="visibility items must be #arch.visibility<...>"):
         ArchBarrierOp(
             ArchScopeAttr.from_name("block"),
             ArrayAttr([_make_visibility("tsm"), _make_space("tlm1")]),
@@ -521,10 +522,10 @@ def test_arch_barrier_verify_errors() -> None:
     with pytest.raises(VerifyException, match="base attribute array"):
         ArchBarrierOp(ArchScopeAttr.from_name("block"), _make_visibility("tsm")).verify()
 
-    with pytest.raises(VerifyException, match="contain both"):
+    with pytest.raises(KernelCodeError, match="contain both"):
         ArchBarrierOp(ArchScopeAttr.from_name("block"), ArrayAttr([_make_visibility("tsm")])).verify()
 
-    with pytest.raises(VerifyException, match="arch.visibility must be tsm/tlm"):
+    with pytest.raises(KernelCodeError, match="arch.visibility must be tsm/tlm"):
         _make_visibility("global")
 
 
@@ -556,7 +557,7 @@ def test_arch_launch_success() -> None:
 # 对应测试文件路径: test/dialect/arch/test_arch.py
 def test_arch_launch_verify_errors() -> None:
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
-    with pytest.raises(VerifyException, match="callee must be flat @symbol"):
+    with pytest.raises(KernelCodeError, match="callee must be flat @symbol"):
         ArchLaunchOp(
             SymbolRefAttr("my_kernel", ["nested"]),
             _make_symbol_value("1"),
@@ -574,7 +575,7 @@ def test_arch_launch_verify_errors() -> None:
             _make_symbol_value("0"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="callee must not be empty"):
+    with pytest.raises(KernelCodeError, match="callee must not be empty"):
         ArchLaunchOp(
             SymbolRefAttr(""),
             _make_symbol_value("1"),
@@ -583,7 +584,7 @@ def test_arch_launch_verify_errors() -> None:
             _make_symbol_value("0"),
         ).verify()
 
-    with pytest.raises(VerifyException, match='block must have type !symbol.int<#symbol.expr<expr>>'):
+    with pytest.raises(KernelCodeError, match='block must have type !symbol.int<#symbol.expr<expr>>'):
         ArchLaunchOp(
             "my_kernel",
             non_symbol_value,
@@ -592,7 +593,7 @@ def test_arch_launch_verify_errors() -> None:
             _make_symbol_value("0"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="thread must be > 0 when statically known"):
+    with pytest.raises(KernelCodeError, match="thread must be > 0 when statically known"):
         ArchLaunchOp(
             "my_kernel",
             _make_symbol_value("1"),
@@ -601,7 +602,7 @@ def test_arch_launch_verify_errors() -> None:
             _make_symbol_value("0"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="subthread must be > 0 when statically known"):
+    with pytest.raises(KernelCodeError, match="subthread must be > 0 when statically known"):
         ArchLaunchOp(
             "my_kernel",
             _make_symbol_value("1"),
@@ -610,7 +611,7 @@ def test_arch_launch_verify_errors() -> None:
             _make_symbol_value("0"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="shared_memory_size must be >= 0 when statically known"):
+    with pytest.raises(KernelCodeError, match="shared_memory_size must be >= 0 when statically known"):
         ArchLaunchOp(
             "my_kernel",
             _make_symbol_value("1"),
@@ -637,7 +638,7 @@ builtin.module {
   %smem = "test.op"() : () -> !symbol.int<#symbol.expr<0>>
   %arg = "test.op"() : () -> !symbol.int<#symbol.expr<N>>
 """
-    with pytest.raises(VerifyException, match="result types must be"):
+    with pytest.raises(KernelCodeError, match="result types must be"):
         Parser(
             ctx,
             common_prefix
@@ -647,7 +648,7 @@ builtin.module {
 """,
         ).parse_module()
 
-    with pytest.raises(VerifyException, match="arg type list must match operand count"):
+    with pytest.raises(KernelCodeError, match="arg type list must match operand count"):
         Parser(
             ctx,
             common_prefix
@@ -657,7 +658,7 @@ builtin.module {
 """,
         ).parse_module()
 
-    with pytest.raises(VerifyException, match="arg types must match operand types"):
+    with pytest.raises(KernelCodeError, match="arg types must match operand types"):
         Parser(
             ctx,
             common_prefix
@@ -757,7 +758,7 @@ def test_arch_package_exports() -> None:
 def test_target_registry_cpu_rejects_thread_id() -> None:
     target_registry.set_current_target("cpu")
     try:
-        with pytest.raises(VerifyException, match="arch.get_thread_id"):
+        with pytest.raises(KernelCodeError, match="arch.get_thread_id"):
             ArchGetThreadIdOp().verify()
     finally:
         target_registry.set_current_target(None)
@@ -812,13 +813,13 @@ def test_arch_token_sign_wait_verify_errors() -> None:
     non_token = _TestOp(result_types=[i32]).results[0]
     ctx = _build_context()
 
-    with pytest.raises(VerifyException, match="id must not be empty"):
+    with pytest.raises(KernelCodeError, match="id must not be empty"):
         ArchTokenType(StringAttr("")).verify()
-    with pytest.raises(VerifyException, match="id must be an identifier"):
+    with pytest.raises(KernelCodeError, match="id must be an identifier"):
         ArchTokenType(StringAttr("1bad")).verify()
-    with pytest.raises(VerifyException, match="count must be >= 0"):
+    with pytest.raises(KernelCodeError, match="count must be >= 0"):
         ArchTokenOp("dma_stage", _make_symbol_value("-1")).verify()
-    with pytest.raises(VerifyException, match="result token id must match id attr"):
+    with pytest.raises(KernelCodeError, match="result token id must match id attr"):
         Parser(
             ctx,
             """
@@ -829,7 +830,7 @@ builtin.module {
 """,
         ).parse_module().verify()
 
-    with pytest.raises(VerifyException, match="count must be > 0"):
+    with pytest.raises(KernelCodeError, match="count must be > 0"):
         ArchSignOp(valid_token.result, _make_symbol_value("0")).verify()
     with pytest.raises(VerifyException, match="base attribute arch.token"):
         ArchSignOp(non_token, valid_count).verify()

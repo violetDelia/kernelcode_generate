@@ -63,10 +63,10 @@
 - package-internal 模块用于拆分实现职责，不作为外部公开 API：
   - `kernel_gen/dialect/dma/type/`：承载 `DmaRingType`。
   - `kernel_gen/dialect/dma/operation/`：承载 lifecycle、transfer、slice、alias、ring op。
-  - `kernel_gen/dialect/dma/common.py`：承载本 package 内可 named import 的 verifier / layout helper。
   - `kernel_gen/dialect/dma/effect.py`：承载本 package 内 MemoryEffect trait。
   - `kernel_gen/dialect/dma/canonicalization.py`：承载本 package 内 canonicalization trait 与 pattern。
-- `common/effect/canonicalization` 只允许 `kernel_gen/dialect/dma/**` 内部按 named import 使用；不得从 `kernel_gen.dialect.dma` root re-export，也不得被 `test/**`、`expectation/**` 或其它 `kernel_gen/**` 模块直接调用。
+- 已删除旧 `kernel_gen/dialect/dma/common.py` helper hub；各 operation/type/canonicalization 文件只能使用当前文件内 helper 或已公开 core API。
+- `effect/canonicalization` 只允许 `kernel_gen/dialect/dma/**` 内部按 named import 使用；不得从 `kernel_gen.dialect.dma` root re-export，也不得被 `test/**`、`expectation/**` 或其它 `kernel_gen/**` 模块直接调用。
 - 测试拆分到 `test/dialect/dma/**`，旧大测试文件 `test/dialect/test_dma.py` 不再存在。
 
 ### 模块级补充

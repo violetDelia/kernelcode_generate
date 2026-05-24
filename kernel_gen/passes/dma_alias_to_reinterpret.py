@@ -38,13 +38,12 @@ from xdsl.pattern_rewriter import (
     RewritePattern,
     op_type_rewrite_pattern,
 )
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dialect.dma import DmaReinterpretOp, DmaReshapeOp, DmaSubviewOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolConstOp, SymbolExprAttr, SymbolIterType, SymbolMulOp, SymbolValueType
-from kernel_gen.passes.common import ensure_builtin_module
+from kernel_gen.passes.common import ensure_builtin_module, verify_generated_ops
 from kernel_gen.passes.pass_manager import Pass
 
 
@@ -685,65 +684,79 @@ def _own_offset_material(op: Operation) -> tuple[tuple[Operation, ...], _SymbolM
     return None
 
 
-def _rewrite_plan(
-    op: DmaViewOp | DmaReshapeOp | DmaSubviewOp,
-    shape_operands: Sequence[SSAValue],
-) -> _RewritePlan | None:
-    """构造 alias op 到 `dma.reinterpret` 的 rewrite 计划。
+class _DmaAliasRewritePlanner:
+    """当前文件内的局部 rewrite 规则容器。
 
     功能说明:
-    - 追踪 source alias root 并组合 offset。
-    - shape 复用原 alias op 的公开 shape/size operand。
-    - stride 从 result type 物化，确保 `dma.reinterpret` verifier 的 result type 是合同真源。
+    - 将单个事务式 helper 收进对象方法，避免 private callable 调用 private callable。
+    - 该容器只在当前文件使用，不作为跨文件公开 API。
 
     使用示例:
-    - plan = _rewrite_plan(view_op, view_op.shape)
+    - _DMA_ALIAS_REWRITE.rewrite_plan(...)
     """
 
-    source = _alias_source_value(op)
-    if source is None:
-        return None
-    source_info = _source_alias_info(source, op, frozenset())
-    if source_info is None:
-        return None
-    source_type = _memory_type(source)
-    root_type = _memory_type(source_info.root)
-    result_type = _memory_type(SSAValue.get(op.result))
-    if source_type is None or root_type is None or result_type is None:
-        return None
-    own_offset = _own_offset_material(op)
-    if own_offset is None:
-        return None
-    own_ops, own_material = own_offset
-    combined = _combine_offsets(
-        source_info.offset,
-        own_material,
-        root_type=root_type,
-        inner_source_type=source_type,
-    )
-    if combined is None:
-        return None
-    offset_ops, offset = combined
-    stride_materialized = _materialize_layout(result_type.stride.data, op)
-    if stride_materialized is None:
-        return None
-    stride_ops, stride_values = stride_materialized
-    reinterpret = DmaReinterpretOp(
-        source_info.root,
-        offset.value,
-        tuple(SSAValue.get(value) for value in shape_operands),
-        tuple(material.value for material in stride_values),
-        result_type,
-    )
-    try:
-        reinterpret.verify()
-    except VerifyException:
-        return None
-    return _RewritePlan(
-        (*source_info.ops, *own_ops, *offset_ops, *stride_ops, reinterpret),
-        reinterpret,
-        source_info.cleanup_ops,
-    )
+    @staticmethod
+    def rewrite_plan(
+        op: DmaViewOp | DmaReshapeOp | DmaSubviewOp,
+        shape_operands: Sequence[SSAValue],
+    ) -> _RewritePlan | None:
+        """构造 alias op 到 `dma.reinterpret` 的 rewrite 计划。
+
+        功能说明:
+        - 追踪 source alias root 并组合 offset。
+        - shape 复用原 alias op 的公开 shape/size operand。
+        - stride 从 result type 物化，确保 `dma.reinterpret` verifier 的 result type 是合同真源。
+
+        使用示例:
+        - plan = _DMA_ALIAS_REWRITE.rewrite_plan(view_op, view_op.shape)
+        """
+
+        source = _alias_source_value(op)
+        if source is None:
+            return None
+        source_info = _source_alias_info(source, op, frozenset())
+        if source_info is None:
+            return None
+        source_type = _memory_type(source)
+        root_type = _memory_type(source_info.root)
+        result_type = _memory_type(SSAValue.get(op.result))
+        if source_type is None or root_type is None or result_type is None:
+            return None
+        own_offset = _own_offset_material(op)
+        if own_offset is None:
+            return None
+        own_ops, own_material = own_offset
+        combined = _combine_offsets(
+            source_info.offset,
+            own_material,
+            root_type=root_type,
+            inner_source_type=source_type,
+        )
+        if combined is None:
+            return None
+        offset_ops, offset = combined
+        stride_materialized = _materialize_layout(result_type.stride.data, op)
+        if stride_materialized is None:
+            return None
+        stride_ops, stride_values = stride_materialized
+        reinterpret = DmaReinterpretOp(
+            source_info.root,
+            offset.value,
+            tuple(SSAValue.get(value) for value in shape_operands),
+            tuple(material.value for material in stride_values),
+            result_type,
+        )
+        try:
+            verify_generated_ops([reinterpret])
+        except KernelCodeError:
+            return None
+        return _RewritePlan(
+            (*source_info.ops, *own_ops, *offset_ops, *stride_ops, reinterpret),
+            reinterpret,
+            source_info.cleanup_ops,
+        )
+
+_DMA_ALIAS_REWRITE = _DmaAliasRewritePlanner()
 
 
 def _erase_dead_cleanup_ops(rewriter: PatternRewriter, ops: Sequence[Operation]) -> None:
@@ -777,7 +790,7 @@ class _DmaViewToReinterpretPattern(RewritePattern):
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: DmaViewOp, rewriter: PatternRewriter, /) -> None:
-        plan = _rewrite_plan(op, tuple(op.shape))
+        plan = _DMA_ALIAS_REWRITE.rewrite_plan(op, tuple(op.shape))
         if plan is None:
             return
         rewriter.replace_matched_op(plan.ops, [plan.reinterpret.result])
@@ -796,7 +809,7 @@ class _DmaReshapeToReinterpretPattern(RewritePattern):
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: DmaReshapeOp, rewriter: PatternRewriter, /) -> None:
-        plan = _rewrite_plan(op, tuple(op.shape))
+        plan = _DMA_ALIAS_REWRITE.rewrite_plan(op, tuple(op.shape))
         if plan is None:
             return
         rewriter.replace_matched_op(plan.ops, [plan.reinterpret.result])
@@ -815,7 +828,7 @@ class _DmaSubviewToReinterpretPattern(RewritePattern):
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: DmaSubviewOp, rewriter: PatternRewriter, /) -> None:
-        plan = _rewrite_plan(op, tuple(op.size))
+        plan = _DMA_ALIAS_REWRITE.rewrite_plan(op, tuple(op.size))
         if plan is None:
             return
         rewriter.replace_matched_op(plan.ops, [plan.reinterpret.result])
@@ -905,8 +918,8 @@ class DmaAliasToReinterpretPass(Pass):
         rewritten = module.clone()
         try:
             _rewrite_module(ctx, rewritten)
-            rewritten.verify()
-        except VerifyException as exc:
+            verify_generated_ops([rewritten])
+        except KernelCodeError as exc:
             raise KernelCodeError(
                 ErrorKind.CONTRACT,
                 ErrorModule.PASS,

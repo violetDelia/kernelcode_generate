@@ -17,12 +17,20 @@ API 列表:
 
 from __future__ import annotations
 
-from kernel_gen.dialect.nn.common import raise_verify_error
+from kernel_gen.core.contracts import raise_verify_error as core_raise_verify_error
 from xdsl.dialects.builtin import StringAttr
 from xdsl.irdl import irdl_attr_definition, param_def
 from xdsl.ir import ParametrizedAttribute
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
+
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE, ErrorKind, ErrorModule, kernel_code_error
+
+
+# Localized helpers from retired package-internal modules.
+
+_ERROR_SCENE = "dialect.nn verifier"
+
 
 _VALID_SPACES = {"global", "shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
 
@@ -91,7 +99,7 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
         """
 
         if self.space.data not in _VALID_SPACES:
-            raise_verify_error("nn space must be one of global/shared/local/tsm/tlm1/tlm2/tlm3")
+            core_raise_verify_error(_ERROR_SCENE, "nn space must be one of global/shared/local/tsm/tlm1/tlm2/tlm3")
 
     @classmethod
     def from_name(cls, space: str) -> "NnMemorySpaceAttr":

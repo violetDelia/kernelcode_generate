@@ -27,8 +27,8 @@ from xdsl.dialects.builtin import (
     StringAttr,
     i32,
 )
-from xdsl.utils.exceptions import VerifyException
 
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.core.contracts import (
     build_contiguous_stride,
     collect_int_dims,
@@ -63,7 +63,7 @@ def test_verify_memory_type_success_and_failure() -> None:
     memory_type = _make_memory_type()
     assert verify_memory_type(memory_type, "lhs", scene="common.contracts verifier") is memory_type
 
-    with pytest.raises(VerifyException, match="lhs must be nn.memory"):
+    with pytest.raises(KernelCodeError, match="lhs must be nn.memory"):
         verify_memory_type(StringAttr("bad"), "lhs", scene="common.contracts verifier")
 
 
@@ -84,38 +84,38 @@ def test_verify_i64_attr_family() -> None:
         scene="common.contracts verifier",
     ) == [5, 2]
 
-    with pytest.raises(VerifyException, match="axis must be i64"):
+    with pytest.raises(KernelCodeError, match="axis must be i64"):
         verify_i64_attr(FloatAttr(1.5, Float32Type()), "axis", scene="common.contracts verifier")
-    with pytest.raises(VerifyException, match="axis must be i64"):
+    with pytest.raises(KernelCodeError, match="axis must be i64"):
         verify_i64_attr(IntegerAttr(1, IntegerType(32)), "axis", scene="common.contracts verifier")
-    with pytest.raises(VerifyException, match="axis must be within \\[-2, 1\\]"):
+    with pytest.raises(KernelCodeError, match="axis must be within \\[-2, 1\\]"):
         verify_i64_attr_range(axis, "axis", min_value=-2, max_value=1, scene="common.contracts verifier")
-    with pytest.raises(VerifyException, match="keepdim must be positive"):
+    with pytest.raises(KernelCodeError, match="keepdim must be positive"):
         verify_i64_attr_value(IntegerAttr(0, IntegerType(64)), "keepdim", allow_zero=False, scene="common.contracts verifier")
-    with pytest.raises(VerifyException, match="keepdim must be non-negative"):
+    with pytest.raises(KernelCodeError, match="keepdim must be non-negative"):
         verify_i64_attr_value(IntegerAttr(-1, IntegerType(64)), "keepdim", allow_zero=True, scene="common.contracts verifier")
-    with pytest.raises(VerifyException, match="kw-sw must be positive"):
+    with pytest.raises(KernelCodeError, match="kw-sw must be positive"):
         verify_i64_attr_group(
             [FloatAttr(1.5, Float32Type())],  # type: ignore[list-item]
             allow_zero=False,
             error_phrase="kw-sw must be positive",
             scene="common.contracts verifier",
         )
-    with pytest.raises(VerifyException, match="kw-sw must be positive"):
+    with pytest.raises(KernelCodeError, match="kw-sw must be positive"):
         verify_i64_attr_group(
             [IntegerAttr(-1, IntegerType(64))],
             allow_zero=True,
             error_phrase="kw-sw must be positive",
             scene="common.contracts verifier",
         )
-    with pytest.raises(VerifyException, match="kw-sw must be positive"):
+    with pytest.raises(KernelCodeError, match="kw-sw must be positive"):
         verify_i64_attr_group(
             [positive, IntegerAttr(0, IntegerType(64))],
             allow_zero=False,
             error_phrase="kw-sw must be positive",
             scene="common.contracts verifier",
         )
-    with pytest.raises(VerifyException, match="kw-sw must be positive"):
+    with pytest.raises(KernelCodeError, match="kw-sw must be positive"):
         verify_i64_attr_group(
             [wider, positive],
             allow_zero=False,

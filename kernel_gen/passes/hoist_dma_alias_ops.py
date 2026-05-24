@@ -40,12 +40,12 @@ from xdsl.ir import Attribute, Block, BlockArgument, Operation, SSAValue
 from xdsl.pattern_rewriter import GreedyRewritePatternApplier, PatternRewriter, PatternRewriteWalker, RewritePattern
 from xdsl.rewriter import InsertPoint
 from xdsl.traits import MemoryEffectKind, get_effects
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.dma import DmaBroadcastOp, DmaReinterpretOp, DmaReshapeOp, DmaViewOp
+from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolForOp, SymbolValueType
-from kernel_gen.passes.common import ensure_builtin_module
+from kernel_gen.passes.common import ensure_builtin_module, verify_generated_ops
 from kernel_gen.passes.pass_manager import Pass
 
 
@@ -606,34 +606,48 @@ def _restore_alias_after_failed_move(block: Block, alias: Operation, original_ne
         block.add_op(alias)
 
 
-def _move_alias_before_writer(module: ModuleOp, alias: Operation, writer: Operation, rewriter: PatternRewriter) -> bool:
-    """执行一次 alias 穿过 writer 的事务式改写。
+class _HoistAliasMover:
+    """当前文件内的局部 rewrite 规则容器。
 
     功能说明:
-    - 复用原 alias op/result，不新建 alias。
-    - 先把 alias 插到 writer 前，再把 writer target 改为 alias result。
-    - `module.verify()` 失败时撤回 alias 位置和 writer target，保证原 module 不被部分改写。
+    - 将单个事务式 helper 收进对象方法，避免 private callable 调用 private callable。
+    - 该容器只在当前文件使用，不作为跨文件公开 API。
 
     使用示例:
-    - changed = _move_alias_before_writer(module, alias, writer, rewriter)
+    - _HOIST_ALIAS_MOVER.move_alias_before_writer(...)
     """
 
-    block = alias.parent_block()
-    if block is None or writer.parent_block() is not block or not alias.results or not writer.operands:
-        return False
-    original_next = alias.next_op
-    original_target = writer.operands[0]
-    alias.detach()
-    rewriter.insert_op(alias, InsertPoint.before(writer))
-    writer.operands[0] = alias.results[0]
-    try:
-        module.verify()
-    except VerifyException:
-        writer.operands[0] = original_target
-        _restore_alias_after_failed_move(block, alias, original_next)
-        return False
-    rewriter.notify_op_modified(writer)
-    return True
+    @staticmethod
+    def move_alias_before_writer(module: ModuleOp, alias: Operation, writer: Operation, rewriter: PatternRewriter) -> bool:
+        """执行一次 alias 穿过 writer 的事务式改写。
+
+        功能说明:
+        - 复用原 alias op/result，不新建 alias。
+        - 先把 alias 插到 writer 前，再把 writer target 改为 alias result。
+        - `module.verify()` 失败时撤回 alias 位置和 writer target，保证原 module 不被部分改写。
+
+        使用示例:
+        - changed = _HOIST_ALIAS_MOVER.move_alias_before_writer(module, alias, writer, rewriter)
+        """
+
+        block = alias.parent_block()
+        if block is None or writer.parent_block() is not block or not alias.results or not writer.operands:
+            return False
+        original_next = alias.next_op
+        original_target = writer.operands[0]
+        alias.detach()
+        rewriter.insert_op(alias, InsertPoint.before(writer))
+        writer.operands[0] = alias.results[0]
+        try:
+            verify_generated_ops([module])
+        except KernelCodeError:
+            writer.operands[0] = original_target
+            _restore_alias_after_failed_move(block, alias, original_next)
+            return False
+        rewriter.notify_op_modified(writer)
+        return True
+
+_HOIST_ALIAS_MOVER = _HoistAliasMover()
 
 
 def _same_block_insert_point(alias: Operation) -> InsertPoint | None:
@@ -802,7 +816,7 @@ class DmaAliasThroughWriteNoReadPattern(RewritePattern):
         writer = op.prev_op
         if writer is None or not _alias_can_retarget_writer(op, writer):
             return
-        if not _move_alias_before_writer(self.module, op, writer, rewriter):
+        if not _HOIST_ALIAS_MOVER.move_alias_before_writer(self.module, op, writer, rewriter):
             self._rejected_alias_ids.add(id(op))
 
 
@@ -934,8 +948,8 @@ class DmaAliasHoistPattern(RewritePattern):
                     originals.append((user, operand_index, user.operands[operand_index]))
                 if has_broadcast_source_use and originals:
                     try:
-                        self.module.verify()
-                    except VerifyException:
+                        verify_generated_ops([self.module])
+                    except KernelCodeError:
                         module_was_valid = False
                     else:
                         module_was_valid = True
@@ -943,10 +957,10 @@ class DmaAliasHoistPattern(RewritePattern):
                         user.operands[operand_index] = source
                     try:
                         for user, _operand_index, _original in originals:
-                            user.verify()
+                            verify_generated_ops([user])
                         if module_was_valid:
-                            self.module.verify()
-                    except VerifyException:
+                            verify_generated_ops([self.module])
+                    except KernelCodeError:
                         for user, operand_index, original in originals:
                             user.operands[operand_index] = original
                     else:

@@ -3,7 +3,7 @@
 
 功能说明:
 - 提供 kernel_gen 内部可复用的类型、shape、dtype 与 verifier 辅助逻辑。
-- 错误模板文字统一从 `kernel_gen.core.error` 读取。
+- 错误模板文字统一从 `kernel_gen.core.error` 读取，失败统一抛出 `KernelCodeError`。
 - 该模块仅承载公共实现，不改变 dialect/operation/symbol_variable 的对外合同。
 
 API 列表:
@@ -37,9 +37,8 @@ from collections.abc import Sequence
 
 from xdsl.dialects.builtin import IntAttr, IntegerAttr, IntegerType
 from xdsl.ir import Attribute
-from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE, ErrorKind, ErrorModule, kernel_code_error
 
 __all__ = [
     "build_contiguous_stride",
@@ -95,13 +94,15 @@ def raise_verify_error(
     - 功能实现: kernel_gen/core/contracts.py
     """
 
-    raise VerifyException(
+    raise kernel_code_error(
+        ErrorKind.VERIFY,
+        ErrorModule.DIALECT,
         ERROR_TEMPLATE.format(
             scene=scene,
             expected=expected,
             actual=actual,
             action=action,
-        )
+        ),
     )
 
 

@@ -11,11 +11,8 @@
 - `class ArchParallelizePass(target: str = "npu_demo", parallel_level: str = "block")`
 - `ArchParallelizePass.from_options(options: dict[str, str]) -> ArchParallelizePass`
 - `ArchParallelizePass.apply(ctx: Context, module: ModuleOp) -> None`
-- `class _ArchParallelizeFuncPattern(block_num: int)`
-- `_ArchParallelizeFuncPattern.match_and_rewrite(op: func.FuncOp, rewriter: PatternRewriter) -> None`
 - `kernel_gen.passes.ArchParallelizePass`
 - `kernel_gen.passes.arch_parallelize.ArchParallelizePass`
-- `kernel_gen.passes.arch_parallelize._ArchParallelizeFuncPattern`
 - `build_registered_pass("arch-parallelize", options: dict[str, str] | None = None) -> ModulePass`
 
 ## 文档信息
@@ -34,6 +31,7 @@
 - `xdsl.dialects.arith`：公开 `arith.constant`，用于识别 loop body 内标量 fill 等只读常量 setup 前缀。
 - `kernel_gen.target.registry`：公开 `is_arch_op_supported(target, op_name)` 与 `get_target_hardware(target, key)`，用于校验 target 与读取静态 `block_num`。
 - `kernel_gen.passes.registry`：公开 pass registry 名称 `arch-parallelize`。
+- 本 pass 内部实现使用私有 `func.FuncOp` root pattern 驱动函数级改写；该 pattern 不属于公开 API，外部代码与测试不得跨文件 import 或直接调用。
 
 ## 目标
 
@@ -54,7 +52,7 @@
 - 非入口函数无顶层 loop 时必须生成 `arch.get_block_id` + `scf.if` block0 guard，只允许 block0 执行原 body。
 - 本 pass 的失败通过 `KernelCodeError` 暴露，稳定错误短语以 `ArchParallelizePassError:` 或 `ArchParallelizePassVerifierError:` 开头。
 - `kernel_gen.passes.arch_parallelize` package root 是唯一 canonical public module path；内部实现文件 `kernel_gen.passes.arch_parallelize.arch_parallelize` 只承载实现，不作为外部 caller import path。
-- `_ArchParallelizeFuncPattern` 虽以下划线开头，但已由用户确认作为公开 pattern API；该公开范围只到 `kernel_gen.passes.arch_parallelize` package root，不 re-export 到 `kernel_gen.passes` 顶层。
+- 内部 `FuncOp` root pattern 是当前实现细节，不从 `kernel_gen.passes.arch_parallelize` package root 或 `kernel_gen.passes` 顶层 re-export。
 - 默认 `npu-demo-lowering` 直接接入本 pass；多个顶层 loop、loop-carried 和 unsupported loop structure 等结构不支持错误继续按本 pass 公开失败合同暴露。
 - `expectation/pass/arch_parallelize/**` 只作为主仓合同验收资产；任务 worktree 不得复制、修改、新建、移动、删除或同步该目录。
 
@@ -120,27 +118,7 @@
   - 顶层 loop 同级出现非允许 setup 前缀 op，或允许 setup 位于 loop 之后时，必须失败为 `ArchParallelizePassError: unsupported loop structure`。
   - `arith.constant`、`memory.get_data`、`symbol.cast`、`symbol.ne` 只在唯一顶层 loop 前作为无副作用 / 只读 setup 前缀放行；其 operand 必须来自函数参数或更早已放行 setup result。
 
-### `class _ArchParallelizeFuncPattern(block_num: int)`
-
-- api：`class _ArchParallelizeFuncPattern(block_num: int)`
-- 参数：
-  - `block_num`：目标硬件 block 数；类型 `int`；必须由 `ArchParallelizePass.apply(...)` 预校验为正整数；pattern 构造本身不新增独立稳定错误文本。
-- 返回值：`RewritePattern` 实例；只通过 `kernel_gen.passes.arch_parallelize` package root 公开。
-- 使用示例：
-
-  ```python
-  from kernel_gen.passes.arch_parallelize import _ArchParallelizeFuncPattern
-
-  pattern = _ArchParallelizeFuncPattern(block_num=2)
-  ```
-
-- 功能说明：以 `func.FuncOp` 为 root 承接函数级 block 并行改写；声明函数和 `entry_point` host dispatcher 保持 no-op，非入口函数继续执行既有 loop / no-loop 判断。
-- 注意事项：
-  - 该 class 仅通过 `kernel_gen.passes.arch_parallelize._ArchParallelizeFuncPattern` 公开，不进入 `kernel_gen.passes` 顶层 `__all__`。
-  - 外部 caller 不得从内部实现模块 `kernel_gen.passes.arch_parallelize.arch_parallelize` 导入该 pattern。
-  - 该 pattern 的稳定错误语义来自当前文件函数级 helper，与 `ArchParallelizePass.apply(...)` 保持一致。
-
-#### `_ArchParallelizeFuncPattern` IR 合同
+### 内部 `FuncOp` root pattern IR 合同
 
 - before:
 
@@ -170,24 +148,8 @@
   }
   ```
 
-- 同一 `_ArchParallelizeFuncPattern` 对无 `symbol.for` 的非入口函数使用 `scf.if` block0 guard。
-
-### `_ArchParallelizeFuncPattern.match_and_rewrite(op: func.FuncOp, rewriter: PatternRewriter) -> None`
-
-- api：`_ArchParallelizeFuncPattern.match_and_rewrite(op: func.FuncOp, rewriter: PatternRewriter) -> None`
-- 参数：
-  - `op`：待匹配的函数；类型 `func.FuncOp`；声明函数和 `entry_point` host dispatcher no-op。
-  - `rewriter`：xDSL pattern rewriter；类型 `PatternRewriter`；本 pattern 当前只通过公开 IR helper 原地改写函数体，不直接使用 rewriter 执行跨 block 替换。
-- 返回值：`None`；直接改写 `op` 或保持 no-op。
-- 使用示例：
-
-  ```python
-  # 由 PatternRewriteWalker 驱动；公开 caller 通常不直接调用本方法。
-  pattern.match_and_rewrite(func_op, rewriter)
-  ```
-
-- 功能说明：按 `func.FuncOp` root 执行 arch-parallelize 函数级改写。
-- 注意事项：测试和调用方应通过 package root 导入 pattern，不得直连内部实现模块或当前文件私有 helper。
+- 同一内部 pattern 对无 `symbol.for` 的非入口函数使用 `scf.if` block0 guard。
+- 测试只能通过 `ArchParallelizePass.apply(...)`、registry 或源码 AST 核对验证该实现结构，不得跨文件 import 或直接调用内部 pattern。
 
 ### `build_registered_pass("arch-parallelize", options: dict[str, str] | None = None) -> ModulePass`
 

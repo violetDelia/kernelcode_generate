@@ -75,7 +75,7 @@ def test_dma_reinterpret_rejects_public_contract_edges() -> None:
     offset, two, four, one = _make_symbol_operands([0, 2, 4, 1])
     result_type = _make_memory_type(shape=_dim_array([2, 4]), stride=_dim_array([4, 1]), element_type=i32)
 
-    with pytest.raises(VerifyException, match="element_type mismatch"):
+    with pytest.raises(KernelCodeError, match="element_type mismatch"):
         DmaReinterpretOp(
             source,
             offset,
@@ -84,7 +84,7 @@ def test_dma_reinterpret_rejects_public_contract_edges() -> None:
             _make_memory_type(shape=_dim_array([2, 4]), stride=_dim_array([4, 1]), element_type=i1),
         ).verify()
 
-    with pytest.raises(VerifyException, match="space mismatch"):
+    with pytest.raises(KernelCodeError, match="space mismatch"):
         DmaReinterpretOp(
             source,
             offset,
@@ -93,21 +93,21 @@ def test_dma_reinterpret_rejects_public_contract_edges() -> None:
             _make_memory_type(shape=_dim_array([2, 4]), stride=_dim_array([4, 1]), space="shared"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="shape must match result shape"):
+    with pytest.raises(KernelCodeError, match="shape must match result shape"):
         DmaReinterpretOp(source, offset, [four, two], [four, one], result_type).verify()
 
-    with pytest.raises(VerifyException, match="stride must match result stride"):
+    with pytest.raises(KernelCodeError, match="stride must match result stride"):
         DmaReinterpretOp(source, offset, [two, four], [one, one], result_type).verify()
 
-    with pytest.raises(VerifyException, match="offset entries must be !symbol.int or !symbol.iter"):
+    with pytest.raises(KernelCodeError, match="offset entries must be !symbol.int or !symbol.iter"):
         DmaReinterpretOp(source, _TestOp(result_types=[IndexType()]).results[0], [two, four], [four, one], result_type).verify()
 
-    with pytest.raises(VerifyException, match="bounds mismatch"):
+    with pytest.raises(KernelCodeError, match="bounds mismatch"):
         DmaReinterpretOp(source, _make_symbol_operands([1])[0], [two, four], [four, one], result_type).verify()
 
     pool_type = _make_memory_type(shape=_dim_array([31]), stride=_dim_array([1]), element_type=i8, space="shared")
     pool = _TestOp(result_types=[pool_type]).results[0]
-    with pytest.raises(VerifyException, match="byte bounds mismatch"):
+    with pytest.raises(KernelCodeError, match="byte bounds mismatch"):
         DmaReinterpretOp(
             pool,
             _make_symbol_operands([0])[0],
