@@ -599,16 +599,18 @@ def _memory_type_of(value: SSAValue) -> NnMemoryType | None:
     return value_type if isinstance(value_type, NnMemoryType) else None
 
 
-def _memory_types_match(lhs: SSAValue, rhs: SSAValue) -> bool:
-    """判断两个 memory value 是否拥有相同公开类型文本。
+def _memory_types_match(lhs: SSAValue, rhs: SSAValue, *, require_same_space: bool = True) -> bool:
+    """判断两个 memory value 是否拥有相同布局。
 
 
     功能说明:
-    - 用于 `dma.copy` 这类整块复制的 full-write 判定。
-    - 类型文本不一致时保守视为非完整 root write。
+    - 默认要求 shape、stride、element_type 与 memory space 全部一致，服务 alias full-cover 判定。
+    - `dma.copy` 的公开 verifier 只要求 shape、stride、element_type 一致；该场景可关闭 same-space 要求。
+    - 非 memory value 或布局不一致时保守视为非完整 root write。
 
     使用示例:
     - if _memory_types_match(target, source): ...
+    - if _memory_types_match(target, source, require_same_space=False): ...
 
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
@@ -616,9 +618,17 @@ def _memory_types_match(lhs: SSAValue, rhs: SSAValue) -> bool:
     - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
     """
 
-    lhs_type = _memory_type_of(lhs)
-    rhs_type = _memory_type_of(rhs)
-    return lhs_type is not None and rhs_type is not None and str(lhs_type) == str(rhs_type)
+    lhs_type = SSAValue.get(lhs).type
+    rhs_type = SSAValue.get(rhs).type
+    if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
+        return False
+    if require_same_space and lhs_type.space != rhs_type.space:
+        return False
+    return (
+        lhs_type.shape == rhs_type.shape
+        and lhs_type.stride == rhs_type.stride
+        and lhs_type.element_type == rhs_type.element_type
+    )
 
 
 def _sizes_cover_memory_shape(sizes: Iterable[SSAValue], memory_type: NnMemoryType) -> bool:
@@ -848,7 +858,8 @@ def _write_use_covers_root(use: Use, *, alias_covers_root: bool) -> bool:
     功能说明:
     - alias result 只有覆盖 source root 时，写入 alias 才能证明 root 被完整 reset。
     - `dma.fill`、`dma.broadcast` target、`dma.slice` target 与 `kernel.*` out 视为完整写入当前 memory value。
-    - `dma.copy` / `dma.deslice` 需要额外证明整块覆盖；partial write 不能证明后续 root read。
+    - `dma.copy` 按公开 verifier 的 shape/stride/element_type 合同证明 target 整块覆盖，可跨 memory space。
+    - `dma.deslice` 需要额外证明整块覆盖；partial write 不能证明后续 root read。
 
     使用示例:
     - full_write = _write_use_covers_root(use, alias_covers_root=True)
@@ -865,7 +876,7 @@ def _write_use_covers_root(use: Use, *, alias_covers_root: bool) -> bool:
     if isinstance(user, (DmaFillOp, DmaBroadcastOp, DmaSliceOp)) and use.index == 0:
         return True
     if isinstance(user, DmaCopyOp) and use.index == 0:
-        return _memory_types_match(SSAValue.get(user.target), SSAValue.get(user.source))
+        return _memory_types_match(SSAValue.get(user.target), SSAValue.get(user.source), require_same_space=False)
     if isinstance(user, DmaDesliceOp) and use.index == 0:
         return _deslice_writes_full_target(user)
     return user.name.startswith("kernel.") and MemoryEffectKind.WRITE in (_effect_kinds_for_use(use) or set())

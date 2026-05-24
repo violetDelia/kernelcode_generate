@@ -937,6 +937,50 @@ def _build_kernel_lifecycle_reset_module() -> ModuleOp:
     return ModuleOp([func_op])
 
 
+def build_copy_cross_space_full_write_module() -> ModuleOp:
+    """构造 dma.copy 跨 memory space 完整写入的正例 module。
+
+
+    功能说明:
+    - `dma.copy(target=alloc, source=arg)` 的 source/target shape、stride、dtype 相同但 memory space 不同。
+    - copy 后的 `kernel.binary_elewise` 读取 alloc，应由 copy target WRITE 证明 alloc root 已完整 reset。
+
+    使用示例:
+    - module = build_copy_cross_space_full_write_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    source_type = _memory_type((4, 4), space="tsm")
+    tile_type = _memory_type((4, 4), space="tlm1")
+    zero = _const_symbol(0)
+    one = _const_symbol(1)
+    top_block = Block(arg_types=[source_type, tile_type, tile_type])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    alloc = DmaAllocOp([], tile_type)
+    copy = DmaCopyOp(alloc.result, top_block.args[0])
+    kernel_use = KernelBinaryElewiseOp(
+        top_block.args[1],
+        alloc.result,
+        top_block.args[2],
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("tlm1"),
+    )
+    free = DmaFreeOp(alloc.result)
+    loop_block.add_ops([alloc, copy, kernel_use, free])
+    loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
+    top_block.add_ops([zero, one, loop, func.ReturnOp()])
+    func_op = func.FuncOp(
+        "copy_cross_space_full_write_case",
+        FunctionType.from_lists([source_type, tile_type, tile_type], []),
+        Region(top_block),
+    )
+    return ModuleOp([func_op])
+
+
 def _build_kernel_lifecycle_read_before_write_module() -> ModuleOp:
     """构造 kernel read 早于 reset/write 的反例 module。
 
@@ -1980,6 +2024,33 @@ def test_symbol_buffer_hoist_hoists_alloc_when_kernel_read_is_reset_by_fill() ->
     assert fill.target is top_alloc.result
     assert kernel_use.out is top_alloc.result
     assert kernel_use.lhs is top_alloc.result
+    assert _free_source_is(top_free, top_alloc.result)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H1A
+# 功能说明: 验证 dma.copy 跨 memory space 但 shape/stride/dtype 一致时可证明 target 完整写。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_alloc_when_copy_cross_space_full_write_resets_kernel_read
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_alloc_when_copy_cross_space_full_write_resets_kernel_read() -> None:
+    module = build_copy_cross_space_full_write_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, loop_op, loop_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_alloc = next(op for op in top_ops if isinstance(op, DmaAllocOp))
+    top_free = next(op for op in top_ops if isinstance(op, DmaFreeOp))
+    loop_index = top_ops.index(loop_op)
+    copy = next(op for op in loop_block.ops if isinstance(op, DmaCopyOp))
+    kernel_use = next(op for op in loop_block.ops if isinstance(op, KernelBinaryElewiseOp))
+
+    assert top_ops.index(top_alloc) < loop_index < top_ops.index(top_free)
+    assert copy.target is top_alloc.result
+    assert copy.source is top_block.args[0]
+    assert kernel_use.lhs is top_alloc.result
+    assert kernel_use.out is top_block.args[1]
     assert _free_source_is(top_free, top_alloc.result)
 
 

@@ -173,6 +173,7 @@ symbol.for value {
   - nested `symbol.for` 内 alloc/free 若先由 `dma.fill` 等完整 write reset 后再被读取，且唯一 `dma.free` 位于 owner body 内所有 data use 之后，则 fixed-point 可把 alloc/free 逐层外提到最外层 loop 前后。
   - owner block 内的 `dma.fill` 支配 nested `symbol.for` 中后续 `kernel.*` read/write 时，acc buffer 的 alloc/free 可成对外提。
   - owner block 内的 `dma.fill` 或其它完整 reset/write 支配 nested `symbol.for` 中后续 `dma.deslice source` READ 时，alloc/free 可成对外提。
+  - `dma.copy(target=buf, source=other)` 作为 target WRITE 时，只要 target/source 的 shape、stride 与 element_type 相同，即使 memory space 不同，也可证明 target root 已完整 reset；alias full-cover 判定仍要求同 space。
   - nested `scf.if` 的 conditional write 只有在同一个 region block 内且 textual order 上早于后续 read 时可作为 reset/write proof；分支内 write 不证明 merge 点 read，跨分支、sibling region、owner loop 外 region 或不可定位 parent chain 均必须 no-op。
 - 当前公开反例固定为：
   - `dma.alloc` 的 shape 依赖 loop-carried 值时，alloc 必须保留在 loop 内。
@@ -330,6 +331,7 @@ symbol.for value {
 | TC-PASS-SYMBOL-BUFFER-HOIST-025 | no-op 边界 | unknown call use / effect escape | 准备 loop 内 alloc 先被 `dma.fill`，再传给无公开 `MemoryEffect` 的 `func.call`，最后唯一 free。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_keeps_alloc_when_unknown_call_uses_buffer`。 | unknown call use 阻止 lifecycle proof，alloc/free 保持原位。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_keeps_alloc_when_unknown_call_uses_buffer |
 | TC-PASS-SYMBOL-BUFFER-HOIST-026 | no-op 边界 | nested loop write 可能不执行 | 准备 nested `symbol.for` 内 write、owner body 后续 read 和唯一 free。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_keeps_alloc_when_nested_loop_write_may_not_run`。 | nested write 不支配 loop 后 read，alloc/free 保持原位。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_keeps_alloc_when_nested_loop_write_may_not_run |
 | TC-PASS-SYMBOL-BUFFER-HOIST-027 | no-op 边界 | partial alias write 后 root read | 准备 byte pool alloc、typed `dma.subview` 局部 fill、随后完整 root `dma.copy` read。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_keeps_alloc_when_partial_write_precedes_full_read`。 | partial write 不能证明 root reset，alloc/free 保持原位。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_keeps_alloc_when_partial_write_precedes_full_read |
+| TC-PASS-SYMBOL-BUFFER-HOIST-028 | pass 改写 | `dma.copy` 跨 memory space 但布局/dtype 相同 | 准备 loop 内 alloc target 与 loop 外 source 的 shape、stride、element_type 相同但 space 不同，copy 后再由 `kernel.*` 读取 alloc。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_alloc_when_copy_cross_space_full_write_resets_kernel_read`。 | copy target WRITE 证明 alloc root 完整 reset，alloc/free 成对外提，copy 与后续 kernel read 留在 loop 内并捕获外提 buffer。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_alloc_when_copy_cross_space_full_write_resets_kernel_read |
 
 ## Pattern MLIR before / after 合同
 
