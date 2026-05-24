@@ -33,6 +33,14 @@
 - `SymbolMinHoistPattern.match_and_rewrite(op: SymbolMinOp, rewriter: PatternRewriter) -> None`
 - `class SymbolMaxHoistPattern()`
 - `SymbolMaxHoistPattern.match_and_rewrite(op: SymbolMaxOp, rewriter: PatternRewriter) -> None`
+- `class ArithConstantHoistPattern()`
+- `ArithConstantHoistPattern.match_and_rewrite(op: arith.ConstantOp, rewriter: PatternRewriter) -> None`
+- `class MemoryGetDataHoistPattern()`
+- `MemoryGetDataHoistPattern.match_and_rewrite(op: MemoryGetDataOp, rewriter: PatternRewriter) -> None`
+- `class SymbolCastHoistPattern()`
+- `SymbolCastHoistPattern.match_and_rewrite(op: SymbolCastOp, rewriter: PatternRewriter) -> None`
+- `class SymbolNeHoistPattern()`
+- `SymbolNeHoistPattern.match_and_rewrite(op: SymbolNeOp, rewriter: PatternRewriter) -> None`
 - `get_symbol_loop_hoist_patterns() -> list[RewritePattern]`
 
 ## 文档信息
@@ -50,6 +58,7 @@
 - pass 调度与顺序约束：[`spec/pass/pass_manager.md`](../../spec/pass/pass_manager.md)
 - pass 注册入口：[`spec/pass/registry.md`](../../spec/pass/registry.md)
 - Symbol dialect：[`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)
+- Memory dialect：[`spec/dialect/memory.md`](../../spec/dialect/memory.md)
 - Tuner dialect：[`spec/dialect/tuner.md`](../../spec/dialect/tuner.md)
 
 ## 目标
@@ -78,6 +87,10 @@
   - `symbol.get_dim`
   - `symbol.get_stride`
   - `symbol.add/sub/mul/div/floordiv/min/max`
+  - `arith.constant`
+  - `memory.get_data`
+  - `symbol.cast`
+  - `symbol.ne`
 - 未列入白名单的 op 一律不由本 pass 主动处理：
   - 不承诺外提
   - 不承诺显式错误
@@ -311,6 +324,12 @@ SymbolLoopHoistPass().apply(Context(), module)
 - `SymbolMulHoistPattern`
 - `SymbolDivHoistPattern`
 - `SymbolFloorDivHoistPattern`
+- `SymbolMinHoistPattern`
+- `SymbolMaxHoistPattern`
+- `ArithConstantHoistPattern`
+- `MemoryGetDataHoistPattern`
+- `SymbolCastHoistPattern`
+- `SymbolNeHoistPattern`
 
 - 功能说明：
 
@@ -516,6 +535,58 @@ assert isinstance(patterns[0], SymbolConstHoistPattern)
   ```
 - 功能说明：定义 `symbol.max` 的 loop-invariant rewrite pattern 对象。
 - 注意事项：仅当 `symbol.max` 的全部 operand 定义在当前 loop body 外部时才允许外提；依赖 loop iterator 或 loop-carried 值时保持 no-op。
+
+### `class ArithConstantHoistPattern()`
+
+- api：`class ArithConstantHoistPattern()`
+- 参数：无。
+- 返回值：`ArithConstantHoistPattern` 实例。
+- 使用示例：
+
+  ```python
+  arith_constant_hoist_pattern = ArithConstantHoistPattern()
+  ```
+- 功能说明：定义 `arith.constant` 的 loop-invariant rewrite pattern 对象。
+- 注意事项：仅处理 `symbol.for` direct body 内的 `arith.constant`；nested region 内的 `arith.constant` 不跨 region 外提。
+
+### `class MemoryGetDataHoistPattern()`
+
+- api：`class MemoryGetDataHoistPattern()`
+- 参数：无。
+- 返回值：`MemoryGetDataHoistPattern` 实例。
+- 使用示例：
+
+  ```python
+  memory_get_data_hoist_pattern = MemoryGetDataHoistPattern()
+  ```
+- 功能说明：定义 `memory.get_data` 的 loop-invariant rewrite pattern 对象。
+- 注意事项：仅当 source memory 定义在当前 loop body 外部时才允许外提；source memory 由当前 loop body 生产时保持 no-op。
+
+### `class SymbolCastHoistPattern()`
+
+- api：`class SymbolCastHoistPattern()`
+- 参数：无。
+- 返回值：`SymbolCastHoistPattern` 实例。
+- 使用示例：
+
+  ```python
+  symbol_cast_hoist_pattern = SymbolCastHoistPattern()
+  ```
+- 功能说明：定义 `symbol.cast` 的 loop-invariant rewrite pattern 对象。
+- 注意事项：仅当 `symbol.cast` operand 定义在当前 loop body 外部时才允许外提；依赖 loop-local `memory.get_data` 或 loop-carried 值时保持 no-op。
+
+### `class SymbolNeHoistPattern()`
+
+- api：`class SymbolNeHoistPattern()`
+- 参数：无。
+- 返回值：`SymbolNeHoistPattern` 实例。
+- 使用示例：
+
+  ```python
+  symbol_ne_hoist_pattern = SymbolNeHoistPattern()
+  ```
+- 功能说明：定义 `symbol.ne` 的 loop-invariant rewrite pattern 对象。
+- 注意事项：仅当 `symbol.ne` 的两个 operand 都定义在当前 loop body 外部时才允许外提；依赖 loop iterator、loop-carried 值或 loop-local guard 链时保持 no-op。
 
 ### `get_symbol_loop_hoist_patterns() -> list[RewritePattern]`
 
@@ -763,6 +834,82 @@ symbol.for %i = %c0 to %n step %c1 {
 }
 ```
 
+### `ArithConstantHoistPattern`
+
+- pattern 作用：把 `symbol.for` direct body 内的 `arith.constant` 外提；nested region 内的 `arith.constant` no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %v = arith.constant 1.000000e+00 : f32
+}
+```
+
+- after:
+
+```mlir
+%v = arith.constant 1.000000e+00 : f32
+symbol.for %i = %c0 to %n step %c1 {
+}
+```
+
+### `MemoryGetDataHoistPattern`
+
+- pattern 作用：把 source memory 来自 loop 外的 `memory.get_data` 外提；source memory 由 loop body 生产时 no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %ptr = memory.get_data %mem : !nn.memory<...> -> !symbol.ptr<f32>
+}
+```
+
+- after:
+
+```mlir
+%ptr = memory.get_data %mem : !nn.memory<...> -> !symbol.ptr<f32>
+symbol.for %i = %c0 to %n step %c1 {
+}
+```
+
+### `SymbolCastHoistPattern`
+
+- pattern 作用：把 operand 来自 loop 外的 `symbol.cast` 外提；依赖 loop-local SSA 时 no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %addr = symbol.cast %ptr : !symbol.ptr<f32> -> !symbol.int<#symbol.expr<?>>
+}
+```
+
+- after:
+
+```mlir
+%addr = symbol.cast %ptr : !symbol.ptr<f32> -> !symbol.int<#symbol.expr<?>>
+symbol.for %i = %c0 to %n step %c1 {
+}
+```
+
+### `SymbolNeHoistPattern`
+
+- pattern 作用：把两个 operand 都来自 loop 外的 `symbol.ne` 外提；依赖 loop iterator、loop-carried 值或 loop-local guard 链时 no-op。
+- before:
+
+```mlir
+symbol.for %i = %c0 to %n step %c1 {
+  %cond = symbol.ne %addr, %c0 : !symbol.int<#symbol.expr<?>>, !symbol.int<#symbol.expr<0>> -> i1
+}
+```
+
+- after:
+
+```mlir
+%cond = symbol.ne %addr, %c0 : !symbol.int<#symbol.expr<?>>, !symbol.int<#symbol.expr<0>> -> i1
+symbol.for %i = %c0 to %n step %c1 {
+}
+```
+
 ## 测试
 
 - 测试文件：
@@ -778,6 +925,7 @@ symbol.for %i = %c0 to %n step %c1 {
 - 验证 SymbolDim、shape、stride、axis 或 symbol IR 语义。
 - 验证公开导入、注册名、CLI 或命名空间入口只暴露 spec 定义的 API。
 - 验证 cost kind、tuning 属性和调优 IR 输出。
+- 验证 `arith.constant` direct body 外提、nested region no-op，以及 `memory.get_data -> symbol.cast -> symbol.ne` presence guard 链在静态 / 动态 source 上外提、loop-local source no-op。
 
 
 ### 功能与用例清单
@@ -790,6 +938,10 @@ symbol.for %i = %c0 to %n step %c1 {
 | TC-PASS-SYMBOL-LOOP-HOIST-004 | 成本/调优 | `tuner.param` 外提。 | 准备公开 cost kind、kernel/DMA 参数或 tuning IR 输入。 | 运行 `TC-SLH-001C`。 | 成本函数、tuning 属性或 cost IR 输出体现“`tuner.param` 外提。”场景。 | `TC-SLH-001C` |
 | TC-PASS-SYMBOL-LOOP-HOIST-005 | 符号语义 | `symbol.add/sub/mul/div/floordiv` 外提。 | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `TC-SLH-001D`。 | 符号表达、shape/stride/axis 结果或 symbol IR 文本体现“`symbol.add/sub/mul/div/floordiv` 外提。”场景。 | `TC-SLH-001D` |
 | TC-PASS-SYMBOL-LOOP-HOIST-005A | 符号语义 | `symbol.min/max` 外提。 | 准备公开 SymbolDim、shape、stride、axis 或 symbol IR 输入。 | 运行 `pytest -q test/passes/test_symbol_loop_hoist.py -k "min_max"`。 | loop-invariant 的 `symbol.min/max` 被外提；依赖 loop-carried 值的 `symbol.min/max` 保持原位。 | `pytest -q test/passes/test_symbol_loop_hoist.py -k "min_max"` |
+| TC-PASS-SYMBOL-LOOP-HOIST-005B | pass 改写 | `arith.constant` direct body 外提。 | 准备 direct body 内含 `arith.constant` 的 `symbol.for`。 | 运行 `pytest -q test/passes/test_symbol_loop_hoist.py -k "arith_constant"`。 | `arith.constant` 位于 `symbol.for` 前。 | `test_symbol_loop_hoist_hoists_arith_constant_direct_body` |
+| TC-PASS-SYMBOL-LOOP-HOIST-005C | pass 改写 | nested region `arith.constant` no-op。 | 准备 `symbol.for` 内 `scf.if` 包裹的 `arith.constant`。 | 运行 `pytest -q test/passes/test_symbol_loop_hoist.py -k "nested_arith_constant"`。 | `arith.constant` 仍位于 `scf.if` region 内。 | `test_symbol_loop_hoist_keeps_nested_arith_constant_in_region` |
+| TC-PASS-SYMBOL-LOOP-HOIST-005D | pass 改写 | presence guard 链外提。 | 准备静态与动态 memory 参数上的 `memory.get_data -> symbol.cast -> symbol.ne` 链。 | 运行 `pytest -q test/passes/test_symbol_loop_hoist.py -k "presence_guard"`。 | 三个 op 均位于 `symbol.for` 前，`scf.if` 使用外提后的 condition。 | `test_symbol_loop_hoist_hoists_memory_presence_guard_static_and_dynamic` |
+| TC-PASS-SYMBOL-LOOP-HOIST-005E | pass 改写 | loop-local presence guard no-op。 | 准备 loop body 内 `dma.alloc` 作为 `memory.get_data` source。 | 运行 `pytest -q test/passes/test_symbol_loop_hoist.py -k "loop_local_memory_presence_guard"`。 | guard 链仍位于 `symbol.for` body 内。 | `test_symbol_loop_hoist_keeps_loop_local_memory_presence_guard` |
 | TC-PASS-SYMBOL-LOOP-HOIST-006 | pass 改写 | `apply(ctx, module)` 保持 `ModulePass` 入口。 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `TC-SLH-001E`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`apply(ctx, module)` 保持 `ModulePass` 入口。”场景。 | `TC-SLH-001E` |
 | TC-PASS-SYMBOL-LOOP-HOIST-007 | 公开入口 | loop-carried 依赖的符号 op 保持原位。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `TC-SLH-002`。 | 公开入口在“loop-carried 依赖的符号 op 保持原位。”场景下可导入、构造、注册或按名称发现。 | `TC-SLH-002` |
 | TC-PASS-SYMBOL-LOOP-HOIST-008 | 边界/异常 | 校验失败包装为 `SymbolLoopHoistVerifierError`。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `TC-SLH-007`。 | “校验失败包装为 `SymbolLoopHoistVerifierError`。”场景按公开错误语义失败或被拒绝。 | `TC-SLH-007` |

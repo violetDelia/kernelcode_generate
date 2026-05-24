@@ -243,6 +243,169 @@ builtin.module {
 """
 
 
+def broadcast_source_leading_unit_static_ir() -> str:
+    """构造 static `[N] -> [1,N]` broadcast source alias 删除正例。
+
+    功能说明:
+    - 返回通过公开 `run_ircheck_text(...)` 执行的 inline IR case。
+
+    使用示例:
+    - actual_ir = _run_public_ircheck_case(broadcast_source_leading_unit_static_ir())
+    """
+
+    return """// COMPILE_ARGS: --pass hoist-dma-alias-ops
+// CHECK: func.func @broadcast_reinterpret_leading_unit_static
+// CHECK: %[[FLAT:.*]] = "dma.alloc"()
+// CHECK-NOT: "dma.reinterpret"
+// CHECK: "dma.fill"(%[[FLAT]], %[[ZERO:.*]])
+// CHECK: "dma.broadcast"(%[[DST:.*]], %[[FLAT]])
+
+builtin.module {
+  func.func @broadcast_reinterpret_leading_unit_static() {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %c56 = symbol.const 56 : !symbol.int<#symbol.expr<56>>
+    %zero = arith.constant 0.000000e+00 : f32
+    %flat = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<56>], [#symbol.expr<1>], f32, #nn.space<tsm>>
+    %alias = "dma.reinterpret"(%flat, %c0, %c1, %c56, %c56, %c1) <{operandSegmentSizes = array<i32: 1, 1, 2, 2>}> : (!nn.memory<[#symbol.expr<56>], [#symbol.expr<1>], f32, #nn.space<tsm>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<56>>, !symbol.int<#symbol.expr<56>>, !symbol.int<#symbol.expr<1>>) -> !nn.memory<[#symbol.expr<1>, #symbol.expr<56>], [#symbol.expr<56>, #symbol.expr<1>], f32, #nn.space<tsm>>
+    "dma.fill"(%alias, %zero) : (!nn.memory<[#symbol.expr<1>, #symbol.expr<56>], [#symbol.expr<56>, #symbol.expr<1>], f32, #nn.space<tsm>>, f32) -> ()
+    %dst = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<72>, #symbol.expr<56>], [#symbol.expr<56>, #symbol.expr<1>], f32, #nn.space<tsm>>
+    "dma.broadcast"(%dst, %alias) : (!nn.memory<[#symbol.expr<72>, #symbol.expr<56>], [#symbol.expr<56>, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<1>, #symbol.expr<56>], [#symbol.expr<56>, #symbol.expr<1>], f32, #nn.space<tsm>>) -> ()
+    func.return
+  }
+}
+"""
+
+
+def broadcast_source_leading_unit_dynamic_ir() -> str:
+    """构造 dynamic `[N] -> [1,N]` broadcast source alias 删除正例。
+
+    功能说明:
+    - 返回通过公开 `run_ircheck_text(...)` 执行的 inline IR case。
+
+    使用示例:
+    - actual_ir = _run_public_ircheck_case(broadcast_source_leading_unit_dynamic_ir())
+    """
+
+    return """// COMPILE_ARGS: --pass hoist-dma-alias-ops
+// CHECK: func.func @broadcast_reinterpret_leading_unit_dynamic
+// CHECK: %[[FLAT:.*]] = "dma.alloc"(%[[N:.*]])
+// CHECK-NOT: "dma.reinterpret"
+// CHECK: "dma.fill"(%[[FLAT]], %[[ZERO:.*]])
+// CHECK: "dma.broadcast"(%[[DST:.*]], %[[FLAT]])
+
+builtin.module {
+  func.func @broadcast_reinterpret_leading_unit_dynamic(%m : !symbol.int<#symbol.expr<M>>, %n : !symbol.int<#symbol.expr<N>>) {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %zero = arith.constant 0.000000e+00 : f32
+    %flat = "dma.alloc"(%n) <{operandSegmentSizes = array<i32: 1>}> : (!symbol.int<#symbol.expr<N>>) -> !nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], f32, #nn.space<tsm>>
+    %alias = "dma.reinterpret"(%flat, %c0, %c1, %n, %n, %c1) <{operandSegmentSizes = array<i32: 1, 1, 2, 2>}> : (!nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], f32, #nn.space<tsm>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<N>>, !symbol.int<#symbol.expr<N>>, !symbol.int<#symbol.expr<1>>) -> !nn.memory<[#symbol.expr<1>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<tsm>>
+    "dma.fill"(%alias, %zero) : (!nn.memory<[#symbol.expr<1>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<tsm>>, f32) -> ()
+    %dst = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<tsm>>
+    "dma.broadcast"(%dst, %alias) : (!nn.memory<[#symbol.expr<M>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<1>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<tsm>>) -> ()
+    func.return
+  }
+}
+"""
+
+
+def broadcast_source_non_leading_unit_noop_ir() -> str:
+    """构造 `[56] -> [2,28]` 非 leading-unit no-op 反例。
+
+    功能说明:
+    - 返回通过公开 `run_ircheck_text(...)` 执行的 inline IR case。
+
+    使用示例:
+    - actual_ir = _run_public_ircheck_case(broadcast_source_non_leading_unit_noop_ir())
+    """
+
+    return """// COMPILE_ARGS: --pass hoist-dma-alias-ops
+// CHECK: func.func @broadcast_reinterpret_non_leading_unit_noop
+// CHECK: %[[ALIAS:.*]] = "dma.reinterpret"(%[[FLAT:.*]], %[[C0:.*]], %[[C2:.*]], %[[C28:.*]], %[[C28]], %[[C1:.*]])
+// CHECK: "dma.broadcast"(%[[DST:.*]], %[[ALIAS]])
+
+builtin.module {
+  func.func @broadcast_reinterpret_non_leading_unit_noop() {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %c2 = symbol.const 2 : !symbol.int<#symbol.expr<2>>
+    %c28 = symbol.const 28 : !symbol.int<#symbol.expr<28>>
+    %zero = arith.constant 0.000000e+00 : f32
+    %flat = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<56>], [#symbol.expr<1>], f32, #nn.space<tsm>>
+    %alias = "dma.reinterpret"(%flat, %c0, %c2, %c28, %c28, %c1) <{operandSegmentSizes = array<i32: 1, 1, 2, 2>}> : (!nn.memory<[#symbol.expr<56>], [#symbol.expr<1>], f32, #nn.space<tsm>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<2>>, !symbol.int<#symbol.expr<28>>, !symbol.int<#symbol.expr<28>>, !symbol.int<#symbol.expr<1>>) -> !nn.memory<[#symbol.expr<2>, #symbol.expr<28>], [#symbol.expr<28>, #symbol.expr<1>], f32, #nn.space<tsm>>
+    "dma.fill"(%alias, %zero) : (!nn.memory<[#symbol.expr<2>, #symbol.expr<28>], [#symbol.expr<28>, #symbol.expr<1>], f32, #nn.space<tsm>>, f32) -> ()
+    %dst = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<72>, #symbol.expr<28>], [#symbol.expr<28>, #symbol.expr<1>], f32, #nn.space<tsm>>
+    "dma.broadcast"(%dst, %alias) : (!nn.memory<[#symbol.expr<72>, #symbol.expr<28>], [#symbol.expr<28>, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<2>, #symbol.expr<28>], [#symbol.expr<28>, #symbol.expr<1>], f32, #nn.space<tsm>>) -> ()
+    func.return
+  }
+}
+"""
+
+
+def broadcast_source_rank0_source_noop_ir() -> str:
+    """构造 rank0 source reinterpret with use 的 no-op 反例。
+
+    功能说明:
+    - rank0 source 不是 `[N] -> [1,N]` broadcast source 化简候选。
+    - alias result 仍被 `dma.fill` 使用时，pass 必须安全 no-op 而不是访问缺失维度崩溃。
+
+    使用示例:
+    - actual_ir = _run_public_ircheck_case(broadcast_source_rank0_source_noop_ir())
+    """
+
+    return """// COMPILE_ARGS: --pass hoist-dma-alias-ops
+// CHECK: func.func @broadcast_reinterpret_rank0_source_noop
+// CHECK: %[[ALIAS:.*]] = "dma.reinterpret"(%[[SCALAR:.*]], %[[C0:.*]], %[[C1:.*]])
+// CHECK: "dma.fill"(%[[ALIAS]], %[[ZERO:.*]])
+
+builtin.module {
+  func.func @broadcast_reinterpret_rank0_source_noop() {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %zero = arith.constant 0.000000e+00 : f32
+    %scalar = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[], [], f32, #nn.space<tsm>>
+    %alias = "dma.reinterpret"(%scalar, %c0, %c1, %c1) <{operandSegmentSizes = array<i32: 1, 1, 1, 1>}> : (!nn.memory<[], [], f32, #nn.space<tsm>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> !nn.memory<[#symbol.expr<1>], [#symbol.expr<1>], f32, #nn.space<tsm>>
+    "dma.fill"(%alias, %zero) : (!nn.memory<[#symbol.expr<1>], [#symbol.expr<1>], f32, #nn.space<tsm>>, f32) -> ()
+    func.return
+  }
+}
+"""
+
+
+def broadcast_source_retarget_rollback_noop_ir() -> str:
+    """构造 writer target retarget 后 verifier 失败的 rollback 反例。
+
+    功能说明:
+    - 返回通过公开 `run_ircheck_text(...)` 执行的 inline IR case。
+
+    使用示例:
+    - actual_ir = _run_public_ircheck_case(broadcast_source_retarget_rollback_noop_ir())
+    """
+
+    return """// COMPILE_ARGS: --pass hoist-dma-alias-ops
+// CHECK: func.func @broadcast_reinterpret_retarget_rollback_noop
+// CHECK: %[[ALIAS:.*]] = "dma.reinterpret"(%[[FLAT:.*]], %[[C0:.*]], %[[C1:.*]], %[[N:.*]], %[[N]], %[[C1]])
+// CHECK: "dma.broadcast"(%[[ALIAS]], %[[SRC:.*]])
+// CHECK: "dma.broadcast"(%[[DST:.*]], %[[ALIAS]])
+
+builtin.module {
+  func.func @broadcast_reinterpret_retarget_rollback_noop(%n : !symbol.int<#symbol.expr<N>>) {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %c2 = symbol.const 2 : !symbol.int<#symbol.expr<2>>
+    %flat = "dma.alloc"(%n) <{operandSegmentSizes = array<i32: 1>}> : (!symbol.int<#symbol.expr<N>>) -> !nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], f32, #nn.space<tsm>>
+    %src = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<2>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<tsm>>
+    %alias = "dma.reinterpret"(%flat, %c0, %c1, %n, %n, %c1) <{operandSegmentSizes = array<i32: 1, 1, 2, 2>}> : (!nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], f32, #nn.space<tsm>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<N>>, !symbol.int<#symbol.expr<N>>, !symbol.int<#symbol.expr<1>>) -> !nn.memory<[#symbol.expr<1>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<tsm>>
+    "dma.broadcast"(%alias, %src) : (!nn.memory<[#symbol.expr<1>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<2>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<tsm>>) -> ()
+    %dst = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<tsm>>
+    "dma.broadcast"(%dst, %alias) : (!nn.memory<[#symbol.expr<4>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<1>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<tsm>>) -> ()
+    func.return
+  }
+}
+"""
+
+
 def test_hoist_dma_alias_ops_public_pattern_api_and_getter_order() -> None:
     """验证公开 pattern API 与 getter 顺序。
 
@@ -380,6 +543,75 @@ def test_hoist_dma_alias_ops_keeps_view_deslice_grouping_deleted() -> None:
     actual_ir = _run_public_ircheck_case(_view_deslice_grouping_deleted_noop_ir())
 
     assert '"dma.reshape"' not in actual_ir
+
+
+def test_hoist_dma_alias_ops_removes_broadcast_source_leading_unit_reinterpret() -> None:
+    """验证 broadcast source leading-unit reinterpret 可删除。
+
+    功能说明:
+    - 静态 `[56] -> [1,56]` 与动态 `[N] -> [1,N]` 都必须删除 alias。
+    - `dma.fill(alias)` 与 `dma.broadcast(dst, alias)` 都改回 flat source。
+
+    使用示例:
+    - pytest -q test/passes/test_hoist_dma_alias_ops.py -k leading_unit
+    """
+
+    for case_text in (broadcast_source_leading_unit_static_ir(), broadcast_source_leading_unit_dynamic_ir()):
+        actual_ir = _run_public_ircheck_case(case_text)
+        assert '"dma.reinterpret"' not in actual_ir
+        assert '"dma.fill"(%flat' in actual_ir
+        assert '"dma.broadcast"(%dst, %flat)' in actual_ir
+
+
+def test_hoist_dma_alias_ops_keeps_non_leading_unit_broadcast_source_alias() -> None:
+    """验证非 leading-unit rank change 不会被误删。
+
+    功能说明:
+    - `[56] -> [2,28]` 不满足 leading-unit broadcast source 合同。
+    - 该反例必须保留 reinterpret 和 broadcast source alias。
+
+    使用示例:
+    - pytest -q test/passes/test_hoist_dma_alias_ops.py -k non_leading_unit
+    """
+
+    actual_ir = _run_public_ircheck_case(broadcast_source_non_leading_unit_noop_ir())
+
+    assert '"dma.reinterpret"' in actual_ir
+    assert '"dma.broadcast"(%dst, %alias)' in actual_ir
+
+
+def test_hoist_dma_alias_ops_keeps_rank0_reinterpret_source_noop() -> None:
+    """验证 rank0 source reinterpret with use 安全 no-op。
+
+    功能说明:
+    - rank0 source 没有 `source_shape[0]`，不能进入 leading-unit `[N] -> [1,N]` 化简。
+    - pass 应保留 alias 与 use，不得抛 `tuple index out of range`。
+
+    使用示例:
+    - pytest -q test/passes/test_hoist_dma_alias_ops.py -k rank0_reinterpret
+    """
+
+    actual_ir = _run_public_ircheck_case(broadcast_source_rank0_source_noop_ir())
+
+    assert '"dma.reinterpret"' in actual_ir
+    assert '"dma.fill"(%alias' in actual_ir
+
+
+def test_hoist_dma_alias_ops_rolls_back_broadcast_source_retarget_verifier_failure() -> None:
+    """验证 retarget 后 verifier 失败时完整 rollback。
+
+    功能说明:
+    - writer target retarget 后 verifier 不接受时，必须完整恢复 alias 与所有 use。
+
+    使用示例:
+    - pytest -q test/passes/test_hoist_dma_alias_ops.py -k retarget_verifier
+    """
+
+    actual_ir = _run_public_ircheck_case(broadcast_source_retarget_rollback_noop_ir())
+
+    assert '"dma.reinterpret"' in actual_ir
+    assert '"dma.broadcast"(%alias, %src)' in actual_ir
+    assert '"dma.broadcast"(%dst, %alias)' in actual_ir
 
 
 def test_hoist_dma_alias_ops_registry_builds_public_pass() -> None:

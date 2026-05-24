@@ -39,9 +39,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.core.error import KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp
+from kernel_gen.dialect.memory import MemoryGetDataOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
+    SymbolCastOp,
     SymbolConstOp,
     SymbolDivOp,
     SymbolExprAttr,
@@ -53,14 +55,19 @@ from kernel_gen.dialect.symbol import (
     SymbolMaxOp,
     SymbolMinOp,
     SymbolMulOp,
+    SymbolNeOp,
     SymbolSubOp,
     SymbolValueType,
     SymbolYieldOp,
 )
 from kernel_gen.dialect.tuner import TunerParamOp
+from kernel_gen.tools.ircheck import run_ircheck_text
 
 pass_module = importlib.import_module("kernel_gen.passes.symbol_loop_hoist")
+ArithConstantHoistPattern = pass_module.ArithConstantHoistPattern
+MemoryGetDataHoistPattern = pass_module.MemoryGetDataHoistPattern
 SymbolAddHoistPattern = pass_module.SymbolAddHoistPattern
+SymbolCastHoistPattern = pass_module.SymbolCastHoistPattern
 SymbolConstHoistPattern = pass_module.SymbolConstHoistPattern
 SymbolDivHoistPattern = pass_module.SymbolDivHoistPattern
 SymbolFloorDivHoistPattern = pass_module.SymbolFloorDivHoistPattern
@@ -70,10 +77,27 @@ SymbolLoopHoistPass = pass_module.SymbolLoopHoistPass
 SymbolMaxHoistPattern = pass_module.SymbolMaxHoistPattern
 SymbolMinHoistPattern = pass_module.SymbolMinHoistPattern
 SymbolMulHoistPattern = pass_module.SymbolMulHoistPattern
+SymbolNeHoistPattern = pass_module.SymbolNeHoistPattern
 SymbolSubHoistPattern = pass_module.SymbolSubHoistPattern
 TunerParamHoistPattern = pass_module.TunerParamHoistPattern
 get_symbol_loop_hoist_patterns = pass_module.get_symbol_loop_hoist_patterns
 lowering_pass_module = importlib.import_module("kernel_gen.passes.lowering")
+
+
+def run_public_ircheck_case(case_text: str) -> str:
+    """运行公开 ircheck inline case。
+
+    功能说明:
+    - 只调用公开 `run_ircheck_text(...)`，返回 actual IR 供测试断言。
+
+    使用示例:
+    - actual_ir = run_public_ircheck_case(case_text)
+    """
+
+    result = run_ircheck_text(case_text, source_path="test/passes/test_symbol_loop_hoist.py:inline")
+    assert result.ok is True, result.message
+    assert result.exit_code == 0
+    return result.actual_ir
 
 
 def _const_symbol_int(value: int) -> tuple[arith.ConstantOp, UnrealizedConversionCastOp, SSAValue]:
@@ -488,7 +512,144 @@ def test_symbol_loop_hoist_patterns_are_public_and_stable() -> None:
         SymbolFloorDivHoistPattern,
         SymbolMinHoistPattern,
         SymbolMaxHoistPattern,
+        ArithConstantHoistPattern,
+        MemoryGetDataHoistPattern,
+        SymbolCastHoistPattern,
+        SymbolNeHoistPattern,
     ]
+
+
+def test_symbol_loop_hoist_hoists_arith_constant_direct_body() -> None:
+    actual_ir = run_public_ircheck_case("""// COMPILE_ARGS: --pass "symbol-loop-hoist={fold=false}"
+// CHECK: func.func @hoist_arith_constant_direct
+// CHECK: %[[C1:.*]] = symbol.const 1
+// CHECK-NEXT: %[[VAL:.*]] = arith.constant 7 : i32
+// CHECK-NEXT: symbol.for %[[IT:.*]] = %[[C0:.*]] to %[[C4:.*]] step %[[C1]]
+// CHECK-NEXT: }
+
+builtin.module {
+  func.func @hoist_arith_constant_direct() {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    symbol.for %i = %c0 to %c4 step %c1 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<4>, step = #symbol.expr<1>>} {
+      %v = arith.constant 7 : i32
+    }
+    func.return
+  }
+}
+""")
+
+    assert actual_ir.index("arith.constant 7") < actual_ir.index("symbol.for")
+
+
+def test_symbol_loop_hoist_keeps_nested_arith_constant_in_region() -> None:
+    actual_ir = run_public_ircheck_case("""// COMPILE_ARGS: --pass "symbol-loop-hoist={fold=false}"
+// CHECK: symbol.for %[[IT:.*]] = %[[C0:.*]] to %[[C4:.*]] step %[[C1:.*]]
+// CHECK-NEXT: scf.if %[[COND:.*]] {
+// CHECK-NEXT: %[[VAL:.*]] = arith.constant 7 : i32
+
+builtin.module {
+  func.func @keep_nested_arith_constant(%cond : i1) {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    symbol.for %i = %c0 to %c4 step %c1 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<4>, step = #symbol.expr<1>>} {
+      scf.if %cond {
+        %v = arith.constant 7 : i32
+      }
+    }
+    func.return
+  }
+}
+""")
+
+    assert actual_ir.index("symbol.for") < actual_ir.index("scf.if") < actual_ir.index("arith.constant 7")
+
+
+def test_symbol_loop_hoist_hoists_memory_presence_guard_static_and_dynamic() -> None:
+    static_ir = run_public_ircheck_case("""// COMPILE_ARGS: --pass "symbol-loop-hoist={fold=false}"
+// CHECK: func.func @hoist_presence_guard_static
+// CHECK: %[[PTR:.*]] = memory.get_data %[[BIAS:.*]]
+// CHECK-NEXT: %[[CAST:.*]] = symbol.cast %[[PTR]]
+// CHECK-NEXT: %[[COND:.*]] = symbol.ne %[[CAST]], %[[C0:.*]]
+// CHECK-NEXT: symbol.for
+// CHECK-NEXT: scf.if %[[COND]]
+
+builtin.module {
+  func.func @hoist_presence_guard_static(%bias : !nn.memory<[#symbol.expr<16>], [#symbol.expr<1>], f32, #nn.space<global>>) {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    symbol.for %i = %c0 to %c4 step %c1 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<4>, step = #symbol.expr<1>>} {
+      %ptr = memory.get_data %bias : !nn.memory<[#symbol.expr<16>], [#symbol.expr<1>], f32, #nn.space<global>> -> !symbol.ptr<f32>
+      %addr = symbol.cast %ptr : !symbol.ptr<f32> -> !symbol.int<#symbol.expr<?>>
+      %cond = symbol.ne %addr, %c0 : !symbol.int<#symbol.expr<?>>, !symbol.int<#symbol.expr<0>> -> i1
+      scf.if %cond {
+      }
+    }
+    func.return
+  }
+}
+""")
+    dynamic_ir = run_public_ircheck_case("""// COMPILE_ARGS: --pass "symbol-loop-hoist={fold=false}"
+// CHECK: func.func @hoist_presence_guard_dynamic
+// CHECK: %[[PTR:.*]] = memory.get_data %[[BIAS:.*]]
+// CHECK-NEXT: %[[CAST:.*]] = symbol.cast %[[PTR]]
+// CHECK-NEXT: %[[COND:.*]] = symbol.ne %[[CAST]], %[[C0:.*]]
+// CHECK: symbol.for
+// CHECK-NEXT: scf.if %[[COND]]
+
+builtin.module {
+  func.func @hoist_presence_guard_dynamic(%bias : !nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], f32, #nn.space<global>>, %n : !symbol.int<#symbol.expr<N>>) {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    symbol.for %i = %c0 to %n step %c1 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>} {
+      %ptr = memory.get_data %bias : !nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], f32, #nn.space<global>> -> !symbol.ptr<f32>
+      %addr = symbol.cast %ptr : !symbol.ptr<f32> -> !symbol.int<#symbol.expr<?>>
+      %cond = symbol.ne %addr, %c0 : !symbol.int<#symbol.expr<?>>, !symbol.int<#symbol.expr<0>> -> i1
+      scf.if %cond {
+      }
+    }
+    func.return
+  }
+}
+""")
+
+    for actual_ir in (static_ir, dynamic_ir):
+        assert actual_ir.index("memory.get_data") < actual_ir.index("symbol.for")
+        assert actual_ir.index("symbol.cast") < actual_ir.index("symbol.for")
+        assert actual_ir.index("symbol.ne") < actual_ir.index("symbol.for")
+
+
+def test_symbol_loop_hoist_keeps_loop_local_memory_presence_guard() -> None:
+    actual_ir = run_public_ircheck_case("""// COMPILE_ARGS: --pass "symbol-loop-hoist={fold=false}"
+// CHECK: symbol.for %[[IT:.*]] = %[[C0:.*]] to %[[C4:.*]] step %[[C1:.*]]
+// CHECK-NEXT: %[[LOCAL:.*]] = "dma.alloc"()
+// CHECK-NEXT: %[[PTR:.*]] = memory.get_data %[[LOCAL]]
+// CHECK-NEXT: %[[CAST:.*]] = symbol.cast %[[PTR]]
+// CHECK-NEXT: %[[COND:.*]] = symbol.ne %[[CAST]], %[[C0]]
+
+builtin.module {
+  func.func @keep_presence_guard_loop_local() {
+    %c0 = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %c4 = symbol.const 4 : !symbol.int<#symbol.expr<4>>
+    %c1 = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    symbol.for %i = %c0 to %c4 step %c1 {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<4>, step = #symbol.expr<1>>} {
+      %local = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#symbol.expr<4>], [#symbol.expr<1>], f32, #nn.space<tsm>>
+      %ptr = memory.get_data %local : !nn.memory<[#symbol.expr<4>], [#symbol.expr<1>], f32, #nn.space<tsm>> -> !symbol.ptr<f32>
+      %addr = symbol.cast %ptr : !symbol.ptr<f32> -> !symbol.int<#symbol.expr<?>>
+      %cond = symbol.ne %addr, %c0 : !symbol.int<#symbol.expr<?>>, !symbol.int<#symbol.expr<0>> -> i1
+      scf.if %cond {
+      }
+    }
+    func.return
+  }
+}
+""")
+
+    assert actual_ir.index("symbol.for") < actual_ir.index("memory.get_data")
+    assert actual_ir.index("memory.get_data") < actual_ir.index("symbol.cast") < actual_ir.index("symbol.ne")
 
 
 # TC-SLH-001C

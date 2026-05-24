@@ -6,6 +6,7 @@
 - 本 pass 使用 xDSL `RewritePattern` / `PatternRewriteWalker` 组织 rewrite，不使用手写整段 block 遍历。
 - P2 `DmaAliasThroughWriteNoReadPattern` 负责把 full-cover alias 穿过 write-only / no-read writer，并把 writer target 改为 alias result。
 - P1 `DmaAliasHoistPattern` 负责把 NoMemoryEffect alias descriptor 移到 operands 已支配的更早位置，不改写任何 writer target。
+- P1 还负责在既有公开 pattern 框架内删除 broadcast source 上的 leading-unit `dma.reinterpret([N] -> [1,N])`，并把相关 writer target 与 `dma.broadcast` source 改回 flat source。
 - 当前 alias op 范围固定为 `dma.reshape`、`dma.view` 与 `dma.reinterpret`。
 - 不保留旧 `view + deslice` 连续维度分组，也不保留旧单 op pattern 兼容入口。
 
@@ -50,6 +51,8 @@
 - 不做 `dma.alloc -> dma.reshape` fold。
 - 不做 `dma.reshape -> dma.reshape` chain collapse。
 - 不新增 `dma.subview` 行为。
+- 不新增 `DmaBroadcastSourceAliasPattern` 或第三个公开 pattern class。
+- 不改变 `dma.broadcast`、`dma.reinterpret` 的 dialect API 或 verifier API。
 - 不跨任意 region 做 same-block 重排；仅允许 direct `symbol.for` body 内 loop-invariant alias 提到该 loop 前。
 
 ## 行为
@@ -97,6 +100,7 @@
 - same-block 场景把 alias 移到所有同 block operands 定义之后的最早合法位置。
 - direct `symbol.for` body 场景中，若 alias 所有 operands 都支配该 `symbol.for`，可把 alias 提到 loop 前。
 - P1 不修改任何 writer target。
+- P1 删除 broadcast source leading-unit reinterpret 时例外：该场景不是纯位置移动，而是将 `dma.fill(alias)` 这类 write/no-read writer target 与 `dma.broadcast(dst, alias)` source 一并改回 flat source。
 - P1 同 block 移动时只允许跨过不触碰 alias source 的 op；若区间内存在 READ/WRITE/unknown effect 触碰 source，则 no-op，避免绕过 P2 的 write/no-read 判定。
 
 #### before
@@ -118,6 +122,48 @@
 - alias 依赖 loop iterator、loop-carried block argument 或 loop body 内 SSA 时不得提出循环。
 - alias source 被待跨越 writer 读/写时不得同 block 外提。
 - P1 只改变 alias descriptor 的位置，不新增、删除或合并 alias op。
+
+### Broadcast source leading-unit reinterpret 删除
+
+#### 功能说明
+
+- 匹配 `dma.reinterpret`，且 source/result 满足：
+  - source 是 typed contiguous 一维 `[N]` memory。
+  - result 是 typed contiguous 二维 `[1,N]` memory，stride 为 `[N,1]`。
+  - offset 为 `0`。
+  - source/result 同 space、同 element type，且不是一维 i8 byte pool dtype-changing reinterpret。
+  - shape / stride operands exact 匹配 result layout。
+- alias result 的所有 use 必须只属于以下两类：
+  - `dma.broadcast` 的 source operand。
+  - `get_effects(...)` 证明为 write/no-read 的 writer target operand。
+- rewrite 后：
+  - `dma.broadcast(dst, alias)` 改为 `dma.broadcast(dst, source)`。
+  - `writer(alias, ...)` 改为 `writer(source, ...)`。
+  - alias 无剩余 use 时删除该 `dma.reinterpret`。
+- retarget 后每个被改写 op 必须自身 verifier 通过；若输入 module 原本可通过全模块 verifier，则 retarget 后全模块 verifier 也必须通过。
+- 任一 unknown use、非 leading-unit shape、offset 非 0、byte-pool、dtype/space 不匹配、op verifier 失败或 module verifier 失败时必须完整 rollback / no-op。
+- rank0 source 或其它无法构造 `[N] -> [1,N]` 证明的 source rank 必须 no-op，不得在维度检查前访问不存在的 shape/stride 条目。
+
+#### before
+
+```mlir
+%alias = "dma.reinterpret"(%flat, %c0, %c1, %n, %n, %c1) : (...) -> !nn.memory<[#symbol.expr<1>, #symbol.expr<N>], [#symbol.expr<N>, #symbol.expr<1>], f32, #nn.space<tsm>>
+"dma.fill"(%alias, %zero) : (!nn.memory<...>, f32) -> ()
+"dma.broadcast"(%dst, %alias) : (!nn.memory<...>, !nn.memory<...>) -> ()
+```
+
+#### after
+
+```mlir
+"dma.fill"(%flat, %zero) : (!nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], f32, #nn.space<tsm>>, f32) -> ()
+"dma.broadcast"(%dst, %flat) : (!nn.memory<...>, !nn.memory<[#symbol.expr<N>], [#symbol.expr<1>], f32, #nn.space<tsm>>) -> ()
+```
+
+#### 注意事项
+
+- `[N] -> [2,N/2]`、`[N] -> [M,N]`、offset 非 0 和无法证明物理 index set 等价的 reinterpret 必须保留。
+- 若某个 write/no-read writer target retarget 后与 `source` 的 rank、shape 或 verifier 合同不兼容，必须保留原 alias 与所有原 uses。
+- 该行为归属既有 `DmaAliasHoistPattern`，不得新增第三个公开 pattern class。
 
 ## 公开导入
 
@@ -154,6 +200,7 @@ same_pass = build_registered_pass("hoist-dma-alias-ops")
 - 验证 P2 使用公开 MemoryEffect，不写死 `dma.fill`。
 - 验证 P1 可以跨过无关 writer，但不能跨过触碰 alias source 的 writer。
 - 验证旧 `view/deslice grouping` 不再发生。
+- 验证 broadcast source leading-unit `dma.reinterpret([N] -> [1,N])` 可删除，非 leading-unit、offset 非 0 和 retarget verifier 失败时 no-op。
 - 验证 registry 默认构造、`fold=false` 与未知专属 option 失败。
 
 ### 测试矩阵
@@ -169,6 +216,10 @@ same_pass = build_registered_pass("hoist-dma-alias-ops")
 | TC-HOIST-DMA-ALIAS-007 | byte-pool reinterpret | i8 pool 到 f32 typed memory 的 reinterpret 保持 no-op |
 | TC-HOIST-DMA-ALIAS-008 | 删除 view/deslice grouping | 不新增 `dma.reshape` |
 | TC-HOIST-DMA-ALIAS-009 | registry | 默认构造、`fold=false`、未知专属 option 失败 |
+| TC-HOIST-DMA-ALIAS-010 | broadcast source leading-unit static/dynamic | `[56] -> [1,56]` 与 `[N] -> [1,N]` alias 删除，`dma.fill` / `dma.broadcast` 改回 flat source |
+| TC-HOIST-DMA-ALIAS-011 | broadcast source 非 leading-unit | `[56] -> [2,28]` alias 保持 no-op |
+| TC-HOIST-DMA-ALIAS-012 | broadcast source retarget rollback | write/no-read writer target retarget 后 verifier 失败时 alias 与 uses 完整保留 |
+| TC-HOIST-DMA-ALIAS-013 | broadcast source rank0 source no-op | rank0 source `dma.reinterpret` 带 use 时保持 no-op 且 pass 不崩溃 |
 
 ### 测试命令
 

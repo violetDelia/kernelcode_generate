@@ -32,6 +32,14 @@ API 列表:
 - `SymbolMinHoistPattern.match_and_rewrite(op: SymbolMinOp, rewriter: PatternRewriter) -> None`
 - `class SymbolMaxHoistPattern()`
 - `SymbolMaxHoistPattern.match_and_rewrite(op: SymbolMaxOp, rewriter: PatternRewriter) -> None`
+- `class ArithConstantHoistPattern()`
+- `ArithConstantHoistPattern.match_and_rewrite(op: arith.ConstantOp, rewriter: PatternRewriter) -> None`
+- `class MemoryGetDataHoistPattern()`
+- `MemoryGetDataHoistPattern.match_and_rewrite(op: MemoryGetDataOp, rewriter: PatternRewriter) -> None`
+- `class SymbolCastHoistPattern()`
+- `SymbolCastHoistPattern.match_and_rewrite(op: SymbolCastOp, rewriter: PatternRewriter) -> None`
+- `class SymbolNeHoistPattern()`
+- `SymbolNeHoistPattern.match_and_rewrite(op: SymbolNeOp, rewriter: PatternRewriter) -> None`
 - `get_symbol_loop_hoist_patterns() -> list[RewritePattern]`
 
 使用示例:
@@ -51,6 +59,7 @@ from __future__ import annotations
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 
 from xdsl.context import Context
+from xdsl.dialects import arith
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.ir import Block, BlockArgument, Operation, SSAValue
 from xdsl.pattern_rewriter import (
@@ -66,6 +75,7 @@ from xdsl.utils.exceptions import VerifyException
 from kernel_gen.dialect.symbol import (
     Symbol,
     SymbolAddOp,
+    SymbolCastOp,
     SymbolConstOp,
     SymbolFloorDivOp,
     SymbolForOp,
@@ -74,9 +84,11 @@ from kernel_gen.dialect.symbol import (
     SymbolMaxOp,
     SymbolMinOp,
     SymbolMulOp,
+    SymbolNeOp,
     SymbolSubOp,
     SymbolDivOp,
 )
+from kernel_gen.dialect.memory import MemoryGetDataOp
 from kernel_gen.dialect.tuner import TunerParamOp
 from kernel_gen.passes.pass_manager import Pass
 
@@ -407,14 +419,187 @@ class SymbolMaxHoistPattern(RewritePattern):
         _hoist_loop_invariant_op(op, rewriter)
 
 
+class ArithConstantHoistPattern(RewritePattern):
+    """`arith.constant` 外提 pattern。
+
+    功能说明:
+    - 对 `symbol.for` direct body 内无 operand 的 `arith.constant` 应用一层外提规则。
+    - nested region 内的 `arith.constant` 保持 no-op，不跨 `scf.if` 或其它 region 外提。
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %v = arith.constant 1.000000e+00 : f32
+      }
+      ```
+    - IR after:
+      ```mlir
+      %v = arith.constant 1.000000e+00 : f32
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+
+    使用示例:
+    - pattern = ArithConstantHoistPattern()
+
+    关联文件:
+    - spec: spec/pass/symbol_loop_hoist.md
+    - test: test/passes/test_symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: arith.ConstantOp, rewriter: PatternRewriter, /) -> None:
+        """匹配并外提 loop-invariant `arith.constant`。
+
+        功能说明:
+        - 只处理 `symbol.for` direct body 内、无 operand 且不依赖 loop-local SSA 的常量。
+        - nested region 或已在 loop 外的常量保持 no-op，由通用外提边界统一判定。
+
+        使用示例:
+        - ArithConstantHoistPattern().match_and_rewrite(op, rewriter)
+        """
+
+        _hoist_loop_invariant_op(op, rewriter)
+
+
+class MemoryGetDataHoistPattern(RewritePattern):
+    """`memory.get_data` 外提 pattern。
+
+    功能说明:
+    - 对 source memory 来自当前 loop 外的 `memory.get_data` 应用一层外提规则。
+    - source memory 由当前 `symbol.for` body 生产时保持 no-op。
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %ptr = memory.get_data %mem : !nn.memory<...> -> !symbol.ptr<f32>
+      }
+      ```
+    - IR after:
+      ```mlir
+      %ptr = memory.get_data %mem : !nn.memory<...> -> !symbol.ptr<f32>
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+
+    使用示例:
+    - pattern = MemoryGetDataHoistPattern()
+
+    关联文件:
+    - spec: spec/pass/symbol_loop_hoist.md
+    - test: test/passes/test_symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: MemoryGetDataOp, rewriter: PatternRewriter, /) -> None:
+        """匹配并外提 loop-invariant `memory.get_data`。
+
+        功能说明:
+        - source memory 由当前 loop 外定义时，把 `memory.get_data` 提到该 `symbol.for` 前。
+        - source memory 是 loop body 内 SSA 时保持 no-op，避免把 guard 链跨生命周期外提。
+
+        使用示例:
+        - MemoryGetDataHoistPattern().match_and_rewrite(op, rewriter)
+        """
+
+        _hoist_loop_invariant_op(op, rewriter)
+
+
+class SymbolCastHoistPattern(RewritePattern):
+    """`symbol.cast` 外提 pattern。
+
+    功能说明:
+    - 对 operand 已定义在当前 loop 外的 `symbol.cast` 应用一层外提规则。
+    - 依赖 loop-local `memory.get_data` 或其它 loop-local SSA 时保持 no-op。
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %addr = symbol.cast %ptr : !symbol.ptr<f32> -> !symbol.int<#symbol.expr<?>>
+      }
+      ```
+    - IR after:
+      ```mlir
+      %addr = symbol.cast %ptr : !symbol.ptr<f32> -> !symbol.int<#symbol.expr<?>>
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+
+    使用示例:
+    - pattern = SymbolCastHoistPattern()
+
+    关联文件:
+    - spec: spec/pass/symbol_loop_hoist.md
+    - test: test/passes/test_symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: SymbolCastOp, rewriter: PatternRewriter, /) -> None:
+        """匹配并外提 loop-invariant `symbol.cast`。
+
+        功能说明:
+        - operand 定义在当前 loop 外时，把 `symbol.cast` 提到 `symbol.for` 前。
+        - operand 依赖 loop-local `memory.get_data` 或其它 loop-local SSA 时保持 no-op。
+
+        使用示例:
+        - SymbolCastHoistPattern().match_and_rewrite(op, rewriter)
+        """
+
+        _hoist_loop_invariant_op(op, rewriter)
+
+
+class SymbolNeHoistPattern(RewritePattern):
+    """`symbol.ne` 外提 pattern。
+
+    功能说明:
+    - 对两个 operand 均定义在当前 loop 外的 `symbol.ne` 应用一层外提规则。
+    - 依赖 loop iterator、loop-carried value 或 loop-local guard 链时保持 no-op。
+    - IR before:
+      ```mlir
+      symbol.for %i = %c0 to %n step %c1 {
+        %cond = symbol.ne %addr, %c0 : !symbol.int<#symbol.expr<?>>, !symbol.int<#symbol.expr<0>> -> i1
+      }
+      ```
+    - IR after:
+      ```mlir
+      %cond = symbol.ne %addr, %c0 : !symbol.int<#symbol.expr<?>>, !symbol.int<#symbol.expr<0>> -> i1
+      symbol.for %i = %c0 to %n step %c1 {
+      }
+      ```
+
+    使用示例:
+    - pattern = SymbolNeHoistPattern()
+
+    关联文件:
+    - spec: spec/pass/symbol_loop_hoist.md
+    - test: test/passes/test_symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: SymbolNeOp, rewriter: PatternRewriter, /) -> None:
+        """匹配并外提 loop-invariant `symbol.ne`。
+
+        功能说明:
+        - 两个 operand 都定义在当前 loop 外时，把 `symbol.ne` 提到 `symbol.for` 前。
+        - 任一 operand 来自 loop iterator、loop-carried value 或 loop-local guard 链时保持 no-op。
+
+        使用示例:
+        - SymbolNeHoistPattern().match_and_rewrite(op, rewriter)
+        """
+
+        _hoist_loop_invariant_op(op, rewriter)
+
+
 def get_symbol_loop_hoist_patterns() -> list[RewritePattern]:
     """返回 `symbol-loop-hoist` pass 使用的公开 pattern 列表。
 
 
     功能说明:
     - 以“每种受支持 op 一个 pattern”的形式公开当前 pass 的 pattern 列表。
-    - 当前只覆盖 `symbol.const`、`tuner.param`、`symbol.get_dim/get_stride` 与
-      `symbol.add/sub/mul/div/floordiv/min/max`。
+    - 当前覆盖 `symbol.const`、`tuner.param`、`symbol.get_dim/get_stride`、
+      `symbol.add/sub/mul/div/floordiv/min/max`、`arith.constant`、`memory.get_data`、
+      `symbol.cast` 与 `symbol.ne`。
 
     使用示例:
     - `patterns = get_symbol_loop_hoist_patterns()`
@@ -437,6 +622,10 @@ def get_symbol_loop_hoist_patterns() -> list[RewritePattern]:
         SymbolFloorDivHoistPattern(),
         SymbolMinHoistPattern(),
         SymbolMaxHoistPattern(),
+        ArithConstantHoistPattern(),
+        MemoryGetDataHoistPattern(),
+        SymbolCastHoistPattern(),
+        SymbolNeHoistPattern(),
     ]
 
 
@@ -511,5 +700,9 @@ __all__ = [
     "SymbolFloorDivHoistPattern",
     "SymbolMinHoistPattern",
     "SymbolMaxHoistPattern",
+    "ArithConstantHoistPattern",
+    "MemoryGetDataHoistPattern",
+    "SymbolCastHoistPattern",
+    "SymbolNeHoistPattern",
     "get_symbol_loop_hoist_patterns",
 ]

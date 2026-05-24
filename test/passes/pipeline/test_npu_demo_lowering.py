@@ -954,7 +954,10 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
 # 对应功能实现文件路径: kernel_gen/passes/hoist_dma_alias_ops.py
 # 对应 spec 文件路径: spec/pass/hoist_dma_alias_ops.md
 # 对应测试文件路径: test/passes/pipeline/test_npu_demo_lowering.py
-def test_npu_demo_lowering_pipeline_hoist_dma_alias_ops_pattern_dump(tmp_path: Path) -> None:
+def test_npu_demo_lowering_pipeline_hoist_dma_alias_ops_pattern_dump(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """验证真实 pipeline dump 中 hoist-dma-alias-ops 的 pattern 事实。
 
     功能说明:
@@ -972,6 +975,11 @@ def test_npu_demo_lowering_pipeline_hoist_dma_alias_ops_pattern_dump(tmp_path: P
     bias = Memory([172], NumericType.Float32)
     module = mlir_gen(matmul_demo.matmul_inputs_static_tile_static_kernel, out, lhs, rhs, bias)
     pipeline = build_npu_demo_lowering_pipeline()
+    monkeypatch.setattr(ArchParallelizePass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(ProducerConsumerAnalysisPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(AttachArchInformationPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(OutlineDeviceKernelPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(TemplateNameInferPass, "apply", _noop_pass_apply)
 
     set_dump_dir(tmp_path)
     try:
@@ -981,23 +989,33 @@ def test_npu_demo_lowering_pipeline_hoist_dma_alias_ops_pattern_dump(tmp_path: P
 
     first_hoist_text = _dump_stage_text_by_marker(tmp_path, "hoist-dma-alias-ops")
     second_hoist_text = _dump_stage_text_by_marker(tmp_path, "hoist-dma-alias-ops", occurrence=2)
+    second_symbol_loop_text = _dump_stage_text_by_marker(tmp_path, "symbol-loop-hoist", occurrence=2)
     markers = _dump_stage_markers(tmp_path)
-    p2_retarget = re.search(
-        r'(?P<alias>%\d+) = "dma\.reinterpret"\([^\n]+\)\s+<\{[^\n]*\}> : [^\n]+\n'
-        r'\s+"dma\.fill"\((?P=alias),',
-        second_hoist_text,
-    )
     p1_alias_before_consumer = re.search(
         r'(?P<alias>%\d+) = "dma\.reinterpret"\([^\n]+\)\s+<\{[^\n]*\}> : [^\n]+\n'
         r'\s+%\d+ = "dma\.deslice"\(%\d+, (?P=alias),',
         second_hoist_text,
     )
+    broadcast_flat_source = re.search(
+        r'(?P<flat>%\d+) = "dma\.alloc"\(\) <\{[^}]+\}> : \(\) -> '
+        r'!nn\.memory<\[#C56\], \[#C1\], f32, #nn\.space<tsm>>'
+        r'[\s\S]+?"dma\.fill"\((?P=flat), %\d+\)'
+        r'[\s\S]+?"dma\.broadcast"\(%\d+, (?P=flat)\)',
+        second_hoist_text,
+    )
+    guard_index = second_symbol_loop_text.index("memory.get_data")
+    cast_index = second_symbol_loop_text.index("symbol.cast")
+    cond_index = second_symbol_loop_text.index("symbol.ne")
+    first_loop_index = second_symbol_loop_text.index("symbol.for")
 
     assert first_hoist_text.startswith("hoist-dma-alias-ops\n")
     assert second_hoist_text.startswith("hoist-dma-alias-ops\n")
+    assert second_symbol_loop_text.startswith("symbol-loop-hoist\n")
     assert markers.count("hoist-dma-alias-ops") == 2
-    assert p2_retarget is not None
+    assert guard_index < cast_index < cond_index < first_loop_index
+    assert second_symbol_loop_text.index("arith.constant") < first_loop_index
     assert p1_alias_before_consumer is not None
+    assert broadcast_flat_source is not None
     assert "source_low" not in second_hoist_text
     assert "target_low" not in second_hoist_text
     assert "DmaViewDesliceGroupingPattern" not in second_hoist_text

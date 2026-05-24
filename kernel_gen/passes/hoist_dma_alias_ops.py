@@ -4,7 +4,9 @@
 - 提供 `hoist-dma-alias-ops` pass。
 - `DmaAliasThroughWriteNoReadPattern` 统一处理 alias 穿过 write-only / no-read writer，
   并把 writer target 改为 alias result。
-- `DmaAliasHoistPattern` 统一处理 NoMemoryEffect alias descriptor 的纯外提，不改写任何 writer target。
+- `DmaAliasHoistPattern` 统一处理 NoMemoryEffect alias descriptor 的纯外提；纯外提路径不改写 writer target。
+- `DmaAliasHoistPattern` 同时在既有公开 pattern 框架内删除 broadcast source 的 leading-unit
+  `dma.reinterpret`，并把相关 writer target / broadcast source 改回 flat source。
 - 第一版 alias 范围为 `dma.reshape`、`dma.view` 与 `dma.reinterpret`。
 - 不保留旧 `view + deslice` 连续维度分组，也不保留旧单 op pattern 兼容入口。
 
@@ -40,7 +42,7 @@ from xdsl.rewriter import InsertPoint
 from xdsl.traits import MemoryEffectKind, get_effects
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.dialect.dma import DmaReinterpretOp, DmaReshapeOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaBroadcastOp, DmaReinterpretOp, DmaReshapeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolForOp, SymbolValueType
 from kernel_gen.passes.common import ensure_builtin_module
@@ -811,6 +813,8 @@ class DmaAliasHoistPattern(RewritePattern):
     - 统一外提 `dma.view`、`dma.reshape` 与 `dma.reinterpret`。
     - 只移动 alias descriptor 到 operands 已支配的最早合法位置，不修改任何 writer target。
     - 允许 loop-invariant alias 从 `symbol.for` 直接 body 提到该 loop 前。
+    - 对 broadcast source 上的 leading-unit `dma.reinterpret([N] -> [1,N])`，在 verifier
+      成功时删除 alias，并把 writer target 与 `dma.broadcast` source 改回 flat source。
 
     IR before:
     ```mlir
@@ -822,6 +826,17 @@ class DmaAliasHoistPattern(RewritePattern):
     ```mlir
     %alias = "dma.view"(%src, %o0, %o1, %s0, %s1, %t0, %t1) : (...) -> !nn.memory<...>
     "dma.fill"(%dst, %zero) : (!nn.memory<...>, f32) -> ()
+    ```
+
+    IR before:
+    ```mlir
+    %alias = "dma.reinterpret"(%flat, %c0, %c1, %n, %n, %c1) : (...) -> !nn.memory<...>
+    "dma.broadcast"(%dst, %alias) : (!nn.memory<...>, !nn.memory<...>) -> ()
+    ```
+
+    IR after:
+    ```mlir
+    "dma.broadcast"(%dst, %flat) : (!nn.memory<...>, !nn.memory<...>) -> ()
     ```
 
     使用示例:
@@ -844,11 +859,13 @@ class DmaAliasHoistPattern(RewritePattern):
         self._rejected_alias_ids: set[int] = set()
 
     def match_and_rewrite(self: "DmaAliasHoistPattern", op: Operation, rewriter: PatternRewriter, /) -> None:
-        """执行单个 pure alias hoist 候选改写。
+        """执行单个 alias hoist / broadcast source 化简候选改写。
 
         功能说明:
         - 对同 block alias，移动到 operands 已支配后的最早合法位置。
         - 对 `symbol.for` 直接 body 内 loop-invariant alias，提到 loop 前。
+        - 对 leading-unit `dma.reinterpret([N] -> [1,N])` 的 broadcast source，事务式删除 alias。
+        - retarget 后任一 op/module verifier 失败时完整 rollback，非目标 rank 保持 no-op。
 
         使用示例:
         - DmaAliasHoistPattern(module).match_and_rewrite(op, rewriter)
@@ -859,6 +876,89 @@ class DmaAliasHoistPattern(RewritePattern):
         alias_id = id(op)
         if alias_id in self._handled_alias_ids or alias_id in self._rejected_alias_ids:
             return
+        if isinstance(op, DmaReinterpretOp) and op.results:
+            source_type = _memory_type_of(op.source)
+            result_type = _memory_type_of(op.result)
+            source_shape = _symbol_expr_attrs(source_type.shape) if source_type is not None else None
+            source_stride = _symbol_expr_attrs(source_type.stride) if source_type is not None else None
+            result_shape = _symbol_expr_attrs(result_type.shape) if result_type is not None else None
+            result_stride = _symbol_expr_attrs(result_type.stride) if result_type is not None else None
+            source_numel = _memory_numel_attr(source_type) if source_type is not None else None
+            result_numel = _memory_numel_attr(result_type) if result_type is not None else None
+            expected_shape: tuple[SymbolExprAttr, ...] = ()
+            expected_stride: tuple[SymbolExprAttr, ...] = ()
+            if source_shape is not None and len(source_shape) == 1:
+                expected_shape = (SymbolExprAttr.from_expr("1"), source_shape[0])
+                expected_stride = (source_shape[0], SymbolExprAttr.from_expr("1"))
+            is_leading_unit_broadcast_source = (
+                source_type is not None
+                and result_type is not None
+                and source_shape is not None
+                and source_stride is not None
+                and result_shape is not None
+                and result_stride is not None
+                and len(source_shape) == 1
+                and len(result_shape) == 2
+                and _symbol_value_is_expr(op.offset, "0")
+                and not _is_i8_byte_pool_memory_type(source_type)
+                and _same_space_and_element_type(source_type, result_type)
+                and _is_contiguous_memory_type(source_type)
+                and _is_contiguous_memory_type(result_type)
+                and source_stride == (SymbolExprAttr.from_expr("1"),)
+                and source_numel is not None
+                and source_numel == result_numel
+                and _same_symbol_attrs(result_shape, expected_shape)
+                and _same_symbol_attrs(result_stride, expected_stride)
+                and _symbol_operands_match_attrs(op.shape, result_shape)
+                and _symbol_operands_match_attrs(op.stride, result_stride)
+            )
+            if is_leading_unit_broadcast_source:
+                source = op.source
+                alias_result = op.results[0]
+                uses = list(alias_result.uses)
+                has_broadcast_source_use = False
+                originals: list[tuple[Operation, int, SSAValue]] = []
+                for use in uses:
+                    user = use.operation
+                    operand_index = use.index
+                    is_broadcast_source = isinstance(user, DmaBroadcastOp) and operand_index == 1
+                    is_write_no_read_target = operand_index == 0 and _writer_target_has_write_no_read_effect(
+                        user,
+                        alias_result,
+                    )
+                    if is_broadcast_source:
+                        has_broadcast_source_use = True
+                    if not _value_dominates_op(source, user) or not (is_broadcast_source or is_write_no_read_target):
+                        originals = []
+                        break
+                    originals.append((user, operand_index, user.operands[operand_index]))
+                if has_broadcast_source_use and originals:
+                    try:
+                        self.module.verify()
+                    except VerifyException:
+                        module_was_valid = False
+                    else:
+                        module_was_valid = True
+                    for user, operand_index, _original in originals:
+                        user.operands[operand_index] = source
+                    try:
+                        for user, _operand_index, _original in originals:
+                            user.verify()
+                        if module_was_valid:
+                            self.module.verify()
+                    except VerifyException:
+                        for user, operand_index, original in originals:
+                            user.operands[operand_index] = original
+                    else:
+                        if list(alias_result.uses):
+                            for user, operand_index, original in originals:
+                                user.operands[operand_index] = original
+                        else:
+                            for user, _operand_index, _original in originals:
+                                rewriter.notify_op_modified(user)
+                            rewriter.erase_op(op)
+                            self._handled_alias_ids.add(alias_id)
+                            return
         insert_point = _loop_hoist_insert_point(op)
         is_loop_hoist = insert_point is not None
         if not is_loop_hoist:

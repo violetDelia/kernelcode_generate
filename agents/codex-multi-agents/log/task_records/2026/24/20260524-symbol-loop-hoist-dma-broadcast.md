@@ -1,0 +1,414 @@
+# T-20260524-99183dda symbol-loop-hoist-dma-broadcast
+
+## 2026-05-24 16:56 +0800 execute 开工记录
+
+- 任务：`T-20260524-99183dda / symbol-loop-hoist-dma-broadcast / execute`
+- 执行人：`咯咯咯`
+- worktree：`/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast`
+- 计划书：主仓只读 `ARCHITECTURE/plan/symbol_loop_hoist_dma_broadcast_green_plan.md`
+- 记录文件：`agents/codex-multi-agents/log/task_records/2026/24/20260524-symbol-loop-hoist-dma-broadcast.md`
+- 执行前阅读：
+  - 已读 `agents/codex-multi-agents/agents/咯咯咯/咯咯咯.prompt.md`。
+  - 已读根 `AGENTS.md`。
+  - 已读 `agents/standard/*.md`，本轮按 execute 边界、公开 API、Diff 反推测试、expectation 只读、敏感目录空 diff 规则执行。
+  - 已读主仓只读计划书 `ARCHITECTURE/plan/symbol_loop_hoist_dma_broadcast_green_plan.md` 的计划目标、公开 API 设计、expectation manifest、S1-S5 小任务卡和验收设计。
+  - 已读主仓 `TODO.md`，当前任务为 `execute / 咯咯咯 / 进行中`。
+- latest main 核对：
+  - 命令：`git fetch origin --prune && git rev-parse HEAD && git rev-parse origin/main && git merge-base HEAD origin/main && git status --short --branch --untracked-files=all`
+  - 结果：`HEAD=origin/main=merge-base=d5ddd875218bb7701cb7722d4b561d1f83f7df9e`，worktree 初始无 dirty diff。
+- 前置任务核对：
+  - `DONE.md` 显示 `T-20260524-bd765d31` 已完成，时间 `2026-05-24 14:30:01 +0800`。
+  - `DONE.md` 显示 `T-20260524-53daf9ec` 已完成，时间 `2026-05-24 15:48:51 +0800`。
+- expectation manifest 核对：
+  - `expectation/pass/symbol_loop_hoist/__main__.py`：`39250da481cf12ba7d3f5b0976bf5fd9969af31c6224ed0262882c18450e2151`，与计划一致。
+  - `expectation/pass/symbol_loop_hoist/arith_constant.py`：`3016ce94301420550f425ceed7c950719f8c1bc7ae82bd48fdaf1a5f6c5c29e7`，与计划一致。
+  - `expectation/pass/symbol_loop_hoist/memory_presence_guard.py`：`202447f1c6338607365c174613cd9e059b42a8920d96dfc05b81763e5407fa59`，与计划一致。
+  - `expectation/pass/hoist_dma_alias_ops/__main__.py`：`b3f66e712e9199638d9090e04c4c17938cc0e5cf9558051730f92c5eec9db60f`，与计划一致。
+  - `expectation/pass/hoist_dma_alias_ops/broadcast.py`：`f62c1719ac94c0c066c9ad57a1b36faa8f54652db4d4d2e693cca603f0391021`，与计划一致。
+- 敏感目录核对：
+  - `git diff --name-only -- expectation .skills agents/standard`：空。
+  - `git diff --cached --name-only -- expectation .skills agents/standard`：空。
+  - `git status --short --ignored --untracked-files=all -- expectation .skills agents/standard`：空。
+- 并发路径交集：
+  - 当前 running `T-20260524-572f35ec` worktree `/home/lfr/kernelcode_generate/wt-20260524-private-api-boundary-static-gate` 有 `54` 个 dirty 路径。
+  - 与本任务计划修改路径精确交集为空；本任务继续执行。
+- 计划内小任务卡核对：
+  - S1：同步 `symbol-loop-hoist` 四个公开 pattern API、spec、文件级 API 列表、docs gate。
+  - S2：实现 `ArithConstantHoistPattern`、`MemoryGetDataHoistPattern`、`SymbolCastHoistPattern`、`SymbolNeHoistPattern`，并补 pytest / expectation 验收。
+  - S3：同步 `hoist-dma-alias-ops` broadcast source leading-unit reinterpret 化简 spec。
+  - S4：在既有公开 pattern 框架内实现 broadcast source leading-unit alias 删除、writer retarget、verify rollback，并补 pytest / expectation 验收。
+  - S5：同步真实 dump gate、`git diff --check`、敏感目录空 diff 和任务记录。
+- 公开 API 确认：
+  - 用户已确认新增公开 pattern exact spelling：`ArithConstantHoistPattern`、`MemoryGetDataHoistPattern`、`SymbolCastHoistPattern`、`SymbolNeHoistPattern`。
+  - 本轮不得新增 `hoist-dma-alias-ops` 第三个公开 pattern，不得改变 `dma.broadcast` / `dma.reinterpret` API；若实现需要这些变化，暂停回报。
+- 禁止修改面：
+  - 不修改 `expectation/`、`.skills/`、`agents/standard/`、计划书自身、`TODO.md`、`DONE.md`。
+  - expectation 只从主仓作为合同真源读取运行，候选 diff 禁止包含 expectation。
+- 实现前只读 expectation 红灯基线：
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist.arith_constant`：exit=1，direct body 正例红，nested 反例通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist.memory_presence_guard`：exit=1，静态/动态正例红，loop-local 反例通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.hoist_dma_alias_ops.broadcast`：exit=1，静态/动态 leading-unit 正例红，非 leading-unit/offset 反例通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist`：exit=1，仅新增 `arith_constant` 与 `memory_presence_guard` leaf 失败。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.hoist_dma_alias_ops`：exit=1，仅新增 `broadcast` leaf 失败。
+
+## 2026-05-24 execute 路径纠偏记录
+
+- 管理员只读核对发现主仓 `/home/lfr/kernelcode_generate` 出现 `kernel_gen/passes/symbol_loop_hoist.py` 本地脏改，而任务 worktree clean。
+- 核对结果：该脏改来自本轮执行时 `apply_patch` 未显式作用于任务 worktree，属于任务 diff 误落主仓；主仓脏改不得作为候选 diff。
+- 纠偏动作：
+  - 已将该 `symbol_loop_hoist.py` 改动迁移到任务 worktree 路径 `/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast/kernel_gen/passes/symbol_loop_hoist.py`。
+  - 已确认主仓 `git status --short --branch --untracked-files=all` 恢复干净。
+  - 后续所有 `apply_patch` 均使用 `wt-20260524-symbol-loop-hoist-dma-broadcast/...` 前缀，确保只改任务 worktree。
+- 当前状态：任务 worktree 只有 `kernel_gen/passes/symbol_loop_hoist.py` 与本记录文件 diff；继续在任务 worktree 收口。
+
+## 2026-05-24 18:55 +0800 execute 完成记录
+
+- 时间：`2026-05-24 18:55 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260524-99183dda / symbol-loop-hoist-dma-broadcast / execute`
+- 任务目标：按计划完成 `symbol-loop-hoist` 四个公开 pattern、`hoist-dma-alias-ops` broadcast source leading-unit reinterpret 化简、对应 `spec`、pytest、真实 dump gate、只读合同验收与记录闭环。
+- 执行前阅读补充：
+  - latest main 同步后重新读取 `agents/codex-multi-agents/agents/咯咯咯/咯咯咯.prompt.md`、根 `AGENTS.md`、`agents/standard/任务记录约定.md`、`agents/standard/实现文件规范.md`、`agents/standard/spec文件规范.md`、`agents/standard/测试文件约定.md`、`agents/standard/expectation任务规则.md`、`agents/standard/协作执行通用规则.md`。
+  - 重新核对主仓只读计划书 `ARCHITECTURE/plan/symbol_loop_hoist_dma_broadcast_green_plan.md` 的公开 API、S1-S5 小任务卡和必过合同验收资产。
+- 最新同步现场：
+  - 开工基线：`d5ddd875218bb7701cb7722d4b561d1f83f7df9e`。
+  - 中途发现 worktree 落后 `origin/main` 1 个提交；执行保护备份 `git diff --binary > /tmp/T-20260524-99183dda-before-sync.patch` 与 `git status --porcelain=v1 --untracked-files=all > /tmp/T-20260524-99183dda-before-sync.status`。
+  - 同步命令：`git stash push -u -m T-20260524-99183dda-before-sync && git merge --ff-only origin/main && git stash pop`，结果：fast-forward 到 `324481af568bfc02e4638cdbb7c3940a9ff15005`，任务 diff 恢复无冲突。
+  - 流转前重核命令：`git fetch origin --prune && git rev-parse HEAD && git rev-parse origin/main && git merge-base HEAD origin/main && git status --short --branch --untracked-files=all`。
+  - 流转前重核结果：`HEAD=origin/main=merge-base=324481af568bfc02e4638cdbb7c3940a9ff15005`；任务 worktree 仅有本任务候选 diff 和本记录文件。
+  - 主仓误落 diff 复核：`/home/lfr/kernelcode_generate` 执行 `git status --short --branch --untracked-files=all`，结果仅 `## main...origin/main`，主仓干净。
+- 改动：
+  - `kernel_gen/passes/symbol_loop_hoist.py`：新增公开 `ArithConstantHoistPattern`、`MemoryGetDataHoistPattern`、`SymbolCastHoistPattern`、`SymbolNeHoistPattern`；同步文件级 API 列表、`get_symbol_loop_hoist_patterns()` 顺序和 `__all__`。
+  - `kernel_gen/passes/hoist_dma_alias_ops.py`：在既有公开 `DmaAliasHoistPattern` 内实现 broadcast source leading-unit `dma.reinterpret([N] -> [1,N])` 删除；仅当 use 集合包含 `dma.broadcast` source，且其它 use 全部是 write/no-read target，并且 retarget 后用户 op verify 与可用 module verify 通过时提交；失败时回滚，不新增第三个公开 pattern，不改变 `dma.broadcast` / `dma.reinterpret` API。
+  - `spec/pass/symbol_loop_hoist.md`：同步新增四个公开 pattern API、依赖、行为边界、测试矩阵和合同验收口径。
+  - `spec/pass/hoist_dma_alias_ops.md`：同步 broadcast source leading-unit rewrite 合同、no-op / rollback 边界、公开 pattern 不扩展口径和测试矩阵。
+  - `test/passes/test_symbol_loop_hoist.py`：补 `arith.constant` direct body / nested region、presence guard 静态 / 动态 / loop-local 公开 ircheck 覆盖。
+  - `test/passes/test_hoist_dma_alias_ops.py`：补 broadcast source leading-unit 静态 / 动态正例、非 leading-unit no-op、retarget verifier rollback no-op。
+  - `test/passes/test_pattern_public_api_docs.py`：同步新增 pattern getter 顺序和实现文档 token gate。
+  - `test/passes/pipeline/test_npu_demo_lowering.py`：补真实 dump gate，验证第二次 `symbol-loop-hoist` 前移 `arith.constant` 与 presence guard 链，第二次 `hoist-dma-alias-ops` 后 `dma.fill` / `dma.broadcast` 共享 flat `[56]` source；用公开 pass `apply(...)` monkeypatch 跳过后续无关 arch 阶段以隔离本计划 dump 验收。
+- 最小功能闭环：
+  - S1 完成：新增 `symbol-loop-hoist` 四个公开 pattern 的 spec、实现文件 API、`__all__`、getter 和 docs gate。
+  - S2 完成：四个 pattern 均复用现有一层 loop-invariant 外提规则，正例红转绿，nested / loop-local 反例保持 no-op。
+  - S3 完成：`hoist-dma-alias-ops` spec 明确 broadcast source leading-unit 化简，不新增第三公开 pattern。
+  - S4 完成：broadcast source 化简在 `DmaAliasHoistPattern` 内事务执行，未知 use、非 leading-unit、offset 非 0、verifier 失败均 no-op / rollback。
+  - S5 完成：真实 dump gate、Diff 反推自测、只读合同验收、敏感目录空 diff和记录均已收口。
+- Diff 反推自测：
+  - `python3 -m py_compile kernel_gen/passes/symbol_loop_hoist.py kernel_gen/passes/hoist_dma_alias_ops.py test/passes/test_symbol_loop_hoist.py test/passes/test_hoist_dma_alias_ops.py test/passes/pipeline/test_npu_demo_lowering.py`：exit=0；锁定改动实现与测试文件语法可加载。
+  - `pytest -q test/passes/test_symbol_loop_hoist.py`：exit=0，`17 passed, 1 warning`；锁定四个新增 pattern 的公开 pass 行为与既有 symbol-loop 行为不回退。
+  - `pytest -q test/passes/test_hoist_dma_alias_ops.py`：exit=0，`14 passed, 1 warning`；锁定 broadcast source leading-unit 正例、非 leading-unit no-op、retarget rollback 与既有 P1/P2 行为不回退。
+  - `pytest -q test/passes/test_pattern_public_api_docs.py`：exit=0，`4 passed, 1 warning`；锁定公开 pattern getter 顺序、spec/docs/docstring token 一致性。
+  - `pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k "symbol_loop_hoist or hoist_dma_alias_ops or broadcast"`：exit=0，`1 passed, 9 deselected, 1 warning`；锁定真实 dump 中新增 symbol-loop 外提与 broadcast flat source 化简。
+- 合同验收：
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist.arith_constant`：exit=0，`2` 个 case 通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist.memory_presence_guard`：exit=0，`3` 个 case 通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist`：exit=0，`19` 个 case 通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.hoist_dma_alias_ops.broadcast`：exit=0，`4` 个 case 通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.hoist_dma_alias_ops`：exit=0，`25` 个 case 通过。
+  - expectation manifest 复核：五个计划 manifest sha256 仍为 `39250da481cf12ba7d3f5b0976bf5fd9969af31c6224ed0262882c18450e2151`、`3016ce94301420550f425ceed7c950719f8c1bc7ae82bd48fdaf1a5f6c5c29e7`、`202447f1c6338607365c174613cd9e059b42a8920d96dfc05b81763e5407fa59`、`b3f66e712e9199638d9090e04c4c17938cc0e5cf9558051730f92c5eec9db60f`、`f62c1719ac94c0c066c9ad57a1b36faa8f54652db4d4d2e693cca603f0391021`，与计划一致。
+- 静态门禁：
+  - `git diff --check`：exit=0。
+  - `git diff --name-only -- expectation .skills agents/standard`：exit=0，输出空。
+  - `git diff --cached --name-only -- expectation .skills agents/standard`：exit=0，输出空。
+  - `git status --short --ignored --untracked-files=all -- expectation .skills agents/standard`：exit=0，输出空。
+  - `git diff --name-only -- '*.py' | xargs -r rg -n 'hasattr\\(ctx|hasattr\\([^,]+, "emit_barrier"|getattr\\(ctx|getattr\\([^,]+, "emit_barrier"|callable\\(getattr'`：无匹配；本轮未新增 ctx 能力探测。
+  - AST 嵌套函数扫描：`no nested functions in changed python files`。
+  - `git diff --unified=0 -- '*.py' | rg '^\\+\\s*(def _|async def _|class _|\\s+def _)'`：无匹配；本轮最终候选 diff 未新增 private callable 定义。
+- 减法检查：
+  - 新增 / 改动 private callable 清单：最终候选 diff 无新增 private callable 定义；中间实现曾新增 broadcast-source 私有 helper 链，已在最终候选中删除并合入 `DmaAliasHoistPattern.match_and_rewrite(...)`，避免新增 private callable 调用 private callable。
+  - 被替代旧逻辑及处理结果：`symbol-loop-hoist` 保留既有白名单外提 helper，不扩成通用 LICM；`hoist-dma-alias-ops` 保留既有 P1/P2 公开 pattern 框架，仅在 `DmaAliasHoistPattern` 中补计划授权的 broadcast source 化简分支；未新增 `DmaBroadcastSourceAliasPattern`。
+  - 保留旧逻辑依据：既有 `reshape/view/reinterpret` pure hoist、through-write retarget、旧 grouping 删除 no-op 合同仍是当前公开行为，相关 pytest 与聚合 expectation 已通过。
+  - 删除 / 未删除验证：新增 private callable 扫描无匹配；`test_pattern_public_api_docs.py` 仍断言 `hoist-dma-alias-ops` 仅公开 `DmaAliasThroughWriteNoReadPattern` 与 `DmaAliasHoistPattern`。
+- 自检：
+  - 接口：新增公开 API 仅限用户确认的四个 `symbol-loop-hoist` pattern；`hoist-dma-alias-ops` 未新增公开 pattern、pass option、dialect API 或 verifier API。
+  - 边界：覆盖 direct body / nested region、静态 / 动态 presence guard、loop-local no-op、leading-unit / non-leading-unit、offset 非 0、verifier rollback。
+  - 异常与兼容：retarget 后用户 op verify 失败或原 module 可 verify 但改写后 module verify 失败均回滚；输入 module 原有无关 verifier 红灯时仍要求被改写用户 op 自身 verify 通过。
+  - 实现质量：没有新增跨文件非公开 API 调用；没有新增 ctx 能力探测；没有新增嵌套函数；broadcast 化简逻辑未抽成新的公开 pattern，符合计划边界。
+  - 冗余与函数粒度：为遵守最新 private callable 准入，未保留新增私有 helper 链；代价是 `DmaAliasHoistPattern.match_and_rewrite(...)` 较长，但行为局限在单个公开 pattern 内，未扩大 API 面。
+  - 测试有效性：pytest 断言正例必须红转绿、反例必须 no-op / rollback；真实 dump gate 不绑定固定文件编号或 SSA 名，能在新增 pass 行为回退时失败。
+  - 资源、并发、性能：本轮仅增加 pattern 局部匹配和 use 列表事务改写；无全局状态共享；只在候选匹配时执行 verify，未引入并发共享可变状态。
+  - 敏感目录：`expectation/`、`.skills/`、`agents/standard/` 候选 diff 均为空。
+- 结论：execute 已完成，可进入 `review`；下一阶段需审查公开 API、实现边界、Diff 反推自测、只读合同验收、敏感目录空 diff与任务记录完整性。
+
+## 2026-05-24 18:58 +0800 execute 流转记录
+
+- 时间：`2026-05-24 18:58 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260524-99183dda / execute -> review`
+- 任务目标：按计划级流程把完成态续接到 `review`。
+- 改动：
+  - 首次执行 `-next` 使用 worktree 相对 `agents/codex-multi-agents/agents-lists.md`，失败：`ERROR(2): file not found: agents/codex-multi-agents/agents-lists.md`，未完成状态推进。
+  - 第二次执行主仓绝对 `agents-lists.md` 但未设置 canonical env，失败：`ERROR(1): cannot resolve canonical agents list; set CODEX_MULTI_AGENTS_AGENTS_FILE or AGENTS_FILE`，未完成状态推进。
+  - 第三次设置 `CODEX_MULTI_AGENTS_AGENTS_FILE=/home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md` 与 `CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE=/home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md` 后执行成功。
+- 验证：
+  - 成功命令：`CODEX_MULTI_AGENTS_AGENTS_FILE=/home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE=/home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file /home/lfr/kernelcode_generate/TODO.md -next -task_id T-20260524-99183dda -from "咯咯咯" -type "review" -message "<review message>" -agents-list /home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md -auto`。
+  - 结果：exit=0，输出 `OK: next T-20260524-99183dda`、`OK: auto-dispatch T-20260524-99183dda -> 不要啊教练`、`OK: talk 咯咯咯 -> 不要啊教练`、`OK: talk 咯咯咯 -> 神秘人`。
+  - 状态核对：`/home/lfr/kernelcode_generate/TODO.md` 中 `T-20260524-99183dda` 已为 `review / 不要啊教练 / 进行中`。
+  - 主仓核对：`/home/lfr/kernelcode_generate` 执行 `git status --short --branch --untracked-files=all`，结果仅 `## main...origin/main`。
+- 自检：状态流转已通过脚本完成；本记录仍在任务 worktree 指定记录文件内；未手工修改 `TODO.md`、`DONE.md`、`agents/standard`、`.skills` 或 `expectation/`。
+- 结论：已续接 review 并已自动通知管理员和审查人。
+
+## 2026-05-24 19:28 +0800 review 记录 - 不要啊教练
+
+- 时间：`2026-05-24 19:28 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260524-99183dda / symbol-loop-hoist-dma-broadcast / review`
+- 任务目标：审查 `symbol-loop-hoist` 四个公开 pattern、`hoist-dma-alias-ops` broadcast source leading-unit 化简、spec/test/真实 dump gate、Diff 反推自测、只读 expectation 合同验收与敏感目录空 diff。
+- 最新同步现场：
+  - 执行目录：`/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast`
+  - 命令：`git fetch origin --prune && git rev-parse HEAD && git rev-parse origin/main && git merge-base HEAD origin/main && git rev-list --left-right --count HEAD...origin/main && git status --short --branch --untracked-files=all`
+  - 结果：`HEAD=324481af568bfc02e4638cdbb7c3940a9ff15005`，`origin/main=324481af568bfc02e4638cdbb7c3940a9ff15005`，`merge-base=324481af568bfc02e4638cdbb7c3940a9ff15005`，ahead/behind=`0/0`，无同步冲突或覆盖风险。
+- 被审 diff：
+  - `kernel_gen/passes/hoist_dma_alias_ops.py`
+  - `kernel_gen/passes/symbol_loop_hoist.py`
+  - `spec/pass/hoist_dma_alias_ops.md`
+  - `spec/pass/symbol_loop_hoist.md`
+  - `test/passes/pipeline/test_npu_demo_lowering.py`
+  - `test/passes/test_hoist_dma_alias_ops.py`
+  - `test/passes/test_pattern_public_api_docs.py`
+  - `test/passes/test_symbol_loop_hoist.py`
+  - 任务记录：`agents/codex-multi-agents/log/task_records/2026/24/20260524-symbol-loop-hoist-dma-broadcast.md`
+- findings：
+  1. `阻断 / 新增问题`：`kernel_gen/passes/hoist_dma_alias_ops.py:886` 与 `kernel_gen/passes/hoist_dma_alias_ops.py:887` 在确认 `len(source_shape) == 1` 前先访问 `source_shape[0]`。`!nn.memory<[], [], ...>` 是现有公开可验证 memory type（仓内已有 round-trip 测试），当合法的 rank-0 source `dma.reinterpret` 带 `dma.fill` use 进入 `hoist-dma-alias-ops` 时，本轮新增 broadcast 分支会抛 `tuple index out of range`，而不是对非目标 rank 保守 no-op。问题 -> 非目标合法 IR 会让 pass 崩溃，破坏 pass no-op 边界。影响 -> 任何含 scalar memory reinterpret 且结果仍有 use 的 module 都可能在本 pass 中失败。最小返工动作 -> 先判断 `source_shape/source_stride/result_shape/result_stride` 均非 `None` 且 `len(source_shape) == 1`、`len(result_shape) == 2` 后，再构造 `expected_shape/expected_stride`；补公开 ircheck/pytest 反例锁定 rank-0 source reinterpret with use 必须 no-op、不崩溃。验收方式 -> 新增测试应在当前实现下复现 `tuple index out of range`，修复后 `pytest -q test/passes/test_hoist_dma_alias_ops.py -k <新增用例>` 通过，并复跑计划列出的 hoist-dma 测试与 expectation。
+  2. `阻断 / 新增问题`：`kernel_gen/passes/symbol_loop_hoist.py:451`、`kernel_gen/passes/symbol_loop_hoist.py:484`、`kernel_gen/passes/symbol_loop_hoist.py:517`、`kernel_gen/passes/symbol_loop_hoist.py:550` 是本轮新增并写入公开 API 列表的 `match_and_rewrite(...)` 方法，但函数体没有函数注释，缺少当前规范要求的 `功能说明` 与 `使用示例`。同类注释问题还包括本轮修改后的 `kernel_gen/passes/hoist_dma_alias_ops.py:861`：函数注释仍只描述 pure hoist，没有写入新增 broadcast source leading-unit 删除与 rollback 行为。问题 -> 新增/修改公开方法注释与真实行为不一致或缺失。影响 -> 文件级 API 与函数级说明无法作为可维护合同，后续审查也无法从函数注释识别 broadcast 分支的异常/rollback 边界。最小返工动作 -> 为四个新增 `match_and_rewrite(...)` 补函数注释；更新 `DmaAliasHoistPattern.match_and_rewrite(...)` 函数注释，明确 pure hoist 与 broadcast source leading-unit rewrite/rollback 两条路径。验收方式 -> 用 AST 或文本扫描确认本轮新增/修改函数注释含 `功能说明` 与 `使用示例`，并复跑 `pytest -q test/passes/test_pattern_public_api_docs.py`。
+- review 追加反例复现：
+  - 命令：使用公开 `run_ircheck_text(...)` 运行 inline case：`!nn.memory<[], [], f32, #nn.space<tsm>>` source 经 `dma.reinterpret` 到 `[1]`，结果被 `dma.fill` 使用，再执行 `--pass hoist-dma-alias-ops`。
+  - 结果：exit=`2`，`IrcheckRunError: pass execution failed at step 1 (pass hoist-dma-alias-ops): tuple index out of range`。
+  - 判定：该反例不属于计划正例，但属于本轮新增 broadcast 分支必须安全 no-op 的非目标合法边界；当前实现不满足。
+- Diff 反推审查 / 复跑验证：
+  - `python3 -m py_compile kernel_gen/passes/symbol_loop_hoist.py kernel_gen/passes/hoist_dma_alias_ops.py test/passes/test_symbol_loop_hoist.py test/passes/test_hoist_dma_alias_ops.py test/passes/pipeline/test_npu_demo_lowering.py`：exit=0。
+  - `pytest -q test/passes/test_symbol_loop_hoist.py`：exit=0，`17 passed, 1 warning`。
+  - `pytest -q test/passes/test_hoist_dma_alias_ops.py`：exit=0，`14 passed, 1 warning`。
+  - `pytest -q test/passes/test_pattern_public_api_docs.py`：exit=0，`4 passed, 1 warning`。
+  - `pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k "symbol_loop_hoist or hoist_dma_alias_ops or broadcast"`：exit=0，`1 passed, 9 deselected, 1 warning`。
+  - 当前计划 pytest 能覆盖执行人列出的正例/反例，但缺少 rank-0 source reinterpret with use 的非目标 no-op 边界，见 finding 1。
+- 合同验收：
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist.arith_constant`：exit=0。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist.memory_presence_guard`：exit=0。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist`：exit=0。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.hoist_dma_alias_ops.broadcast`：exit=0。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.hoist_dma_alias_ops`：exit=0。
+  - 说明：`expectation` 作为合同验收单列，不计入 Diff 反推审查；本轮 review 未修改 `expectation/`。
+- 静态与敏感目录核对：
+  - `git diff --check`：exit=0。
+  - `git diff --cached --check`：exit=0。
+  - `git diff --name-only -- expectation .skills agents/standard`：空。
+  - `git diff --cached --name-only -- expectation .skills agents/standard`：空。
+  - `git status --short --ignored --untracked-files=all -- expectation .skills agents/standard`：空。
+  - `git diff --name-only -- '*.py' | xargs -r rg -n 'hasattr\(ctx|hasattr\([^,]+, "emit_barrier"|getattr\(ctx|getattr\([^,]+, "emit_barrier"|callable\(getattr'`：无命中。
+  - AST 嵌套函数扫描：无嵌套函数。
+  - `git diff --unified=0 -- '*.py' | rg '^\+\s*(def _|async def _|class _|\s+def _)'`：无新增 private callable 定义。
+- 执行记录核对：执行人已写执行前阅读、latest 同步、最小功能闭环、Diff 反推自测、只读 expectation、敏感目录核对、自检和减法检查；但 review 追加反例证明 Diff 反推测试还缺非目标 rank 边界。
+- 减法审查：本轮未新增 private callable；中间私有 helper 链已删除并合入公开 pattern 方法。保留既有 `DmaAliasHoistPattern`/`DmaAliasThroughWriteNoReadPattern` 两公开 pattern 框架，不新增第三公开 pattern，符合计划；但新增 broadcast 分支应先收紧非目标 rank no-op 边界后才能通过。
+- 自检：已读取实际 diff、计划书、执行记录和相关测试；已复跑计划列出的 pytest 与 expectation；已补充能在当前实现失败的公开 ircheck 反例；已核对公开 API、敏感目录、跨文件非公开 API、ctx 能力探测、嵌套函数和 private callable 规则。
+- 结论：`最小需改项`，不得进入 `archive_acceptance`。请回 `execute` 完成上述 2 项返工并补记录。
+
+## 2026-05-24 19:29 +0800 execute 返工记录 - 金铲铲大作战
+
+- 时间：`2026-05-24 19:29 +0800`
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260524-99183dda / symbol-loop-hoist-dma-broadcast / review 退回 execute 返工`
+- 任务目标：修复 review 两项最小阻断：rank0 source `dma.reinterpret` with use 必须安全 no-op，不得 tuple index 崩溃；补齐四个新增 `symbol-loop-hoist` pattern `match_and_rewrite(...)` 函数注释，并更新 `DmaAliasHoistPattern.match_and_rewrite(...)` 注释覆盖 broadcast rewrite / rollback。
+- 执行前阅读：
+  - 已读最新 `agents/codex-multi-agents/agents/金铲铲大作战/金铲铲大作战.prompt.md`。
+  - 已读根 `AGENTS.md`。
+  - 已读 `agents/standard/实现文件规范.md`、`agents/standard/任务记录约定.md`、`agents/standard/审查规范.md`。
+  - 已读主仓只读计划书 `ARCHITECTURE/plan/symbol_loop_hoist_dma_broadcast_green_plan.md` 的验收设计、公开 API 边界和禁止修改面。
+  - 已读本记录中 `2026-05-24 19:28 +0800 review 记录 - 不要啊教练` 的两项最小阻断。
+- 最新同步现场：
+  - 命令：`git fetch origin --prune && git rev-parse HEAD && git rev-parse origin/main && git merge-base HEAD origin/main && git rev-list --left-right --count HEAD...origin/main && git status --short --branch --untracked-files=all`
+  - 结果：`HEAD=324481af568bfc02e4638cdbb7c3940a9ff15005`，`origin/main=324481af568bfc02e4638cdbb7c3940a9ff15005`，`merge-base=324481af568bfc02e4638cdbb7c3940a9ff15005`，ahead/behind=`0/0`；无同步冲突或覆盖风险；worktree 仅有当前任务候选 diff 与本记录文件。
+- 改动：
+  - `kernel_gen/passes/hoist_dma_alias_ops.py`：把 `expected_shape/expected_stride` 构造收窄到 `source_shape is not None and len(source_shape) == 1` 后执行，rank0 source 或其它非一维 source 保持 no-op；更新 `DmaAliasHoistPattern.match_and_rewrite(...)` 函数注释，写清 pure alias hoist、broadcast source leading-unit rewrite、verifier rollback 与非目标 rank no-op。
+  - `kernel_gen/passes/symbol_loop_hoist.py`：为 `ArithConstantHoistPattern.match_and_rewrite(...)`、`MemoryGetDataHoistPattern.match_and_rewrite(...)`、`SymbolCastHoistPattern.match_and_rewrite(...)`、`SymbolNeHoistPattern.match_and_rewrite(...)` 补齐函数注释，均包含 `功能说明` 与 `使用示例`。
+  - `test/passes/test_hoist_dma_alias_ops.py`：新增公开 ircheck inline case `broadcast_source_rank0_source_noop_ir()` 与 pytest `test_hoist_dma_alias_ops_keeps_rank0_reinterpret_source_noop()`，验证 rank0 source `dma.reinterpret` result 被 `dma.fill` 使用时 pass 保留 alias/use 且不崩溃；同时补齐本轮触达的 broadcast no-op / rollback 测试函数说明。
+  - `spec/pass/hoist_dma_alias_ops.md`：补 `rank0 source 或其它无法构造 [N] -> [1,N] 证明的 source rank 必须 no-op` 行为边界，并新增 `TC-HOIST-DMA-ALIAS-013` 测试矩阵。
+- 最小功能闭环：
+  - rank0 source 反例已通过公开 `run_ircheck_text(...)` 路径验证，不直连实现私有 helper。
+  - broadcast source leading-unit 正例、非 leading-unit、retarget rollback 与新增 rank0 no-op 共同覆盖新增分支的正反边界。
+  - 函数注释 AST gate 已锁定 5 个 review 点名 `match_and_rewrite(...)` 均包含 `功能说明` 与 `使用示例`。
+- Diff 反推自测：
+  - `pytest -q test/passes/test_hoist_dma_alias_ops.py -k rank0_reinterpret`：exit=0，`1 passed, 14 deselected, 1 warning`；锁定 rank0 source `dma.reinterpret` with use no-op 且不崩溃。
+  - `python3 -m py_compile kernel_gen/passes/symbol_loop_hoist.py kernel_gen/passes/hoist_dma_alias_ops.py test/passes/test_hoist_dma_alias_ops.py`：exit=0；锁定返工触达实现与新增测试语法。
+  - `python3 -m py_compile kernel_gen/passes/symbol_loop_hoist.py kernel_gen/passes/hoist_dma_alias_ops.py test/passes/test_symbol_loop_hoist.py test/passes/test_hoist_dma_alias_ops.py test/passes/pipeline/test_npu_demo_lowering.py`：exit=0；锁定计划相关 Python 文件语法。
+  - `pytest -q test/passes/test_symbol_loop_hoist.py`：exit=0，`17 passed, 1 warning`；锁定四个新增 pattern 行为不回退。
+  - `pytest -q test/passes/test_hoist_dma_alias_ops.py`：exit=0，`15 passed, 1 warning`；锁定 rank0 反例和既有 alias rewrite/no-op 边界。
+  - `pytest -q test/passes/test_pattern_public_api_docs.py`：exit=0，`4 passed, 1 warning`；锁定公开 pattern 文档/API gate。
+  - `pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k "symbol_loop_hoist or hoist_dma_alias_ops or broadcast"`：exit=0，`1 passed, 9 deselected, 1 warning`；锁定真实 dump gate 不回退。
+  - AST 函数注释 gate：exit=0，输出 `function doc gate passed`；锁定 `ArithConstantHoistPattern.match_and_rewrite`、`MemoryGetDataHoistPattern.match_and_rewrite`、`SymbolCastHoistPattern.match_and_rewrite`、`SymbolNeHoistPattern.match_and_rewrite`、`DmaAliasHoistPattern.match_and_rewrite` 均有 `功能说明` 与 `使用示例`。
+- 合同验收：
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist.arith_constant`：exit=0，2 个 case 通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist.memory_presence_guard`：exit=0，3 个 case 通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist`：exit=0，19 个 case 通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.hoist_dma_alias_ops.broadcast`：exit=0，4 个 case 通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.hoist_dma_alias_ops`：exit=0，25 个 case 通过。
+- 静态门禁：
+  - `git diff --check`：exit=0。
+  - `git diff --name-only -- expectation .skills agents/standard`：exit=0，输出空。
+  - `git diff --cached --name-only -- expectation .skills agents/standard`：exit=0，输出空。
+  - `git status --short --ignored --untracked-files=all -- expectation .skills agents/standard`：exit=0，输出空。
+  - `git diff --name-only -- '*.py' | xargs -r rg -n 'hasattr\\(ctx|hasattr\\([^,]+, "emit_barrier"|getattr\\(ctx|getattr\\([^,]+, "emit_barrier"|callable\\(getattr'`：无匹配；本轮未新增 ctx 能力探测。
+  - AST 嵌套函数扫描：exit=0，输出 `no nested functions in changed python files`。
+  - `git diff --unified=0 -- '*.py' | rg '^\\+\\s*(def _|async def _|class _|\\s+def _)'`：无匹配；本轮返工未新增 private callable 定义。
+- 减法检查：
+  - 新增 / 改动 private callable 清单：无；新增测试 helper 使用非下划线名称 `broadcast_source_rank0_source_noop_ir()`，不新增 private callable。
+  - 被替代旧逻辑及处理结果：替代原先对任意非 `None` `source_shape` 直接访问 `source_shape[0]` 的宽判断，改成先证明 source rank 为 1 后才构造 `[1,N]` 期望布局；旧宽判断已删除。
+  - 保留旧逻辑依据：既有 broadcast source leading-unit rewrite、pure alias hoist、through-write rewrite、retarget rollback 逻辑均属于本计划已验证公开行为，保留并由 pytest / expectation 覆盖。
+  - 删除 / 未删除验证：private callable diff 扫描无匹配；`pytest -q test/passes/test_hoist_dma_alias_ops.py` 与 `expectation.pass.hoist_dma_alias_ops` 均通过，证明旧正例与 no-op 边界未回退。
+- 自检：
+  - 接口：未新增公开 API，未改变 pass option、dialect API 或稳定错误语义；spec 仅补充 no-op 边界和测试矩阵。
+  - 边界：rank0 source、非 leading-unit、retarget verifier 失败、static/dynamic leading-unit 均有公开测试或合同覆盖。
+  - 异常：rank0 source 不再触发 tuple index；非目标 rank 不进入 rewrite；verifier 失败仍 rollback。
+  - 兼容性：不改变 `expectation` 合同资产，不修改 `.skills/agents/standard`，候选 diff 敏感目录为空。
+  - 注释准确性：点名公开 `match_and_rewrite(...)` 注释已同步真实行为，且 AST gate 通过。
+  - 测试有效性：新增 rank0 case 在旧实现会触发 review 复现的 `tuple index out of range`，修复后通过；断言要求 alias/use 保留，能防止误删。
+  - 复用 / 函数粒度：未新增 helper 抽象，保持改动局限在现有公开 pattern 方法和公开 pytest case。
+  - 资源、并发、性能：仅增加 rank 判定前置和测试；无全局状态、资源生命周期或并发影响。
+- 结论：review 两项最小阻断已收口；计划 pytest、主仓只读 expectation、`git diff --check` 与敏感目录空 diff均通过，可按流程续接 `review`。
+
+## 2026-05-24 19:35 +0800 review 复审记录 - 提莫炖蘑菇
+
+- 时间：`2026-05-24 19:35 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260524-99183dda / symbol-loop-hoist-dma-broadcast / review 复审`
+- 任务目标：复审 rank0 source `dma.reinterpret` no-op 修复、公开 pytest 反例、`match_and_rewrite(...)` 函数注释补齐、计划 pytest、主仓只读 expectation、`git diff --check` 与敏感目录空 diff。
+- 最新同步现场：
+  - 执行目录：`/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast`
+  - 命令：`git fetch --prune origin && git rev-parse HEAD && git rev-parse origin/main && git merge-base HEAD origin/main && git rev-list --left-right --count HEAD...origin/main && git status --short --untracked-files=all`
+  - 结果：`HEAD=324481af568bfc02e4638cdbb7c3940a9ff15005`，`origin/main=324481af568bfc02e4638cdbb7c3940a9ff15005`，`merge-base=324481af568bfc02e4638cdbb7c3940a9ff15005`，ahead/behind=`0/0`；无同步冲突或覆盖风险。
+- 被审 diff：
+  - `kernel_gen/passes/hoist_dma_alias_ops.py`
+  - `kernel_gen/passes/symbol_loop_hoist.py`
+  - `spec/pass/hoist_dma_alias_ops.md`
+  - `spec/pass/symbol_loop_hoist.md`
+  - `test/passes/pipeline/test_npu_demo_lowering.py`
+  - `test/passes/test_hoist_dma_alias_ops.py`
+  - `test/passes/test_pattern_public_api_docs.py`
+  - `test/passes/test_symbol_loop_hoist.py`
+  - 任务记录：`agents/codex-multi-agents/log/task_records/2026/24/20260524-symbol-loop-hoist-dma-broadcast.md`
+- findings：无新增阻断项；前次 review 两项阻断均已收口。
+- 复审核对：
+  - `kernel_gen/passes/hoist_dma_alias_ops.py`：`expected_shape/expected_stride` 只在 `source_shape is not None and len(source_shape) == 1` 后构造，rank0 source 不再访问不存在的 `source_shape[0]`；broadcast source rewrite 仍要求 source rank 1、result rank 2、offset 0、same space / dtype、contiguous、shape/stride operands exact match 和 verifier rollback。
+  - `test/passes/test_hoist_dma_alias_ops.py`：新增 `test_hoist_dma_alias_ops_keeps_rank0_reinterpret_source_noop()` 通过公开 `run_ircheck_text(...)` 路径验证 rank0 source `dma.reinterpret` with use 保留 alias/use 且不崩溃；测试未跨文件直连实现私有 helper。
+  - `kernel_gen/passes/symbol_loop_hoist.py`：四个新增公开 pattern 的 `match_and_rewrite(...)` 均有 `功能说明` 与 `使用示例`；`DmaAliasHoistPattern.match_and_rewrite(...)` 注释已覆盖 pure hoist、broadcast source rewrite、rollback 与非目标 rank no-op。
+  - `spec/pass/hoist_dma_alias_ops.md`：已补 rank0 / 非一维 source no-op 边界和 `TC-HOIST-DMA-ALIAS-013`。
+- Diff 反推审查：
+  - `python3 -m py_compile kernel_gen/passes/symbol_loop_hoist.py kernel_gen/passes/hoist_dma_alias_ops.py test/passes/test_symbol_loop_hoist.py test/passes/test_hoist_dma_alias_ops.py test/passes/pipeline/test_npu_demo_lowering.py`：exit=0。
+  - `pytest -q test/passes/test_hoist_dma_alias_ops.py -k rank0_reinterpret`：exit=0，`1 passed, 14 deselected, 1 warning`。
+  - AST 函数注释 gate：exit=0，输出 `function doc gate passed`；锁定 `ArithConstantHoistPattern.match_and_rewrite`、`MemoryGetDataHoistPattern.match_and_rewrite`、`SymbolCastHoistPattern.match_and_rewrite`、`SymbolNeHoistPattern.match_and_rewrite`、`DmaAliasHoistPattern.match_and_rewrite`。
+  - `pytest -q test/passes/test_symbol_loop_hoist.py`：exit=0，`17 passed, 1 warning`。
+  - `pytest -q test/passes/test_hoist_dma_alias_ops.py`：exit=0，`15 passed, 1 warning`。
+  - `pytest -q test/passes/test_pattern_public_api_docs.py`：exit=0，`4 passed, 1 warning`。
+  - `pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k "symbol_loop_hoist or hoist_dma_alias_ops or broadcast"`：exit=0，`1 passed, 9 deselected, 1 warning`。
+- 合同验收：
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist.arith_constant`：exit=0。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist.memory_presence_guard`：exit=0。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist`：exit=0，`19` 个 case 输出通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.hoist_dma_alias_ops.broadcast`：exit=0。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.hoist_dma_alias_ops`：exit=0，`25` 个 case 输出通过。
+  - expectation manifest 核对：`sha256sum` 与计划列出的五个 hash 一致：`39250da...`、`3016ce...`、`202447...`、`b3f66e...`、`f62c17...`。
+  - 说明：`expectation` 只作为主仓只读合同验收单列，不计入 Diff 反推审查；本轮 review 未修改 `expectation/`。
+- 静态与敏感目录核对：
+  - `git diff --check`：exit=0。
+  - `git diff --cached --check`：exit=0。
+  - `git diff --name-only -- expectation .skills agents/standard`：空。
+  - `git diff --cached --name-only -- expectation .skills agents/standard`：空。
+  - `git status --short --ignored --untracked-files=all -- expectation .skills agents/standard`：空。
+  - AST 嵌套函数扫描：exit=0，输出 `no nested functions in changed python files`。
+  - 新增 private callable 扫描：`git diff --unified=0 -- '*.py' | rg '^\+\s*(def _|async def _|class _|\s+def _)'` 无输出。
+  - ctx 能力探测扫描：`git diff --name-only -- '*.py' | xargs -r rg -n 'hasattr\(ctx|hasattr\([^,]+, "emit_barrier"|getattr\(ctx|getattr\([^,]+, "emit_barrier"|callable\(getattr'` 无输出。
+  - 跨文件私有 import AST gate：exit=0，输出 `no cross-file private imports in changed python files`。
+- 执行记录核对：执行人已补执行前阅读、latest 同步、最小功能闭环、Diff 反推自测、只读 expectation、敏感目录核对、自检和减法检查；返工记录与当前 diff、pytest 和 expectation 结果一致。
+- 减法审查：
+  - 新增或改动 private callable：无；新增测试 helper 不以下划线命名，且仅在同一测试文件内服务公开 `run_ircheck_text(...)` case。
+  - 被替代旧逻辑：已删除原先对任意非 `None` `source_shape` 直接访问 `source_shape[0]` 的宽判断，改为先证明 source rank 为 1 后才构造 `[1,N]` 期望布局。
+  - 保留旧逻辑依据：既有 pure alias hoist、through-write rewrite、broadcast source rewrite、verifier rollback 均属于计划完成态，由计划 pytest 与只读 expectation 覆盖；未新增第三个公开 pattern class。
+  - private callable 小于 5 行有效代码 / private callable 调 private callable：本轮无新增 private callable 定义，无新增跨文件私有 API 使用。
+- 自检：
+  - 已读取个人提示词、根 `AGENTS.md`、审查规范、任务记录规范、计划书、前序 review / execute 记录和实际 diff。
+  - 已按最新主线核对基线，未发现覆盖任务 diff 或并行改动风险。
+  - 已复跑 rank0 反例、计划 pytest、函数注释 gate、主仓只读 expectation、静态门禁和敏感目录空 diff。
+  - 已核对公开 API、测试公开入口、跨文件非公开 API、ctx 能力探测、非装饰器嵌套函数、减法审查与 private callable 规则。
+  - 残余风险：无可执行返工项；pipeline dump gate 中 monkeypatch 后续非本计划 pass 属于隔离当前 pass marker 的测试手段，仍通过公开 `build_npu_demo_lowering_pipeline()` 与 dump marker 观测本计划阶段，不作为阻断。
+- 结论：`通过`。本任务为计划级 execute 落地任务，review 通过后应按流程续接 `archive_acceptance / 计划书入档验收`，不得直接进入 merge。
+
+## 2026-05-24 19:38 +0800 archive_acceptance 记录 - 提莫炖蘑菇
+
+- 时间：`2026-05-24 19:38 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260524-99183dda / symbol-loop-hoist-dma-broadcast / archive_acceptance`
+- 任务目标：核对计划级任务记录、Diff 反推审查、主仓只读 expectation 合同验收、敏感目录空 diff 与可归档性。
+- 最新同步现场：
+  - 执行目录：`/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast`
+  - 命令：`git fetch --prune origin && git rev-parse HEAD && git rev-parse origin/main && git merge-base HEAD origin/main && git rev-list --left-right --count HEAD...origin/main && git status --short --untracked-files=all`
+  - 结果：`HEAD=324481af568bfc02e4638cdbb7c3940a9ff15005`，`origin/main=324481af568bfc02e4638cdbb7c3940a9ff15005`，`merge-base=324481af568bfc02e4638cdbb7c3940a9ff15005`，ahead/behind=`0/0`；仅有本计划候选 diff 与任务记录，无同步冲突或覆盖风险。
+- 入档验收核对：
+  - 计划书完成态：`symbol-loop-hoist` 四个公开 pattern、presence guard 链、`arith.constant` direct body 外提、`hoist-dma-alias-ops` broadcast source leading-unit 化简、rank0 source no-op 反例均已有 spec / 实现 / pytest / expectation 证据。
+  - 任务记录：包含 execute、第一次 review 退回、execute 返工、review 复审记录；记录写清 latest 基线、Diff 反推自测 / 审查、只读 expectation、敏感目录空 diff、自检、减法检查 / 审查。
+  - 禁止修改面：候选 diff 中 `expectation/`、`.skills/`、`agents/standard/` 为空；`expectation` 仅通过主仓只读入口运行。
+  - 可归档性：当前任务记录文件已在候选 diff 中，满足记录与代码同批合并要求；下一阶段可交 `merge` 角色只合入候选范围。
+- 验证：
+  - `pytest -q test/passes/test_symbol_loop_hoist.py test/passes/test_hoist_dma_alias_ops.py test/passes/test_pattern_public_api_docs.py`：exit=0，`36 passed, 1 warning`。
+  - `pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k "symbol_loop_hoist or hoist_dma_alias_ops or broadcast"`：exit=0，`1 passed, 9 deselected, 1 warning`。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist.arith_constant`：exit=0。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist.memory_presence_guard`：exit=0。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist`：exit=0。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.hoist_dma_alias_ops.broadcast`：exit=0。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.hoist_dma_alias_ops`：exit=0。
+  - `git diff --check`：exit=0。
+  - `git diff --cached --check`：exit=0。
+  - `git diff --name-only -- expectation .skills agents/standard`：空。
+  - `git diff --cached --name-only -- expectation .skills agents/standard`：空。
+  - `git status --short --ignored --untracked-files=all -- expectation .skills agents/standard`：空。
+- 自检：
+  - 已确认计划级执行链为 `execute -> review -> archive_acceptance -> merge/归档`，本阶段不直接合并。
+  - 已确认 review 复审无可执行返工项，archive_acceptance 未发现记录、合同验收、敏感目录或同批合并阻断。
+  - 已确认 `expectation` 不进入任务候选 diff，Diff 反推测试未以 `expectation` 替代。
+  - 残余风险：无。
+- 结论：`通过`。可按计划级流程续接 `merge`，合并时需仅合入当前候选 diff 与任务记录，不得纳入 `expectation/.skills/agents/standard` 或其它无关文件。
+
+## 2026-05-24 19:46 +0800 merge 记录 - 李白
+
+- 时间：`2026-05-24 19:46 +0800`
+- 经办人：`李白`
+- 任务：`T-20260524-99183dda / symbol-loop-hoist-dma-broadcast / merge`
+- 任务目标：合入已通过 `review` 与 `archive_acceptance` 的候选 diff，并确保任务记录与实现 / spec / 测试同批进入主仓。
+- 合并前阅读：
+  - 已重新读取 `agents/codex-multi-agents/agents/李白/李白.prompt.md`、根 `AGENTS.md`、`agents/standard/合并规范.md` 与 `agents/standard/任务记录约定.md`。
+  - 已核对本记录中 `review` 复审结论与 `archive_acceptance` 结论均为通过；第一次 review 的 rank0 no-op 与函数注释阻断均已有 execute 返工和复审证据。
+- 最新同步现场：
+  - 主仓执行目录：`/home/lfr/kernelcode_generate`
+  - 任务执行目录：`/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast`
+  - 命令：`git fetch --prune origin && git rev-parse HEAD origin/main && git merge-base HEAD origin/main`
+  - 结果：主仓 `HEAD=origin/main=merge-base=324481af568bfc02e4638cdbb7c3940a9ff15005`；任务 worktree `HEAD=origin/main=merge-base=324481af568bfc02e4638cdbb7c3940a9ff15005`；无 ahead/behind、无同步冲突或覆盖风险。
+- 合入范围核对：
+  - 实现：`kernel_gen/passes/hoist_dma_alias_ops.py`、`kernel_gen/passes/symbol_loop_hoist.py`
+  - spec：`spec/pass/hoist_dma_alias_ops.md`、`spec/pass/symbol_loop_hoist.md`
+  - 测试：`test/passes/pipeline/test_npu_demo_lowering.py`、`test/passes/test_hoist_dma_alias_ops.py`、`test/passes/test_pattern_public_api_docs.py`、`test/passes/test_symbol_loop_hoist.py`
+  - 任务记录：`agents/codex-multi-agents/log/task_records/2026/24/20260524-symbol-loop-hoist-dma-broadcast.md`
+  - `git diff --name-only` 与 `git ls-files --others --exclude-standard` 仅显示上述候选文件和本任务记录；本合并不带入 `expectation/`、`.skills/`、`agents/standard/`、`TODO.md`、`DONE.md` 或共享计划书改动。
+- Diff 反推 merge 复核：
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile kernel_gen/passes/symbol_loop_hoist.py kernel_gen/passes/hoist_dma_alias_ops.py test/passes/test_symbol_loop_hoist.py test/passes/test_hoist_dma_alias_ops.py test/passes/pipeline/test_npu_demo_lowering.py`：exit=0。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/passes/test_symbol_loop_hoist.py test/passes/test_hoist_dma_alias_ops.py test/passes/test_pattern_public_api_docs.py`：exit=0，`36 passed, 1 warning`。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k "symbol_loop_hoist or hoist_dma_alias_ops or broadcast"`：exit=0，`1 passed, 9 deselected, 1 warning`。
+  - AST 函数注释 gate：exit=0，`function doc gate passed`；覆盖 `ArithConstantHoistPattern.match_and_rewrite`、`MemoryGetDataHoistPattern.match_and_rewrite`、`SymbolCastHoistPattern.match_and_rewrite`、`SymbolNeHoistPattern.match_and_rewrite` 与 `DmaAliasHoistPattern.match_and_rewrite`。
+- 合同验收：
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist.arith_constant`：exit=0，2 个 case 输出通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist.memory_presence_guard`：exit=0，3 个 case 输出通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.symbol_loop_hoist`：exit=0，19 个 case 输出通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.hoist_dma_alias_ops.broadcast`：exit=0，4 个 case 输出通过。
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260524-symbol-loop-hoist-dma-broadcast:/home/lfr/kernelcode_generate python3 -m expectation.pass.hoist_dma_alias_ops`：exit=0，25 个 case 输出通过。
+  - 说明：`expectation` 仅作为主仓只读合同验收资产单列，不计入 Diff 反推测试，本轮未修改、复制、移动、新建或删除 `expectation/`。
+- 静态与敏感目录核对：
+  - `git diff --check`：exit=0。
+  - `git diff --cached --check`：exit=0。
+  - `git diff --name-only -- expectation .skills agents/standard TODO.md DONE.md ARCHITECTURE/plan`：空。
+  - `git diff --cached --name-only -- expectation .skills agents/standard TODO.md DONE.md ARCHITECTURE/plan`：空。
+  - `git status --short --ignored --untracked-files=all -- expectation .skills agents/standard TODO.md DONE.md ARCHITECTURE/plan`：空。
+  - ctx 能力探测扫描：通过，无 `hasattr(ctx, ...)` / `getattr(ctx, ...)` / `callable(getattr(...))` 命中。
+  - 新增 private callable 扫描：通过，无新增下划线函数 / 类定义。
+  - AST 嵌套函数扫描：通过，无非装饰器嵌套函数。
+  - 跨文件私有 import 扫描：第一次自写扫描把合法 `from __future__ import annotations` 误报为私有导入；修正为排除 `__future__` 后 exit=0，`cross-file private import scan passed`，未发现跨文件私有 API 导入。
+- 冲突处理：无需冲突处理；任务 worktree 与 `origin/main` 同基线，候选 diff 可直接同批提交后快进主仓。
+- 缓存处理：测试后删除 worktree 内 `__pycache__` 与 `.pytest_cache`；未删除或修改 `expectation/.skills` 合同资产。
+- 剩余风险：无当前 merge 阻断；本任务不带入未授权敏感目录改动，不以 `expectation` 替代 Diff 反推测试。
+- 结论：`merge` 前核对通过；下一步将暂存上述 9 个文件，同批提交、快进主仓、push，并执行 `-done`。
