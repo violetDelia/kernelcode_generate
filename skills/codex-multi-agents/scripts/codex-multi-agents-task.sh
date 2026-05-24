@@ -18,7 +18,7 @@
 # - codex-multi-agents-task.sh -file <TODO.md> -pause -task_id <id> -agents-list <agents-lists.md>
 # - codex-multi-agents-task.sh -file <TODO.md> -continue -task_id <id> -agents-list <agents-lists.md>
 # - codex-multi-agents-task.sh -file <TODO.md> -reassign -task_id <id> -to <worker> -agents-list <agents-lists.md>
-# - codex-multi-agents-task.sh -file <TODO.md> -next [-to <worker>|-auto] -task_id <id> -from <sender> -type <execute|spec|build|review|merge|other|refactor> -message <text> -agents-list <agents-lists.md>
+# - codex-multi-agents-task.sh -file <TODO.md> -next [-to <worker>|-auto] -task_id <id> -from <sender> -type <execute|spec|build|review|archive_acceptance|merge|other|refactor> -message <text> -agents-list <agents-lists.md>
 # - codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> -type <execute|spec|build|review|merge|other|refactor> -worktree <path> -depends <task_ids|None> -plan <plan_doc|None> [-to <worker>] [-from <owner>] [-log <record_path>]
 # - codex-multi-agents-task.sh -file <TODO.md> -status <-doing|-task-list|-plan-list>
 # - codex-multi-agents-task.sh -file <TODO.md> -delete -task_id <id>
@@ -113,7 +113,7 @@ validate_type_kind() {
   local text
   text="$(trim "$raw" | tr '[:upper:]' '[:lower:]')"
   case "$text" in
-    execute|spec|build|review|merge|other|refactor)
+    execute|spec|build|review|archive_acceptance|merge|other|refactor)
       printf "%s" "$text"
       return 0
       ;;
@@ -138,7 +138,7 @@ Usage:
   codex-multi-agents-task.sh -file <TODO.md> -pause -task_id <id> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -continue -task_id <id> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -reassign -task_id <id> -to <worker> -agents-list <agents-lists.md>
-  codex-multi-agents-task.sh -file <TODO.md> -next [-to <worker>|-auto] -task_id <id> -from <sender> -type <execute|spec|build|review|merge|other|refactor> -message <text> -agents-list <agents-lists.md>
+  codex-multi-agents-task.sh -file <TODO.md> -next [-to <worker>|-auto] -task_id <id> -from <sender> -type <execute|spec|build|review|archive_acceptance|merge|other|refactor> -message <text> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> -type <execute|spec|build|review|merge|other|refactor> -worktree <path> -depends <task_ids|None> -plan <plan_doc|None> [-to <worker>] [-from <owner>] [-log <record_path>]
   codex-multi-agents-task.sh -file <TODO.md> -status -doing
   codex-multi-agents-task.sh -file <TODO.md> -status -task-list
@@ -149,7 +149,7 @@ Usage:
 Notes:
   - -next without -to will try to auto-start the first ready task in 任务列表 after updating the current task.
   - -next -auto will continue auto-starting all ready tasks in 任务列表 until no ready task remains or the parallel limit is reached.
-  - explicit -dispatch/-reassign/-next -to must match the target agent duty with the task type; merge only allows merge specialists.
+  - explicit -dispatch/-reassign/-next -to must match the target agent duty with the task type; archive_acceptance uses review duty and merge only allows merge specialists.
 
 Examples:
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -dispatch -task_id EX-3 -to worker-a -agents-list ./agents/codex-multi-agents/agents-lists.md -message "请处理任务 EX-3"
@@ -160,6 +160,7 @@ Examples:
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -next -task_id EX-2 -from worker-b -type review -message "下一阶段：补齐边界测试" -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -next -task_id EX-2 -from worker-b -to worker-c -type review -message "下一阶段：补齐边界测试" -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -next -auto -task_id EX-2 -from worker-b -type review -message "下一阶段：补齐边界测试" -agents-list ./agents/codex-multi-agents/agents-lists.md
+  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -next -auto -task_id EX-2 -from reviewer-a -type archive_acceptance -message "计划级 review 通过；进入计划书入档验收。" -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -new -info "补齐计划书全部小任务卡" -type execute -worktree repo-x -depends "EX-2,EX-5" -plan "ARCHITECTURE/plan/x.md" -to worker-b -from 李白 -log ./log/record.md
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -doing
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -task-list
@@ -407,6 +408,7 @@ parse_args() {
     if [[ "$HAS_TYPE" -eq 1 ]]; then
       [[ -n "$(trim "$TYPE_KIND")" ]] || err "$RC_ARG" "empty value for -type"
       TYPE_KIND="$(validate_type_kind "$TYPE_KIND")"
+      [[ "$TYPE_KIND" != "archive_acceptance" ]] || err "$RC_ARG" "archive_acceptance tasks can only be entered through plan task -next"
     fi
     if [[ "$HAS_TO" -eq 1 ]]; then
       [[ -n "$(trim "$TO")" ]] || err "$RC_ARG" "empty value for -to"
@@ -486,6 +488,7 @@ parse_args() {
     [[ -n "$(trim "$INFO")" ]] || err "$RC_ARG" "empty value for -info"
     [[ -n "$(trim "$TYPE_KIND")" ]] || err "$RC_ARG" "empty value for -type"
     TYPE_KIND="$(validate_type_kind "$TYPE_KIND")"
+    [[ "$TYPE_KIND" != "archive_acceptance" ]] || err "$RC_ARG" "archive_acceptance tasks cannot be created with -new"
     [[ -n "$(trim "$WORKTREE")" ]] || err "$RC_ARG" "empty value for -worktree"
     [[ "$(trim "$WORKTREE" | tr '[:upper:]' '[:lower:]')" != "none" ]] || err "$RC_ARG" "-new requires non-None value for -worktree"
     if [[ "$HAS_TO" -eq 1 ]]; then
@@ -886,8 +889,11 @@ main() {
   local todo_lock_fd=""
   acquire_lock_on_file "$FILE" todo_lock_fd
 
-  if [[ "$op" == "done" ]]; then
+  if [[ "$op" == "done" || "$op" == "done-plan" ]]; then
     done_file="$(dirname "$FILE")/DONE.md"
+  fi
+
+  if [[ "$op" == "done" ]]; then
     if [[ ! -e "$done_file" ]]; then
       : > "$done_file" || err "$RC_FILE" "failed to create done file: $done_file"
     fi

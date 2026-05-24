@@ -7,7 +7,7 @@
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路的功能实现为 shell 脚本 `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh`，`pytest-cov` 无法直接采集脚本覆盖率，执行覆盖率命令会得到 `no-data-collected`。
 - 达标判定: shell 实现按规则豁免 `95%` 覆盖率达标线。
-- 当前以 `93` 条 pytest 用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、继续、改派、续接、新建、删除、状态查询、计划书进度、权限校验、并行上限、文件错误、结构错误、自动续接与角色职责约束路径。
+- 当前以 `104` 条 pytest 用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、继续、改派、续接、新建、删除、状态查询、计划书进度、权限校验、并行上限、文件错误、结构错误、自动续接、计划级 `archive_acceptance` 流转与角色职责约束路径。
 
 覆盖率命令:
 - `pytest -q --cov=skills/codex-multi-agents/scripts/codex-multi-agents-task.sh --cov-branch --cov-report=term-missing test/codex-multi-agents/test_codex-multi-agents-task.py`
@@ -2344,7 +2344,7 @@ def test_next_to_dispatches_same_task_and_updates_agent_status(tmp_path: Path) -
 
 
 # TC-030B
-# 测试目的: 验证 -next -to 不允许把 build 任务直接续接给审查角色。
+# 测试目的: 验证计划级 build 阶段不能通过 -next 继续停留在 build。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_next_to_rejects_build_task_for_review_specialist(tmp_path: Path) -> None:
@@ -2403,7 +2403,7 @@ def test_next_to_rejects_build_task_for_review_specialist(tmp_path: Path) -> Non
     )
 
     assert result.returncode == 3
-    assert "build tasks can only be assigned to build specialists or substitutes: worker-c" in result.stderr
+    assert "plan task build must next to review" in result.stderr
 
 
 # TC-031
@@ -3402,7 +3402,7 @@ def test_next_auto_starts_all_ready_tasks_from_task_list(tmp_path: Path) -> None
 
 
 # TC-058
-# 测试目的: 验证 spec 自动续接优先选择专职角色。
+# 测试目的: 验证计划级 spec 阶段不能通过 -next 继续停留在 spec。
 # 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_spec_dedicated_first
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -3466,18 +3466,12 @@ def test_next_auto_spec_dedicated_first(tmp_path: Path) -> None:
         env=env,
     )
 
-    assert result.returncode == 0
-    content = todo.read_text(encoding="utf-8")
-    running_rows = parse_section_rows(content, "## 正在执行的任务")
-    assert any(r[0] == "EX-2" and r[5] == "spec" and r[8] == "worker-c" for r in running_rows)
-    assert get_agent_status(agents, "worker-c") == "busy"
-    assert get_agent_status(agents, "worker-s") == "free"
-    calls_text = calls_file.read_text(encoding="utf-8")
-    assert "你的名字叫做worker-c" in calls_text
+    assert result.returncode == 3
+    assert "plan task spec must next to review" in result.stderr
 
 
 # TC-058A
-# 测试目的: 验证 execute 自动续接优先分配给计划级 execute 专职角色。
+# 测试目的: 验证计划级 execute 阶段不能通过 -next 继续停留在 execute。
 # 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_execute_dedicated_first
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -3541,17 +3535,12 @@ def test_next_auto_execute_dedicated_first(tmp_path: Path) -> None:
         env=env,
     )
 
-    assert result.returncode == 0
-    running_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 正在执行的任务")
-    assert any(r[0] == "EX-2" and r[5] == "execute" and r[8] == "worker-c" for r in running_rows)
-    assert get_agent_status(agents, "worker-c") == "busy"
-    assert get_agent_status(agents, "worker-s") == "free"
-    calls_text = calls_file.read_text(encoding="utf-8")
-    assert "你的名字叫做worker-c" in calls_text
+    assert result.returncode == 3
+    assert "plan task execute must next to review" in result.stderr
 
 
 # TC-059
-# 测试目的: 验证 build 自动续接优先分配给专职角色。
+# 测试目的: 验证计划级 build 阶段不能通过 -next 继续停留在 build。
 # 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_build_dedicated_first
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -3615,18 +3604,12 @@ def test_next_auto_build_dedicated_first(tmp_path: Path) -> None:
         env=env,
     )
 
-    assert result.returncode == 0
-    content = todo.read_text(encoding="utf-8")
-    running_rows = parse_section_rows(content, "## 正在执行的任务")
-    assert any(r[0] == "EX-2" and r[5] == "build" and r[8] == "worker-c" for r in running_rows)
-    assert get_agent_status(agents, "worker-c") == "busy"
-    assert get_agent_status(agents, "worker-s") == "free"
-    calls_text = calls_file.read_text(encoding="utf-8")
-    assert "你的名字叫做worker-c" in calls_text
+    assert result.returncode == 3
+    assert "plan task build must next to review" in result.stderr
 
 
 # TC-060
-# 测试目的: 验证 build 专职不可用时自动续接回退到候补角色。
+# 测试目的: 验证计划级 build 阶段不能通过 -next 续接 build 候补角色。
 # 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_build_falls_back_to_substitute
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -3704,13 +3687,8 @@ def test_next_auto_build_falls_back_to_substitute(tmp_path: Path) -> None:
         env=env,
     )
 
-    assert result.returncode == 0
-    content = todo.read_text(encoding="utf-8")
-    running_rows = parse_section_rows(content, "## 正在执行的任务")
-    assert any(r[0] == "EX-2" and r[5] == "build" and r[8] == "worker-s" for r in running_rows)
-    assert get_agent_status(agents, "worker-s") == "busy"
-    calls_text = calls_file.read_text(encoding="utf-8")
-    assert "你的名字叫做worker-s" in calls_text
+    assert result.returncode == 3
+    assert "plan task build must next to review" in result.stderr
 
 
 # TC-061
@@ -3733,7 +3711,7 @@ def test_next_auto_review_dedicated_first(tmp_path: Path) -> None:
                 "2026-03-08 16:20:00 +0800",
                 "/tmp/wt-ex2",
                 "创建 test",
-                "review",
+                "build",
                 "",
                 "ARCHITECTURE/plan/demo.md",
                 "worker-b",
@@ -3808,9 +3786,9 @@ def test_next_auto_merge_rejects_fallback(tmp_path: Path) -> None:
                 "2026-03-08 16:20:00 +0800",
                 "/tmp/wt-ex2",
                 "创建 test",
-                "merge",
+                "review",
                 "",
-                "ARCHITECTURE/plan/demo.md",
+                "",
                 "worker-b",
                 "进行中",
                 "xxx",
@@ -3885,9 +3863,9 @@ def test_next_auto_merge_rejects_non_merge_specialist(tmp_path: Path) -> None:
                 "2026-03-08 16:20:00 +0800",
                 "/tmp/wt-ex2",
                 "创建 test",
-                "merge",
+                "review",
                 "",
-                "ARCHITECTURE/plan/demo.md",
+                "",
                 "worker-b",
                 "进行中",
                 "xxx",
@@ -3966,7 +3944,7 @@ def test_next_auto_random_assignment_with_seed(tmp_path: Path) -> None:
                 "2026-03-08 16:20:00 +0800",
                 "/tmp/wt-ex2",
                 "创建 test",
-                "review",
+                "build",
                 "",
                 "ARCHITECTURE/plan/demo.md",
                 "worker-b",
@@ -4047,7 +4025,7 @@ def test_next_auto_random_assignment_seed_changes(tmp_path: Path) -> None:
                 "2026-03-08 16:20:00 +0800",
                 "/tmp/wt-ex2",
                 "创建 test",
-                "review",
+                "build",
                 "",
                 "ARCHITECTURE/plan/demo.md",
                 "worker-b",
@@ -4208,6 +4186,582 @@ def test_auto_only_supports_next(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "-auto only supports -next" in result.stderr
+
+
+# TC-053A
+# 测试目的: 验证 -new 不允许直接创建 archive_acceptance 任务。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_new_rejects_archive_acceptance_task_type(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file_current(todo)
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-new",
+        "-info",
+        "计划书入档验收",
+        "-type",
+        "archive_acceptance",
+        "-worktree",
+        "wt-plan",
+        "-depends",
+        "None",
+        "-plan",
+        "ARCHITECTURE/plan/demo.md",
+    )
+
+    assert result.returncode == 1
+    assert "archive_acceptance tasks cannot be created with -new" in result.stderr
+
+
+# TC-053B
+# 测试目的: 验证 -dispatch 不允许独立分发 archive_acceptance 任务。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_rejects_archive_acceptance_task_type(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[],
+        list_rows=[
+            row_list_typed(
+                "EX-A",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-a",
+                "计划书入档验收",
+                "archive_acceptance",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "",
+                "./log/ex-a.md",
+            ),
+        ],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-r", "free", "审查"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-A",
+        "-to",
+        "worker-r",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 3
+    assert "archive_acceptance tasks can only be entered through plan task -next" in result.stderr
+
+    explicit_result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-A",
+        "-to",
+        "worker-r",
+        "-type",
+        "archive_acceptance",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert explicit_result.returncode == 1
+    assert "archive_acceptance tasks can only be entered through plan task -next" in explicit_result.stderr
+
+
+# TC-053C
+# 测试目的: 验证计划级 review 进入 archive_acceptance 必须使用 -to 或 -auto。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_plan_review_next_archive_acceptance_requires_dispatch(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-R",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-r",
+                "计划 review",
+                "review",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-r",
+                "进行中",
+                "",
+                "./log/ex-r.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(agents, rows=[agent_row_with_role("worker-r", "busy", "审查")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-r"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-task_id",
+        "EX-R",
+        "-from",
+        "worker-r",
+        "-type",
+        "archive_acceptance",
+        "-message",
+        "计划 review 通过",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 3
+    assert "plan task review to archive_acceptance requires -to or -auto" in result.stderr
+    list_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 任务列表")
+    assert not any(r[0] == "EX-R" for r in list_rows)
+
+
+# TC-053D
+# 测试目的: 验证计划级 review 可通过 -next -auto 进入 archive_acceptance 并分配给审查权限角色。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_plan_review_next_auto_archive_acceptance_uses_review_role_and_label(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["神秘人-session"])
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-R",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-r",
+                "计划 review",
+                "review",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-r",
+                "进行中",
+                "",
+                "./log/ex-r.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-r", "busy", "审查"),
+            agent_row_with_role("worker-m", "free", "合并"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-r"
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-R",
+        "-from",
+        "worker-r",
+        "-type",
+        "archive_acceptance",
+        "-message",
+        "计划 review 通过；进入入档验收",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    running_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 正在执行的任务")
+    assert any(r[0] == "EX-R" and r[5] == "archive_acceptance" and r[8] == "worker-r" for r in running_rows)
+    assert get_agent_status(agents, "worker-r") == "busy"
+    assert get_agent_status(agents, "worker-m") == "free"
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert "任务 EX-R 已完成当前阶段，已进入计划书入档验收；已经指派给-> 当前执行者。" in calls_text
+
+
+# TC-053E
+# 测试目的: 验证普通 review 不能进入 archive_acceptance。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_normal_review_next_archive_acceptance_rejected(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-R",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-r",
+                "普通 review",
+                "review",
+                "",
+                "",
+                "worker-r",
+                "进行中",
+                "",
+                "./log/ex-r.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(agents, rows=[agent_row_with_role("worker-r", "busy", "审查")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-r"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-R",
+        "-from",
+        "worker-r",
+        "-type",
+        "archive_acceptance",
+        "-message",
+        "错误流转",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 3
+    assert "normal task cannot use archive_acceptance" in result.stderr
+
+
+# TC-053F
+# 测试目的: 验证计划级 review 不能直接续接 merge。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_plan_review_next_merge_rejected(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-R",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-r",
+                "计划 review",
+                "review",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-r",
+                "进行中",
+                "",
+                "./log/ex-r.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(agents, rows=[agent_row_with_role("worker-r", "busy", "审查"), agent_row_with_role("worker-m", "free", "合并")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-r"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-task_id",
+        "EX-R",
+        "-from",
+        "worker-r",
+        "-to",
+        "worker-m",
+        "-type",
+        "merge",
+        "-message",
+        "错误流转",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 3
+    assert "plan task review must next to archive_acceptance or execute" in result.stderr
+
+
+# TC-053G
+# 测试目的: 验证计划级 archive_acceptance 通过后才能续接 merge。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_plan_archive_acceptance_next_merge_auto_uses_merge_role(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-A",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-a",
+                "计划书入档验收",
+                "archive_acceptance",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-a",
+                "进行中",
+                "",
+                "./log/ex-a.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("worker-a", "busy", "审查"),
+            agent_row_with_role("worker-r", "free", "审查"),
+            agent_row_with_role("worker-m", "free", "合并"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-a"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-A",
+        "-from",
+        "worker-a",
+        "-type",
+        "merge",
+        "-message",
+        "入档验收通过",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    running_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 正在执行的任务")
+    assert any(r[0] == "EX-A" and r[5] == "merge" and r[8] == "worker-m" for r in running_rows)
+    assert get_agent_status(agents, "worker-r") == "free"
+    assert get_agent_status(agents, "worker-m") == "busy"
+
+
+# TC-053H
+# 测试目的: 验证计划级 archive_acceptance 不能回退到 review。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_plan_archive_acceptance_next_review_rejected(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-A",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-a",
+                "计划书入档验收",
+                "archive_acceptance",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-a",
+                "进行中",
+                "",
+                "./log/ex-a.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(agents, rows=[agent_row_with_role("worker-a", "busy", "审查")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-a"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-A",
+        "-from",
+        "worker-a",
+        "-type",
+        "review",
+        "-message",
+        "错误回退",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 3
+    assert "plan task archive_acceptance must next to merge or execute" in result.stderr
+
+
+# TC-053I
+# 测试目的: 验证运行中的 merge 阶段不能通过 -next 续接到任意下一阶段。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_rejects_merge_current_stage(tmp_path: Path) -> None:
+    for next_kind in ["execute", "review", "archive_acceptance"]:
+        todo = tmp_path / f"TODO-merge-{next_kind}.md"
+        agents = tmp_path / f"agents-merge-{next_kind}.md"
+        write_todo_file_current(
+            todo,
+            running_rows=[
+                row_running_typed(
+                    "EX-M",
+                    "杜甫",
+                    "2026-03-08 16:20:00 +0800",
+                    "/tmp/wt-m",
+                    "计划 merge",
+                    "merge",
+                    "",
+                    "ARCHITECTURE/plan/demo.md",
+                    "worker-m",
+                    "进行中",
+                    "",
+                    "./log/ex-m.md",
+                ),
+            ],
+            list_rows=[],
+        )
+        write_agents_file(
+            agents,
+            rows=[
+                agent_row_with_role("worker-m", "busy", "合并"),
+                agent_row_with_role("worker-e", "free", "负责计划级 execute"),
+                agent_row_with_role("worker-r", "free", "审查"),
+            ],
+        )
+
+        env = os.environ.copy()
+        env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-m"
+        env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+        result = run_script(
+            "-file",
+            str(todo),
+            "-next",
+            "-auto",
+            "-task_id",
+            "EX-M",
+            "-from",
+            "worker-m",
+            "-type",
+            next_kind,
+            "-message",
+            "错误续接",
+            "-agents-list",
+            str(agents),
+            env=env,
+        )
+
+        assert result.returncode == 3
+        assert "task merge cannot use -next; complete with -done" in result.stderr
+
+
+# TC-053J
+# 测试目的: 验证 other 作为非标准临时状态时不能通过 -next 进入固定执行链。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_rejects_other_current_stage(tmp_path: Path) -> None:
+    for next_kind in ["execute", "review"]:
+        todo = tmp_path / f"TODO-other-{next_kind}.md"
+        agents = tmp_path / f"agents-other-{next_kind}.md"
+        write_todo_file_current(
+            todo,
+            running_rows=[
+                row_running_typed(
+                    "EX-O",
+                    "杜甫",
+                    "2026-03-08 16:20:00 +0800",
+                    "/tmp/wt-o",
+                    "临时状态",
+                    "other",
+                    "",
+                    "",
+                    "worker-o",
+                    "进行中",
+                    "",
+                    "./log/ex-o.md",
+                ),
+            ],
+            list_rows=[],
+        )
+        write_agents_file(
+            agents,
+            rows=[
+                agent_row_with_role("worker-o", "busy", "实现 测试"),
+                agent_row_with_role("worker-e", "free", "负责计划级 execute"),
+                agent_row_with_role("worker-r", "free", "审查"),
+            ],
+        )
+
+        env = os.environ.copy()
+        env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-o"
+        env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+        result = run_script(
+            "-file",
+            str(todo),
+            "-next",
+            "-auto",
+            "-task_id",
+            "EX-O",
+            "-from",
+            "worker-o",
+            "-type",
+            next_kind,
+            "-message",
+            "错误续接",
+            "-agents-list",
+            str(agents),
+            env=env,
+        )
+
+        assert result.returncode == 3
+        assert "task other cannot use -next; no transition is defined" in result.stderr
 
 
 # TC-038
@@ -4380,6 +4934,7 @@ def test_done_last_plan_task_marks_plan_waiting_review(tmp_path: Path) -> None:
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_done_plan_removes_review_ready_plan(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
+    done = tmp_path / "DONE.md"
     agents = tmp_path / "agents-lists.md"
     todo.write_text(
         "\n".join(
@@ -4405,6 +4960,17 @@ def test_done_plan_removes_review_ready_plan(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    done.write_text(
+        "\n".join(
+            [
+                "| 任务 ID | 描述 | 指派 | 完成状态 | 完成时间 | 日志文件 | 备注 |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
+                "| EX-M | merge | 李白 | 已完成 | 2026-03-08 18:00:00 +0800 | ./log/merge.md | 任务类型=merge；计划书=ARCHITECTURE/plan/plan-a.md |",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
     write_agents_file(agents, rows=[agent_row("神秘人", "free")])
 
     env = os.environ.copy()
@@ -4416,6 +4982,60 @@ def test_done_plan_removes_review_ready_plan(tmp_path: Path) -> None:
     assert "OK: done-plan ARCHITECTURE/plan/plan-a.md" in result.stdout
     plan_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 计划书")
     assert not any(r[0] == "ARCHITECTURE/plan/plan-a.md" for r in plan_rows)
+
+
+# TC-043A
+# 测试目的: 验证 -done-plan 在缺少计划级 merge 完成记录时拒绝归档。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_done_plan_requires_merge_done_record(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    done = tmp_path / "DONE.md"
+    agents = tmp_path / "agents-lists.md"
+    todo.write_text(
+        "\n".join(
+            [
+                "## 正在执行的任务",
+                "",
+                "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 任务类型 | 依赖任务 | 计划书 | 指派 | 状态 | 用户指导 | 记录文件 |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                "",
+                "## 计划书",
+                "",
+                "| 计划书 | 总任务数 | 已完成任务 | 待完成任务 | 完成状态 |",
+                "| --- | --- | --- | --- | --- |",
+                "| ARCHITECTURE/plan/plan-a.md | 1 | 1 | 0 | 完成待检查 |",
+                "",
+                "## 任务列表",
+                "",
+                "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 任务类型 | 依赖任务 | 计划书 | 指派 | 记录文件 |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    done.write_text(
+        "\n".join(
+            [
+                "| 任务 ID | 描述 | 指派 | 完成状态 | 完成时间 | 日志文件 | 备注 |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
+                "| EX-A | archive | worker-a | 已完成 | 2026-03-08 17:00:00 +0800 | ./log/archive.md | 任务类型=archive_acceptance；计划书=ARCHITECTURE/plan/plan-a.md |",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    write_agents_file(agents, rows=[agent_row("神秘人", "free")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script("-file", str(todo), "-done-plan", "-plan", "ARCHITECTURE/plan/plan-a.md", env=env)
+
+    assert result.returncode == 3
+    assert "plan is missing merge before done-plan: ARCHITECTURE/plan/plan-a.md" in result.stderr
 
 
 # TC-044

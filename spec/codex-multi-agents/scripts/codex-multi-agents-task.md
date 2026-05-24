@@ -43,7 +43,10 @@
 
 ## 术语
 
-- `任务类型`：任务阶段标签，只接受 `execute/spec/build/review/merge/other/refactor`；新建计划书任务默认使用 `execute`。
+- `任务类型`：任务阶段标签，只接受 `execute/spec/build/review/archive_acceptance/merge/other/refactor`；新建计划书任务默认使用 `execute`。
+- `archive_acceptance`：计划级任务的入档验收阶段，中文名为 `计划书入档验收`，只允许计划级 `review` 通过 `-next -type archive_acceptance -to <审查权限角色>` 或 `-next -type archive_acceptance -auto` 进入。
+- `merge`：任务执行链的终止前阶段，不允许作为 `-next` 当前阶段继续续接；完成后只能按权限执行 `-done`。
+- `other`：非标准临时任务类型，不参与固定执行链，不允许作为 `-next` 当前阶段续接。
 - `正在执行的任务`：已被指派、当前仍在推进的任务。
 - `任务列表`：尚未分发，或已经通过 `-next` 退回等待下一阶段处理的任务。
 - `计划书`：用于聚合任务数量与完成状态的文档路径。
@@ -155,9 +158,11 @@ codex-multi-agents-task.sh \
   - `spec`：只允许 `spec` 专职或 `全能替补`。
   - `build`：只允许 `实现/测试` 专职或 `全能替补`。
   - `review`：只允许 `审查/复审` 专职或 `全能替补`。
+  - `archive_acceptance`：只允许 `审查/复审` 专职或 `全能替补`；不使用合并专职权限。
   - `refactor`：只允许 `实现/开发/测试/重构` 专职或 `全能替补`。
   - `merge`：只允许合并专职；职责必须包含 `合并`，且职责不包含 `全能替补` 或 `不含合并`。
   - `other`：不做额外职责限制。
+- `-dispatch` 不允许独立分发 `archive_acceptance` 任务；该阶段只能由计划级 `review` 通过合法 `-next` 进入。
 - `agents-lists.md` 不是可被 `TODO.md` 全量回算覆盖的派生文件；`-dispatch` 只允许更新当前命令直接触及的角色状态，不得整表重置 `busy/free`。
 - 对当前命令直接读写的角色，`agents-lists.md` 与运行表必须严格映照；若发现应为 `busy` 的角色是 `free`，或应为 `free` 的角色是 `busy`，脚本必须直接失败。
 - 默认任务消息固定包含：任务 ID、描述、当前任务中实际存在的 `worktree`、计划书路径、记录文件、任务记录要求、问题咨询指引；其中“任务记录要求”必须明确：若任务有独立 `worktree`，常规任务日志必须写入该 `worktree` 下的对应记录文件。
@@ -199,6 +204,7 @@ codex-multi-agents-task.sh \
 - `-agents-list` 必须显式提供，且必须与配置解析出的 canonical `AGENTS_FILE` 指向同一文件；不允许写入其他名单副本。
 - `-log` 只写入记录，不检查目标文件是否存在。
 - `DONE.md` 表头固定为：`| 任务 ID | 描述 | 指派 | 完成状态 | 完成时间 | 日志文件 | 备注 |`
+- `DONE.md` 的 `备注` 列必须写入 `任务类型=<kind>；计划书=<plan_doc>`，供 `-done-plan` 校验计划级任务确实经过 `merge`。
 - 若任务绑定计划书，则会同步更新计划表的已完成数与待完成数。
 - 若写操作需要维护计划统计而 `TODO.md` 中缺少 `## 计划书`，则会自动补齐该段落及表头。
 - 若运行表已存在同一角色多条 `状态=进行中` 的脏数据，`-done` 必须直接失败。
@@ -341,6 +347,7 @@ codex-multi-agents-task.sh \
 - 功能说明：
 
 - 将当前运行中任务改写为下一阶段；默认退回 `任务列表`，随后尝试自动启动 `任务列表` 中首个 ready 任务；带 `-to` 时手动指派给指定角色；`-auto` 仅作为兼容开关保留。
+- 计划级任务使用 `execute -> review -> archive_acceptance -> merge` 转移表，普通任务使用 `execute -> review -> merge` 转移表。
 
 - 参数：
 
@@ -398,12 +405,21 @@ codex-multi-agents-task.sh \
 - `-next -to` 的目标角色必须存在、处于 `free` 状态，且在运行表中没有其他 `状态=进行中` 的任务；目标角色为当前执行者时，当前任务会先从运行表移除，再判断其是否仍有其他运行中任务。
 - `-next -to` 的角色职责约束与 `-dispatch` 相同。
 - `-next -to` 与 `-auto` 互斥；`-auto` 只能与 `-next` 组合使用。
+- 计划级任务通过 `计划书` 字段判定：空字符串和 `None` 是普通任务，其它非空值是计划级任务。
+- 计划级 `execute/spec/build/refactor` 只能续接 `review`；不得直接续接 `merge` 或 `archive_acceptance`。
+- 计划级 `review` 只能续接 `archive_acceptance` 或返工 `execute`；不得直接续接 `merge`。
+- 计划级 `review -> archive_acceptance` 必须带 `-to` 或 `-auto`，不得先生成无人指派的待分发 `archive_acceptance` 行。
+- 计划级 `archive_acceptance` 只能续接 `merge` 或返工 `execute`；不得回退到 `review`。
+- 普通任务不得进入 `archive_acceptance`。
+- 当前任务类型为 `merge` 时，`-next` 必须拒绝；`merge` 只能通过 `-done` 完成。
+- 当前任务类型为 `other` 时，`-next` 必须拒绝；`other` 只保留为非标准临时状态，不进入自动或手动续接状态机。
+- 当前任务类型不在公开转移表中时，`-next` 必须默认拒绝，不能静默生成下一阶段任务。
 - `-next` 与 `-next -auto` 的所有会话消息都使用命令行显式传入的 `-from` 作为发送者，不再依赖环境变量解析。
 - `-next` 只更新当前命令涉及的角色状态：原指派角色若已无其他运行中任务则更新为 `free`；手动续接或自动续接接手任务的新角色更新为 `busy`；未被当前命令触及的其他角色保持原样。
 - `agents-lists.md` 不是可被 `TODO.md` 全量回算覆盖的派生文件；`-next` 不得整表重置 `busy/free`。
 - 若当前命令直接读写的角色在 `agents-lists.md` 中的状态与运行表不一致，`-next` 必须直接失败，不能静默修正。
 - `-next` 无论是否带 `-auto`，都会向管理员发送一条摘要消息。
-- 自动续接只会尝试启动 `execute/spec/build/review/merge/refactor` 六类 ready 任务；`other` 不参与自动续接。
+- 自动续接只会尝试启动 `execute/spec/build/review/archive_acceptance/merge/refactor` 七类 ready 任务；`other` 不参与自动续接。
 - 自动续接会扫描整个 `任务列表`，只考虑“依赖任务已经从 `正在执行的任务` 与 `任务列表` 中消失”的 ready 任务；按当前列表顺序选择，不会跳过前面的可启动任务去启动后面的任务。
 - 自动续接成功时，会把被选中的 ready 任务移回 `正在执行的任务`，并把接手角色状态改为 `busy`。
 - 若被自动续接的是当前这条刚退回 `任务列表` 的同一任务，则沿用当前任务原 `任务 ID`。
@@ -416,13 +432,14 @@ codex-multi-agents-task.sh \
   - `spec` 专职：职责包含 `spec` 或 `spec 文档编写`，且职责不包含 `全能替补`。
   - `build` 专职：职责包含 `实现` 或 `测试`，且职责不包含 `全能替补`。
   - `review` 专职：职责包含 `审查` 或 `复审`，且职责不包含 `全能替补`。
+  - `archive_acceptance` 专职：职责包含 `审查` 或 `复审`，且职责不包含 `全能替补`。
   - `refactor` 专职：职责包含 `实现`、`开发`、`测试` 或 `重构`，且职责匹配后可在专职池中参与选择。
   - `merge` 专职：职责包含 `合并`，且职责不包含 `全能替补` 或 `不含合并`。
   - 候补：职责包含 `全能替补`。
   - 仅保留 `agents-lists.md` 中状态为 `free` 且职责匹配的角色；职责包含 `不承担管理员分发的任务` 的角色不计入候选。
   - 若当前执行者满足上述条件，则作为候选之一参与选择。
 - 自动续接选择规则固定为：
-  - `execute/spec/build/review/refactor`：若存在可用专职，只在专职池内随机；专职池为空时才允许候补池参与随机。
+  - `execute/spec/build/review/archive_acceptance/refactor`：若存在可用专职，只在专职池内随机；专职池为空时才允许候补池参与随机。
   - `merge`：只在专职池内随机；若无可用专职则自动续接失败，任务保留在 `任务列表` 并通知管理员。
   - 随机范围仅限当前启用的候选池，不跨层级混合随机。
 - 若设置 `CODEX_MULTI_AGENTS_AUTO_RANDOM_SEED`，自动续接使用该值的 `sha256` 结果作为随机种子；在候选集合与 `agents-lists.md` 顺序不变时可复现选择结果。
@@ -439,13 +456,13 @@ codex-multi-agents-task.sh \
 - 模板固定格式如下：
 
 ```
-请处理任务 <task_id>（<desc>）。worktree=<worktree>；计划书=<plan_doc>；记录文件=<record_file>；若任务有独立 worktree，常规任务日志必须写入该 worktree 下的对应记录文件；只有无独立 worktree 的计划互评、专题 spec 互评、终验或归档结论，才按规则写入计划书、专题 spec 正文或 done_plan 记录文件。完成后按 <repo_root>/agents/standard/任务记录约定.md 记录并回报管理员；流程不清楚请询问管理员；实现/架构问题请询问架构师。
+请处理任务 <task_id>（<desc>）。worktree=<worktree>；计划书=<plan_doc>；记录文件=<record_file>；若任务有独立 worktree，常规任务日志必须写入该 worktree 下的对应记录文件；只有无独立 worktree 的计划互评、专题 spec 互评、计划书入档验收或归档结论，才按规则写入计划书、专题 spec 正文或 done_plan 记录文件。完成后按 <repo_root>/agents/standard/任务记录约定.md 记录并回报管理员；流程不清楚请询问管理员；实现/架构问题请询问架构师。
 ```
 
 - 使用示例：
 
 ```
-请处理任务 EX-2（下一阶段：补齐边界用例）。worktree=/tmp/wt-ex2；计划书=ARCHITECTURE/plan/demo.md；记录文件=./log/ex2.md；若任务有独立 worktree，常规任务日志必须写入该 worktree 下的对应记录文件；只有无独立 worktree 的计划互评、专题 spec 互评、终验或归档结论，才按规则写入计划书、专题 spec 正文或 done_plan 记录文件。完成后按 <repo_root>/agents/standard/任务记录约定.md 记录并回报管理员；流程不清楚请询问管理员；实现/架构问题请询问架构师。
+请处理任务 EX-2（下一阶段：补齐边界用例）。worktree=/tmp/wt-ex2；计划书=ARCHITECTURE/plan/demo.md；记录文件=./log/ex2.md；若任务有独立 worktree，常规任务日志必须写入该 worktree 下的对应记录文件；只有无独立 worktree 的计划互评、专题 spec 互评、计划书入档验收或归档结论，才按规则写入计划书、专题 spec 正文或 done_plan 记录文件。完成后按 <repo_root>/agents/standard/任务记录约定.md 记录并回报管理员；流程不清楚请询问管理员；实现/架构问题请询问架构师。
 ```
 
 - 返回值：
@@ -531,6 +548,7 @@ codex-multi-agents-task.sh \
 - `-plan None` 表示该任务不绑定计划书；其余值必须以 `.md` 结尾。
 - 新写入的 `worktree` 在 `正在执行的任务` 与 `任务列表` 中必须唯一。
 - 新生成的 `任务 ID` 在 `正在执行的任务` 与 `任务列表` 中必须全局唯一。
+- `-new -type archive_acceptance` 必须拒绝，即使 `-plan` 非空也不能直接创建入档验收任务。
 
 - 返回值：
 
@@ -565,7 +583,7 @@ codex-multi-agents-task.sh \
 - `-plan` 必须是 `.md` 文件路径，不能使用 `None`。
 - `计划书` 表头固定为：`| 计划书 | 总任务数 | 已完成任务 | 待完成任务 | 完成状态 |`
 - `-done-plan` 只能处理 `完成状态=完成待检查` 且 `待完成任务=0` 的计划书记录。
-- 若双架构师对同一计划的最新终验结论仍为“不通过”，应先由架构师补建修复任务并完成重新验收，再执行 `-done-plan`。
+- `-done-plan` 还必须在同级 `DONE.md` 中找到该计划的 `任务类型=merge；计划书=<plan_doc>` 完成记录；只有入档验收通过但尚未 merge 的计划不得归档。
 
 - 返回值：
 
@@ -666,3 +684,5 @@ codex-multi-agents-task.sh \
 | TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-076 | 内存/DMA | `TC-061` `test_next_auto_review_dedicated_first`：`review` 专职可用时仅从专职池选择 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_next_auto_review_dedicated_first`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`TC-061` `test_next_auto_review_dedicated_first`：`review` 专职可用时仅从专职池选择”场景。 | `test_next_auto_review_dedicated_first` |
 | TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-077 | 边界/异常 | `TC-062` `test_next_auto_merge_rejects_fallback`：`merge` 无专职且仅候补可用时自动续接失败 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_next_auto_merge_rejects_fallback`。 | “`TC-062` `test_next_auto_merge_rejects_fallback`：`merge` 无专职且仅候补可用时自动续接失败”场景按公开错误语义失败或被拒绝。 | `test_next_auto_merge_rejects_fallback` |
 | TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-078 | 边界/异常 | `TC-062A` `test_next_auto_merge_rejects_non_merge_specialist`：`merge` 自动续接不会错误挑选非合并专职 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_next_auto_merge_rejects_non_merge_specialist`。 | “`TC-062A` `test_next_auto_merge_rejects_non_merge_specialist`：`merge` 自动续接不会错误挑选非合并专职”场景按公开错误语义失败或被拒绝。 | `test_next_auto_merge_rejects_non_merge_specialist` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-079 | 边界/异常 | `TC-053I` `test_next_rejects_merge_current_stage`：运行中 `merge` 阶段不能通过 `-next` 续接到 `execute/review/archive_acceptance` | 准备运行中 `merge` 任务。 | 运行 `test_next_rejects_merge_current_stage`。 | `-next` 返回 `3`，错误文本提示 `merge` 只能通过 `-done` 完成。 | `test_next_rejects_merge_current_stage` |
+| TC-CODEX-MULTI-AGENTS-SCRIPTS-CODEX-MULTI-AGENTS-TASK-080 | 边界/异常 | `TC-053J` `test_next_rejects_other_current_stage`：运行中 `other` 阶段不能通过 `-next` 进入固定执行链 | 准备运行中 `other` 任务。 | 运行 `test_next_rejects_other_current_stage`。 | `-next` 返回 `3`，错误文本提示 `other` 没有公开续接转移。 | `test_next_rejects_other_current_stage` |

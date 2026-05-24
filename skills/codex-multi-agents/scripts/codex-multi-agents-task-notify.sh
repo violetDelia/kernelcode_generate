@@ -10,7 +10,7 @@
 # - codex-multi-agents-task-notify.sh -dispatch-init -agents-list <agents-lists.md> -to <worker>
 # - codex-multi-agents-task-notify.sh -dispatch-message -file <TODO.md> -task_id <id> -to <worker> -from <sender> -agents-list <agents-lists.md> [-message <text>]
 # - codex-multi-agents-task-notify.sh -reassign -file <TODO.md> -task_id <id> -to <worker> -old-assignee <worker> -from <sender> -agents-list <agents-lists.md>
-# - codex-multi-agents-task-notify.sh -next -file <TODO.md> -task_id <id> -type <execute|spec|build|review|merge|other|refactor> -agents-list <agents-lists.md> -from <sender> -admin <admin> [-auto-dispatch <task_id|assignee>]...
+# - codex-multi-agents-task-notify.sh -next -file <TODO.md> -task_id <id> -type <execute|spec|build|review|archive_acceptance|merge|other|refactor> -agents-list <agents-lists.md> -from <sender> -admin <admin> [-auto-dispatch <task_id|assignee>]...
 #
 # 对应文件:
 # - spec: /home/lfr/kernelcode_generate/spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -69,8 +69,30 @@ Usage:
   codex-multi-agents-task-notify.sh -dispatch-init -agents-list <agents-lists.md> -to <worker>
   codex-multi-agents-task-notify.sh -dispatch-message -file <TODO.md> -task_id <id> -to <worker> -from <sender> -agents-list <agents-lists.md> [-message <text>]
   codex-multi-agents-task-notify.sh -reassign -file <TODO.md> -task_id <id> -to <worker> -old-assignee <worker> -from <sender> -agents-list <agents-lists.md>
-  codex-multi-agents-task-notify.sh -next -file <TODO.md> -task_id <id> -type <execute|spec|build|review|merge|other|refactor> -agents-list <agents-lists.md> -from <sender> -admin <admin> [-auto-dispatch <task_id|assignee>]...
+  codex-multi-agents-task-notify.sh -next -file <TODO.md> -task_id <id> -type <execute|spec|build|review|archive_acceptance|merge|other|refactor> -agents-list <agents-lists.md> -from <sender> -admin <admin> [-auto-dispatch <task_id|assignee>]...
 USAGE
+}
+
+task_type_display_name() {
+  # 功能说明:
+  # - 将脚本任务类型转换为通知中的中文阶段名。
+  # - 目前只对 archive_acceptance 使用专名，其他任务类型保持原值。
+  #
+  # 使用示例:
+  # - task_type_display_name "archive_acceptance"
+  #
+  # 关联文件:
+  # - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+  # - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+  # - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-notify.sh
+  case "$1" in
+    archive_acceptance)
+      printf "计划书入档验收"
+      ;;
+    *)
+      printf "%s" "$1"
+      ;;
+  esac
 }
 
 parse_args() {
@@ -398,6 +420,7 @@ reassign_notify() {
 next_notify() {
   local summary_message=""
   local assignee_label=""
+  local type_label=""
   local -a dispatched_parts=()
   local auto_dispatch=""
   local auto_task_id=""
@@ -419,6 +442,7 @@ next_notify() {
   done
 
   if [[ -n "$(trim "$ADMIN_NAME")" && "$ADMIN_NAME" != "$FROM" ]]; then
+    type_label="$(task_type_display_name "$TYPE_KIND")"
     if [[ "${#dispatched_parts[@]}" -eq 1 ]]; then
       auto_task_id=""
       auto_assignee=""
@@ -428,14 +452,18 @@ next_notify() {
         assignee_label="当前执行者"
       fi
       if [[ "$auto_task_id" == "$TASK_ID" ]]; then
-        summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；新任务类型=$TYPE_KIND，已经指派给-> $assignee_label。"
+        if [[ "$TYPE_KIND" == "archive_acceptance" ]]; then
+          summary_message="任务 $TASK_ID 已完成当前阶段，已进入$type_label；已经指派给-> $assignee_label。"
+        else
+          summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；新任务类型=$TYPE_KIND，已经指派给-> $assignee_label。"
+        fi
       else
         summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；已自动开始任务 $auto_task_id -> $assignee_label。"
       fi
     elif [[ "${#dispatched_parts[@]}" -gt 1 ]]; then
       summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；已自动开始任务 $(IFS='；'; printf '%s' "${dispatched_parts[*]}")。"
     else
-      summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；新任务类型=$TYPE_KIND，请管理员推进。"
+      summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；新任务类型=$type_label，请管理员推进。"
     fi
     send_talk_message "$FROM" "$ADMIN_NAME" "$summary_message"
   fi
