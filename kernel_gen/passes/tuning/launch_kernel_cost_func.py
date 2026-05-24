@@ -3,7 +3,7 @@
 
 功能说明:
 - 为 module 中被 `arch.launch` 引用的 device function 生成 sibling cost function。
-- 在 cost function 中保留 `symbol.for` 结构，复制必要 helper op，并为受支持的 `dma/kernel/arch` op 生成 `tuner.cost` 与 `symbol.add` 累计链；`arch.get_dynamic_memory`、`dma.subview` 等 helper 只克隆保留，`dma.store` 按写回方向成本节点保留。
+- 在 cost function 中保留 `symbol.for` 结构，复制必要 helper op，并为受支持的 `dma/kernel/arch` op 生成 `tuner.cost` 与 `symbol.add` 累计链；`arch.get_dynamic_memory`、`dma.reinterpret` 等 helper 只克隆保留，`dma.store` 按写回方向成本节点保留。
 - 保持原 host wrapper 与原 device function 不变；当前文件不公开 helper 函数或 helper 类，重写细节只属于 `LaunchKernelCostFuncPass.apply(...)` 内部实现。
 
 API 列表:
@@ -51,6 +51,7 @@ HELPER_OP_NAMES = (
     "dma.view",
     "dma.subview",
     "dma.reshape",
+    "dma.reinterpret",
     "dma.alloc",
 )
 DROPPED_HELPER_OP_NAMES = (

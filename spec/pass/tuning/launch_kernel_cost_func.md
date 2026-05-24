@@ -52,7 +52,7 @@
 - 固定默认 kind：未显式传入 `cost_kind` 时使用 `DMA1|DMA2|DMA3|DMA4|MAC|VECTOR1|VECTOR2`。
 - 固定输出：每个 unique device callee 对请求列表中的每个 `cost_kind` 生成一份 cost function。
 - 固定 cost function 返回语义：全部 `tuner.cost(...)->!symbol.int` 必须进入 `symbol.add` 累计链，最终 `func.return` 返回单个总值。
-- 保持 helper 保留规则：`arch.get_block_id` / `arch.get_block_num` / `arch.get_thread_id` / `arch.get_thread_num` / `arch.get_subthread_id` / `arch.get_subthread_num`、`arch.get_dynamic_memory`、`builtin.unrealized_conversion_cast`、`dma.view`、`dma.subview`、`dma.reshape` 与 `dma.alloc` 必须保留到 cost function，但不下沉 `tuner.cost`。
+- 保持 helper 保留规则：`arch.get_block_id` / `arch.get_block_num` / `arch.get_thread_id` / `arch.get_thread_num` / `arch.get_subthread_id` / `arch.get_subthread_num`、`arch.get_dynamic_memory`、`builtin.unrealized_conversion_cast`、`dma.view`、`dma.subview`、`dma.reshape`、`dma.reinterpret` 与 `dma.alloc` 必须保留到 cost function，但不下沉 `tuner.cost`。
 - `dma.store` 是写回方向成本节点，生成 `tuner.cost(op_name="dma.store")` 并由 emit 侧复用 `cost::deslice` 公开 helper；`dma.load` / `dma.free` / `dma.broadcast` / `dma.fill` / `dma.cast` / `dma.transpose` 暂无公开 cost helper，本 pass 在 cost function 中直接跳过，不生成 `tuner.cost` 或运行时 side effect。
 - `kernel.binary_elewise.kind` 与 `kernel.reduce.kind` 是原业务 op 的算法类别，不是 cost metadata；生成 `tuner.cost` 时必须改名为 `kernel_kind` 保留，避免重新引入旧公开 attr `kind`。
 
@@ -163,7 +163,7 @@ func.func @_cost_MAC__device_matmul_kernel_(%lhs, %rhs, %out, %m, %k, %n) -> !sy
 - 注意事项：
 
 - 下沉成本节点的 op 家族：`dma.*`、`kernel.*`、`arch.*`。
-- helper op `arch.get_block_id` / `arch.get_block_num` / `arch.get_thread_id` / `arch.get_thread_num` / `arch.get_subthread_id` / `arch.get_subthread_num`、`arch.get_dynamic_memory`、`builtin.unrealized_conversion_cast`、`dma.view`、`dma.subview`、`dma.reshape`、`dma.alloc` 需要克隆保留，但不生成 `tuner.cost`。
+- helper op `arch.get_block_id` / `arch.get_block_num` / `arch.get_thread_id` / `arch.get_thread_num` / `arch.get_subthread_id` / `arch.get_subthread_num`、`arch.get_dynamic_memory`、`builtin.unrealized_conversion_cast`、`dma.view`、`dma.subview`、`dma.reshape`、`dma.reinterpret`、`dma.alloc` 需要克隆保留，但不生成 `tuner.cost`。
 - side-effect DMA op `dma.load`、`dma.free`、`dma.transpose` 在 cost function 中跳过，不克隆且不生成 `tuner.cost`；`dma.store` 按写回方向保留为成本节点，但不执行真实写回。
 - `cost_kind` 始终等于 pass 参数展开后的单个 kind；只允许七值集合内名称。
 - 不因任一合法 `cost_kind` 取值裁剪 `dma.*` / `kernel.*` / `arch.*` 成本节点。
@@ -186,6 +186,7 @@ arch.get_dynamic_memory -> clone helper only
 dma.view -> clone helper only
 dma.subview -> clone helper only
 dma.reshape -> clone helper only
+dma.reinterpret -> clone helper only
 dma.alloc -> clone helper only
 dma.load -> skip
 dma.store -> tuner.cost(op_name="dma.store")
@@ -206,6 +207,7 @@ kernel.add -> tuner.cost(op_name="kernel.add")
   - `dma.view`
   - `dma.subview`
   - `dma.reshape`
+  - `dma.reinterpret`
   - `dma.alloc`
   - `dma.load`
   - `dma.free`

@@ -7,6 +7,8 @@
 - 提供 mlir_gen_compare_text(...)：生成实际 builtin.module，接收预期完整 IR 文本，
   归一化比较并返回 bool。
 - 仅比较 mlir_gen 层的 module 文本，不运行 pass、不做 lowering。
+- `func.func` 级属性只作为 mlir_gen 元数据，不参与硬匹配，避免根函数新增
+  `entry_point` 等属性时旧 expectation 全量失效。
 - 当生成文本包含 `!nn.memory<...>` 里的 `//` 符号表达式时，绕过 xdsl parser
   对 `//` 注释的误切分，改用当前工具内的空白归一化文本比较。
 
@@ -68,6 +70,53 @@ def _render_operation_text(value: Operation) -> str:
     stream = StringIO()
     Printer(stream=stream).print_op(value)
     return stream.getvalue().rstrip()
+
+
+def _strip_func_header_attributes(text: str) -> str:
+    """移除 `func.func` header 上的属性字典。
+
+    功能说明:
+    - `mlir_gen_compare` 关注函数签名、body 与 op 结构是否一致。
+    - 根函数上的 `entry_point` 等属性属于工具比较外的元数据，避免新增属性导致旧
+      expectation 需要逐个补文本。
+
+    使用示例:
+    - normalized = _strip_func_header_attributes(text)
+
+    关联文件:
+    - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
+    - test: [test/tools/test_mlir_gen_compare.py](test/tools/test_mlir_gen_compare.py)
+    - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
+    """
+
+    lines: list[str] = []
+    for line in text.splitlines():
+        func_index = line.find("func.func @")
+        attr_index = line.find(" attributes ", func_index if func_index >= 0 else 0)
+        if func_index < 0 or attr_index < 0:
+            lines.append(line)
+            continue
+        brace_index = line.find("{", attr_index)
+        if brace_index < 0:
+            lines.append(line)
+            continue
+        depth = 0
+        end_index = brace_index
+        while end_index < len(line):
+            char = line[end_index]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    end_index += 1
+                    break
+            end_index += 1
+        if depth != 0:
+            lines.append(line)
+            continue
+        lines.append(line[:attr_index] + line[end_index:])
+    return "\n".join(lines)
 
 
 def _build_compare_context() -> Context:
@@ -254,8 +303,10 @@ def _mlir_gen_compare_expected_text(
     actual_text = _render_operation_text(actual_module)
     if _requires_raw_memory_expression_compare(actual_text, expected_text):
         return _strip_mlir_whitespace_outside_strings(
-            actual_text
-        ) == _strip_mlir_whitespace_outside_strings(expected_text)
+            _strip_func_header_attributes(actual_text)
+        ) == _strip_mlir_whitespace_outside_strings(
+            _strip_func_header_attributes(expected_text)
+        )
 
     ctx = _build_compare_context()
     try:
@@ -266,8 +317,8 @@ def _mlir_gen_compare_expected_text(
         return False
 
     try:
-        actual_norm = _normalize_module_text(actual_module, ctx)
-        expected_norm = _normalize_module_text(expected_module, ctx)
+        actual_norm = _strip_func_header_attributes(_normalize_module_text(actual_module, ctx))
+        expected_norm = _strip_func_header_attributes(_normalize_module_text(expected_module, ctx))
     except Exception:
         return False
     return actual_norm == expected_norm

@@ -78,6 +78,18 @@ class DmaReshapeOp(IRDLOperation):
 
 
 @irdl_op_definition
+class DmaReinterpretOp(IRDLOperation):
+    """测试专用的 helper `dma.reinterpret`。"""
+
+    name = "dma.reinterpret"
+    source = operand_def(Attribute)
+    result = result_def(Attribute)
+
+    def __init__(self: "DmaReinterpretOp", source: SSAValue, result_type: Attribute) -> None:
+        super().__init__(operands=[source], result_types=[result_type])
+
+
+@irdl_op_definition
 class DmaSubviewOp(IRDLOperation):
     """测试专用的 helper `dma.subview`。"""
 
@@ -207,7 +219,7 @@ def _build_launch_kernel_module(
 
     功能说明:
     - 生成一个 wrapper 与一个 device function。
-    - device body 内包含 `symbol.for`、`arch.get_dynamic_memory`、`dma.view`、`dma.subview`、`dma.reshape`、`dma.copy` 与 `kernel.add`，用于覆盖 helper 保留与成本节点生成合同。
+    - device body 内包含 `symbol.for`、`arch.get_dynamic_memory`、`dma.view`、`dma.subview`、`dma.reshape`、`dma.reinterpret`、`dma.copy` 与 `kernel.add`，用于覆盖 helper 保留与成本节点生成合同。
     - 可选生成共享 callee 的第二个 wrapper，或为目标 op 注入保留 metadata attr 冲突。
 
     使用示例:
@@ -282,7 +294,8 @@ def _build_launch_kernel_module(
     view = DmaViewOp(device_block.args[0], memory_type)
     subview = DmaSubviewOp(view.result, memory_type)
     reshape = DmaReshapeOp(device_block.args[1], memory_type)
-    dma_copy = DmaCopyOp(device_block.args[2], subview.result)
+    reinterpret = DmaReinterpretOp(reshape.result, memory_type)
+    dma_copy = DmaCopyOp(device_block.args[2], reinterpret.result)
     kernel_add = KernelAddOp(
         device_block.args[2],
         device_block.args[0],
@@ -302,6 +315,7 @@ def _build_launch_kernel_module(
     loop_block.add_op(view)
     loop_block.add_op(subview)
     loop_block.add_op(reshape)
+    loop_block.add_op(reinterpret)
     loop_block.add_op(dma_copy)
     if unsupported_op:
         loop_block.add_op(UnsupportedOp())
@@ -463,10 +477,12 @@ def test_launch_kernel_cost_func_builds_cost_function_for_vector1_kind() -> None
     assert '"dma.view"' in printed
     assert '"dma.subview"' in printed
     assert '"dma.reshape"' in printed
+    assert '"dma.reinterpret"' in printed
     assert 'op_name = "arch.get_dynamic_memory"' not in printed
     assert 'op_name = "dma.view"' not in printed
     assert 'op_name = "dma.subview"' not in printed
     assert 'op_name = "dma.reshape"' not in printed
+    assert 'op_name = "dma.reinterpret"' not in printed
     assert ' kind = "VECTOR1"' not in printed
     assert printed.count("tuner.cost") == 2
 

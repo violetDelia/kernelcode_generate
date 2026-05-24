@@ -44,6 +44,13 @@ _SIMPLE_MODULE_TEXT = """builtin.module {
 }
 """
 
+_FUNC_ATTR_MODULE_TEXT = """builtin.module {
+  func.func @main() attributes {entry_point} {
+    func.return
+  }
+}
+"""
+
 _ARITH_MODULE_TEXT = """builtin.module {
   func.func @main() {
     %0 = arith.constant 0 : i32
@@ -214,6 +221,31 @@ def test_mlir_gen_compare_true(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     expected_path = tmp_path / "expected.mlir"
     expected_path.write_text(_SIMPLE_MODULE_TEXT, encoding="utf-8")
     _install_public_mlir_gen_stub(monkeypatch, _stub_mlir_gen)
+
+    ok = compare_module.mlir_gen_compare(
+        fn=_dummy_kernel,
+        runtime_args=None,
+        mlir_file=str(expected_path),
+    )
+
+    assert ok is True
+
+
+# TC-MLIR-GEN-COMPARE-017
+# 功能说明: 对齐 mlir_gen_compare 对函数级元数据属性的宽松比较口径。
+# 测试目的: 验证 actual 新增 `func.func` header 属性时，旧 expected 不需要补硬编码属性文本。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_ignores_func_header_attrs
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_mlir_gen_compare_ignores_func_header_attrs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_path = tmp_path / "expected.mlir"
+    expected_path.write_text(_SIMPLE_MODULE_TEXT, encoding="utf-8")
+    actual_module = Parser(build_default_context(), _FUNC_ATTR_MODULE_TEXT).parse_module()
+    _install_public_mlir_gen_stub(monkeypatch, lambda *_a, **_k: actual_module)
 
     ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,

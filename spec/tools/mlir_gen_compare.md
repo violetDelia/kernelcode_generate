@@ -3,7 +3,7 @@
 ## 功能简介
 
 - `mlir_gen_compare` 用来比较 `mlir_gen(...)` 产出的 `builtin.module` 与预期 `.mlir` 文件是否一致。
-- 比较口径默认固定为“两边都先解析，再统一打印后比较字符串”。
+- 比较口径默认固定为“两边都先解析，再统一打印后比较字符串”；`func.func` header 上的属性字典作为 mlir_gen 元数据从比较文本中移除，避免根函数新增 `entry_point` 或后续函数级属性时旧 expectation 全量失效。
 - 若实际或预期文本包含 `!nn.memory<...>` 中的 `//` 符号表达式，则走工具内文本兜底：保留字符串内容，移除字符串外空白后比较。原因是 xdsl/MLIR 词法层把 `//` 识别为注释，不能可靠 parse 这类由 `SymbolDim.__floordiv__` 生成的 memory 类型文本。
 - expected 文件头部或普通行注释中的 `//` 不属于 memory 表达式，不得触发文本兜底比较。
 - 只返回 `bool`；不执行 pass、不做 lowering、不输出 diff。
@@ -62,7 +62,7 @@
   - expected 文件读取失败或非 UTF-8 时返回 `False`。
   - expected 文本解析失败或解析结果不是 `builtin.module` 时返回 `False`。
   - expected 文本含 `!nn.memory<...>` 尖括号正文内的 `//` 表达式时，不要求 parser 成功，改按字符串外空白归一化文本比较；普通注释中的 `//` 仍走 parser + printer 归一化。
-  - 归一化失败或归一化文本不一致时返回 `False`。
+  - 归一化失败或移除 `func.func` header 属性后的归一化文本不一致时返回 `False`。
   - `mlir_gen(...)` 自身抛错时不重新包裹，直接向上传播。
   - 调用方不得依赖实现内部状态。
 
@@ -83,7 +83,7 @@
 - 注意事项：
   - 语义与 `mlir_gen_compare(...)` 一致，区别只在 expected 来源是内存字符串，不是磁盘文件。
   - `runtime_args` 不是 `list`、`tuple` 或 `None` 时必须抛出 `KernelCodeError("runtime_args must be list, tuple, or None")`。
-  - expected 文本解析失败、归一化失败或文本不一致时返回 `False`。
+  - expected 文本解析失败、归一化失败或移除 `func.func` header 属性后的文本不一致时返回 `False`。
   - expected 文本含 `!nn.memory<...>` 尖括号正文内的 `//` 表达式时，按字符串外空白归一化文本比较。
   - `mlir_gen(...)` 自身抛错时不重新包裹，直接向上传播。
   - 调用方不得依赖实现内部状态。
@@ -137,3 +137,4 @@
 | TC-TOOLS-MLIR-GEN-COMPARE-014 | 解析/打印 | MLIR gen compare text true | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_mlir_gen_compare_text_true`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_mlir_gen_compare_text_true` |
 | TC-TOOLS-MLIR-GEN-COMPARE-015 | 内存/DMA | MLIR gen compare text ignores line comment slashes for memory types | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_mlir_gen_compare_text_ignores_line_comment_slashes_for_memory_types`。 | 内存类型、布局、搬运结果或 verifier 行为体现“MLIR gen compare text ignores line comment slashes for memory types”场景。 | `test_mlir_gen_compare_text_ignores_line_comment_slashes_for_memory_types` |
 | TC-TOOLS-MLIR-GEN-COMPARE-016 | 边界/异常 | MLIR gen compare text returns false on invalid text | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_mlir_gen_compare_text_returns_false_on_invalid_text`。 | “MLIR gen compare text returns false on invalid text”场景按公开错误语义失败或被拒绝。 | `test_mlir_gen_compare_text_returns_false_on_invalid_text` |
+| TC-TOOLS-MLIR-GEN-COMPARE-017 | 解析/打印 | MLIR gen compare ignores func header attrs | 准备 actual 带 `func.func` 属性、expected 不带属性的公开输入。 | 运行 `test_mlir_gen_compare_ignores_func_header_attrs`。 | 比较仍返回 `True`，函数签名与 body 继续硬匹配。 | `test_mlir_gen_compare_ignores_func_header_attrs` |

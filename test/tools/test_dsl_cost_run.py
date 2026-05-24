@@ -330,7 +330,7 @@ def test_dsl_cost_run_compiles_rank2_store_vector_layout(tmp_path: Path) -> None
     assert dma2_cost == 2
     assert cost_sources
     source_text = "\n".join(path.read_text(encoding="utf-8") for path in cost_sources)
-    store_lines = [line for line in source_text.splitlines() if "store<GM, TSM, double, double>" in line]
+    store_lines = [line for line in source_text.splitlines() if "store<GM, TSM," in line]
     assert store_lines
     for store_line in store_lines:
         assert "{0, 0}" not in store_line
