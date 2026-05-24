@@ -5,7 +5,7 @@
 - 覆盖 `kernel/matmul` 三条目标 demo 的公开 kernel 函数与脚本入口。
 - 锁定 dynamic demo 使用 `H/K/W` 符号 memory、`TILE_H/TILE_W/TILE_K` 符号 tile。
 - 锁定 static dynamic demo 保留 static memory shape，同时 K/reduce 维按 `TILE_K` 切分并累加 partial。
-- 锁定尾块通过有效区域 `dma.view` 写入零填充 full tile，避免 `?` shape 参与 memory 默认 stride。
+- 锁定尾块通过有效区域 alias 写入零填充 full tile，避免 `?` shape 参与 memory 默认 stride。
 - 锁定 static-static demo 同样具备 K/reduce accumulator，不允许 partial 直接覆盖 output。
 
 API 列表:
@@ -172,11 +172,11 @@ def test_dynamic_matmul_demo_uses_symbolic_memory_and_tile_reduce_accumulator() 
     assert "step = #symbol.expr<TILE_K>" in module_text
     assert '"kernel.matmul"' in module_text
     assert '"kernel.binary_elewise"' in module_text
-    assert '"dma.view"' in module_text
+    assert '"dma.reinterpret"' in module_text
     assert '"dma.deslice"' in module_text
     assert "memory.get_data" in module_text
     assert "symbol.ne" in module_text
-    assert ".template view<T1>" in source
+    assert "slice(" in source
     assert "!nn.memory<[#symbol.expr<17>, #symbol.expr<19>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
     _assert_source_uses_accumulator(source)
@@ -210,11 +210,11 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
     assert "step = #symbol.expr<TILE_K>" in module_text
     assert '"kernel.matmul"' in module_text
     assert '"kernel.binary_elewise"' in module_text
-    assert '"dma.view"' in module_text
+    assert '"dma.reinterpret"' in module_text
     assert '"dma.deslice"' in module_text
     assert "memory.get_data" in module_text
     assert "symbol.ne" in module_text
-    assert ".template view<T1>" in source
+    assert "slice(" in source
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
     _assert_source_uses_accumulator(source)
@@ -242,7 +242,7 @@ def test_static_static_matmul_demo_keeps_static_memory_and_static_tile_reduce() 
     assert "step = #symbol.expr<48>" in module_text
     assert '"kernel.matmul"' in module_text
     assert '"kernel.binary_elewise"' in module_text
-    assert '"dma.view"' in module_text
+    assert '"dma.reinterpret"' in module_text
     assert '"dma.deslice"' in module_text
     assert "memory.get_data" in module_text
     assert "symbol.ne" in module_text

@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from xdsl.context import Context
-from xdsl.dialects import func, scf
+from xdsl.dialects import arith, func, scf
 from xdsl.dialects.builtin import ArrayAttr, ModuleOp
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.pattern_rewriter import (
@@ -42,13 +42,14 @@ from xdsl.pattern_rewriter import (
     RewritePattern,
     op_type_rewrite_pattern,
 )
-from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetBlockNumOp, ArchGetDynamicMemoryOp
 from kernel_gen.dialect.dma import DmaReinterpretOp, DmaReshapeOp, DmaViewOp
+from kernel_gen.dialect.memory import MemoryGetDataOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
+    SymbolCastOp,
     SymbolConstOp,
     SymbolDivOp,
     SymbolFloorDivOp,
@@ -66,7 +67,7 @@ from kernel_gen.dialect.symbol import (
     SymbolValueType,
 )
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
-from kernel_gen.passes.common import ensure_builtin_module, raise_pass_contract_error
+from kernel_gen.passes.common import ensure_builtin_module, raise_pass_contract_error, verify_generated_ops
 from kernel_gen.passes.pass_manager import Pass
 from kernel_gen.target import registry as target_registry
 
@@ -88,6 +89,12 @@ _MEMORY_POOL_SETUP_OPS = (
     DmaViewOp,
     DmaReshapeOp,
     DmaReinterpretOp,
+)
+_PRESENCE_SETUP_OPS = (
+    arith.ConstantOp,
+    MemoryGetDataOp,
+    SymbolCastOp,
+    SymbolNeOp,
 )
 _UNKNOWN_SYMBOL_EXPR = "?"
 
@@ -271,12 +278,13 @@ def _is_allowed_loop_prefix_setup_op(op: Operation) -> bool:
     功能说明:
     - 放行公开 symbol dialect 的无副作用边界构造 op。
     - 放行 memory-pool 生成的 `arch.get_dynamic_memory`、`dma.view`、`dma.reshape` 与 `dma.reinterpret`。
+    - 放行 optional memory presence guard 需要的 `arith.constant`、`memory.get_data`、`symbol.cast` 与 `symbol.ne`。
 
     使用示例:
     - if _is_allowed_loop_prefix_setup_op(op): ...
     """
 
-    return isinstance(op, _SYMBOL_SETUP_OPS + _MEMORY_POOL_SETUP_OPS)
+    return isinstance(op, _SYMBOL_SETUP_OPS + _MEMORY_POOL_SETUP_OPS + _PRESENCE_SETUP_OPS)
 
 
 def _setup_operands_are_allowed(op: Operation, allowed_values: set[SSAValue]) -> bool:
@@ -753,8 +761,8 @@ class ArchParallelizePass(Pass):
             apply_recursively=False,
         ).rewrite_module(module)
         try:
-            module.verify()
-        except VerifyException as exc:
+            verify_generated_ops([module])
+        except KernelCodeError as exc:
             raise KernelCodeError(
                 ErrorKind.CONTRACT,
                 ErrorModule.PASS,

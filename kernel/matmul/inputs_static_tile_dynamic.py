@@ -163,7 +163,7 @@ def _assert_static_symbolic_tile_ir(module_text: str) -> None:
         "step = #symbol.expr<TILE_K>",
         '"kernel.matmul"',
         '"kernel.binary_elewise"',
-        '"dma.view"',
+        '"dma.reinterpret"',
         '"dma.deslice"',
         "memory.get_data",
         "symbol.ne",

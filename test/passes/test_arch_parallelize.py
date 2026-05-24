@@ -559,6 +559,42 @@ builtin.module {
     assert '"dma.reshape"' in result.actual_ir
 
 
+# TC-PASS-ARCH-PARALLELIZE-020
+# 功能说明: 验证 optional memory presence guard 的 loop 前 setup 前缀不阻塞 block 分发。
+# 使用示例: pytest -q test/passes/test_arch_parallelize.py -k test_arch_parallelize_allows_presence_guard_setup_before_single_loop
+def test_arch_parallelize_allows_presence_guard_setup_before_single_loop() -> None:
+    case_text = """// COMPILE_ARGS: --pass "arch-parallelize={target=npu_demo,parallel_level=block}"
+// CHECK: arith.constant
+// CHECK: memory.get_data
+// CHECK: symbol.cast
+// CHECK: symbol.ne
+// CHECK: arch.get_block_id
+// CHECK: symbol.for
+
+builtin.module {
+  func.func @presence_prefix_loop(%bias : !nn.memory<[#symbol.expr<W>], [#symbol.expr<1>], f32, #nn.space<global>>) {
+    %zero = symbol.const 0 : !symbol.int<#symbol.expr<0>>
+    %one = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    %sixteen = symbol.const 16 : !symbol.int<#symbol.expr<16>>
+    %fill = arith.constant 0.000000e+00 : f32
+    %ptr = memory.get_data %bias : !nn.memory<[#symbol.expr<W>], [#symbol.expr<1>], f32, #nn.space<global>> -> !symbol.ptr<f32>
+    %presence = symbol.cast %ptr : !symbol.ptr<f32> -> !symbol.int<#symbol.expr<?>>
+    %has_bias = symbol.ne %presence, %zero : (!symbol.int<#symbol.expr<?>>, !symbol.int<#symbol.expr<0>>) -> i1
+    symbol.for %i = %zero to %sixteen step %one {iter = #symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<16>, step = #symbol.expr<1>>} {
+      %body = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    }
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(case_text, source_path="test/passes/test_arch_parallelize.py")
+    assert result.ok is True, result.message
+    assert result.actual_ir.index("arith.constant") < result.actual_ir.index("arch.get_block_id")
+    assert result.actual_ir.index("memory.get_data") < result.actual_ir.index("arch.get_block_id")
+    assert result.actual_ir.index("symbol.cast") < result.actual_ir.index("arch.get_block_id")
+    assert result.actual_ir.index("symbol.ne") < result.actual_ir.index("arch.get_block_id")
+
+
 # TC-PASS-ARCH-PARALLELIZE-016
 # 功能说明: 验证 memory-pool setup 位于唯一 loop 后仍按 unsupported loop structure 失败。
 # 使用示例: pytest -q test/passes/test_arch_parallelize.py -k test_arch_parallelize_rejects_memory_pool_setup_after_loop

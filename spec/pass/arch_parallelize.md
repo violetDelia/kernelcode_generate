@@ -29,7 +29,9 @@
 
 - `kernel_gen.dialect.arch`：公开 `ArchGetBlockIdOp`、`ArchGetBlockNumOp` 与 `ArchGetDynamicMemoryOp` 类型，用于检测和生成 block 相关 IR，并识别 memory-pool 生成的 setup 前缀。
 - `kernel_gen.dialect.dma`：公开 `DmaViewOp`、`DmaReshapeOp` 与 `DmaReinterpretOp` 类型，用于识别 memory-pool 或旧手动 IR 生成的 loop 前 setup 前缀。
-- `kernel_gen.dialect.symbol`：公开 `SymbolForOp`、`SymbolConstOp`、`SymbolAddOp`、`SymbolMulOp` 与 `SymbolValueType`，用于 loop 边界。
+- `kernel_gen.dialect.memory`：公开 `MemoryGetDataOp`，用于识别 optional memory presence guard 的 data pointer 查询 setup 前缀。
+- `kernel_gen.dialect.symbol`：公开 `SymbolForOp`、`SymbolConstOp`、`SymbolAddOp`、`SymbolMulOp`、`SymbolCastOp`、`SymbolNeOp` 与 `SymbolValueType`，用于 loop 边界和 optional memory presence guard setup 前缀。
+- `xdsl.dialects.arith`：公开 `arith.constant`，用于识别 loop body 内标量 fill 等只读常量 setup 前缀。
 - `kernel_gen.target.registry`：公开 `is_arch_op_supported(target, op_name)` 与 `get_target_hardware(target, key)`，用于校验 target 与读取静态 `block_num`。
 - `kernel_gen.passes.registry`：公开 pass registry 名称 `arch-parallelize`。
 
@@ -46,7 +48,8 @@
 ## 额外补充
 
 - 顶层 loop 指函数 entry block 的直接子 op；嵌套 region 内的 `symbol.for` 不参与顶层计数。
-- 支持结构为 `func { setup-prefix*; symbol.for { body-op*; nested-symbol.for* }; func.return }`，其中同级 `setup-prefix` 只能位于唯一顶层 loop 之前，并且只能是公开 symbol dialect 的纯 setup op，或 memory-pool 生成的 `arch.get_dynamic_memory` / `dma.reinterpret`。
+- 支持结构为 `func { setup-prefix*; symbol.for { body-op*; nested-symbol.for* }; func.return }`，其中同级 `setup-prefix` 只能位于唯一顶层 loop 之前，并且只能是公开 symbol dialect 的纯 setup op、memory-pool 生成的 `arch.get_dynamic_memory` / `dma.reinterpret`，或 optional memory presence guard 需要的 `arith.constant` / `memory.get_data` / `symbol.cast` / `symbol.ne` 链。
+- 所有 `setup-prefix` 的 operand 必须来自函数参数或更早已放行的 setup result；不得依赖 loop body、loop 后 op、未知副作用 op 或后续尚未放行的 SSA。
 - 旧手动 IR 中已存在的 `dma.view` / `dma.reshape` alias 前缀继续允许通过。
 - 非入口函数无顶层 loop 时必须生成 `arch.get_block_id` + `scf.if` block0 guard，只允许 block0 执行原 body。
 - 本 pass 的失败通过 `KernelCodeError` 暴露，稳定错误短语以 `ArchParallelizePassError:` 或 `ArchParallelizePassVerifierError:` 开头。
@@ -115,6 +118,7 @@
   - 多个顶层 `symbol.for` 必须失败为 `ArchParallelizePassError: multiple top-level symbol.for loops are not supported`。
   - loop-carried `symbol.for` 必须失败为 `ArchParallelizePassError: loop-carried symbol.for is not supported`。
   - 顶层 loop 同级出现非允许 setup 前缀 op，或允许 setup 位于 loop 之后时，必须失败为 `ArchParallelizePassError: unsupported loop structure`。
+  - `arith.constant`、`memory.get_data`、`symbol.cast`、`symbol.ne` 只在唯一顶层 loop 前作为无副作用 / 只读 setup 前缀放行；其 operand 必须来自函数参数或更早已放行 setup result。
 
 ### `class _ArchParallelizeFuncPattern(block_num: int)`
 
@@ -235,3 +239,4 @@
 | TC-PASS-ARCH-PARALLELIZE-015 | pass 改写 | memory-pool setup 前缀 | 唯一顶层 `symbol.for` 前包含 `arch.get_dynamic_memory`、`dma.reinterpret` 和 symbol setup；旧兼容路径可包含既有 alias op。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | IR 含 block-strided `symbol.for`，loop 前 memory-pool setup 保持在前缀位置。 | `test_arch_parallelize_allows_memory_pool_setup_before_single_loop` |
 | TC-PASS-ARCH-PARALLELIZE-016 | 失败边界 | memory-pool setup 位于 loop 后 | 唯一顶层 `symbol.for` 后包含 `arch.get_dynamic_memory` 或 alias setup。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | 失败短语含 `unsupported loop structure`。 | `test_arch_parallelize_rejects_memory_pool_setup_after_loop` |
 | TC-PASS-ARCH-PARALLELIZE-017 | 跳过边界 | 入口 host dispatcher + pattern 函数 | module 同时包含带入口属性的 host dispatcher 和带 `kernel.pattern_id` 的 pattern 函数。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | host 保持原调度 body，不新增 block 级 arch 语义；pattern 函数仍含 `arch.get_block_id` 和 block-strided `symbol.for`。 | `test_arch_parallelize_skips_entry_point_host_dispatcher` |
+| TC-PASS-ARCH-PARALLELIZE-020 | pass 改写 | optional memory presence guard setup 前缀 | 唯一顶层 `symbol.for` 前含 `arith.constant` 与 `memory.get_data -> symbol.cast -> symbol.ne`，且 operand 均来自函数参数或更早 setup result。 | 运行 `run_ircheck_text(...)` 触发公开 pass 入口。 | IR 含 block-strided `symbol.for`，presence guard setup 保持在 loop 前，且不触发 `unsupported loop structure`。 | `test_arch_parallelize_allows_presence_guard_setup_before_single_loop` |

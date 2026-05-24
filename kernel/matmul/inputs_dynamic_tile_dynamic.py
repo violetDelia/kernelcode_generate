@@ -163,7 +163,7 @@ def _assert_dynamic_memory_ir(
         "step = #symbol.expr<TILE_K>",
         '"kernel.matmul"',
         '"kernel.binary_elewise"',
-        '"dma.view"',
+        '"dma.reinterpret"',
         '"dma.deslice"',
         "memory.get_data",
         "symbol.ne",
