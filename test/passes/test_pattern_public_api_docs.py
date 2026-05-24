@@ -48,10 +48,15 @@ _PATTERN_MODULE_CASES = (
     _PatternModuleCase(
         "kernel_gen.passes.hoist_dma_alias_ops",
         "spec/pass/hoist_dma_alias_ops.md",
-        ("DmaViewDesliceGroupingPattern", "DmaReshapeThroughFillPattern"),
+        ("DmaAliasThroughWriteNoReadPattern", "DmaAliasHoistPattern"),
         "get_hoist_dma_alias_ops_pass_patterns",
         "module",
-        ("_DmaViewDesliceGroupingPattern", "_DmaReshapeThroughFillPattern"),
+        (
+            "_DmaViewDesliceGroupingPattern",
+            "_DmaReshapeThroughFillPattern",
+            "DmaViewDesliceGroupingPattern",
+            "DmaReshapeThroughFillPattern",
+        ),
     ),
     _PatternModuleCase(
         "kernel_gen.passes.outline_device_kernel",
@@ -214,8 +219,14 @@ _PATTERN_MODULE_CASES = (
 )
 
 _IMPLEMENTATION_DOC_TOKENS = {
-    "DmaViewDesliceGroupingPattern": ("dma.view", "dma.deslice"),
-    "DmaReshapeThroughFillPattern": ("dma.reshape", "dma.fill"),
+    "DmaAliasThroughWriteNoReadPattern": (
+        "MemoryEffectKind.WRITE",
+        "dma.broadcast",
+        "dma.reshape",
+        "dma.view",
+        "dma.reinterpret",
+    ),
+    "DmaAliasHoistPattern": ("dma.view", "dma.reshape", "dma.reinterpret", "symbol.for"),
     "OutlineDeviceKernelFuncPattern": ("func.func", "arch.launch"),
     "DmaAllocInSymbolForHoistPattern": ("dma.alloc", "dma.free"),
     "DmaViewInSymbolForHoistPattern": ("dma.view",),
@@ -354,7 +365,9 @@ def test_pass_pattern_public_api_imports_and_getter_order() -> None:
         if case.getter_name == "nn_lowering_patterns":
             assert type(patterns[-1]).__name__ == "RejectUnsupportedNnOpPattern"
             continue
-        assert [type(pattern).__name__ for pattern in patterns] == list(case.pattern_names)
+        actual_pattern_names = [type(pattern).__name__ for pattern in patterns]
+        public_pattern_names = [name for name in actual_pattern_names if not name.startswith("_")]
+        assert public_pattern_names == list(case.pattern_names)
         fresh_patterns = getter(*_getter_args(case.getter_args_kind))
         assert patterns is not fresh_patterns
         assert all(left is not right for left, right in zip(patterns, fresh_patterns, strict=True))
