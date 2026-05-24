@@ -1257,6 +1257,86 @@ def _build_fixed_point_alloc_free_fill_module(*, dynamic_shape: bool) -> ModuleO
     return ModuleOp([func_op])
 
 
+def _build_dynamic_matmul_loop_local_scratch_module() -> ModuleOp:
+    """构造动态 matmul loop-local scratch 外提正例 module。
+
+
+    功能说明:
+    - 模拟动态 matmul 的 outer M/N/K 三层 loop，acc/tmp/lhs/rhs scratch 的 shape 均来自函数级 tile symbol。
+    - acc/tmp 位于 N loop body，lhs/rhs 位于 K loop body，均带同一 owner block 内唯一 matching `dma.free`。
+    - `dma.fill`、`kernel.matmul` 与 `kernel.binary_elewise` 保留在原循环语义位置，用于验证只移动 alloc/free 生命周期边界。
+
+    使用示例:
+    - module = _build_dynamic_matmul_loop_local_scratch_module()
+
+    关联文件:
+    - spec: spec/pass/symbol_buffer_hoist.md
+    - test: test/passes/test_symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    """
+
+    symbol_types = [
+        SymbolValueType.from_expr("TM"),
+        SymbolValueType.from_expr("TN"),
+        SymbolValueType.from_expr("TK"),
+        SymbolValueType.from_expr("M"),
+        SymbolValueType.from_expr("N"),
+        SymbolValueType.from_expr("K"),
+    ]
+    acc_type = NnMemoryType(
+        ArrayAttr([SymbolExprAttr.from_expr("TM"), SymbolExprAttr.from_expr("TN")]),
+        ArrayAttr([SymbolExprAttr.from_expr("TN"), SymbolExprAttr.from_expr("1")]),
+        i32,
+        NnMemorySpaceAttr.from_name("tsm"),
+    )
+    lhs_type = NnMemoryType(
+        ArrayAttr([SymbolExprAttr.from_expr("TM"), SymbolExprAttr.from_expr("TK")]),
+        ArrayAttr([SymbolExprAttr.from_expr("TK"), SymbolExprAttr.from_expr("1")]),
+        i32,
+        NnMemorySpaceAttr.from_name("tsm"),
+    )
+    rhs_type = NnMemoryType(
+        ArrayAttr([SymbolExprAttr.from_expr("TK"), SymbolExprAttr.from_expr("TN")]),
+        ArrayAttr([SymbolExprAttr.from_expr("TN"), SymbolExprAttr.from_expr("1")]),
+        i32,
+        NnMemorySpaceAttr.from_name("tsm"),
+    )
+    zero = SymbolConstOp(0)
+    top_block = Block(arg_types=symbol_types)
+    tm, tn, tk, m, n, k = top_block.args
+    outer_block = Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TM")])
+    middle_block = Block(arg_types=[SymbolIterType.from_bounds("0", "N", "TN")])
+    inner_block = Block(arg_types=[SymbolIterType.from_bounds("0", "K", "TK")])
+    acc = DmaAllocOp([tm, tn], acc_type)
+    tmp = DmaAllocOp([tm, tn], acc_type)
+    acc_fill = DmaFillOp(acc.result, zero.result)
+    lhs = DmaAllocOp([tm, tk], lhs_type)
+    rhs = DmaAllocOp([tk, tn], rhs_type)
+    lhs_fill = DmaFillOp(lhs.result, zero.result)
+    rhs_fill = DmaFillOp(rhs.result, zero.result)
+    matmul = KernelMatmulOp(tmp.result, lhs.result, rhs.result, NnMemorySpaceAttr.from_name("tsm"))
+    accumulate = KernelBinaryElewiseOp(
+        acc.result,
+        acc.result,
+        tmp.result,
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("tsm"),
+    )
+    lhs_free = DmaFreeOp(lhs.result)
+    rhs_free = DmaFreeOp(rhs.result)
+    tmp_free = DmaFreeOp(tmp.result)
+    acc_free = DmaFreeOp(acc.result)
+    inner_block.add_ops([lhs, rhs, lhs_fill, rhs_fill, matmul, accumulate, rhs_free, lhs_free])
+    inner_loop = SymbolForOp(zero.result, k, tk, inner_block)
+    middle_block.add_ops([acc, tmp, acc_fill, inner_loop, tmp_free, acc_free])
+    middle_loop = SymbolForOp(zero.result, n, tn, middle_block)
+    outer_block.add_op(middle_loop)
+    outer_loop = SymbolForOp(zero.result, m, tm, outer_block)
+    top_block.add_ops([zero, outer_loop, func.ReturnOp()])
+    func_op = func.FuncOp("dynamic_matmul_scratch_case", FunctionType.from_lists(symbol_types, []), Region(top_block))
+    return ModuleOp([func_op])
+
+
 def _build_nested_acc_fill_before_read_module() -> ModuleOp:
     """构造 owner block fill 支配 nested kernel read 的 acc buffer 正例。
 
@@ -2156,6 +2236,52 @@ def test_symbol_buffer_hoist_alloc_free_fixed_point_nested_loop_dynamic() -> Non
     assert list(top_alloc.dynamic_shape) == [top_block.args[0], top_block.args[1]]
     assert fill.target is top_alloc.result
     assert _free_source_is(top_free, top_alloc.result)
+
+
+# TC-SYMBOL-BUFFER-HOIST-004H5A
+# 功能说明: 验证动态 matmul loop-local acc/tmp/lhs/rhs scratch alloc/free 可逐层外提，计算 op 保持循环内。
+# 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_dynamic_matmul_loop_local_scratch_allocs
+# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
+# 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
+def test_symbol_buffer_hoist_hoists_dynamic_matmul_loop_local_scratch_allocs() -> None:
+    module = _build_dynamic_matmul_loop_local_scratch_module()
+
+    SymbolBufferHoistPass().apply(Context(), module)
+
+    top_block, outer_loop, outer_block = _get_blocks(module)
+    top_ops = list(top_block.ops)
+    top_allocs = [op for op in top_ops if isinstance(op, DmaAllocOp)]
+    top_frees = [op for op in top_ops if isinstance(op, DmaFreeOp)]
+    outer_index = top_ops.index(outer_loop)
+    middle_loop = next(op for op in outer_block.ops if isinstance(op, SymbolForOp))
+    middle_block = middle_loop.body.blocks[0]
+    inner_loop = next(op for op in middle_block.ops if isinstance(op, SymbolForOp))
+    inner_block = inner_loop.body.blocks[0]
+    middle_fill = next(op for op in middle_block.ops if isinstance(op, DmaFillOp))
+    inner_fills = [op for op in inner_block.ops if isinstance(op, DmaFillOp)]
+    matmul = next(op for op in inner_block.ops if isinstance(op, KernelMatmulOp))
+    accumulate = next(op for op in inner_block.ops if isinstance(op, KernelBinaryElewiseOp))
+    hoisted_values = tuple(alloc.result for alloc in top_allocs)
+    acc_value = accumulate.out
+    tmp_value = accumulate.rhs
+    lhs_value = matmul.lhs
+    rhs_value = matmul.rhs
+
+    assert len(top_allocs) == 4
+    assert len(top_frees) == 4
+    assert all(top_ops.index(alloc) < outer_index for alloc in top_allocs)
+    assert all(top_ops.index(free) > outer_index for free in top_frees)
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in outer_block.ops)
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in middle_block.ops)
+    assert not any(isinstance(op, (DmaAllocOp, DmaFreeOp)) for op in inner_block.ops)
+    assert all(any(value is hoisted for hoisted in hoisted_values) for value in (acc_value, tmp_value, lhs_value, rhs_value))
+    assert accumulate.lhs is acc_value
+    assert matmul.out is tmp_value
+    assert middle_fill.target is acc_value
+    assert any(fill.target is lhs_value for fill in inner_fills)
+    assert any(fill.target is rhs_value for fill in inner_fills)
+    assert all(any(_free_source_is(free, value) for free in top_frees) for value in (acc_value, tmp_value, lhs_value, rhs_value))
 
 
 # TC-SYMBOL-BUFFER-HOIST-004H6
