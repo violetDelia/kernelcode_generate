@@ -4,11 +4,13 @@
 
 - 定义 `memory-plan` pass 的公开合同。
 - 第一阶段只在显式 `insert-free=true` 时为受控 `dma.alloc` 结果补插 `dma.free`。
+- 原型阶段在显式 `insert-free=true,reuse=true` 时允许同一受支持 owner block 内
+  类型完全一致且生命周期不重叠的 `dma.alloc` 做保守复用。
 - 本 pass 与 `memory-pool` 的 rewrite 语义分离，不做 pool rewrite、alignment 或 backing memory 合并；`npu-demo-lowering` 仅以 `MemoryPlanPass(insert_free=True, fold=False)` 固定调用本 pass 补齐生命周期。
 
 ## API 列表
 
-- `class MemoryPlanPass(insert_free: bool = False, fold: bool = True)`
+- `class MemoryPlanPass(insert_free: bool = False, fold: bool = True, reuse: bool = False)`
 - `MemoryPlanPass.from_options(options: dict[str, str]) -> MemoryPlanPass`
 - `MemoryPlanPass.apply(ctx: Context, module: ModuleOp) -> None`
 
@@ -30,6 +32,7 @@
 ## 目标
 
 - 通过 `memory-plan={insert-free=true}` 给缺少释放点的 owned `dma.alloc` 补齐 `dma.free`。
+- 通过 `memory-plan={insert-free=true,reuse=true}` 在保守可证明时复用生命周期不重叠的 owned `dma.alloc`。
 - 已存在合法 `dma.free` 时保持 no-op，不重复插入。
 - 对 free 早于后续 use、重复 free、所有权逃逸或 unsupported control flow 给出稳定错误。
 
@@ -39,6 +42,7 @@
 - 不处理完整 ownership indicator、retain、branch、region-branch、跨函数所有权或多块 CFG。
 - 不复用、调用或改变 `memory-pool` 的 summary / rewrite 语义。
 - 不管理函数参数、block 参数、`func.call` 返回 memory 或未知 memory-producing op 的 ownership。
+- 不跨 region、跨 unsupported CFG 或跨无法证明 use/free 顺序的 owner block 复用内存。
 
 ## 行为
 
@@ -46,6 +50,8 @@
 
 - `insert-free=false`：pass no-op，不做生命周期检查。
 - `insert-free=true`：执行生命周期分析并补插缺失 `dma.free`。
+- `reuse=false`：默认行为，不做 alloc 复用。
+- `reuse=true`：仅在 `insert-free=true` 时启用保守 linear-scan 复用；单独开启 `reuse=true` 仍保持 no-op。
 - `fold` 是 registry 通用 option，由 [`spec/pass/registry.md`](../../spec/pass/registry.md) 解析；`MemoryPlanPass.from_options(...)` 不解析 `fold`。
 
 ### 管理对象
@@ -71,11 +77,21 @@
 - 若 alloc 没有非 free use，则在 `dma.alloc` 后插入 `dma.free`。
 - 已有合法 `dma.free` 且位于所有非 free use 之后时不重复插入。
 
+### memory reuse
+
+- 仅当 `insert-free=true` 且 `reuse=true` 时执行。
+- 只在同一 supported owner block 内做线性扫描复用。
+- 只复用 result type 完全一致的 `dma.alloc`，即 space、dtype、rank、shape、stride 均相同。
+- 前一个 alloc 的合法 free 必须早于后一个 alloc，才可将后一个 alloc 的 use 改写为前一个 alloc。
+- 复用成功时删除前一个 alloc 的旧 free 与后一个 alloc，保留后一个生命周期末尾的 free。
+- 遇到 escape、unsupported CFG、未知 producing、free-before-use、重复 free 或跨 region 不可证明 use 时沿用既有错误或保守 no-op。
+
 ## 错误语义
 
 - direct API 错误：
   - `MemoryPlanOptionError: unknown option '<name>'`
   - `MemoryPlanOptionError: insert-free expects bool`
+  - `MemoryPlanOptionError: reuse expects bool`
   - `MemoryPlanInvalidLifetime: dma.free appears before last use`
   - `MemoryPlanInvalidLifetime: multiple dma.free for same allocation`
   - `MemoryPlanUnsupportedCall: func.call returning nn.memory requires ownership modelling`
@@ -84,6 +100,7 @@
 - registry 包装错误：
   - `PassRegistryError: pass 'memory-plan' option error: MemoryPlanOptionError: unknown option '<name>'`
   - `PassRegistryError: pass 'memory-plan' option error: MemoryPlanOptionError: insert-free expects bool`
+  - `PassRegistryError: pass 'memory-plan' option error: MemoryPlanOptionError: reuse expects bool`
 
 ## 公开导入
 
@@ -96,7 +113,7 @@
 ```python
 from kernel_gen.passes.memory_plan import MemoryPlanPass
 
-pass_obj = MemoryPlanPass(insert_free=True, fold=False)
+pass_obj = MemoryPlanPass(insert_free=True, fold=False, reuse=True)
 pass_obj.apply(ctx, module)
 ```
 
@@ -104,7 +121,7 @@ pass_obj.apply(ctx, module)
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
 
 load_builtin_passes()
-pass_obj = build_registered_pass("memory-plan", {"insert-free": "true", "fold": "false"})
+pass_obj = build_registered_pass("memory-plan", {"insert-free": "true", "reuse": "true", "fold": "false"})
 ```
 
 ## 测试矩阵
@@ -114,6 +131,8 @@ pass_obj = build_registered_pass("memory-plan", {"insert-free": "true", "fold": 
 | TC-MPLAN-001 | 静态 alloc 缺少 free | 最后 use 后插入 `dma.free` |
 | TC-MPLAN-002 | 动态 alloc 缺少 free | 动态 shape operand 保留，最后 use 后插入 `dma.free` |
 | TC-MPLAN-003 | 已有合法 free | 不重复插入 |
+| TC-MPLAN-003A | reuse 类型一致且生命周期不重叠 | 删除后一个 alloc 与前一个旧 free，保留最终 free |
+| TC-MPLAN-003B | reuse 类型不一致 | 保守 no-op，两个 alloc/free 都保留 |
 | TC-MPLAN-004 | free 早于后续 use | 报 `MemoryPlanInvalidLifetime: dma.free appears before last use` |
 | TC-MPLAN-004A | free 早于 alias 后续 use | alias closure 继续使用时报 `MemoryPlanInvalidLifetime: dma.free appears before last use` |
 | TC-MPLAN-005 | 重复 free | 报 `MemoryPlanInvalidLifetime: multiple dma.free for same allocation` |
