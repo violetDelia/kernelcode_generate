@@ -470,13 +470,13 @@ def test_build_registered_producer_consumer_analysis_pass() -> None:
 # 对应测试文件路径: test/passes/test_registry.py
 def test_build_registered_hoist_dma_alias_ops_pass() -> None:
     load_builtin_passes()
-    hoist_module = importlib.import_module("kernel_gen.passes.hoist_dma_alias_ops")
+    hoist_module = importlib.import_module("kernel_gen.passes.hoist.dma_alias_ops")
 
     pass_obj = build_registered_pass("hoist-dma-alias-ops", {"fold": "false"})
 
     assert isinstance(pass_obj, hoist_module.HoistDmaAliasOpsPass)
     assert pass_obj.name == "hoist-dma-alias-ops"
-    assert pass_obj.__class__.__module__ == "kernel_gen.passes.hoist_dma_alias_ops"
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.hoist.dma_alias_ops"
     assert pass_obj.fold is False
 
 
@@ -494,6 +494,40 @@ def test_build_registered_hoist_dma_alias_ops_rejects_private_options() -> None:
         match=r"^PassRegistryError: pass 'hoist-dma-alias-ops' does not accept options$",
     ):
         build_registered_pass("hoist-dma-alias-ops", {"hoist-ops": "dma.fill"})
+
+
+# TC-REGISTRY-007A-1E
+# 功能说明: 验证 symbol-hoist-pipeline 通过 registry 返回 canonical ModulePass。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_symbol_hoist_pipeline_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_symbol_hoist_pipeline_pass() -> None:
+    load_builtin_passes()
+    hoist_module = importlib.import_module("kernel_gen.passes.hoist.symbol_hoist_pipeline")
+
+    pass_obj = build_registered_pass("symbol-hoist-pipeline", {"fold": "false"})
+
+    assert isinstance(pass_obj, hoist_module.SymbolHoistPipelinePass)
+    assert pass_obj.name == "symbol-hoist-pipeline"
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.hoist.symbol_hoist_pipeline"
+    assert pass_obj.fold is False
+
+
+# TC-REGISTRY-007A-1F
+# 功能说明: 验证 symbol-hoist-pipeline 不接受 pass 专属 option。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_symbol_hoist_pipeline_rejects_private_options
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_symbol_hoist_pipeline_rejects_private_options() -> None:
+    load_builtin_passes()
+
+    with pytest.raises(
+        KernelCodeError,
+        match=r"^PassRegistryError: pass 'symbol-hoist-pipeline' does not accept options$",
+    ):
+        build_registered_pass("symbol-hoist-pipeline", {"hoist-ops": "dma.fill"})
 
 
 # TC-REGISTRY-007A-2
@@ -531,24 +565,34 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
             importlib.import_module("kernel_gen.passes.outline_device_kernel").OutlineDeviceKernelPass,
         ),
         (
-            "kernel_gen.passes.symbol_loop_hoist",
+            "kernel_gen.passes.hoist.symbol_loop_hoist",
             "SymbolLoopHoistPass",
-            importlib.import_module("kernel_gen.passes.symbol_loop_hoist").SymbolLoopHoistPass,
+            importlib.import_module("kernel_gen.passes.hoist.symbol_loop_hoist").SymbolLoopHoistPass,
         ),
         (
-            "kernel_gen.passes.symbol_buffer_hoist",
+            "kernel_gen.passes.hoist.symbol_buffer_hoist",
             "SymbolBufferHoistPass",
-            importlib.import_module("kernel_gen.passes.symbol_buffer_hoist").SymbolBufferHoistPass,
+            importlib.import_module("kernel_gen.passes.hoist.symbol_buffer_hoist").SymbolBufferHoistPass,
         ),
         (
-            "kernel_gen.passes.hoist_dma_alias_ops",
+            "kernel_gen.passes.hoist.dma_alias_ops",
             "HoistDmaAliasOpsPass",
-            importlib.import_module("kernel_gen.passes.hoist_dma_alias_ops").HoistDmaAliasOpsPass,
+            importlib.import_module("kernel_gen.passes.hoist.dma_alias_ops").HoistDmaAliasOpsPass,
+        ),
+        (
+            "kernel_gen.passes.hoist.dma_alias_to_reinterpret",
+            "DmaAliasToReinterpretPass",
+            importlib.import_module("kernel_gen.passes.hoist.dma_alias_to_reinterpret").DmaAliasToReinterpretPass,
+        ),
+        (
+            "kernel_gen.passes.hoist.symbol_hoist_pipeline",
+            "SymbolHoistPipelinePass",
+            importlib.import_module("kernel_gen.passes.hoist.symbol_hoist_pipeline").SymbolHoistPipelinePass,
         ),
         (
             "kernel_gen.passes",
             "SymbolBufferHoistPass",
-            importlib.import_module("kernel_gen.passes.symbol_buffer_hoist").SymbolBufferHoistPass,
+            importlib.import_module("kernel_gen.passes.hoist.symbol_buffer_hoist").SymbolBufferHoistPass,
         ),
         (
             "kernel_gen.passes.lowering",
@@ -618,7 +662,7 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
         (
             "kernel_gen.passes.lowering.symbol_loop_hoist",
             "SymbolLoopHoistPass",
-            importlib.import_module("kernel_gen.passes.symbol_loop_hoist").SymbolLoopHoistPass,
+            importlib.import_module("kernel_gen.passes.hoist.symbol_loop_hoist").SymbolLoopHoistPass,
         ),
     )
 
@@ -628,6 +672,46 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
 
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     assert not hasattr(lowering_module, "BufferResultsToOutParamsPass")
+
+
+# TC-REGISTRY-007A-2H
+# 功能说明: 验证 hoist pass 旧根模块路径已按用户确认删除。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_hoist_old_root_modules_are_removed
+# 对应功能实现文件路径: kernel_gen/passes/hoist/__init__.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_hoist_old_root_modules_are_removed() -> None:
+    removed_modules = (
+        "kernel_gen.passes.dma_alias_to_reinterpret",
+        "kernel_gen.passes.symbol_loop_hoist",
+        "kernel_gen.passes.hoist_dma_alias_ops",
+        "kernel_gen.passes.symbol_buffer_hoist",
+    )
+
+    for module_name in removed_modules:
+        assert importlib.util.find_spec(module_name) is None
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(module_name)
+
+
+# TC-REGISTRY-007A-2I
+# 功能说明: 验证 hoist 新 package 真源路径可导入。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_hoist_new_package_modules_are_public_sources
+# 对应功能实现文件路径: kernel_gen/passes/hoist/__init__.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_hoist_new_package_modules_are_public_sources() -> None:
+    expected = {
+        "kernel_gen.passes.hoist.dma_alias_to_reinterpret": "DmaAliasToReinterpretPass",
+        "kernel_gen.passes.hoist.symbol_loop_hoist": "SymbolLoopHoistPass",
+        "kernel_gen.passes.hoist.dma_alias_ops": "HoistDmaAliasOpsPass",
+        "kernel_gen.passes.hoist.symbol_buffer_hoist": "SymbolBufferHoistPass",
+        "kernel_gen.passes.hoist.symbol_hoist_pipeline": "SymbolHoistPipelinePass",
+    }
+
+    for module_name, attr_name in expected.items():
+        module = importlib.import_module(module_name)
+        assert hasattr(module, attr_name)
 
 
 # TC-REGISTRY-007A-2T
@@ -1148,7 +1232,7 @@ def test_build_registered_symbol_buffer_hoist_pass() -> None:
     assert isinstance(pass_obj, ModulePass)
     assert pass_obj.name == "symbol-buffer-hoist"
     assert type(pass_obj).__name__ == "SymbolBufferHoistPass"
-    assert pass_obj.__class__.__module__ == "kernel_gen.passes.symbol_buffer_hoist"
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.hoist.symbol_buffer_hoist"
 
 
 # TC-REGISTRY-007J-3
@@ -1256,6 +1340,7 @@ def test_load_builtin_passes_is_idempotent() -> None:
     assert "producer-consumer-analysis" in list_registered_passes()
     assert "hoist-dma-alias-ops" in list_registered_passes()
     assert "dma-alias-to-reinterpret" in list_registered_passes()
+    assert "symbol-hoist-pipeline" in list_registered_passes()
     assert "kernel-pattern-attach" in list_registered_passes()
     assert "transform-apply" in list_registered_passes()
     assert "no-op-pipeline" in list_registered_pipelines()

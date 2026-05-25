@@ -65,8 +65,8 @@ from kernel_gen.passes.inline import InlinePass
 from kernel_gen.passes.lowering import NnLoweringPass
 from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
 from kernel_gen.passes.pass_manager import PassManager
-from kernel_gen.passes.symbol_buffer_hoist import SymbolBufferHoistPass
-from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
+from kernel_gen.passes.hoist.symbol_buffer_hoist import SymbolBufferHoistPass
+from kernel_gen.passes.hoist.symbol_loop_hoist import SymbolLoopHoistPass
 from kernel_gen.passes.tile.analysis import TileAnalysisPass
 from kernel_gen.symbol_variable.memory import MemorySpace
 from kernel_gen.target import registry as target_registry

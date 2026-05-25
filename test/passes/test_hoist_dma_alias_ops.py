@@ -10,7 +10,7 @@
 关联文件:
 - spec: spec/pass/hoist_dma_alias_ops.md
 - test: test/passes/test_hoist_dma_alias_ops.py
-- 功能实现: kernel_gen/passes/hoist_dma_alias_ops.py
+- 功能实现: kernel_gen/passes/hoist/dma_alias_ops.py
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from kernel_gen.core.error import KernelCodeError
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
 from kernel_gen.tools.ircheck import run_ircheck_text
 
-pass_module = importlib.import_module("kernel_gen.passes.hoist_dma_alias_ops")
+pass_module = importlib.import_module("kernel_gen.passes.hoist.dma_alias_ops")
 
 DmaAliasHoistPattern = pass_module.DmaAliasHoistPattern
 DmaAliasThroughWriteNoReadPattern = pass_module.DmaAliasThroughWriteNoReadPattern

@@ -47,7 +47,7 @@ class _PatternModuleCase:
 
 _PATTERN_MODULE_CASES = (
     _PatternModuleCase(
-        "kernel_gen.passes.hoist_dma_alias_ops",
+        "kernel_gen.passes.hoist.dma_alias_ops",
         "spec/pass/hoist_dma_alias_ops.md",
         ("DmaAliasThroughWriteNoReadPattern", "DmaAliasHoistPattern"),
         "get_hoist_dma_alias_ops_pass_patterns",
@@ -68,7 +68,7 @@ _PATTERN_MODULE_CASES = (
         ("_OutlineDeviceKernelFuncPattern",),
     ),
     _PatternModuleCase(
-        "kernel_gen.passes.symbol_buffer_hoist",
+        "kernel_gen.passes.hoist.symbol_buffer_hoist",
         "spec/pass/symbol_buffer_hoist.md",
         (
             "DmaAllocInSymbolForHoistPattern",
@@ -85,7 +85,7 @@ _PATTERN_MODULE_CASES = (
         ),
     ),
     _PatternModuleCase(
-        "kernel_gen.passes.symbol_loop_hoist",
+        "kernel_gen.passes.hoist.symbol_loop_hoist",
         "spec/pass/symbol_loop_hoist.md",
         (
             "SymbolConstHoistPattern",

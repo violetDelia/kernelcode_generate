@@ -64,17 +64,13 @@ DecompassPass = importlib.import_module("kernel_gen.passes.decompass").Decompass
 KernelPatternAttachPass = importlib.import_module("kernel_gen.passes.kernel_pattern_attach").KernelPatternAttachPass
 MemoryPlanPass = importlib.import_module("kernel_gen.passes.memory_plan").MemoryPlanPass
 MemoryPoolPass = importlib.import_module("kernel_gen.passes.memory_pool").MemoryPoolPass
-HoistDmaAliasOpsPass = importlib.import_module("kernel_gen.passes.hoist_dma_alias_ops").HoistDmaAliasOpsPass
-DmaAliasToReinterpretPass = importlib.import_module(
-    "kernel_gen.passes.dma_alias_to_reinterpret"
-).DmaAliasToReinterpretPass
+SymbolHoistPipelinePass = importlib.import_module("kernel_gen.passes.hoist").SymbolHoistPipelinePass
 NnLoweringPass = importlib.import_module("kernel_gen.passes.lowering").NnLoweringPass
 OutlineDeviceKernelPass = importlib.import_module("kernel_gen.passes.outline_device_kernel").OutlineDeviceKernelPass
 ProducerConsumerAnalysisPass = importlib.import_module(
     "kernel_gen.passes.producer_consumer_analysis"
 ).ProducerConsumerAnalysisPass
-SymbolBufferHoistPass = importlib.import_module("kernel_gen.passes.symbol_buffer_hoist").SymbolBufferHoistPass
-SymbolLoopHoistPass = importlib.import_module("kernel_gen.passes.symbol_loop_hoist").SymbolLoopHoistPass
+SymbolBufferHoistPass = importlib.import_module("kernel_gen.passes.hoist.symbol_buffer_hoist").SymbolBufferHoistPass
 TileAnalysisPass = importlib.import_module("kernel_gen.passes.tile.analysis").TileAnalysisPass
 TemplateNameInferPass = importlib.import_module("kernel_gen.passes").TemplateNameInferPass
 TransformApplyPass = importlib.import_module("kernel_gen.passes.transform_apply").TransformApplyPass
@@ -167,53 +163,21 @@ def _record_lower(self, ctx: Context, target: ModuleOp) -> None:
     _PIPELINE_PASS_ORDER.append("lower-nn")
 
 
-def _record_dma_alias_to_reinterpret(self, ctx: Context, target: ModuleOp) -> None:
-    """记录 dma-alias-to-reinterpret pass 执行。
+def _record_symbol_hoist_pipeline(self, ctx: Context, target: ModuleOp) -> None:
+    """记录 symbol-hoist-pipeline pass 执行。
 
     功能说明:
-    - 为 pipeline 顺序测试记录 `DmaAliasToReinterpretPass.apply(...)` 被调用。
+    - 为 pipeline 顺序测试记录 `SymbolHoistPipelinePass.apply(...)` 被调用。
+    - 验证公开 pipeline 不再直接串接三个旧 hoist pass。
 
     使用示例:
-    - monkeypatch.setattr(DmaAliasToReinterpretPass, "apply", _record_dma_alias_to_reinterpret)
+    - monkeypatch.setattr(SymbolHoistPipelinePass, "apply", _record_symbol_hoist_pipeline)
     """
 
     _ = self
     _ = ctx
     _ = target
-    _PIPELINE_PASS_ORDER.append("dma-alias-to-reinterpret")
-
-
-def _record_symbol_loop_hoist(self, ctx: Context, target: ModuleOp) -> None:
-    """记录 symbol-loop-hoist pass 执行。
-
-
-    功能说明:
-    - 为 pipeline 顺序测试记录 `SymbolLoopHoistPass.apply(...)` 被调用。
-
-    使用示例:
-    - monkeypatch.setattr(SymbolLoopHoistPass, "apply", _record_symbol_loop_hoist)
-    """
-
-    _ = self
-    _ = ctx
-    _ = target
-    _PIPELINE_PASS_ORDER.append("symbol-loop-hoist")
-
-
-def _record_hoist_dma_alias_ops(self, ctx: Context, target: ModuleOp) -> None:
-    """记录 hoist-dma-alias-ops pass 执行。
-
-    功能说明:
-    - 为 pipeline 顺序测试记录 `HoistDmaAliasOpsPass.apply(...)` 被调用。
-
-    使用示例:
-    - monkeypatch.setattr(HoistDmaAliasOpsPass, "apply", _record_hoist_dma_alias_ops)
-    """
-
-    _ = self
-    _ = ctx
-    _ = target
-    _PIPELINE_PASS_ORDER.append("hoist-dma-alias-ops")
+    _PIPELINE_PASS_ORDER.append("symbol-hoist-pipeline")
 
 
 def _record_symbol_buffer_hoist(self, ctx: Context, target: ModuleOp) -> None:
@@ -519,7 +483,7 @@ def test_npu_demo_lowering_pipeline_builds_pass_manager() -> None:
 
 
 # TC-PIPELINE-101
-# 功能说明: 验证 npu-demo-lowering 的固定顺序包含两次 memory-plan、三次 CSE、五次 canonicalize、pre-pool producer-consumer-analysis 和 late attach。
+# 功能说明: 验证 npu-demo-lowering 的固定顺序包含两次 memory-plan、四次 CSE、五次 canonicalize、pre-pool producer-consumer-analysis 和 late attach。
 # 测试目的: 锁定 dsl_run 新正向管线的最小公开顺序。
 # 使用示例: pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k test_npu_demo_lowering_pipeline_pass_order
 # 对应功能实现文件路径: kernel_gen/pipeline/npu_demo_lowering.py
@@ -533,9 +497,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(CanonicalizePass, "apply", _record_canonicalize)
     monkeypatch.setattr(DecompassPass, "apply", _record_decompose)
     monkeypatch.setattr(NnLoweringPass, "apply", _record_lower)
-    monkeypatch.setattr(DmaAliasToReinterpretPass, "apply", _record_dma_alias_to_reinterpret)
-    monkeypatch.setattr(SymbolLoopHoistPass, "apply", _record_symbol_loop_hoist)
-    monkeypatch.setattr(HoistDmaAliasOpsPass, "apply", _record_hoist_dma_alias_ops)
+    monkeypatch.setattr(SymbolHoistPipelinePass, "apply", _record_symbol_hoist_pipeline)
     monkeypatch.setattr(MemoryPlanPass, "apply", _record_memory_plan)
     monkeypatch.setattr(ArchParallelizePass, "apply", _record_arch_parallelize)
     monkeypatch.setattr(TileAnalysisPass, "apply", _record_tile_analysis)
@@ -557,21 +519,18 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "canonicalize",
         "decompass",
         "lower-nn",
-        "dma-alias-to-reinterpret",
-        "symbol-loop-hoist",
-        "hoist-dma-alias-ops",
+        "symbol-hoist-pipeline",
         "cse",
         "canonicalize",
         "memory-plan:True:False",
         "symbol-buffer-hoist",
-        "symbol-loop-hoist",
-        "hoist-dma-alias-ops",
+        "symbol-hoist-pipeline",
+        "cse",
         "canonicalize",
         "tile-analysis",
         "kernel-pattern-attach",
         "transform-apply",
-        "symbol-loop-hoist",
-        "hoist-dma-alias-ops",
+        "symbol-hoist-pipeline",
         "cse",
         "canonicalize",
         "memory-plan:True:False",
@@ -623,9 +582,7 @@ def test_npu_demo_lowering_pipeline_arch_parallelize_propagates_unsupported_stru
     monkeypatch.setattr(CanonicalizePass, "apply", _noop_pass_apply)
     monkeypatch.setattr(DecompassPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(NnLoweringPass, "apply", _noop_pass_apply)
-    monkeypatch.setattr(DmaAliasToReinterpretPass, "apply", _noop_pass_apply)
-    monkeypatch.setattr(SymbolLoopHoistPass, "apply", _noop_pass_apply)
-    monkeypatch.setattr(HoistDmaAliasOpsPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(SymbolHoistPipelinePass, "apply", _noop_pass_apply)
     monkeypatch.setattr(MemoryPlanPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(TileAnalysisPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(KernelPatternAttachPass, "apply", _noop_pass_apply)
@@ -670,9 +627,7 @@ def test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_blo
     monkeypatch.setattr(CanonicalizePass, "apply", _noop_pass_apply)
     monkeypatch.setattr(DecompassPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(NnLoweringPass, "apply", _noop_pass_apply)
-    monkeypatch.setattr(DmaAliasToReinterpretPass, "apply", _noop_pass_apply)
-    monkeypatch.setattr(SymbolLoopHoistPass, "apply", _noop_pass_apply)
-    monkeypatch.setattr(HoistDmaAliasOpsPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(SymbolHoistPipelinePass, "apply", _noop_pass_apply)
     monkeypatch.setattr(MemoryPlanPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(TileAnalysisPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(KernelPatternAttachPass, "apply", _noop_pass_apply)
@@ -730,9 +685,7 @@ def test_npu_demo_lowering_pipeline_arch_parallelize_skips_entry_point_dispatche
     monkeypatch.setattr(CanonicalizePass, "apply", _noop_pass_apply)
     monkeypatch.setattr(DecompassPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(NnLoweringPass, "apply", _noop_pass_apply)
-    monkeypatch.setattr(DmaAliasToReinterpretPass, "apply", _noop_pass_apply)
-    monkeypatch.setattr(SymbolLoopHoistPass, "apply", _noop_pass_apply)
-    monkeypatch.setattr(HoistDmaAliasOpsPass, "apply", _noop_pass_apply)
+    monkeypatch.setattr(SymbolHoistPipelinePass, "apply", _noop_pass_apply)
     monkeypatch.setattr(MemoryPlanPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(TileAnalysisPass, "apply", _noop_pass_apply)
     monkeypatch.setattr(KernelPatternAttachPass, "apply", _noop_pass_apply)
@@ -771,7 +724,7 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
       不依赖 dump 文件序号。
     - 断言 `producer-consumer-analysis` 位于第二段 `symbol-buffer-hoist` 后、memory-pool 前，
       且该 stage 仍保留 typed `dma.alloc` 形态。
-    - 断言 `arch-parallelize` 位于 memory-pool 后的 `canonicalize` 之后，且 memory-pool 后没有第 4 个 CSE。
+    - 断言 `arch-parallelize` 位于 memory-pool 后的 `canonicalize` 之后，且 memory-pool 后没有第 5 个 CSE。
 
     使用示例:
     - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k memory_plan_dump
@@ -828,59 +781,62 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     assert outline_text.startswith("outline-device-kernel\n")
     assert _dump_stage_index(tmp_path, "cse", occurrence=1) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=1)
     assert _dump_stage_index(tmp_path, "cse", occurrence=2) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=2)
-    assert _dump_stage_index(tmp_path, "cse", occurrence=3) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=4)
-    assert markers.count("cse") == 3
-    assert _dump_stage_index(tmp_path, "dma-alias-to-reinterpret") == 7
-    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=1) == 12
-    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=1) == 13
-    assert _dump_stage_index(tmp_path, "symbol-loop-hoist", occurrence=2) == 14
-    assert _dump_stage_index(tmp_path, "hoist-dma-alias-ops", occurrence=2) == 15
-    assert _dump_stage_index(tmp_path, "hoist-dma-alias-ops", occurrence=2) + 1 == _dump_stage_index(
+    assert _dump_stage_index(tmp_path, "cse", occurrence=3) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=3)
+    assert _dump_stage_index(tmp_path, "cse", occurrence=4) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=4)
+    assert markers.count("cse") == 4
+    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=1) == 7
+    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=1) == 10
+    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=1) == 11
+    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=2) == 12
+    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=2) + 1 == _dump_stage_index(
+        tmp_path, "cse", occurrence=3
+    )
+    assert _dump_stage_index(tmp_path, "cse", occurrence=3) + 1 == _dump_stage_index(
         tmp_path, "canonicalize", occurrence=3
     )
-    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=3) == 16
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=3) == 14
     assert _dump_stage_index(tmp_path, "canonicalize", occurrence=3) + 1 == _dump_stage_index(
         tmp_path, "tile-analysis"
     )
-    assert _dump_stage_index(tmp_path, "tile-analysis") == 17
-    assert _dump_stage_index(tmp_path, "kernel-pattern-attach") == 18
-    assert _dump_stage_index(tmp_path, "transform-apply") == 19
-    assert _dump_stage_index(tmp_path, "symbol-loop-hoist", occurrence=3) == 20
-    assert _dump_stage_index(tmp_path, "hoist-dma-alias-ops", occurrence=3) == 21
-    assert _dump_stage_index(tmp_path, "cse", occurrence=3) == 22
-    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) == 23
-    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=2) == 24
-    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=2) == 25
-    assert _dump_stage_index(tmp_path, "producer-consumer-analysis") == 26
-    assert _dump_stage_index(tmp_path, "memory-pool") == 27
-    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=5) == 28
-    assert _dump_stage_index(tmp_path, "arch-parallelize") == 29
-    assert _dump_stage_index(tmp_path, "attach-arch-information") == 30
-    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 31
-    assert _dump_stage_index(tmp_path, "template-name-infer") == 32
+    assert _dump_stage_index(tmp_path, "tile-analysis") == 15
+    assert _dump_stage_index(tmp_path, "kernel-pattern-attach") == 16
+    assert _dump_stage_index(tmp_path, "transform-apply") == 17
+    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=3) == 18
+    assert _dump_stage_index(tmp_path, "cse", occurrence=4) == 19
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) == 20
+    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=2) == 21
+    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=2) == 22
+    assert _dump_stage_index(tmp_path, "producer-consumer-analysis") == 23
+    assert _dump_stage_index(tmp_path, "memory-pool") == 24
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=5) == 25
+    assert _dump_stage_index(tmp_path, "arch-parallelize") == 26
+    assert _dump_stage_index(tmp_path, "attach-arch-information") == 27
+    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 28
+    assert _dump_stage_index(tmp_path, "template-name-infer") == 29
     assert markers.count("attach-arch-information") == 1
-    assert markers.count("symbol-loop-hoist") == 3
-    assert markers.count("hoist-dma-alias-ops") == 3
+    assert markers.count("symbol-hoist-pipeline") == 3
+    assert "dma-alias-to-reinterpret" not in markers
+    assert "symbol-loop-hoist" not in markers
+    assert "hoist-dma-alias-ops" not in markers
     assert "lower-dma-memory-hierarchy" not in markers
     assert "multi-buffer" not in markers
-    assert markers[12:17] == [
+    assert markers[10:15] == [
         "symbol-buffer-hoist",
-        "symbol-loop-hoist",
-        "hoist-dma-alias-ops",
+        "symbol-hoist-pipeline",
+        "cse",
         "canonicalize",
         "tile-analysis",
     ]
-    assert markers[17:25] == [
+    assert markers[15:22] == [
         "kernel-pattern-attach",
         "transform-apply",
-        "symbol-loop-hoist",
-        "hoist-dma-alias-ops",
+        "symbol-hoist-pipeline",
         "cse",
         "canonicalize",
         "memory-plan",
         "symbol-buffer-hoist",
     ]
-    assert markers[25:30] == [
+    assert markers[22:27] == [
         "producer-consumer-analysis",
         "memory-pool",
         "canonicalize",
@@ -937,13 +893,10 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
     assert "multi-buffer" not in markers
     assert "lower-dma-memory-hierarchy" not in markers
     assert _dump_stage_index(tmp_path, "transform-apply") + 1 == _dump_stage_index(
-        tmp_path, "symbol-loop-hoist", occurrence=3
+        tmp_path, "symbol-hoist-pipeline", occurrence=3
     )
-    assert _dump_stage_index(tmp_path, "symbol-loop-hoist", occurrence=3) + 1 == _dump_stage_index(
-        tmp_path, "hoist-dma-alias-ops", occurrence=3
-    )
-    assert _dump_stage_index(tmp_path, "hoist-dma-alias-ops", occurrence=3) + 1 == _dump_stage_index(
-        tmp_path, "cse", occurrence=3
+    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=3) + 1 == _dump_stage_index(
+        tmp_path, "cse", occurrence=4
     )
     assert _dump_stage_index(tmp_path, "memory-plan", occurrence=2) + 1 == _dump_stage_index(
         tmp_path, "symbol-buffer-hoist", occurrence=2
@@ -954,8 +907,9 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
     assert _dump_stage_index(tmp_path, "producer-consumer-analysis") + 1 == _dump_stage_index(
         tmp_path, "memory-pool"
     )
-    assert markers.count("cse") == 3
-    assert markers.count("hoist-dma-alias-ops") == 3
+    assert markers.count("cse") == 4
+    assert markers.count("symbol-hoist-pipeline") == 3
+    assert "hoist-dma-alias-ops" not in markers
     assert _dump_stage_index(tmp_path, "memory-pool") + 1 == _dump_stage_index(
         tmp_path, "canonicalize", occurrence=5
     )
@@ -977,24 +931,25 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
 
 
 # TC-PIPELINE-115
-# 功能说明: 验证 npu-demo-lowering dump 中 hoist-dma-alias-ops 阶段按 P2/P1 pattern 合同收口。
-# 测试目的: 通过公开 dump marker 断言 P2 writer retarget、P1 alias descriptor 顺序和旧 grouping 删除。
-# 使用示例: pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k hoist_dma_alias_ops_pattern
-# 对应功能实现文件路径: kernel_gen/passes/hoist_dma_alias_ops.py
-# 对应 spec 文件路径: spec/pass/hoist_dma_alias_ops.md
+# 功能说明: 验证 npu-demo-lowering dump 中 symbol-hoist-pipeline 阶段按组合 pattern 合同收口。
+# 测试目的: 通过公开 dump marker 断言 P2 writer retarget、P1 alias descriptor 顺序和 symbol 外提事实。
+# 使用示例: pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k symbol_hoist_pipeline_pattern
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_hoist_pipeline.py
+# 对应 spec 文件路径: spec/pass/symbol_hoist_pipeline.md
 # 对应测试文件路径: test/passes/pipeline/test_npu_demo_lowering.py
-def test_npu_demo_lowering_pipeline_hoist_dma_alias_ops_pattern_dump(
+def test_npu_demo_lowering_pipeline_symbol_hoist_pipeline_pattern_dump(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """验证真实 pipeline dump 中 hoist-dma-alias-ops 的 pattern 事实。
+    """验证真实 pipeline dump 中 symbol-hoist-pipeline 的 pattern 事实。
 
     功能说明:
     - 通过公开 `set_dump_dir(...)` 与 `build_npu_demo_lowering_pipeline(...)` 生成真实 dump。
-    - 不绑定固定 dump 编号，只按首行 marker 定位 `hoist-dma-alias-ops` stage。
+    - 不绑定固定 dump 编号，只按首行 marker 定位 `symbol-hoist-pipeline` stage。
+    - 断言旧 `symbol-loop-hoist` 与 `hoist-dma-alias-ops` 的可观察结果在组合 pass stage 中出现。
 
     使用示例:
-    - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k hoist_dma_alias_ops_pattern
+    - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k symbol_hoist_pipeline_pattern
     """
 
     matmul_demo = importlib.import_module("kernel.matmul.inputs_static_tile_static")
@@ -1016,38 +971,38 @@ def test_npu_demo_lowering_pipeline_hoist_dma_alias_ops_pattern_dump(
     finally:
         reset_config()
 
-    first_hoist_text = _dump_stage_text_by_marker(tmp_path, "hoist-dma-alias-ops")
-    second_hoist_text = _dump_stage_text_by_marker(tmp_path, "hoist-dma-alias-ops", occurrence=3)
-    second_symbol_loop_text = _dump_stage_text_by_marker(tmp_path, "symbol-loop-hoist", occurrence=3)
+    first_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-hoist-pipeline")
+    final_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-hoist-pipeline", occurrence=3)
     markers = _dump_stage_markers(tmp_path)
     p1_alias_before_consumer = re.search(
         r'(?P<alias>%\d+) = "dma\.reinterpret"\([^\n]+\)\s+<\{[^\n]*\}> : [^\n]+\n'
         r'\s+%\d+ = "dma\.deslice"\(%\d+, (?P=alias),',
-        second_hoist_text,
+        final_hoist_text,
     )
     broadcast_flat_source = re.search(
         r'(?P<flat>%\d+) = "dma\.alloc"\(\) <\{[^}]+\}> : \(\) -> '
         r'!nn\.memory<\[#C56\], \[#C1\], f32, #nn\.space<tsm>>'
         r'[\s\S]+?"dma\.fill"\((?P=flat), %\d+\)'
         r'[\s\S]+?"dma\.broadcast"\(%\d+, (?P=flat)\)',
-        second_hoist_text,
+        final_hoist_text,
     )
-    guard_index = second_symbol_loop_text.index("memory.get_data")
-    cast_index = second_symbol_loop_text.index("symbol.cast")
-    cond_index = second_symbol_loop_text.index("symbol.ne")
-    first_loop_index = second_symbol_loop_text.index("symbol.for")
+    guard_index = final_hoist_text.index("memory.get_data")
+    cast_index = final_hoist_text.index("symbol.cast")
+    cond_index = final_hoist_text.index("symbol.ne")
+    first_loop_index = final_hoist_text.index("symbol.for")
 
-    assert first_hoist_text.startswith("hoist-dma-alias-ops\n")
-    assert second_hoist_text.startswith("hoist-dma-alias-ops\n")
-    assert second_symbol_loop_text.startswith("symbol-loop-hoist\n")
-    assert markers.count("hoist-dma-alias-ops") == 3
+    assert first_hoist_text.startswith("symbol-hoist-pipeline\n")
+    assert final_hoist_text.startswith("symbol-hoist-pipeline\n")
+    assert markers.count("symbol-hoist-pipeline") == 3
+    assert "symbol-loop-hoist" not in markers
+    assert "hoist-dma-alias-ops" not in markers
     assert guard_index < cast_index < cond_index < first_loop_index
-    assert second_symbol_loop_text.index("arith.constant") < first_loop_index
+    assert final_hoist_text.index("arith.constant") < first_loop_index
     assert p1_alias_before_consumer is not None
     assert broadcast_flat_source is not None
-    assert "source_low" not in second_hoist_text
-    assert "target_low" not in second_hoist_text
-    assert "DmaViewDesliceGroupingPattern" not in second_hoist_text
+    assert "source_low" not in final_hoist_text
+    assert "target_low" not in final_hoist_text
+    assert "DmaViewDesliceGroupingPattern" not in final_hoist_text
 
 
 def test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain() -> None:

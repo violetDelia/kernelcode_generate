@@ -16,7 +16,7 @@
 ## 文档信息
 
 - `spec`：[`spec/pass/dma_alias_to_reinterpret.md`](../../spec/pass/dma_alias_to_reinterpret.md)
-- `功能实现`：[`kernel_gen/passes/dma_alias_to_reinterpret.py`](../../kernel_gen/passes/dma_alias_to_reinterpret.py)
+- `功能实现`：[`kernel_gen/passes/hoist/dma_alias_to_reinterpret.py`](../../kernel_gen/passes/hoist/dma_alias_to_reinterpret.py)
 - `test`：[`test/passes/test_dma_alias_to_reinterpret.py`](../../test/passes/test_dma_alias_to_reinterpret.py)
 - `expectation`：主仓只读合同资产 `expectation/pass/dma_alias_to_reinterpret/**`
 
@@ -24,7 +24,9 @@
 
 - `spec/dialect/dma.md`：定义 `dma.view`、`dma.reshape`、`dma.subview` 与 `dma.reinterpret`。
 - `spec/pass/registry.md`：承载 registry 名称与通用 `fold` option。
-- `spec/pass/pipeline/npu_demo_lowering.md`：固定 pass 插入到 `NnLoweringPass` 后。
+- `spec/pass/pipeline/npu_demo_lowering.md`：默认 `npu-demo-lowering` 通过
+  `symbol-hoist-pipeline` 承接 alias-to-reinterpret 能力；本 pass 仍保留 registry / 手动
+  pipeline 使用合同。
 
 ## 目标
 
@@ -70,7 +72,7 @@
 - 使用示例：
 
 ```python
-from kernel_gen.passes.dma_alias_to_reinterpret import DmaAliasToReinterpretPass
+from kernel_gen.passes.hoist.dma_alias_to_reinterpret import DmaAliasToReinterpretPass
 
 pass_obj = DmaAliasToReinterpretPass(fold=False)
 ```

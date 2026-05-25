@@ -65,6 +65,7 @@
 - 内置 pipeline 模块放在 `kernel_gen/pipeline`；`load_builtin_passes()` 负责导入这些模块以触发注册。
 - 当前内置 pipeline 至少包含 `default-lowering` 与 `npu-demo-lowering` 两个公开 builder。
 - `hoist-dma-alias-ops` 作为公开 pass name 进入内置注册表；其第一阶段只接受通用 `fold`，不接受专属 option。
+- `symbol-hoist-pipeline` 作为公开 pass name 进入内置注册表；其第一阶段只接受通用 `fold`，不接受专属 option。
 - `npu-demo-lowering` 公开 builder 支持 `options={"target": "npu_demo"}`；其固定顺序由 `spec/pass/pipeline/npu_demo_lowering.md` 约束，并包含 `MemoryPlanPass(insert_free=True, fold=False)`、公开 `arch-parallelize` 阶段与两次 `SymbolBufferHoistPass`；`only-kernel` / `only_kernel` 之类选项必须显式失败，不能把 host wrapper 与 device body 的 outline 流程裁成仅 kernel 形态。
 - registry 只负责注册与查询，不承载具体 pipeline builder 实现。
 - 重复注册同名 pass 或 pipeline 必须立即失败，不得覆盖旧项。
@@ -76,6 +77,7 @@
   - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前；若存在唯一合法 `dma.free`，把 alloc/free 成对移动到 owner loop 两侧。
   - `dma-alias-to-reinterpret`：把 `dma.view` / `dma.reshape` / `dma.subview` 归一为 root source 上的 `dma.reinterpret`。
   - `hoist-dma-alias-ops`：把同 block 内紧邻的 `dma.reshape` 上移穿过 `dma.fill`，作为第一阶段 alias hoist pass。
+  - `symbol-hoist-pipeline`：在一个 pass 内先执行 alias-to-reinterpret 能力，再共同收敛 symbol-loop-hoist 与 dma-alias-hoist 相关 pattern；`symbol-buffer-hoist` 保持独立 pass。
   - `memory-plan`：显式 `insert-free=true` 时为受控 `dma.alloc` 生命周期补插 `dma.free`；显式 `reuse=true` 且 `insert-free=true` 时启用保守 alloc 复用。
   - `multi-buffer`：把可证明的 matmul lhs/rhs staging alloc/copy/use/free 成对生命周期改写为 DMA ring。
   - `producer-consumer-analysis`：基于公开 `MemoryEffect` 与 pass 内置 alias 规则标注普通或控制流分类简单整数列表 event attrs。
@@ -109,12 +111,13 @@
   - `kernel_gen.passes.dma_memory_hierarchy`
   - `kernel_gen.passes.memory_pool`
   - `kernel_gen.passes.memory_plan`
-  - `kernel_gen.passes.dma_alias_to_reinterpret`
-  - `kernel_gen.passes.hoist_dma_alias_ops`
+  - `kernel_gen.passes.hoist.dma_alias_to_reinterpret`
+  - `kernel_gen.passes.hoist.dma_alias_ops`
+  - `kernel_gen.passes.hoist.symbol_hoist_pipeline`
   - `kernel_gen.passes.multi_buffer`
   - `kernel_gen.passes.outline_device_kernel`
-  - `kernel_gen.passes.symbol_buffer_hoist`
-  - `kernel_gen.passes.symbol_loop_hoist`
+  - `kernel_gen.passes.hoist.symbol_buffer_hoist`
+  - `kernel_gen.passes.hoist.symbol_loop_hoist`
   - `kernel_gen.passes.template_name.infer`
   - `kernel_gen.passes.producer_consumer_analysis`
 - 对公开 `RewritePattern` caller，canonical public path 固定为各 pattern 所属实现模块：
@@ -144,6 +147,10 @@
   - `kernel_gen.passes.lowering.tile_analysis`
   - `kernel_gen.passes.lowering.tile_elewise`
   - `kernel_gen.passes.lowering.tile_reduce`
+  - `kernel_gen.passes.dma_alias_to_reinterpret`
+  - `kernel_gen.passes.symbol_loop_hoist`
+  - `kernel_gen.passes.hoist_dma_alias_ops`
+  - `kernel_gen.passes.symbol_buffer_hoist`
 - 已退场的 analysis family 不再提供公开 pass 名或 registry 构造入口；`build_registered_pass("analyze-func-cost")` 必须显式失败。
 - 当前模板名推导专题的 canonical public path 固定为 `kernel_gen.passes.template_name.infer`；`kernel_gen.passes.TemplateNameInferPass` 作为包根 re-export 保持可用。
 - 旧 `kernel_gen.passes.template_name_constraints`、`kernel_gen.passes.template_name_default_constraints`、`kernel_gen.passes.template_name_graph` 与 `kernel_gen.passes.template_name_infer` 根模块必须稳定失败。
@@ -151,7 +158,7 @@
 - pipeline builder 的 canonical public path 固定为 `kernel_gen.pipeline`；旧 `kernel_gen.passes.pipeline` 及其子模块必须稳定失败。
 - 当前 arch parallelize 专题的 canonical public path 固定为 `kernel_gen.passes.arch_parallelize`；`kernel_gen.passes.ArchParallelizePass` 作为包根 re-export 保持可用；registry 名称固定为 `arch-parallelize`。
 - 机械验收口径：
-  - `test/passes/test_registry.py` 负责锁定 canonical public path、`symbol-buffer-hoist` 的稳定注册名与包根 re-export、旧路径失败边界、`analyze-func-cost` 构造失败与 registry caller 的 `importlib` 消费者矩阵。
+  - `test/passes/test_registry.py` 负责锁定 canonical public path、`symbol-buffer-hoist` 与 `symbol-hoist-pipeline` 的稳定注册名与包根 re-export、旧路径失败边界、`analyze-func-cost` 构造失败与 registry caller 的 `importlib` 消费者矩阵。
   - `test/passes/test_pass_manager.py` 负责锁定 pass manager / pipeline caller 的 `importlib` 消费者矩阵。
 
 ### S2 导入矩阵补充

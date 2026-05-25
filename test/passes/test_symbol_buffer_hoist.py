@@ -3,7 +3,7 @@
 
 功能说明:
 - 覆盖 `symbol-buffer-hoist` 的公开 pass、公开 pattern getter、registry builder 与固定失败边界。
-- 只通过 `kernel_gen.passes.symbol_buffer_hoist`、`kernel_gen.passes` 与 `kernel_gen.passes.registry`
+- 只通过 `kernel_gen.passes.hoist.symbol_buffer_hoist`、`kernel_gen.passes` 与 `kernel_gen.passes.registry`
   的公开入口观察行为，不直连文件内 helper。
 
 使用示例:
@@ -12,7 +12,7 @@
 关联文件:
 - spec: spec/pass/symbol_buffer_hoist.md
 - test: test/passes/test_symbol_buffer_hoist.py
-- 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+- 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ from kernel_gen.dialect.symbol import (
     SymbolYieldOp,
 )
 
-pass_module = importlib.import_module("kernel_gen.passes.symbol_buffer_hoist")
+pass_module = importlib.import_module("kernel_gen.passes.hoist.symbol_buffer_hoist")
 package_module = importlib.import_module("kernel_gen.passes")
 registry_module = importlib.import_module("kernel_gen.passes.registry")
 
@@ -86,7 +86,7 @@ def _memory_type(shape: tuple[int | str, ...], *, element_type: Attribute = i32,
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     strides: list[int | str] = []
@@ -121,7 +121,7 @@ def _const_symbol(value: int) -> SymbolConstOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     return SymbolConstOp(value)
@@ -141,7 +141,7 @@ def _build_slice_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     source_type = _memory_type((32, 64))
@@ -181,7 +181,7 @@ def _build_deslice_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     target_type = _memory_type((32, 64))
@@ -222,7 +222,7 @@ def _build_slice_with_free_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     source_type = _memory_type((32, 64))
@@ -263,7 +263,7 @@ def _build_deslice_with_free_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     target_type = _memory_type((32, 64))
@@ -305,7 +305,7 @@ def _build_view_with_free_module(*, loop_dependent_offset: bool = False) -> Modu
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     target_type = _memory_type((16, 16))
@@ -355,7 +355,7 @@ def _build_reinterpret_with_free_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     target_type = _memory_type((16, 16))
@@ -404,7 +404,7 @@ def _build_reshape_with_free_module(*, loop_dependent_shape: bool = False) -> Mo
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     target_type = _memory_type((16,))
@@ -468,7 +468,7 @@ def _build_subview_with_free_module(*, loop_dependent_size: bool = False) -> Mod
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     target_type = _memory_type((16,))
@@ -531,7 +531,7 @@ def _build_slice_with_free_before_use_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     source_type = _memory_type((32, 64))
@@ -571,7 +571,7 @@ def _build_slice_with_multiple_free_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     module = _build_slice_with_free_module()
@@ -595,7 +595,7 @@ def _build_slice_with_nested_free_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     source_type = _memory_type((32, 64))
@@ -639,7 +639,7 @@ def _build_slice_with_free_not_in_owner_loop_body_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     source_type = _memory_type((32, 64))
@@ -684,7 +684,7 @@ def _build_same_value_broadcast_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     target_type = _memory_type((8, 16))
@@ -718,7 +718,7 @@ def _build_broadcast_lifecycle_module(*, same_value: bool = False, with_kernel_r
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     tile_type = _memory_type((4, 4))
@@ -763,7 +763,7 @@ def _build_metadata_query_module(*, include_data_use: bool) -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     source_type = _memory_type((32, 64))
@@ -814,7 +814,7 @@ def _build_conditional_write_module(*, read_in_branch: bool) -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     tile_type = _memory_type((4, 4))
@@ -871,7 +871,7 @@ def _build_alias_result_kernel_use_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     tile_type = _memory_type((4, 4))
@@ -912,7 +912,7 @@ def _build_kernel_lifecycle_reset_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     tile_type = _memory_type((4, 4))
@@ -951,7 +951,7 @@ def build_copy_cross_space_full_write_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     source_type = _memory_type((4, 4), space="tsm")
@@ -995,7 +995,7 @@ def _build_kernel_lifecycle_read_before_write_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     tile_type = _memory_type((4, 4))
@@ -1038,7 +1038,7 @@ def _build_unknown_call_use_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     tile_type = _memory_type((4, 4))
@@ -1075,7 +1075,7 @@ def _build_nested_alias_kernel_use_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     matrix_type = _memory_type((4, 4))
@@ -1119,7 +1119,7 @@ def _build_loop_carried_shape_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     source_type = _memory_type((32, 64))
@@ -1171,7 +1171,7 @@ def _build_invalid_verify_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     source_type = _memory_type((32, 64))
@@ -1223,7 +1223,7 @@ def _build_fixed_point_alloc_free_fill_module(*, dynamic_shape: bool) -> ModuleO
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     zero = _const_symbol(0)
@@ -1272,7 +1272,7 @@ def _build_dynamic_matmul_loop_local_scratch_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     symbol_types = [
@@ -1351,7 +1351,7 @@ def _build_nested_acc_fill_before_read_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     tile_type = _memory_type((4, 4))
@@ -1393,7 +1393,7 @@ def _build_nested_deslice_source_module(*, with_reset: bool) -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     tile_type = _memory_type((4, 4))
@@ -1440,7 +1440,7 @@ def _build_nested_write_may_not_run_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     tile_type = _memory_type((4, 4))
@@ -1482,7 +1482,7 @@ def _build_partial_subview_write_before_root_read_module() -> ModuleOp:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     pool_type = _memory_type((1024,), element_type=i8, space="shared")
@@ -1517,7 +1517,7 @@ def _get_blocks(module: ModuleOp) -> tuple[Block, SymbolForOp, Block]:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
@@ -1539,7 +1539,7 @@ def _free_source_is(free: DmaFreeOp, value: SSAValue) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     return SSAValue.get(free.source) is value
@@ -1548,7 +1548,7 @@ def _free_source_is(free: DmaFreeOp, value: SSAValue) -> bool:
 # TC-SYMBOL-BUFFER-HOIST-001
 # 功能说明: 验证公开 pattern 类、公开 getter 与包根 SymbolBufferHoistPass 可达。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_public_patterns_are_reachable
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_public_patterns_are_reachable() -> None:
@@ -1563,7 +1563,7 @@ def test_symbol_buffer_hoist_public_patterns_are_reachable() -> None:
 # TC-SYMBOL-BUFFER-HOIST-002
 # 功能说明: 验证公开 pattern 直接运行时不外提无 matching free 的 input staging buffer。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_pattern_keeps_input_staging_alloc_without_free
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_pattern_keeps_input_staging_alloc_without_free() -> None:
@@ -1586,7 +1586,7 @@ def test_symbol_buffer_hoist_pattern_keeps_input_staging_alloc_without_free() ->
 # TC-SYMBOL-BUFFER-HOIST-003
 # 功能说明: 验证 SymbolBufferHoistPass 不外提无 matching free 的 input staging buffer。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_pass_keeps_input_staging_alloc_without_free
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_pass_keeps_input_staging_alloc_without_free() -> None:
@@ -1604,7 +1604,7 @@ def test_symbol_buffer_hoist_pass_keeps_input_staging_alloc_without_free() -> No
 # TC-SYMBOL-BUFFER-HOIST-004
 # 功能说明: 验证 SymbolBufferHoistPass 不外提无 matching free 的 output scratch buffer。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_pass_keeps_output_scratch_alloc_without_free
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_pass_keeps_output_scratch_alloc_without_free() -> None:
@@ -1625,7 +1625,7 @@ def test_symbol_buffer_hoist_pass_keeps_output_scratch_alloc_without_free() -> N
 # TC-SYMBOL-BUFFER-HOIST-004A
 # 功能说明: 验证 input staging buffer 与同 body 内 matching free 会成对外提。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_input_staging_alloc_and_matching_free
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_hoists_input_staging_alloc_and_matching_free() -> None:
@@ -1650,7 +1650,7 @@ def test_symbol_buffer_hoist_hoists_input_staging_alloc_and_matching_free() -> N
 # TC-SYMBOL-BUFFER-HOIST-004B
 # 功能说明: 验证 output scratch buffer 与同 body 内 matching free 会成对外提。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_output_scratch_alloc_and_matching_free
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_hoists_output_scratch_alloc_and_matching_free() -> None:
@@ -1675,7 +1675,7 @@ def test_symbol_buffer_hoist_hoists_output_scratch_alloc_and_matching_free() -> 
 # TC-SYMBOL-BUFFER-HOIST-004B1
 # 功能说明: 验证 loop-invariant dma.view 在 alloc/free 成对外提后继续单 op 外提一层。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_loop_invariant_dma_view_one_layer
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_hoists_loop_invariant_dma_view_one_layer() -> None:
@@ -1700,7 +1700,7 @@ def test_symbol_buffer_hoist_hoists_loop_invariant_dma_view_one_layer() -> None:
 # TC-SYMBOL-BUFFER-HOIST-004B1A
 # 功能说明: 验证 loop-invariant dma.reinterpret 在 alloc/free 成对外提后继续单 op 外提一层。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_loop_invariant_dma_reinterpret_one_layer
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_hoists_loop_invariant_dma_reinterpret_one_layer() -> None:
@@ -1725,7 +1725,7 @@ def test_symbol_buffer_hoist_hoists_loop_invariant_dma_reinterpret_one_layer() -
 # TC-SYMBOL-BUFFER-HOIST-004B2
 # 功能说明: 验证 loop-invariant dma.reshape 在 alloc/free 成对外提后继续单 op 外提一层。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_loop_invariant_dma_reshape_one_layer
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_hoists_loop_invariant_dma_reshape_one_layer() -> None:
@@ -1750,7 +1750,7 @@ def test_symbol_buffer_hoist_hoists_loop_invariant_dma_reshape_one_layer() -> No
 # TC-SYMBOL-BUFFER-HOIST-004B3
 # 功能说明: 验证 loop-invariant dma.subview 在 alloc/free 成对外提后继续单 op 外提一层。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_loop_invariant_dma_subview_one_layer
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_hoists_loop_invariant_dma_subview_one_layer() -> None:
@@ -1775,7 +1775,7 @@ def test_symbol_buffer_hoist_hoists_loop_invariant_dma_subview_one_layer() -> No
 # TC-SYMBOL-BUFFER-HOIST-004B4
 # 功能说明: 验证 dma.view 的 offset 依赖当前 iterator 时 view 保留在 loop 内，alloc/free 仍可成对外提。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_dma_view_when_offset_depends_on_loop_iterator
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_dma_view_when_offset_depends_on_loop_iterator() -> None:
@@ -1800,7 +1800,7 @@ def test_symbol_buffer_hoist_keeps_dma_view_when_offset_depends_on_loop_iterator
 # TC-SYMBOL-BUFFER-HOIST-004B5
 # 功能说明: 验证 dma.reshape 的 shape 依赖 loop-carried 值时 reshape 保留在 loop 内。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_dma_reshape_when_shape_is_loop_carried
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_dma_reshape_when_shape_is_loop_carried() -> None:
@@ -1823,7 +1823,7 @@ def test_symbol_buffer_hoist_keeps_dma_reshape_when_shape_is_loop_carried() -> N
 # TC-SYMBOL-BUFFER-HOIST-004B6
 # 功能说明: 验证 dma.subview 的 size 依赖 loop-carried 值时 subview 保留在 loop 内。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_dma_subview_when_size_is_loop_carried
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_dma_subview_when_size_is_loop_carried() -> None:
@@ -1846,7 +1846,7 @@ def test_symbol_buffer_hoist_keeps_dma_subview_when_size_is_loop_carried() -> No
 # TC-SYMBOL-BUFFER-HOIST-004C
 # 功能说明: 验证 matching free 早于 data use 时 alloc/free 保持在 loop 内。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_free_precedes_data_use
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_alloc_when_free_precedes_data_use() -> None:
@@ -1863,7 +1863,7 @@ def test_symbol_buffer_hoist_keeps_alloc_when_free_precedes_data_use() -> None:
 # TC-SYMBOL-BUFFER-HOIST-004D
 # 功能说明: 验证多个 matching free 时 alloc/free 保持在 loop 内。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_multiple_free
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_alloc_when_multiple_free() -> None:
@@ -1880,7 +1880,7 @@ def test_symbol_buffer_hoist_keeps_alloc_when_multiple_free() -> None:
 # TC-SYMBOL-BUFFER-HOIST-004E
 # 功能说明: 验证 matching free 位于 nested loop 时 alloc/free 不外提。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_free_is_nested
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_alloc_when_free_is_nested() -> None:
@@ -1899,7 +1899,7 @@ def test_symbol_buffer_hoist_keeps_alloc_when_free_is_nested() -> None:
 # TC-SYMBOL-BUFFER-HOIST-004F
 # 功能说明: 验证 matching free 不在 owner loop 直接 body 时 alloc/free 不外提。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_free_not_in_owner_loop_body
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_alloc_when_free_not_in_owner_loop_body() -> None:
@@ -1922,7 +1922,7 @@ def test_symbol_buffer_hoist_keeps_alloc_when_free_not_in_owner_loop_body() -> N
 # TC-SYMBOL-BUFFER-HOIST-004G
 # 功能说明: 验证同一 alloc 同时作为 dma.broadcast target/source 时不得自证 reset/write。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_for_same_value_broadcast_read_write
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_alloc_for_same_value_broadcast_read_write() -> None:
@@ -1938,7 +1938,7 @@ def test_symbol_buffer_hoist_keeps_alloc_for_same_value_broadcast_read_write() -
 # TC-SYMBOL-BUFFER-HOIST-004G1
 # 功能说明: 验证 dma.broadcast target WRITE 能作为后续 kernel READ 的 reset/write proof。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_alloc_when_broadcast_resets_kernel_read
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_hoists_alloc_when_broadcast_resets_kernel_read() -> None:
@@ -1963,7 +1963,7 @@ def test_symbol_buffer_hoist_hoists_alloc_when_broadcast_resets_kernel_read() ->
 # TC-SYMBOL-BUFFER-HOIST-004G2
 # 功能说明: 验证 symbol.get_dim/get_stride metadata query 不阻断合法 data use 外提。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_alloc_with_metadata_queries_and_slice_use
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_hoists_alloc_with_metadata_queries_and_slice_use() -> None:
@@ -1990,7 +1990,7 @@ def test_symbol_buffer_hoist_hoists_alloc_with_metadata_queries_and_slice_use() 
 # TC-SYMBOL-BUFFER-HOIST-004G3
 # 功能说明: 验证 symbol.get_dim/get_stride 不能单独作为生命周期 data use。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_only_metadata_queries_exist
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_alloc_when_only_metadata_queries_exist() -> None:
@@ -2009,7 +2009,7 @@ def test_symbol_buffer_hoist_keeps_alloc_when_only_metadata_queries_exist() -> N
 # TC-SYMBOL-BUFFER-HOIST-004G4
 # 功能说明: 验证同一 scf.if region block 内 write-before-read 可证明生命周期安全。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_alloc_when_conditional_write_and_read_are_same_branch
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_hoists_alloc_when_conditional_write_and_read_are_same_branch() -> None:
@@ -2036,7 +2036,7 @@ def test_symbol_buffer_hoist_hoists_alloc_when_conditional_write_and_read_are_sa
 # TC-SYMBOL-BUFFER-HOIST-004G5
 # 功能说明: 验证 scf.if 分支内 write 不能证明 merge 点 read。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_conditional_write_feeds_merge_read
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_alloc_when_conditional_write_feeds_merge_read() -> None:
@@ -2057,7 +2057,7 @@ def test_symbol_buffer_hoist_keeps_alloc_when_conditional_write_feeds_merge_read
 # TC-SYMBOL-BUFFER-HOIST-004H
 # 功能说明: 验证 alias result 流向 kernel.* 时按逃逸/no-op 处理。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alias_result_when_used_by_kernel_op
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_alias_result_when_used_by_kernel_op() -> None:
@@ -2084,7 +2084,7 @@ def test_symbol_buffer_hoist_keeps_alias_result_when_used_by_kernel_op() -> None
 # TC-SYMBOL-BUFFER-HOIST-004H1
 # 功能说明: 验证 kernel read/write 被 fill reset 支配时 alloc/free 可由 MemoryEffect 证明后成对外提。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_alloc_when_kernel_read_is_reset_by_fill
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_hoists_alloc_when_kernel_read_is_reset_by_fill() -> None:
@@ -2110,7 +2110,7 @@ def test_symbol_buffer_hoist_hoists_alloc_when_kernel_read_is_reset_by_fill() ->
 # TC-SYMBOL-BUFFER-HOIST-004H1A
 # 功能说明: 验证 dma.copy 跨 memory space 但 shape/stride/dtype 一致时可证明 target 完整写。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_alloc_when_copy_cross_space_full_write_resets_kernel_read
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_hoists_alloc_when_copy_cross_space_full_write_resets_kernel_read() -> None:
@@ -2137,7 +2137,7 @@ def test_symbol_buffer_hoist_hoists_alloc_when_copy_cross_space_full_write_reset
 # TC-SYMBOL-BUFFER-HOIST-004H2
 # 功能说明: 验证 kernel read 早于 reset/write 时 alloc/free 保持在 loop 内。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_kernel_reads_before_reset
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_alloc_when_kernel_reads_before_reset() -> None:
@@ -2162,7 +2162,7 @@ def test_symbol_buffer_hoist_keeps_alloc_when_kernel_reads_before_reset() -> Non
 # TC-SYMBOL-BUFFER-HOIST-004H3
 # 功能说明: 验证 nested loop 内 alias result 流向 kernel op 时 alias op 逐层 fixed-point 外提。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_nested_alias_result_used_by_kernel_op
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_hoists_nested_alias_result_used_by_kernel_op() -> None:
@@ -2186,7 +2186,7 @@ def test_symbol_buffer_hoist_hoists_nested_alias_result_used_by_kernel_op() -> N
 # TC-SYMBOL-BUFFER-HOIST-004H4
 # 功能说明: 验证静态 nested alloc/free 经 fixed-point 逐层外提到最外层 loop 外。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_alloc_free_fixed_point_nested_loop_static
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_alloc_free_fixed_point_nested_loop_static() -> None:
@@ -2215,7 +2215,7 @@ def test_symbol_buffer_hoist_alloc_free_fixed_point_nested_loop_static() -> None
 # TC-SYMBOL-BUFFER-HOIST-004H5
 # 功能说明: 验证动态 shape nested alloc/free 也能经 fixed-point 逐层外提。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_alloc_free_fixed_point_nested_loop_dynamic
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_alloc_free_fixed_point_nested_loop_dynamic() -> None:
@@ -2241,7 +2241,7 @@ def test_symbol_buffer_hoist_alloc_free_fixed_point_nested_loop_dynamic() -> Non
 # TC-SYMBOL-BUFFER-HOIST-004H5A
 # 功能说明: 验证动态 matmul loop-local acc/tmp/lhs/rhs scratch alloc/free 可逐层外提，计算 op 保持循环内。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_dynamic_matmul_loop_local_scratch_allocs
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_hoists_dynamic_matmul_loop_local_scratch_allocs() -> None:
@@ -2287,7 +2287,7 @@ def test_symbol_buffer_hoist_hoists_dynamic_matmul_loop_local_scratch_allocs() -
 # TC-SYMBOL-BUFFER-HOIST-004H6
 # 功能说明: 验证 owner block fill 支配 nested kernel read 时 acc buffer 可外提。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_acc_buffer_hoists_when_fill_dominates_reads
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_acc_buffer_hoists_when_fill_dominates_reads() -> None:
@@ -2314,7 +2314,7 @@ def test_symbol_buffer_hoist_acc_buffer_hoists_when_fill_dominates_reads() -> No
 # TC-SYMBOL-BUFFER-HOIST-004H6A
 # 功能说明: 验证 nested dma.deslice source 无 reset/write 时不能绕过 lifecycle proof。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_nested_deslice_source_without_reset
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_nested_deslice_source_without_reset() -> None:
@@ -2335,7 +2335,7 @@ def test_symbol_buffer_hoist_keeps_nested_deslice_source_without_reset() -> None
 # TC-SYMBOL-BUFFER-HOIST-004H6B
 # 功能说明: 验证 owner block reset 支配 nested dma.deslice source READ 时允许外提。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_hoists_nested_deslice_source_after_reset
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_hoists_nested_deslice_source_after_reset() -> None:
@@ -2362,7 +2362,7 @@ def test_symbol_buffer_hoist_hoists_nested_deslice_source_after_reset() -> None:
 # TC-SYMBOL-BUFFER-HOIST-004H6C
 # 功能说明: 验证 alloc result 传给未知 call 时 alloc/free 保持在 loop 内。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_unknown_call_uses_buffer
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_alloc_when_unknown_call_uses_buffer() -> None:
@@ -2382,7 +2382,7 @@ def test_symbol_buffer_hoist_keeps_alloc_when_unknown_call_uses_buffer() -> None
 # TC-SYMBOL-BUFFER-HOIST-004H7
 # 功能说明: 验证分支内 write 不支配 merge read，alloc/free 保持原位。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_branch_write_misses_merge_path
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_alloc_when_branch_write_misses_merge_path() -> None:
@@ -2399,7 +2399,7 @@ def test_symbol_buffer_hoist_keeps_alloc_when_branch_write_misses_merge_path() -
 # TC-SYMBOL-BUFFER-HOIST-004H8
 # 功能说明: 验证 nested loop write 可能不执行时不能证明后续 owner-block read。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_nested_loop_write_may_not_run
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_alloc_when_nested_loop_write_may_not_run() -> None:
@@ -2421,7 +2421,7 @@ def test_symbol_buffer_hoist_keeps_alloc_when_nested_loop_write_may_not_run() ->
 # TC-SYMBOL-BUFFER-HOIST-004H9
 # 功能说明: 验证 partial subview write 不能证明完整 root read 已 reset。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_alloc_when_partial_write_precedes_full_read
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_alloc_when_partial_write_precedes_full_read() -> None:
@@ -2444,7 +2444,7 @@ def test_symbol_buffer_hoist_keeps_alloc_when_partial_write_precedes_full_read()
 # TC-SYMBOL-BUFFER-HOIST-005
 # 功能说明: 验证 shape 依赖 loop-carried 时 alloc 保持在 loop 内。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_keeps_loop_carried_shape_inside_loop
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_keeps_loop_carried_shape_inside_loop() -> None:
@@ -2462,7 +2462,7 @@ def test_symbol_buffer_hoist_keeps_loop_carried_shape_inside_loop() -> None:
 # TC-SYMBOL-BUFFER-HOIST-006
 # 功能说明: 验证非 builtin.module 输入复用共享 KernelCodeError 边界。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_rejects_non_module_input
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_rejects_non_module_input() -> None:
@@ -2473,7 +2473,7 @@ def test_symbol_buffer_hoist_rejects_non_module_input() -> None:
 # TC-SYMBOL-BUFFER-HOIST-007
 # 功能说明: 验证 verifier 失败统一转换为 SymbolBufferHoistVerifierError 前缀。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_symbol_buffer_hoist_wraps_verify_failure_prefix
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_symbol_buffer_hoist_wraps_verify_failure_prefix() -> None:
@@ -2486,7 +2486,7 @@ def test_symbol_buffer_hoist_wraps_verify_failure_prefix() -> None:
 # TC-SYMBOL-BUFFER-HOIST-008
 # 功能说明: 验证 registry builder 返回 canonical module path 下的 ModulePass。
 # 使用示例: pytest -q test/passes/test_symbol_buffer_hoist.py -k test_build_registered_symbol_buffer_hoist_pass
-# 对应功能实现文件路径: kernel_gen/passes/symbol_buffer_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_buffer_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_buffer_hoist.py
 def test_build_registered_symbol_buffer_hoist_pass() -> None:
@@ -2497,4 +2497,4 @@ def test_build_registered_symbol_buffer_hoist_pass() -> None:
     assert isinstance(pass_obj, ModulePass)
     assert pass_obj.name == "symbol-buffer-hoist"
     assert type(pass_obj).__name__ == "SymbolBufferHoistPass"
-    assert pass_obj.__class__.__module__ == "kernel_gen.passes.symbol_buffer_hoist"
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.hoist.symbol_buffer_hoist"

@@ -48,7 +48,7 @@
 - 创建者：`未记录`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/pass/symbol_loop_hoist.md`](../../spec/pass/symbol_loop_hoist.md)
-- `功能实现`：[`kernel_gen/passes/symbol_loop_hoist.py`](../../kernel_gen/passes/symbol_loop_hoist.py)
+- `功能实现`：[`kernel_gen/passes/hoist/symbol_loop_hoist.py`](../../kernel_gen/passes/hoist/symbol_loop_hoist.py)
 - `test`：
   - [`test/passes/test_symbol_loop_hoist.py`](../../test/passes/test_symbol_loop_hoist.py)
   - [`test/passes/test_pass_manager.py`](../../test/passes/test_pass_manager.py)
@@ -63,7 +63,7 @@
 
 ## 目标
 
-- 保持公开 pass 名称 `symbol-loop-hoist` 与根路径导入 `kernel_gen.passes.symbol_loop_hoist.SymbolLoopHoistPass` 稳定；失败类型统一使用 `kernel_gen.core.error.KernelCodeError`。
+- 保持公开 pass 名称 `symbol-loop-hoist` 与根路径导入 `kernel_gen.passes.hoist.symbol_loop_hoist.SymbolLoopHoistPass` 稳定；失败类型统一使用 `kernel_gen.core.error.KernelCodeError`。
 - 保持 `kernel_gen.passes.lowering` 与 `kernel_gen.passes.lowering.symbol_loop_hoist` 当前对同名对象的 re-export 继续可用，不在本阶段移除。
 - 保持 `build_registered_pass("symbol-loop-hoist")` 可构造出该 pass，并返回可直接执行的 xDSL `ModulePass` 实例。
 - 将公开语义收口为“每种受支持 op 一个公开 RewritePattern + 反复驱动直到当前 `symbol.for` 达到稳定态”，而不是把外提行为描述为不透明的手写循环。
@@ -103,7 +103,9 @@
 - 顺序边界：
   - `symbol-loop-hoist` 本身只承担单 pass 公开语义，不根据上下游 pass 名称判断业务顺序。
   - `PassManager` 只按调用方添加顺序执行，不为 tile、DMA hierarchy 或 backend pipeline 额外注入顺序失败。
-  - 具体 pipeline 的业务顺序由对应 builder 与 spec 固定；`npu-demo-lowering` 允许在 tile-analysis 前运行一次，并在 memory-pool 后再次运行一次以收敛新增 symbol 表达式。
+  - 具体 pipeline 的业务顺序由对应 builder 与 spec 固定；默认 `npu-demo-lowering` 通过
+    `SymbolHoistPipelinePass` 在对应位置承接 symbol-loop-hoist pattern；standalone
+    `SymbolLoopHoistPass` 仅保留 registry / 手动 pipeline 使用合同。
 - 固定失败短语前缀仅允许使用：
   - `SymbolLoopHoistVerifierError`
 
@@ -150,7 +152,7 @@ raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "SymbolLoopHoistVeri
 
 ```python
 from xdsl.context import Context
-from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
+from kernel_gen.passes.hoist.symbol_loop_hoist import SymbolLoopHoistPass
 
 pass_obj = SymbolLoopHoistPass()
 pass_obj.apply(Context(), module)
@@ -164,7 +166,7 @@ pass_obj.apply(ctx, module)
 ```
 
 ```python
-from kernel_gen.passes.symbol_loop_hoist import get_symbol_loop_hoist_patterns
+from kernel_gen.passes.hoist.symbol_loop_hoist import get_symbol_loop_hoist_patterns
 
 patterns = get_symbol_loop_hoist_patterns()
 ```
@@ -189,7 +191,7 @@ patterns = get_symbol_loop_hoist_patterns()
 - 使用示例：
 
 ```python
-from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
+from kernel_gen.passes.hoist.symbol_loop_hoist import SymbolLoopHoistPass
 
 assert SymbolLoopHoistPass.name == "symbol-loop-hoist"
 ```
@@ -214,7 +216,7 @@ assert SymbolLoopHoistPass.name == "symbol-loop-hoist"
 
 ```python
 from xdsl.context import Context
-from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
+from kernel_gen.passes.hoist.symbol_loop_hoist import SymbolLoopHoistPass
 
 SymbolLoopHoistPass().apply(Context(), module)
 ```
@@ -244,7 +246,7 @@ SymbolLoopHoistPass().apply(Context(), module)
 - 使用示例：
 
 ```python
-from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
+from kernel_gen.passes.hoist.symbol_loop_hoist import SymbolLoopHoistPass
 
 SymbolLoopHoistPass().apply(Context(), module)
 ```
@@ -339,7 +341,7 @@ SymbolLoopHoistPass().apply(Context(), module)
 - 使用示例：
 
 ```python
-from kernel_gen.passes.symbol_loop_hoist import (
+from kernel_gen.passes.hoist.symbol_loop_hoist import (
     SymbolConstHoistPattern,
     get_symbol_loop_hoist_patterns,
 )
@@ -371,7 +373,7 @@ assert isinstance(patterns[0], SymbolConstHoistPattern)
 - 使用示例：
 
   ```python
-  from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
+  from kernel_gen.passes.hoist.symbol_loop_hoist import SymbolLoopHoistPass
 
   assert SymbolLoopHoistPass.name == "symbol-loop-hoist"
   ```
@@ -949,4 +951,4 @@ symbol.for %i = %c0 to %n step %c1 {
 | TC-PASS-SYMBOL-LOOP-HOIST-010 | pass 改写 | 依赖 loop-carried 值的 symbol 算术白名单保持原位。 | 准备带 loop-carried symbol 参数的 `symbol.for`，并让 add/sub/mul/div/floordiv 依赖该参数。 | 运行 `TC-SLH-002B`。 | 依赖 loop-carried 值的 symbol 算术 op 不被外提，仍保留在所属 `symbol.for` body 内。 | `TC-SLH-002B` |
 | TC-PASS-SYMBOL-LOOP-HOIST-012 | pass 改写 | 验证 `symbol-loop-hoist` 在缺少 tile pass 族时允许加入 pipeline 并可作为 no-op 执行。 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `pytest -q test/passes/test_pass_manager.py -k "business_order"`。 | `PassManager` 按调用方顺序执行，不因缺少 tile pass 族或业务顺序报错。 | pytest -q test/passes/test_pass_manager.py -k "business_order" |
 | TC-PASS-SYMBOL-LOOP-HOIST-013 | pass 改写 | 验证 `PassManager` 不执行 symbol-loop-hoist 业务顺序校验。 | 准备包含任意公开 `ModulePass` 顺序的 pass manager。 | 运行 `pytest -q test/passes/test_pass_manager.py -k "business_order"`。 | 管理器只保证添加顺序，不生成 symbol-loop-hoist 业务顺序失败。 | pytest -q test/passes/test_pass_manager.py -k "business_order" |
-| TC-PASS-SYMBOL-LOOP-HOIST-014 | pass 改写 | `npu-demo-lowering` 可在 tile-analysis 前运行一次并在 memory-pool 后再次运行一次。 | 使用公开 `build_npu_demo_lowering_pipeline(...)`。 | 运行 `pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k "pass_order"`。 | pipeline 顺序体现两次 `symbol-loop-hoist`，具体业务顺序由 pipeline builder 固定。 | pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k "pass_order" |
+| TC-PASS-SYMBOL-LOOP-HOIST-014 | pass 改写 | 默认 `npu-demo-lowering` 由 `symbol-hoist-pipeline` 承接 symbol-loop-hoist pattern。 | 使用公开 `build_npu_demo_lowering_pipeline(...)`。 | 运行 `pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k "pass_order"`。 | pipeline 顺序体现 `symbol-hoist-pipeline`，而不是直接运行 standalone `symbol-loop-hoist`；standalone pass 仍可手动加入 `PassManager`。 | pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k "pass_order" |

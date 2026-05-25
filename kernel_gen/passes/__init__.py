@@ -11,8 +11,8 @@
 - 暴露 `memory-plan` 的公开入口。
 - 暴露 `multi-buffer` 的公开入口。
 - 暴露 `outline-device-kernel` 的公开入口。
-- 暴露 `symbol-buffer-hoist` 的公开入口与 pattern API。
-- 暴露 `symbol-loop-hoist` 专题 pass 的根路径入口。
+- 从 `kernel_gen.passes.hoist` 暴露既有包根 `symbol-buffer-hoist` 入口与 pattern API。
+- 从 `kernel_gen.passes.hoist` 暴露既有包根 `symbol-loop-hoist` 专题 pass 入口。
 - 暴露 `template-name-infer` 的公开入口。
 - 暴露 `tile-analysis` 的公开入口与 pattern API。
 - 暴露 `tile-elewise` 的公开入口与 pattern API。
@@ -126,12 +126,12 @@ API 列表:
   - kernel_gen/passes/decompass.py
   - kernel_gen/passes/memory_plan.py
 - kernel_gen/passes/outline_device_kernel.py
-- kernel_gen/passes/symbol_buffer_hoist.py
+- kernel_gen/passes/hoist/symbol_buffer_hoist.py
 - kernel_gen/passes/template_name/infer.py
   - kernel_gen/passes/tile/analysis.py
   - kernel_gen/passes/tile/elewise.py
   - kernel_gen/passes/tile/reduce.py
-- kernel_gen/passes/symbol_loop_hoist.py
+- kernel_gen/passes/hoist/symbol_loop_hoist.py
 """
 
 from .buffer_results_to_out_params import (
@@ -151,7 +151,7 @@ from .inline import InlinePass
 from .memory_plan import MemoryPlanPass
 from .multi_buffer import MultiBufferPass
 from .outline_device_kernel import OutlineDeviceKernelPass
-from .symbol_buffer_hoist import (
+from .hoist import (
     DmaAllocInSymbolForHoistPattern,
     SymbolBufferHoistPass,
     get_symbol_buffer_hoist_patterns,
@@ -173,7 +173,7 @@ from .tile.elewise import (
 from .tile.reduce import TileReducePass
 from .tile.reduce import TileReduceMatmulPattern, get_tile_reduce_pass_patterns
 from .pass_manager import Pass, PassManager
-from .symbol_loop_hoist import (
+from .hoist import (
     SymbolLoopHoistPass,
     SymbolMaxHoistPattern,
     SymbolMinHoistPattern,

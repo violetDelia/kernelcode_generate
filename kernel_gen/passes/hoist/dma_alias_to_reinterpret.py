@@ -8,19 +8,20 @@
 - 无法物化 exact offset、shape 或 stride operand 时保持 no-op；module verifier 失败时回滚。
 
 API 列表:
+- `get_dma_alias_to_reinterpret_patterns() -> list[RewritePattern]`
 - `class DmaAliasToReinterpretPass(fold: bool = True)`
 - `DmaAliasToReinterpretPass.name: str`
 - `DmaAliasToReinterpretPass.apply(ctx: Context, module: ModuleOp) -> None`
 
 使用示例:
 - from xdsl.context import Context
-- from kernel_gen.passes.dma_alias_to_reinterpret import DmaAliasToReinterpretPass
+- from kernel_gen.passes.hoist.dma_alias_to_reinterpret import DmaAliasToReinterpretPass
 - DmaAliasToReinterpretPass().apply(Context(), module)
 
 关联文件:
 - spec: spec/pass/dma_alias_to_reinterpret.md
 - test: test/passes/test_dma_alias_to_reinterpret.py
-- 功能实现: kernel_gen/passes/dma_alias_to_reinterpret.py
+- 功能实现: kernel_gen/passes/hoist/dma_alias_to_reinterpret.py
 """
 
 from __future__ import annotations
@@ -61,7 +62,7 @@ class _SymbolMaterial:
     关联文件:
     - spec: spec/pass/dma_alias_to_reinterpret.md
     - test: test/passes/test_dma_alias_to_reinterpret.py
-    - 功能实现: kernel_gen/passes/dma_alias_to_reinterpret.py
+    - 功能实现: kernel_gen/passes/hoist/dma_alias_to_reinterpret.py
     """
 
     value: SSAValue
@@ -84,7 +85,7 @@ class _AliasInfo:
     关联文件:
     - spec: spec/pass/dma_alias_to_reinterpret.md
     - test: test/passes/test_dma_alias_to_reinterpret.py
-    - 功能实现: kernel_gen/passes/dma_alias_to_reinterpret.py
+    - 功能实现: kernel_gen/passes/hoist/dma_alias_to_reinterpret.py
     """
 
     root: SSAValue
@@ -108,7 +109,7 @@ class _RewritePlan:
     关联文件:
     - spec: spec/pass/dma_alias_to_reinterpret.md
     - test: test/passes/test_dma_alias_to_reinterpret.py
-    - 功能实现: kernel_gen/passes/dma_alias_to_reinterpret.py
+    - 功能实现: kernel_gen/passes/hoist/dma_alias_to_reinterpret.py
     """
 
     ops: tuple[Operation, ...]
@@ -835,6 +836,24 @@ class _DmaSubviewToReinterpretPattern(RewritePattern):
         _erase_dead_cleanup_ops(rewriter, plan.cleanup_ops)
 
 
+def get_dma_alias_to_reinterpret_patterns() -> list[RewritePattern]:
+    """返回 `dma-alias-to-reinterpret` 使用的公开 pattern 列表。
+
+    功能说明:
+    - 以 `dma.view -> dma.reshape -> dma.subview` 顺序提供 alias 归一 pattern。
+    - `SymbolHoistPipelinePass` 复用该公开列表，而不是调用旧 pass `apply(...)`。
+
+    使用示例:
+    - patterns = get_dma_alias_to_reinterpret_patterns()
+    """
+
+    return [
+        _DmaViewToReinterpretPattern(),
+        _DmaReshapeToReinterpretPattern(),
+        _DmaSubviewToReinterpretPattern(),
+    ]
+
+
 def _rewrite_module(ctx: Context, module: ModuleOp) -> None:
     """对 module 执行 alias-to-reinterpret rewrite。
 
@@ -849,11 +868,7 @@ def _rewrite_module(ctx: Context, module: ModuleOp) -> None:
 
     PatternRewriteWalker(
         GreedyRewritePatternApplier(
-            [
-                _DmaViewToReinterpretPattern(),
-                _DmaReshapeToReinterpretPattern(),
-                _DmaSubviewToReinterpretPattern(),
-            ],
+            get_dma_alias_to_reinterpret_patterns(),
             ctx=ctx,
             folding_enabled=True,
             dce_enabled=False,
@@ -891,7 +906,7 @@ class DmaAliasToReinterpretPass(Pass):
     关联文件:
     - spec: spec/pass/dma_alias_to_reinterpret.md
     - test: test/passes/test_dma_alias_to_reinterpret.py
-    - 功能实现: kernel_gen/passes/dma_alias_to_reinterpret.py
+    - 功能实现: kernel_gen/passes/hoist/dma_alias_to_reinterpret.py
     """
 
     name = "dma-alias-to-reinterpret"
@@ -909,7 +924,7 @@ class DmaAliasToReinterpretPass(Pass):
         关联文件:
         - spec: spec/pass/dma_alias_to_reinterpret.md
         - test: test/passes/test_dma_alias_to_reinterpret.py
-        - 功能实现: kernel_gen/passes/dma_alias_to_reinterpret.py
+        - 功能实现: kernel_gen/passes/hoist/dma_alias_to_reinterpret.py
         """
 
         module = ensure_builtin_module(module)
@@ -928,4 +943,4 @@ class DmaAliasToReinterpretPass(Pass):
         _replace_module_body(module, rewritten)
 
 
-__all__ = ["DmaAliasToReinterpretPass"]
+__all__ = ["DmaAliasToReinterpretPass", "get_dma_alias_to_reinterpret_patterns"]

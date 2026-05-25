@@ -23,7 +23,7 @@
 ## 文档信息
 
 - `spec`：[`spec/pass/hoist_dma_alias_ops.md`](../../spec/pass/hoist_dma_alias_ops.md)
-- `功能实现`：[`kernel_gen/passes/hoist_dma_alias_ops.py`](../../kernel_gen/passes/hoist_dma_alias_ops.py)
+- `功能实现`：[`kernel_gen/passes/hoist/dma_alias_ops.py`](../../kernel_gen/passes/hoist/dma_alias_ops.py)
 - `test`：[`test/passes/test_hoist_dma_alias_ops.py`](../../test/passes/test_hoist_dma_alias_ops.py)
 
 ## 依赖
@@ -35,10 +35,11 @@
 ## 目标
 
 - 固定 pass 名称为 `hoist-dma-alias-ops`。
-- 固定 canonical module path 为 `kernel_gen.passes.hoist_dma_alias_ops`。
+- 固定 canonical module path 为 `kernel_gen.passes.hoist.dma_alias_ops`。
 - 固定 registry 构造入口 `build_registered_pass("hoist-dma-alias-ops")` 可返回 `HoistDmaAliasOpsPass`。
 - 固定 public pattern getter 顺序为 through-write pattern 在前、pure hoist pattern 在后。
-- 固定 `npu-demo-lowering` 两处 `SymbolLoopHoistPass` 后接入本 pass。
+- 固定 standalone pass 的 registry / 手动 pipeline 使用合同；默认 `npu-demo-lowering` 由
+  `symbol-hoist-pipeline` 承接本 pass 的 dma alias hoist pattern。
 
 ## 非目标
 
@@ -168,7 +169,7 @@
 ## 公开导入
 
 ```python
-from kernel_gen.passes.hoist_dma_alias_ops import HoistDmaAliasOpsPass
+from kernel_gen.passes.hoist.dma_alias_ops import HoistDmaAliasOpsPass
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
 
 pass_obj = HoistDmaAliasOpsPass()
@@ -189,7 +190,10 @@ same_pass = build_registered_pass("hoist-dma-alias-ops")
 
 ## pipeline
 
-- `npu-demo-lowering` 两处 `SymbolLoopHoistPass()` 后必须紧跟 `HoistDmaAliasOpsPass()`。
+- 默认 `npu-demo-lowering` 不再直接编排 standalone `SymbolLoopHoistPass()` 与
+  `HoistDmaAliasOpsPass()`；相关 pattern 由 `SymbolHoistPipelinePass` 承接。
+- standalone 手动 pipeline 仍可显式把 `SymbolLoopHoistPass()` 与
+  `HoistDmaAliasOpsPass()` 相邻使用。
 - dump marker 验收只按 pass name 相对顺序，不绑定固定数字编号。
 
 ## 测试

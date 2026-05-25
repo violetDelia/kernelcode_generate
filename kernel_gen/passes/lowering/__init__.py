@@ -69,20 +69,20 @@ API 列表:
   - [kernel_gen/passes/tile/reduce.py](kernel_gen/passes/tile/reduce.py)
   - [kernel_gen/passes/lowering/__init__.py](kernel_gen/passes/lowering/__init__.py)
   - [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
-  - [kernel_gen/passes/symbol_loop_hoist.py](kernel_gen/passes/symbol_loop_hoist.py)
+  - [kernel_gen/passes/hoist/symbol_loop_hoist.py](kernel_gen/passes/hoist/symbol_loop_hoist.py)
 """
 
 import sys
 
 from .nn_lowering import NnLoweringPass
 from .. import outline_device_kernel as _outline_device_kernel_module
-from .. import symbol_loop_hoist as _symbol_loop_hoist_module
+from ..hoist import symbol_loop_hoist as _symbol_loop_hoist_module
 from ..dma_memory_hierarchy import (
     LowerDmaMemoryHierarchyPass,
 )
 from ..decompass import DecompassPass
 from ..outline_device_kernel import OutlineDeviceKernelPass
-from ..symbol_loop_hoist import SymbolLoopHoistPass
+from ..hoist.symbol_loop_hoist import SymbolLoopHoistPass
 from ..tile.analysis import TileAnalysisPass
 from ..tile.elewise import TileElewisePass
 from ..tile.reduce import TileReducePass

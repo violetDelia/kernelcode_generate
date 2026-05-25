@@ -28,9 +28,7 @@
 - xdsl `canonicalize`：`xdsl.transforms.canonicalize.CanonicalizePass`，仅作为本 pipeline 内部阶段使用，不注册为仓库公开 pass。
 - `decompass` 公开入口：[`spec/pass/decompass.md`](../../../spec/pass/decompass.md)
 - `nn` lowering：[`spec/pass/lowering/nn_lowering/spec.md`](../../../spec/pass/lowering/nn_lowering/spec.md)
-- `dma-alias-to-reinterpret`：[`spec/pass/dma_alias_to_reinterpret.md`](../dma_alias_to_reinterpret.md)
-- `symbol-loop-hoist`：[`spec/pass/symbol_loop_hoist.md`](../../../spec/pass/symbol_loop_hoist.md)
-- `hoist-dma-alias-ops`：[`spec/pass/hoist_dma_alias_ops.md`](../../../spec/pass/hoist_dma_alias_ops.md)
+- `symbol-hoist-pipeline`：[`spec/pass/symbol_hoist_pipeline.md`](../../../spec/pass/symbol_hoist_pipeline.md)
 - `memory-plan`：[`spec/pass/memory_plan.md`](../../../spec/pass/memory_plan.md)
 - `tile-analysis`：[`spec/pass/tile/analysis.md`](../../../spec/pass/tile/analysis.md)
 - `kernel-pattern-attach`：[`spec/pass/kernel_pattern_attach.md`](../kernel_pattern_attach.md)
@@ -46,16 +44,14 @@
 
 - `npu-demo-lowering`：`npu_demo` 目标的公开 pipeline 名称。
 - `inline`：该 pipeline 的首个内联/展开阶段。
-- `cse`：公共子表达式消除阶段；本 pipeline 中三次均紧跟 `canonicalize`，分别服务 inline 展平、第一段 symbol-loop-hoist 外提和 transform 后整理；第一段 `symbol-buffer-hoist` 后的 cleanup 不插入 CSE，memory-pool 后也不再接入 CSE。
+- `cse`：公共子表达式消除阶段；本 pipeline 中四次均紧跟 `canonicalize`，分别服务 inline 展平、第一段 `symbol-hoist-pipeline`、第一段 `symbol-buffer-hoist` 后 cleanup 和 transform 后 cleanup；memory-pool 后不再接入 CSE。
 - `canonicalize`：xDSL 内置 canonicalization 阶段；只在本 pipeline 内直接实例化 `CanonicalizePass`，不得新增仓库 registry pass 名称；本 pipeline 中共运行五次。
 - `lower-nn`：`NnLoweringPass` 的公开 pass 名称。
-- `dma-alias-to-reinterpret`：`DmaAliasToReinterpretPass` 的公开 pass 名称；本 pipeline 中固定紧跟 `NnLoweringPass`，把 lower-nn 产物中的 `dma.view` / `dma.reshape` / `dma.subview` 归一为 `dma.reinterpret`。
-- `symbol-loop-hoist`：`SymbolLoopHoistPass` 的公开 pass 名称。
-- `hoist-dma-alias-ops`：`HoistDmaAliasOpsPass` 的公开 pass 名称；本 pipeline 中三次分别位于三段 `symbol-loop-hoist` 之后，用于把同 block 紧邻 `dma.fill` 的 `dma.reshape` 上移并改写 fill target。
+- `symbol-hoist-pipeline`：`SymbolHoistPipelinePass` 的公开 pass 名称；本 pipeline 中运行三次，组合 `dma-alias-to-reinterpret`、`symbol-loop-hoist` 与 `hoist-dma-alias-ops` pattern 能力，且 alias 归一 pattern 必须先于后续 hoist pattern。
 - `memory-plan`：`MemoryPlanPass` 的公开 pass 名称；本 pipeline 中固定为 `insert_free=True, fold=False`，执行两次，分别位于两段 `symbol-buffer-hoist` 之前，用于补齐 `dma.free` 生命周期。
 - `arch-parallelize`：`ArchParallelizePass` 的公开 pass 名称；本 pipeline 中位于 memory-pool 后的 `canonicalize` 之后、late `attach-arch-information` 之前，固定 `target=<pipeline target>` 与 `parallel_level="block"`；该阶段跳过带 `entry_point` 属性的 host dispatcher，pattern/device 函数继续按 block 级规则分发。
 - `producer-consumer-analysis`：`ProducerConsumerAnalysisPass` 的公开 pass 名称；本 pipeline 中位于第二段 `symbol-buffer-hoist` 之后、`memory-pool` 之前，只写普通或控制流分类分析 attr，不生成同步 op，并保留 typed `dma.alloc` 形态供分析读取。
-- `tile-analysis`：`TileAnalysisPass` 的公开 pass 名称；本 pipeline 中紧跟第一段 `symbol-buffer-hoist -> symbol-loop-hoist -> hoist-dma-alias-ops -> canonicalize` cleanup，只补充 tile 分析属性。
+- `tile-analysis`：`TileAnalysisPass` 的公开 pass 名称；本 pipeline 中紧跟第一段 `symbol-buffer-hoist -> symbol-hoist-pipeline -> cse -> canonicalize` cleanup，只补充 tile 分析属性。
 - `kernel-pattern-attach`：`KernelPatternAttachPass` 的公开 pass 名称；本 pipeline 中位于 `tile-analysis` 后，负责生成 host dispatcher 与 pattern 函数。
 - `transform-apply`：`TransformApplyPass` 的公开 pass 名称；本 pipeline 中位于 `kernel-pattern-attach` 后，负责消费 pattern 函数上的 `kernel.transform_pipeline` 并在 pattern 内执行 lower-dma-memory-hierarchy / canonicalize。
 - `lower-dma-memory-hierarchy`：`LowerDmaMemoryHierarchyPass` 的公开 pass 名称；本 pipeline 顶层不直接加入该 pass，只允许由 `transform-apply` 按 pattern attr 间接执行。
@@ -68,18 +64,18 @@
 ## 目标
 
 - 提供一条默认包含 tile 分析、pattern attach / transform apply 和 memory pool 摘要的公开 pipeline，供本轮 `pytest` 与 standalone 验收链直接复用。
-- 明确 `symbol-loop-hoist` 在无 `symbol.for` 时可以 no-op，因此可安全加入该最小 pipeline。
-- 明确 `dma-alias-to-reinterpret` 紧跟 `lower-nn`，并在第一段 `symbol-loop-hoist` / `hoist-dma-alias-ops` 前完成 lower-nn alias 归一化。
+- 明确 `symbol-hoist-pipeline` 在无 `symbol.for` 与无 alias op 时可以 no-op，因此可安全加入该最小 pipeline。
+- 明确 `symbol-hoist-pipeline` 紧跟 `lower-nn`，并在同一个 pass 内先完成 lower-nn alias 归一化，再运行 symbol / dma alias hoist pattern。
 - 明确 `CommonSubexpressionElimination` 后必须紧跟 `CanonicalizePass`，且 `CanonicalizePass` 只作为本 pipeline 内部 xDSL pass 直接使用，不进入仓库 pass registry。
-- 明确第一段 `symbol-loop-hoist` 后必须紧跟 `hoist-dma-alias-ops -> cse -> canonicalize`，由 `HoistDmaAliasOpsPass` 在 memory-plan / symbol-buffer-hoist 前先收口紧邻 fill/reshape alias 顺序。
+- 明确第一段 `symbol-hoist-pipeline` 后必须紧跟 `cse -> canonicalize`，在 memory-plan / symbol-buffer-hoist 前先收口 alias 与 symbol 外提。
 - 明确第一段 `memory-plan` 位于第二段 `canonicalize` 之后、第一段 `symbol-buffer-hoist` 之前，并固定 `MemoryPlanPass(insert_free=True, fold=False)`。
 - 明确第一个 `symbol-buffer-hoist` 位于第一段 `memory-plan` 之后，对 `symbol.for` 内安全 `dma.alloc + dma.free` 做成对外提；无可外提 buffer 时保持 no-op。
-- 明确第一个 `symbol-buffer-hoist` 后必须运行 `symbol-loop-hoist -> hoist-dma-alias-ops -> canonicalize` cleanup，但不插入额外 CSE。
+- 明确第一个 `symbol-buffer-hoist` 后必须运行 `symbol-hoist-pipeline -> cse -> canonicalize` cleanup。
 - 明确 `tile-analysis` 位于第一段 post-buffer cleanup 之后、`kernel-pattern-attach` 之前，只记录 tile 分析结果，不生成 tile 循环。
 - 明确 `kernel-pattern-attach -> transform-apply` 位于 `tile-analysis` 之后，先生成 pattern dispatcher，再按 pattern attr 分别执行 `lower-dma-memory-hierarchy` 和 `canonicalize`。
 - 明确顶层 pipeline 不再直接插入 standalone `LowerDmaMemoryHierarchyPass`；lower-dma 只通过 `kernel.transform_pipeline` 间接作用于 pattern 函数。
 - 明确当前 pipeline 不接入 `MultiBufferPass(memory_stage=3)`；multi-buffer 专项能力保留为独立 pass 能力，不作为本 pipeline 阶段。
-- 明确 `transform-apply` 后再次运行 `symbol-loop-hoist -> hoist-dma-alias-ops -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist -> producer-consumer-analysis`，再进入 `MemoryPoolPass(rewrite=True, alignment=0)`。
+- 明确 `transform-apply` 后再次运行 `symbol-hoist-pipeline -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist -> producer-consumer-analysis`，再进入 `MemoryPoolPass(rewrite=True, alignment=0)`。
 - 明确 `producer-consumer-analysis` 位于第二段 `symbol-buffer-hoist` 之后、`memory-pool` 之前，并在 memory-pool 改写前读取 typed `dma.alloc` 形态。
 - 明确 `memory-pool` 位于 `producer-consumer-analysis` 之后，并固定 `MemoryPoolPass(rewrite=True, alignment=0)`，本 pipeline 默认执行 dynamic backing 改写；该改写直接生成 `dma.reinterpret`，不再依赖后置第二次 alias 归一化 pass。
 - 明确 memory-pool 后只运行 `canonicalize -> arch-parallelize -> attach-arch-information`，其中 late `attach-arch-information` 位于 `arch-parallelize` 后、`outline-device-kernel` 前，用于特化 memory-pool 后新生成的 `arch.get_dynamic_memory`。
@@ -105,34 +101,31 @@
   3. `CanonicalizePass`
   4. `DecompassPass`
   5. `NnLoweringPass`
-  6. `DmaAliasToReinterpretPass`
-  7. `SymbolLoopHoistPass`
-  8. `HoistDmaAliasOpsPass`
-  9. `CommonSubexpressionElimination`
-  10. `CanonicalizePass`
-  11. `MemoryPlanPass(insert_free=True, fold=False)`
-  12. `SymbolBufferHoistPass`
-  13. `SymbolLoopHoistPass`
-  14. `HoistDmaAliasOpsPass`
-  15. `CanonicalizePass`
-  16. `TileAnalysisPass`
-  17. `KernelPatternAttachPass`
-  18. `TransformApplyPass`
-  19. `SymbolLoopHoistPass`
-  20. `HoistDmaAliasOpsPass`
-  21. `CommonSubexpressionElimination`
-  22. `CanonicalizePass`
-  23. `MemoryPlanPass(insert_free=True, fold=False)`
-  24. `SymbolBufferHoistPass`
-  25. `ProducerConsumerAnalysisPass`
-  26. `MemoryPoolPass(rewrite=True, alignment=0)`
-  27. `CanonicalizePass`
-  28. `ArchParallelizePass(target=<pipeline target>, parallel_level="block")`
-  29. `AttachArchInformationPass`
-  30. `OutlineDeviceKernelPass`
-  31. `TemplateNameInferPass`
+  6. `SymbolHoistPipelinePass`
+  7. `CommonSubexpressionElimination`
+  8. `CanonicalizePass`
+  9. `MemoryPlanPass(insert_free=True, fold=False)`
+  10. `SymbolBufferHoistPass`
+  11. `SymbolHoistPipelinePass`
+  12. `CommonSubexpressionElimination`
+  13. `CanonicalizePass`
+  14. `TileAnalysisPass`
+  15. `KernelPatternAttachPass`
+  16. `TransformApplyPass`
+  17. `SymbolHoistPipelinePass`
+  18. `CommonSubexpressionElimination`
+  19. `CanonicalizePass`
+  20. `MemoryPlanPass(insert_free=True, fold=False)`
+  21. `SymbolBufferHoistPass`
+  22. `ProducerConsumerAnalysisPass`
+  23. `MemoryPoolPass(rewrite=True, alignment=0)`
+  24. `CanonicalizePass`
+  25. `ArchParallelizePass(target=<pipeline target>, parallel_level="block")`
+  26. `AttachArchInformationPass`
+  27. `OutlineDeviceKernelPass`
+  28. `TemplateNameInferPass`
 - 该 pipeline 不包含 `tile-elewise`、`tile-reduce`、`multi-buffer` 或 `buffer-results-to-out-params`。
-- 若输入 module 中不存在 `symbol.for`，`SymbolLoopHoistPass` 必须保持 no-op。
+- 若输入 module 中不存在 `symbol.for` 与 alias op，`SymbolHoistPipelinePass` 必须保持 no-op。
 - 若输入 module 中不存在可安全外提的 `dma.alloc`，`SymbolBufferHoistPass` 必须保持 no-op。
 - builder 会把默认 `target` 收口为 `npu_demo`。
 ## API详细说明
@@ -155,16 +148,16 @@
 - 注意事项：
   - pipeline 名称必须固定为 `npu-demo-lowering`。
   - pass 顺序必须固定为本文件“公开顺序”列表，不允许由 options 改写。
-  - `DmaAliasToReinterpretPass` 必须紧跟 `NnLoweringPass`。
+  - `SymbolHoistPipelinePass` 必须紧跟 `NnLoweringPass`，且该 pass 内必须先纳入 alias 归一 pattern。
   - memory-pool 前的每个 `cse` 后必须紧跟 xDSL `CanonicalizePass`；memory-pool 后不得再插入 `cse`。
-  - 第一段 `symbol-buffer-hoist` 后必须紧跟 `symbol-loop-hoist -> hoist-dma-alias-ops -> canonicalize`，该段 cleanup 不插入 `cse`。
-  - 第一段和 transform 后的 `symbol-loop-hoist` 后必须紧跟 `hoist-dma-alias-ops -> cse -> canonicalize`。
+  - 第一段 `symbol-buffer-hoist` 后必须紧跟 `symbol-hoist-pipeline -> cse -> canonicalize`。
+  - 第一段和 transform 后的 `symbol-hoist-pipeline` 后必须紧跟 `cse -> canonicalize`。
   - `memory-plan` 固定 `insert_free=True, fold=False`，并在本 pipeline 中执行两次，均位于对应 `symbol-buffer-hoist` 前。
   - 第一个 `symbol-buffer-hoist` 必须在第一段 `memory-plan` 后把安全 `dma.alloc + dma.free` 成对外提，并在 `tile-analysis` 前完成 post-buffer cleanup。
   - `tile-analysis` 只添加 `tile.analysis` / `tile.tile_exprs` 等分析属性，不生成 `symbol.for` 或 `dma.view`。
   - 顶层 pipeline 不直接包含 standalone `lower-dma-memory-hierarchy`；该 pass 只由 `transform-apply` 消费 pattern 函数上的 `kernel.transform_pipeline` 间接执行。
   - 当前 pipeline 不接入 `multi-buffer`；不得为此新增 pipeline option。
-  - `transform-apply` 后必须依次运行 `symbol-loop-hoist -> hoist-dma-alias-ops -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist -> producer-consumer-analysis -> memory-pool`。
+  - `transform-apply` 后必须依次运行 `symbol-hoist-pipeline -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist -> producer-consumer-analysis -> memory-pool`。
   - `producer-consumer-analysis` 位于 `memory-pool` 之前，只写普通或控制流分类分析 attr，不生成 `arch.wait` / `arch.sign`，且该阶段必须仍可观察 typed `dma.alloc` 形态。
   - `memory-pool` 固定 `rewrite=True` 与 `alignment=0`，将片上 `dma.alloc` 改写为 `arch.get_dynamic_memory + dma.reinterpret`。
   - memory-pool 后必须依次运行 `canonicalize -> arch-parallelize -> attach-arch-information -> outline-device-kernel -> template-name-infer`。
@@ -194,9 +187,9 @@
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-001 | pass 改写 | npu demo lowering pipeline builds pass manager | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_npu_demo_lowering_pipeline_builds_pass_manager`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“npu demo lowering pipeline builds pass manager”场景。 | `test_npu_demo_lowering_pipeline_builds_pass_manager` |
-| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-002 | pass 改写 | npu demo lowering pipeline pass order | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_npu_demo_lowering_pipeline_pass_order`。 | 固定顺序包含 `lower-nn -> dma-alias-to-reinterpret -> symbol-loop-hoist`、第一段 `memory-plan -> symbol-buffer-hoist -> symbol-loop-hoist -> hoist-dma-alias-ops -> canonicalize -> tile-analysis`、`kernel-pattern-attach -> transform-apply -> symbol-loop-hoist -> hoist-dma-alias-ops -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist -> producer-consumer-analysis -> memory-pool`、`memory-pool -> canonicalize -> arch-parallelize -> attach-arch-information -> outline-device-kernel -> template-name-infer`，且不包含顶层 `lower-dma-memory-hierarchy` 或 `multi-buffer`。 | `test_npu_demo_lowering_pipeline_pass_order` |
+| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-002 | pass 改写 | npu demo lowering pipeline pass order | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_npu_demo_lowering_pipeline_pass_order`。 | 固定顺序包含 `lower-nn -> symbol-hoist-pipeline -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist -> symbol-hoist-pipeline -> cse -> canonicalize -> tile-analysis`、`kernel-pattern-attach -> transform-apply -> symbol-hoist-pipeline -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist -> producer-consumer-analysis -> memory-pool`、`memory-pool -> canonicalize -> arch-parallelize -> attach-arch-information -> outline-device-kernel -> template-name-infer`，且不包含顶层 `dma-alias-to-reinterpret`、`symbol-loop-hoist`、`hoist-dma-alias-ops`、`lower-dma-memory-hierarchy` 或 `multi-buffer`。 | `test_npu_demo_lowering_pipeline_pass_order` |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-003 | 边界/异常 | npu demo lowering pipeline rejects unknown option | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_npu_demo_lowering_pipeline_rejects_unknown_option`。 | “npu demo lowering pipeline rejects unknown option”场景按公开错误语义失败或被拒绝。 | `test_npu_demo_lowering_pipeline_rejects_unknown_option` |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-004 | pass 改写 | npu demo lowering pipeline memory plan dump shows lifecycle and pool | 通过公开 dump 配置运行 npu-demo-lowering。 | 运行 `test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool`。 | 按 dump marker 定位两段 `memory-plan`、两段 `symbol-buffer-hoist`、`producer-consumer-analysis`、`memory-pool`、memory-pool 后 `canonicalize`、`arch-parallelize`、唯一 `attach-arch-information` 与 `outline-device-kernel`；memory-plan 含 `dma.free`，producer-consumer-analysis 位于 memory-pool 前且保留 typed `dma.alloc`，late attach 位于 arch-parallelize 后且 outline 前，并特化 memory-pool 后 `arch.get_dynamic_memory`。 | `test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool` |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-005 | 公开入口 | npu demo lowering pipeline supports kernel contract style public chain | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain`。 | 公开入口在“npu demo lowering pipeline supports kernel contract style public chain”场景下可导入、构造、注册或按名称发现。 | `test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain` |
 | TC-PASS-PIPELINE-NPU-DEMO-LOWERING-006 | block0 guard / 失败边界 / entry skip | npu demo lowering arch parallelize direct public behavior | 准备无 `symbol.for` 直线函数、多个顶层 `symbol.for`、入口 host + pattern 函数组合三类公开 IR，并在 pipeline 中保留真实 arch-parallelize 阶段。 | 运行 pipeline 中的 no-loop guard、unsupported structure 与入口 skip 三类测试。 | 默认 pipeline 直接使用公开 `ArchParallelizePass`；非入口无 loop 结构写入 block0 guard，不支持结构按公开错误失败，入口 host 不被 block-only guard 或 block-strided rewrite 改写且 pattern 函数仍 rewrite。 | `test_npu_demo_lowering_pipeline_arch_parallelize_wraps_no_loop_body_with_block0_guard`, `test_npu_demo_lowering_pipeline_arch_parallelize_propagates_unsupported_structure`, 入口 skip 测试 |
-| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-007 | pass 改写 | npu demo lowering static dump uses memory pool | 通过公开 dump 配置运行静态 tile matmul。 | 运行 `test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer`。 | 静态 tile matmul 在 `lower-nn -> dma-alias-to-reinterpret` 后先归一 lower-nn alias，并在第一段 `symbol-buffer-hoist -> symbol-loop-hoist -> hoist-dma-alias-ops -> canonicalize -> tile-analysis` 后进入 pattern attach；`transform-apply -> symbol-loop-hoist -> hoist-dma-alias-ops -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist -> producer-consumer-analysis -> memory-pool` 后由 `arch.get_dynamic_memory + dma.reinterpret` 承接，且 producer-consumer-analysis 保留 typed `dma.alloc`、顶层不接入 `lower-dma-memory-hierarchy` / `multi-buffer`、最终不残留 `dma.alloc/dma.free`。 | `test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer` |
+| TC-PASS-PIPELINE-NPU-DEMO-LOWERING-007 | pass 改写 | npu demo lowering static dump uses memory pool | 通过公开 dump 配置运行静态 tile matmul。 | 运行 `test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer`。 | 静态 tile matmul 在 `lower-nn -> symbol-hoist-pipeline` 后先归一 lower-nn alias，并在第一段 `symbol-buffer-hoist -> symbol-hoist-pipeline -> cse -> canonicalize -> tile-analysis` 后进入 pattern attach；`transform-apply -> symbol-hoist-pipeline -> cse -> canonicalize -> memory-plan -> symbol-buffer-hoist -> producer-consumer-analysis -> memory-pool` 后由 `arch.get_dynamic_memory + dma.reinterpret` 承接，且 producer-consumer-analysis 保留 typed `dma.alloc`、顶层不接入 `dma-alias-to-reinterpret` / `symbol-loop-hoist` / `hoist-dma-alias-ops` / `lower-dma-memory-hierarchy` / `multi-buffer`、最终不残留 `dma.alloc/dma.free`。 | `test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer` |

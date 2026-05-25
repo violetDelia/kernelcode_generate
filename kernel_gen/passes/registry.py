@@ -16,6 +16,7 @@
   registry 只解析通用 `fold`。
 - 内置 pass 包含 `kernel-pattern-attach` 与 `transform-apply`，用于 npu-demo lowering
   生成 pattern dispatcher 并消费 pattern transform pipeline。
+- 内置 pass 包含 `symbol-hoist-pipeline`，用于在一个 pass 内组合 alias 归一与 hoist pattern。
 - 文件内 helper 收口为 `_register_registry_entry`、`_build_registered_pass_instance`、
   `_build_registered_pipeline_manager`、`_pipeline_accepts_options`、`_normalize_options`、
   `_split_fold_option` 与 `_reset_registry_for_test`；这些 helper 仅供本文件内部复用，不属于公开接口。
@@ -504,18 +505,21 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.arch_parallelize import ArchParallelizePass
     from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
     from kernel_gen.passes.decompass import DecompassPass
-    from kernel_gen.passes.dma_alias_to_reinterpret import DmaAliasToReinterpretPass
+    from kernel_gen.passes.hoist import (
+        DmaAliasToReinterpretPass,
+        HoistDmaAliasOpsPass,
+        SymbolBufferHoistPass,
+        SymbolHoistPipelinePass,
+        SymbolLoopHoistPass,
+    )
     from kernel_gen.passes.inline import InlinePass
     from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
-    from kernel_gen.passes.hoist_dma_alias_ops import HoistDmaAliasOpsPass
     from kernel_gen.passes.kernel_pattern_attach import KernelPatternAttachPass
     from kernel_gen.passes.multi_buffer import MultiBufferPass
     from kernel_gen.passes.memory_pool import MemoryPoolPass
     from kernel_gen.passes.memory_plan import MemoryPlanPass
     from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
     from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
-    from kernel_gen.passes.symbol_buffer_hoist import SymbolBufferHoistPass
-    from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
     from kernel_gen.passes.tile.analysis import TileAnalysisPass
     from kernel_gen.passes.tile.elewise import TileElewisePass
     from kernel_gen.passes.tile.reduce import TileReducePass
@@ -544,6 +548,7 @@ def load_builtin_passes() -> None:
         TileElewisePass,
         TileReducePass,
         SymbolLoopHoistPass,
+        SymbolHoistPipelinePass,
         MemoryPoolPass,
         MemoryPlanPass,
         LaunchKernelCostFuncPass,

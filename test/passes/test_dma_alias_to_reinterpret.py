@@ -9,7 +9,7 @@
 
 关联文件:
 - spec: spec/pass/dma_alias_to_reinterpret.md
-- 功能实现: kernel_gen/passes/dma_alias_to_reinterpret.py
+- 功能实现: kernel_gen/passes/hoist/dma_alias_to_reinterpret.py
 - 测试文件: test/passes/test_dma_alias_to_reinterpret.py
 """
 
@@ -33,7 +33,7 @@ from kernel_gen.dialect.dma import DmaFillOp, DmaReinterpretOp, DmaReshapeOp, Dm
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolExprAttr, SymbolValueType
 
-pass_module = importlib.import_module("kernel_gen.passes.dma_alias_to_reinterpret")
+pass_module = importlib.import_module("kernel_gen.passes.hoist.dma_alias_to_reinterpret")
 registry_module = importlib.import_module("kernel_gen.passes.registry")
 
 DmaAliasToReinterpretPass = pass_module.DmaAliasToReinterpretPass

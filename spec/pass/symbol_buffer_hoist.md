@@ -28,7 +28,7 @@
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/pass/symbol_buffer_hoist.md`](../../spec/pass/symbol_buffer_hoist.md)
 - `功能实现`：
-  - [`kernel_gen/passes/symbol_buffer_hoist.py`](../../kernel_gen/passes/symbol_buffer_hoist.py)
+  - [`kernel_gen/passes/hoist/symbol_buffer_hoist.py`](../../kernel_gen/passes/hoist/symbol_buffer_hoist.py)
   - [`kernel_gen/passes/__init__.py`](../../kernel_gen/passes/__init__.py)
   - [`kernel_gen/passes/registry.py`](../../kernel_gen/passes/registry.py)
 - `test`：
@@ -62,7 +62,7 @@
 ## 目标
 
 - 固定公开 pass 名称为 `symbol-buffer-hoist`。
-- 固定 canonical module path 为 `kernel_gen.passes.symbol_buffer_hoist`，并要求 `kernel_gen.passes.SymbolBufferHoistPass` 作为包根 re-export 继续可用。
+- 固定 canonical module path 为 `kernel_gen.passes.hoist.symbol_buffer_hoist`，并要求 `kernel_gen.passes.SymbolBufferHoistPass` 作为包根 re-export 继续可用。
 - 固定 `build_registered_pass("symbol-buffer-hoist")` 可构造出当前 pass 的 `ModulePass` 实例。
 - 当前专题只公开一个 pass、一个 pattern 类和一个 pattern getter；不新增专题专属错误类型。
 - 下游 `pytest` 只验证本文件 `API 列表` 中的公开接口，不跨文件直连任何非公开 helper。
@@ -78,7 +78,7 @@ from xdsl.context import Context
 
 from kernel_gen.passes import SymbolBufferHoistPass
 from kernel_gen.passes.registry import build_registered_pass
-from kernel_gen.passes.symbol_buffer_hoist import get_symbol_buffer_hoist_patterns
+from kernel_gen.passes.hoist.symbol_buffer_hoist import get_symbol_buffer_hoist_patterns
 
 pass_obj = SymbolBufferHoistPass()
 pass_obj.apply(Context(), module)
@@ -90,7 +90,7 @@ patterns = get_symbol_buffer_hoist_patterns()
 ```
 
 - `test/passes/test_symbol_buffer_hoist.py` 只能通过 `SymbolBufferHoistPass`、`DmaAllocInSymbolForHoistPattern`、`get_symbol_buffer_hoist_patterns()` 和 `build_registered_pass("symbol-buffer-hoist")` 观察行为。
-- `test/passes/test_registry.py` 只能通过 `kernel_gen.passes.symbol_buffer_hoist`、`kernel_gen.passes.SymbolBufferHoistPass` 与 pass registry 观察公开导入面。
+- `test/passes/test_registry.py` 只能通过 `kernel_gen.passes.hoist.symbol_buffer_hoist`、`kernel_gen.passes.SymbolBufferHoistPass` 与 pass registry 观察公开导入面。
 
 ### 最小改写合同
 
@@ -222,7 +222,7 @@ symbol.for value {
 - 使用示例：
 
   ```python
-  from kernel_gen.passes.symbol_buffer_hoist import SymbolBufferHoistPass
+  from kernel_gen.passes.hoist.symbol_buffer_hoist import SymbolBufferHoistPass
 
   assert SymbolBufferHoistPass.name == "symbol-buffer-hoist"
   ```
@@ -316,7 +316,7 @@ symbol.for value {
 | TC-PASS-SYMBOL-BUFFER-HOIST-009 | pass 改写 | loop-invariant alias op 单层外提 | 准备 alloc/free 成对安全，且 `dma.view` / `dma.reshape` / `dma.subview` / `dma.reinterpret` 的 source 与布局 operand 全部支配当前 loop。 | 运行对应 loop-invariant alias 外提测试。 | alloc/free 成对外提；alias op 位于 loop 前；data use 留在 loop 内捕获 alias result。 | `pytest -q test/passes/test_symbol_buffer_hoist.py -k "loop_invariant_dma_view or loop_invariant_dma_reshape or loop_invariant_dma_subview or loop_invariant_dma_reinterpret"` |
 | TC-PASS-SYMBOL-BUFFER-HOIST-010 | no-op 边界 | alias operand 依赖当前 loop | 准备 `dma.view` offset、`dma.reshape` shape 或 `dma.subview` size 依赖当前 iterator / loop-carried 值。 | 运行 `test_symbol_buffer_hoist_keeps_dma_view_when_offset_depends_on_loop_iterator`、`test_symbol_buffer_hoist_keeps_dma_reshape_when_shape_is_loop_carried`、`test_symbol_buffer_hoist_keeps_dma_subview_when_size_is_loop_carried`。 | alloc/free 可按自身规则成对外提；alias op 保持在 loop 内。 | `pytest -q test/passes/test_symbol_buffer_hoist.py -k "keeps_dma_view or keeps_dma_reshape or keeps_dma_subview"` |
 | TC-PASS-SYMBOL-BUFFER-HOIST-011 | 公开入口 | `build_registered_pass("symbol-buffer-hoist")` 返回 `ModulePass` | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_build_registered_symbol_buffer_hoist_pass`。 | 公开入口在“`build_registered_pass("symbol-buffer-hoist")` 返回 `ModulePass`”场景下可导入、构造、注册或按名称发现。 | test/passes/test_symbol_buffer_hoist.py::test_build_registered_symbol_buffer_hoist_pass |
-| TC-PASS-SYMBOL-BUFFER-HOIST-012 | 公开入口 | `kernel_gen.passes.symbol_buffer_hoist.SymbolBufferHoistPass` 与包根 re-export 导入成功 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_public_patterns_are_reachable`。 | 公开入口可导入；公开 getter 返回公开 `RewritePattern` 实例集合，并锁定 canonical module path 下的 pattern 类。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_public_patterns_are_reachable |
+| TC-PASS-SYMBOL-BUFFER-HOIST-012 | 公开入口 | `kernel_gen.passes.hoist.symbol_buffer_hoist.SymbolBufferHoistPass` 与包根 re-export 导入成功 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_public_patterns_are_reachable`。 | 公开入口可导入；公开 getter 返回公开 `RewritePattern` 实例集合，并锁定 canonical module path 下的 pattern 类。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_public_patterns_are_reachable |
 | TC-PASS-SYMBOL-BUFFER-HOIST-013 | pass 改写 | `kernel.*` read 在 reset/write 之后可纳入 alloc/free 生命周期证明 | 准备 loop 内 `dma.alloc`，先 `dma.fill` 写入该 buffer，再由 `kernel.*` 读取，最后唯一 `dma.free`。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_alloc_when_kernel_read_is_reset_by_fill`。 | alloc 位于 loop 前，free 位于 loop 后，`dma.fill` 与 `kernel.*` use 留在 loop 内并捕获外提后的 buffer。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_alloc_when_kernel_read_is_reset_by_fill |
 | TC-PASS-SYMBOL-BUFFER-HOIST-014 | no-op 边界 | `kernel.*` read 早于 reset/write | 准备 loop 内 `dma.alloc` 直接被 `kernel.*` 作为输入读取，之后唯一 `dma.free`。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_keeps_alloc_when_kernel_reads_before_reset`。 | alloc/free 保持 loop 内，避免把未初始化 read 变成跨迭代共享状态。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_keeps_alloc_when_kernel_reads_before_reset |
 | TC-PASS-SYMBOL-BUFFER-HOIST-015 | pass 改写 | nested loop 中 alias result 流向公开 `MemoryEffect` 可判定的 `kernel.*` operand | 准备 source/layout operand 全部支配当前 loop 的 `dma.reshape` / `dma.view` / `dma.subview` / `dma.reinterpret`，其 result 在 nested loop 中被 `kernel.*` 捕获。 | 运行 `pytest -q test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_nested_alias_result_used_by_kernel_op`。 | alias op 通过 fixed-point 外提到最近安全位置；nested `kernel.*` use 保持原位并捕获外提 alias result。 | test/passes/test_symbol_buffer_hoist.py::test_symbol_buffer_hoist_hoists_nested_alias_result_used_by_kernel_op |

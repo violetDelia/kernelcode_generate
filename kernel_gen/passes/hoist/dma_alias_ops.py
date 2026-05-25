@@ -21,13 +21,13 @@ API 列表:
 
 使用示例:
 - from xdsl.context import Context
-- from kernel_gen.passes.hoist_dma_alias_ops import HoistDmaAliasOpsPass
+- from kernel_gen.passes.hoist.dma_alias_ops import HoistDmaAliasOpsPass
 - HoistDmaAliasOpsPass().apply(Context(), module)
 
 关联文件:
 - spec: [spec/pass/hoist_dma_alias_ops.md](spec/pass/hoist_dma_alias_ops.md)
 - test: [test/passes/test_hoist_dma_alias_ops.py](test/passes/test_hoist_dma_alias_ops.py)
-- 功能实现: [kernel_gen/passes/hoist_dma_alias_ops.py](kernel_gen/passes/hoist_dma_alias_ops.py)
+- 功能实现: [kernel_gen/passes/hoist/dma_alias_ops.py](kernel_gen/passes/hoist/dma_alias_ops.py)
 """
 
 from __future__ import annotations

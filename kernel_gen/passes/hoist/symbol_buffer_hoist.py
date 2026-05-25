@@ -37,7 +37,7 @@ API 列表:
 使用示例:
 - from xdsl.context import Context
 - from xdsl.dialects.builtin import ModuleOp
-- from kernel_gen.passes.symbol_buffer_hoist import SymbolBufferHoistPass
+- from kernel_gen.passes.hoist.symbol_buffer_hoist import SymbolBufferHoistPass
 - module = ModuleOp([])
 - SymbolBufferHoistPass().apply(Context(), module)
 
@@ -45,7 +45,7 @@ API 列表:
 - spec: spec/pass/symbol_buffer_hoist.md
 - test: test/passes/test_symbol_buffer_hoist.py
 - test: test/passes/test_registry.py
-- 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+- 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ class _HoistUsePlan:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+- 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     data_events: tuple["_MemoryEvent", ...]
@@ -125,7 +125,7 @@ class _MemoryEvent:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     use: Use
@@ -148,7 +148,7 @@ def _value_dominates_symbol_for(value: SSAValue, symbol_for: SymbolForOp) -> boo
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     loop_block = symbol_for.body.blocks[0]
@@ -184,7 +184,7 @@ def _shape_is_loop_invariant(op: DmaAllocOp, symbol_for: SymbolForOp) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     return all(_value_dominates_symbol_for(SSAValue.get(value), symbol_for) for value in op.dynamic_shape)
@@ -206,7 +206,7 @@ def _is_supported_data_use(use: Use) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     user = use.operation
@@ -229,7 +229,7 @@ def _is_metadata_query_use(use: Use) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     return use.index == 0 and use.operation.name in {"symbol.get_dim", "symbol.get_stride"}
@@ -251,7 +251,7 @@ def _is_supported_alias_result_use(use: Use) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     user = use.operation
@@ -282,7 +282,7 @@ def _is_supported_alias_source_use(use: Use) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     user = use.operation
@@ -302,7 +302,7 @@ def _collect_direct_uses(result: SSAValue) -> tuple[Use, ...]:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     return tuple(cast_use for cast_use in result.uses)
@@ -321,7 +321,7 @@ def _operation_parent_block(op: Operation) -> Block | None:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     return op.parent_block()
@@ -341,7 +341,7 @@ def _operation_is_in_block_or_descendant(op: Operation, owner_block: Block) -> b
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     op_block = _operation_parent_block(op)
@@ -365,7 +365,7 @@ def _direct_operation_in_block(op: Operation, owner_block: Block) -> Operation |
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     current = op
@@ -394,7 +394,7 @@ def _block_index_map(block: Block) -> dict[Operation, int]:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     return {item: index for index, item in enumerate(block.ops)}
@@ -415,7 +415,7 @@ def _op_dominates_op(producer: Operation, consumer: Operation) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     producer_block = _operation_parent_block(producer)
@@ -445,7 +445,7 @@ def _free_follows_data_events(free_op: DmaFreeOp, data_events: tuple[_MemoryEven
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     if not data_events:
@@ -476,7 +476,7 @@ def _effect_kinds_for_use(use: Use) -> set[MemoryEffectKind] | None:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     effects = get_effects(use.operation)
@@ -500,7 +500,7 @@ def _is_kernel_memory_use(use: Use) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     if not use.operation.name.startswith("kernel."):
@@ -526,7 +526,7 @@ def _is_supported_lifecycle_data_use(use: Use) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     kinds = _effect_kinds_for_use(use)
@@ -547,7 +547,7 @@ def _symbol_value_text(value: SSAValue) -> str | None:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     value_type = SSAValue.get(value).type
@@ -570,7 +570,7 @@ def _symbol_expr_text(value: Attribute) -> str:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     if isinstance(value, SymbolExprAttr):
@@ -592,7 +592,7 @@ def _memory_type_of(value: SSAValue) -> NnMemoryType | None:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     value_type = SSAValue.get(value).type
@@ -615,7 +615,7 @@ def _memory_types_match(lhs: SSAValue, rhs: SSAValue, *, require_same_space: boo
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     lhs_type = SSAValue.get(lhs).type
@@ -645,7 +645,7 @@ def _sizes_cover_memory_shape(sizes: Iterable[SSAValue], memory_type: NnMemoryTy
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     size_texts = tuple(_symbol_value_text(SSAValue.get(size)) for size in sizes)
@@ -667,7 +667,7 @@ def _values_are_symbol_constants(values: Iterable[SSAValue], expected: str) -> b
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     return all(_symbol_value_text(SSAValue.get(value)) == expected for value in values)
@@ -686,7 +686,7 @@ def _shape_product_text(memory_type: NnMemoryType) -> str | None:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     factors: list[str] = []
@@ -712,7 +712,7 @@ def _expected_contiguous_stride_texts(memory_type: NnMemoryType) -> tuple[str, .
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     result: list[str] = []
@@ -740,7 +740,7 @@ def _memory_type_is_contiguous(memory_type: NnMemoryType) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     expected = _expected_contiguous_stride_texts(memory_type)
@@ -764,7 +764,7 @@ def _reinterpret_covers_source(op: DmaReinterpretOp) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     source_type = _memory_type_of(SSAValue.get(op.source))
@@ -796,7 +796,7 @@ def _deslice_writes_full_target(op: DmaDesliceOp) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     target_type = _memory_type_of(SSAValue.get(op.target))
@@ -825,7 +825,7 @@ def _alias_op_covers_source(op: Operation) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     if isinstance(op, DmaReshapeOp):
@@ -867,7 +867,7 @@ def _write_use_covers_root(use: Use, *, alias_covers_root: bool) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     if not alias_covers_root:
@@ -896,7 +896,7 @@ def _is_direct_legacy_output_scratch_use(use: Use, loop_block: Block) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     return isinstance(use.operation, DmaDesliceOp) and use.index == 1 and _operation_parent_block(use.operation) is loop_block
@@ -918,7 +918,7 @@ def _memory_event_from_use(use: Use, *, alias_covers_root: bool, loop_block: Blo
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     if _is_direct_legacy_output_scratch_use(use, loop_block):
@@ -951,7 +951,7 @@ def _data_events_are_reset_before_read(data_events: tuple[_MemoryEvent, ...], lo
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     for event in data_events:
@@ -990,7 +990,7 @@ def _collect_alias_data_events(
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     if alias_op in visited:
@@ -1049,7 +1049,7 @@ def _build_hoist_use_plan(uses: Iterable[Use], loop_block: Block) -> _HoistUsePl
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     collected_uses = tuple(uses)
@@ -1129,7 +1129,7 @@ class DmaAllocInSymbolForHoistPattern(RewritePattern):
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     @op_type_rewrite_pattern
@@ -1148,7 +1148,7 @@ class DmaAllocInSymbolForHoistPattern(RewritePattern):
         关联文件:
         - spec: spec/pass/symbol_buffer_hoist.md
         - test: test/passes/test_symbol_buffer_hoist.py
-        - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+        - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
         """
 
         loop_block = op.parent_block()
@@ -1185,7 +1185,7 @@ def _alias_operands(op: Operation) -> tuple[SSAValue, ...]:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     if isinstance(op, DmaViewOp):
@@ -1216,7 +1216,7 @@ def _alias_result_uses_are_supported(op: Operation, loop_block: Block) -> bool:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     if len(op.results) != 1:
@@ -1250,7 +1250,7 @@ def _hoist_alias_op_if_safe(op: Operation, rewriter: PatternRewriter) -> None:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     loop_block = op.parent_block()
@@ -1298,7 +1298,7 @@ class DmaViewInSymbolForHoistPattern(RewritePattern):
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     @op_type_rewrite_pattern
@@ -1316,7 +1316,7 @@ class DmaViewInSymbolForHoistPattern(RewritePattern):
         关联文件:
         - spec: spec/pass/symbol_buffer_hoist.md
         - test: test/passes/test_symbol_buffer_hoist.py
-        - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+        - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
         """
 
         _hoist_alias_op_if_safe(op, rewriter)
@@ -1352,7 +1352,7 @@ class DmaReshapeInSymbolForHoistPattern(RewritePattern):
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     @op_type_rewrite_pattern
@@ -1370,7 +1370,7 @@ class DmaReshapeInSymbolForHoistPattern(RewritePattern):
         关联文件:
         - spec: spec/pass/symbol_buffer_hoist.md
         - test: test/passes/test_symbol_buffer_hoist.py
-        - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+        - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
         """
 
         _hoist_alias_op_if_safe(op, rewriter)
@@ -1406,7 +1406,7 @@ class DmaSubviewInSymbolForHoistPattern(RewritePattern):
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     @op_type_rewrite_pattern
@@ -1424,7 +1424,7 @@ class DmaSubviewInSymbolForHoistPattern(RewritePattern):
         关联文件:
         - spec: spec/pass/symbol_buffer_hoist.md
         - test: test/passes/test_symbol_buffer_hoist.py
-        - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+        - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
         """
 
         _hoist_alias_op_if_safe(op, rewriter)
@@ -1445,7 +1445,7 @@ class _DmaReinterpretInSymbolForHoistPattern(RewritePattern):
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     @op_type_rewrite_pattern
@@ -1463,7 +1463,7 @@ class _DmaReinterpretInSymbolForHoistPattern(RewritePattern):
         关联文件:
         - spec: spec/pass/symbol_buffer_hoist.md
         - test: test/passes/test_symbol_buffer_hoist.py
-        - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+        - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
         """
 
         _hoist_alias_op_if_safe(op, rewriter)
@@ -1483,7 +1483,7 @@ def get_symbol_buffer_hoist_patterns() -> list[RewritePattern]:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     return [
@@ -1509,7 +1509,7 @@ def _rewrite_module_once(ctx: Context, module: ModuleOp, *, fold: bool) -> None:
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     PatternRewriteWalker(
@@ -1537,7 +1537,7 @@ def _rewrite_module_to_fixed_point(ctx: Context, module: ModuleOp, *, fold: bool
     关联文件:
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     for _iteration in range(8):
@@ -1566,7 +1566,7 @@ class SymbolBufferHoistPass(Pass):
     - spec: spec/pass/symbol_buffer_hoist.md
     - test: test/passes/test_symbol_buffer_hoist.py
     - test: test/passes/test_registry.py
-    - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
     """
 
     name = "symbol-buffer-hoist"
@@ -1587,7 +1587,7 @@ class SymbolBufferHoistPass(Pass):
         - spec: spec/pass/symbol_buffer_hoist.md
         - test: test/passes/test_symbol_buffer_hoist.py
         - test: test/passes/test_registry.py
-        - 功能实现: kernel_gen/passes/symbol_buffer_hoist.py
+        - 功能实现: kernel_gen/passes/hoist/symbol_buffer_hoist.py
         """
 
         module = ensure_builtin_module(module)
@@ -1597,6 +1597,8 @@ class SymbolBufferHoistPass(Pass):
         try:
             module.verify()
         except VerifyException as exc:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"SymbolBufferHoistVerifierError: {exc}") from exc
+        except KernelCodeError as exc:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"SymbolBufferHoistVerifierError: {exc}") from exc
 
 __all__ = [

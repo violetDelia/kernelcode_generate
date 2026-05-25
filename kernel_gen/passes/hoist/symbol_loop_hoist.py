@@ -45,14 +45,14 @@ API 列表:
 使用示例:
 - from xdsl.context import Context
 - from xdsl.dialects.builtin import ModuleOp
-- from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
+- from kernel_gen.passes.hoist.symbol_loop_hoist import SymbolLoopHoistPass
 - module = ModuleOp([])
 - SymbolLoopHoistPass().apply(Context(), module)
 
 关联文件:
 - spec: spec/pass/symbol_loop_hoist.md
 - test: test/passes/test_symbol_loop_hoist.py
-- 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+- 功能实现: kernel_gen/passes/hoist/symbol_loop_hoist.py
 """
 
 from __future__ import annotations
@@ -93,47 +93,56 @@ from kernel_gen.dialect.tuner import TunerParamOp
 from kernel_gen.passes.pass_manager import Pass
 
 
-
-def _hoist_loop_invariant_op(op: Operation, rewriter: PatternRewriter) -> None:
-    """外提当前 `symbol.for` 中循环不变的候选 op。
-
+class _LoopInvariantHoistPattern(RewritePattern):
+    """共享 `symbol.for` loop-invariant 外提规则的私有基类。
 
     功能说明:
-    - 仅在候选 op 位于 `symbol.for` body 内，且全部 operand 都来自当前 loop body 外部时执行外提。
-    - 该 helper 只服务本文件公开 pattern，避免各 pattern 复制同一套父级与 operand 判定逻辑。
+    - 仅服务本文件内公开 hoist pattern，集中维护候选 op 父级和 operand 来源判定。
+    - 不作为公开 pattern API 暴露，避免调用方跨文件依赖内部 rewrite 细节。
 
     使用示例:
-    - _hoist_loop_invariant_op(op, rewriter)
-
-    关联文件:
-    - spec: spec/pass/symbol_loop_hoist.md
-    - test: test/passes/test_symbol_loop_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    - class SymbolConstHoistPattern(_LoopInvariantHoistPattern): ...
     """
 
-    loop_block = getattr(op, "parent_block", lambda: None)()
-    if loop_block is None:
-        return
-    symbol_for = getattr(loop_block, "parent_op", lambda: None)()
-    if not isinstance(symbol_for, SymbolForOp):
-        return
-    for operand in op.operands:
-        value = SSAValue.get(operand)
-        if isinstance(value, BlockArgument):
-            if value.owner is loop_block:
-                return
-            continue
-        owner = getattr(value, "owner", None)
-        if owner is None:
-            continue
-        if getattr(owner, "parent_block", lambda: None)() is loop_block:
+    def _hoist_loop_invariant_op(self, op: Operation, rewriter: PatternRewriter) -> None:
+        """外提当前 `symbol.for` 中循环不变的候选 op。
+
+        功能说明:
+        - 仅在候选 op 位于 `symbol.for` body 内，且全部 operand 都来自当前 loop body 外部时执行外提。
+        - 该私有方法只服务本文件公开 pattern，避免各 pattern 复制同一套父级与 operand 判定逻辑。
+
+        使用示例:
+        - self._hoist_loop_invariant_op(op, rewriter)
+
+        关联文件:
+        - spec: spec/pass/symbol_loop_hoist.md
+        - test: test/passes/test_symbol_loop_hoist.py
+        - 功能实现: kernel_gen/passes/hoist/symbol_loop_hoist.py
+        """
+
+        loop_block = getattr(op, "parent_block", lambda: None)()
+        if loop_block is None:
             return
-    op.detach()
-    rewriter.insert_op(op, InsertPoint.before(symbol_for))
-    rewriter.notify_op_modified(symbol_for)
+        symbol_for = getattr(loop_block, "parent_op", lambda: None)()
+        if not isinstance(symbol_for, SymbolForOp):
+            return
+        for operand in op.operands:
+            value = SSAValue.get(operand)
+            if isinstance(value, BlockArgument):
+                if value.owner is loop_block:
+                    return
+                continue
+            owner = getattr(value, "owner", None)
+            if owner is None:
+                continue
+            if getattr(owner, "parent_block", lambda: None)() is loop_block:
+                return
+        op.detach()
+        rewriter.insert_op(op, InsertPoint.before(symbol_for))
+        rewriter.notify_op_modified(symbol_for)
 
 
-class SymbolConstHoistPattern(RewritePattern):
+class SymbolConstHoistPattern(_LoopInvariantHoistPattern):
     """`symbol.const` 外提 pattern。
 
     功能说明:
@@ -154,10 +163,10 @@ class SymbolConstHoistPattern(RewritePattern):
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolConstOp, rewriter: PatternRewriter, /) -> None:
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
-class TunerParamHoistPattern(RewritePattern):
+class TunerParamHoistPattern(_LoopInvariantHoistPattern):
     """`tuner.param` 外提 pattern。
 
     功能说明:
@@ -178,10 +187,10 @@ class TunerParamHoistPattern(RewritePattern):
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: TunerParamOp, rewriter: PatternRewriter, /) -> None:
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
-class SymbolGetDimHoistPattern(RewritePattern):
+class SymbolGetDimHoistPattern(_LoopInvariantHoistPattern):
     """`symbol.get_dim` 外提 pattern。
 
     功能说明:
@@ -202,10 +211,10 @@ class SymbolGetDimHoistPattern(RewritePattern):
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolGetDimOp, rewriter: PatternRewriter, /) -> None:
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
-class SymbolGetStrideHoistPattern(RewritePattern):
+class SymbolGetStrideHoistPattern(_LoopInvariantHoistPattern):
     """`symbol.get_stride` 外提 pattern。
 
     功能说明:
@@ -226,10 +235,10 @@ class SymbolGetStrideHoistPattern(RewritePattern):
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolGetStrideOp, rewriter: PatternRewriter, /) -> None:
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
-class SymbolAddHoistPattern(RewritePattern):
+class SymbolAddHoistPattern(_LoopInvariantHoistPattern):
     """`symbol.add` 外提 pattern。
 
     功能说明:
@@ -250,10 +259,10 @@ class SymbolAddHoistPattern(RewritePattern):
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolAddOp, rewriter: PatternRewriter, /) -> None:
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
-class SymbolSubHoistPattern(RewritePattern):
+class SymbolSubHoistPattern(_LoopInvariantHoistPattern):
     """`symbol.sub` 外提 pattern。
 
     功能说明:
@@ -274,10 +283,10 @@ class SymbolSubHoistPattern(RewritePattern):
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolSubOp, rewriter: PatternRewriter, /) -> None:
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
-class SymbolMulHoistPattern(RewritePattern):
+class SymbolMulHoistPattern(_LoopInvariantHoistPattern):
     """`symbol.mul` 外提 pattern。
 
     功能说明:
@@ -298,10 +307,10 @@ class SymbolMulHoistPattern(RewritePattern):
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolMulOp, rewriter: PatternRewriter, /) -> None:
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
-class SymbolDivHoistPattern(RewritePattern):
+class SymbolDivHoistPattern(_LoopInvariantHoistPattern):
     """`symbol.div` 外提 pattern。
 
     功能说明:
@@ -322,10 +331,10 @@ class SymbolDivHoistPattern(RewritePattern):
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolDivOp, rewriter: PatternRewriter, /) -> None:
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
-class SymbolFloorDivHoistPattern(RewritePattern):
+class SymbolFloorDivHoistPattern(_LoopInvariantHoistPattern):
     """`symbol.floordiv` 外提 pattern。
 
     功能说明:
@@ -346,10 +355,10 @@ class SymbolFloorDivHoistPattern(RewritePattern):
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolFloorDivOp, rewriter: PatternRewriter, /) -> None:
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
-class SymbolMinHoistPattern(RewritePattern):
+class SymbolMinHoistPattern(_LoopInvariantHoistPattern):
     """`symbol.min` 外提 pattern。
 
 
@@ -376,15 +385,15 @@ class SymbolMinHoistPattern(RewritePattern):
     关联文件:
     - spec: spec/pass/symbol_loop_hoist.md
     - test: test/passes/test_symbol_loop_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_loop_hoist.py
     """
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolMinOp, rewriter: PatternRewriter, /) -> None:
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
-class SymbolMaxHoistPattern(RewritePattern):
+class SymbolMaxHoistPattern(_LoopInvariantHoistPattern):
     """`symbol.max` 外提 pattern。
 
 
@@ -411,15 +420,15 @@ class SymbolMaxHoistPattern(RewritePattern):
     关联文件:
     - spec: spec/pass/symbol_loop_hoist.md
     - test: test/passes/test_symbol_loop_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_loop_hoist.py
     """
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: SymbolMaxOp, rewriter: PatternRewriter, /) -> None:
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
-class ArithConstantHoistPattern(RewritePattern):
+class ArithConstantHoistPattern(_LoopInvariantHoistPattern):
     """`arith.constant` 外提 pattern。
 
     功能说明:
@@ -444,7 +453,7 @@ class ArithConstantHoistPattern(RewritePattern):
     关联文件:
     - spec: spec/pass/symbol_loop_hoist.md
     - test: test/passes/test_symbol_loop_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_loop_hoist.py
     """
 
     @op_type_rewrite_pattern
@@ -459,10 +468,10 @@ class ArithConstantHoistPattern(RewritePattern):
         - ArithConstantHoistPattern().match_and_rewrite(op, rewriter)
         """
 
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
-class MemoryGetDataHoistPattern(RewritePattern):
+class MemoryGetDataHoistPattern(_LoopInvariantHoistPattern):
     """`memory.get_data` 外提 pattern。
 
     功能说明:
@@ -487,7 +496,7 @@ class MemoryGetDataHoistPattern(RewritePattern):
     关联文件:
     - spec: spec/pass/symbol_loop_hoist.md
     - test: test/passes/test_symbol_loop_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_loop_hoist.py
     """
 
     @op_type_rewrite_pattern
@@ -502,10 +511,10 @@ class MemoryGetDataHoistPattern(RewritePattern):
         - MemoryGetDataHoistPattern().match_and_rewrite(op, rewriter)
         """
 
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
-class SymbolCastHoistPattern(RewritePattern):
+class SymbolCastHoistPattern(_LoopInvariantHoistPattern):
     """`symbol.cast` 外提 pattern。
 
     功能说明:
@@ -530,7 +539,7 @@ class SymbolCastHoistPattern(RewritePattern):
     关联文件:
     - spec: spec/pass/symbol_loop_hoist.md
     - test: test/passes/test_symbol_loop_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_loop_hoist.py
     """
 
     @op_type_rewrite_pattern
@@ -545,10 +554,10 @@ class SymbolCastHoistPattern(RewritePattern):
         - SymbolCastHoistPattern().match_and_rewrite(op, rewriter)
         """
 
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
-class SymbolNeHoistPattern(RewritePattern):
+class SymbolNeHoistPattern(_LoopInvariantHoistPattern):
     """`symbol.ne` 外提 pattern。
 
     功能说明:
@@ -573,7 +582,7 @@ class SymbolNeHoistPattern(RewritePattern):
     关联文件:
     - spec: spec/pass/symbol_loop_hoist.md
     - test: test/passes/test_symbol_loop_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_loop_hoist.py
     """
 
     @op_type_rewrite_pattern
@@ -588,7 +597,7 @@ class SymbolNeHoistPattern(RewritePattern):
         - SymbolNeHoistPattern().match_and_rewrite(op, rewriter)
         """
 
-        _hoist_loop_invariant_op(op, rewriter)
+        self._hoist_loop_invariant_op(op, rewriter)
 
 
 def get_symbol_loop_hoist_patterns() -> list[RewritePattern]:
@@ -607,7 +616,7 @@ def get_symbol_loop_hoist_patterns() -> list[RewritePattern]:
     关联文件:
     - spec: spec/pass/symbol_loop_hoist.md
     - test: test/passes/test_symbol_loop_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_loop_hoist.py
     """
 
     return [
@@ -646,7 +655,7 @@ class SymbolLoopHoistPass(Pass):
     关联文件:
     - spec: spec/pass/symbol_loop_hoist.md
     - test: test/passes/test_symbol_loop_hoist.py
-    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_loop_hoist.py
     """
 
     name = "symbol-loop-hoist"
@@ -669,7 +678,7 @@ class SymbolLoopHoistPass(Pass):
         关联文件:
         - spec: spec/pass/symbol_loop_hoist.md
         - test: test/passes/test_symbol_loop_hoist.py
-        - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+        - 功能实现: kernel_gen/passes/hoist/symbol_loop_hoist.py
         """
 
         if ctx.get_optional_dialect(Symbol.name) is None:
@@ -685,6 +694,8 @@ class SymbolLoopHoistPass(Pass):
         try:
             module.verify()
         except VerifyException as exc:
+            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"SymbolLoopHoistVerifierError: {exc}") from exc
+        except KernelCodeError as exc:
             raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, f"SymbolLoopHoistVerifierError: {exc}") from exc
 
 __all__ = [

@@ -8,13 +8,13 @@
 - pytest -q test/passes/test_symbol_loop_hoist.py
 
 当前覆盖率信息:
-- `kernel_gen.passes.symbol_loop_hoist`：`80%`（Stmts=135 Miss=20 Branch=66 BrPart=14；最近一次统计：2026-04-24 04:42:42 +0800）。
+- `kernel_gen.passes.hoist.symbol_loop_hoist`：`80%`（Stmts=135 Miss=20 Branch=66 BrPart=14；最近一次统计：2026-04-24 04:42:42 +0800）。
 
 覆盖率命令:
-- `pytest -q --cov=kernel_gen.passes.symbol_loop_hoist --cov-branch --cov-report=term-missing test/passes/test_symbol_loop_hoist.py`
+- `pytest -q --cov=kernel_gen.passes.hoist.symbol_loop_hoist --cov-branch --cov-report=term-missing test/passes/test_symbol_loop_hoist.py`
 
 关联文件:
-- 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+- 功能实现: kernel_gen/passes/hoist/symbol_loop_hoist.py
 - Spec 文档: spec/pass/symbol_loop_hoist.md
 - 测试文件: test/passes/test_symbol_loop_hoist.py
 """
@@ -63,7 +63,7 @@ from kernel_gen.dialect.symbol import (
 from kernel_gen.dialect.tuner import TunerParamOp
 from kernel_gen.tools.ircheck import run_ircheck_text
 
-pass_module = importlib.import_module("kernel_gen.passes.symbol_loop_hoist")
+pass_module = importlib.import_module("kernel_gen.passes.hoist.symbol_loop_hoist")
 ArithConstantHoistPattern = pass_module.ArithConstantHoistPattern
 MemoryGetDataHoistPattern = pass_module.MemoryGetDataHoistPattern
 SymbolAddHoistPattern = pass_module.SymbolAddHoistPattern
@@ -260,7 +260,7 @@ def _make_module_for_symbol_min_max_hoist() -> ModuleOp:
     - module = _make_module_for_symbol_min_max_hoist()
 
     关联文件:
-    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/hoist/symbol_loop_hoist.py
     - Spec 文档: spec/pass/symbol_loop_hoist.md
     - 测试文件: test/passes/test_symbol_loop_hoist.py
     """
@@ -450,7 +450,7 @@ def _make_module_with_step_zero() -> ModuleOp:
 
 # TC-SLH-001
 # 测试目的: 验证 loop 内 invariant `symbol.get_dim/get_stride` 会被向上提一层到 `symbol.for` 之前。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_hoists_symbol_dim_ops() -> None:
@@ -470,7 +470,7 @@ def test_symbol_loop_hoist_hoists_symbol_dim_ops() -> None:
 
 # TC-SLH-001A
 # 测试目的: 验证 loop 内的 invariant `symbol.const` 会被向上提一层到 `symbol.for` 之前。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_hoists_symbol_const() -> None:
@@ -494,7 +494,7 @@ def test_symbol_loop_hoist_is_exported_from_lowering_package() -> None:
 
 # TC-SLH-001B
 # 测试目的: 验证公开 pattern 与 getter 可导入，且 getter 顺序稳定。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_patterns_are_public_and_stable() -> None:
@@ -654,7 +654,7 @@ builtin.module {
 
 # TC-SLH-001C
 # 测试目的: 验证 loop 内 invariant `tuner.param` 会被向上提一层到 `symbol.for` 之前。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_hoists_tuner_param() -> None:
@@ -674,7 +674,7 @@ def test_symbol_loop_hoist_hoists_tuner_param() -> None:
 
 # TC-SLH-001D
 # 测试目的: 验证 loop 内 invariant `symbol.add/sub/mul/div/floordiv` 会被向上提一层到 `symbol.for` 之前。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_hoists_symbol_elewise_ops() -> None:
@@ -703,7 +703,7 @@ def test_symbol_loop_hoist_hoists_symbol_elewise_ops() -> None:
 
 # TC-SLH-001D1
 # 测试目的: 验证 loop 内 invariant `symbol.min/max` 会被向上提一层到 `symbol.for` 之前。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_hoists_symbol_min_max_ops() -> None:
@@ -723,7 +723,7 @@ def test_symbol_loop_hoist_hoists_symbol_min_max_ops() -> None:
 
 # TC-SLH-001E
 # 测试目的: 验证 `SymbolLoopHoistPass` 作为 ModulePass 可直接通过 apply(ctx, module) 执行。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_apply_behaves_like_module_pass() -> None:
@@ -741,7 +741,7 @@ def test_symbol_loop_hoist_apply_behaves_like_module_pass() -> None:
 
 # TC-SLH-001F
 # 测试目的: 验证 module 不含 `symbol.for` 时保持 no-op。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_keeps_module_without_symbol_for_no_op() -> None:
@@ -757,7 +757,7 @@ def test_symbol_loop_hoist_keeps_module_without_symbol_for_no_op() -> None:
 
 # TC-SLH-002
 # 测试目的: 验证依赖 loop iv 的 `symbol.add` 保持在 loop 内。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_keeps_loop_carried_symbol_add_in_loop() -> None:
@@ -776,7 +776,7 @@ def test_symbol_loop_hoist_keeps_loop_carried_symbol_add_in_loop() -> None:
 
 # TC-SLH-002A
 # 测试目的: 验证依赖 loop-local 生产者的 get_dim/get_stride 与 symbol 算术保持在 loop 内。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_keeps_loop_local_symbol_inputs_in_loop() -> None:
@@ -813,7 +813,7 @@ def test_symbol_loop_hoist_keeps_loop_local_symbol_inputs_in_loop() -> None:
 
 # TC-SLH-002B
 # 测试目的: 验证依赖 loop-carried 值的 symbol 算术白名单全部保持在 loop 内。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_keeps_loop_carried_symbol_elewise_in_loop() -> None:
@@ -840,7 +840,7 @@ def test_symbol_loop_hoist_keeps_loop_carried_symbol_elewise_in_loop() -> None:
 
 # TC-SLH-007
 # 测试目的: 验证 `module.verify()` 失败会被包装为固定失败短语 `SymbolLoopHoistVerifierError`。
-# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_loop_hoist.py
 # 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/passes/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_verifier_errors_are_wrapped() -> None:
