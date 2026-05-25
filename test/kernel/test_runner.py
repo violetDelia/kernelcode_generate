@@ -79,7 +79,7 @@ def test_run_numpy_demo_rejects_numpy_integer_runtime_arg() -> None:
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
     expected = lhs + rhs
 
-    with pytest.raises(TypeError, match="real_args.*np.ndarray or int"):
+    with pytest.raises(TypeError, match="real_args.*np.ndarray, int or None"):
         run_numpy_demo(
             "test_runner/reject_numpy_integer_tile",
             runner_dynamic_tile_add_kernel,

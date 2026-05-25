@@ -7,6 +7,7 @@ API 列表:
 - `Kernel`
 - `class KernelBinaryElewiseOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, *, kind: str | StringAttr, space: NnMemorySpaceAttr)`
 - `class KernelMatmulOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr)`
+- `class KernelMatmulFusionOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, acc: SSAValue | Operation, *, space: NnMemorySpaceAttr)`
 - `class KernelImg2col1dOp(out: SSAValue | Operation, input_value: SSAValue | Operation, k: SSAValue | Operation, s: SSAValue | Operation, d: SSAValue | Operation, p_left: SSAValue | Operation, p_right: SSAValue | Operation, space: NnMemorySpaceAttr)`
 - `class KernelImg2col2dOp(out: SSAValue | Operation, input_value: SSAValue | Operation, kh: SSAValue | Operation, kw: SSAValue | Operation, sh: SSAValue | Operation, sw: SSAValue | Operation, dh: SSAValue | Operation, dw: SSAValue | Operation, ph: SSAValue | Operation, pw: SSAValue | Operation, pl: SSAValue | Operation, pr: SSAValue | Operation, space: NnMemorySpaceAttr)`
 - `class KernelSelectOp(out: SSAValue | Operation, cond: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr)`
@@ -27,14 +28,15 @@ from __future__ import annotations
 
 from xdsl.ir import Dialect
 
-from .operation import KernelBinaryElewiseOp, KernelExpOp, KernelImg2col1dOp, KernelImg2col2dOp, KernelMatmulOp, KernelReduceMinOp, KernelReduceOp, KernelSelectOp
+from .operation import KernelBinaryElewiseOp, KernelExpOp, KernelImg2col1dOp, KernelImg2col2dOp, KernelMatmulFusionOp, KernelMatmulOp, KernelReduceMinOp, KernelReduceOp, KernelSelectOp
 
-Kernel = Dialect("kernel", [KernelBinaryElewiseOp, KernelMatmulOp, KernelImg2col1dOp, KernelImg2col2dOp, KernelSelectOp, KernelExpOp, KernelReduceOp, KernelReduceMinOp], [])
+Kernel = Dialect("kernel", [KernelBinaryElewiseOp, KernelMatmulOp, KernelMatmulFusionOp, KernelImg2col1dOp, KernelImg2col2dOp, KernelSelectOp, KernelExpOp, KernelReduceOp, KernelReduceMinOp], [])
 
 __all__ = [
     "Kernel",
     "KernelBinaryElewiseOp",
     "KernelMatmulOp",
+    "KernelMatmulFusionOp",
     "KernelImg2col1dOp",
     "KernelImg2col2dOp",
     "KernelSelectOp",

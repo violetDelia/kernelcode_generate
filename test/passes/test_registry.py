@@ -1294,6 +1294,29 @@ def test_build_registered_kernel_pattern_passes() -> None:
     assert "transform-apply" in list_registered_passes()
 
 
+# TC-REGISTRY-007N
+# 功能说明: 验证 kernel-aggregate 与 kernel-matmul-fusion-decompose 内置 pass 可通过 registry 稳定构造。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_kernel_matmul_fusion_passes
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_kernel_matmul_fusion_passes() -> None:
+    load_builtin_passes()
+
+    aggregate_pass = build_registered_pass("kernel-aggregate", {"matmul-acc": "true", "fold": "false"})
+    decompose_pass = build_registered_pass("kernel-matmul-fusion-decompose", {"fold": "false"})
+
+    assert aggregate_pass.name == "kernel-aggregate"
+    assert aggregate_pass.matmul_acc is True
+    assert aggregate_pass.fold is False
+    assert aggregate_pass.__class__.__module__ == "kernel_gen.passes.kernel_aggregate"
+    assert decompose_pass.name == "kernel-matmul-fusion-decompose"
+    assert decompose_pass.fold is False
+    assert decompose_pass.__class__.__module__ == "kernel_gen.passes.kernel_matmul_fusion_decompose"
+    assert "kernel-aggregate" in list_registered_passes()
+    assert "kernel-matmul-fusion-decompose" in list_registered_passes()
+
+
 # TC-REGISTRY-007M
 # 功能说明: 验证 kernel-pattern-attach 与 transform-apply 通过 registry 构造时拒绝未知专属 option。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_kernel_pattern_passes_reject_unknown_options
@@ -1322,6 +1345,41 @@ def test_build_registered_kernel_pattern_passes_reject_unknown_options() -> None
         build_registered_pass("transform-apply", {"extra": "1"})
 
 
+# TC-REGISTRY-007O
+# 功能说明: 验证 kernel-aggregate 与 kernel-matmul-fusion-decompose 通过 registry 构造时拒绝非法 options。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_kernel_matmul_fusion_passes_reject_options
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_build_registered_kernel_matmul_fusion_passes_reject_options() -> None:
+    load_builtin_passes()
+
+    with pytest.raises(
+        KernelCodeError,
+        match=(
+            r"^PassRegistryError: pass 'kernel-aggregate' option error: "
+            r".*kernel-aggregate options unknown: extra"
+        ),
+    ):
+        build_registered_pass("kernel-aggregate", {"extra": "1"})
+    with pytest.raises(
+        KernelCodeError,
+        match=(
+            r"^PassRegistryError: pass 'kernel-aggregate' option error: "
+            r".*kernel-aggregate options matmul-acc expects bool"
+        ),
+    ):
+        build_registered_pass("kernel-aggregate", {"matmul-acc": "maybe"})
+    with pytest.raises(
+        KernelCodeError,
+        match=(
+            r"^PassRegistryError: pass 'kernel-matmul-fusion-decompose' option error: "
+            r".*kernel-matmul-fusion-decompose options unknown: mode"
+        ),
+    ):
+        build_registered_pass("kernel-matmul-fusion-decompose", {"mode": "fast"})
+
+
 # TC-REGISTRY-008
 # 功能说明: 验证 load_builtin_passes 满足幂等性，并提供基础内置 pass/pipeline、default-lowering 与 npu-demo-lowering。
 # 使用示例: pytest -q test/passes/test_registry.py -k test_load_builtin_passes_is_idempotent
@@ -1343,6 +1401,8 @@ def test_load_builtin_passes_is_idempotent() -> None:
     assert "symbol-hoist-pipeline" in list_registered_passes()
     assert "kernel-pattern-attach" in list_registered_passes()
     assert "transform-apply" in list_registered_passes()
+    assert "kernel-aggregate" in list_registered_passes()
+    assert "kernel-matmul-fusion-decompose" in list_registered_passes()
     assert "no-op-pipeline" in list_registered_pipelines()
     assert "default-lowering" in list_registered_pipelines()
     assert "npu-demo-lowering" in list_registered_pipelines()

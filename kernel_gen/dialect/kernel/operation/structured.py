@@ -1,10 +1,11 @@
 """kernel structured operations.
 
 功能说明:
-- 定义 kernel.matmul、kernel.img2col1d 与 kernel.img2col2d op。
+- 定义 kernel.matmul、kernel.matmul_fusion、kernel.img2col1d 与 kernel.img2col2d op。
 
 API 列表:
 - `class KernelMatmulOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr)`
+- `class KernelMatmulFusionOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, acc: SSAValue | Operation, *, space: NnMemorySpaceAttr)`
 - `class KernelImg2col1dOp(...)`
 - `class KernelImg2col2dOp(...)`
 
@@ -38,6 +39,7 @@ from xdsl.dialects.builtin import (
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, traits_def
 from xdsl.traits import EffectInstance, MemoryEffect, MemoryEffectKind
+from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
@@ -98,6 +100,40 @@ class _KernelUnaryMemoryEffect(MemoryEffect):
         return {
             EffectInstance(MemoryEffectKind.WRITE, SSAValue.get(op.out)),  # type: ignore[attr-defined]
             EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.input)),  # type: ignore[attr-defined]
+        }
+
+class _KernelMatmulFusionMemoryEffect(MemoryEffect):
+    """matmul_fusion 的 MemoryEffect trait。
+
+    功能说明:
+    - 暴露 out 的 READ/WRITE 与 lhs/rhs 的 READ，匹配 acc=true 时的累加语义。
+
+    使用示例:
+    - effects = _KernelMatmulFusionMemoryEffect.get_effects(op)
+    """
+
+    @classmethod
+    def get_effects(cls, op: Operation) -> set[EffectInstance]:
+        """返回 kernel.matmul_fusion 的 MemoryEffect 集合。
+
+        功能说明:
+        - `out` 在 acc=true 分支需要读取旧值并写回新值，因此暴露 READ 和 WRITE。
+        - `lhs/rhs` 只读；`acc` 是标量控制 operand，不暴露 memory effect。
+
+        使用示例:
+        - effects = _KernelMatmulFusionMemoryEffect.get_effects(op)
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/kernel/test_kernel.py
+        - 功能实现: kernel_gen/dialect/kernel/
+        """
+
+        return {
+            EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.out)),  # type: ignore[attr-defined]
+            EffectInstance(MemoryEffectKind.WRITE, SSAValue.get(op.out)),  # type: ignore[attr-defined]
+            EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.lhs)),  # type: ignore[attr-defined]
+            EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.rhs)),  # type: ignore[attr-defined]
         }
 
 def _verify_element_type_match(types: Iterable[NnMemoryType], message: str) -> None:
@@ -178,6 +214,58 @@ def _verify_matmul_shape(
             ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected="kernel.matmul result shape must match lhs/rhs",
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
+            )
+        )
+
+def _verify_matmul_fusion_shape(
+    lhs_shape: Sequence[Attribute],
+    rhs_shape: Sequence[Attribute],
+    out_shape: Sequence[Attribute],
+) -> None:
+    """校验 kernel.matmul_fusion 的形状约束。
+
+    功能说明:
+    - 要求 lhs/rhs/out 皆为 rank-2。
+    - 要求 `lhs=[M, K]`、`rhs=[K, N]`、`out=[M, N]` 机械一致。
+    - 使用 matmul_fusion 专属稳定错误短语，避免与旧 kernel.matmul 合同混淆。
+
+    使用示例:
+    - _verify_matmul_fusion_shape(lhs.shape.data, rhs.shape.data, out.shape.data)
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/kernel/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel/
+    """
+
+    lhs_shape = list(lhs_shape)
+    rhs_shape = list(rhs_shape)
+    out_shape = list(out_shape)
+    if len(lhs_shape) != 2 or len(rhs_shape) != 2 or len(out_shape) != 2:
+        raise VerifyException(
+            ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="kernel.matmul_fusion requires rank-2 memory types",
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
+            )
+        )
+    if lhs_shape[1] != rhs_shape[0]:
+        raise VerifyException(
+            ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="kernel.matmul_fusion contracting dimensions must match",
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
+            )
+        )
+    if out_shape[0] != lhs_shape[0] or out_shape[1] != rhs_shape[1]:
+        raise VerifyException(
+            ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="kernel.matmul_fusion result shape must match lhs/rhs",
                 actual=ERROR_ACTUAL,
                 action=ERROR_ACTION,
             )
@@ -414,6 +502,100 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
             [lhs_type, rhs_type, out_type],
             "kernel.matmul element_type must match across operands",
         )
+
+
+@irdl_op_definition
+class KernelMatmulFusionOp(IRDLOperation):
+    """kernel.matmul_fusion。
+
+    功能说明:
+    - 结构化矩阵乘累加中间 op，输入输出均为 nn.memory，acc 为 i1 标量。
+    - `acc=false` 表示覆盖写 out，`acc=true` 表示累加写 out。
+    - 本 op 只作为 npu-demo lowering 中间 IR，进入 source/emit 前必须由分解 pass 拆回既有 op。
+
+    使用示例:
+    - KernelMatmulFusionOp(out, lhs, rhs, acc, space=_make_space("tsm"))
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/kernel/test_kernel.py
+    - 功能实现: kernel_gen/dialect/kernel/
+    """
+
+    name = "kernel.matmul_fusion"
+    traits = traits_def(_KernelMatmulFusionMemoryEffect())
+
+    out = operand_def(NnMemoryType)
+    lhs = operand_def(NnMemoryType)
+    rhs = operand_def(NnMemoryType)
+    acc = operand_def(Attribute)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        out: SSAValue | Operation,
+        lhs: SSAValue | Operation,
+        rhs: SSAValue | Operation,
+        acc: SSAValue | Operation,
+        *,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 kernel.matmul_fusion op。
+
+        功能说明:
+        - 按公开 `out/lhs/rhs/acc` operand 顺序保存四个 operand 与 space 属性。
+        - 不生成 SSA result，结果通过 out memory 写回。
+
+        使用示例:
+        - KernelMatmulFusionOp(out, lhs, rhs, acc, space=space)
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/kernel/test_kernel.py
+        - 功能实现: kernel_gen/dialect/kernel/
+        """
+
+        super().__init__(operands=[out, lhs, rhs, acc], attributes={"space": space})
+
+    def verify_(self) -> None:
+        """校验 kernel.matmul_fusion operand 与输出约束。
+
+        功能说明:
+        - 校验矩阵乘法 shape 合同、element type 一致性、acc=i1 与 space 属性合法性。
+        - 错误短语固定为 `kernel.matmul_fusion ...`，供公开 expectation 和 pytest 匹配。
+
+        使用示例:
+        - KernelMatmulFusionOp(out, lhs, rhs, acc, space=space).verify_()
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/kernel/test_kernel.py
+        - 功能实现: kernel_gen/dialect/kernel/
+        """
+
+        lhs_type = verify_memory_type(self.lhs.type, "lhs", scene=_ERROR_SCENE)
+        rhs_type = verify_memory_type(self.rhs.type, "rhs", scene=_ERROR_SCENE)
+        out_type = verify_memory_type(self.out.type, "out", scene=_ERROR_SCENE)
+        self.space.verify()
+        if SSAValue.get(self.acc).type != i1:
+            raise VerifyException(
+                ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.matmul_fusion acc must be i1",
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
+                )
+            )
+        _verify_matmul_fusion_shape(lhs_type.shape.data, rhs_type.shape.data, out_type.shape.data)
+        if lhs_type.element_type != rhs_type.element_type or lhs_type.element_type != out_type.element_type:
+            raise VerifyException(
+                ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.matmul_fusion element_type must match across operands",
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
+                )
+            )
 
 
 @irdl_op_definition
@@ -828,6 +1010,7 @@ class KernelImg2col2dOp(IRDLOperation):
 
 __all__ = [
     "KernelMatmulOp",
+    "KernelMatmulFusionOp",
     "KernelImg2col1dOp",
     "KernelImg2col2dOp",
 ]

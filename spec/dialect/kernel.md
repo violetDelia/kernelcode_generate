@@ -15,6 +15,7 @@
 - `class KernelReduceOp(out: SSAValue | Operation, input_value: SSAValue | Operation, *, kind: str | StringAttr, axis: int | IntegerAttr | IntAttr, keepdim: bool | int | IntegerAttr | IntAttr, space: NnMemorySpaceAttr)`
 - `class KernelReduceMinOp(out: SSAValue | Operation, input_value: SSAValue | Operation, axis: int | IntegerAttr | IntAttr, keepdim: bool | int | IntegerAttr | IntAttr, space: NnMemorySpaceAttr)`
 - `class KernelMatmulOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr)`
+- `class KernelMatmulFusionOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, acc: SSAValue | Operation, *, space: NnMemorySpaceAttr)`
 - `class KernelImg2col1dOp(out: SSAValue | Operation, input_value: SSAValue | Operation, k: SSAValue | Operation, s: SSAValue | Operation, d: SSAValue | Operation, p_left: SSAValue | Operation, p_right: SSAValue | Operation, space: NnMemorySpaceAttr)`
 - `class KernelImg2col2dOp(out: SSAValue | Operation, input_value: SSAValue | Operation, kh: SSAValue | Operation, kw: SSAValue | Operation, sh: SSAValue | Operation, sw: SSAValue | Operation, dh: SSAValue | Operation, dw: SSAValue | Operation, ph: SSAValue | Operation, pw: SSAValue | Operation, pl: SSAValue | Operation, pr: SSAValue | Operation, space: NnMemorySpaceAttr)`
 
@@ -47,6 +48,7 @@
 - 所有 op 不产生 SSA result，结果必须写入 `outs(...)`；不得把 `out` 写回链路写成“实现自定”或“可选消费”。
 - 所有 op 必须通过 xDSL `MemoryEffect` trait 暴露对 memory operand 的读写语义，供 pass 通过 `xdsl.traits.get_effects(op)` 机械判定生命周期：
   - `kernel.binary_elewise` 与 `kernel.matmul` 对 `out` 暴露 `WRITE`，对 `lhs/rhs` 暴露 `READ`。
+  - `kernel.matmul_fusion` 对 `out` 暴露 `READ + WRITE`，对 `lhs/rhs` 暴露 `READ`；`acc` 是 i1 控制 operand，不暴露 memory effect。
   - `kernel.select` 对 `out` 暴露 `WRITE`，对 `cond/lhs/rhs` 暴露 `READ`。
   - `kernel.exp`、`kernel.reduce`、`kernel.reduce_min`、`kernel.img2col1d`、`kernel.img2col2d` 对 `out` 暴露 `WRITE`，对 `input` 暴露 `READ`。
 - 本版仅支持 memory operand，不支持标量 operand；标量扩展留待后续版本。
@@ -290,6 +292,42 @@ func.return %out : !nn.memory<f32, [M, N], GM>
 - 返回 `KernelMatmulOp`。
 - 结果写入 `out`。
 
+### `class KernelMatmulFusionOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, acc: SSAValue | Operation, *, space: NnMemorySpaceAttr)`
+
+- api：`class KernelMatmulFusionOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, acc: SSAValue | Operation, *, space: NnMemorySpaceAttr)`
+
+- 功能说明：
+
+- 中间 IR 的矩阵乘累加 op：`acc=false` 时覆盖写 `out = lhs @ rhs`，`acc=true` 时累加写 `out += lhs @ rhs`。
+- 本 op 不直接 emit/source，必须在进入 `producer-consumer-analysis`、`memory-pool`、outline 或 gen_kernel/source 前由 `KernelMatmulFusionDecomposePass` 分解回既有可 emit IR。
+
+- 参数：
+
+- `out(!nn.memory<...>)`：输出 operand；累加分支会读取旧值并写回。
+- `lhs(!nn.memory<...>)`：左输入 operand。
+- `rhs(!nn.memory<...>)`：右输入 operand。
+- `acc(i1)`：动态累加开关。
+- `space(#nn.space<...>)`：op 的空间属性。
+
+- 使用示例：
+
+```mlir
+"kernel.matmul_fusion"(%out, %lhs, %rhs, %acc) {space = #nn.space<tsm>} : (...) -> ()
+```
+
+- 注意事项：
+
+- `lhs/rhs/out` 必须满足二维矩阵乘合同：`lhs=[M, K]`、`rhs=[K, N]`、`out=[M, N]`。
+- `lhs.element_type`、`rhs.element_type`、`out.element_type` 必须一致。
+- `acc` 必须是 `i1`；非 `i1` 必须 verifier 失败，错误短语包含 `kernel.matmul_fusion acc must be i1`。
+- rank 非二维、K 维失配、输出 shape 失配、dtype 失配必须分别使用 `kernel.matmul_fusion requires rank-2 memory types`、`kernel.matmul_fusion contracting dimensions must match`、`kernel.matmul_fusion result shape must match lhs/rhs`、`kernel.matmul_fusion element_type must match across operands`。
+- MemoryEffect 必须把 `out` 标成 `READ + WRITE`，`lhs/rhs` 标成 `READ`。
+
+- 返回值：
+
+- 返回 `KernelMatmulFusionOp`。
+- 结果写入 `out`。
+
 ### `class KernelImg2col1dOp(out: SSAValue | Operation, input_value: SSAValue | Operation, k: SSAValue | Operation, s: SSAValue | Operation, d: SSAValue | Operation, p_left: SSAValue | Operation, p_right: SSAValue | Operation, space: NnMemorySpaceAttr)`
 
 - api：`class KernelImg2col1dOp(out: SSAValue | Operation, input_value: SSAValue | Operation, k: SSAValue | Operation, s: SSAValue | Operation, d: SSAValue | Operation, p_left: SSAValue | Operation, p_right: SSAValue | Operation, space: NnMemorySpaceAttr)`
@@ -394,6 +432,7 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 - 验证 `kernel.binary_elewise / kernel.exp / kernel.reduce / kernel.reduce_min / kernel.matmul / kernel.img2col*` 的 op 名字、关键 attrs 与 `out` 消费链路合同。
 - 验证 `kernel.matmul` mixed-space 合同只放开 out/lhs/rhs space 一致性，不放开 shape、rank 或 dtype。
 - 验证 `kernel.matmul` 对非二维 operand、`[M,K] x [K,N] -> [M,N]` 形状不匹配的 verifier 拒绝路径已被机械锁定。
+- 验证 `kernel.matmul_fusion` 的公开构造、acc=i1、shape/dtype verifier、READ+WRITE effect 与 source 前必须分解边界。
 - 验证 `kernel.img2col1d/img2col2d` 的输入 rank/layout 合同与结构化输出合同已被机械锁定。
 - 验证 `kernel.img2col1d` 的 `input.shape + attrs -> W_out`、`kernel.img2col2d` 的 `input.shape + attrs -> OH/OW` 公式与拒绝路径已被机械锁定。
 - 验证“无 SSA result、显式输出 operand”约束。
@@ -417,6 +456,8 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 | TC-KRN-014A | 内存/DMA | `kernel.matmul` 允许 out/lhs/rhs mixed-space | 准备 out@tsm、lhs@tlm1、rhs@tlm2 且 shape/dtype 合法的公开 memory operand。 | 运行 `test_kernel_matmul_allows_mixed_spaces`。 | `kernel.matmul` verifier 通过，不要求 operand space 与 `space` attribute 一致。 | `test_kernel_matmul_allows_mixed_spaces` |
 | TC-KRN-014 | 边界/异常 | `kernel.matmul` 拒绝 dtype mismatch | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_kernel_matmul_dtype_mismatch`。 | “`kernel.matmul` 拒绝 dtype mismatch”场景按公开错误语义失败或被拒绝。 | `test_kernel_matmul_dtype_mismatch` |
 | TC-KRN-015 | 边界/异常 | `kernel.matmul` 拒绝非二维 operand 与 `[M,K] x [K,N] -> [M,N]` shape 失配 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_kernel_matmul_rank_shape_contract`。 | “`kernel.matmul` 拒绝非二维 operand 与 `[M,K] x [K,N] -> [M,N]` shape 失配”场景按公开错误语义失败或被拒绝。 | `test_kernel_matmul_rank_shape_contract` |
+| TC-KRN-015F | 内存/DMA | `kernel.matmul_fusion` 支持静态/动态合法 shape、acc=i1 与 READ+WRITE effect | 准备合法 out/lhs/rhs memory 与 i1 acc。 | 运行 `test_kernel_matmul_fusion_success_and_memory_effects`。 | verifier 通过，`out` 暴露 READ+WRITE，`lhs/rhs` 暴露 READ。 | `test_kernel_matmul_fusion_success_and_memory_effects` |
+| TC-KRN-015G | 边界/异常 | `kernel.matmul_fusion` 拒绝 acc、shape、dtype 非法组合 | 准备 acc 非 i1、contracting dimension 不一致、输出 shape 不一致与 dtype mismatch。 | 运行 `test_kernel_matmul_fusion_verifier_errors`。 | 按公开错误短语失败。 | `test_kernel_matmul_fusion_verifier_errors` |
 | TC-KRN-017 | 执行结果 | `kernel.img2col1d/img2col2d` 保持结构化输出与显式窗口 attrs | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_kernel_img2col_structured_contract`。 | 命令返回码、输出、执行结果或状态变更体现“`kernel.img2col1d/img2col2d` 保持结构化输出与显式窗口 attrs”场景。 | `test_kernel_img2col_structured_contract` |
 | TC-KRN-018 | 边界/异常 | `kernel.img2col1d/img2col2d` 拒绝非法输入 rank 或 layout | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_kernel_img2col_input_rank_layout_contract`。 | “`kernel.img2col1d/img2col2d` 拒绝非法输入 rank 或 layout”场景按公开错误语义失败或被拒绝。 | `test_kernel_img2col_input_rank_layout_contract` |
 | TC-KRN-019 | 边界/异常 | `kernel.img2col1d/img2col2d` 拒绝 `input.shape + attrs` 推导出的 `W_out/OH/OW` 与 `out.shape` 不一致、公式结果 `< 1` 或窗口轴不等于 `k/[kh,kw]` | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_kernel_img2col_output_extent_contract`。 | “`kernel.img2col1d/img2col2d` 拒绝 `input.shape + attrs` 推导出的 `W_out/OH/OW` 与 `out.shape` 不一致、公式结果 `< 1` 或窗口轴不等于 `k/[kh,kw]`”场景按公开错误语义失败或被拒绝。 | `test_kernel_img2col_output_extent_contract` |

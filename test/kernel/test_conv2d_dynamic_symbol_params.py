@@ -69,6 +69,7 @@ def _dynamic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]:
         Memory(["B", "C", output_h_dim, output_w_dim], NumericType.Float32),
         Memory(["B", "N", "XH", "XW"], NumericType.Float32),
         Memory(["C", "N", "KH", "KW"], NumericType.Float32),
+        Memory(["C"], NumericType.Float32),
         sh_dim,
         sw_dim,
         dh_dim,

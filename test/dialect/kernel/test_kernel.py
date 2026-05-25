@@ -51,6 +51,7 @@ from kernel_gen.dialect.kernel import (
     KernelExpOp,
     KernelImg2col1dOp,
     KernelImg2col2dOp,
+    KernelMatmulFusionOp,
     KernelMatmulOp,
     KernelReduceOp,
     KernelReduceMinOp,
@@ -734,6 +735,26 @@ def test_kernel_matmul_memory_effects() -> None:
     }
 
 
+# TC-KRN-015F
+# 功能说明: 验证 kernel.matmul_fusion 正例与 MemoryEffect。
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_matmul_fusion_success_and_memory_effects
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
+def test_kernel_matmul_fusion_success_and_memory_effects() -> None:
+    out = _make_value(_make_memory_type(shape=_dim_array([2, 4]), stride=_dim_array([4, 1]), space="tsm"))
+    lhs = _make_value(_make_memory_type(shape=_dim_array([2, 3]), stride=_dim_array([3, 1]), space="tlm1"))
+    rhs = _make_value(_make_memory_type(shape=_dim_array([3, 4]), stride=_dim_array([4, 1]), space="tlm2"))
+    acc = _TestOp(result_types=[i1]).results[0]
+    op = KernelMatmulFusionOp(out, lhs, rhs, acc, space=_make_space("tsm"))
+    op.verify_()
+    effects = _effect_kinds_by_value(op)
+    assert (MemoryEffectKind.READ, out) in effects
+    assert (MemoryEffectKind.WRITE, out) in effects
+    assert (MemoryEffectKind.READ, lhs) in effects
+    assert (MemoryEffectKind.READ, rhs) in effects
+
+
 # TC-KRN-016A
 # 功能说明: 验证 kernel.select 暴露 out WRITE 与 cond/lhs/rhs READ MemoryEffect。
 # 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_select_memory_effects
@@ -883,6 +904,33 @@ def test_kernel_matmul_space_contract_matrix() -> None:
             _make_value(rhs_type),
             _make_space("invalid"),
         ).verify()
+
+
+# TC-KRN-015G
+# 功能说明: 验证 kernel.matmul_fusion 的 acc、shape 与 dtype verifier 失败语义。
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_matmul_fusion_verifier_errors
+# 对应功能实现文件路径: kernel_gen/dialect/kernel/
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/kernel/test_kernel.py
+def test_kernel_matmul_fusion_verifier_errors() -> None:
+    out = _make_value(_make_memory_type(shape=_dim_array([2, 4]), stride=_dim_array([4, 1]), space="tsm"))
+    lhs = _make_value(_make_memory_type(shape=_dim_array([2, 3]), stride=_dim_array([3, 1]), space="tsm"))
+    rhs = _make_value(_make_memory_type(shape=_dim_array([3, 4]), stride=_dim_array([4, 1]), space="tsm"))
+    bad_acc = _TestOp(result_types=[i32]).results[0]
+    good_acc = _TestOp(result_types=[i1]).results[0]
+    with pytest.raises(VerifyException, match="kernel.matmul_fusion acc must be i1"):
+        KernelMatmulFusionOp(out, lhs, rhs, bad_acc, space=_make_space("tsm")).verify_()
+    bad_rhs = _make_value(_make_memory_type(shape=_dim_array([5, 4]), stride=_dim_array([4, 1]), space="tsm"))
+    with pytest.raises(VerifyException, match="kernel.matmul_fusion contracting dimensions must match"):
+        KernelMatmulFusionOp(out, lhs, bad_rhs, good_acc, space=_make_space("tsm")).verify_()
+    bad_out = _make_value(_make_memory_type(shape=_dim_array([2, 5]), stride=_dim_array([5, 1]), space="tsm"))
+    with pytest.raises(VerifyException, match="kernel.matmul_fusion result shape must match lhs/rhs"):
+        KernelMatmulFusionOp(bad_out, lhs, rhs, good_acc, space=_make_space("tsm")).verify_()
+    bad_dtype = _make_value(
+        _make_memory_type(shape=_dim_array([3, 4]), stride=_dim_array([4, 1]), element_type=Float32Type(), space="tsm")
+    )
+    with pytest.raises(VerifyException, match="kernel.matmul_fusion element_type must match across operands"):
+        KernelMatmulFusionOp(out, lhs, bad_dtype, good_acc, space=_make_space("tsm")).verify_()
 
 
 # TC-KRN-017

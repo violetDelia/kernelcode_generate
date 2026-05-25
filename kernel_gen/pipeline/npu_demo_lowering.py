@@ -4,7 +4,7 @@
 功能说明:
 - 提供 `npu-demo-lowering` pipeline 的 builder。
 - 固定 `dsl_run` 的 npu_demo 正向链路为
-  `InlinePass -> CommonSubexpressionElimination -> CanonicalizePass -> DecompassPass -> NnLoweringPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> TileAnalysisPass -> KernelPatternAttachPass -> TransformApplyPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> ProducerConsumerAnalysisPass -> MemoryPoolPass -> CanonicalizePass -> ArchParallelizePass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
+  `InlinePass -> CommonSubexpressionElimination -> CanonicalizePass -> DecompassPass -> NnLoweringPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> TileAnalysisPass -> KernelPatternAttachPass -> TransformApplyPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> KernelAggregatePass -> KernelMatmulFusionDecomposePass -> ProducerConsumerAnalysisPass -> MemoryPoolPass -> CanonicalizePass -> ArchParallelizePass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
 - 默认 `MemoryPlanPass` 补齐 insert-free 生命周期，`MemoryPoolPass` 执行 dynamic backing 改写，template-name infer 在 outline 后写回 wrapper/body memory type 的 template name。
 - 通过 registry 装饰器完成 pipeline 注册。
 
@@ -33,6 +33,8 @@ from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.passes.decompass import DecompassPass
 from kernel_gen.passes.hoist import SymbolBufferHoistPass, SymbolHoistPipelinePass
 from kernel_gen.passes.inline import InlinePass
+from kernel_gen.passes.kernel_aggregate import KernelAggregatePass
+from kernel_gen.passes.kernel_matmul_fusion_decompose import KernelMatmulFusionDecomposePass
 from kernel_gen.passes.kernel_pattern_attach import KernelPatternAttachPass
 from kernel_gen.passes.lowering import NnLoweringPass
 from kernel_gen.passes.memory_plan import MemoryPlanPass
@@ -54,7 +56,7 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     功能说明:
     - 返回 `PassManager(name="npu-demo-lowering")`。
     - 固定 pass 顺序为
-      `InlinePass -> CommonSubexpressionElimination -> CanonicalizePass -> DecompassPass -> NnLoweringPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> TileAnalysisPass -> KernelPatternAttachPass -> TransformApplyPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> ProducerConsumerAnalysisPass -> MemoryPoolPass -> CanonicalizePass -> ArchParallelizePass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
+      `InlinePass -> CommonSubexpressionElimination -> CanonicalizePass -> DecompassPass -> NnLoweringPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> TileAnalysisPass -> KernelPatternAttachPass -> TransformApplyPass -> SymbolHoistPipelinePass -> CommonSubexpressionElimination -> CanonicalizePass -> MemoryPlanPass -> SymbolBufferHoistPass -> KernelAggregatePass -> KernelMatmulFusionDecomposePass -> ProducerConsumerAnalysisPass -> MemoryPoolPass -> CanonicalizePass -> ArchParallelizePass -> AttachArchInformationPass -> OutlineDeviceKernelPass -> TemplateNameInferPass`。
     - `CommonSubexpressionElimination` 后均紧跟 xDSL `CanonicalizePass`，仅在本 pipeline 内清理 IR，
       不把 canonicalize 注册为仓库公开 pass。
     - `MemoryPlanPass` 固定以 `insert_free=True, fold=False` 运行两次，并位于对应
@@ -68,7 +70,9 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     - `TransformApplyPass` 只消费 pattern 函数上的 `kernel.transform_pipeline`，在 pattern 内执行 lower-dma-memory-hierarchy 与 canonicalize。
     - `SymbolHoistPipelinePass` 在没有 `symbol.for` 与 alias op 的模块上应保持 no-op，因此可直接用于
       dsl_run 的最小 npu_demo 正向合同。
-    - `ProducerConsumerAnalysisPass` 位于第二段 `SymbolBufferHoistPass` 后、`MemoryPoolPass` 前，只写
+    - 新增 `KernelAggregatePass(matmul_acc=True) -> KernelMatmulFusionDecomposePass()` 位于第二段
+      `SymbolBufferHoistPass` 后、`ProducerConsumerAnalysisPass` 前，保证 producer/consumer 只分析已分解后的既有可 emit IR。
+    - `ProducerConsumerAnalysisPass` 位于分解 pass 后、`MemoryPoolPass` 前，只写
       普通或控制流分类分析 attr，不生成同步 op，并保留 typed `dma.alloc` 形态供分析读取。
     - `MemoryPoolPass` 固定以 `rewrite=True, alignment=0` 运行，将片上 `dma.alloc` 改写为
       `arch.get_dynamic_memory + dma.reinterpret`。
@@ -129,6 +133,8 @@ def build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> P
     pm.add_pass(CanonicalizePass())
     pm.add_pass(MemoryPlanPass(insert_free=True, fold=False))
     pm.add_pass(SymbolBufferHoistPass())
+    pm.add_pass(KernelAggregatePass(matmul_acc=True))
+    pm.add_pass(KernelMatmulFusionDecomposePass())
     pm.add_pass(ProducerConsumerAnalysisPass())
     pm.add_pass(MemoryPoolPass(rewrite=True, alignment=0))
     pm.add_pass(CanonicalizePass())
