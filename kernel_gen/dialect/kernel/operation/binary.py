@@ -213,7 +213,7 @@ def _verify_element_type_match(types: Iterable[NnMemoryType], message: str) -> N
 
 
 _KERNEL_ERROR_SCENE = "dialect.kernel verifier"
-_BINARY_ELEWISE_ARITH_KINDS = {"add", "sub", "mul", "div", "truediv"}
+_BINARY_ELEWISE_ARITH_KINDS = {"add", "sub", "mul", "div", "truediv", "min", "max"}
 _BINARY_ELEWISE_COMPARE_KINDS = {"eq", "ne", "lt", "le", "gt", "ge"}
 _BINARY_ELEWISE_KINDS = _BINARY_ELEWISE_ARITH_KINDS | _BINARY_ELEWISE_COMPARE_KINDS
 
@@ -224,7 +224,7 @@ class KernelBinaryElewiseOp(IRDLOperation):
 
     功能说明:
     - 定义统一的二元逐元素算术/比较 op。
-    - 通过 kind 属性区分 add/sub/eq 等语义。
+    - 通过 kind 属性区分 add/sub/min/max/eq 等语义。
 
     使用示例:
     - KernelBinaryElewiseOp(out, lhs, rhs, kind="add", space=NnMemorySpaceAttr.from_name("global"))

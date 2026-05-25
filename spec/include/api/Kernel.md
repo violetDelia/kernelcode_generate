@@ -15,6 +15,8 @@
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::sub(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::min(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
@@ -60,7 +62,7 @@
 ### 模块级补充
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
-- 本规范只覆盖当前已进入合同真源的 helper：`add`、`sub`、`mul`、`truediv`、`eq`、`ne`、`lt`、`le`、`gt`、`ge`、`exp`、`select`、`reduce_sum`、`reduce_min`、`reduce_max`、`matmul`、`img2col1d`、`img2col2d`。
+- 本规范只覆盖当前已进入合同真源的 helper：`add`、`sub`、`mul`、`truediv`、`min`、`max`、`eq`、`ne`、`lt`、`le`、`gt`、`ge`、`exp`、`select`、`reduce_sum`、`reduce_min`、`reduce_max`、`matmul`、`img2col1d`、`img2col2d`。
 - `broadcast`、`broadcast_to`、`softmax`、`cast` 与其他旧 `Nn` 公开名，不属于本轮 `Kernel` 公共接口。
 - 除 `matmul`、`img2col1d`、`img2col2d` 外，当前公开 helper 默认要求输入与输出使用同一 `MemorySpace`；若后端实现不支持某个合法组合，必须显式失败，不能静默回退。
 - 所有 helper 都要求调用方显式提供输出 `Memory`，统一返回 `Status`；不得通过函数返回值承接输出 memory。
@@ -132,6 +134,38 @@ auto status = npu_demo::truediv(out, lhs, rhs);
 ```
 - 功能说明：执行 `truediv`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
+
+### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::min(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+
+- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::min(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- 参数：
+  - `out`：输出对象，承接逐元素最小值结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供。
+  - `lhs`：左操作数，参与逐元素最小值计算；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供。
+  - `rhs`：右操作数，参与逐元素最小值计算；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供。
+- 返回值：`Status`，表示执行状态。
+- 使用示例：
+
+  ```cpp
+auto status = npu_demo::min(out, lhs, rhs);
+```
+- 功能说明：执行 same-shape 逐元素最小值计算。
+- 注意事项：模板顺序固定为 `Space -> InType -> OutType`，参数顺序固定为 `out -> lhs -> rhs`；不提供隐式 broadcast、旧 `Nn` 别名或 Python helper。
+
+### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+
+- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- 参数：
+  - `out`：输出对象，承接逐元素最大值结果；类型 `Memory<Space, OutType>&`；无默认值，调用方必须显式提供。
+  - `lhs`：左操作数，参与逐元素最大值计算；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供。
+  - `rhs`：右操作数，参与逐元素最大值计算；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供。
+- 返回值：`Status`，表示执行状态。
+- 使用示例：
+
+  ```cpp
+auto status = npu_demo::max(out, lhs, rhs);
+```
+- 功能说明：执行 same-shape 逐元素最大值计算。
+- 注意事项：模板顺序固定为 `Space -> InType -> OutType`，参数顺序固定为 `out -> lhs -> rhs`；不提供隐式 broadcast、旧 `Nn` 别名或 Python helper。
 
 ### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
@@ -384,7 +418,7 @@ auto status = npu_demo::img2col2d(out, input, 3, 3, 1, 1, 1, 1, 0, 0, 0, 0);
 ### 测试目标
 
 - 锁定 `include/api/Kernel.h` 的 helper 集合、模板顺序、参数顺序与删除 `Nn` 公开层后的唯一入口语义。
-- 锁定 `target=npu_demo` 时 `kernel.*` 节点发射到 `npu_demo::<helper><...>(out, ...)` 的文本合同。
+- 锁定 `target=npu_demo` 时 `kernel.*` 节点发射到 `npu_demo::<helper><...>(out, ...)` 的文本合同，包括 `kernel.binary_elewise kind="min"/"max"`。
 - 锁定 `gen_kernel(target=npu_demo)` 只消费 `Kernel` 公共接口，不再依赖公开 `Nn` 层。
 
 ### 功能与用例清单
@@ -394,3 +428,4 @@ auto status = npu_demo::img2col2d(out, input, 3, 3, 1, 1, 1, 1, 0, 0, 0, 0);
 | TC-INCLUDE-API-KERNEL-001 | 公开入口 | 锁定 `Kernel` helper 集合与删除 `Nn` 公开层后的唯一入口语义。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_include_api_kernel_exports_only_public_kernel_helpers`。 | 公开入口在“锁定 `Kernel` helper 集合与删除 `Nn` 公开层后的唯一入口语义。”场景下可导入、构造、注册或按名称发现。 | `test_include_api_kernel_exports_only_public_kernel_helpers` |
 | TC-INCLUDE-API-KERNEL-002 | 解析/打印 | 锁定 `target=npu_demo` 的 `out-first` helper 文本。 | 准备可 parse/print、round-trip 或文本比对的公开输入。 | 运行 `test_emit_c_lowers_npu_demo_kernel_helpers_out_first`。 | parse/print、round-trip 或文本比对结果稳定。 | `test_emit_c_lowers_npu_demo_kernel_helpers_out_first` |
 | TC-INCLUDE-API-KERNEL-003 | 公开入口 | 锁定函数级源码不再回退到公开 `Nn` 名称。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_gen_kernel_emits_npu_demo_kernel_helpers_without_public_nn_alias`。 | 公开入口在“锁定函数级源码不再回退到公开 `Nn` 名称。”场景下可导入、构造、注册或按名称发现。 | `test_gen_kernel_emits_npu_demo_kernel_helpers_without_public_nn_alias` |
+| TC-INCLUDE-API-KERNEL-004 | 生成/编译 | 锁定 `npu_demo::min/max` out-first helper 声明与执行形态。 | 构造 same-shape `Memory` 输入输出并包含 `include/api/Kernel.h`。 | 运行 `test_include_api_kernel_compiles_out_first_helpers`。 | `npu_demo::min/max` 可编译并按逐元素最小值/最大值写入输出。 | `test_include_api_kernel_compiles_out_first_helpers` |

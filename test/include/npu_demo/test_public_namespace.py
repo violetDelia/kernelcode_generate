@@ -180,6 +180,20 @@ int main() {
     if (out_data[0] != 3.5f || out_data[1] != 5.5f) {
         return fail(2);
     }
+    Status max_status = npu_demo::max<GM, float, float>(out, lhs, rhs);
+    if (max_status != StatusCode::kOk) {
+        return fail(20);
+    }
+    if (out_data[0] != 2.0f || out_data[1] != 3.0f) {
+        return fail(21);
+    }
+    Status min_status = npu_demo::min<GM, float, float>(out, lhs, rhs);
+    if (min_status != StatusCode::kOk) {
+        return fail(22);
+    }
+    if (out_data[0] != 1.5f || out_data[1] != 2.5f) {
+        return fail(23);
+    }
 
     long long block_ids[2] = {-1, -1};
     long long thread_nums[2] = {0, 0};
@@ -198,6 +212,8 @@ int main() {
 }
 """
     assert "npu_demo::add" in source
+    assert "npu_demo::max" in source
+    assert "npu_demo::min" in source
     assert "npu_demo::launch" in source
     assert "npu_demo::detail" not in source
     assert "npu_demo_dma_detail" not in source

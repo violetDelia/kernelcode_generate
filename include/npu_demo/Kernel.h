@@ -8,7 +8,14 @@ API 列表:
 - `npu_demo::sub<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
 - `npu_demo::mul<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
 - `npu_demo::truediv<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
-- `npu_demo::eq/ne/lt/le/gt/ge<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::min<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `npu_demo::max<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::le(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::gt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `npu_demo::exp<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& input) -> Status`
 - `npu_demo::select<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, bool>& cond, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) -> Status`
 - `npu_demo::reduce_sum<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) -> Status`
@@ -26,7 +33,7 @@ API 列表:
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 
@@ -53,7 +60,7 @@ namespace detail {
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <typename T>
@@ -72,7 +79,7 @@ inline bool is_non_null(const T* ptr) {
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, typename BinaryFn>
@@ -126,7 +133,7 @@ inline Status elementwise_binary_same_shape(
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, typename UnaryFn>
@@ -179,7 +186,7 @@ inline Status elementwise_unary_same_shape(
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, typename CompareFn>
@@ -203,7 +210,7 @@ inline Status compare_same_shape(
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -221,7 +228,7 @@ inline Status add(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -239,7 +246,7 @@ inline Status sub(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -257,7 +264,7 @@ inline Status mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs,
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -273,6 +280,46 @@ inline Status truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& 
 
 /*
 功能说明:
+- 执行 same-shape 多维逐元素最小值并把结果写入 `out`。
+
+使用示例:
+- Status st = npu_demo::min<GM, float, float>(out, lhs, rhs);
+
+
+关联文件:
+- spec: spec/include/api/Kernel.md
+- test: test/include/api/test_kernel.py
+- 功能实现: include/npu_demo/Kernel.h
+*/
+template <MemorySpace Space, typename InType, typename OutType>
+inline Status min(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) {
+        return a < b ? a : b;
+    });
+}
+
+/*
+功能说明:
+- 执行 same-shape 多维逐元素最大值并把结果写入 `out`。
+
+使用示例:
+- Status st = npu_demo::max<GM, float, float>(out, lhs, rhs);
+
+
+关联文件:
+- spec: spec/include/api/Kernel.md
+- test: test/include/api/test_kernel.py
+- 功能实现: include/npu_demo/Kernel.h
+*/
+template <MemorySpace Space, typename InType, typename OutType>
+inline Status max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs) {
+    return detail::elementwise_binary_same_shape(out, lhs, rhs, [](const InType& a, const InType& b) {
+        return a > b ? a : b;
+    });
+}
+
+/*
+功能说明:
 - 执行 same-shape 多维逐元素相等比较并把结果写入 `out`。
 
 使用示例:
@@ -281,7 +328,7 @@ inline Status truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& 
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -299,7 +346,7 @@ inline Status eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -317,7 +364,7 @@ inline Status ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -335,7 +382,7 @@ inline Status lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -353,7 +400,7 @@ inline Status le(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -371,7 +418,7 @@ inline Status gt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -389,7 +436,7 @@ inline Status ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, 
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -409,7 +456,7 @@ inline Status exp(Memory<Space, OutType>& out, const Memory<Space, InType>& inpu
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -449,7 +496,7 @@ inline Status select(
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -503,7 +550,7 @@ inline Status reduce_sum(Memory<Space, OutType>& out, const Memory<Space, InType
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -561,7 +608,7 @@ inline Status reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -619,7 +666,7 @@ inline Status reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType>
@@ -675,7 +722,7 @@ inline Status matmul(
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType>
@@ -747,7 +794,7 @@ inline Status img2col1d(
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType>

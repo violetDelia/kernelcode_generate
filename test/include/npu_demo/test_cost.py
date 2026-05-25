@@ -119,11 +119,13 @@ int main() {
 
     S_INT add_cost =
         npu_demo::cost::add<GM, float, float, npu_demo::VECTOR1>(out, source, source);
+    S_INT max_cost =
+        npu_demo::cost::max<GM, float, float, npu_demo::VECTOR1>(out, source, source);
     S_INT copy_cost =
         npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA1>(tile, source);
     S_INT vector2_cost =
-        npu_demo::cost::add<GM, float, float, npu_demo::VECTOR2>(out, source, source);
-    if (add_cost != 1 || copy_cost != 1 || vector2_cost != 0) {
+        npu_demo::cost::min<GM, float, float, npu_demo::VECTOR2>(out, source, source);
+    if (add_cost != 1 || max_cost != 1 || copy_cost != 1 || vector2_cost != 0) {
         return fail(1);
     }
     if (npu_demo::DMA1 == npu_demo::DMA2) {

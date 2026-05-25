@@ -1893,6 +1893,15 @@ def test_emit_c_private_additional_error_matrix(
     for index, arg in enumerate(kernel_block.args[:3]):
         kernel_ctx.bind_name(arg, f"m{index}")
 
+    max_op = KernelBinaryElewiseOp(
+        kernel_block.args[0],
+        kernel_block.args[1],
+        kernel_block.args[2],
+        kind="max",
+        space=NnMemorySpaceAttr.from_name("global"),
+    )
+    assert emit_c_op(max_op, kernel_ctx) == "max<GM, float, float>(m0 /*out*/, m1 /*lhs*/, m2 /*rhs*/);"
+
     add_op = KernelBinaryElewiseOp(
         kernel_block.args[0],
         kernel_block.args[1],
@@ -1919,6 +1928,8 @@ def test_emit_c_private_additional_error_matrix(
         ("sub", "sub"),
         ("mul", "mul"),
         ("div", "div"),
+        ("min", "min"),
+        ("max", "max"),
         ("eq", "eq"),
         ("ne", "ne"),
         ("lt", "lt"),
@@ -2476,6 +2487,8 @@ def test_emit_c_lowers_npu_demo_tuner_cost_kernel_binary_elewise() -> None:
         ("mul", "mul"),
         ("div", "truediv"),
         ("truediv", "truediv"),
+        ("min", "min"),
+        ("max", "max"),
         ("eq", "eq"),
         ("ne", "ne"),
         ("lt", "lt"),

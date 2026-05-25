@@ -99,7 +99,7 @@ def _compile_and_run(source: str) -> None:
 
 
 # COST-API-001
-# 测试目的: 验证 `include/api/cost/Core.h` 公开七种 npu_demo cost kind，且不再残留旧 compute / memory / DMA 别名。
+# 测试目的: 验证 `include/api/cost/Core.h` 公开七种 npu_demo cost kind，并保留既有 `npu_demo::DMA` 兼容别名。
 # 使用示例: `pytest -q test/include/api/test_cost.py -k test_include_api_cost_core_exports_npu_demo_cost_kinds`
 # 对应功能实现文件路径: `include/api/cost/Core.h`
 # 对应 spec 文件路径: `spec/include/api/cost/Core.md`
@@ -115,7 +115,7 @@ def test_include_api_cost_core_exports_npu_demo_cost_kinds() -> None:
     assert "CostKind::Memory" not in public_header
     assert "inline constexpr cost::CostKind compute" not in public_header
     assert "inline constexpr cost::CostKind memory" not in public_header
-    assert "inline constexpr cost::CostKind DMA =" not in public_header
+    assert "inline constexpr cost::CostKind DMA = cost::CostKind::DMA1" in public_header
 
     source = r"""
 #include "include/api/cost/Core.h"
@@ -123,11 +123,12 @@ def test_include_api_cost_core_exports_npu_demo_cost_kinds() -> None:
 
 int main() {
     npu_demo::cost::CostKind dma1_kind = npu_demo::DMA1;
+    npu_demo::cost::CostKind dma_compat_kind = npu_demo::DMA;
     npu_demo::cost::CostKind dma4_kind = npu_demo::DMA4;
     npu_demo::cost::CostKind mac_kind = npu_demo::MAC;
     npu_demo::cost::CostKind vector1_kind = npu_demo::VECTOR1;
     npu_demo::cost::CostKind vector2_kind = npu_demo::VECTOR2;
-    if (dma1_kind != npu_demo::DMA1 || dma4_kind != npu_demo::DMA4) {
+    if (dma1_kind != npu_demo::DMA1 || dma_compat_kind != npu_demo::DMA1 || dma4_kind != npu_demo::DMA4) {
         return 1;
     }
     if (mac_kind != npu_demo::MAC || vector1_kind != npu_demo::VECTOR1 || vector2_kind != npu_demo::VECTOR2) {
@@ -170,6 +171,10 @@ int main() {
 
     S_INT add_cost =
         npu_demo::cost::add<GM, float, float, npu_demo::VECTOR1>(out, lhs, rhs);
+    S_INT max_cost =
+        npu_demo::cost::max<GM, float, float, npu_demo::VECTOR1>(out, lhs, rhs);
+    S_INT min_miss_cost =
+        npu_demo::cost::min<GM, float, float, npu_demo::VECTOR2>(out, lhs, rhs);
     S_INT reduce_max_cost =
         npu_demo::cost::reduce_max<TSM, float, float, npu_demo::VECTOR1>(lhs_mat, rhs_mat, 1);
     S_INT matmul_cost = npu_demo::cost::matmul<
@@ -180,7 +185,7 @@ int main() {
         float,
         float,
         npu_demo::MAC>(out_mat, lhs_mat, rhs_mat);
-    if (add_cost != 1 || reduce_max_cost != 1 || matmul_cost != 1) {
+    if (add_cost != 1 || max_cost != 1 || min_miss_cost != 0 || reduce_max_cost != 1 || matmul_cost != 1) {
         return fail(1);
     }
     return 0;

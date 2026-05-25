@@ -110,7 +110,6 @@ def flash_attention_inputs_static_tile_static_kernel(
     br = 64
     bc = 64
     unit_tile = br - br + 1
-    pair_tile = unit_tile + unit_tile
     for b0 in loop(0, batch_size, 1):
         for h0 in loop(0, head_size, 1):
             for m0 in loop(0, seq_len, br):
@@ -142,11 +141,13 @@ def flash_attention_inputs_static_tile_static_kernel(
                     deslice(score_tile, score_region, [0, 0], [cur_br, cur_bc], [1, 1])
                     tile_max = alloc([br, unit_tile], NumericType.Float32, MemorySpace.TSM)
                     kernel.reduce(tile_max, score_tile, kind=kernel.KernelReduceKind.MAX, axis=1, keepdim=True)
-                    max_pair = alloc([br, pair_tile], NumericType.Float32, MemorySpace.TSM)
-                    deslice(max_pair, m_state, [0, 0], [br, unit_tile], [1, 1])
-                    deslice(max_pair, tile_max, [0, unit_tile], [br, unit_tile], [1, 1])
                     m_next = alloc([br, unit_tile], NumericType.Float32, MemorySpace.TSM)
-                    kernel.reduce(m_next, max_pair, kind=kernel.KernelReduceKind.MAX, axis=1, keepdim=True)
+                    kernel.binary_elewise(
+                        m_next,
+                        m_state,
+                        tile_max,
+                        kind=kernel.KernelBinaryElewiseKind.MAX,
+                    )
                     m_next_full = alloc([br, bc], NumericType.Float32, MemorySpace.TSM)
                     broadcast(m_next_full, m_next)
                     shifted_score = alloc([br, bc], NumericType.Float32, MemorySpace.TSM)

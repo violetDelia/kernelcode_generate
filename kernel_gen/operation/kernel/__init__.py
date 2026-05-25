@@ -6,7 +6,7 @@
 - 本子模块对齐 `kernel` dialect，所有 helper 返回 `None`，不创建新 `Memory`。
 
 API 列表:
-- `class KernelBinaryElewiseKind(Enum)`
+- `class KernelBinaryElewiseKind(Enum): ADD | SUB | MUL | DIV | TRUEDIV | MIN | MAX | EQ | NE | LT | LE | GT | GE`
 - `binary_elewise(out: Memory, lhs: Memory, rhs: Memory, *, kind: KernelBinaryElewiseKind) -> None`
 - `add(out: Memory, lhs: Memory, rhs: Memory) -> None`
 - `sub(out: Memory, lhs: Memory, rhs: Memory) -> None`

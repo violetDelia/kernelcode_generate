@@ -6,7 +6,7 @@
 
 ## API 列表
 
-- `class KernelBinaryElewiseKind(Enum)`
+- `class KernelBinaryElewiseKind(Enum): ADD | SUB | MUL | DIV | TRUEDIV | MIN | MAX | EQ | NE | LT | LE | GT | GE`
 - `binary_elewise(out: Memory, lhs: Memory, rhs: Memory, *, kind: KernelBinaryElewiseKind) -> None`
 - `add(out: Memory, lhs: Memory, rhs: Memory) -> None`
 - `sub(out: Memory, lhs: Memory, rhs: Memory) -> None`
@@ -59,7 +59,7 @@
 ## 术语
 
 - out-first：第一个参数为写回目标 `out`，helper 成功时返回 `None`。
-- 算术 kind：`ADD`、`SUB`、`MUL`、`DIV`、`TRUEDIV`。
+- 算术 kind：`ADD`、`SUB`、`MUL`、`DIV`、`TRUEDIV`、`MIN`、`MAX`。
 - 比较 kind：`EQ`、`NE`、`LT`、`LE`、`GT`、`GE`。
 - 归约 kind：`SUM`、`MIN`、`MAX`。
 
@@ -69,15 +69,15 @@
 
 - api：`class KernelBinaryElewiseKind(Enum)`
 - 参数：无。
-- 返回值：枚举类型；成员固定为 `ADD`、`SUB`、`MUL`、`DIV`、`TRUEDIV`、`EQ`、`NE`、`LT`、`LE`、`GT`、`GE`。
+- 返回值：枚举类型；成员固定为 `ADD`、`SUB`、`MUL`、`DIV`、`TRUEDIV`、`MIN`、`MAX`、`EQ`、`NE`、`LT`、`LE`、`GT`、`GE`。
 - 使用示例：
 
   ```python
   from kernel_gen.operation import kernel
 
-  kind = kernel.KernelBinaryElewiseKind.ADD
+  kind = kernel.KernelBinaryElewiseKind.MAX
   ```
-- 功能说明：定义 `binary_elewise(...)` 的合法 `kind` 输入集合。
+- 功能说明：定义 `binary_elewise(...)` 的合法 `kind` 输入集合，`MIN/MAX` 与 `ADD/SUB/MUL/DIV/TRUEDIV` 同属算术 kind。
 - 注意事项：字符串 `"add"`、`"eq"` 或其它字符串不是合法公开输入；调用方必须传 `KernelBinaryElewiseKind` 成员。
 
 ### `binary_elewise(out: Memory, lhs: Memory, rhs: Memory, *, kind: KernelBinaryElewiseKind) -> None`
@@ -100,10 +100,10 @@
   lhs = Memory([16, 32], NumericType.Float32)
   rhs = Memory([16, 32], NumericType.Float32)
 
-  kernel.binary_elewise(out, lhs, rhs, kind=kernel.KernelBinaryElewiseKind.ADD)
+  kernel.binary_elewise(out, lhs, rhs, kind=kernel.KernelBinaryElewiseKind.MAX)
   ```
 - 功能说明：校验 out-first 二元逐元素 kernel 写回合同。
-- 注意事项：算术 kind 要求 `out/lhs/rhs` dtype 一致；比较 kind 要求 `out.dtype` 为 `NumericType.Bool`，`lhs/rhs` dtype 可不同；不做隐式 broadcast、dtype 提升、layout 转换或空间转换。
+- 注意事项：算术 kind（含 `MIN/MAX`）要求 `out/lhs/rhs` dtype 一致；比较 kind 要求 `out.dtype` 为 `NumericType.Bool`，`lhs/rhs` dtype 可不同；不做隐式 broadcast、dtype 提升、layout 转换或空间转换。
 
 ### `add(out: Memory, lhs: Memory, rhs: Memory) -> None`
 
@@ -471,7 +471,7 @@
 
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
-| TC-OP-KERNEL-ELEWISE-001 | 算术 helper | `add/sub/mul/div/truediv` 成功写回 | `out/lhs/rhs` shape、stride、space、dtype 一致 | 运行 operation kernel pytest | helper 返回 `None` | `test_kernel_arithmetic_helpers_are_out_first_and_return_none` |
+| TC-OP-KERNEL-ELEWISE-001 | 算术 helper | `add/sub/mul/div/truediv` 与 `binary_elewise MIN/MAX` 成功写回 | `out/lhs/rhs` shape、stride、space、dtype 一致 | 运行 operation kernel pytest | helper 返回 `None`，且不新增 `kernel.min/max` Python helper | `test_kernel_arithmetic_helpers_are_out_first_and_return_none` |
 | TC-OP-KERNEL-ELEWISE-002 | 比较 helper | `eq/ne/lt/le/gt/ge` 写入 Bool out | `out.dtype=Bool`，`lhs/rhs` dtype 可不同 | 运行 operation kernel pytest | helper 返回 `None` | `test_kernel_compare_helpers_require_bool_out_and_allow_input_dtype_mismatch` |
 | TC-OP-KERNEL-ELEWISE-003 | 错误边界 | 字符串 kind、shape mismatch、dtype mismatch | 构造非法公开输入 | 运行 operation kernel pytest | 抛出 `KernelCodeError` | `test_kernel_binary_elewise_rejects_non_api_kind_and_mismatched_metadata` |
 | TC-OP-KERNEL-ACTIVATION-001 | 激活 helper | `exp` 浮点写回 | `out/input` shape、stride、space、dtype 一致且 dtype 为浮点 | 运行 activation pytest | helper 返回 `None` | `test_kernel_exp_accepts_matching_float_memory` |

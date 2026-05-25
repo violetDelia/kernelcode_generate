@@ -14,6 +14,8 @@
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::sub(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::mul(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::truediv(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::min(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::max(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::eq(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::ne(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::lt(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
@@ -61,7 +63,7 @@
 ### 模块级补充
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
-- 当前公开 helper 集合与 [`spec/include/api/Kernel.md`](../../../../spec/include/api/Kernel.md) 保持一致：`add`、`sub`、`mul`、`truediv`、`eq`、`ne`、`lt`、`le`、`gt`、`ge`、`exp`、`select`、`reduce_sum`、`reduce_min`、`reduce_max`、`matmul`、`img2col1d`、`img2col2d`。
+- 当前公开 helper 集合与 [`spec/include/api/Kernel.md`](../../../../spec/include/api/Kernel.md) 保持一致：`add`、`sub`、`mul`、`truediv`、`min`、`max`、`eq`、`ne`、`lt`、`le`、`gt`、`ge`、`exp`、`select`、`reduce_sum`、`reduce_min`、`reduce_max`、`matmul`、`img2col1d`、`img2col2d`。
 - 当前不公开 `broadcast`、`softmax`、`cast` 或旧 `Nn` helper 的成本接口。
 - cost helper 只表达当前 op 的局部成本承接，不负责累计、调度或运行时执行。
 - `kind2`、`kind3` 与其他旧 kind 不再属于当前 helper 输入域。
@@ -145,6 +147,44 @@
   ```
 - 功能说明：定义逐元素真除法的成本 helper。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；参数顺序固定为 `out -> lhs -> rhs`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；不公开 `cost::kernel::truediv`、`cost<OpTag, ...>` 或旧 `Nn` 成本别名；非法组合必须稳定失败。
+
+### `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::min(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+
+- api：`template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::min(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- 参数：
+  - `out`：输出对象，提供成本估算的元素规模来源；类型 `const Memory<Space, OutType>&`；无默认值，调用方必须显式提供。
+  - `lhs`：左操作数；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供。
+  - `rhs`：右操作数；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供。
+- 返回值：`S_INT`。
+- 使用示例：
+
+  ```cpp
+  #include "include/npu_demo/npu_demo.h"
+
+  using namespace npu_demo;
+  S_INT min_cost = cost::min<GM, float, float, VECTOR1>(out, lhs, rhs);
+  ```
+- 功能说明：定义逐元素最小值的成本 helper。
+- 注意事项：参数顺序固定为 `out -> lhs -> rhs`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；`VECTOR1` 命中当前逐元素 kernel op，`VECTOR2` 与未命中组合返回 `0`。
+
+### `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::max(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+
+- api：`template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::max(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- 参数：
+  - `out`：输出对象，提供成本估算的元素规模来源；类型 `const Memory<Space, OutType>&`；无默认值，调用方必须显式提供。
+  - `lhs`：左操作数；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供。
+  - `rhs`：右操作数；类型 `const Memory<Space, InType>&`；无默认值，调用方必须显式提供。
+- 返回值：`S_INT`。
+- 使用示例：
+
+  ```cpp
+  #include "include/npu_demo/npu_demo.h"
+
+  using namespace npu_demo;
+  S_INT max_cost = cost::max<GM, float, float, VECTOR1>(out, lhs, rhs);
+  ```
+- 功能说明：定义逐元素最大值的成本 helper。
+- 注意事项：参数顺序固定为 `out -> lhs -> rhs`；模板顺序固定为 `Space -> InType -> OutType -> Kind`；`VECTOR1` 命中当前逐元素 kernel op，`VECTOR2` 与未命中组合返回 `0`。
 
 ### `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::eq(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
@@ -439,7 +479,7 @@
 
 ### 测试目标
 
-- 通过当前聚合入口 `test_include_api_cost_kernel_signatures_compile` 一次性验证 `Kernel cost` helper 的声明、模板顺序与 `S_INT` 返回合同。
+- 通过当前聚合入口 `test_include_api_cost_kernel_signatures_compile` 一次性验证 `Kernel cost` helper 的声明、模板顺序与 `S_INT` 返回合同，包括 `cost::min/max`。
 - 验证 `tuner.cost(op_name="kernel.add" | "kernel.binary_elewise" | "kernel.exp" | "kernel.select" | "kernel.reduce" | "kernel.matmul" | "kernel.img2col2d")` 的节点级文本发射。
 - 验证完整 cost function 生成后可消费 `cost::add` 与 `cost::matmul`。
 
@@ -448,6 +488,7 @@
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-COST-KERNEL-001 | 生成/编译 | `cost::add` 独立实例化 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_include_api_cost_kernel_signatures_compile`。 | 生成源码、IR 文本或编译结果体现“`cost::add` 独立实例化”场景。 | `test_include_api_cost_kernel_signatures_compile` |
+| TC-COST-KERNEL-001A | 生成/编译 | `cost::min/max` 独立实例化 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_include_api_cost_kernel_signatures_compile`。 | `cost::min/max` 按 Kernel helper 模板顺序并在末尾追加 `CostKind Kind`，可被 `include/api/cost/Kernel.h` 消费。 | `test_include_api_cost_kernel_signatures_compile` |
 | TC-COST-KERNEL-002 | 生成/编译 | `cost::matmul` 独立实例化 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_include_api_cost_kernel_signatures_compile`。 | 生成源码、IR 文本或编译结果体现“`cost::matmul` 独立实例化”场景。 | `test_include_api_cost_kernel_signatures_compile` |
 | TC-COST-KERNEL-003 | pass 改写 | `emit_c` 节点级发射 `kernel.add` 成本调用 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tuner_cost_kernel_add`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`emit_c` 节点级发射 `kernel.add` 成本调用”场景。 | `test_emit_c_lowers_npu_demo_tuner_cost_kernel_add` |
 | TC-COST-KERNEL-003A | pass 改写 | `emit_c` 节点级发射 `kernel.binary_elewise` 成本调用 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tuner_cost_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“`emit_c` 节点级发射 `kernel.binary_elewise` 成本调用”场景。 | `test_emit_c_lowers_npu_demo_tuner_cost_kernel_binary_elewise` |

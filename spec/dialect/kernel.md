@@ -101,7 +101,7 @@
 - `lhs(!nn.memory<...>)`：左输入 operand。
 - `rhs(!nn.memory<...>)`：右输入 operand。
 - `out(!nn.memory<...>)`：输出 operand。
-- `kind(str)`：语义类型，允许 `add/sub/mul/div/truediv/eq/ne/lt/le/gt/ge`。
+- `kind(str)`：语义类型，允许 `add/sub/mul/div/truediv/min/max/eq/ne/lt/le/gt/ge`。
 - `space(#nn.space<...>)`：op 的空间属性。
 
 - 使用示例：
@@ -116,7 +116,7 @@ func.return %out : !nn.memory<f32, [N, C], GM>
 
 - `lhs/rhs/out` 的 `shape/stride/space` 必须一致，`kernel` 层不负责形状变换。
 - 当 `kind` 为比较类（`eq/ne/lt/le/gt/ge`）时，`out.element_type` 必须是 `i1`。
-- 当 `kind` 为算术类（`add/sub/mul/div/truediv`）时，`lhs/rhs/out` 的 `element_type` 必须一致。
+- 当 `kind` 为算术类（`add/sub/mul/div/truediv/min/max`）时，`lhs/rhs/out` 的 `element_type` 必须一致。
 
 - 返回值：
 
@@ -445,7 +445,7 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 | TC-KRN-001 | 公开入口 | 合法 space 创建成功 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_kernel_space_attr_valid`。 | 公开入口在“合法 space 创建成功”场景下可导入、构造、注册或按名称发现。 | `test_kernel_space_attr_valid` |
 | TC-KRN-002 | 边界/异常 | 非法 space 被拒绝 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_kernel_space_attr_invalid`。 | “非法 space 被拒绝”场景按公开错误语义失败或被拒绝。 | `test_kernel_space_attr_invalid` |
 | TC-KRN-003 | 边界/异常 | `shape/stride` rank 不一致 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_kernel_memory_type_rank_mismatch`。 | “`shape/stride` rank 不一致”场景按公开错误语义失败或被拒绝。 | `test_kernel_memory_type_rank_mismatch` |
-| TC-KRN-004 | 公开入口 | `kernel.binary_elewise(kind="add")` 正常路径 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_kernel_binary_elewise_add_success`。 | 公开入口在“`kernel.binary_elewise(kind="add")` 正常路径”场景下可导入、构造、注册或按名称发现。 | `test_kernel_binary_elewise_add_success` |
+| TC-KRN-004 | 公开入口 | `kernel.binary_elewise` 算术 kind 正常路径 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_kernel_binary_elewise_arithmetic_success`。 | `add/min/max` 等算术 kind 可导入、构造、注册或按名称发现。 | `test_kernel_binary_elewise_arithmetic_success` |
 | TC-KRN-005 | 边界/异常 | `kernel.binary_elewise(kind="add")` layout 或 dtype 不一致报错 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_kernel_binary_elewise_add_layout_mismatch`。 | “`kernel.binary_elewise(kind="add")` layout 或 dtype 不一致报错”场景按公开错误语义失败或被拒绝。 | `test_kernel_binary_elewise_add_layout_mismatch` |
 | TC-KRN-006 | 执行结果 | `kernel.binary_elewise(kind="eq")` 输出类型为 `i1` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_kernel_binary_elewise_compare_output_type`。 | 命令返回码、输出、执行结果或状态变更体现“`kernel.binary_elewise(kind="eq")` 输出类型为 `i1`”场景。 | `test_kernel_binary_elewise_compare_output_type` |
 | TC-KRN-007 | 边界/异常 | `kernel.binary_elewise` 比较输出类型或 kind 非法 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_kernel_binary_elewise_compare_output_type_error`。 | “`kernel.binary_elewise` 比较输出类型或 kind 非法”场景按公开错误语义失败或被拒绝。 | `test_kernel_binary_elewise_compare_output_type_error` |

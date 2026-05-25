@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。当前基线要求 `cpu::Memory<Space, T>` 使用运行期 `rank`，并以 `MAX_DIM=8` 作为内部固定上限；逐元素/显式 broadcast、`add` 的 scalar overload（`Memory+scalar` / `scalar+Memory`，其中 `memory + const(i32)` 的目标源码保持 CPU 整数实参直传，`memory + symbol.int` 的 CPU 终点整数标量口径固定为 `long long`）、`exp`、`reduce_sum/reduce_min/reduce_max` 与 `img2col1d/img2col2d` CPU 叶子接口语义仍由 CPU include 层实现负责承接。
+定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。当前基线要求 `cpu::Memory<Space, T>` 使用运行期 `rank`，并以 `MAX_DIM=8` 作为内部固定上限；逐元素/显式 broadcast、`add` 的 scalar overload（`Memory+scalar` / `scalar+Memory`，其中 `memory + const(i32)` 的目标源码保持 CPU 整数实参直传，`memory + symbol.int` 的 CPU 终点整数标量口径固定为 `long long`）、`min/max`、`exp`、`reduce_sum/reduce_min/reduce_max` 与 `img2col1d/img2col2d` CPU 叶子接口语义仍由 CPU include 层实现负责承接。
 
 ## API 列表
 
@@ -29,6 +29,8 @@
 - `template <cpu::MemorySpace Space, typename T> void cpu::sub(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, T>& out)`
 - `template <cpu::MemorySpace Space, typename T> void cpu::mul(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, T>& out)`
 - `template <cpu::MemorySpace Space, typename T> void cpu::truediv(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, T>& out)`
+- `template <cpu::MemorySpace Space, typename T> void cpu::min(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, T>& out)`
+- `template <cpu::MemorySpace Space, typename T> void cpu::max(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, T>& out)`
 - `template <cpu::MemorySpace Space> void cpu::exp(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out)`
 - `template <cpu::MemorySpace Space> void cpu::reduce_sum(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out, const long long* axes, unsigned long long axes_rank, bool keepdim)`
 - `template <cpu::MemorySpace Space> void cpu::reduce_min(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out, const long long* axes, unsigned long long axes_rank, bool keepdim)`
@@ -63,6 +65,7 @@
 - 保持纯头文件、无标准库依赖、无异常机制的实现约束。
 - 明确 CPU 后端 `Memory` 视图使用运行期 `rank` 的接口边界，并以 `MAX_DIM=8` 作为固定容量基线。
 - 冻结 `cpu::add` 的标量终点口径：上游 `memory + const(i32)` 在 `target=cpu` 下保持 CPU 整数实参直传，`memory + symbol.int` 在 `target=cpu` 下固定映射为 `long long` 标量调用形态。
+- 冻结 `cpu::min(...)` 与 `cpu::max(...)` 的 same-shape 逐元素接口，供 `kernel.binary_elewise kind="min"/"max"` 的 CPU emit 稳定消费。
 - 冻结 `cpu::exp(...)` 与 `cpu::reduce_sum/reduce_min/reduce_max(...)` 的稳定 CPU 公开接口，明确参数约束、输出契约与违约路径。
 - 冻结 `cpu::img2col1d(...)` 与 `cpu::img2col2d(...)` 的稳定 CPU 公开接口，使 `emit_c/gen_kernel` 在 CPU 侧拥有固定调用目标。
 
@@ -403,6 +406,38 @@ auto status = cpu::truediv(out, lhs, rhs);
 ```
 - 功能说明：执行 `truediv`。
 - 注意事项：输入 shape、dtype、space 和广播关系必须符合对应 operation 合同；非法组合必须稳定失败。
+
+### `template <cpu::MemorySpace Space, typename T> void cpu::min(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, T>& out)`
+
+- api：`template <cpu::MemorySpace Space, typename T> void cpu::min(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, T>& out)`
+- 参数：
+  - `lhs`：左操作数，参与逐元素最小值计算；类型 `const cpu::Memory<Space, T>&`；无默认值，调用方必须显式提供。
+  - `rhs`：右操作数，参与逐元素最小值计算；类型 `const cpu::Memory<Space, T>&`；无默认值，调用方必须显式提供。
+  - `out`：输出对象，承接逐元素最小值结果；类型 `cpu::Memory<Space, T>&`；无默认值，调用方必须显式提供。
+- 返回值：无返回值；调用成功表示操作完成。
+- 使用示例：
+
+  ```cpp
+cpu::min(lhs, rhs, out);
+```
+- 功能说明：逐元素计算 `lhs` 与 `rhs` 的最小值并写入 `out`。
+- 注意事项：输入和输出必须同 rank、同 shape、同 dtype、同 space；不提供隐式 broadcast 或类型提升。
+
+### `template <cpu::MemorySpace Space, typename T> void cpu::max(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, T>& out)`
+
+- api：`template <cpu::MemorySpace Space, typename T> void cpu::max(const cpu::Memory<Space, T>& lhs, const cpu::Memory<Space, T>& rhs, cpu::Memory<Space, T>& out)`
+- 参数：
+  - `lhs`：左操作数，参与逐元素最大值计算；类型 `const cpu::Memory<Space, T>&`；无默认值，调用方必须显式提供。
+  - `rhs`：右操作数，参与逐元素最大值计算；类型 `const cpu::Memory<Space, T>&`；无默认值，调用方必须显式提供。
+  - `out`：输出对象，承接逐元素最大值结果；类型 `cpu::Memory<Space, T>&`；无默认值，调用方必须显式提供。
+- 返回值：无返回值；调用成功表示操作完成。
+- 使用示例：
+
+  ```cpp
+cpu::max(lhs, rhs, out);
+```
+- 功能说明：逐元素计算 `lhs` 与 `rhs` 的最大值并写入 `out`。
+- 注意事项：输入和输出必须同 rank、同 shape、同 dtype、同 space；不提供隐式 broadcast 或类型提升。
 
 ### `template <cpu::MemorySpace Space> void cpu::exp(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out)`
 
@@ -767,6 +802,7 @@ def test_cpu_img2col_api_contract_v1():
 | TC-INCLUDE-CPU-CPU-012 | 执行结果 | INC-NN-005 -> `test/include/cpu/test_nn.py::test_cpu_nn_mul_success` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `pytest -q test/include/cpu/test_nn.py::test_cpu_nn_mul_success`。 | 命令返回码、输出、执行结果或状态变更体现“INC-NN-005 -> `test/include/cpu/test_nn.py::test_cpu_nn_mul_success`”场景。 | test/include/cpu/test_nn.py::test_cpu_nn_mul_success |
 | TC-INCLUDE-CPU-CPU-013 | 执行结果 | INC-NN-006 -> `test/include/cpu/test_nn.py::test_cpu_nn_sub_success` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `pytest -q test/include/cpu/test_nn.py::test_cpu_nn_sub_success`。 | 命令返回码、输出、执行结果或状态变更体现“INC-NN-006 -> `test/include/cpu/test_nn.py::test_cpu_nn_sub_success`”场景。 | test/include/cpu/test_nn.py::test_cpu_nn_sub_success |
 | TC-INCLUDE-CPU-CPU-014 | 执行结果 | INC-NN-007 -> `test/include/cpu/test_nn.py::test_cpu_nn_truediv_success` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `pytest -q test/include/cpu/test_nn.py::test_cpu_nn_truediv_success`。 | 命令返回码、输出、执行结果或状态变更体现“INC-NN-007 -> `test/include/cpu/test_nn.py::test_cpu_nn_truediv_success`”场景。 | test/include/cpu/test_nn.py::test_cpu_nn_truediv_success |
+| TC-INCLUDE-CPU-CPU-014A | 执行结果 | INC-NN-007A -> `test/include/cpu/test_nn.py::test_cpu_nn_min_max_success` | 准备 same-shape `cpu::Memory` 输入和输出。 | 运行 `pytest -q test/include/cpu/test_nn.py::test_cpu_nn_min_max_success`。 | `cpu::min` 与 `cpu::max` 按逐元素最小值/最大值写入输出。 | test/include/cpu/test_nn.py::test_cpu_nn_min_max_success |
 | TC-INCLUDE-CPU-CPU-015 | 执行结果 | INC-NN-008 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_ne` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `pytest -q test/include/cpu/test_nn.py::test_cpu_nn_compare_ne`。 | 命令返回码、输出、执行结果或状态变更体现“INC-NN-008 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_ne`”场景。 | test/include/cpu/test_nn.py::test_cpu_nn_compare_ne |
 | TC-INCLUDE-CPU-CPU-016 | 执行结果 | INC-NN-009 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_lt` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `pytest -q test/include/cpu/test_nn.py::test_cpu_nn_compare_lt`。 | 命令返回码、输出、执行结果或状态变更体现“INC-NN-009 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_lt`”场景。 | test/include/cpu/test_nn.py::test_cpu_nn_compare_lt |
 | TC-INCLUDE-CPU-CPU-017 | 执行结果 | INC-NN-010 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_le` | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `pytest -q test/include/cpu/test_nn.py::test_cpu_nn_compare_le`。 | 命令返回码、输出、执行结果或状态变更体现“INC-NN-010 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_le`”场景。 | test/include/cpu/test_nn.py::test_cpu_nn_compare_le |

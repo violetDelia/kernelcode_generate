@@ -6,7 +6,7 @@
 - helper 只做公开 `Memory` 元信息校验，返回 `None`，不创建新的 `Memory`。
 
 API 列表:
-- `class KernelBinaryElewiseKind(Enum)`
+- `class KernelBinaryElewiseKind(Enum): ADD | SUB | MUL | DIV | TRUEDIV | MIN | MAX | EQ | NE | LT | LE | GT | GE`
 - `binary_elewise(out: Memory, lhs: Memory, rhs: Memory, *, kind: KernelBinaryElewiseKind) -> None`
 - `add(out: Memory, lhs: Memory, rhs: Memory) -> None`
 - `sub(out: Memory, lhs: Memory, rhs: Memory) -> None`
@@ -54,6 +54,8 @@ class KernelBinaryElewiseKind(Enum):
     MUL = "mul"
     DIV = "div"
     TRUEDIV = "truediv"
+    MIN = "min"
+    MAX = "max"
     EQ = "eq"
     NE = "ne"
     LT = "lt"
@@ -68,6 +70,8 @@ _ARITHMETIC_KINDS = {
     KernelBinaryElewiseKind.MUL,
     KernelBinaryElewiseKind.DIV,
     KernelBinaryElewiseKind.TRUEDIV,
+    KernelBinaryElewiseKind.MIN,
+    KernelBinaryElewiseKind.MAX,
 }
 _COMPARE_KINDS = {
     KernelBinaryElewiseKind.EQ,
@@ -185,12 +189,12 @@ def binary_elewise(out: Memory, lhs: Memory, rhs: Memory, *, kind: KernelBinaryE
 
     功能说明:
     - 校验 out/lhs/rhs 均为 `Memory`。
-    - 算术 kind 要求三者 dtype 一致。
+    - 算术 kind（含 MIN/MAX）要求三者 dtype 一致。
     - 比较 kind 要求 out dtype 为 `NumericType.Bool`，lhs/rhs dtype 可不同。
     - 返回 `None` 表示写回由 kernel dialect op 承接。
 
     使用示例:
-    - binary_elewise(out, lhs, rhs, kind=KernelBinaryElewiseKind.ADD)
+    - binary_elewise(out, lhs, rhs, kind=KernelBinaryElewiseKind.MAX)
     """
 
     _ensure_memory(out, "out")

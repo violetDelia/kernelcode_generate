@@ -23,7 +23,7 @@
 
 ## 模块行为
 
-- `kernel.binary_elewise(out, lhs, rhs, *, kind=KernelBinaryElewiseKind.X)` 注册到 `KernelBinaryElewiseAST`。
+- `kernel.binary_elewise(out, lhs, rhs, *, kind=KernelBinaryElewiseKind.X)` 注册到 `KernelBinaryElewiseAST`，其中 `X` 包含 `MIN/MAX`。
 - `kernel.add/sub/mul/div/truediv/eq/ne/lt/le/gt/ge(out, lhs, rhs)` 注册到对应固定 kind AST 节点。
 - `kernel.exp(out, input_value)` 注册到 `KernelExpAST`。
 - `kernel.reduce(out, input_value, *, kind=KernelReduceKind.X, axis=N, keepdim=False)` 注册到 `KernelReduceAST`。
@@ -35,6 +35,7 @@
 
 - 本模块不导出公开 helper；调用方只通过 `kernel_gen.operation.kernel` 与 `kernel_gen.dsl.ast.plugin.lookup_builtin(...)` 观察注册效果。
 - `binary_elewise` 的 `kind` 必须是 `KernelBinaryElewiseKind`，字符串不是公开输入。
+- 不新增 `kernel.min(...)` / `kernel.max(...)` Python helper；DSL 调用必须继续使用 `kernel.binary_elewise(..., kind=kernel.KernelBinaryElewiseKind.MIN/MAX)`。
 - `kernel.add/sub/...` 只接受 `out/lhs/rhs` 三个位置参数，不接受 keyword。
 - `kernel.exp` 只接受 `out/input_value` 两个位置参数，不接受 keyword。
 - `kernel.reduce` 只接受 `out/input_value` 两个位置参数，`kind/axis` 为必填 keyword，`keepdim` 为可选 keyword；`kind` 必须是 `KernelReduceKind`，字符串不是公开输入。

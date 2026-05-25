@@ -222,6 +222,47 @@ int main() {
     _compile_and_run(source)
 
 
+# INC-NN-001A
+# 测试目的: 验证逐元素 min/max 输出正确。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_min_max_success
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_min_max_success() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    float lhs_data[6] = {1, 8, -3, 4, 10, 6};
+    float rhs_data[6] = {6, 5, -4, 9, 2, 7};
+    float min_data[6] = {0};
+    float max_data[6] = {0};
+    long long shape[2] = {2, 3};
+    long long stride[2] = {3, 1};
+
+    cpu::Memory<cpu::GM, float> lhs(lhs_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, float> rhs(rhs_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, float> min_out(min_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, float> max_out(max_data, 2, shape, stride);
+
+    cpu::min(lhs, rhs, min_out);
+    cpu::max(lhs, rhs, max_out);
+
+    if (min_data[0] != 1 || min_data[1] != 5 || min_data[2] != -4 || min_data[4] != 2) {
+        return fail(1);
+    }
+    if (max_data[0] != 6 || max_data[1] != 8 || max_data[2] != -3 || max_data[4] != 10) {
+        return fail(2);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
 # INC-NN-002
 # 测试目的: 验证逐元素比较输出 predicate 语义结果。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_compare_eq

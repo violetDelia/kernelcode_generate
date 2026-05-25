@@ -21,7 +21,7 @@ API 列表:
 
 关联文件:
 - spec: spec/include/api/cost/Core.md
-- test: test/include/npu_demo/cost.py
+- test: test/include/npu_demo/test_cost.py
 - 功能实现: include/npu_demo/cost/Core.h
 */
 

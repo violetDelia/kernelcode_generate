@@ -8,7 +8,7 @@
 - `KernelContext` 是由 `launch` 创建并绑定到当前线程的运行时上下文视图，不再是生成源码 body 签名中的显式参数。
 - `thread_num()` / `block_num()` / `subthread_num()` 返回本次 launch 的 extent，而不是 target registry 的固定模板值；`shared_memory_size` 作为 launch metadata 以编译期模板参数承接。
 - `include/npu_demo/npu_demo.h` 作为单入口头文件，需透传 `include/api/Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `Trance.h` / `cost/*.h` 的统一声明，并汇聚 `include/npu_demo/Core.h` / `Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `Trance.h` / `cost/*.h` 的后端实现。
-- `npu_demo::add/sub/mul/...`、`npu_demo::launch(...)`、`npu_demo::block_id()`、`npu_demo::build_contiguous_stride(...)`、`npu_demo::view(...)`、`npu_demo::alloc(...)`、`npu_demo::fill(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)`、`npu_demo::transpose(...)`、`npu_demo::broadcast(...)` 以及 `npu_demo::cost::add/copy/...` 是 public function 的唯一成功消费方向；`detail` 只服务实现内部。
+- `npu_demo::add/sub/mul/truediv/min/max/...`、`npu_demo::launch(...)`、`npu_demo::block_id()`、`npu_demo::build_contiguous_stride(...)`、`npu_demo::view(...)`、`npu_demo::alloc(...)`、`npu_demo::fill(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)`、`npu_demo::transpose(...)`、`npu_demo::broadcast(...)` 以及 `npu_demo::cost::add/min/max/copy/...` 是 public function 的唯一成功消费方向；`detail` 只服务实现内部。
 - `TRANCE` block 目录模式下，`npu_demo::launch(...)` 每个 block worker 必须写入独立 `block_XXXX.log`，文件实现由 trace 模块公开入口承接。
 
 ## API 列表
@@ -37,7 +37,11 @@
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::deslice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::transpose(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& perm)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::broadcast(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::min(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `namespace npu_demo::cost`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::min(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::max(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 
 ## 文档信息
 
@@ -84,8 +88,8 @@
 - public function 必须位于 `namespace npu_demo`；基础类型与 enum 可以继续来自 `include/api` 全局公开类型。
 - `npu_demo::detail` 只用于实现内部复用；公开测试、spec 示例、生成源码不得直接消费 `npu_demo::detail` 或 `*_detail` 名称。
 - `include/npu_demo/npu_demo.h` 是唯一聚合入口，不新增第二套 target include。
-- `Kernel` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md) 冻结；`npu_demo` 只负责承接实现，不得重新发明旧 `Nn` 公共别名。
-- `cost` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/cost/Core.md`](../../../spec/include/api/cost/Core.md)、[`spec/include/api/cost/Dma.md`](../../../spec/include/api/cost/Dma.md)、[`spec/include/api/cost/Kernel.md`](../../../spec/include/api/cost/Kernel.md) 冻结；`npu_demo` 只负责承接默认实现，不得额外引入 `kind2/kind3` 或 target 私有成本命名。
+- `Kernel` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md) 冻结；`npu_demo` 只负责承接实现，不得重新发明旧 `Nn` 公共别名；`min/max` 与其它 same-shape binary helper 一样使用 out-first 参数顺序。
+- `cost` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/cost/Core.md`](../../../spec/include/api/cost/Core.md)、[`spec/include/api/cost/Dma.md`](../../../spec/include/api/cost/Dma.md)、[`spec/include/api/cost/Kernel.md`](../../../spec/include/api/cost/Kernel.md) 冻结；`npu_demo` 只负责承接默认实现，不得额外引入 `kind2/kind3` 或 target 私有成本命名；`cost::min/max` 必须与 `cost::add/sub/mul/truediv` 保持同一模板与参数形态。
 - `gen_kernel(target="npu_demo")` 生成的完整源码若同时包含普通 kernel function 与 `_cost_DMA1_*` / `_cost_DMA2_*` / `_cost_DMA3_*` / `_cost_DMA4_*` / `_cost_MAC_*` / `_cost_VECTOR1_*` / `_cost_VECTOR2_*` sibling cost function，仍只允许依赖本头文件；不得额外要求包含 `include/npu_demo/cost/*.h`、`include/api/cost/*.h` 或额外 `using namespace npu_demo::cost;`。
 - `KernelContext` 只表示当前 launched body 的运行时视图；生成源码不得再显式声明 `npu_demo::KernelContext& ctx` 参数，不要求公开默认构造、复制持久化或脱离 launch 生命周期独立使用。
 - block-only launch 子集固定为：`1 <= block <= registry.hardware.block_num`、`thread=1`、`subthread=1`、`shared_memory_size=0`；不支持的 extent 必须显式失败，禁止静默回退到单线程或忽略部分 extent。
@@ -469,6 +473,32 @@ auto subthreads = ctx.subthread_num();
 - 功能说明：承接 `npu_demo` 后端的公开成本 helper 子命名空间。
 - 注意事项：`npu_demo::cost` 是当前公开子命名空间；生成源码可在 `using namespace npu_demo;` 后使用 `cost::...`；不得引入 `kind2/kind3` 或 target 私有成本命名；`dsl_cost_run(...)` 的 DMA 聚合不得依赖跨文件 `npu_demo::cost::detail` 非公开状态。
 
+### `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::min/max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+
+- api：`template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::min/max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- 参数：`out`、`lhs`、`rhs` 的顺序、模板参数与 same-shape 约束以 [`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md) 为真源。
+- 返回值：`Status`，表示执行状态。
+- 使用示例：
+
+  ```cpp
+  Status status = npu_demo::max(out, lhs, rhs);
+  ```
+- 功能说明：聚合并承接 `include/api/Kernel.h` 中公开的逐元素 `min/max` helper。
+- 注意事项：`include/npu_demo/npu_demo.h` 必须让公开命名空间可直接消费 `npu_demo::min/max`；不得要求调用方依赖 `npu_demo::detail` 或旧 `Nn` 公共别名。
+
+### `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::min/max(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+
+- api：`template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::min/max(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- 参数：`out`、`lhs`、`rhs` 的顺序、模板参数与 `CostKind` 尾参约束以 [`spec/include/api/cost/Kernel.md`](../../../spec/include/api/cost/Kernel.md) 为真源。
+- 返回值：`S_INT`。
+- 使用示例：
+
+  ```cpp
+  S_INT max_cost = npu_demo::cost::max<GM, float, float, VECTOR1>(out, lhs, rhs);
+  ```
+- 功能说明：聚合并承接 `include/api/cost/Kernel.h` 中公开的逐元素 `min/max` 成本 helper。
+- 注意事项：`include/npu_demo/npu_demo.h` 必须让生成源码在 `using namespace npu_demo;` 后可直接消费 `cost::min/max`；不得引入额外 include、`using namespace npu_demo::cost;` 或 target 私有成本命名。
+
 ## 测试
 
 - 测试文件：
@@ -509,9 +539,11 @@ auto subthreads = ctx.subthread_num();
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-003 | 边界/异常 | 锁定 barrier 的 `visibility / scope` 参数合同。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_npu_demo_kernel_context_barrier_requires_visibility_and_block_scope`。 | “锁定 barrier 的 `visibility / scope` 参数合同。”场景按公开错误语义失败或被拒绝。 | `test_npu_demo_kernel_context_barrier_requires_visibility_and_block_scope` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-004 | 边界/异常 | 锁定 `block > 2`、`thread != 1` 或 `subthread != 1` 的显式失败边界。 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_npu_demo_launch_rejects_unsupported_extent_without_fallback`。 | “锁定 `block > 2`、`thread != 1` 或 `subthread != 1` 的显式失败边界。”场景按公开错误语义失败或被拒绝。 | `test_npu_demo_launch_rejects_unsupported_extent_without_fallback` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-005 | 公开入口 | 锁定 `npu_demo::` public function 最小正向消费。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_npu_demo_public_namespace_smoke_compiles_vector_kernel_and_launch`。 | 公开入口在“锁定 `npu_demo::` public function 最小正向消费。”场景下可导入、构造、注册或按名称发现。 | `test_npu_demo_public_namespace_smoke_compiles_vector_kernel_and_launch` |
+| TC-INCLUDE-NPU-DEMO-NPU-DEMO-005A | 公开入口 | 锁定 `npu_demo::min/max` public namespace 正向消费。 | 包含 `include/npu_demo/npu_demo.h` 并构造 same-shape vector memory。 | 运行 `test_npu_demo_public_namespace_smoke_compiles_vector_kernel_and_launch`。 | `npu_demo::min/max` 可经聚合头文件直接调用，不依赖 `detail` 或旧 `Nn` 名称。 | `test_npu_demo_public_namespace_smoke_compiles_vector_kernel_and_launch` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-006 | 公开入口 | 锁定 `Memory/Dma` public function 只通过 `npu_demo::` 正向消费，未限定的全局 helper 不作为成功路径。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_npu_demo_public_namespace_memory_dma_helpers`。 | 公开入口在“锁定 `Memory/Dma` public function 只通过 `npu_demo::` 正向消费，未限定的全局 helper 不作为成功路径。”场景下可导入、构造、注册或按名称发现。 | `test_npu_demo_public_namespace_memory_dma_helpers` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-007 | 生成/编译 | 锁定 `include/npu_demo/npu_demo.h` 对 `gen_kernel` 输出的 wrapper/body kernel + sibling cost function 模块仍是单入口 compile-only 头文件。 | 准备公开 DSL/IR 输入、目标配置与源码生成入口。 | 运行 `test_gen_kernel_compiles_npu_demo_cost_function_module`。 | 生成源码、IR 文本或编译结果体现“锁定 `include/npu_demo/npu_demo.h` 对 `gen_kernel` 输出的 wrapper/body kernel + sibling cost function 模块仍是单入口 compile-only 头文件。”场景。 | `test_gen_kernel_compiles_npu_demo_cost_function_module` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-008 | 公开入口 | 锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `block_num=2/thread_num=1` 上限语义。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_target_registry_npu_demo_supports_launch_and_barrier_caps`。 | 公开入口在“锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `block_num=2/thread_num=1` 上限语义。”场景下可导入、构造、注册或按名称发现。 | `test_target_registry_npu_demo_supports_launch_and_barrier_caps` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-009 | 边界/异常 | 锁定 cost DMA include 不依赖跨文件非公开 detail 聚合状态。 | 读取公开 include 文本。 | 运行 `test_npu_demo_cost_dma_has_no_cross_file_detail_accumulator`。 | `include/npu_demo/cost/Core.h` 不承载 DMA 聚合状态，`include/npu_demo/cost/Dma.h` 不包含或调用该非公开状态。 | `test_npu_demo_cost_dma_has_no_cross_file_detail_accumulator` |
+| TC-INCLUDE-NPU-DEMO-NPU-DEMO-009A | 公开入口 | 锁定 `npu_demo::cost::min/max` public namespace 正向消费。 | 包含 `include/npu_demo/npu_demo.h` 并构造 same-shape vector memory。 | 运行 `test_npu_demo_public_header_aggregates_cost_family`。 | `npu_demo::cost::min/max` 可经聚合头文件直接调用，模板与参数顺序和 `include/api/cost/Kernel.h` 一致。 | `test_npu_demo_public_header_aggregates_cost_family` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-010 | 执行结果 | 单入口头文件聚合 runtime trance，`TRANCE` 开启时输出 Memory 与 launch 参数。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE`，构造 `Memory<GM, float>` 并作为 forwarded arg 执行 `npu_demo::launch<2, 1, 1, 0>(...)`。 | 运行 `test_npu_demo_trance_stdout_memory_and_launch_format`。 | stdout 包含 launch `template=<block=2, thread=1, subthread=1, shared_memory_size=0>`、`arg0 = callable[kernel_body]`、`arg1 = mem[...] [2, 3] [3, 1] f32 GM` 与 `arg2 = 7`。 | `test_npu_demo_trance_stdout_memory_and_launch_format` |
 | TC-INCLUDE-NPU-DEMO-NPU-DEMO-011 | 执行结果 | 单入口头文件聚合 runtime trance block 文件模式。 | include `include/npu_demo/npu_demo.h`，传 `-DTRANCE` 与 `KG_TRANCE_DIR_PATH`，执行 `npu_demo::launch<2, 1, 1, 0>(...)`。 | 运行 `test_npu_demo_launch_trance_block_logs_are_per_block_files`。 | `block_0000.log` 与 `block_0001.log` 存在并包含对应 header 与 launch 参数，旧额外 `block_*.log` 会被清理。 | `test_npu_demo_launch_trance_block_logs_are_per_block_files` |

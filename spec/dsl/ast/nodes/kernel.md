@@ -56,7 +56,7 @@
   node = KernelBinaryElewiseAST(out, lhs, rhs, KernelBinaryElewiseKind.ADD)
   ```
 - 功能说明：发射 `kernel.binary_elewise(out, lhs, rhs) {kind = ...}`。
-- 注意事项：必须复用 `kernel_gen.operation.kernel.binary_elewise(...)` 的公开校验；算术/比较 shape、stride、space、dtype 规则不得在 AST 层另开口径。
+- 注意事项：必须复用 `kernel_gen.operation.kernel.binary_elewise(...)` 的公开校验；`MIN/MAX` 作为算术 kind 发射为 `kind="min"` / `kind="max"`，算术/比较 shape、stride、space、dtype 规则不得在 AST 层另开口径。
 
 ### `class KernelAddAST / KernelSubAST / KernelMulAST / KernelDivAST / KernelTrueDivAST / KernelEqAST / KernelNeAST / KernelLtAST / KernelLeAST / KernelGtAST / KernelGeAST`
 
@@ -174,6 +174,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-DSL-AST-NODES-KERNEL-001 | pass 改写 | add helper lower | 构造公开 `KernelAddAST`。 | 发射 MLIR。 | 返回 `KernelBinaryElewiseOp(kind="add")`。 | `test_kernel_add_node_emits_binary_elewise_op` |
 | TC-DSL-AST-NODES-KERNEL-002 | 边界/异常 | string kind rejected | 构造 `KernelBinaryElewiseAST(..., "add")`。 | 初始化节点。 | 抛 `KernelCodeError`。 | `test_kernel_binary_elewise_node_rejects_string_kind` |
+| TC-DSL-AST-NODES-KERNEL-002A | pass 改写 | min/max kind lower | 构造公开 `KernelBinaryElewiseAST(..., KernelBinaryElewiseKind.MIN/MAX)`。 | 发射 MLIR。 | 返回 `KernelBinaryElewiseOp(kind="min"|"max")`。 | `test_kernel_binary_elewise_node_emits_min_max_kind` |
 | TC-DSL-AST-NODES-KERNEL-005 | pass 改写 | exp lower | 构造公开 `KernelExpAST`。 | 发射 MLIR。 | 返回 `KernelExpOp`。 | `test_kernel_exp_node_emits_exp_op` |
 | TC-DSL-AST-NODES-KERNEL-006 | pass 改写 | reduce lower | 构造公开 `KernelReduceAST`。 | 发射 MLIR。 | 返回 `KernelReduceOp(kind=...)`。 | `test_kernel_reduce_node_emits_reduce_op` |
 | TC-DSL-AST-NODES-KERNEL-003 | pass 改写 | matmul lower | 构造 mixed-space rank-2 memory。 | 发射 MLIR。 | 返回无结果 `KernelMatmulOp`。 | `test_kernel_matmul_node_emits_matmul_op` |

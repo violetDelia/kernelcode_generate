@@ -130,6 +130,8 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
             "mul": "mul",
             "div": "truediv",
             "truediv": "truediv",
+            "min": "min",
+            "max": "max",
             "eq": "eq",
             "ne": "ne",
             "lt": "lt",

@@ -349,7 +349,7 @@ def public_kernel_out_first_helper_kernel(
     """提供 kernel out-first helper DSL kernel。"""
 
     kernel_ops.add(ele_out, ele_lhs, ele_rhs)
-    kernel_ops.binary_elewise(ele_out, ele_lhs, ele_rhs, kind=kernel_ops.KernelBinaryElewiseKind.SUB)
+    kernel_ops.binary_elewise(ele_out, ele_lhs, ele_rhs, kind=kernel_ops.KernelBinaryElewiseKind.MAX)
     kernel_ops.matmul(mat_out, mat_lhs, mat_rhs)
     kernel_ops.img2col1d(img1_out, img1_in, k)
     kernel_ops.img2col2d(img2_out, img2_in, kh=kh, kw=kw, ph=1, pw=1, pl=1, pr=1)
@@ -1213,6 +1213,7 @@ def test_mlir_gen_lowers_kernel_out_first_public_helpers() -> None:
     module_text = str(module)
 
     assert sum(isinstance(op, KernelBinaryElewiseOp) for op in ops) == 2
+    assert '"max"' in module_text
     assert any(isinstance(op, KernelMatmulOp) for op in ops)
     assert any(isinstance(op, KernelImg2col1dOp) for op in ops)
     assert any(isinstance(op, KernelImg2col2dOp) for op in ops)

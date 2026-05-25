@@ -141,6 +141,8 @@ def test_include_api_kernel_exports_only_public_kernel_helpers() -> None:
 
     assert "namespace npu_demo" in public_header
     assert "Status add(" in public_header
+    assert "Status min(" in public_header
+    assert "Status max(" in public_header
     assert "Status matmul(" in public_header
     assert "Status img2col2d(" in public_header
     assert "Status reduce_max(" in public_header
@@ -179,6 +181,18 @@ int main() {
     }
     if (out_data[0] != 11.0f || out_data[1] != 22.0f || out_data[2] != 33.0f || out_data[3] != 44.0f) {
         return fail(2);
+    }
+    if (npu_demo::max<GM, float, float>(out, lhs, rhs) != StatusCode::kOk) {
+        return fail(21);
+    }
+    if (out_data[0] != 10.0f || out_data[1] != 20.0f || out_data[2] != 30.0f || out_data[3] != 40.0f) {
+        return fail(22);
+    }
+    if (npu_demo::min<GM, float, float>(out, lhs, rhs) != StatusCode::kOk) {
+        return fail(23);
+    }
+    if (out_data[0] != 1.0f || out_data[1] != 2.0f || out_data[2] != 3.0f || out_data[3] != 4.0f) {
+        return fail(24);
     }
 
     float lhs_matmul_data[4] = {1.0f, 2.0f, 3.0f, 4.0f};

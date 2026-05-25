@@ -91,6 +91,29 @@ def test_kernel_binary_elewise_node_rejects_string_kind() -> None:
         KernelBinaryElewiseAST(out, lhs, rhs, "add")
 
 
+# TC-AST-NODE-KERNEL-002A
+# 功能说明: 验证 KernelBinaryElewiseAST 可发射 min/max kind。
+# 测试目的: 锁定新增 enum 成员通过公开 AST 节点 lower 为 kernel.binary_elewise kind 字符串。
+# 使用示例: pytest -q test/dsl/ast/nodes/test_kernel.py -k min_max
+# 对应功能实现文件路径: kernel_gen/dsl/ast/nodes/kernel.py
+# 对应 spec 文件路径: spec/dsl/ast/nodes/kernel.md
+# 对应测试文件路径: test/dsl/ast/nodes/test_kernel.py
+def test_kernel_binary_elewise_node_emits_min_max_kind() -> None:
+    memory = Memory([2, 4], NumericType.Float32)
+    out = _memory_node("out", memory)
+    lhs = _memory_node("lhs", memory)
+    rhs = _memory_node("rhs", memory)
+    ctx, block = _block_for_memories(out, lhs, rhs)
+
+    min_op = KernelBinaryElewiseAST(out, lhs, rhs, KernelBinaryElewiseKind.MIN).emit_mlir(ctx, block)
+    max_op = KernelBinaryElewiseAST(out, lhs, rhs, KernelBinaryElewiseKind.MAX).emit_mlir(ctx, block)
+
+    assert isinstance(min_op, KernelBinaryElewiseOp)
+    assert isinstance(max_op, KernelBinaryElewiseOp)
+    assert min_op.kind.data == "min"
+    assert max_op.kind.data == "max"
+
+
 # TC-AST-NODE-KERNEL-003
 # 功能说明: 验证 KernelMatmulAST 发射 kernel.matmul。
 # 测试目的: out-first matmul 允许 mixed-space operand 并生成无结果 dialect op。

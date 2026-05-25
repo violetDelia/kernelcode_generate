@@ -41,7 +41,7 @@ def _kernel_add_stmt(out: Memory, lhs: Memory, rhs: Memory) -> None:
 
 
 def _kernel_binary_stmt(out: Memory, lhs: Memory, rhs: Memory) -> None:
-    kernel.binary_elewise(out, lhs, rhs, kind=kernel.KernelBinaryElewiseKind.ADD)
+    kernel.binary_elewise(out, lhs, rhs, kind=kernel.KernelBinaryElewiseKind.MAX)
 
 
 def _kernel_matmul_return_stmt(out: Memory, lhs: Memory, rhs: Memory) -> None:
@@ -126,6 +126,7 @@ def test_kernel_plugin_parse_function_builds_statement_nodes() -> None:
     assert isinstance(add_ast, FunctionAST)
     assert isinstance(add_ast.body.statements[0], KernelAddAST)
     assert isinstance(binary_ast.body.statements[0], KernelBinaryElewiseAST)
+    assert binary_ast.body.statements[0].kind is kernel.KernelBinaryElewiseKind.MAX
     assert isinstance(exp_ast.body.statements[0], KernelExpAST)
     assert isinstance(reduce_ast.body.statements[0], KernelReduceAST)
     assert isinstance(matmul_ast.body.statements[0], KernelMatmulAST)

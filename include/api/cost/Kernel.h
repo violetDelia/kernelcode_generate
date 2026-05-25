@@ -8,6 +8,8 @@ API 列表:
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::sub(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::mul(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::truediv(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::min(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::max(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::eq(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::ne(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType, CostKind Kind> S_INT npu_demo::cost::lt(const Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
@@ -29,12 +31,13 @@ helper 清单:
 使用示例:
 - #include "include/api/cost/Kernel.h"
 - S_INT add_cost = npu_demo::cost::add<GM, float, float, npu_demo::VECTOR1>(out, lhs, rhs);
+- S_INT max_cost = npu_demo::cost::max<GM, float, float, npu_demo::VECTOR1>(out, lhs, rhs);
 - S_INT matmul_cost = npu_demo::cost::matmul<TSM, TSM, TLM1, float, float, float, npu_demo::MAC>(out, lhs, rhs);
 
 
 关联文件:
 - spec: spec/include/api/cost/Kernel.md
-- test: test/include/api/cost.py
+- test: test/include/api/test_cost.py
 - 功能实现: include/npu_demo/cost/Kernel.h
 */
 
@@ -54,11 +57,12 @@ namespace cost {
 使用示例:
 - S_INT add_cost = npu_demo::cost::add<GM, float, float, npu_demo::VECTOR1>(out, lhs, rhs);
 - S_INT div_cost = npu_demo::cost::truediv<TSM, float, float, npu_demo::VECTOR1>(out, lhs, rhs);
+- S_INT max_cost = npu_demo::cost::max<TSM, float, float, npu_demo::VECTOR1>(out, lhs, rhs);
 
 
 关联文件:
 - spec: spec/include/api/cost/Kernel.md
-- test: test/include/api/cost.py
+- test: test/include/api/test_cost.py
 - 功能实现: include/npu_demo/cost/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, CostKind Kind>
@@ -81,6 +85,16 @@ S_INT truediv(
     const Memory<Space, OutType>& out,
     const Memory<Space, InType>& lhs,
     const Memory<Space, InType>& rhs);
+template <MemorySpace Space, typename InType, typename OutType, CostKind Kind>
+S_INT min(
+    const Memory<Space, OutType>& out,
+    const Memory<Space, InType>& lhs,
+    const Memory<Space, InType>& rhs);
+template <MemorySpace Space, typename InType, typename OutType, CostKind Kind>
+S_INT max(
+    const Memory<Space, OutType>& out,
+    const Memory<Space, InType>& lhs,
+    const Memory<Space, InType>& rhs);
 
 /*
 功能说明:
@@ -92,7 +106,7 @@ S_INT truediv(
 
 关联文件:
 - spec: spec/include/api/cost/Kernel.md
-- test: test/include/api/cost.py
+- test: test/include/api/test_cost.py
 - 功能实现: include/npu_demo/cost/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, CostKind Kind>
@@ -137,7 +151,7 @@ S_INT ge(
 
 关联文件:
 - spec: spec/include/api/cost/Kernel.md
-- test: test/include/api/cost.py
+- test: test/include/api/test_cost.py
 - 功能实现: include/npu_demo/cost/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType, CostKind Kind>
@@ -165,7 +179,7 @@ S_INT reduce_max(const Memory<Space, OutType>& out, const Memory<Space, InType>&
 
 关联文件:
 - spec: spec/include/api/cost/Kernel.md
-- test: test/include/api/cost.py
+- test: test/include/api/test_cost.py
 - 功能实现: include/npu_demo/cost/Kernel.h
 */
 template <

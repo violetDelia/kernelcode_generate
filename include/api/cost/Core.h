@@ -2,7 +2,7 @@
 功能说明:
 - 定义 include/api/cost/Core.h 的统一公共成本类型声明。
 - 当前公开 `npu_demo::cost::CostKind::{DMA1, DMA2, DMA3, DMA4, MAC, VECTOR1, VECTOR2}`，并额外公开
-  `npu_demo::{DMA1, DMA2, DMA3, DMA4, MAC, VECTOR1, VECTOR2}` 作为模板实参别名。
+  `npu_demo::{DMA, DMA1, DMA2, DMA3, DMA4, MAC, VECTOR1, VECTOR2}` 作为模板实参别名。
 - 全部 cost helper 继续沿用 `S_INT` 作为返回类型来源。
 
 API 列表:
@@ -28,7 +28,7 @@ helper 清单:
 
 关联文件:
 - spec: spec/include/api/cost/Core.md
-- test: test/include/api/cost.py
+- test: test/include/api/test_cost.py
 - 功能实现: include/npu_demo/cost/Core.h
 */
 
@@ -54,7 +54,7 @@ namespace cost {
 
 关联文件:
 - spec: spec/include/api/cost/Core.md
-- test: test/include/api/cost.py
+- test: test/include/api/test_cost.py
 - 功能实现: include/npu_demo/cost/Core.h
 */
 enum class CostKind {
@@ -72,7 +72,7 @@ enum class CostKind {
 /*
 功能说明:
 - 公开 `emit_c/gen_kernel(target="npu_demo")` 直接透传的成本 kind 模板实参别名。
-- 让生成源码可直接写出 `DMA1` / `DMA2` / `DMA3` / `DMA4` / `MAC` / `VECTOR1` / `VECTOR2`，不再在 emit 阶段做额外映射。
+- 让生成源码可直接写出 `DMA` / `DMA1` / `DMA2` / `DMA3` / `DMA4` / `MAC` / `VECTOR1` / `VECTOR2`，不再在 emit 阶段做额外映射。
 
 使用示例:
 - S_INT add_cost = npu_demo::cost::add<GM, float, float, npu_demo::VECTOR1>(out, lhs, rhs);
@@ -81,7 +81,7 @@ enum class CostKind {
 
 关联文件:
 - spec: spec/include/api/cost/Core.md
-- test: test/include/api/cost.py
+- test: test/include/api/test_cost.py
 - 功能实现: include/npu_demo/cost/Core.h
 */
 inline constexpr cost::CostKind DMA = cost::CostKind::DMA1;

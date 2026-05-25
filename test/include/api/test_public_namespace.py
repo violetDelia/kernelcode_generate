@@ -142,10 +142,14 @@ void consume_api_names() {
     Status status = StatusCode::kOk;
     BarrierScope scope = BarrierScope::BLOCK;
     MemorySpace space = GM;
+    auto min_fn = &npu_demo::min<GM, float, float>;
+    auto max_fn = &npu_demo::max<GM, float, float>;
     kernelcode::trance::TranceSink sink = kernelcode::trance::make_stdout_sink();
     (void)status;
     (void)scope;
     (void)space;
+    (void)min_fn;
+    (void)max_fn;
     (void)sink;
 }
 """

@@ -61,6 +61,8 @@ def _assert_flash_source_uses_kernel_softmax(fn) -> None:
     function_source = inspect.getsource(fn)
     assert "kernel.matmul(" in function_source
     assert "kernel.reduce(" in function_source
+    assert "kernel.binary_elewise(" in function_source
+    assert "kernel.KernelBinaryElewiseKind.MAX" in function_source
     assert "broadcast(" in function_source
     assert "kernel.exp(" in function_source
     assert "kernel.truediv(" in function_source
@@ -71,6 +73,8 @@ def _assert_flash_source_uses_kernel_softmax(fn) -> None:
     assert "softmax(" not in function_source
     assert "score = matmul(" not in function_source
     assert "weighted = matmul(" not in function_source
+    assert "pair_tile" not in function_source
+    assert "max_pair" not in function_source
 
 
 def _assert_flash_source_uses_query_and_key_tile_loops(fn) -> None:
@@ -107,7 +111,6 @@ def _assert_flash_static_static_source_uses_fixed_upper_bound_scratch() -> None:
 
     function_source = inspect.getsource(flash_attention_inputs_static_tile_static_kernel)
     assert "unit_tile = br - br + 1" in function_source
-    assert "pair_tile = unit_tile + unit_tile" in function_source
     assert "m_state = alloc([br, unit_tile]" in function_source
     assert "sum_state = alloc([br, unit_tile]" in function_source
     assert "weighted = alloc([br, dim_size]" in function_source
@@ -151,6 +154,9 @@ def _assert_flash_static_static_first_ir_uses_fixed_upper_bound_scratch() -> Non
     assert '!nn.memory<[#C64, #C64], [#C64, #C1], f32, #nn.space<tsm>>' in first_ir
     assert '!nn.memory<[#C64, #C1], [#C1, #C1], f32, #nn.space<tsm>>' in first_ir
     assert '!nn.memory<[#C64, #C91], [#C91, #C1], f32, #nn.space<tsm>>' in first_ir
+    assert '"kernel.binary_elewise"' in first_ir
+    assert 'kind = "max"' in first_ir
+    assert '!nn.memory<[#C64, #C2], [#C2, #C1], f32, #nn.space<tsm>>' not in first_ir
     assert re.search(r'"dma\.view".*-> !nn\.memory<\[#S2, #S2\]', first_ir) is not None
     assert re.search(r'"dma\.view".*-> !nn\.memory<\[#S2, #C91\]', first_ir) is not None
     assert re.search(r'"dma\.alloc".*#S2', first_ir) is None
@@ -188,6 +194,9 @@ def _assert_flash_symbolic_tile_first_ir_uses_fixed_upper_bound_scratch(case_nam
     first_ir = _read_first_ir(case_name)
     assert '!nn.memory<[#S_BR, #S_BC], [#S_BC, #C1], f32, #nn.space<tsm>>' in first_ir
     assert '!nn.memory<[#S_BR, #C1], [#C1, #C1], f32, #nn.space<tsm>>' in first_ir
+    assert '"kernel.binary_elewise"' in first_ir
+    assert 'kind = "max"' in first_ir
+    assert '!nn.memory<[#S_BR, #C2], [#C2, #C1], f32, #nn.space<tsm>>' not in first_ir
     assert re.search(r'"dma\.view".*-> !nn\.memory<\[' + re.escape(tail_symbols[0]) + r",", first_ir) is not None
     assert re.search(r'"dma\.view".*-> !nn\.memory<\[' + re.escape(tail_symbols[0]) + r", " + re.escape(tail_symbols[1]) + r"\]", first_ir) is not None
     _assert_no_flash_tail_shape_alloc(first_ir, tail_symbols)
@@ -310,7 +319,10 @@ def test_flash_static_static_demo_keeps_static_memory_and_tile() -> None:
     assert "!symbol.int<#symbol.expr<BR>>" not in module_text
     assert "!symbol.int<#symbol.expr<BC>>" not in module_text
     assert "step = #symbol.expr<64>" in module_text
+    assert '"kernel.binary_elewise"' in module_text
+    assert 'kind = "max"' in module_text
     assert "matmul<" in source
+    assert "max<" in source
     assert "reduce_max<" in source
     assert "reduce_sum<" in source
     assert "broadcast<" in source
@@ -342,6 +354,8 @@ def test_flash_static_dynamic_demo_keeps_static_memory_and_symbolic_tile() -> No
     assert "step = #symbol.expr<BR>" in module_text
     assert "step = #symbol.expr<BC>" in module_text
     assert '"kernel.reduce"' in module_text
+    assert '"kernel.binary_elewise"' in module_text
+    assert 'kind = "max"' in module_text
     assert '"kernel.exp"' in module_text
     assert '"dma.broadcast"' in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
@@ -370,6 +384,8 @@ def test_flash_dynamic_dynamic_demo_keeps_symbolic_memory_and_symbolic_tile() ->
     assert "step = #symbol.expr<BR>" in module_text
     assert "step = #symbol.expr<BC>" in module_text
     assert '"kernel.reduce"' in module_text
+    assert '"kernel.binary_elewise"' in module_text
+    assert 'kind = "max"' in module_text
     assert '"kernel.exp"' in module_text
     assert '"dma.broadcast"' in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text

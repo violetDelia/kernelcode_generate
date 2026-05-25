@@ -8,6 +8,8 @@ API 列表:
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::sub(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::min(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
+- `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::eq(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::ne(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::lt(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs)`
@@ -29,12 +31,13 @@ helper 清单:
 使用示例:
 - #include "include/api/Kernel.h"
 - Status status = npu_demo::add<GM, float, float>(out, lhs, rhs);
+- Status status_min = npu_demo::min<GM, float, float>(out, lhs, rhs);
 - Status status2 = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs);
 
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 
@@ -53,11 +56,12 @@ namespace npu_demo {
 使用示例:
 - Status st = npu_demo::add<GM, float, float>(out, lhs, rhs);
 - Status st2 = npu_demo::truediv<TSM, int32_t, float>(out, lhs, rhs);
+- Status st3 = npu_demo::max<TSM, int32_t, int32_t>(out, lhs, rhs);
 
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -68,6 +72,10 @@ template <MemorySpace Space, typename InType, typename OutType>
 Status mul(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs);
 template <MemorySpace Space, typename InType, typename OutType>
 Status truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs);
+template <MemorySpace Space, typename InType, typename OutType>
+Status min(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs);
+template <MemorySpace Space, typename InType, typename OutType>
+Status max(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const Memory<Space, InType>& rhs);
 
 /*
 功能说明:
@@ -80,7 +88,7 @@ Status truediv(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, co
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -107,7 +115,7 @@ Status ge(Memory<Space, OutType>& out, const Memory<Space, InType>& lhs, const M
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -131,7 +139,7 @@ Status select(
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace Space, typename InType, typename OutType>
@@ -153,7 +161,7 @@ Status reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType>& inpu
 
 关联文件:
 - spec: spec/include/api/Kernel.md
-- test: test/include/api/kernel.py
+- test: test/include/api/test_kernel.py
 - 功能实现: include/npu_demo/Kernel.h
 */
 template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType>

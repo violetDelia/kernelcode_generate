@@ -27,7 +27,7 @@ from kernel_gen.symbol_variable.type import NumericType
 
 # TC-OP-KERNEL-ELEWISE-001
 # 功能说明: 验证 out-first 算术 helper 成功路径。
-# 测试目的: 锁定 add/sub/mul/div/truediv 返回 None 且不创建新 Memory。
+# 测试目的: 锁定 add/sub/mul/div/truediv 与 binary_elewise min/max 返回 None 且不创建新 Memory。
 # 使用示例: pytest -q test/operation/kernel/test_elementwise.py -k arithmetic
 # 对应功能实现文件路径: kernel_gen/operation/kernel/elementwise.py
 # 对应 spec 文件路径: spec/operation/kernel.md
@@ -44,6 +44,10 @@ def test_kernel_arithmetic_helpers_are_out_first_and_return_none() -> None:
     assert kernel.div(out, lhs, rhs) is None
     assert kernel.truediv(out, lhs, rhs) is None
     assert kernel.binary_elewise(out, lhs, rhs, kind=kernel.KernelBinaryElewiseKind.ADD) is None
+    assert kernel.binary_elewise(out, lhs, rhs, kind=kernel.KernelBinaryElewiseKind.MIN) is None
+    assert kernel.binary_elewise(out, lhs, rhs, kind=kernel.KernelBinaryElewiseKind.MAX) is None
+    assert not hasattr(kernel, "min")
+    assert not hasattr(kernel, "max")
 
 
 # TC-OP-KERNEL-ELEWISE-002

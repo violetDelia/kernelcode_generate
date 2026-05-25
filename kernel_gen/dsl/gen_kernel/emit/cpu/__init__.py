@@ -695,6 +695,8 @@ def _emit_kernel_binary_elewise_stmt(op: KernelBinaryElewiseOp, ctx: EmitCContex
         "sub": "sub",
         "mul": "mul",
         "div": "div",
+        "min": "min",
+        "max": "max",
         "eq": "eq",
         "ne": "ne",
         "lt": "lt",

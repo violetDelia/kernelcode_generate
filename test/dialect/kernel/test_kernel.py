@@ -269,18 +269,19 @@ def test_kernel_memory_type_rank_mismatch() -> None:
 
 
 # TC-KRN-004
-# 功能说明: 验证 kernel.binary_elewise(kind="add") 正常路径可通过。
-# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_binary_elewise_add_success
+# 功能说明: 验证 kernel.binary_elewise arithmetic kind 正常路径可通过。
+# 使用示例: pytest -q test/dialect/kernel/test_kernel.py -k test_kernel_binary_elewise_arithmetic_success
 # 对应功能实现文件路径: kernel_gen/dialect/kernel/
 # 对应 spec 文件路径: spec/dialect/kernel.md
 # 对应测试文件路径: test/dialect/kernel/test_kernel.py
-def test_kernel_binary_elewise_add_success() -> None:
+def test_kernel_binary_elewise_arithmetic_success() -> None:
     memory_type = _make_memory_type()
     lhs = _make_value(memory_type)
     rhs = _make_value(memory_type)
-    out = _make_value(memory_type)
-    op = KernelBinaryElewiseOp(out, lhs, rhs, kind="add", space=_make_space("global"))
-    op.verify()
+    for kind in ("add", "min", "max"):
+        out = _make_value(memory_type)
+        op = KernelBinaryElewiseOp(out, lhs, rhs, kind=kind, space=_make_space("global"))
+        op.verify()
 
 
 # TC-KRN-004A
@@ -479,7 +480,7 @@ def test_kernel_binary_elewise_public_kind_matrix() -> None:
     lhs = _make_value(memory_type)
     rhs = _make_value(memory_type)
 
-    for kind in ("sub", "mul", "div", "truediv"):
+    for kind in ("sub", "mul", "div", "truediv", "min", "max"):
         KernelBinaryElewiseOp(
             _make_value(memory_type),
             lhs,
