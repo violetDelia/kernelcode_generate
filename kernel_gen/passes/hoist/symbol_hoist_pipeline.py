@@ -2,7 +2,7 @@
 
 功能说明:
 - 提供 `symbol-hoist-pipeline` pass，在一个 pass 内组合 alias 归一、symbol loop hoist 与 dma alias hoist pattern。
-- pattern 顺序固定为 alias-to-reinterpret 在前，随后 symbol-loop-hoist 与 dma-alias-hoist 共同收敛。
+- pattern 顺序固定为 alias-to-reinterpret 先独立收敛，随后 symbol-loop-hoist、symbol-buffer-hoist 与 dma-alias-hoist 共同收敛。
 - pass 成功验证后才替换原 module，验证失败时保持输入 module 不被部分改写。
 
 API 列表:
@@ -32,6 +32,7 @@ from kernel_gen.dialect.symbol import Symbol
 from kernel_gen.passes.common import ensure_builtin_module
 from kernel_gen.passes.hoist.dma_alias_ops import get_hoist_dma_alias_ops_pass_patterns
 from kernel_gen.passes.hoist.dma_alias_to_reinterpret import get_dma_alias_to_reinterpret_patterns
+from kernel_gen.passes.hoist.symbol_buffer_hoist import get_symbol_buffer_hoist_patterns
 from kernel_gen.passes.hoist.symbol_loop_hoist import get_symbol_loop_hoist_patterns
 from kernel_gen.passes.pass_manager import Pass
 
@@ -42,7 +43,8 @@ class SymbolHoistPipelinePass(Pass):
     功能说明:
     - 固定公开 pass name 为 `symbol-hoist-pipeline`。
     - 不调用旧 `dma-alias-to-reinterpret` / `symbol-loop-hoist` / `hoist-dma-alias-ops` pass 的 `apply(...)`。
-    - 在同一个 greedy rewrite 中按 alias 归一优先的 pattern 顺序运行，并在 clone 验证成功后替换原 module。
+    - 在 clone 上先运行 alias 归一，再运行 symbol-loop-hoist、symbol-buffer-hoist 与 dma-alias-hoist
+      的固定点组合，验证成功后替换原 module。
 
     使用示例:
     - SymbolHoistPipelinePass(fold=False).apply(ctx, module)
@@ -55,8 +57,8 @@ class SymbolHoistPipelinePass(Pass):
 
         功能说明:
         - 确保 `Symbol` dialect 可用，供 alias 归一过程生成 `symbol.const/add/mul`。
-        - 在 clone 上运行 combined pattern，保证 verifier 失败时原 module 保持不变。
-        - pattern 列表顺序为 alias-to-reinterpret、symbol-loop-hoist、hoist-dma-alias-ops。
+        - 在 clone 上分两阶段运行 pattern，保证 verifier 失败时原 module 保持不变。
+        - 第一阶段仅 alias-to-reinterpret；第二阶段顺序为 symbol-loop-hoist、symbol-buffer-hoist、hoist-dma-alias-ops。
 
         使用示例:
         - SymbolHoistPipelinePass().apply(ctx, module)
@@ -66,15 +68,23 @@ class SymbolHoistPipelinePass(Pass):
         if ctx.get_optional_dialect(Symbol.name) is None:
             ctx.load_dialect(Symbol)
         rewritten = target.clone()
-        patterns = [
-            *get_dma_alias_to_reinterpret_patterns(),
-            *get_symbol_loop_hoist_patterns(),
-            *get_hoist_dma_alias_ops_pass_patterns(rewritten),
-        ]
         try:
             PatternRewriteWalker(
                 GreedyRewritePatternApplier(
-                    patterns,
+                    get_dma_alias_to_reinterpret_patterns(),
+                    ctx=ctx,
+                    folding_enabled=self.fold,
+                    dce_enabled=False,
+                ),
+                apply_recursively=True,
+            ).rewrite_module(rewritten)
+            PatternRewriteWalker(
+                GreedyRewritePatternApplier(
+                    [
+                        *get_symbol_loop_hoist_patterns(),
+                        *get_symbol_buffer_hoist_patterns(),
+                        *get_hoist_dma_alias_ops_pass_patterns(rewritten),
+                    ],
                     ctx=ctx,
                     folding_enabled=self.fold,
                     dce_enabled=False,

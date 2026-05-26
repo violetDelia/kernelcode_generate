@@ -22,7 +22,7 @@ API 列表:
 - `exp(out: Memory, input_value: Memory) -> None`
 - `class KernelReduceKind(Enum)`
 - `reduce(out: Memory, input_value: Memory, *, kind: KernelReduceKind, axis: int, keepdim: bool = False) -> None`
-- `matmul(out: Memory, lhs: Memory, rhs: Memory) -> None`
+- `matmul(out: Memory, lhs: Memory, rhs: Memory, *, acc: bool = False) -> None`
 - `img2col1d(out: Memory, input_value: Memory, k: int | SymbolDim, s: int | SymbolDim = 1, d: int | SymbolDim = 1, p_left: int | SymbolDim = 0, p_right: int | SymbolDim = 0) -> None`
 - `img2col2d(out: Memory, input_value: Memory, kh: int | SymbolDim, kw: int | SymbolDim, sh: int | SymbolDim = 1, sw: int | SymbolDim = 1, dh: int | SymbolDim = 1, dw: int | SymbolDim = 1, ph: int | SymbolDim = 0, pw: int | SymbolDim = 0, pl: int | SymbolDim = 0, pr: int | SymbolDim = 0) -> None`
 

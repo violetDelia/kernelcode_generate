@@ -6,7 +6,7 @@
 - 第一阶段只在显式 `insert-free=true` 时为受控 `dma.alloc` 结果补插 `dma.free`。
 - 原型阶段在显式 `insert-free=true,reuse=true` 时允许同一受支持 owner block 内
   类型完全一致且生命周期不重叠的 `dma.alloc` 做保守复用。
-- 本 pass 与 `memory-pool` 的 rewrite 语义分离，不做 pool rewrite、alignment 或 backing memory 合并；`npu-demo-lowering` 仅以 `MemoryPlanPass(insert_free=True, fold=False)` 固定调用本 pass 补齐生命周期。
+- 本 pass 与 `memory-pool` 的 rewrite 语义分离，不做 pool rewrite、alignment 或 backing memory 合并；`npu-demo-lowering` 以 `MemoryPlanPass(insert_free=True, reuse=True, fold=False)` 固定调用本 pass 补齐生命周期并启用保守复用。
 
 ## API 列表
 
@@ -38,8 +38,8 @@
 
 ## 非目标
 
-- `default-lowering` 不接入本 pass；`npu-demo-lowering` 固定以 `insert_free=True, fold=False` 调用，不新增 memory-plan 专属 pipeline option。
-- 不处理完整 ownership indicator、retain、branch、region-branch、跨函数所有权或多块 CFG。
+- `default-lowering` 不接入本 pass；`npu-demo-lowering` 固定以 `insert_free=True, reuse=True, fold=False` 调用，不新增 memory-plan 专属 pipeline option。
+- 不处理完整 ownership indicator、retain、region-branch、跨函数所有权或多块 CFG；仅支持本文件明确列出的单块 `scf.if` branch-local alloc/free/reuse 形态。
 - 不复用、调用或改变 `memory-pool` 的 summary / rewrite 语义。
 - 不管理函数参数、block 参数、`func.call` 返回 memory 或未知 memory-producing op 的 ownership。
 - 不跨 region、跨 unsupported CFG 或跨无法证明 use/free 顺序的 owner block 复用内存。
@@ -57,10 +57,10 @@
 ### 管理对象
 
 - 只管理当前 module 内由 `dma.alloc` 产生的 owned memory。
-- 支持 alloc 所在 owner block 为单块 `func.func` body 或单块 `symbol.for` body。
+- 支持 alloc 所在 owner block 为单块 `func.func` body、单块 `symbol.for` body 或单块 `scf.if` then/else branch body。
 - alloc 的最后一次有效 use 若位于嵌套 `symbol.for` 内，free 插入到 owner block 中承载该 nested use 的 ancestor `symbol.for` 之后。
 - alloc 的最后一次有效 use 若位于 owner block 中单块 `scf.if` 分支内，free 插入到 owner block 中承载该 nested use 的 `scf.if` 之后。
-- `scf.if` 分支内新建 `dma.alloc` 仍不建模，按 unsupported control flow 失败。
+- `scf.if` 分支内新建 `dma.alloc` 支持 branch-local 生命周期建模：free 只能插入同一 branch block，同一 branch 内类型完全一致且生命周期不重叠的 alloc 可以复用；不得跨 then/else branch 或跨 if 外 owner block 复用。
 
 ### alias closure
 
@@ -81,6 +81,7 @@
 
 - 仅当 `insert-free=true` 且 `reuse=true` 时执行。
 - 只在同一 supported owner block 内做线性扫描复用。
+- `scf.if` then/else 分支分别作为独立 supported owner block；同一分支内部可复用，互斥分支之间不得复用。
 - 只复用 result type 完全一致的 `dma.alloc`，即 space、dtype、rank、shape、stride 均相同。
 - 前一个 alloc 的合法 free 必须早于后一个 alloc，才可将后一个 alloc 的 use 改写为前一个 alloc。
 - 复用成功时删除前一个 alloc 的旧 free 与后一个 alloc，保留后一个生命周期末尾的 free。
@@ -145,8 +146,11 @@ pass_obj = build_registered_pass("memory-plan", {"insert-free": "true", "reuse":
 | TC-MPLAN-010 | memory-return call | 报 `MemoryPlanUnsupportedCall: func.call returning nn.memory requires ownership modelling` |
 | TC-MPLAN-011 | return/yield escape | 报 `MemoryPlanUnsupportedEscape: dma.alloc escapes current supported region` |
 | TC-MPLAN-012 | scf.for 内 alloc | 报 `MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region` |
-| TC-MPLAN-012A | scf.if 内 alloc | 报 `MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region` |
+| TC-MPLAN-012A | scf.if branch-local alloc | 在同一 branch block 末尾插入 `dma.free` |
 | TC-MPLAN-012B | owner block alloc 在 scf.if 分支内 use | `dma.free` 插入到 `scf.if` 后 |
+| TC-MPLAN-012C | scf.if 同一 branch 内类型一致 alloc 复用 | 只复用同一 branch 内生命周期不重叠 alloc，不跨 branch |
+| TC-MPLAN-012D | scf.if 互斥分支 alloc | then/else branch 分别保留独立 alloc/free，不做跨分支复用 |
+| TC-MPLAN-012E | scf.if branch-local alloc 经 `scf.yield` 逃逸 | 报 `MemoryPlanUnsupportedEscape: dma.alloc escapes current supported region` |
 
 ## 验收命令
 

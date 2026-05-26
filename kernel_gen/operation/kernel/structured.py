@@ -6,7 +6,7 @@
 - helper 只校验公开 `Memory` 元信息并返回 `None`。
 
 API 列表:
-- `matmul(out: Memory, lhs: Memory, rhs: Memory) -> None`
+- `matmul(out: Memory, lhs: Memory, rhs: Memory, *, acc: bool = False) -> None`
 - `img2col1d(out: Memory, input_value: Memory, k: int | SymbolDim, s: int | SymbolDim = 1, d: int | SymbolDim = 1, p_left: int | SymbolDim = 0, p_right: int | SymbolDim = 0) -> None`
 - `img2col2d(out: Memory, input_value: Memory, kh: int | SymbolDim, kw: int | SymbolDim, sh: int | SymbolDim = 1, sw: int | SymbolDim = 1, dh: int | SymbolDim = 1, dw: int | SymbolDim = 1, ph: int | SymbolDim = 0, pw: int | SymbolDim = 0, pl: int | SymbolDim = 0, pr: int | SymbolDim = 0) -> None`
 
@@ -185,21 +185,25 @@ def _ensure_expected_memory(actual: Memory, expected: Memory, context: str) -> N
         _raise_contract(f"{context} out format must match contract", "format mismatch")
 
 
-def matmul(out: Memory, lhs: Memory, rhs: Memory) -> None:
+def matmul(out: Memory, lhs: Memory, rhs: Memory, *, acc: bool = False) -> None:
     """out-first rank-2 matmul。
 
     功能说明:
     - 校验 `lhs[M,K] * rhs[K,N] -> out[M,N]`。
     - 允许 out/lhs/rhs 位于不同 memory space。
+    - `acc=True` 表示目标 kernel 累加旧 out，`acc=False` 表示覆盖写 out。
     - 返回 `None` 表示写回由 kernel dialect op 承接。
 
     使用示例:
     - matmul(out, lhs, rhs)
+    - matmul(out, lhs, rhs, acc=True)
     """
 
     _ensure_memory(out, "out")
     _ensure_memory(lhs, "lhs")
     _ensure_memory(rhs, "rhs")
+    if not isinstance(acc, bool):
+        _raise_contract("kernel.matmul acc must be bool", f"acc={type(acc).__name__}")
     out_shape = out.get_shape()
     lhs_shape = lhs.get_shape()
     rhs_shape = rhs.get_shape()

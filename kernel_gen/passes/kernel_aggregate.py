@@ -24,6 +24,14 @@ from __future__ import annotations
 from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp, i1
 from xdsl.ir import Attribute, Block, Operation, SSAValue
+from xdsl.pattern_rewriter import (
+    GreedyRewritePatternApplier,
+    PatternRewriter,
+    PatternRewriteWalker,
+    RewritePattern,
+    op_type_rewrite_pattern,
+)
+from xdsl.rewriter import InsertPoint
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp
@@ -92,6 +100,123 @@ def _ancestor_op_in_block(op: Operation, block: Block) -> Operation | None:
     return None
 
 
+class _KernelMatmulAggregatePattern(RewritePattern):
+    """kernel.matmul 临时累加聚合 pattern。
+
+    功能说明:
+    - 以单个 `kernel.matmul` 为 root 匹配 tmp matmul + add + free 生命周期。
+    - 命中后生成 `symbol.ne` 与带固定 `fusion_list` 的 `kernel.matmul_fusion`，并删除 tmp 生命周期。
+
+    使用示例:
+    - pattern = _KernelMatmulAggregatePattern()
+    """
+
+    def __init__(self) -> None:
+        """初始化聚合 pattern。
+
+        功能说明:
+        - 记录已经改写的 tmp SSA，防止同一次 pass 内重复聚合。
+
+        使用示例:
+        - pattern = _KernelMatmulAggregatePattern()
+        """
+
+        super().__init__()
+        self.rewritten_tmps: set[SSAValue] = set()
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, matmul: KernelMatmulOp, rewriter: PatternRewriter, /) -> None:
+        """匹配并改写 kernel.matmul 临时累加形态。
+
+        功能说明:
+        - 只处理同 block 相邻 `kernel.matmul(tmp,lhs,rhs)` 与 `kernel.binary_elewise(out,out,tmp, add)`。
+        - tmp alloc/free 可在祖先 owner block 中包住当前 loop。
+
+        使用示例:
+        - walker 运行时自动调用本方法。
+        """
+
+        block = matmul.parent_block()
+        if block is None:
+            return
+        block_ops = list(block.ops)
+        matmul_index = block_ops.index(matmul)
+        if matmul_index + 1 >= len(block_ops):
+            return
+        add = block_ops[matmul_index + 1]
+        if not isinstance(add, KernelBinaryElewiseOp) or add.kind.data != "add":
+            return
+        tmp = SSAValue.get(matmul.out)
+        out = SSAValue.get(add.out)
+        if tmp in self.rewritten_tmps:
+            raise _kernel_aggregate_error("ambiguous matmul fusion")
+        if SSAValue.get(add.lhs) is not out or SSAValue.get(add.rhs) is not tmp:
+            return
+        alloc = tmp.owner if isinstance(tmp.owner, DmaAllocOp) else None
+        if alloc is None:
+            return
+        alloc_block = alloc.parent_block()
+        if alloc_block is None:
+            return
+        uses = list(tmp.uses)
+        free_ops = [use.operation for use in uses if isinstance(use.operation, DmaFreeOp)]
+        expected_ops = {alloc, matmul, add, *free_ops}
+        if len(free_ops) != 1 or any(use.operation not in expected_ops for use in uses):
+            return
+        free = free_ops[0]
+        if free.parent_block() is not alloc_block:
+            return
+        owner_anchor = _ancestor_op_in_block(matmul, alloc_block)
+        if owner_anchor is None:
+            return
+        owner_ops = list(alloc_block.ops)
+        alloc_index = owner_ops.index(alloc)
+        anchor_index = owner_ops.index(owner_anchor)
+        free_index = owner_ops.index(free)
+        if not (alloc_index < anchor_index < free_index):
+            return
+        lhs_type = SSAValue.get(matmul.lhs).type
+        rhs_type = SSAValue.get(matmul.rhs).type
+        if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
+            return
+        contracting_dim = lhs_type.shape.data[1] if len(lhs_type.shape.data) == 2 else None
+        if contracting_dim is None or contracting_dim != rhs_type.shape.data[0]:
+            return
+        candidates: list[SymbolForOp] = []
+        parent = matmul.parent_op()
+        while parent is not None:
+            if isinstance(parent, SymbolForOp):
+                iter_attr = parent.iter_attr
+                dim_text = contracting_dim.expr.data if isinstance(contracting_dim, SymbolExprAttr) else ""
+                step_text = iter_attr.step.expr.data
+                if contracting_dim == iter_attr.step or step_text == dim_text:
+                    candidates.append(parent)
+            parent = parent.parent_op()
+        if len(candidates) != 1:
+            raise _kernel_aggregate_error("matmul acc iterator")
+        owner_loop = candidates[0]
+        if not any(True for _ in owner_loop.body.blocks):
+            raise _kernel_aggregate_error("matmul acc iterator")
+        iter_value = owner_loop.body.block.args[0]
+        acc = SymbolNeOp(iter_value, owner_loop.start, i1)
+        acc.result.name_hint = "acc"
+        fusion = KernelMatmulFusionOp(
+            out,
+            matmul.lhs,
+            matmul.rhs,
+            acc.result,
+            space=matmul.space,
+            fusion_list="kernel.matmul,kernel.binary_elewise.add",
+        )
+        verify_generated_ops([acc, fusion])
+        rewriter.insert_op([acc, fusion], InsertPoint.before(matmul))
+        rewriter.erase_op(add)
+        rewriter.erase_op(free)
+        rewriter.erase_op(matmul)
+        rewriter.erase_op(alloc)
+        self.rewritten_tmps.add(tmp)
+
+
 class KernelAggregatePass(Pass):
     """聚合 matmul 累加形态的公开 pass。
 
@@ -99,7 +224,8 @@ class KernelAggregatePass(Pass):
     - `matmul_acc=True` 时匹配同 block 相邻 `kernel.matmul(tmp,lhs,rhs)` 与
       `kernel.binary_elewise(out,out,tmp){kind="add"}`。
     - tmp alloc/free 可位于同 block 或包住目标 loop 的祖先 owner block。
-    - 生成 `symbol.ne(k_iter,k_start)` 与 `kernel.matmul_fusion(out,lhs,rhs,acc)`，
+    - 生成 `symbol.ne(k_iter,k_start)` 与
+      `kernel.matmul_fusion(out,lhs,rhs,acc,fusion_list="kernel.matmul,kernel.binary_elewise.add")`，
       并删除原 tmp alloc/free、matmul 与 add。
     - 无法证明 tmp 生命周期、extra use 或 K/reduce iterator 时按计划 no-op 或 fail-fast。
 
@@ -155,85 +281,18 @@ class KernelAggregatePass(Pass):
         - KernelAggregatePass(matmul_acc=True).apply(Context(), module)
         """
 
-        _ = ctx
         ensure_builtin_module(module)
         if not self.matmul_acc:
             return
-        rewritten_tmps: set[SSAValue] = set()
-        for matmul in list(module.walk()):
-            if not isinstance(matmul, KernelMatmulOp):
-                continue
-            block = matmul.parent_block()
-            if block is None:
-                continue
-            block_ops = list(block.ops)
-            matmul_index = block_ops.index(matmul)
-            if matmul_index + 1 >= len(block_ops):
-                continue
-            add = block_ops[matmul_index + 1]
-            if not isinstance(add, KernelBinaryElewiseOp) or add.kind.data != "add":
-                continue
-            tmp = SSAValue.get(matmul.out)
-            out = SSAValue.get(add.out)
-            if tmp in rewritten_tmps:
-                raise _kernel_aggregate_error("ambiguous matmul fusion")
-            if SSAValue.get(add.lhs) is not out or SSAValue.get(add.rhs) is not tmp:
-                continue
-            alloc = tmp.owner if isinstance(tmp.owner, DmaAllocOp) else None
-            if alloc is None:
-                continue
-            alloc_block = alloc.parent_block()
-            if alloc_block is None:
-                continue
-            uses = list(tmp.uses)
-            free_ops = [use.operation for use in uses if isinstance(use.operation, DmaFreeOp)]
-            expected_ops = {alloc, matmul, add, *free_ops}
-            if len(free_ops) != 1 or any(use.operation not in expected_ops for use in uses):
-                continue
-            free = free_ops[0]
-            if free.parent_block() is not alloc_block:
-                continue
-            owner_anchor = _ancestor_op_in_block(matmul, alloc_block)
-            if owner_anchor is None:
-                continue
-            owner_ops = list(alloc_block.ops)
-            alloc_index = owner_ops.index(alloc)
-            anchor_index = owner_ops.index(owner_anchor)
-            free_index = owner_ops.index(free)
-            if not (alloc_index < anchor_index < free_index):
-                continue
-            lhs_type = SSAValue.get(matmul.lhs).type
-            rhs_type = SSAValue.get(matmul.rhs).type
-            if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
-                continue
-            contracting_dim = lhs_type.shape.data[1] if len(lhs_type.shape.data) == 2 else None
-            if contracting_dim is None or contracting_dim != rhs_type.shape.data[0]:
-                continue
-            candidates: list[SymbolForOp] = []
-            parent = matmul.parent_op()
-            while parent is not None:
-                if isinstance(parent, SymbolForOp):
-                    iter_attr = parent.iter_attr
-                    dim_text = contracting_dim.expr.data if isinstance(contracting_dim, SymbolExprAttr) else ""
-                    step_text = iter_attr.step.expr.data
-                    if contracting_dim == iter_attr.step or step_text == dim_text:
-                        candidates.append(parent)
-                parent = parent.parent_op()
-            if len(candidates) != 1:
-                raise _kernel_aggregate_error("matmul acc iterator")
-            owner_loop = candidates[0]
-            if not any(True for _ in owner_loop.body.blocks):
-                raise _kernel_aggregate_error("matmul acc iterator")
-            iter_value = owner_loop.body.block.args[0]
-            acc = SymbolNeOp(iter_value, owner_loop.start, i1)
-            fusion = KernelMatmulFusionOp(out, matmul.lhs, matmul.rhs, acc.result, space=matmul.space)
-            verify_generated_ops([acc, fusion])
-            block.insert_ops_before([acc, fusion], matmul)
-            block.erase_op(add)
-            block.erase_op(matmul)
-            alloc_block.erase_op(free)
-            alloc_block.erase_op(alloc)
-            rewritten_tmps.add(tmp)
+        PatternRewriteWalker(
+            GreedyRewritePatternApplier(
+                [_KernelMatmulAggregatePattern()],
+                ctx=ctx,
+                folding_enabled=self.fold,
+                dce_enabled=False,
+            ),
+            apply_recursively=True,
+        ).rewrite_module(module)
 
 
 __all__ = ["KernelAggregatePass"]

@@ -287,7 +287,7 @@ def _record_memory_plan(self, ctx: Context, target: ModuleOp) -> None:
 
 
     功能说明:
-    - 为 pipeline 顺序测试记录 `MemoryPlanPass` 的 `insert_free` 与 `fold` 固定参数。
+    - 为 pipeline 顺序测试记录 `MemoryPlanPass` 的 `insert_free`、`reuse` 与 `fold` 固定参数。
 
     使用示例:
     - monkeypatch.setattr(MemoryPlanPass, "apply", _record_memory_plan)
@@ -295,7 +295,10 @@ def _record_memory_plan(self, ctx: Context, target: ModuleOp) -> None:
 
     _ = ctx
     _ = target
-    _PIPELINE_PASS_ORDER.append(f"memory-plan:{self.insert_free}:{self.fold}")
+    insert_free = self.insert_free
+    reuse = self.reuse
+    fold = self.fold
+    _PIPELINE_PASS_ORDER.append(f"memory-plan:{insert_free}:{reuse}:{fold}")
 
 
 def _record_arch_parallelize(self, ctx: Context, target: ModuleOp) -> None:
@@ -518,7 +521,7 @@ def test_npu_demo_lowering_pipeline_builds_pass_manager() -> None:
 
 
 # TC-PIPELINE-101
-# 功能说明: 验证 npu-demo-lowering 的固定顺序包含两次 memory-plan、四次 CSE、五次 canonicalize、pre-pool producer-consumer-analysis 和 late attach。
+# 功能说明: 验证 npu-demo-lowering 的固定顺序包含三次 memory-plan、四次 CSE、五次 canonicalize、pre-pool producer-consumer-analysis 和 late attach。
 # 测试目的: 锁定 dsl_run 新正向管线的最小公开顺序。
 # 使用示例: pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k test_npu_demo_lowering_pipeline_pass_order
 # 对应功能实现文件路径: kernel_gen/pipeline/npu_demo_lowering.py
@@ -556,26 +559,25 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "canonicalize",
         "decompass",
         "lower-nn",
-        "symbol-hoist-pipeline",
-        "cse",
-        "canonicalize",
-        "memory-plan:True:False",
-        "symbol-buffer-hoist",
+        "memory-plan:True:True:False",
         "symbol-hoist-pipeline",
         "cse",
         "canonicalize",
         "tile-analysis",
         "kernel-pattern-attach",
         "transform-apply",
+        "memory-plan:True:True:False",
         "symbol-hoist-pipeline",
         "cse",
         "canonicalize",
-        "memory-plan:True:False",
-        "symbol-buffer-hoist",
         "kernel-aggregate:True",
         "kernel-matmul-fusion-decompose",
+        "memory-plan:True:True:False",
+        "symbol-hoist-pipeline",
+        "cse",
+        "canonicalize",
         "producer-consumer-analysis",
-        "memory-pool:True:0",
+        "memory-pool:True:1024",
         "canonicalize",
         "arch-parallelize:npu_demo:block",
         "attach-arch-information",
@@ -759,10 +761,10 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
 
     功能说明:
     - 通过公开 `set_dump_dir(...)` 与公开 pipeline builder 观察 pass dump。
-    - 按 pass marker 查找两段 `memory-plan`、两段 `symbol-buffer-hoist` 与 `memory-pool`，
+    - 按 pass marker 查找三段 `memory-plan`、三段 `symbol-hoist-pipeline` 与 `memory-pool`，
       不依赖 dump 文件序号。
-    - 断言 `kernel-aggregate` 与 `kernel-matmul-fusion-decompose` 位于第二段
-      `symbol-buffer-hoist` 后、`producer-consumer-analysis` 前，且 producer stage
+    - 断言 `kernel-aggregate` 与 `kernel-matmul-fusion-decompose` 位于第二段 hoist cleanup 后、
+      第三段 memory-plan 前，且 producer stage
       仍保留 typed `dma.alloc` 形态。
     - 断言 `arch-parallelize` 位于 memory-pool 后的 `canonicalize` 之后，且 memory-pool 后没有第 5 个 CSE。
 
@@ -786,8 +788,10 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
 
     memory_plan_text = _dump_stage_text_by_marker(tmp_path, "memory-plan")
     second_memory_plan_text = _dump_stage_text_by_marker(tmp_path, "memory-plan", occurrence=2)
-    first_buffer_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-buffer-hoist")
-    second_buffer_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-buffer-hoist", occurrence=2)
+    third_memory_plan_text = _dump_stage_text_by_marker(tmp_path, "memory-plan", occurrence=3)
+    first_symbol_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-hoist-pipeline")
+    second_symbol_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-hoist-pipeline", occurrence=2)
+    third_symbol_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-hoist-pipeline", occurrence=3)
     kernel_aggregate_text = _dump_stage_text_by_marker(tmp_path, "kernel-aggregate")
     decompose_text = _dump_stage_text_by_marker(tmp_path, "kernel-matmul-fusion-decompose")
     producer_consumer_text = _dump_stage_text_by_marker(tmp_path, "producer-consumer-analysis")
@@ -799,14 +803,16 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     markers = _dump_stage_markers(tmp_path)
     assert memory_plan_text.startswith("memory-plan\n")
     assert "dma.free" in memory_plan_text
-    assert first_buffer_hoist_text.startswith("symbol-buffer-hoist\n")
-    assert "symbol.for" in first_buffer_hoist_text
+    assert first_symbol_hoist_text.startswith("symbol-hoist-pipeline\n")
+    assert "symbol.for" in first_symbol_hoist_text
     assert second_memory_plan_text.startswith("memory-plan\n")
     assert "dma.free" in second_memory_plan_text
-    assert second_buffer_hoist_text.startswith("symbol-buffer-hoist\n")
+    assert second_symbol_hoist_text.startswith("symbol-hoist-pipeline\n")
     assert kernel_aggregate_text.startswith("kernel-aggregate\n")
     assert decompose_text.startswith("kernel-matmul-fusion-decompose\n")
     assert '"kernel.matmul_fusion"' not in decompose_text
+    assert third_memory_plan_text.startswith("memory-plan\n")
+    assert third_symbol_hoist_text.startswith("symbol-hoist-pipeline\n")
     assert producer_consumer_text.startswith("producer-consumer-analysis\n")
     assert "dma.alloc" in producer_consumer_text
     assert "!nn.memory" in producer_consumer_text
@@ -829,37 +835,38 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     assert _dump_stage_index(tmp_path, "cse", occurrence=3) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=3)
     assert _dump_stage_index(tmp_path, "cse", occurrence=4) + 1 == _dump_stage_index(tmp_path, "canonicalize", occurrence=4)
     assert markers.count("cse") == 4
-    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=1) == 7
-    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=1) == 10
-    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=1) == 11
-    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=2) == 12
-    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=2) + 1 == _dump_stage_index(
-        tmp_path, "cse", occurrence=3
+    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=1) == 7
+    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=1) == 8
+    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=1) + 1 == _dump_stage_index(
+        tmp_path, "cse", occurrence=2
     )
-    assert _dump_stage_index(tmp_path, "cse", occurrence=3) + 1 == _dump_stage_index(
-        tmp_path, "canonicalize", occurrence=3
+    assert _dump_stage_index(tmp_path, "cse", occurrence=2) + 1 == _dump_stage_index(
+        tmp_path, "canonicalize", occurrence=2
     )
-    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=3) == 14
-    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=3) + 1 == _dump_stage_index(
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=2) == 10
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=2) + 1 == _dump_stage_index(
         tmp_path, "tile-analysis"
     )
-    assert _dump_stage_index(tmp_path, "tile-analysis") == 15
-    assert _dump_stage_index(tmp_path, "kernel-pattern-attach") == 16
-    assert _dump_stage_index(tmp_path, "transform-apply") == 17
-    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=3) == 18
-    assert _dump_stage_index(tmp_path, "cse", occurrence=4) == 19
-    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) == 20
-    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=2) == 21
-    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=2) == 22
-    assert _dump_stage_index(tmp_path, "kernel-aggregate") == 23
-    assert _dump_stage_index(tmp_path, "kernel-matmul-fusion-decompose") == 24
-    assert _dump_stage_index(tmp_path, "producer-consumer-analysis") == 25
-    assert _dump_stage_index(tmp_path, "memory-pool") == 26
-    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=5) == 27
-    assert _dump_stage_index(tmp_path, "arch-parallelize") == 28
-    assert _dump_stage_index(tmp_path, "attach-arch-information") == 29
-    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 30
-    assert _dump_stage_index(tmp_path, "template-name-infer") == 31
+    assert _dump_stage_index(tmp_path, "tile-analysis") == 11
+    assert _dump_stage_index(tmp_path, "kernel-pattern-attach") == 12
+    assert _dump_stage_index(tmp_path, "transform-apply") == 13
+    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=2) == 14
+    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=2) == 15
+    assert _dump_stage_index(tmp_path, "cse", occurrence=3) == 16
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=3) == 17
+    assert _dump_stage_index(tmp_path, "kernel-aggregate") == 18
+    assert _dump_stage_index(tmp_path, "kernel-matmul-fusion-decompose") == 19
+    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=3) == 20
+    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=3) == 21
+    assert _dump_stage_index(tmp_path, "cse", occurrence=4) == 22
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) == 23
+    assert _dump_stage_index(tmp_path, "producer-consumer-analysis") == 24
+    assert _dump_stage_index(tmp_path, "memory-pool") == 25
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=5) == 26
+    assert _dump_stage_index(tmp_path, "arch-parallelize") == 27
+    assert _dump_stage_index(tmp_path, "attach-arch-information") == 28
+    assert _dump_stage_index(tmp_path, "outline-device-kernel") == 29
+    assert _dump_stage_index(tmp_path, "template-name-infer") == 30
     assert markers.count("attach-arch-information") == 1
     assert markers.count("symbol-hoist-pipeline") == 3
     assert "dma-alias-to-reinterpret" not in markers
@@ -867,25 +874,28 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     assert "hoist-dma-alias-ops" not in markers
     assert "lower-dma-memory-hierarchy" not in markers
     assert "multi-buffer" not in markers
-    assert markers[10:15] == [
-        "symbol-buffer-hoist",
+    assert markers[6:11] == [
+        "memory-plan",
         "symbol-hoist-pipeline",
         "cse",
         "canonicalize",
         "tile-analysis",
     ]
-    assert markers[15:22] == [
+    assert markers[11:17] == [
         "kernel-pattern-attach",
         "transform-apply",
+        "memory-plan",
         "symbol-hoist-pipeline",
         "cse",
         "canonicalize",
-        "memory-plan",
-        "symbol-buffer-hoist",
     ]
-    assert markers[22:29] == [
+    assert markers[17:28] == [
         "kernel-aggregate",
         "kernel-matmul-fusion-decompose",
+        "memory-plan",
+        "symbol-hoist-pipeline",
+        "cse",
+        "canonicalize",
         "producer-consumer-analysis",
         "memory-pool",
         "canonicalize",
@@ -947,21 +957,36 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
     assert "multi-buffer" not in markers
     assert "lower-dma-memory-hierarchy" not in markers
     assert _dump_stage_index(tmp_path, "transform-apply") + 1 == _dump_stage_index(
-        tmp_path, "symbol-hoist-pipeline", occurrence=3
-    )
-    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=3) + 1 == _dump_stage_index(
-        tmp_path, "cse", occurrence=4
+        tmp_path, "memory-plan", occurrence=2
     )
     assert _dump_stage_index(tmp_path, "memory-plan", occurrence=2) + 1 == _dump_stage_index(
-        tmp_path, "symbol-buffer-hoist", occurrence=2
+        tmp_path, "symbol-hoist-pipeline", occurrence=2
     )
-    assert _dump_stage_index(tmp_path, "symbol-buffer-hoist", occurrence=2) + 1 == _dump_stage_index(
+    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=2) + 1 == _dump_stage_index(
+        tmp_path, "cse", occurrence=3
+    )
+    assert _dump_stage_index(tmp_path, "cse", occurrence=3) + 1 == _dump_stage_index(
+        tmp_path, "canonicalize", occurrence=3
+    )
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=3) + 1 == _dump_stage_index(
         tmp_path, "kernel-aggregate"
     )
     assert _dump_stage_index(tmp_path, "kernel-aggregate") + 1 == _dump_stage_index(
         tmp_path, "kernel-matmul-fusion-decompose"
     )
     assert _dump_stage_index(tmp_path, "kernel-matmul-fusion-decompose") + 1 == _dump_stage_index(
+        tmp_path, "memory-plan", occurrence=3
+    )
+    assert _dump_stage_index(tmp_path, "memory-plan", occurrence=3) + 1 == _dump_stage_index(
+        tmp_path, "symbol-hoist-pipeline", occurrence=3
+    )
+    assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=3) + 1 == _dump_stage_index(
+        tmp_path, "cse", occurrence=4
+    )
+    assert _dump_stage_index(tmp_path, "cse", occurrence=4) + 1 == _dump_stage_index(
+        tmp_path, "canonicalize", occurrence=4
+    )
+    assert _dump_stage_index(tmp_path, "canonicalize", occurrence=4) + 1 == _dump_stage_index(
         tmp_path, "producer-consumer-analysis"
     )
     assert _dump_stage_index(tmp_path, "producer-consumer-analysis") + 1 == _dump_stage_index(

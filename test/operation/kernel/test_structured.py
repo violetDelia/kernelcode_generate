@@ -41,9 +41,12 @@ def test_kernel_matmul_supports_mixed_space_and_rejects_non_api_memoryspace() ->
     rhs = Memory([k_dim, n_dim], NumericType.Float32, space=MemorySpace.TLM2)
 
     assert kernel.matmul(out, lhs, rhs) is None
+    assert kernel.matmul(out, lhs, rhs, acc=True) is None
 
     with pytest.raises(TypeError, match="memoryspace"):
         kernel.matmul(out, lhs, rhs, memoryspace=MemorySpace.TSM)
+    with pytest.raises(KernelCodeError, match="kernel.matmul acc must be bool"):
+        kernel.matmul(out, lhs, rhs, acc=1)  # type: ignore[arg-type]
     with pytest.raises(KernelCodeError, match="contracting"):
         kernel.matmul(out, lhs, Memory([SymbolDim("Q"), n_dim], NumericType.Float32))
 

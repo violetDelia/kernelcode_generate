@@ -5,9 +5,9 @@
   `dma.alloc` 结果补插 `dma.free`。
 - `reuse=True` 且 `insert_free=True` 时，在同一受支持 owner block 内对类型完全一致、
   生命周期不重叠的 `dma.alloc` 做保守线性扫描复用。
-- 当前阶段只分析 `func.func` body 与 `symbol.for` body 内的单块生命周期；
-  owner block 中单块 `scf.if` 分支内的 use 会映射到 `scf.if` 后统一释放。
-- `scf.if` 分支内新建 `dma.alloc` 仍按 unsupported control flow 拒绝。
+- 当前阶段分析 `func.func` body、`symbol.for` body 与单块 `scf.if` 分支内的生命周期。
+- `scf.if` 分支内新建 `dma.alloc` 必须在同一分支内释放或由本 pass 插入释放；
+  分支间不复用，逃逸到分支外仍按 unsupported escape 拒绝。
 - 通过当前文件内 helper 计算 alias closure，不依赖 `memory_pool` 或其它 pass 私有实现。
 - `dma.reinterpret` 与 `dma.view` / `dma.reshape` / `dma.subview` 一样只产生 source alias。
 
@@ -391,7 +391,7 @@ def _owner_block_for_alloc(alloc: DmaAllocOp) -> Block:
     """返回 alloc 所在且被 memory-plan 支持的 owner block。
 
     功能说明:
-    - 第一阶段只支持 `func.func` body 与 `symbol.for` body。
+    - 支持 `func.func` body、`symbol.for` body 与单块 `scf.if` 分支 body。
 
     使用示例:
     - block = _owner_block_for_alloc(alloc)
@@ -399,33 +399,51 @@ def _owner_block_for_alloc(alloc: DmaAllocOp) -> Block:
 
     block = alloc.parent_block()
     if block is None:
-        _raise_memory_plan_error("MemoryPlanUnsupportedEscape: dma.alloc escapes current supported region")
-    _verify_supported_owner_block(block)
-    return block
-
-
-def _verify_supported_owner_block(block: Block) -> None:
-    """校验 owner block 所属 region 是否受支持。
-
-    功能说明:
-    - 支持 `func.func` body 与 `symbol.for` body。
-    - `scf.if` 分支内 alloc 暂不建模，仍显式报 unsupported control flow。
-    - 其它控制流或多块 region 显式报 unsupported control flow。
-
-    使用示例:
-    - _verify_supported_owner_block(block)
-    """
-
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "MemoryPlanUnsupportedEscape: dma.alloc escapes current supported region",
+        )
     parent = block.parent_op()
     if isinstance(parent, func.FuncOp):
         if len(list(parent.body.blocks)) != 1:
-            _raise_memory_plan_error("MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region")
-        return
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region",
+            )
+        return block
     if isinstance(parent, SymbolForOp):
         if len(list(parent.body.blocks)) != 1:
-            _raise_memory_plan_error("MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region")
-        return
-    _raise_memory_plan_error("MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region")
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region",
+            )
+        return block
+    if isinstance(parent, scf.IfOp):
+        true_blocks = list(parent.true_region.blocks)
+        false_blocks = list(parent.false_region.blocks)
+        if len(true_blocks) != 1 or len(false_blocks) > 1:
+            raise KernelCodeError(
+                ErrorKind.CONTRACT,
+                ErrorModule.PASS,
+                "MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region",
+            )
+        if true_blocks and block is true_blocks[0]:
+            return block
+        if false_blocks and block is false_blocks[0]:
+            return block
+        raise KernelCodeError(
+            ErrorKind.CONTRACT,
+            ErrorModule.PASS,
+            "MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region",
+        )
+    raise KernelCodeError(
+        ErrorKind.CONTRACT,
+        ErrorModule.PASS,
+        "MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region",
+    )
 
 
 def _scf_if_branch_index(if_op: scf.IfOp, block: Block) -> int:
@@ -540,15 +558,22 @@ def _is_escape_op(op: Operation, aliases: set[SSAValue]) -> bool:
     """判断 use 是否代表当前阶段不支持的逃逸。
 
     功能说明:
-    - `func.return` 与 `symbol.yield` 携带 alias 时视为逃逸。
+    - `func.return`、`symbol.yield` 与 `scf.yield` 携带 alias 时视为逃逸。
 
     使用示例:
     - if _is_escape_op(op, aliases): ...
     """
 
-    if isinstance(op, (func.ReturnOp, SymbolYieldOp)):
-        return _operation_uses_alias(op, aliases)
-    return op.name in {"func.return", "symbol.yield"} and _operation_uses_alias(op, aliases)
+    uses_alias = False
+    for alias in aliases:
+        if any(operand is alias for operand in op.operands):
+            uses_alias = True
+            break
+    if isinstance(op, (func.ReturnOp, SymbolYieldOp, scf.YieldOp)):
+        return uses_alias
+    if op.name in {"func.return", "symbol.yield", "scf.yield"}:
+        return uses_alias
+    return False
 
 
 def _validate_supported_use(op: Operation, aliases: set[SSAValue]) -> None:

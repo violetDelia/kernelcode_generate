@@ -734,21 +734,28 @@ def test_memory_plan_rejects_scf_for_region() -> None:
 
 
 # TC-MPLAN-012A
-# 功能说明: 验证 scf.if 内 alloc 被当前阶段显式拒绝。
-# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_rejects_scf_if_region
+# 功能说明: 验证 scf.if 单块分支内 alloc 可在同分支内补齐 free。
+# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_inserts_free_inside_scf_if_region
 # 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
 # 对应 spec 文件路径: spec/pass/memory_plan.md
 # 对应测试文件路径: test/passes/test_memory_plan.py
-def test_memory_plan_rejects_scf_if_region() -> None:
+def test_memory_plan_inserts_free_inside_scf_if_region() -> None:
     mem_type = _memory_type()
     condition = arith.ConstantOp(IntegerAttr(1, i1))
     true_block = Block()
     alloc = DmaAllocOp([], mem_type)
-    true_block.add_ops([alloc, scf.YieldOp()])
+    scalar = _scalar_i32()
+    broadcast = DmaBroadcastOp(alloc.result, scalar.result)
+    true_block.add_ops([alloc, broadcast, scf.YieldOp()])
     if_op = scf.IfOp(condition.result, [], Region(true_block), None)
-    module = _module_with_ops("scf_if_region", [condition, if_op])
+    module = _module_with_ops("scf_if_region", [scalar, condition, if_op])
 
-    _assert_memory_plan_error(module, "MemoryPlanUnsupportedControlFlow: unsupported memory lifetime region")
+    _apply_memory_plan(module)
+
+    true_ops = list(true_block.ops)
+    free = next(op for op in true_ops if isinstance(op, DmaFreeOp))
+    assert _free_source_is(free, alloc.result)
+    assert true_ops.index(free) == true_ops.index(broadcast) + 1
 
 
 # TC-MPLAN-012B
@@ -775,6 +782,98 @@ def test_memory_plan_inserts_free_after_scf_if_branch_use() -> None:
     body_ops = list(_function_body(module).ops)
     free = next(op for op in body_ops if isinstance(op, DmaFreeOp))
     assert body_ops.index(free) == body_ops.index(if_op) + 1
+
+
+# TC-MPLAN-012C
+# 功能说明: 验证 scf.if 同一分支内不重叠 alloc 可复用。
+# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_reuses_same_scf_if_branch_allocs
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应测试文件路径: test/passes/test_memory_plan.py
+def test_memory_plan_reuses_same_scf_if_branch_allocs() -> None:
+    mem_type = _memory_type()
+    condition = arith.ConstantOp(IntegerAttr(1, i1))
+    scalar1 = _scalar_i32()
+    scalar2 = _scalar_i32()
+    first_alloc = DmaAllocOp([], mem_type)
+    first_broadcast = DmaBroadcastOp(first_alloc.result, scalar1.result)
+    second_alloc = DmaAllocOp([], mem_type)
+    second_broadcast = DmaBroadcastOp(second_alloc.result, scalar2.result)
+    true_block = Block()
+    true_block.add_ops([first_alloc, first_broadcast, second_alloc, second_broadcast, scf.YieldOp()])
+    if_op = scf.IfOp(condition.result, [], Region(true_block), None)
+    module = _module_with_ops("scf_if_branch_reuse", [scalar1, scalar2, condition, if_op])
+
+    MemoryPlanPass(insert_free=True, fold=False, reuse=True).apply(Context(), module)
+
+    true_ops = list(true_block.ops)
+    assert [op for op in true_ops if isinstance(op, DmaAllocOp)] == [first_alloc]
+    free_ops = [op for op in true_ops if isinstance(op, DmaFreeOp)]
+    assert len(free_ops) == 1
+    assert _free_source_is(free_ops[0], first_alloc.result)
+    assert SSAValue.get(second_broadcast.target) is first_alloc.result
+
+
+# TC-MPLAN-012D
+# 功能说明: 验证 scf.if 互斥分支内 alloc 不跨分支复用。
+# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_does_not_reuse_across_scf_if_branches
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应测试文件路径: test/passes/test_memory_plan.py
+def test_memory_plan_does_not_reuse_across_scf_if_branches() -> None:
+    mem_type = _memory_type()
+    condition = arith.ConstantOp(IntegerAttr(1, i1))
+    scalar1 = _scalar_i32()
+    scalar2 = _scalar_i32()
+    true_alloc = DmaAllocOp([], mem_type)
+    true_broadcast = DmaBroadcastOp(true_alloc.result, scalar1.result)
+    true_block = Block()
+    true_block.add_ops([true_alloc, true_broadcast, scf.YieldOp()])
+    false_alloc = DmaAllocOp([], mem_type)
+    false_broadcast = DmaBroadcastOp(false_alloc.result, scalar2.result)
+    false_block = Block()
+    false_block.add_ops([false_alloc, false_broadcast, scf.YieldOp()])
+    if_op = scf.IfOp(condition.result, [], Region(true_block), Region(false_block))
+    module = _module_with_ops("scf_if_branch_no_cross_reuse", [scalar1, scalar2, condition, if_op])
+
+    MemoryPlanPass(insert_free=True, fold=False, reuse=True).apply(Context(), module)
+
+    assert [op for op in true_block.ops if isinstance(op, DmaAllocOp)] == [true_alloc]
+    assert [op for op in false_block.ops if isinstance(op, DmaAllocOp)] == [false_alloc]
+    assert SSAValue.get(true_broadcast.target) is true_alloc.result
+    assert SSAValue.get(false_broadcast.target) is false_alloc.result
+
+
+# TC-MPLAN-012E
+# 功能说明: 验证 scf.if 分支内 alloc 经 scf.yield 逃逸时必须拒绝。
+# 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_rejects_scf_if_branch_yield_escape
+# 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
+# 对应 spec 文件路径: spec/pass/memory_plan.md
+# 对应测试文件路径: test/passes/test_memory_plan.py
+def test_memory_plan_rejects_scf_if_branch_yield_escape() -> None:
+    """验证 branch-local alloc 不能通过 scf.yield 逃逸。
+
+    功能说明:
+    - 构造带 memory result 的 `scf.if`。
+    - then/else 分支各自 yield branch-local alloc。
+    - `MemoryPlanPass(insert_free=True)` 必须按 unsupported escape 拒绝。
+
+    使用示例:
+    - pytest -q test/passes/test_memory_plan.py -k test_memory_plan_rejects_scf_if_branch_yield_escape
+    """
+
+    mem_type = _memory_type()
+    condition = arith.ConstantOp(IntegerAttr(1, i1))
+    true_alloc = DmaAllocOp([], mem_type)
+    false_alloc = DmaAllocOp([], mem_type)
+    true_block = Block()
+    true_block.add_ops([true_alloc, scf.YieldOp(true_alloc.result)])
+    false_block = Block()
+    false_block.add_ops([false_alloc, scf.YieldOp(false_alloc.result)])
+    if_op = scf.IfOp(condition.result, [mem_type], Region(true_block), Region(false_block))
+    module = _module_with_ops("scf_if_branch_yield_escape", [condition, if_op])
+
+    _assert_memory_plan_error(module, "MemoryPlanUnsupportedEscape: dma.alloc escapes current supported region")
 
 
 # TC-MPLAN-013

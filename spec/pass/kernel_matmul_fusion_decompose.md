@@ -3,7 +3,7 @@
 ## 功能简介
 
 - 定义 `kernel-matmul-fusion-decompose` pass 的公开合同。
-- 该 pass 在 source/emit 前把 `kernel.matmul_fusion` 分解为既有可 emit IR。
+- 该 pass 在 source/emit 前把 `kernel.matmul_fusion` 分解为带静态 `acc` 属性的 `kernel.matmul` 分支 IR；`fusion_list` 字符串 metadata 不参与分解决策。
 
 ## API 列表
 
@@ -25,18 +25,16 @@
 
 ```text
 scf.if %acc {
-  %tmp = dma.alloc : <same memory type as out>
-  kernel.matmul(%tmp, %lhs, %rhs)
-  kernel.binary_elewise(%out, %out, %tmp) {kind = "add"}
-  dma.free %tmp
+  kernel.matmul(%out, %lhs, %rhs) {acc = true}
 } else {
-  kernel.matmul(%out, %lhs, %rhs)
+  kernel.matmul(%out, %lhs, %rhs) {acc = false}
 }
 ```
 
-- `%tmp` type 必须与 `out` type 完全一致；无法构造时 fail-fast，错误短语包含 `kernel-matmul-fusion-decompose tmp type`。
+- 该 pass 不创建临时 `dma.alloc`、不生成 `kernel.binary_elewise add`、不插入 `dma.free`，也不为动态 shape 额外插入 `symbol.get_dim`；shape/type 合同由原 `kernel.matmul_fusion` verifier 与目标 `kernel.matmul` verifier 共同保证。
+- `kernel.matmul_fusion.fusion_list` 是 metadata；非空字符串不得改变输出 IR，不得复制到普通 `kernel.matmul`。
 - 成功后 module 中不得残留 `kernel.matmul_fusion`。
-- 本 pass 不新增 include helper、不新增 emitC/gen_kernel source 分支、不改变旧 `kernel.matmul` 语义。
+- 本 pass 不新增 include helper、不新增 emitC/gen_kernel source 分支；它依赖 `kernel.matmul(acc=false|true)` 与 include `npu_demo::matmul(..., bool acc=false)` 公开累加语义。
 
 ## 使用示例
 
@@ -55,7 +53,8 @@ KernelMatmulFusionDecomposePass().apply(ctx, module)
 
 | 用例 ID | 场景 | 预期 | 建议测试 |
 | --- | --- | --- | --- |
-| TC-PASS-KERNEL-MATMUL-FUSION-DECOMPOSE-001 | 静态 fusion | 分解为 `scf.if`，true 分支 tmp+matmul+add+free，else 分支 matmul(out) | `test_kernel_matmul_fusion_decompose_static_scf_if` |
-| TC-PASS-KERNEL-MATMUL-FUSION-DECOMPOSE-002 | 动态 shape fusion | 插入必要 `symbol.get_dim`，tmp 与 out type 完全一致 | `test_kernel_matmul_fusion_decompose_dynamic_scf_if` |
+| TC-PASS-KERNEL-MATMUL-FUSION-DECOMPOSE-001 | 静态 fusion | 分解为 `scf.if`，true 分支 `kernel.matmul(acc=true)`，else 分支 `kernel.matmul(acc=false)`，不生成 tmp/add/free | `test_kernel_matmul_fusion_decompose_static_scf_if` |
+| TC-PASS-KERNEL-MATMUL-FUSION-DECOMPOSE-002 | 动态 shape fusion | 分解为相同两分支 matmul，不插入 `symbol.get_dim`、tmp、add 或 free | `test_kernel_matmul_fusion_decompose_dynamic_scf_if` |
 | TC-PASS-KERNEL-MATMUL-FUSION-DECOMPOSE-003 | 无 fusion | no-op | `test_kernel_matmul_fusion_decompose_no_fusion_no_op` |
 | TC-PASS-KERNEL-MATMUL-FUSION-DECOMPOSE-004 | unknown option | fail-fast `kernel-matmul-fusion-decompose options` | `test_kernel_matmul_fusion_decompose_rejects_options` |
+| TC-PASS-KERNEL-MATMUL-FUSION-DECOMPOSE-005 | 非空 fusion_list | 分解结果与普通 fusion 相同，输出不残留 `fusion_list` metadata | `test_kernel_matmul_fusion_decompose_ignores_fusion_list_metadata` |

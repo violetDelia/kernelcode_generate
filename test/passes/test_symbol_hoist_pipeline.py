@@ -101,8 +101,8 @@ def test_symbol_hoist_pipeline_combines_reinterpret_and_loop_hoist() -> None:
     actual_ir = _run_public_ircheck_case(
         """// COMPILE_ARGS: --pass "symbol-hoist-pipeline={fold=false}"
 // CHECK: func.func @combined_reinterpret_and_symbol_hoist
-// CHECK: %[[ADD:.*]] = symbol.add
 // CHECK: %[[ALIAS:.*]] = "dma.reinterpret"
+// CHECK: %[[ADD:.*]] = symbol.add
 // CHECK: symbol.for
 // CHECK: "dma.deslice"
 // CHECK-NOT: "dma.view"

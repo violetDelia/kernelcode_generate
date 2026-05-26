@@ -211,6 +211,13 @@ int main() {
         out_matmul_data[2] != 43.0f || out_matmul_data[3] != 50.0f) {
         return fail(4);
     }
+    if (npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_mat, lhs_mat, rhs_mat, true) != StatusCode::kOk) {
+        return fail(25);
+    }
+    if (out_matmul_data[0] != 38.0f || out_matmul_data[1] != 44.0f ||
+        out_matmul_data[2] != 86.0f || out_matmul_data[3] != 100.0f) {
+        return fail(26);
+    }
 
     float reduce_data[6] = {1.0f, 9.0f, 3.0f, 7.0f, 2.0f, 5.0f};
     float reduce_out_data[2] = {0.0f, 0.0f};

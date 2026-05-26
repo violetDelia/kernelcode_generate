@@ -64,6 +64,7 @@ from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolConstOp,
     SymbolExprAttr,
+    SymbolFloorDivOp,
     SymbolForOp,
     SymbolMulOp,
     SymbolValueType,
@@ -263,7 +264,8 @@ class MemoryPoolPass(Pass):
 
         功能说明:
         - 记录是否执行 pool 改写、通用 fold 开关与 byte alignment。
-        - `alignment=0` 关闭对齐；负数或非整数直接报公开合同错误。
+- `alignment=0` 关闭对齐；正数按 `align_up(offset, alignment)` 对 byte offset 对齐；
+  负数或非整数直接报公开合同错误。
 
         使用示例:
         - pass_obj = MemoryPoolPass()
@@ -1121,7 +1123,8 @@ def _align_expr(expr: sp.Basic, alignment: int, *, allow_dynamic: bool = False) 
     功能说明:
     - `alignment=0` 直接返回原表达式。
     - 静态整数表达式使用 `align_up`。
-    - 动态表达式无法机械物化时默认按 unimplemented 失败；analysis-only summary 可显式允许保留原表达式。
+    - 动态表达式按 `((offset + alignment - 1) floordiv alignment) * alignment` 建模；
+      analysis-only summary 可显式允许保留原表达式。
 
     使用示例:
     - offset = _align_expr(sp.Integer(514), 1024)
@@ -1132,20 +1135,12 @@ def _align_expr(expr: sp.Basic, alignment: int, *, allow_dynamic: bool = False) 
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    if alignment == 0:
-        return _safe_simplify_expr(expr)
-    if expr == 0:
-        return sp.Integer(0)
-    if isinstance(expr, sp.Integer) or (expr.is_number and expr.is_integer):
-        value = int(expr)
-        return sp.Integer(((value + alignment - 1) // alignment) * alignment)
-    if allow_dynamic:
-        return _safe_simplify_expr(expr)
-    raise KernelCodeError(
-        ErrorKind.UNIMPLEMENTED,
-        ErrorModule.PASS,
-        "MemoryPoolUnsupportedAlignment: dynamic aligned offset is not supported",
-    )
+    rules = _MemoryPoolRewriteRules
+    requested_alignment = alignment
+    dynamic_is_allowed = allow_dynamic
+    source_expr = expr
+    aligned_expr = rules.align_expr(source_expr, requested_alignment, allow_dynamic=dynamic_is_allowed)
+    return aligned_expr
 
 
 def _safe_simplify_expr(expr: sp.Basic) -> sp.Basic:
@@ -1541,6 +1536,299 @@ def _mul_material(lhs: _SymbolMaterial, rhs: _SymbolMaterial) -> tuple[SymbolMul
     expr_text = _mul_expr_text(lhs, rhs, expr)
     op = SymbolMulOp(lhs.value, rhs.value, SymbolValueType.from_expr(expr_text))
     return op, _SymbolMaterial(op.result, expr_text, expr)
+
+
+class _MemoryPoolRewriteRules:
+    """memory-pool rewrite 阶段的当前文件规则容器。"""
+
+    @staticmethod
+    def align_expr(expr: sp.Basic, alignment: int, *, allow_dynamic: bool = False) -> sp.Basic:
+        """对 byte offset 表达式执行 alignment 规则。
+
+        功能说明:
+        - 静态 offset 直接按整数 align_up 计算。
+        - 动态 offset 物化为 `floor((offset + alignment - 1) / alignment) * alignment`。
+
+        使用示例:
+        - expr = _MemoryPoolRewriteRules.align_expr(sp.Integer(1), 1024)
+        """
+
+        if alignment == 0:
+            return _safe_simplify_expr(expr)
+        if expr == 0:
+            return sp.Integer(0)
+        if isinstance(expr, sp.Integer) or (expr.is_number and expr.is_integer):
+            value = int(expr)
+            return sp.Integer(((value + alignment - 1) // alignment) * alignment)
+        if allow_dynamic:
+            return _safe_simplify_expr(expr)
+        numerator = expr + sp.Integer(alignment - 1)
+        return _safe_simplify_expr(sp.floor(numerator / sp.Integer(alignment)) * sp.Integer(alignment))
+
+    @staticmethod
+    def floordiv_material(lhs: _SymbolMaterial, rhs: _SymbolMaterial) -> tuple[SymbolFloorDivOp, _SymbolMaterial]:
+        """构造 symbol.floordiv material。
+
+        功能说明:
+        - 按公开 `SymbolFloorDivOp` 物化动态 byte alignment 的除法部分。
+
+        使用示例:
+        - op, material = _MemoryPoolRewriteRules.floordiv_material(offset_plus_mask, alignment)
+        """
+
+        expr = _safe_simplify_expr(sp.floor(lhs.expr / rhs.expr))
+        if lhs.expr_text == "?" or rhs.expr_text == "?":
+            expr_text = "?"
+        elif isinstance(expr, sp.Integer) or (expr.is_number and expr.is_integer):
+            expr_text = str(int(expr))
+        else:
+            lhs_text = f"({lhs.expr_text})" if "+" in lhs.expr_text or "-" in lhs.expr_text[1:] else lhs.expr_text
+            rhs_text = f"({rhs.expr_text})" if "+" in rhs.expr_text or "-" in rhs.expr_text[1:] else rhs.expr_text
+            expr_text = f"{lhs_text} floordiv {rhs_text}"
+        op = SymbolFloorDivOp(lhs.value, rhs.value, SymbolValueType.from_expr(expr_text))
+        return op, _SymbolMaterial(op.result, expr_text, expr)
+
+    @classmethod
+    def align_material(cls, offset: _SymbolMaterial, alignment: int) -> tuple[list[Operation], _SymbolMaterial]:
+        """按 byte alignment 物化动态 offset。
+
+        功能说明:
+        - 使用公开 symbol op 生成 `((offset + alignment - 1) floordiv alignment) * alignment`。
+
+        使用示例:
+        - ops, aligned = _MemoryPoolRewriteRules.align_material(offset, 1024)
+        """
+
+        if alignment == 0 or offset.expr_text == "0":
+            return [], offset
+        mask_op, mask = _const_material(alignment - 1)
+        numerator_op, numerator = _add_material(offset, mask)
+        alignment_op, alignment_material = _const_material(alignment)
+        div_op, divided = cls.floordiv_material(numerator, alignment_material)
+        scale_op, scaled = _mul_material(divided, alignment_material)
+        return [mask_op, numerator_op, alignment_op, div_op, scale_op], scaled
+
+    @classmethod
+    def dynamic_offset_from_prior_numels(
+        cls,
+        prior_numels: list[tuple[_SymbolMaterial, int]],
+        dtype_size: int,
+        zero: _SymbolMaterial,
+        ratio_materials: dict[int, _SymbolMaterial] | None = None,
+        *,
+        alignment: int = 0,
+    ) -> tuple[list[Operation], _SymbolMaterial]:
+        """按 prior numel 与 dtype byte ratio 生成动态 offset。
+
+        功能说明:
+        - 多个同 ratio 动态项先求和再乘 ratio。
+        - `alignment>0` 时保留每个 prior allocation 前的 align gap。
+
+        使用示例:
+        - ops, offset = _MemoryPoolRewriteRules.dynamic_offset_from_prior_numels([(m, 4)], 1, zero)
+        """
+
+        if alignment > 0:
+            ops: list[Operation] = []
+            current = zero
+            for numel, prior_dtype_size in prior_numels:
+                if prior_dtype_size % dtype_size != 0:
+                    raise KernelCodeError(
+                        ErrorKind.UNIMPLEMENTED,
+                        ErrorModule.PASS,
+                        "MemoryPoolUnsupportedByteOffset: byte offset is not divisible by target unit",
+                    )
+                align_ops, aligned_current = cls.align_material(current, alignment)
+                ops.extend(align_ops)
+                current = aligned_current
+                size_material = numel
+                ratio = prior_dtype_size // dtype_size
+                if ratio != 1:
+                    if ratio_materials is not None and ratio in ratio_materials:
+                        ratio_material = ratio_materials[ratio]
+                        ratio_op = None
+                    else:
+                        ratio_op, ratio_material = _const_material(ratio)
+                    mul_op, size_material = _mul_material(numel, ratio_material)
+                    if ratio_op is not None:
+                        ops.append(ratio_op)
+                    ops.append(mul_op)
+                if current.expr_text == "0":
+                    current = size_material
+                    continue
+                add_op, current = _add_material(current, size_material)
+                ops.append(add_op)
+            align_ops, aligned_offset = cls.align_material(current, alignment)
+            ops.extend(align_ops)
+            return ops, aligned_offset
+
+        ratio_groups: dict[int, list[_SymbolMaterial]] = {}
+        for numel, prior_dtype_size in prior_numels:
+            if prior_dtype_size % dtype_size != 0:
+                raise KernelCodeError(
+                    ErrorKind.UNIMPLEMENTED,
+                    ErrorModule.PASS,
+                    "MemoryPoolUnsupportedByteOffset: byte offset is not divisible by target unit",
+                )
+            ratio_groups.setdefault(prior_dtype_size // dtype_size, []).append(numel)
+
+        ops: list[Operation] = []
+        current: _SymbolMaterial | None = None
+        for ratio in sorted(ratio_groups):
+            group_values = ratio_groups[ratio]
+            group_current = group_values[0]
+            for value in group_values[1:]:
+                op, group_current = _add_material(group_current, value)
+                ops.append(op)
+            if ratio != 1:
+                if ratio_materials is not None and ratio in ratio_materials:
+                    ratio_material = ratio_materials[ratio]
+                    ratio_op = None
+                else:
+                    ratio_op, ratio_material = _const_material(ratio)
+                mul_op, group_current = _mul_material(group_current, ratio_material)
+                if ratio_op is not None:
+                    ops.append(ratio_op)
+                ops.append(mul_op)
+            if current is None:
+                if ratio == 1:
+                    op, current = _add_material(zero, group_current)
+                    ops.append(op)
+                else:
+                    current = group_current
+                continue
+            op, current = _add_material(current, group_current)
+            ops.append(op)
+        if current is None:
+            return [], zero
+        return ops, current
+
+    @classmethod
+    def offset_bytes_material(
+        cls,
+        current_bytes: sp.Basic,
+        alignment: int,
+        *,
+        zero: _SymbolMaterial,
+        prior_numels: list[tuple[_SymbolMaterial, int]],
+        ratio_materials: dict[int, _SymbolMaterial] | None = None,
+    ) -> tuple[list[Operation], _SymbolMaterial]:
+        """生成当前 alloc 的 reinterpret byte offset。
+
+        功能说明:
+        - 静态 byte offset 生成 `symbol.const`。
+        - 动态 prior numel 按 dtype byte size 精确物化，避免 floor 截断。
+
+        使用示例:
+        - ops, offset = _MemoryPoolRewriteRules.offset_bytes_material(current, 0, zero=zero, prior_numels=[])
+        """
+
+        aligned_bytes = cls.align_expr(current_bytes, alignment)
+        if aligned_bytes == 0:
+            return [], zero
+
+        if prior_numels and any(not isinstance(numel.expr, sp.Integer) for numel, _ in prior_numels):
+            return cls.dynamic_offset_from_prior_numels(
+                prior_numels,
+                1,
+                zero,
+                ratio_materials,
+                alignment=alignment,
+            )
+
+        if alignment == 0 and prior_numels:
+            if any(not isinstance(numel.expr, sp.Integer) for numel, _ in prior_numels):
+                return cls.dynamic_offset_from_prior_numels(prior_numels, 1, zero, ratio_materials)
+
+        if not (isinstance(aligned_bytes, sp.Integer) or (aligned_bytes.is_number and aligned_bytes.is_integer)):
+            raise KernelCodeError(
+                ErrorKind.UNIMPLEMENTED,
+                ErrorModule.PASS,
+                "MemoryPoolUnsupportedAlignment: dynamic byte offset is not supported",
+            )
+
+        op, offset = _const_material(int(aligned_bytes))
+        return [op], offset
+
+    @classmethod
+    def prepare_rewrite_infos(
+        cls,
+        alloc_infos: list[_AllocInfo],
+        op_loop: dict[Operation, LoopOp | None],
+        func_block: Block,
+        alignment: int,
+    ) -> dict[_AllocInfo, _RewriteInfo]:
+        """准备所有 alloc 的 rewrite metadata。
+
+        功能说明:
+        - 按 `func + space` 线性切分，不做生命周期复用。
+        - 每个 alloc 独立选择自身可支配的 metadata anchor。
+
+        使用示例:
+        - infos = _MemoryPoolRewriteRules.prepare_rewrite_infos(alloc_infos, op_loop, block, 0)
+        """
+
+        result: dict[_AllocInfo, _RewriteInfo] = {}
+        current_by_bucket: dict[tuple[str], sp.Basic] = {}
+        processed_numels_by_bucket: dict[tuple[str], list[tuple[_AllocInfo, _SymbolMaterial, int]]] = {}
+        for info in alloc_infos:
+            group_block = _metadata_group_block(info, op_loop, func_block)
+            group_anchor = _metadata_group_anchor(group_block, [info], op_loop, func_block)
+            zero_op, zero = _const_material(0)
+            one_op, one = _const_material(1)
+            metadata_ops: list[Operation] = [zero_op]
+
+            shape_ops, shape_values = _shape_materials(
+                info,
+                group_block,
+                func_block,
+                anchor=group_anchor,
+            )
+            metadata_ops.extend(shape_ops)
+            numel_ops, numel = _numel_material(shape_values)
+            metadata_ops.extend(numel_ops)
+            metadata_ops.append(one_op)
+
+            current = current_by_bucket.get(info.bucket_key, sp.Integer(0))
+            if current == 0:
+                offset_ops: list[Operation] = []
+                offset = zero
+            else:
+                prior_numels: list[tuple[_SymbolMaterial, int]] = []
+                if not isinstance(current, sp.Integer):
+                    rematerialized_prior_numel_by_info: dict[_AllocInfo, _SymbolMaterial] = {}
+                    prior_numels = _prior_numels_for_block(
+                        processed_numels_by_bucket.get(info.bucket_key, []),
+                        group_block,
+                        func_block,
+                        group_anchor,
+                        rematerialized_prior_numel_by_info,
+                        metadata_ops,
+                    )
+                offset_ops, offset = cls.offset_bytes_material(
+                    current,
+                    alignment,
+                    zero=zero,
+                    prior_numels=prior_numels,
+                    ratio_materials=None,
+                )
+            metadata_ops.extend(offset_ops)
+
+            group_block.insert_ops_before(metadata_ops, group_anchor)
+            result[info] = _RewriteInfo(
+                info,
+                shape_values,
+                numel,
+                offset,
+                one,
+                tuple(metadata_ops),
+            )
+            current_by_bucket[info.bucket_key] = _safe_simplify_expr(
+                cls.align_expr(current, alignment) + info.size_bytes_expr
+            )
+            processed_numels_by_bucket.setdefault(info.bucket_key, []).append((info, numel, info.dtype_size))
+
+        return result
 
 
 def _dynamic_shape_dim_text(dim: SymbolExprAttr) -> str:
@@ -1962,6 +2250,7 @@ def _offset_bytes_material(
     功能说明:
     - offset 以 `arch.get_dynamic_memory` 的 byte pool 为单位，不再按 target dtype 转换。
     - 动态 offset 以 prior numel 乘 dtype byte size 精确物化，避免 floor 截断。
+    - `alignment>0` 时按每段 `align_up(current)+size` 链式推进，保留前序对齐 gap。
 
     使用示例:
     - ops, offset = _offset_bytes_material(current_bytes, 0, zero=zero, prior_numels=[(a, 4)])
@@ -1972,87 +2261,18 @@ def _offset_bytes_material(
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    aligned_bytes = _align_expr(current_bytes, alignment)
-    if aligned_bytes == 0:
-        return [], zero
-
-    if alignment == 0 and prior_numels:
-        if any(not isinstance(numel.expr, sp.Integer) for numel, _ in prior_numels):
-            return _dynamic_offset_from_prior_numels(prior_numels, 1, zero, ratio_materials)
-
-    if not (isinstance(aligned_bytes, sp.Integer) or (aligned_bytes.is_number and aligned_bytes.is_integer)):
-        raise KernelCodeError(
-            ErrorKind.UNIMPLEMENTED,
-            ErrorModule.PASS,
-            "MemoryPoolUnsupportedAlignment: dynamic byte offset is not supported",
-        )
-
-    op, offset = _const_material(int(aligned_bytes))
-    return [op], offset
-
-
-def _dynamic_offset_from_prior_numels(
-    prior_numels: list[tuple[_SymbolMaterial, int]],
-    dtype_size: int,
-    zero: _SymbolMaterial,
-    ratio_materials: dict[int, _SymbolMaterial] | None = None,
-) -> tuple[list[Operation], _SymbolMaterial]:
-    """按 prior numel 与 dtype byte ratio 生成动态 offset。
-
-
-    功能说明:
-    - 仅处理可证明整除的整数 ratio。
-    - 多个同 ratio 动态项先求和再乘 ratio，保持 IR 可读且避免 floor 截断。
-
-    使用示例:
-    - ops, offset = _dynamic_offset_from_prior_numels([(m, 4), (k, 4)], 2, zero)
-
-    关联文件:
-    - spec: spec/pass/lowering/memory_pool.md
-    - test: test/passes/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/memory_pool.py
-    """
-
-    ratio_groups: dict[int, list[_SymbolMaterial]] = {}
-    for numel, prior_dtype_size in prior_numels:
-        if prior_dtype_size % dtype_size != 0:
-            raise KernelCodeError(
-                ErrorKind.UNIMPLEMENTED,
-                ErrorModule.PASS,
-                "MemoryPoolUnsupportedByteOffset: byte offset is not divisible by target unit",
-            )
-        ratio_groups.setdefault(prior_dtype_size // dtype_size, []).append(numel)
-
-    ops: list[Operation] = []
-    current: _SymbolMaterial | None = None
-    for ratio in sorted(ratio_groups):
-        group_values = ratio_groups[ratio]
-        group_current = group_values[0]
-        for value in group_values[1:]:
-            op, group_current = _add_material(group_current, value)
-            ops.append(op)
-        if ratio != 1:
-            if ratio_materials is not None and ratio in ratio_materials:
-                ratio_material = ratio_materials[ratio]
-                ratio_op = None
-            else:
-                ratio_op, ratio_material = _const_material(ratio)
-            mul_op, group_current = _mul_material(group_current, ratio_material)
-            if ratio_op is not None:
-                ops.append(ratio_op)
-            ops.append(mul_op)
-        if current is None:
-            if ratio == 1:
-                op, current = _add_material(zero, group_current)
-                ops.append(op)
-            else:
-                current = group_current
-            continue
-        op, current = _add_material(current, group_current)
-        ops.append(op)
-    if current is None:
-        return [], zero
-    return ops, current
+    rules = _MemoryPoolRewriteRules
+    current_offset = current_bytes
+    selected_alignment = alignment
+    ratio_cache = ratio_materials
+    materials = list(prior_numels)
+    return rules.offset_bytes_material(
+        current_offset,
+        selected_alignment,
+        zero=zero,
+        prior_numels=materials,
+        ratio_materials=ratio_cache,
+    )
 
 
 def _metadata_group_block(info: _AllocInfo, op_loop: dict[Operation, LoopOp | None], func_block: Block) -> Block:
@@ -2232,67 +2452,12 @@ def _prepare_rewrite_infos(
     - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
-    result: dict[_AllocInfo, _RewriteInfo] = {}
-    current_by_bucket: dict[tuple[str], sp.Basic] = {}
-    processed_numels_by_bucket: dict[tuple[str], list[tuple[_AllocInfo, _SymbolMaterial, int]]] = {}
-    for info in alloc_infos:
-        group_block = _metadata_group_block(info, op_loop, func_block)
-        group_anchor = _metadata_group_anchor(group_block, [info], op_loop, func_block)
-        zero_op, zero = _const_material(0)
-        one_op, one = _const_material(1)
-        metadata_ops: list[Operation] = [zero_op]
-
-        shape_ops, shape_values = _shape_materials(
-            info,
-            group_block,
-            func_block,
-            anchor=group_anchor,
-        )
-        metadata_ops.extend(shape_ops)
-        numel_ops, numel = _numel_material(shape_values)
-        metadata_ops.extend(numel_ops)
-        metadata_ops.append(one_op)
-
-        current = current_by_bucket.get(info.bucket_key, sp.Integer(0))
-        if current == 0:
-            offset_ops: list[Operation] = []
-            offset = zero
-        else:
-            prior_numels: list[tuple[_SymbolMaterial, int]] = []
-            if alignment == 0 and not isinstance(current, sp.Integer):
-                rematerialized_prior_numel_by_info: dict[_AllocInfo, _SymbolMaterial] = {}
-                prior_numels = _prior_numels_for_block(
-                    processed_numels_by_bucket.get(info.bucket_key, []),
-                    group_block,
-                    func_block,
-                    group_anchor,
-                    rematerialized_prior_numel_by_info,
-                    metadata_ops,
-                )
-            offset_ops, offset = _offset_bytes_material(
-                current,
-                alignment,
-                zero=zero,
-                prior_numels=prior_numels,
-                ratio_materials=None,
-            )
-        metadata_ops.extend(offset_ops)
-
-        group_block.insert_ops_before(metadata_ops, group_anchor)
-        result[info] = _RewriteInfo(
-            info,
-            shape_values,
-            numel,
-            offset,
-            one,
-            tuple(metadata_ops),
-        )
-        current_by_bucket[info.bucket_key] = _safe_simplify_expr(
-            _align_expr(current, alignment) + info.size_bytes_expr
-        )
-        processed_numels_by_bucket.setdefault(info.bucket_key, []).append((info, numel, info.dtype_size))
-
-    return result
+    rules = _MemoryPoolRewriteRules
+    infos = list(alloc_infos)
+    loop_map = dict(op_loop)
+    target_block = func_block
+    selected_alignment = alignment
+    return rules.prepare_rewrite_infos(infos, loop_map, target_block, selected_alignment)
 
 
 def _dynamic_memory_backing_ops(

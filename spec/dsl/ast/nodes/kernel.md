@@ -20,7 +20,7 @@
 - `class KernelGeAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `class KernelExpAST(out: ValueAST, input_value: ValueAST, location: SourceLocation | None = None)`
 - `class KernelReduceAST(out: ValueAST, input_value: ValueAST, kind: KernelReduceKind, axis: int, keepdim: bool = False, location: SourceLocation | None = None)`
-- `class KernelMatmulAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `class KernelMatmulAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None, *, acc: ValueAST | None = None)`
 - `class KernelImg2Col1dAST(out: ValueAST, input_value: ValueAST, k: ValueAST, s: ValueAST | None = None, d: ValueAST | None = None, p_left: ValueAST | None = None, p_right: ValueAST | None = None, location: SourceLocation | None = None)`
 - `class KernelImg2Col2dAST(out: ValueAST, input_value: ValueAST, kh: ValueAST, kw: ValueAST, sh: ValueAST | None = None, sw: ValueAST | None = None, dh: ValueAST | None = None, dw: ValueAST | None = None, ph: ValueAST | None = None, pw: ValueAST | None = None, pl: ValueAST | None = None, pr: ValueAST | None = None, location: SourceLocation | None = None)`
 
@@ -107,21 +107,22 @@
 - 功能说明：发射 out-first `kernel.reduce(out, input)` dialect op，并写入 `kind/axis/keepdim/space` attrs。
 - 注意事项：必须复用 `kernel_gen.operation.kernel.reduce(...)` 的公开校验；`kind` 在 operation/AST 层是枚举，发射到 dialect 时才转换为稳定字符串。
 
-### `class KernelMatmulAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+### `class KernelMatmulAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None, *, acc: ValueAST | None = None)`
 
 - 参数：
   - `out`：rank-2 写回目标 memory 节点。
   - `lhs`：rank-2 左矩阵 memory 节点。
   - `rhs`：rank-2 右矩阵 memory 节点。
+  - `acc`：可选 i1 累加开关节点；`None` 时发射普通 `kernel.matmul`，非 `None` 时发射中间 `kernel.matmul_fusion`。
   - `location`：可选源码位置。
-- 返回值：`KernelMatmulAST`；`emit_mlir(...)` 返回无结果 `KernelMatmulOp`。
+- 返回值：`KernelMatmulAST`；`emit_mlir(...)` 在 `acc is None` 时返回无结果 `KernelMatmulOp`，在 `acc` 存在时返回无结果 `KernelMatmulFusionOp`。
 - 使用示例：
 
   ```python
-  node = KernelMatmulAST(out, lhs, rhs)
+  node = KernelMatmulAST(out, lhs, rhs, location, acc=acc)
   ```
-- 功能说明：发射 out-first `kernel.matmul(out, lhs, rhs)`。
-- 注意事项：不接受 `memoryspace` 参数；mixed-space 是否可用以 `spec/operation/kernel.md` 和 `spec/dialect/kernel.md` 为准。
+- 功能说明：发射 out-first `kernel.matmul(out, lhs, rhs)`；当 `acc` 由 DSL 提供时，先发射 `kernel.matmul_fusion(out,lhs,rhs,acc,fusion_list="")`，由后续 pass 分解为静态 `kernel.matmul(acc=true/false)` 分支。
+- 注意事项：不接受 `memoryspace` 参数；`acc` 必须 lower 为 i1 SSA value；mixed-space 是否可用以 `spec/operation/kernel.md` 和 `spec/dialect/kernel.md` 为准。
 
 ### `class KernelImg2Col1dAST(...)`
 
@@ -177,5 +178,5 @@
 | TC-DSL-AST-NODES-KERNEL-002A | pass 改写 | min/max kind lower | 构造公开 `KernelBinaryElewiseAST(..., KernelBinaryElewiseKind.MIN/MAX)`。 | 发射 MLIR。 | 返回 `KernelBinaryElewiseOp(kind="min"|"max")`。 | `test_kernel_binary_elewise_node_emits_min_max_kind` |
 | TC-DSL-AST-NODES-KERNEL-005 | pass 改写 | exp lower | 构造公开 `KernelExpAST`。 | 发射 MLIR。 | 返回 `KernelExpOp`。 | `test_kernel_exp_node_emits_exp_op` |
 | TC-DSL-AST-NODES-KERNEL-006 | pass 改写 | reduce lower | 构造公开 `KernelReduceAST`。 | 发射 MLIR。 | 返回 `KernelReduceOp(kind=...)`。 | `test_kernel_reduce_node_emits_reduce_op` |
-| TC-DSL-AST-NODES-KERNEL-003 | pass 改写 | matmul lower | 构造 mixed-space rank-2 memory。 | 发射 MLIR。 | 返回无结果 `KernelMatmulOp`。 | `test_kernel_matmul_node_emits_matmul_op` |
+| TC-DSL-AST-NODES-KERNEL-003 | pass 改写 | matmul lower | 构造 mixed-space rank-2 memory。 | 发射 MLIR。 | 无 `acc` 时返回无结果 `KernelMatmulOp`；有 i1 `acc` 时返回无结果 `KernelMatmulFusionOp`。 | `test_kernel_matmul_node_emits_matmul_op` |
 | TC-DSL-AST-NODES-KERNEL-004 | pass 改写 | img2col2d lower | 构造公开 img2col2d memory 与参数。 | 发射 MLIR。 | 返回 `KernelImg2col2dOp`。 | `test_kernel_img2col2d_node_emits_img2col2d_op` |

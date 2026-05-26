@@ -66,7 +66,7 @@
 - 当前内置 pipeline 至少包含 `default-lowering` 与 `npu-demo-lowering` 两个公开 builder。
 - `hoist-dma-alias-ops` 作为公开 pass name 进入内置注册表；其第一阶段只接受通用 `fold`，不接受专属 option。
 - `symbol-hoist-pipeline` 作为公开 pass name 进入内置注册表；其第一阶段只接受通用 `fold`，不接受专属 option。
-- `npu-demo-lowering` 公开 builder 支持 `options={"target": "npu_demo"}`；其固定顺序由 `spec/pass/pipeline/npu_demo_lowering.md` 约束，并包含 `MemoryPlanPass(insert_free=True, fold=False)`、公开 `arch-parallelize` 阶段与两次 `SymbolBufferHoistPass`；`only-kernel` / `only_kernel` 之类选项必须显式失败，不能把 host wrapper 与 device body 的 outline 流程裁成仅 kernel 形态。
+- `npu-demo-lowering` 公开 builder 支持 `options={"target": "npu_demo"}`；其固定顺序由 `spec/pass/pipeline/npu_demo_lowering.md` 约束，并包含三次 `MemoryPlanPass(insert_free=True, reuse=True, fold=False)`、三次 `SymbolHoistPipelinePass`、`MemoryPoolPass(rewrite=True, alignment=1024)` 与公开 `arch-parallelize` 阶段；`only-kernel` / `only_kernel` 之类选项必须显式失败，不能把 host wrapper 与 device body 的 outline 流程裁成仅 kernel 形态。
 - registry 只负责注册与查询，不承载具体 pipeline builder 实现。
 - 重复注册同名 pass 或 pipeline 必须立即失败，不得覆盖旧项。
 - 为便于工具与测试编写最小用例，仓库内置 pass 至少应包含：
@@ -77,7 +77,7 @@
   - `symbol-buffer-hoist`：把 `symbol.for` 单 block 循环体内可安全外提的 `dma.alloc` 提到 loop 之前；若存在唯一合法 `dma.free`，把 alloc/free 成对移动到 owner loop 两侧。
   - `dma-alias-to-reinterpret`：把 `dma.view` / `dma.reshape` / `dma.subview` 归一为 root source 上的 `dma.reinterpret`。
   - `hoist-dma-alias-ops`：把同 block 内紧邻的 `dma.reshape` 上移穿过 `dma.fill`，作为第一阶段 alias hoist pass。
-  - `symbol-hoist-pipeline`：在一个 pass 内先执行 alias-to-reinterpret 能力，再共同收敛 symbol-loop-hoist 与 dma-alias-hoist 相关 pattern；`symbol-buffer-hoist` 保持独立 pass。
+  - `symbol-hoist-pipeline`：在一个 pass 内先执行 alias-to-reinterpret 能力，再按 `symbol-loop-hoist -> symbol-buffer-hoist -> hoist-dma-alias-ops` 固定顺序收敛相关 pattern；`symbol-buffer-hoist` 仍是可手动注册的独立 pass，但不作为 `npu-demo-lowering` 顶层阶段出现。
   - `memory-plan`：显式 `insert-free=true` 时为受控 `dma.alloc` 生命周期补插 `dma.free`；显式 `reuse=true` 且 `insert-free=true` 时启用保守 alloc 复用。
   - `multi-buffer`：把可证明的 matmul lhs/rhs staging alloc/copy/use/free 成对生命周期改写为 DMA ring。
   - `producer-consumer-analysis`：基于公开 `MemoryEffect` 与 pass 内置 alias 规则标注普通或控制流分类简单整数列表 event attrs。
@@ -574,7 +574,7 @@ names = list_registered_passes()
 | TC-PASS-REGISTRY-021 | 公开入口 | build registered inline pass | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_inline_pass`。 | 公开入口在“build registered inline pass”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_inline_pass` |
 | TC-PASS-REGISTRY-022 | 公开入口 | build registered pass accepts universal fold option | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_build_registered_pass_accepts_universal_fold_option`。 | 公开入口在“build registered pass accepts universal fold option”场景下可导入、构造、注册或按名称发现。 | `test_build_registered_pass_accepts_universal_fold_option` |
 | TC-PASS-REGISTRY-023 | 边界/异常 | build registered pass rejects invalid fold option | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_build_registered_pass_rejects_invalid_fold_option`。 | “build registered pass rejects invalid fold option”场景按公开错误语义失败或被拒绝。 | `test_build_registered_pass_rejects_invalid_fold_option` |
-| TC-PASS-REGISTRY-023A | 公开入口 | memory-pool rewrite/alignment options | 加载内置 pass 并提供 `rewrite/fold/alignment` option。 | 运行 `test_build_registered_memory_pool_alignment_options`。 | registry 构造 `MemoryPoolPass`，`rewrite=True`、`fold=False`、`alignment=0`。 | `test_build_registered_memory_pool_alignment_options` |
+| TC-PASS-REGISTRY-023A | 公开入口 | memory-pool rewrite/alignment options | 加载内置 pass 并提供 `rewrite/fold/alignment` option。 | 运行 `test_build_registered_memory_pool_alignment_options`。 | registry 构造 `MemoryPoolPass`，`rewrite=True`、`fold=False`、`alignment=0`，并保留默认 alignment `1024` 的公开构造行为。 | `test_build_registered_memory_pool_alignment_options` |
 | TC-PASS-REGISTRY-023B | 边界/异常 | memory-pool alignment/options 非法值 | 准备非法 `rewrite`、非法 `alignment` 或未知 option。 | 运行 `test_build_registered_memory_pool_alignment_rejects_invalid_options`。 | registry 报 `PassRegistryError: pass 'memory-pool' option error: <原因>`。 | `test_build_registered_memory_pool_alignment_rejects_invalid_options` |
 | TC-PASS-REGISTRY-023C | 公开入口 | arch-parallelize pass registry 名称 | 加载内置 pass 并提供 `target=npu_demo`、`parallel_level=block` option。 | 运行 `test_build_registered_arch_parallelize_pass`。 | registry 构造 `ArchParallelizePass`，且 `list_registered_passes()` 包含 `arch-parallelize`。 | `test_build_registered_arch_parallelize_pass` |
 | TC-PASS-REGISTRY-023D | 公开入口 | multi-buffer memory-stage/fold options | 加载内置 pass 并提供 `memory-stage=3` 和 registry 通用 `fold=false` option。 | 运行 `test_build_registered_multi_buffer_options`。 | registry 构造 `MultiBufferPass`，`memory_stage=3`、`fold=False`。 | `test_build_registered_multi_buffer_options` |

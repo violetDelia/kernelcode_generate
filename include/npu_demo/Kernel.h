@@ -21,7 +21,7 @@ API 列表:
 - `npu_demo::reduce_sum<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) -> Status`
 - `npu_demo::reduce_min<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) -> Status`
 - `npu_demo::reduce_max<Space, InType, OutType>(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis) -> Status`
-- `npu_demo::matmul<LhsSpace, RhsSpace, OutSpace, LhsType, RhsType, OutType>(Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs) -> Status`
+- `npu_demo::matmul<LhsSpace, RhsSpace, OutSpace, LhsType, RhsType, OutType>(Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs, bool acc = false) -> Status`
 - `npu_demo::img2col1d<InputSpace, OutputSpace, InType, OutType>(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right) -> Status`
 - `npu_demo::img2col2d<InputSpace, OutputSpace, InType, OutType>(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr) -> Status`
 
@@ -29,6 +29,7 @@ API 列表:
 - #include "include/npu_demo/Kernel.h"
 - Status st = npu_demo::add<GM, float, float>(out, lhs, rhs);
 - Status st2 = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs);
+- Status st3 = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs, true);
 
 
 关联文件:
@@ -659,9 +660,11 @@ inline Status reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType
 /*
 功能说明:
 - 对二维输入执行矩阵乘法，并把结果写入 `out`。
+- `acc=true` 时读取 `out` 旧值并累加，`acc=false` 时覆盖写。
 
 使用示例:
 - Status st = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs);
+- Status st_acc = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs, true);
 
 
 关联文件:
@@ -673,7 +676,8 @@ template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, type
 inline Status matmul(
     Memory<OutSpace, OutType>& out,
     const Memory<LhsSpace, LhsType>& lhs,
-    const Memory<RhsSpace, RhsType>& rhs) {
+    const Memory<RhsSpace, RhsType>& rhs,
+    bool acc) {
     if (lhs.rank() != 2 || rhs.rank() != 2 || out.rank() != 2) {
         return StatusCode::kError;
     }
@@ -699,14 +703,14 @@ inline Status matmul(
         for (long long ni = 0; ni < n; ++ni) {
             rhs_indices[1] = ni;
             out_indices[1] = ni;
-            OutType acc = static_cast<OutType>(0);
+            OutType acc_value = acc ? out.at(out_indices) : static_cast<OutType>(0);
             for (long long ki = 0; ki < k; ++ki) {
                 lhs_indices[1] = ki;
                 rhs_indices[0] = ki;
-                acc = static_cast<OutType>(
-                    acc + static_cast<OutType>(lhs.at(lhs_indices)) * static_cast<OutType>(rhs.at(rhs_indices)));
+                acc_value = static_cast<OutType>(
+                    acc_value + static_cast<OutType>(lhs.at(lhs_indices)) * static_cast<OutType>(rhs.at(rhs_indices)));
             }
-            out.at(out_indices) = acc;
+            out.at(out_indices) = acc_value;
         }
     }
     return StatusCode::kOk;

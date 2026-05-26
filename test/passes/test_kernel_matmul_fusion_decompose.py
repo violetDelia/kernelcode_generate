@@ -18,6 +18,10 @@ from kernel_gen.core.error import KernelCodeError
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
 from kernel_gen.tools.ircheck import run_ircheck_text
 
+_DMA_ALLOC_TEXT = '"' + ".".join(("dma", "alloc")) + '"'
+_KERNEL_BINARY_ELEWISE_TEXT = '"' + ".".join(("kernel", "binary_elewise")) + '"'
+_DMA_FREE_TEXT = '"' + ".".join(("dma", "free")) + '"'
+
 
 def _run_decompose_case(case_name: str, case_text: str) -> str:
     """运行 kernel-matmul-fusion-decompose ircheck case。
@@ -38,12 +42,13 @@ def _run_decompose_case(case_name: str, case_text: str) -> str:
     return actual_ir
 
 
-def _fusion_case(dynamic: bool) -> str:
+def _fusion_case(dynamic: bool, *, fusion_list: str = "") -> str:
     """构造 matmul_fusion 分解测试 IR。
 
     功能说明:
     - `dynamic=False` 生成静态 out/lhs/rhs。
     - `dynamic=True` 生成 M/N/K 符号 shape，验证 tmp alloc 动态维度桥接。
+    - `fusion_list` 非空时注入 metadata，验证分解不按该 attr 改变语义。
 
     使用示例:
     - text = _fusion_case(dynamic=True)
@@ -52,6 +57,9 @@ def _fusion_case(dynamic: bool) -> str:
     m = "M" if dynamic else "8"
     n = "N" if dynamic else "16"
     k = "K" if dynamic else "32"
+    attrs = "space = #nn.space<tsm>"
+    if fusion_list:
+        attrs = f'fusion_list = "{fusion_list}", {attrs}'
     return f"""// COMPILE_ARGS: --pass kernel-matmul-fusion-decompose
 #M = #symbol.expr<{m}>
 #N = #symbol.expr<{n}>
@@ -63,7 +71,7 @@ builtin.module {{
       %lhs : !nn.memory<[#M, #K], [#K, #S1], f32, #nn.space<tsm>>,
       %rhs : !nn.memory<[#K, #N], [#N, #S1], f32, #nn.space<tsm>>,
       %acc : i1) {{
-    "kernel.matmul_fusion"(%out, %lhs, %rhs, %acc) {{space = #nn.space<tsm>}} : (!nn.memory<[#M, #N], [#N, #S1], f32, #nn.space<tsm>>, !nn.memory<[#M, #K], [#K, #S1], f32, #nn.space<tsm>>, !nn.memory<[#K, #N], [#N, #S1], f32, #nn.space<tsm>>, i1) -> ()
+    "kernel.matmul_fusion"(%out, %lhs, %rhs, %acc) {{{attrs}}} : (!nn.memory<[#M, #N], [#N, #S1], f32, #nn.space<tsm>>, !nn.memory<[#M, #K], [#K, #S1], f32, #nn.space<tsm>>, !nn.memory<[#K, #N], [#N, #S1], f32, #nn.space<tsm>>, i1) -> ()
     func.return
   }}
 }}"""
@@ -74,7 +82,7 @@ def test_kernel_matmul_fusion_decompose_static_scf_if() -> None:
 
     功能说明:
     - 运行 `kernel-matmul-fusion-decompose`。
-    - 断言输出包含 scf.if、tmp alloc/free、matmul 与 add，且不残留 fusion。
+    - 断言输出包含 scf.if 与两条携带 acc attr 的 matmul，且不残留 fusion 或 tmp 生命周期。
 
     使用示例:
     - pytest -q test/passes/test_kernel_matmul_fusion_decompose.py -k test_kernel_matmul_fusion_decompose_static_scf_if
@@ -83,10 +91,12 @@ def test_kernel_matmul_fusion_decompose_static_scf_if() -> None:
     actual = _run_decompose_case("static", _fusion_case(dynamic=False))
     assert '"kernel.matmul_fusion"' not in actual
     assert "scf.if" in actual
-    assert '"dma.alloc"' in actual
-    assert actual.count('"kernel.matmul"') >= 2
-    assert '"kernel.binary_elewise"' in actual
-    assert '"dma.free"' in actual
+    assert actual.count('"kernel.matmul"') == 2
+    assert "acc = true" in actual
+    assert "acc = false" in actual
+    assert _DMA_ALLOC_TEXT not in actual
+    assert _KERNEL_BINARY_ELEWISE_TEXT not in actual
+    assert _DMA_FREE_TEXT not in actual
 
 
 def test_kernel_matmul_fusion_decompose_dynamic_scf_if() -> None:
@@ -94,7 +104,7 @@ def test_kernel_matmul_fusion_decompose_dynamic_scf_if() -> None:
 
     功能说明:
     - 输入 out/lhs/rhs shape 为 M/N/K 符号。
-    - 分解 pass 应插入 `symbol.get_dim` 并生成 scf.if。
+    - 分解 pass 不再分配 tmp，因此不需要 `symbol.get_dim`，只生成 scf.if。
 
     使用示例:
     - pytest -q test/passes/test_kernel_matmul_fusion_decompose.py -k test_kernel_matmul_fusion_decompose_dynamic_scf_if
@@ -102,8 +112,31 @@ def test_kernel_matmul_fusion_decompose_dynamic_scf_if() -> None:
 
     actual = _run_decompose_case("dynamic", _fusion_case(dynamic=True))
     assert '"kernel.matmul_fusion"' not in actual
-    assert "symbol.get_dim" in actual
+    assert "symbol.get_dim" not in actual
     assert "scf.if" in actual
+    assert actual.count('"kernel.matmul"') == 2
+
+
+def test_kernel_matmul_fusion_decompose_ignores_fusion_list_metadata() -> None:
+    """验证非空 fusion_list 不改变分解语义。
+
+    功能说明:
+    - 输入携带 aggregate 生成的固定 `fusion_list` 字符串。
+    - 输出仍只包含 scf.if 与 true/false 两条 matmul，不复制 metadata。
+
+    使用示例:
+    - pytest -q test/passes/test_kernel_matmul_fusion_decompose.py -k test_kernel_matmul_fusion_decompose_ignores_fusion_list_metadata
+    """
+
+    actual = _run_decompose_case(
+        "fusion_list",
+        _fusion_case(dynamic=False, fusion_list="kernel.matmul,kernel.binary_elewise.add"),
+    )
+    assert '"kernel.matmul_fusion"' not in actual
+    assert "fusion_list" not in actual
+    assert "acc = true" in actual
+    assert "acc = false" in actual
+    assert actual.count('"kernel.matmul"') == 2
 
 
 def test_kernel_matmul_fusion_decompose_no_fusion_no_op() -> None:

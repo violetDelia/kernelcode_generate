@@ -735,6 +735,43 @@ def test_kernel_matmul_memory_effects() -> None:
         (MemoryEffectKind.READ, rhs),
     }
 
+    acc_op = KernelMatmulOp(out, lhs, rhs, _make_space("global"), acc=True)
+    assert _effect_kinds_by_value(acc_op) == {
+        (MemoryEffectKind.READ, out),
+        (MemoryEffectKind.WRITE, out),
+        (MemoryEffectKind.READ, lhs),
+        (MemoryEffectKind.READ, rhs),
+    }
+
+    int_attr_true_op = KernelMatmulOp(out, lhs, rhs, _make_space("global"), acc=IntAttr(True))
+    assert _effect_kinds_by_value(int_attr_true_op) == {
+        (MemoryEffectKind.READ, out),
+        (MemoryEffectKind.WRITE, out),
+        (MemoryEffectKind.READ, lhs),
+        (MemoryEffectKind.READ, rhs),
+    }
+    int_attr_false_op = KernelMatmulOp(out, lhs, rhs, _make_space("global"), acc=IntAttr(False))
+    assert _effect_kinds_by_value(int_attr_false_op) == {
+        (MemoryEffectKind.WRITE, out),
+        (MemoryEffectKind.READ, lhs),
+        (MemoryEffectKind.READ, rhs),
+    }
+    int_attr_one_op = KernelMatmulOp(out, lhs, rhs, _make_space("global"), acc=IntAttr(1))
+    assert _effect_kinds_by_value(int_attr_one_op) == {
+        (MemoryEffectKind.READ, out),
+        (MemoryEffectKind.WRITE, out),
+        (MemoryEffectKind.READ, lhs),
+        (MemoryEffectKind.READ, rhs),
+    }
+
+    with pytest.raises(KernelCodeError, match="kernel.matmul acc must be bool/i1"):
+        KernelMatmulOp(out, lhs, rhs, _make_space("global"), acc=2)
+
+    invalid_attr_op = KernelMatmulOp(out, lhs, rhs, _make_space("global"))
+    invalid_attr_op.attributes["acc"] = IntegerAttr(1, i32)
+    with pytest.raises(KernelCodeError, match="kernel.matmul acc must be bool/i1"):
+        invalid_attr_op.verify_()
+
 
 # TC-KRN-015F
 # 功能说明: 验证 kernel.matmul_fusion 正例与 MemoryEffect。
@@ -749,6 +786,18 @@ def test_kernel_matmul_fusion_success_and_memory_effects() -> None:
     acc = _TestOp(result_types=[i1]).results[0]
     op = KernelMatmulFusionOp(out, lhs, rhs, acc, space=_make_space("tsm"))
     op.verify_()
+    assert op.fusion_list is None
+    tagged_op = KernelMatmulFusionOp(
+        out,
+        lhs,
+        rhs,
+        acc,
+        space=_make_space("tsm"),
+        fusion_list="kernel.matmul,kernel.binary_elewise.add",
+    )
+    tagged_op.verify_()
+    assert isinstance(tagged_op.fusion_list, StringAttr)
+    assert tagged_op.fusion_list.data == "kernel.matmul,kernel.binary_elewise.add"
     effects = _effect_kinds_by_value(op)
     assert (MemoryEffectKind.READ, out) in effects
     assert (MemoryEffectKind.WRITE, out) in effects
@@ -932,6 +981,12 @@ def test_kernel_matmul_fusion_verifier_errors() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.matmul_fusion element_type must match across operands"):
         KernelMatmulFusionOp(out, lhs, bad_dtype, good_acc, space=_make_space("tsm")).verify_()
+    invalid_fusion_list = KernelMatmulFusionOp(out, lhs, rhs, good_acc, space=_make_space("tsm"))
+    invalid_fusion_list.attributes["fusion_list"] = IntegerAttr(1, i32)
+    with pytest.raises(KernelCodeError, match="kernel.matmul_fusion fusion_list must be string"):
+        invalid_fusion_list.verify_()
+    with pytest.raises(KernelCodeError, match="kernel.matmul_fusion fusion_list must be string"):
+        KernelMatmulFusionOp(out, lhs, rhs, good_acc, space=_make_space("tsm"), fusion_list=1)  # type: ignore[arg-type]
 
 
 # TC-KRN-017

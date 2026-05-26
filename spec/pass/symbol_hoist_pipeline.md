@@ -3,8 +3,8 @@
 ## 功能简介
 
 - 定义 `symbol-hoist-pipeline` pass 的公开合同。
-- 该 pass 在一个 `ModulePass` 内组合 alias 归一、symbol loop hoist 与 dma alias hoist pattern。
-- 组合 pass 必须先纳入 `dma-alias-to-reinterpret` 能力，把可归一的 `dma.view` / `dma.reshape` / `dma.subview` 改写为 `dma.reinterpret`，再让后续 hoist pattern 在同一 greedy rewrite 中收敛。
+- 该 pass 在一个 `ModulePass` 内组合 alias 归一、symbol loop hoist、symbol buffer hoist 与 dma alias hoist pattern。
+- 组合 pass 必须在 clone 上分两段执行：第一段只运行 `dma-alias-to-reinterpret`，把可归一的 `dma.view` / `dma.reshape` / `dma.subview` 改写为 `dma.reinterpret`；第二段按 `symbol-loop-hoist -> symbol-buffer-hoist -> hoist-dma-alias-ops` 固定 pattern 顺序收敛。
 - 旧根模块 `kernel_gen.passes.dma_alias_to_reinterpret`、`kernel_gen.passes.symbol_loop_hoist`、`kernel_gen.passes.hoist_dma_alias_ops`、`kernel_gen.passes.symbol_buffer_hoist` 不保留兼容 shim；hoist 真源路径统一为 `kernel_gen.passes.hoist.*`。
 
 ## API 列表
@@ -25,6 +25,7 @@
 - Pass registry：`spec/pass/registry.md`
 - Alias 归一 pattern：`spec/pass/dma_alias_to_reinterpret.md`
 - Symbol loop hoist pattern：`spec/pass/symbol_loop_hoist.md`
+- Symbol buffer hoist pattern：`spec/pass/symbol_buffer_hoist.md`
 - DMA alias hoist pattern：`spec/pass/hoist_dma_alias_ops.md`
 - Pipeline 使用方：`spec/pass/pipeline/npu_demo_lowering.md`
 
@@ -39,7 +40,7 @@
 ## 目标
 
 - 对外提供一个可注册的 hoist 组合 pass：`SymbolHoistPipelinePass(fold=True)`。
-- 不调用旧单 pass 的 `apply(...)`，而是复用公开 pattern getter 构造 combined pattern 列表。
+- 不调用旧单 pass 的 `apply(...)`，而是复用公开 pattern getter 构造两段 pattern 列表。
 - 在 clone 上执行 rewrite 并验证，验证成功后替换原 module，验证失败时保留原 module。
 - 保持 `cse` / `canonicalize` 为 pipeline 外置阶段，不把它们注册或内嵌到本 pass。
 
@@ -98,9 +99,9 @@
   ```
 - 功能说明：执行 combined hoist rewrite。
 - 注意事项：
-  - pattern 列表顺序必须以 alias 归一 pattern 开头，确保后续 hoist pattern 优先看到 `dma.reinterpret` 形态。
+  - 第一段 pattern 列表只能包含 alias 归一 pattern；第二段 pattern 列表必须按 `symbol-loop-hoist -> symbol-buffer-hoist -> hoist-dma-alias-ops` 固定顺序构造，确保 buffer 生命周期外提发生在 alias hoist 前。
   - 若 module verifier 或生成 op verifier 失败，必须抛出 `KernelCodeError(ErrorModule.PASS, "SymbolHoistPipelineVerifierError: ...")`。
-  - 不得简单顺序调用 `DmaAliasToReinterpretPass.apply(...)`、`SymbolLoopHoistPass.apply(...)` 或 `HoistDmaAliasOpsPass.apply(...)`。
+  - 不得简单顺序调用 `DmaAliasToReinterpretPass.apply(...)`、`SymbolLoopHoistPass.apply(...)`、`SymbolBufferHoistPass.apply(...)` 或 `HoistDmaAliasOpsPass.apply(...)`。
 
 ## 测试
 
@@ -111,7 +112,7 @@
 
 - 验证公开 registry 与 canonical import path。
 - 验证未知专属 option 的稳定失败短语。
-- 验证 combined pass 同时具备 alias 归一与 symbol loop hoist 能力。
+- 验证 combined pass 具备 alias 归一、symbol loop hoist、symbol buffer hoist 与 dma alias hoist 能力，且失败时回滚原 module。
 - 验证旧根模块路径不再可用，新 `kernel_gen.passes.hoist.*` 真源路径可导入。
 
 ### 功能与用例清单

@@ -112,7 +112,7 @@ def test_kernel_aggregate_fuses_zero_start_reduce_owner() -> None:
 
     功能说明:
     - 运行公开 registry pass `kernel-aggregate={matmul-acc=true}`。
-    - 断言输出包含 `symbol.ne` 与 `kernel.matmul_fusion`，且原 tmp 形态消失。
+    - 断言输出包含 `symbol.ne`、带固定 fusion_list 的 `kernel.matmul_fusion`，且原 tmp 形态消失。
 
     使用示例:
     - pytest -q test/passes/test_kernel_aggregate.py -k test_kernel_aggregate_fuses_zero_start_reduce_owner
@@ -121,6 +121,7 @@ def test_kernel_aggregate_fuses_zero_start_reduce_owner() -> None:
     actual = _run_kernel_aggregate_case("zero_start", _aggregate_case_text("0", "32", "32"))
     assert "symbol.ne" in actual
     assert '"kernel.matmul_fusion"' in actual
+    assert 'fusion_list = "kernel.matmul,kernel.binary_elewise.add"' in actual
     assert '"kernel.matmul"' not in actual
     assert '"kernel.binary_elewise"' not in actual
     assert '"dma.free"' not in actual

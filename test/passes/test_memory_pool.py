@@ -801,7 +801,7 @@ def test_memory_pool_public_invalid_shape_stride_and_free_edges() -> None:
     else:
         raise AssertionError("expected KernelCodeError for duplicate dma.free")
 
-    with pytest.raises(VerifyException, match="shape dimensions must be SymbolExprAttr"):
+    with pytest.raises(KernelCodeError, match="shape dimensions must be SymbolExprAttr"):
         NnMemoryType(
             ArrayAttr([IntAttr(2)]),
             ArrayAttr([IntAttr(1)]),
@@ -810,8 +810,45 @@ def test_memory_pool_public_invalid_shape_stride_and_free_edges() -> None:
         )
 
 
+def test_memory_pool_rewrite_chains_dynamic_aligned_offsets() -> None:
+    """验证动态 rewrite 会保留前序 alignment gap。
+
+    功能说明:
+    - 构造 static-small -> dynamic -> tail 三段同 bucket alloc。
+    - 第三段 offset 必须基于第二段已对齐起点继续推进，不能只对未对齐 prior size 总和做最终对齐。
+
+    使用示例:
+    - pytest -q test/passes/test_memory_pool.py -k test_memory_pool_rewrite_chains_dynamic_aligned_offsets
+    """
+
+    n_value = _TestOp(result_types=[SymbolValueType.from_expr("N")])
+    small_type = _make_memory_type(shape=(1,), stride=(1,), element_type=i32, space="shared")
+    dynamic_type = _make_memory_type(shape=("N",), stride=(1,), element_type=i32, space="shared")
+    tail_type = _make_memory_type(shape=(2,), stride=(1,), element_type=i32, space="shared")
+    small_alloc = DmaAllocOp(_make_symbol_operands([1]), small_type)
+    small_free = DmaFreeOp(small_alloc.result)
+    dynamic_alloc = DmaAllocOp([n_value.results[0]], dynamic_type)
+    dynamic_free = DmaFreeOp(dynamic_alloc.result)
+    tail_alloc = DmaAllocOp(_make_symbol_operands([2]), tail_type)
+    tail_free = DmaFreeOp(tail_alloc.result)
+    module = _build_module(
+        "dynamic_alignment_chain",
+        [n_value, small_alloc, small_free, dynamic_alloc, dynamic_free, tail_alloc, tail_free],
+    )
+
+    MemoryPoolPass(rewrite=True, alignment=1024).apply(Context(), module)
+
+    reinterprets = [op for op in _collect_ops_recursive(module.body.block) if isinstance(op, DmaReinterpretOp)]
+    offsets = [op.offset.type.get_value() for op in reinterprets]
+    assert offsets[0] == 0
+    assert offsets[1] == 1024
+    assert isinstance(offsets[2], str)
+    assert "floordiv" in offsets[2]
+    assert "2047" in offsets[2]
+
+
 # TC-MP-024
-# 功能说明: 验证公开 rewrite 对 dynamic shape、alignment 与生命周期顺序的拒绝边界。
+# 功能说明: 验证公开 rewrite 对 dynamic shape、alignment 与生命周期顺序的边界。
 # 使用示例: pytest -q test/passes/test_memory_pool.py -k test_memory_pool_public_rewrite_error_edges
 # 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
@@ -853,12 +890,13 @@ def test_memory_pool_public_rewrite_error_edges() -> None:
     assert str(offsets["alloc1"]) == "0"
     assert sp.simplify(offsets["alloc2"] - sp.Integer(16) * symbol_n) == 0
 
-    try:
-        MemoryPoolPass(rewrite=True, alignment=1024).apply(Context(), dynamic_alignment_module)
-    except KernelCodeError as exc:
-        assert "MemoryPoolUnsupportedAlignment: dynamic aligned offset is not supported" in str(exc)
-    else:
-        raise AssertionError("expected KernelCodeError for dynamic aligned offset")
+    MemoryPoolPass(rewrite=True, alignment=1024).apply(Context(), dynamic_alignment_module)
+    rewritten_ops = _collect_ops_recursive(dynamic_alignment_module.body.block)
+    reinterprets = [op for op in rewritten_ops if isinstance(op, DmaReinterpretOp)]
+    assert len(reinterprets) == 2
+    assert reinterprets[1].offset.type.get_value() != "16*N"
+    assert "floordiv" in reinterprets[1].offset.type.get_value()
+    assert not any(isinstance(op, DmaAllocOp) for op in rewritten_ops)
 
     missing_operand_type = NnMemoryType(
         ArrayAttr([_symbol_expr_attr("M"), _symbol_expr_attr(4)]),

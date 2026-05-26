@@ -21,7 +21,7 @@ from xdsl.context import Context
 from xdsl.ir import Block
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelExpOp, KernelImg2col2dOp, KernelMatmulOp, KernelReduceOp
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelExpOp, KernelImg2col2dOp, KernelMatmulFusionOp, KernelMatmulOp, KernelReduceOp
 from kernel_gen.dsl.ast.nodes import (
     ConstValueAST,
     KernelAddAST,
@@ -32,6 +32,7 @@ from kernel_gen.dsl.ast.nodes import (
     KernelReduceAST,
     MemoryAST,
 )
+from kernel_gen.dsl.ast.nodes.attr import SourceLocation
 from kernel_gen.operation.kernel import KernelBinaryElewiseKind, KernelReduceKind
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -134,6 +135,15 @@ def test_kernel_matmul_node_emits_matmul_op() -> None:
 
     assert isinstance(emitted, KernelMatmulOp)
     assert len(emitted.results) == 0
+
+    fusion = KernelMatmulAST(out, lhs, rhs, acc=ConstValueAST(True)).emit_mlir(ctx, block)
+    assert isinstance(fusion, KernelMatmulFusionOp)
+    assert fusion.fusion_list is None
+
+    legacy_location = SourceLocation(line=1, column=0)
+    legacy = KernelMatmulAST(out, lhs, rhs, legacy_location)
+    assert legacy.location == legacy_location
+    assert legacy.acc is None
 
 
 # TC-AST-NODE-KERNEL-004

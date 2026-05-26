@@ -22,7 +22,7 @@
 - `exp(out: Memory, input_value: Memory) -> None`
 - `class KernelReduceKind(Enum)`
 - `reduce(out: Memory, input_value: Memory, *, kind: KernelReduceKind, axis: int, keepdim: bool = False) -> None`
-- `matmul(out: Memory, lhs: Memory, rhs: Memory) -> None`
+- `matmul(out: Memory, lhs: Memory, rhs: Memory, *, acc: bool = False) -> None`
 - `img2col1d(out: Memory, input_value: Memory, k: int | SymbolDim, s: int | SymbolDim = 1, d: int | SymbolDim = 1, p_left: int | SymbolDim = 0, p_right: int | SymbolDim = 0) -> None`
 - `img2col2d(out: Memory, input_value: Memory, kh: int | SymbolDim, kw: int | SymbolDim, sh: int | SymbolDim = 1, sw: int | SymbolDim = 1, dh: int | SymbolDim = 1, dw: int | SymbolDim = 1, ph: int | SymbolDim = 0, pw: int | SymbolDim = 0, pl: int | SymbolDim = 0, pr: int | SymbolDim = 0) -> None`
 - `kernel_gen.operation.kernel`
@@ -355,13 +355,14 @@
 - 功能说明：校验 out-first `kernel.reduce` 写回合同。
 - 注意事项：`out/input_value` dtype、space 必须一致；`keepdim=False` 删除 `axis` 维，`keepdim=True` 将 `axis` 维替换为 `1`；不做隐式 broadcast 或 dtype 提升。
 
-### `matmul(out: Memory, lhs: Memory, rhs: Memory) -> None`
+### `matmul(out: Memory, lhs: Memory, rhs: Memory, *, acc: bool = False) -> None`
 
-- api：`matmul(out: Memory, lhs: Memory, rhs: Memory) -> None`
+- api：`matmul(out: Memory, lhs: Memory, rhs: Memory, *, acc: bool = False) -> None`
 - 参数：
   - `out`：写回目标；类型 `Memory`；无默认值；不允许 `None`；rank 必须为 2；shape 必须为 `[lhs.M, rhs.N]`。
   - `lhs`：左输入；类型 `Memory`；无默认值；不允许 `None`；rank 必须为 2。
   - `rhs`：右输入；类型 `Memory`；无默认值；不允许 `None`；rank 必须为 2。
+  - `acc`：是否累加旧 `out`；类型 `bool`；默认值 `False`；只能以 keyword 传入。
 - 返回值：`None`；非法输入抛出 `KernelCodeError` 或 Python `TypeError`。
 - 使用示例：
 
@@ -374,10 +375,10 @@
   lhs = Memory(["M", "K"], NumericType.Float32, space=MemorySpace.TLM1)
   rhs = Memory(["K", "N"], NumericType.Float32, space=MemorySpace.TLM2)
 
-  kernel.matmul(out, lhs, rhs)
+  kernel.matmul(out, lhs, rhs, acc=True)
   ```
-- 功能说明：校验 out-first rank-2 matrix multiply 写回合同。
-- 注意事项：`lhs.shape[1]` 必须等于 `rhs.shape[0]`；`out.shape` 必须等于 `[lhs.shape[0], rhs.shape[1]]`；三者 dtype 必须一致；允许三者位于不同 `MemorySpace`；不接受 `memoryspace` 参数。
+- 功能说明：校验 out-first rank-2 matrix multiply 写回合同；`acc=True` 表示累加写 `out += lhs @ rhs`，`acc=False` 表示覆盖写。
+- 注意事项：`lhs.shape[1]` 必须等于 `rhs.shape[0]`；`out.shape` 必须等于 `[lhs.shape[0], rhs.shape[1]]`；三者 dtype 必须一致；允许三者位于不同 `MemorySpace`；不接受 `memoryspace` 参数；`acc` 非 `bool` 必须抛出 `KernelCodeError`，错误短语包含 `kernel.matmul acc must be bool`。
 
 ### `img2col1d(out: Memory, input_value: Memory, k: int | SymbolDim, s: int | SymbolDim = 1, d: int | SymbolDim = 1, p_left: int | SymbolDim = 0, p_right: int | SymbolDim = 0) -> None`
 
@@ -476,7 +477,7 @@
 | TC-OP-KERNEL-ELEWISE-003 | 错误边界 | 字符串 kind、shape mismatch、dtype mismatch | 构造非法公开输入 | 运行 operation kernel pytest | 抛出 `KernelCodeError` | `test_kernel_binary_elewise_rejects_non_api_kind_and_mismatched_metadata` |
 | TC-OP-KERNEL-ACTIVATION-001 | 激活 helper | `exp` 浮点写回 | `out/input` shape、stride、space、dtype 一致且 dtype 为浮点 | 运行 activation pytest | helper 返回 `None` | `test_kernel_exp_accepts_matching_float_memory` |
 | TC-OP-KERNEL-REDUCTION-001 | 归约 helper | `reduce` kind/axis/keepdim 矩阵 | `input` rank 大于 0，`out` shape 为归约结果 | 运行 reduction pytest | helper 返回 `None`，非法矩阵抛 `KernelCodeError` | `test_kernel_reduce_accepts_public_kind_axis_keepdim_matrix` |
-| TC-OP-KERNEL-STRUCTURED-001 | matmul | mixed-space rank-2 matmul | `lhs[M,K]`、`rhs[K,N]`、`out[M,N]` | 运行 structured pytest | 返回 `None`；`memoryspace` keyword 被拒绝 | `test_kernel_matmul_supports_mixed_space_and_rejects_non_api_memoryspace` |
+| TC-OP-KERNEL-STRUCTURED-001 | matmul | mixed-space rank-2 matmul | `lhs[M,K]`、`rhs[K,N]`、`out[M,N]` | 运行 structured pytest | 返回 `None`；`memoryspace` keyword 被拒绝；`acc=True` 被接受且 `acc` 非 bool 被拒绝 | `test_kernel_matmul_supports_mixed_space_and_rejects_non_api_memoryspace` |
 | TC-OP-KERNEL-STRUCTURED-002 | img2col1d | 静态与符号窗口参数 | Norm rank-3 input 与匹配 out | 运行 structured pytest | 返回 `None`；错误 shape 被拒绝 | `test_kernel_img2col1d_validates_expected_out_memory` |
 | TC-OP-KERNEL-STRUCTURED-003 | img2col2d | 静态与符号窗口参数 | Norm rank-4 input 与匹配 out | 运行 structured pytest | 返回 `None`；错误 format 被拒绝 | `test_kernel_img2col2d_validates_expected_out_memory` |
 | TC-OP-KERNEL-PKG-001 | package 导出 | `kernel` 子模块可达 | 导入 `kernel_gen.operation` | 运行 package pytest | `operation.kernel is kernel` | `test_operation_package_exports_kernel_submodule_only` |

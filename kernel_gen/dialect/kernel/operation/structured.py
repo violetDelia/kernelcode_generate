@@ -4,8 +4,8 @@
 - 定义 kernel.matmul、kernel.matmul_fusion、kernel.img2col1d 与 kernel.img2col2d op。
 
 API 列表:
-- `class KernelMatmulOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr)`
-- `class KernelMatmulFusionOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, acc: SSAValue | Operation, *, space: NnMemorySpaceAttr)`
+- `class KernelMatmulOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr, *, acc: bool | int | IntegerAttr | IntAttr = False)`
+- `class KernelMatmulFusionOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, acc: SSAValue | Operation, *, space: NnMemorySpaceAttr, fusion_list: str | StringAttr = "")`
 - `class KernelImg2col1dOp(...)`
 - `class KernelImg2col2dOp(...)`
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 
 from kernel_gen.core.contracts import collect_int_dims, build_contiguous_stride, verify_i64_attr_range, verify_memory_type
-from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE, ErrorKind, ErrorModule, kernel_code_error
+from kernel_gen.core.error import ERROR_ACTION, ERROR_ACTUAL, ERROR_TEMPLATE, ErrorKind, ErrorModule, KernelCodeError, kernel_code_error
 from xdsl.dialects.arith import ConstantOp
 from xdsl.dialects.builtin import (
     BFloat16Type,
@@ -37,7 +37,7 @@ from xdsl.dialects.builtin import (
     i1,
 )
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
-from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, traits_def
+from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, opt_attr_def, traits_def
 from xdsl.traits import EffectInstance, MemoryEffect, MemoryEffectKind
 from xdsl.utils.exceptions import VerifyException
 
@@ -74,6 +74,144 @@ class _KernelBinaryMemoryEffect(MemoryEffect):
             EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.lhs)),  # type: ignore[attr-defined]
             EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.rhs)),  # type: ignore[attr-defined]
         }
+
+
+class _KernelMatmulAccRules:
+    """kernel.matmul acc 的当前文件规则容器。"""
+
+    @staticmethod
+    def error() -> KernelCodeError:
+        """构造 kernel.matmul acc 公开错误。
+
+        功能说明:
+        - 保持 `kernel.matmul acc must be bool/i1` 稳定错误短语。
+
+        使用示例:
+        - raise _KERNEL_MATMUL_ACC.error()
+        """
+
+        return kernel_code_error(
+            ErrorKind.VERIFY,
+            ErrorModule.DIALECT,
+            ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="kernel.matmul acc must be bool/i1",
+                actual=ERROR_ACTUAL,
+                action=ERROR_ACTION,
+            ),
+        )
+
+    @staticmethod
+    def verify_attr(attr: IntegerAttr | None) -> bool:
+        """校验并读取 kernel.matmul acc attr。
+
+        功能说明:
+        - 缺失 attr 等价于 `false`。
+        - 只接受 i1 IntegerAttr；true 可按 xDSL i1 的 `-1` 或显式 `1` 表达。
+
+        使用示例:
+        - enabled = _KERNEL_MATMUL_ACC.verify_attr(op.acc)
+        """
+
+        if attr is None:
+            return False
+        if not isinstance(attr, IntegerAttr) or attr.type != i1:
+            raise _KERNEL_MATMUL_ACC.error()
+        value = int(attr.value.data)
+        if value not in {-1, 0, 1}:
+            raise _KERNEL_MATMUL_ACC.error()
+        return value != 0
+
+    @staticmethod
+    def normalize_attr(value: bool | int | IntegerAttr | IntAttr) -> IntegerAttr | None:
+        """规整公开 constructor 的 acc 输入。
+
+        功能说明:
+        - `False/0` 规整为缺失 attr，匹配 IR attr missing == false 合同。
+        - 显式 `IntegerAttr` 保留原 attr，允许 pass 输出 `acc = false` 稳定文本。
+        - `IntAttr(True/False)` 与 `IntAttr(1/0)` 按公开 bool/int 合同接受。
+
+        使用示例:
+        - attr = _KERNEL_MATMUL_ACC.normalize_attr(True)
+        """
+
+        if isinstance(value, bool):
+            return IntegerAttr.from_bool(value) if value else None
+        if isinstance(value, int):
+            if value not in {0, 1}:
+                raise _KERNEL_MATMUL_ACC.error()
+            return IntegerAttr.from_bool(bool(value)) if value else None
+        if isinstance(value, IntAttr):
+            raw = int(value.data)
+            if raw not in {-1, 0, 1}:
+                raise _KERNEL_MATMUL_ACC.error()
+            return IntegerAttr.from_bool(raw != 0) if raw != 0 else None
+        if isinstance(value, IntegerAttr):
+            _KERNEL_MATMUL_ACC.verify_attr(value)
+            return value
+        raise _KERNEL_MATMUL_ACC.error()
+
+
+_KERNEL_MATMUL_ACC = _KernelMatmulAccRules()
+
+
+def _normalize_matmul_fusion_list_attr(value: str | StringAttr) -> StringAttr | None:
+    """规整 kernel.matmul_fusion fusion_list attr。
+
+    功能说明:
+    - 公开 constructor 只接受 `str` 或 `StringAttr`。
+    - 空字符串等价缺省 attr，保留旧 IR 兼容。
+    - 非字符串输入以稳定 `kernel.matmul_fusion fusion_list must be string` 短语失败。
+
+    使用示例:
+    - attr = _normalize_matmul_fusion_list_attr("kernel.matmul,kernel.binary_elewise.add")
+    """
+
+    message = ERROR_TEMPLATE.format(
+        scene=_ERROR_SCENE,
+        expected="kernel.matmul_fusion fusion_list must be string",
+        actual=ERROR_ACTUAL,
+        action=ERROR_ACTION,
+    )
+    if isinstance(value, str):
+        if value == "":
+            return None
+        return StringAttr(value)
+    if isinstance(value, StringAttr):
+        if value.data == "":
+            return None
+        return value
+    raise KernelCodeError(
+        ErrorKind.VERIFY,
+        ErrorModule.DIALECT,
+        message,
+    )
+
+
+class _KernelMatmulMemoryEffect(MemoryEffect):
+    """kernel.matmul 的 attr-aware MemoryEffect trait。"""
+
+    @classmethod
+    def get_effects(cls, op: Operation) -> set[EffectInstance]:
+        """返回 kernel.matmul 的 MemoryEffect 集合。
+
+        功能说明:
+        - `acc=false` 或缺失 attr 时 out 仅 WRITE，lhs/rhs READ。
+        - `acc=true` 时 out 额外 READ，表示累加读取旧值后写回。
+
+        使用示例:
+        - effects = _KernelMatmulMemoryEffect.get_effects(op)
+        """
+
+        effects = {
+            EffectInstance(MemoryEffectKind.WRITE, SSAValue.get(op.out)),  # type: ignore[attr-defined]
+            EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.lhs)),  # type: ignore[attr-defined]
+            EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.rhs)),  # type: ignore[attr-defined]
+        }
+        if _KERNEL_MATMUL_ACC.verify_attr(op.acc):  # type: ignore[attr-defined]
+            effects.add(EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.out)))  # type: ignore[attr-defined]
+        return effects
+
 
 class _KernelUnaryMemoryEffect(MemoryEffect):
     """一输入一输出 kernel op 的 out 写与 input 读 effect trait。"""
@@ -481,7 +619,34 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
     """
 
     name = "kernel.matmul"
-    traits = traits_def(_KernelBinaryMemoryEffect())
+    traits = traits_def(_KernelMatmulMemoryEffect())
+
+    acc = opt_attr_def(IntegerAttr)
+
+    def __init__(
+        self,
+        out: SSAValue | Operation,
+        lhs: SSAValue | Operation,
+        rhs: SSAValue | Operation,
+        space: NnMemorySpaceAttr,
+        *,
+        acc: bool | int | IntegerAttr | IntAttr = False,
+    ) -> None:
+        """初始化 kernel.matmul。
+
+        功能说明:
+        - 按 out/lhs/rhs/space 公开顺序构造 op。
+        - `acc=True` 写入 i1 attr；`acc=False` 省略 attr，保持 IR 缺省 false 合同。
+
+        使用示例:
+        - KernelMatmulOp(out, lhs, rhs, space, acc=True)
+        """
+
+        attributes: dict[str, Attribute] = {"space": space}
+        acc_attr = _KERNEL_MATMUL_ACC.normalize_attr(acc)
+        if acc_attr is not None:
+            attributes["acc"] = acc_attr
+        IRDLOperation.__init__(self, operands=[out, lhs, rhs], attributes=attributes)
 
     def verify_(self) -> None:
         """校验 kernel.matmul operand 与输出约束。
@@ -497,6 +662,7 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
         rhs_type = verify_memory_type(self.rhs.type, "rhs", scene=_ERROR_SCENE)
         out_type = verify_memory_type(self.out.type, "out", scene=_ERROR_SCENE)
         self.space.verify()
+        _KERNEL_MATMUL_ACC.verify_attr(self.acc)
         _verify_matmul_shape(lhs_type.shape.data, rhs_type.shape.data, out_type.shape.data)
         _verify_element_type_match(
             [lhs_type, rhs_type, out_type],
@@ -511,10 +677,11 @@ class KernelMatmulFusionOp(IRDLOperation):
     功能说明:
     - 结构化矩阵乘累加中间 op，输入输出均为 nn.memory，acc 为 i1 标量。
     - `acc=false` 表示覆盖写 out，`acc=true` 表示累加写 out。
+    - `fusion_list` 是字符串 metadata，不改变 verifier、effect 或分解语义。
     - 本 op 只作为 npu-demo lowering 中间 IR，进入 source/emit 前必须由分解 pass 拆回既有 op。
 
     使用示例:
-    - KernelMatmulFusionOp(out, lhs, rhs, acc, space=_make_space("tsm"))
+    - KernelMatmulFusionOp(out, lhs, rhs, acc, space=_make_space("tsm"), fusion_list="kernel.matmul,kernel.binary_elewise.add")
 
     关联文件:
     - spec: spec/dialect/kernel.md
@@ -530,6 +697,7 @@ class KernelMatmulFusionOp(IRDLOperation):
     rhs = operand_def(NnMemoryType)
     acc = operand_def(Attribute)
     space = attr_def(NnMemorySpaceAttr)
+    fusion_list = opt_attr_def(Attribute)
 
     def __init__(
         self,
@@ -539,15 +707,17 @@ class KernelMatmulFusionOp(IRDLOperation):
         acc: SSAValue | Operation,
         *,
         space: NnMemorySpaceAttr,
+        fusion_list: str | StringAttr = "",
     ) -> None:
         """初始化 kernel.matmul_fusion op。
 
         功能说明:
         - 按公开 `out/lhs/rhs/acc` operand 顺序保存四个 operand 与 space 属性。
+        - `fusion_list` 默认空字符串；非空字符串作为 metadata attr 保留。
         - 不生成 SSA result，结果通过 out memory 写回。
 
         使用示例:
-        - KernelMatmulFusionOp(out, lhs, rhs, acc, space=space)
+        - KernelMatmulFusionOp(out, lhs, rhs, acc, space=space, fusion_list="kernel.matmul,kernel.binary_elewise.add")
 
         关联文件:
         - spec: spec/dialect/kernel.md
@@ -555,13 +725,17 @@ class KernelMatmulFusionOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/kernel/
         """
 
-        super().__init__(operands=[out, lhs, rhs, acc], attributes={"space": space})
+        attributes: dict[str, Attribute] = {"space": space}
+        fusion_list_attr = _normalize_matmul_fusion_list_attr(fusion_list)
+        if fusion_list_attr is not None:
+            attributes["fusion_list"] = fusion_list_attr
+        super().__init__(operands=[out, lhs, rhs, acc], attributes=attributes)
 
     def verify_(self) -> None:
         """校验 kernel.matmul_fusion operand 与输出约束。
 
         功能说明:
-        - 校验矩阵乘法 shape 合同、element type 一致性、acc=i1 与 space 属性合法性。
+        - 校验矩阵乘法 shape 合同、element type 一致性、acc=i1、space 与 fusion_list 属性合法性。
         - 错误短语固定为 `kernel.matmul_fusion ...`，供公开 expectation 和 pytest 匹配。
 
         使用示例:
@@ -577,6 +751,18 @@ class KernelMatmulFusionOp(IRDLOperation):
         rhs_type = verify_memory_type(self.rhs.type, "rhs", scene=_ERROR_SCENE)
         out_type = verify_memory_type(self.out.type, "out", scene=_ERROR_SCENE)
         self.space.verify()
+        fusion_attr = self.attributes.get("fusion_list")
+        if fusion_attr is not None and not isinstance(fusion_attr, StringAttr):
+            raise KernelCodeError(
+                ErrorKind.VERIFY,
+                ErrorModule.DIALECT,
+                ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.matmul_fusion fusion_list must be string",
+                    actual=ERROR_ACTUAL,
+                    action=ERROR_ACTION,
+                ),
+            )
         if SSAValue.get(self.acc).type != i1:
             raise VerifyException(
                 ERROR_TEMPLATE.format(

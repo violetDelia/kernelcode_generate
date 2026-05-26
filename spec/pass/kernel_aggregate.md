@@ -3,7 +3,7 @@
 ## 功能简介
 
 - 定义 `kernel-aggregate` pass 的公开合同。
-- `KernelAggregatePass(matmul_acc=True)` 将同 block 相邻 `kernel.matmul(tmp,lhs,rhs)` 与 `kernel.binary_elewise(out,out,tmp){kind="add"}` 聚合为 `kernel.matmul_fusion(out,lhs,rhs,acc)`；tmp alloc/free 可位于同 block 或包住目标 loop 的祖先 owner block。
+- `KernelAggregatePass(matmul_acc=True)` 将同 block 相邻 `kernel.matmul(tmp,lhs,rhs)` 与 `kernel.binary_elewise(out,out,tmp){kind="add"}` 聚合为 `kernel.matmul_fusion(out,lhs,rhs,acc,fusion_list="kernel.matmul,kernel.binary_elewise.add")`；tmp alloc/free 可位于同 block 或包住目标 loop 的祖先 owner block。
 - `acc` 由 K/reduce owner `symbol.for` 的 iterator 与 start 通过 `symbol.ne` 生成。
 
 ## API 列表
@@ -25,6 +25,7 @@
 - unknown option 或非法 bool 必须失败，错误短语包含 `kernel-aggregate options`。
 - `matmul_acc=False` 时 no-op。
 - `matmul_acc=True` 时仅匹配同 block 相邻 `kernel.matmul` 后接 `kernel.binary_elewise(kind="add")` 的形态。
+- 命中时生成的 `kernel.matmul_fusion` 必须携带固定 `fusion_list = "kernel.matmul,kernel.binary_elewise.add"` 字符串 metadata；该 metadata 不改变后续 decompose 语义。
 - add 必须是 `out = out + tmp`，其中 `tmp` 是 matmul out。
 - tmp 必须来自唯一 `dma.alloc`，只有 matmul 写、add 读和唯一 `dma.free` use；extra use、alias use、metadata use、缺 free 或多 free 均 no-op。
 - tmp alloc/free 位于祖先 owner block 时，必须证明 owner block 内 `dma.alloc` 早于承载 matmul/add 的 owner loop，且唯一 `dma.free` 晚于该 owner loop；无法证明时 no-op。
@@ -52,7 +53,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m kernel_gen.tools.ircheck case.
 
 | 用例 ID | 场景 | 预期 | 建议测试 |
 | --- | --- | --- | --- |
-| TC-PASS-KERNEL-AGGREGATE-001 | zero-start K/reduce owner | 生成 `symbol.ne(k_iter,k_start)` 与 `kernel.matmul_fusion`，删除原 tmp alloc/free、matmul、add | `test_kernel_aggregate_fuses_zero_start_reduce_owner` |
+| TC-PASS-KERNEL-AGGREGATE-001 | zero-start K/reduce owner | 生成 `symbol.ne(k_iter,k_start)` 与带固定 `fusion_list` 的 `kernel.matmul_fusion`，删除原 tmp alloc/free、matmul、add | `test_kernel_aggregate_fuses_zero_start_reduce_owner` |
 | TC-PASS-KERNEL-AGGREGATE-002 | nonzero start | acc 与实际 loop start 比较，不写死 0 | `test_kernel_aggregate_fuses_nonzero_start_reduce_owner` |
 | TC-PASS-KERNEL-AGGREGATE-003 | dynamic start | acc 使用公开 start SSA value | `test_kernel_aggregate_fuses_dynamic_start_reduce_owner` |
 | TC-PASS-KERNEL-AGGREGATE-004 | nested K owner | 选择 contracting dimension owner，不按最近 loop 猜测 | `test_kernel_aggregate_fuses_nested_k_owner` |

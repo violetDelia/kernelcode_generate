@@ -20,7 +20,7 @@ API 列表:
 - `KernelGeAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
 - `KernelExpAST(out: ValueAST, input_value: ValueAST, location: SourceLocation | None = None)`
 - `KernelReduceAST(out: ValueAST, input_value: ValueAST, kind: KernelReduceKind, axis: int, keepdim: bool = False, location: SourceLocation | None = None)`
-- `KernelMatmulAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None)`
+- `KernelMatmulAST(out: ValueAST, lhs: ValueAST, rhs: ValueAST, location: SourceLocation | None = None, *, acc: ValueAST | None = None)`
 - `KernelImg2Col1dAST(out: ValueAST, input_value: ValueAST, k: ValueAST, s: ValueAST | None = None, d: ValueAST | None = None, p_left: ValueAST | None = None, p_right: ValueAST | None = None, location: SourceLocation | None = None)`
 - `KernelImg2Col2dAST(out: ValueAST, input_value: ValueAST, kh: ValueAST, kw: ValueAST, sh: ValueAST | None = None, sw: ValueAST | None = None, dh: ValueAST | None = None, dw: ValueAST | None = None, ph: ValueAST | None = None, pw: ValueAST | None = None, pl: ValueAST | None = None, pr: ValueAST | None = None, location: SourceLocation | None = None)`
 
@@ -38,6 +38,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from xdsl.context import Context
+from xdsl.dialects.builtin import i1
 from xdsl.ir import Block, Operation, SSAValue
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
@@ -46,6 +47,7 @@ from kernel_gen.dialect.kernel import (
     KernelExpOp,
     KernelImg2col1dOp,
     KernelImg2col2dOp,
+    KernelMatmulFusionOp,
     KernelMatmulOp,
     KernelReduceOp,
 )
@@ -489,33 +491,56 @@ class KernelReduceAST(StatementAST):
         )
 
 
-@dataclass
+@dataclass(init=False)
 class KernelMatmulAST(StatementAST):
     """kernel.matmul AST 节点。
 
     功能说明:
-    - 承载 out-first `kernel.matmul(out, lhs, rhs)` 调用。
+    - 承载 out-first `kernel.matmul(out, lhs, rhs, acc=...)` 调用。
+    - `acc=None` lower 为普通 `kernel.matmul`，`acc` 有值时 lower 为 `kernel.matmul_fusion`。
 
     使用示例:
     - KernelMatmulAST(out, lhs, rhs)
+    - KernelMatmulAST(out, lhs, rhs, acc=ConstValueAST(True))
     """
 
     out: ValueAST
     lhs: ValueAST
     rhs: ValueAST
     location: SourceLocation | None = None
+    acc: ValueAST | None = None
 
-    def __post_init__(self) -> None:
-        self.out = _as_value_ast(self.out, self.location)
-        self.lhs = _as_value_ast(self.lhs, self.location)
-        self.rhs = _as_value_ast(self.rhs, self.location)
+    def __init__(
+        self,
+        out: ValueAST,
+        lhs: ValueAST,
+        rhs: ValueAST,
+        location: SourceLocation | None = None,
+        *,
+        acc: ValueAST | None = None,
+    ) -> None:
+        """初始化 kernel.matmul AST。
+
+        功能说明:
+        - 保持旧 `KernelMatmulAST(out, lhs, rhs, location)` 位置参数兼容。
+        - 新增 `acc` 只能以 keyword 传入，避免把旧 location 误判成累加条件。
+
+        使用示例:
+        - KernelMatmulAST(out, lhs, rhs, location, acc=cond)
+        """
+
+        self.out = _as_value_ast(out, location)
+        self.lhs = _as_value_ast(lhs, location)
+        self.rhs = _as_value_ast(rhs, location)
+        self.acc = _as_value_ast(acc, location) if acc is not None else None
+        self.location = location
 
     def emit_mlir(self, ctx: Context, block: Block | None = None) -> EmitMlirResult:
         """发射 kernel.matmul。
 
         功能说明:
         - 校验 out/lhs/rhs 公开 Memory 合同。
-        - 生成 `kernel.matmul` dialect op，返回无结果 Operation。
+        - 缺省 acc 生成 `kernel.matmul`；提供 acc 时生成 `kernel.matmul_fusion`。
 
         使用示例:
         - op = node.emit_mlir(ctx, block)
@@ -523,13 +548,23 @@ class KernelMatmulAST(StatementAST):
 
         assert isinstance(ctx, Context)
         assert isinstance(block, Block)
-        kernel_ops.matmul(_require_memory(self.out, "out"), _require_memory(self.lhs, "lhs"), _require_memory(self.rhs, "rhs"))
+        kernel_ops.matmul(
+            _require_memory(self.out, "out"),
+            _require_memory(self.lhs, "lhs"),
+            _require_memory(self.rhs, "rhs"),
+            acc=self.acc is not None,
+        )
         out_value = _emit_ssa_value(self.out, ctx, block)
         lhs_value = _emit_ssa_value(self.lhs, ctx, block)
         rhs_value = _emit_ssa_value(self.rhs, ctx, block)
         out_type = _ensure_memory_ssa(out_value, "out")
         _ensure_memory_ssa(lhs_value, "lhs")
         _ensure_memory_ssa(rhs_value, "rhs")
+        if self.acc is not None:
+            acc_value = _emit_ssa_value(self.acc, ctx, block)
+            if acc_value.type != i1:
+                raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "kernel.matmul acc must lower to i1")
+            return KernelMatmulFusionOp(out_value, lhs_value, rhs_value, acc_value, space=out_type.space, fusion_list="")
         return KernelMatmulOp(out_value, lhs_value, rhs_value, out_type.space)
 
 

@@ -3358,7 +3358,7 @@ def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
         stmt,
     )
     assert re.search(
-        r"matmul<[^>]+>\(v\d+ /\*out\*/, v\d+ /\*lhs\*/, v\d+ /\*rhs\*/\);",
+        r"matmul<[^>]+>\(v\d+ /\*out\*/, v\d+ /\*lhs\*/, v\d+ /\*rhs\*/, false /\*acc\*/\);",
         stmt,
     )
     assert re.search(

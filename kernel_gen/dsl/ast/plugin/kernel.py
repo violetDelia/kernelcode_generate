@@ -357,12 +357,15 @@ def _build_reduce(node: BuiltinCall) -> KernelReduceAST:
 def _build_matmul(node: BuiltinCall) -> KernelMatmulAST:
     """功能说明: 构造 kernel.matmul AST；使用示例: registry 调用该 builder。"""
 
-    _ensure_arg_count(node, 3, "Unsupported kernel.matmul arity")
-    if node.kwargs:
-        kwargs_text = ", ".join(sorted(node.kwargs))
+    if len(node.args) != 3:
+        diagnostic = Diagnostic("Unsupported kernel.matmul arity", node.location)
+        raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
+    unexpected_kwargs = set(node.kwargs) - {"acc"}
+    if unexpected_kwargs:
+        kwargs_text = ", ".join(sorted(unexpected_kwargs))
         diagnostic = Diagnostic(f"Unsupported kernel.matmul kwargs: {kwargs_text}", node.location)
         raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.AST, diagnostic.message)
-    return KernelMatmulAST(node.args[0], node.args[1], node.args[2], location=node.location)
+    return KernelMatmulAST(node.args[0], node.args[1], node.args[2], acc=node.kwargs.get("acc"), location=node.location)
 
 
 @dsl_builtin(kernel.img2col1d, KernelImg2Col1dAST)

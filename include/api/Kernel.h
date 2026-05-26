@@ -21,7 +21,7 @@ API 列表:
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_sum(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_min(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
 - `template <MemorySpace Space, typename InType, typename OutType> Status npu_demo::reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType>& input, long long axis)`
-- `template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType> Status npu_demo::matmul(Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs)`
+- `template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename LhsType, typename RhsType, typename OutType> Status npu_demo::matmul(Memory<OutSpace, OutType>& out, const Memory<LhsSpace, LhsType>& lhs, const Memory<RhsSpace, RhsType>& rhs, bool acc = false)`
 - `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col1d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long k, long long s, long long d, long long p_left, long long p_right)`
 - `template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType> Status npu_demo::img2col2d(Memory<OutputSpace, OutType>& out, const Memory<InputSpace, InType>& input, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`
 
@@ -156,6 +156,7 @@ Status reduce_max(Memory<Space, OutType>& out, const Memory<Space, InType>& inpu
 
 使用示例:
 - Status st = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs);
+- Status st_acc = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs, true);
 - Status st2 = npu_demo::img2col1d<GM, TSM, float, float>(out, input, 3, 2, 1, 1, 1);
 
 
@@ -168,7 +169,8 @@ template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, type
 Status matmul(
     Memory<OutSpace, OutType>& out,
     const Memory<LhsSpace, LhsType>& lhs,
-    const Memory<RhsSpace, RhsType>& rhs);
+    const Memory<RhsSpace, RhsType>& rhs,
+    bool acc = false);
 template <MemorySpace InputSpace, MemorySpace OutputSpace, typename InType, typename OutType>
 Status img2col1d(
     Memory<OutputSpace, OutType>& out,

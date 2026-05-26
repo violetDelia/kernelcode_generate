@@ -48,6 +48,14 @@ def _kernel_matmul_return_stmt(out: Memory, lhs: Memory, rhs: Memory) -> None:
     return kernel.matmul(out, lhs, rhs)
 
 
+def _kernel_matmul_acc_stmt(out: Memory, lhs: Memory, rhs: Memory) -> None:
+    output = out
+    left = lhs
+    right = rhs
+    enabled = True
+    kernel.matmul(output, left, right, acc=enabled)
+
+
 def _kernel_exp_stmt(out: Memory, input_value: Memory) -> None:
     kernel.exp(out, input_value)
 
@@ -122,6 +130,7 @@ def test_kernel_plugin_parse_function_builds_statement_nodes() -> None:
     exp_ast = parse_function(_kernel_exp_stmt, out, out)
     reduce_ast = parse_function(_kernel_reduce_stmt, Memory([2, 1], NumericType.Float32), Memory([2, 4], NumericType.Float32))
     matmul_ast = parse_function(_kernel_matmul_return_stmt, out, lhs, rhs)
+    matmul_acc_ast = parse_function(_kernel_matmul_acc_stmt, out, lhs, rhs)
 
     assert isinstance(add_ast, FunctionAST)
     assert isinstance(add_ast.body.statements[0], KernelAddAST)
@@ -130,6 +139,8 @@ def test_kernel_plugin_parse_function_builds_statement_nodes() -> None:
     assert isinstance(exp_ast.body.statements[0], KernelExpAST)
     assert isinstance(reduce_ast.body.statements[0], KernelReduceAST)
     assert isinstance(matmul_ast.body.statements[0], KernelMatmulAST)
+    assert isinstance(matmul_acc_ast.body.statements[0], KernelMatmulAST)
+    assert matmul_acc_ast.body.statements[0].acc is not None
     assert matmul_ast.returns_none.value is True
 
 
