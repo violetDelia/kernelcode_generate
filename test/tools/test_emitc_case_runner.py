@@ -249,4 +249,4 @@ builtin.module {
         forbidden_snippets=["kernel.exp"],
     )
 
-    assert "exp<GM, float, float>(arg0 /*out*/, arg1 /*input*/);" in source
+    assert "exp<GM, float, float>(arg1 /*out*/, arg0 /*input*/);" in source

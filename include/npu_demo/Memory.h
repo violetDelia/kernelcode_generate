@@ -10,6 +10,8 @@ API 列表:
 - `template <MemorySpace Space, typename T> class Memory`
 - `Memory::Memory(T* data, const long long* shape, const long long* stride, unsigned long long rank, MemoryFormat format = MemoryFormat::Norm)`
 - `Memory::Memory(T* data, const long long* shape, unsigned long long rank, MemoryFormat format = MemoryFormat::Norm)`
+- `Memory::Memory(T* data, std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
+- `Memory::Memory(T* data, std::initializer_list<long long> shape, MemoryFormat format = MemoryFormat::Norm)`
 - `Memory::data() -> T*`
 - `Memory::data() const -> const T*`
 - `Memory::shape() const -> const long long*`
@@ -20,7 +22,9 @@ API 列表:
 - `Memory::get_shape(unsigned long long axis) const -> long long`
 - `Memory::get_stride(unsigned long long axis) const -> long long`
 - `template <typename ViewT> Memory::view(const Vector& offset, const Vector& size, const Vector& stride) const -> Memory<Space, ViewT>`
+- `template <typename ViewT> Memory::view(std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride) const -> Memory<Space, ViewT>`
 - `Memory::reshape(const Vector& shape) const -> Memory<Space, T>`
+- `Memory::reshape(std::initializer_list<long long> shape) const -> Memory<Space, T>`
 - `Memory::element_count() const -> long long`
 - `Memory::is_contiguous() const -> bool`
 - `Memory::trance_print(const kernelcode::trance::TranceSink& sink, const char* name) const -> void`
@@ -39,13 +43,14 @@ helper 清单:
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 
 #ifndef KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_MEMORY_H_
 #define KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_MEMORY_H_
 
+#include <initializer_list>
 #include <limits>
 #include <stdexcept>
 #include <type_traits>
@@ -190,7 +195,7 @@ inline const char* memory_trance_space_name(MemorySpace space) {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 inline void build_contiguous_stride(const long long* shape, unsigned long long rank, long long* out_stride) {
@@ -216,7 +221,7 @@ inline void build_contiguous_stride(const long long* shape, unsigned long long r
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -241,7 +246,7 @@ inline Memory<Space, T>::Memory(
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -256,6 +261,77 @@ inline Memory<Space, T>::Memory(
 
 /*
 功能说明:
+- 使用 initializer-list shape/stride 构造 Memory 视图，列表内容立即复制到 Memory 内部固定元数据。
+- shape/stride 长度必须一致且位于公开 rank 上限内，失败时使用稳定 runtime_error 文本。
+
+使用示例:
+- Memory<GM, float> mem(data, {2, 3}, {3, 1});
+
+
+关联文件:
+- spec: spec/include/api/Memory.md
+- test: test/include/api/test_memory.py
+- 功能实现: include/npu_demo/Memory.h
+*/
+template <MemorySpace Space, typename T>
+inline Memory<Space, T>::Memory(
+    T* data,
+    std::initializer_list<long long> shape,
+    std::initializer_list<long long> stride,
+    MemoryFormat format)
+    : data_(data), rank_(0), format_(format) {
+    npu_demo::detail::memory_contract_or_throw(shape.size() > 0, "memory: invalid initializer_list layout");
+    npu_demo::detail::memory_contract_or_throw(
+        shape.size() <= npu_demo::detail::kMaxMemoryHelperRank,
+        "memory: invalid initializer_list layout");
+    npu_demo::detail::memory_contract_or_throw(
+        shape.size() == stride.size(),
+        "memory: invalid initializer_list layout");
+    long long shape_buf[npu_demo::detail::kMaxMemoryHelperRank] = {0};
+    long long stride_buf[npu_demo::detail::kMaxMemoryHelperRank] = {0};
+    auto shape_it = shape.begin();
+    auto stride_it = stride.begin();
+    for (unsigned long long i = 0; i < shape.size(); ++i, ++shape_it, ++stride_it) {
+        shape_buf[i] = *shape_it;
+        stride_buf[i] = *stride_it;
+    }
+    init_shape_and_stride(shape.size(), shape_buf, stride_buf);
+}
+
+/*
+功能说明:
+- 使用 initializer-list shape 构造连续 Memory 视图，shape 内容立即复制并推导连续 stride。
+- shape 长度必须位于公开 rank 上限内，失败时使用稳定 runtime_error 文本。
+
+使用示例:
+- Memory<GM, float> mem(data, {2, 3});
+
+
+关联文件:
+- spec: spec/include/api/Memory.md
+- test: test/include/api/test_memory.py
+- 功能实现: include/npu_demo/Memory.h
+*/
+template <MemorySpace Space, typename T>
+inline Memory<Space, T>::Memory(
+    T* data,
+    std::initializer_list<long long> shape,
+    MemoryFormat format)
+    : data_(data), rank_(0), format_(format) {
+    npu_demo::detail::memory_contract_or_throw(shape.size() > 0, "memory: invalid initializer_list shape");
+    npu_demo::detail::memory_contract_or_throw(
+        shape.size() <= npu_demo::detail::kMaxMemoryHelperRank,
+        "memory: invalid initializer_list shape");
+    long long shape_buf[npu_demo::detail::kMaxMemoryHelperRank] = {0};
+    auto shape_it = shape.begin();
+    for (unsigned long long i = 0; i < shape.size(); ++i, ++shape_it) {
+        shape_buf[i] = *shape_it;
+    }
+    init_shape_and_stride(shape.size(), shape_buf, 0);
+}
+
+/*
+功能说明:
 - 返回底层数据指针。
 
 使用示例:
@@ -264,7 +340,7 @@ inline Memory<Space, T>::Memory(
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -282,7 +358,7 @@ inline T* Memory<Space, T>::data() {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -300,7 +376,7 @@ inline const T* Memory<Space, T>::data() const {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -318,7 +394,7 @@ inline const long long* Memory<Space, T>::shape() const {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -336,7 +412,7 @@ inline const long long* Memory<Space, T>::stride() const {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -354,7 +430,7 @@ inline unsigned long long Memory<Space, T>::rank() const {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -372,7 +448,7 @@ inline MemoryFormat Memory<Space, T>::format() const {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -390,7 +466,7 @@ inline MemorySpace Memory<Space, T>::space() const {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -408,7 +484,7 @@ inline long long Memory<Space, T>::get_shape(unsigned long long axis) const {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -430,7 +506,7 @@ inline long long Memory<Space, T>::get_stride(unsigned long long axis) const {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/api/memory.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -527,6 +603,46 @@ inline Memory<Space, ViewT> Memory<Space, T>::view(
 
 /*
 功能说明:
+- 使用 initializer-list offset/size/stride 构造成员式子视图，列表内容立即复制成短生命周期 Vector 后复用公开 Vector 版 view 合同。
+- 三个列表长度必须与 source rank 一致；其它边界错误沿用 Vector 版 `memory.view:*` 文本。
+
+使用示例:
+- Memory<GM, float> tile = source.view<float>({0, 1}, {2, 2}, {1, 1});
+
+
+关联文件:
+- spec: spec/include/api/Memory.md
+- test: test/include/api/test_memory.py
+- 功能实现: include/npu_demo/Memory.h
+*/
+template <MemorySpace Space, typename T>
+template <typename ViewT>
+inline Memory<Space, ViewT> Memory<Space, T>::view(
+    std::initializer_list<long long> offset,
+    std::initializer_list<long long> size,
+    std::initializer_list<long long> stride) const {
+    npu_demo::detail::memory_contract_or_throw(offset.size() == rank_, "memory.view: vector_rank_mismatch");
+    npu_demo::detail::memory_contract_or_throw(size.size() == rank_, "memory.view: vector_rank_mismatch");
+    npu_demo::detail::memory_contract_or_throw(stride.size() == rank_, "memory.view: vector_rank_mismatch");
+    long long offset_buf[npu_demo::detail::kMaxMemoryHelperRank] = {0};
+    long long size_buf[npu_demo::detail::kMaxMemoryHelperRank] = {0};
+    long long stride_buf[npu_demo::detail::kMaxMemoryHelperRank] = {0};
+    auto offset_it = offset.begin();
+    auto size_it = size.begin();
+    auto stride_it = stride.begin();
+    for (unsigned long long i = 0; i < rank_; ++i, ++offset_it, ++size_it, ++stride_it) {
+        offset_buf[i] = *offset_it;
+        size_buf[i] = *size_it;
+        stride_buf[i] = *stride_it;
+    }
+    Vector offset_vec(offset_buf, rank_);
+    Vector size_vec(size_buf, rank_);
+    Vector stride_vec(stride_buf, rank_);
+    return view<ViewT>(offset_vec, size_vec, stride_vec);
+}
+
+/*
+功能说明:
 - 提供 `gen_kernel/emit_c(target=npu_demo)` 使用的一维 `npu_demo::view(...)` 包装，
   让生成源码可显式消费 `npu_demo::view(source, offset, size, stride)`。
 
@@ -568,7 +684,7 @@ inline Memory<Space, T> view(
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/api/memory.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -599,6 +715,35 @@ inline Memory<Space, T> Memory<Space, T>::reshape(const Vector& shape) const {
 
 /*
 功能说明:
+- 使用 initializer-list shape 构造成员式 reshape，列表内容立即复制成短生命周期 Vector 后复用公开 Vector 版 reshape 合同。
+- 空列表、rank 超上限、非正维度、非连续 source 或元素数不一致均沿用 `memory.reshape:*` 公开失败语义。
+
+使用示例:
+- Memory<TSM, float> reshaped = source.reshape({2, 3, 4});
+
+
+关联文件:
+- spec: spec/include/api/Memory.md
+- test: test/include/api/test_memory.py
+- 功能实现: include/npu_demo/Memory.h
+*/
+template <MemorySpace Space, typename T>
+inline Memory<Space, T> Memory<Space, T>::reshape(std::initializer_list<long long> shape) const {
+    npu_demo::detail::memory_contract_or_throw(shape.size() > 0, "memory.reshape: invalid shape");
+    npu_demo::detail::memory_contract_or_throw(
+        shape.size() <= npu_demo::detail::kMaxMemoryHelperRank,
+        "memory.reshape: rank_too_large");
+    long long shape_buf[npu_demo::detail::kMaxMemoryHelperRank] = {0};
+    auto shape_it = shape.begin();
+    for (unsigned long long i = 0; i < shape.size(); ++i, ++shape_it) {
+        shape_buf[i] = *shape_it;
+    }
+    Vector shape_vec(shape_buf, shape.size());
+    return reshape(shape_vec);
+}
+
+/*
+功能说明:
 - 返回元素总数，即 shape 各维乘积。
 
 使用示例:
@@ -607,7 +752,7 @@ inline Memory<Space, T> Memory<Space, T>::reshape(const Vector& shape) const {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -629,7 +774,7 @@ inline long long Memory<Space, T>::element_count() const {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -658,7 +803,7 @@ inline bool Memory<Space, T>::is_contiguous() const {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/api/memory.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -700,7 +845,7 @@ inline void Memory<Space, T>::trance_print(const kernelcode::trance::TranceSink&
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -723,7 +868,7 @@ inline long long Memory<Space, T>::linear_offset(const long long* indices) const
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>
@@ -742,7 +887,7 @@ inline T& Memory<Space, T>::at(const long long* indices) {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 template <MemorySpace Space, typename T>

@@ -29,6 +29,7 @@ def _emit_npu_demo_dma_slice(op: DmaSliceOp, ctx) -> str:
 
     功能说明:
     - 根据 `DmaSliceOp` 的 source、target 与 layout 参数生成 `slice(...)` 语句。
+    - offset/size/stride 统一发射为 brace-list，交由 include initializer-list overload 承接。
     - 仅作为当前文件内注册实现使用，不作为跨文件公开 API。
 
     使用示例:
@@ -39,25 +40,11 @@ def _emit_npu_demo_dma_slice(op: DmaSliceOp, ctx) -> str:
 
     target_expr = emit_c_value(op.target, ctx)
     source_expr = emit_c_value(op.source, ctx)
-    if len(op.offsets) == len(op.sizes) == len(op.strides) == 1:
-        return (
-            f"{ctx.current_indent}slice({target_expr} /*dst*/, {source_expr} /*source*/, "
-            f"{emit_c_value(op.offsets[0], ctx)} /*offset*/, {emit_c_value(op.sizes[0], ctx)} /*size*/, {emit_c_value(op.strides[0], ctx)} /*stride*/);"
-        )
-    if len(op.offsets) == len(op.sizes) == len(op.strides) == 3:
-        offset_expr = "{" + ", ".join(emit_c_value(value, ctx) for value in op.offsets) + "}"
-        size_expr = "{" + ", ".join(emit_c_value(value, ctx) for value in op.sizes) + "}"
-        stride_expr = "{" + ", ".join(emit_c_value(value, ctx) for value in op.strides) + "}"
-        return (
-            f"{ctx.current_indent}slice({target_expr} /*dst*/, {source_expr} /*source*/, "
-            f"{offset_expr} /*offset*/, {size_expr} /*size*/, "
-            f"{stride_expr} /*stride*/);"
-        )
-    if not 1 <= len(op.offsets) <= 4 or not 1 <= len(op.sizes) <= 4 or not 1 <= len(op.strides) <= 4:
-        raise ctx.emit_error("dma.slice", "npu_demo Vector supports 1..4 values")
-    offset_vec = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in op.offsets) + "}"
-    size_vec = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in op.sizes) + "}"
-    stride_vec = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in op.strides) + "}"
+    if not len(op.offsets) == len(op.sizes) == len(op.strides) or len(op.offsets) == 0:
+        raise ctx.emit_error("dma.slice", "layout rank mismatch")
+    offset_vec = "{" + ", ".join(emit_c_value(value, ctx) for value in op.offsets) + "}"
+    size_vec = "{" + ", ".join(emit_c_value(value, ctx) for value in op.sizes) + "}"
+    stride_vec = "{" + ", ".join(emit_c_value(value, ctx) for value in op.strides) + "}"
     return (
         f"{ctx.current_indent}slice({target_expr} /*dst*/, {source_expr} /*source*/, "
         f"{offset_vec} /*offset*/, {size_vec} /*size*/, {stride_vec} /*stride*/);"

@@ -1,15 +1,20 @@
 /*
 功能说明:
 - 定义 include/api/Dma.h 的统一 DMA 接口声明。
-- 公共层提供 `alloc / fill / slice / deslice / transpose / broadcast` 六类 DMA helper 声明；
+- 公共层提供 `alloc / fill / slice / deslice / transpose / store / load / broadcast` DMA helper 声明；
   `view` / `reshape` 已移动到 `Memory` 的成员接口。
 
 API 列表:
 - `template <MemorySpace Space, typename T> Memory<Space, T> npu_demo::alloc(std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
 - `template <MemorySpace Space, typename T> Status npu_demo::fill(Memory<Space, T>& target, const T& value)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::slice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::slice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::deslice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T> Status npu_demo::deslice(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::transpose(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& perm)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::transpose(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> perm)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::store(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::load(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType> Status npu_demo::broadcast(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source)`
 
 helper 清单:
@@ -26,7 +31,7 @@ helper 清单:
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/dma.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 
@@ -49,7 +54,7 @@ helper 清单:
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/dma.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 namespace npu_demo {
@@ -70,7 +75,7 @@ Memory<Space, T> alloc(
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/dma.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace Space, typename T>
@@ -86,7 +91,7 @@ Status fill(Memory<Space, T>& target, const T& value);
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/dma.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
@@ -96,6 +101,13 @@ Status slice(
     const Vector& offset,
     const Vector& size,
     const Vector& stride);
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
+Status slice(
+    Memory<TargetSpace, T>& target,
+    const Memory<SourceSpace, T>& source,
+    std::initializer_list<long long> offset,
+    std::initializer_list<long long> size,
+    std::initializer_list<long long> stride);
 
 /*
 功能说明:
@@ -107,7 +119,7 @@ Status slice(
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/dma.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
@@ -117,6 +129,13 @@ Status deslice(
     const Vector& offset,
     const Vector& size,
     const Vector& stride);
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
+Status deslice(
+    Memory<TargetSpace, T>& target,
+    const Memory<SourceSpace, T>& source,
+    std::initializer_list<long long> offset,
+    std::initializer_list<long long> size,
+    std::initializer_list<long long> stride);
 
 /*
 功能说明:
@@ -128,7 +147,7 @@ Status deslice(
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/dma.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>
@@ -136,6 +155,53 @@ Status transpose(
     Memory<TargetSpace, TargetType>& target,
     const Memory<SourceSpace, SourceType>& source,
     const Vector& perm);
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>
+Status transpose(
+    Memory<TargetSpace, TargetType>& target,
+    const Memory<SourceSpace, SourceType>& source,
+    std::initializer_list<long long> perm);
+
+/*
+功能说明:
+- 将 source 块写回 target 的指定区域，layout 参数使用 generated source brace-list overload。
+
+使用示例:
+- Status status = npu_demo::store(target, source, {0, 0}, {2, 4}, {1, 1});
+
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>
+Status store(
+    Memory<TargetSpace, TargetType>& target,
+    const Memory<SourceSpace, SourceType>& source,
+    std::initializer_list<long long> offset,
+    std::initializer_list<long long> size,
+    std::initializer_list<long long> stride);
+
+/*
+功能说明:
+- 从 source 指定区域读取并写入 target，layout 参数使用 generated source brace-list overload。
+
+使用示例:
+- Status status = npu_demo::load(target, source, {0, 0}, {2, 4}, {1, 1});
+
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>
+Status load(
+    Memory<TargetSpace, TargetType>& target,
+    const Memory<SourceSpace, SourceType>& source,
+    std::initializer_list<long long> offset,
+    std::initializer_list<long long> size,
+    std::initializer_list<long long> stride);
 
 /*
 功能说明:
@@ -147,7 +213,7 @@ Status transpose(
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/dma.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>

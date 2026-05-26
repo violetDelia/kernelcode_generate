@@ -59,6 +59,7 @@
 - `target="npu_demo"` 的 ptr `symbol.cast` 必须发射为 pointer-to-integer reinterpret cast，用于 optional memory presence guard。
 - `gen_kernel` 可在源码中写入 `// kg.allow_absent_memory_args: <index>:<dtype>:<rank>;...` 元数据，供执行引擎按公开 runtime `None` 合同识别 allow-absent memory 参数；该注释不新增 `emit` package 公开 API。
 - `kernel.binary_elewise(kind="min"|"max")` 在 `target="cpu"` 下必须发射为 `cpu::min(lhs, rhs, out)` / `cpu::max(lhs, rhs, out)`，在 `target="npu_demo"` 下必须发射为 `min<Space, InType, OutType>(out, lhs, rhs)` / `max<Space, InType, OutType>(out, lhs, rhs)`，成本发射必须映射到 `cost::min/max<Space, InType, OutType, Kind>(out, lhs, rhs)`。
+- `target="npu_demo"` 的 generated source layout 参数必须统一发射到 initializer-list public overload，形如 `{...} /*shape*/`、`{...} /*stride*/`、`{...} /*offset*/`、`{...} /*size*/`；不得在 generated source 中泄漏 `Vector(...)`、`Vector{...}`、`long long *_shape[]` 或 `long long *_stride[]` layout buffer。
 
 ## API详细说明
 

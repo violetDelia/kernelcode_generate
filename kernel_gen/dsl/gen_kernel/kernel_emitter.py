@@ -645,7 +645,7 @@ class KernelEmitter:
 
         功能说明:
         - 将未限定的线程 / 动态内存 helper 补成 `npu_demo::` 命名空间调用。
-        - 仅对 `.view<...>` 的三个 Vector 实参做精确归一化，避免影响普通 brace-list。
+        - 不再把成员式 `.view<...>({...})` brace-list 形态改写回 `Vector{...}`。
 
         使用示例:
         - stmt = self._normalize_npu_demo_stmt(stmt)
@@ -659,10 +659,6 @@ class KernelEmitter:
         stmt = re.sub(r"(?<![\\w:])thread_id\\(\\)", "npu_demo::thread_id()", stmt)
         stmt = re.sub(r"(?<![\\w:])thread_num\\(\\)", "npu_demo::thread_num()", stmt)
         stmt = re.sub(r"(?<![\\w:])get_dynamic_memory<", "npu_demo::get_dynamic_memory<", stmt)
-        if ".view<" in stmt:
-            stmt = re.sub(r"(\.view<[^>]+>\()\{", r"\1Vector{", stmt)
-            stmt = re.sub(r"(/\*offset\*/,\s*)\{", r"\1Vector{", stmt)
-            stmt = re.sub(r"(/\*size\*/,\s*)\{", r"\1Vector{", stmt)
         return stmt
 
     def _get_npu_demo_plain_func(self, module_op: ModuleOp) -> func.FuncOp | None:
@@ -1231,13 +1227,14 @@ class KernelEmitter:
         """
 
         self._validate_npu_demo_body_level_kernel_body(func_op)
-        _, out_type = self._get_npu_demo_body_level_kernel_types(func_op)
+        source_type, out_type = self._get_npu_demo_body_level_kernel_types(func_op)
         arg_names = self._arg_names(func_op)
         for arg_name, arg_value in zip(arg_names, func_op.args, strict=True):
             if self.ctx.lookup_name(arg_value) is None:
                 self.ctx.bind_name(arg_value, arg_name)
         source_name = self.ctx.lookup_name(func_op.args[1]) or arg_names[1]
         element_type = self._type_to_c(out_type.element_type)
+        source_view_accessor = "template view" if source_type.template_name.data else "view"
         lines = [
             f"{self.ctx.current_indent}S_INT tid = npu_demo::thread_id();",
             f"{self.ctx.current_indent}S_INT tnum = npu_demo::thread_num();",
@@ -1251,14 +1248,17 @@ class KernelEmitter:
                 f"npu_demo::get_dynamic_memory<MemorySpace::TLM1>();"
             ),
             "",
-            f"{self.ctx.current_indent}auto src_view = view({source_name}, tid * 16, 16, 1);",
-            f"{self.ctx.current_indent}auto work_tile = view(tsm, 0, 16, 1);",
-            f"{self.ctx.current_indent}auto out_tile = view(tsm, 0, 16, 1);",
+            f"{self.ctx.current_indent}auto src_view = {source_name}.{source_view_accessor}<{element_type}>"
+            f"({{tid * 16}} /*offset*/, {{16}} /*size*/, {{1}} /*stride*/);",
+            f"{self.ctx.current_indent}auto work_tile = tsm.view<{element_type}>"
+            f"({{0}} /*offset*/, {{16}} /*size*/, {{1}} /*stride*/);",
+            f"{self.ctx.current_indent}auto out_tile = tsm.view<{element_type}>"
+            f"({{0}} /*offset*/, {{16}} /*size*/, {{1}} /*stride*/);",
             "",
-            f"{self.ctx.current_indent}slice(work_tile, src_view, 0, 16, 1);",
+            f"{self.ctx.current_indent}slice(work_tile, src_view, {{0}} /*offset*/, {{16}} /*size*/, {{1}} /*stride*/);",
             f"{self.ctx.current_indent}add<MemorySpace::TSM, {element_type}, {element_type}>"
             f"(out_tile, work_tile, work_tile);",
-            f"{self.ctx.current_indent}deslice(out, out_tile, tid * 16, 16, 1);",
+            f"{self.ctx.current_indent}deslice(out, out_tile, {{tid * 16}} /*offset*/, {{16}} /*size*/, {{1}} /*stride*/);",
         ]
         return "\n".join(lines)
 
@@ -1333,6 +1333,7 @@ class KernelEmitter:
 
         功能说明:
         - 仅对无返回值且首参为 `nn.memory` 的 out-param 函数生效。
+        - `npu_demo` 默认函数中的 `dma.cast` 仍可别名到 out 参数，保证 buffer-results case 不生成未声明局部名。
         - `npu_demo` device body 中的 `dma.view` / `dma.reshape` 是局部 tile 视图，不能别名到 out 参数名。
         - sibling cost function 会返回 `!symbol.int`，首参不是 out-param，不能把局部 DMA 结果绑定成 `arg0`。
 
@@ -1340,7 +1341,7 @@ class KernelEmitter:
         - self._bind_rewritten_out_result(func_op, op)
         """
 
-        if self.ctx.is_target("npu_demo"):
+        if self.ctx.is_target("npu_demo") and not isinstance(op, DmaCastOp):
             return
         if not func_op.args or not op.results or len(op.results) != 1:
             return

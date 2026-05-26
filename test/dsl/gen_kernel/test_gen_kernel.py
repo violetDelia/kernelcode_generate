@@ -2298,7 +2298,7 @@ def test_gen_kernel_compiles_npu_demo_tiled_matmul_source() -> None:
 
 # GK-018
 # 功能说明: 验证 npu_demo target 可生成固定的 dynamic memory/view/slice/deslice/add 管线。
-# 测试目的: 锁定 `TSM/TLM`、`view/slice/deslice/add` 固定顺序，并防止回退到 `.view/load/store` 风格。
+# 测试目的: 锁定 `TSM/TLM`、brace-list `view/slice/deslice/add` 固定顺序，并防止回退到旧标量 layout 风格。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_memory_pipeline
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
@@ -2316,15 +2316,22 @@ def test_gen_kernel_emits_npu_demo_memory_pipeline() -> None:
     tlm_idx = source.index(
         "Memory<MemorySpace::TLM1, float> tlm = npu_demo::get_dynamic_memory<MemorySpace::TLM1>();"
     )
-    src_view_idx = source.index("auto src_view = view(source, tid * 16, 16, 1);")
-    work_view_idx = source.index("auto work_tile = view(tsm, 0, 16, 1);")
-    out_view_idx = source.index("auto out_tile = view(tsm, 0, 16, 1);")
-    slice_idx = source.index("slice(work_tile, src_view, 0, 16, 1);")
+    src_view_idx = source.index(
+        "auto src_view = source.view<float>({tid * 16} /*offset*/, {16} /*size*/, {1} /*stride*/);"
+    )
+    work_view_idx = source.index(
+        "auto work_tile = tsm.view<float>({0} /*offset*/, {16} /*size*/, {1} /*stride*/);"
+    )
+    out_view_idx = source.index(
+        "auto out_tile = tsm.view<float>({0} /*offset*/, {16} /*size*/, {1} /*stride*/);"
+    )
+    slice_idx = source.index("slice(work_tile, src_view, {0} /*offset*/, {16} /*size*/, {1} /*stride*/);")
     add_idx = source.index("add<MemorySpace::TSM, float, float>(out_tile, work_tile, work_tile);")
-    deslice_idx = source.index("deslice(out, out_tile, tid * 16, 16, 1);")
+    deslice_idx = source.index("deslice(out, out_tile, {tid * 16} /*offset*/, {16} /*size*/, {1} /*stride*/);")
 
     assert tsm_idx < tlm_idx < src_view_idx < work_view_idx < out_view_idx < slice_idx < add_idx < deslice_idx
-    assert ".view<" not in source
+    assert "view(source" not in source
+    assert "Vector{" not in source
     assert "load<" not in source
     assert "store<" not in source
     assert "slice(source" not in source
@@ -2391,7 +2398,7 @@ def test_gen_kernel_black_box_lowered_add_and_npu_demo_contracts() -> None:
     npu_source = gen_kernel(npu_func, _npu_ctx())
     assert "npu_demo::thread_id()" in npu_source
     assert "npu_demo::get_dynamic_memory<MemorySpace::TSM>()" in npu_source
-    assert "deslice(out, out_tile, tid * 16, 16, 1);" in npu_source
+    assert "deslice(out, out_tile, {tid * 16} /*offset*/, {16} /*size*/, {1} /*stride*/);" in npu_source
 
 
 # GK-I2-001
@@ -2735,10 +2742,12 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
     )
     assert f"Memory<{space_enum}, float> v3 = npu_demo::get_dynamic_memory<{space_enum}>();" in source
     assert "16*npu_demo::thread_id()" in source
-    assert source.index("slice(v2_1 /*dst*/, lhs_1 /*source*/, 0 /*offset*/, 16 /*size*/, 1 /*stride*/);") < source.index(
+    assert source.index(
+        "slice(v2_1 /*dst*/, lhs_1 /*source*/, {0} /*offset*/, {16} /*size*/, {1} /*stride*/);"
+    ) < source.index(
         "add<TSM, float, float>(v2_3 /*out*/, v2_1 /*lhs*/, v2_2 /*rhs*/);"
     ) < source.index(
-        "deslice(out /*target*/, v2_3 /*source*/, 16*npu_demo::thread_id() /*offset*/, 16 /*size*/, 1 /*stride*/);"
+        "deslice(out /*target*/, v2_3 /*source*/, {16*npu_demo::thread_id()} /*offset*/, {16} /*size*/, {1} /*stride*/);"
     )
     assert "arch.launch_kernel" not in source
     assert "ctx.sync_threads" not in source

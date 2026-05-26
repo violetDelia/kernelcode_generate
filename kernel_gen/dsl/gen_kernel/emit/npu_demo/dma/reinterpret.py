@@ -59,19 +59,6 @@ def _is_i8_byte_pool(memory_type: NnMemoryType) -> bool:
     return len(memory_type.shape.data) == 1 and memory_type.element_type == i8
 
 
-def _long_long_buffer(name: str, values: tuple[str, ...], ctx) -> str:
-    """生成 npu_demo Memory 构造所需的 `long long[]` 局部数组。
-
-    功能说明:
-    - shape/stride operand 已经通过 emit registry 转为 C++ 表达式文本。
-
-    使用示例:
-    - line = _long_long_buffer("tile_shape", ("M", "N"), ctx)
-    """
-
-    return f"{ctx.current_indent}long long {name}[{len(values)}] = {{{', '.join(values)}}};"
-
-
 def _reinterpret_data_expr(
     source_expr: str,
     source_type: NnMemoryType,
@@ -104,8 +91,9 @@ def _emit_npu_demo_dma_reinterpret(op: DmaReinterpretOp, ctx) -> str:
     """发射 npu_demo `dma.reinterpret` C++ 语句。
 
     功能说明:
-    - 用 source data、result shape、result stride 与 source format 构造新的 `Memory<...>`。
+    - 用 source data、result shape/stride brace-list 与 source format 构造新的 `Memory<...>`。
     - 不调用 view/reshape helper，保持 `dma.reinterpret` 的无副作用 alias 语义。
+    - generated source 不生成 `long long *_shape[]` / `*_stride[]` 局部 layout buffer。
 
     使用示例:
     - stmt = _emit_npu_demo_dma_reinterpret(op, ctx)
@@ -125,13 +113,9 @@ def _emit_npu_demo_dma_reinterpret(op: DmaReinterpretOp, ctx) -> str:
     stride_values = tuple(emit_c_value(value, ctx) for value in op.stride)
     offset_expr = emit_c_value(op.offset, ctx)
     data_expr = _reinterpret_data_expr(source_expr, source_type, result_type, offset_expr, ctx)
-    return "\n".join(
-        [
-            _long_long_buffer(f"{result_name}_shape", shape_values, ctx),
-            _long_long_buffer(f"{result_name}_stride", stride_values, ctx),
-            (
-                f"{ctx.current_indent}{ctx.dispatch_type(result_type)} {result_name}"
-                f"({data_expr}, {result_name}_shape, {result_name}_stride, {len(shape_values)}, {source_expr}.format());"
-            ),
-        ]
+    shape_expr = "{" + ", ".join(shape_values) + "}"
+    stride_expr = "{" + ", ".join(stride_values) + "}"
+    return (
+        f"{ctx.current_indent}{ctx.dispatch_type(result_type)} {result_name}"
+        f"({data_expr}, {shape_expr} /*shape*/, {stride_expr} /*stride*/, {source_expr}.format());"
     )

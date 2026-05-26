@@ -1,13 +1,18 @@
 /*
 功能说明:
-- 提供 npu_demo 后端的 `alloc/fill/slice/deslice/transpose/broadcast` 轻量实现，并复用 `Memory` 的成员式 `view/reshape` 接口。
+- 提供 npu_demo 后端的 `alloc/fill/slice/deslice/transpose/store/load/broadcast` 轻量实现，并复用 `Memory` 的成员式 `view/reshape` 接口。
 
 API 列表:
 - `npu_demo::alloc<Space, T>(std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm) -> Memory<Space, T>`
 - `npu_demo::fill<Space, T>(Memory<Space, T>& target, const T& value) -> Status`
 - `npu_demo::slice<TargetSpace, SourceSpace, T>(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride) -> Status`
+- `npu_demo::slice<TargetSpace, SourceSpace, T>(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride) -> Status`
 - `npu_demo::deslice<TargetSpace, SourceSpace, T>(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride) -> Status`
+- `npu_demo::deslice<TargetSpace, SourceSpace, T>(Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride) -> Status`
 - `npu_demo::transpose<TargetSpace, SourceSpace, TargetType, SourceType>(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, const Vector& perm) -> Status`
+- `npu_demo::transpose<TargetSpace, SourceSpace, TargetType, SourceType>(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> perm) -> Status`
+- `npu_demo::store<TargetSpace, SourceSpace, TargetType, SourceType>(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride) -> Status`
+- `npu_demo::load<TargetSpace, SourceSpace, TargetType, SourceType>(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride) -> Status`
 - `npu_demo::broadcast<TargetSpace, SourceSpace, TargetType, SourceType>(Memory<TargetSpace, TargetType>& target, const Memory<SourceSpace, SourceType>& source) -> Status`
 
 使用示例:
@@ -17,7 +22,7 @@ API 列表:
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/dma.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 
@@ -76,7 +81,7 @@ inline bool dma_checked_add_non_negative(long long lhs, long long rhs, long long
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/dma.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace Space, typename T>
@@ -129,7 +134,7 @@ inline Memory<Space, T> alloc(
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/dma.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace Space, typename T>
@@ -174,7 +179,7 @@ inline Status fill(Memory<Space, T>& target, const T& value) {
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/dma.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
@@ -274,6 +279,49 @@ inline Status slice(
 
 /*
 功能说明:
+- 从 source 读取切片并写入预分配 target（initializer-list offset/size/stride 版本）。
+- 列表内容立即复制到短生命周期 Vector，再复用 Vector 版 slice 公开合同；非法长度返回 `StatusCode::kError`。
+
+使用示例:
+- Status status = npu_demo::slice(tile, source, {0, 1}, {2, 2}, {1, 1});
+
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
+inline Status slice(
+    Memory<TargetSpace, T>& target,
+    const Memory<SourceSpace, T>& source,
+    std::initializer_list<long long> offset,
+    std::initializer_list<long long> size,
+    std::initializer_list<long long> stride) {
+    const unsigned long long rank = source.rank();
+    if (rank == 0 || rank > npu_demo::detail::kMaxDmaRank ||
+        offset.size() != rank || size.size() != rank || stride.size() != rank) {
+        return StatusCode::kError;
+    }
+    long long offset_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    long long size_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    long long stride_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    auto offset_it = offset.begin();
+    auto size_it = size.begin();
+    auto stride_it = stride.begin();
+    for (unsigned long long i = 0; i < rank; ++i, ++offset_it, ++size_it, ++stride_it) {
+        offset_buf[i] = *offset_it;
+        size_buf[i] = *size_it;
+        stride_buf[i] = *stride_it;
+    }
+    Vector offset_vec(offset_buf, rank);
+    Vector size_vec(size_buf, rank);
+    Vector stride_vec(stride_buf, rank);
+    return slice(target, source, offset_vec, size_vec, stride_vec);
+}
+
+/*
+功能说明:
 - 提供 `gen_kernel/emit_c(target=npu_demo)` 使用的一维标量 `npu_demo::slice(...)` 包装，
   让生成源码可显式消费 `npu_demo::slice(target, source, offset, size, stride)`。
 
@@ -312,7 +360,7 @@ inline Status slice(
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/dma.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
@@ -408,6 +456,49 @@ inline Status deslice(
         target.at(target_indices) = source.at(source_indices);
     }
     return StatusCode::kOk;
+}
+
+/*
+功能说明:
+- 将 source 块写回 target 指定区域（initializer-list offset/size/stride 版本）。
+- 列表内容立即复制到短生命周期 Vector，再复用 Vector 版 deslice 公开合同；非法长度返回 `StatusCode::kError`。
+
+使用示例:
+- Status status = npu_demo::deslice(target, tile, {0, 1}, {2, 2}, {1, 1});
+
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
+inline Status deslice(
+    Memory<TargetSpace, T>& target,
+    const Memory<SourceSpace, T>& source,
+    std::initializer_list<long long> offset,
+    std::initializer_list<long long> size,
+    std::initializer_list<long long> stride) {
+    const unsigned long long rank = source.rank();
+    if (rank == 0 || rank > npu_demo::detail::kMaxDmaRank ||
+        offset.size() != rank || size.size() != rank || stride.size() != rank) {
+        return StatusCode::kError;
+    }
+    long long offset_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    long long size_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    long long stride_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    auto offset_it = offset.begin();
+    auto size_it = size.begin();
+    auto stride_it = stride.begin();
+    for (unsigned long long i = 0; i < rank; ++i, ++offset_it, ++size_it, ++stride_it) {
+        offset_buf[i] = *offset_it;
+        size_buf[i] = *size_it;
+        stride_buf[i] = *stride_it;
+    }
+    Vector offset_vec(offset_buf, rank);
+    Vector size_vec(size_buf, rank);
+    Vector stride_vec(stride_buf, rank);
+    return deslice(target, source, offset_vec, size_vec, stride_vec);
 }
 
 /*
@@ -533,6 +624,142 @@ inline Status store(
 
 /*
 功能说明:
+- 提供 `dma.store` 的 initializer-list offset/size/stride 后端 helper，供 generated source 直接传入 `{...}` 布局参数。
+- 列表内容立即复制到短生命周期 Vector，再复用 Vector 版 store 合同；非法长度返回 `StatusCode::kError`。
+
+使用示例:
+- Status status = store<GM, TSM, float, int32_t>(target, tile, {0, 1}, {2, 2}, {1, 1});
+
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>
+inline Status store(
+    Memory<TargetSpace, TargetType>& target,
+    const Memory<SourceSpace, SourceType>& source,
+    std::initializer_list<long long> offset,
+    std::initializer_list<long long> size,
+    std::initializer_list<long long> stride) {
+    const unsigned long long rank = source.rank();
+    if (rank == 0 || rank > npu_demo::detail::kMaxDmaRank ||
+        offset.size() != rank || size.size() != rank || stride.size() != rank) {
+        return StatusCode::kError;
+    }
+    long long offset_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    long long size_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    long long stride_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    auto offset_it = offset.begin();
+    auto size_it = size.begin();
+    auto stride_it = stride.begin();
+    for (unsigned long long i = 0; i < rank; ++i, ++offset_it, ++size_it, ++stride_it) {
+        offset_buf[i] = *offset_it;
+        size_buf[i] = *size_it;
+        stride_buf[i] = *stride_it;
+    }
+    Vector offset_vec(offset_buf, rank);
+    Vector size_vec(size_buf, rank);
+    Vector stride_vec(stride_buf, rank);
+    return store(target, source, offset_vec, size_vec, stride_vec);
+}
+
+/*
+功能说明:
+- 提供 `dma.load` 的 initializer-list offset/size/stride 后端 helper，按 source 区域读取并写入预分配 target。
+- 允许 source/target 元素类型不同，写入 target 时按 `TargetType` 显式转换；非法 rank、长度、边界或数据指针返回 `StatusCode::kError`。
+
+使用示例:
+- Status status = load<TSM, GM, float, int32_t>(tile, source, {0, 1}, {2, 2}, {1, 1});
+
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>
+inline Status load(
+    Memory<TargetSpace, TargetType>& target,
+    const Memory<SourceSpace, SourceType>& source,
+    std::initializer_list<long long> offset,
+    std::initializer_list<long long> size,
+    std::initializer_list<long long> stride) {
+    const unsigned long long rank = source.rank();
+    if (rank == 0 || rank > npu_demo::detail::kMaxDmaRank ||
+        target.rank() != rank || offset.size() != rank || size.size() != rank || stride.size() != rank) {
+        return StatusCode::kError;
+    }
+    if (source.data() == nullptr || target.data() == nullptr) {
+        return StatusCode::kError;
+    }
+
+    long long offset_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    long long size_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    long long stride_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    auto offset_it = offset.begin();
+    auto size_it = size.begin();
+    auto stride_it = stride.begin();
+    long long element_count = 1;
+    for (unsigned long long i = 0; i < rank; ++i, ++offset_it, ++size_it, ++stride_it) {
+        offset_buf[i] = *offset_it;
+        size_buf[i] = *size_it;
+        stride_buf[i] = *stride_it;
+        if (offset_buf[i] < 0 || size_buf[i] <= 0 || stride_buf[i] <= 0) {
+            return StatusCode::kError;
+        }
+        if (source.get_shape(i) <= 0 || target.get_shape(i) <= 0) {
+            return StatusCode::kError;
+        }
+        if (source.get_stride(i) <= 0 || target.get_stride(i) <= 0 || target.get_shape(i) != size_buf[i]) {
+            return StatusCode::kError;
+        }
+        long long span = 0;
+        if (!npu_demo::detail::dma_checked_mul_non_negative(size_buf[i] - 1, stride_buf[i], &span)) {
+            return StatusCode::kError;
+        }
+        long long last_index = 0;
+        if (!npu_demo::detail::dma_checked_add_non_negative(offset_buf[i], span, &last_index) ||
+            last_index >= source.get_shape(i)) {
+            return StatusCode::kError;
+        }
+        long long next_element_count = 0;
+        if (!npu_demo::detail::dma_checked_mul_non_negative(element_count, size_buf[i], &next_element_count)) {
+            return StatusCode::kError;
+        }
+        element_count = next_element_count;
+    }
+
+    long long logical_indices[npu_demo::detail::kMaxDmaRank] = {0};
+    long long source_indices[npu_demo::detail::kMaxDmaRank] = {0};
+    long long target_indices[npu_demo::detail::kMaxDmaRank] = {0};
+    for (long long linear = 0; linear < element_count; ++linear) {
+        long long remainder = linear;
+        for (unsigned long long reverse_index = 0; reverse_index < rank; ++reverse_index) {
+            const unsigned long long dim = rank - 1 - reverse_index;
+            logical_indices[dim] = remainder % size_buf[dim];
+            remainder /= size_buf[dim];
+        }
+        for (unsigned long long dim = 0; dim < rank; ++dim) {
+            target_indices[dim] = logical_indices[dim];
+            long long source_delta = 0;
+            if (!npu_demo::detail::dma_checked_mul_non_negative(
+                    logical_indices[dim], stride_buf[dim], &source_delta)) {
+                return StatusCode::kError;
+            }
+            if (!npu_demo::detail::dma_checked_add_non_negative(
+                    offset_buf[dim], source_delta, &source_indices[dim])) {
+                return StatusCode::kError;
+            }
+        }
+        target.at(target_indices) = static_cast<TargetType>(source.at(source_indices));
+    }
+    return StatusCode::kOk;
+}
+
+/*
+功能说明:
 - 按 `perm` 将 source 物化转置到预分配 target。
 - `perm[target_axis]` 表示 target 轴从 source 的哪一轴读取。
 - 允许 source/target 元素类型不同，写入时按 target 类型显式转换。
@@ -543,7 +770,7 @@ inline Status store(
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/dma.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>
@@ -611,6 +838,38 @@ inline Status transpose(
 
 /*
 功能说明:
+- 按 initializer-list `perm` 将 source 物化转置到预分配 target。
+- perm 列表立即复制到短生命周期 Vector，再复用 Vector 版 transpose 合同；非法长度返回 `StatusCode::kError`。
+
+使用示例:
+- Status status = npu_demo::transpose(target, source, {1, 0});
+
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>
+inline Status transpose(
+    Memory<TargetSpace, TargetType>& target,
+    const Memory<SourceSpace, SourceType>& source,
+    std::initializer_list<long long> perm) {
+    const unsigned long long rank = source.rank();
+    if (rank == 0 || rank > npu_demo::detail::kMaxDmaRank || perm.size() != rank) {
+        return StatusCode::kError;
+    }
+    long long perm_buf[npu_demo::detail::kMaxDmaRank] = {0};
+    auto perm_it = perm.begin();
+    for (unsigned long long i = 0; i < rank; ++i, ++perm_it) {
+        perm_buf[i] = *perm_it;
+    }
+    Vector perm_vec(perm_buf, rank);
+    return transpose(target, source, perm_vec);
+}
+
+/*
+功能说明:
 - 将 `source` 按 trailing-dimension broadcast 规则物化到预分配 `target`。
 - 允许 source rank 小于 target rank；缺失的前置维按 singleton 处理。
 
@@ -620,7 +879,7 @@ inline Status transpose(
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/include/api/dma.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename TargetType, typename SourceType>

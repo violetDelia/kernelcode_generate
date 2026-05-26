@@ -49,9 +49,9 @@
 - `dma.alloc` 发射必须用 `dynamic_shape` operand 绑定运行期符号值，并根据 result memory type 重建完整 shape 与默认连续 stride；部分动态 shape operand 只覆盖符号维度，静态维度仍从 result type 补回。
 - `dma.alloc` 的 `dynamic_shape` 与 result rank 等长时，发射必须把它作为完整运行期 shape，并据此推导默认连续 stride；匿名 `?` 不得直接写入 C++ 源码。
 - `dma.alloc` 中含 `min(...)` 的动态尾块维度必须映射到已发射 C++ 变量名，不能把 `symbol.iter` 的 IR 文本直接写进 helper 参数。
-- `dma.copy` 不得发射为未公开的 `copy<...>(...)` helper；npu_demo 下必须用公开 `slice(target, source, Vector(static_cast<long long>(0)...), Vector(static_cast<long long>(target.get_shape(axis))...), Vector(static_cast<long long>(1)...))` 表达整块复制，避免 `Vector{0, 0}` 与指针构造重载歧义。
+- `dma.copy` 不得发射为未公开的 `copy<...>(...)` helper；npu_demo 下必须用公开 `slice(target, source, {...} /*offset*/, {...} /*size*/, {...} /*stride*/)` brace-list overload 表达整块复制，避免 generated source 泄漏 `Vector(...)`、`Vector{...}` 或 layout buffer。
 - `dma.reinterpret` 必须发射为共享 source backing data 的 `Memory<SPACE, T>` 构造，不生成数据搬运；source 是一维 `i8` byte pool 时先按 byte offset 做指针偏移，再 `reinterpret_cast<T*>`，typed source 则按 source element offset 偏移。
-- `dma.reshape` 必须发射为公开成员式 `source.reshape(...)`，其中 rank 1..4 使用 `Vector{shape...}`，rank >4 使用 `Vector(buffer, rank)`；不得使用裸 `{...}` braced-init 作为 `reshape` 实参。
+- `dma.reshape` 必须发射为公开成员式 `source.reshape({...} /*shape*/)`；所有 rank 均使用 initializer-list public overload，不得生成 `Vector(...)`、`Vector{...}` 或 `long long reshape_shape_*` layout buffer。
 - 目录内未列入公开 API 的注册函数与 helper 不得跨文件直接调用。
 
 ## API详细说明

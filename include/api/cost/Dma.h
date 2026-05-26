@@ -7,7 +7,9 @@
 API 列表:
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::copy(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::slice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::slice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
 - `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::deslice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, const Vector& offset, const Vector& size, const Vector& stride)`
+- `template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind> S_INT npu_demo::cost::deslice(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& source, std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride)`
 
 helper 清单:
 - 无；当前文件只声明公开 DMA 成本 helper。
@@ -19,12 +21,14 @@ helper 清单:
 
 关联文件:
 - spec: spec/include/api/cost/Dma.md
-- test: test/include/api/cost.py
+- test: test/include/api/test_cost.py
 - 功能实现: include/npu_demo/cost/Dma.h
 */
 
 #ifndef KERNELCODE_GENERATE_INCLUDE_API_COST_DMA_H_
 #define KERNELCODE_GENERATE_INCLUDE_API_COST_DMA_H_
+
+#include <initializer_list>
 
 #include "include/api/Memory.h"
 #include "include/api/cost/Core.h"
@@ -42,7 +46,7 @@ namespace cost {
 
 关联文件:
 - spec: spec/include/api/cost/Dma.md
-- test: test/include/api/cost.py
+- test: test/include/api/test_cost.py
 - 功能实现: include/npu_demo/cost/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind>
@@ -59,7 +63,7 @@ S_INT copy(const Memory<TargetSpace, T>& target, const Memory<SourceSpace, T>& s
 
 关联文件:
 - spec: spec/include/api/cost/Dma.md
-- test: test/include/api/cost.py
+- test: test/include/api/test_cost.py
 - 功能实现: include/npu_demo/cost/Dma.h
 */
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind>
@@ -70,12 +74,26 @@ S_INT slice(
     const Vector& size,
     const Vector& stride);
 template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind>
+S_INT slice(
+    const Memory<TargetSpace, T>& target,
+    const Memory<SourceSpace, T>& source,
+    std::initializer_list<long long> offset,
+    std::initializer_list<long long> size,
+    std::initializer_list<long long> stride);
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind>
 S_INT deslice(
     const Memory<TargetSpace, T>& target,
     const Memory<SourceSpace, T>& source,
     const Vector& offset,
     const Vector& size,
     const Vector& stride);
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T, CostKind Kind>
+S_INT deslice(
+    const Memory<TargetSpace, T>& target,
+    const Memory<SourceSpace, T>& source,
+    std::initializer_list<long long> offset,
+    std::initializer_list<long long> size,
+    std::initializer_list<long long> stride);
 
 }  // namespace cost
 }  // namespace npu_demo

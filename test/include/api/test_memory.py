@@ -361,6 +361,85 @@ int main() {
     _compile_and_run(source)
 
 
+# API-MEMORY-002A
+# 测试目的: 验证 Memory initializer-list 构造、成员式 view 与 reshape overload 可编译运行并拒绝非法 layout。
+# 使用示例: pytest -q test/include/api/test_memory.py -k test_memory_initializer_list_layout_contract
+# 对应功能实现文件路径: include/npu_demo/Memory.h
+# 对应 spec 文件路径: spec/include/api/Memory.md
+# 对应测试文件路径: test/include/api/test_memory.py
+def test_memory_initializer_list_layout_contract() -> None:
+    source = r"""
+#include <stdexcept>
+#include <string>
+
+#include "include/api/Memory.h"
+#include "include/npu_demo/Memory.h"
+
+static int fail(int code) {
+    return code;
+}
+
+static bool contains(const std::string& value, const char* needle) {
+    return value.find(needle) != std::string::npos;
+}
+
+int main() {
+    float data[12];
+    for (int i = 0; i < 12; ++i) {
+        data[i] = static_cast<float>(i);
+    }
+
+    Memory<GM, float> explicit_layout(data, {3, 4}, {4, 1}, MemoryFormat::CLast);
+    if (explicit_layout.rank() != 2 || explicit_layout.get_shape(0) != 3 ||
+        explicit_layout.get_stride(0) != 4 || explicit_layout.format() != MemoryFormat::CLast) {
+        return fail(1);
+    }
+
+    Memory<GM, float> contiguous(data, {3, 4});
+    if (contiguous.get_shape(0) != 3 || contiguous.get_shape(1) != 4 ||
+        contiguous.get_stride(0) != 4 || contiguous.get_stride(1) != 1) {
+        return fail(2);
+    }
+
+    auto view = contiguous.view<float>({1, 1}, {2, 2}, {1, 2});
+    if (view.rank() != 2 || view.get_shape(0) != 2 || view.get_shape(1) != 2) {
+        return fail(3);
+    }
+    if (view.get_stride(0) != 4 || view.get_stride(1) != 2 || view.data() != contiguous.data() + 5) {
+        return fail(4);
+    }
+
+    auto reshaped = contiguous.reshape({2, 6});
+    if (reshaped.rank() != 2 || reshaped.get_shape(0) != 2 || reshaped.get_shape(1) != 6 ||
+        reshaped.get_stride(0) != 6 || reshaped.get_stride(1) != 1 || reshaped.data() != contiguous.data()) {
+        return fail(5);
+    }
+
+    try {
+        Memory<GM, float> bad(data, {3, 4}, {4});
+        (void)bad;
+        return fail(10);
+    } catch (const std::runtime_error& err) {
+        if (!contains(err.what(), "initializer_list layout")) {
+            return fail(11);
+        }
+    }
+
+    try {
+        auto bad_view = contiguous.view<float>({0}, {1}, {1});
+        (void)bad_view;
+        return fail(12);
+    } catch (const std::runtime_error& err) {
+        if (!contains(err.what(), "vector_rank_mismatch")) {
+            return fail(13);
+        }
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
 # API-MEMORY-003
 # 测试目的: 验证旧自由函数 `reshape(source, shape)` 已退出公共层稳定口径。
 # 使用示例: pytest -q test/include/api/test_memory.py -k test_memory_rejects_legacy_free_reshape_contract

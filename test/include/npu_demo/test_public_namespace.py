@@ -261,7 +261,7 @@ int main() {
         return fail(31);
     }
 
-    if (npu_demo::slice(tile, line, Vector{1}, Vector{2}, Vector{1}) != StatusCode::kOk) {
+    if (npu_demo::slice(tile, line, {1}, {2}, {1}) != StatusCode::kOk) {
         return fail(4);
     }
     if (tile.data()[0] != 2.0f || tile.data()[1] != 3.0f) {
@@ -270,7 +270,7 @@ int main() {
 
     float target_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     Memory<GM, float> target(target_data, Vector{4}.data(), Vector{1}.data(), 1, MemoryFormat::Norm);
-    if (npu_demo::deslice(target, tile, Vector{1}, Vector{2}, Vector{1}) != StatusCode::kOk) {
+    if (npu_demo::deslice(target, tile, {1}, {2}, {1}) != StatusCode::kOk) {
         return fail(6);
     }
     if (target_data[1] != 2.0f || target_data[2] != 3.0f) {
@@ -281,7 +281,7 @@ int main() {
     Memory<TSM, float> matrix(matrix_data, Vector{2, 3}.data(), Vector{3, 1}.data(), 2, MemoryFormat::Norm);
     float transposed_data[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     Memory<GM, float> transposed(transposed_data, Vector{3, 2}.data(), Vector{2, 1}.data(), 2, MemoryFormat::Norm);
-    if (npu_demo::transpose(transposed, matrix, Vector{1, 0}) != StatusCode::kOk) {
+    if (npu_demo::transpose(transposed, matrix, {1, 0}) != StatusCode::kOk) {
         return fail(8);
     }
     if (transposed_data[0] != 1.0f || transposed_data[1] != 4.0f ||
@@ -311,6 +311,22 @@ int main() {
         broadcast_target_data[4] != 7.0f || broadcast_target_data[5] != 7.0f) {
         return fail(11);
     }
+    float store_target_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    Memory<GM, float> store_target(store_target_data, {4}, {1}, MemoryFormat::Norm);
+    if (npu_demo::store(store_target, tile, {1}, {2}, {1}) != StatusCode::kOk) {
+        return fail(12);
+    }
+    if (store_target_data[1] != 2.0f || store_target_data[2] != 3.0f) {
+        return fail(13);
+    }
+    int load_data[2] = {0, 0};
+    Memory<TSM, int> load_target(load_data, {2}, {1}, MemoryFormat::Norm);
+    if (npu_demo::load(load_target, line, {1}, {2}, {1}) != StatusCode::kOk) {
+        return fail(14);
+    }
+    if (load_data[0] != 2 || load_data[1] != 3) {
+        return fail(15);
+    }
     return 0;
 }
 """
@@ -321,6 +337,8 @@ int main() {
     assert "npu_demo::slice" in source
     assert "npu_demo::deslice" in source
     assert "npu_demo::transpose" in source
+    assert "npu_demo::store" in source
+    assert "npu_demo::load" in source
     assert "npu_demo::broadcast" in source
     assert "npu_demo::detail" not in source
     assert "npu_demo_dma_detail" not in source

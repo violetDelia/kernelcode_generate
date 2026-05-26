@@ -1510,13 +1510,12 @@ def test_emit_c_lowers_npu_demo_dma_misc_helper_contracts() -> None:
     assert cast_stmt == "cast<GM, float, int32_t>(dst /*dst*/, src /*source*/);"
     assert copy_stmt == (
         "slice(dst /*dst*/, dst /*source*/, "
-        "Vector(static_cast<long long>(0), static_cast<long long>(0)) /*offset*/, "
-        "Vector(static_cast<long long>(dst.get_shape(0)), static_cast<long long>(dst.get_shape(1))) /*size*/, "
-        "Vector(static_cast<long long>(1), static_cast<long long>(1)) /*stride*/);"
+        "{0, 0} /*offset*/, {dst.get_shape(0), dst.get_shape(1)} /*size*/, "
+        "{1, 1} /*stride*/);"
     )
     assert free_stmt == "free<GM, float>(dst /*source*/);"
     assert transpose_stmt == "transpose<GM, GM, float, float>(dst /*dst*/, dst /*source*/, {1, 0} /*perm*/);"
-    assert "Memory<GM, float> v0 = dst.reshape(Vector{3, 2} /*shape*/);" == reshape_stmt
+    assert "Memory<GM, float> v0 = dst.reshape({3, 2} /*shape*/);" == reshape_stmt
 
 
 def test_emit_c_lowers_npu_demo_dma_free_alloc_result_with_concrete_dtype() -> None:
@@ -1552,15 +1551,15 @@ def test_emit_c_lowers_npu_demo_dma_free_alloc_result_with_concrete_dtype() -> N
     assert free_stmt == "delete[] v0.data();"
 
 
-def test_emit_c_rejects_npu_demo_dma_copy_invalid_target_and_rank() -> None:
-    """验证 npu_demo `dma.copy` 发射只接受 1..4 rank 的 nn.memory target。
+def test_emit_c_lowers_npu_demo_dma_copy_invalid_target_and_rank5_brace_list() -> None:
+    """验证 npu_demo `dma.copy` 拒绝非 memory target 且 rank5 使用 brace-list 发射。
 
     功能说明:
     - 通过公开 `emit_c_op(...)` 入口覆盖 `dma.copy` 的公开错误语义。
-    - 防止 `dma.copy` 生成 include/api 未公开 helper 或 rank>4 的非法 Vector 构造。
+    - 防止 `dma.copy` 回退 include/api 未公开 copy helper、`Vector` layout 或 rank>4 局部数组。
 
     使用示例:
-    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_rejects_npu_demo_dma_copy_invalid_target_and_rank
+    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_copy_invalid_target_and_rank5_brace_list
     """
 
     mem_type = _make_memory_type([2], [1], space="global", element_type=f32)
@@ -1576,19 +1575,23 @@ def test_emit_c_rejects_npu_demo_dma_copy_invalid_target_and_rank() -> None:
     rank5_ctx = _npu_ctx()
     rank5_ctx.bind_name(rank5_block.args[0], "dst")
     rank5_ctx.bind_name(rank5_block.args[1], "src")
-    with pytest.raises(KernelCodeError, match="dma.copy: npu_demo Vector supports 1..4 values"):
-        emit_c_op(DmaCopyOp(rank5_block.args[0], rank5_block.args[1]), rank5_ctx)
+    stmt = emit_c_op(DmaCopyOp(rank5_block.args[0], rank5_block.args[1]), rank5_ctx)
+    assert stmt == (
+        "slice(dst /*dst*/, src /*source*/, {0, 0, 0, 0, 0} /*offset*/, "
+        "{dst.get_shape(0), dst.get_shape(1), dst.get_shape(2), dst.get_shape(3), dst.get_shape(4)} /*size*/, "
+        "{1, 1, 1, 1, 1} /*stride*/);"
+    )
 
 
-def test_emit_c_lowers_npu_demo_dma_reshape_rank6_via_vector_buffer() -> None:
-    """验证 npu_demo `dma.reshape` rank>4 走公开 Vector(data, size) 形态。
+def test_emit_c_lowers_npu_demo_dma_reshape_rank6_via_brace_list() -> None:
+    """验证 npu_demo `dma.reshape` rank>4 走公开 initializer-list 形态。
 
     功能说明:
     - 通过公开 `emit_c_op(...)` 入口覆盖 rank 6 reshape 发射。
-    - 锁定源码不使用无法编译的 `Vector{a, b, c, d, e, f}` 构造。
+    - 锁定源码不使用 `Vector(...)` 或局部 `long long reshape_shape_*`。
 
     使用示例:
-    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_reshape_rank6_via_vector_buffer
+    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_reshape_rank6_via_brace_list
     """
 
     src_type = _make_memory_type([720], [1], space="tsm", element_type=f32)
@@ -1600,21 +1603,20 @@ def test_emit_c_lowers_npu_demo_dma_reshape_rank6_via_vector_buffer() -> None:
 
     stmt = emit_c_op(DmaReshapeOp(block.args[0], shape_ops, dst_type), ctx)
 
-    assert stmt == (
-        "long long reshape_shape_0[6] = {2, 3, 4, 5, 6, 1};\n"
-        "Memory<TSM, float> v0 = src.reshape(Vector(reshape_shape_0, 6) /*shape*/);"
-    )
+    assert stmt == "Memory<TSM, float> v0 = src.reshape({2, 3, 4, 5, 6, 1} /*shape*/);"
+    assert "Vector" not in stmt
+    assert "reshape_shape" not in stmt
 
 
-def test_emit_c_lowers_npu_demo_dma_slice_deslice_vector2_contracts() -> None:
-    """验证 npu_demo 下 2D slice/deslice 使用 Vector 参数发射。
+def test_emit_c_lowers_npu_demo_dma_slice_deslice_brace_list_contracts() -> None:
+    """验证 npu_demo 下 2D slice/deslice 使用 brace-list 参数发射。
 
     功能说明:
     - 通过公开 `emit_c_op(...)` 入口覆盖非 1D/3D 的 `dma.slice` 与 `dma.deslice` 发射路径。
-    - 锁定 2D offset/size/stride 以 `Vector{...}` 形式传给 npu_demo helper。
+    - 锁定 2D offset/size/stride 以 `{...}` 形式传给 npu_demo helper。
 
     使用示例:
-    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_slice_deslice_vector2_contracts
+    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_dma_slice_deslice_brace_list_contracts
     """
 
     mem_type = _make_memory_type([2, 2], [2, 1], space="global", element_type=f32)
@@ -1642,10 +1644,10 @@ def test_emit_c_lowers_npu_demo_dma_slice_deslice_vector2_contracts() -> None:
     )
 
     assert emit_c_op(slice_op, ctx) == (
-        "slice(dst /*dst*/, src /*source*/, Vector{0, 1} /*offset*/, Vector{2, 2} /*size*/, Vector{1, 1} /*stride*/);"
+        "slice(dst /*dst*/, src /*source*/, {0, 1} /*offset*/, {2, 2} /*size*/, {1, 1} /*stride*/);"
     )
     assert emit_c_op(deslice_op, ctx) == (
-        "deslice(dst /*target*/, src /*source*/, Vector{0, 1} /*offset*/, Vector{2, 2} /*size*/, Vector{1, 1} /*stride*/);"
+        "deslice(dst /*target*/, src /*source*/, {0, 1} /*offset*/, {2, 2} /*size*/, {1, 1} /*stride*/);"
     )
 
 
@@ -2091,9 +2093,7 @@ def test_emit_c_lowers_npu_demo_dma_indexed_and_fill_helpers() -> None:
     assert "load<GM, GM, int32_t, int32_t>(dst /*dst*/, src /*source*/, {1, 2} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);" in joined
     assert (
         "store<GM, GM, int32_t, int32_t>(dst /*dst*/, src /*source*/, "
-        "Vector(static_cast<long long>(1), static_cast<long long>(2)) /*offset*/, "
-        "Vector(static_cast<long long>(2), static_cast<long long>(3)) /*size*/, "
-        "Vector(static_cast<long long>(1), static_cast<long long>(1)) /*stride*/);"
+        "{1, 2} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);"
     ) in joined
     assert f"fill<GM, int32_t>(dst /*dst*/, {fill_cast_name} /*value*/);" in joined
 
@@ -2268,7 +2268,7 @@ def test_emit_c_op_lowers_dma_alloc_and_view() -> None:
 
     assert npu_view_stmt == (
         "Memory<GM, float> source_1 = "
-        "source.view<float>(Vector{1, 0} /*offset*/, Vector{2, 3} /*size*/, Vector{1, 1} /*stride*/);"
+        "source.view<float>({1, 0} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);"
     )
 
     pool_type = _make_memory_type([128], [1], space="shared", element_type=i8)
@@ -2307,10 +2307,11 @@ def test_emit_c_op_lowers_dma_alloc_and_view() -> None:
 
     npu_reinterpret_stmt = emit_c_op(npu_reinterpret, npu_reinterpret_ctx)
 
-    assert "long long v0_shape[2] = {2, 3};" in npu_reinterpret_stmt
-    assert "long long v0_stride[2] = {3, 1};" in npu_reinterpret_stmt
     assert "Memory<TSM, float> v0(reinterpret_cast<float*>(const_cast<int8_t*>(pool.data()) + 8)" in npu_reinterpret_stmt
+    assert "{2, 3} /*shape*/, {3, 1} /*stride*/" in npu_reinterpret_stmt
     assert "pool.format()" in npu_reinterpret_stmt
+    assert "long long v0_shape" not in npu_reinterpret_stmt
+    assert "long long v0_stride" not in npu_reinterpret_stmt
 
 
 # EC-010
@@ -2746,13 +2747,13 @@ def test_emit_c_lowers_npu_demo_tuner_cost_dma_slice_and_deslice() -> None:
 
     assert emit_c_op(slice_op, slice_ctx) == (
         "S_INT cost0 = cost::slice<TSM, GM, float, DMA1>"
-        "(target /*target*/, source /*source*/, Vector{0, 0} /*offset*/, "
-        "Vector{2, 2} /*size*/, Vector{1, 1} /*stride*/);"
+        "(target /*target*/, source /*source*/, {0, 0} /*offset*/, "
+        "{2, 2} /*size*/, {1, 1} /*stride*/);"
     )
     assert emit_c_op(deslice_op, deslice_ctx) == (
         "S_INT cost0 = cost::deslice<TSM, GM, float, DMA1>"
-        "(target /*target*/, source /*source*/, Vector{0, 0} /*offset*/, "
-        "Vector{2, 2} /*size*/, Vector{1, 1} /*stride*/);"
+        "(target /*target*/, source /*source*/, {0, 0} /*offset*/, "
+        "{2, 2} /*size*/, {1, 1} /*stride*/);"
     )
 
 
@@ -3105,14 +3106,6 @@ def test_emit_c_rejects_npu_demo_tuner_cost_public_error_matrix() -> None:
             r"tuner\.cost: dma\.slice source/target element type must match",
         ),
         (
-            _make_tuner_cost_op(
-                "dma.slice",
-                "DMA1",
-                [block.args[6], block.args[6], c0.result, c0.result, c0.result, c0.result, c0.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result, c1.result],
-            ),
-            r"tuner\.cost: op_name=dma\.slice npu_demo Vector supports 1\.\.4 values",
-        ),
-        (
             _make_tuner_cost_op("kernel.matmul", "MAC", [block.args[0], block.args[1]]),
             r"tuner\.cost: op_name=kernel\.matmul requires out, lhs, rhs",
         ),
@@ -3296,12 +3289,12 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     assert "S_INT tid = npu_demo::thread_id();" in stmt
     assert "S_INT tnum = npu_demo::thread_num();" in stmt
     assert "Memory<TSM, float> tsm = npu_demo::get_dynamic_memory<TSM>();" in stmt
-    assert "Memory<GM, float> src_view = source.view<float>(Vector{tid} /*offset*/, Vector{16} /*size*/, Vector{1} /*stride*/);" in stmt
-    assert "Memory<TSM, float> work_tile = tsm.view<float>(Vector{0} /*offset*/, Vector{16} /*size*/, Vector{1} /*stride*/);" in stmt
-    assert "Memory<TSM, float> out_tile = tsm.view<float>(Vector{0} /*offset*/, Vector{16} /*size*/, Vector{1} /*stride*/);" in stmt
-    assert "slice(work_tile /*dst*/, src_view /*source*/, 0 /*offset*/, 16 /*size*/, 1 /*stride*/);" in stmt
+    assert "Memory<GM, float> src_view = source.view<float>({tid} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
+    assert "Memory<TSM, float> work_tile = tsm.view<float>({0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
+    assert "Memory<TSM, float> out_tile = tsm.view<float>({0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
+    assert "slice(work_tile /*dst*/, src_view /*source*/, {0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
     assert "add<TSM, float, float>(out_tile /*out*/, work_tile /*lhs*/, work_tile /*rhs*/);" in stmt
-    assert "deslice(out /*target*/, out_tile /*source*/, tid /*offset*/, 16 /*size*/, 1 /*stride*/);" in stmt
+    assert "deslice(out /*target*/, out_tile /*source*/, {tid} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
     assert ".view<float>(" in stmt
     assert "npu_demo::view(" not in stmt
     assert "load<" not in stmt
@@ -3311,8 +3304,8 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
 
 
 # EC-027
-# 功能说明: 验证 npu_demo 下 tiled matmul 可发射 symbol.for + 2D slice/deslice + kernel.matmul 管线，且多维 slice/deslice 采用 Vector 绑定合同。
-# 测试目的: 锁定 target=npu_demo 的二维 tile helper 形态与 `matmul<...>(...)` 调用，确保多维参数不回退到 brace-list 文本并保持 deslice Vector 调用链稳定。
+# 功能说明: 验证 npu_demo 下 tiled matmul 可发射 symbol.for + 2D slice/deslice + kernel.matmul 管线，且多维 slice/deslice 采用 brace-list 绑定合同。
+# 测试目的: 锁定 target=npu_demo 的二维 tile helper 形态与 `matmul<...>(...)` 调用，确保多维参数不回退到 Vector 文本并保持 deslice brace-list 调用链稳定。
 # 使用示例: pytest -q test/dsl/gen_kernel/emit/test_package.py -k test_emit_c_lowers_npu_demo_tiled_matmul_pipeline
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/__init__.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/emit.md
@@ -3352,15 +3345,16 @@ def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
     assert "long long slice_offset" not in stmt
     assert "long long deslice_offset" not in stmt
     c_name = r"c_\d+(?:_\d+)?"
-    assert re.search(rf"Vector\{{i\d+, {c_name}\}}", stmt)
-    assert re.search(rf"Vector\{{{c_name}, i\d+\}}", stmt)
-    assert re.search(rf"Vector\{{{c_name}, {c_name}\}}", stmt)
+    assert re.search(rf"\{{i\d+, {c_name}\}}", stmt)
+    assert re.search(rf"\{{{c_name}, i\d+\}}", stmt)
+    assert re.search(rf"\{{{c_name}, {c_name}\}}", stmt)
+    assert "Vector{" not in stmt
     assert re.search(
-        rf"slice\(v\d+ /\*dst\*/, lhs /\*source\*/, Vector\{{i\d+, {c_name}\}} /\*offset\*/, Vector\{{{c_name}, {c_name}\}} /\*size\*/, Vector\{{{c_name}, {c_name}\}} /\*stride\*/\);",
+        rf"slice\(v\d+ /\*dst\*/, lhs /\*source\*/, \{{i\d+, {c_name}\}} /\*offset\*/, \{{{c_name}, {c_name}\}} /\*size\*/, \{{{c_name}, {c_name}\}} /\*stride\*/\);",
         stmt,
     )
     assert re.search(
-        rf"slice\(v\d+ /\*dst\*/, rhs /\*source\*/, Vector\{{{c_name}, i\d+\}} /\*offset\*/, Vector\{{{c_name}, {c_name}\}} /\*size\*/, Vector\{{{c_name}, {c_name}\}} /\*stride\*/\);",
+        rf"slice\(v\d+ /\*dst\*/, rhs /\*source\*/, \{{{c_name}, i\d+\}} /\*offset\*/, \{{{c_name}, {c_name}\}} /\*size\*/, \{{{c_name}, {c_name}\}} /\*stride\*/\);",
         stmt,
     )
     assert re.search(
@@ -3368,7 +3362,7 @@ def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
         stmt,
     )
     assert re.search(
-        rf"deslice\(v\d+ /\*target\*/, v\d+ /\*source\*/, Vector\{{i\d+, i\d+\}} /\*offset\*/, Vector\{{{c_name}, {c_name}\}} /\*size\*/, Vector\{{{c_name}, {c_name}\}} /\*stride\*/\);",
+        rf"deslice\(v\d+ /\*target\*/, v\d+ /\*source\*/, \{{i\d+, i\d+\}} /\*offset\*/, \{{{c_name}, {c_name}\}} /\*size\*/, \{{{c_name}, {c_name}\}} /\*stride\*/\);",
         stmt,
     )
     assert "nn.matmul" not in stmt

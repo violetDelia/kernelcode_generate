@@ -311,11 +311,11 @@ def _emit_npu_demo_tuner_cost(op: TunerCostOp, ctx) -> str:
         helper = "slice" if helper_name == "dma.slice" else "deslice"
         target_expr = emit_c_value(target_value, ctx)
         source_expr = emit_c_value(source_value, ctx)
-        if not 1 <= len(offsets) <= 4 or not 1 <= len(sizes) <= 4 or not 1 <= len(strides) <= 4:
-            raise ctx.emit_error("tuner.cost", f"op_name={helper_name} npu_demo Vector supports 1..4 values")
-        offset_expr = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in offsets) + "}"
-        size_expr = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in sizes) + "}"
-        stride_expr = "Vector{" + ", ".join(emit_c_value(value, ctx) for value in strides) + "}"
+        if len(offsets) == 0 or len(sizes) == 0 or len(strides) == 0:
+            raise ctx.emit_error("tuner.cost", f"op_name={helper_name} layout rank mismatch")
+        offset_expr = "{" + ", ".join(emit_c_value(value, ctx) for value in offsets) + "}"
+        size_expr = "{" + ", ".join(emit_c_value(value, ctx) for value in sizes) + "}"
+        stride_expr = "{" + ", ".join(emit_c_value(value, ctx) for value in strides) + "}"
         return (
             f"{ctx.current_indent}S_INT {result_name} = "
             f"cost::{helper}<{ctx.dispatch_attr(target_type)}, {ctx.dispatch_attr(source_type)}, {target_template}, {helper_kind}>"

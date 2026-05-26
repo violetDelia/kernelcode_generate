@@ -25,6 +25,8 @@
 - `template <MemorySpace Space, typename T> class Memory(Space: MemorySpace, T: type)`
 - `Memory::Memory(T* data, const long long* shape, const long long* stride, unsigned long long rank, MemoryFormat format = MemoryFormat::Norm)`
 - `Memory::Memory(T* data, const long long* shape, unsigned long long rank, MemoryFormat format = MemoryFormat::Norm)`
+- `Memory::Memory(T* data, std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
+- `Memory::Memory(T* data, std::initializer_list<long long> shape, MemoryFormat format = MemoryFormat::Norm)`
 - `Memory::data() -> T*`
 - `Memory::data() const -> const T*`
 - `Memory::shape() const -> const long long*`
@@ -35,7 +37,9 @@
 - `Memory::get_shape(unsigned long long axis) const -> long long`
 - `Memory::get_stride(unsigned long long axis) const -> long long`
 - `template <typename ViewT> Memory::view(const Vector& offset, const Vector& size, const Vector& stride) const -> Memory<Space, ViewT>`
+- `template <typename ViewT> Memory::view(std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride) const -> Memory<Space, ViewT>`
 - `Memory::reshape(const Vector& shape) const -> Memory<Space, T>`
+- `Memory::reshape(std::initializer_list<long long> shape) const -> Memory<Space, T>`
 - `Memory::element_count() const -> long long`
 - `Memory::is_contiguous() const -> bool`
 - `Memory::trance_print(const kernelcode::trance::TranceSink& sink, const char* name) const -> void`
@@ -87,6 +91,7 @@
 - `build_contiguous_stride` 不迁移 `Vector`、`Memory`、`MemorySpace` 等基础类型；这些类型继续来自 include/api 的当前公开位置。
 - `view` 不再作为 DMA 自由函数暴露在公共层；`dma.view` 的源码目标固定桥接到成员式 `source.view<T>(...)`。
 - `reshape(shape)` 只按当前公开子集收口为成员式接口，不在本轮扩展模板参数、隐式拷贝或空间改写语义。
+- initializer-list constructor、`view` 与 `reshape` overload 是 generated source layout brace-list 的稳定承接口径；生成源码不得为 npu_demo layout 参数泄漏 `Vector(...)`、`Vector{...}` 或局部 `long long *_shape[]` / `*_stride[]` buffer。
 - `include/api/Memory.h` 仅提供声明与类型边界，不提供函数体实现；具体后端实现需在各自 include 层提供。
 
 ## API详细说明
@@ -280,6 +285,41 @@ Memory<GM, float> memory(data, shape, 2);
 - 功能说明：构造 `Memory` 实例。
 - 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
 
+### `Memory::Memory(T* data, std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
+
+- api：`Memory::Memory(T* data, std::initializer_list<long long> shape, std::initializer_list<long long> stride, MemoryFormat format = MemoryFormat::Norm)`
+- 参数：
+  - `data`：输入数据或缓冲区内容；类型 `T*`；无默认值，调用方必须显式提供。
+  - `shape`：形状序列；类型 `std::initializer_list<long long>`；无默认值，长度必须为 `1..8`。
+  - `stride`：步长序列；类型 `std::initializer_list<long long>`；无默认值，长度必须与 `shape` 一致。
+  - `format`：内存格式；类型 `MemoryFormat`；默认值 `MemoryFormat::Norm`。
+- 返回值：`Memory` 实例。
+- 使用示例：
+
+  ```cpp
+float data[6] = {};
+Memory<GM, float> memory(data, {2, 3}, {3, 1});
+```
+- 功能说明：使用 brace-list layout 构造 `Memory` 实例，列表内容立即复制到对象内部元信息。
+- 注意事项：本 overload 是 generated source layout brace-list 的稳定入口；长度不一致、空列表或超过 rank 上限必须稳定失败。
+
+### `Memory::Memory(T* data, std::initializer_list<long long> shape, MemoryFormat format = MemoryFormat::Norm)`
+
+- api：`Memory::Memory(T* data, std::initializer_list<long long> shape, MemoryFormat format = MemoryFormat::Norm)`
+- 参数：
+  - `data`：输入数据或缓冲区内容；类型 `T*`；无默认值，调用方必须显式提供。
+  - `shape`：形状序列；类型 `std::initializer_list<long long>`；无默认值，长度必须为 `1..8`。
+  - `format`：内存格式；类型 `MemoryFormat`；默认值 `MemoryFormat::Norm`。
+- 返回值：`Memory` 实例。
+- 使用示例：
+
+  ```cpp
+float data[6] = {};
+Memory<GM, float> memory(data, {2, 3});
+```
+- 功能说明：使用 brace-list shape 构造连续行主序 `Memory` 视图，并自动推导 stride。
+- 注意事项：该 overload 不拥有底层 `data`；生成源码可用该入口避免局部 shape/stride buffer 泄漏。
+
 ### `Memory::data() -> T*`
 
 - api：`Memory::data() -> T*`
@@ -415,6 +455,22 @@ auto tile = memory.view<float>(offset, size, stride);
 - 功能说明：返回源 memory 的成员式子视图，不复制底层数据；`ViewT` 可与源元素类型不同，用于将动态 byte backing memory 切分为 typed view。
 - 注意事项：`offset/size/stride` 的 rank 必须与源 memory rank 一致；npu_demo 实现支持 rank `1..8`；`offset[i] >= 0`、`size[i] > 0`、`stride[i] > 0`、`source.shape[i] > 0`、`source.stride[i] > 0`；结果 shape 等于 `size`，结果 stride 等于源 physical stride 与 view logical stride 的逐维乘积，结果 data 指针等于源 data 按 `ViewT` 线性元素单位偏移后的 typed view；当 `ViewT` 与源元素类型不同时，typed view 覆盖的字节范围必须落在源 memory 的字节容量内。公开失败关键字固定为 `memory.view: invalid rank`、`memory.view: vector_rank_mismatch`、`memory.view: invalid offset/size/stride`、`memory.view: invalid source shape`、`memory.view: invalid source stride`、`memory.view: overflow`、`memory.view: out_of_bounds` 或 `memory.view: rank_too_large`。
 
+### `template <typename ViewT> Memory::view(std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride) const -> Memory<Space, ViewT>`
+
+- api：`template <typename ViewT> Memory::view(std::initializer_list<long long> offset, std::initializer_list<long long> size, std::initializer_list<long long> stride) const -> Memory<Space, ViewT>`
+- 参数：
+  - `offset`：偏移序列；类型 `std::initializer_list<long long>`；长度必须与源 memory rank 一致。
+  - `size`：尺寸序列；类型 `std::initializer_list<long long>`；长度必须与 `offset` 一致。
+  - `stride`：步长序列；类型 `std::initializer_list<long long>`；长度必须与 `offset` 一致。
+- 返回值：`Memory<Space, ViewT>`。
+- 使用示例：
+
+  ```cpp
+auto tile = memory.view<float>({0, 0}, {2, 4}, {1, 1});
+```
+- 功能说明：以 brace-list layout 返回源 memory 的成员式子视图，不复制底层数据。
+- 注意事项：本 overload 是 generated source layout brace-list 的稳定入口；语义与 Vector 版一致，生成源码不得先物化 `Vector` 或 layout buffer。
+
 ### `Memory::reshape(const Vector& shape) const -> Memory<Space, T>`
 
 - api：`Memory::reshape(const Vector& shape) const -> Memory<Space, T>`
@@ -428,6 +484,20 @@ auto reshaped = memory.reshape(shape);
 ```
 - 功能说明：执行 `reshape`。
 - 注意事项：输入 memory、offset、size、stride 和 dtype 必须符合 DMA operation 合同；非法组合必须稳定失败。
+
+### `Memory::reshape(std::initializer_list<long long> shape) const -> Memory<Space, T>`
+
+- api：`Memory::reshape(std::initializer_list<long long> shape) const -> Memory<Space, T>`
+- 参数：
+  - `shape`：目标形状序列；类型 `std::initializer_list<long long>`；长度必须为 `1..8`。
+- 返回值：`Memory<Space, T>`。
+- 使用示例：
+
+  ```cpp
+auto reshaped = memory.reshape({2, 3, 4});
+```
+- 功能说明：以 brace-list shape 返回同一 backing data 的 reshaped memory 视图。
+- 注意事项：本 overload 是 generated source layout brace-list 的稳定入口；生成源码不得为 reshape 生成 `Vector(...)`、`Vector{...}` 或 `long long reshape_shape_*` buffer。
 
 ### `Memory::element_count() const -> long long`
 
@@ -538,5 +608,6 @@ auto& item = memory.at(indices);
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
 | --- | --- | --- | --- | --- | --- | --- |
 | TC-INCLUDE-API-MEMORY-001 | 内存/DMA | `Memory<Space, T>` 的最小构造与查询语义可工作。 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `API-MEMORY-001`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`Memory<Space, T>` 的最小构造与查询语义可工作。”场景。 | `API-MEMORY-001` |
+| TC-INCLUDE-API-MEMORY-001A | 内存/DMA | `Memory` initializer-list constructor/view/reshape overload 可工作。 | 准备公开 Memory 参数和 brace-list layout。 | 运行 `test_memory_initializer_list_layout_contract`。 | brace-list overload 可编译运行，非法 layout 按公开错误失败。 | `test_memory_initializer_list_layout_contract` |
 | TC-INCLUDE-API-MEMORY-002 | 公开入口 | `npu_demo::build_contiguous_stride` 可经 `include/npu_demo/npu_demo.h` 正向编译运行，未限定的全局函数不作为成功路径。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `NPU-DEMO-PUBLIC-002`。 | 公开入口在“`npu_demo::build_contiguous_stride` 可经 `include/npu_demo/npu_demo.h` 正向编译运行，未限定的全局函数不作为成功路径。”场景下可导入、构造、注册或按名称发现。 | `NPU-DEMO-PUBLIC-002` |
 | TC-INCLUDE-API-MEMORY-003 | 执行结果 | `Memory::trance_print(...)` 在 TRANCE 开启时输出参数摘要。 | 准备 `Memory<GM, float>`、`ScopedTranceSink` 与 stdout sink，并通过 `launch` forwarded args 触发 Memory 参数打印。 | 运行 `test_npu_demo_trance_stdout_memory_and_launch_format`。 | 输出包含 `arg1 = mem[...] [2, 3] [3, 1] f32 GM`。 | `test_npu_demo_trance_stdout_memory_and_launch_format` |

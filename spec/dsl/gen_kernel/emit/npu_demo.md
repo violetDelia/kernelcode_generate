@@ -52,6 +52,7 @@
 - `scf.if` 仅作为 `arch-parallelize` 生成的 block0 guard、optional memory presence guard 及同类单块控制流辅助进入 npu_demo emit；分支体必须通过公开 `emit_c_op(...)` 递归发射；无 else 的空 false region 视为空分支；不得再回到私有 wrapper 或第二套控制流拼接器。
 - `memory.get_data` 作为 optional memory presence guard 的 pointer query 进入 npu_demo emit；实现文件固定为 `emit/npu_demo/memory.py`，通过注册体系接入，不新增 package 公开 API。
 - `symbol.cast` 的 ptr 分支只服务 `!symbol.ptr<...> -> !symbol.int<#symbol.expr<?>>`，C++ 源码使用 `reinterpret_cast<S_INT>(ptr)`；直接 ptr compare 不属于 npu_demo emit 合同。
+- `dma.*` 与 `tuner.cost(op_name="dma.*")` 的 layout 参数必须发射为 npu_demo include 层公开 initializer-list overload，完整 generated source 不得出现 `Vector(...)`、`Vector{...}` 或局部 `long long *_shape[]` / `*_stride[]` layout buffer。
 
 ## API详细说明
 

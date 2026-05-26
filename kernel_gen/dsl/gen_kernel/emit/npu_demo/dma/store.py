@@ -51,7 +51,7 @@ def _emit_npu_demo_dma_store(op: DmaStoreOp, ctx) -> str:
 
     功能说明:
     - 根据 `DmaStoreOp` 的 target、source、offset/size/stride 生成 `store<...>(...)` 语句。
-    - rank 1..4 的 offset/size/stride 统一发射为显式 `Vector(...)` 构造，避免多维裸初始化列表触发 C++ 构造歧义。
+    - offset/size/stride 统一发射为 brace-list，交由 include initializer-list overload 承接。
     - 仅作为当前文件内注册实现使用，不作为跨文件公开 API。
 
     使用示例:
@@ -64,8 +64,8 @@ def _emit_npu_demo_dma_store(op: DmaStoreOp, ctx) -> str:
     source_expr = emit_c_value(op.source, ctx)
     layout_exprs: list[str] = []
     for values in (op.offsets, op.sizes, op.strides):
-        if not 1 <= len(values) <= 4:
-            raise ctx.emit_error("dma.store", "npu_demo Vector supports 1..4 values")
+        if len(values) == 0:
+            raise ctx.emit_error("dma.store", "layout rank mismatch")
         parts: list[str] = []
         for value in values:
             owner = value.owner
@@ -82,8 +82,7 @@ def _emit_npu_demo_dma_store(op: DmaStoreOp, ctx) -> str:
                 parts.append(owner.results[0].type.expr.expr.data)
                 continue
             parts.append(emit_c_value(value, ctx))
-        cast_parts = [f"static_cast<long long>({part})" for part in parts]
-        layout_exprs.append("Vector(" + ", ".join(cast_parts) + ")")
+        layout_exprs.append("{" + ", ".join(parts) + "}")
     offset_expr, size_expr, stride_expr = layout_exprs
     return (
         f"{ctx.current_indent}store<{ctx.dispatch_attr(op.target.type)}, {ctx.dispatch_attr(op.source.type)}, "

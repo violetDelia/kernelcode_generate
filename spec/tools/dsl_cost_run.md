@@ -78,7 +78,7 @@
 - 验证包根与模块入口可公开导入。
 - 验证 `VECTOR1` 返回真实非零成本，`DMA1/DMA2` 按同一 cost function 内匹配 DMA 总字节数统一取整，`VECTOR2` 返回 `0`。
 - 验证 DMA 聚合生成源码不依赖 `npu_demo::cost::detail` 非公开 helper。
-- 验证 rank=2 `store(...)` 写回可通过 `dsl_cost_run(...)` 编译执行，且普通写回行不再使用裸 `{..}` layout。
+- 验证 rank=2 `store(...)` 写回可通过 `dsl_cost_run(...)` 编译执行，且普通写回行使用 `{..} /*offset*/`、`{..} /*size*/`、`{..} /*stride*/` brace-list public overload，不再生成 `Vector` layout。
 - 验证旧 `compute` kind 按公开错误语义失败。
 - 验证缺少 `_cost_<kind>_*` sibling 时按 `DslCostRunMissingCostFunction` 失败，且不 fallback 到普通 kernel。
 - 验证非 `npu_demo` target 按 `DslCostRunInvalidTarget` 失败。
@@ -91,7 +91,7 @@
 | TC-TOOLS-DSL-COST-RUN-001 | 执行结果 | VECTOR1 cost | 准备 npu_demo add kernel 与公开真实参数。 | 运行 `test_dsl_cost_run_returns_public_vector1_cost`。 | 返回 `int` 且非零。 | `test_dsl_cost_run_returns_public_vector1_cost` |
 | TC-TOOLS-DSL-COST-RUN-002 | 执行结果 | DMA aggregate cost | 准备两路 GM->TSM slice 与一路 TSM->GM store，且单路字节数不能整除 64 的 npu_demo add kernel。 | 运行 `test_dsl_cost_run_returns_dma1_aggregate_cost`。 | `DMA1` 返回 `ceil((lhs_bytes + rhs_bytes) / 64)`，`DMA2` 返回 `ceil(out_bytes / 64)`。 | `test_dsl_cost_run_returns_dma1_aggregate_cost` |
 | TC-TOOLS-DSL-COST-RUN-003 | 边界/异常 | DMA aggregate source avoids private detail | 开启 `dump_dir` 并运行 DMA1 cost。 | 运行 `test_dsl_cost_run_dma_source_avoids_non_public_detail_helpers`。 | 生成源码不出现 `npu_demo::cost::detail`、`reset_dma_cost_accumulator` 或 `finalize_dma_cost_accumulator`。 | `test_dsl_cost_run_dma_source_avoids_non_public_detail_helpers` |
-| TC-TOOLS-DSL-COST-RUN-003A | 执行结果 | rank2 store layout compiles | 准备 rank=2 显式 `slice + add + store` kernel。 | 运行 `test_dsl_cost_run_compiles_rank2_store_vector_layout`。 | `DMA1/DMA2` 返回公开公式成本，生成源码中的普通 `store(...)` 行不再使用裸 `{..}` layout，并可真实编译执行。 | `test_dsl_cost_run_compiles_rank2_store_vector_layout` |
+| TC-TOOLS-DSL-COST-RUN-003A | 执行结果 | rank2 store brace-list layout compiles | 准备 rank=2 显式 `slice + add + store` kernel。 | 运行 `test_dsl_cost_run_compiles_rank2_store_brace_list_layout`。 | `DMA1/DMA2` 返回公开公式成本，生成源码中的普通 `store(...)` 行使用 brace-list layout、不再生成 `Vector` layout，并可真实编译执行。 | `test_dsl_cost_run_compiles_rank2_store_brace_list_layout` |
 | TC-TOOLS-DSL-COST-RUN-004 | 执行结果 | VECTOR2 cost | 准备 npu_demo add kernel 与公开真实参数。 | 运行 `test_dsl_cost_run_returns_zero_for_vector2_reserved_kind`。 | 返回 `0`。 | `test_dsl_cost_run_returns_zero_for_vector2_reserved_kind` |
 | TC-TOOLS-DSL-COST-RUN-005 | 边界/异常 | 旧 kind | 传入旧 `compute` kind。 | 运行 `test_dsl_cost_run_rejects_old_cost_kind`。 | 按 `DslCostRunInvalidCostKind` 失败。 | `test_dsl_cost_run_rejects_old_cost_kind` |
 | TC-TOOLS-DSL-COST-RUN-006 | 边界/异常 | 缺少 cost sibling 且禁止 fallback | 准备不包含 `LaunchKernelCostFuncPass` 的公开 `PassManager` 链路。 | 运行 `test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback`。 | 按 `DslCostRunMissingCostFunction` 失败，输出参数保持原值，不 fallback 到普通 kernel。 | `test_dsl_cost_run_rejects_missing_cost_sibling_without_fallback` |

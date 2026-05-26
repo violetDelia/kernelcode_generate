@@ -311,12 +311,12 @@ def test_dsl_cost_run_dma_source_avoids_non_public_detail_helpers(tmp_path: Path
 
 
 # TC-DSL-COST-RUN-002B
-# 功能说明: 验证 rank=2 `store(...)` 写回可通过 `dsl_cost_run(...)` 编译执行，且不再发射裸 `{..}` layout。
-# 使用示例: pytest -q test/tools/test_dsl_cost_run.py -k test_dsl_cost_run_compiles_rank2_store_vector_layout
+# 功能说明: 验证 rank=2 `store(...)` 写回可通过 `dsl_cost_run(...)` 编译执行，且生成源码使用 brace-list layout。
+# 使用示例: pytest -q test/tools/test_dsl_cost_run.py -k test_dsl_cost_run_compiles_rank2_store_brace_list_layout
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit/npu_demo/dma/store.py
 # 对应 spec 文件路径: spec/tools/dsl_cost_run.md
 # 对应测试文件路径: test/tools/test_dsl_cost_run.py
-def test_dsl_cost_run_compiles_rank2_store_vector_layout(tmp_path: Path) -> None:
+def test_dsl_cost_run_compiles_rank2_store_brace_list_layout(tmp_path: Path) -> None:
     set_dump_dir(tmp_path)
     out = np.zeros((2, 5), dtype=np.float64)
     lhs = np.arange(10, dtype=np.float64).reshape(2, 5)
@@ -333,9 +333,10 @@ def test_dsl_cost_run_compiles_rank2_store_vector_layout(tmp_path: Path) -> None
     store_lines = [line for line in source_text.splitlines() if "store<GM, TSM," in line]
     assert store_lines
     for store_line in store_lines:
-        assert "{0, 0}" not in store_line
-        assert "{2, 5}" not in store_line
-        assert "{1, 1}" not in store_line
+        assert "{0, 0}" in store_line
+        assert "{2, 5}" in store_line
+        assert "{1, 1}" in store_line
+        assert "Vector" not in store_line
 
 
 # TC-DSL-COST-RUN-003

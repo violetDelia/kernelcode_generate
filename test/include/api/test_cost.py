@@ -229,9 +229,16 @@ int main() {
         npu_demo::cost::slice<TSM, GM, float, npu_demo::DMA1>(tile, source, offset, size, step);
     S_INT deslice_cost =
         npu_demo::cost::deslice<GM, TSM, float, npu_demo::DMA2>(target, tile, offset, size, step);
+    S_INT slice_list_cost =
+        npu_demo::cost::slice<TSM, GM, float, npu_demo::DMA1>(tile, source, {0}, {4}, {1});
+    S_INT deslice_list_cost =
+        npu_demo::cost::deslice<GM, TSM, float, npu_demo::DMA2>(target, tile, {0}, {4}, {1});
+    S_INT invalid_list_cost =
+        npu_demo::cost::slice<TSM, GM, float, npu_demo::DMA1>(tile, source, {0}, {4}, {0});
     S_INT miss_cost =
         npu_demo::cost::copy<TSM, GM, float, npu_demo::DMA2>(tile, source);
-    if (copy_cost != 1 || slice_cost != 1 || deslice_cost != 1 || miss_cost != 0) {
+    if (copy_cost != 1 || slice_cost != 1 || deslice_cost != 1 ||
+        slice_list_cost != 1 || deslice_list_cost != 1 || invalid_list_cost != 0 || miss_cost != 0) {
         return fail(1);
     }
     return 0;

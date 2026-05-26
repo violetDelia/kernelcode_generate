@@ -406,6 +406,87 @@ int main() {
     _compile_and_run(source)
 
 
+# API-DMA-003C
+# 功能说明: 验证 DMA initializer-list overload 覆盖 slice/deslice/store/load/transpose generated source layout 合同。
+# 测试目的: 锁定 generated source 可直接传 `{...}` layout，不需要 `Vector` 临时对象或局部 layout buffer。
+# 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_initializer_list_layout_overloads`
+# 对应功能实现文件路径: `include/npu_demo/Dma.h`
+# 对应 spec 文件路径: `spec/include/api/Dma.md`
+# 对应测试文件路径: `test/include/api/test_dma.py`
+def test_dma_initializer_list_layout_overloads() -> None:
+    source = r"""
+#include "include/api/Dma.h"
+#include "include/npu_demo/Dma.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    float source_data[12];
+    for (int i = 0; i < 12; ++i) {
+        source_data[i] = static_cast<float>(i);
+    }
+    Memory<GM, float> source(source_data, {3, 4}, {4, 1}, MemoryFormat::Norm);
+
+    float tile_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    Memory<TSM, float> tile(tile_data, {2, 2}, {2, 1}, MemoryFormat::Norm);
+    if (npu_demo::slice(tile, source, {1, 1}, {2, 2}, {1, 1}) != StatusCode::kOk) {
+        return fail(1);
+    }
+    if (tile_data[0] != 5.0f || tile_data[1] != 6.0f || tile_data[2] != 9.0f || tile_data[3] != 10.0f) {
+        return fail(2);
+    }
+
+    float target_data[12] = {0.0f};
+    Memory<GM, float> target(target_data, {3, 4}, {4, 1}, MemoryFormat::Norm);
+    if (npu_demo::deslice(target, tile, {0, 1}, {2, 2}, {1, 1}) != StatusCode::kOk) {
+        return fail(3);
+    }
+    if (target_data[1] != 5.0f || target_data[2] != 6.0f ||
+        target_data[5] != 9.0f || target_data[6] != 10.0f) {
+        return fail(4);
+    }
+
+    float stored_data[12] = {0.0f};
+    Memory<GM, float> stored(stored_data, {3, 4}, {4, 1}, MemoryFormat::Norm);
+    if (npu_demo::store(stored, tile, {1, 0}, {2, 2}, {1, 1}) != StatusCode::kOk) {
+        return fail(5);
+    }
+    if (stored_data[4] != 5.0f || stored_data[5] != 6.0f ||
+        stored_data[8] != 9.0f || stored_data[9] != 10.0f) {
+        return fail(6);
+    }
+
+    int load_data[4] = {0, 0, 0, 0};
+    Memory<TSM, int> loaded(load_data, {2, 2}, {2, 1}, MemoryFormat::Norm);
+    if (npu_demo::load(loaded, source, {1, 1}, {2, 2}, {1, 1}) != StatusCode::kOk) {
+        return fail(7);
+    }
+    if (load_data[0] != 5 || load_data[1] != 6 || load_data[2] != 9 || load_data[3] != 10) {
+        return fail(8);
+    }
+
+    float transposed_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    Memory<TSM, float> transposed(transposed_data, {2, 2}, {2, 1}, MemoryFormat::Norm);
+    if (npu_demo::transpose(transposed, tile, {1, 0}) != StatusCode::kOk) {
+        return fail(9);
+    }
+    if (transposed_data[0] != 5.0f || transposed_data[1] != 9.0f ||
+        transposed_data[2] != 6.0f || transposed_data[3] != 10.0f) {
+        return fail(10);
+    }
+
+    if (npu_demo::slice(tile, source, {0}, {2}, {1}) != StatusCode::kError) {
+        return fail(11);
+    }
+    if (npu_demo::load(loaded, source, {1, 1}, {2, 2}, {1, 0}) != StatusCode::kError) {
+        return fail(12);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
 # API-DMA-003B
 # 功能说明: 验证 `fill/broadcast` 在 npu_demo 后端可编译并物化目标块。
 # 测试目的: 锁定 `fill` 与 trailing-dimension `broadcast` 的公共 DMA helper 语义。
