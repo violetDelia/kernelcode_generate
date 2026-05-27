@@ -113,15 +113,15 @@
   - `out`：rank-2 写回目标 memory 节点。
   - `lhs`：rank-2 左矩阵 memory 节点。
   - `rhs`：rank-2 右矩阵 memory 节点。
-  - `acc`：可选 i1 累加开关节点；`None` 时发射普通 `kernel.matmul`，非 `None` 时发射中间 `kernel.matmul_fusion`。
+  - `acc`：可选 i1 累加开关节点；`None` 时发射普通 `kernel.matmul`，非 `None` 时发射动态 acc `kernel.matmul`。
   - `location`：可选源码位置。
-- 返回值：`KernelMatmulAST`；`emit_mlir(...)` 在 `acc is None` 时返回无结果 `KernelMatmulOp`，在 `acc` 存在时返回无结果 `KernelMatmulFusionOp`。
+- 返回值：`KernelMatmulAST`；`emit_mlir(...)` 返回无结果 `KernelMatmulOp`，在 `acc` 存在时写入第四个动态 acc operand。
 - 使用示例：
 
   ```python
   node = KernelMatmulAST(out, lhs, rhs, location, acc=acc)
   ```
-- 功能说明：发射 out-first `kernel.matmul(out, lhs, rhs)`；当 `acc` 由 DSL 提供时，先发射 `kernel.matmul_fusion(out,lhs,rhs,acc,fusion_list="")`，由后续 pass 分解为静态 `kernel.matmul(acc=true/false)` 分支。
+- 功能说明：发射 out-first `kernel.matmul(out, lhs, rhs)`；当 `acc` 由 DSL 提供时，直接发射 `kernel.matmul(out,lhs,rhs,acc)` 动态 acc 形态。
 - 注意事项：不接受 `memoryspace` 参数；`acc` 必须 lower 为 i1 SSA value；mixed-space 是否可用以 `spec/operation/kernel.md` 和 `spec/dialect/kernel.md` 为准。
 
 ### `class KernelImg2Col1dAST(...)`
@@ -178,5 +178,5 @@
 | TC-DSL-AST-NODES-KERNEL-002A | pass 改写 | min/max kind lower | 构造公开 `KernelBinaryElewiseAST(..., KernelBinaryElewiseKind.MIN/MAX)`。 | 发射 MLIR。 | 返回 `KernelBinaryElewiseOp(kind="min"|"max")`。 | `test_kernel_binary_elewise_node_emits_min_max_kind` |
 | TC-DSL-AST-NODES-KERNEL-005 | pass 改写 | exp lower | 构造公开 `KernelExpAST`。 | 发射 MLIR。 | 返回 `KernelExpOp`。 | `test_kernel_exp_node_emits_exp_op` |
 | TC-DSL-AST-NODES-KERNEL-006 | pass 改写 | reduce lower | 构造公开 `KernelReduceAST`。 | 发射 MLIR。 | 返回 `KernelReduceOp(kind=...)`。 | `test_kernel_reduce_node_emits_reduce_op` |
-| TC-DSL-AST-NODES-KERNEL-003 | pass 改写 | matmul lower | 构造 mixed-space rank-2 memory。 | 发射 MLIR。 | 无 `acc` 时返回无结果 `KernelMatmulOp`；有 i1 `acc` 时返回无结果 `KernelMatmulFusionOp`。 | `test_kernel_matmul_node_emits_matmul_op` |
+| TC-DSL-AST-NODES-KERNEL-003 | pass 改写 | matmul lower | 构造 mixed-space rank-2 memory。 | 发射 MLIR。 | 无 `acc` 时返回无结果 `KernelMatmulOp`；有 i1 `acc` 时返回动态 acc `KernelMatmulOp`。 | `test_kernel_matmul_node_emits_matmul_op` |
 | TC-DSL-AST-NODES-KERNEL-004 | pass 改写 | img2col2d lower | 构造公开 img2col2d memory 与参数。 | 发射 MLIR。 | 返回 `KernelImg2col2dOp`。 | `test_kernel_img2col2d_node_emits_img2col2d_op` |

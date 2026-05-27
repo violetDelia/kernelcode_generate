@@ -1295,26 +1295,29 @@ def test_build_registered_kernel_pattern_passes() -> None:
 
 
 # TC-REGISTRY-007N
-# 功能说明: 验证 kernel-aggregate 与 kernel-matmul-fusion-decompose 内置 pass 可通过 registry 稳定构造。
-# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_kernel_matmul_fusion_passes
+# 功能说明: 验证 kernel-aggregate 与 kernel-decompose 内置 pass 可通过 registry 稳定构造。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_kernel_decompose_passes
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
 # 对应测试文件路径: test/passes/test_registry.py
-def test_build_registered_kernel_matmul_fusion_passes() -> None:
+def test_build_registered_kernel_decompose_passes() -> None:
     load_builtin_passes()
 
     aggregate_pass = build_registered_pass("kernel-aggregate", {"matmul-acc": "true", "fold": "false"})
-    decompose_pass = build_registered_pass("kernel-matmul-fusion-decompose", {"fold": "false"})
+    decompose_pass = build_registered_pass("kernel-decompose", {"fold": "false"})
 
     assert aggregate_pass.name == "kernel-aggregate"
     assert aggregate_pass.matmul_acc is True
     assert aggregate_pass.fold is False
     assert aggregate_pass.__class__.__module__ == "kernel_gen.passes.kernel_aggregate"
-    assert decompose_pass.name == "kernel-matmul-fusion-decompose"
+    assert decompose_pass.name == "kernel-decompose"
     assert decompose_pass.fold is False
-    assert decompose_pass.__class__.__module__ == "kernel_gen.passes.kernel_matmul_fusion_decompose"
+    assert decompose_pass.__class__.__module__ == "kernel_gen.passes.kernel_decompose"
     assert "kernel-aggregate" in list_registered_passes()
-    assert "kernel-matmul-fusion-decompose" in list_registered_passes()
+    assert "kernel-decompose" in list_registered_passes()
+    assert "kernel-matmul-fusion-decompose" not in list_registered_passes()
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("kernel_gen.passes.kernel_matmul_fusion_decompose")
 
 
 # TC-REGISTRY-007M
@@ -1346,12 +1349,12 @@ def test_build_registered_kernel_pattern_passes_reject_unknown_options() -> None
 
 
 # TC-REGISTRY-007O
-# 功能说明: 验证 kernel-aggregate 与 kernel-matmul-fusion-decompose 通过 registry 构造时拒绝非法 options。
-# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_kernel_matmul_fusion_passes_reject_options
+# 功能说明: 验证 kernel-aggregate 与 kernel-decompose 通过 registry 构造时拒绝非法 options。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_build_registered_kernel_decompose_passes_reject_options
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
 # 对应测试文件路径: test/passes/test_registry.py
-def test_build_registered_kernel_matmul_fusion_passes_reject_options() -> None:
+def test_build_registered_kernel_decompose_passes_reject_options() -> None:
     load_builtin_passes()
 
     with pytest.raises(
@@ -1373,11 +1376,11 @@ def test_build_registered_kernel_matmul_fusion_passes_reject_options() -> None:
     with pytest.raises(
         KernelCodeError,
         match=(
-            r"^PassRegistryError: pass 'kernel-matmul-fusion-decompose' option error: "
-            r".*kernel-matmul-fusion-decompose options unknown: mode"
+            r"^PassRegistryError: pass 'kernel-decompose' option error: "
+            r".*kernel-decompose options unknown: mode"
         ),
     ):
-        build_registered_pass("kernel-matmul-fusion-decompose", {"mode": "fast"})
+        build_registered_pass("kernel-decompose", {"mode": "fast"})
 
 
 # TC-REGISTRY-008
@@ -1402,7 +1405,8 @@ def test_load_builtin_passes_is_idempotent() -> None:
     assert "kernel-pattern-attach" in list_registered_passes()
     assert "transform-apply" in list_registered_passes()
     assert "kernel-aggregate" in list_registered_passes()
-    assert "kernel-matmul-fusion-decompose" in list_registered_passes()
+    assert "kernel-decompose" in list_registered_passes()
+    assert "kernel-matmul-fusion-decompose" not in list_registered_passes()
     assert "no-op-pipeline" in list_registered_pipelines()
     assert "default-lowering" in list_registered_pipelines()
     assert "npu-demo-lowering" in list_registered_pipelines()

@@ -14,7 +14,7 @@
 - `class KernelExpOp(input_value: SSAValue | Operation, out: SSAValue | Operation, space: NnMemorySpaceAttr)`
 - `class KernelReduceOp(out: SSAValue | Operation, input_value: SSAValue | Operation, *, kind: str | StringAttr, axis: int | IntegerAttr | IntAttr, keepdim: bool | int | IntegerAttr | IntAttr, space: NnMemorySpaceAttr)`
 - `class KernelReduceMinOp(out: SSAValue | Operation, input_value: SSAValue | Operation, axis: int | IntegerAttr | IntAttr, keepdim: bool | int | IntegerAttr | IntAttr, space: NnMemorySpaceAttr)`
-- `class KernelMatmulOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr, *, acc: bool | int | IntegerAttr | IntAttr = False)`
+- `class KernelMatmulOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr, *, acc: bool | int | IntegerAttr | IntAttr | SSAValue | Operation = False)`
 - `class KernelMatmulFusionOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, acc: SSAValue | Operation, *, space: NnMemorySpaceAttr, fusion_list: str | StringAttr = "")`
 - `class KernelImg2col1dOp(out: SSAValue | Operation, input_value: SSAValue | Operation, k: SSAValue | Operation, s: SSAValue | Operation, d: SSAValue | Operation, p_left: SSAValue | Operation, p_right: SSAValue | Operation, space: NnMemorySpaceAttr)`
 - `class KernelImg2col2dOp(out: SSAValue | Operation, input_value: SSAValue | Operation, kh: SSAValue | Operation, kw: SSAValue | Operation, sh: SSAValue | Operation, sw: SSAValue | Operation, dh: SSAValue | Operation, dw: SSAValue | Operation, ph: SSAValue | Operation, pw: SSAValue | Operation, pl: SSAValue | Operation, pr: SSAValue | Operation, space: NnMemorySpaceAttr)`
@@ -48,8 +48,8 @@
 - 所有 op 不产生 SSA result，结果必须写入 `outs(...)`；不得把 `out` 写回链路写成“实现自定”或“可选消费”。
 - 所有 op 必须通过 xDSL `MemoryEffect` trait 暴露对 memory operand 的读写语义，供 pass 通过 `xdsl.traits.get_effects(op)` 机械判定生命周期：
   - `kernel.binary_elewise` 对 `out` 暴露 `WRITE`，对 `lhs/rhs` 暴露 `READ`。
-  - `kernel.matmul(acc=false)` 或缺少 `acc` attr 时对 `out` 暴露 `WRITE`，对 `lhs/rhs` 暴露 `READ`。
-  - `kernel.matmul(acc=true)` 对 `out` 暴露 `READ + WRITE`，对 `lhs/rhs` 暴露 `READ`。
+  - `kernel.matmul(acc=false)` 或缺少 `acc` attr 且无动态 acc operand 时对 `out` 暴露 `WRITE`，对 `lhs/rhs` 暴露 `READ`。
+  - `kernel.matmul(acc=true)` 或存在动态 acc operand 时对 `out` 暴露 `READ + WRITE`，对 `lhs/rhs` 暴露 `READ`。
   - `kernel.matmul_fusion` 对 `out` 暴露 `READ + WRITE`，对 `lhs/rhs` 暴露 `READ`；`acc` 是 i1 控制 operand，不暴露 memory effect；`fusion_list` 仅是字符串 metadata，不影响 effect。
   - `kernel.select` 对 `out` 暴露 `WRITE`，对 `cond/lhs/rhs` 暴露 `READ`。
   - `kernel.exp`、`kernel.reduce`、`kernel.reduce_min`、`kernel.img2col1d`、`kernel.img2col2d` 对 `out` 暴露 `WRITE`，对 `input` 暴露 `READ`。
@@ -256,13 +256,13 @@ func.return %out : !nn.memory<f32, [B], GM>
 - 返回 `KernelReduceMinOp`。
 - 结果写入 `out`。
 
-### `class KernelMatmulOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr, *, acc: bool | int | IntegerAttr | IntAttr = False)`
+### `class KernelMatmulOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr, *, acc: bool | int | IntegerAttr | IntAttr | SSAValue | Operation = False)`
 
-- api：`class KernelMatmulOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr, *, acc: bool | int | IntegerAttr | IntAttr = False)`
+- api：`class KernelMatmulOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr, *, acc: bool | int | IntegerAttr | IntAttr | SSAValue | Operation = False)`
 
 - 功能说明：
 
-- 对左右输入 operand 执行矩阵乘，并把结果写入输出 operand；`acc=true` 时读取旧 `out` 并累加写回。
+- 对左右输入 operand 执行矩阵乘，并把结果写入输出 operand；静态 `acc=true` 或动态 acc operand 为真时读取旧 `out` 并累加写回。
 
 - 参数：
 
@@ -270,7 +270,7 @@ func.return %out : !nn.memory<f32, [B], GM>
 - `rhs(!nn.memory<...>)`：右输入 operand。
 - `out(!nn.memory<...>)`：输出 operand。
 - `space(#nn.space<...>)`：op 的空间属性。
-- `acc(i1)`：可选静态累加属性；缺省或 `false` 表示覆盖写，`true` 表示累加写。
+- `acc(bool|i1 attr|SSAValue|Operation)`：可选累加控制；bool/int/attr 走静态 attr，SSAValue/Operation 走第四个动态 `i1` operand；缺省或 `false` 表示覆盖写，`true` 表示累加写。
 
 - 使用示例：
 
@@ -278,6 +278,8 @@ func.return %out : !nn.memory<f32, [B], GM>
 %out = dma.alloc value : !nn.memory<f32, [M, N], GM>
 kernel.matmul %lhs, %rhs, %out : value
 kernel.matmul %lhs, %rhs, %out {acc = true} : value
+%acc = symbol.ne %k, %k_start : !symbol.iter<...>, !symbol.int<...> -> i1
+"kernel.matmul"(%out, %lhs, %rhs, %acc) {space = #nn.space<global>} : (..., i1) -> ()
 func.return %out : !nn.memory<f32, [M, N], GM>
 ```
 
@@ -290,8 +292,10 @@ func.return %out : !nn.memory<f32, [M, N], GM>
 - `lhs`、`rhs`、`out` 可以使用不同合法 memory space；该 mixed-space 只对 `kernel.matmul` 生效，不扩展到 `kernel.binary_elewise`、`kernel.select`、`kernel.exp`、`kernel.reduce` 或 `kernel.img2col*`。
 - `space` attribute 只要求是合法 `NnMemorySpaceAttr`；不要求与 `lhs/rhs/out` 任一 operand 的 space 相同，也不重新定义为 out space 或执行主导 space。
 - `kernel.matmul` 不接受批维 broadcast 或隐式 transpose。
-- `acc` 只接受 `bool`、`0/1`、`IntegerAttr` i1 或 `IntAttr` bool/int；其它 attr、非 i1 宽度或非 0/1 整数必须 verifier 失败，错误短语固定为 `kernel.matmul acc must be bool/i1`。
-- 缺少 `acc` attr 与 `acc=false` 语义一致；`acc=true` 时 MemoryEffect 必须把 `out` 标成 `READ + WRITE`。
+- `acc` 静态 attr 只接受 `bool`、`0/1`、`IntegerAttr` i1 或 `IntAttr` bool/int；其它 attr、非 i1 宽度或非 0/1 整数必须 verifier 失败，错误短语固定为 `kernel.matmul acc must be bool/i1`。
+- 动态 acc operand 必须是第四个 operand，类型必须为 `i1`；非 `i1` 必须 verifier 失败，错误短语固定为 `kernel.matmul acc must be bool/i1`。
+- 单个 op 不允许同时存在动态 acc operand 与静态 `acc` attr；冲突必须 verifier 失败，错误短语固定为 `kernel.matmul acc must not be both operand and attr`。
+- 缺少 `acc` attr 且无动态 acc operand 与 `acc=false` 语义一致；`acc=true` 或存在动态 acc operand 时 MemoryEffect 必须把 `out` 标成 `READ + WRITE`。
 
 - 返回值：
 
@@ -306,7 +310,7 @@ func.return %out : !nn.memory<f32, [M, N], GM>
 
 - 中间 IR 的矩阵乘累加 op：`acc=false` 时覆盖写 `out = lhs @ rhs`，`acc=true` 时累加写 `out += lhs @ rhs`。
 - `fusion_list` 是 pass 生成的字符串 metadata；默认空字符串保持旧构造 / 旧 IR 兼容，非空字符串必须 round-trip。
-- 本 op 不直接 emit/source，必须在进入 `producer-consumer-analysis`、`memory-pool`、outline 或 gen_kernel/source 前由 `KernelMatmulFusionDecomposePass` 分解回既有可 emit IR。
+- 本 op 不直接 emit/source，必须在进入 `producer-consumer-analysis`、`memory-pool`、outline 或 gen_kernel/source 前由 `KernelDecomposePass` 分解为动态 acc `kernel.matmul`。
 
 - 参数：
 
@@ -329,7 +333,7 @@ func.return %out : !nn.memory<f32, [M, N], GM>
 - `lhs.element_type`、`rhs.element_type`、`out.element_type` 必须一致。
 - `acc` 必须是 `i1`；非 `i1` 必须 verifier 失败，错误短语包含 `kernel.matmul_fusion acc must be i1`。
 - `fusion_list` 只接受 `str | StringAttr`；IR attr 非字符串必须 verifier 失败，错误短语包含 `kernel.matmul_fusion fusion_list must be string`。
-- `fusion_list` 不参与 shape/dtype 校验、MemoryEffect 或 `KernelMatmulFusionDecomposePass` 分支选择；分解后不得复制该 metadata 到普通 `kernel.matmul`。
+- `fusion_list` 不参与 shape/dtype 校验、MemoryEffect 或 `KernelDecomposePass` 分解决策；分解后不得复制该 metadata 到普通 `kernel.matmul`。
 - rank 非二维、K 维失配、输出 shape 失配、dtype 失配必须分别使用 `kernel.matmul_fusion requires rank-2 memory types`、`kernel.matmul_fusion contracting dimensions must match`、`kernel.matmul_fusion result shape must match lhs/rhs`、`kernel.matmul_fusion element_type must match across operands`。
 - MemoryEffect 必须把 `out` 标成 `READ + WRITE`，`lhs/rhs` 标成 `READ`。
 
@@ -442,6 +446,7 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 - 验证 `kernel.binary_elewise / kernel.exp / kernel.reduce / kernel.reduce_min / kernel.matmul / kernel.img2col*` 的 op 名字、关键 attrs 与 `out` 消费链路合同。
 - 验证 `kernel.matmul` mixed-space 合同只放开 out/lhs/rhs space 一致性，不放开 shape、rank 或 dtype。
 - 验证 `kernel.matmul` 对非二维 operand、`[M,K] x [K,N] -> [M,N]` 形状不匹配的 verifier 拒绝路径已被机械锁定。
+- 验证 `kernel.matmul` 动态 acc operand 的 constructor、parse/print、互斥规则、非 i1 拒绝与 MemoryEffect。
 - 验证 `kernel.matmul_fusion` 的公开构造、acc=i1、shape/dtype verifier、READ+WRITE effect 与 source 前必须分解边界。
 - 验证 `kernel.img2col1d/img2col2d` 的输入 rank/layout 合同与结构化输出合同已被机械锁定。
 - 验证 `kernel.img2col1d` 的 `input.shape + attrs -> W_out`、`kernel.img2col2d` 的 `input.shape + attrs -> OH/OW` 公式与拒绝路径已被机械锁定。
@@ -466,6 +471,10 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 | TC-KRN-014A | 内存/DMA | `kernel.matmul` 允许 out/lhs/rhs mixed-space | 准备 out@tsm、lhs@tlm1、rhs@tlm2 且 shape/dtype 合法的公开 memory operand。 | 运行 `test_kernel_matmul_allows_mixed_spaces`。 | `kernel.matmul` verifier 通过，不要求 operand space 与 `space` attribute 一致。 | `test_kernel_matmul_allows_mixed_spaces` |
 | TC-KRN-014 | 边界/异常 | `kernel.matmul` 拒绝 dtype mismatch | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_kernel_matmul_dtype_mismatch`。 | “`kernel.matmul` 拒绝 dtype mismatch”场景按公开错误语义失败或被拒绝。 | `test_kernel_matmul_dtype_mismatch` |
 | TC-KRN-015 | 边界/异常 | `kernel.matmul` 拒绝非二维 operand 与 `[M,K] x [K,N] -> [M,N]` shape 失配 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_kernel_matmul_rank_shape_contract`。 | “`kernel.matmul` 拒绝非二维 operand 与 `[M,K] x [K,N] -> [M,N]` shape 失配”场景按公开错误语义失败或被拒绝。 | `test_kernel_matmul_rank_shape_contract` |
+| TC-KRN-015A | 公开入口 | `kernel.matmul` 支持动态 acc operand | 准备合法 out/lhs/rhs memory 与 i1 acc SSAValue。 | 运行 `test_kernel_matmul_dynamic_acc_constructor_and_memory_effects`。 | constructor 写入第四 operand，不写静态 attr，MemoryEffect 对 out 为 READ+WRITE。 | `test_kernel_matmul_dynamic_acc_constructor_and_memory_effects` |
+| TC-KRN-015B | 符号语义 | `kernel.matmul` 动态 acc parse / print round-trip | 准备四 operand `kernel.matmul` IR。 | 运行 `test_kernel_matmul_dynamic_acc_parse_print_round_trip`。 | IR 可解析和 verify，打印仍为四 operand 形态，不写静态 `acc=true/false`。 | `test_kernel_matmul_dynamic_acc_parse_print_round_trip` |
+| TC-KRN-015C | 边界/异常 | `kernel.matmul` 拒绝动态 acc 与静态 attr 共存 | 准备动态 acc op 并同时写入静态 `acc` attr。 | 运行 `test_kernel_matmul_rejects_dynamic_and_static_acc_together`。 | verifier 失败，错误短语包含 `kernel.matmul acc must not be both operand and attr`。 | `test_kernel_matmul_rejects_dynamic_and_static_acc_together` |
+| TC-KRN-015D | 边界/异常 | `kernel.matmul` 拒绝非 i1 动态 acc | 准备非 i1 SSAValue 作为动态 acc。 | 运行 `test_kernel_matmul_rejects_non_i1_dynamic_acc`。 | verifier 失败，错误短语包含 `kernel.matmul acc must be bool/i1`。 | `test_kernel_matmul_rejects_non_i1_dynamic_acc` |
 | TC-KRN-015F | 内存/DMA | `kernel.matmul_fusion` 支持静态/动态合法 shape、acc=i1 与 READ+WRITE effect | 准备合法 out/lhs/rhs memory 与 i1 acc。 | 运行 `test_kernel_matmul_fusion_success_and_memory_effects`。 | verifier 通过，`out` 暴露 READ+WRITE，`lhs/rhs` 暴露 READ。 | `test_kernel_matmul_fusion_success_and_memory_effects` |
 | TC-KRN-015G | 边界/异常 | `kernel.matmul_fusion` 拒绝 acc、shape、dtype 非法组合 | 准备 acc 非 i1、contracting dimension 不一致、输出 shape 不一致与 dtype mismatch。 | 运行 `test_kernel_matmul_fusion_verifier_errors`。 | 按公开错误短语失败。 | `test_kernel_matmul_fusion_verifier_errors` |
 | TC-KRN-017 | 执行结果 | `kernel.img2col1d/img2col2d` 保持结构化输出与显式窗口 attrs | 准备公开输入数据、执行入口或 CLI 状态文件。 | 运行 `test_kernel_img2col_structured_contract`。 | 命令返回码、输出、执行结果或状态变更体现“`kernel.img2col1d/img2col2d` 保持结构化输出与显式窗口 attrs”场景。 | `test_kernel_img2col_structured_contract` |
@@ -477,7 +486,7 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 | TC-KRN-027 | 边界/异常 | `kernel.img2col2d` 拒绝 space/dtype/window 失配并支持动态参数和动态 shape | 准备 2D img2col 的 space、dtype、窗口轴、动态 symbol 与动态 shape 组合。 | 运行 `test_kernel_img2col2d_public_contract_matrix`。 | 非法 space/dtype/window 失配被拒绝；动态参数或动态 shape 不误报静态合同失败。 | `test_kernel_img2col2d_public_contract_matrix` |
 | TC-KRN-028 | 边界/异常 | `kernel.reduce` 通用入口覆盖 `kind/axis/keepdim/shape` 公开矩阵 | 准备 `sum/min/max`、不同 axis/keepdim 形态与非法输出。 | 运行 `test_kernel_reduce_public_kind_axis_keepdim_matrix`。 | 合法通用 reduce 通过；非法 kind、dtype、space、shape 按公开错误语义失败。 | `test_kernel_reduce_public_kind_axis_keepdim_matrix` |
 | TC-KRN-029 | 边界/异常 | `kernel.reduce_min` 拒绝 dtype 与 space 不一致 | 准备 dtype、输出 space 与属性 space 失配场景。 | 运行 `test_kernel_reduce_min_dtype_space_matrix`。 | `kernel.reduce_min` 对 dtype 和 space 失配按公开错误语义失败。 | `test_kernel_reduce_min_dtype_space_matrix` |
-| TC-KRN-030 | 内存/DMA | `kernel.binary_elewise`、`kernel.matmul` 与 `kernel.select` 暴露 out write / input read effect | 准备合法二元、matmul 与 select op。 | 运行 `test_kernel_binary_elewise_memory_effects`、`test_kernel_matmul_memory_effects`、`test_kernel_select_memory_effects`。 | `get_effects(op)` 返回输入 memory operand 的 `READ`；`kernel.matmul(acc=false)` 对 out 为 `WRITE`，`kernel.matmul(acc=true)` 对 out 为 `READ + WRITE`。 | `test_kernel_binary_elewise_memory_effects` / `test_kernel_matmul_memory_effects` / `test_kernel_select_memory_effects` |
+| TC-KRN-030 | 内存/DMA | `kernel.binary_elewise`、`kernel.matmul` 与 `kernel.select` 暴露 out write / input read effect | 准备合法二元、matmul 与 select op。 | 运行 `test_kernel_binary_elewise_memory_effects`、`test_kernel_matmul_memory_effects`、`test_kernel_select_memory_effects`。 | `get_effects(op)` 返回输入 memory operand 的 `READ`；`kernel.matmul(acc=false)` 对 out 为 `WRITE`，`kernel.matmul(acc=true)` 或动态 acc 对 out 为 `READ + WRITE`。 | `test_kernel_binary_elewise_memory_effects` / `test_kernel_matmul_memory_effects` / `test_kernel_select_memory_effects` |
 | TC-KRN-031 | 内存/DMA | `kernel.exp`、`kernel.img2col*` 与 `kernel.reduce*` 暴露 out write / input read effect | 准备合法 unary、img2col 与 reduce op。 | 运行 `test_kernel_exp_memory_effects`、`test_kernel_img2col_memory_effects`、`test_kernel_reduce_memory_effects`。 | `get_effects(op)` 返回 out 的 `WRITE` 与 input 的 `READ`。 | `test_kernel_exp_memory_effects` / `test_kernel_img2col_memory_effects` / `test_kernel_reduce_memory_effects` |
 
 

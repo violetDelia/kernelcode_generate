@@ -62,9 +62,7 @@ AttachArchInformationPass = importlib.import_module("kernel_gen.passes.attach_ar
 ArchParallelizePass = importlib.import_module("kernel_gen.passes.arch_parallelize").ArchParallelizePass
 DecompassPass = importlib.import_module("kernel_gen.passes.decompass").DecompassPass
 KernelAggregatePass = importlib.import_module("kernel_gen.passes.kernel_aggregate").KernelAggregatePass
-KernelMatmulFusionDecomposePass = importlib.import_module(
-    "kernel_gen.passes.kernel_matmul_fusion_decompose"
-).KernelMatmulFusionDecomposePass
+KernelDecomposePass = importlib.import_module("kernel_gen.passes.kernel_decompose").KernelDecomposePass
 KernelPatternAttachPass = importlib.import_module("kernel_gen.passes.kernel_pattern_attach").KernelPatternAttachPass
 MemoryPlanPass = importlib.import_module("kernel_gen.passes.memory_plan").MemoryPlanPass
 MemoryPoolPass = importlib.import_module("kernel_gen.passes.memory_pool").MemoryPoolPass
@@ -266,20 +264,22 @@ def _record_kernel_aggregate(self, ctx: Context, target: ModuleOp) -> None:
     _PIPELINE_PASS_ORDER.append(f"kernel-aggregate:{self.matmul_acc}")
 
 
-def _record_kernel_matmul_fusion_decompose(self, ctx: Context, target: ModuleOp) -> None:
-    """记录 kernel-matmul-fusion-decompose pass 执行。
+def _record_kernel_decompose(self, ctx: Context, target: ModuleOp) -> None:
+    """记录 kernel-decompose pass 执行。
 
     功能说明:
-    - 为 pipeline 顺序测试记录 `KernelMatmulFusionDecomposePass.apply(...)` 被调用。
+    - 为 pipeline 顺序测试记录 `KernelDecomposePass.apply(...)` 被调用。
 
     使用示例:
-    - monkeypatch.setattr(KernelMatmulFusionDecomposePass, "apply", _record_kernel_matmul_fusion_decompose)
+    - monkeypatch.setattr(KernelDecomposePass, "apply", _record_kernel_decompose)
     """
 
-    _ = self
     _ = ctx
     _ = target
-    _PIPELINE_PASS_ORDER.append("kernel-matmul-fusion-decompose")
+    pass_name = self.name
+    if pass_name != "kernel-decompose":
+        raise AssertionError(f"unexpected kernel decompose pass name: {pass_name}")
+    _PIPELINE_PASS_ORDER.append(pass_name)
 
 
 def _record_memory_plan(self, ctx: Context, target: ModuleOp) -> None:
@@ -542,7 +542,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(KernelPatternAttachPass, "apply", _record_kernel_pattern_attach)
     monkeypatch.setattr(TransformApplyPass, "apply", _record_transform_apply)
     monkeypatch.setattr(KernelAggregatePass, "apply", _record_kernel_aggregate)
-    monkeypatch.setattr(KernelMatmulFusionDecomposePass, "apply", _record_kernel_matmul_fusion_decompose)
+    monkeypatch.setattr(KernelDecomposePass, "apply", _record_kernel_decompose)
     monkeypatch.setattr(SymbolBufferHoistPass, "apply", _record_symbol_buffer_hoist)
     monkeypatch.setattr(MemoryPoolPass, "apply", _record_memory_pool)
     monkeypatch.setattr(ProducerConsumerAnalysisPass, "apply", _record_producer_consumer_analysis)
@@ -571,7 +571,7 @@ def test_npu_demo_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) 
         "cse",
         "canonicalize",
         "kernel-aggregate:True",
-        "kernel-matmul-fusion-decompose",
+        "kernel-decompose",
         "memory-plan:True:True:False",
         "symbol-hoist-pipeline",
         "cse",
@@ -755,7 +755,9 @@ def test_npu_demo_lowering_pipeline_arch_parallelize_skips_entry_point_dispatche
     assert "arch.get_block_id" in pattern
 
 
-def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tmp_path: Path) -> None:
+def test_npu_demo_lowering_pipeline_dynamic_acc_kernel_decompose_dump_shows_lifecycle_and_pool(
+    tmp_path: Path,
+) -> None:
     """验证 npu-demo-lowering 真实中间态包含 memory-plan 生命周期与 memory-pool 改写。
 
 
@@ -763,13 +765,13 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     - 通过公开 `set_dump_dir(...)` 与公开 pipeline builder 观察 pass dump。
     - 按 pass marker 查找三段 `memory-plan`、三段 `symbol-hoist-pipeline` 与 `memory-pool`，
       不依赖 dump 文件序号。
-    - 断言 `kernel-aggregate` 与 `kernel-matmul-fusion-decompose` 位于第二段 hoist cleanup 后、
+    - 断言 `kernel-aggregate` 与 `kernel-decompose` 位于第二段 hoist cleanup 后、
       第三段 memory-plan 前，且 producer stage
       仍保留 typed `dma.alloc` 形态。
     - 断言 `arch-parallelize` 位于 memory-pool 后的 `canonicalize` 之后，且 memory-pool 后没有第 5 个 CSE。
 
     使用示例:
-    - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k memory_plan_dump
+    - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k dynamic_acc_kernel_decompose_dump
     """
 
     lhs = Memory(["M", "K"], NumericType.Float32)
@@ -793,7 +795,7 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     second_symbol_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-hoist-pipeline", occurrence=2)
     third_symbol_hoist_text = _dump_stage_text_by_marker(tmp_path, "symbol-hoist-pipeline", occurrence=3)
     kernel_aggregate_text = _dump_stage_text_by_marker(tmp_path, "kernel-aggregate")
-    decompose_text = _dump_stage_text_by_marker(tmp_path, "kernel-matmul-fusion-decompose")
+    decompose_text = _dump_stage_text_by_marker(tmp_path, "kernel-decompose")
     producer_consumer_text = _dump_stage_text_by_marker(tmp_path, "producer-consumer-analysis")
     memory_pool_text = _dump_stage_text_by_marker(tmp_path, "memory-pool")
     post_pool_canonicalize_text = _dump_stage_text_by_marker(tmp_path, "canonicalize", occurrence=5)
@@ -809,8 +811,11 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     assert "dma.free" in second_memory_plan_text
     assert second_symbol_hoist_text.startswith("symbol-hoist-pipeline\n")
     assert kernel_aggregate_text.startswith("kernel-aggregate\n")
-    assert decompose_text.startswith("kernel-matmul-fusion-decompose\n")
+    assert decompose_text.startswith("kernel-decompose\n")
     assert '"kernel.matmul_fusion"' not in decompose_text
+    assert "acc = true" not in decompose_text
+    assert "acc = false" not in decompose_text
+    assert '"kernel.matmul"' in decompose_text
     assert third_memory_plan_text.startswith("memory-plan\n")
     assert third_symbol_hoist_text.startswith("symbol-hoist-pipeline\n")
     assert producer_consumer_text.startswith("producer-consumer-analysis\n")
@@ -855,7 +860,7 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     assert _dump_stage_index(tmp_path, "cse", occurrence=3) == 16
     assert _dump_stage_index(tmp_path, "canonicalize", occurrence=3) == 17
     assert _dump_stage_index(tmp_path, "kernel-aggregate") == 18
-    assert _dump_stage_index(tmp_path, "kernel-matmul-fusion-decompose") == 19
+    assert _dump_stage_index(tmp_path, "kernel-decompose") == 19
     assert _dump_stage_index(tmp_path, "memory-plan", occurrence=3) == 20
     assert _dump_stage_index(tmp_path, "symbol-hoist-pipeline", occurrence=3) == 21
     assert _dump_stage_index(tmp_path, "cse", occurrence=4) == 22
@@ -891,7 +896,7 @@ def test_npu_demo_lowering_pipeline_memory_plan_dump_shows_lifecycle_and_pool(tm
     ]
     assert markers[17:28] == [
         "kernel-aggregate",
-        "kernel-matmul-fusion-decompose",
+        "kernel-decompose",
         "memory-plan",
         "symbol-hoist-pipeline",
         "cse",
@@ -930,7 +935,7 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
 
     transform_apply_text = _dump_stage_text_by_marker(tmp_path, "transform-apply")
     kernel_aggregate_text = _dump_stage_text_by_marker(tmp_path, "kernel-aggregate")
-    decompose_text = _dump_stage_text_by_marker(tmp_path, "kernel-matmul-fusion-decompose")
+    decompose_text = _dump_stage_text_by_marker(tmp_path, "kernel-decompose")
     producer_consumer_text = _dump_stage_text_by_marker(tmp_path, "producer-consumer-analysis")
     memory_pool_text = _dump_stage_text_by_marker(tmp_path, "memory-pool")
     arch_parallelize_text = _dump_stage_text_by_marker(tmp_path, "arch-parallelize")
@@ -941,8 +946,11 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
     assert "dma.current_ring" not in transform_apply_text
     assert "dma.advance_ring" not in transform_apply_text
     assert kernel_aggregate_text.startswith("kernel-aggregate\n")
-    assert decompose_text.startswith("kernel-matmul-fusion-decompose\n")
+    assert decompose_text.startswith("kernel-decompose\n")
     assert '"kernel.matmul_fusion"' not in decompose_text
+    assert "acc = true" not in decompose_text
+    assert "acc = false" not in decompose_text
+    assert '"kernel.matmul"' in decompose_text
     assert producer_consumer_text.startswith("producer-consumer-analysis\n")
     assert "dma.alloc" in producer_consumer_text
     assert "arch.get_dynamic_memory" not in producer_consumer_text
@@ -972,9 +980,9 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
         tmp_path, "kernel-aggregate"
     )
     assert _dump_stage_index(tmp_path, "kernel-aggregate") + 1 == _dump_stage_index(
-        tmp_path, "kernel-matmul-fusion-decompose"
+        tmp_path, "kernel-decompose"
     )
-    assert _dump_stage_index(tmp_path, "kernel-matmul-fusion-decompose") + 1 == _dump_stage_index(
+    assert _dump_stage_index(tmp_path, "kernel-decompose") + 1 == _dump_stage_index(
         tmp_path, "memory-plan", occurrence=3
     )
     assert _dump_stage_index(tmp_path, "memory-plan", occurrence=3) + 1 == _dump_stage_index(

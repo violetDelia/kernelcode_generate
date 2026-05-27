@@ -4,10 +4,10 @@
 - 定义 kernel.matmul、kernel.matmul_fusion、kernel.img2col1d 与 kernel.img2col2d op。
 
 API 列表:
-- `class KernelMatmulOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr, *, acc: bool | int | IntegerAttr | IntAttr = False)`
+- `class KernelMatmulOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, space: NnMemorySpaceAttr, *, acc: bool | int | IntegerAttr | IntAttr | SSAValue | Operation = False)`
 - `class KernelMatmulFusionOp(out: SSAValue | Operation, lhs: SSAValue | Operation, rhs: SSAValue | Operation, acc: SSAValue | Operation, *, space: NnMemorySpaceAttr, fusion_list: str | StringAttr = "")`
-- `class KernelImg2col1dOp(...)`
-- `class KernelImg2col2dOp(...)`
+- `class KernelImg2col1dOp(out: SSAValue | Operation, input_value: SSAValue | Operation, k: SSAValue | Operation, s: SSAValue | Operation, d: SSAValue | Operation, p_left: SSAValue | Operation, p_right: SSAValue | Operation, space: NnMemorySpaceAttr)`
+- `class KernelImg2col2dOp(out: SSAValue | Operation, input_value: SSAValue | Operation, kh: SSAValue | Operation, kw: SSAValue | Operation, sh: SSAValue | Operation, sw: SSAValue | Operation, dh: SSAValue | Operation, dw: SSAValue | Operation, ph: SSAValue | Operation, pw: SSAValue | Operation, pl: SSAValue | Operation, pr: SSAValue | Operation, space: NnMemorySpaceAttr)`
 
 使用示例:
 - `from kernel_gen.dialect.kernel.operation import ...`
@@ -37,7 +37,7 @@ from xdsl.dialects.builtin import (
     i1,
 )
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
-from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, opt_attr_def, traits_def
+from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, opt_attr_def, opt_operand_def, traits_def
 from xdsl.traits import EffectInstance, MemoryEffect, MemoryEffectKind
 from xdsl.utils.exceptions import VerifyException
 
@@ -197,7 +197,7 @@ class _KernelMatmulMemoryEffect(MemoryEffect):
 
         功能说明:
         - `acc=false` 或缺失 attr 时 out 仅 WRITE，lhs/rhs READ。
-        - `acc=true` 时 out 额外 READ，表示累加读取旧值后写回。
+        - `acc=true` 或存在动态 acc operand 时 out 额外 READ，表示累加路径会读取旧值后写回。
 
         使用示例:
         - effects = _KernelMatmulMemoryEffect.get_effects(op)
@@ -208,7 +208,7 @@ class _KernelMatmulMemoryEffect(MemoryEffect):
             EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.lhs)),  # type: ignore[attr-defined]
             EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.rhs)),  # type: ignore[attr-defined]
         }
-        if _KERNEL_MATMUL_ACC.verify_attr(op.acc):  # type: ignore[attr-defined]
+        if op.dynamic_acc is not None or _KERNEL_MATMUL_ACC.verify_attr(op.acc):  # type: ignore[attr-defined]
             effects.add(EffectInstance(MemoryEffectKind.READ, SSAValue.get(op.out)))  # type: ignore[attr-defined]
         return effects
 
@@ -569,48 +569,22 @@ def _static_int_from_dim(dim: Attribute) -> int | None:
     except ValueError:
         return None
 
-class _BaseKernelBinaryOp(IRDLOperation):
-    """内部兼容用的旧二元 op 基类。"""
-
-    out = operand_def(NnMemoryType)
-    lhs = operand_def(NnMemoryType)
-    rhs = operand_def(NnMemoryType)
-    space = attr_def(NnMemorySpaceAttr)
-
-    def __init__(
-        self,
-        out: SSAValue | Operation,
-        lhs: SSAValue | Operation,
-        rhs: SSAValue | Operation,
-        space: NnMemorySpaceAttr,
-    ) -> None:
-        """初始化二元 op。
-
-        功能说明:
-        - 按旧二元 kernel op 的 operand 顺序保存 out/lhs/rhs 与 space 属性。
-
-        使用示例:
-        - _BaseKernelBinaryOp(out, lhs, rhs, space)
-        """
-
-        super().__init__(operands=[out, lhs, rhs], attributes={"space": space})
-
-
-
 _ERROR_SCENE = "dialect.kernel verifier"
 
 @irdl_op_definition
-class KernelMatmulOp(_BaseKernelBinaryOp):
+class KernelMatmulOp(IRDLOperation):
     """kernel.matmul。
 
 
     功能说明:
     - 结构化矩阵乘 op，输入输出均为 nn.memory。
+    - `acc` 可为静态 bool/i1 attr，也可为第四个动态 i1 operand；两者互斥。
     - verifier 强制二维输入、shape 机械一致及 element_type 对齐。
     - 允许 out/lhs/rhs 使用不同合法 memory space，`space` attribute 只校验自身合法性。
 
     使用示例:
     - KernelMatmulOp(out, lhs, rhs, _make_space("global"))
+    - KernelMatmulOp(out, lhs, rhs, _make_space("global"), acc=dynamic_acc)
 
     关联文件:
     - spec: spec/dialect/kernel.md
@@ -621,6 +595,11 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
     name = "kernel.matmul"
     traits = traits_def(_KernelMatmulMemoryEffect())
 
+    out = operand_def(NnMemoryType)
+    lhs = operand_def(NnMemoryType)
+    rhs = operand_def(NnMemoryType)
+    dynamic_acc = opt_operand_def(Attribute)
+    space = attr_def(NnMemorySpaceAttr)
     acc = opt_attr_def(IntegerAttr)
 
     def __init__(
@@ -630,29 +609,36 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
         rhs: SSAValue | Operation,
         space: NnMemorySpaceAttr,
         *,
-        acc: bool | int | IntegerAttr | IntAttr = False,
+        acc: bool | int | IntegerAttr | IntAttr | SSAValue | Operation = False,
     ) -> None:
         """初始化 kernel.matmul。
 
         功能说明:
         - 按 out/lhs/rhs/space 公开顺序构造 op。
         - `acc=True` 写入 i1 attr；`acc=False` 省略 attr，保持 IR 缺省 false 合同。
+        - `acc` 传入 SSAValue / Operation 时写入第四个动态 i1 operand。
 
         使用示例:
         - KernelMatmulOp(out, lhs, rhs, space, acc=True)
+        - KernelMatmulOp(out, lhs, rhs, space, acc=acc_value)
         """
 
         attributes: dict[str, Attribute] = {"space": space}
-        acc_attr = _KERNEL_MATMUL_ACC.normalize_attr(acc)
-        if acc_attr is not None:
-            attributes["acc"] = acc_attr
-        IRDLOperation.__init__(self, operands=[out, lhs, rhs], attributes=attributes)
+        dynamic_acc: list[SSAValue | Operation] = []
+        if isinstance(acc, (SSAValue, Operation)):
+            dynamic_acc = [acc]
+        else:
+            acc_attr = _KERNEL_MATMUL_ACC.normalize_attr(acc)
+            if acc_attr is not None:
+                attributes["acc"] = acc_attr
+        IRDLOperation.__init__(self, operands=[out, lhs, rhs, dynamic_acc], attributes=attributes)
 
     def verify_(self) -> None:
         """校验 kernel.matmul operand 与输出约束。
 
         功能说明:
         - 校验矩阵乘法 shape 合同、element type 一致性与 space 属性合法性。
+        - 校验动态 acc operand 与静态 acc attr 互斥，动态 acc 必须为 i1。
 
         使用示例:
         - KernelMatmulOp(out, lhs, rhs, space).verify()
@@ -663,6 +649,20 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
         out_type = verify_memory_type(self.out.type, "out", scene=_ERROR_SCENE)
         self.space.verify()
         _KERNEL_MATMUL_ACC.verify_attr(self.acc)
+        if self.dynamic_acc is not None:
+            if self.acc is not None:
+                raise kernel_code_error(
+                    ErrorKind.VERIFY,
+                    ErrorModule.DIALECT,
+                    ERROR_TEMPLATE.format(
+                        scene=_ERROR_SCENE,
+                        expected="kernel.matmul acc must not be both operand and attr",
+                        actual=ERROR_ACTUAL,
+                        action=ERROR_ACTION,
+                    ),
+                )
+            if SSAValue.get(self.dynamic_acc).type != i1:
+                raise _KERNEL_MATMUL_ACC.error()
         _verify_matmul_shape(lhs_type.shape.data, rhs_type.shape.data, out_type.shape.data)
         _verify_element_type_match(
             [lhs_type, rhs_type, out_type],
@@ -678,7 +678,7 @@ class KernelMatmulFusionOp(IRDLOperation):
     - 结构化矩阵乘累加中间 op，输入输出均为 nn.memory，acc 为 i1 标量。
     - `acc=false` 表示覆盖写 out，`acc=true` 表示累加写 out。
     - `fusion_list` 是字符串 metadata，不改变 verifier、effect 或分解语义。
-    - 本 op 只作为 npu-demo lowering 中间 IR，进入 source/emit 前必须由分解 pass 拆回既有 op。
+    - 本 op 只作为 npu-demo lowering 中间 IR，进入 source/emit 前必须由 `KernelDecomposePass` 分解为动态 acc `kernel.matmul`。
 
     使用示例:
     - KernelMatmulFusionOp(out, lhs, rhs, acc, space=_make_space("tsm"), fusion_list="kernel.matmul,kernel.binary_elewise.add")

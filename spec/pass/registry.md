@@ -84,7 +84,7 @@
   - `kernel-pattern-attach`：在唯一 `entry_point` host 中生成 `tuner.select` / `tuner.launch` pattern dispatcher 与两个 pattern 函数。
   - `transform-apply`：消费 pattern 函数上的 `kernel.transform_pipeline`，在函数级 clone 上执行 pass / pipeline 字符串并移除该 attr。
   - `kernel-aggregate`：在 `matmul-acc=true` 时把可证明的 `kernel.matmul(tmp)+kernel.binary_elewise(out,out,tmp)` 聚合为 `kernel.matmul_fusion`。
-  - `kernel-matmul-fusion-decompose`：在 source/emit 前把 `kernel.matmul_fusion` 分解回已有可 emit IR。
+  - `kernel-decompose`：在 source/emit 前把 `kernel.matmul_fusion` 分解为动态 acc `kernel.matmul`。
   - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 pytest 与工具层统一解析。
   - `template-name-infer`：npu-demo lowering 末尾的非语义 template name 注解 pass。
 - tuning pass `launch-kernel-cost-func` 可通过 pass registry 显式启用，但不自动进入 `default-lowering` 或 `npu-demo-lowering`。
@@ -97,7 +97,7 @@
 - `kernel-pattern-attach` 第一阶段不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `KernelPatternAttachPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'kernel-pattern-attach' option error: <原因>`。
 - `transform-apply` 第一阶段不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `TransformApplyPass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'transform-apply' option error: <原因>`。
 - `kernel-aggregate` 接受 pass 专属 `options={"matmul-acc": "true|false|1|0|yes|no|on|off"}`；`fold` 仍由 registry 通用 option 处理。未知 option 或非法 bool 必须由 `KernelAggregatePass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'kernel-aggregate' option error: <原因>`。
-- `kernel-matmul-fusion-decompose` 第一版不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `KernelMatmulFusionDecomposePass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'kernel-matmul-fusion-decompose' option error: <原因>`。
+- `kernel-decompose` 第一版不接受 pass 专属 option；`fold` 仍由 registry 通用 option 处理。未知 option 必须由 `KernelDecomposePass.from_options(...)` 失败并由 registry 保留为 `PassRegistryError: pass 'kernel-decompose' option error: <原因>`，内层原因包含 `kernel-decompose options unknown: <name>`。
 - registry 只解析 pass 通用 `fold` 选项；剩余 `options` 仅按字典透传给 pass 或 pipeline 构造入口。
 
 ### 当前公开路径与迁移矩阵
@@ -125,7 +125,7 @@
   - `kernel_gen.passes.template_name.infer`
   - `kernel_gen.passes.producer_consumer_analysis`
   - `kernel_gen.passes.kernel_aggregate`
-  - `kernel_gen.passes.kernel_matmul_fusion_decompose`
+  - `kernel_gen.passes.kernel_decompose`
 - 对公开 `RewritePattern` caller，canonical public path 固定为各 pattern 所属实现模块：
   - pattern class 必须列入所属模块 `__all__` 与对应 spec `API 列表`。
   - pass package 根 `kernel_gen.passes` 与 `kernel_gen.passes.lowering.nn_lowering` package root 只维护既有稳定 re-export，不全量重导出 pattern。
@@ -157,6 +157,7 @@
   - `kernel_gen.passes.symbol_loop_hoist`
   - `kernel_gen.passes.hoist_dma_alias_ops`
   - `kernel_gen.passes.symbol_buffer_hoist`
+  - `kernel_gen.passes.kernel_matmul_fusion_decompose`
 - 已退场的 analysis family 不再提供公开 pass 名或 registry 构造入口；`build_registered_pass("analyze-func-cost")` 必须显式失败。
 - 当前模板名推导专题的 canonical public path 固定为 `kernel_gen.passes.template_name.infer`；`kernel_gen.passes.TemplateNameInferPass` 作为包根 re-export 保持可用。
 - 旧 `kernel_gen.passes.template_name_constraints`、`kernel_gen.passes.template_name_default_constraints`、`kernel_gen.passes.template_name_graph` 与 `kernel_gen.passes.template_name_infer` 根模块必须稳定失败。

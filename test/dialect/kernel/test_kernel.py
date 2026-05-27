@@ -38,8 +38,10 @@ from xdsl.dialects.builtin import (
 )
 from xdsl.dialects.test import TestOp as _TestOp
 from xdsl.ir import Attribute, Operation, SSAValue
+from xdsl.parser import Parser
 from xdsl.traits import MemoryEffectKind, get_effects
 from xdsl.utils.exceptions import VerifyException
+from kernel_gen.core.context import build_default_context
 from kernel_gen.core.error import KernelCodeError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -771,6 +773,120 @@ def test_kernel_matmul_memory_effects() -> None:
     invalid_attr_op.attributes["acc"] = IntegerAttr(1, i32)
     with pytest.raises(KernelCodeError, match="kernel.matmul acc must be bool/i1"):
         invalid_attr_op.verify_()
+
+
+def test_kernel_matmul_dynamic_acc_constructor_and_memory_effects() -> None:
+    """验证 kernel.matmul 动态 acc constructor 与保守 MemoryEffect。
+
+    功能说明:
+    - 通过公开 `KernelMatmulOp(..., acc=SSAValue)` 构造第四个 i1 operand。
+    - 动态 acc 形态必须对 out 暴露 READ + WRITE，lhs/rhs 暴露 READ。
+
+    使用示例:
+    - pytest -q test/dialect/kernel/test_kernel.py -k dynamic_acc_constructor
+    """
+
+    lhs_type = _make_memory_type(shape=_dim_array([2, 3]))
+    rhs_type = _make_memory_type(shape=_dim_array([3, 4]))
+    out_type = _make_memory_type(shape=_dim_array([2, 4]))
+    out = _make_value(out_type)
+    lhs = _make_value(lhs_type)
+    rhs = _make_value(rhs_type)
+    acc = _TestOp(result_types=[i1]).results[0]
+    op = KernelMatmulOp(out, lhs, rhs, _make_space("global"), acc=acc)
+
+    op.verify()
+    assert op.dynamic_acc is acc
+    assert op.acc is None
+    assert _effect_kinds_by_value(op) == {
+        (MemoryEffectKind.READ, out),
+        (MemoryEffectKind.WRITE, out),
+        (MemoryEffectKind.READ, lhs),
+        (MemoryEffectKind.READ, rhs),
+    }
+
+
+def test_kernel_matmul_dynamic_acc_parse_print_round_trip() -> None:
+    """验证 kernel.matmul 动态 acc IR 可 parse / print。
+
+    功能说明:
+    - 使用公开 xDSL Parser 解析四 operand `kernel.matmul`。
+    - 打印结果不得回退为静态 `acc=true/false` attr。
+
+    使用示例:
+    - pytest -q test/dialect/kernel/test_kernel.py -k dynamic_acc_parse_print
+    """
+
+    module_text = """builtin.module {
+  func.func @dynamic_acc_case(
+      %out : !nn.memory<[#symbol.expr<2>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<tsm>>,
+      %lhs : !nn.memory<[#symbol.expr<2>, #symbol.expr<3>], [#symbol.expr<3>, #symbol.expr<1>], f32, #nn.space<tsm>>,
+      %rhs : !nn.memory<[#symbol.expr<3>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<tsm>>,
+      %acc : i1) {
+    "kernel.matmul"(%out, %lhs, %rhs, %acc) {space = #nn.space<tsm>} : (!nn.memory<[#symbol.expr<2>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<2>, #symbol.expr<3>], [#symbol.expr<3>, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#symbol.expr<3>, #symbol.expr<4>], [#symbol.expr<4>, #symbol.expr<1>], f32, #nn.space<tsm>>, i1) -> ()
+    func.return
+  }
+}"""
+    module = Parser(build_default_context(), module_text).parse_module()
+    module.verify()
+    printed = str(module)
+    assert '"kernel.matmul"(%out, %lhs, %rhs, %acc)' in printed
+    assert "acc = true" not in printed
+    assert "acc = false" not in printed
+
+
+def test_kernel_matmul_rejects_dynamic_and_static_acc_together() -> None:
+    """验证 kernel.matmul 拒绝动态 acc operand 与静态 acc attr 共存。
+
+    功能说明:
+    - 先通过公开 constructor 构造动态 acc 形态。
+    - 再模拟 parser 可产生的非法 attr 组合，直接锁定 verifier 错误短语。
+
+    使用示例:
+    - pytest -q test/dialect/kernel/test_kernel.py -k rejects_dynamic_and_static
+    """
+
+    lhs_type = _make_memory_type(shape=_dim_array([2, 3]))
+    rhs_type = _make_memory_type(shape=_dim_array([3, 4]))
+    out_type = _make_memory_type(shape=_dim_array([2, 4]))
+    op = KernelMatmulOp(
+        _make_value(out_type),
+        _make_value(lhs_type),
+        _make_value(rhs_type),
+        _make_space("global"),
+        acc=_TestOp(result_types=[i1]).results[0],
+    )
+    op.attributes["acc"] = IntegerAttr.from_bool(True)
+
+    with pytest.raises(KernelCodeError, match="kernel.matmul acc must not be both operand and attr"):
+        op.verify_()
+
+
+def test_kernel_matmul_rejects_non_i1_dynamic_acc() -> None:
+    """验证 kernel.matmul 动态 acc operand 必须为 i1。
+
+    功能说明:
+    - 使用公开 constructor 传入非 i1 SSAValue。
+    - 直接调用 dialect verifier，锁定稳定错误短语。
+
+    使用示例:
+    - pytest -q test/dialect/kernel/test_kernel.py -k rejects_non_i1_dynamic_acc
+    """
+
+    lhs_type = _make_memory_type(shape=_dim_array([2, 3]))
+    rhs_type = _make_memory_type(shape=_dim_array([3, 4]))
+    out_type = _make_memory_type(shape=_dim_array([2, 4]))
+    bad_acc = _TestOp(result_types=[i32]).results[0]
+    op = KernelMatmulOp(
+        _make_value(out_type),
+        _make_value(lhs_type),
+        _make_value(rhs_type),
+        _make_space("global"),
+        acc=bad_acc,
+    )
+
+    with pytest.raises(KernelCodeError, match="kernel.matmul acc must be bool/i1"):
+        op.verify_()
 
 
 # TC-KRN-015F

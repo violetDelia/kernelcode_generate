@@ -3367,3 +3367,31 @@ def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
     )
     assert "nn.matmul" not in stmt
     assert "arch.launch_kernel" not in stmt
+
+
+def test_npu_demo_emit_matmul_dynamic_acc_uses_acc_expression() -> None:
+    """验证 npu_demo matmul 动态 acc 发射为表达式实参。
+
+    功能说明:
+    - 通过公开 `KernelMatmulOp(..., acc=SSAValue)` 构造动态 acc matmul。
+    - 使用公开 `emit_c_op(...)` 发射，断言 acc 实参不是固定 true/false。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_package.py -k dynamic_acc_uses_acc_expression
+    """
+
+    out_type = _make_memory_type([2, 4], [4, 1], "tsm", element_type=f32)
+    lhs_type = _make_memory_type([2, 3], [3, 1], "tlm1", element_type=f32)
+    rhs_type = _make_memory_type([3, 4], [4, 1], "tlm2", element_type=f32)
+    block = Block(arg_types=[out_type, lhs_type, rhs_type, i1])
+    out, lhs, rhs, acc = block.args
+    op = KernelMatmulOp(out, lhs, rhs, NnMemorySpaceAttr.from_name("tsm"), acc=acc)
+    ctx = _npu_ctx()
+    for name, value in zip(("out", "lhs", "rhs", "runtime_acc"), block.args, strict=True):
+        ctx.bind_name(value, name)
+
+    stmt = emit_c_op(op, ctx)
+
+    assert "runtime_acc /*acc*/" in stmt
+    assert "true /*acc*/" not in stmt
+    assert "false /*acc*/" not in stmt

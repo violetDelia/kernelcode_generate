@@ -16,8 +16,8 @@
   registry 只解析通用 `fold`。
 - 内置 pass 包含 `kernel-pattern-attach` 与 `transform-apply`，用于 npu-demo lowering
   生成 pattern dispatcher 并消费 pattern transform pipeline。
-- 内置 pass 包含 `kernel-aggregate` 与 `kernel-matmul-fusion-decompose`，用于聚合
-  matmul tmp+add 中间 IR 并在 source 前分解回已有可 emit 形态。
+- 内置 pass 包含 `kernel-aggregate` 与 `kernel-decompose`，用于聚合
+  matmul tmp+add 中间 IR 并在 source 前分解为动态 acc kernel matmul。
 - 内置 pass 包含 `symbol-hoist-pipeline`，用于在一个 pass 内组合 alias 归一与 hoist pattern。
 - 文件内 helper 收口为 `_register_registry_entry`、`_build_registered_pass_instance`、
   `_build_registered_pipeline_manager`、`_pipeline_accepts_options`、`_normalize_options`、
@@ -518,7 +518,7 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
     from kernel_gen.passes.kernel_pattern_attach import KernelPatternAttachPass
     from kernel_gen.passes.kernel_aggregate import KernelAggregatePass
-    from kernel_gen.passes.kernel_matmul_fusion_decompose import KernelMatmulFusionDecomposePass
+    from kernel_gen.passes.kernel_decompose import KernelDecomposePass
     from kernel_gen.passes.multi_buffer import MultiBufferPass
     from kernel_gen.passes.memory_pool import MemoryPoolPass
     from kernel_gen.passes.memory_plan import MemoryPlanPass
@@ -545,7 +545,7 @@ def load_builtin_passes() -> None:
         HoistDmaAliasOpsPass,
         KernelPatternAttachPass,
         KernelAggregatePass,
-        KernelMatmulFusionDecomposePass,
+        KernelDecomposePass,
         MultiBufferPass,
         OutlineDeviceKernelPass,
         SymbolBufferHoistPass,

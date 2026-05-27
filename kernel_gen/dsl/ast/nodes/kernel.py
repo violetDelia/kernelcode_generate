@@ -47,7 +47,6 @@ from kernel_gen.dialect.kernel import (
     KernelExpOp,
     KernelImg2col1dOp,
     KernelImg2col2dOp,
-    KernelMatmulFusionOp,
     KernelMatmulOp,
     KernelReduceOp,
 )
@@ -497,7 +496,7 @@ class KernelMatmulAST(StatementAST):
 
     功能说明:
     - 承载 out-first `kernel.matmul(out, lhs, rhs, acc=...)` 调用。
-    - `acc=None` lower 为普通 `kernel.matmul`，`acc` 有值时 lower 为 `kernel.matmul_fusion`。
+    - `acc=None` lower 为普通 `kernel.matmul`，`acc` 有值时 lower 为动态 acc `kernel.matmul`。
 
     使用示例:
     - KernelMatmulAST(out, lhs, rhs)
@@ -540,7 +539,7 @@ class KernelMatmulAST(StatementAST):
 
         功能说明:
         - 校验 out/lhs/rhs 公开 Memory 合同。
-        - 缺省 acc 生成 `kernel.matmul`；提供 acc 时生成 `kernel.matmul_fusion`。
+        - 缺省 acc 生成静态默认 `kernel.matmul`；提供 acc 时生成动态 acc `kernel.matmul`。
 
         使用示例:
         - op = node.emit_mlir(ctx, block)
@@ -564,7 +563,7 @@ class KernelMatmulAST(StatementAST):
             acc_value = _emit_ssa_value(self.acc, ctx, block)
             if acc_value.type != i1:
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.MLIR_GEN, "kernel.matmul acc must lower to i1")
-            return KernelMatmulFusionOp(out_value, lhs_value, rhs_value, acc_value, space=out_type.space, fusion_list="")
+            return KernelMatmulOp(out_value, lhs_value, rhs_value, out_type.space, acc=acc_value)
         return KernelMatmulOp(out_value, lhs_value, rhs_value, out_type.space)
 
 

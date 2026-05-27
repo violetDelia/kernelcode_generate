@@ -30,6 +30,7 @@ def _emit_npu_demo_kernel_matmul(op: KernelMatmulOp, ctx) -> str:
 
     功能说明:
     - 根据 `KernelMatmulOp` 的 lhs/rhs/out memory 生成 `matmul<...>(...)` 语句。
+    - 静态 acc 使用 `true/false` 字面量，动态 acc operand 使用对应 C++ 表达式。
     - 仅作为当前文件内注册实现使用，不作为跨文件公开 API。
 
     使用示例:
@@ -70,10 +71,13 @@ def _emit_npu_demo_kernel_matmul(op: KernelMatmulOp, ctx) -> str:
     out_memory_type.verify()
     out_template_name = out_memory_type.template_name.data
     out_type = out_template_name if out_template_name else ctx.dispatch_type(out_memory_type.element_type)
-    acc_attr = op.acc
     acc_literal = "false"
-    if isinstance(acc_attr, IntegerAttr) and int(acc_attr.value.data) != 0:
-        acc_literal = "true"
+    if op.dynamic_acc is not None:
+        acc_literal = emit_c_value(op.dynamic_acc, ctx)
+    else:
+        acc_attr = op.acc
+        if isinstance(acc_attr, IntegerAttr) and int(acc_attr.value.data) != 0:
+            acc_literal = "true"
     return (
         f"{ctx.current_indent}matmul<{lhs_space}, {rhs_space}, {out_space}, "
         f"{lhs_type}, {rhs_type}, {out_type}>({out_expr} /*out*/, {lhs_expr} /*lhs*/, "

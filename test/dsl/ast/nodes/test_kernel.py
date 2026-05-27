@@ -21,7 +21,7 @@ from xdsl.context import Context
 from xdsl.ir import Block
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelExpOp, KernelImg2col2dOp, KernelMatmulFusionOp, KernelMatmulOp, KernelReduceOp
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelExpOp, KernelImg2col2dOp, KernelMatmulOp, KernelReduceOp
 from kernel_gen.dsl.ast.nodes import (
     ConstValueAST,
     KernelAddAST,
@@ -136,9 +136,10 @@ def test_kernel_matmul_node_emits_matmul_op() -> None:
     assert isinstance(emitted, KernelMatmulOp)
     assert len(emitted.results) == 0
 
-    fusion = KernelMatmulAST(out, lhs, rhs, acc=ConstValueAST(True)).emit_mlir(ctx, block)
-    assert isinstance(fusion, KernelMatmulFusionOp)
-    assert fusion.fusion_list is None
+    dynamic_acc = KernelMatmulAST(out, lhs, rhs, acc=ConstValueAST(True)).emit_mlir(ctx, block)
+    assert isinstance(dynamic_acc, KernelMatmulOp)
+    assert dynamic_acc.dynamic_acc is not None
+    assert dynamic_acc.acc is None
 
     legacy_location = SourceLocation(line=1, column=0)
     legacy = KernelMatmulAST(out, lhs, rhs, legacy_location)

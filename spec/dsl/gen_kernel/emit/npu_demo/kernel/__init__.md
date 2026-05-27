@@ -40,6 +40,7 @@
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 本目录只通过注册体系生效，不额外导出公开 API。
 - 目录内未列入公开 API 的注册函数与 helper 不得跨文件直接调用。
+- `kernel.matmul` 在 `acc` 为静态 attr 时发射 `true/false` 字面量，在 `acc` 为第四个动态 i1 operand 时必须把对应 C++ 表达式传给现有 `npu_demo::matmul(..., bool acc)` 参数；不得在 emit 阶段回退为旧 `scf.if` 双分支。
 
 ## API详细说明
 
@@ -103,6 +104,7 @@
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-KERNEL-043 | pass 改写 | emit c lowers npu demo tuner cost kernel binary elewise | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tuner_cost_kernel_binary_elewise`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo tuner cost kernel binary elewise”场景。 | `test_emit_c_lowers_npu_demo_tuner_cost_kernel_binary_elewise` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-KERNEL-044 | pass 改写 | emit c lowers npu demo tuner cost kernel exp select reduce | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tuner_cost_kernel_exp_select_reduce`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo tuner cost kernel exp select reduce”场景。 | `test_emit_c_lowers_npu_demo_tuner_cost_kernel_exp_select_reduce` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-KERNEL-045 | pass 改写 | emit c lowers npu demo tuner cost kernel matmul | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tuner_cost_kernel_matmul`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo tuner cost kernel matmul”场景。 | `test_emit_c_lowers_npu_demo_tuner_cost_kernel_matmul` |
+| TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-KERNEL-045A | pass 改写 | emit c lowers dynamic acc kernel matmul | 准备带第四个动态 i1 acc operand 的 `kernel.matmul`。 | 运行 `test_npu_demo_emit_matmul_dynamic_acc_uses_acc_expression`。 | 生成源码中 `matmul<...>(out,lhs,rhs,<acc expression>)` 使用动态 acc 表达式，不固化为 `true/false`，不生成 `scf.if`。 | `test_npu_demo_emit_matmul_dynamic_acc_uses_acc_expression` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-KERNEL-046 | pass 改写 | emit c lowers npu demo tuner cost kernel img2col2d | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tuner_cost_kernel_img2col2d`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo tuner cost kernel img2col2d”场景。 | `test_emit_c_lowers_npu_demo_tuner_cost_kernel_img2col2d` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-KERNEL-047 | pass 改写 | emit c lowers npu demo tuner cost DMA copy | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tuner_cost_dma_copy`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo tuner cost DMA copy”场景。 | `test_emit_c_lowers_npu_demo_tuner_cost_dma_copy` |
 | TC-DSL-GEN-KERNEL-EMIT-NPU-DEMO-KERNEL-048 | pass 改写 | emit c lowers npu demo tuner cost DMA slice and deslice | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `test_emit_c_lowers_npu_demo_tuner_cost_dma_slice_and_deslice`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“emit c lowers npu demo tuner cost DMA slice and deslice”场景。 | `test_emit_c_lowers_npu_demo_tuner_cost_dma_slice_and_deslice` |
