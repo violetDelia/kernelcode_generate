@@ -4,16 +4,18 @@
 功能说明:
 - 实现 `inputs 静 + tile 静` 的 NCHW conv2d kernel demo。
 - 使用 `kernel.img2col2d + kernel.matmul + kernel.add` out-first helper 实现卷积，tile 尾块显式通过 DSL `min(...)` 收口。
-- 输入尺寸由固定 seed `20260503` 生成并固化为具体数字：`input[5, 65, 281, 262]`、`weight[20, 65, 3, 3]`、`out[5, 20, 35, 33]`。
-- 固定 stride=8，将大输入映射到可真实执行的输出规模；tile 从轻量候选集合按固定 seed 选择，N/C/F/Ho/Wo 均大于 tile 并至少触发两轮 tile。
+- 输入尺寸由 seed `2026052701` 从随机范围选出：`input[4, 49, 248, 232]`、`weight[20, 49, 3, 5]`、`out[4, 20, 32, 29]`。
+- static case 将 seed-selected input/weight/output shape 具体化到 IR memory type。
+- 固定 stride=8，将大输入映射到可真实执行的输出规模；tile 由 seed `2026051721` 从候选集合选出并作为 static IR tile 常量进入 loop。
+- 同一 shape seed 还选出非对称 padding `(3, 3, 4, 0)`，在编译期作为 seed-selected static attr 写入 IR。
 - C/K reduce 维按 `tile_c` 分块，`kernel.matmul` 的 K 维为 `cur_c * KH * KW`。
 - accumulator、bias 与 partial staging scratch 使用 iterator-independent tile 上界分配，真实 tail 通过 `dma.view/deslice` 表达；img2col 与 matmul reshape 链路因现有 layout 合同保持 current tile 分配。
 - C/K reduce 完成后按 optional rank-1 bias 分支广播 `bias[None, :, None, None]`，再写回输出。
-- lowering 后 IR 必须保持上述具体数字 static shape，不得变成动态符号 shape。
+- lowering 后 IR 必须保持上述 seed-selected static shape，不得变成动态符号 shape。
 - 通过 `dsl_run` 真实执行，并分别校验 absent bias 与 present bias 的 NumPy conv2d 参考结果。
 
 API 列表:
-- `conv2d_inputs_static_tile_static_kernel(out: Tensor[f32, 5, 20, 35, 33], input_tensor: Tensor[f32, 5, 65, 281, 262], weight: Tensor[f32, 20, 65, 3, 3], bias: Tensor[f32, 20]) -> None`
+- `conv2d_inputs_static_tile_static_kernel(out: Tensor[f32, 4, 20, 32, 29], input_tensor: Tensor[f32, 4, 49, 248, 232], weight: Tensor[f32, 20, 49, 3, 5], bias: Tensor[f32, 20]) -> None`
 - `main() -> None`
 
 使用示例:
@@ -44,26 +46,38 @@ from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
-_STATIC_SHAPE_SEED = 20260503
+_STATIC_SHAPE_SEED = 2026052701
 _STATIC_SHAPE_RNG = random.Random(_STATIC_SHAPE_SEED)
-_STATIC_BATCH = _STATIC_SHAPE_RNG.randint(5, 7)
-_STATIC_IN_CHANNELS = _STATIC_SHAPE_RNG.randint(65, 72)
-_STATIC_INPUT_H = _STATIC_SHAPE_RNG.randint(281, 281)
-_STATIC_INPUT_W = _STATIC_SHAPE_RNG.randint(262, 262)
-_STATIC_OUT_CHANNELS = _STATIC_SHAPE_RNG.randint(20, 20)
-_STATIC_KERNEL_H = 3
-_STATIC_KERNEL_W = 3
+_STATIC_BATCH = _STATIC_SHAPE_RNG.randint(4, 6)
+_STATIC_IN_CHANNELS = _STATIC_SHAPE_RNG.randint(48, 64)
+_STATIC_INPUT_H = _STATIC_SHAPE_RNG.randint(241, 289)
+_STATIC_INPUT_W = _STATIC_SHAPE_RNG.randint(225, 273)
+_STATIC_OUT_CHANNELS = _STATIC_SHAPE_RNG.randint(18, 24)
+_STATIC_KERNEL_H = _STATIC_SHAPE_RNG.choice((3, 5))
+_STATIC_KERNEL_W = _STATIC_SHAPE_RNG.choice((3, 5))
 _STATIC_STRIDE_H = 8
 _STATIC_STRIDE_W = 8
+_STATIC_DILATION_H = 1
+_STATIC_DILATION_W = 1
+_STATIC_PAD_TOP = _STATIC_SHAPE_RNG.choice((0, 1, 2, 3, 4))
+_STATIC_PAD_BOTTOM = _STATIC_SHAPE_RNG.choice((0, 1, 2, 3, 4))
+_STATIC_PAD_LEFT = _STATIC_SHAPE_RNG.choice((0, 1, 2, 3, 4))
+_STATIC_PAD_RIGHT = _STATIC_SHAPE_RNG.choice((0, 1, 2, 3, 4))
 _STATIC_TILE_SELECTION_SEED = 2026051721
-_STATIC_TILE_CANDIDATES = ((8, 16, 4, 8, 8), (7, 18, 3, 8, 8), (6, 20, 2, 8, 8))
+_STATIC_TILE_CANDIDATES = ((8, 16, 4, 8, 9), (7, 18, 3, 9, 8), (6, 20, 2, 10, 7))
 _STATIC_TILE_F, _STATIC_TILE_C, _STATIC_TILE_N, _STATIC_TILE_HO, _STATIC_TILE_WO = random.Random(_STATIC_TILE_SELECTION_SEED).choice(
     _STATIC_TILE_CANDIDATES
 )
 _BIAS_CASE_ORDER_SEED = 2026051753
 _BIAS_CASE_ORDER = tuple(random.Random(_BIAS_CASE_ORDER_SEED).sample(("absent", "present"), 2))
-_STATIC_OUTPUT_H = ((_STATIC_INPUT_H - _STATIC_KERNEL_H) // _STATIC_STRIDE_H) + 1
-_STATIC_OUTPUT_W = ((_STATIC_INPUT_W - _STATIC_KERNEL_W) // _STATIC_STRIDE_W) + 1
+_STATIC_OUTPUT_H = (
+    (_STATIC_INPUT_H + _STATIC_PAD_TOP + _STATIC_PAD_BOTTOM - _STATIC_DILATION_H * (_STATIC_KERNEL_H - 1) - 1)
+    // _STATIC_STRIDE_H
+) + 1
+_STATIC_OUTPUT_W = (
+    (_STATIC_INPUT_W + _STATIC_PAD_LEFT + _STATIC_PAD_RIGHT - _STATIC_DILATION_W * (_STATIC_KERNEL_W - 1) - 1)
+    // _STATIC_STRIDE_W
+) + 1
 
 
 def _conv2d_nchw_reference(input_tensor: np.ndarray, weight: np.ndarray) -> np.ndarray:
@@ -71,33 +85,37 @@ def _conv2d_nchw_reference(input_tensor: np.ndarray, weight: np.ndarray) -> np.n
 
 
     功能说明:
-    - 当前 static demo 只使用 stride=8、dilation=1、padding=0。
+    - 当前 static demo 使用 seed-selected stride、dilation 与非对称 padding。
     - 通过 `np.einsum(...)` 对 kernel H/W 维展开累计，避免运行期依赖外部 tensor 框架。
 
     使用示例:
     - `_conv2d_nchw_reference(input_tensor, weight)`
     """
 
-    n_size, _c_size, h_size, w_size = input_tensor.shape
+    padded_input = np.pad(
+        input_tensor,
+        ((0, 0), (0, 0), (_STATIC_PAD_TOP, _STATIC_PAD_BOTTOM), (_STATIC_PAD_LEFT, _STATIC_PAD_RIGHT)),
+    )
+    n_size, _c_size, h_size, w_size = padded_input.shape
     f_size, _wc_size, kh_size, kw_size = weight.shape
-    ho_size = ((h_size - kh_size) // _STATIC_STRIDE_H) + 1
-    wo_size = ((w_size - kw_size) // _STATIC_STRIDE_W) + 1
+    ho_size = ((h_size - _STATIC_DILATION_H * (kh_size - 1) - 1) // _STATIC_STRIDE_H) + 1
+    wo_size = ((w_size - _STATIC_DILATION_W * (kw_size - 1) - 1) // _STATIC_STRIDE_W) + 1
     output = np.zeros((n_size, f_size, ho_size, wo_size), dtype=np.float32)
     for kh_index in range(kh_size):
-        h_start = kh_index
+        h_start = kh_index * _STATIC_DILATION_H
         h_stop = h_start + ho_size * _STATIC_STRIDE_H
         for kw_index in range(kw_size):
-            w_start = kw_index
+            w_start = kw_index * _STATIC_DILATION_W
             w_stop = w_start + wo_size * _STATIC_STRIDE_W
-            window = input_tensor[:, :, h_start:h_stop:_STATIC_STRIDE_H, w_start:w_stop:_STATIC_STRIDE_W]
+            window = padded_input[:, :, h_start:h_stop:_STATIC_STRIDE_H, w_start:w_stop:_STATIC_STRIDE_W]
             output += np.einsum("nchw,fc->nfhw", window, weight[:, :, kh_index, kw_index], optimize=True)
     return output
 
 
 def conv2d_inputs_static_tile_static_kernel(
-    out: "Tensor[f32, 5, 20, 35, 33]",
-    input_tensor: "Tensor[f32, 5, 65, 281, 262]",
-    weight: "Tensor[f32, 20, 65, 3, 3]",
+    out: "Tensor[f32, 4, 20, 32, 29]",
+    input_tensor: "Tensor[f32, 4, 49, 248, 232]",
+    weight: "Tensor[f32, 20, 49, 3, 5]",
     bias: "Tensor[f32, 20]",
 ) -> None:
     """执行静态输入、静态 tile 的 conv2d。
@@ -105,10 +123,10 @@ def conv2d_inputs_static_tile_static_kernel(
 
     功能说明:
     - 输入布局为 `input[N, C, H, W]`，权重布局为 `weight[F, C, KH, KW]`，输出布局为 `out[N, F, Ho, Wo]`。
-    - 输入 shape 为固定 seed 生成并固化的具体数字。
-    - 固定 stride=8、dilation=1、padding=0。
+    - 输入 shape 为 fixed-seed random profile 选出的具体 static 值。
+    - 固定 stride=8、dilation=1，padding 使用同一 profile 选出的非对称配置。
     - 主计算入口使用 `kernel.img2col2d/kernel.matmul/kernel.add` out-first helper。
-    - 固定 seed 从轻量候选中选择 `TF/TC/TN/THO/TWO`，确保 memory_pool 后的片上动态内存视图不越过 npu_demo 目标容量。
+    - tile 由 fixed-seed 候选集合选出，确保 memory_pool 后的片上动态内存视图不越过 npu_demo 目标容量。
     - K/reduce 维按输入通道 tile 切分，`kernel.matmul` 覆盖 `cur_c * KH * KW`，并用本地 accumulator 累计所有 partial 后一次写回。
     - accumulator、bias 与 partial staging scratch 使用固定 tile 上界分配，真实 `cur_f/cur_ho/cur_wo` tail 通过 `view/deslice` 写入与读出。
     - runtime bias 非空时，在 reduce 后、写回前广播 rank-1 bias 并累加。
@@ -128,12 +146,12 @@ def conv2d_inputs_static_tile_static_kernel(
     tile_wo = _STATIC_TILE_WO
     stride_h = 8
     stride_w = 8
-    dilation_h = 1
-    dilation_w = 1
-    pad_top = 0
-    pad_bottom = 0
-    pad_left = 0
-    pad_right = 0
+    dilation_h = _STATIC_DILATION_H
+    dilation_w = _STATIC_DILATION_W
+    pad_top = _STATIC_PAD_TOP
+    pad_bottom = _STATIC_PAD_BOTTOM
+    pad_left = _STATIC_PAD_LEFT
+    pad_right = _STATIC_PAD_RIGHT
     ho_size = ((h_size + pad_top + pad_bottom - dilation_h * (kh_size - 1) - 1) // stride_h) + 1
     wo_size = ((w_size + pad_left + pad_right - dilation_w * (kw_size - 1) - 1) // stride_w) + 1
 
@@ -146,8 +164,20 @@ def conv2d_inputs_static_tile_static_kernel(
                     cur_ho = min(tile_ho, ho_size - ho0)
                     cur_wo = min(tile_wo, wo_size - wo0)
                     spatial_tile = cur_ho * cur_wo
-                    input_h_tile = (cur_ho - 1) * stride_h + (kh_size - 1) * dilation_h + 1 - pad_top - pad_bottom
-                    input_w_tile = (cur_wo - 1) * stride_w + (kw_size - 1) * dilation_w + 1 - pad_left - pad_right
+                    input_h_origin = ho0 * stride_h - pad_top
+                    input_w_origin = wo0 * stride_w - pad_left
+                    input_h_window_end = (ho0 + cur_ho - 1) * stride_h - pad_top + (kh_size - 1) * dilation_h + 1
+                    input_w_window_end = (wo0 + cur_wo - 1) * stride_w - pad_left + (kw_size - 1) * dilation_w + 1
+                    input_h_start = max(input_h_origin, 0)
+                    input_w_start = max(input_w_origin, 0)
+                    input_h_end = min(input_h_window_end, h_size)
+                    input_w_end = min(input_w_window_end, w_size)
+                    input_h_tile = input_h_end - input_h_start
+                    input_w_tile = input_w_end - input_w_start
+                    local_pad_top = max(pad_top - ho0 * stride_h, 0)
+                    local_pad_left = max(pad_left - wo0 * stride_w, 0)
+                    local_pad_bottom = max(input_h_window_end - h_size, 0)
+                    local_pad_right = max(input_w_window_end - w_size, 0)
                     for ni in loop(0, cur_n, 1):
                         batch_index = n0 + ni
                         batch_tile = min(n_size, 1)
@@ -161,16 +191,10 @@ def conv2d_inputs_static_tile_static_kernel(
                             cur_c = min(tile_c, c_size - c0)
                             k_tile = cur_c * kh_size * kw_size
                             out_tile = batch_tile * spatial_tile
-                            input_tile = slice(
-                                input_tensor,
-                                [batch_index, c0, ho0 * stride_h, wo0 * stride_w],
-                                [batch_tile, cur_c, input_h_tile, input_w_tile],
-                                [1, 1, 1, 1],
-                                MemorySpace.TSM,
-                            )
+                            input_tile = slice(input_tensor, [batch_index, c0, input_h_start, input_w_start], [batch_tile, cur_c, input_h_tile, input_w_tile], [1, 1, 1, 1], MemorySpace.TSM)
                             weight_tile = slice(weight, [f0, c0, 0, 0], [cur_f, cur_c, kh_size, kw_size], [1, 1, 1, 1], MemorySpace.TSM)
                             col = alloc([batch_tile, cur_c, kh_size, kw_size, cur_ho, cur_wo], NumericType.Float32, MemorySpace.TSM)
-                            kernel.img2col2d(col, input_tile, kh=kh_size, kw=kw_size, sh=stride_h, sw=stride_w, dh=dilation_h, dw=dilation_w, ph=pad_top, pw=pad_bottom, pl=pad_left, pr=pad_right)
+                            kernel.img2col2d(col, input_tile, kh=kh_size, kw=kw_size, sh=stride_h, sw=stride_w, dh=dilation_h, dw=dilation_w, ph=local_pad_top, pw=local_pad_bottom, pl=local_pad_left, pr=local_pad_right)
                             col2 = reshape(col, [k_tile, out_tile])
                             weight2 = reshape(weight_tile, [cur_f, k_tile])
                             out2 = alloc([cur_f, out_tile], NumericType.Float32, MemorySpace.TSM)
@@ -196,7 +220,7 @@ def _assert_static_memory_ir(module_text: str) -> None:
 
 
     功能说明:
-    - 确认 output/input/weight memory 类型包含固定 seed 生成的具体数字 shape。
+    - 确认 output/input/weight memory 类型包含 seed-selected static shape。
     - 确认 IR 不包含 dynamic demo 的语义化符号 shape 或旧匿名 `s1/s2/...` shape。
     - 失败时抛出 `AssertionError`，让 demo 脚本直接暴露 static shape 回退。
 
@@ -247,9 +271,9 @@ def main() -> None:
 
 
     功能说明:
-    - 使用固定 seed 生成并固化的具体 shape 构造真实 NumPy ndarray 输入。
+    - 使用 fixed-seed random profile 选出的具体 shape 构造真实 NumPy ndarray 输入。
     - 写入 `kernel/dump/conv2d/inputs_static_tile_static/`。
-    - 校验 lowered IR 保持具体数字 static shape。
+    - 校验 lowered IR 保持 seed-selected static shape。
     - 分别用 NumPy conv2d 与 `conv2d + bias[None, :, None, None]` 参考结果校验输出。
 
     使用示例:
@@ -287,13 +311,15 @@ def main() -> None:
     _assert_static_memory_ir(str(present_result.dsl_result.module))
     print(
         "[ARGS] "
+        "profile=fixed-seed-random static_ir=seed-selected-concrete "
         f"seed={_STATIC_SHAPE_SEED} input={input_tensor.shape} weight={weight.shape} "
-        f"stride=({_STATIC_STRIDE_H},{_STATIC_STRIDE_W}) "
+        f"stride=({_STATIC_STRIDE_H},{_STATIC_STRIDE_W}) dilation=({_STATIC_DILATION_H},{_STATIC_DILATION_W}) "
+        f"padding=({_STATIC_PAD_TOP},{_STATIC_PAD_BOTTOM},{_STATIC_PAD_LEFT},{_STATIC_PAD_RIGHT}) "
         f"tile_seed={_STATIC_TILE_SELECTION_SEED} tile_candidates={_STATIC_TILE_CANDIDATES} "
         f"selected_tile=({_STATIC_TILE_F},{_STATIC_TILE_C},{_STATIC_TILE_N},{_STATIC_TILE_HO},{_STATIC_TILE_WO}) "
         f"output={present_out.shape} bias_case_order={_BIAS_CASE_ORDER} bias_rank=1"
     )
-    print("[IR] static memory evidence: output/input/weight concrete shapes present; dynamic symbol shapes absent")
+    print("[IR] static memory evidence: seed-selected concrete output/input/weight shapes present; dynamic symbol shapes absent")
     print(f"[CHECK] {absent_result.case_name} max_abs_diff={absent_result.max_abs_diff}")
     print(f"[CHECK] {present_result.case_name} max_abs_diff={present_result.max_abs_diff}")
 

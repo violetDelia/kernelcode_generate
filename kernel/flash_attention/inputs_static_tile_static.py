@@ -3,15 +3,16 @@
 
 功能说明:
 - 实现 `inputs 静 + tile 静` 的 Flash Attention kernel demo。
-- 输入 shape 由固定 seed `2026051621` 随机生成并固化为具体数字：`Q/K/V/out[2, 11, 389, 91]`。
-- tile 固定为 `Br=64`、`Bc=64`，序列长度大于两类 tile 并触发 query/key 尾块。
+- 输入 shape 由 seed `2026052721` 从随机候选集合选出：`Q/K/V/out[1, 8, 389, 48]`。
+- static case 将 seed-selected shape 具体化到 IR memory type。
+- tile 由 seed `2026051727` 从候选集合中选为 `Br=64`、`Bc=80`，并作为 static IR tile 常量进入 loop。
 - 使用四层循环 `batch -> head -> query block -> key/value block` 实现 online softmax。
 - softmax 显式展开为 running max、running sum、`kernel.exp` 与归一化，不调用 `nn.softmax`。
 - 可改写 score/state/output scratch 使用固定 `Br/Bc/dim` 上界分配，真实 query/key tail 通过现有 `dma.view/deslice` 写入 fixed tile storage。
 - 通过 `dsl_run` 真实执行，并和 NumPy softmax attention 参考结果对齐。
 
 API 列表:
-- `flash_attention_inputs_static_tile_static_kernel(out: Tensor[f32, 2, 11, 389, 91], q: Tensor[f32, 2, 11, 389, 91], k: Tensor[f32, 2, 11, 389, 91], v: Tensor[f32, 2, 11, 389, 91]) -> None`
+- `flash_attention_inputs_static_tile_static_kernel(out: Tensor[f32, 1, 8, 389, 48], q: Tensor[f32, 1, 8, 389, 48], k: Tensor[f32, 1, 8, 389, 48], v: Tensor[f32, 1, 8, 389, 48]) -> None`
 - `main() -> None`
 
 使用示例:
@@ -42,15 +43,15 @@ from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
-_STATIC_SHAPE_SEED = 2026051621
+_STATIC_SHAPE_SEED = 2026052721
 _STATIC_SHAPE_RNG = random.Random(_STATIC_SHAPE_SEED)
-_STATIC_SEQ_LEN_CHOICES = (257, 321, 389, 449, 511)
-_STATIC_BATCH = _STATIC_SHAPE_RNG.randint(1, 2)
-_STATIC_HEADS = _STATIC_SHAPE_RNG.randint(8, 12)
-_STATIC_SEQ_LEN = _STATIC_SEQ_LEN_CHOICES[_STATIC_SHAPE_RNG.randrange(len(_STATIC_SEQ_LEN_CHOICES))]
-_STATIC_DIM = _STATIC_SHAPE_RNG.randint(32, 128)
-_STATIC_BR = 64
-_STATIC_BC = 64
+_STATIC_BATCH = _STATIC_SHAPE_RNG.choice((1, 2))
+_STATIC_HEADS = _STATIC_SHAPE_RNG.choice((4, 8))
+_STATIC_SEQ_LEN = _STATIC_SHAPE_RNG.choice((257, 321, 389))
+_STATIC_DIM = _STATIC_SHAPE_RNG.choice((48, 64, 80))
+_STATIC_TILE_SELECTION_SEED = 2026051727
+_STATIC_TILE_CANDIDATES = ((48, 64), (64, 80), (80, 96))
+_STATIC_BR, _STATIC_BC = random.Random(_STATIC_TILE_SELECTION_SEED).choice(_STATIC_TILE_CANDIDATES)
 
 
 def _softmax_last_axis(value: np.ndarray) -> np.ndarray:
@@ -87,17 +88,17 @@ def _flash_attention_reference(q: np.ndarray, k: np.ndarray, v: np.ndarray) -> n
 
 
 def flash_attention_inputs_static_tile_static_kernel(
-    out: "Tensor[f32, 2, 11, 389, 91]",
-    q: "Tensor[f32, 2, 11, 389, 91]",
-    k: "Tensor[f32, 2, 11, 389, 91]",
-    v: "Tensor[f32, 2, 11, 389, 91]",
+    out: "Tensor[f32, 1, 8, 389, 48]",
+    q: "Tensor[f32, 1, 8, 389, 48]",
+    k: "Tensor[f32, 1, 8, 389, 48]",
+    v: "Tensor[f32, 1, 8, 389, 48]",
 ) -> None:
     """执行静态输入、静态 tile 的 Flash Attention。
 
 
     功能说明:
     - 输入布局为 `[B, H, SL, D]`。
-    - 固定 `Br=64`、`Bc=64` 做 query block 与 key/value block 两层分块。
+    - 使用 seed-selected `Br/Bc` 做 query block 与 key/value block 两层分块。
     - 主计算入口使用 kernel out-first helper，softmax 以 running max/running sum online 形式展开。
     - score/state/output scratch 使用固定 tile 上界分配，`cur_br/cur_bc` tail 只通过 `view/deslice` 表达。
     - 输出写回 `out[B, H, SL, D]`。
@@ -107,8 +108,8 @@ def flash_attention_inputs_static_tile_static_kernel(
     """
 
     batch_size, head_size, seq_len, dim_size = q.get_shape()
-    br = 64
-    bc = 64
+    br = _STATIC_BR
+    bc = _STATIC_BC
     unit_tile = br - br + 1
     for b0 in loop(0, batch_size, 1):
         for h0 in loop(0, head_size, 1):
@@ -215,11 +216,11 @@ def main() -> None:
         out,
         expected,
     )
-    print(result.dsl_result.module)
-    print(result.dsl_result.source)
     print(
         "[ARGS] "
-        f"seed={_STATIC_SHAPE_SEED} shape={q.shape} tile=({_STATIC_BR},{_STATIC_BC}) "
+        "profile=fixed-seed-random static_ir=seed-selected-concrete "
+        f"seed={_STATIC_SHAPE_SEED} shape={q.shape} "
+        f"tile_seed={_STATIC_TILE_SELECTION_SEED} tile_candidates={_STATIC_TILE_CANDIDATES} tile=({_STATIC_BR},{_STATIC_BC}) "
         f"query_tiles={(_STATIC_SEQ_LEN + _STATIC_BR - 1) // _STATIC_BR} "
         f"key_tiles={(_STATIC_SEQ_LEN + _STATIC_BC - 1) // _STATIC_BC} "
         f"query_tail={_STATIC_SEQ_LEN % _STATIC_BR} key_tail={_STATIC_SEQ_LEN % _STATIC_BC} "

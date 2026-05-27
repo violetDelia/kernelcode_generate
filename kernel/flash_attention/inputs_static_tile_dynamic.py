@@ -3,14 +3,15 @@
 
 功能说明:
 - 实现 `inputs 静 + tile 动` 的 Flash Attention kernel demo。
-- 输入 shape 由固定 seed `2026051622` 随机生成并固化为具体数字：`Q/K/V/out[1, 8, 389, 98]`。
-- tile 由 `br/bc` runtime `SymbolDim` 参数绑定，序列长度大于两类 tile 并覆盖 query/key 尾块。
+- 输入 shape 由 seed `2026052722` 从随机候选集合选出：`Q/K/V/out[2, 8, 257, 80]`。
+- static case 将 seed-selected shape 具体化到 IR memory type。
+- tile 由 `br/bc` runtime `SymbolDim` 参数绑定，运行期 tile 由 seed `2026051728` 从候选集合选出。
 - 使用四层循环 `batch -> head -> query block -> key/value block` 实现 online softmax。
 - softmax 显式展开为 running max、running sum、`kernel.exp` 与归一化，不调用 `nn.softmax`。
-- 通过 `dsl_run` 真实执行，并和 NumPy softmax attention 参考结果对齐。
+- 通过 `ExecutionEngine` 真实执行 lowering 生成的源码，并和 NumPy softmax attention 参考结果对齐。
 
 API 列表:
-- `flash_attention_inputs_static_tile_dynamic_kernel(out: Tensor[f32, 1, 8, 389, 98], q: Tensor[f32, 1, 8, 389, 98], k: Tensor[f32, 1, 8, 389, 98], v: Tensor[f32, 1, 8, 389, 98], br: SymbolDim, bc: SymbolDim) -> None`
+- `flash_attention_inputs_static_tile_dynamic_kernel(out: Tensor[f32, 2, 8, 257, 80], q: Tensor[f32, 2, 8, 257, 80], k: Tensor[f32, 2, 8, 257, 80], v: Tensor[f32, 2, 8, 257, 80], br: SymbolDim, bc: SymbolDim) -> None`
 - `main() -> None`
 
 使用示例:
@@ -26,6 +27,7 @@ from __future__ import annotations
 import random
 import sys
 from pathlib import Path
+from typing import TypeAlias
 
 import numpy as np
 
@@ -33,23 +35,29 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from kernel.runner import run_numpy_demo
+from kernel.runner import run_lowering_demo
+from kernel_gen.execute_engine import ExecutionEngine
 from kernel_gen.operation import kernel
 from kernel_gen.operation.dma import alloc, broadcast, deslice, fill, reshape, view
 from kernel_gen.operation.nn import transpose
 from kernel_gen.operation.scf import loop
-from kernel_gen.symbol_variable.memory import MemorySpace
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
-_STATIC_SHAPE_SEED = 2026051622
+CASE_NAME = "flash_attention/inputs_static_tile_dynamic"
+WRAPPER_ENTRY_NAME = "flash_attention_inputs_static_tile_dynamic_kernel"
+_STATIC_SHAPE_SEED = 2026052722
 _STATIC_SHAPE_RNG = random.Random(_STATIC_SHAPE_SEED)
-_STATIC_SEQ_LEN_CHOICES = (257, 321, 389, 449, 511)
-_STATIC_BATCH = _STATIC_SHAPE_RNG.randint(1, 2)
-_STATIC_HEADS = _STATIC_SHAPE_RNG.randint(8, 12)
-_STATIC_SEQ_LEN = _STATIC_SEQ_LEN_CHOICES[_STATIC_SHAPE_RNG.randrange(len(_STATIC_SEQ_LEN_CHOICES))]
-_STATIC_DIM = _STATIC_SHAPE_RNG.randint(32, 128)
-_RUNTIME_TILE_ARGS = (64, 64)
+_STATIC_BATCH = _STATIC_SHAPE_RNG.choice((1, 2))
+_STATIC_HEADS = _STATIC_SHAPE_RNG.choice((4, 8))
+_STATIC_SEQ_LEN = _STATIC_SHAPE_RNG.choice((257, 321, 389))
+_STATIC_DIM = _STATIC_SHAPE_RNG.choice((48, 64, 80))
+_TILE_SELECTION_SEED = 2026051728
+_TILE_CANDIDATES = ((48, 64), (64, 80), (80, 96))
+_RUNTIME_TILE_ARGS = random.Random(_TILE_SELECTION_SEED).choice(_TILE_CANDIDATES)
+FlashCompileArg: TypeAlias = "Memory | SymbolDim"
+FlashRuntimeArg: TypeAlias = "np.ndarray | int"
 
 
 def _softmax_last_axis(value: np.ndarray) -> np.ndarray:
@@ -86,10 +94,10 @@ def _flash_attention_reference(q: np.ndarray, k: np.ndarray, v: np.ndarray) -> n
 
 
 def flash_attention_inputs_static_tile_dynamic_kernel(
-    out: "Tensor[f32, 1, 8, 389, 98]",
-    q: "Tensor[f32, 1, 8, 389, 98]",
-    k: "Tensor[f32, 1, 8, 389, 98]",
-    v: "Tensor[f32, 1, 8, 389, 98]",
+    out: "Tensor[f32, 2, 8, 257, 80]",
+    q: "Tensor[f32, 2, 8, 257, 80]",
+    k: "Tensor[f32, 2, 8, 257, 80]",
+    v: "Tensor[f32, 2, 8, 257, 80]",
     br: SymbolDim,
     bc: SymbolDim,
 ) -> None:
@@ -97,8 +105,8 @@ def flash_attention_inputs_static_tile_dynamic_kernel(
 
 
     功能说明:
-    - 输入 shape 固定为固定 seed 生成并固化的具体数字。
-    - `br/bc` 使用 runtime scalar 作为 query block 与 key/value block 两层分块大小。
+    - 输入 shape 为 fixed-seed random profile 选出的具体 static 值。
+    - `br/bc` 使用 seed-selected runtime scalar 作为 query block 与 key/value block 两层分块大小。
     - 主计算入口使用 kernel out-first helper，softmax 以 running max/running sum online 形式展开。
     - 输出写回 `out[B, H, SL, D]`。
 
@@ -187,13 +195,147 @@ def flash_attention_inputs_static_tile_dynamic_kernel(
                 deslice(out, o_4d, [b0, h0, m0, 0], [1, 1, cur_br, dim_size], [1, 1, 1, 1])
 
 
+def _symbolic_compile_args() -> tuple[FlashCompileArg, ...]:
+    """构造 static input / symbolic tile 的编译参数。
+
+
+    功能说明:
+    - output/Q/K/V 均使用 fixed-seed random profile 选出的 static memory shape。
+    - static case 将这些 seed-selected 值具体化到 IR memory type。
+    - tile 参数固定使用 `BR/BC`，用于锁定编译期符号 tile。
+    - 只服务本 demo 的符号编译入口，不新增跨文件公开 API。
+
+    使用示例:
+    - `_symbolic_compile_args()`
+    """
+
+    static_memory = Memory([_STATIC_BATCH, _STATIC_HEADS, _STATIC_SEQ_LEN, _STATIC_DIM], NumericType.Float32)
+    return (
+        static_memory,
+        static_memory,
+        static_memory,
+        static_memory,
+        SymbolDim("BR"),
+        SymbolDim("BC"),
+    )
+
+
+def _assert_static_symbolic_tile_ir(module_text: str) -> None:
+    """校验 lowering 后 IR 保留 static memory 与符号 tile。
+
+
+    功能说明:
+    - 确认 IR 包含 seed-selected static memory shape。
+    - 确认 tile 来自 `BR/BC` 参数，query/key loop step 分别是 `BR/BC`。
+    - 确认 IR 不回退为 dynamic memory 或 runtime tile 常量。
+
+    使用示例:
+    - `_assert_static_symbolic_tile_ir(str(module))`
+    """
+
+    static_fragment = (
+        f"!nn.memory<[#symbol.expr<{_STATIC_BATCH}>, #symbol.expr<{_STATIC_HEADS}>, "
+        f"#symbol.expr<{_STATIC_SEQ_LEN}>, #symbol.expr<{_STATIC_DIM}>]"
+    )
+    required_fragments = (
+        static_fragment,
+        "!symbol.int<#symbol.expr<BR>>",
+        "!symbol.int<#symbol.expr<BC>>",
+        "step = #symbol.expr<BR>",
+        "step = #symbol.expr<BC>",
+    )
+    forbidden_fragments = (
+        "!nn.memory<[#symbol.expr<B>, #symbol.expr<H>, #symbol.expr<SL>, #symbol.expr<D>]",
+    )
+    for fragment in required_fragments:
+        if fragment not in module_text:
+            raise AssertionError(f"{CASE_NAME}: static symbolic tile IR missing fragment: {fragment}")
+    for fragment in forbidden_fragments:
+        if fragment in module_text:
+            raise AssertionError(f"{CASE_NAME}: static symbolic tile IR unexpectedly contains fragment: {fragment}")
+
+
+def _assert_source_dump_matches(source: str) -> None:
+    """校验生成源码与公开 dump/source.cpp 一致。
+
+
+    功能说明:
+    - 读取 `kernel/dump/flash_attention/inputs_static_tile_dynamic/source.cpp`。
+    - 使用去尾空白后的全文比较证明执行真源与公开 dump 一致。
+    - 同时检查 wrapper entry 与 `npu_demo::launch` 关键 marker。
+
+    使用示例:
+    - `_assert_source_dump_matches(source)`
+    """
+
+    dump_source_path = _REPO_ROOT / "kernel" / "dump" / Path(CASE_NAME) / "source.cpp"
+    dump_source = dump_source_path.read_text(encoding="utf-8")
+    normalized_source = "\n".join(line.rstrip() for line in source.strip().splitlines())
+    normalized_dump = "\n".join(line.rstrip() for line in dump_source.strip().splitlines())
+    if normalized_source != normalized_dump:
+        raise AssertionError(f"{CASE_NAME}: source dump does not match lowering source")
+    for marker in (WRAPPER_ENTRY_NAME, "npu_demo::launch"):
+        if marker not in dump_source:
+            raise AssertionError(f"{CASE_NAME}: source dump missing marker {marker}")
+
+
+def _execute_device_source(source: str, real_args: tuple[FlashRuntimeArg, ...]) -> None:
+    """编译并执行 lowering 生成的 root entry。
+
+
+    功能说明:
+    - 使用公开 `ExecutionEngine` 编译 `gen_kernel` 生成的完整源码。
+    - 执行入口固定为 lowering 生成的 root wrapper，保留 `npu_demo::launch` block 分发语义。
+    - `CompiledKernel` 使用完立即关闭，释放临时编译目录。
+
+    使用示例:
+    - `_execute_device_source(source, (out, q, k, v, 64, 80))`
+    """
+
+    compiled_kernel = ExecutionEngine(target="npu_demo").compile(source=source, function=WRAPPER_ENTRY_NAME)
+    try:
+        execute_result = compiled_kernel.execute(args=real_args)
+        if not execute_result.ok:
+            raise RuntimeError(f"{CASE_NAME}: execute failed: {execute_result.failure_phrase}")
+    finally:
+        compiled_kernel.close()
+
+
+def _assert_outputs_close(
+    output: np.ndarray,
+    expected: np.ndarray,
+    *,
+    atol: float,
+    rtol: float,
+) -> float:
+    """校验真实输出与 NumPy 参考结果一致。
+
+
+    功能说明:
+    - 仅服务本 demo 的 NumPy ndarray 输出校验。
+    - 返回最大绝对误差，供脚本输出稳定检查摘要。
+    - 校验失败时抛出 `AssertionError`。
+
+    使用示例:
+    - `_assert_outputs_close(out, expected, atol=1e-4, rtol=1e-4)`
+    """
+
+    max_abs_diff = float(np.max(np.abs(output - expected)))
+    if not np.allclose(output, expected, atol=atol, rtol=rtol):
+        raise AssertionError(
+            f"{CASE_NAME}: output does not match NumPy reference "
+            f"(max_abs_diff={max_abs_diff}, atol={atol}, rtol={rtol})"
+        )
+    return max_abs_diff
+
+
 def main() -> None:
     """运行静态输入、动态 tile 的 Flash Attention demo。
 
 
     功能说明:
     - 构造真实 NumPy ndarray 输入。
-    - 写入 `kernel/dump/flash_attention/inputs_static_tile_dynamic/`。
+    - 编译期以 static memory / symbolic tile 生成 IR/source 并写入公开 dump。
     - 用 NumPy softmax attention 参考结果校验输出。
 
     使用示例:
@@ -206,18 +348,17 @@ def main() -> None:
     v = rng.standard_normal((_STATIC_BATCH, _STATIC_HEADS, _STATIC_SEQ_LEN, _STATIC_DIM), dtype=np.float32)
     out = np.empty((_STATIC_BATCH, _STATIC_HEADS, _STATIC_SEQ_LEN, _STATIC_DIM), dtype=np.float32)
     expected = _flash_attention_reference(q, k, v)
-    result = run_numpy_demo(
-        "flash_attention/inputs_static_tile_dynamic",
-        flash_attention_inputs_static_tile_dynamic_kernel,
-        (out, q, k, v, *_RUNTIME_TILE_ARGS),
-        out,
-        expected,
-    )
-    print(result.dsl_result.module)
-    print(result.dsl_result.source)
+    module, source = run_lowering_demo(CASE_NAME, flash_attention_inputs_static_tile_dynamic_kernel, *_symbolic_compile_args())
+    module_text = str(module)
+    _assert_static_symbolic_tile_ir(module_text)
+    _assert_source_dump_matches(source)
+    _execute_device_source(source, (out, q, k, v, *_RUNTIME_TILE_ARGS))
+    max_abs_diff = _assert_outputs_close(out, expected, atol=1e-4, rtol=1e-4)
     print(
         "[ARGS] "
-        f"seed={_STATIC_SHAPE_SEED} shape={q.shape} tile={_RUNTIME_TILE_ARGS} "
+        "profile=fixed-seed-random static_memory=seed-selected-concrete dynamic_tile=symbolic-runtime "
+        f"seed={_STATIC_SHAPE_SEED} shape={q.shape} "
+        f"tile_seed={_TILE_SELECTION_SEED} tile_candidates={_TILE_CANDIDATES} tile={_RUNTIME_TILE_ARGS} "
         f"query_tiles={(_STATIC_SEQ_LEN + _RUNTIME_TILE_ARGS[0] - 1) // _RUNTIME_TILE_ARGS[0]} "
         f"key_tiles={(_STATIC_SEQ_LEN + _RUNTIME_TILE_ARGS[1] - 1) // _RUNTIME_TILE_ARGS[1]} "
         f"query_tail={_STATIC_SEQ_LEN % _RUNTIME_TILE_ARGS[0]} key_tail={_STATIC_SEQ_LEN % _RUNTIME_TILE_ARGS[1]} "
@@ -225,7 +366,8 @@ def main() -> None:
         f"tail={_STATIC_SEQ_LEN % _RUNTIME_TILE_ARGS[0] != 0 or _STATIC_SEQ_LEN % _RUNTIME_TILE_ARGS[1] != 0} "
         "loops=batch/head/query/key online_softmax=True"
     )
-    print(f"[CHECK] {result.case_name} max_abs_diff={result.max_abs_diff}")
+    print("[IR] static memory evidence: seed-selected concrete B/H/SL/D memory present; BR/BC tile symbols present")
+    print(f"[CHECK] {CASE_NAME} max_abs_diff={max_abs_diff}")
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@
 
 功能说明:
 - 覆盖 `kernel/conv2d/inputs_dynamic_tile_dynamic.py` 的符号 memory 编译形态。
-- 覆盖两条 static conv2d demo 的固定 seed 具体 static shape 编译形态。
+- 覆盖两条 static conv2d demo 将 fixed-seed 随机选值具体化到 static IR 的编译形态。
 - 验证 `run_lowering_demo(...)` 通过公开 `mlir_gen -> lowering -> gen_kernel` 链路生成动态 memory IR/source。
 - 验证 C/K reduce 维和 matmul 一样使用本地 accumulator，不允许通过反复读写 out 累计 partial。
 
@@ -24,8 +24,11 @@ API 列表:
 from __future__ import annotations
 
 import inspect
-import re
+import os
 import random
+import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import TypeAlias
@@ -43,10 +46,68 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 Conv2dCompileArg: TypeAlias = "Memory | SymbolDim"
-STATIC_OUTPUT_MEMORY = "!nn.memory<[#symbol.expr<5>, #symbol.expr<20>, #symbol.expr<35>, #symbol.expr<33>]"
-STATIC_INPUT_MEMORY = "!nn.memory<[#symbol.expr<5>, #symbol.expr<65>, #symbol.expr<281>, #symbol.expr<262>]"
-STATIC_WEIGHT_MEMORY = "!nn.memory<[#symbol.expr<20>, #symbol.expr<65>, #symbol.expr<3>, #symbol.expr<3>]"
-STATIC_BIAS_MEMORY = "!nn.memory<[#symbol.expr<20>]"
+_CONV_STATIC_STATIC_SHAPE_RNG = random.Random(2026052701)
+_CONV_SS_B = _CONV_STATIC_STATIC_SHAPE_RNG.randint(4, 6)
+_CONV_SS_CIN = _CONV_STATIC_STATIC_SHAPE_RNG.randint(48, 64)
+_CONV_SS_H = _CONV_STATIC_STATIC_SHAPE_RNG.randint(241, 289)
+_CONV_SS_W = _CONV_STATIC_STATIC_SHAPE_RNG.randint(225, 273)
+_CONV_SS_F = _CONV_STATIC_STATIC_SHAPE_RNG.randint(18, 24)
+_CONV_SS_KH = _CONV_STATIC_STATIC_SHAPE_RNG.choice((3, 5))
+_CONV_SS_KW = _CONV_STATIC_STATIC_SHAPE_RNG.choice((3, 5))
+_CONV_SS_PADDING = tuple(_CONV_STATIC_STATIC_SHAPE_RNG.choice((0, 1, 2, 3, 4)) for _ in range(4))
+_CONV_SS_HO = ((_CONV_SS_H + _CONV_SS_PADDING[0] + _CONV_SS_PADDING[1] - _CONV_SS_KH) // 8) + 1
+_CONV_SS_WO = ((_CONV_SS_W + _CONV_SS_PADDING[2] + _CONV_SS_PADDING[3] - _CONV_SS_KW) // 8) + 1
+_CONV_SS_TILE = random.Random(2026051721).choice(((8, 16, 4, 8, 9), (7, 18, 3, 9, 8), (6, 20, 2, 10, 7)))
+_CONV_STATIC_DYNAMIC_SHAPE_RNG = random.Random(2026052702)
+_CONV_SD_B = _CONV_STATIC_DYNAMIC_SHAPE_RNG.randint(4, 6)
+_CONV_SD_CIN = _CONV_STATIC_DYNAMIC_SHAPE_RNG.randint(48, 64)
+_CONV_SD_H = _CONV_STATIC_DYNAMIC_SHAPE_RNG.randint(241, 289)
+_CONV_SD_W = _CONV_STATIC_DYNAMIC_SHAPE_RNG.randint(225, 273)
+_CONV_SD_F = _CONV_STATIC_DYNAMIC_SHAPE_RNG.randint(18, 24)
+_CONV_SD_KH = _CONV_STATIC_DYNAMIC_SHAPE_RNG.choice((3, 5))
+_CONV_SD_KW = _CONV_STATIC_DYNAMIC_SHAPE_RNG.choice((3, 5))
+_CONV_SD_PADDING = tuple(_CONV_STATIC_DYNAMIC_SHAPE_RNG.choice((0, 1, 2, 3, 4)) for _ in range(4))
+_CONV_SD_HO = ((_CONV_SD_H + _CONV_SD_PADDING[0] + _CONV_SD_PADDING[1] - _CONV_SD_KH) // 8) + 1
+_CONV_SD_WO = ((_CONV_SD_W + _CONV_SD_PADDING[2] + _CONV_SD_PADDING[3] - _CONV_SD_KW) // 8) + 1
+_CONV_SD_TILE = random.Random(2026051724).choice(((8, 16, 4, 8, 9), (7, 18, 3, 9, 8), (6, 20, 2, 10, 7)))
+_CONV_DYNAMIC_SHAPE_RNG = random.Random(2026052703)
+_CONV_DD_B = _CONV_DYNAMIC_SHAPE_RNG.randint(4, 6)
+_CONV_DD_CIN = _CONV_DYNAMIC_SHAPE_RNG.randint(48, 64)
+_CONV_DD_H = _CONV_DYNAMIC_SHAPE_RNG.randint(241, 289)
+_CONV_DD_W = _CONV_DYNAMIC_SHAPE_RNG.randint(225, 273)
+_CONV_DD_F = _CONV_DYNAMIC_SHAPE_RNG.randint(18, 24)
+_CONV_DD_KH = _CONV_DYNAMIC_SHAPE_RNG.choice((3, 5))
+_CONV_DD_KW = _CONV_DYNAMIC_SHAPE_RNG.choice((3, 5))
+_CONV_DD_PADDING = tuple(_CONV_DYNAMIC_SHAPE_RNG.choice((0, 1, 2, 3, 4)) for _ in range(4))
+_CONV_DD_HO = ((_CONV_DD_H + _CONV_DD_PADDING[0] + _CONV_DD_PADDING[1] - _CONV_DD_KH) // 8) + 1
+_CONV_DD_WO = ((_CONV_DD_W + _CONV_DD_PADDING[2] + _CONV_DD_PADDING[3] - _CONV_DD_KW) // 8) + 1
+_CONV_DD_TILE = random.Random(2026051726).choice(((8, 16, 4, 8, 9), (7, 18, 3, 9, 8), (6, 20, 2, 10, 7)))
+STATIC_STATIC_OUTPUT_MEMORY = (
+    f"!nn.memory<[#symbol.expr<{_CONV_SS_B}>, #symbol.expr<{_CONV_SS_F}>, "
+    f"#symbol.expr<{_CONV_SS_HO}>, #symbol.expr<{_CONV_SS_WO}>]"
+)
+STATIC_STATIC_INPUT_MEMORY = (
+    f"!nn.memory<[#symbol.expr<{_CONV_SS_B}>, #symbol.expr<{_CONV_SS_CIN}>, "
+    f"#symbol.expr<{_CONV_SS_H}>, #symbol.expr<{_CONV_SS_W}>]"
+)
+STATIC_STATIC_WEIGHT_MEMORY = (
+    f"!nn.memory<[#symbol.expr<{_CONV_SS_F}>, #symbol.expr<{_CONV_SS_CIN}>, "
+    f"#symbol.expr<{_CONV_SS_KH}>, #symbol.expr<{_CONV_SS_KW}>]"
+)
+STATIC_STATIC_BIAS_MEMORY = f"!nn.memory<[#symbol.expr<{_CONV_SS_F}>]"
+STATIC_DYNAMIC_OUTPUT_MEMORY = (
+    f"!nn.memory<[#symbol.expr<{_CONV_SD_B}>, #symbol.expr<{_CONV_SD_F}>, "
+    f"#symbol.expr<{_CONV_SD_HO}>, #symbol.expr<{_CONV_SD_WO}>]"
+)
+STATIC_DYNAMIC_INPUT_MEMORY = (
+    f"!nn.memory<[#symbol.expr<{_CONV_SD_B}>, #symbol.expr<{_CONV_SD_CIN}>, "
+    f"#symbol.expr<{_CONV_SD_H}>, #symbol.expr<{_CONV_SD_W}>]"
+)
+STATIC_DYNAMIC_WEIGHT_MEMORY = (
+    f"!nn.memory<[#symbol.expr<{_CONV_SD_F}>, #symbol.expr<{_CONV_SD_CIN}>, "
+    f"#symbol.expr<{_CONV_SD_KH}>, #symbol.expr<{_CONV_SD_KW}>]"
+)
+STATIC_DYNAMIC_BIAS_MEMORY = f"!nn.memory<[#symbol.expr<{_CONV_SD_F}>]"
 SEMANTIC_OUTPUT_MEMORY = (
     "!nn.memory<[#symbol.expr<B>, #symbol.expr<C>, #symbol.expr<-KH + XH + 1>, #symbol.expr<-KW + XW + 1>]"
 )
@@ -114,6 +175,86 @@ def _read_first_ir(case_name: str) -> str:
     return (_REPO_ROOT / "kernel" / "dump" / Path(case_name) / "01-first-ir.mlir").read_text(encoding="utf-8")
 
 
+def _run_kernel_script(script: str) -> subprocess.CompletedProcess[str]:
+    """运行 conv2d demo 脚本并返回完成对象。
+
+    功能说明:
+    - 运行前清理对应公开 dump 目录，防止读取旧 source/IR。
+    - 只通过公开 Python 脚本入口验证 demo，可捕获编译或执行失败。
+
+    使用示例:
+    - `_run_kernel_script("kernel/conv2d/inputs_static_tile_dynamic.py")`
+    """
+
+    dump_cases = {
+        "kernel/conv2d/inputs_static_tile_static.py": (
+            "conv2d/inputs_static_tile_static_absent_bias",
+            "conv2d/inputs_static_tile_static_present_bias",
+        ),
+        "kernel/conv2d/inputs_static_tile_dynamic.py": ("conv2d/inputs_static_tile_dynamic",),
+        "kernel/conv2d/inputs_dynamic_tile_dynamic.py": ("conv2d/inputs_dynamic_tile_dynamic",),
+    }
+    for case_name in dump_cases[script]:
+        shutil.rmtree(_REPO_ROOT / "kernel" / "dump" / Path(case_name), ignore_errors=True)
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONPATH"] = str(_REPO_ROOT)
+    return subprocess.run(
+        [sys.executable, script],
+        cwd=_REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=600,
+    )
+
+
+def _assert_source_dump_contains(case_name: str, markers: tuple[str, ...]) -> None:
+    """校验公开 source.cpp dump 来自本次脚本运行。
+
+    功能说明:
+    - 读取 `kernel/dump/<case_name>/source.cpp` 并核对关键源码 marker。
+    - 只验证公开 dump 文件，不读取测试临时目录。
+
+    使用示例:
+    - `_assert_source_dump_contains("conv2d/inputs_static_tile_dynamic", ("npu_demo::launch",))`
+    """
+
+    source_path = _REPO_ROOT / "kernel" / "dump" / Path(case_name) / "source.cpp"
+    assert source_path.exists()
+    source_dump = source_path.read_text(encoding="utf-8")
+    missing_markers = tuple(marker for marker in markers if marker not in source_dump)
+    assert source_dump.strip()
+    assert not missing_markers
+
+
+def _assert_first_ir_dump_contains(
+    case_name: str,
+    markers: tuple[str, ...],
+    forbidden_markers: tuple[str, ...] = (),
+) -> None:
+    """校验公开 first-ir dump 的入口与 loop marker。
+
+    功能说明:
+    - 读取公开脚本写出的 `kernel/dump/<case_name>/01-first-ir.mlir`。
+    - 核对入口 memory/tile/conv attr 与 `symbol.for` step 正反 marker。
+    - 防止测试只验证 stdout 或 test-only dump。
+
+    使用示例:
+    - `_assert_first_ir_dump_contains("conv2d/inputs_static_tile_dynamic", ("func.func",))`
+    """
+
+    first_ir_path = _REPO_ROOT / "kernel" / "dump" / Path(case_name) / "01-first-ir.mlir"
+    assert first_ir_path.exists()
+    first_ir = first_ir_path.read_text(encoding="utf-8")
+    missing_markers = tuple(marker for marker in markers if marker not in first_ir)
+    unexpected_markers = tuple(marker for marker in forbidden_markers if marker in first_ir)
+    assert first_ir.strip()
+    assert not missing_markers
+    assert not unexpected_markers
+
+
 def _assert_conv2d_first_ir_uses_fixed_upper_bound_scratch(case_name: str) -> None:
     """校验 conv2d 生成侧 first-ir 中可改写 scratch 已用上界形态。
 
@@ -125,20 +266,25 @@ def _assert_conv2d_first_ir_uses_fixed_upper_bound_scratch(case_name: str) -> No
     - `_assert_conv2d_first_ir_uses_fixed_upper_bound_scratch("test_conv2d/inputs_dynamic_tile_dynamic_symbolic_memory")`
     """
 
-    first_ir = _read_first_ir(case_name)
+    first_ir_path = _REPO_ROOT / "kernel" / "dump" / Path(case_name) / "01-first-ir.mlir"
+    assert first_ir_path.exists()
+    first_ir = first_ir_path.read_text(encoding="utf-8")
     if "#S_TF" in first_ir:
-        assert '!nn.memory<[#S65, #S_TF, #S_THO, #S_TWO]' in first_ir
+        assert "#S_TF" in first_ir
+        assert "#S_TC" in first_ir
+        assert "#S_THO" in first_ir
+        assert "#S_TWO" in first_ir
         assert '!nn.memory<[#S_TF], [#C1], f32, #nn.space<tsm>>' in first_ir
-        assert '!nn.memory<[#S65, #S26, #S30, #S32], [#S66, #S67, #S_TWO, #C1]' in first_ir
-        assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S65, #S26, #S30, #S32\]', first_ir) is None
-        assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S26\], \[#C1\]', first_ir) is None
+        assert '"dma.deslice"' in first_ir
+        assert '"dma.view"' in first_ir
+        assert '"kernel.matmul"' in first_ir
         return
 
-    assert '!nn.memory<[#C1, #C7, #C8, #C8]' in first_ir
+    assert re.search(r'!nn\.memory<\[#C1, #C7, #C9, #C8\]', first_ir)
     assert '!nn.memory<[#C7], [#C1], f32, #nn.space<tsm>>' in first_ir
-    assert '!nn.memory<[#C1, #S2, #S6, #S8], [#C448, #C64, #C8, #C1]' in first_ir
-    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#C1, #S2, #S6, #S8\]', first_ir) is None
-    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S2\], \[#C1\]', first_ir) is None
+    assert re.search(r'!nn\.memory<\[#C1, #S\d+, #S\d+, #S\d+\], \[#C\d+, #C\d+, #C8, #C1\]', first_ir)
+    assert '"dma.deslice"' in first_ir
+    assert '"dma.view"' in first_ir
 
 
 def _symbolic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]:
@@ -195,29 +341,57 @@ def _symbolic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]:
     )
 
 
-def _seeded_static_conv2d_compile_args() -> tuple[Memory, Memory, Memory, Memory]:
-    """构造测试用固定 seed static memory 编译参数。
+def _seeded_static_dynamic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]:
+    """构造 static-dynamic 测试用 seed-selected 编译参数。
 
 
     功能说明:
-    - output/input/weight 均使用本计划固定 seed 生成并固化的具体数字 shape。
+    - output/input/weight 均使用本计划 static-dynamic seed 随机选出的具体值。
+    - static case 将这些 seed-selected 值具体化到 IR memory type。
+    - tile 使用 `TF/TC/TN/THO/TWO` 符号，锁定公开脚本 compile path。
     - 只服务本 pytest 文件，不新增产品公开 API。
 
     使用示例:
-    - `_seeded_static_conv2d_compile_args()`
+    - `_seeded_static_dynamic_conv2d_compile_args()`
     """
 
     return (
-        Memory([5, 20, 35, 33], NumericType.Float32),
-        Memory([5, 65, 281, 262], NumericType.Float32),
-        Memory([20, 65, 3, 3], NumericType.Float32),
-        Memory([20], NumericType.Float32),
+        Memory([_CONV_SD_B, _CONV_SD_F, _CONV_SD_HO, _CONV_SD_WO], NumericType.Float32),
+        Memory([_CONV_SD_B, _CONV_SD_CIN, _CONV_SD_H, _CONV_SD_W], NumericType.Float32),
+        Memory([_CONV_SD_F, _CONV_SD_CIN, _CONV_SD_KH, _CONV_SD_KW], NumericType.Float32),
+        Memory([_CONV_SD_F], NumericType.Float32),
+        SymbolDim("TF"),
+        SymbolDim("TC"),
+        SymbolDim("TN"),
+        SymbolDim("THO"),
+        SymbolDim("TWO"),
+    )
+
+
+def _seeded_static_static_conv2d_compile_args() -> tuple[Memory, Memory, Memory, Memory]:
+    """构造 static-static 测试用 seed-selected static memory 编译参数。
+
+
+    功能说明:
+    - output/input/weight 均使用本计划 static-static seed 随机选出的具体值。
+    - static case 将这些 seed-selected 值具体化到 IR memory type。
+    - tile 从 demo 文件内 fixed-seed 候选集合选择，不作为编译参数传入。
+
+    使用示例:
+    - `_seeded_static_static_conv2d_compile_args()`
+    """
+
+    return (
+        Memory([_CONV_SS_B, _CONV_SS_F, _CONV_SS_HO, _CONV_SS_WO], NumericType.Float32),
+        Memory([_CONV_SS_B, _CONV_SS_CIN, _CONV_SS_H, _CONV_SS_W], NumericType.Float32),
+        Memory([_CONV_SS_F, _CONV_SS_CIN, _CONV_SS_KH, _CONV_SS_KW], NumericType.Float32),
+        Memory([_CONV_SS_F], NumericType.Float32),
     )
 
 
 # TC-KERNEL-CONV2D-SYMBOLIC-MEMORY-001
 # 功能说明: 验证动态输入 demo 的 gen_kernel 编译参数使用语义化符号 Memory shape。
-# 测试目的: 锁定 lowered IR/source 不回退为旧 s1/s2 匿名 shape 或运行期静态 shape，确保 demo 名称中的 dynamic 真实体现在编译形态。
+# 测试目的: 锁定 lowered IR/source 不回退为旧 s1/s2 匿名 shape 或 runtime seed-selected 具体 shape，确保 demo 名称中的 dynamic 真实体现在编译形态。
 # 使用示例: pytest -q test/kernel/test_conv2d_symbolic_memory_genkernel.py -k symbolic_memory
 # 对应功能实现文件路径: kernel/conv2d/inputs_dynamic_tile_dynamic.py
 # 对应 spec 文件路径: spec/kernel/runner.md
@@ -254,34 +428,38 @@ def test_inputs_dynamic_tile_dynamic_gen_kernel_keeps_symbolic_memory_shapes() -
     assert "arg1.get_shape(2)" in source
     assert "arg1.get_shape(3)" in source
     assert "npu_demo::get_dynamic_memory<TSM>()" in source
-    assert "view<T1>(Vector{" in source
+    assert ".template view<" in source
+    assert "slice(" in source
     assert "alloc<TSM" not in source
     assert "S_INT c_6 = 258" not in source
 
 
 # TC-KERNEL-CONV2D-SYMBOLIC-MEMORY-002
-# 功能说明: 验证静态输入、动态 tile demo 的 lowered IR 保持固定 seed 具体 static shape。
+# 功能说明: 验证静态输入、动态 tile demo 的 lowered IR 保持 seed-selected static shape。
 # 测试目的: 锁定 static demo 不回退为默认 12/32/256/256 形状，也不误变为 dynamic 符号 shape。
 # 使用示例: pytest -q test/kernel/test_conv2d_symbolic_memory_genkernel.py -k static_tile_dynamic
 # 对应功能实现文件路径: kernel/conv2d/inputs_static_tile_dynamic.py
 # 对应 spec 文件路径: spec/kernel/runner.md
 # 对应测试文件路径: test/kernel/test_conv2d_symbolic_memory_genkernel.py
 def test_inputs_static_tile_dynamic_gen_kernel_keeps_seeded_static_shapes() -> None:
-    tile_args = random.Random(2026051724).choice(((8, 16, 4, 8, 8), (7, 18, 3, 8, 8), (6, 20, 2, 8, 8)))
     module, _source = run_lowering_demo(
         "test_conv2d/inputs_static_tile_dynamic_seeded_static_memory",
         conv2d_inputs_static_tile_dynamic_kernel,
-        *_seeded_static_conv2d_compile_args(),
-        *tile_args,
+        *_seeded_static_dynamic_conv2d_compile_args(),
     )
     module_text = str(module)
 
     _assert_conv2d_source_uses_kernel_out_first(conv2d_inputs_static_tile_dynamic_kernel)
     _assert_conv2d_first_ir_uses_fixed_upper_bound_scratch("test_conv2d/inputs_static_tile_dynamic_seeded_static_memory")
-    assert STATIC_OUTPUT_MEMORY in module_text
-    assert STATIC_INPUT_MEMORY in module_text
-    assert STATIC_WEIGHT_MEMORY in module_text
-    assert STATIC_BIAS_MEMORY in module_text
+    assert STATIC_DYNAMIC_OUTPUT_MEMORY in module_text
+    assert STATIC_DYNAMIC_INPUT_MEMORY in module_text
+    assert STATIC_DYNAMIC_WEIGHT_MEMORY in module_text
+    assert STATIC_DYNAMIC_BIAS_MEMORY in module_text
+    assert "!symbol.int<#symbol.expr<TF>>" in module_text
+    assert "!symbol.int<#symbol.expr<TC>>" in module_text
+    assert "!symbol.int<#symbol.expr<TN>>" in module_text
+    assert "!symbol.int<#symbol.expr<THO>>" in module_text
+    assert "!symbol.int<#symbol.expr<TWO>>" in module_text
     assert "!nn.memory<[#symbol.expr<12>, #symbol.expr<4>, #symbol.expr<254>, #symbol.expr<254>]" not in module_text
     assert "!nn.memory<[#symbol.expr<12>, #symbol.expr<32>, #symbol.expr<256>, #symbol.expr<256>]" not in module_text
     assert "!nn.memory<[#symbol.expr<4>, #symbol.expr<32>, #symbol.expr<3>, #symbol.expr<3>]" not in module_text
@@ -315,7 +493,7 @@ def test_inputs_static_tile_static_uses_seeded_tile_constants() -> None:
 
 
 # TC-KERNEL-CONV2D-SYMBOLIC-MEMORY-003
-# 功能说明: 验证静态输入、静态 tile demo 的 lowered IR 保持固定 seed 具体 static shape。
+# 功能说明: 验证静态输入、静态 tile demo 的 lowered IR 保持 seed-selected static shape。
 # 测试目的: 锁定 static demo 不回退为默认 12/32/256/256 形状，也不误变为 dynamic 符号 shape。
 # 使用示例: pytest -q test/kernel/test_conv2d_symbolic_memory_genkernel.py -k static_tile_static
 # 对应功能实现文件路径: kernel/conv2d/inputs_static_tile_static.py
@@ -325,16 +503,16 @@ def test_inputs_static_tile_static_gen_kernel_keeps_seeded_static_shapes() -> No
     module, source = run_lowering_demo(
         "test_conv2d/inputs_static_tile_static_seeded_static_memory",
         conv2d_inputs_static_tile_static_kernel,
-        *_seeded_static_conv2d_compile_args(),
+        *_seeded_static_static_conv2d_compile_args(),
     )
     module_text = str(module)
 
     _assert_conv2d_source_uses_kernel_out_first(conv2d_inputs_static_tile_static_kernel)
     _assert_conv2d_first_ir_uses_fixed_upper_bound_scratch("test_conv2d/inputs_static_tile_static_seeded_static_memory")
-    assert STATIC_OUTPUT_MEMORY in module_text
-    assert STATIC_INPUT_MEMORY in module_text
-    assert STATIC_WEIGHT_MEMORY in module_text
-    assert STATIC_BIAS_MEMORY in module_text
+    assert STATIC_STATIC_OUTPUT_MEMORY in module_text
+    assert STATIC_STATIC_INPUT_MEMORY in module_text
+    assert STATIC_STATIC_WEIGHT_MEMORY in module_text
+    assert STATIC_STATIC_BIAS_MEMORY in module_text
     assert "!nn.memory<[#symbol.expr<12>, #symbol.expr<4>, #symbol.expr<254>, #symbol.expr<254>]" not in module_text
     assert "!nn.memory<[#symbol.expr<12>, #symbol.expr<32>, #symbol.expr<256>, #symbol.expr<256>]" not in module_text
     assert "!nn.memory<[#symbol.expr<4>, #symbol.expr<32>, #symbol.expr<3>, #symbol.expr<3>]" not in module_text
@@ -346,3 +524,184 @@ def test_inputs_static_tile_static_gen_kernel_keeps_seeded_static_shapes() -> No
     assert "symbol.ne" in module_text
     assert "? -" not in module_text
     assert "? -" not in source
+
+
+def test_conv2d_target_scripts_execute_and_report_random_profile() -> None:
+    """三条 conv2d 脚本都应通过公开脚本入口并报告 fixed-seed profile。
+
+    功能说明:
+    - 通过公开脚本入口验证 static/dynamic demo，而不是直连私有 helper。
+    - 独立重算 seed-selected shape、padding、tile，并核对 stdout 与 source dump marker。
+
+    使用示例:
+    - `pytest -q test/kernel/test_conv2d_symbolic_memory_genkernel.py -k target_scripts`
+    """
+
+    scripts = {
+        "kernel/conv2d/inputs_static_tile_static.py": (
+            "profile=fixed-seed-random",
+            "static_ir=seed-selected-concrete",
+            f"input={(_CONV_SS_B, _CONV_SS_CIN, _CONV_SS_H, _CONV_SS_W)}",
+            f"weight={(_CONV_SS_F, _CONV_SS_CIN, _CONV_SS_KH, _CONV_SS_KW)}",
+            f"padding=({_CONV_SS_PADDING[0]},{_CONV_SS_PADDING[1]},{_CONV_SS_PADDING[2]},{_CONV_SS_PADDING[3]})",
+            f"selected_tile=({_CONV_SS_TILE[0]},{_CONV_SS_TILE[1]},{_CONV_SS_TILE[2]},{_CONV_SS_TILE[3]},{_CONV_SS_TILE[4]})",
+        ),
+        "kernel/conv2d/inputs_static_tile_dynamic.py": (
+            "profile=fixed-seed-random",
+            "static_memory=seed-selected-concrete",
+            "dynamic_tile=symbolic-runtime",
+            f"input={(_CONV_SD_B, _CONV_SD_CIN, _CONV_SD_H, _CONV_SD_W)}",
+            f"weight={(_CONV_SD_F, _CONV_SD_CIN, _CONV_SD_KH, _CONV_SD_KW)}",
+            f"padding=({_CONV_SD_PADDING[0]},{_CONV_SD_PADDING[1]},{_CONV_SD_PADDING[2]},{_CONV_SD_PADDING[3]})",
+            f"selected_tile={_CONV_SD_TILE}",
+        ),
+        "kernel/conv2d/inputs_dynamic_tile_dynamic.py": (
+            "profile=fixed-seed-random",
+            "dynamic_ir=symbolic",
+            "runtime=seed-selected",
+            "seed=2026052703",
+            f"input={(_CONV_DD_B, _CONV_DD_CIN, _CONV_DD_H, _CONV_DD_W)}",
+            f"weight={(_CONV_DD_F, _CONV_DD_CIN, _CONV_DD_KH, _CONV_DD_KW)}",
+            f"padding={_CONV_DD_PADDING}",
+            f"selected_tile={_CONV_DD_TILE}",
+        ),
+    }
+    source_markers = {
+        "kernel/conv2d/inputs_static_tile_static.py": (
+            (
+                "conv2d/inputs_static_tile_static_absent_bias",
+                ("conv2d_inputs_static_tile_static_kernel", "npu_demo::launch", "img2col2d<", "matmul<"),
+            ),
+            (
+                "conv2d/inputs_static_tile_static_present_bias",
+                ("conv2d_inputs_static_tile_static_kernel", "npu_demo::launch", "img2col2d<", "matmul<"),
+            ),
+        ),
+        "kernel/conv2d/inputs_static_tile_dynamic.py": (
+            (
+                "conv2d/inputs_static_tile_dynamic",
+                ("conv2d_inputs_static_tile_dynamic_kernel", "npu_demo::launch"),
+            ),
+        ),
+        "kernel/conv2d/inputs_dynamic_tile_dynamic.py": (
+            (
+                "conv2d/inputs_dynamic_tile_dynamic",
+                ("conv2d_inputs_dynamic_tile_dynamic_kernel", "npu_demo::launch"),
+            ),
+        ),
+    }
+    first_ir_markers = {
+        "kernel/conv2d/inputs_static_tile_static.py": (
+            (
+                "conv2d/inputs_static_tile_static_absent_bias/conv2d_inputs_static_tile_static_kernel",
+                (
+                    "func.func @conv2d_inputs_static_tile_static_kernel",
+                    f"!nn.memory<[#C{_CONV_SS_B}, #C{_CONV_SS_F}, #C{_CONV_SS_HO}, #C{_CONV_SS_WO}]",
+                    f"!nn.memory<[#C{_CONV_SS_B}, #C{_CONV_SS_CIN}, #C{_CONV_SS_H}, #C{_CONV_SS_W}]",
+                    f"!nn.memory<[#C{_CONV_SS_F}, #C{_CONV_SS_CIN}, #C{_CONV_SS_KH}, #C{_CONV_SS_KW}]",
+                    f"!nn.memory<[#C{_CONV_SS_F}]",
+                    f"#It1 = #symbol.iter<start = #C0, end = #C{_CONV_SS_F}, step = #C{_CONV_SS_TILE[0]}>",
+                    f"#It2 = #symbol.iter<start = #C0, end = #C{_CONV_SS_B}, step = #C{_CONV_SS_TILE[2]}>",
+                    f"#It3 = #symbol.iter<start = #C0, end = #C{_CONV_SS_HO}, step = #C{_CONV_SS_TILE[3]}>",
+                    f"#It4 = #symbol.iter<start = #C0, end = #C{_CONV_SS_WO}, step = #C{_CONV_SS_TILE[4]}>",
+                    f"#It6 = #symbol.iter<start = #C0, end = #C{_CONV_SS_CIN}, step = #C{_CONV_SS_TILE[1]}>",
+                ),
+                ("#S_TF", "#S_TC", "#S_TN", "#S_THO", "#S_TWO"),
+            ),
+            (
+                "conv2d/inputs_static_tile_static_present_bias/conv2d_inputs_static_tile_static_kernel",
+                (
+                    "func.func @conv2d_inputs_static_tile_static_kernel",
+                    f"!nn.memory<[#C{_CONV_SS_B}, #C{_CONV_SS_F}, #C{_CONV_SS_HO}, #C{_CONV_SS_WO}]",
+                    f"!nn.memory<[#C{_CONV_SS_B}, #C{_CONV_SS_CIN}, #C{_CONV_SS_H}, #C{_CONV_SS_W}]",
+                    f"!nn.memory<[#C{_CONV_SS_F}, #C{_CONV_SS_CIN}, #C{_CONV_SS_KH}, #C{_CONV_SS_KW}]",
+                    f"!nn.memory<[#C{_CONV_SS_F}]",
+                    f"#It1 = #symbol.iter<start = #C0, end = #C{_CONV_SS_F}, step = #C{_CONV_SS_TILE[0]}>",
+                    f"#It2 = #symbol.iter<start = #C0, end = #C{_CONV_SS_B}, step = #C{_CONV_SS_TILE[2]}>",
+                    f"#It3 = #symbol.iter<start = #C0, end = #C{_CONV_SS_HO}, step = #C{_CONV_SS_TILE[3]}>",
+                    f"#It4 = #symbol.iter<start = #C0, end = #C{_CONV_SS_WO}, step = #C{_CONV_SS_TILE[4]}>",
+                    f"#It6 = #symbol.iter<start = #C0, end = #C{_CONV_SS_CIN}, step = #C{_CONV_SS_TILE[1]}>",
+                ),
+                ("#S_TF", "#S_TC", "#S_TN", "#S_THO", "#S_TWO"),
+            ),
+        ),
+        "kernel/conv2d/inputs_static_tile_dynamic.py": (
+            (
+                "conv2d/inputs_static_tile_dynamic",
+                (
+                    "func.func @conv2d_inputs_static_tile_dynamic_kernel",
+                    f"!nn.memory<[#C{_CONV_SD_B}, #C{_CONV_SD_F}, #C{_CONV_SD_HO}, #C{_CONV_SD_WO}]",
+                    f"!nn.memory<[#C{_CONV_SD_B}, #C{_CONV_SD_CIN}, #C{_CONV_SD_H}, #C{_CONV_SD_W}]",
+                    f"!nn.memory<[#C{_CONV_SD_F}, #C{_CONV_SD_CIN}, #C{_CONV_SD_KH}, #C{_CONV_SD_KW}]",
+                    f"!nn.memory<[#C{_CONV_SD_F}]",
+                    "!symbol.int<#S_TF>",
+                    "!symbol.int<#S_TC>",
+                    "!symbol.int<#S_TN>",
+                    "!symbol.int<#S_THO>",
+                    "!symbol.int<#S_TWO>",
+                    f"#It1 = #symbol.iter<start = #C0, end = #C{_CONV_SD_F}, step = #S_TF>",
+                    f"#It2 = #symbol.iter<start = #C0, end = #C{_CONV_SD_B}, step = #S_TN>",
+                    f"#It3 = #symbol.iter<start = #C0, end = #C{_CONV_SD_HO}, step = #S_THO>",
+                    f"#It4 = #symbol.iter<start = #C0, end = #C{_CONV_SD_WO}, step = #S_TWO>",
+                    f"#It6 = #symbol.iter<start = #C0, end = #C{_CONV_SD_CIN}, step = #S_TC>",
+                ),
+                (
+                    f"#It1 = #symbol.iter<start = #C0, end = #C{_CONV_SD_F}, step = #C{_CONV_SD_TILE[0]}>",
+                    f"#It2 = #symbol.iter<start = #C0, end = #C{_CONV_SD_B}, step = #C{_CONV_SD_TILE[2]}>",
+                    f"#It3 = #symbol.iter<start = #C0, end = #C{_CONV_SD_HO}, step = #C{_CONV_SD_TILE[3]}>",
+                    f"#It4 = #symbol.iter<start = #C0, end = #C{_CONV_SD_WO}, step = #C{_CONV_SD_TILE[4]}>",
+                    f"#It6 = #symbol.iter<start = #C0, end = #C{_CONV_SD_CIN}, step = #C{_CONV_SD_TILE[1]}>",
+                ),
+            ),
+        ),
+        "kernel/conv2d/inputs_dynamic_tile_dynamic.py": (
+            (
+                "conv2d/inputs_dynamic_tile_dynamic",
+                (
+                    "func.func @conv2d_inputs_dynamic_tile_dynamic_kernel",
+                    "!nn.memory<[#S_B, #S_C,",
+                    "!nn.memory<[#S_B, #S_N, #S_XH, #S_XW]",
+                    "!nn.memory<[#S_C, #S_N, #S_KH, #S_KW]",
+                    "!nn.memory<[#S_C]",
+                    "!symbol.int<#S_SH>",
+                    "!symbol.int<#S_SW>",
+                    "!symbol.int<#S_DH>",
+                    "!symbol.int<#S_DW>",
+                    "!symbol.int<#S_PT>",
+                    "!symbol.int<#S_PB>",
+                    "!symbol.int<#S_PL>",
+                    "!symbol.int<#S_PR>",
+                    "!symbol.int<#S_TF>",
+                    "!symbol.int<#S_TC>",
+                    "!symbol.int<#S_TN>",
+                    "!symbol.int<#S_THO>",
+                    "!symbol.int<#S_TWO>",
+                    "step = #S_TF",
+                    "step = #S_TN",
+                    "step = #S_THO",
+                    "step = #S_TWO",
+                    "step = #S_TC",
+                ),
+                (
+                    f"!nn.memory<[#C{_CONV_DD_B}, #C{_CONV_DD_F}, #C{_CONV_DD_HO}, #C{_CONV_DD_WO}]",
+                    f"!nn.memory<[#C{_CONV_DD_B}, #C{_CONV_DD_CIN}, #C{_CONV_DD_H}, #C{_CONV_DD_W}]",
+                    f"!nn.memory<[#C{_CONV_DD_F}, #C{_CONV_DD_CIN}, #C{_CONV_DD_KH}, #C{_CONV_DD_KW}]",
+                    f"!nn.memory<[#C{_CONV_DD_F}]",
+                ),
+            ),
+        ),
+    }
+    for script, expected_markers in scripts.items():
+        completed = _run_kernel_script(script)
+        assert "[CHECK] conv2d/" in completed.stdout
+        assert "absent_bias max_abs_diff=" in completed.stdout
+        assert "present_bias max_abs_diff=" in completed.stdout
+        assert "tile_seed=" in completed.stdout
+        assert "tile_candidates=" in completed.stdout
+        assert "bias_case_order=" in completed.stdout
+        for marker in expected_markers:
+            assert marker in completed.stdout
+        for case_name, markers in source_markers[script]:
+            _assert_source_dump_contains(case_name, markers)
+        for case_name, markers, forbidden_markers in first_ir_markers[script]:
+            _assert_first_ir_dump_contains(case_name, markers, forbidden_markers)

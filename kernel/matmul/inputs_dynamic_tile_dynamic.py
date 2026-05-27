@@ -3,8 +3,8 @@
 
 功能说明:
 - 实现 `inputs 动 + tile 动` 的二维 matmul kernel demo。
-- 编译期 memory 使用 `H/K/W` 语义符号，tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数，运行期从轻量候选集合按固定 seed 选择 tile 组合。
-- 运行期仍传入真实 NumPy ndarray 与 int tile，执行 lowering 生成的 launch wrapper 后和 `np.matmul` 对齐。
+- 编译期 memory 使用 `H/K/W` 语义符号，tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数。
+- 运行期 shape 与 tile 都由 fixed-seed random profile 选出，只通过真实 NumPy ndarray 与 int runtime scalar 绑定，不静态化进入口 memory/tile 类型。
 - K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 初始化局部 accumulator，K loop 内用 `kernel.matmul/kernel.add` out-first helper 累加 partial，K loop 后按 optional rank-1 bias 分支累加并最终写回 output。
 - H/W/K 尾块都通过 `min(tile, dim - iv)` 覆盖，避免只覆盖可整除 case。
 
@@ -202,6 +202,30 @@ def _assert_accumulator_source(source: str) -> None:
         raise AssertionError("matmul accumulator source order must be fill -> matmul -> add -> output deslice")
 
 
+def _assert_source_dump_matches(source: str) -> None:
+    """校验生成源码与公开 dump/source.cpp 一致。
+
+
+    功能说明:
+    - 读取 `kernel/dump/matmul/inputs_dynamic_tile_dynamic/source.cpp`。
+    - 使用去尾空白后的全文比较证明执行真源与公开 dump 一致。
+    - 同时检查 wrapper entry 与 `npu_demo::launch` 关键 marker。
+
+    使用示例:
+    - `_assert_source_dump_matches(source)`
+    """
+
+    dump_source_path = _REPO_ROOT / "kernel" / "dump" / Path(CASE_NAME) / "source.cpp"
+    dump_source = dump_source_path.read_text(encoding="utf-8")
+    normalized_source = "\n".join(line.rstrip() for line in source.strip().splitlines())
+    normalized_dump = "\n".join(line.rstrip() for line in dump_source.strip().splitlines())
+    if normalized_source != normalized_dump:
+        raise AssertionError(f"{CASE_NAME}: source dump does not match lowering source")
+    for marker in (WRAPPER_ENTRY_NAME, "npu_demo::launch"):
+        if marker not in dump_source:
+            raise AssertionError(f"{CASE_NAME}: source dump missing marker {marker}")
+
+
 def _execute_lowering_source(source: str, real_args: tuple[MatmulRuntimeArg, ...]) -> None:
     """编译并执行 lowering 生成的 launch wrapper。
 
@@ -255,7 +279,7 @@ def main() -> None:
 
 
     功能说明:
-    - 使用固定 seed 选择真实 shape，并用固定 seed 从轻量候选中选择不整除 H/W/K 的 runtime tile。
+    - 使用 fixed-seed random profile 选择真实 runtime shape 与不整除 H/W/K 的 runtime tile。
     - 编译期以符号 memory/tile 生成 lowering IR 与 npu_demo source。
     - 运行期分别执行 bias absent / present launch wrapper，并用 NumPy 参考校验输出。
 
@@ -279,6 +303,7 @@ def main() -> None:
     module, source = run_lowering_demo(CASE_NAME, matmul_inputs_dynamic_tile_dynamic_kernel, *_symbolic_compile_args())
     module_text = str(module)
     _assert_accumulator_source(source)
+    _assert_source_dump_matches(source)
     _assert_dynamic_memory_ir(module_text, tuple(absent_out.shape), tuple(lhs.shape), tuple(rhs.shape))
     max_abs_diff_by_case = {}
     for bias_case in BIAS_CASE_ORDER:
@@ -292,6 +317,7 @@ def main() -> None:
     present_max_abs_diff = max_abs_diff_by_case["present"]
     print(
         "[ARGS] "
+        "profile=fixed-seed-random dynamic_ir=symbolic runtime=seed-selected "
         f"seed=2026051603 shape=(M={h_size},K={k_size},N={w_size}) "
         f"tile_seed={TILE_SELECTION_SEED} tile_candidates={TILE_ARG_CANDIDATES} selected_tile={TILE_ARGS} "
         f"bias_case_order={BIAS_CASE_ORDER} multi_tile=True tail=True bias_rank=1"

@@ -3,8 +3,9 @@
 
 功能说明:
 - 实现 `inputs 静 + tile 动` 的二维 matmul kernel demo。
-- 输入 shape 由固定 seed `2026051602` 随机生成并固化为具体数字：`lhs[197, 178]`、`rhs[178, 184]`、`out[197, 184]`。
-- tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数，运行期从轻量候选集合按固定 seed 选择 int scalar 绑定，并通过 lowering 生成的 launch wrapper 触发真实 multi-block 执行。
+- 输入 shape 由 seed `2026051602` 从随机范围选出：`lhs[197, 178]`、`rhs[178, 184]`、`out[197, 184]`。
+- static case 将 seed-selected shape 具体化到 IR memory type。
+- tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数，运行期从轻量候选集合按 seed `2026051713` 选择 int scalar 绑定，并通过 lowering 生成的 launch wrapper 触发真实 multi-block 执行。
 - H/W/K 均大于对应 runtime tile，且至少触发两次 tile loop；H/W/K 尾块都通过 `min(tile, dim - iv)` 覆盖。
 - K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 初始化局部 accumulator，K loop 内用 `kernel.matmul/kernel.add` out-first helper 累加 partial，K loop 后按 optional rank-1 bias 分支累加并最终写回 output。
 
@@ -122,7 +123,8 @@ def _symbolic_compile_args() -> tuple[MatmulCompileArg, ...]:
 
 
     功能说明:
-    - output/lhs/rhs memory 固定为 `197x184`、`197x178`、`178x184`。
+    - output/lhs/rhs memory 使用 seed-selected static shape：`197x184`、`197x178`、`178x184`。
+    - static case 将这些 seed-selected 值具体化到 IR memory type。
     - tile 参数固定使用 `TILE_H/TILE_W/TILE_K`，用于锁定编译期符号 tile。
 
     使用示例:
@@ -145,7 +147,7 @@ def _assert_static_symbolic_tile_ir(module_text: str) -> None:
 
 
     功能说明:
-    - 确认 IR 包含固定 static memory shape。
+    - 确认 IR 包含 seed-selected static memory shape。
     - 确认 tile 来自 `TILE_H/TILE_W/TILE_K` 参数，K loop step 是 `TILE_K`。
 
     使用示例:
@@ -202,6 +204,30 @@ def _assert_accumulator_source(source: str) -> None:
         raise AssertionError("matmul accumulator source order must be fill -> matmul -> add -> output deslice")
 
 
+def _assert_source_dump_matches(source: str) -> None:
+    """校验生成源码与公开 dump/source.cpp 一致。
+
+
+    功能说明:
+    - 读取 `kernel/dump/matmul/inputs_static_tile_dynamic/source.cpp`。
+    - 使用去尾空白后的全文比较证明执行真源与公开 dump 一致。
+    - 同时检查 wrapper entry 与 `npu_demo::launch` 关键 marker。
+
+    使用示例:
+    - `_assert_source_dump_matches(source)`
+    """
+
+    dump_source_path = _REPO_ROOT / "kernel" / "dump" / Path(CASE_NAME) / "source.cpp"
+    dump_source = dump_source_path.read_text(encoding="utf-8")
+    normalized_source = "\n".join(line.rstrip() for line in source.strip().splitlines())
+    normalized_dump = "\n".join(line.rstrip() for line in dump_source.strip().splitlines())
+    if normalized_source != normalized_dump:
+        raise AssertionError(f"{CASE_NAME}: source dump does not match lowering source")
+    for marker in (WRAPPER_ENTRY_NAME, "npu_demo::launch"):
+        if marker not in dump_source:
+            raise AssertionError(f"{CASE_NAME}: source dump missing marker {marker}")
+
+
 def _execute_lowering_source(source: str, real_args: tuple[MatmulRuntimeArg, ...]) -> None:
     """编译并执行 lowering 生成的 launch wrapper。
 
@@ -255,7 +281,8 @@ def main() -> None:
 
 
     功能说明:
-    - 使用固定 seed 生成并固化的 `197x178x184` matmul shape，并用固定 seed 从轻量候选中选择不整除 H/W/K 的 tile。
+    - 使用 fixed-seed random profile 选出的 `197x178x184` matmul shape。
+    - 运行期 tile 由 fixed-seed 候选集合选出，编译期 tile 保持 `TILE_H/TILE_W/TILE_K` 符号。
     - 编译期以 static memory / symbolic tile 生成 lowering IR 与 npu_demo source。
     - 运行期分别执行 bias absent / present launch wrapper，并用 NumPy 参考校验输出。
 
@@ -276,6 +303,7 @@ def main() -> None:
     module_text = str(module)
     _assert_static_symbolic_tile_ir(module_text)
     _assert_accumulator_source(source)
+    _assert_source_dump_matches(source)
     max_abs_diff_by_case = {}
     for bias_case in BIAS_CASE_ORDER:
         if bias_case == "absent":
@@ -288,13 +316,14 @@ def main() -> None:
     present_max_abs_diff = max_abs_diff_by_case["present"]
     print(
         "[ARGS] "
+        "profile=fixed-seed-random static_memory=seed-selected-concrete dynamic_tile=symbolic-runtime "
         f"seed={_STATIC_SHAPE_SEED} shape=(M={_STATIC_M},K={_STATIC_K},N={_STATIC_N}) "
         f"tile_seed={TILE_SELECTION_SEED} tile_candidates={TILE_ARG_CANDIDATES} selected_tile={TILE_ARGS} "
         f"bias_case_order={BIAS_CASE_ORDER} multi_tile=True tail=True bias_rank=1"
     )
     print(
         "[IR] static memory evidence: "
-        f"{_STATIC_M}x{_STATIC_K}x{_STATIC_N} memory and TILE_H/TILE_W/TILE_K tile present"
+        f"seed-selected {_STATIC_M}x{_STATIC_K}x{_STATIC_N} memory concrete; TILE_H/TILE_W/TILE_K tile symbols present"
     )
     print(f"[CHECK] {CASE_NAME}/absent_bias max_abs_diff={absent_max_abs_diff}")
     print(f"[CHECK] {CASE_NAME}/present_bias max_abs_diff={present_max_abs_diff}")
