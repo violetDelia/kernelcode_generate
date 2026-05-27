@@ -35,6 +35,7 @@
 - `功能实现`：[`kernel_gen/execute_engine/compiler.py`](kernel_gen/execute_engine/compiler.py)
 - `功能实现`：[`kernel_gen/execute_engine/strategy.py`](kernel_gen/execute_engine/strategy.py)
 - `功能实现`：[`kernel_gen/execute_engine/builtin_strategy.py`](kernel_gen/execute_engine/builtin_strategy.py)
+- `功能实现`：[`kernel_gen/execute_engine/runtime_args.py`](kernel_gen/execute_engine/runtime_args.py)
 - `test`：[`test/execute_engine/test_contract.py`](test/execute_engine/test_contract.py)
 - `test`：[`test/execute_engine/test_builtin_strategy.py`](test/execute_engine/test_builtin_strategy.py)
 - `test`：[`test/execute_engine/test_compile_strategy.py`](test/execute_engine/test_compile_strategy.py)
@@ -48,6 +49,8 @@
 - `target` 相关 include 目录（由 target 映射决定）：
   - `npu_demo`：`include/npu_demo/*`
   - `cpu`：`include/cpu/*`
+- 内置 target 后端实现：由 `kernel_gen/execute_engine/builtin_strategy.py` 生成 include、entry shim、compile unit 与 shared object。
+- 运行时 ABI：由 `kernel_gen/execute_engine/runtime_args.py` 封送 runtime args 并调用 `kg_execute_entry`。
 
 ## 术语
 

@@ -4,7 +4,7 @@
 
 - 定义执行引擎 `P0` 的 `target` 选择、target 专属 `include` 注入与 `entry shim` 合同。
 - 冻结 `entry_point` 命名、`ordered_args` 绑定顺序、编译器默认值与 flags 追加策略，使 `compile -> execute` 在不同 target 下保持机械一致。
-- 本文档覆盖 target include、entry shim 与 compiler 三类职责；公开入口、内置 target 支持实现和 `CompiledKernel` 装配均由 `kernel_gen/execute_engine/compiler.py` 承接。
+- 本文档覆盖 target include、entry shim 与 compiler 三类职责；公开入口和 `CompiledKernel` 装配由 `kernel_gen/execute_engine/compiler.py` 承接，内置 target 支持实现由 `kernel_gen/execute_engine/builtin_strategy.py` 承接。
 - runtime trance kernel log 的编译期宏由 `kernel_gen.core.config.set_trance_enabled(...)` 控制；`ExecutionEngine.compile(...)` 不新增同义入参。
 
 ## API 列表
@@ -17,6 +17,7 @@
 - `功能实现`：[`kernel_gen/execute_engine/compiler.py`](kernel_gen/execute_engine/compiler.py)
 - `功能实现`：[`kernel_gen/execute_engine/strategy.py`](kernel_gen/execute_engine/strategy.py)
 - `功能实现`：[`kernel_gen/execute_engine/builtin_strategy.py`](kernel_gen/execute_engine/builtin_strategy.py)
+- `功能实现`：[`kernel_gen/execute_engine/runtime_args.py`](kernel_gen/execute_engine/runtime_args.py)
 - `test`：[`test/execute_engine/test_compile.py`](test/execute_engine/test_compile.py)、[`test/execute_engine/test_builtin_strategy.py`](test/execute_engine/test_builtin_strategy.py)、[`test/execute_engine/test_invoke.py`](test/execute_engine/test_invoke.py)、[`test/execute_engine/test_contract.py`](test/execute_engine/test_contract.py)
 
 ## 依赖
@@ -51,14 +52,14 @@
 - 本文档只冻结 target/include/entry shim 合同；`stream`、输出回收与运行时参数类型校验沿用 [`spec/execute_engine/execute_engine.md`](spec/execute_engine/execute_engine.md) 与 [`spec/execute_engine/execute_engine_api.md`](spec/execute_engine/execute_engine_api.md)。
 ### 内部编译行为
 
-- `ExecutionEngine.compile(...)` 根据 `CompileRequest.target` 选择 compile strategy；内置 `cpu` / `npu_demo` strategy 在 `compiler.py` 内选择 target include set 并生成编译产物。
+- `ExecutionEngine.compile(...)` 根据 `CompileRequest.target` 选择 compile strategy；内置 `cpu` / `npu_demo` strategy 由 `builtin_strategy.py` 选择 target include set 并生成编译产物。
 - `target="npu_demo"` 时只能注入 `#include "include/npu_demo/npu_demo.h"`。
 - `target="cpu"` 时必须同时注入 `#include "include/cpu/Memory.h"` 与 `#include "include/cpu/Nn.h"`。
 - 当 `compiler is None` 时，编译命令使用 `g++`。
 - 编译 flags 必须保留 `-std=c++17` 基线，并按调用方顺序追加 `CompileRequest.compiler_flags`。
 - entry shim 仅作为内部桥接逻辑：源码未提供同名 `extern "C"` 入口时，内部生成稳定 C ABI 入口；源码已提供同名入口时可省略。
 - `ordered_args` 是内部 ABI 槽位，不作为 Python 公开 API；执行侧只接收 `tuple[RuntimeInput, ...]` 运行时参数。
-- 内置 target 编译产物结构、include 注入、entry shim 与真实编译 helper 均为 `compiler.py` 私有实现，不进入 `kernel_gen.execute_engine` 包根公开 API；调用方不得依赖这些下划线 helper。
+- 内置 target 编译产物结构、include 注入、entry shim 与真实编译 helper 均为 `builtin_strategy.py` 包内实现，不进入 `kernel_gen.execute_engine` 包根公开 API；调用方不得依赖这些 helper 或内部模块作为第三方扩展点。
 - `target="npu_demo"` entry shim 的函数形参解析必须把 `S_INT` 视为整数标量参数槽位，与 `int` / `long` / `int64_t` 等整型形参按同一 `ordered_args` 顺序绑定。
 - `target="npu_demo"` entry shim 解析到 `template <typename Tn>` 与 `Memory<Space, Tn>&` 形参时，内部 `_ArgSlot` 必须携带 runtime dtype code，并根据 `gen_kernel` 生成源码中的 `__kernel_gen_template_instance_seed_*` alias 或源码中 concrete `Memory<..., dtype>` 的 dtype 生成唯一 concrete `Memory<Space, dtype>` 绑定后调用 `function<dtype...>(...)`。
 - 若手写 templated source 只有 `Memory<Space, Tn>&` 形参而缺少任何 concrete `Memory<..., dtype>` 实例线索，`ExecutionEngine.compile(...)` 必须以 `template_instance_required` 稳定失败；不得默认实例化为 `float`。

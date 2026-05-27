@@ -5,7 +5,7 @@
 - 定义 `ExecutionEngine.compile(...)` 的 compile strategy 扩展合同。
 - 内置 `cpu` / `npu_demo` strategy 保持既有真实编译行为。
 - compile strategy registry 真源由 `strategy.py` 承接；`compiler.py` 保留旧公开导入路径和 `CompiledKernel` 装配。
-- 内置 target include、entry shim 与编译产物生成由 `compiler.py` 私有实现承接；`builtin_strategy.py` 只负责包内安装 `cpu` / `npu_demo` 内置 strategy，不进入包根公开 API。
+- 内置 target include、entry shim 与编译产物生成由 `builtin_strategy.py` 承接；该文件只提供包内文件级 API，不进入包根公开 API。
 - 第三方 target 可通过公开 registry 注册 compile strategy；缺失时公开失败，不得 fallback 到 CPU。
 
 ## API 列表
@@ -22,6 +22,7 @@
 - `spec`：`spec/execute_engine/strategy.md`
 - `功能实现`：`kernel_gen/execute_engine/strategy.py`
 - `功能实现`：`kernel_gen/execute_engine/builtin_strategy.py`
+- `功能实现`：`kernel_gen/execute_engine/runtime_args.py`
 - `功能实现`：`kernel_gen/execute_engine/compiler.py`
 - `功能实现`：`kernel_gen/execute_engine/__init__.py`
 - `test`：`test/execute_engine/test_compile_strategy.py`
@@ -49,8 +50,9 @@
 - `ExecutionEngine.compile(request=...)` 与 `source` 或 `function` 混用时必须以 `source_empty_or_invalid` 失败，错误文本包含 `request cannot be combined with source or function`。
 - `CompiledKernel.execute(...)` 对 `target` 不在 `cpu` / `npu_demo` 的 compile-only kernel 必须以 `execution_unsupported` 失败。
 - SourceBundle decode/write helper 不公开；strategy 可自行消费 aggregate string，但不得新增公开 helper。
-- 内置 target 编译产物结构、include 注入、entry shim 与真实编译 helper 均为 `compiler.py` 私有实现；第三方 strategy 不得依赖这些 helper 作为公开扩展点。
-- `builtin_strategy.py` 只提供包内安装逻辑，不写入包根 `__all__`，公开测试不得直接调用该安装函数。
+- 内置 target 编译产物结构、include 注入、entry shim 与真实编译 helper 均为 `builtin_strategy.py` 包内实现；第三方 strategy 不得依赖这些 helper 作为公开扩展点。
+- `builtin_strategy.py` 提供 `BuiltinCompileArtifacts`、`build_builtin_compile_artifacts(...)`、`install_builtin_compile_strategies(...)` 三个文件级 API，不写入包根 `__all__`，公开测试不得直接调用安装函数。
+- `runtime_args.py` 提供 `AllowAbsentMemoryArg`、`RuntimeInput`、`invoke_compiled_kernel(...)` 三个文件级 API，不写入包根 `__all__`。
 
 ## API详细说明
 
