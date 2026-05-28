@@ -3,7 +3,7 @@
 
 功能说明:
 - 覆盖 `kernel/conv2d/inputs_dynamic_tile_dynamic.py` 的符号 memory 编译形态。
-- 覆盖两条 static conv2d demo 将 fixed-seed 随机选值具体化到 static IR 的编译形态。
+- 覆盖两条 static conv2d demo 将 per-run random 选值具体化到 static IR 的编译形态。
 - 验证 `run_lowering_demo(...)` 通过公开 `mlir_gen -> lowering -> gen_kernel` 链路生成动态 memory IR/source。
 - 验证 C/K reduce 维和 matmul 一样使用本地 accumulator，不允许通过反复读写 out 累计 partial。
 
@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import inspect
 import os
+from ast import literal_eval
 import random
 import re
 import shutil
@@ -255,6 +256,176 @@ def _assert_first_ir_dump_contains(
     assert not unexpected_markers
 
 
+def _conv2d_script_first_ir_markers(
+    script: str,
+    stdout: str,
+) -> tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]:
+    """构造 conv2d 脚本本次随机 profile 对应的 first-ir marker。
+
+    功能说明:
+    - static 脚本必须在 first-ir 中出现本次随机 output/input/weight shape。
+    - dynamic 脚本必须保留语义符号，且不得把本次随机 shape 静态化。
+
+    使用示例:
+    - `_conv2d_script_first_ir_markers("kernel/conv2d/inputs_static_tile_dynamic.py", stdout)`
+    """
+
+    shape_seed_match = re.search(r"shape_seed=(\d+)", stdout)
+    tile_seed_match = re.search(r"tile_seed=(\d+)", stdout)
+    output_match = re.search(r"output=(\([^)]*\))", stdout)
+    input_match = re.search(r"input=(\([^)]*\))", stdout)
+    weight_match = re.search(r"weight=(\([^)]*\))", stdout)
+    stride_match = re.search(r"stride=(\([^)]*\))", stdout)
+    dilation_match = re.search(r"dilation=(\([^)]*\))", stdout)
+    padding_match = re.search(r"padding=(\([^)]*\))", stdout)
+    candidates_match = re.search(r"tile_candidates=([^\n]*?) selected_tile=", stdout)
+    tile_match = re.search(r"selected_tile=(\([^)]*\))", stdout)
+    assert shape_seed_match is not None
+    assert tile_seed_match is not None
+    assert output_match is not None
+    assert input_match is not None
+    assert weight_match is not None
+    assert stride_match is not None
+    assert dilation_match is not None
+    assert padding_match is not None
+    assert candidates_match is not None
+    assert tile_match is not None
+    shape_seed = int(shape_seed_match.group(1))
+    tile_seed = int(tile_seed_match.group(1))
+    shape_rng = random.Random(shape_seed)
+    batch = shape_rng.randint(4, 6)
+    in_channels = shape_rng.randint(48, 64)
+    input_h = shape_rng.randint(241, 289)
+    input_w = shape_rng.randint(225, 273)
+    out_channels = shape_rng.randint(18, 24)
+    kernel_h = shape_rng.choice((3, 5))
+    kernel_w = shape_rng.choice((3, 5))
+    padding = tuple(shape_rng.choice((0, 1, 2, 3, 4)) for _ in range(4))
+    stride = (8, 8)
+    dilation = (1, 1)
+    output_h = ((input_h + padding[0] + padding[1] - dilation[0] * (kernel_h - 1) - 1) // stride[0]) + 1
+    output_w = ((input_w + padding[2] + padding[3] - dilation[1] * (kernel_w - 1) - 1) // stride[1]) + 1
+    expected_candidates = ((8, 16, 4, 8, 9), (7, 18, 3, 9, 8), (6, 20, 2, 10, 7))
+    assert tuple(literal_eval(candidates_match.group(1))) == expected_candidates
+    tile = random.Random(tile_seed).choice(expected_candidates)
+    output_shape = (batch, out_channels, output_h, output_w)
+    input_shape = (batch, in_channels, input_h, input_w)
+    weight_shape = (out_channels, in_channels, kernel_h, kernel_w)
+    assert literal_eval(output_match.group(1)) == output_shape
+    assert literal_eval(input_match.group(1)) == input_shape
+    assert literal_eval(weight_match.group(1)) == weight_shape
+    assert literal_eval(stride_match.group(1)) == stride
+    assert literal_eval(dilation_match.group(1)) == dilation
+    assert literal_eval(padding_match.group(1)) == padding
+    assert literal_eval(tile_match.group(1)) == tile
+    assert batch * out_channels * output_h * output_w * in_channels * kernel_h * kernel_w <= 300_000_000
+    batch, out_channels, output_h, output_w = output_shape
+    _input_batch, in_channels, input_h, input_w = input_shape
+    _weight_out, _weight_in, kernel_h, kernel_w = weight_shape
+    tile_f, tile_c, tile_n, tile_ho, tile_wo = tile
+    assert out_channels > tile_f
+    assert in_channels > tile_c
+    assert batch > tile_n
+    assert output_h > tile_ho
+    assert output_w > tile_wo
+    assert out_channels % tile_f != 0
+    assert in_channels % tile_c != 0
+    assert batch % tile_n != 0
+    assert output_h % tile_ho != 0
+    assert output_w % tile_wo != 0
+    if script == "kernel/conv2d/inputs_static_tile_static.py":
+        markers = (
+            "func.func @conv2d_inputs_static_tile_static_kernel",
+            f"!nn.memory<[#C{batch}, #C{out_channels}, #C{output_h}, #C{output_w}]",
+            f"!nn.memory<[#C{batch}, #C{in_channels}, #C{input_h}, #C{input_w}]",
+            f"!nn.memory<[#C{out_channels}, #C{in_channels}, #C{kernel_h}, #C{kernel_w}]",
+            f"!nn.memory<[#C{out_channels}]",
+            f"#It1 = #symbol.iter<start = #C0, end = #C{out_channels}, step = #C{tile_f}>",
+            f"#It2 = #symbol.iter<start = #C0, end = #C{batch}, step = #C{tile_n}>",
+            f"#It3 = #symbol.iter<start = #C0, end = #C{output_h}, step = #C{tile_ho}>",
+            f"#It4 = #symbol.iter<start = #C0, end = #C{output_w}, step = #C{tile_wo}>",
+            f"#It6 = #symbol.iter<start = #C0, end = #C{in_channels}, step = #C{tile_c}>",
+        )
+        return (
+            (
+                "conv2d/inputs_static_tile_static_absent_bias/conv2d_inputs_static_tile_static_kernel",
+                markers,
+                ("#S_TF", "#S_TC", "#S_TN", "#S_THO", "#S_TWO"),
+            ),
+            (
+                "conv2d/inputs_static_tile_static_present_bias/conv2d_inputs_static_tile_static_kernel",
+                markers,
+                ("#S_TF", "#S_TC", "#S_TN", "#S_THO", "#S_TWO"),
+            ),
+        )
+    if script == "kernel/conv2d/inputs_static_tile_dynamic.py":
+        return (
+            (
+                "conv2d/inputs_static_tile_dynamic",
+                (
+                    "func.func @conv2d_inputs_static_tile_dynamic_kernel",
+                    f"!nn.memory<[#C{batch}, #C{out_channels}, #C{output_h}, #C{output_w}]",
+                    f"!nn.memory<[#C{batch}, #C{in_channels}, #C{input_h}, #C{input_w}]",
+                    f"!nn.memory<[#C{out_channels}, #C{in_channels}, #C{kernel_h}, #C{kernel_w}]",
+                    f"!nn.memory<[#C{out_channels}]",
+                    "!symbol.int<#S_TF>",
+                    "!symbol.int<#S_TC>",
+                    "!symbol.int<#S_TN>",
+                    "!symbol.int<#S_THO>",
+                    "!symbol.int<#S_TWO>",
+                    f"#It1 = #symbol.iter<start = #C0, end = #C{out_channels}, step = #S_TF>",
+                    f"#It2 = #symbol.iter<start = #C0, end = #C{batch}, step = #S_TN>",
+                    f"#It3 = #symbol.iter<start = #C0, end = #C{output_h}, step = #S_THO>",
+                    f"#It4 = #symbol.iter<start = #C0, end = #C{output_w}, step = #S_TWO>",
+                    f"#It6 = #symbol.iter<start = #C0, end = #C{in_channels}, step = #S_TC>",
+                ),
+                (
+                    f"#It1 = #symbol.iter<start = #C0, end = #C{out_channels}, step = #C{tile_f}>",
+                    f"#It2 = #symbol.iter<start = #C0, end = #C{batch}, step = #C{tile_n}>",
+                    f"#It3 = #symbol.iter<start = #C0, end = #C{output_h}, step = #C{tile_ho}>",
+                    f"#It4 = #symbol.iter<start = #C0, end = #C{output_w}, step = #C{tile_wo}>",
+                    f"#It6 = #symbol.iter<start = #C0, end = #C{in_channels}, step = #C{tile_c}>",
+                ),
+            ),
+        )
+    return (
+        (
+            "conv2d/inputs_dynamic_tile_dynamic",
+            (
+                "func.func @conv2d_inputs_dynamic_tile_dynamic_kernel",
+                "!nn.memory<[#S_B, #S_C,",
+                "!nn.memory<[#S_B, #S_N, #S_XH, #S_XW]",
+                "!nn.memory<[#S_C, #S_N, #S_KH, #S_KW]",
+                "!nn.memory<[#S_C]",
+                "!symbol.int<#S_SH>",
+                "!symbol.int<#S_SW>",
+                "!symbol.int<#S_DH>",
+                "!symbol.int<#S_DW>",
+                "!symbol.int<#S_PT>",
+                "!symbol.int<#S_PB>",
+                "!symbol.int<#S_PL>",
+                "!symbol.int<#S_PR>",
+                "!symbol.int<#S_TF>",
+                "!symbol.int<#S_TC>",
+                "!symbol.int<#S_TN>",
+                "!symbol.int<#S_THO>",
+                "!symbol.int<#S_TWO>",
+                "step = #S_TF",
+                "step = #S_TN",
+                "step = #S_THO",
+                "step = #S_TWO",
+                "step = #S_TC",
+            ),
+            (
+                f"!nn.memory<[#C{batch}, #C{out_channels}, #C{output_h}, #C{output_w}]",
+                f"!nn.memory<[#C{batch}, #C{in_channels}, #C{input_h}, #C{input_w}]",
+                f"!nn.memory<[#C{out_channels}, #C{in_channels}, #C{kernel_h}, #C{kernel_w}]",
+                f"!nn.memory<[#C{out_channels}]",
+            ),
+        ),
+    )
+
+
 def _assert_conv2d_first_ir_uses_fixed_upper_bound_scratch(case_name: str) -> None:
     """校验 conv2d 生成侧 first-ir 中可改写 scratch 已用上界形态。
 
@@ -342,12 +513,12 @@ def _symbolic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]:
 
 
 def _seeded_static_dynamic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]:
-    """构造 static-dynamic 测试用 seed-selected 编译参数。
+    """构造 static-dynamic 测试用 本次随机选中 编译参数。
 
 
     功能说明:
     - output/input/weight 均使用本计划 static-dynamic seed 随机选出的具体值。
-    - static case 将这些 seed-selected 值具体化到 IR memory type。
+    - static case 将这些 本次随机选中 值具体化到 IR memory type。
     - tile 使用 `TF/TC/TN/THO/TWO` 符号，锁定公开脚本 compile path。
     - 只服务本 pytest 文件，不新增产品公开 API。
 
@@ -369,13 +540,13 @@ def _seeded_static_dynamic_conv2d_compile_args() -> tuple[Conv2dCompileArg, ...]
 
 
 def _seeded_static_static_conv2d_compile_args() -> tuple[Memory, Memory, Memory, Memory]:
-    """构造 static-static 测试用 seed-selected static memory 编译参数。
+    """构造 static-static 测试用 本次随机选中 static memory 编译参数。
 
 
     功能说明:
     - output/input/weight 均使用本计划 static-static seed 随机选出的具体值。
-    - static case 将这些 seed-selected 值具体化到 IR memory type。
-    - tile 从 demo 文件内 fixed-seed 候选集合选择，不作为编译参数传入。
+    - static case 将这些 本次随机选中 值具体化到 IR memory type。
+    - tile 从 demo 文件内 per-run random 候选集合选择，不作为编译参数传入。
 
     使用示例:
     - `_seeded_static_static_conv2d_compile_args()`
@@ -391,7 +562,7 @@ def _seeded_static_static_conv2d_compile_args() -> tuple[Memory, Memory, Memory,
 
 # TC-KERNEL-CONV2D-SYMBOLIC-MEMORY-001
 # 功能说明: 验证动态输入 demo 的 gen_kernel 编译参数使用语义化符号 Memory shape。
-# 测试目的: 锁定 lowered IR/source 不回退为旧 s1/s2 匿名 shape 或 runtime seed-selected 具体 shape，确保 demo 名称中的 dynamic 真实体现在编译形态。
+# 测试目的: 锁定 lowered IR/source 不回退为旧 s1/s2 匿名 shape 或 runtime 本次随机选中 具体 shape，确保 demo 名称中的 dynamic 真实体现在编译形态。
 # 使用示例: pytest -q test/kernel/test_conv2d_symbolic_memory_genkernel.py -k symbolic_memory
 # 对应功能实现文件路径: kernel/conv2d/inputs_dynamic_tile_dynamic.py
 # 对应 spec 文件路径: spec/kernel/runner.md
@@ -435,7 +606,7 @@ def test_inputs_dynamic_tile_dynamic_gen_kernel_keeps_symbolic_memory_shapes() -
 
 
 # TC-KERNEL-CONV2D-SYMBOLIC-MEMORY-002
-# 功能说明: 验证静态输入、动态 tile demo 的 lowered IR 保持 seed-selected static shape。
+# 功能说明: 验证静态输入、动态 tile demo 的 lowered IR 保持 本次随机选中 static shape。
 # 测试目的: 锁定 static demo 不回退为默认 12/32/256/256 形状，也不误变为 dynamic 符号 shape。
 # 使用示例: pytest -q test/kernel/test_conv2d_symbolic_memory_genkernel.py -k static_tile_dynamic
 # 对应功能实现文件路径: kernel/conv2d/inputs_static_tile_dynamic.py
@@ -493,7 +664,7 @@ def test_inputs_static_tile_static_uses_seeded_tile_constants() -> None:
 
 
 # TC-KERNEL-CONV2D-SYMBOLIC-MEMORY-003
-# 功能说明: 验证静态输入、静态 tile demo 的 lowered IR 保持 seed-selected static shape。
+# 功能说明: 验证静态输入、静态 tile demo 的 lowered IR 保持 本次随机选中 static shape。
 # 测试目的: 锁定 static demo 不回退为默认 12/32/256/256 形状，也不误变为 dynamic 符号 shape。
 # 使用示例: pytest -q test/kernel/test_conv2d_symbolic_memory_genkernel.py -k static_tile_static
 # 对应功能实现文件路径: kernel/conv2d/inputs_static_tile_static.py
@@ -527,11 +698,11 @@ def test_inputs_static_tile_static_gen_kernel_keeps_seeded_static_shapes() -> No
 
 
 def test_conv2d_target_scripts_execute_and_report_random_profile() -> None:
-    """三条 conv2d 脚本都应通过公开脚本入口并报告 fixed-seed profile。
+    """三条 conv2d 脚本都应通过公开脚本入口并报告本次随机 profile。
 
     功能说明:
     - 通过公开脚本入口验证 static/dynamic demo，而不是直连私有 helper。
-    - 独立重算 seed-selected shape、padding、tile，并核对 stdout 与 source dump marker。
+    - 独立重算 本次随机选中 shape、padding、tile，并核对 stdout 与 source dump marker。
 
     使用示例:
     - `pytest -q test/kernel/test_conv2d_symbolic_memory_genkernel.py -k target_scripts`
@@ -539,31 +710,18 @@ def test_conv2d_target_scripts_execute_and_report_random_profile() -> None:
 
     scripts = {
         "kernel/conv2d/inputs_static_tile_static.py": (
-            "profile=fixed-seed-random",
-            "static_ir=seed-selected-concrete",
-            f"input={(_CONV_SS_B, _CONV_SS_CIN, _CONV_SS_H, _CONV_SS_W)}",
-            f"weight={(_CONV_SS_F, _CONV_SS_CIN, _CONV_SS_KH, _CONV_SS_KW)}",
-            f"padding=({_CONV_SS_PADDING[0]},{_CONV_SS_PADDING[1]},{_CONV_SS_PADDING[2]},{_CONV_SS_PADDING[3]})",
-            f"selected_tile=({_CONV_SS_TILE[0]},{_CONV_SS_TILE[1]},{_CONV_SS_TILE[2]},{_CONV_SS_TILE[3]},{_CONV_SS_TILE[4]})",
+            "profile=per-run-random",
+            "static_ir=random-concrete",
         ),
         "kernel/conv2d/inputs_static_tile_dynamic.py": (
-            "profile=fixed-seed-random",
-            "static_memory=seed-selected-concrete",
+            "profile=per-run-random",
+            "static_memory=random-concrete",
             "dynamic_tile=symbolic-runtime",
-            f"input={(_CONV_SD_B, _CONV_SD_CIN, _CONV_SD_H, _CONV_SD_W)}",
-            f"weight={(_CONV_SD_F, _CONV_SD_CIN, _CONV_SD_KH, _CONV_SD_KW)}",
-            f"padding=({_CONV_SD_PADDING[0]},{_CONV_SD_PADDING[1]},{_CONV_SD_PADDING[2]},{_CONV_SD_PADDING[3]})",
-            f"selected_tile={_CONV_SD_TILE}",
         ),
         "kernel/conv2d/inputs_dynamic_tile_dynamic.py": (
-            "profile=fixed-seed-random",
+            "profile=per-run-random",
             "dynamic_ir=symbolic",
-            "runtime=seed-selected",
-            "seed=2026052703",
-            f"input={(_CONV_DD_B, _CONV_DD_CIN, _CONV_DD_H, _CONV_DD_W)}",
-            f"weight={(_CONV_DD_F, _CONV_DD_CIN, _CONV_DD_KH, _CONV_DD_KW)}",
-            f"padding={_CONV_DD_PADDING}",
-            f"selected_tile={_CONV_DD_TILE}",
+            "runtime=random",
         ),
     }
     source_markers = {
@@ -590,112 +748,12 @@ def test_conv2d_target_scripts_execute_and_report_random_profile() -> None:
             ),
         ),
     }
-    first_ir_markers = {
-        "kernel/conv2d/inputs_static_tile_static.py": (
-            (
-                "conv2d/inputs_static_tile_static_absent_bias/conv2d_inputs_static_tile_static_kernel",
-                (
-                    "func.func @conv2d_inputs_static_tile_static_kernel",
-                    f"!nn.memory<[#C{_CONV_SS_B}, #C{_CONV_SS_F}, #C{_CONV_SS_HO}, #C{_CONV_SS_WO}]",
-                    f"!nn.memory<[#C{_CONV_SS_B}, #C{_CONV_SS_CIN}, #C{_CONV_SS_H}, #C{_CONV_SS_W}]",
-                    f"!nn.memory<[#C{_CONV_SS_F}, #C{_CONV_SS_CIN}, #C{_CONV_SS_KH}, #C{_CONV_SS_KW}]",
-                    f"!nn.memory<[#C{_CONV_SS_F}]",
-                    f"#It1 = #symbol.iter<start = #C0, end = #C{_CONV_SS_F}, step = #C{_CONV_SS_TILE[0]}>",
-                    f"#It2 = #symbol.iter<start = #C0, end = #C{_CONV_SS_B}, step = #C{_CONV_SS_TILE[2]}>",
-                    f"#It3 = #symbol.iter<start = #C0, end = #C{_CONV_SS_HO}, step = #C{_CONV_SS_TILE[3]}>",
-                    f"#It4 = #symbol.iter<start = #C0, end = #C{_CONV_SS_WO}, step = #C{_CONV_SS_TILE[4]}>",
-                    f"#It6 = #symbol.iter<start = #C0, end = #C{_CONV_SS_CIN}, step = #C{_CONV_SS_TILE[1]}>",
-                ),
-                ("#S_TF", "#S_TC", "#S_TN", "#S_THO", "#S_TWO"),
-            ),
-            (
-                "conv2d/inputs_static_tile_static_present_bias/conv2d_inputs_static_tile_static_kernel",
-                (
-                    "func.func @conv2d_inputs_static_tile_static_kernel",
-                    f"!nn.memory<[#C{_CONV_SS_B}, #C{_CONV_SS_F}, #C{_CONV_SS_HO}, #C{_CONV_SS_WO}]",
-                    f"!nn.memory<[#C{_CONV_SS_B}, #C{_CONV_SS_CIN}, #C{_CONV_SS_H}, #C{_CONV_SS_W}]",
-                    f"!nn.memory<[#C{_CONV_SS_F}, #C{_CONV_SS_CIN}, #C{_CONV_SS_KH}, #C{_CONV_SS_KW}]",
-                    f"!nn.memory<[#C{_CONV_SS_F}]",
-                    f"#It1 = #symbol.iter<start = #C0, end = #C{_CONV_SS_F}, step = #C{_CONV_SS_TILE[0]}>",
-                    f"#It2 = #symbol.iter<start = #C0, end = #C{_CONV_SS_B}, step = #C{_CONV_SS_TILE[2]}>",
-                    f"#It3 = #symbol.iter<start = #C0, end = #C{_CONV_SS_HO}, step = #C{_CONV_SS_TILE[3]}>",
-                    f"#It4 = #symbol.iter<start = #C0, end = #C{_CONV_SS_WO}, step = #C{_CONV_SS_TILE[4]}>",
-                    f"#It6 = #symbol.iter<start = #C0, end = #C{_CONV_SS_CIN}, step = #C{_CONV_SS_TILE[1]}>",
-                ),
-                ("#S_TF", "#S_TC", "#S_TN", "#S_THO", "#S_TWO"),
-            ),
-        ),
-        "kernel/conv2d/inputs_static_tile_dynamic.py": (
-            (
-                "conv2d/inputs_static_tile_dynamic",
-                (
-                    "func.func @conv2d_inputs_static_tile_dynamic_kernel",
-                    f"!nn.memory<[#C{_CONV_SD_B}, #C{_CONV_SD_F}, #C{_CONV_SD_HO}, #C{_CONV_SD_WO}]",
-                    f"!nn.memory<[#C{_CONV_SD_B}, #C{_CONV_SD_CIN}, #C{_CONV_SD_H}, #C{_CONV_SD_W}]",
-                    f"!nn.memory<[#C{_CONV_SD_F}, #C{_CONV_SD_CIN}, #C{_CONV_SD_KH}, #C{_CONV_SD_KW}]",
-                    f"!nn.memory<[#C{_CONV_SD_F}]",
-                    "!symbol.int<#S_TF>",
-                    "!symbol.int<#S_TC>",
-                    "!symbol.int<#S_TN>",
-                    "!symbol.int<#S_THO>",
-                    "!symbol.int<#S_TWO>",
-                    f"#It1 = #symbol.iter<start = #C0, end = #C{_CONV_SD_F}, step = #S_TF>",
-                    f"#It2 = #symbol.iter<start = #C0, end = #C{_CONV_SD_B}, step = #S_TN>",
-                    f"#It3 = #symbol.iter<start = #C0, end = #C{_CONV_SD_HO}, step = #S_THO>",
-                    f"#It4 = #symbol.iter<start = #C0, end = #C{_CONV_SD_WO}, step = #S_TWO>",
-                    f"#It6 = #symbol.iter<start = #C0, end = #C{_CONV_SD_CIN}, step = #S_TC>",
-                ),
-                (
-                    f"#It1 = #symbol.iter<start = #C0, end = #C{_CONV_SD_F}, step = #C{_CONV_SD_TILE[0]}>",
-                    f"#It2 = #symbol.iter<start = #C0, end = #C{_CONV_SD_B}, step = #C{_CONV_SD_TILE[2]}>",
-                    f"#It3 = #symbol.iter<start = #C0, end = #C{_CONV_SD_HO}, step = #C{_CONV_SD_TILE[3]}>",
-                    f"#It4 = #symbol.iter<start = #C0, end = #C{_CONV_SD_WO}, step = #C{_CONV_SD_TILE[4]}>",
-                    f"#It6 = #symbol.iter<start = #C0, end = #C{_CONV_SD_CIN}, step = #C{_CONV_SD_TILE[1]}>",
-                ),
-            ),
-        ),
-        "kernel/conv2d/inputs_dynamic_tile_dynamic.py": (
-            (
-                "conv2d/inputs_dynamic_tile_dynamic",
-                (
-                    "func.func @conv2d_inputs_dynamic_tile_dynamic_kernel",
-                    "!nn.memory<[#S_B, #S_C,",
-                    "!nn.memory<[#S_B, #S_N, #S_XH, #S_XW]",
-                    "!nn.memory<[#S_C, #S_N, #S_KH, #S_KW]",
-                    "!nn.memory<[#S_C]",
-                    "!symbol.int<#S_SH>",
-                    "!symbol.int<#S_SW>",
-                    "!symbol.int<#S_DH>",
-                    "!symbol.int<#S_DW>",
-                    "!symbol.int<#S_PT>",
-                    "!symbol.int<#S_PB>",
-                    "!symbol.int<#S_PL>",
-                    "!symbol.int<#S_PR>",
-                    "!symbol.int<#S_TF>",
-                    "!symbol.int<#S_TC>",
-                    "!symbol.int<#S_TN>",
-                    "!symbol.int<#S_THO>",
-                    "!symbol.int<#S_TWO>",
-                    "step = #S_TF",
-                    "step = #S_TN",
-                    "step = #S_THO",
-                    "step = #S_TWO",
-                    "step = #S_TC",
-                ),
-                (
-                    f"!nn.memory<[#C{_CONV_DD_B}, #C{_CONV_DD_F}, #C{_CONV_DD_HO}, #C{_CONV_DD_WO}]",
-                    f"!nn.memory<[#C{_CONV_DD_B}, #C{_CONV_DD_CIN}, #C{_CONV_DD_H}, #C{_CONV_DD_W}]",
-                    f"!nn.memory<[#C{_CONV_DD_F}, #C{_CONV_DD_CIN}, #C{_CONV_DD_KH}, #C{_CONV_DD_KW}]",
-                    f"!nn.memory<[#C{_CONV_DD_F}]",
-                ),
-            ),
-        ),
-    }
     for script, expected_markers in scripts.items():
         completed = _run_kernel_script(script)
         assert "[CHECK] conv2d/" in completed.stdout
         assert "absent_bias max_abs_diff=" in completed.stdout
         assert "present_bias max_abs_diff=" in completed.stdout
+        assert "shape_seed=" in completed.stdout
         assert "tile_seed=" in completed.stdout
         assert "tile_candidates=" in completed.stdout
         assert "bias_case_order=" in completed.stdout
@@ -703,5 +761,5 @@ def test_conv2d_target_scripts_execute_and_report_random_profile() -> None:
             assert marker in completed.stdout
         for case_name, markers in source_markers[script]:
             _assert_source_dump_contains(case_name, markers)
-        for case_name, markers, forbidden_markers in first_ir_markers[script]:
+        for case_name, markers, forbidden_markers in _conv2d_script_first_ir_markers(script, completed.stdout):
             _assert_first_ir_dump_contains(case_name, markers, forbidden_markers)

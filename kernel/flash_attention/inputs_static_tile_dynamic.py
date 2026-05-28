@@ -3,15 +3,15 @@
 
 功能说明:
 - 实现 `inputs 静 + tile 动` 的 Flash Attention kernel demo。
-- 输入 shape 由 seed `2026052722` 从随机候选集合选出：`Q/K/V/out[2, 8, 257, 80]`。
-- static case 将 seed-selected shape 具体化到 IR memory type。
-- tile 由 `br/bc` runtime `SymbolDim` 参数绑定，运行期 tile 由 seed `2026051728` 从候选集合选出。
+- 脚本入口每次运行先随机生成 `shape_seed/tile_seed`，再从受控候选集合选择本次 `Q/K/V/out` shape 与 runtime `Br/Bc`。
+- static case 将本次随机 shape 具体化到 IR memory type。
+- tile 由 `br/bc` runtime `SymbolDim` 参数绑定，运行期 tile 从候选集合随机选出。
 - 使用四层循环 `batch -> head -> query block -> key/value block` 实现 online softmax。
 - softmax 显式展开为 running max、running sum、`kernel.exp` 与归一化，不调用 `nn.softmax`。
 - 通过 `ExecutionEngine` 真实执行 lowering 生成的源码，并和 NumPy softmax attention 参考结果对齐。
 
 API 列表:
-- `flash_attention_inputs_static_tile_dynamic_kernel(out: Tensor[f32, 2, 8, 257, 80], q: Tensor[f32, 2, 8, 257, 80], k: Tensor[f32, 2, 8, 257, 80], v: Tensor[f32, 2, 8, 257, 80], br: SymbolDim, bc: SymbolDim) -> None`
+- `flash_attention_inputs_static_tile_dynamic_kernel(out: Tensor[f32, B, H, SL, D], q: Tensor[f32, B, H, SL, D], k: Tensor[f32, B, H, SL, D], v: Tensor[f32, B, H, SL, D], br: SymbolDim, bc: SymbolDim) -> None`
 - `main() -> None`
 
 使用示例:
@@ -105,8 +105,8 @@ def flash_attention_inputs_static_tile_dynamic_kernel(
 
 
     功能说明:
-    - 输入 shape 为 fixed-seed random profile 选出的具体 static 值。
-    - `br/bc` 使用 seed-selected runtime scalar 作为 query block 与 key/value block 两层分块大小。
+    - 输入 shape 为 per-run random profile 选出的具体 static 值。
+    - `br/bc` 使用 本次随机选中 runtime scalar 作为 query block 与 key/value block 两层分块大小。
     - 主计算入口使用 kernel out-first helper，softmax 以 running max/running sum online 形式展开。
     - 输出写回 `out[B, H, SL, D]`。
 
@@ -200,8 +200,8 @@ def _symbolic_compile_args() -> tuple[FlashCompileArg, ...]:
 
 
     功能说明:
-    - output/Q/K/V 均使用 fixed-seed random profile 选出的 static memory shape。
-    - static case 将这些 seed-selected 值具体化到 IR memory type。
+    - output/Q/K/V 均使用 per-run random profile 选出的 static memory shape。
+    - static case 将这些 本次随机选中 值具体化到 IR memory type。
     - tile 参数固定使用 `BR/BC`，用于锁定编译期符号 tile。
     - 只服务本 demo 的符号编译入口，不新增跨文件公开 API。
 
@@ -225,7 +225,7 @@ def _assert_static_symbolic_tile_ir(module_text: str) -> None:
 
 
     功能说明:
-    - 确认 IR 包含 seed-selected static memory shape。
+    - 确认 IR 包含 本次随机选中 static memory shape。
     - 确认 tile 来自 `BR/BC` 参数，query/key loop step 分别是 `BR/BC`。
     - 确认 IR 不回退为 dynamic memory 或 runtime tile 常量。
 
@@ -342,6 +342,38 @@ def main() -> None:
     - `python3 kernel/flash_attention/inputs_static_tile_dynamic.py`
     """
 
+    global _STATIC_SHAPE_SEED, _STATIC_BATCH, _STATIC_HEADS, _STATIC_SEQ_LEN, _STATIC_DIM
+    global _TILE_SELECTION_SEED, _RUNTIME_TILE_ARGS
+
+    system_rng = random.SystemRandom()
+    for _attempt in range(128):
+        shape_seed = system_rng.randrange(1, 2**31)
+        tile_seed = system_rng.randrange(1, 2**31)
+        shape_rng = random.Random(shape_seed)
+        batch = shape_rng.choice((1, 2))
+        heads = shape_rng.choice((4, 8))
+        seq_len = shape_rng.choice((257, 321, 389))
+        dim = shape_rng.choice((48, 64, 80))
+        tile_args = random.Random(tile_seed).choice(_TILE_CANDIDATES)
+        has_multi_tile = seq_len > tile_args[0] and seq_len > tile_args[1]
+        has_tail = seq_len % tile_args[0] != 0 or seq_len % tile_args[1] != 0
+        if has_multi_tile and has_tail:
+            break
+    else:
+        raise RuntimeError("flash attention static/dynamic random profile failed to satisfy tile invariants")
+
+    _STATIC_SHAPE_SEED = shape_seed
+    _STATIC_BATCH = batch
+    _STATIC_HEADS = heads
+    _STATIC_SEQ_LEN = seq_len
+    _STATIC_DIM = dim
+    _TILE_SELECTION_SEED = tile_seed
+    _RUNTIME_TILE_ARGS = tile_args
+    annotation = f"Tensor[f32, {_STATIC_BATCH}, {_STATIC_HEADS}, {_STATIC_SEQ_LEN}, {_STATIC_DIM}]"
+    flash_attention_inputs_static_tile_dynamic_kernel.__annotations__.update(
+        {"out": annotation, "q": annotation, "k": annotation, "v": annotation}
+    )
+
     rng = np.random.default_rng(_STATIC_SHAPE_SEED)
     q = rng.standard_normal((_STATIC_BATCH, _STATIC_HEADS, _STATIC_SEQ_LEN, _STATIC_DIM), dtype=np.float32)
     k = rng.standard_normal((_STATIC_BATCH, _STATIC_HEADS, _STATIC_SEQ_LEN, _STATIC_DIM), dtype=np.float32)
@@ -356,8 +388,8 @@ def main() -> None:
     max_abs_diff = _assert_outputs_close(out, expected, atol=1e-4, rtol=1e-4)
     print(
         "[ARGS] "
-        "profile=fixed-seed-random static_memory=seed-selected-concrete dynamic_tile=symbolic-runtime "
-        f"seed={_STATIC_SHAPE_SEED} shape={q.shape} "
+        "profile=per-run-random static_memory=random-concrete dynamic_tile=symbolic-runtime "
+        f"shape_seed={_STATIC_SHAPE_SEED} shape={q.shape} "
         f"tile_seed={_TILE_SELECTION_SEED} tile_candidates={_TILE_CANDIDATES} tile={_RUNTIME_TILE_ARGS} "
         f"query_tiles={(_STATIC_SEQ_LEN + _RUNTIME_TILE_ARGS[0] - 1) // _RUNTIME_TILE_ARGS[0]} "
         f"key_tiles={(_STATIC_SEQ_LEN + _RUNTIME_TILE_ARGS[1] - 1) // _RUNTIME_TILE_ARGS[1]} "
@@ -366,7 +398,7 @@ def main() -> None:
         f"tail={_STATIC_SEQ_LEN % _RUNTIME_TILE_ARGS[0] != 0 or _STATIC_SEQ_LEN % _RUNTIME_TILE_ARGS[1] != 0} "
         "loops=batch/head/query/key online_softmax=True"
     )
-    print("[IR] static memory evidence: seed-selected concrete B/H/SL/D memory present; BR/BC tile symbols present")
+    print("[IR] static memory evidence: random concrete B/H/SL/D memory present; BR/BC tile symbols present")
     print(f"[CHECK] {CASE_NAME} max_abs_diff={max_abs_diff}")
 
 

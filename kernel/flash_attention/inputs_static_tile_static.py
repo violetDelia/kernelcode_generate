@@ -3,16 +3,16 @@
 
 功能说明:
 - 实现 `inputs 静 + tile 静` 的 Flash Attention kernel demo。
-- 输入 shape 由 seed `2026052721` 从随机候选集合选出：`Q/K/V/out[1, 8, 389, 48]`。
-- static case 将 seed-selected shape 具体化到 IR memory type。
-- tile 由 seed `2026051727` 从候选集合中选为 `Br=64`、`Bc=80`，并作为 static IR tile 常量进入 loop。
+- 脚本入口每次运行先随机生成 `shape_seed/tile_seed`，再从受控候选集合选择本次 `Q/K/V/out` shape 与 `Br/Bc`。
+- static case 将本次随机 shape 具体化到 IR memory type。
+- tile 从候选集合随机选择，并作为 static IR tile 常量进入 loop。
 - 使用四层循环 `batch -> head -> query block -> key/value block` 实现 online softmax。
 - softmax 显式展开为 running max、running sum、`kernel.exp` 与归一化，不调用 `nn.softmax`。
 - 可改写 score/state/output scratch 使用固定 `Br/Bc/dim` 上界分配，真实 query/key tail 通过现有 `dma.view/deslice` 写入 fixed tile storage。
 - 通过 `dsl_run` 真实执行，并和 NumPy softmax attention 参考结果对齐。
 
 API 列表:
-- `flash_attention_inputs_static_tile_static_kernel(out: Tensor[f32, 1, 8, 389, 48], q: Tensor[f32, 1, 8, 389, 48], k: Tensor[f32, 1, 8, 389, 48], v: Tensor[f32, 1, 8, 389, 48]) -> None`
+- `flash_attention_inputs_static_tile_static_kernel(out: Tensor[f32, B, H, SL, D], q: Tensor[f32, B, H, SL, D], k: Tensor[f32, B, H, SL, D], v: Tensor[f32, B, H, SL, D]) -> None`
 - `main() -> None`
 
 使用示例:
@@ -98,7 +98,7 @@ def flash_attention_inputs_static_tile_static_kernel(
 
     功能说明:
     - 输入布局为 `[B, H, SL, D]`。
-    - 使用 seed-selected `Br/Bc` 做 query block 与 key/value block 两层分块。
+    - 使用 本次随机选中 `Br/Bc` 做 query block 与 key/value block 两层分块。
     - 主计算入口使用 kernel out-first helper，softmax 以 running max/running sum online 形式展开。
     - score/state/output scratch 使用固定 tile 上界分配，`cur_br/cur_bc` tail 只通过 `view/deslice` 表达。
     - 输出写回 `out[B, H, SL, D]`。
@@ -203,6 +203,39 @@ def main() -> None:
     - `python3 kernel/flash_attention/inputs_static_tile_static.py`
     """
 
+    global _STATIC_SHAPE_SEED, _STATIC_BATCH, _STATIC_HEADS, _STATIC_SEQ_LEN, _STATIC_DIM
+    global _STATIC_TILE_SELECTION_SEED, _STATIC_BR, _STATIC_BC
+
+    system_rng = random.SystemRandom()
+    for _attempt in range(128):
+        shape_seed = system_rng.randrange(1, 2**31)
+        tile_seed = system_rng.randrange(1, 2**31)
+        shape_rng = random.Random(shape_seed)
+        batch = shape_rng.choice((1, 2))
+        heads = shape_rng.choice((4, 8))
+        seq_len = shape_rng.choice((257, 321, 389))
+        dim = shape_rng.choice((48, 64, 80))
+        br, bc = random.Random(tile_seed).choice(_STATIC_TILE_CANDIDATES)
+        has_multi_tile = seq_len > br and seq_len > bc
+        has_tail = seq_len % br != 0 or seq_len % bc != 0
+        if has_multi_tile and has_tail:
+            break
+    else:
+        raise RuntimeError("flash attention static/static random profile failed to satisfy tile invariants")
+
+    _STATIC_SHAPE_SEED = shape_seed
+    _STATIC_BATCH = batch
+    _STATIC_HEADS = heads
+    _STATIC_SEQ_LEN = seq_len
+    _STATIC_DIM = dim
+    _STATIC_TILE_SELECTION_SEED = tile_seed
+    _STATIC_BR = br
+    _STATIC_BC = bc
+    annotation = f"Tensor[f32, {_STATIC_BATCH}, {_STATIC_HEADS}, {_STATIC_SEQ_LEN}, {_STATIC_DIM}]"
+    flash_attention_inputs_static_tile_static_kernel.__annotations__.update(
+        {"out": annotation, "q": annotation, "k": annotation, "v": annotation}
+    )
+
     rng = np.random.default_rng(_STATIC_SHAPE_SEED)
     q = rng.standard_normal((_STATIC_BATCH, _STATIC_HEADS, _STATIC_SEQ_LEN, _STATIC_DIM), dtype=np.float32)
     k = rng.standard_normal((_STATIC_BATCH, _STATIC_HEADS, _STATIC_SEQ_LEN, _STATIC_DIM), dtype=np.float32)
@@ -218,8 +251,8 @@ def main() -> None:
     )
     print(
         "[ARGS] "
-        "profile=fixed-seed-random static_ir=seed-selected-concrete "
-        f"seed={_STATIC_SHAPE_SEED} shape={q.shape} "
+        "profile=per-run-random static_ir=random-concrete "
+        f"shape_seed={_STATIC_SHAPE_SEED} shape={q.shape} "
         f"tile_seed={_STATIC_TILE_SELECTION_SEED} tile_candidates={_STATIC_TILE_CANDIDATES} tile=({_STATIC_BR},{_STATIC_BC}) "
         f"query_tiles={(_STATIC_SEQ_LEN + _STATIC_BR - 1) // _STATIC_BR} "
         f"key_tiles={(_STATIC_SEQ_LEN + _STATIC_BC - 1) // _STATIC_BC} "

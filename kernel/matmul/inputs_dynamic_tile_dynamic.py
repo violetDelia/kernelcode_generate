@@ -4,7 +4,7 @@
 功能说明:
 - 实现 `inputs 动 + tile 动` 的二维 matmul kernel demo。
 - 编译期 memory 使用 `H/K/W` 语义符号，tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数。
-- 运行期 shape 与 tile 都由 fixed-seed random profile 选出，只通过真实 NumPy ndarray 与 int runtime scalar 绑定，不静态化进入口 memory/tile 类型。
+- 脚本入口每次运行先随机生成 `shape_seed/tile_seed`，运行期 shape 与 tile 都由本次随机 profile 选出，只通过真实 NumPy ndarray 与 int runtime scalar 绑定，不静态化进入口 memory/tile 类型。
 - K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 初始化局部 accumulator，K loop 内用 `kernel.matmul/kernel.add` out-first helper 累加 partial，K loop 后按 optional rank-1 bias 分支累加并最终写回 output。
 - H/W/K 尾块都通过 `min(tile, dim - iv)` 覆盖，避免只覆盖可整除 case。
 
@@ -279,7 +279,7 @@ def main() -> None:
 
 
     功能说明:
-    - 使用 fixed-seed random profile 选择真实 runtime shape 与不整除 H/W/K 的 runtime tile。
+    - 使用 per-run random profile 选择真实 runtime shape 与不整除 H/W/K 的 runtime tile。
     - 编译期以符号 memory/tile 生成 lowering IR 与 npu_demo source。
     - 运行期分别执行 bias absent / present launch wrapper，并用 NumPy 参考校验输出。
 
@@ -287,10 +287,26 @@ def main() -> None:
     - `python3 kernel/matmul/inputs_dynamic_tile_dynamic.py`
     """
 
-    shape_rng = random.Random(2026051603)
-    h_size = shape_rng.randint(160, 256)
-    k_size = shape_rng.randint(160, 256)
-    w_size = shape_rng.randint(160, 256)
+    global TILE_SELECTION_SEED, TILE_ARGS
+
+    system_rng = random.SystemRandom()
+    for _attempt in range(128):
+        shape_seed = system_rng.randrange(1, 2**31)
+        tile_seed = system_rng.randrange(1, 2**31)
+        shape_rng = random.Random(shape_seed)
+        h_size = shape_rng.randint(160, 256)
+        k_size = shape_rng.randint(160, 256)
+        w_size = shape_rng.randint(160, 256)
+        tile_args = random.Random(tile_seed).choice(TILE_ARG_CANDIDATES)
+        has_multi_tile = h_size > tile_args[0] and w_size > tile_args[1] and k_size > tile_args[2]
+        has_tail = h_size % tile_args[0] != 0 and w_size % tile_args[1] != 0 and k_size % tile_args[2] != 0
+        if has_multi_tile and has_tail:
+            break
+    else:
+        raise RuntimeError("matmul dynamic/dynamic random profile failed to satisfy tile invariants")
+
+    TILE_SELECTION_SEED = tile_seed
+    TILE_ARGS = tile_args
     rng = np.random.default_rng(2026051603)
     lhs = rng.standard_normal((h_size, k_size), dtype=np.float32)
     rhs = rng.standard_normal((k_size, w_size), dtype=np.float32)
@@ -317,8 +333,8 @@ def main() -> None:
     present_max_abs_diff = max_abs_diff_by_case["present"]
     print(
         "[ARGS] "
-        "profile=fixed-seed-random dynamic_ir=symbolic runtime=seed-selected "
-        f"seed=2026051603 shape=(M={h_size},K={k_size},N={w_size}) "
+        "profile=per-run-random dynamic_ir=symbolic runtime=random "
+        f"shape_seed={shape_seed} shape=(M={h_size},K={k_size},N={w_size}) "
         f"tile_seed={TILE_SELECTION_SEED} tile_candidates={TILE_ARG_CANDIDATES} selected_tile={TILE_ARGS} "
         f"bias_case_order={BIAS_CASE_ORDER} multi_tile=True tail=True bias_rank=1"
     )

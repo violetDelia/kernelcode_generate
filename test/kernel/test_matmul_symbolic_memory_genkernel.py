@@ -4,7 +4,7 @@
 功能说明:
 - 覆盖 `kernel/matmul` 三条目标 demo 的公开 kernel 函数与脚本入口。
 - 锁定 dynamic demo 使用 `H/K/W` 符号 memory、`TILE_H/TILE_W/TILE_K` 符号 tile。
-- 锁定 static demo 将 fixed-seed 随机选值具体化到 static IR，同时 K/reduce 维按 `TILE_K` 切分并累加 partial。
+- 锁定 static demo 将 per-run random 选值具体化到 static IR，同时 K/reduce 维按 `TILE_K` 切分并累加 partial。
 - 锁定尾块通过有效区域 alias 写入零填充 full tile，避免 `?` shape 参与 memory 默认 stride。
 - 锁定 static-static demo 同样具备 K/reduce accumulator，不允许 partial 直接覆盖 output。
 
@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import inspect
 import os
+from ast import literal_eval
 from pathlib import Path
 import random
 import re
@@ -48,7 +49,7 @@ _MATMUL_SS_SHAPE_RNG = random.Random(2026051601)
 _MATMUL_SS_M = _MATMUL_SS_SHAPE_RNG.randint(160, 256)
 _MATMUL_SS_K = _MATMUL_SS_SHAPE_RNG.randint(160, 256)
 _MATMUL_SS_N = _MATMUL_SS_SHAPE_RNG.randint(160, 256)
-_MATMUL_SS_TILE = random.Random(2026051700).choice(((64, 64, 64), (72, 56, 48), (48, 80, 56)))
+_MATMUL_SS_TILE = random.Random(2026051700).choice(((72, 56, 48), (48, 80, 56)))
 _MATMUL_SD_SHAPE_RNG = random.Random(2026051602)
 _MATMUL_SD_M = _MATMUL_SD_SHAPE_RNG.randint(160, 256)
 _MATMUL_SD_K = _MATMUL_SD_SHAPE_RNG.randint(160, 256)
@@ -105,11 +106,12 @@ def _assert_matmul_first_ir_uses_fixed_upper_bound_scratch(case_name: str) -> No
     - `_assert_matmul_first_ir_uses_fixed_upper_bound_scratch("test/matmul/dynamic_symbolic_tile_reduce")`
     """
 
-    first_ir = _read_first_ir(case_name)
-    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_H|#C72), (#S_TILE_W|#C56)\]', first_ir)
-    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_H|#C72), (#S_TILE_K|#C48)\]', first_ir)
-    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_K|#C48), (#S_TILE_W|#C56)\]', first_ir)
-    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_W|#C56)\], \[#C1\]', first_ir)
+    first_ir = (_REPO_ROOT / "kernel" / "dump" / Path(case_name) / "01-first-ir.mlir").read_text(encoding="utf-8")
+    static_h, static_w, static_k = _MATMUL_SS_TILE
+    assert re.search(rf'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_H|#C{static_h}), (#S_TILE_W|#C{static_w})\]', first_ir)
+    assert re.search(rf'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_H|#C{static_h}), (#S_TILE_K|#C{static_k})\]', first_ir)
+    assert re.search(rf'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_K|#C{static_k}), (#S_TILE_W|#C{static_w})\]', first_ir)
+    assert re.search(rf'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_W|#C{static_w})\], \[#C1\]', first_ir)
     assert re.search(r'"dma\.view".*-> !nn\.memory<\[#S2, #S4\]', first_ir)
     assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S2, #S4\]', first_ir) is None
     assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S2, #S6\]', first_ir) is None
@@ -215,6 +217,133 @@ def _assert_first_ir_dump_contains(
     assert first_ir.strip()
     assert not missing_markers
     assert not unexpected_markers
+
+
+def _matmul_script_first_ir_markers(
+    script: str,
+    stdout: str,
+) -> tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]:
+    """构造 matmul 脚本本次随机 profile 对应的 first-ir marker。
+
+    功能说明:
+    - static 脚本必须在 first-ir 中出现本次随机 shape。
+    - dynamic 脚本必须保留 `H/K/W` 与 `TILE_*` 符号，且不得把本次随机值静态化。
+
+    使用示例:
+    - `_matmul_script_first_ir_markers("kernel/matmul/inputs_static_tile_dynamic.py", stdout)`
+    """
+
+    shape_seed_match = re.search(r"shape_seed=(\d+)", stdout)
+    tile_seed_match = re.search(r"tile_seed=(\d+)", stdout)
+    shape_match = re.search(r"shape=\(M=(\d+),K=(\d+),N=(\d+)\)", stdout)
+    candidates_match = re.search(r"tile_candidates=([^\n]*?) selected_tile=", stdout)
+    assert shape_seed_match is not None
+    assert tile_seed_match is not None
+    assert shape_match is not None
+    assert candidates_match is not None
+    shape_seed = int(shape_seed_match.group(1))
+    tile_seed = int(tile_seed_match.group(1))
+    candidate_tiles = tuple(literal_eval(candidates_match.group(1)))
+    shape_rng = random.Random(shape_seed)
+    m_size = shape_rng.randint(160, 256)
+    k_size = shape_rng.randint(160, 256)
+    n_size = shape_rng.randint(160, 256)
+    if script == "kernel/matmul/inputs_static_tile_static.py":
+        expected_candidates = ((72, 56, 48), (48, 80, 56))
+        expected_tile_text = "selected_tile=(M={tile_m},N={tile_n},K={tile_k})"
+    elif script == "kernel/matmul/inputs_static_tile_dynamic.py":
+        expected_candidates = ((64, 80, 64), (72, 88, 56), (48, 96, 64))
+        expected_tile_text = "selected_tile=({tile_m}, {tile_n}, {tile_k})"
+    else:
+        expected_candidates = ((80, 96, 72), (72, 88, 56), (48, 96, 64))
+        expected_tile_text = "selected_tile=({tile_m}, {tile_n}, {tile_k})"
+    assert candidate_tiles == expected_candidates
+    tile_m, tile_n, tile_k = random.Random(tile_seed).choice(expected_candidates)
+    assert tuple(int(value) for value in shape_match.groups()) == (m_size, k_size, n_size)
+    assert expected_tile_text.format(tile_m=tile_m, tile_n=tile_n, tile_k=tile_k) in stdout
+    assert m_size * k_size * n_size <= 17_000_000
+    assert (m_size + tile_m - 1) // tile_m >= 2
+    assert (n_size + tile_n - 1) // tile_n >= 2
+    assert (k_size + tile_k - 1) // tile_k >= 2
+    assert m_size % tile_m != 0
+    assert n_size % tile_n != 0
+    assert k_size % tile_k != 0
+    assert "multi_tile=True" in stdout
+    assert "tail=True" in stdout
+    if script == "kernel/matmul/inputs_static_tile_static.py":
+        markers = (
+            "func.func @matmul_inputs_static_tile_static_kernel",
+            f"!nn.memory<[#C{m_size}, #C{n_size}]",
+            f"!nn.memory<[#C{m_size}, #C{k_size}]",
+            f"!nn.memory<[#C{k_size}, #C{n_size}]",
+            f"!nn.memory<[#C{n_size}]",
+            f"#It1 = #symbol.iter<start = #C0, end = #C{m_size}, step = #C{tile_m}>",
+            f"#It2 = #symbol.iter<start = #C0, end = #C{n_size}, step = #C{tile_n}>",
+            f"#It3 = #symbol.iter<start = #C0, end = #C{k_size}, step = #C{tile_k}>",
+        )
+        return (
+            (
+                "matmul/inputs_static_tile_static_absent_bias/matmul_inputs_static_tile_static_kernel",
+                markers,
+                ("#S_TILE_H", "#S_TILE_W", "#S_TILE_K"),
+            ),
+            (
+                "matmul/inputs_static_tile_static_present_bias/matmul_inputs_static_tile_static_kernel",
+                markers,
+                ("#S_TILE_H", "#S_TILE_W", "#S_TILE_K"),
+            ),
+        )
+    if script == "kernel/matmul/inputs_static_tile_dynamic.py":
+        return (
+            (
+                "matmul/inputs_static_tile_dynamic",
+                (
+                    "func.func @matmul_inputs_static_tile_dynamic_kernel",
+                    f"!nn.memory<[#C{m_size}, #C{n_size}]",
+                    f"!nn.memory<[#C{m_size}, #C{k_size}]",
+                    f"!nn.memory<[#C{k_size}, #C{n_size}]",
+                    f"!nn.memory<[#C{n_size}]",
+                    "!symbol.int<#S_TILE_H>",
+                    "!symbol.int<#S_TILE_W>",
+                    "!symbol.int<#S_TILE_K>",
+                    "step = #S_TILE_H",
+                    "step = #S_TILE_W",
+                    "step = #S_TILE_K",
+                ),
+                (
+                    f"step = #C{tile_m}",
+                    f"step = #C{tile_n}",
+                    f"step = #C{tile_k}",
+                ),
+            ),
+        )
+    return (
+        (
+            "matmul/inputs_dynamic_tile_dynamic",
+            (
+                "func.func @matmul_inputs_dynamic_tile_dynamic_kernel",
+                "!nn.memory<[#S_H, #S_W]",
+                "!nn.memory<[#S_H, #S_K]",
+                "!nn.memory<[#S_K, #S_W]",
+                "!nn.memory<[#S_W]",
+                "!symbol.int<#S_TILE_H>",
+                "!symbol.int<#S_TILE_W>",
+                "!symbol.int<#S_TILE_K>",
+                "step = #S_TILE_H",
+                "step = #S_TILE_W",
+                "step = #S_TILE_K",
+            ),
+            (
+                f"!nn.memory<[#C{m_size}, #C{n_size}]",
+                f"!nn.memory<[#C{m_size}, #C{k_size}]",
+                f"!nn.memory<[#C{k_size}, #C{n_size}]",
+                f"!nn.memory<[#C{n_size}]",
+                f"step = #C{tile_m}",
+                f"step = #C{tile_n}",
+                f"step = #C{tile_k}",
+            ),
+        ),
+    )
 
 
 def test_dynamic_matmul_demo_uses_symbolic_memory_and_tile_reduce_accumulator() -> None:
@@ -325,28 +454,22 @@ def test_static_static_matmul_demo_keeps_static_memory_and_static_tile_reduce() 
 
 
 def test_matmul_target_scripts_execute_and_tile_reduce_still_passes() -> None:
-    """三条目标脚本都应通过公开脚本入口并报告 seed-selected profile。"""
+    """三条目标脚本都应通过公开脚本入口并报告本次随机 profile。"""
 
     scripts = {
         "kernel/matmul/inputs_dynamic_tile_dynamic.py": (
-            "profile=fixed-seed-random",
+            "profile=per-run-random",
             "dynamic_ir=symbolic",
-            "runtime=seed-selected",
-            f"shape=(M={_MATMUL_DD_M},K={_MATMUL_DD_K},N={_MATMUL_DD_N})",
-            f"selected_tile={_MATMUL_DD_TILE}",
+            "runtime=random",
         ),
         "kernel/matmul/inputs_static_tile_dynamic.py": (
-            "profile=fixed-seed-random",
-            "static_memory=seed-selected-concrete",
+            "profile=per-run-random",
+            "static_memory=random-concrete",
             "dynamic_tile=symbolic-runtime",
-            f"shape=(M={_MATMUL_SD_M},K={_MATMUL_SD_K},N={_MATMUL_SD_N})",
-            f"selected_tile={_MATMUL_SD_TILE}",
         ),
         "kernel/matmul/inputs_static_tile_static.py": (
-            "profile=fixed-seed-random",
-            "static_ir=seed-selected-concrete",
-            f"shape=(M={_MATMUL_SS_M},K={_MATMUL_SS_K},N={_MATMUL_SS_N})",
-            f"selected_tile=(M={_MATMUL_SS_TILE[0]},N={_MATMUL_SS_TILE[1]},K={_MATMUL_SS_TILE[2]})",
+            "profile=per-run-random",
+            "static_ir=random-concrete",
         ),
     }
     source_markers = {
@@ -373,93 +496,12 @@ def test_matmul_target_scripts_execute_and_tile_reduce_still_passes() -> None:
             ),
         ),
     }
-    first_ir_markers = {
-        "kernel/matmul/inputs_static_tile_static.py": (
-            (
-                "matmul/inputs_static_tile_static_absent_bias/matmul_inputs_static_tile_static_kernel",
-                (
-                    "func.func @matmul_inputs_static_tile_static_kernel",
-                    f"!nn.memory<[#C{_MATMUL_SS_M}, #C{_MATMUL_SS_N}]",
-                    f"!nn.memory<[#C{_MATMUL_SS_M}, #C{_MATMUL_SS_K}]",
-                    f"!nn.memory<[#C{_MATMUL_SS_K}, #C{_MATMUL_SS_N}]",
-                    f"!nn.memory<[#C{_MATMUL_SS_N}]",
-                    f"#It1 = #symbol.iter<start = #C0, end = #C{_MATMUL_SS_M}, step = #C{_MATMUL_SS_TILE[0]}>",
-                    f"#It2 = #symbol.iter<start = #C0, end = #C{_MATMUL_SS_N}, step = #C{_MATMUL_SS_TILE[1]}>",
-                    f"#It3 = #symbol.iter<start = #C0, end = #C{_MATMUL_SS_K}, step = #C{_MATMUL_SS_TILE[2]}>",
-                ),
-                ("#S_TILE_H", "#S_TILE_W", "#S_TILE_K"),
-            ),
-            (
-                "matmul/inputs_static_tile_static_present_bias/matmul_inputs_static_tile_static_kernel",
-                (
-                    "func.func @matmul_inputs_static_tile_static_kernel",
-                    f"!nn.memory<[#C{_MATMUL_SS_M}, #C{_MATMUL_SS_N}]",
-                    f"!nn.memory<[#C{_MATMUL_SS_M}, #C{_MATMUL_SS_K}]",
-                    f"!nn.memory<[#C{_MATMUL_SS_K}, #C{_MATMUL_SS_N}]",
-                    f"!nn.memory<[#C{_MATMUL_SS_N}]",
-                    f"#It1 = #symbol.iter<start = #C0, end = #C{_MATMUL_SS_M}, step = #C{_MATMUL_SS_TILE[0]}>",
-                    f"#It2 = #symbol.iter<start = #C0, end = #C{_MATMUL_SS_N}, step = #C{_MATMUL_SS_TILE[1]}>",
-                    f"#It3 = #symbol.iter<start = #C0, end = #C{_MATMUL_SS_K}, step = #C{_MATMUL_SS_TILE[2]}>",
-                ),
-                ("#S_TILE_H", "#S_TILE_W", "#S_TILE_K"),
-            ),
-        ),
-        "kernel/matmul/inputs_static_tile_dynamic.py": (
-            (
-                "matmul/inputs_static_tile_dynamic",
-                (
-                    "func.func @matmul_inputs_static_tile_dynamic_kernel",
-                    f"!nn.memory<[#C{_MATMUL_SD_M}, #C{_MATMUL_SD_N}]",
-                    f"!nn.memory<[#C{_MATMUL_SD_M}, #C{_MATMUL_SD_K}]",
-                    f"!nn.memory<[#C{_MATMUL_SD_K}, #C{_MATMUL_SD_N}]",
-                    f"!nn.memory<[#C{_MATMUL_SD_N}]",
-                    "!symbol.int<#S_TILE_H>",
-                    "!symbol.int<#S_TILE_W>",
-                    "!symbol.int<#S_TILE_K>",
-                    "step = #S_TILE_H",
-                    "step = #S_TILE_W",
-                    "step = #S_TILE_K",
-                ),
-                (
-                    f"step = #C{_MATMUL_SD_TILE[0]}",
-                    f"step = #C{_MATMUL_SD_TILE[1]}",
-                    f"step = #C{_MATMUL_SD_TILE[2]}",
-                ),
-            ),
-        ),
-        "kernel/matmul/inputs_dynamic_tile_dynamic.py": (
-            (
-                "matmul/inputs_dynamic_tile_dynamic",
-                (
-                    "func.func @matmul_inputs_dynamic_tile_dynamic_kernel",
-                    "!nn.memory<[#S_H, #S_W]",
-                    "!nn.memory<[#S_H, #S_K]",
-                    "!nn.memory<[#S_K, #S_W]",
-                    "!nn.memory<[#S_W]",
-                    "!symbol.int<#S_TILE_H>",
-                    "!symbol.int<#S_TILE_W>",
-                    "!symbol.int<#S_TILE_K>",
-                    "step = #S_TILE_H",
-                    "step = #S_TILE_W",
-                    "step = #S_TILE_K",
-                ),
-                (
-                    f"!nn.memory<[#C{_MATMUL_DD_M}, #C{_MATMUL_DD_N}]",
-                    f"!nn.memory<[#C{_MATMUL_DD_M}, #C{_MATMUL_DD_K}]",
-                    f"!nn.memory<[#C{_MATMUL_DD_K}, #C{_MATMUL_DD_N}]",
-                    f"!nn.memory<[#C{_MATMUL_DD_N}]",
-                    f"step = #C{_MATMUL_DD_TILE[0]}",
-                    f"step = #C{_MATMUL_DD_TILE[1]}",
-                    f"step = #C{_MATMUL_DD_TILE[2]}",
-                ),
-            ),
-        ),
-    }
     for script, expected_markers in scripts.items():
         completed = _run_kernel_script(script)
         assert "[CHECK] matmul/" in completed.stdout
         assert "absent_bias max_abs_diff=" in completed.stdout
         assert "present_bias max_abs_diff=" in completed.stdout
+        assert "shape_seed=" in completed.stdout
         assert "tile_seed=" in completed.stdout
         assert "tile_candidates=" in completed.stdout
         assert "bias_case_order=" in completed.stdout
@@ -468,5 +510,5 @@ def test_matmul_target_scripts_execute_and_tile_reduce_still_passes() -> None:
             assert marker in completed.stdout
         for case_name, markers in source_markers[script]:
             _assert_source_dump_contains(case_name, markers)
-        for case_name, markers, forbidden_markers in first_ir_markers[script]:
+        for case_name, markers, forbidden_markers in _matmul_script_first_ir_markers(script, completed.stdout):
             _assert_first_ir_dump_contains(case_name, markers, forbidden_markers)

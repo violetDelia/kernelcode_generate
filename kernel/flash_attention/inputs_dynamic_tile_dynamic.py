@@ -3,9 +3,9 @@
 
 功能说明:
 - 实现 `inputs 动 + tile 动` 的 Flash Attention kernel demo。
-- 输入 batch/head/sequence/dim 使用 `B/H/SL/D` 符号维度，并由 seed `2026052723` 选出的真实 NumPy ndarray 运行时 shape 绑定。
-- 运行时 seed-selected shape 为 `Q/K/V/out[2, 8, 321, 80]`，所有维度均不超过 1024，序列长度大于两类 tile 并触发 query/key 尾块。
-- tile 由 `br/bc` runtime `SymbolDim` 参数绑定，运行期 tile 由 seed `2026051729` 从候选集合选出。
+- 输入 batch/head/sequence/dim 使用 `B/H/SL/D` 符号维度，并由本次随机选出的真实 NumPy ndarray 运行时 shape 绑定。
+- 本次随机 shape 所有维度均不超过 1024，序列长度大于两类 tile 并触发 query/key 尾块。
+- tile 由 `br/bc` runtime `SymbolDim` 参数绑定，运行期 tile 从候选集合随机选出。
 - 使用四层循环 `batch -> head -> query block -> key/value block` 实现 online softmax。
 - softmax 显式展开为 running max、running sum、`kernel.exp` 与归一化，不调用 `nn.softmax`。
 - 通过 `ExecutionEngine` 真实执行 lowering 生成的源码，并和 NumPy softmax attention 参考结果对齐。
@@ -106,7 +106,7 @@ def flash_attention_inputs_dynamic_tile_dynamic_kernel(
 
     功能说明:
     - `Q/K/V/out` 的 batch/head/sequence/dim 维度为符号维度。
-    - `br/bc` 使用 seed-selected runtime scalar 作为 query block 与 key/value block 两层分块大小。
+    - `br/bc` 使用 本次随机选中 runtime scalar 作为 query block 与 key/value block 两层分块大小。
     - 主计算入口使用 kernel out-first helper，softmax 以 running max/running sum online 形式展开。
     - 输出写回 `out[B, H, SL, D]`。
 
@@ -333,13 +333,41 @@ def main() -> None:
 
 
     功能说明:
-    - 构造 fixed-seed random profile 选出的真实 NumPy ndarray 输入，shape 绑定到 `B/H/SL/D`。
+    - 构造 per-run random profile 选出的真实 NumPy ndarray 输入，shape 绑定到 `B/H/SL/D`。
     - 编译期以 dynamic memory / symbolic tile 生成 IR/source 并写入公开 dump。
     - 用 NumPy softmax attention 参考结果校验输出。
 
     使用示例:
     - `python3 kernel/flash_attention/inputs_dynamic_tile_dynamic.py`
     """
+
+    global _DYNAMIC_SHAPE_SEED, _DYNAMIC_BATCH, _DYNAMIC_HEADS, _DYNAMIC_SEQ_LEN, _DYNAMIC_DIM
+    global _TILE_SELECTION_SEED, _RUNTIME_TILE_ARGS
+
+    system_rng = random.SystemRandom()
+    for _attempt in range(128):
+        shape_seed = system_rng.randrange(1, 2**31)
+        tile_seed = system_rng.randrange(1, 2**31)
+        shape_rng = random.Random(shape_seed)
+        batch = shape_rng.choice((1, 2))
+        heads = shape_rng.choice((4, 8))
+        seq_len = shape_rng.choice((257, 321, 389))
+        dim = shape_rng.choice((48, 64, 80))
+        tile_args = random.Random(tile_seed).choice(_TILE_CANDIDATES)
+        has_multi_tile = seq_len > tile_args[0] and seq_len > tile_args[1]
+        has_tail = seq_len % tile_args[0] != 0 or seq_len % tile_args[1] != 0
+        if has_multi_tile and has_tail:
+            break
+    else:
+        raise RuntimeError("flash attention dynamic/dynamic random profile failed to satisfy tile invariants")
+
+    _DYNAMIC_SHAPE_SEED = shape_seed
+    _DYNAMIC_BATCH = batch
+    _DYNAMIC_HEADS = heads
+    _DYNAMIC_SEQ_LEN = seq_len
+    _DYNAMIC_DIM = dim
+    _TILE_SELECTION_SEED = tile_seed
+    _RUNTIME_TILE_ARGS = tile_args
 
     rng = np.random.default_rng(_DYNAMIC_SHAPE_SEED)
     q = rng.standard_normal((_DYNAMIC_BATCH, _DYNAMIC_HEADS, _DYNAMIC_SEQ_LEN, _DYNAMIC_DIM), dtype=np.float32)
@@ -355,8 +383,8 @@ def main() -> None:
     max_abs_diff = _assert_outputs_close(out, expected, atol=1e-4, rtol=1e-4)
     print(
         "[ARGS] "
-        "profile=fixed-seed-random dynamic_ir=symbolic runtime=seed-selected "
-        f"seed={_DYNAMIC_SHAPE_SEED} shape={q.shape} "
+        "profile=per-run-random dynamic_ir=symbolic runtime=random "
+        f"shape_seed={_DYNAMIC_SHAPE_SEED} shape={q.shape} "
         f"tile_seed={_TILE_SELECTION_SEED} tile_candidates={_TILE_CANDIDATES} tile={_RUNTIME_TILE_ARGS} "
         f"query_tiles={(_DYNAMIC_SEQ_LEN + _RUNTIME_TILE_ARGS[0] - 1) // _RUNTIME_TILE_ARGS[0]} "
         f"key_tiles={(_DYNAMIC_SEQ_LEN + _RUNTIME_TILE_ARGS[1] - 1) // _RUNTIME_TILE_ARGS[1]} "

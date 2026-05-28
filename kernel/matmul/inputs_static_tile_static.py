@@ -3,15 +3,15 @@
 
 功能说明:
 - 实现 `inputs 静 + tile 静` 的二维 matmul kernel demo。
-- 输入 shape 由 seed `2026051601` 从随机范围选出：`lhs[166, 217]`、`rhs[217, 172]`、`out[166, 172]`。
-- static case 将 seed-selected shape 具体化到 IR memory type。
-- tile 由 seed `2026051700` 从候选集合选为 `TILE_M=72`、`TILE_N=56`、`TILE_K=48`，并作为 static IR tile 常量进入 loop。
+- 脚本入口每次运行先随机生成 `shape_seed/tile_seed`，再从受控范围选择本次 shape 与 tile。
+- static case 将本次随机 shape 具体化到 IR memory type。
+- tile 从候选集合随机选择，并作为 static IR tile 常量进入 loop。
 - M/N/K 均大于对应 tile，且至少触发两次 tile loop；K 维尾块通过 `min(tile_k, k_size - k0)` 覆盖。
 - K/reduce 维按 `TILE_K` 分块，每个 H/W 输出 tile 初始化 accumulator，K loop 内用 `kernel.matmul/kernel.add` 累加 partial，loop 后写回 output。
 - 通过 `dsl_run` 真实执行，并分别校验 absent bias 的 NumPy `matmul` 与 present bias 的 `matmul + bias[None, :]`。
 
 API 列表:
-- `matmul_inputs_static_tile_static_kernel(out: Tensor[f32, 166, 172], lhs: Tensor[f32, 166, 217], rhs: Tensor[f32, 217, 172], bias: Tensor[f32, 172]) -> None`
+- `matmul_inputs_static_tile_static_kernel(out: Tensor[f32, M, N], lhs: Tensor[f32, M, K], rhs: Tensor[f32, K, N], bias: Tensor[f32, N]) -> None`
 - `main() -> None`
 
 使用示例:
@@ -47,7 +47,7 @@ _STATIC_M = _STATIC_SHAPE_RNG.randint(160, 256)
 _STATIC_K = _STATIC_SHAPE_RNG.randint(160, 256)
 _STATIC_N = _STATIC_SHAPE_RNG.randint(160, 256)
 _TILE_SELECTION_SEED = 2026051700
-_TILE_CANDIDATES = ((64, 64, 64), (72, 56, 48), (48, 80, 56))
+_TILE_CANDIDATES = ((72, 56, 48), (48, 80, 56))
 _TILE_M, _TILE_N, _TILE_K = random.Random(_TILE_SELECTION_SEED).choice(_TILE_CANDIDATES)
 _BIAS_CASE_ORDER_SEED = 2026051750
 _BIAS_CASE_ORDER = tuple(random.Random(_BIAS_CASE_ORDER_SEED).sample(("absent", "present"), 2))
@@ -63,8 +63,8 @@ def matmul_inputs_static_tile_static_kernel(
 
 
     功能说明:
-    - 读取由 fixed-seed random profile 选出并在 static IR 中具体化的 `lhs/rhs/out` shape。
-    - 以模块级 seed-selected 静态 tile 做三维循环，输入维度均大于 tile 并覆盖尾块。
+    - 读取由 per-run random profile 选出并在 static IR 中具体化的 `lhs/rhs/out` shape。
+    - 以模块级 本次随机选中 静态 tile 做三维循环，输入维度均大于 tile 并覆盖尾块。
     - K 维按 `tile_k` 切分，并通过 `kernel.matmul/kernel.add` out-first helper 累加到局部 accumulator。
     - 若 runtime bias 非空，则在 reduce 后、写回前广播 rank-1 bias 并累加。
 
@@ -116,14 +116,58 @@ def main() -> None:
 
 
     功能说明:
-    - 按 fixed-seed random profile 构造真实 NumPy ndarray 输入。
-    - static IR 中的 shape/tile 必须等于本轮 seed-selected 值。
+    - 按 per-run random profile 构造真实 NumPy ndarray 输入。
+    - static IR 中的 shape/tile 必须等于本轮 本次随机选中 值。
     - 调用公共 runner 执行 `dsl_run`，并写入 `kernel/dump/matmul/inputs_static_tile_static/`。
     - 分别用 `np.matmul(lhs, rhs)` 与 `np.matmul(lhs, rhs) + bias[None, :]` 校验输出。
 
     使用示例:
     - `python3 kernel/matmul/inputs_static_tile_static.py`
     """
+
+    global _STATIC_SHAPE_SEED, _STATIC_M, _STATIC_K, _STATIC_N
+    global _TILE_SELECTION_SEED, _TILE_M, _TILE_N, _TILE_K
+
+    system_rng = random.SystemRandom()
+    for _attempt in range(128):
+        shape_seed = system_rng.randrange(1, 2**31)
+        tile_seed = system_rng.randrange(1, 2**31)
+        shape_rng = random.Random(shape_seed)
+        candidate_m = shape_rng.randint(160, 256)
+        candidate_k = shape_rng.randint(160, 256)
+        candidate_n = shape_rng.randint(160, 256)
+        candidate_tile_m, candidate_tile_n, candidate_tile_k = random.Random(tile_seed).choice(_TILE_CANDIDATES)
+        has_multi_tile = (
+            candidate_m > candidate_tile_m
+            and candidate_k > candidate_tile_k
+            and candidate_n > candidate_tile_n
+        )
+        has_tail = (
+            candidate_m % candidate_tile_m != 0
+            and candidate_k % candidate_tile_k != 0
+            and candidate_n % candidate_tile_n != 0
+        )
+        if has_multi_tile and has_tail:
+            break
+    else:
+        raise RuntimeError("matmul static/static random profile failed to satisfy tile invariants")
+
+    _STATIC_SHAPE_SEED = shape_seed
+    _STATIC_M = candidate_m
+    _STATIC_K = candidate_k
+    _STATIC_N = candidate_n
+    _TILE_SELECTION_SEED = tile_seed
+    _TILE_M = candidate_tile_m
+    _TILE_N = candidate_tile_n
+    _TILE_K = candidate_tile_k
+    matmul_inputs_static_tile_static_kernel.__annotations__.update(
+        {
+            "out": f"Tensor[f32, {_STATIC_M}, {_STATIC_N}]",
+            "lhs": f"Tensor[f32, {_STATIC_M}, {_STATIC_K}]",
+            "rhs": f"Tensor[f32, {_STATIC_K}, {_STATIC_N}]",
+            "bias": f"Tensor[f32, {_STATIC_N}]",
+        }
+    )
 
     rng = np.random.default_rng(_STATIC_SHAPE_SEED)
     lhs = rng.normal(size=(_STATIC_M, _STATIC_K)).astype(np.float32)
@@ -155,8 +199,8 @@ def main() -> None:
     present_result = results["present"]
     print(
         "[ARGS] "
-        "profile=fixed-seed-random static_ir=seed-selected-concrete "
-        f"seed={_STATIC_SHAPE_SEED} shape=(M={_STATIC_M},K={_STATIC_K},N={_STATIC_N}) "
+        "profile=per-run-random static_ir=random-concrete "
+        f"shape_seed={_STATIC_SHAPE_SEED} shape=(M={_STATIC_M},K={_STATIC_K},N={_STATIC_N}) "
         f"tile_seed={_TILE_SELECTION_SEED} tile_candidates={_TILE_CANDIDATES} "
         f"selected_tile=(M={_TILE_M},N={_TILE_N},K={_TILE_K}) "
         f"bias_case_order={_BIAS_CASE_ORDER} multi_tile=True tail=True bias_rank=1"

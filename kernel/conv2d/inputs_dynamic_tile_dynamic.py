@@ -4,9 +4,9 @@
 功能说明:
 - 实现 `inputs 动 + tile 动` 的 NCHW conv2d kernel demo。
 - 输入与输出使用符号维度标注，并由真实 NumPy ndarray 运行时 shape 绑定。
-- demo 输入规模由 seed `2026052703` 从受控随机范围选出：运行时值为 `B=5 / N=60 / XH=281 / XW=243 / C=18 / KH=3 / KW=5`。
+- 脚本入口每次运行先随机生成 `shape_seed/tile_seed`，再从受控范围选择本次 shape、`KH/KW`、padding 与 tile。
 - 编译期 memory、stride、dilation、padding 与 tile 均保持 `SymbolDim` 语义符号。
-- seed-selected shape / conv attrs / tile 只作为 runtime ndarray shape 与 int scalar 传给 `ExecutionEngine` root wrapper，不静态化进入口 memory/tile 类型。
+- 本次随机 shape / conv attrs / tile 只作为 runtime ndarray shape 与 int scalar 传给 `ExecutionEngine` root wrapper，不静态化进入口 memory/tile 类型。
 - 当 `tile_c < input channel` 时在每个输出 tile 内先初始化本地 accumulator，再在 `c0` tile 循环内用 `kernel.img2col2d/kernel.matmul/kernel.add` 累计 partial，最后一次写回输出。
 - accumulator、bias 与 partial staging scratch 使用 iterator-independent tile 上界分配，真实 tail 通过 `dma.view/deslice` 表达；img2col 与 matmul reshape 链路因现有 layout 合同保持 current tile 分配。
 - 编译期用 `B/N/C/XH/XW/KH/KW/SH/SW/DH/DW/PT/PB/PL/PR/TF/TC/TN/THO/TWO` 语义化符号走 `gen_kernel` 生成动态 memory IR/source。
@@ -123,7 +123,7 @@ def conv2d_inputs_dynamic_tile_dynamic_kernel(
 
     功能说明:
     - 输入、输出与权重维度来自 `Tensor[...]` 符号维度，布局为 input[B,N,XH,XW]、weight[C,N,KH,KW]、out[B,C,HO,WO]。
-    - stride/dilation/padding/tile shape 使用 seed-selected runtime scalar 绑定，不静态化进入编译入口类型。
+    - stride/dilation/padding/tile shape 使用 本次随机选中 runtime scalar 绑定，不静态化进入编译入口类型。
     - K/reduce 维按输入通道 tile 切分，`kernel.matmul` 覆盖 `cur_c * KH * KW`，并通过本地 accumulator 累计所有 partial。
     - accumulator、bias 与 partial staging scratch 使用 tile 上界分配，真实 `cur_f/cur_ho/cur_wo` tail 通过 `view/deslice` 写入与读出。
     - runtime bias 非空时，在 reduce 后、写回前广播 rank-1 bias 并累加。
@@ -425,30 +425,61 @@ def main() -> None:
 
 
     功能说明:
-    - 使用 fixed-seed random profile 构造 runtime shape、conv attrs、tile 与 NumPy ndarray 输入。
+    - 使用 per-run random profile 构造 runtime shape、conv attrs、tile 与 NumPy ndarray 输入。
     - 写入 `kernel/dump/conv2d/inputs_dynamic_tile_dynamic/`。
-    - 编译期以符号 memory shape 生成 IR/source，运行期以 seed-selected tensor shape 执行 root wrapper。
+    - 编译期以符号 memory shape 生成 IR/source，运行期以 本次随机选中 tensor shape 执行 root wrapper。
     - 分别用 NumPy conv2d 与 `conv2d + bias[None, :, None, None]` 参考结果校验输出。
 
     使用示例:
     - `python3 kernel/conv2d/inputs_dynamic_tile_dynamic.py`
     """
 
-    shape_rng = random.Random(_DYNAMIC_SHAPE_SEED)
-    n_size = shape_rng.randint(4, 6)
-    c_size = shape_rng.randint(48, 64)
-    h_size = shape_rng.randint(241, 289)
-    w_size = shape_rng.randint(225, 273)
-    f_size = shape_rng.randint(18, 24)
-    kh_size = shape_rng.choice((3, 5))
-    kw_size = shape_rng.choice((3, 5))
+    global _DYNAMIC_SHAPE_SEED, _DYNAMIC_TILE_SELECTION_SEED, _DYNAMIC_TILE_ARGS
+
     stride_args = (8, 8)
     dilation_args = (1, 1)
-    padding_args = tuple(shape_rng.choice((0, 1, 2, 3, 4)) for _ in range(4))
-    tile_args = _DYNAMIC_TILE_ARGS
-    ho_size = ((h_size + padding_args[0] + padding_args[1] - dilation_args[0] * (kh_size - 1) - 1) // stride_args[0]) + 1
-    wo_size = ((w_size + padding_args[2] + padding_args[3] - dilation_args[1] * (kw_size - 1) - 1) // stride_args[1]) + 1
-    rng = np.random.default_rng(2026051613)
+    system_rng = random.SystemRandom()
+    for _attempt in range(128):
+        shape_seed = system_rng.randrange(1, 2**31)
+        tile_seed = system_rng.randrange(1, 2**31)
+        shape_rng = random.Random(shape_seed)
+        n_size = shape_rng.randint(4, 6)
+        c_size = shape_rng.randint(48, 64)
+        h_size = shape_rng.randint(241, 289)
+        w_size = shape_rng.randint(225, 273)
+        f_size = shape_rng.randint(18, 24)
+        kh_size = shape_rng.choice((3, 5))
+        kw_size = shape_rng.choice((3, 5))
+        padding_args = tuple(shape_rng.choice((0, 1, 2, 3, 4)) for _ in range(4))
+        tile_args = random.Random(tile_seed).choice(_DYNAMIC_TILE_CANDIDATES)
+        ho_size = ((h_size + padding_args[0] + padding_args[1] - dilation_args[0] * (kh_size - 1) - 1) // stride_args[0]) + 1
+        wo_size = ((w_size + padding_args[2] + padding_args[3] - dilation_args[1] * (kw_size - 1) - 1) // stride_args[1]) + 1
+        tile_f, tile_c, tile_n, tile_ho, tile_wo = tile_args
+        has_multi_tile = (
+            f_size > tile_f
+            and c_size > tile_c
+            and n_size > tile_n
+            and ho_size > tile_ho
+            and wo_size > tile_wo
+        )
+        tail_count = sum(
+            (
+                f_size % tile_f != 0,
+                c_size % tile_c != 0,
+                n_size % tile_n != 0,
+                ho_size % tile_ho != 0,
+                wo_size % tile_wo != 0,
+            )
+        )
+        if has_multi_tile and tail_count == 5:
+            break
+    else:
+        raise RuntimeError("conv2d dynamic/dynamic random profile failed to satisfy tile invariants")
+
+    _DYNAMIC_SHAPE_SEED = shape_seed
+    _DYNAMIC_TILE_SELECTION_SEED = tile_seed
+    _DYNAMIC_TILE_ARGS = tile_args
+    rng = np.random.default_rng(_DYNAMIC_SHAPE_SEED)
     input_tensor = rng.standard_normal((n_size, c_size, h_size, w_size), dtype=np.float32)
     weight = rng.standard_normal((f_size, c_size, kh_size, kw_size), dtype=np.float32)
     bias = rng.standard_normal((f_size,), dtype=np.float32)
@@ -487,8 +518,8 @@ def main() -> None:
     present_max_abs_diff = max_abs_diff_by_case["present"]
     print(
         "[ARGS] "
-        "profile=fixed-seed-random dynamic_ir=symbolic runtime=seed-selected "
-        f"seed={_DYNAMIC_SHAPE_SEED} "
+        "profile=per-run-random dynamic_ir=symbolic runtime=random "
+        f"shape_seed={_DYNAMIC_SHAPE_SEED} "
         f"input={(n_size, c_size, h_size, w_size)} weight={(f_size, c_size, kh_size, kw_size)} "
         f"stride={stride_args} dilation={dilation_args} padding={padding_args} "
         f"tile_seed={_DYNAMIC_TILE_SELECTION_SEED} tile_candidates={_DYNAMIC_TILE_CANDIDATES} selected_tile={tile_args} "

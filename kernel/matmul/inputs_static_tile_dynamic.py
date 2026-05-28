@@ -3,14 +3,14 @@
 
 功能说明:
 - 实现 `inputs 静 + tile 动` 的二维 matmul kernel demo。
-- 输入 shape 由 seed `2026051602` 从随机范围选出：`lhs[197, 178]`、`rhs[178, 184]`、`out[197, 184]`。
-- static case 将 seed-selected shape 具体化到 IR memory type。
-- tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数，运行期从轻量候选集合按 seed `2026051713` 选择 int scalar 绑定，并通过 lowering 生成的 launch wrapper 触发真实 multi-block 执行。
+- 脚本入口每次运行先随机生成 `shape_seed/tile_seed`，再从受控范围选择本次 shape 与 runtime tile。
+- static case 将本次随机 shape 具体化到 IR memory type。
+- tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数，运行期从轻量候选集合随机选择 int scalar 绑定，并通过 lowering 生成的 launch wrapper 触发真实 multi-block 执行。
 - H/W/K 均大于对应 runtime tile，且至少触发两次 tile loop；H/W/K 尾块都通过 `min(tile, dim - iv)` 覆盖。
 - K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 初始化局部 accumulator，K loop 内用 `kernel.matmul/kernel.add` out-first helper 累加 partial，K loop 后按 optional rank-1 bias 分支累加并最终写回 output。
 
 API 列表:
-- `matmul_inputs_static_tile_dynamic_kernel(out: Tensor[f32, 197, 184], lhs: Tensor[f32, 197, 178], rhs: Tensor[f32, 178, 184], bias: Tensor[f32, 184], tile_h: SymbolDim, tile_w: SymbolDim, tile_k: SymbolDim) -> None`
+- `matmul_inputs_static_tile_dynamic_kernel(out: Tensor[f32, M, N], lhs: Tensor[f32, M, K], rhs: Tensor[f32, K, N], bias: Tensor[f32, N], tile_h: SymbolDim, tile_w: SymbolDim, tile_k: SymbolDim) -> None`
 - `main() -> None`
 
 使用示例:
@@ -123,8 +123,8 @@ def _symbolic_compile_args() -> tuple[MatmulCompileArg, ...]:
 
 
     功能说明:
-    - output/lhs/rhs memory 使用 seed-selected static shape：`197x184`、`197x178`、`178x184`。
-    - static case 将这些 seed-selected 值具体化到 IR memory type。
+    - output/lhs/rhs memory 使用 本次随机选中 static shape：`197x184`、`197x178`、`178x184`。
+    - static case 将这些 本次随机选中 值具体化到 IR memory type。
     - tile 参数固定使用 `TILE_H/TILE_W/TILE_K`，用于锁定编译期符号 tile。
 
     使用示例:
@@ -147,7 +147,7 @@ def _assert_static_symbolic_tile_ir(module_text: str) -> None:
 
 
     功能说明:
-    - 确认 IR 包含 seed-selected static memory shape。
+    - 确认 IR 包含 本次随机选中 static memory shape。
     - 确认 tile 来自 `TILE_H/TILE_W/TILE_K` 参数，K loop step 是 `TILE_K`。
 
     使用示例:
@@ -281,14 +281,56 @@ def main() -> None:
 
 
     功能说明:
-    - 使用 fixed-seed random profile 选出的 `197x178x184` matmul shape。
-    - 运行期 tile 由 fixed-seed 候选集合选出，编译期 tile 保持 `TILE_H/TILE_W/TILE_K` 符号。
+    - 使用 per-run random profile 选出的 `197x178x184` matmul shape。
+    - 运行期 tile 由 per-run random 候选集合选出，编译期 tile 保持 `TILE_H/TILE_W/TILE_K` 符号。
     - 编译期以 static memory / symbolic tile 生成 lowering IR 与 npu_demo source。
     - 运行期分别执行 bias absent / present launch wrapper，并用 NumPy 参考校验输出。
 
     使用示例:
     - `python3 kernel/matmul/inputs_static_tile_dynamic.py`
     """
+
+    global _STATIC_SHAPE_SEED, _STATIC_M, _STATIC_K, _STATIC_N
+    global TILE_SELECTION_SEED, TILE_ARGS
+
+    system_rng = random.SystemRandom()
+    for _attempt in range(128):
+        shape_seed = system_rng.randrange(1, 2**31)
+        tile_seed = system_rng.randrange(1, 2**31)
+        shape_rng = random.Random(shape_seed)
+        candidate_m = shape_rng.randint(160, 256)
+        candidate_k = shape_rng.randint(160, 256)
+        candidate_n = shape_rng.randint(160, 256)
+        candidate_tile = random.Random(tile_seed).choice(TILE_ARG_CANDIDATES)
+        has_multi_tile = (
+            candidate_m > candidate_tile[0]
+            and candidate_n > candidate_tile[1]
+            and candidate_k > candidate_tile[2]
+        )
+        has_tail = (
+            candidate_m % candidate_tile[0] != 0
+            and candidate_n % candidate_tile[1] != 0
+            and candidate_k % candidate_tile[2] != 0
+        )
+        if has_multi_tile and has_tail:
+            break
+    else:
+        raise RuntimeError("matmul static/dynamic random profile failed to satisfy tile invariants")
+
+    _STATIC_SHAPE_SEED = shape_seed
+    _STATIC_M = candidate_m
+    _STATIC_K = candidate_k
+    _STATIC_N = candidate_n
+    TILE_SELECTION_SEED = tile_seed
+    TILE_ARGS = candidate_tile
+    matmul_inputs_static_tile_dynamic_kernel.__annotations__.update(
+        {
+            "out": f"Tensor[f32, {_STATIC_M}, {_STATIC_N}]",
+            "lhs": f"Tensor[f32, {_STATIC_M}, {_STATIC_K}]",
+            "rhs": f"Tensor[f32, {_STATIC_K}, {_STATIC_N}]",
+            "bias": f"Tensor[f32, {_STATIC_N}]",
+        }
+    )
 
     rng = np.random.default_rng(_STATIC_SHAPE_SEED)
     lhs = rng.standard_normal((_STATIC_M, _STATIC_K), dtype=np.float32)
@@ -316,14 +358,14 @@ def main() -> None:
     present_max_abs_diff = max_abs_diff_by_case["present"]
     print(
         "[ARGS] "
-        "profile=fixed-seed-random static_memory=seed-selected-concrete dynamic_tile=symbolic-runtime "
-        f"seed={_STATIC_SHAPE_SEED} shape=(M={_STATIC_M},K={_STATIC_K},N={_STATIC_N}) "
+        "profile=per-run-random static_memory=random-concrete dynamic_tile=symbolic-runtime "
+        f"shape_seed={_STATIC_SHAPE_SEED} shape=(M={_STATIC_M},K={_STATIC_K},N={_STATIC_N}) "
         f"tile_seed={TILE_SELECTION_SEED} tile_candidates={TILE_ARG_CANDIDATES} selected_tile={TILE_ARGS} "
         f"bias_case_order={BIAS_CASE_ORDER} multi_tile=True tail=True bias_rank=1"
     )
     print(
         "[IR] static memory evidence: "
-        f"seed-selected {_STATIC_M}x{_STATIC_K}x{_STATIC_N} memory concrete; TILE_H/TILE_W/TILE_K tile symbols present"
+        f"本次随机选中 {_STATIC_M}x{_STATIC_K}x{_STATIC_N} memory concrete; TILE_H/TILE_W/TILE_K tile symbols present"
     )
     print(f"[CHECK] {CASE_NAME}/absent_bias max_abs_diff={absent_max_abs_diff}")
     print(f"[CHECK] {CASE_NAME}/present_bias max_abs_diff={present_max_abs_diff}")

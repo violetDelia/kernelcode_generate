@@ -2,7 +2,7 @@
 
 功能说明:
 - 覆盖 `kernel/flash_attention` 三条目标 demo 的公开 kernel 函数与脚本入口。
-- 锁定 static demo 将 fixed-seed 随机选值具体化到 static IR，dynamic demo 保留 `B/H/SL/D` 符号 memory。
+- 锁定 static demo 将 per-run random 选值具体化到 static IR，dynamic demo 保留 `B/H/SL/D` 符号 memory。
 - 锁定 static-dynamic 与 dynamic-dynamic demo 的 `BR/BC` tile 参数作为 runtime `SymbolDim` 进入 lowering。
 - 锁定 Flash Attention 生成 `batch -> head -> query block -> key/value block` 四层循环并使用 online softmax 状态。
 
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import inspect
 import os
+from ast import literal_eval
 from pathlib import Path
 import random
 import re
@@ -253,8 +254,8 @@ def _static_static_flash_args() -> tuple[Memory, Memory, Memory, Memory]:
     """构造 static-static flash attention 编译参数。
 
     功能说明:
-    - output/Q/K/V 均使用 fixed-seed 随机选出的具体值。
-    - static case 将这些 seed-selected 值具体化到 IR memory type。
+    - output/Q/K/V 均使用 per-run random 选出的具体值。
+    - static case 将这些 本次随机选中 值具体化到 IR memory type。
 
     使用示例:
     - `_static_static_flash_args()`
@@ -272,8 +273,8 @@ def _static_dynamic_flash_args() -> tuple[Memory, Memory, Memory, Memory]:
     """构造 static-dynamic flash attention 编译参数。
 
     功能说明:
-    - output/Q/K/V 均使用 fixed-seed 随机选出的具体值。
-    - static case 将这些 seed-selected 值具体化到 IR memory type。
+    - output/Q/K/V 均使用 per-run random 选出的具体值。
+    - static case 将这些 本次随机选中 值具体化到 IR memory type。
 
     使用示例:
     - `_static_dynamic_flash_args()`
@@ -382,6 +383,122 @@ def _assert_first_ir_dump_contains(
     assert not unexpected_markers
 
 
+def _flash_script_first_ir_markers(
+    script: str,
+    stdout: str,
+) -> tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]:
+    """构造 flash attention 脚本本次随机 profile 对应的 first-ir marker。
+
+    功能说明:
+    - static 脚本必须在 first-ir 中出现本次随机 B/H/SL/D。
+    - dynamic 脚本必须保留 `B/H/SL/D` 与 `BR/BC` 符号。
+
+    使用示例:
+    - `_flash_script_first_ir_markers("kernel/flash_attention/inputs_static_tile_dynamic.py", stdout)`
+    """
+
+    shape_seed_match = re.search(r"shape_seed=(\d+)", stdout)
+    tile_seed_match = re.search(r"tile_seed=(\d+)", stdout)
+    candidates_match = re.search(r"tile_candidates=([^\n]*?) tile=", stdout)
+    shape_match = re.search(r"shape=(\([^)]*\))", stdout)
+    tile_match = re.search(r"tile=(\([^)]*\))", stdout)
+    query_tiles_match = re.search(r"query_tiles=(\d+)", stdout)
+    key_tiles_match = re.search(r"key_tiles=(\d+)", stdout)
+    query_tail_match = re.search(r"query_tail=(\d+)", stdout)
+    key_tail_match = re.search(r"key_tail=(\d+)", stdout)
+    assert shape_seed_match is not None
+    assert tile_seed_match is not None
+    assert candidates_match is not None
+    assert shape_match is not None
+    assert tile_match is not None
+    assert query_tiles_match is not None
+    assert key_tiles_match is not None
+    assert query_tail_match is not None
+    assert key_tail_match is not None
+    shape_seed = int(shape_seed_match.group(1))
+    tile_seed = int(tile_seed_match.group(1))
+    shape_rng = random.Random(shape_seed)
+    batch = shape_rng.choice((1, 2))
+    heads = shape_rng.choice((4, 8))
+    seq_len = shape_rng.choice((257, 321, 389))
+    dim = shape_rng.choice((48, 64, 80))
+    expected_candidates = ((48, 64), (64, 80), (80, 96))
+    assert tuple(literal_eval(candidates_match.group(1))) == expected_candidates
+    br, bc = random.Random(tile_seed).choice(expected_candidates)
+    assert literal_eval(shape_match.group(1)) == (batch, heads, seq_len, dim)
+    assert literal_eval(tile_match.group(1)) == (br, bc)
+    assert int(query_tiles_match.group(1)) == (seq_len + br - 1) // br
+    assert int(key_tiles_match.group(1)) == (seq_len + bc - 1) // bc
+    assert int(query_tail_match.group(1)) == seq_len % br
+    assert int(key_tail_match.group(1)) == seq_len % bc
+    assert batch * heads * seq_len * seq_len * dim <= 200_000_000
+    assert (seq_len + br - 1) // br >= 3
+    assert (seq_len + bc - 1) // bc >= 3
+    assert seq_len % br != 0
+    assert seq_len % bc != 0
+    assert "multi_tile=True" in stdout
+    assert "tail=True" in stdout
+    if script == "kernel/flash_attention/inputs_static_tile_static.py":
+        return (
+            (
+                "flash_attention/inputs_static_tile_static/flash_attention_inputs_static_tile_static_kernel",
+                (
+                    "func.func @flash_attention_inputs_static_tile_static_kernel",
+                    f"!nn.memory<[#C{batch}, #C{heads}, #C{seq_len}, #C{dim}]",
+                    f"#It3 = #symbol.iter<start = #C0, end = #C{seq_len}, step = #C{br}>",
+                    f"#It4 = #symbol.iter<start = #C0, end = #C{seq_len}, step = #C{bc}>",
+                    f"!nn.memory<[#C{br}, #C{bc}]",
+                    '"kernel.reduce"',
+                    '"kernel.binary_elewise"',
+                    'kind = "max"',
+                ),
+                ("#S_BR", "#S_BC"),
+            ),
+        )
+    if script == "kernel/flash_attention/inputs_static_tile_dynamic.py":
+        return (
+            (
+                "flash_attention/inputs_static_tile_dynamic",
+                (
+                    "func.func @flash_attention_inputs_static_tile_dynamic_kernel",
+                    f"!nn.memory<[#C{batch}, #C{heads}, #C{seq_len}, #C{dim}]",
+                    "!symbol.int<#S_BR>",
+                    "!symbol.int<#S_BC>",
+                    f"#It3 = #symbol.iter<start = #C0, end = #C{seq_len}, step = #S_BR>",
+                    f"#It4 = #symbol.iter<start = #C0, end = #C{seq_len}, step = #S_BC>",
+                    '"kernel.reduce"',
+                    '"kernel.binary_elewise"',
+                    'kind = "max"',
+                ),
+                (
+                    f"#It3 = #symbol.iter<start = #C0, end = #C{seq_len}, step = #C{br}>",
+                    f"#It4 = #symbol.iter<start = #C0, end = #C{seq_len}, step = #C{bc}>",
+                ),
+            ),
+        )
+    return (
+        (
+            "flash_attention/inputs_dynamic_tile_dynamic",
+            (
+                "func.func @flash_attention_inputs_dynamic_tile_dynamic_kernel",
+                "!nn.memory<[#S_B, #S_H, #S_SL, #S_D]",
+                "!symbol.int<#S_BR>",
+                "!symbol.int<#S_BC>",
+                "#It3 = #symbol.iter<start = #C0, end = #S_SL, step = #S_BR>",
+                "#It4 = #symbol.iter<start = #C0, end = #S_SL, step = #S_BC>",
+                '"kernel.reduce"',
+                '"kernel.binary_elewise"',
+                'kind = "max"',
+            ),
+            (
+                f"!nn.memory<[#C{batch}, #C{heads}, #C{seq_len}, #C{dim}]",
+                f"#It3 = #symbol.iter<start = #C0, end = #C{seq_len}, step = #C{br}>",
+                f"#It4 = #symbol.iter<start = #C0, end = #C{seq_len}, step = #C{bc}>",
+            ),
+        ),
+    )
+
+
 def test_flash_static_static_demo_keeps_static_memory_and_tile() -> None:
     """static-static demo 应生成 static memory 与 static tile。"""
 
@@ -476,28 +593,22 @@ def test_flash_dynamic_dynamic_demo_keeps_symbolic_memory_and_symbolic_tile() ->
 
 
 def test_flash_attention_target_scripts_execute() -> None:
-    """三条 flash attention 脚本都应通过公开脚本入口并报告 seed-selected profile。"""
+    """三条 flash attention 脚本都应通过公开脚本入口并报告本次随机 profile。"""
 
     scripts = {
         "kernel/flash_attention/inputs_static_tile_static.py": (
-            "profile=fixed-seed-random",
-            "static_ir=seed-selected-concrete",
-            f"shape={(_FLASH_SS_B, _FLASH_SS_H, _FLASH_SS_SL, _FLASH_SS_D)}",
-            f"tile=({_FLASH_SS_TILE[0]},{_FLASH_SS_TILE[1]})",
+            "profile=per-run-random",
+            "static_ir=random-concrete",
         ),
         "kernel/flash_attention/inputs_static_tile_dynamic.py": (
-            "profile=fixed-seed-random",
-            "static_memory=seed-selected-concrete",
+            "profile=per-run-random",
+            "static_memory=random-concrete",
             "dynamic_tile=symbolic-runtime",
-            f"shape={(_FLASH_SD_B, _FLASH_SD_H, _FLASH_SD_SL, _FLASH_SD_D)}",
-            f"tile={_FLASH_SD_TILE}",
         ),
         "kernel/flash_attention/inputs_dynamic_tile_dynamic.py": (
-            "profile=fixed-seed-random",
+            "profile=per-run-random",
             "dynamic_ir=symbolic",
-            "runtime=seed-selected",
-            f"shape={(_FLASH_DD_B, _FLASH_DD_H, _FLASH_DD_SL, _FLASH_DD_D)}",
-            f"tile={_FLASH_DD_TILE}",
+            "runtime=random",
         ),
     }
     source_markers = {
@@ -527,69 +638,11 @@ def test_flash_attention_target_scripts_execute() -> None:
             ),
         ),
     }
-    first_ir_markers = {
-        "kernel/flash_attention/inputs_static_tile_static.py": (
-            (
-                "flash_attention/inputs_static_tile_static/flash_attention_inputs_static_tile_static_kernel",
-                (
-                    "func.func @flash_attention_inputs_static_tile_static_kernel",
-                    f"!nn.memory<[#C{_FLASH_SS_B}, #C{_FLASH_SS_H}, #C{_FLASH_SS_SL}, #C{_FLASH_SS_D}]",
-                    f"#It3 = #symbol.iter<start = #C0, end = #C{_FLASH_SS_SL}, step = #C{_FLASH_SS_TILE[0]}>",
-                    f"#It4 = #symbol.iter<start = #C0, end = #C{_FLASH_SS_SL}, step = #C{_FLASH_SS_TILE[1]}>",
-                    f"!nn.memory<[#C{_FLASH_SS_TILE[0]}, #C{_FLASH_SS_TILE[1]}]",
-                    '"kernel.reduce"',
-                    '"kernel.binary_elewise"',
-                    'kind = "max"',
-                ),
-                ("#S_BR", "#S_BC"),
-            ),
-        ),
-        "kernel/flash_attention/inputs_static_tile_dynamic.py": (
-            (
-                "flash_attention/inputs_static_tile_dynamic",
-                (
-                    "func.func @flash_attention_inputs_static_tile_dynamic_kernel",
-                    f"!nn.memory<[#C{_FLASH_SD_B}, #C{_FLASH_SD_H}, #C{_FLASH_SD_SL}, #C{_FLASH_SD_D}]",
-                    "!symbol.int<#S_BR>",
-                    "!symbol.int<#S_BC>",
-                    f"#It3 = #symbol.iter<start = #C0, end = #C{_FLASH_SD_SL}, step = #S_BR>",
-                    f"#It4 = #symbol.iter<start = #C0, end = #C{_FLASH_SD_SL}, step = #S_BC>",
-                    '"kernel.reduce"',
-                    '"kernel.binary_elewise"',
-                    'kind = "max"',
-                ),
-                (
-                    f"#It3 = #symbol.iter<start = #C0, end = #C{_FLASH_SD_SL}, step = #C{_FLASH_SD_TILE[0]}>",
-                    f"#It4 = #symbol.iter<start = #C0, end = #C{_FLASH_SD_SL}, step = #C{_FLASH_SD_TILE[1]}>",
-                ),
-            ),
-        ),
-        "kernel/flash_attention/inputs_dynamic_tile_dynamic.py": (
-            (
-                "flash_attention/inputs_dynamic_tile_dynamic",
-                (
-                    "func.func @flash_attention_inputs_dynamic_tile_dynamic_kernel",
-                    "!nn.memory<[#S_B, #S_H, #S_SL, #S_D]",
-                    "!symbol.int<#S_BR>",
-                    "!symbol.int<#S_BC>",
-                    "#It3 = #symbol.iter<start = #C0, end = #S_SL, step = #S_BR>",
-                    "#It4 = #symbol.iter<start = #C0, end = #S_SL, step = #S_BC>",
-                    '"kernel.reduce"',
-                    '"kernel.binary_elewise"',
-                    'kind = "max"',
-                ),
-                (
-                    f"!nn.memory<[#C{_FLASH_DD_B}, #C{_FLASH_DD_H}, #C{_FLASH_DD_SL}, #C{_FLASH_DD_D}]",
-                    f"#It3 = #symbol.iter<start = #C0, end = #C{_FLASH_DD_SL}, step = #C{_FLASH_DD_TILE[0]}>",
-                    f"#It4 = #symbol.iter<start = #C0, end = #C{_FLASH_DD_SL}, step = #C{_FLASH_DD_TILE[1]}>",
-                ),
-            ),
-        ),
-    }
     for script, expected_markers in scripts.items():
         completed = _run_kernel_script(script)
         assert "[CHECK] flash_attention/" in completed.stdout
         assert "max_abs_diff=" in completed.stdout
+        assert "shape_seed=" in completed.stdout
         assert "tile_seed=" in completed.stdout
         assert "tile_candidates=" in completed.stdout
         _assert_flash_script_reports_tail(completed.stdout)
@@ -597,5 +650,5 @@ def test_flash_attention_target_scripts_execute() -> None:
             assert marker in completed.stdout
         for case_name, markers in source_markers[script]:
             _assert_source_dump_contains(case_name, markers)
-        for case_name, markers, forbidden_markers in first_ir_markers[script]:
+        for case_name, markers, forbidden_markers in _flash_script_first_ir_markers(script, completed.stdout):
             _assert_first_ir_dump_contains(case_name, markers, forbidden_markers)

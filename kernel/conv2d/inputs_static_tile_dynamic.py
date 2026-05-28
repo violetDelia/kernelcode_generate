@@ -3,11 +3,11 @@
 
 功能说明:
 - 实现 `inputs 静 + tile 动` 的 NCHW conv2d kernel demo。
-- 输入尺寸由 seed `2026052702` 从随机范围选出：`input[4, 61, 254, 229]`、`weight[21, 61, 3, 5]`、`out[4, 21, 33, 29]`。
-- static case 将 seed-selected input/weight/output shape 具体化到 IR memory type。
+- 脚本入口每次运行先随机生成 `shape_seed/tile_seed`，再从受控范围选择本次 input/weight/output shape、`KH/KW`、padding 与 runtime tile。
+- static case 将本次随机 input/weight/output shape 具体化到 IR memory type。
 - 固定 stride=8，将大输入映射到可真实执行的输出规模；N/C/F/Ho/Wo 均大于 tile 并至少触发两轮 tile。
-- 同一 shape seed 还选出非对称 padding `(4, 3, 4, 3)`，在编译期作为 seed-selected static attr 写入 IR。
-- lowering 后 IR 必须保持上述 seed-selected static shape，不得变成动态符号 shape。
+- 同一 shape seed 还选出非对称 padding，在编译期作为本次随机 static attr 写入 IR。
+- lowering 后 IR 必须保持上述 本次随机选中 static shape，不得变成动态符号 shape。
 - tile 由 `run_lowering_demo(...)` 以 `SymbolDim` 进入编译 IR，运行期以 Python `int` 传给 `ExecutionEngine` wrapper，尾块通过 DSL `min(...)` 生成 `symbol.min`。
 - 当 `tile_c < input channel` 时在每个输出 tile 内先初始化本地 accumulator，再在 `c0` tile 循环内用 `kernel.img2col2d/kernel.matmul/kernel.add` 累计 partial，最后一次写回输出。
 - accumulator、bias 与 partial staging scratch 使用 iterator-independent tile 上界分配，真实 tail 通过 `dma.view/deslice` 表达；img2col 与 matmul reshape 链路因现有 layout 合同保持 current tile 分配。
@@ -15,7 +15,7 @@
 - 通过 `ExecutionEngine` 真实执行 lowering 生成的源码，并分别校验 absent bias 与 present bias 的 NumPy conv2d 参考结果。
 
 API 列表:
-- `conv2d_inputs_static_tile_dynamic_kernel(out: Tensor[f32, 4, 21, 33, 29], input_tensor: Tensor[f32, 4, 61, 254, 229], weight: Tensor[f32, 21, 61, 3, 5], bias: Tensor[f32, 21], tile_f: SymbolDim, tile_c: SymbolDim, tile_n: SymbolDim, tile_ho: SymbolDim, tile_wo: SymbolDim) -> None`
+- `conv2d_inputs_static_tile_dynamic_kernel(out: Tensor[f32, B, F, HO, WO], input_tensor: Tensor[f32, B, C, H, W], weight: Tensor[f32, F, C, KH, KW], bias: Tensor[f32, F], tile_f: SymbolDim, tile_c: SymbolDim, tile_n: SymbolDim, tile_ho: SymbolDim, tile_wo: SymbolDim) -> None`
 - `main() -> None`
 
 使用示例:
@@ -90,7 +90,7 @@ def _conv2d_nchw_reference(input_tensor: np.ndarray, weight: np.ndarray) -> np.n
 
 
     功能说明:
-    - 当前 static demo 使用 seed-selected stride、dilation 与非对称 padding。
+    - 当前 static demo 使用 本次随机选中 stride、dilation 与非对称 padding。
     - 通过 `np.einsum(...)` 对 kernel H/W 维展开累计，避免运行期依赖外部 tensor 框架。
 
     使用示例:
@@ -132,7 +132,7 @@ def conv2d_inputs_static_tile_dynamic_kernel(
 
 
     功能说明:
-    - 输入 shape 为 fixed-seed random profile 选出的具体 static 值，tile shape 由 runtime scalar 绑定。
+    - 输入 shape 为 per-run random profile 选出的具体 static 值，tile shape 由 runtime scalar 绑定。
     - 固定 stride=8、dilation=1，padding 使用同一 profile 选出的非对称配置。
     - 使用 `kernel.img2col2d + kernel.matmul + kernel.add` 生成卷积主体，并按 `tile_c` 循环分块后累计所有 partial 到本地 accumulator。
     - runtime tile 从轻量候选集合按 seed 选择，确保 memory_pool 后的片上动态内存视图不越界。
@@ -229,7 +229,7 @@ def _assert_static_memory_ir(module_text: str) -> None:
 
 
     功能说明:
-    - 确认 output/input/weight memory 类型包含 seed-selected static shape。
+    - 确认 output/input/weight memory 类型包含 本次随机选中 static shape。
     - 确认 IR 不包含 dynamic demo 的语义化符号 shape 或旧匿名 `s1/s2/...` shape。
     - 失败时抛出 `AssertionError`，让 demo 脚本直接暴露 static shape 回退。
 
@@ -290,8 +290,8 @@ def _symbolic_compile_args() -> tuple[Conv2dCompileArg, ...]:
 
 
     功能说明:
-    - output/input/weight/bias 均使用 fixed-seed random profile 选出的 static memory shape。
-    - static case 将这些 seed-selected 值具体化到 IR memory type。
+    - output/input/weight/bias 均使用 per-run random profile 选出的 static memory shape。
+    - static case 将这些 本次随机选中 值具体化到 IR memory type。
     - tile 参数固定使用 `TF/TC/TN/THO/TWO`，用于锁定编译期符号 tile。
     - stride、dilation 与 padding 保留在 DSL body 内的 static random attr。
 
@@ -391,17 +391,88 @@ def main() -> None:
 
 
     功能说明:
-    - 使用 fixed-seed random profile 选出的具体 shape 构造真实 NumPy ndarray 输入。
+    - 使用 per-run random profile 选出的具体 shape 构造真实 NumPy ndarray 输入。
     - 写入 `kernel/dump/conv2d/inputs_static_tile_dynamic/`。
     - 编译期以 static memory / symbolic tile 生成 lowering IR 与 npu_demo source。
-    - 校验 lowered IR 保持 seed-selected static shape 且 tile 保持 `TF/TC/TN/THO/TWO`。
+    - 校验 lowered IR 保持 本次随机选中 static shape 且 tile 保持 `TF/TC/TN/THO/TWO`。
     - 分别用 NumPy conv2d 与 `conv2d + bias[None, :, None, None]` 参考结果校验输出。
 
     使用示例:
     - `python3 kernel/conv2d/inputs_static_tile_dynamic.py`
     """
 
-    rng = np.random.default_rng(2026051612)
+    global _STATIC_SHAPE_SEED, _STATIC_BATCH, _STATIC_IN_CHANNELS, _STATIC_INPUT_H, _STATIC_INPUT_W
+    global _STATIC_OUT_CHANNELS, _STATIC_KERNEL_H, _STATIC_KERNEL_W
+    global _STATIC_PAD_TOP, _STATIC_PAD_BOTTOM, _STATIC_PAD_LEFT, _STATIC_PAD_RIGHT
+    global _STATIC_TILE_SELECTION_SEED, _STATIC_TILE_ARGS, _STATIC_OUTPUT_H, _STATIC_OUTPUT_W
+
+    system_rng = random.SystemRandom()
+    for _attempt in range(128):
+        shape_seed = system_rng.randrange(1, 2**31)
+        tile_seed = system_rng.randrange(1, 2**31)
+        shape_rng = random.Random(shape_seed)
+        batch = shape_rng.randint(4, 6)
+        in_channels = shape_rng.randint(48, 64)
+        input_h = shape_rng.randint(241, 289)
+        input_w = shape_rng.randint(225, 273)
+        out_channels = shape_rng.randint(18, 24)
+        kernel_h = shape_rng.choice((3, 5))
+        kernel_w = shape_rng.choice((3, 5))
+        pad_top = shape_rng.choice((0, 1, 2, 3, 4))
+        pad_bottom = shape_rng.choice((0, 1, 2, 3, 4))
+        pad_left = shape_rng.choice((0, 1, 2, 3, 4))
+        pad_right = shape_rng.choice((0, 1, 2, 3, 4))
+        output_h = ((input_h + pad_top + pad_bottom - _STATIC_DILATION_H * (kernel_h - 1) - 1) // _STATIC_STRIDE_H) + 1
+        output_w = ((input_w + pad_left + pad_right - _STATIC_DILATION_W * (kernel_w - 1) - 1) // _STATIC_STRIDE_W) + 1
+        tile_args = random.Random(tile_seed).choice(_STATIC_TILE_CANDIDATES)
+        tile_f, tile_c, tile_n, tile_ho, tile_wo = tile_args
+        has_multi_tile = (
+            out_channels > tile_f
+            and in_channels > tile_c
+            and batch > tile_n
+            and output_h > tile_ho
+            and output_w > tile_wo
+        )
+        tail_count = sum(
+            (
+                out_channels % tile_f != 0,
+                in_channels % tile_c != 0,
+                batch % tile_n != 0,
+                output_h % tile_ho != 0,
+                output_w % tile_wo != 0,
+            )
+        )
+        if has_multi_tile and tail_count == 5:
+            break
+    else:
+        raise RuntimeError("conv2d static/dynamic random profile failed to satisfy tile invariants")
+
+    _STATIC_SHAPE_SEED = shape_seed
+    _STATIC_BATCH = batch
+    _STATIC_IN_CHANNELS = in_channels
+    _STATIC_INPUT_H = input_h
+    _STATIC_INPUT_W = input_w
+    _STATIC_OUT_CHANNELS = out_channels
+    _STATIC_KERNEL_H = kernel_h
+    _STATIC_KERNEL_W = kernel_w
+    _STATIC_PAD_TOP = pad_top
+    _STATIC_PAD_BOTTOM = pad_bottom
+    _STATIC_PAD_LEFT = pad_left
+    _STATIC_PAD_RIGHT = pad_right
+    _STATIC_TILE_SELECTION_SEED = tile_seed
+    _STATIC_TILE_ARGS = tile_args
+    _STATIC_OUTPUT_H = output_h
+    _STATIC_OUTPUT_W = output_w
+    conv2d_inputs_static_tile_dynamic_kernel.__annotations__.update(
+        {
+            "out": f"Tensor[f32, {_STATIC_BATCH}, {_STATIC_OUT_CHANNELS}, {_STATIC_OUTPUT_H}, {_STATIC_OUTPUT_W}]",
+            "input_tensor": f"Tensor[f32, {_STATIC_BATCH}, {_STATIC_IN_CHANNELS}, {_STATIC_INPUT_H}, {_STATIC_INPUT_W}]",
+            "weight": f"Tensor[f32, {_STATIC_OUT_CHANNELS}, {_STATIC_IN_CHANNELS}, {_STATIC_KERNEL_H}, {_STATIC_KERNEL_W}]",
+            "bias": f"Tensor[f32, {_STATIC_OUT_CHANNELS}]",
+        }
+    )
+
+    rng = np.random.default_rng(_STATIC_SHAPE_SEED)
     input_tensor = rng.standard_normal((_STATIC_BATCH, _STATIC_IN_CHANNELS, _STATIC_INPUT_H, _STATIC_INPUT_W), dtype=np.float32)
     weight = rng.standard_normal((_STATIC_OUT_CHANNELS, _STATIC_IN_CHANNELS, _STATIC_KERNEL_H, _STATIC_KERNEL_W), dtype=np.float32)
     bias = rng.standard_normal((_STATIC_OUT_CHANNELS,), dtype=np.float32)
@@ -426,14 +497,14 @@ def main() -> None:
     present_max_abs_diff = max_abs_diff_by_case["present"]
     print(
         "[ARGS] "
-        "profile=fixed-seed-random static_memory=seed-selected-concrete dynamic_tile=symbolic-runtime "
-        f"seed={_STATIC_SHAPE_SEED} input={input_tensor.shape} weight={weight.shape} "
+        "profile=per-run-random static_memory=random-concrete dynamic_tile=symbolic-runtime "
+        f"shape_seed={_STATIC_SHAPE_SEED} input={input_tensor.shape} weight={weight.shape} "
         f"stride=({_STATIC_STRIDE_H},{_STATIC_STRIDE_W}) dilation=({_STATIC_DILATION_H},{_STATIC_DILATION_W}) "
         f"padding=({_STATIC_PAD_TOP},{_STATIC_PAD_BOTTOM},{_STATIC_PAD_LEFT},{_STATIC_PAD_RIGHT}) "
         f"tile_seed={_STATIC_TILE_SELECTION_SEED} tile_candidates={_STATIC_TILE_CANDIDATES} selected_tile={tile_args} "
         f"output={present_out.shape} bias_case_order={_BIAS_CASE_ORDER} bias_rank=1"
     )
-    print("[IR] static memory evidence: seed-selected concrete output/input/weight shapes present; TF/TC/TN/THO/TWO tile symbols present")
+    print("[IR] static memory evidence: 本次随机选中 concrete output/input/weight shapes present; TF/TC/TN/THO/TWO tile symbols present")
     print(f"[CHECK] {CASE_NAME}/absent_bias max_abs_diff={absent_max_abs_diff}")
     print(f"[CHECK] {CASE_NAME}/present_bias max_abs_diff={present_max_abs_diff}")
 
