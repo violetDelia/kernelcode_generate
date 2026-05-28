@@ -252,12 +252,14 @@ def _make_memory_type(
     stride: list[int | str],
     element_type: Attribute = i32,
     space: str = "global",
+    external_attrs: DictionaryAttr | None = None,
 ) -> NnMemoryType:
     return NnMemoryType(
         ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in shape]),
         ArrayAttr([SymbolExprAttr.from_expr(str(dim)) for dim in stride]),
         element_type,
         NnMemorySpaceAttr.from_name(space),
+        external_attrs=external_attrs,
     )
 
 
@@ -3222,6 +3224,25 @@ def test_gen_kernel_rejects_npu_demo_barrier_wrapper_missing_body_symbol() -> No
             _npu_ctx(),
             r"wrapper signature must match body inputs",
             id="wrapper-input-mismatch",
+        ),
+        pytest.param(
+            _make_npu_demo_launch_signature_module(
+                body_input_types=(
+                    _make_memory_type([64], [1], element_type=f32, external_attrs=DictionaryAttr({"layout": StringAttr("body")})),
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                ),
+                body_arg_names=("lhs", "rhs", "out"),
+                wrapper_input_types=(
+                    _make_memory_type([64], [1], element_type=f32, external_attrs=DictionaryAttr({"layout": StringAttr("wrapper")})),
+                    _make_memory_type([64], [1], element_type=f32),
+                    _make_memory_type([64], [1], element_type=f32),
+                ),
+                wrapper_arg_names=("lhs", "rhs", "out"),
+            ),
+            _npu_ctx(),
+            r"wrapper signature must match body inputs",
+            id="wrapper-external-attr-mismatch",
         ),
         pytest.param(
             _make_npu_demo_launch_signature_module(

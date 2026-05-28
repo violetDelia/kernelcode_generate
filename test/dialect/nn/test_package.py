@@ -55,6 +55,7 @@ EXPECTED_NN_ALL = {
     "NnMemoryType",
     "copy_memory_type",
     "copy_memory_type_with_template_name",
+    "copy_memory_type_with_external_attr",
 }
 
 EXPECTED_DIALECT_NN_SUBSET = {
@@ -77,6 +78,7 @@ EXPECTED_DIALECT_NN_SUBSET = {
     "NnMemoryType",
     "copy_memory_type",
     "copy_memory_type_with_template_name",
+    "copy_memory_type_with_external_attr",
 }
 
 EXPECTED_OPS = [

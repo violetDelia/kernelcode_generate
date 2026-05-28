@@ -4,9 +4,10 @@
 - 承载 nn dialect package 拆分后的 nn type package 实现。
 
 API 列表:
-- `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr, template_name: StringAttr | str | None = None)`
+- `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr, template_name: StringAttr | str | None = None, *, external_attrs: DictionaryAttr | dict[str, Attribute] | None = None)`
 - `copy_memory_type(memory_type: NnMemoryType, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
 - `copy_memory_type_with_template_name(memory_type: NnMemoryType, template_name: str | StringAttr, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
+- `copy_memory_type_with_external_attr(memory_type: NnMemoryType, key: str, value: Attribute) -> NnMemoryType`
 
 使用示例:
 - from kernel_gen.dialect.nn.type import NnMemoryType
@@ -22,7 +23,13 @@ from __future__ import annotations
 from kernel_gen.dialect.nn.type.memory_type import (
     NnMemoryType,
     copy_memory_type,
+    copy_memory_type_with_external_attr,
     copy_memory_type_with_template_name,
 )
 
-__all__ = ["NnMemoryType", "copy_memory_type", "copy_memory_type_with_template_name"]
+__all__ = [
+    "NnMemoryType",
+    "copy_memory_type",
+    "copy_memory_type_with_template_name",
+    "copy_memory_type_with_external_attr",
+]

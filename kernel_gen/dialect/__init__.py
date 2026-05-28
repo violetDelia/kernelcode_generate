@@ -32,9 +32,10 @@ API 列表:
 - `class NnImg2col1dOp(input_value: SSAValue, result_type: NnMemoryType, kw: SSAValue, sw: SSAValue, dw: SSAValue, pl: SSAValue, pr: SSAValue, space: NnMemorySpaceAttr)`
 - `class NnImg2col2dOp(input_value: SSAValue, result_type: NnMemoryType, kh: SSAValue, kw: SSAValue, sh: SSAValue, sw: SSAValue, dh: SSAValue, dw: SSAValue, ph: SSAValue, pw: SSAValue, pl: SSAValue, pr: SSAValue, space: NnMemorySpaceAttr)`
 - `class NnMemorySpaceAttr(space: StringAttr)`
-- `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr, template_name: StringAttr | str | None = None)`
+- `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr, template_name: StringAttr | str | None = None, *, external_attrs: DictionaryAttr | dict[str, Attribute] | None = None)`
 - `copy_memory_type(memory_type: NnMemoryType, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
 - `copy_memory_type_with_template_name(memory_type: NnMemoryType, template_name: str | StringAttr, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
+- `copy_memory_type_with_external_attr(memory_type: NnMemoryType, key: str, value: Attribute) -> NnMemoryType`
 
 使用示例:
 - from kernel_gen.dialect import Arch, ArchLaunchKernelOp, Nn, NnAddOp, NnMemoryType
@@ -78,6 +79,7 @@ __all__ = [
     "NnMemoryType",
     "copy_memory_type",
     "copy_memory_type_with_template_name",
+    "copy_memory_type_with_external_attr",
 ]
 
 
@@ -108,6 +110,7 @@ if TYPE_CHECKING:  # pragma: no cover
         NnMemorySpaceAttr,
         NnMemoryType,
         copy_memory_type,
+        copy_memory_type_with_external_attr,
         copy_memory_type_with_template_name,
         NnMulOp,
         NnNeOp,
@@ -145,6 +148,7 @@ _LAZY_EXPORT_MODULE: dict[str, str] = {
     "NnMemoryType": ".nn",
     "copy_memory_type": ".nn",
     "copy_memory_type_with_template_name": ".nn",
+    "copy_memory_type_with_external_attr": ".nn",
 }
 
 

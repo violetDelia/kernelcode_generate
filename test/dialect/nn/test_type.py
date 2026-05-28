@@ -27,6 +27,7 @@ from xdsl.context import Context
 from xdsl.dialects.builtin import (
     ArrayAttr,
     Builtin,
+    DictionaryAttr,
     Float16Type,
     Float32Type,
     IntAttr,
@@ -69,6 +70,7 @@ from kernel_gen.dialect import (
 )
 from kernel_gen.dialect.nn import (
     copy_memory_type,
+    copy_memory_type_with_external_attr,
     copy_memory_type_with_template_name,
     NnCastOp,
     NnDivOp,
@@ -243,8 +245,9 @@ def test_memory_type_template_name_round_trip_and_field() -> None:
     memory_type = Parser(ctx, text).parse_attribute()
     assert isinstance(memory_type, NnMemoryType)
     memory_type.verify()
-    assert _print_ir(memory_type) == text
+    assert _print_ir(memory_type) == '!nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<global>, external_attrs = {template_name = "T1"}>'
     assert memory_type.template_name.data == "T1"
+    assert memory_type.external_attrs.data["template_name"] == StringAttr("T1")
 
     cleared = copy_memory_type(memory_type)
     assert cleared.template_name.data == ""
@@ -252,7 +255,92 @@ def test_memory_type_template_name_round_trip_and_field() -> None:
 
     restored = copy_memory_type_with_template_name(cleared, StringAttr("T2"))
     assert restored.template_name.data == "T2"
-    assert _print_ir(restored).endswith(", template = T2>")
+    assert _print_ir(restored).endswith(', external_attrs = {template_name = "T2"}>')
+
+
+def test_memory_type_external_attrs_round_trip_and_copy_helpers() -> None:
+    """验证 external_attrs canonical print 与 copy helper 只特殊处理 template_name。"""
+
+    ctx = _build_context()
+    text = '!nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<global>, external_attrs = {sdnn_layout = "mac_banked", template_name = "T1"}>'
+    memory_type = Parser(ctx, text).parse_attribute()
+    assert isinstance(memory_type, NnMemoryType)
+    memory_type.verify()
+    assert _print_ir(memory_type) == text
+    assert memory_type.template_name.data == "T1"
+    assert memory_type.external_attrs.data["sdnn_layout"] == StringAttr("mac_banked")
+
+    cleared = copy_memory_type(memory_type)
+    assert cleared.template_name.data == ""
+    assert "template_name" not in cleared.external_attrs.data
+    assert cleared.external_attrs.data["sdnn_layout"] == StringAttr("mac_banked")
+    assert memory_type.template_name.data == "T1"
+
+    renamed = copy_memory_type_with_template_name(cleared, "T2")
+    assert renamed.template_name.data == "T2"
+    assert renamed.external_attrs.data["sdnn_layout"] == StringAttr("mac_banked")
+
+    with_bank = copy_memory_type_with_external_attr(renamed, "bank", StringAttr("tsm"))
+    assert with_bank.template_name.data == "T2"
+    assert with_bank.external_attrs.data["bank"] == StringAttr("tsm")
+    assert "bank" not in renamed.external_attrs.data
+
+
+def test_memory_type_template_name_constructor_conflict_rejected() -> None:
+    """验证 template_name 与 external_attrs 同 key 异值稳定失败。"""
+
+    with pytest.raises(KernelCodeError, match="template_name conflicts with template_name"):
+        NnMemoryType(
+            ArrayAttr([_expr_attr("M")]),
+            ArrayAttr([_expr_attr(1)]),
+            i32,
+            _make_space("global"),
+            template_name="T1",
+            external_attrs=DictionaryAttr({"template_name": StringAttr("T2")}),
+        )
+
+
+def test_memory_type_legacy_template_and_external_attrs_parse_conflict() -> None:
+    """验证 legacy template 与 external_attrs template_name 同值可读、异值拒绝。"""
+
+    ctx = _build_context()
+    same = Parser(
+        ctx,
+        '!nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<global>, template = T1, external_attrs = {template_name = "T1"}>',
+    ).parse_attribute()
+    assert isinstance(same, NnMemoryType)
+    assert same.template_name.data == "T1"
+    assert _print_ir(same).endswith(', external_attrs = {template_name = "T1"}>')
+
+    with pytest.raises(KernelCodeError, match="template_name conflicts with template_name"):
+        Parser(
+            ctx,
+            '!nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<global>, template = T1, external_attrs = {template_name = "T2"}>',
+        ).parse_attribute()
+
+
+def test_memory_type_external_attrs_validation() -> None:
+    """验证 external_attrs key 与保留 template_name value 的公开失败语义。"""
+
+    ctx = _build_context()
+    with pytest.raises(KernelCodeError, match="external_attrs key must be an identifier"):
+        Parser(
+            ctx,
+            '!nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<global>, external_attrs = {"bad-key" = "x"}>',
+        ).parse_attribute()
+    with pytest.raises(KernelCodeError, match="external_attrs template_name must be StringAttr"):
+        NnMemoryType(
+            ArrayAttr([_expr_attr("M")]),
+            ArrayAttr([_expr_attr(1)]),
+            i32,
+            _make_space("global"),
+            external_attrs={"template_name": IntegerAttr(1, i32)},
+        )
+    with pytest.raises(ParseError, match="external_attrs keys must be unique"):
+        Parser(
+            ctx,
+            '!nn.memory<[#symbol.expr<M>], [#symbol.expr<1>], i32, #nn.space<global>, external_attrs = {layout = "x", layout = "y"}>',
+        ).parse_attribute()
 
 @pytest.mark.parametrize("template_name", ["1T", "T 1", "<T1>", ""])
 def test_memory_type_rejects_invalid_template_name(template_name: str) -> None:

@@ -7,9 +7,12 @@
 ## API 列表
 
 - `class NnMemorySpaceAttr(space: StringAttr)`
-- `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr, template_name: StringAttr | str | None = None)`
+- `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr, template_name: StringAttr | str | None = None, *, external_attrs: DictionaryAttr | dict[str, Attribute] | None = None)`
+- `NnMemoryType.external_attrs -> DictionaryAttr`
+- `NnMemoryType.template_name -> StringAttr`
 - `copy_memory_type(memory_type: NnMemoryType, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
 - `copy_memory_type_with_template_name(memory_type: NnMemoryType, template_name: str | StringAttr, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
+- `copy_memory_type_with_external_attr(memory_type: NnMemoryType, key: str, value: Attribute) -> NnMemoryType`
 - `class NnAddOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
 - `class NnSubOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
 - `class NnMulOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
@@ -57,7 +60,7 @@
 ## 目标
 
 - 提供 `global/shared/local/tsm/tlm1/tlm2/tlm3` 七种 memory space 的统一属性表示。
-- 提供可解析、可打印、可校验的 `!nn.memory<...>` 类型表示；可选 `template = T1` 只由 `template_name` 字段承载。
+- 提供可解析、可打印、可校验的 `!nn.memory<...>` 类型表示；通用扩展属性由 `external_attrs` 承载，`template_name` 是其中的保留 key。
 - 为 `nn.add/sub/mul/div/truediv/floordiv/eq/ne/lt/le/gt/ge/select/cast/relu/sigmoid/tanh/leaky_relu/hard_sigmoid/exp/reduce_sum/reduce_min/reduce_max/broadcast/transpose/softmax/img2col1d/img2col2d/matmul` 提供稳定的方言层接口。
 - 明确 `nn dialect` 不支持逐元素隐式 broadcast，所有广播必须显式使用 `nn.broadcast`。
 - 承接上游 `operation.broadcast_to(...)` 的 canonical lowering：进入方言时以 `nn.broadcast` 表达目标 shape（由结果类型承载），不在 `nn dialect` 额外新增 `nn.broadcast_to` 独立 op。
@@ -71,11 +74,11 @@
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - 本文件只定义 `kernel_gen/dialect/nn/` 的方言层接口，不重复上游 `operation/nn` 的高层 API 语义。
 - `kernel_gen.dialect.nn` 是唯一稳定公开包根入口；`kernel_gen/dialect/nn/` 内部按 `attr`、`type`、`operation` family 拆分实现，不要求外部调用方直接导入子模块。
-- `kernel_gen/dialect/nn/attr/space_attr.py` 承载 `NnMemorySpaceAttr`；`kernel_gen/dialect/nn/type/memory_type.py` 承载 `NnMemoryType`、`copy_memory_type(...)`、`copy_memory_type_with_template_name(...)`。
+- `kernel_gen/dialect/nn/attr/space_attr.py` 承载 `NnMemorySpaceAttr`；`kernel_gen/dialect/nn/type/memory_type.py` 承载 `NnMemoryType`、`copy_memory_type(...)`、`copy_memory_type_with_template_name(...)`、`copy_memory_type_with_external_attr(...)`。
 - `kernel_gen/dialect/nn/operation/binary.py` 承载 binary / compare op family；`operation/elewise.py` 承载 `select/cast/broadcast/transpose`；`operation/active.py` 承载 activation / unary family；`operation/reduce.py` 承载 `reduce_sum/reduce_min/reduce_max`；`operation/structured.py` 承载 `img2col1d/img2col2d/matmul`。
 - 旧单文件实现已退场且不保留 shim、wrapper、redirect 或兼容文件；`import kernel_gen.dialect.nn` 必须解析到 package root。
 - `kernel_gen.dialect.nn.__all__` 只导出 `API 列表` 中的公开对象，不导出内部子模块对象。
-- `kernel_gen.dialect` 包根只保留既有 nn exact subset：`Nn`、`NnAddOp`、`NnBroadcastOp`、`NnSubOp`、`NnMulOp`、`NnTrueDivOp`、`NnEqOp`、`NnNeOp`、`NnLtOp`、`NnLeOp`、`NnGtOp`、`NnGeOp`、`NnMatmulOp`、`NnImg2col1dOp`、`NnImg2col2dOp`、`NnMemorySpaceAttr`、`NnMemoryType`、`copy_memory_type(...)`、`copy_memory_type_with_template_name(...)`。
+- `kernel_gen.dialect` 包根只保留既有 nn exact subset 并纳入本轮新增 copy helper：`Nn`、`NnAddOp`、`NnBroadcastOp`、`NnSubOp`、`NnMulOp`、`NnTrueDivOp`、`NnEqOp`、`NnNeOp`、`NnLtOp`、`NnLeOp`、`NnGtOp`、`NnGeOp`、`NnMatmulOp`、`NnImg2col1dOp`、`NnImg2col2dOp`、`NnMemorySpaceAttr`、`NnMemoryType`、`copy_memory_type(...)`、`copy_memory_type_with_template_name(...)`、`copy_memory_type_with_external_attr(...)`。
 - 已删除旧 `kernel_gen/dialect/nn/common.py` helper hub；各 attr/type/operation 文件只能使用当前文件内 helper 或已公开 core API，不得恢复 package-internal common 模块。
 - 上游若允许逐元素隐式 broadcast，进入 `nn dialect` 前必须显式展开为 `nn.broadcast`。
 - 上游 `broadcast_to(source, target_shape, space)` 进入方言时必须归一化为 `nn.broadcast`：目标 `target_shape` 仅通过 `result_type.shape` 体现，`nn dialect` 不承诺提供独立的 `nn.broadcast_to` op。
@@ -87,10 +90,13 @@
 - `NnMemorySpaceAttr` 仅允许 `global/shared/local/tsm/tlm1/tlm2/tlm3` 七种取值。
 - `NnMemoryType.space` 与各 op 的 `space` attribute 必须使用同一语义口径。
 - `NnMemoryType` 中 `shape` 与 `stride` 的 rank 必须一致；每一维必须由 `SymbolExprAttr` 承载，表达式可表示静态整数、符号或 `?`。
-- `NnMemoryType.template_name` 是可选字段；文本 IR 使用 `, template = T1` 形式，省略表示无 template name。合法 template name 必须匹配 `[A-Za-z_][A-Za-z0-9_]*`，`<T1>`、空白、数字开头或带空格文本必须拒绝。
+- `NnMemoryType.external_attrs` 是可选扩展属性容器；文本 IR canonical 形式使用 `external_attrs = {...}`，key 按字典序打印。legacy `template = T1` 只允许作为输入兼容，parse 后必须打印为 `external_attrs = {template_name = "T1"}`。
+- `NnMemoryType.template_name` 是兼容 property；未携带时返回 `StringAttr("")`。合法 template name 必须匹配 `[A-Za-z_][A-Za-z0-9_]*`，`<T1>`、空白、数字开头或带空格文本必须拒绝。
+- `external_attrs` key 必须匹配 `[A-Za-z_][A-Za-z0-9_]*`；重复 key 必须稳定失败；`template_name` key 的 value 必须是 `StringAttr`。
 - `memory_template_name(...)` 与 `has_memory_template_name(...)` 已删除，不再作为公开 API、包根导出或测试合同。迁移方式：调用方读取公开 `NnMemoryType.template_name.data`；空字符串表示未携带 template name，非空字符串表示 template name。
-- `copy_memory_type(...)` 复制 `shape/stride/element_type/space` 并清除 template name，避免新 buffer 派生时泄漏旧 template family。
-- `copy_memory_type_with_template_name(...)` 复制 memory type 并写入合法 template name；非法 template name 必须按 `NnMemoryType.verify()` 失败。
+- `copy_memory_type(...)` 复制 `shape/stride/element_type/space` 并仅清除 `external_attrs["template_name"]`，必须保留其它 external attrs。
+- `copy_memory_type_with_template_name(...)` 复制 memory type 并写入合法 `external_attrs["template_name"]`；非法 template name 必须按 `NnMemoryType.verify()` 失败。
+- `copy_memory_type_with_external_attr(...)` 复制 memory type 并覆盖单个 external attr key，不允许原地修改输入对象。
 - `shape` 中的 `?` 表示动态维度；`stride` 中的 `?` 不允许与同位置 `shape` 中的 `?` 直接成对出现。
 - 二元逐元素 op 的 `lhs/rhs/result` 必须满足 `shape/stride/space` 的 verifier 约束，不能依赖方言层做隐式 broadcast。
 - 比较 op 的结果 `element_type` 必须为 `i1`。
@@ -118,35 +124,117 @@
 - 功能说明：构造 `NnMemorySpaceAttr` 实例。
 - 注意事项：构造参数必须符合本条目参数说明；实例内部缓存、状态字典和派生字段不作为外部可变入口。
 
-### `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr, template_name: StringAttr | str | None = None)`
+### `class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr, template_name: StringAttr | str | None = None, *, external_attrs: DictionaryAttr | dict[str, Attribute] | None = None)`
 
-- api：`class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr, template_name: StringAttr | str | None = None)`
+- api：`class NnMemoryType(shape: ArrayAttr[SymbolExprAttr], stride: ArrayAttr[SymbolExprAttr], element_type: Attribute, space: NnMemorySpaceAttr, template_name: StringAttr | str | None = None, *, external_attrs: DictionaryAttr | dict[str, Attribute] | None = None)`
 - 参数：
   - `shape`：形状序列，定义张量、内存或符号对象的维度大小；类型 `ArrayAttr[SymbolExprAttr]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `stride`：步长序列，定义各维度在底层线性布局中的跨距；类型 `ArrayAttr[SymbolExprAttr]`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `element_type`：类型对象或类型名称；类型 `Attribute`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `space`：内存空间标识，定义对象所在的 GM、SM、LM 或其他公开空间；类型 `NnMemorySpaceAttr`；无默认值，调用方必须显式提供；不允许 `None` 或空值作为稳定输入，除非本接口 `注意事项` 另有明确说明；按值或只读语义消费，调用方不得依赖输入对象被修改；非法值按该 API 的公开错误语义处理。
   - `template_name`：可选 C++ template 类型参数名；类型 `StringAttr | str | None`；默认值 `None`；`None` 或空字符串表示无 template name，非空值必须匹配 `[A-Za-z_][A-Za-z0-9_]*`。
+  - `external_attrs`：memory type 扩展属性容器；类型 `DictionaryAttr | dict[str, Attribute] | None`；默认值 `None`；key 必须为 identifier；`template_name` 是保留 key 且 value 必须为 `StringAttr`。
 - 返回值：`NnMemoryType` 实例。
 - 使用示例：
 
   ```python
-  nn_memory_type = NnMemoryType(shape=shape, stride=stride, element_type=element_type, space=space, template_name="T1")
+  nn_memory_type = NnMemoryType(
+      shape=shape,
+      stride=stride,
+      element_type=element_type,
+      space=space,
+      template_name="T1",
+      external_attrs={"layout": StringAttr("mac_banked")},
+  )
   ```
 - 功能说明：构造 `NnMemoryType` 实例。
-- 注意事项：构造参数必须符合本条目参数说明；`shape/stride` 只公开 `ArrayAttr[SymbolExprAttr]`，raw `IntAttr/StringAttr` 或其它 `Attribute` 容器不是公开兼容入口；`template_name` 只接受裸 identifier，不接受尖括号模板实参文本；实例内部缓存、状态字典和派生字段不作为外部可变入口；`memory_template_name(...)` / `has_memory_template_name(...)` 已删除，读取 template name 时使用 `memory_type.template_name.data`。
+- 注意事项：构造参数必须符合本条目参数说明；`shape/stride` 只公开 `ArrayAttr[SymbolExprAttr]`，raw `IntAttr/StringAttr` 或其它 `Attribute` 容器不是公开兼容入口；`template_name` 只接受裸 identifier，不接受尖括号模板实参文本；`template_name` 与 `external_attrs["template_name"]` 同值时允许，异值时必须失败并包含 `nn memory external_attrs template_name conflicts with template_name`；canonical print 不输出 legacy `template = ...`，必须输出 `external_attrs = {...}`；实例内部缓存、状态字典和派生字段不作为外部可变入口；`memory_template_name(...)` / `has_memory_template_name(...)` 已删除，读取 template name 时使用 `memory_type.template_name.data`。
+
+### `NnMemoryType.external_attrs -> DictionaryAttr`
+
+- api：`NnMemoryType.external_attrs -> DictionaryAttr`
+- 参数：
+  - 无显式参数；通过 `NnMemoryType` 实例属性读取。
+- 返回值：`DictionaryAttr`；返回当前 memory type 的扩展属性容器；未携带扩展属性时返回空 `DictionaryAttr`。
+- 使用示例：
+
+  ```python
+  attrs = memory_type.external_attrs
+  layout = attrs.data.get("layout")
+  ```
+- 功能说明：读取 memory type 的通用扩展属性容器。
+- 注意事项：`external_attrs` 是 `NnMemoryType` 的公开只读访问入口；调用方不得依赖原地修改返回容器来更新 memory type；需要写入或覆盖单个 key 时使用 `copy_memory_type_with_external_attr(...)`；`template_name` 是保留 key，value 必须是 `StringAttr`。
+
+### `NnMemoryType.template_name -> StringAttr`
+
+- api：`NnMemoryType.template_name -> StringAttr`
+- 参数：
+  - 无显式参数；通过 `NnMemoryType` 实例属性读取。
+- 返回值：`StringAttr`；当 `external_attrs` 中存在 `template_name` 时返回该值；未携带 template name 时返回 `StringAttr("")`。
+- 使用示例：
+
+  ```python
+  name = memory_type.template_name.data
+  if name:
+      print(name)
+  ```
+- 功能说明：兼容旧调用方读取 memory template name，并以 `external_attrs["template_name"]` 作为真实存储。
+- 注意事项：该属性只提供读取兼容，不表示 `template_name` 仍是独立 type parameter；非法 `external_attrs["template_name"]` 类型必须由 verifier 以 `nn memory external_attrs template_name must be StringAttr` 拒绝。
 
 ### `copy_memory_type(memory_type: NnMemoryType, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
 
 - api：`copy_memory_type(memory_type: NnMemoryType, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
-- 功能说明：复制 memory type 的基础字段并清空 template name。
-- 注意事项：该接口不得保留旧 template name；需要显式写入 name 时必须使用 `copy_memory_type_with_template_name(...)`。
+- 参数：
+  - `memory_type`：被复制的 memory type；类型 `NnMemoryType`；调用方必须显式提供；不允许 `None`；输入对象不得被原地修改。
+  - `shape`：可选替换 shape；类型 `ArrayAttr[SymbolExprAttr] | None`；默认值 `None`，表示沿用 `memory_type.shape`；非 `None` 时必须符合 `NnMemoryType` 的 shape 合同。
+  - `stride`：可选替换 stride；类型 `ArrayAttr[SymbolExprAttr] | None`；默认值 `None`，表示沿用 `memory_type.stride`；非 `None` 时必须符合 `NnMemoryType` 的 stride 合同。
+  - `element_type`：可选替换元素类型；类型 `Attribute | None`；默认值 `None`，表示沿用 `memory_type.element_type`。
+  - `space`：可选替换 memory space；类型 `NnMemorySpaceAttr | None`；默认值 `None`，表示沿用 `memory_type.space`；非 `None` 时必须是合法公开 memory space。
+- 返回值：新的 `NnMemoryType`；返回值保留除 `template_name` 外的全部 `external_attrs`，并清除 `external_attrs["template_name"]`。
+- 使用示例：
+
+  ```python
+  cloned = copy_memory_type(memory_type, shape=new_shape)
+  assert cloned.template_name.data == ""
+  ```
+- 功能说明：复制 memory type 的基础字段并清空 `external_attrs["template_name"]`。
+- 注意事项：该接口不得保留旧 template name；必须保留除 `template_name` 外的其它 `external_attrs`；需要显式写入 name 时必须使用 `copy_memory_type_with_template_name(...)`；该接口不提供写入任意 external attr 的能力，需要写入其它 key 时使用 `copy_memory_type_with_external_attr(...)`。
 
 ### `copy_memory_type_with_template_name(memory_type: NnMemoryType, template_name: str | StringAttr, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
 
 - api：`copy_memory_type_with_template_name(memory_type: NnMemoryType, template_name: str | StringAttr, *, shape: ArrayAttr[SymbolExprAttr] | None = None, stride: ArrayAttr[SymbolExprAttr] | None = None, element_type: Attribute | None = None, space: NnMemorySpaceAttr | None = None) -> NnMemoryType`
-- 功能说明：复制 memory type 的基础字段并写入合法 template name。
-- 注意事项：`template_name` 必须匹配 `[A-Za-z_][A-Za-z0-9_]*`；shape/stride 必须继续是 `ArrayAttr[SymbolExprAttr]`。
+- 参数：
+  - `memory_type`：被复制的 memory type；类型 `NnMemoryType`；调用方必须显式提供；不允许 `None`；输入对象不得被原地修改。
+  - `template_name`：写入 `external_attrs["template_name"]` 的 template 名称；类型 `str | StringAttr`；无默认值；必须匹配 `[A-Za-z_][A-Za-z0-9_]*`，非法值必须在 verifier 中稳定失败。
+  - `shape`：可选替换 shape；类型 `ArrayAttr[SymbolExprAttr] | None`；默认值 `None`，表示沿用 `memory_type.shape`；非 `None` 时必须符合 `NnMemoryType` 的 shape 合同。
+  - `stride`：可选替换 stride；类型 `ArrayAttr[SymbolExprAttr] | None`；默认值 `None`，表示沿用 `memory_type.stride`；非 `None` 时必须符合 `NnMemoryType` 的 stride 合同。
+  - `element_type`：可选替换元素类型；类型 `Attribute | None`；默认值 `None`，表示沿用 `memory_type.element_type`。
+  - `space`：可选替换 memory space；类型 `NnMemorySpaceAttr | None`；默认值 `None`，表示沿用 `memory_type.space`；非 `None` 时必须是合法公开 memory space。
+- 返回值：新的 `NnMemoryType`；返回值保留其它 `external_attrs`，并添加或覆盖 `external_attrs["template_name"]`。
+- 使用示例：
+
+  ```python
+  named = copy_memory_type_with_template_name(memory_type, "T1", stride=new_stride)
+  assert named.template_name.data == "T1"
+  ```
+- 功能说明：复制 memory type 的基础字段并写入合法 `external_attrs["template_name"]`。
+- 注意事项：`template_name` 必须匹配 `[A-Za-z_][A-Za-z0-9_]*`；shape/stride 必须继续是 `ArrayAttr[SymbolExprAttr]`；必须保留除 `template_name` 外的其它 `external_attrs`；该接口只负责 template name 写入，不覆盖其它 external attr key。
+
+### `copy_memory_type_with_external_attr(memory_type: NnMemoryType, key: str, value: Attribute) -> NnMemoryType`
+
+- api：`copy_memory_type_with_external_attr(memory_type: NnMemoryType, key: str, value: Attribute) -> NnMemoryType`
+- 参数：
+  - `memory_type`：被复制的 memory type；类型 `NnMemoryType`；调用方必须显式提供。
+  - `key`：要写入的 external attr key；类型 `str`；必须匹配 `[A-Za-z_][A-Za-z0-9_]*`。
+  - `value`：要写入的 external attr value；类型 `Attribute`；当 `key == "template_name"` 时必须为 `StringAttr` 且 value 文本必须是合法 identifier。
+- 返回值：新的 `NnMemoryType`。
+- 使用示例：
+
+  ```python
+  cloned = copy_memory_type_with_external_attr(memory_type, "layout", StringAttr("mac_banked"))
+  ```
+- 功能说明：复制 memory type 并覆盖单个 external attr。
+- 注意事项：不得原地修改输入对象；该接口不提供 shape/stride/element_type/space 替换能力，需要替换基础字段时组合使用 `copy_memory_type(...)` 或 `copy_memory_type_with_template_name(...)`。
 
 ### `class NnAddOp(lhs: SSAValue, rhs: SSAValue, result_type: NnMemoryType, space: NnMemorySpaceAttr)`
 
@@ -707,7 +795,7 @@
 ### 测试目标
 
 - 验证 `NnMemorySpaceAttr` 的合法取值、非法输入与文本 round-trip。
-- 验证 `NnMemoryType` 的字段完整性、rank 约束、`shape/stride` 合法性与文本 round-trip。
+- 验证 `NnMemoryType` 的字段完整性、rank 约束、`shape/stride` 合法性、`external_attrs` canonical print、legacy template 输入兼容与文本 round-trip。
 - 验证 `nn.add/sub/mul/div/truediv/eq/ne/lt/le/gt/ge` 的 operand/result/type/space verifier 约束，其中 `nn.add` 覆盖 memory+scalar/symbol 与 dtype promotion 规则。
 - 验证 `nn.select` 的 `cond/lhs/rhs/result` 约束与 `cond` 的 `i1` 要求。
 - 验证 `nn.cast` 的 input/result `shape/stride/space` 一致性与 element_type 变更允许性。
@@ -787,3 +875,5 @@
 | TC-NN-DIA-060 | 边界/异常 | `nn.transpose` 动态维度连续 stride 合同 | 准备含动态 `?` 维度的公开 memory type 与 transpose op。 | 运行 `test_transpose_dynamic_stride_public_contract`。 | result 低维为动态时高维 stride 为 `?`、低维 stride 为 1 的公开布局通过 verifier。 | `test_transpose_dynamic_stride_public_contract` |
 | TC-NN-DIA-061 | 边界/异常 | `nn.select`/`nn.cast`/activation 公开 verifier 错误矩阵 | 准备公开 op 构造入口、合法 memory operand 与 shape/stride/dtype/space 错误组合。 | 运行 `test_select_cast_activation_public_error_matrix`。 | select/cast/activation 对 space、shape、stride、dtype 与标量参数错误稳定拒绝。 | `test_select_cast_activation_public_error_matrix` |
 | TC-NN-DIA-062 | 边界/异常 | `nn.img2col1d/2d` 的 symbol/dynamic 参数与错误矩阵 | 准备公开 op 构造入口、`symbol.const`、动态 shape、symbol 参数、非法 padding 与非连续 result stride。 | 运行 `test_img2col_public_symbol_dynamic_error_matrix`。 | 静态 symbol 常量、动态 shape 与 symbol 参数按公开合同通过或跳过静态公式校验；非法 padding 与非连续 result stride 稳定拒绝。 | `test_img2col_public_symbol_dynamic_error_matrix` |
+| TC-NN-DIA-063 | 解析/打印 | `NnMemoryType.external_attrs` canonical round-trip 与 copy helper | 准备携带 `external_attrs = {sdnn_layout = "mac_banked", template_name = "T1"}` 的 memory type 文本。 | 运行 `test_memory_type_external_attrs_round_trip_and_copy_helpers`。 | external attrs 按 key 排序稳定打印；`copy_memory_type(...)` 仅清除 `template_name`；新增 clone helper 不原地修改输入。 | `test_memory_type_external_attrs_round_trip_and_copy_helpers` |
+| TC-NN-DIA-064 | 边界/异常 | `NnMemoryType.external_attrs` key/value 与 legacy template 冲突 | 准备非法 external attr key、非 `StringAttr` template value、重复 key、legacy template 与 external attrs 冲突文本。 | 运行 `test_memory_type_template_name_constructor_conflict_rejected`、`test_memory_type_legacy_template_and_external_attrs_parse_conflict`、`test_memory_type_external_attrs_validation`。 | 非法 key、重复 key、template value 类型错误与 template 冲突按公开错误短语失败。 | `test_memory_type_template_name_constructor_conflict_rejected` / `test_memory_type_legacy_template_and_external_attrs_parse_conflict` / `test_memory_type_external_attrs_validation` |

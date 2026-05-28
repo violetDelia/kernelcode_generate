@@ -54,6 +54,7 @@ EXPECTED_PUBLIC_EXPORTS = [
     "NnSubOp",
     "NnTrueDivOp",
     "copy_memory_type",
+    "copy_memory_type_with_external_attr",
     "copy_memory_type_with_template_name",
 ]
 

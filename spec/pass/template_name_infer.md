@@ -3,7 +3,7 @@
 ## 功能简介
 
 - 定义 `template-name-infer` pass 的公开合同。
-- 该 pass 对每个 `func.func` 建立 template-name graph，统一求解并写回 `NnMemoryType.template_name`。
+- 该 pass 对每个 `func.func` 建立 template-name graph，统一求解并通过 `NnMemoryType.external_attrs["template_name"]` 写回兼容 `NnMemoryType.template_name`。
 - pass 不写 op 专属大分支；op 语义必须由 `template_name_constraints` 注册表承载。
 
 ## API 列表
@@ -32,7 +32,7 @@
 - 函数签名 memory block argument 是默认命名 seed；普通中间 memory result 没有显式 name 且不与 seed family 相连时保持无 template name。
 - 带 `entry_point` 属性的 host 函数是其 `<host>_pattern*` 函数的 template-name 真源；pattern 函数必须携带 `kernel.transform_pipeline` 属性，且同位置 memory 参数与 host 参数共享 template family。
 - 带 `entry_point` 属性的 host 函数若直接 `func.call @helper`，同位置 memory call operands 与 helper block args 必须共享 template family；helper 同位置显式 template name 与 entry arg 冲突时必须稳定失败。
-- pass 只写回 `template_name`，不得改变 shape、stride、element_type 或 space。
+- pass 只写回 `external_attrs["template_name"]`，不得改变 shape、stride、element_type、space 或其它 external attrs。
 - 写回函数参数后必须同步 `func.func` function type。
 - 未注册 memory op 必须稳定失败，暴露默认约束漏项。
 - `from_options({})` 成功；非空 options 必须稳定失败。
@@ -53,6 +53,7 @@
 
 - 功能：注册默认约束，遍历每个 `func.func`，求解并写回 template name。
 - 错误：未知 memory op、同 family 冲突 name、非法 template name、entry_point pattern 参数数量不一致或同位置 memory / non-memory 不一致、entry_point direct `func.call` 参数数量不一致或同位置 memory 模板冲突均必须稳定失败。
+- 注意事项：写回必须使用公开 `copy_memory_type_with_template_name(...)` 语义，保留除 `template_name` 外的全部 `external_attrs`。
 
 ## 测试
 

@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, StringAttr, UnitAttr, i32, i8
+from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, FunctionType, ModuleOp, StringAttr, UnitAttr, i32, i8
 from xdsl.ir import Block, Region
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -40,21 +40,16 @@ from kernel_gen.passes.template_name.graph import Same, TemplateNameGraph, Templ
 from kernel_gen.passes.template_name.infer import TemplateNameInferPass
 
 
-def _symbol_array(values: tuple[str, ...]) -> ArrayAttr:
-    """构造 SymbolExprAttr 数组。"""
-
-    return ArrayAttr([SymbolExprAttr.from_expr(value) for value in values])
-
-
-def _memory_type(template_name: str | None = None) -> NnMemoryType:
+def _memory_type(template_name: str | None = None, external_attrs: DictionaryAttr | None = None) -> NnMemoryType:
     """构造测试用公开 memory type。"""
 
     return NnMemoryType(
-        _symbol_array(("M",)),
-        _symbol_array(("1",)),
+        ArrayAttr([SymbolExprAttr.from_expr("M")]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
         i32,
         NnMemorySpaceAttr.from_name("global"),
         template_name=template_name,
+        external_attrs=external_attrs,
     )
 
 
@@ -62,8 +57,8 @@ def _byte_pool_type() -> NnMemoryType:
     """构造一维 i8 byte backing pool memory type。"""
 
     return NnMemoryType(
-        _symbol_array(("BYTES",)),
-        _symbol_array(("1",)),
+        ArrayAttr([SymbolExprAttr.from_expr("BYTES")]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
         i8,
         NnMemorySpaceAttr.from_name("tsm"),
     )
@@ -73,8 +68,8 @@ def _typed_tsm_type() -> NnMemoryType:
     """构造 byte pool view 产出的 typed memory type。"""
 
     return NnMemoryType(
-        _symbol_array(("M",)),
-        _symbol_array(("1",)),
+        ArrayAttr([SymbolExprAttr.from_expr("M")]),
+        ArrayAttr([SymbolExprAttr.from_expr("1")]),
         i32,
         NnMemorySpaceAttr.from_name("tsm"),
     )
@@ -140,6 +135,22 @@ def test_template_name_infer_pass_writes_function_arg_types() -> None:
     assert func_op.args[1].type.template_name.data == "T1"
     assert func_op.function_type.inputs.data[0].template_name.data == "T1"
     assert func_op.function_type.inputs.data[1].template_name.data == "T1"
+
+
+def test_template_name_infer_preserves_external_attrs_when_writing_names() -> None:
+    """验证 pass 写入 template_name 时保留其它 external_attrs。"""
+
+    module, func_op = _copy_module(
+        _memory_type(external_attrs=DictionaryAttr({"layout": StringAttr("mac_banked")})),
+        _memory_type(),
+    )
+
+    TemplateNameInferPass().apply(Context(), module)
+
+    first_type = func_op.args[0].type
+    assert isinstance(first_type, NnMemoryType)
+    assert first_type.template_name.data == "T1"
+    assert first_type.external_attrs.data["layout"] == StringAttr("mac_banked")
 
 
 def test_template_name_infer_rejects_conflicting_explicit_names() -> None:
