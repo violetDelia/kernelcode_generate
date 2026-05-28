@@ -7,9 +7,7 @@
 - `fold=False` 且不配置 `apply_op` 时保留 legacy `GM -> SM -> LM` / `LM -> SM -> GM`
   hierarchy 兼容路径。
 - 配置 `apply_op="matmul{[...]}"` 时，对 `kernel.matmul` 的非空 target operand
-  生成 `dma.alloc + (dma.copy | dma.slice) + dma.free` 生命周期并替换 operand。
-- `kernel.matmul` 可带第四个动态 acc 控制 operand；`apply_op` 规则仍只处理
-  `out/lhs/rhs` 三个 memory operand，并原样保留动态 acc。
+  生成 `dma.alloc + dma.copy + dma.free` 生命周期并替换 operand。
 
 API 列表:
 - `class LowerDmaMemoryHierarchyPass(fold: bool = True, apply_op: str | None = None)`
@@ -36,17 +34,15 @@ from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
 from xdsl.context import Context
 from xdsl.dialects import arith
 from xdsl.dialects.builtin import (
-    ArrayAttr,
     IntAttr,
     IntegerAttr,
     ModuleOp,
     UnrealizedConversionCastOp,
     i32,
-    i1,
 )
 from xdsl.ir import Block, Operation, SSAValue
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaReinterpretOp, DmaSliceOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaSliceOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolGetDimOp, SymbolValueType
 from kernel_gen.passes.pass_manager import Pass
@@ -55,7 +51,6 @@ from kernel_gen.passes.pass_manager import Pass
 _APPLY_OP_PREFIX = "matmul"
 _APPLY_TARGETS = {"", "shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
 _MATMUL_OPERAND_COUNT = 3
-_MATMUL_DYNAMIC_ACC_OPERAND_COUNT = 4
 
 
 def _symbol_expr_text(attr: SymbolExprAttr) -> str:
@@ -158,8 +153,7 @@ def _parse_apply_op(apply_op: str | None) -> _ApplyOpRule | None:
 
     功能说明:
     - 当前仅支持 `matmul{["", "tlm1", "tlm2"]}` 形式的单条规则。
-    - 列表固定对应 `kernel.matmul` 的 `out/lhs/rhs` 三个 memory operand。
-    - 若 `kernel.matmul` 有第四个动态 acc operand，该 operand 是控制 operand，不属于规则列表。
+    - 列表固定对应 `kernel.matmul` 的 `out/lhs/rhs` 三个 operand。
 
     使用示例:
     - rule = _parse_apply_op('matmul{["", "tlm1", "tlm2"]}')
@@ -381,7 +375,7 @@ def _resolve_window_operands(
     - 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
     """
 
-    owner = value.owner
+    owner = getattr(value, "owner", None)
     if isinstance(owner, DmaViewOp):
         offsets = list(owner.offsets)
         sizes = list(owner.shape)
@@ -554,8 +548,7 @@ class LowerDmaMemoryHierarchyPass(Pass):
     功能说明:
     - 默认无 `apply_op` 时保持 no-op。
     - `fold=False` 且无 `apply_op` 时保留 legacy hierarchy 兼容路径。
-    - 有 `apply_op` 时按 `matmul{[...]}` 规则插入 `dma.alloc + (dma.copy | dma.slice) + dma.free`。
-    - 四 operand `kernel.matmul` 的第四个动态 acc 控制 operand 会被保留。
+    - 有 `apply_op` 时按 `matmul{[...]}` 规则插入 `dma.alloc + dma.copy + dma.free`。
 
     使用示例:
     - LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", "tlm2"]}').apply(Context(), module)
@@ -624,8 +617,7 @@ class LowerDmaMemoryHierarchyPass(Pass):
 
 
         功能说明:
-        - 有 `apply_op` 时只处理 `kernel.matmul` 并生成 copy/slice-based staging。
-        - 规则只解释前三个 memory operand；第四个动态 acc 控制 operand原样保留。
+        - 有 `apply_op` 时只处理 `kernel.matmul` 并生成 copy-based staging。
         - 无 `apply_op` 且 `fold=True` 时 no-op。
         - 无 `apply_op` 且 `fold=False` 时走 legacy hierarchy 兼容路径。
 
@@ -649,15 +641,12 @@ class LowerDmaMemoryHierarchyPass(Pass):
         self._apply_legacy_hierarchy(module)
 
     def _apply_matmul_rule(self, module: ModuleOp, rule: _ApplyOpRule) -> None:
-        """执行 `matmul{[...]}` staging rewrite。
+        """执行 `matmul{[...]}` copy-based rewrite。
 
 
         功能说明:
         - 遍历 module 内 `kernel.matmul` op。
-        - 对规则中非空普通 memory operand 插入 `dma.alloc + dma.copy` 并替换 operand。
-        - 对 unit effective window operand 插入连续 staging 与 `dma.slice`，避免非连续
-          storage stride 进入 target space。
-        - 允许第四个动态 acc 控制 operand，但该 operand 必须是 `i1` 且不参与 target rewrite。
+        - 对规则中非空 target operand 插入 `dma.alloc + dma.copy` 并替换 operand。
         - 在 kernel op 后插入对应 `dma.free`，为后续 lifecycle pass 提供公开边界。
 
         使用示例:
@@ -670,21 +659,12 @@ class LowerDmaMemoryHierarchyPass(Pass):
         """
 
         for op in [candidate for candidate in module.walk() if candidate.name == "kernel.matmul"]:
-            operand_count = len(op.operands)
-            if operand_count not in {_MATMUL_OPERAND_COUNT, _MATMUL_DYNAMIC_ACC_OPERAND_COUNT}:
+            if len(op.operands) != _MATMUL_OPERAND_COUNT:
                 raise KernelCodeError(
                     ErrorKind.CONTRACT,
                     ErrorModule.PASS,
-                    "kernel.matmul apply_op requires 3 memory operands and optional i1 acc operand",
+                    "kernel.matmul must have exactly 3 operands for apply_op matmul",
                 )
-            if operand_count == _MATMUL_DYNAMIC_ACC_OPERAND_COUNT:
-                acc_operand = SSAValue.get(op.operands[3])
-                if acc_operand.type != i1:
-                    raise KernelCodeError(
-                        ErrorKind.CONTRACT,
-                        ErrorModule.PASS,
-                        "kernel.matmul apply_op dynamic acc operand must be i1",
-                    )
             block = op.parent
             if not isinstance(block, Block):
                 raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "kernel.matmul must live in a block")
@@ -700,112 +680,11 @@ class LowerDmaMemoryHierarchyPass(Pass):
                         ErrorModule.PASS,
                         "apply_op matmul target operand must be nn.memory",
                     )
-                source_owner = source.owner
-                if isinstance(source_owner, DmaViewOp) and all(
-                    isinstance(stride.type, SymbolValueType) and stride.type.get_value() == 1
-                    for stride in source_owner.stride
-                ):
-                    stride_reversed: list[SymbolExprAttr] = []
-                    running = "1"
-                    for shape_dim in reversed(source_type.shape.data):
-                        if not isinstance(shape_dim, SymbolExprAttr):
-                            raise KernelCodeError(
-                                ErrorKind.CONTRACT,
-                                ErrorModule.PASS,
-                                "apply_op staging shape entries must be SymbolExprAttr",
-                            )
-                        stride_reversed.append(SymbolExprAttr.from_expr(running))
-                        dim_text = shape_dim.expr.data
-                        running = dim_text if running == "1" else f"({dim_text}) * ({running})"
-                    stride_reversed.reverse()
-                    target_type = NnMemoryType(
-                        source_type.shape,
-                        ArrayAttr(stride_reversed),
-                        source_type.element_type,
-                        NnMemorySpaceAttr.from_name(target_space),
-                    )
-                    shape_ops, dynamic_shape = _build_dynamic_shape_operands(source, source_type)
-                    alloc = DmaAllocOp(dynamic_shape, target_type)
-                    transfer = DmaSliceOp(
-                        alloc.result,
-                        source_owner.source,
-                        list(source_owner.offsets),
-                        list(source_owner.shape),
-                        list(source_owner.stride),
-                    )
-                elif isinstance(source_owner, DmaReinterpretOp):
-                    reinterpret_source_type = source_owner.source.type
-                    reinterpret_is_window = isinstance(reinterpret_source_type, NnMemoryType)
-                    reinterpret_is_window = reinterpret_is_window and len(reinterpret_source_type.shape.data) == len(source_type.shape.data)
-                    reinterpret_is_window = reinterpret_is_window and isinstance(source_owner.offset.type, SymbolValueType)
-                    reinterpret_is_window = reinterpret_is_window and source_owner.offset.type.get_value() == 0
-                    reinterpret_is_window = reinterpret_is_window and len(source_owner.stride) == len(reinterpret_source_type.stride.data)
-                    if reinterpret_is_window:
-                        for stride_operand, reinterpret_source_stride in zip(source_owner.stride, reinterpret_source_type.stride.data):
-                            if not isinstance(stride_operand.type, SymbolValueType):
-                                reinterpret_is_window = False
-                                break
-                            if not isinstance(reinterpret_source_stride, SymbolExprAttr):
-                                reinterpret_is_window = False
-                                break
-                            if stride_operand.type.expr.expr.data != reinterpret_source_stride.expr.data:
-                                reinterpret_is_window = False
-                                break
-                    if not reinterpret_is_window:
-                        target_type = _with_space(source_type, target_space)
-                        shape_ops, dynamic_shape = _build_dynamic_shape_operands(source, source_type)
-                        alloc = DmaAllocOp(dynamic_shape, target_type)
-                        transfer = DmaCopyOp(alloc.result, source)
-                    else:
-                        stride_reversed = []
-                        running = "1"
-                        for shape_dim in reversed(source_type.shape.data):
-                            if not isinstance(shape_dim, SymbolExprAttr):
-                                raise KernelCodeError(
-                                    ErrorKind.CONTRACT,
-                                    ErrorModule.PASS,
-                                    "apply_op staging shape entries must be SymbolExprAttr",
-                                )
-                            stride_reversed.append(SymbolExprAttr.from_expr(running))
-                            dim_text = shape_dim.expr.data
-                            running = dim_text if running == "1" else f"({dim_text}) * ({running})"
-                        stride_reversed.reverse()
-                        target_type = NnMemoryType(
-                            source_type.shape,
-                            ArrayAttr(stride_reversed),
-                            source_type.element_type,
-                            NnMemorySpaceAttr.from_name(target_space),
-                        )
-                        shape_ops, dynamic_shape = _build_dynamic_shape_operands(source, source_type)
-                        zero_const = arith.ConstantOp(IntegerAttr(0, i32))
-                        zero_cast = UnrealizedConversionCastOp(
-                            operands=[zero_const.result],
-                            result_types=[SymbolValueType.from_expr("0")],
-                        )
-                        one_const = arith.ConstantOp(IntegerAttr(1, i32))
-                        one_cast = UnrealizedConversionCastOp(
-                            operands=[one_const.result],
-                            result_types=[SymbolValueType.from_expr("1")],
-                        )
-                        source_type.verify()
-                        rank = len(source_type.shape.data)
-                        if rank <= 0:
-                            raise KernelCodeError(ErrorKind.CONTRACT, ErrorModule.PASS, "kernel operand rank must be >= 1")
-                        alloc = DmaAllocOp(dynamic_shape, target_type)
-                        transfer = DmaSliceOp(
-                            alloc.result,
-                            source_owner.source,
-                            [zero_cast.results[0]] * rank,
-                            list(source_owner.shape),
-                            [one_cast.results[0]] * rank,
-                        )
-                        shape_ops = [*shape_ops, zero_const, zero_cast, one_const, one_cast]
-                else:
-                    target_type = _with_space(source_type, target_space)
-                    shape_ops, dynamic_shape = _build_dynamic_shape_operands(source, source_type)
-                    alloc = DmaAllocOp(dynamic_shape, target_type)
-                    transfer = DmaCopyOp(alloc.result, source)
-                block.insert_ops_before([*shape_ops, alloc, transfer], op)
+                target_type = _with_space(source_type, target_space)
+                shape_ops, dynamic_shape = _build_dynamic_shape_operands(source, source_type)
+                alloc = DmaAllocOp(dynamic_shape, target_type)
+                copy = DmaCopyOp(alloc.result, source)
+                block.insert_ops_before([*shape_ops, alloc, copy], op)
                 op.operands[index] = alloc.result
                 post_ops.append(DmaFreeOp(alloc.result))
             if post_ops:

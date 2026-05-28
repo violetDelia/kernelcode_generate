@@ -4,9 +4,9 @@
 功能说明:
 - 覆盖 `kernel/matmul` 三条目标 demo 的公开 kernel 函数与脚本入口。
 - 锁定 dynamic demo 使用 `H/K/W` 符号 memory、`TILE_H/TILE_W/TILE_K` 符号 tile。
-- 锁定 static demo 将 per-run random 选值具体化到 static IR，同时 K/reduce 维按 `TILE_K` 切分并使用 dynamic acc matmul。
-- 锁定尾块通过有效区域 view 限定 staging、compute 与写回，避免 padding fill 掩盖 tail。
-- 锁定 static-static demo 同样具备 K/reduce dynamic acc accumulator，不允许回退到 partial + add。
+- 锁定 static demo 将 per-run random 选值具体化到 static IR，同时 K/reduce 维按 `TILE_K` 切分并累加 partial。
+- 锁定尾块通过有效区域 alias 写入零填充 full tile，避免 `?` shape 参与 memory 默认 stride。
+- 锁定 static-static demo 同样具备 K/reduce accumulator，不允许 partial 直接覆盖 output。
 
 API 列表:
 - 无（pytest 文件，不承载公开 API）
@@ -62,24 +62,23 @@ _MATMUL_DD_N = _MATMUL_DD_SHAPE_RNG.randint(160, 256)
 _MATMUL_DD_TILE = random.Random(2026051711).choice(((80, 96, 72), (72, 88, 56), (48, 96, 64)))
 
 
-def _assert_source_uses_dynamic_acc_effective_view(source: str) -> None:
-    """校验 npu_demo source 中 dynamic acc effective view 形态。
+def _assert_source_uses_accumulator(source: str) -> None:
+    """校验 npu_demo source 中 accumulator 顺序。
 
 
     功能说明:
     - 当前测试文件内 helper，只服务公开 demo 输出的源码文本断言。
-    - 要求 source 不再包含 padding fill，并保留 matmul 到 output deslice 的顺序。
-    - 要求 source 包含动态 acc 条件，避免回退到静态 acc 或 partial + add。
+    - 要求 `fill -> matmul -> add -> output deslice`，避免 K loop partial 直接覆盖 output。
 
     使用示例:
-    - `_assert_source_uses_dynamic_acc_effective_view(source)`
+    - `_assert_source_uses_accumulator(source)`
     """
 
+    fill_index = source.index("fill<")
     matmul_index = source.index("matmul<")
-    output_deslice_index = source.index("deslice(arg0", matmul_index)
-    assert "fill<" not in source
-    assert matmul_index < output_deslice_index
-    assert "!=" in source or "symbol.ne" in source
+    add_index = source.index("add<")
+    output_deslice_index = source.index("deslice(arg0", add_index)
+    assert fill_index < matmul_index < add_index < output_deslice_index
 
 
 def _read_first_ir(case_name: str) -> str:
@@ -96,16 +95,15 @@ def _read_first_ir(case_name: str) -> str:
     return (_REPO_ROOT / "kernel" / "dump" / Path(case_name) / "01-first-ir.mlir").read_text(encoding="utf-8")
 
 
-def _assert_matmul_first_ir_uses_effective_views(case_name: str) -> None:
-    """校验 matmul 生成侧 first-ir 中 compute 使用 effective view。
+def _assert_matmul_first_ir_uses_fixed_upper_bound_scratch(case_name: str) -> None:
+    """校验 matmul 生成侧 first-ir 中可改写 scratch 已用上界形态。
 
     功能说明:
     - 锁定 accumulator、bias tile、lhs/rhs staging scratch 使用 tile 上界分配。
-    - 锁定当前 tail 只通过 `dma.view/deslice` 表达，不能回退成 current tile scratch alloc 或 padding fill。
-    - 锁定 dynamic acc `symbol.ne` 控制 operand 与动态 acc `kernel.matmul`。
+    - 锁定当前 tail 只通过 `dma.view/deslice` 表达，不能回退成 current tile scratch alloc。
 
     使用示例:
-    - `_assert_matmul_first_ir_uses_effective_views("test/matmul/dynamic_symbolic_tile_reduce")`
+    - `_assert_matmul_first_ir_uses_fixed_upper_bound_scratch("test/matmul/dynamic_symbolic_tile_reduce")`
     """
 
     first_ir = (_REPO_ROOT / "kernel" / "dump" / Path(case_name) / "01-first-ir.mlir").read_text(encoding="utf-8")
@@ -115,11 +113,6 @@ def _assert_matmul_first_ir_uses_effective_views(case_name: str) -> None:
     assert re.search(rf'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_K|#C{static_k}), (#S_TILE_W|#C{static_w})\]', first_ir)
     assert re.search(rf'"dma\.alloc".*-> !nn\.memory<\[(#S_TILE_W|#C{static_w})\], \[#C1\]', first_ir)
     assert re.search(r'"dma\.view".*-> !nn\.memory<\[#S2, #S4\]', first_ir)
-    assert re.search(r'"dma\.view".*-> !nn\.memory<\[#S2, #S6\]', first_ir)
-    assert re.search(r'"dma\.view".*-> !nn\.memory<\[#S6, #S4\]', first_ir)
-    assert '"dma.fill"' not in first_ir
-    assert "symbol.ne" in first_ir
-    assert re.search(r'"kernel\.matmul"\(%\d+, %\d+, %\d+, %\d+\)', first_ir)
     assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S2, #S4\]', first_ir) is None
     assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S2, #S6\]', first_ir) is None
     assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S6, #S4\]', first_ir) is None
@@ -141,12 +134,7 @@ def _assert_python_source_uses_kernel_out_first(fn) -> None:
     function_source = inspect.getsource(fn)
     assert "kernel.matmul(" in function_source
     assert "kernel.add(" in function_source
-    assert "acc=(k0 != 0)" in function_source
-    assert "partial =" not in function_source
-    assert "fill(lhs_tile" not in function_source
-    assert "fill(rhs_tile" not in function_source
-    assert "fill(bias_tile" not in function_source
-    assert "fill(acc" not in function_source
+    assert "partial = matmul(" not in function_source
     assert "updated_acc = add(" not in function_source
 
 
@@ -375,7 +363,7 @@ def test_dynamic_matmul_demo_uses_symbolic_memory_and_tile_reduce_accumulator() 
     module_text = str(module)
 
     _assert_python_source_uses_kernel_out_first(matmul_inputs_dynamic_tile_dynamic_kernel)
-    _assert_matmul_first_ir_uses_effective_views("test/matmul/dynamic_symbolic_tile_reduce")
+    _assert_matmul_first_ir_uses_fixed_upper_bound_scratch("test/matmul/dynamic_symbolic_tile_reduce")
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" in module_text
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<K>]" in module_text
     assert "!nn.memory<[#symbol.expr<K>, #symbol.expr<W>]" in module_text
@@ -393,7 +381,7 @@ def test_dynamic_matmul_demo_uses_symbolic_memory_and_tile_reduce_accumulator() 
     assert "slice(" in source
     assert "!nn.memory<[#symbol.expr<17>, #symbol.expr<19>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
-    _assert_source_uses_dynamic_acc_effective_view(source)
+    _assert_source_uses_accumulator(source)
 
 
 def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce() -> None:
@@ -413,7 +401,7 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
     module_text = str(module)
 
     _assert_python_source_uses_kernel_out_first(matmul_inputs_static_tile_dynamic_kernel)
-    _assert_matmul_first_ir_uses_effective_views("test/matmul/static_symbolic_tile_reduce")
+    _assert_matmul_first_ir_uses_fixed_upper_bound_scratch("test/matmul/static_symbolic_tile_reduce")
     assert f"!nn.memory<[#symbol.expr<{_MATMUL_SD_M}>, #symbol.expr<{_MATMUL_SD_N}>]" in module_text
     assert f"!nn.memory<[#symbol.expr<{_MATMUL_SD_M}>, #symbol.expr<{_MATMUL_SD_K}>]" in module_text
     assert f"!nn.memory<[#symbol.expr<{_MATMUL_SD_K}>, #symbol.expr<{_MATMUL_SD_N}>]" in module_text
@@ -431,7 +419,7 @@ def test_static_dynamic_matmul_demo_keeps_static_memory_and_symbolic_tile_reduce
     assert "slice(" in source
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
-    _assert_source_uses_dynamic_acc_effective_view(source)
+    _assert_source_uses_accumulator(source)
 
 
 def test_static_static_matmul_demo_keeps_static_memory_and_static_tile_reduce() -> None:
@@ -448,7 +436,7 @@ def test_static_static_matmul_demo_keeps_static_memory_and_static_tile_reduce() 
     module_text = str(module)
 
     _assert_python_source_uses_kernel_out_first(matmul_inputs_static_tile_static_kernel)
-    _assert_matmul_first_ir_uses_effective_views("test/matmul/static_static_tile_reduce")
+    _assert_matmul_first_ir_uses_fixed_upper_bound_scratch("test/matmul/static_static_tile_reduce")
     assert f"!nn.memory<[#symbol.expr<{_MATMUL_SS_M}>, #symbol.expr<{_MATMUL_SS_N}>]" in module_text
     assert f"!nn.memory<[#symbol.expr<{_MATMUL_SS_M}>, #symbol.expr<{_MATMUL_SS_K}>]" in module_text
     assert f"!nn.memory<[#symbol.expr<{_MATMUL_SS_K}>, #symbol.expr<{_MATMUL_SS_N}>]" in module_text
@@ -462,7 +450,7 @@ def test_static_static_matmul_demo_keeps_static_memory_and_static_tile_reduce() 
     assert "symbol.ne" in module_text
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
-    _assert_source_uses_dynamic_acc_effective_view(source)
+    _assert_source_uses_accumulator(source)
 
 
 def test_matmul_target_scripts_execute_and_tile_reduce_still_passes() -> None:

@@ -27,19 +27,18 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, i1, i32
-from xdsl.dialects.test import TestOp as _TestOp
-from xdsl.ir import Attribute, Block, Operation, Region
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, i32
+from xdsl.ir import Block, Operation, Region
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaReinterpretOp, DmaSliceOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaSliceOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolExprAttr
 import kernel_gen.passes.registry as passregistry
 from kernel_gen.passes.tuning.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
 import kernel_gen.target.registry as targetregistry
@@ -113,7 +112,6 @@ def _build_matmul_module(
     out_type: NnMemoryType | None = None,
     lhs_type: NnMemoryType | None = None,
     rhs_type: NnMemoryType | None = None,
-    dynamic_acc_type: Attribute | None = None,
     space: str = "global",
 ) -> tuple[ModuleOp, Block, KernelMatmulOp]:
     """构造单个 `kernel.matmul` module。"""
@@ -126,13 +124,8 @@ def _build_matmul_module(
         rhs_type = _make_memory_type(shape=(3, 4), stride=(4, 1), space=space)
     func_type = FunctionType.from_lists([out_type, lhs_type, rhs_type], [])
     block = Block(arg_types=[out_type, lhs_type, rhs_type])
-    if dynamic_acc_type is None:
-        matmul = KernelMatmulOp(block.args[0], block.args[1], block.args[2], _make_space(space))
-        block.add_ops([matmul, func.ReturnOp()])
-    else:
-        acc = _TestOp(result_types=[dynamic_acc_type])
-        matmul = KernelMatmulOp(block.args[0], block.args[1], block.args[2], _make_space(space), acc=acc.results[0])
-        block.add_ops([acc, matmul, func.ReturnOp()])
+    matmul = KernelMatmulOp(block.args[0], block.args[1], block.args[2], _make_space(space))
+    block.add_ops([matmul, func.ReturnOp()])
     func_op = func.FuncOp("matmul", func_type, Region(block))
     return ModuleOp([func_op]), block, matmul
 
@@ -376,178 +369,6 @@ def test_dma_memory_hierarchy_apply_op_accepts_anonymous_dynamic_shape() -> None
     allocs = [op for op in _collect_ops(block) if isinstance(op, DmaAllocOp)]
     assert len(allocs) == 1
     assert [operand.type.get_value() for operand in allocs[0].dynamic_shape] == ["?", 4]
-    module.verify()
-
-
-# TC-DMH-010
-# 测试目的: 验证 apply_op 保留 kernel.matmul 第四个 dynamic acc 控制 operand。
-# 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_apply_op_preserves_dynamic_acc_operand
-# 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
-# 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
-# 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
-def test_dma_memory_hierarchy_apply_op_preserves_dynamic_acc_operand() -> None:
-    module, block, matmul = _build_matmul_module(space="tsm", dynamic_acc_type=i1)
-    original_acc = matmul.operands[3]
-
-    LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", "tlm2"]}').apply(Context(), module)
-
-    ops = _collect_ops(block)
-    assert len(matmul.operands) == 4
-    assert matmul.operands[3] is original_acc
-    assert _memory_space(matmul.operands[1].type) == "tlm1"
-    assert _memory_space(matmul.operands[2].type) == "tlm2"
-    assert len([op for op in ops if isinstance(op, DmaCopyOp)]) == 2
-    assert len([op for op in ops if isinstance(op, DmaFreeOp)]) == 2
-    module.verify()
-
-
-# TC-DMH-011
-# 测试目的: 验证 apply_op 拒绝非 i1 dynamic acc 控制 operand。
-# 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_rejects_non_i1_dynamic_acc_operand
-# 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
-# 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
-# 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
-def test_dma_memory_hierarchy_rejects_non_i1_dynamic_acc_operand() -> None:
-    module, _, _ = _build_matmul_module(space="tsm", dynamic_acc_type=i32)
-
-    with pytest.raises(KernelCodeError, match="kernel.matmul apply_op dynamic acc operand must be i1"):
-        LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", "tlm2"]}').apply(Context(), module)
-
-
-# TC-DMH-012
-# 测试目的: 验证 apply_op 对 unit-stride dma.view operand 使用连续 staging 与 dma.slice window 搬运。
-# 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_apply_op_view_operand_uses_contiguous_slice_staging
-# 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
-# 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
-# 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
-def test_dma_memory_hierarchy_apply_op_view_operand_uses_contiguous_slice_staging() -> None:
-    out_type = NnMemoryType(
-        ArrayAttr([_symbol_expr_attr("CUR_M"), _symbol_expr_attr("CUR_N")]),
-        ArrayAttr([_symbol_expr_attr("TILE_N"), _symbol_expr_attr(1)]),
-        i32,
-        _make_space("tsm"),
-    )
-    lhs_storage_type = NnMemoryType(
-        ArrayAttr([_symbol_expr_attr("TILE_M"), _symbol_expr_attr("TILE_K")]),
-        ArrayAttr([_symbol_expr_attr("TILE_K"), _symbol_expr_attr(1)]),
-        i32,
-        _make_space("tsm"),
-    )
-    lhs_view_type = NnMemoryType(
-        ArrayAttr([_symbol_expr_attr("CUR_M"), _symbol_expr_attr("CUR_K")]),
-        ArrayAttr([_symbol_expr_attr("TILE_K"), _symbol_expr_attr(1)]),
-        i32,
-        _make_space("tsm"),
-    )
-    rhs_type = NnMemoryType(
-        ArrayAttr([_symbol_expr_attr("CUR_K"), _symbol_expr_attr("CUR_N")]),
-        ArrayAttr([_symbol_expr_attr("CUR_N"), _symbol_expr_attr(1)]),
-        i32,
-        _make_space("tsm"),
-    )
-    func_type = FunctionType.from_lists([out_type, lhs_storage_type, rhs_type], [])
-    block = Block(arg_types=[out_type, lhs_storage_type, rhs_type])
-    zero = _TestOp(result_types=[SymbolValueType.from_expr("0")])
-    cur_m = _TestOp(result_types=[SymbolValueType.from_expr("CUR_M")])
-    cur_k = _TestOp(result_types=[SymbolValueType.from_expr("CUR_K")])
-    one = _TestOp(result_types=[SymbolValueType.from_expr("1")])
-    lhs_view = DmaViewOp(
-        block.args[1],
-        [zero.results[0], zero.results[0]],
-        [cur_m.results[0], cur_k.results[0]],
-        [one.results[0], one.results[0]],
-        lhs_view_type,
-    )
-    matmul = KernelMatmulOp(block.args[0], lhs_view.result, block.args[2], _make_space("tsm"))
-    block.add_ops([zero, cur_m, cur_k, one, lhs_view, matmul, func.ReturnOp()])
-    module = ModuleOp([func.FuncOp("matmul_view", func_type, Region(block))])
-
-    LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", ""]}').apply(Context(), module)
-
-    ops = _collect_ops(block)
-    allocs = [op for op in ops if isinstance(op, DmaAllocOp)]
-    slices = [op for op in ops if isinstance(op, DmaSliceOp)]
-    copies = [op for op in ops if isinstance(op, DmaCopyOp)]
-    assert len(allocs) == 1
-    assert len(slices) == 1
-    assert not copies
-    target_type = allocs[0].result.type
-    assert isinstance(target_type, NnMemoryType)
-    assert _memory_space(target_type) == "tlm1"
-    assert list(target_type.shape.data) == list(lhs_view_type.shape.data)
-    assert list(target_type.stride.data) == [_symbol_expr_attr("CUR_K"), _symbol_expr_attr(1)]
-    assert slices[0].source is block.args[1]
-    assert slices[0].target is allocs[0].result
-    assert matmul.operands[1] is allocs[0].result
-    module.verify()
-
-
-# TC-DMH-013
-# 测试目的: 验证 apply_op 对等价 effective window 的 dma.reinterpret operand 使用连续 staging 与 dma.slice window 搬运。
-# 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_apply_op_reinterpret_operand_uses_contiguous_slice_staging
-# 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
-# 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
-# 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
-def test_dma_memory_hierarchy_apply_op_reinterpret_operand_uses_contiguous_slice_staging() -> None:
-    out_type = NnMemoryType(
-        ArrayAttr([_symbol_expr_attr("CUR_M"), _symbol_expr_attr("CUR_N")]),
-        ArrayAttr([_symbol_expr_attr("TILE_N"), _symbol_expr_attr(1)]),
-        i32,
-        _make_space("tsm"),
-    )
-    lhs_storage_type = NnMemoryType(
-        ArrayAttr([_symbol_expr_attr("TILE_M"), _symbol_expr_attr("TILE_K")]),
-        ArrayAttr([_symbol_expr_attr("TILE_K"), _symbol_expr_attr(1)]),
-        i32,
-        _make_space("tsm"),
-    )
-    lhs_reinterpret_type = NnMemoryType(
-        ArrayAttr([_symbol_expr_attr("CUR_M"), _symbol_expr_attr("CUR_K")]),
-        ArrayAttr([_symbol_expr_attr("TILE_K"), _symbol_expr_attr(1)]),
-        i32,
-        _make_space("tsm"),
-    )
-    rhs_type = NnMemoryType(
-        ArrayAttr([_symbol_expr_attr("CUR_K"), _symbol_expr_attr("CUR_N")]),
-        ArrayAttr([_symbol_expr_attr("CUR_N"), _symbol_expr_attr(1)]),
-        i32,
-        _make_space("tsm"),
-    )
-    func_type = FunctionType.from_lists([out_type, lhs_storage_type, rhs_type], [])
-    block = Block(arg_types=[out_type, lhs_storage_type, rhs_type])
-    zero = _TestOp(result_types=[SymbolValueType.from_expr("0")])
-    cur_m = _TestOp(result_types=[SymbolValueType.from_expr("CUR_M")])
-    cur_k = _TestOp(result_types=[SymbolValueType.from_expr("CUR_K")])
-    tile_k = _TestOp(result_types=[SymbolValueType.from_expr("TILE_K")])
-    one = _TestOp(result_types=[SymbolValueType.from_expr("1")])
-    lhs_reinterpret = DmaReinterpretOp(
-        block.args[1],
-        zero.results[0],
-        [cur_m.results[0], cur_k.results[0]],
-        [tile_k.results[0], one.results[0]],
-        lhs_reinterpret_type,
-    )
-    matmul = KernelMatmulOp(block.args[0], lhs_reinterpret.result, block.args[2], _make_space("tsm"))
-    block.add_ops([zero, cur_m, cur_k, tile_k, one, lhs_reinterpret, matmul, func.ReturnOp()])
-    module = ModuleOp([func.FuncOp("matmul_reinterpret", func_type, Region(block))])
-
-    LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", ""]}').apply(Context(), module)
-
-    ops = _collect_ops(block)
-    allocs = [op for op in ops if isinstance(op, DmaAllocOp)]
-    slices = [op for op in ops if isinstance(op, DmaSliceOp)]
-    copies = [op for op in ops if isinstance(op, DmaCopyOp)]
-    assert len(allocs) == 1
-    assert len(slices) == 1
-    assert not copies
-    target_type = allocs[0].result.type
-    assert isinstance(target_type, NnMemoryType)
-    assert _memory_space(target_type) == "tlm1"
-    assert list(target_type.shape.data) == list(lhs_reinterpret_type.shape.data)
-    assert list(target_type.stride.data) == [_symbol_expr_attr("CUR_K"), _symbol_expr_attr(1)]
-    assert slices[0].source is block.args[1]
-    assert slices[0].target is allocs[0].result
-    assert matmul.operands[1] is allocs[0].result
     module.verify()
 
 

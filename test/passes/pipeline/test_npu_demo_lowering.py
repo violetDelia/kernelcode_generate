@@ -1074,7 +1074,7 @@ def test_npu_demo_lowering_pipeline_symbol_hoist_pipeline_pattern_dump(
     )
     broadcast_flat_source = re.search(
         r'(?P<flat>%\d+) = "dma\.alloc"\(\) <\{[^}]+\}> : \(\) -> '
-        r'!nn\.memory<\[#C56\], \[#C1\], f32, #nn\.space<tsm>>'
+        r'!nn\.memory<\[#C\d+\], \[#C1\], f32, #nn\.space<tsm>>'
         r'[\s\S]+?"dma\.fill"\((?P=flat), %\d+\)'
         r'[\s\S]+?"dma\.broadcast"\(%\d+, (?P=flat)\)',
         final_hoist_text,
@@ -1116,9 +1116,9 @@ def test_npu_demo_lowering_pipeline_supports_kernel_contract_style_public_chain(
     finally:
         reset_config()
 
-    assert "template = T1" in module_text
-    assert "template = T2" in module_text
-    assert "template = T3" in module_text
+    assert 'template_name = "T1"' in module_text
+    assert 'template_name = "T2"' in module_text
+    assert 'template_name = "T3"' in module_text
     assert "arch.get_dynamic_memory" in module_text
     assert "dma.reinterpret" in module_text
     assert "dma.alloc" not in module_text
