@@ -75,7 +75,7 @@ ProducerConsumerAnalysisPass = importlib.import_module(
 SymbolBufferHoistPass = importlib.import_module("kernel_gen.passes.hoist.symbol_buffer_hoist").SymbolBufferHoistPass
 TileAnalysisPass = importlib.import_module("kernel_gen.passes.tile.analysis").TileAnalysisPass
 TemplateNameInferPass = importlib.import_module("kernel_gen.passes").TemplateNameInferPass
-TransformApplyPass = importlib.import_module("kernel_gen.passes.transform_apply").TransformApplyPass
+TransformApplyPass = importlib.import_module("kernel_gen.passes.tuning.transform_apply").TransformApplyPass
 
 _PIPELINE_PASS_ORDER: list[str] = []
 

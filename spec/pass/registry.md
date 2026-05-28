@@ -114,6 +114,7 @@
   - `kernel_gen.passes.decompass`
   - `kernel_gen.passes.tuning.dma_memory_hierarchy`
   - `kernel_gen.passes.tuning.kernel_pattern_attach`
+  - `kernel_gen.passes.tuning.transform_apply`
   - `kernel_gen.passes.memory_pool`
   - `kernel_gen.passes.memory_plan`
   - `kernel_gen.passes.hoist.dma_alias_to_reinterpret`
@@ -161,6 +162,7 @@
   - `kernel_gen.passes.hoist_dma_alias_ops`
   - `kernel_gen.passes.symbol_buffer_hoist`
   - `kernel_gen.passes.kernel_matmul_fusion_decompose`
+  - `kernel_gen.passes.transform_apply`
 - 已退场的 analysis family 不再提供公开 pass 名或 registry 构造入口；`build_registered_pass("analyze-func-cost")` 必须显式失败。
 - 当前模板名推导专题的 canonical public path 固定为 `kernel_gen.passes.template_name.infer`；`kernel_gen.passes.TemplateNameInferPass` 作为包根 re-export 保持可用。
 - 旧 `kernel_gen.passes.template_name_constraints`、`kernel_gen.passes.template_name_default_constraints`、`kernel_gen.passes.template_name_graph` 与 `kernel_gen.passes.template_name_infer` 根模块必须稳定失败。

@@ -1318,7 +1318,7 @@ def test_build_registered_kernel_pattern_passes() -> None:
     assert kernel_pattern_pass.name == "kernel-pattern-attach"
     assert kernel_pattern_pass.__class__.__module__ == "kernel_gen.passes.tuning.kernel_pattern_attach"
     assert transform_apply_pass.name == "transform-apply"
-    assert transform_apply_pass.__class__.__module__ == "kernel_gen.passes.transform_apply"
+    assert transform_apply_pass.__class__.__module__ == "kernel_gen.passes.tuning.transform_apply"
     assert "kernel-pattern-attach" in list_registered_passes()
     assert "transform-apply" in list_registered_passes()
 

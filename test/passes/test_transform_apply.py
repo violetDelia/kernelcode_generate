@@ -7,13 +7,14 @@
 - pytest -q test/passes/test_transform_apply.py
 
 关联文件:
-- 功能实现: kernel_gen/passes/transform_apply.py
+- 功能实现: kernel_gen/passes/tuning/transform_apply.py
 - Spec 文档: spec/pass/transform_apply.md
 - 测试文件: test/passes/test_transform_apply.py
 """
 
 from __future__ import annotations
 
+import importlib
 from io import StringIO
 from pathlib import Path
 import sys
@@ -30,7 +31,23 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.core.context import build_default_context
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.passes.transform_apply import TransformApplyPass
+from kernel_gen.passes.tuning import TransformApplyPass
+
+
+def test_transform_apply_public_import_path_rehomed() -> None:
+    """验证 transform-apply 公开导入路径已迁移。
+
+    功能说明:
+    - 只通过公开 package 与 canonical module 路径验证新入口可达、旧根模块失败。
+
+    使用示例:
+    - pytest -q test/passes/test_transform_apply.py -k public_import_path_rehomed
+    """
+
+    module = importlib.import_module("kernel_gen.passes.tuning.transform_apply")
+    assert module.TransformApplyPass is TransformApplyPass
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("kernel_gen.passes.transform_apply")
 
 
 def _parse_module(text: str) -> ModuleOp:

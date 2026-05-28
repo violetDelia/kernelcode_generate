@@ -45,7 +45,7 @@ from kernel_gen.passes.producer_consumer_analysis import ProducerConsumerAnalysi
 from kernel_gen.passes.template_name.infer import TemplateNameInferPass
 from kernel_gen.passes.tile.analysis import TileAnalysisPass
 from kernel_gen.passes.tuning import KernelPatternAttachPass
-from kernel_gen.passes.transform_apply import TransformApplyPass
+from kernel_gen.passes.tuning import TransformApplyPass
 
 
 @register_pipeline("npu-demo-lowering")
