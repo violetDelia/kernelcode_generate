@@ -17,7 +17,7 @@
 ## 文档信息
 
 - `spec`：[`spec/pass/lowering/dma_memory_hierarchy/spec.md`](../../../../spec/pass/lowering/dma_memory_hierarchy/spec.md)
-- `功能实现`：[`kernel_gen/passes/dma_memory_hierarchy.py`](../../../../kernel_gen/passes/dma_memory_hierarchy.py)
+- `功能实现`：[`kernel_gen/passes/tuning/dma_memory_hierarchy.py`](../../../../kernel_gen/passes/tuning/dma_memory_hierarchy.py)
 - `test`：[`test/passes/test_dma_memory_hierarchy.py`](../../../../test/passes/test_dma_memory_hierarchy.py)
 
 ## 依赖
@@ -65,7 +65,7 @@
 - 使用示例：
 
   ```python
-  from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
+  from kernel_gen.passes.tuning.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
 
   pass_obj = LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", "tlm2"]}')
   ```
@@ -106,7 +106,7 @@
 
   ```python
   from xdsl.context import Context
-  from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
+  from kernel_gen.passes.tuning.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
 
   pass_obj = LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", "tlm2"]}')
   pass_obj.apply(Context(), module)

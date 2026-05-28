@@ -112,7 +112,8 @@
   - `kernel_gen.passes.attach_arch_information`
   - `kernel_gen.passes.arch_parallelize`
   - `kernel_gen.passes.decompass`
-  - `kernel_gen.passes.dma_memory_hierarchy`
+  - `kernel_gen.passes.tuning.dma_memory_hierarchy`
+  - `kernel_gen.passes.tuning.kernel_pattern_attach`
   - `kernel_gen.passes.memory_pool`
   - `kernel_gen.passes.memory_plan`
   - `kernel_gen.passes.hoist.dma_alias_to_reinterpret`
@@ -143,6 +144,8 @@
   - `kernel_gen.analysis.memory`
   - `kernel_gen.passes.analysis`
   - `kernel_gen.passes.analysis.func_cost`
+  - `kernel_gen.passes.dma_memory_hierarchy`
+  - `kernel_gen.passes.kernel_pattern_attach`
   - `kernel_gen.passes.lowering.registry`
   - `kernel_gen.passes.lowering.pass_manager`
   - `kernel_gen.passes.lowering.inline`

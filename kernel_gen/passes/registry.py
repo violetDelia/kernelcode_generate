@@ -515,8 +515,11 @@ def load_builtin_passes() -> None:
         SymbolLoopHoistPass,
     )
     from kernel_gen.passes.inline import InlinePass
-    from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
-    from kernel_gen.passes.kernel_pattern_attach import KernelPatternAttachPass
+    from kernel_gen.passes.tuning import (
+        KernelPatternAttachPass,
+        LaunchKernelCostFuncPass,
+        LowerDmaMemoryHierarchyPass,
+    )
     from kernel_gen.passes.kernel_aggregate import KernelAggregatePass
     from kernel_gen.passes.kernel_decompose import KernelDecomposePass
     from kernel_gen.passes.multi_buffer import MultiBufferPass
@@ -527,7 +530,6 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.tile.analysis import TileAnalysisPass
     from kernel_gen.passes.tile.elewise import TileElewisePass
     from kernel_gen.passes.tile.reduce import TileReducePass
-    from kernel_gen.passes.tuning import LaunchKernelCostFuncPass
     from kernel_gen.passes.template_name.infer import TemplateNameInferPass
     from kernel_gen.passes.transform_apply import TransformApplyPass
     from kernel_gen.passes.producer_consumer_analysis import ProducerConsumerAnalysisPass

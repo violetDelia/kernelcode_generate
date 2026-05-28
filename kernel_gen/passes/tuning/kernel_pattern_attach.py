@@ -11,13 +11,13 @@ API 列表:
 - `KernelPatternAttachPass.apply(ctx: Context, module: ModuleOp) -> None`
 
 使用示例:
-- from kernel_gen.passes.kernel_pattern_attach import KernelPatternAttachPass
+- from kernel_gen.passes.tuning.kernel_pattern_attach import KernelPatternAttachPass
 - KernelPatternAttachPass().apply(Context(), module)
 
 关联文件:
 - spec: spec/pass/kernel_pattern_attach.md
 - test: test/passes/test_kernel_pattern_attach.py
-- 功能实现: kernel_gen/passes/kernel_pattern_attach.py
+- 功能实现: kernel_gen/passes/tuning/kernel_pattern_attach.py
 """
 
 from __future__ import annotations
@@ -277,7 +277,7 @@ class KernelPatternAttachPass(Pass):
     关联文件:
     - spec: spec/pass/kernel_pattern_attach.md
     - test: test/passes/test_kernel_pattern_attach.py
-    - 功能实现: kernel_gen/passes/kernel_pattern_attach.py
+    - 功能实现: kernel_gen/passes/tuning/kernel_pattern_attach.py
     """
 
     name = "kernel-pattern-attach"

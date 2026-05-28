@@ -7,7 +7,7 @@
 - pytest -q test/passes/test_kernel_pattern_attach.py
 
 关联文件:
-- 功能实现: kernel_gen/passes/kernel_pattern_attach.py
+- 功能实现: kernel_gen/passes/tuning/kernel_pattern_attach.py
 - Spec 文档: spec/pass/kernel_pattern_attach.md
 - 测试文件: test/passes/test_kernel_pattern_attach.py
 """
@@ -30,7 +30,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.core.context import build_default_context
 from kernel_gen.core.error import KernelCodeError
-from kernel_gen.passes.kernel_pattern_attach import KernelPatternAttachPass
+from kernel_gen.passes.tuning.kernel_pattern_attach import KernelPatternAttachPass
 
 _TSM_OUT = "!nn.memory<[#symbol.expr<8>, #symbol.expr<16>], [#symbol.expr<16>, #symbol.expr<1>], f32, #nn.space<tsm>>"
 _TSM_LHS = "!nn.memory<[#symbol.expr<8>, #symbol.expr<32>], [#symbol.expr<32>, #symbol.expr<1>], f32, #nn.space<tsm>>"

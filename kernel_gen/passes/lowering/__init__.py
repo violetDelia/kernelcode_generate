@@ -3,7 +3,6 @@
 
 功能说明:
 - 提供 nn -> kernel lowering pass 的公开入口。
-- 提供 lower-dma-memory-hierarchy pass 的聚合导出。
 - 提供 decompass pass 的公开入口。
 - 提供 outline-device-kernel 的 lowering 兼容入口。
 - 提供 tile-analysis / tile-elewise / tile-reduce ModulePass 入口。
@@ -12,7 +11,6 @@
 
 API 列表:
 - `class NnLoweringPass()`
-- `class LowerDmaMemoryHierarchyPass()`
 - `class DecompassPass()`
 - `class OutlineDeviceKernelPass()`
 - `class TileAnalysisPass()`
@@ -23,8 +21,6 @@ API 列表:
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 - pass_obj = NnLoweringPass()
-- from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
-- pass_obj = LowerDmaMemoryHierarchyPass()
 - from kernel_gen.passes.decompass import DecompassPass
 - pass_obj = DecompassPass()
 - from kernel_gen.passes.lowering import OutlineDeviceKernelPass
@@ -41,7 +37,6 @@ API 列表:
 关联文件:
 - spec:
   - [spec/pass/lowering/nn_lowering/spec.md](spec/pass/lowering/nn_lowering/spec.md)
-  - [spec/pass/lowering/dma_memory_hierarchy/spec.md](spec/pass/lowering/dma_memory_hierarchy/spec.md)
   - [spec/pass/decompass.md](spec/pass/decompass.md)
   - [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
   - [spec/pass/tile/analysis.md](spec/pass/tile/analysis.md)
@@ -52,7 +47,6 @@ API 列表:
 - test:
   - [test/passes/lowering/nn_lowering/test_public_name.py](test/passes/lowering/nn_lowering/test_public_name.py)
   - [test/passes/lowering/nn_lowering/test_nn_lowering.py](test/passes/lowering/nn_lowering/test_nn_lowering.py)
-  - [test/passes/test_dma_memory_hierarchy.py](test/passes/test_dma_memory_hierarchy.py)
   - [test/passes/decompass/test_softmax.py](test/passes/decompass/test_softmax.py)
   - [test/passes/test_outline_device_kernel.py](test/passes/test_outline_device_kernel.py)
   - [test/passes/tile/test_analysis.py](test/passes/tile/test_analysis.py)
@@ -61,7 +55,6 @@ API 列表:
   - [test/passes/test_symbol_loop_hoist.py](test/passes/test_symbol_loop_hoist.py)
 - 功能实现:
   - [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
-  - [kernel_gen/passes/dma_memory_hierarchy.py](kernel_gen/passes/dma_memory_hierarchy.py)
   - [kernel_gen/passes/decompass.py](kernel_gen/passes/decompass.py)
   - [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
   - [kernel_gen/passes/tile/analysis.py](kernel_gen/passes/tile/analysis.py)
@@ -77,9 +70,6 @@ import sys
 from .nn_lowering import NnLoweringPass
 from .. import outline_device_kernel as _outline_device_kernel_module
 from ..hoist import symbol_loop_hoist as _symbol_loop_hoist_module
-from ..dma_memory_hierarchy import (
-    LowerDmaMemoryHierarchyPass,
-)
 from ..decompass import DecompassPass
 from ..outline_device_kernel import OutlineDeviceKernelPass
 from ..hoist.symbol_loop_hoist import SymbolLoopHoistPass
@@ -94,7 +84,6 @@ sys.modules.setdefault(__name__ + ".symbol_loop_hoist", _symbol_loop_hoist_modul
 
 __all__ = [
     "NnLoweringPass",
-    "LowerDmaMemoryHierarchyPass",
     "DecompassPass",
     "OutlineDeviceKernelPass",
     "TileAnalysisPass",

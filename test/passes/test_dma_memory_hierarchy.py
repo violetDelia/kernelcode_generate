@@ -11,10 +11,10 @@
 - pytest -q test/passes/test_dma_memory_hierarchy.py
 
 覆盖率命令:
-- pytest --cov=kernel_gen.passes.dma_memory_hierarchy --cov-report=term-missing test/passes/test_dma_memory_hierarchy.py
+- pytest --cov=kernel_gen.passes.tuning.dma_memory_hierarchy --cov-report=term-missing test/passes/test_dma_memory_hierarchy.py
 
 关联文件:
-- 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
+- 功能实现: kernel_gen/passes/tuning/dma_memory_hierarchy.py
 - Spec 文档: spec/pass/lowering/dma_memory_hierarchy/spec.md
 - 测试文件: test/passes/test_dma_memory_hierarchy.py
 """
@@ -40,7 +40,7 @@ from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr
 import kernel_gen.passes.registry as passregistry
-from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
+from kernel_gen.passes.tuning.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
 import kernel_gen.target.registry as targetregistry
 
 
@@ -178,7 +178,7 @@ def _patch_target_hardware(
 # TC-DMH-001
 # 测试目的: 验证默认不配置 apply_op 时 pass 不触碰 IR，也不要求 target SM/LM。
 # 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_default_no_apply_op_is_noop
-# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_default_no_apply_op_is_noop() -> None:
@@ -196,7 +196,7 @@ def test_dma_memory_hierarchy_default_no_apply_op_is_noop() -> None:
 # TC-DMH-002
 # 测试目的: 验证 fold=False 且不配置 apply_op 时仍保留 legacy hierarchy 兼容路径。
 # 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_fold_false_legacy_hierarchy
-# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_fold_false_legacy_hierarchy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -220,7 +220,7 @@ def test_dma_memory_hierarchy_fold_false_legacy_hierarchy(monkeypatch: pytest.Mo
 # TC-DMH-003
 # 测试目的: 验证 apply_op 对 matmul lhs/rhs 生成 `dma.alloc + dma.copy + dma.free` 并替换 operand。
 # 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_apply_op_matmul_copies_lhs_rhs
-# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_apply_op_matmul_copies_lhs_rhs() -> None:
@@ -255,7 +255,7 @@ def test_dma_memory_hierarchy_apply_op_matmul_copies_lhs_rhs() -> None:
 # TC-DMH-004
 # 测试目的: 验证 apply_op 对 out operand 与 input operand 使用相同 copy 替换规则。
 # 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_apply_op_can_copy_out
-# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_apply_op_can_copy_out() -> None:
@@ -281,7 +281,7 @@ def test_dma_memory_hierarchy_apply_op_can_copy_out() -> None:
 # TC-DMH-005
 # 测试目的: 验证显式空 target 规则不插入搬运。
 # 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_apply_op_empty_rule_noop
-# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_apply_op_empty_rule_noop() -> None:
@@ -300,7 +300,7 @@ def test_dma_memory_hierarchy_apply_op_empty_rule_noop() -> None:
 # TC-DMH-006
 # 测试目的: 验证 registry option 能公开构造 apply_op pass 并执行 copy rewrite。
 # 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_registry_apply_op
-# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_registry_apply_op() -> None:
@@ -324,7 +324,7 @@ def test_dma_memory_hierarchy_registry_apply_op() -> None:
 # TC-DMH-007
 # 测试目的: 验证 apply_op 对显式符号维度生成 `symbol.get_dim` 并作为 `dma.alloc` dynamic_shape。
 # 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_apply_op_symbol_shape
-# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_apply_op_symbol_shape() -> None:
@@ -350,7 +350,7 @@ def test_dma_memory_hierarchy_apply_op_symbol_shape() -> None:
 # TC-DMH-008
 # 测试目的: 验证匿名动态维度作为 apply_op staging 目标 shape 时使用 full-rank dynamic_shape。
 # 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_apply_op_accepts_anonymous_dynamic_shape
-# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_apply_op_accepts_anonymous_dynamic_shape() -> None:
@@ -375,7 +375,7 @@ def test_dma_memory_hierarchy_apply_op_accepts_anonymous_dynamic_shape() -> None
 # TC-DMH-009
 # 测试目的: 验证非法 apply_op 规则在公开构造入口稳定失败。
 # 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_rejects_invalid_apply_op_rules
-# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
 # 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
 @pytest.mark.parametrize(

@@ -25,11 +25,11 @@ API 列表:
 from __future__ import annotations
 
 from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
-from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
 from kernel_gen.passes.decompass import DecompassPass
 from kernel_gen.passes.lowering import NnLoweringPass
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import register_pipeline
+from kernel_gen.passes.tuning import LowerDmaMemoryHierarchyPass
 
 
 @register_pipeline("default-lowering")

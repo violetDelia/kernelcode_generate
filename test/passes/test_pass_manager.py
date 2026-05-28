@@ -455,7 +455,7 @@ def test_pass_manager_surviving_import_matrix() -> None:
     buffer_results_module = importlib.import_module("kernel_gen.passes.buffer_results_to_out_params")
     default_lowering_pipeline_module = importlib.import_module("kernel_gen.pipeline.default_lowering")
     npu_demo_pipeline_module = importlib.import_module("kernel_gen.pipeline.npu_demo_lowering")
-    dma_hierarchy_module = importlib.import_module("kernel_gen.passes.dma_memory_hierarchy")
+    dma_hierarchy_module = importlib.import_module("kernel_gen.passes.tuning.dma_memory_hierarchy")
     tile_analysis_module = importlib.import_module("kernel_gen.passes.tile.analysis")
     tile_elewise_module = importlib.import_module("kernel_gen.passes.tile.elewise")
     tile_reduce_module = importlib.import_module("kernel_gen.passes.tile.reduce")
@@ -477,7 +477,10 @@ def test_pass_manager_surviving_import_matrix() -> None:
     ).NnLoweringPass
     assert BufferResultsToOutParamsPass is buffer_results_module.BufferResultsToOutParamsPass
     assert not hasattr(lowering_module, "BufferResultsToOutParamsPass")
-    assert lowering_module.LowerDmaMemoryHierarchyPass is dma_hierarchy_module.LowerDmaMemoryHierarchyPass
+    assert not hasattr(lowering_module, "LowerDmaMemoryHierarchyPass")
+    assert dma_hierarchy_module.LowerDmaMemoryHierarchyPass.__module__ == (
+        "kernel_gen.passes.tuning.dma_memory_hierarchy"
+    )
     assert lowering_module.TileAnalysisPass is tile_analysis_module.TileAnalysisPass
     assert lowering_module.TileElewisePass is tile_elewise_module.TileElewisePass
     assert lowering_module.TileReducePass is tile_reduce_module.TileReducePass
@@ -498,8 +501,11 @@ def test_pass_manager_old_lowering_paths_fail_fast() -> None:
         "kernel_gen.analysis.memory",
         "kernel_gen.passes.analysis",
         "kernel_gen.passes.analysis.func_cost",
+        "kernel_gen.passes.dma_memory_hierarchy",
+        "kernel_gen.passes.kernel_pattern_attach",
         "kernel_gen.passes.lowering.pass_manager",
         "kernel_gen.passes.lowering.registry",
+        "kernel_gen.passes.lowering.dma_memory_hierarchy",
         "kernel_gen.passes.lowering.tile_analysis",
         "kernel_gen.passes.lowering.tile_elewise",
         "kernel_gen.passes.lowering.tile_reduce",

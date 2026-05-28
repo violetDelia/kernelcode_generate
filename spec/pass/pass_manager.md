@@ -56,7 +56,7 @@
 
 - `PassManager` 与 `Pass` 的 canonical public path 固定为 `kernel_gen.passes.pass_manager`。
 - default / npu-demo pipeline builder 的 canonical public path 固定为 `kernel_gen.pipeline`。
-- `LowerDmaMemoryHierarchyPass`、`MemoryPoolPass` 与 `MemoryPlanPass` 的 canonical public path 固定为 `kernel_gen.passes.dma_memory_hierarchy`、`kernel_gen.passes.memory_pool` 与 `kernel_gen.passes.memory_plan`。
+- `LowerDmaMemoryHierarchyPass`、`MemoryPoolPass` 与 `MemoryPlanPass` 的 canonical public path 固定为 `kernel_gen.passes.tuning.dma_memory_hierarchy`、`kernel_gen.passes.memory_pool` 与 `kernel_gen.passes.memory_plan`。
 - tile family 的 canonical public path 固定为：
   - `kernel_gen.passes.tile.analysis`
   - `kernel_gen.passes.tile.elewise`
@@ -70,6 +70,8 @@
   - `kernel_gen.analysis.memory`
   - `kernel_gen.passes.analysis`
   - `kernel_gen.passes.analysis.func_cost`
+  - `kernel_gen.passes.dma_memory_hierarchy`
+  - `kernel_gen.passes.kernel_pattern_attach`
   - `kernel_gen.passes.lowering.pass_manager`
   - `kernel_gen.passes.lowering.registry`
   - `kernel_gen.passes.lowering.dma_memory_hierarchy`
@@ -77,7 +79,7 @@
   - `kernel_gen.passes.lowering.tile_analysis`
   - `kernel_gen.passes.lowering.tile_elewise`
   - `kernel_gen.passes.lowering.tile_reduce`
-- `LowerDmaMemoryHierarchyPass`、`MemoryPoolPass` 与 `MemoryPlanPass` 的调用方不得再把 lowering compat 路径当作主入口；若需要添加这些 pass，应从上级模块导入后再交给 `PassManager`。
+- `LowerDmaMemoryHierarchyPass`、`MemoryPoolPass` 与 `MemoryPlanPass` 的调用方不得再把 lowering compat 路径当作主入口；若需要添加这些 pass，应从 canonical public path 导入后再交给 `PassManager`。
 - `MemoryPoolPass` 的 `rewrite` 与 `alignment` 由 `MemoryPoolPass(...)` 或 registry/ircheck 构造入口决定；`PassManager` 只负责按 pass 对象现有配置执行和处理通用 `fold` sweep，不解析 `memory-pool` 专属 option。
 - `MemoryPlanPass` 的 `insert_free/reuse` 由 `MemoryPlanPass(...)` 或 registry/ircheck 构造入口决定；`PassManager` 不解析 `memory-plan` 专属 option。
 - `npu-demo-lowering` 中三次 `MemoryPlanPass(insert_free=True, reuse=True, fold=False)`、三次 `SymbolHoistPipelinePass` 与 `MemoryPoolPass(rewrite=True, alignment=1024)` 的相对顺序由 [`spec/pass/pipeline/npu_demo_lowering.md`](../../spec/pass/pipeline/npu_demo_lowering.md) 固定；`PassManager` 不额外检查或推导这些业务顺序。

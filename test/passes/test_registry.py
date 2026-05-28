@@ -601,11 +601,6 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
         ),
         (
             "kernel_gen.passes.lowering",
-            "LowerDmaMemoryHierarchyPass",
-            importlib.import_module("kernel_gen.passes.dma_memory_hierarchy").LowerDmaMemoryHierarchyPass,
-        ),
-        (
-            "kernel_gen.passes.lowering",
             "TileAnalysisPass",
             importlib.import_module("kernel_gen.passes.tile.analysis").TileAnalysisPass,
         ),
@@ -620,9 +615,24 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
             importlib.import_module("kernel_gen.passes.tile.reduce").TileReducePass,
         ),
         (
-            "kernel_gen.passes.dma_memory_hierarchy",
+            "kernel_gen.passes.tuning.dma_memory_hierarchy",
             "LowerDmaMemoryHierarchyPass",
-            importlib.import_module("kernel_gen.passes.dma_memory_hierarchy").LowerDmaMemoryHierarchyPass,
+            importlib.import_module("kernel_gen.passes.tuning.dma_memory_hierarchy").LowerDmaMemoryHierarchyPass,
+        ),
+        (
+            "kernel_gen.passes.tuning.kernel_pattern_attach",
+            "KernelPatternAttachPass",
+            importlib.import_module("kernel_gen.passes.tuning.kernel_pattern_attach").KernelPatternAttachPass,
+        ),
+        (
+            "kernel_gen.passes.tuning",
+            "LowerDmaMemoryHierarchyPass",
+            importlib.import_module("kernel_gen.passes.tuning.dma_memory_hierarchy").LowerDmaMemoryHierarchyPass,
+        ),
+        (
+            "kernel_gen.passes.tuning",
+            "KernelPatternAttachPass",
+            importlib.import_module("kernel_gen.passes.tuning.kernel_pattern_attach").KernelPatternAttachPass,
         ),
         (
             "kernel_gen.passes.memory_pool",
@@ -672,6 +682,25 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
 
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     assert not hasattr(lowering_module, "BufferResultsToOutParamsPass")
+    assert not hasattr(lowering_module, "LowerDmaMemoryHierarchyPass")
+
+
+# TC-REGISTRY-007A-2D
+# 功能说明: 验证 tuning pass 旧根模块路径已按用户确认删除。
+# 使用示例: pytest -q test/passes/test_registry.py -k test_tuning_old_root_modules_are_removed
+# 对应功能实现文件路径: kernel_gen/passes/tuning/__init__.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/passes/test_registry.py
+def test_tuning_old_root_modules_are_removed() -> None:
+    removed_modules = (
+        "kernel_gen.passes.dma_memory_hierarchy",
+        "kernel_gen.passes.kernel_pattern_attach",
+    )
+
+    for module_name in removed_modules:
+        assert importlib.util.find_spec(module_name) is None
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(module_name)
 
 
 # TC-REGISTRY-007A-2H
@@ -1287,7 +1316,7 @@ def test_build_registered_kernel_pattern_passes() -> None:
     transform_apply_pass = build_registered_pass("transform-apply", {"fold": "false"})
 
     assert kernel_pattern_pass.name == "kernel-pattern-attach"
-    assert kernel_pattern_pass.__class__.__module__ == "kernel_gen.passes.kernel_pattern_attach"
+    assert kernel_pattern_pass.__class__.__module__ == "kernel_gen.passes.tuning.kernel_pattern_attach"
     assert transform_apply_pass.name == "transform-apply"
     assert transform_apply_pass.__class__.__module__ == "kernel_gen.passes.transform_apply"
     assert "kernel-pattern-attach" in list_registered_passes()

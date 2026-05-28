@@ -35,7 +35,6 @@ from kernel_gen.passes.hoist import SymbolHoistPipelinePass
 from kernel_gen.passes.inline import InlinePass
 from kernel_gen.passes.kernel_aggregate import KernelAggregatePass
 from kernel_gen.passes.kernel_decompose import KernelDecomposePass
-from kernel_gen.passes.kernel_pattern_attach import KernelPatternAttachPass
 from kernel_gen.passes.lowering import NnLoweringPass
 from kernel_gen.passes.memory_plan import MemoryPlanPass
 from kernel_gen.passes.memory_pool import MemoryPoolPass
@@ -45,6 +44,7 @@ from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
 from kernel_gen.passes.producer_consumer_analysis import ProducerConsumerAnalysisPass
 from kernel_gen.passes.template_name.infer import TemplateNameInferPass
 from kernel_gen.passes.tile.analysis import TileAnalysisPass
+from kernel_gen.passes.tuning import KernelPatternAttachPass
 from kernel_gen.passes.transform_apply import TransformApplyPass
 
 

@@ -132,9 +132,10 @@ def test_default_lowering_pipeline_builds_pass_manager() -> None:
 def test_default_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     decompose_module = importlib.import_module("kernel_gen.passes.decompass")
+    dma_memory_hierarchy_module = importlib.import_module("kernel_gen.passes.tuning.dma_memory_hierarchy")
     DecompassPass = decompose_module.DecompassPass
     NnLoweringPass = lowering_module.NnLoweringPass
-    LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
+    LowerDmaMemoryHierarchyPass = dma_memory_hierarchy_module.LowerDmaMemoryHierarchyPass
     order: list[str] = []
 
     def _record_decompose(self, ctx: Context, target: ModuleOp) -> None:
