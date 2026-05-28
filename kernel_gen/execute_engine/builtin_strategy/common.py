@@ -1,29 +1,34 @@
-"""execute_engine builtin backend implementation.
+"""execute_engine builtin strategy shared implementation.
 
 
 功能说明:
-- 承接内置 `cpu` / `npu_demo` 后端实现、启动代码生成、target include、entry shim 与真实编译路径。
-- 提供包内文件级 API 供 `compiler.py` 安装内置 strategy 并装配 `CompiledKernel`。
+- 承接内置 `cpu` / `npu_demo` / `cuda_sm86` 后端共享的源码校验、entry shim、编译命令和 SourceBundle 基础能力。
+- 提供 `builtin_strategy` package 内部跨 target 复用的文件级 API。
 - 不运行期导入 `compiler.py`，不构造 `CompiledKernel`，不进入 `kernel_gen.execute_engine` 包根公开 API。
 
 API 列表:
 - `class BuiltinCompileArtifacts(soname_path: str, source_path: str, command: tuple[str, ...], stdout: str, stderr: str, return_code: int, allow_absent_memory_arg_specs: tuple[tuple[int, str, int], ...] = (), cleanup: Callable[[], None] | None = None)`
-- `build_builtin_compile_artifacts(request: "CompileRequest") -> BuiltinCompileArtifacts`
-- `install_builtin_compile_strategies(strategy_factory: Callable[[], CompileStrategy]) -> None`
+- `class BuiltinParamSpec(kind: str, ctype: str, memory_space: str | None = None, template_name: str | None = None)`
+- `BuiltinStrategySupport: type`
+- `BUNDLE_MARKER_PREFIX: str`
+- `REPO_ROOT: Path`
 
 helper 清单:
-- 本文件内部 helper 不进入 `__all__`，只服务内置后端编译产物生成。
+- package 内部 helper 只服务内置后端编译产物生成，不进入 `kernel_gen.execute_engine` 包根公开 API。
 
 使用示例:
-- artifacts = build_builtin_compile_artifacts(request)
-- install_builtin_compile_strategies(strategy_factory)
+- unit = BuiltinStrategySupport.compose_compile_unit(source="int main(){}", include_lines_for_target=(), entry_shim_source="")
+- metadata = BuiltinStrategySupport.extract_allow_absent_memory_arg_specs(source)
 
 关联文件:
 - spec: spec/execute_engine/execute_engine_target.md
 - spec: spec/execute_engine/strategy.md
 - test: test/execute_engine/test_builtin_strategy.py
 - test: test/execute_engine/test_compile.py
-- 功能实现: kernel_gen/execute_engine/compiler.py
+- 功能实现: kernel_gen/execute_engine/builtin_strategy/__init__.py
+- 功能实现: kernel_gen/execute_engine/builtin_strategy/cpu.py
+- 功能实现: kernel_gen/execute_engine/builtin_strategy/npu_demo.py
+- 功能实现: kernel_gen/execute_engine/builtin_strategy/cuda_sm86.py
 """
 
 from __future__ import annotations
@@ -39,9 +44,6 @@ import tempfile
 
 from kernel_gen.core.config import get_dump_dir, get_trance_enabled
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
-from kernel_gen.execute_engine.strategy import CompileStrategy, register_compile_strategy
-
-
 _TARGET_HEADER_MISMATCH = "target_header_mismatch"
 _SOURCE_EMPTY_OR_INVALID = "source_empty_or_invalid"
 _COMPILE_FAILED = "compile_failed"
@@ -92,7 +94,8 @@ _TEMPLATE_INSTANCE_SEED_PATTERN = re.compile(
     r"(?P<dtype>float|double|int32_t|int64_t|int|long\s+long)\s*>\s*;"
 )
 _ALLOW_ABSENT_MEMORY_ARGS_PATTERN = re.compile(r"//\s*kg\.allow_absent_memory_args:\s*(?P<body>[^\n]*)")
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_BUNDLE_MARKER_PREFIX = "// __KG_BUNDLE_FILE__:"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 @dataclass(frozen=True)
@@ -468,7 +471,7 @@ class _BuiltinStrategySupport:
         """返回 target 对应的 include set。
 
         功能说明:
-        - 固定 `cpu` 和 `npu_demo` 的 include 注入集合。
+        - 固定 `cpu`、`npu_demo` 与 `cuda_sm86` 的 include 注入集合。
         - 不支持的 target 返回空集合，由上层转成稳定失败。
 
         使用示例:
@@ -477,6 +480,8 @@ class _BuiltinStrategySupport:
 
         if target == "npu_demo":
             return ('#include "include/npu_demo/npu_demo.h"',)
+        if target == "cuda_sm86":
+            return ('#include "include/cuda_sm86/cuda_sm86.cuh"',)
         if target == "cpu":
             return (
                 '#include "include/cpu/Memory.h"',
@@ -1035,7 +1040,7 @@ class _BuiltinStrategySupport:
         """从 source 粗略推断 include family。
 
         功能说明:
-        - 只识别仓库约定路径片段：`include/cpu/` 与 `include/npu_demo/`。
+        - 只识别仓库约定路径片段：`include/cpu/`、`include/npu_demo/` 与 `include/cuda_sm86/`。
         - 混合 include 返回 `mixed`，由上层转成稳定失败。
 
         使用示例:
@@ -1044,12 +1049,15 @@ class _BuiltinStrategySupport:
 
         has_cpu = "include/cpu/" in source
         has_npu = "include/npu_demo/" in source
-        if has_cpu and has_npu:
+        has_cuda_sm86 = "include/cuda_sm86/" in source
+        if sum(1 for item in (has_cpu, has_npu, has_cuda_sm86) if item) > 1:
             return "mixed"
         if has_cpu:
             return "cpu"
         if has_npu:
             return "npu_demo"
+        if has_cuda_sm86:
+            return "cuda_sm86"
         return None
 
 
@@ -1089,104 +1097,16 @@ class _BuiltinStrategySupport:
         return compiler
 
 
-def build_builtin_compile_artifacts(request: "CompileRequest") -> BuiltinCompileArtifacts:
-    """生成内置 target 编译产物。
-
-    功能说明:
-    - 执行源码校验、target include 校验、entry shim 生成、编译单元拼接和编译产物校验。
-    - `cpu` target 保持 dry-run，`npu_demo` target 走真实编译。
-    - 返回不依赖 `compiler.py` 类型的产物描述，由 facade 负责装配 `CompiledKernel`。
-
-    使用示例:
-    - artifacts = build_builtin_compile_artifacts(request)
-    """
-
-    source = request.source
-    target = request.target
-    function = request.function
-    entry_point = request.entry_point
-    compiler = _BuiltinStrategySupport.resolve_compiler_name(request.compiler)
-    compiler_flags = _BuiltinStrategySupport.ensure_compiler_flags(request.compiler_flags)
-    link_flags = request.link_flags
-
-    if source is None or not isinstance(source, str) or not source.strip():
-        raise _BuiltinStrategySupport.builtin_compile_error(_SOURCE_EMPTY_OR_INVALID, "source is empty")
-    include_family = _BuiltinStrategySupport.source_include_family(source)
-    if include_family == "mixed":
-        raise _BuiltinStrategySupport.builtin_compile_error(_TARGET_HEADER_MISMATCH, "source includes mixed target include families")
-    if include_family is not None and include_family != target:
-        raise _BuiltinStrategySupport.builtin_compile_error(
-            _TARGET_HEADER_MISMATCH,
-            f"source include family mismatch: source={include_family}, target={target}",
-        )
-    if "#error" in source:
-        raise _BuiltinStrategySupport.builtin_compile_error(_COMPILE_FAILED, "source contains #error directive")
-    if function is None or not isinstance(function, str) or not function.strip():
-        raise _BuiltinStrategySupport.builtin_compile_error(_SYMBOL_RESOLVE_FAILED, "function is empty")
-    if not isinstance(entry_point, str) or not entry_point.strip():
-        raise _BuiltinStrategySupport.builtin_compile_error(_SYMBOL_RESOLVE_FAILED, "entry_point is empty")
-
-    compiler_flags = _BuiltinStrategySupport.trance_compiler_flags(function=function, compiler_flags=compiler_flags)
-    target_headers = _BuiltinStrategySupport.include_lines_for_target(target)
-    if not target_headers:
-        raise _BuiltinStrategySupport.builtin_compile_error(_TARGET_HEADER_MISMATCH, f"unsupported target: {target}")
-
-    shim_source = ""
-    if _BuiltinStrategySupport.requires_entry_shim(source, entry_point):
-        shim_source = _BuiltinStrategySupport.compose_entry_shim_source(function=function, entry_point=entry_point, source=source)
-    allow_absent_memory_arg_specs = _BuiltinStrategySupport.extract_allow_absent_memory_arg_specs(source)
-    compile_unit = _BuiltinStrategySupport.compose_compile_unit(
-        source=source,
-        include_lines_for_target=target_headers,
-        entry_shim_source=shim_source,
-    )
-    artifacts = _BuiltinStrategySupport.compile_unit_source(
-        source=compile_unit,
-        compiler=compiler,
-        compiler_flags=compiler_flags,
-        link_flags=link_flags,
-        include_dirs=(str(_REPO_ROOT),),
-        dry_run=(target == "cpu"),
-    )
-    try:
-        if artifacts.return_code != 0:
-            raise _BuiltinStrategySupport.builtin_compile_error(_COMPILE_FAILED, f"compiler returned non-zero ({artifacts.return_code})")
-        if not Path(artifacts.soname_path).exists():
-            raise _BuiltinStrategySupport.builtin_compile_error(_COMPILE_FAILED, "compile output is missing")
-    except Exception:
-        if artifacts.cleanup is not None:
-            artifacts.cleanup()
-        raise
-
-    return BuiltinCompileArtifacts(
-        soname_path=artifacts.soname_path,
-        source_path=artifacts.source_path,
-        command=artifacts.command,
-        stdout=artifacts.stdout,
-        stderr=artifacts.stderr,
-        return_code=artifacts.return_code,
-        allow_absent_memory_arg_specs=allow_absent_memory_arg_specs,
-        cleanup=artifacts.cleanup,
-    )
-
-
-def install_builtin_compile_strategies(strategy_factory: Callable[[], CompileStrategy]) -> None:
-    """安装内置 compile strategy。
-
-    功能说明:
-    - 使用调用方提供的 factory 为 `cpu` 与 `npu_demo` 分别创建 strategy 实例。
-    - 安装时使用 `override=True`，保持模块重载或重复导入时的既有覆盖语义。
-
-    使用示例:
-    - install_builtin_compile_strategies(strategy_factory)
-    """
-
-    register_compile_strategy("cpu", strategy_factory(), override=True)
-    register_compile_strategy("npu_demo", strategy_factory(), override=True)
+BuiltinParamSpec = _ParamSpec
+BuiltinStrategySupport = _BuiltinStrategySupport
+BUNDLE_MARKER_PREFIX = _BUNDLE_MARKER_PREFIX
+REPO_ROOT = _REPO_ROOT
 
 
 __all__ = [
     "BuiltinCompileArtifacts",
-    "build_builtin_compile_artifacts",
-    "install_builtin_compile_strategies",
+    "BuiltinParamSpec",
+    "BuiltinStrategySupport",
+    "BUNDLE_MARKER_PREFIX",
+    "REPO_ROOT",
 ]

@@ -3,7 +3,8 @@
 功能说明:
 - 定义 execute_engine 对外稳定的编译请求、执行请求、执行结果、编译产物和引擎入口。
 - 保留 `compiler.py` 旧公开导入路径，并 re-export strategy registry 公开 API。
-- 通过 `builtin_strategy.py` 生成内置后端编译产物，通过 `runtime_args.py` 完成运行时 ABI 调用。
+- 通过 `builtin_strategy/` package 生成内置后端编译产物，通过 `runtime_args.py` 完成运行时 ABI 调用。
+- CUDA SM86 后端通过同一 `ExecutionEngine(target="cuda_sm86")` 公开入口编译并执行 `.so` slot C ABI。
 
 API 列表:
 - `class CompileRequest(source: str, target: str, function: str, entry_point: str = "kg_execute_entry", compiler: str | None = None, compiler_flags: tuple[str, ...] = ("-std=c++17",), link_flags: tuple[str, ...] = ())`
@@ -34,7 +35,10 @@ result = kernel.execute(request=ExecuteRequest(args=()))
 - spec/execute_engine/execute_engine_target.md
 - spec/execute_engine/strategy.md
 - kernel_gen/execute_engine/strategy.py
-- kernel_gen/execute_engine/builtin_strategy.py
+- kernel_gen/execute_engine/builtin_strategy/__init__.py
+- kernel_gen/execute_engine/builtin_strategy/cpu.py
+- kernel_gen/execute_engine/builtin_strategy/npu_demo.py
+- kernel_gen/execute_engine/builtin_strategy/cuda_sm86.py
 - kernel_gen/execute_engine/runtime_args.py
 - test/execute_engine/test_contract.py
 - test/execute_engine/test_compile.py
@@ -278,16 +282,17 @@ class CompiledKernel:
             capture_function_output = request.capture_function_output
             stream = request.stream
         if stream is not None:
+            detail = "cuda_sm86 does not support non-None stream" if self.target == "cuda_sm86" else "ExecuteRequest.stream is not supported in P0"
             raise _ExecutionEngineSupport.error(
                 _STREAM_NOT_SUPPORTED,
-                "ExecuteRequest.stream is not supported in P0",
+                detail,
             )
         if capture_function_output:
             raise _ExecutionEngineSupport.error(
                 _FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED,
                 "ExecuteRequest.capture_function_output is not supported in P0",
             )
-        if self.target not in ("cpu", "npu_demo"):
+        if self.target not in ("cpu", "npu_demo", "cuda_sm86"):
             raise _ExecutionEngineSupport.error(
                 _EXECUTION_UNSUPPORTED,
                 "compiled target does not expose runtime execution",

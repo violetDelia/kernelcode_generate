@@ -3,7 +3,7 @@
 ## 功能简介
 
 - 定义 target 注册中心的规范，负责提供目录 target 的统一注册/查询入口。
-- 支持 `json` 与 `txt` 两类来源；其中 `npu_demo` 的公开真源是 `kernel_gen/target/targets/npu_demo.txt`，不再以 Python 内置模板形式对外承诺。
+- 支持 `json` 与 `txt` 两类来源；其中 `npu_demo` 的公开真源是 `kernel_gen/target/targets/npu_demo.txt`，`cuda_sm86` 的公开真源是 `kernel_gen/target/targets/cuda_sm86.txt`，不再以 Python 内置模板形式对外承诺。
 - target 信息用于驱动 `arch` 相关 operation/dialect/include-runtime 的“能力检查”和“硬件参数读取”，例如 `thread_num`、`sm_memory_size`、`arch.launch`、`arch.barrier`。
 - target 信息也作为第三方 generic backend 的启用前置；backend 自动加载前必须先能通过公开 registry 查询到 target。
 
@@ -82,7 +82,7 @@
   loaded = registry.load_targets(Path("kernel_gen/target/targets"))
   ```
 - 功能说明：扫描目录并加载 `*.json` 与 `*.txt` target 文件。
-- 注意事项：返回值是本次加载集合；target 名称必须与文件名不含扩展名部分一致；`npu_demo` 的公开真源是目录中的 `npu_demo.txt`；加载会注册解析出的 target，重复加载默认目录必须保持幂等。
+- 注意事项：返回值是本次加载集合；target 名称必须与文件名不含扩展名部分一致；`npu_demo` 的公开真源是目录中的 `npu_demo.txt`，`cuda_sm86` 的公开真源是目录中的 `cuda_sm86.txt`；加载会注册解析出的 target，重复加载默认目录必须保持幂等。
 
 ### `register_target(spec: TargetSpec) -> None`
 
@@ -300,6 +300,36 @@ hw.tlm3_memory_size=1048576
 - `sm_memory_size=0` 与 `lm_memory_size=0` 表示 `npu_demo` 不提供 `SM/LM` 动态内存容量；`tsm_memory_size=2097152`、`tlm1_memory_size=524288`、`tlm2_memory_size=1048576`、`tlm3_memory_size=1048576` 为固定片上容量。
 - `npu_demo` 的标准注册入口是 `kernel_gen/target/targets/npu_demo.txt`；标准查询入口是 `is_arch_op_supported(...)`、`get_target_hardware(...)` 与 `get_current_target_hardware(...)`。
 
+### `cuda_sm86.txt` 目录 target
+
+- `cuda_sm86` 的标准注册入口是 `kernel_gen/target/targets/cuda_sm86.txt`；调用方通过 `load_targets(...)` 从目录加载，registry 不再把 CUDA target 当作 Python 内置模板对外承诺。
+- `cuda_sm86.txt` 的字段使用普通 TXT 语法，字段与 `npu_demo.txt` 同类：`name`、`arch.supported_ops`、`arch.unsupported_ops` 与 `hw.*`。
+
+`kernel_gen/target/targets/cuda_sm86.txt` 的推荐内容语义等价于：
+
+```txt
+name=cuda_sm86
+arch.supported_ops=arch.get_block_id,arch.get_block_num,arch.get_thread_id,arch.get_thread_num,arch.get_subthread_id,arch.get_subthread_num,arch.get_dynamic_memory,arch.barrier,arch.launch
+arch.unsupported_ops=arch.launch_kernel
+hw.block_num=1
+hw.thread_num=256
+hw.subthread_num=32
+hw.sm_memory_size=49152
+hw.lm_memory_size=0
+hw.tsm_memory_size=49152
+hw.tlm1_memory_size=0
+hw.tlm2_memory_size=0
+hw.tlm3_memory_size=0
+```
+
+语义说明：
+
+- `cuda_sm86` 使用显式白名单；除上述 `arch.get_*` 查询、`arch.get_dynamic_memory`、`arch.barrier` 与 `arch.launch` 外，其他能力查询固定判定为未启用。
+- `thread_num=256` 表示首版 block 级 CUDA launch 的线程能力上限；`subthread_num=32` 表示 CUDA warp 分组能力上限。
+- `sm_memory_size=49152` 与 `tsm_memory_size=49152` 表示 SM86 首版 shared-memory staging 容量；`tlm1/tlm2/tlm3_memory_size=0` 表示 TLM fragment 不通过 registry 暴露动态 byte-pool 容量。
+- `cuda_sm86` 不新增 `warp_num`、`compute_capability`、`shared_memory_size`、`mma_m`、`mma_n` 或 `mma_k` 硬件字段；这些能力由 CUDA include / emit / pipeline 合同承接。
+- `cuda_sm86` 的标准查询入口是 `is_arch_op_supported(...)`、`get_target_hardware(...)` 与 `get_current_target_hardware(...)`。
+
 ### helper 说明
 
 - 当前文件内存在若干解析、校验与默认 target 组装 helper。
@@ -313,6 +343,8 @@ hw.tlm3_memory_size=1048576
 - `dialect/arch` 在 verifier 阶段可根据“当前 target”校验 op 支持性。
 - 当 `target="npu_demo"` 时，`block_num=2`、`thread_num=1`、`subthread_num=1` 必须作为 block-only 能力上限读取；`SM/LM` 动态内存容量固定为 `0`，`TSM/TLM1/TLM2/TLM3` 动态内存容量固定为 `2097152/524288/1048576/1048576`。
 - 当 `target="npu_demo"` 时，`arch.launch` 与 `arch.barrier` 通过 `is_arch_op_supported(...)` 查询必须返回已启用；旧名 `arch.launch_kernel` 必须保持未启用。
+- 当 `target="cuda_sm86"` 时，`thread_num=256` 与 `subthread_num=32` 必须作为 CUDA block / warp 能力上限读取；`TSM` 对应 shared-memory staging，`TLM1/TLM2/TLM3` 不得被解释为动态 byte-pool 容量。
+- 当 `target="cuda_sm86"` 时，`arch.launch` 与 `arch.barrier` 通过 `is_arch_op_supported(...)` 查询必须返回已启用；旧名 `arch.launch_kernel` 必须保持未启用。
 
 ### CPU TXT 示例
 
@@ -347,7 +379,8 @@ hw.tlm3_memory_size=0
 ## 测试
 
 - 测试文件：`test/target/test_registry.py`
-- 执行命令：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/target/test_registry.py`
+- 测试文件：`test/target/test_cuda_sm86_registry.py`
+- 执行命令：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/target/test_registry.py test/target/test_cuda_sm86_registry.py`
 
 ### 测试目标
 

@@ -25,7 +25,10 @@
 - `spec`：[`spec/execute_engine/execute_engine_api.md`](spec/execute_engine/execute_engine_api.md)
 - `功能实现`：[`kernel_gen/execute_engine/compiler.py`](kernel_gen/execute_engine/compiler.py)
 - `功能实现`：[`kernel_gen/execute_engine/strategy.py`](kernel_gen/execute_engine/strategy.py)
-- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy.py`](kernel_gen/execute_engine/builtin_strategy.py)
+- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/__init__.py`](kernel_gen/execute_engine/builtin_strategy/__init__.py)
+- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/cpu.py`](kernel_gen/execute_engine/builtin_strategy/cpu.py)
+- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/npu_demo.py`](kernel_gen/execute_engine/builtin_strategy/npu_demo.py)
+- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/cuda_sm86.py`](kernel_gen/execute_engine/builtin_strategy/cuda_sm86.py)
 - `功能实现`：[`kernel_gen/execute_engine/runtime_args.py`](kernel_gen/execute_engine/runtime_args.py)
 - `test`：[`test/execute_engine/test_contract.py`](test/execute_engine/test_contract.py)
 - `test`：[`test/execute_engine/test_compile_strategy.py`](test/execute_engine/test_compile_strategy.py)
@@ -51,7 +54,7 @@
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
 - `P0` 内置真实执行仅支持 `target in {"cpu","npu_demo"}`；第三方 target 可注册 compile strategy，但 execute-only 路径必须以 `execution_unsupported` 失败。
-- `compiler.py` 只承接公开请求/结果/facade 和旧公开导入路径；内置 target 编译细节在 `builtin_strategy.py`，运行时参数封送和动态库 entry 调用在 `runtime_args.py`。
+- `compiler.py` 只承接公开请求/结果/facade 和旧公开导入路径；内置 target 编译细节在 `builtin_strategy/` package，运行时参数封送和动态库 entry 调用在 `runtime_args.py`。
 - `P0` 不支持 `stream` 与输出回收；当 `ExecuteRequest.stream is not None` 或 `capture_function_output=True` 必须失败。
 - `args` 必须与 `function` 形参顺序严格一致；不做自动重排或参数推断。
 - 运行时参数仅允许 memory / int / float 三类输入；`None` 只允许作为源码元数据声明的 allow-absent memory runtime input；其他类型必须失败。

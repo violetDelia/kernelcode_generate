@@ -17,7 +17,7 @@
 关联文件:
 - 功能实现: kernel_gen/execute_engine/compiler.py
 - 功能实现: kernel_gen/execute_engine/strategy.py
-- 功能实现: kernel_gen/execute_engine/builtin_strategy.py
+- 功能实现: kernel_gen/execute_engine/builtin_strategy/__init__.py
 - Spec 文档: spec/execute_engine/execute_engine.md
 - Spec 文档: spec/execute_engine/execute_engine_api.md
 - Spec 文档: spec/execute_engine/execute_engine_target.md
@@ -65,7 +65,11 @@ def test_execute_engine_contract_files_exist() -> None:
     assert (REPO_ROOT / "spec/execute_engine/execute_engine_target.md").is_file()
     assert (REPO_ROOT / "spec/execute_engine/strategy.md").is_file()
     assert (execute_engine_dir / "strategy.py").is_file()
-    assert (execute_engine_dir / "builtin_strategy.py").is_file()
+    assert (execute_engine_dir / "builtin_strategy").is_dir()
+    assert (execute_engine_dir / "builtin_strategy" / "__init__.py").is_file()
+    assert (execute_engine_dir / "builtin_strategy" / "cpu.py").is_file()
+    assert (execute_engine_dir / "builtin_strategy" / "npu_demo.py").is_file()
+    assert (execute_engine_dir / "builtin_strategy" / "cuda_sm86.py").is_file()
     assert (execute_engine_dir / "runtime_args.py").is_file()
     assert not old_target_module.exists()
     assert (REPO_ROOT / "test/execute_engine/test_contract.py").is_file()
@@ -136,13 +140,13 @@ def test_execute_engine_strategy_registry_reexport_identity() -> None:
 
 # EE-S1-000C
 # 测试目的: 验证内置 strategy 安装模块不进入包根公开 API，且安装调用只存在于 compiler.py。
-# 对应功能实现文件路径: kernel_gen/execute_engine/builtin_strategy.py
+# 对应功能实现文件路径: kernel_gen/execute_engine/builtin_strategy/__init__.py
 # 对应 spec 文件路径: spec/execute_engine/strategy.md
 # 对应测试文件路径: test/execute_engine/test_contract.py
 def test_execute_engine_builtin_strategy_static_install_boundary() -> None:
     install_name = "install_builtin_compile" + "_strategies"
     install_alias_name = "_" + install_name
-    builtin_path = REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy.py"
+    builtin_path = REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy" / "__init__.py"
     compiler_path = REPO_ROOT / "kernel_gen/execute_engine/compiler.py"
     builtin_source = builtin_path.read_text(encoding="utf-8")
     builtin_tree = ast.parse(builtin_source)
@@ -304,7 +308,7 @@ def test_execute_engine_target_support_old_module_absent() -> None:
 
 # EE-S1-000G
 # 测试目的: 锁定 builtin/runtime 包内文件级 API 不进入包根公开 API。
-# 对应功能实现文件路径: kernel_gen/execute_engine/builtin_strategy.py
+# 对应功能实现文件路径: kernel_gen/execute_engine/builtin_strategy/__init__.py
 # 对应功能实现文件路径: kernel_gen/execute_engine/runtime_args.py
 # 对应 spec 文件路径: spec/execute_engine/execute_engine_api.md
 # 对应测试文件路径: test/execute_engine/test_contract.py
@@ -325,7 +329,7 @@ def test_execute_engine_internal_module_file_api_exact_sets() -> None:
         assert name not in execute_engine.__all__
 
     allowed_defined_names = {
-        REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy.py": set(builtin_module.__all__),
+        REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy" / "__init__.py": set(builtin_module.__all__),
         REPO_ROOT / "kernel_gen/execute_engine/runtime_args.py": set(runtime_module.__all__),
     }
     for path, allowed_names in allowed_defined_names.items():
@@ -352,14 +356,18 @@ def test_execute_engine_internal_module_file_api_exact_sets() -> None:
 # 测试目的: 锁定本轮 execute_engine 文件的 private callable 边界。
 # 对应功能实现文件路径: kernel_gen/execute_engine/compiler.py
 # 对应功能实现文件路径: kernel_gen/execute_engine/strategy.py
-# 对应功能实现文件路径: kernel_gen/execute_engine/builtin_strategy.py
+# 对应功能实现文件路径: kernel_gen/execute_engine/builtin_strategy/__init__.py
 # 对应功能实现文件路径: kernel_gen/execute_engine/runtime_args.py
 # 对应测试文件路径: test/execute_engine/test_contract.py
 def test_execute_engine_private_callable_gate() -> None:
     target_files = (
         REPO_ROOT / "kernel_gen/execute_engine/compiler.py",
         REPO_ROOT / "kernel_gen/execute_engine/strategy.py",
-        REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy.py",
+        REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy" / "__init__.py",
+        REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy" / "cpu.py",
+        REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy" / "npu_demo.py",
+        REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy" / "cuda_sm86.py",
+        REPO_ROOT / "kernel_gen/execute_engine/builtin_strategy" / "common.py",
         REPO_ROOT / "kernel_gen/execute_engine/runtime_args.py",
     )
     violations: list[str] = []

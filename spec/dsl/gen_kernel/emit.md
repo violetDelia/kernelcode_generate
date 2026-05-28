@@ -22,6 +22,7 @@
   - [`kernel_gen/dsl/gen_kernel/emit/register.py`](../../../kernel_gen/dsl/gen_kernel/emit/register.py)
   - [`kernel_gen/dsl/gen_kernel/emit/cpu/__init__.py`](../../../kernel_gen/dsl/gen_kernel/emit/cpu/__init__.py)
   - [`kernel_gen/dsl/gen_kernel/emit/npu_demo/__init__.py`](../../../kernel_gen/dsl/gen_kernel/emit/npu_demo/__init__.py)
+  - [`kernel_gen/dsl/gen_kernel/emit/cuda_sm86/__init__.py`](../../../kernel_gen/dsl/gen_kernel/emit/cuda_sm86/__init__.py)
 - `test`：[`test/dsl/gen_kernel/emit/test_package.py`](../../../test/dsl/gen_kernel/emit/test_package.py)
 
 ## 依赖
@@ -32,6 +33,7 @@
 - [`spec/dsl/gen_kernel/source_product.md`](../../../spec/dsl/gen_kernel/source_product.md)
 - [`spec/dsl/gen_kernel/emit/cpu/__init__.md`](../../../spec/dsl/gen_kernel/emit/cpu/__init__.md)
 - [`spec/dsl/gen_kernel/emit/npu_demo.md`](../../../spec/dsl/gen_kernel/emit/npu_demo.md)
+- [`spec/dsl/gen_kernel/emit/cuda_sm86.md`](../../../spec/dsl/gen_kernel/emit/cuda_sm86.md)
 
 ## 目标
 
@@ -60,6 +62,7 @@
 - `gen_kernel` 可在源码中写入 `// kg.allow_absent_memory_args: <index>:<dtype>:<rank>;...` 元数据，供执行引擎按公开 runtime `None` 合同识别 allow-absent memory 参数；该注释不新增 `emit` package 公开 API。
 - `kernel.binary_elewise(kind="min"|"max")` 在 `target="cpu"` 下必须发射为 `cpu::min(lhs, rhs, out)` / `cpu::max(lhs, rhs, out)`，在 `target="npu_demo"` 下必须发射为 `min<Space, InType, OutType>(out, lhs, rhs)` / `max<Space, InType, OutType>(out, lhs, rhs)`，成本发射必须映射到 `cost::min/max<Space, InType, OutType, Kind>(out, lhs, rhs)`。
 - `target="npu_demo"` 的 generated source layout 参数必须统一发射到 initializer-list public overload，形如 `{...} /*shape*/`、`{...} /*stride*/`、`{...} /*offset*/`、`{...} /*size*/`；不得在 generated source 中泄漏 `Vector(...)`、`Vector{...}`、`long long *_shape[]` 或 `long long *_stride[]` layout buffer。
+- `target="cuda_sm86"` 的 `ModuleOp` 发射必须通过 registry 自动加载 `kernel_gen.dsl.gen_kernel.emit.cuda_sm86`，返回公开 SourceBundle aggregate string；artifact 至少包含 `kernel.cu`，且 generated source 必须按 lowered IR 中真实 kernel op family 与受 spec 约束的函数类型信息生成 matmul / conv2d / flash_attention 对应 source，包含 CUDA include、`__global__` kernel marker、参与最终 matmul 输出的真实 Tensor Core `mma.sync` 或 `nvcuda::wmma` 执行路径与 `kg_execute_entry(slots, count)` C ABI，不得包含 `include/npu_demo`、`npu_demo::` 或 `get_dynamic_memory<TLM`；不得用 entry 名称、printed IR 字符串 token 或 unknown fallback 选择 family。
 
 ## API详细说明
 
@@ -111,7 +114,8 @@
 ## 测试
 
 - 测试文件：`test/dsl/gen_kernel/emit/test_package.py`
-- 执行命令：`pytest -q test/dsl/gen_kernel/emit/test_package.py`
+- 测试文件：`test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py`
+- 执行命令：`pytest -q test/dsl/gen_kernel/emit/test_package.py test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py`
 
 ### 测试目标
 

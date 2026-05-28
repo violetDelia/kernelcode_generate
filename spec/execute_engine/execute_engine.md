@@ -6,7 +6,7 @@
 - **生命周期**：`compile(request) -> CompiledKernel`，随后 `CompiledKernel.execute(exec_request) -> ExecuteResult`；当编译过程使用内部临时工作区时，`CompiledKernel.close()` 或对象析构必须释放该工作区。
 - **输入**：
   - `source`：C++ 源码字符串（单个 translation unit）。
-  - `target`：目标后端标识（`cpu` / `npu_demo`）。
+  - `target`：目标后端标识（`cpu` / `npu_demo` / `cuda_sm86`）。
   - `function`：要调用的目标函数符号（例如 `"npu_demo::add"`）。
   - `args`：按形参顺序排列的入参序列，元素类型仅允许：`memory` / `int` / `float`。
 - **失败短语入口**：所有失败必须在 `ExecuteResult.failure_phrase` 以“固定短语”表达，禁止静默 fallback 或同义词扩散。
@@ -34,7 +34,10 @@
 - `spec`：[`spec/execute_engine/execute_engine.md`](spec/execute_engine/execute_engine.md)
 - `功能实现`：[`kernel_gen/execute_engine/compiler.py`](kernel_gen/execute_engine/compiler.py)
 - `功能实现`：[`kernel_gen/execute_engine/strategy.py`](kernel_gen/execute_engine/strategy.py)
-- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy.py`](kernel_gen/execute_engine/builtin_strategy.py)
+- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/__init__.py`](kernel_gen/execute_engine/builtin_strategy/__init__.py)
+- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/cpu.py`](kernel_gen/execute_engine/builtin_strategy/cpu.py)
+- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/npu_demo.py`](kernel_gen/execute_engine/builtin_strategy/npu_demo.py)
+- `功能实现`：[`kernel_gen/execute_engine/builtin_strategy/cuda_sm86.py`](kernel_gen/execute_engine/builtin_strategy/cuda_sm86.py)
 - `功能实现`：[`kernel_gen/execute_engine/runtime_args.py`](kernel_gen/execute_engine/runtime_args.py)
 - `test`：[`test/execute_engine/test_contract.py`](test/execute_engine/test_contract.py)
 - `test`：[`test/execute_engine/test_builtin_strategy.py`](test/execute_engine/test_builtin_strategy.py)
@@ -49,7 +52,7 @@
 - `target` 相关 include 目录（由 target 映射决定）：
   - `npu_demo`：`include/npu_demo/*`
   - `cpu`：`include/cpu/*`
-- 内置 target 后端实现：由 `kernel_gen/execute_engine/builtin_strategy.py` 生成 include、entry shim、compile unit 与 shared object。
+- 内置 target 后端实现：由 `kernel_gen/execute_engine/builtin_strategy/` package 生成 include、entry shim、compile unit / SourceBundle artifact 与 shared object。
 - 运行时 ABI：由 `kernel_gen/execute_engine/runtime_args.py` 封送 runtime args 并调用 `kg_execute_entry`。
 
 ## 术语
@@ -70,7 +73,7 @@
 ### 模块级补充
 
 - 本小节只记录模块级非接口补充；接口级参数限制、错误语义、兼容要求与非目标必须维护在对应 API 的 `注意事项`。
-- `P0` 内置真实编译/执行支持 `target in {"cpu","npu_demo"}`；其他 target 必须注册 compile strategy，缺失时 `failure_phrase == "target_header_mismatch"`。
+- `P0` 内置真实编译/执行支持 `target in {"cpu","npu_demo","cuda_sm86"}`；其他 target 必须注册 compile strategy，缺失时 `failure_phrase == "target_header_mismatch"`。
 - 第三方 compile-only target 的 `CompiledKernel.execute(...)` 必须以 `failure_phrase == "execution_unsupported"` 公开失败，不得 fallback 到普通 kernel。
 - `P0` 不支持 `stream`；当 `ExecuteRequest.stream is not None` 必须失败，且 `failure_phrase == "stream_not_supported"`。
 - `P0` 不支持函数输出回收；当 `ExecuteRequest.capture_function_output=True` 必须失败，且 `failure_phrase == "function_output_capture_not_supported"`。

@@ -35,6 +35,7 @@
 - 保证 `infra` 标记稳定可用，便于分层执行测试。
 - 保证 `nn_lowering` 标记稳定可用，避免 `nn_lowering` 专题测试产生未知标记 warning。
 - 保证 `npu_demo` 标记稳定可用，避免 npu_demo 端到端测试产生未知标记 warning。
+- 保证 `cuda` 标记稳定可用，避免 CUDA SM86 本机运行测试产生未知标记 warning。
 - 通过显式 `filterwarnings` 说明默认 warning 策略，避免把项目 warning 静默吞掉。
 - 限制 pytest 只扫描 `test` 目录，避免误采集 worktree 与临时目录。
 - 统一使用 `importlib` 导入模式，降低同名测试冲突。
@@ -66,7 +67,7 @@
 
 - api：`[pytest].markers: list[str]`
 - 参数：无。
-- 返回值：`list[str]`；至少包含 `infra`、`nn_lowering` 与 `npu_demo` 标记说明。
+- 返回值：`list[str]`；至少包含 `infra`、`nn_lowering`、`npu_demo` 与 `cuda` 标记说明。
 - 使用示例：
 
   ```bash
@@ -172,3 +173,4 @@
 | TC-SCRIPT-PYTEST-CONFIG-002 | 公开入口 | `testpaths/python_files/addopts/norecursedirs` 与合同一致。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `TC-PC-002 / test_pytest_config_values`。 | 公开入口在“`testpaths/python_files/addopts/norecursedirs` 与合同一致。”场景下可导入、构造、注册或按名称发现。 | `TC-PC-002 / test_pytest_config_values` |
 | TC-SCRIPT-PYTEST-CONFIG-003 | pass 改写 | 配置块存在且包含 `nn_lowering` 标记说明。 | 准备包含目标 op、pass 名称或 pipeline 的公开 IR 输入。 | 运行 `TC-PC-003 / test_pytest_ini_options_present`。 | IR 改写后的 op、属性、顺序或 no-op 行为体现“配置块存在且包含 `nn_lowering` 标记说明。”场景。 | `TC-PC-003 / test_pytest_ini_options_present` |
 | TC-SCRIPT-PYTEST-CONFIG-004 | 公开入口 | 配置块存在且包含 `filterwarnings=default`。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `TC-PC-004 / test_pytest_config_values`。 | 公开入口在“配置块存在且包含 `filterwarnings=default`。”场景下可导入、构造、注册或按名称发现。 | `TC-PC-004 / test_pytest_config_values` |
+| TC-SCRIPT-PYTEST-CONFIG-005 | 公开入口 | 配置块存在且包含 `cuda` 标记说明。 | 按 spec 声明的导入路径、CLI 参数、注册名或命名空间访问公开入口。 | 运行 `test_pytest_ini_options_present`。 | CUDA SM86 本机运行测试可使用 `-m cuda`，不会产生 unknown mark warning。 | `test_pytest_ini_options_present` |

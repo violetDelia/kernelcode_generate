@@ -103,6 +103,7 @@ def test_pytest_ini_options_present() -> None:
     assert "infra: 标记脚本与基础设施测试" in markers
     assert "nn_lowering: 标记 nn_lowering 相关测试" in markers
     assert "npu_demo: 标记 npu_demo 端到端或运行时相关测试" in markers
+    assert "cuda: 标记 CUDA 后端端到端或运行时相关测试" in markers
 
 
 def test_pytest_config_values() -> None:

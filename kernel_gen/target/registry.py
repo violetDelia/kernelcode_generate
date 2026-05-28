@@ -4,6 +4,7 @@
 功能说明:
 - 定义 target 注册与查询入口，用于管理 `arch` op 支持矩阵与硬件参数。
 - 支持从目录加载 JSON/TXT 形式的 target 规范，并提供支持性判定与硬件查询。
+- 内置文件化 target 包含 `npu_demo` 与 `cuda_sm86`，用于公开 pipeline / compile strategy 注册。
 
 API 列表:
 - `TargetSpec(name: str, arch_supported_ops: set[str] | None, arch_unsupported_ops: set[str], hardware: dict[str, int])`
@@ -858,6 +859,7 @@ def get_current_target_hardware(key: str) -> int | None:
 
 _ensure_cpu_target()
 _ensure_npu_demo_target()
+load_targets(_TARGETS_DIR)
 
 __all__ = [
     "TargetSpec",

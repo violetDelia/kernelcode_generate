@@ -19,6 +19,7 @@
 - 内置 pass 包含 `kernel-aggregate` 与 `kernel-decompose`，用于聚合
   matmul tmp+add 中间 IR 并在 source 前分解为动态 acc kernel matmul。
 - 内置 pass 包含 `symbol-hoist-pipeline`，用于在一个 pass 内组合 alias 归一与 hoist pattern。
+- 内置 pipeline 包含 `cuda-sm86-lowering`，用于 CUDA SM86 Tensor Core 后端 lowering。
 - 文件内 helper 收口为 `_register_registry_entry`、`_build_registered_pass_instance`、
   `_build_registered_pipeline_manager`、`_pipeline_accepts_options`、`_normalize_options`、
   `_split_fold_option` 与 `_reset_registry_for_test`；这些 helper 仅供本文件内部复用，不属于公开接口。
@@ -482,7 +483,7 @@ def load_builtin_passes() -> None:
     功能说明:
     - 主动加载仓库内置 pass / pipeline，使装饰器注册与显式注册生效。
     - 满足幂等性：重复调用不会重复注册或造成副作用。
-    - 当前内置 pipeline 包含 `default-lowering` 与 `npu-demo-lowering`。
+    - 当前内置 pipeline 包含 `default-lowering`、`npu-demo-lowering` 与 `cuda-sm86-lowering`。
 
     使用示例:
     - load_builtin_passes()
@@ -570,10 +571,13 @@ def load_builtin_passes() -> None:
         register_pass(pass_cls)
 
     from kernel_gen.pipeline import (
+        build_cuda_sm86_lowering_pipeline,
         build_default_lowering_pipeline,
         build_npu_demo_lowering_pipeline,
     )
 
+    if "cuda-sm86-lowering" not in _PIPELINE_REGISTRY:
+        register_pipeline("cuda-sm86-lowering")(build_cuda_sm86_lowering_pipeline)
     if "default-lowering" not in _PIPELINE_REGISTRY:
         register_pipeline("default-lowering")(build_default_lowering_pipeline)
     if "npu-demo-lowering" not in _PIPELINE_REGISTRY:

@@ -10,7 +10,9 @@
 
 关联文件:
 - 功能实现: kernel_gen/execute_engine/compiler.py
-- 功能实现: kernel_gen/execute_engine/builtin_strategy.py
+- 功能实现: kernel_gen/execute_engine/builtin_strategy/__init__.py
+- 功能实现: kernel_gen/execute_engine/builtin_strategy/cpu.py
+- 功能实现: kernel_gen/execute_engine/builtin_strategy/npu_demo.py
 - Spec 文档: spec/execute_engine/execute_engine_target.md
 - 测试文件: test/execute_engine/test_builtin_strategy.py
 """
