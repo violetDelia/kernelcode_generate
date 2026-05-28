@@ -5,8 +5,8 @@
 - 定义 `lower-dma-memory-hierarchy` pass 的公开入口、规则语法、默认行为与错误语义。
 - 默认 `LowerDmaMemoryHierarchyPass()` 不配置 `apply_op` 时保持 no-op，不再隐式执行固定 `GM -> SM -> LM` / `LM -> SM -> GM` 改写。
 - `fold=False` 且不配置 `apply_op` 时保留 legacy hierarchy 兼容路径，用于历史基础合同：global `kernel.*` operand/out 经 `dma.slice / dma.deslice` 搬运到 local 计算。
-- 配置 `apply_op="matmul{[...]}"` 时启用当前公开规则：列表按 `kernel.matmul` IR operand 下标对应 `out/lhs/rhs`，非空 target 表示分配目标 space buffer、执行 `dma.copy(target, source)` 并替换该 operand。
-- `apply_op` 规则搬运只使用 `dma.alloc + dma.copy + dma.free`，不得使用 legacy `dma.slice / dma.deslice` 表示规则搬运。
+- 配置 `apply_op="matmul{[...]}"` 时启用当前公开规则：列表按 `kernel.matmul` IR memory operand 下标对应 `out/lhs/rhs`，非空 target 表示分配目标 space buffer并替换该 operand；普通 operand 执行 `dma.copy(target, source)`，unit-stride `dma.view` operand 执行 `dma.slice(target, view_source, view_offsets, view_shape, view_stride)` 并把 staging buffer 规整为 view shape 的连续布局；零偏移且 stride 逐项等于 source physical stride 的 `dma.reinterpret` operand 视为上游 alias 规范化后的等价有效窗口，执行 `dma.slice(target, reinterpret_source, [0...], reinterpret_shape, [1...])`；若 `kernel.matmul` 带第四个动态 acc 控制 operand，该 operand 必须是 `i1`，并由 pass 原样保留。
+- `apply_op` 规则搬运使用 `dma.alloc + (dma.copy | dma.slice) + dma.free`；`dma.slice` 只用于 unit-stride `dma.view` 或等价零偏移 `dma.reinterpret` window staging，`dma.deslice` 仍只属于 legacy 写回路径。
 
 ## API 列表
 
@@ -45,7 +45,10 @@
 - 本 pass 只定义 `dma memory hierarchy` 相关搬运规则，不负责 tile 搜索、并行化、double buffer、barrier、async 或 codegen 策略。
 - `apply_op` 规则命中后，只处理 `kernel.matmul`；其他 op 保持不变。
 - `apply_op` 规则中非空 target operand 必须是 `!nn.memory<...>`；若命中非 memory operand，必须显式失败。
-- 被搬运 operand 的 target type 必须复用 source 的 `shape/stride/element_type`，仅替换 `space`。
+- `apply_op` 只解释前三个 `kernel.matmul` memory operand；第四个动态 acc operand 是控制 operand，不属于 target 列表。
+- `kernel.matmul` 在 `apply_op` 模式下只能有 3 个 memory operand，或 3 个 memory operand 加 1 个 `i1` dynamic acc operand；其它 operand 数量或非 `i1` dynamic acc 必须显式失败。
+- 被搬运的普通 operand target type 必须复用 source 的 `shape/stride/element_type`，仅替换 `space`。
+- 被搬运的 unit-stride `dma.view` 或等价零偏移 `dma.reinterpret` operand target type 必须复用 source 的 `shape/element_type`，但 `stride` 必须改为该 shape 的默认连续布局，避免把上界 storage stride 泄漏进 target space buffer。
 - `dma.alloc` 的 `dynamic_shape`：
   - 静态 shape 使用空 `dynamic_shape`。
   - 显式符号维度通过 `symbol.get_dim(source, axis)` 读取。
@@ -75,6 +78,7 @@
   - 规则列表长度必须正好为 `3`，按 `out/lhs/rhs` 对应 IR operand 下标 `0/1/2`。
   - 规则元素必须是 `""` 或 `shared/local/tsm/tlm1/tlm2/tlm3`。
   - `global` 不是合法 target space；source operand 可以来自任意合法 `nn.memory` space。
+  - 规则列表只对应 `out/lhs/rhs`，不包含动态 acc 控制 operand。
   - 非法 op 名、非法 JSON、非列表、列表长度错误、非字符串元素、非法 target space 都必须以公开错误失败。
 
 ### `LowerDmaMemoryHierarchyPass.from_options(options: dict[str, str]) -> LowerDmaMemoryHierarchyPass`
@@ -112,7 +116,8 @@
   pass_obj.apply(Context(), module)
   ```
 - 功能说明：
-  - 有 `apply_op` 时，对每个 `kernel.matmul` 执行 copy-based operand rewrite。
+  - 有 `apply_op` 时，对每个 `kernel.matmul` 执行 target operand rewrite；普通 operand 使用 copy-based rewrite，unit-stride view 或等价零偏移 reinterpret operand 使用 slice-based window rewrite。
+  - `kernel.matmul` 带第四个动态 acc `i1` operand 时，pass 必须保留该 operand identity，并继续只改写前三个 memory operand。
   - 无 `apply_op` 且 `fold=True` 时，不改写 `module`。
   - 无 `apply_op` 且 `fold=False` 时，执行 legacy `GM -> SM -> LM` / `LM -> SM -> GM` 兼容路径。
 - 注意事项：
@@ -127,9 +132,11 @@
     "dma.free"(%lhs_buf) : (!nn.memory<..., #nn.space<tlm1>>) -> ()
     "dma.free"(%rhs_buf) : (!nn.memory<..., #nn.space<tlm2>>) -> ()
     ```
-  - 规则中空字符串 operand 不得插入 `dma.alloc`、`dma.copy` 或替换 operand。
+  - 规则中空字符串 operand 不得插入 `dma.alloc`、`dma.copy`、`dma.slice` 或替换 operand。
   - 规则命中 out operand 时，out 与 input 使用同一 copy 替换规则；本轮不追加 out writeback。
-  - `apply_op` 模式不得生成 legacy `dma.slice / dma.deslice`。
+  - 四 operand dynamic acc `kernel.matmul` 中第四 operand 只允许为 `i1`；非法第四 operand 必须以 `kernel.matmul apply_op dynamic acc operand must be i1` 失败。
+  - `kernel.matmul` operand 数量不是 3 或 4 时，必须以 `kernel.matmul apply_op requires 3 memory operands and optional i1 acc operand` 失败。
+  - `apply_op` 模式不得生成 legacy `dma.deslice`；`dma.slice` 只允许作为 unit-stride view 或等价零偏移 reinterpret operand 的 window staging。
   - legacy `fold=False` 模式若 target 缺失 `SM/LM` 必须失败，错误信息必须包含 `SM/LM` 与 `lower-dma-memory-hierarchy`。
 
 ## 测试
@@ -168,3 +175,7 @@
 | TC-DMH-007 | dynamic shape | 显式 symbol 维度 | 构造含 `M` 维度的 `kernel.matmul`。 | 运行 `apply_op` 改写 lhs。 | `dma.alloc.dynamic_shape` 使用 `symbol.get_dim` 结果。 | `test_dma_memory_hierarchy_apply_op_symbol_shape` |
 | TC-DMH-008 | dynamic shape | 匿名 `?` 维度 | 构造含 `?` 维度的 `kernel.matmul`。 | 运行 `apply_op` 改写该 operand。 | `dma.alloc.dynamic_shape` 使用 `symbol.get_dim` 结果，result shape 保持 `?`。 | `test_dma_memory_hierarchy_apply_op_accepts_anonymous_dynamic_shape` |
 | TC-DMH-009 | 错误语义 | 非法 apply_op | 使用非法 op、非法 arity、非法 space、非字符串元素。 | 构造 `LowerDmaMemoryHierarchyPass(apply_op=...)`。 | 稳定抛出 `KernelCodeError`。 | `test_dma_memory_hierarchy_rejects_invalid_apply_op_rules` |
+| TC-DMH-010 | dynamic acc | 四 operand matmul | 构造第四 operand 为 `i1` 的 `kernel.matmul`。 | 运行 `apply_op='matmul{["", "tlm1", "tlm2"]}'`。 | 只改写 lhs/rhs memory operand，第四个 acc operand identity 保留。 | `test_dma_memory_hierarchy_apply_op_preserves_dynamic_acc_operand` |
+| TC-DMH-011 | 错误语义 | 非法 dynamic acc | 构造第四 operand 非 `i1` 的 `kernel.matmul`。 | 运行 `apply_op`。 | 稳定抛出 `kernel.matmul apply_op dynamic acc operand must be i1`。 | `test_dma_memory_hierarchy_rejects_non_i1_dynamic_acc_operand` |
+| TC-DMH-012 | effective view staging | unit-stride view operand | 构造 lhs 为 `dma.view` 结果且 view result stride 继承上界 storage stride。 | 运行 `apply_op='matmul{["", "tlm1", ""]}'`。 | lhs staging 使用连续 `tlm1` buffer 与 `dma.slice` 从 view base window 搬运，不生成 `dma.copy`。 | `test_dma_memory_hierarchy_apply_op_view_operand_uses_contiguous_slice_staging` |
+| TC-DMH-013 | effective reinterpret staging | zero-offset reinterpret operand | 构造 lhs 为 `dma.reinterpret` 结果且 result stride 等于 source physical stride。 | 运行 `apply_op='matmul{["", "tlm1", ""]}'`。 | lhs staging 使用连续 `tlm1` buffer 与 `dma.slice` 从 reinterpret source 搬运，不生成 `dma.copy`。 | `test_dma_memory_hierarchy_apply_op_reinterpret_operand_uses_contiguous_slice_staging` |

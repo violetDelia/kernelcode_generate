@@ -5,7 +5,9 @@
 - 实现 `inputs 动 + tile 动` 的二维 matmul kernel demo。
 - 编译期 memory 使用 `H/K/W` 语义符号，tile 使用 `TILE_H/TILE_W/TILE_K` 符号参数。
 - 脚本入口每次运行先随机生成 `shape_seed/tile_seed`，运行期 shape 与 tile 都由本次随机 profile 选出，只通过真实 NumPy ndarray 与 int runtime scalar 绑定，不静态化进入口 memory/tile 类型。
-- K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 初始化局部 accumulator，K loop 内用 `kernel.matmul/kernel.add` out-first helper 累加 partial，K loop 后按 optional rank-1 bias 分支累加并最终写回 output。
+- K/reduce 维按 `tile_k` 分块：每个 H/W 输出 tile 使用 fixed upper-bound storage，
+  K loop 内通过当前有效 view 与动态 acc `kernel.matmul(..., acc=(k0 != 0))` 直接累加，
+  K loop 后按 optional rank-1 bias 分支只在有效 view 上累加并最终写回 output。
 - H/W/K 尾块都通过 `min(tile, dim - iv)` 覆盖，避免只覆盖可整除 case。
 
 API 列表:
@@ -37,7 +39,7 @@ if str(_REPO_ROOT) not in sys.path:
 from kernel.runner import run_lowering_demo
 from kernel_gen.execute_engine import ExecutionEngine
 from kernel_gen.operation import kernel
-from kernel_gen.operation.dma import alloc, broadcast, deslice, fill, reshape, view
+from kernel_gen.operation.dma import alloc, broadcast, deslice, reshape, view
 from kernel_gen.operation.scf import loop
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -69,7 +71,7 @@ def matmul_inputs_dynamic_tile_dynamic_kernel(
     功能说明:
     - 输入和输出 shape 全部来自 `Tensor[...]` 的 `H/K/W` 符号维度。
     - `tile_h/tile_w/tile_k` 作为 `SymbolDim` 参数进入编译 IR，不在 Python 函数体内常量化。
-    - K 维通过内层 loop 切分，每个 partial 通过 `kernel.matmul/kernel.add` out-first helper 累加到同一个局部 accumulator。
+    - K 维通过内层 loop 切分，并通过有效 view 与动态 acc `kernel.matmul` 直接累加到同一个局部 accumulator。
     - runtime bias 非空时，在 K reduce 后、写回 output 前广播 rank-1 bias 并累加。
 
     使用示例:
@@ -85,31 +87,29 @@ def matmul_inputs_dynamic_tile_dynamic_kernel(
             cur_h = min(tile_h, h_size - h0)
             cur_w = min(tile_w, w_size - w0)
             acc = alloc([tile_h, tile_w], NumericType.Float32, MemorySpace.TSM)
-            fill(acc, 0)
-            bias_tile = alloc([tile_w], NumericType.Float32, MemorySpace.TSM)
-            fill(bias_tile, 0)
-            bias_row = reshape(bias_tile, [1, tile_w])
-            bias_full = alloc([tile_h, tile_w], NumericType.Float32, MemorySpace.TSM)
+            acc_eff = view(acc, [0, 0], [cur_h, cur_w], [1, 1])
             for k0 in loop(0, k_size, tile_k):
                 cur_k = min(tile_k, k_size - k0)
                 lhs_tile = alloc([tile_h, tile_k], NumericType.Float32, MemorySpace.TSM)
                 rhs_tile = alloc([tile_k, tile_w], NumericType.Float32, MemorySpace.TSM)
-                fill(lhs_tile, 0)
-                fill(rhs_tile, 0)
+                lhs_eff = view(lhs_tile, [0, 0], [cur_h, cur_k], [1, 1])
+                rhs_eff = view(rhs_tile, [0, 0], [cur_k, cur_w], [1, 1])
                 lhs_region = view(lhs, [h0, k0], [cur_h, cur_k], [1, 1])
                 rhs_region = view(rhs, [k0, w0], [cur_k, cur_w], [1, 1])
-                deslice(lhs_tile, lhs_region, [0, 0], [cur_h, cur_k], [1, 1])
-                deslice(rhs_tile, rhs_region, [0, 0], [cur_k, cur_w], [1, 1])
-                partial = alloc([tile_h, tile_w], NumericType.Float32, MemorySpace.TSM)
-                kernel.matmul(partial, lhs_tile, rhs_tile)
-                kernel.add(acc, acc, partial)
+                deslice(lhs_eff, lhs_region, [0, 0], [cur_h, cur_k], [1, 1])
+                deslice(rhs_eff, rhs_region, [0, 0], [cur_k, cur_w], [1, 1])
+                kernel.matmul(acc_eff, lhs_eff, rhs_eff, acc=(k0 != 0))
             if bias is not None:
+                bias_tile = alloc([tile_w], NumericType.Float32, MemorySpace.TSM)
+                bias_eff = view(bias_tile, [0], [cur_w], [1])
                 bias_region = view(bias, [w0], [cur_w], [1])
-                deslice(bias_tile, bias_region, [0], [cur_w], [1])
-                broadcast(bias_full, bias_row)
-                kernel.add(acc, acc, bias_full)
-            out_region = view(acc, [0, 0], [cur_h, cur_w], [1, 1])
-            deslice(out, out_region, [h0, w0], [cur_h, cur_w], [1, 1])
+                deslice(bias_eff, bias_region, [0], [cur_w], [1])
+                bias_row = reshape(bias_eff, [1, cur_w])
+                bias_full = alloc([tile_h, tile_w], NumericType.Float32, MemorySpace.TSM)
+                bias_full_eff = view(bias_full, [0, 0], [cur_h, cur_w], [1, 1])
+                broadcast(bias_full_eff, bias_row)
+                kernel.add(acc_eff, acc_eff, bias_full_eff)
+            deslice(out, acc_eff, [h0, w0], [cur_h, cur_w], [1, 1])
 
 
 def _symbolic_compile_args() -> tuple[MatmulCompileArg, ...]:
@@ -183,23 +183,27 @@ def _assert_dynamic_memory_ir(
 
 
 def _assert_accumulator_source(source: str) -> None:
-    """校验源码中 accumulator 先累加后最终写回。
+    """校验源码中 accumulator 使用动态 acc matmul 后最终写回。
 
 
     功能说明:
-    - 只检查公开生成源码的关键顺序：`fill -> matmul -> add -> output deslice`。
-    - 防止 K loop partial 直接覆盖 output tile 的回退。
+    - 检查公开生成源码不再依赖 padding fill 或 partial add。
+    - 要求 `matmul<...>` 在 output deslice 前出现，且源码保留动态 acc 条件 marker。
 
     使用示例:
     - `_assert_accumulator_source(source)`
     """
 
-    fill_index = source.index("fill<")
     matmul_index = source.index("matmul<")
-    add_index = source.index("add<")
-    output_deslice_index = source.index("deslice(arg0", add_index)
-    if not (fill_index < matmul_index < add_index < output_deslice_index):
-        raise AssertionError("matmul accumulator source order must be fill -> matmul -> add -> output deslice")
+    output_deslice_index = source.index("deslice(arg0", matmul_index)
+    if "fill<" in source:
+        raise AssertionError("effective view matmul source must not contain padding fill")
+    if "matmul<" not in source or "deslice(arg0" not in source:
+        raise AssertionError("effective view matmul source missing compute or output writeback")
+    if not (matmul_index < output_deslice_index):
+        raise AssertionError("effective view matmul must compute before output deslice")
+    if "!=" not in source and "symbol.ne" not in source:
+        raise AssertionError("effective view matmul source must preserve dynamic acc condition")
 
 
 def _assert_source_dump_matches(source: str) -> None:
