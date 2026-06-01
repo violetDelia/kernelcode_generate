@@ -1,31 +1,24 @@
 #pragma once
 
-#include <cuda_runtime.h>
+// 功能说明:
+// - 定义 cuda_sm86 target 单入口 include，透传 include/api 的统一 Arch 声明并汇聚 CUDA 后端实现层。
+// - 调用方通过该 aggregate header 获得 CUDA generated source 所需的 `cuda_sm86::ArgSlot` backend ABI。
+//
+// API 列表:
+// - `namespace cuda_sm86`
+// - `struct cuda_sm86::ArgSlot`
+//
+// helper 清单:
+// - 无；当前文件只做公开聚合入口，不承接独立 helper 实现。
+//
+// 使用示例:
+// - #include "include/cuda_sm86/cuda_sm86.cuh"
+// - extern "C" int kg_execute_entry(cuda_sm86::ArgSlot* slots, unsigned long long count);
+//
+// 关联文件:
+// - spec/include/cuda_sm86/cuda_sm86.md
+// - include/api/Arch.h
+// - include/cuda_sm86/Arch.h
 
-#include <cstdio>
-#include <cstdlib>
-
-namespace cuda_sm86 {
-
-struct ArgSlot {
-  int kind;
-  void *data;
-  long long *shape;
-  long long *stride;
-  unsigned long long rank;
-  int dtype_code;
-  long long int_value;
-  double float_value;
-};
-
-inline void check_cuda(cudaError_t status, const char *expr, const char *file, int line) {
-  if (status == cudaSuccess) {
-    return;
-  }
-  std::fprintf(stderr, "cuda_runtime_failed: %s at %s:%d for %s\n", cudaGetErrorString(status), file, line, expr);
-  std::abort();
-}
-
-#define KG_CUDA_CHECK(expr) ::cuda_sm86::check_cuda((expr), #expr, __FILE__, __LINE__)
-
-}  // namespace cuda_sm86
+#include "include/api/Arch.h"
+#include "include/cuda_sm86/Arch.h"

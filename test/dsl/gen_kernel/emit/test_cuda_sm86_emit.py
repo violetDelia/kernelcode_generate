@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import ast
 from collections.abc import Callable
 from pathlib import Path
 import sys
@@ -197,21 +198,34 @@ def test_cuda_sm86_emit_module_returns_source_bundle() -> None:
     assert "mma.sync.aligned.m16n8k8" in source
     assert "tensor_core_probe" not in source
     assert "acc += lhs" not in source
-    assert "kg_cuda_sm86_device_alloc" in source
-    assert "kg_cuda_sm86_is_f32_memory" in source
+    assert "cuda_sm86::detail::device_alloc" in source
+    assert "cuda_sm86::detail::is_f32_memory" in source
     assert 'extern "C" int kg_execute_entry(cuda_sm86::ArgSlot* slots, unsigned long long count)' in source
     assert "launch_matmul_entry" not in source
     assert "matmul_f32_kernel" not in source
     include_text = Path("include/cuda_sm86/cuda_sm86.cuh").read_text(encoding="utf-8")
+    arch_text = Path("include/cuda_sm86/Arch.h").read_text(encoding="utf-8")
+    arch_api_block = arch_text.split("API 列表:", 1)[1].split("helper 清单:", 1)[0]
+    spec_text = Path("spec/include/cuda_sm86/cuda_sm86.md").read_text(encoding="utf-8")
+    spec_api_block = spec_text.split("## API 列表", 1)[1].split("## 文档信息", 1)[0]
     assert "matmul_f32_kernel" not in include_text
     assert "DeviceMemory" not in include_text
     assert "GmView" not in include_text
     assert "SharedTile" not in include_text
     assert "MmaTileConfig" not in include_text
-    assert "device_alloc" not in include_text
-    assert "copy_host_to_device" not in include_text
-    assert "copy_device_to_host" not in include_text
-    assert "is_f32_memory" not in include_text
+    assert '#include "include/api/Arch.h"' in include_text
+    assert '#include "include/cuda_sm86/Arch.h"' in include_text
+    assert "template <typename T>" not in include_text
+    assert "`struct cuda_sm86::ArgSlot`" in arch_api_block
+    assert "cuda_sm86::detail" not in arch_api_block
+    assert "`struct cuda_sm86::ArgSlot`" in spec_api_block
+    assert "cuda_sm86::detail" not in spec_api_block
+    assert "cuda_sm86::detail::*" in arch_text
+    assert "namespace detail" in arch_text
+    assert "device_alloc" in arch_text
+    assert "copy_host_to_device" in arch_text
+    assert "copy_device_to_host" in arch_text
+    assert "is_f32_memory" in arch_text
     assert "include/npu_demo" not in source
     assert "npu_demo::" not in source
     assert "get_dynamic_memory<TLM" not in source
@@ -319,3 +333,151 @@ def test_cuda_sm86_gen_kernel_dump_writes_bundle_artifacts(tmp_path: Path) -> No
     assert 'kg_cuda_sm86_selected_kernel_kind = "matmul"' in kernel_source
     assert "kg_cuda_sm86_run_matmul" in kernel_source
     assert "cuda_sm86::ArgSlot" in header_source
+
+
+def test_cuda_sm86_emit_package_structure_matches_plan() -> None:
+    """验证 CUDA SM86 emit package 结构符合计划。
+
+    功能说明:
+    - 只读取文件和 AST，不 import / direct call `cuda_sm86` package 内部 helper。
+    - 锁定 root 聚合、唯一 `module.py` handler、依赖方向和空 `__all__`。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py -k package_structure
+    """
+
+    root = Path("kernel_gen/dsl/gen_kernel/emit/cuda_sm86")
+    expected_files = {
+        "__init__.py",
+        "constants.py",
+        "detect.py",
+        "include.py",
+        "module.py",
+        "runtime.py",
+        "source_bundle.py",
+        "kernel/__init__.py",
+        "kernel/binary_elewise.py",
+        "kernel/exp.py",
+        "kernel/img2col2d.py",
+        "kernel/matmul.py",
+        "kernel/reduce.py",
+    }
+    for rel_path in expected_files:
+        assert (root / rel_path).is_file(), rel_path
+    assert Path("include/cuda_sm86/Arch.h").is_file()
+
+    init_text = (root / "__init__.py").read_text(encoding="utf-8")
+    for token in (
+        "_COMMON_CUDA_RUNTIME_SOURCE",
+        "_MATMUL_CUDA_SOURCE",
+        "_CONV2D_CUDA_SOURCE",
+        "_FLASH_ATTENTION_CUDA_SOURCE",
+        "kg_cuda_sm86_run_",
+        "mma.sync",
+        "__global__",
+        "@emit_c_impl",
+    ):
+        assert token not in init_text, token
+
+    assert not (root / "source").exists()
+
+    emit_files: list[str] = []
+    include_files: list[str] = []
+    imports_by_path: dict[str, set[str]] = {}
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        modules: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                for decorator in node.decorator_list:
+                    current = decorator
+                    while isinstance(current, ast.Call):
+                        current = current.func
+                    parts: list[str] = []
+                    while isinstance(current, ast.Attribute):
+                        parts.append(current.attr)
+                        current = current.value
+                    if isinstance(current, ast.Name):
+                        parts.append(current.id)
+                    decorator_name = ".".join(reversed(parts))
+                    if decorator_name.endswith("emit_c_impl"):
+                        emit_files.append(path.as_posix())
+                    if decorator_name.endswith("emit_c_include_impl"):
+                        include_files.append(path.as_posix())
+            if isinstance(node, ast.Import):
+                modules.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                prefix = "." * node.level
+                if node.module:
+                    base = prefix + node.module
+                    parts = base.split(".")
+                    if len(parts) >= 3 and parts[-2] == "kernel":
+                        modules.add(base)
+                    else:
+                        modules.add(base)
+                else:
+                    for alias in node.names:
+                        modules.add(prefix + alias.name)
+        imports_by_path[path.as_posix()] = modules
+
+    assert emit_files == [
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/binary_elewise.py",
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/exp.py",
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/img2col2d.py",
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/matmul.py",
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/reduce.py",
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/module.py",
+    ]
+    assert include_files == ["kernel_gen/dsl/gen_kernel/emit/cuda_sm86/include.py"]
+    allowed_imports = {
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/__init__.py": {".include", ".kernel", ".module"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/constants.py": set(),
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/module.py": {".constants", ".detect", ".source_bundle"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/source_bundle.py": {".constants", ".detect", ".runtime", ".kernel.matmul", ".kernel.img2col2d", ".kernel.reduce"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/detect.py": {".constants"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/include.py": {".constants"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/runtime.py": {".constants"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/__init__.py": {".binary_elewise", ".exp", ".img2col2d", ".matmul", ".reduce"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/binary_elewise.py": {"..constants"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/exp.py": {"..constants"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/img2col2d.py": {"..constants", "..detect"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/matmul.py": {"..constants", "..detect"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/reduce.py": {"..constants", "..detect"},
+    }
+    package_root = ".".join(("kernel_gen", "dsl", "gen_kernel", "emit", "cuda_sm86"))
+    for rel, allowed in allowed_imports.items():
+        imports = {
+            item
+            for item in imports_by_path[rel]
+            if item.startswith(".") or item.startswith(package_root)
+        }
+        assert imports <= allowed, (rel, imports, allowed)
+
+    for package_init in (root / "__init__.py", root / "kernel" / "__init__.py"):
+        tree = ast.parse(package_init.read_text(encoding="utf-8"), filename=str(package_init))
+        exports: list[ast.expr] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets):
+                exports.append(node.value)
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "__all__":
+                exports.append(node.value)
+        assert exports, f"missing __all__: {package_init}"
+        assert isinstance(exports[-1], ast.List) and not exports[-1].elts, f"__all__ must be empty list: {package_init}"
+
+    internal_children = {"constants", "detect", "module", "runtime", "source_bundle", "kernel"}
+    forbidden_internal_path = package_root + "."
+    for test_file in Path("test").rglob("*.py"):
+        tree = ast.parse(test_file.read_text(encoding="utf-8"), filename=str(test_file))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert not alias.name.startswith(forbidden_internal_path), (test_file, alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if module.startswith(forbidden_internal_path):
+                    raise AssertionError((test_file, module))
+                if module == package_root:
+                    for alias in node.names:
+                        assert alias.name not in internal_children, (test_file, module, alias.name)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                assert forbidden_internal_path not in node.value, (test_file, node.value)

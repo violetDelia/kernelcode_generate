@@ -17,8 +17,10 @@ API 列表:
 from __future__ import annotations
 
 import ast
+import importlib
 import re
 import subprocess
+import typing
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -435,3 +437,32 @@ def testcurrent_diff_module_helpers_use_private_prefix_or_public_api() -> None:
     assert not violations, "current diff module helper prefix violations:\n" + "\n".join(
         violation.render() for violation in violations
     )
+
+
+def testcuda_sm86_package_local_api_type_hints_resolve() -> None:
+    """Assert CUDA SM86 package-local API annotations resolve.
+
+    功能说明:
+    - 使用 `typing.get_type_hints(...)` 锁定当前 diff 新增 SourceBundle / kernel source builder 签名。
+    - 本测试只做 repo conformance 反射核对，不调用 CUDA SM86 package-local helper 生成源码。
+
+    使用示例:
+    - pytest.main(["test/repo_conformance/test_private_api_boundaries.py", "-k", "cuda_sm86_package_local_api_type_hints"])
+    """
+
+    package_name = ".".join(("kernel_gen", "dsl", "gen_kernel", "emit", "cuda_sm86"))
+    detect_module = importlib.import_module(package_name + ".detect")
+    source_bundle_module = importlib.import_module(package_name + ".source_bundle")
+    matmul_module = importlib.import_module(package_name + ".kernel.matmul")
+    img2col2d_module = importlib.import_module(package_name + ".kernel.img2col2d")
+    reduce_module = importlib.import_module(package_name + ".kernel.reduce")
+    expected_summary_type = detect_module.CudaSm86ModuleSummary
+    functions = (
+        source_bundle_module.build_cuda_sm86_source_bundle,
+        matmul_module.emit_matmul_source,
+        img2col2d_module.emit_conv2d_source,
+        reduce_module.emit_flash_attention_source,
+    )
+    for function in functions:
+        hints = typing.get_type_hints(function)
+        assert hints["summary"] is expected_summary_type
