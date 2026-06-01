@@ -322,9 +322,11 @@ class _DmaCanonicalizationRules:
         """判断 op 是否完整覆盖 `dma.fill` 的 target。
 
         功能说明:
-        - 仅承认后续 `dma.fill`、安全 `dma.copy`、标量 `dma.broadcast` 三类 full-overwrite。
+        - 承认后续 `dma.fill`、安全 `dma.copy`、标量 `dma.broadcast` 与 `dma.deslice` full-overwrite。
         - `dma.copy` 的 source 不得是 target 或 target 的一跳 view/subview/reshape alias。
         - `dma.broadcast` 只有非 memory 标量 source 可覆盖 target。
+        - `dma.deslice` 只按 target SSA value 判定覆盖，不按 sizes 做 partial/full 推理；
+          若后续同 block 仍读取 target 或 target 的一跳 alias，则保留 fill。
 
         使用示例:
         - if _DmaCanonicalizationRules.full_overwrites_fill_target(candidate, fill.target): ...
@@ -338,9 +340,62 @@ class _DmaCanonicalizationRules:
         if op .name =="dma.fill":
             return op .target is target
         if op .name =="dma.copy":
-            return op .target is target and not _DmaCanonicalizationRules.is_target_or_direct_alias(op .source ,target )
+            if op .target is not target :
+                return False
+            if op .source is target :
+                return False
+            owner =op .source .owner
+            if isinstance (owner ,Operation ):
+                if owner .name =="dma.view" and owner .source is target:
+                    return False
+                if owner .name =="dma.subview" and len (owner .source )==1 and owner .source [0 ]is target:
+                    return False
+                if owner .name =="dma.reshape" and owner .source is target:
+                    return False
+            return True
         if op .name =="dma.broadcast":
             return op .target is target and not isinstance (op .source .type ,NnMemoryType )
+        if op .name =="dma.deslice":
+            if op .target is not target :
+                return False
+            candidate =op .next_op
+            while candidate is not None :
+                if len (candidate .regions )!=0 :
+                    return False
+                effects =get_effects (candidate )
+                if effects is None :
+                    for operand in candidate .operands :
+                        if operand is target :
+                            return False
+                        owner =operand .owner
+                        if isinstance (owner ,Operation ):
+                            if owner .name =="dma.view" and owner .source is target:
+                                return False
+                            if owner .name =="dma.subview" and len (owner .source )==1 and owner .source [0 ]is target:
+                                return False
+                            if owner .name =="dma.reshape" and owner .source is target:
+                                return False
+                    candidate =candidate .next_op
+                    continue
+                for effect in effects :
+                    if effect .kind !=MemoryEffectKind .READ :
+                        continue
+                    value =effect .value
+                    if value is None :
+                        return False
+                    if isinstance (value ,SSAValue ):
+                        if value is target :
+                            return False
+                        owner =value .owner
+                        if isinstance (owner ,Operation ):
+                            if owner .name =="dma.view" and owner .source is target:
+                                return False
+                            if owner .name =="dma.subview" and len (owner .source )==1 and owner .source [0 ]is target:
+                                return False
+                            if owner .name =="dma.reshape" and owner .source is target:
+                                return False
+                candidate =candidate .next_op
+            return True
         return False
 
     @staticmethod

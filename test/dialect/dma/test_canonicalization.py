@@ -58,7 +58,63 @@ def test_dma_fill_canonicalization_removes_safe_full_overwrites() -> None:
     )
     assert _count_ops(broadcast_module, DmaFillOp) == 0
 
-def test_dma_fill_canonicalization_keeps_reads_partial_and_aliases() -> None:
+    part_type = _make_memory_type(shape=_dim_array([1, 4]), stride=_dim_array([4, 1]))
+    target_op = _TestOp(result_types=[memory_type])
+    part_op = _TestOp(result_types=[part_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c4_op = _make_symbol_value_op(4)
+    deslice_module = _canonicalized_module(
+        [
+            target_op,
+            part_op,
+            c0_op,
+            c1_op,
+            c4_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            DmaDesliceOp(
+                target_op.results[0],
+                part_op.results[0],
+                [c0_op.results[0], c0_op.results[0]],
+                [c1_op.results[0], c4_op.results[0]],
+                [c1_op.results[0], c1_op.results[0]],
+                memory_type,
+            ),
+        ]
+    )
+    assert _count_ops(deslice_module, DmaFillOp) == 0
+
+    dynamic_type = _make_memory_type(shape=_dim_array(["M", "N", "K"]), stride=_dim_array(["N*K", "K", 1]))
+    target_op = _TestOp(result_types=[dynamic_type])
+    source_op = _TestOp(result_types=[dynamic_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    m_op = _make_symbol_value_op("M")
+    n_op = _make_symbol_value_op("N")
+    k_op = _make_symbol_value_op("K")
+    dynamic_deslice_module = _canonicalized_module(
+        [
+            target_op,
+            source_op,
+            c0_op,
+            c1_op,
+            m_op,
+            n_op,
+            k_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            DmaDesliceOp(
+                target_op.results[0],
+                source_op.results[0],
+                [c0_op.results[0], c0_op.results[0], c0_op.results[0]],
+                [m_op.results[0], n_op.results[0], k_op.results[0]],
+                [c1_op.results[0], c1_op.results[0], c1_op.results[0]],
+                dynamic_type,
+            ),
+        ]
+    )
+    assert _count_ops(dynamic_deslice_module, DmaFillOp) == 0
+
+def test_dma_fill_canonicalization_keeps_reads_and_aliases() -> None:
     memory_type = _make_memory_type()
 
     target_op = _TestOp(result_types=[memory_type])
@@ -81,13 +137,43 @@ def test_dma_fill_canonicalization_keeps_reads_partial_and_aliases() -> None:
     part_type = _make_memory_type(shape=_dim_array([1, 4]), stride=_dim_array([4, 1]))
     target_op = _TestOp(result_types=[memory_type])
     part_op = _TestOp(result_types=[part_type])
+    other_op = _TestOp(result_types=[memory_type])
     c0_op = _make_symbol_value_op(0)
     c1_op = _make_symbol_value_op(1)
     c4_op = _make_symbol_value_op(4)
-    partial_writer = _canonicalized_module(
+    read_before_deslice = _canonicalized_module(
         [
             target_op,
             part_op,
+            other_op,
+            c0_op,
+            c1_op,
+            c4_op,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            DmaCopyOp(other_op.results[0], target_op.results[0]),
+            DmaDesliceOp(
+                target_op.results[0],
+                part_op.results[0],
+                [c0_op.results[0], c0_op.results[0]],
+                [c1_op.results[0], c4_op.results[0]],
+                [c1_op.results[0], c1_op.results[0]],
+                memory_type,
+            ),
+        ]
+    )
+    assert _count_ops(read_before_deslice, DmaFillOp) == 1
+
+    target_op = _TestOp(result_types=[memory_type])
+    part_op = _TestOp(result_types=[part_type])
+    other_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c4_op = _make_symbol_value_op(4)
+    read_after_deslice = _canonicalized_module(
+        [
+            target_op,
+            part_op,
+            other_op,
             c0_op,
             c1_op,
             c4_op,
@@ -100,9 +186,10 @@ def test_dma_fill_canonicalization_keeps_reads_partial_and_aliases() -> None:
                 [c1_op.results[0], c1_op.results[0]],
                 memory_type,
             ),
+            DmaCopyOp(other_op.results[0], target_op.results[0]),
         ]
     )
-    assert _count_ops(partial_writer, DmaFillOp) == 1
+    assert _count_ops(read_after_deslice, DmaFillOp) == 1
 
     target_op = _TestOp(result_types=[memory_type])
     c0_op = _make_symbol_value_op(0)
