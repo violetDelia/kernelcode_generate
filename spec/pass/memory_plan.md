@@ -68,7 +68,7 @@
 - `dma.reshape` result alias `source`。
 - `dma.subview` result alias `source`。
 - `dma.reinterpret` result alias `source`。
-- `dma.deslice` result alias `target` operand，不 alias `source` operand。
+- `dma.deslice` 是目标式写回 op，不产生 result；target 生命周期读取 source use，但 source 不归入 target alias closure。
 - 其它 memory-producing op 不纳入 alias closure；若使用 alloc alias 且无法证明 ownership，必须失败。
 
 ### free 插入
@@ -138,7 +138,7 @@ pass_obj = build_registered_pass("memory-plan", {"insert-free": "true", "reuse":
 | TC-MPLAN-004A | free 早于 alias 后续 use | alias closure 继续使用时报 `MemoryPlanInvalidLifetime: dma.free appears before last use` |
 | TC-MPLAN-005 | 重复 free | 报 `MemoryPlanInvalidLifetime: multiple dma.free for same allocation` |
 | TC-MPLAN-006 | view/reshape/subview/reinterpret alias | alias 最后 use 后插入 free |
-| TC-MPLAN-007 | deslice target alias | result alias target，source 不归入 target alias closure |
+| TC-MPLAN-007 | deslice target writeback | target 写回不让 source 归入 target alias closure |
 | TC-MPLAN-008 | nested symbol.for | inner alloc free 在 inner body 末尾，outer alloc free 在 nested use 后 |
 | TC-MPLAN-008A | nested symbol.for 内 use-after-free | 同一 nested anchor 内 free 早于后续 use 时失败 |
 | TC-MPLAN-008B | nested symbol.for 内释放外层 alloc | nested body 内 free 不能作为 owner-block alloc 的合法最终释放 |

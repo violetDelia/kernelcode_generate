@@ -1025,7 +1025,7 @@ def test_npu_demo_lowering_pipeline_static_dump_uses_pool_without_multi_buffer(t
 
 # TC-PIPELINE-115
 # 功能说明: 验证 npu-demo-lowering dump 中 symbol-hoist-pipeline 阶段按组合 pattern 合同收口。
-# 测试目的: 通过公开 dump marker 断言 P2 writer retarget、P1 alias descriptor 顺序和 symbol 外提事实。
+# 测试目的: 通过公开 dump marker 断言 alias descriptor 顺序、symbol 外提和 acc fill 删除事实。
 # 使用示例: pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k symbol_hoist_pipeline_pattern
 # 对应功能实现文件路径: kernel_gen/passes/hoist/symbol_hoist_pipeline.py
 # 对应 spec 文件路径: spec/pass/symbol_hoist_pipeline.md
@@ -1040,6 +1040,7 @@ def test_npu_demo_lowering_pipeline_symbol_hoist_pipeline_pattern_dump(
     - 通过公开 `set_dump_dir(...)` 与 `build_npu_demo_lowering_pipeline(...)` 生成真实 dump。
     - 不绑定固定 dump 编号，只按首行 marker 定位 `symbol-hoist-pipeline` stage。
     - 断言旧 `symbol-loop-hoist` 与 `hoist-dma-alias-ops` 的可观察结果在组合 pass stage 中出现。
+    - 断言 kernel-decompose 后的最终 symbol hoist stage 不再保留 acc 初始化 fill。
 
     使用示例:
     - pytest -q test/passes/pipeline/test_npu_demo_lowering.py -k symbol_hoist_pipeline_pattern
@@ -1069,20 +1070,20 @@ def test_npu_demo_lowering_pipeline_symbol_hoist_pipeline_pattern_dump(
     markers = _dump_stage_markers(tmp_path)
     p1_alias_before_consumer = re.search(
         r'(?P<alias>%\d+) = "dma\.reinterpret"\([^\n]+\)\s+<\{[^\n]*\}> : [^\n]+\n'
-        r'\s+%\d+ = "dma\.deslice"\(%\d+, (?P=alias),',
+        r'\s+"dma\.deslice"\(%\d+, (?P=alias),',
         final_hoist_text,
     )
-    broadcast_flat_source = re.search(
-        r'(?P<flat>%\d+) = "dma\.alloc"\(\) <\{[^}]+\}> : \(\) -> '
-        r'!nn\.memory<\[#C\d+\], \[#C1\], f32, #nn\.space<tsm>>'
-        r'[\s\S]+?"dma\.fill"\((?P=flat), %\d+\)'
-        r'[\s\S]+?"dma\.broadcast"\(%\d+, (?P=flat)\)',
+    broadcast_effective_source = re.search(
+        r'"dma\.broadcast"\(%\d+, %\d+\)[^\n]* : '
+        r'\(!nn\.memory<\[#S\d+, #S\d+\], \[#S\d+, #C1\], f32, #nn\.space<tsm>>, '
+        r'!nn\.memory<\[#S\d+\], \[#C1\], f32, #nn\.space<tsm>>\) -> \(\)',
         final_hoist_text,
     )
     guard_index = final_hoist_text.index("memory.get_data")
     cast_index = final_hoist_text.index("symbol.cast")
     cond_index = final_hoist_text.index("symbol.ne")
     first_loop_index = final_hoist_text.index("symbol.for")
+    first_stage_loop_index = first_hoist_text.index("symbol.for")
 
     assert first_hoist_text.startswith("symbol-hoist-pipeline\n")
     assert final_hoist_text.startswith("symbol-hoist-pipeline\n")
@@ -1090,9 +1091,11 @@ def test_npu_demo_lowering_pipeline_symbol_hoist_pipeline_pattern_dump(
     assert "symbol-loop-hoist" not in markers
     assert "hoist-dma-alias-ops" not in markers
     assert guard_index < cast_index < cond_index < first_loop_index
-    assert final_hoist_text.index("arith.constant") < first_loop_index
+    assert first_hoist_text.index("arith.constant") < first_stage_loop_index
+    assert '"dma.fill"' in first_hoist_text
+    assert '"dma.fill"' not in final_hoist_text
     assert p1_alias_before_consumer is not None
-    assert broadcast_flat_source is not None
+    assert broadcast_effective_source is not None
     assert "source_low" not in final_hoist_text
     assert "target_low" not in final_hoist_text
     assert "DmaViewDesliceGroupingPattern" not in final_hoist_text

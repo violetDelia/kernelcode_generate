@@ -20,7 +20,7 @@
 - `class DmaLoadOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
 - `class DmaStoreOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
 - `class DmaSliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
-- `class DmaDesliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue], result_type: NnMemoryType)`
+- `class DmaDesliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
 - `class DmaSubviewOp(source: SSAValue | Operation, offset: SSAValue | Operation, size: SSAValue | Operation, stride: SSAValue | Operation, result_type: NnMemoryType)`
 - `class DmaViewOp(source: SSAValue | Operation, offsets: Sequence[SSAValue], shape: Sequence[SSAValue], stride: Sequence[SSAValue], result_type: NnMemoryType)`
 - `class DmaReshapeOp(source: SSAValue | Operation, shape: Sequence[SSAValue], result_type: NnMemoryType)`
@@ -278,7 +278,7 @@ op = DmaFillOp(target, value)
 - `dma.fill` 只负责标量写入，不承担 memory-memory 广播、逐元素算术或 dtype promotion。
 - verifier 只检查 `dma.fill` 的局部类型与接口合法性；“该 `target` 是否在下游 IR 中被实际消费”属于链路级验收边界。对 mixed add 当前最低通过口径，必须出现 `dma.alloc + dma.fill + downstream use(target)` 的完整片段，`users=[]` 的 dead temporary memory 不能计为通过。
 - `CanonicalizePass` 可以删除被后续同 block sibling 完整覆盖的前序 `dma.fill`。full-overwrite 集合包含后续 `dma.fill`、source 不是同一 target 或其一跳 `dma.view` / `dma.subview` / `dma.reshape` alias 的 `dma.copy`、source 是非 memory 标量的 `dma.broadcast`，以及 target SSA value 与前序 `dma.fill` target 相同的 `dma.deslice`。
-- `dma.deslice` 作为 `dma.fill` full-overwrite writer 时，不按 `sizes == target.shape` 判断；writer target 必须是同一 SSA value，且同 block 局部扫描内不能在 deslice 前后观察到 target 或其一跳 alias 的数据读取。若 deslice 后仍有 target 数据读取，前序 fill 必须保留，因为当前公开 IR 仍可能观察到 fill 提供的旧值。
+- `dma.deslice` 作为 `dma.fill` full-overwrite writer 时，writer target 必须是同一 SSA value。若 `offsets=0`、`sizes == target.shape`、`strides=1` 可机械证明完整覆盖，则允许 deslice 后读取 target 或其一跳 alias 并删除前序 fill；否则同 block 局部扫描内不能在 deslice 前后观察到 target 或其一跳 alias 的数据读取。若非完整覆盖 deslice 后仍有 target 数据读取，前序 fill 必须保留，因为当前公开 IR 仍可能观察到 fill 提供的旧值。
 - `dma.fill` canonicalization 遇到 target 在覆盖前被读取、partial writer、region op、unknown side effect、self-copy、target-derived alias read、memory-source broadcast 或无法证明完整覆盖的 op 时必须保留前序 `dma.fill`。
 
 - 返回值：
@@ -583,9 +583,9 @@ op = DmaSliceOp(target, source, offsets, sizes, strides)
 - 返回类型为无返回值；当前 op result 数量固定为 `0`。
 - 可 lowering 到“对子视图目标执行 copy/insert”的等价目标形式。
 
-### `class DmaDesliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue], result_type: NnMemoryType)`
+### `class DmaDesliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
 
-- api：`class DmaDesliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue], result_type: NnMemoryType)`
+- api：`class DmaDesliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
 
 - 功能说明：
 
@@ -599,12 +599,11 @@ op = DmaSliceOp(target, source, offsets, sizes, strides)
 - `offsets`：variadic `!symbol.int<#symbol.expr<expr>>` 或 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>` operand；每一维表示 `target` 对应维度的回写起始索引，长度必须与 `target.rank` 一致。
 - `sizes`：variadic `!symbol.int<#symbol.expr<expr>>` operand；每一维表示回写区域在 `target` 对应维度的大小，长度必须与 `target.rank` 一致。
 - `strides`：variadic `!symbol.int<#symbol.expr<expr>>` operand；每一维表示 `target` 对应维度的回写步长，长度必须与 `target.rank` 一致，当前每一维必须具有单位步长语义。
-- `result_type`：结果类型，必须为 `!nn.memory<...>`，且必须与 `target` 类型一致。
 
 - 使用示例：
 
 ```python
-op = DmaDesliceOp(target, source, offsets, sizes, strides, result_type)
+op = DmaDesliceOp(target, source, offsets, sizes, strides)
 ```
 
 - 注意事项：
@@ -617,8 +616,8 @@ op = DmaDesliceOp(target, source, offsets, sizes, strides, result_type)
 
 - 返回值：
 
-- 返回类型为 `!nn.memory<...>`；当前 op result 数量固定为 `1`。
-- 返回值语义为“回写完成后的目标内存”，其类型必须与 `target` 完全一致。
+- 返回类型为无返回值；当前 op result 数量固定为 `0`，写回结果由 `target` 承载。
+- 写回完成后的目标内存仍由原 `target` SSA value 表达。
 - 可 lowering 到 `tensor.insert_slice`、`memref.copy` 或等价目标。
 
 ### `class DmaSubviewOp(source: SSAValue | Operation, offset: SSAValue | Operation, size: SSAValue | Operation, stride: SSAValue | Operation, result_type: NnMemoryType)`
@@ -830,7 +829,7 @@ op = DmaCastOp(source, result_type)
 - 验证 `dma.view/reshape/reinterpret` 的元素类型/空间一致性与形状约束，其中 `dma.view` 覆盖动态 `offsets`（允许 `!symbol.iter<start = #symbol.expr<0>, end = #symbol.expr<N>, step = #symbol.expr<1>>`）、`shape/stride`（`!symbol.int<#symbol.expr<expr>>`）operand 与边界校验，`dma.reshape` 覆盖动态 `shape` 的 `!symbol.int<#symbol.expr<expr>>` operand，`dma.reinterpret` 覆盖线性 offset、result shape/stride exact 匹配和 byte-pool bounds。
 - 验证 `dma.subview` 的一维 `i8` backing memory、一维 typed result、元素单位 `offset/size/stride`、space 一致性、size 对齐与静态 byte bounds 边界。
 - 验证 `dma.view` 在 DSL helper / 合同链路中不仅要生成 op，还要求返回 `Memory` 类型与 `dma.view.result_type` 一致；当直接 `func.return` 时，`EXPECTED_MEMORY` 比对必须成功。
-- 验证 `dma.fill` dead-fill canonicalization 只删除安全 full-overwrite 前的前序 fill，其中 full-overwrite 覆盖 `dma.fill`、安全 `dma.copy`、标量 `dma.broadcast` 与同 target `dma.deslice`，并保留 target read、partial writer、self-copy、自读写 store、region/unknown side effect、target-derived alias read 与 memory-source broadcast 场景。
+- 验证 `dma.fill` dead-fill canonicalization 只删除安全 full-overwrite 前的前序 fill，其中 full-overwrite 覆盖 `dma.fill`、安全 `dma.copy`、标量 `dma.broadcast`、同 target `dma.deslice`，以及可证明完整覆盖的 `dma.deslice -> target alias read`；并保留 target read、partial writer、self-copy、自读写 store、region/unknown side effect、target-derived alias read 与 memory-source broadcast 场景。
 - 验证 `dma.view` / `dma.reshape` canonicalization 只删除机械 identity alias op，且仅在前序 reshape result 唯一用于后序 reshape 时合并一跳连续 reshape，并保留 byte-pool typed view、byte-pool nonzero-offset view、shape/stride 改变 view、rank 改变 reshape、shape 改变 reshape与动态不可机械证明 reshape。
 - 验证默认连续 stride 在符号维度（如 `N` / `M*N` / `min(tile, extent - iter)` / `?`）下的推导、等价判断与退化规则已覆盖。
 - 验证 `dma.cast` 只允许改变元素类型，且保持 `shape/stride/space` 不变。
@@ -858,7 +857,7 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-012 | 边界/异常 | `dma.cast` 结果约束 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_cast_layout_or_space_mismatch`。 | “`dma.cast` 结果约束”场景按公开错误语义失败或被拒绝。 | `test_dma_cast_layout_or_space_mismatch` |
 | TC-DMA-013 | 内存/DMA | `dma.alloc` 合法路径 | 准备公开 Memory/DMA 参数，包括 shape、stride、dtype、space 或切片元信息。 | 运行 `test_dma_alloc_verify_success`。 | 内存类型、布局、搬运结果或 verifier 行为体现“`dma.alloc` 合法路径”场景。 | `test_dma_alloc_verify_success` |
 | TC-DMA-014 | 边界/异常 | `dma.view` 约束 | 准备触发该错误路径的公开输入或非法参数组合。 | 运行 `test_dma_view_type_or_space_mismatch`。 | “`dma.view` 约束”场景按公开错误语义失败或被拒绝。 | `test_dma_view_type_or_space_mismatch` |
-| TC-DMA-014B | pass 改写 | `dma.fill` dead-fill canonicalization 正例 | 准备同 block 中 `fill -> fill`、`fill -> copy`、`fill -> scalar broadcast`、静态 `fill -> deslice(target, source)` 与动态三维 `fill -> deslice(target, source)` 的公开 IR。 | 运行 `test_dma_fill_canonicalization_removes_safe_full_overwrites`。 | 前序 `dma.fill` 仅在安全完整覆盖场景被 `CanonicalizePass` 删除；`dma.deslice` 正例不按 `sizes == target.shape` 判断。 | `test_dma_fill_canonicalization_removes_safe_full_overwrites` |
+| TC-DMA-014B | pass 改写 | `dma.fill` dead-fill canonicalization 正例 | 准备同 block 中 `fill -> fill`、`fill -> copy`、`fill -> scalar broadcast`、静态 `fill -> deslice(target, source)`、动态三维 `fill -> deslice(target, source)` 与 `fill -> full deslice -> alias read` 的公开 IR。 | 运行 `test_dma_fill_canonicalization_removes_safe_full_overwrites`。 | 前序 `dma.fill` 仅在安全完整覆盖场景被 `CanonicalizePass` 删除；`dma.deslice` 可证明完整覆盖时允许后续 target alias read。 | `test_dma_fill_canonicalization_removes_safe_full_overwrites` |
 | TC-DMA-014C | pass 改写 | `dma.fill` dead-fill canonicalization read/alias 反例 | 准备覆盖前 target read、`fill -> read target -> deslice(target, source)`、`fill -> deslice(target, source) -> read target`、target-derived view/reshape alias read 的公开 IR。 | 运行 `test_dma_fill_canonicalization_keeps_reads_and_aliases`。 | 前序 `dma.fill` 保留，避免误删仍被读取或无法证明完整覆盖的初始化。 | `test_dma_fill_canonicalization_keeps_reads_and_aliases` |
 | TC-DMA-014C1 | pass 改写 | `dma.fill` dead-fill canonicalization side-effect 反例 | 准备 self-copy、`dma.store` 自读写、`dma.store` partial writer、region op 与 unknown side effect 的公开 IR。 | 运行 `test_dma_fill_canonicalization_keeps_self_read_write_and_side_effect_boundaries`。 | 前序 `dma.fill` 在不可证明安全的自读写、partial、region 或 unknown side effect 前保留。 | `test_dma_fill_canonicalization_keeps_self_read_write_and_side_effect_boundaries` |
 | TC-DMA-014C2 | pass 改写 | `dma.fill` dead-fill canonicalization memory-source alias 反例 | 准备 target 一跳 `dma.subview` alias read、memory-source broadcast 读 target/view/subview alias 的公开 IR。 | 运行 `test_dma_fill_canonicalization_keeps_subview_and_memory_broadcast_aliases`。 | 前序 `dma.fill` 在 memory-source broadcast 或 subview alias read 场景保留。 | `test_dma_fill_canonicalization_keeps_subview_and_memory_broadcast_aliases` |

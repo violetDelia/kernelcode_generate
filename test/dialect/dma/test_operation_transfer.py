@@ -119,14 +119,8 @@ def test_dma_transfer_ops_reject_element_space_or_result_mismatch() -> None:
         offsets,
         sizes,
         strides,
-        deslice_target_type,
     )
     with pytest.raises(KernelCodeError, match="dma.deslice element_type mismatch"):
-        op.verify()
-
-    bad_result_type = _make_memory_type(shape=_dim_array([8, 4]), space="shared")
-    op = DmaDesliceOp(deslice_target, deslice_source, offsets, sizes, strides, bad_result_type)
-    with pytest.raises(KernelCodeError, match="dma.deslice result must match target type"):
         op.verify()
 
 def test_dma_broadcast_accepts_memory_source() -> None:

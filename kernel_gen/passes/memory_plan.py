@@ -313,7 +313,7 @@ def _alias_result_from_source(op: Operation, source: SSAValue) -> SSAValue | Non
 
     功能说明:
     - `dma.view`、`dma.reshape`、`dma.subview`、`dma.reinterpret` 的 result alias source。
-    - `dma.deslice` 的 result alias target，不 alias source。
+    - `dma.deslice` 是目标式写回 op，不产生 alias result。
 
     使用示例:
     - new_alias = _alias_result_from_source(op, alloc.result)
@@ -326,8 +326,6 @@ def _alias_result_from_source(op: Operation, source: SSAValue) -> SSAValue | Non
     if isinstance(op, DmaSubviewOp) and any(_same_value(operand, source) for operand in op.source):
         return op.result
     if isinstance(op, DmaReinterpretOp) and _same_value(op.source, source):
-        return op.result
-    if isinstance(op, DmaDesliceOp) and _same_value(op.target, source):
         return op.result
     return None
 

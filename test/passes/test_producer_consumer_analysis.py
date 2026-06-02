@@ -109,7 +109,7 @@ def test_producer_consumer_analysis_alias_and_deslice_chain() -> None:
 
     功能说明:
     - `dma.view` / `dma.reinterpret` 不生产、不消费，只让 result alias source。
-    - `dma.deslice` 消费 source producer，同时生产 target，并让 result alias target。
+    - `dma.deslice` 消费 source producer，同时生产 target；后续 target 读取消费该生产事件。
 
     使用示例:
     - pytest -q test/passes/test_producer_consumer_analysis.py -k alias_and_deslice
@@ -125,8 +125,8 @@ def test_producer_consumer_analysis_alias_and_deslice_chain() -> None:
     %lhs_view = "dma.view"(%lhs, %c0, %c0, %c4, %c4, %c1, %c1) <{{operandSegmentSizes = array<i32: 1, 2, 2, 2>}}> : ({_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> {_LOCAL_TYPE}
     %lhs_reinterpret = "dma.reinterpret"(%lhs_view, %c0, %c4, %c4, %c4, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2>}}> : ({_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>) -> {_LOCAL_TYPE}
     "kernel.matmul"(%out, %lhs_reinterpret, %rhs) {{space = #nn.space<tsm>}} : ({_LOCAL_TYPE}, {_LOCAL_TYPE}, {_LOCAL_TYPE}) -> ()
-    %dst_after = "dma.deslice"(%dst, %out, %c0, %c0, %c4, %c4, %c1, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2, 2>}}> : ({_GLOBAL_TYPE}, {_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> {_GLOBAL_TYPE}
-    "dma.copy"(%z, %dst_after) : ({_GLOBAL_TYPE}, {_GLOBAL_TYPE}) -> ()
+    "dma.deslice"(%dst, %out, %c0, %c0, %c4, %c4, %c1, %c1) <{{operandSegmentSizes = array<i32: 1, 1, 2, 2, 2>}}> : ({_GLOBAL_TYPE}, {_LOCAL_TYPE}, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<0>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<4>>, !symbol.int<#symbol.expr<1>>, !symbol.int<#symbol.expr<1>>) -> ()
+    "dma.copy"(%z, %dst) : ({_GLOBAL_TYPE}, {_GLOBAL_TYPE}) -> ()
     func.return
   }}
 }}

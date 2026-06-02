@@ -271,9 +271,9 @@ store/deslice -> 把 source 写回 target 指定窗口
   ```python
     from kernel_gen.operation import dma
 
-    result = dma.deslice(target=target, source=source, offsets=offsets, sizes=sizes, strides=strides)
-    ```
-- 功能说明：执行 DMA operation `deslice` 的公开 Python 入口，返回或修改 `Memory` 对象。
+    dma.deslice(target=target, source=source, offsets=offsets, sizes=sizes, strides=strides)
+  ```
+- 功能说明：执行 DMA operation `deslice` 的公开 Python 入口，写回 `target` 且不返回 `Memory`。
 - 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
 
 ### `view(source: Memory, offset: ShapeInput, size: ShapeInput, stride: ShapeInput) -> Memory`
@@ -508,9 +508,9 @@ store/deslice -> 把 source 写回 target 指定窗口
   ```python
     import kernel_gen.operation as operation
 
-    result = operation.deslice(target=target, source=source, offsets=offsets, sizes=sizes, strides=strides)
-    ```
-- 功能说明：执行 DMA operation `kernel_gen.operation.deslice` 的公开 Python 入口，返回或修改 `Memory` 对象。
+    operation.deslice(target=target, source=source, offsets=offsets, sizes=sizes, strides=strides)
+  ```
+- 功能说明：执行 DMA operation `kernel_gen.operation.deslice` 的公开 Python 入口，写回 `target` 且不返回 `Memory`。
 - 注意事项：输入 `Memory`、shape、stride、offset、size、dtype 和 space 必须满足 `symbol_variable` 公开合同；返回值式 helper 不暴露 lowering 内部 op。
 
 ### `kernel_gen.operation.view(source: Memory, offset: ShapeInput, size: ShapeInput, stride: ShapeInput) -> Memory`

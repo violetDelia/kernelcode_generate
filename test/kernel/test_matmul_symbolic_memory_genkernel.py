@@ -62,23 +62,33 @@ _MATMUL_DD_N = _MATMUL_DD_SHAPE_RNG.randint(160, 256)
 _MATMUL_DD_TILE = random.Random(2026051711).choice(((80, 96, 72), (72, 88, 56), (48, 96, 64)))
 
 
-def _assert_source_uses_accumulator(source: str) -> None:
+def _assert_source_uses_accumulator(source: str, *, expect_initial_fill: bool = True) -> None:
     """校验 npu_demo source 中 accumulator 顺序。
 
 
     功能说明:
     - 当前测试文件内 helper，只服务公开 demo 输出的源码文本断言。
-    - 要求 `fill -> matmul -> add -> output deslice`，避免 K loop partial 直接覆盖 output。
+    - 默认要求 `fill -> matmul -> add -> output deslice`，避免 K loop partial 直接覆盖 output。
+    - dynamic acc 形态要求无 `fill<`，但 `matmul(... acc)` 仍早于 bias add 与 output deslice。
 
     使用示例:
     - `_assert_source_uses_accumulator(source)`
     """
 
-    fill_index = source.index("fill<")
     matmul_index = source.index("matmul<")
-    add_index = source.index("add<")
-    output_deslice_index = source.index("deslice(arg0", add_index)
-    assert fill_index < matmul_index < add_index < output_deslice_index
+    if expect_initial_fill:
+        fill_index = source.index("fill<")
+        add_index = source.index("add<")
+        output_deslice_index = source.index("deslice(arg0", add_index)
+        assert fill_index < matmul_index < add_index < output_deslice_index
+        return
+    output_deslice_index = source.index("deslice(arg0", matmul_index)
+    add_index = source.find("add<", matmul_index, output_deslice_index)
+    assert "fill<" not in source
+    assert "/*acc*/" in source
+    assert matmul_index < output_deslice_index
+    if add_index != -1:
+        assert matmul_index < add_index < output_deslice_index
 
 
 def _read_first_ir(case_name: str) -> str:
@@ -86,7 +96,7 @@ def _read_first_ir(case_name: str) -> str:
 
     功能说明:
     - 只读取 `run_lowering_demo(...)` 公开写出的 `kernel/dump/<case>/01-first-ir.mlir`。
-    - 用于验证 DSL/kernel 生成侧已产生 fixed upper-bound scratch，而不是依赖后续 pass 掩盖。
+    - 用于验证 DSL/kernel 生成侧 scratch 形态，而不是依赖后续 pass 掩盖。
 
     使用示例:
     - `_read_first_ir("test/matmul/dynamic_symbolic_tile_reduce")`
@@ -117,6 +127,29 @@ def _assert_matmul_first_ir_uses_fixed_upper_bound_scratch(case_name: str) -> No
     assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S2, #S6\]', first_ir) is None
     assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S6, #S4\]', first_ir) is None
     assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S4\], \[#C1\]', first_ir) is None
+
+
+def _assert_matmul_first_ir_uses_effective_tile_scratch(case_name: str) -> None:
+    """校验 matmul static/static first-ir 使用当前有效 tile scratch 并保留显式 fill。
+
+    功能说明:
+    - 锁定 accumulator、bias tile、lhs/rhs staging 与 partial 都按 `min(tile, remaining)` 有效区域分配。
+    - 锁定 kernel 实现侧仍生成 acc、bias、lhs、rhs 四个显式 fill，由后续 pass 证明删除冗余 fill。
+
+    使用示例:
+    - `_assert_matmul_first_ir_uses_effective_tile_scratch("test/matmul/static_static_tile_reduce")`
+    """
+
+    first_ir = _read_first_ir(case_name)
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S2, #S4\], \[#S4, #C1\]', first_ir)
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S4\], \[#C1\]', first_ir)
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S2, #S6\], \[#S6, #C1\]', first_ir)
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#S6, #S4\], \[#S4, #C1\]', first_ir)
+    assert first_ir.count('"dma.fill"') == 4
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#C48, #C80\]', first_ir) is None
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#C48, #C56\]', first_ir) is None
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#C56, #C80\]', first_ir) is None
+    assert re.search(r'"dma\.alloc".*-> !nn\.memory<\[#C80\], \[#C1\]', first_ir) is None
 
 
 def _assert_python_source_uses_kernel_out_first(fn) -> None:
@@ -436,7 +469,7 @@ def test_static_static_matmul_demo_keeps_static_memory_and_static_tile_reduce() 
     module_text = str(module)
 
     _assert_python_source_uses_kernel_out_first(matmul_inputs_static_tile_static_kernel)
-    _assert_matmul_first_ir_uses_fixed_upper_bound_scratch("test/matmul/static_static_tile_reduce")
+    _assert_matmul_first_ir_uses_effective_tile_scratch("test/matmul/static_static_tile_reduce")
     assert f"!nn.memory<[#symbol.expr<{_MATMUL_SS_M}>, #symbol.expr<{_MATMUL_SS_N}>]" in module_text
     assert f"!nn.memory<[#symbol.expr<{_MATMUL_SS_M}>, #symbol.expr<{_MATMUL_SS_K}>]" in module_text
     assert f"!nn.memory<[#symbol.expr<{_MATMUL_SS_K}>, #symbol.expr<{_MATMUL_SS_N}>]" in module_text
@@ -450,7 +483,7 @@ def test_static_static_matmul_demo_keeps_static_memory_and_static_tile_reduce() 
     assert "symbol.ne" in module_text
     assert "!nn.memory<[#symbol.expr<H>, #symbol.expr<W>]" not in module_text
     assert "!nn.memory<[#symbol.expr<s1>" not in module_text
-    _assert_source_uses_accumulator(source)
+    _assert_source_uses_accumulator(source, expect_initial_fill=False)
 
 
 def test_matmul_target_scripts_execute_and_tile_reduce_still_passes() -> None:

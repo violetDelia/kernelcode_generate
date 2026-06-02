@@ -462,13 +462,13 @@ def test_rewrite_mixed_memory_and_scalar_results_preserves_scalar_return() -> No
 
 
 # BROTP-013
-# 功能说明: 验证 `dma.deslice` 这类 result/target 分离的写回 op 会同步改写到前置 out 参数。
-# 测试目的: 锁定 return SSA 被替换时，真实写回 operand 也必须切到 `arg0`，避免源码仍写旧 target 入参。
-# 使用示例: pytest -q test/passes/test_buffer_results_to_out_params.py -k test_rewrite_deslice_result_retargets_writeback_to_front_out_param
+# 功能说明: 验证返回 deslice target 时写回 op 会同步改写到前置 out 参数。
+# 测试目的: 锁定 target return SSA 被替换时，真实写回 operand 也必须切到 `arg0`，避免源码仍写旧 target 入参。
+# 使用示例: pytest -q test/passes/test_buffer_results_to_out_params.py -k test_rewrite_deslice_target_return_retargets_writeback_to_front_out_param
 # 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
 # 对应 spec 文件路径: spec/pass/buffer_results_to_out_params.md
 # 对应测试文件路径: test/passes/test_buffer_results_to_out_params.py
-def test_rewrite_deslice_result_retargets_writeback_to_front_out_param() -> None:
+def test_rewrite_deslice_target_return_retargets_writeback_to_front_out_param() -> None:
     source_type = _make_memory_type_with_shape((2, 2), space="local")
     target_type = _make_memory_type_with_shape((2, 2))
     block = Block(arg_types=[source_type, target_type])
@@ -481,12 +481,11 @@ def test_rewrite_deslice_result_retargets_writeback_to_front_out_param() -> None
         [c0.result, c0.result],
         [c2.result, c2.result],
         [c1.result, c1.result],
-        target_type,
     )
-    return_op = func.ReturnOp(deslice_op.result)
+    return_op = func.ReturnOp(block.args[1])
     block.add_ops([c0, c1, c2, deslice_op, return_op])
     func_op = func.FuncOp(
-        "deslice_result",
+        "deslice_target_return",
         FunctionType.from_lists([source_type, target_type], [target_type]),
         Region(block),
         arg_attrs=_arg_attrs("src", "target"),

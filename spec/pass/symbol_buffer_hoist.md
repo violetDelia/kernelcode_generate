@@ -119,7 +119,7 @@ symbol.for value {
 ```text
 symbol.for value {
   %buf = "dma.alloc"(%tm, %tn) : (value) -> !nn.memory<value>
-  %out2 = "dma.deslice"(%out, %buf, value) : (value) -> !nn.memory<value>
+  "dma.deslice"(%out, %buf, value) : (value) -> ()
   "dma.free"(%buf) : (value) -> ()
 }
 ```
@@ -129,7 +129,7 @@ symbol.for value {
 ```text
 %buf = "dma.alloc"(%tm, %tn) : (value) -> !nn.memory<value>
 symbol.for value {
-  %out2 = "dma.deslice"(%out, %buf, value) : (value) -> !nn.memory<value>
+  "dma.deslice"(%out, %buf, value) : (value) -> ()
 }
 "dma.free"(%buf) : (value) -> ()
 ```

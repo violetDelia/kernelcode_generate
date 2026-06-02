@@ -514,7 +514,7 @@ def test_memory_plan_tracks_reinterpret_alias() -> None:
 
 
 # TC-MPLAN-007
-# 功能说明: 验证 deslice result alias target 且不把 source 纳入 target alias closure。
+# 功能说明: 验证 deslice target 写回不把 source 纳入 target 生命周期 closure。
 # 使用示例: pytest -q test/passes/test_memory_plan.py -k test_memory_plan_tracks_deslice_target_alias_not_source
 # 对应功能实现文件路径: kernel_gen/passes/memory_plan.py
 # 对应 spec 文件路径: spec/pass/memory_plan.md
@@ -532,9 +532,8 @@ def test_memory_plan_tracks_deslice_target_alias_not_source() -> None:
         [zero0.result, zero1.result],
         [two.result, four.result],
         [one0.result, one1.result],
-        mem_type,
     )
-    target_broadcast = DmaBroadcastOp(deslice.result, scalar_target.result)
+    target_broadcast = DmaBroadcastOp(target_alloc.result, scalar_target.result)
     source_broadcast = DmaBroadcastOp(source_alloc.result, scalar_source.result)
     module = _module_with_ops(
         "deslice_alias",
@@ -591,7 +590,7 @@ def test_memory_plan_nested_symbol_for_places_inner_and_outer_free() -> None:
         [one0.result, one1.result],
         mem_type,
     )
-    deslice = DmaDesliceOp(view.result, source_alloc.result, [zero0.result, zero1.result], [two.result, four.result], [one0.result, one1.result], mem_type)
+    deslice = DmaDesliceOp(view.result, source_alloc.result, [zero0.result, zero1.result], [two.result, four.result], [one0.result, one1.result])
     outer_block.add_ops([
         outer_alloc,
         inner_start,

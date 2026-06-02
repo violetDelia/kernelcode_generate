@@ -78,7 +78,6 @@ def test_dma_fill_canonicalization_removes_safe_full_overwrites() -> None:
                 [c0_op.results[0], c0_op.results[0]],
                 [c1_op.results[0], c4_op.results[0]],
                 [c1_op.results[0], c1_op.results[0]],
-                memory_type,
             ),
         ]
     )
@@ -108,11 +107,41 @@ def test_dma_fill_canonicalization_removes_safe_full_overwrites() -> None:
                 [c0_op.results[0], c0_op.results[0], c0_op.results[0]],
                 [m_op.results[0], n_op.results[0], k_op.results[0]],
                 [c1_op.results[0], c1_op.results[0], c1_op.results[0]],
-                dynamic_type,
             ),
         ]
     )
     assert _count_ops(dynamic_deslice_module, DmaFillOp) == 0
+
+    target_op = _TestOp(result_types=[memory_type])
+    source_op = _TestOp(result_types=[memory_type])
+    other_op = _TestOp(result_types=[memory_type])
+    c0_op = _make_symbol_value_op(0)
+    c1_op = _make_symbol_value_op(1)
+    c2_op = _make_symbol_value_op(2)
+    c4_op = _make_symbol_value_op(4)
+    alias = DmaReshapeOp(target_op.results[0], [c2_op.results[0], c4_op.results[0]], memory_type)
+    full_deslice_then_alias_read = _canonicalized_module(
+        [
+            target_op,
+            source_op,
+            other_op,
+            c0_op,
+            c1_op,
+            c2_op,
+            c4_op,
+            alias,
+            DmaFillOp(target_op.results[0], c0_op.results[0]),
+            DmaDesliceOp(
+                target_op.results[0],
+                source_op.results[0],
+                [c0_op.results[0], c0_op.results[0]],
+                [c2_op.results[0], c4_op.results[0]],
+                [c1_op.results[0], c1_op.results[0]],
+            ),
+            DmaCopyOp(other_op.results[0], alias.result),
+        ]
+    )
+    assert _count_ops(full_deslice_then_alias_read, DmaFillOp) == 0
 
 def test_dma_fill_canonicalization_keeps_reads_and_aliases() -> None:
     memory_type = _make_memory_type()
@@ -157,7 +186,6 @@ def test_dma_fill_canonicalization_keeps_reads_and_aliases() -> None:
                 [c0_op.results[0], c0_op.results[0]],
                 [c1_op.results[0], c4_op.results[0]],
                 [c1_op.results[0], c1_op.results[0]],
-                memory_type,
             ),
         ]
     )
@@ -184,7 +212,6 @@ def test_dma_fill_canonicalization_keeps_reads_and_aliases() -> None:
                 [c0_op.results[0], c0_op.results[0]],
                 [c1_op.results[0], c4_op.results[0]],
                 [c1_op.results[0], c1_op.results[0]],
-                memory_type,
             ),
             DmaCopyOp(other_op.results[0], target_op.results[0]),
         ]

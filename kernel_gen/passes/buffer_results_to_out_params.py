@@ -44,7 +44,7 @@ from xdsl.pattern_rewriter import (
 )
 from xdsl.rewriter import InsertPoint
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp
+from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import Symbol
 from kernel_gen.passes.common import ensure_builtin_module
@@ -237,10 +237,6 @@ class BufferResultsToOutParamsFuncPattern(RewritePattern):
         ]
         memory_return_values = [return_op.arguments[index] for index in memory_indices]
         for new_out_arg, return_value in zip(new_out_args, memory_return_values, strict=True):
-            owner = getattr(return_value, "owner", None)
-            if isinstance(owner, DmaDesliceOp) and owner.result == return_value:
-                owner.operands[0] = new_out_arg
-                rewriter.notify_op_modified(owner)
             rewriter.replace_all_uses_with(return_value, new_out_arg)
         rewriter.erase_op(return_op)
         rewriter.insert_op(func.ReturnOp(*scalar_return_values), InsertPoint.at_end(block))

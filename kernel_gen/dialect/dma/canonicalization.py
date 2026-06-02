@@ -318,6 +318,32 @@ class _DmaCanonicalizationRules:
         return True
 
     @staticmethod
+    def deslice_covers_target (op :Operation ,target :SSAValue )->bool :
+        """判断 `dma.deslice` 是否可证明完整覆盖 target。
+
+        功能说明:
+        - 要求 offsets 全 0、strides 全 1、sizes 与 target.shape 完全一致。
+        - 用于允许 `fill -> full deslice -> target alias read` 删除前序 fill。
+
+        使用示例:
+        - if _DmaCanonicalizationRules.deslice_covers_target(op, target): ...
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/dma/
+        - 功能实现: kernel_gen/dialect/dma/
+        """
+
+        if op .name !="dma.deslice" or op .target is not target:
+            return False
+        target_type =_DmaCanonicalizationHelpers .verify_memory_type (target .type ,"target")
+        return (
+        _DmaCanonicalizationRules.all_symbol_operands_static_value(op .offsets ,0 )
+        and _DmaCanonicalizationRules.symbol_operands_match_layout(op .sizes ,target_type .shape )
+        and _DmaCanonicalizationRules.all_symbol_operands_static_value(op .strides ,1 )
+        )
+
+    @staticmethod
     def full_overwrites_fill_target (op :Operation ,target :SSAValue )->bool :
         """判断 op 是否完整覆盖 `dma.fill` 的 target。
 
@@ -325,8 +351,8 @@ class _DmaCanonicalizationRules:
         - 承认后续 `dma.fill`、安全 `dma.copy`、标量 `dma.broadcast` 与 `dma.deslice` full-overwrite。
         - `dma.copy` 的 source 不得是 target 或 target 的一跳 view/subview/reshape alias。
         - `dma.broadcast` 只有非 memory 标量 source 可覆盖 target。
-        - `dma.deslice` 只按 target SSA value 判定覆盖，不按 sizes 做 partial/full 推理；
-          若后续同 block 仍读取 target 或 target 的一跳 alias，则保留 fill。
+        - `dma.deslice` 若可证明完整覆盖 target，允许后续读取覆盖后的 target 或一跳 alias；
+          否则仍要求 deslice 后同 block 不再读取 target 或其一跳 alias。
 
         使用示例:
         - if _DmaCanonicalizationRules.full_overwrites_fill_target(candidate, fill.target): ...
@@ -358,6 +384,8 @@ class _DmaCanonicalizationRules:
         if op .name =="dma.deslice":
             if op .target is not target :
                 return False
+            if _DmaCanonicalizationRules.deslice_covers_target(op ,target ):
+                return True
             candidate =op .next_op
             while candidate is not None :
                 if len (candidate .regions )!=0 :

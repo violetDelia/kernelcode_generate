@@ -267,6 +267,103 @@ builtin.module {
     assert '"dma.free"' not in actual
 
 
+def test_kernel_aggregate_fuses_tail_reduce_owner_with_intervening_frees() -> None:
+    """验证 tail K 维与 staging free 不阻断聚合。
+
+    功能说明:
+    - lhs/rhs 的 contracting 维为 `min(step, remaining)`，用于有效 tile 尾块。
+    - `kernel.matmul` 与累加 add 中间夹着不触碰 tmp/out 的 `dma.free`。
+    - 聚合后保留 lhs/rhs staging free，删除 tmp 生命周期并生成 fusion。
+
+    使用示例:
+    - pytest -q test/passes/test_kernel_aggregate.py -k test_kernel_aggregate_fuses_tail_reduce_owner_with_intervening_frees
+    """
+
+    case_text = """// COMPILE_ARGS: --pass "kernel-aggregate={matmul-acc=true}"
+#M = #symbol.expr<8>
+#N = #symbol.expr<16>
+#Step = #symbol.expr<32>
+#K = #symbol.expr<min(32, 96 - iter<0,96,32>)>
+#S = #symbol.expr<0>
+#E = #symbol.expr<96>
+#ItK = #symbol.iter<start = #S, end = #E, step = #Step>
+builtin.module {
+  func.func @tail_with_intervening_free_case(
+      %out : !nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>) {
+    %s = symbol.const 0 : !symbol.int<#S>
+    %e = symbol.const 96 : !symbol.int<#E>
+    %k = symbol.const 32 : !symbol.int<#Step>
+    %m = symbol.const 8 : !symbol.int<#M>
+    %n = symbol.const 16 : !symbol.int<#N>
+    symbol.for %ki = %s to %e step %k {iter = #ItK} {
+      %rem = symbol.sub %e, %ki : !symbol.int<#E>, !symbol.iter<start = #S, end = #E, step = #Step> -> !symbol.int<#symbol.expr<96 - iter<0,96,32>>>
+      %cur = symbol.min %k, %rem : !symbol.int<#Step>, !symbol.int<#symbol.expr<96 - iter<0,96,32>>> -> !symbol.int<#K>
+      %lhs = "dma.alloc"(%m, %cur) <{operandSegmentSizes = array<i32: 2>}> : (!symbol.int<#M>, !symbol.int<#K>) -> !nn.memory<[#M, #K], [#K, #symbol.expr<1>], f32, #nn.space<tlm1>>
+      %rhs = "dma.alloc"(%cur, %n) <{operandSegmentSizes = array<i32: 2>}> : (!symbol.int<#K>, !symbol.int<#N>) -> !nn.memory<[#K, #N], [#N, #symbol.expr<1>], f32, #nn.space<tlm2>>
+      %tmp = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>
+      "kernel.matmul"(%tmp, %lhs, %rhs) {space = #nn.space<tsm>} : (!nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#M, #K], [#K, #symbol.expr<1>], f32, #nn.space<tlm1>>, !nn.memory<[#K, #N], [#N, #symbol.expr<1>], f32, #nn.space<tlm2>>) -> ()
+      "dma.free"(%lhs) : (!nn.memory<[#M, #K], [#K, #symbol.expr<1>], f32, #nn.space<tlm1>>) -> ()
+      "dma.free"(%rhs) : (!nn.memory<[#K, #N], [#N, #symbol.expr<1>], f32, #nn.space<tlm2>>) -> ()
+      "kernel.binary_elewise"(%out, %out, %tmp) {kind = "add", space = #nn.space<tsm>} : (!nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>) -> ()
+      "dma.free"(%tmp) : (!nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>) -> ()
+    }
+    func.return
+  }
+}"""
+    actual = _run_kernel_aggregate_case("tail_with_intervening_free", case_text)
+    assert '"kernel.matmul_fusion"' in actual
+    assert '"kernel.matmul"' not in actual
+    assert '"kernel.binary_elewise"' not in actual
+    assert actual.count('"dma.free"') == 2
+
+
+def test_kernel_aggregate_fuses_tmp_reinterpret_alias() -> None:
+    """验证 tmp 经公开 alias op 后仍可聚合。
+
+    功能说明:
+    - tmp root alloc 只被单个 `dma.reinterpret` alias 和最终 free 使用。
+    - matmul/add 只使用 alias SSA，满足受控生命周期时可删除 root alloc、alias 与 tmp free。
+
+    使用示例:
+    - pytest -q test/passes/test_kernel_aggregate.py -k test_kernel_aggregate_fuses_tmp_reinterpret_alias
+    """
+
+    case_text = """// COMPILE_ARGS: --pass "kernel-aggregate={matmul-acc=true}"
+#M = #symbol.expr<8>
+#N = #symbol.expr<16>
+#K = #symbol.expr<32>
+#S = #symbol.expr<0>
+#E = #symbol.expr<32>
+#ItK = #symbol.iter<start = #S, end = #E, step = #K>
+builtin.module {
+  func.func @tmp_reinterpret_alias_case(
+      %out : !nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>,
+      %lhs : !nn.memory<[#M, #K], [#K, #symbol.expr<1>], f32, #nn.space<tsm>>,
+      %rhs : !nn.memory<[#K, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>) {
+    %s = symbol.const 0 : !symbol.int<#S>
+    %e = symbol.const 32 : !symbol.int<#E>
+    %k = symbol.const 32 : !symbol.int<#K>
+    %zero = symbol.const 0 : !symbol.int<#S>
+    %m = symbol.const 8 : !symbol.int<#M>
+    %n = symbol.const 16 : !symbol.int<#N>
+    %one = symbol.const 1 : !symbol.int<#symbol.expr<1>>
+    symbol.for %ki = %s to %e step %k {iter = #ItK} {
+      %tmp_root = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>
+      %tmp = "dma.reinterpret"(%tmp_root, %zero, %m, %n, %n, %one) <{operandSegmentSizes = array<i32: 1, 1, 2, 2>}> : (!nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>, !symbol.int<#S>, !symbol.int<#M>, !symbol.int<#N>, !symbol.int<#N>, !symbol.int<#symbol.expr<1>>) -> !nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>
+      "kernel.matmul"(%tmp, %lhs, %rhs) {space = #nn.space<tsm>} : (!nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#M, #K], [#K, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#K, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>) -> ()
+      "kernel.binary_elewise"(%out, %out, %tmp) {kind = "add", space = #nn.space<tsm>} : (!nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>, !nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>) -> ()
+      "dma.free"(%tmp_root) : (!nn.memory<[#M, #N], [#N, #symbol.expr<1>], f32, #nn.space<tsm>>) -> ()
+    }
+    func.return
+  }
+}"""
+    actual = _run_kernel_aggregate_case("tmp_reinterpret_alias", case_text)
+    assert '"kernel.matmul_fusion"' in actual
+    assert '"dma.reinterpret"' not in actual
+    assert '"dma.alloc"' not in actual
+    assert '"dma.free"' not in actual
+
+
 def test_kernel_aggregate_rejects_multiple_k_owner_candidates() -> None:
     """验证多个 K owner 候选 fail-fast。
 

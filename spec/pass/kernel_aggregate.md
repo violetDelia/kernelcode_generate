@@ -3,7 +3,7 @@
 ## 功能简介
 
 - 定义 `kernel-aggregate` pass 的公开合同。
-- `KernelAggregatePass(matmul_acc=True)` 将同 block 相邻 `kernel.matmul(tmp,lhs,rhs)` 与 `kernel.binary_elewise(out,out,tmp){kind="add"}` 聚合为 `kernel.matmul_fusion(out,lhs,rhs,acc,fusion_list="kernel.matmul,kernel.binary_elewise.add")`；tmp alloc/free 可位于同 block 或包住目标 loop 的祖先 owner block。
+- `KernelAggregatePass(matmul_acc=True)` 将同 block 中 `kernel.matmul(tmp,lhs,rhs)` 与后续 `kernel.binary_elewise(out,out,tmp){kind="add"}` 聚合为 `kernel.matmul_fusion(out,lhs,rhs,acc,fusion_list="kernel.matmul,kernel.binary_elewise.add")`；两者之间只允许夹杂不触碰 tmp/out 的 `dma.free`，tmp alloc/free 可位于同 block 或包住目标 loop 的祖先 owner block。
 - `acc` 由 K/reduce owner `symbol.for` 的 iterator 与 start 通过 `symbol.ne` 生成。
 
 ## API 列表
@@ -24,12 +24,12 @@
 - 唯一专属 option 为 `matmul-acc=true|false|1|0|yes|no|on|off`，默认 `false`。
 - unknown option 或非法 bool 必须失败，错误短语包含 `kernel-aggregate options`。
 - `matmul_acc=False` 时 no-op。
-- `matmul_acc=True` 时仅匹配同 block 相邻 `kernel.matmul` 后接 `kernel.binary_elewise(kind="add")` 的形态。
+- `matmul_acc=True` 时仅匹配同 block 中 `kernel.matmul` 后接 `kernel.binary_elewise(kind="add")` 的形态；两者之间若存在 op，只允许是不触碰 tmp/out 的 `dma.free`。
 - 命中时生成的 `kernel.matmul_fusion` 必须携带固定 `fusion_list = "kernel.matmul,kernel.binary_elewise.add"` 字符串 metadata；该 metadata 不改变后续 decompose 语义。
 - add 必须是 `out = out + tmp`，其中 `tmp` 是 matmul out。
-- tmp 必须来自唯一 `dma.alloc`，只有 matmul 写、add 读和唯一 `dma.free` use；extra use、alias use、metadata use、缺 free 或多 free 均 no-op。
+- tmp 必须来自唯一 `dma.alloc`，或来自该 alloc 的唯一 `dma.view/dma.reinterpret` alias；direct tmp 只能有 matmul 写、add 读和唯一 `dma.free` use，alias tmp 要求 root alloc 仅有该 alias 与唯一 free use、alias 仅有 matmul/add use；extra use、metadata use、缺 free 或多 free 均 no-op。
 - tmp alloc/free 位于祖先 owner block 时，必须证明 owner block 内 `dma.alloc` 早于承载 matmul/add 的 owner loop，且唯一 `dma.free` 晚于该 owner loop；无法证明时 no-op。
-- K/reduce owner 必须唯一可证明；找不到、多候选或误选 M/N loop 必须 fail-fast，错误短语包含 `kernel-aggregate matmul acc iterator`。
+- K/reduce owner 必须唯一可证明；contracting 维可等于 reduce loop step，也可为有效尾块形态 `min(step, remaining)`；找不到、多候选或误选 M/N loop 必须 fail-fast，错误短语包含 `kernel-aggregate matmul acc iterator`。
 - 多个独立 pair 可逐个聚合；共享 tmp 或歧义必须 fail-fast，错误短语包含 `kernel-aggregate ambiguous matmul fusion`。
 
 ## 使用示例
@@ -58,6 +58,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m kernel_gen.tools.ircheck case.
 | TC-PASS-KERNEL-AGGREGATE-003 | dynamic start | acc 使用公开 start SSA value | `test_kernel_aggregate_fuses_dynamic_start_reduce_owner` |
 | TC-PASS-KERNEL-AGGREGATE-004 | nested K owner | 选择 contracting dimension owner，不按最近 loop 猜测 | `test_kernel_aggregate_fuses_nested_k_owner` |
 | TC-PASS-KERNEL-AGGREGATE-004A | outer tmp lifecycle nested K owner | tmp alloc/free 位于祖先 owner block 且包住目标 K loop 时可聚合，删除 tmp 生命周期 | `test_kernel_aggregate_fuses_outer_tmp_lifetime_nested_k_owner` |
+| TC-PASS-KERNEL-AGGREGATE-004B | tail K owner + staging free | contracting 维为 `min(step, remaining)`，matmul/add 之间夹杂不触碰 tmp/out 的 staging `dma.free` | `test_kernel_aggregate_fuses_tail_reduce_owner_with_intervening_frees` |
+| TC-PASS-KERNEL-AGGREGATE-004C | tmp alias lifecycle | tmp 经唯一 `dma.reinterpret` alias 后被 matmul/add 使用，root alloc/free 生命周期受控 | `test_kernel_aggregate_fuses_tmp_reinterpret_alias` |
 | TC-PASS-KERNEL-AGGREGATE-005 | 多个 K owner 候选 | fail-fast `kernel-aggregate matmul acc iterator` | `test_kernel_aggregate_rejects_multiple_k_owner_candidates` |
 | TC-PASS-KERNEL-AGGREGATE-006 | M/N loop 误选 | fail-fast `kernel-aggregate matmul acc iterator` | `test_kernel_aggregate_rejects_m_or_n_loop_as_acc_owner` |
 | TC-PASS-KERNEL-AGGREGATE-007 | extra tmp use / matmul-acc=false | no-op | `test_kernel_aggregate_keeps_extra_tmp_use_no_op`, `test_kernel_aggregate_matmul_acc_false_no_op` |

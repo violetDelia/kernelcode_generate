@@ -631,7 +631,6 @@ def _emit_dma_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
         raise ctx.emit_error(op.name, "dma ops are cpu-only")
     source_expr = _emit_c_value(op.source, ctx)
     target_expr = _emit_c_value(op.target, ctx)
-    ctx.bind_name(op.result, target_expr)
     return _emit_dma_copy_loop_nest(
         source_expr=source_expr,
         target_expr=target_expr,

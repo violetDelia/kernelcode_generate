@@ -193,3 +193,37 @@ Diff 反推审查：
 剩余风险：
 - `dma.deslice` 后续读防线偏保守，可能保留某些后续再次 full-overwrite 后才读取 target 的 fill；该风险已在 review 记录中说明，属于安全方向 no-op，不影响本计划完成态。
 结论：merge 前核对通过；可以只暂存上述 4 个候选文件并同批提交、push、执行 `-done`。
+
+时间：2026-06-02 08:35 +0800
+经办人：榕
+任务：用户追加口径 / dma fill、dma.deslice 无 result、matmul 优化后 0 fill 合并
+任务目标：按用户最新口径合入当前主仓改动：`dma.deslice` 不再产生 result；matmul kernel 实现可保留 fill，但优化后 IR 与生成源码不得残留 fill；补强 `kernel_aggregate` 对 effective tail tile、tmp alias 与中间 free 的聚合证明，使 acc fill 能在后续 `kernel_decompose` 后消除。
+用户确认来源：
+- 2026-06-01 用户明确指出“dma slice op 应该没有 reslit dma.deslice”，本轮按 `dma.deslice` 无 result 收口。
+- 2026-06-01 用户明确指出“kernel 实现 的 fill，不要删除”，本轮保留 kernel 实现中的显式 fill。
+- 2026-06-01 用户随后明确修正“不对，优化后一个fill都不会有了”，本轮按最终优化产物 0 fill 收口。
+改动：
+- `kernel/matmul/inputs_static_tile_static.py`：静态 tile matmul 的 accumulator、lhs/rhs staging、bias staging 和 partial 使用当前 effective tile shape；kernel 实现保留显式 fill，最终由 pass 链消除。
+- `kernel_gen/dialect/dma/operation/slice.py` 及 DMA package/spec/test：`DmaDesliceOp` 改为无 result 副作用 op，发射器和 AST lowering 不再绑定 deslice result。
+- `kernel_gen/dialect/dma/canonicalization.py`：补充 full deslice 覆盖判定，使 `fill -> full deslice -> target/alias read` 可删，非 full / 不可证明场景保持保守。
+- `kernel_gen/passes/kernel_aggregate.py` 与对应 spec/test：聚合器支持 `min(step, remaining)` contracting dim、`dma.view/dma.reinterpret` tmp alias 生命周期，以及 matmul/add 之间不触碰 tmp/out 的 `dma.free` 生命周期标记。
+- `buffer_results_to_out_params`、`memory_plan`、`producer_consumer_analysis`、`launch_kernel_cost_func`、`dma_memory_hierarchy`、gen_kernel emit/spec/test 同步 `dma.deslice` 无 result 口径。
+验证：
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/dialect/dma test/kernel/test_matmul_symbolic_memory_genkernel.py test/passes/pipeline/test_npu_demo_lowering.py`：exit=0，`83 passed, 1 warning`。
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m py_compile kernel_gen/dialect/dma/canonicalization.py kernel_gen/dialect/dma/operation/slice.py kernel_gen/passes/kernel_aggregate.py kernel/matmul/inputs_static_tile_static.py test/dialect/dma/test_canonicalization.py test/kernel/test_matmul_symbolic_memory_genkernel.py`：exit=0。
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 kernel/matmul/inputs_static_tile_static.py`：exit=0；`shape=(M=206,K=225,N=165)`，`selected_tile=(M=72,N=56,K=48)`，absent/present bias `max_abs_diff=4.1961669921875e-05`；运行输出仍含既有符号表达调试噪声，不影响数值与 IR 门禁。
+- `rg -c '"dma\.fill"' .../01-first-ir.mlir .../10-canonicalize.mlir`：present/absent 的 `01-first-ir.mlir` 均为 4 个 fill，`10-canonicalize.mlir` 均为 1 个 fill。
+- `rg -n '"dma\.fill"|fill<' .../19-kernel-decompose.mlir .../30-template-name-infer.mlir .../source.cpp`：exit=1，无匹配；优化后 IR 与生成源码为 0 fill。
+- `git diff --check HEAD`：exit=0。
+Diff 反推自测：
+- DMA dialect / deslice API 变更反推运行 `test/dialect/dma`、deslice 相关发射器测试、pipeline 测试和 py_compile。
+- matmul 形态变更反推运行 `test/kernel/test_matmul_symbolic_memory_genkernel.py` 与真实 `kernel/matmul/inputs_static_tile_static.py`。
+- `kernel_aggregate` 聚合证明变更反推运行 pipeline/matmul 测试；新增测试覆盖 effective tail contracting dim、tmp alias 和中间 free。
+敏感目录：
+- 本轮不修改 `expectation/`、`.skills`、`agents/standard`、`AGENTS.md`、`TODO.md`、`DONE.md`。
+冲突处理：
+- 当前主仓位于 `main`，合入前 `origin/main=12cde564`，本地合并提交基于 latest main；无合并冲突。
+自检：
+- 公开 API 变更仅限用户确认的 `dma.deslice` 无 result；spec、实现、emit、pass 与测试已同步。
+- 未新增 ctx 能力探测；未修改合同资产；kernel 实现 fill 与优化后 0 fill 两个口径已分别由 first IR 和 final IR/source 门禁锁定。
+结论：当前追加改动可作为同批合并提交提交并推送。

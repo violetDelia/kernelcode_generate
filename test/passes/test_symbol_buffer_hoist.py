@@ -199,7 +199,6 @@ def _build_deslice_module() -> ModuleOp:
         [zero.result, zero.result],
         [tm.result, tn.result],
         [one.result, one.result],
-        target_type,
     )
     loop_block.add_ops([alloc, deslice])
     loop = SymbolForOp(zero.result, one.result, one.result, loop_block)
@@ -281,7 +280,6 @@ def _build_deslice_with_free_module() -> ModuleOp:
         [zero.result, zero.result],
         [tm.result, tn.result],
         [one.result, one.result],
-        target_type,
     )
     free = DmaFreeOp(alloc.result)
     loop_block.add_ops([alloc, deslice, free])
@@ -331,7 +329,6 @@ def _build_view_with_free_module(*, loop_dependent_offset: bool = False) -> Modu
         [loop_block.args[0], zero.result],
         [tile.result, tile.result],
         [one.result, one.result],
-        target_type,
     )
     free = DmaFreeOp(alloc.result)
     loop_block.add_ops([alloc, view, deslice, free])
@@ -380,7 +377,6 @@ def _build_reinterpret_with_free_module() -> ModuleOp:
         [loop_block.args[0], zero.result],
         [tile.result, tile.result],
         [one.result, one.result],
-        target_type,
     )
     free = DmaFreeOp(alloc.result)
     loop_block.add_ops([alloc, reinterpret, deslice, free])
@@ -443,7 +439,6 @@ def _build_reshape_with_free_module(*, loop_dependent_shape: bool = False) -> Mo
         [loop_block.args[0]],
         [sixteen.result],
         [one.result],
-        target_type,
     )
     free = DmaFreeOp(alloc.result)
     loop_block.add_ops([alloc, reshape, deslice, free])
@@ -507,7 +502,6 @@ def _build_subview_with_free_module(*, loop_dependent_size: bool = False) -> Mod
         [loop_block.args[0]],
         [sixteen.result],
         [one.result],
-        target_type,
     )
     free = DmaFreeOp(alloc.result)
     loop_block.add_ops([alloc, subview, deslice, free])
@@ -1411,7 +1405,6 @@ def _build_nested_deslice_source_module(*, with_reset: bool) -> ModuleOp:
         [zero.result, zero.result],
         [four.result, four.result],
         [one.result, one.result],
-        tile_type,
     )
     inner_block.add_op(deslice)
     inner_loop = SymbolForOp(zero.result, one.result, one.result, inner_block)

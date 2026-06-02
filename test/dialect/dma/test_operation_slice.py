@@ -94,7 +94,7 @@ def test_dma_deslice_verify_success() -> None:
     offsets = _make_symbol_operands([0, 0])
     sizes = _make_symbol_operands([2, 4])
     strides = _make_symbol_operands([1, 1])
-    op = DmaDesliceOp(target, source, offsets, sizes, strides, target_type)
+    op = DmaDesliceOp(target, source, offsets, sizes, strides)
     op.verify()
 
 def test_dma_dynamic_symbol_int_operands_valid() -> None:
@@ -117,4 +117,4 @@ def test_dma_dynamic_symbol_int_operands_valid() -> None:
     DmaLoadOp(tile, source, offsets, sizes, strides).verify()
     DmaSliceOp(tile, source, offsets, sizes, strides).verify()
     DmaStoreOp(target, tile, offsets, sizes, strides).verify()
-    DmaDesliceOp(target, tile, offsets, sizes, strides, source_type).verify()
+    DmaDesliceOp(target, tile, offsets, sizes, strides).verify()

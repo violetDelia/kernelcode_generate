@@ -40,7 +40,6 @@ def _emit_npu_demo_dma_deslice(op: DmaDesliceOp, ctx) -> str:
 
     source_expr = emit_c_value(op.source, ctx)
     target_expr = emit_c_value(op.target, ctx)
-    ctx.bind_name(op.result, target_expr)
     if not len(op.offsets) == len(op.sizes) == len(op.strides) or len(op.offsets) == 0:
         raise ctx.emit_error("dma.deslice", "layout rank mismatch")
     offset_vec = "{" + ", ".join(emit_c_value(value, ctx) for value in op.offsets) + "}"

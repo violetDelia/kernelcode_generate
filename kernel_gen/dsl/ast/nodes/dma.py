@@ -2028,11 +2028,11 @@ class DmaDesliceAST(_WriteSliceDmaAST):
         """构造 `DmaDesliceOp`。
 
         功能说明:
-        - deslice 保留 target type 作为 out-param result type。
+        - deslice 只通过 target operand 表达写回结果。
 
         使用示例:
         - op = self._build_dma_op(target, source, offsets, sizes, strides)
         """
 
         assert isinstance(target.type, NnMemoryType)
-        return DmaDesliceOp(target, source, offsets, sizes, strides, target.type)
+        return DmaDesliceOp(target, source, offsets, sizes, strides)

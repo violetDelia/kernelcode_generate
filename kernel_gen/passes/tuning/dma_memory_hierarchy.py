@@ -491,7 +491,7 @@ def _lower_gm_out_to_lm_with_writeback(
     功能说明:
     - 在 `anchor_op` 前插入 SM/LM alloc（out staging）。
     - 在 `anchor_op` 后插入两段 `dma.deslice`：`LM -> SM` 与 `SM -> GM`。
-      第二段 deslice 的 source 使用第一段 deslice 的 result，匹配 `dma.deslice` 返回“更新后 target”的语义。
+      第二段 deslice 的 source 使用第一段 deslice 写入的 SM target。
     - `LM -> SM` 使用 zero offsets + unit strides；`SM -> GM` 保留 full/window offsets/sizes，
       但回写 strides 仍统一使用 unit stride。
     - 返回：需插入到 `anchor_op` 前的 ops、需插入到 `anchor_op` 后的 ops、以及 LM out SSA value。
@@ -527,15 +527,13 @@ def _lower_gm_out_to_lm_with_writeback(
         zero_offsets,
         window_sizes,
         unit_strides,
-        sm_type,
     )
     deslice_sm_to_gm = DmaDesliceOp(
         window_target,
-        deslice_lm_to_sm.result,
+        alloc_sm.result,
         window_offsets,
         window_sizes,
         window_strides,
-        window_target.type,
     )
     post_ops: list[Operation] = [deslice_lm_to_sm, deslice_sm_to_gm]
     return pre_ops, post_ops, alloc_lm.result

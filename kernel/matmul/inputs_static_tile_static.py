@@ -7,7 +7,7 @@
 - static case 将本次随机 shape 具体化到 IR memory type。
 - tile 从候选集合随机选择，并作为 static IR tile 常量进入 loop。
 - M/N/K 均大于对应 tile，且至少触发两次 tile loop；K 维尾块通过 `min(tile_k, k_size - k0)` 覆盖。
-- K/reduce 维按 `TILE_K` 分块，每个 H/W 输出 tile 初始化 accumulator，K loop 内用 `kernel.matmul/kernel.add` 累加 partial，loop 后写回 output。
+- K/reduce 维按 `TILE_K` 分块，每个 H/W 输出 tile 按当前有效区域分配 accumulator，K loop 内用 `kernel.matmul/kernel.add` 累加 partial，loop 后写回 output。
 - 通过 `dsl_run` 真实执行，并分别校验 absent bias 的 NumPy `matmul` 与 present bias 的 `matmul + bias[None, :]`。
 
 API 列表:
@@ -83,32 +83,31 @@ def matmul_inputs_static_tile_static_kernel(
         for n0 in loop(0, n_size, tile_n):
             cur_m = min(tile_m, m_size - m0)
             cur_n = min(tile_n, n_size - n0)
-            acc = alloc([tile_m, tile_n], NumericType.Float32, MemorySpace.TSM)
+            acc = alloc([cur_m, cur_n], NumericType.Float32, MemorySpace.TSM)
             fill(acc, 0)
-            bias_tile = alloc([tile_n], NumericType.Float32, MemorySpace.TSM)
-            fill(bias_tile, 0)
-            bias_row = reshape(bias_tile, [1, tile_n])
-            bias_full = alloc([tile_m, tile_n], NumericType.Float32, MemorySpace.TSM)
+            bias_tile = alloc([cur_n], NumericType.Float32, MemorySpace.TSM)
+            bias_full = alloc([cur_m, cur_n], NumericType.Float32, MemorySpace.TSM)
             for k0 in loop(0, k_size, tile_k):
                 cur_k = min(tile_k, k_size - k0)
-                lhs_tile = alloc([tile_m, tile_k], NumericType.Float32, MemorySpace.TSM)
-                rhs_tile = alloc([tile_k, tile_n], NumericType.Float32, MemorySpace.TSM)
+                lhs_tile = alloc([cur_m, cur_k], NumericType.Float32, MemorySpace.TSM)
+                rhs_tile = alloc([cur_k, cur_n], NumericType.Float32, MemorySpace.TSM)
                 fill(lhs_tile, 0)
                 fill(rhs_tile, 0)
                 lhs_region = view(lhs, [m0, k0], [cur_m, cur_k], [1, 1])
                 rhs_region = view(rhs, [k0, n0], [cur_k, cur_n], [1, 1])
                 deslice(lhs_tile, lhs_region, [0, 0], [cur_m, cur_k], [1, 1])
                 deslice(rhs_tile, rhs_region, [0, 0], [cur_k, cur_n], [1, 1])
-                partial = alloc([tile_m, tile_n], NumericType.Float32, MemorySpace.TSM)
+                partial = alloc([cur_m, cur_n], NumericType.Float32, MemorySpace.TSM)
                 kernel.matmul(partial, lhs_tile, rhs_tile)
                 kernel.add(acc, acc, partial)
             if bias is not None:
                 bias_region = view(bias, [n0], [cur_n], [1])
+                bias_row = reshape(bias_tile, [1, cur_n])
+                fill(bias_tile, 0)
                 deslice(bias_tile, bias_region, [0], [cur_n], [1])
                 broadcast(bias_full, bias_row)
                 kernel.add(acc, acc, bias_full)
-            out_region = view(acc, [0, 0], [cur_m, cur_n], [1, 1])
-            deslice(out, out_region, [m0, n0], [cur_m, cur_n], [1, 1])
+            deslice(out, acc, [m0, n0], [cur_m, cur_n], [1, 1])
 
 
 def main() -> None:

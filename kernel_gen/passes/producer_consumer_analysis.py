@@ -38,7 +38,7 @@ from xdsl.printer import Printer
 from xdsl.traits import MemoryEffectKind, get_effects
 
 from kernel_gen.core.error import ErrorKind, ErrorModule, KernelCodeError
-from kernel_gen.dialect.dma import DmaDesliceOp, DmaReinterpretOp, DmaReshapeOp, DmaSubviewOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaReinterpretOp, DmaReshapeOp, DmaSubviewOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp
 from kernel_gen.passes.common import ensure_builtin_module
@@ -343,7 +343,7 @@ def _build_alias_roots(ops: tuple[Operation, ...]) -> dict[SSAValue, SSAValue]:
 
     功能说明:
     - `dma.view/reshape/subview/reinterpret` 的 result alias source。
-    - `dma.deslice` 的 result alias target。
+    - `dma.deslice` 是目标式写回 op，不产生 alias result。
 
     使用示例:
     - alias_roots = _build_alias_roots(ops)
@@ -354,8 +354,6 @@ def _build_alias_roots(ops: tuple[Operation, ...]) -> dict[SSAValue, SSAValue]:
     for op in ops:
         if isinstance(op, (DmaViewOp, DmaReshapeOp, DmaSubviewOp, DmaReinterpretOp)):
             alias_roots[SSAValue.get(op.result)] = _alias_root(SSAValue.get(op.source), alias_roots)
-        elif isinstance(op, DmaDesliceOp):
-            alias_roots[SSAValue.get(op.result)] = _alias_root(SSAValue.get(op.target), alias_roots)
     return {value: _alias_root(value, alias_roots) for value in alias_roots}
 
 

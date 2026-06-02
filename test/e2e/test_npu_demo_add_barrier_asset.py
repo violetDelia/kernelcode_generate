@@ -196,7 +196,7 @@ def build_npu_demo_add_barrier_module(
         space=NnMemorySpaceAttr.from_name("tsm"),
     )
     barrier1 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
-    deslice = DmaDesliceOp(body_block.args[3], out_tsm.result, [thread_offset.result], [size.result], [stride.result], gm_type)
+    deslice = DmaDesliceOp(body_block.args[3], out_tsm.result, [thread_offset.result], [size.result], [stride.result])
     body_block.add_ops(
         [
             thread_offset,

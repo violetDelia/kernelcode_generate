@@ -1640,7 +1640,6 @@ def test_emit_c_lowers_npu_demo_dma_slice_deslice_brace_list_contracts() -> None
         [zero.result, one.result],
         [two.result, two.result],
         [one.result, one.result],
-        mem_type,
     )
 
     assert emit_c_op(slice_op, ctx) == (
@@ -1790,7 +1789,7 @@ def test_emit_c_private_additional_error_matrix(
         with pytest.raises(KernelCodeError, match="cpu-only"):
             emit_c_op(op, _target_ctx("gpu"))
     slice_op = DmaSliceOp(load_block.args[0], load_block.args[1], [], [], [])
-    deslice_op = DmaDesliceOp(load_block.args[0], load_block.args[1], [], [], [], unit_tile_type)
+    deslice_op = DmaDesliceOp(load_block.args[0], load_block.args[1], [], [], [])
     img2col_op = NnImg2col2dOp(
         load_block.args[0],
         unit_tile_type,
@@ -1883,7 +1882,7 @@ def test_emit_c_private_additional_error_matrix(
         [SymbolConstOp(1).result] * 3,
         [SymbolConstOp(1).result] * 3,
     )
-    deslice3 = DmaDesliceOp(rank3_block.args[0], rank3_block.args[1], [SymbolConstOp(0).result] * 3, [SymbolConstOp(1).result] * 3, [SymbolConstOp(1).result] * 3, rank3_type)
+    deslice3 = DmaDesliceOp(rank3_block.args[0], rank3_block.args[1], [SymbolConstOp(0).result] * 3, [SymbolConstOp(1).result] * 3, [SymbolConstOp(1).result] * 3)
     rank3_ctx = _npu_ctx()
     rank3_ctx.bind_name(rank3_block.args[0], "dst")
     rank3_ctx.bind_name(rank3_block.args[1], "src")
@@ -2398,7 +2397,6 @@ def test_emit_c_op_assigns_unique_helper_names_for_repeated_dma_slice_and_deslic
         [c0.result, c0.result],
         [c2.result, c2.result],
         [c1.result, c1.result],
-        memory_type,
     )
     deslice1 = DmaDesliceOp(
         block.args[1],
@@ -2406,7 +2404,6 @@ def test_emit_c_op_assigns_unique_helper_names_for_repeated_dma_slice_and_deslic
         [c0.result, c0.result],
         [c2.result, c2.result],
         [c1.result, c1.result],
-        memory_type,
     )
 
     slice_stmt0 = emit_c_op(slice0, ctx)
@@ -3262,7 +3259,7 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     out_tile_view = DmaViewOp(tsm.result, [zero.result], [size.result], [stride.result], tsm_type)
     slice_op = DmaSliceOp(work_tile_view.result, src_view.result, [zero.result], [size.result], [stride.result])
     add_op = NnAddOp(work_tile_view.result, work_tile_view.result, tsm_type, NnMemorySpaceAttr.from_name("tsm"))
-    deslice_op = DmaDesliceOp(block.args[1], add_op.result, [tid.result], [size.result], [stride.result], mem_type)
+    deslice_op = DmaDesliceOp(block.args[1], add_op.result, [tid.result], [size.result], [stride.result])
 
     ctx.bind_name(tid.result, "tid")
     ctx.bind_name(tnum.result, "tnum")

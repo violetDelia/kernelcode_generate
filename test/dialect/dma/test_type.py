@@ -86,7 +86,6 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
         [c2.results[0], c2.results[0]],
         [c0.results[0], c1.results[0]],
         [c3.results[0], c3.results[0]],
-        alloc_type,
     )
     reshape = DmaReshapeOp(alloc.result, [c1.results[0], c0.results[0]], reshape_type)
     cast_target_op = _TestOp(

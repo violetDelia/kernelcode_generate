@@ -431,11 +431,7 @@ class LaunchKernelCostFuncPass(Pass):
                             f"unsupported op '{op_name}' in device function '{device_func.sym_name.data}'",
                         )
 
-                    if op_name == "dma.deslice" and op.results and op.operands:
-                        mapped_target = value_mapper.get(op.operands[0], op.operands[0])
-                        for source_result in op.results:
-                            value_mapper[source_result] = mapped_target
-                    elif len(op.results) != 0:
+                    if len(op.results) != 0:
                         cloned = op.clone(value_mapper=value_mapper)
                         target_block.add_op(cloned)
                         for source_result, cloned_result in zip(

@@ -167,7 +167,7 @@ func.func @_cost_MAC__device_matmul_kernel_(%lhs, %rhs, %out, %m, %k, %n) -> !sy
 - side-effect DMA op `dma.load`、`dma.free`、`dma.transpose` 在 cost function 中跳过，不克隆且不生成 `tuner.cost`；`dma.store` 按写回方向保留为成本节点，但不执行真实写回。
 - `cost_kind` 始终等于 pass 参数展开后的单个 kind；只允许七值集合内名称。
 - 不因任一合法 `cost_kind` 取值裁剪 `dma.*` / `kernel.*` / `arch.*` 成本节点。
-- `dma.deslice` 只生成 `tuner.cost(op_name="dma.deslice")`，不得在 cost function 中执行真实写回；若原 op result 被后续消费，result 映射为原 target memory。
+- `dma.deslice` 只生成 `tuner.cost(op_name="dma.deslice")`，不得在 cost function 中执行真实写回；当前 `dma.deslice` 不产生 result，后续 target 读取仍以原 target memory 表达。
 - 原 op 已存在 `kind`、`cost_kind`、`op_name`、`device_func` 任一同名 attr 时必须显式失败。
 - `tuner.cost` 不公开 `kind`、`device_func` 两个 attrs。
 

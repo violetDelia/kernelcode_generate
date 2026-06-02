@@ -7,7 +7,7 @@ API 列表:
 - `class DmaLoadOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
 - `class DmaStoreOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
 - `class DmaSliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
-- `class DmaDesliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue], result_type: NnMemoryType)`
+- `class DmaDesliceOp(target: SSAValue | Operation, source: SSAValue | Operation, offsets: Sequence[SSAValue], sizes: Sequence[SSAValue], strides: Sequence[SSAValue])`
 
 使用示例:
 - `DmaSliceOp(target, source, offsets, sizes, strides)`
@@ -32,7 +32,6 @@ IRDLOperation ,
 attr_def ,
 irdl_op_definition ,
 operand_def ,
-result_def ,
 traits_def ,
 var_operand_def ,
 )
@@ -558,7 +557,6 @@ class DmaDesliceOp (IRDLOperation ):
     offsets =var_operand_def (Attribute )
     sizes =var_operand_def (SymbolValueType )
     strides =var_operand_def (SymbolValueType )
-    result =result_def (NnMemoryType )
 
     irdl_options =[AttrSizedOperandSegments (as_property =True )]
 
@@ -569,17 +567,16 @@ class DmaDesliceOp (IRDLOperation ):
     offsets :Sequence [SSAValue ],
     sizes :Sequence [SSAValue ],
     strides :Sequence [SSAValue ],
-    result_type :NnMemoryType ,
     )->None :
         """初始化 dma.deslice。
 
 
         功能说明:
-        - 设置 target/source、offsets/sizes/strides 与结果类型。
+        - 设置 target/source 与 offsets/sizes/strides。
         - offsets 允许 `!symbol.int` 与 `!symbol.iter`。
 
         使用示例:
-        - DmaDesliceOp(target, source, offsets, sizes, strides, result_type)
+        - DmaDesliceOp(target, source, offsets, sizes, strides)
 
         关联文件:
         - spec: spec/dialect/dma.md
@@ -587,10 +584,7 @@ class DmaDesliceOp (IRDLOperation ):
         - 功能实现: kernel_gen/dialect/dma/
         """
 
-        super ().__init__ (
-        operands =[target ,source ,offsets ,sizes ,strides ],
-        result_types =[result_type ],
-        )
+        super ().__init__ (operands =[target ,source ,offsets ,sizes ,strides ])
 
     def verify_ (self )->None :
         """校验 dma.deslice。
@@ -600,7 +594,7 @@ class DmaDesliceOp (IRDLOperation ):
         - source.shape 必须与 sizes 对齐。
         - offsets/sizes/strides 长度与 target rank 一致。
         - offsets 允许 `!symbol.int` 与 `!symbol.iter`。
-        - result type 必须与 target type 一致。
+        - op 本身不产生 result，写回目标由 target 承载。
 
         使用示例:
         - DmaDesliceOp(...).verify_()
@@ -613,7 +607,6 @@ class DmaDesliceOp (IRDLOperation ):
 
         source_type =_DmaSliceHelpers .verify_memory_type (self .source .type ,"source")
         target_type =_DmaSliceHelpers .verify_memory_type (self .target .type ,"target")
-        result_type =_DmaSliceHelpers .verify_memory_type (self .result .type ,"result")
         offsets =_DmaSliceHelpers .verify_symbol_index_operands (self .offsets ,"offsets",min_value =0 )
         sizes =_DmaSliceHelpers .verify_symbol_int_operands (self .sizes ,"sizes",min_value =1 )
         strides =_DmaSliceHelpers .verify_symbol_int_operands (self .strides ,"strides",min_value =1 )
@@ -625,8 +618,6 @@ class DmaDesliceOp (IRDLOperation ):
         _DmaSliceHelpers .verify_operands_match_layout (sizes ,source_type .shape ,"source shape must match sizes")
         if source_type .element_type !=target_type .element_type :
             raise kernel_code_error (ErrorKind .VERIFY ,ErrorModule .DIALECT ,"dma.deslice element_type mismatch")
-        if result_type !=target_type :
-            raise kernel_code_error (ErrorKind .VERIFY ,ErrorModule .DIALECT ,"dma.deslice result must match target type")
 
 
 

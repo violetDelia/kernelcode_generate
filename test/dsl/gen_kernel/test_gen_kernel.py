@@ -460,7 +460,7 @@ def _make_npu_demo_add_barrier_module(
         space=NnMemorySpaceAttr.from_name("tsm"),
     )
     barrier1 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
-    deslice = DmaDesliceOp(body_block.args[3], out_tsm.result, [thread_offset.result], [size.result], [stride.result], gm_type)
+    deslice = DmaDesliceOp(body_block.args[3], out_tsm.result, [thread_offset.result], [size.result], [stride.result])
     body_block.add_ops(
         [
             thread_offset,
@@ -1444,8 +1444,8 @@ def test_gen_kernel_accepts_rewritten_single_output_function() -> None:
 
 
 # GK-O5-002
-# 功能说明: 验证 rewritten `dma.deslice` memory return 会把可写 ABI 收口到前置 `arg0`。
-# 测试目的: 锁定 `buffer-results-to-out-params` 不只替换 return SSA，还会把 deslice 的真实写回目标改成 out-first 参数。
+# 功能说明: 验证 rewritten deslice target memory return 会把可写 ABI 收口到前置 `arg0`。
+# 测试目的: 锁定 `buffer-results-to-out-params` 替换返回 target 时，也会把 deslice 的真实写回目标改成 out-first 参数。
 # 使用示例: pytest -q test/dsl/gen_kernel/test_gen_kernel.py -k test_gen_kernel_rewritten_deslice_memory_result_uses_front_out_param
 # 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel/gen_kernel.md
@@ -1463,9 +1463,8 @@ def test_gen_kernel_rewritten_deslice_memory_result_uses_front_out_param() -> No
         [c0.result, c0.result],
         [c2.result, c2.result],
         [c1.result, c1.result],
-        target_type,
     )
-    block.add_ops([c0, c1, c2, deslice_op, func.ReturnOp(deslice_op.result)])
+    block.add_ops([c0, c1, c2, deslice_op, func.ReturnOp(block.args[1])])
     func_op = _func("deslice_case", [source_type, target_type], [target_type], block, ("src", "target"))
 
     source = gen_kernel(_rewrite_func(func_op), _ctx())
