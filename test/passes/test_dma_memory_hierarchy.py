@@ -253,7 +253,7 @@ def test_dma_memory_hierarchy_apply_op_matmul_copies_lhs_rhs() -> None:
 
 
 # TC-DMH-004
-# 测试目的: 验证 apply_op 对 out operand 与 input operand 使用相同 copy 替换规则。
+# 测试目的: 验证 apply_op 对 out operand staging 后会写回原 descriptor。
 # 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_apply_op_can_copy_out
 # 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
@@ -268,13 +268,45 @@ def test_dma_memory_hierarchy_apply_op_can_copy_out() -> None:
     copies = [op for op in _collect_ops(block) if isinstance(op, DmaCopyOp)]
     frees = [op for op in _collect_ops(block) if isinstance(op, DmaFreeOp)]
     assert len(allocs) == 1
-    assert len(copies) == 1
+    assert len(copies) == 2
     assert len(frees) == 1
     assert copies[0].source is original_out
     assert copies[0].target is allocs[0].result
+    assert copies[1].source is allocs[0].result
+    assert copies[1].target is original_out
     assert frees[0].source is allocs[0].result
     assert matmul.operands[0] is allocs[0].result
     assert _memory_space(matmul.operands[0].type) == "tlm1"
+    ops = _collect_ops(block)
+    assert ops.index(matmul) < ops.index(copies[1]) < ops.index(frees[0])
+    module.verify()
+
+
+# TC-DMH-004B
+# 测试目的: 验证 CUDA C5 all-TLM1 规则会改写 out/lhs/rhs 且 out 写回可见。
+# 使用示例: pytest -q test/passes/test_dma_memory_hierarchy.py -k all_tlm1
+# 对应功能实现文件路径: kernel_gen/passes/tuning/dma_memory_hierarchy.py
+# 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy/spec.md
+# 对应测试文件路径: test/passes/test_dma_memory_hierarchy.py
+def test_dma_memory_hierarchy_apply_op_all_tlm1_writes_back_out() -> None:
+    module, block, matmul = _build_matmul_module(space="tsm")
+    original_out = matmul.operands[0]
+
+    LowerDmaMemoryHierarchyPass(apply_op='matmul{["tlm1", "tlm1", "tlm1"]}').apply(Context(), module)
+
+    ops = _collect_ops(block)
+    allocs = [op for op in ops if isinstance(op, DmaAllocOp)]
+    copies = [op for op in ops if isinstance(op, DmaCopyOp)]
+    frees = [op for op in ops if isinstance(op, DmaFreeOp)]
+    assert len(allocs) == 3
+    assert len(copies) == 4
+    assert len(frees) == 3
+    assert [_memory_space(operand.type) for operand in matmul.operands] == ["tlm1", "tlm1", "tlm1"]
+    assert copies[0].target is allocs[0].result
+    assert copies[0].source is original_out
+    assert copies[3].target is original_out
+    assert copies[3].source is allocs[0].result
+    assert ops.index(matmul) < ops.index(copies[3]) < ops.index(frees[0])
     module.verify()
 
 

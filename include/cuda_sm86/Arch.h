@@ -7,7 +7,7 @@ API 列表:
 - `struct cuda_sm86::ArgSlot`
 
 helper 清单:
-- `cuda_sm86::detail::*`：generated CUDA source 专用的 memory/scalar guard、host-device copy、device allocation、TF32 转换与 CUDA 错误检查。
+- `cuda_sm86::detail::*`：generated CUDA source 专用的 memory descriptor、alias/view、copy/fill/broadcast、math kernel helper、slot/scalar guard、host-device copy、device allocation、TF32 转换与 CUDA 错误检查。
 - `KG_CUDA_CHECK(expr)`：generated CUDA source 内部使用的 CUDA runtime 检查宏。
 
 使用示例:
@@ -43,6 +43,14 @@ struct ArgSlot {
 };
 
 namespace detail {
+
+struct MemoryDescriptor {
+  void *data;
+  const long long *shape;
+  const long long *stride;
+  unsigned long long rank;
+  int dtype_code;
+};
 
 /*
 功能说明:
@@ -149,6 +157,129 @@ inline unsigned long long element_count(const ArgSlot &slot) {
     result *= static_cast<unsigned long long>(slot.shape[idx]);
   }
   return result;
+}
+
+/*
+功能说明:
+- 将 public `ArgSlot` 转成 generated source 内部 memory descriptor。
+- descriptor 只保存指针和元数据引用，不拥有底层内存。
+- 仅供 generated source 或 `cuda_sm86::detail` 后端实现层内部使用，不进入公开 API。
+
+使用示例:
+- `auto desc = cuda_sm86::detail::descriptor_from_slot(slots[0]);`
+*/
+inline MemoryDescriptor descriptor_from_slot(const ArgSlot &slot) {
+  return MemoryDescriptor{slot.data, slot.shape, slot.stride, slot.rank, slot.dtype_code};
+}
+
+/*
+功能说明:
+- 构造 alias descriptor，用于 view / reinterpret / reshape 这类不复制数据的 final IR op。
+- 调用方负责传入已计算好的 data 指针、shape、stride 和 rank。
+- 仅供 generated source 或 `cuda_sm86::detail` 后端实现层内部使用，不进入公开 API。
+
+使用示例:
+- `auto alias = cuda_sm86::detail::alias_descriptor(base.data, shape, stride, 2, base.dtype_code);`
+*/
+inline MemoryDescriptor alias_descriptor(void *data, const long long *shape, const long long *stride, unsigned long long rank, int dtype_code) {
+  return MemoryDescriptor{data, shape, stride, rank, dtype_code};
+}
+
+/*
+功能说明:
+- 按 descriptor shape 计算元素数量。
+- rank 为 0、shape 为空或任一维非正时返回 0。
+- 仅供 generated source 或 `cuda_sm86::detail` 后端实现层内部使用，不进入公开 API。
+
+使用示例:
+- `auto elems = cuda_sm86::detail::descriptor_element_count(desc);`
+*/
+inline unsigned long long descriptor_element_count(const MemoryDescriptor &desc) {
+  if (desc.shape == nullptr || desc.rank == 0) {
+    return 0;
+  }
+  unsigned long long result = 1;
+  for (unsigned long long idx = 0; idx < desc.rank; ++idx) {
+    if (desc.shape[idx] <= 0) {
+      return 0;
+    }
+    result *= static_cast<unsigned long long>(desc.shape[idx]);
+  }
+  return result;
+}
+
+/*
+功能说明:
+- device 侧连续 copy helper，服务 `dma.copy` materialization。
+- 调用方负责保证 source/target 至少包含 `element_count` 个元素。
+- 仅供 generated source 或 `cuda_sm86::detail` 后端实现层内部使用，不进入公开 API。
+
+使用示例:
+- `cuda_sm86::detail::copy_contiguous(dst, src, count);`
+*/
+template <typename T>
+__device__ void copy_contiguous(T *target, const T *source, unsigned long long element_count) {
+  for (unsigned long long index = static_cast<unsigned long long>(threadIdx.x); index < element_count; index += blockDim.x) {
+    target[index] = source[index];
+  }
+}
+
+/*
+功能说明:
+- device 侧连续 fill helper，服务 `dma.fill` materialization。
+- 调用方负责保证 target 至少包含 `element_count` 个元素。
+- 仅供 generated source 或 `cuda_sm86::detail` 后端实现层内部使用，不进入公开 API。
+
+使用示例:
+- `cuda_sm86::detail::fill_contiguous(dst, 0.0f, count);`
+*/
+template <typename T>
+__device__ void fill_contiguous(T *target, T value, unsigned long long element_count) {
+  for (unsigned long long index = static_cast<unsigned long long>(threadIdx.x); index < element_count; index += blockDim.x) {
+    target[index] = value;
+  }
+}
+
+/*
+功能说明:
+- device 侧 row-vector broadcast helper，服务 9 demo 中的 `dma.broadcast` materialization。
+- `cols` 表示 source row 长度，target 按 row-major `[rows, cols]` 写入。
+- 仅供 generated source 或 `cuda_sm86::detail` 后端实现层内部使用，不进入公开 API。
+
+使用示例:
+- `cuda_sm86::detail::broadcast_row_vector(dst, src, rows, cols);`
+*/
+template <typename T>
+__device__ void broadcast_row_vector(T *target, const T *source, unsigned long long rows, unsigned long long cols) {
+  const unsigned long long total = rows * cols;
+  for (unsigned long long index = static_cast<unsigned long long>(threadIdx.x); index < total; index += blockDim.x) {
+    target[index] = source[index % cols];
+  }
+}
+
+/*
+功能说明:
+- device 侧 binary elewise helper，服务 `kernel.binary_elewise` 支持的 add/sub/mul/truediv/max。
+- `kind` 取值由 generated source 静态生成，unsupported kind 不应调用本 helper。
+- 仅供 generated source 或 `cuda_sm86::detail` 后端实现层内部使用，不进入公开 API。
+
+使用示例:
+- `auto value = cuda_sm86::detail::binary_value(lhs, rhs, 0);`
+*/
+__device__ __forceinline__ float binary_value(float lhs, float rhs, int kind) {
+  if (kind == 0) {
+    return lhs + rhs;
+  }
+  if (kind == 1) {
+    return lhs - rhs;
+  }
+  if (kind == 2) {
+    return lhs * rhs;
+  }
+  if (kind == 3) {
+    return lhs / rhs;
+  }
+  return lhs > rhs ? lhs : rhs;
 }
 
 /*

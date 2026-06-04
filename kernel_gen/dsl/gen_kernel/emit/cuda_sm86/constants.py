@@ -2,7 +2,7 @@
 
 功能说明:
 - 固定 CUDA SM86 package-local source artifact 名称、target 名称和 runtime entry 名称。
-- 固定每个 `kernel.*` op emit 返回的 canonical token，供 ModuleOp 汇总逻辑机械判定。
+- 固定每个 `kernel.*` op emit 返回的 canonical marker，供单 op dispatch 路径保持可诊断输出。
 - 只承载计划确认的短字符串常量，不承载 CUDA source 模板或业务逻辑。
 
 API 列表:

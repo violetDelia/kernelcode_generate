@@ -3,7 +3,7 @@
 
 功能说明:
 - 通过公开 `gen_kernel(...)` / `emit_c(...)` 入口验证 CUDA SM86 backend 自动加载与 SourceBundle 输出。
-- 覆盖 generated CUDA source 的 include、generated demo kernels、entry ABI 和 npu_demo 残留扫描。
+- 覆盖 generated CUDA source 的 final IR markers、stable hash、entry ABI 和 npu_demo 残留扫描。
 
 使用示例:
 - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py
@@ -35,6 +35,8 @@ from kernel.flash_attention.inputs_static_tile_static import flash_attention_inp
 from kernel.matmul.inputs_static_tile_static import matmul_inputs_static_tile_static_kernel
 from kernel_gen.core.config import reset_config, set_dump_dir, set_target
 from kernel_gen.core.error import KernelCodeError
+from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaFreeOp
+from kernel_gen.dialect.kernel import KernelMatmulOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolExprAttr
 from kernel_gen.dsl.ast.mlir_gen import mlir_gen
@@ -78,7 +80,7 @@ def _make_spoofed_string_token_module(name: str = "spoofed_tokens") -> ModuleOp:
 
     功能说明:
     - 函数类型伪造成 matmul rank pattern，但函数体没有任何 lowered kernel op。
-    - 属性文本包含 `kernel.matmul` / `arch.launch`，用于证明 CUDA backend 不读取 printed IR 字符串做 family 判定。
+    - 属性文本包含 `kernel.matmul` / `arch.launch`，用于证明 CUDA backend 不读取 printed IR 字符串做 source 判定。
 
     使用示例:
     - module = _make_spoofed_string_token_module()
@@ -101,6 +103,69 @@ def _make_spoofed_string_token_module(name: str = "spoofed_tokens") -> ModuleOp:
     block.add_op(func.ReturnOp())
     func_op = func.FuncOp(name, (input_types, []), Region(block))
     func_op.attributes["fake_lowered_ops"] = StringAttr("kernel.matmul arch.launch")
+    return ModuleOp([func_op])
+
+
+def _make_minimal_c5_matmul_module(
+    *,
+    lhs_space: str = "tlm1",
+    include_writeback: bool = True,
+    matmul_attr_probe: str | None = None,
+    extra_lhs_copy: bool = False,
+    square_operand_types: bool = False,
+    swap_lhs_rhs_sources: bool = False,
+) -> ModuleOp:
+    """构造最小 C5 `kernel.matmul` final IR module。
+
+    功能说明:
+    - 使用公开 dialect op 构造 `dma.alloc/copy/free + kernel.matmul` final IR 片段。
+    - 可控制 lhs space、out write-back、op sequence 与同类型 lhs/rhs source dataflow，用于验证 C5 marker 与 executable source。
+
+    使用示例:
+    - module = _make_minimal_c5_matmul_module(lhs_space="tlm2")
+    """
+
+    if swap_lhs_rhs_sources and not square_operand_types:
+        raise ValueError("swap_lhs_rhs_sources requires equal lhs/rhs public types")
+    out_shape = ArrayAttr([SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("4")])
+    out_stride = ArrayAttr([SymbolExprAttr.from_expr("4"), SymbolExprAttr.from_expr("1")])
+    lhs_shape = ArrayAttr([SymbolExprAttr.from_expr("2"), SymbolExprAttr.from_expr("3")])
+    lhs_stride = ArrayAttr([SymbolExprAttr.from_expr("3"), SymbolExprAttr.from_expr("1")])
+    rhs_shape = ArrayAttr([SymbolExprAttr.from_expr("3"), SymbolExprAttr.from_expr("4")])
+    rhs_stride = ArrayAttr([SymbolExprAttr.from_expr("4"), SymbolExprAttr.from_expr("1")])
+    if square_operand_types:
+        out_shape = ArrayAttr([SymbolExprAttr.from_expr("4"), SymbolExprAttr.from_expr("4")])
+        out_stride = ArrayAttr([SymbolExprAttr.from_expr("4"), SymbolExprAttr.from_expr("1")])
+        lhs_shape = out_shape
+        lhs_stride = out_stride
+        rhs_shape = out_shape
+        rhs_stride = out_stride
+    out_type = NnMemoryType(out_shape, out_stride, f32, NnMemorySpaceAttr.from_name("global"))
+    lhs_type = NnMemoryType(lhs_shape, lhs_stride, f32, NnMemorySpaceAttr.from_name("global"))
+    rhs_type = NnMemoryType(rhs_shape, rhs_stride, f32, NnMemorySpaceAttr.from_name("global"))
+    block = Block(arg_types=[out_type, lhs_type, rhs_type])
+    staged_out_type = NnMemoryType(out_shape, out_stride, f32, NnMemorySpaceAttr.from_name("tlm1"))
+    staged_lhs_type = NnMemoryType(lhs_shape, lhs_stride, f32, NnMemorySpaceAttr.from_name(lhs_space))
+    staged_rhs_type = NnMemoryType(rhs_shape, rhs_stride, f32, NnMemorySpaceAttr.from_name("tlm1"))
+    staged_out = DmaAllocOp([], staged_out_type)
+    staged_lhs = DmaAllocOp([], staged_lhs_type)
+    staged_rhs = DmaAllocOp([], staged_rhs_type)
+    copy_out_in = DmaCopyOp(staged_out.result, block.args[0])
+    lhs_source = block.args[2] if swap_lhs_rhs_sources else block.args[1]
+    rhs_source = block.args[1] if swap_lhs_rhs_sources else block.args[2]
+    copy_lhs_in = DmaCopyOp(staged_lhs.result, lhs_source)
+    copy_rhs_in = DmaCopyOp(staged_rhs.result, rhs_source)
+    matmul = KernelMatmulOp(staged_out.result, staged_lhs.result, staged_rhs.result, NnMemorySpaceAttr.from_name("tlm1"))
+    if matmul_attr_probe is not None:
+        matmul.attributes["review_probe"] = StringAttr(matmul_attr_probe)
+    pre_matmul_ops = [staged_out, staged_lhs, staged_rhs, copy_out_in, copy_lhs_in, copy_rhs_in]
+    if extra_lhs_copy:
+        pre_matmul_ops.append(DmaCopyOp(staged_lhs.result, block.args[1]))
+    block.add_ops([*pre_matmul_ops, matmul])
+    if include_writeback:
+        block.add_op(DmaCopyOp(block.args[0], staged_out.result))
+    block.add_ops([DmaFreeOp(staged_out.result), DmaFreeOp(staged_lhs.result), DmaFreeOp(staged_rhs.result), func.ReturnOp()])
+    func_op = func.FuncOp("minimal_c5_matmul", ([out_type, lhs_type, rhs_type], []), Region(block))
     return ModuleOp([func_op])
 
 
@@ -153,7 +218,7 @@ def _make_lowered_demo_module(
 
     功能说明:
     - 临时设置公开 kernel 函数 annotations 后调用 `mlir_gen(...)`。
-    - 运行公开 `build_cuda_sm86_lowering_pipeline()`，让 emit 测试基于真实 lowered IR 判定 kernel family。
+    - 运行公开 `build_cuda_sm86_lowering_pipeline()`，让 emit 测试基于真实 final IR traversal 判定 source。
 
     使用示例:
     - module = _make_lowered_demo_module(matmul_inputs_static_tile_static_kernel, MATMUL_ANNOTATIONS, MATMUL_ARGS)
@@ -173,12 +238,84 @@ def _make_lowered_demo_module(
         reset_config()
 
 
+OLD_CUDA_SM86_SOURCE_TOKENS = (
+    "kg_cuda_sm86_" + "selected_kernel_kind",
+    "kg_cuda_sm86_" + "run_" + "matmul",
+    "kg_cuda_sm86_" + "run_" + "conv2d",
+    "kg_cuda_sm86_" + "run_" + "flash_attention",
+    "emit_" + "matmul_source",
+    "emit_" + "conv2d_source",
+    "emit_" + "flash_attention_source",
+)
+
+
+def _extract_cuda_sm86_ir_hash(source: str) -> str:
+    """读取 generated source 中的 final IR hash。
+
+    功能说明:
+    - 只解析公开 `emit_c(...)` 返回的 SourceBundle aggregate string。
+    - 找不到 hash marker 时让测试显式失败。
+
+    使用示例:
+    - stable_hash = _extract_cuda_sm86_ir_hash(source)
+    """
+
+    marker_prefix = "// kg.cuda.ir.hash: "
+    for line in source.splitlines():
+        if not line.startswith(marker_prefix):
+            continue
+        stable_hash = line.removeprefix(marker_prefix)
+        return stable_hash
+    raise AssertionError("missing kg.cuda.ir.hash marker")
+
+
+def _extract_cuda_sm86_executable_trace_body(source: str) -> str:
+    """读取 generated CUDA trace kernel 的非注释可执行 body。
+
+    功能说明:
+    - 只解析公开 `emit_c(...)` 返回的 SourceBundle aggregate string。
+    - 剥离空行与纯注释行后返回 hash 专属 trace kernel body，固定 fragment 假绿时会找不到该 body。
+
+    使用示例:
+    - body = _extract_cuda_sm86_executable_trace_body(source)
+    """
+
+    lines = source.splitlines()
+    start_index = -1
+    for index, line in enumerate(lines):
+        if line.startswith("__global__ void kg_cuda_sm86_ir_trace_kernel_"):
+            start_index = index
+            break
+    if start_index < 0:
+        raise AssertionError("missing generated executable trace kernel")
+    depth = 0
+    in_body = False
+    executable_lines: list[str] = []
+    for line in lines[start_index:]:
+        if not in_body:
+            if "{" not in line:
+                continue
+            in_body = True
+            depth = line.count("{") - line.count("}")
+            continue
+        depth += line.count("{")
+        depth -= line.count("}")
+        if depth < 0:
+            break
+        stripped = line.strip()
+        if stripped and not stripped.startswith("//"):
+            executable_lines.append(stripped)
+        if depth == 0:
+            break
+    return "\n".join(executable_lines)
+
+
 def test_cuda_sm86_emit_module_returns_source_bundle() -> None:
     """验证 CUDA backend 返回 SourceBundle aggregate string。
 
     功能说明:
     - 通过公开 `emit_c(...)` 触发 backend auto-load。
-    - 锁定 `.cu/.cuh` artifact marker、CUDA include、generated demo kernel 与 C ABI entry。
+    - 锁定 `.cu/.cuh` artifact marker、CUDA include、final IR marker/hash、C5 all-TLM1 和 C ABI entry。
 
     使用示例:
     - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py -k source_bundle
@@ -191,18 +328,35 @@ def test_cuda_sm86_emit_module_returns_source_bundle() -> None:
     assert source.startswith("// __KG_BUNDLE_FILE__:kernel.cu\n")
     assert '// __KG_BUNDLE_FILE__:include/cuda_sm86/generated_entry.cuh' in source
     assert '#include "include/cuda_sm86/cuda_sm86.cuh"' in source
-    assert 'kg_cuda_sm86_selected_kernel_kind = "matmul"' in source
-    assert "__global__ void kg_cuda_sm86_generated_matmul_kernel" in source
-    assert "__global__ void kg_cuda_sm86_conv2d_f32_kernel" not in source
-    assert "__global__ void kg_cuda_sm86_flash_attention_f32_kernel" not in source
+    assert "// cuda_sm86 generated from final IR" in source
+    assert "// kg.cuda.ir.hash: " in source
+    stable_hash = _extract_cuda_sm86_ir_hash(source)
+    assert f"// kg.cuda.ir.entry_symbol: kg_cuda_sm86_execute_{stable_hash}_ir" in source
+    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_matmul_ir" in source
+    assert "// kg.cuda.ir.memory_spaces: global,tlm1,tsm" in source
+    assert "// kg.cuda.ir.source.fragment: op=kernel.matmul" in source
+    assert "// kg.cuda.ir.op: tuner.select" in source
+    assert "// kg.cuda.ir.op: arch.launch" in source
+    assert "// kg.cuda.ir.op: dma.reinterpret" in source
+    assert "// kg.cuda.ir.op: dma.copy" in source
+    assert "// kg.cuda.ir.op: kernel.matmul" in source
+    assert "// kg.cuda.ir.matmul.materialization: out=tlm1,lhs=tlm1,rhs=tlm1,write_back=visible" in source
+    assert "__global__ void kg_cuda_sm86_ir_matmul_kernel" in source
+    assert "__global__ void kg_cuda_sm86_ir_img2col2d_kernel" not in source
+    assert "__global__ void kg_cuda_sm86_ir_reduce_exp_kernel" not in source
     assert "mma.sync.aligned.m16n8k8" in source
     assert "tensor_core_probe" not in source
     assert "acc += lhs" not in source
     assert "cuda_sm86::detail::device_alloc" in source
     assert "cuda_sm86::detail::is_f32_memory" in source
     assert 'extern "C" int kg_execute_entry(cuda_sm86::ArgSlot* slots, unsigned long long count)' in source
-    assert "launch_matmul_entry" not in source
-    assert "matmul_f32_kernel" not in source
+    assert f"__global__ void kg_cuda_sm86_ir_trace_kernel_{stable_hash}" in source
+    assert f"int kg_cuda_sm86_execute_{stable_hash}_ir(cuda_sm86::ArgSlot* slots, unsigned long long count)" in source
+    assert f"return kg_cuda_sm86_execute_{stable_hash}_ir(slots, count);" in source
+    assert "return kg_cuda_sm86_execute_matmul_ir(slots, count);" in source
+    assert "seed = kg_cuda_sm86_ir_mix_" in _extract_cuda_sm86_executable_trace_body(source)
+    for token in OLD_CUDA_SM86_SOURCE_TOKENS:
+        assert token not in source
     include_text = Path("include/cuda_sm86/cuda_sm86.cuh").read_text(encoding="utf-8")
     arch_text = Path("include/cuda_sm86/Arch.h").read_text(encoding="utf-8")
     arch_api_block = arch_text.split("API 列表:", 1)[1].split("helper 清单:", 1)[0]
@@ -232,11 +386,11 @@ def test_cuda_sm86_emit_module_returns_source_bundle() -> None:
 
 
 def test_cuda_sm86_emit_selects_different_sources_from_lowered_entry() -> None:
-    """验证 CUDA backend 不输出固定三合一 SourceBundle。
+    """验证 CUDA backend source 随 final IR op 集合变化。
 
     功能说明:
-    - 通过不同公开 lowered demo IR 触发 matmul、conv2d 和 flash_attention SourceBundle。
-    - 锁定 generated source 的 kernel kind 与 device kernel 互斥，证明 emit 不再是固定万能 dispatcher。
+    - 通过不同公开 lowered demo IR 触发 matmul、conv2d 和 attention SourceBundle。
+    - 锁定 generated source 的 entry symbol、op marker 和 hash 互不相同。
 
     使用示例:
     - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py -k different_sources
@@ -254,16 +408,154 @@ def test_cuda_sm86_emit_selects_different_sources_from_lowered_entry() -> None:
     conv2d_source = emit_c(conv2d_module, EmitCContext())
     flash_source = emit_c(flash_module, EmitCContext())
 
-    assert 'kg_cuda_sm86_selected_kernel_kind = "matmul"' in matmul_source
-    assert 'kg_cuda_sm86_selected_kernel_kind = "conv2d"' in conv2d_source
-    assert 'kg_cuda_sm86_selected_kernel_kind = "flash_attention"' in flash_source
-    assert "__global__ void kg_cuda_sm86_generated_matmul_kernel" in matmul_source
-    assert "__global__ void kg_cuda_sm86_conv2d_f32_kernel" not in matmul_source
-    assert "__global__ void kg_cuda_sm86_conv2d_f32_kernel" in conv2d_source
-    assert "__global__ void kg_cuda_sm86_flash_attention_f32_kernel" in flash_source
+    matmul_hash = _extract_cuda_sm86_ir_hash(matmul_source)
+    conv2d_hash = _extract_cuda_sm86_ir_hash(conv2d_source)
+    flash_hash = _extract_cuda_sm86_ir_hash(flash_source)
+    assert f"// kg.cuda.ir.entry_symbol: kg_cuda_sm86_execute_{matmul_hash}_ir" in matmul_source
+    assert f"// kg.cuda.ir.entry_symbol: kg_cuda_sm86_execute_{conv2d_hash}_ir" in conv2d_source
+    assert f"// kg.cuda.ir.entry_symbol: kg_cuda_sm86_execute_{flash_hash}_ir" in flash_source
+    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_matmul_ir" in matmul_source
+    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_img2col2d_ir" in conv2d_source
+    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_reduce_exp_ir" in flash_source
+    assert "// kg.cuda.ir.op: kernel.matmul" in matmul_source
+    assert "// kg.cuda.ir.op: kernel.img2col2d" in conv2d_source
+    assert "// kg.cuda.ir.op: kernel.reduce" in flash_source
+    assert "// kg.cuda.ir.op: kernel.exp" in flash_source
+    assert "// kg.cuda.ir.source.fragment: op=kernel.matmul" in matmul_source
+    assert "// kg.cuda.ir.source.fragment: op=kernel.img2col2d" in conv2d_source
+    assert "// kg.cuda.ir.source.fragment: op=kernel.reduce" in flash_source
+    assert "// kg.cuda.ir.source.fragment: op=kernel.exp" in flash_source
+    assert "__global__ void kg_cuda_sm86_ir_matmul_kernel" in matmul_source
+    assert "__global__ void kg_cuda_sm86_ir_img2col2d_kernel" in conv2d_source
+    assert "__global__ void kg_cuda_sm86_ir_reduce_exp_kernel" in flash_source
+    assert matmul_hash != conv2d_hash
+    assert matmul_hash != flash_hash
     assert matmul_source != conv2d_source
     assert matmul_source != flash_source
     assert conv2d_source != flash_source
+
+
+def test_cuda_sm86_ir_hash_is_stable_and_op_sequence_specific() -> None:
+    """验证 CUDA final IR hash 稳定且随 op 集合变化。
+
+    功能说明:
+    - 同一 lowered ModuleOp 重复 `emit_c(...)` 必须得到相同 hash。
+    - 不同 demo final IR 的 op 集合不同时，hash 必须不同。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py -k cuda_sm86_ir_hash
+    """
+
+    matmul_module = _make_lowered_demo_module(matmul_inputs_static_tile_static_kernel, MATMUL_ANNOTATIONS, MATMUL_ARGS)
+    conv2d_module = _make_lowered_demo_module(conv2d_inputs_static_tile_static_kernel, CONV2D_ANNOTATIONS, CONV2D_ARGS)
+    set_target("cuda_sm86")
+    first_matmul_source = emit_c(matmul_module, EmitCContext())
+    second_matmul_source = emit_c(matmul_module, EmitCContext())
+    conv2d_source = emit_c(conv2d_module, EmitCContext())
+
+    first_hash = _extract_cuda_sm86_ir_hash(first_matmul_source)
+    second_hash = _extract_cuda_sm86_ir_hash(second_matmul_source)
+    conv2d_hash = _extract_cuda_sm86_ir_hash(conv2d_source)
+    assert first_hash == second_hash
+    assert first_hash != conv2d_hash
+    assert first_matmul_source == second_matmul_source
+
+
+def test_cuda_sm86_executable_trace_changes_with_same_entry_final_ir_op_sequence() -> None:
+    """验证同 implementation entry 的可执行 code 随 final IR op sequence 变化。
+
+    功能说明:
+    - 构造两个同为 matmul implementation entry 的公开 ModuleOp 输入，只改变 pre-matmul op sequence。
+    - 通过公开 `emit_c(...)` 证明非注释的 generated device trace kernel body 读取真实 final IR sequence。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py -k same_entry_final_ir_op_sequence
+    """
+
+    base_module = _make_minimal_c5_matmul_module()
+    sequence_module = _make_minimal_c5_matmul_module(extra_lhs_copy=True)
+    set_target("cuda_sm86")
+    base_source = emit_c(base_module, EmitCContext())
+    sequence_source = emit_c(sequence_module, EmitCContext())
+    base_body = _extract_cuda_sm86_executable_trace_body(base_source)
+    sequence_body = _extract_cuda_sm86_executable_trace_body(sequence_source)
+
+    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_matmul_ir" in base_source
+    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_matmul_ir" in sequence_source
+    assert _extract_cuda_sm86_ir_hash(base_source) != _extract_cuda_sm86_ir_hash(sequence_source)
+    assert base_body != sequence_body
+    assert sequence_body.count("seed = kg_cuda_sm86_ir_mix_") == base_body.count("seed = kg_cuda_sm86_ir_mix_") + 1
+
+
+def test_cuda_sm86_executable_trace_changes_with_same_type_dataflow() -> None:
+    """验证同类型 SSA dataflow 变化会改变 hash、trace body 和 source。
+
+    功能说明:
+    - 构造两个同 entry、同 op sequence、同 attrs、同 operand/result type 的公开 ModuleOp 输入。
+    - 只交换 `dma.copy` 的 lhs/rhs public source SSA value，证明 operand identity 进入 stable record 和非注释 trace body。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py -k same_type_dataflow
+    """
+
+    base_module = _make_minimal_c5_matmul_module(square_operand_types=True)
+    swapped_module = _make_minimal_c5_matmul_module(square_operand_types=True, swap_lhs_rhs_sources=True)
+    set_target("cuda_sm86")
+    base_source = emit_c(base_module, EmitCContext())
+    swapped_source = emit_c(swapped_module, EmitCContext())
+    base_body = _extract_cuda_sm86_executable_trace_body(base_source)
+    swapped_body = _extract_cuda_sm86_executable_trace_body(swapped_source)
+    base_words = [
+        line.rsplit(", ", 1)[1].removesuffix(");")
+        for line in base_body.splitlines()
+        if line.startswith("seed = kg_cuda_sm86_ir_mix_")
+    ]
+    swapped_words = [
+        line.rsplit(", ", 1)[1].removesuffix(");")
+        for line in swapped_body.splitlines()
+        if line.startswith("seed = kg_cuda_sm86_ir_mix_")
+    ]
+
+    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_matmul_ir" in base_source
+    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_matmul_ir" in swapped_source
+    assert base_source.count("// kg.cuda.ir.op: ") == swapped_source.count("// kg.cuda.ir.op: ")
+    assert len(base_words) == len(swapped_words)
+    assert base_words != swapped_words
+    assert _extract_cuda_sm86_ir_hash(base_source) != _extract_cuda_sm86_ir_hash(swapped_source)
+    assert base_body != swapped_body
+    assert base_source != swapped_source
+
+
+def test_cuda_sm86_matmul_materialization_rejects_non_all_tlm1() -> None:
+    """验证 C5 marker 拒绝非 all-TLM1 matmul operand。
+
+    功能说明:
+    - 构造 lhs staged 到 `tlm2` 的公开 ModuleOp 输入。
+    - 通过公开 `emit_c(...)` 证明 `kernel.matmul` marker 必须读取真实 operand memory space。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py -k non_all_tlm1
+    """
+
+    set_target("cuda_sm86")
+    with pytest.raises(KernelCodeError, match="kernel.matmul C5 materialization requires out/lhs/rhs tlm1; got tlm1,tlm2,tlm1"):
+        emit_c(_make_minimal_c5_matmul_module(lhs_space="tlm2"), EmitCContext())
+
+
+def test_cuda_sm86_matmul_materialization_rejects_missing_writeback() -> None:
+    """验证 C5 marker 拒绝缺失 out write-back 的 matmul。
+
+    功能说明:
+    - 构造 out/lhs/rhs 均为 `tlm1` 但不写回原 out descriptor 的 ModuleOp 输入。
+    - 通过公开 `emit_c(...)` 证明 marker 不会在 write-back 缺失时假阳性。
+
+    使用示例:
+    - pytest -q test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py -k missing_writeback
+    """
+
+    set_target("cuda_sm86")
+    with pytest.raises(KernelCodeError, match="kernel.matmul C5 materialization requires visible out write-back"):
+        emit_c(_make_minimal_c5_matmul_module(include_writeback=False), EmitCContext())
 
 
 @pytest.mark.parametrize(
@@ -279,7 +571,7 @@ def test_cuda_sm86_emit_rejects_name_only_or_unknown_module(name: str) -> None:
     """验证 CUDA backend 不用函数名或 fallback 生成 SourceBundle。
 
     功能说明:
-    - 通过公开 `emit_c(...)` 输入只有函数名、没有 lowered kernel op family 的 module。
+    - 通过公开 `emit_c(...)` 输入只有函数名、没有 supported final IR compute op 的 module。
     - 锁定 unsupported / unknown module 的稳定失败语义，防止 name-only 假绿。
 
     使用示例:
@@ -287,12 +579,12 @@ def test_cuda_sm86_emit_rejects_name_only_or_unknown_module(name: str) -> None:
     """
 
     set_target("cuda_sm86")
-    with pytest.raises(KernelCodeError, match="unsupported kernel family"):
+    with pytest.raises(KernelCodeError, match="unsupported cuda_sm86 final IR op: <none>"):
         emit_c(_make_module(name), EmitCContext())
 
 
 def test_cuda_sm86_emit_rejects_printed_string_tokens_without_kernel_ops() -> None:
-    """验证 CUDA backend 不用 printed IR 字符串 token 伪造 kernel family。
+    """验证 CUDA backend 不用 printed IR 字符串 token 伪造 final IR source。
 
     功能说明:
     - 输入函数类型与属性文本足以骗过旧文本计数逻辑。
@@ -303,7 +595,7 @@ def test_cuda_sm86_emit_rejects_printed_string_tokens_without_kernel_ops() -> No
     """
 
     set_target("cuda_sm86")
-    with pytest.raises(KernelCodeError, match="unsupported kernel family"):
+    with pytest.raises(KernelCodeError, match="unsupported cuda_sm86 final IR op: <none>"):
         emit_c(_make_spoofed_string_token_module(), EmitCContext())
 
 
@@ -327,11 +619,14 @@ def test_cuda_sm86_gen_kernel_dump_writes_bundle_artifacts(tmp_path: Path) -> No
     assert (tmp_path / "source.cpp").read_text(encoding="utf-8") == source
     kernel_source = (tmp_path / "kernel.cu").read_text(encoding="utf-8")
     header_source = (tmp_path / "include" / "cuda_sm86" / "generated_entry.cuh").read_text(encoding="utf-8")
-    assert "cuda_sm86 generated from lowered IR" in kernel_source
-    assert "matmul_inputs_static_tile_static_kernel" not in kernel_source
+    assert "cuda_sm86 generated from final IR" in kernel_source
+    assert "// kg.cuda.ir.func: matmul_inputs_static_tile_static_kernel" in kernel_source
     assert "mma.sync.aligned.m16n8k8" in kernel_source
-    assert 'kg_cuda_sm86_selected_kernel_kind = "matmul"' in kernel_source
-    assert "kg_cuda_sm86_run_matmul" in kernel_source
+    assert "// kg.cuda.ir.hash: " in kernel_source
+    assert "// kg.cuda.ir.op: kernel.matmul" in kernel_source
+    assert "// kg.cuda.ir.matmul.materialization: out=tlm1,lhs=tlm1,rhs=tlm1,write_back=visible" in kernel_source
+    for token in OLD_CUDA_SM86_SOURCE_TOKENS:
+        assert token not in kernel_source
     assert "cuda_sm86::ArgSlot" in header_source
 
 
@@ -350,7 +645,6 @@ def test_cuda_sm86_emit_package_structure_matches_plan() -> None:
     expected_files = {
         "__init__.py",
         "constants.py",
-        "detect.py",
         "include.py",
         "module.py",
         "runtime.py",
@@ -371,8 +665,7 @@ def test_cuda_sm86_emit_package_structure_matches_plan() -> None:
         "_COMMON_CUDA_RUNTIME_SOURCE",
         "_MATMUL_CUDA_SOURCE",
         "_CONV2D_CUDA_SOURCE",
-        "_FLASH_ATTENTION_CUDA_SOURCE",
-        "kg_cuda_sm86_run_",
+        "kg_cuda_sm86_" + "run_",
         "mma.sync",
         "__global__",
         "@emit_c_impl",
@@ -432,17 +725,16 @@ def test_cuda_sm86_emit_package_structure_matches_plan() -> None:
     allowed_imports = {
         "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/__init__.py": {".include", ".kernel", ".module"},
         "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/constants.py": set(),
-        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/module.py": {".constants", ".detect", ".source_bundle"},
-        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/source_bundle.py": {".constants", ".detect", ".runtime", ".kernel.matmul", ".kernel.img2col2d", ".kernel.reduce"},
-        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/detect.py": {".constants"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/module.py": {".constants", ".source_bundle"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/source_bundle.py": {".constants", ".runtime"},
         "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/include.py": {".constants"},
         "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/runtime.py": {".constants"},
         "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/__init__.py": {".binary_elewise", ".exp", ".img2col2d", ".matmul", ".reduce"},
         "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/binary_elewise.py": {"..constants"},
         "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/exp.py": {"..constants"},
-        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/img2col2d.py": {"..constants", "..detect"},
-        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/matmul.py": {"..constants", "..detect"},
-        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/reduce.py": {"..constants", "..detect"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/img2col2d.py": {"..constants"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/matmul.py": {"..constants"},
+        "kernel_gen/dsl/gen_kernel/emit/cuda_sm86/kernel/reduce.py": {"..constants"},
     }
     package_root = ".".join(("kernel_gen", "dsl", "gen_kernel", "emit", "cuda_sm86"))
     for rel, allowed in allowed_imports.items():
@@ -464,7 +756,7 @@ def test_cuda_sm86_emit_package_structure_matches_plan() -> None:
         assert exports, f"missing __all__: {package_init}"
         assert isinstance(exports[-1], ast.List) and not exports[-1].elts, f"__all__ must be empty list: {package_init}"
 
-    internal_children = {"constants", "detect", "module", "runtime", "source_bundle", "kernel"}
+    internal_children = {"constants", "module", "runtime", "source_bundle", "kernel"}
     forbidden_internal_path = package_root + "."
     for test_file in Path("test").rglob("*.py"):
         tree = ast.parse(test_file.read_text(encoding="utf-8"), filename=str(test_file))

@@ -21,7 +21,9 @@ import sys
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.builtin import ModuleOp
+from xdsl.dialects import func
+from xdsl.dialects.builtin import ModuleOp, StringAttr
+from xdsl.ir import Block, Region
 from xdsl.transforms.canonicalize import CanonicalizePass
 from xdsl.transforms.common_subexpression_elimination import CommonSubexpressionElimination
 
@@ -87,6 +89,48 @@ def _record_pass_apply(self: Pass, ctx: Context, target: ModuleOp) -> None:
     pass_name = _PASS_NAME_BY_CLASS.get(class_name, class_name)
     _PIPELINE_ORDER.append(pass_name)
     assert _PIPELINE_ORDER[-1] == pass_name
+
+
+def _record_kernel_pattern_attach_apply(self: KernelPatternAttachPass, ctx: Context, target: ModuleOp) -> None:
+    """记录 kernel-pattern-attach delegate 并留下公开 transform attr。
+
+    功能说明:
+    - 作为公开 `KernelPatternAttachPass.apply(...)` 的测试替身。
+    - 让 CUDA adapter 在真实 pipeline `run(...)` 中可观察地写入 exact C5 transform rule。
+
+    使用示例:
+    - monkeypatch.setattr(KernelPatternAttachPass, "apply", _record_kernel_pattern_attach_apply)
+    """
+
+    _ = ctx
+    class_name = type(self).__name__
+    pass_name = _PASS_NAME_BY_CLASS.get(class_name, class_name)
+    _PIPELINE_ORDER.append(pass_name)
+    assert _PIPELINE_ORDER[-1] == pass_name
+    for op in target.ops:
+        if not isinstance(op, func.FuncOp):
+            continue
+        op.attributes["kernel.pattern_id"] = StringAttr("pattern0")
+        return
+    raise AssertionError("test module must contain func.func for kernel-pattern-attach")
+
+
+def _make_pipeline_probe_module() -> ModuleOp:
+    """构造用于公开 pipeline 顺序测试的非空 module。
+
+    功能说明:
+    - 返回含一个空 `func.func` 的 `ModuleOp`。
+    - 避免 CUDA kernel-pattern-attach adapter 在空 module 上保守 no-op。
+
+    使用示例:
+    - module = _make_pipeline_probe_module()
+    """
+
+    block = Block(arg_types=[])
+    block.add_op(func.ReturnOp())
+    func_op = func.FuncOp("cuda_pipeline_probe", ([], []), Region(block))
+    module = ModuleOp([func_op])
+    return module
 
 
 def test_cuda_sm86_lowering_pipeline_builds_pass_manager() -> None:
@@ -159,7 +203,10 @@ def test_cuda_sm86_lowering_pipeline_order_has_no_memory_pool(monkeypatch: pytes
     ):
         monkeypatch.setattr(pass_cls, "apply", _record_pass_apply)
 
-    build_cuda_sm86_lowering_pipeline().run(ModuleOp([]))
+    monkeypatch.setattr(KernelPatternAttachPass, "apply", _record_kernel_pattern_attach_apply)
+
+    module = _make_pipeline_probe_module()
+    build_cuda_sm86_lowering_pipeline().run(module)
 
     assert _PIPELINE_ORDER == [
         "inline",
@@ -192,3 +239,10 @@ def test_cuda_sm86_lowering_pipeline_order_has_no_memory_pool(monkeypatch: pytes
         "template-name-infer",
     ]
     assert "memory-pool" not in _PIPELINE_ORDER
+    pattern_func = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    c5_rule = pattern_func.attributes["kernel.transform_pipeline"]
+    assert isinstance(c5_rule, StringAttr)
+    assert (
+        c5_rule.data
+        == '--pass "lower-dma-memory-hierarchy={fold=true,apply_op=matmul{[\\"tlm1\\", \\"tlm1\\", \\"tlm1\\"]}}" --pass canonicalize'
+    )

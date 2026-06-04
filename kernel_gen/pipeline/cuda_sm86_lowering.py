@@ -24,7 +24,8 @@ API 列表:
 from __future__ import annotations
 
 from xdsl.context import Context
-from xdsl.dialects.builtin import ModuleOp
+from xdsl.dialects import func
+from xdsl.dialects.builtin import ModuleOp, StringAttr
 from xdsl.transforms.canonicalize import CanonicalizePass
 from xdsl.transforms.common_subexpression_elimination import CommonSubexpressionElimination
 
@@ -98,6 +99,62 @@ class _CudaSm86ArchParallelizePass(Pass):
                 raise
 
 
+class _CudaSm86KernelPatternAttachPass(Pass):
+    """CUDA pipeline 内部 matmul pattern 适配层。
+
+
+    功能说明:
+    - 复用公开 `KernelPatternAttachPass.apply(...)` 生成 dispatcher 和 pattern 函数。
+    - 仅在 `cuda-sm86-lowering` pipeline 内把 pattern 函数的 transform rule 收口为 C5 确认的
+      `matmul{["tlm1", "tlm1", "tlm1"]}`。
+    - 不改变 standalone `KernelPatternAttachPass` 的公开合同或 registry options。
+
+    使用示例:
+    - pm.add_pass(_CudaSm86KernelPatternAttachPass())
+    """
+
+    name = "kernel-pattern-attach"
+
+    def __init__(self) -> None:
+        """初始化 CUDA pattern 适配层。
+
+
+        功能说明:
+        - 创建公开 `KernelPatternAttachPass` delegate。
+        - 固定 CUDA all-TLM1 transform rule，不新增 pipeline option。
+
+        使用示例:
+        - pass_obj = _CudaSm86KernelPatternAttachPass()
+        """
+
+        super().__init__()
+        self.delegate = KernelPatternAttachPass()
+
+    def apply(self, ctx: Context, module: ModuleOp) -> None:
+        """执行 CUDA pattern attach 并改写 transform rule。
+
+
+        功能说明:
+        - 先调用公开 delegate 生成 pattern 函数。
+        - 对生成的 `kernel.transform_pipeline` 统一写入 C5 all-TLM1 rule，确保后续
+          `TransformApplyPass` 消费时 out/lhs/rhs 三个 memory operand 都 materialize 到 `tlm1`。
+
+        使用示例:
+        - pass_obj.apply(Context(), module)
+        """
+
+        if not any(isinstance(op, func.FuncOp) for op in module.ops):
+            return
+        self.delegate.apply(ctx, module)
+        c5_pipeline = '--pass "lower-dma-memory-hierarchy={fold=true,apply_op=matmul{[\\"tlm1\\", \\"tlm1\\", \\"tlm1\\"]}}" --pass canonicalize'
+        for op in module.ops:
+            if not isinstance(op, func.FuncOp):
+                continue
+            if "kernel.pattern_id" not in op.attributes:
+                continue
+            op.attributes["kernel.transform_pipeline"] = StringAttr(c5_pipeline)
+
+
 @register_pipeline("cuda-sm86-lowering")
 def build_cuda_sm86_lowering_pipeline(options: dict[str, str] | None = None) -> PassManager:
     """构造 cuda-sm86-lowering pipeline。
@@ -143,7 +200,7 @@ def build_cuda_sm86_lowering_pipeline(options: dict[str, str] | None = None) -> 
     pm.add_pass(CommonSubexpressionElimination())
     pm.add_pass(CanonicalizePass())
     pm.add_pass(TileAnalysisPass())
-    pm.add_pass(KernelPatternAttachPass())
+    pm.add_pass(_CudaSm86KernelPatternAttachPass())
     pm.add_pass(TransformApplyPass())
     pm.add_pass(MemoryPlanPass(insert_free=True, reuse=True, fold=False))
     pm.add_pass(SymbolHoistPipelinePass())

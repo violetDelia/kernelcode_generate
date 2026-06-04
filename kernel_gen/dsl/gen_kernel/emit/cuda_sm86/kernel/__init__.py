@@ -1,4 +1,4 @@
-"""CUDA SM86 generated kernel family package.
+"""CUDA SM86 final IR kernel op registration package.
 
 功能说明:
 - 聚合 CUDA SM86 `kernel.*` op emit 注册模块。
@@ -12,7 +12,7 @@ API 列表:
 
 关联文件:
 - spec: spec/dsl/gen_kernel/emit/cuda_sm86.md
-- 功能实现: kernel_gen/dsl/gen_kernel/emit/cuda_sm86/detect.py
+- 功能实现: kernel_gen/dsl/gen_kernel/emit/cuda_sm86/source_bundle.py
 """
 
 from __future__ import annotations

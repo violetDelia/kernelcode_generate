@@ -7,7 +7,7 @@
 - `fold=False` 且不配置 `apply_op` 时保留 legacy `GM -> SM -> LM` / `LM -> SM -> GM`
   hierarchy 兼容路径。
 - 配置 `apply_op="matmul{[...]}"` 时，对 `kernel.matmul` 的非空 target operand
-  生成 `dma.alloc + dma.copy + dma.free` 生命周期并替换 operand。
+  生成 staging 生命周期并替换 operand；out operand 会在 matmul 后写回原 descriptor。
 
 API 列表:
 - `class LowerDmaMemoryHierarchyPass(fold: bool = True, apply_op: str | None = None)`
@@ -546,7 +546,7 @@ class LowerDmaMemoryHierarchyPass(Pass):
     功能说明:
     - 默认无 `apply_op` 时保持 no-op。
     - `fold=False` 且无 `apply_op` 时保留 legacy hierarchy 兼容路径。
-    - 有 `apply_op` 时按 `matmul{[...]}` 规则插入 `dma.alloc + dma.copy + dma.free`。
+    - 有 `apply_op` 时按 `matmul{[...]}` 规则插入 staging op；out staging 会追加写回。
 
     使用示例:
     - LowerDmaMemoryHierarchyPass(apply_op='matmul{["", "tlm1", "tlm2"]}').apply(Context(), module)
@@ -615,7 +615,7 @@ class LowerDmaMemoryHierarchyPass(Pass):
 
 
         功能说明:
-        - 有 `apply_op` 时只处理 `kernel.matmul` 并生成 copy-based staging。
+        - 有 `apply_op` 时只处理 `kernel.matmul` 并生成 copy-based staging，out staging 追加写回。
         - 无 `apply_op` 且 `fold=True` 时 no-op。
         - 无 `apply_op` 且 `fold=False` 时走 legacy hierarchy 兼容路径。
 
@@ -645,7 +645,8 @@ class LowerDmaMemoryHierarchyPass(Pass):
         功能说明:
         - 遍历 module 内 `kernel.matmul` op。
         - 对规则中非空 target operand 插入 `dma.alloc + dma.copy` 并替换 operand。
-        - 在 kernel op 后插入对应 `dma.free`，为后续 lifecycle pass 提供公开边界。
+        - out operand 在 kernel op 后先 `dma.copy(original_out, staged_out)` 再 `dma.free`，避免 staging 结果被释放后不可见。
+        - input operand 在 kernel op 后插入对应 `dma.free`，为后续 lifecycle pass 提供公开边界。
 
         使用示例:
         - self._apply_matmul_rule(module, rule)
@@ -678,12 +679,36 @@ class LowerDmaMemoryHierarchyPass(Pass):
                         ErrorModule.PASS,
                         "apply_op matmul target operand must be nn.memory",
                     )
-                target_type = _with_space(source_type, target_space)
-                shape_ops, dynamic_shape = _build_dynamic_shape_operands(source, source_type)
+                target_type = NnMemoryType(
+                    source_type.shape,
+                    source_type.stride,
+                    source_type.element_type,
+                    NnMemorySpaceAttr.from_name(target_space),
+                )
+                source_type.verify()
+                shape_ops: list[Operation] = []
+                dynamic_shape: list[SSAValue] = []
+                has_unknown_shape = any(isinstance(dim, SymbolExprAttr) and dim.expr.data == "?" for dim in source_type.shape.data)
+                for axis, shape_dim in enumerate(source_type.shape.data):
+                    if not isinstance(shape_dim, SymbolExprAttr):
+                        raise KernelCodeError(
+                            ErrorKind.CONTRACT,
+                            ErrorModule.PASS,
+                            "dynamic_shape result shape entries must be SymbolExprAttr",
+                        )
+                    shape_text = shape_dim.expr.data
+                    signless = shape_text[1:] if shape_text.startswith("-") else shape_text
+                    if not has_unknown_shape and signless.isdecimal():
+                        continue
+                    get_dim = SymbolGetDimOp(source, IntAttr(axis))
+                    shape_ops.append(get_dim)
+                    dynamic_shape.append(get_dim.result)
                 alloc = DmaAllocOp(dynamic_shape, target_type)
                 copy = DmaCopyOp(alloc.result, source)
                 block.insert_ops_before([*shape_ops, alloc, copy], op)
                 op.operands[index] = alloc.result
+                if index == 0:
+                    post_ops.append(DmaCopyOp(source, alloc.result))
                 post_ops.append(DmaFreeOp(alloc.result))
             if post_ops:
                 block.insert_ops_after(post_ops, op)

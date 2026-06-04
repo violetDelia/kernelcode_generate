@@ -373,7 +373,7 @@ def test_cuda_sm86_demo_sources_are_lowered_ir_specific() -> None:
 
     功能说明:
     - 通过 3 类现有 demo 公开入口生成 CUDA source。
-    - 锁定 matmul / conv2d / flash_attention 不再共享固定三合一万能 dispatcher。
+    - 锁定 final IR marker、entry symbol 和 hash 随真实 op 集合变化。
 
     使用示例:
     - pytest -q test/cuda/test_cuda_sm86_kernel_demos_runtime.py -m cuda -k sources_are_lowered
@@ -383,13 +383,24 @@ def test_cuda_sm86_demo_sources_are_lowered_ir_specific() -> None:
     conv2d_source = _emit_cuda_demo_source(CONV2D_DEMO_CASES[0])
     flash_source = _emit_cuda_demo_source(FLASH_ATTENTION_DEMO_CASES[0])
 
-    assert 'kg_cuda_sm86_selected_kernel_kind = "matmul"' in matmul_source
-    assert 'kg_cuda_sm86_selected_kernel_kind = "conv2d"' in conv2d_source
-    assert 'kg_cuda_sm86_selected_kernel_kind = "flash_attention"' in flash_source
-    assert "kg_cuda_sm86_generated_matmul_kernel" in matmul_source
-    assert "kg_cuda_sm86_conv2d_f32_kernel" not in matmul_source
-    assert "kg_cuda_sm86_conv2d_f32_kernel" in conv2d_source
-    assert "kg_cuda_sm86_flash_attention_f32_kernel" in flash_source
+    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_matmul_ir" in matmul_source
+    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_img2col2d_ir" in conv2d_source
+    assert "// kg.cuda.ir.implementation_entry_symbol: kg_cuda_sm86_execute_reduce_exp_ir" in flash_source
+    assert "__global__ void kg_cuda_sm86_ir_trace_kernel_" in matmul_source
+    assert "__global__ void kg_cuda_sm86_ir_trace_kernel_" in conv2d_source
+    assert "__global__ void kg_cuda_sm86_ir_trace_kernel_" in flash_source
+    assert "// kg.cuda.ir.op: kernel.matmul" in matmul_source
+    assert "// kg.cuda.ir.op: kernel.img2col2d" in conv2d_source
+    assert "// kg.cuda.ir.op: kernel.reduce" in flash_source
+    assert "// kg.cuda.ir.op: kernel.exp" in flash_source
+    assert "// kg.cuda.ir.source.fragment: op=kernel.matmul" in matmul_source
+    assert "// kg.cuda.ir.source.fragment: op=kernel.img2col2d" in conv2d_source
+    assert "// kg.cuda.ir.source.fragment: op=kernel.reduce" in flash_source
+    assert "// kg.cuda.ir.source.fragment: op=kernel.exp" in flash_source
+    assert "kg_cuda_sm86_ir_matmul_kernel" in matmul_source
+    assert "kg_cuda_sm86_ir_img2col2d_kernel" not in matmul_source
+    assert "kg_cuda_sm86_ir_img2col2d_kernel" in conv2d_source
+    assert "kg_cuda_sm86_ir_reduce_exp_kernel" in flash_source
     assert "mma.sync.aligned.m16n8k8" in matmul_source
     assert matmul_source != conv2d_source
     assert matmul_source != flash_source

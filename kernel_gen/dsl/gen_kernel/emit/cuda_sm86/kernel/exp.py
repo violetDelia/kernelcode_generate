@@ -2,7 +2,7 @@
 
 功能说明:
 - 注册 `target="cuda_sm86"` 的 `kernel.exp` op emit。
-- ModuleOp backend 通过该 op emit 识别 flash_attention lowered IR family。
+- 单 op emit 只返回当前 final IR op marker；ModuleOp SourceBundle 由 final IR traversal 统一生成。
 
 API 列表:
 - 无公开 API；`_emit_cuda_sm86_kernel_exp(op: KernelExpOp, ctx: EmitCContext) -> str` 仅作为 emit registry 装饰器入口存在。
@@ -12,7 +12,7 @@ API 列表:
 
 关联文件:
 - spec: spec/dsl/gen_kernel/emit/cuda_sm86.md
-- 功能实现: kernel_gen/dsl/gen_kernel/emit/cuda_sm86/detect.py
+- 功能实现: kernel_gen/dsl/gen_kernel/emit/cuda_sm86/source_bundle.py
 - test: test/dsl/gen_kernel/emit/test_cuda_sm86_emit.py
 """
 
@@ -27,11 +27,11 @@ from ..constants import CUDA_SM86_KERNEL_OP_EXP, CUDA_SM86_TARGET_NAME
 
 @emit_c_impl(KernelExpOp, target=CUDA_SM86_TARGET_NAME)
 def _emit_cuda_sm86_kernel_exp(op: KernelExpOp, ctx: EmitCContext) -> str:
-    """发射 CUDA SM86 `kernel.exp` op token。
+    """发射 CUDA SM86 `kernel.exp` final IR marker。
 
     功能说明:
-    - 不直接生成整段 flash_attention source，只返回当前 op 的 canonical token。
-    - `module.py` 汇总每个 kernel op 的 emit 结果后再构建 SourceBundle。
+    - 校验 registry 传入 op 与 expected op name 一致。
+    - 返回 canonical marker，供公开单 op dispatch 路径保持可诊断输出；ModuleOp source 不依赖此返回值选择整段源码。
 
     使用示例:
     - token = _emit_cuda_sm86_kernel_exp(op, EmitCContext())

@@ -17,10 +17,8 @@ API 列表:
 from __future__ import annotations
 
 import ast
-import importlib
 import re
 import subprocess
-import typing
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -439,30 +437,38 @@ def testcurrent_diff_module_helpers_use_private_prefix_or_public_api() -> None:
     )
 
 
-def testcuda_sm86_package_local_api_type_hints_resolve() -> None:
-    """Assert CUDA SM86 package-local API annotations resolve.
+def testcuda_sm86_final_ir_builder_stays_package_local_by_text() -> None:
+    """Assert CUDA SM86 final IR builder is not re-exported.
 
     功能说明:
-    - 使用 `typing.get_type_hints(...)` 锁定当前 diff 新增 SourceBundle / kernel source builder 签名。
-    - 本测试只做 repo conformance 反射核对，不调用 CUDA SM86 package-local helper 生成源码。
+    - 只读取 CUDA emit package 文件和 AST，不 import / direct call package-local helper。
+    - 锁定 final IR SourceBundle builder 存在、root `__all__` 为空、旧 source-selection helper 文件退场。
 
     使用示例:
-    - pytest.main(["test/repo_conformance/test_private_api_boundaries.py", "-k", "cuda_sm86_package_local_api_type_hints"])
+    - pytest.main(["test/repo_conformance/test_private_api_boundaries.py", "-k", "cuda_sm86_final_ir_builder"])
     """
 
-    package_name = ".".join(("kernel_gen", "dsl", "gen_kernel", "emit", "cuda_sm86"))
-    detect_module = importlib.import_module(package_name + ".detect")
-    source_bundle_module = importlib.import_module(package_name + ".source_bundle")
-    matmul_module = importlib.import_module(package_name + ".kernel.matmul")
-    img2col2d_module = importlib.import_module(package_name + ".kernel.img2col2d")
-    reduce_module = importlib.import_module(package_name + ".kernel.reduce")
-    expected_summary_type = detect_module.CudaSm86ModuleSummary
-    functions = (
-        source_bundle_module.build_cuda_sm86_source_bundle,
-        matmul_module.emit_matmul_source,
-        img2col2d_module.emit_conv2d_source,
-        reduce_module.emit_flash_attention_source,
+    root = _PrivateApiBoundaryHelpers.repo_root()
+    package_root = root / "kernel_gen" / "dsl" / "gen_kernel" / "emit" / "cuda_sm86"
+    source_bundle_tree = ast.parse((package_root / "source_bundle.py").read_text(encoding="utf-8"))
+    public_classes = {node.name for node in ast.walk(source_bundle_tree) if isinstance(node, ast.ClassDef)}
+    public_functions = {node.name for node in ast.walk(source_bundle_tree) if isinstance(node, ast.FunctionDef)}
+    old_tokens = (
+        "CudaSm86" + "ModuleSummary",
+        "detect_cuda_sm86_" + "kernel_family",
+        "summarize_cuda_sm86_" + "module",
+        "emit_" + "matmul_source",
+        "emit_" + "conv2d_source",
+        "emit_" + "flash_attention_source",
     )
-    for function in functions:
-        hints = typing.get_type_hints(function)
-        assert hints["summary"] is expected_summary_type
+
+    assert "CudaSm86SourceBuilder" in public_classes
+    assert "CudaSm86IrTrace" in public_classes
+    assert "build_cuda_sm86_source_bundle" in public_functions
+    assert not (package_root / "detect.py").exists()
+    init_text = (package_root / "__init__.py").read_text(encoding="utf-8")
+    assert "__all__: list[str] = []" in init_text
+    for path in package_root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for token in old_tokens:
+            assert token not in text, (path, token)
